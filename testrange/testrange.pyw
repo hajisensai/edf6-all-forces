@@ -71,7 +71,17 @@ class App(tk.Tk):
         self.status.pack(fill='x', **pad)
 
     def _vehicles(self, parent: tk.Widget) -> ttk.LabelFrame:
-        box = ttk.LabelFrame(parent, text='载具（数量，0 = 不放；地图上最多 12 台）')
+        outer = ttk.LabelFrame(parent, text='载具（数量，0 = 不放；按机体大小放在出生点附近的平地点位，放不下时安装会提示）')
+        # The list is long (the range's own vehicles, the stock ones, the installer's and EDF4.1's): it scrolls.
+        canvas = tk.Canvas(outer, highlightthickness=0, width=520, height=560)
+        bar = ttk.Scrollbar(outer, orient='vertical', command=canvas.yview)
+        box = ttk.Frame(canvas)
+        box.bind('<Configure>', lambda _e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.create_window((0, 0), window=box, anchor='nw')
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side='left', fill='both', expand=True)
+        bar.pack(side='right', fill='y')
+        canvas.bind_all('<MouseWheel>', lambda e: canvas.yview_scroll(int(-e.delta / 120), 'units'))
         ttk.Label(box, text='空车').grid(row=0, column=0)
         ttk.Label(box, text='NPC 驾驶').grid(row=0, column=1)
         for row, (sgo, label) in enumerate(gen.VEHICLES, start=1):
@@ -87,7 +97,11 @@ class App(tk.Tk):
         ttk.Label(box, text='载具等级（1 = 普通，越高越硬）').grid(row=last, column=2, sticky='w', pady=(6, 0))
         ttk.Spinbox(box, from_=0.5, to=5, increment=0.5, width=5, textvariable=self.vlevel).grid(
             row=last, column=0, columnspan=2, pady=(6, 0))
-        return box
+        ttk.Label(box, wraplength=460, foreground='#555', justify='left',
+                  text='进关后按 M 打开地图，右侧「摆放」面板可以把任意载具、敌人（含 EDF4.1 的母船、地球吞噬者、UFO 机器人）'
+                       '放到地图上点的位置（单机；ini RangePlace）。标「安装器装的」的那几种要先运行过安装器，没有时安装会跳过并提示。').grid(
+            row=last + 1, column=0, columnspan=3, sticky='w', pady=(6, 0))
+        return outer
 
     def _waves(self, parent: tk.Widget) -> ttk.LabelFrame:
         w = self.plan.waves
@@ -99,7 +113,7 @@ class App(tk.Tk):
         labels = [e[1] for e in gen.ENEMIES]
         self.w_enemy = tk.StringVar(value=next((l for s, l, _ in gen.ENEMIES if s == w.enemy), labels[0]))
         ttk.Label(box, text='敌人种类').grid(row=1, column=0, sticky='w')
-        ttk.Combobox(box, values=labels, textvariable=self.w_enemy, state='readonly', width=22).grid(row=1, column=1, sticky='w')
+        ttk.Combobox(box, values=labels, textvariable=self.w_enemy, state='readonly', width=40).grid(row=1, column=1, sticky='w')
         self.w_vars: dict[str, tk.Variable] = {}
         fields = [('per_wave', '每波数量', tk.IntVar), ('max_alive', '场上少于几只时刷下一波', tk.IntVar),
                   ('first_delay', '开局多少秒后刷第一波', tk.DoubleVar), ('interval', '两波最短间隔（秒）', tk.DoubleVar),

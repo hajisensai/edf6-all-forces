@@ -108,6 +108,13 @@ PACKS_FILE = 'Plugins/EDF6VehicleCrew.packs.ini'
 # ModeList entry members (docs/mission-list-re.md §7): 0 name key, 1 description key, 5 save file, 6 [list, text,
 # thumbnails], 8 online, 9 content id, 10 mode type (0 offline scenario, 1 online).
 M_NAME, M_DESC, M_MST, M_FILES, M_ONLINE, M_CONTENT, M_TYPE = 0, 1, 5, 6, 8, 9, 10
+# Member 7: one row a difficulty; a row's element 6 the online weapon level cap, element 7 the armour cap
+# (docs/weapon-level-cap-re.md: EDF.dll 0xD8850 -> 0xE2710 reads [GS+0x148] member 7 [difficulty][6]: a list of floats
+# interpolated by the mission's place in the list, x25 the level; not a list, or negative: -1, no cap; 0xD8130 -> 0xE06B0
+# the same for element 7). The stock offline modes have 0 in both (no cap), the online ones lists ([0.1, 1.1] on Easy).
+M_LIMITS, LIMIT_WEAPON, LIMIT_ARMOR = 7, 6, 7
+# No cap, as EDF.dll's own online modes say it (Mission Pack 2's Inferno: [-1.0, -1.0]).
+NO_WEAPON_CAP = [sgo.Float(struct.pack('<f', -1.0)), sgo.Float(struct.pack('<f', -1.0))]
 T = TypeVar('T')
 # What the EDF4.1 install leaves out after all: object rels ('OBJECT/X.SGO') and map names, or each with its reason.
 Skip41 = Union[Collection[str], Mapping[str, str]]
@@ -122,9 +129,12 @@ class Pack:
     kinds (offline; the test range online too, as the stock packs are: one save file for both)."""
 
     def __init__(self, group: str, tag: str, mst: str, like: int, name: dict[str, str], desc: dict[str, str],
-                 kinds: tuple[str, ...] = (OFFLINE,)) -> None:
+                 kinds: tuple[str, ...] = (OFFLINE,), weapon_cap: bool = True) -> None:
         self.group, self.tag, self.mst, self.like, self.name, self.desc = group, tag, mst, like, name, desc
         self.kinds = kinds
+        # False: its online mode has no weapon level cap (mode_entry; the test range's, the user, 2026-10-17:
+        # 「测试场不限制武器等级」). The stock online modes cap it by the difficulty and the mission's place in the list.
+        self.weapon_cap = weapon_cap
         self.list, self.image, self.txt = self.kind_files(OFFLINE)
         self.name_key, self.desc_key = self.keys(OFFLINE)
 
@@ -188,7 +198,7 @@ RANGE = Pack('range', 'EDF6TR', 'TR00.MST', 0,
               'JA': 'EDF6VehicleCrew のビークルと武器を試せます。標的のみで敵は出ません。本編の進行には影響しません。',
               'KR': 'EDF6VehicleCrew의 탈것과 무기를 시험합니다. 표적만 있고 적은 없으며 본편 진행에는 영향이 없습니다.',
               'SC': '试驾 EDF6VehicleCrew 的载具与武器：只有靶子，没有敌人；不影响剧情进度。'},
-             (OFFLINE, ONLINE))
+             (OFFLINE, ONLINE), weapon_cap=False)
 RANGE_LIKE = 'EDF6/RM015'   # the stock row whose music, progress and flags the range's row copies (range_row)
 RANGE_ROW = {'group': 'range', 'key': f'EDF6/{RANGE_MISSION}', 'map': None, 'thumb': 'EDF6/M045',
              'title': {lang: RANGE.name[lang] for lang in LANGS},
@@ -646,6 +656,14 @@ def mode_entry(template: list, pack: Pack, content: int, kind: str = OFFLINE) ->
     entry[M_MST], entry[M_FILES] = pack.mst, pack.paths(kind)
     online = int(kind == ONLINE)
     entry[M_ONLINE], entry[M_CONTENT], entry[M_TYPE] = online, content, online
+    if online and not pack.weapon_cap and isinstance(entry[M_LIMITS], list):
+        # The test range: the online weapon level cap gone on every difficulty (M_LIMITS; the room's level limit switch
+        # then has nothing to limit); the armour cap and every other difficulty parameter the stock online mode's. A
+        # template with no table there (not a list: as the offline modes' 0) has no cap to lift. tools/selftest.py
+        # edf5_campaign_range_pack checks every row of the game's own online story is lifted.
+        for row in entry[M_LIMITS]:
+            if isinstance(row, list) and len(row) > LIMIT_WEAPON:
+                row[LIMIT_WEAPON] = copy.deepcopy(NO_WEAPON_CAP)
     return entry
 
 

@@ -285,6 +285,11 @@ float sceneComposeHits[mapbtn::kComposeItems][4]{};int sceneComposeCode[mapbtn::
 void MapCommandComposeButtons(const float* r,const int* codes,int n) noexcept {
     sceneComposeHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneComposeHits[i],r+i*4,16);sceneComposeCode[i]=codes[i];}
 }
+// The test range's 「摆放」 panel's click targets as drawn (hud.cpp MapPlacePanel).
+float scenePlaceHits[kMapPlaceItems][4]{};int scenePlaceCode[kMapPlaceItems]{},scenePlaceHitCount=0;
+void MapCommandPlaceButtons(const float* r,const int* codes,int n) noexcept {
+    scenePlaceHitCount=n;for(int i=0;i<n;++i){std::memcpy(scenePlaceHits[i],r+i*4,16);scenePlaceCode[i]=codes[i];}
+}
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
     *g=GearHud{};g->shown=true;g->at[0]=g->at[1]=g->at[2]=1.0f;g->warn=(sceneWarn.on>>kWarnGear&1u)!=0;g->tick=sceneTick;
@@ -426,7 +431,9 @@ void Dot(float x,float y,float z,std::uint8_t flags) {
 }
 // The map at `height` m, looking `pitchDeg` down along heading `yawDeg`, round a player at the origin with the squad,
 // two tanks, a heli, a jet, a carrier, a spread of enemies (some airborne) and two objective markers.
-void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920,float uiScale=1.0f,bool payload=false,bool vehicleOnly=false,bool online=false) {
+// `place`: the test range's 「摆放」 panel (mapcmd.h MapCommandReadout place*): 0 none (another mission), 1 shut (its tab),
+// 2 open on EDF4.1's enemies with a row armed and rows not installed / not preloaded, 3 the same online (every row dim).
+void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920,float uiScale=1.0f,bool payload=false,bool vehicleOnly=false,bool online=false,int place=0) {
     const float previousScale=config.hudScale;config.hudScale=uiScale;
     hasMapPayload=payload;sceneMapPayload=PayloadReadout{};
     if(payload){sceneMapPayload.count=kMostPayload;sceneMapPayload.selectionToken=111;sceneMapPayload.seat=1;
@@ -550,6 +557,12 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneCmd.squadTally=SquadTally{};sceneCmd.squadTally.total=sceneCmd.squads;
     for(int i=0;i<sceneCmd.squads;++i)sceneCmd.squadTally.scripted+=sceneCmd.squad[i].rank==3;
     sceneCmd.noteFresh=true;
+    sceneCmd.placeOn=place>0;sceneCmd.placeOpen=place>=2;sceneCmd.placeOnline=place==3;
+    sceneCmd.placeCategory=static_cast<int>(debugspawn::Category::enemy41);sceneCmd.placePick=14;
+    sceneCmd.placeArmed=place>=2 && !pad ? debugspawn::RowOf(debugspawn::Category::enemy41,14) : -1;
+    for(int i=0;i<debugspawn::kEntryCount;++i)
+        sceneCmd.placeState[i]=place==3 ? debugspawn::RowState::online : !debugspawn::kEntries[i].preload ? debugspawn::RowState::notPreloaded :
+                               i%7==3 ? debugspawn::RowState::missing : debugspawn::RowState::ready;
     hasMap=true;
     const std::wstring path=dir+L"\\"+name+L".txt";
     if(_wfopen_s(&out,path.c_str(),L"w") || !out){hasMap=false;return;}
@@ -628,6 +641,24 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
             if(own!=1){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
         }
     }
+    // The 「摆放」 panel: clickable with the mouse alone (its tab shut; open, its title, six tabs, the rows of the window
+    // and an arrow or two), on the screen, clear of the command card, the support bar and the payload panel's rows.
+    if(place>0) {
+        // Open: at least three rows fit (a shorter screen, the payload panel above it: fewer rows), the window at most.
+        const int least=pad ? 0 : place==1 ? 1 : 1+debugspawn::kCategoryCount+3,want=pad ? 0 : place==1 ? 1 : 1+debugspawn::kCategoryCount+rangeplace::kWindow+2;
+        if(pad ? scenePlaceHitCount!=0 : scenePlaceHitCount<least || scenePlaceHitCount>want)
+            {++textFailed;std::printf("FAIL place panel clicks: %d (want about %d)\n",scenePlaceHitCount,want);}
+        for(int i=0;i<scenePlaceHitCount;++i) {
+            const float* b=scenePlaceHits[i];
+            if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL place hit %d off the screen\n",i);}
+            auto under=[&](const float* q,const char* what,int k){
+                if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL place panel over %s %d\n",what,k);}
+            };
+            for(int k=0;k<sceneButtons;++k)under(sceneButton[k],"button",k);
+            for(int k=0;k<sceneSupportHitCount;++k)under(sceneSupportHits[k],"the support bar",k);
+            for(int k=0;k<scenePayloadButtonCount;++k)under(scenePayloadButtons[k],"the payload panel",k);
+        }
+    } else if(scenePlaceHitCount){++textFailed;std::printf("FAIL place panel in a mission without it: %d\n",scenePlaceHitCount);}
     // The squad panel (the user, 2026-10-09: "小队太多了…看不过来"): folded, the rows on foot that take orders, the rest
     // (a script's) in the summary row that opens it; open, every row and the row that folds it.
     int ranks[16];
@@ -2295,6 +2326,14 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_clickable_payload_4x3",700.0f,60.0f,20.0f,false,9,1440,2.0f,true);
     MapScene(dir,L"map_vehicle_only_controls",700.0f,60.0f,20.0f,false,9,1440,1.5f,true,true);
     MapScene(dir,L"map_online_controls",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,true);
+    // The test range's 「摆放」 panel (range_place.h): shut, open (mouse, a pad, a narrow screen, the payload panel up),
+    // online.
+    MapScene(dir,L"map_place_shut",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,false,1);
+    MapScene(dir,L"map_place",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,false,2);
+    MapScene(dir,L"map_place_pad",700.0f,60.0f,20.0f,true,4,1920,1.0f,false,false,false,2);
+    MapScene(dir,L"map_place_narrow",700.0f,60.0f,20.0f,false,9,1280,1.0f,false,false,false,2);
+    MapScene(dir,L"map_place_payload",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,false,2);
+    MapScene(dir,L"map_place_online",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,true,3);
     StatsScenes(dir);
     StockTank(ground);
     failed+=!MapDrawsMapAlone(ground,sceneStock.hull);

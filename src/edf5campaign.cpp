@@ -22,6 +22,7 @@
 #include "crew.h"
 #include "memory.h"
 #include "edf/host.h"
+#include "debug_spawn.h"
 #include "unlock_ported.h"
 #include <cstdint>
 #include <cstring>
@@ -266,6 +267,18 @@ bool __fastcall ClearedHook(unsigned row,unsigned char* vec) {
     return cleared && !(scanPack && scanPack->Missing(static_cast<int>(row)));
 }
 }  // namespace
+
+// The current mode's content id is the test range's (docs/weapon-level-cap-re.md §3: GS+0x38's mode is the one
+// GS+0x148 names, which the script's GetContentID 0x70E5D0 reads; a guest's too, once the room's mode is set). Offline
+// and online: the range's two modes share its content id.
+bool TestRangeMode() noexcept {
+    const int range=Cfg().testRangeContent;
+    if(range<=0)return false;
+    __try {
+        unsigned char* gs=nullptr;
+        return CurrentContent(gs)==range;
+    } __except(EXCEPTION_EXECUTE_HANDLER){ return false; }
+}
 
 // The mission select's first clear check through a stub: lea rdx,[rsp+0x50] (the caller's rsp+0x48, past the return
 // address); mov rax,ClearedHook; jmp rax. Installed whatever the key (read at each opening); not at all when a piece

@@ -300,7 +300,7 @@ float DepthScale(float depth,float readTo) noexcept {
 
 // A line of text to draw once the quads are down: where, its size (measured), its scale and colour.
 struct Line { wchar_t text[128]; float x,y,w,h,scale; const float* rgba; };
-constexpr int kMaxLines=160;   // the map's panels, card, support bar and tooltip on top of its grid labels
+constexpr int kMaxLines=192;   // the map's panels, card, support bar, the test range's place panel and tooltip on top of its grid labels
 
 void Format(Line& l,const wchar_t* format,...) noexcept {
     va_list args;va_start(args,format);
@@ -3838,11 +3838,11 @@ float MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool p
     return bottom;
 }
 
-// A map-only interactive loadout keeps left-click firing and camera aim untouched outside M.
-void MapPayloadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,
-                     const MapCommandReadout& commands,Line* lines,int* at) noexcept {
+// A map-only interactive loadout keeps left-click firing and camera aim untouched outside M. Its bottom (px), 0 none.
+float MapPayloadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,
+                      const MapCommandReadout& commands,Line* lines,int* at) noexcept {
     PayloadReadout r{};
-    if(!PlayerSelectablePayload(&r) || r.count<=0){MapCommandPayloadButtons(nullptr,0,0,nullptr,0);return;}
+    if(!PlayerSelectablePayload(&r) || r.count<=0){MapCommandPayloadButtons(nullptr,0,0,nullptr,0);return 0.0f;}
     const int count=r.count<kMostPayload ? r.count : kMostPayload;
     const float right=width-16.0f*s,left=right-std::fmin(460.0f*s,width*0.46f-32.0f*s),top=216.0f*s,rowH=30.0f*s;
     MapUiBox(drawer,ctx,left-8.0f*s,top-14.0f*s,right+8.0f*s,top+rowH*static_cast<float>(count+1),lines,*at);
@@ -3861,6 +3861,7 @@ void MapPayloadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool 
         }
     }
     MapCommandPayloadButtons(rects,r.selectionToken,r.seat,entries,hits);
+    return top+rowH*static_cast<float>(count+1);
 }
 
 // The map's tooltip (the user, 2026-10-09: "m里面显示太复杂了"): a button's full word and its key are not on the
@@ -4071,9 +4072,12 @@ void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height
     MapCommandFormationButtons(rects,entries,placed);
 }
 
+// The command card as drawn this frame (MapButtons), for its formation menu (MapCommands draws it over every panel).
+float mapCardRects[mapbtn::kCount*4]{};int mapCardIds[mapbtn::kCount]{};int mapCardCount=0;
 int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float s,bool pad,const MapCommandReadout& c,Line* lines,
                int* at) noexcept {
     using mapbtn::Id;
+    mapCardCount=0;
     if(pad){MapCommandButtons(nullptr,nullptr,0);MapCommandFormationButtons(nullptr,nullptr,0);return 0;}
     constexpr int n=mapbtn::kCount;
     static const Tx kWord[n]={Tx::orderMove,Tx::orderAttackMove,Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,
@@ -4125,7 +4129,9 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         rects[placed*4]=q.x0;rects[placed*4+1]=q.y0;rects[placed*4+2]=q.x1;rects[placed*4+3]=q.y1;ids[placed++]=shownIds[k];
     }
     MapCommandButtons(rects,ids,placed);
-    MapFormationMenu(drawer,ctx,text,width,height,s,c,rects,ids,placed,lines,at);
+    std::memcpy(mapCardRects,rects,sizeof(float)*4*static_cast<std::size_t>(placed));
+    std::memcpy(mapCardIds,ids,sizeof(int)*static_cast<std::size_t>(placed));
+    mapCardCount=placed;
     return rows;
 }
 
@@ -4281,21 +4287,131 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
     MapComposePanel(drawer,ctx,text,s,c,base,x1+6.0f*s,row[composeRow].y0,top,bottom,lines,at);
 }
 
+const Tx* DebugSpawnCategoryWords() noexcept;
+
+// The test range's 「摆放」 panel (range_place.h, mapcmd.cpp; ini RangePlace), at the map's right under the payload panel,
+// down to `bottom`: shut, its title tab alone (a click, or , . / or the D-pad, opens it); open, the category tabs (two rows
+// of three), a window of the category's rows round the one picked (the armed one lit as the card's buttons are, the one a
+// pad or the keys picked marked, one that cannot be made now dimmed with why), arrows to page through them, and the
+// keys. Online, every row dimmed and the reason said. A pad has no pointer: nothing to click then (its D-pad and A).
+void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,const MapCommandReadout& c,
+                   Line* lines,int* at) noexcept {
+    if(!c.placeOn || *at+rangeplace::kWindow+12>kMaxLines){MapCommandPlaceButtons(nullptr,nullptr,0);return;}
+    const float x1=width-12.0f*s,x0=x1-std::fmin(420.0f*s,width*0.32f),rowH=24.0f*s,tabH=24.0f*s,pad8=8.0f*s;
+    float rects[kMapPlaceItems*4];int codes[kMapPlaceItems];int hits=0;
+    auto hit=[&](float a,float b,float r,float d,int code){
+        if(pad || hits>=kMapPlaceItems)return;
+        float* q=rects+4*hits;q[0]=a;q[1]=b;q[2]=r;q[3]=d;codes[hits++]=code;
+    };
+    auto over=[&](float a,float b,float r,float d){ return !pad && c.pointer && c.px>=a && c.px<r && c.py>=b && c.py<d; };
+    const Tx* const words=DebugSpawnCategoryWords();
+    using debugspawn::RowState;
+    if(!c.placeOpen) {   // the tab alone
+        const float t0=x1-150.0f*s,t1=top+tabH+4.0f*s;
+        MapUiBox(drawer,ctx,t0,top,x1,t1,lines,*at);
+        if(over(t0,top,x1,t1))Rect(drawer,ctx,t0,top,x1,t1,kMapBoxFill);
+        const float mid=(top+t1)*0.5f;
+        Label(text,lines,at,t0+pad8,mid,0,kLineScale*0.75f,kMapOrder,L"%ls",Tr(Tx::placeTitle));
+        Tri(drawer,ctx,x1-14.0f*s,mid-4.0f*s,x1-14.0f*s,mid+4.0f*s,4.0f*s,kMapOrder);
+        MapTipSet(c,t0,top,x1,t1,L"%ls",Tr(Tx::placeTabTip));
+        hit(t0,top,x1,t1,kPlaceToggle);
+        MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits);
+        return;
+    }
+    const int cat=c.placeCategory>=0 && c.placeCategory<debugspawn::kCategoryCount ? c.placeCategory : 0;
+    const debugspawn::Category category=static_cast<debugspawn::Category>(cat);
+    const int count=debugspawn::CountIn(category);
+    const int pick=c.placePick<count ? c.placePick : 0;
+    // How many rows fit under the title, the tabs, the arrows and the two lines of keys.
+    const int tabRows=(debugspawn::kCategoryCount+2)/3;
+    const float fixed=tabH+static_cast<float>(tabRows)*tabH+2.0f*rowH*0.7f+3.0f*rowH*0.8f+3.0f*pad8;
+    int window=static_cast<int>((bottom-top-fixed)/rowH);
+    if(window>rangeplace::kWindow)window=rangeplace::kWindow;
+    if(window<3){MapCommandPlaceButtons(nullptr,nullptr,0);return;}
+    const int first=rangeplace::WindowFirst(pick,count,window),shown=count-first<window ? count-first : window;
+    float y=top;
+    const float y1=top+fixed+static_cast<float>(shown)*rowH;
+    MapUiBox(drawer,ctx,x0-pad8,top,x1,y1,lines,*at);
+    // The title: a click shuts the panel.
+    Label(text,lines,at,x0,y+tabH*0.5f,0,kLineScale*0.75f,kMapOrder,L"%ls",Tr(Tx::placeTitle));
+    Label(text,lines,at,x1-24.0f*s,y+tabH*0.5f,2,kLineScale*0.65f,kMapOrderDim,L"%d/%d",count ? pick+1 : 0,count);
+    Tri(drawer,ctx,x1-14.0f*s,y+tabH*0.5f+3.0f*s,x1-14.0f*s,y+tabH*0.5f-4.0f*s,4.0f*s,kMapOrder);
+    if(over(x0-pad8,y,x1,y+tabH))Rect(drawer,ctx,x0-pad8,y,x1,y+tabH,kMapBoxFill);
+    hit(x0-pad8,y,x1,y+tabH,kPlaceToggle);
+    y+=tabH;
+    // The tabs, three a row.
+    const float tabW=(x1-x0)/3.0f;
+    for(int k=0;k<debugspawn::kCategoryCount;++k) {
+        const float a=x0+tabW*static_cast<float>(k%3),b=y+tabH*static_cast<float>(k/3),r=a+tabW-3.0f*s,d=b+tabH-3.0f*s;
+        Rect(drawer,ctx,a,b,r,d,k==cat ? kBtnLit : over(a,b,r,d) ? kMapBoxFill : kBtnFill);
+        Label(text,lines,at,(a+r)*0.5f,(b+d)*0.5f,1,kLineScale*0.6f,k==cat ? kWhite : kMapOrderDim,L"%ls",Tr(words[k]));
+        if(*at>0)MapFitLabel(text,lines[*at-1],a+2.0f*s,r-2.0f*s);
+        hit(a,b,r,d,kPlaceTab+k);
+    }
+    y+=tabH*static_cast<float>(tabRows)+pad8*0.5f;
+    // The arrows (shown when there is more that way) and the rows between them.
+    const float arrowH=rowH*0.7f,mid=(x0+x1)*0.5f;
+    if(first>0) {
+        if(over(x0,y,x1,y+arrowH))Rect(drawer,ctx,x0,y,x1,y+arrowH,kMapBoxFill);
+        Tri(drawer,ctx,mid,y+arrowH*0.75f,mid,y+arrowH*0.2f,6.0f*s,kMapOrder);
+        hit(x0,y,x1,y+arrowH,kPlacePageUp);
+    }
+    y+=arrowH;
+    for(int i=0;i<shown;++i) {
+        const int row=debugspawn::RowOf(category,first+i);
+        if(row<0)break;
+        const float b=y+rowH*static_cast<float>(i),d=b+rowH;
+        const RowState st=c.placeState[row];
+        const bool armed=c.placeArmed==row,picked=first+i==pick;
+        if(armed)Rect(drawer,ctx,x0,b,x1,d,kBtnLit);
+        else if(over(x0,b,x1,d) || (picked && pad))Rect(drawer,ctx,x0,b,x1,d,kMapBoxFill);
+        const bool ready=st==RowState::ready && !c.placeOnline;
+        const wchar_t* why=c.placeOnline || st==RowState::ready ? L"" : st==RowState::missing ? Tr(Tx::placeMissing) :
+            st==RowState::notPreloaded ? Tr(Tx::placeNotPreloaded) : st==RowState::broken ? Tr(Tx::placeBroken) : Tr(Tx::debugSpawnUnavailable);
+        Label(text,lines,at,x0+14.0f*s,(b+d)*0.5f,0,kLineScale*0.68f,armed ? kWhite : ready ? kWhite : kMapOrderDim,L"%ls%ls",
+              debugspawn::kEntries[row].name,why);
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0+14.0f*s,x1-4.0f*s);
+        if(picked)Tri(drawer,ctx,x0+2.0f*s,(b+d)*0.5f,x0+10.0f*s,(b+d)*0.5f,4.0f*s,armed ? kWhite : kMapOrder);
+        hit(x0,b,x1,d,row);
+    }
+    bool unloaded=false;
+    for(int i=0;i<count && !c.placeOnline;++i){const int row=debugspawn::RowOf(category,i);unloaded=unloaded || (row>=0 && c.placeState[row]==RowState::notPreloaded);}
+    y+=rowH*static_cast<float>(shown);
+    if(first+shown<count) {
+        if(over(x0,y,x1,y+arrowH))Rect(drawer,ctx,x0,y,x1,y+arrowH,kMapBoxFill);
+        Tri(drawer,ctx,mid,y+arrowH*0.2f,mid,y+arrowH*0.75f,6.0f*s,kMapOrder);
+        hit(x0,y,x1,y+arrowH,kPlacePageDown);
+    }
+    y+=arrowH+pad8*0.5f;
+    // Why nothing can be placed (online), the keys, and how the rows not preloaded come in.
+    const float footH=rowH*0.8f;
+    const auto foot=[&](const float* tint,Tx words){
+        Label(text,lines,at,x0,y+footH*0.5f,0,kLineScale*0.6f,tint,L"%ls",Tr(words));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1-4.0f*s);
+        y+=footH;
+    };
+    if(c.placeOnline)foot(kAmber,Tx::placeOnline);
+    foot(kTeal,pad ? Tx::placeHintPad : Tx::placeHintMouse);
+    if(!pad)foot(kTeal,Tx::placeHintKeys);
+    if(unloaded && (pad || !c.placeOnline))foot(kMapOrderDim,Tx::placeHintAll);
+    MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits);
+}
+
 void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     static MapCommandReadout c;   // the draw thread's (too big for its stack)
     if(!PlayerMapCommands(&c)){
         MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
         MapCommandFormationButtons(nullptr,nullptr,0);
-        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);return;
+        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandPlaceButtons(nullptr,nullptr,0);return;
     }
     const float* tint=c.allowed && c.pickable ? kMapOrder : kMapOrderDim;
     // Where a point order goes: the pointer (a ring and a cross), or with a pad the crosshair at the centre; an armed
     // point order or support call in its colour.
-    const float* aim=c.armedOrder ? (c.armed==Order::attackMove ? kAmber : kWhite) : c.supportArmed>=0 ? kGreen : tint;
+    const float* aim=c.armedOrder ? (c.armed==Order::attackMove ? kAmber : kWhite) : c.supportArmed>=0 || c.placeArmed>=0 ? kGreen : tint;
     const float cx=c.pointer ? c.px : width*0.5f,cy=c.pointer ? c.py : height*0.5f;
     Seg(drawer,ctx,cx-16.0f*s,cy,cx-5.0f*s,cy,2.0f*s,aim);Seg(drawer,ctx,cx+5.0f*s,cy,cx+16.0f*s,cy,2.0f*s,aim);
     Seg(drawer,ctx,cx,cy-16.0f*s,cx,cy-5.0f*s,2.0f*s,aim);Seg(drawer,ctx,cx,cy+5.0f*s,cx,cy+16.0f*s,2.0f*s,aim);
-    if(c.pointer)Arc(drawer,ctx,cx,cy,9.0f*s,0.0f,kTurn,1.5f*s,16,c.armedOrder || c.supportArmed>=0 ? aim : kWhite);
+    if(c.pointer)Arc(drawer,ctx,cx,cy,9.0f*s,0.0f,kTurn,1.5f*s,16,c.armedOrder || c.supportArmed>=0 || c.placeArmed>=0 ? aim : kWhite);
     // The box being dragged.
     if(c.boxing) {
         const float x0=c.bx<c.px ? c.bx : c.px,x1=c.bx<c.px ? c.px : c.bx,y0=c.by<c.py ? c.by : c.py,y1=c.by<c.py ? c.py : c.by;
@@ -4351,12 +4467,17 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         }
     }
     const float panelBottom=MapSquadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
-    MapPayloadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
+    const float payloadBottom=MapPayloadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
     const int buttonRows=MapButtons(drawer,ctx,text,width,height,s,m.pad,c,lines,at);
     // The support bar under the squad panel (its rows and the gap under them), down to the command card.
     const float barTop=c.squads>0 ? panelBottom+10.0f*s : panelBottom;
     const float barBottom=height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+40.0f)*s;
     MapSupportBar(drawer,ctx,text,width,s,barTop,barBottom,m.pad,c,lines,at);
+    // The test range's 「摆放」 panel at the right, under the scale band (and the payload panel when it is up).
+    MapPlacePanel(drawer,ctx,text,width,s,std::fmax(206.0f*s,payloadBottom+10.0f*s),barBottom,m.pad,c,lines,at);
+    // The formation button's menu over all of them (its box empties the text under it; its rows take the clicks first).
+    if(m.pad)MapCommandFormationButtons(nullptr,nullptr,0);
+    else MapFormationMenu(drawer,ctx,text,width,height,s,c,mapCardRects,mapCardIds,mapCardCount,lines,at);
     // The band over the map's keys: what is selected and what to do with it (one line; the keys are in the tooltips).
     Rect(drawer,ctx,0.0f,height-104.0f*s,width,height-46.0f*s,kMapBand);
     const float y=height-75.0f*s;
@@ -4445,6 +4566,7 @@ void MapTargetsNone() noexcept {
     MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
     MapCommandFormationButtons(nullptr,nullptr,0);MapCommandComposeButtons(nullptr,nullptr,0);
     MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
+    MapCommandPlaceButtons(nullptr,nullptr,0);
 }
 
 // The map view open: its marks drawn (true), nothing else of the HUD; the damage statistics' page in their place while it
@@ -4596,6 +4718,13 @@ void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
                Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy : Tx::npcPingNoUnit));
 }
 
+// The catalog's categories in the HUD's words (debug_spawn.h Category, in its order): the debug spawn tool's menu and the
+// test range's 「摆放」 panel.
+const Tx* DebugSpawnCategoryWords() noexcept {
+    static const Tx kNames[debugspawn::kCategoryCount]={Tx::debugSpawnVehicles,Tx::debugSpawnOurs,Tx::debugSpawnAircraft,
+                                                        Tx::debugSpawnEnemies,Tx::debugSpawnEnemies41,Tx::debugSpawnSoldiers};
+    return kNames;
+}
 // The result line (a spawn's, for a moment): its words, the row's name.
 void DebugSpawnStatusLine(Text* text,Line* lines,int* at,float x,float y,int align,float scale,const DebugSpawnCue& c) noexcept {
     if(c.status==kDebugSpawnNone || c.statusRow<0 || c.statusRow>=debugspawn::kEntryCount)return;
@@ -4621,10 +4750,9 @@ void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,fl
     if(*at+kWindow+5>kMaxLines)return;
     using debugspawn::Category;
     const Category cat=static_cast<Category>(c.category>=0 && c.category<debugspawn::kCategoryCount ? c.category : 0);
-    static const Tx kNames[debugspawn::kCategoryCount]={Tx::debugSpawnVehicles,Tx::debugSpawnAircraft,Tx::debugSpawnEnemies,
-                                                        Tx::debugSpawnSoldiers};
-    static const Tx kHints[debugspawn::kCategoryCount]={Tx::debugSpawnHintVehicle,Tx::debugSpawnHintAircraft,Tx::debugSpawnHintEnemy,
-                                                        Tx::debugSpawnHintSoldier};
+    const Tx* const kNames=DebugSpawnCategoryWords();
+    static const Tx kHints[debugspawn::kCategoryCount]={Tx::debugSpawnHintVehicle,Tx::debugSpawnHintVehicle,Tx::debugSpawnHintAircraft,
+                                                        Tx::debugSpawnHintEnemy,Tx::debugSpawnHintEnemy,Tx::debugSpawnHintSoldier};
     const int first=c.count<=kWindow ? 0 : (c.pick-kWindow/2<0 ? 0 : (c.pick-kWindow/2+kWindow>c.count ? c.count-kWindow : c.pick-kWindow/2));
     const int shown=c.count<kWindow ? c.count : kWindow;
     const int firstLine=*at;

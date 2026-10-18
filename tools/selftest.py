@@ -1916,6 +1916,114 @@ def target_range_fits_the_real_plain() -> None:
 
 
 @test
+def spawn_catalog_generated_is_current() -> None:
+    """src/spawn_catalog.inc (the plugin's object rows: the M map's 「摆放」 in the test range, the debug spawn tool) is what
+    tools/gen_spawn_catalog.py writes from testrange/catalog.py now: a row added to a registry reaches the plugin."""
+    import gen_spawn_catalog
+    with open(gen_spawn_catalog.OUT, encoding='utf-8', newline='') as f:
+        assert f.read().replace('\r\n', '\n') == gen_spawn_catalog.render(), \
+            'src/spawn_catalog.inc is stale: python tools/gen_spawn_catalog.py'
+
+
+@test
+def spawn_catalog_covers_every_registry() -> None:
+    """The test range's catalog (testrange/catalog.py) misses nothing the registries add (the user, 2026-10-17:
+    「测试场的东西该更新了」): every EDF4.1 object (edf41port/objects.json) is a row or named with why it is not
+    (catalog.edf41_left_out) and its class is known; EDF5's DLC object groups are rows; every vehicle of ours the player
+    drives empty (gen.PLACEABLE_DERIVED: the helicopters, the player jets, every parked twin, the ground vehicles our tools
+    make) and the installer's are rows; every vcobjects GROUND_VEHICLES kind is placeable (the range makes it or the
+    installer's SGO is a row); every stock row the range's waves and the debug spawn tool name is one; the waves leave
+    no ship on the ground; the log ids are unique."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import catalog
+    import gen
+    import vcobjects as vc
+    rows = catalog.rows()
+    by = {r.sgo: r for r in rows}
+    assert len(by) == len(rows) and len({r.ident for r in rows}) == len(rows), 'a row twice'
+    reg = catalog._edf41_registry()
+    for o in reg['objects']:
+        stem = o['object'].removeprefix('OBJECT/').removesuffix('.SGO').lower()
+        why = catalog.edf41_left_out(o)
+        assert o['class'] in catalog.EDF41_CLASSES or o['class'] in catalog.EDF41_LEFT_OUT_CLASSES, \
+            f'{o["object"]}: class {o["class"]} is new: give it a category in testrange/catalog.py EDF41_CLASSES'
+        assert (stem in by) != bool(why), f'{o["object"]}: neither a row nor left out with why ({why})'
+    for r in catalog.edf41_rows():
+        assert set(catalog.edf41_files(r.sgo)) <= set(reg['files']), r.sgo
+    assert {r.sgo for r in catalog.edf5dlc_rows()} <= set(by) and catalog.edf5dlc_rows(), 'EDF5 DLC objects'
+    assert set(gen.PLACEABLE_DERIVED) <= set(by), sorted(set(gen.PLACEABLE_DERIVED) - set(by))
+    assert all(by[s].category == 'ours' and by[s].source == 'range' for s in gen.PLACEABLE_DERIVED)
+    want_jets = {s for s, j in vc.JETS.items() if (j.player or j.parked) and s in gen.DERIVED}   # not the requests' copies
+    assert want_jets <= set(gen.PLACEABLE_DERIVED), f'a jet the player flies is not placeable: {sorted(want_jets - set(gen.PLACEABLE_DERIVED))}'
+    installer_rows = {s for s, _, _ in catalog.INSTALLER_VEHICLES}
+    for kind, v in vc.GROUND_VEHICLES.items():
+        placed = gen.DERIVED_PREFIX + kind + '_mission' in gen.GROUND_MISSION or v.sgo.lower() in installer_rows
+        assert placed, f'GROUND_VEHICLES {kind} is not placeable in the test range (testrange/gen.py GROUND_MISSION or catalog.INSTALLER_VEHICLES)'
+    assert installer_rows <= set(by) and set(gen.GROUND_MISSION) <= set(by)
+    for s, _ in catalog.STOCK_VEHICLES:
+        assert by[s].category == 'vehicle' and by[s].source == 'stock'
+    assert {s for s, _, _ in gen.ENEMIES if s not in gen.PRIMER_KINDS} <= set(by), 'a wave enemy is no row'
+    assert all(by[s].lift < gen.WAVE_LIFT_MOST for s, _, _ in gen.ENEMIES if s in by), 'a ship among the waves'
+    wanted = {'ufomother301', 'ufomother401', 'uforobo401', 'edf6vc_sedan', 'v507_rescuetank_ai', 'vehicle301_tank_ai'}
+    assert wanted <= set(by), sorted(wanted - set(by))
+    # The panel's tabs (src/debug_spawn.h Category) are the catalog's, in its order.
+    header = src('src/debug_spawn.h')
+    tabs = re.search(r'enum class Category : std::uint8_t \{ ([^}]*), count \};', header).group(1).split(', ')
+    assert tabs == list(catalog.CATEGORIES), tabs
+
+
+@test
+def range_leaves_out_what_is_not_installed() -> None:
+    """The range's vehicles whose files the installer writes (the sedan, EDF4.1's tank) are left out, said so, when this
+    game's Mods does not have them (an EDF4.1 install that never ran, a sedan build that failed); the rest of the plan is
+    as it was. A waves' 4.1 enemy that is not there is refused with its file named."""
+    import tempfile
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    plan = gen.target_range(gen.Plan())
+    assert set(gen.RANGE_NEW) <= set(plan.vehicles), 'the installer\'s range lacks the new vehicles'
+    with tempfile.TemporaryDirectory() as root:
+        kept, said = gen.without_missing(root, plan)
+        gone = {s for s in gen.RANGE_NEW if s in gen.OPTIONAL_VEHICLES}
+        assert gone and not gone & set(kept.vehicles) and len(said) == len(gone), (said, kept.vehicles)
+        assert {s: n for s, n in plan.vehicles.items() if s not in gone} == kept.vehicles and kept.friends == plan.friends
+        assert 'v507_rescuetank_ai' in kept.vehicles, 'a stock vehicle is never left out'
+        for rel in gen.catalog.files_of(gen.OPTIONAL_VEHICLES['edf6vc_sedan']):
+            path = os.path.join(root, 'Mods', *rel.split('/'))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, 'wb').close()
+        kept, said = gen.without_missing(root, plan)
+        assert 'edf6vc_sedan' in kept.vehicles and 'vehicle301_tank_ai' not in kept.vehicles
+    row = gen.enemy_row('hector301cc')
+    assert row and row.source == 'edf41' and gen.enemy_row('giantant01') is None
+
+
+@test
+def range_online_mode_has_no_weapon_level_cap() -> None:
+    """The test range's online mode lifts the online weapon level cap (the user, 2026-10-17: 「测试场不限制武器等级」;
+    docs/weapon-level-cap-re.md): EDF.dll 0xE2710 reads the current mode's ModeList member 7 [difficulty][6] and a
+    negative value is no cap; the range writes EDF.dll's own [-1.0, -1.0] on every difficulty, the armour cap (element 7)
+    and every other value the stock online story's; its offline mode and every other pack keep theirs. (The full
+    CONFIG.SGO build is checked with the game in edf5_campaign_range_pack.)"""
+    import copy
+    import struct
+    import sgo
+    f = lambda v: sgo.Float(struct.pack('<f', v))  # noqa: E731
+    template = ['name', 'desc', 0, 0, 0, 'M.MST', ['a', 'b', 'c'],
+                [[f(1.0)] * 5 + [[f(1.2), f(1.5)], [f(0.1), f(1.1)], [358, 2322]] for _ in range(5)], 1, 0, 1]
+    online = e5c.mode_entry(copy.deepcopy(template), e5c.RANGE, 6, e5c.ONLINE)
+    assert all(sgo.plain(r[e5c.LIMIT_WEAPON]) == [-1.0, -1.0] and r[e5c.LIMIT_ARMOR] == [358, 2322]
+               for r in online[e5c.M_LIMITS])
+    assert sgo.plain(online[e5c.M_LIMITS][0][:6]) == sgo.plain(template[7][0][:6])
+    offline = e5c.mode_entry(copy.deepcopy(template), e5c.RANGE, 6, e5c.OFFLINE)
+    assert sgo.plain(offline[e5c.M_LIMITS]) == sgo.plain(template[7]), 'the offline mode changed'
+    for pack in e5c.PACKS:
+        assert pack.weapon_cap and sgo.plain(e5c.mode_entry(copy.deepcopy(template), pack, 3, e5c.ONLINE)[7]) == sgo.plain(template[7])
+    # The game's reader (EDF.dll 0xE2710): a negative element is no cap, and these are the instructions read for it.
+    assert not e5c.RANGE.weapon_cap and e5c.M_LIMITS == 7 and e5c.LIMIT_WEAPON == 6
+
+
+@test
 def footprint_covers_the_stock_models() -> None:
     """testrange/gen.py footprint for each stock-model vehicle the installer's range places: at least how far its model
     reaches from its origin across the ground (the bind pose's vertices, Root.cpk), OVERLAP_SLACK aside (the EMC's
@@ -5681,7 +5789,16 @@ def edf5_campaign_range_pack() -> None:
         assert len({(m[e5c.M_TYPE], m[e5c.M_CONTENT]) for m in modes}) == len(modes), 'GetModeNo(type, content) ambiguous'
         for m, kind in zip(ours, e5c.RANGE.kinds):
             like = next(x for x in stock if x[e5c.M_CONTENT] == 0 and x[e5c.M_TYPE] == m[e5c.M_TYPE])
-            assert m[7] == like[7] and m[11:] == like[11:], 'not the stock story mode of its kind'
+            # Online, no weapon level cap (the user, 2026-10-17: 「测试场不限制武器等级」; docs/weapon-level-cap-re.md):
+            # every difficulty's element 6 is EDF.dll's own "no cap" [-1.0, -1.0], the rest the stock online story's.
+            if kind == e5c.ONLINE:
+                assert all(row[e5c.LIMIT_WEAPON] == [-1.0, -1.0] for row in m[e5c.M_LIMITS]), m[e5c.M_LIMITS]
+                assert any(row[e5c.LIMIT_WEAPON] != [-1.0, -1.0] for row in like[e5c.M_LIMITS]), 'the stock mode has no cap'
+                assert [r[:e5c.LIMIT_WEAPON] + r[e5c.LIMIT_WEAPON + 1:] for r in m[e5c.M_LIMITS]] == \
+                       [r[:e5c.LIMIT_WEAPON] + r[e5c.LIMIT_WEAPON + 1:] for r in like[e5c.M_LIMITS]]
+            else:
+                assert m[e5c.M_LIMITS] == like[e5c.M_LIMITS]
+            assert m[11:] == like[11:], 'not the stock story mode of its kind'
             assert m[e5c.M_FILES] == e5c.RANGE.paths(kind) and (m[e5c.M_NAME], m[e5c.M_DESC]) == e5c.RANGE.keys(kind)
             listed, image, txt = e5c.RANGE.kind_files(kind)
             rows = dsgo.parse(files[listed]).root.get('table').items
@@ -8464,6 +8581,136 @@ def edf41_objects_install() -> None:
             files, skipped = eo.build(game)
             users = {o['object'] for o in reg['objects'] if shared in o['files']}
             assert {obj for obj, _why in skipped} == users and shared not in files, skipped
+
+
+@test
+def edf41_outfits_shipped() -> None:
+    """edf41port/outfits (tools/make_edf41_outfits.py, docs/edf41-outfits.md): the Ranger and Air Raider outfits ship (the
+    Wing Diver and Fencer too, while the pipeline takes them); every class's files are shipped as registered and nothing
+    else is; new names only (OBJECT/EDF41_P_*, MENUOBJECT/EDF41_P_*: no stock file replaced); each archive's models are
+    EDF6's (0x20) and sound (pylib/outfit41.py check_archive: re-serialise, textures before the model, inverse binds,
+    weights summing to 1, indices inside the skeleton) on at most outfit41.MAX_BONES bones; each battle SGO is the
+    class's (CONFIG.SGO SoldierInit order) and names its archive, body and LODs, each menu SGO its archive and body; the
+    report says every shared joint ended within 7 cm of EDF6's."""
+    import hashlib
+    import edf41_outfits as eo
+    import mdb
+    import outfit41
+    import rabpool
+    import sgo
+    reg = eo.registry()
+    classes = {c['class']: c for c in reg['classes']}
+    assert {'ranger', 'airraider'} <= set(classes), f'Ranger and Air Raider outfits missing: {sorted(classes)}'
+    listed = {rel for c in reg['classes'] for rel in c['files']}
+    assert listed == set(reg['files']), 'the registry lists files no class needs, or the reverse'
+    shipped = {os.path.relpath(os.path.join(d, f), eo.FILES).replace(os.sep, '/') for d, _, fs in os.walk(eo.FILES) for f in fs}
+    own = {s for rel in listed for s in rabpool.stored(rel)}
+    for s in sorted(own):
+        if s.endswith(rabpool.MANIFEST):
+            with open(os.path.join(eo.FILES, *s.split('/')), encoding='utf-8') as f:
+                own |= {f'{rabpool.MEMBERS}/{row[-1]}' for row in json.load(f)['files']}
+    assert shipped == own, f'shipped but unlisted: {sorted(shipped - own)[:5]}; listed, not shipped: {sorted(own - shipped)[:5]}'
+    soldier = {0: 'AssultSoldier', 1: 'PaleWing', 2: 'Engineer', 3: 'HeavyArmor'}
+    for key, c in classes.items():
+        spec = outfit41.SPECS[key]
+        assert c['soldier_class'] == spec.soldier_class and c['battle'] == f'OBJECT/{spec.out}.SGO' and \
+            c['menu'] == f'MENUOBJECT/{spec.out}.SGO', key
+        assert all(r.split('/', 1)[1].startswith('EDF41_P_') for r in c['files']), f'{key}: a file under a stock name'
+        data = {rel: eo.read(rel) for rel in c['files']}
+        for rel, b in data.items():
+            assert hashlib.sha256(b).hexdigest() == reg['files'][rel], rel
+        arch = f'OBJECT/{spec.out}.MRAB'
+        models = [f for f in mdb.rab_read(data[arch]).files if f.name.lower().endswith('.mdb')]
+        assert len(models) == 3, f'{key}: body and two LODs'
+        faults = outfit41.check_archive(data[arch], [f.name for f in models])
+        assert not faults, (key, faults[:5])
+        for f in models:
+            md = mdb.mdb_read(f.data)
+            assert md.version == 0x20 and len(md.bones) <= outfit41.MAX_BONES, (key, f.name, len(md.bones))
+        battle = sgo.load(data=data[c['battle']])
+        assert battle['xgs_scene_object_class'] == soldier[spec.soldier_class], (key, battle['xgs_scene_object_class'])
+        archive, body, lods = outfit41.model_entry(battle['animation_model'][0])
+        assert outfit41.rel_of(archive) == arch and [body] + [n for n, _ in lods] == [f.name for f in models], key
+        menu = sgo.load(data=data[c['menu']])
+        assert outfit41.rel_of(menu['animation_model'][0][0]) == arch and menu['animation_model'][0][1] == body, key
+        assert c['report']['joint_error_max'] < 0.07, (key, c['report']['joint_error_worst'])
+
+
+@test
+def edf41_outfits_pipeline_math() -> None:
+    """pylib/outfit41.py's turns (no game): align turns a set of offsets onto their rotated copies exactly (Kabsch), a
+    line of offsets (the forearm) by the shortest turn of their direction, shortest_turn handles the opposite direction,
+    and the pairing rules every class shares map 4.1's otherFinger* to middle* and kubi to head."""
+    import math
+    import numpy as np
+    import outfit41
+    a = math.radians(25.0)
+    q = np.array([[math.cos(a), math.sin(a), 0.0], [-math.sin(a), math.cos(a), 0.0], [0.0, 0.0, 1.0]])
+    us = [np.array(v) for v in ((0.1, 0.0, 0.02), (0.0, 0.08, -0.03), (0.05, 0.05, 0.05))]
+    got = outfit41.align(us, [u @ q for u in us])
+    assert np.allclose(got, q, atol=1e-9) and abs(outfit41.turn_angle(got) - 25.0) < 1e-6
+    line = [np.array((0.1, 0.0, 0.0)), np.array((0.2, 0.0, 0.0))]
+    got = outfit41.align(line, [u @ q for u in line])
+    assert np.allclose(np.array((1.0, 0.0, 0.0)) @ got, np.array((1.0, 0.0, 0.0)) @ q, atol=1e-9)
+    flip = outfit41.shortest_turn(np.array((0.0, 1.0, 0.0)), np.array((0.0, -1.0, 0.0)))
+    assert np.allclose(np.array((0.0, 1.0, 0.0)) @ flip, (0.0, -1.0, 0.0), atol=1e-9) and np.allclose(flip @ flip.T, np.eye(3))
+    rules = dict(outfit41.COMMON)
+    assert re.sub(r'otherFinger(\d)_([lr])', rules[r'otherFinger(\d)_([lr])'], 'otherFinger2_l') == 'middle2_l'
+    assert rules['kubi'] == 'head'
+
+
+@test
+def edf41_outfits_reproducible() -> None:
+    """With EDF4.1 and EDF6 on this machine: tools/make_edf41_outfits.py builds today exactly the files shipped (the
+    pipeline is deterministic and the committed files are current). Skipped without either game (CI)."""
+    import gamedir
+    import edf41_outfits as eo
+    import make_edf41_outfits as m
+    import rootcpk
+    edf41 = gamedir.find_other(gamedir.EDF41)
+    if not edf41 or not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        print('      (skipped: no EDF4.1 or EDF6 here)')
+        return
+    reg = eo.registry()
+    data, _files = m.build(edf41, rootcpk.DEFAULT_GAME)
+    assert data['files'] == reg['files'], 'rerun tools/make_edf41_outfits.py: the shipped outfits are not what it builds'
+    assert [c['class'] for c in data['classes']] == [c['class'] for c in reg['classes']]
+
+
+@test
+def edf41_outfits_install() -> None:
+    """tools/edf41_outfits.py on a stand-in game: every class's files written as the ledger owner edf41outfit, a second
+    install writes nothing, remove deletes them; a file another mod put at one of a class's names is never written over,
+    that class is left out (said why), the others installed. The installer writes them after the 4.1 objects and its
+    uninstall removes them; the release bundles the registry and the files; the plugin installs the hooks and the online
+    preload hands its member to them."""
+    import edf41_outfits as eo
+    assert eo.OWNER in ledger.OWNERS
+    reg = eo.registry()
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e41f-') as game:
+        os.makedirs(os.path.join(game, 'Mods'))
+        files, skipped = eo.build(game)
+        assert not skipped and set(files) == set(reg['files'])
+        eo.install(game, files)
+        led = ledger.Ledger(game)
+        assert {ledger.key(r) for r in files} == set(led.owned_by(eo.OWNER))
+        assert eo.install(game, files) == [], 'a second install rewrote files it already holds'
+        _deleted, kept = eo.remove(game)
+        assert not kept and not any(os.path.exists(led.disk(r)) for r in files), 'remove left files'
+        theirs = reg['classes'][0]['files'][0]
+        modfiles.atomic_write(os.path.join(game, 'Mods', *theirs.split('/')), b'another mod')
+        files, skipped = eo.build(game)
+        assert [cls for cls, _why in skipped] == [reg['classes'][0]['class']] and theirs not in files, skipped
+        assert set(files) == {r for c in reg['classes'][1:] for r in c['files']}
+        eo.install(game, files)
+        with open(os.path.join(game, 'Mods', *theirs.split('/')), 'rb') as f:
+            assert f.read() == b'another mod', "another mod's file was written over"
+    inst, rel = src('tools/installer.py'), src('tools/build_release.py')
+    assert inst.index('edf41_objects.install(game, objects41)') < inst.index('edf41_outfits.install(game, outfits41)')
+    assert 'edf41_outfits.remove' in inst.split('def uninstall(game: str)', 1)[1]
+    assert '"edf41port", "outfits")}{seps}edf41port/outfits' in rel and '"edf41port", "outfits.json")}{seps}edf41port' in rel
+    plugin, mission = src('src/plugin.cpp'), src('src/mission.cpp')
+    assert 'InstallOutfit41()' in plugin and 'Outfit41SessionPreload(sessionOrig,' in mission
 
 
 @test

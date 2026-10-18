@@ -75,20 +75,45 @@ def main() -> int:
     checks += 1
 
     game = rootcpk.Game(str(args.game))
-    rows = re.findall(r'\{Category::(\w+),How::(\w+),"([^"]+)",L"[^"]*",L"app:/object/([^"]+)"', header)
-    assert rows, 'no stock rows read'
-    for category, how, ident, name in rows:
-        members = sgo.load(data=game.read('OBJECT', name))
-        cls = members.get('xgs_scene_object_class')
+    # The object rows: src/spawn_catalog.inc (tools/gen_spawn_catalog.py from testrange/catalog.py), included by the header.
+    assert '#include "spawn_catalog.inc"' in header, 'the header no longer takes the generated rows'
+    catalog = (ROOT / 'src/spawn_catalog.inc').read_text(encoding='utf-8')
+    rows = re.findall(r'\{Category::(\w+),How::(\w+),"([^"]+)",L"[^"]*",L"app:/object/([^"]+)",\d+,[0-9.]+f,(true|false),(true|false)\}',
+                      catalog)
+    assert rows and not re.findall(r'L"app:/object/', header), 'object rows outside the generated file'
+    sys.path.insert(0, str(ROOT / 'tools'))
+    sys.path.insert(0, str(ROOT / 'testrange'))
+    import edf41_objects  # noqa: E402  (the bundled, pre-converted 4.1 objects: no EDF4.1 needed)
+    import gen  # noqa: E402
+    mods = args.game / 'Mods'
+    skipped = 0
+    for category, how, ident, name, mod, _preload in rows:
+        rel = f'OBJECT/{name.split(".")[0].upper()}.SGO'
         assert name.upper().startswith(ident.upper()), (ident, name)
-        if how == 'stockVehicle':
-            assert category == 'vehicle' and cls in VEHICLE_CLASSES, (name, cls)
+        if mod == 'false':                                   # Root.cpk's own
+            data, where = game.read('OBJECT', name), 'Root.cpk'
+        elif (mods / rel).is_file():                          # installed: what the game loads
+            data, where = (mods / rel).read_bytes(), 'Mods'
+        elif rel in edf41_objects.registry()['files']:        # EDF4.1's, as the installer ships it
+            data, where = edf41_objects.read(rel), 'edf41port'
+        elif ident.startswith('EDF6TR_'):                    # the range's own, as its install writes it
+            data, where = gen.vehicle_sgo(gen.Game(str(args.game)), name.split('.')[0].lower()), 'testrange/gen.py'
+        else:
+            print(f'{name}: not installed here, not checked')
+            skipped += 1
+            continue
+        members = sgo.load(data=data)
+        cls = members.get('xgs_scene_object_class')
+        if how == 'vehicle':
+            assert category in ('vehicle', 'ours'), (name, category)
+            assert cls in VEHICLE_CLASSES if mod == 'false' else str(cls).startswith('Vehicle'), (name, cls)
             assert members.get('mission_setup'), f'{name}: no mission_setup'
         else:
-            assert how == 'enemy' and category == 'enemy' and cls and not str(cls).startswith('Vehicle'), (name, cls)
+            assert how == 'enemy' and category in ('enemy', 'enemy41') and cls and not str(cls).startswith('Vehicle'), (name, cls)
         checks += 2
-        print(f'{name}: {cls}{" (mission_setup)" if how == "stockVehicle" else ""}')
-    print(f'debug_spawn_resource_audit: {checks} checks passed (read-only Root.cpk / EDF.dll)')
+        print(f'{name}: {cls}{" (mission_setup)" if how == "vehicle" else ""} [{where}]')
+    print(f'debug_spawn_resource_audit: {checks} checks passed, {skipped} rows not installed here '
+          '(read-only Root.cpk / EDF.dll / Mods / edf41port)')
     return 0
 
 

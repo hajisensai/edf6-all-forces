@@ -271,6 +271,11 @@ struct Config {
     int debugSpawnSpawnKey=0x78;    // ...spawn the row picked (F9)
     float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
     float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
+    // The M map's 「摆放」 panel in the test range's mission (range_place.h; the debug spawn tool's catalog and making,
+    // whatever DebugSpawn says): on by default; offline only. RangePlaceAll: every row preloaded, the heavy EDF4.1 ones
+    // too (Entry::preload false: another 17 MB model each); off: those listed as not preloaded.
+    bool rangePlace=true;
+    bool rangePlaceAll=false;
     bool roomLoadout=true;          // the room / HQ support loadout menu (room_ui.cpp; 0 at load: nothing installed, both
                                     // screens untouched; turned 0 later: both screens passed through, nothing read or drawn)
     bool roomPreSync=true;          // ...and the room pre-sync with it (room_sync.h: generate what the host lists; 0: none)
@@ -278,6 +283,8 @@ struct Config {
     int roomLoadoutButton=0xC0;     // ...and pad combination (XInput button bits, all held: 0xC0 L3 + R3; 0 none)
     bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,
                                     // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
+    bool allClassesRide=true;       // every class may take every seat a class may take (allclass.cpp: each seat's class
+                                    // mask widened as the vehicle is made, a bench pose for a rider whose CAS lacks the seat's)
     bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
     int seatNextKey=0x46;           // ...the next free seat ('F'; a Windows virtual-key code, 0: none)
     bool seatNumberKeys=true;       // ...the number keys 1-9 pick that seat (an NPC in it changes places with the player)
@@ -544,6 +551,11 @@ bool InstallEdf41Robo() noexcept;      // edf41robo.cpp: EDF4.1's UfoRobo (ini E
 bool InstallEdf41Mother401() noexcept;   // edf41mother401.cpp
 // edf41deiroi.cpp: a falling Deiroi's landing ray, cast by EDF6 against a null Havok world (crash in EDF4.1's M412), goes through the map ray.
 bool InstallEdf41Deiroi() noexcept;
+// allclass.cpp: every class in every seat (ini AllClassesRide): the seat build's class mask widened, the ride pose's fallback.
+bool InstallAllClassesRide() noexcept;
+// fsbudget.cpp: CRI File System's loader pool (num_loaders, 96 stock) raised before the library starts, so the archives
+// the plugin's content keeps open (the test range's place panel catalog) do not run it out.
+bool InstallFsLoaderBudget() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
