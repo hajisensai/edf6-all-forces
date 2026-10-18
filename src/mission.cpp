@@ -5,6 +5,7 @@
 // The preload is hooked here, not in the test-range loadout (loadout.cpp), so the mission's start (and with
 // it the jets', the carrier's and the laser's preloads) does not hang on the loadout's own checks: the
 // loadout only wraps the call when it is on (LoadoutPreload). Layout: docs/loadout-re.md.
+#include "crash_dump.h"
 #include "crew.h"
 #include "firstperson.h"
 #include "mission_watch.h"
@@ -63,6 +64,7 @@ int Redirect(const unsigned* sites,std::size_t count,unsigned target,void* hook)
 
 void MissionStart() noexcept {
     LogMemory("mission start entered");
+    CheckCrashFilter();   // the crash dump's filter and abort handler still first (crash_dump.h)
     WatchMissionPhase("resets");
     ResetPlayer();
     ResetFirstPerson();
