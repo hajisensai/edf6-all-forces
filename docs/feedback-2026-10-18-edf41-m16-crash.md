@@ -108,3 +108,18 @@ EDF6Coop.log [17:43:21.648] EXCEPTION C0000005 thread 30476 at EDF+4C3A30 readin
 ```
 
 崩溃点（ObjectAction 1）之后又跑了约 9 分钟、要塞又投放了两批。
+
+**修复后，跑到任务结束**（H）：同一命令改 `--ini Edf41Mother401Dev=295040`（再加 262144「DevShoot 一次打一批」）、1500 秒。4.1 的七个动作全部按 4.1 语义执行，`Func_1` 的 6 走 `0x4CB6D0` 后约 48 秒脚本进结算（autopilot 记到 `Result_Offline()` 协程，任务开始后 1140.5 秒），游戏到时正常退出（`drive exit 0`），无新 dump、`EDF6Coop.log` 本局无异常：
+
+```
+[19:01:30.476] EDF41FORTRESS 00000217CC949870 ObjectAction 0 (cannons on)
+[19:02:05.519] EDF41FORTRESS 00000217CC949870 ObjectAction 1 (cannons off)
+[19:12:04.944] EDF41FORTRESS 00000217CC949870 ObjectAction 2 (gatling on)
+[19:12:04.944] EDF41FORTRESS 00000217CC949870 ObjectAction 4 (bits on)
+[19:12:39.986] EDF41FORTRESS 00000217CC949870 ObjectAction 3 (gatling off)
+[19:12:39.986] EDF41FORTRESS 00000217CC949870 ObjectAction 5 (bits off)
+[19:14:17.755] EDF41FORTRESS 00000217CC949870 ObjectAction 6 (destroyed)
+[  1140.5 s] COROUTINE ... "string Result_Offline()"
+```
+
+未核（U）：要塞倒下的画面（没开 `--shots`）、结算是「成功」还是别的（`Func_1` 末尾调 `MissionClear`，玩家装甲被 dev 位保持满，推断为成功）、部件开关在画面上的效果、联机（脚本消息只在主机还是各机执行，与类原有的 3 / 4 同路径，未测）。存档每局跑后逐字节还原，任务进度不保留。
