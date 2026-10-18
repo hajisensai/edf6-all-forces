@@ -11913,7 +11913,7 @@ def edf41_hector_alias() -> None:
         return
     data, files = m.build(edf41, rootcpk.DEFAULT_GAME, ('HECTOR301CC.SGO',))
     assert not data['skipped'] and [o['object'] for o in data['objects']] == ['OBJECT/HECTOR301CC.SGO'], data['skipped']
-    assert set(files) == {'OBJECT/HECTOR301CC.SGO', 'OBJECT/HECTOR.CAS', 'OBJECT/HECTOR301CC.MRAB',
+    assert set(files) == {'OBJECT/HECTOR301CC.SGO', 'OBJECT/HECTOR.CAS', m.HECTOR_MODEL,
                           'OBJECT/RAGDOLL_HECTOR301_HAS_HKA.SHKT'}, sorted(files)
     root = dsgo.parse(files['OBJECT/HECTOR301CC.SGO']).root
     top = sgo.load(data=files['OBJECT/HECTOR301CC.SGO'])
@@ -11966,16 +11966,23 @@ def edf41_hector_alias() -> None:
     assert top['WalkingEnemyBase']['TurnSpeed'] == [0.3, 0.1], top['WalkingEnemyBase']['TurnSpeed']
     assert top['WalkingEnemyBase']['RandomAnimationTrack'] == [], 'its variables are not in the CAS'
     # the model, the MAB, the ragdoll
-    rab = files['OBJECT/HECTOR301CC.MRAB']
+    # one archive for every variant (a player's report, 2026-10-18: 21 archives each with the same body and textures):
+    # the textures once, an armed body per variant under its root's name, the SGO naming its own
+    rab = files[m.HECTOR_MODEL]
     archive = mdb.rab_read(rab)
     member = {f.name.lower(): f for f in archive.files}
     am = root.get('animation_model')
-    assert am.items[0].items[0].lower() == 'app:/object/hector301cc.mrab' and am.items[1] == 'app:/object/Hector.cas'
+    assert am.items[0].items[0].lower() == 'app:/object/hector_variants.mrab' and am.items[1] == 'app:/object/Hector.cas'
+    assert am.items[0].items[1] == 'HECTOR301CC.mdb', am.items[0].items[1]
     model = mdb.mdb_read(member[am.items[0].items[1].lower()].data)
-    assert [f.name for f in archive.files if f.name.lower().endswith('.mdb') and f.folder == 1 and 'fragment' not in f.name.lower()] == ['Hector301.mdb']
+    bodies = sorted(f.name for f in archive.files if f.name.lower().endswith('.mdb') and 'fragment' not in f.name.lower())
+    assert bodies == sorted(m.shared_member(r) for r in m.HECTOR_VARIANTS), bodies
+    names = [f.name.lower() for f in archive.files]
+    assert len(names) == len(set(names)) and mdb.folder_order_ok(archive)
     bones = {model.name_of(b.name) for b in model.bones}
     assert {'waist', 'arms_l', 'arms_r', 'Hector301', 'gun_arms_l', 'gun_arms_r'} <= bones
-    assert not m.missing_textures(rab, 'Hector301.mdb'), m.missing_textures(rab, 'Hector301.mdb')
+    for body in bodies:
+        assert not m.missing_textures(rab, body), (body, m.missing_textures(rab, body))
     for frag in am.items[3].items[3].items[6].items:
         assert frag.lower() in member, frag
         assert not m.missing_textures(rab, frag)
@@ -12042,8 +12049,8 @@ def edf41_hector_weapon_anim() -> None:
     for clip in (opened, closed):
         frames, step = int(clip[0]), clip[1]
         assert frames == 31 and step == 4.0 and len(clip) == 2 + frames * len(names) * 7, (frames, step, len(clip))
-    rab = mdb.rab_read(files['OBJECT/HECTOR401LS.MRAB'])
-    md = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == 'hector401.mdb').data)
+    rab = mdb.rab_read(files[m.HECTOR_MODEL])
+    md = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == 'hector401ls.mdb').data)
     local = {md.name_of(b.name): b.local for b in md.bones}
     last = opened[2 + 30 * len(names) * 7:]
     for i, n in enumerate(names):
@@ -12177,8 +12184,8 @@ def edf41_hector_guns() -> None:
     # 401's weapons are skinned: their bones come over with blend indices that stay inside the bone table
     for name in ('HECTOR401CS.SGO', 'HECTOR401LG.SGO'):
         import edf41_objects
-        archive = mdb.rab_read(edf41_objects.read('OBJECT/' + name.replace('.SGO', '.MRAB')))
-        body = next(x for x in archive.files if x.name.lower() == 'hector401.mdb')
+        archive = mdb.rab_read(edf41_objects.read(m.HECTOR_MODEL))
+        body = next(x for x in archive.files if x.name.lower() == m.shared_member(name).lower())
         md = mdb.mdb_read(body.data)
         names = {md.name_of(b.name) for b in md.bones}
         assert {'gun_arms_l_gun_arms', 'gun_arms_r_gun_arms'} <= names, name
