@@ -23,7 +23,8 @@ ObjRef* __fastcall UpperHook(void* context,ObjRef* out,const float* matrix,int i
     if(ready && InSession() && admission && !admission(index)) {
         // 22AB90 returns a weak_ptr in its caller-provided output, not a Soldier*. Its caller
         // checks the ctrl at 22B637, then the locked object at 22B694: this is its valid empty path.
-        // Returning null from the inner 591130 instead would crash at 22AC3F.
+        // Returning null from the inner 591130 instead crashed at 22AC3F, before edf5online.cpp gave 22AB90 an
+        // empty record for it (Edf5BvmOnlineObject); refused here, 591130 does not run at all.
         if(out)*out=ObjRef{};
         if(online)Edf5BvmOnlinePlayerMade(index,nullptr);
         return out;

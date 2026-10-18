@@ -1,0 +1,97 @@
+"""The code the EDF4.1 outfit rests on (src/outfit41.cpp, docs/edf41-outfits.md), as byte signatures read from EDF.dll
+(TimeDateStamp 0x678CCB46): writes src/outfit41_signatures.inc. tests/outfit41_native_audit.py checks the .inc against
+the game's EDF.dll, and the call sites, vtables and offsets the hooks rely on.
+
+    python tools/outfit41_sigs.py [EDF.dll]
+"""
+from __future__ import annotations
+
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import room_preview_sigs  # noqa: E402  (image(): the TimeDateStamp check)
+
+INC = os.path.join(HERE, '..', 'src', 'outfit41_signatures.inc')
+
+# (rva, size, what it holds for the outfit)
+SIGNATURES: tuple[tuple[int, int, str], ...] = (
+    (0x0E34E0, 0x3F, 'the battle model path (tables, class, outfit): SoldierInit[class][2][outfit]'),
+    (0x0E3420, 0x48, 'the menu model path (tables, class, outfit): SoldierInit[class][5][1][outfit]'),
+    (0x0D8700, 0x28, 'the player outfit (GS, player): GS +0x6E94 + player * 0x3E60, below 0 the mission default'),
+    (0x0D8730, 0x4B, 'the player battle path (GS, player, class): ends in a jump to 0xE34E0'),
+    (0x59DE73, 0x23, 'own preload (0x59DE50): player in ecx, class GS +0x6E90, the path from 0xD8730'),
+    (0x59DD0F, 0x1D, 'session preload (0x59DC90): the member record\'s class and outfit, the path from 0xE34E0'),
+    (0x591227, 0x12, 'online creation: 0x5A3F90(desc from 0x595960, ...)'),
+    (0x59120E, 0x10, 'online creation: 0x595960(desc, &member, ...) right before it, in the same 0x591130'),
+    # Only the read of +0x48 (4 bytes): EDF6Coop's [Mission] Extend rewrites the `cmp 4; jcc` right after both
+    # (0x5959E1, 0x59DCEA: jumps of its own, multislot/src/patches.cpp) and loads before us.
+    (0x5959DD, 0x04, "online desc: the member's mission index +0x48 picks its record"),
+    (0x59DCD9, 0x04, "session preload: the member's mission index +0x48 picks its record"),
+    (0x9393B0, 0x28, "3D view constructor: OnMessage(this, 3, {this +0x2AC player, ...}) called directly, not by the vtable"),
+    (0x8A9B15, 0x14, 'soldier screen: the outfit change unlocked flag GS +0x300 copied to screen +0x7A4'),
+    (0x8AB585, 0x1E, 'outfit popup: built only while screen +0x7A4 is set'),
+    (0x70D912, 0x28, "mission result: GS +0x300 set once the current list's last row is cleared (0xDF990)"),
+    (0x0DEDD5, 0x0B, "new save: the outfit +0x6E94 is -1 (the mission's)"),
+    (0x59144D, 0x13, 'offline creation: 0x5A3F90(desc from 0x595C80, ...)'),
+    (0x595AE2, 0x0F, 'online desc +0: -1 for a remote member (0x12AC420), else 0'),
+    (0x595CBD, 0x06, 'offline desc +0: the local slot'),
+    (0x12AC420, 0x08, 'the member\'s remote bit: +0x10 bit 1'),
+    (0x5A3FE3, 0x1E, 'creation: class desc +8, outfit desc +0xC into 0xE34E0'),
+    (0x5A4087, 0x2E, 'creation: desc +0 == -1 marks the object remote (+0x128 bit 0)'),
+    (0x93B412, 0x19, 'view: msg-3 Desc menu path from 0xE3420'),
+    (0x93BCEE, 0x1A, 'view: msg-6 menu path from 0xE3420'),
+    (0x8AB642, 0x07, 'popup item 0: the mission-default lambda (vtable 0x1805CF0)'),
+    (0x8ABAE0, 0x56, 'popup: the items copied into the request\'s vector (+0x238 data, +0x240 capacity, +0x248 size)'),
+    (0x8ABB49, 0x4E, 'popup: type 6, the cursor from the screen\'s outfit (+0x7A0) at request +0x148'),
+    (0x8ABBFE, 0x17, 'popup: 0x119C600(system, out, type, request at rbp+0xE0)'),
+    (0x8AD560, 0x55, 'the mission-default lambda\'s call: screen +0x798 / +0x7A0 / +0x818, GS +0x6E94, 0x7E2EB0'),
+    (0x8AD410, 0x16, 'its _Copy: vtable and the captured screen'),
+    (0x8AD780, 0x16, 'its _Move'),
+    (0x089950, 0x20, 'the popup item\'s copy constructor (vector, dst, src)'),
+    (0x0B91D0, 0x23, 'the item vector\'s reserve (vector, capacity)'),
+    (0x03D450, 0x18, 'std::wstring::assign(ptr, len)'),
+    (0x7E2EB0, 0x1E, 'the popup closed (the lambdas\' tail)'),
+    (0x8BDE80, 0x61, 'the HQ 3D view rebuilt (player, class, outfit): message 3'),
+)
+
+# The five stock items' std::function vtables: (vtable rva, its _Do_call) in the popup's order (outfit -1, 2, 3, 1, 0).
+ITEM_VTABLES: tuple[tuple[int, int, int], ...] = (
+    (0x1805CF0, 0x8AD560, -1), (0x1805D28, 0x8AD5C0, 2), (0x1805D60, 0x8AD620, 3), (0x1805D98, 0x8AD680, 1),
+    (0x1805DD0, 0x8AD6E0, 0),
+)
+# The HQ / room 3D view (UiHQ_3DModelView): its vtable and OnMessage, the slot the menu path hook chains (its player at
+# +0x2AC while it asks 0xE3420 at 0x93B426 / 0x93BD03, both inside OnMessage).
+VIEW_VTABLE, VIEW_SLOT_MESSAGE, VIEW_ONMESSAGE = 0x180FA60, 3, 0x93B320
+# rel32 calls the hooks redirect: (call site, the callee it must hold)
+CALLS: tuple[tuple[int, int], ...] = (
+    (0x591234, 0x5A3F90), (0x59145B, 0x5A3F90), (0x5A3FFC, 0x0E34E0), (0x59DD27, 0x0E34E0), (0x59DE91, 0x0D8730),
+    (0x591219, 0x595960), (0x9393D3, 0x93B320), (0x93B426, 0x0E3420), (0x93BD03, 0x0E3420), (0x8ABC10, 0x119C600),
+)
+
+
+def render(img: bytes) -> str:
+    lines = ['// Generated by tools/outfit41_sigs.py from EDF.dll 0x678CCB46: do not edit. (outfit41.cpp CheckCode)']
+    for i, (rva, size, what) in enumerate(SIGNATURES):
+        data = ','.join(f'0x{b:02X}' for b in img[rva:rva + size])
+        lines.append(f'// {what}')
+        lines.append(f'constexpr unsigned char kSig{i}[]={{{data}}};')
+    lines.append('constexpr Signature kSignatures[]={')
+    lines += [f'    {{0x{rva:X},kSig{i},sizeof(kSig{i})}},' for i, (rva, _, _) in enumerate(SIGNATURES)]
+    lines.append('};')
+    return '\n'.join(lines) + '\n'
+
+
+def main(argv: list[str]) -> int:
+    import gamedir
+    path = argv[1] if len(argv) > 1 else os.path.join(gamedir.find_or_dev(), 'EDF.dll')
+    _, img = room_preview_sigs.image(path)
+    with open(INC, 'w', encoding='utf-8', newline='\n') as f:
+        f.write(render(img))
+    print(f'wrote {os.path.normpath(INC)}: {len(SIGNATURES)} signatures')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))

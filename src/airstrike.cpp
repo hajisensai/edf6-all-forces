@@ -16,6 +16,12 @@
 //    are redirected) every weapon table row named EDF6VC_CALL_* gets the owned bit, as that step gives a
 //    DLC weapon its: NEW and 0 stars the first time, stars left alone after. Before it, so its "equipped
 //    but not owned: back to the default weapon" pass keeps them on the soldiers that carry them.
+//    The script's entry alone also marks / moves the mission pack's save (edf5campaign.cpp MigrateMissionPackSave):
+//    MAINSCRIPT calls UnlockDownloadContents only after SetMode and a LoadSaveData_ModeSelect that succeeded
+//    (MAINSCRIPT.AS 363, 852, 1691, 1801, 1851, 1889, 1913), so GS+0x57A4 is the new mode's save (read whole by
+//    0x7BE970, or the reset template when it has no file yet) and GS+0x38 that mode. The call at 0xDC348 is the
+//    reset's (0xDB580 bit 8, via 0xDB920 -> 0xDC170), which runs after bit 4 has put the template in GS+0x57A4 and,
+//    inside SetMode (0xDC4B8), before 0xDC4C5 sets GS+0x38: the old mode then, a save that is not its.
 //  - The thrown drones (tools/call_weapons.py: EDF6VC_CALL_THROW_*, Patroller clones in the Robot Bomb list, told
 //    apart by their AmmoHitSizeAdjust's bits, kThrows): the Weapon_Sub's shot (its vtable slot 17, called with the
 //    bullet it just made, 0x697DDD) of one of ours, a BombBullet01, is kept (bombs[]); at that bomb's update
@@ -471,29 +477,42 @@ Granted GrantCalls(unsigned char* gs,bool ported) noexcept {
     return out;
 }
 
-void __fastcall UnlockDlcHook(unsigned char* gs) {
+void Grant(unsigned char* gs) noexcept {
     __try {
         const bool ported=Cfg().portedWeaponsUnlocked;
         const Granted granted=GrantCalls(gs,ported);
         if(granted.calls>0)Log("CALLS %d call weapons owned now",granted.calls);
         if(ported)Log("PORTED weapons unlocked: %d owned now%s",granted.ported,granted.calls<0 ? " (no weapon table yet)" : "");
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("CALLS granting failed");}
+}
+// 0xDC348: the reset's (see the file comment): the call weapons only.
+void __fastcall UnlockDlcHook(unsigned char* gs) {
+    Grant(gs);
+    reinterpret_cast<UnlockFn>(image+kUnlockDlc)(gs);
+}
+// 0x70FF87: the script's UnlockDownloadContents, right after a mode's save was loaded: that save first.
+void __fastcall ScriptUnlockDlcHook(unsigned char* gs) {
+    __try { MigrateMissionPackSave(gs); } __except(EXCEPTION_EXECUTE_HANDLER){Log("PACK save: moving the rows failed");}
+    Grant(gs);
     reinterpret_cast<UnlockFn>(image+kUnlockDlc)(gs);
 }
 
-// Both entries of 0xDC550 redirected to UnlockDlcHook; whether both are.
-bool InstallOwnership() noexcept {
+// Both entries of 0xDC550 redirected (0xDC348 to UnlockDlcHook, 0x70FF87 to ScriptUnlockDlcHook); whether both are.
+// `script`: whether the script's is (the mission packs' save hook).
+bool InstallOwnership(bool& script) noexcept {
+    script=false;
     if(!Matches(kUnlockDlc,kUnlockDlcSig,sizeof(kUnlockDlcSig)) || !Matches(kUnlockDlcJump-7,kUnlockThunkSig,sizeof(kUnlockThunkSig))) {
         Log("CALLS ownership: profile mismatch");
         return false;
     }
     bool ok=true;
     const unsigned sites[]={kUnlockDlcCall,kUnlockDlcJump};
-    for(const unsigned site:sites) {
+    void* const hooks[]={reinterpret_cast<void*>(&UnlockDlcHook),reinterpret_cast<void*>(&ScriptUnlockDlcHook)};
+    for(unsigned i=0;i<2;++i) {
         bool changed=false;
-        if(RedirectCall(image+site,image+kUnlockDlc,reinterpret_cast<void*>(&UnlockDlcHook),changed))continue;
+        if(RedirectCall(image+sites[i],image+kUnlockDlc,hooks[i],changed)){script=script || sites[i]==kUnlockDlcJump;continue;}
         ok=false;
-        Log("CALLS ownership: %s at %X",changed ? "half patched" : "not patched",site);
+        Log("CALLS ownership: %s at %X",changed ? "half patched" : "not patched",sites[i]);
     }
     return ok;
 }
@@ -604,7 +623,9 @@ bool InstallAirstrikes() noexcept {
     CheckCallTable();
     __try {
         bool calls=false;
-        const bool owned=InstallOwnership();
+        bool script=false;
+        const bool owned=InstallOwnership(script);
+        SetMissionPackSaveHook(script);   // a mission pack is owned only while its saves are marked (edf5campaign.cpp Ours)
         if(Matches(kIfcStart,kIfcStartSig,sizeof(kIfcStartSig)) && Matches(kRadioCall,kRadioCallSig,sizeof(kRadioCallSig))) {
             bool changed=false;
             calls=RedirectCall(image+kRadioCall,image+kIfcStart,reinterpret_cast<void*>(&RadioStartHook),changed);
@@ -614,7 +635,7 @@ bool InstallAirstrikes() noexcept {
         // update vtable untouched so their original payload/timeline cannot be suppressed.
         const bool throws=InstallThrows();
         const bool pickSend=calls && InstallPickSend();
-        Log("HOOK airstrikes calls=%d owned=%d stockBombers=native throws=%d pickSend=%d",calls,owned,throws,pickSend);
+        Log("HOOK airstrikes calls=%d owned=%d packSaves=%d stockBombers=native throws=%d pickSend=%d",calls,owned,script,throws,pickSend);
         return calls || throws;
     } __except(FaultLog("AIRSTRIKE install",GetExceptionInformation())){return false;}
 }

@@ -361,7 +361,12 @@ void* CreateFromPath(const float* matrix,const wchar_t* sgoPath) noexcept {
     alignas(16) unsigned char context[0x30]={};
     const std::uint64_t vt=reinterpret_cast<std::uint64_t>(image+kCreateContextVtable);
     std::memcpy(context,&vt,8);
-    return reinterpret_cast<CreateFromPathFn>(image+kCreateFromPath)(manager,matrix,sgoPath,context);
+    // The SceneObject constructor 0x1189C00 loads the four rows with MOVAPS (1189CB0..1189CCE; the native tests
+    // support_soldier_create_native / create_jet_native fault on a misaligned one). Callers build plain float[16]
+    // locals (edf41mother.cpp, edf41mother401.cpp), which C++ aligns to 4 only: copy, as CreateJet and the soldiers do.
+    alignas(16) float nativeMatrix[16];
+    std::memcpy(nativeMatrix,matrix,sizeof(nativeMatrix));
+    return reinterpret_cast<CreateFromPathFn>(image+kCreateFromPath)(manager,nativeMatrix,sgoPath,context);
 }
 void DeleteObject(void* object) noexcept {
     const char* o=static_cast<const char*>(object);

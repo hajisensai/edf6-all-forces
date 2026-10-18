@@ -5,6 +5,7 @@
 #include "edf/host.h"
 #include <cstdio>
 #include <cstdlib>
+#include <new>
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -67,6 +68,18 @@ void BuildBoundary() {
     void* page=VirtualAlloc(nullptr,n,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE);Check(page!=nullptr,"private ABI adapter allocated");
     std::memcpy(page,code,n);FlushInstructionCache(GetCurrentProcess(),page,n);boundary=reinterpret_cast<ConstructorBoundary>(page);
 }
+// A Plan where a real one may be: alignof(Plan) is 8, so a Plan inside another object or a heap block can start at
+// 8 mod 16. Since PR #100 (cefc19e9, Unit gained a uint64 `variant`) a Unit is 112 bytes and Unit.matrix sits at
+// 32+112*i: a Plan placed at 16 has every matrix aligned by luck, one at 8 mod 16 has none. The fixture used the lucky
+// placement until then and its negative control (the native MOVAPS faults on a raw Unit matrix) stopped faulting;
+// this placement makes every Unit matrix misaligned, the case the production copy exists for.
+static_assert(alignof(support_net::Plan)==8 && sizeof(support_net::Unit)%16==0 &&
+              (8+offsetof(support_net::Plan,units)+offsetof(support_net::Unit,matrix))%16==8,
+              "Plan/Unit layout changed: recheck which placement leaves Unit.matrix misaligned");
+support_net::Plan& MisalignedPlan() {
+    alignas(16) static unsigned char storage[sizeof(support_net::Plan)+8];
+    return *new(storage+8) support_net::Plan{};
+}
 unsigned char* __fastcall NativeCreateBoundary(void* mgr,const float* matrix,const wchar_t* path,support_native::InitParam* init) {
     ++calls;seenMatrix=matrix;
     Check(mgr==manager,"native CreateObject manager retained");
@@ -83,13 +96,13 @@ int wmain(int argc,wchar_t** argv) {
     image=edf::IdentifyImage(LoadLibraryExW(argv[1],nullptr,DONT_RESOLVE_DLL_REFERENCES));
     Check(image!=nullptr,"supported private EDF.dll mapping");BuildBoundary();
     void* handler=AddVectoredExceptionHandler(1,&AlignmentFault);Check(handler!=nullptr,"expected native fault recorder installed");
-    alignas(16) support_net::Plan plan{};
+    support_net::Plan& plan=MisalignedPlan();
     static_assert(offsetof(support_net::Unit,matrix)==8);
     for(unsigned i=0;i<support_net::kMaxUnits;++i) {
         float* matrix=plan.units[i].matrix;
         matrix[0]=matrix[5]=matrix[10]=matrix[15]=1;matrix[12]=float(i*3);matrix[13]=2;matrix[14]=-5;
         const unsigned residue=static_cast<unsigned>(reinterpret_cast<std::uintptr_t>(matrix)&15u);
-        Check(residue==4 || residue==12,"real Plan matrix layout is not SIMD aligned");
+        Check(residue==8,"fixture Plan (alignof 8, at 8 mod 16) leaves every Unit matrix off SIMD alignment");
         support_native::InitParam init{image+support_native::kInitVtable,{}};
         const int previousFaults=faults;
         boundary(object,matrix,&init,manager);

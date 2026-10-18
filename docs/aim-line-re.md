@@ -73,4 +73,7 @@
   机组还在走去登机的支援机，红线都一直画着。
 - 修复：空座位一律隐藏（谁驾驶都一样，空座位上没有人需要这条线）；`npcDriven` 参数随之删除。玩家坐上来时仍按「隐藏 / 恢复」
   两条处理（`SetLine` 记着段数，`EnsurePoints` 后写回）。离线：`tools/aim_line_want_check.cpp` 新增空座位与旧规则复现两条。
-- 已知限制：每辆载具最多记 12 条被隐藏的线（`crew.cpp` `kLinesPerVehicle`），超出的线保持原样。
+- 已知限制：每辆载具最多记 32 条被隐藏的线（`crew.cpp` `kLinesPerVehicle`，空座位一律隐藏后由 12 提到 32）。`AimLines`
+  最多走 16 个座位 × 每座 16 件武器，理论上能超过 32：超出的线不清零、保持原样（照常画），只在 `State.lines` 固定数组里找空位，
+  不越界；每辆载具第一次没有空位时记一行 `AIMLINE v=…: 32 lines already hidden …`（`State.linesFullLogged`，换任务 / 换载具槽清零）。
+  被隐藏的线段数总记在表里，不会有「清了零却没记」的线。

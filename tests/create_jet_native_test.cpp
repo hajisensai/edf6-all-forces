@@ -76,11 +76,11 @@ int wmain(int argc,wchar_t** argv) {
     DWORD old=0;Check(VirtualProtect(image+jet::kObjectMgr,8,PAGE_READWRITE,&old)!=0,"private object manager slot writable");
     Put<void*>(image,jet::kObjectMgr,manager);
     void* handler=AddVectoredExceptionHandler(1,&AlignmentFault);Check(handler!=nullptr,"native alignment fault recorder installed");
-    alignas(16) support_net::Plan plan{};
+    support_net::Plan& plan=MisalignedPlan();   // the shared fixture's: every Unit matrix at 8 mod 16
     for(unsigned i=0;i<support_net::kMaxUnits;++i) {
         float* matrix=plan.units[i].matrix;
         matrix[0]=matrix[5]=matrix[10]=matrix[15]=1;matrix[12]=static_cast<float>(i*3);matrix[13]=2;matrix[14]=-5;
-        Check((reinterpret_cast<std::uintptr_t>(matrix)&15u)!=0,"real support-plan matrix is not SIMD aligned");
+        Check((reinterpret_cast<std::uintptr_t>(matrix)&15u)==8,"fixture support-plan matrix is off SIMD alignment");
         support_native::InitParam init{image+support_native::kInitVtable,{}};const int before=faults;
         boundary(object,matrix,&init,manager);
         Check(faults==before+1 && faultRva==0x1189CB0,"negative control faults at the original native MOVAPS source load");

@@ -9,6 +9,10 @@ target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41mother401.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41deiroi.cpp)
+# Every class in every seat (ini AllClassesRide; its own line, as above).
+target_sources(EDF6VehicleCrew PRIVATE src/allclass.cpp)
+# CRI File System's loader pool sized for the plugin's content (its own line, as above).
+target_sources(EDF6VehicleCrew PRIVATE src/fsbudget.cpp)
 # The ground vehicles' ram (its own line, as above).
 target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 # The gun stabilizer (its own line, as the Nix's).
@@ -85,6 +89,10 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_variants.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 target_sources(EDF6VehicleCrew PRIVATE src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
+# More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
+# word (src/edf5online_room.h; the creation and the table: src/edf5online.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/edf5online_room.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -505,6 +513,10 @@ add_test(NAME log_once COMMAND log_once_test)
 add_executable(debug_spawn_test tests/debug_spawn_test.cpp)
 target_compile_options(debug_spawn_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME debug_spawn COMMAND debug_spawn_test)
+# The test range's 「摆放」 panel on the M map (src/range_place.h) offline.
+add_executable(range_place_test tests/range_place_test.cpp)
+target_compile_options(range_place_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME range_place COMMAND range_place_test)
 add_executable(sightzoom_test tests/sightzoom_test.cpp)
 target_link_libraries(sightzoom_test PRIVATE edf6common)
 target_compile_options(sightzoom_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -556,6 +568,11 @@ add_test(NAME room_menu COMMAND room_menu_test)
 add_executable(room_preview_test tests/room_preview_test.cpp)
 target_compile_options(room_preview_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_preview COMMAND room_preview_test)
+# The EDF4.1 outfit's pure logic (src/outfit41_logic.h: its files, the stored choice, the popup's layout).
+add_executable(outfit41_test tests/outfit41_test.cpp)
+target_include_directories(outfit41_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(outfit41_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME outfit41 COMMAND outfit41_test)
 # The room / HQ loadout screen's pure side: element names, keyboard / pad mapping, the input gate, row looks, texts,
 # catalog units, preview and save pairing (src/room_ui_logic.h; src/room_ui.cpp draws with it).
 add_executable(room_ui_test tests/room_ui_test.cpp)
@@ -669,6 +686,10 @@ set_tests_properties(menu_preview PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The preview's signatures, vtable slots and tables against the game's EDF.dll / Root.cpk (read only; skipped without).
 add_test(NAME room_preview_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_preview_native_audit.py")
 set_tests_properties(room_preview_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The EDF4.1 outfit's signatures, call sites and vtables against the game's EDF.dll, its files against the shipped
+# registry and the plugin's paths (read only; the EDF.dll / Root.cpk parts skipped without the game).
+add_test(NAME outfit41_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/outfit41_native_audit.py")
+set_tests_properties(outfit41_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The slim generator install copies for the menu and the room pre-sync (tools/loadout_generator.py, build_release.py).
 add_test(NAME slim_generator COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/slim_generator_test.py")
 set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -731,6 +752,8 @@ set_tests_properties(doll_follow_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=u
 # The plugin's launched drones fly with no one aboard; crewed aircraft never launched empty (src/jet_internal.h Unmanned).
 add_test(NAME unmanned_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/unmanned_launch_guard.py")
 set_tests_properties(unmanned_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME npc_car_aim_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_car_aim_guard.py")
+set_tests_properties(npc_car_aim_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # Proportional navigation (src/pn.h) against the stock pure pursuit at the same turn limit.
 add_executable(pn_test tests/pn_test.cpp)
 target_compile_options(pn_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -798,7 +821,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test room_ui_test loadout_writer_test room_coop_capability_test room_sync_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test room_ui_test loadout_writer_test room_coop_capability_test room_sync_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
@@ -1066,6 +1089,12 @@ add_test(NAME route_guide_partial_install COMMAND route_guide_native_test "${EDF
 set_tests_properties(route_guide_native route_guide_foreign_site route_guide_partial_install PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(edf5_campaign_native edf5_campaign_partial_install edf5_campaign_chained edf5_campaign_foreign_site ported_missions_unlock_native
                      PROPERTIES SKIP_RETURN_CODE 77)
+# The mission packs' save marker through EDF.dll's own reset / load-apply / checksum / seen writers (private mapping).
+add_executable(mission_pack_save_native_test EXCLUDE_FROM_ALL tests/mission_pack_save_native_test.cpp)
+target_compile_options(mission_pack_save_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks mission_pack_save_native_test)
+add_test(NAME mission_pack_save_native COMMAND mission_pack_save_native_test "${EDF6_NATIVE_DLL}")
+set_tests_properties(mission_pack_save_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME edf5_campaign_lifecycle COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf5_campaign_lifecycle.py")
 
 add_executable(npc_gunners_online_test EXCLUDE_FROM_ALL tests/npc_gunners_online_test.cpp src/ground_navigation.cpp)
@@ -1078,7 +1107,8 @@ add_test(NAME npc_gunners_online COMMAND npc_gunners_online_test)
 # EDF6Autopilot: a test-only plugin for background measurement runs (tests/autopilot/autopilot.cpp, driven by
 # tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
 # cmake --build build --target EDF6Autopilot
-add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp tests/autopilot/airdrop_probe.cpp)
+add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp tests/autopilot/airdrop_probe.cpp
+            tests/autopilot/wdenergy_probe.cpp)
 target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
 target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
 target_include_directories(EDF6Autopilot PRIVATE common)
@@ -1190,6 +1220,24 @@ target_include_directories(mission_crew_support_test PRIVATE src common)
 target_compile_options(mission_crew_support_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks mission_crew_support_test)
 add_test(NAME mission_crew_support COMMAND mission_crew_support_test)
+# Every class in every seat (src/allclass.cpp, ini AllClassesRide; docs/all-classes-ride-re.md): the real hooks on a
+# private image, the source guard, the native facts on EDF.dll and the Root.cpk census behind them.
+add_executable(allclass_test EXCLUDE_FROM_ALL tests/allclass_test.cpp)
+target_link_libraries(allclass_test PRIVATE edf6common)
+target_include_directories(allclass_test PRIVATE src common)
+target_compile_options(allclass_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks allclass_test)
+add_test(NAME allclass COMMAND allclass_test)
+add_test(NAME allclass_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_guard.py")
+set_tests_properties(allclass_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME allclass_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(allclass_native PROPERTIES SKIP_RETURN_CODE 77)
+# CRI File System's loader pool (src/fsbudget.cpp; docs/cri-fs-loaders-re.md): the init sites, the config field and the
+# crash a run-out pool led to, on a real EDF.dll.
+add_test(NAME fsbudget_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/fsbudget_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(fsbudget_native PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME allclass_census COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_census_check.py" "${EDF6_GAME_DIR}")
+set_tests_properties(allclass_census PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 
 add_test(NAME mission_crew_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/mission_crew_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(mission_crew_native PROPERTIES SKIP_RETURN_CODE 77)
@@ -1391,6 +1439,12 @@ add_executable(mission_watch_test tests/mission_watch_test.cpp)
 target_include_directories(mission_watch_test PRIVATE common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(mission_watch_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME mission_watch COMMAND mission_watch_test)
+# More than four in an EDF5 / EDF4.1 script mission online: EDF6Coop's version and hook shape, the room word, and the
+# spawn layout both plugins share to the bit (src/edf5online_room.h, src/spawn_layout.h). No game.
+add_executable(edf5_online_room_test EXCLUDE_FROM_ALL tests/edf5_online_room_test.cpp)
+target_compile_options(edf5_online_room_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks edf5_online_room_test)
+add_test(NAME edf5_online_room COMMAND edf5_online_room_test)
 # The EDF5 scripts' player natives online (src/edf5online.cpp) on a private EDF.dll mapping.
 add_executable(edf5_online_native_test EXCLUDE_FROM_ALL tests/edf5_online_native_test.cpp)
 target_include_directories(edf5_online_native_test PRIVATE src common)
@@ -1399,7 +1453,8 @@ target_compile_options(edf5_online_native_test PRIVATE /W4 /WX /utf-8 /permissiv
 add_dependencies(offline_checks edf5_online_native_test)
 add_test(NAME edf5_online_native COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}")
 add_test(NAME edf5_online_foreign_build COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}" foreign)
-set_tests_properties(edf5_online_native edf5_online_foreign_build PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME edf5_online_rollback COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}" rollback)
+set_tests_properties(edf5_online_native edf5_online_foreign_build edf5_online_rollback PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(fp_ride_lifecycle_test EXCLUDE_FROM_ALL tests/fp_ride_lifecycle_test.cpp)
 target_sources(fp_ride_lifecycle_test PRIVATE src/fp_skin_gpu.cpp)
 target_include_directories(fp_ride_lifecycle_test PRIVATE src common)

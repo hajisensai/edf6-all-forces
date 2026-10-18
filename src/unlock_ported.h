@@ -19,6 +19,13 @@ constexpr bool StoryPack(int id,int edf5,int edf41) noexcept {
 static_assert(StoryPack(3,3,0) && StoryPack(5,3,0) && !StoryPack(6,3,0) && !StoryPack(0,3,7) && !StoryPack(2,3,7));
 static_assert(StoryPack(7,3,7) && StoryPack(9,3,7) && !StoryPack(10,3,7) && !StoryPack(6,3,7) && !StoryPack(3,0,0));
 
+// One of EDF4.1's three packs (EDF41Content .. +2; 0: not installed): its HQ shows 4.1's background
+// (src/edf5campaign.cpp InstallEdf41MenuBg, tools/edf41_menu_bg.py).
+constexpr bool Edf41Pack(int id,int edf41) noexcept {
+    return edf41>0 && id>=edf41 && id<edf41+kPacks41;
+}
+static_assert(Edf41Pack(7,7) && Edf41Pack(9,7) && !Edf41Pack(10,7) && !Edf41Pack(6,7) && !Edf41Pack(0,0) && !Edf41Pack(3,0));
+
 // A row of the mission select's list (0x8A1530, built at 0x8A2160..0x8A241A): 0x14 bytes. +0 the list row, +4 the
 // shown number (field 4), +8 the state, +0xC field 5 (both filled while the scan reaches the row), +0x10 a byte.
 // States: 0 cleared, 1 open, 2 open (a branch row: field 5 is 1), 3 locked but shown, 4 locked and hidden.

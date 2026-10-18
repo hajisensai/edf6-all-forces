@@ -78,19 +78,23 @@ void Versions() {
     using crew::support_net::kCapabilities;using crew::support_net::kCapSoldierVariants;using crew::support_net::kCapAirborneAir;
     using crew::support_net::kCapTransports;using crew::support_net::kCapLoadout;using crew::support_net::kExtVariants;
     using crew::support_net::kExtSeaRescue;using crew::support_net::kExtensions;using crew::support_net::kFeatures;
-    using crew::support_net::Features;using crew::support_net::FeatureExt;using crew::support_net::kExtRescueChannel;
+    using crew::support_net::Features;using crew::support_net::FeatureExt;using crew::support_net::kExtRescueChannel;using crew::support_net::kExtOutfit41;
+    using crew::support_net::kExtBvmPlayers;
     // Feature words (support_protocol.h Features): the capability bits low, the extension bits above them. The rescue and
     // its own channel (2026-10-10) came after #100's build, the newest that announces nothing.
     const std::uint32_t rescueBit=FeatureExt(kExtSeaRescue|kExtRescueChannel);
+    // ... and the EDF4.1 outfit and the EDF5 / EDF4.1 missions' players 5.. (2026-10-18) after them: #100's build lacks them
+    // as well.
+    const std::uint32_t laterBits=rescueBit|FeatureExt(kExtOutfit41|kExtBvmPlayers);
     State s;s.online=true;s.mine=kFeatures;s.silentHost=Features(kCapabilities,kExtVariants);
     Check(Compare(s).kind==Kind::none,"a guest before the welcome: nothing said");
     s.hostKnown=true;s.hostCaps=kFeatures;
     Check(Compare(s).kind==Kind::none,"the same build: nothing said");
     s.hostCaps=0;
     Notice n=Compare(s);
-    Check(n.kind==Kind::hostOlder && n.missing==rescueBit,"a host that announces nothing (#100's build): older, the sea rescue and its channel named");
+    Check(n.kind==Kind::hostOlder && n.missing==laterBits,"a host that announces nothing (#100's build): older, the sea rescue, its channel and the EDF4.1 outfit named");
     s.hostCaps=Features(kCapSoldierVariants,0);n=Compare(s);
-    Check(n.kind==Kind::hostOlder && n.missing==(kCapAirborneAir|kCapTransports|kCapLoadout|FeatureExt(kExtVariants)|rescueBit),
+    Check(n.kind==Kind::hostOlder && n.missing==(kCapAirborneAir|kCapTransports|kCapLoadout|FeatureExt(kExtVariants)|laterBits),
           "an older host: what it lacks named, capabilities and extensions alike");
     Check((Features(kCapabilities,0)&rescueBit)==0 && (kFeatures&rescueBit) && (rescueBit&kCapTransports)==0,
           "the rescue's bit is none of #100's capabilities (kCapTransports 4 / kCapLoadout 8 keep their meaning)");

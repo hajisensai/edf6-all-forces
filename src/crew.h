@@ -12,6 +12,7 @@
 #include "sightzoom.h"
 #include "stores.h"
 #include "edf/seat.h"
+#include "mission_packs.h"
 
 namespace crew {
 extern unsigned char* image;
@@ -250,6 +251,7 @@ struct Config {
     bool fpArmIk=true;              // ...the arms posed for the first person: shoulders beside and below the eye
     float fpHoldArc=60.0f;          // ...a free hand on the other hand's weapon slides round it this far from below, deg
     float fpWristMax=30.0f;         // ...and its forearm turns about the wrist at most this much, deg
+    bool fpNativeElbow=true;        // ...the elbow bends toward where the animation has it (0: out and down, the old pole)
     bool fpFit=true;                // ...a bulky or long weapon held further off, a shield out to the side
     bool fpCulling=true;            // ...the arms and weapon handed to Umbra around the eye (never culled)
     bool fpMotion=true;             // ...the arms and weapon sway, bob, kick, dip at a reload, a switch, a sprint, a roll
@@ -270,6 +272,11 @@ struct Config {
     int debugSpawnSpawnKey=0x78;    // ...spawn the row picked (F9)
     float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
     float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
+    // The M map's 「摆放」 panel in the test range's mission (range_place.h; the debug spawn tool's catalog and making,
+    // whatever DebugSpawn says): on by default; offline only. RangePlaceAll: every row preloaded, the heavy EDF4.1 ones
+    // too (Entry::preload false: another 17 MB model each); off: those listed as not preloaded.
+    bool rangePlace=true;
+    bool rangePlaceAll=false;
     bool roomLoadout=true;          // the room / HQ support loadout menu (room_ui.cpp; 0 at load: nothing installed, both
                                     // screens untouched; turned 0 later: both screens passed through, nothing read or drawn)
     bool roomPreSync=true;          // ...and the room pre-sync with it (room_sync.h: generate what the host lists; 0: none)
@@ -277,6 +284,8 @@ struct Config {
     int roomLoadoutButton=0xC0;     // ...and pad combination (XInput button bits, all held: 0xC0 L3 + R3; 0 none)
     bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,
                                     // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
+    bool allClassesRide=true;       // every class may take every seat a class may take (allclass.cpp: each seat's class
+                                    // mask widened as the vehicle is made, a bench pose for a rider whose CAS lacks the seat's)
     bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
     int seatNextKey=0x46;           // ...the next free seat ('F'; a Windows virtual-key code, 0: none)
     bool seatNumberKeys=true;       // ...the number keys 1-9 pick that seat (an NPC in it changes places with the player)
@@ -349,9 +358,13 @@ struct Config {
     bool edf41Net=true;             // the 4.1 classes' parts / spawns get the game's child identity, the host's decisions travel to the guests
     bool edf41NetMirror=false;      // development only, offline: a second UfoRobo follows the first through the game's own stream code (a guest copy)
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
-    int edf5CampaignContent=0;       // the EDF5 mission packs' first content id (edf5campaign.cpp; 0 = none installed): owned like a DLC
-    int testRangeContent=0;          // the test range mission pack's content id (offline and online modes; 0 = not installed): owned the same way
-    int edf41Content=0;              // the first of the EDF4.1 packs' content ids (the story; its Mission Pack 1 and 2 are +1, +2; offline and online modes; 0 = not installed): owned the same way
+    // The mission packs' content ids are fixed (mission_packs.h kEdf5 / kRange / kEdf41, tools/make_edf5_campaign.py
+    // CONTENT); the ini says which are installed. Any other value is an older installer's (an id that depended on the
+    // mods installed, 2026-10-15): logged and taken as 0 until the installer runs again (plugin.cpp LoadConfig).
+    int edf5CampaignContent=0;       // the EDF5 mission packs' first content id, 65 (edf5campaign.cpp; 0 = none installed): owned like a DLC
+    int testRangeContent=0;          // the test range mission pack's content id, 68 (offline and online modes; 0 = not installed): owned the same way
+    int edf41Content=0;              // the first of the EDF4.1 packs' content ids, 69 (the story; its Mission Pack 1 and 2 are +1, +2; offline and online modes; 0 = not installed): owned the same way
+    packs::Table missionPacks;       // EDF6VehicleCrew.packs.ini: each installed pack's identity and placeholder rows (mission_packs.h)
     // The ported content unlocked (unlock_ported.h; both off by default: a shared package keeps everyone's progress):
     bool portedMissionsUnlocked=false;  // every mission of the EDF5 / EDF4.1 packs selectable (edf5campaign.cpp InstallPortedMissions), live
     bool portedWeaponsUnlocked=false;   // every ported weapon owned at the next save load (airstrike.cpp UnlockDlcHook); never taken back
@@ -539,6 +552,12 @@ bool InstallEdf41Robo() noexcept;      // edf41robo.cpp: EDF4.1's UfoRobo (ini E
 bool InstallEdf41Mother401() noexcept;   // edf41mother401.cpp
 // edf41deiroi.cpp: a falling Deiroi's landing ray, cast by EDF6 against a null Havok world (crash in EDF4.1's M412), goes through the map ray.
 bool InstallEdf41Deiroi() noexcept;
+// allclass.cpp: every class in every seat (ini AllClassesRide): the seat build's class mask widened, the ride pose's fallback.
+bool InstallAllClassesRide() noexcept;
+// fsbudget.cpp: CRI File System's loader pool (num_loaders: 130 as the game builds it, 0x60 + its caller's 0x22) raised
+// by the model archives the spawn catalog can keep open (src/spawn_catalog_archives.h) before the library starts, so the
+// test range's place panel catalog does not run it out. The other pools do not grow with open archives (fsbudget.cpp).
+bool InstallFsLoaderBudget() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
@@ -557,6 +576,12 @@ bool InstallJetSound() noexcept;
 bool InstallGlyphLock() noexcept;
 bool InstallEdf5Campaign() noexcept;
 bool InstallPortedMissions() noexcept;   // PortedMissionsUnlocked: the packs' mission select (edf5campaign.cpp)
+void SetMissionPackSaveHook(bool ready) noexcept;   // the save-load hook is in (airstrike.cpp): packs with Legacy rows owned
+void MigrateMissionPackSave(unsigned char* gs) noexcept;   // a pack's loaded save moved to the rows now, once (edf5campaign.cpp)
+bool InstallEdf41MenuBg() noexcept;      // EDF4.1's HQ background in the 4.1 packs (edf5campaign.cpp)
+// The current mode's content id (0..2 EDF6's, then the installed packs': Cfg().edf5CampaignContent, edf41Content ...), -1
+// when there is none to read (edf5campaign.cpp, as the mission select reads it). Any thread: only reads.
+int GameContentId() noexcept;
 // EDF5's compiled mission scripts online: the BVM executor's PreloadPlayerResource and CreatePlayer given their online
 // half (edf5online.cpp). Edf5BvmOnlinePlayers: the patched creation loop's count.
 bool InstallEdf5Online() noexcept;
@@ -565,6 +590,13 @@ std::uint32_t Edf5BvmOnlinePlayers() noexcept;
 bool Edf5BvmOnlinePlayerArgs(int index,int* pad,int* split) noexcept;
 void Edf5BvmOnlinePlayerMade(int index,const void* made) noexcept;
 void ResetEdf5Online() noexcept;
+// More than the BVM loop's four online (edf5online_room.cpp, edf5online_room.h): EDF6Coop's BvmPlayerTableHooks in
+// place here; every one of the mission's `count` players' machines said it creates them too (EDF6Coop member attribute
+// EDF6X_BVMPLAYERS; false with the reason in `why`); this machine's own word told and the others' watched (the room's
+// frame, room_ui.cpp).
+bool Edf5CoopBvmTableHooked() noexcept;
+bool Edf5RoomAllowsBvmPlayers(std::uint32_t count,char* why,std::size_t size) noexcept;
+void Edf5OnlineRoomTick() noexcept;
 void JetSound(unsigned char* vehicle) noexcept;
 void JetSoundTick() noexcept;
 float GameEffectVolume() noexcept;   // jetsound.cpp: the game's master volume times its effect volume (0..1)

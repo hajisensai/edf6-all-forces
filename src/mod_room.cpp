@@ -1,9 +1,16 @@
 // EOS performs the native game's SEARCH_TYPE range query before returning rooms.
 // Namespace that existing key, including Coop's reflected family. Vanilla's
 // invitation check also rejects the namespaced value before joining/loading data.
+// A room on one of our mission packs (DLC 65..71, mission_packs.h) also carries the
+// pack's identity (AF_PACK): a guest checks it before the native JoinLobby, so a
+// different pack definition or a row this machine lacks is refused with a dialog
+// instead of a black screen or the wrong mission (docs/mod-room-isolation.md).
 #include "mod_room.h"
 #include "coop_extension_api.h"
+#include "mission_packs.h"
+#include "pack_notice.h"
 #include <Windows.h>
+#include <cstdio>
 #include <cstring>
 #include <cwchar>
 #include <atomic>
@@ -12,7 +19,9 @@ namespace crew {
 extern unsigned char* image;
 void Log(const char* format,...) noexcept;
 namespace {
-struct Data { int version; const char* key; std::int64_t value; int type; };
+// EOS_Lobby_AttributeData: the value a union (int64 for type 1, a UTF-8 string for type 3).
+struct Data { int version; const char* key; union { std::int64_t value; const char* text; }; int type; };
+constexpr int kInt64=1,kString=3;
 struct Attribute { int version; Data* data; int visibility; };
 struct Options { int version; const Data* data; int mode; };
 struct IndexOptions { int version; unsigned index; };
@@ -57,6 +66,10 @@ const wchar_t* CoopDependencyProblem() noexcept {
     const auto admission=reinterpret_cast<AdmissionReady>(resolveCoop("EDF6Coop_MissionAdmissionReady"));
     if(!admission || !resolveCoop("EDF6Coop_ResolveMissionPlayerPuid"))
         return L"EDF6Coop 缺少本版全军出击所需的任务准入与玩家身份接口。";
+    // The members' EDF4.1 outfits (outfit41.cpp) and the room pre-sync travel on its member attributes: without them the
+    // others would be shown in their stock outfits with no word said, so the room is refused with this reason instead.
+    if(!resolveCoop("EDF6CoopGetMemberAttributeApi"))
+        return L"EDF6Coop 缺少成员属性接口（各玩家的 4.1 外观等联机同步需要），版本过旧。";
     if(admission()!=1)return L"EDF6Coop 的任务准入保护尚未就绪，已阻止进入联机。";
     return nullptr;
 }
@@ -67,6 +80,8 @@ void ShowCoopDependencyProblem(const wchar_t* problem) noexcept {
 }
 using ShowDependencyProblem=void(*)(const wchar_t*) noexcept;
 ShowDependencyProblem showDependencyProblem=&ShowCoopDependencyProblem;
+using FindPack=const packs::Pack*(*)(std::int64_t) noexcept;
+FindPack findPack=&InstalledMissionPack;
 bool RequireCoop(const char* action,void* client,Callback cb) {
     const wchar_t* problem=CoopDependencyProblem();
     if(!problem)return true;
@@ -86,12 +101,35 @@ void CreateRoom(void* h,const void* o,void* client,Callback cb) {
     create(h,o,client,cb);
 }
 bool Type(const Data* d) noexcept {return d && d->key && d->type==1 && !std::strcmp(d->key,"SEARCH_TYPE");}
+bool Content(const Data* d) noexcept {return d && d->key && d->type==kInt64 && !std::strcmp(d->key,"DLC");}
+// The game publishes the room's content id (DLC, 0x749CF8); on one of our packs its identity goes with it, from this
+// machine's EDF6VehicleCrew.packs.ini. A later change of the room's pack publishes DLC again, and with it the line.
+int PublishContent(void* h,const Options* o) {
+    const int result=add(h,o);
+    const std::int64_t content=o->data->value;
+    if(result || !packs::Reserved(content))return result;
+    const packs::Pack* pack=findPack(content);
+    char line[packs::kLineSize]{};
+    if(!pack || !packs::Format(*pack,line)) {
+        Log("ROOM publish: content %lld is a mission pack this machine has not installed: no %s",
+            static_cast<long long>(content),packs::kAttribute);
+        return result;
+    }
+    // The game's own versions of both structures (its EOS SDK's), as it passed them for DLC.
+    Data identity{o->data->version,packs::kAttribute,{0},kString};
+    identity.text=line;
+    const Options options{o->version,&identity,o->mode};
+    const int published=add(h,&options);
+    Log("ROOM publish: %s=%s result=%d",packs::kAttribute,line,published);
+    return published;
+}
 int Add(void* h,const Options* o) {
+    if(o && Content(o->data))return PublishContent(h,o);
     if(!o || !Type(o->data))return add(h,o);
     // A durable marker survives DirectNet's persisted room attributes, whose
     // game-facing type may already have been decoded by another wrapper.
-    const Data profile{1,"AF_PROFILE",1,1};
-    const Options marker{2,&profile,0};
+    const Data profile{o->data->version,"AF_PROFILE",1,1};
+    const Options marker{o->version,&profile,0};
     const int marked=add(h,&marker);
     if(marked)return marked;
     Data d=*o->data;d.value=EncodeAllForcesRoom(d.value);
@@ -110,6 +148,59 @@ int CopyAttribute(void* h,const IndexOptions* o,Attribute** out) {
         (*out)->data->value=DecodeAllForcesRoom((*out)->data->value);
     return result;
 }
+// The room's mission pack against this machine's (mission_packs.h Admit): kOk for every room not on one of ours.
+// `details` an EOS lobby details handle (rawCopy reads it); reason/ids for the log.
+packs::Admission AdmitPack(void* details,std::int64_t& content,int& contentResult) {
+    Attribute* attr=nullptr;
+    const KeyOptions dlcKey{1,"DLC"};
+    contentResult=rawCopy(details,&dlcKey,&attr);
+    const bool numeric=contentResult==0 && attr && attr->data && attr->data->type==kInt64;
+    content=numeric ? attr->data->value : -1;
+    if(attr)release(attr);
+    packs::Admission a{};
+    if(!numeric) {   // the game publishes DLC with every room (0x749CF8): unreadable is no room to trust
+        a.verdict=packs::Verdict::kMalformed;
+        return a;
+    }
+    if(!packs::Reserved(content))return a;
+    attr=nullptr;
+    const KeyOptions lineKey{1,packs::kAttribute};
+    const int lineResult=rawCopy(details,&lineKey,&attr);
+    const char* line=lineResult==0 && attr && attr->data && attr->data->type==kString ? attr->data->text : nullptr;
+    a=packs::Admit(content,line,findPack(content));
+    if(attr)release(attr);
+    return a;
+}
+// The dialog for a room refused for its mission pack (mission_packs.h Explain), the same on every route: the EOS join
+// below and EDF6Coop's remembered / virtual rooms (EDF6AF_RoomPackCompatible). Shown on a thread of its own (the
+// caller may be EOS's tick thread), never twice at once; `repeatMs` keeps an unchanged refusal from coming back
+// sooner (EDF6Coop asks about its remembered room at each room search).
+void ExplainPackRefusal(std::int64_t content,bool unread,const packs::Admission& a,const packs::Pack* local,
+                        std::uint64_t repeatMs) noexcept {
+    wchar_t text[512]{};
+    if(unread || !packs::Explain(content,a,local,text,sizeof(text)/sizeof(text[0])))
+        swprintf_s(text,L"无法读取房间的任务包（内容编号）。\n\n请稍后重试，或请房主重新创建房间。");
+    char key[96]{};
+    std::snprintf(key,sizeof(key),"room-pack;%lld;%s;%s;%d",static_cast<long long>(content),
+                  unread ? "content-read-failed" : packs::Reason(a.verdict),a.host.id ? a.host.digest : "-",a.host.rows);
+    if(!notice::Post(key,L"全军出击：无法加入联机房间",text,repeatMs))
+        Log("ROOM join refused: the dialog for %s is already shown (not again)",key);
+}
+bool RoomPackAdmitted(void* details,void* client,Callback cb) {
+    std::int64_t content=-1;
+    int contentResult=0;
+    const packs::Admission a=AdmitPack(details,content,contentResult);
+    if(a.verdict==packs::Verdict::kOk)return true;
+    const bool unread=content<0;   // AdmitPack's -1: no numeric DLC
+    const packs::Pack* local=packs::Reserved(content) ? findPack(content) : nullptr;
+    Log("ROOM join refused: reason=%s content=%lld content_result=%d host=%s/%s/%d local=%s/%s/%d missing_here=%d first=%d",
+        unread ? "content-read-failed" : packs::Reason(a.verdict),static_cast<long long>(content),contentResult,
+        a.host.id ? a.host.tag : "-",a.host.id ? a.host.digest : "-",a.host.rows,local ? local->tag : "-",
+        local ? local->digest : "-",local ? local->rows : 0,a.missingHere,a.firstMissingHere);
+    Refuse(client,cb);
+    ExplainPackRefusal(content,unread,a,local,0);   // the player's own join: again at each try, once the last one is closed
+    return false;
+}
 void JoinRoom(void* h,const JoinOptions* o,void* client,Callback cb) {
     if(!ready.load(std::memory_order_acquire)) {
         Log("ROOM join refused: reason=namespace-not-ready");
@@ -123,7 +214,11 @@ void JoinRoom(void* h,const JoinOptions* o,void* client,Callback cb) {
     const auto check=coop ? reinterpret_cast<VirtualCheck>(GetProcAddress(coop,"EDF6Coop_AllForcesVirtualRoom")) : nullptr;
     const int virtualRoom=o && check ? check(o->details) : -1;
     if(virtualRoom==1) {
-        Log("ROOM join allowed: route=coop-virtual");
+        // A synthetic handle is not EOS's: its persisted attributes (AF_PACK included) are Coop's to read, which this
+        // plugin cannot do here. EDF6Coop (from hajisensai/edf-coop-stable#36) asks EDF6AF_RoomPackCompatible itself
+        // before it lets such a room in (REJOIN, its virtual room, the full-lobby fallback), and that refusal shows the
+        // same dialog; an older EDF6Coop does not (docs/mod-room-isolation.md).
+        Log("ROOM join allowed: route=coop-virtual (the mission pack is EDF6Coop's to check: EDF6AF_RoomPackCompatible)");
         return join(h,o,client,cb);
     }
     Attribute* attr=nullptr;
@@ -134,6 +229,7 @@ void JoinRoom(void* h,const JoinOptions* o,void* client,Callback cb) {
     const bool allowed=typed && AllForcesWireType(wireType);
     if(attr)release(attr);
     if(allowed) {
+        if(!RoomPackAdmitted(o->details,client,cb))return;   // EOS_InvalidParameters, a dialog, no native join
         Log("ROOM join allowed: route=eos SEARCH_TYPE=%#llx",static_cast<unsigned long long>(wireType));
         return join(h,o,client,cb);
     }
@@ -194,6 +290,22 @@ bool InstallModRoom() noexcept {
 // bridge, never the presence of the resource files or a permissive metadata flag.
 extern "C" __declspec(dllexport) std::int64_t EDF6AF_DecodeRoomType(std::int64_t value) noexcept {
     return crew::DecodeAllForcesRoom(value);
+}
+// For EDF6Coop's remembered / virtual rooms (their attributes persisted by Coop, which All Forces cannot read through
+// a synthetic handle): 1 when a room with content id `dlc` and AF_PACK `line` (nullptr: absent) may be joined here,
+// 0 when not: logged, and the player told why in the EOS route's dialog (ExplainPackRefusal: on its own thread, so
+// the caller, EOS's tick thread, is never held up; the same refusal not again within a minute). EDF6Coop calls it
+// (hajisensai/edf-coop-stable#36) where it admits a remembered room: REJOIN, its virtual room, the full-lobby
+// fallback, and the remembered room it adds to a failed room search.
+extern "C" __declspec(dllexport) int EDF6AF_RoomPackCompatible(std::int64_t dlc,const char* line) noexcept {
+    const crew::packs::Pack* const local=crew::packs::Reserved(dlc) ? crew::findPack(dlc) : nullptr;
+    const auto a=crew::packs::Admit(dlc,line,local);
+    if(a.verdict==crew::packs::Verdict::kOk)return 1;
+    crew::Log("ROOM pack check (EDF6Coop): refused reason=%s content=%lld host=%s/%s/%d local=%s/%s/%d missing_here=%d first=%d",
+        crew::packs::Reason(a.verdict),static_cast<long long>(dlc),a.host.id ? a.host.tag : "-",a.host.id ? a.host.digest : "-",
+        a.host.rows,local ? local->tag : "-",local ? local->digest : "-",local ? local->rows : 0,a.missingHere,a.firstMissingHere);
+    crew::ExplainPackRefusal(dlc,false,a,local,60000);
+    return 0;
 }
 extern "C" __declspec(dllexport) bool EDF6AF_RoomIsolationReady() noexcept {
     // Coop also asks this before its synthetic/full-lobby DirectNet joins,

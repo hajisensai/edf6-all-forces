@@ -1,0 +1,519 @@
+{
+ "about": "Each spawn catalog row's model archives (.MRAB / .RAB), through every SGO it names: python tools/gen_spawn_catalog.py --archives (needs the game). src/spawn_catalog_archives.h counts them.",
+ "rows": {
+  "alien4legtank301": [
+   "OBJECT/ALIEN4LEGTANK301.MRAB",
+   "OBJECT/ALIEN4LEGTANK301_CANNON.MRAB",
+   "OBJECT/ALIEN4LEGTANK301_LIGHT.MRAB",
+   "OBJECT/E509_DEIROI_MISSILE.MRAB",
+   "OBJECT/E510_FORTRESS_DEBRIS.MRAB"
+  ],
+  "alientrailer401": [
+   "OBJECT/ALIENTRAILER401.MRAB",
+   "OBJECT/ALIENTRAILER401_LIGHT.MRAB"
+  ],
+  "alientrailer401_fixed": [
+   "OBJECT/ALIENTRAILER401.MRAB",
+   "OBJECT/ALIENTRAILER401_LIGHT.MRAB"
+  ],
+  "alientrailer401_fixedxl": [
+   "OBJECT/ALIENTRAILER401.MRAB",
+   "OBJECT/ALIENTRAILER401_LIGHT.MRAB"
+  ],
+  "alientrailer401_l": [
+   "OBJECT/ALIENTRAILER401.MRAB",
+   "OBJECT/ALIENTRAILER401_LIGHT.MRAB"
+  ],
+  "alientrailer401_xl": [
+   "OBJECT/ALIENTRAILER401.MRAB",
+   "OBJECT/ALIENTRAILER401_LIGHT.MRAB"
+  ],
+  "anthill301": [
+   "OBJECT/ANTHILL301.RAB"
+  ],
+  "deiroi401": [
+   "OBJECT/DEIROI401.MRAB",
+   "OBJECT/DEIROI401_LIGHT.MRAB"
+  ],
+  "deiroi401_2": [
+   "OBJECT/DEIROI401.MRAB",
+   "OBJECT/DEIROI401_LIGHT.MRAB"
+  ],
+  "deiroi401_3": [
+   "OBJECT/DEIROI401.MRAB",
+   "OBJECT/DEIROI401_LIGHT.MRAB"
+  ],
+  "deiroi401l": [
+   "OBJECT/DEIROI401.MRAB",
+   "OBJECT/DEIROI401_LIGHT.MRAB"
+  ],
+  "deiroi401s": [
+   "OBJECT/DEIROI401.MRAB",
+   "OBJECT/DEIROI401_LIGHT.MRAB"
+  ],
+  "dragonbig401": [
+   "OBJECT/BIGDRAGON401BLUE.RAB",
+   "OBJECT/BIGDRAGON401BLUE_LIGHT.RAB"
+  ],
+  "dragonsmall401": [
+   "OBJECT/DRAGONSMALL401.MRAB",
+   "OBJECT/DRAGONSMALL401_LIGHT.MRAB"
+  ],
+  "e503_armorfrog_af": [
+   "OBJECT/E503_ARMORFROG.MRAB",
+   "OBJECT/E503_ARMOR_ASSAULT.MRAB",
+   "OBJECT/E503_ARMOR_GRENADE.MRAB",
+   "OBJECT/E503_ARMOR_LAUNCHER.MRAB",
+   "OBJECT/E503_FROG.MRAB"
+  ],
+  "e503_frog_af": [
+   "OBJECT/E503_ASSAULT.MRAB",
+   "OBJECT/E503_FROG.MRAB",
+   "OBJECT/E503_GRENADE.MRAB",
+   "OBJECT/E503_LAUNCHER.MRAB"
+  ],
+  "e503_frog_af_leader": [
+   "OBJECT/E503_ASSAULT.MRAB",
+   "OBJECT/E503_FROG.MRAB",
+   "OBJECT/E503_GRENADE.MRAB",
+   "OBJECT/E503_LAUNCHER.MRAB"
+  ],
+  "e507_goldufo": [
+   "OBJECT/E507_GOLDUFO.MRAB"
+  ],
+  "e508_carrier": [
+   "OBJECT/E508_CARRIER.MRAB"
+  ],
+  "e510_dlc_fortress": [
+   "OBJECT/E509_DEIROI_MISSILE.MRAB",
+   "OBJECT/E510_FORTRESS.MRAB",
+   "OBJECT/E510_FORTRESS_DEBRIS.MRAB"
+  ],
+  "e511_mothership_edf6": [
+   "OBJECT/E511_MOTHERSHIP.MRAB"
+  ],
+  "e513_shieldbearer": [
+   "OBJECT/E513_SHIELDBEARER.MRAB"
+  ],
+  "e515_imperialufo": [
+   "OBJECT/E515_IMPERIALUFO.MRAB"
+  ],
+  "e601_martian_gs": [
+   "OBJECT/E601_MARTIAN.MRAB"
+  ],
+  "e601_martian_ls": [
+   "OBJECT/E601_MARTIAN.MRAB"
+  ],
+  "e602_berserker": [
+   "OBJECT/E602_BERSERKER.MRAB"
+  ],
+  "e605_spinnerufo": [
+   "OBJECT/E605_SPINNERUFO.MRAB"
+  ],
+  "e611_timeship": [
+   "OBJECT/E611_TIMESHIP.MRAB",
+   "OBJECT/E612_ANCHOR.MRAB",
+   "OBJECT/E613_CAPSULE.MRAB"
+  ],
+  "e650_giantant01": [
+   "OBJECT/E650_GIANTANT.MRAB"
+  ],
+  "e651_spider01_light": [
+   "OBJECT/E651_SPIDER.MRAB"
+  ],
+  "edf41/dragonsmall401": [
+   "OBJECT/DRAGONSMALL401_LIGHT.MRAB",
+   "OBJECT/EDF41/DRAGONSMALL401.MRAB"
+  ],
+  "edf41/redsmalldragon": [
+   "OBJECT/EDF41/EXSMALLDRAGON.MRAB"
+  ],
+  "edf41/yerrowsmalldragon": [
+   "OBJECT/EDF41/EXSMALLDRAGON.MRAB"
+  ],
+  "edf41mp01/anthill301ug": [
+   "OBJECT/EDF41MP01/ANTHILLUG.RAB"
+  ],
+  "edf41mp01/dragonsmall401_hs": [
+   "OBJECT/EDF41MP01/DRAGONSMALL401.MRAB"
+  ],
+  "edf41mp01/giantant04": [
+   "OBJECT/GIANTANT.MRAB"
+  ],
+  "edf41mp01/giantant04sb": [
+   "OBJECT/EDF41MP01/ARI_HALF.RAB"
+  ],
+  "edf41mp01/giantbeequeen02": [
+   "OBJECT/GIANTBEE.MRAB",
+   "OBJECT/GIANTBEE_LIGHT.MRAB"
+  ],
+  "edf41mp01/nephila02l": [
+   "OBJECT/NEPHILA.RAB",
+   "OBJECT/NEPHILA_LIGHT.RAB"
+  ],
+  "edf41mp01/redsmalldragon_hs": [
+   "OBJECT/EDF41MP01/EXSMALLDRAGON.MRAB"
+  ],
+  "edf41mp01/yerrowsmalldragon_hs": [
+   "OBJECT/EDF41MP01/EXSMALLDRAGON.MRAB"
+  ],
+  "edf41mp02/anthill301largemp02": [
+   "OBJECT/EDF41MP02/ANTHILL301LARGE.RAB"
+  ],
+  "edf41mp02/anthill301ugmp02": [
+   "OBJECT/EDF41MP02/ANTHILLUG.RAB"
+  ],
+  "edf41mp02/giantant04": [
+   "OBJECT/GIANTANT.MRAB"
+  ],
+  "edf41mp02/giantant04sbmp02": [
+   "OBJECT/EDF41MP02/ARI_HALF.RAB"
+  ],
+  "edf41mp02/giantbeequeen02": [
+   "OBJECT/GIANTBEE.MRAB",
+   "OBJECT/GIANTBEE_LIGHT.MRAB"
+  ],
+  "edf41mp02/nephila02l": [
+   "OBJECT/NEPHILA.RAB",
+   "OBJECT/NEPHILA_LIGHT.RAB"
+  ],
+  "edf41mp02/nephila03l": [
+   "OBJECT/NEPHILA.RAB",
+   "OBJECT/NEPHILA_LIGHT.RAB"
+  ],
+  "edf41mp02/ufo401ace": [
+   "OBJECT/UFO401.MRAB"
+  ],
+  "edf6tr_artillery_mission": [
+   "OBJECT/EDF6VC_ARTILLERY.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_drill_mission": [
+   "OBJECT/EDF6VC_DRILL.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_jet_blast_carrier_parked_mission": [
+   "OBJECT/EDF6VC_CARRIER.MRAB",
+   "WEAPON/BULLET_MEDIUMMISSILE01.RAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_jet_carrier_parked_mission": [
+   "OBJECT/EDF6VC_CARRIER.MRAB",
+   "WEAPON/BULLET_MEDIUMMISSILE01.RAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_jet_doll_carrier_parked_mission": [
+   "OBJECT/EDF6VC_CARRIER.MRAB",
+   "WEAPON/BULLET_MEDIUMMISSILE01.RAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_jet_fighter_parked_mission": [
+   "OBJECT/BOMBER501.MRAB",
+   "WEAPON/BULLET_MEDIUMMISSILE01.RAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_jet_interceptor_parked_mission": [
+   "OBJECT/EDF6VC_INTERCEPTOR.MRAB",
+   "WEAPON/BULLET_ICBM01.RAB",
+   "WEAPON/BULLET_MEDIUMMISSILE01.RAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_jet_multirole_parked_mission": [
+   "OBJECT/EDF6VC_MULTIROLE.MRAB",
+   "WEAPON/AIRTORTOISE_MISSILE.RAB",
+   "WEAPON/BULLET_ICBM01.RAB",
+   "WEAPON/BULLET_MEDIUMMISSILE01.RAB",
+   "WEAPON/BULLET_ROCKET.RAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_jet_strike_parked_mission": [
+   "OBJECT/BOMBER501.MRAB",
+   "WEAPON/AIRTORTOISE_MISSILE.RAB",
+   "WEAPON/BULLET_ICBM01.RAB",
+   "WEAPON/BULLET_ROCKET.RAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_katyusha_mission": [
+   "OBJECT/EDF6VC_KATYUSHA.MRAB",
+   "WEAPON/BULLET_ROCKET.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_pjet_fighter_mission": [
+   "OBJECT/EDF6VC_INTERCEPTOR.MRAB",
+   "WEAPON/BULLET_MEDIUMMISSILE01.RAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_pjet_strike_mission": [
+   "OBJECT/BOMBER501.MRAB",
+   "WEAPON/AIRTORTOISE_MISSILE.RAB",
+   "WEAPON/BULLET_ICBM01.RAB",
+   "WEAPON/BULLET_ROCKET.RAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_sazabi_mission": [
+   "OBJECT/EDF6VC_SAZABI.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_sidecar_mission": [
+   "OBJECT/EDF6VC_SIDECAR.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_v506_heli_edf6benefits_mission": [
+   "OBJECT/V506_HELI_EDF6BENEFITS.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_v506_heli_mission": [
+   "OBJECT/V506_HELI.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_v602_heli_mission": [
+   "OBJECT/V602_HELI.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_vehicle401_striker_mission": [
+   "OBJECT/VEHICLE401_STRIKER.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_vehicle409_heli_mission": [
+   "OBJECT/VEHICLE409_HELI.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_vehicle410_heli_mission": [
+   "OBJECT/VEHICLE410_HELI.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_vehicle502_groundrobo_mission": [
+   "OBJECT/VEHICLE502_GROUNDROBO.MRAB",
+   "WEAPON/SHELLCASE401.RAB",
+   "WEAPON/VEHICLE502_GROUNDROBO_CANNON_L.RAB",
+   "WEAPON/VEHICLE502_GROUNDROBO_CANNON_R.RAB",
+   "WEAPON/V_502_GROUNDROBO_GATLING.RAB"
+  ],
+  "edf6vc_sedan": [
+   "OBJECT/EDF6VC_SEDAN.MRAB"
+  ],
+  "giantant01": [
+   "OBJECT/GIANTANT.MRAB"
+  ],
+  "giantantqueen": [
+   "OBJECT/GIANTANT.MRAB",
+   "OBJECT/GIANTANT_LIGHT.MRAB"
+  ],
+  "giantbee01charge": [
+   "OBJECT/GIANTBEE.MRAB",
+   "OBJECT/GIANTBEE_LIGHT.MRAB"
+  ],
+  "giantspider01": [
+   "OBJECT/GIANTSPIDER.MRAB",
+   "OBJECT/GIANTSPIDER_LIGHT.MRAB"
+  ],
+  "hector301cc": [
+   "OBJECT/HECTOR301CC.MRAB"
+  ],
+  "hector301cg": [
+   "OBJECT/HECTOR301CG.MRAB"
+  ],
+  "hector301cl": [
+   "OBJECT/HECTOR301CL.MRAB"
+  ],
+  "hector301gc": [
+   "OBJECT/HECTOR301GC.MRAB"
+  ],
+  "hector301gg": [
+   "OBJECT/HECTOR301GG.MRAB"
+  ],
+  "hector301gl": [
+   "OBJECT/HECTOR301GL.MRAB"
+  ],
+  "hector301lc": [
+   "OBJECT/HECTOR301LC.MRAB"
+  ],
+  "hector301lg": [
+   "OBJECT/HECTOR301LG.MRAB"
+  ],
+  "hector301ll": [
+   "OBJECT/HECTOR301LL.MRAB"
+  ],
+  "hector401cc": [
+   "OBJECT/HECTOR401CC.MRAB"
+  ],
+  "hector401cg": [
+   "OBJECT/HECTOR401CG.MRAB"
+  ],
+  "hector401cs": [
+   "OBJECT/HECTOR401CS.MRAB"
+  ],
+  "hector401gg": [
+   "OBJECT/HECTOR401GG.MRAB"
+  ],
+  "hector401gl": [
+   "OBJECT/HECTOR401GL.MRAB"
+  ],
+  "hector401lc": [
+   "OBJECT/HECTOR401LC.MRAB"
+  ],
+  "hector401lg": [
+   "OBJECT/HECTOR401LG.MRAB"
+  ],
+  "hector401ll": [
+   "OBJECT/HECTOR401LL.MRAB"
+  ],
+  "hector401ls": [
+   "OBJECT/HECTOR401LS.MRAB"
+  ],
+  "hector401sc": [
+   "OBJECT/HECTOR401SC.MRAB"
+  ],
+  "hector401sg": [
+   "OBJECT/HECTOR401SG.MRAB"
+  ],
+  "hector401ss": [
+   "OBJECT/HECTOR401SS.MRAB"
+  ],
+  "shootingtarget": [
+   "OBJECT/SHOOTINGTARGET.MRAB"
+  ],
+  "transporter401_formation": [
+   "OBJECT/TRANSPORTER401.RAB",
+   "OBJECT/TRANSPORTER401_LIGHT.RAB"
+  ],
+  "ufo301": [
+   "OBJECT/UFO301.MRAB",
+   "OBJECT/UFO301_LIGHT.MRAB"
+  ],
+  "ufo301ace": [
+   "OBJECT/UFO301.MRAB",
+   "OBJECT/UFO301_LIGHT.MRAB"
+  ],
+  "ufo401": [
+   "OBJECT/UFO401.MRAB",
+   "OBJECT/UFO401_LIGHT.MRAB"
+  ],
+  "ufocarrier301": [
+   "OBJECT/CARRIER301.RAB",
+   "OBJECT/CARRIER301_LIGHT.RAB"
+  ],
+  "ufocarrier401": [
+   "OBJECT/CARRIER401.RAB",
+   "OBJECT/CARRIER401_LIGHT.RAB"
+  ],
+  "ufomother301": [
+   "OBJECT/UFOMOTHER301.MRAB",
+   "OBJECT/UFOMOTHER301_LIGHT.MRAB"
+  ],
+  "ufomother401": [
+   "OBJECT/UFOMOTHER401.MRAB",
+   "OBJECT/UFOMOTHER401_LIGHT.MRAB"
+  ],
+  "uforobo401": [
+   "OBJECT/UFOROBO401.RAB"
+  ],
+  "v503_bike": [
+   "OBJECT/EDF6VC_OPTIC_V503_BIKE.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "v504_begaruta_mission": [
+   "OBJECT/EDF6VC_OPTIC_V504_BEGARUTA_GRAY.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_504_A_GATLING_L.RAB",
+   "WEAPON/V_504_A_GATLING_R.RAB",
+   "WEAPON/V_504_H_FLAMETHROWER.RAB",
+   "WEAPON/V_504_S_MISSILE_L.RAB",
+   "WEAPON/V_504_S_MISSILE_R.RAB"
+  ],
+  "v505_tank_mission": [
+   "OBJECT/EDF6VC_OPTIC_V505_TANK.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "v507_rescuetank_ai": [
+   "OBJECT/EDF6VC_OPTIC_V507_RESCUETANK.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "v510_maser_mission": [
+   "OBJECT/EDF6VC_OPTIC_V510_MASER.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "v512_keitruck": [
+   "OBJECT/EDF6VC_OPTIC_V512_KEITRUCK.MRAB"
+  ],
+  "v515_retrobalam_mission": [
+   "OBJECT/EDF6VC_OPTIC_V515_RETROBALAM.MRAB"
+  ],
+  "v603_flak_mission": [
+   "OBJECT/EDF6VC_OPTIC_V603_FLAK.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "v605_barga_cannon_mission": [
+   "OBJECT/EDF6VC_OPTIC_V605_BARGA_CANNON.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "v608_oldrobot_g_mission": [
+   "OBJECT/EDF6VC_OPTIC_V608_OLDROBOT.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_504_A_GATLING_L.RAB",
+   "WEAPON/V_504_A_GATLING_R.RAB",
+   "WEAPON/V_504_H_FLAMETHROWER.RAB",
+   "WEAPON/V_504_S_MISSILE_L.RAB",
+   "WEAPON/V_504_S_MISSILE_R.RAB"
+  ],
+  "v612_nix_g_mission": [
+   "OBJECT/EDF6VC_OPTIC_V612_NIX_BLUE.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/V_504_S_MISSILE_L.RAB",
+   "WEAPON/V_504_S_MISSILE_R.RAB",
+   "WEAPON/V_612_A_BEAMLAUNCHER_L.RAB",
+   "WEAPON/V_612_A_BEAMLAUNCHER_R.RAB"
+  ],
+  "v613_bike": [
+   "OBJECT/EDF6VC_OPTIC_V613_BIKE.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "v614_proteus_mk2_mission": [
+   "OBJECT/EDF6VC_OPTIC_V614_PROTEUS_MK2.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "vehicle301_tank_ai": [
+   "OBJECT/V505_TANKEDF4.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "vehicle403_tank_mission": [
+   "OBJECT/EDF6VC_OPTIC_VEHICLE403_TANK.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "vehicle404_bigtank": [
+   "OBJECT/EDF6VC_OPTIC_VEHICLE404_BIGTANK.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "vehicle407_bigbegaruta_mission": [
+   "OBJECT/EDF6VC_OPTIC_VEHICLE407_BIGBEGARUTA.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "vehicle501_fortressrobo": [
+   "OBJECT/VEHICLE501_FORTRESSROBO.RAB",
+   "WEAPON/V_NULL.RAB"
+  ]
+ }
+}

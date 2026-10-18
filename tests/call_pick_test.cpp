@@ -38,6 +38,8 @@ ULONGLONG GameMs() noexcept { return 3600000; }
 int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept { return EXCEPTION_EXECUTE_HANDLER; }
 bool JetLaunch(JetRole,const float*,const float*,const float*,DWORD,const void*,bool) noexcept { return false; }
 void HeliCalled(unsigned char*,bool,const float*,DWORD) noexcept {}
+void SetMissionPackSaveHook(bool) noexcept {}             // edf5campaign.cpp: the packs' save rows (not this test's)
+void MigrateMissionPackSave(unsigned char*) noexcept {}
 unsigned char* SubLaunch(const float*,const float*) noexcept { return nullptr; }
 bool JetLaunchBomber(const float*,const float*,const float*,const BombLoad&,DWORD,const void*,JetBody,const void*) noexcept {
     return false;

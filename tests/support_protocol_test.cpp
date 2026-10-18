@@ -346,8 +346,8 @@ void RoomBuilds() {
     {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.With(2);r.nodes[2]->session->Stop();
      r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();r.Step(1100);r.Settle();
      std::uint32_t missing=0;
-     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==FeatureExt(kExtSeaRescue|kExtRescueChannel) &&
-           r.nodes[0]->session->PeersAhead()==0,"a guest without the sea rescue (all four capabilities) is behind, the rescue named");
+     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==FeatureExt(kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers) &&
+           r.nodes[0]->session->PeersAhead()==0,"a guest without the sea rescue (all four capabilities) is behind, the rescue and the EDF4.1 outfit named");
      Check(r.nodes[1]->session->RoomBehindHost(),"and the other guest is told");}
     // A newer guest: the capability bits are full (kCapabilities<kMaxUnits), so newer is an extension bit this build lacks.
     {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions|(kExtensions+1);r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);

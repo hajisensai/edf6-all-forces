@@ -79,7 +79,11 @@ constexpr ULONGLONG kStatusMs=4000;
 bool profileChecked=false,profile=false;
 void* missionMgr=nullptr;          // the object manager this mission's preload was for
 bool preloaded[kEntryCount]{};     // its SGO queued for this mission
+bool missing[kEntryCount]{};       // a Mods row with a file not in Mods (not installed): never preloaded nor made
 bool broken[kEntryCount]{};        // the game faulted making it: off until the game restarts (as support_spawn.cpp)
+// This mission is the test range pack's (edf5campaign.cpp TestRangeMode at its start): the M map's 「摆放」 is on
+// (ini RangePlace), whatever DebugSpawn says.
+bool rangeMission=false;
 Menu menu{};
 bool held[5]{};                    // the keys' own state (Press)
 ULONGLONG lastFrame=0;
@@ -113,18 +117,32 @@ int SupportCatalogOf(int call) noexcept {
     return -1;
 }
 
-// The row's state for the HUD: can it be made now.
-bool RowReady(int row) noexcept {
-    if(row<0 || row>=kEntryCount)return false;
+// The row's state for the HUD: can it be made now, else why not (debug_spawn.h RowState).
+RowState StateOf(int row) noexcept {
+    if(row<0 || row>=kEntryCount)return RowState::unavailable;
     const Entry& e=kEntries[row];
     switch(e.how) {
-    case How::stockVehicle:
-    case How::enemy: return profile && preloaded[row] && !broken[row];
-    case How::drone: return Cfg().jetPilot && jet::SpawnReady();
-    case How::supportCall: return SupportCatalogOf(e.arg)>=0 && SupportCallReadiness().state==SupportReady::ready;
-    case How::soldier: return SupportSoldiersReady();
+    case How::vehicle:
+    case How::enemy:
+        if(missing[row])return RowState::missing;
+        if(broken[row])return RowState::broken;
+        return profile && preloaded[row] ? RowState::ready : RowState::notPreloaded;
+    case How::drone: return Cfg().jetPilot && jet::SpawnReady() ? RowState::ready : RowState::unavailable;
+    case How::supportCall:
+        return SupportCatalogOf(e.arg)>=0 && SupportCallReadiness().state==SupportReady::ready ? RowState::ready : RowState::unavailable;
+    case How::soldier: return SupportSoldiersReady() ? RowState::ready : RowState::unavailable;
     }
-    return false;
+    return RowState::unavailable;
+}
+bool RowReady(int row) noexcept { return StateOf(row)==RowState::ready; }
+
+// A Mods row's files all there (Mods\OBJECT\): the list testrange/catalog.py files_of gives, the one catalog.available
+// checks for the range's own tools (src/spawn_catalog.inc). The first one that is not, or nullptr: every one is.
+const wchar_t* ModRowLacks(const Entry& e) noexcept {
+    if(!e.files || !e.files[0])return L"?";   // a Mods row always lists its files (debug_spawn.h FilesAgree)
+    for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1)
+        if(!jet::ModFileThere(f))return f;
+    return nullptr;
 }
 
 void Publish() noexcept {
@@ -227,6 +245,14 @@ bool GroundUnder(float* p) noexcept {
     return true;
 }
 
+// The way a row made at `at` faces: a vehicle away from the player (`me`: its door side to them), an enemy or a soldier
+// at them; `look` when they are on one spot.
+void FaceOf(const Entry& e,const float* me,const float* at,const float* look,float* heading) noexcept {
+    const bool facePlayer=e.how==How::enemy || e.how==How::soldier;
+    if(facePlayer)HeadingTo(at,me,look,heading);
+    else HeadingTo(me,at,look,heading);
+}
+
 // Where the row goes: the crosshair's ground point (DebugSpawnRange) or DebugSpawnDistance ahead (debug_spawn.h
 // PlaceSpawn), its lift added; `heading` the way it faces (a vehicle away from the player, the others at them) and
 // `look` the camera's horizontal heading.
@@ -248,34 +274,34 @@ bool Where(const Entry& e,const unsigned char* human,float* at,float* heading,fl
     at[1]+=e.lift;
     const float origin[3]={0.0f,0.0f,0.0f},north[3]={0.0f,0.0f,1.0f};
     HeadingTo(origin,dir,north,look);   // dir's own horizontal part, unit (straight up / down: north)
-    const bool facePlayer=e.category==Category::enemy || e.category==Category::soldier;
-    if(facePlayer)HeadingTo(at,me,look,heading);
-    else HeadingTo(me,at,look,heading);
+    FaceOf(e,me,at,look,heading);
     return true;
 }
 
-void Spawn(int row,unsigned char* human) noexcept {
-    if(row<0 || row>=kEntryCount)return;
+// Makes row `row` at `at` (its lift in already) facing `heading` (`look`: the drone's flight heading), by its How; the
+// result for the HUD and the log (Say), and returned (DebugSpawnStatus) with a support call's own answer in `note`. The
+// one way every spawn goes, the debug spawn tool's (Spawn) and the M map's 「摆放」 (PlaceRow): online it refuses
+// before any of it (a native object made here exists on this machine alone: the other players' games never see it,
+// docs/feature-2026-10-17-testrange-update.md).
+int MakeRow(int row,const float* at,const float* heading,const float* look,wchar_t* noteOut,std::size_t noteSize) noexcept {
+    if(row<0 || row>=kEntryCount)return kDebugSpawnFailed;
     const Entry& e=kEntries[row];
+    if(noteOut && noteSize)noteOut[0]=0;
     if(InSession()) {
         Say(kDebugSpawnOnline,row,nullptr,"%s: refused: online session (a local-only object would not exist on the other machines)",e.id);
-        return;
-    }
-    float at[3],heading[3],look[3];
-    if(!Where(e,human,at,heading,look)) {
-        Say(kDebugSpawnNoPlace,row,nullptr,"%s: failed: no place (camera straight up / down with nothing hit)",e.id);
-        return;
+        return kDebugSpawnOnline;
     }
     alignas(16) float m[16];
     FacingMatrix(heading,at,m);
     const char* why="";
     const void* made=nullptr;
     switch(e.how) {
-    case How::stockVehicle:
+    case How::vehicle:
     case How::enemy:
         if(!profile)why="EDF.dll profile mismatch (see DEBUGSPAWN profile)";
+        else if(missing[row])why="a file of it is not in Mods (not installed: run the installer / install the test range)";
         else if(broken[row])why="it faulted before: off until the game restarts";
-        else if(!preloaded[row])why="not preloaded this mission (DebugSpawn turned on mid-mission: next mission)";
+        else if(!preloaded[row])why="not preloaded this mission (turned on mid-mission, or a heavy row with RangePlaceAll=0)";
         else made=e.how==How::enemy ? SpawnEnemy(row,m,&why) : SpawnVehicle(row,m,&why);
         break;
     case How::supportCall: {
@@ -288,7 +314,8 @@ void Spawn(int row,unsigned char* human) noexcept {
         const bool accepted=SupportCallAt(catalog,at,note,_countof(note));
         Say(accepted ? kDebugSpawnRequested : kDebugSpawnRefused,row,note,"%s: support call %ls (catalog %d) to (%.1f,%.1f,%.1f): %s",e.id,
             kSupportCalls[e.arg],catalog,at[0],at[1],at[2],accepted ? "accepted (see SUPPORT lines)" : "refused (see SUPPORT lines)");
-        return;
+        if(noteOut && noteSize)wcsncpy_s(noteOut,noteSize,note,_TRUNCATE);
+        return accepted ? kDebugSpawnRequested : kDebugSpawnRefused;
     }
     case How::drone:
         if(!Cfg().jetPilot)why="JetPilot=0";
@@ -305,31 +332,64 @@ void Spawn(int row,unsigned char* human) noexcept {
     }
     if(made) {
         Say(kDebugSpawnDone,row,nullptr,"%s: spawned %p at (%.1f,%.1f,%.1f) heading (%.2f,%.2f)%s",e.id,made,at[0],at[1],at[2],heading[0],heading[2],
-            e.category==Category::enemy ? " team enemy" : e.category==Category::vehicle ? " team friend, empty" : "");
-    } else {
-        Say(kDebugSpawnFailed,row,nullptr,"%s: failed at (%.1f,%.1f,%.1f): %s",e.id,at[0],at[1],at[2],why);
+            e.how==How::enemy ? " team enemy" : e.how==How::vehicle ? " team friend, empty" : "");
+        return kDebugSpawnDone;
     }
+    Say(kDebugSpawnFailed,row,nullptr,"%s: failed at (%.1f,%.1f,%.1f): %s",e.id,at[0],at[1],at[2],why);
+    return kDebugSpawnFailed;
+}
+
+void Spawn(int row,unsigned char* human) noexcept {
+    if(row<0 || row>=kEntryCount)return;
+    const Entry& e=kEntries[row];
+    float at[3],heading[3],look[3];
+    if(!Where(e,human,at,heading,look)) {
+        Say(kDebugSpawnNoPlace,row,nullptr,"%s: failed: no place (camera straight up / down with nothing hit)",e.id);
+        return;
+    }
+    MakeRow(row,at,heading,look,nullptr,0);
 }
 }  // namespace
 
+// Which object rows this mission preloads: in the test range (the M map's 「摆放」, `range`) every row there is (a Mods
+// row whose SGO is in Mods), the heavy ones (Entry::preload false: another 17 MB model each) only with RangePlaceAll=1;
+// elsewhere (the debug spawn tool alone, DebugSpawn=1) the stock rows only, as before the range's rows came in: a Mods
+// row's file may be there in any mission, but a story mission pays for none of it.
+bool PreloadsRow(const Entry& e,bool range) noexcept {
+    if(!e.sgo)return false;
+    if(!range)return !e.mod;
+    return e.preload || Cfg().rangePlaceAll;
+}
+
 void PreloadDebugSpawn() noexcept {
     for(auto& p:preloaded)p=false;
+    for(auto& m:missing)m=false;
     missionMgr=nullptr;
     menu.open=false;
     AcquireSRWLockExclusive(&cueLock);
     cue=DebugSpawnCue{};statusAt=0;
     ReleaseSRWLockExclusive(&cueLock);
     const Config& c=Cfg();
-    if(!c.enabled || !c.debugSpawn)return;   // off: nothing preloaded, nothing touched
+    rangeMission=c.enabled && TestRangeMode();
+    // Online the range's 「摆放」 refuses (MakeRow): nothing preloaded for it there.
+    const bool range=rangeMission && c.rangePlace && !InSession();
+    if(!c.enabled || (!c.debugSpawn && !range))return;   // off: nothing preloaded, nothing touched
     if(!profileChecked){profileChecked=true;profile=CheckProfile();}
     if(!profile)return;
-    int vehicles=0,enemies=0;
+    int lacking=0;
+    for(int i=0;i<kEntryCount;++i) {
+        const wchar_t* const lacks=kEntries[i].mod ? ModRowLacks(kEntries[i]) : nullptr;
+        missing[i]=lacks!=nullptr;
+        if(lacks && ++lacking<=8)Log("DEBUGSPAWN %s: not installed (Mods\\OBJECT\\%ls missing)",kEntries[i].id,lacks);
+    }
+    int vehicles=0,enemies=0,absent=0;
     __try {
         void* const mgr=At<void*>(image,kPreloadMgr);
         missionMgr=At<void*>(image,kObjectMgr);
         if(!mgr || !missionMgr)return;
         for(int i=0;i<kEntryCount;++i) {
-            if(!kEntries[i].sgo || broken[i])continue;
+            if(!PreloadsRow(kEntries[i],range) || broken[i])continue;
+            if(missing[i]){++absent;continue;}   // not installed: a missing SGO is never handed to the preload
             reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEntries[i].sgo,2,-1);
             preloaded[i]=true;
             ++(kEntries[i].how==How::enemy ? enemies : vehicles);
@@ -339,8 +399,32 @@ void PreloadDebugSpawn() noexcept {
         Log("DEBUGSPAWN preload faulted: nothing of the tool's this mission");
         return;
     }
-    Log("DEBUGSPAWN on: %d stock vehicles and %d enemies preloaded; keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X",
-        vehicles,enemies,c.debugSpawnKey,c.debugSpawnPrevKey,c.debugSpawnNextKey,c.debugSpawnCategoryKey,c.debugSpawnSpawnKey);
+    Log("DEBUGSPAWN on (%s): %d vehicles and %d enemies preloaded, %d not installed (RangePlaceAll=%d); keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X",
+        range ? "the test range's place panel" : "the debug spawn tool",vehicles,enemies,absent,c.rangePlaceAll,
+        c.debugSpawnKey,c.debugSpawnPrevKey,c.debugSpawnNextKey,c.debugSpawnCategoryKey,c.debugSpawnSpawnKey);
+}
+
+bool RangePlaceOn() noexcept { return rangeMission && Cfg().enabled && Cfg().rangePlace; }
+
+RowState SpawnRowState(int row) noexcept {
+    if(InSession())return RowState::online;
+    return StateOf(row);
+}
+
+int PlaceRow(int row,const float* ground,wchar_t* note,std::size_t size) noexcept {
+    if(note && size)note[0]=0;
+    if(row<0 || row>=kEntryCount || !ground || !std::isfinite(ground[0]+ground[1]+ground[2]))return kDebugSpawnNoPlace;
+    if(!RangePlaceOn())return kDebugSpawnFailed;
+    const Entry& e=kEntries[row];
+    unsigned char* const human=PlayerHuman();
+    float at[3]={ground[0],ground[1]+e.lift,ground[2]},heading[3],look[3]={0.0f,0.0f,1.0f};
+    float me[3]={ground[0],ground[1],ground[2]-1.0f};   // no player seen: face north
+    float eye[3],dir[3];
+    if(CameraRay(eye,dir)){const float origin[3]={},north[3]={0.0f,0.0f,1.0f};HeadingTo(origin,dir,north,look);}
+    __try { if(human)std::memcpy(me,human+kPosition,12); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    FaceOf(e,me,at,look,heading);
+    Log("DEBUGSPAWN place panel: %s at the map's point (%.1f,%.1f,%.1f)",e.id,ground[0],ground[1],ground[2]);
+    return MakeRow(row,at,heading,look,note,size);
 }
 
 void DebugSpawnFrame(unsigned char* human) noexcept {

@@ -17,17 +17,22 @@
 //  - a friendly soldier: the support soldiers' stock Ranger (support_soldier.cpp), let go of at once.
 #pragma once
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 
 namespace crew {
 namespace debugspawn {
-enum class Category : std::uint8_t { vehicle, aircraft, enemy, soldier, count };
+// vehicle: EDF6's stock vehicles and EDF4.1's; ours: the range's and the installer's vehicles (Mods files); aircraft: the
+// plugin's crewed aircraft (support calls) and the drone; enemy: EDF6's stock enemies and EDF5's DLC fortress; enemy41:
+// EDF4.1's ported enemies; soldier: the support soldiers.
+enum class Category : std::uint8_t { vehicle, ours, aircraft, enemy, enemy41, soldier, count };
 constexpr int kCategoryCount=static_cast<int>(Category::count);
 // The categories' names are the HUD's words (src/hudtext.inc debugSpawnVehicles ...), in this order.
 
-// How a row is made (debug_spawn.cpp Spawn). `arg`: supportCall its kSupportCalls index, soldier the SupportWeapon
-// (support_call.h); the others none.
-enum class How : std::uint8_t { stockVehicle, supportCall, drone, enemy, soldier };
+// How a row is made (debug_spawn.cpp MakeRow). `arg`: supportCall its kSupportCalls index, soldier the SupportWeapon
+// (support_call.h); the others none. vehicle: CreateObject on its SGO + its mission_setup, empty, friend team (a stock
+// SGO or one in Mods); enemy: the script's CreateEnemy steps.
+enum class How : std::uint8_t { vehicle, supportCall, drone, enemy, soldier };
 // The support calls (support_dispatch.cpp SupportCallKey: the map's air support catalog) the crewed aircraft rows ask for.
 // The follow variants (they escort the player) where there is one; the Brute is the guard call (it guards the point).
 inline constexpr const wchar_t* kSupportCalls[]={L"STRIKE_F",L"FIGHTER_F",L"INTERCEPTOR_F",L"MULTIROLE_F",L"CARRIER_F",
@@ -38,32 +43,24 @@ struct Entry {
     How how;
     const char* id;          // the log's (ASCII: the log is narrow text)
     const wchar_t* name;     // the menu's
-    const wchar_t* sgo;      // stockVehicle / enemy: the stock SGO this tool preloads and creates (nullptr otherwise)
+    const wchar_t* sgo;      // vehicle / enemy: the SGO this tool preloads and creates (nullptr otherwise)
     int arg;
     float lift;              // m over the ground point it starts at (a flier higher up)
+    bool mod=false;          // its SGO is a Mods file (the range's, the installer's, EDF4.1's): there only when that is
+    bool preload=true;       // preloaded by default (else only with ini RangePlaceAll=1: a heavy model of its own)
+    // A Mods row's files (testrange/catalog.py files_of, what catalog.available checks): names under Mods\OBJECT\, each
+    // NUL-ended, the list ended by an empty name; its SGO among them. Made only when every one is there (debug_spawn.cpp ModRowLacks).
+    // nullptr: none (a stock row, Root.cpk's; the plugin's own rows).
+    const wchar_t* files=nullptr;
 };
 
-// The rows. Stock SGOs are Root.cpk's own (tests/debug_spawn_resource_audit.py reads each: a ground vehicle's must carry
-// mission_setup, every one must exist); the stock vehicles are the `_mission` ones the stock missions and the test range
-// place (testrange/gen.py VEHICLES), the enemies the test range's (ENEMIES, CreateEnemy). The plugin's crewed aircraft
-// are the map's air support calls; the drone is the carriers' (its SGO the installer's, preloaded by PreloadJets).
+// The rows. The object rows (vehicles, enemies) are src/spawn_catalog.inc, written by tools/gen_spawn_catalog.py from
+// testrange/catalog.py (the test range's own lists come from there too): EDF6's stock ones are Root.cpk's
+// (tests/debug_spawn_resource_audit.py reads each: a vehicle's must carry mission_setup, every one must exist), the others
+// Mods files the range's install or the installer writes (`mod`: made only when the file is there). The plugin's crewed
+// aircraft are the map's air support calls; the drone is the carriers' (its SGO the installer's, preloaded by PreloadJets).
 inline constexpr Entry kEntries[]={
-    {Category::vehicle,How::stockVehicle,"V505_TANK_MISSION",L"布莱克战车 505",L"app:/object/V505_TANK_MISSION.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"VEHICLE403_TANK_MISSION",L"坦克 403",L"app:/object/VEHICLE403_TANK_MISSION.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"VEHICLE404_BIGTANK",L"大型坦克 404",L"app:/object/VEHICLE404_BIGTANK.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V603_FLAK_MISSION",L"防空车 603",L"app:/object/V603_FLAK_MISSION.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V510_MASER_MISSION",L"EMC 510",L"app:/object/V510_MASER_MISSION.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V605_BARGA_CANNON_MISSION",L"巴尔加炮 605",L"app:/object/V605_BARGA_CANNON_MISSION.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V507_RESCUETANK_AI",L"救援装甲车 507",L"app:/object/V507_RESCUETANK_AI.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V512_KEITRUCK",L"轻卡车 512",L"app:/object/V512_KEITRUCK.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V503_BIKE",L"摩托 503",L"app:/object/V503_BIKE.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V613_BIKE",L"摩托 613",L"app:/object/V613_BIKE.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V504_BEGARUTA_MISSION",L"机甲 Begaruta 504",L"app:/object/V504_BEGARUTA_MISSION.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"VEHICLE407_BIGBEGARUTA_MISSION",L"大型机甲 407",L"app:/object/VEHICLE407_BIGBEGARUTA_MISSION.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V612_NIX_G_MISSION",L"机甲 Nix G 612",L"app:/object/V612_NIX_G_MISSION.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V614_PROTEUS_MK2_MISSION",L"机甲 Proteus 614",L"app:/object/V614_PROTEUS_MK2_MISSION.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V608_OLDROBOT_G_MISSION",L"旧型机甲 608",L"app:/object/V608_OLDROBOT_G_MISSION.sgo",0,0.5f},
-    {Category::vehicle,How::stockVehicle,"V515_RETROBALAM_MISSION",L"巨型机甲 Balam 515",L"app:/object/V515_RETROBALAM_MISSION.sgo",0,0.5f},
+#include "spawn_catalog.inc"
     // supportCall: kSupportCalls' index. A support call: as many as the call brings (support config), from the map's edge.
     {Category::aircraft,How::supportCall,"call_strike_f",L"对地攻击机（支援呼叫）",nullptr,0,0.0f},
     {Category::aircraft,How::supportCall,"call_fighter_f",L"制空战斗机（支援呼叫）",nullptr,1,0.0f},
@@ -77,19 +74,6 @@ inline constexpr Entry kEntries[]={
     {Category::aircraft,How::supportCall,"call_heli",L"直升机 Brute 410（支援呼叫·守点）",nullptr,9,0.0f},
     {Category::aircraft,How::supportCall,"call_medic_heli_f",L"医疗直升机（支援呼叫）",nullptr,10,0.0f},
     {Category::aircraft,How::drone,"jet_drone",L"机炮无人机（无人驾驶）",nullptr,0,60.0f},
-    {Category::enemy,How::enemy,"GIANTANT01",L"巨蚁",L"app:/object/GIANTANT01.sgo",0,0.5f},
-    {Category::enemy,How::enemy,"E650_GIANTANT01",L"巨蚁（EDF6）",L"app:/object/E650_GIANTANT01.sgo",0,0.5f},
-    {Category::enemy,How::enemy,"GIANTSPIDER01",L"巨蜘蛛",L"app:/object/GIANTSPIDER01.sgo",0,0.5f},
-    {Category::enemy,How::enemy,"E651_SPIDER01_LIGHT",L"蜘蛛（轻）",L"app:/object/E651_SPIDER01_LIGHT.sgo",0,0.5f},
-    {Category::enemy,How::enemy,"GIANTANTQUEEN",L"母体（女王巨蚁）",L"app:/object/GIANTANTQUEEN.sgo",0,0.5f},
-    {Category::enemy,How::enemy,"GIANTBEE01CHARGE",L"巨蜂（飞）",L"app:/object/GIANTBEE01CHARGE.sgo",0,20.0f},
-    {Category::enemy,How::enemy,"E503_FROG_AF",L"蛙兵",L"app:/object/E503_FROG_AF.sgo",0,0.5f},
-    {Category::enemy,How::enemy,"E503_ARMORFROG_AF",L"装甲蛙兵",L"app:/object/E503_ARMORFROG_AF.sgo",0,0.5f},
-    {Category::enemy,How::enemy,"E601_MARTIAN_GS",L"火星人",L"app:/object/E601_MARTIAN_GS.sgo",0,0.5f},
-    {Category::enemy,How::enemy,"E507_GOLDUFO",L"金色 UFO（飞）",L"app:/object/E507_GOLDUFO.sgo",0,30.0f},
-    {Category::enemy,How::enemy,"E515_IMPERIALUFO",L"帝国 UFO（飞）",L"app:/object/E515_IMPERIALUFO.sgo",0,30.0f},
-    {Category::enemy,How::enemy,"DRAGONSMALL401",L"小龙（飞）",L"app:/object/DRAGONSMALL401.sgo",0,30.0f},
-    {Category::enemy,How::enemy,"SHOOTINGTARGET",L"训练靶子（不动）",L"app:/object/SHOOTINGTARGET.sgo",0,0.5f},
     // soldier: SupportWeapon's order (support_call.h): rifle, flame, rocket, shotgun, sniper.
     {Category::soldier,How::soldier,"ranger_rifle",L"游骑兵（步枪）",nullptr,0,0.2f},
     {Category::soldier,How::soldier,"ranger_flame",L"游骑兵（火焰）",nullptr,1,0.2f},
@@ -98,6 +82,13 @@ inline constexpr Entry kEntries[]={
     {Category::soldier,How::soldier,"ranger_sniper",L"游骑兵（狙击）",nullptr,4,0.2f},
 };
 constexpr int kEntryCount=static_cast<int>(sizeof(kEntries)/sizeof(kEntries[0]));
+// Every Mods row lists its files and nothing else does; a list is not empty.
+constexpr bool FilesAgree() noexcept {
+    for(const auto& e:kEntries)
+        if(e.mod!=(e.files!=nullptr) || (e.files && !e.files[0]))return false;
+    return true;
+}
+static_assert(FilesAgree(),"a Mods row (mod) and only it names its Mods files");
 
 constexpr int CountIn(Category c) noexcept {
     int n=0;
@@ -185,5 +176,24 @@ inline void FacingMatrix(const float* heading,const float* at,float* m) noexcept
     const float r[16]={z,0.0f,-x,0.0f, 0.0f,1.0f,0.0f,0.0f, x,0.0f,z,0.0f, at[0],at[1],at[2],1.0f};
     for(int i=0;i<16;++i)m[i]=r[i];
 }
+// Why a row cannot be made now (debug_spawn.cpp SpawnRowState; the panels dim it and say so).
+enum class RowState : std::uint8_t {
+    ready,
+    missing,        // a Mods row with a file not in Mods: not installed (the installer's EDF4.1 objects, the range's vehicles)
+    notPreloaded,   // not preloaded this mission (a heavy row with RangePlaceAll=0; DebugSpawn turned on mid-mission)
+    broken,         // the game faulted making it: off until the game restarts
+    unavailable,    // its module is not up now (the support calls' cooldown, JetPilot=0, ...)
+    online,         // a session: the plugin's objects would be this machine's alone
+};
 }  // namespace debugspawn
+
+// debug_spawn.cpp, the M map's 「摆放」 panel in the test range (range_place.h, mapcmd.cpp; ini RangePlace): whether it is
+// on this mission (the mission is the test range pack's, edf5campaign.cpp TestRangeMode), a row's state now, and a row
+// made at a ground point the map picked (its DebugSpawnStatus; a support call's own answer in `note`). Game thread.
+bool RangePlaceOn() noexcept;
+debugspawn::RowState SpawnRowState(int row) noexcept;
+int PlaceRow(int row,const float* ground,wchar_t* note,std::size_t size) noexcept;
+// edf5campaign.cpp: the current mode is the test range pack's (its content id TestRangeContent, as the game's own
+// GetContentID reads it). Any thread; false when there is none to read.
+bool TestRangeMode() noexcept;
 }  // namespace crew

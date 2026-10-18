@@ -67,6 +67,16 @@ bool NpcDriver(const unsigned char* v) noexcept {
 
 void Log(const char*,...) noexcept {}
 bool InSession() noexcept { return mapOnline; }
+// The test range's 「摆放」 (debug_spawn.cpp): on in the stub's range mission, each row's state, a row made at a point.
+bool placeOnStub=false;debugspawn::RowState placeStateStub=debugspawn::RowState::ready;
+int placeCalls=0,placeRowStub=-1;float placeAtStub[3]{};
+bool RangePlaceOn() noexcept { return placeOnStub; }
+debugspawn::RowState SpawnRowState(int) noexcept { return mapOnline ? debugspawn::RowState::online : placeStateStub; }
+int PlaceRow(int row,const float* ground,wchar_t* note,std::size_t size) noexcept {
+    ++placeCalls;placeRowStub=row;std::memcpy(placeAtStub,ground,12);
+    if(note && size)note[0]=0;
+    return kDebugSpawnDone;
+}
 float MapRay(const float*,const float*,float*) noexcept { return -1.0f; }
 float MapFloorRay(const float*,const float*,float*) noexcept { return -1.0f; }
 bool groundReady=false;
@@ -534,6 +544,91 @@ void UiCaptureAndSnapshots() noexcept {
     Check(!MapCommandPointerCaptured() && !view.squads && !view.payloads && !view.panels,"closing map drops captures and all stale UI snapshots");
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;ResetMapCommands();
 }
+// The test range's 「摆放」 panel (range_place.h) through the production frame: keys, the mouse on its rows and the map, a
+// pad, online, and a mission without it.
+void PlacePanel() noexcept {
+    using debugspawn::Category;using debugspawn::RowOf;
+    ResetMapCommands();view=View{};config=Config{};placeCalls=0;placeRowStub=-1;mapOnline=false;
+    placeStateStub=debugspawn::RowState::ready;supportCalls=0;
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));
+    MapCmdInput in{};in.front=true;in.usingPad=true;in.eye[1]=100.0f;in.look[0]=80;in.look[2]=120;float centre[3]{};
+    const auto tap=[&](int key){inputstub::keys[key]=true;MapCommandFrame(in,centre);inputstub::keys[key]=false;MapCommandFrame(in,centre);};
+    // Not the range's mission: none of it, the map's keys and the pad's A / B as they were.
+    placeOnStub=false;
+    MapCommandFrame(in,centre);tap(VK_OEM_PERIOD);tap(VK_RETURN);
+    MapCommandReadout r{};
+    Check(PlayerMapCommands(&r) && !r.placeOn && !game.place.open && !placeCalls && !MapPlaceHoldsPad(),"another mission: no place panel at all");
+    tap(VK_OEM_COMMA);tap(VK_OEM_2);tap(VK_BACK);
+    Check(in.usingPad,"another mission: , . / Enter Backspace are not read (the pad stays the input)");
+    // The range: , . / open and move it, Enter places the picked row at the point (the screen's centre here: no view).
+    placeOnStub=true;
+    tap(VK_OEM_PERIOD);
+    Check(game.place.open && game.place.pick[0]==0 && PlayerMapCommands(&r) && r.placeOn && r.placeOpen,"the first key opens it, moving nothing");
+    tap(VK_OEM_PERIOD);tap(VK_OEM_PERIOD);
+    Check(game.place.pick[0]==2,"then . moves down the rows");
+    tap(VK_OEM_2);
+    Check(game.place.category==1 && PlayerMapCommands(&r) && r.placeCategory==1,"/ the next category");
+    tap(VK_RETURN);
+    Check(placeCalls==1 && placeRowStub==RowOf(Category::ours,0) && std::fabs(placeAtStub[0]-80)<0.01f && std::fabs(placeAtStub[2]-120)<0.01f,
+          "Enter: the picked row at the map's point");
+    MapCommandFrame(in,centre);
+    Check(placeCalls==1,"holding nothing: one placed");
+    // Online: the panel is shown with why nothing can be placed; its keys are not read (nothing made, the pad stays the
+    // input).
+    mapOnline=true;in.usingPad=true;tap(VK_RETURN);tap(VK_OEM_PERIOD);
+    Check(placeCalls==1 && PlayerMapCommands(&r) && r.placeOnline && in.usingPad && game.place.pick[1]==0,
+          "online: shown with its reason, its keys not read, nothing made");
+    mapOnline=false;in.usingPad=false;
+    // A row that is not installed: said so, not made.
+    placeStateStub=debugspawn::RowState::missing;tap(VK_RETURN);
+    Check(placeCalls==1 && std::wcsstr(game.note,hudtext::Tr(hudtext::Tx::placeMissing)),"a row not installed: said so, not made");
+    placeStateStub=debugspawn::RowState::ready;
+    tap(VK_BACK);
+    Check(!game.place.open,"Backspace shuts it");
+    // The mouse: a row's click arms it (the support armed before is not), each left click on the map places it, the right
+    // button disarms it.
+    in.usingPad=false;in.mouse=true;groundReady=true;
+    const float vp[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    const int row=RowOf(Category::enemy41,2);
+    const float rect[4]={1000,300,1260,324};
+    MapCommandPlaceButtons(rect,&row,1);
+    game.armedSupport=1;
+    in.dx=(1100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(312.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+    const auto left=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
+    const auto right=[&]{inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_RBUTTON]=false;MapCommandFrame(in,centre);};
+    left();
+    Check(game.place.armed==row && game.place.open && game.place.category==static_cast<int>(Category::enemy41) && game.armedSupport<0 &&
+          PlayerMapCommands(&r) && r.placeArmed==row && placeCalls==1,"a row's click arms it, the support disarmed, nothing made yet");
+    MapCommandPlaceButtons(nullptr,nullptr,0);
+    in.dx=(500.0f-game.pointer.x)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
+    left();left();
+    Check(placeCalls==3 && placeRowStub==row && game.place.armed==row && !supportCalls,"armed: each left click on the map places one, still armed");
+    right();
+    Check(game.place.armed<0 && placeCalls==3,"the right button disarms it, makes nothing");
+    left();
+    Check(placeCalls==3,"disarmed: a left click on the map is the map's");
+    // A pad: the D-pad opens and moves it, A places at the centre, B shuts it; the map's A / B wait until both are let go.
+    in.usingPad=true;in.mouse=false;in.pad=true;
+    game.place.open=false;MapCommandFrame(in,centre);
+    const auto pad=[&](WORD b){in.buttons=b;MapCommandFrame(in,centre);in.buttons=0;MapCommandFrame(in,centre);};
+    pad(XINPUT_GAMEPAD_DPAD_DOWN);
+    Check(game.place.open && MapPlaceHoldsPad(),"the D-pad opens it; the pad's A / B are the panel's");
+    pad(XINPUT_GAMEPAD_DPAD_RIGHT);
+    Check(game.place.category==static_cast<int>(Category::enemy41)+1,"right: the next category");
+    pad(XINPUT_GAMEPAD_A);
+    Check(placeCalls==4 && std::fabs(placeAtStub[0]-80)<0.01f,"A places the picked row at the screen's centre");
+    in.buttons=XINPUT_GAMEPAD_B;MapCommandFrame(in,centre);
+    Check(!game.place.open && MapPlaceHoldsPad(),"B shuts it; while B is still held the map's B waits (it would close the map)");
+    in.buttons=0;MapCommandFrame(in,centre);
+    Check(!MapPlaceHoldsPad(),"let go: the pad's A / B are the map's again");
+    pad(XINPUT_GAMEPAD_A);
+    Check(placeCalls==4,"shut: A is the map's (centre on the player), nothing placed");
+    game.place.armed=row;SuspendMapCommands();
+    Check(game.place.armed<0 && !MapPlaceHoldsPad(),"closing the map disarms it");
+    in.pad=false;placeOnStub=false;groundReady=false;
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));ResetMapCommands();
+}
 // Only the units that take orders are picked (the user, 2026-10-09: "总有一些我不能指挥的"; "坦克上的…框选的时候应该去重"):
 // Tab passes over a script's squad and a riding one, a script's squad's panel row says why instead of selecting it, a
 // riding squad's row still picks it (for its dismount), and the log of a refused order counts why per unit.
@@ -828,7 +923,7 @@ int main() {
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
     crew::SupportInput();
     crew::UiCaptureAndSnapshots();crew::RtsClicks();crew::PickOnlyCommandable();crew::FormationMenu();
-    crew::RemoteCommandResults();crew::SelectionCapabilityMask();
+    crew::RemoteCommandResults();crew::SelectionCapabilityMask();crew::PlacePanel();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

@@ -35,8 +35,15 @@ same way (their shadowed model and CAS move with them); every 4.1 script names t
 STOCK_OVERRIDES: objects EDF6's archives hold, left over from 4.1 (EDF6's own missions never spawn them), whose class
 EDF6 has since changed: the stock file lacks keys the class reads unchecked and crashes on spawn (Transporter401_
 Formation: se_preset_list, EDF+0x5E9A90, M-P003 2026-10-13). Such a root is built like any other (4.1's SGO under an
-EDF6 template of the class) and shipped under the same Mods path, so it replaces the stock file. build() checks every
-SGO the 4.1 missions spawn (spawned_objects) that EDF6's archives serve: stale_stock refuses one that is not replaced.
+EDF6 template of the class) and shipped under the same Mods path, so it replaces the stock file.
+
+STOCK_COMPLETIONS: stock SGOs in EDF6's own form that name a file only 4.1 ships (Monster501_King: its model archive,
+the null model at EDF+0x1100303, MP004 2026-10-17). The stock SGO stays; those files come over converted, registered
+under 'stock_completions'. A member of such an archive that a model archive of the class's own stock SGOs holds byte
+for byte (the King's five Monster501 textures, in EDF6's OBJECT/MONSTER501.MRAB) is not shipped: the entry's
+'members_from' and the manifest row say where in the player's EDF6 the install reads it (stock_member_sources,
+tools/edf41_objects.py). build() checks every SGO the 4.1 missions spawn (spawned_objects) that EDF6's archives
+serve: stale_stock refuses one that is neither replaced nor completed.
 """
 from __future__ import annotations
 
@@ -44,6 +51,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -96,6 +104,13 @@ STOCK_EXEMPT: dict[str, str] = {
 STOCK_OVERRIDES: dict[str, str] = {
     'TRANSPORTER401_FORMATION.SGO': "no se_preset_list: Transporter_Formation's constructor passes it unchecked to the "
                                     "sound system (EDF+0x5E9A90 -> 0x5E4760 -> 0x7B3310 -> 0x240AD3, a null fault)",
+}
+# Stock SGOs EDF6 has already brought into its own form (keys, MAB, CAS) that name a file only 4.1 ships: the stock
+# SGO stays, the files it lacks come over converted (completion). root -> what failed without them.
+STOCK_COMPLETIONS: dict[str, str] = {
+    'MONSTER501_KING.SGO': "names app:/object/Monster501_King.rab, which no EDF6 archive holds: Monster501's setup "
+                           "(EDF+0x6BB890) finds no model (0x6BC218), passes the null to the model instance "
+                           "(0x11002D0), which faults reading it (EDF+0x1100303; MP004, testhub #17, 2026-10-17)",
 }
 
 # The DLC objects EDF4.1's two mission packs spawn (pylib/edf41dlc.py: <EDF4.1>/DLC/<hash>/dlc.cpk, mounted mp01: /
@@ -1053,14 +1068,36 @@ PATCHES.update(DLC_INSECT_PATCHES)
 # -- with 4.1's look and 4.1's own unit put in (FRIEND_KEYS: model, CAS, MAB, ragdoll, colours, lights, voice, its 4.1
 # weapons). The class's names are checked against 4.1's files (CLASS_NAMES, friend_names).
 
-# Keys 4.1's file gives (when it has them): the look, the voice and the 4.1 unit's weapons and the slots they go in.
+# Keys 4.1's file gives (when it has them): the look, the voice and the 4.1 unit's weapons and the slots they go in, and
+# human_direction_adjust, which names its model's spine bones and the axis they turn about (below: SPINE_AXIS_MODE).
 # Not: game_object_camera_setting (4.1's one camera pair, EDF6 reads a list of four, EDF+0x54DDF0), soldier_config
 # (4.1's second number is 0 / 1, EDF6's 0.35 in every stock soldier: not known to mean the same), soldier_weapon_grab_
-# adjust, human_climb_settings, human_character_control_mass, the grip offsets (EDF6 only), appeal_animation (EDF6's
-# folder of emotes exists; 4.1's names OBJECT/ARMYSOLDIER/APPEAL/*.CANM, which EDF6 lacks).
+# adjust (EDF6 only: re-expressed for 4.1's hand instead, weapon_grip_adjust), human_climb_settings,
+# human_character_control_mass, the grip offsets (EDF6 only), appeal_animation (EDF6's folder of emotes exists; 4.1's
+# names OBJECT/ARMYSOLDIER/APPEAL/*.CANM, which EDF6 lacks).
 FRIEND_KEYS = ('ragdoll', 'ragdoll_contact', 'soldier_color', 'soldier_spotlight', 'game_object_talk_setting',
                'human_voice', 'human_se_table', 'game_object_durability', 'soldier_load_weapon', 'soldier_weapon_slot',
-               'heavy_booster_setting', 'pale_wing_streamer_setting')
+               'heavy_booster_setting', 'pale_wing_streamer_setting', 'human_direction_adjust')
+# The aim twist: human_direction_adjust [mode, [spine bones], ...] turns each spine bone's local matrix by the aim's yaw
+# (EDF+0x5750E0; mode read into +0x12D0 by 0x56E66B): mode 2 about the bone's local X (0x575514 cmp ecx, 2: rows 1 and 2
+# mixed), any other about its local Y (rows 0 and 2 mixed). EDF6's soldiers' spine bones (hara0..2) point local X up and
+# all 101 stock soldiers say 2; 4.1's point local Y up and all 31 of 4.1's say 1. A 4.1 model under EDF6's 2 turns its
+# spine about the body's side axis -- bends forward and back -- instead of twisting it: the key follows the model.
+SPINE_AXIS_MODE = {0: 2, 1: 1}   # the local axis (row of the bind matrix) that points up -> the mode that turns about it
+# The left hand on the weapon (feedback 2026-10-18 「omega小队持枪姿势有问题」): SoldierBase (EDF+0x597F00) sets the CAS
+# variable v_weapon_grip_ik_target (its index at +0x1988, EDF+0x58DC15) to grab · ik · node, where ik is the weapon
+# model's first record of its MAB list 1 (the 'IK' locator: EDF+0x68C206..0x68C352, matrix +0x7B0, node +0x7A0) and
+# grab the soldier's soldier_weapon_grab_adjust: [offset, rotation in degrees] (EDF+0x58DD70: item 1 as Rx·Ry·Rz, row
+# vectors, degrees by pi / 180; item 0 the offset row, +0x19C0). The CAS's IK puts the left wrist bone (te_l) in that
+# frame. EDF6 re-authored every weapon's IK locator for its own skeleton's te_l, whose axes are turned ~90 degrees from
+# 4.1's: across the 8 ranger AI weapons both games ship with one (WEAPON/AISOLDIER*), EDF6's IK rotation is 88..98
+# degrees from 4.1's, and 8..17 degrees from 4.1's re-expressed in EDF6's te_l (te_l_4.1 · te_l_6^-1; selftest
+# edf41_friend_grip_matches_weapons). The 4.1 soldiers carry EDF6's weapons (the same names, EDF6's files), so their
+# left hand came out turned ~90 degrees off the grip. grab is applied in the target's own frame (left of ik), so one
+# rotation per model re-expresses every weapon's: weapon_grip_adjust. (EDF6's fencers' own (-90, -35, 0) comes out
+# within 3 degrees of none for 4.1's fencer skeleton -- EDF6 kept the old frame for them; their AI weapons carry no IK
+# record, so it moves nothing.)
+GRIP_BONE = 'te_l'
 # What the class reads in another shape than 4.1 wrote it, or by a name 4.1's model lacks (EDF.dll, static, 2026-10-17):
 #  - soldier_sub_weapon_slot: 0 (no sub weapon; 41 / 45, 12 / 24, 34 / 38 stock soldiers of the three classes): EDF6's
 #    own file may name a third weapon there (AIHEAVYARMOR_SP_LEADER: [[2, 'weapon', 'te_l']]), 4.1's units carry two;
@@ -1152,6 +1189,92 @@ def friend_roots(games: 'Games') -> dict[str, int]:
     return count
 
 
+def euler_matrix(deg: list) -> list[float]:
+    """Rx · Ry · Rz of the angles in degrees, row vectors (soldier_weapon_grab_adjust[1], EDF+0x58DD70), as a 4x4."""
+    out = mdb.ident()
+    for axis, a in enumerate(deg[:3]):
+        c, s = math.cos(math.radians(float(a))), math.sin(math.radians(float(a)))
+        i, j = [(1, 2), (2, 0), (0, 1)][axis]   # x: rows/cols 1, 2; y: 2, 0; z: 0, 1
+        r = mdb.ident()
+        r[i * 4 + i], r[i * 4 + j], r[j * 4 + i], r[j * 4 + j] = c, s, -s, c
+        out = mdb.mmul(out, r)
+    return out
+
+
+def matrix_euler(m: list[float]) -> list[float]:
+    """The degrees euler_matrix turns into the rotation part of `m` (ValueError at gimbal lock, where they are not one)."""
+    sb = -m[2]
+    if abs(sb) > 0.9999:
+        raise ValueError(f'rotation {m[:11]} is at gimbal lock: no unique Rx·Ry·Rz angles')
+    return [math.degrees(math.atan2(m[6], m[10])), math.degrees(math.asin(sb)), math.degrees(math.atan2(m[1], m[0]))]
+
+
+def model_mdb(file: Callable[[object], bytes | None], am: object) -> mdb.Mdb | None:
+    """The first MDB animation_model[0] names (its archive through `file`); None when it is not there."""
+    entries = model_entries(am[0]) if isinstance(am, list) and am else []
+    rab = file(entries[0][0]) if entries else None
+    for f in mdb.rab_read(rab).files if rab else []:
+        if f.name.lower() == str(entries[0][1]).lower():
+            return mdb.mdb_read(f.data)
+    return None
+
+
+def bind_rotation(md: mdb.Mdb, bone: str) -> list[float]:
+    """The model-space bind rotation of `bone` (translation dropped; ValueError when it is not a rotation)."""
+    m = list(mdb.bind_world(md)[mdb.bone_named(md, bone)])
+    m[12:15] = [0.0, 0.0, 0.0]
+    rows = [m[0:3], m[4:7], m[8:11]]
+    if any(abs(sum(a * b for a, b in zip(rows[i], rows[j])) - (i == j)) > 1e-3 for i in range(3) for j in range(3)):
+        raise ValueError(f'bone {bone}: bind matrix {rows} is not a rotation')
+    return m
+
+
+def spine_mode(md: mdb.Mdb, bones: list) -> int:
+    """The human_direction_adjust mode that twists `bones` about the body's up axis (SPINE_AXIS_MODE): ValueError when
+    they do not all point the same local axis up, or point neither X nor Y up."""
+    ups = set()
+    for b in bones:
+        m = bind_rotation(md, b)
+        ups |= {row for row in range(3) if abs(m[row * 4 + 1]) > 0.95}
+    if len(ups) != 1 or next(iter(ups)) not in SPINE_AXIS_MODE:
+        raise ValueError(f'spine bones {bones} point local axes {sorted(ups)} up: no human_direction_adjust mode turns '
+                         'them about the up axis')
+    return SPINE_AXIS_MODE[next(iter(ups))]
+
+
+def weapon_grip_adjust(model41: mdb.Mdb, model6: mdb.Mdb, adjust6: list) -> list:
+    """soldier_weapon_grab_adjust for a 4.1 soldier of model `model41` that carries EDF6's weapons, from `adjust6`, the
+    key of the EDF6 soldier (model `model6`) it takes its other keys from: that rotation re-expressed for 4.1's left
+    wrist (GRIP_BONE above: rotation te_l_4.1 · te_l_6^-1 · adjust6's), the offset as it is. The wrist then lands in
+    every weapon's IK frame as EDF6's soldier's does, the hand on the grip the same way round."""
+    turn = mdb.mmul(bind_rotation(model41, GRIP_BONE), mdb.inverse_affine(bind_rotation(model6, GRIP_BONE)))
+    rot = mdb.mmul(turn, euler_matrix(adjust6[1]))
+    return [[float(v) for v in adjust6[0]], [round(a, 4) for a in matrix_euler(rot)]]
+
+
+def soldier_grip(file41: Callable[[object], bytes | None], members: dict, template: dict,
+                 rel: str) -> tuple[list, int]:
+    """(soldier_weapon_grab_adjust, human_direction_adjust mode) for the 4.1 soldier `members` (its files through
+    `file41`) that carries the keys of EDF6's soldier `template` (whose files are EDF6's: `file41` reads them too).
+    ValueError when either model is missing or a key is not of the shape the class reads."""
+    m41, m6 = model_mdb(file41, members['animation_model']), model_mdb(file41, template['animation_model'])
+    if m41 is None or m6 is None:
+        raise ValueError(f'{rel}: the model of the soldier or of its EDF6 template is not there')
+    adjust6 = template['soldier_weapon_grab_adjust']
+    if not (isinstance(adjust6, list) and len(adjust6) == 2 and all(len(v) == 3 for v in adjust6)):
+        raise ValueError(f'{rel}: template soldier_weapon_grab_adjust {adjust6!r} is not [offset, rotation]')
+    hda = members['human_direction_adjust']
+    return weapon_grip_adjust(m41, m6, adjust6), spine_mode(m41, hda[1])
+
+
+def files_reader(games: 'Games', files: dict[str, bytes]) -> Callable[[object], bytes | None]:
+    """app:/... or Mods path -> the file's bytes: `files`' when it is there, else EDF6's, else None."""
+    def file(ref: object) -> bytes | None:
+        r = rel_of(str(ref))
+        return files[r] if r in files else games.read6(r) if r in games.have6 else None
+    return file
+
+
 def friend_names(games: 'Games', files: dict[str, bytes], rel: str, members: dict, mab: bytes) -> None:
     """ValueError when a name the class looks up is not in 4.1's files: FRIEND_BONE_KEYS in the model, the weapon slots'
     CAS players (soldier_weapon_slot [indices, player, ...]: weapon / weapon_r / weapon_l), FRIEND_LOCATOR_KEYS and the
@@ -1214,6 +1337,12 @@ def friend_look(games: 'Games', root: str) -> dict[str, bytes]:
             root_node.set(k, dsgo_value(mine[k]))
     for k, v in FRIEND_OVERRIDE[cls]:
         root_node.set(k, dsgo_value(v))
+    plain41 = {k: sgo.plain(v) for k, v in mine.items()}
+    grab, mode = soldier_grip(files_reader(games, out), plain41, sgo.load(data=t_data), src)
+    if plain41['human_direction_adjust'][0] != mode:
+        raise ValueError(f'{src}: 4.1\'s human_direction_adjust mode {plain41["human_direction_adjust"][0]} does not '
+                         f'twist its spine about the up axis ({mode} does)')
+    root_node.set('soldier_weapon_grab_adjust', dsgo_value(grab))
     # animation_model: 4.1's model (its first entry: the _light one names an archive 4.1 itself lacks), CAS and MAB, then
     # the template's entries past them that name nothing of EDF6's model (its scale; its effect archive, a dict); a
     # list there names EDF6's model's bones (the wing divers' skirt chain, ragdoll_skirt5B_*), which 4.1's lacks.
@@ -1433,6 +1562,12 @@ class Games:
     def has4(self, rel: str) -> bool:
         """A file EDF4.1 has at Mods path `rel`: its own archives, a DLC pack's, or a shadowed story file moved."""
         return rel in self.in4 or rel in self.in4dlc or rel in self.moved
+
+    def lacks(self, rel: str) -> bool:
+        """A file `rel` (a Mods path an SGO names) the game cannot load that 4.1 has: a file (not a folder prefix),
+        not a sound bank (loose files: closure checks those), not in EDF6's archives. What closure ships."""
+        return (bool(os.path.splitext(rel)[1]) and not rel.endswith('.ACB') and rel not in self.have6
+                and self.has4(rel))
 
     def stock_by_class(self) -> dict[str, dict[str, dict]]:
         """EDF6's own top-level SGOs by xgs_scene_object_class: {class: {OBJECT/<name>: members}} (read once)."""
@@ -2315,13 +2450,8 @@ def class_bodies(spec: ClassNames, members: dict, rel: str) -> tuple[str, ...]:
 
 def model_bones(file: Callable[[object], bytes | None], am: object) -> set[str]:
     """The bone names of the first MDB animation_model[0] names (its archive through `file`); empty when it is not there."""
-    entries = model_entries(am[0]) if isinstance(am, list) and am else []
-    rab = file(entries[0][0]) if entries else None
-    for f in mdb.rab_read(rab).files if rab else []:
-        if f.name.lower() == str(entries[0][1]).lower():
-            md = mdb.mdb_read(f.data)
-            return {md.name_of(b.name) for b in md.bones}
-    return set()
+    md = model_mdb(file, am)
+    return {md.name_of(b.name) for b in md.bones} if md else set()
 
 
 def check_class_names(games: 'Games', files: dict[str, bytes], rel: str) -> None:
@@ -2526,17 +2656,23 @@ def spawned_objects(games: 'Games') -> set[str]:
 
 
 def stale_stock(stock: dict[str, dict[str, dict]], spawned: set[str], overridden: set[str],
-                proven: set[str]) -> list[str]:
+                proven: set[str], only41: Callable[[str], bool] = lambda rel: False) -> list[str]:
     """The stock EDF6 SGOs (`stock`: stock_by_class) among `spawned` that this port neither replaces (`overridden`) nor
-    can show to load, as 'rel: lacks [keys]' / 'rel: no sibling to test': the class reads its keys by name and several
-    dereference a miss unchecked, so a file lacking a key every OTHER stock SGO of its class has is a leftover its
-    class cannot load (Transporter401_Formation, no se_preset_list: EDF6's own missions never spawn it, its sibling
-    has the key). `proven` (SGOs EDF6's own missions spawn, directly or through the files they name) are loaded by
-    the game, so they pass: that is the only evidence for a class with a single member."""
+    can show to load, as 'rel: names [files]' / 'rel: lacks [keys]' / 'rel: no sibling to test': the class reads its
+    keys by name and several dereference a miss unchecked, so a file lacking a key every OTHER stock SGO of its class
+    has is a leftover its class cannot load (Transporter401_Formation, no se_preset_list: EDF6's own missions never
+    spawn it, its sibling has the key). So is one naming a file the game cannot load that 4.1 has (`only41`:
+    Games.lacks), whatever its keys: a model archive only 4.1 ships leaves the class a null model (Monster501_King,
+    keys as its sibling's: EDF+0x1100303). `proven` (SGOs EDF6's own missions spawn, directly or through the files
+    they name) are loaded by the game, so they pass: that is the only evidence for a class with a single member."""
     out: list[str] = []
     for cls, members in sorted(stock.items()):
         for rel, mine in sorted(members.items()):
             if rel not in spawned or rel in overridden or rel in proven:
+                continue
+            absent = sorted(r for r in {ref_rel(s) for s in strings(mine) if is_ref(s)} if only41(r))
+            if absent:
+                out.append(f'{rel}: class {cls} names {absent}, which only EDF4.1 has')
                 continue
             others = [set(m) for r, m in members.items() if r != rel]
             if not others:
@@ -2625,6 +2761,23 @@ def fill_class_keys(stock: dict[str, dict[str, dict]], read: Callable[[str], byt
         members[k] = full[k]
     files[rel] = sgo.write_depth_first(version, members)
     return {'template': name, 'keys': need}
+
+
+def root_soldier_grip(games: 'Games', out: dict[str, bytes], rel: str, filled: dict | None) -> None:
+    """A ROOTS soldier (4.1's own file under an EDF6 soldier class: the Omega team) with soldier_weapon_grab_adjust
+    re-expressed for its 4.1 hand (weapon_grip_adjust) from the EDF6 soldier fill_class_keys took the key from, and its
+    human_direction_adjust checked to twist its model's spine about the up axis (spine_mode). ValueError when the key
+    did not come from such a template or the object is not a DSGO (the soldier classes are DSGO-only)."""
+    if not filled or 'soldier_weapon_grab_adjust' not in filled['keys'] or out[rel][:4] != b'DSGO':
+        raise ValueError(f'{rel}: soldier_weapon_grab_adjust not filled from an EDF6 soldier into a DSGO ({filled})')
+    doc = dsgo.parse(out[rel])
+    members = sgo.load(data=out[rel])
+    grab, mode = soldier_grip(files_reader(games, out), members, sgo.load(data=games.read6(filled['template'])), rel)
+    if members['human_direction_adjust'][0] != mode:
+        raise ValueError(f'{rel}: human_direction_adjust mode {members["human_direction_adjust"][0]} does not twist its '
+                         f'spine about the up axis ({mode} does)')
+    doc.root.set('soldier_weapon_grab_adjust', dsgo_value(grab))
+    out[rel] = dsgo.compact(dsgo.Document(doc.root, doc.pool))
 
 
 def check_class_keys(stock: dict[str, dict[str, dict]], rel: str, data: bytes) -> None:
@@ -3358,6 +3511,8 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
                 if out[rel][:4] != b'DSGO' and str(sgo.load(data=out[rel]).get('xgs_scene_object_class')) in games.dsgo_only_classes():
                     out[rel] = as_dsgo(out[rel])
                 check_class_format(games.dsgo_only_classes(), rel, out[rel])
+                if str(sgo.load(data=out[rel]).get('xgs_scene_object_class')) in FRIEND_OVERRIDE:
+                    root_soldier_grip(games, out, rel, filled)   # the Omega team: 4.1's soldiers kept whole
                 check_class_keys(stock, rel, out[rel])
                 check_model_mab(stock, rel, out[rel])
                 check_fracture(sgo.load(data=out[rel]), out, rel)
@@ -3376,20 +3531,77 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
         objects.append({'object': rel, 'class': cls, 'missions': uses, 'files': list(out),
                         **({'class_keys_from': filled} if filled else {}),
                         **({'replaces_stock': STOCK_OVERRIDES[root]} if root in STOCK_OVERRIDES else {})})
-    if not only:   # every stock SGO the 4.1 missions spawn is one EDF6 loads, or replaced above
-        stale = stale_stock(games.stock_by_class(), spawned_objects(games), {o['object'] for o in objects},
-                            proven_stock(games))
+    completions = []
+    for root, why in STOCK_COMPLETIONS.items():
+        if only and root not in only:
+            continue
+        rel = 'OBJECT/' + root
+        out = complete_stock(games, rel)
+        clash = [r for r in out if r in files and files[r] != out[r]]
+        if clash:
+            raise ValueError(f'{rel}: files another object needs differently: {clash}')
+        files.update(out)
+        sources = stock_member_sources(games, rel, out)
+        completions.append({'object': rel, 'class': sgo.load(data=games.read6(rel)).get('xgs_scene_object_class'),
+                            'files': list(out), 'completes_stock': why, **({'members_from': sources} if sources else {})})
+    if not only:   # every stock SGO the 4.1 missions spawn is one EDF6 loads, or replaced / completed above
+        stale = stale_stock(games.stock_by_class(), spawned_objects(games),
+                            {o['object'] for o in objects + completions}, proven_stock(games), games.lacks)
         stale = [s for s in stale if s.split(':')[0] not in STOCK_EXEMPT]
         if stale:
-            raise ValueError('EDF6 archives serve SGOs the 4.1 missions spawn that its classes cannot load '
-                             '(add the root to ROOTS / ALIASES with STOCK_OVERRIDES):\n  ' + '\n  '.join(stale))
+            raise ValueError('EDF6 archives serve SGOs the 4.1 missions spawn that its classes cannot load (add the '
+                             'root to ROOTS / ALIASES with STOCK_OVERRIDES, or to STOCK_COMPLETIONS):\n  '
+                             + '\n  '.join(stale))
     hashes = {r: hashlib.sha256(b).hexdigest() for r, b in files.items()}
     for r, path in shared.items():
         with open(os.path.join(HERE, '..', *path.split('/')), 'rb') as f:
             hashes[r] = hashlib.sha256(f.read()).hexdigest()
-    data = {'source': 'EDF4.1 Root.cpk and its DLC packs; tools/make_edf41_objects.py', 'objects': objects, 'skipped': skipped,
-            'files': dict(sorted(hashes.items())), 'shared': shared}
+    data = {'source': 'EDF4.1 Root.cpk and its DLC packs; tools/make_edf41_objects.py', 'objects': objects,
+            'stock_completions': completions, 'skipped': skipped, 'files': dict(sorted(hashes.items())),
+            'shared': shared}
     return data, files
+
+
+def complete_stock(games: Games, rel: str) -> dict[str, bytes]:
+    """The files the stock SGO `rel` (STOCK_COMPLETIONS) names that only 4.1 has (Games.lacks), converted. ValueError
+    when it names none (nothing to complete), when one is an SGO (that would be an object of its own: a root), or when
+    a model archive it names lacks the MDB it names there (the class would get the null model all the same)."""
+    members = sgo.load(data=games.read6(rel))
+    need = sorted(r for r in {ref_rel(s) for s in strings(members) if is_ref(s)} if games.lacks(r))
+    if not need:
+        raise ValueError(f'{rel}: names no file only 4.1 has; STOCK_COMPLETIONS has nothing to complete')
+    if any(r.endswith('.SGO') for r in need):
+        raise ValueError(f'{rel}: names SGOs only 4.1 has ({need}): port it as a root (STOCK_OVERRIDES)')
+    out = {r: convert(games, r) for r in need}
+    for rab, name in [(e[0], e[1]) for e in model_entries((members.get('animation_model') or [None])[0])
+                      if len(e) > 1 and isinstance(e[0], str) and isinstance(e[1], str) and is_ref(e[0])]:
+        r = ref_rel(rab)
+        if r in out and not any(f.name.lower() == name.lower() for f in mdb.rab_read(out[r]).files):
+            raise ValueError(f'{rel}: {r} has no {name}, which its animation_model names')
+    return out
+
+
+def stock_member_sources(games: Games, rel: str, out: dict[str, bytes]) -> dict[str, dict[str, list]]:
+    """{archive of `out`: {sha256: [EDF6 archive, RAB path, member index, member name]}}: the members of the archives a
+    completion ships (`out`, for the stock SGO `rel`) whose stored bytes a model archive of EDF6's own SGOs of its class
+    holds (the King: Monster501's MONSTER501.MRAB). The install reads those from the player's game instead (rabpool
+    manifest rows with a source; tools/edf41_objects.py checks each by its SHA-256)."""
+    cls = sgo.load(data=games.read6(rel)).get('xgs_scene_object_class')
+    donors = sorted({ref_rel(e[0]) for members in games.stock_by_class().get(str(cls), {}).values()
+                     for e in model_entries((members.get('animation_model') or [None])[0])
+                     if e and isinstance(e[0], str) and is_ref(e[0])} & games.have6)
+    found: dict[str, list] = {}
+    for donor in (d for d in donors if rabpool.is_archive(d)):
+        archive = os.path.basename(games.in6[donor].cpk.path)
+        for i, f in enumerate(mdb.rab_read(games.read6(donor)).files):
+            found.setdefault(hashlib.sha256(f.stored).hexdigest(), [archive, donor, i, f.name])
+    sources: dict[str, dict[str, list]] = {}
+    for r, data in out.items():
+        if rabpool.is_archive(r):
+            mine = {s: found[s] for s in (hashlib.sha256(f.stored).hexdigest() for f in mdb.rab_read(data).files) if s in found}
+            if mine:
+                sources[r] = dict(sorted(mine.items()))
+    return sources
 
 
 def main() -> int:
@@ -3403,7 +3615,8 @@ def main() -> int:
     data, files = build(a.edf41, a.edf6, tuple(r.upper() for r in a.only))
     out_json, out_files = (os.path.join(a.out, 'objects.json'), os.path.join(a.out, 'objects')) if a.out else (OUT, FILES)
     shutil.rmtree(out_files, ignore_errors=True)
-    for rel, b in rabpool.pack(files).items():   # archives as manifests over shared members (pylib/rabpool.py)
+    sources = {r: s for c in data['stock_completions'] for r, s in c.get('members_from', {}).items()}
+    for rel, b in rabpool.pack(files, sources).items():   # archives as manifests over shared members (pylib/rabpool.py)
         path = os.path.join(out_files, *rel.split('/'))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb') as f:

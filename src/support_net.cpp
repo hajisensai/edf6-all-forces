@@ -182,6 +182,8 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
     out[0]=0;
     const struct { std::uint32_t bit; Tx text; } kNames[]={{FeatureExt(support_net::kExtSeaRescue),Tx::versionFeatRescue},
         {FeatureExt(support_net::kExtRescueChannel),Tx::versionFeatRescueChannel},
+        {FeatureExt(support_net::kExtOutfit41),Tx::versionFeatOutfit41},
+        {FeatureExt(support_net::kExtBvmPlayers),Tx::versionFeatBvmPlayers},
         {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapTransports,Tx::versionFeatTransport},
         {support_net::kCapLoadout,Tx::versionFeatCompose},{FeatureExt(support_net::kExtVariants),Tx::versionFeatVariants},
         {support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
