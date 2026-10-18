@@ -111,12 +111,17 @@ def model_external_inputs(folder: str) -> dict[str, str | None]:
     """
     import obj_model
     root = Path(folder).resolve()
+    root_prefix = os.path.normcase(str(root)).rstrip('\\/') + os.sep
     external: dict[str, str | None] = {}
 
-    def record(path: Path) -> None:
-        path = path.resolve()
-        if not path.is_relative_to(root):
-            external[str(path)] = sha256_file(str(path))
+    def record(path: str) -> None:
+        # Pure string normalisation: these paths may belong to another machine (a drive that exists here but
+        # cannot be read), so resolve() or any other filesystem access could raise OSError. Existence uses the
+        # same criterion as obj_model; absent/unreadable is recorded as None.
+        normal = os.path.abspath(path)
+        if os.path.normcase(normal).startswith(root_prefix):
+            return
+        external[normal] = sha256_file(normal) if obj_model.path_present(normal) else None
 
     for obj in root.rglob('*.obj'):
         with obj.open(encoding='utf-8', errors='replace') as f:
@@ -125,11 +130,11 @@ def model_external_inputs(folder: str) -> dict[str, str | None]:
                 if not parts or parts[0] != 'mtllib':
                     continue
                 library = obj.parent / ' '.join(parts[1:])
-                record(library)
-                if library.is_file():
+                record(str(library))
+                if obj_model.path_present(str(library)) and os.path.isfile(library):
                     for material in obj_model.read_mtl(str(library)).values():
                         if material.diffuse_map:
-                            record(Path(material.diffuse_map))
+                            record(material.diffuse_map)
     return external
 
 
