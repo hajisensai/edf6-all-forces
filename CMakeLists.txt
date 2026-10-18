@@ -28,6 +28,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/infantryscope.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/firstperson.cpp src/fp_vehicle.cpp src/fp_skin_gpu.cpp src/vehicle_look.cpp)
 # The damage statistics (src/damagestats.cpp: the damage hook and the round tags; the page in src/hud_stats.inc).
 target_sources(EDF6VehicleCrew PRIVATE src/damagestats.cpp)
+# The EDF4.1 port's kill counters in the battle record (src/killcount.cpp; docs/kill-counter-re.md).
+target_sources(EDF6VehicleCrew PRIVATE src/killcount.cpp)
 # Fire that cannot hurt its target (src/wastedfire.cpp, src/wasted_fire.h): fed by the damage hook, asked by the AI.
 target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
@@ -1236,6 +1238,15 @@ set_tests_properties(allclass_native PROPERTIES SKIP_RETURN_CODE 77)
 # crash a run-out pool led to, on a real EDF.dll.
 add_test(NAME fsbudget_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/fsbudget_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(fsbudget_native PROPERTIES SKIP_RETURN_CODE 77)
+# The battle record's rows and the counter store (src/killcount_logic.h; docs/kill-counter-re.md): the row fill's
+# decoding and the tree lookup on made-up bytes, then every site src/killcount.cpp patches on a real EDF.dll.
+add_executable(killcount_test EXCLUDE_FROM_ALL tests/killcount_test.cpp)
+target_include_directories(killcount_test PRIVATE src)
+target_compile_options(killcount_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks killcount_test)
+add_test(NAME killcount COMMAND killcount_test)
+add_test(NAME killcount_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/killcount_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(killcount_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME allclass_census COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_census_check.py" "${EDF6_GAME_DIR}")
 set_tests_properties(allclass_census PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 

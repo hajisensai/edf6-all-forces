@@ -5999,7 +5999,7 @@ def edf5_campaign_range_pack() -> None:
     for campaign, want in ((True, e5c.Contents(65, 68)), (False, e5c.Contents(0, 68))):
         files, content, _ = e5c.build(rootcpk.DEFAULT_GAME, campaign=campaign)
         assert content == want, (campaign, content)
-        assert set(files) == {e5c.CONFIG, e5c.PACKS_FILE, *e5c.TEXTS.values(),
+        assert set(files) == {e5c.CONFIG, e5c.PACKS_FILE, *e5c.TEXTS.values(), e5c.ACHIEVEMENT,
                               *(f for pk in (*(e5c.PACKS if campaign else ()), e5c.RANGE) for f in pk.files())}
         modes = sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList'])
         assert modes[:len(stock)] == stock
@@ -8830,7 +8830,7 @@ def edf41_anthill_voxel_body() -> None:
     assert near(block[1], [lo for lo, _ in box]) and near(block[2], [hi for _, hi in box]), 'the box is not the model\'s extent'
     assert block[0] == [16, 16, 16] and len(block[3]) == m.FRACTURE_TUNING + 1 and block[3][-1] == [], block
     # 4.1's own values stay; E517's mech look does not come over; the score adjust both stock nests carry does
-    assert top['game_object_durability'] == 1500.0 and top['game_object_kill_counter'] == 'NestKillCount'
+    assert top['game_object_durability'] == 1500.0 and top['game_object_kill_counter'] == 'edf41_NestKillCount'
     assert top['game_object_destroy_score_adjust'] == 0.5
     assert not {'ant_hill_material_type', 'lighting', 'material_animation'} & set(top), sorted(top)
     # the refusals
@@ -9356,8 +9356,8 @@ def edf41_dlc_insects() -> None:
     """The DLC's insects and nests on EDF6's classes (make_edf41_objects.DLC_INSECT_PATCHES, NEST_41_KEYS): Nephila02L's
     thread gravity and spread as 4.1's setup defaults them (3.0, 0.1) where EDF6's would be 0.5, 03L's own four kept;
     every Nephila and the queen carry the plugin keys src/edf41insects.cpp reads (4.1's random_speed, 4.1's needle base
-    0.4), and only they; ragdoll_contact as EDF6's own copies of these objects; the nests count into AntHillKillCount
-    with 4.1's score. The plugin's key names and constants are the converter's."""
+    0.4), and only they; ragdoll_contact as EDF6's own copies of these objects; the nests count into the port's nests
+    counter (edf41_NestKillCount, pylib/edf41kills.py) with 4.1's score. The plugin's key names and constants are the converter's."""
     import edf41_objects as eo
     import make_edf41_objects as m
     import sgo
@@ -9389,7 +9389,7 @@ def edf41_dlc_insects() -> None:
         assert top(root)['ragdoll_contact'][1] == want, root
     for root in by_class['AntHill'] + by_class['BigNest']:
         t = top(root)
-        assert t['game_object_kill_counter'] == 'AntHillKillCount', root
+        assert t['game_object_kill_counter'] == 'edf41_NestKillCount', root
         assert t.get('game_object_destroy_score_adjust', 1.0) == 1.0, root
     # the plugin keys appear on no other shipped object
     for o in reg['objects']:
@@ -11485,7 +11485,7 @@ def edf41_rest_behaviour_real() -> None:
                  'ALIENTRAILER401_XL'):
         d = load(name)
         assert len(d['se_list']) == 6 and pairs(d['material_animation']) == pairs(d['unit_material_animation']) == [0, 2, 2]
-        assert d['game_object_kill_counter'] == 'AlienTrailerKillCount'
+        assert d['game_object_kill_counter'] == 'edf41_AlienTrailerKillCount'
     for name in ('VEHICLE501_FORTRESSROBO', 'VEHICLE501_FORTRESSROBO_AI'):
         d = load(name)
         assert len(d['booster_setting']) == 4 and all(len(x) == 2 and isinstance(x[1], float) for x in d['booster_setting'])
@@ -12716,6 +12716,137 @@ def sent_crash_dump_is_this_runs() -> None:
     with contextlib.redirect_stdout(out):
         failed = module.main()
     assert failed == 0, out.getvalue()
+
+
+@test
+def edf41_kill_counters_shipped() -> None:
+    """The user, 2026-10-18: 「4.1导入单位的sgo里的gameobjectkillcount写入单独的类别」. Every shipped 4.1 object that counts
+    its kills counts into one of the port's own counters (pylib/edf41kills.py; docs/kill-counter-re.md), never into an
+    EDF6 category or a name EDF6's counters lack: the Hectors, the quadruped, the Deroys, the dragons, the motherships
+    and the Earth Eater's core (4.1's Brain) each their own; every counter is used. No game needed (CI)."""
+    import edf41_objects as eo
+    import edf41kills as kills
+    import make_edf41_objects as m
+    reg = eo.registry()
+    counted: dict[str, str] = {}
+    for rel in reg['files']:
+        if rel.endswith('.SGO'):
+            name = m.kill_counter(eo.read(rel))
+            if name is not None:
+                counted[rel] = name
+    assert counted and set(counted.values()) <= set(kills.KEYS), sorted(set(counted.values()) - set(kills.KEYS))
+    assert set(counted.values()) == set(kills.KEYS), sorted(set(kills.KEYS) - set(counted.values()))
+    want = {'OBJECT/HECTOR301CC.SGO': 'HectorKillCount', 'OBJECT/HECTOR401SS.SGO': 'HectorKillCount',
+            'OBJECT/ALIEN4LEGTANK301.SGO': '4LegTankKillCount', 'OBJECT/DEIROI401L.SGO': 'DeiroiKillCount',
+            'OBJECT/UFOMOTHER401_COREPANEL.SGO': 'MotherShip401KillCount',
+            'OBJECT/EDF41MP02/UFOMOTHER401_DLC_COREPANEL.SGO': 'MotherShip401KillCount',
+            'OBJECT/UFOMOTHER301.SGO': 'MotherShip301KillCount', 'OBJECT/UFOROBO401.SGO': 'UfoRoboKillCount',
+            'OBJECT/DRAGONBIG401.SGO': 'BigDragonKillCount', 'OBJECT/EDF41/DRAGONSMALL401.SGO': 'DragonKillCount',
+            'OBJECT/EDF41MP01/REDSMALLDRAGON_HS.SGO': 'DragonKillCount', 'OBJECT/ANTHILL301.SGO': 'NestKillCount',
+            'OBJECT/EDF41MP02/ANTHILL301LARGEMP02.SGO': 'NestKillCount', 'OBJECT/UFOCARRIER301.SGO': 'Carrier1KillCount',
+            'OBJECT/UFOCARRIER401.SGO': 'Carrier2KillCount', 'OBJECT/EDF41MP01/GIANTANT04.SGO': 'GiantAntKillCount'}
+    for rel, name in want.items():
+        assert counted.get(rel) == kills.PREFIX + name, (rel, counted.get(rel))
+    # the parts count nothing (as in 4.1): one Earth Eater / quadruped / Deroy is one kill, of its core or body
+    for rel in ('OBJECT/UFOMOTHER401_PANEL01.SGO', 'OBJECT/ALIEN4LEGTANK301_CANNON.SGO', 'OBJECT/DEIROIFOOTPARTS_TOE.SGO'):
+        assert rel not in counted, rel
+    # the generator's pass: 4.1's names and the nests' EDF6 template name to the port's; anything else refused
+    files = {'OBJECT/A.SGO': _sgo_bytes({'game_object_kill_counter': 'HectorKillCount'}),
+             'OBJECT/B.SGO': _sgo_bytes({'game_object_kill_counter': 'AntHillKillCount'}),
+             'OBJECT/C.SGO': _sgo_bytes({'xgs_scene_object_class': 'X'})}
+    files['OBJECT/D.SGO'] = m.as_dsgo(_sgo_bytes({'game_object_kill_counter': 'DragonKillCount'}))
+    before_c = files['OBJECT/C.SGO']
+    m.kill_counters(files)
+    assert [m.kill_counter(files[r]) for r in ('OBJECT/A.SGO', 'OBJECT/B.SGO', 'OBJECT/D.SGO')] == \
+        ['edf41_HectorKillCount', 'edf41_NestKillCount', 'edf41_DragonKillCount']
+    assert files['OBJECT/C.SGO'] == before_c and files['OBJECT/D.SGO'][:4] == b'DSGO'
+    try:
+        m.kill_counters({'OBJECT/E.SGO': _sgo_bytes({'game_object_kill_counter': 'BerserkerAKillCount'})})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('an EDF6-only counter on a 4.1 object passed')
+
+
+def _sgo_bytes(members: dict) -> bytes:
+    import sgo
+    return sgo.write_depth_first(258, dict(members))
+
+
+@test
+def edf41_kill_counters_plugin_table() -> None:
+    """The plugin's list of the counters (src/edf41_kill_counters.h, the battle record's added rows in this order) is
+    pylib/edf41kills.py's; the page fits its bounds (90 stock rows + ours <= 127, an imm8 compare); the plugin builds
+    and installs it (src/killcount.cpp, CMake, plugin.cpp); every name is a *KillCount row (shown when not 0)."""
+    import edf41kills as kills
+    header = src('src/edf41_kill_counters.h')
+    names = re.findall(r'L"([^"]+)"', header)
+    assert tuple(names) == kills.KEYS, (names, kills.KEYS)
+    assert 90 + len(names) <= kills.TABLE_ROWS
+    assert all(n.endswith('KillCount') and n.startswith(kills.PREFIX) for n in names)
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/killcount.cpp)' in src('CMakeLists.txt')
+    assert re.search(r'^\s+InstallKillCounters\(\);', src('src/plugin.cpp'), re.M)
+    assert 'killcount_native_audit.py' in src('CMakeLists.txt')
+
+
+@test
+def edf41_kill_counters_save_slots() -> None:
+    """TROPHY.DAT keeps the counters' values by position in the store's order (the names' UTF-16 order; 200 slots;
+    docs/kill-counter-re.md): every port counter sorts after every name an Achievement.sgo may hold (upper-case
+    initials), so the stock variables keep their slots and a save read without them loses nothing of EDF6's;
+    add_variables appends them once, refuses a variable that would sort after them and a table over 200. With the
+    game: the real Achievement.sgo and text tables as the installer writes them (stock rows untouched)."""
+    import edf41kills as kills
+    import sgo
+    assert all(k[0].islower() for k in kills.KEYS) and len(set(kills.KEYS)) == len(kills.KEYS)
+    stockish = [['FrameCount', 'int', 0], ['WingDiverPlayCount', 'int', 0], ['ZzzKillCount', 'int', 0]]
+    members = {'AchievementEvent': [], 'AchievementVariable': _rows_copy(stockish)}
+    kills.add_variables(members)
+    rows = members['AchievementVariable']
+    assert rows[:3] == stockish and [r[0] for r in rows[3:]] == list(kills.KEYS)
+    assert all(r[1:] == ['int', 0] for r in rows[3:])
+    kills.add_variables(members)
+    assert len(members['AchievementVariable']) == 3 + len(kills.KEYS), 'added twice'
+    assert sorted(r[0] for r in rows)[:3] == sorted(r[0] for r in stockish), 'a stock slot moved'
+    for bad in ([['edf5_KillCount', 'int', 0]], [[f'V{i}', 'int', 0] for i in range(kills.SLOTS - len(kills.KEYS) + 1)]):
+        try:
+            kills.add_variables({'AchievementVariable': _rows_copy(bad)})
+        except ValueError:
+            continue
+        raise AssertionError(f'accepted {bad[:2]}...')
+    for c in kills.COUNTERS:
+        assert set(c.text) == set(kills.LANGS) and all(c.text.values()), c.key
+        assert kills.label(c, 'EN').endswith(' (4.1):') and kills.label(c, 'SC').endswith('（4.1）')
+    # another mod's table that cannot take them: left as it is (the packs install all the same), said in the notes
+    foreign = sgo.write_depth_first(258, {'AchievementEvent': [], 'AchievementVariable': [['zzz', 'int', 0]]})
+    plan: dict = {}
+    assert e5c.achievement_or_base(foreign, plan) == foreign and len(plan['notes']) == 1
+    assert e5c.achievement_or_base(b'not an sgo', plan) == b'not an sgo' and len(plan['notes']) == 2
+    assert '击杀计数' in e5c.summary(({}, e5c.Contents(0, 68), plan))
+    if not _e5c_have_game():   # the real data: a developer's machine (CI has no game)
+        return
+    import rootcpk
+    game = rootcpk.default()
+    data = game.read('ETC', 'ACHIEVEMENT.SGO')
+    stock = sgo.plain(sgo.read(data)[1])
+    out = sgo.plain(sgo.read(e5c.achievement_table(data))[1])
+    n = len(stock['AchievementVariable'])
+    assert out['AchievementEvent'] == stock['AchievementEvent']
+    assert out['AchievementVariable'][:n] == stock['AchievementVariable']
+    names = [r[0] for r in out['AchievementVariable']]
+    assert len(names) <= kills.SLOTS and sorted(names)[:n] == sorted(r[0] for r in stock['AchievementVariable'])
+    for lang, rel in e5c.TEXTS.items():
+        raw = game.read(*rel.split('/'))
+        base = sgo.read(raw)[1]
+        text = sgo.read(e5c.text_table(raw, lang, ()))[1]
+        assert {k: v for k, v in text.items() if k in base} == base, (rel, 'stock text changed')
+        assert all(k not in base for k in kills.text_keys()), (rel, 'EDF6 already has a 4.1 counter text')
+        for c in kills.COUNTERS:
+            assert text[kills.TEXT_PREFIX + c.key] == kills.label(c, lang), (rel, c.key)
+
+
+def _rows_copy(rows: list) -> list:
+    return [list(r) for r in rows]
 
 
 def main() -> int:

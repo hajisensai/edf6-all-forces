@@ -21,6 +21,11 @@ first member's text key, and enables the ones whose content id the player owns. 
     one row per mission of its definition (missions.json), every row's 11th member named "flags", a stock thumbnail
     of a mission on the map;
   - its name and description keys in ETC/TEXTTABLE_STEAM.<lang>.TXT_SGO (the dialog's and the mode screen's text).
+Every build also writes the EDF4.1 port's kill counters (pylib/edf41kills.py, docs/kill-counter-re.md): their variables
+into ETC/ACHIEVEMENT.SGO (AchievementVariable, after the stock ones) and their battle record labels (StatusInfo_<name>)
+into the same text tables; the 4.1 objects count into them (tools/make_edf41_objects.py) and the plugin lists them in
+the battle record (src/killcount.cpp). Both files are another mod's or the game's with only these added, owned
+through the manifest like CONFIG.SGO.
 EDF5's own titles and briefings (edf5campaign/missions.json, tools/make_edf5_campaign_text.py).
 The content ids are not DLC the platform knows: the plugin owns them (src/edf5campaign.cpp, ini
 EDF5CampaignContent = the first of the three, set here). Without the plugin the packs are listed but greyed out.
@@ -65,6 +70,7 @@ for _p in (os.path.join(HERE, '..', 'pylib'),):
         sys.path.insert(0, _p)
 import cpk  # noqa: E402
 import dsgo  # noqa: E402
+import edf41kills  # noqa: E402
 import mdb  # noqa: E402
 import modfiles  # noqa: E402
 import rootcpk  # noqa: E402
@@ -99,6 +105,7 @@ EDF41_INI_KEY = 'EDF41Content'
 LANGS = ('CN', 'EN', 'JA', 'KR', 'SC')
 CONFIG = 'DEFAULTPACKAGE/CONFIG.SGO'
 TEXTS = {lang: f'ETC/TEXTTABLE_STEAM.{lang}.TXT_SGO' for lang in LANGS}   # app:/etc/TextTable_steam.%LOCALE%.txt_sgo
+ACHIEVEMENT = 'ETC/ACHIEVEMENT.SGO'   # APP:/ETC/Achievement.sgo (EDF+0xCDD30): the counters, the EDF4.1 port's added
 SCRIPTS = 'EDF5_OLD_SCRIPT'
 # A row's music (list member 8) is what the HQ / sortie screen and the online room play while it is the selected
 # mission (EDF.dll 0x8406E0 reads it through 0xE0A30; called from the mission select's cursor 0x8A5AA7 / 0x8A5C1D,
@@ -290,7 +297,7 @@ PACKS41 = (Pack41(PACK41, EDF41, EDF41_FOLDER), Pack41(PACK41_MP01, os.path.join
 SLOTS = (*PACKS, RANGE, *(p.pack for p in PACKS41))   # each pack's content id: CONTENT_BASE + its index here
 CONTENT = {p.tag: CONTENT_BASE + k for k, p in enumerate(SLOTS)}   # fixed: the same on every machine
 # every build writes these
-FILES = (CONFIG, *TEXTS.values(), *(f for p in (*PACKS, RANGE) for f in p.files()), PACKS_FILE)
+FILES = (CONFIG, *TEXTS.values(), ACHIEVEMENT, *(f for p in (*PACKS, RANGE) for f in p.files()), PACKS_FILE)
 # The 2026-10-07 version's files (appended to EDF6's own offline list): put back, never written any more.
 LEGACY_LIST = 'MISSION/MISSIONLIST.OFFLINE.LIST.SGO'
 LEGACY = (LEGACY_LIST, 'MISSION/MISSIONLIST.OFFLINE.IMAGE.RAB',
@@ -739,14 +746,37 @@ def pack_config(data: bytes, packs: tuple[Pack, ...] = PACKS) -> tuple[bytes, di
 
 
 def text_table(data: bytes, lang: str, packs: tuple[Pack, ...] = PACKS) -> bytes:
-    """The game's text table with the packs' mode names and descriptions (other keys untouched)."""
+    """The game's text table with the packs' mode names and descriptions and the EDF4.1 kill counters' battle record
+    labels (other keys untouched)."""
     ver, members = sgo.read(data)
     for pack in packs:
         for kind in pack.kinds:
             name_key, desc_key = pack.keys(kind)
             members[name_key] = pack.name[lang]
             members[desc_key] = pack.desc[lang]
+    edf41kills.add_texts(members, lang)
     return sgo.write_depth_first(ver, members)
+
+
+def achievement_table(data: bytes) -> bytes:
+    """Achievement.sgo with the EDF4.1 kill counters' variables after its own (edf41kills.add_variables: they sort
+    after every stock name, so TROPHY.DAT's slots of the stock ones stay; ValueError when they cannot)."""
+    ver, members = sgo.read(data)
+    edf41kills.add_variables(members)
+    return sgo.write_depth_first(ver, members)
+
+
+def achievement_or_base(data: bytes, plan: dict) -> bytes:
+    """achievement_table(data), or `data` as it is when it cannot take the counters (another mod's table that does not
+    read as one, or whose names would move the save's slots: edf41kills.add_variables): the packs do not depend on
+    it, so only the counters are left out (the 4.1 kills then count nowhere, as before; the plugin shows no row for a
+    name the game's table lacks), said in the plan's 'notes'."""
+    try:
+        return achievement_table(data)
+    except (ValueError, KeyError, IndexError, TypeError, struct.error, UnicodeDecodeError) as e:
+        plan.setdefault('notes', []).append(f'EDF4.1 击杀计数没有加进 {ACHIEVEMENT}（{type(e).__name__}: {e}）：'
+                                            '4.1 敌人的击杀不计数，战斗记录里也没有这几行。')
+        return data
 
 
 def legacy_blocked(root: str, manifest: dict) -> bool:
@@ -780,6 +810,7 @@ def build(root: str, campaign: bool = True, test_range: bool = True,
     out = {CONFIG: config}
     for lang, rel in TEXTS.items():
         out[rel] = parsed(rel, lambda rel=rel, lang=lang: text_table(base_bytes(root, game, rel, manifest), lang, packs))
+    out[ACHIEVEMENT] = achievement_or_base(base_bytes(root, game, ACHIEVEMENT, manifest), p)
     for pack in packs:
         rows = by_pack[pack.group]
         if len(rows) > 512:
@@ -1196,7 +1227,7 @@ def check(root: str) -> bool:
         return True
     # The installed packs' files must be as written; a record kept for a retired file another tool changed since
     # (a pack taken out, what it replaced kept to put back) is reported, not a fault.
-    current = {CONFIG, PACKS_FILE, *TEXTS.values(), *(f for p in PACKS if enabled(root) for f in p.files()),
+    current = {CONFIG, PACKS_FILE, *TEXTS.values(), ACHIEVEMENT, *(f for p in PACKS if enabled(root) for f in p.files()),
                *(RANGE.files() if range_installed(root) else ()),
                *(f for f in files if manifest.get('edf41') and managed(f) and f not in FILES)}
 
@@ -1262,6 +1293,7 @@ def main(argv: list[str]) -> int:
 def summary(built: tuple[dict[str, bytes], Contents, dict]) -> str:
     content = built[1]
     out = f'测试场任务包（内容编号 {content.range}，离线和在线的「任务包」里选「{RANGE.name["SC"]}」）'
+    out += ''.join(f'\n  注意：{note}' for note in built[2].get('notes', ()))
     if not content.campaign:
         return out
     rows = built[2]['rows']
