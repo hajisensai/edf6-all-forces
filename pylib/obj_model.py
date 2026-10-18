@@ -223,7 +223,7 @@ def read_obj(path: str) -> ObjFile:
                 mat = ' '.join(t[1:])
             elif t[0] == 'mtllib':
                 lib = os.path.join(os.path.dirname(path), ' '.join(t[1:]))
-                if os.path.exists(lib):
+                if path_present(lib):
                     mats.update(read_mtl(lib))
             elif t[0] == 'f':
                 if cur is None:
@@ -236,6 +236,13 @@ def read_obj(path: str) -> ObjFile:
                 if len(corners) >= 3:
                     cur.faces.append(ObjFace(mat, tuple(corners)))
     return ObjFile(path, pos, uvs, nrm, [o for o in objects if o.faces], mats)
+
+
+def path_present(path: str) -> bool:
+    """Whether a path written inside an OBJ/MTL (possibly another machine's absolute path, e.g. a drive that is
+    present but unreadable) counts as existing. The single criterion shared by the model reader and the build
+    cache: os.path.exists is False on any OSError, so an unreadable foreign path is simply absent."""
+    return os.path.exists(path)
 
 
 def texture_path(obj: ObjFile, material: str, overrides: dict[str, str] | None = None) -> str:
@@ -251,7 +258,7 @@ def texture_path(obj: ObjFile, material: str, overrides: dict[str, str] | None =
     m = obj.materials.get(material)
     if m is None or not m.diffuse_map:
         raise ObjError(f'{obj.path}: material {material} has no map_Kd')
-    if os.path.exists(m.diffuse_map):
+    if path_present(m.diffuse_map):
         return m.diffuse_map
     base = os.path.basename(m.diffuse_map.replace('\\', '/')).lower()
     for f in os.listdir(folder):
