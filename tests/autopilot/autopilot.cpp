@@ -35,6 +35,7 @@
 #include "edf/patch.h"
 #include "airdrop_probe.h"
 #include "wdenergy_probe.h"
+#include "hector_probe.h"
 
 namespace {
 HMODULE self=nullptr;
@@ -686,6 +687,8 @@ void RunCommand(const char* text) noexcept {
             Log("PROBE airdrop installed=%d",autopilot::InstallAirdropProbe(image,&Log,&HoldKey));
         else if(named && !std::strcmp(what,"wdenergy"))
             Log("PROBE wdenergy installed=%d",autopilot::InstallWdEnergyProbe(image,&Log));
+        else if(named && !std::strcmp(what,"hector"))
+            Log("PROBE hector installed=%d",autopilot::InstallHectorProbe(image,&Log));
         else Log("CMD probe: unknown probe %s",what);
     }
     else Log("CMD unknown: %s",word);
@@ -746,6 +749,7 @@ DWORD WINAPI Loop(void*) {
         PluginInputTick();
         autopilot::AirdropProbeTick();
         autopilot::WdEnergyProbeTick();
+        autopilot::HectorProbeTick();
         Sleep(15);
     }
 }

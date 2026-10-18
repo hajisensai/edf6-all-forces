@@ -12080,6 +12080,88 @@ def edf41_hector_alias() -> None:
 
 
 @test
+def edf41_hector_gait() -> None:
+    """A 4.1 Hector's legs play 4.1's animation (docs/feedback-2026-10-18-edf41-hector-walk.md; src/hector_ai.h PickGait /
+    GaitRate, src/edf41ai.cpp GaitStateHook / GaitRateHook): 4.1's rule (EDF41.exe 0x2220E0 / 0x2224E0) picks stand,
+    turn_l / turn_r or walk_f / b / l / r from the yaw step, the eased velocity in the body's frame and the walk command,
+    every frame; EDF6's WalkingEnemyBase never plays a turn while a Berserker's walking state stands it still (the stand
+    state turns only past the clamp those states give FaceTarget). The plugin's slot table follows hector::Gait and names
+    the slots the class's constructor binds; the call sites it redirects are the stand / walk states' own state and rate
+    calls. With the game: EDF.dll binds those names at those slots and calls those functions at those sites. With both
+    games: the CAS's v_walk_animation_speed / v_turn_animation_speed are 4.1's 10 / 112 (the rates multiply them)."""
+    code = src('src/edf41ai.cpp')
+    head = src('src/hector_ai.h')
+    order = [w.strip() for w in re.search(r'enum class Gait \{([^}]*)\}', head).group(1).split(',')]
+    assert order == ['Stand', 'WalkF', 'WalkB', 'WalkL', 'WalkR', 'TurnL', 'TurnR'], order
+    table = [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', re.search(r'kGaitStateAt\[\]=\{([^}]*)\}', code).group(1))]
+    name = {'Stand': 'stand', 'WalkF': 'walk_f', 'WalkB': 'walk_b', 'WalkL': 'walk_l', 'WalkR': 'walk_r', 'TurnL': 'turn_l',
+            'TurnR': 'turn_r'}
+    binds = {'stand': 0x1000, 'turn_l': 0x1004, 'turn_r': 0x1008, 'walk_f': 0x101C, 'walk_b': 0x1020, 'walk_l': 0x1024,
+             'walk_r': 0x1028}
+    assert len(table) == len(order) and all(binds[name[g]] == at for g, at in zip(order, table)), table
+    sites = [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', re.search(r'kGaitStateSites\[\]=\{([^}]*)\}', code).group(1))]
+    rates = [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', re.search(r'kGaitRateSites\[\]=\{([^}]*)\}', code).group(1))]
+    assert sites == [0x540697, 0x5406C1, 0x5406DF, 0x540821] and rates == [0x5406F5, 0x54083E], (sites, rates)
+    install = code.split('bool InstallEdf41Ai() noexcept {', 1)[1]
+    assert 'gaits==4 && rates==2' in install and '&GaitStateHook' in install and '&GaitRateHook' in install
+    # only a Hector's (the table's entries are Hectors): any other walking enemy keeps the class's choice
+    for hook in ('bool __fastcall GaitStateHook(', 'void __fastcall GaitRateHook('):
+        body = code.split(hook, 1)[1].split('\n}\n', 1)[0]
+        assert 'if(Find(self) && ' in body, hook
+    # the walk itself (4.1 0x2234B6..0x2238BF): with a target, at any distance, the body faces the target and walks along
+    # its own facing only; every walking state's MoveTo and FaceTarget is taken over (the follow state's slot beside
+    # the target made it slide sideways, 2026-10-18 M113)
+    moves = [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', re.search(r'kMoveToSites\[\]=\{([^}]*)\}', code).group(1))]
+    faces = [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', re.search(r'kFaceSites\[\]=\{([^}]*)\}', code).group(1))]
+    assert moves == [0x34D8D8, 0x34D955, 0x34DA65] and faces == [0x34D8FD, 0x34D96A, 0x34DA7A], (moves, faces)
+    assert 'walks==3 && faces==3' in install
+    steer = head.split('inline Walk Steer(', 1)[1].split('\n}\n', 1)[0]
+    assert steer.index('w.takeover=true;') < steer.index('if(dist>=c.closeIn)return w;'), 'far away too: 4.1 has no route'
+    face = code.split('void __fastcall FaceHook(', 1)[1].split('\n}\n', 1)[0]
+    assert 'e->haveTarget' in face and 'aim[0]=e->target[0]' in face
+    move = code.split('bool __fastcall MoveToHook(', 1)[1].split('\n}\n', 1)[0]
+    assert 'kAxisZAt' in move and 'e->target' not in move, 'the walk is along the facing, never at a point'
+
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if not os.path.exists(dll):
+        print('skip  edf41_hector_gait (EDF.dll part): needs EDF6 installed')
+        return
+    import struct
+    import edfre
+    play = int(re.search(r'kCasPlayState=(0x[0-9A-F]+)', code).group(1), 16)
+    rate = int(re.search(r'kCasSetRate=(0x[0-9A-F]+)', code).group(1), 16)
+    move_fn = int(re.search(r'kMoveTo=(0x[0-9A-F]+)', code).group(1), 16)
+    face_fn = int(re.search(r'kFaceTarget=(0x[0-9A-F]+)', code).group(1), 16)
+    for at, want in ([(a, play) for a in sites] + [(a, rate) for a in rates] + [(a, move_fn) for a in moves] +
+                     [(a, face_fn) for a in faces]):
+        assert edfre.img[at] == 0xE8 and at + 5 + struct.unpack_from('<i', edfre.img, at + 1)[0] == want, hex(at)
+    # the constructor (0x53CD15..0x53CF05): each state looked up by name (lea r8, name) lands in its slot (mov [r14+slot], eax)
+    found: dict[str, int] = {}
+    last = ''
+    for ins in edfre.md.disasm(edfre.img[0x53CD15:0x53CF05], 0x53CD15):
+        m = re.match(r'r8, \[rip \+ (0x[0-9a-f]+)\]', ins.op_str)
+        if ins.mnemonic == 'lea' and m:
+            to = ins.address + ins.size + int(m.group(1), 16)
+            last = edfre.img[to:to + 64].decode('utf-16le', 'replace').split('\0')[0]
+        m = re.match(r'dword ptr \[r14 \+ (0x[0-9a-f]+)\], eax', ins.op_str)
+        if ins.mnemonic == 'mov' and m and last:
+            found[last] = int(m.group(1), 16)
+    assert all(found.get(n) == at for n, at in binds.items()), found
+    edf41 = _edf41_root()
+    if not edf41:
+        print('skip  edf41_hector_gait (CAS part): needs EDF4.1 installed')
+        return
+    import cas_graft
+    import cas_legacy as cl
+    import make_edf41_objects as m41
+    _data, files = m41.build(edf41, rootcpk.DEFAULT_GAME, ('HECTOR301CC.SGO',))
+    cas = files['OBJECT/HECTOR.CAS']
+    value = {cas_graft._name(cas, at): struct.unpack_from('<f', cas, at + 12)[0] for at in cl.cas_layout(cas).tree.vcontrols}
+    assert value['v_walk_animation_speed'] == 10.0 and value['v_turn_animation_speed'] == 112.0, value
+
+
+@test
 def edf41_hector_weapon_anim() -> None:
     """tools/make_edf41_objects.py hector_anim on HECTOR401LS (launcher / shield) and HECTOR401GG (two gatlings), built from
     the games: each 401 weapon's own CAS clips (4.1 plays them from the weapon's state machine; the class has nothing for
