@@ -6,7 +6,10 @@
 //     creation's description +0 (the local slot), the online member's mission index (+0x48 of the member 0x595960 is
 //     handed, 0x591219; of the member the session preload is handed) and its remote bit (+0x10 bit 1).
 //     The preload decides, per local slot and per mission index; the creation takes the outfit only when the preload took
-//     it for that class (the resource must be preloaded), so the two never disagree.
+//     it for that class (the resource must be preloaded), so the two never disagree. Only this mission's preloads count
+//     (outfit41_logic.h PreloadRecord): a member created without one (joining mid-mission) wears the stock outfit.
+// Enabled=0 (the plugin's live switch): the hooks stay and pass through, as every module's: the stock popup, the stock
+// models, the stored choice untouched, the room told the stock flags.
 //   - the 3D view's model: 0xE3420 from the HQ / room view's OnMessage (0x93B426 msg 3, 0x93BD03 msg 6), for the view's
 //     own player (view +0x2AC, read in the chained OnMessage). The views are this machine's players only.
 //   - the HQ outfit popup (built in 0x8AB310): a sixth item, EDF4.1's subtitle (hudtext outfit41Item), after the five
@@ -73,10 +76,9 @@ State state;
 std::atomic<bool> available[kClasses]{};
 wchar_t statePath[MAX_PATH]{};
 wchar_t modsDir[MAX_PATH]{};
-// What the preloads took, -1 or the class whose EDF4.1 outfit was preloaded: per local slot (offline), per mission index
-// (online). The creation reads them, possibly on another thread than the preload.
-std::atomic<int> preloadedLocal[kLocalPlayers]{-1,-1};
-std::atomic<int> preloadedOnline[kMissionPlayers];
+// What this mission's preloads took (outfit41_logic.h PreloadRecord): cleared at the first preload after the last
+// mission, so a creation the preloads never reached is the stock outfit.
+PreloadRecord preloads;
 // What the path calls below are building, on the calling thread.
 enum class Build { none, preloadOnline, createLocal, createOnline };
 struct Building { Build what=Build::none; int who=-1; bool remote=false; };
@@ -134,7 +136,7 @@ Wire LocalWire(int p) noexcept {
             w.missionDefault=MissionDefault(outfit,At<unsigned char>(gs,kGsUnlocked)!=0);
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){w.missionDefault=false;}
-    return w;
+    return Effective(Cfg().enabled,w);   // Enabled=0: the stock outfit here, and what the room is told
 }
 bool LocalWears(int p,int cls) noexcept {
     if(!Installed(cls) || !ValidLocal(p))return false;
@@ -225,14 +227,15 @@ void Tick() noexcept {
     }
 }
 bool RemoteWears(int index,int cls) noexcept {
-    if(!Installed(cls))return false;
+    if(!Cfg().enabled || !Installed(cls))return false;   // Enabled=0: every model the stock one
     Wire w;
     return RemoteWire(index,w) && Wears(w.chosen,w.missionDefault,InPack41());
 }
 
 // --- The battle model
-const wchar_t* Decided(int cls,bool wears,std::atomic<int>& slot) noexcept {
-    slot=wears ? cls : -1;
+const wchar_t* Decided(int cls,bool wears,std::atomic<int>* slot) noexcept {
+    if(!slot)return nullptr;
+    slot->store(wears ? cls : -1);
     return wears ? kFiles[cls].battle : nullptr;
 }
 const wchar_t* __fastcall BattlePathHook(void* tables,int cls,int outfit) {
@@ -241,17 +244,18 @@ const wchar_t* __fastcall BattlePathHook(void* tables,int cls,int outfit) {
     if(ValidClass(cls)) {
         if(b.what==Build::preloadOnline && ValidIndex(b.who)) {
             const bool wears=b.remote ? RemoteWears(b.who,cls) : LocalWears(0,cls);
-            ours=Decided(cls,wears,preloadedOnline[b.who]);
+            ours=Decided(cls,wears,preloads.Online(b.who));
             Log("OUTFIT41 online preload: mission player %d (%s) class %d: %s",b.who,b.remote ? "remote" : "this machine's",cls,
                 ours ? "EDF4.1 outfit" : "stock outfit");
-        } else if(b.what==Build::createOnline && ValidIndex(b.who) && preloadedOnline[b.who]==cls)ours=kFiles[cls].battle;
-        else if(b.what==Build::createLocal && ValidLocal(b.who) && preloadedLocal[b.who]==cls)ours=kFiles[cls].battle;
+        } else if(b.what==Build::createOnline && preloads.OnlineTook(b.who,cls))ours=kFiles[cls].battle;
+        else if(b.what==Build::createLocal && preloads.LocalTook(b.who,cls))ours=kFiles[cls].battle;
     }
     return ours ? ours : reinterpret_cast<PathFn>(image+kBattlePath)(tables,cls,outfit);
 }
 const wchar_t* __fastcall OwnPathHook(void* gs,int who,int cls) {
     if(ValidLocal(who) && ValidClass(cls)) {
-        const wchar_t* ours=Decided(cls,LocalWears(who,cls),preloadedLocal[who]);
+        preloads.BeginPreload();
+        const wchar_t* ours=Decided(cls,LocalWears(who,cls),preloads.Local(who));
         const Wire w=LocalWire(who);
         Log("OUTFIT41 preload: player %d class %d: %s (chosen %d, mission outfit or locked %d, EDF4.1 pack %d, files %d)",who+1,
             cls,ours ? "EDF4.1 outfit" : "stock outfit",w.chosen,w.missionDefault,InPack41(),Installed(cls));
@@ -264,6 +268,7 @@ std::uintptr_t Create(Building b,std::uintptr_t desc,std::uintptr_t x,std::uintp
     building=b;
     const auto result=reinterpret_cast<Call4>(image+kCreate)(desc,x,y,z);
     building=was;
+    preloads.MissionOver();   // the mission's players are made: its preloads are done, the next preload is another mission's
     return result;
 }
 std::uintptr_t __fastcall CreateOnlineHook(std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d) {
@@ -296,6 +301,7 @@ std::uintptr_t __fastcall MessageHook(unsigned char* view,std::uintptr_t id,std:
     viewPlayer=who;
     const auto result=nextMessage(view,id,payload);
     viewPlayer=was;
+    preloads.MissionOver();   // the HQ / room 3D view: out of any mission (also with RoomLoadout=0: no screen frame then)
     Tick();
     return result;
 }
@@ -344,7 +350,7 @@ void* __fastcall OurMove(void* impl,void* where) {
 }
 std::uintptr_t __fastcall OurPicked(void* impl,void* arg) {
     const int who=ScreenPlayer(impl);
-    if(ValidLocal(who) && !state.on[who]) {
+    if(Cfg().enabled && ValidLocal(who) && !state.on[who]) {
         state.on[who]=true;
         SaveState();
         Log("OUTFIT41 player %d: the EDF4.1 outfit chosen",who+1);
@@ -356,7 +362,7 @@ std::uintptr_t __fastcall OurPicked(void* impl,void* arg) {
 }
 template<int I> std::uintptr_t __fastcall StockPicked(void* impl,void* arg) {
     const int who=ScreenPlayer(impl);
-    const bool was=ValidLocal(who) && state.on[who];
+    const bool was=Cfg().enabled && ValidLocal(who) && state.on[who];   // Enabled=0: the stored choice left as it is
     if(was) {
         state.on[who]=false;
         SaveState();
@@ -372,6 +378,7 @@ constexpr FuncCallFn kStockHooks[kStockItems]={&StockPicked<0>,&StockPicked<1>,&
 // Adds our item to the outfit popup's request (`req`, 0x119C600's fourth argument at 0x8ABC10) when the screen is a local
 // player's and its class's files are in Mods. Anything not as 0x8AB310 builds it: left alone.
 void AddItem(unsigned char* req) noexcept {
+    if(!Cfg().enabled)return;   // Enabled=0: the stock popup
     if(At<std::int32_t>(req,kReqType)!=kOutfitDialog)return;
     unsigned char* vec=req+kReqVector;
     auto data=At<unsigned char*>(vec,kVecData);
@@ -418,7 +425,10 @@ std::uintptr_t Outfit41SessionPreload(PlayerPreloadFn call,std::uintptr_t a,std:
         if(member)next=Building{Build::preloadOnline,At<std::int32_t>(member,kMemberIndex),RemoteMember(At<std::uint32_t>(member,kMemberFlags))};
     } __except(EXCEPTION_EXECUTE_HANDLER){next=Building{};}
     if(!installed)next=Building{};
-    if(ValidIndex(next.who))preloadedOnline[next.who]=-1;
+    if(ValidIndex(next.who)) {
+        preloads.BeginPreload();   // the mission's first preload: the last mission's record dropped whole
+        preloads.Online(next.who)->store(-1);
+    }
     const Building was=building;
     building=next;
     const auto result=call(a,b,c,d);
@@ -427,11 +437,12 @@ std::uintptr_t Outfit41SessionPreload(PlayerPreloadFn call,std::uintptr_t a,std:
 }
 
 void Outfit41RoomTick() noexcept {
-    if(installed)Tick();
+    if(!installed)return;
+    preloads.MissionOver();   // the online room / the HQ: out of any mission (an aborted load, another room since)
+    Tick();
 }
 
 bool InstallOutfit41() noexcept {
-    for(auto& p:preloadedOnline)p=-1;
     const wchar_t* ini=ConfigPath();
     if(!ini || !*ini)return false;
     wcscpy_s(statePath,ini);

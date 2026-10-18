@@ -157,35 +157,45 @@ int main() {
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_d_0_0_1");
     const auto id=fpview::Identity();std::memcpy(pose,id.m,64);std::memcpy(pose+16,id.m,64);
     const float originals[32]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1,1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    // The draw (render thread) poses from the camera step's published copy, never from State (§17.5).
+    const auto drawInstruments=[&]{Publish();DrawSnap s{};TakeSnapshot(&s);SnapScope taken(&s);InstrumentPose(inst,backup);};
     Current().ride.seat=0;Current().instrumentsReady=true;Current().instruments.value[0]=5;
-    InstrumentPose(inst,backup);
+    drawInstruments();
     check(pose[0]==0 && pose[16]==1,"inactive digit segment collapses, another seat's instrument is unchanged");
     Unpose(inst,backup);
+    {
+        Publish();DrawSnap published0{};TakeSnapshot(&published0);
+        Current().ride.seat=1;Current().instrumentsReady=false;   // the game thread moves on, not yet published
+        {SnapScope taken(&published0);InstrumentPose(inst,backup);}
+        check(pose[0]==0 && pose[16]==1,"the instruments draw reads the published seat and readings, not the game thread's live State");
+        Unpose(inst,backup);
+        Current().ride.seat=0;Current().instrumentsReady=true;
+    }
     check(std::memcmp(pose,originals,sizeof(pose))==0,"the native draw pose is restored byte for byte");
     Put<const wchar_t*>(bones,0,L"vc_i_0_0_l_0_0");
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_0_0_l_1_0");
-    Current().instruments.language=1;InstrumentPose(inst,backup);
+    Current().instruments.language=1;drawInstruments();
     check(pose[0]==0 && pose[16]==1,"native draw path selects Chinese geometry and hides English geometry");
     Unpose(inst,backup);
     check(std::memcmp(pose,originals,sizeof(pose))==0,"language selection never persists in the native skeleton");
     Put<const wchar_t*>(bones,0,L"vc_i_1_0_l_0_0");
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_l_1_0");
-    InstrumentPose(inst,backup);
+    drawInstruments();
     check(pose[0]==0 && pose[16]==1,"adjacent station captions also select exactly one language");
     Unpose(inst,backup);
     Put<const wchar_t*>(bones,0,L"vc_i_1_0_c_0_0");
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_c_0_2");
-    InstrumentPose(inst,backup);
+    drawInstruments();
     check(pose[0]==0 && pose[16]==0,"adjacent station does not mix overlapping damage colours without its readings");
     Unpose(inst,backup);
     Put<const wchar_t*>(bones,0,L"vc_i_1_0_D_7_0_0");
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_D_7_0_6");
-    Current().instruments.value[instruments::ammo]=99999;InstrumentPose(inst,backup);
+    Current().instruments.value[instruments::ammo]=99999;drawInstruments();
     check(pose[0]==0 && pose[16]==1,"new neighbouring digits show a dash, never a fully lit 88888");
     Unpose(inst,backup);
     Put<const wchar_t*>(bones,0,L"vc_i_1_0_B_2");
     Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_1_0_T_0");
-    Current().instruments.share[instruments::fuel]=1;Current().instruments.contact[0]=true;InstrumentPose(inst,backup);
+    Current().instruments.share[instruments::fuel]=1;Current().instruments.contact[0]=true;drawInstruments();
     check(pose[0]==0 && pose[16]==0,"new neighbouring bars and contacts do not inherit this seat's readings");
     Unpose(inst,backup);
     check(std::memcmp(pose,originals,sizeof(pose))==0,"new widget dispatch restores every original pose byte");
@@ -266,12 +276,39 @@ int main() {
     check(ViewState(view1)==a && ViewState(view2)==b,"render passes select their camera, independent of update order");
     Put<float>(c1,kCamEyeRow,123.0f);++renderFrame;
     check(ViewState(view1)==a,"render ownership uses the submitted camera even after the next camera step moves its eye");
+    {
+        // A draw lags the camera step by up to three update steps (docs/fp-render-re.md §17.2): turning fast, the frame
+        // it renders is a few submits older than the newest. It is still that camera's (its own submit), at the same
+        // tolerance: matching only the newest drew it stock (the body and gun flashing).
+        const float up[3]={0,1,0};
+        M4 turned[4],lagViews[4];unsigned char lag[0xA0]{};
+        for(int k=0;k<4;++k) {
+            const float angle=.3f*static_cast<float>(k+1);
+            turned[k]=fpview::Mul(fpview::Rotation(up,std::cos(angle),std::sin(angle)),camera1);
+            fpview::NativeView(turned[k],&lagViews[k]);CaptureRenderCamera(c1,turned[k].m);
+        }
+        bool all=true;
+        for(int k=0;k<4;++k){std::memcpy(lag+0x20,lagViews[k].m,64);all=all && ViewState(lag)==a;}
+        check(all,"a draw of a frame up to three submits old is still routed to its camera while it turns fast");
+        M4 never=fpview::Mul(fpview::Rotation(up,std::cos(2.5f),std::sin(2.5f)),camera1),neverView;fpview::NativeView(never,&neverView);
+        std::memcpy(lag+0x20,neverView.m,64);
+        check(!ViewState(lag),"a view no camera submitted is not borrowed (the tolerance is unchanged)");
+        for(int k=0;k<kViewHistory;++k)CaptureRenderCamera(c1,camera1.m);
+        std::memcpy(lag+0x20,lagViews[0].m,64);
+        check(!ViewState(lag) && ViewState(view1)==a,"the view history is bounded: a frame kViewHistory submits old is no longer its camera's");
+    }
     {StateScope scope(a);int hand=0;DrawSnap snapA{};TakeSnapshot(&snapA);SnapScope taken(&snapA);
         check(PartOf(p1+kBodyModel,&hand)==Part::body && PartOf(p2+kBodyModel,&hand)==Part::none,
               "P2 remains a native world body when drawn in P1's viewport");
         Drew1(p1+kBodyModel);
     }
     {StateScope scope(b);check(!Drew1Now(p1+kBodyModel),"opaque-pass completion records belong to the viewport");}
+    {
+        StateScope scope(a);const State keep=*a;
+        Current()=State{};   // the game thread resets a State whole (Leave, a caught fault) while the pass is drawn
+        check(Drew1Now(p1+kBodyModel),"the opaque pass's record is the draws' own: a game-thread State reset mid-pass leaves it");
+        Current()=keep;
+    }
     Put<void*>(p1+kBodyModel,0,vt);Put<void*>(p2+kBodyModel,0,vt);
     hooked[0]=Hooked{vt,&RecordBodyDraw};hookedCount=1;
     DrawHook(p1+kBodyModel,nullptr,1,view1);const bool ownMasked=drawArmMask;
@@ -297,10 +334,13 @@ int main() {
     FirstPersonInstrumentReadings(reading,p2);CockpitScreens screens{};
     check(b->instrumentsReady && b->instruments.language==3 && FirstPersonScreens(&screens,p2) && !FirstPersonScreens(&screens,p1),
           "cockpit feed and physical screens follow their exact human owner");
+    {DrawSnap fed{};check(TakeSnapshotOf(static_cast<int>(b-states),&fed) && fed.instrumentsReady && fed.instruments.language==3,
+                          "the cockpit feed reaches the instruments draw through the published copy");}
     check(!ArmBone(L"kata_l") && !ArmBone(L"arms_l") && ArmBone(L"jowan0_l") && ArmBone(L"kawan0_l"),
           "body topology excludes torso-side clavicle and mount faces while retaining complete upper arms");
     ResetFirstPerson();SyncSession();
     check(!FirstPersonOn() && !CameraState(c1) && !CameraState(c2),"mission reset retires all local cameras without restoring freed native objects");
+    {StateScope scope(a);check(!Drew1Now(p1+kBodyModel) && !ViewState(view2),"a new mission starts the draws' own records and the submitted views empty");}
     {
         // Production Fit on the native bone-record layout (docs/fp-render-re.md §17): the skeleton instance at
         // model+0xA0, records with the box flag +0x09, half sizes +0xF0, centre +0x100, world +0xB0. A rifle facing
@@ -338,29 +378,53 @@ int main() {
         for(auto& state:states)state=State{};
         selected=&states[0];
         State* mine=&states[0];State* other=&states[1];
+        unsigned char camW[0x400]{};mine->cam=camW;
+        // The two frames the writer submits by turns (CaptureRenderCamera, game thread) and their native views.
+        const float up[3]={0,1,0};
+        const M4 submit[2]={fpview::Translate(1,2,3),fpview::Mul(fpview::Rotation(up,std::cos(1.0f),std::sin(1.0f)),fpview::Translate(-4,5,6))};
+        M4 expect[2];fpview::NativeView(submit[0],&expect[0]);fpview::NativeView(submit[1],&expect[1]);
         std::atomic<bool> stop{false};
+        std::atomic<int> rounds{0};   // the reader starts once the writer has published and submitted (never vacuous)
         std::thread writer([&]{
             StateScope scope(mine);
             for(int k=0;!stop.load();++k) {
                 const float v=static_cast<float>(k&1 ? 1 : 2);
                 Current().on=true;Current().inHandCount=1;Current().handOf[0]=k&1;
                 for(int h=0;h<2;++h){Current().view[h]=fpview::Translate(v,v,v);Current().placeWeapon[h]=fpview::Translate(v,v,v);}
+                Current().ride.seat=k&1;Current().instrumentsReady=(k&1)!=0;Current().instruments.value[0]=v;
+                for(int h=0;h<2;++h){Current().probeAnchor[h]=fpview::Translate(v,v,v);Current().probeAnchored[h]=(k&1)!=0;}
                 Publish();
+                CaptureRenderCamera(camW,submit[k&1].m);
+                rounds.fetch_add(1);
             }
         });
-        bool consistent=true,ownSelection=true;
+        while(rounds.load()<2)std::this_thread::yield();
+        bool consistent=true,ownSelection=true,viewsWhole=true;
+        int viewsSeen=0;
         for(int i=0;i<20000;++i) {
             StateScope scope(mine);
+            ViewHistory h{};
+            if(TakeViews(0,&h)) {
+                for(int k=0;k<kViewHistory;++k) {
+                    if(!h.ok[k])continue;
+                    ++viewsSeen;
+                    viewsWhole=viewsWhole && (std::memcmp(h.view[k].m,expect[0].m,64)==0 || std::memcmp(h.view[k].m,expect[1].m,64)==0);
+                }
+            }
             DrawSnap snap{};
             if(!TakeSnapshot(&snap))continue;
             const float v=snap.view[0].m[12];
+            const bool odd=v==1.0f;
             consistent=consistent && snap.view[1].m[12]==v && snap.placeWeapon[0].m[12]==v && snap.placeWeapon[1].m[12]==v &&
-                       snap.handOf[0]==(v==1.0f ? 1 : 0);
+                       snap.handOf[0]==(odd ? 1 : 0) && snap.rideSeat==(odd ? 1 : 0) && snap.instrumentsReady==odd &&
+                       snap.instruments.value[0]==v && snap.probeAnchor[0].m[12]==v && snap.probeAnchor[1].m[12]==v &&
+                       snap.probeAnchored[0]==odd && snap.probeAnchored[1]==odd;
             {StateScope inner(other);ownSelection=ownSelection && &Current()==other;}
             ownSelection=ownSelection && &Current()==mine;
         }
         stop=true;writer.join();
-        check(consistent,"a draw's copy of the camera step's state is whole, never torn by a concurrent publish");
+        check(consistent,"a draw's copy of the camera step's state (seat, instruments, probe anchors too) is whole, never torn by a concurrent publish");
+        check(viewsWhole && viewsSeen>0,"the submitted views a draw matches against are whole, never torn by a concurrent submit");
         check(ownSelection,"each thread keeps its own state selection (the camera step cannot switch a draw's camera)");
         for(auto& state:states)state=State{};
         selected=&states[0];

@@ -570,7 +570,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     edf41_objects.install(game, objects41)
     outfits41, skipped_outfits = edf41_outfits.build(game)
     print('写入 EDF4.1 外观（游骑兵、空降兵、飞翼、剑兵各一套，作为新增外观；预先转换好，不需要装 4.1；'
-          '不替换任何原版文件，在战前外观菜单里选「EDF4.1」才使用）……')
+          f'不替换任何原版文件，在战前外观菜单里选「{edf41_outfits.ITEM_ZH}」才使用；'
+          'EDF4.1 任务包里外观为「配合任务」或外观更改未解锁时默认使用）……')
     for cls, why in skipped_outfits:
         print('  跳过', cls, why)
     for path in edf41_outfits.install(game, outfits41):
