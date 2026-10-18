@@ -614,8 +614,11 @@ FORTRESS_ALIAS = Alias(
     state_aliases=(('main', 'ground', 'stand'), ('main', 'wakeup', 'stand'), ('main', 'walk_start', 'stand'),
                    ('main', 'walk_end', 'stand'), ('main', 'walk_b', 'walk_f'), ('main', 'walk_l', 'walk_f'),
                    ('main', 'walk_r', 'walk_f'), ('core_hatch', 'open_state', 'open')))
-# debris (E510's rubble at the locator 瓦礫基準点, which 4.1's MAB has not) stays: the class reads it only on a script command
-# (0x1000000d / 1) 4.1's missions never send, and every stock SGO of the class has it (class_keys).
+# debris (E510's rubble at the locator 瓦礫基準点, which 4.1's MAB has not) stays, though its locator is missing: the class reads
+# it only for its own ObjectAction 1 (0x1000000d / 1, 0x4C37E0, which derefs the locator lookup unchecked), and every stock SGO
+# of the class has it (class_keys). 4.1's missions DO send ObjectAction 1 (M117: group 0 off; 2026-10-18, EDF+0x4C3A30 crash):
+# the plugin (src/edf41fortress.cpp, src/edf41fortress_action.h) runs every ObjectAction a marked fortress gets as 4.1 does
+# and passes none to the class's table (tools/selftest.py edf41_fortress_object_actions).
 
 
 @dataclass(frozen=True)
