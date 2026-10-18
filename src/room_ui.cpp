@@ -547,6 +547,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     }
     Follow(self,screen.room);
     Outfit41RoomTick();   // the EDF4.1 outfit told to the room whatever the menu's switches (outfit41.cpp)
+    Edf5OnlineRoomTick(); // this machine's word that it creates every player of an EDF5/4.1 mission (edf5online_room.cpp)
     const bool on=Cfg().enabled && Cfg().roomLoadout;
     const SwitchPlan sw=PlanSwitches(st.switches,on,Cfg().roomPreSync,screen.room);
     if(sw.leave) {   // a switch turned off: withdrawn, and the next mission does not take the host's list either
