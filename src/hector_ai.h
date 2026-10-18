@@ -12,8 +12,9 @@
 //    rand(retreatRand) frames, then the cycle starts again. Inside `near` it walks up to the target in a straight line
 //    and stands inside the stop radius.
 //  - Speed (0x223470 / 0x2216F0): the walk command is the object's +0x278 (1.0, GameObjectBase's default, 0x28D0EF),
-//    -0.85 of it backing off (0x223832, 0x2238BB); the local velocity eases 10 % a frame to 0.1 x the command, x 60 per
-//    second (0x2218D0, 0x221A31, 0x221B30): 6 units/s forward, 5.1 backward, everywhere (no slower battle walk). EDF6's
+//    -1 of it backing off (0x2237FF loads -1 into xmm7; 0x2238BB multiplies the same command by it); the local velocity
+//    eases 10 % a frame to 0.1 x the command, x 60 per second (0x2218D0, 0x221A31, 0x221B30): 6 units/s both ways,
+//    everywhere (no slower battle walk). EDF6's
 //    MoveTo (0x33E3B0) makes the walk vector |speed| long and the class scales it by WalkingEnemyBase.MoveSpeed[0] = 6
 //    (0x53D7CC); the class's own speeds are 0.125 in the chase state (0x34DA46) and 0.9..1.2 x linear_speed following,
 //    so Steer gives the speed 4.1 has.
@@ -99,11 +100,17 @@ inline Event Step(Cycle& y,const Config& c,Rng& rng,float dist) noexcept {
 }
 
 constexpr float kWalkSpeed=1.0f;       // 4.1's walk command (+0x278)
-constexpr float kRetreatSpeed=0.85f;   // backing off: -0.85 x the command, facing the target
+constexpr float kRetreatSpeed=kWalkSpeed;  // 4.1 0x2238BB: -1 x the same command, facing the target
 
-// How the walk is steered this frame. `takeover` false: the game's own goal (outside `near`, it knows the way round
-// obstacles). `retreat`: walk away from the target. `go` false: stand (inside the stop radius). `speed`: MoveTo's speed
-// argument in every case (the length of the walk vector the class multiplies by MoveSpeed[0]).
+// How the walk is steered this frame (4.1's AI 0x2234B6..0x2238BF, every frame, at any distance): with a target the
+// heading is the target itself (its position minus the Hector's; 4.1 has no route), the body turns to it
+// (clamp(10 x angle, -1, 1) x 0.03 rad a frame: EDF6's FaceTarget with limit 0.1 x TurnSpeed 0.3) and the walk command
+// is along the body's own facing only (+0x338, the local z: forward 1, backing off -1 while still facing the
+// target, 0 inside the stop radius). It never walks sideways. EDF6's Berserker in a fight (its follow state 0x34D890)
+// faces the target but walks to a point beside it (0x3408D0: a slot plus the target's lead), so the legs walk forward
+// while the body slides up to 90 degrees sideways (2026-10-18 M113: 43 % of the walking frames over 11 degrees off).
+// `takeover` false (no target): the game's own walk. `retreat`: walk backward. `go` false: stand. `speed`: MoveTo's
+// speed argument in every case (the length of the walk vector the class multiplies by MoveSpeed[0]).
 struct Walk {
     bool takeover=false;
     bool retreat=false;
@@ -114,12 +121,49 @@ struct Walk {
 inline Walk Steer(const Cycle& y,const Config& c,float dist,bool haveTarget=true) noexcept {
     Walk w;
     if(!haveTarget)return w;
-    if(y.phase==Phase::Retreat) { w.takeover=true; w.retreat=true; w.speed=kRetreatSpeed; return w; }
-    if(dist>=c.closeIn)return w;
     w.takeover=true;
+    if(y.phase==Phase::Retreat) { w.retreat=true; w.speed=kRetreatSpeed; return w; }
+    if(dist>=c.closeIn)return w;
     w.go=dist>y.stopRadius;
     w.speed=w.go ? kWalkSpeed : 0.0f;
     return w;
+}
+
+// ---- the walk animation (4.1: mode 0x2220E0, state and rate 0x2224E0, re-chosen every frame) --------------------------
+// 4.1 picks the legs' animation from what the body does, not from what it is told: the yaw change this frame (+0x1314),
+// the eased local velocity per frame (+0x12E0 x / +0x12E8 z) and the walk command per frame (+0x12F0, 0.1 x the AI's):
+//  - stand when all three are about zero (|yaw step| < 1e-4, |v|^2 < 1e-4, |command|^2 < 1e-8);
+//  - turn when the yaw changes (> 1e-4) and either nothing is commanded or the turn outweighs the walk
+//    (|yaw step| > 0.4 |v|): turn_l for a growing yaw, turn_r otherwise, at |yaw step| x v_turn_animation_speed (112);
+//  - otherwise walk along the velocity's larger local axis: x > 0 walk_l, x <= 0 walk_r when |x| > |z|, else z > 0
+//    walk_f, z <= 0 walk_b, at |v| x v_walk_animation_speed (10: 1.0 at 4.1's 0.1 a frame).
+// EDF6's WalkingEnemyBase decides it otherwise (its walk state 0x540710: by the walk command against 22.5 degree side
+// windows, 0x53C4A0; its stand state 0x5405B0: a turn only past FaceTarget's clamp 0.1 (+0xFA4), which Berserker's
+// walking states clamp to exactly 0.1, 0x34D8E9 / 0x34D95A / 0x34DA6A, so never, and at the clamped angle x 112):
+// a Hector standing while it turns to its target plays stand and slides round on its feet.
+enum class Gait { Stand, WalkF, WalkB, WalkL, WalkR, TurnL, TurnR };
+constexpr float kGaitStill=1e-4f,kGaitCommand=1e-8f,kGaitTurnOverWalk=0.4f;
+
+// yawStep: this frame's yaw change (radians); vx, vz: the velocity per frame in the body's frame (+x the model's x
+// axis, +z its forward); command2: the squared walk command per frame.
+inline Gait PickGait(float yawStep,float vx,float vz,float command2) noexcept {
+    const float turn=std::fabs(yawStep);
+    const float v2=vx*vx+vz*vz;
+    if(turn<kGaitStill && v2<kGaitStill && command2<kGaitCommand)return Gait::Stand;
+    if(turn>kGaitStill && (command2<kGaitCommand || turn>kGaitTurnOverWalk*std::sqrt(v2)))
+        return yawStep>0.0f ? Gait::TurnL : Gait::TurnR;
+    if(std::fabs(vx)>std::fabs(vz))return vx>0.0f ? Gait::WalkL : Gait::WalkR;
+    return vz>0.0f ? Gait::WalkF : Gait::WalkB;
+}
+
+// The playback rate 4.1 gives `g`: walkSpeed / turnSpeed are the CAS variables v_walk_animation_speed and
+// v_turn_animation_speed (per frame units, as 4.1 multiplies them).
+inline float GaitRate(Gait g,float yawStep,float vx,float vz,float walkSpeed,float turnSpeed) noexcept {
+    switch(g) {
+    case Gait::TurnL: case Gait::TurnR: return std::fabs(yawStep)*turnSpeed;
+    case Gait::WalkF: case Gait::WalkB: case Gait::WalkL: case Gait::WalkR: return std::sqrt(vx*vx+vz*vz)*walkSpeed;
+    case Gait::Stand: default: return 1.0f;
+    }
 }
 
 // ---- weapon aim -------------------------------------------------------------------------------------------------------

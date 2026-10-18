@@ -18,7 +18,9 @@
     uninstalls cleanly, a call_weapons.install that rolled back records no first backup, and the installer's
     uninstall over a misaligned table offers repair or skipping the table instead of failing;
   - the installer's 「回传日志」 (tools/testhub.py collect) sends only a crash dump of this install and of the run the
-    logs end with (tests/testhub_dump_source_test.py: synthetic minidumps against the plugin log's loading lines);
+    logs end with (tests/testhub_dump_source_test.py: synthetic minidumps against the plugin log's loading lines), the
+    plugin's own crash dump beside Windows' one, a candidate Windows Report.wer with unconfirmed session identity, and always crash/dumps.txt saying why there is
+    no dump; the dump's file name and log lines src/crash_dump.cpp writes are the ones collect() looks for;
   - the model importer (pylib/obj_model.py, pylib/texfile.py) on synthetic data: OBJ reading (negative indices,
     n-gons, winding, uv origin, texture lookup), holes found and closed, skins, meshes split below 65536 vertices
     with tangents, PNG decoding, DDS .lod slicing and DXT1.
@@ -4655,6 +4657,74 @@ def edf41_clone_destructor_slot() -> None:
 
 
 @test
+def edf41_fortress_object_actions() -> None:
+    """4.1's fortress (Alien4LegTank301 on EDF6's MovingFortress) runs the script's ObjectAction (native 3200, message
+    0x1000000D) as 4.1 does (src/edf41fortress_action.h): 0..5 one part group on / off, 6 destroyed. EDF6's class numbers
+    the same message otherwise, and its 1 spawns rubble at a locator 4.1's model has not: M117 (要塞破壊作戦) sends
+    ObjectAction(fortress, 1) about two minutes after the dropped Ufo301 wave is cleared and EDF.dll crashed at 0x4C3A30
+    every time (2026-10-18, docs/feedback-2026-10-18-edf41-m16-crash.md). So: every ObjectAction a shipped 4.1 mission
+    sends a fortress is a constant 4.1 knows; the hook runs it before anything else and never hands 0x1000000D to the class;
+    with the game present the class functions it calls are EDF.dll's, and the class's own action 1 is the rubble spawn whose
+    locator lookup is unchecked (the reason none may reach it)."""
+    import glob
+
+    import bvm41
+    hook = src('src/edf41fortress.cpp')
+    head = src('src/edf41fortress_action.h')
+    assert 'constexpr int kActions=7;' in head
+    body = hook.split('bool __fastcall MessageHook(void* self,std::uint32_t msg,void* data) {', 1)[1].split('\n}\n', 1)[0]
+    first = body.index('if(msg==kMsgAction && data && Marked(self))return Edf41Action(self,')
+    assert first < body.index('nextMessage('), 'ObjectAction on a 4.1 fortress is answered before the class sees it'
+    act = hook.split('bool Edf41Action(void* self,int action) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'nextMessage' not in act and 'return true;' in act, 'no 4.1 action falls through to the class table'
+    assert 'constexpr std::uint32_t kMsgAction=0x1000000D;' in hook
+    assert 'edf41_fortress_check' in src('CMakeLists.txt').split('set(EDF6_OFFLINE_CHECKS', 1)[1].split(')', 1)[0]
+    assert "('edf41_fortress', 1)" in src('tools/make_edf41_objects.py'), 'the mark the hook keys on'
+
+    seen: dict[str, list[int]] = {}
+    for path in sorted(glob.glob(os.path.join(ROOT, 'edf41port', '**', 'MISSION.BVM'), recursive=True)):
+        with open(path, 'rb') as f:
+            prog = bvm41.parse(f.read())
+        codes = [prog.init] + [g.code for g in prog.funcs]
+        # a fortress global: push <address>; pushs <name>; pushs <...Alien4LegTank301.sgo>; ... create; storeind
+        forts = set()
+        for code in codes:
+            for i, x in enumerate(code):
+                if x.op == bvm41.OP_PUSHS and isinstance(x.v, str) and x.v.lower().endswith('/alien4legtank301.sgo') \
+                        and i >= 2 and code[i - 1].op == bvm41.OP_PUSHS and code[i - 2].op == bvm41.OP_PUSH \
+                        and any(y.op == bvm41.OP_STOREIND for y in code[i + 1:i + 5]):
+                    forts.add(code[i - 2].v)
+        for code in codes:
+            for i, x in enumerate(code):
+                if x.op != bvm41.OP_NAT0 or x.v != 3200 or i < 2:
+                    continue
+                h, a = code[i - 2], code[i - 1]
+                if h.op != bvm41.OP_PUSHG or h.v not in forts:
+                    continue
+                assert a.op in (bvm41.OP_PUSH, bvm41.OP_PUSH1), f'{path}: ObjectAction on the fortress with no constant'
+                n = 1 if a.op == bvm41.OP_PUSH1 else a.v
+                assert 0 <= n < 7, f'{path}: ObjectAction {n} on the fortress is not in 4.1\'s table'
+                seen.setdefault(os.path.relpath(path, ROOT).replace(os.sep, '/'), []).append(n)
+    assert sorted(seen.get('edf41port/missions/M117/MISSION.BVM', [])) == [0, 1, 2, 3, 4, 5, 6], seen
+    assert 1 in seen['edf41port/missions/M117/MISSION.BVM'], 'the action that crashed EDF6\'s own table'
+    assert 6 in seen.get('edf41port/mp01/missions/M416/MISSION.BVM', []), seen
+
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if not os.path.exists(dll):
+        return
+    import edfre
+    for name in ('kPartsSwitchHead', 'kDieHead'):
+        want = bytes(int(b, 16) for b in re.findall(r'0x[0-9A-F]+', re.search(name + r'\[8\]=\{(.*?)\};', hook).group(1)))
+        rva = int(re.search(('kPartsSwitch' if name == 'kPartsSwitchHead' else 'kDie') + r'=(0x[0-9A-F]+);', hook).group(1), 16)
+        assert edfre.img[rva:rva + 8] == want, (name, hex(rva))
+    # the class's table (0x4C6240): action 1 calls the rubble spawn 0x4C37E0, which derefs the locator it looks up unchecked
+    assert edfre.img[0x4C6334] == 0xE8 and 0x4C6339 + int.from_bytes(edfre.img[0x4C6335:0x4C6339], 'little', signed=True) == 0x4C37E0
+    assert edfre.img[0x4C3A27] == 0xE8 and 0x4C3A2C + int.from_bytes(edfre.img[0x4C3A28:0x4C3A2C], 'little', signed=True) == 0x6BADD0
+    assert edfre.img[0x4C3A2C:0x4C3A34] == bytes.fromhex('488b45f04863480c'), 'mov rax,[rbp-10h]; movsxd rcx,[rax+0Ch]'
+
+
+@test
 def edf41_mother_parts_default_migrates() -> None:
     """Edf41MotherParts shipped 15 (no 301 panels) in the nightlies from 2026-10-14 and ships 31 now: merge_ini keeps a
     player's value, so an ini still at the old 15 is moved to 31 once by the installer's second defaults step (its own mark:
@@ -5999,7 +6069,7 @@ def edf5_campaign_range_pack() -> None:
     for campaign, want in ((True, e5c.Contents(65, 68)), (False, e5c.Contents(0, 68))):
         files, content, _ = e5c.build(rootcpk.DEFAULT_GAME, campaign=campaign)
         assert content == want, (campaign, content)
-        assert set(files) == {e5c.CONFIG, e5c.PACKS_FILE, *e5c.TEXTS.values(),
+        assert set(files) == {e5c.CONFIG, e5c.PACKS_FILE, *e5c.TEXTS.values(), e5c.ACHIEVEMENT,
                               *(f for pk in (*(e5c.PACKS if campaign else ()), e5c.RANGE) for f in pk.files())}
         modes = sgo.plain(sgo.read(files[e5c.CONFIG])[1]['ModeList'])
         assert modes[:len(stock)] == stock
@@ -8830,7 +8900,7 @@ def edf41_anthill_voxel_body() -> None:
     assert near(block[1], [lo for lo, _ in box]) and near(block[2], [hi for _, hi in box]), 'the box is not the model\'s extent'
     assert block[0] == [16, 16, 16] and len(block[3]) == m.FRACTURE_TUNING + 1 and block[3][-1] == [], block
     # 4.1's own values stay; E517's mech look does not come over; the score adjust both stock nests carry does
-    assert top['game_object_durability'] == 1500.0 and top['game_object_kill_counter'] == 'NestKillCount'
+    assert top['game_object_durability'] == 1500.0 and top['game_object_kill_counter'] == 'edf41_NestKillCount'
     assert top['game_object_destroy_score_adjust'] == 0.5
     assert not {'ant_hill_material_type', 'lighting', 'material_animation'} & set(top), sorted(top)
     # the refusals
@@ -9356,8 +9426,8 @@ def edf41_dlc_insects() -> None:
     """The DLC's insects and nests on EDF6's classes (make_edf41_objects.DLC_INSECT_PATCHES, NEST_41_KEYS): Nephila02L's
     thread gravity and spread as 4.1's setup defaults them (3.0, 0.1) where EDF6's would be 0.5, 03L's own four kept;
     every Nephila and the queen carry the plugin keys src/edf41insects.cpp reads (4.1's random_speed, 4.1's needle base
-    0.4), and only they; ragdoll_contact as EDF6's own copies of these objects; the nests count into AntHillKillCount
-    with 4.1's score. The plugin's key names and constants are the converter's."""
+    0.4), and only they; ragdoll_contact as EDF6's own copies of these objects; the nests count into the port's nests
+    counter (edf41_NestKillCount, pylib/edf41kills.py) with 4.1's score. The plugin's key names and constants are the converter's."""
     import edf41_objects as eo
     import make_edf41_objects as m
     import sgo
@@ -9389,7 +9459,7 @@ def edf41_dlc_insects() -> None:
         assert top(root)['ragdoll_contact'][1] == want, root
     for root in by_class['AntHill'] + by_class['BigNest']:
         t = top(root)
-        assert t['game_object_kill_counter'] == 'AntHillKillCount', root
+        assert t['game_object_kill_counter'] == 'edf41_NestKillCount', root
         assert t.get('game_object_destroy_score_adjust', 1.0) == 1.0, root
     # the plugin keys appear on no other shipped object
     for o in reg['objects']:
@@ -11485,7 +11555,7 @@ def edf41_rest_behaviour_real() -> None:
                  'ALIENTRAILER401_XL'):
         d = load(name)
         assert len(d['se_list']) == 6 and pairs(d['material_animation']) == pairs(d['unit_material_animation']) == [0, 2, 2]
-        assert d['game_object_kill_counter'] == 'AlienTrailerKillCount'
+        assert d['game_object_kill_counter'] == 'edf41_AlienTrailerKillCount'
     for name in ('VEHICLE501_FORTRESSROBO', 'VEHICLE501_FORTRESSROBO_AI'):
         d = load(name)
         assert len(d['booster_setting']) == 4 and all(len(x) == 2 and isinstance(x[1], float) for x in d['booster_setting'])
@@ -12009,6 +12079,108 @@ def edf41_hector_alias() -> None:
     # the head player the plugin opens and closes (src/hector_ai.h StepHead), and no weapon animation on 301's guns
     assert {'open', 'close'} <= cas_graft.states(cas)['head'], cas_graft.states(cas)
     assert top['edf41_hector_anim'] == [[0.0, [], [], [], []]] * 2, top['edf41_hector_anim']
+
+
+@test
+def edf41_hector_gait() -> None:
+    """A 4.1 Hector's legs play 4.1's animation (docs/feedback-2026-10-18-edf41-hector-walk.md; src/hector_ai.h PickGait /
+    GaitRate, src/edf41ai.cpp GaitStateHook / GaitRateHook): 4.1's rule (EDF41.exe 0x2220E0 / 0x2224E0) picks stand,
+    turn_l / turn_r or walk_f / b / l / r from the yaw step, the eased velocity in the body's frame and the walk command,
+    every frame; EDF6's WalkingEnemyBase never plays a turn while a Berserker's walking state stands it still (the stand
+    state turns only past the clamp those states give FaceTarget). The plugin's slot table follows hector::Gait and names
+    the slots the class's constructor binds; the call sites it redirects are the stand / walk states' own state and rate
+    calls. With the game: EDF.dll binds those names at those slots and calls those functions at those sites. With both
+    games: the CAS's v_walk_animation_speed / v_turn_animation_speed are 4.1's 10 / 112 (the rates multiply them)."""
+    code = src('src/edf41ai.cpp')
+    head = src('src/hector_ai.h')
+    order = [w.strip() for w in re.search(r'enum class Gait \{([^}]*)\}', head).group(1).split(',')]
+    assert order == ['Stand', 'WalkF', 'WalkB', 'WalkL', 'WalkR', 'TurnL', 'TurnR'], order
+    table = [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', re.search(r'kGaitStateAt\[\]=\{([^}]*)\}', code).group(1))]
+    name = {'Stand': 'stand', 'WalkF': 'walk_f', 'WalkB': 'walk_b', 'WalkL': 'walk_l', 'WalkR': 'walk_r', 'TurnL': 'turn_l',
+            'TurnR': 'turn_r'}
+    binds = {'stand': 0x1000, 'turn_l': 0x1004, 'turn_r': 0x1008, 'walk_f': 0x101C, 'walk_b': 0x1020, 'walk_l': 0x1024,
+             'walk_r': 0x1028}
+    assert len(table) == len(order) and all(binds[name[g]] == at for g, at in zip(order, table)), table
+    sites = [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', re.search(r'kGaitStateSites\[\]=\{([^}]*)\}', code).group(1))]
+    rates = [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', re.search(r'kGaitRateSites\[\]=\{([^}]*)\}', code).group(1))]
+    assert sites == [0x540697, 0x5406C1, 0x5406DF, 0x540821] and rates == [0x5406F5, 0x54083E], (sites, rates)
+    install = code.split('bool InstallEdf41Ai() noexcept {', 1)[1]
+    assert 'gaits==4 && rates==2' in install and '&GaitStateHook' in install and '&GaitRateHook' in install
+    # only a Hector's (the table's entries are Hectors): any other walking enemy keeps the class's choice
+    for hook in ('bool __fastcall GaitStateHook(', 'void __fastcall GaitRateHook('):
+        body = code.split(hook, 1)[1].split('\n}\n', 1)[0]
+        assert 'if(Find(self) && ' in body, hook
+    # the walk itself (4.1 0x2234B6..0x2238BF): with a target, at any distance, the body faces the target and walks along
+    # its own facing only; every walking state's MoveTo and FaceTarget is taken over (the follow state's slot beside
+    # the target made it slide sideways, 2026-10-18 M113)
+    moves = [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', re.search(r'kMoveToSites\[\]=\{([^}]*)\}', code).group(1))]
+    faces = [int(x, 16) for x in re.findall(r'0x[0-9A-F]+', re.search(r'kFaceSites\[\]=\{([^}]*)\}', code).group(1))]
+    assert moves == [0x34D8D8, 0x34D955, 0x34DA65] and faces == [0x34D8FD, 0x34D96A, 0x34DA7A], (moves, faces)
+    assert 'walks==3 && faces==3' in install
+    steer = head.split('inline Walk Steer(', 1)[1].split('\n}\n', 1)[0]
+    assert steer.index('w.takeover=true;') < steer.index('if(dist>=c.closeIn)return w;'), 'far away too: 4.1 has no route'
+    face = code.split('void __fastcall FaceHook(', 1)[1].split('\n}\n', 1)[0]
+    assert 'e->haveTarget' in face and 'aim[0]=e->target[0]' in face
+    move = code.split('bool __fastcall MoveToHook(', 1)[1].split('\n}\n', 1)[0]
+    assert 'kAxisZAt' in move and 'e->target' not in move, 'the walk is along the facing, never at a point'
+
+    import rootcpk
+    dll = os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll')
+    if not os.path.exists(dll):
+        print('skip  edf41_hector_gait (EDF.dll part): needs EDF6 installed')
+        return
+    import struct
+    import edfre
+    play = int(re.search(r'kCasPlayState=(0x[0-9A-F]+)', code).group(1), 16)
+    rate = int(re.search(r'kCasSetRate=(0x[0-9A-F]+)', code).group(1), 16)
+    move_fn = int(re.search(r'kMoveTo=(0x[0-9A-F]+)', code).group(1), 16)
+    face_fn = int(re.search(r'kFaceTarget=(0x[0-9A-F]+)', code).group(1), 16)
+    for at, want in ([(a, play) for a in sites] + [(a, rate) for a in rates] + [(a, move_fn) for a in moves] +
+                     [(a, face_fn) for a in faces]):
+        assert edfre.img[at] == 0xE8 and at + 5 + struct.unpack_from('<i', edfre.img, at + 1)[0] == want, hex(at)
+    # the constructor (0x53CD15..0x53CF05): each state looked up by name (lea r8, name) lands in its slot (mov [r14+slot], eax)
+    found: dict[str, int] = {}
+    last = ''
+    for ins in edfre.md.disasm(edfre.img[0x53CD15:0x53CF05], 0x53CD15):
+        m = re.match(r'r8, \[rip \+ (0x[0-9a-f]+)\]', ins.op_str)
+        if ins.mnemonic == 'lea' and m:
+            to = ins.address + ins.size + int(m.group(1), 16)
+            last = edfre.img[to:to + 64].decode('utf-16le', 'replace').split('\0')[0]
+        m = re.match(r'dword ptr \[r14 \+ (0x[0-9a-f]+)\], eax', ins.op_str)
+        if ins.mnemonic == 'mov' and m and last:
+            found[last] = int(m.group(1), 16)
+    assert all(found.get(n) == at for n, at in binds.items()), found
+    edf41 = _edf41_root()
+    if not edf41:
+        print('skip  edf41_hector_gait (CAS part): needs EDF4.1 installed')
+        return
+    # Native 4.1 retreat is the forward command multiplied by xmm7=-1, not a reduced speed. Verify the
+    # executable contract so a mistaken interpretation of this register cannot pass a mirrored formula test.
+    import pefile
+    import capstone
+    with pefile.PE(os.path.join(edf41, 'EDF41.exe'), fast_load=True) as pe41:
+        assert pe41.FILE_HEADER.TimeDateStamp == 0x57AAB039, 'unsupported EDF4.1 executable for gait audit'
+        image41 = pe41.get_memory_mapped_image()
+    assert image41[0x2237FF:0x223807] == bytes.fromhex('f30f103d51338900')
+    factor_at = 0x223807 + struct.unpack_from('<i', image41, 0x223803)[0]
+    assert factor_at == 0xAB6B58 and struct.unpack_from('<f', image41, factor_at)[0] == -1.0
+    assert image41[0x22389E:0x2238A6] == bytes.fromhex('f30f108b78020000')
+    assert image41[0x2238AE:0x2238B6] == bytes.fromhex('f30f118b38030000')
+    assert image41[0x2238BB:0x2238C7] == bytes.fromhex('f30f59cff30f118b38030000')
+    native = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    native.detail = True
+    instructions = list(native.disasm(image41[0x223807:0x2238BB], 0x223807))
+    assert instructions and instructions[-1].address + instructions[-1].size == 0x2238BB
+    assert all(capstone.x86.X86_REG_XMM7 not in ins.regs_access()[1] for ins in instructions)
+    walk_speed = float(re.search(r'kWalkSpeed=([0-9.]+)f', head).group(1))
+    assert 'kRetreatSpeed=kWalkSpeed;' in head and walk_speed == -struct.unpack_from('<f', image41, factor_at)[0]
+    import cas_graft
+    import cas_legacy as cl
+    import make_edf41_objects as m41
+    _data, files = m41.build(edf41, rootcpk.DEFAULT_GAME, ('HECTOR301CC.SGO',))
+    cas = files['OBJECT/HECTOR.CAS']
+    value = {cas_graft._name(cas, at): struct.unpack_from('<f', cas, at + 12)[0] for at in cl.cas_layout(cas).tree.vcontrols}
+    assert value['v_walk_animation_speed'] == 10.0 and value['v_turn_animation_speed'] == 112.0, value
 
 
 @test
@@ -12716,6 +12888,171 @@ def sent_crash_dump_is_this_runs() -> None:
     with contextlib.redirect_stdout(out):
         failed = module.main()
     assert failed == 0, out.getvalue()
+
+
+@test
+def edf41_kill_counters_shipped() -> None:
+    """The user, 2026-10-18: 「4.1导入单位的sgo里的gameobjectkillcount写入单独的类别」. Every shipped 4.1 object that counts
+    its kills counts into one of the port's own counters (pylib/edf41kills.py; docs/kill-counter-re.md), never into an
+    EDF6 category or a name EDF6's counters lack: the Hectors, the quadruped, the Deroys, the dragons, the motherships
+    and the Earth Eater's core (4.1's Brain) each their own; every counter is used. No game needed (CI)."""
+    import edf41_objects as eo
+    import edf41kills as kills
+    import make_edf41_objects as m
+    reg = eo.registry()
+    counted: dict[str, str] = {}
+    for rel in reg['files']:
+        if rel.endswith('.SGO'):
+            name = m.kill_counter(eo.read(rel))
+            if name is not None:
+                counted[rel] = name
+    assert counted and set(counted.values()) <= set(kills.KEYS), sorted(set(counted.values()) - set(kills.KEYS))
+    assert set(counted.values()) == set(kills.KEYS), sorted(set(kills.KEYS) - set(counted.values()))
+    want = {'OBJECT/HECTOR301CC.SGO': 'HectorKillCount', 'OBJECT/HECTOR401SS.SGO': 'HectorKillCount',
+            'OBJECT/ALIEN4LEGTANK301.SGO': '4LegTankKillCount', 'OBJECT/DEIROI401L.SGO': 'DeiroiKillCount',
+            'OBJECT/UFOMOTHER401_COREPANEL.SGO': 'MotherShip401KillCount',
+            'OBJECT/EDF41MP02/UFOMOTHER401_DLC_COREPANEL.SGO': 'MotherShip401KillCount',
+            'OBJECT/UFOMOTHER301.SGO': 'MotherShip301KillCount', 'OBJECT/UFOROBO401.SGO': 'UfoRoboKillCount',
+            'OBJECT/DRAGONBIG401.SGO': 'BigDragonKillCount', 'OBJECT/EDF41/DRAGONSMALL401.SGO': 'DragonKillCount',
+            'OBJECT/EDF41MP01/REDSMALLDRAGON_HS.SGO': 'DragonKillCount', 'OBJECT/ANTHILL301.SGO': 'NestKillCount',
+            'OBJECT/EDF41MP02/ANTHILL301LARGEMP02.SGO': 'NestKillCount', 'OBJECT/UFOCARRIER301.SGO': 'Carrier1KillCount',
+            'OBJECT/UFOCARRIER401.SGO': 'Carrier2KillCount', 'OBJECT/EDF41MP01/GIANTANT04.SGO': 'GiantAntKillCount'}
+    for rel, name in want.items():
+        assert counted.get(rel) == kills.PREFIX + name, (rel, counted.get(rel))
+    # the parts count nothing (as in 4.1): one Earth Eater / quadruped / Deroy is one kill, of its core or body
+    for rel in ('OBJECT/UFOMOTHER401_PANEL01.SGO', 'OBJECT/ALIEN4LEGTANK301_CANNON.SGO', 'OBJECT/DEIROIFOOTPARTS_TOE.SGO'):
+        assert rel not in counted, rel
+    # the generator's pass: 4.1's names and the nests' EDF6 template name to the port's; anything else refused
+    files = {'OBJECT/A.SGO': _sgo_bytes({'game_object_kill_counter': 'HectorKillCount'}),
+             'OBJECT/B.SGO': _sgo_bytes({'game_object_kill_counter': 'AntHillKillCount'}),
+             'OBJECT/C.SGO': _sgo_bytes({'xgs_scene_object_class': 'X'})}
+    files['OBJECT/D.SGO'] = m.as_dsgo(_sgo_bytes({'game_object_kill_counter': 'DragonKillCount'}))
+    before_c = files['OBJECT/C.SGO']
+    m.kill_counters(files)
+    assert [m.kill_counter(files[r]) for r in ('OBJECT/A.SGO', 'OBJECT/B.SGO', 'OBJECT/D.SGO')] == \
+        ['edf41_HectorKillCount', 'edf41_NestKillCount', 'edf41_DragonKillCount']
+    assert files['OBJECT/C.SGO'] == before_c and files['OBJECT/D.SGO'][:4] == b'DSGO'
+    try:
+        m.kill_counters({'OBJECT/E.SGO': _sgo_bytes({'game_object_kill_counter': 'BerserkerAKillCount'})})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('an EDF6-only counter on a 4.1 object passed')
+
+
+def _sgo_bytes(members: dict) -> bytes:
+    import sgo
+    return sgo.write_depth_first(258, dict(members))
+
+
+@test
+def edf41_kill_counters_plugin_table() -> None:
+    """The plugin's list of the counters (src/edf41_kill_counters.h, the battle record's added rows in this order) is
+    pylib/edf41kills.py's; the page fits its bounds (90 stock rows + ours <= 127, an imm8 compare); the plugin builds
+    and installs it (src/killcount.cpp, CMake, plugin.cpp); every name is a *KillCount row (shown when not 0)."""
+    import edf41kills as kills
+    header = src('src/edf41_kill_counters.h')
+    names = re.findall(r'L"([^"]+)"', header)
+    assert tuple(names) == kills.KEYS, (names, kills.KEYS)
+    assert 90 + len(names) <= kills.TABLE_ROWS
+    assert all(n.endswith('KillCount') and n.startswith(kills.PREFIX) for n in names)
+    assert 'target_sources(EDF6VehicleCrew PRIVATE src/killcount.cpp)' in src('CMakeLists.txt')
+    assert re.search(r'^\s+InstallKillCounters\(\);', src('src/plugin.cpp'), re.M)
+    assert 'killcount_native_audit.py' in src('CMakeLists.txt')
+
+
+@test
+def edf41_kill_counters_save_slots() -> None:
+    """TROPHY.DAT keeps the counters' values by position in the store's order (the names' UTF-16 order; 200 slots;
+    docs/kill-counter-re.md): every port counter sorts after every name an Achievement.sgo may hold (upper-case
+    initials), so the stock variables keep their slots and a save read without them loses nothing of EDF6's;
+    add_variables appends them once, refuses a variable that would sort after them and a table over 200. With the
+    game: the real Achievement.sgo and text tables as the installer writes them (stock rows untouched)."""
+    import edf41kills as kills
+    import sgo
+    assert all(k[0].islower() for k in kills.KEYS) and len(set(kills.KEYS)) == len(kills.KEYS)
+    stockish = [['FrameCount', 'int', 0], ['WingDiverPlayCount', 'int', 0], ['ZzzKillCount', 'int', 0]]
+    members = {'AchievementEvent': [], 'AchievementVariable': _rows_copy(stockish)}
+    kills.add_variables(members)
+    rows = members['AchievementVariable']
+    assert rows[:3] == stockish and [r[0] for r in rows[3:]] == list(kills.KEYS)
+    assert all(r[1:] == ['int', 0] for r in rows[3:])
+    kills.add_variables(members)
+    assert len(members['AchievementVariable']) == 3 + len(kills.KEYS), 'added twice'
+    assert sorted(r[0] for r in rows)[:3] == sorted(r[0] for r in stockish), 'a stock slot moved'
+    for bad in ([['edf5_KillCount', 'int', 0]], [[f'V{i}', 'int', 0] for i in range(kills.SLOTS - len(kills.KEYS) + 1)]):
+        try:
+            kills.add_variables({'AchievementVariable': _rows_copy(bad)})
+        except ValueError:
+            continue
+        raise AssertionError(f'accepted {bad[:2]}...')
+    for c in kills.COUNTERS:
+        assert set(c.text) == set(kills.LANGS) and all(c.text.values()), c.key
+        assert kills.label(c, 'EN').endswith(' (4.1):') and kills.label(c, 'SC').endswith('（4.1）')
+    # another mod's table that cannot take them: left as it is (the packs install all the same), said in the notes
+    foreign = sgo.write_depth_first(258, {'AchievementEvent': [], 'AchievementVariable': [['zzz', 'int', 0]]})
+    plan: dict = {}
+    assert e5c.achievement_or_base(foreign, plan) == foreign and len(plan['notes']) == 1
+    assert e5c.achievement_or_base(b'not an sgo', plan) == b'not an sgo' and len(plan['notes']) == 2
+    assert '击杀计数' in e5c.summary(({}, e5c.Contents(0, 68), plan))
+    if not _e5c_have_game():   # the real data: a developer's machine (CI has no game)
+        return
+    import rootcpk
+    game = rootcpk.default()
+    data = game.read('ETC', 'ACHIEVEMENT.SGO')
+    stock = sgo.plain(sgo.read(data)[1])
+    out = sgo.plain(sgo.read(e5c.achievement_table(data))[1])
+    n = len(stock['AchievementVariable'])
+    assert out['AchievementEvent'] == stock['AchievementEvent']
+    assert out['AchievementVariable'][:n] == stock['AchievementVariable']
+    names = [r[0] for r in out['AchievementVariable']]
+    assert len(names) <= kills.SLOTS and sorted(names)[:n] == sorted(r[0] for r in stock['AchievementVariable'])
+    for lang, rel in e5c.TEXTS.items():
+        raw = game.read(*rel.split('/'))
+        base = sgo.read(raw)[1]
+        text = sgo.read(e5c.text_table(raw, lang, ()))[1]
+        assert {k: v for k, v in text.items() if k in base} == base, (rel, 'stock text changed')
+        assert all(k not in base for k in kills.text_keys()), (rel, 'EDF6 already has a 4.1 counter text')
+        for c in kills.COUNTERS:
+            assert text[kills.TEXT_PREFIX + c.key] == kills.label(c, lang), (rel, c.key)
+
+
+def _rows_copy(rows: list) -> list:
+    return [list(r) for r in rows]
+
+
+@test
+def plugin_crash_dump_is_collected() -> None:
+    """docs/feedback-2026-10-18-crash-dump.md: reports #19 / #20 of a crash came with no dump. The plugin now writes
+    its own (src/crash_dump.cpp) as <exe>.<pid>.plugin.dmp in %LOCALAPPDATA%'s CrashDumps; collect() finds it by the
+    'EDF6*.dmp' glob and the .plugin.dmp ending, and reads the plugin's log lines to say why there is none. Both sides
+    checked against each other here, so a renamed file or log line cannot silently stop the dump from being sent."""
+    import fnmatch
+    import inspect
+    import testhub
+    with open(os.path.join(ROOT, 'src', 'crash_dump.cpp'), encoding='utf-8') as f:
+        cpp = f.read()
+    fmt = re.search(r'swprintf_s\(dumpPath,L"([^"]+)"', cpp)
+    assert fmt, 'crash_dump.cpp: the dump path format'
+    # The C++ literal "%ls\\%ls.%lu.plugin.dmp": folder, escaped backslash, exe name, pid.
+    name = fmt.group(1).replace(r'%ls\\', '', 1).replace('%ls', 'EDF6.exe', 1).replace('%lu', '12345', 1)
+    assert name == 'EDF6.exe.12345.plugin.dmp', name
+    assert fnmatch.fnmatch(name, 'EDF6*.dmp') and name.lower().endswith('.plugin.dmp'), name
+    assert 'GetEnvironmentVariableW(L"LOCALAPPDATA"' in cpp and r'L"\\CrashDumps"' in cpp, 'the dump goes to CrashDumps'
+    src = inspect.getsource(testhub.plugin_crash_note)
+    for line in ('CRASH dump written', 'CRASHDUMP installed'):
+        assert line in cpp and line in src, line
+    assert 'line.Text("CRASH ").Text(request.kind).Text(": exception ")' in cpp and 'CRASH ' in src, 'the crash line'
+    assert 'CrashLog(line.text,line.size);' in cpp, 'crash diagnostics bypass the ordinary logger locks'
+    with tempfile.TemporaryDirectory() as scratch:
+        plugins = os.path.join(scratch, 'Mods', 'Plugins')
+        os.makedirs(plugins)
+        path = os.path.join(plugins, 'EDF6VehicleCrew.log')
+        for status in ('CRASH dump written: EDF6.exe.12345.plugin.dmp', 'CRASH dump failed: MiniDumpWriteDump error 5'):
+            with open(path, 'w', encoding='utf-8') as stream:
+                stream.write('[12:00:00.000] EDF6VehicleCrew 0.9.0 loading\nCRASH unhandled exception: exception C0000005 at EDF.dll+0x4C3A30\n' + status + '\n')
+            note = testhub.plugin_crash_note(scratch)
+            assert status in note, (status, note)
 
 
 def main() -> int:

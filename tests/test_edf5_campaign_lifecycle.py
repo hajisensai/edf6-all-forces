@@ -46,7 +46,8 @@ class CampaignLifecycleTests(unittest.TestCase):
         chosen pack's files, the ids the real build gives (EDF5's 65..67, the range's 68 with or without them)."""
         files = self.files if files is None else files
         packs = (*(campaign.PACKS if with_campaign else ()), *((campaign.RANGE,) if test_range else ()))
-        rels = {campaign.CONFIG, campaign.PACKS_FILE, *campaign.TEXTS.values(), *(f for pack in packs for f in pack.files())}
+        rels = {campaign.CONFIG, campaign.PACKS_FILE, *campaign.TEXTS.values(), campaign.ACHIEVEMENT,
+                *(f for pack in packs for f in pack.files())}
         ids = campaign.Contents(65 if with_campaign else 0, 68 if test_range else 0)
         # In build()'s order: the mode table first.
         return {rel: files[rel] for rel in campaign.FILES if rel in rels}, ids, {'rows': [], 'skipped': []}

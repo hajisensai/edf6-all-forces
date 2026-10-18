@@ -64,6 +64,7 @@ bool SupportVariantReady(const wchar_t*) noexcept{return false;}
 void NoteMissingVariant(const wchar_t*,const char*) noexcept{}
 void SupportVariantHello(std::uint32_t*,unsigned char*) noexcept{}
 bool SupportPeersApplyVariants() noexcept{return true;}
+bool SupportPeersApplyBackpacks() noexcept{return true;}
 bool SupportPeersHaveVariantFile(std::uint64_t) noexcept{return true;}
 bool DeleteSupportVehicle(unsigned char*) noexcept{return false;}
 void ConfigureSupportNet(const support_net::Hooks&) noexcept{}

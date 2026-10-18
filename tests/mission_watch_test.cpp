@@ -36,6 +36,8 @@ void Log(const char* format,...) noexcept {
     lines.emplace_back(text);
 }
 void LogMemory(const char* when) noexcept { Log("MEMORY %s",when); }
+void FlushLog() noexcept {}   // crash_dump.cpp's (linked for MiniDumpWriter)
+void CrashLog(const char*,std::size_t) noexcept {}
 }  // namespace crew
 
 int main() {

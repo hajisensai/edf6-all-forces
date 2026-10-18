@@ -177,6 +177,8 @@ void NoteMissingVariant(const wchar_t* file,const char*) noexcept {missingNoted.
 void SupportVariantHello(std::uint32_t* ext,unsigned char*) noexcept {if(ext)*ext=support_net::kExtVariants;}
 bool peersApplyVariants=true,peersHaveFiles=true;
 bool SupportPeersApplyVariants() noexcept {return peersApplyVariants;}
+bool peersApplyBackpacks=true;
+bool SupportPeersApplyBackpacks() noexcept {return peersApplyBackpacks;}
 bool SupportPeersHaveVariantFile(std::uint64_t) noexcept {return peersHaveFiles;}
 bool DeleteSupportVehicle(unsigned char*) noexcept {++deleted;return true;}
 support_net::Hooks configuredHooks{};int netConfigured=0,gatesInstalled=0;
@@ -776,6 +778,24 @@ int main() {
         // A peer's view of a host's plan: a look it lacks comes stock (Validate passes); pylons it lacks refuse the plan.
         variantFiles.erase(lanceL);missingNoted.clear();
         check(Validate(plan),"a soldier's look a peer lacks does not refuse the plan");
+        // A Bloom false positive is harmless for colours, but a backpack changes the weapon list: an applied pack
+        // missing here must refuse preparation instead of materialising the same NetId with a different armament.
+        unsigned char collision[kVariantBloomBytes]{};
+        for(const wchar_t* present:{L"EDF6VC_NPC_RIFLE_X_X_AWEAPON245.SGO",L"EDF6VC_NPC_RIFLE_L_X_X_AWEAPON258.SGO",
+                                    L"EDF6VC_NPC_FLAME_X_X_AWEAPON252.SGO"})BloomAdd(collision,VariantHash(present));
+        const std::wstring packFile=L"EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO";
+        check(BloomHas(collision,VariantHash(packFile.c_str())) && !variantFiles.count(packFile),
+              "three real resources can make the hello falsely announce a missing grenade resource");
+        SupportPlan packed=plan;SupportLook packLook;packLook.pack=1;
+        packed.units[1].resourceId=SupportSoldierResource(SupportWeapon::rifle,false);
+        packed.units[1].variant=kVariantApplied|LookVariant(packLook);
+        missingNoted.clear();
+        check(!Validate(packed) && !missingNoted.empty() && missingNoted.back()==packFile,
+              "an applied backpack missing here refuses the whole plan and names the missing resource");
+        variantFiles.insert(packFile);
+        check(Validate(packed),"the exact backpack resource here: the peer prepares normally");
+        variantFiles.erase(packFile);packed.units[1].variant&=~kVariantApplied;
+        check(Validate(packed),"a wanted but unapplied pack uses stock on every peer");
         variantFiles.insert(lanceL);
         // The tank: the stock 105 mm and 25 AP rounds beside it, one hull (the user: 一半ap一半he).
         ResetSupportDispatch();plan={};
@@ -797,6 +817,30 @@ int main() {
         check(made>0 && lastAircraftVariant==L"app:/object/edf6vc_lo_strike_4000000000056562.sgo" &&
               (deployments[0].plan.units[0].variant&kVariantApplied),"the strike jets are made from their all-bombs file");
         ResetSupportDispatch();
+    }
+    {
+        // The same packed preset before/after a peer update: only its pack downgrades; the generated/preloaded
+        // compatible resource still supplies its colours immediately (no pending-list round trip).
+        wchar_t path[MAX_PATH];GetTempPathW(MAX_PATH,path);wcscat_s(path,L"edf6_backpack_compat_test.ini");
+        FILE* out=nullptr;_wfopen_s(&out,path,L"wb");check(out!=nullptr,"packed compatibility ini written");
+        const char compatibilityText[]="[VehicleCrew]\r\nSupportPreset_SQUAD=rifle@1E3A8A+aHandGrenade01*4\r\n";
+        std::fwrite(compatibilityText,1,sizeof(compatibilityText)-1,out);std::fclose(out);LoadSupportConfig(path);DeleteFileW(path);
+        variantFiles={L"EDF6VC_NPC_RIFLE_L_1E3A8A_X_AHANDGRENADE01.SGO",L"EDF6VC_NPC_RIFLE_1E3A8A_X_AHANDGRENADE01.SGO",
+                      L"EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO",L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"};
+        testOnline=true;peersApplyBackpacks=false;peersApplyVariants=true;peersHaveFiles=true;
+        ResetSupportDispatch();SupportPlan plan{};SupportLook look;
+        const auto load=PackSupportLoadout(PresetLoadout(SupportCfg().preset[21]));
+        check(Plan(21,target,load,&plan)==support_net::PlanResult::ready &&
+              (plan.units[0].variant&kVariantApplied) && LookOfVariant(plan.units[0].variant,&look) && !look.pack && look.primary==0x1E3A8A,
+              "older peer: its pack is absent but the colours are applied on the first plan");
+        wchar_t madePath[128];
+        check(SupportSoldierLookPath(plan.units[0].resourceId,plan.units[0].variant,true,madePath,128)==madePath &&
+              !std::wcscmp(madePath,L"app:/object/edf6vc_npc_rifle_l_1e3a8a_x.sgo"),"the downgraded plan uses its colour-only resource");
+        peersApplyBackpacks=true;ResetSupportDispatch();plan={};
+        check(Plan(21,target,load,&plan)==support_net::PlanResult::ready &&
+              (plan.units[0].variant&kVariantApplied) && LookOfVariant(plan.units[0].variant,&look) && look.pack==1 && look.primary==0x1E3A8A,
+              "every peer updated: the same preset applies its pack and its colours");
+        testOnline=false;ResetSupportDispatch();
     }
     {
         // Stage 5 (docs/feature-2026-10-12-room-loadout-menu.md): every support unit's real crew wears SupportCrewColour_<KEY>

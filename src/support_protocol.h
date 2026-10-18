@@ -44,9 +44,15 @@ static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits")
 // an EDF5 / EDF4.1 script mission, past the BVM loop's four, when every member does (edf5online_room.h: EDF6Coop member
 // attribute EDF6X_BVMPLAYERS, read before the creation). With a member without it every machine creates four: the
 // version notice names the feature. Carried by no message of this protocol.
+// kExtBackpack (2026-10-18, the user: 「让npc可以使用背包位武器如突击的手雷，飞翼的短剑等」; docs/npc-backpack-re.md): it reads a
+// soldier variant's backpack weapon (support_loadout.h LookVariant bits 50-57) and makes that soldier from its file. An
+// older Validate refuses a variant with those bits (the whole plan, no reason anyone sees), so a host sends them only when
+// every peer announced this (SupportPeersApplyBackpacks); otherwise the soldier carries its colours alone, said. The last
+// bit the welcome's features word has room for (kFeatures below 1024).
 constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtOutfit41=8u,kExtBvmPlayers=16u,
-    kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers;
-constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers;   // what every hello of this build announces (Tick)
+    kExtBackpack=32u,
+    kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack;
+constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack;   // what every hello of this build announces (Tick)
 constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it
 // What a build has, both words in one (the version notice compares and names these, support_net.cpp VersionTick): the
 // capability bits low (below kMaxUnits, 4 bits), the extension bits above them.

@@ -12,7 +12,8 @@ manifest does not list are deleted (they would make the pack refused).
 
 Usage:
   python tools/export_edf41_assets.py OUT [--edf41 DIR]     export (DIR: an EDF4.1 install; default: the one found)
-  python tools/export_edf41_assets.py --check OUT [--full]  a pack's faults (--full: every SHA-256 too); exit 1 on any
+  python tools/export_edf41_assets.py --check OUT [--full]  all sources this installer needs (--full: SHA-256 too);
+                                                         exit 1 on any fault, subtitle text optional
 """
 from __future__ import annotations
 
@@ -45,6 +46,26 @@ def wanted() -> list[str]:
     """Every rel the pack holds (subtitle files only when the EDF4.1 has them: export decides)."""
     return [rel for name in edf41_maps.MAPS for rel in edf41_maps.sources(name)] + edf41_sounds.sources41() + \
         list(edf41_menu_bg.SOURCES)
+
+
+def optional_subtitles() -> set[str]:
+    """The subtitle plugin's text is optional at export; absent text falls back to cue names at install time."""
+    return {'/'.join((*edf41_sounds.PLUGINS, name)) for name in edf41_sounds.CAPTIONS.values()}
+
+
+def check(out: str, full: bool = False) -> list[str]:
+    """A complete export for this installer, not just an internally consistent manifest. The installer can use a
+    partial pack group by group (edf41src.check keeps that contract); a release pack must also list every currently
+    required source, including files added since it was exported. Unlisted subtitle text alone is optional."""
+    faults = edf41src.check(out, full=full)
+    try:
+        pack = edf41src.pack(out)
+    except ValueError:
+        return faults
+    optional = {edf41src.key(rel) for rel in optional_subtitles()}
+    faults += [f'素材包清单里没有当前安装器必需的 {rel}，请重新导出素材包'
+               for rel in wanted() if edf41src.key(rel) not in optional and edf41src.key(rel) not in pack.files]
+    return faults
 
 
 def _sha_file(path: str) -> str:
@@ -106,7 +127,7 @@ def export(root41: str, out: str, say=print) -> dict:  # noqa: ANN001 - say(str)
         else:
             src = os.path.join(root41, *rel.split('/'))
             if not os.path.isfile(src):
-                if rel.split('/')[0] == edf41_sounds.PLUGINS[0]:
+                if rel in optional_subtitles():
                     say(f'  没有 {rel}（字幕插件的文本，可选：没有时字幕用台词编号）')
                     continue
                 raise SystemExit(f'EDF4.1 缺少 {rel}')
@@ -151,11 +172,11 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     ap.add_argument('out')
     ap.add_argument('--edf41', help='an EDF4.1 install (default: $EDF41_DIR, next to EDF6, the Steam libraries)')
-    ap.add_argument('--check', action='store_true', help="report the pack's faults instead of exporting")
+    ap.add_argument('--check', action='store_true', help='check all sources this installer requires (subtitle text optional)')
     ap.add_argument('--full', action='store_true', help='with --check: every SHA-256 too')
     args = ap.parse_args(argv)
     if args.check:
-        faults = edf41src.check(args.out, full=args.full)
+        faults = check(args.out, full=args.full)
         for why in faults:
             print(why)
         print(f'{len(faults)} 个问题' if faults else '素材包完整' + ('（含 SHA-256）' if args.full else '（大小）'))

@@ -14,9 +14,9 @@
 #include <cstdint>
 
 namespace crew {
-// ForEachConfiguredVariant gives at most a look per seat (kSupportLoadoutMost 12), a crew and a loadout per catalog entry
-// (kSupportConfigUnits 64), and the mission crews' two: 64 x 14 + 2 (support_variants.cpp checks the constants).
-inline constexpr int kConfiguredVariantsMost=64*(12+2)+2;
+// Each seat may need both its packed look and its colours without the pack (a room with an older peer), plus a crew
+// and a loadout per catalog entry (kSupportConfigUnits 64), and the mission crews' two.
+inline constexpr int kConfiguredVariantsMost=64*(12*2+2)+2;
 inline constexpr int kHostVariantsMost=512;      // a host's whole list (room_sync_logic.h kSetMost, checked there)
 inline constexpr int kPendingPreloadMost=128;    // the pending list's newest names
 inline constexpr int kSupportVariantsMost=kConfiguredVariantsMost+kHostVariantsMost+kPendingPreloadMost;
@@ -45,7 +45,8 @@ std::uint64_t SupportCrewVariant(std::uint32_t catalog,std::uint32_t resource) n
 const wchar_t* SupportSoldierLookPath(std::uint32_t resource,std::uint64_t variant,bool remote,wchar_t* path,
                                       std::size_t capacity) noexcept;
 // Every variant file the current configuration (SupportCfg) can make a plan ask for, whatever is called: each catalog
-// entry's SupportPreset_<KEY> colours (a leader's template every four seats, as SupportLoadoutResource) and its
+// entry's SupportPreset_<KEY> colours / backpack (a leader's template every four seats, as SupportLoadoutResource),
+// including its colours without the backpack for older peers (ForEachPresetVariant), and its
 // SupportVehicle_<KEY> pylons (the hull its key names, as the plan's HullVariant). Upper-case names (SupportLookFile /
 // VehicleVariantFile), and every crew's colours (SupportCrewColour_*, the mission crews' too: SupportCrewVariant's
 // files). A name possibly more than once. The room pre-sync's host list (room_sync.cpp). Returns how many were given.

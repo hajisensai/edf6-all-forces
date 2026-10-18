@@ -66,6 +66,8 @@ bool SupportPeersAcceptLoadout() noexcept;
 bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept;
 // Host: whether every peer applies unit variants at all (an older build's do not); offline / no peer: true.
 bool SupportPeersApplyVariants() noexcept;
+// Host: whether every peer reads a soldier's backpack weapon (support_protocol.h kExtBackpack); offline / no peer: true.
+bool SupportPeersApplyBackpacks() noexcept;
 // Whether every peer has the sea rescue catalog entry (support_protocol.h kExtSeaRescue); true offline / with no session. Without it the
 // host refuses the rescue with a reason (the swimmer's machine is told, and logs it).
 bool SupportPeersAcceptRescue() noexcept;

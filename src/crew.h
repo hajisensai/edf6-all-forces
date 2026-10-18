@@ -390,6 +390,7 @@ struct Config {
     float npcLaneLength=150.0f;     // ...m along it (shorter where it meets the map)
     float npcFlankDeg=45.0f;        // ...their combat spot this many degrees off the player's own line to the target
     bool npcWeaponSwitch=true;      // ...they switch weapons for the target's range and kind
+    bool npcBackpack=true;          // ...a support soldier made with a backpack weapon uses it (npc_backpack.h, docs/npc-backpack-re.md)
     float npcEngageShare=0.85f;     // ...they fight at this share of their longest weapon's true reach (the stock: half, at least 25 m)
     bool npcEvade=true;             // ...crowded, they back off, side-step and roll
     float npcDangerRange=15.0f;     // ...m: enemies this near press on them
@@ -558,6 +559,9 @@ bool InstallAllClassesRide() noexcept;
 // by the model archives the spawn catalog can keep open (src/spawn_catalog_archives.h) before the library starts, so the
 // test range's place panel catalog does not run it out. The other pools do not grow with open archives (fsbudget.cpp).
 bool InstallFsLoaderBudget() noexcept;
+// killcount.cpp: the battle record (戦績) also lists the EDF4.1 port's own kill counters (edf41_*KillCount, the
+// installer's Mods/ETC/ACHIEVEMENT.SGO; docs/kill-counter-re.md): its row table moved to the plugin's, rows added.
+bool InstallKillCounters() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
@@ -668,6 +672,8 @@ struct ObjRef {
 
 // The plugin's log (EDF6VehicleCrew.log; over kLogMax it is renamed to .log.1 and a new one begun).
 void Log(const char* format,...) noexcept;
+// Preformatted crash diagnostics: direct append, without the ordinary logger's locks or CRT formatting.
+void CrashLog(const char* text,std::size_t size) noexcept;
 void ReloadConfigIfChanged() noexcept;
 // The ini read again now (the loadout menu saved it: loadout_store.cpp), and its path (Mods/Plugins/EDF6VehicleCrew.ini).
 void ReloadConfigNow() noexcept;

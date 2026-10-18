@@ -222,6 +222,13 @@ void Texts() {
         Expect(Same(out,hudtext::Tr(Tx::roomStockColour)),"stock colours noted");
         r.editing=true;r.field=1;NoteLine(r,out,kLineMost);
         Expect(Same(out,hudtext::Tr(Tx::roomFieldPrimary)),"editing colour 1");
+        r.field=roommenu::kPackField;NoteLine(r,out,kLineMost);
+        Expect(Same(out,hudtext::Tr(Tx::roomFieldPack)),"editing the backpack");
+        RowLine(r,out,kLineMost);
+        Expect(Has(out,hudtext::Tr(Tx::roomPackNone)),"editing the backpack with none: none said");
+        r.pack=59;RowLine(r,out,kLineMost);
+        Expect(Has(out,KindLabel(r.kind)) && Has(out,L" + Handy Saber"),"a soldier's line names its backpack weapon");
+        r.editing=false;r.pack=0;
         r=ViewRow{};r.text=RowText::pylon;r.index=1;r.store=2;r.rounds=4;
         RowLine(r,out,kLineMost);
         Expect(Has(out,L"2. ") && Has(out,L"AIM-120"),"pylon line");

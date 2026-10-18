@@ -5,6 +5,13 @@ are made here (MINIDUMP_HEADER with its TimeDateStamp, one ModuleListStream, MIN
 MiscInfoStream with ProcessCreateTime; a PE header with TimeDateStamp and SizeOfImage), the plugin's log is written
 with its `loading` lines, LOCALAPPDATA points at a scratch CrashDumps. Exit code 1 when a check fails.
 
+2026-10-18 (reports #19 / #20: a crash, no dump, no word on it; docs/feedback-2026-10-18-crash-dump.md): the plugin's
+own dump (EDF6.exe.<pid>.plugin.dmp, src/crash_dump.cpp) is sent beside Windows' LocalDumps one; crash/dumps.txt is
+always written, and with no dump it says why (the plugin's log: dump written / crash seen / installed / old plugin; the
+LocalDumps state); Windows' Report.wer is attached as an unconfirmed Report.candidate.wer (the same path and a later
+EventTime do not identify a process; ProgramData points at a scratch WER). Oversized dumps are rejected before any
+dump file is opened, including hang dumps.
+
   python tests/testhub_dump_source_test.py
 """
 from __future__ import annotations
@@ -16,6 +23,7 @@ import sys
 import tempfile
 import time
 import zipfile
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'tools'))
 import testhub  # noqa: E402
@@ -74,10 +82,34 @@ def write_dump(path: str, modules: list[tuple[str, int, int]], written: float | 
 
 
 def collected(game: str) -> tuple[list[str], str]:
+    names, listing, _ = collected_all(game)
+    return [n for n in names if n.startswith('crash/') and n.endswith('.dmp')], listing
+
+
+def collected_all(game: str) -> tuple[list[str], str, bytes]:
+    """Every name in the zip, crash/dumps.txt, and crash/Report.candidate.wer (b'' when not sent)."""
     data, names = testhub.collect(game, 'test')
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         listing = z.read('crash/dumps.txt').decode('utf-8') if 'crash/dumps.txt' in names else ''
-    return [n for n in names if n.startswith('crash/') and n.endswith('.dmp')], listing
+        wer = z.read('crash/Report.candidate.wer') if 'crash/Report.candidate.wer' in names else b''
+    return names, listing, wer
+
+
+def write_wer(root: str, name: str, exe: str, at: float, code: str = 'c0000005', module: str = 'EDF.dll',
+              offset: str = '00000000004c3a30') -> str:
+    """A Windows Error Reporting Report.wer (UTF-16 with a BOM, as WER writes it) under <root>/Microsoft/Windows/WER/
+    ReportArchive/<name>: EventTime a FILETIME, the APPCRASH signature (Sig[3] module, Sig[6] code, Sig[7] offset;
+    the names are localized, the indices are not), the exe's path."""
+    folder = os.path.join(root, 'Microsoft', 'Windows', 'WER', 'ReportArchive', name)
+    os.makedirs(folder, exist_ok=True)
+    lines = ['Version=1', 'EventType=APPCRASH', f'EventTime={int((at + 11644473600) * 1e7)}',
+             'Sig[0].Name=应用程序名', 'Sig[0].Value=EDF6.exe', 'Sig[3].Name=故障模块名称', f'Sig[3].Value={module}',
+             'Sig[6].Name=异常代码', f'Sig[6].Value={code}', 'Sig[7].Name=异常偏移', f'Sig[7].Value={offset}',
+             f'UI[2]={exe}', f'LoadedModule[0]={exe}']
+    path = os.path.join(folder, 'Report.wer')
+    with open(path, 'wb') as f:
+        f.write('\ufeff'.encode('utf-16-le') + '\r\n'.join(lines).encode('utf-16-le'))
+    return path
 
 
 def write_log(game: str, lines: list[str], mtime: float) -> None:
@@ -93,14 +125,17 @@ def tod(t: float, ms: str = '.123') -> str:
 
 
 def main() -> int:
-    saved = os.environ.get('LOCALAPPDATA')
+    saved = {k: os.environ.get(k) for k in ('LOCALAPPDATA', 'ProgramData')}
+    state = testhub.local_dumps_state
     try:
         return _main()
-    finally:   # tools/selftest.py runs this in its own process: give LOCALAPPDATA back
-        if saved is None:
-            os.environ.pop('LOCALAPPDATA', None)
-        else:
-            os.environ['LOCALAPPDATA'] = saved
+    finally:   # tools/selftest.py runs this in its own process: give LOCALAPPDATA / ProgramData back
+        testhub.local_dumps_state = state
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def _main() -> int:
@@ -111,6 +146,8 @@ def _main() -> int:
         crew = os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.dll')
         write_pe(crew, 0x6AC9C50B, 9416704)
         os.environ['LOCALAPPDATA'] = os.path.join(root, 'local')
+        os.environ['ProgramData'] = os.path.join(root, 'programdata')   # no machine's WER reports in the cases
+        testhub.local_dumps_state = lambda: 'Windows LocalDumps：（测试）未配置'
         dumps = os.path.join(root, 'local', 'CrashDumps')
         os.makedirs(dumps)
         exe = os.path.join(game, 'EDF6.exe')
@@ -186,8 +223,161 @@ def _main() -> int:
             mods = testhub.dump_modules(real)
             expect(mods is not None and mods.get('edf6vehiclecrew.dll', ('', 0, 0))[1] == 0x6AC5DF87,
                    "report #5's real dump reads its plugin's stamp")
+        bounded_dump_metadata(root, exe, crew, run)
+        crash_dump_cases(root, game, dumps, exe, crew, run)
     print(f'{checks - failures}/{checks} checks passed')
     return 1 if failures else 0
+
+
+def bounded_dump_metadata(root: str, exe: str, crew: str, run: int) -> None:
+    """Module/session checks may seek in a full dump, but never allocate its entire memory payload."""
+    probe = os.path.join(root, 'metadata.dmp')
+    write_dump(probe, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=run + 60, created=run - 1)
+    real_open = open
+    reads = []
+
+    class MetadataReader:
+        def __init__(self, f):
+            self.f = f
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.f.__exit__(*args)
+
+        def seek(self, *args):
+            return self.f.seek(*args)
+
+        def read(self, size=-1):
+            assert 0 <= size <= (1 << 20), 'dump metadata parsing must use bounded reads'
+            data = self.f.read(size)
+            reads.append(len(data))
+            return data
+
+    def metadata_open(path, *args, **kwargs):
+        f = real_open(path, *args, **kwargs)
+        return MetadataReader(f) if os.fspath(path) == probe else f
+
+    with patch('builtins.open', metadata_open):
+        modules = testhub.dump_modules(probe)
+        expect(modules is not None and modules['edf6vehiclecrew.dll'][1:] == (0x6AC9C50B, 9416704),
+               'bounded metadata reads retain the module identity')
+        expect(testhub.dump_times(probe) == (run + 60, run - 1), 'bounded metadata reads retain both session times')
+    expect(sum(reads) < (1 << 20), 'only dump metadata is read, independent of the full memory payload')
+
+
+def crash_dump_cases(root: str, game: str, dumps: str, exe: str, crew: str, run: int) -> None:
+    """2026-10-18: the plugin's own dump, crash/dumps.txt always, why no dump, Windows' Report.wer."""
+    for name in os.listdir(dumps):
+        os.remove(os.path.join(dumps, name))
+    loading = f'{tod(run)} EDF6VehicleCrew 0.9.0 loading'
+    installed = f'{tod(run)} CRASHDUMP installed: x (dbghelp 1, dumping thread 1, filter kept first by redirect, ...)'
+    now = time.time()
+
+    # No dump anywhere, an old plugin (no CRASHDUMP line): dumps.txt still written, saying so.
+    write_log(game, [loading, f'{tod(run + 30)} HELI this run'], now - 5)
+    names, listing, wer = collected_all(game)
+    expect('crash/dumps.txt' in names, 'dumps.txt is written even when there is no dump at all')
+    expect('没有上传任何崩溃转储' in listing and '旧版插件' in listing and 'LocalDumps' in listing,
+           'with no dump, dumps.txt says the plugin had no crash dump and the LocalDumps state')
+    expect('没有这个游戏目录的 EDF6.exe 崩溃报告' in listing and wer == b'', 'no WER report: said, none attached')
+
+    # The plugin's dump installed but nothing reached it (a fast fail): said.
+    write_log(game, [loading, installed], now - 5)
+    expect('已装好' in collected(game)[1], 'an installed crash dump that saw no crash: said')
+    # It saw the crash but the dump failed: the crash line is quoted.
+    write_log(game, [loading, installed, f'{tod(run + 60)} CRASH unhandled exception: exception C0000005 at EDF.dll+0x4c3a30',
+                     f'{tod(run + 60)} CRASH dump not written: x (error 5)'], now - 5)
+    listing = collected(game)[1]
+    expect('看到了崩溃但转储没写成' in listing and 'EDF.dll+0x4c3a30' in listing and 'error 5' in listing,
+           'a crash the plugin saw but could not dump: its lines in dumps.txt')
+
+    # The allocation-free native crash writer writes both lines directly, without the normal timestamp prefix.
+    raw_crash = 'CRASH unhandled exception: exception C0000005 at EDF.dll+0x4c3a30, thread 123; writing x'
+    write_log(game, [loading, installed, raw_crash, 'CRASH dump not written: x (error 5)'], now - 5)
+    listing = collected(game)[1]
+    expect('看到了崩溃但转储没写成' in listing and 'EDF.dll+0x4c3a30' in listing and 'error 5' in listing,
+           'both raw crash failure lines are recognized without timestamp prefixes')
+    write_log(game, [loading, installed, raw_crash, 'CRASH dump written: x, 3000 KB (exception C0000005 at EDF.dll+0x4c3a30)'],
+              now - 5)
+    listing = collected(game)[1]
+    expect('已写出（CRASH dump written: x, 3000 KB' in listing and '看到了崩溃但转储没写成' not in listing,
+           'a raw crash line followed by a raw success line is recognized as written')
+    write_log(game, [loading, installed, f'{tod(run + 60)} DEBUG mentions CRASH dump written: bogus'], now - 5)
+    listing = collected(game)[1]
+    expect('已装好' in listing and '已写出' not in listing,
+           'a non-crash line mentioning CRASH is not accepted as crash evidence')
+    write_log(game, [loading, installed, raw_crash, 'CRASH dump not written: x (error 5)'], now - 5)
+
+    # A same-folder WER after loading is useful evidence, but path and time cannot confirm its process/session.
+    progdata = os.environ['ProgramData']
+    write_wer(progdata, 'AppCrash_EDF6.exe_old', exe, run - 3600, offset='0000000000111111')
+    write_wer(progdata, 'AppCrash_EDF6.exe_other', r'E:\other\EDF6.exe', run + 90, offset='0000000000222222')
+    mine = write_wer(os.environ['LOCALAPPDATA'], 'AppCrash_EDF6.exe_mine', exe, run + 60)
+    names, listing, wer = collected_all(game)
+    with open(mine, 'rb') as f:
+        expect(wer == f.read(), 'the WER candidate is attached as it is')
+    expect('crash/Report.candidate.wer' in names and 'crash/Report.wer' not in names and '会话未确认' in listing,
+           'the archive name and explanation both retain the WER session uncertainty')
+    expect('c0000005' in listing and 'EDF.dll+0x4c3a30' in listing and 'AppCrash_EDF6.exe_mine' in listing,
+           "dumps.txt names the report's exception code and module+offset")
+    expect('111111' not in listing and '222222' not in listing, "an earlier run's or another folder's report is not taken")
+
+    # A later launch can crash before it logs loading. Even when the plugin log has a CRASH line from the earlier
+    # launch, newest-after-loading alone must not label this later process's WER as belonging to the logged session.
+    later = write_wer(progdata, 'AppCrash_EDF6.exe_later', exe, run + 400, module='later.dll', offset='0000000000333333')
+    names, listing, wer = collected_all(game)
+    with open(later, 'rb') as f:
+        expect(wer == f.read(), "a later launch's report remains available only as a candidate")
+    expect('crash/Report.wer' not in names and '会话未确认' in listing and '后续未记 loading 的启动' in listing,
+           "a later launch's WER is not asserted to be this session's crash")
+    expect(testhub.wer_report(game, None)[0] is None, 'without a loading line no WER is attributed or attached')
+    os.remove(later)
+
+    # The plugin's dump and Windows' dump of this run: both sent.
+    plugin = os.path.join(dumps, 'EDF6.exe.7300.plugin.dmp')
+    windows = os.path.join(dumps, 'EDF6.exe.7300.dmp')
+    for path in (plugin, windows):
+        write_dump(path, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=run + 60, created=run - 1)
+        os.utime(path, (run + 60, run + 60))
+    write_log(game, [loading, installed, f'{tod(run + 60)} CRASH dump written: {plugin}, 3000 KB'], now - 5)
+    sent, listing = collected(game)
+    expect(sorted(sent) == ['crash/EDF6.exe.7300.dmp', 'crash/EDF6.exe.7300.plugin.dmp'],
+           "the plugin's dump and Windows' dump of this run are both sent")
+    expect('没有上传任何崩溃转储' not in listing, 'with a dump sent, no "no dump" note')
+    # An older plugin dump of this install does not displace this run's.
+    older = os.path.join(dumps, 'EDF6.exe.7000.plugin.dmp')
+    write_dump(older, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=run - 7000, created=run - 7201)
+    os.utime(older, (run - 7000, run - 7000))
+    expect('crash/EDF6.exe.7300.plugin.dmp' in collected(game)[0], "an earlier run's plugin dump is not sent in its place")
+
+    # Dumps over DUMP_MAX: named with their size, not dropped without a word (this machine's LocalDumps wrote
+    # 100 MB ones, 2026-10-18).
+    limit = testhub.DUMP_MAX
+    hang = os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.hang.dmp')
+    write_dump(hang, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=run + 60, created=run - 1)
+    opened = []
+    real_open = open
+
+    def no_dump_open(path, *args, **kwargs):
+        if os.fspath(path).lower().endswith('.dmp'):
+            opened.append(path)
+            raise AssertionError('an oversized dump must be rejected before parsing or reading: ' + path)
+        return real_open(path, *args, **kwargs)
+
+    try:
+        testhub.DUMP_MAX = os.path.getsize(windows) - 1
+        with patch('builtins.open', no_dump_open):
+            sent, listing = collected(game)
+        expect(sent == [], 'a dump over the limit is not sent')
+        expect('EDF6.exe.7300.dmp: ' in listing and 'EDF6.exe.7300.plugin.dmp: ' in listing and '超过' in listing,
+               'a dump over the limit is named in dumps.txt with its size')
+        expect('EDF6VehicleCrew.hang.dmp: ' in listing and not opened,
+               'all oversized sources, including hang dumps, are rejected without opening any dump')
+    finally:
+        testhub.DUMP_MAX = limit
+        os.remove(hang)
 
 
 _made = 0

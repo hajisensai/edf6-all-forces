@@ -14,7 +14,10 @@
 //    leader, the spot it was free at), the weapon for that range and kind (PickArm), the look onto it, the trigger only
 //    with the round's line and blast clear of friends and the map ray open; it moves only when it must: crowded (back
 //    off, side-step, roll), hurt (behind the player), in the player's lane (out of it), engaged (to a combat spot beside
-//    the player, never between them and the target); else the stock follow / formation move stands.
+//    the player, never between them and the target); else the stock follow / formation move stands;
+//  - a support soldier made with a backpack weapon (docs/npc-backpack-re.md): its grenade at a group in its throw's reach,
+//    its saber / spear at a target in its reach (Backpack, npc_backpack.h), through the game's own use of a backpack tap
+//    (npc_backpack.cpp NpcPackUse) and its message to the other machines.
 // Online: only the soldiers this machine runs (online_authority.h IsOnlineAuthority: its own registered ones, the host for
 // one with no identity), as the stock AI writes only theirs; the block goes to the other machines the way the stock AI's
 // does (§2.1).
@@ -27,6 +30,7 @@
 #include "ground_navigation.h"
 #include "pickup.h"
 #include "npc_logic.h"
+#include "npc_backpack.h"
 #include "ifc_model.h"
 #include "npc_mark.h"
 #include "online_authority.h"
@@ -135,6 +139,13 @@ struct Soldier {
     float pickPos[3];
     int pickKind;
     ULONGLONG pickFrame;
+    // Its backpack weapon (Backpack): the last use, the look held on it until packHoldUntil (a frame), each sub slot's
+    // empty stretch and when its reload was last asked for.
+    bool packUsed;
+    ULONGLONG packAt,packHoldUntil;
+    float packDir[3];
+    bool packEmpty[2];
+    ULONGLONG packReloadAt[2];
 };
 Soldier soldiers[kMaxSoldiers]{};
 ULONGLONG fullLoggedAt=0,listLoggedAt=0;
@@ -488,7 +499,9 @@ Arms ArmsOf(const unsigned char* h) noexcept {
     for(int i=0;i<a.n;++i) {
         const unsigned char* w=list[i];
         npc::Arm& m=a.arm[i];m=npc::Arm{};
-        if(!Readable(w,kWeaponAmmo+4))continue;
+        // A backpack weapon (a sub slot's: npc_backpack.cpp) is in no WeaponSet: never picked through d82+i, fired by the
+        // trigger, nor counted in the reach it fights at or the blast its shots are vetoed for (Backpack uses it).
+        if(!Readable(w,kWeaponAmmo+4) || NpcPackIndex(h,i))continue;
         const float speed=At<float>(w,0x894)*60.0f,factor=At<float>(w,0x8E0);
         a.speed[i]=std::isfinite(speed) && speed>0.0f ? speed : 0.0f;
         a.gravity[i]=std::isfinite(factor) && factor>0.0f ? factor*14.7f : 0.0f;
@@ -1012,6 +1025,82 @@ bool AttackMoveSee(Squad& q,bool target,bool fired,ULONGLONG ms) noexcept {
     return mapcmd::AttackMoveHolds(seen,ms-q.attackHoldAt,q.attackShotAt ? ms-q.attackShotAt : ~0ull);
 }
 
+// --- Its backpack weapon (docs/npc-backpack-re.md; npc_backpack.h) ---
+// The enemies within `radius` of target `t`'s lock point, `t` among them.
+int GroupAt(const Enemy& t,float radius) noexcept {
+    int n=0;
+    for(int i=0;i<world.enemies;++i)if(npc::Dist(world.enemy[i].aim,t.aim)<=radius)++n;
+    return n>0 ? n : 1;
+}
+ULONGLONG packLoggedAt=0;
+// After the main weapon's look and trigger: a throw or a swing at `t` when its backpack weapon is for it (npc_backpack.h
+// Fits, the friends clear, the map open along its way), the look turned onto it first and the main trigger off meanwhile;
+// while the use goes on (the game's WeaponSet 0 sub weapon, then kHoldFrames) the look stays on it and the main trigger and
+// the weapon picks stay off (a switch or a shot must not cut the throw). A hand-reloaded one (the sabers) empty: the long
+// press's reload, once each time it runs dry (again after kReloadGapMs).
+void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsigned mask,ULONGLONG ms) noexcept {
+    if(!Cfg().npcBackpack || !NpcBackpackReady())return;
+    NpcPackSlot slots[2];
+    const int n=NpcPackSlots(h,slots,2);
+    if(!n)return;
+    for(int i=0;i<n;++i) {
+        const int k=slots[i].slot&1;
+        if(At<std::int32_t>(slots[i].weapon,kWeaponAmmo)>0){s.packEmpty[k]=false;continue;}
+        if(s.packEmpty[k] && ms-s.packReloadAt[k]<npcpack::kReloadGapMs)continue;
+        s.packEmpty[k]=true;s.packReloadAt[k]=ms;
+        NpcPackReload(slots[i].weapon);
+    }
+    const ULONGLONG frame=GameFrame();
+    if(NpcPackBusy(h) || frame<s.packHoldUntil) {
+        if(mask&kMaskLook)Look(h,s.packDir);
+        h[kTrigger]=0;h[kPickWeapon]=h[kPickWeapon+1]=h[kPickWeapon+2]=0;
+        return;
+    }
+    if(!t)return;
+    npc::Friend fr[kMaxFriends];
+    const int friends=FriendsBut(h,fr);
+    const float dist=npc::Dist(eye,t->aim);
+    for(int i=0;i<n;++i) {
+        const PackWeapon& row=*slots[i].row;
+        const unsigned char* w=slots[i].weapon;
+        if(!NpcPackCanUse(h,slots[i].slot))continue;
+        const float reach=At<float>(w,kArmReach),blast=At<float>(w,kArmBlast),speed=At<float>(w,kWeaponSpeed)*60.0f,
+                    factor=At<float>(w,kWeaponGravity);
+        npcpack::Weapon pack{row.use,std::isfinite(reach) && reach>0.0f ? reach : 0.0f,std::isfinite(blast) && blast>0.0f ? blast : 0.0f,
+                             row.area,std::isfinite(speed) && speed>0.0f ? speed : 0.0f,
+                             std::isfinite(factor) && factor>0.0f ? factor*npcpack::kGravity : 0.0f,row.lift,
+                             At<std::int32_t>(w,kWeaponAmmo)>0};
+        if(!npcpack::Rested(row.use,s.packUsed,ms-s.packAt))continue;
+        const npcpack::Target target{dist,npc::Horiz(eye,t->aim),t->aim[1]-eye[1],GroupAt(*t,npcpack::GroupRadius(pack)),
+                                     t->points>=kLargePoints};
+        float pitch=0.0f,dir[3],hit[3];
+        if(!npcpack::Fits(pack,target,&pitch))continue;
+        if(row.use==PackUse::thrown) {
+            npcpack::ThrowLook(eye,t->aim,pitch,row.lift,dir);
+            if(!npcpack::ArcClear(pack,eye,t->aim,pitch,kSpread,fr,friends,[](const float* from,const float* to) noexcept {
+                float collision[3];return MapRay(from,to,collision)>=0.0f;
+            }))continue;
+        } else {
+            dir[0]=t->aim[0]-eye[0];dir[1]=t->aim[1]-eye[1];dir[2]=t->aim[2]-eye[2];
+            const float wall=MapRay(eye,t->aim,hit);
+            if(!npc::ShotClear(eye,t->aim,kSpread,0.0f,fr,friends) || (wall>=0.0f && wall<dist-2.0f))continue;
+        }
+        if(!(mask&kMaskLook))return;
+        Look(h,dir);
+        h[kTrigger]=0;
+        if(!npcpack::AimOn(row.use,At<float>(h,kViewPitch),At<float>(h,kViewYaw),dir,dist))return;   // turning onto it
+        if(!NpcPackUse(h,slots[i].slot))return;
+        s.packUsed=true;s.packAt=ms;s.packHoldUntil=frame+npcpack::kHoldFrames;
+        std::memcpy(s.packDir,dir,sizeof(dir));
+        if(ms-packLoggedAt>=kLogMs) {
+            packLoggedAt=ms;
+            Log("NPCAI soldier %p: backpack %ls (slot %d, %s) at %.0f m",h,row.label,slots[i].slot,
+                row.use==PackUse::thrown ? "thrown" : "direct",dist);
+        }
+        return;
+    }
+}
+
 Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const unsigned char* root,const float* eye,
            const float* pos,Squad* q,ULONGLONG ms) noexcept {
     Plan p{"stock",false,a.held[0]};
@@ -1063,6 +1152,7 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
         h[kTrigger]=0;
         Veto(h,StockTarget(h),eye,a);
     }
+    if(a.held[0]>=0){Backpack(s,h,t.e,eye,mask,ms);p.fire=p.fire && h[kTrigger]!=0;}
     const bool holds=pursuit.fightFirst && AttackMoveSee(*q,t.e!=nullptr,p.fire,ms);
     if(!(mask&kMaskMove))return p;
     // Its moves, the first that applies: the player's move order before anything of its own; an attack-move's while its
@@ -1633,6 +1723,7 @@ bool InstallNpcAi() noexcept {
     if(!seatEventsOk)Log("NPCAI vehicle seat events not as read: a crew created aboard plays the boarding sound");
     if(!followOk)Log("NPCAI SetFollow not as read: squads are not reorganized when a leader dies");
     InstallRealDriverNative(&OwnsNpcSeatInput);
+    InstallNpcBackpack();
     InstallBargaControlKind();
     InstallBoxes();
     int hooked=0;

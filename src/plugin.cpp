@@ -15,6 +15,8 @@
 #pragma warning(disable:4201)
 #include "PluginAPI.h"
 #pragma warning(pop)
+#include "crash_dump.h"
+#include "log_buffer.h"
 #include "crew.h"
 #include "firstperson.h"
 #include "mod_room.h"
@@ -804,6 +806,7 @@ void LoadConfig() noexcept {
     n.npcLaneLength=ReadFloat(L"NpcLaneLength",n.npcLaneLength);
     n.npcFlankDeg=ReadFloat(L"NpcFlankDeg",n.npcFlankDeg);
     n.npcWeaponSwitch=ReadBool(L"NpcWeaponSwitch",n.npcWeaponSwitch);
+    n.npcBackpack=ReadBool(L"NpcBackpack",n.npcBackpack);
     n.npcEngageShare=ReadFloat(L"NpcEngageShare",n.npcEngageShare);
     n.npcEvade=ReadBool(L"NpcEvade",n.npcEvade);
     n.npcDangerRange=ReadFloat(L"NpcDangerRange",n.npcDangerRange);
@@ -881,6 +884,7 @@ void LoadConfig() noexcept {
         n.customNpcAi,n.npcFireLane,n.npcLaneWidth,n.npcLaneLength,n.npcFlankDeg,n.npcWeaponSwitch,n.npcEngageShare,n.npcEvade,
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
+    Log("CONFIG npcBackpack=%d",n.npcBackpack);
     Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding,n.npcGunners);
     Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);
     Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,n.npcGuardFormation);
@@ -956,13 +960,9 @@ namespace {
 constexpr LONGLONG kLogMax=32ll<<20;
 constexpr std::size_t kLogBuffer=1u<<20;
 constexpr DWORD kFlushMs=50;
-SRWLOCK logLock=SRWLOCK_INIT;        // the buffers
-char logBuffer[2][kLogBuffer];
-std::size_t logUsed=0;               // in logBuffer[logActive]
-int logActive=0;
-unsigned logDropped=0;
+logging::Buffer<kLogBuffer> logBuffer;
 INIT_ONCE logWriterOnce=INIT_ONCE_STATIC_INIT;
-HANDLE logFile=nullptr;              // the writer's alone
+HANDLE logFile=nullptr;              // under logBuffer.fileLock
 LONGLONG logSize=0;
 
 HANDLE OpenLog() noexcept {
@@ -993,26 +993,25 @@ void RotateLog() noexcept {
     if(n>0)WriteLog(line,static_cast<std::size_t>(n));
 }
 
+// Called with the file lock and an immutable buffer snapshot, by the writer or an explicit best-effort flush.
+void WritePendingLog(const char* text,std::size_t n,unsigned dropped) noexcept {
+    if(!n && !dropped)return;
+    if(!logFile)logFile=OpenLog();
+    if(!logFile)return;
+    if(logSize+static_cast<LONGLONG>(n)>kLogMax)RotateLog();
+    WriteLog(text,n);
+    if(dropped) {
+        char line[120];
+        const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"(%u log lines dropped: more than %zu KB in %lu ms)\r\n",dropped,
+                                kLogBuffer>>10,kFlushMs);
+        if(k>0)WriteLog(line,static_cast<std::size_t>(k));
+    }
+}
+
 DWORD WINAPI LogWriter(void*) {
     for(;;) {
         Sleep(kFlushMs);
-        AcquireSRWLockExclusive(&logLock);
-        const int full=logActive;
-        const std::size_t n=logUsed;
-        const unsigned dropped=logDropped;
-        logActive^=1;logUsed=0;logDropped=0;
-        ReleaseSRWLockExclusive(&logLock);
-        if(!n && !dropped)continue;
-        if(!logFile)logFile=OpenLog();
-        if(!logFile)continue;
-        if(logSize+static_cast<LONGLONG>(n)>kLogMax)RotateLog();
-        WriteLog(logBuffer[full],n);
-        if(dropped) {
-            char line[120];
-            const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"(%u log lines dropped: more than %zu KB in %lu ms)\r\n",dropped,
-                                    kLogBuffer>>10,kFlushMs);
-            if(k>0)WriteLog(line,static_cast<std::size_t>(k));
-        }
+        logBuffer.Drain(&WritePendingLog);
     }
 }
 
@@ -1031,12 +1030,17 @@ void Log(const char* format,...) noexcept {
     const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u.%03u] %s\r\n",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,text);
     if(n<=0)return;
     InitOnceExecuteOnce(&logWriterOnce,&StartLogWriter,nullptr,nullptr);
-    AcquireSRWLockExclusive(&logLock);
-    if(logUsed+static_cast<std::size_t>(n)<=kLogBuffer) {
-        std::memcpy(logBuffer[logActive]+logUsed,line,static_cast<std::size_t>(n));
-        logUsed+=static_cast<std::size_t>(n);
-    } else ++logDropped;
-    ReleaseSRWLockExclusive(&logLock);
+    logBuffer.Append(line,static_cast<std::size_t>(n));
+}
+
+// A best-effort snapshot: both locks are acquired once, without waiting. Crash diagnostics use their own raw append
+// below instead: neither ordinary formatting nor a flush of older lines is a prerequisite for producing the dump.
+void FlushLog() noexcept {
+    if(logPath[0])logBuffer.Drain(&WritePendingLog,true);
+}
+
+void CrashLog(const char* text,std::size_t size) noexcept {
+    logging::AppendCrashLine(logPath,text,size);
 }
 
 void ReloadConfigIfChanged() noexcept {
@@ -1129,6 +1133,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     CheckPauseFlag();       // the game's pause flag (the game clock and the HUD stop with it): read only
     // Then the installs, in dependency order. From the first patch on the plugin stays loaded whatever fails
     // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
+    // The crash dump first (its filter and handlers point into this DLL): a crash in any install below is dumped.
+    InstallCrashDump();
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     Log("ROOM isolation=%d",InstallModRoom());
     Log("SUPPORT soldiers=%d",InstallSupportSoldiers());
@@ -1163,6 +1169,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();
     InstallDamageStats();   // the damage function's head and the rounds' spawn (damagestats.cpp): the statistics' page over the map
+    InstallKillCounters();  // the battle record's rows: the EDF4.1 port's kill counters after the stock ones (killcount.cpp)
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)

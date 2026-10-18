@@ -184,6 +184,7 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
         {FeatureExt(support_net::kExtRescueChannel),Tx::versionFeatRescueChannel},
         {FeatureExt(support_net::kExtOutfit41),Tx::versionFeatOutfit41},
         {FeatureExt(support_net::kExtBvmPlayers),Tx::versionFeatBvmPlayers},
+        {FeatureExt(support_net::kExtBackpack),Tx::versionFeatBackpack},
         {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapTransports,Tx::versionFeatTransport},
         {support_net::kCapLoadout,Tx::versionFeatCompose},{FeatureExt(support_net::kExtVariants),Tx::versionFeatVariants},
         {support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
@@ -340,6 +341,7 @@ bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept {
     return !running || session.PeersHaveVariant(support_net::kExtVariants,hash);
 }
 bool SupportPeersApplyVariants() noexcept { return !running || session.PeersHaveVariant(support_net::kExtVariants,0); }
+bool SupportPeersApplyBackpacks() noexcept { return !running || session.PeersHaveExtension(support_net::kExtBackpack); }
 bool SupportPeersAcceptRescue() noexcept { return !running || session.PeersHaveExtension(support_net::kExtSeaRescue); }
 bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept {
     constexpr ULONGLONG kShowMs=12000;

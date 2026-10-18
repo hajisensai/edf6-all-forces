@@ -348,10 +348,17 @@ std::uint64_t DecideVariant(std::uint32_t catalog,const wchar_t* file,std::uint6
     }
     return wanted|kVariantApplied;
 }
-// Soldier `i` of a composed load: its preset colours (PresetLookFor) as a variant of `resource`'s template.
+// Soldier `i` of a composed load: its preset colours and backpack weapon (PresetLookFor) as a variant of `resource`'s
+// template. A peer that does not read backpacks (support_protocol.h kExtBackpack) would refuse the whole plan for its
+// bits: the soldier then comes with its colours alone, said once a request.
 std::uint64_t SoldierVariant(std::uint32_t catalog,const SupportLoadout& load,int i,std::uint32_t resource) noexcept {
     if(catalog>=static_cast<unsigned>(kSupportConfigUnits))return 0;
-    const auto look=PresetLookFor(SupportCfg().preset[catalog],load,i);
+    auto look=PresetLookFor(SupportCfg().preset[catalog],load,i);
+    if(look.pack && !SupportPeersApplyBackpacks()) {
+        Log("SUPPORT plan catalog=%u: soldier %d without its backpack weapon: a peer runs an older All Forces (no backpacks)",catalog,i);
+        NoteVariant(L"房间里有旧版全军出击：支援士兵本次不带背包武器（全员更新后生效）%ls",L"");
+        look.pack=0;
+    }
     if(!look.On())return 0;
     wchar_t file[96];
     if(!SupportLookFile(SupportSoldierWeapon(resource),IsSupportLeaderResource(resource),look,file,_countof(file)))return 0;
@@ -679,7 +686,8 @@ bool Validate(const SupportPlan& plan) noexcept {
     const auto member=[](std::uint32_t id) noexcept {return IsSupportSoldierResource(id) && !IsSupportLeaderResource(id);};
     // Unit variants (support_loadout.h): a look on a soldier, pylons on the entry's own hull, each one that decodes. A hull
     // made from its loaded file must have it here: another weapon list than the host's would not be the same vehicle (a
-    // soldier's colours alone may come stock: the same class, weapon and AI). The missing file goes on the pending list.
+    // soldier's colours alone may come stock: the same class, weapon and AI). A backpack changes its weapons too, so
+    // its applied file is mandatory: the hello's Bloom filter can have false positives. Missing files are listed.
     for(unsigned i=0;i<plan.count;++i) {
         const auto& unit=plan.units[i];
         if(!unit.variant)continue;
@@ -689,9 +697,11 @@ bool Validate(const SupportPlan& plan) noexcept {
                 static_cast<unsigned long long>(unit.variant));
             return false;
         }
-        if((unit.variant&kVariantApplied) && !IsSupportSoldierResource(unit.resourceId) && !SupportVariantReady(file)) {
+        SupportLook look;
+        const bool weaponVariant=!IsSupportSoldierResource(unit.resourceId) || (LookOfVariant(unit.variant,&look) && look.pack);
+        if((unit.variant&kVariantApplied) && weaponVariant && !SupportVariantReady(file)) {
             NoteMissingVariant(file,"the host's plan");
-            NoteVariant(L"房主的载具预设需要 %ls，本机没有：本次支援未出动；退出游戏后运行安装器菜单 7 即可生成",file);
+            NoteVariant(L"房主的武器预设需要 %ls，本机没有：本次支援未出动；退出游戏后运行安装器菜单 7 即可生成",file);
             return false;
         }
     }

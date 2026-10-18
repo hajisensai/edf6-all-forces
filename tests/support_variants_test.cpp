@@ -75,7 +75,7 @@ void Mission() {
     MissionParts p=MissionVariants(&set,[&](auto&& put){for(const auto& f:configured)put(f.c_str());},
                                    [&](auto&& put){for(const auto& f:hosts)put(f.c_str());},pending.data(),pending.size());
     Expect(p.configured==kConfiguredVariantsMost && p.host==kHostVariantsMost && p.pending==kPendingPreloadMost && !p.dropped &&
-           set.count==kSupportVariantsMost,"every part at its bound: the whole set fits (1538), nothing dropped");
+           set.count==kSupportVariantsMost,"every part at its bound: the whole set fits, nothing dropped");
     // More than a part's bound (a source the plugin never gives): the excess counted, the other parts unharmed.
     const std::vector<std::wstring> tooMany=Soldiers(kConfiguredVariantsMost+5,0x700000);
     p=MissionVariants(&set,[&](auto&& put){for(const auto& f:tooMany)put(f.c_str());},
@@ -87,6 +87,18 @@ void Mission() {
     Expect(set.count==3 && p.configured==2 && p.host==1 && p.pending==0,"the union: each file once");
     // A directory full of other generated files is no part of it: only what is named.
     Expect(!set.Has(hosts[1].c_str()),"nothing beyond the three sources");
+}
+
+void BackpackFallback() {
+    SupportPreset preset;wchar_t why[128];
+    Expect(ParseSupportPreset(L"rifle@1E3A8A+aHandGrenade01*4",12,&preset,why,128),"packed preset parses");
+    const auto configured=[&](auto&& put){ForEachPresetVariant(preset,put);};
+    const MissionParts parts=MissionVariants(&set,configured,[](auto&&){},nullptr,0);
+    Expect(parts.configured==4 && !parts.host && !parts.pending && !parts.dropped && set.count==4,
+           "without any pending names the configuration preloads both pack and colour-only leader/member resources");
+    Expect(set.Has(L"EDF6VC_NPC_RIFLE_L_1E3A8A_X_AHANDGRENADE01.SGO") && set.Has(L"EDF6VC_NPC_RIFLE_1E3A8A_X_AHANDGRENADE01.SGO") &&
+           set.Has(L"EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO") && set.Has(L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO"),
+           "the complete and old-peer resources match the generator's four names");
 }
 
 void Bloom() {
@@ -130,6 +142,7 @@ int main() {
     Names();
     Pending();
     Mission();
+    BackpackFallback();
     Bloom();
     std::printf("support_variants: %d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;

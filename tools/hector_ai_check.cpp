@@ -89,7 +89,7 @@ int main() {
         Cycle y;
         y.stopRadius=40.0f;
         Walk w=Steer(y,c,300.0f);
-        Check(!w.takeover,"far: the game's own walk");
+        Check(w.takeover && !w.retreat && w.go,"far: 4.1 heads for the target too (no route), forward along its facing");
         w=Steer(y,c,100.0f);
         Check(w.takeover && !w.retreat && w.go,"inside near, outside the stop radius: straight at the target");
         w=Steer(y,c,39.0f);
@@ -99,17 +99,46 @@ int main() {
         Check(w.takeover && w.retreat && w.go,"back-off: away from the target");
         w=Steer(y,c,900.0f);
         Check(w.takeover && w.retreat && w.go,"back-off at any distance");
-        // 4.1's speeds (EDF41.exe 0x223832 / 0x2238BB: -0.85 backing off; +0x278 = 1 otherwise), not the class's 0.125
-        Check(w.speed==kRetreatSpeed && kRetreatSpeed==0.85f,"back-off at 0.85 of the walk",w.speed);
+        // 4.1's speeds (EDF41.exe 0x2238BB: -1 backing off; the same +0x278 command), not the class's 0.125
+        Check(w.speed==kRetreatSpeed && kRetreatSpeed==kWalkSpeed,"back-off uses the same command magnitude as forward (4.1 0x2238BB)",w.speed);
+        Check(w.speed*6.0f==6.0f,"back-off at 4.1's 6 units/s (xmm7 is -1, not -0.85)",w.speed*6.0f);
         y.phase=Phase::Approach;
         w=Steer(y,c,300.0f);
-        Check(!w.takeover && w.speed==kWalkSpeed && kWalkSpeed==1.0f,"far: the game's goal at 4.1's full speed",w.speed);
+        Check(w.takeover && w.speed==kWalkSpeed && kWalkSpeed==1.0f,"far: at 4.1's full speed",w.speed);
         w=Steer(y,c,100.0f);
         Check(w.speed==1.0f,"closing in at full speed",w.speed);
         w=Steer(y,c,39.0f);
         Check(w.speed==0.0f,"inside the stop radius: speed 0",w.speed);
         w=Steer(y,c,10.0f,false);
         Check(!w.takeover && w.speed==1.0f,"no target: the game's goal at full speed");
+    }
+    // --- the legs' animation (4.1 0x2220E0 / 0x2224E0)
+    {
+        const float walkK=10.0f,turnK=112.0f;   // HECTOR.CAS v_walk_animation_speed / v_turn_animation_speed
+        Check(PickGait(0.0f,0.0f,0.0f,0.0f)==Gait::Stand,"still: stand");
+        Check(GaitRate(Gait::Stand,0.0f,0.0f,0.0f,walkK,turnK)==1.0f,"stand at rate 1");
+        // turning on the spot (the case EDF6's stand state plays as `stand`)
+        Check(PickGait(0.03f,0.0f,0.0f,0.0f)==Gait::TurnL,"a growing yaw with nothing commanded: turn_l");
+        Check(PickGait(-0.03f,0.0f,0.0f,0.0f)==Gait::TurnR,"a shrinking yaw: turn_r");
+        Check(std::fabs(GaitRate(Gait::TurnL,0.03f,0.0f,0.0f,walkK,turnK)-3.36f)<1e-4f,"turn rate |yaw step| x 112",
+              GaitRate(Gait::TurnL,0.03f,0.0f,0.0f,walkK,turnK));
+        Check(std::fabs(GaitRate(Gait::TurnR,-0.003f,0.0f,0.0f,walkK,turnK)-0.336f)<1e-4f,"a slow turn plays slowly");
+        Check(PickGait(0.00009f,0.0f,0.0f,0.0f)==Gait::Stand,"a yaw step under 1e-4: still stand");
+        Check(PickGait(0.03f,0.0f,0.0f,0.0f)!=Gait::Stand && PickGait(0.0001f,0.0f,0.0f,0.0f)==Gait::WalkB,
+              "exactly 1e-4: not stand, not a turn (4.1's comparisons), the walk branch");
+        // walking
+        Check(PickGait(0.0f,0.0f,0.1f,0.01f)==Gait::WalkF,"forward: walk_f");
+        Check(std::fabs(GaitRate(Gait::WalkF,0.0f,0.0f,0.1f,walkK,turnK)-1.0f)<1e-5f,"4.1's full walk (0.1 a frame) at rate 1");
+        Check(PickGait(0.0f,0.0f,-0.1f,0.01f)==Gait::WalkB,"backing off: walk_b at the forward speed");
+        Check(std::fabs(GaitRate(Gait::WalkB,0.0f,0.0f,-0.1f,walkK,turnK)-1.0f)<1e-5f,"...at rate 1 as 4.1's backward command is -1");
+        Check(PickGait(0.01f,0.0f,0.1f,0.01f)==Gait::WalkF,"a turn under 0.4 |v| while walking: still walk_f");
+        Check(PickGait(0.03f,0.0f,0.05f,0.01f)==Gait::TurnL,"a turn over 0.4 |v|: turn_l though it walks");
+        Check(PickGait(0.0f,0.0866f,0.05f,0.01f)==Gait::WalkL,"60 degrees to +x: walk_l (the larger axis)");
+        Check(PickGait(0.0f,-0.0866f,0.05f,0.01f)==Gait::WalkR,"60 degrees to -x: walk_r");
+        Check(PickGait(0.0f,0.05f,0.0866f,0.01f)==Gait::WalkF,"30 degrees off: walk_f");
+        Check(PickGait(0.0f,0.0f,0.0f,0.01f)==Gait::WalkB,"commanded, not yet moving: the walk branch (4.1: z <= 0 is walk_b)");
+        Check(PickGait(0.0f,0.0f,0.02f,0.0f)==Gait::WalkF,"coasting after the command stops: still walking");
+        Check(PickGait(0.0f,0.0f,0.009f,0.0f)==Gait::Stand,"slow enough: stand");
     }
     // --- the arms' aim (4.1 Hector_WeaponBase 0x22ADF0)
     {

@@ -6,7 +6,9 @@
 //
 // It edits what tools/support_loadout.py edit() / edit_vehicle() edits (the installer's menu 8), with the same rules:
 //   a squad: its soldiers in seat order (a leader every four, i % 4 == 0), each a kind, a primary and a secondary colour
-//       (or stock); up to the entry's seats (at most kSupportLoadoutMost). No soldiers: the entry's own load (value empty).
+//       (or stock) and, a Ranger's or a Wing Diver's, a backpack weapon (npc_pack_table.h: none, then its class's in table
+//       order; docs/npc-backpack-re.md); up to the entry's seats (at most kSupportLoadoutMost). No soldiers: the entry's own
+//       load (value empty).
 //   a tank: its main gun HE / AP, then up to 4 pylons AP / HE / GLM; a jet: up to 5 pylons AAM_S / AAM_M / AAM_L / AGM /
 //       AGM_L / MK82 / RKT, none = GUNS; rounds from kRoundCounts. Stock: the value empty (the vehicle as it always came).
 // A value the parser refused when it was read is shown stock and left alone unless the player changes that unit (the
@@ -16,7 +18,7 @@
 // the cursor (wrapping); right / confirm go in, left / cancel come out (cancel on the unit list closes, discarding);
 // left / right change the field being edited (wrapping); add / remove a soldier or pylon; reset puts the unit stock.
 // Levels: the unit list (its last row is "save"), a unit's rows (soldiers; a vehicle's gun row then its pylons), the
-// fields of one row (kind / primary / secondary; store / rounds; the tank's gun).
+// fields of one row (kind / primary / secondary / backpack; store / rounds; the tank's gun).
 // Crews (阶段 5): a unit whose spec says it brings a crew gets a crew-colour row (SupportCrewColour_<KEY>, support_loadout.h
 // CrewColour): the last row of its vehicle, or a unit of its own (a seated entry's crew, the default for every crew, the
 // mission vehicles' support crews). Its fields: the primary (default -> X -> the palette) and the secondary colour.
@@ -138,7 +140,7 @@ inline Keys Presses(Keys& held,const Keys& down) noexcept {
 }
 
 // --- Serialising (the exact grammar the parsers accept; stock is the empty value) ---
-inline constexpr std::size_t kValueMost=384;   // 12 tokens of "thunderbow@RRGGBB:RRGGBB*12," fit
+inline constexpr std::size_t kValueMost=768;   // 12 tokens of "thunderbow@RRGGBB:RRGGBB+pHandGrenade01*12," fit
 namespace detail {
 struct Text {
     wchar_t* out;std::size_t capacity,n=0;bool fits=true;
@@ -157,10 +159,11 @@ inline bool SameSoldier(const SupportPreset& p,int a,int b) noexcept {
 inline void SoldierToken(Text& t,const SupportPreset& p,int i,int run) noexcept {
     t.Puts(SupportKindIniName(p.kind[i]));
     const SupportLook& l=p.look[i];
-    if(l.On()) {
+    if(l.Coloured()) {
         t.Put(L'@');t.Colour(l.primary);
         if(l.secondary!=kStockColour){t.Put(L':');t.Colour(l.secondary);}
     }
+    if(const PackWeapon* pack=l.pack ? PackOf(l.pack) : nullptr){t.Put(L'+');t.Puts(pack->sgo);}
     if(run>1){t.Put(L'*');t.Int(run);}
 }
 }  // namespace detail
@@ -297,10 +300,16 @@ inline int MostRows(const Unit& u) noexcept {
     const VehicleBodyRow* row=VehicleBodyOf(u.body);
     return row ? row->most : 0;
 }
-// Fields of row `r`: a soldier 3 (kind, primary, secondary); a tank's gun 1; a pylon 2 (store, rounds); a crew 2 (primary,
-// secondary); else 0.
+// Fields of row `r`: a soldier 3 (kind, primary, secondary) and a Ranger's or a Wing Diver's 4th, its backpack weapon; a
+// tank's gun 1; a pylon 2 (store, rounds); a crew 2 (primary, secondary); else 0.
+inline constexpr int kPackField=3;
+inline bool CarriesPack(SupportWeapon kind) noexcept { return CyclePack(0,SupportSoldierClass(kind),1)!=0; }
 inline int FieldCount(const Unit& u,int r) noexcept {
-    if(IsSquad(u))return u.squad.count>0 ? 3 : 0;
+    if(IsSquad(u)) {
+        if(u.squad.count<=0)return 0;
+        const int i=r>=0 && r<u.squad.count ? r : 0;
+        return CarriesPack(u.squad.kind[i]) ? 4 : 3;
+    }
     if(r==CrewRow(u))return 2;
     if(!u.vehicle.On())return 0;
     if(r==0)return VehicleBodyOf(u.body)->tank ? 1 : 0;
@@ -366,12 +375,18 @@ inline Act RemovePylon(Menu& m,Unit& u) noexcept {
     if(m.rowAt>l.count)m.rowAt=l.count;
     return Act::changed;
 }
+// A new kind keeps the soldier's backpack weapon only when its class may carry it (a Fencer none).
 inline void ChangeSoldier(Menu& m,Unit& u,int step) noexcept {
     const int i=m.rowAt;
     SupportLook& l=u.squad.look[i];
-    if(m.fieldAt==0)u.squad.kind[i]=static_cast<SupportWeapon>(Wrap(static_cast<int>(u.squad.kind[i]),step,kSupportWeaponCount));
+    if(m.fieldAt==0) {
+        u.squad.kind[i]=static_cast<SupportWeapon>(Wrap(static_cast<int>(u.squad.kind[i]),step,kSupportWeaponCount));
+        if(!PackFits(l.pack,SupportSoldierClass(u.squad.kind[i])))l.pack=0;
+        if(m.fieldAt>=FieldCount(u,i))m.fieldAt=0;
+    }
     else if(m.fieldAt==1)l.primary=CycleColour(m.palette,l.primary,step);
-    else l.secondary=CycleColour(m.palette,l.secondary,step);
+    else if(m.fieldAt==2)l.secondary=CycleColour(m.palette,l.secondary,step);
+    else l.pack=static_cast<std::uint8_t>(CyclePack(l.pack,SupportSoldierClass(u.squad.kind[i]),step));
 }
 inline void ChangePylon(Menu& m,Unit& u,int step) noexcept {
     const int i=m.rowAt-1;
@@ -558,6 +573,7 @@ struct ViewRow {
     int soldierClass=-1;            // SupportSoldierClass: 0 Ranger, 1 Wing Diver, 2 Fencer
     bool leader=false;
     std::uint32_t primary=0,secondary=0;   // RGBA, 0 stock
+    int pack=0;                     // a soldier's backpack weapon (npc_pack_table.h code), 0 none
     int store=0;                    // kLoadStores code, 0 none
     int rounds=0;                   // the pylon's rounds
     bool cursor=false;              // the column's cursor is on it
@@ -584,7 +600,7 @@ inline ViewRow SquadRow(const Unit& u,int i) noexcept {
     const SupportWeapon k=u.squad.kind[i];
     r.text=RowText::soldier;r.kind=static_cast<int>(k);r.label=kSupportKindNames[r.kind].label;
     r.soldierClass=SupportSoldierClass(k);r.leader=i%4==0;
-    r.primary=Rgba(u.squad.look[i].primary);r.secondary=Rgba(u.squad.look[i].secondary);
+    r.primary=Rgba(u.squad.look[i].primary);r.secondary=Rgba(u.squad.look[i].secondary);r.pack=u.squad.look[i].pack;
     return r;
 }
 inline ViewRow CrewViewRow(const Unit& u,int i) noexcept {
