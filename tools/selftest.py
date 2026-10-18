@@ -5718,8 +5718,8 @@ def edf5_campaign_pack_music() -> None:
     assert [p.pack.bgm for p in e5c.PACKS41] == ['BGM_E4S02_EDFHonbu', 'BGM_Sinkou_intermission',
                                                  'BGM_Sinkou_taisenmenu']
     assert e5c.RANGE.bgm is None
-    row = e5c.new_row(4, {'key': 'EDF41/M001', 'bgm': e5c.BGM41, 'progress': 0.5, 'flags': e5c.FLAGS})
-    assert row.items[7] == 0.0 and row.items[8] == e5c.BGM41 and row.names == {10: 'flags'}
+    row = e5c.new_row(4, {'key': 'EDF41/M001', 'bgm': e5c.BGM41, 'progress': 0.5, 'flags': e5c.FLAGS}, [5])
+    assert row.items[3].items == [5.0] and row.items[7] == 0.0 and row.items[8] == e5c.BGM41 and row.names == {10: 'flags'}
     template = [f'm{k}' for k in range(14)]
     for pack in (*e5c.PACKS, *(p.pack for p in e5c.PACKS41)):
         for kind in pack.kinds:
