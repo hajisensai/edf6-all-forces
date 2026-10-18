@@ -64,5 +64,5 @@
 
 ## 相关仓库
 
-- 联机插件 EDF6Coop：`hajisensai/edf-coop-stable`（本机 `D:\APP\edf6_directnet`），提供 `EDF6CoopGetMemberAttributeApi`；多人房间的支援功能要求全员装 EDF6Coop 2.5.0+。EDFModLoader 按文件名加载，EDF6Coop 先于本插件加载。不开游戏的联机测试在 Coop 仓库的 `multislot/tests/gamenet`。
+- 联机插件 EDF6Coop：`hajisensai/edf-coop-stable`（本机 `D:\APP\edf6_directnet`），提供 `EDF6CoopGetMemberAttributeApi`；联机（建房 / 进房）要求全员装 EDF6Coop 2.6.0+（2.5.0 没有成员属性接口，且 2.6.0 的联机协议升到 3，与 2.5.0 不能同房）。EDFModLoader 按文件名加载，EDF6Coop 先于本插件加载。不开游戏的联机测试在 Coop 仓库的 `multislot/tests/gamenet`。
 - 分享组合包：`D:\APP\edf6-share`（合并本仓库 PR 后重新生成，流程见该目录的 CLAUDE.md 与 `make_share.py`）。
