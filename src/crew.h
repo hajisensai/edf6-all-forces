@@ -589,6 +589,13 @@ std::uint32_t Edf5BvmOnlinePlayers() noexcept;
 bool Edf5BvmOnlinePlayerArgs(int index,int* pad,int* split) noexcept;
 void Edf5BvmOnlinePlayerMade(int index,const void* made) noexcept;
 void ResetEdf5Online() noexcept;
+// More than the BVM loop's four online (edf5online_room.cpp, edf5online_room.h): EDF6Coop's BvmPlayerTableHooks in
+// place here; every one of the mission's `count` players' machines said it creates them too (EDF6Coop member attribute
+// EDF6X_BVMPLAYERS; false with the reason in `why`); this machine's own word told and the others' watched (the room's
+// frame, room_ui.cpp).
+bool Edf5CoopBvmTableHooked() noexcept;
+bool Edf5RoomAllowsBvmPlayers(std::uint32_t count,char* why,std::size_t size) noexcept;
+void Edf5OnlineRoomTick() noexcept;
 void JetSound(unsigned char* vehicle) noexcept;
 void JetSoundTick() noexcept;
 float GameEffectVolume() noexcept;   // jetsound.cpp: the game's master volume times its effect volume (0..1)

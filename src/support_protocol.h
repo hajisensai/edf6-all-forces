@@ -40,9 +40,13 @@ static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits")
 // the room its EDF4.1 outfit (outfit41.cpp, EDF6Coop member attribute EDF6X_OUTFIT41) and dresses the others by theirs.
 // A member without it sees everyone's stock outfit and is seen in its own: the version notice names the feature. Carried
 // by no message of this protocol: announced so the room's builds compare (version_notice.h).
-constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtOutfit41=8u,
-    kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41;
-constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41;   // what every hello of this build announces (Tick)
+// kExtBvmPlayers (2026-10-18, a room of eight on an EDF4.1 pack: players 5.. had no soldier): it creates every player of
+// an EDF5 / EDF4.1 script mission, past the BVM loop's four, when every member does (edf5online_room.h: EDF6Coop member
+// attribute EDF6X_BVMPLAYERS, read before the creation). With a member without it every machine creates four: the
+// version notice names the feature. Carried by no message of this protocol.
+constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtOutfit41=8u,kExtBvmPlayers=16u,
+    kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers;
+constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers;   // what every hello of this build announces (Tick)
 constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it
 // What a build has, both words in one (the version notice compares and names these, support_net.cpp VersionTick): the
 // capability bits low (below kMaxUnits, 4 bits), the extension bits above them.

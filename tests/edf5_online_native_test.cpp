@@ -3,7 +3,10 @@
 // session's count, each player given AngelScript's pad and split (a session fixture); the game's own creation loop
 // (0x22B3B0..0x22B878) run on a made-up frame and BVM object, stock and patched, for four, six, eight and forty
 // players; the one creation (0x22AB90) run for an index the game makes no object for; another build is left
-// untouched. Never starts the game.
+// untouched. The script's player table past four rows: the creation's rows and every reader of the table (the route
+// guide 0x21F380, Factor_PlayerAreaIn's 0x207870, natives 0x3ED / 0x3EE / 0x3EF, 0x2252D0 / 0x2253A0, the first
+// player's 0x229040) run for real for six and forty players, EDF6Coop's four bounds in place as its hooks place them.
+// A failed write puts every site back and frees the page (`rollback`). Never starts the game.
 #include "../src/crew.h"
 #include "../src/memory.h"
 #include <cstdarg>
@@ -15,11 +18,19 @@
 #include <string>
 #include <vector>
 #include "../src/edf5online.cpp"
+#include "../src/edf5online_room.h"
 
 namespace crew {
 unsigned char* image=nullptr;
 bool gateReady=true;
 bool MissionParticipantGateReady() noexcept { return gateReady; }
+// edf5online_room.cpp's answers, the test's to give.
+bool coopHooked=true,roomAllows=true;
+bool Edf5CoopBvmTableHooked() noexcept { return coopHooked; }
+bool Edf5RoomAllowsBvmPlayers(std::uint32_t,char* why,std::size_t size) noexcept {
+    if(!roomAllows)std::snprintf(why,size,"mission player 6 did not tell the room");
+    return roomAllows;
+}
 }
 namespace {
 std::vector<std::string> lines;
@@ -42,6 +53,7 @@ unsigned char* CallLanding(unsigned site) {
     std::int32_t rel;std::memcpy(&rel,p+1,4);
     unsigned char* to=p+5+rel;
     if(to[0]==0x48 && to[1]==0xB8 && to[10]==0xFF && to[11]==0xE0) {std::uintptr_t a;std::memcpy(&a,to+2,8);return reinterpret_cast<unsigned char*>(a);}
+    if(to[0]==0xFF && to[1]==0x25 && !to[2] && !to[3] && !to[4] && !to[5]) {std::uintptr_t a;std::memcpy(&a,to+6,8);return reinterpret_cast<unsigned char*>(a);}
     return to;
 }
 }  // namespace
@@ -152,9 +164,9 @@ constexpr int kMax=64;
 struct Ctrl { void* const* vtable; volatile long uses; volatile long weaks; };
 void __fastcall Noop(void*) {}
 void* const ctrlVtable[]={reinterpret_cast<void*>(&Noop),reinterpret_cast<void*>(&Noop)};
-alignas(16) unsigned char bodies[kMax][0x200];
+alignas(16) unsigned char bodies[kMax][0x1600];   // a player's +0x158C / +0x1588 / +0x380 read and written
 Ctrl ctrls[kMax];
-alignas(16) unsigned char bvm[0x400];
+alignas(16) unsigned char bvm[0x500];   // +0x490: 0x229040's done flag
 Shared listData[kMax];
 struct Made { float ground[4]; float matrixPos[4]; int pad,split,mode; bool online; int onlinePad,onlineSplit; };
 Made made[kMax];
@@ -192,6 +204,7 @@ void __fastcall Reserve(void* list) {
 // The BVM object as the loop reads it: +0x168 the four rows, +0x1D0 the object list's storage and +0x1E0 its count,
 // +0x2D0 the script's current group (0: the group at +0x210).
 void Fresh() {
+    crew::Edf5BvmRowsGone(bvm);   // the plugin's rows of the last run let go first (as the object's destructor does)
     std::memset(bvm,0,sizeof(bvm));std::memset(bodies,0,sizeof(bodies));std::memset(listData,0,sizeof(listData));
     std::memset(made,0,sizeof(made));std::memset(groupObjects,0,sizeof(groupObjects));
     for(auto& c:ctrls)c=Ctrl{ctrlVtable,1,1};
@@ -326,6 +339,158 @@ bool Install() {
     return true;
 }
 }  // namespace Guard
+// EDF6Coop's BvmPlayerTableHooks as EDF6Coop installs them (multislot/src/patches.cpp, code.cpp JumpBytes): the whole
+// instruction replaced by a jmp rel32 to a thunk, the rest nop; the thunk reads the entry for player 0..3 and gives an
+// empty one (rdx 0) for any other index (mission.cpp BvmPlayerEntry). `bounded` counts the empty ones given.
+namespace CoopEmu {
+struct Site { unsigned rva; std::size_t size; unsigned char cmp[4]; };
+const Site kSites[]={{0x21F3CF,8,{0x49,0x83,0xFC,0x04}},    // cmp r12,4 (the loop's player)
+                     {0x222761,7,{0x48,0x83,0xF8,0x04}},    // cmp rax,4 (movsxd rax,edx: the script's index)
+                     {0x228AED,7,{0x48,0x83,0xF8,0x04}},
+                     {0x22A685,7,{0x48,0x83,0xF8,0x04}}};
+volatile long bounded=0;
+bool Install() {
+    using LoopFixture::Emit;using LoopFixture::Emit64;
+    unsigned char code[512];
+    unsigned char* p=code;
+    std::size_t entry[4]{};
+    for(int i=0;i<4;++i) {
+        const Site& s=kSites[i];
+        entry[i]=static_cast<std::size_t>(p-code);
+        Emit(p,{s.cmp[0],s.cmp[1],s.cmp[2],s.cmp[3],0x73,static_cast<unsigned char>(s.size+14)});
+        for(std::size_t k=0;k<s.size;++k)*p++=crew::image[s.rva+k];
+        Emit(p,{0xFF,0x25,0,0,0,0});Emit64(p,crew::image+s.rva+s.size);
+        // push rax; mov rax,&bounded; lock inc dword [rax]; pop rax; xor edx,edx; back.
+        Emit(p,{0x50,0x48,0xB8});Emit64(p,const_cast<long*>(&bounded));
+        Emit(p,{0xF0,0xFF,0x00,0x58,0x31,0xD2,0xFF,0x25,0,0,0,0});Emit64(p,crew::image+s.rva+s.size);
+    }
+    auto* const page=static_cast<unsigned char*>(crew::AllocateNearCode(crew::image+0x21F3CF,code,static_cast<std::size_t>(p-code)));
+    if(!page)return false;
+    for(int i=0;i<4;++i) {
+        const Site& s=kSites[i];
+        unsigned char bytes[8];
+        const auto rel=static_cast<std::int32_t>(page+entry[i]-(crew::image+s.rva+5));
+        bytes[0]=0xE9;std::memcpy(bytes+1,&rel,4);
+        for(std::size_t k=5;k<s.size;++k)bytes[k]=0x90;
+        LoopFixture::Write(crew::image+s.rva,bytes,s.size);
+    }
+    return true;
+}
+}  // namespace CoopEmu
+
+// The table's readers run for real on LoopFixture's object after a loop: each player's vf 0x298 (0x222740 calls it) its
+// index + 100; 0x22A650's process at +0x70; Factor_PlayerAreaIn's Initialize (0x207870) and 0x21F380's guide
+// construction (0x12D85B0 new, 0x5C6C10 its constructor) recorded; 0x229040's two ways on (found at 0x229141 with rbp
+// the player, nobody at 0x229208) back to the test through Guard's landing.
+namespace Readers {
+using LoopFixture::bodies;using LoopFixture::bvm;using LoopFixture::ctrls;
+constexpr int kMost=LoopFixture::kMax;
+std::int32_t __fastcall Vf298(void* self) {
+    return 100+static_cast<std::int32_t>((static_cast<unsigned char*>(self)-&bodies[0][0])/static_cast<std::ptrdiff_t>(sizeof(bodies[0])));
+}
+void __fastcall Vf198(void*) {}
+void* vtable[0x300/8]{};
+alignas(16) unsigned char process[0x100]{};
+void Dress() {
+    vtable[0x298/8]=reinterpret_cast<void*>(&Vf298);
+    vtable[0x198/8]=reinterpret_cast<void*>(&Vf198);
+    void* const vt=vtable;
+    for(int i=0;i<kMost;++i) {   // the vtable; the player's weak-this (+0x28 / +0x30), which the route guide's InitParam copies
+        std::memcpy(bodies[i],&vt,8);
+        void* const self=bodies[i];void* const ctrl=&ctrls[i];
+        std::memcpy(bodies[i]+0x28,&self,8);std::memcpy(bodies[i]+0x30,&ctrl,8);
+    }
+    std::memset(process,0,sizeof(process));
+    process[0x78]=1;   // [process+0x78] != 0: 0x22A650 keeps its count
+    unsigned char* const at=process;std::memcpy(bvm+0x70,&at,8);
+}
+using GetFn=std::int32_t(__fastcall*)(void*,std::int32_t);
+using WaitFn=void(__fastcall*)(void*,std::int32_t,std::int32_t,std::int32_t);
+using SetFn=void(__fastcall*)(void*,std::int32_t,std::int32_t);
+using FlagFn=void(__fastcall*)(void*,bool);
+bool Flag(int i,unsigned bit) { return (crew::At<std::uint32_t>(bodies[i],0x380)>>bit)&1; }
+// Factor_PlayerAreaIn's Initialize: what it was handed.
+std::uint32_t areaCount=0;
+crew::Shared areaCopy[kMost];
+bool __fastcall AreaInit(void*,void*,const crew::Shared* players,std::uint32_t count,std::int32_t,std::int32_t*) {
+    areaCount=count;
+    for(std::uint32_t i=0;i<count && i<static_cast<std::uint32_t>(kMost);++i)areaCopy[i]=players[i];
+    return true;
+}
+// rbp = bvm, then target(a1..a6): the call at 0x221687 as 0x2214B0 makes it.
+struct AreaArgs { void* bvm; void* target; void* factor; void* area; const crew::Shared* players; std::uint64_t count,flag; std::int32_t* mode; };
+using AreaCallFn=std::uint64_t(*)(AreaArgs*);
+AreaCallFn areaCall=nullptr;
+// The route guide: one per player it is made for (the InitParam's player at +0x38, 0x21F49B).
+const void* guided[kMost];
+int guides=0;
+bool __fastcall GuideOnline(void*) { return true; }
+alignas(16) unsigned char guideBody[0x300];
+void* __fastcall GuideNew(std::size_t) { std::memset(guideBody,0,sizeof(guideBody));return guideBody; }
+void* __fastcall GuideMake(void* at,const unsigned char* param) {
+    if(guides<kMost)guided[guides]=crew::At<const void*>(param,0x38);
+    ++guides;
+    return at;
+}
+bool __fastcall NotBusy(void*) { return false; }
+// 0x229040's ways on.
+const void* firstFound=nullptr;
+const void* const kNobody=reinterpret_cast<const void*>(1);
+bool Install() {
+    using LoopFixture::Emit;using LoopFixture::Redirect;
+    auto* const code=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE));
+    if(!code)return false;
+    unsigned char* p=code;
+    // push rbp; push rbx; sub rsp,0x38; rbx = args; rbp = bvm; [rsp+0x20] flag; [rsp+0x28] mode; rcx/rdx/r8/r9; call target.
+    Emit(p,{0x55,0x53,0x48,0x83,0xEC,0x38,0x48,0x8B,0xD9,0x48,0x8B,0x2B,0x48,0x8B,0x43,0x30,0x48,0x89,0x44,0x24,0x20,
+            0x48,0x8B,0x43,0x38,0x48,0x89,0x44,0x24,0x28,0x48,0x8B,0x4B,0x10,0x48,0x8B,0x53,0x18,0x4C,0x8B,0x43,0x20,
+            0x4C,0x8B,0x4B,0x28,0xFF,0x53,0x08,0x48,0x83,0xC4,0x38,0x5B,0x5D,0xC3});
+    areaCall=reinterpret_cast<AreaCallFn>(code);
+    // 0x207870 -> AreaInit (mov rax,imm64; jmp rax).
+    unsigned char jump[12]={0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+    const void* to=reinterpret_cast<const void*>(&AreaInit);std::memcpy(jump+2,&to,8);
+    LoopFixture::Write(crew::image+0x207870,jump,sizeof(jump));
+    // 0x229141 (found, rbp the player): firstFound = rbp; 0x229208 (nobody): firstFound = kNobody; then Guard's landing.
+    unsigned char found[25]={0x48,0xB8,0,0,0,0,0,0,0,0,0x48,0x89,0x28,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+    const void* slot=&firstFound;std::memcpy(found+2,&slot,8);std::memcpy(found+15,&Guard::landing,8);
+    LoopFixture::Write(crew::image+0x229141,found,sizeof(found));
+    unsigned char nobody[29]={0x48,0xB8,0,0,0,0,0,0,0,0,0x48,0xC7,0x00,0x01,0x00,0x00,0x00,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
+    std::memcpy(nobody+2,&slot,8);std::memcpy(nobody+19,&Guard::landing,8);
+    LoopFixture::Write(crew::image+0x229208,nobody,sizeof(nobody));
+    return Redirect(0x229069,0x5D9F70,reinterpret_cast<void*>(&NotBusy)) &&
+           Redirect(0x21F417,0x7748F0,reinterpret_cast<void*>(&GuideOnline)) &&
+           Redirect(0x21F66C,0x12D85B0,reinterpret_cast<void*>(&GuideNew)) &&
+           Redirect(0x21F681,0x5C6C10,reinterpret_cast<void*>(&GuideMake));
+}
+void CallFirst(void*) { reinterpret_cast<void(__fastcall*)(void*)>(crew::image+0x229040)(bvm); }
+// 0x229040 for real: the player it found, kNobody when none, null on a fault.
+const void* First() {
+    firstFound=nullptr;
+    Guard::armed=true;
+    const int returned=Guard::guarded(&CallFirst,nullptr);
+    Guard::armed=false;
+    return returned ? nullptr : firstFound;
+}
+void CallGuide(void*) { reinterpret_cast<void(__fastcall*)(void*,int,float)>(crew::image+0x21F380)(bvm,0,1.0f); }
+// 0x21F380 for real (the route guide to object list entry 0): the guides made, -1 on a fault.
+int Guide() {
+    guides=0;
+    Guard::armed=true;
+    const int returned=Guard::guarded(&CallGuide,nullptr);
+    Guard::armed=false;
+    return returned ? guides : -1;
+}
+// Factor_PlayerAreaIn's call (0x221687) as 0x2214B0 makes it: rbp `object`, the four rows' weak_ptrs.
+std::uint32_t Area(void* object) {
+    crew::Shared four[4];
+    for(int i=0;i<4;++i)four[i]={crew::At<void*>(bvm,0x170+0x18*static_cast<std::size_t>(i)),crew::At<void*>(bvm,0x178+0x18*static_cast<std::size_t>(i))};
+    std::int32_t mode=0;
+    AreaArgs args{object,CallLanding(0x221687),nullptr,nullptr,four,4,0,&mode};
+    areaCount=0;
+    return (areaCall(&args)&0xFF) ? areaCount : 0;
+}
+}  // namespace Readers
+
 struct CreateCall { int index; crew::Shared* out; };
 void CallCreate(void* arg) {
     auto* const call=static_cast<CreateCall*>(arg);
@@ -365,8 +530,35 @@ int main(int argc,char** argv) {
         Check(Matches(kNormalizeAt,kNormalizeCode,sizeof(kNormalizeCode)) && Matches(kLayoutAt,kLayoutCode,sizeof(kLayoutCode)) &&
               Matches(kRowAt,kRowCode,sizeof(kRowCode)) && Matches(kRowIndexAt,kRowIndexCode,sizeof(kRowIndexCode)) &&
               Matches(kObjectAt,kObjectCode,sizeof(kObjectCode)),"the loop's four sites and the object call untouched");
+        Check(Matches(kGuideAt,kGuideCode,sizeof(kGuideCode)) && Matches(kFirstAt,kFirstCode,sizeof(kFirstCode)) &&
+              CallsTo(kGetCall,kGet) && CallsTo(kWaitCall,kWait) && CallsTo(kSetCall,kSet) && CallsTo(kFlag11Call,kFlag11) &&
+              CallsTo(kFlag7Call,kFlag7) && CallsTo(kAreaCall,kAreaInit) && CallsTo(kRowsGoneCall,kVectorDtor),
+              "the table's readers and the rows' destructor call untouched");
         Check(Logged("HOOK edf5 online=0"),"the refusal logged");
         std::printf("edf5_online_native_test: %d checks passed (foreign)\n",checks);
+        return 0;
+    }
+    if(mode=="rollback") {   // the last write (the creation's entry) fails: every site written before it put back, the page freed
+        static std::vector<unsigned char> before;
+        before.assign(image+0x200000,image+0x230000);
+        static int refused=0;
+        static unsigned char* page=nullptr;
+        writeCode=[](unsigned rva,const unsigned char* bytes,std::size_t size) noexcept -> bool {
+            if(rva==kCreateOnline && !refused++)return false;   // the first write of the entry: refused
+            if((bytes[0]==0xE8 || bytes[0]==0xE9) && size>=5 && std::memcmp(image+rva,bytes,size)) {
+                std::int32_t rel=0;std::memcpy(&rel,bytes+1,4);
+                unsigned char* const to=image+rva+5+rel;
+                if(to<image || to>=image+0x22CE000)page=reinterpret_cast<unsigned char*>(reinterpret_cast<std::uintptr_t>(to)&~std::uintptr_t{0xFFF});
+            }
+            return WriteImage(rva,bytes,size);
+        };
+        Check(!InstallEdf5Online() && !Edf5OnlineReady(),"a write refused: not installed");
+        Check(refused==1 && page!=nullptr,"refused at the creation's entry, after every other site was written to the page");
+        Check(!std::memcmp(before.data(),image+0x200000,before.size()),"every byte of EDF+0x200000..0x230000 as before");
+        MEMORY_BASIC_INFORMATION m{};
+        Check(VirtualQuery(page,&m,sizeof(m))==sizeof(m) && m.State==MEM_FREE,"the stubs' page given back");
+        Check(Logged("every site written put back"),"the rollback logged");
+        std::printf("edf5_online_native_test: %d checks passed (rollback)\n",checks);
         return 0;
     }
 
@@ -424,7 +616,10 @@ int main(int argc,char** argv) {
     Check(Matches(kObjectAt,kObjectCode,sizeof(kObjectCode)),"0x591130's call back as it was");
     Fresh();
 
-    Check(InstallEdf5Online() && Edf5OnlineReady(),"installed on the supported build");
+    // EDF6Coop loads first: its BvmPlayerTableHooks in place, in its own jump shape (edf5online_room.h CoopJumpShape).
+    Check(CoopEmu::Install(),"EDF6Coop's four BvmPlayerTableHooks (emulated)");
+    for(const auto& site:bvmroom::kCoopSites)Check(bvmroom::CoopJumpShape(image+site.rva,site.size),"EDF6Coop's jump shape at its site");
+    Check(InstallEdf5Online() && Edf5OnlineReady(),"installed on the supported build, beside EDF6Coop's hooks");
     Check(InstallEdf5Online(),"a second install is the first's answer");
     Check(Logged("HOOK edf5 online=1"),"installed, logged");
     Check(CallLanding(kPreloadCall)==image+kAsPreload,"native 0x10 calls AngelScript's PreloadPlayerResource (0x1B8CC0)");
@@ -448,6 +643,17 @@ int main(int argc,char** argv) {
         Check(image[site.rva]==0xE9 && rest,"a loop site: jmp to its stub");
     }
     Check(CallLanding(kObjectCall)==reinterpret_cast<unsigned char*>(&Edf5BvmOnlineObject),"0x22AC2F calls Edf5BvmOnlineObject");
+    for(const auto& site:{std::pair<unsigned,std::size_t>{kGuideAt,sizeof(kGuideCode)},{kFirstAt,sizeof(kFirstCode)}}) {
+        bool rest=true;
+        for(std::size_t i=5;i<site.second;++i)rest=rest && image[site.first+i]==0xCC;
+        Check(image[site.first]==0xE9 && rest,"a reader's site: jmp to its stub");
+    }
+    Check(CallLanding(kGetCall)==reinterpret_cast<unsigned char*>(&GetHook) && CallLanding(kWaitCall)==reinterpret_cast<unsigned char*>(&WaitHook) &&
+          CallLanding(kSetCall)==reinterpret_cast<unsigned char*>(&SetHook) &&
+          CallLanding(kFlag11Call)==reinterpret_cast<unsigned char*>(&FlagHook<kFlag11>) &&
+          CallLanding(kFlag7Call)==reinterpret_cast<unsigned char*>(&FlagHook<kFlag7>) &&
+          CallLanding(kRowsGoneCall)==reinterpret_cast<unsigned char*>(&RowsGoneHook),"the natives' calls and the rows' destructor to the plugin");
+    for(const auto& site:bvmroom::kCoopSites)Check(bvmroom::CoopJumpShape(image+site.rva,site.size),"EDF6Coop's hooks kept");
     Check(onlineObject==reinterpret_cast<OnlineObjectFn>(image+kOnlineObject),"which calls 0x591130");
 
     // The patched loop, four players: everything as the stock loop's (the stubs run the loop's own instructions).
@@ -469,7 +675,9 @@ int main(int argc,char** argv) {
         Check(SameFloats(made[i].ground,want,3),"patched, eight: 5-8 at the layout's offsets from the spawn point");
         Check(made[i].pad==-1 && made[i].split==8,"patched, eight: 5-8 no pad of the loop's own");
         Check(groupObjects[i]==bodies[i] && listData[i].obj==bodies[i],"patched, eight: 5-8 in the group and the object list");
-        Check(ctrls[i].weaks==2 && ctrls[i].uses==1,"patched, eight: 5-8 held by the object list only");
+        Check(ctrls[i].weaks==3 && ctrls[i].uses==1,"patched, eight: 5-8 held by the object list and the plugin's row");
+        const auto* row=static_cast<const Row*>(Edf5BvmRowAt(bvm,static_cast<std::uint64_t>(i)));
+        Check(row && row->obj==bodies[i] && row->ctrl==&ctrls[i] && row->index==i,"patched, eight: 5-8 in the plugin's rows");
     }
     {
         const float* p5=made[4].ground;const float* p2=made[1].ground;
@@ -493,6 +701,94 @@ int main(int argc,char** argv) {
             const float ex=made[i].ground[0]-made[j].ground[0],ez=made[i].ground[2]-made[j].ground[2];
             Check(ex*ex+ez*ez>0.25f,"patched, forty: nobody on anybody");
         }
+
+    // The script's player table read by its natives, for real: six players (rows 0..3 the game's, 4..5 the plugin's),
+    // EDF6Coop's four bounds in place.
+    Check(Readers::Install(),"the readers' calls on the fixture");
+    Put<std::uint32_t>(status,kSessionPlayers,6);
+    {
+        using namespace Readers;
+        Result six=Loop(6);
+        Check(six.guardKept && creations==6,"readers, six: six created");
+        Dress();
+        const auto get=reinterpret_cast<GetFn>(CallLanding(kGetCall));
+        const auto set=reinterpret_cast<SetFn>(CallLanding(kSetCall));
+        const auto wait=reinterpret_cast<WaitFn>(CallLanding(kWaitCall));
+        const auto flag11=reinterpret_cast<FlagFn>(CallLanding(kFlag11Call));
+        const auto flag7=reinterpret_cast<FlagFn>(CallLanding(kFlag7Call));
+        // Native 0x3ED (0x222740): the player's vf 0x298 by the script's index. EDF6Coop alone: 5.. empty.
+        long bounded=CoopEmu::bounded;
+        Check(reinterpret_cast<GetFn>(image+kGet)(bvm,4)==0 && reinterpret_cast<GetFn>(image+kGet)(bvm,5)==0 &&
+              CoopEmu::bounded==bounded+2,"stock with EDF6Coop: players 5-6 read as empty (Coop's bound)");
+        bounded=CoopEmu::bounded;
+        for(int i=0;i<6;++i)Check(get(bvm,i)==100+i,"native 0x3ED: every one of six players");
+        Check(CoopEmu::bounded==bounded,"native 0x3ED: players 5-6 read from the plugin's rows, past EDF6Coop's bound");
+        Check(get(bvm,6)==0 && get(bvm,-1)==0 && CoopEmu::bounded==bounded+2,"native 0x3ED: an index no player has, empty (Coop's bound)");
+        Check(ctrls[5].uses==1 && ctrls[5].weaks==3,"native 0x3ED: the player's lock let go");
+        // Native 0x3EF (0x228AC0): the player's +0x158C.
+        set(bvm,5,77);set(bvm,0,55);
+        Check(At<std::int32_t>(bodies[5],0x158C)==77 && At<std::int32_t>(bodies[0],0x158C)==55,"native 0x3EF: players 6 and 1");
+        // Native 0x3EE (0x22A650): wait until the player's +0x1588 has the mask (the process's +0x68 set: wait).
+        Put<std::int32_t>(bodies[5],0x1588,4);
+        process[0x68]=0;wait(bvm,5,4,1);
+        Check(process[0x68]==0,"native 0x3EE: player 6 has the flag, no wait");
+        process[0x68]=0;wait(bvm,5,8,1);
+        Check(process[0x68]==1,"native 0x3EE: player 6 lacks it, the script waits");
+        Put<std::int32_t>(bodies[2],0x1588,8);
+        process[0x68]=0;wait(bvm,2,8,1);
+        Check(process[0x68]==0,"native 0x3EE: player 3 (the game's row) as before");
+        // 0x2252D0 / 0x2253A0: every player's +0x380 bit 11 / bit 7.
+        for(auto& b:bodies)Put<std::uint32_t>(b,0x380,0);
+        reinterpret_cast<FlagFn>(image+kFlag11)(bvm,true);
+        Check(Flag(3,11) && !Flag(4,11) && !Flag(5,11),"stock 0x2252D0: players 1-4 only");
+        flag11(bvm,true);flag7(bvm,true);
+        for(int i=0;i<6;++i)Check(Flag(i,11) && Flag(i,7),"0x2252D0 / 0x2253A0: every one of six players");
+        Check(!Flag(6,11) && !Flag(6,7),"and nobody past them");
+        flag11(bvm,false);
+        for(int i=0;i<6;++i)Check(!Flag(i,11) && Flag(i,7),"0x2252D0 off: every one of six, bit 7 kept");
+        // Factor_PlayerAreaIn (0x221687 -> 0x207870): every player's weak_ptr handed to Initialize.
+        Check(Area(bvm)==6,"Factor_PlayerAreaIn: six players handed to Initialize");
+        for(int i=0;i<6;++i)Check(areaCopy[i].obj==bodies[i] && areaCopy[i].ctrl==&ctrls[i],"Factor_PlayerAreaIn: each player's");
+        Check(Area(process)==4,"Factor_PlayerAreaIn of an object without the plugin's rows: the game's four, untouched");
+        // Native 1200 (0x21F380): a route guide for each of this machine's players.
+        bounded=CoopEmu::bounded;
+        Check(Guide()==6,"the route guide: one for each of six players");
+        for(int i=0;i<6;++i)Check(guided[i]==bodies[i],"the route guide: each player's own, in order");
+        Check(CoopEmu::bounded==bounded,"the route guide: players 5-6 past EDF6Coop's bound");
+        bodies[4][0x128]=1;   // player 5 a remote one (+0x128 bit 0): no guide here
+        Check(Guide()==5 && guided[4]==bodies[5],"the route guide: a remote player 5 skipped, player 6 guided");
+        bodies[4][0x128]=0;
+        // 0x229040: the first player there.
+        Check(First()==bodies[0],"0x229040: player 1 first");
+        for(int i=0;i<4;++i){Put<void*>(bvm,0x170+0x18*static_cast<std::size_t>(i),nullptr);Put<void*>(bvm,0x178+0x18*static_cast<std::size_t>(i),nullptr);}
+        Check(First()==bodies[4],"0x229040: players 1-4 gone, player 5 found in the plugin's rows");
+        // The object's rows go (0x20EB81): the game's, then the plugin's; the weak references back.
+        const auto gone=reinterpret_cast<RowsGoneFn>(CallLanding(kRowsGoneCall));
+        gone(bvm+kRows,0x18,4,image+0x20ECE0);
+        Check(!Edf5BvmRowAt(bvm,4) && ctrls[4].weaks==2 && ctrls[5].weaks==2,"the rows' destructor: the plugin's rows let go");
+        Check(First()==kNobody,"0x229040: nobody once they are gone");
+        bounded=CoopEmu::bounded;
+        Check(Guide()==0 && CoopEmu::bounded==bounded+2,"the route guide without rows: nobody, 5-6 bounded by EDF6Coop");
+    }
+    // Forty: every reader for every one of them.
+    Put<std::uint32_t>(status,kSessionPlayers,40);
+    {
+        using namespace Readers;
+        Result many=Loop(40);
+        Check(many.guardKept && creations==40,"readers, forty: forty created");
+        Dress();
+        const auto get=reinterpret_cast<GetFn>(CallLanding(kGetCall));
+        const auto flag7=reinterpret_cast<FlagFn>(CallLanding(kFlag7Call));
+        for(int i=0;i<40;++i)Check(get(bvm,i)==100+i,"forty: native 0x3ED for each");
+        for(auto& b:bodies)Put<std::uint32_t>(b,0x380,0);
+        flag7(bvm,true);
+        for(int i=0;i<40;++i)Check(Flag(i,7),"forty: 0x2253A0 on each");
+        Check(!Flag(40,7),"forty: nobody past them");
+        Check(Area(bvm)==40 && areaCopy[39].obj==bodies[39],"forty: Factor_PlayerAreaIn with all forty");
+        Check(Guide()==40 && guided[39]==bodies[39] && guided[33]==bodies[33],"forty: a route guide for each");
+    }
+    Put<std::uint32_t>(status,kSessionPlayers,2);
+    Fresh();
 
     // 0x22AB90 for an index the game makes no object for, patched: an empty player, as AngelScript's (0x1DC544).
     onlineObject=&NoOnlineObject;
@@ -591,6 +887,21 @@ int main(int argc,char** argv) {
     Check(Edf5BvmOnlinePlayerArgs(4,&pad,&split) && pad==-1,"the fifth: its arguments (remote, no pad)");
     lines.clear();
     Check(Edf5BvmOnlinePlayers()==6 && !Logged("EDF5 online:"),"once, not every call");
+    // Past four only where every machine creates them: a member that did not say so, or EDF6Coop's hooks missing here,
+    // and every machine creates four, said each time.
+    roomAllows=false;lines.clear();
+    Check(Edf5BvmOnlinePlayers()==4 && Logged("but mission player 6 did not tell the room: every machine of the room creates players 1-4 only"),
+          "a member without the word: four, and why");
+    Check(!Edf5BvmOnlinePlayerArgs(4,&pad,&split),"and the fifth not armed");
+    roomAllows=true;coopHooked=false;lines.clear();
+    Check(Edf5BvmOnlinePlayers()==4 && Logged("BvmPlayerTableHooks are not in place on this machine"),"EDF6Coop's hooks missing here: four, and why");
+    SessionFixture::Users({true,true,true,true,true,false});
+    lines.clear();
+    Check(Edf5BvmOnlinePlayers()==4 && Logged("this machine's player is past the 4 a mission creates"),"this machine the sixth: it has none, said");
+    coopHooked=true;
+    SessionFixture::Users({false,true,true,true,true,true});
+    lines.clear();
+    Check(Edf5BvmOnlinePlayers()==6 && Logged("6 players, past the script loop's 4"),"both again: six, said again");
     ResetEdf5Online();
     // A room of eight seen from the machine whose player is the seventh: the real loop, the participant gate's way.
     SessionFixture::Users({true,true,true,true,true,true,false,true});

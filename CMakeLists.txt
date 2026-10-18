@@ -90,6 +90,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 target_sources(EDF6VehicleCrew PRIVATE src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
+# More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
+# word (src/edf5online_room.h; the creation and the table: src/edf5online.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/edf5online_room.cpp)
 # edf6common: the memory / patch / image / seat code both plugins link (common/)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
@@ -1430,6 +1433,12 @@ add_executable(mission_watch_test tests/mission_watch_test.cpp)
 target_include_directories(mission_watch_test PRIVATE common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_compile_options(mission_watch_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME mission_watch COMMAND mission_watch_test)
+# More than four in an EDF5 / EDF4.1 script mission online: EDF6Coop's version and hook shape, the room word, and the
+# spawn layout both plugins share to the bit (src/edf5online_room.h, src/spawn_layout.h). No game.
+add_executable(edf5_online_room_test EXCLUDE_FROM_ALL tests/edf5_online_room_test.cpp)
+target_compile_options(edf5_online_room_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks edf5_online_room_test)
+add_test(NAME edf5_online_room COMMAND edf5_online_room_test)
 # The EDF5 scripts' player natives online (src/edf5online.cpp) on a private EDF.dll mapping.
 add_executable(edf5_online_native_test EXCLUDE_FROM_ALL tests/edf5_online_native_test.cpp)
 target_include_directories(edf5_online_native_test PRIVATE src common)
@@ -1438,7 +1447,8 @@ target_compile_options(edf5_online_native_test PRIVATE /W4 /WX /utf-8 /permissiv
 add_dependencies(offline_checks edf5_online_native_test)
 add_test(NAME edf5_online_native COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}")
 add_test(NAME edf5_online_foreign_build COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}" foreign)
-set_tests_properties(edf5_online_native edf5_online_foreign_build PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME edf5_online_rollback COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}" rollback)
+set_tests_properties(edf5_online_native edf5_online_foreign_build edf5_online_rollback PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(fp_ride_lifecycle_test EXCLUDE_FROM_ALL tests/fp_ride_lifecycle_test.cpp)
 target_sources(fp_ride_lifecycle_test PRIVATE src/fp_skin_gpu.cpp)
 target_include_directories(fp_ride_lifecycle_test PRIVATE src common)
