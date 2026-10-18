@@ -152,6 +152,7 @@ struct State {
     ULONGLONG emptySince,playerAt,bumpedAt,crewedAt,loggedAt,seen;
     std::int32_t ownTeam;   // the vehicle's team before we crewed it (valid when crewedAt != 0)
     HiddenLine lines[kLinesPerVehicle];
+    bool linesFullLogged;   // SetLine found no room once for this vehicle: said once, not every frame
 };
 // Every live vehicle runs its input every frame (seen); one not seen for kStaleMs is gone.
 constexpr int kMaxStates=128;
@@ -268,14 +269,22 @@ bool EnsurePoints(unsigned char* line,std::int32_t segments,const float* at) noe
 // What a seat's lines get this frame: aim_line_want.h Want.
 using aimline::LineWant;
 
-// Hides the line (its count kept in the vehicle's state; with no room left the line stays as it is), or gives back
-// what was taken (its point buffer first: EnsurePoints).
+// Hides the line (its count kept in the vehicle's state; with no room left the line stays as it is, said once per
+// vehicle: AimLines walks up to 16 seats x 16 weapons, more than kLinesPerVehicle), or gives back what was taken (its
+// point buffer first: EnsurePoints). A line is only ever zeroed with its count kept, so none is lost for good.
 void SetLine(State& st,unsigned char* line,LineWant want,const float* at) noexcept {
     const auto segments=At<std::int32_t>(line,kAimLineSegments);
     HiddenLine* h=HiddenOf(st,line);
     if(want==LineWant::hide && segments>0) {
         if(!h)h=HiddenOf(st,nullptr);
-        if(!h)return;
+        if(!h) {
+            if(!st.linesFullLogged) {
+                st.linesFullLogged=true;
+                Log("AIMLINE v=%p: %d lines already hidden, the room for this vehicle; line=%p and further ones left showing",
+                    st.ref.obj,kLinesPerVehicle,line);
+            }
+            return;
+        }
         *h=HiddenLine{line,segments};
         Put<std::int32_t>(line,kAimLineSegments,0);
     } else if(want==LineWant::show && h) {

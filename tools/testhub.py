@@ -232,6 +232,97 @@ def _pe_image(path: str) -> tuple[int, int] | None:
         return None
 
 
+def _dump_stream(data: bytes, kind: int) -> int | None:
+    """The RVA of a minidump's first stream of type `kind` (MINIDUMP_DIRECTORY), None when it has none."""
+    u32 = lambda o: int.from_bytes(data[o:o + 4], 'little')  # noqa: E731
+    if len(data) < 32 or data[:4] != b'MDMP':
+        return None
+    streams, directory = u32(8), u32(12)
+    for i in range(min(streams, 1024)):
+        entry = directory + 12 * i
+        if entry + 12 <= len(data) and u32(entry) == kind:
+            return u32(entry + 8)
+    return None
+
+
+def dump_times(path: str) -> tuple[int | None, int | None]:
+    """(when the dump was written, when its process started), seconds since the epoch, None for what it does not say:
+    MINIDUMP_HEADER.TimeDateStamp and MINIDUMP_MISC_INFO.ProcessCreateTime (stream 15, valid with Flags1 bit
+    MINIDUMP_MISC1_PROCESS_TIMES). Both are UTC time_t, as MiniDumpWriteDump writes them."""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+    except OSError:
+        return None, None
+    if len(data) < 32 or data[:4] != b'MDMP':
+        return None, None
+    written = int.from_bytes(data[20:24], 'little') or None
+    created = None
+    rva = _dump_stream(data, 15)          # MiscInfoStream
+    if rva is not None and rva + 16 <= len(data):
+        flags = int.from_bytes(data[rva + 4:rva + 8], 'little')
+        if flags & 0x2:
+            created = int.from_bytes(data[rva + 12:rva + 16], 'little') or None
+    return written, created
+
+
+# The plugins' first line of a run (src/plugin.cpp EML6_Load, autoturret/src/plugin.cpp): time of day only, the date
+# is the log's. Both logs are appended to across runs, so the last such line is where the run the logs end with began.
+_LOADING = re.compile(rb'\[(\d\d):(\d\d):(\d\d)(?:\.\d{3})?\] EDF6(?:VehicleCrew|AutoTurret) [^\r\n]* loading\r?$', re.M)
+SESSION_LOGS = ('EDF6VehicleCrew.log', 'EDF6VehicleCrew.log.1', 'EDF6AutoTurret.log', 'EDF6AutoTurret.log.1')
+SESSION_EARLY = 120   # a run's process starts at most this long before its plugins log `loading` (seconds; 0-1 s
+                      # measured 2026-10-18: EDF6.exe.51968 started 03:51:57, its log's loading 03:51:58)
+SESSION_SKEW = 5      # clock rounding between the log's time of day and a dump's whole seconds
+
+
+def _last_loading(path: str) -> float | None:
+    """When the last run in this log began (its last `loading` line), seconds since the epoch. The line has the time of
+    day; its date is the latest one that puts it no later than the log's last write (a run is shorter than a day)."""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+        written = os.path.getmtime(path)
+    except OSError:
+        return None
+    last = None
+    for last in _LOADING.finditer(data):
+        pass
+    if last is None:
+        return None
+    h, m, s = (int(g) for g in last.groups())
+    day = time.localtime(written)
+    at = time.mktime((day.tm_year, day.tm_mon, day.tm_mday, h, m, s, 0, 0, -1))
+    if at > written + SESSION_SKEW:
+        day = time.localtime(written - 86400)
+        at = time.mktime((day.tm_year, day.tm_mon, day.tm_mday, h, m, s, 0, 0, -1))
+    return at
+
+
+def session_start(game: str) -> float | None:
+    """When the game run the sent logs end with began: the latest `loading` line of the plugins' logs (SESSION_LOGS),
+    None when no log has one (the plugins never ran from this game folder)."""
+    starts = [t for t in (_last_loading(os.path.join(game, 'Mods', 'Plugins', n)) for n in SESSION_LOGS) if t is not None]
+    return max(starts) if starts else None
+
+
+def dump_in_session(path: str, start: float | None) -> str:
+    """'' when the dump is of the run that began at `start` (session_start), else why not. Report #6 (2026-10-10) sent
+    a dump of 10-07 with logs of 10-10: the same install can crash in several runs, and only the last run's dump goes
+    with the last run's logs. Of that run: written at or after its start, and (when the dump records it) by a process
+    that started then, not before (an earlier run) or after (a later run whose plugins never logged)."""
+    if start is None:
+        return '插件日志里没有 loading 行，对不上是哪次游戏'
+    written, created = dump_times(path)
+    if written is None:
+        written = int(os.path.getmtime(path))
+    when = lambda t: time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t))  # noqa: E731
+    if written < start - SESSION_SKEW:
+        return f'写于 {when(written)}，早于本次游戏（日志 loading {when(start)}）'
+    if created is not None and not (start - SESSION_EARLY <= created <= start + SESSION_SKEW):
+        return f'进程启动于 {when(created)}，不是本次游戏（日志 loading {when(start)}）'
+    return ''
+
+
 def dump_modules(path: str) -> dict[str, tuple[str, int, int]] | None:
     """A minidump's module list (MINIDUMP_DIRECTORY stream 4): lower-case file name -> (full path, TimeDateStamp,
     SizeOfImage). None when it is no minidump or has no module list."""
@@ -241,14 +332,8 @@ def dump_modules(path: str) -> dict[str, tuple[str, int, int]] | None:
     except OSError:
         return None
     u32 = lambda o: int.from_bytes(data[o:o + 4], 'little')  # noqa: E731
-    if len(data) < 32 or data[:4] != b'MDMP':
-        return None
-    streams, directory = u32(8), u32(12)
-    for i in range(min(streams, 1024)):
-        entry = directory + 12 * i
-        if entry + 12 > len(data) or u32(entry) != 4:   # ModuleListStream
-            continue
-        rva = u32(entry + 8)
+    rva = _dump_stream(data, 4)   # ModuleListStream
+    if rva is not None:
         out: dict[str, tuple[str, int, int]] = {}
         for m in range(min(u32(rva), 4096)):
             mod = rva + 4 + 108 * m                       # MINIDUMP_MODULE
@@ -287,7 +372,8 @@ def dump_matches(path: str, game: str) -> str:
 def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
     """The logs zipped: Mods/Plugins' logs (tails), ini files and DLL versions, the mod loader's log, the
     install ledgers (Mods/.edf6*.json), and the newest EDF6 crash dump of the last three days written by this install
-    (dump_matches; crash/dumps.txt says which were left out and why). Returns the zip
+    (dump_matches) in the run the logs end with (dump_in_session); crash/dumps.txt says which were left out and why.
+    Returns the zip
     and the names it holds."""
     mem = io.BytesIO()
     names: list[str] = []
@@ -320,11 +406,17 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
         # The plugin's own dump of a mission start that hung (src/mission_watch.cpp): Windows writes none for a game
         # that hangs and is killed, nor without LocalDumps set up (a tester's machine, 2026-10-10).
         verdicts: list[str] = []
+        start = session_start(game)
+        if start is not None:
+            verdicts.append(f'本次游戏：插件日志 loading {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start))}')
 
         def matches(path: str) -> bool:
             why = dump_matches(path, game)
+            if not why:
+                session = dump_in_session(path, start)
+                why = f'不是本次游戏：{session}' if session else ''
             verdicts.append(f'{os.path.basename(path)}  {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(path)))}  '
-                            + (f'来源不符，未上传：{why}' if why else '本次安装'))
+                            + (f'来源不符，未上传：{why}' if why else '本次安装、本次游戏'))
             return not why
 
         for path in sorted(glob.glob(os.path.join(plugins, '*.hang.dmp'))):
@@ -338,7 +430,8 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
                     f'{os.path.basename(path)}: {os.path.getsize(path)} bytes, over the {DUMP_MAX} limit; left at home\r\n'.encode('utf-8'))
         dumps = [p for p in glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'CrashDumps', 'EDF6*.dmp'))
                  if time.time() - os.path.getmtime(p) < DUMP_AGE and os.path.getsize(p) <= DUMP_MAX]
-        # The newest of this install's (dump_matches): an older build's dump is named in crash/dumps.txt, not sent.
+        # The newest of this install's (dump_matches) and of the run the logs end with (dump_in_session): an older
+        # build's or an earlier run's dump is named in crash/dumps.txt, not sent.
         for path in sorted(dumps, key=os.path.getmtime, reverse=True):
             if matches(path):
                 with open(path, 'rb') as f:

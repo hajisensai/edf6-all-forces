@@ -17,6 +17,8 @@
   - interrupted or refused runs: autoturret/tools/build.py install killed half way still reinstalls and
     uninstalls cleanly, a call_weapons.install that rolled back records no first backup, and the installer's
     uninstall over a misaligned table offers repair or skipping the table instead of failing;
+  - the installer's 「回传日志」 (tools/testhub.py collect) sends only a crash dump of this install and of the run the
+    logs end with (tests/testhub_dump_source_test.py: synthetic minidumps against the plugin log's loading lines);
   - the model importer (pylib/obj_model.py, pylib/texfile.py) on synthetic data: OBJ reading (negative indices,
     n-gons, winding, uv origin, texture lookup), holes found and closed, skins, meshes split below 65536 vertices
     with tangents, PNG decoding, DDS .lod slicing and DXT1.
@@ -12490,6 +12492,22 @@ def edf5_dlc_shipped() -> None:
             else:
                 assert entry['kind'] == 'edf6' and entry['path'].startswith('MAP/'), (rel, entry)
     assert shipped == want, (sorted(shipped - want)[:5], sorted(want - shipped)[:5])
+
+
+@test
+def sent_crash_dump_is_this_runs() -> None:
+    """docs/feedback-2026-10-12-testhub.md 旁支问题: report #6 sent another run's dump with its logs. collect() keeps a
+    dump only of this install (dump_matches) and of the run the logs end with (dump_in_session: written after the
+    plugins' last loading line, by a process that started then); the cases are in tests/testhub_dump_source_test.py."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('testhub_dump_source_test',
+                                                  os.path.join(ROOT, 'tests', 'testhub_dump_source_test.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        failed = module.main()
+    assert failed == 0, out.getvalue()
 
 
 def main() -> int:
