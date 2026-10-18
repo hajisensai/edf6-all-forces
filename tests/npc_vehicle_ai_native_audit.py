@@ -81,8 +81,38 @@ kind = code(0x62D850, 0x37)
 assert kind[0x62D850] == 'test byte ptr [rcx + 0x1a], 8' and kind[0x62D859] == 'mov eax, 1' and kind[0x62D864] == 'mov eax, 2'
 assert code(0x60A110, 7)[0x60A110] == 'lea r8, [rip + 0x11cfd49]'   # the Barga's slot 6 reads the punch combos
 
+# The CarBase classes with a slot 6 of their own (src/npcai.cpp CarAimReady): the 60X truck and the 607 RoboTruck call
+# CarBase's 0x6731C0 (the action at +0x2508) and then read their aim table key; their slot 70, which the action aims
+# through, walks that table unchecked (60X: +0x2AF8, 0x70 a weapon; the fault at 0x625A17, testhub #16 2026-10-17).
+TRUCKS = {0x17DCFB8: (0x6266B0, 0x6256E0, 0x6266F8, 0x62671C, 0x17DD310, 'v60X_aim_info'),
+          0x17DCAB0: (0x6234E0, 0x622530, 0x623528, 0x62354C, 0x17DCE68, 'v607_aim_info')}
+for vt, (six_at, aim_at, car_six_call, key_lea, key_at, key) in TRUCKS.items():
+    assert slot(vt, 6) == six_at and slot(vt, 70) == aim_at and slot(vt, 7) == 0x673300 and slot(vt, 72) == 0x661440, hex(vt)
+    assert p.get_data(six_at, 16) == bytes.fromhex('488bc448895810488970184889782055'), hex(six_at)  # CarAimReady kOwnSixSig
+    assert code(car_six_call, 5)[car_six_call] == 'call 0x6731c0', hex(car_six_call)   # the action first, then the key
+    lea = code(key_lea, 7)[key_lea]
+    assert lea.startswith('lea r9, [rip + ') and key_lea + 7 + int(lea.split('+ ')[1].rstrip(']'), 16) == key_at, lea
+    assert p.get_data(key_at, 2 * len(key) + 2).decode('utf-16le') == key + '\0', key
+t60 = code(0x625A08, 0x13)
+assert t60[0x625A08] == 'imul rbx, rsi, 0x70' and t60[0x625A0C] == 'add rbx, qword ptr [r15 + 0x2af8]'
+assert t60[0x625A17] == 'movups xmm0, xmmword ptr [rbx + 0x10]'
+assert slot(0x17E01B0, 6) == 0x6731C0 and slot(0x17E01B0, 70) == 0x65F6F0   # the plain Car: CarBase's own
+# CarAimReady's key test: 0x528A0(object + 0xA0, key) -> node or null, as the vehicles read their own keys.
+assert p.get_data(0x528A0, 8) == bytes.fromhex('4053' '4883ec20' '488b')
+for at, reg in ((0x61D98D, 'rdi'), (0x64D002, 'rbx')):
+    near = code(at - 0x10, 0x15)
+    assert f'lea rcx, [{reg} + 0xa0]' in near.values() and near[at] == 'call 0x528a0', hex(at)
+# Every crewed class (src/crew.cpp kClasses) running the CarBase pass and action has CarBase's slot 6 or one above.
+CREWED = (0x17D8B50, 0x17D8FA0, 0x17D9458, 0x17D98C8, 0x17DA508, 0x17DA960, 0x17DADB0, 0x17DB9D8, 0x17DBDF8,
+          0x17DC250, 0x17DC620, 0x17DD440, 0x17DD720, 0x17DE0A8, 0x17DEC40, 0x17DFDC8, 0x17E0A80, 0x17E1828,
+          0x17E01B0, 0x17DCAB0, 0x17DCFB8, 0x17DB590)
+for vt in CREWED:
+    if slot(vt, 7) == 0x673300 and slot(vt, 72) == 0x661440:
+        assert slot(vt, 6) in (0x6731C0, *(s[0] for s in TRUCKS.values())), (hex(vt), hex(slot(vt, 6)))
+
 # The CarBase seat aim's trigger: only with the range flag, no limit veto (r14b) and on target (r15b).
 aim = code(0x65FF26, 0x30)
 assert aim[0x65FF2B] == 'cmp byte ptr [rsp + 0x30], 0' and aim[0x65FF32] == 'test r14b, r14b'
 assert aim[0x65FF37] == 'test r15b, r15b' and aim[0x65FF3C] == 'mov dword ptr [r12 + rbx + 0x2e4], 0x3f800000'
-print('PASS: AI-list flag -> slot 6, the three AI passes and actions (the Barga slot 4 kind), the mech attack table and aim origin, the seat aim gate')
+print('PASS: AI-list flag -> slot 6, the three AI passes and actions (the Barga slot 4 kind), the mech attack table and aim origin, '
+      'the trucks\' own slot 6 and aim table, the seat aim gate')

@@ -1397,6 +1397,45 @@ bool BargaReady(unsigned char* v,void* const* vt) noexcept {
     return built;
 }
 
+// The CarBase classes with a slot 6 of their own: the 60X truck (0x6266B0) and the 607 RoboTruck (0x6234E0) call CarBase's
+// 0x6731C0 (the AI action at veh+0x2508), then build their turret aim table from the SGO (`v60X_aim_info` 0x62671C /
+// `v607_aim_info` 0x62354C; 0x70 per seat-0 weapon, the 60X's vector at veh+0x2AF0: data +0x2AF8, count +0x2B08), and
+// their own slot 70 (0x6256E0 / 0x622530), which the AI action 0x661440 aims through, reads it unchecked once it has a
+// target (0x625A17: the null table, faulting every frame: a player's 60X a soldier then drove, testhub #16, 2026-10-17).
+// So their slot 6 is run once before the pass, as the stock does when such a vehicle joins the AI list; only when the SGO
+// has the key, since a missing one throws (0x626FA6) after the action is registered (stock V607_ROBOTRUCK.SGO lacks it):
+// such a vehicle is driven, not fired. A class with another slot 6 of its own is not known to be safe: driven only.
+constexpr unsigned kCarSix=0x6731C0,kTruckSix=0x6266B0,kRoboTruckSix=0x6234E0,kSgoKeyNode=0x528A0;
+constexpr std::size_t kObjectSgo=0xA0;   // the SGO the classes read their keys from (0x528A0: 0x61D98D, 0x64D002 ...)
+const unsigned char kOwnSixSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x10,0x48,0x89,0x70,0x18,0x48,0x89,0x78,0x20,0x55};
+const unsigned char kSgoKeyNodeSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B};
+using SgoKeyNodeFn=const void*(__fastcall*)(const void*,const wchar_t*);
+constexpr int kCarTried=16;
+ObjRef carTried[kCarTried]{};int carTriedNext=0;
+
+bool CarAimReady(unsigned char* v,void* const* vt) noexcept {
+    if(!Readable(vt,(kSlotSix+1)*8) || vt[kSlotSix]==image+kCarSix)return true;   // CarBase's own: nothing of its own
+    if(At<const void*>(v,kCarAction))return true;                                 // its slot 6 has run
+    for(const auto& r:carTried)if(r.Is(v))return false;
+    carTried[carTriedNext]=ObjRef::Of(v);carTriedNext=(carTriedNext+1)%kCarTried;
+    const wchar_t* key=vt[kSlotSix]==image+kTruckSix ? L"v60X_aim_info" : vt[kSlotSix]==image+kRoboTruckSix ? L"v607_aim_info" : nullptr;
+    bool built=false;const char* why="its slot 6 is not one the plugin knows";
+    if(key && Matches(static_cast<std::size_t>(static_cast<const unsigned char*>(vt[kSlotSix])-image),kOwnSixSig,sizeof(kOwnSixSig)) &&
+       Matches(kSgoKeyNode,kSgoKeyNodeSig,sizeof(kSgoKeyNodeSig))) {
+        why="its SGO has no aim table";
+        __try {
+            if(reinterpret_cast<SgoKeyNodeFn>(image+kSgoKeyNode)(v+kObjectSgo,key)) {
+                reinterpret_cast<SixFn>(vt[kSlotSix])(v);
+                built=At<const void*>(v,kCarAction)!=nullptr;
+                why="its slot 6 registered no action";
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER){built=false;why="its slot 6 faulted";}
+    }
+    if(built)Log("NPCAI car v=%p: its AI and turret aim built (slot 6) for the NPC driver",v);
+    else Log("NPCAI car v=%p: %s: left driving only",v,why);
+    return built;
+}
+
 // Each vehicle an NPC driver runs the AI pass of, once in kDrivenLogMs (Debug): its seats' weapons' rounds left, so a
 // log tells which of several driven vehicles fires (the rounds go down) and which only drives.
 constexpr ULONGLONG kDrivenLogMs=10000;
@@ -1449,6 +1488,7 @@ void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
     if(lastV==v && lastFrame==frame)return;   // once a frame
     lastV=v;lastFrame=frame;
     if(kind==AiPass::barga && !BargaReady(v,vt))return;
+    if(kind==AiPass::car && !CarAimReady(v,vt))return;
     LogDrivenVehicle(h,v);
     reinterpret_cast<AiPassFn>(vt[kSlotAiPass])(v,dt);
     if(kind==AiPass::barga)return;   // its action runs inside its pass
