@@ -9,7 +9,8 @@ MISSION/EDF5_OLD_SCRIPT), so those are the ones taken.
 
 Per mission, in 4.1's story order (MISSION/MISSIONLIST.SGO):
   missions/<id>/MISSION.BVM, BEFORE.BVM   EDF5's, with the story objects EDF6 holds as other objects named where 4.1's
-                                          are installed (pylib/edf41dlc.py STORY_SHADOWED: app:/Object/EDF41/...)
+                                          are installed (pylib/edf41dlc.py: dragons as app:/Object/EDF41_<name>.SGO,
+                                          soldiers under app:/Object/EDF41/)
   missions/<id>/MISSION.RMPA, BEFORE.RMPA  EDF5's, in EDF6's format (pylib/rmpa_legacy.py; the old one crashes EDF6's
                                           reader, EDF+0x6F3D25)
   missions.json: id, files, title / brief per EDF6 language from 4.1's MISSIONTEXT.SGO (rows [JA title, JA brief,
