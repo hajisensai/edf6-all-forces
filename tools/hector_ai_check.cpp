@@ -99,8 +99,9 @@ int main() {
         Check(w.takeover && w.retreat && w.go,"back-off: away from the target");
         w=Steer(y,c,900.0f);
         Check(w.takeover && w.retreat && w.go,"back-off at any distance");
-        // 4.1's speeds (EDF41.exe 0x223832 / 0x2238BB: -0.85 backing off; +0x278 = 1 otherwise), not the class's 0.125
-        Check(w.speed==kRetreatSpeed && kRetreatSpeed==0.85f,"back-off at 0.85 of the walk",w.speed);
+        // 4.1's speeds (EDF41.exe 0x2238BB: -1 backing off; the same +0x278 command), not the class's 0.125
+        Check(w.speed==kRetreatSpeed && kRetreatSpeed==kWalkSpeed,"back-off uses the same command magnitude as forward (4.1 0x2238BB)",w.speed);
+        Check(w.speed*6.0f==6.0f,"back-off at 4.1's 6 units/s (xmm7 is -1, not -0.85)",w.speed*6.0f);
         y.phase=Phase::Approach;
         w=Steer(y,c,300.0f);
         Check(w.takeover && w.speed==kWalkSpeed && kWalkSpeed==1.0f,"far: at 4.1's full speed",w.speed);
@@ -128,8 +129,8 @@ int main() {
         // walking
         Check(PickGait(0.0f,0.0f,0.1f,0.01f)==Gait::WalkF,"forward: walk_f");
         Check(std::fabs(GaitRate(Gait::WalkF,0.0f,0.0f,0.1f,walkK,turnK)-1.0f)<1e-5f,"4.1's full walk (0.1 a frame) at rate 1");
-        Check(PickGait(0.0f,0.0f,-0.085f,0.0072f)==Gait::WalkB,"backing off: walk_b");
-        Check(std::fabs(GaitRate(Gait::WalkB,0.0f,0.0f,-0.085f,walkK,turnK)-0.85f)<1e-5f,"...at 0.85");
+        Check(PickGait(0.0f,0.0f,-0.1f,0.01f)==Gait::WalkB,"backing off: walk_b at the forward speed");
+        Check(std::fabs(GaitRate(Gait::WalkB,0.0f,0.0f,-0.1f,walkK,turnK)-1.0f)<1e-5f,"...at rate 1 as 4.1's backward command is -1");
         Check(PickGait(0.01f,0.0f,0.1f,0.01f)==Gait::WalkF,"a turn under 0.4 |v| while walking: still walk_f");
         Check(PickGait(0.03f,0.0f,0.05f,0.01f)==Gait::TurnL,"a turn over 0.4 |v|: turn_l though it walks");
         Check(PickGait(0.0f,0.0866f,0.05f,0.01f)==Gait::WalkL,"60 degrees to +x: walk_l (the larger axis)");

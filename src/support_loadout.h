@@ -448,6 +448,22 @@ inline std::size_t SupportLookFile(SupportWeapon kind,bool leader,const SupportL
     n.Puts(L".SGO");
     return n.Out(out,capacity,path);
 }
+// Every file a preset can ask for: its full look and, when a backpack accompanies colours, the colours alone for an
+// older peer. Both room pre-sync and mission preload use this enumeration, including after pending is cleared.
+template<class Each>
+inline int ForEachPresetVariant(const SupportPreset& preset,Each&& each) noexcept {
+    int count=0;
+    for(int i=0;i<preset.count && i<kSupportLoadoutMost;++i) {
+        const auto give=[&](const SupportLook& look) noexcept {
+            wchar_t file[96];
+            if(look.On() && SupportLookFile(preset.kind[i],i%4==0,look,file,96)){each(file);++count;}
+        };
+        const SupportLook& full=preset.look[i];
+        give(full);
+        if(full.pack && full.Coloured()){SupportLook compatible=full;compatible.pack=0;give(compatible);}
+    }
+    return count;
+}
 // EDF6VC_LO_<BODY>_<the variant in 16 hex digits, applied bit clear>.SGO: the body's base SGO with these pylons.
 inline std::size_t VehicleVariantFile(const VehicleLoadout& l,wchar_t* out,std::size_t capacity,bool path=false) noexcept {
     const VehicleBodyRow* row=VehicleBodyOf(l.body);

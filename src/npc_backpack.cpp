@@ -98,6 +98,25 @@ const PackWeapon* RowOf(const unsigned char* w) noexcept {
     if(!file || n<=4 || _wcsnicmp(file+n-4,L".SGO",4))return nullptr;
     return PackNamed(file,file+n-4);
 }
+struct UseState { unsigned char* weapon; unsigned char* sub; unsigned char* set; };
+// Shared by the read-only readiness check and the actual use. The AI must not take the main weapon's look / trigger
+// for a backpack which the native state, slot mask or lock currently forbids.
+bool PrepareUse(unsigned char* h,int slot,UseState* out) noexcept {
+    if(!ready || !h || IsAnyPlayer(h))return false;
+    unsigned char* weapon=SlotWeapon(h,slot);
+    unsigned char* sub=AsSub(weapon);
+    unsigned char* set=Set0(h);
+    if(!sub || !set || !RowOf(weapon))return false;
+    // The input's gates (0x5A1DD3, 0x5A1EBD, 0x5A1F75), one stricter: a use going on is never cut.
+    if(At<const void*>(set,kSetSub))return false;
+    if(h[kStateBits]&kStateNoPack)return false;
+    if(At<std::uint32_t>(h,kHumanState)&kStateFree)return false;
+    if(At<const void*>(h,kSubLock) && At<std::int32_t>(h,kSubLockCount)>=1)return false;
+    if(!(At<std::uint32_t>(h,kControlMask)&MaskOf(slot)))return false;
+    if(At<std::uint32_t>(weapon,kWeaponAmmo)==0)return false;
+    *out=UseState{weapon,sub,set};
+    return true;
+}
 }  // namespace
 
 bool InstallNpcBackpack() noexcept {
@@ -146,26 +165,21 @@ bool NpcPackBusy(const unsigned char* h) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return true;}
 }
 
+bool NpcPackCanUse(unsigned char* h,int slot) noexcept {
+    __try { UseState use{};return PrepareUse(h,slot,&use); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool NpcPackUse(unsigned char* h,int slot) noexcept {
-    if(!ready || IsAnyPlayer(h))return false;
     bool begun=false;
     __try {
-        unsigned char* weapon=SlotWeapon(h,slot);   // rdi at 0x5A1F75 (its rounds); the cast is rsi (what the set takes)
-        unsigned char* sub=AsSub(weapon);
-        unsigned char* set=Set0(h);
-        if(!sub || !set || !RowOf(weapon))return false;
-        // The input's gates (0x5A1DD3, 0x5A1EBD, 0x5A1F75), one stricter: a use going on is never cut (the input cuts it
-        // while +0x1A20 is set).
-        if(At<const void*>(set,kSetSub))return false;
-        if(h[kStateBits]&kStateNoPack)return false;
-        if(At<std::uint32_t>(h,kHumanState)&kStateFree)return false;
-        if(At<const void*>(h,kSubLock) && At<std::int32_t>(h,kSubLockCount)>=1)return false;
-        if(!(At<std::uint32_t>(h,kControlMask)&MaskOf(slot)))return false;
-        if(At<std::uint32_t>(weapon,kWeaponAmmo)==0)return false;
+        UseState use{};
+        if(!PrepareUse(h,slot,&use))return false;
+        unsigned char* set=use.set;
         // The use (0x5A1FC1..0x5A1FF8, 0x59E7A8..0x59E7DE).
         const auto held=At<unsigned char* const*>(set,kSetWeapon);
         if(held && Readable(held,8) && *held && Readable(*held,kMainBusy+2))Put<std::uint16_t>(*held,kMainBusy,0);
-        Put<void*>(set,kSetSub,sub);
+        Put<void*>(set,kSetSub,use.sub);
         Fn<GoFn>(kMachineGo)(set+kSetMachine,image+kSubState,0);
         h[kSubChain]=0;
         begun=true;

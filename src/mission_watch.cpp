@@ -18,7 +18,8 @@ ULONGLONG stuckMs=kMissionPhaseStuckMs,dumpMs=kMissionPhaseDumpMs;
 DWORD pollMs=1000;
 
 // Resolved when the watchdog starts, nothing stuck yet: a game thread stuck holding the loader lock would otherwise
-// stop the watchdog in LoadLibrary before it wrote anything (crash_dump.cpp's, shared with the crash dump).
+// stop the watchdog in LoadLibrary before it wrote anything. This is crash_dump.cpp's serialized service, not the
+// raw dbghelp pointer: a hang and a crash must never execute MiniDumpWriteDump concurrently.
 MiniDumpWriteDumpFn writeDump=nullptr;
 wchar_t dumpPath[MAX_PATH]{};
 

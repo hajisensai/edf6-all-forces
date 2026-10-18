@@ -16,6 +16,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "crash_dump.h"
+#include "log_buffer.h"
 #include "crew.h"
 #include "firstperson.h"
 #include "mod_room.h"
@@ -959,14 +960,9 @@ namespace {
 constexpr LONGLONG kLogMax=32ll<<20;
 constexpr std::size_t kLogBuffer=1u<<20;
 constexpr DWORD kFlushMs=50;
-SRWLOCK logLock=SRWLOCK_INIT;        // the buffers
-SRWLOCK logFileLock=SRWLOCK_INIT;    // the file (taken before logLock): the writer's, and a crash's flush (FlushLog)
-char logBuffer[2][kLogBuffer];
-std::size_t logUsed=0;               // in logBuffer[logActive]
-int logActive=0;
-unsigned logDropped=0;
+logging::Buffer<kLogBuffer> logBuffer;
 INIT_ONCE logWriterOnce=INIT_ONCE_STATIC_INIT;
-HANDLE logFile=nullptr;              // under logFileLock
+HANDLE logFile=nullptr;              // under logBuffer.fileLock
 LONGLONG logSize=0;
 
 HANDLE OpenLog() noexcept {
@@ -997,20 +993,13 @@ void RotateLog() noexcept {
     if(n>0)WriteLog(line,static_cast<std::size_t>(n));
 }
 
-// The lines so far written to the file: the buffer they are in taken (the lines go on into the other one) and
-// written. Under logFileLock, so the writer and a crash's flush (FlushLog) never write at once or out of order.
-void DrainLog() noexcept {
-    AcquireSRWLockExclusive(&logLock);
-    const int full=logActive;
-    const std::size_t n=logUsed;
-    const unsigned dropped=logDropped;
-    logActive^=1;logUsed=0;logDropped=0;
-    ReleaseSRWLockExclusive(&logLock);
+// Called with the file lock and an immutable buffer snapshot, by the writer or an explicit best-effort flush.
+void WritePendingLog(const char* text,std::size_t n,unsigned dropped) noexcept {
     if(!n && !dropped)return;
     if(!logFile)logFile=OpenLog();
     if(!logFile)return;
     if(logSize+static_cast<LONGLONG>(n)>kLogMax)RotateLog();
-    WriteLog(logBuffer[full],n);
+    WriteLog(text,n);
     if(dropped) {
         char line[120];
         const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"(%u log lines dropped: more than %zu KB in %lu ms)\r\n",dropped,
@@ -1022,19 +1011,7 @@ void DrainLog() noexcept {
 DWORD WINAPI LogWriter(void*) {
     for(;;) {
         Sleep(kFlushMs);
-        AcquireSRWLockExclusive(&logFileLock);
-        DrainLog();
-        ReleaseSRWLockExclusive(&logFileLock);
-    }
-}
-
-// A lock a crashed thread may hold for good: tried for a while, then given up (false).
-bool TryLockFor(SRWLOCK* lock,DWORD ms) noexcept {
-    const ULONGLONG until=GetTickCount64()+ms;
-    for(;;) {
-        if(TryAcquireSRWLockExclusive(lock))return true;
-        if(GetTickCount64()>=until)return false;
-        Sleep(1);
+        logBuffer.Drain(&WritePendingLog);
     }
 }
 
@@ -1053,23 +1030,17 @@ void Log(const char* format,...) noexcept {
     const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u.%03u] %s\r\n",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,text);
     if(n<=0)return;
     InitOnceExecuteOnce(&logWriterOnce,&StartLogWriter,nullptr,nullptr);
-    AcquireSRWLockExclusive(&logLock);
-    if(logUsed+static_cast<std::size_t>(n)<=kLogBuffer) {
-        std::memcpy(logBuffer[logActive]+logUsed,line,static_cast<std::size_t>(n));
-        logUsed+=static_cast<std::size_t>(n);
-    } else ++logDropped;
-    ReleaseSRWLockExclusive(&logLock);
+    logBuffer.Append(line,static_cast<std::size_t>(n));
 }
 
-// A crash (crash_dump.cpp): the lines so far on disk now, from the dumping thread. The writer is waited for (it may
-// be mid-write); a lock the crashed thread holds (it crashed inside Log, or the writer did) is given up after a while.
+// A best-effort snapshot: both locks are acquired once, without waiting. Crash diagnostics use their own raw append
+// below instead: neither ordinary formatting nor a flush of older lines is a prerequisite for producing the dump.
 void FlushLog() noexcept {
-    if(!logPath[0] || !TryLockFor(&logFileLock,1000))return;
-    if(TryLockFor(&logLock,1000)) {   // the buffers free now: DrainLog takes the lock again
-        ReleaseSRWLockExclusive(&logLock);
-        DrainLog();
-    }
-    ReleaseSRWLockExclusive(&logFileLock);
+    if(logPath[0])logBuffer.Drain(&WritePendingLog,true);
+}
+
+void CrashLog(const char* text,std::size_t size) noexcept {
+    logging::AppendCrashLine(logPath,text,size);
 }
 
 void ReloadConfigIfChanged() noexcept {

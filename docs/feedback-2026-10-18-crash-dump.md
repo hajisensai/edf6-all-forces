@@ -30,9 +30,16 @@
 - **dump 由预先建好的专用线程写**：崩溃线程只做原子抢占 + SetEvent + 等待，栈溢出（只剩一页栈）也能写；
   其它同时崩溃的线程等这份 dump 写完再往下走（一次进程一份，`race` 用例 4 线程同时 AV 只有一份）。
   dump 线程自己崩了不会自锁；写 dump 超过 60 s 就放行给 Windows。
-- **日志先写再 dump**：先 `Log("CRASH ...")` 并 `FlushLog()`（`plugin.cpp` 新增：日志原来是 50 ms 一刷的缓冲，崩溃会丢最后的行；
-  `FlushLog` 在 dump 线程上同步写盘，崩溃线程若持有日志锁则 1 s 后放弃），再写 dump，再记一行路径 / 大小 / 异常码 / 模块+偏移。
-  模块名用 `VirtualQuery` + `K32GetMappedFileNameW`，不碰加载器锁。
+- **hang 与 crash 共用同一个写入服务**：`MiniDumpWriter()` 返回串行服务入口，不暴露原始 dbghelp 函数；
+  watchdog 提交 hang 的文件 / 上下文并等完成，crash 使用独立事件，不拿普通提交锁；待处理的 crash 优先。
+  所有实际 `MiniDumpWriteDump` 调用只在同一 worker 执行，避免任务开局卡住后又崩溃时并发重入。
+  [微软要求 DbgHelp 调用串行](https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/nf-minidumpapiset-minidumpwritedump)。
+  若 worker 无法启动则明确失败，不回退到调用方并发调用；若 DbgHelp 自身卡死，crash 仍按 60 s 上限放行给 Windows。
+- **先 dump，再独立追加诊断**：审查复现了原实现的死锁：故障线程若持有普通日志缓冲锁，dump 线程会卡在第一条 `Log("CRASH ...")`，
+  到不了 `FlushLog` 的超时保护，更到不了 dump。现在先写 dump，再用固定缓冲自行格式化整数 / UTF-16 文本，直接以 `FILE_APPEND_DATA`
+  追加 `CRASH ...` 与结果行；不经过普通日志的缓冲 / 文件锁、`InitOnce` 或 printf / locale 锁。诊断追加失败不影响已生成的 dump。
+  模块名用 `VirtualQuery` + `K32GetMappedFileNameW`，不碰加载器锁；截断的模块路径不作为以零结尾的字符串读取。
+  普通日志仍为 50 ms 一刷；`FlushLog` 通过共用 `log_buffer.h` 一次性 try-lock 并交换缓冲，失败就返回，消除先释放再重获锁的窗口。
 
 ### filter 覆盖情况（静态 + 实测）
 
@@ -91,18 +98,23 @@ fast fail 类崩溃没有兜底 dump，只有下面的 Report.wer。
 - `crash/dumps.txt` **总是写**。没有上传任何 dump 时写明原因：
   - 插件这边（读本次游戏的插件日志）：已写出 / 看到崩溃但没写成（引用 `CRASH` 行）/ 已装好但没走到（fast fail、被结束、卡死）/ 旧版插件没有此功能；
   - Windows 这边：`HKLM` LocalDumps 是否存在（以及目录 / 类型 / 个数）。
-- 附上 Windows 自己的 `Report.wer`：`%LOCALAPPDATA%` 与 `%ProgramData%` 下 `Microsoft\Windows\WER\ReportArchive|ReportQueue\AppCrash_EDF6.exe_*`，
+- 附上 Windows 自己的候选 `Report.wer`：`%LOCALAPPDATA%` 与 `%ProgramData%` 下 `Microsoft\Windows\WER\ReportArchive|ReportQueue\AppCrash_EDF6.exe_*`，
   只取这个游戏目录（`AppPath` / `UI[2]` / `LoadedModule[0]`）、本次游戏时段内（`EventTime` ≥ 插件 loading 行）最新一份，
-  作为 `crash/Report.wer`，`dumps.txt` 里摘一行「异常码 于 模块+偏移」（`Sig[6]` / `Sig[3]` / `Sig[7]`，索引不受本地化影响）。
-  没有 dump 时这是最低证据。
+  作为 `crash/Report.candidate.wer`，`dumps.txt` 里摘一行「异常码 于 模块+偏移」（`Sig[6]` / `Sig[3]` / `Sig[7]`，索引不受本地化影响）。
+  路径与时间下界不能证明进程身份，可能来自后续未记 loading 的启动，因此明确标记「会话未确认」，不认作本次崩溃的确定报告。
+  没有 dump 时仍保留这份候选证据。
 - 插件 dump（`*.plugin.dmp`）与 Windows dump 各取一份：都要过 `dump_matches`（本次安装）与 `dump_in_session`（本次游戏），
   插件的优先；超过 `DUMP_MAX` 或会让上传超过 `UPLOAD_MAX` 的写进 `dumps.txt`，不再无声丢弃。
+  大小检查在打开 dump 前完成，数 GB 的 full dump 不会先整份读入内存；元数据解析按偏移读取所需的有限区段。
 
 ## 验证
 
-- `crash_dump_test`（ctest，子进程逐类崩溃，70 项检查全过）：AV（`C0000005`）、未捕获 C++ 异常（`E06D7363`）、栈溢出（`C00000FD`）、
+- `crash_dump_test`（ctest，子进程逐类崩溃，审查修复后 100 项检查全过）：AV（`C0000005`）、未捕获 C++ 异常（`E06D7363`）、栈溢出（`C00000FD`）、
   ucrtbase `abort` / `terminate`、插件静态 CRT `abort`（`40000015`）、ucrtbase 非法参数（`C0000417`）、之后再设的 filter 被排在后面并在 dump 后调用、
-  4 线程同时崩溃只一份 dump；每份 dump 的异常流线程 = 崩溃线程，日志顺序 `CRASH …` → flush → `CRASH dump written`；被处理的异常不写 dump。
+  4 线程同时崩溃只一份 dump；每份 dump 的异常流线程 = 崩溃线程；诊断回调进入前 dump 已生成；被处理的异常不写 dump。
+  新增真实共用日志实现的缓冲锁 / 文件锁被故障线程持有、诊断文件打不开三类回归，均仍写出 dump 并正常走完崩溃链；
+  try-only flush 的持锁退出、缓冲交换 / 顺序与丢行计数也单独验证。
+  可控 fake writer 阻塞 hang 时提交 crash，验证最大 in-flight = 1、两份请求使用同一 worker，且各自文件路径 / 异常码 / 线程信息保持正确。
 - cdb（`.ecxr; kc`）：
   - av：`crash_dump_test!AccessViolation ← kernel32!BaseThreadInitThunk ← ntdll!RtlUserThreadStart`，`mov dword ptr [10h],1`；
   - abort：`CaptureHere ← OnUcrtAbort ← ucrtbase!raise ← ucrtbase!abort ← Child ← main`；terminate 多一层 `ucrtbase!terminate`；
@@ -112,4 +124,5 @@ fast fail 类崩溃没有兜底 dump，只有下面的 Report.wer。
   `CRASH dump written: ...EDF6.exe.138560.plugin.dmp, 5507 KB`。cdb：`EDF6Autopilot!KeyboardState ← EOSOVH_Win64_Shipping ← EDF!… ← kernel32!BaseThreadInitThunk`，
   线程 0x1a08c = 106636 即游戏线程。同次崩溃本机 HKLM LocalDumps 写了 101 MB 的 `EDF6.exe.138560.dmp`（超 `DUMP_MAX`，新 `collect()` 会在 `dumps.txt` 里写明）。
   游戏目录由 harness 逐字节还原（DLL sha 与测前一致，autopilot 文件已移除）；两份 dump 已从 CrashDumps 挪进 worktree 的 `tmp/ingame/dumps/`。
-- `tests/testhub_dump_source_test.py` 32 项、`tools/selftest.py` 新增 `plugin_crash_dump_is_collected`（C++ 的文件名格式 / 日志行与 `collect()` 的 glob / 判定互相对上）。
+- `tests/testhub_dump_source_test.py` 审查修复后 43 项、`tools/selftest.py` 的两项 dump 相关守卫通过（C++ 的文件名格式 / 日志行与 `collect()` 的 glob / 判定互相对上）。
+  原生测试实际生成的 av / bufferlock / filelock 三份原始无时间戳日志也直接交给 `plugin_crash_note` 验证，均识别为已写出。

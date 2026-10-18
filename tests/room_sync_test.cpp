@@ -494,8 +494,37 @@ void Rooms() {
     Expect(lobby.member[1].values.empty(),"the client's keys withdrawn");
     lobby.current=0;host.engine.Leave(&kFakeApi);
     Expect(lobby.member[0].values.empty(),"the host's keys withdrawn");
-    Expect(keysSeen.size()<=5,"at most five extension keys (Coop allows 16 published a process)");
+    Expect(keysSeen.size()<=kListParts+2,"the list, readiness and pack marker fit Coop's 16-key limit");
     Expect(lobby.refused==0,"Coop never refused a key or value");
+}
+
+void BackpackCompatibility() {
+    ResetLobby(3);
+    static Machine host,client;host=Machine{};client=Machine{};
+    const std::wstring complete=L"EDF6VC_NPC_RIFLE_1E3A8A_X_AHANDGRENADE01.SGO",
+                       compatible=L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO";
+    host.config={complete,compatible,L"EDF6VC_LO_TANK_4000000000000C81.SGO"};host.files=host.config;
+    Tick(host,0,1000);Tick(client,1,1000);
+    const char* list=ValueOf(0,kKeyList);
+    Expect(ValueOf(0,kKeyPacks) && ValueOf(1,kKeyPacks) && list && !std::strchr(list,'+'),
+           "an older member without the pack marker: every published token uses the old grammar");
+    Expect(client.pending==std::vector<std::wstring>({compatible,L"EDF6VC_LO_TANK_4000000000000C81.SGO"}),
+           "the compatible list still generates the soldier's colours and the vehicle");
+    client.Finish();client.pending.clear();Tick(client,1,2000);
+    Expect(client.engine.HasHostList() && client.engine.HostList().count==2 && client.engine.Now().own==Ready::ready,
+           "after generation clears pending, the validated compatible host list retains mission preloads");
+    lobby.member[2].present=false;
+    Tick(host,0,3000);Tick(client,1,3000);
+    list=ValueOf(0,kKeyList);
+    Expect(list && std::strchr(list,'+') && host.engine.Target().count==3 && client.engine.HostList().count==3,
+           "every remaining member reads packs: the full list adds the backpack resource");
+    Expect(client.pending==std::vector<std::wstring>({complete}),"only the newly usable pack needs generating");
+    client.Finish();Tick(client,1,9000);
+    lobby.member[2].present=true;Tick(host,0,10000);Tick(client,1,10000);
+    Expect(!std::strchr(ValueOf(0,kKeyList),'+') && client.engine.HostList().count==2 && client.engine.Now().own==Ready::ready,
+           "an older member joins: downgrade to its readable list without losing the generated colours");
+    lobby.current=0;host.engine.Leave(&kFakeApi);
+    Expect(!ValueOf(0,kKeyPacks),"leaving withdraws the pack capability marker too");
 }
 
 void LongList() {
@@ -701,6 +730,7 @@ int main() {
     ListCoding();
     HaveAndPlan();
     Rooms();
+    BackpackCompatibility();
     LongList();
     MissionList();
     Budget();

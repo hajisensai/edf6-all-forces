@@ -164,12 +164,42 @@ void Friends() {
     npc::Friend near{{0.0f,0.0f,24.0f},0.8f},far{{0.0f,0.0f,10.0f},0.8f};
     Check(!LandingClear(at,5.0f,&near,1),"a friend 6 m from a 5 m blast's landing: held");
     Check(LandingClear(at,5.0f,&far,1) && LandingClear(at,0.0f,&near,1),"one 20 m off, or no radius: clear");
-    const float from[3]={0.0f,1.5f,0.0f},dir[3]={0.0f,0.0f,1.0f};
-    npc::Friend close{{0.3f,1.5f,3.0f},0.8f},behind{{0.0f,1.5f,-3.0f},0.8f},beyond{{0.0f,1.5f,12.0f},0.8f};
-    Check(!NearClear(from,dir,0.6f,&close,1),"a friend 3 m ahead on its way: held");
-    Check(NearClear(from,dir,0.6f,&behind,1) && NearClear(from,dir,0.6f,&beyond,1),"one behind or past kNearLine: the arc goes over");
     Check(Rested(PackUse::thrown,false,0) && !Rested(PackUse::thrown,true,3999) && Rested(PackUse::thrown,true,4000) &&
           !Rested(PackUse::direct,true,699) && Rested(PackUse::direct,true,700),"the pace");
+}
+
+void WholeFlight() {
+    using namespace npcpack;
+    const Weapon grenade{PackUse::thrown,360.0f,5.0f,0.0f,36.0f,14.7f,0.125f,true};
+    const float from[3]={0.0f,1.5f,0.0f},to[3]={0.0f,1.5f,40.0f};
+    float pitch=0.0f,flight=0.0f;
+    Check(LobPitch(40.0f,0.0f,grenade.speed,grenade.gravity,&pitch,&flight),"a forty metre throw has an arc");
+    int rays=0;float last[3]{},longest=0.0f;
+    const auto open=[&](const float* a,const float* b) noexcept {
+        ++rays;const float length=npc::Dist(a,b);if(length>longest)longest=length;
+        for(int k=0;k<3;++k)last[k]=b[k];return false;
+    };
+    Check(ArcClear(grenade,from,to,pitch,0.1f,nullptr,0,open) && rays>10 && longest<=kArcStep+0.001f && npc::Dist(last,to)<0.01f,
+          "the map is traced all the way to the landing, in bounded segments",rays,longest);
+    const auto wall=[](const float* a,const float* b) noexcept {return a[2]<12.0f && b[2]>=12.0f;};
+    Check(!ArcClear(grenade,from,to,pitch,0.1f,nullptr,0,wall),"a wall twelve metres away stops the throw (past the old six metre test)");
+    // A low wall the real arc clears is safe; a straight eye-to-target ray would incorrectly forbid this throw.
+    const auto lowWall=[](const float* a,const float* b) noexcept {
+        if(a[2]>=20.0f || b[2]<20.0f)return false;
+        const float t=(20.0f-a[2])/(b[2]-a[2]);return a[1]+(b[1]-a[1])*t<2.0f;
+    };
+    Check(ArcClear(grenade,from,to,pitch,0.1f,nullptr,0,lowWall),"the real arc clears a low wall on the straight sight line");
+    const float t=flight*0.5f;
+    npc::Friend middle{{0.0f,from[1]+grenade.speed*std::sin(pitch)*t-0.5f*grenade.gravity*t*t,20.0f},0.1f};
+    float look[3];ThrowLook(from,to,pitch,grenade.lift,look);
+    const float oldEnd[3]={from[0]+look[0]*6.0f,from[1]+look[1]*6.0f,from[2]+look[2]*6.0f};
+    Check(LandingClear(to,grenade.blast,&middle,1) && npc::ShotClear(from,oldEnd,0.1f,0.0f,&middle,1),
+          "a friend midway along the real arc escapes the old near / landing tests");
+    Check(!ArcClear(grenade,from,to,pitch,0.1f,&middle,1,open),"the whole actual arc protects a friend midway along it (FireVector lift restored)");
+    npc::Friend beside=middle;beside.pos[0]=3.0f;
+    Check(ArcClear(grenade,from,to,pitch,0.1f,&beside,1,open),"a friend safely beside the arc does not prevent a throw");
+    npc::Friend landing{{0.0f,1.5f,35.0f},0.8f};
+    Check(!ArcClear(grenade,from,to,pitch,0.1f,&landing,1,open),"the landing blast is checked as well as the arc");
 }
 }  // namespace
 
@@ -180,6 +210,7 @@ int main() {
     When();
     Looks();
     Friends();
+    WholeFlight();
     std::printf("npc_backpack_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }

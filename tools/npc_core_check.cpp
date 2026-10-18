@@ -17,7 +17,7 @@ namespace crew {
 bool InstallRealDriverNative(NpcSeatInputOwnedFn) noexcept { return true; }
 // npc_backpack.cpp stand-ins: one sub slot (packSlot) when packReady; its uses and reloads recorded, the use going on
 // (packBusy) as the case sets.
-bool packReady=false,packBusy=false;int packSlots=0,packUses=0,packUseSlot=-1,packReloads=0;
+bool packReady=false,packBusy=false,packCanUse=true;int packSlots=0,packUses=0,packUseSlot=-1,packReloads=0;
 NpcPackSlot packSlot{};
 bool InstallNpcBackpack() noexcept { return packReady; }
 bool NpcBackpackReady() noexcept { return packReady; }
@@ -27,6 +27,7 @@ int NpcPackSlots(const unsigned char*,NpcPackSlot* out,int most) noexcept {
 }
 bool NpcPackIndex(const unsigned char*,int index) noexcept { return packReady && packSlots && index==packSlot.index; }
 bool NpcPackBusy(const unsigned char*) noexcept { return packBusy; }
+bool NpcPackCanUse(unsigned char*,int) noexcept { return packCanUse; }
 bool NpcPackUse(unsigned char*,int slot) noexcept { ++packUses;packUseSlot=slot;return true; }
 bool NpcPackReload(unsigned char*) noexcept { ++packReloads;return true; }
 bool RealDriverNativeReady() noexcept { return true; }
@@ -63,6 +64,7 @@ Config config{};
 ULONGLONG now=1000,frame=1;
 bool sessionOn=false,host=true,door=true;
 bool wall=false;
+float arcWallZ=0.0f; // a finite map wall for production Backpack's segment queries
 bool flatFloor=false,completeRide=false;
 bool mapHeld=true,rayOn=false;
 const void* markEnemy=nullptr;
@@ -144,6 +146,7 @@ void __fastcall RideRec(void* actor,SharedRef* ref,int slot) {
 void Jump(unsigned rva,const void* to) { auto p=image+rva;p[0]=0x48;p[1]=0xB8;std::memcpy(p+2,&to,8);p[10]=0xFF;p[11]=0xE0; }
 void Reset() {
     heldSupportActor=nullptr;playerObj=nullptr;ResetNpcAi();config=Config{};now=1000;frame=1;sessionOn=false;host=true;door=true;wall=false;flatFloor=completeRide=false;follows=rides=announcedBoards=0;
+    arcWallZ=0.0f;
     std::memset(human,0,sizeof(human));std::memset(dead,0,sizeof(dead));std::memset(other,0,sizeof(other));
     std::memset(vehicle,0,sizeof(vehicle));std::memset(seats,0,sizeof(seats));std::memset(ctrl,0,sizeof(ctrl));
     for(auto p : {human,dead,other}) { Put<void*>(p,0,image+kSoldiers[0].vtable);Put<int>(p,kTeam,kTeamFriend); }
@@ -186,7 +189,12 @@ bool NpcDrivable(const unsigned char* v) noexcept { return drivableVehicle && v=
 bool PrepareNpcVehicleAi(unsigned char*) noexcept {return true;}
 int tankCommands=0;Command lastTankCommand{};
 bool TankCommand(const void*,const Command& command,const ObjRef&) noexcept {++tankCommands;lastTankCommand=command;return true;}
-float MapRay(const float*,const float*,float* hit) noexcept {
+float MapRay(const float* from,const float* to,float* hit) noexcept {
+    if(arcWallZ>0.0f && from[2]<arcWallZ && to[2]>=arcWallZ) {
+        const float t=(arcWallZ-from[2])/(to[2]-from[2]);
+        for(int k=0;k<3;++k)hit[k]=from[k]+(to[k]-from[k])*t;
+        return npc::Dist(from,hit);
+    }
     if(!wall)return -1.0f;hit[0]=0;hit[1]=1.5f;hit[2]=20;return 20;
 }
 bool SeatPoint(const unsigned char*,unsigned,float* at,float* reach) noexcept {
@@ -957,7 +965,7 @@ int main() {
         Put<float>(rifle,kArmReach,150.0f);Put<float>(rifle,kArmDamage,10.0f);Put<std::int32_t>(rifle,kWeaponAmmo,30);
         unsigned char* list[2]={rifle,grenade};
         Put<unsigned char**>(human,kWeapons,list);Put<std::uint64_t>(human,kWeaponCount,2);
-        packReady=true;packSlots=1;packSlot=NpcPackSlot{grenade,PackOf(1),0,1};packUses=packReloads=0;packBusy=false;
+        packReady=true;packSlots=1;packSlot=NpcPackSlot{grenade,PackOf(1),0,1};packUses=packReloads=0;packBusy=false;packCanUse=true;
         Arms packArms=ArmsOf(human);
         Expect(packArms.n==2 && packArms.arm[0].ready && !packArms.arm[1].ready && packArms.arm[1].reach==0.0f && LongestReach(packArms)==150.0f &&
                LargestBlast(packArms)==0.0f,"the backpack's grenade is out of the arms it picks, fires and fights at (production ArmsOf)");
@@ -975,6 +983,32 @@ int main() {
             Put<float>(human,kViewPitch,-std::atan2(dir[1],std::sqrt(dir[0]*dir[0]+dir[2]*dir[2])));Put<float>(human,kViewYaw,std::atan2(dir[0],dir[2]));
         };
         const auto drive=[&]{now+=16;++frame;world.frame=frame;return Drive(*soldier,human,kSoldiers[0],packArms,nullptr,eyePoint,Pos(human),squad,now);};
+        // A ready round is not sufficient: the native state / sub-slot mask may forbid its use. Such a backpack must
+        // not continually take the main weapon's look and trigger, even though it is a good target for the grenade.
+        packCanUse=false;world.enemy[0].aim[0]=0.0f;
+        Put<float>(human,kViewPitch,std::atan2(eyePoint[1],24.0f));Put<float>(human,kViewYaw,0.0f);
+        drive();
+        Expect(packUses==0 && At<unsigned char>(human,kTrigger)==1 && std::fabs(At<float>(human,kLookPitch))<0.2f,
+               "native backpack gate closed: the main rifle keeps aiming and firing (production Drive)");
+        const float beforePitch=At<float>(human,kLookPitch),beforeYaw=At<float>(human,kLookYaw);
+        human[kTrigger]=0;
+        drive();
+        Expect(packUses==0 && At<unsigned char>(human,kTrigger)==1 && At<float>(human,kLookPitch)==beforePitch && At<float>(human,kLookYaw)==beforeYaw,
+               "a closed backpack gate does not starve the main rifle on subsequent frames");
+        world.enemy[0].aim[0]=-2.0f;packCanUse=true;
+        Put<float>(human,kViewPitch,0.0f);Put<float>(human,kViewYaw,0.0f);
+        arcWallZ=12.0f;Put<float>(human,kLookPitch,123.0f);human[kTrigger]=1;
+        Backpack(*soldier,human,&world.enemy[0],eyePoint,kMaskLook,now);
+        Expect(!packUses && human[kTrigger]==1 && At<float>(human,kLookPitch)==123.0f,
+               "a wall beyond six metres forbids the grenade before taking the main weapon's aim / trigger (production Backpack)");
+        arcWallZ=0.0f;
+        const float mid=flight*0.5f;
+        world.friends=1;world.frObject[0]=other;
+        world.fr[0]=npc::Friend{{-1.0f,eyePoint[1]+36.0f*std::sin(pitch)*mid-0.5f*14.7f*mid*mid,12.0f},0.8f};
+        Backpack(*soldier,human,&world.enemy[0],eyePoint,kMaskLook,now);
+        Expect(!packUses && human[kTrigger]==1 && At<float>(human,kLookPitch)==123.0f,
+               "a friend midway along the actual lifted arc forbids the grenade before taking aim (production Backpack)");
+        world.friends=0;
         drive();
         float expect[2]{};npc::AimDelta(0.0f,0.0f,dir,1.0f,kLookMost,expect);
         Expect(packUses==0 && At<unsigned char>(human,kTrigger)==0 && std::fabs(At<float>(human,kLookPitch)-expect[0])<1e-5f,
@@ -984,6 +1018,9 @@ int main() {
         packBusy=true;Put<unsigned char>(human,kTrigger,1);Put<unsigned char>(human,kPickWeapon+1,1);drive();
         Expect(packUses==1 && At<unsigned char>(human,kTrigger)==0 && At<unsigned char>(human,kPickWeapon+1)==0,
                "the throw going on: no other, the main trigger and the picks off");
+        frame=soldier->packHoldUntil+1;Put<float>(human,kLookPitch,999.0f);drive();
+        Expect(packUses==1 && std::fabs(At<float>(human,kLookPitch)-expect[0])<1e-5f,
+               "an animation still going after 45 frames keeps the actual throw direction");
         packBusy=false;frame=soldier->packHoldUntil;onIt();drive();
         Expect(packUses==1,"done, but within kThrowGapMs of the last: it rests");
         now+=npcpack::kThrowGapMs;onIt();drive();

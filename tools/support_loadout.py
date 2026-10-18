@@ -575,6 +575,10 @@ def wanted_files(text: str, pending: list[str] = ()) -> list[str]:
         for i, (k, look, carried) in enumerate(soldiers):
             if look != (STOCK, STOCK) or carried:
                 out.append(look_file(k, i % 4 == 0, look, carried))
+            if carried and look != (STOCK, STOCK):
+                # A peer without backpack support receives these colours without the pack. Generate and retain that
+                # resource too: its name is no longer on the pending list after a successful generation.
+                out.append(look_file(k, i % 4 == 0, look))
     out += [vehicle_file(l) for l in vehicles(text).values()]
     out += crew_files(text)
     out += [p.strip().upper() for p in pending if decode_name(p)]

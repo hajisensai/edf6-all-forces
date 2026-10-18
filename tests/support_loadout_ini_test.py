@@ -133,6 +133,19 @@ check(sl.decode_name('edf6vc_npc_thunderbow_l_1e3a8a_x_pweapon216.sgo') == ('npc
 check(sl.wanted_files('[VehicleCrew]\r\nSupportPreset_SQUAD=rifle+aHandGrenade01*4,lance+pWeapon216\r\n') ==
       ['EDF6VC_NPC_RIFLE_L_X_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_LANCE_L_X_X_PWEAPON216.SGO'],
       'a pack alone wants its file (a leader every four)')
+packed_ini = '[VehicleCrew]\r\nSupportPreset_SQUAD=rifle@1E3A8A+aHandGrenade01*4\r\n'
+packed_names = ['EDF6VC_NPC_RIFLE_L_1E3A8A_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO',
+                'EDF6VC_NPC_RIFLE_1E3A8A_X_AHANDGRENADE01.SGO', 'EDF6VC_NPC_RIFLE_1E3A8A_X.SGO']
+check(sl.wanted_files(packed_ini) == packed_names, 'a coloured pack also generates its old-peer colour resources')
+with tempfile.TemporaryDirectory() as root:
+    made = {'OBJECT/' + n: b'test resource' for n in packed_names}
+    sl.install_new(root, made)
+    os.makedirs(os.path.dirname(sl.pending_path(root)), exist_ok=True)
+    with open(sl.pending_path(root), 'w', encoding='utf-8') as f:
+        f.write('\n'.join(packed_names))
+    sl.clear_pending(root, made)
+    check(not sl.read_pending(root) and not sl.stale(root, packed_ini) and not sl.missing_names(root, packed_ini),
+          'after pending is cleared, configuration still retains every complete and compatible resource')
 check('NpcBackpack=1' in read('EDF6VehicleCrew.ini') and '+背包武器' in read('EDF6VehicleCrew.ini'),
       'the shipped ini documents the backpack weapons')
 

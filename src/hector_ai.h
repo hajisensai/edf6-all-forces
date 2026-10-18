@@ -12,8 +12,9 @@
 //    rand(retreatRand) frames, then the cycle starts again. Inside `near` it walks up to the target in a straight line
 //    and stands inside the stop radius.
 //  - Speed (0x223470 / 0x2216F0): the walk command is the object's +0x278 (1.0, GameObjectBase's default, 0x28D0EF),
-//    -0.85 of it backing off (0x223832, 0x2238BB); the local velocity eases 10 % a frame to 0.1 x the command, x 60 per
-//    second (0x2218D0, 0x221A31, 0x221B30): 6 units/s forward, 5.1 backward, everywhere (no slower battle walk). EDF6's
+//    -1 of it backing off (0x2237FF loads -1 into xmm7; 0x2238BB multiplies the same command by it); the local velocity
+//    eases 10 % a frame to 0.1 x the command, x 60 per second (0x2218D0, 0x221A31, 0x221B30): 6 units/s both ways,
+//    everywhere (no slower battle walk). EDF6's
 //    MoveTo (0x33E3B0) makes the walk vector |speed| long and the class scales it by WalkingEnemyBase.MoveSpeed[0] = 6
 //    (0x53D7CC); the class's own speeds are 0.125 in the chase state (0x34DA46) and 0.9..1.2 x linear_speed following,
 //    so Steer gives the speed 4.1 has.
@@ -99,12 +100,12 @@ inline Event Step(Cycle& y,const Config& c,Rng& rng,float dist) noexcept {
 }
 
 constexpr float kWalkSpeed=1.0f;       // 4.1's walk command (+0x278)
-constexpr float kRetreatSpeed=0.85f;   // backing off: -0.85 x the command, facing the target
+constexpr float kRetreatSpeed=kWalkSpeed;  // 4.1 0x2238BB: -1 x the same command, facing the target
 
 // How the walk is steered this frame (4.1's AI 0x2234B6..0x2238BF, every frame, at any distance): with a target the
 // heading is the target itself (its position minus the Hector's; 4.1 has no route), the body turns to it
 // (clamp(10 x angle, -1, 1) x 0.03 rad a frame: EDF6's FaceTarget with limit 0.1 x TurnSpeed 0.3) and the walk command
-// is along the body's own facing only (+0x338, the local z: forward 1, backing off -0.85 x 1 while still facing the
+// is along the body's own facing only (+0x338, the local z: forward 1, backing off -1 while still facing the
 // target, 0 inside the stop radius). It never walks sideways. EDF6's Berserker in a fight (its follow state 0x34D890)
 // faces the target but walks to a point beside it (0x3408D0: a slot plus the target's lead), so the legs walk forward
 // while the body slides up to 90 degrees sideways (2026-10-18 M113: 43 % of the walking frames over 11 degrees off).

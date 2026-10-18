@@ -6,8 +6,8 @@
 //    (kGroupLeast enemies within kGroup m of the target, or one large one), on the ground or low (never a flyer), on the
 //    low arc its own speed and gravity give (LobPitch: the look raised by the arc less the weapon's FireVector lift), no
 //    farther than its true reach or kFlightMost seconds of flight, no nearer than its own round reaches it; no friend
-//    where it lands (its blast, or its area for a burning / gas round, LandingClear) nor on the first kNearLine m of
-//    its way (NearClear); at most once every kThrowGapMs.
+//    where it lands (its blast, or its area for a burning / gas round, LandingClear) nor on its whole actual flight
+//    (ArcClear, with terrain checked on every segment); at most once every kThrowGapMs.
 //  - direct (the sabers, the spears): at the target within kDirectShare of its true reach, the round's line clear of
 //    friends (npc_logic.h ShotClear); a swing every kDirectGapMs while it stays in reach.
 // Each use waits for the look to be on it (AimOn) and holds that look kHoldFrames afterwards: the weapon lets go on its
@@ -22,7 +22,6 @@ namespace crew::npcpack {
 constexpr float kGravity=14.7f;            // m/s^2 at gravity factor 1 (heli.cpp kGravity, measured)
 constexpr float kFlightMost=2.5f;          // s: a longer throw is not made (the target has walked off by then)
 constexpr float kThrowMost=150.0f;         // m: never farther, whatever a slow round's life says
-constexpr float kNearLine=6.0f;            // m of a throw's way kept clear of friends (where a round would hit one)
 constexpr float kDirectShare=0.9f;         // of a direct weapon's true reach
 constexpr float kGroup=8.0f;               // m round the target the group counts within (at least the round's own radius)
 constexpr int kGroupLeast=2;               // enemies in it, the target among them (or one large one)
@@ -32,6 +31,7 @@ constexpr float kDirectHit=1.5f;           // m: the look on a direct target (np
 constexpr float kDirectConeLeast=0.05f;
 constexpr std::uint64_t kThrowGapMs=4000,kDirectGapMs=700,kReloadGapMs=15000;   // kReloadGapMs: an empty one asked again
 constexpr int kHoldFrames=45;              // 0.75 s
+constexpr float kArcStep=3.0f,kArcTimeStep=0.1f; // the whole flight: no more than 3 m / 0.1 s between map rays
 
 // The elevation (rad, up positive) a round of `speed` (m/s) falling at `gravity` (m/s^2) leaves at to land `rise` m above
 // where it leaves, `horiz` m away: the low arc; `flight` its time (s). False when it cannot get there. No gravity: the
@@ -103,10 +103,30 @@ inline bool LandingClear(const float* at,float radius,const npc::Friend* friends
     for(int i=0;i<n;++i)if(npc::Dist(at,friends[i].pos)<radius*1.25f+friends[i].radius)return false;
     return true;
 }
-// No friend on the first kNearLine m of the way along `dir` (unit) from `from`.
-inline bool NearClear(const float* from,const float* dir,float spread,const npc::Friend* friends,int n) noexcept {
-    const float to[3]={from[0]+dir[0]*kNearLine,from[1]+dir[1]*kNearLine,from[2]+dir[2]*kNearLine};
-    return npc::ShotClear(from,to,spread,0.0f,friends,n);
+// The actual round's full low arc, not the soldier's look (ThrowLook removes the weapon's FireVector lift from that
+// look). Any friend or terrain collision along it rules the throw out: a contact grenade would explode there, not at
+// the intended target; a timed / bouncing grenade's eventual landing cannot be predicted after that collision.
+// `blocked(a,b)` tests the map segment. At most 0.1 s per chord also bounds the gravity sag between its ends.
+template<class Blocked>
+inline bool ArcClear(const Weapon& w,const float* from,const float* to,float pitch,float spread,
+                     const npc::Friend* friends,int n,Blocked blocked) noexcept {
+    const float horiz=npc::Horiz(from,to),c=std::cos(pitch);
+    if(!(horiz>0.01f) || !(w.speed>0.0f) || !(c>1e-4f))return false;
+    const float flight=horiz/(w.speed*c);
+    if(!std::isfinite(flight) || !(flight>0.0f) || flight>kFlightMost)return false;
+    const float byTime=flight/kArcTimeStep,byLength=(w.speed+w.gravity*flight)*flight/kArcStep;
+    const float segments=std::ceil(byTime>byLength ? byTime : byLength);
+    if(!std::isfinite(segments) || segments>256.0f)return false;
+    const int steps=segments>1.0f ? static_cast<int>(segments) : 1;
+    const float vx=(to[0]-from[0])/flight,vz=(to[2]-from[2])/flight,vy=w.speed*std::sin(pitch);
+    float previous[3]={from[0],from[1],from[2]};
+    for(int i=1;i<=steps;++i) {
+        const float t=flight*static_cast<float>(i)/static_cast<float>(steps);
+        const float point[3]={from[0]+vx*t,from[1]+vy*t-0.5f*w.gravity*t*t,from[2]+vz*t};
+        if(!npc::ShotClear(previous,point,spread,0.0f,friends,n) || blocked(previous,point))return false;
+        for(int k=0;k<3;++k)previous[k]=point[k];
+    }
+    return LandingClear(to,Radius(w),friends,n);
 }
 // Whether it has rested since its last use (`sinceMs`; a first use any time).
 inline bool Rested(PackUse use,bool used,std::uint64_t sinceMs) noexcept {

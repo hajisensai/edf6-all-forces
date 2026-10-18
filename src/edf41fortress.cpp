@@ -18,6 +18,7 @@
 //    takes the step's sideways input from [+0x1970] (0x4C3244: 0 / 1 left, 3 / 4 right, anything else straight), which only
 //    its network sync writes (0x4C41D2 / 0x4C9D72): offline it never changes. When the main player starts a new clip the
 //    next step is drawn as 4.1 draws it and written there (2 straight, 0 left, 3 right).
+//    Only this optional step choice follows Edf41Ai; standing and the script message contract are required even with it off.
 //  - The script's ObjectAction (0x1000000D) means what it means to 4.1 (src/edf41fortress_action.h): 0..5 switch one part
 //    group on / off through the class's own 0x4CA7E0, 6 destroys it through the class's own death (0x4CB6D0: HP 0, the
 //    dead flags, the destroy state; what ApplyDamage + slot 18 0x4C60E0 do when the HP runs out). None of it reaches the
@@ -128,7 +129,7 @@ std::uint64_t __fastcall UpdateHook(void* self,void* dt) {
                 Log("EDF41FORTRESS %p stands up (mode %d -> 1)",self,*reinterpret_cast<int*>(static_cast<char*>(self)+kModeAt));
             }
         }
-        Wander(static_cast<char*>(self));
+        if(Cfg().edf41Ai)Wander(static_cast<char*>(self));
     }
     return nextUpdate(self,dt);
 }
@@ -161,10 +162,8 @@ bool __fastcall MessageHook(void* self,std::uint32_t msg,void* data) {
 }  // namespace
 
 bool InstallEdf41Fortress() noexcept {
-    if(!Cfg().edf41Ai) {
-        Log("EDF41FORTRESS off (ini Edf41Ai=0)");
-        return false;
-    }
+    // Edf41Ai can turn off the extra wandering AI, not the converted object's required message / standing contract.
+    // Otherwise ObjectAction(1) reaches MovingFortress's rubble spawn again and M117 still crashes with Edf41Ai=0.
     void** vtable=reinterpret_cast<void**>(image+kVtable);
     void* const update=vtable[kSlotUpdate];
     void* const message=vtable[kSlotMessage];
@@ -184,7 +183,7 @@ bool InstallEdf41Fortress() noexcept {
     nextMessage=reinterpret_cast<MessageFn>(message);
     const bool u=PatchVtableSlot(vtable+kSlotUpdate,update,reinterpret_cast<void*>(&UpdateHook));
     const bool m=PatchVtableSlot(vtable+kSlotMessage,message,reinterpret_cast<void*>(&MessageHook));
-    Log("EDF41FORTRESS hooked: update=%d messages=%d",u ? 1 : 0,m ? 1 : 0);
+    Log("EDF41FORTRESS hooked: update=%d messages=%d wander=%d",u ? 1 : 0,m ? 1 : 0,Cfg().edf41Ai ? 1 : 0);
     return u && m;
 }
 }  // namespace crew

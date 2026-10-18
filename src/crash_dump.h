@@ -22,8 +22,9 @@
 namespace crew {
 using MiniDumpWriteDumpFn=BOOL(WINAPI*)(HANDLE,DWORD,HANDLE,MINIDUMP_TYPE,PMINIDUMP_EXCEPTION_INFORMATION,
                                         PMINIDUMP_USER_STREAM_INFORMATION,PMINIDUMP_CALLBACK_INFORMATION);
-// dbghelp!MiniDumpWriteDump, loaded once (null when there is no dbghelp). Resolve it before anything is stuck or
-// crashed: a thread that died holding the loader lock would stop LoadLibrary in the dumping thread.
+// A serialized MiniDumpWriteDump service (null if dbghelp or its worker is unavailable), never the raw dbghelp
+// pointer. Hang and crash dumps execute on the same worker: dbghelp forbids concurrent calls. Resolve this before
+// anything is stuck or crashed: a thread that died holding the loader lock would stop LoadLibrary.
 MiniDumpWriteDumpFn MiniDumpWriter() noexcept;
 // The dump's contents (mission_watch's hang dump too): every thread's stack and registers, the memory they point at,
 // the modules (unloaded ones too), the threads' TEBs and the PEB. A few MB, not the whole heap.

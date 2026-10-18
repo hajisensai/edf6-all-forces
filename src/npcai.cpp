@@ -1052,7 +1052,7 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
     }
     const ULONGLONG frame=GameFrame();
     if(NpcPackBusy(h) || frame<s.packHoldUntil) {
-        if(frame<s.packHoldUntil && (mask&kMaskLook))Look(h,s.packDir);
+        if(mask&kMaskLook)Look(h,s.packDir);
         h[kTrigger]=0;h[kPickWeapon]=h[kPickWeapon+1]=h[kPickWeapon+2]=0;
         return;
     }
@@ -1063,6 +1063,7 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
     for(int i=0;i<n;++i) {
         const PackWeapon& row=*slots[i].row;
         const unsigned char* w=slots[i].weapon;
+        if(!NpcPackCanUse(h,slots[i].slot))continue;
         const float reach=At<float>(w,kArmReach),blast=At<float>(w,kArmBlast),speed=At<float>(w,kWeaponSpeed)*60.0f,
                     factor=At<float>(w,kWeaponGravity);
         npcpack::Weapon pack{row.use,std::isfinite(reach) && reach>0.0f ? reach : 0.0f,std::isfinite(blast) && blast>0.0f ? blast : 0.0f,
@@ -1076,9 +1077,9 @@ void Backpack(Soldier& s,unsigned char* h,const Enemy* t,const float* eye,unsign
         if(!npcpack::Fits(pack,target,&pitch))continue;
         if(row.use==PackUse::thrown) {
             npcpack::ThrowLook(eye,t->aim,pitch,row.lift,dir);
-            const float ahead[3]={eye[0]+dir[0]*npcpack::kNearLine,eye[1]+dir[1]*npcpack::kNearLine,eye[2]+dir[2]*npcpack::kNearLine};
-            if(!npcpack::LandingClear(t->aim,npcpack::Radius(pack),fr,friends) || !npcpack::NearClear(eye,dir,kSpread,fr,friends) ||
-               MapRay(eye,ahead,hit)>=0.0f)continue;
+            if(!npcpack::ArcClear(pack,eye,t->aim,pitch,kSpread,fr,friends,[](const float* from,const float* to) noexcept {
+                float collision[3];return MapRay(from,to,collision)>=0.0f;
+            }))continue;
         } else {
             dir[0]=t->aim[0]-eye[0];dir[1]=t->aim[1]-eye[1];dir[2]=t->aim[2]-eye[2];
             const float wall=MapRay(eye,t->aim,hit);

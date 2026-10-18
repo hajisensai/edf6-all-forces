@@ -19,7 +19,7 @@
     uninstall over a misaligned table offers repair or skipping the table instead of failing;
   - the installer's 「回传日志」 (tools/testhub.py collect) sends only a crash dump of this install and of the run the
     logs end with (tests/testhub_dump_source_test.py: synthetic minidumps against the plugin log's loading lines), the
-    plugin's own crash dump beside Windows' one, Windows' Report.wer, and always crash/dumps.txt saying why there is
+    plugin's own crash dump beside Windows' one, a candidate Windows Report.wer with unconfirmed session identity, and always crash/dumps.txt saying why there is
     no dump; the dump's file name and log lines src/crash_dump.cpp writes are the ones collect() looks for;
   - the model importer (pylib/obj_model.py, pylib/texfile.py) on synthetic data: OBJ reading (negative indices,
     n-gons, winding, uv origin, texture lookup), holes found and closed, skins, meshes split below 65536 vertices
@@ -12154,6 +12154,26 @@ def edf41_hector_gait() -> None:
     if not edf41:
         print('skip  edf41_hector_gait (CAS part): needs EDF4.1 installed')
         return
+    # Native 4.1 retreat is the forward command multiplied by xmm7=-1, not a reduced speed. Verify the
+    # executable contract so a mistaken interpretation of this register cannot pass a mirrored formula test.
+    import pefile
+    import capstone
+    with pefile.PE(os.path.join(edf41, 'EDF41.exe'), fast_load=True) as pe41:
+        assert pe41.FILE_HEADER.TimeDateStamp == 0x57AAB039, 'unsupported EDF4.1 executable for gait audit'
+        image41 = pe41.get_memory_mapped_image()
+    assert image41[0x2237FF:0x223807] == bytes.fromhex('f30f103d51338900')
+    factor_at = 0x223807 + struct.unpack_from('<i', image41, 0x223803)[0]
+    assert factor_at == 0xAB6B58 and struct.unpack_from('<f', image41, factor_at)[0] == -1.0
+    assert image41[0x22389E:0x2238A6] == bytes.fromhex('f30f108b78020000')
+    assert image41[0x2238AE:0x2238B6] == bytes.fromhex('f30f118b38030000')
+    assert image41[0x2238BB:0x2238C7] == bytes.fromhex('f30f59cff30f118b38030000')
+    native = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    native.detail = True
+    instructions = list(native.disasm(image41[0x223807:0x2238BB], 0x223807))
+    assert instructions and instructions[-1].address + instructions[-1].size == 0x2238BB
+    assert all(capstone.x86.X86_REG_XMM7 not in ins.regs_access()[1] for ins in instructions)
+    walk_speed = float(re.search(r'kWalkSpeed=([0-9.]+)f', head).group(1))
+    assert 'kRetreatSpeed=kWalkSpeed;' in head and walk_speed == -struct.unpack_from('<f', image41, factor_at)[0]
     import cas_graft
     import cas_legacy as cl
     import make_edf41_objects as m41
@@ -13022,7 +13042,17 @@ def plugin_crash_dump_is_collected() -> None:
     src = inspect.getsource(testhub.plugin_crash_note)
     for line in ('CRASH dump written', 'CRASHDUMP installed'):
         assert line in cpp and line in src, line
-    assert re.search(r'Log\("CRASH %s: exception', cpp) and "'] CRASH '" in src, 'the crash line'
+    assert 'line.Text("CRASH ").Text(request.kind).Text(": exception ")' in cpp and 'CRASH ' in src, 'the crash line'
+    assert 'CrashLog(line.text,line.size);' in cpp, 'crash diagnostics bypass the ordinary logger locks'
+    with tempfile.TemporaryDirectory() as scratch:
+        plugins = os.path.join(scratch, 'Mods', 'Plugins')
+        os.makedirs(plugins)
+        path = os.path.join(plugins, 'EDF6VehicleCrew.log')
+        for status in ('CRASH dump written: EDF6.exe.12345.plugin.dmp', 'CRASH dump failed: MiniDumpWriteDump error 5'):
+            with open(path, 'w', encoding='utf-8') as stream:
+                stream.write('[12:00:00.000] EDF6VehicleCrew 0.9.0 loading\nCRASH unhandled exception: exception C0000005 at EDF.dll+0x4C3A30\n' + status + '\n')
+            note = testhub.plugin_crash_note(scratch)
+            assert status in note, (status, note)
 
 
 def main() -> int:

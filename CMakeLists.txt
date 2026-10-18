@@ -465,6 +465,12 @@ set_target_properties(crawl_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_B
 add_executable(edf41_fortress_check EXCLUDE_FROM_ALL tools/edf41_fortress_check.cpp)
 target_compile_options(edf41_fortress_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(edf41_fortress_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# Exercise the production installer and patched vtable slots with the optional Hector AI disabled and enabled.
+add_executable(edf41fortress_runtime_test EXCLUDE_FROM_ALL tests/edf41fortress_runtime_test.cpp)
+target_link_libraries(edf41fortress_runtime_test PRIVATE edf6common)
+target_include_directories(edf41fortress_runtime_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(edf41fortress_runtime_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41fortress_runtime COMMAND edf41fortress_runtime_test)
 # EDF4.1 Hector's arm gate and back-off cycle (src/hector_ai.h), offline (tools/hector_ai_check.cpp). Not part of the plugin build:
 # cmake --build build --target hector_ai_check && build\hector_ai_check.exe
 add_executable(hector_ai_check EXCLUDE_FROM_ALL tools/hector_ai_check.cpp)
@@ -491,6 +497,11 @@ add_executable(npc_backpack_check EXCLUDE_FROM_ALL tools/npc_backpack_check.cpp)
 target_include_directories(npc_backpack_check PRIVATE src)
 target_compile_options(npc_backpack_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(npc_backpack_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# Execute the production native slot reader and all readiness/state-machine gates against recording entry points.
+add_executable(npc_backpack_native_check EXCLUDE_FROM_ALL tools/npc_backpack_native_check.cpp)
+target_include_directories(npc_backpack_native_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(npc_backpack_native_check PRIVATE edf6common)
+target_compile_options(npc_backpack_native_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_executable(npc_ai_check EXCLUDE_FROM_ALL tools/npc_ai_check.cpp)
 target_compile_options(npc_ai_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(npc_ai_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
@@ -715,6 +726,9 @@ add_test(NAME native_helpers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR
 # tools/edf41_maps.py converting maps in processes of their own writes what one by one writes (skipped without the games)
 add_test(NAME edf41_maps_parallel COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf41_maps_parallel.py")
 set_tests_properties(texture_acceleration model_workers edf41_maps_parallel PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# Exported share bundles must include the current mandatory maps, sounds and menu assets, not only a valid old manifest.
+add_test(NAME edf41_install_safety COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf41_install_safety.py")
+set_tests_properties(edf41_install_safety PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME optics_model_reference COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_optics_model_reference.py")
 set_tests_properties(optics_model_reference PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The room / HQ menu's layout patch (tools/room_layout.py): stock members unchanged, the names src/room_ui_logic.h uses.
@@ -790,7 +804,8 @@ set_target_properties(fp_view_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE
 set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check damage_stats_check fp_view_check cockpit_canvas_check unlock_ported_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
-add_dependencies(offline_checks transport_runtime_test)
+add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
+add_test(NAME npc_backpack_native_check COMMAND npc_backpack_native_check)
 add_dependencies(offline_checks stab_native_readback_test)
 add_test(NAME stab_native_readback COMMAND stab_native_readback_test "${EDF6_NATIVE_DLL}")
 set_tests_properties(stab_native_readback PROPERTIES SKIP_RETURN_CODE 77)
@@ -1472,6 +1487,7 @@ add_executable(crash_dump_test tests/crash_dump_test.cpp)
 target_compile_options(crash_dump_test PRIVATE /W4 /WX /utf-8 /permissive-)
 target_link_libraries(crash_dump_test PRIVATE dbghelp)
 add_test(NAME crash_dump COMMAND crash_dump_test)
+add_dependencies(offline_checks crash_dump_test)
 # More than four in an EDF5 / EDF4.1 script mission online: EDF6Coop's version and hook shape, the room word, and the
 # spawn layout both plugins share to the bit (src/edf5online_room.h, src/spawn_layout.h). No game.
 add_executable(edf5_online_room_test EXCLUDE_FROM_ALL tests/edf5_online_room_test.cpp)

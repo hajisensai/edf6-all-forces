@@ -20,7 +20,7 @@
 //    0x34DA7A, their calls of FaceTarget 0x33E840 (the follow state faces the target, the others their goal).
 //    A Hector with a target walks as 4.1's does at any distance (hector::Steer; EDF41.exe 0x2234B6..0x2238BF): it faces
 //    the target (FaceHook) and its walk is along its own facing (the goal is its position +-100 along its matrix's z
-//    row): forward at 1, backward at 0.85 in a back-off, 0 inside the stop radius (the class multiplies the walk vector
+//    row): forward at 1, backward at 1 in a back-off, 0 inside the stop radius (the class multiplies the walk vector
 //    by MoveSpeed[0] = 6 units/s, 0x53D7CC), a = b = 0 (4.1 walks at full speed to the end). The class's own follow
 //    state instead faced the target and walked to the slot beside it: the legs walked forward while the body slid
 //    sideways (2026-10-18 M113: 43 % of the walking frames over 11 degrees off its facing) and one Hector walked on the

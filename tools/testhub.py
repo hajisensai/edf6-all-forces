@@ -41,6 +41,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import zipfile
+from typing import BinaryIO
 
 SITE = os.environ.get('EDF6_TESTHUB_URL', 'https://edf6.fushi.moe').rstrip('/')
 CONFIG = os.path.join(os.environ.get('APPDATA') or os.path.expanduser('~'), 'EDF6AllForces', 'testhub.json')
@@ -232,16 +233,23 @@ def _pe_image(path: str) -> tuple[int, int] | None:
         return None
 
 
-def _dump_stream(data: bytes, kind: int) -> int | None:
+def _dump_read(f: BinaryIO, offset: int, size: int) -> bytes:
+    """Read one bounded metadata range, never the dump's memory payload (full dumps can be several GB)."""
+    f.seek(offset)
+    return f.read(size)
+
+
+def _dump_stream(f: BinaryIO, kind: int) -> int | None:
     """The RVA of a minidump's first stream of type `kind` (MINIDUMP_DIRECTORY), None when it has none."""
-    u32 = lambda o: int.from_bytes(data[o:o + 4], 'little')  # noqa: E731
-    if len(data) < 32 or data[:4] != b'MDMP':
+    head = _dump_read(f, 0, 32)
+    if len(head) < 32 or head[:4] != b'MDMP':
         return None
-    streams, directory = u32(8), u32(12)
-    for i in range(min(streams, 1024)):
-        entry = directory + 12 * i
-        if entry + 12 <= len(data) and u32(entry) == kind:
-            return u32(entry + 8)
+    streams = min(int.from_bytes(head[8:12], 'little'), 1024)
+    directory = int.from_bytes(head[12:16], 'little')
+    rows = _dump_read(f, directory, 12 * streams)
+    for entry in range(0, len(rows) - 11, 12):
+        if int.from_bytes(rows[entry:entry + 4], 'little') == kind:
+            return int.from_bytes(rows[entry + 8:entry + 12], 'little')
     return None
 
 
@@ -251,19 +259,19 @@ def dump_times(path: str) -> tuple[int | None, int | None]:
     MINIDUMP_MISC1_PROCESS_TIMES). Both are UTC time_t, as MiniDumpWriteDump writes them."""
     try:
         with open(path, 'rb') as f:
-            data = f.read()
+            head = _dump_read(f, 0, 32)
+            if len(head) < 32 or head[:4] != b'MDMP':
+                return None, None
+            written = int.from_bytes(head[20:24], 'little') or None
+            created = None
+            rva = _dump_stream(f, 15)          # MiscInfoStream
+            if rva is not None:
+                misc = _dump_read(f, rva, 16)
+                if len(misc) == 16 and int.from_bytes(misc[4:8], 'little') & 0x2:
+                    created = int.from_bytes(misc[12:16], 'little') or None
+            return written, created
     except OSError:
         return None, None
-    if len(data) < 32 or data[:4] != b'MDMP':
-        return None, None
-    written = int.from_bytes(data[20:24], 'little') or None
-    created = None
-    rva = _dump_stream(data, 15)          # MiscInfoStream
-    if rva is not None and rva + 16 <= len(data):
-        flags = int.from_bytes(data[rva + 4:rva + 8], 'little')
-        if flags & 0x2:
-            created = int.from_bytes(data[rva + 12:rva + 16], 'little') or None
-    return written, created
 
 
 # The plugins' first line of a run (src/plugin.cpp EML6_Load, autoturret/src/plugin.cpp): time of day only, the date
@@ -328,23 +336,34 @@ def dump_modules(path: str) -> dict[str, tuple[str, int, int]] | None:
     SizeOfImage). None when it is no minidump or has no module list."""
     try:
         with open(path, 'rb') as f:
-            data = f.read()
+            rva = _dump_stream(f, 4)   # ModuleListStream
+            if rva is None:
+                return None
+            count = _dump_read(f, rva, 4)
+            if len(count) != 4:
+                return None
+            count = min(int.from_bytes(count, 'little'), 4096)
+            rows = _dump_read(f, rva + 4, 108 * count)
+            if len(rows) != 108 * count:
+                return None
+            out: dict[str, tuple[str, int, int]] = {}
+            for m in range(count):
+                row = rows[108 * m:108 * (m + 1)]
+                size, stamp, name_rva = (int.from_bytes(row[o:o + 4], 'little') for o in (8, 16, 20))
+                raw_length = _dump_read(f, name_rva, 4)
+                if len(raw_length) != 4:
+                    return None
+                length = int.from_bytes(raw_length, 'little')
+                if length > (1 << 16) or length % 2:   # Windows paths are at most 32767 UTF-16 code units
+                    return None
+                raw_name = _dump_read(f, name_rva + 4, length)
+                if len(raw_name) != length:
+                    return None
+                name = raw_name.decode('utf-16-le', 'replace')
+                out[re.split(r'[\\/]', name)[-1].lower()] = (name, stamp, size)
+            return out
     except OSError:
         return None
-    u32 = lambda o: int.from_bytes(data[o:o + 4], 'little')  # noqa: E731
-    rva = _dump_stream(data, 4)   # ModuleListStream
-    if rva is not None:
-        out: dict[str, tuple[str, int, int]] = {}
-        for m in range(min(u32(rva), 4096)):
-            mod = rva + 4 + 108 * m                       # MINIDUMP_MODULE
-            if mod + 108 > len(data):
-                return None
-            size, stamp, name_rva = u32(mod + 8), u32(mod + 16), u32(mod + 20)
-            length = u32(name_rva)
-            name = data[name_rva + 4:name_rva + 4 + length].decode('utf-16-le', 'replace')
-            out[re.split(r'[\\/]', name)[-1].lower()] = (name, stamp, size)
-        return out
-    return None
 
 
 def dump_matches(path: str, game: str) -> str:
@@ -391,7 +410,13 @@ def plugin_crash_note(game: str) -> str:
     text = _session_log(game)
     if text is None:
         return '插件崩溃转储：插件日志里没有本次游戏的 loading 行'
-    lines = [ln.split('] ', 1)[-1] for ln in text.splitlines() if '] CRASH ' in ln]
+    # Normal logging used a [hh:mm:ss.mmm] prefix; the allocation-free crash writer now writes raw CRASH lines.
+    # Anchor both forms so an unrelated log message merely mentioning CRASH cannot become crash evidence.
+    lines = []
+    for ln in text.splitlines():
+        crash = re.fullmatch(r'(?:\[\d\d:\d\d:\d\d(?:\.\d{3})?\] )?(CRASH .*)', ln)
+        if crash:
+            lines.append(crash[1])
     if any(ln.startswith('CRASH dump written') for ln in lines):
         return '插件崩溃转储：已写出（' + next(ln for ln in lines if ln.startswith('CRASH dump written')) + '）'
     if lines:
@@ -452,10 +477,11 @@ def read_wer(path: str) -> dict[str, str] | None:
 
 
 def wer_report(game: str, start: float | None) -> tuple[str | None, str]:
-    """Windows' own report of an EDF6.exe crash of this game folder in the run the logs end with (the newest
+    """A candidate Windows report from this game folder after the logs' last loading line (the newest
     AppCrash_EDF6.exe_*/Report.wer under the user's and the machine's WER ReportArchive / ReportQueue): its path (None
-    when there is none) and a line for crash/dumps.txt. Without a dump it is the least there is: the exception code,
-    the faulting module and the offset in it."""
+    when there is none) and a line for crash/dumps.txt. AppPath and EventTime identify the install and a lower time
+    bound, not the process: a later launch can crash before its plugins log loading. Keep the evidence explicitly
+    unconfirmed, including when a matching dump is present; time proximity alone cannot prove process identity."""
     if start is None:
         return None, 'Windows 错误报告：插件日志里没有 loading 行，对不上是哪次游戏，未附'
     roots = [os.environ.get('LOCALAPPDATA', ''), os.environ.get('ProgramData') or os.environ.get('PROGRAMDATA', '')]
@@ -474,11 +500,12 @@ def wer_report(game: str, start: float | None) -> tuple[str | None, str]:
                 if at >= start - SESSION_SKEW and (best is None or at > best[0]):
                     best = (at, path, wer)
     if best is None:
-        return None, (f'Windows 错误报告：本次游戏没有（这个游戏目录的较早的有 {seen} 份）' if seen
+        return None, (f'Windows 错误报告：loading 后没有候选（这个游戏目录的较早的有 {seen} 份）' if seen
                       else 'Windows 错误报告：没有这个游戏目录的 EDF6.exe 崩溃报告')
     at, path, wer = best
     when = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(at))
-    return path, (f'Windows 错误报告 {os.path.basename(os.path.dirname(path))}：{when}，异常 {wer.get("Sig[6].Value", "?")} '
+    return path, (f'Windows 错误报告候选（会话未确认，可能来自后续未记 loading 的启动） '
+                  f'{os.path.basename(os.path.dirname(path))}：{when}，异常 {wer.get("Sig[6].Value", "?")} '
                   f'于 {wer.get("Sig[3].Value", "?")}+0x{wer.get("Sig[7].Value", "?").lstrip("0") or "0"}')
 
 
@@ -486,7 +513,8 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
     """The logs zipped: Mods/Plugins' logs (tails), ini files and DLL versions, the mod loader's log, the
     install ledgers (Mods/.edf6*.json), and the newest EDF6 crash dumps of the last three days written by this install
     (dump_matches) in the run the logs end with (dump_in_session): the plugin's own (*.plugin.dmp, src/crash_dump.cpp)
-    and Windows' (LocalDumps), one of each; Windows' error report of that crash (Report.wer) when it has one.
+    and Windows' (LocalDumps), one of each; a candidate Windows error report (Report.candidate.wer), whose process
+    cannot be matched to the log session by path and EventTime alone.
     crash/dumps.txt is always there: which dumps were left out and why, and when none was sent, why none was written
     (2026-10-18: reports #19 / #20 of a crash came with no dump and no word on it). Returns the zip and the names it
     holds."""
@@ -535,14 +563,16 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
             return not why
 
         for path in sorted(glob.glob(os.path.join(plugins, '*.hang.dmp'))):
-            if time.time() - os.path.getmtime(path) >= DUMP_AGE or not matches(path):
+            if time.time() - os.path.getmtime(path) >= DUMP_AGE:
                 continue
-            if os.path.getsize(path) <= DUMP_MAX:
+            size = os.path.getsize(path)
+            if size > DUMP_MAX:
+                verdicts.append(f'{os.path.basename(path)}: {size} 字节，超过 {DUMP_MAX} 的上限，未读取、未上传（来源未检查）')
+                add(path, 'crash/' + os.path.basename(path) + '.too-big.txt',
+                    f'{os.path.basename(path)}: {size} bytes, over the {DUMP_MAX} limit; left at home\r\n'.encode('utf-8'))
+            elif matches(path):
                 with open(path, 'rb') as f:
                     add(path, 'crash/' + os.path.basename(path), f.read())
-            else:   # said, not dropped without a word
-                add(path, 'crash/' + os.path.basename(path) + '.too-big.txt',
-                    f'{os.path.basename(path)}: {os.path.getsize(path)} bytes, over the {DUMP_MAX} limit; left at home\r\n'.encode('utf-8'))
         dumps = [p for p in glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'CrashDumps', 'EDF6*.dmp'))
                  if time.time() - os.path.getmtime(p) < DUMP_AGE]
         # Of each source the newest of this install's (dump_matches) and of the run the logs end with
@@ -552,12 +582,13 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
         for source in ('plugin', 'windows'):
             group = [p for p in dumps if p.lower().endswith('.plugin.dmp') == (source == 'plugin')]
             for path in sorted(group, key=os.path.getmtime, reverse=True):
-                if not matches(path):
-                    continue
                 size = os.path.getsize(path)
                 if size > DUMP_MAX:
-                    verdicts.append(f'{os.path.basename(path)}: {size} 字节，超过 {DUMP_MAX} 的上限，未上传')
-                elif mem.tell() + size > UPLOAD_MAX - (4 << 20):
+                    verdicts.append(f'{os.path.basename(path)}: {size} 字节，超过 {DUMP_MAX} 的上限，未读取、未上传（来源未检查）')
+                    continue
+                if not matches(path):
+                    continue
+                if mem.tell() + size > UPLOAD_MAX - (4 << 20):
                     verdicts.append(f'{os.path.basename(path)}: {size} 字节，加上它会超过上传上限 {UPLOAD_MAX}，未上传')
                 else:
                     with open(path, 'rb') as f:
@@ -572,7 +603,7 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
         verdicts.append(line)
         if report:
             with open(report, 'rb') as f:
-                add(report, 'crash/Report.wer', f.read())
+                add(report, 'crash/Report.candidate.wer', f.read())
         add('', 'crash/dumps.txt', ('\r\n'.join(verdicts) + '\r\n').encode('utf-8'))
     return mem.getvalue(), names
 

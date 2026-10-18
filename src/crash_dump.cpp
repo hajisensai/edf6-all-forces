@@ -12,13 +12,14 @@
 
 namespace crew {
 void Log(const char* format,...) noexcept;
-// The log's buffered lines written to the file now, on the calling thread (plugin.cpp): the line naming the crash is
-// on disk before the dump is attempted, so a dump that hangs or kills the process still leaves it.
-void FlushLog() noexcept;
+// A direct append of already formatted text (plugin.cpp): no normal logging/CRT formatting locks. It is called only
+// after the dump attempt, so diagnostic output can never prevent the primary crash evidence from being produced.
+void CrashLog(const char* text,std::size_t size) noexcept;
 
 namespace {
 INIT_ONCE writerOnce=INIT_ONCE_STATIC_INIT;
 MiniDumpWriteDumpFn writer=nullptr;
+INIT_ONCE serviceOnce=INIT_ONCE_STATIC_INIT;
 
 BOOL CALLBACK ResolveWriter(PINIT_ONCE,void*,void**) noexcept {
     if(const HMODULE dbghelp=LoadLibraryW(L"dbghelp.dll"))writer=reinterpret_cast<MiniDumpWriteDumpFn>(GetProcAddress(dbghelp,"MiniDumpWriteDump"));
@@ -36,6 +37,22 @@ Request request;
 std::atomic<DWORD> owner{0};
 HANDLE go=nullptr,done=nullptr;   // the dumping thread's start, and the dump's end (manual reset: every waiter)
 DWORD dumperId=0;
+HANDLE hangGo=nullptr,hangDone=nullptr;
+// Only ordinary dump submitters take this lock. The crash path and worker never acquire it, even if a watchdog
+// itself faults while submitting a hang dump. The submitter waits until completion, keeping these pointers alive.
+SRWLOCK hangSubmitLock=SRWLOCK_INIT;
+struct HangRequest {
+    HANDLE process=nullptr,file=nullptr;
+    DWORD pid=0;
+    MINIDUMP_TYPE type=MiniDumpNormal;
+    PMINIDUMP_EXCEPTION_INFORMATION exception=nullptr;
+    PMINIDUMP_USER_STREAM_INFORMATION streams=nullptr;
+    PMINIDUMP_CALLBACK_INFORMATION callback=nullptr;
+    BOOL result=FALSE;
+    DWORD error=0;
+} hangRequest;
+BOOL WINAPI SerializedWrite(HANDLE,DWORD,HANDLE,MINIDUMP_TYPE,PMINIDUMP_EXCEPTION_INFORMATION,
+                             PMINIDUMP_USER_STREAM_INFORMATION,PMINIDUMP_CALLBACK_INFORMATION) noexcept;
 // The dump of a crash in a big game takes a few seconds; a dumping thread that never ends (the crashed thread held a
 // lock it needs) lets the crash go on to Windows after this.
 constexpr DWORD kDumpWaitMs=60000;
@@ -57,58 +74,133 @@ void Where(const void* address,wchar_t* name,std::size_t capacity,unsigned long 
     offset=reinterpret_cast<std::uintptr_t>(address);
     MEMORY_BASIC_INFORMATION mbi{};
     if(!address || !VirtualQuery(address,&mbi,sizeof(mbi)) || mbi.Type!=MEM_IMAGE)return;
-    wchar_t path[MAX_PATH];
-    if(!K32GetMappedFileNameW(GetCurrentProcess(),mbi.AllocationBase,path,MAX_PATH))return;
+    wchar_t path[MAX_PATH]{};
+    const DWORD length=K32GetMappedFileNameW(GetCurrentProcess(),mbi.AllocationBase,path,MAX_PATH);
+    if(!length || length>=MAX_PATH)return;
     const wchar_t* slash=wcsrchr(path,L'\\');
     wcscpy_s(name,capacity,slash ? slash+1 : path);
     offset=reinterpret_cast<std::uintptr_t>(address)-reinterpret_cast<std::uintptr_t>(mbi.AllocationBase);
 }
 
-// The dump itself, on the dumping thread (or the crashed one when that thread could not be started).
+// Fixed storage and integer/UTF-16 formatting, without printf/locale/heap locks: any of those may be owned by the
+// crashed thread. Truncation affects only the diagnostic line; the dump has already been attempted at this point.
+struct CrashLine {
+    char text[4096]{};
+    std::size_t size=0;
+    void Put(char c) noexcept { if(size<sizeof(text))text[size++]=c; }
+    CrashLine& Text(const char* s) noexcept { while(*s)Put(*s++);return *this; }
+    CrashLine& Wide(const wchar_t* s) noexcept {
+        while(*s) {
+            unsigned c=*s++;
+            if(c>=0xD800 && c<=0xDBFF && *s>=0xDC00 && *s<=0xDFFF)c=0x10000+((c-0xD800)<<10)+(*s++-0xDC00);
+            if(c<0x80)Put(static_cast<char>(c));
+            else if(c<0x800){Put(static_cast<char>(0xC0|(c>>6)));Put(static_cast<char>(0x80|(c&63)));}
+            else {
+                if(c>=0x10000){Put(static_cast<char>(0xF0|(c>>18)));Put(static_cast<char>(0x80|((c>>12)&63)));}
+                else Put(static_cast<char>(0xE0|(c>>12)));
+                Put(static_cast<char>(0x80|((c>>6)&63)));Put(static_cast<char>(0x80|(c&63)));
+            }
+        }
+        return *this;
+    }
+    CrashLine& Number(unsigned long long value,unsigned base=10,unsigned width=0) noexcept {
+        char digits[32];unsigned n=0;
+        do { digits[n++]="0123456789ABCDEF"[value%base];value/=base; } while(value);
+        while(width>n){Put('0');--width;}
+        while(n)Put(digits[--n]);
+        return *this;
+    }
+    CrashLine& Hex(unsigned long long value) noexcept { return Text("0x").Number(value,16); }
+};
+
+// The dump itself, on the dumping thread (or the crashed one when that thread could not be started). Dump first:
+// even the ordinary logger's first Log call can deadlock when the faulting thread owns its buffer or CRT lock.
 void Write() noexcept {
+    const MiniDumpWriteDumpFn write=writer;   // resolved during installation; no InitOnce/loader lock here
+    bool opened=false,ok=false;
+    DWORD error=0;
+    LARGE_INTEGER size{};
+    if(write && dumpPath[0]) {
+        const HANDLE file=CreateFileW(dumpPath,GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+        if(file!=INVALID_HANDLE_VALUE) {
+            opened=true;
+            MINIDUMP_EXCEPTION_INFORMATION info{request.thread,request.ep,FALSE};
+            ok=SerializedWrite(GetCurrentProcess(),GetCurrentProcessId(),file,kDumpType,request.ep ? &info : nullptr,nullptr,nullptr)!=FALSE;
+            error=ok ? 0 : GetLastError();
+            GetFileSizeEx(file,&size);
+            CloseHandle(file);
+        } else error=GetLastError();
+    }
     const EXCEPTION_RECORD* record=request.ep ? request.ep->ExceptionRecord : nullptr;
     const DWORD code=record ? record->ExceptionCode : 0;
     wchar_t module[MAX_PATH];
     unsigned long long offset=0;
     Where(record ? record->ExceptionAddress : nullptr,module,std::size(module),offset);
-    char access[96]="";
-    if(record && code==EXCEPTION_ACCESS_VIOLATION && record->NumberParameters>=2)
-        _snprintf_s(access,sizeof(access),_TRUNCATE,", %s %#llx",record->ExceptionInformation[0]==0 ? "reading" :
-                    record->ExceptionInformation[0]==8 ? "executing" : "writing",
-                    static_cast<unsigned long long>(record->ExceptionInformation[1]));
-    // The line first and on disk: whatever happens to the dump, the log says what crashed where.
-    Log("CRASH %s: exception %08lX at %ls+%#llx%s, thread %lu; writing %ls",request.kind,code,module,offset,access,
-        request.thread,dumpPath[0] ? dumpPath : L"(no path)");
-    FlushLog();
-    const MiniDumpWriteDumpFn write=MiniDumpWriter();
-    if(!write || !dumpPath[0]) {
-        Log("CRASH dump not written: %s",write ? "no dump path" : "no dbghelp MiniDumpWriteDump");
-        FlushLog();
-        return;
+    CrashLine line;
+    line.Text("CRASH ").Text(request.kind).Text(": exception ").Number(code,16,8).Text(" at ").Wide(module).Text("+").Hex(offset);
+    if(record && code==EXCEPTION_ACCESS_VIOLATION && record->NumberParameters>=2) {
+        line.Text(record->ExceptionInformation[0]==0 ? ", reading " : record->ExceptionInformation[0]==8 ? ", executing " : ", writing ")
+            .Hex(record->ExceptionInformation[1]);
     }
-    const HANDLE file=CreateFileW(dumpPath,GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
-    if(file==INVALID_HANDLE_VALUE) {
-        Log("CRASH dump not written: %ls (error %lu)",dumpPath,GetLastError());
-        FlushLog();
-        return;
-    }
-    MINIDUMP_EXCEPTION_INFORMATION info{request.thread,request.ep,FALSE};
-    const BOOL ok=write(GetCurrentProcess(),GetCurrentProcessId(),file,kDumpType,request.ep ? &info : nullptr,nullptr,nullptr);
-    const DWORD error=ok ? 0 : GetLastError();
-    LARGE_INTEGER size{};
-    GetFileSizeEx(file,&size);
-    CloseHandle(file);
-    if(ok)Log("CRASH dump written: %ls, %lld KB (exception %08lX at %ls+%#llx, thread %lu)",dumpPath,size.QuadPart>>10,code,module,
-              offset,request.thread);
-    else Log("CRASH dump failed: %ls, MiniDumpWriteDump error %lu (%lld KB written)",dumpPath,error,size.QuadPart>>10);
-    FlushLog();
+    line.Text(", thread ").Number(request.thread).Text("; dump ").Wide(dumpPath[0] ? dumpPath : L"(no path)").Text("\r\n");
+    if(!write || !dumpPath[0])line.Text("CRASH dump not written: ").Text(write ? "no dump path" : "no dbghelp MiniDumpWriteDump");
+    else if(!opened)line.Text("CRASH dump not written: ").Wide(dumpPath).Text(" (error ").Number(error).Text(")");
+    else if(ok)line.Text("CRASH dump written: ").Wide(dumpPath).Text(", ").Number(static_cast<unsigned long long>(size.QuadPart)>>10)
+        .Text(" KB (exception ").Number(code,16,8).Text(" at ").Wide(module).Text("+").Hex(offset).Text(", thread ").Number(request.thread).Text(")");
+    else line.Text("CRASH dump failed: ").Wide(dumpPath).Text(", MiniDumpWriteDump error ").Number(error).Text(" (")
+        .Number(static_cast<unsigned long long>(size.QuadPart)>>10).Text(" KB written)");
+    line.Text("\r\n");
+    CrashLog(line.text,line.size);
 }
 
 DWORD WINAPI Dumper(void*) noexcept {
-    WaitForSingleObject(go,INFINITE);
-    Write();
-    SetEvent(done);
-    return 0;
+    const HANDLE pending[]={go,hangGo};   // a pending crash is serviced before the next hang
+    for(;;) {
+        const DWORD event=WaitForMultipleObjects(2,pending,FALSE,INFINITE);
+        if(event==WAIT_OBJECT_0) {
+            Write();
+            SetEvent(done);
+        } else if(event==WAIT_OBJECT_0+1) {
+            hangRequest.result=SerializedWrite(hangRequest.process,hangRequest.pid,hangRequest.file,hangRequest.type,
+                                                hangRequest.exception,hangRequest.streams,hangRequest.callback);
+            hangRequest.error=hangRequest.result ? 0 : GetLastError();
+            SetEvent(hangDone);
+        } else return 0;
+    }
+}
+
+BOOL CALLBACK StartService(PINIT_ONCE,void*,void**) noexcept {
+    if(!writer)return TRUE;
+    done=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    go=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+    hangDone=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+    hangGo=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+    const HANDLE thread=go && done && hangGo && hangDone ? CreateThread(nullptr,0,&Dumper,nullptr,0,&dumperId) : nullptr;
+    if(thread)CloseHandle(thread);
+    else {
+        for(const HANDLE event:{go,done,hangGo,hangDone})if(event)CloseHandle(event);
+        go=done=hangGo=hangDone=nullptr;
+        dumperId=0;
+    }
+    return TRUE;
+}
+
+// The only call into dbghelp lives on the worker. Ordinary callers submit a fixed-slot request and retain their
+// file/context until it completes. A crash signals its separate event, so it never waits on an ordinary submitter's
+// lock. If dbghelp hangs, the existing crash timeout releases Windows; starting another concurrent call is unsafe.
+BOOL WINAPI SerializedWrite(HANDLE process,DWORD pid,HANDLE file,MINIDUMP_TYPE type,PMINIDUMP_EXCEPTION_INFORMATION exception,
+                             PMINIDUMP_USER_STREAM_INFORMATION streams,PMINIDUMP_CALLBACK_INFORMATION callback) noexcept {
+    if(!writer || !dumperId){SetLastError(ERROR_NOT_READY);return FALSE;}
+    if(GetCurrentThreadId()==dumperId)return writer(process,pid,file,type,exception,streams,callback);
+    AcquireSRWLockExclusive(&hangSubmitLock);
+    hangRequest={process,file,pid,type,exception,streams,callback,FALSE,0};
+    const BOOL submitted=SetEvent(hangGo);
+    const DWORD wait=submitted ? WaitForSingleObject(hangDone,INFINITE) : WAIT_FAILED;
+    const BOOL result=wait==WAIT_OBJECT_0 ? hangRequest.result : FALSE;
+    const DWORD error=wait==WAIT_OBJECT_0 ? hangRequest.error : GetLastError();
+    ReleaseSRWLockExclusive(&hangSubmitLock);
+    SetLastError(error);
+    return result;
 }
 
 // Small on the crashed thread's stack (a stack overflow leaves it a page): the dump is written by the dumping thread.
@@ -269,21 +361,14 @@ bool MakePath(const wchar_t* folder) noexcept {
 
 MiniDumpWriteDumpFn MiniDumpWriter() noexcept {
     InitOnceExecuteOnce(&writerOnce,&ResolveWriter,nullptr,nullptr);
-    return writer;
+    InitOnceExecuteOnce(&serviceOnce,&StartService,nullptr,nullptr);
+    return writer && dumperId ? &SerializedWrite : nullptr;
 }
 
 bool InstallCrashDump(const wchar_t* folder) noexcept {
     if(installed.exchange(true))return true;
     const bool path=MakePath(folder);
     const bool dbghelp=MiniDumpWriter()!=nullptr;   // now, nothing crashed yet
-    done=CreateEventW(nullptr,TRUE,FALSE,nullptr);
-    go=CreateEventW(nullptr,FALSE,FALSE,nullptr);
-    if(const HANDLE t=go && done ? CreateThread(nullptr,0,&Dumper,nullptr,0,&dumperId) : nullptr)CloseHandle(t);
-    else {
-        if(go)CloseHandle(go);
-        go=nullptr;   // Capture writes on the crashed thread then
-        dumperId=0;
-    }
     behind.store(SetUnhandledExceptionFilter(&Filter));
     redirected=Redirect();
     // The game's CRT (EDF.dll, EDF6.exe and most modules use ucrtbase.dll) and the plugin's own static one.

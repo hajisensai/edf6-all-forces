@@ -672,6 +672,8 @@ struct ObjRef {
 
 // The plugin's log (EDF6VehicleCrew.log; over kLogMax it is renamed to .log.1 and a new one begun).
 void Log(const char* format,...) noexcept;
+// Preformatted crash diagnostics: direct append, without the ordinary logger's locks or CRT formatting.
+void CrashLog(const char* text,std::size_t size) noexcept;
 void ReloadConfigIfChanged() noexcept;
 // The ini read again now (the loadout menu saved it: loadout_store.cpp), and its path (Mods/Plugins/EDF6VehicleCrew.ini).
 void ReloadConfigNow() noexcept;

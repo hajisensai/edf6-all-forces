@@ -82,8 +82,10 @@ def main() -> int:
     if '#include "npc_backpack_signatures.inc"' not in native:
         fail('npc_backpack.cpp: the signatures are not the generated ones')
     use = body(native, 'bool NpcPackUse(unsigned char* h,int slot) noexcept')
+    prepare = body(native, 'bool PrepareUse(unsigned char* h,int slot,UseState* out) noexcept')
+    can_use = body(native, 'bool NpcPackCanUse(unsigned char* h,int slot) noexcept')
     checks += 1
-    if 'if(!ready || IsAnyPlayer(h))return false;' not in use:
+    if 'if(!ready || !h || IsAnyPlayer(h))return false;' not in prepare or 'PrepareUse(h,slot,&use)' not in can_use:
         fail('NpcPackUse: a player (whose own input does this) or an unverified profile goes on')
     checks += 1
     gates = ('if(At<const void*>(set,kSetSub))return false;', 'if(h[kStateBits]&kStateNoPack)return false;',
@@ -91,9 +93,9 @@ def main() -> int:
              'if(At<const void*>(h,kSubLock) && At<std::int32_t>(h,kSubLockCount)>=1)return false;',
              'if(!(At<std::uint32_t>(h,kControlMask)&MaskOf(slot)))return false;',
              'if(At<std::uint32_t>(weapon,kWeaponAmmo)==0)return false;')
-    writes = ('Put<std::uint16_t>(*held,kMainBusy,0);', 'Put<void*>(set,kSetSub,sub);',
+    writes = ('Put<std::uint16_t>(*held,kMainBusy,0);', 'Put<void*>(set,kSetSub,use.sub);',
               'Fn<GoFn>(kMachineGo)(set+kSetMachine,image+kSubState,0);', 'h[kSubChain]=0;')
-    if not before(use, *gates, *writes):
+    if not before(prepare, *gates) or not before(use, 'if(!PrepareUse(h,slot,&use))return false;', *writes):
         fail('NpcPackUse: not every gate before the writes, or the writes not in the game\'s order (0x5A1FC1..0x5A1FF8)')
     checks += 1
     if not before(use, 'h[kSubChain]=0;', 'InSession() && (At<std::uint16_t>(h,kNetFlags)&(online::kNetRemote|online::kNetLocal))==online::kNetLocal',
@@ -127,9 +129,9 @@ def main() -> int:
     if not before(backpack, 'if(NpcPackBusy(h) || frame<s.packHoldUntil) {', 'h[kTrigger]=0;h[kPickWeapon]=h[kPickWeapon+1]=h[kPickWeapon+2]=0;', 'return;'):
         fail('Backpack: the main trigger and the picks not off while a use goes on')
     checks += 1
-    if not before(backpack, 'npcpack::Fits(pack,target,&pitch)', 'npcpack::LandingClear(', 'npcpack::NearClear(', 'Look(h,dir);',
+    if not before(backpack, 'if(!NpcPackCanUse(h,slots[i].slot))continue;', 'npcpack::Fits(pack,target,&pitch)', 'npcpack::ArcClear(', 'Look(h,dir);',
                   'npcpack::AimOn(', 'NpcPackUse(h,slots[i].slot)'):
-        fail('Backpack: the use before its fit, its friends\' tests or its look')
+        fail('Backpack: the look before native readiness / its whole arc checked, or the use before its look')
     checks += 1
     if 'npc::ShotClear(eye,t->aim,kSpread,0.0f,fr,friends)' not in backpack:
         fail('Backpack: a direct weapon\'s line not tested for friends')

@@ -686,7 +686,8 @@ bool Validate(const SupportPlan& plan) noexcept {
     const auto member=[](std::uint32_t id) noexcept {return IsSupportSoldierResource(id) && !IsSupportLeaderResource(id);};
     // Unit variants (support_loadout.h): a look on a soldier, pylons on the entry's own hull, each one that decodes. A hull
     // made from its loaded file must have it here: another weapon list than the host's would not be the same vehicle (a
-    // soldier's colours alone may come stock: the same class, weapon and AI). The missing file goes on the pending list.
+    // soldier's colours alone may come stock: the same class, weapon and AI). A backpack changes its weapons too, so
+    // its applied file is mandatory: the hello's Bloom filter can have false positives. Missing files are listed.
     for(unsigned i=0;i<plan.count;++i) {
         const auto& unit=plan.units[i];
         if(!unit.variant)continue;
@@ -696,9 +697,11 @@ bool Validate(const SupportPlan& plan) noexcept {
                 static_cast<unsigned long long>(unit.variant));
             return false;
         }
-        if((unit.variant&kVariantApplied) && !IsSupportSoldierResource(unit.resourceId) && !SupportVariantReady(file)) {
+        SupportLook look;
+        const bool weaponVariant=!IsSupportSoldierResource(unit.resourceId) || (LookOfVariant(unit.variant,&look) && look.pack);
+        if((unit.variant&kVariantApplied) && weaponVariant && !SupportVariantReady(file)) {
             NoteMissingVariant(file,"the host's plan");
-            NoteVariant(L"房主的载具预设需要 %ls，本机没有：本次支援未出动；退出游戏后运行安装器菜单 7 即可生成",file);
+            NoteVariant(L"房主的武器预设需要 %ls，本机没有：本次支援未出动；退出游戏后运行安装器菜单 7 即可生成",file);
             return false;
         }
     }

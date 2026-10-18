@@ -74,12 +74,14 @@ EDF41.exe `Alien4LegTank` 虚表 0xA967B8（RTTI `.?AVAlien4LegTank@@`），槽 
 - `src/edf41fortress_action.h`（新）：4.1 的 7 个动作 → `{组开关(掩码, on) | 毁坏 | 不做事}`，纯函数。
 - `src/edf41fortress.cpp`：消息钩子对带 `edf41_fortress` 标记的要塞，0x1000000D **全部自己处理、返回 1**（与 4.1 一致），不再交给类的表：0..5 调 `0x4CA7E0`，6 调 `0x4CB6D0`，表外的值只记日志。安装时核对两个函数开头 8 字节，不符则不挂钩。EDF6 自己的要塞（无标记）不受影响。
 - `tools/make_edf41_objects.py`：改掉「4.1 任务从不发 1」的错误注释（debris 键保留：每个原版同类 SGO 都有，只有类自己的动作 1 读它，而插件不再让 4.1 要塞走到那里）。
+- 合并审查补齐配置路径：`Edf41Ai=0` 原先让 `InstallEdf41Fortress` 直接返回，连必要的 ObjectAction 翻译一起关掉，M117 仍会走回相同崩溃。现在站立模式、核心生成器路由和消息翻译始终安装，只有可选的步伐随机选择（`Wander`）受 AI 开关控制。
 
 没有用 try / 吞异常 / 判空跳过：问题不是「定位点找不到」本身，而是消息被错当成 EDF6 的动作 1。
 
 ## 测试
 
 - `tools/edf41_fortress_check.cpp`（ctest，进 `EDF6_OFFLINE_CHECKS`）：7 个动作逐一对上 4.1 的跳转表；表外值什么也不做；每个组动作只碰一组。
+- `tests/edf41fortress_runtime_test.cpp`：直接编入生产 `edf41fortress.cpp`，在本进程的替身 image 上经过真实安装器和补丁后的虚表槽 4 / 9。分别以 `Edf41Ai=0 / 1` 执行 0..6 与表外动作，核对原生调用的 this / 组掩码 / 开关、action 1 不进原类、action 6 走死亡；同时核对必要站立、可选 Wander、生成器参数还原、原版要塞直通与桥接返回值。测试不加载或启动游戏；不替代联机或画面验收。
 - `tools/selftest.py edf41_fortress_object_actions`：扫 `edf41port` 下全部 4.1 任务脚本，对 4.1 要塞发的 ObjectAction 都是 0..6 的常量（M117 恰好 0..6 各一次，M416 有 6）；钩子在任何 `nextMessage` 之前先接 0x1000000D、`Edf41Action` 不转给类；有游戏时核 `0x4CA7E0` / `0x4CB6D0` 开头字节、`0x4C6334` 调 `0x4C37E0`、`0x4C3A27` 调 `0x6BADD0` 后不判空的那两条指令。
 
 ## 实机（autopilot 后台，本机 EDF.dll 0x678CCB46）

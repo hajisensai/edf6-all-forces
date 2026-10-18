@@ -27,7 +27,7 @@ namespace autopilot {
 namespace {
 constexpr std::size_t kVtable=0x17ADA78,kFrame=0x34F280,kFrameSlot=5;
 constexpr std::size_t kChildByName=0xD7480,kGetTarget=0x30C0F0;
-constexpr std::size_t kTree=0xA8,kPos=0x90,kYaw=0x1444,kWantYaw=0x1454,kYawStep=0x1320,kWalk=0x1290,kVelocity=0x1430,
+constexpr std::size_t kSelfCtrl=0x30,kTree=0xA8,kPos=0x90,kYaw=0x1444,kWantYaw=0x1454,kYawStep=0x1320,kWalk=0x1290,kVelocity=0x1430,
                       kTurnClamp=0x12A4,kMode=0x12DC,kCas=0xBD0,kMainPlayer=0xFD0,kHasTarget=0x4A0,kBattle=0x17A0;
 constexpr std::size_t kPlayers=0x60,kPlayerSize=0x160,kPlayerState=0x104,kPlayerRate=0x100,kPlayerClock=0xE8,
                       kPlayerStates=0xE0,kStateEntry=0x24;
@@ -49,12 +49,14 @@ std::size_t rows=0;
 
 struct Seen {
     const void* self=nullptr;
+    const void* control=nullptr;       // a respawn at the same address is another instance
+    int id=0;
     unsigned frames=0;
     float pos[3]{};
     int state=-2;
 };
-Seen seen[64];
-int seenCount=0;
+std::vector<Seen> seen;               // every address, including runs with more than 64 Hectors
+int nextId=0;
 
 template<class T> T At(const unsigned char* p,std::size_t off) noexcept { T v{}; std::memcpy(&v,p+off,sizeof(T)); return v; }
 
@@ -65,13 +67,19 @@ bool IsHector(void* self) noexcept {
     return out.tree!=nullptr;
 }
 
-Seen& SeenOf(const void* self,int& id) noexcept {
-    for(int i=0;i<seenCount;++i)
-        if(seen[i].self==self) { id=i; return seen[i]; }
-    id=seenCount<64 ? seenCount++ : 63;
-    seen[id]=Seen{};
-    seen[id].self=self;
-    return seen[id];
+Seen& SeenOf(const void* self,const void* control) noexcept {
+    for(Seen& e:seen)
+        if(e.self==self) {
+            if(e.control!=control) {
+                e=Seen{};
+                e.self=self; e.control=control; e.id=nextId++;
+            }
+            return e;
+        }
+    seen.emplace_back();
+    Seen& e=seen.back();
+    e.self=self; e.control=control; e.id=nextId++;
+    return e;
 }
 
 // The main player's state name (or "?"), its index, rate and clip clock.
@@ -130,8 +138,10 @@ std::uint64_t __fastcall Frame(void* self,void* a,void* b,void* c) noexcept {
     __try {
         if(!IsHector(self))return result;
         const auto s=static_cast<const unsigned char*>(self);
-        int id=0;
-        Seen& e=SeenOf(self,id);
+        const void* control=At<const void*>(s,kSelfCtrl);
+        if(!control)return result;
+        Seen& e=SeenOf(self,control);
+        const int id=e.id;
         const float p[3]={At<float>(s,kPos),At<float>(s,kPos+4),At<float>(s,kPos+8)};
         const float dx=p[0]-e.pos[0],dy=p[1]-e.pos[1],dz=p[2]-e.pos[2];
         const float step=e.frames ? std::sqrt(dx*dx+dy*dy+dz*dz) : 0.0f;
@@ -148,24 +158,23 @@ std::uint64_t __fastcall Frame(void* self,void* a,void* b,void* c) noexcept {
     return result;
 }
 
-bool Swap(std::size_t slot,std::size_t expect,void* with,void** original) noexcept {
+bool Swap(std::size_t slot,std::size_t expect,void* with) noexcept {
     auto** const entry=reinterpret_cast<void**>(image+kVtable+slot*8);
     if(*entry!=image+expect)return false;
     DWORD old=0;
     if(!VirtualProtect(entry,8,PAGE_READWRITE,&old))return false;
-    *original=*entry;
-    *entry=with;
+    // Publish only after InstallHectorProbe initialized the original and the image. The interlocked exchange is the
+    // publication barrier, and also leaves another hook alone if it replaced the slot during VirtualProtect.
+    const bool installed=InterlockedCompareExchangePointer(entry,with,image+expect)==image+expect;
     VirtualProtect(entry,8,old,&old);
-    return true;
+    return installed;
 }
 }  // namespace
 
 bool InstallHectorProbe(unsigned char* img,LogFn log) noexcept {
     image=img; say=log;
-    void* frame=nullptr;
-    if(!Swap(kFrameSlot,kFrame,reinterpret_cast<void*>(&Frame),&frame))return false;
-    realFrame=reinterpret_cast<FrameFn>(frame);
-    return true;
+    realFrame=reinterpret_cast<FrameFn>(img+kFrame);
+    return Swap(kFrameSlot,kFrame,reinterpret_cast<void*>(&Frame));
 }
 
 void HectorProbeTick() noexcept {
