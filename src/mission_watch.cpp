@@ -79,7 +79,7 @@ DWORD WINAPI Watch(void*) noexcept {
 }
 
 BOOL CALLBACK StartWatch(PINIT_ONCE,void*,void**) noexcept {
-    if(const HMODULE dbghelp=LoadLibraryW(L"dbghelp.dll"))writeDump=reinterpret_cast<WriteFn>(GetProcAddress(dbghelp,"MiniDumpWriteDump"));
+    if(const HMODULE dbghelp=LoadLibraryExW(L"dbghelp.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32))writeDump=reinterpret_cast<WriteFn>(GetProcAddress(dbghelp,"MiniDumpWriteDump"));
     if(!DumpPath(dumpPath,std::size(dumpPath)))dumpPath[0]=0;
     const HANDLE t=CreateThread(nullptr,0,&Watch,nullptr,0,nullptr);
     if(t)CloseHandle(t);

@@ -20,7 +20,7 @@ bool PatchCode(std::size_t checkRva,const unsigned char* expect,std::size_t expe
     DWORD old=0;
     if(!VirtualProtect(at,size,PAGE_EXECUTE_READWRITE,&old))return false;
     std::memcpy(at,value,size);
-    VirtualProtect(at,size,old,&old);
+    edf::RestoreProtection(at,size,old);
     FlushInstructionCache(GetCurrentProcess(),at,size);
     return true;
 }
