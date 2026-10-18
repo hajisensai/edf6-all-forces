@@ -69,11 +69,12 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA。只读静态分析（`to
 
 - `Pack(..., weapon_cap=False)` 只给测试场（`RANGE`）；`mode_entry` 生成它的**联机**模式时把成员 7 每一行的元素 6 写成 `NO_WEAPON_CAP = [-1.0, -1.0]`。离线模式、EDF5 / EDF4.1 战役的任务包、原版模式都不动。
 - 校验：`tools/selftest.py edf5_campaign_range_pack`（有游戏时，用本机 CONFIG.SGO 生成后逐行核对：联机模式每个难度元素 6 为 `[-1,-1]`、其余元素与原版联机剧情相同、离线模式与原版离线剧情相同）、`range_online_mode_has_no_weapon_level_cap`（无游戏，CI 也跑）。
-- 生效范围：上限由每台机器的本地 config 算，房主和客人都要用新版安装器装过（进测试场房间本来就需要双方装了同一个任务包）。没有更新的客人仍按原来的上限过滤自己的武器。
+- 生效范围：上限由每台机器的本地 config 算，房主看不到客人的 ModeList。只影响没用新版安装器重装的那一方（客人或房主自己）：他的 config 仍是原版上限。
+- 旧安装者被明确拒绝（2026-10-18）：取消上限算进任务包定义摘要（`make_edf5_campaign.pack_digest`：`weapon_cap=False` 的联机包多哈希一行 `online-weapon-cap none`），即 `EDF6VehicleCrew.packs.ini` 的 `Digest`、房间属性 `AF_PACK` 里发布的那个；客人进房前 `src/mission_packs.h Admit` 比对摘要，旧安装的一方摘要不同 → `pack-definition-differs`，弹窗让双方用同一版本并重新运行安装器。没有另造协议。保持原版上限的任务包摘要不变（存档的布局标记 `MigrateModeSave` 也不变）。校验：`tools/selftest.py range_weapon_cap_in_pack_definition`。
 - 没有做的：`GS+0x6E58`（会进存档，且只解锁开关不解除上限）、`GS+0x14C4C/14C50`（房主设置，会同步给所有人）、`GS+0x14FC8`（4 处写入互相覆盖）、只 hook 选武器谓词（护甲截断与成员标红仍在）。护甲上限保持原样（用户只要求武器等级；如需也解除，同法把元素 7 写成整数 0）。
 
 ## 待实机验证
 
 - 联机房间选「EDF6VehicleCrew 测试场」任务包、简单难度、打开等级限制开关：选武器界面高等级武器不再变灰；房间信息显示「无限制」（`Room_Weapon_Level_NoLimit`，`0x957ED0` 遇到负值的分支）。
 - 同一房间切到原版联机剧情：上限照旧。
-- 客人用旧版 config 进新版房主的测试场房间：客人自己仍受限（预期，记录现象）。
+- 客人用旧版安装（摘要里没有取消上限）进新版房主的测试场房间：应在进房前被拒绝（`pack-definition-differs`）。

@@ -49,6 +49,9 @@ const unsigned char kRideStateSig[]={0x48,0x8B,0xB7,0x40,0x15,0x00,0x00,0x48,0x8
     0x00,0x00,0x45,0x33,0xC9,0xE8,0x3D,0x14,0xBF,0x00};
 const unsigned char kSetCasStateSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
 static_assert(kSeats==0x608 && kSeatCount==0x618 && kSeatStride==0x340,"the seat vector 0x62BE33 appends to");
+// What SeatBuild reads of the vehicle: the seat vector's data pointer (kSeats) through its count (kSeatCount, 8 bytes).
+constexpr std::size_t kSeatVectorRead=kSeatCount+sizeof(std::uint64_t)-kSeats;
+static_assert(kSeatVectorRead==0x18,"vehicle+0x608 .. +0x61F");
 
 using SeatBuildFn=void(__fastcall*)(unsigned char*,void*);
 using SetCasStateFn=bool(__fastcall*)(void*,std::int32_t,const wchar_t*,std::int32_t);
@@ -58,7 +61,7 @@ bool On() noexcept { return Cfg().enabled && Cfg().allClassesRide; }
 
 // The vehicle base's seat build, then the seat it appended opened to every class.
 void __fastcall SeatBuild(unsigned char* vehicle,void* entry) {
-    const bool seen=Readable(vehicle+kSeats,0x10,true);
+    const bool seen=Readable(vehicle+kSeats,kSeatVectorRead,true);
     const std::uint64_t before=seen ? At<std::uint64_t>(vehicle,kSeatCount) : 0;
     reinterpret_cast<SeatBuildFn>(image+kSeatBuild)(vehicle,entry);
     if(!seen || !On())return;

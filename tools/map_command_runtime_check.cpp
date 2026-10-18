@@ -558,6 +558,8 @@ void PlacePanel() noexcept {
     MapCommandFrame(in,centre);tap(VK_OEM_PERIOD);tap(VK_RETURN);
     MapCommandReadout r{};
     Check(PlayerMapCommands(&r) && !r.placeOn && !game.place.open && !placeCalls && !MapPlaceHoldsPad(),"another mission: no place panel at all");
+    tap(VK_OEM_COMMA);tap(VK_OEM_2);tap(VK_BACK);
+    Check(in.usingPad,"another mission: , . / Enter Backspace are not read (the pad stays the input)");
     // The range: , . / open and move it, Enter places the picked row at the point (the screen's centre here: no view).
     placeOnStub=true;
     tap(VK_OEM_PERIOD);
@@ -571,11 +573,12 @@ void PlacePanel() noexcept {
           "Enter: the picked row at the map's point");
     MapCommandFrame(in,centre);
     Check(placeCalls==1,"holding nothing: one placed");
-    // Online: the panel says why, nothing is made.
-    mapOnline=true;tap(VK_RETURN);
-    Check(placeCalls==1 && PlayerMapCommands(&r) && r.placeOnline && std::wcsstr(game.note,hudtext::Tr(hudtext::Tx::placeOnline)),
-          "online: refused with its reason, nothing made");
-    mapOnline=false;
+    // Online: the panel is shown with why nothing can be placed; its keys are not read (nothing made, the pad stays the
+    // input).
+    mapOnline=true;in.usingPad=true;tap(VK_RETURN);tap(VK_OEM_PERIOD);
+    Check(placeCalls==1 && PlayerMapCommands(&r) && r.placeOnline && in.usingPad && game.place.pick[1]==0,
+          "online: shown with its reason, its keys not read, nothing made");
+    mapOnline=false;in.usingPad=false;
     // A row that is not installed: said so, not made.
     placeStateStub=debugspawn::RowState::missing;tap(VK_RETURN);
     Check(placeCalls==1 && std::wcsstr(game.note,hudtext::Tr(hudtext::Tx::placeMissing)),"a row not installed: said so, not made");

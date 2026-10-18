@@ -554,8 +554,9 @@ bool InstallEdf41Mother401() noexcept;   // edf41mother401.cpp
 bool InstallEdf41Deiroi() noexcept;
 // allclass.cpp: every class in every seat (ini AllClassesRide): the seat build's class mask widened, the ride pose's fallback.
 bool InstallAllClassesRide() noexcept;
-// fsbudget.cpp: CRI File System's loader pool (num_loaders, 96 stock) raised before the library starts, so the archives
-// the plugin's content keeps open (the test range's place panel catalog) do not run it out.
+// fsbudget.cpp: CRI File System's loader pool (num_loaders: 130 as the game builds it, 0x60 + its caller's 0x22) raised
+// by the model archives the spawn catalog can keep open (src/spawn_catalog_archives.h) before the library starts, so the
+// test range's place panel catalog does not run it out. The other pools do not grow with open archives (fsbudget.cpp).
 bool InstallFsLoaderBudget() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;

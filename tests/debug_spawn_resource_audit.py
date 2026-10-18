@@ -78,7 +78,7 @@ def main() -> int:
     # The object rows: src/spawn_catalog.inc (tools/gen_spawn_catalog.py from testrange/catalog.py), included by the header.
     assert '#include "spawn_catalog.inc"' in header, 'the header no longer takes the generated rows'
     catalog = (ROOT / 'src/spawn_catalog.inc').read_text(encoding='utf-8')
-    rows = re.findall(r'\{Category::(\w+),How::(\w+),"([^"]+)",L"[^"]*",L"app:/object/([^"]+)",\d+,[0-9.]+f,(true|false),(true|false)\}',
+    rows = re.findall(r'\{Category::(\w+),How::(\w+),"([^"]+)",L"[^"]*",L"app:/object/([^"]+)",\d+,[0-9.]+f,(true|false),(true|false),(?:nullptr|L"[^}]*")\}',
                       catalog)
     assert rows and not re.findall(r'L"app:/object/', header), 'object rows outside the generated file'
     sys.path.insert(0, str(ROOT / 'tools'))

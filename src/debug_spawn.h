@@ -48,6 +48,10 @@ struct Entry {
     float lift;              // m over the ground point it starts at (a flier higher up)
     bool mod=false;          // its SGO is a Mods file (the range's, the installer's, EDF4.1's): there only when that is
     bool preload=true;       // preloaded by default (else only with ini RangePlaceAll=1: a heavy model of its own)
+    // A Mods row's files (testrange/catalog.py files_of, what catalog.available checks): names under Mods\OBJECT\, each
+    // NUL-ended, the list ended by an empty name; its SGO among them. Made only when every one is there (debug_spawn.cpp ModRowLacks).
+    // nullptr: none (a stock row, Root.cpk's; the plugin's own rows).
+    const wchar_t* files=nullptr;
 };
 
 // The rows. The object rows (vehicles, enemies) are src/spawn_catalog.inc, written by tools/gen_spawn_catalog.py from
@@ -78,6 +82,13 @@ inline constexpr Entry kEntries[]={
     {Category::soldier,How::soldier,"ranger_sniper",L"游骑兵（狙击）",nullptr,4,0.2f},
 };
 constexpr int kEntryCount=static_cast<int>(sizeof(kEntries)/sizeof(kEntries[0]));
+// Every Mods row lists its files and nothing else does; a list is not empty.
+constexpr bool FilesAgree() noexcept {
+    for(const auto& e:kEntries)
+        if(e.mod!=(e.files!=nullptr) || (e.files && !e.files[0]))return false;
+    return true;
+}
+static_assert(FilesAgree(),"a Mods row (mod) and only it names its Mods files");
 
 constexpr int CountIn(Category c) noexcept {
     int n=0;
@@ -168,7 +179,7 @@ inline void FacingMatrix(const float* heading,const float* at,float* m) noexcept
 // Why a row cannot be made now (debug_spawn.cpp SpawnRowState; the panels dim it and say so).
 enum class RowState : std::uint8_t {
     ready,
-    missing,        // a Mods row whose SGO is not in Mods: not installed (the installer's EDF4.1 objects, the range's vehicles)
+    missing,        // a Mods row with a file not in Mods: not installed (the installer's EDF4.1 objects, the range's vehicles)
     notPreloaded,   // not preloaded this mission (a heavy row with RangePlaceAll=0; DebugSpawn turned on mid-mission)
     broken,         // the game faulted making it: off until the game restarts
     unavailable,    // its module is not up now (the support calls' cooldown, JetPilot=0, ...)

@@ -1925,6 +1925,66 @@ def spawn_catalog_generated_is_current() -> None:
     with open(gen_spawn_catalog.OUT, encoding='utf-8', newline='') as f:
         assert f.read().replace('\r\n', '\n') == gen_spawn_catalog.render(), \
             'src/spawn_catalog.inc is stale: python tools/gen_spawn_catalog.py'
+    with open(gen_spawn_catalog.OUT_ARCHIVES, encoding='utf-8', newline='') as f:
+        assert f.read().replace('\r\n', '\n') == gen_spawn_catalog.render_archives(), \
+            'src/spawn_catalog_archives.h is stale: python tools/gen_spawn_catalog.py (--archives with the game)'
+
+
+@test
+def spawn_catalog_rows_check_their_files() -> None:
+    """The plugin makes a Mods row of the catalog only when every file the range's own tools need for it is there: one
+    list for both sides (the review of #191: the plugin checked the SGO alone, catalog.available every file). Each row of
+    src/spawn_catalog.inc carries catalog.files_of (its SGO among them), and debug_spawn.cpp checks each of them."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import catalog
+    import gen_spawn_catalog
+    inc = src('src/spawn_catalog.inc')
+    rows = catalog.rows()
+    lines = [l for l in inc.splitlines() if l.startswith('    {Category::')]
+    assert len(lines) == len(rows)
+    for r, line in zip(rows, lines):
+        want = catalog.files_of(r)
+        if r.source == 'stock':
+            assert not want and line.endswith(',nullptr},'), r.sgo
+            continue
+        files = re.search(r',(?:true|false),(?:true|false),(L".*)\},$', line).group(1)
+        got = [n.replace('\\\\', '/') for n in re.findall(r'L"([^"]*)\\0"', files)]
+        assert got == [w.removeprefix('OBJECT/') for w in want] and r.rel in want, (r.sgo, got, want)
+    assert gen_spawn_catalog.files_literal(rows[0]) == 'nullptr'
+    code = src('src/debug_spawn.cpp')
+    lacks = code.split('const wchar_t* ModRowLacks(const Entry& e) noexcept {', 1)[1].split('\n}', 1)[0]
+    assert 'for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1)' in lacks and 'jet::ModFileThere(f)' in lacks
+    assert 'missing[i]=lacks!=nullptr;' in code and 'ModRowThere' not in code
+    assert 'static_assert(FilesAgree(),' in src('src/debug_spawn.h')
+
+
+@test
+def spawn_catalog_archives_recorded() -> None:
+    """src/fsbudget.cpp adds one CriFsLoader per model archive the catalog's whole preload can hold open
+    (src/spawn_catalog_archives.h, from testrange/catalog_archives.json; docs/cri-fs-loaders-re.md): the header is the
+    record's count, the record has every row and no other, and (with the game) the record is what the rows' SGOs name
+    now, through every SGO they name."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import catalog
+    import gen_spawn_catalog as g
+    rec = g.recorded()
+    union = g.archive_union(rec)
+    assert f'inline constexpr int kCatalogModelArchives={len(union)};' in src('src/spawn_catalog_archives.h')
+    assert all(a.endswith(g.MODEL_ARCHIVES) for a in union)   # the objects' models and their weapons' (WEAPON/...)
+    assert 'constexpr std::int32_t kAddedLoaders=debugspawn::kCatalogModelArchives;' in src('src/fsbudget.cpp')
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    read = g.game_reader(rootcpk.DEFAULT_GAME)
+    stale = []
+    for r in catalog.rows():
+        try:
+            now = g.row_archives(r, read)
+        except (FileNotFoundError, KeyError):
+            continue   # not installed here (the installer's sedan, EDF5's DLC fortress): not checked
+        if now != rec[r.sgo]:
+            stale.append(r.sgo)
+    assert not stale, f'testrange/catalog_archives.json is stale for {stale[:5]}: python tools/gen_spawn_catalog.py --archives'
 
 
 @test
@@ -2023,6 +2083,31 @@ def range_online_mode_has_no_weapon_level_cap() -> None:
         assert pack.weapon_cap and sgo.plain(e5c.mode_entry(copy.deepcopy(template), pack, 3, e5c.ONLINE)[7]) == sgo.plain(template[7])
     # The game's reader (EDF.dll 0xE2710): a negative element is no cap, and these are the instructions read for it.
     assert not e5c.RANGE.weapon_cap and e5c.M_LIMITS == 7 and e5c.LIMIT_WEAPON == 6
+
+
+@test
+def range_weapon_cap_in_pack_definition() -> None:
+    """Each machine computes the online weapon cap from its own config.sgo (docs/weapon-level-cap-re.md), so a guest whose
+    install predates the range's lifted cap keeps the stock cap in the host's room. The cap is part of the pack's
+    definition (make_edf5_campaign.pack_digest, the AF_PACK digest the guest compares, src/mission_packs.h Admit): the
+    same rows with the stock cap make another digest, so that guest is refused (pack-definition-differs) and told to
+    reinstall. A pack that keeps the stock cap hashes as before (its digest, and its saves' layout marker, unchanged)."""
+    import copy
+    import hashlib
+    rows = [{'key': f'EDF6/{e5c.RANGE_MISSION}'}]
+    capped = copy.copy(e5c.RANGE)
+    capped.weapon_cap = True
+    assert e5c.pack_digest(e5c.RANGE, rows) != e5c.pack_digest(capped, rows), 'the lifted cap is not in the definition'
+    old = lambda pack, rs: hashlib.sha256(  # noqa: E731 - the digest before the cap was in it (2026-10-18, #193)
+        (f'AF-PACK-1\n{pack.tag}\n{len(rs)}\n' + ''.join(f'{r["key"]}\n' for r in rs)).encode()).hexdigest()[:16]
+    assert e5c.pack_digest(capped, rows) == old(capped, rows)
+    for pack in e5c.PACKS:
+        some = [{'key': f'X/{i}'} for i in range(3)]
+        assert pack.weapon_cap and e5c.pack_digest(pack, some) == old(pack, some), pack.tag
+    # The guest's check (mission_packs.h Admit) compares exactly that digest: another one is pack-definition-differs.
+    header = src('src/mission_packs.h')
+    assert 'if(std::strcmp(a.host.digest,local->digest) || a.host.rows!=local->rows){a.verdict=Verdict::kOtherVersion;return a;}' in header
+    assert 'case Verdict::kOtherVersion: return "pack-definition-differs";' in header
 
 
 @test
@@ -4714,7 +4799,14 @@ def map_commands_wired() -> None:
     code, mapc, cmake, readme = src('src/mapcmd.cpp'), src('src/map.cpp'), src('CMakeLists.txt'), src('README.md')
     # Keys come through the plugin's input source (common/edf/input_source.h), so a background host's keyboard is read.
     assert code.count('edf::AsyncKey(') == 1 and 'GetAsyncKeyState' not in code
-    assert 'Down(VK_TAB)' in code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
+    reader = code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
+    assert 'Down(VK_TAB)' in reader
+    # The 「摆放」 panel's keys (, . / Enter Backspace) only where the panel works (the test range, offline): on any other map
+    # they stay the game's and never switch the input back from the pad.
+    assert reader.startswith('const MapCmdInput& in,bool placeKeys)') and 'const bool placeKeys=RangePlaceOn() && !InSession();' in code
+    for key in ('VK_OEM_COMMA', 'VK_OEM_PERIOD', 'VK_OEM_2', 'VK_RETURN', 'VK_BACK'):
+        assert f'Down({key})' in reader.split('if(placeKeys) {', 1)[1] and f'Down({key})' not in reader.split('if(placeKeys) {', 1)[0], key
+    assert 'placeHoldsPad.store(placeKeys && ' in code and '(placeKeys && ((k.padUp && !g.was.padUp)' in code
     frame = mapc.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
     assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(in,onto)'), 'the commands read keys only with the map open'
     # The box (Ctrl + left drag) never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧").

@@ -76,7 +76,7 @@ jobs:
           git diff --exit-code -- src/stores.inc
           if ($LASTEXITCODE) { Write-Error 'src/stores.inc is stale: run python tools/gen_stores.py and commit it'; exit 1 }
           python tools/gen_spawn_catalog.py --check
-          if ($LASTEXITCODE) { Write-Error 'src/spawn_catalog.inc is stale: run python tools/gen_spawn_catalog.py and commit it'; exit 1 }
+          if ($LASTEXITCODE) { Write-Error 'src/spawn_catalog.inc / src/spawn_catalog_archives.h is stale: run python tools/gen_spawn_catalog.py (--archives with the game when the catalog changed) and commit it'; exit 1 }
           # src/nozzles_gen.h is measured on the game's models (no Root.cpk here): checked against its own record of
           # what it was made from (tools/gen_nozzles.py --check).
           python tools/gen_nozzles.py --check

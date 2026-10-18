@@ -152,6 +152,23 @@ int main() {
     casStates={L"vehicle503_bike_driver",L"vehicle_striker_rear"};played.clear();   // a Ranger's CAS
     Check(RideState(nullptr,0,L"vehicle503_bike_driver",0) && played.size()==1,"the Ranger keeps the bike pose");
 
+    // A vehicle whose seat vector's count (+0x618) lies past readable memory: SeatBuild reads nothing of it (its check
+    // covers +0x608..+0x61F, every byte it reads), the stock build still runs, nothing is widened.
+    {
+        SYSTEM_INFO si{};GetSystemInfo(&si);
+        const std::size_t pageSize=si.dwPageSize;
+        auto* pages=static_cast<unsigned char*>(VirtualAlloc(nullptr,2*pageSize,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+        DWORD was=0;
+        Check(pages && VirtualProtect(pages+pageSize,pageSize,PAGE_NOACCESS,&was),"a readable page, then a guard page");
+        unsigned char* const edge=pages+pageSize-edf::kSeatCount;   // +0x608..+0x617 readable, +0x618 not
+        Put<unsigned char*>(edge,edf::kSeats,seatData.data());
+        Check(Readable(edge+edf::kSeats,0x10,true) && !Readable(edge+edf::kSeatCount,8),"the count alone unreadable");
+        builds=0;buildsSeat=false;
+        SeatBuild(edge,nullptr);
+        Check(builds==1,"the stock build ran; the unreadable count was never read");
+        VirtualFree(pages,0,MEM_RELEASE);
+    }
+
     std::printf("allclass: %d checks passed\n",checks);
     return 0;
 }
