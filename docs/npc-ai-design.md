@@ -103,6 +103,8 @@ friends = 每帧快照：玩家 + 友军士兵 + 友军载具（队伍遍历 0x5
 - `PickArm` 按目标距离与类型打分（追踪 / 对空打飞行目标、爆炸打大目标与成群小怪、近距高 DPS），自身爆炸半径内的距离不用爆炸武器，友军靠近目标时不用爆炸武器；现用武器不差于最佳 25% 就不换（防抖）。
 - 换枪写 d82+i（M）。下一帧核对当前武器（WeaponSet `h+0x1970` 第 0 组 `+0x40` 解两次指针）是否就是选中的那把；连续 30 帧不一致就**对这名士兵关闭换枪并记日志**（RE 的 M 项被证伪时停用，而不是重试）。
 - 交战距离 = `NpcEngageShare` × 最长真实射程（`EngageRange`），代替原版的 max(25, 0.5 × 射程)。
+- 背包位武器（2026-10-18，`docs/npc-backpack-re.md`）：副武器槽（`h+0x19F8`）里的武器不在任何 WeaponSet，`ArmsOf` 不把它算进
+  可选武器；由 `Backpack`（`npc_backpack.h`）在主武器瞄准之后判断投掷 / 挥砍，经原版背包使用（`npc_backpack.cpp`）出手（`NpcBackpack`）。
 
 ### 3.6 机动（B4、B5）
 
@@ -329,7 +331,7 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 联机里直接决定客人的小队会不会被拉向房主。远端玩家的镜头读不到：撤退的「身后」改为那位玩家背对最近威胁的一侧；
 枪线回避（§3.4）只对本机玩家有，远端玩家本人仍在友军射线检查里。
 
-ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`VanillaRecruit`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
+ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcBackpack`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`VanillaRecruit`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
 
 ## 10. 分阶段计划与顺序
 

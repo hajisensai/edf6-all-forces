@@ -3,6 +3,7 @@
 The one source of truth is EDF6VehicleCrew.ini [VehicleCrew] (src/support_loadout.h has the syntax; the plugin rereads
 the ini on every save):
   SupportPreset_<KEY>=lance@1E3A8A*4,cannon*4      a seated entry's soldiers in seat order, colours, counts
+  SupportPreset_<KEY>=rifle+aHandGrenade01*4        ... and a backpack weapon each (src/npc_pack_table.h, PACKS)
   SupportVehicle_<KEY>=HE,AP:25                    a tank's main gun (HE / AP) and the rounds on its pylons beside it
   SupportVehicle_<KEY>=MK82:6,MK82:6               a jet's pylons (the guns always aboard); GUNS: the guns alone
   SupportCrewColour_<KEY>=1E3A8A[:FFFFFF]          a support unit's real crew's colours (X stock; X alone: stock over the
@@ -15,9 +16,12 @@ The generated files, written into <game>/Mods and recorded in the ledger (pylib/
 from the game's own files (Root.cpk only read). Their names say what they are, so any of them can be made from its name
 alone: a peer that lacked one in an online room listed it in Mods/Plugins/EDF6VehicleCrew.variants_pending.txt
 (src/support_variants.cpp), and this tool makes every name listed there too, then clears the list.
-  OBJECT/EDF6VC_NPC_<KIND>[_L]_<PRIMARY|X>_<SECONDARY|X>.SGO   a coloured soldier: the stock AI template of that kind (its
-      _LEADER for a leader) with its soldier_color entries recoloured (change_color0 = primary, change_color1 =
-      secondary; a face's own entry is kept). Nothing else changes: the same class, model, CAS, AI weapon.
+  OBJECT/EDF6VC_NPC_<KIND>[_L]_<PRIMARY|X>_<SECONDARY|X>[_<PACK>].SGO   a coloured soldier: the stock AI template of that
+      kind (its _LEADER for a leader) with its soldier_color entries recoloured (change_color0 = primary, change_color1 =
+      secondary; a face's own entry is kept). Nothing else changes: the same class, model, CAS, AI weapon. With a
+      backpack weapon (PACK its upper-case WEAPONTABLE name, docs/npc-backpack-re.md) the template also loads that
+      weapon after its own (soldier_load_weapon), its weapon sets keep only its own weapons (soldier_weapon_slot) and
+      the new one is its sub weapon slot (soldier_sub_weapon_slot, as the player templates hold their backpack).
   OBJECT/EDF6VC_LO_<BODY>_<VARIANT>.SGO   a loaded vehicle (VARIANT: support_loadout.h LoadoutVariant, 16 hex digits):
       TANK  the support tank V505_TANK_MISSION (the Mods copy other tools made, else the stock), its main gun the stock
             Blacker A1's mount (WEAPON/EWEAPON419: the 90 mm smooth-bore) for AP, a holder more for each pylon after it
@@ -66,6 +70,102 @@ KINDS: tuple[tuple[str, str, str], ...] = (
     ('pilebanker', '重装·打桩', 'N607_AIHEAVYARMOR_SP'), ('fshotgun', '重装·霰弹', 'N607_AIHEAVYARMOR_SSG'),
 )
 KIND_NAMES = tuple(k[0] for k in KINDS)
+# support_call.h SupportSoldierClass: 0 Ranger, 1 Wing Diver, 2 Fencer (KINDS order: 5 Rangers, 5 Wing Divers, 4 Fencers).
+KIND_CLASS = {n: 0 if i < 5 else 1 if i < 10 else 2 for i, n in enumerate(KIND_NAMES)}
+# src/npc_pack_table.h kPackWeapons (tests/support_loadout_ini_test.py compares): the backpack weapons a support soldier may
+# carry, (code, WEAPONTABLE name, class, use, category, lift, area, label).
+PACKS: tuple[tuple[int, str, int, str, int, float, float, str], ...] = (
+    (1, 'aHandGrenade01', 0, 'thrown', 20, 0.125, 0.0, 'MG11'),
+    (2, 'aWeapon221', 0, 'thrown', 20, 0.125, 0.0, 'MG11J'),
+    (3, 'aWeapon222', 0, 'thrown', 20, 0.125, 0.0, 'T5 Mouse'),
+    (4, 'aWeapon223', 0, 'thrown', 20, 0.0, 0.0, 'DNG1'),
+    (5, 'aWeapon224', 0, 'thrown', 20, 0.125, 0.0, 'Firecracker 1'),
+    (6, 'aWeapon225', 0, 'thrown', 20, 0.125, 0.0, 'MG12'),
+    (7, 'aWeapon226', 0, 'thrown', 20, 0.125, 0.0, 'MG13'),
+    (8, 'aWeapon227', 0, 'thrown', 20, 0.125, 0.0, 'T44 Mouse'),
+    (9, 'aWeapon228', 0, 'thrown', 20, 0.125, 0.0, 'MG13JA'),
+    (10, 'aWeapon229', 0, 'thrown', 20, 0.125, 0.0, 'MG14'),
+    (11, 'aWeapon230', 0, 'thrown', 20, 0.125, 0.0, 'MG14J'),
+    (12, 'aWeapon231', 0, 'thrown', 20, 0.125, 0.0, 'Firecracker 2'),
+    (13, 'aWeapon232', 0, 'thrown', 20, 0.125, 0.0, 'T6 Mouse'),
+    (14, 'aWeapon233', 0, 'thrown', 20, 0.0, 0.0, 'DNG2'),
+    (15, 'aWeapon234', 0, 'thrown', 20, 0.125, 0.0, 'MG15'),
+    (16, 'aWeapon235', 0, 'thrown', 20, 0.1, 0.0, 'MG20'),
+    (17, 'aWeapon236', 0, 'thrown', 20, 0.125, 0.0, 'Firecracker 3'),
+    (18, 'aWeapon237', 0, 'thrown', 20, 0.1, 0.0, 'TJ444 Mouse'),
+    (19, 'aWeapon238', 0, 'thrown', 20, 0.1, 0.0, 'MG21J'),
+    (20, 'aWeapon239', 0, 'thrown', 20, 0.1, 0.0, 'MG21'),
+    (21, 'aWeapon240', 0, 'thrown', 20, 0.0, 0.0, 'DNG3'),
+    (22, 'aWeapon241', 0, 'thrown', 20, 0.125, 0.0, 'Firecracker 4'),
+    (23, 'aWeapon242', 0, 'thrown', 20, 0.1, 0.0, 'MG22'),
+    (24, 'aWeapon243', 0, 'thrown', 20, 0.125, 0.0, 'Bound Grenade'),
+    (25, 'aWeapon244', 0, 'thrown', 20, 0.07, 0.0, 'MG30'),
+    (26, 'aWeapon245', 0, 'thrown', 20, 0.125, 0.0, 'TJO Mouse'),
+    (27, 'aWeapon246', 0, 'thrown', 20, 0.125, 0.0, 'Firecracker 0'),
+    (28, 'aWeapon247', 0, 'thrown', 20, 0.0, 0.0, 'DNG9'),
+    (29, 'aWeapon248', 0, 'thrown', 20, 0.07, 0.0, 'MG40'),
+    (30, 'aWeapon249', 0, 'thrown', 20, 0.07, 0.0, 'TZ6 Mouse'),
+    (31, 'aWeapon250', 0, 'thrown', 20, 0.05, 0.0, 'MG50'),
+    (32, 'aWeapon251', 0, 'thrown', 20, 0.0, 0.0, 'DNG10'),
+    (33, 'aWeapon252', 0, 'thrown', 20, 0.125, 0.0, 'Firecracker 1000'),
+    (34, 'aWeapon253', 0, 'thrown', 20, 0.05, 0.0, 'TZ8 Mouse'),
+    (35, 'aWeapon254', 0, 'thrown', 23, 0.125, 8.0, 'Thermite Round'),
+    (36, 'aWeapon255', 0, 'thrown', 23, 0.125, 8.0, 'Nanothermite Round'),
+    (37, 'aWeapon256', 0, 'thrown', 23, 0.1, 8.0, 'M2 Thermite Round'),
+    (38, 'aWeapon257', 0, 'thrown', 23, 0.07, 8.0, 'BX Nanothermite Round'),
+    (39, 'aWeapon258', 0, 'thrown', 23, 0.07, 8.0, 'Metathermite Round'),
+    (40, 'aWeapon259', 0, 'thrown', 23, 0.05, 8.0, 'M3 Thermite Round'),
+    (41, 'aWeapon260', 0, 'thrown', 23, 0.05, 8.0, 'M9 Thermite Round'),
+    (42, 'aWeapon266', 0, 'thrown', 23, 0.125, 8.0, 'A61 Binary Round'),
+    (43, 'aWeapon267', 0, 'thrown', 23, 0.1, 8.0, 'A62 Binary Round'),
+    (44, 'aWeapon268', 0, 'thrown', 23, 0.07, 8.0, 'A71 Binary Round'),
+    (45, 'aWeapon269', 0, 'thrown', 23, 0.05, 8.0, 'A72 Binary Round'),
+    (46, 'pHandGrenade01', 1, 'thrown', 110, 0.0, 0.0, 'Blink Ball α'),
+    (47, 'pWeapon197', 1, 'thrown', 110, 0.0, 0.0, 'Starmine'),
+    (48, 'pWeapon198', 1, 'thrown', 110, 0.0, 0.0, 'Blink Ball'),
+    (49, 'pWeapon199', 1, 'thrown', 110, 0.0, 0.0, 'Split Ball'),
+    (50, 'pWeapon200', 1, 'thrown', 110, 0.0, 0.0, 'Blink Ball B'),
+    (51, 'pWeapon201', 1, 'thrown', 110, 0.0, 0.0, 'Starmine 2'),
+    (52, 'pWeapon202', 1, 'thrown', 110, 0.0, 0.0, 'Blink Ball C'),
+    (53, 'pWeapon203', 1, 'thrown', 110, 0.0, 0.0, 'Blink Fork'),
+    (54, 'pWeapon204', 1, 'thrown', 110, 0.0, 0.0, 'Starmine F'),
+    (55, 'pWeapon205', 1, 'thrown', 110, 0.0, 0.0, 'Blink Ball D'),
+    (56, 'pWeapon206', 1, 'thrown', 110, 0.0, 0.0, 'Split Ball AT'),
+    (57, 'pWeapon207', 1, 'thrown', 110, 0.0, 0.0, 'Starmine Z'),
+    (58, 'pWeapon208', 1, 'thrown', 110, 0.0, 0.0, 'Blink Ball FZ'),
+    (59, 'pWeapon216', 1, 'direct', 111, 0.0, 0.0, 'Handy Saber'),
+    (60, 'pWeapon217', 1, 'direct', 111, 0.0, 0.0, 'Short Saber'),
+    (61, 'pWeapon218', 1, 'direct', 111, 0.0, 0.0, 'Handy Saber 2'),
+    (62, 'pWeapon219', 1, 'direct', 111, 0.0, 0.0, 'Handy Saber 3'),
+    (63, 'pWeapon220', 1, 'direct', 111, 0.0, 0.0, 'Short Saber 2'),
+    (64, 'pWeapon221', 1, 'direct', 111, 0.0, 0.0, 'Power Saber'),
+    (65, 'pWeapon222', 1, 'direct', 111, 0.0, 0.0, 'Handy Saber S'),
+    (66, 'pWeapon223', 1, 'direct', 111, 0.0, 0.0, 'Valiant Saber'),
+    (67, 'pWeapon238', 1, 'direct', 116, 0.0, 0.0, 'Pulsar Spear M1'),
+    (68, 'pWeapon239', 1, 'direct', 116, 0.0, 0.0, 'Glow Spear'),
+    (69, 'pWeapon240', 1, 'direct', 116, 0.0, 0.0, 'Pulsar Spear M2'),
+    (70, 'pWeapon241', 1, 'direct', 116, 0.0, 0.0, 'Pulsar Spear M3'),
+    (71, 'pWeapon242', 1, 'direct', 116, 0.0, 0.0, 'Power Spear'),
+    (72, 'pWeapon243', 1, 'direct', 116, 0.0, 0.0, 'Pulsar Spear M4'),
+    (73, 'pWeapon244', 1, 'direct', 116, 0.0, 0.0, 'Glow Spear S'),
+    (74, 'pWeapon245', 1, 'direct', 116, 0.0, 0.0, 'Power Spear S3'),
+)
+PACK_BY_NAME = {p[1].upper(): p for p in PACKS}
+
+
+def pack(text: str, k: str) -> str:
+    """A preset's +PACK for kind `k` as the plugin reads it (PackNamed, PackFits): the canonical WEAPONTABLE name."""
+    row = PACK_BY_NAME.get(text.strip().upper())
+    if row is None:
+        raise Invalid(f'未知或不支持的背包武器：{text.strip()}')
+    if row[2] != KIND_CLASS[k]:
+        raise Invalid(('重装兵没有背包武器：' if KIND_CLASS[k] == 2 else '背包武器与兵种不符：') + text.strip())
+    return row[1]
+
+
+def pack_path(name: str) -> str:
+    """The backpack weapon's file as the weapon table names it (WEAPONTABLE.SGO column 1)."""
+    return f'app:/weapon/{name}.sgo'
 # The catalog entries a player can fill (src/support_dispatch.cpp SupportCallSeats) and their seats.
 SEATS: dict[str, int] = {'SQUAD': 12, 'PLATOON': 12, 'TRANSPORT_CREWED': 4, 'TRUCK_CREWED': 4,
                          'SQUAD_HELI': 12, 'PLATOON_HELI': 12, 'SQUAD_AIRDROP': 12, 'PLATOON_AIRDROP': 12}
@@ -136,7 +236,7 @@ class Invalid(ValueError):
 
 
 Look = tuple[int, int]   # (primary, secondary), 0xRRGGBB or STOCK
-Soldier = tuple[str, Look]
+Soldier = tuple[str, Look, str]   # (kind, look, backpack weapon: its WEAPONTABLE name, '' none)
 Pylon = tuple[str, int]  # (store name, rounds)
 
 
@@ -185,16 +285,18 @@ def parse_preset(text: str, seats: int) -> list[Soldier]:
     out: list[Soldier] = []
     for token in _tokens(text):
         head, star, n = token.partition('*')
+        head, plus, packed = head.partition('+')
         name, at, colours = head.partition('@')
         k = kind(name)
         look: Look = (STOCK, STOCK)
         if at:
             primary, colon, secondary = colours.partition(':')
             look = (_colour(primary), _colour(secondary) if colon else STOCK)
+        carried = pack(packed, k) if plus else ''
         count = _count(n, MOST, '人数 *') if star else 1
         if len(out) + count > MOST:
             raise Invalid(f'超过 {MOST} 人')
-        out += [(k, look)] * count
+        out += [(k, look, carried)] * count
     if out and len(out) > seats:
         raise Invalid('该单位没有可编组的座位' if seats <= 0 else f'人数 {len(out)} 超过该单位的座位数 {seats}')
     return out
@@ -212,16 +314,18 @@ def format_preset(soldiers: list[Soldier]) -> str:
         j = i
         while j < len(soldiers) and soldiers[j] == soldiers[i]:
             j += 1
-        k, (p, s) = soldiers[i]
+        k, (p, s), carried = soldiers[i]
         token = k + ('' if (p, s) == (STOCK, STOCK) else '@' + _colour_text(p) + ('' if s == STOCK else ':' + _colour_text(s)))
+        token += '+' + carried if carried else ''
         out.append(token + (f'*{j - i}' if j - i > 1 else ''))
         i = j
     return ','.join(out)
 
 
-def look_file(k: str, leader: bool, look: Look) -> str:
+def look_file(k: str, leader: bool, look: Look, carried: str = '') -> str:
     """src/support_loadout.h SupportLookFile."""
-    return f'EDF6VC_NPC_{k.upper()}{"_L" if leader else ""}_{_colour_text(look[0])}_{_colour_text(look[1])}.SGO'
+    tail = '_' + carried.upper() if carried else ''
+    return f'EDF6VC_NPC_{k.upper()}{"_L" if leader else ""}_{_colour_text(look[0])}_{_colour_text(look[1])}{tail}.SGO'
 
 
 # ------------------------------------------------------------------------------------------------ crew colours
@@ -385,18 +489,26 @@ def variant_hash(file: str) -> int:
     return h
 
 
-_NPC_NAME = re.compile(r'EDF6VC_NPC_([A-Z]+)(_L)?_([0-9A-F]{6}|X)_([0-9A-F]{6}|X)\.SGO$')
+_NPC_NAME = re.compile(r'EDF6VC_NPC_([A-Z]+)(_L)?_([0-9A-F]{6}|X)_([0-9A-F]{6}|X)(?:_([A-Z0-9]+))?\.SGO$')
 _LO_NAME = re.compile(r'EDF6VC_LO_([A-Z]+)_([0-9A-F]{16})\.SGO$')
 
 
 def decode_name(file: str) -> tuple | None:
-    """A generated file's name back into what it is: ('npc', kind, leader, look) or ('lo', Loadout); None: not one."""
+    """A generated file's name back into what it is: ('npc', kind, leader, look, backpack weapon or '') or ('lo', Loadout);
+    None: not one."""
     name = file.strip().upper()
     m = _NPC_NAME.match(name)
     if m and m.group(1).lower() in KIND_NAMES:
+        k = m.group(1).lower()
         look = tuple(STOCK if g == 'X' else int(g, 16) for g in (m.group(3), m.group(4)))
-        if look != (STOCK, STOCK):
-            return 'npc', m.group(1).lower(), bool(m.group(2)), look
+        carried = ''
+        if m.group(5):
+            row = PACK_BY_NAME.get(m.group(5))
+            if row is None or row[2] != KIND_CLASS[k]:
+                return None
+            carried = row[1]
+        if look != (STOCK, STOCK) or carried:
+            return 'npc', k, bool(m.group(2)), look, carried
         return None
     m = _LO_NAME.match(name)
     if m:
@@ -460,9 +572,9 @@ def wanted_files(text: str, pending: list[str] = ()) -> list[str]:
     order."""
     out: list[str] = []
     for soldiers in presets(text).values():
-        for i, (k, look) in enumerate(soldiers):
-            if look != (STOCK, STOCK):
-                out.append(look_file(k, i % 4 == 0, look))
+        for i, (k, look, carried) in enumerate(soldiers):
+            if look != (STOCK, STOCK) or carried:
+                out.append(look_file(k, i % 4 == 0, look, carried))
     out += [vehicle_file(l) for l in vehicles(text).values()]
     out += crew_files(text)
     out += [p.strip().upper() for p in pending if decode_name(p)]
@@ -506,9 +618,40 @@ def recolour(data: bytes, look: Look) -> bytes:
     return dsgo.write(doc)
 
 
-def soldier_file(game: rootcpk.Game, k: str, leader: bool, look: Look) -> bytes:
+def with_pack(data: bytes, carried: str) -> bytes:
+    """A soldier template (DSGO) carrying backpack weapon `carried` (its WEAPONTABLE name) as the player templates hold
+    theirs: loaded after the template's own weapons (soldier_load_weapon), out of its weapon sets (soldier_weapon_slot keeps
+    only the indices it loads) and in a sub weapon slot of its own (soldier_sub_weapon_slot [[index, 'weapon', 0]],
+    P605_RANGER.SGO's form): the game's setup 0x592FA0 reads it into the soldier's sub weapons (+0x19F8), the only list
+    its backpack use reads (docs/npc-backpack-re.md). Every other value as it was."""
+    if data[:4] != b'DSGO':
+        raise ValueError('不是 DSGO 士兵模板')
+    doc = dsgo.parse(data)
+    loads = doc.root.get('soldier_load_weapon')
+    if not isinstance(loads, dsgo.Node) or not loads.items or not all(isinstance(w, str) for w in loads.items):
+        raise ValueError('模板没有 soldier_load_weapon 武器表')
+    index = len(loads.items)
+    loads.items.append(pack_path(carried))
+    sets = doc.root.get('soldier_weapon_slot')
+    if not isinstance(sets, dsgo.Node) or not sets.items:
+        raise ValueError('模板没有 soldier_weapon_slot')
+    for entry in sets.items:
+        indices = entry.items[0]
+        indices.items[:] = [i for i in indices.items if isinstance(i, float) and int(i) < index]
+        if not indices.items:
+            raise ValueError('soldier_weapon_slot 的一组没有模板自己的武器')
+    if not isinstance(doc.root.get('soldier_sub_weapon_slot'), float):
+        raise ValueError('模板已经有 soldier_sub_weapon_slot')
+    doc.root.set('soldier_sub_weapon_slot', dsgo.Node([dsgo.Node([float(index), 'weapon', 0.0])]))
+    return dsgo.write(doc)
+
+
+def soldier_file(game: rootcpk.Game, k: str, leader: bool, look: Look, carried: str = '') -> bytes:
     template = {n: t for n, _, t in KINDS}[k] + ('_LEADER' if leader else '')
-    return recolour(game.read('OBJECT', template + '.SGO'), look)
+    data = game.read('OBJECT', template + '.SGO')
+    if look != (STOCK, STOCK):
+        data = recolour(data, look)
+    return with_pack(data, carried) if carried else data
 
 
 def _as_sgo(v: object) -> sgo.Value:
@@ -799,7 +942,7 @@ def describe(soldiers: list[Soldier]) -> str:
     for i in range(0, len(soldiers), 4):
         squad = soldiers[i:i + 4]
         parts.append('[' + '、'.join(labels[k] + ('' if look == (STOCK, STOCK) else f'@{_colour_text(look[0])}:{_colour_text(look[1])}')
-                                     for k, look in squad) + ']')
+                                     + (f'+{carried}' if carried else '') for k, look, carried in squad) + ']')
     return ' '.join(parts)
 
 

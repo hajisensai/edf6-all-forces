@@ -254,6 +254,7 @@ inline constexpr const wchar_t* kNumbered=L"%d. %ls";
 inline constexpr const wchar_t* kRounds=L"x%d";
 inline constexpr const wchar_t* kFieldRounds=L"< x%d >";
 inline constexpr const wchar_t* kFieldGun=L"< HE / AP >";
+inline constexpr const wchar_t* kPackSuffix=L" + %ls";
 namespace detail {
 template<class... A> void Put(wchar_t* out,std::size_t n,const wchar_t* format,A... args) noexcept {
     if(!out || !n)return;
@@ -280,6 +281,13 @@ inline void RowLine(const ViewRow& r,wchar_t* out,std::size_t n) noexcept {
     switch(r.text) {
     case RowText::soldier:
         detail::Put(body,kLineMost,r.leader ? hudtext::Tr(Tx::roomNumberedLeader) : kNumbered,r.index+1,KindLabel(r.kind));
+        if(const PackWeapon* pack=r.pack ? PackOf(r.pack) : nullptr) {   // its backpack weapon (the game's English name)
+            const std::size_t used=std::wcslen(body);
+            detail::Put(body+used,kLineMost-used,kPackSuffix,pack->label);
+        } else if(r.editing && r.field==roommenu::kPackField) {
+            const std::size_t used=std::wcslen(body);
+            detail::Put(body+used,kLineMost-used,kPackSuffix,hudtext::Tr(Tx::roomPackNone));
+        }
         break;
     case RowText::pylon: detail::Put(body,kLineMost,kNumbered,r.index+1,StoreLabel(r.store)); break;
     case RowText::gunHE: detail::Put(body,kLineMost,L"%ls",hudtext::Tr(Tx::roomGunHe)); break;
@@ -298,7 +306,8 @@ inline void NoteLine(const ViewRow& r,wchar_t* out,std::size_t n) noexcept {
     if(!out || !n)return;
     out[0]=0;
     if(r.editing && r.text==RowText::soldier) {
-        const Tx t=r.field==0 ? Tx::roomFieldKind : r.field==1 ? Tx::roomFieldPrimary : Tx::roomFieldSecondary;
+        const Tx t=r.field==0 ? Tx::roomFieldKind : r.field==1 ? Tx::roomFieldPrimary : r.field==2 ? Tx::roomFieldSecondary :
+                   Tx::roomFieldPack;
         detail::Put(out,n,L"%ls",hudtext::Tr(t));
     } else if(r.editing && r.text==RowText::crew) {
         detail::Put(out,n,L"%ls",hudtext::Tr(r.field==0 ? Tx::roomFieldPrimary : Tx::roomFieldSecondary));

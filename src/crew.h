@@ -390,6 +390,7 @@ struct Config {
     float npcLaneLength=150.0f;     // ...m along it (shorter where it meets the map)
     float npcFlankDeg=45.0f;        // ...their combat spot this many degrees off the player's own line to the target
     bool npcWeaponSwitch=true;      // ...they switch weapons for the target's range and kind
+    bool npcBackpack=true;          // ...a support soldier made with a backpack weapon uses it (npc_backpack.h, docs/npc-backpack-re.md)
     float npcEngageShare=0.85f;     // ...they fight at this share of their longest weapon's true reach (the stock: half, at least 25 m)
     bool npcEvade=true;             // ...crowded, they back off, side-step and roll
     float npcDangerRange=15.0f;     // ...m: enemies this near press on them

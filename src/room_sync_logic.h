@@ -12,7 +12,9 @@
 // unique, each one generated variant file in short form, never its name:
 //   a soldier   one letter, the kind (support_call.h SupportWeapon: a = rifle ... n = fshotgun; upper case = the leader's
 //               template), then the primary and the secondary colour, each 6 upper-case hex digits or X (stock):
-//               "a1E3A8AX" = EDF6VC_NPC_RIFLE_1E3A8A_X.SGO
+//               "a1E3A8AX" = EDF6VC_NPC_RIFLE_1E3A8A_X.SGO; a backpack weapon (npc_pack_table.h) adds '+' and its code in
+//               2 upper-case hex digits: "aXX+01" = EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO (a build without packs
+//               refuses such a list, as any token it cannot read: its members generate through the pending list then)
 //   a vehicle   one digit, the body (support_loadout.h VehicleBody 1 tank ... 5 multirole), then the loadout's 64-bit
 //               variant (LoadoutVariant, applied bit clear) in 16 upper-case hex digits:
 //               "14000000000000C81" = EDF6VC_LO_TANK_4000000000000C81.SGO
@@ -149,6 +151,13 @@ inline bool ParseVariantFile(const wchar_t* name,VariantRef* out) noexcept {
             if(!HexOf(s,6,&v))return false;
             *colour=static_cast<std::int32_t>(v);s+=6;
         }
+        if(*s==L'_') {   // the backpack weapon's WEAPONTABLE name
+            const wchar_t* a=++s;
+            while((*s>=L'A' && *s<=L'Z') || (*s>=L'0' && *s<=L'9'))++s;
+            const PackWeapon* pack=PackNamed(a,s);
+            if(!pack)return false;
+            look.pack=pack->code;
+        }
         if(std::wcscmp(s,L".SGO") || !look.On())return false;
         r.bits=LookVariant(look);
     } else if(!std::wcsncmp(name,L"EDF6VC_LO_",10)) {
@@ -187,6 +196,7 @@ inline std::size_t TokenOf(const VariantRef& r,char* out,std::size_t capacity) n
             if(colour==kStockColour){t[n++]='X';continue;}
             for(int s=20;s>=0;s-=4)t[n++]=hex[(static_cast<std::uint32_t>(colour)>>s)&0xF];
         }
+        if(look.pack){t[n++]='+';t[n++]=hex[look.pack>>4];t[n++]=hex[look.pack&0xF];}
     }
     t[n]=0;
     if(static_cast<std::size_t>(n)+1>capacity){out[0]=0;return 0;}
@@ -211,6 +221,12 @@ inline bool ParseToken(const char* s,std::size_t n,VariantRef* out) noexcept {
             std::int32_t v=0;
             for(int k=0;k<6;++k){const int d=hex(s[i+k]);if(d<0)return false;v=(v<<4)|d;}
             *colour=v;i+=6;
+        }
+        if(i+3==n && s[i]=='+') {
+            const int hi=hex(s[i+1]),lo=hex(s[i+2]);
+            if(hi<0 || lo<0)return false;
+            look.pack=static_cast<std::uint8_t>(hi*16+lo);i+=3;
+            if(!PackOf(look.pack))return false;
         }
         if(i!=n || !look.On())return false;
         r.bits=LookVariant(look);
