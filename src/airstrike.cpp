@@ -472,6 +472,7 @@ Granted GrantCalls(unsigned char* gs,bool ported) noexcept {
 }
 
 void __fastcall UnlockDlcHook(unsigned char* gs) {
+    __try { MigrateMissionPackSave(gs); } __except(EXCEPTION_EXECUTE_HANDLER){Log("PACK save: moving the rows failed");}
     __try {
         const bool ported=Cfg().portedWeaponsUnlocked;
         const Granted granted=GrantCalls(gs,ported);
@@ -605,6 +606,7 @@ bool InstallAirstrikes() noexcept {
     __try {
         bool calls=false;
         const bool owned=InstallOwnership();
+        SetMissionPackSaveHook(owned);   // a pack whose older saves have other rows is owned only with this hook
         if(Matches(kIfcStart,kIfcStartSig,sizeof(kIfcStartSig)) && Matches(kRadioCall,kRadioCallSig,sizeof(kRadioCallSig))) {
             bool changed=false;
             calls=RedirectCall(image+kRadioCall,image+kIfcStart,reinterpret_cast<void*>(&RadioStartHook),changed);

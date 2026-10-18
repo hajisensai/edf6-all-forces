@@ -50,7 +50,7 @@ def edf5_rows(root: str, first: int) -> list[dict[str, object]]:
     with open(edf5.TEXT, encoding='utf-8') as f:
         text = json.load(f)
     p = edf5.plan(root)
-    order = {(r['group'], r['path']): first + i for i, r in enumerate(p['rows'])}
+    order = {(r['group'], r['path']): first + i for i, r in enumerate(r for r in p['rows'] if edf5.available(r))}
     why = {(g, path): reason for g, path, reason in p['skipped']}
     out = []
     for group, series in SERIES.items():
