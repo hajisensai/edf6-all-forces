@@ -8,7 +8,8 @@
 //    one, its window is made off screen and never activates;
 //  - every second, and when the keys change, a row in <dll>.log: the game's committed memory (and its peak), its RAM,
 //    and the machine's free RAM and commit, so a mission's load shows as a curve;
-//  - commands in <dll>.cmd (one at a time, cleared once run): "mem", "quit" (the game's own ExitApp way), and, written
+//  - commands in <dll>.cmd (one at a time, cleared once run): "mem", "quit" (the game's own ExitApp way), "crash av|abort|
+//    terminate [game]" (a crash on purpose: EDF6VehicleCrew's crash dump checked in the real game), and, written
 //    before the launch, "mission <row|RM015|M001|range> [difficulty 0-4] [hq]": straight into that offline mission, no menu
 //    (with "hq": that pack's mode and row made current and the HQ menu shown instead, for its pictures)
 //    ("range": the test range's own mission pack, row 0 of the offline mode whose content id is the TestRangeContent
@@ -24,6 +25,7 @@
 #include <intrin.h>
 #include <cstdio>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -117,7 +119,12 @@ void* PatchImport(HMODULE module,const char* dll,const char* function,void* hook
 
 // The keyboard (and mouse buttons) the game sees: only the autopilot's held keys, never the desktop's. The game believes
 // it is the foreground window (Foreground), so with the real state the user's typing and clicks elsewhere would play it.
+volatile LONG crashOnGameThread=0;   // "crash av game": the next keyboard read (the game thread's, every frame) faults
 BOOL WINAPI KeyboardState(PBYTE keys) {
+    if(crashOnGameThread && InterlockedExchange(&crashOnGameThread,0)) {
+        Log("CMD crash: an access violation on the game thread %lu (inside EDF.dll's keyboard read)",GetCurrentThreadId());
+        *reinterpret_cast<volatile int*>(static_cast<std::uintptr_t>(0x10))=1;
+    }
     if(!keys)return FALSE;
     for(int vk=0;vk<kKeyCodes;++vk)keys[vk]=held[vk] ? 0x80 : 0;
     return TRUE;
@@ -672,6 +679,25 @@ void AskMission(const char* text) noexcept {
                           range ? "TestRangeContent" : "EDF41Content");
 }
 
+// "crash av|abort|terminate [game]": a crash on purpose, for EDF6VehicleCrew's crash dump (src/crash_dump.cpp) in the
+// real game: an access violation, or ucrtbase's abort() / terminate() (the game's CRT). On this thread (the command
+// loop's); "av game": on the game thread, at its next keyboard read (KeyboardState, under EDF.dll's frames).
+void Crash(const char* text) noexcept {
+    char how[16]{},where[16]{};
+    sscanf_s(text,"%*s %15s %15s",how,static_cast<unsigned>(sizeof(how)),where,static_cast<unsigned>(sizeof(where)));
+    LogMemory("crash");
+    if(!std::strcmp(how,"av") && !std::strcmp(where,"game")){InterlockedExchange(&crashOnGameThread,1);return;}
+    using VoidFn=void(__cdecl*)();
+    const HMODULE ucrt=GetModuleHandleW(L"ucrtbase.dll");
+    if(!std::strcmp(how,"abort") || !std::strcmp(how,"terminate")) {
+        if(const auto f=ucrt ? reinterpret_cast<VoidFn>(GetProcAddress(ucrt,how)) : nullptr)f();
+        Log("CMD crash %s: ucrtbase.dll has no %s",how,how);
+        return;
+    }
+    if(!std::strcmp(how,"av"))*reinterpret_cast<volatile int*>(static_cast<std::uintptr_t>(0x10))=1;
+    else Log("CMD crash: unknown kind %s (av, abort, terminate)",how);
+}
+
 // One command from <dll>.cmd (the driver writes it, this clears it once done).
 void RunCommand(const char* text) noexcept {
     char word[32]{};
@@ -691,6 +717,7 @@ void RunCommand(const char* text) noexcept {
             Log("PROBE hector installed=%d",autopilot::InstallHectorProbe(image,&Log));
         else Log("CMD probe: unknown probe %s",what);
     }
+    else if(!std::strcmp(word,"crash"))Crash(text);
     else Log("CMD unknown: %s",word);
 }
 

@@ -15,6 +15,7 @@
 #pragma warning(disable:4201)
 #include "PluginAPI.h"
 #pragma warning(pop)
+#include "crash_dump.h"
 #include "crew.h"
 #include "firstperson.h"
 #include "mod_room.h"
@@ -959,12 +960,13 @@ constexpr LONGLONG kLogMax=32ll<<20;
 constexpr std::size_t kLogBuffer=1u<<20;
 constexpr DWORD kFlushMs=50;
 SRWLOCK logLock=SRWLOCK_INIT;        // the buffers
+SRWLOCK logFileLock=SRWLOCK_INIT;    // the file (taken before logLock): the writer's, and a crash's flush (FlushLog)
 char logBuffer[2][kLogBuffer];
 std::size_t logUsed=0;               // in logBuffer[logActive]
 int logActive=0;
 unsigned logDropped=0;
 INIT_ONCE logWriterOnce=INIT_ONCE_STATIC_INIT;
-HANDLE logFile=nullptr;              // the writer's alone
+HANDLE logFile=nullptr;              // under logFileLock
 LONGLONG logSize=0;
 
 HANDLE OpenLog() noexcept {
@@ -995,26 +997,44 @@ void RotateLog() noexcept {
     if(n>0)WriteLog(line,static_cast<std::size_t>(n));
 }
 
+// The lines so far written to the file: the buffer they are in taken (the lines go on into the other one) and
+// written. Under logFileLock, so the writer and a crash's flush (FlushLog) never write at once or out of order.
+void DrainLog() noexcept {
+    AcquireSRWLockExclusive(&logLock);
+    const int full=logActive;
+    const std::size_t n=logUsed;
+    const unsigned dropped=logDropped;
+    logActive^=1;logUsed=0;logDropped=0;
+    ReleaseSRWLockExclusive(&logLock);
+    if(!n && !dropped)return;
+    if(!logFile)logFile=OpenLog();
+    if(!logFile)return;
+    if(logSize+static_cast<LONGLONG>(n)>kLogMax)RotateLog();
+    WriteLog(logBuffer[full],n);
+    if(dropped) {
+        char line[120];
+        const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"(%u log lines dropped: more than %zu KB in %lu ms)\r\n",dropped,
+                                kLogBuffer>>10,kFlushMs);
+        if(k>0)WriteLog(line,static_cast<std::size_t>(k));
+    }
+}
+
 DWORD WINAPI LogWriter(void*) {
     for(;;) {
         Sleep(kFlushMs);
-        AcquireSRWLockExclusive(&logLock);
-        const int full=logActive;
-        const std::size_t n=logUsed;
-        const unsigned dropped=logDropped;
-        logActive^=1;logUsed=0;logDropped=0;
-        ReleaseSRWLockExclusive(&logLock);
-        if(!n && !dropped)continue;
-        if(!logFile)logFile=OpenLog();
-        if(!logFile)continue;
-        if(logSize+static_cast<LONGLONG>(n)>kLogMax)RotateLog();
-        WriteLog(logBuffer[full],n);
-        if(dropped) {
-            char line[120];
-            const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"(%u log lines dropped: more than %zu KB in %lu ms)\r\n",dropped,
-                                    kLogBuffer>>10,kFlushMs);
-            if(k>0)WriteLog(line,static_cast<std::size_t>(k));
-        }
+        AcquireSRWLockExclusive(&logFileLock);
+        DrainLog();
+        ReleaseSRWLockExclusive(&logFileLock);
+    }
+}
+
+// A lock a crashed thread may hold for good: tried for a while, then given up (false).
+bool TryLockFor(SRWLOCK* lock,DWORD ms) noexcept {
+    const ULONGLONG until=GetTickCount64()+ms;
+    for(;;) {
+        if(TryAcquireSRWLockExclusive(lock))return true;
+        if(GetTickCount64()>=until)return false;
+        Sleep(1);
     }
 }
 
@@ -1039,6 +1059,17 @@ void Log(const char* format,...) noexcept {
         logUsed+=static_cast<std::size_t>(n);
     } else ++logDropped;
     ReleaseSRWLockExclusive(&logLock);
+}
+
+// A crash (crash_dump.cpp): the lines so far on disk now, from the dumping thread. The writer is waited for (it may
+// be mid-write); a lock the crashed thread holds (it crashed inside Log, or the writer did) is given up after a while.
+void FlushLog() noexcept {
+    if(!logPath[0] || !TryLockFor(&logFileLock,1000))return;
+    if(TryLockFor(&logLock,1000)) {   // the buffers free now: DrainLog takes the lock again
+        ReleaseSRWLockExclusive(&logLock);
+        DrainLog();
+    }
+    ReleaseSRWLockExclusive(&logFileLock);
 }
 
 void ReloadConfigIfChanged() noexcept {
@@ -1131,6 +1162,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     CheckPauseFlag();       // the game's pause flag (the game clock and the HUD stop with it): read only
     // Then the installs, in dependency order. From the first patch on the plugin stays loaded whatever fails
     // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
+    // The crash dump first (its filter and handlers point into this DLL): a crash in any install below is dumped.
+    InstallCrashDump();
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     Log("ROOM isolation=%d",InstallModRoom());
     Log("SUPPORT soldiers=%d",InstallSupportSoldiers());

@@ -18,7 +18,9 @@
     uninstalls cleanly, a call_weapons.install that rolled back records no first backup, and the installer's
     uninstall over a misaligned table offers repair or skipping the table instead of failing;
   - the installer's 「回传日志」 (tools/testhub.py collect) sends only a crash dump of this install and of the run the
-    logs end with (tests/testhub_dump_source_test.py: synthetic minidumps against the plugin log's loading lines);
+    logs end with (tests/testhub_dump_source_test.py: synthetic minidumps against the plugin log's loading lines), the
+    plugin's own crash dump beside Windows' one, Windows' Report.wer, and always crash/dumps.txt saying why there is
+    no dump; the dump's file name and log lines src/crash_dump.cpp writes are the ones collect() looks for;
   - the model importer (pylib/obj_model.py, pylib/texfile.py) on synthetic data: OBJ reading (negative indices,
     n-gons, winding, uv origin, texture lookup), holes found and closed, skins, meshes split below 65536 vertices
     with tangents, PNG decoding, DDS .lod slicing and DXT1.
@@ -12997,6 +12999,30 @@ def edf41_kill_counters_save_slots() -> None:
 
 def _rows_copy(rows: list) -> list:
     return [list(r) for r in rows]
+
+
+@test
+def plugin_crash_dump_is_collected() -> None:
+    """docs/feedback-2026-10-18-crash-dump.md: reports #19 / #20 of a crash came with no dump. The plugin now writes
+    its own (src/crash_dump.cpp) as <exe>.<pid>.plugin.dmp in %LOCALAPPDATA%'s CrashDumps; collect() finds it by the
+    'EDF6*.dmp' glob and the .plugin.dmp ending, and reads the plugin's log lines to say why there is none. Both sides
+    checked against each other here, so a renamed file or log line cannot silently stop the dump from being sent."""
+    import fnmatch
+    import inspect
+    import testhub
+    with open(os.path.join(ROOT, 'src', 'crash_dump.cpp'), encoding='utf-8') as f:
+        cpp = f.read()
+    fmt = re.search(r'swprintf_s\(dumpPath,L"([^"]+)"', cpp)
+    assert fmt, 'crash_dump.cpp: the dump path format'
+    # The C++ literal "%ls\\%ls.%lu.plugin.dmp": folder, escaped backslash, exe name, pid.
+    name = fmt.group(1).replace(r'%ls\\', '', 1).replace('%ls', 'EDF6.exe', 1).replace('%lu', '12345', 1)
+    assert name == 'EDF6.exe.12345.plugin.dmp', name
+    assert fnmatch.fnmatch(name, 'EDF6*.dmp') and name.lower().endswith('.plugin.dmp'), name
+    assert 'GetEnvironmentVariableW(L"LOCALAPPDATA"' in cpp and r'L"\\CrashDumps"' in cpp, 'the dump goes to CrashDumps'
+    src = inspect.getsource(testhub.plugin_crash_note)
+    for line in ('CRASH dump written', 'CRASHDUMP installed'):
+        assert line in cpp and line in src, line
+    assert re.search(r'Log\("CRASH %s: exception', cpp) and "'] CRASH '" in src, 'the crash line'
 
 
 def main() -> int:

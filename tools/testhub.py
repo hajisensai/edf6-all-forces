@@ -369,12 +369,127 @@ def dump_matches(path: str, game: str) -> str:
     return ''
 
 
+def _session_log(game: str) -> str | None:
+    """EDF6VehicleCrew's log of the run the sent logs end with: what follows its last `loading` line (.log.1 first when
+    the log was rotated during the run). None when it has no loading line."""
+    data = b''
+    for name in ('EDF6VehicleCrew.log.1', 'EDF6VehicleCrew.log'):
+        try:
+            with open(os.path.join(game, 'Mods', 'Plugins', name), 'rb') as f:
+                data += f.read()
+        except OSError:
+            pass
+    last = None
+    for last in _LOADING.finditer(data):
+        pass
+    return None if last is None else data[last.start():].decode('utf-8', 'replace')
+
+
+def plugin_crash_note(game: str) -> str:
+    """What EDF6VehicleCrew's crash dump (src/crash_dump.cpp) did in the run the logs end with, from its log: the dump it
+    wrote, the crash it saw and failed to dump, or why it had nothing to write."""
+    text = _session_log(game)
+    if text is None:
+        return '插件崩溃转储：插件日志里没有本次游戏的 loading 行'
+    lines = [ln.split('] ', 1)[-1] for ln in text.splitlines() if '] CRASH ' in ln]
+    if any(ln.startswith('CRASH dump written') for ln in lines):
+        return '插件崩溃转储：已写出（' + next(ln for ln in lines if ln.startswith('CRASH dump written')) + '）'
+    if lines:
+        return '插件崩溃转储：插件看到了崩溃但转储没写成：' + ' / '.join(lines[:3])
+    if 'CRASHDUMP installed' in text:
+        return ('插件崩溃转储：已装好，但本次游戏没有走到它（__fastfail：/GS、CFG、堆损坏；进程被外部结束；卡死；'
+                '或者这次游戏没有崩溃）')
+    return '插件崩溃转储：本次游戏的插件没有这个功能（旧版插件）'
+
+
+def local_dumps_state() -> str:
+    """Whether Windows writes crash dumps for EDF6.exe (WER LocalDumps). Only HKLM counts: settings under HKCU are
+    ignored (measured 2026-10-18, docs/feedback-2026-10-18-crash-dump.md). The key existing is enough, with defaults
+    (%LOCALAPPDATA%\\CrashDumps, 10 dumps, mini dump); EDF6.exe's subkey overrides them."""
+    try:
+        import winreg
+    except ImportError:
+        return 'Windows LocalDumps：不是 Windows，未查'
+    base = r'SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps'
+    values: dict[str, object] = {}
+    try:
+        for key in (base, base + r'\EDF6.exe'):
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as k:
+                    for i in range(winreg.QueryInfoKey(k)[1]):
+                        name, value, _ = winreg.EnumValue(k, i)
+                        values[name] = value
+            except FileNotFoundError:
+                if key == base:
+                    return 'Windows LocalDumps：未配置（HKLM 下没有 LocalDumps 键），Windows 不会为崩溃写转储'
+    except OSError as e:
+        return f'Windows LocalDumps：读不了注册表（{e}）'
+    folder = values.get('DumpFolder') or r'%LOCALAPPDATA%\CrashDumps'
+    return f'Windows LocalDumps：已配置（目录 {folder}，类型 {values.get("DumpType", 1)}，最多 {values.get("DumpCount", 10)} 个）'
+
+
+def _filetime(value: str) -> float | None:
+    try:
+        return int(value) / 1e7 - 11644473600
+    except ValueError:
+        return None
+
+
+def read_wer(path: str) -> dict[str, str] | None:
+    """A Windows Error Reporting Report.wer as its key=value lines (UTF-16 with a BOM, as WER writes it)."""
+    try:
+        with open(path, 'rb') as f:
+            raw = f.read(1 << 20)
+    except OSError:
+        return None
+    text = raw.decode('utf-16', 'replace') if raw[:2] in (b'\xff\xfe', b'\xfe\xff') else raw.decode('utf-8', 'replace')
+    out: dict[str, str] = {}
+    for line in text.splitlines():
+        key, eq, value = line.partition('=')
+        if eq:
+            out.setdefault(key.strip().lstrip('\ufeff'), value.strip())
+    return out
+
+
+def wer_report(game: str, start: float | None) -> tuple[str | None, str]:
+    """Windows' own report of an EDF6.exe crash of this game folder in the run the logs end with (the newest
+    AppCrash_EDF6.exe_*/Report.wer under the user's and the machine's WER ReportArchive / ReportQueue): its path (None
+    when there is none) and a line for crash/dumps.txt. Without a dump it is the least there is: the exception code,
+    the faulting module and the offset in it."""
+    if start is None:
+        return None, 'Windows 错误报告：插件日志里没有 loading 行，对不上是哪次游戏，未附'
+    roots = [os.environ.get('LOCALAPPDATA', ''), os.environ.get('ProgramData') or os.environ.get('PROGRAMDATA', '')]
+    best: tuple[float, str, dict[str, str]] | None = None
+    seen = 0
+    for root in filter(None, roots):
+        for kind in ('ReportArchive', 'ReportQueue'):
+            for path in glob.glob(os.path.join(root, 'Microsoft', 'Windows', 'WER', kind, 'AppCrash_EDF6.exe_*', 'Report.wer')):
+                wer = read_wer(path)
+                at = _filetime(wer.get('EventTime', '')) if wer else None
+                exe = (wer.get('AppPath') or wer.get('UI[2]') or wer.get('LoadedModule[0]') or '') if wer else ''
+                if at is None or os.path.normcase(os.path.normpath(os.path.dirname(exe))) != \
+                        os.path.normcase(os.path.normpath(game)):
+                    continue
+                seen += 1
+                if at >= start - SESSION_SKEW and (best is None or at > best[0]):
+                    best = (at, path, wer)
+    if best is None:
+        return None, (f'Windows 错误报告：本次游戏没有（这个游戏目录的较早的有 {seen} 份）' if seen
+                      else 'Windows 错误报告：没有这个游戏目录的 EDF6.exe 崩溃报告')
+    at, path, wer = best
+    when = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(at))
+    return path, (f'Windows 错误报告 {os.path.basename(os.path.dirname(path))}：{when}，异常 {wer.get("Sig[6].Value", "?")} '
+                  f'于 {wer.get("Sig[3].Value", "?")}+0x{wer.get("Sig[7].Value", "?").lstrip("0") or "0"}')
+
+
 def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
     """The logs zipped: Mods/Plugins' logs (tails), ini files and DLL versions, the mod loader's log, the
-    install ledgers (Mods/.edf6*.json), and the newest EDF6 crash dump of the last three days written by this install
-    (dump_matches) in the run the logs end with (dump_in_session); crash/dumps.txt says which were left out and why.
-    Returns the zip
-    and the names it holds."""
+    install ledgers (Mods/.edf6*.json), and the newest EDF6 crash dumps of the last three days written by this install
+    (dump_matches) in the run the logs end with (dump_in_session): the plugin's own (*.plugin.dmp, src/crash_dump.cpp)
+    and Windows' (LocalDumps), one of each; Windows' error report of that crash (Report.wer) when it has one.
+    crash/dumps.txt is always there: which dumps were left out and why, and when none was sent, why none was written
+    (2026-10-18: reports #19 / #20 of a crash came with no dump and no word on it). Returns the zip and the names it
+    holds."""
     mem = io.BytesIO()
     names: list[str] = []
     plugins = os.path.join(game, 'Mods', 'Plugins')
@@ -429,16 +544,36 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
                 add(path, 'crash/' + os.path.basename(path) + '.too-big.txt',
                     f'{os.path.basename(path)}: {os.path.getsize(path)} bytes, over the {DUMP_MAX} limit; left at home\r\n'.encode('utf-8'))
         dumps = [p for p in glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'CrashDumps', 'EDF6*.dmp'))
-                 if time.time() - os.path.getmtime(p) < DUMP_AGE and os.path.getsize(p) <= DUMP_MAX]
-        # The newest of this install's (dump_matches) and of the run the logs end with (dump_in_session): an older
-        # build's or an earlier run's dump is named in crash/dumps.txt, not sent.
-        for path in sorted(dumps, key=os.path.getmtime, reverse=True):
-            if matches(path):
-                with open(path, 'rb') as f:
-                    add(path, 'crash/' + os.path.basename(path), f.read())
+                 if time.time() - os.path.getmtime(p) < DUMP_AGE]
+        # Of each source the newest of this install's (dump_matches) and of the run the logs end with
+        # (dump_in_session): an older build's or an earlier run's dump is named in crash/dumps.txt, not sent. The
+        # plugin's first (it has the crash's own context); Windows' too while the upload stays under UPLOAD_MAX.
+        sent = 0
+        for source in ('plugin', 'windows'):
+            group = [p for p in dumps if p.lower().endswith('.plugin.dmp') == (source == 'plugin')]
+            for path in sorted(group, key=os.path.getmtime, reverse=True):
+                if not matches(path):
+                    continue
+                size = os.path.getsize(path)
+                if size > DUMP_MAX:
+                    verdicts.append(f'{os.path.basename(path)}: {size} 字节，超过 {DUMP_MAX} 的上限，未上传')
+                elif mem.tell() + size > UPLOAD_MAX - (4 << 20):
+                    verdicts.append(f'{os.path.basename(path)}: {size} 字节，加上它会超过上传上限 {UPLOAD_MAX}，未上传')
+                else:
+                    with open(path, 'rb') as f:
+                        add(path, 'crash/' + os.path.basename(path), f.read())
+                    sent += 1
                 break
-        if verdicts:
-            add('', 'crash/dumps.txt', ('\r\n'.join(verdicts) + '\r\n').encode('utf-8'))
+        if not sent and not any(n.startswith('crash/') and n.endswith('.dmp') for n in names):
+            verdicts.append('没有上传任何崩溃转储。')
+            verdicts.append(plugin_crash_note(game))
+            verdicts.append(local_dumps_state())
+        report, line = wer_report(game, start)
+        verdicts.append(line)
+        if report:
+            with open(report, 'rb') as f:
+                add(report, 'crash/Report.wer', f.read())
+        add('', 'crash/dumps.txt', ('\r\n'.join(verdicts) + '\r\n').encode('utf-8'))
     return mem.getvalue(), names
 
 
