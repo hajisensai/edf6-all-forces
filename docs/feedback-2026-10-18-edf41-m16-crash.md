@@ -82,6 +82,29 @@ EDF41.exe `Alien4LegTank` 虚表 0xA967B8（RTTI `.?AVAlien4LegTank@@`），槽 
 - `tools/edf41_fortress_check.cpp`（ctest，进 `EDF6_OFFLINE_CHECKS`）：7 个动作逐一对上 4.1 的跳转表；表外值什么也不做；每个组动作只碰一组。
 - `tools/selftest.py edf41_fortress_object_actions`：扫 `edf41port` 下全部 4.1 任务脚本，对 4.1 要塞发的 ObjectAction 都是 0..6 的常量（M117 恰好 0..6 各一次，M416 有 6）；钩子在任何 `nextMessage` 之前先接 0x1000000D、`Edf41Action` 不转给类；有游戏时核 `0x4CA7E0` / `0x4CB6D0` 开头字节、`0x4C6334` 调 `0x4C37E0`、`0x4C3A27` 调 `0x6BADD0` 后不判空的那两条指令。
 
-## 实机
+## 实机（autopilot 后台，本机 EDF.dll 0x678CCB46）
 
-见下节（autopilot 后台跑 M117，修复前 / 修复后对照）。
+推进办法：`python tests/autopilot/drive.py run edf41:15 0 900 <log> --place <build>/EDF6VehicleCrew.dll=Plugins/EDF6VehicleCrew.dll --ini Edf41DevShoot=2 --ini Edf41DevShootDamage=3000 --ini Edf41Mother401Dev=32896`（edf41:15 = M117，难度 0；32896 = 32768「DevShoot 也打普通敌人」+ 128「玩家装甲保持满」，脚本的全灭等待因此能推进）。每次跑前备份、跑后逐字节还原存档目录（`saves restored byte for byte`），插件 DLL / ini 由 drive.py 逐字节还原。
+
+**修复前（origin/main 1fb6931e 构建）**，H：
+
+```
+[17:37:38.117] EDF41FORTRESS 000002A0D2AF2010 stands up (mode 0 -> 1)
+[17:37:56.134] EDF41FORTRESS 000002A0D2AF2010 message 20100 generator 0 -> 1
+[17:41:54.331] EDF41FORTRESS 000002A0D2AF2010 message 20100 generator 0 -> 1
+EDF6Coop.log [17:43:21.648] EXCEPTION C0000005 thread 30476 at EDF+4C3A30 reading 000000000000000C
+  rsi=000002A0D2AF2010 rdi=000000001000000D ... #00 EDF+4C3A30 #01 EDF+4C6339 #02 EDF6VehicleCrew.dll+1698CC #03 EDF+1DA4B8 #04 EDF+212A6C
+```
+
+与测试者的栈相同（多出的一帧是本插件的消息钩子），`rsi` 就是日志里那台要塞。dump `%LOCALAPPDATA%\CrashDumps\EDF6.exe.81820.dmp`：`0x4C6240` 帧的消息数据（`r14 = 000000aa375fec00`）里是 `00000001`，即 ObjectAction(1)。进任务约 5 分 50 秒崩。
+
+**修复后（本分支构建）**，H：同一命令跑满 900 秒，游戏到时由 drive.py 正常退出（`drive exit 0`），无新 dump，`EDF6Coop.log` 无新异常：
+
+```
+[17:55:04.592] EDF41FORTRESS 00000263D7005DC0 ObjectAction 0 (cannons on)
+[17:55:39.659] EDF41FORTRESS 00000263D7005DC0 ObjectAction 1 (cannons off)
+[17:56:13.905] EDF41FORTRESS 00000263D7005DC0 message 20100 generator 0 -> 1
+[17:59:40.116] EDF41FORTRESS 00000263D7005DC0 message 20100 generator 0 -> 1
+```
+
+崩溃点（ObjectAction 1）之后又跑了约 9 分钟、要塞又投放了两批。
