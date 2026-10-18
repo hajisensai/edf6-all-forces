@@ -688,6 +688,7 @@ void LoadConfig() noexcept {
     n.fpMotion=ReadBool(L"FirstPersonMotion",n.fpMotion);
     n.fpCulling=ReadBool(L"FirstPersonCulling",n.fpCulling);
     n.fpFit=ReadBool(L"FirstPersonFit",n.fpFit);
+    n.fpNativeElbow=ReadBool(L"FirstPersonNativeElbow",n.fpNativeElbow);
     n.fpArmIk=ReadBool(L"FirstPersonArmIk",n.fpArmIk);
     n.fpHoldArc=ReadFloat(L"FirstPersonHoldArc",n.fpHoldArc);
     n.fpWristMax=ReadFloat(L"FirstPersonWristMax",n.fpWristMax);
@@ -1136,6 +1137,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallEdf5Campaign();  // the EDF5 campaign's mission packs owned (edf5campaign.cpp)
     InstallPortedMissions(); // ...and with PortedMissionsUnlocked every mission of the ported packs open (edf5campaign.cpp)
+    InstallEdf41MenuBg();    // the EDF4.1 packs' HQ shows 4.1's background when the installer added it (edf5campaign.cpp)
     InstallEdf5Online();    // ...and their missions online: the BVM player natives' online half (edf5online.cpp)
     InstallJetSound();
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)

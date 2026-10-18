@@ -5664,6 +5664,7 @@ def edf5_campaign_build() -> None:
             like = next(s for s in stock if s[e5c.M_CONTENT] == pack.like and s[e5c.M_TYPE] == m[e5c.M_TYPE])
             assert m[7] == like[7] and m[11:] == like[11:], 'the difficulty ranges are not the matching stock mode\'s'
             assert m[e5c.M_FILES] == pack.paths(kind) and (m[e5c.M_NAME], m[e5c.M_DESC]) == pack.keys(kind)
+            assert m[e5c.M_BGM] == pack.bgm == e5c.BGM5, "the mode's HQ music is not EDF5's"
     for lang, rel in e5c.TEXTS.items():
         base = sgo.read(rootcpk.default().read('ETC', f'TEXTTABLE_STEAM.{lang}.TXT_SGO'))[1]
         text = sgo.read(files[rel])[1]
@@ -5684,6 +5685,7 @@ def edf5_campaign_build() -> None:
                 assert len(r.items) == 11 and r.names == {10: 'flags'} and r.items[0] == float(i), (pack.tag, i)
                 assert r.items[3].items == ([float(i + 1)] if i + 1 < len(rows) else []), (pack.tag, i)
                 assert r.items[1].startswith('app:/Mission/EDF5_OLD_SCRIPT/') and r.items[10] == 8.0
+                assert r.items[7] == 0.0 and r.items[8] == e5c.BGM5, (pack.tag, i, "not EDF5's HQ background / music")
                 rootcpk.default().read(r.items[1].split('app:/', 1)[1], 'MISSION.BVM')
             for rel in txt.values():
                 assert len(sgo.read(files[rel])[1]['table']) == len(rows), rel
@@ -5704,6 +5706,120 @@ def edf5_campaign_build() -> None:
         section = packs_ini.split(f'[Pack{e5c.CONTENT[pack.tag]}]\r\n', 1)[1].split('\r\n\r\n', 1)[0].split('\r\n')
         assert section[0] == f'Tag={pack.tag}' and section[2] == f'Rows={len(rows)}', (pack.tag, section)
         assert section[3] == 'Missing=' + '0' * ((len(rows) + 3) // 4), (pack.tag, section)
+
+
+@test
+def edf5_campaign_pack_music() -> None:
+    """Each pack's HQ / sortie screen music (the user, 2026-10-18: EDF5's packs EDF5's own, EDF4.1's EDF4.1's): every
+    row's list member 8 (what EDF.dll 0x8406E0 plays while the row is selected) and its modes' ModeList member 3 (the
+    fallback) are the pack's (Pack.bgm), the test range keeps RM015's row and the stock mode's music. The stand-in
+    rows and modes need no game (CI)."""
+    assert [p.bgm for p in e5c.PACKS] == [e5c.BGM5] * 3 == ['BGM_E5S02_EDFHonbu'] * 3
+    assert [p.pack.bgm for p in e5c.PACKS41] == ['BGM_E4S02_EDFHonbu', 'BGM_Sinkou_intermission',
+                                                 'BGM_Sinkou_taisenmenu']
+    assert e5c.RANGE.bgm is None
+    row = e5c.new_row(4, {'key': 'EDF41/M001', 'bgm': e5c.BGM41, 'progress': 0.5, 'flags': e5c.FLAGS})
+    assert row.items[7] == 0.0 and row.items[8] == e5c.BGM41 and row.names == {10: 'flags'}
+    template = [f'm{k}' for k in range(14)]
+    for pack in (*e5c.PACKS, *(p.pack for p in e5c.PACKS41)):
+        for kind in pack.kinds:
+            entry = e5c.mode_entry(template, pack, 9, kind)
+            assert entry[e5c.M_BGM] == pack.bgm and template[e5c.M_BGM] == 'm3', (pack.tag, kind)
+            assert [entry[k] for k in (2, 4, 7, 11, 12, 13)] == [template[k] for k in (2, 4, 7, 11, 12, 13)]
+    assert e5c.mode_entry(template, e5c.RANGE, 9)[e5c.M_BGM] == 'm3', "the range lost the stock mode's music"
+
+
+@test
+def edf5_campaign_pack_music_real() -> None:
+    """The packs' music against the games themselves (a developer's machine: each part skipped without its game):
+    EDF6's music bank holds every cue with its sound (TIKYUUX_MUSIC.AWB); EDF5's HQ music is its modes' ModeList member 3 (its lists have no music
+    member), as is EDF4.1's (config.sgo, and each DLC's package.sgo); and EDF6's own rows 13..36 (missions 14..37,
+    the user's example) play EDF5's."""
+    import gamedir
+    import rootcpk
+    import sgo
+    if not _e5c_have_game():
+        return
+    bank = os.path.join(rootcpk.DEFAULT_GAME, 'SOUND', 'PC', 'TIKYUUX_MUSIC')
+    with open(bank + '.AWB', 'rb') as f:
+        waves = _afs2_sizes(f.read(0x10000))
+    for bgm in (e5c.BGM5, *(p.pack.bgm for p in e5c.PACKS41)):
+        ids = _music_cue_waves(bank + '.ACB', bgm)   # a cue a bank only names, its sound stripped, plays nothing
+        assert ids and all(waves.get(i, 0) > 1 << 20 for i in ids), (bgm, ids, "no sound in EDF6's music bank")
+    table = dsgo.parse(rootcpk.default().read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
+    assert {r.items[8] for r in table[13:37]} == {e5c.BGM5} and {r.items[7] for r in table[13:37]} == {0.0}
+    root5 = gamedir.find_other(gamedir.EDF5, near=rootcpk.DEFAULT_GAME)
+    if root5:
+        game5 = rootcpk.Game(root5)
+        assert {str(m[3]) for m in sgo.read(game5.read('DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList']} == {e5c.BGM5}
+        assert {len(r) for r in sgo.read(game5.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO'))[1]['table']} == {4}
+    root41 = _edf41_root()
+    if root41:
+        import edf41dlc
+        modes41 = sgo.read(_cpk_file(os.path.join(root41, 'Root.cpk'), 'DEFAULTPACKAGE', 'CONFIG.SGO'))[1]['ModeList']
+        assert {str(m[3]) for m in modes41} == {e5c.BGM41}
+        want = {'mp01': e5c.BGM41_MP01, 'mp02': e5c.BGM41_MP02}
+        for mount, dlc in edf41dlc.find(root41).items():   # only the DLC this EDF4.1 has
+            assert {str(m[3]) for m in sgo.read(dlc.read('package.sgo'))[1]['ModeList']} == {want[mount]}, mount
+
+
+def _music_cue_waves(acb_path: str, cue: str) -> list[int]:
+    """The stream wave ids an ACB's cue plays: cue -> sequence -> its tracks' events' synth references (command
+    0x7D0) -> waveforms (reference type 1). [] for a cue the bank does not name."""
+    import struct
+    import acb
+    import cpk
+
+    def table(b: bytes) -> list[dict]:
+        b = b if b[:4] == b'@UTF' else cpk._unmask(b)
+        body = b[8:8 + struct.unpack_from('>I', b, 4)[0]]
+        at = struct.unpack_from('>I', body, 8)[0]
+        return [{k: body[at + v[0]:at + v[0] + v[1]] if isinstance(v, tuple) else v for k, v in r.items()}
+                for r in cpk.parse_utf(b)[3]()]
+    with open(acb_path, 'rb') as f:
+        head, _ = acb._row(f.read())
+    t = {k: table(head[k]) for k in ('CueNameTable', 'CueTable', 'SequenceTable', 'TrackTable', 'TrackEventTable',
+                                     'SynthTable', 'WaveformTable')}
+    index = {r['CueName']: r['CueIndex'] for r in t['CueNameTable']}
+    if cue not in index:
+        return []
+    entry = t['CueTable'][index[cue]]
+    assert entry['ReferenceType'] == 3, (cue, entry['ReferenceType'])   # a sequence, as every music cue
+    seq = t['SequenceTable'][entry['ReferenceIndex']]
+    out = []
+    for k in range(seq['NumTracks']):
+        event = t['TrackEventTable'][t['TrackTable'][struct.unpack_from('>H', seq['TrackIndex'], 2 * k)[0]]['EventIndex']]
+        cmd, p = event['Command'], 0
+        while p + 3 <= len(cmd):
+            code, size = struct.unpack_from('>HB', cmd, p)
+            if code == 0x7D0:
+                refs = t['SynthTable'][struct.unpack_from('>H', cmd, p + 5)[0]]['ReferenceItems']
+                out += [t['WaveformTable'][i]['StreamAwbId'] for kind, i in struct.iter_unpack('>HH', refs) if kind == 1]
+            p += 3 + size
+    return out
+
+
+def _afs2_sizes(head: bytes) -> dict[int, int]:
+    """An AWB's wave id -> its size, from the file's header (pylib/awe.afs2_waves without the data)."""
+    import struct
+    assert head[:4] == b'AFS2'
+    off_size, id_size = head[5], head[6]
+    count = struct.unpack_from('<I', head, 8)[0]
+    ids = struct.unpack_from(f'<{count}{"H" if id_size == 2 else "I"}', head, 16)
+    offs = struct.unpack_from(f'<{count + 1}{"I" if off_size == 4 else "Q"}', head, 16 + count * id_size)
+    return {w: offs[i + 1] - offs[i] for i, w in enumerate(ids)}
+
+
+def _cpk_file(path: str, folder: str, name: str) -> bytes:
+    """A file of a CPK, CRILAYLA-decompressed when it is."""
+    import cpk
+    import crilayla
+    archive = cpk.Cpk(path)
+    e = archive.index[(folder, name)]
+    with open(path, 'rb') as h:
+        h.seek(archive.base + int(e['FileOffset']))
+        data = h.read(int(e['FileSize']))
+    return crilayla.decompress(data) if int(e['ExtractSize']) != int(e['FileSize']) else data
 
 
 @test
@@ -6036,6 +6152,243 @@ def edf5_campaign_plugin_sites() -> None:
             at = img.find(b'\xe8', at + 1)
         return out
     assert callers(0xD92B0) == set(sites), sorted(hex(x) for x in callers(0xD92B0) ^ set(sites))
+
+
+@test
+def edf41_menu_bg_math() -> None:
+    """tools/edf41_menu_bg.py's reprojection (no game): 4.1's camera (vertical fov 0.96 rad from the origin) mapped to
+    EDF6's screen in model units (+-9.6 x +-5.4): a point on the frustum's edge lands on the screen's edge at any depth,
+    BG_Stripe's corner (z = -31.03, the frame's back) just past it; depth() is projective, falls with distance and
+    stays in 0 .. 1.5 over the layers; clipping keeps a triangle's inside part with its attributes; the row-vector
+    rotation matrix is mdb's (a 52-degree turn about -Y gives Menu_BG01's BGCircle_map3 bind rows); the HUiBG layout
+    gets one layout more, first, on the new skin, the stock ones as they were."""
+    import math
+    import sgo
+    import edf41_menu_bg as b
+    for z in (-8.84, -17.5, -31.03):
+        x, y, _ = b.project((b.TAN_Y * b.ASPECT * -z, b.TAN_Y * -z, z))
+        assert abs(x - 9.6) < 1e-4 and abs(y + 5.4) < 1e-4, (z, x, y)   # EDF6's UI is y down
+    x, y, _ = b.project((29.02, 16.33, -31.03))
+    assert 9.6 < x < 9.8 and -5.5 < y < -5.4, (x, y)
+    ds = [b.depth(z) for z in (-8.0, -13.0, -17.5, -25.0, -32.0)]
+    assert ds == sorted(ds, reverse=True) and abs(ds[0] - b.DEPTH_RANGE) < 1e-9 and abs(ds[-1]) < 1e-9, ds
+    # projective: the depth of a plane's points is affine in their screen position (planes stay planes)
+    pts = [(-5.0, 1.0, -10.0), (5.0, 1.0, -30.0), (0.0, 4.0, -20.0)]
+    proj = [b.project(p) for p in pts]
+    q = b.project(tuple(sum(p[k] for p in pts) / 3 for k in range(3)))   # a point of that plane
+    dx, dy = proj[1][0] - proj[0][0], proj[1][1] - proj[0][1]
+    ex, ey = proj[2][0] - proj[0][0], proj[2][1] - proj[0][1]
+    det = dx * ey - dy * ex
+    u = ((q[0] - proj[0][0]) * ey - (q[1] - proj[0][1]) * ex) / det
+    v = (dx * (q[1] - proj[0][1]) - dy * (q[0] - proj[0][0])) / det
+    assert abs(proj[0][2] + u * (proj[1][2] - proj[0][2]) + v * (proj[2][2] - proj[0][2]) - q[2]) < 1e-9
+    assert abs(b.depth_slope(-20.0) - (b.depth(-20.001) - b.depth(-19.999)) / -0.002) < 1e-6
+    tri = [([(0.0, 0.0, -10.0, 1.0), (0.0, 0.0)], (0.0, 0.0, -10.0)),
+           ([(40.0, 0.0, -10.0, 1.0), (1.0, 0.0)], (40.0, 0.0, -10.0)),
+           ([(0.0, 2.0, -10.0, 1.0), (0.0, 1.0)], (0.0, 2.0, -10.0))]
+    poly = b.clip_polygon(tri)
+    edge = b.SIDE_KEEP * b.TAN_Y * b.ASPECT * 10
+    assert len(poly) == 4 and max(p[1][0] for p in poly) <= edge + 1e-6, poly
+    for elems, view in poly:   # attributes follow the cut: u = x / 40 on the triangle
+        assert abs(elems[1][0] - view[0] / 40) < 1e-9 and abs(elems[0][0] - view[0]) < 1e-9
+    m = b.quat_matrix((0.0, -math.sin(math.radians(26)), 0.0, math.cos(math.radians(26))))
+    assert abs(m[0] - 0.6157) < 1e-3 and abs(m[2] - 0.7880) < 1e-3 and abs(m[8] + 0.7880) < 1e-3, m[:11]
+    stock = {'BG_BASE': ['Layout', 'app:/UI/BG_skin.sgo', [0, 0, 0], [0, 0, 1920, 1080], [], 0, 0, []],
+             'BG_BASE_B': ['Layout', 'app:/UI/BG_B_skin.sgo'], 'BG_BASE_C': ['Layout', 'app:/UI/BG_C_skin.sgo'],
+             'BG_BASE_D': ['Layout', 'app:/UI/BG_D_skin.sgo'], 'xgs_ui_object_class': 'HUiBG',
+             'layout_tree': [['BaseFrame'], [['BG_BASE'], 0, ['BG_BASE_B'], 0, ['BG_BASE_C'], 0, ['BG_BASE_D'], 0]]}
+    data = sgo.write_depth_first(258, stock)
+    out = sgo.plain(sgo.read(b.lyt(data))[1])
+    base = sgo.plain(sgo.read(data)[1])
+    assert {k: v for k, v in out.items() if k not in (b.LAYOUT, 'layout_tree')} == \
+        {k: v for k, v in base.items() if k != 'layout_tree'}, 'a stock layout changed'
+    assert out[b.LAYOUT][1] == f'app:/UI/{b.STEM}_skin.sgo' and out[b.LAYOUT][2:] == base['BG_BASE'][2:]
+    assert out['layout_tree'] == [['BaseFrame'], [[b.LAYOUT], 0, *base['layout_tree'][1]]]
+    try:
+        b.lyt(b.lyt(data))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('the layout added twice')
+
+
+@test
+def edf41_menu_bg_install() -> None:
+    """tools/edf41_menu_bg.py install on a stand-in game (conversion stubbed): every file written as edf41menubg's, a
+    second install from the same 4.1 files converts nothing, no EDF4.1 writes nothing (and takes an earlier install
+    out), another mod's copy of a stock file it extends leaves the whole background out with that file untouched, removal deletes what it
+    wrote; the installer and the release bundle carry it, and the asset pack lists its sources."""
+    import tempfile
+    import edf41_menu_bg as b
+    import edf41src
+    import export_edf41_assets as exp
+    import ledger
+    made: list[str] = []
+
+    class Src:
+        def __init__(self, _root41: str) -> None:
+            pass
+
+        def fingerprint(self, rel: str) -> list[int]:
+            return [len(rel), 1]
+
+    def build(_root: str, _root41: str) -> dict[str, bytes]:
+        made.append('x')
+        return {rel: f'bg {rel}'.encode() for rel in b.FILES}
+
+    assert b.OWNER in ledger.OWNERS and set(b.SOURCES) <= set(exp.wanted()) and 'MENU' in edf41src.TOP
+    assert "'edf41_menu_bg'" in src('tools/build_release.py')
+    inst = src('tools/installer.py')
+    assert 'edf41_menu_bg.install(game, root41)' in inst and 'edf41_menu_bg.remove' in inst
+    with tempfile.TemporaryDirectory() as game, patched(b, build=build, Source=Src), \
+            patched(b.edf41src, problems=lambda *_a, **_k: []):
+        os.makedirs(os.path.join(game, 'Mods'))
+        assert b.install(game, None) == ([], [b.NO_EDF41]) and not made
+        written, skipped = b.install(game, 'edf41')
+        assert not skipped and len(written) == len(b.FILES) and made == ['x']
+        led = ledger.Ledger(game)
+        assert all(led.owners(rel) == [b.OWNER] for rel in b.FILES)
+        assert b.install(game, 'edf41') == ([], []) and made == ['x'], 'converted again from the same files'
+        assert b.install(game, None)[0] == [] and not ledger.Ledger(game).owned_by(b.OWNER), 'an old install left in'
+        other = os.path.join(game, 'Mods', 'UI', 'UIRESOURCEGROUP_HQ.SGO')
+        os.makedirs(os.path.dirname(other), exist_ok=True)
+        with open(other, 'wb') as f:
+            f.write(b'another mod')
+        written, skipped = b.install(game, 'edf41')
+        assert not written and 'UIRESOURCEGROUP_HQ.SGO' in skipped[0], skipped
+        with open(other, 'rb') as f:
+            assert f.read() == b'another mod'
+        os.remove(other)
+        assert b.install(game, 'edf41')[0]
+        b.remove(game)
+        assert not ledger.Ledger(game).owned_by(b.OWNER)
+        assert not any(os.path.exists(os.path.join(game, 'Mods', *rel.split('/'))) for rel in b.FILES)
+
+
+@test
+def edf41_menu_bg_real() -> None:
+    """tools/edf41_menu_bg.py on the real games (a developer's machine; CI has neither): 4.1's Menu_BG01 reprojected
+    onto EDF6's screen. Every still layer lands where 4.1's camera shows it (its extent = its projected 4.1 extent;
+    the panoramic band clipped to the kept region), the back stripe fills the screen just past its edge, the two discs
+    off the axis keep their size in their own plane scaled by their depth and sit at their projected centre (the CAS's
+    fixed translations moved to match), depths stay in 0 .. 1.5; the files read back (MDB 0x20, CAS 0x204, SGOs, the
+    clip's names); lyt_bg.sgo is EDF6's own plus the one layout. The plugin's hook sites are the code it reads."""
+    import math
+    import struct
+    import cas_legacy
+    import mdb
+    import mdb_legacy
+    import rootcpk
+    import sgo
+    import edf41_menu_bg as b
+    if not _e5c_have_game():
+        return
+    import pefile
+    code = src('src/edf5campaign.cpp')
+
+    def sig(name: str) -> bytes:
+        body = code.split(f'const unsigned char {name}[]={{', 1)[1].split('}', 1)[0]
+        return bytes(int(x, 16) for x in re.findall(r'0x([0-9A-Fa-f]{2})', body))
+    pe = pefile.PE(os.path.join(rootcpk.DEFAULT_GAME, 'EDF.dll'), fast_load=True)
+    img = pe.get_memory_mapped_image()
+    for name, rva in (('kBgThemeCallerSig', 0x8BE6B0), ('kBgThemeSig', 0x8BE6E0), ('kChildByNameSig', 0x839FD0)):
+        assert img[rva:rva + len(sig(name))] == sig(name), name
+    assert 'L"BG_BASE_EDF41"' in code and b.LAYOUT == 'BG_BASE_EDF41'
+    root41 = _edf41_root()
+    if not root41:
+        return
+    files = b.build(rootcpk.DEFAULT_GAME, root41)
+    assert set(files) == set(b.FILES)
+    stock = sgo.plain(sgo.read(rootcpk.default().read('UI', 'LYT_BG.SGO'))[1])
+    lyt = sgo.plain(sgo.read(files[b.LYT])[1])
+    assert {k: v for k, v in lyt.items() if k not in (b.LAYOUT, 'layout_tree')} == \
+        {k: v for k, v in stock.items() if k != 'layout_tree'}
+    assert lyt['layout_tree'][1][:2] == [[b.LAYOUT], 0] and lyt['layout_tree'][1][2:] == stock['layout_tree'][1]
+    for rel in b.GROUPS:   # every scene that preloads the backgrounds preloads ours too, the rest as it was
+        base = sgo.plain(sgo.read(rootcpk.default().read(*rel.split('/')))[1])['resource']
+        got = sgo.plain(sgo.read(files[rel])[1])['resource']
+        ours = [f'APP:/{r}' for r in (b.SKIN, b.SGO, b.RAB, b.CAS)]
+        at = base.index('APP:/UI/BG_D.CAS') + 1
+        assert got == base[:at] + ours + base[at:], rel
+    groups = [n for n in rootcpk.default().names('UI') if n.startswith('UIRESOURCEGROUP_') and
+              'APP:/UI/LYT_BG.SGO' in sgo.plain(sgo.read(rootcpk.default().read('UI', n))[1]).get('resource', [])]
+    assert sorted(f'UI/{n}' for n in groups) == sorted(b.GROUPS), groups
+    skin = sgo.plain(sgo.read(files[b.SKIN])[1])
+    model_sgo = sgo.plain(sgo.read(files[b.SGO])[1])
+    assert skin['base'] == f'app:/UI/{b.STEM}.sgo' and skin['object_class'] == 'Model'
+    assert model_sgo['animation_model'] == [[[f'app:/UI/{b.STEM}.rab', b.MODEL]], f'app:/UI/{b.STEM}.cas', 0]
+    src41 = b.Source(root41)
+    cas41 = src41.read(b.SOURCES[2])
+    pose = b.Pose(cas41)
+    rab41 = mdb.rab_read(src41.read(b.SOURCES[1]))
+    old = mdb.mdb_read(mdb_legacy.mdb_from_legacy(mdb.cmpl_decompress(
+        next(f for f in rab41.files if f.name == b.MODEL).stored)))
+    rab6 = mdb.rab_read(files[b.RAB])
+    assert [f.name for f in rab6.files] == [f.name for f in rab41.files]
+    new = mdb.mdb_read(mdb.cmpl_decompress(next(f for f in rab6.files if f.name == b.MODEL).stored))
+    assert new.version == 0x20 and len(new.objects) == len(old.objects)
+    cas6 = cas_legacy.cas_layout(files[b.CAS])
+    assert cas6.version == cas_legacy.CAS_6
+    names = [old.name_of(x.name) for x in old.bones]
+
+    def extent(md: mdb.Mdb, o: mdb.Object, pose_: b.Pose, project: bool) -> list[float]:
+        world = pose_.matrix(md.name_of(md.bones[o.bone].name), md.bones[o.bone].local)
+        lo, hi = [math.inf] * 3, [-math.inf] * 3
+        for me in o.meshes:
+            pi = b._pos_index(me)
+            for e in b.decode(me):
+                p = b._transform(e[pi], world)
+                if project:   # where 4.1 shows it, cut at the kept region's sides (as the converter clips)
+                    x, y, z = b.project(p)
+                    ex, ey = b.SIDE_KEEP * 9.6, b.SIDE_KEEP * 5.4
+                    p = (max(-ex, min(ex, x)), max(-ey, min(ey, y)), z)
+                for k in range(3):
+                    lo[k], hi[k] = min(lo[k], p[k]), max(hi[k], p[k])
+        return lo + hi
+    discs = ('BGCircle_map3', 'BGCircle_map4')
+    pose6 = b.Pose(b.patch_cas(cas41, pose, {n: b.project(tuple(pose.translation(n))) for n in discs}))
+    for o_old, o_new in zip(old.objects, new.objects):
+        name = names[o_old.bone]
+        got = extent(new, o_new, pose6, False)
+        assert new.materials[o_new.meshes[0].material].b2 == old.materials[o_old.meshes[0].material].b2, name
+        if pose.spins(name):   # the tilted discs spread in depth (drawn by material priority b2, as every layer)
+            continue
+        assert -1e-6 <= got[2] and got[5] <= b.DEPTH_RANGE + 1e-6, (name, got)
+        want = extent(old, o_old, pose, True)
+        if name in ('WorldMap', 'WorldMapFrame'):   # clipped: inside the kept region, wider than the screen
+            assert got[0] < -9.6 and got[3] > 9.6 and max(abs(got[0]), got[3]) <= b.SIDE_KEEP * 9.6 + 1e-3, (name, got)
+            continue
+        assert max(abs(g - w) for g, w in zip(got, want)) < 0.01, (name, got, want)   # half-float positions: 1 px
+    stripe = extent(new, next(o for o in new.objects if new.name_of(new.bones[o.bone].name) == 'BG_Stripe'), pose6, False)
+    assert stripe[0] < -9.6 < 9.6 < stripe[3] and stripe[1] < -5.4 < 5.4 < stripe[4], stripe
+    for disc in discs:
+        t = pose.translation(disc)
+        want = tuple(struct.unpack('<3f', struct.pack('<3f', *b.project(tuple(t)))))
+        assert pose6.translation(disc) == want, disc
+        bind = new.bones[[new.name_of(x.name) for x in new.bones].index(disc)].local[12:15]
+        assert max(abs(x - y) for x, y in zip(bind, b.project(tuple(t)))) < 1e-5, (disc, bind)
+        o_old = next(o for o in old.objects if names[o.bone] == disc)
+        o_new = next(o for o in new.objects if new.name_of(new.bones[o.bone].name) == disc)
+        r_old = max(abs(e[b._pos_index(o_old.meshes[0])][0]) for e in b.decode(o_old.meshes[0]))
+        r_new = max(abs(e[b._pos_index(o_new.meshes[0])][0]) for e in b.decode(o_new.meshes[0]))
+        assert abs(r_new - r_old * b.S / -t[2]) < 0.01, (disc, r_old, r_new)
+    l41, l6 = cas_legacy.cas_layout(cas41).canm, cas6.canm
+    assert [c.name for c in l41.clips] == [c.name for c in l6.clips] and l41.names == l6.names
+    # what the real game needed (2026-10-18): faces clockwise in x / y as EDF6's own BG (else culled: a black screen),
+    # texture names spelled as the RAB's members (else a crash), the turning bones' spins mirrored with their models
+    members = [f.name for f in rab6.files]
+    assert all(t.filename in members for t in new.textures), [t.filename for t in new.textures]
+    for o in new.objects:
+        for me in o.meshes:
+            ps = [e[b._pos_index(me)] for e in b.decode(me)]
+            idx = struct.unpack(f'<{len(me.indices) // 2}H', me.indices)
+            area = sum((ps[j][0] - ps[i][0]) * (ps[k][1] - ps[i][1]) - (ps[j][1] - ps[i][1]) * (ps[k][0] - ps[i][0])
+                       for i, j, k in zip(idx[0::3], idx[1::3], idx[2::3]))
+            assert area < 0, (new.name_of(new.bones[o.bone].name), area)
+    for name in pose.euler:
+        if pose.spins(name):
+            for k, k6 in zip(pose.euler[name], pose6.euler[name]):
+                assert (k6[0], k6[1], k6[2]) == (-k[0], k[1], -k[2]), name
 
 
 @test
@@ -6626,6 +6979,40 @@ def edf41_weapon_conversion() -> None:
     assert dsgo.to_py(edf5port.weapon41({'xgs_scene_object_class': 'x'}, {}).root.get('ExtPrams')) == [1.0]
     energy = edf5port.weapon41({'EnergyChargeRequire': 25}, {}).root.get('EnergyChargeRequire')
     assert dsgo.to_py(energy) == [25.0, 25.0], 'EDF6 holds EnergyChargeRequire as [curve, value]'
+
+
+# EDF.dll's weapon update draws a charge's energy from its owner (vtable slot 31, call 0x693E34) unless
+# EnergyChargeRequire[1] (+0x234, read at 0x68CAAA) is below this (comiss 0x693E1B); the amount is element 0 (+0x22C,
+# 0x68CA3D: a curve at the star, a plain number as it is). docs/stock-payload-re.md section 3.
+WD_ENERGY_GATE = 0.0011
+
+
+@test
+def edf41_wing_diver_energy() -> None:
+    """edf41port/weapons.json against EDF.dll's energy draw (2026-10-18 feedback: a 4.1 Wing Diver weapon's charge
+    takes no flight energy): every Wing Diver weapon (100-107) holds EnergyChargeRequire as [need, gate], need its 4.1
+    number; one whose 4.1 text names an energy cost (消費エネルギー X％) needs X and draws (gate at or above
+    WD_ENERGY_GATE), one 4.1 gives the no-draw mark 0.001 (its own generator: 0％ / －－－ or no cost line) stays below
+    it. Needs no game."""
+    import re
+    with open(os.path.join(ROOT, 'edf41port', 'weapons.json'), encoding='utf-8') as f:
+        weapons = [w for w in json.load(f)['weapons'] if 100 <= w['category'] <= 107]
+    assert weapons, 'no Wing Diver weapon in edf41port/weapons.json'
+    drawing = 0
+    for w in weapons:
+        energy = dsgo.to_py(dsgo.load(w['weapon']).get('EnergyChargeRequire'))
+        assert isinstance(energy, list) and len(energy) == 2 and energy[0] == energy[1], (w['id'], energy)
+        need = energy[0]
+        ja = w['text']['JA']
+        cost = dict((s[0], s[1]) for s in ja[2]).get('消費エネルギー') if len(ja) > 2 else None
+        number = re.match(r'[\d.]+', cost) if cost else None
+        if number and float(number.group()) > 0:
+            assert abs(need - float(number.group())) <= 1e-4 * max(1.0, need), (w['id'], cost, need)
+            assert need >= WD_ENERGY_GATE, (w['id'], need)
+            drawing += 1
+        else:
+            assert abs(need - 0.001) < 1e-6, f'{w["id"]}: no energy cost in its text ({cost!r}) but {need}'
+    assert drawing >= 100, drawing
 
 
 @test
@@ -9335,6 +9722,104 @@ def edf41_friend_looks_shipped() -> None:
     assert m.rel_of(omg['animation_model'][1]) == 'OBJECT/ARMYSOLDIER.CAS'
 
 
+def _rotation_degrees(rot: list) -> float:
+    """How far the rotation part of the 4x4 `rot` turns, in degrees."""
+    import math
+    return math.degrees(math.acos(max(-1.0, min(1.0, (rot[0] + rot[5] + rot[10] - 1) / 2))))
+
+
+EDF41_SOLDIERS = ('OBJECT/AIARMYSOLDIER_OMG.SGO', 'OBJECT/AIARMYSOLDIER_OMG_LEADER.SGO')   # + LOOKS' (look_rel)
+
+
+@test
+def edf41_friend_grip_shipped() -> None:
+    """4.1's soldiers hold EDF6's weapons with their own skeleton (feedback 2026-10-18 「omega小队持枪姿势有问题」; no game:
+    the files are committed). Every LOOKS soldier and the Omega team: human_direction_adjust's mode twists its 4.1
+    model's spine about the up axis (make_edf41_objects.spine_mode: 4.1's hara bones point local Y up, mode 1; EDF6's 2
+    turns them about the side axis), and soldier_weapon_grab_adjust is the one value of its model (the left wrist's
+    frame change, weapon_grip_adjust): the rangers' a ~84-degree turn, not EDF6's zero, the Omega team's the same as
+    the 4.1 rangers' (one model; both from EDF6 rangers, whose adjust is zero)."""
+    import edf41_objects as eo
+    import edf41friends as ef
+    import make_edf41_objects as m
+    import sgo
+    by_model: dict[tuple, set] = {}
+    for rel in [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS):
+        d = sgo.load(data=eo.read(rel))
+        md = m.model_mdb(lambda r: eo.read(m.rel_of(r)), d['animation_model'])
+        hda = d['human_direction_adjust']
+        assert hda[0] == m.spine_mode(md, hda[1]) == 1, (rel, hda)
+        grab = d['soldier_weapon_grab_adjust']
+        assert len(grab) == 2 and all(len(v) == 3 for v in grab), (rel, grab)
+        # one value per model and class (a class's EDF6 templates share a skeleton and an adjust)
+        model = m.rel_of(m.model_entries(d['animation_model'][0])[0][0])
+        by_model.setdefault((model, d['xgs_scene_object_class']), set()).add(repr(grab))
+    assert all(len(grabs) == 1 for grabs in by_model.values()), by_model
+    ranger = sgo.load(data=eo.read(ef.look_rel('OBJECT/AIARMYSOLDIER_AF.SGO')))['soldier_weapon_grab_adjust']
+    for rel in EDF41_SOLDIERS:
+        assert sgo.load(data=eo.read(rel))['soldier_weapon_grab_adjust'] == ranger, rel
+    assert 60 < _rotation_degrees(m.euler_matrix(ranger[1])) < 120, ranger
+
+
+@test
+def edf41_friend_grip_matches_weapons() -> None:
+    """The 4.1 soldiers' soldier_weapon_grab_adjust against the weapons (needs EDF4.1 and EDF6): make_edf41_objects
+    recomputes the shipped value from each soldier's model and its EDF6 template's; and for every ranger AI weapon both
+    games ship with an IK record (MAB list 1, record 0: what EDF+0x68C206 reads), EDF6's IK frame is 75+ degrees from
+    4.1's own -- the hand 4.1's skeleton got before -- and within 20 of it through the shipped adjust (grab · ik,
+    EDF+0x597F00), i.e. the left hand on each grip as 4.1 itself placed it."""
+    import math
+
+    import dsgo
+    import edf41_objects as eo
+    import edf41friends as ef
+    import mab_legacy
+    import make_edf41_objects as m
+    import mdb
+    import sgo
+    edf41, edf6 = os.path.join(m.STEAM, 'Earth Defense Force 4.1'), os.path.join(m.STEAM, 'EARTH DEFENSE FORCE 6')
+    if not all(os.path.isfile(os.path.join(r, 'Root.cpk')) for r in (edf41, edf6)):
+        print('skip  edf41_friend_grip_matches_weapons: needs EDF4.1 and EDF6 installed')
+        return
+    games = m.Games(edf41, edf6)
+    registry = eo.registry()
+    reg = {o['object']: o for o in registry['objects']}
+
+    def file(ref: object) -> bytes | None:
+        r = m.rel_of(str(ref))
+        return eo.read(r) if r in registry['files'] else games.read6(r) if r in games.have6 else None
+
+    for rel in [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS):
+        o = reg[rel]
+        template = o.get('look_of') or o['class_keys_from']['template']
+        d = sgo.load(data=eo.read(rel))
+        grab, _mode = m.soldier_grip(file, d, sgo.load(data=games.read6(template)), rel)
+        assert grab == d['soldier_weapon_grab_adjust'], (rel, grab, d['soldier_weapon_grab_adjust'])
+
+    def ik(data: bytes) -> list | None:
+        if data[:4] == b'DSGO':
+            item = dsgo.parse(data).root.get('animation_model').items[2]
+            block = getattr(item, 'data', None)
+        else:
+            block = sgo.read(data)[1]['animation_model'][2]
+        if not isinstance(block, bytes):
+            return None
+        first = [loc for i, loc in mab_legacy.mab_locators(block) if i == 1][:1]
+        return m.euler_matrix([math.degrees(a) for a in first[0].c[:3]]) if first and first[0].c else None
+
+    grab = m.euler_matrix(sgo.load(data=eo.read(ef.look_rel('OBJECT/AIARMYSOLDIER_AF.SGO')))['soldier_weapon_grab_adjust'][1])
+    seen = 0
+    for w in sorted(r for r in games.have6 if r.startswith('WEAPON/AISOLDIER') and r.endswith('.SGO') and r in games.in4):
+        q6, q4 = ik(games.read6(w)), ik(games.read4(w))
+        if q6 is None or q4 is None:
+            continue
+        seen += 1
+        before = _rotation_degrees(mdb.mmul(q6, mdb.inverse_affine(q4)))
+        after = _rotation_degrees(mdb.mmul(mdb.mmul(grab, q6), mdb.inverse_affine(q4)))
+        assert before > 75 and after < 20, (w, before, after)
+    assert seen >= 8, seen
+
+
 @test
 def edf41_friends_load_in_edf6() -> None:
     """The friends' SGOs as the installed game loads them (needs EDF4.1, EDF5 and EDF6: _legacy_games): each 'stock' one is in EDF6's
@@ -10071,8 +10556,10 @@ def edf41_story_pack_real() -> None:
     skipped = {path: why for g, path, why in p['skipped'] if g == e5c.PACK41.group}
     # 2026-10-15: the motherships (301, 401) and UfoRobo are the plugin's own classes: no story mission is left out any more
     assert not skipped and len(rows41) == len(e5c.edf41_text()['missions']) == 89, skipped
+    assert [m[e5c.M_BGM] for m in ours] == [e5c.BGM41] * 2, "the modes' HQ music is not EDF4.1's"
     listed = dsgo.parse(files[e5c.PACK41.list]).root.get('table').items
     assert [r.items[2] for r in listed] == [f'EDF41/{r["path"]}' for r in rows41]
+    assert {(r.items[7], r.items[8]) for r in listed} == {(0.0, e5c.BGM41)}, "not EDF4.1's HQ music"
     for r in rows41:
         for name in r['files']:
             assert files[f'MISSION/EDF41/{r["path"]}/{name}'] == e5c.edf41_script(r['path'], name)
@@ -10472,6 +10959,16 @@ def edf41_asset_pack() -> None:
         def fingerprint(self, name: str) -> list[int]:
             return [len(self.read(name)), 7]
 
+    class FakeMenu:   # 4.1's MENU files in Root.cpk (tools/edf41_menu_bg.py Source)
+        def __init__(self, _root: str) -> None:
+            pass
+
+        def read(self, rel: str) -> bytes:
+            return f'menu:{rel}'.encode()
+
+        def fingerprint(self, rel: str) -> list[int]:
+            return [len(self.read(rel)), 9]
+
     def put(path: str, data: bytes) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb') as f:
@@ -10501,10 +10998,13 @@ def edf41_asset_pack() -> None:
             [f'MAP/{f}' for n in edf41_maps.MAPS for f in edf41_maps._source(n, FakeCpk(''))]
         for g in s.GROUPS:
             assert {s.rel41(p, r41) for p in s.sources_of(g, r6, r41)} - {None} <= set(s.sources41()), g
-        with patched(exp.edf41_maps, Archives=FakeCpk):
+        with patched(exp.edf41_maps, Archives=FakeCpk), patched(exp.edf41_menu_bg, Source=FakeMenu):
             exp.export(r41, pack, say=lambda _line: None)
         listed = edf41src.pack(pack).names
-        assert len(listed) == 3 * len(edf41_maps.MAPS) + len(s.sources41()) - 2, len(listed)
+        assert len(listed) == 3 * len(edf41_maps.MAPS) + len(s.sources41()) - 2 + len(exp.edf41_menu_bg.SOURCES), len(listed)
+        real_menu = exp.edf41_menu_bg.Source(pack)   # the HQ background's files from the pack: the same bytes and stamp
+        assert all(real_menu.read(r) == FakeMenu('').read(r) and real_menu.fingerprint(r) == FakeMenu('').fingerprint(r)
+                   for r in exp.edf41_menu_bg.SOURCES)
         assert edf41src.check(pack, full=True) == [] and os.path.isfile(os.path.join(pack, exp.README))
         # the same reads and fingerprints from the pack as from EDF4.1
         a = edf41_maps.Archives(pack)
@@ -10631,7 +11131,7 @@ def edf41_asset_pack() -> None:
         # a second export: puts back what was removed, rewrites nothing else, drops an unlisted file
         put(os.path.join(pack, 'MAP', 'EXTRA.MAC'), b'x')
         lines: list[str] = []
-        with patched(exp.edf41_maps, Archives=FakeCpk):
+        with patched(exp.edf41_maps, Archives=FakeCpk), patched(exp.edf41_menu_bg, Source=FakeMenu):
             exp.export(r41, pack, say=lines.append)
         assert [x for x in lines if x.startswith('  导出')] == ['  导出 mods/Plugins/subtitles.txt'], lines
         assert not os.path.exists(os.path.join(pack, 'MAP', 'EXTRA.MAC')) and edf41src.check(pack, full=True) == []

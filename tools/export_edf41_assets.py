@@ -1,7 +1,7 @@
 """Exports an EDF4.1 asset pack (pylib/edf41src.py) from an EDF4.1 install: exactly the EDF4.1 files the install-time
 converters read (tools/edf41_maps.py sources: every map's MAC / MAD / RAB, unpacked from 4.1's archives;
 tools/edf41_sounds.py sources41: the weapon sound bank, the two voice banks and their lists, the subtitle plugin's text
-when that 4.1 has it), laid out as EDF4.1 lays them out, and the manifest with each file's size, SHA-256 and EDF4.1
+when that 4.1 has it; tools/edf41_menu_bg.py SOURCES: the HQ background, unpacked from Root.cpk), laid out as EDF4.1 lays them out, and the manifest with each file's size, SHA-256 and EDF4.1
 fingerprint. A player without EDF4.1 then gets the 4.1 maps and sounds from it: the share package carries it as the
 folder `edf41` next to the installer (or $EDF41_ASSETS names it).
 
@@ -26,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import edf41_maps  # noqa: E402
+import edf41_menu_bg  # noqa: E402
 import edf41_sounds  # noqa: E402
 import edf41src  # noqa: E402
 import gamedir  # noqa: E402
@@ -33,7 +34,7 @@ import gamedir  # noqa: E402
 README = '说明.txt'
 README_TEXT = """EDF4.1 素材包（EDF6 全军出击安装器用）
 
-这是从 EDF4.1 里抽出的、安装器转换 4.1 任务地图和 4.1 音效 / 语音 / 字幕所需的原始文件（{count} 个，{size}）。
+这是从 EDF4.1 里抽出的、安装器转换 4.1 任务地图、4.1 音效 / 语音 / 字幕和 4.1 本部背景所需的原始文件（{count} 个，{size}）。
 放法：整个 {folder} 文件夹和「EDF6VehicleCrew安装器.exe」放在同一个文件夹里（不要改名，不要只拷一部分）。
 没装 EDF4.1 时，安装器会从这里转换；装了 EDF4.1 时，安装器优先用已安装的 EDF4.1。
 文件清单与 SHA-256 在 {manifest}；缺文件或文件被改过时，用到它的那张地图或那组声音不会安装，安装器会说明原因。
@@ -42,7 +43,8 @@ README_TEXT = """EDF4.1 素材包（EDF6 全军出击安装器用）
 
 def wanted() -> list[str]:
     """Every rel the pack holds (subtitle files only when the EDF4.1 has them: export decides)."""
-    return [rel for name in edf41_maps.MAPS for rel in edf41_maps.sources(name)] + edf41_sounds.sources41()
+    return [rel for name in edf41_maps.MAPS for rel in edf41_maps.sources(name)] + edf41_sounds.sources41() + \
+        list(edf41_menu_bg.SOURCES)
 
 
 def _sha_file(path: str) -> str:
@@ -90,6 +92,7 @@ def export(root41: str, out: str, say=print) -> dict:  # noqa: ANN001 - say(str)
         os.remove(manifest_path)   # an export cut short leaves no pack
     os.makedirs(out, exist_ok=True)
     archives = edf41_maps.Archives(root41)
+    menu = edf41_menu_bg.Source(root41)
     files: dict[str, dict] = {}
     reused = 0
     for rel in wanted():
@@ -98,6 +101,8 @@ def export(root41: str, out: str, say=print) -> dict:  # noqa: ANN001 - say(str)
         if rel.startswith('MAP/'):
             name = rel.split('/', 1)[1]
             source = archives.fingerprint(name)
+        elif rel in edf41_menu_bg.SOURCES:
+            source = menu.fingerprint(rel)
         else:
             src = os.path.join(root41, *rel.split('/'))
             if not os.path.isfile(src):
@@ -113,8 +118,8 @@ def export(root41: str, out: str, say=print) -> dict:  # noqa: ANN001 - say(str)
             reused += 1
             continue
         say(f'  导出 {rel}')
-        if rel.startswith('MAP/'):
-            data = archives.read(name)
+        if rel.startswith('MAP/') or rel in edf41_menu_bg.SOURCES:
+            data = archives.read(name) if rel.startswith('MAP/') else menu.read(rel)
             _write(dst, data)
             files[rel] = {'size': len(data), 'sha256': hashlib.sha256(data).hexdigest(), 'source': source}
             del data

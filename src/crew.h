@@ -251,6 +251,7 @@ struct Config {
     bool fpArmIk=true;              // ...the arms posed for the first person: shoulders beside and below the eye
     float fpHoldArc=60.0f;          // ...a free hand on the other hand's weapon slides round it this far from below, deg
     float fpWristMax=30.0f;         // ...and its forearm turns about the wrist at most this much, deg
+    bool fpNativeElbow=true;        // ...the elbow bends toward where the animation has it (0: out and down, the old pole)
     bool fpFit=true;                // ...a bulky or long weapon held further off, a shield out to the side
     bool fpCulling=true;            // ...the arms and weapon handed to Umbra around the eye (never culled)
     bool fpMotion=true;             // ...the arms and weapon sway, bob, kick, dip at a reload, a switch, a sprint, a roll
@@ -576,6 +577,10 @@ bool InstallEdf5Campaign() noexcept;
 bool InstallPortedMissions() noexcept;   // PortedMissionsUnlocked: the packs' mission select (edf5campaign.cpp)
 void SetMissionPackSaveHook(bool ready) noexcept;   // the save-load hook is in (airstrike.cpp): packs with Legacy rows owned
 void MigrateMissionPackSave(unsigned char* gs) noexcept;   // a pack's loaded save moved to the rows now, once (edf5campaign.cpp)
+bool InstallEdf41MenuBg() noexcept;      // EDF4.1's HQ background in the 4.1 packs (edf5campaign.cpp)
+// The current mode's content id (0..2 EDF6's, then the installed packs': Cfg().edf5CampaignContent, edf41Content ...), -1
+// when there is none to read (edf5campaign.cpp, as the mission select reads it). Any thread: only reads.
+int GameContentId() noexcept;
 // EDF5's compiled mission scripts online: the BVM executor's PreloadPlayerResource and CreatePlayer given their online
 // half (edf5online.cpp). Edf5BvmOnlinePlayers: the patched creation loop's count.
 bool InstallEdf5Online() noexcept;

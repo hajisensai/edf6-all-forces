@@ -134,7 +134,7 @@ class DriverTest(unittest.TestCase):
         with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
              patch.object(drive, 'run', return_value=0) as run:
             self.assertEqual(drive.main(['run']), 0)
-        none = {'extra': (), 'loadout': None, 'shots': None, 'keys': (), 'place': (), 'ini': ()}
+        none = {'extra': (), 'loadout': None, 'shots': None, 'keys': (), 'place': (), 'ini': (), 'hq': False}
         run.assert_called_once_with(self.game, 'range', 1, 45, None, **none)
         with patch.object(drive.gamedir, 'find_or_dev', return_value=self.game), \
              patch.object(drive, 'run', return_value=0) as run:
@@ -149,7 +149,7 @@ class DriverTest(unittest.TestCase):
                                          '--key', '57@25:5000', '--key', 'enter@30']), 0)
         run.assert_called_once_with(self.game, 'RM015', 1, 90, 'out.log', extra=('probe airdrop', 'mem'),
                                     loadout='x.ini', shots='shots', keys=(('57', 25.0, 5000), ('enter', 30.0, 1000)),
-                                    place=(), ini=())
+                                    place=(), ini=(), hq=False)
         with self.assertRaises(SystemExit):
             drive.run_options(['--key', '57'])
         with self.assertRaises(SystemExit):

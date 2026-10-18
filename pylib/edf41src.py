@@ -10,6 +10,7 @@ manifest (MANIFEST) with each one's size and SHA-256. tools/export_edf41_assets.
     <pack>/MAP/<MAP>.MAC|MAD|RAB       the map files, unpacked from 4.1's Root.cpk / Chunk0x.cpk / DX11.cpk
     <pack>/SOUND/PC/...                4.1's loose sound files, as they are
     <pack>/mods/Plugins/subtitles*.txt the subtitle plugin's text, when the exporting 4.1 had it
+    <pack>/MENU/MENU_BG01.SGO|RAB|CAS  the HQ background (tools/edf41_menu_bg.py), unpacked from 4.1's Root.cpk
 
 `source` is what the converters fingerprint the file by in EDF4.1 itself (a MAP file: the archive's [unpacked size,
 CRC]; a loose file: [size, mtime ns]): a map or sound group converted from EDF4.1 is current from the pack made of the
@@ -38,7 +39,7 @@ KIND = 'edf41-assets'
 FORMAT = 1
 ENV = 'EDF41_ASSETS'
 FOLDER = 'edf41'          # next to the installer
-TOP = ('MAP', 'SOUND', 'mods')   # the folders a pack's files are in
+TOP = ('MAP', 'SOUND', 'mods', 'MENU')   # the folders a pack's files are in
 
 
 def is_pack(path: str | None) -> bool:

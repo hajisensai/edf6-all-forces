@@ -93,9 +93,22 @@ LANGS = ('CN', 'EN', 'JA', 'KR', 'SC')
 CONFIG = 'DEFAULTPACKAGE/CONFIG.SGO'
 TEXTS = {lang: f'ETC/TEXTTABLE_STEAM.{lang}.TXT_SGO' for lang in LANGS}   # app:/etc/TextTable_steam.%LOCALE%.txt_sgo
 SCRIPTS = 'EDF5_OLD_SCRIPT'
-# The values of EDF6's own 28 EDF5-era rows (RM015B2, M046, ...): the EDF5 soldiers' look, its menu music, flags 8
-# (no branch bits 0x80 / 0x100, no 0x20).
-BGM = 'BGM_E6M29_MissionEDF5'
+# A row's music (list member 8) is what the HQ / sortie screen and the online room play while it is the selected
+# mission (EDF.dll 0x8406E0 reads it through 0xE0A30; called from the mission select's cursor 0x8A5AA7 / 0x8A5C1D,
+# the HQ's entry 0x904F1E on the current mission, the room 0x9062C4; MAINSCRIPT HQMain / Room
+# PlaySelectedMissionBGM_Start). Empty, it falls back to the mode's ModeList member 3, then to BGM_E4S02_EDFHonbu.
+# Each pack plays its own game's HQ music (the user, 2026-10-18: EDF5's packs EDF5's own, as EDF6 rows 13..36 =
+# missions 14..37 do; EDF4.1's packs EDF4.1's): the game's HQMain plays GetMainMenuBgm(), the current mode's
+# ModeList member 3 (EDF5 MAINSCRIPT HQMain; EDF41.exe 0x3475F0, default BGM_E4S02_EDFHonbu), and their lists have
+# no music member:
+#   EDF5 story / Mission Pack 1 / 2 config.sgo ModeList: BGM_E5S02_EDFHonbu (all three)
+#   EDF4.1 story config.sgo ModeList: BGM_E4S02_EDFHonbu; Mission Pack 1 package.sgo: BGM_Sinkou_intermission;
+#   Mission Pack 2 package.sgo: BGM_Sinkou_taisenmenu.
+# EDF6's SOUND/PC/TIKYUUX_MUSIC.ACB holds every one of these cues. Pack.bgm; the test range keeps RM015's.
+BGM5 = 'BGM_E5S02_EDFHonbu'
+BGM41, BGM41_MP01, BGM41_MP02 = 'BGM_E4S02_EDFHonbu', 'BGM_Sinkou_intermission', 'BGM_Sinkou_taisenmenu'
+# The values of EDF6's own EDF5-era rows (RM015, M046, ...): the EDF5 soldiers' look (member 6 = 0), EDF5's HQ
+# background (member 7 = 0: lyt_bg.sgo's BG_BASE, EDF5's own BG.sgo), flags 8 (no branch bits 0x80 / 0x100, no 0x20).
 FLAGS = 8.0
 # The packs' content ids: fixed, CONTENT_BASE + the pack's place in SLOTS (docs/mission-list-re.md §7). EDF.dll knows
 # 0..2 (0xE3F80's names, MAINSCRIPT's endings); other mods append theirs after the highest (3, 4, ...), as this tool
@@ -106,8 +119,9 @@ CONTENT_BASE = 65
 # build, owned through the manifest like the rest.
 PACKS_FILE = 'Plugins/EDF6VehicleCrew.packs.ini'
 # ModeList entry members (docs/mission-list-re.md §7): 0 name key, 1 description key, 5 save file, 6 [list, text,
-# thumbnails], 8 online, 9 content id, 10 mode type (0 offline scenario, 1 online).
-M_NAME, M_DESC, M_MST, M_FILES, M_ONLINE, M_CONTENT, M_TYPE = 0, 1, 5, 6, 8, 9, 10
+# thumbnails], 8 online, 9 content id, 10 mode type (0 offline scenario, 1 online); 3 the mode's HQ music (the
+# fallback of a row without one, BGM5 above).
+M_NAME, M_DESC, M_BGM, M_MST, M_FILES, M_ONLINE, M_CONTENT, M_TYPE = 0, 1, 3, 5, 6, 8, 9, 10
 # Member 7: one row a difficulty; a row's element 6 the online weapon level cap, element 7 the armour cap
 # (docs/weapon-level-cap-re.md: EDF.dll 0xD8850 -> 0xE2710 reads [GS+0x148] member 7 [difficulty][6]: a list of floats
 # interpolated by the mission's place in the list, x25 the level; not a list, or negative: -1, no cap; 0xD8130 -> 0xE06B0
@@ -125,13 +139,14 @@ OFFLINE, ONLINE = 'Offline', 'Online'   # a mode's kind: its file names, its tex
 
 class Pack:
     """One mission pack: its rows' group, its files' tag, its save file, the stock content whose mode it copies
-    (difficulty ranges, image, music: EDF6's story for EDF5's, the matching DLC for EDF5's DLCs), its names, and its
-    kinds (offline; the test range online too, as the stock packs are: one save file for both)."""
+    (difficulty ranges, image: EDF6's story for EDF5's, the matching DLC for EDF5's DLCs), its names, its kinds
+    (offline; the test range online too, as the stock packs are: one save file for both), and its HQ music (BGM5 ...:
+    every row's and its modes'; None: the stock mode's and the rows' own, the test range)."""
 
     def __init__(self, group: str, tag: str, mst: str, like: int, name: dict[str, str], desc: dict[str, str],
-                 kinds: tuple[str, ...] = (OFFLINE,), weapon_cap: bool = True) -> None:
+                 kinds: tuple[str, ...] = (OFFLINE,), bgm: str | None = None, weapon_cap: bool = True) -> None:
         self.group, self.tag, self.mst, self.like, self.name, self.desc = group, tag, mst, like, name, desc
-        self.kinds = kinds
+        self.kinds, self.bgm = kinds, bgm
         # False: its online mode has no weapon level cap (mode_entry; the test range's, the user, 2026-10-17:
         # 「测试场不限制武器等级」). The stock online modes cap it by the difficulty and the mission's place in the list.
         self.weapon_cap = weapon_cap
@@ -179,11 +194,11 @@ def _names(part: dict[str, str]) -> tuple[dict[str, str], dict[str, str]]:
 # as the stock packs: one content id and one save file for both, the online one a copy of the stock online mode.
 PACKS = (
     Pack('main', 'EDF5', 'E5M0.MST', 0, *_names({'CN': '本篇', 'EN': 'Main Story', 'JA': '本編', 'KR': '본편', 'SC': '本篇'}),
-         (OFFLINE, ONLINE)),
+         (OFFLINE, ONLINE), BGM5),
     Pack('dlc1', 'EDF5DLC1', 'E5D1.MST', 1, *_names({'CN': '任務包１', 'EN': 'Mission Pack 1', 'JA': 'ミッションパック１',
-                                                     'KR': '미션 팩 1', 'SC': '任务包１'}), (OFFLINE, ONLINE)),
+                                                     'KR': '미션 팩 1', 'SC': '任务包１'}), (OFFLINE, ONLINE), BGM5),
     Pack('dlc2', 'EDF5DLC2', 'E5D2.MST', 2, *_names({'CN': '任務包２', 'EN': 'Mission Pack 2', 'JA': 'ミッションパック２',
-                                                     'KR': '미션 팩 2', 'SC': '任务包２'}), (OFFLINE, ONLINE)),
+                                                     'KR': '미션 팩 2', 'SC': '任务包２'}), (OFFLINE, ONLINE), BGM5),
 )
 # The test range's pack. Its one row is testrange/gen.py's mission folder (Mods/MISSION/EDF6/EDF6TR_RANGE: the
 # script, the site's points), with RM015's row values (progress 0.2, its music, flags 8): an EDF-era row, where the
@@ -225,7 +240,7 @@ PACK41 = Pack('edf41', 'EDF41', 'E41M.MST', 0,
               {lang: d + _UNVERIFIED_41[lang] for lang, d in {
                   'CN': '遊玩 EDF4.1 本篇。', 'EN': 'Play the EDF4.1 story.', 'JA': 'EDF4.1 の本編をプレイします。',
                   'KR': 'EDF4.1 본편을 플레이합니다.', 'SC': '游玩 EDF4.1 本篇。'}.items()},
-              (OFFLINE, ONLINE))
+              (OFFLINE, ONLINE), BGM41)
 
 # EDF4.1's two DLC mission packs (tools/make_edf41_missions.py --dlc, from the DLC archives of a 4.1 that has them;
 # committed like the story): packs of their own, as 4.1 had them, slotted right after the story so the three 4.1
@@ -249,10 +264,10 @@ _UNVERIFIED_41_DLC = {'CN': '（4.1 任務包的腳本轉換為 EDF5 格式；�
                       'SC': '（4.1 任务包的脚本转换为 EDF5 格式；地图由已安装的 EDF4.1 转换；尚未逐关实机验证）'}
 PACK41_MP01 = Pack('edf41mp01', 'EDF41MP01', 'E4P1.MST', 1,
                    *_names41({'CN': '任務包１', 'EN': 'Mission Pack 1', 'JA': 'ミッションパック１', 'KR': '미션 팩 1',
-                              'SC': '任务包１'}), (OFFLINE, ONLINE))
+                              'SC': '任务包１'}), (OFFLINE, ONLINE), BGM41_MP01)
 PACK41_MP02 = Pack('edf41mp02', 'EDF41MP02', 'E4P2.MST', 2,
                    *_names41({'CN': '任務包２', 'EN': 'Mission Pack 2', 'JA': 'ミッションパック２', 'KR': '미션 팩 2',
-                              'SC': '任务包２'}), (OFFLINE, ONLINE))
+                              'SC': '任务包２'}), (OFFLINE, ONLINE), BGM41_MP02)
 
 
 class Pack41(NamedTuple):
@@ -454,7 +469,7 @@ def plan(root: str, root41: str | None = None, skip41: Skip41 = frozenset()) -> 
     for pack in PACKS:
         for m in text[pack.group]:
             folder = f'MISSION/{SCRIPTS}/{m["path"]}'
-            row = {'group': pack.group, 'path': m['path'], 'key': f'{SCRIPTS}/{m["path"]}', 'bgm': BGM,
+            row = {'group': pack.group, 'path': m['path'], 'key': f'{SCRIPTS}/{m["path"]}', 'bgm': pack.bgm,
                    'flags': FLAGS, 'progress': m['progress'], 'map': None,
                    'title': {lang: m['title'][lang] for lang in LANGS},
                    'brief': {lang: m['brief'][lang] for lang in LANGS}}
@@ -535,7 +550,7 @@ def plan41(root: str, maps: set[str], root41: str | None,
             gone = missing_assets(names, maps41, bvm)
             if 'BEFORE.BVM' in m['files']:   # loads maps and objects too; not every mission has one
                 gone += missing_assets(names, maps41, edf41_script(m['id'], 'BEFORE.BVM', p41.data))
-            row = {'group': p41.pack.group, 'path': m['id'], 'key': f'{p41.folder}/{m["id"]}', 'bgm': BGM,
+            row = {'group': p41.pack.group, 'path': m['id'], 'key': f'{p41.folder}/{m["id"]}', 'bgm': p41.pack.bgm,
                    'flags': FLAGS, 'progress': round(i / len(missions), 4), 'map': first_map(bvm),
                    'title': m['title'], 'brief': m['brief'], 'files': m['files'], 'sha': m.get('sha', {})}
             if gone:
@@ -650,9 +665,12 @@ def modes(members: dict) -> list:
 
 def mode_entry(template: list, pack: Pack, content: int, kind: str = OFFLINE) -> list:
     """The pack's ModeList entry of `kind`: a copy of the stock mode `template` (of that kind), with the pack's names,
-    save file, files and content id; members 8 and 10 are 0 offline, 1 online (the stock modes')."""
+    save file, files, content id and HQ music (when it has its own); members 8 and 10 are 0 offline, 1 online (the
+    stock modes')."""
     entry = copy.deepcopy(template)
     entry[M_NAME], entry[M_DESC] = pack.keys(kind)
+    if pack.bgm is not None:
+        entry[M_BGM] = pack.bgm
     entry[M_MST], entry[M_FILES] = pack.mst, pack.paths(kind)
     online = int(kind == ONLINE)
     entry[M_ONLINE], entry[M_CONTENT], entry[M_TYPE] = online, content, online

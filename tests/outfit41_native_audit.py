@@ -81,6 +81,13 @@ def audit_code(img: bytes, base: int) -> None:
     for site, callee in sigs.CALLS:
         check(img[site] == 0xE8 and site + 5 + struct.unpack_from('<i', img, site + 1)[0] == callee,
               f'{site:#x} calls {callee:#x}')
+    on_message = struct.unpack_from('<Q', img, sigs.VIEW_VTABLE + 8 * sigs.VIEW_SLOT_MESSAGE)[0] - base
+    check(on_message == sigs.VIEW_ONMESSAGE, f'3D view vtable {sigs.VIEW_VTABLE:#x} slot {sigs.VIEW_SLOT_MESSAGE} is OnMessage')
+    menu_sites = [site for site, callee in sigs.CALLS if callee == 0x0E3420]
+    check([site for site, callee in sigs.CALLS if callee == sigs.VIEW_ONMESSAGE] == [0x9393D3],
+          "the view constructor's direct OnMessage call is redirected too (its first build)")
+    check(len(menu_sites) == 2 and all(on_message < site < 0x93C304 for site in menu_sites),
+          'the menu path calls the hook redirects are inside OnMessage (where its player is known)')
     for vt, call, _outfit in sigs.ITEM_VTABLES:
         slots = [struct.unpack_from('<Q', img, vt + 8 * k)[0] - base for k in range(6)]
         check(slots[2] == call, f'item vtable {vt:#x} slot 2 is {call:#x}')
