@@ -99,7 +99,8 @@ Now:
   pack its tag, a definition digest (tag, every row's mission key, the shipped 4.1
   scripts' hashes), the row count and the placeholder mask. The plugin owns exactly
   the packs listed there. When the game publishes `DLC` for one of them, `Add` also
-  publishes `AF_PACK = "1;<id>;<tag>;<digest>;<rows>;<mask>"` (EOS string). Before
+  publishes `AF_PACK = "1;<id>;<tag>;<digest>;<rows>;<mask>"` (EOS string; the structures'
+  versions are the game's own call's, `o->version` / `o->data->version`). Before
   the native `JoinLobby` (EOS route) a guest reads `DLC` and `AF_PACK` and refuses,
   with a Chinese dialog naming the pack, when the pack is not installed here, the
   room has no identity (older host), the line does not match the id, the definition
@@ -122,14 +123,39 @@ pack-definition-differs | pack-rows-missing-here | content-read-failed` with bot
 sides' tag/digest/rows, `PACK placeholders: content N (TAG), k of m rows locked`,
 `CONFIG mission packs: N installed`.
 
-**Coop's virtual / remembered rooms are not pack-checked yet.** A synthetic lobby
-handle is Coop's; All Forces cannot read its persisted attributes and logs
-`route=coop-virtual (mission pack identity not checked on this route)`. Coop already
-persists string attributes (`LobbyAttribute::text`), so `AF_PACK` survives REJOIN.
-What Coop needs to do (not done here): where it admits a remembered/virtual room
-(`CompatibleLocalRoom` / `EDF6Coop_AllForcesVirtualRoom`), call the All Forces
-export `int EDF6AF_RoomPackCompatible(int64 dlc, const char* afPack)` with the
-persisted `DLC` and `AF_PACK` (nullptr when absent) and refuse on 0.
+**Coop's virtual / remembered rooms.** A synthetic lobby handle is Coop's; All Forces
+cannot read its persisted attributes and logs `route=coop-virtual (the mission pack is
+EDF6Coop's to check: EDF6AF_RoomPackCompatible)`. Coop persists string attributes
+(`LobbyAttribute::text`), so `AF_PACK` survives REJOIN, and since
+hajisensai/edf-coop-stable#36 it calls the All Forces export
+`int EDF6AF_RoomPackCompatible(int64 dlc, const char* afPack)` with the persisted `DLC`
+and `AF_PACK` (nullptr when absent) where it admits such a room (`CompatibleLocalRoom`:
+REJOIN `startVirtualJoinRoom`, the virtual room's `hookVirtualJoin`, the full-lobby
+fallback from `epicJoined`, and `addRememberedRoom`, the remembered room it adds to a
+failed room search) and refuses on 0. An older Coop does not check.
+
+**The refusal dialog, every route (2026-10-18).** The export refuses with the same
+Chinese dialog as the EOS route (`mission_packs.h` `Explain`, `mod_room.cpp`
+`ExplainPackRefusal`), and logs both sides' tag/digest/rows. The caller may be EOS's
+tick thread (Coop answers EOS callbacks there), so no route shows the dialog on the
+calling thread: `src/pack_notice.h` shows it on a thread of its own (`MessageBoxW`
+without an owner, topmost) and returns at once. The same refusal (by content id,
+reason, host digest and rows) is never shown twice at once; through the export it is
+not shown again within a minute (Coop asks at every room search), while a player's own
+EOS join shows it again at each try once the last one is closed. The ownership hook's
+refusal at the lobby join (`0x8EC659`, a pack not installed here) goes through the same
+notice. That is the only dialog there: on the not-owned branch of `0x8EC270` the game's
+own message (`Lobby_WarnWeaponEquip`, "not purchased, you can play but not equip its
+weapons", then the join anyway through the continuation `0x8E7060`, whose `_Do_call`
+is `0x8F06D0`) needs the content's name from `0xE3F80`, which returns nullptr past id
+2 (`0xE3FA4`); the branch then just returns (`0x8EC6C6` → `0x8EC7F6`). 「未持有此内容」
+(`Online_NotHaveContents`) is no dialog: it is the room list's mission name for a
+content id this machine has no list for (`0x8EB710`, referenced once at `0x8EB836`).
+Static (H); not seen in the game. A refusal on the EOS route completes the game's join
+with `EOS_InvalidParameters`, which the game answers with its own 「无法参加房间。」
+(`OnlineError_RoomError`, `0x8EFEC0` for any result but 0 and 3): that one stays, after
+ours, as it does for every other refusal of this file (static, M: the handler's wiring
+to JoinLobby's callback was not traced).
 
 Tests: `tests/mod_room_test.cpp` (`PackIdentity`: publish beside `DLC`, same
 identity joins, every mismatch refused with no `JoinLobby` call and a dialog, the
@@ -178,15 +204,70 @@ What the game keys by the content id, and what by the row (EDF.dll `0x678CCB46`)
   it wrote last, when that differs from the definition, as the pack's legacy layout
   (manifest `legacy`, kept by later installs and past an uninstall in
   `Mods/.edf5campaign-legacy.json`) and writes `Legacy=<old rows>:<each one's row
-  now>` into `EDF6VehicleCrew.packs.ini`. The plugin's save-load hook
-  (`airstrike.cpp` `UnlockDlcHook` on `0xDC550`, which `MAINSCRIPT.AS` runs right
-  after `SetMode` and `LoadSaveData_ModeSelect`) moves an unmarked save of the
-  current pack to the rows now and writes a marker (the definition digest's first
-  32 bits) in row bytes 508..511, which no pack of ours reaches; a marked save is
-  never moved again, and the next save the game writes carries both. A pack with
-  `Legacy` is owned only while that hook is in. Tested offline
-  (`mod_room_test` `SaveMigration`, `edf5_campaign_native_test` on a stand-in game
-  status, `tests/test_edf5_campaign_lifecycle.py`, selftest
-  `edf5_campaign_legacy_rows`); not in the game. Not covered: a save copied from
-  another machine whose older list differed from this one's (it is moved by this
-  machine's record).
+  now>` into `EDF6VehicleCrew.packs.ini`.
+
+### Save layout markers (2026-10-18, after review)
+
+Each pack's save is marked with the layout its rows are in, and every decision is made
+from the save itself (its marker and what it holds), never from the install's history
+alone (`src/mission_packs.h` `MigrateModeSave`):
+
+- **The marker** is the rows' mission keys in order, hashed (`tools/make_edf5_campaign.py`
+  `layout_id`, `packs.ini` `Layout`): not the definition digest, which also hashes the
+  4.1 scripts, so a script's fix keeps every save's marker. It sits in row bytes 508..511
+  (`GS+0x57A4+0x169C`), which no pack of ours reaches.
+- **Older layouts.** `edf5campaign/pack_layouts.json` keeps every layout a release had,
+  per pack, oldest first (now one each, 2026-10-18's); a test fails when a pack's
+  definition has a layout not in it. The installer writes each older one with its map to
+  the rows now (`Older=<marker>,...`, `From<marker>=<rows>:<map>`, at most 4 with
+  `Legacy`): a save marked by any release moves straight to the rows now, however many
+  releases it skipped. A save holding a row past its layout's map, or a marker without a
+  map (another, e.g. newer, version's), is left exactly as it is (`other-layout`).
+- **Unmarked saves** (from before the markers, or new): nothing in them, or nothing past
+  `StableRows`, are marked as they are. `StableRows` is how many leading rows every
+  older install had where they are now: rows of the first released layout whose script
+  and everything it loads is in the game's own packages (row `stable`: `Root.cpk`,
+  `Chunk01/02.cpk`; nothing `tools/edf5_dlc.py` adds), up to the first that is not.
+  With this game: 110 of 110 for EDF5's story, 3 of 15 for its Mission Pack 1 (DM018,
+  DM019, DM020, DM015 need `tools/edf5_dlc.py`'s parts: the four rows older installs
+  left out), 14 of 14 for Mission Pack 2, 0 for the three EDF4.1 packs (their maps are
+  converted at install: any row may have been left out), 1 of 1 for the test range.
+  Past them only this machine's record of its older list (`Legacy`) can say which rows
+  the save had, and only when the save fits it (nothing past its rows);
+  otherwise (`layout-unknown`: an older version uninstalled before this one, so no
+  record) the save is left unmarked and unmoved: the player is told once a session
+  (「全军出击：任务包存档」) that clears past that row may be off. Nothing is guessed,
+  so nothing wrong is made permanent; the game writes the next save with the rows now,
+  still unmarked. Not covered: a save copied from another machine whose older list
+  differed from this one's record (it is moved by this machine's record).
+- **When it runs.** Only from the script's `UnlockDownloadContents` (`0x70FF87`,
+  `airstrike.cpp` `ScriptUnlockDlcHook`): MAINSCRIPT calls it only after `SetMode` and a
+  `LoadSaveData_ModeSelect` that succeeded (MAINSCRIPT.AS 363, 852, 1691, 1801, 1851,
+  1889, 1913), so `GS+0x57A4` is the new mode's save and `GS+0x38` that mode. The other
+  entry of `0xDC550`, the call at `0xDC348`, is the reset's (`0xDB580` bit 8 via
+  `0xDB920` → `0xDC170`): it runs after bit 4 has put the template into `GS+0x57A4` and,
+  inside `SetMode` (`0xDC4B8`), before `0xDC4C5` sets `GS+0x38`, so there the mode is the
+  old one and the block a blank: marking it there (as the first version of this did)
+  would give a new pack's first save the previous pack's marker. That entry only grants
+  the call weapons now. A pack is owned only while the script's entry is hooked (an
+  unmarked save played with the rows now could not be told from an older install's).
+- **The marker survives the game's save cycle** (`tests/mission_pack_save_native_test.cpp`,
+  real EDF.dll code in a private mapping, only the CRT imports resolved): the write job
+  (`0x7BD0A0` → job `0x7BD910`, run by `0x7C1CB0`) writes a 0x14-byte header (`MDB0`,
+  version 3, length, checksum `0x7C1270` over the live block) and then `GS+0x57A4`
+  whole, 0x16C4 bytes; the read job (`0x7BC310` → `0x7BD720`, run by `0x7C1670`) takes
+  only a file of exactly that length with matching magic, version and checksum; the
+  load's apply `0x7BE970` (from the save UI's completion `0x945680` at `0x945741`)
+  copies the whole block over `GS+0x57A4`, or nothing on any failure; `0xDBCE0` after
+  it only copies the current row and difficulty out. The reset (`0xDF790`'s template,
+  `0xDBA00`, inline in `0xDB580` bit 4) zeroes the block, marker included, at every
+  `SetMode` and the mode select's `Reset`, and the next load brings the file's back;
+  a mode without a file keeps the zeroed template (a new save, then marked). The only
+  writer of the row bytes is `0xDFA90` (`0x70DB63`, the current row); none clears rows
+  past the list's. Run: reset, the game's own writers over rows 0..507, checksum,
+  apply, two rounds of load → save → load, a failed and a short read: 32 checks. Not
+  run: the file I/O itself (`0x7B9990` / `0x7B8DE0`, platform calls; their callers'
+  bytes are checked), whether the file has another layer of encryption (the header and
+  checksum are over the plain block), and a save job queued before a `SetMode` and run
+  after it (it would write the new mode's block under the old mode's file name; on the
+  path at MAINSCRIPT.AS 345 a `WaitSaveLoad` comes first, on 799..842 none was found).

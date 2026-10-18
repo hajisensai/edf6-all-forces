@@ -220,6 +220,8 @@ def build_exe(name: str, generator: str | None = None) -> str:
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "missions.json")}{seps}edf5campaign']
     # and EDF5's own thumbnails of those missions (make_edf5_campaign.THUMBS, next to the text)
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "thumbnails.rab")}{seps}edf5campaign']
+    # and every save layout the mission packs had (make_edf5_campaign.LAYOUTS: the saves' row maps)
+    cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "pack_layouts.json")}{seps}edf5campaign']
     # the earlier games' weapon registries (ported_weapons.DATA is the bundle when frozen)
     # the converted models the EDF5 weapons need (ported_weapons.bundled), so the frozen installer needs no EDF5
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5port", "assets")}{seps}edf5port/assets']

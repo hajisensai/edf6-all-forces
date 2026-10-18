@@ -3,8 +3,10 @@
 // since 2026-10-18: the seven packs have fixed content ids (kBase..), and a mission a machine lacks keeps its row as a
 // placeholder. What can still differ is the pack's definition (another All Forces version) and which rows a machine
 // lacks: the installer writes both to EDF6VehicleCrew.packs.ini ([Pack<id>] Tag, Digest, Rows, Missing), the host
-// publishes its pack's line with the room (kAttribute) and a guest checks it before the native JoinLobby.
-// Pure, no game: tests/mod_room_test.cpp and tools/mission_packs_check.cpp run it.
+// publishes its pack's line with the room (kAttribute) and a guest checks it before the native JoinLobby. The same
+// file gives each pack's save layout (Layout, StableRows, Legacy, Older / From<layout>): every save of a pack is
+// marked with the layout its rows are in and moved to the rows now by its own marker and content (MigrateModeSave).
+// Pure, no game: tests/mod_room_test.cpp and tests/edf5_campaign_native_test.cpp run it.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -30,17 +32,34 @@ inline const wchar_t* Name(std::int64_t id) noexcept {
     return Reserved(id) ? names[id-kBase] : L"（未知任务包）";
 }
 
+// An older layout of a pack's rows, as a save written with it has them: each of its rows' row now (-1: that mission is
+// no longer in the pack). `from` is that layout's marker; 0 the saves from before the markers (2026-10-18).
+struct LayoutMap {
+    std::uint32_t from=0;
+    int rows=0;
+    std::int16_t row[kMaxRows]{};
+};
+constexpr int kMaxFrom=4;      // the older layouts a pack moves saves from (the installer keeps the most recent ones)
 struct Pack {
     int id=0;                  // 0: no pack
     char tag[16]{};
     char digest[17]{};         // 16 hex digits: the definition (tag, every row's mission, the shipped scripts' hashes)
     int rows=0;
     std::uint8_t missing[kMaxRows/8]{};   // the placeholder rows: bit (row % 8) of byte row / 8
-    std::uint32_t layout=0;    // the save marker of these rows (MigrateModeSave): the digest's first 8 hex digits, never 0
-    int legacyRows=0;          // Legacy: the rows a save from before 2026-10-18 may have (0: none to move)
-    std::int16_t legacy[kMaxRows]{};      // ...each one's row now (-1: no longer in the pack)
+    // The save marker of these rows (MigrateModeSave): the rows' mission keys in order, hashed by the installer
+    // (tools/make_edf5_campaign.py layout_id). Only the order of the missions: a script's change keeps it. Never 0.
+    std::uint32_t layout=0;
+    // Rows 0..stableRows-1 sat where they sit now in every layout an older install could have written (a mission an
+    // install left out was always at or past this row): an unmarked save using only these rows needs no moving.
+    int stableRows=0;
+    int fromCount=0;
+    LayoutMap from[kMaxFrom]{};   // the layouts a save is moved from; from 0: this machine's record of the unmarked one
     bool Missing(int row) const noexcept { return row>=0 && row<rows && (missing[row/8]>>(row%8)&1); }
     int MissingCount() const noexcept { int n=0; for(int i=0;i<rows;++i)n+=Missing(i); return n; }
+    const LayoutMap* From(std::uint32_t marker) const noexcept {
+        for(int i=0;i<fromCount;++i)if(from[i].from==marker)return &from[i];
+        return nullptr;
+    }
 };
 struct Table {
     Pack packs[kCount]{};
@@ -82,41 +101,60 @@ inline bool Token(const char* s,std::size_t max) noexcept {   // a tag or digest
     for(std::size_t i=0;i<n;++i)if(!((s[i]>='0' && s[i]<='9') || (s[i]>='a' && s[i]<='z') || (s[i]>='A' && s[i]<='Z')))return false;
     return true;
 }
-// One installed pack from its [Pack<id>] values; false (nothing kept) on any malformed value.
+// One installed pack from its [Pack<id>] values; false (nothing kept) on any malformed value. Its save layout is
+// SetLayout's (a room's line carries none: a room compares definitions, not saves).
 inline bool Make(int id,const char* tag,const char* digest,int rows,const char* mask,Pack& out) noexcept {
     Pack p{};
     if(!Reserved(id) || !Token(tag,sizeof(p.tag)) || !Token(digest,sizeof(p.digest)) || std::strlen(digest)!=16
        || !ParseMask(mask,rows,p.missing))return false;
-    std::uint32_t layout=0;
-    for(int i=0;i<8;++i) {
-        const int d=HexDigit(digest[i]);
-        if(d<0)return false;
-        layout=layout<<4|static_cast<std::uint32_t>(d);
-    }
-    p.id=id;p.rows=rows;p.layout=layout ? layout : 1;
+    for(int i=0;i<16;++i)if(HexDigit(digest[i])<0)return false;
+    p.id=id;p.rows=rows;
     std::memcpy(p.tag,tag,std::strlen(tag)+1);
     std::memcpy(p.digest,digest,17);
     out=p;
     return true;
 }
-// Legacy="<old row count>:<each old row's row now, -1 none>" (tools/make_edf5_campaign.py packs_ini). An empty value is
-// no legacy; anything malformed (a count off, a row past the pack) is false and leaves none.
-inline bool SetLegacy(Pack& p,const char* text) noexcept {
-    p.legacyRows=0;
+// A layout id as the installer writes it: exactly 8 hex digits, not 0.
+inline bool ParseLayout(const char* hex,std::uint32_t& out) noexcept {
+    if(!hex || std::strlen(hex)!=8)return false;
+    std::uint32_t v=0;
+    for(int i=0;i<8;++i) {
+        const int d=HexDigit(hex[i]);
+        if(d<0)return false;
+        v=v<<4|static_cast<std::uint32_t>(d);
+    }
+    if(!v)return false;
+    out=v;
+    return true;
+}
+// Layout=<8 hex digits> and StableRows=<0..rows>: the pack's save layout. False (nothing changed) on anything else.
+inline bool SetLayout(Pack& p,const char* hex,int stableRows) noexcept {
+    std::uint32_t v=0;
+    if(!ParseLayout(hex,v) || stableRows<0 || stableRows>p.rows || p.From(v))return false;
+    p.layout=v;p.stableRows=stableRows;
+    return true;
+}
+// "<old row count>:<each old row's row now, -1 none>" (tools/make_edf5_campaign.py packs_ini) as the map from layout
+// `marker`: 0 the unmarked saves' (ini Legacy), else an older marked layout's (ini Older, From<marker>). An empty text
+// adds none; anything malformed (a count off, a row past the pack, a marker twice or the pack's own, one too many) is
+// false and adds none.
+inline bool AddFrom(Pack& p,std::uint32_t marker,const char* text) noexcept {
     if(!text || !*text)return true;
+    if(p.fromCount>=kMaxFrom || p.From(marker) || (marker && marker==p.layout))return false;
     char* end=nullptr;
     const long n=std::strtol(text,&end,10);
     if(end==text || *end!=':' || n<1 || n>kMaxRows)return false;
-    std::int16_t map[kMaxRows]{};
+    LayoutMap& m=p.from[p.fromCount];
+    m=LayoutMap{};
     const char* at=end+1;
     for(long i=0;i<n;++i) {
         const long v=std::strtol(at,&end,10);
-        if(end==at || v<-1 || v>=p.rows || (i+1<n ? *end!=',' : *end!=0))return false;
-        map[i]=static_cast<std::int16_t>(v);
+        if(end==at || v<-1 || v>=p.rows || (i+1<n ? *end!=',' : *end!=0)){m=LayoutMap{};return false;}
+        m.row[i]=static_cast<std::int16_t>(v);
         at=end+1;
     }
-    std::memcpy(p.legacy,map,sizeof(map));
-    p.legacyRows=static_cast<int>(n);
+    m.from=marker;m.rows=static_cast<int>(n);
+    ++p.fromCount;
     return true;
 }
 
@@ -128,7 +166,11 @@ inline bool SetLegacy(Pack& p,const char* text) noexcept {
 constexpr std::size_t kModeSave=0x57A4,kModeSaveSize=0x16C4,kClear=8,kClearClasses=10,kRowBytes=0x14A0,kMarkerRow=508;
 constexpr std::size_t kMarker=kRowBytes+kMarkerRow;
 static_assert(kMarker+4<=kRowBytes+kMaxRows && kClear+kClearClasses*kMaxRows<=kRowBytes && kRowBytes+kMaxRows<=kModeSaveSize);
-enum class Migration { kNone,kAlready,kMarked,kRemapped,kForeign };
+// kUndetermined: an unmarked save with progress whose older layout cannot be told (no record of this machine's older
+// list, or one the save does not fit, and progress past the stable rows). kForeign: a marker of a layout this version
+// has no map from (another version's), or a save its map does not fit. Both are left exactly as they are, unmarked
+// or under their own marker, so a guess is never made permanent.
+enum class Migration { kNone,kAlready,kMarked,kRemapped,kForeign,kUndetermined };
 inline const char* MigrationName(Migration m) noexcept {
     switch(m) {
     case Migration::kNone: return "none";
@@ -136,34 +178,64 @@ inline const char* MigrationName(Migration m) noexcept {
     case Migration::kMarked: return "marked";
     case Migration::kRemapped: return "rows-moved";
     case Migration::kForeign: return "other-layout";
+    case Migration::kUndetermined: return "layout-unknown";
     }
     return "?";
 }
-// Once per save: an unmarked one (written before 2026-10-18, or new) gets its rows moved from the pack's Legacy layout
-// (an older install left a mission out, so the rows after it sat higher up) to the rows now, then the marker; a marked
-// one is left alone (a load without a save in between moves nothing twice). A marker of another layout (another
-// definition) is not ours to read: left as it is. kNone: a pack this marker does not fit.
+// The highest row the save holds anything for (a clear of any class, its row byte, the current row); -1: none. The
+// row bytes from kMarkerRow on are the marker's, never a row of ours.
+inline int HighestUsedRow(const unsigned char* save) noexcept {
+    int high=-1;
+    for(int r=0;r<static_cast<int>(kMarkerRow);++r) {
+        bool used=save[kRowBytes+static_cast<std::size_t>(r)]!=0;
+        for(std::size_t c=0;c<kClearClasses && !used;++c)used=save[kClear+c*kMaxRows+static_cast<std::size_t>(r)]!=0;
+        if(used)high=r;
+    }
+    for(int r=static_cast<int>(kMarkerRow);r<kMaxRows;++r)
+        for(std::size_t c=0;c<kClearClasses;++c)if(save[kClear+c*kMaxRows+static_cast<std::size_t>(r)])high=r;
+    std::uint32_t row=0;
+    std::memcpy(&row,save,4);
+    if(row>0)high=row>=static_cast<std::uint32_t>(kMaxRows) ? kMaxRows : static_cast<int>(row)>high ? static_cast<int>(row) : high;
+    return high;
+}
+// The save's rows moved by `m` (its old row r to m.row[r]), the current row with them (to 0 when its mission is gone).
+inline void MoveRows(unsigned char* save,const LayoutMap& m) noexcept {
+    std::uint8_t clear[kClearClasses][kMaxRows]{},bytes[kMarkerRow]{};
+    for(std::size_t c=0;c<kClearClasses;++c)
+        for(int r=0;r<m.rows;++r)
+            if(m.row[r]>=0)clear[c][m.row[r]]=save[kClear+c*kMaxRows+static_cast<std::size_t>(r)];
+    for(int r=0;r<m.rows && r<static_cast<int>(kMarkerRow);++r)
+        if(m.row[r]>=0 && m.row[r]<static_cast<int>(kMarkerRow))bytes[m.row[r]]=save[kRowBytes+static_cast<std::size_t>(r)];
+    std::memcpy(save+kClear,clear,sizeof(clear));
+    std::memcpy(save+kRowBytes,bytes,sizeof(bytes));
+    std::uint32_t row=0;
+    std::memcpy(&row,save,4);
+    row=row<static_cast<std::uint32_t>(m.rows) && m.row[row]>=0 ? static_cast<std::uint32_t>(m.row[row]) : 0;
+    std::memcpy(save,&row,4);
+}
+// Once per save, decided by the save itself (its marker and what it holds), never by the install's history alone:
+//  - marked with these rows' layout: left alone (a load without a save in between moves nothing twice);
+//  - marked with an older layout the installer gave a map from: moved to the rows now and marked (every older layout
+//    has its own map to now, so a save skips any number of versions); a save past that map's rows: kForeign;
+//  - unmarked (from before 2026-10-18, or new): holding nothing, or nothing past the stable rows (where every older
+//    layout had its rows), marked as it is; else moved by this machine's record of its older list (Legacy, from 0)
+//    when the save fits it (nothing past its rows), else kUndetermined.
+// kNone: no layout, or a pack the marker does not fit (more rows than kMarkerRow).
 inline Migration MigrateModeSave(unsigned char* save,const Pack& p) noexcept {
-    if(!save || p.rows<1 || p.rows>static_cast<int>(kMarkerRow))return Migration::kNone;
+    if(!save || !p.layout || p.rows<1 || p.rows>static_cast<int>(kMarkerRow))return Migration::kNone;
     std::uint32_t marker=0;
     std::memcpy(&marker,save+kMarker,4);
     if(marker==p.layout)return Migration::kAlready;
-    if(marker)return Migration::kForeign;
+    const int high=HighestUsedRow(save);
+    const LayoutMap* const m=p.From(marker);
     Migration done=Migration::kMarked;
-    if(p.legacyRows>0) {
-        std::uint8_t clear[kClearClasses][kMaxRows]{},bytes[kMarkerRow]{};
-        for(std::size_t c=0;c<kClearClasses;++c)
-            for(int r=0;r<p.legacyRows;++r)
-                if(p.legacy[r]>=0)clear[c][p.legacy[r]]=save[kClear+c*kMaxRows+static_cast<std::size_t>(r)];
-        for(int r=0;r<p.legacyRows && r<static_cast<int>(kMarkerRow);++r)
-            if(p.legacy[r]>=0)bytes[p.legacy[r]]=save[kRowBytes+static_cast<std::size_t>(r)];
-        std::memcpy(save+kClear,clear,sizeof(clear));
-        std::memcpy(save+kRowBytes,bytes,sizeof(bytes));
-        std::uint32_t row=0;
-        std::memcpy(&row,save,4);
-        row=row<static_cast<std::uint32_t>(p.legacyRows) && p.legacy[row]>=0 ? static_cast<std::uint32_t>(p.legacy[row]) : 0;
-        std::memcpy(save,&row,4);
+    if(!marker && high<p.stableRows) {
+        // nothing in it, or only rows that every older layout had where they are now
+    } else if(m && high<m->rows) {
+        MoveRows(save,*m);
         done=Migration::kRemapped;
+    } else {
+        return marker ? Migration::kForeign : Migration::kUndetermined;
     }
     std::memcpy(save+kMarker,&p.layout,4);
     return done;
