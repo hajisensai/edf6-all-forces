@@ -97,11 +97,50 @@ t60 = code(0x625A08, 0x13)
 assert t60[0x625A08] == 'imul rbx, rsi, 0x70' and t60[0x625A0C] == 'add rbx, qword ptr [r15 + 0x2af8]'
 assert t60[0x625A17] == 'movups xmm0, xmmword ptr [rbx + 0x10]'
 assert slot(0x17E01B0, 6) == 0x6731C0 and slot(0x17E01B0, 70) == 0x65F6F0   # the plain Car: CarBase's own
-# CarAimReady's key test: 0x528A0(object + 0xA0, key) -> node or null, as the vehicles read their own keys.
-assert p.get_data(0x528A0, 8) == bytes.fromhex('4053' '4883ec20' '488b')
-for at, reg in ((0x61D98D, 'rdi'), (0x64D002, 'rbx')):
-    near = code(at - 0x10, 0x15)
-    assert f'lea rcx, [{reg} + 0xa0]' in near.values() and near[at] == 'call 0x528a0', hex(at)
+# CarAimReady's key test (CarAimKey / TruckKeyLookupKnown) reads the key as both slot 6 do, right after the action:
+# lea r8,[r13+0x100] (the object's SGO root, an sgs::ut variant); r9 = the key; call 0x66F040, at slot 6 +0x5D / +0x7D.
+for six_at, key_lea in ((0x6266B0, 0x62671C), (0x6234E0, 0x62354C)):
+    s6 = code(six_at + 0x5D, 0x25)
+    assert s6[six_at + 0x5D] == 'lea r8, [r13 + 0x100]' and s6[six_at + 0x64] == 'mov dword ptr [rsp + 0x20], 0xffffffff'
+    assert six_at + 0x6C == key_lea and s6[six_at + 0x7A] == 'mov rcx, r13' and s6[six_at + 0x7D] == 'call 0x66f040', hex(six_at)
+    assert p.get_data(six_at + 0x5D, 18) == bytes.fromhex('4d8d8500010000c7442420ffffffff4c8d0d')   # kSixKeySiteSig
+# The slot 6's own answer: false when 0x6731C0 failed (je past `mov al, 1`), true at the end (RunCarSix reads it).
+for six_at, test_at, fail_to in ((0x6266B0, 0x6266FD, 0x626F46), (0x6234E0, 0x62352D, 0x623D76)):
+    head = code(test_at, 8)
+    assert code(test_at - 5, 5)[test_at - 5] == 'call 0x6731c0' and head[test_at] == 'test al, al', hex(six_at)
+    assert head[test_at + 2] == f'je {hex(fail_to)}' and code(fail_to - 2, 2)[fail_to - 2] == 'mov al, 1', hex(six_at)
+# 0x66F040: the root's alternative at +0x10 (0xFFFF valueless: r8d = -1, then 0x283F90 throws on it); otherwise the find
+# visitor of table 0x179EBA8 with the request {name +0, index +8} on the root (rdi = r8); the index it answers is used.
+f = code(0x66F040, 0x70)
+assert f[0x66F05C] == 'mov rdi, r8' and f[0x66F067] == 'movzx eax, word ptr [r8 + 0x10]' and f[0x66F06C] == 'mov esi, 0xffff'
+assert f[0x66F078] == 'cmp ax, si' and f[0x66F07D] == 'mov r8d, 0xffffffff'
+assert f[0x66F085] == 'mov qword ptr [rsp + 0x28], r9' and f[0x66F08A] == 'mov r8, qword ptr [r14 + rax*8 + 0x179eba8]'
+assert f[0x66F092] == 'lea rdx, [rsp + 0x28]' and f[0x66F097] == 'mov rcx, rdi' and f[0x66F09A] == 'call r8'
+assert f[0x66F09D] == 'mov r8d, dword ptr [rsp + 0x30]' and f[0x66F0AA] == 'call 0x283f90'
+assert f[0x66F071] == 'lea r14, [rip - 0x66f078]'   # r14 = the image base
+assert p.get_data(0x66F05C, 0x44) == bytes.fromhex(   # kSgoFindDispatchSig
+    '498bf8488bda4889542428410fb74010beffff00004c8d35880f99ff663bc6750841b8ffffffffeb1d4c894c24284d8b'
+    '84c6a8eb7901488d542428488bcf41ffd0448b44')
+c = code(0x283F90, 0x60)
+assert c[0x283FC0] == 'movzx eax, word ptr [rcx + 0x10]' and c[0x283FC4] == 'cmp ax, dx' and c[0x283FC7] == 'je 0x283fe2'
+assert code(0x283FE2, 0x11)[0x283FEE] == 'call 0x12da768'   # _CxxThrowException: a valueless root throws
+# The find visitors, one per alternative (kSgoFindVisitors): 0 a pointer to an SGO handle (0x52790 on what it points
+# to), 1 never found, 2 a node reference (0x55A30 on the root itself); each writes the index to request +8.
+assert [slot(0x179EBA8, i) for i in range(3)] == [0x238F90, 0x238DF0, 0x239060]
+v0 = code(0x238F90, 0x25)
+assert v0[0x238F96] == 'mov rcx, qword ptr [rcx]' and v0[0x238F9C] == 'mov rdx, qword ptr [rdx]'
+assert v0[0x238F9F] == 'call 0x52790' and v0[0x238FA4] == 'mov dword ptr [rbx + 8], eax'
+assert code(0x238DF0, 8)[0x238DF0] == 'mov dword ptr [rdx + 8], 0xffffffff'
+v2 = code(0x239060, 0x22)
+assert v2[0x239069] == 'mov rdx, qword ptr [rdx]' and v2[0x23906C] == 'call 0x55a30' and v2[0x239071] == 'mov dword ptr [rbx + 8], eax'
+# Both lookups answer -1 for a missing name (the plugin's "no aim table").
+assert code(0x5284E, 6)[0x5284E] == 'mov eax, 0xffffffff'
+# The slot 6 throws after the action is registered (the reason CarAimReady records a failed run before it tests the
+# action): its variant checks jump to _CxxThrowException.
+for at, to in ((0x6267B5, 0x626FA6), (0x626931, 0x626F94), (0x62697E, 0x626F82),    # the 60X
+                 (0x6235E5, 0x623DD6), (0x623761, 0x623DC4), (0x6237AE, 0x623DB2)):   # the 607, the same code
+    assert code(at, 6)[at] == f'je {hex(to)}', hex(at)
+    assert 'call 0x12da768' in code(to, 0x11).values(), hex(to)
 # Every crewed class (src/crew.cpp kClasses) running the CarBase pass and action has CarBase's slot 6 or one above.
 CREWED = (0x17D8B50, 0x17D8FA0, 0x17D9458, 0x17D98C8, 0x17DA508, 0x17DA960, 0x17DADB0, 0x17DB9D8, 0x17DBDF8,
           0x17DC250, 0x17DC620, 0x17DD440, 0x17DD720, 0x17DE0A8, 0x17DEC40, 0x17DFDC8, 0x17E0A80, 0x17E1828,
@@ -115,4 +154,4 @@ aim = code(0x65FF26, 0x30)
 assert aim[0x65FF2B] == 'cmp byte ptr [rsp + 0x30], 0' and aim[0x65FF32] == 'test r14b, r14b'
 assert aim[0x65FF37] == 'test r15b, r15b' and aim[0x65FF3C] == 'mov dword ptr [r12 + rbx + 0x2e4], 0x3f800000'
 print('PASS: AI-list flag -> slot 6, the three AI passes and actions (the Barga slot 4 kind), the mech attack table and aim origin, '
-      'the trucks\' own slot 6 and aim table, the seat aim gate')
+      'the trucks\' own slot 6, its key lookup (+0x100 through 0x66F040) and aim table, the seat aim gate')

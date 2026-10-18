@@ -155,3 +155,12 @@ python tools/gamequeue.py release <token>
 - `tools/edf41_objects.py`：`entries()` = `objects` + `stock_completions`，`unavailable` / `build` 都遍历它。
   RAB 被别的 MOD 占用时，`unavailable` 列出 `OBJECT/MONSTER501_KING.SGO`，`plan41` 就跳过 MP004 并写明原因，
   不会再带着缺失的模型上场。
+- 体积：4.1 的 `MONSTER501_KING.RAB` 装好是 44.9 MB（19 个成员）。其中 5 个与玩家 EDF6 自带的 `Root.cpk`
+  `OBJECT/MONSTER501.MRAB` 逐字节相同（`Monster501_nor_body.dds`、`Monster501_param_rslh_body.dds`、
+  `Monster501_light0_scroll.dds`、`Monster501_nor_wing.dds`、`Monster501_param_rslh_wing.dds`，共 28.2 MB），
+  不随包附带：`objects.json` 该条目的 `members_from` 与清单行第 7 列（`pylib/rabpool.py`，格式同 `tools/edf5_dlc.py`）
+  记下 [cpk, RAB 路径, 成员序号, 成员名]，`make_edf41_objects.py stock_member_sources` 生成时按「同类原版 SGO 点名的模型档案」
+  自动找出。仓库与安装包里 King 只剩 14 个成员 16.7 MB。安装时 `edf41_objects.build` 从玩家自己的 Root.cpk 取这 5 个并逐个
+  核 SHA-256，再拼回整个 RAB 核整文件 SHA-256；取不到（没有 Root.cpk、没有 MONSTER501.MRAB）或字节不符（游戏更新过），
+  `unavailable` 就列出 `OBJECT/MONSTER501_KING.SGO` 并写原因，`plan41` 把点名 King 的任务（MP004，以及 DLC2 的 M311、
+  MP501）做成占位并写明原因，不装半个模型。

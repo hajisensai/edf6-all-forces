@@ -2,6 +2,12 @@
 the copies converted ahead of time (tools/make_edf41_objects.py -> edf41port/objects.json + edf41port/objects/): no
 EDF4.1 is needed on the player's machine. Plan P4 (docs/edf5-weapons-plan.md).
 
+A member of one of these archives that the player's EDF6 already ships byte for byte (the King's five Monster501
+textures, the same in EDF6's OBJECT/MONSTER501.MRAB) is not shipped: its object's registry entry names where
+('members_from': {archive: {sha256: [EDF6 archive, RAB path, member index, member name]}}, the manifest row's 7th
+column, pylib/rabpool.py), and build reads it from the player's game, SHA-256 checked, as tools/edf5_dlc.py does. An
+object one of whose members is not there as generated (EDF6 updated, an archive missing) is left out, and said why.
+
     build(root) -> (files, skipped)    {Mods path: bytes} to write; [(object, why)] left out
     install(root, files) -> paths      written as OWNER's (pylib/ledger.py); what it wrote before and not now released
     remove(root) -> (deleted, kept)
@@ -14,11 +20,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import struct
 import sys
+from collections.abc import Callable
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import ledger  # noqa: E402
+import mdb  # noqa: E402
 import rabpool  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
 
@@ -42,14 +51,72 @@ def _read_file(path: str) -> bytes:
         return f.read()
 
 
-def read(rel: str) -> bytes:
+def read(rel: str, source: Callable[[list], bytes] | None = None) -> bytes:
     """The bytes of Mods path `rel` as the tools ship it: a shared file whole, one of ours through pylib/rabpool.py
-    (an archive rebuilt from its manifest and the shared members)."""
+    (an archive rebuilt from its manifest and the shared members; a member the player's EDF6 ships through `source`,
+    game_source(root): rabpool.Unsourced without one)."""
     reg = registry()
     if rel in reg.get('shared', {}):
         return _read_file(bundled(rel))
     base = os.path.join(DATA, 'edf41port', 'objects')
-    return rabpool.unpack(rel, lambda s: _read_file(os.path.join(base, *s.split('/'))))
+    return rabpool.unpack(rel, lambda s: _read_file(os.path.join(base, *s.split('/'))), source)
+
+
+def stock_members(obj: dict) -> dict[str, dict[str, list]]:
+    """{archive: {sha256: source}}: the members of the object's archives read from the player's EDF6."""
+    return obj.get('members_from', {})
+
+
+class _Stock:
+    """The player's EDF6 as the source of the members not shipped (tools/edf5_dlc.py Edf6: its archives, read on
+    demand); each RAB read and taken apart once."""
+
+    def __init__(self, root: str) -> None:
+        self.root = root
+        self._e6 = None
+        self.rabs: dict[tuple[str, str], list] = {}
+
+    @property
+    def e6(self):  # noqa: ANN201 - tools/edf5_dlc.py Edf6, opened on first use
+        if self._e6 is None:
+            import edf5_dlc
+            self._e6 = edf5_dlc.Edf6(self.root)
+        return self._e6
+
+    def members(self, archive: str, path: str) -> list:
+        key = (archive, path.upper())
+        if key not in self.rabs:
+            self.rabs[key] = mdb.rab_read(self.e6.read(archive, path)).files
+        return self.rabs[key]
+
+    def problems(self, sources: dict[str, list]) -> list[str]:
+        """Why these members cannot be read from the player's EDF6 as generated: [] when they can."""
+        out: list[str] = []
+        for sha, (archive, path, index, name) in sorted(sources.items()):
+            why = self.e6.missing(archive, path)
+            if why is None:
+                try:
+                    have = self.members(archive, path)
+                except (AssertionError, ValueError, IndexError, KeyError, struct.error, UnicodeDecodeError) as e:
+                    why = f'EDF6 的 {path} 不再是可读的 RAB（{type(e).__name__}: {e}）'
+                else:
+                    if index >= len(have) or have[index].name != name or sha256(have[index].stored) != sha:
+                        why = f'EDF6 的 {path} 里 {name} 不是生成时的那份（游戏更新过？）'
+            if why and why not in out:
+                out.append(why)
+        return out
+
+    def read(self, src: list) -> bytes:
+        archive, path, index, name = src
+        f = self.members(archive, path)[index]
+        if f.name != name:
+            raise ValueError(f'EDF6 {path}: member {index} is {f.name}, not {name}')
+        return f.stored
+
+
+def game_source(root: str) -> Callable[[list], bytes]:
+    """The source read() takes for the game at `root`."""
+    return _Stock(root).read
 
 
 def registry() -> dict:
@@ -85,11 +152,21 @@ def unavailable(root: str) -> list[tuple[str, str]]:
     whose objects are not here."""
     reg = registry()
     led = ledger.Ledger(root)
+    stock: _Stock | None = None
     out: list[tuple[str, str]] = []
     for obj in entries(reg):
+        why: list[str] = []
         foreign = [rel for rel in obj['files'] if _not_ours(led, rel, reg['files'][rel])]
         if foreign:
-            out.append((obj['object'], f"another mod's file in Mods: {', '.join(foreign)}"))
+            why.append(f"another mod's file in Mods: {', '.join(foreign)}")
+        sourced = {sha: src for srcs in stock_members(obj).values() for sha, src in srcs.items()}
+        if sourced:
+            stock = stock or _Stock(root)
+            gone = stock.problems(sourced)
+            if gone:
+                why.append('它的模型档案有几个成员不随包附带，要从你的 EDF6 里取：' + '；'.join(gone))
+        if why:
+            out.append((obj['object'], '; '.join(why)))
     return out
 
 
@@ -100,13 +177,14 @@ def build(root: str) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
     reg = registry()
     skipped = unavailable(root)
     left_out = {obj for obj, _ in skipped}
+    source = game_source(root)
     files: dict[str, bytes] = {}
     for obj in entries(reg):
         if obj['object'] in left_out:
             continue
         for rel in obj['files']:
             if rel not in files:
-                data = read(rel)
+                data = read(rel, source) if rel in stock_members(obj) else read(rel)
                 if hashlib.sha256(data).hexdigest() != reg['files'][rel]:
                     raise ValueError(f'{rel}: not the file the registry lists (a damaged install of the tools)')
                 files[rel] = data

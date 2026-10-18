@@ -33,14 +33,26 @@ b4faa8e 与 main（57391bd4）之间 `npcai.cpp` 没有改动，main 同样有�
 ## 修复
 
 - `src/npcai.cpp CarAimReady`（结构同巴尔加的 `BargaReady`）：CarBase pass 之前调用。
-  - slot 6 是 CarBase 自己的：直接通过；`+0x2508` 已有动作（slot 6 跑过，不论是原版 AI 表还是插件）：通过。
-  - slot 6 是 60X / 607 的：先用 `0x528A0(veh+0xA0, key)` 查 SGO 有没有本类瞄准键（载具类自己读键也是这条路：`0x61D98D`、
-    `0x64D002`），有才调一次本类 slot 6，登记了动作才算建好；没有键就**只开车不开火**（避免「动作已登记、表为空」）。
-  - 其它不认识的 slot 6：只开车。每台车只试一次，结果写一行 `NPCAI car v=...` 日志。
+  - slot 6 是 CarBase 自己的：直接通过。
+  - 插件跑过这台车的 slot 6：按记录（`SixRun`）答，**先于**「`+0x2508` 有动作」判断。slot 6 先调 `0x6731C0` 登记动作、再建瞄准表，
+    建表中途还会抛（60X `0x6267B5` / `0x626931` / `0x62697E` 跳 `0x12DA768`，607 `0x6235E5` / `0x623761` / `0x6237AE` 同构），
+    抛了就是「动作在、表半建」，所以失败记录必须先读，否则下一帧照样放行。
+  - 没跑过、`+0x2508` 已有动作（原版 AI 表跑过 slot 6）：通过。
+  - slot 6 是 60X / 607 的：按 slot 6 **自己的**读法查瞄准键：`0x62670D` / `0x62353D` `lea r8,[r13+0x100]` 后 `call 0x66F040`，
+    即对象 `+0x100` 的 SGO 根（sgs::ut variant，`+0x110` 是备选号）经 find 访问表 `0x179EBA8`（0 = 指向 SGO 句柄的指针，`0x52790`；
+    1 = 永远查不到；2 = 节点引用，`0x55A30`；`0xFFFF` = 无值，`0x283F90` 会抛）。插件原先用 `0x528A0(veh+0xA0, key)`，只等价于
+    备选 0 且指针恰指 `+0xA0` 的情形，没法证明对其它备选成立，已改掉（复用 `src/ifc_model.h` 同一套 find 访问）。键在才调一次 slot 6，
+    没抛、返回 true（`0x6266FF` / `0x62352F`：`0x6731C0` 失败就返回 false）且登记了动作才算建好；没有键 / 根不可读 / 抛了，都**只开车不开火**。
+  - 其它不认识的 slot 6：只开车。
+  - 记录按对象保存、不会被冲掉（原先是 16 格环，第 17 台车会挤掉旧记录，被挤掉的失败车每帧重跑 slot 6、刷日志）：每条记录用
+    `npcmark::Assign` 钉住对象的 weak 控制块，持有期间 {对象, 控制块} 这一对不会被别的对象复用；对象销毁（控制块强引用数为 0）后
+    在下次登记时删掉并释放。巴尔加的 `BargaReady` 用同一份记录。每台车只试一次，结果写一行 `NPCAI car v=...` 日志。
 - `tests/npc_vehicle_ai_native_audit.py`：钉住两种卡车的 slot 6 / slot 70、先 `0x6731C0` 后读键、键字符串、`0x625A08..17` 的读法、
-  `0x528A0` 的前缀与 `+0xA0` 用法；并要求 `crew.cpp kClasses` 里每个跑 CarBase pass + 动作的类，slot 6 要么是 CarBase 的、要么在上面两种里
+  slot 6 的读键位置（`+0x5D` 的 `lea r8,[r13+0x100]`、`+0x7D` 的 `call 0x66F040`）、`0x66F040` 的分派与 find 访问表三项、无值根会抛、
+  建表中途的抛出跳转；并要求 `crew.cpp kClasses` 里每个跑 CarBase pass + 动作的类，slot 6 要么是 CarBase 的、要么在上面两种里
   （新出现别的类会让审计失败，而不是进游戏才崩）。
-- `tests/npc_car_aim_guard.py`（ctest）：钉住 `DriveVehicleAi` 在 pass 之前问 `CarAimReady`，`CarAimReady` 先查键再调 slot 6。
+- `tests/npc_car_aim_guard.py`（ctest）：钉住 `DriveVehicleAi` 在 pass 之前问 `CarAimReady`，`CarAimReady` 先查键再调 slot 6，
+  查键走 `+0x100` 的 find 访问，`CarAimReady` / `BargaReady` 先读记录再看动作，记录钉住并释放控制块，不再有固定环。
 
 ## 验证
 
