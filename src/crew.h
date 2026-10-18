@@ -558,6 +558,9 @@ bool InstallAllClassesRide() noexcept;
 // by the model archives the spawn catalog can keep open (src/spawn_catalog_archives.h) before the library starts, so the
 // test range's place panel catalog does not run it out. The other pools do not grow with open archives (fsbudget.cpp).
 bool InstallFsLoaderBudget() noexcept;
+// killcount.cpp: the battle record (戦績) also lists the EDF4.1 port's own kill counters (edf41_*KillCount, the
+// installer's Mods/ETC/ACHIEVEMENT.SGO; docs/kill-counter-re.md): its row table moved to the plugin's, rows added.
+bool InstallKillCounters() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).

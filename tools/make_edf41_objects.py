@@ -68,6 +68,7 @@ import cas_graft  # noqa: E402
 import cas_pose  # noqa: E402
 import dsgo  # noqa: E402
 import edf41dlc  # noqa: E402
+import edf41kills  # noqa: E402
 import edf41friends  # noqa: E402
 import legacy_assets  # noqa: E402
 import legacy_sgo  # noqa: E402
@@ -828,12 +829,13 @@ def nest_material_slots(members: dict) -> None:
 # The underground nests: ANTHILL301's alias, with their own material animation (nest_material_slots). Two keys are set
 # as 4.1 has them (NEST_41_KEYS below): the score multiplier E517's template would bring in (0.5) is 1.0, what 4.1 gives a
 # nest without the key and EDF6 too (the base reader EDF+0x545DB7 defaults to 1.0); the kill counter is EDF6's name for
-# the same tally.
+# 4.1's own tally (kill_counters below: the port's nests category).
 NEST_41_KEYS: tuple[tuple[str, object], ...] = (
     ('game_object_destroy_score_adjust', 1.0),
-    # 4.1's nests count into NestKillCount (a name in EDF41.exe's counter table, 0xA36D20); EDF6's table (EDF+0x893C40)
-    # has no such name, so the kill would be counted nowhere: the same tally is AntHillKillCount there (0x894440)
-    ('game_object_kill_counter', 'AntHillKillCount'),
+    # 4.1's nests count into NestKillCount (a name in EDF41.exe's counter table, 0xA36D20), which EDF6's counters
+    # (APP:/ETC/Achievement.sgo) lack, and E517's template brings EDF6's AntHillKillCount (its teleportation devices):
+    # the port's own counter for 4.1's nests (pylib/edf41kills.py)
+    ('game_object_kill_counter', edf41kills.ported('NestKillCount')),
 )
 UG_NEST_ALIAS = Alias('AntHill', 'E517_ANTHILL.SGO', (),
                       drop=('ant_hill_material_type', 'lighting', 'material_animation'), fracture=True,
@@ -3552,6 +3554,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             raise ValueError('EDF6 archives serve SGOs the 4.1 missions spawn that its classes cannot load (add the '
                              'root to ROOTS / ALIASES with STOCK_OVERRIDES, or to STOCK_COMPLETIONS):\n  '
                              + '\n  '.join(stale))
+    kill_counters(files)
     hashes = {r: hashlib.sha256(b).hexdigest() for r, b in files.items()}
     for r, path in shared.items():
         with open(os.path.join(HERE, '..', *path.split('/')), 'rb') as f:
@@ -3560,6 +3563,47 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             'stock_completions': completions, 'skipped': skipped, 'files': dict(sorted(hashes.items())),
             'shared': shared}
     return data, files
+
+
+def kill_counter(data: bytes) -> str | None:
+    """The SGO's (classic or DSGO) game_object_kill_counter, or None."""
+    if data[:4] == b'DSGO':
+        root = dsgo.parse(data).root
+        value = next((root.items[i] for i, n in root.names.items() if n == 'game_object_kill_counter'), None)
+    else:
+        value = sgo.read(data)[1].get('game_object_kill_counter')
+    return None if value is None else str(value)
+
+
+def kill_counters(files: dict[str, bytes]) -> None:
+    """Every SGO here that counts its kills (game_object_kill_counter) counts into the port's own counter for it
+    (pylib/edf41kills.py ported: 4.1's name, or EDF6's AntHillKillCount a nest's template brought in), not into an EDF6
+    category or into a name EDF6's counters lack (counted nowhere: EDF+0xCF640 adds only to a variable
+    APP:/ETC/Achievement.sgo has; docs/kill-counter-re.md). The user, 2026-10-18: each 4.1 unit a category of its own in
+    the battle record. ValueError for a counter with no category (edf41kills.COUNTERS is missing one)."""
+    for rel in sorted(files):
+        if not rel.upper().endswith('.SGO'):
+            continue
+        data = files[rel]
+        if data[:4] not in (b'DSGO', b'SGO\0'):
+            continue
+        name = kill_counter(data)
+        if name is None:
+            continue
+        try:
+            new = edf41kills.ported(name)
+        except KeyError:
+            raise ValueError(f'{rel}: kill counter {name} has no category of the port (pylib/edf41kills.py)') from None
+        if new == name:
+            continue
+        if data[:4] == b'DSGO':
+            doc = dsgo.parse(data)
+            doc.root.set('game_object_kill_counter', new)
+            files[rel] = dsgo.compact(doc)
+        else:
+            version, members = sgo.read(data)
+            members['game_object_kill_counter'] = new
+            files[rel] = sgo.write_depth_first(version, members)
 
 
 def complete_stock(games: Games, rel: str) -> dict[str, bytes]:
