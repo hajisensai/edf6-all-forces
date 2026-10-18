@@ -251,6 +251,19 @@ bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
 bool DebugSpawnReadout(DebugSpawnCue* o) noexcept { if(sceneDebugSpawnOn)*o=sceneDebugSpawn;return sceneDebugSpawnOn; }
 void MapCommandView(const float*,float,float) noexcept {}
+// Stand-in PVP state and hit ledger let offline fixtures exercise the production panel.
+PvpStatus scenePvp{},scenePvpSnapshot{};bool scenePvpVisible=false;
+int scenePvpPadPick=-1,scenePvpCount=0,scenePvpCodes[kMapPvpItems]{};float scenePvpRects[kMapPvpItems][4]{};
+bool ReadPvpStatus(PvpStatus* value) noexcept { if(value)*value=scenePvp;return value!=nullptr; }
+void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpStatus* snapshot) noexcept {
+    scenePvpVisible=snapshot!=nullptr;scenePvpSnapshot=snapshot ? *snapshot : PvpStatus{};scenePvpCount=n;
+    for(int i=0;i<n;++i){std::memcpy(scenePvpRects[i],rects+i*4,16);scenePvpCodes[i]=codes[i];}
+}
+int MapPvpPadSelection() noexcept { return scenePvpPadPick; }
+thermal::Status sceneThermal{};
+namespace thermal { Status GetStatus() noexcept { return sceneThermal; } }
+VehicleSensorReadout sceneSensor{};bool sceneSensorOn=false;
+bool PlayerVehicleContacts(VehicleSensorReadout* value) noexcept { if(value)*value=sceneSensor;return value && sceneSensorOn; }
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
 int sceneButtons=0;float sceneButton[mapbtn::kCount][4]{};int sceneButtonId[mapbtn::kCount]{};
 void MapCommandButtons(const float* r,const int* ids,int n) noexcept {

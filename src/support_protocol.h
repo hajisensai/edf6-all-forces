@@ -67,6 +67,11 @@ constexpr std::uint32_t kFeatures=Features(kCapabilities,kExtensions);
 // says so (support_net.cpp VersionTick). An older host sends 0 in both (its welcome never set them); an older guest
 // ignores them. The hello's own `index` keeps its bound (below kMaxUnits).
 static_assert(kFeatures<1024,"welcome.catalog carries the host's features");
+// Additional capability word in hello/welcome unit.role, outside the full ten-bit features word.
+// A requester-bearing BEGIN uses only the unused unit fields and is sent only to a room where every peer
+// announced kDetailPvpSupport. Older builds ignore BEGIN units, so this all-peer gate is mandatory.
+constexpr std::uint32_t kDetailPvpSupport=1u,kDetails=kDetailPvpSupport;
+constexpr std::uint32_t kBeginRequesterMetadata=0x52565050u;
 // Request statuses kept per requester (host) and for this machine's own requests (any machine): the map's call and the
 // sea rescue are separate requests, each told its own outcome even when the other came later.
 constexpr std::uint32_t kRecentRequests=4;
@@ -116,6 +121,9 @@ public:
     // Host: whether every peer of this session announced all of `caps` in its current hello (no peer: true).
     // A client is never asked to plan: true.
     bool PeersHave(std::uint32_t caps) const noexcept;
+    // Current authenticated handshake only. Host: all peers; client: its host. Unknown/not ready: false.
+    bool PeersHaveDetails(std::uint32_t bits) const noexcept;
+    std::uint32_t HostDetails() const noexcept { return running_ && epoch_ ? (host_ ? kDetails : hostDetails_) : 0u; }
     // Host: whether every peer announced all of `ext` (kExtVariants) and, `hash` non-zero, has that variant file by its
     // hello's filter (no peer: true). A client is never asked: true.
     bool PeersHaveVariant(std::uint32_t ext,std::uint64_t hash) const noexcept;
@@ -162,9 +170,9 @@ private:
     std::array<std::uint64_t,kMaxPeers+1> challenges_{},lastRequestAt_{};
     std::array<std::uint32_t,kMaxPeers+1> requests_{};
     std::array<std::uint32_t,kMaxPeers+1> peerMissions_{};
-    std::array<std::uint32_t,kMaxPeers+1> peerCaps_{},peerExt_{};
+    std::array<std::uint32_t,kMaxPeers+1> peerCaps_{},peerExt_{},peerDetails_{};
     std::array<std::array<unsigned char,32>,kMaxPeers+1> peerBloom_{};
-    std::uint32_t hostCaps_=0;bool hostCapsKnown_=false,hostRoomBehind_=false;
+    std::uint32_t hostCaps_=0,hostDetails_=0;bool hostCapsKnown_=false,hostRoomBehind_=false;
     std::array<std::uint64_t,kMaxPeers+1> rescueAt_{};   // host: when each requester's last rescue was made (0: none)
     std::uint64_t rescueCooldown_=kRescueCooldownMs;
     bool InFlight(const Transaction& t) const noexcept;

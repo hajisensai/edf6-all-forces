@@ -108,9 +108,10 @@ def spawns(bvm: bytes) -> list[Spawn]:
     prog = bvm41.parse(bvm)
     out = []
     for func, _i, x, args in bvm41.native_calls(prog, {(NAT, n) for n in NATIVES}):
-        lits = [a.s for a in args]
-        point = lits[0] if x.v in AT_POINT else None
-        sgos = tuple(rel_of(s) for s in lits if s is not None and s.lower().endswith('.sgo'))
+        point = args[0].s if x.v in AT_POINT else None
+        # A branch can pass a different model at the same creation call. Scan every possible literal;
+        # an ambiguous point remains None rather than inventing one predecessor's exact position.
+        sgos = tuple(sorted({rel_of(s) for a in args for s in a.literals if s.lower().endswith('.sgo')}))
         out.append(Spawn(func, x.v, point, sgos))
     return out
 

@@ -188,6 +188,11 @@ bool PlayerMapCommands(MapCommandReadout* out) noexcept;
 constexpr int kPlaceTab=0x1000,kPlaceToggle=0x2000,kPlacePageUp=0x2001,kPlacePageDown=0x2002;   // a row's code: its kEntries index
 constexpr int kMapPlaceItems=rangeplace::kWindow+debugspawn::kCategoryCount+3;
 void MapCommandPlaceButtons(const float* rects,const int* codes,int n) noexcept;
+struct PvpStatus;
+constexpr int kPvpModeToggle=0,kPvpTeam1=1,kPvpTeam2=2,kMapPvpItems=3;
+// The exact rendered state accompanies every action; stale world/revision/member identity is rejected on use.
+void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpStatus* snapshot) noexcept;
+int MapPvpPadSelection() noexcept; // selected code, -1 when R3 has not focused the panel
 // map.cpp ReadToggles: the 「摆放」 panel takes the pad's A and B (placing, shutting it) while it is open, and until both
 // are let go after it shut: the map's own A (centre on the player) and B (close the map) wait. Any thread.
 bool MapPlaceHoldsPad() noexcept;

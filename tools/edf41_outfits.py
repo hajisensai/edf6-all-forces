@@ -54,7 +54,7 @@ def _foreign(led: ledger.Ledger, rel: str) -> bool:
     return os.path.exists(led.disk(rel)) and not led.owners(rel)
 
 
-def build(root: str) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
+def build(root: str, *, material_compat: bool = False) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
     """Every class's files (each checked against the registry's SHA-256), but those of a class one of whose names
     another mod already uses in Mods."""
     reg = registry()
@@ -71,6 +71,9 @@ def build(root: str) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
             if hashlib.sha256(data).hexdigest() != reg['files'][rel]:
                 raise ValueError(f'{rel}: not the file the registry lists (a damaged install of the tools)')
             files[rel] = data
+    if material_compat:
+        import edf41_materials
+        files = edf41_materials.apply(files, root)
     return files, skipped
 
 

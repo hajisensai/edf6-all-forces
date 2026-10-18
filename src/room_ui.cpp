@@ -18,6 +18,7 @@
 // Nothing is patched unless every address checks out (REFUSED in the log: both screens as they are). The slots are read
 // and chained, never assumed stock: EDF6Coop chains the room's too.
 #include "room_ui.h"
+#include "pvp.h"
 #include "outfit41.h"
 #include "crew.h"
 #include "hud.h"
@@ -153,7 +154,7 @@ bool padOk=false;   // the game's pad table checked (else the keyboard alone)
 
 // What was last written into each element of the screen now (the calls reload a texture / re-lay a text: only when it
 // changes). Invalid when the screen object changes and when the menu opens: everything written afresh.
-enum Slot : int { kSlotRoot, kSlotHead, kSlotHint, kSlotUnit, kSlotBox=kSlotUnit+kRows, kSlotText=kSlotBox+kRows,
+enum Slot : int { kSlotRoot, kSlotHead, kSlotHint, kSlotHelp2, kSlotHelp3, kSlotEntry, kSlotUnit, kSlotBox=kSlotUnit+kRows, kSlotText=kSlotBox+kRows,
                   kSlotNote=kSlotText+kRows, kSlotStatus=kSlotNote+kRows, kSlotCount=kSlotStatus+kStatusLines };
 enum class RootState : std::uint8_t { unknown, found, missing };
 // The texture-skinned elements: the panel, each row's two chips and its icon.
@@ -233,9 +234,14 @@ void ToggleName(wchar_t* out,int size) noexcept {
         const UINT scan=MapVirtualKeyW(static_cast<UINT>(vk),MAPVK_VK_TO_VSC);
         if(!scan || GetKeyNameTextW(static_cast<LONG>(scan<<16),out,size)<=0)_snwprintf_s(out,static_cast<std::size_t>(size),_TRUNCATE,L"0x%X",vk);
     }
-    wchar_t pad[48];
-    PadComboName(static_cast<std::uint16_t>(Cfg().roomLoadoutButton),pad,std::size(pad));
+    wchar_t pad[96];
+    const auto combo=static_cast<std::uint16_t>(Cfg().roomLoadoutButton);
+    PadComboName(PadToggleAvailable(padOk,combo) ? combo : 0,pad,std::size(pad));
     if(pad[0]){const std::size_t used=std::wcslen(out);_snwprintf_s(out+used,static_cast<std::size_t>(size)-used,_TRUNCATE,L"%ls%ls",used ? L" / " : L"",pad);}
+}
+
+bool ToggleAvailable() noexcept {
+    return Cfg().roomLoadoutKey>0 || PadToggleAvailable(padOk,static_cast<std::uint16_t>(Cfg().roomLoadoutButton));
 }
 
 // --- Reading the ini (room_menu.h IniRead) ---
@@ -477,17 +483,20 @@ void ClearMenu(unsigned char* self) noexcept {
     wchar_t name[kNameMost];
     SetText(self,kSlotHead,kHeadName,nullptr);
     SetText(self,kSlotHint,kHintName,nullptr);
+    SetText(self,kSlotHelp2,kHelp2Name,nullptr);
+    SetText(self,kSlotHelp3,kHelp3Name,nullptr);
     SetTextured(self,kTexBack,kBackName,kWhiteTexture,kPanelColour,false);
     for(int i=0;i<kRows;++i){UnitName(i,name);SetText(self,kSlotUnit+i,name,nullptr);DrawRow(self,i,nullptr);}
     for(int i=0;i<kStatusLines;++i){StatusName(i,name);SetText(self,kSlotStatus+i,name,nullptr);}
 }
 // The root's shown flag, and while the menu is not shown everything it set taken back; false when this screen's layout
 // has no menu elements (not looked up again until the screen object changes or the menu opens).
-bool Draw(unsigned char* self,bool shown) noexcept {
+bool Draw(unsigned char* self,bool shown,bool entry=false) noexcept {
     Validate();
+    const bool rootShown=shown || entry;
     if(st.written.root==RootState::missing)return false;
-    if(Changed(kSlotRoot,shown ? 1 : 2) || st.written.root==RootState::unknown) {
-        if(!SetShown(self,kRootName,shown)) {
+    if(Changed(kSlotRoot,rootShown ? 1 : 2) || st.written.root==RootState::unknown) {
+        if(!SetShown(self,kRootName,rootShown)) {
             if(!st.missingLogged)Log("ROOMUI the %s screen's layout has no menu elements (Mods/UI not installed by the installer, "
                                      "or another mod's layout): the menu is not drawn there",st.room ? "room" : "HQ");
             st.missingLogged=true;
@@ -497,6 +506,7 @@ bool Draw(unsigned char* self,bool shown) noexcept {
         st.written.root=RootState::found;
     }
     if(!shown)ClearMenu(self);
+    if(!entry)SetText(self,kSlotEntry,kEntryName,nullptr);
     return true;
 }
 void DrawMenu(unsigned char* self) noexcept {
@@ -521,10 +531,11 @@ void DrawMenu(unsigned char* self) noexcept {
         StatusName(i,name);
         SetText(self,kSlotStatus+i,name,i<s.count ? s.text[i] : nullptr,StatusColour(i<s.count && s.warn[i]));
     }
-    wchar_t key[48];
-    ToggleName(key,48);
-    HintLine(key,line,kLineMost);
-    SetText(self,kSlotHint,kHintName,line);
+    wchar_t key[128];
+    ToggleName(key,128);
+    HelpLine(v.level,0,key,line,kLineMost);SetText(self,kSlotHint,kHintName,line);
+    HelpLine(v.level,1,key,line,kLineMost);SetText(self,kSlotHelp2,kHelp2Name,line);
+    HelpLine(v.level,2,key,line,kLineMost);SetText(self,kSlotHelp3,kHelp3Name,line);
 }
 
 // --- One frame of either screen ---
@@ -546,6 +557,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         st.held=rm::Keys{};
     }
     Follow(self,screen.room);
+    PvpRoomTick();       // capability advertisement only; native team changes stay on the game-thread PvpFrame
     Outfit41RoomTick();   // the EDF4.1 outfit told to the room whatever the menu's switches (outfit41.cpp)
     Edf5OnlineRoomTick(); // this machine's word that it creates every player of an EDF5/4.1 mission (edf5online_room.cpp)
     const bool on=Cfg().enabled && Cfg().roomLoadout;
@@ -572,10 +584,18 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         result=screen.next(self,copy);
     } else result=screen.next(self,ctx);
     if(sw.tick)roomsync::TickRoomSync();
-    const bool shown=PlanFrame(hasInput,st.menu.open).show;
-    FollowPreview(shown);
-    roompreview::TickPreview(shown);
-    if(Draw(self,shown) && shown){DrawMenu(self);st.drew=true;}
+    const Plan display=PlanFrame(hasInput,st.menu.open,ToggleAvailable(),!st.gate.latched);
+    FollowPreview(display.show);
+    roompreview::TickPreview(display.show);
+    if(Draw(self,display.show,display.entry)) {
+        if(display.show)DrawMenu(self);
+        if(display.entry) {
+            wchar_t key[128],line[kLineMost];
+            ToggleName(key,128);EntryLine(key,line,kLineMost);
+            SetText(self,kSlotEntry,kEntryName,line);
+        }
+        if(display.show || display.entry)st.drew=true;
+    }
     return result;
 }
 std::uint64_t __fastcall RoomHook(unsigned char* self,void* ctx) { return Frame(screens[0],self,ctx); }

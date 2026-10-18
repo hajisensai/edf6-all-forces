@@ -40,7 +40,7 @@ void __fastcall DriverRec(void* v,int seat,const void* target) {
     ++driverCalls;driverTarget=target;GunFireRec(v,seat,target);
 }
 void SetupDriver() {
-    SetupGunner(false);ResetDriverPayload();driverCalls=0;driverTarget=nullptr;suppressGunnerChoice=false;
+    SetupGunner(false);ResetDriverPayload();nativePayloadFixture=false;driverCalls=0;driverTarget=nullptr;suppressGunnerChoice=false;
     auto from=SeatAt(vehicle,1),to=SeatAt(vehicle,0);
     std::memcpy(to,from,edf::kSeatStride);std::memset(from,0,edf::kSeatStride);
     Put<float>(human,0x2F8,100);Put<float>(other,kPosition+8,20);
@@ -89,6 +89,12 @@ int main() {
     Expect(driverCalls==1 && At<float>(SeatAt(vehicle,0),0x2E0)==0,"remote driver copy cannot choose or redirect locally");
     SetupDriver();Put<void*>(SeatAt(vehicle,0),kSeatRiderCtrl,nullptr);hooked(vehicle,0,other);
     Expect(driverCalls==1 && driverWrites.empty(),"ordinary empty vehicle remains original dispatch with no fabricated crew state");
+    SetupDriver();config.stockStores=false;nativePayloadFixture=true;chosenGunnerFire=PayloadFire::secondary;hooked(vehicle,0,other);
+    Expect(driverCalls==1 && At<float>(SeatAt(vehicle,0),0x2E4)==0 && At<float>(SeatAt(vehicle,0),0x2E0)==1 && !driverWrites.empty(),
+           "native alternate ammunition still plans and steers its chosen belt with optional stores disabled");
+    SetupDriver();config.stockStores=false;chosenGunnerFire=PayloadFire::secondary;hooked(vehicle,0,other);
+    Expect(driverCalls==1 && At<float>(SeatAt(vehicle,0),0x2E4)==1 && At<float>(SeatAt(vehicle,0),0x2E0)==0 && driverWrites.empty(),
+           "ordinary native weapons keep original dispatch when optional stores are disabled");
     ResetDriverPayload();VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc driver payload: %d failures\n",failures);return failures?1:0;
 }

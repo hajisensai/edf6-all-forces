@@ -2998,7 +2998,7 @@ struct DriverWrite { ObjRef vehicle,rider; float fire[2]; ULONGLONG at; };
 std::vector<DriverWrite> driverWrites;
 void ResetDriverPayload() noexcept { driverWrites.clear(); }
 bool RealPayloadDriver(unsigned char* v) noexcept {
-    return Cfg().enabled && Cfg().stockStores && !v[kDead] && SeatCount(v)>0 &&
+    return Cfg().enabled && (Cfg().stockStores || NativePayloadControl(v,0)) && !v[kDead] && SeatCount(v)>0 &&
         edf::LivingSoldierInSeat(image,SeatAt(v,0)) && AiGunner(v,SeatAt(v,0));
 }
 void ReleaseDriverPayload(unsigned char* v,bool replace) noexcept {
@@ -3103,7 +3103,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         else VisitEnemies(v,&GunnerVisit,&p);
         if(p.best && HoldFire(v,p.best)){p.best=nullptr;}   // no round would hurt it now (HoldFire): the seat idles
         if(p.best) {
-            if(Cfg().stockStores) {
+            if(Cfg().stockStores || NativePayloadControl(v,i)) {
                 PayloadFire fire=PayloadFire::other;
                 const auto w=NpcPayloadSelect(v,i,p.bestD,GunnerAirTarget(p.best),&fire);
                 if(!w)continue;

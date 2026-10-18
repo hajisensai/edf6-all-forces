@@ -33,6 +33,7 @@
 #include "edf41classes.h"
 #include "edf41robo_ai.h"
 #include "edf41robo_body.h"
+#include "edf41_sound_channels.h"
 #include "edf41net.h"
 #include "memory.h"
 
@@ -121,7 +122,7 @@ constexpr std::size_t kFindLocator=0x6BADD0,kRagdollOn=0x6E40B0,kPointImpulse=0x
     kCasVar=0x1167170,kCasVarSet=0x116DF60,kDelete=0x118A1B0,kBodyById=0x6EA430,kChargeCreate=0x84A60,kCasSpeed=0x116DF20,
     kMatCtor=0x6DBE90,kMatTarget=0x6DC7B0,kMatLoad=0x6DC6B0,kMatPlay=0x6DC830,kMatStep=0x6DC8B0,kMatFree=0x29D120,
     kRagdollLayer=0x6E9320,kParticleCreate=0x844C0,kParticleParamInit=0x300C80,kTexByName=0x2E8510,kTexAssign=0xF5E10,
-    kTexFree=0x1120820,kParticleParamFree=0x8FDF0,kSetAngVel=0x11B1760,kContactSignal=0xDAB920,kContactAdd=0x6E3A60,kContactCb=0x6EC450;
+    kTexFree=0x1120820,kParticleParamFree=0x8FDF0,kSetAngVel=0x11B1760,kContactSignal=0xDAB920,kContactAdd=0x6E3A60,kContactCb=0x6EC450,kSoundPlaying=0x7A8A20;
 constexpr std::size_t kInitParamBase=0x1762068,kEffects=0x20B2980,kManager=0x20B2958,kChargeVtable=0x17A9338,kParticleParamVtable=0x17620E8;
 struct Print { std::size_t rva; unsigned char bytes[8]; };
 constexpr Print kPrints[]={
@@ -141,6 +142,7 @@ constexpr Print kPrints[]={
     {kTexByName,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{kTexAssign,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},
     {kTexFree,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},{kParticleParamFree,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},
     {kSetAngVel,{0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C}},{kContactSignal,{0x48,0x8B,0x89,0x80,0x09,0x00,0x00,0x41}},
+    {kSoundPlaying,{0x48,0x83,0xEC,0x28,0x48,0x8B,0x41,0x08}},
     {kContactAdd,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{kContactCb,{0x40,0x53,0x56,0x57,0x48,0x81,0xEC,0xD0}},
 };
 std::atomic<int> state{0};   // 0 unchecked, 1 good, 2 refused
@@ -158,6 +160,10 @@ bool Ok() noexcept {
 }
 template<class F> F At(std::size_t rva) noexcept { return reinterpret_cast<F>(image+rva); }
 void* Global(std::size_t rva) noexcept { return Readable(image+rva,8) ? *reinterpret_cast<void* const*>(image+rva) : nullptr; }
+
+bool SoundPlaying(const SoundHandle& handle) noexcept {
+    return Ok() && handle.instance && !ShuttingDown() && At<bool(__fastcall*)(const SoundHandle*)>(kSoundPlaying)(&handle);
+}
 
 bool FindLocatorIn(void* model,int list,const wchar_t* name,LocatorHandle* out) noexcept {
     *out={nullptr,nullptr};
@@ -529,6 +535,8 @@ struct Gun {
     wchar_t factory[32]={};
     const wchar_t* chargeSe=nullptr;
     const wchar_t* shotSe=nullptr;
+    bool shotLoops=false;       // source class sets this only for the small gun (EDF41.exe 0x2757CE)
+    edf41sound::GunSounds<SoundHandle> sounds;
     const wchar_t* hitSe=nullptr;   // the bullets' hit sound (4.1 0x275730 fills each group's InitParam +0xB0)
     int flashLife=0;             // the muzzle flash: life in frames (4.1 group +0x3F0), pushed out along the muzzle by
     float flashOffset=0.0f;      // +0x3F4 + the template's +0x38; its size is the charge effect's strength when the charge
@@ -569,6 +577,7 @@ struct Robo {
     LocatorHandle footL{},footR{},lockOn{};
     void* lockPoint=nullptr;     // the lock point the plugin keeps on ロックオン (EventAnimationObject has none)
     SoundHandle drive;           // se_table[0], the drive hum, from birth (4.1 +0x1560)
+    edf41sound::Channels<SoundHandle> eventSounds; // MAB channels, separate from the drive and each gun
     bool driveOn=false;
     Gun gun[4];
     // state machines
@@ -762,6 +771,7 @@ void SetLevel(Robo& r) noexcept {
     const float smc[4]={1.0f*k,0.25f*k,0.5f*k,1.0f*k};
     std::memcpy(sm.bullet.color,smc,sizeof(smc));
     sm.aimLimit=0.5f; sm.spread=(std::max)(0.05f,0.25f/s); sm.interval=5; sm.duration=300; sm.charge=180;
+    sm.shotLoops=true;
     sm.chargeSe=L"ロボ小ビームチャージ"; sm.shotSe=L"ロボ小ビーム発射"; sm.look=kChargeSmall; sm.hitSe=L"ロボビーム着弾小"; sm.flashLife=10; sm.flashOffset=0.0f;
     Gun& md=r.gun[kMiddle];
     md.bullet.speed=2.0f; md.bullet.life=600; md.bullet.damage=(std::max)(1.0f,30.0f*s); md.bullet.explosion=9.0f+s; md.bullet.size=40.0f;
@@ -857,7 +867,12 @@ void GunEnter(Robo& r,Gun& g,int state) noexcept {
         if(e && WeakAlive(z.chargeRef) && Readable(e+0x4E4,4))std::memcpy(&g.flashSize,e+0x4E4,4);
         if(!std::isfinite(g.flashSize) || g.flashSize<0.0f)g.flashSize=0.0f;
     }
-    if(g.state==kG1 && state!=kG1)ChargeOff(g);
+    if(g.state==kG1) {
+        g.sounds.LeaveCharge([](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+        if(state!=kG1)ChargeOff(g);
+    }
+    if(g.state==kG2)g.sounds.LeaveFire([](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+    if(state==kG0)g.sounds.Release([](SoundHandle& handle,int fade) { StopSound(handle,fade); });
     g.state=state;
     g.frames=0;
     if(state==kG1)ChargeOn(r,g,static_cast<int>(&g-r.gun));
@@ -868,7 +883,8 @@ void GunEnter(Robo& r,Gun& g,int state) noexcept {
         for(int i=0;i<g.muzzles;++i)
             if(g.muzzle[i].found && LocatorMatrix(g.muzzle[i].loc,m)) { sum[0]+=m[12]; sum[1]+=m[13]; sum[2]+=m[14]; ++n; }
         if(n) { c[0]=sum[0]/n; c[1]=sum[1]/n; c[2]=sum[2]/n; }
-        PlaySe(r,g.chargeSe,c);
+        g.sounds.Charge([&](SoundHandle* handle) { return edf41c::PlaySe(r.obj,g.chargeSe,c,handle); },
+            [](SoundHandle& handle,int fade) { StopSound(handle,fade); });
     }
     if(state==kG2)g.counter=0;
 }
@@ -958,11 +974,27 @@ void GunTick(Robo& r,Gun& g,int group) noexcept {
                 FireOne(r,g,i,group);
                 if(g.muzzle[i].found && LocatorMatrix(g.muzzle[i].loc,m)) { c[0]+=m[12]; c[1]+=m[13]; c[2]+=m[14]; ++n; }
             }
-            if(n) { c[0]/=n; c[1]/=n; c[2]/=n; PlaySe(r,g.shotSe,c); }   // once a round, at the muzzles' centre (4.1 0x27B500)
+            if(n) {
+                c[0]/=n; c[1]/=n; c[2]/=n;
+                g.sounds.Shot(g.shotLoops,[&](SoundHandle* handle) { return edf41c::PlaySe(r.obj,g.shotSe,c,handle); },
+                    [](const SoundHandle& handle) { return p6::SoundPlaying(handle); },
+                    [](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+            }   // 4.1 0x27B500: finite shots per round; small-gun loop once until G2 exits
         }
         if(g.duration>=0 && g.frames>g.duration)GunEnter(r,g,kG0);
         break;
     }
+    if(g.sounds.Empty())return;
+    float centre[3]={},matrix[16];
+    int count=0;
+    for(int i=0;i<g.muzzles;++i)
+        if(g.muzzle[i].found && LocatorMatrix(g.muzzle[i].loc,matrix)) {
+            for(int axis=0;axis<3;++axis)centre[axis]+=matrix[12+axis];
+            ++count;
+        }
+    if(count)for(float& value:centre)value/=count;
+    else std::memcpy(centre,r.pos,sizeof(centre));
+    g.sounds.MoveAll([&](SoundHandle& handle) { MoveSound(handle,centre); });
 }
 
 // ---- CAS ------------------------------------------------------------------------------------------------------------
@@ -972,6 +1004,7 @@ bool Play(Robo& r,int state,const wchar_t* why) noexcept {
     float t=0.0f,len=0.0f;
     ClipNow(r.obj,&before,&t,&len);
     const bool ok=PlayStateIndex(r.obj,state);
+    if(ok)r.eventSounds.StopAll(16,[](SoundHandle& handle,int fade) { StopSound(handle,fade); });
     if(ok && before==state)ClipRewind(r.obj);   // the same state again (a second walk_f_lr): from its start
     r.evState=-2;     // the events start over with the new clip
     if(r.logged<400) { ++r.logged; Log("EDF41ROBO %p plays %ls (state %d) %s",r.obj,why,state,ok ? "" : "REFUSED"); }
@@ -1421,10 +1454,15 @@ void RaiseEvent(Robo& r,const Event& e) noexcept {
     ++r.events;
     switch(e.kind) {
     case kEvSe:
-        PlaySe(r,e.text.c_str(),r.pos);
+        // The converter preserves an absent channel as -1. 4.1 first stops an occupied channel
+        // (0x321FAC -> 0x322290, fade 16); its 360-degree shot is an infinite ACB cue on channel 0.
+        r.eventSounds.Start(static_cast<int>(e.a),[&](SoundHandle* handle) {
+            return edf41c::PlaySe(r.obj,e.text.c_str(),r.pos,handle);
+        },[](SoundHandle& handle,int fade) { StopSound(handle,fade); });
         break;
     case kEvSeStop:
-        break;   // 4.1 stops the channel's loop (ロボ３６０発射); the cues the plugin plays are one-shots
+        r.eventSounds.StopOne(static_cast<int>(e.a),16,[](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+        break;
     case kEvHit: {   // 4.1 0x277790: damage x s at the ground under the locator, radius scale x the locator's size
         LocatorHandle l{};
         float m[16];
@@ -1661,7 +1699,11 @@ void Die(Robo& r,const void* gdi) noexcept {
     if(r.form) { PlaySe(r,L"ロボ死亡",r.pos); BigExplosion(p,nrm,0.75f,2.0f); }
     else { PlaySe(r,L"ロボ飛行形態死亡",r.pos); BigExplosion(r.pos,back,0.75f,2.0f); }
     StopSound(r.drive,60);
-    for(Gun& g:r.gun)ChargeOff(g);
+    r.eventSounds.StopAll(16,[](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+    for(Gun& g:r.gun) {
+        g.sounds.Release([](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+        ChargeOff(g);
+    }
     float durability=0.0f;
     const char* o=static_cast<const char*>(r.obj);
     if(Readable(o+kDurabilityAt,4))std::memcpy(&durability,o+kDurabilityAt,4);
@@ -1752,6 +1794,7 @@ void Tick(Robo& r) noexcept {
     for(int g=0;g<4;++g)GunTick(r,r.gun[g],g);
     WriteMatrix(r);
     MoveSound(r.drive,r.pos);
+    r.eventSounds.MoveAll([&](SoundHandle& handle) { MoveSound(handle,r.pos); });
     NetOut(r);    // online: the deciding copy's periodic state
     if(r.ticks%600==0) {
         float durability=0.0f;
@@ -1881,9 +1924,13 @@ void FootIk(Robo& r,const float* newMatrix) noexcept {
 // back), the material animation. Used by the destructor (the object is still whole: the stock destructor runs after) and by
 // the shutdown callback (every robot left, while the sound system and the material data still exist).
 void Release(Robo& r) noexcept {
+    r.eventSounds.StopAll(0,[](SoundHandle& handle,int fade) { StopSound(handle,fade); });
     StopSound(r.drive,0);
     r.driveOn=false;
-    for(Gun& g:r.gun)ChargeOff(g);
+    for(Gun& g:r.gun) {
+        g.sounds.Release([](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+        ChargeOff(g);
+    }
     p6::LightsEnd(r.lights);
 }
 

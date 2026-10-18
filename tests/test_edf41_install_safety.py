@@ -14,6 +14,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'pylib')]
 import edf41_maps as maps
+import edf41_objects as objects
 import edf41_sounds as sounds
 import edf41src
 import export_edf41_assets as exporter
@@ -84,6 +85,82 @@ class Edf41InstallSafetyTests(unittest.TestCase):
             self.assertEqual(changed.read_bytes(), b'user changed bank')
             sounds.remove(root)
             self.assertEqual(changed.read_bytes(), b'user changed bank')
+
+
+class Edf41ObjectUpgradeTests(unittest.TestCase):
+    OBJ = 'OBJECT/DEPENDENT_TEST.SGO'
+    MODEL = 'OBJECT/DEPENDENT_TEST.MRAB'
+    PHYSICS = 'OBJECT/DEPENDENT_TEST.SHKT'
+    SHADER = 'SHADER/DX11/EDF41_SND_MECH.SGO'
+
+    def plan(self, payloads: dict) -> dict:
+        return {'objects': [{'object': self.OBJ, 'files': [self.OBJ, self.MODEL, self.PHYSICS]}],
+                'files': {rel: hashlib.sha256(data).hexdigest() for rel, data in payloads.items()}}
+
+    def test_primary_writer_upgrades_and_transfers_new_closure_to_each_dependent(self) -> None:
+        payloads = {self.OBJ: b'new-object', self.MODEL: b'new-model', self.PHYSICS: b'new-physics'}
+        for dependent in sorted(objects.DEPENDENT_OWNERS):
+            for writer_first in (True, False):
+                with self.subTest(dependent=dependent, writer_first=writer_first), tempfile.TemporaryDirectory() as root, \
+                        patch.object(objects, 'registry', return_value=self.plan(payloads)), \
+                        patch.object(objects, 'read', side_effect=payloads.__getitem__):
+                    led = ledger.Ledger(root)
+                    led.put(objects.OWNER, self.OBJ, b'old-object')
+                    led.need(dependent, self.OBJ)
+                    files, skipped = objects.build(root)
+                    self.assertFalse(skipped)
+                    objects.install(root, files)
+                    for rel, data in payloads.items():
+                        led = ledger.Ledger(root)
+                        self.assertEqual(set(led.owners(rel)), {objects.OWNER, dependent})
+                        self.assertEqual(Path(led.disk(rel)).read_bytes(), data)
+                    if writer_first:
+                        objects.remove(root)
+                        for rel in payloads:
+                            self.assertTrue(Path(led.disk(rel)).exists(), 'new closure must outlive its primary writer')
+                        ledger.Ledger(root).release(dependent)
+                    else:
+                        ledger.Ledger(root).release(dependent)
+                        for rel in payloads:
+                            self.assertTrue(Path(led.disk(rel)).exists())
+                        objects.remove(root)
+                    self.assertFalse(any(Path(led.disk(rel)).exists() for rel in payloads))
+
+    def test_primary_upgrade_propagates_actual_shader_dependency(self) -> None:
+        payloads = {self.OBJ: b'new-object', self.MODEL: b'new-model', self.PHYSICS: b'new-physics'}
+        fake_materials = type('Materials', (), {'needed_names': staticmethod(lambda files: {'SND_MECH'}),
+                                               'shader_path': staticmethod(lambda name: self.SHADER)})
+        with tempfile.TemporaryDirectory() as root, patch.object(objects, 'registry', return_value=self.plan(payloads)), \
+                patch.dict(sys.modules, {'edf41materials': fake_materials}):
+            led = ledger.Ledger(root)
+            led.put(objects.OWNER, self.OBJ, b'old-object')
+            led.need('testrange', self.OBJ)
+            objects.install(root, payloads | {self.SHADER: b'actual-used-shader'})
+            self.assertEqual(set(ledger.Ledger(root).owners(self.SHADER)), {objects.OWNER, 'testrange'})
+            objects.remove(root)
+            self.assertEqual(Path(led.disk(self.SHADER)).read_bytes(), b'actual-used-shader')
+            ledger.Ledger(root).release('testrange')
+            self.assertFalse(Path(led.disk(self.SHADER)).exists())
+
+    def test_competing_writer_spoofed_consumer_and_user_edits_are_refused(self) -> None:
+        payloads = {self.OBJ: b'new-object', self.MODEL: b'new-model', self.PHYSICS: b'new-physics'}
+        for owners, edit in ((('testrange',), False), (('calls',), False),
+                             ((objects.OWNER, 'calls'), False), ((objects.OWNER, 'testrange'), True),
+                             ((objects.OWNER,), True)):
+            with self.subTest(owners=owners, edit=edit), tempfile.TemporaryDirectory() as root, \
+                    patch.object(objects, 'registry', return_value=self.plan(payloads)), \
+                    patch.object(objects, 'read', side_effect=payloads.__getitem__):
+                led = ledger.Ledger(root)
+                led.put(owners[0], self.OBJ, b'old-object')
+                for owner in owners[1:]:
+                    led.need(owner, self.OBJ)
+                expected = b'user edited' if edit else b'old-object'
+                if edit:
+                    Path(led.disk(self.OBJ)).write_bytes(expected)
+                files, skipped = objects.build(root)
+                self.assertFalse(files)
+                self.assertEqual([obj for obj, _ in skipped], [self.OBJ])
+                self.assertEqual(Path(led.disk(self.OBJ)).read_bytes(), expected)
 
 
 class Edf41AssetExportCheckTests(unittest.TestCase):

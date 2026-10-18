@@ -55,7 +55,7 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
     泰坦和炮手座坦克的副炮自瞄，炮塔镜头下的锁定；
   - AutoTurret 的车辆数据：防空车（KG6 克卜勒系）改高射炮、玻尔斯对地、关卡里的 NPC 防空车、NPC 泰坦的副炮，
     以及这几辆车的武器说明行；
-  - 呼叫武器、战机 / 直升机 / 无人机、潜水母舰、喀秋莎、自行榴弹炮、钻头战车、边三轮、降落伞、EMC 光束、
+  - 呼叫武器、战机 / 直升机 / 无人机、潜水母舰、喀秋莎、自行榴弹炮、钻头战车、边三轮、M163 火神炮车、BMPT、降落伞、EMC 光束、
     大地图和测试场「大混战」关卡（都在你机器上现场生成，见下）。
 
 安装 / 更新：
@@ -201,7 +201,8 @@ def build_exe(name: str, generator: str | None = None) -> str:
         cmd += ['--paths', p]
     for mod in ('call_weapons', 'edf41_objects', 'edf41_outfits', 'edf41_maps', 'edf41_menu_bg', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model', 'make_sedan',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'catalog', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
-                'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
+                'testhub', 'make_emc', 'make_vulcan', 'make_bmpt', 'make_tracked_combat', 'tracked_combat_model', 'vulcan_model', 'bmpt_model',
+                'edf41_materials', 'edf41materials', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
                 'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'mdb', 'edf6native', 'crilayla',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is

@@ -34,6 +34,9 @@ bool CheckHeliProfile() noexcept;
 bool InstallDoorGuns() noexcept;   // after CheckHeliProfile: the 410's door guns (their weapon-user hook)
 // Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point).
 float MapRay(const float* a,const float* b,float* hit) noexcept;
+// Whether map rays can distinguish an unobstructed line from an unavailable native query.
+// Game thread: checked EDF.dll ray profile and a live physics world.
+bool MapRayReady() noexcept;
 // map.cpp's eye: the same ray past the hits on moving bodies (map_floor.h Fixed: the scene objects' ragdolls on the map
 // layers, an Earth Eater's parts over the field), so only the fixed world (terrain, buildings, cave rock) is found.
 float MapFixedRay(const float* a,const float* b,float* hit) noexcept;

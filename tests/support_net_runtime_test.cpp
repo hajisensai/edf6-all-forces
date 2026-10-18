@@ -18,6 +18,11 @@ const char* actorPuids[4]={"host","client","host","lobby-only"};
 std::uint64_t generation=1;
 unsigned spawnCount=0,destroyCount=0,sendCount=0,peerCount=0;
 unsigned commandPackets=0,commandContexts=0;
+unsigned pvpPackets=0,pvpContexts=0,pvpResets=0;bool pvpReady=false;char pvpSender[65]{};
+unsigned rangePlans=0,rangeValidations=0,rangeSpawns=0,rangeDestroys=0,rangeTicks=0,rangeResets=0,rangeNotices=0;
+std::uint64_t rangeToken=0;
+int pvpTeam=0;bool identityMismatch=false,nativeIdMissing=false;
+unsigned lastSupportTeam=0,lastSupportOwner=0;
 unsigned qmarkPackets=0,qmarkContexts=0,qmarkResets=0;std::uint32_t qmarkPeers=0;bool qmarkReady=false;
 EDF6CoopPeer Peer(const char* id) { EDF6CoopPeer p{};strcpy_s(p.id,id);return p; }
 struct Packet { EDF6CoopPeer sender;unsigned char bytes[176]; };
@@ -59,6 +64,55 @@ bool ReceiveQMarkNetwork(std::uint32_t,const char*,const void* bytes,std::size_t
     ++fixture::qmarkPackets;return true;
 }
 void ResetQMarkNetwork() noexcept { ++fixture::qmarkResets; }
+void UpdatePvpNetwork(const CommandNetworkContext& context,std::uint64_t) noexcept {
+    ++fixture::pvpContexts;fixture::pvpReady=context.ready;
+}
+bool ReceivePvpNetwork(std::uint32_t,const char* sender,const void* bytes,std::size_t size,std::uint64_t) noexcept {
+    if(size<4 || std::memcmp(bytes,"AFPV",4))return false;
+    ++fixture::pvpPackets;strcpy_s(fixture::pvpSender,sender);return true;
+}
+void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
+void ResetPvp() noexcept { ResetPvpNetwork(); }
+int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}
+bool PvpValidateSupportPlan(const support_net::Plan& plan) noexcept {
+    return fixture::pvpTeam>=0 && plan.team==static_cast<unsigned>(fixture::pvpTeam);
+}
+bool ReadNativeObjectId(const unsigned char* object,unsigned char* id) noexcept {
+    if(fixture::nativeIdMissing)return false;
+    for(unsigned i=0;i<fixture::actors;++i)if(object==reinterpret_cast<const unsigned char*>(fixture::actorPuids[i])) {
+        std::memset(id,0,32);id[0]=static_cast<unsigned char>(0x40+i);return true;
+    }
+    return false;
+}
+bool ResolveMarkIdentities(const unsigned char* marker,const unsigned char*,MarkIdentities* out) noexcept {
+    if(!marker || !out || marker[0]<0x40 || marker[0]>=0x40+fixture::actors)return false;
+    const unsigned i=marker[0]-0x40;
+    *out={};out->player={fixture::actorPuids[i],reinterpret_cast<const void*>(static_cast<std::uintptr_t>(i+100))};
+    out->slot=static_cast<int>(i);out->puid=const_cast<char*>(fixture::identityMismatch ? "wrong-member" : fixture::actorPuids[i]);
+    return true;
+}
+// The native spawn functions are isolated below the bridge. Their production descriptor/plan contract still runs,
+// so this fixture verifies the real bridge routes only the reserved catalog through all range callbacks.
+support_net::PlanResult PlanRangeEnemy(std::uint32_t catalog,const float* at,std::uint64_t descriptor,support_net::Plan* out) noexcept {
+    ++fixture::rangePlans;
+    const int row=debugspawn::NetworkRow(descriptor);
+    float matrix[16]{};matrix[0]=matrix[5]=matrix[10]=matrix[15]=1;
+    for(unsigned i=0;i<3;++i)matrix[12+i]=at[i];
+    return catalog==debugspawn::kNetworkCatalog && debugspawn::BuildNetworkPlan(row,matrix,out) ?
+        support_net::PlanResult::ready : support_net::PlanResult::refused;
+}
+bool ValidateRangeEnemy(const support_net::Plan& plan) noexcept {
+    ++fixture::rangeValidations;return debugspawn::NetworkPlanRow(plan)>=0;
+}
+bool SpawnRangeEnemy(std::uint64_t token,const support_net::Plan&,bool) noexcept {
+    fixture::rangeToken=token;++fixture::rangeSpawns;return true;
+}
+void DestroyRangeEnemy(std::uint64_t token) noexcept {
+    if(token && token==fixture::rangeToken){++fixture::rangeDestroys;fixture::rangeToken=0;}
+}
+void RangeEnemyNetworkTick() noexcept { ++fixture::rangeTicks; }
+void ResetRangeEnemyNetwork() noexcept { ++fixture::rangeResets;fixture::rangeToken=0; }
+bool RangeEnemyRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept { ++fixture::rangeNotices;return false; }
 }
 namespace fixture {
 using namespace crew::support_net;
@@ -119,7 +173,10 @@ PlanResult PlanCall(std::uint32_t id,const float* target,std::uint64_t,Plan* pla
     auto& u=plan->units[0];u.resourceId=1;u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;return PlanResult::ready;
 }
 bool Validate(const Plan& p) noexcept { return p.count==1 && p.units[0].resourceId==1; }
-bool Spawn(std::uint64_t,const Plan&,bool remote) noexcept { Check(!remote,"host native spawn callback authority");++spawnCount;return true; }
+bool Spawn(std::uint64_t,const Plan& plan,bool remote) noexcept {
+    Check(!remote,"host native spawn callback authority");++spawnCount;
+    lastSupportTeam=plan.team;lastSupportOwner=plan.requester[0];return true;
+}
 void Destroy(std::uint64_t) noexcept { ++destroyCount; }
 bool Derive(std::uint32_t ordinal,unsigned char* bytes) noexcept { std::memset(bytes,0,32);bytes[12]=5;std::memcpy(bytes+4,&ordinal,4);return true; }
 void Step() { tick+=100;crew::SupportNetTick(); }
@@ -175,10 +232,23 @@ int main() {
     EDF6AFMissionAdmissionState initial{};location=3;
     Check(EDF6AF_GetMissionAdmissionState(1,sizeof(initial),&initial) && initial.phase==1 && initial.worldEpoch,
         "initial native lobby is visible before dispatcher preload configuration");location=4;
-    crew::ConfigureSupportNet({&PlanCall,&Validate,&Spawn,&Destroy,&Derive});
+    actors=expectedActors=1;gateReady=true;
+    crew::ConfigureSupportNet({&PlanCall,&Validate,&Spawn,&Destroy,&Derive,&Participants,&AdmissionReady,&CreationsMatch});
+    NoteCreations();Step(); // a real sealed native actor/PUID, independent of lobby order
     wchar_t note[256]{};const float at[3]={0,1,2};
     Check(crew::SubmitSupportRequest(1,at,note,256),"production dynamic ABI accepts host request");Step();
     Check(spawnCount==1,"production frame runs planner and native callback");
+    Check(lastSupportOwner==0x40 && lastSupportTeam==0,"mode-off support caches the authenticated native requester with stock team zero");
+    pvpTeam=1;tick+=2100;
+    Check(crew::SubmitSupportRequest(1,at,note,256),"committed PVP owner can request support");Step();
+    Check(spawnCount==2 && lastSupportTeam==1 && lastSupportOwner==0x40,"PVP support carries the real requester's committed team to the plan");
+    Plan probed{};pvpTeam=-1;
+    Check(crew::PlanForRequester(0,1,at,0,&probed)==PlanResult::refused,"pending PVP transition refuses support instead of choosing team two");
+    pvpTeam=1;identityMismatch=true;
+    Check(crew::PlanForRequester(0,1,at,0,&probed)==PlanResult::refused,"native requester PUID must match authenticated local sender and sealed world");
+    identityMismatch=false;nativeIdMissing=true;
+    Check(crew::PlanForRequester(0,1,at,0,&probed)==PlanResult::refused,"missing canonical native player ID never drops back to stock-team PVP support");
+    nativeIdMissing=false;pvpTeam=0;
     const unsigned before=destroyCount;
     ready=false;Step();Check(destroyCount==before && crew::SupportTransactionActive(1),"not-ready snapshot preserves delivered actors and activation");
     ready=true;generation++;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"restored link does not silently reopen a changed participant epoch");
@@ -195,12 +265,33 @@ int main() {
     auto markPacket=packet;std::memcpy(markPacket.bytes,"QMRK",4);incoming.push_back(markPacket);Step();
     Check(qmarkPackets==1 && commandPackets==1 && sendCount==1,"a Q mark packet goes to qmark.cpp alone");
     Check(qmarkContexts>0 && qmarkReady && qmarkPeers==1,"the Q marks get the room (ready, its peers) each tick");
+    auto pvpPacket=packet;std::memcpy(pvpPacket.bytes,"AFPV",4);incoming.push_back(pvpPacket);Step();
+    Check(pvpPackets==1 && commandPackets==1 && qmarkPackets==1 && !std::strcmp(pvpSender,"client"),
+        "PVP receives the shared poll's authenticated sender exactly once without reaching other parsers");
+    Check(pvpContexts>0 && pvpReady,"PVP receives the ready sealed-world context");
     Check(crew::SubmitSupportRequest(1,at,note,256),"full handshake queues request");
     installed=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"unloaded bridge disables queued work");
     installed=true;peerCount=0;generation++;tick+=1000;Step();
     online=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"offline never sends multiplayer requests");
-    const unsigned resetsBefore=qmarkResets;crew::ResetSupportNet();
+    const unsigned resetsBefore=qmarkResets,pvpResetsBefore=pvpResets;crew::ResetSupportNet();
     Check(qmarkResets>resetsBefore,"the session reset drops the teammates' marks");
+    Check(pvpResets>pvpResetsBefore,"the session reset cancels PVP's network epoch");
+    // Same production session, reserved range catalog, with no remote peer: every wrapper must select the range
+    // callbacks rather than the ordinary support dispatcher. The multi-peer transaction is tested independently.
+    online=true;host=true;ready=true;installed=true;peerCount=0;generation++;tick+=1000;
+    crew::ConfigureSupportNet({&PlanCall,&Validate,&Spawn,&Destroy,&Derive});
+    const auto ordinarySpawns=spawnCount;
+    int row=-1;for(int i=0;i<crew::debugspawn::kEntryCount;++i)
+        if(crew::debugspawn::kEntries[i].how==crew::debugspawn::How::enemy){row=i;break;}
+    Check(row>=0,"range bridge has a generated enemy descriptor");
+    Check(crew::SubmitSupportRequest(static_cast<int>(crew::debugspawn::kNetworkCatalog),at,note,256,
+        crew::debugspawn::Descriptor(crew::debugspawn::kEntries[row])),"range request reaches the production bridge");
+    Step();
+    Check(rangePlans==1 && rangeValidations==1 && rangeSpawns==1 && rangeToken && spawnCount==ordinarySpawns,
+        "range catalog traverses its plan, validate and native spawn wrappers alone");
+    Check(rangeTicks>0 && rangeNotices>0,"range activation/status ticks are supplied by the production bridge");
+    const auto rangeResetBefore=rangeResets;crew::ResetSupportNet();
+    Check(rangeDestroys==1 && rangeResets>rangeResetBefore && !rangeToken,"mission reset rolls back range ownership and request identity");
     WorldParticipants();
     std::printf("support runtime bridge: %d checks passed\n",checks);
 }

@@ -45,3 +45,28 @@ def game_cues(game_root: str) -> set[str]:
             with open(os.path.join(folder, name), 'rb') as f:
                 out.update(cue_names(f.read()))
     return out
+
+
+def cue_lengths(data: bytes) -> dict[str, int]:
+    """Cue name -> authored length in milliseconds; 0xffffffff is unbounded/unknown length.
+
+    The sentinel alone does not prove a loop: inspect the cue graph and source playback owner.
+    This is cue metadata, not a waveform LoopFlag; a finite sequence can contain looped waves
+    terminated by sequence commands. Never infer playback ownership from individual wave flags.
+    """
+    head, _ = _row(data)
+    tables = []
+    for key in ('CueNameTable', 'CueTable'):
+        table = head.get(key)
+        if not isinstance(table, bytes) or len(table) < 8:
+            raise ValueError(f'ACB has no {key}')
+        block = table if table[:4] == b'@UTF' else cpk._unmask(table)
+        tables.append(list(cpk.parse_utf(block)[3]()))
+    names, cues = tables
+    out = {}
+    for entry in names:
+        index = entry['CueIndex']
+        if not isinstance(index, int) or not 0 <= index < len(cues):
+            raise ValueError(f'ACB cue {entry["CueName"]!r} has invalid index {index}')
+        out[entry['CueName']] = cues[index]['Length']
+    return out

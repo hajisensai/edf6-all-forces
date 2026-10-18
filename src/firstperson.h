@@ -9,6 +9,8 @@
 namespace crew {
 void ResetFirstPerson() noexcept;   // publish a new mission; camera/render thread retires old pointers
 bool InstallFirstPerson() noexcept;   // at load, before InstallMap (the map's camera step chains outside this one)
+// Outer camera owner (map/TV) finished its step: suspend this viewport's viewmodel while it owns the view.
+void FirstPersonCameraOverride(const void* camera,bool overridden) noexcept;
 bool FirstPersonOn() noexcept;        // game thread: the local player's camera is in first person this frame
 // Draw thread or game thread (map.cpp's camera step): the stock HUD is off on `camera` for a vehicle's first person
 // (its information goes on the cockpit's panels instead; the user, 2026-10-13: "关，信息全上面板").

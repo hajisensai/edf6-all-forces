@@ -27,6 +27,7 @@
 //    of record [human+0xD40], before its /24); a pad is read through XInput (the hold clears the game's own pad input).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "pvp.h"
 #include "firstperson.h"
 #include "transport.h"
 #include "airdrop.h"
@@ -614,7 +615,7 @@ Keys ReadToggles(bool front,const XINPUT_STATE* pad) noexcept {
         const WORD b=pad->Gamepad.wButtons;
         k.padMap=c.mapButton>0 && (b&static_cast<WORD>(c.mapButton))==static_cast<WORD>(c.mapButton);
         // The test range's 「摆放」 panel open (mapcmd.cpp): its A places, its B shuts it; the map's own wait.
-        const bool place=MapPlaceHoldsPad();
+        const bool place=MapPlaceHoldsPad() || (b&XINPUT_GAMEPAD_RIGHT_THUMB)!=0;
         k.padClose=(b&XINPUT_GAMEPAD_B)!=0 && !place;
         k.padCentre=(b&XINPUT_GAMEPAD_A)!=0 && !place;
     }
@@ -726,6 +727,7 @@ bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
     __try {
         SupportActorFrame(human);
         if(!human || !human[kHumanPlayer] || !IsPlayer(human))return false;
+        FrameTick();       // shared scene-clock anchor, including missions with no surviving vehicle
         TransportTick();   // the squads' transports (transport.cpp), after the deliveries that start them
         AirdropTick();     // the transport planes' containers (airdrop.cpp): held under them, let go over their points
         const bool open=Frame(human);
@@ -824,6 +826,7 @@ void __fastcall CamStepHook(void* cam,void* step) {
     nextCamStep(cam,step);
     __try { Camera(static_cast<unsigned char*>(cam),generation); }
     __except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};cameraSession.Publish(generation,false);}
+    FirstPersonCameraOverride(cam,camSide.shown && camSide.cam==cam && cameraSession.Current(generation));
     StockHud(static_cast<unsigned char*>(cam),generation);
 }
 

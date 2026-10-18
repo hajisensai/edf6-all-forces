@@ -64,12 +64,17 @@ from typing import Callable
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import acb  # noqa: E402
+import edf41_sound  # noqa: E402
 import cas_graft  # noqa: E402
 import cas_pose  # noqa: E402
 import dsgo  # noqa: E402
 import edf41dlc  # noqa: E402
 import edf41kills  # noqa: E402
 import edf41friends  # noqa: E402
+import edf41tank  # noqa: E402
+import edf41heli  # noqa: E402
+import edf41mech  # noqa: E402
+import edf41bike  # noqa: E402
 import legacy_assets  # noqa: E402
 import legacy_sgo  # noqa: E402
 import mab_legacy  # noqa: E402
@@ -1494,6 +1499,34 @@ def check_sounds(games: 'Games', data: bytes, rel: str) -> None:
             raise ValueError(f'{rel}: sound {n!r} plays cue {seset[n]}, which none of {sorted(loaded)} holds')
 
 
+
+def check_vehicle_sounds(games: 'Games', data: bytes, rel: str) -> None:
+    """Validate the special vehicle ports' class tables and MAB events against loaded banks.
+
+    Generic SE_KEYS does not include CarBase/heli/Begaruta tables. A name existing
+    in SEPRESET is insufficient: its cue must be in this vehicle's actual bank set.
+    """
+    members = sgo.read(data)[1]
+    names = [n for key, value in members.items() if key.endswith('_se_table')
+             for n in strings(value) if n]
+    for key in ('ragdoll_contact', 'car_base_ragdoll_contact'):
+        entry = members.get(key)
+        if isinstance(entry, list) and entry and isinstance(entry[0], str) and entry[0]:
+            names.append(entry[0])
+    am = members.get('animation_model')
+    if isinstance(am, list) and len(am) > 2 and isinstance(am[2], bytes) and am[2][:4] == b'MAB\0':
+        for events in mab_legacy.mab_event_params(am[2]).values():
+            for kind, _time, params in events:
+                if kind == 'se':
+                    name = params.get('name')
+                    if not isinstance(name, str) or not name:
+                        raise ValueError(f'{rel}: vehicle MAB se event has no preset name')
+                    names.append(name)
+    proxy = {'xgs_scene_object_class': members['xgs_scene_object_class'],
+             'game_sound': members.get('game_sound', []), 'se_table': sorted(set(names))}
+    check_sounds(games, sgo.write_depth_first(0x102, proxy), rel)
+
+
 def strings(v: object) -> list[str]:
     if isinstance(v, str):
         return [v]
@@ -1747,18 +1780,9 @@ class StandIn:
 
 
 # Files these need that the tools already ship elsewhere: Mods path -> path under the tools' data (not copied again).
-SHARED: dict[str, str] = {'OBJECT/V505_TANKEDF4.MRAB': 'edf5port/assets/OBJECT/V505_TANKEDF4.MRAB'}
+SHARED: dict[str, str] = {}   # source V301 archives are shipped by edf41tank, not an EDF5 remake
 
-STAND_INS: dict[str, StandIn] = {
-    # 4.1's AI tank (13 missions): class VehicleTank301, keys none of which EDF6's tank (Vehicle505_Tank) has. EDF6's
-    # AI tank on EDF5's Blacker No.4.1 model (the same tank, EDF5's remake; P3 ships it converted, SHARED).
-    'VEHICLE301_TANK_AI.SGO': StandIn('V505_TANK_AI.SGO', ('app:/Object/v505_tankedf4.mrab', 'v505_tankedf4.mdb'), (
-        # 4.1 VehicleTank301's values for the keys EDF6's tank reads the same way (jobs/4bf89026/tmp/behav_rest/
-        # NOTES_tank.md): the route-point radius (4.1 0x290200 tests distance^2 < 3^2), the water line. Its attack
-        # (turn gain, reverse past 126 deg, turret 20 deg/s, aim gate 0.1 rad, the cannon) is EDF6's already.
-        ('game_object_ai_route_update_distance', 3.0),
-        ('car_base_submerge_height', 1.7))),
-}
+STAND_INS: dict[str, StandIn] = {}   # V301 now keeps its own model and physics (edf41tank).
 
 
 def stand_in(games: Games, s: StandIn) -> tuple[bytes, list[str]]:
@@ -1853,6 +1877,16 @@ def mother_parts_fix(files: dict[str, bytes]) -> None:
     for rel in [r for r in files if r.startswith('OBJECT/UFOMOTHER301_') and r.endswith('.CAS')]:
         rest = MOTHER_PART_REST.get(rel.split('/', 1)[1], 'close_state')
         files[rel] = cas_graft.alias_states(files[rel], {'main': [('default', rest)]})
+    # These animation sounds own real MAB channels: preserve their precise stop events instead
+    # of approximating the whole appear/close clip as one fire-and-forget cue.
+    for name in ('UFOMOTHER301_BIGCANNON', 'UFOMOTHER301_CANNON'):
+        rel = 'OBJECT/' + name + '.SGO'
+        if rel not in files:
+            continue
+        version, members = sgo.read(files[rel])
+        am = members['animation_model']
+        members['edf41_sound_events'] = edf41_sound.animation_events(files[rel_of(am[1])], mab_block(am[2]))
+        files[rel] = sgo.write_depth_first(version, members)
     # The panels have no CAS in 4.1 (animation_model[1] is the int 0); EventAnimationObject's constructor asks for the player "main",
     # so they get the hatch's (its clips name bones the panel's model lacks: nothing binds, the state only has to exist).
     for rel in [r for r in files if r.startswith('OBJECT/UFOMOTHER301_PANEL') and r.endswith('.SGO')]:
@@ -2078,7 +2112,7 @@ def robo_events(cas: bytes, mab: bytes) -> list:
                 kind = ROBO_EVENTS[key]
                 text = p.get('name', p.get('collision', ''))
                 a = float(p.get('damage', 10.0) if kind == 2 else p.get('charge_frame', 0) if kind in (3, 5) else
-                          p.get('channel', 0))
+                          p.get('channel', -1))
                 b = float(p.get('scale', 1.0))
                 c = float(p.get('quake', 0.2))
                 keys.append([float(time), kind, str(text), a, b, c])
@@ -3422,11 +3456,66 @@ def dlc_roots(games: Games) -> dict[str, int]:
     return dict(DLC_ROOTS)
 
 
+
+def vehicle_spawn_objects(objects: list[dict], files: dict[str, bytes]) -> None:
+    """Give direct-spawn vehicles their final default setup without changing call-in objects.
+
+    A mission placement reads mission_setup; a transport call-in supplies its own
+    settings through vehicle_setup. Keep the source call-in SGO byte for byte and
+    register a private placement copy. AI variants keep their authored mission setup.
+    """
+    for obj in objects:
+        root = obj['object']
+        if not str(obj.get('class', '')).startswith('Vehicle') or root.upper().endswith('_AI.SGO'):
+            continue
+        data = files[root]
+        members = sgo.load(data=data)
+        setup = members.get('vehicle_setup')
+        if not isinstance(setup, list) or not setup:
+            raise ValueError(f'{root}: direct vehicle spawn has no final vehicle_setup')
+        private = 'OBJECT/EDF41_RANGE_' + root.rsplit('/', 1)[-1]
+        if private in files:
+            raise ValueError(f'{root}: private spawn path already exists: {private}')
+        if data[:4] == b'DSGO':
+            doc = dsgo.parse(data)
+            doc.root.set('mission_setup', copy.deepcopy(doc.root.get('vehicle_setup')))
+            out = dsgo.write(doc)
+        else:
+            version, values = sgo.read(data)
+            values['mission_setup'] = copy.deepcopy(values['vehicle_setup'])
+            out = sgo.write_depth_first(version, values)
+        changed = sgo.load(data=out)
+        if changed['mission_setup'] != setup:
+            raise ValueError(f'{root}: private spawn lost final vehicle setup values')
+        if {k: v for k, v in changed.items() if k != 'mission_setup'} != {
+                k: v for k, v in members.items() if k != 'mission_setup'}:
+            raise ValueError(f'{root}: private spawn changed another vehicle contract')
+        files[private] = out
+        obj['spawn_object'] = private
+        obj['files'].append(private)
+
+
 def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict[str, bytes]]:
     """The whole conversion; `only` (SGO names like 'HECTOR301CC.SGO') limits it to those roots."""
     games = Games(edf41, edf6)
     objects, skipped, files = [], [], {}
     shared: dict[str, str] = {}
+    vehicle_modules = (edf41tank, edf41heli, edf41mech, edf41bike)
+    vehicle_roots = {root for module in vehicle_modules for root in module.ROOTS}
+    for module in vehicle_modules:
+        for root in module.ROOTS:
+            if only and root not in only:
+                continue
+            out = module.build(games, root)
+            check_vehicle_sounds(games, out['OBJECT/' + root], 'OBJECT/' + root)
+            clash = [r for r in out if r in files and files[r] != out[r]]
+            if clash:
+                raise ValueError(f'{root}: vehicle resources differ between variants: {clash}')
+            files.update(out)
+            objects.append({'object': 'OBJECT/' + root,
+                            'class': sgo.load(data=out['OBJECT/' + root])['xgs_scene_object_class'],
+                            'missions': ROOTS.get(root, 0), 'files': list(out),
+                            'ported_model': 'EDF4.1 original model, animations and Havok collision'})
     for root, s in STAND_INS.items():
         if only and root not in only:
             continue
@@ -3462,7 +3551,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
                     if not only or r in only]
     for root, uses in roots.items():
         rel = 'OBJECT/' + root
-        if root in STAND_INS or (only and root not in only):
+        if root in STAND_INS or root in vehicle_roots or (only and root not in only):
             continue
         if rel in games.have6 and root not in STOCK_OVERRIDES:
             skipped.append({'object': rel, 'reason': 'EDF6 has it'})
@@ -3558,6 +3647,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
                              'root to ROOTS / ALIASES with STOCK_OVERRIDES, or to STOCK_COMPLETIONS):\n  '
                              + '\n  '.join(stale))
     kill_counters(files)
+    vehicle_spawn_objects(objects, files)
     hashes = {r: hashlib.sha256(b).hexdigest() for r, b in files.items()}
     for r, path in shared.items():
         with open(os.path.join(HERE, '..', *path.split('/')), 'rb') as f:

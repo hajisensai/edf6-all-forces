@@ -9,6 +9,26 @@ bool Point(const float* p) noexcept {
     for(int i=0;i<3;++i)if(!std::isfinite(p[i]) || std::fabs(p[i])>1.0e6f)return false;
     return true;
 }
+bool ZeroId(const unsigned char* id) noexcept {
+    for(unsigned i=0;i<32;++i)if(id[i])return false;
+    return true;
+}
+bool CanonicalRequester(const unsigned char* id) noexcept {
+    if(ZeroId(id))return false;
+    for(unsigned i=20;i<24;++i)if(id[i])return false;
+    return true;
+}
+bool RequesterMetadata(const unsigned char* id,std::uint32_t team) noexcept {
+    return team<=2 && (ZeroId(id) ? team==0 : CanonicalRequester(id));
+}
+bool BeginUnit(const Unit& unit) noexcept {
+    // BEGIN has no unit transform/variant. Require byte-zero floats, including rejecting negative zero.
+    const float zero[16]{};
+    if(unit.variant || std::memcmp(unit.matrix,zero,sizeof(zero)))return false;
+    if(!unit.resourceId)return !unit.role && ZeroId(unit.netId);
+    return unit.resourceId==kBeginRequesterMetadata && unit.role<=2 && CanonicalRequester(unit.netId);
+}
+bool HasRequester(const Plan& plan) noexcept { return !ZeroId(plan.requester); }
 bool ValidUnit(const Unit& u,bool ids) noexcept {
     if(!u.resourceId || u.role>kMaxUnits)return false;
     for(float x:u.matrix)if(!std::isfinite(x) || std::fabs(x)>1.0e6f)return false;
@@ -46,12 +66,12 @@ bool ValidMessage(const Message& m) noexcept {
     if(m.kind==Kind::request)return m.request!=0;
     if(m.kind==Kind::requestStatus)return m.request!=0 && m.index<=static_cast<std::uint32_t>(RequestStatus::interrupted);
     if(!m.transaction)return false;
-    if(m.kind==Kind::begin)return m.count!=0;
+    if(m.kind==Kind::begin)return m.count!=0 && BeginUnit(m.unit);
     return m.kind!=Kind::unit || ValidUnit(m.unit,true);
 }
 }
 bool ValidPlan(const Plan& p,bool ids) noexcept {
-    if(!p.count || p.count>kMaxUnits || p.catalogId>=1024 || !Point(p.target))return false;
+    if(!p.count || p.count>kMaxUnits || p.catalogId>=1024 || !Point(p.target) || !RequesterMetadata(p.requester,p.team))return false;
     for(std::uint32_t i=0;i<p.count;++i) {
         if(!ValidUnit(p.units[i],ids) || p.units[i].role>p.count || p.units[i].role==i+1)return false;
         if(p.units[i].resourceId==kExistingVehicle && p.catalogId!=kMissionCrewCatalog)return false;
@@ -99,8 +119,8 @@ void Session::ClearTransactions() noexcept {
 }
 void Session::Stop() noexcept {
     ClearTransactions();running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);
-    peerExt_.fill(0);for(auto& b:peerBloom_)b.fill(0);
-    hostCaps_=0;hostCapsKnown_=false;hostRoomBehind_=false;
+    peerExt_.fill(0);peerDetails_.fill(0);for(auto& b:peerBloom_)b.fill(0);
+    hostCaps_=0;hostDetails_=0;hostCapsKnown_=false;hostRoomBehind_=false;
 }
 std::uint32_t Session::PeersBehind(std::uint32_t* missing) const noexcept {
     std::uint32_t behind=0,lack=0;
@@ -129,6 +149,13 @@ bool Session::RequesterOf(std::uint64_t token,std::uint32_t* peer) const noexcep
 bool Session::PeersHave(std::uint32_t caps) const noexcept {
     if(!host_)return true;
     for(std::uint32_t i=1;i<=peers_;++i)if((peerCaps_[i]&caps)!=caps)return false;
+    return true;
+}
+bool Session::PeersHaveDetails(std::uint32_t bits) const noexcept {
+    if(!running_ || !epoch_ || (bits&~kDetails))return false;
+    if(!host_)return hostCapsKnown_ && (hostDetails_&bits)==bits;
+    for(std::uint32_t i=1;i<=peers_;++i)
+        if(!challenges_[i] || (peerDetails_[i]&bits)!=bits)return false;
     return true;
 }
 bool Session::PeersHaveVariant(std::uint32_t ext,std::uint64_t hash) const noexcept {
@@ -167,7 +194,7 @@ void Session::Start(bool host,std::uint32_t peers,std::uint32_t hostPeer,std::ui
 bool Session::Ready() const noexcept {
     if(!running_ || !epoch_)return false;
     if(host_)for(std::uint32_t i=1;i<=peers_;++i)if(!challenges_[i])return false;
-    return backend_.hooks.plan && backend_.hooks.validate && backend_.hooks.spawn && backend_.hooks.destroy && backend_.hooks.deriveId;
+    return (backend_.hooks.plan || backend_.hooks.planForRequester) && backend_.hooks.validate && backend_.hooks.spawn && backend_.hooks.destroy && backend_.hooks.deriveId;
 }
 bool Session::Send(std::uint32_t peer,Message m) noexcept {
     m.epoch=epoch_;return backend_.send && backend_.send(backend_.context,peer,m);
@@ -178,6 +205,7 @@ bool Session::Broadcast(Message m) noexcept {
 void Session::Welcome(std::uint32_t peer) noexcept {
     Message m;m.kind=Kind::welcome;m.challenge=challenges_[peer];m.request=epochSerial_;
     m.catalog=kFeatures;m.ok=PeersBehind(nullptr) ? 1u : 0u;   // this build's features (support_protocol.h kFeatures)
+    m.unit.role=kDetails;
     Send(peer,m);
 }
 void Session::Cancel(std::uint32_t id,bool broadcast,RequestStatus reason) noexcept {
@@ -297,9 +325,12 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
     auto& t=transactions_[id-1];
     if(t.phase==Phase::planning) {
         const auto catalog=t.plan.catalogId;float target[3];std::memcpy(target,t.plan.target,sizeof(target));
-        const auto result=t.external ? PlanResult::ready : backend_.hooks.plan(catalog,target,t.loadout,&t.plan);
+        const auto result=t.external ? PlanResult::ready : backend_.hooks.planForRequester ?
+            backend_.hooks.planForRequester(t.requester,catalog,target,t.loadout,&t.plan) :
+            backend_.hooks.plan(catalog,target,t.loadout,&t.plan);
         if(result==PlanResult::pending)return;
-        if(result==PlanResult::refused || t.plan.catalogId!=catalog || !ValidPlan(t.plan,false)){Cancel(id,true,RequestStatus::refused);return;}
+        if(result==PlanResult::refused || t.plan.catalogId!=catalog || !ValidPlan(t.plan,false) ||
+           (HasRequester(t.plan) && !PeersHaveDetails(kDetailPvpSupport))){Cancel(id,true,RequestStatus::refused);return;}
         for(std::uint32_t i=0;i<t.plan.count;++i) {
             if(t.plan.units[i].resourceId==kExistingVehicle)continue;
             if(ordinal_>=0x80000000u || !backend_.hooks.deriveId(ordinal_++,t.plan.units[i].netId)){Cancel(id,true);return;}
@@ -308,6 +339,10 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
         t.phase=Phase::prepared;t.since=now;t.ready[0]=1;
         Message m;m.kind=Kind::begin;m.transaction=id;m.catalog=t.plan.catalogId;m.count=t.plan.count;
         std::memcpy(m.target,t.plan.target,sizeof(m.target));
+        if(HasRequester(t.plan)) {
+            m.unit.resourceId=kBeginRequesterMetadata;m.unit.role=t.plan.team;
+            std::memcpy(m.unit.netId,t.plan.requester,sizeof(m.unit.netId));
+        }
         if(!Broadcast(m)){Cancel(id,true);return;}
         for(std::uint32_t i=0;i<t.plan.count;++i) {
             m=Message{};m.kind=Kind::unit;m.transaction=id;m.index=i;m.unit=t.plan.units[i];m.challenge=t.plan.units[i].variant;
@@ -317,6 +352,7 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
         if(!Broadcast(m)){Cancel(id,true);return;}
     }
     if(t.phase==Phase::prepared) {
+        if(HasRequester(t.plan) && !PeersHaveDetails(kDetailPvpSupport)){Cancel(id,true,RequestStatus::refused);return;}
         for(std::uint32_t i=0;i<=peers_;++i)if(!t.ready[i])return;
         t.phase=Phase::spawning;t.since=now;
         Message m;m.kind=Kind::commit;m.transaction=id;
@@ -339,7 +375,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
         if(m.request<peerMissions_[peer] || (m.request==peerMissions_[peer] && challenges_[peer]!=m.challenge))return;
         peerMissions_[peer]=m.request;peerCaps_[peer]=m.index;
         // The whole extension word (PeersAhead reads the bits this build does not know) and the variant files' filter.
-        peerExt_[peer]=m.unit.resourceId;std::memcpy(peerBloom_[peer].data(),m.unit.netId,32);
+        peerExt_[peer]=m.unit.resourceId;peerDetails_[peer]=m.unit.role;std::memcpy(peerBloom_[peer].data(),m.unit.netId,32);
         if(challenges_[peer] && challenges_[peer]!=m.challenge) {
             if(HasSpawned()){Suspend();return;}
             if(epochSerial_==UINT32_MAX){Stop();return;}
@@ -352,7 +388,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     }
     if(!host_ && peer==hostPeer_ && m.kind==Kind::welcome && m.challenge==challenge_ && m.request>=seenEpochSerial_) {
         if(m.request==seenEpochSerial_ && epoch_!=m.epoch)return;
-        hostCaps_=m.catalog;hostRoomBehind_=m.ok!=0;hostCapsKnown_=true;   // the host's kFeatures (0: an older host)
+        hostCaps_=m.catalog;hostDetails_=m.unit.role;hostRoomBehind_=m.ok!=0;hostCapsKnown_=true;   // the host's kFeatures (0: an older host)
         if(epoch_!=m.epoch){if(HasSpawned()){Suspend();return;}ClearTransactions();epoch_=m.epoch;}
         seenEpochSerial_=m.request;
         return;
@@ -383,10 +419,17 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
         Message reply;reply.kind=Kind::result;reply.transaction=m.transaction;Send(hostPeer_,reply);return;
     }
     if(m.kind==Kind::begin && t.phase==Phase::empty) {
+        if(m.unit.resourceId && !PeersHaveDetails(kDetailPvpSupport)) {
+            t.phase=Phase::cancelled;t.since=now;t.failure=RequestStatus::refused;
+            Message reply;reply.kind=Kind::ready;reply.transaction=m.transaction;Send(hostPeer_,reply);return;
+        }
         if(nextToken_==UINT64_MAX){Suspend();return;}
         t.token=++nextToken_;
         t.phase=Phase::assembling;t.since=now;t.plan.catalogId=m.catalog;t.plan.count=m.count;
         std::memcpy(t.plan.target,m.target,sizeof(m.target));
+        if(m.unit.resourceId==kBeginRequesterMetadata) {
+            std::memcpy(t.plan.requester,m.unit.netId,sizeof(t.plan.requester));t.plan.team=m.unit.role;
+        }
     } else if(m.kind==Kind::unit && t.phase==Phase::assembling && m.index<t.plan.count) {
         const auto bit=1u<<m.index;
         Unit unit=m.unit;unit.variant=m.challenge;
@@ -394,12 +437,14 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
         t.plan.units[m.index]=unit;t.received|=bit;
     } else if(m.kind==Kind::prepare && t.phase==Phase::assembling) {
         Message reply;reply.kind=Kind::ready;reply.transaction=m.transaction;
-        reply.ok=t.received==((1u<<t.plan.count)-1) && ValidPlan(t.plan) && backend_.hooks.validate && backend_.hooks.validate(t.plan);
+        reply.ok=t.received==((1u<<t.plan.count)-1) && ValidPlan(t.plan) &&
+            (!HasRequester(t.plan) || PeersHaveDetails(kDetailPvpSupport)) && backend_.hooks.validate && backend_.hooks.validate(t.plan);
         t.phase=reply.ok ? Phase::prepared : Phase::cancelled;t.since=now;Send(hostPeer_,reply);
     } else if(m.kind==Kind::commit && (t.phase==Phase::prepared || t.phase==Phase::spawning || t.phase==Phase::active)) {
         Message reply;reply.kind=Kind::result;reply.transaction=m.transaction;
         const bool alreadySpawned=t.spawned;
-        reply.ok=alreadySpawned || (backend_.hooks.spawn && backend_.hooks.spawn(t.token,t.plan,true));
+        reply.ok=alreadySpawned || ((!HasRequester(t.plan) || PeersHaveDetails(kDetailPvpSupport)) &&
+            backend_.hooks.spawn && backend_.hooks.spawn(t.token,t.plan,true));
         t.spawned=reply.ok!=0;
         if(!alreadySpawned)t.since=now;
         if(t.phase!=Phase::active)t.phase=reply.ok ? Phase::spawning : Phase::cancelled;
@@ -419,6 +464,7 @@ void Session::Tick(std::uint64_t now) noexcept {
         Message m;m.kind=Kind::hello;m.challenge=challenge_;m.request=missionSerial_;m.index=kCapabilities;
         if(backend_.hooks.variants)backend_.hooks.variants(&m.unit.resourceId,m.unit.netId);
         m.unit.resourceId|=kExtBuilt;   // the catalog's and the protocol's, announced whatever the variants hook said
+        m.unit.role=kDetails;
         Send(hostPeer_,m);lastHello_=now;
     }
     for(std::uint32_t id=1;id<=kMaxTransactions;++id) {

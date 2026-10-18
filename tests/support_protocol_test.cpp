@@ -19,7 +19,8 @@ struct Node {
     std::unique_ptr<Session> session=std::make_unique<Session>();
     bool reject=false,failSpawn=false,pending=false,refusePlan=false;
     std::uint32_t pendingCatalog=0;   // pending only for this catalog (0: every one)
-    unsigned spawns=0,destroys=0,plans=0;
+    unsigned spawns=0,destroys=0,plans=0,requesterPlans=0,requesterPeer=999;
+    unsigned char requester[32]{};std::uint32_t team=0;
     std::uint64_t loadout=0;   // the last plan call's composed load (support_call.h PackSupportLoadout)
     std::uint64_t variant=0;   // given to every planned unit (support_net.h Unit::variant)
     std::uint32_t ext=kExtVariants;unsigned char bloom[32]{};   // its hello's extension (support_variants.h)
@@ -72,7 +73,7 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     // An older (or newer) build's hello: its capabilities and its extension word as that build sends them (a build before
     // the extension: 0 and an empty filter).
     if(node.id==room.legacyNode && sent.kind==Kind::hello){sent.index=room.legacyCaps;sent.unit=Unit{};sent.unit.resourceId=room.legacyExt;}
-    if(node.id==0 && room.oldHost && sent.kind==Kind::welcome){sent.catalog=0;sent.ok=0;}
+    if(node.id==0 && room.oldHost && sent.kind==Kind::welcome){sent.catalog=0;sent.ok=0;sent.unit.role=0;}
     if(!Encode(sent,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
     Packet p{node.id,dst,decoded};room.packets.push_back(p);room.history.push_back(p);return true;
 }
@@ -82,12 +83,17 @@ PlanResult PlanCall(std::uint32_t catalog,const float* at,std::uint64_t loadout,
     if(current->refusePlan)return PlanResult::refused;
     if(current->pending && (!current->pendingCatalog || current->pendingCatalog==catalog))return PlanResult::pending;
     *p=Plan{};p->catalogId=catalog;p->count=16;std::memcpy(p->target,at,sizeof(p->target));
+    std::memcpy(p->requester,current->requester,sizeof(p->requester));p->team=current->team;
     for(unsigned i=0;i<p->count;++i) {
         auto& u=p->units[i];u.resourceId=i%2+1;u.variant=current->variant;
         u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;
         u.matrix[12]=at[0]+static_cast<float>(i);u.matrix[13]=at[1];u.matrix[14]=at[2];
     }
     return PlanResult::ready;
+}
+PlanResult PlanForRequester(std::uint32_t requester,std::uint32_t catalog,const float* at,std::uint64_t loadout,Plan* p) noexcept {
+    ++current->requesterPlans;current->requesterPeer=requester;
+    return PlanCall(catalog,at,loadout,p);
 }
 bool Validate(const Plan& p) noexcept {
     if(current->reject)return false;
@@ -105,6 +111,12 @@ bool Derive(std::uint32_t ordinal,unsigned char* out) noexcept {
 }
 void Notice(std::uint32_t request,RequestStatus status) noexcept { current->notices.emplace_back(request,status); }
 void Hello(std::uint32_t* ext,unsigned char* bloom) noexcept { *ext=current->ext;std::memcpy(bloom,current->bloom,32); }
+void RequesterPlanner(Node& node,bool only=false) {
+    Backend b{&node,&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&Derive}};
+    b.hooks.notice=&Notice;b.hooks.variants=&Hello;
+    b.hooks.ownChannel=[](std::uint32_t catalog) noexcept {return catalog==kRescue;};
+    b.hooks.planForRequester=&PlanForRequester;if(only)b.hooks.plan=nullptr;node.session->Configure(b);
+}
 Room::Room(unsigned count) {
     for(unsigned i=0;i<count;++i) {
         auto n=std::make_unique<Node>();n->id=i;n->room=this;n->nonce=100000+1000*i;
@@ -429,4 +441,129 @@ void RescueChannel() {
      Check(r.Submit(1,kRescue),"asked again at once");r.Settle();
      Check(LastFor(r,1)==RequestStatus::active,"a rescue that was cancelled started no cooldown (it starts once made everywhere)");}
 }
-int main() { Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }
+void PvpSupportCodec() {
+    static_assert(kVersion==2 && kWireSize==176 && kFeatures<1024,"PvP detail does not change the v2 ABI");
+    Message begin;begin.kind=Kind::begin;begin.epoch=22;begin.transaction=1;begin.catalog=5;begin.count=1;
+    unsigned char wire[kWireSize]{};Message decoded;
+    Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded),"legacy BEGIN still round-trips");
+    bool zero=true;for(unsigned i=68;i<kWireSize;++i)zero=zero && wire[i]==0;
+    Check(zero,"legacy BEGIN unused unit and tail stay byte-zero");
+    begin.unit.resourceId=kBeginRequesterMetadata;begin.unit.role=2;begin.unit.netId[0]=41;begin.unit.netId[12]=1;
+    Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded) && decoded.unit.role==2 &&
+        decoded.unit.resourceId==kBeginRequesterMetadata && !std::memcmp(decoded.unit.netId,begin.unit.netId,32),
+        "BEGIN requester identity and authorized side cross the unchanged real v2 codec");
+    Check(wire[4]==2 && wire[172]==0 && wire[175]==0,"metadata preserves v2 and the reserved tail");
+    begin.unit.role=0;
+    Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded) && decoded.unit.netId[0]==41,
+        "team zero retains requester ownership for a later PvP activation");
+    auto malformed=begin;malformed.unit.role=3;
+    Check(!Encode(malformed,wire,sizeof(wire)),"unknown PvP team rejected");
+    malformed=begin;malformed.unit.netId[20]=1;
+    Check(!Encode(malformed,wire,sizeof(wire)),"requester native padding must be canonical");
+    malformed=begin;std::memset(malformed.unit.netId,0,32);
+    Check(!Encode(malformed,wire,sizeof(wire)),"metadata cannot claim an empty requester");
+    malformed=begin;malformed.unit.resourceId=123;
+    Check(!Encode(malformed,wire,sizeof(wire)),"unknown BEGIN metadata magic rejected");
+    malformed=begin;malformed.unit.matrix[15]=1;
+    Check(!Encode(malformed,wire,sizeof(wire)),"metadata transform must be zero");
+    malformed=begin;malformed.unit.matrix[0]=-0.0f;
+    Check(!Encode(malformed,wire,sizeof(wire)),"metadata requires byte-zero transform");
+    malformed=begin;malformed.unit.variant=1;
+    Check(!Encode(malformed,wire,sizeof(wire)),"BEGIN cannot hide a unit variant");
+    malformed=begin;malformed.unit.resourceId=0;
+    Check(!Encode(malformed,wire,sizeof(wire)),"unmarked BEGIN cannot carry requester bytes");
+    Check(Encode(begin,wire,sizeof(wire)),"valid requester fixture");
+    wire[68]^=1;Check(!Decode(wire,sizeof(wire),decoded),"wire decoder rejects unknown BEGIN magic");wire[68]^=1;
+    wire[160]=1;Check(!Decode(wire,sizeof(wire),decoded),"wire decoder rejects noncanonical requester padding");wire[160]=0;
+    wire[72]=3;Check(!Decode(wire,sizeof(wire),decoded),"wire decoder rejects invalid metadata side");wire[72]=0;
+    wire[76]=1;Check(!Decode(wire,sizeof(wire),decoded),"wire decoder rejects dirty metadata fields");
+    Plan plan;plan.count=1;plan.units[0].resourceId=1;
+    plan.units[0].matrix[0]=plan.units[0].matrix[5]=plan.units[0].matrix[10]=plan.units[0].matrix[15]=1;
+    Check(ValidPlan(plan,false),"legacy plan has no requester or team");
+    plan.team=1;Check(!ValidPlan(plan,false),"team plan requires a requester");
+    plan.requester[0]=41;Check(ValidPlan(plan,false),"canonical requester permits team one");
+    plan.team=0;Check(ValidPlan(plan,false),"requester with stock team is a valid ownership cache");
+    plan.team=3;Check(!ValidPlan(plan,false),"plan rejects unsupported team");
+    plan.team=2;plan.requester[23]=1;Check(!ValidPlan(plan,false),"plan rejects noncanonical native requester");
+}
+void PvpSupport() {
+    {Room r(3);
+     Check(r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport) && r.nodes[1]->session->HostDetails()==kDetails &&
+        r.nodes[1]->session->PeersHaveDetails(kDetailPvpSupport),"host and clients negotiate independent support details");
+     r.nodes[0]->requester[0]=41;r.nodes[0]->requester[12]=1;r.nodes[0]->team=2;
+     RequesterPlanner(*r.nodes[0],true);
+     Check(r.nodes[0]->session->Ready(),"requester-aware hook can be the sole host planner");
+     const float at[3]={10,20,30};const std::uint64_t load=0xDD99998;
+     r.With(2);Check(current->session->Submit(5,at,r.now,load),"second authenticated peer submits support");
+     for(auto& packet:r.packets)if(packet.from==2 && packet.message.kind==Kind::request)packet.message.index=9;
+     r.Settle();
+     Check(r.nodes[0]->requesterPlans>0 && r.nodes[0]->requesterPeer==2 && r.nodes[0]->loadout==load,
+        "planner receives authenticated peer index and loadout, never payload index");
+     for(const auto& n:r.nodes)Check(n->spawns==1 && n->last.requester[0]==41 && n->last.team==2,
+        "every real-wire peer receives identical requester ownership and PvP team");
+     const auto begin=Find(r,Kind::begin,1);
+     Check(begin.message.unit.resourceId==kBeginRequesterMetadata && begin.message.unit.role==2,
+        "host emits explicit BEGIN requester metadata");
+     r.Step(2100);r.With(0);const float own[3]={1,2,3};Check(current->session->Submit(5,own,r.now),"host submits its own support");r.Settle();
+     Check(r.nodes[0]->requesterPeer==0,"host-local planner requester is peer zero");}
+    {Room r(2);r.nodes[0]->requester[0]=42;r.nodes[0]->team=0;RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==1 && n->last.requester[0]==42 && !n->last.team,
+        "stock-side deployment retains ownership on every peer");}
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.Step(1100);r.Settle();
+     Check(!r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport),"one legacy peer closes the room metadata gate");
+     r.nodes[0]->requester[0]=42;r.nodes[0]->team=1;RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
+     for(const auto& n:r.nodes)Check(!n->spawns,"no metadata transaction spawns with a legacy third peer");
+     bool began=false;for(const auto& p:r.history)began=began || p.message.kind==Kind::begin;
+     Check(!began,"all-peer capability gate runs before any BEGIN metadata is sent");
+     r.nodes[0]->requester[0]=0;r.nodes[0]->team=0;r.Step(2100);r.Submit();r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==1,"legacy stock support remains usable in a mixed room");
+     const auto legacy=Find(r,Kind::begin,1);unsigned char wire[kWireSize]{};Check(Encode(legacy.message,wire,sizeof(wire)),"legacy mixed-room BEGIN encoded");
+     bool zero=true;for(unsigned i=68;i<kWireSize;++i)zero=zero && wire[i]==0;
+     Check(zero,"mixed-room legacy BEGIN carries no metadata bytes");}
+    {Room r(3);r.dropTo=0;r.dropKind=Kind::ready;r.nodes[0]->requester[0]=42;RequesterPlanner(*r.nodes[0]);r.Submit();r.Settle();
+     r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.Step(1100);r.Settle();r.dropTo=999;r.Settle();
+     for(const auto& n:r.nodes)Check(!n->spawns,"capability loss before commit cancels a prepared requester transaction");}
+    {Room r(3);const auto old=Find(r,Kind::hello,0);
+     r.legacyNode=old.from;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.With(old.from);
+     r.nodes[old.from]->session->Stop();r.nodes[old.from]->session->Start(false,2,r.Peer(old.from,0),r.now);r.Settle();
+     Check(!r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport),"new challenge replaces the peer capability word with legacy zero");
+     r.Deliver(old);Check(!r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport),"stale prior-mission HELLO cannot restore a capability");
+     r.legacyNode=999;r.Step(1100);r.Settle();
+     Check(r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport),"current challenge HELLO can refresh capabilities");
+     Packet wrong{};for(const auto& p:r.history)if(p.from==old.from && p.message.kind==Kind::hello)wrong=p;
+     wrong.message.challenge+=100;wrong.message.unit.role=0;r.Deliver(wrong);
+     Check(r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport),"wrong challenge with equal mission serial cannot erase current capability");}
+    for(bool assembled:{false,true}) {
+        Room r(3);r.nodes[0]->requester[0]=42;RequesterPlanner(*r.nodes[0]);
+        if(assembled){r.dropTo=1;r.dropKind=Kind::prepare;}else{r.dropTo=0;r.dropKind=Kind::ready;}
+        r.Submit();r.Settle();Packet welcome{};
+        for(const auto& p:r.history)if(p.to==1 && p.message.kind==Kind::welcome)welcome=p;
+        welcome.message.unit.role=0;r.Deliver(welcome);
+        Check(!r.nodes[1]->session->PeersHaveDetails(kDetailPvpSupport),"current authenticated welcome can withdraw host support details");
+        Packet step{0,1,{}};step.message.epoch=r.nodes[1]->session->Epoch();step.message.transaction=1;
+        step.message.kind=Kind::prepare;r.Deliver(step);step.message.kind=Kind::commit;r.Deliver(step);
+        Check(!r.nodes[1]->spawns,"client capability loss while assembling or prepared prevents native creation");
+    }
+    for(unsigned mode=0;mode<3;++mode) {
+        Room r(3);if(mode==0){r.oldHost=true;r.Step(1100);r.Settle();Check(!r.nodes[1]->session->HostDetails(),"legacy host has no details");}
+        Packet begin{mode==1 ? 2u : 0u,1,{}};begin.message.kind=Kind::begin;begin.message.epoch=r.nodes[1]->session->Epoch();
+        begin.message.transaction=1;begin.message.catalog=5;begin.message.count=1;
+        begin.message.unit.resourceId=kBeginRequesterMetadata;begin.message.unit.role=2;begin.message.unit.netId[0]=42;
+        if(mode==2)++begin.message.epoch;
+        r.Deliver(begin);
+        Packet unit=begin;unit.from=0;unit.message=Message{};unit.message.kind=Kind::unit;unit.message.epoch=r.nodes[1]->session->Epoch();
+        unit.message.transaction=1;unit.message.unit.resourceId=1;
+        unit.message.unit.matrix[0]=unit.message.unit.matrix[5]=unit.message.unit.matrix[10]=unit.message.unit.matrix[15]=1;
+        Derive(0x40000001u,unit.message.unit.netId);r.Deliver(unit);
+        Packet next=unit;next.message=Message{};next.message.epoch=unit.message.epoch;next.message.transaction=1;
+        next.message.kind=Kind::prepare;r.Deliver(next);next.message.kind=Kind::commit;r.Deliver(next);
+        Check(!r.nodes[1]->spawns,"unnegotiated, wrong-host or stale-epoch requester BEGIN cannot create objects");
+    }
+    {Room r(2);const auto old=Find(r,Kind::welcome,1);r.nodes[1]->session->Stop();
+     Check(!r.nodes[1]->session->PeersHaveDetails(kDetailPvpSupport) && !r.nodes[1]->session->HostDetails(),"stopped client forgets host detail word");
+     r.With(1);r.nodes[1]->session->Start(false,1,1,r.now);r.oldHost=true;r.Settle();
+     r.Deliver(old);Check(!r.nodes[1]->session->HostDetails(),"stale welcome challenge cannot restore old host details");
+     r.With(0);r.nodes[0]->session->Stop();
+     Check(!r.nodes[0]->session->HostDetails(),"stopped host does not advertise usable details");}
+}
+int main() { PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }

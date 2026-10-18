@@ -38,6 +38,22 @@ assert struct.unpack_from('<Q',binary,vt+8)[0]-pe.OPTIONAL_HEADER.ImageBase==val
 locator=struct.unpack_from('<Q',binary,vt-8)[0]-pe.OPTIONAL_HEADER.ImageBase
 assert struct.unpack_from('<I',binary,locator+4)[0]==0x10,'laser draw this is its umbra subobject'
 print('native render call, signatures, laser draw slot and owner adjustment passed')
+# Every flash class uses MuzzleFlashBase's +0x120 borrowed matrix. Check the two destructor routes before
+# trusting a matrix until destruction (secondary Umbra thunks jump directly to the primary body).
+assert binary[0x2BA563:0x2BA56E]==bytes.fromhex('488b433848898720010000')
+classes=re.search(r'FlashClass flashClasses\[\]=\{(.*?)\n\};',source,re.S).group(1)
+entries=re.findall(r'\{(0x[0-9A-F]+),(0x[0-9A-F]+),(0x[0-9A-F]+|0),(0x[0-9A-F]+|0)\}',classes)
+assert len(entries)==10
+for values in entries:
+    primary,dtor,secondary,thunk=(int(x,0) for x in values)
+    assert struct.unpack_from('<Q',binary,primary+8)[0]-pe.OPTIONAL_HEADER.ImageBase==dtor,(hex(primary),'primary destructor')
+    if secondary:
+        assert struct.unpack_from('<Q',binary,secondary)[0]-pe.OPTIONAL_HEADER.ImageBase==thunk
+        assert binary[thunk:thunk+7]==bytes.fromhex('4881e930010000')
+        at=thunk+7
+        assert binary[at]==0xE9 and at+5+struct.unpack_from('<i',binary,at+1)[0]==dtor,(hex(thunk),'secondary destructor')
+print('native muzzle matrix ownership and 10 flash classes destructor routes passed')
+
 game=Path(args.dll).resolve().parent
 if (game/'Root.cpk').is_file():
     sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'pylib'))

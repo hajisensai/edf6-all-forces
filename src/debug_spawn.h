@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include "debug_spawn_files.h"
 
 namespace crew {
 namespace debugspawn {
@@ -48,7 +49,7 @@ struct Entry {
     float lift;              // m over the ground point it starts at (a flier higher up)
     bool mod=false;          // its SGO is a Mods file (the range's, the installer's, EDF4.1's): there only when that is
     bool preload=true;       // preloaded by default (else only with ini RangePlaceAll=1: a heavy model of its own)
-    // A Mods row's files (testrange/catalog.py files_of, what catalog.available checks): names under Mods\OBJECT\, each
+    // A Mods row's files (testrange/catalog.py files_of, what catalog.available checks): bare OBJECT names or WEAPON/name, each
     // NUL-ended, the list ended by an empty name; its SGO among them. Made only when every one is there (debug_spawn.cpp ModRowLacks).
     // nullptr: none (a stock row, Root.cpk's; the plugin's own rows).
     const wchar_t* files=nullptr;
@@ -84,8 +85,14 @@ inline constexpr Entry kEntries[]={
 constexpr int kEntryCount=static_cast<int>(sizeof(kEntries)/sizeof(kEntries[0]));
 // Every Mods row lists its files and nothing else does; a list is not empty.
 constexpr bool FilesAgree() noexcept {
-    for(const auto& e:kEntries)
+    for(const auto& e:kEntries) {
         if(e.mod!=(e.files!=nullptr) || (e.files && !e.files[0]))return false;
+        if(e.files)for(const wchar_t* f=e.files;*f;) {
+            if(!ParseModFile(f))return false;
+            while(*f)++f;
+            ++f;
+        }
+    }
     return true;
 }
 static_assert(FilesAgree(),"a Mods row (mod) and only it names its Mods files");

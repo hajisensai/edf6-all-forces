@@ -85,11 +85,14 @@ def main() -> int:
     sys.path.insert(0, str(ROOT / 'testrange'))
     import edf41_objects  # noqa: E402  (the bundled, pre-converted 4.1 objects: no EDF4.1 needed)
     import gen  # noqa: E402
+    import catalog as spawn_catalog  # noqa: E402
+    row_definitions = {row.ident: row for row in spawn_catalog.rows()}
     mods = args.game / 'Mods'
     skipped = 0
     for category, how, ident, name, mod, _preload in rows:
         rel = f'OBJECT/{name.split(".")[0].upper()}.SGO'
-        assert name.upper().startswith(ident.upper()), (ident, name)
+        expected = row_definitions.get(ident)
+        assert expected is not None and expected.rel == rel, (ident, name, expected)
         if mod == 'false':                                   # Root.cpk's own
             data, where = game.read('OBJECT', name), 'Root.cpk'
         elif (mods / rel).is_file():                          # installed: what the game loads

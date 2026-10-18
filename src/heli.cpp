@@ -3674,6 +3674,11 @@ bool InstallDoorGuns() noexcept {
     return doorOk;
 }
 
+bool MapRayReady() noexcept {
+    if(!rayOk)return false;
+    const auto world=At<const unsigned char*>(image,kHavokGlobal);
+    return Readable(world,0x70) && At<const void*>(world,0x68)!=nullptr;
+}
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
 float MapFixedRay(const float* a,const float* b,float* hit) noexcept {
     return mapfloor::Fixed(a,b,

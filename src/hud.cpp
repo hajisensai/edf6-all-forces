@@ -44,6 +44,8 @@
 #include "vecmath.h"
 #include "warn.h"
 #include "support_net.h"
+#include "pvp.h"
+#include "thermal.h"
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -140,6 +142,7 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool mountedOptic,turretBinding; edf::aimlink::ModeBindingV1 binding;
                   bool stock; StockHudReadout stockHud;
                   bool payload; PayloadReadout payloadHud;
+                  bool sensor; VehicleSensorReadout sensorHud;
                   bool warned; Warnings warn;
                   bool seats; SeatPrompt seatPrompt;
                     bool lookHint,lookKeys;
@@ -827,6 +830,65 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     keys.x=sx-keys.w*0.5f;keys.y=line.y+24.0f*s;
 }
 
+const wchar_t* ThermalModeWord(thermal::Mode mode) noexcept {
+    return Tr(mode==thermal::Mode::whiteHot ? Tx::thermalWhiteHot : mode==thermal::Mode::blackHot ? Tx::thermalBlackHot : Tx::thermalOptical);
+}
+const wchar_t* ThermalReasonWord(thermal::Reason reason) noexcept {
+    switch(reason) {
+    case thermal::Reason::unsupportedSeat: return Tr(Tx::thermalUnsupportedSeat);
+    case thermal::Reason::notInSight: return Tr(Tx::thermalEnterSight);
+    case thermal::Reason::hooksUnavailable:
+    case thermal::Reason::unsupportedSurface: return Tr(Tx::thermalFallback);
+    case thermal::Reason::waitingFrame: return Tr(Tx::thermalWaiting);
+    case thermal::Reason::optical:
+    case thermal::Reason::active: return L"";
+    }
+    return L"";
+}
+void ThermalControlText(Line& line,const thermal::Status& status) noexcept {
+    wchar_t key[32];KeyName(Cfg().thermalKey,key,_countof(key));
+    Format(line,Tr(Tx::thermalControl),key,ThermalModeWord(status.effective));
+    const wchar_t* reason=ThermalReasonWord(status.reason);
+    if(reason[0])Append(line,L" / %ls",reason);
+}
+void ThermalControlHint(Text* text,float width,float height,float s,const thermal::Status& status,Line* lines,int* at) noexcept {
+    if(!status.eligible || *at>=kMaxLines)return;
+    Line& line=lines[(*at)++];ThermalControlText(line,status);
+    line.scale=kLineScale*0.65f;line.rgba=status.reason==thermal::Reason::unsupportedSurface ||
+        status.reason==thermal::Reason::hooksUnavailable ? kAmber : kCyan;line.w=line.h=0.0f;
+    if(text) {
+        MeasureAll(*text,&line,1);
+        const float most=std::fmin(720.0f*s,width-36.0f*s);
+        if(line.w>most){line.scale*=most/line.w;MeasureAll(*text,&line,1);}
+    }
+    line.x=18.0f*s;line.y=height*0.3f+26.0f*s;
+}
+
+// Optical contacts are sampled on the game thread; drawing only projects the immutable HUD snapshot.
+// Recognition remains native LOS-based; the image label reports the thermal compositor's effective mode.
+void VehicleContacts(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
+                     const VehicleSensorReadout& sensor,const thermal::Status& thermalStatus,Line* lines,int* at) noexcept {
+    if(sensor.kind!=VehicleSensorKind::optical)return;
+    const float r=(sensor.gunship ? 14.0f : 11.0f)*s,t=std::fmax(1.0f,1.4f*s),arm=5.0f*s;
+    for(int i=0;i<sensor.count && i<kVehicleContacts;++i) {
+        const auto& contact=sensor.contact[i];
+        float x,y,depth;
+        if(!std::isfinite(contact.range) || contact.range<=0.0f ||
+           !Project(vp,contact.at,width,height,&x,&y,&depth) ||
+           x<r || x>width-r || y<r || y>height-r)continue;
+        if(sensor.gunship) {
+            float hx,hy;scopeview::RectHalf(width,height,&hx,&hy);
+            if(x-r<width*0.5f-hx || x+r>width*0.5f+hx || y-r<height*0.5f-hy || y+r>height*0.5f+hy)continue;
+        }
+        for(int side=-1;side<=1;side+=2)for(int up=-1;up<=1;up+=2) {
+            const float bx=x+static_cast<float>(side)*r,by=y+static_cast<float>(up)*r;
+            Rect(drawer,ctx,side<0 ? bx : bx-arm,by-t*0.5f,side<0 ? bx+arm : bx,by+t*0.5f,kCyan);
+            Rect(drawer,ctx,bx-t*0.5f,up<0 ? by : by-arm,bx+t*0.5f,up<0 ? by+arm : by,kCyan);
+        }
+    }
+    Label(text,lines,at,18.0f*s,height*0.3f,0,kLineScale*0.65f,kCyan,
+          Tr(Tx::vehicleSensorContacts),ThermalModeWord(thermalStatus.effective),sensor.count,static_cast<int>(std::lround(sensor.range)));
+}
 // A lock (stores.h StoreLock: `lock` 2 locked, 1 locking at `progress`, on the lock point `p`): locking, a yellow
 // square closing in as it locks; locked, a red diamond on the target. False off the screen (`sx`, `sy`: its point).
 bool LockAt(void* drawer,void* ctx,const float* vp,float width,float height,float s,int lock,const float* p,float progress,float* sx,
@@ -3289,6 +3351,7 @@ void HudPublish() noexcept {
     s.launcher=PlayerLauncher(&s.launch);
     s.heliSight=PlayerHeliSight(&s.heliAim);
     s.gunner=PlayerGunnerHud(&s.gun);
+    s.sensor=PlayerVehicleContacts(&s.sensorHud);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
     s.turret=PlayerTurretAim(&s.turretAim);
     s.mountedOptic=SightZoomMounted(nullptr);s.turretBinding=PlayerTurretBinding(&s.binding);
@@ -4289,11 +4352,93 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
 
 const Tx* DebugSpawnCategoryWords() noexcept;
 
+// PVP shares the right-hand stack with loadout and placement. Hover or R3 focus expands its tab.
+// Hitboxes carry the same status snapshot, so a click cannot target a replacement world/revision.
+bool mapPvpHovered=false;
+Tx MapPvpResult(pvp_protocol::Result result) noexcept {
+    using R=pvp_protocol::Result;
+    switch(result) {
+    case R::Idle: return Tx::pvpReady;
+    case R::Pending: return Tx::pvpPending;
+    case R::Complete: return Tx::pvpComplete;
+    case R::NotReady: return Tx::pvpNotReady;
+    case R::Busy: return Tx::pvpBusy;
+    case R::InvalidArgument: return Tx::pvpInvalid;
+    case R::UnsupportedRoster: return Tx::pvpRoster;
+    case R::ProtocolError: return Tx::pvpChanged;
+    case R::PrepareFailed: return Tx::pvpPrepareFailed;
+    case R::ApplyFailed: return Tx::pvpApplyFailed;
+    case R::SendFailed: return Tx::pvpSendFailed;
+    case R::TimedOut: return Tx::pvpTimedOut;
+    case R::Aborted: return Tx::pvpAborted;
+    case R::SessionLost: return Tx::pvpSessionLost;
+    case R::Faulted: return Tx::pvpFaulted;
+    }
+    return Tx::pvpNotReady;
+}
+float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,
+                  const MapCommandReadout& c,Line* lines,int* at) noexcept {
+    PvpStatus status{};ReadPvpStatus(&status);
+    if(*at+7>kMaxLines || top+28.0f*s>bottom){MapCommandPvpButtons(nullptr,nullptr,0,nullptr);mapPvpHovered=false;return top;}
+    const float x1=width-12.0f*s,x0=x1-std::fmin(420.0f*s,width*0.32f),titleH=28.0f*s,rowH=24.0f*s,footH=19.0f*s;
+    const float expandedBottom=top+titleH+3.0f*rowH+2.0f*footH+8.0f*s;
+    const int padPick=pad ? MapPvpPadSelection() : -1;
+    const bool pointer=!pad && c.pointer;
+    const bool overTitle=pointer && c.px>=x0 && c.px<x1 && c.py>=top && c.py<top+titleH;
+    const bool overBody=pointer && mapPvpHovered && c.px>=x0 && c.px<x1 && c.py>=top && c.py<expandedBottom;
+    mapPvpHovered=overTitle || overBody;
+    const bool open=(mapPvpHovered || padPick>=0) && expandedBottom<=bottom;
+    const float panelBottom=open ? expandedBottom : top+titleH;
+    MapUiBox(drawer,ctx,x0,top,x1,panelBottom,lines,*at);
+    const float* stateTint=!status.ready || status.pending ? kAmber : status.enabled ? kWhite : kMapOrderDim;
+    Label(text,lines,at,x0+8.0f*s,top+titleH*0.5f,0,kLineScale*0.7f,stateTint,
+          Tr(Tx::pvpTitleState),Tr(status.enabled ? Tx::pvpOn : Tx::pvpOff),status.localTeam);
+    const float hintLeft=x1-108.0f*s;
+    if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,hintLeft-8.0f*s);
+    Label(text,lines,at,x1-22.0f*s,top+titleH*0.5f,2,kLineScale*0.55f,kMapOrderDim,L"%ls",
+          Tr(pad ? Tx::pvpFocusPad : Tx::pvpExpand));
+    if(*at>0)MapFitLabel(text,lines[*at-1],hintLeft,x1-22.0f*s);
+    Tri(drawer,ctx,x1-11.0f*s,top+titleH*0.5f+(open ? 3.0f : -3.0f)*s,
+        x1-11.0f*s,top+titleH*0.5f+(open ? -4.0f : 4.0f)*s,4.0f*s,kMapOrder);
+    MapTipSet(c,x0,top,x1,top+titleH,L"%ls",Tr(Tx::pvpMouseHint));
+    if(!open){MapCommandPvpButtons(nullptr,nullptr,0,&status);return panelBottom;}
+    float rects[kMapPvpItems*4]{};int codes[kMapPvpItems]{};int hits=0;
+    const int choices[]={kPvpModeToggle,kPvpTeam1,kPvpTeam2};
+    const Tx words[]={status.enabled ? Tx::pvpDisable : Tx::pvpEnable,Tx::pvpTeam1,Tx::pvpTeam2};
+    const float left=x0+8.0f*s,right=x1-8.0f*s;
+    float y=top+titleH;
+    for(int i=0;i<kMapPvpItems;++i) {
+        const int code=choices[i];
+        const bool allowed=status.ready && !status.pending && (code!=kPvpModeToggle || status.host);
+        const bool selected=code==kPvpModeToggle ? status.enabled : status.localTeam==code;
+        const bool hover=pointer && c.px>=left && c.px<right && c.py>=y && c.py<y+rowH-3.0f*s;
+        const bool focus=padPick==code;
+        Rect(drawer,ctx,left,y,right,y+rowH-3.0f*s,(allowed && hover) || focus ? kBtnLit : kBtnFill);
+        if(selected)Rect(drawer,ctx,left,y+4.0f*s,left+3.0f*s,y+rowH-7.0f*s,kMapOrder);
+        Label(text,lines,at,left+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,
+              allowed ? kWhite : kMapOrderDim,L"%ls",Tr(words[i]));
+        if(*at>0)MapFitLabel(text,lines[*at-1],left+10.0f*s,right-4.0f*s);
+        if(code==kPvpModeToggle)MapTipSet(c,left,y,right,y+rowH,L"%ls",Tr(Tx::pvpHostOnly));
+        if(allowed){float* q=rects+4*hits;q[0]=left;q[1]=y;q[2]=right;q[3]=y+rowH-3.0f*s;codes[hits++]=code;}
+        y+=rowH;
+    }
+    const Tx result=status.pending ? Tx::pvpPending : !status.ready ? Tx::pvpNotReady : MapPvpResult(status.result);
+    Label(text,lines,at,left,y+footH*0.5f,0,kLineScale*0.56f,stateTint,L"%ls",Tr(result));
+    if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    const wchar_t* details=hudtext::InUse()==hudtext::Lang::zhCN && status.note[0] ? status.note : Tr(result);
+    MapTipSet(c,left,y,right,y+footH,L"%ls",details);
+    y+=footH;
+    Label(text,lines,at,left,y+footH*0.5f,0,kLineScale*0.55f,kTeal,L"%ls",Tr(pad ? Tx::pvpPadHint : Tx::pvpMouseHint));
+    if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    MapCommandPvpButtons(rects,codes,hits,&status);
+    return panelBottom;
+}
+
 // The test range's 「摆放」 panel (range_place.h, mapcmd.cpp; ini RangePlace), at the map's right under the payload panel,
 // down to `bottom`: shut, its title tab alone (a click, or , . / or the D-pad, opens it); open, the category tabs (two rows
 // of three), a window of the category's rows round the one picked (the armed one lit as the card's buttons are, the one a
 // pad or the keys picked marked, one that cannot be made now dimmed with why), arrows to page through them, and the
-// keys. Online, every row dimmed and the reason said. A pad has no pointer: nothing to click then (its D-pad and A).
+// keys. Each row retains its online/resource state. A pad uses its D-pad and A instead of the pointer.
 void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,const MapCommandReadout& c,
                    Line* lines,int* at) noexcept {
     if(!c.placeOn || *at+rangeplace::kWindow+12>kMaxLines){MapCommandPlaceButtons(nullptr,nullptr,0);return;}
@@ -4324,10 +4469,15 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
     const int pick=c.placePick<count ? c.placePick : 0;
     // How many rows fit under the title, the tabs, the arrows and the two lines of keys.
     const int tabRows=(debugspawn::kCategoryCount+2)/3;
-    const float fixed=tabH+static_cast<float>(tabRows)*tabH+2.0f*rowH*0.7f+3.0f*rowH*0.8f+3.0f*pad8;
+    bool unloaded=false;
+    for(int i=0;i<count;++i){const int row=debugspawn::RowOf(category,i);unloaded=unloaded || (row>=0 && c.placeState[row]==RowState::notPreloaded);}
+    const float footH=rowH*0.8f;
+    const int footerRows=(pad ? 1 : 2)+(unloaded ? 1 : 0);
+    const float fixed=tabH+(c.placeOnline ? footH : 0.0f)+static_cast<float>(tabRows)*tabH+2.0f*rowH*0.7f+
+                      static_cast<float>(footerRows)*footH+3.0f*pad8;
     int window=static_cast<int>((bottom-top-fixed)/rowH);
     if(window>rangeplace::kWindow)window=rangeplace::kWindow;
-    if(window<3){MapCommandPlaceButtons(nullptr,nullptr,0);return;}
+    if(window<1){MapCommandPlaceButtons(nullptr,nullptr,0);return;}
     const int first=rangeplace::WindowFirst(pick,count,window),shown=count-first<window ? count-first : window;
     float y=top;
     const float y1=top+fixed+static_cast<float>(shown)*rowH;
@@ -4339,6 +4489,11 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
     if(over(x0-pad8,y,x1,y+tabH))Rect(drawer,ctx,x0-pad8,y,x1,y+tabH,kMapBoxFill);
     hit(x0-pad8,y,x1,y+tabH,kPlaceToggle);
     y+=tabH;
+    if(c.placeOnline) {
+        Label(text,lines,at,x0,y+footH*0.5f,0,kLineScale*0.6f,kAmber,L"%ls",Tr(Tx::placeOnline));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1-4.0f*s);
+        y+=footH;
+    }
     // The tabs, three a row.
     const float tabW=(x1-x0)/3.0f;
     for(int k=0;k<debugspawn::kCategoryCount;++k) {
@@ -4365,8 +4520,8 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
         const bool armed=c.placeArmed==row,picked=first+i==pick;
         if(armed)Rect(drawer,ctx,x0,b,x1,d,kBtnLit);
         else if(over(x0,b,x1,d) || (picked && pad))Rect(drawer,ctx,x0,b,x1,d,kMapBoxFill);
-        const bool ready=st==RowState::ready && !c.placeOnline;
-        const wchar_t* why=c.placeOnline || st==RowState::ready ? L"" : st==RowState::missing ? Tr(Tx::placeMissing) :
+        const bool ready=st==RowState::ready;
+        const wchar_t* why=st==RowState::ready ? L"" : st==RowState::online ? Tr(Tx::placeOnlineRow) : st==RowState::missing ? Tr(Tx::placeMissing) :
             st==RowState::notPreloaded ? Tr(Tx::placeNotPreloaded) : st==RowState::broken ? Tr(Tx::placeBroken) : Tr(Tx::debugSpawnUnavailable);
         Label(text,lines,at,x0+14.0f*s,(b+d)*0.5f,0,kLineScale*0.68f,armed ? kWhite : ready ? kWhite : kMapOrderDim,L"%ls%ls",
               debugspawn::kEntries[row].name,why);
@@ -4374,8 +4529,6 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
         if(picked)Tri(drawer,ctx,x0+2.0f*s,(b+d)*0.5f,x0+10.0f*s,(b+d)*0.5f,4.0f*s,armed ? kWhite : kMapOrder);
         hit(x0,b,x1,d,row);
     }
-    bool unloaded=false;
-    for(int i=0;i<count && !c.placeOnline;++i){const int row=debugspawn::RowOf(category,i);unloaded=unloaded || (row>=0 && c.placeState[row]==RowState::notPreloaded);}
     y+=rowH*static_cast<float>(shown);
     if(first+shown<count) {
         if(over(x0,y,x1,y+arrowH))Rect(drawer,ctx,x0,y,x1,y+arrowH,kMapBoxFill);
@@ -4383,17 +4536,15 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
         hit(x0,y,x1,y+arrowH,kPlacePageDown);
     }
     y+=arrowH+pad8*0.5f;
-    // Why nothing can be placed (online), the keys, and how the rows not preloaded come in.
-    const float footH=rowH*0.8f;
+    // Online support is per row; retain missing/preload reasons and controls in either mode.
     const auto foot=[&](const float* tint,Tx words){
         Label(text,lines,at,x0,y+footH*0.5f,0,kLineScale*0.6f,tint,L"%ls",Tr(words));
         if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1-4.0f*s);
         y+=footH;
     };
-    if(c.placeOnline)foot(kAmber,Tx::placeOnline);
     foot(kTeal,pad ? Tx::placeHintPad : Tx::placeHintMouse);
     if(!pad)foot(kTeal,Tx::placeHintKeys);
-    if(unloaded && (pad || !c.placeOnline))foot(kMapOrderDim,Tx::placeHintAll);
+    if(unloaded)foot(kMapOrderDim,Tx::placeHintAll);
     MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits);
 }
 
@@ -4402,7 +4553,8 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     if(!PlayerMapCommands(&c)){
         MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
         MapCommandFormationButtons(nullptr,nullptr,0);
-        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandPlaceButtons(nullptr,nullptr,0);return;
+        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandPlaceButtons(nullptr,nullptr,0);
+        MapCommandPvpButtons(nullptr,nullptr,0,nullptr);mapPvpHovered=false;return;
     }
     const float* tint=c.allowed && c.pickable ? kMapOrder : kMapOrderDim;
     // Where a point order goes: the pointer (a ring and a cross), or with a pad the crosshair at the centre; an armed
@@ -4473,8 +4625,10 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     const float barTop=c.squads>0 ? panelBottom+10.0f*s : panelBottom;
     const float barBottom=height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+40.0f)*s;
     MapSupportBar(drawer,ctx,text,width,s,barTop,barBottom,m.pad,c,lines,at);
-    // The test range's 「摆放」 panel at the right, under the scale band (and the payload panel when it is up).
-    MapPlacePanel(drawer,ctx,text,width,s,std::fmax(206.0f*s,payloadBottom+10.0f*s),barBottom,m.pad,c,lines,at);
+    // One right-hand stack: scale/compass, optional weapon loadout, PVP tab, then the range's placement panel.
+    const float pvpTop=std::fmax(206.0f*s,payloadBottom+10.0f*s);
+    const float pvpBottom=MapPvpPanel(drawer,ctx,text,width,s,pvpTop,barBottom,m.pad,c,lines,at);
+    MapPlacePanel(drawer,ctx,text,width,s,pvpBottom+8.0f*s,barBottom,m.pad,c,lines,at);
     // The formation button's menu over all of them (its box empties the text under it; its rows take the clicks first).
     if(m.pad)MapCommandFormationButtons(nullptr,nullptr,0);
     else MapFormationMenu(drawer,ctx,text,width,height,s,c,mapCardRects,mapCardIds,mapCardCount,lines,at);
@@ -4566,7 +4720,7 @@ void MapTargetsNone() noexcept {
     MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
     MapCommandFormationButtons(nullptr,nullptr,0);MapCommandComposeButtons(nullptr,nullptr,0);
     MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
-    MapCommandPlaceButtons(nullptr,nullptr,0);
+    MapCommandPlaceButtons(nullptr,nullptr,0);MapCommandPvpButtons(nullptr,nullptr,0,nullptr);mapPvpHovered=false;
 }
 
 // The map view open: its marks drawn (true), nothing else of the HUD; the damage statistics' page in their place while it
@@ -4982,6 +5136,9 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(fresh && snap.turretCamOk && !mountedOptic && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
             TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
         if(gunnerSight)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
+        const auto thermalStatus=thermal::GetStatus();
+        if(fresh && !overhead)ThermalControlHint(t,width,height,s,thermalStatus,lines,&at);
+        if(fresh && snap.sensor && !overhead)VehicleContacts(drawer,ctx,t,viewProj,width,height,s,snap.sensorHud,thermalStatus,lines,&at);
         const bool showTurretOverlay=fresh && snap.turret && !mountedOptic && !snap.cockpit && !(physicalSight && snap.turretAim.ownGun) && (!stockHud || hudcue::TurretOverlayOwned(stockPick,snap.stockHud.turret)) && !launcherSight && !overhead && !gunnerSight && !mechSight;
         if(showTurretOverlay) {
             float controlsBottom=-1.0f;

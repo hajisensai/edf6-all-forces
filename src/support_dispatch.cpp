@@ -8,6 +8,7 @@
 #include "support_soldier.h"
 #include "support_spawn.h"
 #include "support_net.h"
+#include "pvp.h"
 #include "mission_crew_support.h"
 #include "mission_participants.h"
 #include "mission_participant_gate.h"
@@ -946,6 +947,7 @@ void Destroy(std::uint64_t id) noexcept {
             const auto parent=deployed.plan.units[i].role;
             if(parent && parent<=deployed.plan.count && preserve[parent-1])preserve[i]=true;
             if(preserve[i] && deployed.plan.units[i].resourceId<kAircraft)HoldSupportSoldier(deployed.objects[i],false);
+            if(!preserve[i])PvpForgetSupportObject(deployed.objects[i]);
         }
         // Remove crew first so native seat ownership is released before deleting hulls.
         for(unsigned i=0;i<deployed.plan.count;++i)
@@ -1041,6 +1043,9 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
         }
         deployed->objects[i]=object;
     }
+    // Every peer binds the authenticated plan's native requester identity and changes the actual soldier/hull/weapon
+    // teams before any airborne pilot can enter combat. Failure rolls the entire support transaction back.
+    if(!PvpAttachSupportPlan(plan,deployed->objects,plan.count)){Destroy(id);return false;}
     if(!BoardAirborne(*deployed,networked)){Destroy(id);return false;}
     Log("SUPPORT spawn %llu: catalog %u, %u units created (%s)",static_cast<unsigned long long>(id),plan.catalogId,plan.count,
         networked ? "networked" : InSession() ? "host of a one-player world" : "offline");
@@ -1296,6 +1301,15 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
 bool SupportSubCallAt(const float* target,const float* from,bool local,wchar_t* note,std::size_t capacity) noexcept {
     if(note && capacity)note[0]=0;
     if(!target || !std::isfinite(target[0]+target[1]+target[2]))return false;
+    // This special weapon still replays unregistered copies and carries no requester into this function. It cannot
+    // silently create a fixed-team-2 carrier during a PVP transition or active match; normal support has real owner metadata.
+    if(PvpSupportTeam(nullptr)!=0) {
+        const wchar_t* const why=hudtext::Tr(hudtext::Tx::pvpSubUnsupported);
+        if(local)Status(why);
+        if(note && capacity)_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",why);
+        Log("SUPPORT submarine carrier refused: special native-copy call has no authenticated PVP owner transaction");
+        return false;
+    }
     // Ahead of the target, away from the caller: the hull's 1664 m clear of them where the water lets it, else nearer.
     constexpr float kAhead[]={1000.0f,600.0f,300.0f,0.0f};
     float dir[3]={0.0f,0.0f,1.0f};

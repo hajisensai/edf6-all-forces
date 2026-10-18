@@ -23,7 +23,7 @@ struct PayloadEntry {
     float ready;               // 0..1: its reload as the stock weapon gauge reckons it (1: loaded, rounds left)
     float reloadSec;           // seconds of reload left (0: loaded, or none coming: its rounds are spent for good)
     PayloadFire fire;
-    bool picked;               // the one the secondary fires now (a seat whose secondary has stores to switch)
+    bool picked;               // selected loadout (every linked barrel is marked; r.picked remains its leader)
     bool homing;               // it locks on (LockonType 1)
     bool selectable;           // a live choice in the R/LB cycle; independent primary guns remain read-only
     bool coax;                 // a coaxial machine gun (StoreRole::coax): its own secondary trigger, never cycled
@@ -71,6 +71,12 @@ int PayloadSightWeapons(const void* vehicle,unsigned seat,unsigned char** out,in
 // the Titan's hull gatling), store redirects applied, deduplicated; whichever is the fire-control pick. The HUD marks each
 // (the user, 2026-10-12: 「应该两个准星都同时显示才对」). Same contract as PayloadSightWeapons otherwise.
 int PayloadTriggerWeapons(const void* vehicle,unsigned seat,unsigned char** out,int capacity) noexcept;
+// Resolve a live source holder's trigger group to its actual usable weapon. Optional cross-plugin aiming adapter:
+// true + null is an authoritative empty group; false leaves an unsupported/non-authoritative caller native.
+// Uses the same fresh from/to mapping as PullHook, including surviving linked barrels and preceding-frame NPC picks.
+bool PayloadAimWeapon(const void* vehicle,unsigned seat,const void* source,const unsigned char** out) noexcept;
+// Native alternate ammunition remains managed even when optional add-on stores are disabled.
+bool NativePayloadControl(const void* vehicle,unsigned seat) noexcept;
 // Authoritative NPC seat: choose an existing, loaded, reachable weapon for this target.
 // Call before native seat aiming/firing; writes no trigger. nullptr means none is usable.
 // `fire` reports the native trigger control to use (primary or secondary).

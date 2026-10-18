@@ -67,6 +67,7 @@ ULONGLONG readoutAt=0;
 
 ULONGLONG publishedFrame=0;      // the frame and vehicle of the last PublishAim (the PlayerAimV4 export publishes once)
 const void* publishedVehicle=nullptr;
+const void* publishedGun=nullptr;
 
 link::ViewRayFn viewRay=nullptr;
 link::MapRayFn mapRay=nullptr;
@@ -76,6 +77,8 @@ link::InputHeldFn inputHeld=nullptr;
 link::BindingReservedFn sightBinding=nullptr;
 link::SeatQueryFn turretObserver=nullptr;
 link::SeatQueryFn aimsTurret=nullptr;
+link::PayloadAimFn payloadAim=nullptr;
+ULONGLONG payloadTried=0;
 ULONGLONG aimsTried=0;
 ULONGLONG bindingTried=0,observerTried=0;
 link::ModeBindingV1 modeBinding{};
@@ -270,6 +273,18 @@ bool ObservesTurret(const unsigned char* vehicle,unsigned seat) noexcept {
     return fn && fn(vehicle,seat);
 }
 
+bool ActualWeapon(const unsigned char* vehicle,unsigned seat,const unsigned char* source,const unsigned char** out) noexcept {
+    if(!out)return false;
+    *out=nullptr;
+    const auto fn=link::Resolve(link::kCrewDll,link::kPayloadAim,payloadAim,payloadTried);
+    if(!fn)return false;
+    link::PayloadAimV1 reply{sizeof(link::PayloadAimV1),nullptr};
+    if(!fn(vehicle,seat,source,&reply) || reply.size!=sizeof(reply))return false;
+    const auto weapon=static_cast<const unsigned char*>(reply.weapon);
+    if(weapon && Readable(weapon,kAmmoGravity+4))*out=weapon;
+    return true; // a handled empty/invalid pointer cannot silently restore a different native gun
+}
+
 bool CrewAims(const unsigned char* vehicle,unsigned seat) noexcept {
     return link::Resolve(link::kCrewDll,link::kAimsTurret,aimsTurret,aimsTried) && aimsTurret(vehicle,seat);
 }
@@ -316,7 +331,7 @@ float PriorityWeight(const Enemy& e) noexcept {
 }
 
 void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,const float* world,const float* muzzle,const float* bore,
-                const Shot* shot,const float* vel,float life) noexcept {
+                const Shot* shot,const float* vel,float life,const void* gun) noexcept {
     link::TurretReadoutV1 r{};
     r.mode=mode;r.keys=pilot.keys;r.ownGun=ownGun;
     const int effective=EffectiveModeBinding(vehicle,pilot.seat,pilot.keys);
@@ -342,7 +357,7 @@ void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,cons
             r.flight=frames/60.0f;r.inReach=life<=0.0f || frames<=life;r.lead=std::isfinite(r.range);
         }
     }
-    publishedFrame=Frame();publishedVehicle=vehicle;
+    publishedFrame=Frame();publishedVehicle=vehicle;publishedGun=gun;
     AcquireSRWLockExclusive(&readoutLock);
     readout=r;readoutAt=GetTickCount64();modeBinding={requested!=effective,pilot.keys,requested,effective};
     ReleaseSRWLockExclusive(&readoutLock);
@@ -387,6 +402,8 @@ bool PlayerAim(const unsigned char* v,unsigned s,const unsigned char* gun,edf::a
     const auto seat=edf::SeatAt(const_cast<unsigned char*>(v),s);
     if(edf::SeatRider(image,seat)!=edf::Rider::player)return false;
     SeeVehicleOnce(v);
+    const unsigned char* actual=nullptr;
+    if(ActualWeapon(v,s,gun,&actual))gun=actual;
     Shot shot{};
     float muzzle[3],bore[3],life=0.0f,reach=0.0f;
     const bool barrel=gun && Readable(gun,kAmmoGravity+4) && Readable(gun+edf::kWeaponMatrix,0x40) && edf::MeanMuzzle(gun,64,muzzle,bore);
@@ -403,9 +420,9 @@ bool PlayerAim(const unsigned char* v,unsigned s,const unsigned char* gun,edf::a
     out->mode=mode;
     float world[3];
     const void* target=Designated(v,world);
-    if(publishedFrame!=Frame() || publishedVehicle!=v)
+    if(publishedFrame!=Frame() || publishedVehicle!=v || publishedGun!=gun)
         PublishAim(v,true,target,target ? world : nullptr,barrel ? muzzle : nullptr,barrel ? bore : nullptr,barrel ? &shot : nullptr,
-                   target ? pilot.lockVel : nullptr,life);
+                   target ? pilot.lockVel : nullptr,life,gun);
     const auto rule=edf::aimlink::PlayerGunRule(true,LeadCircle(),target!=nullptr);
     if(!rule.steer || !barrel || ObservesTurret(v,s))return true;
     float dir[3],frames=0.0f;

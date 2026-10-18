@@ -24,10 +24,34 @@ void Log(const char* f,...) noexcept {if(f && std::strncmp(f,"SUPPORT TRACE",13)
 unsigned char objects[32][0x3000]{},controls[32][32]{},seats[32][edf::kSeatStride*14]{};
 int made=0,deleted=0,boardRequests=0,activated=0,orders=0,followed=0,netRequests=0,releases=0,routeOrders=0;
 int held=0;bool transactionActive=false;
+// Observe the production ownership adapter boundary without replacing dispatcher creation/boarding/rollback.
+unsigned pvpAttachCalls=0,pvpForgetCalls=0,pvpAttachedCount=0,pvpLifecycle=0,pvpAttachOrder=0,pvpSeatOrder=0,pvpActivateOrder=0;
+bool pvpAttachOk=true,pvpAttachSawEveryObject=false;
+int pvpSupportMode=0;
+int PvpSupportTeam(const char*) noexcept {return pvpSupportMode;}
+ObjRef pvpAttachedRefs[support_net::kMaxUnits]{};
+std::vector<ObjRef> pvpForgotten;
+bool PvpAttachSupportPlan(const support_net::Plan& plan,const ObjRef* refs,unsigned count) noexcept {
+    ++pvpAttachCalls;pvpAttachedCount=count;pvpAttachOrder=++pvpLifecycle;
+    pvpAttachSawEveryObject=refs && count==plan.count && count<=support_net::kMaxUnits;
+    for(unsigned i=0;i<count && i<support_net::kMaxUnits;++i) {
+        pvpAttachedRefs[i]=refs[i];
+        pvpAttachSawEveryObject=pvpAttachSawEveryObject && refs[i].obj && refs[i].ctrl;
+    }
+    return pvpAttachOk && pvpAttachSawEveryObject;
+}
+void PvpForgetSupportObject(const ObjRef& ref) noexcept {
+    if(ref.obj){++pvpForgetCalls;pvpForgotten.push_back(ref);}
+}
 bool SupportTransactionActive(std::uint64_t) noexcept {return transactionActive;}
 bool peersNew=true;
 bool SupportPeersAcceptVariants() noexcept {return peersNew;}
-bool HoldSupportSoldier(const ObjRef&,bool hold) noexcept {held+=hold ? 1 : -1;return true;}
+std::set<const void*> heldObjects;
+bool HoldSupportSoldier(const ObjRef& ref,bool hold) noexcept {
+    held+=hold ? 1 : -1;
+    if(hold)heldObjects.insert(ref.obj);else heldObjects.erase(ref.obj);
+    return true;
+}
 bool allReady=true,terrain=true,nativeFail=false;
 #ifndef SUPPORT_ROUTE_NATIVE_TEST
 Sea terrainSea=Sea::land;float waterSurface=0;
@@ -103,7 +127,10 @@ bool SupportPeersAcceptTransports() noexcept {return peersTransports;}
 bool peersLoadout=true;
 bool SupportPeersAcceptLoadout() noexcept {return peersLoadout;}
 bool lastAirborne=false;
-bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne) noexcept {++activated;lastAirborne=airborne;return true;}
+bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool airborne) noexcept {
+    if(!pvpActivateOrder)pvpActivateOrder=++pvpLifecycle;
+    ++activated;lastAirborne=airborne;return true;
+}
 bool peersAirborne=true,peersRescue=true;
 bool SupportPeersAcceptAirborne() noexcept {return peersAirborne;}
 bool SupportPeersAcceptRescue() noexcept {return peersRescue;}
@@ -155,6 +182,7 @@ bool CreateSupportSoldierUnregistered(const float* matrix,std::uint32_t resource
 }
 int seatNow=0,registeredBeforeSeat=0;bool seatFail=false;
 int NpcSeatCrewNow(unsigned char* v,unsigned char* const* crew,int count) noexcept {
+    if(!pvpSeatOrder)pvpSeatOrder=++pvpLifecycle;
     ++seatNow;if(seatFail)return 0;
     int seated=0;
     for(int i=0;i<count && i<static_cast<int>(SeatCount(v));++i){Put<const void*>(SeatAt(v,static_cast<unsigned>(i)),kSeatRider,crew[i]);++seated;}
@@ -162,7 +190,14 @@ int NpcSeatCrewNow(unsigned char* v,unsigned char* const* crew,int count) noexce
 }
 bool DeriveSupportSoldierNetId(const void*,unsigned,unsigned char*) noexcept {return true;}
 bool FollowSupportSoldier(const ObjRef&,const ObjRef&) noexcept {++followed;return true;}
-bool DeleteSupportSoldier(const ObjRef& ref) noexcept {if(ref)++deleted;return true;}
+bool DeleteSupportSoldier(const ObjRef& ref) noexcept {
+    if(ref) {
+        ++deleted;
+        // The native adapter's ReleaseWeak also clears its owned/held record on deletion.
+        if(heldObjects.erase(ref.obj) && held>0)--held;
+    }
+    return true;
+}
 int registered=0;
 bool RegisterSupportObject(const void*,const unsigned char*) noexcept {++registered;if(!seatNow)++registeredBeforeSeat;return true;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept {return true;}
@@ -346,7 +381,11 @@ int main() {
     ResetSupportDispatch();testOnline=true;made=0;
     check(SupportCallAt(0,target,note,128) && netRequests==1 && !made,"online click uses reliable request rather than local spawn");
     ResetSupportDispatch();made=boardRequests=0;held=0;seatNow=0;registered=0;registeredBeforeSeat=0;activated=0;SupportPlan networkPlan;
+    pvpLifecycle=pvpAttachOrder=pvpSeatOrder=pvpActivateOrder=0;
     check(Plan(0,target,0,&networkPlan)==support_net::PlanResult::ready && Spawn(10,networkPlan,false),"committed online plan creates registered stand-ins");
+    check(pvpAttachSawEveryObject && pvpAttachedCount==networkPlan.count && pvpAttachOrder &&
+          pvpAttachOrder<pvpSeatOrder && pvpSeatOrder<pvpActivateOrder,
+          "ownership is attached to every real unit after creation and before airborne boarding or activation");
     check(seatNow==1 && registered==2 && registeredBeforeSeat==0,"airborne hull and crew are registered only after the crew is seated");
     check(activated==1,"the host flies its airborne copy at once: a hull in the air never waits unflown for the barrier");
     SupportDispatchTick();
@@ -368,6 +407,22 @@ int main() {
      ResetSupportDispatch();transactionActive=false;boardRequests=0;activated=0;seatNow=0;
      check(SpawnDeployment(30,legacy,false,false) && seatNow==0 && activated==0,"legacy hull: no seating at spawn, no flight yet");
      SupportDispatchTick();check(boardRequests==1,"legacy hull: its crew walks aboard as before");}
+    // Maximum protocol-sized deployment: ownership must reach every one of eight hull/pilot pairs, beyond old small lists.
+    {ResetSupportDispatch();made=deleted=held=seatNow=activated=0;SupportPlan maximum=networkPlan;maximum.count=support_net::kMaxUnits;
+     for(unsigned i=0;i<maximum.count;++i) {
+         maximum.units[i]=networkPlan.units[i%2];maximum.units[i].role=i%2 ? i : 0;
+     }
+     pvpLifecycle=pvpAttachOrder=pvpSeatOrder=pvpActivateOrder=0;
+     check(SpawnDeployment(50,maximum,false,false) && made==16 && pvpAttachedCount==16 && pvpAttachSawEveryObject &&
+           pvpAttachedRefs[15].obj==objects[15] && pvpAttachOrder<pvpSeatOrder && pvpSeatOrder<pvpActivateOrder,
+           "all sixteen support objects are attached without truncation before the first aircraft seats or flies");
+     pvpForgetCalls=0;pvpForgotten.clear();Destroy(50);
+     check(deleted==16 && pvpForgetCalls==16 && !held && !deployments[0].used,"empty maximum deployment forgets every ownership record on rollback");}
+    {ResetSupportDispatch();made=deleted=held=seatNow=activated=0;pvpAttachOk=false;pvpForgetCalls=0;
+     check(!SpawnDeployment(51,networkPlan,false,false) && made==2 && deleted==2 && !held && !deployments[0].used &&
+           !seatNow && !activated && pvpForgetCalls==2,
+           "ownership attachment failure rolls all constructed objects back before any crew boarding or flight");
+     pvpAttachOk=true;}
     // Rollback must respect a real player's independent boarding action, on either machine.
     for(bool remotePlayer:{false,true}) {
         ResetSupportDispatch();made=deleted=held=0;transactionActive=false;
@@ -376,8 +431,9 @@ int main() {
         Put<unsigned char>(human,kHumanPlayer,1);Put<void*>(human,kHumanPad,human);
         if(remotePlayer)Put<unsigned char>(human,edf::kRiderNet+edf::kNetFlags,1);
         Put<long>(control,edf::kCtrlUses,1);Put<void*>(seats[0],kSeatRider,human);Put<void*>(seats[0],kSeatRiderCtrl,control);
-        Destroy(20);
+        pvpForgetCalls=0;pvpForgotten.clear();Destroy(20);
         check(!deleted && !held && !deployments[0].used,"cancel preserves occupied hull and real crew, releases their holds, and drops deployment ownership");
+        check(!pvpForgetCalls && pvpForgotten.empty(),"a player-retained hull and its preserved real crew keep their ownership bindings");
     }
     ResetSupportDispatch();testOnline=true;submitReady=true;
     SupportCallAt(0,target,note,128);const auto firstRequest=noticeRequest;
@@ -440,6 +496,15 @@ int main() {
         check(SupportCallAt(16,target,note,128) && subLaunches==1 && !offlinePending && made==0 && std::wcsstr(note,L"上浮")!=nullptr,
               "submarine carrier over water: it surfaces at once, no plan, no planner objects");
         check(SupportSubCallAt(target,nullptr,false,note,128) && subLaunches==2,"a radio replay on another machine surfaces its own copy");
+        pvpSupportMode=1;
+        check(!SupportSubCallAt(target,nullptr,true,note,128) && subLaunches==2 &&
+              std::wcsstr(note,hudtext::Tr(hudtext::Tx::pvpSubUnsupported)),
+              "active PVP refuses the unowned special carrier before creation with a localized in-game reason");
+        pvpSupportMode=-1;
+        check(!SupportSubCallAt(target,nullptr,false,note,128) && subLaunches==2,
+              "PVP queued/prepare/apply/restore window also refuses a remote special-copy replay");
+        pvpSupportMode=0;
+
         testOnline=true;
         check(!SupportCallAt(16,target,note,128) && subLaunches==2 && netRequests==requestsBefore,
               "online the map refuses it (the call weapon brings it), no host request");
@@ -510,6 +575,8 @@ int main() {
     check(SupportCallAt(30,target,note,128),"a helicopter assault (a platoon) queued");
     SupportDispatchTick();
     const SupportPlan assault=deployments[0].plan;
+    check(pvpAttachedCount==14 && pvpAttachSawEveryObject && pvpAttachedRefs[13].obj==objects[13],
+          "transport ownership includes pilot, hull and all twelve passengers without truncation");
     check(made==14 && assault.count==14 && lastPrepared.heli==static_cast<int>(HeliBody::transport410) && seatNow==1 && activated==1,
           "a platoon in one transport helicopter: hull, pilot and twelve soldiers made inside it, seated, flying in at spawn");
     check(At<const void*>(SeatAt(objects[0],0),kSeatRider)==objects[1] && At<const void*>(SeatAt(objects[0],12),kSeatRider)==objects[13],

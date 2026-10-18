@@ -1559,11 +1559,13 @@ def turret_aim_wired() -> None:
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
     assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
-                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding', 'kPlayerAim', 'kAimsTurret'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding', 'kPlayerAim', 'kAimsTurret', 'kPayloadAim'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
     # V4, the one player turret aim (2026-10-09): EDF6AutoTurret answers it, EDF6VehicleCrew's turret camera asks it every
     # frame and says it steers; the flak's own Steer and the tank driver's frame then leave the turret to the camera.
     assert names['kPlayerAim'].endswith('V4') and names['kAimsTurret'].endswith('V4'), names
+    assert names['kPayloadAim'].endswith('V1'), names
+    assert f'bool __cdecl {names["kPayloadAim"]}(' in src('src/turretaim.cpp'), 'optional actual-weapon export must match its shared ABI name'
     assert f'bool __cdecl {names["kPlayerAim"]}(' in src('autoturret/src/designate.cpp')
     assert f'bool __cdecl {names["kAimsTurret"]}(' in src('src/turretaim.cpp')
     assert 'PlayerTurretLead(v,0,TurretGun(v,seat),lead)' in src('src/turretcam.cpp'), 'turretcam.cpp: the camera asks V4'
@@ -1951,11 +1953,20 @@ def spawn_catalog_rows_check_their_files() -> None:
             continue
         files = re.search(r',(?:true|false),(?:true|false),(L".*)\},$', line).group(1)
         got = [n.replace('\\\\', '/') for n in re.findall(r'L"([^"]*)\\0"', files)]
-        assert got == [w.removeprefix('OBJECT/') for w in want] and r.rel in want, (r.sgo, got, want)
+        assert got == [gen_spawn_catalog.mod_file_name(w) for w in want] and r.rel in want, (r.sgo, got, want)
     assert gen_spawn_catalog.files_literal(rows[0]) == 'nullptr'
     code = src('src/debug_spawn.cpp')
     lacks = code.split('const wchar_t* ModRowLacks(const Entry& e) noexcept {', 1)[1].split('\n}', 1)[0]
-    assert 'for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1)' in lacks and 'jet::ModFileThere(f)' in lacks
+    assert 'for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1)' in lacks and 'ModRowFileThere(f)' in lacks
+    assert 'const auto reference=ParseModFile(file);' in code
+    assert gen_spawn_catalog.mod_file_name('OBJECT/EDF41MP01/ANTHILL301UG.SGO') == 'EDF41MP01/ANTHILL301UG.SGO'
+    assert gen_spawn_catalog.mod_file_name('WEAPON/EDF6VC_BMPT_ATGM_4.SGO') == 'WEAPON/EDF6VC_BMPT_ATGM_4.SGO'
+    for unsafe in ('OBJECT/../x', 'WEAPON/a//b', 'WEAPON/a\\b', 'C:/OBJECT/x', '/OBJECT/x', 'OBJECT/.x', 'OBJECT/x.', 'OBJECT/a..b', 'OBJECT/x:ads'):
+        try:
+            gen_spawn_catalog.mod_file_name(unsafe)
+        except ValueError:
+            continue
+        raise AssertionError(f'unsafe spawn catalog file accepted: {unsafe}')
     assert 'missing[i]=lacks!=nullptr;' in code and 'ModRowThere' not in code
     assert 'static_assert(FilesAgree(),' in src('src/debug_spawn.h')
 
@@ -2028,7 +2039,8 @@ def spawn_catalog_covers_every_registry() -> None:
         assert by[s].category == 'vehicle' and by[s].source == 'stock'
     assert {s for s, _, _ in gen.ENEMIES if s not in gen.PRIMER_KINDS} <= set(by), 'a wave enemy is no row'
     assert all(by[s].lift < gen.WAVE_LIFT_MOST for s, _, _ in gen.ENEMIES if s in by), 'a ship among the waves'
-    wanted = {'ufomother301', 'ufomother401', 'uforobo401', 'edf6vc_sedan', 'v507_rescuetank_ai', 'vehicle301_tank_ai'}
+    wanted = {'ufomother301', 'ufomother401', 'uforobo401', 'edf6vc_sedan', 'v507_rescuetank_ai', 'vehicle301_tank',
+              'edf6tr_vulcan_mission', 'edf6tr_bmpt_mission'}
     assert wanted <= set(by), sorted(wanted - set(by))
     # The panel's tabs (src/debug_spawn.h Category) are the catalog's, in its order.
     header = src('src/debug_spawn.h')
@@ -2057,7 +2069,7 @@ def range_leaves_out_what_is_not_installed() -> None:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             open(path, 'wb').close()
         kept, said = gen.without_missing(root, plan)
-        assert 'edf6vc_sedan' in kept.vehicles and 'vehicle301_tank_ai' not in kept.vehicles
+        assert 'edf6vc_sedan' in kept.vehicles and 'vehicle301_tank' not in kept.vehicles
     row = gen.enemy_row('hector301cc')
     assert row and row.source == 'edf41' and gen.enemy_row('giantant01') is None
 
@@ -2127,7 +2139,10 @@ def footprint_covers_the_stock_models() -> None:
     import sgo
     game = gen.Game(rootcpk.DEFAULT_GAME)
     seen = 0
-    for name in sorted({s for s, _ in gen.placements(gen.target_range(gen.Plan()))} - gen.JETS.keys()):
+    # Match gen.install's effective plan: an optional migrated vehicle absent from Mods is not spawned, and is not a
+    # stock Root.cpk model this audit can measure. Installed optional vehicles are still included.
+    plan, _skipped = gen.without_missing(rootcpk.DEFAULT_GAME, gen.target_range(gen.Plan()))
+    for name in sorted({s for s, _ in gen.placements(plan)} - gen.JETS.keys()):
         model = sgo.load(data=gen.vehicle_sgo(game, name)).get('animation_model')
         path, member = model[0][0], model[0][1]
         folder, file = path.split('app:/')[1].rsplit('/', 1)
@@ -2376,6 +2391,8 @@ def heli_sight_after_aim_lines() -> None:
     def read(key: str) -> bool:
         if f'L"{key}"' in plugin or any(f'L"{key}"' in m for m in modules.values()):
             return True
+        if key == 'Edf41MaterialCompatibility':
+            return key.lower() in src('tools/installer.py').lower() and 'material_compat=' in src('tools/installer.py')
         for prefix, known in suffixes.items():
             if key.startswith(prefix) and key[len(prefix):] in known:
                 return any(f'L"{prefix}%ls"' in m for m in modules.values())
@@ -2628,7 +2645,9 @@ def cockpit_warnings_wired() -> None:
         assert len(re.findall(r'(?<!\w)L"', audio.split(table, 1)[1].split('};', 1)[0])) == n_call, table
     repeats = audio.split('kCallRepeat[kCallCount]={', 1)[1].split('};', 1)[0]
     assert len(repeats.split(',')) == n_call, repeats
-    tick = src('src/crew.cpp').split('void FrameTick()', 1)[1].split('\n}', 1)[0]
+    crew_source = src('src/crew.cpp')
+    assert 'void FrameTick() noexcept { SharedFrameTick(); }' in crew_source, 'the public frame entry must use the shared GameFrame guard'
+    tick = crew_source.split('void SharedFrameTick()', 1)[1].split('\n}', 1)[0]
     assert 0 <= tick.find('&WarnTick') < tick.find('&HudPublish'), 'WarnTick must run before HudPublish'
     cmake = src('CMakeLists.txt')
     assert 'src/warn.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]
@@ -2790,8 +2809,10 @@ def view_distance_keeps_far_pass_start() -> None:
     assert '#include "view_clip.h"' in code and 'viewclip::Raise(' in code
     assert 'kOverlap' not in code and 'kCamDistantNear' not in code, 'view.cpp: the far pass start must not be moved'
     raise_fn = code.split('bool Raise(', 1)[1].split('\n}', 1)[0]
-    puts = re.findall(r'Put<float>\(at,([^,]+),', raise_fn)
-    assert puts == ['farClip', 'farClip+8'], f'view.cpp Raise writes {puts}: only the far clip and the far pass end'
+    writes = re.findall(r'WriteClip\(at,farClip,(\d),', raise_fn)
+    assert writes == ['0', '2'], f'view.cpp Raise writes fields {writes}: only far clip and far pass end'
+    write_fn = code.split('void WriteClip(', 1)[1].split('\n}', 1)[0]
+    assert 'Put<float>(at,Field(farClip,field),value);' in write_fn
     body = rule.split('inline bool Raise(', 1)[1].split('\n}', 1)[0]
     assert 'distantNear' not in body, 'view_clip.h Raise: the far pass start is the mission\'s'
     assert 'add_executable(view_clip_check EXCLUDE_FROM_ALL tools/view_clip_check.cpp)' in cmake
@@ -3891,7 +3912,7 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(at_build, build_files=_at_build_files))
             enter(patched(describe, table_ids=lambda mods: []))
             enter(patched(installer, bundle_dir=lambda: bundle, check_loader=lambda game: None,
-                          find_edf41=lambda game: None,
+                          find_edf41=lambda game: None, material_compat_wanted=lambda text: False,
                           stack_weapons=lambda game: {}, retire_weapons=lambda game: True,
                           ask=lambda prompt: answers.pop(0)))
             enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
@@ -4488,7 +4509,8 @@ def stock_payload_and_seats_wired() -> None:
     want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
                   for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
     assert sorted(builds) == want, (builds, want)
-    assert 'if(IsStoreWeapon(w))return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
+    assert 'if(IsStoreWeapon(w) && !(spec && spec->nativeControl))' in payload
+    assert 'return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     # The disabled branch also calls AimLines to restore native lines. Check the
     # enabled pipeline's ordering, not that earlier ownership-cleanup call.
@@ -4871,9 +4893,9 @@ def map_commands_wired() -> None:
     assert code.count('edf::AsyncKey(') == 1 and 'GetAsyncKeyState' not in code
     reader = code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
     assert 'Down(VK_TAB)' in reader
-    # The 「摆放」 panel's keys (, . / Enter Backspace) only where the panel works (the test range, offline): on any other map
+    # The 「摆放」 panel's keys (, . / Enter Backspace) only where the panel works (the test range; enemy placement also works online): on any other map
     # they stay the game's and never switch the input back from the pad.
-    assert reader.startswith('const MapCmdInput& in,bool placeKeys)') and 'const bool placeKeys=RangePlaceOn() && !InSession();' in code
+    assert reader.startswith('const MapCmdInput& in,bool placeKeys)') and 'const bool placeKeys=RangePlaceOn();' in code
     for key in ('VK_OEM_COMMA', 'VK_OEM_PERIOD', 'VK_OEM_2', 'VK_RETURN', 'VK_BACK'):
         assert f'Down({key})' in reader.split('if(placeKeys) {', 1)[1] and f'Down({key})' not in reader.split('if(placeKeys) {', 1)[0], key
     assert 'placeHoldsPad.store(placeKeys && ' in code and '(placeKeys && ((k.padUp && !g.was.padUp)' in code
@@ -5050,13 +5072,16 @@ def map_wired() -> None:
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'edf::AsyncKey(' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp',
-                                      'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     fp = src('src/firstperson.cpp')
     key_input = fp.split('bool KeyInputAllowed() noexcept {', 1)[1].split('\n}', 1)[0]
     assert 'if(MapHoldsKeys())return false;' in key_input
     assert '!KeyInputAllowed()' in fp and 'keyWas=false;keyCancelled=down;return;' in fp, 'map input cancels the FP key gesture'
     assert 'Foreground() && !MapHoldsKeys()' in src('src/room_ui.cpp'), 'the room menu keys give way to the map'
+    thermal = src('src/thermal.cpp')
+    assert '!GamePaused() && !MapHoldsKeys() && shot.inSight && down && !keyHeld' in thermal, 'thermal switching gives way to map/pause and requires the actual optic'
+    assert 'process==GetCurrentProcessId()' in thermal, 'the thermal key reader requires this game window'
 
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
@@ -7245,7 +7270,8 @@ def edf41_weapons_convert_real() -> None:
         for k in dsgo.parse(stock(f'WEAPON/{r.items[0].upper()}.SGO')).root.names.values():
             count[k] = count.get(k, 0) + 1
     common = {k for k, n in count.items() if n >= 0.95 * len(rows[::7])}
-    cues6 = acb.game_cues(edf6)
+    import make_edf41_weapons as m41
+    cues6 = m41.available_weapon_cues(edf6, edf41)
     cues41 = acb.game_cues(edf41)
     ports = [p for p in pw.PORTS if p.game == 'edf41']
     assert ports
@@ -7549,27 +7575,41 @@ def edf41_calls_convert() -> None:
             r.set(k, v)
         return r
 
-    template = call([0.05, 180.0, 120.0, 1.0, ['app:/Object/v508_transport.sgo', 'app:/object/v509_transportbox.sgo',
-                     'app:/Object/v504_begaruta.sgo', [[0.5, 0.7], [[ 'app:/weapon/v_504begaruta_cannon01_l.sgo', 1.0],
-                                                                     ['app:/weapon/v_504begaruta_cannon01_r.sgo', 1.0]]]],
+    donor_weapons = [[f'app:/weapon/v_504begaruta_slot{i}.sgo', [1.0, 2.0]] for i in range(8)]
+    source_weapons = [[f'app:/weapon/v_406begaruta_slot{i}.sgo', [float(i), 3.0]] for i in range(6)]
+    donor_setup = [[0.5, 0.7], [2, 3, 4, 5], [8] * 6, [7], donor_weapons, [9, 10]]
+    source_setup = [[0.4, 0.6], [6, 5, 4, 3], [9] * 6, [8], source_weapons, [10, 11]]
+    template = call([0.05, 180.0, 120.0, 1.0,
+                     ['app:/Object/v508_transport.sgo', 'app:/object/v509_transportbox.sgo',
+                      'app:/Object/v504_begaruta.sgo', donor_setup],
                      ['輸送部隊目標確認', '輸送部隊発射', '輸送部隊攻撃後']])
-    mine = {'Ammo_CustomParameter': [0.05, 180, 120, 1, ['app:/Object/Transporter401.sgo', 'app:/object/Transporter401_ContainerM.sgo',
-                                     'app:/Object/Vehicle406_Begaruta_red.sgo', [[0.4, 0.6], [['app:/weapon/v_406begaruta_cannon01.sgo', 2.0]]]],
-                                     ['x', '輸送部隊発射ベガルタ', 'y']],
+    mine = {'Ammo_CustomParameter': [0.05, 180, 120, 1,
+                                    ['app:/Object/Transporter401.sgo', 'app:/object/Transporter401_ContainerM.sgo',
+                                     'app:/Object/Vehicle406_Begaruta_red.sgo', source_setup],
+                                    ['x', '輸送部隊発射ベガルタ', 'y']],
             'AmmoCount': 3, 'ReloadTime': 900, 'EnergyChargeRequire': -1.0}
     r = ec.vehicle_call(mine, template, ec.VEHICLES['vehicle406_begaruta_red.sgo']).root
     acp = r.get('Ammo_CustomParameter')
     drop = acp.items[4]
-    assert drop.items[0] == 'app:/Object/v508_transport.sgo' and drop.items[2] == 'app:/Object/v504_begaruta_red.sgo'
-    assert dsgo.to_py(drop.items[3]) == [[0.4, 0.6], [['app:/weapon/v_504begaruta_cannon01_l.sgo', 2.0],
-                                                      ['app:/weapon/v_504begaruta_cannon01_r.sgo', 2.0]]], dsgo.to_py(drop.items[3])
+    assert drop.items[0] == 'app:/Object/v508_transport.sgo'
+    assert drop.items[2] == 'app:/Object/vehicle406_begaruta_red.sgo', 'the real 406 model must be summoned'
+    assert dsgo.to_py(drop.items[3]) == source_setup, 'the six original holders and tuning must survive an eight-slot donor'
+    assert len(drop.items[3].items[4].items) == 6
     assert dsgo.to_py(acp.items[5]) == ['輸送部隊目標確認', '輸送部隊発射', '輸送部隊攻撃後'], 'not the template\'s voices'
     assert r.get('AmmoCount') == 3 and r.get('ReloadTime') == 900 and dsgo.to_py(r.get('EnergyChargeRequire')) == [-1.0, -1.0]
     assert template.get('Ammo_CustomParameter').items[4].items[2] == 'app:/Object/v504_begaruta.sgo', 'the template changed'
     odd = dict(mine, Ammo_CustomParameter=mine['Ammo_CustomParameter'][:4] + [mine['Ammo_CustomParameter'][4][:3] + [[0.4]]]
                + mine['Ammo_CustomParameter'][5:])
+    try:
+        ec.vehicle_call(odd, template, ec.VEHICLES['vehicle406_begaruta_red.sgo'])
+    except edf5port.Unsupported as e:
+        assert 'six-holder' in str(e)
+    else:
+        raise AssertionError('a malformed 406 setup must not silently fall back to the 504')
+    # A generic donor route retains its template when the old settings do not
+    # have the donor shape; the dedicated six-holder 406 route above is strict.
     r = ec.vehicle_call(odd, template, 'v504_begaruta_red.sgo').root
-    assert dsgo.to_py(r.get('Ammo_CustomParameter').items[4].items[3]) == dsgo.to_py(template.get('Ammo_CustomParameter').items[4].items[3])
+    assert dsgo.to_py(r.get('Ammo_CustomParameter').items[4].items[3]) == donor_setup
     bomber = call([30.0, 1.0, ['app:/object/Bomber501.sgo', 2.0, [1.0]], ['a']])
     r = ec.bomber_call({'Ammo_CustomParameter': [0.05, 120, 180, 2, ['app:/object/Bomber401.sgo', 3, [5.0]]]}, bomber).root
     assert dsgo.to_py(r.get('Ammo_CustomParameter').items[2]) == ['app:/object/Bomber401.sgo', 3, [5.0]]
@@ -7913,26 +7953,36 @@ def ported_assets_of_another_mod_stay() -> None:
                 assert modfiles.read(_mods(game, asset)) == b'another mod'
 
 
+def _edf41_shared_port_fixture():
+    """Synthetic sharing independent of whether current EDF4.1 objects borrow EDF5 art."""
+    from dataclasses import replace
+    import ported_weapons as pw
+    asset = 'OBJECT/EDF41_SHARED_LEDGER_FIXTURE.MRAB'
+    port = replace(pw.PORTS[0], assets={asset: 'OBJECT/SYNTHETIC_SOURCE.RAB'})
+    ports = tuple(port if p.id == port.id else p for p in pw.PORTS)
+    return asset, port, ports
+
+
 @test
 def edf41_shared_weapon_asset_lifecycle() -> None:
-    """The real shared asset's path, through install -> legacy upgrade -> campaign plan -> either uninstall order.
+    """An explicit synthetic shared asset, through install -> legacy upgrade -> campaign plan -> either uninstall order.
     A weapon-manifest hash is required even for byte-identical unowned files; edited files still block the object."""
     import edf41_objects as eo
     import itertools
     import ported_weapons as pw
-    asset = next(iter(eo.registry()['shared']))
-    port = next(p for p in pw.PORTS if asset in p.assets)
+    asset, port, ports = _edf41_shared_port_fixture()
     obj, data = 'OBJECT/VEHICLE301_TANK_AI.SGO', b'shared model'
     payloads = {obj: b'converted tank', asset: data}
     reg = {'objects': [{'object': obj, 'files': list(payloads)}],
            'files': {r: modfiles.sha256(d) for r, d in payloads.items()}, 'shared': {asset: 'unused'}}
     ids = STOCK + sorted({*cw.templates(), *(p.template for p in pw.PORTS)} - set(STOCK)) + list(calls.IDS)
-    table = ids + [p.id if p is port else pw.retired_id(p.id) for p in pw.PORTS]
+    table = ids + [p.id if p.id == port.id else pw.retired_id(p.id) for p in pw.PORTS]
     for legacy in (False, True):
         for removal, original in itertools.product(('calls', 'repair', 'edf41'), (None, b'original mod model')):
             with tempfile.TemporaryDirectory(prefix='edf6vc-shared-') as game, \
                     patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
                     patched(cw, stock=lambda game_root, rel: b''), \
+                    patched(pw, PORTS=ports, BY_ID={p.id: p for p in ports}), \
                     patched(eo, registry=lambda: reg), patched(eo, read=payloads.__getitem__):
                 if original is not None:
                     modfiles.atomic_write(_mods(game, asset), original)
@@ -7979,21 +8029,21 @@ def edf41_shared_weapon_asset_lifecycle() -> None:
 
 @contextlib.contextmanager
 def _edf41_shared_game(original: bytes | None) -> Iterator[tuple[str, str, bytes, Callable[[], dict[str, bytes]]]]:
-    """A game dir with the real shared EDF4.1 model's path and a weapon table for its port: (game, asset, our bytes,
+    """A game dir with the synthetic shared EDF4.1 model and a weapon table for its port: (game, asset, our bytes,
     the call weapons' files). `original`: a pre-install file at the asset's path (another mod's)."""
     import edf41_objects as eo
     import ported_weapons as pw
-    asset = next(iter(eo.registry()['shared']))
-    port = next(p for p in pw.PORTS if asset in p.assets)
+    asset, port, ports = _edf41_shared_port_fixture()
     obj, data = 'OBJECT/VEHICLE301_TANK_AI.SGO', b'shared model'
     payloads = {obj: b'converted tank', asset: data}
     reg = {'objects': [{'object': obj, 'files': list(payloads)}],
            'files': {r: modfiles.sha256(d) for r, d in payloads.items()}, 'shared': {asset: 'unused'}}
     ids = STOCK + sorted({*cw.templates(), *(p.template for p in pw.PORTS)} - set(STOCK)) + list(calls.IDS)
-    table = ids + [p.id if p is port else pw.retired_id(p.id) for p in pw.PORTS]
+    table = ids + [p.id if p.id == port.id else pw.retired_id(p.id) for p in pw.PORTS]
     with tempfile.TemporaryDirectory(prefix='edf6vc-shared-') as game, \
             patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
             patched(cw, stock=lambda game_root, rel: b''), \
+            patched(pw, PORTS=ports, BY_ID={p.id: p for p in ports}), \
             patched(eo, registry=lambda: reg), patched(eo, read=payloads.__getitem__):
         if original is not None:
             modfiles.atomic_write(_mods(game, asset), original)
@@ -10866,7 +10916,7 @@ def edf41_objects_after_weapons() -> None:
     tank out (2026-10-12, the real install)."""
     text = src('tools/installer.py')
     body = text[text.index('def install(game: str'):]
-    assert body.index('call_weapons.install(game, weapons)') < body.index('edf41_objects.build(game)')
+    assert body.index('call_weapons.install(game, weapons)') < body.index('edf41_objects.build(game, material_compat=material_compat)')
 
 
 

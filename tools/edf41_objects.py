@@ -32,6 +32,7 @@ import rabpool  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
 
 OWNER = 'edf41'   # pylib/ledger.py OWNERS
+DEPENDENT_OWNERS = frozenset(('testrange', 'testrange_sub'))   # need() consumers, never a second writer
 # The registry and the files: bundled next to the frozen installer, else the source tree's.
 DATA = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.join(HERE, '..')  # type: ignore[attr-defined]
 REGISTRY = os.path.join(DATA, 'edf41port', 'objects.json')
@@ -136,6 +137,12 @@ def _not_ours(led: ledger.Ledger, rel: str, sha: str) -> bool:
         # Older installers recorded ported models only in the weapon transaction's manifest, not the ledger.
         # Planning must recognize them before the weapon install migrates their ownership later in this run.
         return call_weapons.owned_assets(os.path.dirname(led.mods)).get(ledger.key(rel)) != sha
+    if led.changed(rel):
+        return sha256_file(led.disk(rel)) != sha
+    if OWNER in owners and others and set(others) <= DEPENDENT_OWNERS:
+        # The primary writer may upgrade its own unedited object while the range
+        # still references it. A dependency is not an independent competing writer.
+        return False
     return bool(others) and sha256_file(led.disk(rel)) != sha
 
 
@@ -170,7 +177,7 @@ def unavailable(root: str) -> list[tuple[str, str]]:
     return out
 
 
-def build(root: str) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
+def build(root: str, *, material_compat: bool = False) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
     """The files of every registered object (each checked against the registry's SHA-256) but those of the objects
     unavailable() names. One of our tools' files with these very bytes (the Blacker No.4.1 model the EDF5 weapons
     install too) is shared: install records edf41 as needing it as well."""
@@ -188,6 +195,11 @@ def build(root: str) -> tuple[dict[str, bytes], list[tuple[str, str]]]:
                 if hashlib.sha256(data).hexdigest() != reg['files'][rel]:
                     raise ValueError(f'{rel}: not the file the registry lists (a damaged install of the tools)')
                 files[rel] = data
+    if material_compat:
+        import edf41_materials
+        # A shared archive also belongs to an EDF5 weapon: never alter its shader names.
+        own = {rel: data for rel, data in files.items() if rel not in reg.get('shared', {})}
+        files.update(edf41_materials.apply(own, root))
     return files, skipped
 
 
@@ -200,11 +212,29 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
         if rel in files:
             led.record(call_weapons.OWNER, rel, sha)
     before = set(led.owned_by(OWNER))
+    dependencies: list[tuple[set[str], list[str]]] = []
+    for obj in entries(registry()):
+        held = set(led.owners(obj['object'])) & DEPENDENT_OWNERS
+        if not held or OWNER not in led.owners(obj['object']) or led.changed(obj['object']):
+            continue
+        required = [rel for rel in obj['files'] if rel in files]
+        if obj['object'] not in files:
+            continue
+        if any(rel.startswith('SHADER/') for rel in files):
+            import edf41materials
+            private = {rel: files[rel] for rel in required}
+            required += [rel for name in edf41materials.needed_names(private)
+                         if (rel := edf41materials.shader_path(name)) in files]
+        dependencies.append((held, required))
     paths = []
     for rel, data in files.items():
         if ledger.key(rel) in before and sha256_file(led.disk(rel)) == sha256(data):
             continue
         paths.append(led.put(OWNER, rel, data))
+    for held, required in dependencies:
+        for dependent in sorted(held):
+            for rel in required:
+                led.need(dependent, rel)
     led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files}))
     return paths
 

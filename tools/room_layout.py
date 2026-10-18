@@ -21,14 +21,15 @@ The elements (docs/room-ui-re.md §5: [type, skin, pos, area, flags, hcoord, vco
   vcRoot                 the whole menu, a transparent layout over the screen: the plugin shows / hides it (+0x1F8)
     vcBack               the panel (HUDIconTexture_skin: GLOBAL; the plugin binds WHITE and tints it)
     vcHead               the title line
-    vcU00..vcU13         the unit column (TextField)
-    vcR00..vcR13         the row column, each a transparent layout holding
+    vcU00..vcU11         the unit column (TextField)
+    vcR00..vcR11         the row column, each a transparent layout holding
       vcR00T             its text (TextField)
       vcR00A / vcR00B    the primary / secondary colour chips (HUDIconTexture_skin: WHITE tinted the colour)
       vcR00I             the weapon / store icon (HUDIconTexture_skin: the plugin sets the icon's texture)
       vcR00N             the field / rounds note (TextField)
     vcS0..vcS3           the status lines (generation, room sync, the client's note)
-    vcHint               the key hint line
+    vcHint / vcHelp2 / vcHelp3  three contextual help lines (separate from status)
+    vcEntry              the visible closed-page entry (actual toggle key / pad combination)
 src/room_ui_logic.h names them the same way (tests/room_layout_test.py checks the two agree).
 
 The installer writes both at install (`install`, owner `roomui` in the ledger, released at uninstall); `loadout-generate`
@@ -54,7 +55,7 @@ OWNER = 'roomui'   # pylib/ledger.py OWNERS
 LAYOUTS = ('LYT_HUIONLINEROOM.SGO', 'LYT_HUIHQMAIN.SGO')   # Root.cpk UI/<name> -> Mods/UI/<name>
 NOT_OURS = ('LYT_MAINFRAME.SGO',)                          # EDF6Coop's: never written here
 
-ROWS = 14            # rows a column shows (src/room_ui_logic.h kRows)
+ROWS = 12            # rows a column shows (src/room_ui_logic.h kRows)
 STATUS_LINES = 4     # src/room_ui_logic.h kStatusLines
 PREFIX = 'vc'        # every member this tool adds
 MENU_RIGHT = 1128    # the panel's right edge (1920 x 1080 layout units): the 3D view's side stays clear
@@ -69,8 +70,9 @@ PANEL_X, PANEL_Y, PANEL_W, PANEL_H = 48.0, 96.0, MENU_RIGHT - 48.0, 912.0
 ROW_Y, ROW_STEP, ROW_H = 168.0, 46.0, 40.0
 UNIT_X, UNIT_W = 80.0, 380.0
 ROWS_X = 480.0
-STATUS_Y, STATUS_STEP = 820.0, 36.0
-HINT_Y = 966.0
+STATUS_Y, STATUS_STEP = 736.0, 36.0
+HINT_Y, HELP_STEP = 896.0, 36.0
+ENTRY_Y = 974.0
 
 
 def _layout(skin: str, x: float, y: float, w: float, h: float) -> list:
@@ -97,6 +99,7 @@ def status_name(i: int) -> str:
 
 
 ROOT, BACK, HEAD, HINT = PREFIX + 'Root', PREFIX + 'Back', PREFIX + 'Head', PREFIX + 'Hint'
+HELP2, HELP3, ENTRY = PREFIX + 'Help2', PREFIX + 'Help3', PREFIX + 'Entry'
 ROW_PARTS = ('T', 'A', 'B', 'I', 'N')   # text, primary chip, secondary chip, icon, note
 
 
@@ -107,6 +110,9 @@ def elements() -> dict[str, list]:
         BACK: _layout(ICON, PANEL_X, PANEL_Y, PANEL_W, PANEL_H),
         HEAD: _text(UNIT_X, 112.0, 1000.0, 40.0, 28),
         HINT: _text(UNIT_X, HINT_Y, 1000.0, 34.0, 18),
+        HELP2: _text(UNIT_X, HINT_Y + HELP_STEP, 1000.0, 34.0, 18),
+        HELP3: _text(UNIT_X, HINT_Y + 2 * HELP_STEP, 1000.0, 34.0, 18),
+        ENTRY: _text(UNIT_X, ENTRY_Y, 1000.0, 34.0, 22),
     }
     for i in range(ROWS):
         y = ROW_Y + i * ROW_STEP
@@ -153,7 +159,7 @@ def subtree() -> list:
         kids += [[row_name(i)], [x for part in ROW_PARTS for x in ([row_name(i, part)], 0)]]
     for i in range(STATUS_LINES):
         kids += [[status_name(i)], 0]
-    kids += [[HINT], 0]
+    kids += [[HINT], 0, [HELP2], 0, [HELP3], 0, [ENTRY], 0]
     return [[ROOT], kids]
 
 

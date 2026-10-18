@@ -15,6 +15,14 @@
 #include <memory>
 namespace crew {
 void PlayAreaTick() noexcept {}
+int PvpSupportTeam(const char*) noexcept {return 0;}
+unsigned routePvpForgotten=0;
+bool PvpAttachSupportPlan(const support_net::Plan& plan,const ObjRef* refs,unsigned count) noexcept {
+    if(!refs || count!=plan.count || count>support_net::kMaxUnits)return false;
+    for(unsigned i=0;i<count;++i)if(!refs[i].obj || !refs[i].ctrl)return false;
+    return true;
+}
+void PvpForgetSupportObject(const ObjRef& ref) noexcept {if(ref.obj)++routePvpForgotten;}
 namespace {bool supportSessionActive=true;}
 support::Policy SupportMissionPolicy() noexcept {return {support::Environment::normal,false};}
 int SupportAirCallCount() noexcept{return 21;}
@@ -202,6 +210,9 @@ int main() {
     Check(SquadCommand(units[0],Command{Order::guard,{takeover[0],takeover[1],takeover[2]}}) &&
           !NpcPrepareSquadRoute(units[0],takeover,1) && q->routeCancelled,
           "explicit player squad order permanently takes ownership from this ingress route");
+    Check(!routePvpForgotten,"infantry ownership remains bound throughout ingress and combat");
+    Destroy(7001);
+    Check(routePvpForgotten==4 && !d.used,"explicit squad rollback forgets all four actual infantry ownership records");
     ResetSupportDispatch();ResetNpcAi();VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     std::printf("support_infantry_route_test: %d checks passed after %d frames\n",checks,frames);
 }

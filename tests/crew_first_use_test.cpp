@@ -84,8 +84,12 @@ void NpcPostInput(unsigned char*) noexcept{}
 void NpcGunnersInput(unsigned char*) noexcept{}
 // Unrelated production hooks are linked but must never run in this fixture.
 void (*volatile unexpectedHook)()=&std::abort;
+int pvpFrameTicks=0,thermalFrameTicks=0;
+void NoopGlobalTick() {}
 bool BumpSuppressed(void) noexcept{unexpectedHook();return {};}
 void ViewTick(void) noexcept{unexpectedHook();return;}
+void PvpFrame(void) noexcept{unexpectedHook();++pvpFrameTicks;return;}
+namespace thermal { void Tick(bool,unsigned) noexcept{unexpectedHook();++thermalFrameTicks;return;} }
 void BigWorldProbe(void) noexcept{unexpectedHook();return;}
 void JetSound(unsigned char *) noexcept{unexpectedHook();return;}
 void JetSoundTick(void) noexcept{unexpectedHook();return;}
@@ -128,7 +132,7 @@ bool IsGroundRobo(void const *) noexcept{unexpectedHook();return {};}
 void GroundFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void HeliCueStep(unsigned char *) noexcept{unexpectedHook();return;}
 void HeliFrame(unsigned char *) noexcept{unexpectedHook();return;}
-float MapRay(float const *,float const *,float *) noexcept{unexpectedHook();return {};}
+float MapRay(float const *,float const *,float *) noexcept{unexpectedHook();return -1.0f;}
 void HeliReap(void const *) noexcept{unexpectedHook();return;}
 void RescueTick(void) noexcept{unexpectedHook();return;}
 void HudSee(unsigned char *) noexcept{unexpectedHook();return;}
@@ -276,6 +280,21 @@ int main(){
         const auto before=GameFrame();tickFrame=before;ResetCrew();
         Check(GameFrame()>before && tickFrame==0,"mission reset invalidates frame consumers and native baseline");
         frameClockOk=false;Put<void*>(image,kSystem,nullptr);
+    }
+    {
+        // Invoke the production shared scene anchor directly; no vehicle InputHook runs in this fixture.
+        Setup();frameClockOk=false;frameClock.Reset();tickFrame=0;
+        unexpectedHook=&NoopGlobalTick;pvpFrameTicks=thermalFrameTicks=0;
+        FrameTick();
+        Check(pvpFrameTicks==1 && thermalFrameTicks==1,"local-player shared anchor updates PVP/thermal with zero vehicle inputs");
+        FrameTick();
+        Check(pvpFrameTicks==1 && thermalFrameTicks==1,"several actors in one scene step do not duplicate PVP/thermal");
+        frameClock.Observe(testHuman,testHuman,1);FrameTick();
+        Check(pvpFrameTicks==2 && thermalFrameTicks==2,"next native scene step continues the shared tick without a vehicle");
+        std::memset(testVehicle,0,sizeof(testVehicle)); // every former vehicle is gone; the player still supplies native steps
+        frameClock.Observe(testHuman,testHuman,2);FrameTick();
+        Check(pvpFrameTicks==3 && thermalFrameTicks==3,"destroying the last vehicle does not stop PVP requests or thermal cleanup");
+        unexpectedHook=&std::abort;
     }
     std::printf("crew_first_use_test: %d checks, %d failed\n",checks,failures);
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;

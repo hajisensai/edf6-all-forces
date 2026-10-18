@@ -19,8 +19,9 @@
 //  - The muzzle flash (H, fp-render-re.md §5): a shot of the player's weapon (0x696FD0) hands its flash the muzzle's shot
 //    matrix through weapon+0x4C0 (the flash keeps that pointer and copies the matrix each of its 3 updates); the call to
 //    the effect factory there (0x697FD0) is redirected so that, for the player's weapons in first person, the pointer
-//    is a matrix of this file's: the shot matrix through T, kept up to date every camera step. The round itself was
-//    made before that call from the real muzzle.
+//    becomes an owned matrix after native construction: the shot's immutable muzzle-to-weapon offset through the
+//    current weapon pose and T. Both primary and Umbra deleting destructors retire its borrowed matrix; a camera
+//    reset freezes it until then. The round itself was made before that call from the real muzzle.
 //  - The aim line (H call, M meaning): a soldier's weapon with a trajectory line (the grenade launchers' red arc) builds
 //    it with 0x6899F0(line, &start, &velocity, &gravity) from its muzzle (the call at 0x6888D9); the call is redirected and,
 //    for a line that starts at the player in first person, its start is moved through T (the viewmodel's muzzle); the
@@ -57,6 +58,7 @@
 #include "vehicle_look.h"
 #include "fp_motion.h"
 #include "fp_skin_gpu.h"
+#include "thermal.h"
 #include "map.h"
 #include "memory.h"
 #include "edf/host.h"
@@ -115,7 +117,7 @@ constexpr std::uint32_t kSprints[]={0x29E},kDashes[]={0x29,0x3D,0xA38,0x25,0xE39
 // &weapon+0x488: the flash takes its matrix pointer from weapon+0x4C0 = r9+0x38).
 constexpr unsigned kFlashCall=0x697FD0,kEffectCreate=0x1194280;
 constexpr std::size_t kFlashParam=0x488,kFlashMatrix=0x4C0;
-constexpr int kFlashSlots=16,kFlashFrames=8;   // matrices handed out (a flash lives 3 updates)
+constexpr int kFlashSlots=64;   // never reused until the native effect is destroyed
 // The aim line's build (a soldier weapon's call of it) and how near the player's chest its start must be to be theirs.
 constexpr unsigned kAimLineCall=0x6888D9,kAimLineBuild=0x6899F0;
 // Umbra's object transform setter (0x6C06A0 calls it with model+0x110 after an update).
@@ -171,7 +173,7 @@ bool HandBounds(int hand,const unsigned char* w,M4* out) noexcept;
 int BoneIndex(const unsigned char* inst,const wchar_t* name) noexcept;
 
 struct Unbatched { const void* model; void* batch; };
-struct alignas(16) Flash { float m[16]; const float* src; int age,hand; };
+struct alignas(16) Flash { float m[16]; M4 local; const void* model; void* effect; int hand; unsigned reserved[3]; };
 struct LookApplied { void* cam=nullptr;float before[16]{},written[16]{}; };
 // --- What the camera step leaves for the draws (State: game thread only; the draws read only DrawSnap) ---
 // What the draws read of a camera's state (docs/fp-render-re.md §17.5): the draws run on a render thread while the
@@ -207,7 +209,8 @@ struct State {
     LookApplied lookApplied{};
     const unsigned char* nativeWeapon[2]{};
     float nativeRest[2][3]{};
-    bool on;                    // the local player's camera is in first person
+    bool on;                    // the local player's underlying camera is in first person
+    bool overridden;            // an outer camera owner (map/TV, including its transition) draws this viewport
     unsigned char* human;       // that player
     unsigned char* cam;         // its camera
     const void* body;           // its body model
@@ -219,8 +222,8 @@ struct State {
     float stock[16];           // the stock matrix this frame (put back before the next step)
     float eyeLocal[3];          // the eased eye in the body frame
     bool fresh;                 // the eye taken as it is next frame
-    float savedNear,savedSmooth;
-    bool nearSet,smoothSet;
+    float savedNear,savedSmooth,stepNear,writtenNear;
+    bool nearSet,smoothSet,stepNearSet;
     // The motion: last frame's readings and the springs.
     bool have;
     float pitch,yaw,pos[3],vy;
@@ -352,7 +355,12 @@ unsigned appliedSession=0;
 void SyncSession() noexcept {
     const unsigned next=session.load(std::memory_order_acquire);
     if(next==appliedSession)return;
-    for(auto& state:states){state=State{};selected=&state;Publish();ClearViews(static_cast<int>(&state-states));}
+    for(auto& state:states){
+        Flash flashes[kFlashSlots];std::memcpy(flashes,state.flashes,sizeof(flashes));
+        for(auto& f:flashes)f.model=nullptr;
+        state=State{};std::memcpy(state.flashes,flashes,sizeof(flashes));
+        selected=&state;Publish();ClearViews(static_cast<int>(&state-states));
+    }
     selected=&states[0];fpskin::Clear();appliedSession=next;
 }
 // --- What the draws keep for themselves (render thread only: the game thread never writes or resets it) ---
@@ -379,7 +387,7 @@ void CaptureRenderCamera(void* camera,const float* world) noexcept {
     if(!state)return;
     M4 frame;std::memcpy(frame.m,world,64);
     M4 native;
-    const bool ok=fpview::NativeView(frame,&native) && state->on;
+    const bool ok=fpview::NativeView(frame,&native) && state->on && !state->overridden;
     Published& p=published[state-states];
     SeqPublish(&p.viewSeq,&p.views,[&](ViewHistory& v){
         const int at=v.next>=0 && v.next<kViewHistory ? v.next : 0;
@@ -691,6 +699,17 @@ bool RootPose(const unsigned char* model,M4* out) noexcept {
     return true;
 }
 
+// The shot reads muzzle-node bone records (+0xB0), rather than the draw palette. Capture its offset in that
+// same native root frame; the draw palette may already belong to a different queued render/update frame.
+bool ShotRoot(const unsigned char* model,M4* out) noexcept {
+    const auto inst=At<const unsigned char*>(model,kBaseLod+kLodInst);
+    if(!inst || At<std::int32_t>(inst,kInstCount)<=0)return false;
+    const auto bones=At<const unsigned char*>(inst,kInstBones);
+    if(!bones)return false;
+    *out=MatrixAt(bones+kBoneWorld);
+    return fpview::Finite(*out);
+}
+
 // Umbra's place of a model: a box around `eye` (kEyeBox metres each way), or its real bounds (`eye` null: the box the
 // update computes from the bones, 0x11005E0 at the skeleton instance's +0x70 = model+0x110, axes scaled by the extents;
 // 0x6C06A0 hands that to 0x11B30C0, which keeps model+0x110 as it is).
@@ -813,30 +832,44 @@ int HandOfModel(const void* model) noexcept {
     return -1;
 }
 
-// The Current().flashes handed out lately, moved with the viewmodel (their shot matrix through this frame's T).
+// A flash owns its muzzle-to-weapon transform, captured at that shot. The native muzzle matrix is rewritten only
+// when the gun fires (and reused by the next shot), so keeping its pointer and multiplying it by a later T makes
+// the old world position drift against a moving weapon. Rebuild from the live weapon root instead.
 void Flashes() noexcept {
     for(Flash& f:Current().flashes) {
-        if(!f.src || f.age>=kFlashFrames){f.src=nullptr;continue;}
-        ++f.age;
-        if(Current().viewOk[f.hand])std::memcpy(f.m,fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(f.src)),Current().view[f.hand]).m,64);
+        if(!f.model)continue;
+        if(HandOfModel(f.model)!=f.hand){f.model=nullptr;continue;}   // never read a removed weapon's pose
+        M4 root;
+        if(Current().viewOk[f.hand] && RootPose(static_cast<const unsigned char*>(f.model),&root))
+            std::memcpy(f.m,fpview::Mul(fpview::Mul(f.local,root),Current().view[f.hand]).m,64);
     }
 }
 
 // A shot's flash about to be made for weapon `w`: in first person, its matrix pointer is one of the Current().flashes'.
-void Relocate(unsigned char* w) noexcept {
+Flash* Relocate(unsigned char* w) noexcept {
     const int hand=Current().on ? HandOfModel(w+kWeaponModel) : -1;
-    if(hand<0 || !Current().viewOk[hand])return;
+    if(hand<0 || !Current().viewOk[hand])return nullptr;
     auto& event=Current().shotEvent[hand];
     if(event.weapon!=w)event=State::ShotEvent{w,0,0};
     if(event.count<3)++event.count;
     event.recoil=RecoilOf(w);
     const auto src=At<const float*>(w,kFlashMatrix);
-    if(!src)return;
-    Flash& f=Current().flashes[Current().flashNext];
-    Current().flashNext=(Current().flashNext+1)%kFlashSlots;
-    f.src=src;f.age=0;f.hand=hand;
-    std::memcpy(f.m,fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(src)),Current().view[hand]).m,64);
+    if(!src)return nullptr;
+    M4 root,inverse;
+    if(!ShotRoot(w+kWeaponModel,&root) || !fpview::InverseAffine(root,&inverse))return nullptr;
+    Flash* free=nullptr;
+    for(int k=0;k<kFlashSlots;++k) {
+        Flash& candidate=Current().flashes[(Current().flashNext+k)%kFlashSlots];
+        if(candidate.model || candidate.effect)continue; // never rebind a matrix an older effect still reads
+        free=&candidate;Current().flashNext=(Current().flashNext+k+1)%kFlashSlots;break;
+    }
+    if(!free)return nullptr;   // native flash, rather than another live shot's matrix
+    Flash& f=*free;
+    const M4 shot=MatrixAt(reinterpret_cast<const unsigned char*>(src));
+    f.local=fpview::Mul(shot,inverse);f.model=w+kWeaponModel;f.effect=nullptr;f.hand=hand;
+    std::memcpy(f.m,fpview::Mul(shot,Current().view[hand]).m,64);
     Put<const float*>(w,kFlashMatrix,f.m);
+    return &f;
 }
 
 // The start of a line `start` (x, y, z, w) moved through T into `out` when it is the player's in first person.
@@ -868,18 +901,83 @@ void* __fastcall AimLineHook(void* line,const float* start,const float* velocity
     return reinterpret_cast<LineFn>(image+kAimLineBuild)(line,from,velocity,gravity);
 }
 
+// The factory returns the raw GameObject, and every supported MuzzleFlashBase descendant borrows +0x120's
+// matrix until its real deleting destructor. Track both routes: Umbra's secondary destructor thunk jumps straight
+// to the primary body, so hooking only the primary vtable would miss that route. Native profile is audited offline.
+struct FlashClass {
+    unsigned vtable,dtor,umbra,umbraDtor;
+    void* next=nullptr;void* umbraNext=nullptr;
+};
+FlashClass flashClasses[]={
+    {0x17A5F98,0x2BA580,0,0},           // MuzzleFlashBase
+    {0x17A6068,0x2BAED0,0,0},           // EfsMuzzleFlash
+    {0x17A6158,0x2BBA10,0x17A61C0,0x2BBA04}, // LaserMuzzleFlash01
+    {0x17A6268,0x2BCCF0,0x17A62D0,0x2BCCE4}, // LaserMuzzleFlash02
+    {0x17A6378,0x2BE660,0x17A63E0,0x2BE654}, // LaserMuzzleFlash03
+    {0x17A6478,0x2BF990,0x17A64E0,0x2BF984}, // MuzzleFlash01
+    {0x17A6578,0x2C0A70,0x17A65E0,0x2C0A64}, // MuzzleFlash02
+    {0x17A6678,0x2C1800,0,0},           // MuzzleFlashRailGun
+    {0x17A6880,0x2C3120,0x17A68E8,0x2C3114}, // PileBunkerMuzzleFlash01
+    {0x17A6978,0x2C3FB0,0x17A69E0,0x2C3F98}, // TestMuzzleFlash
+};
+using FlashDtorFn=void*(__fastcall*)(void*,unsigned);
+void RetireFlash(const void* effect) noexcept {
+    for(auto& state:states)for(auto& f:state.flashes)if(f.effect==effect){f.effect=nullptr;f.model=nullptr;}
+}
+template<int Class> void* __fastcall FlashDtorHook(void* effect,unsigned flags) {
+    RetireFlash(effect);
+    return reinterpret_cast<FlashDtorFn>(flashClasses[Class].next)(effect,flags);
+}
+template<int Class> void* __fastcall FlashUmbraDtorHook(void* object,unsigned flags) {
+    RetireFlash(static_cast<unsigned char*>(object)-0x130);
+    return reinterpret_cast<FlashDtorFn>(flashClasses[Class].umbraNext)(object,flags);
+}
+const FlashDtorFn flashDtorHooks[]={
+    &FlashDtorHook<0>,&FlashDtorHook<1>,&FlashDtorHook<2>,&FlashDtorHook<3>,&FlashDtorHook<4>,
+    &FlashDtorHook<5>,&FlashDtorHook<6>,&FlashDtorHook<7>,&FlashDtorHook<8>,&FlashDtorHook<9>,
+};
+const FlashDtorFn flashUmbraDtorHooks[]={
+    &FlashUmbraDtorHook<0>,&FlashUmbraDtorHook<1>,&FlashUmbraDtorHook<2>,&FlashUmbraDtorHook<3>,&FlashUmbraDtorHook<4>,
+    &FlashUmbraDtorHook<5>,&FlashUmbraDtorHook<6>,&FlashUmbraDtorHook<7>,&FlashUmbraDtorHook<8>,&FlashUmbraDtorHook<9>,
+};
+bool HookFlashLifetime(void* effect) noexcept {
+    const auto vt=At<const unsigned char*>(effect,0);
+    for(auto& c:flashClasses)if(vt==image+c.vtable) {
+        const auto index=static_cast<std::size_t>(&c-flashClasses);
+        if(!c.next) {
+            auto slot=reinterpret_cast<void**>(image+c.vtable)+1;
+            if(*slot!=image+c.dtor || !edf::ChainVtableSlot(slot,reinterpret_cast<void*>(flashDtorHooks[index]),&c.next))return false;
+        }
+        if(c.umbra && !c.umbraNext) {
+            if(At<const unsigned char*>(effect,0x130)!=image+c.umbra)return false;
+            auto slot=reinterpret_cast<void**>(image+c.umbra);
+            if(*slot!=image+c.umbraDtor || !edf::ChainVtableSlot(slot,reinterpret_cast<void*>(flashUmbraDtorHooks[index]),&c.umbraNext))return false;
+        }
+        return true;
+    }
+    return false;   // an unknown/custom effect retains its native matrix and ownership
+}
 void* __fastcall FlashCreateHook(void* factory,void* a,void* cls,void* param) {
+    // Keep native creation/shot world transforms intact. Only after a supported effect and its destructor exist
+    // does it borrow one of our matrices; a rejected custom class or a full pool remains entirely native.
+    void* const effect=reinterpret_cast<CreateFn>(image+kEffectCreate)(factory,a,cls,param);
+    if(!effect)return effect;
     State* before=selected;
     __try {
         auto weapon=static_cast<unsigned char*>(param)-kFlashParam;
-        for(auto& state:states)if(state.on) {
+        for(auto& state:states)if(state.on && !state.overridden) {
             selected=&state;
-            if(HandOfModel(weapon+kWeaponModel)>=0){Relocate(weapon);break;}
+            if(HandOfModel(weapon+kWeaponModel)<0)continue;
+            if(HookFlashLifetime(effect)) {
+                const auto native=At<const float*>(weapon,kFlashMatrix);
+                if(auto f=Relocate(weapon)){f->effect=effect;Put<const float*>(effect,0x120,f->m);}
+                Put<const float*>(weapon,kFlashMatrix,native);
+            }
+            break;
         }
-        selected=before;
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     selected=before;
-    return reinterpret_cast<CreateFn>(image+kEffectCreate)(factory,a,cls,param);
+    return effect;
 }
 
 // Debug=1: what the viewmodel is built from, every 5 s (every half second through a reload).
@@ -957,10 +1055,18 @@ void Probe(const bool* anchored,const M4* anchor,const M4& camera) noexcept {
     Current().probeFrames=Current().probeAir=0;Current().probeSpeed=0.0f;
 }
 
+// Return only the near-plane value this camera still owns. The outer map/another camera feature may already
+// have written its own precision; its latest value must not be replaced by an older first-person baseline.
+void ReturnNear(unsigned char* cam) noexcept {
+    if(!Current().nearSet)return;
+    if(At<float>(cam,kCamNear)==Current().writtenNear)ViewWriteNear(cam,Current().savedNear);
+    Current().nearSet=false;
+}
+
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
     if(Current().on){PlaceAll(true);Rebatch(true);}
-    if(Current().cam && Current().nearSet)Put<float>(Current().cam,kCamNear,Current().savedNear);
+    if(Current().cam)ReturnNear(Current().cam);
     if(Current().human && Current().smoothSet)Put<float>(Current().human,kLookSmooth,Current().savedSmooth);
     if(Current().on)Log("FP view back to the stock camera");
     // Keep the camera binding even when first person is off: its independent free-look restore still runs.
@@ -968,6 +1074,7 @@ void Leave() noexcept {
     // state with no viewmodel published (nor to another player's).
     auto cam=Current().cam;const auto look=Current().lookApplied;
     Flash flashes[kFlashSlots];std::memcpy(flashes,Current().flashes,sizeof(flashes));const int flashNext=Current().flashNext;
+    for(auto& f:flashes)f.model=nullptr;   // freeze detached effects; their destructor releases the borrowed matrix
     Current()=State{};Current().cam=cam;Current().lookApplied=look;
     ClearViews(static_cast<int>(selected-states));
     std::memcpy(Current().flashes,flashes,sizeof(flashes));Current().flashNext=flashNext;
@@ -1210,7 +1317,7 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     std::memcpy(cam+kCamMatrix,ride.frame,64);
     VehicleLookCamera(h,reinterpret_cast<float*>(cam+kCamMatrix));
     VehicleScreens(ride.vehicle,ride.seat,eye,&Current().screens);
-    if(Current().nearSet){Put<float>(cam,kCamNear,Current().savedNear);Current().nearSet=false;}
+    ReturnNear(cam);
     if(Current().smoothSet){Put<float>(h,kLookSmooth,Current().savedSmooth);Current().smoothSet=false;}
     Current().body=h+kBodyModel;Current().weaponCount=0;Current().inHandCount=0;
     for(int hand=kRight;hand<=kLeft;++hand) {
@@ -1252,12 +1359,19 @@ void Camera(unsigned char* cam) noexcept {
     float eye[3];
     fpview::EyeWorld(body,Current().eyeLocal,eye);
     std::memcpy(cam+kCamEyeRow,eye,12);
-    if(c.fpNear>0.0f){if(!Current().nearSet){Current().savedNear=At<float>(cam,kCamNear);Current().nearSet=true;}Put<float>(cam,kCamNear,c.fpNear);}
+    Current().stepNearSet=false;
+    const bool depthReady=ViewDepthReady();
+    if(!depthReady)ReturnNear(cam);
+    if(depthReady && c.fpNear>0.0f && !Current().overridden){
+        Current().stepNear=At<float>(cam,kCamNear);Current().stepNearSet=true;
+        if(!Current().nearSet){Current().savedNear=Current().stepNear;Current().nearSet=true;}
+        ViewWriteNear(cam,c.fpNear);Current().writtenNear=c.fpNear;
+    }
     if(c.fpAimSnap){if(!Current().smoothSet){Current().savedSmooth=At<float>(h,kLookSmooth);Current().smoothSet=true;}Put<float>(h,kLookSmooth,1.0f);}
     Gather(h);
     Views(h,cam);
-    Rebatch(false);
-    Unbatch();
+    Rebatch(Current().overridden);
+    if(!Current().overridden)Unbatch();
     Flashes();
 }
 
@@ -1265,7 +1379,7 @@ void Camera(unsigned char* cam) noexcept {
 void __fastcall RenderHook(void* system,std::uint8_t a,std::uint8_t b) {
     SyncSession();++renderFrame;
     State* before=selected;
-    __try { for(auto& state:states)if(state.on){selected=&state;PlaceAll(false);} } __except(EXCEPTION_EXECUTE_HANDLER){}
+    __try { for(auto& state:states)if(state.on && !state.overridden){selected=&state;PlaceAll(false);} } __except(EXCEPTION_EXECUTE_HANDLER){}
     selected=before;
     reinterpret_cast<RenderFn>(image+kRender)(system,a,b);
 }
@@ -1320,7 +1434,7 @@ void Publish() noexcept {
     Published& p=published[selected-states];
     const State& c=Current();
     SeqPublish(&p.seq,&p.snap,[&](DrawSnap& d){
-        d.on=c.on;d.riding=c.riding;d.body=c.body;d.rideModel=c.riding && c.ride.vehicle ? c.ride.vehicle+0xE40 : nullptr;
+        d.on=c.on && !c.overridden;d.riding=c.riding;d.body=c.body;d.rideModel=c.riding && c.ride.vehicle ? c.ride.vehicle+0xE40 : nullptr;
         std::memcpy(d.weapons,c.weapons,sizeof(d.weapons));d.weaponCount=c.weaponCount;
         std::memcpy(d.inHand,c.inHand,sizeof(d.inHand));std::memcpy(d.handOf,c.handOf,sizeof(d.handOf));d.inHandCount=c.inHandCount;
         for(int k=0;k<2;++k) {
@@ -1772,7 +1886,12 @@ void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
 
 using MeshFn=void(__fastcall*)(void*,void*,int,std::uint8_t,void*);
 void __fastcall MeshHook(void* mesh,void* ctx,int pass,std::uint8_t flag,void* cache) {
-    if(!fpskin::Active()){reinterpret_cast<MeshFn>(image+kMeshDraw)(mesh,ctx,pass,flag,cache);return;}
+    const bool skin=fpskin::Active();
+    if(!skin && !thermal::WantsCapture()){
+        reinterpret_cast<MeshFn>(image+kMeshDraw)(mesh,ctx,pass,flag,cache);
+        thermal::ObserveSurface(At<ID3D11DeviceContext*>(ctx,8),pass);
+        return;
+    }
     // Repeat the supported native helper's prepare/bind/flush sequence, replacing only its DrawIndexed submission.
     // No COM vtable hooks: Steam's graphics wrapper may replace those while a frame is being built.
     using PrepareFn=std::int64_t(__fastcall*)(void*,void*,int,int,std::uint8_t);
@@ -1791,12 +1910,20 @@ void __fastcall MeshHook(void* mesh,void* ctx,int pass,std::uint8_t flag,void* c
     for(std::uint64_t i=0;i<passes;++i) {
         reinterpret_cast<PassFn>(image+kMeshPass)(ctx,holder,technique,i);
         if(At<unsigned>(ctx,0x78))reinterpret_cast<FlushFn>(image+kFlushDrawState)(static_cast<unsigned char*>(ctx)+0x20,context);
-        ID3D11Buffer* palette=nullptr;context->VSGetConstantBuffers(1,1,&palette);
-        fpskin::Mask mask{};
-        __try { mask=BodyMask(palette); } __except(EXCEPTION_EXECUTE_HANDLER){}
-        if(palette)palette->Release();
-        fpskin::Begin(mask);
-        fpskin::Submit(context,count,0,0);
+        if(skin) {
+            ID3D11Buffer* palette=nullptr;context->VSGetConstantBuffers(1,1,&palette);
+            fpskin::Mask mask{};
+            __try { mask=BodyMask(palette); } __except(EXCEPTION_EXECUTE_HANDLER){}
+            if(palette)palette->Release();
+            fpskin::Begin(mask);
+            fpskin::Submit(context,count,0,0);
+            thermal::CaptureIndexed(context,count,0,0);
+        } else {
+            // Test the same native depth/stencil state before the opaque draw writes depth. Sampling afterward
+            // with EQUAL would heat a coplanar fragment which native LESS rejected. Capture restores GPU state.
+            thermal::CaptureIndexed(context,count,0,0);
+            context->DrawIndexed(count,0,0);
+        }
     }
     if(cache) {
         Put<void*>(cache,0,passes==1 ? material : nullptr);
@@ -1846,6 +1973,34 @@ bool HookDrawOf(void** vt) noexcept {
 }
 }  // namespace
 
+// Called by the outer camera hook after it has chosen this viewport's final view. Keep the underlying eye for
+// its transition back to first person, while returning every render-side override to the native world model.
+void FirstPersonCameraOverride(const void* camera,bool overridden) noexcept {
+    State* const state=CameraState(camera);
+    if(!state || state->overridden==overridden)return;
+    StateScope scope(state);
+    state->overridden=overridden;
+    if(state->on) {
+        if(overridden){
+            PlaceAll(true);Rebatch(true);
+            // The map raised its near plane before our camera step. Return that frame's value, rather than
+            // replacing the map's precision with the viewmodel's close clip for its first frame.
+            if(state->stepNearSet && At<float>(camera,kCamNear)==state->writtenNear)
+                ViewWriteNear(const_cast<void*>(camera),state->stepNear);
+            state->stepNearSet=false;
+        }
+        else if(!state->riding){
+            Unbatch();
+            if(ViewDepthReady() && Cfg().fpNear>0.0f){
+                if(!state->nearSet){state->savedNear=At<float>(camera,kCamNear);state->nearSet=true;}
+                ViewWriteNear(const_cast<void*>(camera),Cfg().fpNear);state->writtenNear=Cfg().fpNear;
+            }
+        }
+    }
+    ClearViews(static_cast<int>(state-states));
+    Publish();
+}
+
 void ResetFirstPerson() noexcept { session.fetch_add(1,std::memory_order_release); }
 
 bool FirstPersonOn() noexcept { for(const auto& state:states)if(state.on)return true;return false; }
@@ -1862,10 +2017,10 @@ bool FirstPersonGunnerSight() noexcept {
 }
 bool FirstPersonHidesStockHud(const void* camera) noexcept {
     const auto state=CameraState(camera);
-    return state && state->on && state->riding && state->screens.n>0 && Cfg().fpHideStockHud;
+    return state && state->on && !state->overridden && state->riding && state->screens.n>0 && Cfg().fpHideStockHud;
 }
 bool FirstPersonScreens(CockpitScreens* out,const unsigned char* human) noexcept {
-    for(const auto& state:states)if(state.on && state.riding && state.screens.n && state.human==human){*out=state.screens;return true;}
+    for(const auto& state:states)if(state.on && !state.overridden && state.riding && state.screens.n && state.human==human){*out=state.screens;return true;}
     return false;
 }
 

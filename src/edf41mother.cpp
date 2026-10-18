@@ -38,6 +38,7 @@
 #include "edf41_hitlayer.h"
 #include "edf41classes.h"
 #include "edf41mother_pose.h"
+#include "edf41_sound_channels.h"
 #include "edf41net.h"
 #include "memory.h"
 
@@ -50,6 +51,7 @@
 #include <cwchar>
 #include <mutex>
 #include <new>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -385,6 +387,15 @@ enum Group { kHatch=0, kCover=1, kCannon=2, kBigCannon=3, kPanel=4 };
 const char* const kGroupNames[5]={"HatchLow","HatchMiddle","Cannon","BigCannon","Panel"};
 
 struct Wave { wchar_t path[260]; int count=0; int interval=1; int delay=0; float level=1.0f; bool active=false; int kind=1; };
+struct SoundKey { float time=0.0f; int kind=0,channel=-1; std::wstring name,node; bool trace=false; };
+struct SoundClip { int state=-1,clip=0; std::vector<SoundKey> events; };
+struct BoneSound { SoundHandle handle; int bone=-1; bool trace=false; };
+struct AnimationSounds {
+    bool loaded=false;
+    std::vector<SoundClip> clips;
+    edf41sound::Timeline timeline;
+    edf41sound::Channels<BoneSound> channels;
+};
 struct Part {
     void* hull=nullptr;
     float local[16];                 // A: the entry's euler and position
@@ -417,6 +428,7 @@ struct Part {
     int cannonBone=-2,hatchBones[4]={-2,-2,-2,-2};
     float beamOffsets[4][3]={};
     SoundHandle chargeLoop;
+    AnimationSounds animationSounds;
     std::uint64_t rng=0;
     Glow glow;                       // 4.1 PartsBase +0xA10 colour, +0xA20 target, +0xA30 rate, +0xA04 scroll
     bool hullDeathSeen=false;        // 4.1 +0x905: the hull's first frame at durability <= 0 (flash, then dark)
@@ -483,11 +495,16 @@ void Track(void* o) noexcept { Forget(o); WeakSet(refs[o],o); }
 bool Live(void* o) noexcept { const auto it=refs.find(o); return it!=refs.end() && WeakAlive(it->second); }
 Hull* HullOf(void* h) noexcept { const auto it=hulls.find(h); return it==hulls.end() ? nullptr : &it->second; }
 Part* PartOf(void* p) noexcept { const auto it=parts.find(p); return it==parts.end() ? nullptr : &it->second; }
+void StopAnimationSounds(Part& p,int fade) noexcept {
+    p.animationSounds.channels.StopAll(fade,[](BoneSound& sound,int frames) { StopSound(sound.handle,frames); });
+    p.animationSounds.timeline.Reset();
+}
 // A record's own resources go with it (bindings, loops still playing): every erase of a record goes through these.
 void DropPart(void* o) noexcept {
     const auto it=parts.find(o);
     if(it==parts.end())return;
     FreeGlow(it->second.glow);
+    StopAnimationSounds(it->second,0);
     StopSound(it->second.chargeLoop);
     parts.erase(it);
 }
@@ -586,6 +603,8 @@ void ShutdownVents() noexcept {
         StopSound(kv.second.fall,0);
     }
     for(auto& kv:parts) {
+        loops+=!kv.second.animationSounds.channels.Empty();
+        StopAnimationSounds(kv.second,0);
         loops+=kv.second.chargeLoop.instance!=nullptr;
         StopSound(kv.second.chargeLoop,0);
     }
@@ -765,7 +784,11 @@ void RandomDown(Part& p,float maxAngle,float* out) noexcept {
 }
 
 // ---- the state machines (4.1, one to one) ---------------------------------------------------------------------------
-void Switch(Part& p,int state) noexcept { p.state=state; p.frames=0; }
+void Switch(Part& p,int state) noexcept {
+    StopAnimationSounds(p,16); // interrupted clips cannot leave their MAB channels behind
+    p.state=state;
+    p.frames=0;
+}
 enum { kBigClosed=1,kBigOpen,kBigStandby,kBigCharge,kBigFire,kBigDestroyed,kBigClose,kBigFall };
 enum { kCanDormant=1,kCanAppear,kCanStandby,kCanWait,kCanFire,kCanDestroyed,kCanFall };
 enum { kPanDormant=1,kPanStart,kPanLaser,kPanPlasma,kPanDestroyed };
@@ -777,12 +800,11 @@ void BigCannonTick(void* obj,Part& p) noexcept {
     PartPos(obj,pos);
     switch(p.state) {
         case kBigClosed:
-            if(p.enabled) { Switch(p,kBigOpen); PlayState(obj,L"open"); PlaySe(p.hull,L"母船UFO砲台出現",pos); }
+            if(p.enabled) { Switch(p,kBigOpen); PlayState(obj,L"open"); }
             break;
         case kBigOpen:
             if(f>1 && AnimDone(obj)) {
                 Switch(p,kBigStandby);
-                PlaySe(p.hull,L"母船UFO砲台出現完了",pos);
                 GlowTo(p.glow,1.0f,1.0f,1.0f,1.0f);   // 4.1 0x256A90 exit
                 SetGlow(p.glow,10.0f,10.0f,10.0f,1.0f);
             }
@@ -790,7 +812,7 @@ void BigCannonTick(void* obj,Part& p) noexcept {
         case kBigStandby: {
             const bool trigger=p.boost;
             p.boost=false;   // 4.1 clears the one-shot trigger every frame of this state
-            if(!p.enabled) { Switch(p,kBigClose); PlayState(obj,L"close"); PlaySe(p.hull,L"母船UFO砲台収納",pos); }
+            if(!p.enabled) { Switch(p,kBigClose); PlayState(obj,L"close"); }
             else if((p.attack || trigger) && !p.statik)Switch(p,kBigCharge);
             break;
         }
@@ -813,7 +835,7 @@ void BigCannonTick(void* obj,Part& p) noexcept {
             if(f>300) { Switch(p,kBigFall); PlaySe(p.hull,L"母船UFO砲台墜落",pos); p.falling=true; }
             break;
         case kBigClose:
-            if(f>1 && AnimDone(obj)) { Switch(p,kBigClosed); PlayState(obj,L"close_state"); PlaySe(p.hull,L"母船UFO砲台収納完了",pos); }
+            if(f>1 && AnimDone(obj)) { Switch(p,kBigClosed); PlayState(obj,L"close_state"); }
             break;
         case kBigFall:
             if(f==360 || f==380 || f==400) {
@@ -835,12 +857,11 @@ void CannonTick(void* obj,Part& p,Hull& h,float s) noexcept {
     PartPos(obj,pos);
     switch(p.state) {
         case kCanDormant:
-            if(p.enabled) { Switch(p,kCanAppear); PlayAppear(obj); PlaySe(p.hull,L"母船UFO中型砲台出現",pos); }
+            if(p.enabled) { Switch(p,kCanAppear); PlayAppear(obj); }
             break;
         case kCanAppear:
             if(f>1 && AnimDone(obj)) {
                 Switch(p,kCanStandby);
-                PlaySe(p.hull,L"母船UFO中型砲台出現残響",pos);
                 GlowTo(p.glow,5.0f,5.0f,5.0f,1.0f);   // 4.1 0x259D20 exit
                 AtLeast(p.glow,10.0f);
             }
@@ -1348,6 +1369,79 @@ void PartFrame(void* obj,Part& p,Hull& h) noexcept {
     }
     TickGlow(p.glow);
     ++p.frames;
+}
+
+// BigCannon/Cannon's authored MAB sound tracks, sampled from the real CAS clock. In particular,
+// appear stops at 440 / 189 clip units; close has two independent channels at different times.
+// Class-code charge/shot sounds remain on their separate paths (their lengths do not define ownership).
+void LoadAnimationSounds(void* obj,AnimationSounds& sounds) noexcept {
+    if(sounds.loaded)return;
+    sounds.loaded=true;
+    const SgoNode* table=Key(obj,L"edf41_sound_events");
+    const int count=Count(table);
+    if(count<0 || count>128) { Fail("a cannon lacks its authored sound-event table"); return; }
+    for(int i=0;i<count;++i) {
+        const SgoNode* row=Child(table,i);
+        wchar_t state[128];
+        std::int32_t clip=0;
+        if(!Text(Child(row,0),state,128) || !Int(Child(row,1),&clip)) { sounds.clips.clear(); return; }
+        SoundClip entry;
+        entry.state=StateIndex(obj,state);
+        entry.clip=clip;
+        const SgoNode* events=Child(row,2);
+        const int keys=Count(events);
+        if(keys<0 || keys>128) { sounds.clips.clear(); return; }
+        for(int k=0;k<keys;++k) {
+            const SgoNode* key=Child(events,k);
+            SoundKey event;
+            std::int32_t kind=0,channel=-1,trace=0;
+            wchar_t name[128],node[128];
+            if(!Float(Child(key,0),&event.time) || !Int(Child(key,1),&kind) || !Text(Child(key,2),name,128)
+               || !Int(Child(key,3),&channel) || !Text(Child(key,4),node,128) || !Int(Child(key,5),&trace)) {
+                sounds.clips.clear(); return;
+            }
+            event.kind=kind;
+            event.channel=channel;
+            event.name=name;
+            event.node=node;
+            event.trace=trace!=0;
+            entry.events.push_back(std::move(event));
+        }
+        sounds.clips.push_back(std::move(entry));
+    }
+}
+void SoundPoint(void* obj,int bone,float* out) noexcept {
+    float matrix[16];
+    if(bone>=0 && BoneMatrix(static_cast<char*>(obj)+kEaoSkeleton,bone,matrix))std::memcpy(out,matrix+12,12);
+    else PartPos(obj,out);
+}
+void TickAnimationSounds(void* obj,Part& p) noexcept {
+    const bool active=(p.group==kBigCannon && (p.state==kBigOpen || p.state==kBigClose))
+        || (p.group==kCannon && p.state==kCanAppear);
+    if(!active) { StopAnimationSounds(p,16); return; }
+    AnimationSounds& sounds=p.animationSounds;
+    LoadAnimationSounds(obj,sounds);
+    int state=-1;
+    float time=0.0f,length=0.0f;
+    if(!ClipNow(obj,&state,&time,&length))return;
+    const auto stop=[](BoneSound& sound,int fade) { StopSound(sound.handle,fade); };
+    sounds.timeline.Step(state,time,sounds.clips,[&](const SoundKey& event) {
+        if(event.kind==1) { sounds.channels.StopOne(event.channel,16,stop); return; }
+        if(event.kind!=0 || event.name.empty())return;
+        const int bone=event.node.empty() ? -1 : BoneIndex(static_cast<char*>(obj)+kEaoSkeleton,event.node.c_str());
+        float at[3];
+        SoundPoint(obj,bone,at);
+        sounds.channels.Start(event.channel,[&](BoneSound* sound) {
+            if(sound) { sound->bone=bone; sound->trace=event.trace; }
+            return PlaySe(p.hull,event.name.c_str(),at,sound ? &sound->handle : nullptr);
+        },stop);
+    },[&] { sounds.channels.StopAll(16,stop); });
+    sounds.channels.MoveAll([&](BoneSound& sound) {
+        if(!sound.trace)return;
+        float at[3];
+        SoundPoint(obj,sound.bone,at);
+        MoveSound(sound.handle,at);
+    });
 }
 
 // ---- development switches (ini Edf41MotherForce): what the autopilot cannot make happen (it does not shoot) --------------
@@ -1921,6 +2015,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     if(!p)return reinterpret_cast<UpdateFn>(partClass.orig[kSlotUpdate])(self,dt);
     Hull* h=Live(p->hull) ? HullOf(p->hull) : nullptr;
     if(!h) {   // the hull is gone (destroyed, or the script deleted it): the part goes with it (4.1 0x56BBC0)
+        StopAnimationSounds(*p,0);
         if(!p->gone) { DeleteObject(self); p->gone=true; }
         return reinterpret_cast<UpdateFn>(partClass.orig[kSlotUpdate])(self,dt);
     }
@@ -1932,7 +2027,11 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     h=p && Live(p->hull) ? HullOf(p->hull) : nullptr;
     if(p)TeamGuard(self,*p,"after the class's update");
     if(p && h && !p->gone)NetPartIn(self,*p);   // online: the host's decisions (edf41net)
-    if(p && h && !p->gone)PartFrame(self,*p,*h);
+    if(p && h && !p->gone) {
+        TickAnimationSounds(self,*p); // finish crossed keys before PartFrame can leave the old clip
+        PartFrame(self,*p,*h);
+        TickAnimationSounds(self,*p); // a state entered at time zero starts its keys in this frame
+    }
     if(p)TeamGuard(self,*p,"after PartFrame");
     if(p && h && !p->gone){ float aim[3]; if(Alive(self) && DevPoint(self,*p,aim))DevShoot(self,aim); }   // development (ini Edf41DevShoot)
     return r;

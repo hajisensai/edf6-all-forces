@@ -72,7 +72,7 @@ class CampaignLifecycleTests(unittest.TestCase):
         with ExitStack() as stack:
             for name, value in {'check_loader': None, 'plugin_files': plugins, 'stack_weapons': {},
                                 'build_autoturret': ({}, False), 'install_autoturret': None,
-                                'build_asset': None, 'find_edf41': None}.items():   # a stand-in game: no EDF4.1
+                                'build_asset': None, 'find_edf41': None, 'material_compat_wanted': False}.items():   # a stand-in game: no EDF4.1
                 stack.enter_context(patch.object(installer, name, return_value=value))
             for module, name, value in ((rootcpk, 'use', None), (call_weapons, 'recover', False),
                                         (call_weapons, 'install', []), (gen, 'install', []),
@@ -582,7 +582,9 @@ class Edf41SkipTests(unittest.TestCase):
 
     def test_object_made_unavailable_by_a_foreign_file(self) -> None:
         import edf41_objects
-        theirs = 'OBJECT/V505_TANKEDF4.MRAB'
+        tank = next(obj for obj in edf41_objects.entries(edf41_objects.registry()) if obj['object'] == TANK)
+        theirs = next(rel for rel in tank['files'] if rel.upper().endswith(('.RAB', '.MRAB')))
+        self.assertNotEqual(theirs, 'OBJECT/V505_TANKEDF4.MRAB', 'the real 301 must no longer depend on its old stand-in')
         modfiles.atomic_write(os.path.join(self.root, 'Mods', *theirs.split('/')), b'another mod')
         left_out = dict(edf41_objects.unavailable(self.root))
         self.assertIn(TANK, left_out)

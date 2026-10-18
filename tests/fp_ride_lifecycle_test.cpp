@@ -30,9 +30,18 @@ bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) 
 bool IsPlayer(const unsigned char* h) noexcept { return h!=nullptr; }
 bool RedirectCall(unsigned char*,void*,void*,bool&) noexcept { return false; }
 }
+namespace crew::thermal {
+bool WantsCapture() noexcept { return false; }
+void ObserveSurface(ID3D11DeviceContext*,int) noexcept {}
+void CaptureIndexed(ID3D11DeviceContext*,unsigned,unsigned,int) noexcept {}
+}
+
 namespace crew {
 unsigned char* image=nullptr;
 Config config{};
+bool depthPatchReady=true;
+bool ViewDepthReady() noexcept { return depthPatchReady; }
+void ViewWriteNear(void* camera,float value) noexcept { Put<float>(camera,kCamNear,value); }
 void VehicleLookSetReady(bool) noexcept {}
 bool observeCamera=false;
 bool VehicleLookCamera(const unsigned char*,float* matrix) noexcept {
@@ -56,6 +65,8 @@ bool VehicleEye(unsigned char*,float* eye,RideView* out) noexcept {
     std::memcpy(out->frame,rideFrame.m,64);std::memcpy(eye,rideFrame.m+12,12);return true;
 }
 int VehicleScreens(const unsigned char*,int,const float*,CockpitScreens* out) noexcept { out->n=0;return 0; }
+void* retiredThis=nullptr;unsigned retiredFlags=0;
+void* __fastcall RecordFlashDtor(void* object,unsigned flags) { retiredThis=object;retiredFlags=flags;return object; }
 bool drawArmMask=false;
 void __fastcall RecordBodyDraw(void*,void*,int,void*) { drawArmMask=fpskin::Active(); }
 float laserStart[4]{},laserEnd[4]{};
@@ -126,6 +137,31 @@ int main() {
     for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);}
     firing=fpmotion::Cue{};Hand(weapon,0,2,0,firing);
     check(firing.shots==2,"counter and flash observations of the same shots are not double counted");
+    // The shot's native muzzle matrix stays frozen until another shot. A moving viewmodel must carry an
+    // immutable muzzle offset through the weapon's current root, rather than reusing that old world position.
+    Put<void*>(model,kBaseLod+kLodInst,lodA);Put<int>(lodA,kInstCount,1);
+    const M4 shotRoot=fpview::Translate(10,2,3);std::memcpy(recordsA+kBoneWorld,shotRoot.m,64);
+    M4 flashRoot=fpview::Translate(9,2,3);Put<float*>(lodA,kInstPose,flashRoot.m); // a queued draw's older pose
+    Current().flashes[0]=Flash{};Current().flashNext=0;Current().view[0]=fpview::Translate(-10,-2,-3);
+    const M4 muzzle=fpview::Translate(10,2.1f,3.7f);std::memcpy(flashMatrix,muzzle.m,64);
+    Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);
+    const float* ownFlash=At<const float*>(weapon,kFlashMatrix);
+    check(ownFlash!=flashMatrix,"a shot receives its own immutable muzzle-to-weapon anchor");
+    check(std::fabs(Current().flashes[0].local.m[12])<1e-5f,
+          "muzzle anchoring uses the shot's native bone frame even when the queued draw pose is one frame older");
+    flashRoot=fpview::Translate(15,4,6);Current().view[0]=fpview::Translate(-15,-4,-6);
+    flashMatrix[12]=999;flashMatrix[13]=888;flashMatrix[14]=777;Flashes();
+    check(std::fabs(ownFlash[12])<1e-5f && std::fabs(ownFlash[13]-.1f)<1e-5f && std::fabs(ownFlash[14]-.7f)<1e-5f,
+          "movement and a later native muzzle rewrite cannot move an existing flash off its viewmodel muzzle");
+    for(int k=0;k<kFlashSlots;++k) {
+        Current().flashes[k].model=model;
+    }
+    Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);
+    check(At<const float*>(weapon,kFlashMatrix)==flashMatrix,
+          "a full flash pool preserves the native shot rather than overwriting a matrix still borrowed by another flash");
+    Current().inHandCount=0;Flashes();
+    check(Current().flashes[0].model==nullptr,"retiring a held weapon never follows its freed or replaced pose");
+    Current().inHand[0]=model;Current().inHandCount=1;Put<void*>(model,kBaseLod+kLodInst,nullptr);
     unsigned char laser[0x190]{};Put<void*>(laser,8,weapon);
     const float from[4]={1,2,3,1},hit[4]={20,30,40,1};
     std::memcpy(laser+0x130,from,16);std::memcpy(laser+0x140,hit,16);
@@ -265,6 +301,18 @@ int main() {
     auto a=CameraState(c1),b=CameraState(c2);
     check(a && b && a!=b && a->on && b->on && a->human==p1 && b->human==p2,
           "interleaved P1/P2 native camera steps keep independent active viewmodels");
+    a->savedNear=.1f;a->nearSet=true;a->writtenNear=.03f;Put<float>(c1,kCamNear,.03f);
+    depthPatchReady=false;++renderFrame;CamStepHook(c1,nullptr);
+    check(std::fabs(At<float>(c1,kCamNear)-.1f)<1e-6f && !a->nearSet,
+          "a failed/unavailable depth patch returns a previously modified first-person near plane to native");
+    a->nearSet=true;a->savedNear=.1f;a->writtenNear=.03f;Put<float>(c1,kCamNear,.8f);
+    {StateScope scope(a);ReturnNear(c1);}
+    check(std::fabs(At<float>(c1,kCamNear)-.8f)<1e-6f && !a->nearSet,
+          "returning first-person near ownership preserves a newer clip written by the outer map");
+    Put<float>(c1,kCamNear,.1f);
+    depthPatchReady=true;++renderFrame;CamStepHook(c1,nullptr);
+    check(std::fabs(At<float>(c1,kCamNear)-config.fpNear)<1e-6f && a->nearSet,
+          "a successfully created corrected depth shader enables the requested first-person near plane");
     const auto p1Motion=a->motion;a->reloadLeft=25;a->shotEvent[0].count=2;
     ++renderFrame;CamStepHook(c2,nullptr);
     check(a->reloadLeft==25 && a->shotEvent[0].count==2 && std::memcmp(&a->motion,&p1Motion,sizeof(p1Motion))==0,
@@ -317,6 +365,25 @@ int main() {
     check(ownMasked && foreignNative && secondMasked && !fpskin::Active(),
           "actual draw hook masks each viewport's own body, keeps the other player native, and restores mask state");
     hookedCount=0;
+    // An outer camera owner changes only P1's final view. Its underlying FP eye remains the transition target,
+    // but no old submitted matrix may force arms/guns into the map (or borrow P2's model).
+    a->weapons[0]=model;a->weaponCount=1;a->inHand[0]=model;a->inHandCount=1;
+    a->unbatched[0]=Unbatched{model,&batch};Put<void*>(model,kBatch,nullptr);
+    a->stepNearSet=true;a->stepNear=.8f;a->writtenNear=.03f;Put<float>(c1,kCamNear,.03f);
+    FirstPersonCameraOverride(c1,true);
+    check(std::fabs(At<float>(c1,kCamNear)-.8f)<1e-6f,"the map retains its own near clip on the first takeover frame");
+    DrawSnap overridden{};TakeSnapshotOf(static_cast<int>(a-states),&overridden);
+    check(a->on && a->overridden && !overridden.on && b->on && !b->overridden,
+          "the map suspends only its own viewport's viewmodel while retaining its underlying first-person eye");
+    check(At<void*>(model,kBatch)==&batch && !a->unbatched[0].model,
+          "taking the camera returns the weapon to the native batch before map drawing");
+    CaptureRenderCamera(c1,camera1.m);
+    check(!ViewState(view1) && ViewState(view2)==b,
+          "a map camera and its retired first-person history cannot trigger pass completion or P2 arms");
+    FirstPersonCameraOverride(c1,false);CaptureRenderCamera(c1,camera1.m);
+    check(ViewState(view1)==a && !a->overridden && At<void*>(model,kBatch)==nullptr,
+          "returning the camera resumes its first-person draw and unbatch ownership");
+    {StateScope scope(a);Rebatch(true);a->weaponCount=a->inHandCount=0;}
     p1[kRagdoll]=1;
     check(NotWanted(c1,p1)==nullptr,"knockback retains the requested first-person camera");
     p1[kRagdoll]=0;Put<float>(c1,kCamEyeRow+4,20);Put<std::uint32_t>(p1,kActLimit,kSprints[0]);
@@ -338,7 +405,22 @@ int main() {
                           "the cockpit feed reaches the instruments draw through the published copy");}
     check(!ArmBone(L"kata_l") && !ArmBone(L"arms_l") && ArmBone(L"jowan0_l") && ArmBone(L"kawan0_l"),
           "body topology excludes torso-side clavicle and mount faces while retaining complete upper arms");
+    int nativeFlash=0;
+    b->flashes[0].effect=&nativeFlash;b->flashes[0].model=model;b->flashes[0].m[12]=42;
     ResetFirstPerson();SyncSession();
+    check(b->flashes[0].effect==&nativeFlash && !b->flashes[0].model && b->flashes[0].m[12]==42,
+          "mission reset freezes the matrix still borrowed by a native effect until its actual destructor");
+    flashClasses[0].next=reinterpret_cast<void*>(&RecordFlashDtor);
+    FlashDtorHook<0>(&nativeFlash,1);
+    check(!b->flashes[0].effect && retiredThis==&nativeFlash && retiredFlags==1,
+          "the native primary destructor releases its matrix and forwards this/flags unchanged");
+    flashClasses[0].next=nullptr;
+    unsigned char secondaryFlash[0x150]{};b->flashes[0].effect=secondaryFlash;b->flashes[0].model=model;
+    flashClasses[2].umbraNext=reinterpret_cast<void*>(&RecordFlashDtor);
+    FlashUmbraDtorHook<2>(secondaryFlash+0x130,3);
+    check(!b->flashes[0].effect && retiredThis==secondaryFlash+0x130 && retiredFlags==3,
+          "the secondary destructor retires the root while forwarding the native adjusted-this thunk correctly");
+    flashClasses[2].umbraNext=nullptr;
     check(!FirstPersonOn() && !CameraState(c1) && !CameraState(c2),"mission reset retires all local cameras without restoring freed native objects");
     {StateScope scope(a);check(!Drew1Now(p1+kBodyModel) && !ViewState(view2),"a new mission starts the draws' own records and the submitted views empty");}
     {

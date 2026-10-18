@@ -33,7 +33,7 @@ using roommenu::ViewRow;
 using roommenu::RowText;
 
 // --- The layout's elements (tools/room_layout.py ROWS, STATUS_LINES, the names) ---
-inline constexpr int kRows=14;          // rows a column shows: room_menu.h Menu::pageRows
+inline constexpr int kRows=12;          // rows a column shows: room_menu.h Menu::pageRows
 inline constexpr int kStatusLines=4;
 static_assert(kRows<=roommenu::kPageMost,"a column shows at most the snapshot's rows");
 // Every name is at most 7 characters: the game's std::wstring holds it in place (no heap pointer to hand over).
@@ -42,6 +42,9 @@ inline constexpr const wchar_t* kRootName=L"vcRoot";
 inline constexpr const wchar_t* kBackName=L"vcBack";
 inline constexpr const wchar_t* kHeadName=L"vcHead";
 inline constexpr const wchar_t* kHintName=L"vcHint";
+inline constexpr const wchar_t* kHelp2Name=L"vcHelp2";
+inline constexpr const wchar_t* kHelp3Name=L"vcHelp3";
+inline constexpr const wchar_t* kEntryName=L"vcEntry";
 // The plain white texture the panel and the chips show, tinted (tools/room_layout.py WHITE: written to Mods/UI by the
 // installer; Root.cpk has no plain one). Without the plugin nothing binds it: the skins draw nothing.
 inline constexpr const wchar_t* kWhiteTexture=L"app:/UI/EDF6VC_WHITE.dds";
@@ -91,6 +94,10 @@ inline roommenu::Keys KeysDown(const Raw& r,std::uint16_t combo) noexcept {
     return roommenu::Keys{r.toggleKey || comboHeld,r.up || (b&kPadUp),r.down || (b&kPadDown),r.left || (b&kPadLeft),
                           r.right || (b&kPadRight),r.enter || (b&kPadA),r.escape || (b&kPadB),r.insert || (b&kPadX),
                           r.del || (b&kPadY),r.home || (b&kPadBack)};
+}
+inline constexpr std::uint16_t kPadKnownBits=0xF3FF;
+inline constexpr bool PadToggleAvailable(bool padOk,std::uint16_t combo) noexcept {
+    return padOk && combo && !(combo & static_cast<std::uint16_t>(~kPadKnownBits));
 }
 // The pad combination's name for the hint ("L3+R3"); empty for none.
 inline void PadComboName(std::uint16_t combo,wchar_t* out,std::size_t n) noexcept {
@@ -144,8 +151,12 @@ inline bool TakeInput(Gate& g,bool open,bool anyDown) noexcept {
 // --- One frame's plan ---
 // `hasInput`: the screen would read input this frame (0x8DAD00 with the real ctx: not covered by a sub-screen, a dialog
 // or a transition). Covered, the menu is hidden and frozen (no key steps it: not even the toggle), its edits kept.
-struct Plan { bool step,show; };
-inline Plan PlanFrame(bool hasInput,bool open) noexcept { return Plan{hasInput,hasInput && open}; }
+struct Plan { bool step,show,entry; };
+// The closed page advertises its real toggle without stealing focus. A covered page, an unavailable binding, or the
+// closing key still held hides the entry: the prompt must never promise an action that the page cannot take now.
+inline Plan PlanFrame(bool hasInput,bool open,bool canToggle=true,bool inputReleased=true) noexcept {
+    return Plan{hasInput,hasInput && open,hasInput && !open && canToggle && inputReleased};
+}
 
 // --- The switches over one screen frame: Enabled && RoomLoadout (`on`) and RoomPreSync ---
 // Off: the screen's own update is chained with its own ctx and nothing else runs (no key read, no input taken, no
@@ -325,6 +336,18 @@ inline void NoteLine(const ViewRow& r,wchar_t* out,std::size_t n) noexcept {
 inline const wchar_t* Title(bool dirty) noexcept { return hudtext::Tr(dirty ? Tx::roomTitleUnsaved : Tx::roomTitle); }
 inline void HintLine(const wchar_t* toggleName,wchar_t* out,std::size_t n) noexcept {
     detail::Put(out,n,hudtext::Tr(Tx::roomHint),toggleName && *toggleName ? toggleName : L"-");
+}
+// Three bounded, contextual lines instead of the old all-controls sentence. The second line explains the operation
+// available at this level; the last always says that toggling discards edits (save has its own explicit row).
+inline void HelpLine(roommenu::Level level,int line,const wchar_t* toggleName,wchar_t* out,std::size_t n) noexcept {
+    if(line==0)detail::Put(out,n,L"%ls",hudtext::Tr(level==roommenu::Level::fields ? Tx::roomHintFields : Tx::roomHintNavigate));
+    else if(line==1)detail::Put(out,n,L"%ls",hudtext::Tr(level==roommenu::Level::units ? Tx::roomHintSave :
+                                                      level==roommenu::Level::rows ? Tx::roomHintTools : Tx::roomHintFinish));
+    else if(line==2)detail::Put(out,n,hudtext::Tr(Tx::roomHintClose),toggleName && *toggleName ? toggleName : L"-");
+    else if(out && n)out[0]=0;
+}
+inline void EntryLine(const wchar_t* toggleName,wchar_t* out,std::size_t n) noexcept {
+    detail::Put(out,n,hudtext::Tr(Tx::roomEntry),toggleName && *toggleName ? toggleName : L"-");
 }
 // The generator's state as a line; false when there is nothing to say (idle).
 inline bool GenerateLine(const GenerateStatus& s,wchar_t* out,std::size_t n) noexcept {

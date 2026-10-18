@@ -216,13 +216,18 @@ def _foreign(led: ledger.Ledger, rel: str) -> bool:
     return not owners or any(o != OWNER for o in owners) or led.changed(rel)
 
 
-def _current(led: ledger.Ledger, stamp: dict, name: str, source: dict[str, list[int]]) -> bool:
+def _current(led: ledger.Ledger, stamp: dict, name: str, source: dict[str, list[int]],
+             material_compat: bool = False) -> bool:
     """Map `name` is installed by this VERSION from these 4.1 files, every file still as written."""
     entry = stamp.get(name, {})
-    if entry.get('version') != VERSION or entry.get('source') != source:
+    if (entry.get('version') != VERSION or entry.get('source') != source
+            or bool(entry.get('material_compat', False)) != material_compat):
         return False
     mine = set(led.owned_by(OWNER))
-    return all(ledger.key(rel) in mine and os.path.exists(led.disk(rel)) for rel in files_of(name))
+    shaders = entry.get('material_shaders', [])
+    return (all(ledger.key(rel) in mine and os.path.exists(led.disk(rel))
+                for rel in files_of(name) + shaders)
+            and all(not led.changed(rel) for rel in shaders))
 
 
 NO_EDF41 = '没有找到 EDF4.1 也没有 EDF4.1 素材包（需要其中之一才能转换它的地图）'
@@ -285,7 +290,8 @@ def workers() -> int:
     return model_workers.workers_for(os.cpu_count() or 1, model_workers.available_memory(), MAX_WORKERS, WORKER_MEMORY)
 
 
-def install(root: str, root41: str | None, say: Callable[[str], None] = print) -> tuple[list[str], list[tuple[str, str]]]:
+def install(root: str, root41: str | None, say: Callable[[str], None] = print, *,
+            material_compat: bool = False) -> tuple[list[str], list[tuple[str, str]]]:
     """Every map of MAPS converted and written as OWNER's; (paths written, [(map, why not)]). With more than one map to
     convert and workers() > 1 they convert in processes of their own, several at once (convert_job; nothing patched
     into this module reaches them); each is written, in MAPS order, as soon as it and the maps before it are
@@ -311,7 +317,7 @@ def install(root: str, root41: str | None, say: Callable[[str], None] = print) -
             plan.append((name, None, f'源地图不可用：{type(e).__name__}: {e}'))
             continue
         plan.append((name, source, ''))
-    todo = [name for name, source, _ in plan if source is not None and not _current(led, stamp, name, source)]
+    todo = [name for name, source, _ in plan if source is not None and not _current(led, stamp, name, source, material_compat)]
     count = workers() if len(todo) > 1 else 1
     if count > 1:
         jobs = [(convert_job, (name, root41, root), f'地图 {name}') for name in todo]
@@ -332,6 +338,7 @@ def install(root: str, root41: str | None, say: Callable[[str], None] = print) -
             continue
         wanted.update(ledger.key(rel) for rel in files_of(name))
         if name not in todo:
+            wanted.update(ledger.key(rel) for rel in stamp[name].get('material_shaders', []))
             continue
         say(f'  转换 4.1 地图 {name}（借用 EDF6 {MAPS[name][0]} 的天气与寻路网格）……')
         ok, files = next(results)
@@ -339,12 +346,25 @@ def install(root: str, root41: str | None, say: Callable[[str], None] = print) -
             skipped.append((name, files))
             wanted.difference_update(ledger.key(rel) for rel in files_of(name))
             continue
+        if material_compat:
+            import edf41_materials
+            try:
+                # Only the converted 4.1 geometry: donor weather archives stay exactly EDF6's.
+                model_rel = f'MAP/{name}.RAB'
+                files.update(edf41_materials.apply({model_rel: files[model_rel]}, root))
+            except CONVERT_ERRORS as e:
+                skipped.append((name, f'材质适配失败：{type(e).__name__}: {e}'))
+                wanted.difference_update(ledger.key(rel) for rel in files_of(name))
+                continue
+        material_shaders = sorted(rel for rel in files if rel.startswith('SHADER/'))
+        wanted.update(ledger.key(rel) for rel in material_shaders)
         for rel, data in files.items():
             if ledger.key(rel) in set(led.owned_by(OWNER)) and sha256_file(led.disk(rel)) == sha256(data):
                 continue
             written.append(led.put(OWNER, rel, data))
         del files
-        stamp[name] = {'version': VERSION, 'source': source}
+        stamp[name] = {'version': VERSION, 'source': source, 'material_compat': material_compat,
+                       'material_shaders': material_shaders}
         with open(stamp_path, 'w', encoding='utf-8') as f:
             json.dump(stamp, f, indent=1)
     led.release(OWNER, sorted(set(led.owned_by(OWNER)) - wanted))

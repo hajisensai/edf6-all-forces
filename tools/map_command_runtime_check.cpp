@@ -36,6 +36,19 @@ int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
     ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
 }
+PvpStatus pvpStateStub{};unsigned pvpUiRequests=0;int pvpUiCode=-1;
+bool PvpUiMatches(std::uint64_t epoch,std::uint32_t revision,const char* puid) noexcept {
+    return puid && pvpStateStub.ready && !pvpStateStub.pending && pvpStateStub.epoch==epoch &&
+        pvpStateStub.revision==revision && !std::strcmp(pvpStateStub.localPuid,puid);
+}
+bool SetPvpEnabledAt(bool enabled,std::uint64_t epoch,std::uint32_t revision,const char* puid) noexcept {
+    if(!pvpStateStub.host || !PvpUiMatches(epoch,revision,puid))return false;
+    ++pvpUiRequests;pvpUiCode=enabled ? 10 : 11;return true;
+}
+bool SetPvpLocalTeamAt(int team,std::uint64_t epoch,std::uint32_t revision,const char* puid) noexcept {
+    if((team!=1 && team!=2) || !PvpUiMatches(epoch,revision,puid))return false;
+    ++pvpUiRequests;pvpUiCode=team;return true;
+}
 unsigned char* PlayerHuman() noexcept {return nullptr;}
 const void* remoteAuthority=nullptr;bool allRemote=false,mapOnline=false;
 bool IsOnlineAuthority(const void* object) noexcept {return !allRemote && object!=remoteAuthority;}
@@ -71,7 +84,10 @@ bool InSession() noexcept { return mapOnline; }
 bool placeOnStub=false;debugspawn::RowState placeStateStub=debugspawn::RowState::ready;
 int placeCalls=0,placeRowStub=-1;float placeAtStub[3]{};
 bool RangePlaceOn() noexcept { return placeOnStub; }
-debugspawn::RowState SpawnRowState(int) noexcept { return mapOnline ? debugspawn::RowState::online : placeStateStub; }
+debugspawn::RowState SpawnRowState(int row) noexcept {
+    return mapOnline && (row<0 || row>=debugspawn::kEntryCount || debugspawn::kEntries[row].how!=debugspawn::How::enemy) ?
+        debugspawn::RowState::online : placeStateStub;
+}
 int PlaceRow(int row,const float* ground,wchar_t* note,std::size_t size) noexcept {
     ++placeCalls;placeRowStub=row;std::memcpy(placeAtStub,ground,12);
     if(note && size)note[0]=0;
@@ -573,11 +589,10 @@ void PlacePanel() noexcept {
           "Enter: the picked row at the map's point");
     MapCommandFrame(in,centre);
     Check(placeCalls==1,"holding nothing: one placed");
-    // Online: the panel is shown with why nothing can be placed; its keys are not read (nothing made, the pad stays the
-    // input).
+    // Online: inputs still navigate the same range panel; only rows without a reliable spawn transaction refuse.
     mapOnline=true;in.usingPad=true;tap(VK_RETURN);tap(VK_OEM_PERIOD);
-    Check(placeCalls==1 && PlayerMapCommands(&r) && r.placeOnline && in.usingPad && game.place.pick[1]==0,
-          "online: shown with its reason, its keys not read, nothing made");
+    Check(placeCalls==1 && PlayerMapCommands(&r) && r.placeOnline && !in.usingPad && game.place.pick[1]==1,
+          "online: unsupported vehicle row refuses while keyboard navigation remains available");
     mapOnline=false;in.usingPad=false;
     // A row that is not installed: said so, not made.
     placeStateStub=debugspawn::RowState::missing;tap(VK_RETURN);
@@ -624,6 +639,15 @@ void PlacePanel() noexcept {
     Check(!MapPlaceHoldsPad(),"let go: the pad's A / B are the map's again");
     pad(XINPUT_GAMEPAD_A);
     Check(placeCalls==4,"shut: A is the map's (centre on the player), nothing placed");
+    mapOnline=true;game.place.open=true;game.place.category=static_cast<int>(Category::enemy);game.place.pick[game.place.category]=0;
+    pad(XINPUT_GAMEPAD_A);
+    Check(placeCalls==5 && debugspawn::kEntries[placeRowStub].how==debugspawn::How::enemy,
+        "online A places a preloaded enemy through the same range request boundary");
+    game.place.category=static_cast<int>(Category::vehicle);game.place.pick[game.place.category]=0;
+    pad(XINPUT_GAMEPAD_A);
+    Check(placeCalls==5 && std::wcsstr(game.note,hudtext::Tr(hudtext::Tx::placeOnline)),
+        "online unsupported vehicle keeps a concrete refusal without invoking local creation");
+    mapOnline=false;
     game.place.armed=row;SuspendMapCommands();
     Check(game.place.armed<0 && !MapPlaceHoldsPad(),"closing the map disarms it");
     in.pad=false;placeOnStub=false;groundReady=false;
@@ -850,6 +874,43 @@ void RtsClicks() noexcept {
     }
     std::memset(inputstub::keys,0,sizeof(inputstub::keys));squadOn=false;groundReady=false;marked=nullptr;ResetMapCommands();
 }
+void PvpUiActions() noexcept {
+    ResetMapCommands();view=View{};placeOnStub=false;mapOnline=true;pvpUiRequests=0;
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));
+    pvpStateStub={};pvpStateStub.ready=pvpStateStub.host=true;pvpStateStub.epoch=101;pvpStateStub.revision=7;
+    strcpy_s(pvpStateStub.localPuid,"host");
+    const float vp[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    MapCmdInput input{};input.front=true;input.mouse=true;input.eye[1]=100;float centre[3]{};
+    MapCommandView(vp,1280,720);MapCommandFrame(input,centre);
+    const float rect[4]={600,340,680,380};const int code=kPvpTeam1;
+    MapCommandUiPanels(rect,1);MapCommandPvpButtons(rect,&code,1,&pvpStateStub);
+    game.armedOrder=true;game.armed=Order::guard;
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(input,centre);
+    Check(MapCommandPointerCaptured(),"PVP press captures the map pointer and armed world order");
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(input,centre);
+    Check(pvpUiRequests==1 && pvpUiCode==1 && game.armedOrder && !game.armedClick,
+        "PVP click uses the rendered native-world/revision/member snapshot without leaking onto ground");
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(input,centre);
+    ++pvpStateStub.revision;MapCommandPvpButtons(rect,&code,1,&pvpStateStub);
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(input,centre);
+    Check(pvpUiRequests==1,"revision replacement between press/release cancels the old PVP button");
+    ++pvpStateStub.epoch; // The game changed before another HUD pass: queued API must still reject the old rectangle.
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(input,centre);
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(input,centre);
+    Check(pvpUiRequests==1,"a still-rendered old world cannot enqueue a PVP action after native state changed");
+    MapCommandPvpButtons(nullptr,nullptr,0,&pvpStateStub);input.mouse=false;input.pad=true;input.usingPad=true;
+    input.buttons=XINPUT_GAMEPAD_RIGHT_THUMB;MapCommandFrame(input,centre);
+    Check(MapPvpPadSelection()==kPvpTeam1 && MapPlaceHoldsPad(),"R3 focuses a collapsed PVP panel with no invisible click boxes");
+    input.buttons=0;MapCommandFrame(input,centre);input.buttons=XINPUT_GAMEPAD_DPAD_DOWN;MapCommandFrame(input,centre);
+    Check(MapPvpPadSelection()==kPvpTeam2 && !game.place.open,"PVP D-pad selects its team and never opens range placement");
+    input.buttons=0;MapCommandFrame(input,centre);input.buttons=XINPUT_GAMEPAD_A;MapCommandFrame(input,centre);
+    Check(pvpUiRequests==2 && pvpUiCode==2 && MapPlaceHoldsPad(),"PVP A confirms the selected team while map centring stays held");
+    input.buttons=XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_B;MapCommandFrame(input,centre);
+    Check(MapPvpPadSelection()<0 && MapPlaceHoldsPad(),"PVP B returns but held A/B cannot close or centre the map");
+    input.buttons=0;MapCommandFrame(input,centre);Check(!MapPlaceHoldsPad(),"both pad buttons released ends PVP capture");
+    SuspendMapCommands();Check(!view.pvpVisible && !view.pvps,"map close invalidates PVP rectangles and their snapshot");
+    mapOnline=false;ResetMapCommands();
+}
 void RemoteCommandResults() noexcept {
     ResetMapCommands();mapOnline=true;groundReady=true;networkSubmits=0;squadOrders=0;squadOn=true;
     unsigned char remote[0x100]{},remoteCtrl[0x10]{};Put<void*>(squadObj,kSelfCtrl,squadCtrl);Put<void*>(remote,kSelfCtrl,remoteCtrl);
@@ -923,7 +984,7 @@ int main() {
     crew::FocusButtonPreservesMark();crew::MarkFromMap();crew::MarkLifetimeAndConfig();
     crew::SupportInput();
     crew::UiCaptureAndSnapshots();crew::RtsClicks();crew::PickOnlyCommandable();crew::FormationMenu();
-    crew::RemoteCommandResults();crew::SelectionCapabilityMask();crew::PlacePanel();
+    crew::RemoteCommandResults();crew::SelectionCapabilityMask();crew::PlacePanel();crew::PvpUiActions();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

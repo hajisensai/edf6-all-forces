@@ -6,6 +6,10 @@
 #include "mission_participants.h"
 #include "command_net.h"
 #include "command_protocol.h"
+#include "debug_spawn_net.h"
+#include "pvp.h"
+#include "support_soldier.h"
+#include "command_identity.h"
 #include "version_notice.h"
 #include "hudtext.h"
 #include <cstdlib>
@@ -115,8 +119,10 @@ bool SendCommand(std::uint32_t peer,const void* bytes,std::size_t count) noexcep
         api.send(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(count))!=0;
 }
 void CommandContext(ULONGLONG now) noexcept {
-    UpdateCommandNetwork({running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
-        snapshot.peerCount,snapshot.local.id,&SendCommand},now);
+    const CommandNetworkContext context{running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
+        snapshot.peerCount,snapshot.local.id,&SendCommand};
+    UpdateCommandNetwork(context,now);
+    UpdatePvpNetwork(context,now);
 }
 // The Q marks (qmark.cpp) go peer to peer over the same transport, with no host step: only the room has to be up.
 void QMarkContext(ULONGLONG now) noexcept { UpdateQMarkNetwork(running,snapshot.peerCount,&SendCommand,now); }
@@ -243,15 +249,78 @@ void VersionTick(bool online) noexcept {
     ReleaseSRWLockExclusive(&versionLock);
 }
 }
+namespace {
+bool PlanRequester(std::uint32_t peer,unsigned char* out) noexcept {
+    if(!out || !running || peer>snapshot.peerCount)return false;
+    const char* authenticated=peers[peer].id;
+    AcquireSRWLockShared(&worldLock);const bool sealed=worldFrozen && world.ready;ReleaseSRWLockShared(&worldLock);
+    if(!sealed)return false;
+    const HMODULE coop=GetModuleHandleW(L"EDF6Coop.dll");
+    const auto resolve=coop ? reinterpret_cast<EDF6CoopResolveMissionPlayerPuidFn>(GetProcAddress(coop,"EDF6Coop_ResolveMissionPlayerPuid")) : nullptr;
+    if(!resolve)return false;
+    for(std::uint32_t i=0;i<support_net::kMaxPeers;++i) {
+        AcquireSRWLockShared(&worldLock);const ObjRef actor=worldCreated[i];ReleaseSRWLockShared(&worldLock);
+        if(!actor.obj)continue;
+        EDF6CoopPeer who{};
+        if(!resolve(static_cast<std::int32_t>(i),&who) || !PeerValid(who) || std::strcmp(who.id,authenticated))continue;
+        __try {
+            unsigned char candidate[32]{};MarkIdentities identities{};
+            if(ReadNativeObjectId(static_cast<const unsigned char*>(actor.obj),candidate) &&
+               ResolveMarkIdentities(candidate,nullptr,&identities) && identities.player.obj==actor.obj &&
+               identities.player.ctrl==actor.ctrl && SupportCommandRequesterMatches(identities.puid,authenticated)) {
+                std::memcpy(out,candidate,32);return true;
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    }
+    return false;
+}
+support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalog,const float* target,
+                                         std::uint64_t loadout,support_net::Plan* out) noexcept {
+    if(catalog==debugspawn::kNetworkCatalog)return PlanRangeEnemy(catalog,target,loadout,out);
+    if(!out || !running || peer>snapshot.peerCount)return support_net::PlanResult::refused;
+    const int team=PvpSupportTeam(peers[peer].id);
+    if(team<0)return support_net::PlanResult::refused; // an unconfirmed transition must not silently create stock-team support
+    const bool ownership=session.PeersHaveDetails(support_net::kDetailPvpSupport);
+    if(team && !ownership)return support_net::PlanResult::refused;
+    const auto result=hooks.planForRequester ? hooks.planForRequester(peer,catalog,target,loadout,out) :
+        hooks.plan ? hooks.plan(catalog,target,loadout,out) : support_net::PlanResult::refused;
+    if(result!=support_net::PlanResult::ready)return result;
+    if(ownership) {
+        if(!PlanRequester(peer,out->requester))return support_net::PlanResult::refused;
+        out->team=static_cast<std::uint32_t>(team);
+    }
+    return PvpValidateSupportPlan(*out) ? result : support_net::PlanResult::refused;
+}
+}
 void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
     ResetSupportNet();hooks=configured;
-    session.Configure({nullptr,&Send,&Nonce,hooks});
+    auto combined=hooks;
+    combined.plan=[](std::uint32_t catalog,const float* target,std::uint64_t loadout,support_net::Plan* out) noexcept {
+        if(catalog==debugspawn::kNetworkCatalog)return PlanRangeEnemy(catalog,target,loadout,out);
+        return hooks.plan ? hooks.plan(catalog,target,loadout,out) : support_net::PlanResult::refused;
+    };
+    combined.planForRequester=&PlanForRequester;
+    combined.validate=[](const support_net::Plan& plan) noexcept {
+        return plan.catalogId==debugspawn::kNetworkCatalog ? ValidateRangeEnemy(plan) :
+            PvpValidateSupportPlan(plan) && hooks.validate && hooks.validate(plan);
+    };
+    combined.spawn=[](std::uint64_t token,const support_net::Plan& plan,bool remote) noexcept {
+        return plan.catalogId==debugspawn::kNetworkCatalog ? SpawnRangeEnemy(token,plan,remote) : hooks.spawn && hooks.spawn(token,plan,remote);
+    };
+    combined.destroy=[](std::uint64_t token) noexcept {
+        DestroyRangeEnemy(token);
+        if(hooks.destroy)hooks.destroy(token);
+    };
+    combined.notice=[](std::uint32_t request,support_net::RequestStatus status) noexcept {
+        if(!RangeEnemyRequestNotice(request,status) && hooks.notice)hooks.notice(request,status);
+    };
+    session.Configure({nullptr,&Send,&Nonce,combined});
 }
 void ResetSupportNet() noexcept {
-    session.Stop();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
+    session.Stop();ResetRangeEnemyNetwork();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
     for(auto& v:commandVersionOf)v=0;
     versionShown={};AcquireSRWLockExclusive(&versionLock);versionAt=0;ReleaseSRWLockExclusive(&versionLock);
-    commandHostPeer=0;ResetCommandNetwork();ResetQMarkNetwork();
+    commandHostPeer=0;ResetCommandNetwork();ResetQMarkNetwork();ResetPvpNetwork();
 }
 void SuspendSupportNet() noexcept {
     session.Suspend();running=false;blockedUntilMission=true;
@@ -292,6 +361,7 @@ void SupportNetTick() noexcept {
             CommandContext(now);
             if(ReceiveQMarkNetwork(peer,sender.id,bytes,count,now))continue;   // before the support parser, as the commands
             if(ReceiveCommandNetwork(peer,sender.id,bytes,count,now))continue;
+            if(ReceivePvpNetwork(peer,sender.id,bytes,count,now))continue;
             support_net::Message message;
             if(support_net::Decode(bytes,count,message)) {
                 const auto pending=session.PendingHandshakes();
@@ -303,6 +373,7 @@ void SupportNetTick() noexcept {
     }
     session.SetRescueCooldown(static_cast<std::uint64_t>(Cfg().seaRescueCooldownSec)*1000);   // the host's own setting decides
     session.Tick(now);
+    RangeEnemyNetworkTick();
     VersionTick(running);
     CommandContext(now);
     QMarkContext(now);
@@ -333,6 +404,7 @@ void ReportSupportFailure(std::uint64_t transaction) noexcept {
     }
 }
 bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
+bool SupportPeersHaveDetails(std::uint32_t details) noexcept { return !InSession() || (running && session.PeersHaveDetails(details)); }
 bool SupportPeersAcceptVariants() noexcept { return !running || session.PeersHave(support_net::kCapSoldierVariants); }
 bool SupportPeersAcceptAirborne() noexcept { return !running || session.PeersHave(support_net::kCapAirborneAir); }
 bool SupportPeersAcceptTransports() noexcept { return !running || session.PeersHave(support_net::kCapTransports); }
@@ -438,6 +510,7 @@ void NoteSupportMissionPlayerCreated(int index,const ObjRef& object) noexcept {
 }
 void SupportMissionReturnedToLobby() noexcept {
     SuspendSupportNet();
+    ResetPvp(); // verified native scene release, unlike a transient transport readiness loss
     AcquireSRWLockExclusive(&worldLock);
     world={};world.size=sizeof(world);worldPhase=1;worldFrozen=false;worldCreationSeen=false;
     if(worldSerial!=UINT64_MAX)world.worldEpoch=++worldSerial;

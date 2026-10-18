@@ -19,6 +19,8 @@
 #include "sazabi_sound.h"
 #include "support_spawn.h"
 #include "support_soldier.h"
+#include "thermal.h"
+#include "pvp.h"
 #include "support_variants.h"
 #include <iterator>
 
@@ -66,8 +68,10 @@ void MissionStart() noexcept {
     LogMemory("mission start entered");
     CheckCrashFilter();   // the crash dump's filter and abort handler still first (crash_dump.h)
     WatchMissionPhase("resets");
+    ResetPvp();  // true world boundary: restore teams and release support-owner weak identities
     ResetPlayer();
     ResetFirstPerson();
+    thermal::Reset();
     ResetCrew();
     ResetHelis();
     ResetGround();

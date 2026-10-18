@@ -20,6 +20,8 @@
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
+#include "pvp.h"
+#include "thermal.h"
 #include "vehicle_look.h"
 #include "aim_line_want.h"
 #include "boarding_entrance.h"
@@ -662,10 +664,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepPvp, kStepThermal, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","pvp","thermal"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -805,9 +807,10 @@ void PerfTick() noexcept {
     perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=0;
 }
 
+void ThermalTick() noexcept { const auto& c=Cfg();thermal::Tick(c.enabled && c.thermal,static_cast<unsigned>(c.thermalKey)); }
 void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); Edf41Mother401DevTick(); }   // (the 401's dev enemy shooter: edf41mother401.cpp)
 
-void FrameTick() noexcept {
+void SharedFrameTick() noexcept {
     if(tickFrame==GameFrame())return;
     tickFrame=GameFrame();
     PerfTick();
@@ -815,6 +818,8 @@ void FrameTick() noexcept {
     GuardedTick(kStepUnderground,&ExitGroundTick);   // off a vehicle: on the floor, not in it (exit_ground.h)
     GuardedTick(kStepRescue,&RescueTick);
     GuardedTick(kStepWarn,&WarnTick);   // before the HUD's publish: it carries what this decides
+    GuardedTick(kStepThermal,&ThermalTick);
+    GuardedTick(kStepPvp,&PvpFrame);
     GuardedTick(kStepHudPublish,&HudPublish);
     GuardedTick(kStepUnderground,&BigWorldProbe);
     GuardedTick(kStepUnderground,&PlayAreaTick);   // the walls where the map's ground ends (playarea.cpp)
@@ -902,6 +907,10 @@ void InstallInputs() noexcept {
     Log("HOOK inputs=%d",hooked);
 }
 }  // namespace
+
+// Both the local Soldier pre-update and vehicle inputs use this one scene-clock boundary. In a mission with no
+// vehicles, the local player still advances PVP, thermal cleanup, HUD publication and support; repeated actors do not.
+void FrameTick() noexcept { SharedFrameTick(); }
 
 // Not at load: another plugin (EDF6AutoTurret hooks 403/404/603) may patch the same input slots after us, and
 // ours must chain onto theirs. Once, from the first of the mission's start (mission.cpp), the on-foot prompt

@@ -41,7 +41,8 @@ def read(path: str) -> bytes:
 header = open(os.path.join(ROOT, 'src', 'room_ui_logic.h'), encoding='utf-8').read()
 check(int(re.search(r'kRows=(\d+);', header).group(1)) == rl.ROWS, 'kRows == ROWS')
 check(int(re.search(r'kStatusLines=(\d+);', header).group(1)) == rl.STATUS_LINES, 'kStatusLines == STATUS_LINES')
-for const, name in (('kRootName', rl.ROOT), ('kBackName', rl.BACK), ('kHeadName', rl.HEAD), ('kHintName', rl.HINT)):
+for const, name in (('kRootName', rl.ROOT), ('kBackName', rl.BACK), ('kHeadName', rl.HEAD), ('kHintName', rl.HINT),
+                    ('kHelp2Name', rl.HELP2), ('kHelp3Name', rl.HELP3), ('kEntryName', rl.ENTRY)):
     check(re.search(const + r'=L"(\w+)"', header).group(1) == name, f'{const} == {name}')
 parts = dict(re.findall(r"(text|primary|secondary|icon|note)=L'(\w)'", header))
 check(parts == {'text': 'T', 'primary': 'A', 'secondary': 'B', 'icon': 'I', 'note': 'N'} and
@@ -51,7 +52,7 @@ check("Name(out,L'U',i,2,0)" in header and "Name(out,L'R',i,2," in header and "N
 check(rl.unit_name(3) == 'vcU03' and rl.row_name(12, 'B') == 'vcR12B' and rl.status_name(2) == 'vcS2', 'the spellings')
 names = set(rl.elements())
 check(all(len(n) <= 7 and n.startswith(rl.PREFIX) for n in names), 'every name at most 7 characters (the in-place wstring)')
-check(len(names) == 4 + rl.ROWS * 7 + rl.STATUS_LINES, 'element count')
+check(len(names) == 7 + rl.ROWS * 7 + rl.STATUS_LINES, 'element count')
 icons = sorted(set(re.findall(r'L"app:/weapon/icon/([\w.]+)"', header)))
 check(len(icons) >= 15, f'the header names the icons: {icons}')
 
@@ -79,7 +80,7 @@ for n, e in els.items():
     if e[0] == 'TextField':
         props = {p[0]: p[1] for p in e[7]}
         check(props.get('text_dr') == '' and 'text' not in props, f'{n}: empty text')
-check(sum(1 for e in els.values() if e[0] == 'TextField') == 2 + rl.ROWS * 3 + rl.STATUS_LINES, 'every text field checked')
+check(sum(1 for e in els.values() if e[0] == 'TextField') == 5 + rl.ROWS * 3 + rl.STATUS_LINES, 'every text field checked')
 # The predicate itself catches what would show (a window skin, a model chip, a text).
 check(rl.draws_by_default(['Layout', 'app:/UI/Window_Test01_skin.sgo', [0, 0, 0], [0, 0, 1, 1], [], 0, 0, []]) != [] and
       rl.draws_by_default(['Layout', 'app:/UI/ColorChipBox_skin.sgo', [0, 0, 0], [0, 0, 1, 1], [], 0, 0, []]) != [] and
@@ -103,6 +104,19 @@ for i in range(rl.ROWS):
         check(box[2][0] + e[2][0] + e[3][2] <= rl.MENU_RIGHT, f'{rl.row_name(i, p)} left of the 3D view')
     check(els[rl.unit_name(i)][2][0] + els[rl.unit_name(i)][3][2] <= box[2][0], 'units left of the rows')
 check(els[rl.BACK][2][0] + els[rl.BACK][3][2] <= rl.MENU_RIGHT, 'the panel left of the 3D view')
+# The last selectable row, status and help are independent vertical bands. Validate in layout units and after uniform
+# scaling to the supported common resolutions: a shorter page leaves the full three-line help visible at 720p too.
+for width, height in ((1280, 720), (1600, 900), (1920, 1080), (2560, 1440), (3440, 1440)):
+    scale = min(width / 1920, height / 1080)
+    bands = [(rl.ROW_Y + (rl.ROWS - 1) * rl.ROW_STEP, rl.ROW_H),
+             (rl.STATUS_Y, (rl.STATUS_LINES - 1) * rl.STATUS_STEP + 34),
+             (rl.HINT_Y, 34), (rl.HINT_Y + rl.HELP_STEP, 34), (rl.HINT_Y + 2 * rl.HELP_STEP, 34)]
+    check(all((y + h) * scale <= bands[i + 1][0] * scale for i, (y, h) in enumerate(bands[:-1])),
+          f'{width}x{height}: rows, status and all help lines have no vertical overlap')
+    check((bands[-1][0] + bands[-1][1]) * scale <= height, f'{width}x{height}: help stays on screen')
+check(els[rl.ENTRY][2][1] > 953 and els[rl.ENTRY][2][1] + els[rl.ENTRY][3][3] <= 1008,
+      'closed-page entry is below the room chat and inside the page margin')
+
 check(all(e[2][1] + e[3][3] <= 1080 for n, e in els.items() if not (n.startswith(rl.PREFIX + 'R') and len(n) == 6)),
       'every direct child of vcRoot inside the screen')
 
@@ -123,6 +137,9 @@ if game is not None:
         stock = game.read('UI', os.path.basename(rel))
         v0, before = sgo.read(stock)
         v1, after = sgo.read(data)
+        if os.path.basename(rel) == 'LYT_HUIONLINEROOM.SGO':
+            chat = sgo.plain(before['Chat_Window'])
+            check(els[rl.ENTRY][2][1] >= chat[2][1] + chat[3][3], 'entry stays below the native room chat window')
         check(v0 == v1, 'version kept')
         check(set(after) == set(before) | names and not (set(before) & names), f'{rel}: the menu\'s members added, none replaced')
         for n, v in before.items():
@@ -138,6 +155,10 @@ if game is not None:
             check(False, f'{rel}: patching twice is refused')
         except ValueError:
             pass
+    _, main_frame = sgo.read(game.read('UI', 'LYT_MAINFRAME.SGO'))
+    guide = sgo.plain(main_frame['ControlGuideText'])
+    check(els[rl.ENTRY][2][0] + els[rl.ENTRY][3][2] <= guide[2][0],
+          'entry stays left of the native MainFrame control guide (MainFrame itself is not changed)')
     # The skins as the game has them: Transparent draws nothing, HUDIconTexture's default texture is empty.
     _, skin = sgo.read(game.read('UI', 'TRANSPARENT_SKIN.SGO'))
     check(skin == {'object_class': 'Transparent'}, f'Transparent_skin: {skin}')

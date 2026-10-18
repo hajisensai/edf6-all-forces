@@ -20,9 +20,11 @@ bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 bool IsStoreWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0},gunSpec{L"HP", "HP", StoreRole::gun,0,0},
-                coaxSpec{L"MG", "MG", StoreRole::coax,0,0};
+                coaxSpec{L"MG", "MG", StoreRole::coax,0,0},
+                npcPairedLeft{L"PAIR_L", "pair", StoreRole::gun,0,0,1,0},npcPairedRight{L"PAIR_R", "pair", StoreRole::gun,0,0,1,1},
+                npcNativeHE{L"NATIVE_HE", "HE", StoreRole::gun,0,0,0,0,true},npcNativeAP{L"NATIVE_AP", "AP", StoreRole::gun,0,0,0,0,true};
 const StoreSpec* StoreOf(const unsigned char* w) noexcept {
-    return w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : w[0x101]==5 ? &coaxSpec : nullptr;
+    return w[0x101]==8 ? &npcNativeHE : w[0x101]==9 ? &npcNativeAP : w[0x101]==6 ? &npcPairedLeft : w[0x101]==7 ? &npcPairedRight : w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : w[0x101]==5 ? &coaxSpec : nullptr;
 }
 int fileQueries=0;
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
@@ -246,6 +248,43 @@ int main() {
         reinterpret_cast<FiredFn>(reinterpret_cast<void**>(image+kMotionClasses[1].vtable)[kSlotFired])(veh,coaxHolder);
         check(stockFiredRuns==0 && vehicleFiredRuns==1,"the 601's coax too");
         VirtualProtect(image,0x2200000,old,&old);
+    }
+    // NPC driver uses the same paired-barrel redirect as the player, not two pulls on the selected leader.
+    {
+        ResetPayload();now+=1000;trackedHuman=nullptr;
+        static unsigned char v[0x2400]{},s[edf::kSeatStride]{},vc[16]{},rider[0x2000]{},rc[16]{},
+                             w[4][0x1600]{},h[4][kHolderStride]{},hc[4][16]{};
+        unsigned char* list[4]{};
+        Put<void*>(v,0,image+kVt603);Put<void*>(v,kSelfCtrl,vc);Put<int>(vc,8,1);
+        Put<void*>(v,kSeats,s);Put<std::uint64_t>(v,kSeatCount,1);Put<void*>(v,kHolders,h);Put<std::uint64_t>(v,kHolderCount,4);
+        Put<void*>(s,kSeatRider,rider);Put<void*>(s,kSeatRiderCtrl,rc);Put<int>(rc,8,1);
+        for(int i=0;i<4;++i) {
+            list[i]=h[i];Put<void*>(h[i],kHolderWeapon,w[i]);Put<void*>(h[i],kHolderCtrl,hc[i]);Put<int>(hc[i],8,1);
+            Put<int>(w[i],kWeaponAmmo,i<2 ? 0 : 10);Put<int>(w[i],kWeaponCapacity,10);Put<int>(w[i],kWeaponReloadTime,-1);
+            Put<float>(w[i],0x224,1000);Put<float>(w[i],0x89C,10);Put<float>(w[i],0x8B0,i<2 ? 0.0f : 4.0f);
+            Put<const wchar_t*>(w[i],kWeaponName,L"flak");Put<const wchar_t*>(w[i],8,L"V603_FLAK_GUNH01_DLC_L.SGO");
+            if(i>=2){w[i][0x100]=2;w[i][0x101]=static_cast<unsigned char>(i+4);}
+        }
+        Put<void*>(s,kSeatWeapons,list);Put<std::uint64_t>(s,kSeatWeaponCount,4);
+        check(NpcPayloadSelect(v,0,400,true)==w[2],"NPC chooses the real linked flak loadout for an aircraft");
+        PullHook(h[0]);check(w[2][kWeaponTrigger] && !w[3][kWeaponTrigger],"NPC left source fires linked left only");
+        w[2][kWeaponTrigger]=0;PullHook(h[1]);check(!w[2][kWeaponTrigger] && w[3][kWeaponTrigger],"NPC right source fires linked right only");
+        w[3][kWeaponTrigger]=0;Put<int>(w[2],kWeaponAmmo,0);
+        check(NpcPayloadSelect(v,0,400,true)==w[3],"NPC can choose the remaining right barrel when the linked leader is spent");
+        PullHook(h[0]);PullHook(h[1]);check(!w[2][kWeaponTrigger] && w[3][kWeaponTrigger],"NPC cannot redirect both native sources into the surviving single barrel");
+        w[3][kWeaponTrigger]=0;Put<std::uint64_t>(s,kSeatWeaponCount,2);
+        w[0][0x100]=w[1][0x100]=2;w[0][0x101]=8;w[1][0x101]=9;Put<int>(w[1],kWeaponAmmo,10);
+        check(NpcPayloadSelect(v,0,400,true)==w[1],"NPC selects AP native belt when HE is empty");
+        PullHook(h[0]);w[1][kWeaponTrigger]=0;PullHook(h[1]);
+        check(!w[0][kWeaponTrigger] && !w[1][kWeaponTrigger],"NPC second native source cannot repeat the selected AP shot");
+        Put<int>(w[0],kWeaponAmmo,10);Put<float>(w[0],0x8B0,4);
+        check(NpcPayloadSelect(v,0,400,false)==w[0],"NPC switches from AP back to HE against a ground target");
+        PullHook(h[1]);check(!w[0][kWeaponTrigger] && !w[1][kWeaponTrigger],"NPC unselected native AP stays silent after changing back");
+        PullHook(h[0]);check(w[0][kWeaponTrigger] && !w[1][kWeaponTrigger],"NPC native HE receives exactly its selected source");
+        w[0][kWeaponTrigger]=0;cfg.stockStores=false;Put<int>(w[0],kWeaponAmmo,0);
+        check(NpcPayloadSelect(v,0,400,true)==w[1],"NPC keeps native alternate ammunition selection when optional stores are off");
+        PullHook(h[1]);check(!w[1][kWeaponTrigger],"optional stores off still suppresses NPC's redundant second native pull");
+        PullHook(h[0]);check(w[1][kWeaponTrigger] && !w[0][kWeaponTrigger],"optional stores off preserves NPC single-belt firing");cfg.stockStores=true;
     }
     ResetPayload();check(!PayloadPicked(vehicles[0]),"mission reset clears choices");
     VirtualFree(image,0,MEM_RELEASE);std::printf("payload runtime: %d checks, %d failures\n",checks,fail);return fail ? 1 : 0;

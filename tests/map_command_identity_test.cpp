@@ -28,6 +28,8 @@ int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
     ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
 }
+bool SetPvpEnabledAt(bool,std::uint64_t,std::uint32_t,const char*) noexcept {return false;}
+bool SetPvpLocalTeamAt(int,std::uint64_t,std::uint32_t,const char*) noexcept {return false;}
 unsigned char* PlayerHuman() noexcept {return nullptr;}
 const void* remoteAuthority=nullptr;bool allRemote=false,mapOnline=false;
 bool IsOnlineAuthority(const void* object) noexcept {return !allRemote && object!=remoteAuthority;}
