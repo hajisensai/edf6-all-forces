@@ -91,7 +91,9 @@ bool WorldMoveToPad(const NativeLease& lease,const float movement[3],float camer
         const float along=DotMove(cameraForward,up);
         for(int i=0;i<3;++i)cameraForward[i]-=up[i]*along;
         if(!UnitMove(cameraForward))for(int i=0;i<3;++i)cameraForward[i]=forward[i];
-        float cameraRight[3];CrossMove(up,cameraForward,cameraRight);
+        // EDF's +X is the left of +Z (enemy_control_camera.h): the screen's right is
+        // forward x up, not up x forward (that was the left: A/D and the stick swapped).
+        float cameraRight[3];CrossMove(cameraForward,up,cameraRight);
         if(!UnitMove(cameraRight))return false;
         float world[3];
         const bool vertical=(lease.profile->axes&8)!=0;

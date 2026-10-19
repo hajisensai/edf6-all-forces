@@ -9,6 +9,8 @@
 #include "enemy_control_net.h"
 #include "enemy_control_capacity.h"
 #include "enemy_control_adapter.h"
+#include "enemy_control_camera.h"
+#include "enemy_control_bindings.h"
 #include "enemy_control_native_net.h"
 #include "enemy_control_core_pose.h"
 #include "enemy_control_native_pose.h"
@@ -72,6 +74,8 @@ struct Session {
     ULONGLONG received=0,frame=~0ULL;
     std::uint64_t executed=0,nextSequence=0,acceptedSequence=0,lastAction=0,lastActionHash=0,pendingAction=0,pendingActionHash=0;
     std::uint32_t wasHeld=0;
+    bool keyWas[kBindingCount]{};   // each attack's own key last sample (enemy_control_bindings.h)
+    std::uint32_t uiAbility=0;bool uiWas=false; // the M card's held attack row
     bool local=false,networked=false,uiHeld=false,physicalHeld=false,faulted=false,sourceProtected=false,nativeOwned=false,adapterAttempted=false,closing=false,aborted=false;
     std::uint32_t sourceOwnedFlags=0;
     float yaw=0,pitch=0,aimPoint[3]{};
@@ -301,8 +305,10 @@ void FillSnapshot(Snapshot& snapshot,const ObjRef& owner,const ObjRef& target,co
 Reason CanPrepare(const ObjRef& requester,const ObjRef& target,Catalogue* catalogue) {
     if(!On())return Reason::disabled;
     if(!targetReady)return Reason::nativeMismatch;
-    if(!Live(requester) || !IsAnyPlayer(static_cast<const unsigned char*>(requester.obj)) || !IsSoldierClass(requester.obj) ||
-        !HumanOnFoot(static_cast<const unsigned char*>(requester.obj)))return Reason::invalidRequester;
+    if(!Live(requester) || !IsAnyPlayer(static_cast<const unsigned char*>(requester.obj)) || !IsSoldierClass(requester.obj))
+        return Reason::invalidRequester;
+    // Riding is the player's own state, not a broken requester: say what to do about it.
+    if(!HumanOnFoot(static_cast<const unsigned char*>(requester.obj)))return Reason::riding;
     if(!Live(target))return Reason::invalidTarget;
     if(Same(requester,target))return Reason::sameObject;
     if(ByOwner(requester) || ByObject(target.obj))return Reason::busy;
@@ -516,9 +522,11 @@ void Sample(Session& session,Input& sample) noexcept {
     const auto* pad=At<const unsigned char*>(human,kHumanPad);
     const int index=At<int>(human,0xD40);
     const auto* record=pad && index>=0 && index<4 ? pad+static_cast<std::size_t>(index)*0xA80 : nullptr;
-    bool physical=false;
+    bool physical=false,keys=false;
+    std::uint16_t buttons=0;std::uint8_t leftTrigger=0,rightTrigger=0;bool padRead=false;
     if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,0x688)) {
-        sample.move[0]=Axis(At<float>(record,0x0C));sample.move[2]=Axis(At<float>(record,0x24));
+        keys=true;
+        sample.move[0]=Axis(At<float>(record,0x0C));sample.move[2]=Axis(StickForward(At<float>(record,0x24)));
         sample.look[0]=Axis(At<float>(record,0x3C));sample.look[1]=Axis(At<float>(record,0x54));
         physical=record[0xD0]!=0;
         // Keyboard/mouse are the first local input record only. A second local
@@ -533,18 +541,37 @@ void Sample(Session& session,Input& sample) noexcept {
             if(std::isfinite(dx) && std::isfinite(dy) && std::fabs(dx)<4000 && std::fabs(dy)<4000) {
                 sample.look[0]=Axis(sample.look[0]+dx/24.0f);sample.look[1]=Axis(sample.look[1]+dy/24.0f);
             }
-            physical=physical || Held(VK_LBUTTON);
+            padRead=MapPadState(&buttons,&leftTrigger,&rightTrigger);
         }
     }
-    const bool fire=physical || (InputAllowed() && session.uiHeld);
-    const auto* selected=FindAbility(session.catalogue,session.snapshot.selectedAbility);
-    if(fire && selected) {
-        if(selected->flags&AbilityFlag::held)sample.active[0]={selected->id,1};
-        else if(!session.physicalHeld)sample.active[0]={selected->id,2};
+    // Every attack has its own key (enemy_control_bindings.h): pressing it uses that attack,
+    // no selection first. The native fire action (+0xD0, whatever the game binds it to, and
+    // the only one a second local player's record offers) is the first attack's too.
+    unsigned activeCount=0;
+    const auto use=[&](const Ability& ability,bool down,bool& was) noexcept {
+        bool listed=false;
+        for(unsigned i=0;i<activeCount;++i)listed=listed || sample.active[i].id==ability.id;
+        if(down && !listed && activeCount<kConcurrentAbilities) {
+            if(ability.flags&AbilityFlag::held)sample.active[activeCount++]={ability.id,1};
+            else if(!was)sample.active[activeCount++]={ability.id,2};
+        }
+        was=down;
+    };
+    const unsigned bound=(std::min)(kBindingCount,static_cast<unsigned>(session.catalogue.abilities.size()));
+    for(unsigned i=0;i<bound;++i) {
+        const auto& binding=kBindings[i];
+        bool down=keys && i==0 && physical;
+        if(keys && index==0)down=down || Held(binding.vk) || (padRead && PadDown(binding.pad,buttons,leftTrigger,rightTrigger));
+        use(session.catalogue.abilities[i],down,session.keyWas[i]);
     }
-    session.physicalHeld=fire;
-    session.yaw=std::remainder(session.yaw+sample.look[0]*0.04f,2.0f*kPi);session.pitch+=sample.look[1]*0.025f;
-    session.pitch=(std::max)(-1.2f,(std::min)(1.2f,session.pitch));
+    for(unsigned i=bound;i<kBindingCount;++i)session.keyWas[i]=false;
+    // The M card's row held (any attack, including those past the last key).
+    const auto* row=session.uiAbility ? FindAbility(session.catalogue,session.uiAbility) : nullptr;
+    if(row)use(*row,InputAllowed() && session.uiHeld,session.uiWas);
+    else session.uiWas=false;
+    // look[] keeps the native axis signs (right/down positive, enemy_control_camera.h):
+    // right lowers the heading and down lowers the elevation, as the soldier's own camera.
+    session.yaw=TurnYaw(session.yaw,sample.look[0]);session.pitch=TurnPitch(session.pitch,sample.look[1]);
     sample.absoluteAim=true;sample.aimYaw=session.yaw;sample.aimPitch=session.pitch;
     enemy_target::Ray ray{};enemy_target::Selection target{};
     if(AimRay(session,sample.aimYaw,sample.aimPitch,&ray) && enemy_target::Pick(session.owner,session.target,ray,&target))
@@ -696,7 +723,7 @@ bool EnemyControlApply(std::uint64_t lease,const Input& input) noexcept {
 }
 bool EnemyControlRestore(std::uint64_t lease) noexcept {
     auto* s=ByLease(lease);if(!s)return true;
-    s->snapshot.phase=Phase::restoring;s->queued.clear();s->uiHeld=s->physicalHeld=false;
+    s->snapshot.phase=Phase::restoring;s->queued.clear();s->uiHeld=s->physicalHeld=false;s->uiAbility=0;
     if(!DropReady(s->owner) || !DropReady(s->target)){Publish();return false;}
     if(!s->catalogue.adapter && s->nativeOwned && !enemy_native::RestoreNativeActions(s->native)){Publish();return false;}
     if(!s->catalogue.adapter && !RestoreEnemyControlUnitGuide(s->target.obj,s->target.ctrl)){Publish();return false;}
@@ -766,6 +793,11 @@ void EnemyControlFrame() noexcept {
         }
     }
     Publish();
+}
+bool EnemyControlPickable(const void* object) noexcept {
+    if(!object)return false;
+    for(const auto* adapter:adapters)if(adapter && adapter->Match(object))return true;
+    return enemy_native::Profile(object)!=nullptr;
 }
 bool EnemyControlDescribe(const ObjRef& requester,const ObjRef& target,Snapshot* out) noexcept {
     if(!out)return false;*out={};
@@ -845,7 +877,7 @@ bool EnemyControlRequest(const Snapshot& snapshot) noexcept {
 bool EnemyControlSelectAbility(const Snapshot& snapshot,std::uint32_t ability) noexcept {
     auto* s=ByLease(snapshot.lease);
     if(!s || !s->local || !SessionIdentity(*s,snapshot) || !FindAbility(s->catalogue,ability))return false;
-    s->uiHeld=s->physicalHeld=false;
+    s->uiHeld=s->physicalHeld=false;s->uiAbility=0;
     if(s->snapshot.selectedAbility!=ability){s->snapshot.selectedAbility=ability;s->snapshot.revision=++revision;}
     Selected(s->snapshot,s->catalogue);Publish();return true;
 }
@@ -859,6 +891,18 @@ bool EnemyControlSetAbilityHeld(const Snapshot& snapshot,bool held) noexcept {
             std::memcmp(s->snapshot.owner,snapshot.owner,32) || std::memcmp(s->snapshot.target,snapshot.target,32))return false;
     }
     s->uiHeld=held;return true;
+}
+bool EnemyControlHoldAbility(const Snapshot& snapshot,std::uint32_t ability) noexcept {
+    auto* s=ByLease(snapshot.lease);
+    if(!s || !s->local)return false;
+    if(!SessionIdentity(*s,snapshot)) {
+        // As EnemyControlSetAbilityHeld: only a release survives a newer revision of this same lease.
+        if(ability || s->snapshot.ownerHumanKey!=snapshot.ownerHumanKey || s->snapshot.profileHash!=snapshot.profileHash ||
+            std::memcmp(s->snapshot.owner,snapshot.owner,32) || std::memcmp(s->snapshot.target,snapshot.target,32))return false;
+    }
+    if(ability && !FindAbility(s->catalogue,ability))return false;
+    if(s->uiAbility!=ability)s->uiWas=false;
+    s->uiAbility=ability;s->uiHeld=ability!=0;return true;
 }
 bool EnemyControlExit(const Snapshot& snapshot) noexcept {
     auto* s=ByLease(snapshot.lease);
@@ -989,7 +1033,7 @@ enemy_control::ActionResult EnemyControlApplyNetworkAction(std::uint64_t lease,s
 }
 bool EnemyControlQuiesceNetworkActions(std::uint64_t lease) noexcept {
     auto* s=ByLease(lease);if(!s)return true;
-    s->closing=true;s->snapshot.phase=Phase::restoring;for(auto& active:s->input.active)active={};s->queued.clear();s->uiHeld=s->physicalHeld=false;
+    s->closing=true;s->snapshot.phase=Phase::restoring;for(auto& active:s->input.active)active={};s->queued.clear();s->uiHeld=s->physicalHeld=false;s->uiAbility=0;
     bool ok=true;
     if(s->catalogue.adapter)ok=!s->adapterAttempted || s->catalogue.adapter->Apply(s->target.obj,Input{},false);
     else if(s->nativeOwned)ok=enemy_native::QuiesceNativeActions(s->native);
@@ -1000,7 +1044,7 @@ bool EnemyControlNetworkActionsEmpty(std::uint64_t lease) noexcept {
 }
 bool EnemyControlAbortNetworkActions(std::uint64_t lease) noexcept {
     auto* s=ByLease(lease);if(!s)return true;
-    s->closing=s->aborted=true;s->snapshot.phase=Phase::restoring;for(auto& active:s->input.active)active={};s->queued.clear();s->uiHeld=s->physicalHeld=false;
+    s->closing=s->aborted=true;s->snapshot.phase=Phase::restoring;for(auto& active:s->input.active)active={};s->queued.clear();s->uiHeld=s->physicalHeld=false;s->uiAbility=0;
     return s->catalogue.adapter || !s->nativeOwned || enemy_native::AbortNativeActions(s->native);
 }
 bool EnemyControlNeedsNetworkPose(std::uint64_t lease) noexcept {

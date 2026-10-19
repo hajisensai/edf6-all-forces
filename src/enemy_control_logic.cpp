@@ -22,6 +22,7 @@ const wchar_t* ReasonText(Reason reason) noexcept {
     case Reason::notOwner:return L"此操控属于另一名玩家";
     case Reason::networkUnavailable:return L"房间尚未准备好敌方操控同步";
     case Reason::networkCapacity:return L"敌方操控需要配套新版 EDF Coop，请所有玩家更新";
+    case Reason::riding:return L"请先下车：只有步行时才能操控敌方单位";
     case Reason::dead:return L"角色或受控单位已死亡";
     case Reason::sceneChanged:return L"场景已切换，操控已结束";
     }

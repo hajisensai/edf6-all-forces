@@ -969,6 +969,8 @@ void ResetSightZoom() noexcept;
 // swallowed and counted, up +; the count since the last call), and the first XInput pad's buttons now (false: none).
 int TakeScopeWheel(bool hold) noexcept;
 bool MapPadButtons(std::uint16_t* buttons) noexcept;
+// The same pad with its analog triggers (0..255), for the controlled enemy's attack keys.
+bool MapPadState(std::uint16_t* buttons,std::uint8_t* leftTrigger,std::uint8_t* rightTrigger) noexcept;
 
 // turretcam.cpp: the turret camera (README 炮塔镜头, docs/camera-re.md §3b, §5). InstallTurretCam at load (the riding
 // camera's look-at fetch, the seat aim's step); TurretCamFrame from every vehicle's input, the plugin off too (it lets

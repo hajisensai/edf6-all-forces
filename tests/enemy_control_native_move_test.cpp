@@ -3,6 +3,7 @@
 #include <cstring>
 #include <limits>
 #include "../src/enemy_control_native_move.cpp"
+#include "../src/enemy_control_camera.h"
 
 namespace {
 using namespace crew::enemy_native;
@@ -46,6 +47,38 @@ int main() {
                 Check(Close(out.yaw,0.2f) && Close(out.pitch,-0.3f) && out.held==7 && out.pressed==2 && out.seed==42,"movement preserves aim and action identity");
             }
         }
+    }
+    // Strafing: semantic right is the screen's right, (-cos, 0, sin) of the camera heading
+    // (+X is the left of +Z). Walking's native goal is (-pad0C, 0, -pad24) in its body frame
+    // (0x53E7EE..0x53E81E), so the world it walks is -pad0C*(cos,0,-sin) - pad24*(sin,0,cos).
+    for(const auto rva:{0x343DD0u,0x4A8FD0u,0x4A6780u}) {
+        scene.profile.inputRva=rva;scene.profile.axes=0x31;
+        for(float body:{0.0f,pi*0.5f,-pi*0.5f,pi})for(float camera:{0.0f,0.7f,pi*0.5f,-2.0f}) {
+            scene.Yaw(body);
+            for(float side:{1.0f,-1.0f}) {
+                const float move[3]={side,0,0};Input out{};
+                Check(WorldMoveToPad(scene.lease,move,camera,&out),"strafe admitted");
+                const float walked[3]={-out.right*std::cos(body)-out.forward*std::sin(body),0,out.right*std::sin(body)-out.forward*std::cos(body)};
+                const float screenRight[3]={-std::cos(camera),0,std::sin(camera)};
+                Check(Close(walked[0],side*screenRight[0]) && Close(walked[2],side*screenRight[2]),"D walks to the screen's right, A to its left");
+            }
+            const float ahead[3]={0,0,1};Input out{};
+            Check(WorldMoveToPad(scene.lease,ahead,camera,&out),"forward admitted");
+            const float walked[3]={-out.right*std::cos(body)-out.forward*std::sin(body),0,out.right*std::sin(body)-out.forward*std::cos(body)};
+            Check(Close(walked[0],std::sin(camera)) && Close(walked[2],std::cos(camera)),"W walks where the camera looks");
+        }
+    }
+    {
+        namespace ec=crew::enemy_control;
+        // The camera turns as the soldier's: mouse/stick right (native +) turns right, i.e. lowers
+        // the heading (map_cam.h), and the view then looks toward the old screen-right.
+        float right[3],forwardAfter[3];ec::CameraRight(0.3f,right);ec::CameraForward(ec::TurnYaw(0.3f,1.0f),forwardAfter);
+        Check(ec::TurnYaw(0.3f,1.0f)<0.3f && right[0]*forwardAfter[0]+right[2]*forwardAfter[2]>0,"look right turns the camera right");
+        Check(ec::TurnPitch(0.0f,1.0f)<0.0f && ec::TurnPitch(0.0f,-1.0f)>0.0f,"look down lowers the elevation, up raises it");
+        Check(ec::TurnPitch(1.19f,-1.0f)<=1.2f && ec::TurnPitch(-1.19f,1.0f)>=-1.2f,"pitch stays inside the input contract");
+        Check(ec::StickForward(-1.0f)==1.0f,"left stick pushed forward (+0x24 negative) walks forward");
+        const float d[3]={1,0,0};float w[3];ec::CameraMoveToWorld(0.0f,d,w);
+        Check(Close(w[0],-1) && Close(w[2],0),"camera-relative right at heading 0 is world -X");
     }
     scene.profile.inputRva=0x3B3ED0;scene.profile.axes=15;scene.Yaw(0);
     const float up[3]={0,1,0};Input out{};

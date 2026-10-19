@@ -1420,7 +1420,10 @@ void PlayerTick(Robo& r) noexcept {
         const float length=std::sqrt(input.move[0]*input.move[0]+input.move[1]*input.move[1]+input.move[2]*input.move[2]);
         const float speed=r.aiSpeed/(std::max)(1.0f,length);
         float world[3],body[3];
-        ToWorld(r.player.yaw,input.move,world);ToLocal(r.yaw,world,body);
+        // The semantic move is camera-relative (right, up, forward); the screen's right is
+        // the camera's -X local (enemy_control_camera.h), so it enters ToWorld negated.
+        const float camera[3]={-input.move[0],input.move[1],input.move[2]};
+        ToWorld(r.player.yaw,camera,world);ToLocal(r.yaw,world,body);
         r.cmdX=body[0]*speed;r.cmdY=body[1]*speed;r.cmdZ=body[2]*speed;
         TurnTo(r,r.target,0.01f);
     }

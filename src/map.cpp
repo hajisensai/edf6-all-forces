@@ -990,6 +990,12 @@ bool MapPadButtons(std::uint16_t* buttons) noexcept {
     *buttons=s.Gamepad.wButtons;
     return true;
 }
+bool MapPadState(std::uint16_t* buttons,std::uint8_t* leftTrigger,std::uint8_t* rightTrigger) noexcept {
+    XINPUT_STATE s{};
+    if(!PadState(&s))return false;
+    *buttons=s.Gamepad.wButtons;*leftTrigger=s.Gamepad.bLeftTrigger;*rightTrigger=s.Gamepad.bRightTrigger;
+    return true;
+}
 }  // namespace crew
 
 // EDF6AutoTurret asks whether the map holds the keys before it reads its own (common/edf/aimlink.h InputHeldV1).

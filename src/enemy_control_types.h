@@ -10,7 +10,7 @@ enum class Phase : std::uint32_t { idle, pending, active, restoring, failed };
 enum class Reason : std::uint32_t {
     none, disabled, invalidRequester, invalidTarget, sameObject, friendly, building,
     unsupportedFamily, incompleteSkills, nativeMismatch, noIdentity, busy, stale,
-    nativeFailure, notOwner, networkUnavailable, dead, sceneChanged, networkCapacity
+    nativeFailure, notOwner, networkUnavailable, dead, sceneChanged, networkCapacity, riding
 };
 enum AbilityFlag : std::uint32_t { held=1, edge=2, movement=4, passive=8 };
 enum class AbilityState : std::uint32_t { native, active, cooldown, unavailable };
