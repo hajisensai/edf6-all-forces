@@ -22,6 +22,7 @@ import sgo
 
 ROOTS = tuple('VEHICLE301_TANK' + suffix + '.SGO' for suffix in
               ('', '_AI', '_BULLETGIRLS', '_DCZERO', '_DC55', '_EDF2PV2', '_NATSUIRO'))
+RECOIL_BIND_BONE = 'edf6vc_cannon_slide_physics'
 
 
 def rel(ref: str) -> str:
@@ -35,6 +36,33 @@ def model(data: bytes, name: str) -> mdb.Mdb:
     return mdb.mdb_read(members[0].data)
 
 
+def recoil_model_archive(data: bytes, name: str) -> bytes:
+    """Add a meshless physics readback leaf with the barrel's exact rest frame.
+
+    Every native ragdoll body needs an animation_from_ragdoll target even when
+    CAS owns its visible bone. A sibling leaf receives that writeback while the
+    real cannon_slide keeps animating and poses its body through the other stage.
+    """
+    archive = mdb.rab_read(data)
+    members = [member for member in archive.files if member.name.lower() == name.lower()]
+    if len(members) != 1:
+        raise ValueError(f'model archive does not hold exactly one {name}')
+    member = members[0]
+    md = mdb.mdb_read(member.data)
+    if md.bone_index(RECOIL_BIND_BONE) >= 0:
+        raise ValueError('V301 reserved recoil binding bone already exists')
+    source = copy.deepcopy(md.bones[mdb.bone_named(md, 'cannon_slide')])
+    if source.parent < 0:
+        raise ValueError('V301 recoil bone has no parent')
+    parent = md.name_of(md.bones[source.parent].name)
+    at = mdb.insert_bone(md, RECOIL_BIND_BONE, parent)
+    md.bones[at].local = list(source.local)
+    md.bones[at].inv_bind = list(source.inv_bind)
+    raw = mdb.mdb_write(md)
+    member.stored = mdb.cmpl_compress(raw) if member.stored[:4] == b'CMPL' else raw
+    return mdb.rab_write(archive)
+
+
 def check(members: dict, md: mdb.Mdb, physics: bytes, cas: bytes) -> None:
     """Refuse unresolved bones, Havok bodies, locators or animation ownership conflicts."""
     names = {md.name_of(b.name) for b in md.bones}
@@ -43,6 +71,11 @@ def check(members: dict, md: mdb.Mdb, physics: bytes, cas: bytes) -> None:
     bodies = set(proxies)
     frames = ragdoll_fit.bone_frames(md)
     inner = sgo.read(members['ragdoll'][1])[1]
+    # BindDependency initializes each body's +0x60 through this stage before
+    # the first animation update. An absent row crashes at native 0x6E8284.
+    missing = bodies - {row[0][0] for row in inner['animation_from_ragdoll']}
+    if missing:
+        raise ValueError(f'V301 unbound animation_from_ragdoll bodies: {sorted(missing)}')
     for key, reverse in (('ragdoll_from_animation', False), ('animation_from_ragdoll', True)):
         for row in inner[key]:
             bone, proxy = row[0][::-1] if reverse else row[0]
@@ -83,6 +116,18 @@ def check(members: dict, md: mdb.Mdb, physics: bytes, cas: bytes) -> None:
     materials = {md.name_of(mt.name) for mt in md.materials}
     if any(row[0] not in materials for row in members['tank_caterpillar_animation']):
         raise ValueError('V301 caterpillar animation names another model material')
+    slide = md.bones[mdb.bone_named(md, 'cannon_slide')]
+    sink = md.bones[mdb.bone_named(md, RECOIL_BIND_BONE)]
+    if (sink.kind != 0 or sink.bounded != 0 or sink.parent != slide.parent or
+            sink.local != slide.local or sink.inv_bind != slide.inv_bind or
+            any(obj.bone == sink.index for obj in md.objects)):
+        raise ValueError('V301 recoil binding bone must be a meshless sibling with the exact barrel bind frame')
+    reverse = [row[0] for row in inner['animation_from_ragdoll'] if row[0][0] == 'RagDollProxys.cannon_slide']
+    if reverse != [['RagDollProxys.cannon_slide', RECOIL_BIND_BONE]]:
+        raise ValueError('V301 recoil readback must target only its hidden binding bone')
+    forward = [row[0] for row in inner['ragdoll_from_animation'] if row[0][1] == 'RagDollProxys.cannon_slide']
+    if forward != [['cannon_slide', 'RagDollProxys.cannon_slide']]:
+        raise ValueError('V301 recoil body must still follow the animated barrel')
     pose = cas_pose.CasPose(cas)
     if {c.name for c in pose.clips} != {'default', 'fire'}:
         raise ValueError('V301 recoil CAS no longer has the audited two clips')
@@ -109,7 +154,7 @@ def build(games, root: str) -> dict[str, bytes]:
     entry = am[0] if isinstance(am[0][0], str) else am[0][0]
     archive = rel(entry[0])
     # The absent *_light.rab is a virtual secondary model, not part of the source closure.
-    out = {archive: legacy_assets.convert(archive, games.read4(archive))}
+    out = {archive: recoil_model_archive(legacy_assets.convert(archive, games.read4(archive)), entry[1])}
     md = model(out[archive], entry[1])
     donor_am = members['animation_model']
     donor_md = model(games.read6(rel(donor_am[0][0])), donor_am[0][1])
@@ -132,9 +177,13 @@ def build(games, root: str) -> dict[str, bytes]:
     shkt = rel(members['ragdoll'][0])
     out[shkt] = games.read4(shkt)
     bind_version, binding = sgo.read(members['ragdoll'][1])
-    # A recoil track owns the barrel's slide; its collision body follows that track.
-    # Never let animation_from_ragdoll overwrite the recoil in the next update.
-    binding['animation_from_ragdoll'] = [r for r in binding['animation_from_ragdoll'] if r[0][1] != 'cannon_slide']
+    # Preserve the original row/offset so native construction binds this body.
+    # Only its destination changes: physics writes the hidden same-frame leaf,
+    # while CAS owns cannon_slide and ragdoll_from_animation follows its recoil.
+    recoil_rows = [row for row in binding['animation_from_ragdoll'] if row[0][1] == 'cannon_slide']
+    if len(recoil_rows) != 1 or recoil_rows[0][0][0] != 'RagDollProxys.cannon_slide':
+        raise ValueError('V301 source recoil binding is not its canonical single row')
+    recoil_rows[0][0][1] = RECOIL_BIND_BONE
     members['ragdoll'][1] = sgo.write_depth_first(bind_version, binding)
     bodies = {o.get('name', '').removeprefix('RagDollProxys.') for o in hk2014.read(out[shkt]).objects
               if o.type.name == 'hkpRigidBody'}
