@@ -615,34 +615,83 @@ int main() {
     M4 bar=crew::instruments::Pose(Identity(),L'b',hp,0,0,reading,true);
     Expect(Near(bar.m[0],.25f) && Near(bar.m[5],1),"a physical bar scales only along its own horizontal axis");
     {   // The weapons screen (cockpit_screens.inc PublishInstruments -> ArmReadings -> e / B / v / D controls).
+        using crew::instruments::Pose;
         Readings w{};
         for(float& v:w.value)v=-1.0f;
-        ArmRow rows[3]{};
-        rows[0]=ArmRow{1,1,1.0f,0.42f,2,false};      // a tank gun's next round going in, HE
-        rows[1]=ArmRow{0,286,0.57f,-1.0f,0,false};   // its coaxial gun
-        rows[2]=ArmRow{2,0,0.0f,-1.0f,0,true};       // a launcher spent for good
-        ArmReadings(w,rows,3,0);
-        auto shown=[&](wchar_t mode,int field,int place){return crew::instruments::Pose(Identity(),mode,field,place,0,w,true).m[0]!=0;};
-        int pictures=0,frames=0;
-        for(int g=0;g<9;++g)pictures+=shown(L'e',arm,g);
+        ArmRow rows[4]{};
+        rows[0]=ArmRow{2,0,0.0f,-1.0f,false};      // AP, spent from the ready rack
+        rows[1]=ArmRow{4,1,1.0f,0.42f,false};      // HEAT, its next round going in
+        rows[2]=ArmRow{0,286,0.57f,-1.0f,false};   // the coaxial MG
+        rows[3]=ArmRow{7,0,0.0f,-1.0f,true};       // a launcher spent for good
+        ArmReadings(w,rows,3,1);
+        auto shown=[&](wchar_t mode,int field,int place){return Pose(Identity(),mode,field,place,0,w,true).m[0]!=0;};
+        int pictures=0,frames=0,cells=0;
+        for(int k=0;k<12;++k)pictures+=shown(L'e',arm,k);
         for(int i=0;i<kRows;++i)frames+=shown(L'e',pick,i);
-        Expect(pictures==1 && shown(L'e',arm,1),"the weapons screen shows the picked weapon's one picture");
-        Expect(frames==1 && shown(L'e',pick,0),"one weapon cell framed: the picked one");
-        Expect(shown(L'e',crew::instruments::shell,2) && !shown(L'e',crew::instruments::shell,1),"the round's tag (HE) alone");
+        for(int i=0;i<kRows;++i)for(int k=0;k<12;++k)cells+=shown(L'e',rowRound+i,k);
+        Expect(pictures==1 && shown(L'e',arm,4),"the weapons screen shows the picked round's one tag and picture (HEAT)");
+        Expect(cells==3 && shown(L'e',rowRound,2) && shown(L'e',rowRound+1,4) && shown(L'e',rowRound+2,0),
+               "each cell names its weapon by its round class (AP, HEAT, MG), one each");
+        Expect(frames==1 && shown(L'e',pick,1),"one cell framed: the picked one");
         Expect(shown(L'l',w.language,load+1) && !shown(L'l',w.language,empty+1),"LOADING while the next round goes in");
-        Expect(Near(crew::instruments::Pose(Identity(),L'b',load,0,0,w,true).m[0],.42f) && crew::instruments::Pose(Identity(),L'b',mag,0,0,w,true).m[0]==0,
+        Expect(Near(Pose(Identity(),L'b',load,0,0,w,true).m[0],.42f) && Pose(Identity(),L'b',mag,0,0,w,true).m[0]==0,
                "loading fills the bar in place of the magazine");
-        Expect(Near(crew::instruments::Pose(Identity(),L'b',row+1,0,0,w,true).m[0],.57f) && shown(L'v',row+2,0) && !shown(L'v',row+3,0),
-               "each listed weapon's cell has its fill; no cell past the seat's weapons");
-        Expect(Segment(w.value[ammo],0,1) && !Segment(w.value[ammo],0,0),"the rounds digits read the picked weapon's");
-        ArmReadings(w,rows,3,2);
-        Expect(shown(L'l',w.language,empty+1) && !shown(L'l',w.language,load+1) && !shown(L'e',crew::instruments::shell,2),
-               "a spent launcher: EMPTY, no loading, no stale tag");
+        Expect(Near(Pose(Identity(),L'b',row+2,0,0,w,true).m[0],.57f),"each listed weapon's cell has its fill");
+        {
+            Readings two{};
+            for(float& v:two.value)v=-1.0f;
+            ArmReadings(two,rows,2,0);
+            Expect(Pose(Identity(),L'v',row+1,0,0,two,true).m[0]!=0 && Pose(Identity(),L'v',row+2,0,0,two,true).m[0]==0,
+                   "no cell past the seat's weapons");
+        }
+        Expect(Near(Pose(Identity(),L'b',row+1,0,0,w,true).m[0],.42f),"a loading weapon's cell shows its loading");
+        ArmReadings(w,rows,4,3);
+        Expect(shown(L'l',w.language,empty+1) && !shown(L'l',w.language,load+1),"a spent launcher: EMPTY, no loading");
+        Expect(w.value[pick]==2 && shown(L'e',rowRound,4) && shown(L'e',rowRound+2,7),
+               "four weapons: the cells a window holding the picked one (HEAT, MG, RKT; RKT framed)");
         Readings one{};
         for(float& v:one.value)v=-1.0f;
         ArmReadings(one,rows,1,0);
         Expect(one.value[pick]<0 && one.value[row]<0,"a single weapon lists no cells");
-        Expect(crew::instruments::Pose(Identity(),L'e',arm,1,0,one,false).m[0]==0,"another seat's picture is hidden, not all nine at once");
+        Expect(Pose(Identity(),L'e',arm,2,0,one,false).m[0]==0,"another seat's picture is hidden, not all twelve at once");
+    }
+    {   // The flight instruments: a compass card, an altimeter's hands, an attitude card, zero-padded digits.
+        using crew::instruments::Pose;
+        Readings f{};
+        for(float& v:f.value)v=-1.0f;
+        f.flight=true;f.value[heading]=90;f.value[altitude]=2500;f.value[pitch]=10;f.value[roll]=30;
+        const float tip[3]={0,1,0};
+        auto at=[&](const M4& m,float* out){for(int c=0;c<3;++c)out[c]=tip[0]*m.m[c]+tip[1]*m.m[4+c]+tip[2]*m.m[8+c]+m.m[12+c];};
+        float p[3];
+        at(Pose(Identity(),L'h',heading,0,0,f,true),p);
+        Expect(Near(p[0],-1) && Near(p[1],0),"heading 090: the card's N turned to the left, E under the lubber line",p[0],p[1]);
+        at(Pose(Identity(),L'n',speed,0,0,f,true),p);
+        f.value[speed]=0;at(Pose(Identity(),L'n',speed,0,0,f,true),p);
+        Expect(p[0]<0 && p[1]<0,"the needles' sense: zero at the scale's lower left",p[0],p[1]);
+        at(Pose(Identity(),L'w',altitude,1000,0,f,true),p);
+        Expect(Near(p[0],0) && Near(p[1],-1),"2500 m: the long hand at 5 (half way round)",p[0],p[1]);
+        at(Pose(Identity(),L'w',altitude,10000,0,f,true),p);
+        Expect(Near(p[0],1) && Near(p[1],0),"2500 m: the short hand at 2.5 (a quarter round)",p[0],p[1]);
+        Expect(Pose(Identity(),L'h',heading,1,0,f,true).m[0]==0 && Pose(Identity(),L'h',heading,0,0,f,true).m[0]!=0,
+               "flying: the ground's compass card gives way to the attitude card");
+        // The attitude card: its centre dropped 10 degrees x 0.0045 below the window's, the card turned against the
+        // 30 degree right bank (anticlockwise: its right side up).
+        const M4 g=Pose(Identity(),L'g',pitch,45,1400,f,true);
+        const float centre[3]={g.m[12],g.m[13],g.m[14]};
+        float right[3];
+        const float side[3]={1,0,0};
+        for(int c=0;c<3;++c)right[c]=side[0]*g.m[c]+side[1]*g.m[4+c]+side[2]*g.m[8+c]+g.m[12+c]-centre[c];
+        Expect(Near(std::sqrt(centre[0]*centre[0]+centre[1]*centre[1]),.045f) && right[1]>0.4f && right[0]>0.8f,
+               "nose 10 up, right bank 30: the horizon 0.045 below and its right side raised",right[0],right[1]);
+        f.value[pitch]=80;
+        const M4 most=Pose(Identity(),L'g',pitch,45,1400,f,true);
+        Expect(Near(std::sqrt(most.m[12]*most.m[12]+most.m[13]*most.m[13]),.14f),"the card's travel stops at its window's mask");
+        f.flight=false;
+        Expect(Pose(Identity(),L'g',pitch,45,1400,f,true).m[0]==0 && Pose(Identity(),L'h',heading,1,0,f,true).m[0]!=0,
+               "on the ground: no attitude card, the compass card in its window");
+        f.value[heading]=74;
+        Expect(Segment(74,2,0,true) && !Segment(74,2,6,true) && !Segment(74,2,0),"a heading's digits are zero-padded: 074");
+        Expect(Pose(Identity(),L'Z',heading,2,0,f,true).m[0]!=0,"Z digits light the leading zero");
     }
     AuthoredActions();
     Identity_();

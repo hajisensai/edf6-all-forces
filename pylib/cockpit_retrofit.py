@@ -41,6 +41,8 @@ MATERIALS = {
     'retrofit_scale': KitMaterial((148,171,150),emissive=True),
     'retrofit_needle': KitMaterial((210,161,82),emissive=True),
     'retrofit_knob': KitMaterial((28,33,31)),
+    'retrofit_sky': KitMaterial((40,100,165),emissive=True),
+    'retrofit_ground': KitMaterial((115,76,40),emissive=True),
 }
 RANGES = {ci.SPEED:2000,ci.ALT:10000,ci.HEADING:360,ci.FUEL:100,ci.HP:100,
           ci.CLIMB:50,ci.PITCH:90,ci.POWER:100}
@@ -166,7 +168,145 @@ def _text(name,text,at,width,height,material,facing,up):
     return merge(bits,name) if bits else om.Part(name,material,[],[])
 
 
+def _disc(name,material,at,r,u,facing,radius,a0=0.,a1=360.,n=40):
+    """A disc (or the sector a0..a1 degrees clockwise from up) in the face's plane at `at` (a function of x, y)."""
+    pts=[(radius*math.sin(math.radians(a0+(a1-a0)*i/n)),radius*math.cos(math.radians(a0+(a1-a0)*i/n))) for i in range(n+1)]
+    pts=[(0.,0.)]+pts if a1-a0<360 else pts[:-1]
+    verts=[om.Vertex(at(x,y),tuple(facing),(0.,0.)) for x,y in pts]
+    # Counter-clockwise seen from the front: a fan turning anticlockwise in (right, up).
+    tris=[(0,i+1,i) for i in range(1,len(pts)-1)]
+    return om.Part(name,material,verts,tris)
+
+
+def _bar(name,material,at,facing,x0,y0,x1,y1,t):
+    dx,dy=x1-x0,y1-y0;ln=math.hypot(dx,dy) or 1.;px,py=-dy/ln*t/2,dx/ln*t/2
+    pts=[(x0-px,y0-py),(x1-px,y1-py),(x1+px,y1+py),(x0+px,y0+py)]
+    if sum(pts[i-1][0]*pts[i][1]-pts[i][0]*pts[i-1][1] for i in range(4))<0:pts=pts[::-1]
+    return om.Part(name,material,[om.Vertex(at(x,y),tuple(facing),(0.,0.)) for x,y in pts],[(0,1,2),(0,2,3)])
+
+
+def _annulus(name,material,at,facing,inner,outer,n=48):
+    verts,tris=[],[]
+    for i in range(n):
+        a,b=2*math.pi*i/n,2*math.pi*(i+1)/n
+        quad=[(inner*math.sin(a),inner*math.cos(a)),(inner*math.sin(b),inner*math.cos(b)),
+              (outer*math.sin(b),outer*math.cos(b)),(outer*math.sin(a),outer*math.cos(a))]
+        base=len(verts);verts+=[om.Vertex(at(x,y),tuple(facing),(0.,0.)) for x,y in quad]
+        tris+=[(base,base+1,base+2),(base,base+2,base+3)]
+    return om.Part(name,material,verts,tris)
+
+
+def _compass(name,centre,facing,up,diameter):
+    """A standby compass: a card a tick each 5 degrees (longer each 30), N / E / S / W and the tens of degrees between
+    (3 for 030) turning with the heading (h_) under a fixed lubber line and aircraft mark. Not a needle on a 270 degree
+    scale: the user, 2026-10-19: 「哪有方位盘用那种表盘的」."""
+    r,u,f=basis(facing,up);radius=diameter/2
+    def at(x=0.,y=0.,z=0.):
+        return tuple(centre[k]+r[k]*x+u[k]*y+f[k]*z for k in range(3))
+    parts=[cylinder(name+'_rim','retrofit_rim',at(z=-.002),at(z=.003),radius,32),
+           cylinder(name+'_face','retrofit_face',at(z=.003),at(z=.004),radius*.91,32)]
+    card=[]
+    for deg in range(0,360,5):
+        a=math.radians(deg);long=deg%30==0;mid=deg%10==0
+        r0=radius*(.66 if long else .72 if mid else .76)
+        card.append(_bar(name+'_card','retrofit_scale',lambda x,y:at(x,y,.0052),f,r0*math.sin(a),r0*math.cos(a),
+                         radius*.82*math.sin(a),radius*.82*math.cos(a),radius*(.035 if long else .02)))
+    for deg in range(0,360,30):
+        a=math.radians(deg)
+        text={0:'N',90:'E',180:'S',270:'W'}.get(deg,str(deg//10))
+        card.append(_text(name+'_card',text,at(radius*.5*math.sin(a),radius*.5*math.cos(a),.0054),diameter*.2,
+                          diameter*(.1 if deg%90==0 else .075),'retrofit_scale',f,_turn(u,r,deg)))
+    card=merge(card,name+'_card')
+    parts.append(card)
+    lubber=_bar(name+'_lubber','retrofit_needle',lambda x,y:at(x,y,.007),f,0,radius*.86,0,radius*.68,radius*.06)
+    plane=merge([_bar(name+'_plane','retrofit_needle',lambda x,y:at(x,y,.007),f,0,radius*.22,0,-radius*.2,radius*.05),
+                 _bar(name+'_plane','retrofit_needle',lambda x,y:at(x,y,.007),f,-radius*.2,radius*.04,radius*.2,radius*.04,radius*.05),
+                 _bar(name+'_plane','retrofit_needle',lambda x,y:at(x,y,.007),f,-radius*.08,-radius*.17,radius*.08,-radius*.17,
+                      radius*.04)],name+'_plane')
+    parts+=[lubber,plane]
+    dash=_text(name+'_unknown','-',at(0,0,.008),diameter*.18,diameter*.10,'retrofit_scale',f,u)
+    parts.append(dash)
+    return parts,[InstrumentControl(card.name,f'h_{ci.HEADING}_0',at(z=.0052),f,u),
+                  InstrumentControl(dash.name,f'u_{ci.HEADING}',at(z=.008),f,u)]
+
+
+def _turn(u,r,degrees):
+    """`u` turned `degrees` clockwise as the face is seen (toward its right `r`)."""
+    a=math.radians(degrees)
+    return tuple(u[k]*math.cos(a)+r[k]*math.sin(a) for k in range(3))
+
+
+ATTITUDE_DEGREE=.014   # a standby attitude card's pitch scale: dial radii a degree
+
+
+def _attitude(name,centre,facing,up,diameter):
+    """A standby attitude indicator: sky, ground, horizon and a pitch ladder on one card dropped by the nose's pitch and
+    turned against the bank (g_), seen through a round window in a bezel ring in front of it (what moves beyond the
+    window is behind the ring), the fixed aircraft over it and the bank scale's ticks on the ring. Not a needle."""
+    r,u,f=basis(facing,up);radius=diameter/2
+    def at(x=0.,y=0.,z=0.):
+        return tuple(centre[k]+r[k]*x+u[k]*y+f[k]*z for k in range(3))
+    window,lip=radius*.62,radius*1.06
+    travel=(lip-window)/2;reach=window+travel
+    parts=[cylinder(name+'_rim','retrofit_rim',at(z=-.002),at(z=.003),radius,32),
+           cylinder(name+'_face','retrofit_face',at(z=.003),at(z=.004),radius*.91,32)]
+    def z(depth):
+        return lambda x,y:at(x,y,depth)
+    sky=_disc(name+'_sky','retrofit_sky',z(.0045),r,u,f,reach,-90,90)
+    ground=_disc(name+'_ground','retrofit_ground',z(.0045),r,u,f,reach,90,270)
+    lines=[_bar(name+'_lines','retrofit_scale',z(.005),f,-reach,0,reach,0,radius*.035)]
+    for deg in (-20,-10,10,20):
+        y=deg*ATTITUDE_DEGREE*radius;half=radius*(.22 if deg%20 else .14)
+        lines.append(_bar(name+'_lines','retrofit_scale',z(.005),f,-half,y,half,y,radius*.025))
+    lines=merge(lines,name+'_lines')
+    parts+=[sky,ground,lines,_annulus(name+'_bezel','retrofit_rim',z(.0062),f,window,lip)]
+    for deg in (-60,-30,-20,-10,0,10,20,30,60):
+        a=math.radians(deg)
+        parts.append(_bar(name+'_bank','retrofit_scale',z(.0064),f,window*1.02*math.sin(a),window*1.02*math.cos(a),
+                          window*(1.2 if deg%30==0 else 1.12)*math.sin(a),window*(1.2 if deg%30==0 else 1.12)*math.cos(a),
+                          radius*.03))
+    wings=merge([_bar(name+'_wings','retrofit_needle',z(.007),f,-window*.7,0,-window*.25,0,radius*.05),
+                 _bar(name+'_wings','retrofit_needle',z(.007),f,window*.25,0,window*.7,0,radius*.05),
+                 _disc(name+'_wings','retrofit_needle',z(.007),r,u,f,radius*.04,n=12)],name+'_wings')
+    parts.append(wings)
+    control=f'g_{ci.PITCH}_{round(ATTITUDE_DEGREE*1e4)}_{round(travel/radius*1e4)}'
+    extent=(radius,radius)   # the card moves in dial radii
+    return parts,[InstrumentControl(p.name,control,at(z=.0045),f,u,extent) for p in (sky,ground,lines)]
+
+
+def _altimeter(name,centre,facing,up,diameter):
+    """An altimeter: 0..9 round the whole dial, the long hand once round each 1000 m, the short one each 10000 m (w_)."""
+    r,u,f=basis(facing,up);radius=diameter/2
+    def at(x=0.,y=0.,z=0.):
+        return tuple(centre[k]+r[k]*x+u[k]*y+f[k]*z for k in range(3))
+    parts=[cylinder(name+'_rim','retrofit_rim',at(z=-.002),at(z=.003),radius,32),
+           cylinder(name+'_face','retrofit_face',at(z=.003),at(z=.004),radius*.91,32)]
+    for tick in range(50):
+        a=math.radians(tick*7.2);direction=tuple(r[k]*math.sin(a)+u[k]*math.cos(a) for k in range(3))
+        parts.append(panel(name+'_tick','retrofit_scale',at(math.sin(a)*radius*.79,math.cos(a)*radius*.79,.005),
+                           radius*.025,radius*(.15 if tick%5==0 else .07),f,direction))
+    for n in range(10):
+        a=math.radians(n*36)
+        parts.append(_text(name+'_number',str(n),at(math.sin(a)*radius*.58,math.cos(a)*radius*.58,.0055),diameter*.14,
+                           diameter*.1,'retrofit_scale',f,u))
+    parts.append(_text(name+'_unit','x100m',at(0,-radius*.3,.006),diameter*.4,diameter*.07,'retrofit_scale',f,u))
+    parts.append(_text(name+'_title','ALT',at(0,radius*.28,.006),diameter*.3,diameter*.07,'retrofit_scale',f,u))
+    controls=[]
+    for per,length,width,depth in ((10000,.5,.08,.008),(1000,.78,.045,.0085)):
+        p=panel(name+f'_hand_{per}','retrofit_needle',at(0,radius*length/2,depth),radius*width,radius*length,f,u)
+        parts.append(p)
+        controls.append(InstrumentControl(p.name,f'w_{ci.ALT}_{per}',at(z=depth),f,u))
+    dash=_text(name+'_unknown','-',at(0,-radius*.1,.0088),diameter*.18,diameter*.10,'retrofit_scale',f,u)
+    parts.append(dash)
+    controls.append(InstrumentControl(dash.name,f'u_{ci.ALT}',at(z=.0088),f,u))
+    return parts,controls
+
+
 def _dial(name,centre,facing,up,diameter,field,ground,labels,ranges):
+    # A heading is a compass card, an attitude a horizon, an altitude a whole-dial altimeter: real instruments' faces.
+    if field==ci.HEADING:return _compass(name,centre,facing,up,diameter)
+    if field==ci.PITCH:return _attitude(name,centre,facing,up,diameter)
+    if field==ci.ALT and not ground:return _altimeter(name,centre,facing,up,diameter)
     r,u,f=basis(facing,up);radius=diameter/2
     def at(x=0.,y=0.,z=0.):
         return tuple(centre[k]+r[k]*x+u[k]*y+f[k]*z for k in range(3))

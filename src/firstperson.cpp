@@ -1810,10 +1810,10 @@ void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=null
         if(!name || std::wcsncmp(name,L"vc_i_",5)!=0)continue;
         int seat=-1,screen=-1,field=-1,place=0,segment=0;wchar_t mode=0;
         const int fields=swscanf_s(name,L"vc_i_%d_%d_%lc_%d_%d_%d",&seat,&screen,&mode,1u,&field,&place,&segment);
-        if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'p') && fields!=6))continue;
+        if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'Z' || mode==L'p') && fields!=6))continue;
         const bool mine=seat==d.rideSeat;
         const bool rangedNeedle=mode==L'n' && fields>=5;
-        const bool neutralWidget=mode==L'D' || mode==L'B' || mode==L'T';
+        const bool neutralWidget=mode==L'D' || mode==L'B' || mode==L'T' || mode==L'Z';
         // Adjacent stations visible from this seat use the same language, while their
         // new health/percent widgets remain neutral without that seat's live data.
         // A weapons screen's picture / tag / frame (e) has no neutral look: another seat's is hidden.
@@ -2131,6 +2131,11 @@ void FirstPersonInstrumentReadings(const instruments::Readings& readings,const u
     // Game thread (the HUD's vehicle snapshot): published at once, as the draws read only what is published.
     for(auto& state:states)if(state.on && state.riding && state.human==human) {
         state.instruments=readings;state.instrumentsReady=true;
+        // The bank for the attitude indicator, from the seat's own frame (vc_eye_<seat>: rows left, up, ahead in the
+        // world): right wing down positive. A flying vehicle's only, as its pitch.
+        const float* m=state.ride.frame;
+        state.instruments.value[instruments::roll]=readings.flight && std::isfinite(m[1]+m[5]) && (m[1]!=0.0f || m[5]!=0.0f) ?
+            std::atan2(m[1],m[5])/0.01745329252f : -1.0f;
         StateScope scope(&state);Publish();
     }
 }

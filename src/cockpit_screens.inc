@@ -108,13 +108,13 @@ void PublishInstruments(const Snapshot& snap) noexcept {
         const auto& j=snap.jet;
         for(int i=0;i<j.stores && i<kMostStores;++i) {
             ArmRow& w=rows[n++];
-            w.group=hudcue::CockpitArmGroup(hudcue::StoreIconOf(j.storeName[i],j.storeRole[i]));
+            w.round=static_cast<int>(hudcue::CockpitRoundOf(hudcue::StoreIconOf(j.storeName[i],j.storeRole[i])));
             w.rounds=j.storeRounds[i];w.spent=j.storeRounds[i]<=0;
             if(i==j.store)picked=i;
         }
         if(j.guns>0) {
             ArmRow& w=rows[n++];
-            w.group=hudcue::CockpitArmGroup(hudcue::StoreIcon::gun);w.rounds=j.gunRounds;w.spent=j.gunRounds<=0;
+            w.round=static_cast<int>(hudcue::CockpitRound::mg);w.rounds=j.gunRounds;w.spent=j.gunRounds<=0;
             if(picked<0)picked=n-1;
         }
     } else if(snap.stock && snap.stockHud.arms>0) {   // a stock vehicle's (a heli's too), as the loadout strip lays them
@@ -128,12 +128,12 @@ void PublishInstruments(const Snapshot& snap) noexcept {
             const StockArm& m=a.arm[order[k]];
             const reticle::Style sight=m.reticle;
             ArmRow& w=rows[n++];
-            w.group=hudcue::CockpitArmGroup(hudcue::ArmIconOf(static_cast<int>(m.kind),m.lobbed,static_cast<int>(m.style),
-                                                               sight==reticle::Style::cannon || sight==reticle::Style::precision));
+            w.round=static_cast<int>(hudcue::CockpitRoundOfArm(static_cast<int>(m.kind),m.lobbed,static_cast<int>(m.style),
+                                                                sight==reticle::Style::cannon || sight==reticle::Style::precision,
+                                                                static_cast<int>(m.shell)));
             w.rounds=m.ammo;
             w.magazine=m.ammoMax>0 ? static_cast<float>(m.ammo)/static_cast<float>(m.ammoMax) : -1.0f;
             w.loading=hudcue::CellLoad(m.ammo,m.reload,m.cycleSec,m.cycle);
-            w.shell=static_cast<int>(m.shell);
             w.spent=m.ammo<=0 && !m.canReload;
             if(order[k]==fired)picked=k;
         }

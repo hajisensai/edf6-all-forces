@@ -26,7 +26,7 @@ LABELS = {
     'RELOAD': ('LOADING', '装填中', '裝填中', '装填中'),
     'EMPTY': ('EMPTY', '弹尽', '彈盡', '弾切れ'),
 }
-NEUTRAL = 'APHEBMTCN1234'
+NEUTRAL = 'APHEBMTCN1234KxGULSRWIOVDk/m-'   # round tags, dial titles and units: no translation, glyphs only
 
 
 def masks(chars: str) -> dict[str, tuple[int, tuple[int, ...]]]:

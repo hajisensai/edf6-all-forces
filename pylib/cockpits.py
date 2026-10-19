@@ -250,17 +250,19 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
             nonlocal md
             # Visibility-only geometry can share a bone even at different positions.
             # Needles and bars keep their own pivots; their transforms are not visibility-only.
-            reusable = control.control[0] in 'dDplcuve'
-            name = shared.get(control.control) if reusable else None
+            # Parts of one moving control about one pivot (an attitude card's sky, ground and lines) share it too.
+            key = (control.control if control.control[0] in 'dDplcuveZ' else
+                   (control.control, control.centre, control.facing, control.up, control.extent))
+            name = shared.get(key)
             if name is None:
                 name = f'vc_i_{fit.seat}_{index}_{control.control}'
                 at = Screen('status', control.centre, control.facing, .01, .01, control.up)
                 transform = screen_frame(at, fit)
-                if control.control.startswith(('t_','T_')):
+                if control.control.startswith(('t_','T_','g_')):   # moved in units of the extent (g: screen heights)
                     transform[:3] = [v*control.extent[0]*fit.scale for v in transform[:3]]
                     transform[4:7] = [v*control.extent[1]*fit.scale for v in transform[4:7]]
                 md = vehicle_optics.add_marker(md, fit.bone, name, transform)
-                if reusable: shared[control.control] = name
+                shared[key] = name
             controls[fit.seat][control.part] = name
 
         for index, scr in enumerate(kit.screens):
