@@ -46,6 +46,10 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址为 RVA。置信度：H = 反汇编 /
   - 原版建模本身不看 `GS+0x300`：`0xD8700 / 0xD8730` 只在外观 < 0 时取任务表第 6 列（`0xE10F0`）。
 - 远端玩家：发送方按自己的存档算出「选了」与「配合任务或未解锁」两个标志（§6），接收方用本机的「是否 4.1 任务包」（同房间同任务）合成。
 
+### 1.2 未解锁时也能选（2026-10-19）
+
+用户：「我怎么没办法把我的皮肤换成4.1的，因为我没通关4.1吗」。原因是上面的原版门槛：弹窗只在 `+0x7A4`（`GS+0x300` 的拷贝）非 0 时构造，4.1 项挂在弹窗里，一起被挡。这不是 4.1 外观的设计。现在未解锁、该兵种文件齐全时，插件链接士兵画面 OnUpdate（vtable `0x1805788` 槽 1 = `0x8AB310`），在它构造弹窗之前置 `+0x7A4 = 1`，并像解锁后的初始化一样换上带外观键的操作说明（`0x7A3500` 查 `Sys_Control_Keyboard_Description_SoldierSelect` / `Sys_Control_Description_SoldierSelect`，赋给 `+0x738`，置 `+0x6F2`）。弹窗里只保留第 0 项「配合任务」与 4.1 项，其余 4 个原版外观用原版条目析构 `0x8E170` 去掉（`outfit41_logic.h OfferLocked / LockedCursor`）。日志：`OUTFIT41 ... popup=1 locked=1 (unlocked N)`、`OUTFIT41 player 1: the outfit change is locked ...`。
+
 ## 2. 模型路径钩子（逆向）
 
 | 调用点 | 调用 | 上下文 | 置信 |

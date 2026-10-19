@@ -38,6 +38,17 @@ void ShowPreview(const PreviewSpec&) noexcept {UnexpectedRoomDependency();}
 void HidePreview() noexcept {++nativePreviewHides;}
 void TickPreview(bool) noexcept {UnexpectedRoomDependency();}
 }
+// The native dialogs (room_dialog.cpp): not ready here, so the menu keeps its overlay path this fixture drives; with no
+// dialog open, closing / forgetting one is a no-op.
+namespace nativedialog {
+bool InstallNativeDialog() noexcept {UnexpectedRoomDependency();return false;}
+bool NativeDialogReady() noexcept {return false;}
+bool OpenDialog(const wchar_t*,const Button*,int,int,Handle*) noexcept {UnexpectedRoomDependency();return false;}
+bool DialogAlive(const Handle&) noexcept {UnexpectedRoomDependency();return false;}
+bool TakePicked(const Handle&,std::uint64_t*) noexcept {UnexpectedRoomDependency();return false;}
+void CloseDialog(Handle& h) noexcept {h=Handle{};}
+void ForgetDialog(Handle& h) noexcept {h=Handle{};}
+}
 namespace roomsync {
 void TickRoomSync() noexcept {UnexpectedRoomDependency();}
 void LeaveRoomSync() noexcept {++nativeSyncLeaves;}

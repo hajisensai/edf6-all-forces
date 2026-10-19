@@ -95,6 +95,15 @@ def audit_code(img: bytes, base: int) -> None:
             f = slots[k]
             check(img[f:f + 3] == b'\x48\x8d\x05' and f + 7 + struct.unpack_from('<i', img, f + 3)[0] == vt,
                   f'item vtable {vt:#x} slot {k} writes its own vtable')
+    # The locked outfit change (outfit41_logic.h OfferLocked): the soldier screen's OnUpdate slot, the only read of its
+    # +0x7A4 (the popup, inside OnUpdate) and its write (the screen's init), the item destructor the popup's cleanup uses.
+    upd = struct.unpack_from('<Q', img, sigs.SOLDIER_VTABLE + 8 * sigs.SOLDIER_SLOT_UPDATE)[0] - base
+    check(upd == sigs.SOLDIER_UPDATE, f'soldier screen vtable {sigs.SOLDIER_VTABLE:#x} slot {sigs.SOLDIER_SLOT_UPDATE} is its OnUpdate')
+    check(img[0x8AB59C:0x8AB5A3] == bytes.fromhex('80bfa407000000'),
+          'the popup is built in OnUpdate behind cmp byte [screen+0x7A4], 0')
+    check(img[0x8A9B23:0x8A9B29] == bytes.fromhex('888ea4070000'), 'the screen init copies GS +0x300 into +0x7A4')
+    check(img[0x8ABC4D:0x8ABC50] == bytes.fromhex('4c8d0d') and 0x8ABC54 + struct.unpack_from('<i', img, 0x8ABC50)[0] == 0x8E170
+          and struct.unpack_from('<I', img, 0x8ABC55)[0] == 0x90, 'the popup destroys its 0x90-byte items with 0x8E170')
 
 
 def audit_game(game, reg: dict) -> None:

@@ -55,6 +55,13 @@ constexpr std::size_t kReserve=0xB91D0,kItemCopy=0x89950,kAssign=0x3D450,kCloseP
 // The five stock items' std::function vtables, in the popup's order (outfit -1, 2, 3, 1, 0); the first is the one ours
 // is copied from.
 constexpr std::size_t kItemVtables[kStockItems]={0x1805CF0,0x1805D28,0x1805D60,0x1805D98,0x1805DD0};
+// The outfit change still locked (outfit41_logic.h OfferLocked): HUiHQSoldierSelect's OnUpdate (vtable 0x1805788 slot 1,
+// 0x8AB310: the popup is built there), the item's destructor (0x8E170: the popup's own eh-vector destructor, 0x8ABC4D),
+// the text table's lookup (0x7A3500 on [0x20B29A8], 0x8A9B53), the two help keys the unlocked screen picks from and the
+// pad-mode flag it asks (0x1183D70, 0x8A9B3F).
+constexpr std::size_t kSoldierVtable=0x1805788,kSoldierSlotUpdate=1,kSoldierUpdate=0x8AB310;
+constexpr std::size_t kItemDestroy=0x8E170,kTextTable=0x20B29A8,kTextLookup=0x7A3500,kPadMode=0x1183D70;
+constexpr std::size_t kHelpKeyboard=0x18058F0,kHelpPad=0x18058A0;
 
 using PathFn=const wchar_t*(__fastcall*)(void*,int,int);
 using Call4=std::uintptr_t(__fastcall*)(std::uintptr_t,std::uintptr_t,std::uintptr_t,std::uintptr_t);
@@ -67,6 +74,10 @@ using OutfitFn=int(__fastcall*)(void*,int);
 using FuncCopyFn=void*(__fastcall*)(void*,void*);
 using FuncCallFn=std::uintptr_t(__fastcall*)(void*,void*);
 using MessageFn=std::uintptr_t(__fastcall*)(unsigned char*,std::uintptr_t,std::uintptr_t);
+using ScreenUpdateFn=std::uintptr_t(__fastcall*)(unsigned char*,void*);
+using ItemDestroyFn=void(__fastcall*)(void*);
+using TextLookupFn=const wchar_t*(__fastcall*)(void*,const wchar_t*);
+using PadModeFn=bool(__fastcall*)();
 
 struct Signature { std::size_t rva; const unsigned char* bytes; std::size_t size; };
 #include "outfit41_signatures.inc"
@@ -87,6 +98,8 @@ thread_local int memberIndex=-1;    // 0x595960's member (0x591219), for the cre
 thread_local int viewPlayer=-1;     // inside the 3D view's OnMessage: its player
 FuncCallFn stockCall[kStockItems]{};
 MessageFn nextMessage=nullptr;
+ScreenUpdateFn nextSoldierUpdate=nullptr;
+unsigned char* forcedScreen=nullptr;   // the soldier screen whose +0x7A4 we set (UI thread)
 void* ourVtable[1+kFuncSlots]{};   // [0] the stock vtable's [-1] (its RTTI locator), then the six slots
 
 unsigned char* GameStatus() noexcept { return At<unsigned char*>(image,kGameStatus); }
@@ -375,6 +388,49 @@ template<int I> std::uintptr_t __fastcall StockPicked(void* impl,void* arg) {
 }
 constexpr FuncCallFn kStockHooks[kStockItems]={&StockPicked<0>,&StockPicked<1>,&StockPicked<2>,&StockPicked<3>,&StockPicked<4>};
 
+// GS +0x300: the stock outfit change unlocked (1), locked (0); -1 unreadable.
+int Unlocked() noexcept {
+    __try {
+        unsigned char* gs=GameStatus();
+        return gs ? (At<unsigned char>(gs,kGsUnlocked)!=0 ? 1 : 0) : -1;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
+// The help line the unlocked screen shows (0x8A9B37..0x8A9BB1): the text table's entry assigned to +0x738, +0x6F2 set.
+void UnlockedHelp(unsigned char* screen) noexcept {
+    const bool keyboard=KeyboardHelp(At<std::int32_t>(screen,kScreenPlayer),reinterpret_cast<PadModeFn>(image+kPadMode)());
+    void* table=At<void*>(image,kTextTable);
+    if(!table)return;
+    const wchar_t* text=reinterpret_cast<TextLookupFn>(image+kTextLookup)(table,
+        reinterpret_cast<const wchar_t*>(image+(keyboard ? kHelpKeyboard : kHelpPad)));
+    if(!text)return;
+    reinterpret_cast<AssignFn>(image+kAssign)(screen+kScreenHelp,text,std::wcslen(text));
+    Put<unsigned char>(screen,kScreenHelpDirty,1);
+}
+// Every frame of the soldier screen, before its own update builds the popup: a locked screen whose class has our files
+// gets the popup (+0x7A4) and the unlocked help once; given back (0, the locked stock value) when that stops holding.
+void OfferWhileLocked(unsigned char* screen) noexcept {
+    if(Unlocked()!=0)return;   // unlocked: the game's own; unreadable: left alone
+    const bool set=At<unsigned char>(screen,kScreenUnlocked)!=0;
+    if(set && forcedScreen!=screen)return;   // not ours to take back
+    const int who=At<std::int32_t>(screen,kScreenPlayer);
+    if(!set)CheckFiles();                     // once a screen (and while the files are missing), not every frame
+    const bool offer=OfferLocked(Cfg().enabled,false,ValidLocal(who) && Installed(ClassOf(who)));
+    if(offer && !set) {
+        Put<unsigned char>(screen,kScreenUnlocked,1);
+        UnlockedHelp(screen);
+        if(forcedScreen!=screen)Log("OUTFIT41 player %d: the outfit change is locked (GS +0x300 = 0): the outfit popup offered "
+                                    "with the mission's outfit and the EDF4.1 outfit only",who+1);
+        forcedScreen=screen;
+    } else if(!offer && set && forcedScreen==screen) {
+        Put<unsigned char>(screen,kScreenUnlocked,0);
+        forcedScreen=nullptr;
+    }
+}
+std::uintptr_t __fastcall SoldierUpdateHook(unsigned char* screen,void* ctx) {
+    __try { if(screen)OfferWhileLocked(screen); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    return nextSoldierUpdate(screen,ctx);
+}
+
 // Adds our item to the outfit popup's request (`req`, 0x119C600's fourth argument at 0x8ABC10) when the screen is a local
 // player's and its class's files are in Mods. Anything not as 0x8AB310 builds it: left alone.
 void AddItem(unsigned char* req) noexcept {
@@ -388,6 +444,15 @@ void AddItem(unsigned char* req) noexcept {
     if(!impl0 || At<void*>(impl0,0)!=image+kItemVtables[0])return;
     const int who=ScreenPlayer(impl0);
     CheckFiles();
+    const bool locked=Unlocked()==0;
+    if(locked) {
+        // Only a screen we gave the popup reaches here locked: the four stock outfits stay behind the game's unlock,
+        // destroyed in place (the game's own item destructor) before ours is added. Without our files: item 0 alone.
+        for(std::size_t i=kLockedKeep;i<size;++i)reinterpret_cast<ItemDestroyFn>(image+kItemDestroy)(data+i*kItemSize);
+        size=kLockedKeep;
+        Put<std::size_t>(vec,kVecSize,size);
+        Put<std::int32_t>(req,kReqCursor,0);
+    }
     if(!ValidLocal(who) || !Installed(ClassOf(who)))return;
     const wchar_t* label=hudtext::Tr(hudtext::Tx::outfit41Item,hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage()));
     if(size==At<std::size_t>(vec,kVecCapacity)) {
@@ -400,7 +465,8 @@ void AddItem(unsigned char* req) noexcept {
     reinterpret_cast<AssignFn>(image+kAssign)(item+kItemText,label,std::wcslen(label));
     auto impl=At<unsigned char*>(item,kItemImpl);
     if(impl)Put<void*>(impl,0,&ourVtable[1]);
-    Put<std::int32_t>(req,kReqCursor,Cursor(state.on[who],At<std::int32_t>(req,kReqCursor)));
+    Put<std::int32_t>(req,kReqCursor,locked ? LockedCursor(state.on[who]) :
+                                       Cursor(state.on[who],At<std::int32_t>(req,kReqCursor),static_cast<std::int32_t>(size)));
 }
 std::uintptr_t __fastcall ShowDialogHook(std::uintptr_t system,std::uintptr_t out,std::uintptr_t type,std::uintptr_t req) {
     __try { AddItem(reinterpret_cast<unsigned char*>(req)); } __except(EXCEPTION_EXECUTE_HANDLER) {
@@ -490,8 +556,17 @@ bool InstallOutfit41() noexcept {
     // our item only once every stock item can turn the outfit off again
     const int popup=items==static_cast<int>(kStockItems) ?
         Redirect(kOutfitDialogCall,kShowDialog,reinterpret_cast<void*>(&ShowDialogHook)) : 0;
-    Log("OUTFIT41 battle=%d/%d menu=%d/%zu stock items=%d/%zu popup=%d files ranger=%d wingdiver=%d airraider=%d fencer=%d "
-        "chosen=%d%d EDF41Content=%d (%ls)",battle,kBattleSites,menu,std::size(kMenuPathCalls)+1,items,kStockItems,popup,
+    // and offered to a locked screen only once the popup carries it (else the locked screen keeps the stock look)
+    int locked=0;
+    if(popup) {
+        void* next=nullptr;
+        auto slot=reinterpret_cast<void**>(image+kSoldierVtable)+kSoldierSlotUpdate;
+        if(*slot!=image+kSoldierUpdate)Log("OUTFIT41 the soldier screen's OnUpdate is %p, not the stock one: chained onto it",*slot);
+        if(edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&SoldierUpdateHook),&next)){nextSoldierUpdate=reinterpret_cast<ScreenUpdateFn>(next);locked=1;}
+        else Log("OUTFIT41 the soldier screen's OnUpdate could not be chained: the EDF4.1 outfit waits for the stock unlock");
+    }
+    Log("OUTFIT41 battle=%d/%d menu=%d/%zu stock items=%d/%zu popup=%d locked=%d (unlocked %d) files ranger=%d wingdiver=%d airraider=%d fencer=%d "
+        "chosen=%d%d EDF41Content=%d (%ls)",battle,kBattleSites,menu,std::size(kMenuPathCalls)+1,items,kStockItems,popup,locked,Unlocked(),
         available[0].load(),available[1].load(),available[2].load(),available[3].load(),state.on[0],state.on[1],
         Cfg().edf41Content,statePath);
     return battle==kBattleSites && menu==static_cast<int>(std::size(kMenuPathCalls))+1 && popup==1;

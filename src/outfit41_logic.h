@@ -159,8 +159,24 @@ inline constexpr std::size_t kScreenPlayer=0x798,kScreenOutfit=0x7A0;
 // std::_Func_impl's vtable (MSVC): _Copy, _Move, _Do_call, _Target_type, _Delete_this, _Get.
 inline constexpr int kFuncSlots=6,kSlotCopy=0,kSlotMove=1,kSlotCall=2;
 
-// The cursor the popup opens on: ours when the EDF4.1 outfit is chosen, else the game's own choice.
-constexpr std::int32_t Cursor(bool on,std::int32_t stock) noexcept { return on ? kItemEdf41 : stock; }
+// The cursor the popup opens on: ours (at `ours`) when the EDF4.1 outfit is chosen, else the game's own choice.
+constexpr std::int32_t Cursor(bool on,std::int32_t stock,std::int32_t ours=kItemEdf41) noexcept { return on ? ours : stock; }
+
+// --- The outfit change still locked (GS +0x300 == 0: the last row of a mission list not cleared yet, docs/edf41-outfits.md
+// §1.1). The stock soldier screen then never opens the popup (0x8AB59C reads its copy +0x7A4) and its help names no
+// outfit key (0x8A9B31). The EDF4.1 outfit is ours, not the game's progression: the user (2026-10-19) asked why it could
+// not be chosen before clearing EDF4.1, and it was never meant to wait for any clear. So while locked the screen is given
+// the popup (+0x7A4 set, the help the unlocked screen shows: 0x8A9B37..0x8A9CA6) and the popup offers only what the
+// lock allows plus ours: the mission's outfit (item 0, -1, what a locked save always wears) and the EDF4.1 outfit; the
+// four stock outfits stay behind the game's own unlock.
+inline constexpr std::size_t kScreenUnlocked=0x7A4,kScreenHelp=0x738,kScreenHelpDirty=0x6F2;
+inline constexpr std::size_t kLockedKeep=1;           // the stock items kept while locked: item 0, the mission's outfit
+// The popup's EDF4.1 item offered to a locked screen: the plugin on, the change locked, and the class's files there.
+constexpr bool OfferLocked(bool enabled,bool unlocked,bool installed) noexcept { return enabled && !unlocked && installed; }
+// The help the unlocked screen picks (0x8A9B37): the keyboard one for the first player on the keyboard, else the pad's.
+constexpr bool KeyboardHelp(std::int32_t player,bool padMode) noexcept { return player==0 && !padMode; }
+// The popup's cursor while locked: ours when chosen, else the mission's outfit (the only stock item left).
+constexpr std::int32_t LockedCursor(bool on) noexcept { return on ? static_cast<std::int32_t>(kLockedKeep) : 0; }
 
 // --- The HQ / room 3D view (UiHQ_3DModelView, vtable 0x180FA60): OnMessage (slot 3, 0x93B320) asks 0xE3420 for the
 // menu model path (0x93B426 msg 3, 0x93BD03 msg 6) of the view's own player, view +0x2AC.
