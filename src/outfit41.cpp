@@ -43,6 +43,7 @@ using namespace outfit41;
 
 // EDF.dll 0x678CCB46 RVAs (tools/outfit41_sigs.py checks every one).
 constexpr std::size_t kGameStatus=0x20B2890,kGsClass=0x6E90,kGsOutfit=0x6E94,kGsStride=0x3E60,kGsUnlocked=0x300;
+constexpr std::size_t kGsLocalPlayers=0x14FF4;   // this machine's players (the HQ / room views are made for these)
 constexpr std::size_t kBattlePath=0xE34E0,kMenuPath=0xE3420,kOwnPath=0xD8730,kPlayerOutfit=0xD8700;
 constexpr std::size_t kCreate=0x5A3F90,kCreateOnline=0x591234,kCreateOffline=0x59145B;
 constexpr std::size_t kMemberDesc=0x595960,kMemberDescCall=0x591219;
@@ -103,6 +104,7 @@ unsigned char* forcedScreen=nullptr;   // the soldier screen whose +0x7A4 we set
 void* ourVtable[1+kFuncSlots]{};   // [0] the stock vtable's [-1] (its RTTI locator), then the six slots
 
 unsigned char* GameStatus() noexcept { return At<unsigned char*>(image,kGameStatus); }
+SRWLOCK colourLock=SRWLOCK_INIT;   // the colour swap: the UI thread and a mission's preload may both ask
 
 bool CheckCode() noexcept {
     for(const auto& s:kSignatures) {
@@ -160,6 +162,32 @@ int ClassOf(int who) noexcept {
     unsigned char* gs=GameStatus();
     return gs && ValidLocal(who) ? At<std::int32_t>(gs,kGsClass+static_cast<std::size_t>(who)*kGsStride) : -1;
 }
+
+// --- The EDF4.1 outfit's own colours (outfit41_logic.h Reconcile): the block of the stock outfit under it holds them while
+// the player wears it. Asked wherever the game may read a player's colours next: the soldier screen's frame, the popup's
+// picks, the HQ / room frame and 3D view, a mission's preload.
+const char* kColourActs[]={"","worn: its colours put in","taken off: the stock colours put back","edited","dropped (a save was loaded)"};
+void Recolour(int p) noexcept {
+    if(!ValidLocal(p))return;
+    AcquireSRWLockExclusive(&colourLock);
+    ColourAct act=ColourAct::none;
+    bool changed=false;
+    int cls=-1,outfit=-1;
+    __try {
+        unsigned char* gs=GameStatus();
+        if(gs && (p==0 || At<std::int32_t>(gs,kGsLocalPlayers)>p)) {
+            cls=ClassOf(p);
+            if(ValidClass(cls) && LocalWears(p,cls))outfit=reinterpret_cast<OutfitFn>(image+kPlayerOutfit)(gs,p);
+            act=Reconcile(state,p,gs+ColourOffset(p,0,0),outfit>=0 ? cls : -1,outfit,changed);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){act=ColourAct::none;changed=false;}
+    if(changed)SaveState();
+    ReleaseSRWLockExclusive(&colourLock);
+    if(act!=ColourAct::none && act!=ColourAct::mirrored)
+        Log("OUTFIT41 player %d class %d: the EDF4.1 outfit's own colours %s (stock outfit %d's block)",p+1,cls,
+            kColourActs[static_cast<int>(act)],outfit);
+}
+void RecolourAll() noexcept { for(int p=0;p<kLocalPlayers;++p)Recolour(p); }
 
 // --- The room (EDF6Coop): this machine's value, the others'
 const EDF6CoopMemberAttributeApi* attrApi=nullptr;
@@ -233,6 +261,7 @@ void Tick() noexcept {
     const ULONGLONG now=GetTickCount64();
     if(lastTick && now-lastTick<kTickMs)return;
     lastTick=now;
+    RecolourAll();   // before telling the room: the member record the game sends reads these blocks
     PublishOwn();
     if(attrApi) {
         Lookup none;none.id="";
@@ -256,6 +285,7 @@ const wchar_t* __fastcall BattlePathHook(void* tables,int cls,int outfit) {
     const wchar_t* ours=nullptr;
     if(ValidClass(cls)) {
         if(b.what==Build::preloadOnline && ValidIndex(b.who)) {
+            if(!b.remote)Recolour(0);
             const bool wears=b.remote ? RemoteWears(b.who,cls) : LocalWears(0,cls);
             ours=Decided(cls,wears,preloads.Online(b.who));
             Log("OUTFIT41 online preload: mission player %d (%s) class %d: %s",b.who,b.remote ? "remote" : "this machine's",cls,
@@ -268,6 +298,7 @@ const wchar_t* __fastcall BattlePathHook(void* tables,int cls,int outfit) {
 const wchar_t* __fastcall OwnPathHook(void* gs,int who,int cls) {
     if(ValidLocal(who) && ValidClass(cls)) {
         preloads.BeginPreload();
+        Recolour(who);   // this mission's outfit decides the block (the mission's outfit -1 resolves per mission)
         const wchar_t* ours=Decided(cls,LocalWears(who,cls),preloads.Local(who));
         const Wire w=LocalWire(who);
         Log("OUTFIT41 preload: player %d class %d: %s (chosen %d, mission outfit or locked %d, EDF4.1 pack %d, files %d)",who+1,
@@ -368,6 +399,7 @@ std::uintptr_t __fastcall OurPicked(void* impl,void* arg) {
         SaveState();
         Log("OUTFIT41 player %d: the EDF4.1 outfit chosen",who+1);
     }
+    if(ValidLocal(who))Recolour(who);   // its own colours in before the view is rebuilt
     const auto result=reinterpret_cast<CloseFn>(image+kClosePopup)(At<void*>(arg,0));
     if(ValidLocal(who))Rebuild(who,ClassOf(who));
     if(who==0)PublishOwn();
@@ -380,8 +412,10 @@ template<int I> std::uintptr_t __fastcall StockPicked(void* impl,void* arg) {
         state.on[who]=false;
         SaveState();
         Log("OUTFIT41 player %d: the EDF4.1 outfit off (stock item %d)",who+1,I);
+        Recolour(who);   // the stock block back before the stock item changes the outfit
     }
     const auto result=stockCall[I](impl,arg);
+    if(ValidLocal(who))Recolour(who);   // the outfit may now resolve to another block (the EDF4.1 pack's default)
     if(was)Rebuild(who,ClassOf(who));
     if(who==0)PublishOwn();   // the save's outfit may have changed the mission default too
     return result;
@@ -427,7 +461,9 @@ void OfferWhileLocked(unsigned char* screen) noexcept {
     }
 }
 std::uintptr_t __fastcall SoldierUpdateHook(unsigned char* screen,void* ctx) {
-    __try { if(screen)OfferWhileLocked(screen); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    int who=-1;
+    __try { if(screen){OfferWhileLocked(screen);who=At<std::int32_t>(screen,kScreenPlayer);} } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    Recolour(who);   // a class changed on this screen: its block follows
     return nextSoldierUpdate(screen,ctx);
 }
 

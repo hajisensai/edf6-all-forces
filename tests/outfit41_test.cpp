@@ -23,6 +23,86 @@ bool EndsWith(const wchar_t* s,const wchar_t* tail) {
 }
 }  // namespace
 
+// The EDF4.1 outfit's own colours (Reconcile): a fake GS colour area, two players' 16 blocks each.
+struct FakeGs { unsigned char player[kLocalPlayers][16*kColourBlock]; };
+unsigned char* Block(FakeGs& g,int p,int cls,int outfit) { return g.player[p]+static_cast<std::size_t>(outfit+cls*4)*kColourBlock; }
+void Fill(unsigned char* b,unsigned char v) { std::memset(b,v,kColourBlock); }
+bool Is(const unsigned char* b,unsigned char v) { for(std::size_t i=0;i<kColourBlock;++i)if(b[i]!=v)return false; return true; }
+void Colours() {
+    Expect(ColourOffset(0,0,0)==0x6FB0 && ColourOffset(1,0,0)==0x6FB0+0x3E60 && ColourOffset(0,1,2)==0x6FB0+6*0x188,
+           "the game's colour blocks: (outfit + class*4) * 0x188 from GS +0x6FB0, a player 0x3E60 on");
+    Expect(kColourBlock==0x188 && 0x6FB0+0xC0==0x7070 && 0x6FB0+0x184==0x7134,"a block: primary chips, its index, secondary, its index");
+    static FakeGs g;
+    for(int p=0;p<kLocalPlayers;++p)for(int b=0;b<16;++b)Fill(g.player[p]+b*kColourBlock,static_cast<unsigned char>(0x10*p+b));
+    static State s;
+    s=State{};
+    bool changed=false;
+    // Ranger (0), stock outfit 2: the first time worn, the EDF4.1 colours start as the stock ones: nothing changes on screen.
+    Expect(Reconcile(s,0,g.player[0],0,2,changed)==ColourAct::swapped && changed,"worn: swapped");
+    Expect(Is(Block(g,0,0,2),0x02) && s.has[0][0] && Is(s.swap[0].backup,0x02),"first time: the stock colours, backed up");
+    // edited in the colour screen while worn: the EDF4.1 colours
+    Fill(Block(g,0,0,2),0xA1);
+    Expect(Reconcile(s,0,g.player[0],0,2,changed)==ColourAct::mirrored && changed && Is(s.own[0][0],0xA1),"an edit is the EDF4.1 one");
+    Expect(Reconcile(s,0,g.player[0],0,2,changed)==ColourAct::none && !changed,"steady: nothing");
+    // taken off: the stock colours back, the EDF4.1 ones kept
+    Expect(Reconcile(s,0,g.player[0],-1,-1,changed)==ColourAct::restored && Is(Block(g,0,0,2),0x02) && Is(s.own[0][0],0xA1),
+           "taken off: the stock block back, ours kept");
+    // the stock outfit edited meanwhile: untouched by ours
+    Fill(Block(g,0,0,2),0xB2);
+    Expect(Reconcile(s,0,g.player[0],0,2,changed)==ColourAct::swapped && Is(Block(g,0,0,2),0xA1) && Is(s.swap[0].backup,0xB2),
+           "worn again: its own colours, the stock edit backed up");
+    // another stock outfit under it (the mission's outfit resolving elsewhere): ours move, both stock blocks intact
+    Expect(Reconcile(s,0,g.player[0],0,3,changed)==ColourAct::swapped && Is(Block(g,0,0,2),0xB2) && Is(Block(g,0,0,3),0xA1),
+           "moved: the old block back, ours over the new one");
+    // another class: per class colours (Wing Diver first worn: its stock ones)
+    Expect(Reconcile(s,0,g.player[0],1,3,changed)==ColourAct::swapped && Is(Block(g,0,0,3),0x03) && Is(Block(g,0,1,3),0x07),
+           "another class: the Ranger's block back, the Wing Diver's own (its stock colours the first time)");
+    Fill(Block(g,0,1,3),0xC3);
+    Reconcile(s,0,g.player[0],0,3,changed);
+    Expect(Is(Block(g,0,1,3),0x07) && Is(Block(g,0,0,3),0xA1) && Is(s.own[0][1],0xC3),"each class keeps its own EDF4.1 colours");
+    // the second player is separate
+    Expect(Reconcile(s,1,g.player[1],0,3,changed)==ColourAct::swapped && Is(Block(g,1,0,3),0x13) && Is(Block(g,0,0,3),0xA1),
+           "player 2: its own blocks and colours");
+    // a save loaded while swapped: the other blocks change: the swap is dropped without writing the new save's block
+    for(int b=0;b<16;++b)Fill(g.player[1]+b*kColourBlock,static_cast<unsigned char>(0x50+b));
+    Expect(Reconcile(s,1,g.player[1],-1,-1,changed)==ColourAct::dropped && changed && Is(Block(g,1,0,3),0x53),
+           "a save loaded: the loaded block left as it is");
+    // the save never had the swap (loaded back as it was): the block is the backup: dropped, not mirrored
+    Reconcile(s,0,g.player[0],0,3,changed);
+    std::memcpy(Block(g,0,0,3),s.swap[0].backup,kColourBlock);
+    Expect(Reconcile(s,0,g.player[0],0,3,changed)==ColourAct::swapped && Is(s.own[0][0],0xA1) && Is(Block(g,0,0,3),0xA1) &&
+           Is(s.swap[0].backup,0x03),"the backup back in the block: not an edit; the old swap dropped and made again");
+    std::memcpy(Block(g,0,0,3),s.swap[0].backup,kColourBlock);
+    Expect(Reconcile(s,0,g.player[0],-1,-1,changed)==ColourAct::dropped && Is(Block(g,0,0,3),0x03) && Is(s.own[0][0],0xA1),
+           "not worn any more: dropped, the block left as the game has it");
+    Reconcile(s,0,g.player[0],0,3,changed);
+    // out of range wants: none
+    Expect(Reconcile(s,0,g.player[0],0,-1,changed)==ColourAct::restored,"the outfit unknown: taken off");
+    Expect(Reconcile(s,0,g.player[0],5,0,changed)==ColourAct::none && Reconcile(s,2,g.player[0],0,0,changed)==ColourAct::none,
+           "bad class / player: nothing");
+    // the file round trip
+    Reconcile(s,0,g.player[0],0,1,changed);
+    s.on[0]=true;
+    const std::string text=Format(s);
+    const State back=Parse(text);
+    Expect(back.on[0] && back.has[0][0] && back.has[0][1] && !back.has[0][2] && back.has[1][0],"the colours known round trip");
+    Expect(std::memcmp(back.own[0][1],s.own[0][1],kColourBlock)==0 && std::memcmp(back.own[0][0],s.own[0][0],kColourBlock)==0,
+           "their bytes");
+    Expect(back.swap[0].cls==0 && back.swap[0].outfit==1 && back.swap[0].others==s.swap[0].others &&
+           std::memcmp(back.swap[0].backup,s.swap[0].backup,kColourBlock)==0,"the swap and its backup");
+    Expect(back.swap[1].cls<0,"no swap: none");
+    // a swap line without its backup, or malformed: no swap (the block left to the game)
+    std::string cut=text.substr(0,text.find("Backup1="));
+    Expect(Parse(cut).swap[0].cls<0,"a swap without its backup: none");
+    Expect(Parse("Swap1=0,9,0000000000000000\r\nColours1_7=00\r\n").swap[0].cls<0 && !Parse("Colours1_7=00").has[0][0],
+           "malformed: ignored");
+    Expect(Parse("[Outfit41]\r\nPlayer1=1\r\n").on[0] && !Parse("[Outfit41]\r\nPlayer1=1\r\n").has[0][0],"an older file: no colours yet");
+    // after the round trip, the live state goes on: still swapped where the file says
+    static State again;
+    again=back;
+    Expect(Reconcile(again,0,g.player[0],0,1,changed)==ColourAct::none,"read back: the block in the game is ours, nothing to do");
+}
+
 int main() {
     const wchar_t* stems[kClasses]={L"EDF41_P_RANGER",L"EDF41_P_WINGDIVER",L"EDF41_P_AIRRAIDER",L"EDF41_P_FENCER"};
     for(int c=0;c<kClasses;++c) {
@@ -116,6 +196,7 @@ int main() {
     Expect(kScreenUnlocked==0x7A4 && kScreenHelp==0x738 && kScreenHelpDirty==0x6F2,"the soldier screen's fields");
     Expect(kItemSize==0x90 && kItemImpl==0x58 && kReqVector==0x150 && kReqCursor==0x148 && kReqType==0x128,"the request's layout");
     Expect(kViewPlayer==0x2AC && kViewSlotMessage==3,"the 3D view's player and OnMessage slot");
+    Colours();
     std::printf("outfit41_test: %d/%d checks passed\n",checks-failures,checks);
     return failures ? 1 : 0;
 }
