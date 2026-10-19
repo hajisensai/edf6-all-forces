@@ -102,7 +102,8 @@ void MapCommandSquadFold(const float* rect) noexcept; // the panel's summary row
 constexpr int kMapFormationEntries=24;
 void MapCommandFormationButtons(const float* rects,const int* entries,int n) noexcept;
 void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,const int* entries,int n) noexcept; // up to 16
-void MapCommandUiPanels(const float* rects,int n) noexcept; // up to 16 complete background rectangles
+constexpr int kMapUiPanels=32;
+void MapCommandUiPanels(const float* rects,int n) noexcept; // up to kMapUiPanels complete background rectangles
 // Game thread, after MapCommandFrame and before map camera steering. A press begun on UI stays
 // captured until its own release, even outside that panel (left, Ctrl-left, and right mouse).
 bool MapCommandPointerCaptured() noexcept;
@@ -181,15 +182,26 @@ struct MapCommandReadout {
     // index, -1 none), each row's state now (debugspawn::RowState).
     bool placeOn=false,placeOnline=false,placeOpen=false;
     int placeCategory=0,placePick=0,placeArmed=-1;
+    int placeTop=0;            // the first row the shown category's list scrolled to (range_place.h Panel::top)
     debugspawn::RowState placeState[debugspawn::kEntryCount]{};
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
 // hud.cpp: the 「摆放」 panel's click targets as drawn (`codes`: map_buttons.h-style codes, kPlace* below), for the clicks.
 constexpr int kPlaceTab=0x1000,kPlaceToggle=0x2000,kPlacePageUp=0x2001,kPlacePageDown=0x2002;   // a row's code: its kEntries index
 constexpr int kMapPlaceItems=rangeplace::kWindow+debugspawn::kCategoryCount+3;
-void MapCommandPlaceButtons(const float* rects,const int* codes,int n) noexcept;
+// `window`: the list's rows drawn (with a pad too, where no click target is published): what a page is (range_place.h).
+void MapCommandPlaceButtons(const float* rects,const int* codes,int n,int window) noexcept;
+// map.cpp Steer, before the wheel zooms: a wheel over the 「摆放」 list scrolls it instead (`delta` WHEEL_DELTA units, +
+// away from the user). True when taken. Game thread.
+bool MapCommandWheel(int delta) noexcept;
+// The legend's title row as drawn (hud.cpp MapLegend; null: none, a pad), and whether it is open (a click on it turns
+// it). Any thread.
+void MapCommandLegendButton(const float* rect) noexcept;
+bool MapLegendOpen() noexcept;
 struct PvpStatus;
-constexpr int kPvpModeToggle=0,kPvpTeam1=1,kPvpTeam2=2,kMapPvpItems=3;
+// kPvpFold: the panel's title row (a click opens / folds it: MapPvpOpen).
+constexpr int kPvpModeToggle=0,kPvpTeam1=1,kPvpTeam2=2,kPvpFold=3,kMapPvpItems=4;
+bool MapPvpOpen() noexcept;
 // The exact rendered state accompanies every action; stale world/revision/member identity is rejected on use.
 void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpStatus* snapshot) noexcept;
 int MapPvpPadSelection() noexcept; // selected code, -1 when R3 has not focused the panel

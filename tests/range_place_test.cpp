@@ -1,7 +1,7 @@
 // The test range's 「摆放」 panel on the M map (src/range_place.h) without the game: it opens on its first key and stays as
 // it was, a row's click picks and arms it (again: disarmed), the right button disarms, shutting it disarms, place asks for
 // the picked row only while it is open, the moves go round a category and keep each category's pick, the arrows page by
-// a window and stop at the ends, the window keeps the pick in view; and the catalog's tabs are all there. Exit code 1
+// the rows shown and stop at the ends, the wheel scrolls the list, the view keeps the pick in it; and the catalog's tabs are all there. Exit code 1
 // when one fails.
 // cmake --build build --target range_place_test && build\range_place_test.exe
 #include "../src/range_place.h"
@@ -74,27 +74,55 @@ void Moving() {
     for(int i=0;i<kCategoryCount;++i)Step(p,back);
     Expect(p.category==0,"round the categories both ways");
     Press down{};down.page=1;
+    p.window=8;
     Step(p,down);
-    Expect(p.pick[0]==(2+kWindow<n ? 2+kWindow : n-1),"an arrow: a window further");
+    Expect(p.pick[0]==2+8 && p.top[0]==8,"an arrow: the list and the pick a page (the rows shown) further");
     for(int i=0;i<20;++i)Step(p,down);
-    Expect(p.pick[0]==n-1,"the arrows stop at the last row");
+    Expect(p.pick[0]==n-1 && p.top[0]==n-8,"the arrows stop at the last row, the last page shown");
     Press up{};up.page=-1;
     for(int i=0;i<20;++i)Step(p,up);
-    Expect(p.pick[0]==0,"and at the first");
+    Expect(p.pick[0]==0 && p.top[0]==0,"and at the first");
     p.category=99;
     Step(p,next);
     Expect(p.category==0,"a broken category resets to the first");
 }
 
 void Window() {
-    Expect(WindowFirst(0,40,12)==0 && WindowFirst(5,40,12)==0,"near the top: from the first row");
-    Expect(WindowFirst(20,40,12)==14,"in the middle: the pick in the middle");
-    Expect(WindowFirst(39,40,12)==28,"at the end: the last window");
-    Expect(WindowFirst(3,8,12)==0,"fewer rows than the window: all of them");
-    for(int pick=0;pick<60;++pick) {
-        const int first=WindowFirst(pick,60,12);
+    Expect(ViewFirst(0,0,40,12)==0 && ViewFirst(0,5,40,12)==0,"near the top: from the first row");
+    Expect(ViewFirst(10,20,40,12)==10,"the list's own scroll kept while the pick is in view");
+    Expect(ViewFirst(0,20,40,12)==9,"a pick below the view brings the list down to it");
+    Expect(ViewFirst(30,20,40,12)==20,"a pick above the view brings the list up to it");
+    Expect(ViewFirst(99,39,40,12)==28,"never past the last page");
+    Expect(ViewFirst(5,3,8,12)==0,"fewer rows than the window: all of them");
+    for(int top=-3;top<70;top+=7)for(int pick=0;pick<60;++pick) {
+        const int first=ViewFirst(top,pick,60,12);
         Expect(first>=0 && first<=pick && pick<first+12 && first+12<=60,"the pick always in view, the window inside the rows");
     }
+    Expect(Pages(40,12)==4 && PageOf(0,40,12)==1 && PageOf(12,40,12)==2 && PageOf(28,40,12)==4,"the page line");
+    // The wheel scrolls the list; the pick follows only to stay in view, and nothing scrolls past the ends.
+    Panel p{};p.open=true;p.window=8;
+    const int n=CountIn(Category::enemy41);
+    Press wheel{};wheel.scroll=3;
+    Expect(Step(p,wheel).act==Act::moved && p.top[0]==3 && p.pick[0]==3,"the wheel down: three rows, the pick dragged into view");
+    p.pick[0]=6;Step(p,wheel);
+    Expect(p.top[0]==6 && p.pick[0]==6,"a pick still in view stays");
+    p.category=static_cast<int>(Category::enemy41);
+    for(int i=0;i<40;++i)Step(p,wheel);
+    Expect(p.top[p.category]==n-8,"the wheel stops at the last page");
+    Press back{};back.scroll=-3;
+    for(int i=0;i<40;++i)Step(p,back);
+    Expect(p.top[p.category]==0 && p.pick[p.category]<8,"and at the first, the pick in view");
+    Panel shut{};
+    Expect(Step(shut,wheel).act==Act::none && !shut.open,"shut: the wheel is the map's (zoom)");
+}
+
+void Holding() {
+    Repeat r{};
+    Expect(Repeats(r,true,false,1000),"the press itself");
+    Expect(!Repeats(r,true,true,1000+kRepeatFirstMs-1),"held: nothing until the first delay");
+    Expect(Repeats(r,true,true,1000+kRepeatFirstMs),"then a repeat");
+    Expect(!Repeats(r,true,true,1000+kRepeatFirstMs+kRepeatMs-1) && Repeats(r,true,true,1000+kRepeatFirstMs+kRepeatMs),"and one every interval");
+    Expect(!Repeats(r,false,true,5000) && Repeats(r,true,false,5001),"let go and pressed again: a press at once");
 }
 
 void Catalog() {
@@ -120,6 +148,7 @@ int main() {
     Arming();
     Moving();
     Window();
+    Holding();
     Catalog();
     std::printf("range_place_test: %d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;

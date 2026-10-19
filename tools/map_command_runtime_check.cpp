@@ -609,6 +609,13 @@ void PlacePanel() noexcept {
     // A row that is not installed: said so, not made.
     placeStateStub=debugspawn::RowState::missing;tap(VK_RETURN);
     Check(placeCalls==1 && std::wcsstr(game.note,hudtext::Tr(hudtext::Tx::placeMissing)),"a row not installed: said so, not made");
+    // A row not loaded this mission (or loading): placing it goes on to PlaceRow, which queues its load and makes it there
+    // once loaded (debug_spawn.cpp RequestLoad / LoadTick), instead of refusing with 「未预载」.
+    placeStateStub=debugspawn::RowState::notPreloaded;tap(VK_RETURN);
+    Check(placeCalls==2,"a row not loaded yet is still placed: its load is queued");
+    placeStateStub=debugspawn::RowState::loading;tap(VK_RETURN);
+    Check(placeCalls==3,"a row loading takes the newer point");
+    placeCalls=1;
     placeStateStub=debugspawn::RowState::ready;
     tap(VK_BACK);
     Check(!game.place.open,"Backspace shuts it");
@@ -619,7 +626,7 @@ void PlacePanel() noexcept {
     MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
     const int row=RowOf(Category::enemy41,2);
     const float rect[4]={1000,300,1260,324};
-    MapCommandPlaceButtons(rect,&row,1);
+    MapCommandPlaceButtons(rect,&row,1,8);
     game.armedSupport=1;
     in.dx=(1100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(312.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
     const auto left=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
@@ -627,7 +634,28 @@ void PlacePanel() noexcept {
     left();
     Check(game.place.armed==row && game.place.open && game.place.category==static_cast<int>(Category::enemy41) && game.armedSupport<0 &&
           PlayerMapCommands(&r) && r.placeArmed==row && placeCalls==1,"a row's click arms it, the support disarmed, nothing made yet");
-    MapCommandPlaceButtons(nullptr,nullptr,0);
+    // The wheel over the list scrolls it (map.cpp asks before it zooms); a notch three rows, a fine wheel's parts kept.
+    Check(game.place.window==8,"a page is the rows the HUD drew");
+    const bool wheeled=MapCommandWheel(-WHEEL_DELTA);MapCommandFrame(in,centre);
+    Check(wheeled && game.place.top[game.place.category]==3 && game.place.pick[game.place.category]==3 &&
+          PlayerMapCommands(&r) && r.placeTop==3,"a notch toward the user scrolls the list down three rows, the pick kept in view");
+    Check(MapCommandWheel(WHEEL_DELTA/2) && game.place.top[game.place.category]==3,"half a notch: taken, not scrolled yet");
+    Check(MapCommandWheel(WHEEL_DELTA/2) && game.place.top[game.place.category]==0,"the other half: back up three rows");
+    in.dx=(300.0f-game.pointer.x)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
+    Check(!MapCommandWheel(-WHEEL_DELTA) && game.place.top[game.place.category]==0,"off the list the wheel is the map's zoom");
+    // The legend's title and the PVP title fold by a click (never by the pointer passing over them).
+    const float legend[4]={1000,600,1260,628};
+    MapCommandLegendButton(legend);
+    const bool legendWas=MapLegendOpen();
+    in.dx=(1100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(614.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+    Check(MapLegendOpen()==legendWas,"the pointer over the legend's title does not open it");
+    left();
+    Check(MapLegendOpen()!=legendWas && placeCalls==1,"a click on it does, and places nothing");
+    left();
+    Check(MapLegendOpen()==legendWas,"another click folds it");
+    MapCommandLegendButton(nullptr);
+    in.dx=(1100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(312.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+    MapCommandPlaceButtons(nullptr,nullptr,0,0);
     in.dx=(500.0f-game.pointer.x)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
     left();left();
     Check(placeCalls==3 && placeRowStub==row && game.place.armed==row && !supportCalls,"armed: each left click on the map places one, still armed");

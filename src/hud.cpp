@@ -3784,11 +3784,11 @@ void HideLinesUnder(Line* lines,int prior,float x0,float y0,float x1,float y1) n
 }
 
 // Map panels share a viewport-fitted scale and publish the exact opaque UI regions.
-float mapUiPanels[16*4]{};int mapUiPanelCount=0;
+float mapUiPanels[kMapUiPanels*4]{};int mapUiPanelCount=0;
 void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* lines,int prior) noexcept {
     HideLinesUnder(lines,prior,x0,y0,x1,y1);
     Rect(drawer,ctx,x0,y0,x1,y1,kMapBand);
-    if(mapUiPanelCount<16) {
+    if(mapUiPanelCount<kMapUiPanels) {
         auto* r=mapUiPanels+4*mapUiPanelCount++;r[0]=x0;r[1]=y0;r[2]=x1;r[3]=y1;
     }
 }
@@ -3906,13 +3906,23 @@ float MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool p
     return bottom;
 }
 
+// The map's right-hand dock (the user, 2026-10-19: 「m地图里面右边的操作太难受了」「操作区域和图例冲突了」): one column at
+// the right edge under the compass and the scale, from top to bottom the payload panel, the enemy control, PVP and the
+// test range's 「摆放」, with the legend folded at its foot. Each panel has its own band of it: nothing opens over
+// another, nothing grows or shrinks under the pointer (every fold is a click), so a click lands where it was aimed.
+struct MapDock { float x0,x1; };
+MapDock MapDockAt(float width,float s) noexcept {
+    const float x1=width-12.0f*s;
+    return {x1-std::fmin(420.0f*s,width*0.32f),x1};
+}
 // A map-only interactive loadout keeps left-click firing and camera aim untouched outside M. Its bottom (px), 0 none.
 float MapPayloadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,
                       const MapCommandReadout& commands,Line* lines,int* at) noexcept {
     PayloadReadout r{};
     if(!PlayerSelectablePayload(&r) || r.count<=0){MapCommandPayloadButtons(nullptr,0,0,nullptr,0);return 0.0f;}
     const int count=r.count<kMostPayload ? r.count : kMostPayload;
-    const float right=width-16.0f*s,left=right-std::fmin(460.0f*s,width*0.46f-32.0f*s),top=216.0f*s,rowH=30.0f*s;
+    const MapDock dock=MapDockAt(width,s);   // the dock's width, as every panel under it
+    const float right=dock.x1-8.0f*s,left=dock.x0+8.0f*s,top=216.0f*s,rowH=30.0f*s;
     MapUiBox(drawer,ctx,left-8.0f*s,top-14.0f*s,right+8.0f*s,top+rowH*static_cast<float>(count+1),lines,*at);
     Label(text,lines,at,left,top,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::mapPayloadTitle));
     if(*at)MapFitLabel(text,lines[*at-1],left,right);
@@ -4477,7 +4487,6 @@ float MapEnemyPanel(void* drawer,void* ctx,Text* text,float width,float s,float 
 
 // PVP shares the right-hand stack with loadout and placement. Hover or R3 focus expands its tab.
 // Hitboxes carry the same status snapshot, so a click cannot target a replacement world/revision.
-bool mapPvpHovered=false;
 Tx MapPvpResult(pvp_protocol::Result result) noexcept {
     using R=pvp_protocol::Result;
     switch(result) {
@@ -4502,17 +4511,18 @@ Tx MapPvpResult(pvp_protocol::Result result) noexcept {
 float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,
                   const MapCommandReadout& c,Line* lines,int* at) noexcept {
     PvpStatus status{};ReadPvpStatus(&status);
-    if(*at+7>kMaxLines || top+28.0f*s>bottom){MapCommandPvpButtons(nullptr,nullptr,0,nullptr);mapPvpHovered=false;return top;}
+    if(*at+7>kMaxLines || top+28.0f*s>bottom){MapCommandPvpButtons(nullptr,nullptr,0,nullptr);return top;}
     const float x1=width-12.0f*s,x0=x1-std::fmin(420.0f*s,width*0.32f),titleH=28.0f*s,rowH=24.0f*s,footH=19.0f*s;
     const float expandedBottom=top+titleH+3.0f*rowH+2.0f*footH+8.0f*s;
     const int padPick=pad ? MapPvpPadSelection() : -1;
     const bool pointer=!pad && c.pointer;
     const bool overTitle=pointer && c.px>=x0 && c.px<x1 && c.py>=top && c.py<top+titleH;
-    const bool overBody=pointer && mapPvpHovered && c.px>=x0 && c.px<x1 && c.py>=top && c.py<expandedBottom;
-    mapPvpHovered=overTitle || overBody;
-    const bool open=(mapPvpHovered || padPick>=0) && expandedBottom<=bottom;
+    // Opened and folded by a click on its title (kPvpFold) or R3's focus, never by the pointer passing over it: the
+    // panels under it in the dock stay where they are while the pointer moves (MapDock).
+    const bool open=(MapPvpOpen() || padPick>=0) && expandedBottom<=bottom;
     const float panelBottom=open ? expandedBottom : top+titleH;
     MapUiBox(drawer,ctx,x0,top,x1,panelBottom,lines,*at);
+    Rect(drawer,ctx,x0,top,x1,top+titleH,overTitle ? kBtnLit : kBtnFill);
     const float* stateTint=!status.ready || status.pending ? kAmber : status.enabled ? kWhite : kMapOrderDim;
     Label(text,lines,at,x0+8.0f*s,top+titleH*0.5f,0,kLineScale*0.7f,stateTint,
           Tr(Tx::pvpTitleState),Tr(status.enabled ? Tx::pvpOn : Tx::pvpOff),status.localTeam);
@@ -4524,13 +4534,14 @@ float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float to
     Tri(drawer,ctx,x1-11.0f*s,top+titleH*0.5f+(open ? 3.0f : -3.0f)*s,
         x1-11.0f*s,top+titleH*0.5f+(open ? -4.0f : 4.0f)*s,4.0f*s,kMapOrder);
     MapTipSet(c,x0,top,x1,top+titleH,L"%ls",Tr(Tx::pvpMouseHint));
-    if(!open){MapCommandPvpButtons(nullptr,nullptr,0,&status);return panelBottom;}
     float rects[kMapPvpItems*4]{};int codes[kMapPvpItems]{};int hits=0;
+    if(pointer){float* q=rects;q[0]=x0;q[1]=top;q[2]=x1;q[3]=top+titleH;codes[hits++]=kPvpFold;}
+    if(!open){MapCommandPvpButtons(rects,codes,hits,&status);return panelBottom;}
     const int choices[]={kPvpModeToggle,kPvpTeam1,kPvpTeam2};
     const Tx words[]={status.enabled ? Tx::pvpDisable : Tx::pvpEnable,Tx::pvpTeam1,Tx::pvpTeam2};
     const float left=x0+8.0f*s,right=x1-8.0f*s;
     float y=top+titleH;
-    for(int i=0;i<kMapPvpItems;++i) {
+    for(int i=0;i<3;++i) {
         const int code=choices[i];
         const bool allowed=status.ready && !status.pending && (code!=kPvpModeToggle || status.host);
         const bool selected=code==kPvpModeToggle ? status.enabled : status.localTeam==code;
@@ -4557,15 +4568,98 @@ float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float to
     return panelBottom;
 }
 
-// The test range's 「摆放」 panel (range_place.h, mapcmd.cpp; ini RangePlace), at the map's right under the payload panel,
-// down to `bottom`: shut, its title tab alone (a click, or , . / or the D-pad, opens it); open, the category tabs (two rows
-// of three), a window of the category's rows round the one picked (the armed one lit as the card's buttons are, the one a
-// pad or the keys picked marked, one that cannot be made now dimmed with why), arrows to page through them, and the
-// keys. Each row retains its online/resource state. A pad uses its D-pad and A instead of the pointer.
+// A framed button's edge (the card's look).
+void MapFrame(void* drawer,void* ctx,float x0,float y0,float x1,float y1,float s,const float* edge) noexcept {
+    const float t=1.2f*s;
+    Seg(drawer,ctx,x0,y0,x1,y0,t,edge);Seg(drawer,ctx,x1,y0,x1,y1,t,edge);
+    Seg(drawer,ctx,x1,y1,x0,y1,t,edge);Seg(drawer,ctx,x0,y1,x0,y0,t,edge);
+}
+
+// The legend at the dock's foot: its title row (a click opens / folds it; never the pointer passing over it), the whole
+// legend in two columns while open, beside the dock over the map (its bottom level with the title's), so opening it
+// neither covers nor squeezes the dock's controls. The title's top: the dock's other panels end above it.
+float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bottom,bool pad,const MapCommandReadout& c,
+                Line* lines,int* at) noexcept {
+    struct Entry { MapKind kind; std::uint8_t flags; Tx name; };
+    static const Entry kLegend[]={{MapKind::squad,0,Tx::legendSquad},{MapKind::ally,0,Tx::legendFriendly},{MapKind::vehicle,0,Tx::legendVehicle},
+                                  {MapKind::air,0,Tx::legendAircraft},{MapKind::air,kMapRotor,Tx::legendHelicopter},
+                                  {MapKind::vehicle,kMapEmpty,Tx::legendEmpty},{MapKind::carrier,0,Tx::legendCarrier},
+                                  {MapKind::enemy,kMapLarge,Tx::legendLargeEnemy},{MapKind::enemyAir,kMapLarge,Tx::legendLargeEnemyAir},
+                                  {MapKind::marker,0,Tx::legendObjective}};
+    constexpr int kItems=static_cast<int>(sizeof(kLegend)/sizeof(kLegend[0]))+5;   // the player, the dots, the brackets
+    constexpr int kRows=(kItems+1)/2;
+    const MapDock dock=MapDockAt(width,s);
+    const float titleH=28.0f*s,rowH=22.0f*s,y1=bottom,y0=y1-titleH;
+    if(y0<60.0f*s || *at+kItems+2>kMaxLines){MapCommandLegendButton(nullptr);return bottom;}
+    const bool open=MapLegendOpen();
+    const float listW=std::fmin(360.0f*s,dock.x0-24.0f*s),lx1=dock.x0-8.0f*s,lx0=lx1-listW;
+    const float listH=static_cast<float>(kRows)*rowH+10.0f*s;
+    // Level with the title, or as low over it as clears every panel drawn so far (the support composition, the payload
+    // panel): it covers the map only.
+    float listBottom=y1;
+    for(int tries=0;tries<kMapUiPanels;++tries) {
+        int blocker=-1;
+        for(int i=0;i<mapUiPanelCount && blocker<0;++i) {
+            const float* r=mapUiPanels+4*i;
+            if(r[0]<lx1 && lx0<r[2] && r[1]<listBottom && listBottom-listH<r[3])blocker=i;
+        }
+        if(blocker<0)break;
+        listBottom=mapUiPanels[4*blocker+1]-6.0f*s;
+        if(listBottom-listH<60.0f*s){listBottom=y1;break;}   // nowhere clear: over the title after all
+    }
+    const float listTop=listBottom-listH;
+    const bool shown=open && listTop>60.0f*s && listW>200.0f*s;
+    MapUiBox(drawer,ctx,dock.x0,y0,dock.x1,y1,lines,*at);
+    const bool hover=!pad && c.pointer && c.px>=dock.x0 && c.px<dock.x1 && c.py>=y0 && c.py<y1;
+    Rect(drawer,ctx,dock.x0,y0,dock.x1,y1,hover ? kBtnLit : kBtnFill);
+    MapFrame(drawer,ctx,dock.x0,y0,dock.x1,y1,s,kMapOrderDim);
+    const float mid=(y0+y1)*0.5f;
+    Label(text,lines,at,dock.x0+10.0f*s,mid,0,kLineScale*0.7f,open ? kWhite : kMapOrder,L"%ls",Tr(Tx::legendTitle));
+    Tri(drawer,ctx,dock.x1-15.0f*s,mid+(open ? 3.0f : -3.0f)*s,dock.x1-15.0f*s,mid+(open ? -4.0f : 4.0f)*s,4.5f*s,open ? kWhite : kMapOrder);
+    if(!pad){const float hit[4]={dock.x0,y0,dock.x1,y1};MapCommandLegendButton(hit);}
+    else MapCommandLegendButton(nullptr);
+    if(!shown)return y0;
+    MapUiBox(drawer,ctx,lx0,listTop,lx1,listBottom,lines,*at);
+    MapFrame(drawer,ctx,lx0,listTop,lx1,listBottom,s,kMapOrderDim);
+    const int first=*at;
+    const float colW=(lx1-lx0)*0.5f;
+    int item=0;
+    float ix=0.0f,tx=0.0f,y=0.0f;
+    auto slot=[&]{
+        const int col=item/kRows,row=item%kRows;++item;
+        ix=lx0+colW*static_cast<float>(col)+16.0f*s;tx=ix+20.0f*s;y=listTop+5.0f*s+rowH*(static_cast<float>(row)+0.5f);
+    };
+    slot();Arc(drawer,ctx,ix,y,7.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
+    Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendYou));
+    for(const Entry& e:kLegend) {
+        slot();MapIcon(drawer,ctx,ix,y,s*0.9f,e.kind,e.flags,0.0f,0.0f,-1.0f,1.0f);
+        Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(e.name));
+    }
+    slot();MapDot1(drawer,ctx,ix,y,s,0,kMapEnemy);
+    Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendEnemy));
+    slot();MapDot1(drawer,ctx,ix,y,s,kMapFlying,kMapEnemy);
+    Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendEnemyFlying));
+    slot();MapBrackets(drawer,ctx,ix,y,8.0f*s,2.0f*s,kMapEnemy);
+    Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendLock));
+    slot();MapBrackets(drawer,ctx,ix,y,8.0f*s,2.0f*s,kAmber);
+    Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
+    for(int i=first;i<*at;++i) {
+        Line& row=lines[i];
+        MapFitLabel(text,row,row.x,row.x<lx0+colW ? lx0+colW-4.0f*s : lx1-6.0f*s);
+    }
+    return y0;
+}
+
+// The test range's 「摆放」 panel (range_place.h, mapcmd.cpp; ini RangePlace) in the dock, from `top` down to `bottom`.
+// Shut: its title row alone (a click, , . / or the D-pad opens it). Open: the title (a click shuts it), the categories
+// as tabs with their counts (two rows of three), the list (as many rows as fit, its own scroll: the wheel over it, the
+// arrows a page; the armed row lit, the picked one marked, one that cannot be made now dimmed with why at its right),
+// the page line between the arrows and one line of what to press. A pad uses its D-pad, A and B instead of the pointer.
 void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,const MapCommandReadout& c,
                    Line* lines,int* at) noexcept {
-    if(!c.placeOn || *at+rangeplace::kWindow+12>kMaxLines){MapCommandPlaceButtons(nullptr,nullptr,0);return;}
-    const float x1=width-12.0f*s,x0=x1-std::fmin(420.0f*s,width*0.32f),rowH=24.0f*s,tabH=24.0f*s,pad8=8.0f*s;
+    if(!c.placeOn || *at+2*rangeplace::kWindow+16>kMaxLines){MapCommandPlaceButtons(nullptr,nullptr,0,0);return;}
+    const MapDock dock=MapDockAt(width,s);
+    const float x0=dock.x0,x1=dock.x1,rowH=30.0f*s,titleH=32.0f*s,tabH=32.0f*s,arrowH=30.0f*s,footH=22.0f*s,pad6=6.0f*s;
     float rects[kMapPlaceItems*4];int codes[kMapPlaceItems];int hits=0;
     auto hit=[&](float a,float b,float r,float d,int code){
         if(pad || hits>=kMapPlaceItems)return;
@@ -4574,102 +4668,109 @@ void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float t
     auto over=[&](float a,float b,float r,float d){ return !pad && c.pointer && c.px>=a && c.px<r && c.py>=b && c.py<d; };
     const Tx* const words=DebugSpawnCategoryWords();
     using debugspawn::RowState;
-    const auto tab=[&]() {
-        if(top+tabH+4.0f*s>bottom){MapCommandPlaceButtons(nullptr,nullptr,0);return;}
-        const float t0=x1-150.0f*s,t1=top+tabH+4.0f*s;
-        MapUiBox(drawer,ctx,t0,top,x1,t1,lines,*at);
-        if(over(t0,top,x1,t1))Rect(drawer,ctx,t0,top,x1,t1,kMapBoxFill);
-        const float mid=(top+t1)*0.5f;
-        Label(text,lines,at,t0+pad8,mid,0,kLineScale*0.75f,kMapOrder,L"%ls",Tr(Tx::placeTitle));
-        Tri(drawer,ctx,x1-14.0f*s,mid-4.0f*s,x1-14.0f*s,mid+4.0f*s,4.0f*s,kMapOrder);
-        MapTipSet(c,t0,top,x1,t1,L"%ls",Tr(Tx::placeTabTip));
-        hit(t0,top,x1,t1,kPlaceToggle);
-        MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits);
-    };
-    if(!c.placeOpen){tab();return;}
     const int cat=c.placeCategory>=0 && c.placeCategory<debugspawn::kCategoryCount ? c.placeCategory : 0;
     const debugspawn::Category category=static_cast<debugspawn::Category>(cat);
     const int count=debugspawn::CountIn(category);
-    const int pick=c.placePick<count ? c.placePick : 0;
-    // How many rows fit under the title, the tabs, the arrows and the two lines of keys.
+    const int pick=c.placePick>=0 && c.placePick<count ? c.placePick : 0;
+    // The title row: 「摆放」, the category and the pick (shut: how to open it), the fold arrow. The whole row is the click.
+    auto title=[&](bool open) {
+        Rect(drawer,ctx,x0,top,x1,top+titleH,over(x0,top,x1,top+titleH) ? kBtnLit : kBtnFill);
+        MapFrame(drawer,ctx,x0,top,x1,top+titleH,s,kMapOrder);
+        const float mid=top+titleH*0.5f;
+        Label(text,lines,at,x0+10.0f*s,mid,0,kLineScale*0.78f,kWhite,L"%ls",Tr(Tx::placeTitle));
+        const float titleRight=*at>0 ? lines[*at-1].x+lines[*at-1].w+12.0f*s : x0+90.0f*s;
+        if(open)Label(text,lines,at,x1-30.0f*s,mid,2,kLineScale*0.62f,kMapOrderDim,L"%ls  %d/%d",Tr(words[cat]),count ? pick+1 : 0,count);
+        else Label(text,lines,at,x1-30.0f*s,mid,2,kLineScale*0.58f,kMapOrderDim,L"%ls",Tr(pad ? Tx::placeOpenPad : Tx::placeOpenMouse));
+        if(*at>0)MapFitLabel(text,lines[*at-1],titleRight,x1-30.0f*s);
+        Tri(drawer,ctx,x1-15.0f*s,mid+(open ? 4.0f : -4.0f)*s,x1-15.0f*s,mid+(open ? -4.0f : 4.0f)*s,5.0f*s,kMapOrder);
+        MapTipSet(c,x0,top,x1,top+titleH,L"%ls",Tr(Tx::placeTabTip));
+        hit(x0,top,x1,top+titleH,kPlaceToggle);
+    };
+    if(top+titleH>bottom){MapCommandPlaceButtons(nullptr,nullptr,0,0);return;}
+    if(!c.placeOpen) {
+        MapUiBox(drawer,ctx,x0,top,x1,top+titleH,lines,*at);
+        title(false);
+        MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits,0);
+        return;
+    }
     const int tabRows=(debugspawn::kCategoryCount+2)/3;
-    bool unloaded=false;
-    for(int i=0;i<count;++i){const int row=debugspawn::RowOf(category,i);unloaded=unloaded || (row>=0 && c.placeState[row]==RowState::notPreloaded);}
-    const float footH=rowH*0.8f;
-    const int footerRows=(pad ? 1 : 2)+(unloaded ? 1 : 0);
-    const float fixed=tabH+(c.placeOnline ? footH : 0.0f)+static_cast<float>(tabRows)*tabH+2.0f*rowH*0.7f+
-                      static_cast<float>(footerRows)*footH+3.0f*pad8;
+    const float fixed=titleH+(c.placeOnline ? footH : 0.0f)+static_cast<float>(tabRows)*tabH+pad6+arrowH+footH+pad6;
     int window=static_cast<int>((bottom-top-fixed)/rowH);
     if(window>rangeplace::kWindow)window=rangeplace::kWindow;
-    if(window<1){tab();return;}
-    const int first=rangeplace::WindowFirst(pick,count,window),shown=count-first<window ? count-first : window;
-    float y=top;
-    const float y1=top+fixed+static_cast<float>(shown)*rowH;
-    MapUiBox(drawer,ctx,x0-pad8,top,x1,y1,lines,*at);
-    // The title: a click shuts the panel.
-    Label(text,lines,at,x0,y+tabH*0.5f,0,kLineScale*0.75f,kMapOrder,L"%ls",Tr(Tx::placeTitle));
-    Label(text,lines,at,x1-24.0f*s,y+tabH*0.5f,2,kLineScale*0.65f,kMapOrderDim,L"%d/%d",count ? pick+1 : 0,count);
-    Tri(drawer,ctx,x1-14.0f*s,y+tabH*0.5f+3.0f*s,x1-14.0f*s,y+tabH*0.5f-4.0f*s,4.0f*s,kMapOrder);
-    if(over(x0-pad8,y,x1,y+tabH))Rect(drawer,ctx,x0-pad8,y,x1,y+tabH,kMapBoxFill);
-    hit(x0-pad8,y,x1,y+tabH,kPlaceToggle);
-    y+=tabH;
+    if(window<1) {   // no room for a row: the title alone (it still shuts the panel)
+        MapUiBox(drawer,ctx,x0,top,x1,top+titleH,lines,*at);
+        title(true);
+        MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits,0);
+        return;
+    }
+    const int first=rangeplace::ViewFirst(c.placeTop,pick,count,window),shown=count-first<window ? count-first : window;
+    const float y1=top+fixed+static_cast<float>(window)*rowH;   // the panel keeps its height while paging
+    MapUiBox(drawer,ctx,x0,top,x1,y1,lines,*at);
+    title(true);
+    float y=top+titleH;
     if(c.placeOnline) {
-        Label(text,lines,at,x0,y+footH*0.5f,0,kLineScale*0.6f,kAmber,L"%ls",Tr(Tx::placeOnline));
-        if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1-4.0f*s);
+        Label(text,lines,at,x0+8.0f*s,y+footH*0.5f,0,kLineScale*0.58f,kAmber,L"%ls",Tr(Tx::placeOnline));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,x1-6.0f*s);
         y+=footH;
     }
-    // The tabs, three a row.
-    const float tabW=(x1-x0)/3.0f;
+    // The tabs, three a row, each with its count.
+    const float tabW=(x1-x0-8.0f*s)/3.0f;
     for(int k=0;k<debugspawn::kCategoryCount;++k) {
-        const float a=x0+tabW*static_cast<float>(k%3),b=y+tabH*static_cast<float>(k/3),r=a+tabW-3.0f*s,d=b+tabH-3.0f*s;
-        Rect(drawer,ctx,a,b,r,d,k==cat ? kBtnLit : over(a,b,r,d) ? kMapBoxFill : kBtnFill);
-        Label(text,lines,at,(a+r)*0.5f,(b+d)*0.5f,1,kLineScale*0.6f,k==cat ? kWhite : kMapOrderDim,L"%ls",Tr(words[k]));
-        if(*at>0)MapFitLabel(text,lines[*at-1],a+2.0f*s,r-2.0f*s);
+        const float a=x0+4.0f*s+tabW*static_cast<float>(k%3),b=y+3.0f*s+tabH*static_cast<float>(k/3),r=a+tabW-4.0f*s,d=b+tabH-4.0f*s;
+        const bool lit=k==cat;
+        Rect(drawer,ctx,a,b,r,d,lit ? kBtnLit : over(a,b,r,d) ? kMapBoxFill : kBtnFill);
+        MapFrame(drawer,ctx,a,b,r,d,s,lit ? kWhite : kMapOrderDim);
+        Label(text,lines,at,(a+r)*0.5f,(b+d)*0.5f,1,kLineScale*0.6f,lit ? kWhite : kMapOrder,L"%ls %d",Tr(words[k]),
+              debugspawn::CountIn(static_cast<debugspawn::Category>(k)));
+        if(*at>0)MapFitLabel(text,lines[*at-1],a+3.0f*s,r-3.0f*s);
         hit(a,b,r,d,kPlaceTab+k);
     }
-    y+=tabH*static_cast<float>(tabRows)+pad8*0.5f;
-    // The arrows (shown when there is more that way) and the rows between them.
-    const float arrowH=rowH*0.7f,mid=(x0+x1)*0.5f;
-    if(first>0) {
-        if(over(x0,y,x1,y+arrowH))Rect(drawer,ctx,x0,y,x1,y+arrowH,kMapBoxFill);
-        Tri(drawer,ctx,mid,y+arrowH*0.75f,mid,y+arrowH*0.2f,6.0f*s,kMapOrder);
-        hit(x0,y,x1,y+arrowH,kPlacePageUp);
-    }
-    y+=arrowH;
+    y+=tabH*static_cast<float>(tabRows)+pad6;
+    // The rows.
     for(int i=0;i<shown;++i) {
         const int row=debugspawn::RowOf(category,first+i);
         if(row<0)break;
-        const float b=y+rowH*static_cast<float>(i),d=b+rowH;
+        const float b=y+rowH*static_cast<float>(i),d=b+rowH-2.0f*s;
         const RowState st=c.placeState[row];
-        const bool armed=c.placeArmed==row,picked=first+i==pick;
-        if(armed)Rect(drawer,ctx,x0,b,x1,d,kBtnLit);
-        else if(over(x0,b,x1,d) || (picked && pad))Rect(drawer,ctx,x0,b,x1,d,kMapBoxFill);
-        const bool ready=st==RowState::ready;
-        const wchar_t* why=st==RowState::ready ? L"" : st==RowState::online ? Tr(Tx::placeOnlineRow) : st==RowState::missing ? Tr(Tx::placeMissing) :
-            st==RowState::notPreloaded ? Tr(Tx::placeNotPreloaded) : st==RowState::broken ? Tr(Tx::placeBroken) : Tr(Tx::debugSpawnUnavailable);
-        Label(text,lines,at,x0+14.0f*s,(b+d)*0.5f,0,kLineScale*0.68f,armed ? kWhite : ready ? kWhite : kMapOrderDim,L"%ls%ls",
-              debugspawn::kEntries[row].name,why);
-        if(*at>0)MapFitLabel(text,lines[*at-1],x0+14.0f*s,x1-4.0f*s);
-        if(picked)Tri(drawer,ctx,x0+2.0f*s,(b+d)*0.5f,x0+10.0f*s,(b+d)*0.5f,4.0f*s,armed ? kWhite : kMapOrder);
+        const bool armed=c.placeArmed==row,picked=first+i==pick,ready=st==RowState::ready;
+        const bool usable=ready || st==RowState::notPreloaded || st==RowState::loading;   // the first placing loads it
+        if(armed)Rect(drawer,ctx,x0+4.0f*s,b,x1-4.0f*s,d,kBtnLit);
+        else if(over(x0,b,x1,d) || (picked && pad))Rect(drawer,ctx,x0+4.0f*s,b,x1-4.0f*s,d,kMapBoxFill);
+        else if(i%2)Rect(drawer,ctx,x0+4.0f*s,b,x1-4.0f*s,d,kBtnFill);
+        const float mid=(b+d)*0.5f;
+        float right=x1-10.0f*s;
+        if(!ready) {   // why at the row's right, the name fitted left of it
+            const wchar_t* why=st==RowState::online ? Tr(Tx::placeOnlineRow) : st==RowState::missing ? Tr(Tx::placeMissing) :
+                st==RowState::notPreloaded ? Tr(Tx::placeNotPreloaded) : st==RowState::loading ? Tr(Tx::placeLoading) :
+                st==RowState::broken ? Tr(Tx::placeBroken) : Tr(Tx::debugSpawnUnavailable);
+            Label(text,lines,at,right,mid,2,kLineScale*0.56f,st==RowState::broken ? kAmber : st==RowState::loading ? kGreen : kMapOrderDim,
+                  L"%ls",why);
+            if(*at>0){Line& w=lines[*at-1];MapFitLabel(text,w,x1-160.0f*s,right);w.x=right-w.w;right=w.x-6.0f*s;}
+        }
+        Label(text,lines,at,x0+20.0f*s,mid,0,kLineScale*0.68f,armed || usable ? kWhite : kMapOrderDim,L"%ls",debugspawn::kEntries[row].name);
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0+20.0f*s,right);
+        if(picked)Tri(drawer,ctx,x0+6.0f*s,mid,x0+14.0f*s,mid,4.5f*s,armed ? kWhite : kMapOrder);
         hit(x0,b,x1,d,row);
     }
-    y+=rowH*static_cast<float>(shown);
-    if(first+shown<count) {
-        if(over(x0,y,x1,y+arrowH))Rect(drawer,ctx,x0,y,x1,y+arrowH,kMapBoxFill);
-        Tri(drawer,ctx,mid,y+arrowH*0.2f,mid,y+arrowH*0.75f,6.0f*s,kMapOrder);
-        hit(x0,y,x1,y+arrowH,kPlacePageDown);
-    }
-    y+=arrowH+pad8*0.5f;
-    // Online support is per row; retain missing/preload reasons and controls in either mode.
-    const auto foot=[&](const float* tint,Tx words){
-        Label(text,lines,at,x0,y+footH*0.5f,0,kLineScale*0.6f,tint,L"%ls",Tr(words));
-        if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1-4.0f*s);
-        y+=footH;
-    };
-    foot(kTeal,pad ? Tx::placeHintPad : Tx::placeHintMouse);
-    if(!pad)foot(kTeal,Tx::placeHintKeys);
-    if(unloaded)foot(kMapOrderDim,Tx::placeHintAll);
-    MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits);
+    y+=rowH*static_cast<float>(window);
+    // The page line: ▲ (a page up), the page we are on, ▼ (a page down); an arrow dim when there is nothing that way.
+    const int pages=rangeplace::Pages(count,window),page=rangeplace::PageOf(first,count,window);
+    const float aw=std::fmin(110.0f*s,(x1-x0)*0.3f);
+    const float ua=x0+4.0f*s,ur=ua+aw,da=x1-4.0f*s-aw,dr=x1-4.0f*s,ab=y+2.0f*s,ad=y+arrowH-2.0f*s,amid=(ab+ad)*0.5f;
+    const bool up=first>0,down=first+shown<count;
+    Rect(drawer,ctx,ua,ab,ur,ad,up && over(ua,ab,ur,ad) ? kBtnLit : kBtnFill);MapFrame(drawer,ctx,ua,ab,ur,ad,s,up ? kMapOrder : kMapOrderDim);
+    Tri(drawer,ctx,(ua+ur)*0.5f,amid+5.0f*s,(ua+ur)*0.5f,amid-5.0f*s,7.0f*s,up ? kWhite : kMapOrderDim);
+    Rect(drawer,ctx,da,ab,dr,ad,down && over(da,ab,dr,ad) ? kBtnLit : kBtnFill);MapFrame(drawer,ctx,da,ab,dr,ad,s,down ? kMapOrder : kMapOrderDim);
+    Tri(drawer,ctx,(da+dr)*0.5f,amid-5.0f*s,(da+dr)*0.5f,amid+5.0f*s,7.0f*s,down ? kWhite : kMapOrderDim);
+    Label(text,lines,at,(x0+x1)*0.5f,amid,1,kLineScale*0.6f,kMapOrder,Tr(Tx::placePage),page,pages);
+    if(*at>0)MapFitLabel(text,lines[*at-1],ur+4.0f*s,da-4.0f*s);
+    if(up){hit(ua,ab,ur,ad,kPlacePageUp);MapTipSet(c,ua,ab,ur,ad,L"%ls",Tr(Tx::placePageUpTip));}
+    if(down){hit(da,ab,dr,ad,kPlacePageDown);MapTipSet(c,da,ab,dr,ad,L"%ls",Tr(Tx::placePageDownTip));}
+    y+=arrowH;
+    // One line of what to press (the keyboard's keys in the title's tooltip).
+    Label(text,lines,at,x0+8.0f*s,y+footH*0.5f,0,kLineScale*0.56f,kTeal,L"%ls",Tr(pad ? Tx::placeHintPad : Tx::placeHintMouse));
+    if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,x1-6.0f*s);
+    MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits,window);
 }
 
 void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
@@ -4677,8 +4778,9 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     if(!PlayerMapCommands(&c)){
         MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
         MapCommandFormationButtons(nullptr,nullptr,0);
-        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandPlaceButtons(nullptr,nullptr,0);
-        MapCommandPvpButtons(nullptr,nullptr,0,nullptr);MapCommandEnemyButtons(nullptr,nullptr,0,nullptr);mapPvpHovered=mapEnemyHovered=false;return;
+        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandPlaceButtons(nullptr,nullptr,0,0);
+        MapCommandPvpButtons(nullptr,nullptr,0,nullptr);MapCommandEnemyButtons(nullptr,nullptr,0,nullptr);mapEnemyHovered=false;
+        MapLegend(drawer,ctx,text,width,s,height-(kBtnBottom+40.0f)*s,m.pad,c,lines,at);return;
     }
     const float* tint=c.allowed && c.pickable ? kMapOrder : kMapOrderDim;
     // Where a point order goes: the pointer (a ring and a cross), or with a pad the crosshair at the centre; an armed
@@ -4755,11 +4857,13 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     const float barTop=c.squads>0 ? panelBottom+10.0f*s : panelBottom;
     const float barBottom=height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+40.0f)*s;
     MapSupportBar(drawer,ctx,text,width,s,barTop,barBottom,m.pad,c,lines,at);
-    // One right-hand stack: scale/compass, optional weapon loadout, PVP tab, then the range's placement panel.
-    const float pvpTop=std::fmax(206.0f*s,payloadBottom+10.0f*s);
-    const float enemyBottom=MapEnemyPanel(drawer,ctx,text,width,s,pvpTop,barBottom,m.pad,c,lines,at);
-    const float pvpBottom=MapPvpPanel(drawer,ctx,text,width,s,enemyBottom+8.0f*s,barBottom,m.pad,c,lines,at);
-    MapPlacePanel(drawer,ctx,text,width,s,pvpBottom+8.0f*s,barBottom,m.pad,c,lines,at);
+    // The right-hand dock (MapDock): under the scale / compass and the payload panel, the enemy control, PVP and the
+    // range's 「摆放」 down to the legend folded at its foot, each in its own band.
+    const float dockTop=std::fmax(206.0f*s,payloadBottom+10.0f*s);
+    const float dockBottom=MapLegend(drawer,ctx,text,width,s,barBottom,m.pad,c,lines,at)-8.0f*s;
+    const float enemyBottom=MapEnemyPanel(drawer,ctx,text,width,s,dockTop,dockBottom,m.pad,c,lines,at);
+    const float pvpBottom=MapPvpPanel(drawer,ctx,text,width,s,enemyBottom+8.0f*s,dockBottom,m.pad,c,lines,at);
+    MapPlacePanel(drawer,ctx,text,width,s,pvpBottom+8.0f*s,dockBottom,m.pad,c,lines,at);
     // The formation button's menu over all of them (its box empties the text under it; its rows take the clicks first).
     if(m.pad)MapCommandFormationButtons(nullptr,nullptr,0);
     else MapFormationMenu(drawer,ctx,text,width,height,s,c,mapCardRects,mapCardIds,mapCardCount,lines,at);
@@ -4781,48 +4885,6 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
 }
 
-// The legend: a small tab over the right end of the command card ("图例"), the whole legend over it while the pointer
-// is on the tab or on the legend (the user, 2026-10-09: "m里面显示太复杂了": it no longer takes the left edge for good).
-void MapLegend(void* drawer,void* ctx,Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
-    MapCommandReadout c{};
-    const bool pointer=PlayerMapCommands(&c) && c.pointer;
-    struct Entry { MapKind kind; std::uint8_t flags; Tx name; };
-    static const Entry kLegend[]={{MapKind::squad,0,Tx::legendSquad},{MapKind::ally,0,Tx::legendFriendly},{MapKind::vehicle,0,Tx::legendVehicle},
-                                  {MapKind::air,0,Tx::legendAircraft},{MapKind::air,kMapRotor,Tx::legendHelicopter},
-                                  {MapKind::vehicle,kMapEmpty,Tx::legendEmpty},{MapKind::carrier,0,Tx::legendCarrier},
-                                  {MapKind::enemy,kMapLarge,Tx::legendLargeEnemy},{MapKind::enemyAir,kMapLarge,Tx::legendLargeEnemyAir},
-                                  {MapKind::marker,0,Tx::legendObjective}};
-    constexpr int kRows=static_cast<int>(sizeof(kLegend)/sizeof(kLegend[0]))+5;   // the player, the dots, the brackets
-    const float tabW=110.0f*s,tabH=24.0f*s,x1=width-12.0f*s,x0=x1-tabW,tabY1=height-110.0f*s,tabY0=tabY1-tabH;
-    const float listW=std::fmin(300.0f*s,width*0.4f),lx0=x1-listW,ly1=tabY0-2.0f*s,ly0=ly1-(static_cast<float>(kRows)*22.0f+12.0f)*s;
-    const bool open=pointer && ((c.px>=x0 && c.px<x1 && c.py>=tabY0 && c.py<tabY1) || (c.px>=lx0 && c.px<x1 && c.py>=ly0 && c.py<ly1));
-    MapUiBox(drawer,ctx,x0,tabY0,x1,tabY1,lines,*at);
-    const float mid=(tabY0+tabY1)*0.5f,arrow=x1-12.0f*s;
-    Label(text,lines,at,(x0+arrow)*0.5f-4.0f*s,mid,1,kLineScale*0.7f,open ? kWhite : kMapOrder,L"%ls",Tr(Tx::legendTitle));
-    Tri(drawer,ctx,arrow,mid+(open ? 3.0f : -3.0f)*s,arrow,mid+(open ? -4.0f : 4.0f)*s,4.0f*s,open ? kWhite : kMapOrder);
-    if(!open)return;
-    MapUiBox(drawer,ctx,lx0,ly0,x1,ly1,lines,*at);
-    const int first=*at;
-    const float ix=lx0+24.0f*s,tx=lx0+44.0f*s;
-    float y=ly0+17.0f*s;
-    Arc(drawer,ctx,ix,y,8.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
-    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendYou));
-    for(const Entry& e:kLegend) {
-        y+=22.0f*s;
-        MapIcon(drawer,ctx,ix,y,s,e.kind,e.flags,0.0f,0.0f,-1.0f,1.0f);
-        Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(e.name));
-    }
-    y+=22.0f*s;MapDot1(drawer,ctx,ix,y,s,0,kMapEnemy);
-    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendEnemy));
-    y+=22.0f*s;MapDot1(drawer,ctx,ix,y,s,kMapFlying,kMapEnemy);
-    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendEnemyFlying));
-    y+=22.0f*s;MapBrackets(drawer,ctx,ix,y,9.0f*s,2.0f*s,kMapEnemy);
-    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendLock));
-    y+=22.0f*s;MapBrackets(drawer,ctx,ix,y,9.0f*s,2.0f*s,kAmber);
-    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
-    for(int i=first;i<*at;++i)MapFitLabel(text,lines[i],tx,x1-8.0f*s);
-}
-
 // The title and the keys (top and bottom bands).
 void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     MapUiBox(drawer,ctx,0,0,width,46.0f*s,lines,*at);
@@ -4839,7 +4901,6 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
         Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,Tr(Tx::mapMouseKeys),key);
     }
     for(int i=bandsFirst;i<*at;++i)MapFitLabel(text,lines[i],16.0f*s,width-16.0f*s);
-    MapLegend(drawer,ctx,text,width,height,s,lines,at);
 }
 
 void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
@@ -4851,7 +4912,8 @@ void MapTargetsNone() noexcept {
     MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
     MapCommandFormationButtons(nullptr,nullptr,0);MapCommandComposeButtons(nullptr,nullptr,0);
     MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
-    MapCommandPlaceButtons(nullptr,nullptr,0);MapCommandPvpButtons(nullptr,nullptr,0,nullptr);MapCommandEnemyButtons(nullptr,nullptr,0,nullptr);mapPvpHovered=mapEnemyHovered=false;
+    MapCommandPlaceButtons(nullptr,nullptr,0,0);MapCommandPvpButtons(nullptr,nullptr,0,nullptr);MapCommandEnemyButtons(nullptr,nullptr,0,nullptr);mapEnemyHovered=false;
+    MapCommandLegendButton(nullptr);
 }
 
 // The map view open: its marks drawn (true), nothing else of the HUD; the damage statistics' page in their place while it
@@ -5021,8 +5083,9 @@ void DebugSpawnStatusLine(Text* text,Line* lines,int* at,float x,float y,int ali
         return;
     }
     const Tx words=c.status==kDebugSpawnDone ? Tx::debugSpawnDone : c.status==kDebugSpawnOnline ? Tx::debugSpawnOnline :
-                   c.status==kDebugSpawnNoPlace ? Tx::debugSpawnNoPlace : Tx::debugSpawnFailed;
-    Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnDone ? kGreen : kAmber,Tr(words),name);
+                   c.status==kDebugSpawnNoPlace ? Tx::debugSpawnNoPlace : c.status==kDebugSpawnLoading ? Tx::placeLoadingNote :
+                   Tx::debugSpawnFailed;
+    Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnDone || c.status==kDebugSpawnLoading ? kGreen : kAmber,Tr(words),name);
 }
 // The debug spawn tool's menu (debug_spawn.cpp; ini DebugSpawn, off by default): a panel at the left, its category, a
 // window of its rows round the one picked (an arrow at it; dim when it cannot be made now), the keys, and a spawn's

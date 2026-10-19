@@ -111,16 +111,17 @@ void StackCase(int width,int height,bool active) {
     hasMapPayload=true;sceneMapPayload={};sceneMapPayload.count=kMostPayload;sceneMapPayload.selectionToken=1;
     for(auto& entry:sceneMapPayload.entry){entry.selectable=true;wcscpy_s(entry.name,L"Native payload long name");}
     float vp[16]{};vp[0]=vp[5]=vp[10]=vp[15]=1;
-    mapPvpHovered=false;RecordBegin();Measured([&](Text* text,Line* lines,int* at){MapCommands(image,nullptr,text,vp,w,h,s,map,lines,at);},s);recording=false;
+    scenePvpOpen=false;RecordBegin();Measured([&](Text* text,Line* lines,int* at){MapCommands(image,nullptr,text,vp,w,h,s,map,lines,at);},s);recording=false;
     bool found=false;
     for(const auto& line:drew)if(line.text==Tr(Tx::pvpExpand)) {
         sceneCmd.px=(line.x0+line.x1)*0.5f;sceneCmd.py=(line.y0+line.y1)*0.5f;found=true;break;
     }
     Check(found,"real PVP tab remains discoverable below the enemy card");
+    scenePvpOpen=found;   // its title clicked (kPvpFold): the panel opens by a click, never by the pointer passing
     RecordBegin();Measured([&](Text* text,Line* lines,int* at){MapCommands(image,nullptr,text,vp,w,h,s,map,lines,at);},s);recording=false;
     CheckDrawing(w,h);
-    if(!(sceneEnemyVisible && (active ? sceneEnemyCount>0 : sceneEnemyCount==0) && scenePvpCount==3 && scenePlaceHitCount>0))std::printf("stack %dx%d active=%d enemy=%d pvp=%d place=%d payload=%d lang=%d pointer=%.1f/%.1f\n",width,height,active,sceneEnemyCount,scenePvpCount,scenePlaceHitCount,scenePayloadButtonCount,static_cast<int>(hudtext::InUse()),sceneCmd.px,sceneCmd.py);
-    Check(sceneEnemyVisible && (active ? sceneEnemyCount>0 : sceneEnemyCount==0) && scenePvpCount==3 && scenePlaceHitCount>0,"enemy/PVP/placement actions remain reachable in the production stack");
+    if(!(sceneEnemyVisible && (active ? sceneEnemyCount>0 : sceneEnemyCount==0) && scenePvpCount==4 && scenePlaceHitCount>0))std::printf("stack %dx%d active=%d enemy=%d pvp=%d place=%d payload=%d lang=%d pointer=%.1f/%.1f\n",width,height,active,sceneEnemyCount,scenePvpCount,scenePlaceHitCount,scenePayloadButtonCount,static_cast<int>(hudtext::InUse()),sceneCmd.px,sceneCmd.py);
+    Check(sceneEnemyVisible && (active ? sceneEnemyCount>0 : sceneEnemyCount==0) && scenePvpCount==4 && scenePlaceHitCount>0,"enemy/PVP/placement actions remain reachable in the production stack");
     Check(scenePayloadButtonCount==(active ? 0 : kMostPayload),"active enemy skills replace paused source loadout while inspection retains payload choices");
     const auto overlaps=[](const float* a,const float* b){return a[0]<b[2] && b[0]<a[2] && a[1]<b[3] && b[1]<a[3];};
     for(int i=0;i<sceneEnemyCount;++i) {
