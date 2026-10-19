@@ -29,8 +29,8 @@ folders, and a story file EDF6 holds as another file (shadowed: DragonSmall401.m
 into the pack's folder with them.
 
 STORY_ROOTS: the story's objects whose own path EDF6 holds as another object (pylib/edf41dlc.py STORY_SHADOWED: the
-small dragons, EDF5's frog dragons at 4.1's names in EDF6, which EDF6's own missions spawn), under OBJECT/EDF41/ the
-same way (their shadowed model and CAS move with them); every 4.1 script names them there (edf41dlc.rewrite).
+small dragons, EDF5's frog dragons at 4.1's names in EDF6, which EDF6's own missions spawn), as OBJECT/EDF41_<name>.SGO;
+their shadowed model and CAS stay under OBJECT/EDF41/. Every 4.1 script names the distinct SGO (edf41dlc.rewrite).
 
 STOCK_OVERRIDES: objects EDF6's archives hold, left over from 4.1 (EDF6's own missions never spawn them), whose class
 EDF6 has since changed: the stock file lacks keys the class reads unchecked and crashes on spawn (Transporter401_
@@ -1014,16 +1014,18 @@ for _hs in ('DRAGONSMALL401_HS.SGO', 'REDSMALLDRAGON_HS.SGO', 'YERROWSMALLDRAGON
 # M517, M518, M601 and the packs' M418, M993, DM202, M999 ...), the same 4.1 objects as the DLC's three above but for their
 # own tuning: EDF6 holds each of their paths as EDF5's frog dragon (e518_frogDragon*, the same class and numbers, another
 # model, CAS and ragdoll), which EDF6's own missions spawn, so the 4.1 missions got EDF5's frog in 4.1's place (2026-10-17
-# 「这龙怎么还是蝌蚪的模样」). 4.1's go to OBJECT/EDF41/ (edf41dlc.STORY_SHADOWED; their model archive and CAS, which EDF6 also
-# holds as EDF5's, move with them: relocations) and every converted 4.1 script names them there (edf41dlc.rewrite); the
+# 「这龙怎么还是蝌蚪的模样」). 4.1's SGOs get an EDF41_ prefix in OBJECT/ (edf41dlc.STORY_DRAGONS); their model archives
+# and CAS, which EDF6 also holds as EDF5's, stay under OBJECT/EDF41/ (relocations). Every converted 4.1 script names
+# the distinct SGO through edf41dlc.rewrite (including the older EDF41/ SGO references); the
 # ragdoll bodies as the DLC's (their ragdolls are the same files). Templates: the EDF6 objects of the same name.
 STORY_ROOTS: dict[str, int] = {   # how many of 4.1's own story missions name each (its MISSION/<id>/*.BVM, 2026-10-17)
     'DRAGONSMALL401.SGO': 14, 'REDSMALLDRAGON.SGO': 7, 'YERROWSMALLDRAGON.SGO': 3,
 }
 for _story, _uses in STORY_ROOTS.items():
-    ROOTS[f'{edf41dlc.STORY_FOLDER}/{_story}'] = _uses
-    ALIASES[f'{edf41dlc.STORY_FOLDER}/{_story}'] = Alias('DragonSmall', _story, (),
-                                                         override=(('edf41_ragdoll_bodies', list(SMALL_DRAGON_BODIES)),))
+    _root = edf41dlc.STORY_DRAGONS[_story]
+    ROOTS[_root] = _uses
+    ALIASES[_root] = Alias('DragonSmall', _story, (),
+                           override=(('edf41_ragdoll_bodies', list(SMALL_DRAGON_BODIES)),))
 
 
 
@@ -1066,8 +1068,8 @@ PATCHES.update(DLC_INSECT_PATCHES)
 # --- EDF4.1's own friendly soldiers (FRIEND_LOOKS; feedback 2026-10-17 「npc好像也没搬过来」, docs/feedback-2026-10-17-
 # edf41-npc.md). The 4.1 missions' rangers, fencers and wing divers name story paths (OBJECT/AIARMYSOLDIER_AF.SGO ...)
 # that EDF6 holds for its own soldiers and its own missions spawn: those stay EDF6's, and 4.1's file of each ships at
-# OBJECT/EDF41/<name> (pylib/edf41friends.py LOOKS, look_rel), the story folder of edf41dlc.STORY_SHADOWED as the small
-# dragons' (STORY_ROOTS): Games.moved reads it from the story path, and edf41dlc.rewrite renames every 4.1 script's
+# OBJECT/EDF41/<name> (pylib/edf41friends.py LOOKS, look_rel), the story folder of edf41dlc.STORY_SHADOWED:
+# Games.moved reads it from the story path, and edf41dlc.rewrite renames every 4.1 script's
 # reference (tools/make_edf41_missions.py, story and packs). Built here, not through ROOTS / ALIASES: the template is
 # EDF6's own file of the same name, kept whole but for 4.1's look and unit (alias_dsgo is the Hectors' model merge). Each is EDF6's file of that name -- the class's behaviour as EDF6 tunes it: AI, camera, climbing, soldier_config
 # -- with 4.1's look and 4.1's own unit put in (FRIEND_KEYS: model, CAS, MAB, ragdoll, colours, lights, voice, its 4.1
@@ -1530,6 +1532,8 @@ def own_folder(rel: str) -> str:
     """The folder under OBJECT/ an object at Mods path `rel` keeps its own files in: its DLC pack's (pack_folder), the
     story folder for a STORY_ROOTS object (edf41dlc.STORY_FOLDER), '' for any other."""
     parts = rel.split('/')
+    if rel in {'OBJECT/' + name for name in edf41dlc.STORY_DRAGONS.values()}:
+        return edf41dlc.STORY_FOLDER
     if len(parts) > 2 and parts[0] == 'OBJECT' and parts[1] == edf41dlc.STORY_FOLDER:
         return edf41dlc.STORY_FOLDER
     return pack_folder(rel)
@@ -1561,8 +1565,10 @@ class Games:
         # Story files a pack's object needs in 4.1's form where EDF6 holds another file at that path (shadowed): Mods
         # path in the pack's folder -> the story path it is read from (closure fills it)
         self.moved: dict[str, str] = {}
-        for name in edf41dlc.STORY_SHADOWED:   # STORY_ROOTS: 4.1's story object, shipped in the story folder
-            self.moved[f'OBJECT/{edf41dlc.STORY_FOLDER}/{name}'] = f'OBJECT/{name}'
+        for name in edf41dlc.STORY_SHADOWED:   # The same canonical SGO path that every mission and object names.
+            self.moved[rel_of(edf41dlc.rewrite(f'app:/Object/{name}'))] = f'OBJECT/{name}'
+            if name in edf41dlc.STORY_DRAGONS:   # Historical/custom scripts may still name the old isolated SGO.
+                self.moved[f'OBJECT/{edf41dlc.STORY_FOLDER}/{name}'] = f'OBJECT/{name}'
 
     def has4(self, rel: str) -> bool:
         """A file EDF4.1 has at Mods path `rel`: its own archives, a DLC pack's, or a shadowed story file moved."""
@@ -1640,7 +1646,8 @@ def closure(games: Games, root: str) -> tuple[list[str], list[str]]:
                 why.append(f'{rel}: {e!r}')
                 continue
             moves = relocations(games, rel, members)
-            todo += [moves.get(ref_rel(s), ref_rel(s)) for s in strings(members) if is_ref(s)]
+            refs = [p for s in strings(members) for p in edf41dlc.rewrite(s).split(';') if is_ref(p)]
+            todo += [moves.get(ref_rel(p), ref_rel(p)) for p in refs]
     return need, why
 
 
@@ -1703,8 +1710,7 @@ def retarget(rel: str, data: bytes, moved: dict[str, str]) -> bytes:
     changed = [False]
 
     def one(p: str) -> str:
-        if edf41dlc.is_mounted(p):
-            return edf41dlc.app_path(p)
+        p = edf41dlc.rewrite(p)   # Mounted paths and shadowed story SGOs share the scripts' canonical mapping.
         if folder and p.lower().startswith('app:/object/'):
             new = f'OBJECT/{folder}/{rel_of(p).split("/", 1)[1]}'
             if moved.get(new) == rel_of(p):
@@ -3558,6 +3564,19 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
                              'root to ROOTS / ALIASES with STOCK_OVERRIDES, or to STOCK_COMPLETIONS):\n  '
                              + '\n  '.join(stale))
     kill_counters(files)
+    # Older installed missions and players' own scripts name the former isolated SGO paths. Keep byte-identical
+    # aliases in the canonical object's closure, without a second registry row (which would duplicate object lists).
+    registered = {o['object']: o for o in objects}
+    for source, target in edf41dlc.STORY_DRAGONS.items():
+        canonical = 'OBJECT/' + target
+        if canonical not in registered:
+            continue
+        legacy = f'OBJECT/{edf41dlc.STORY_FOLDER}/{source}'
+        if legacy in files and files[legacy] != files[canonical]:
+            raise ValueError(f'{legacy}: compatibility SGO differs from {canonical}')
+        files[legacy] = files[canonical]
+        if legacy not in registered[canonical]['files']:
+            registered[canonical]['files'].append(legacy)
     hashes = {r: hashlib.sha256(b).hexdigest() for r, b in files.items()}
     for r, path in shared.items():
         with open(os.path.join(HERE, '..', *path.split('/')), 'rb') as f:

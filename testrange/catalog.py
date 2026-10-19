@@ -110,7 +110,7 @@ STOCK_ENEMIES: tuple[tuple[str, str, bool, float], ...] = (
     ('e507_goldufo', '金色 UFO（飞）', True, 30.0),
     ('e515_imperialufo', '帝国 UFO（飞）', True, 30.0),
     ('e605_spinnerufo', 'UFO E605（飞）', True, 30.0),
-    ('dragonsmall401', '小龙（飞）', True, 30.0),
+    ('dragonsmall401', '蝌蚪（五六代，飞）', True, 30.0),
     ('e508_carrier', '传送舰（飞）', True, 250.0),
     ('e611_timeship', '星导者新舰（飞）', True, 400.0),
     ('e511_mothership_edf6', '母舰（飞）', True, 900.0),
@@ -138,6 +138,16 @@ EDF41_CLASSES: dict[str, tuple[str, str, float, bool]] = {
     'UfoRobo': ('enemy41', '4.1 UFO 机器人（飞船 / 机器人形态）', 150.0, True),
     'UfoMother301': ('enemy41', '4.1 母船（飞）', 300.0, True),
     'UfoMother401': ('enemy41', '4.1 地球吞噬者（飞）', 300.0, True),
+}
+# File identities distinguish 4.1's dragons from EDF5/6's frog dragons (the same native DragonSmall class).
+EDF41_DRAGON_LABELS: dict[str, str] = {
+    'EDF41_DRAGONSMALL401': '4.1 小龙（绿，飞）',
+    'EDF41_REDSMALLDRAGON': '4.1 小龙（红，飞）',
+    'EDF41_YERROWSMALLDRAGON': '4.1 小龙（黄，飞）',
+    'EDF41MP01/DRAGONSMALL401_HS': '4.1 DLC 小龙（绿，飞）',
+    'EDF41MP01/REDSMALLDRAGON_HS': '4.1 DLC 小龙（红，飞）',
+    'EDF41MP01/YERROWSMALLDRAGON_HS': '4.1 DLC 小龙（黄，飞）',
+    'DRAGONBIG401': '4.1 大龙（飞）',
 }
 # Registry objects that are no row, and why (selftest: every other one is).
 EDF41_LEFT_OUT_CLASSES: dict[str, str] = {
@@ -188,6 +198,7 @@ def edf41_rows() -> tuple[Row, ...]:
     for o in objects:
         category, words, lift, flying = EDF41_CLASSES[o['class']]
         stem = o['object'].removeprefix('OBJECT/').removesuffix('.SGO')
+        words = EDF41_DRAGON_LABELS.get(stem, words)
         others = {f for f in o['files'] if f != o['object']}
         preload = o['class'] not in first or others <= brought
         first.add(o['class'])

@@ -9569,51 +9569,63 @@ def edf41_class_names() -> None:
 
 @test
 def edf41_story_small_dragons() -> None:
-    """2026-10-17「这龙怎么还是蝌蚪的模样」: 4.1's story small dragons (app:/Object/DragonSmall401.sgo, RedSmallDragon.sgo,
-    YerrowSmallDragon.sgo) are paths EDF6 holds as EDF5's frog dragons (e518_frogDragon*), which EDF6's own missions spawn,
-    so the 4.1 missions showed the frog. 4.1's own go to OBJECT/EDF41/ (pylib/edf41dlc.py STORY_SHADOWED / story_path,
-    make_edf41_objects STORY_ROOTS: aliased like the DLC's _HS dragons, their shadowed model and CAS moved along) and every
-    converted 4.1 script names them there (edf41dlc.rewrite through bvm41.rewritten for EDF5's story recompiles, through
-    to_edf5 for the packs). Checked: the mapping (only those three SGOs, any case, ';' lists, idempotent, mounted paths as
-    before); the generator's roots and aliases; a story script rewritten names none at the stock path and gives the same
-    bytes back once put back; the registry and the committed scripts agree (a registry shipping OBJECT/EDF41/<x> has no
-    script naming the stock <x>); with the games installed, the three built from 4.1's archives carry 4.1's models and
-    ragdolls from files of their own, none at a path EDF6's archives hold."""
+    """4.1's small dragons have distinct EDF41_ root SGOs: stock DragonSmall401 is EDF5/6's frog dragon. Original
+    and old EDF41/ script paths converge on the prefixed name; only model/CAS dependencies stay in EDF41/. The old
+    namespaced SGO remains a byte-identical compatibility file of each object, not another catalog object. Check
+    mapping, generator roots, every committed BVM, the shipped objects, and (with both games) a real rebuild."""
     import glob
     import bvm41
     import edf41_objects as eo
     import edf41dlc
     import make_edf41_objects as m
+    import mdb
     import sgo
     f = edf41dlc.STORY_FOLDER
-    assert edf41dlc.story_path('app:/Object/DragonSmall401.sgo') == f'app:/Object/{f}/DragonSmall401.sgo'
-    assert edf41dlc.story_path('app:/object/redsmalldragon.sgo') == f'app:/object/{f}/redsmalldragon.sgo'
-    for other in ('app:/Object/DragonBig401.sgo', 'app:/Object/DragonSmall401_HS.sgo', 'app:/Object/DragonSmall401.mrab',
-                  f'app:/Object/{f}/DragonSmall401.sgo', 'app:/Object/EDF41MP01/DragonSmall401_HS.sgo', 'DragonSmall401'):
+    dragons = {'DRAGONSMALL401.SGO': 'EDF41_DRAGONSMALL401.SGO',
+               'REDSMALLDRAGON.SGO': 'EDF41_REDSMALLDRAGON.SGO',
+               'YERROWSMALLDRAGON.SGO': 'EDF41_YERROWSMALLDRAGON.SGO'}
+    assert edf41dlc.STORY_DRAGONS == dragons, edf41dlc.STORY_DRAGONS
+    for name, target in dragons.items():
+        canonical = 'app:/Object/' + target
+        for old in ('app:/Object/' + name, f'app:/Object/{f}/' + name, canonical):
+            for path in (old, old.lower(), old.swapcase()):
+                assert edf41dlc.story_path(path) == canonical, path
+                assert edf41dlc.rewrite(path) == canonical, path
+                assert edf41dlc.rewrite(edf41dlc.rewrite(path)) == canonical, path
+    for other in ('app:/Object/DragonBig401.sgo', 'app:/Object/DragonSmall401_HS.sgo',
+                  'app:/Object/DragonSmall401.mrab', f'app:/Object/{f}/DragonSmall401.cas',
+                  'app:/Object/EDF41MP01/DragonSmall401_HS.sgo', 'DragonSmall401'):
         assert edf41dlc.story_path(other) is None, other
         assert edf41dlc.rewrite(other) == other, other
-    both = 'app:/Object/YerrowSmallDragon.sgo;mp01:/Object/GiantAnt04.sgo'
-    assert edf41dlc.rewrite(both) == f'app:/Object/{f}/YerrowSmallDragon.sgo;app:/Object/EDF41MP01/GiantAnt04.sgo'
-    assert edf41dlc.rewrite(edf41dlc.rewrite(both)) == edf41dlc.rewrite(both)
-    # the generator: one root and alias per shadowed object, in the story folder, under the class with 4.1's ragdoll bodies
-    import edf41friends
-    dragons = [n for n in edf41dlc.STORY_SHADOWED if 'OBJECT/' + n not in edf41friends.LOOKS]   # the soldiers: friend_look
+    mixed = ('app:/Object/DragonSmall401.sgo;app:/object/edf41/redsmalldragon.sgo;'
+             'app:/object/edf41_yerrowsmalldragon.sgo;mp01:/Object/DragonSmall401_HS.sgo;app:/Object/DragonBig401.sgo')
+    expected = ('app:/Object/EDF41_DRAGONSMALL401.SGO;app:/Object/EDF41_REDSMALLDRAGON.SGO;'
+                'app:/Object/EDF41_YERROWSMALLDRAGON.SGO;app:/Object/EDF41MP01/DragonSmall401_HS.sgo;'
+                'app:/Object/DragonBig401.sgo')
+    assert edf41dlc.rewrite(mixed) == expected
+    assert edf41dlc.rewrite(expected) == expected
+    # Canonical root identities remain DragonSmall aliases with the original template and 4.1 ragdoll bodies.
     assert set(m.STORY_ROOTS) == set(dragons), m.STORY_ROOTS
     assert f not in {folder for _, folder in edf41dlc.PACKS.values()}
-    for name in dragons:
-        root = f'{f}/{name}'
-        a = m.ALIASES[root]
-        assert m.ROOTS[root] == m.STORY_ROOTS[name] > 0 and a.cls == 'DragonSmall' and a.template == name, (root, a)
+    for name, target in dragons.items():
+        a = m.ALIASES[target]
+        assert m.ROOTS[target] == m.STORY_ROOTS[name] > 0 and a.cls == 'DragonSmall' and a.template == name, (target, a)
+        assert name not in m.ROOTS and f'{f}/{name}' not in m.ROOTS, name
         assert dict(a.override)['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), a.override
-        assert m.own_folder('OBJECT/' + root) == f and m.pack_folder('OBJECT/' + root) == '', root
+        assert m.own_folder('OBJECT/' + target) == f and m.pack_folder('OBJECT/' + target) == '', target
     assert m.own_folder('OBJECT/EDF41MP01/X.SGO') == 'EDF41MP01' and m.own_folder('OBJECT/X.SGO') == ''
-    # a story script (EDF5's recompile, M165: all three) with its strings mapped; the bytes come back with them put back
-    stock = re.compile(r'(?i)^app:/object/(' + '|'.join(re.escape(n) for n in edf41dlc.STORY_SHADOWED) + r')$')
-    unmap = re.compile(r'(?i)^(app:/object)/' + f + r'/')
+    old_path = re.compile(r'(?i)^app:/object/(?:' + re.escape(f) + r'/)?('
+                          + '|'.join(re.escape(n) for n in dragons) + r')$')
+    canonical_paths = {'app:/object/' + target.lower(): name for name, target in dragons.items()}
 
     def pushed(data: bytes) -> list[str]:
         prog = bvm41.parse(data)
-        return [x.v for code in [prog.init] + [g.code for g in prog.funcs] for x in code if x.op == bvm41.OP_PUSHS]
+        return [p for code in [prog.init] + [g.code for g in prog.funcs] for x in code
+                if x.op == bvm41.OP_PUSHS for p in x.v.split(';')]
+
+    def restore(text: str) -> str:
+        return ';'.join('app:/Object/' + canonical_paths[p.lower()] if p.lower() in canonical_paths else p
+                        for p in text.split(';'))
 
     with open(os.path.join(ROOT, 'edf41port', 'missions', 'M165', 'MISSION.BVM'), 'rb') as fh:
         script = fh.read()
@@ -9621,42 +9633,129 @@ def edf41_story_small_dragons() -> None:
     mapped = bvm41.rewritten(script, edf41dlc.rewrite)
     assert bvm41.rewritten(mapped, edf41dlc.rewrite) == mapped
     names = pushed(mapped)
-    assert not [s for s in names if stock.match(s)], names
-    assert set(dragons) <= {s.split('/')[-1].upper() for s in names if unmap.match(s)} <= set(edf41dlc.STORY_SHADOWED), names
-    restored = bvm41.rewritten(mapped, lambda s: unmap.sub(r'\1/', s))
-    assert bvm41.rewritten(restored, edf41dlc.rewrite) == mapped and not [s for s in pushed(restored) if unmap.match(s)]
-    # the registry and the committed scripts agree: a story dragon shipped in the folder is named there by every script
-    shipped = {o['object'] for o in eo.registry()['objects']}
-    moved = {name for name in edf41dlc.STORY_SHADOWED if f'OBJECT/{f}/{name}' in shipped}
-    assert moved in (set(), set(edf41dlc.STORY_SHADOWED)), moved
-    if moved:
-        for path in glob.glob(os.path.join(ROOT, 'edf41port', '**', '*.BVM'), recursive=True):
-            with open(path, 'rb') as fh:
-                left = [s for s in pushed(fh.read()) if stock.match(s)]
-            assert not left, f'{path} names {left}: regenerate tools/make_edf41_missions.py (story and --dlc)'
+    assert not [s for s in names if old_path.match(s)], names
+    assert set(canonical_paths) <= {s.lower() for s in names}, names
+    restored = bvm41.rewritten(mapped, restore)
+    assert bvm41.rewritten(restored, edf41dlc.rewrite) == mapped
+    assert not [s for s in pushed(restored) if s.lower() in canonical_paths]
+    # Every shipped story/DLC script uses the prefixed identity, never the stock or old namespace name.
+    referenced: set[str] = set()
+    for path in glob.glob(os.path.join(ROOT, 'edf41port', '**', '*.BVM'), recursive=True):
+        with open(path, 'rb') as fh:
+            names = pushed(fh.read())
+        assert not [s for s in names if old_path.match(s)], f'{path} retains an old small-dragon path'
+        for name in names:
+            if name.lower() in canonical_paths:
+                assert name == edf41dlc.rewrite(name), (path, name)
+                referenced.add(name.lower())
+    assert referenced == set(canonical_paths), referenced
+    models = {'DRAGONSMALL401.SGO': 'SmallDragon401Green.mdb', 'REDSMALLDRAGON.SGO': 'RedSmallDragon.mdb',
+              'YERROWSMALLDRAGON.SGO': 'YerrowSmallDragon.mdb'}
+    source_of = {target: name for name, target in dragons.items()}
+
+    def check_object(obj: dict, read: Callable[[str], bytes]) -> None:
+        rel = obj['object']
+        source = source_of[rel.removeprefix('OBJECT/')]
+        legacy = f'OBJECT/{f}/{source}'
+        assert obj['class'] == 'DragonSmall' and legacy in obj['files'], obj
+        assert read(legacy) == read(rel), (rel, 'old namespace SGO differs')
+        top = sgo.load(data=read(rel))
+        assert top['xgs_scene_object_class'] == 'DragonSmall', (rel, top['xgs_scene_object_class'])
+        model = m.model_entries(top['animation_model'][0])[0]
+        model_rel = m.rel_of(model[0])
+        assert model_rel.startswith(f'OBJECT/{f}/') and model[1] == models[source], model
+        assert model_rel in obj['files'], (rel, model_rel)
+        assert model[1].lower() in {x.name.lower() for x in mdb.rab_read(read(model_rel)).files}, model
+        cas_rel = m.rel_of(top['animation_model'][1])
+        assert cas_rel.startswith(f'OBJECT/{f}/') and cas_rel in obj['files'], cas_rel
+        assert 'frogdragon' not in top['ragdoll'][0].lower(), top['ragdoll']
+        assert m.rel_of(top['ragdoll'][0]) in obj['files'], top['ragdoll']
+        assert top['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), top.get('edf41_ragdoll_bodies')
+
+    objects = {o['object']: o for o in eo.registry()['objects']}
+    for name, target in dragons.items():
+        rel = 'OBJECT/' + target
+        assert rel in objects and f'OBJECT/{f}/{name}' not in objects, rel
+        assert 'OBJECT/' + name not in objects, (name, 'would replace EDF5/6 frog dragons')
+        check_object(objects[rel], eo.read)
     if not _e5c_have_game() or not _edf41_root():
         print('skip  edf41_story_small_dragons (real archives): needs EDF6 and EDF4.1 installed')
         return
     import rootcpk
-    import mdb
     games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
-    frog = sgo.load(data=games.read6('OBJECT/DRAGONSMALL401.SGO'))   # why the folder: EDF6's own is EDF5's frog
+    frog = sgo.load(data=games.read6('OBJECT/DRAGONSMALL401.SGO'))
     assert 'frogdragon' in m.model_entries(frog['animation_model'][0])[0][1].lower(), frog['animation_model'][0]
-    roots = tuple(f'{f}/{n}' for n in dragons)
-    data, files = m.build(_edf41_root(), rootcpk.DEFAULT_GAME, roots)
-    assert not data['skipped'] and {o['object'] for o in data['objects']} == {'OBJECT/' + r for r in roots}, data['skipped']
-    models = {'DRAGONSMALL401.SGO': 'SmallDragon401Green.mdb', 'REDSMALLDRAGON.SGO': 'RedSmallDragon.mdb',
-              'YERROWSMALLDRAGON.SGO': 'YerrowSmallDragon.mdb'}
-    for o in data['objects']:
-        rel = o['object']
-        assert not [r for r in o['files'] if r in games.have6], (rel, o['files'])   # nothing EDF6 would load instead
-        top = sgo.load(data=files[rel])
-        model = m.model_entries(top['animation_model'][0])[0]
-        assert m.rel_of(model[0]).startswith(f'OBJECT/{f}/') and model[1] == models[rel.split('/')[-1]], model
-        assert model[1].lower() in {x.name.lower() for x in mdb.rab_read(files[m.rel_of(model[0])]).files}, model
-        assert m.rel_of(top['animation_model'][1]).startswith(f'OBJECT/{f}/'), top['animation_model'][1]
-        assert 'frogdragon' not in top['ragdoll'][0].lower() and m.rel_of(top['ragdoll'][0]) in files, top['ragdoll']
-        assert top['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), top.get('edf41_ragdoll_bodies')
+    for name, target in dragons.items():
+        assert games.moved['OBJECT/' + target] == 'OBJECT/' + name, target
+        assert games.moved[f'OBJECT/{f}/{name}'] == 'OBJECT/' + name, name
+    data, files = m.build(_edf41_root(), rootcpk.DEFAULT_GAME, tuple(dragons.values()))
+    assert not data['skipped'] and {o['object'] for o in data['objects']} == {'OBJECT/' + r for r in dragons.values()}, data['skipped']
+    for obj in data['objects']:
+        assert not [r for r in obj['files'] if r in games.have6], (obj['object'], obj['files'])
+        check_object(obj, files.__getitem__)
+
+
+@test
+def edf41_story_small_dragons_upgrade() -> None:
+    """An existing edf41-owned EDF41/ dragon install upgrades to the three prefixed roots without foreign-file
+    refusals, dependency rewrites or stock frog overrides; both entry names uninstall without leaving resources."""
+    import edf41_objects as eo
+    import edf41dlc
+    reg = eo.registry()
+    roots = {'OBJECT/' + n for n in edf41dlc.STORY_DRAGONS.values()}
+    aliases = {f'OBJECT/{edf41dlc.STORY_FOLDER}/{n}' for n in edf41dlc.STORY_DRAGONS}
+    objects = [o for o in reg['objects'] if o['object'] in roots]
+    needed = {r for obj in objects for r in obj['files']}
+    assert len(objects) == 3 and roots | aliases <= needed
+    subset = {**reg, 'objects': objects, 'stock_completions': [],
+              'files': {r: reg['files'][r] for r in needed}}
+    payloads = {r: eo.read(r) for r in needed}
+    old = {r: data for r, data in payloads.items() if r not in roots}
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e41dragon-') as game, patched(eo, registry=lambda: subset):
+        os.makedirs(os.path.join(game, 'Mods'))
+        eo.install(game, old)
+        led = ledger.Ledger(game)
+        assert set(led.owned_by(eo.OWNER)) == {ledger.key(r) for r in old}
+        assert all(os.path.isfile(led.disk(r)) for r in aliases)
+        assert not any(os.path.exists(led.disk(r)) for r in roots)
+        assert not eo.unavailable(game), eo.unavailable(game)
+        files, skipped = eo.build(game)
+        assert not skipped and files == payloads, skipped
+        written = eo.install(game, files)
+        assert {os.path.relpath(p, led.mods).replace('\\', '/').upper() for p in written} == roots, written
+        for source, target in edf41dlc.STORY_DRAGONS.items():
+            canonical, legacy = 'OBJECT/' + target, f'OBJECT/{edf41dlc.STORY_FOLDER}/{source}'
+            assert modfiles.read(led.disk(canonical)) == modfiles.read(led.disk(legacy)) == payloads[canonical]
+            assert not os.path.exists(led.disk('OBJECT/' + source)), source
+        assert set(ledger.Ledger(game).owned_by(eo.OWNER)) == {ledger.key(r) for r in needed}
+        assert not eo.unavailable(game) and eo.install(game, files) == []
+        _deleted, kept = eo.remove(game)
+        assert not kept and not any(os.path.exists(led.disk(r)) for r in needed), kept
+        assert not ledger.Ledger(game).owned_by(eo.OWNER)
+
+@test
+def edf41_dragon_catalog_names() -> None:
+    """The object list and range distinguish EDF5/6's stock frog dragon, 4.1's three prefixed small dragons, DLC
+    dragons and the big dragon, while every row's file path still resolves to its own registry object."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import catalog
+    rows = {r.sgo: r for r in catalog.rows()}
+    frog = rows['dragonsmall401']
+    assert frog.source == 'stock' and frog.rel == 'OBJECT/DRAGONSMALL401.SGO'
+    assert '蝌蚪' in frog.label and '小龙' not in frog.label, frog
+    expected = {'edf41_dragonsmall401': '4.1 小龙（绿，飞）',
+                'edf41_redsmalldragon': '4.1 小龙（红，飞）',
+                'edf41_yerrowsmalldragon': '4.1 小龙（黄，飞）',
+                'edf41mp01/dragonsmall401_hs': '4.1 DLC 小龙（绿，飞）',
+                'edf41mp01/redsmalldragon_hs': '4.1 DLC 小龙（红，飞）',
+                'edf41mp01/yerrowsmalldragon_hs': '4.1 DLC 小龙（黄，飞）',
+                'dragonbig401': '4.1 大龙（飞）'}
+    for name, label in expected.items():
+        row = rows[name]
+        assert row.label.startswith(label + ' ') and row.source == 'edf41' and row.flying, row
+        assert row.category == 'enemy41' and row.rel in catalog.edf41_files(row.sgo), row
+        assert row.rel == 'OBJECT/' + name.upper() + '.SGO' and '蝌蚪' not in row.label, row
+    assert not {f'edf41/{n}' for n in ('dragonsmall401', 'redsmalldragon', 'yerrowsmalldragon')} & set(rows)
 
 
 @test
