@@ -510,10 +510,15 @@ def leaks(kit: Kit, step: float = LEAK_STEP) -> list[tuple[float, float]]:
     or the walls of a cockpit meant to be closed (Kit.sill; the user, 2026-10-14: "固定翼的底部是空白，完全能看过去").
     A line out through the kit's real glass (Kit.windows: a chin window) is a view, not a leak. Empty for a kit
     without a sill."""
-    import numpy as np
     if kit.sill is None:
         return []
-    lines = sight_lines(kit.sill, step)
+    return unmet(kit, sight_lines(kit.sill, step))
+
+
+def unmet(kit: Kit, lines: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Of the lines of sight `lines` (yaw left, pitch up, degrees, from the eye), those that meet no front face of the
+    kit and leave through none of its real glass (Kit.windows): where the world shows through it (leaks)."""
+    import numpy as np
     tris = [np.asarray([v.pos for v in p.verts], dtype=np.float64)[np.asarray(p.tris, dtype=np.int64)]
             for p in kit.parts if p.tris]
     if not tris:
@@ -568,16 +573,24 @@ def _conform(tris, kit: Kit, m: list[float], scale: float) -> None:  # noqa: ANN
 
 
 def _sides(p: Vec3, room: dict[str, float]) -> list[str]:
-    """The walls of `room` a kit point (eye frame) presses on: past NEAR of the room that way."""
-    out = []
+    """The walls of `room` a kit point (eye frame) presses on: past NEAR of the room that way; in a corner, where it
+    is past CORNER of the room every way it is out but past NEAR of none (the room is measured straight out: its
+    corners are where a hull's bevels are nearest), the wall it is furthest out toward."""
+    out, ratios = [], {}
     for value, plus, minus in ((p[0], 'left', 'right'), (p[1], 'up', 'down'), (p[2], 'ahead', 'back')):
         side = plus if value > 0 else minus
-        if math.isfinite(room[side]) and abs(value) > NEAR * room[side]:
-            out.append(side)
+        if math.isfinite(room[side]) and room[side] > 0:
+            ratios[side] = abs(value) / room[side]
+            if ratios[side] > NEAR:
+                out.append(side)
+    corner = [side for side, r in ratios.items() if r > CORNER]
+    if not out and len(corner) >= 2:
+        out.append(max(corner, key=ratios.__getitem__))
     return out
 
 
 NEAR = 0.7
+CORNER = 0.5   # _sides(): a point this far out toward two or more walls at once is in the room's corner
 
 
 def fitted(tris, fit: Fit, kit_fn: KitFn) -> Kit:  # noqa: ANN001 - numpy

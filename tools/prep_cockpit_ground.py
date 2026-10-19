@@ -91,8 +91,11 @@ class Source:
 
 
 SOURCES = (
+    # The P880's box reaches 1.0 m behind the eye: its rear wall stands 0.86-0.93 m back (its corners further out than
+    # its middle). Cut at 0.45 m the wall was gone and the hull round the cab (seen from inside: not drawn) showed the
+    # world past the seat (the user, 2026-10-19, of the rescue tank: 「救护车往后看会看到空气」).
     Source('sf-arhan-p880', 'a85231fbbfac482ea0bb3fc7e2758cd8', 'ARHAN P880 6x6', 'Mayess', (0.2, 0.45, -0.42),
-           (0.0, 0.0, 1.0), (0.0, 1.0, 0.0), ((-0.9, -1.4, -0.45), (2.0, 1.0, 1.5)), scale=2.4, mirror=True,
+           (0.0, 0.0, 1.0), (0.0, 1.0, 0.0), ((-0.9, -1.4, -1.0), (2.0, 1.0, 1.5)), scale=2.4, mirror=True,
            shows="a cab-over truck's cab (mirrored: driven from the right): dashboard, wheel, the big windscreen's "
                  "pillars, roof console, seats"),
     Source('sf-lightbody-85', '67beae18c3d24be68f9c8f0ec382d8e3', "Lightbody Lifted '85 - Low poly model",
