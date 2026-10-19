@@ -1410,6 +1410,88 @@ bool JoinOnly(npc::Control control,const void* top) noexcept {
     return npc::Scripted(control) && NativeJoinable(static_cast<const unsigned char*>(top));
 }
 
+// --- The stock's join mark and free-squad cover (the user 2026-10-19: "同时删除npc顶上的未招募红标（因为已经改成m里面
+// 招募了）和删除玩家招募npc以后npc的减伤消失问题"; docs/npc-ai-design.md §5.2) ---
+// The join mark: the HUD object built at 0xF5200 (vtable 0x1768BC8, its texture "合流マーク.dds") is handed every soldier;
+// its slot 1 (0xF7280) keeps the head (+0x90, y + 2.25 m) of each one with +0x540 set and no leader (+0x548) and draws
+// the mark there. It is the stock walk-up's invitation, so it goes with it: while WalkUpOff the slot draws nothing
+// (the map's RECRUIT is the way in); with VanillaRecruit=1 or the AI off it is the stock's.
+// The cover: the soldier's update (vslot 5, 0x59ABB0) walks +0x548 from the soldier to the end of the chain
+// (0x59B4B4..0x59B4CD) and, when that one has +0x540 set and is on the AI list (+0x1A bit 3), gives the soldier the
+// stock's cover of a free squad: +0x478 = 3 (0x59B4DE; every observer's sight +0x470 is divided by it, 0x54A343: it is
+// seen at a third of the range) and, while its budget +0x1D40 lasts (1800 frames at spawn 0x596ADD, at most 600 after
+// a leader change 0x596D91 / 0x59D42D, spent only while covered), damage taken x0.01 (+0x384, 0x59B51A) and its guns'
+// damage factor x0.1 (+0x788, 0x59B502); else +0x478 = 1 (0x59B524). A recruited squad's chain ends at the player,
+// whose +0x540 is 0: the cover ended the moment the squad joined, by the stock walk-up or by the map alike. With the
+// plugin's AI on the walk is CoverRoot's, by NpcFreeSquadCover: 0 (the default; the user 2026-10-19: "暂时取消这个掩护
+// 设定吧") hands the read kNoCover, a soldier with no +0x540, so no squad has the cover at all (recruited or free, led
+// from the start, a support soldier); 1 stops the walk below a player, so a squad's cover is its top NPC's, before and
+// after it is recruited (a squad under no player ends where the stock's does). Each machine computes it from its own
+// objects, as the stock does (the leader is replicated by vslot 39; +0x540 is not, §2.3).
+constexpr unsigned kJoinMarkSlot=0x1768BD0,kJoinMarkVisit=0xF7280;
+const unsigned char kJoinMarkSig[]={0x48,0x83,0xEC,0x38,0x80,0xBA,0x40,0x05,0x00,0x00,0x00,0x74,0x72,0x48,0x83,0xBA,
+                                    0x48,0x05,0x00,0x00,0x00,0x75,0x68};   // sub rsp,38h; cmp [rdx+540h],0; je; cmp [rdx+548h],0; jne
+constexpr unsigned kCoverWalk=0x59B4B4;
+// mov rax,rbx; nop; @: lea rcx,[rax]; mov rax,[rax+548h]; test rax,rax; jne @ -- then cmp [rcx+540h],r15b (0x59B4CF)
+const unsigned char kCoverWalkSig[]={0x48,0x8B,0xC3,0x66,0x0F,0x1F,0x84,0x00,0x00,0x00,0x00,0x00,0x48,0x8D,0x08,0x48,
+                                     0x8B,0x80,0x48,0x05,0x00,0x00,0x48,0x85,0xC0,0x75,0xF1};
+const unsigned char kCoverReadSig[]={0x44,0x38,0xB9,0x40,0x05,0x00,0x00,0x74,0x4C,0xF6,0x41,0x1A,0x08,0x74,0x46,
+                                     0xC7,0x83,0x78,0x04,0x00,0x00,0x00,0x00,0x40,0x40};   // ... mov [rbx+478h],3.0
+using JoinMarkFn=void(__fastcall*)(void*,const unsigned char*);
+JoinMarkFn nextJoinMark=nullptr;
+bool coverOk=false;
+// What the cover's read sees with NpcFreeSquadCover=0: +0x540 0 (0x59B4CF -> 0x59B524, +0x478 = 1, no budget spent).
+alignas(16) const unsigned char kNoCover[kAutoFollow+0x10]{};
+void __fastcall JoinMarkHook(void* marks,const unsigned char* human) noexcept {
+    if(WalkUpOff())return;
+    nextJoinMark(marks,human);
+}
+// The one whose +0x540 / +0x1A the stock's cover reads for `h` (rcx at 0x59B4CF): up +0x548 to the end of the chain;
+// with the plugin's AI on, kNoCover (NpcFreeSquadCover=0) or the walk stopping below a player (its squad's top NPC).
+const unsigned char* __fastcall CoverRoot(const unsigned char* h) noexcept {
+    __try {
+        const bool own=ok && Cfg().enabled && Cfg().customNpcAi;
+        if(own && !Cfg().npcFreeSquadCover)return kNoCover;
+        const bool belowPlayer=own;
+        const unsigned char* top=h;
+        for(int i=0;i<kMaxRoot*4;++i) {
+            const auto up=At<const unsigned char*>(top,kLeader);
+            if(!up || !Readable(up,kLeader+8) || (belowPlayer && IsAnyPlayer(up)))return top;
+            top=up;
+        }
+        return top;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return h;}
+}
+// Both once, from InstallNpcAi. The walk's 27 bytes become: mov rcx,rbx; call CoverRoot (a near thunk); mov rcx,rax;
+// 16 bytes of nop. Every register the rest of 0x59ABB0 reads after them is non-volatile or written first (rax, rdx,
+// xmm1 at 0x59B4E8 / 0x59B53E / 0x59B4FA or 0x59B52E), and rsp is 16-aligned there (seven pushes, sub rsp,260h).
+void InstallFreeSquadCover() noexcept {
+    __try {
+        auto slot=reinterpret_cast<void**>(image+kJoinMarkSlot);
+        void* const current=Readable(slot,8) ? *slot : nullptr;
+        if(current==image+kJoinMarkVisit && Matches(kJoinMarkVisit,kJoinMarkSig,sizeof(kJoinMarkSig))) {
+            nextJoinMark=reinterpret_cast<JoinMarkFn>(current);
+            if(!PatchVtableSlot(slot,current,reinterpret_cast<void*>(&JoinMarkHook)))nextJoinMark=nullptr;
+        }
+        Log("NPCAI join mark (合流マーク) %s",nextJoinMark ? "hooked: hidden while the map recruits" : "not as read: stays stock");
+        if(Matches(kCoverWalk,kCoverWalkSig,sizeof(kCoverWalkSig)) &&
+           Matches(kCoverWalk+sizeof(kCoverWalkSig),kCoverReadSig,sizeof(kCoverReadSig))) {
+            unsigned char* const at=image+kCoverWalk;
+            void* const thunk=AllocateNearThunk(at,reinterpret_cast<void*>(&CoverRoot));
+            const auto rel=thunk ? static_cast<unsigned char*>(thunk)-(at+8) : 0;
+            if(thunk && rel>-0x7FFFFFF0 && rel<0x7FFFFFF0) {
+                unsigned char code[sizeof(kCoverWalkSig)]={0x48,0x8B,0xCB,0xE8,0,0,0,0,0x48,0x8B,0xC8,
+                    0x0F,0x1F,0x84,0x00,0x00,0x00,0x00,0x00,0x0F,0x1F,0x84,0x00,0x00,0x00,0x00,0x00};
+                const auto rel32=static_cast<std::int32_t>(rel);
+                std::memcpy(code+4,&rel32,4);
+                coverOk=edf::PatchCode(at,kCoverWalkSig,code,sizeof(code));
+            }
+            if(thunk && !coverOk)VirtualFree(thunk,0,MEM_RELEASE);
+        }
+        Log("NPCAI free-squad cover %s",coverOk ? "patched (NpcFreeSquadCover: 0 none, 1 kept on recruiting)" : "not as read: stays stock");
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+
 // The plugin (or its AI) turned off while a dismissed squad cools down: its +0x540 back as it was (stock again).
 void GiveBackDismissed(unsigned char* h) noexcept {
     for(auto& q:squads)
@@ -1764,7 +1846,7 @@ bool InstallNpcAi() noexcept {
     }
     ok=hooked==kClasses;
     Log("NPCAI soldiers' Think hooked %d/%d%s",hooked,kClasses,ok ? "" : ": the custom AI stays off");
-    if(ok)InstallDriverPayload();
+    if(ok){InstallDriverPayload();InstallFreeSquadCover();}
     ConfigureNpcCommandNetwork(ok ? &NpcMapCommandForRequester : nullptr);
     return ok;
 }
