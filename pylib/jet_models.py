@@ -54,6 +54,7 @@ from mdb import (Bone, Mat, Mdb, Mesh, Object, bind_world, cmpl_compress, cmpl_d
 import gamedir  # noqa: E402
 import graft_pure  # noqa: E402
 import jet_gear  # noqa: E402
+import jet_hardpoints  # noqa: E402
 import jet_skids  # noqa: E402
 import mdb_jet  # noqa: E402
 
@@ -266,7 +267,24 @@ def with_gear(md: Mdb, gear: str | None, d: jet_gear.Donors | None) -> tuple[Mdb
 def elevon_model(game) -> Mdb:  # noqa: ANN001 - rootcpk.Game
     md, _tex = with_gear(mdb_jet.jet_archive(game.read('OBJECT', ELEVON_ARCHIVE))[2], ELEVON_GEAR, donors(game))
     md = grounded(md)
-    return with_nozzles(md, exit_nozzles(md, None))
+    md = with_nozzles(md, exit_nozzles(md, None))
+    return jet_hardpoints.with_hardpoints(md, hardpoints_for(game, md, ELEVON_FILE))
+
+
+# ------------------------------------------------------------------------------------------ hardpoints
+# Each jet model's guns and stores hang on bones of its own (pylib/jet_hardpoints.py; the user, 2026-10-19: 「在地面停着的
+# 飞机射导弹，会在地底生成」): placed on its airframe for the muzzles of the weapons hung there (vcobjects.hardpoint_muzzles),
+# on the models vcobjects.HARDPOINT_FILES names (vcobjects.jet_sgo hangs the weapons on them there, on `mdl` elsewhere).
+ELEVON_FILE = 'EDF6VC_JET.MRAB'   # vcobjects.JET_ELEVON_FILE: the elevon bomber's archive (tools/make_jets.py writes it)
+
+
+def hardpoints_for(game, md: Mdb, file: str) -> list[jet_hardpoints.Hardpoint]:  # noqa: ANN001 - rootcpk.Game
+    """The hardpoints of model `md`, written as archive `file` (none for a file vcobjects.HARDPOINT_FILES does not name)."""
+    import vcobjects
+    if file not in vcobjects.HARDPOINT_FILES:
+        return []
+    r = MODELS.get(file)
+    return jet_hardpoints.hardpoints(md, vcobjects.hardpoint_muzzles(game), bool(r and r.skids))
 
 
 def elevon_archive(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
@@ -278,6 +296,9 @@ def elevon_archive(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
     jet_gear.check_gear(md, 1.0)
     md = with_nozzles(md, exit_nozzles(md, None))
     check_nozzle_bones(md, exit_nozzles(strip_nozzles(md), None))   # on the exits of the model they are in
+    hps = hardpoints_for(game, md, ELEVON_FILE)
+    md = jet_hardpoints.with_hardpoints(md, hps)
+    jet_hardpoints.check_hardpoints(md, hps)
     return replace_member(raw, ELEVON_MODEL, mdb_write(md), d.rab, tex)
 
 
@@ -441,9 +462,11 @@ def build(game, models: dict[str, Recipe] | None = None) -> dict[str, bytes]:  #
         md, tex = unscaled(src, r, d)
         made = finish(md, r)
         nozzles = nozzles_for(game, made, name)
-        data = mdb_write(with_nozzles(made, nozzles))
+        made = with_nozzles(made, nozzles)
+        hps = hardpoints_for(game, made, name)
+        data = mdb_write(jet_hardpoints.with_hardpoints(made, hps))
         arc = replace_member(raw, r.model, data, d.rab if d else None, tex)
-        check(raw, arc, r, d, nozzles)
+        check(raw, arc, r, d, nozzles, hps)
         out[name] = arc
     return out
 
@@ -502,7 +525,8 @@ def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Gam
     raw = game.read('OBJECT', r.archive)
     md = make_model(mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == r.model.lower()).data), r,
                     donors(game) if r.gear else None)
-    return with_nozzles(md, nozzles_for(game, md, file))
+    md = with_nozzles(md, nozzles_for(game, md, file))
+    return jet_hardpoints.with_hardpoints(md, hardpoints_for(game, md, file))
 
 
 # Each jet model's nozzles are bones of the model itself (the user, 2026-10-10: 「尾烟应该跟着模型生成，而不是用两段可能不同步的
@@ -551,9 +575,10 @@ STOCK_BOMBERS: dict[str, tuple[str, str]] = {'bomber401': ('BOMBER401.MRAB', 'bo
 STOCK_COPIES: dict[str, str] = {'EDF6VC_GUNSHIP.MRAB': 'bomber401', 'EDF6VC_TRANSPORT_PLANE.MRAB': 'bomber401'}
 
 
-def stock_copy_model(src: Mdb, key: str) -> Mdb:
-    """The stock bomber `src` (STOCK_BOMBERS[key]'s model) as STOCK_COPIES makes it: skinned, its nozzle bones on."""
-    return with_nozzles(jet_gear.skin_rigid(src), exit_nozzles(src, key))
+def stock_copy_model(src: Mdb, key: str, hps: list[jet_hardpoints.Hardpoint] | None = None) -> Mdb:
+    """The stock bomber `src` (STOCK_BOMBERS[key]'s model) as STOCK_COPIES makes it: skinned, its nozzle bones on, and
+    its hardpoints `hps` (hardpoints_for: the gunship's)."""
+    return jet_hardpoints.with_hardpoints(with_nozzles(jet_gear.skin_rigid(src), exit_nozzles(src, key)), hps or [])
 
 
 def stock_copy(game, file: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
@@ -562,12 +587,13 @@ def stock_copy(game, file: str) -> bytes:  # noqa: ANN001 - rootcpk.Game
     arc, member = STOCK_BOMBERS[key]
     raw = game.read('OBJECT', arc)
     src = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == member).data)
-    out = replace_member(raw, member, mdb_write(stock_copy_model(src, key)))
-    check_stock_copy(raw, out, key)
+    hps = hardpoints_for(game, src, file)
+    out = replace_member(raw, member, mdb_write(stock_copy_model(src, key, hps)))
+    check_stock_copy(raw, out, key, hps)
     return out
 
 
-def check_stock_copy(raw: bytes, arc: bytes, key: str) -> None:
+def check_stock_copy(raw: bytes, arc: bytes, key: str, hps: list[jet_hardpoints.Hardpoint] | None = None) -> None:
     """Re-read a STOCK_COPIES archive `arc` made of the stock archive `raw`: the same members in the same order, every one
     but the model byte-identical; the model round-trips and carries exactly the stock's nozzles (check_nozzle_bones, the
     exits measured on the stock model); without them its bones are the stock's two and skin_rigid's mesh bone, the stock's
@@ -583,6 +609,8 @@ def check_stock_copy(raw: bytes, arc: bytes, key: str) -> None:
     data = next(f for f in b.files if f.name.lower() == member).data
     new = mdb_read(data)
     assert mdb_write(new) == data, 'the model does not round-trip'
+    jet_hardpoints.check_hardpoints(new, hps or [])
+    new = jet_hardpoints.strip_hardpoints(new)
     check_nozzle_bones(new, exit_nozzles(src, key))
     bare = strip_nozzles(new)
     stock = [src.name_of(x.name) for x in src.bones]
@@ -851,7 +879,8 @@ def close(a: float, b: float) -> bool:
     return abs(a - b) <= 1e-3 * abs(b) + 2e-3      # half4 positions re-rounded after scaling
 
 
-def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None, nozzles: list[NozzleBone] | None = None) -> None:
+def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None, nozzles: list[NozzleBone] | None = None,
+          hps: list[jet_hardpoints.Hardpoint] | None = None) -> None:
     """Re-read the written archive: the stock members in their order, untouched ones byte-identical, but for the ones
     nothing loads (replace_member: other models, textures no texture table of the new model names), plus (a model with
     gear) exactly the gear's donor textures, their bytes the donor's; the new model round-trips; bone names as the
@@ -873,6 +902,8 @@ def check(raw: bytes, arc: bytes, r: Recipe, d: jet_gear.Donors | None = None, n
     data = next(f for f in b.files if f.name.lower() == r.model.lower()).data
     new = mdb_read(data)
     assert mdb_write(new) == data, 'new model does not round-trip'
+    jet_hardpoints.check_hardpoints(new, hps or [], bool(r.skids))   # its hardpoints (jet_hardpoints), then the rest without
+    new = jet_hardpoints.strip_hardpoints(new)
     check_nozzle_bones(new, nozzles or [])
     new = strip_nozzles(new)
     used = {x.name.lower() for t in new.textures for x in graft_pure.texture_members(b, t.filename)}

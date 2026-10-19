@@ -243,6 +243,143 @@ def nozzle_bones_in_a_made_model() -> None:
     assert mdb_write(jet_models.strip_nozzles(out)) == mdb_write(md), 'strip_nozzles does not give the model back'
 
 
+def _belly_model(belly: float) -> 'object':
+    """A stand-in grounded jet: mdl; body (skin) with gear_nose (z 4) and gear_main_l / _r (z -2, x +-2) under it, then
+    the object's bone; a flat belly (two skinned triangles on body) at y `belly` over x -3..3, z -6..6, and on each main
+    gear leg a triangle down to the ground (y 0) beside the belly's centre line."""
+    import struct
+    from mdb import Bone, MatParam, MatTex, Material, Mdb, Mesh, Object, VElem
+    import mdb_jet
+    ident = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+
+    def at(x: float, y: float, z: float) -> list[float]:
+        return ident[:12] + [x, y, z, 1.0]
+    binds = [ident, ident, at(0.0, 0.8, 4.0), at(2.0, 0.8, -2.0), at(-2.0, 0.8, -2.0), ident]
+    parents = [-1, 0, 1, 1, 1, 0]
+    kinds = [0, 3, 3, 3, 3, 2]
+    bones = [Bone(i, parents[i], -1, -1, i, 0, kinds[i], 0, int(kinds[i] == 3), 0, 0, list(binds[i]),
+                  ident[:12] + [-binds[i][12], -binds[i][13], -binds[i][14], 1.0], [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0])
+             for i in range(6)]
+    mdb_jet.link(bones)
+    elems = [VElem(4, 0, 0, 'position'), VElem(1, 12, 0, 'BLENDWEIGHT'), VElem(21, 28, 0, 'BLENDINDICES')]
+    pts = [((-3.0, belly, -6.0), 1), ((3.0, belly, -6.0), 1), ((3.0, belly, 6.0), 1), ((-3.0, belly, 6.0), 1),
+           ((1.0, 0.0, -2.5), 3), ((1.2, 0.0, -1.5), 3), ((1.1, belly, -2.0), 3),
+           ((-1.0, 0.0, -2.5), 4), ((-1.2, 0.0, -1.5), 4), ((-1.1, belly, -2.0), 4)]
+    rows = b''.join(struct.pack('<3f4f4B', *p, 1.0, 0.0, 0.0, 0.0, bone, 0, 0, 0) for p, bone in pts)
+    tris = struct.pack('<12H', 0, 1, 2, 0, 2, 3, 4, 5, 6, 7, 8, 9)
+    me = Mesh(bytes((0, 1, 1, 0)), 0, 0, 32, elems, 0, rows, tris)
+    mat = Material(0, 0, 0, 3, 'snd_BRDF_Common_Basic', [MatParam([0.5, 0.5, 0.5, 0.0], (0, 0), 'diffuse', 0x402)],
+                   [MatTex(0, 'albedo', (0,) * 5)], 3)
+    return Mdb(0x20, ['mdl', 'body', 'gear_nose', 'gear_main_l', 'gear_main_r', 'body_mesh', 'Material'], bones,
+               [Object(5, 5, [me])], [mat], [])
+
+
+# The stock 506 weapons' muzzles from their holder bone (Root.cpk: V_506HELI_GATLING01_L / _R, V_506HELI_MISSILE01's
+# pods, V_409HELI_BOMB01's racks; vcobjects.hardpoint_muzzles reads them off the game).
+_GUN_MUZZLES = ((-2.5, -0.24, 2.53), (2.5, -0.24, 2.53))
+_STORE_MUZZLES = ((-1.96, -0.49, 1.1), (-1.76, -0.67, 0.2), (-1.37, -0.48, 1.5), (-1.05, -0.67, 0.2), (1.05, -0.67, 0.2),
+                  (1.37, -0.48, 1.5), (1.76, -0.67, 0.2), (1.96, -0.49, 1.1))
+
+
+@test
+def jet_hardpoints_keep_the_muzzles_out_of_the_ground() -> None:
+    """pylib/jet_hardpoints.py on a stand-in grounded jet (no game; the user, 2026-10-19: 「在地面停着的飞机射导弹，会在
+    地底生成」): the stock muzzles on the root (the model's origin, the wheels' contact: what every jet hung its weapons
+    on) are all under the ground; the hardpoints put the stores' bone over the main gear and the guns' over the nose gear,
+    each as high as leaves every muzzle at or under the belly (the gear's triangles, down to the ground, not taken for
+    airframe), every muzzle GROUND_CLEAR over the ground; the bones are transform only on the mesh bone, the model written
+    and read back passes check_hardpoints, strip_hardpoints gives it back byte for byte; a belly too low for the missile
+    pods' 0.67 m drop leaves no place (HardpointError), never a muzzle in the ground."""
+    import jet_hardpoints as jh
+    from mdb import mdb_read, mdb_write
+    assert all(m[1] < 0.0 for m in _GUN_MUZZLES + _STORE_MUZZLES), 'every stock muzzle is under its holder bone'
+    md = _belly_model(1.0)
+    want = {jh.HP_GUN: _GUN_MUZZLES, jh.HP_STORE: _STORE_MUZZLES}
+    hps = jh.hardpoints(md, want)
+    at = {h.name: h.at for h in hps}
+    assert [h.name for h in hps] == [jh.HP_GUN, jh.HP_STORE], hps
+    assert max(abs(a - b) for a, b in zip(at[jh.HP_STORE], (0.0, 1.0 + 0.48, -2.0))) < 1e-6, at   # the racks on the belly
+    assert max(abs(a - b) for a, b in zip(at[jh.HP_GUN], (0.0, 1.0 + 0.24, 4.0))) < 1e-6, at
+    out = jh.with_hardpoints(md, hps)
+    names = [out.name_of(b.name) for b in out.bones]
+    assert names == ['mdl', 'body', 'gear_nose', 'gear_main_l', 'gear_main_r', 'hp_gun', 'hp_store', 'body_mesh'], names
+    back = mdb_read(mdb_write(out))
+    jh.check_hardpoints(back, hps)
+    for h in hps:
+        pts = jh.muzzle_points(back, h.name, h.muzzles)
+        assert min(p[1] for p in pts) >= jh.GROUND_CLEAR and max(p[1] for p in pts) <= 1.0 + 1e-6, (h.name, pts)
+        assert all(p[1] < 0.0 for p in jh.muzzle_points(back, 'mdl', h.muzzles)), 'on the root they were in the ground'
+    assert back.objects[0].bone == back.bone_index('body_mesh')
+    assert mdb_write(jh.strip_hardpoints(out)) == mdb_write(md), 'strip_hardpoints does not give the model back'
+    low = _belly_model(0.5)   # 0.5 m: the pods 0.19 m under the racks still clear the ground
+    pts = [p for h in jh.hardpoints(low, want) for p in jh.muzzle_points(jh.with_hardpoints(low, jh.hardpoints(low, want)),
+                                                                          h.name, h.muzzles)]
+    assert min(p[1] for p in pts) >= jh.GROUND_CLEAR, pts
+    try:
+        jh.hardpoints(_belly_model(0.1), want)
+    except jh.HardpointError:
+        pass
+    else:
+        raise AssertionError('a belly 0.1 m over the ground took the stores')
+
+
+@test
+def jet_weapons_hang_on_their_hardpoints() -> None:
+    """pylib/vcobjects.py jet_sgo hangs each jet's weapons (jet_weapon_bones): on a model with hardpoints
+    (HARDPOINT_FILES, which pylib/jet_models.py gives the bones) its guns on hp_gun, its missiles, rockets and bombs on
+    hp_store, anything else (the blast drones' charges) on the anchor; on any other model (the stock bombers the airstrike
+    takes over) all on the anchor; Jet.weapon_bones as given. tools/make_jets.py checks every SGO's holder bones against its
+    model (check_weapon_bones), and tools/support_loadout.py hangs a loadout's pylons on the jet's store holder. With the
+    game: every hardpoint model as made carries the bones, every muzzle GROUND_CLEAR over its ground and under its skin
+    (check_hardpoints), where the same muzzles on the root were in the ground."""
+    import jet_hardpoints as jh
+    import jet_models
+    import rootcpk
+    assert vc.HARDPOINT_FILES == {vc.JET_ELEVON_FILE, *(f for f, r in jet_models.MODELS.items() if r.grounded),
+                                  vc.GUNSHIP_MODEL_FILE}, sorted(vc.HARDPOINT_FILES)
+    assert jet_models.ELEVON_FILE == vc.JET_ELEVON_FILE
+    seen = 0
+    for name, jet in vc.JETS.items():
+        model = list(jet.model) if jet.model is not None else vc.JET_ELEVON_MODEL
+        bones = vc.jet_weapon_bones(jet, model, jet.anchor)
+        if jet.weapon_bones:
+            assert bones == list(jet.weapon_bones), name
+            continue
+        if vc.model_file(model) not in vc.HARDPOINT_FILES:
+            assert bones == [jet.anchor] * len(jet.weapons), name
+            continue
+        seen += 1
+        for w, b in zip(jet.weapons, bones):
+            kind = vc.store_of(w)
+            want = jh.HP_GUN if w in vc._GUNS else jh.HP_STORE if kind and vc.STORES[kind[0]].role in \
+                ('air', 'ground', 'bomb', 'rocket') else jet.anchor
+            assert b == want, (name, w, b)
+        assert vc.jet_weapon_bones(jet, vc.JET_MODEL, jet.anchor) == [jet.anchor] * len(jet.weapons), name
+    assert seen >= 20, seen
+    jets = src('tools/make_jets.py')
+    assert 'check_weapon_bones(out, game)' in jets.split('\ndef build(', 1)[1].split('\ndef ', 1)[0]
+    assert "jet_weapon_bones(jet, m['animation_model'][0], anchor)" in src('pylib/vcobjects.py')
+    loadout = src('tools/support_loadout.py')
+    assert 'store_row = next(' in loadout and '[list(store_row) for _ in l.pylons]' in loadout
+    if not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.Game(rootcpk.DEFAULT_GAME)
+    muzzles = vc.hardpoint_muzzles(game)
+    assert muzzles == {jh.HP_GUN: _GUN_MUZZLES, jh.HP_STORE: _STORE_MUZZLES}, muzzles
+    from mdb import mdb_read, rab_read
+    models = {f: jet_models._model_of(game, None if f == vc.JET_ELEVON_FILE else f)
+              for f in vc.HARDPOINT_FILES if f != vc.GUNSHIP_MODEL_FILE}
+    raw = jet_models.stock_copy(game, vc.GUNSHIP_MODEL_FILE)
+    models[vc.GUNSHIP_MODEL_FILE] = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == 'bomber401.mdb').data)
+    for f, md in models.items():
+        r = jet_models.MODELS.get(f)
+        hps = jet_models.hardpoints_for(game, jh.strip_hardpoints(md), f)
+        jh.check_hardpoints(md, hps, bool(r and r.skids))
+        for h in hps:
+            assert min(p[1] for p in jh.muzzle_points(md, h.name, h.muzzles)) >= jh.GROUND_CLEAR, (f, h)
+            assert min(p[1] for p in jh.muzzle_points(md, 'mdl', h.muzzles)) < 0.0, (f, h.name, 'was not in the ground')
+
+
 @test
 def gear_legs_as_the_models_fold_them() -> None:
     """src/gear.cpp's legs (kLegNames, kLegUp) are pylib/jet_gear.py's (LEGS, LEG_UP): the plugin folds each leg by the
