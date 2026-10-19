@@ -54,6 +54,17 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x03D450, 0x18, 'std::wstring::assign(ptr, len)'),
     (0x7E2EB0, 0x1E, 'the popup closed (the lambdas\' tail)'),
     (0x8BDE80, 0x61, 'the HQ 3D view rebuilt (player, class, outfit): message 3'),
+    # The outfit change still locked (outfit41_logic.h OfferLocked): what the unlocked screen does that we repeat.
+    (0x8AB310, 0x20, 'HUiHQSoldierSelect OnUpdate (vtable 0x1805788 slot 1): it builds the outfit popup'),
+    (0x8A9B37, 0x34, 'soldier screen, unlocked: player 0 off the pad (0x1183D70): the keyboard help key from [0x20B29A8] by 0x7A3500'),
+    (0x8A9B8A, 0x2F, 'soldier screen, unlocked: the help text assigned to +0x738, +0x6F2 set'),
+    (0x8A9C6E, 0x13, 'soldier screen, unlocked: else the pad help key'),
+    (0x18058F0, 0x5E, 'the keyboard help key Sys_Control_Keyboard_Description_SoldierSelect (UTF-16, NUL)'),
+    (0x18058A0, 0x4C, 'the pad help key Sys_Control_Description_SoldierSelect (UTF-16, NUL)'),
+    (0x1183D70, 0x08, 'the pad-mode flag the help asks'),
+    (0x7A3500, 0x10, 'the text table lookup (table, key) -> text'),
+    (0x8ABC4D, 0x19, 'the popup: its five items destroyed by 0x8E170, 0x90 bytes each'),
+    (0x08E170, 0x2A, 'the popup item destructor: its +0x80 tree, its std::function, its text'),
 )
 
 # The five stock items' std::function vtables: (vtable rva, its _Do_call) in the popup's order (outfit -1, 2, 3, 1, 0).
@@ -64,6 +75,8 @@ ITEM_VTABLES: tuple[tuple[int, int, int], ...] = (
 # The HQ / room 3D view (UiHQ_3DModelView): its vtable and OnMessage, the slot the menu path hook chains (its player at
 # +0x2AC while it asks 0xE3420 at 0x93B426 / 0x93BD03, both inside OnMessage).
 VIEW_VTABLE, VIEW_SLOT_MESSAGE, VIEW_ONMESSAGE = 0x180FA60, 3, 0x93B320
+# The soldier screen (HUiHQSoldierSelect): its vtable and OnUpdate, the slot the locked-outfit hook chains.
+SOLDIER_VTABLE, SOLDIER_SLOT_UPDATE, SOLDIER_UPDATE = 0x1805788, 1, 0x8AB310
 # rel32 calls the hooks redirect: (call site, the callee it must hold)
 CALLS: tuple[tuple[int, int], ...] = (
     (0x591234, 0x5A3F90), (0x59145B, 0x5A3F90), (0x5A3FFC, 0x0E34E0), (0x59DD27, 0x0E34E0), (0x59DE91, 0x0D8730),

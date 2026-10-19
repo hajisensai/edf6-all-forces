@@ -106,6 +106,14 @@ int main() {
     Expect(kItemEdf41==static_cast<std::int32_t>(kStockItems),"our item follows the five stock ones");
     Expect(Grown(0)==2 && Grown(5)==12,"reserve(capacity * 2 + 2)");
     Expect(Cursor(true,3)==kItemEdf41 && Cursor(false,3)==3,"the cursor");
+    Expect(Cursor(true,3,5)==5 && Cursor(false,3,5)==3,"the cursor: ours at its own index");
+    // The outfit change still locked: our item is offered with the mission's outfit only (the stock four stay locked).
+    Expect(OfferLocked(true,false,true),"locked, on, files there: offered");
+    Expect(!OfferLocked(true,true,true),"unlocked: the game's own popup");
+    Expect(!OfferLocked(false,false,true) && !OfferLocked(true,false,false),"off, or no files: the stock locked screen");
+    Expect(kLockedKeep==1 && LockedCursor(true)==1 && LockedCursor(false)==0,"locked: item 0 (the mission's) then ours");
+    Expect(KeyboardHelp(0,false) && !KeyboardHelp(0,true) && !KeyboardHelp(1,false),"the help the unlocked screen picks");
+    Expect(kScreenUnlocked==0x7A4 && kScreenHelp==0x738 && kScreenHelpDirty==0x6F2,"the soldier screen's fields");
     Expect(kItemSize==0x90 && kItemImpl==0x58 && kReqVector==0x150 && kReqCursor==0x148 && kReqType==0x128,"the request's layout");
     Expect(kViewPlayer==0x2AC && kViewSlotMessage==3,"the 3D view's player and OnMessage slot");
     std::printf("outfit41_test: %d/%d checks passed\n",checks-failures,checks);
