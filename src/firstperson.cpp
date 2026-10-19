@@ -101,10 +101,12 @@ constexpr int kMostWeapons=16;
 // +0x90, the character proxy's support +0x711 (2 = in the air), frames on the ground +0x1264 (0 -> 1 = a landing), the
 // action limits +0x5D0 (each stock move writes its own value on entry); the hands' weapon sets [+0x1970] (count +0x1980,
 // 0x150 each, the weapon in hand **(set+0x40)). A weapon: shots fired +0xBD0, its fire state +0xBD4 (3 = a reload's
-// animation starts), ReloadTime +0x20C (frames), FireRecoil +0x37C.
+// animation runs, 4 = its _finish: 0x693DB5 / 0x693D0E), the reload's frames left +0xE68 (both states run while it is
+// above 0: 0x693BAF; payload.cpp's reload bar reads it too), ReloadTime +0x20C (frames), FireRecoil +0x37C.
 constexpr std::size_t kLook=0x1240,kPos=0x90,kSupport=0x711,kGroundFrames=0x1264,kActLimit=0x5D0,
                       kSets=0x1970,kSetCount=0x1980,kSetStride=0x150,kSetWeapon=0x40,
-                      kShotCount=0xBD0,kFireState=0xBD4,kReloadTime=0x20C,kFireRecoil=0x37C;
+                      kShotCount=0xBD0,kFireState=0xBD4,kReloadTime=0x20C,kFireRecoil=0x37C,
+                      kReloadLeft=0xE68;
 constexpr int kMostSets=4,kMostReloadFrames=900;
 // The stock moves by the value they write to +0x5D0 (§3.3; H for the Ranger's sprint and the rolls, L for the Fencer's
 // and the Wing Diver's: Debug=1 logs every change to match them). Only the Ranger's is a sprint (a run held); the
@@ -158,6 +160,11 @@ using CamStepFn=void(__fastcall*)(void*,void*);
 using DrawFn=void(__fastcall*)(void*,void*,int,void*);
 CamStepFn nextCamStep=nullptr;
 bool camOk=false,drawOk=false;
+// The module that holds the model draw when another plugin replaced it outright (not a chain onto the stock draw
+// our hook could sit on): EDF6RangerFPS swaps the slot and recolours the same skin palette, so the two first
+// persons cannot both draw. Named in the install line and once when the key is pressed (empty: not the reason).
+char drawOwner[64]{};
+bool drawOwnerToldOnKey=false;
 
 // The draw hook is on every vtable whose slot 1 is the stock draw (a model class that keeps it): each its own next.
 struct Hooked { const void* vtable; DrawFn next; };
@@ -561,6 +568,10 @@ void Toggle(const unsigned char* h) noexcept {
     // Loss of input ownership cancels this gesture; it is not a key release. If the
     // physical key is still held when focus/the map returns, wait for its release
     // before allowing another gesture, so the held boarding/map key cannot toggle.
+    if(down && drawOwner[0] && !drawOwnerToldOnKey && c.enabled && c.firstPerson) {
+        drawOwnerToldOnKey=true;
+        Log("FP key 0x%X: first person is off, the model draw is %s's (another first-person mod)",c.firstPersonKey,drawOwner);
+    }
     if(!h || !c.enabled || !c.firstPerson || !camOk || !drawOk || !KeyInputAllowed() || KeyTaken(h,c.firstPersonKey)) {
         keyWas=false;keyCancelled=down;return;
     }
@@ -611,8 +622,10 @@ float RecoilOf(const unsigned char* w) noexcept {
     return std::isfinite(r) ? 0.3f+0.7f*std::fmin(std::fabs(r),1.0f) : 0.5f;
 }
 
-// One hand's weapon this frame: its shots, a reload started.
-void Hand(const unsigned char* w,std::uint64_t k,std::int32_t shots,std::int32_t fire,fpmotion::Cue& c) noexcept {
+// One hand's weapon this frame: its shots, and the frames its reload has left (`*reload`, the larger of the hands').
+// The reload is the game's own count (+0xE68 while the state is 3 or 4), not ours from ReloadTime at the state's start:
+// that one ran on through a reload cut short, a weapon switch or the second hand's pause, and missed the _finish.
+void Hand(const unsigned char* w,std::uint64_t k,std::int32_t shots,std::int32_t fire,fpmotion::Cue& c,int* reload) noexcept {
     const std::int32_t d=shots-Current().shots[k];
     int fired=d>0 && d<10 ? d : 0;
     Current().sampledShots+=fired;
@@ -623,24 +636,26 @@ void Hand(const unsigned char* w,std::uint64_t k,std::int32_t shots,std::int32_t
         if(event.weapon==w){Current().notifiedShots+=event.count;fired=(std::max)(fired,event.count);recoil=std::fmax(recoil,event.recoil);event=State::ShotEvent{};}
     }
     if(fired){c.shots+=fired;c.recoil=std::fmax(c.recoil,recoil);}
-    if(fire!=3 || Current().fire[k]==3)return;
-    const std::int32_t t=At<std::int32_t>(w,kReloadTime);
-    Current().reloadLeft=t>0 ? (t<kMostReloadFrames ? t : kMostReloadFrames) : 0;
-    if(Cfg().debug)Log("FP reload %d frames (FireRecoil %.3f)",t,At<float>(w,kFireRecoil));
+    const std::int32_t left=fire==3 || fire==4 ? At<std::int32_t>(w,kReloadLeft) : 0;
+    if(left>0)*reload=(std::max)(*reload,left<kMostReloadFrames ? left : kMostReloadFrames);
+    if(fire==3 && Current().fire[k]!=3 && Cfg().debug)
+        Log("FP reload %d of %d frames (FireRecoil %.3f)",left,At<std::int32_t>(w,kReloadTime),At<float>(w,kFireRecoil));
 }
 
 // The hands' weapons this frame: shots, a reload started, a switch.
 void Weapons(const unsigned char* h,fpmotion::Cue& c) noexcept {
     Current().sampledShots=Current().notifiedShots=0;
+    int reload=0;
     auto n=At<std::uint64_t>(h,kSetCount);
     if(n>kMostSets)n=kMostSets;
     for(std::uint64_t k=0;k<n;++k) {
         const unsigned char* w=SetWeapon(h,k);
         const std::int32_t shots=w ? At<std::int32_t>(w,kShotCount) : 0,fire=w ? At<std::int32_t>(w,kFireState) : 0;
-        if(Current().have && w!=Current().held[k] && Current().held[k]){c.switched=true;Current().reloadLeft=0;}
-        if(Current().have && w && w==Current().held[k])Hand(w,k,shots,fire,c);
+        if(Current().have && w!=Current().held[k] && Current().held[k])c.switched=true;
+        if(Current().have && w && w==Current().held[k])Hand(w,k,shots,fire,c,&reload);
         Current().held[k]=w;Current().shots[k]=shots;Current().fire[k]=fire;
     }
+    Current().reloadLeft=reload;
 }
 
 // What the soldier did since the last frame (fp_motion.h Cue), the readings kept for the next.
@@ -665,7 +680,6 @@ fpmotion::Cue Cues(const unsigned char* h) noexcept {
     }
     Weapons(h,c);
     c.reloading=Current().reloadLeft>0;
-    if(Current().reloadLeft>0)--Current().reloadLeft;
     c.move=MoveOf(act);
     Current().pitch=pitch;Current().yaw=yaw;std::memcpy(Current().pos,pos,12);Current().groundFrames=ground;Current().act=act;Current().have=true;
     return c;
@@ -1881,6 +1895,21 @@ bool InstallFirstPerson() noexcept {
     if(!camOk){Log("FP off: the camera step not chained");return false;}
     nextCamStep=reinterpret_cast<CamStepFn>(next);
     drawOk=HookDrawOf(reinterpret_cast<void**>(image+kModelVtable));
+    if(!drawOk) {
+        void* const held=reinterpret_cast<void**>(image+kModelVtable)[kModelDrawSlot];
+        HMODULE owner=nullptr;
+        wchar_t path[MAX_PATH]{};
+        if(held!=image+kModelDraw &&
+           GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              static_cast<LPCWSTR>(held),&owner) && GetModuleFileNameW(owner,path,MAX_PATH)) {
+            const wchar_t* name=wcsrchr(path,L'\\');
+            _snprintf_s(drawOwner,sizeof(drawOwner),_TRUNCATE,"%ls",name ? name+1 : path);
+        } else if(held!=image+kModelDraw) {
+            _snprintf_s(drawOwner,sizeof(drawOwner),_TRUNCATE,"code at %p",held);
+        }
+        if(drawOwner[0])Log("FP off: the model draw (EDF+%X slot %zu) was replaced by %s, not chained: its first person, not ours",
+                            kModelVtable,kModelDrawSlot,drawOwner);
+    }
     bool changed=false;
     const bool cameraSubmitOk=RedirectCall(image+kCameraSubmitCall,image+kCameraSubmit,reinterpret_cast<void*>(&CameraSubmitHook),changed);
     drawOk=drawOk && cameraSubmitOk;

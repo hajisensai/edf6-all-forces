@@ -119,13 +119,24 @@ int main() {
     float flashMatrix[16]{};flashMatrix[0]=flashMatrix[5]=flashMatrix[10]=flashMatrix[15]=1;
     Put<float>(weapon,kFireRecoil,.075f);Current().shots[0]=0;
     for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);}
-    fpmotion::Cue firing{};Hand(weapon,0,0,0,firing);
+    int reload=0;
+    fpmotion::Cue firing{};Hand(weapon,0,0,0,firing,&reload);
     check(firing.shots==2 && firing.recoil>=.3f,"actual shot events drive recoil even when the sampled counter does not advance");
-    firing=fpmotion::Cue{};Hand(weapon,0,0,0,firing);
+    firing=fpmotion::Cue{};Hand(weapon,0,0,0,firing,&reload);
     check(firing.shots==0,"shot events are consumed once");
     for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);}
-    firing=fpmotion::Cue{};Hand(weapon,0,2,0,firing);
+    firing=fpmotion::Cue{};Hand(weapon,0,2,0,firing,&reload);
     check(firing.shots==2,"counter and flash observations of the same shots are not double counted");
+    check(reload==0,"no reload while the weapon fires");
+    // The reload is the game's own frames left (+0xE68) while the state is 3 (the animation) or 4 (its _finish).
+    const auto reloadIn=[&](int state,int left) {
+        Put<int>(weapon,kReloadLeft,left);Current().shots[0]=2;Current().fire[0]=state;
+        int r=0;fpmotion::Cue cue{};Hand(weapon,0,2,state,cue,&r);return r;
+    };
+    check(reloadIn(3,40)==40 && reloadIn(4,6)==6,"a reload's animation and its finish both count, by the game's frames left");
+    check(reloadIn(3,0)==0 && reloadIn(0,40)==0 && reloadIn(1,40)==0,"no reload without frames left or outside states 3 and 4");
+    check(reloadIn(3,5000)==kMostReloadFrames,"the frames left are capped");
+    Put<int>(weapon,kReloadLeft,0);
     unsigned char laser[0x190]{};Put<void*>(laser,8,weapon);
     const float from[4]={1,2,3,1},hit[4]={20,30,40,1};
     std::memcpy(laser+0x130,from,16);std::memcpy(laser+0x140,hit,16);

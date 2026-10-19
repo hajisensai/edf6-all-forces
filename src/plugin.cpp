@@ -34,7 +34,9 @@
 #include "subcarrier.h"
 #include "edf/host.h"
 #include "version.h"
+#include "build_id.h"
 #include "pack_notice.h"
+#include "profile_sigs.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -56,22 +58,7 @@ wchar_t logPath[MAX_PATH]{},logOldPath[MAX_PATH+2]{};
 wchar_t iniPath[MAX_PATH]{};
 edf::IniWatch ini;
 
-struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
-// The code the plugin calls or relies on; any mismatch and it stays off.
-const Signature kSignatures[]={
-    {kCanRideSeat,{0x40,0x57,0x48,0x83,0xEC,0x30,0x8B,0x81,0x14,0x03,0x00,0x00,0x48,0x8B,0xFA,0x39},16},
-    {kCanRide,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48},16},
-    {kSeatRide,{0x40,0x53,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x83,0xEC,0x38,0x45,0x33,0xD2,0x45},16},
-    {kSeatClear,{0x48,0x85,0xD2,0x0F,0x84,0x94,0x00,0x00,0x00,0x48,0x89,0x5C,0x24,0x08,0x57,0x48},16},
-    {kSeatKick,{0x48,0x85,0xD2,0x0F,0x84,0x98,0x01,0x00,0x00,0x48,0x89,0x5C,0x24,0x08,0x48,0x89},16},
-    {kFindSeat,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57},16},
-    {kRideAi,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x55,0x57,0x41,0x56,0x48,0x8D},16},
-    {kPromptVisit,{0x40,0x53,0x48,0x83,0xEC,0x30,0x48,0x8B,0x41,0x08,0x48,0x8B,0xD9,0x4C,0x8B,0xD2},16},
-    {0x5E3B50,{0x8B,0xC2,0x2D,0x15,0x00,0x00,0x10,0x74,0x09,0x83,0xF8,0x01,0x0F,0x85,0xCE,0x69},16},   // dummy rider: get-off -> dies
-    {0x634710,{0x49,0x8B,0x80,0x68,0x02,0x00,0x00,0x48,0x85,0xC0,0x74,0x0A,0x83,0x78,0x08,0x00},16},   // seat+0x268 occupancy
-    {0x62DD32,{0x48,0x8B,0x87,0x38,0x02,0x00,0x00,0x48,0x85,0xC0,0x74,0x06,0x83,0x78,0x08,0x00},16},   // same, prompt check
-    {0x572EFF,{0x44,0x38,0xAE,0x54,0x03,0x00,0x00},7},                                                 // human+0x354 player
-};
+using sigs::kSignatures;   // profile_sigs.h
 
 bool CheckProfile() noexcept {
     __try {
@@ -84,9 +71,9 @@ float ReadFloat(const wchar_t* key,float fallback) noexcept {
     wchar_t text[64]{};
     GetPrivateProfileStringW(L"VehicleCrew",key,L"",text,64,iniPath);
     if(!text[0])return fallback;
-    wchar_t* end=nullptr;
-    const float v=std::wcstof(text,&end);
-    return end!=text && std::isfinite(v) ? v : fallback;
+    float v=fallback;
+    if(!edf::ParseFloat(text,&v))Log("CONFIG %ls=%ls is not a number: %g used",key,text,fallback);
+    return v;
 }
 // HudLanguage: auto / en / zh-CN / zh-TW / ja (hudtext.h ParseSetting); anything else is logged and auto used.
 int ReadLanguage(int fallback) noexcept {
@@ -1119,7 +1106,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
     swprintf_s(logOldPath,L"%ls.1",logPath);
     info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Crew";info->version=PLUG_VER(EDF6VC_VERSION_MAJOR,EDF6VC_VERSION_MINOR,EDF6VC_VERSION_PATCH,0);
-    Log("EDF6VehicleCrew %s loading",EDF6VC_VERSION);
+    char file[96];
+    edf::DescribeModuleFile(module,file,sizeof(file));
+    Log("EDF6VehicleCrew %s loading (build %s, %s)",EDF6VC_VERSION,EDF6_BUILD_ID,file);
     ini.Start(iniPath);
     LoadConfig();
     image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
@@ -1210,6 +1199,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");
     StartCallPicker();
+    if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
     return true;
 }
 

@@ -22,7 +22,7 @@ MiniDumpWriteDumpFn writer=nullptr;
 INIT_ONCE serviceOnce=INIT_ONCE_STATIC_INIT;
 
 BOOL CALLBACK ResolveWriter(PINIT_ONCE,void*,void**) noexcept {
-    if(const HMODULE dbghelp=LoadLibraryW(L"dbghelp.dll"))writer=reinterpret_cast<MiniDumpWriteDumpFn>(GetProcAddress(dbghelp,"MiniDumpWriteDump"));
+    if(const HMODULE dbghelp=LoadLibraryExW(L"dbghelp.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32))writer=reinterpret_cast<MiniDumpWriteDumpFn>(GetProcAddress(dbghelp,"MiniDumpWriteDump"));
     return TRUE;
 }
 

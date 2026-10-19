@@ -21,6 +21,9 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 #include "edf/host.h"
+#include "edf/patch.h"
+#include "autoturret_version.h"
+#include "build_id.h"
 #include "edf/input_source.h"
 #include "append_log.h"
 #include "turret.h"
@@ -803,9 +806,10 @@ int HookGrenade() noexcept {
 float ReadFloat(const wchar_t* key,float fallback) noexcept {
     wchar_t text[64]{};
     GetPrivateProfileStringW(L"AutoTurret",key,L"",text,64,iniPath);
-    wchar_t* end=nullptr;
-    const float value=std::wcstof(text,&end);
-    return end!=text && std::isfinite(value) ? value : fallback;
+    if(!text[0])return fallback;
+    float value=fallback;
+    if(!edf::ParseFloat(text,&value))Log("CONFIG %ls=%ls is not a number: %g used",key,text,fallback);
+    return value;
 }
 
 // An integer key held to [lo, hi] (a key code, a button mask, milliseconds).
@@ -922,8 +926,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     wcscpy_s(dot,MAX_PATH-(dot-iniPath),L".ini");
     wcscpy_s(logPath,iniPath);
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
-    info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Auto Turret";info->version=PLUG_VER(0,3,0,0);
-    Log("EDF6AutoTurret 0.3.0 loading");
+    info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Auto Turret";info->version=PLUG_VER(EDF6AT_VERSION_MAJOR,EDF6AT_VERSION_MINOR,EDF6AT_VERSION_PATCH,0);
+    char file[96];
+    edf::DescribeModuleFile(module,file,sizeof(file));
+    Log("EDF6AutoTurret %s loading (build %s, %s)",EDF6AT_VERSION,EDF6_BUILD_ID,file);
     ini.Start(iniPath);
     LoadConfig();
     image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
@@ -933,6 +939,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     const int flak=HookFlak();
     const int gunners=HookGunners();
     Log("LOADED patches flak=%d gunners=%d",flak,gunners);
+    if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
     return flak+gunners>0;
 }
 

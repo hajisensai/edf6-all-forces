@@ -16,4 +16,8 @@ bool ChainVtableSlot(void** slot,void* hook,void** next) noexcept;
 // Writes `replacement` over `size` code bytes at `at`, only while they are `expected` (true when they already
 // are `replacement`), and flushes the instruction cache.
 bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned char* replacement,std::size_t size) noexcept;
+// Puts `size` bytes at `at` back to the `previous` protection after a write. A failure leaves the code writable
+// but the write itself took, so it is counted (ProtectRestoreFailures, logged once loaded), not returned.
+void RestoreProtection(void* at,std::size_t size,DWORD previous) noexcept;
+unsigned ProtectRestoreFailures() noexcept;
 }  // namespace edf

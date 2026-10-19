@@ -99,6 +99,13 @@ target_sources(EDF6VehicleCrew PRIVATE src/edf5online_room.cpp)
 add_subdirectory(common)
 target_link_libraries(EDF6VehicleCrew PRIVATE edf6common)
 configure_file(src/version.h.in "${CMAKE_BINARY_DIR}/generated/version.h" @ONLY)
+# generated/build_id.h: the commit, at every build (cmake/build_id.cmake), for both plugins' load line.
+add_custom_target(edf6_build_id
+    COMMAND "${CMAKE_COMMAND}" "-DSRC=${CMAKE_SOURCE_DIR}" "-DOUT=${CMAKE_BINARY_DIR}/generated/build_id.h"
+            -P "${CMAKE_SOURCE_DIR}/cmake/build_id.cmake"
+    BYPRODUCTS "${CMAKE_BINARY_DIR}/generated/build_id.h"
+    COMMENT "Recording the build's commit" VERBATIM)
+add_dependencies(EDF6VehicleCrew edf6_build_id)
 target_include_directories(EDF6VehicleCrew PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
 target_link_libraries(EDF6VehicleCrew PRIVATE xaudio2 sapi ole32)
 target_compile_options(EDF6VehicleCrew PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -122,6 +129,10 @@ add_subdirectory(autoturret)
 add_executable(append_log_test EXCLUDE_FROM_ALL tools/append_log_test.cpp)
 target_link_libraries(append_log_test PRIVATE edf6common)
 target_compile_options(append_log_test PRIVATE /W4 /WX /utf-8 /permissive-)
+# edf6common's load helpers: the strict ini number, the DLL file line, a patch putting the page protection back.
+add_executable(common_host_check EXCLUDE_FROM_ALL tools/common_host_check.cpp)
+target_link_libraries(common_host_check PRIVATE edf6common)
+target_compile_options(common_host_check PRIVATE /W4 /WX /utf-8 /permissive-)
 # Production sidecar boarding against stand-in objects and a recording warp (no game required).
 add_executable(sidecar_board_check EXCLUDE_FROM_ALL tools/sidecar_board_check.cpp)
 target_include_directories(sidecar_board_check PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
@@ -801,7 +812,7 @@ target_compile_options(fp_view_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(fp_view_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
-set(EDF6_OFFLINE_CHECKS append_log_test pjet_kinds heli_aim_check heli_fire_check
+set(EDF6_OFFLINE_CHECKS append_log_test common_host_check pjet_kinds heli_aim_check heli_fire_check
     nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check damage_stats_check fp_view_check cockpit_canvas_check unlock_ported_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
@@ -1531,3 +1542,29 @@ add_test(NAME vehicle_look COMMAND vehicle_look_test)
 
 add_test(NAME sedan_build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sedan_build_test.py")
 set_tests_properties(sedan_build PROPERTIES SKIP_RETURN_CODE 77)
+
+# The two built plugins loaded for real into one process, in either order (tests/plugin_pair_load_test.cpp): each
+# exports its list (aimlink.h and the rest) from its own DLL, aimlink::Resolve finds the peer's names, and with no
+# EDF.dll both EML6_Load refuse and log their load line (with the build id) and REFUSED. Copies in the test's own
+# scratch directory are loaded (EML6_Load writes its .log beside the DLL, never into Mods/Plugins).
+add_executable(plugin_pair_load_test EXCLUDE_FROM_ALL tests/plugin_pair_load_test.cpp)
+target_include_directories(plugin_pair_load_test PRIVATE common third_party/EDFModLoader)
+target_compile_options(plugin_pair_load_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(plugin_pair_load_test EDF6VehicleCrew EDF6AutoTurret)
+add_dependencies(offline_checks plugin_pair_load_test)
+foreach(order crew-first turret-first)
+  add_test(NAME plugin_pair_load_${order} COMMAND plugin_pair_load_test "$<TARGET_FILE:EDF6VehicleCrew>" "$<TARGET_FILE:EDF6AutoTurret>"
+           "${CMAKE_CURRENT_BINARY_DIR}/test_scratch/plugin_pair_load_${order}" ${order})
+endforeach()
+# EDF6VehicleCrew's EDF.dll fingerprints (src/profile_sigs.h) on a private EDF.dll mapping (tests/profile_native_test.cpp):
+# every row matches, every byte changed is refused by its table's check; the built plugin refuses each kSignatures row.
+add_executable(profile_native_test EXCLUDE_FROM_ALL tests/profile_native_test.cpp)
+target_include_directories(profile_native_test PRIVATE src common third_party/EDFModLoader)
+target_link_libraries(profile_native_test PRIVATE edf6common)
+target_compile_options(profile_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(profile_native_test EDF6VehicleCrew)
+add_dependencies(offline_checks profile_native_test)
+add_test(NAME profile_native COMMAND profile_native_test "${EDF6_NATIVE_DLL}")
+add_test(NAME profile_native_plugin_refusal COMMAND profile_native_test "${EDF6_NATIVE_DLL}" plugin "$<TARGET_FILE:EDF6VehicleCrew>"
+         "${CMAKE_CURRENT_BINARY_DIR}/test_scratch/profile_native_plugin_refusal")
+set_tests_properties(profile_native profile_native_plugin_refusal PROPERTIES SKIP_RETURN_CODE 77)
