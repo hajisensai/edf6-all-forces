@@ -446,6 +446,21 @@ def release_imports() -> None:
 
 
 @test
+def frozen_collision_consumer() -> None:
+    """The package gate runs the real binding and geometry consumers on portable data."""
+    import frozen_collision_probe
+    frozen_collision_probe.check()
+
+
+@test
+def release_module_identity() -> None:
+    """Recipes and frozen imports must use the same unambiguous runtime modules."""
+    sys.path.insert(0, os.path.join(ROOT, 'tests'))
+    import test_buildcache_module_identity
+    test_buildcache_module_identity.run_checks()
+
+
+@test
 def play_edge_margin_is_the_big_maps() -> None:
     """src/crew.h kBigWorldMargin (the big map's ground edge = BigWorld less it) is tools/make_bigmap.py WORLD_MARGIN."""
     import make_bigmap
@@ -1162,7 +1177,7 @@ def sidecar_tub_holds_the_gunner() -> None:
 def shkt_check_on_synthetic_data() -> None:
     """pylib/shkt_check.py without the game (tests/test_shkt_check.py Portable): hull / box geometry, SHKT refs, and
     an SGO whose ragdoll mapping or accessory names a body its SHKT lacks is an error. The stock-file mutations of the
-    same test file need the game; tools/shkt_check.py checks an installed Mods folder."""
+    same test file need the game; tools/check_shkt.py checks an installed Mods folder."""
     import unittest
     sys.path.insert(0, os.path.join(ROOT, 'tests'))
     import test_shkt_check

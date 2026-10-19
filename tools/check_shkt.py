@@ -1,10 +1,10 @@
 """Checks every SHKT the mods install and every body name the mods' SGOs bind to a SHKT (pylib/shkt_check.py).
 Reads the game directory only; writes nothing.
 
-python tools/shkt_check.py [--game DIR]            Mods/OBJECT and Mods/WEAPON: each tagfile SHKT on its own, then
+python tools/check_shkt.py [--game DIR]            Mods/OBJECT and Mods/WEAPON: each tagfile SHKT on its own, then
                                                    each SGO's ragdoll mappings / accessory parts against the SHKT the
                                                    game would load (Mods first, else Root.cpk / Chunk01 / Chunk02)
-python tools/shkt_check.py --stock [--game DIR]    the same over the game's own files (calibration: must be clean)
+python tools/check_shkt.py --stock [--game DIR]    the same over the game's own files (calibration: must be clean)
 
 Exit 1 on any error. A name an SGO binds that its SHKT lacks crashes the game before the mission starts.
 Legacy Havok packfiles (the EDF4.1 port's ragdolls) are not tagfiles: listed as skipped.

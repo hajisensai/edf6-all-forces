@@ -163,13 +163,20 @@ def cmpl_binary() -> list[str]:
     return ['--add-binary', f'{CMPL_DLL}{os.pathsep}.']
 
 
+def project_paths() -> list[str]:
+    """One unambiguous module namespace for both freezers and cached recipes."""
+    import buildcache
+    buildcache.source_modules(ROOT)
+    return [os.path.normpath(os.path.join(ROOT, p)) for p in buildcache.MODULE_FOLDERS]
+
+
 def generator_cmd() -> list[str]:
     """The PyInstaller command of the slim generator (tools/loadout_generator.py alone, onefile, console: the plugin starts
     it with CREATE_NO_WINDOW)."""
     cmd = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--console',
            '--name', GENERATOR_NAME, '--distpath', os.path.join(WORK, 'gen-dist'),
            '--workpath', os.path.join(WORK, 'gen-work'), '--specpath', WORK]
-    for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib')):
+    for p in project_paths()[:2]:
         cmd += ['--paths', p]
     for mod in GENERATOR_EXCLUDES:
         cmd += ['--exclude-module', mod]
@@ -188,6 +195,7 @@ def build_generator() -> str:
 def build_exe(name: str, generator: str | None = None) -> str:
     """name: the zip's name without .zip, bundled as plugin/build_info.json (the installer shows it, and its
     menu 3 compares it with the test site's newest build)."""
+    paths = project_paths()
     check_bundled()
     seps = os.pathsep
     os.makedirs(WORK, exist_ok=True)
@@ -202,12 +210,11 @@ def build_exe(name: str, generator: str | None = None) -> str:
     cmd = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--console',
            '--name', EXE_NAME, '--distpath', os.path.join(WORK, 'dist'), '--workpath', os.path.join(WORK, 'work'),
            '--specpath', WORK]
-    for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange'),
-              os.path.join(ROOT, 'autoturret', 'tools')):
+    for p in paths:
         cmd += ['--paths', p]
     for mod in ('call_weapons', 'edf41_objects', 'edf41_outfits', 'edf41_maps', 'edf41_menu_bg', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model', 'make_sedan',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'catalog', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
-                'testhub', 'make_emc', 'make_vulcan', 'make_bmpt', 'make_tracked_combat', 'tracked_combat_model', 'tracked_collision', 'vulcan_model', 'bmpt_model',
+                'testhub', 'make_emc', 'make_vulcan', 'make_bmpt', 'make_tracked_combat', 'tracked_combat_model', 'tracked_collision', 'frozen_collision_probe', 'vulcan_model', 'bmpt_model',
                 'edf41_materials', 'edf41materials', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
                 'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'mdb', 'edf6native', 'crilayla',
