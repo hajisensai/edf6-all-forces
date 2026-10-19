@@ -151,6 +151,8 @@ struct Soldier {
     float packDir[3];
     bool packEmpty[2];
     ULONGLONG packReloadAt[2];
+    ULONGLONG climbSince;    // its action limits have read as the climb's (kClimbLimits) since then; 0: not
+    bool climbSaid;          // that stretch logged (StuckClimb)
 };
 Soldier soldiers[kMaxSoldiers]{};
 ULONGLONG fullLoggedAt=0,listLoggedAt=0;
@@ -1194,6 +1196,27 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     return p;
 }
 
+// A soldier held in EDF6's climb over a ledge (the soldier classes' slot 72, 0x5790A0: the only writer of action limits
+// 0x62D, 0x5791DA). The state leaves only when the climb clip it played on the main player is done (0x5798DF), so a CAS
+// without the climb states (their indices at +0x1530..+0x153C resolved -1 at 0x5784D4..0x578543, the play refused) never
+// lets it go: the soldier stands frozen, its moves and fire ignored (2026-10-19: 「NPC有的会立正」; tools/make_edf41_objects.py
+// drop_climb keeps 4.1's soldiers, whose CAS has none, from climbing at all). Logged once a stretch, after kClimbStuckMs:
+// a real climb takes about a second. Diagnostic only: nothing of the soldier is changed.
+constexpr std::uint32_t kClimbLimits=0x62D;
+constexpr std::size_t kClimbStates=0x1530;   // 4 x int: common_elude_large_up, middle_over, middle_up, small_up
+constexpr ULONGLONG kClimbStuckMs=4000;
+void StuckClimb(Soldier& s,const unsigned char* h,int cls,ULONGLONG ms) noexcept {
+    if(At<std::uint32_t>(h,kActionLimits)!=kClimbLimits){s.climbSince=0;s.climbSaid=false;return;}
+    if(!s.climbSince){s.climbSince=ms;return;}
+    if(s.climbSaid || ms-s.climbSince<kClimbStuckMs)return;
+    s.climbSaid=true;
+    const float* pos=Pos(h);
+    Log("NPCAI %s %p: held in the climb state %.0f s at (%.0f,%.0f,%.0f); its CAS's climb states %d %d %d %d (-1: none, "
+        "the climb never ends)",kSoldiers[cls].name,h,static_cast<double>(ms-s.climbSince)/1000.0,pos[0],pos[1],pos[2],
+        At<std::int32_t>(h,kClimbStates),At<std::int32_t>(h,kClimbStates+4),At<std::int32_t>(h,kClimbStates+8),
+        At<std::int32_t>(h,kClimbStates+12));
+}
+
 void Think(unsigned char* h,int cls) noexcept {
     if(IsAnyPlayer(h) || h[kDead] || !IsOnlineAuthority(h))return;   // only the NPCs whose AI this machine runs (online_authority.h)
     const std::int32_t team=At<std::int32_t>(h,kTeam);
@@ -1221,6 +1244,7 @@ void Think(unsigned char* h,int cls) noexcept {
     Soldier* const s=Entry(h,ms);
     if(!s)return;
     s->seen=ms;
+    StuckClimb(*s,h,cls,ms);
     const float* pos=Pos(h);
     const float eye[3]={pos[0],pos[1]+kEye,pos[2]};
     if(!s->controlSet || control!=s->control) {
