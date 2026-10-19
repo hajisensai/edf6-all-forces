@@ -20,7 +20,7 @@ namespace {
 constexpr unsigned kCarVtable=0x17E01B0,kCarFrame=0x65A850,kCarPose=0x65A690;
 constexpr unsigned kWeaponCall=0x65B37E,kSetWeapon=0x633330;
 constexpr unsigned kAimVtable=0x17D8A68,kAimSeVtable=0x17D8A90;
-constexpr unsigned kAimStep=0x5FBDA0,kAimSeStep=0x5FCD80,kAimPose=0x5FACD0,kAimRegister=0x5FB790;
+constexpr unsigned kAimPose=0x5FACD0,kAimRegister=0x5FB790;
 constexpr unsigned kPhysicsToBones=0x6EDCA0,kBuildWorld=0x1100B90,kBonesToPhysics=0x6ED800,kPull=0x62C000;
 constexpr std::size_t kRagdoll=0x1320,kCas=0x1180,kSgo=0x100,kSeatRightX=0x2D0,kSeatRightY=0x2D4,kSeatFire=0x2E4;
 constexpr std::size_t kSeatHolders=0xC8,kSeatHoldersCount=0xD8;
@@ -188,7 +188,12 @@ bool InstallEdf41Bike() noexcept {
               Matches(kAimRegister,kAimRegisterCode,sizeof(kAimRegisterCode)) &&
               Matches(kPhysicsToBones,kPhysicsToBonesCode,sizeof(kPhysicsToBonesCode)) &&
               Matches(kBonesToPhysics,kBonesToPhysicsCode,sizeof(kBonesToPhysicsCode)) && Matches(kBuildWorld,kBuildWorldCode,sizeof(kBuildWorldCode));
-        known=known && At<const void*>(image+kAimVtable,16)==image+kAimStep && At<const void*>(image+kAimSeVtable,16)==image+kAimSeStep &&
+        // Slot 2 (the step) is called through the vtable, so another module's chained hook runs as it does for
+        // every other seat: the turret camera (turretcam.cpp, AddSe) and the stabilizer (stab.cpp, plain) chain
+        // it before this installs (plugin.cpp), so requiring the stock pointer there refused the 408 in every
+        // real game (2026-10-19 log: 「EDF41BIKE refused: native Car/Aim/physics profile differs」). Slot 3 (the
+        // pose, which this calls by address) must stay stock.
+        known=known && At<const void*>(image+kAimVtable,16)!=nullptr && At<const void*>(image+kAimSeVtable,16)!=nullptr &&
                At<const void*>(image+kAimVtable,24)==image+kAimPose && At<const void*>(image+kAimSeVtable,24)==image+kAimPose;
     } __except(EXCEPTION_EXECUTE_HANDLER) { known=false; }
     if(!known){Log("EDF41BIKE refused: native Car/Aim/physics profile differs");return false;}

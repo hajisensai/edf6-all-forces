@@ -62,3 +62,23 @@ Car 的 setup build `0x65B37E` 原本始终把 seat 0 的 Aim 交给 `0x633330`�
 - 生产 cpp 和两个 C++ 测试均以 MSVC `/W4 /WX /utf-8 /permissive-` 实际编译运行。
 
 以上是源资源、真实原生合同和离线 production routing 验证。未启动或操作游戏，未写游戏目录；三轮实际驾驶 / 转向稳定性、乘员动作、gun 接触与毁车效果，以及两机联机显示 / 射击仍需实机验收。
+
+## 2026-10-19 反馈「4.1 的载具召唤出来在空中，而且会自动装填」
+
+### 自动装填（已修）
+
+EDF6 读 `ReloadType`（武器 `+0x208`）在 `0x693E8D`：0 / 3 手动换弹；1（`0x693EA4` 与 `edi=1` 比较）每帧把 `+0xE68` 减 1，即按时间自动回满（EDF6 文本「[自動]$0秒」：手雷、无人机、鲸鱼 105mm）；2 在 `0x693EAC..0x693F18` 扣掉本帧新增的积分（文本「$0pt」：所有载具请求、轰炸机、暴风）。EDF4.1 只有 0 / 1 两种，它的 1 是积分装填（全部 150 个空爆兵呼叫，文本「リロード 900pt」）。移植原样抄了 1，于是 84 个呼叫（载具、鲸鱼炮艇、轰炸机）和 11 把 4.1 激光引导呼叫在 EDF6 里按帧计时自动回满。`pylib/edf5port.py RELOAD_TYPE41` 把 4.1 的 1 换成 EDF6 的 2（`weapon41` 与 `edf41calls._use` 同用），登记表快照按 selftest `ported_weapons_registry_current` 的同一转换刷新。车载武器本身（`ReloadType 0`，`ReloadTime -1`）在 4.1 与 EDF6 一致，不补弹，未改。
+
+### 408 呼叫的驾驶参数（已修）
+
+`Vehicle_Car` 的设定 slot 46 `0x65A910` 从 `setup[1]` 读 7 个数：[0] 缩放 `car_base_brake_and_friction`（`0x66EEC0` / `0x66EF20`），[1] [2] 缩放齿轮表（`0x66E1A0`），[3] [4] 转向速率（`0x66B730` → `+0x1B44 / +0x1B40`），[5] [6] 牵引曲线（`0x66EE60`）；越界读作 0。408 对象自己用 V512 的 `[0.8,30,0.0075,0.7,0.075,0.3,0.6]`，但 5 条请求仍带 4.1 VehicleBike 自己的四数块（如 `[2.0,0.9,30,100]`），请求生成的车齿轮表按 0.9 / 30 缩放、转向 100 / 0、牵引系数 0；M 地图摆放走 `mission_setup` 不受影响。现在请求带对象自己的 `edf41bike.CAR_DRIVE`（生成时校验与 V512 一致），保留 4.1 的装甲 [0] 与机枪 [2]。4.1 各型号之间的速度 / 动力差异没有已核实的 Car 对应量，未映射。
+
+### 炮手适配在实机从未安装（已修）
+
+本机日志每次加载都是 `EDF41BIKE refused: native Car/Aim/physics profile differs`：`plugin.cpp` 先装 `InstallTurretCam` / `InstallStabilizer`，它们链接了 Aim vtable slot 2（`0x17D8A90` / `0x17D8A68`），而本模块要求 slot 2 仍是原版指针。本模块经 vtable 调 slot 2，链上的钩子照常对所有座位生效，所以只要求 slot 2 非空、slot 3（按地址调用的 pose）仍是原版。`tests/edf41bike_runtime_test.cpp` 增加「被链接的 slot 2 仍安装且经链调用」「slot 3 被换仍拒绝」。
+
+### 悬空（未定根因，需实机）
+
+本机 2026-10-19 20:05 的会话（`EDF6Coop.log` 打开 `EDF6VC_E41_WEAPON753` 与 `VEHICLE408_MOTORBIKE.SGO`）：第一辆 408 生成时 `pos=(-272,2,234)`，附近地面 y≈1（同区 `(-250,1,212)`、`(-294,1,207)`），此后十余分钟停在 y=2 不再下落；21 秒后第二辆生成在 `(-274,4,235)`，即叠在第一辆上方，第一辆位置不变。原版集装箱出车点本就离地约 1 m（`docs/airdrop-vehicle-re.md` §2.3，Grape 出车后落到地面），所以 408 底盘在出车后没有受重力下落，且对第二辆的穿透推挤表现得像不可动刚体。
+
+已静态排除：碰撞层（4.1 SHKT 全部 layer 0 / group 1，与 V503 的 TAG0 相同）、重力系数（hkp `gravityFactor` 1.0）、`car_base_all_rigid_body` 的 [1] [2]（`0x6660D0` 写的是 motion properties 线 / 角阻尼，不是重力）、`car_base_rigid_body`（-1 字段全部跳过）、上面那组错误驾驶参数（只影响刹车、齿轮、转向、牵引）。仍可疑、无法静态定论的差异：408 是唯一把代理设为 mode 2（`0x6ED480` → 运动学 `motionType 1`，碰撞 `0x6ED2D0(…,3)`）的车辆，且 `front_sus` / `handle` 为动态代理（V503 只有 body 在世界里；4.1 源 `vehicle_dactive_node` 把 gun / front_sus / handle / front_tire 列为动画驱动），以及 hkp→hknp 迁移（`0x160B950`）生成的 motion / 激活状态。下一次实测请在出车后读每个代理的 `+0x9C` 模式、`0x11B14A0` motion type 与激活状态，再决定修改；不以降低出车高度或强制落地掩盖。

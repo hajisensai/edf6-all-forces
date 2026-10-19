@@ -26,6 +26,8 @@ void __fastcall PhysRead(void* at){Check(at==vehicle+0x1320,"physics read uses t
 void __fastcall World(void* at,const void* matrix){Check(at==vehicle+0xEE0 && matrix==vehicle+0x60,"world build uses the real model/body matrix");order.push_back(3);}
 void __fastcall PhysWrite(void* at){Check(at==vehicle+0x1320,"physical gun target uses the original ragdoll");order.push_back(4);}
 void __fastcall Pull(void* holder){++pulls;pulled=holder;}
+int chainedSteps=0;
+void __fastcall ChainedStep(unsigned char* aim,const float* values){++chainedSteps;Step(aim,values);}
 void __fastcall PriorFrame(unsigned char*){++frames;}
 void __fastcall PriorPose(unsigned char*){++poses;}
 void __fastcall Find(const void*,void* request){static_cast<crew::ifcmodel::Find*>(request)->index=tagged ? 0 : -1;}
@@ -87,6 +89,15 @@ int main(){
  reinterpret_cast<crew::SetWeaponFn>(callHook)(vehicle,originalAim,&entry,3);
  Check(frames==1&&poses==1&&steps==0&&pulls==0&&aimed==originalAim,"ordinary Car passes frame pose and original constructor arguments through unchanged");
  for(int failure=1;failure<=2;++failure){Reset();failChain=failure;Check(!crew::InstallEdf41Bike(),"inject failure after the constructor redirect");reinterpret_cast<crew::SetWeaponFn>(callHook)(vehicle,originalAim,&entry,9);Check(sets==1&&aimed==originalAim&&registrations==0,"partial installation cannot redirect a source constructor");auto table=reinterpret_cast<crew::VehicleFn*>(crew::image+0x17E01B0);table[4](vehicle);table[45](vehicle);Check(frames==1&&poses==1&&steps==0&&pulls==0,"partially installed hooks forward original callbacks without owned work");}
+ // Another module (turretcam.cpp / stab.cpp) chains the aim step before this installs, as plugin.cpp orders it:
+ // the 408 still installs and its gunner's step runs through that chain. A replaced pose slot is refused.
+ Reset();auto chained=reinterpret_cast<void**>(crew::image+0x17D8A68);chained[2]=reinterpret_cast<void*>(&ChainedStep);
+ reinterpret_cast<void**>(crew::image+0x17D8A90)[2]=reinterpret_cast<void*>(&ChainedStep);chainedSteps=0;
+ Check(crew::InstallEdf41Bike(),"an aim step chained by another module does not refuse the 408");
+ reinterpret_cast<crew::SetWeaponFn>(callHook)(vehicle,originalAim,&entry,7);crew::Frame(vehicle);
+ Check(chainedSteps==1&&steps==1&&pulls==1,"the gunner's step goes through the chained vtable slot");
+ Reset();reinterpret_cast<void**>(crew::image+0x17D8A68)[3]=reinterpret_cast<void*>(&ChainedStep);
+ Check(!crew::InstallEdf41Bike(),"a replaced aim pose slot still refuses the profile");
  Reset();Check(crew::InstallEdf41Bike(),"reinstall for disabled lifecycle");config.enabled=false;crew::Frame(vehicle);crew::Pose(vehicle);Check(poses==1&&steps==0&&pulls==0,"disabled feature leaves original callbacks and no owned input");
  VirtualFree(crew::image,0,MEM_RELEASE);crew::image=nullptr;
  std::puts("original 408 production routing and lifecycle checks passed");
