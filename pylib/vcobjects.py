@@ -1939,14 +1939,14 @@ ULT_CORE_FILE = 'EDF6VC_ULT_CORE.SGO'
 ULT_BLAST_FILE = 'EDF6VC_ULT_BLAST.SGO'
 ULT_FILES = (ULT_SIGHT_FILE, ULT_BOLT_FILE, ULT_SPARK_FILE, ULT_BEAM_FILE, ULT_CORE_FILE, ULT_BLAST_FILE)   # EmcRound's order
 ULT_BOLT_ROUNDS = 8                     # src/ultimate_plan.h kBoltFrames
-ULT_SPARK_RADIUS, ULT_BLAST_RADIUS = 22.0, 55.0
+ULT_SPARK_RADIUS, ULT_BLAST_RADIUS = 40.0, 55.0
 # (rounds, size, colour, speed m a frame, life frames, shot volume, shot pitch): reach = speed x life, past the farthest
 # start: the aims' ring (900 m up, 520 m out) to the area's far edge, a bolt's 700 m (plus its lean), the beam's 1300 m.
 ULT_BEAMS: dict[str, tuple[int, float, tuple[float, ...], float, int, float, float]] = {
-    ULT_SIGHT_FILE: (360, 0.8, (3.0, 0.2, 0.45, 1.0), 140.0, 10, 0.0, 1.0),
+    ULT_SIGHT_FILE: (760, 0.8, (3.0, 0.2, 0.45, 1.0), 140.0, 10, 0.0, 1.0),
     ULT_BOLT_FILE: (ULT_BOLT_ROUNDS, 2.5, (1.8, 2.4, 3.0, 1.0), 160.0, 6, 0.7, 1.7),
-    ULT_BEAM_FILE: (260, 48.0, (2.8, 0.45, 3.0, 1.0), 150.0, 10, 1.0, 0.6),
-    ULT_CORE_FILE: (260, 18.0, (3.0, 2.6, 3.0, 1.0), 150.0, 10, 0.0, 1.0),
+    ULT_BEAM_FILE: (500, 48.0, (2.8, 0.45, 3.0, 1.0), 150.0, 10, 1.0, 0.6),
+    ULT_CORE_FILE: (500, 18.0, (3.0, 2.6, 3.0, 1.0), 150.0, 10, 0.0, 1.0),
 }
 ULT_REACH = {ULT_SIGHT_FILE: 1300.0, ULT_BOLT_FILE: 760.0, ULT_BEAM_FILE: 1300.0, ULT_CORE_FILE: 1300.0}
 ULT_CHARGE_COLOUR = (2.2, 0.6, 3.0, 1.0)
@@ -1995,7 +1995,7 @@ def check_ult(files: dict[str, bytes]) -> None:
         assert p[2] == rounds and p[3] == 0 and p[9] == 0.0 and p[15] == 0 and m['indirect_fire_damage'] == 0.0, (name, p)
         assert p[5] * p[10] >= ULT_REACH[name], (name, p[5], p[10])
         assert p[17][0] == 1.0 and p[18][2] == 0.0 and p[17][2] == volume, name
-    assert ULT_BEAMS[ULT_SIGHT_FILE][0] >= 5 * 60 and ULT_BEAMS[ULT_BEAM_FILE][0] >= 4 * 60, 'rounds for the whole phase'
+    assert ULT_BEAMS[ULT_SIGHT_FILE][0] >= 12 * 60 and ULT_BEAMS[ULT_BEAM_FILE][0] >= 8 * 60, 'rounds for the whole phase'
     for name, radius in ((ULT_SPARK_FILE, ULT_SPARK_RADIUS), (ULT_BLAST_FILE, ULT_BLAST_RADIUS)):
         m = sgo.load(data=files[name])
         p = m['indirect_fire_param']

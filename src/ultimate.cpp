@@ -291,8 +291,8 @@ void StormFrame(int f) noexcept {
         EmcFire(EmcRound::ultBolt,show.caller,from,to,show.damage*kBoltShare/kBoltFrames);
         const float above[3]={to[0],to[1]+2.0f,to[2]};
         EmcFire(EmcRound::ultSpark,show.caller,above,to,show.damage*kSparkShare);
-        edf41c::StencilLight(to,kBoltLight,70.0f,8);
-        edf41c::Explosion(to,kUp,9.0f);
+        edf41c::StencilLight(to,kBoltLight,110.0f,8);
+        edf41c::Explosion(to,kUp,20.0f);   // the spark's size (ULT_SPARK_RADIUS 40): the storm fills the circle
     }
     if(f%20==0)edf41c::Quake(show.at,0.5f,kRadius*3.0f);
     if(f%50==25 && show.snapped) {   // the whole sky lights with the storm now and then

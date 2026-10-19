@@ -14,13 +14,14 @@ namespace ultimate {
 constexpr float kPi=3.14159265358979f;
 constexpr int kFps=60;
 // Frames from the call (the stock countdown already over: the hook is the satellite's fire state).
-constexpr int kChargeEnd=5*kFps;          // 0 .. 300: charge
-constexpr int kStormEnd=kChargeEnd+6*kFps;   // .. 660: storm
-constexpr int kCannonEnd=kStormEnd+4*kFps;   // .. 900: cannon
-constexpr int kAfterEnd=kCannonEnd+10*kFps;  // .. 1500: after; the show is over
-constexpr int kSkyBackAt=kCannonEnd+1*kFps;  // the sky starts coming back a second into the after
-constexpr float kSkyBackSec=7.0f;
-constexpr float kSkyDarkSec=4.0f;         // the charge's fade into the dark sky
+// Slow on purpose (the user, 2026-10-20, after a 25 s first cut: 「来的太快了，应该慢一点，不然没那种宏状感」): 40 s in all.
+constexpr int kChargeEnd=12*kFps;            // 0 .. 720: charge
+constexpr int kStormEnd=kChargeEnd+10*kFps;  // .. 1320: storm
+constexpr int kCannonEnd=kStormEnd+8*kFps;   // .. 1800: cannon
+constexpr int kAfterEnd=kCannonEnd+10*kFps;  // .. 2400: after; the show is over
+constexpr int kSkyBackAt=kCannonEnd+2*kFps;  // the sky starts coming back two seconds into the after
+constexpr float kSkyBackSec=8.0f;            // and is back 10 s after the last ring
+constexpr float kSkyDarkSec=8.0f;            // the charge's fade into the dark sky
 
 constexpr float kRadius=220.0f;           // m: the area the strike clears
 // The aim beams: kAims from a ring kAimRing out and kAimHeight up, their aims from the area's edge to its centre.
@@ -29,18 +30,19 @@ constexpr float kAimRing=520.0f,kAimHeight=900.0f;
 constexpr float kAimSizeFrom=0.8f,kAimSizeTo=7.0f;
 // The bolts: from kBoltHeight over where they land (a little off plumb), kBoltsPerSec on average, more as the storm goes on.
 constexpr float kBoltHeight=700.0f,kBoltLean=40.0f;
-constexpr float kBoltsPerSec=90.0f;
+constexpr float kBoltsPerSec=150.0f;
 constexpr int kBoltFrames=8;              // a bolt's rounds (the SGO's: pylib/vcobjects.py ULT_BOLT_ROUNDS)
-// The main beam: from kBeamHeight straight down, growing to full size in kBeamGrow frames.
+// The main beam: from kBeamHeight straight down, growing to full size in kBeamGrow frames (and thinning away as long).
 constexpr float kBeamHeight=1300.0f;
-constexpr int kBeamGrow=40;
+constexpr int kBeamGrow=120;
 constexpr float kBeamSize=48.0f,kCoreSize=18.0f;
-// The rings: kRings, one every kRingGap frames from the cannon's start, the first on the centre; each blast kRingBlast m.
+// The rings: kRings, one every kRingGap frames once the beam is full (kBeamGrow into the cannon), the first on the centre;
+// each blast kRingBlast m. A slow wave out to the edge.
 constexpr int kRings=12;
-constexpr int kRingGap=14;
+constexpr int kRingGap=26;
 constexpr float kRingBlast=55.0f;
 static_assert(kChargeEnd<kStormEnd && kStormEnd<kCannonEnd && kCannonEnd<kAfterEnd,"phases in order");
-static_assert(kStormEnd+kRings*kRingGap<=kCannonEnd,"every ring goes off in the cannon phase");
+static_assert(kStormEnd+kBeamGrow+kRings*kRingGap<=kCannonEnd,"every ring goes off in the cannon phase");
 
 enum class Phase : unsigned char { charge, storm, cannon, after, over };
 inline Phase PhaseAt(int frame) noexcept {
@@ -88,14 +90,14 @@ inline Aim AimAt(int i,int frame) noexcept {
 }
 
 // Bolts landing on storm frame `frame` (0 = the storm's first): how many (at most kMaxBoltsAFrame), each one's landing
-// offset and its top's lean. The rate climbs from half to one and a half kBoltsPerSec over the storm.
-constexpr int kMaxBoltsAFrame=4;
+// offset and its top's lean. The rate climbs from a third to five thirds kBoltsPerSec over the storm.
+constexpr int kMaxBoltsAFrame=6;
 struct Bolt { float at[2],lean[2]; };
 inline int BoltsAt(std::uint64_t seed,int frame,Bolt* out) noexcept {
     if(frame<0 || frame>=kStormEnd-kChargeEnd)return 0;
     Rng g=FrameRng(seed^0xB017ull,frame);
     const float t=static_cast<float>(frame)/(kStormEnd-kChargeEnd);
-    const float mean=kBoltsPerSec*(0.5f+t)/kFps;       // bolts this frame on average
+    const float mean=kBoltsPerSec*(1.0f/3.0f+4.0f/3.0f*t)/kFps;       // bolts this frame on average
     int n=static_cast<int>(mean);
     if(g.Unit()<mean-static_cast<float>(n))++n;
     if(n>kMaxBoltsAFrame)n=kMaxBoltsAFrame;
@@ -120,6 +122,7 @@ inline Ring RingOf(int k,std::uint64_t seed) noexcept {
 }
 // The ring that goes off on cannon frame `frame` (0 = the cannon's first), or -1.
 inline int RingAt(int frame) noexcept {
+    frame-=kBeamGrow;
     if(frame<0 || frame%kRingGap)return -1;
     const int k=frame/kRingGap;
     return k<kRings ? k : -1;
@@ -143,18 +146,18 @@ enum class CircleModel : unsigned char { outer, star, core, sky };
 struct CircleSpec { CircleModel model; int appear; float lift,size,spin; bool sky; };   // spin: rad/s at the charge's pace
 constexpr CircleSpec kCircles[]={
     {CircleModel::outer,0,0.6f,1.0f,0.22f,false},
-    {CircleModel::star,24,1.0f,1.0f,-0.38f,false},
-    {CircleModel::core,48,1.4f,1.0f,0.9f,false},
-    {CircleModel::sky,70,260.0f,1.0f,-0.28f,true},
-    {CircleModel::sky,100,430.0f,0.72f,0.34f,true},
-    {CircleModel::sky,130,600.0f,0.5f,-0.45f,true},
+    {CircleModel::star,70,1.0f,1.0f,-0.38f,false},
+    {CircleModel::core,140,1.4f,1.0f,0.9f,false},
+    {CircleModel::sky,220,260.0f,1.0f,-0.28f,true},
+    {CircleModel::sky,310,430.0f,0.72f,0.34f,true},
+    {CircleModel::sky,400,600.0f,0.5f,-0.45f,true},
 };
 constexpr int kCircleCount=static_cast<int>(sizeof(kCircles)/sizeof(kCircles[0]));
-constexpr int kCircleOpen=50;                     // frames to open out
-constexpr int kCircleRise=90;                     // frames a sky circle takes to rise
+constexpr int kCircleOpen=100;                    // frames to open out
+constexpr int kCircleRise=180;                    // frames a sky circle takes to rise
 constexpr int kCircleCloseAt=kCannonEnd+2*kFps;   // the first starts closing; each next kCircleStagger later
-constexpr int kCircleStagger=10;
-constexpr int kCircleClose=80;                    // frames to close away
+constexpr int kCircleStagger=15;
+constexpr int kCircleClose=120;                   // frames to close away
 static_assert(kCircleCloseAt+(kCircleCount-1)*kCircleStagger+kCircleClose<=kAfterEnd,"every circle is gone before the end");
 
 // The turn's pace: 1 in the charge, quicker as the show builds.
