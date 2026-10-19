@@ -19,6 +19,7 @@ import jet_models
 import ledger
 import make_bmpt
 import make_vulcan
+import vcobjects as vc
 import mdb
 import rmpa
 import rootcpk
@@ -84,7 +85,7 @@ class RangeCatalogTests(unittest.TestCase):
                 row = rows[name]
                 dependencies = catalog.files_of(row)
                 self.assertEqual(dependencies, list(gen.range_files(name)))
-                self.assertEqual(len(dependencies), 6 if 'vulcan' in name else 7)
+                self.assertEqual(len(dependencies), 4 + len(vc.GROUND_VEHICLES[BUILDERS[name].OWNER].weapons))
                 for rel in dependencies:
                     path = Path(root, 'Mods', *rel.split('/'))
                     path.parent.mkdir(parents=True, exist_ok=True)

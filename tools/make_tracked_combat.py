@@ -33,6 +33,11 @@ GUNS = {
         'LockonTargetType': 7302.0,
     },
 }
+# The BMPT's second belt (vcobjects STORES BMPT_AP / BMPT_AP_R): the 2A42 is a dual-feed gun, HE-FRAG-T (GUNS) or the
+# 3UBR8 APDS-T. Over GUNS['bmpt']: penetrating, no burst, faster (3UBR8 ~1120 m/s against the HE-FRAG's ~960: 16 x 1.17
+# m a frame), flatter, more on one target; the AP box is the smaller (real BMPT: 850 rounds of both, 160 of them AP).
+BMPT_AP_BELT = {'AmmoCount': 150.0, 'AmmoDamage': 30.0, 'AmmoSpeed': 18.7, 'AmmoGravityFactor': 0.1,
+                'AmmoExplosion': 0.0, 'AmmoIsPenetration': 1.0}
 NAMES = {
     'bmpt': ('BMPT 30 mm Autocannon', '\u0042\u004d\u0050\u0054 30mm\u673a\u70ae',
              '\u0042\u004d\u0050\u0054 30mm\u6a5f\u95a2\u7832', '\u0042\u004d\u0050\u0054 30mm\u6a5f\u7832'),
@@ -112,7 +117,7 @@ def _weapon_muzzles(doc: dsgo.Document, points: list[tuple[str, tuple[float, flo
 
 
 def gun_sgo(game: vc.Game, kind: str, stock: str, side: str,
-            points: list[tuple[str, tuple[float, float, float]]]) -> bytes:
+            points: list[tuple[str, tuple[float, float, float]]], belt: str | None = None) -> bytes:
     if kind == 'vulcan':
         name = vc.store_file('VULCAN_HE' if side == 'left' else 'VULCAN_AP', 2000)
         doc = dsgo.parse(vc.store_sgo(game, name))
@@ -130,6 +135,18 @@ def gun_sgo(game: vc.Game, kind: str, stock: str, side: str,
             if key not in doc.root.names.values():
                 raise ValueError(f'{name}: missing {key}')
             doc.root.set(key, value)
+    elif belt is not None:
+        # The BMPT's APDS belt: its own store file (one switch choice for both barrels, vcobjects STORES BMPT_AP*),
+        # the native gun's numbers with BMPT_AP_BELT over them, the store's name.
+        doc = dsgo.parse(vc.store_sgo(game, belt))
+        native = dsgo.parse(game.read('WEAPON', stock)).root
+        for key, value in {**GUNS[kind], **BMPT_AP_BELT}.items():
+            if doc.root.get(key) is None:
+                raise ValueError(f'{belt}: missing {key}')
+            doc.root.set(key, value)
+        for key in ('MuzzleFlash', 'MuzzleFlash_CustomParameter', 'ShellCase'):
+            doc.root.set(key, copy.deepcopy(native.get(key)))
+        doc.root.set('animation_model', copy.deepcopy(native.get('animation_model')))
     else:
         doc = dsgo.parse(game.read('WEAPON', stock))
         for key, value in GUNS[kind].items():
@@ -158,8 +175,19 @@ def gun_sgo(game: vc.Game, kind: str, stock: str, side: str,
     return dsgo.compact(doc)
 
 
-def missile_sgo(game: vc.Game, points: list[tuple[str, tuple[float, float, float]]]) -> bytes:
-    doc = dsgo.parse(vc.store_sgo(game, vc.store_file('BMPT_ATGM', 4)))
+# Each BMPT holder's part (vehicle weapons in order): the native guns' sides, the missile tubes, then the second belt's
+# sides (on the same moving barrels) and the thermobaric missile (the same tubes).
+BMPT_SLOTS = ('left', 'right', 'missiles', 'left', 'right', 'missiles')
+
+
+def slot(kind: str, index: int) -> str:
+    """What holder `index` of `kind` fires from: 'left' / 'right' (a gun's barrel) or 'missiles' (the tubes)."""
+    return BMPT_SLOTS[index] if kind == 'bmpt' else ('left' if index == 0 else 'right')
+
+
+def missile_sgo(game: vc.Game, points: list[tuple[str, tuple[float, float, float]]],
+                store: str = vc.store_file('BMPT_ATGM', 4)) -> bytes:
+    doc = dsgo.parse(vc.store_sgo(game, store))
     _weapon_muzzles(doc, points)
     return dsgo.compact(doc)
 
@@ -227,6 +255,11 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
     if len(setting.items) != 2:
         raise ValueError('native V603 must have two weapon mounts')
     if kind == 'bmpt':
+        # The missiles' holder, then the second belt's two on the guns' own moving bones and the thermobaric
+        # missile's on the missiles' (BMPT_SLOTS).
+        guns = [copy.deepcopy(setting.items[0]), copy.deepcopy(setting.items[1])]
+        setting.items.append(_node(['cannon_main', 0.0]))
+        setting.items.extend(guns)
         setting.items.append(_node(['cannon_main', 0.0]))
     else:
         # HE/AP are alternate belts in the same visible M61: the AP weapon
@@ -278,7 +311,7 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
         if gun.get('AmmoCount') <= 0 or gun.get('AmmoDamage') <= 0:
             raise ValueError(f'{kind}: nonfunctional weapon {path}')
         muzzles = vc.mab_muzzles(gun.get('animation_model').items[2].data)
-        expected_count = 4 if index == 2 else 1
+        expected_count = 4 if slot(kind, index) == 'missiles' else 1
         if len(muzzles) != expected_count:
             raise ValueError(f'{kind}: {path} has {len(muzzles)} muzzle locators, expected {expected_count}')
         if dsgo.write(dsgo.parse(blob)) != blob:
@@ -306,7 +339,7 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
             gun = dsgo.parse(files[f'WEAPON/{path.rsplit("/", 1)[1].upper()}']).root
             block = gun.get('animation_model').items[2].data
             positions = [struct.unpack_from('<3f', block, off) for _, _, off in vc.mab_muzzles(block)]
-            authored = points['missiles' if index == 2 else ('left' if index == 0 else 'right')]
+            authored = points[slot(kind, index)]
             if any(bone != settings[index][0] for bone, _ in authored):
                 raise ValueError(f'{kind}: holder uses a different moving bone from the visible barrel')
             wanted = [p for _, p in authored]
@@ -326,7 +359,11 @@ def build(root: str, kind: str) -> dict[str, bytes]:
     for stock, path, side in zip(STOCK_GUNS, vehicle.weapons[:2], ('left', 'right')):
         files[f'WEAPON/{path.rsplit("/", 1)[1].upper()}'] = gun_sgo(game, kind, stock, side, points[side])
     if kind == 'bmpt':
-        files[f'WEAPON/{vehicle.weapons[2].rsplit("/", 1)[1].upper()}'] = missile_sgo(game, points['missiles'])
+        name = lambda i: vehicle.weapons[i].rsplit('/', 1)[1].upper()   # noqa: E731
+        files[f'WEAPON/{name(2)}'] = missile_sgo(game, points['missiles'])
+        for i, (stock, side) in enumerate(zip(STOCK_GUNS, ('left', 'right')), 3):
+            files[f'WEAPON/{name(i)}'] = gun_sgo(game, kind, stock, side, points[side], name(i))
+        files[f'WEAPON/{name(5)}'] = missile_sgo(game, points['missiles'], name(5))
     check(files, kind, game)
     return files
 

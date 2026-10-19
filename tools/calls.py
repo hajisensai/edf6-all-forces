@@ -231,10 +231,10 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('M163 Vulcan', 'Requests an M163 with an M113 hull and six-barrel 20 mm M61 cannon. Select HE or AP in the payload menu or with R / LB; only the selected belt fires. Authored model based on the real vehicle layout.'),
     },
     'bmpt': {
-        'SC': ('BMPT 坦克支援车', '请求一辆 BMPT：双 30mm 机炮与四发反坦克导弹。载具挂载菜单或 R / 手柄 LB 在双机炮和导弹之间切换；导弹需要锁定。外观为按真实构型自建模型。'),
-        'CN': ('BMPT 戰車支援車', '請求一輛 BMPT：雙 30mm 機砲與四發反戰車飛彈。載具掛載選單或 R / 手把 LB 在雙機砲和飛彈之間切換；飛彈需要鎖定。外觀為按真實構型自建模型。'),
-        'JA': ('BMPT 戦車支援戦闘車', '30mm 連装機関砲と対戦車ミサイル 4 発を搭載した BMPT を要請する。搭載メニューまたは R / LB で機関砲とミサイルを切り替える。実車の構成に基づく独自モデル。'),
-        'EN': ('BMPT Tank Support Vehicle', 'Requests a BMPT with twin 30 mm autocannons and four anti-tank missiles. Switch between paired cannon and missiles in the payload menu or with R / LB. Missiles require lock-on. Authored model based on the real vehicle layout.'),
+        'SC': ('BMPT 坦克支援车', '请求一辆 BMPT：双 30mm 双路供弹机炮（高爆 / APDS 穿甲弹链）与 9M120 阿塔卡导弹（串联破甲 / 9M120F 温压）。载具挂载菜单或 R / 手柄 LB 切换弹链与导弹；导弹需要锁定。外观为按真实构型自建模型。'),
+        'CN': ('BMPT 戰車支援車', '請求一輛 BMPT：雙 30mm 雙路供彈機砲（高爆 / APDS 穿甲彈鏈）與 9M120 阿塔卡飛彈（串聯破甲 / 9M120F 溫壓）。載具掛載選單或 R / 手把 LB 切換彈鏈與飛彈；飛彈需要鎖定。外觀為按真實構型自建模型。'),
+        'JA': ('BMPT 戦車支援戦闘車', '30mm 連装機関砲（二系統給弾：榴弾 / APDS）と 9M120 アターカ（タンデム HEAT / 9M120F サーモバリック）を搭載した BMPT を要請する。搭載メニューまたは R / LB で弾帯とミサイルを切り替える。実車の構成に基づく独自モデル。'),
+        'EN': ('BMPT Tank Support Vehicle', 'Requests a BMPT with twin dual-feed 30 mm autocannons (HE or APDS belt) and 9M120 Ataka missiles (tandem HEAT or 9M120F thermobaric). Switch belts and missiles in the payload menu or with R / LB. Missiles require lock-on. Authored model based on the real vehicle layout.'),
     },
     'sedan': {
         'SC': ('民用轿车', '请求一辆没有武器的民用轿车，单驾驶席。按通常的上车键驾驶，V 切换第一人称，按住鼠标中键或手柄 L3 转动视角自由观察。'),

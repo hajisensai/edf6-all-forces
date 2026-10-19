@@ -12,6 +12,10 @@ namespace crew {
 // coax: a tank's / an IFV's coaxial machine gun, fired by its own (secondary) trigger, never one of the switch's choices
 // (payload.cpp).
 enum class StoreRole { air, ground, bomb, rocket, gun, drone, charge, coax };
+// The round a gun store's sight names when its numbers alone would name it wrong (tools/gen_stores.py SHELLS): `native`
+// the sight's own reading (reticle.h ShellOf), `heat` a shaped charge (it bursts, but is no HE), `canister` a cloud of
+// balls (vhud.cpp Arm).
+enum class StoreShell : std::uint8_t { native, heat, canister };
 struct StoreSpec {
     const wchar_t* prefix;   // its weapon files' names: prefix + rounds + ".SGO" (vcobjects.store_file)
     const char* name;        // shown in the cockpit
@@ -21,6 +25,7 @@ struct StoreSpec {
     unsigned group=0;        // nonzero: one selectable loadout spanning its native barrel holders
     unsigned barrel=0;       // original native holder index for that linked barrel
     bool nativeControl=false; // a native trigger source, independently selectable (alternate ammunition)
+    StoreShell shell=StoreShell::native;
 };
 // A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
 struct JetMass { float mark,mass,durability; };

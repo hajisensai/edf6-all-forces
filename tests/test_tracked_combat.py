@@ -40,6 +40,16 @@ class CatalogContractTests(unittest.TestCase):
         missile = vc.GROUND_VEHICLES['bmpt'].weapons[2]
         self.assertEqual(vc.store_of(missile), ('BMPT_ATGM', 4))
         self.assertEqual(vc.STORES['BMPT_ATGM'].role, 'ground')
+        # 2026-10-19: the 2A42's second (APDS) feed, one choice for both barrels, and the Ataka's 9M120F.
+        bmpt = vc.GROUND_VEHICLES['bmpt'].weapons
+        self.assertEqual([vc.store_of(w) for w in bmpt[3:]], [('BMPT_AP', 150), ('BMPT_AP_R', 150), ('BMPT_ATGMF', 4)])
+        a, b = vc.STORES['BMPT_AP'], vc.STORES['BMPT_AP_R']
+        self.assertEqual((a.group, a.barrel, b.group, b.barrel), (3, 0, 3, 1))
+        self.assertNotIn(a.group, {s.group for k, s in vc.STORES.items() if k not in ('BMPT_AP', 'BMPT_AP_R')})
+        self.assertEqual(vc.STORES['BMPT_ATGMF'].role, 'ground')
+        self.assertNotEqual(vc.STORES['BMPT_ATGMF'].weapon.look.model, vc.STORES['BMPT_ATGM'].weapon.look.model,
+                            'the rounds one control cycles never look alike')
+        self.assertEqual(combat.BMPT_SLOTS, ('left', 'right', 'missiles', 'left', 'right', 'missiles'))
 
 
 @unittest.skipUnless((Path(rootcpk.DEFAULT_GAME) / 'Root.cpk').is_file(), 'EDF6 Root.cpk is unavailable')
@@ -157,6 +167,30 @@ class NativeAssetContractTests(unittest.TestCase):
             weapon = dsgo.parse(self.files['vulcan'][f'WEAPON/{vc.store_file(kind,2000)}']).root
             self.assertEqual(weapon.get('AmmoIsPenetration'), 1.0 if kind.endswith('AP') else 0.0)
             self.assertEqual(weapon.get('AmmoExplosion'), 0.0 if kind.endswith('AP') else 0.6)
+
+    def test_bmpt_second_feed_is_apds_on_the_native_barrels(self) -> None:
+        vehicle = vc.GROUND_VEHICLES['bmpt']
+        files = self.files['bmpt']
+        r = dsgo.parse(files[f'OBJECT/{vehicle.sgo}.SGO']).root
+        settings = dsgo.to_py(r.get('vehicle_weapon_setting'))
+        self.assertEqual(settings[3], settings[0])
+        self.assertEqual(settings[4], settings[1])
+        self.assertEqual(settings[5][0], settings[2][0])
+        name = lambda i: f'WEAPON/{vehicle.weapons[i].rsplit("/", 1)[1].upper()}'   # noqa: E731
+        for he, ap in ((0, 3), (1, 4)):
+            h, a = dsgo.parse(files[name(he)]).root, dsgo.parse(files[name(ap)]).root
+            self.assertEqual((a.get('AmmoIsPenetration'), a.get('AmmoExplosion')), (1.0, 0.0))
+            self.assertGreater(h.get('AmmoExplosion'), 0.0)
+            self.assertGreater(a.get('AmmoSpeed'), h.get('AmmoSpeed'))
+            self.assertEqual(a.get('AmmoCount'), 150.0)
+            self.assertEqual(a.get('AmmoClass'), h.get('AmmoClass'))
+            self.assertEqual(a.get('name.en'), '30 mm APDS (3UBR8)')
+            self.assertEqual(a.get('animation_model').items[2].data, h.get('animation_model').items[2].data,
+                             'the AP belt leaves the same barrel and case port as the HE belt')
+        t, f = dsgo.parse(files[name(2)]).root, dsgo.parse(files[name(5)]).root
+        self.assertEqual(t.get('animation_model').items[2].data, f.get('animation_model').items[2].data)
+        self.assertGreater(f.get('AmmoExplosion'), t.get('AmmoExplosion'))
+        self.assertLess(f.get('AmmoDamage'), t.get('AmmoDamage'))
 
     def test_cases_leave_authored_receiver_with_cartridge_scale(self) -> None:
         for kind in combat.KINDS:
