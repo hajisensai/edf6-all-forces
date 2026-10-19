@@ -42,7 +42,7 @@ class ModuleIdentityTests(unittest.TestCase):
 
     def assert_duplicate_rejected(self, duplicate: str) -> None:
         with tempfile.TemporaryDirectory(prefix='edf6-module-identity-') as folder:
-            root = Path(folder)
+            root = Path(folder).resolve()
             sources = {
                 'pylib/shkt_check.py': "B = 'body-schema'\n",
                 'tools/make_vulcan.py': 'import shkt_check\n',
