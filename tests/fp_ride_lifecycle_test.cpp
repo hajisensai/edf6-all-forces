@@ -667,24 +667,46 @@ int main() {
         const float up[3]={0,1,0};
         const M4 submit[2]={fpview::Translate(1,2,3),fpview::Mul(fpview::Rotation(up,std::cos(1.0f),std::sin(1.0f)),fpview::Translate(-4,5,6))};
         M4 expect[2];fpview::NativeView(submit[0],&expect[0]);fpview::NativeView(submit[1],&expect[1]);
+        const auto publishFrame=[&](int k) {
+            const float v=static_cast<float>(k&1 ? 1 : 2);
+            Current().on=true;Current().inHandCount=1;Current().handOf[0]=k&1;
+            for(int h=0;h<2;++h){Current().view[h]=fpview::Translate(v,v,v);Current().placeWeapon[h]=fpview::Translate(v,v,v);}
+            Current().ride.seat=k&1;Current().instrumentsReady=(k&1)!=0;Current().instruments.value[0]=v;
+            for(int h=0;h<2;++h){Current().probeAnchor[h]=fpview::Translate(v,v,v);Current().probeAnchored[h]=(k&1)!=0;}
+            Publish();CaptureRenderCamera(camW,submit[k&1].m);
+        };
+        const auto markersMatch=[](const DrawSnap& snap) {
+            const float v=snap.view[0].m[12];
+            const bool odd=v==1.0f;
+            return (v==1.0f || v==2.0f) && snap.view[1].m[12]==v && snap.placeWeapon[0].m[12]==v && snap.placeWeapon[1].m[12]==v &&
+                   snap.handOf[0]==(odd ? 1 : 0) && snap.rideSeat==(odd ? 1 : 0) && snap.instrumentsReady==odd &&
+                   snap.instruments.value[0]==v && snap.probeAnchor[0].m[12]==v && snap.probeAnchor[1].m[12]==v &&
+                   snap.probeAnchored[0]==odd && snap.probeAnchored[1]==odd;
+        };
+        // SeqTake may retain a reader's last whole copy while the writer is busy. Seed this scene's
+        // markers and view history before racing, rather than inheriting another scenario's valid cache.
+        publishFrame(0);
+        DrawSnap initial{};ViewHistory initialViews{};
+        check(TakeSnapshot(&initial) && markersMatch(initial) && TakeViews(0,&initialViews),
+              "the concurrent scene seeds the reader's complete snapshot and submitted-view caches");
+        publishFrame(1);
+        DrawSnap fallback{};bool fallbackOk=false;
+        Published& p=published[0];
+        SeqPublish(&p.seq,&p.snap,[&](DrawSnap&){fallbackOk=TakeSnapshot(&fallback);});
+        check(fallbackOk && markersMatch(fallback) && fallback.view[0].m[12]==initial.view[0].m[12],
+              "a busy writer legally retains the reader's previous whole frame after a newer frame was published");
         std::atomic<bool> stop{false};
         std::atomic<int> rounds{0};   // the reader starts once the writer has published and submitted (never vacuous)
         std::thread writer([&]{
             StateScope scope(mine);
             for(int k=0;!stop.load();++k) {
-                const float v=static_cast<float>(k&1 ? 1 : 2);
-                Current().on=true;Current().inHandCount=1;Current().handOf[0]=k&1;
-                for(int h=0;h<2;++h){Current().view[h]=fpview::Translate(v,v,v);Current().placeWeapon[h]=fpview::Translate(v,v,v);}
-                Current().ride.seat=k&1;Current().instrumentsReady=(k&1)!=0;Current().instruments.value[0]=v;
-                for(int h=0;h<2;++h){Current().probeAnchor[h]=fpview::Translate(v,v,v);Current().probeAnchored[h]=(k&1)!=0;}
-                Publish();
-                CaptureRenderCamera(camW,submit[k&1].m);
+                publishFrame(k);
                 rounds.fetch_add(1);
             }
         });
         while(rounds.load()<2)std::this_thread::yield();
         bool consistent=true,ownSelection=true,viewsWhole=true;
-        int viewsSeen=0;
+        int viewsSeen=0,snapshotsSeen=0;
         for(int i=0;i<20000;++i) {
             StateScope scope(mine);
             ViewHistory h{};
@@ -697,17 +719,13 @@ int main() {
             }
             DrawSnap snap{};
             if(!TakeSnapshot(&snap))continue;
-            const float v=snap.view[0].m[12];
-            const bool odd=v==1.0f;
-            consistent=consistent && snap.view[1].m[12]==v && snap.placeWeapon[0].m[12]==v && snap.placeWeapon[1].m[12]==v &&
-                       snap.handOf[0]==(odd ? 1 : 0) && snap.rideSeat==(odd ? 1 : 0) && snap.instrumentsReady==odd &&
-                       snap.instruments.value[0]==v && snap.probeAnchor[0].m[12]==v && snap.probeAnchor[1].m[12]==v &&
-                       snap.probeAnchored[0]==odd && snap.probeAnchored[1]==odd;
+            ++snapshotsSeen;
+            consistent=consistent && markersMatch(snap);
             {StateScope inner(other);ownSelection=ownSelection && &Current()==other;}
             ownSelection=ownSelection && &Current()==mine;
         }
         stop=true;writer.join();
-        check(consistent,"a draw's copy of the camera step's state (seat, instruments, probe anchors too) is whole, never torn by a concurrent publish");
+        check(consistent && snapshotsSeen>0,"a draw's copy of the camera step's state (seat, instruments, probe anchors too) is whole, never torn by a concurrent publish");
         check(viewsWhole && viewsSeen>0,"the submitted views a draw matches against are whole, never torn by a concurrent submit");
         check(ownSelection,"each thread keeps its own state selection (the camera step cannot switch a draw's camera)");
         for(auto& state:states)state=State{};

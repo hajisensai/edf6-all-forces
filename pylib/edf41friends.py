@@ -74,13 +74,13 @@ def look_rel(story: str) -> str:
 # 34 kinds, 86 of the story's 89 missions). 'look' ones are 4.1's soldiers ported under LOOK_FOLDER; 'stock' ones
 # EDF6's own (its AI vehicles: the same 4.1 models, Vehicle40x_*.mrab, under EDF6's vehicle classes, which rebuilt
 # 4.1's vehicle keys: 4.1's VehicleTank403 ... cannot go under them); the ported ones are the 4.1 files EDF6 lacks,
-# or holds stale (TRANSPORTER401_FORMATION, make_edf41_objects STOCK_OVERRIDES), and the 4.1 tank (a stand-in:
-# EDF6's V505 AI tank under 4.1's name and look).
+# or holds stale (TRANSPORTER401_FORMATION, make_edf41_objects STOCK_OVERRIDES), and the original 4.1 tank
+# on the audited native 601 tracked behavior, with its own model, physics and bindings.
 FRIENDS: dict[str, Friend] = {
     **{look_rel(r): Friend('look', cls) for r, cls in LOOKS.items()},
     'OBJECT/AIARMYSOLDIER_OMG.SGO': Friend('ported', 'AssultSoldier'),
     'OBJECT/AIARMYSOLDIER_OMG_LEADER.SGO': Friend('ported', 'AssultSoldier'),
-    'OBJECT/VEHICLE301_TANK_AI.SGO': Friend('ported', 'Vehicle505_Tank'),
+    'OBJECT/VEHICLE301_TANK_AI.SGO': Friend('ported', 'Vehicle601_Tank'),
     'OBJECT/VEHICLE402_ROCKET_AI.SGO': Friend('stock', 'Vehicle402_Rocket'),
     'OBJECT/VEHICLE403_TANK_AI.SGO': Friend('stock', 'Vehicle403_Tank'),
     'OBJECT/VEHICLE404_BIGTANK_AI.SGO': Friend('stock', 'Vehicle404_Tank'),

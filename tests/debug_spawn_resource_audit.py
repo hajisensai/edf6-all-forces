@@ -20,7 +20,7 @@ import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 
 # The game's vehicle classes the stock rows use (xgs_scene_object_class); a new row's class must be added knowingly.
-VEHICLE_CLASSES = {'Vehicle505_Tank', 'Vehicle403_Tank', 'Vehicle404_Tank', 'Vehicle603_Flak', 'Vehicle510_Maser',
+VEHICLE_CLASSES = {'Vehicle505_Tank', 'Vehicle601_Tank', 'Vehicle403_Tank', 'Vehicle404_Tank', 'Vehicle603_Flak', 'Vehicle510_Maser',
                    'Vehicle501_FortressRobo', 'Vehicle507_Rescuetank', 'Vehicle_Car', 'Vehicle503_Bike',
                    'Vehicle504_begaruta', 'VehicleBigBegaruta', 'Vehicle612_nix',
                    # 2026-10-19: the NPC-crewed kinds' `_ai` SGOs placed empty (testrange/catalog.py STOCK_VEHICLES)
