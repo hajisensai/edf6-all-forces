@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 #include <limits>
+#include <unordered_map>
 
 using namespace crew::support_net;
 namespace {
@@ -28,7 +29,7 @@ struct Node {
     std::uint32_t ext=kExtVariants;unsigned char bloom[32]{};   // its hello's extension (support_variants.h)
     std::uint64_t nonce=0;
     std::uint64_t lastToken=0;
-    bool active[kMaxTransactions+1]{};
+    std::unordered_map<std::uint64_t,bool> active;
     Plan last{};
     bool remote=false;
     std::vector<std::pair<std::uint32_t,RequestStatus>> notices;
@@ -78,6 +79,8 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     // the extension: 0 and an empty filter).
     if(node.id==room.legacyNode && sent.kind==Kind::hello){sent.index=room.legacyCaps;sent.unit=Unit{};sent.unit.resourceId=room.legacyExt;sent.unit.role=room.legacyDetails;}
     if(node.id==0 && room.oldHost && sent.kind==Kind::welcome){sent.catalog=0;sent.ok=0;sent.unit.role=0;}
+    if(node.id==room.legacyNode && !(room.legacyDetails&kDetailTransactionGenerations) &&
+       sent.kind==Kind::result && !sent.ok && sent.index==kCancelAckIndex)sent.index=0;
     if(!Encode(sent,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
     Packet p{node.id,dst,decoded};room.packets.push_back(p);room.history.push_back(p);return true;
 }
@@ -155,6 +158,10 @@ void Codec() {
     m.unit.matrix[0]=2;Check(!Encode(m,bytes,sizeof(bytes)),"nonrigid matrix rejected");
     m.unit.matrix[0]=1;m.unit.netId[12]=4;Check(!Encode(m,bytes,sizeof(bytes)),"wrong native identity type rejected");
     m.unit.netId[12]=5;m.unit.netId[20]=1;Check(!Encode(m,bytes,sizeof(bytes)),"native padding cannot carry uninitialized memory");
+    m=Message{};m.kind=Kind::result;m.epoch=22;m.transaction=1;m.index=kCancelAckIndex;
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),out) && out.index==kCancelAckIndex && !out.ok,"explicit cancellation ACK marker round-trips on unchanged v2 wire");
+    m.ok=1;Check(!Encode(m,bytes,sizeof(bytes)),"a positive creation RESULT cannot masquerade as explicit cancellation ACK");
+    m.ok=0;m.index=kCancelAckIndex-1;Check(!Encode(m,bytes,sizeof(bytes)),"undefined RESULT markers are rejected");
 }
 // 2026-10-09 (review): configured weapons are new soldier resources an older peer's Validate refuses mid-transaction.
 // Peers announce kCapSoldierVariants in their hello's index; the wire stays v2 both ways.
@@ -586,7 +593,7 @@ std::uint64_t SubmitDrone(Room& r,const Plan& p) {
     r.With(0);return r.nodes[0]->session->SubmitPrepared(p,r.now,PreparedKind::dynamicDrone);
 }
 void PreparedDroneAdmission() {
-    static_assert(kDetailPvpSupport==1 && kDetailDynamicDrones==2 && kDetails==3,"independent legacy-compatible detail bits");
+    static_assert(kDetailPvpSupport==1 && kDetailDynamicDrones==2 && kDetailTransactionGenerations==4 && kDetails==7,"independent legacy-compatible detail bits");
     Room r(3);auto p=DronePlan();
     Check(ValidPreparedDronePlan(p),"exact submarine child shape admitted by explicit prepared-drone contract");
     r.With(1);Check(!r.nodes[1]->session->SubmitPrepared(p,r.now,PreparedKind::dynamicDrone),"guest cannot submit a prepared dynamic plan");
@@ -700,6 +707,170 @@ void PreparedDroneChannels() {
      r.With(0);r.nodes[0]->session->Failed(2);r.Settle();r.nodes[0]->pending=false;r.Settle();
      for(unsigned i=0;i<3;++i){const auto& n=r.nodes[i];Check(n->session->IsActive(n->lastToken) && !n->active[childTokens[i]],"child cancellation does not cancel pending ordinary transaction");}}
 }
+// Every replay here crosses the production codec, just as Room::Send does.
+void Replay(Room& room,const Packet& packet) {
+    unsigned char wire[kWireSize]{};Message decoded;
+    Check(Encode(packet.message,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded),"generation replay traverses production wire codec");
+    room.Deliver({packet.from,packet.to,decoded});
+}
+void PreparedDroneRecycling() {
+    Room room(3);
+    Check(room.Submit(1,5),"ordinary root support activates beside recycled dynamic children");room.Settle();
+    std::uint64_t roots[3]{};for(unsigned i=0;i<3;++i)roots[i]=room.nodes[i]->lastToken;
+    Packet staleBegin{},staleUnit{},stalePrepare{},staleCommit{},staleActivate{},staleCancel{},staleReady{},staleResult{},staleActivated{};
+    std::uint64_t firstChild=0;
+    for(unsigned i=0;i<3*kMaxTransactions;++i) {
+        const auto before=room.history.size();const auto token=SubmitDrone(room,DronePlan());
+        Check(token!=0,"completed dynamic cancellations do not consume a mission lifetime slot");
+        const bool sameSlot=i==kMaxTransactions-1;
+        if(sameSlot){room.dropTo=0;room.dropKind=Kind::ready;}
+        const auto spawns=room.nodes[0]->spawns;room.Settle();
+        if(sameSlot) {
+            Packet ready[3]{};for(std::size_t h=before;h<room.history.size();++h)if(room.history[h].message.kind==Kind::ready)ready[room.history[h].from]=room.history[h];
+            Check(ready[1].message.transaction>kMaxTransactions && (ready[1].message.transaction-1)%kMaxTransactions==(staleReady.message.transaction-1)%kMaxTransactions,
+                "replay fixture really reuses the exact former wire slot");
+            room.dropTo=999;Replay(room,ready[2]);Replay(room,staleReady);room.Settle();
+            Check(room.nodes[0]->spawns==spawns,"stale positive READY cannot satisfy a new generation's missing prepare ACK");
+            room.dropTo=0;room.dropKind=Kind::result;Replay(room,ready[1]);room.Settle();
+            Packet results[3]{};for(std::size_t h=before;h<room.history.size();++h)if(room.history[h].message.kind==Kind::result && room.history[h].message.ok)results[room.history[h].from]=room.history[h];
+            room.dropTo=999;Replay(room,results[2]);Replay(room,staleResult);room.Settle();
+            Check(!room.nodes[0]->session->IsActive(token),"stale positive RESULT cannot satisfy a new generation's missing create ACK");
+            Replay(room,results[1]);room.Settle();
+        }
+        std::uint64_t children[3]{};
+        for(unsigned n=0;n<3;++n){children[n]=room.nodes[n]->lastToken;Check(room.nodes[n]->session->IsActive(children[n]),"new generation activates on every real-wire peer");}
+        if(!i)firstChild=token;
+        if(!i)for(std::size_t h=before;h<room.history.size();++h) {
+            const auto& p=room.history[h];
+            if(p.from==0 && p.to==1) {
+                if(p.message.kind==Kind::begin)staleBegin=p;
+                if(p.message.kind==Kind::unit)staleUnit=p;
+                if(p.message.kind==Kind::prepare)stalePrepare=p;
+                if(p.message.kind==Kind::commit)staleCommit=p;
+                if(p.message.kind==Kind::activate)staleActivate=p;
+            }
+            if(p.from==1 && p.to==0) {
+                if(p.message.kind==Kind::ready)staleReady=p;
+                if(p.message.kind==Kind::result)staleResult=p;
+                if(p.message.kind==Kind::activated)staleActivated=p;
+            }
+        }
+        if(sameSlot) {
+            const auto guestSpawns=room.nodes[1]->spawns;
+            for(const auto& packet:{staleBegin,staleUnit,stalePrepare,staleCommit,staleActivate,staleCancel,staleReady,staleResult,staleActivated})Replay(room,packet);
+            auto failure=staleResult;failure.message.ok=0;Replay(room,failure);room.Settle();
+            for(unsigned n=0;n<3;++n)Check(room.nodes[n]->session->IsActive(children[n]) && room.nodes[n]->session->IsActive(roots[n]),"old generation BEGIN/ACK/cancel/result cannot affect replacement or root support");
+            Check(room.nodes[1]->spawns==guestSpawns,"replayed retired BEGIN cannot allocate another callback token or object");
+            for(unsigned n=0;n<3;++n){room.With(n);room.nodes[n]->session->Failed(firstChild);}room.Settle();
+            Check(room.nodes[0]->session->IsActive(token),"late old native failure callback cannot cancel a reused slot");
+        }
+        room.With(sameSlot ? 1u : 0u);current->session->Failed(sameSlot ? children[1] : token);room.Settle();
+        if(!i)for(std::size_t h=before;h<room.history.size();++h)if(room.history[h].from==0 && room.history[h].to==1 && room.history[h].message.kind==Kind::cancel)staleCancel=room.history[h];
+        for(unsigned n=0;n<3;++n)Check(!room.nodes[n]->session->IsActive(children[n]) && room.nodes[n]->session->IsActive(roots[n]),"only fully cancelled child retires while ordinary root remains live");
+    }
+    for(const auto& node:room.nodes)Check(node->session->ActiveCount()==1,"hundreds of sequential generations retain exactly their ordinary root");
+    room.Step(2100);Check(room.Submit(1,kRescue),"rescue request still has capacity after hundreds of dynamic children");room.Settle();
+    for(const auto& node:room.nodes)Check(node->session->ActiveCount()==2,"reclaimed storage remains shared with real rescue transactions");
+}
+void PreparedDroneCapacity() {
+    Room room(3);std::vector<std::uint64_t> tokens;
+    for(unsigned i=0;i<kMaxTransactions;++i) {
+        const auto token=SubmitDrone(room,DronePlan(crew::kSupportSubDroneResource,1000+i));
+        Check(token!=0,"all bounded live storage slots remain available concurrently");tokens.push_back(token);room.Settle();
+    }
+    Check(!SubmitDrone(room,DronePlan(crew::kSupportSubDroneResource,9999)),"concurrent live capacity fails explicitly at the configured bound");
+    room.dropTo=2;room.dropKind=Kind::cancel;room.With(0);room.nodes[0]->session->Failed(tokens.front());room.Settle();
+    Check(!SubmitDrone(room,DronePlan(crew::kSupportSubDroneResource,9999)),"a cancelled slot remains reserved until every peer acknowledges destruction");
+    room.dropTo=999;room.failTo=0;room.failKind=Kind::result;room.Step(1100);room.Settle();
+    Check(!SubmitDrone(room,DronePlan(crew::kSupportSubDroneResource,9999)),"lost cancel acknowledgement cannot expose storage for a new generation");
+    room.failTo=999;room.Step(1100);room.Settle();
+    const auto replacement=SubmitDrone(room,DronePlan(crew::kSupportSubDroneResource,9999));
+    Check(replacement!=0,"retransmitted cancellation quorum releases precisely one full-table slot");room.Settle();
+    for(const auto& node:room.nodes)Check(node->session->ActiveCount()==kMaxTransactions,"a reused slot preserves all other concurrent transactions");
+    Packet oldAck{};for(const auto& packet:room.history)if(packet.from==2 && packet.to==0 && packet.message.kind==Kind::result && !packet.message.ok && packet.message.transaction==1)oldAck=packet;
+    room.dropTo=2;room.dropKind=Kind::cancel;room.With(0);room.nodes[0]->session->Failed(replacement);room.Settle();
+    Replay(room,oldAck);
+    Check(!SubmitDrone(room,DronePlan(crew::kSupportSubDroneResource,10000)),"old generation cancel ACK cannot release a newly cancelled slot with a missing peer");
+    room.dropTo=999;room.Step(1100);room.Settle();
+    Check(SubmitDrone(room,DronePlan(crew::kSupportSubDroneResource,10000))!=0,"current generation cancel ACK permits another safe reuse of the same sole free slot");room.Settle();
+    for(const auto& node:room.nodes)Check(node->session->ActiveCount()==kMaxTransactions,"repeated same-slot reuse never collects the other 127 active roots");
+}
+void PreparedDroneFailureIsNotCancellationAck() {
+    Room room(3);std::vector<std::uint64_t> tokens;
+    for(unsigned i=0;i<kMaxTransactions;++i) {
+        const auto token=SubmitDrone(room,DronePlan(crew::kSupportSubDroneResource,1000+i));
+        Check(token!=0,"fill every live slot before guest-local cancellation failure");tokens.push_back(token);room.Settle();
+    }
+    const auto epoch=room.nodes[0]->session->Epoch();
+    room.failTo=1;room.failKind=Kind::cancel;
+    room.With(1);room.nodes[1]->session->Failed(tokens.front());room.Pump();room.Step(1100);room.Settle();
+    Check(room.nodes[0]->session->Epoch()==epoch && room.nodes[0]->session->Ready(),"failed CANCEL enqueue retains the current production Session generation");
+    Check(!SubmitDrone(room,DronePlan(crew::kSupportSubDroneResource,9999)),"repeated ordinary failure RESULT cannot acknowledge an unreceived host CANCEL or release its slot");
+    Packet oldFailure{};for(const auto& packet:room.history)if(packet.from==1 && packet.to==0 && packet.message.kind==Kind::result && !packet.message.ok)oldFailure=packet;
+    room.failTo=999;room.Step(1100);room.Settle();
+    const auto replacement=SubmitDrone(room,DronePlan(crew::kSupportSubDroneResource,9999));
+    Check(replacement!=0,"actual host cancellation acknowledgement releases the slot after enqueue recovers");room.Settle();
+    auto oldCancel=oldFailure;oldCancel.from=0;oldCancel.to=1;oldCancel.message.kind=Kind::cancel;
+    Replay(room,oldFailure);Replay(room,oldCancel);room.Settle();
+    for(const auto& node:room.nodes)Check(node->session->ActiveCount()==kMaxTransactions,"all peers activate the replacement and preserve the other 127 live transactions");
+    Check(room.nodes[0]->session->IsActive(replacement),"old ordinary failure and old cancellation cannot affect the live replacement generation");
+}
+void PreparedDroneCancelledBeforeBegin() {
+    Room room(3);
+    for(unsigned i=0;i<kMaxTransactions+2;++i) {
+        room.nodes[0]->rejectValidationAt=room.nodes[0]->validations+2;
+        const auto token=SubmitDrone(room,DronePlan());Check(token!=0,"failed plans before BEGIN also release their slot through cancellation quorum");room.Settle();
+        for(const auto& node:room.nodes)Check(!node->spawns && !node->session->IsActive(token),"cancel before BEGIN never invents a child on any peer");
+    }
+}
+void LegacyTransactionCapacity() {
+    Room room(3);room.legacyNode=2;room.legacyCaps=kCapabilities;room.legacyExt=kExtensions;
+    room.legacyDetails=kDetailPvpSupport|kDetailDynamicDrones;room.Step(1100);room.Settle();
+    Check(!room.nodes[0]->session->PeersHaveDetails(kDetailTransactionGenerations),"dynamic-only legacy peer does not claim generation codec support");
+    Check(!SubmitDrone(room,DronePlan()),"dynamic admission requires recyclable-slot compatibility before consuming the bounded legacy budget");
+    for(unsigned i=0;i<kMaxTransactions;++i) {
+        room.Step(2100);Check(room.Submit(0,5),"legacy ordinary support retains every original transaction slot");room.Settle();
+        room.With(0);room.nodes[0]->session->Failed(room.nodes[0]->lastToken);room.Settle();
+    }
+    room.Step(2100);Check(!room.Submit(0,5),"old peer room refuses at its original tombstone bound instead of sending unsupported generation IDs");
+    for(const auto& packet:room.history)Check(packet.message.transaction<=kMaxTransactions,"mixed old room never emits a transaction an old v2 decoder rejects");
+    Packet currentHello{};for(const auto& packet:room.history)if(packet.from==2 && packet.to==0 && packet.message.kind==Kind::hello)currentHello=packet;
+    room.legacyNode=999;currentHello.message.unit.role=kDetails;Replay(room,currentHello);
+    Check(room.nodes[0]->session->PeersHaveDetails(kDetailTransactionGenerations),"authenticated current capability refresh can enable generation support");
+    Check(!SubmitDrone(room,DronePlan()),"capability refresh cannot retroactively turn an unmarked legacy failure/response into explicit cancellation ACK");
+    room.Step(1100);room.Settle();const auto upgraded=SubmitDrone(room,DronePlan());
+    Check(upgraded!=0,"refreshed peer's newly processed host CANCEL and explicit ACK can safely release its old tombstones");room.Settle();
+    for(const auto& node:room.nodes)Check(node->session->ActiveCount()==1,"all peers converge after legacy tombstones receive real generation ACKs");
+    Room oldHost(2);oldHost.oldHost=true;oldHost.Step(1100);oldHost.Settle();
+    Packet begin{0,1,{}};begin.message.kind=Kind::begin;begin.message.epoch=oldHost.nodes[1]->session->Epoch();
+    begin.message.transaction=kMaxTransactions+1;begin.message.catalog=5;begin.message.count=1;Replay(oldHost,begin);
+    auto commit=begin;commit.message.kind=Kind::commit;Replay(oldHost,commit);
+    Check(!oldHost.nodes[1]->spawns,"client requires negotiated host generations before accepting a high-ID BEGIN");
+}
+void GenerationDetailsWithdrawal() {
+    for(unsigned mode=0;mode<3;++mode) {
+        Room room(3);
+        for(unsigned i=0;i<kMaxTransactions;++i) {
+            const auto token=SubmitDrone(room,DronePlan());Check(token!=0,"generation withdrawal fixture retires one original wire cycle");room.Settle();
+            room.With(0);room.nodes[0]->session->Failed(token);room.Settle();
+        }
+        if(mode==0){room.dropTo=1;room.dropKind=Kind::prepare;}
+        else {room.dropTo=0;room.dropKind=Kind::ready;}
+        room.Step(2100);Check(room.Submit(0,5),"ordinary support can use a recycled wire generation");room.Settle();
+        const auto spawns=room.nodes[1]->spawns;
+        if(mode<2) {
+            Packet welcome{};for(const auto& packet:room.history)if(packet.to==1 && packet.message.kind==Kind::welcome)welcome=packet;
+            welcome.message.unit.role=kDetails&~kDetailTransactionGenerations;Replay(room,welcome);
+            Packet step{0,1,{}};step.message.epoch=room.nodes[1]->session->Epoch();step.message.transaction=kMaxTransactions+1;
+            step.message.kind=Kind::prepare;Replay(room,step);step.message.kind=Kind::commit;Replay(room,step);
+            Check(room.nodes[1]->spawns==spawns,"client rechecks host generation capability before prepare/create of ordinary high-ID support");
+        } else {
+            room.legacyNode=2;room.legacyCaps=kCapabilities;room.legacyExt=kExtensions;
+            room.legacyDetails=kDetails&~kDetailTransactionGenerations;room.Step(1100);room.Settle();
+            for(const auto& node:room.nodes)Check(node->spawns==spawns,"peer generation capability withdrawal prevents ordinary high-ID native creation");
+        }
+    }
+}
 void PreparedDroneDetails() {
     {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.legacyDetails=kDetailPvpSupport;r.Step(1100);r.Settle();
      Check(r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport) && !r.nodes[0]->session->PeersHaveDetails(kDetailDynamicDrones),
@@ -727,4 +898,4 @@ void PreparedDroneDetails() {
     }
 }
 } // namespace
-int main() { PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }

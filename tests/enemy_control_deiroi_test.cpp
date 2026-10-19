@@ -261,6 +261,32 @@ int main(){
     CHECK(!RestoreDeiroiControl(lease)&&At<LONG>(owner.control,12)==2);
     CHECK(!ExecuteDeiroiAbility(lease,0x10000,false,301,301));
     fixtureNetFlight=false;CHECK(RestoreDeiroiControl(lease)&&At<LONG>(owner.control,12)==1);
+    // A live gun with a readable identity header still owns its manual state
+    // when the rest of the body temporarily becomes inaccessible.
+    auto* originalPartBody=parts[0].b;
+    auto* relocatedStorage=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x5000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    CHECK(relocatedStorage!=nullptr);parts[0].b=relocatedStorage+0xFC0;
+    lease=Setup();CHECK(UpdateDeiroiAim(lease,0,0));
+    CHECK(ExecuteDeiroiAbility(lease,0,false,900,900));
+    CHECK(At<LONG>(parts[0].control,8)==1&&At<LONG>(parts[0].control,12)==2&&At<const void*>(parts[0].b,kMachine+0x18)==image+kCharge&&DeiroiGunManual(lease,0));
+    DWORD tailProtection=0,tailIgnored=0;
+    CHECK(VirtualProtect(relocatedStorage+0x1000,0x1000,PAGE_NOACCESS,&tailProtection)!=0);MemoryTick();
+    CHECK(Readable(parts[0].b,0x38)&&!Readable(parts[0].b,0x355));
+    CHECK(DeiroiGunCount(lease)==~0u); // unknown live equipment is an incomplete catalogue, not a lost gun
+    const Entry healthy{Reference(parts[1].b),1};
+    CHECK(GunFor(*Owner(lease,false),healthy)==nullptr && At<LONG>(parts[0].control,12)==2);
+    const bool healthyResult=ExecuteDeiroiAbility(lease,1,false,901,901);
+    CHECK(!healthyResult && At<LONG>(parts[0].control,12)==2);
+    CHECK(!RestoreDeiroiControl(lease));
+    CHECK(VirtualProtect(relocatedStorage+0x1000,0x1000,tailProtection,&tailIgnored)!=0);MemoryTick();
+    CHECK(!healthyResult);
+    const LONG weakAfterSweep=At<LONG>(parts[0].control,12);
+    const bool oldManual=DeiroiGunManual(lease,0);
+    const bool restoreResult=RestoreDeiroiControl(lease);
+    const bool staleCharge=At<const void*>(parts[0].b,kMachine+0x18)==image+kCharge;
+    CHECK(weakAfterSweep==2 && oldManual && restoreResult && !staleCharge);
+    CHECK(At<LONG>(parts[0].control,12)==1);
+    parts[0].b=originalPartBody;VirtualFree(relocatedStorage,0,MEM_RELEASE);
     Put<LONG>(owner.control,8,0);CHECK(DeiroiGunCount(lease)==~0u);CHECK(!ExecuteDeiroiAbility(lease,1,false,7,129));
     for(auto& part:parts){VirtualFree(part.b,0,MEM_RELEASE);VirtualFree(part.control,0,MEM_RELEASE);}
     VirtualFree(mainRows,0,MEM_RELEASE);

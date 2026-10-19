@@ -46,6 +46,7 @@ constexpr float kPi=3.14159265f,kG=9.8f,kGravity=14.7f;
 // m/s no jet is commanded past (see jet_flight.cpp JetSteer and jetprops.cpp).
 constexpr float kBodyTop=250.0f;
 constexpr float kMinAlt=25.0f;         // never lower over the ground than this
+constexpr float kTakeoffClear=30.0f;   // m over the ground: done taking off
 constexpr float kCeilingGap=12.0f;
 // Game ms a jet not flown this long is no longer flown (its position and command stale): left out of the
 // spatial checks (other jets near, in a burst's way, a drone docking). Not its identity: that is its ObjRef.
@@ -662,6 +663,9 @@ bool JetBarrelLog(const unsigned char* v,const float* pos) noexcept;
 void ResetTargets() noexcept;
 
 // --- jet_carrier.cpp ---
+// Metadata gathered for a carrier owned elsewhere may become an autonomous
+// carrier after its actual native pilot/authority changes.
+bool CarrierMetadataReady(Jet& carrier,ULONGLONG ms) noexcept;
 constexpr float kDockBelow=15.0f;
 constexpr float kTriggerHeld=4.0f;
 constexpr ULONGLONG kDroneSortieMs=30000,kIdleMs=4000,kKamikazeSortieMs=90000;

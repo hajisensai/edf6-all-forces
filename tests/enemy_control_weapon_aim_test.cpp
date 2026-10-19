@@ -866,11 +866,3 @@ int main() {
     TypedRuntimeCases();InlineCases();StackCases();ShellCases();BossCases();WalkingCases();PartsCases();FanCases();AcceptedPointCases();BossLockCases();DeiroiMainCases();MeteorCases();ReadinessCases();
     std::printf("enemy weapon aim runtime: %d checks, %d failures\n",checks,failures);return failures?1:0;
 }
-
-
-
-
-
-
-
-

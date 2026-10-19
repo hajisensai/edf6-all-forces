@@ -45,7 +45,6 @@ Jet jets[kMaxJets]{};
 
 namespace {
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
-constexpr float kTakeoffClear=30.0f;   // m over the ground: done taking off
 constexpr float kThrownHover=12.0f;    // m a thrown charge drone hovers over where its bomb landed, waiting (Rotor)
 // Withdrawing it climbs toward the ceiling and flies away from the player at full speed; it is deleted
 // only out there (never in front of the player): kGone from the player, or, held in by the map's edge,
@@ -556,7 +555,8 @@ void JetFrame(unsigned char* v) noexcept {
     }
     // A metadata parent never owns a real local player's control; playerjet.cpp flies that player's carrier.
     if(PlayerJetHolds(v))return;
-    if(staged && (staged->supportMetadata || (staged->supportDrone && !OnlineRunsHere(v)))) {
+    if(staged && ((staged->supportMetadata && !CarrierMetadataReady(*staged,GameMs())) ||
+                  (staged->supportDrone && !OnlineRunsHere(v)))) {
         // Registered remote copies keep native network physics and no local AI or latched fire.
         v[kFireGun]=0;v[kFireMissile]=0;staged->m.ready=false;staged->seen=GameMs();return;
     }
@@ -740,6 +740,7 @@ void jet::ResumeNpc(unsigned char* v,const float* vel) noexcept {
     const ULONGLONG ms=GameMs();
     Jet* const j=FindJet(v);
     if(!j)return;   // its first frame with its pilot makes the entry (CrewPlaced)
+    if(j->supportMetadata && !CarrierMetadataReady(*j,ms))return;
     if(ms>j->seen)j->bornAt+=ms-j->seen;
     j->seen=ms;j->lastStep=0;
     std::memcpy(j->m.vel,vel,12);

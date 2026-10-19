@@ -53,4 +53,3 @@ const wchar_t* ReasonText(Reason) noexcept;
 bool ValidInput(const Input&) noexcept;
 std::uint32_t AbilityId(const char* profile,const wchar_t* name,unsigned channel) noexcept;
 }
-

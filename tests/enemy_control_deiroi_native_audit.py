@@ -234,4 +234,3 @@ if args.trace:
     target.write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n',encoding='utf8')
     print('derived trace artifact:',target)
 print('Deiroi native/asset audit:',checks,'checks passed')
-

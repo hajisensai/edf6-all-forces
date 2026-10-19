@@ -132607,5 +132607,1879 @@
    "name": "デコイ〔シルバー〕",
    "reason": "转换不支持：raw block b'\\x00OGS' (only MAB blocks are converted)"
   }
- ]
+ ],
+ "sound_fallbacks": {
+  "weapon_Ranger_AF_AF-V": {
+   "cue": "e5w_AF_T1-StokeS",
+   "length_ms": 851,
+   "template": "aWeapon011",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF100": {
+   "cue": "e5w_AF_T4-Stoke-mk2",
+   "length_ms": 748,
+   "template": "aWeapon038",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF14RA": {
+   "cue": "e5w_AF_SluggerNN1",
+   "length_ms": 700,
+   "template": "aWeapon002",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF14RAR": {
+   "cue": "e5w_AF_PA-11SLS",
+   "length_ms": 700,
+   "template": "aWeapon006",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF14ST": {
+   "cue": "e5w_AF_PA-11LS",
+   "length_ms": 700,
+   "template": "aWeapon003",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF14_B3": {
+   "cue": "e5w_AF_T1-Stoke",
+   "length_ms": 851,
+   "template": "aWeapon007",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF15": {
+   "cue": "e5w_AF_T1-Stoke",
+   "length_ms": 851,
+   "template": "aWeapon007",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF15ST": {
+   "cue": "e5w_AF_T1-Stoke",
+   "length_ms": 851,
+   "template": "aWeapon007",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF17": {
+   "cue": "e5w_AF_T1-StokeLS",
+   "length_ms": 851,
+   "template": "aWeapon013",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF18RA": {
+   "cue": "e5w_AF_T2-StokeKF",
+   "length_ms": 800,
+   "template": "aWeapon019",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF19RA": {
+   "cue": "e5w_AF_T3-StokeBurst",
+   "length_ms": 819,
+   "template": "aWeapon025",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF19ST": {
+   "cue": "e5w_AF_T2-StokeKF",
+   "length_ms": 800,
+   "template": "aWeapon019",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF19X-B3": {
+   "cue": "e5w_AF_T3-StokeBurst",
+   "length_ms": 819,
+   "template": "aWeapon025",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF20RA": {
+   "cue": "e5w_AF_T4-StokeAE",
+   "length_ms": 651,
+   "template": "aWeapon034",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF20ST": {
+   "cue": "e5w_AF_T4-Stoke",
+   "length_ms": 748,
+   "template": "aWeapon031",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF99": {
+   "cue": "e5w_AF_T4-StokeAE",
+   "length_ms": 651,
+   "template": "aWeapon034",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_AF99ST": {
+   "cue": "e5w_AF_T4-Stoke-mk2",
+   "length_ms": 748,
+   "template": "aWeapon038",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_HeatBaster": {
+   "cue": "e5w_AF_PA-11LS",
+   "length_ms": 700,
+   "template": "aWeapon003",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_HeatBasterG1": {
+   "cue": "e5w_AF_T1-StokeS",
+   "length_ms": 851,
+   "template": "aWeapon011",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_HeatBasterG2": {
+   "cue": "e5w_AF_T3-Stoke",
+   "length_ms": 819,
+   "template": "aWeapon023",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_AF_HeatBasterX": {
+   "cue": "e5w_AF_SluggerNN4",
+   "length_ms": 1193,
+   "template": "aWeapon035",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_cascadeX": {
+   "cue": "e5w_RL_CascadeFA",
+   "length_ms": 2658,
+   "template": "aWeapon137",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_genocideGun": {
+   "cue": "e5w_RL_CascadeFA",
+   "length_ms": 2658,
+   "template": "aWeapon137",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_goliathZ": {
+   "cue": "e5w_RL_Cascade3",
+   "length_ms": 2456,
+   "template": "aWeapon130",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_plasmaLauncherA1": {
+   "cue": "e5w_RLnew_SMAW-E01mk3",
+   "length_ms": 1955,
+   "template": "aWeapon114",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_plasmaLauncherA2": {
+   "cue": "e5w_RLnew_SMAW-Seeker201",
+   "length_ms": 2003,
+   "template": "aWeapon122",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_plasmaLauncherA3": {
+   "cue": "e5w_RL_VolcanoH20W",
+   "length_ms": 1203,
+   "template": "aWeapon132",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_stingrayM3": {
+   "cue": "e5w_RL_Cascade2",
+   "length_ms": 1934,
+   "template": "aWeapon123",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_stingrayM99": {
+   "cue": "e5w_RL_Cascade3",
+   "length_ms": 2456,
+   "template": "aWeapon130",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_stingrayMF": {
+   "cue": "e5w_RL_CascadeFA",
+   "length_ms": 2658,
+   "template": "aWeapon137",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_stingrayST": {
+   "cue": "e5w_RL_Cascade1",
+   "length_ms": 1983,
+   "template": "aWeapon109",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_volcano3A": {
+   "cue": "e5w_RL_GoliathD1",
+   "length_ms": 2247,
+   "template": "aWeapon111",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_volcano3W": {
+   "cue": "e5w_RLnew_SMAW-E01mk2",
+   "length_ms": 1955,
+   "template": "aWeapon112",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_volcano6W": {
+   "cue": "e5w_RLnew_SMAW-FA01mk3",
+   "length_ms": 2024,
+   "template": "aWeapon131",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_RL_volcanoB10": {
+   "cue": "e5w_RLnew_SMAW-UFEprototype",
+   "length_ms": 2024,
+   "template": "aWeapon128",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_buffaloG1": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon048",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_buffaloG2": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon048",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_buffaloG3": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon053",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_buffaloG3Burst": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon053",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_buffaloG4": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon060",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_buffaloG9": {
+   "cue": "e5w_SG_SlugShot2",
+   "length_ms": 1741,
+   "template": "aWeapon066",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_buffaloGSS": {
+   "cue": "e5w_SG_SlugShot3",
+   "length_ms": 2368,
+   "template": "aWeapon071",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_buffaloWide": {
+   "cue": "e5w_SG_SlugShotZ6",
+   "length_ms": 2431,
+   "template": "aWeapon075",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_governor100": {
+   "cue": "e5w_SG_SlugShot3",
+   "length_ms": 2368,
+   "template": "aWeapon071",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_governor25": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon053",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_slug0": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon048",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_slugShotBC": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon060",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_slugShotDA": {
+   "cue": "e5w_SG_SlugShot3",
+   "length_ms": 2368,
+   "template": "aWeapon071",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_slugShotEA": {
+   "cue": "e5w_SG_SlugShotZ6",
+   "length_ms": 2431,
+   "template": "aWeapon075",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_sparrowShot": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon053",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_sparrowShotM2": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon060",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_sparrowShotM3": {
+   "cue": "e5w_SG_SlugShot2",
+   "length_ms": 1741,
+   "template": "aWeapon066",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_sparrowShotMX": {
+   "cue": "e5w_SG_SlugShot3",
+   "length_ms": 2368,
+   "template": "aWeapon071",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_wideShot": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon053",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_wideShotA1": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon060",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_wideShotA1VR": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon060",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SG_wideShotVR": {
+   "cue": "e5w_SG_SlugShot1",
+   "length_ms": 1369,
+   "template": "aWeapon053",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SP_acidGun_prototype": {
+   "cue": "weapon_SPnew_acidGunPrototype",
+   "length_ms": 1101,
+   "template": "aWeapon191",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SP_acidShot": {
+   "cue": "weapon_SPnew_acidShot",
+   "length_ms": 1346,
+   "template": "aWeapon193",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SP_kanshakuDamaBakusai": {
+   "cue": "weapon_SPnew_wideAcidGun",
+   "length_ms": 1851,
+   "template": "aWeapon194",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_0ShikiLaserRifle": {
+   "cue": "e5w_SRnew_FSP-SNR120",
+   "length_ms": 2324,
+   "template": "aWeapon088",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_5CardXA": {
+   "cue": "e5w_SRnew_SNR0101Rev2",
+   "length_ms": 2313,
+   "template": "aWeapon094",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_5CardXB": {
+   "cue": "e5w_SRnew_BURST-SNR-B3-150",
+   "length_ms": 2313,
+   "template": "aWeapon097",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_MMF100": {
+   "cue": "e5w_SRnew_RSNR-141",
+   "length_ms": 2313,
+   "template": "aWeapon096",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_MMF200": {
+   "cue": "e5w_SRnew_RSNR-241",
+   "length_ms": 2811,
+   "template": "aWeapon099",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_MMF40": {
+   "cue": "e5w_SRnew_NN41",
+   "length_ms": 1946,
+   "template": "aWeapon077",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_MMF41": {
+   "cue": "e5w_SRnew_SNR030",
+   "length_ms": 2104,
+   "template": "aWeapon081",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_MMF42": {
+   "cue": "e5w_SRnew_BURST-SNR-B3-050",
+   "length_ms": 2104,
+   "template": "aWeapon085",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_MMF43": {
+   "cue": "e5w_SRnew_SNR0101",
+   "length_ms": 2309,
+   "template": "aWeapon091",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_MMF50": {
+   "cue": "e5w_SRnew_SNR0101Rev2",
+   "length_ms": 2313,
+   "template": "aWeapon094",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_MMFHercules": {
+   "cue": "e5w_SRnew_Penetrator310XF",
+   "length_ms": 2125,
+   "template": "aWeapon104",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_NovaBusterM1": {
+   "cue": "e5w_SRnew_Lysander",
+   "length_ms": 2155,
+   "template": "aWeapon086",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_NovaBusterM2": {
+   "cue": "e5w_SRnew_Lysander_mk2",
+   "length_ms": 2693,
+   "template": "aWeapon100",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_NovaBusterM3": {
+   "cue": "e5w_SRnew_FSP-SNR220",
+   "length_ms": 2931,
+   "template": "aWeapon102",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_lysander2": {
+   "cue": "e5w_SRnew_Penetrator010",
+   "length_ms": 1906,
+   "template": "aWeapon095",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_stlingerJ2": {
+   "cue": "e5w_SRnew_Stringer2",
+   "length_ms": 2942,
+   "template": "aWeapon092",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_stlingerJ3": {
+   "cue": "e5w_SRnew_BURST-SNR-B3-150",
+   "length_ms": 2313,
+   "template": "aWeapon097",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_Ranger_SR_stlingerJ9": {
+   "cue": "e5w_SRnew_BURST-SNR-B4-250",
+   "length_ms": 2811,
+   "template": "aWeapon103",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaGrenade": {
+   "cue": "e5w_WDnew_range_plasmaCannon",
+   "length_ms": 1891,
+   "template": "pPlasmaLauncher01",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaGrenadeB": {
+   "cue": "e5w_WDnew_range_plasmaBigCannon",
+   "length_ms": 2180,
+   "template": "pWeapon149",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaGrenadeBlast": {
+   "cue": "e5w_WDnew_range_plasmaHeavyCannon",
+   "length_ms": 2313,
+   "template": "pWeapon156",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaGrenadeC": {
+   "cue": "e5w_WDnew_range_plasmaCannonCR",
+   "length_ms": 1440,
+   "template": "pWeapon164",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaGrenadeF": {
+   "cue": "e5w_WDnew_range_plasmaCannonE",
+   "length_ms": 2109,
+   "template": "pWeapon173",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaGrenadeRapid": {
+   "cue": "e5w_WDnew_range_plasmaCannonB",
+   "length_ms": 1891,
+   "template": "pWeapon152",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaGrenadeSP": {
+   "cue": "e5w_WDnew_range_gritGunMA",
+   "length_ms": 1640,
+   "template": "pWeapon162",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaGrenadeSigma": {
+   "cue": "e5w_WDnew_range_plasmaCannonBurst4Z",
+   "length_ms": 2391,
+   "template": "pWeapon176",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaGrenadeWide20": {
+   "cue": "e5w_WDnew_range_plasmaCannonC",
+   "length_ms": 1553,
+   "template": "pWeapon159",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaGrenadeWide40": {
+   "cue": "e5w_WDnew_range_plasmaCannonDouble",
+   "length_ms": 2028,
+   "template": "pWeapon171",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncher2ren": {
+   "cue": "e5w_WDnew_range_plasmaCannonBurst2",
+   "length_ms": 1891,
+   "template": "pWeapon151",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncher2renR": {
+   "cue": "e5w_WDnew_range_plasmaFallDA",
+   "length_ms": 2085,
+   "template": "pWeapon161",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncher2renRS": {
+   "cue": "e5w_WDnew_range_plasmaCannonBurst2D",
+   "length_ms": 1680,
+   "template": "pWeapon165",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncher3ren": {
+   "cue": "e5w_WDnew_range_plasmaFallF6",
+   "length_ms": 2056,
+   "template": "pWeapon157",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherBlastP": {
+   "cue": "e5w_WDnew_range_plasmaHeavyCannon",
+   "length_ms": 2313,
+   "template": "pWeapon156",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherE1": {
+   "cue": "e5w_WDnew_range_plasmaCannon",
+   "length_ms": 1891,
+   "template": "pPlasmaLauncher01",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherE2": {
+   "cue": "e5w_WDnew_range_gritShot",
+   "length_ms": 1134,
+   "template": "pWeapon148",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherE3": {
+   "cue": "e5w_WDnew_range_plasmaFall",
+   "length_ms": 2120,
+   "template": "pWeapon150",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherE4": {
+   "cue": "e5w_WDnew_range_plasmaBigCannonM2",
+   "length_ms": 2195,
+   "template": "pWeapon154",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherE5": {
+   "cue": "e5w_WDnew_range_plasmaCannonTriple",
+   "length_ms": 1830,
+   "template": "pWeapon163",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherEX": {
+   "cue": "e5w_WDnew_range_plasmaFallF10",
+   "length_ms": 2115,
+   "template": "pWeapon166",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherEX3ren": {
+   "cue": "e5w_WDnew_range_splasherAZ",
+   "length_ms": 1546,
+   "template": "pWeapon167",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherFallSigma": {
+   "cue": "e5w_WDnew_range_plasmaFallF20",
+   "length_ms": 2065,
+   "template": "pWeapon177",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherM15": {
+   "cue": "e5w_WDnew_range_plasmaCannonC",
+   "length_ms": 1553,
+   "template": "pWeapon159",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherM30": {
+   "cue": "e5w_WDnew_range_plasmaGreatCannon",
+   "length_ms": 1941,
+   "template": "pWeapon169",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherRSR": {
+   "cue": "e5w_WDnew_range_gritShotW15",
+   "length_ms": 1815,
+   "template": "pWeapon172",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherRZR": {
+   "cue": "e5w_WDnew_range_plasmaFallF20",
+   "length_ms": 2065,
+   "template": "pWeapon177",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherType-D": {
+   "cue": "e5w_WDnew_range_plasmaBigCannonM2",
+   "length_ms": 2195,
+   "template": "pWeapon154",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherType-D2": {
+   "cue": "e5w_WDnew_range_plasmaCannonBurst3",
+   "length_ms": 1948,
+   "template": "pWeapon158",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaLauncherXSX": {
+   "cue": "e5w_WDnew_range_plasmaCannonE",
+   "length_ms": 2109,
+   "template": "pWeapon173",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_areaPlasmaShot": {
+   "cue": "e5w_WDnew_range_plasmaCannon",
+   "length_ms": 1891,
+   "template": "pPlasmaLauncher01",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeGungnir": {
+   "cue": "e5w_WDnew_snipe_raijinAlpha",
+   "length_ms": 3402,
+   "template": "pWeapon147",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeLRSL-AC": {
+   "cue": "e5w_WDnew_snipe_monsterGZ",
+   "length_ms": 4192,
+   "template": "pWeapon145",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeLRSL-S": {
+   "cue": "e5w_WDnew_snipe_monsterGA",
+   "length_ms": 1940,
+   "template": "pWeapon139",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeLRSL-SIG": {
+   "cue": "e5w_WDnew_snipe_monsterGZ",
+   "length_ms": 4192,
+   "template": "pWeapon145",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeLRSL33": {
+   "cue": "e5w_WDnew_snipe_monsterZero",
+   "length_ms": 1519,
+   "template": "pWeapon129",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeLRSL34": {
+   "cue": "e5w_WDnew_snipe_monsterZero",
+   "length_ms": 1519,
+   "template": "pWeapon129",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeLRSL35": {
+   "cue": "e5w_WDnew_snipe_monsterZero",
+   "length_ms": 1519,
+   "template": "pWeapon129",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeLRSL36": {
+   "cue": "e5w_WDnew_snipe_monsterZero",
+   "length_ms": 1519,
+   "template": "pWeapon129",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeLRSL37": {
+   "cue": "e5w_WDnew_snipe_monster",
+   "length_ms": 1791,
+   "template": "pWeapon131",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeLRSL38": {
+   "cue": "e5w_WDnew_snipe_monsterGA",
+   "length_ms": 1940,
+   "template": "pWeapon139",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeMonster-S": {
+   "cue": "e5w_WDnew_snipe_monsterGA",
+   "length_ms": 1940,
+   "template": "pWeapon139",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeThunder": {
+   "cue": "e5w_WDnew_snipe_boltShooter",
+   "length_ms": 1819,
+   "template": "pWeapon127",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeThunder15": {
+   "cue": "e5w_WDnew_snipe_boltShooter2",
+   "length_ms": 2293,
+   "template": "pWeapon130",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeThunder40": {
+   "cue": "e5w_WDnew_snipe_boltShooterRF",
+   "length_ms": 3470,
+   "template": "pWeapon142",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeThunder6": {
+   "cue": "e5w_WDnew_snipe_boltShooter3",
+   "length_ms": 3059,
+   "template": "pWeapon137",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeThunderA": {
+   "cue": "e5w_WDnew_snipe_boltShooter",
+   "length_ms": 1819,
+   "template": "pWeapon127",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeThunderB": {
+   "cue": "e5w_WDnew_snipe_boltShooter2",
+   "length_ms": 2293,
+   "template": "pWeapon130",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeThunderC": {
+   "cue": "e5w_WDnew_snipe_boltShooter2",
+   "length_ms": 2293,
+   "template": "pWeapon130",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeThunderD": {
+   "cue": "e5w_WDnew_snipe_raijin",
+   "length_ms": 2667,
+   "template": "pWeapon135",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeThunderMX": {
+   "cue": "e5w_WDnew_snipe_boltShooterRF",
+   "length_ms": 3470,
+   "template": "pWeapon142",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_LONG_snipeThunderR": {
+   "cue": "e5w_WDnew_snipe_boltShooter2",
+   "length_ms": 2293,
+   "template": "pWeapon130",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiBow10": {
+   "cue": "e5w_WDnew_med_thunderBowgun",
+   "length_ms": 1844,
+   "template": "pWeapon102",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiBow15": {
+   "cue": "e5w_WDnew_med_boltGunA1",
+   "length_ms": 1898,
+   "template": "pWeapon105",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiBow15S": {
+   "cue": "e5w_WDnew_med_thunderBowgun2",
+   "length_ms": 2161,
+   "template": "pWeapon107",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiBow20": {
+   "cue": "e5w_WDnew_med_thunderBowgun3",
+   "length_ms": 2750,
+   "template": "pWeapon112",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiBow30": {
+   "cue": "e5w_WDnew_med_boltGunPower",
+   "length_ms": 2071,
+   "template": "pWeapon118",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiBowXD": {
+   "cue": "e5w_WDnew_med_thunderBowgunRZ",
+   "length_ms": 2806,
+   "template": "pWeapon125",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiEclair10": {
+   "cue": "e5w_WDnew_med_thunderBowgun",
+   "length_ms": 1844,
+   "template": "pWeapon102",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiEclair20": {
+   "cue": "e5w_WDnew_med_boltGunA1",
+   "length_ms": 1898,
+   "template": "pWeapon105",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiEclair30": {
+   "cue": "e5w_WDnew_med_thunderBowgunW",
+   "length_ms": 2750,
+   "template": "pWeapon114",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiEclairLIM": {
+   "cue": "e5w_WDnew_med_boltGunAZ",
+   "length_ms": 2071,
+   "template": "pWeapon121",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiGromSS": {
+   "cue": "e5w_WDnew_med_thunderBowgunRA",
+   "length_ms": 2161,
+   "template": "pWeapon110",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiGromX": {
+   "cue": "e5w_WDnew_med_thunderBowgunRA",
+   "length_ms": 2161,
+   "template": "pWeapon110",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiIzunaA": {
+   "cue": "e5w_WDnew_med_boltGun",
+   "length_ms": 1898,
+   "template": "pWeapon101",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiIzunaB": {
+   "cue": "e5w_WDnew_med_thunderBowgun",
+   "length_ms": 1844,
+   "template": "pWeapon102",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiIzunaCcustom": {
+   "cue": "e5w_WDnew_med_thunderBowgun",
+   "length_ms": 1844,
+   "template": "pWeapon104",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiIzunaDcustom": {
+   "cue": "e5w_WDnew_med_boltGunRA",
+   "length_ms": 1822,
+   "template": "pWeapon108",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiIzunaEcustom": {
+   "cue": "e5w_WDnew_med_boltGunRB",
+   "length_ms": 1880,
+   "template": "pWeapon116",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_DengekiIzunaFF": {
+   "cue": "e5w_WDnew_med_thunderBowgunRZ",
+   "length_ms": 2806,
+   "template": "pWeapon125",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleDynast": {
+   "cue": "e5w_WDnew_med_pulseMG5WAY",
+   "length_ms": 1013,
+   "template": "pWeapon083",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleDynastAlpha": {
+   "cue": "e5w_WDnew_med_pulseMG_RapidDE",
+   "length_ms": 1214,
+   "template": "pWeapon090",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleDynastZ": {
+   "cue": "e5w_WDnew_med_pulseBusterAlpha",
+   "length_ms": 1147,
+   "template": "pWeapon089",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxion": {
+   "cue": "e5w_WDnew_med_pulseMG",
+   "length_ms": 893,
+   "template": "pPulse01",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxion2way": {
+   "cue": "e5w_WDnew_med_pulseMG_R",
+   "length_ms": 1140,
+   "template": "pWeapon077",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxion3way": {
+   "cue": "e5w_WDnew_med_pulseMG3WAY",
+   "length_ms": 943,
+   "template": "pWeapon079",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxion4way": {
+   "cue": "e5w_WDnew_med_pulseMG5WAY",
+   "length_ms": 1013,
+   "template": "pWeapon083",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxion5way": {
+   "cue": "e5w_WDnew_med_pulseMG4WAY",
+   "length_ms": 1043,
+   "template": "pWeapon081",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxion6way": {
+   "cue": "e5w_WDnew_med_pulseMG6WAY",
+   "length_ms": 1248,
+   "template": "pWeapon086",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxion6wayS": {
+   "cue": "e5w_WDnew_med_pulseBusterAlpha",
+   "length_ms": 1147,
+   "template": "pWeapon089",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxion9way": {
+   "cue": "e5w_WDnew_med_stardustD",
+   "length_ms": 1699,
+   "template": "pWeapon092",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxionMX": {
+   "cue": "e5w_WDnew_med_pulseMG_R",
+   "length_ms": 1140,
+   "template": "pWeapon077",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxionMk2": {
+   "cue": "e5w_WDnew_med_pulseMG3WAY",
+   "length_ms": 943,
+   "template": "pWeapon079",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxionMk3": {
+   "cue": "e5w_WDnew_med_pulseBuster",
+   "length_ms": 1224,
+   "template": "pWeapon085",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxionMk4": {
+   "cue": "e5w_WDnew_med_pulseMGM4",
+   "length_ms": 1123,
+   "template": "pWeapon093",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxionMkX": {
+   "cue": "e5w_WDnew_med_pulseBusterBeta",
+   "length_ms": 1253,
+   "template": "pWeapon096",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxionSlinger": {
+   "cue": "e5w_WDnew_med_pulseMG3WAY",
+   "length_ms": 943,
+   "template": "pWeapon079",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxionSlingerD": {
+   "cue": "e5w_WDnew_med_pulseMG6WAY",
+   "length_ms": 1248,
+   "template": "pWeapon086",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxionSlingerS": {
+   "cue": "e5w_WDnew_med_pulseMGM4",
+   "length_ms": 1123,
+   "template": "pWeapon093",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleIxionWIDE": {
+   "cue": "e5w_WDnew_med_pulseMG_Rapid",
+   "length_ms": 1221,
+   "template": "pWeapon080",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_ParticleLuxardo": {
+   "cue": "e5w_WDnew_med_pulseMGZDM",
+   "length_ms": 1542,
+   "template": "pWeapon099",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_laserChainsaw": {
+   "cue": "e5w_WDnew_med_destBlaster2",
+   "length_ms": 1186,
+   "template": "pWeapon049",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_laserCyclone": {
+   "cue": "e5w_WDnew_med_destBlasterF",
+   "length_ms": 1449,
+   "template": "pWeapon060",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazr197": {
+   "cue": "e5w_WDnew_med_destBlaster",
+   "length_ms": 1291,
+   "template": "pWeapon046",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazr198": {
+   "cue": "e5w_WDnew_med_destBlaster",
+   "length_ms": 1291,
+   "template": "pWeapon046",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazr199": {
+   "cue": "e5w_WDnew_med_destBlaster2",
+   "length_ms": 1186,
+   "template": "pWeapon049",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazr200": {
+   "cue": "e5w_WDnew_med_destBlaster2",
+   "length_ms": 1186,
+   "template": "pWeapon049",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazr201": {
+   "cue": "e5w_WDnew_med_destBlasterF",
+   "length_ms": 1449,
+   "template": "pWeapon060",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazr202": {
+   "cue": "e5w_WDnew_med_destBlasterF",
+   "length_ms": 1449,
+   "template": "pWeapon060",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazr299": {
+   "cue": "e5w_WDnew_med_destBlasterW",
+   "length_ms": 1595,
+   "template": "pWeapon068",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazr300": {
+   "cue": "e5w_WDnew_med_destBlasterW",
+   "length_ms": 1595,
+   "template": "pWeapon068",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazrARC": {
+   "cue": "e5w_WDnew_med_destBlasterFE",
+   "length_ms": 1653,
+   "template": "pWeapon075",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazrReflectronMutil": {
+   "cue": "e5w_WDnew_med_destBlasterW",
+   "length_ms": 1595,
+   "template": "pWeapon068",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazrReflectronZD": {
+   "cue": "e5w_WDnew_med_destBlasterFE",
+   "length_ms": 1653,
+   "template": "pWeapon075",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_MEDIUM_lazrSIG": {
+   "cue": "e5w_WDnew_med_destBlasterFE",
+   "length_ms": 1653,
+   "template": "pWeapon075",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_Hreithmar": {
+   "cue": "e5w_WDnew_short_sparkLancer45W",
+   "length_ms": 2457,
+   "template": "pWeapon043",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_Luonnotar": {
+   "cue": "e5w_WDnew_short_sparkLancer45W",
+   "length_ms": 2457,
+   "template": "pWeapon043",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLance": {
+   "cue": "e5w_WDnew_short_flashFoil",
+   "length_ms": 1678,
+   "template": "pWeapon002",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLance2way": {
+   "cue": "e5w_WDnew_short_flashFoilY12",
+   "length_ms": 1943,
+   "template": "pWeapon010",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLance3way": {
+   "cue": "e5w_WDnew_short_sparkLancer20T",
+   "length_ms": 1920,
+   "template": "pWeapon018",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLance4way": {
+   "cue": "e5w_WDnew_short_sparkLancer30B8T",
+   "length_ms": 2016,
+   "template": "pWeapon030",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLanceB": {
+   "cue": "e5w_WDnew_short_flashFoilY12",
+   "length_ms": 1943,
+   "template": "pWeapon010",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLanceBurst": {
+   "cue": "e5w_WDnew_short_sparkLancer25W3",
+   "length_ms": 2016,
+   "template": "pWeapon024",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLanceC": {
+   "cue": "e5w_WDnew_short_sparkLancer20T",
+   "length_ms": 1920,
+   "template": "pWeapon018",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLanceDemonic": {
+   "cue": "e5w_WDnew_short_sparkLancer30B8T",
+   "length_ms": 2016,
+   "template": "pWeapon030",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLanceHoly": {
+   "cue": "e5w_WDnew_short_sparkLancer40T",
+   "length_ms": 2760,
+   "template": "pWeapon038",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLanceMX": {
+   "cue": "e5w_WDnew_short_sparkLancer15B6T",
+   "length_ms": 1920,
+   "template": "pWeapon015",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLancePlasmaLum": {
+   "cue": "e5w_WDnew_short_flashFoilY12",
+   "length_ms": 1943,
+   "template": "pWeapon010",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLanceSIGMA": {
+   "cue": "e5w_WDnew_short_sparkLancer40T",
+   "length_ms": 2760,
+   "template": "pWeapon038",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_laserLanceX": {
+   "cue": "e5w_WDnew_short_sparkLancer25W3",
+   "length_ms": 2016,
+   "template": "pWeapon024",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_rapierMX": {
+   "cue": "e5w_WDnew_short_sparkLancer20T",
+   "length_ms": 1920,
+   "template": "pWeapon018",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_rapierMaster": {
+   "cue": "e5w_WDnew_short_sparkLancer35W4",
+   "length_ms": 2760,
+   "template": "pWeapon033",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_rapierMasterThrust": {
+   "cue": "e5w_WDnew_short_sparkLancer40T",
+   "length_ms": 2760,
+   "template": "pWeapon038",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_rapierPlasmaBloom": {
+   "cue": "e5w_WDnew_short_sparkLancer35W4",
+   "length_ms": 2760,
+   "template": "pWeapon033",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_rapierPlasmaWhip": {
+   "cue": "e5w_WDnew_short_sparkLancer20T",
+   "length_ms": 1920,
+   "template": "pWeapon018",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_rapierPlasmaWhipS": {
+   "cue": "e5w_WDnew_short_sparkLancer30B8T",
+   "length_ms": 2016,
+   "template": "pWeapon030",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_sparkLance0": {
+   "cue": "e5w_WDnew_short_flashFoilY6",
+   "length_ms": 1678,
+   "template": "pWeapon005",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_sparkLance1": {
+   "cue": "e5w_WDnew_short_sparkLancer25W3",
+   "length_ms": 2016,
+   "template": "pWeapon024",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SHORT_sparkLanceA": {
+   "cue": "e5w_WDnew_short_sparkLancer40T",
+   "length_ms": 2760,
+   "template": "pWeapon038",
+   "field": [
+    "FireSe",
+    1
+   ]
+  },
+  "weapon_WD_SP_ArmageddonCluster": {
+   "cue": "e5w_WDnew_range_plasmaFallF20",
+   "length_ms": 2065,
+   "template": "pWeapon177",
+   "field": [
+    "FireSe",
+    1
+   ]
+  }
+ }
 }

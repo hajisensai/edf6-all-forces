@@ -99,7 +99,7 @@ assert "RegisterNativeUnitFactoryCallsite(kSite)" in source and "kSite=0x6D331D"
 assert "NativeUnitFactoryCallsiteReady(kSite)" in source and "NativeUnitFactoryProviderReady(provider)" in source
 assert "sizeof(NativeProjectileSample)" not in source and "resourceMask,1" in source
 assert "pending.complete=true" in source and "if(!p.complete)return true" in source
-assert "InvokeOriginalNativeUnitFactory" in source and "ReplayNativeProjectileSample" in source
+assert "InvokeOriginalNativeUnitFactory" in source and "ReplayNativeProjectileOutcomeInPlace" in source
 checks += 5
 # Persistent beam refresh is a genuine BulletBase path, separate from muzzle FX.
 # InitParam+70 points to muzzle+70; BulletBase's root+140 state copies the

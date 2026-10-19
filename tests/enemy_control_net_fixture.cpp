@@ -84,7 +84,7 @@ struct NativeEnvironment {
     std::vector<std::uint64_t> appliedActionSequences;
     std::vector<std::vector<unsigned char>> appliedActions;
     bool online=true,capacityReady=true,strict=true,sealed=true,pose=true,nativeId=true,authority=true,inputValid=true;
-    unsigned capacityQueries=0;
+    unsigned capacityQueries=0;bool flowBlocked=false,flowUnavailable=false;unsigned flowCalls=0;
     bool corruptNativeId=false,wrongRequesterPuid=false,profileMismatch=false,failBegin=false,failActivate=false,failApply=false;
     bool fallback=false,failPoseCapture=false,failPoseApply=false;
     std::size_t poseSize=ep::kMaxPoseBytes;unsigned poseGeneration=1;
@@ -126,6 +126,7 @@ bool PureActivate(void*,std::uint64_t,const ep::LeaseSpec&);
 bool PurePose(void*,std::uint64_t,const ep::LeaseSpec&,std::uint64_t,const void*,std::size_t);
 ep::ActionResult PureAction(void*,std::uint64_t,const ep::LeaseSpec&,std::uint64_t,const void*,std::size_t);
 bool BridgeSend(std::uint32_t,const void*,std::size_t) noexcept;
+std::uint32_t BridgeTrySend(std::uint32_t,const void*,std::size_t,std::uint32_t,std::uint32_t) noexcept;
 struct Room {
     unsigned bridge=0;
     std::uint64_t epoch=0;
@@ -153,7 +154,7 @@ struct Room {
     ep::Protocol& Protocol(unsigned node) noexcept {return node==bridge ? crew::protocol : nodes[node].protocol;}
     void TickAll() {
         for(unsigned i=0;i<3;++i)if(i==bridge)
-            crew::UpdateEnemyControlNetwork({true,bridge==0,epoch,bridge ? Peer(bridge,0) : 0,2,kPuid[bridge],&BridgeSend},now);
+            crew::UpdateEnemyControlNetwork({true,bridge==0,epoch,bridge ? Peer(bridge,0) : 0,2,kPuid[bridge],&BridgeSend,&BridgeTrySend},now);
         else nodes[i].protocol.Tick(nodes[i].context,now);
     }
     bool Queue(unsigned from,std::uint32_t peer,const void* bytes,std::size_t size) {
@@ -285,6 +286,12 @@ ep::ActionResult PureAction(void* user,std::uint64_t id,const ep::LeaseSpec& spe
     CHECK(ep::SameSpec(found->second.spec,spec) && sequence && size && size<=ep::kMaxPoseBytes);
     if(node.actionResult==ec::ActionResult::applied){node.actionSequences.push_back(sequence);node.actions.emplace_back(static_cast<const unsigned char*>(bytes),static_cast<const unsigned char*>(bytes)+size);}
     return node.actionResult;
+}
+std::uint32_t BridgeTrySend(std::uint32_t peer,const void* bytes,std::size_t size,std::uint32_t byteLimit,std::uint32_t packetLimit) noexcept {
+    ++native.flowCalls;CHECK(byteLimit==ep::kActionPeerByteCredits && packetLimit==ep::kActionPeerPacketCredits);
+    if(native.flowUnavailable)return EDF6COOP_EXTENSION_SEND_UNAVAILABLE;
+    if(native.flowBlocked)return EDF6COOP_EXTENSION_SEND_WOULD_BLOCK;
+    return BridgeSend(peer,bytes,size) ? EDF6COOP_EXTENSION_SEND_ACCEPTED : EDF6COOP_EXTENSION_SEND_UNAVAILABLE;
 }
 std::vector<unsigned char> PoseBytes(std::size_t size,unsigned generation) {
     std::vector<unsigned char> bytes(size);for(std::size_t i=0;i<size;++i)bytes[i]=static_cast<unsigned char>((i*17+generation*37)%251);
@@ -563,7 +570,7 @@ void LocalCapacityProofGatesEnemyControl() {
     static_assert(EDF6COOP_EXTENSION_VERSION==1,"ordinary support ABI remains API v1");
     EDF6CoopExtensionCapacity proof{sizeof(EDF6CoopExtensionCapacity),EDF6COOP_EXTENSION_CAPACITY_VERSION,
         EDF6COOP_EXTENSION_MAX_PAYLOAD,32,crew::kEnemyControlInboxMessages,crew::kEnemyControlPendingBytes,
-        crew::kEnemyControlPendingBytes,EDF6COOP_EXTENSION_CAPACITY_RELIABLE_ORDERED};
+        crew::kEnemyControlPendingBytes,EDF6COOP_EXTENSION_CAPACITY_RELIABLE_ORDERED|EDF6COOP_EXTENSION_CAPACITY_BOUNDED_TRY_SEND};
     CHECK(crew::ValidEnemyControlCapacity(proof));auto oldSdk=proof;
     oldSdk.inboxMessages=1024;oldSdk.pendingBytes=oldSdk.congestedBacklogBytes=256*1024;
     CHECK(!crew::ValidEnemyControlCapacity(oldSdk));
@@ -1009,6 +1016,19 @@ void HostExitDrainsNativeAndWireOutboxes() {
     CHECK(current.nodes[1].actions==std::vector<std::vector<unsigned char>>({first,last}) && current.nodes[2].actions==current.nodes[1].actions);
     current.Step();current.Closed(snapshot.lease);CHECK(native.restoreCalls && !native.abortCalls);
 }
+
+void ProductionSdkBackpressureRetainsAcceptedResults() {
+    Room current(0,221);native.hostActions=true;CHECK(current.Request(0,5));current.Pump();const auto snapshot=current.ActiveSnapshot(0);
+    const auto bytes=PoseBytes(512,91);native.acceptedActions.push_back(bytes);native.flowBlocked=true;
+    crew::EnemyControlNetworkFrame();current.Step();
+    CHECK(native.flowCalls && !ActionPacketCount(current) && !native.restoreCalls && current.Lease(0,snapshot.lease)->phase==ep::Phase::active);
+    CHECK(native.acceptedActions.empty() && !current.Protocol(0).ActionIdle(snapshot.lease));
+    native.flowBlocked=false;current.Step();current.Step();
+    CHECK(current.nodes[1].actions==std::vector<std::vector<unsigned char>>({bytes}) && current.nodes[2].actions==current.nodes[1].actions);
+    CHECK(current.Protocol(0).ActionIdle(snapshot.lease) && !native.restoreCalls);
+    CHECK(callbacks.stop(snapshot));current.Pump();current.Closed(snapshot.lease);
+}
+
 void HostAcceptedBatchesUseBackpressure() {
     Room current(0,190);native.hostActions=true;CHECK(current.Request(0,5));current.Pump();const auto snapshot=current.ActiveSnapshot(0);
     std::vector<std::vector<unsigned char>> expected;
@@ -1139,6 +1159,6 @@ int main() {
     PendingCancellationUsesCurrentUiBinding();EpochPendingSampleDoesNotCrossWorld();
     HostPoseSamplingAndAtomicDelivery();GuestPoseAuthenticationAndAtomicDelivery();PoseFailureAndLoss();
     NonFallbackDoesNotProducePose();EpochRejectsOldPoseEnvelope();PoseRevalidatesNativeActorBinding();RetiredPoseSlotsDoNotRevokeNewBody();
-    ProductionSignalBatchesRespectNativeBarriers();HostNormalizesStaleFocusWithoutRevokingControl();HostExitDrainsNativeAndWireOutboxes();HostAcceptedBatchesUseBackpressure();GuestAcceptedActionsRequireActualNativeApplication();ActionsRevalidateNativeIdentityAndFailures();
+    ProductionSignalBatchesRespectNativeBarriers();HostNormalizesStaleFocusWithoutRevokingControl();HostExitDrainsNativeAndWireOutboxes();HostAcceptedBatchesUseBackpressure();ProductionSdkBackpressureRetainsAcceptedResults();GuestAcceptedActionsRequireActualNativeApplication();ActionsRevalidateNativeIdentityAndFailures();
     std::printf("enemy_control_net_fixture: %u checks passed (production host/guest + real three-peer codec bus)\n",checks);return 0;
 }

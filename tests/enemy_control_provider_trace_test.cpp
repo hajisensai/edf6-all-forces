@@ -36,10 +36,12 @@ bool TraceContainsAppliedAck(const Message& message,std::uint64_t lease,std::uin
 struct SdkPendingLedger {
     using Ack=std::tuple<std::uint64_t,unsigned,unsigned,std::size_t>;
     static constexpr std::size_t kLimit=crew::kEnemyControlPendingBytes;
-    std::vector<std::vector<std::size_t>> pending;std::priority_queue<Ack,std::vector<Ack>,std::greater<Ack>> acks;std::size_t peak=0,background=0;
-    SdkPendingLedger(unsigned peers,std::size_t reserved):pending(peers,std::vector<std::size_t>(peers,reserved)),peak(reserved),background(reserved) {}
-    void Expire(std::uint64_t now) {while(!acks.empty() && std::get<0>(acks.top())<=now){const auto ack=acks.top();acks.pop();auto& bytes=pending[std::get<1>(ack)][std::get<2>(ack)];Check(bytes>=background+std::get<3>(ack),"SDK transport ACK releases one tracked complete datagram exactly once");bytes-=std::get<3>(ack);}}
-    bool Track(unsigned from,unsigned to,std::size_t wireBytes,std::uint64_t now,std::uint64_t rawSdkArrival) {Expire(now);const auto bytes=wireBytes+kActionSdkFramingBytes;auto& link=pending[from][to];link+=bytes;peak=std::max(peak,link);acks.emplace(rawSdkArrival+TraceOneWayMs(),from,to,bytes);if(link>=kLimit)std::fprintf(stderr,"SDK_PENDING_OVERFLOW from=%u to=%u tracked_bytes=%zu background_bytes=%zu datagram_bytes=%zu; actual extension admission requires pendingBytes<%zu\n",from,to,link,background,bytes,kLimit);return link<kLimit;}
+    std::vector<std::vector<std::size_t>> pending,packets;std::priority_queue<Ack,std::vector<Ack>,std::greater<Ack>> acks;std::size_t peak=0,background=0,backgroundPackets=0;
+    // Background is an explicit retained shared backlog, modelled as 1 KiB complete datagrams; it is not a traffic-rate claim.
+    SdkPendingLedger(unsigned peers,std::size_t reserved):pending(peers,std::vector<std::size_t>(peers,reserved)),packets(peers,std::vector<std::size_t>(peers,(reserved+1023)/1024)),peak(reserved),background(reserved),backgroundPackets((reserved+1023)/1024) {}
+    void Expire(std::uint64_t now) {while(!acks.empty() && std::get<0>(acks.top())<=now){const auto ack=acks.top();acks.pop();const auto from=std::get<1>(ack),to=std::get<2>(ack);auto& bytes=pending[from][to];Check(bytes>=background+std::get<3>(ack) && packets[from][to]>backgroundPackets,"SDK transport ACK releases one tracked complete datagram exactly once");bytes-=std::get<3>(ack);--packets[from][to];}}
+    bool CanTrackAction(unsigned from,unsigned to,std::size_t wireBytes,std::uint64_t now) {Expire(now);return pending[from][to]+wireBytes+kActionSdkFramingBytes<=kActionPeerByteCredits && packets[from][to]<kActionPeerPacketCredits;}
+    bool Track(unsigned from,unsigned to,std::size_t wireBytes,std::uint64_t now,std::uint64_t rawSdkArrival) {Expire(now);const auto bytes=wireBytes+kActionSdkFramingBytes;auto& link=pending[from][to];link+=bytes;++packets[from][to];peak=std::max(peak,link);acks.emplace(rawSdkArrival+TraceOneWayMs(),from,to,bytes);if(link>=kLimit)std::fprintf(stderr,"SDK_PENDING_OVERFLOW from=%u to=%u tracked_bytes=%zu background_bytes=%zu datagram_bytes=%zu; actual extension admission requires pendingBytes<%zu\n",from,to,link,background,bytes,kLimit);return link<kLimit;}
 };
 unsigned Nibble(char c) {if(c>='0' && c<='9')return static_cast<unsigned>(c-'0');if(c>='a' && c<='f')return static_cast<unsigned>(c-'a'+10);Check(false,"compact payload is canonical lowercase hex");return 0;}
 Payload Hex(const std::string& value) {
@@ -47,7 +49,7 @@ Payload Hex(const std::string& value) {
     Payload result;result.reserve(value.size()/2);for(std::size_t i=0;i<value.size();i+=2)result.push_back(static_cast<unsigned char>((Nibble(value[i])<<4)|Nibble(value[i+1])));return result;
 }
 void CapacityAdmission() {
-    EDF6CoopExtensionCapacity current{sizeof(current),EDF6COOP_EXTENSION_CAPACITY_VERSION,EDF6COOP_EXTENSION_MAX_PAYLOAD,static_cast<std::uint32_t>(kMaxPeers),crew::kEnemyControlInboxMessages,crew::kEnemyControlPendingBytes,crew::kEnemyControlPendingBytes,EDF6COOP_EXTENSION_CAPACITY_RELIABLE_ORDERED};
+    EDF6CoopExtensionCapacity current{sizeof(current),EDF6COOP_EXTENSION_CAPACITY_VERSION,EDF6COOP_EXTENSION_MAX_PAYLOAD,static_cast<std::uint32_t>(kMaxPeers),crew::kEnemyControlInboxMessages,crew::kEnemyControlPendingBytes,crew::kEnemyControlPendingBytes,EDF6COOP_EXTENSION_CAPACITY_RELIABLE_ORDERED|EDF6COOP_EXTENSION_CAPACITY_BOUNDED_TRY_SEND};
     Check(crew::ValidEnemyControlCapacity(current),"new SDK advertises the actual mandatory production capacities");
     auto old=current;old.inboxMessages=256;old.pendingBytes=old.congestedBacklogBytes=256*1024;Check(!crew::ValidEnemyControlCapacity(old),"old 256-inbox/256KiB SDK is explicitly refused for enemy control");
     EDF6CoopExtensionCapacity absent{};Check(!crew::ValidEnemyControlCapacity(absent),"SDK without a capacity export cannot admit native enemy control");
@@ -132,6 +134,11 @@ bool TraceSend(void* user,std::uint32_t peer,const void* bytes,std::size_t size)
     Check(b.ledger.Track(p.from,p.to,size,b.room.now,rawSdkArrival),"every AF control and action fits actual DirectNet pendingBytes admission");
     const auto due=std::max(rawSdkArrival,b.flowDue[p.from][p.to]);b.flowDue[p.from][p.to]=due;b.wire.push({p,due,++b.serial,false});return true;
 }
+SendResult TraceTrySendAction(void* user,std::uint32_t peer,const void* bytes,std::size_t size) {
+    auto& bus=Bus(user);const auto* node=static_cast<Node*>(user);const auto to=bus.room.Global(node->id,peer);
+    if(!bus.ledger.CanTrackAction(node->id,to,size,bus.room.now))return SendResult::wouldBlock;
+    return TraceSend(user,peer,bytes,size) ? SendResult::accepted : SendResult::unavailable;
+}
 ActionResult TraceApply(void* user,std::uint64_t id,const LeaseSpec& spec,std::uint64_t sequence,const void* bytes,std::size_t size) {
     auto& b=Bus(user);const auto* n=static_cast<Node*>(user);Check(n->id!=0,"accepted host factory outcome is never replayed on the authority");const auto* l=b.room.Lease(n->id,id);Check(id==b.lease && l && SameSpec(spec,l->spec) && (l->phase==Phase::active || l->phase==Phase::draining),"typed outcome stays bound to its exact active or draining native lease");
     auto& applied=b.applied[n->id];Check(sequence==applied+1 && applied<b.expected.size(),"each guest applies every actual typed outcome exactly once in original order");const auto& expected=*b.expected[applied];Check(size==expected.size() && !std::memcmp(bytes,expected.data(),size),"every guest receives byte-identical actual typed provider payload");++applied;return ActionResult::applied;
@@ -140,7 +147,7 @@ bool TraceQuiesce(void* user,std::uint64_t,const LeaseSpec&) {auto& b=Bus(user);
 bool TraceEmpty(void* user,std::uint64_t,const LeaseSpec&) {const auto& b=Bus(user);return static_cast<Node*>(user)->id!=0 || (b.producerDone && b.uncaptured.empty());}
 bool TraceAbort(void* user,std::uint64_t,const LeaseSpec&) {auto& b=Bus(user);++b.aborts[static_cast<Node*>(user)->id];return true;}
 void RunTrace(const TraceScenario& trace,unsigned hz,unsigned pollHz) {
-    ++traceScalarRuns;TraceBus b(trace,hz,pollHz);for(const auto& n:b.room.nodes){traceBuses[n.get()]=&b;auto h=Backend(n.get());h.ValidateInput=&TraceValidate;h.Send=&TraceSend;h.ApplyAction=&TraceApply;h.QuiesceActions=&TraceQuiesce;h.ActionsEmpty=&TraceEmpty;h.AbortActions=&TraceAbort;Check(n->protocol.Configure(h) && n->protocol.SetSendPacing(true),"install production-paced timed actual-provider backend before acquisition");}
+    ++traceScalarRuns;TraceBus b(trace,hz,pollHz);for(const auto& n:b.room.nodes){traceBuses[n.get()]=&b;auto h=Backend(n.get());h.ValidateInput=&TraceValidate;h.Send=&TraceSend;h.TrySendAction=&TraceTrySendAction;h.ApplyAction=&TraceApply;h.QuiesceActions=&TraceQuiesce;h.ActionsEmpty=&TraceEmpty;h.AbortActions=&TraceAbort;Check(n->protocol.Configure(h) && n->protocol.SetSendPacing(true),"install production-paced timed actual-provider backend before acquisition");}
     Check(b.room.Request(),"authenticated source requests actual trace control");const auto acquireAt=b.room.now;
     for(std::uint64_t acquireFrame=0;;++acquireFrame){b.room.now=acquireAt+(acquireFrame*1000+pollHz-1)/pollHz;b.Tick(true);bool active=true;for(const auto& n:b.room.nodes)active=active && n->protocol.ActiveCount()==1;if(active)break;Check(b.room.now-acquireAt<5000,"all-peer frame-paced acquisition completes within the protocol deadline");}
     b.lease=b.room.Active();b.startAt=b.room.now;std::size_t nextTick=0;std::uint64_t frame=0;
@@ -287,6 +294,11 @@ bool AggregatePoseApply(void* user,std::uint64_t lease,const LeaseSpec& spec,std
     auto& bus=AggregateBus(user);const auto* node=static_cast<Node*>(user);const auto body=bus.Body(lease);Check(bus.mixedPose && node->id!=0,"only mixed protocol-pressure guests apply synthetic legal pose traffic");const auto* current=bus.room.Lease(node->id,lease);Check(current && SameSpec(spec,current->spec),"mixed pose retains the exact body lease and source identity");
     crew::enemy_native::pose::State decoded{};Check(crew::enemy_native::pose::Decode(bytes,size,&decoded),"each mixed pressure pose decodes with the production semantic validator");const auto expected=AggregatePoseBytes(body,sequence);Check(size==expected.size() && !std::memcmp(bytes,expected.data(),size),"mixed pose payload remains byte-identical across the reliable production wire");Check(sequence==bus.posesApplied[node->id][body]+1,"each guest applies every mixed pressure pose once in order");++bus.posesApplied[node->id][body];return true;
 }
+SendResult AggregateTrySendAction(void* user,std::uint32_t peer,const void* bytes,std::size_t size) {
+    auto& bus=AggregateBus(user);const auto* node=static_cast<Node*>(user);const auto to=bus.room.Global(node->id,peer);
+    if(!bus.ledger.CanTrackAction(node->id,to,size,bus.room.now))return SendResult::wouldBlock;
+    return AggregateSend(user,peer,bytes,size) ? SendResult::accepted : SendResult::unavailable;
+}
 ActionResult AggregateApply(void* user,std::uint64_t lease,const LeaseSpec& spec,std::uint64_t sequence,const void* bytes,std::size_t size){auto& bus=AggregateBus(user);const auto* node=static_cast<Node*>(user);Check(node->id!=0,"aggregate host never replays an already accepted native outcome");const auto body=bus.Body(lease);const auto* current=bus.room.Lease(node->id,lease);
     Check(current && SameSpec(spec,current->spec) && spec.requesterPlayer==bus.sources[body] && spec.target==Id(100+body) && (current->phase==Phase::active || current->phase==Phase::draining),"aggregate typed action remains bound to exact body, source, target and live lease");
     auto& applied=bus.applied[node->id][body];Check(sequence==applied+1 && applied<bus.expected.size(),"each guest applies each body's 480 outcomes exactly once in original order");const auto& expected=*bus.expected[applied];Check(size==expected.size() && !std::memcmp(bytes,expected.data(),size),"every aggregate guest receives byte-identical real provider payload for every body");++applied;return ActionResult::applied;
@@ -296,7 +308,7 @@ bool AggregateEmpty(void* user,std::uint64_t lease,const LeaseSpec&){const auto&
 bool AggregateAbort(void* user,std::uint64_t lease,const LeaseSpec&){auto& bus=AggregateBus(user);++bus.aborts[static_cast<Node*>(user)->id][bus.Body(lease)];return true;}
 void RunAggregateTrace(const TraceScenario& trace,unsigned peerCount,unsigned bodies=8,unsigned nativeHz=144,unsigned pollHz=60,bool mixedPose=false,bool stallReceiver=false,bool faultExit=false){
     ++traceAggregateRuns;AggregateTraceBus bus(trace,peerCount,bodies,nativeHz,pollHz,mixedPose,stallReceiver,faultExit);
-    for(const auto& node:bus.room.nodes){aggregateTraceBuses[node.get()]=&bus;auto hooks=Backend(node.get());hooks.Send=&AggregateSend;hooks.Authenticate=&AggregateAuth;hooks.ValidateInput=&TraceValidate;hooks.ApplyPose=&AggregatePoseApply;hooks.ApplyAction=&AggregateApply;hooks.QuiesceActions=&AggregateQuiesce;hooks.ActionsEmpty=&AggregateEmpty;hooks.AbortActions=&AggregateAbort;Check(node->protocol.Configure(hooks),"install independent aggregate timed native backend before acquisition");Check(node->protocol.SetSendPacing(true),"aggregate uses actual frame-scoped global production sender pacing");}
+    for(const auto& node:bus.room.nodes){aggregateTraceBuses[node.get()]=&bus;auto hooks=Backend(node.get());hooks.Send=&AggregateSend;hooks.TrySendAction=&AggregateTrySendAction;hooks.Authenticate=&AggregateAuth;hooks.ValidateInput=&TraceValidate;hooks.ApplyPose=&AggregatePoseApply;hooks.ApplyAction=&AggregateApply;hooks.QuiesceActions=&AggregateQuiesce;hooks.ActionsEmpty=&AggregateEmpty;hooks.AbortActions=&AggregateAbort;Check(node->protocol.Configure(hooks),"install independent aggregate timed native backend before acquisition");Check(node->protocol.SetSendPacing(true),"aggregate uses actual frame-scoped global production sender pacing");}
     // Admission is intentionally serialized by the production protocol. Acquire
     // each actual body through the full barrier before requesting the next one;
     // the native eight-body burst starts only after all independent leases exist.

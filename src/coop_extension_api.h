@@ -46,11 +46,21 @@ typedef uint32_t (EDF6COOP_CALL *EDF6CoopGetExtensionApiFn)(
 // older Coop builds can still run ordinary support while high-volume enemy control remains unavailable.
 #define EDF6COOP_EXTENSION_CAPACITY_VERSION 1u
 #define EDF6COOP_EXTENSION_CAPACITY_RELIABLE_ORDERED 1u
+#define EDF6COOP_EXTENSION_CAPACITY_BOUNDED_TRY_SEND 2u
+#define EDF6COOP_EXTENSION_SEND_UNAVAILABLE 0u
+#define EDF6COOP_EXTENSION_SEND_ACCEPTED 1u
+#define EDF6COOP_EXTENSION_SEND_WOULD_BLOCK 2u
 typedef struct EDF6CoopExtensionCapacity {
     uint32_t size,version,maxPayload,maxPeers,inboxMessages,pendingBytes,congestedBacklogBytes,flags;
 } EDF6CoopExtensionCapacity;
 typedef uint32_t (EDF6COOP_CALL *EDF6CoopGetExtensionCapacityFn)(
     uint32_t version,uint32_t outSize,EDF6CoopExtensionCapacity* out);
+
+// Optional fixed v1 ABI. Atomically admits the full authenticated datagram against the real shared
+// reliable sender backlog. WOULD_BLOCK changes neither the route generation nor its sequence space.
+typedef uint32_t (EDF6COOP_CALL *EDF6CoopTrySendExtensionFn)(
+    uint64_t expectedGeneration,const EDF6CoopPeer* peer,const void* data,uint32_t bytes,
+    uint32_t pendingBytesLimit,uint32_t pendingPacketsLimit);
 
 // AF -> Coop, in-process only. The producer snapshots actual current-world player
 // PUIDs atomically. Lobby users alone are not participants. ready is 0 while the

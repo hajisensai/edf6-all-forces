@@ -408,11 +408,3 @@ int main() {
     crew::ResetSubs();VirtualFree(crew::image,0,MEM_RELEASE);crew::image=nullptr;
     std::printf("submarine_support_fixture: %d checks, %d failed\n",checks,failures);return failures ? 1 : 0;
 }
-
-
-
-
-
-
-
-

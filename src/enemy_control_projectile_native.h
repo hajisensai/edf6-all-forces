@@ -27,6 +27,10 @@ struct NativeProjectileJournal {
     void* created=nullptr;unsigned heldMask=0;
     bool made=false,busy=false,copyEntered=false,createEntered=false,cleanupEntered=false,uncertain=false;
 };
+// Creation and descriptor cleanup are independent outcomes. A real native
+// object must be adopted by its caller even when cleanup remains in journal.
+// cleanupComplete never grants permission to repeat a successful creation.
+struct NativeProjectileOutcome {void* created=nullptr;bool cleanupComplete=false;};
 bool NativeProjectileJournalEmpty(const NativeProjectileJournal&) noexcept;
 bool RestoreNativeProjectileJournal(NativeProjectileJournal&) noexcept;
 // Lock-point adapters for native maker parameters which share the same target
@@ -54,9 +58,13 @@ bool CanPrepareNativeProjectileSample(const NativeLease&,const void* localTempla
 // A local-only callback receives a complete native-owned descriptor for this
 // synchronous call. Normal cleanup uses native 100C90; an entered cleanup
 // failure retains the persistent journal instead of losing ownership.
+// Pointer wrappers return null until cleanup finishes, which alone does not
+// prove no object was created. New lifecycle owners use the explicit outcome.
 void* WithNativeProjectileSample(const NativeLease&,const void* localTemplate,
     float* persistentMuzzleMatrix,const NativeProjectileSample&,NativeProjectileCreateFn,void* user) noexcept;
 void* WithNativeProjectileSampleInPlace(NativeProjectileJournal&,const NativeLease&,const void* localTemplate,
+    float* persistentMuzzleMatrix,const NativeProjectileSample&,NativeProjectileCreateFn,void* user) noexcept;
+NativeProjectileOutcome WithNativeProjectileOutcomeInPlace(NativeProjectileJournal&,const NativeLease&,const void* localTemplate,
     float* persistentMuzzleMatrix,const NativeProjectileSample&,NativeProjectileCreateFn,void* user) noexcept;
 // Legacy wrappers use a bounded persistent internal ledger, never a stack
 // descriptor. Its owner must include these gates in Empty/Restore as well.
@@ -65,6 +73,8 @@ bool RestoreNativeProjectileJournals(const NativeLease&) noexcept;
 // Nonnull means the original 1194280 factory registered a real native object.
 // The caller still owns its original post-create cache/list/network callbacks.
 void* ReplayNativeProjectileSampleInPlace(NativeProjectileJournal&,const NativeLease&,void* localFactory,const void* localTemplate,
+    float* persistentMuzzleMatrix,const NativeProjectileSample&) noexcept;
+NativeProjectileOutcome ReplayNativeProjectileOutcomeInPlace(NativeProjectileJournal&,const NativeLease&,void* localFactory,const void* localTemplate,
     float* persistentMuzzleMatrix,const NativeProjectileSample&) noexcept;
 void* ReplayNativeProjectileSample(const NativeLease&,void* localFactory,const void* localTemplate,
     float* persistentMuzzleMatrix,const NativeProjectileSample&) noexcept;

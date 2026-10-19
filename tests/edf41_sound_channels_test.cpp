@@ -1,5 +1,7 @@
 #include "../src/edf41_sound_channels.h"
+#include "../src/edf41_sound_fallback.h"
 #include <cstdio>
+#include <string>
 #include <vector>
 
 namespace {
@@ -26,6 +28,37 @@ struct Backend {
 };
 }
 int main() {
+    const auto& cue=crew::edf41sound::kFallbackCues[0];
+    std::vector<std::wstring> looked;
+    bool nativeSource=false,sourceBank=false,nativeTarget=true;
+    int imports=0;
+    auto stockCue=[&](const wchar_t* name) {
+        looked.emplace_back(name);
+        return (nativeSource && std::wcscmp(name,cue.source)==0) ||
+               (nativeTarget && std::wcscmp(name,cue.target)==0);
+    };
+    auto importedCue=[&](const wchar_t* name) {
+        ++imports;
+        return sourceBank && std::wcscmp(name,cue.source)==0;
+    };
+    Check(crew::edf41sound::LookupCue(cue.source,stockCue,importedCue) &&
+          looked.size()==2 && looked.back()==cue.target,"missing optional bank uses the resident finite fallback");
+    looked.clear(); sourceBank=true;
+    Check(crew::edf41sound::LookupCue(cue.source,stockCue,importedCue) && looked.size()==1,
+          "an available imported bank keeps its exact source sound");
+    looked.clear(); nativeSource=true;
+    const int beforeImports=imports;
+    Check(crew::edf41sound::LookupCue(cue.source,stockCue,importedCue) && looked.size()==1 && imports==beforeImports,
+          "native lookup wins without touching imported or fallback audio");
+    looked.clear(); nativeSource=false; sourceBank=false; nativeTarget=false;
+    Check(!crew::edf41sound::LookupCue(cue.source,stockCue,importedCue) && looked.size()==2,
+          "a failed imported load and unavailable fallback fail without recursion");
+    looked.clear(); nativeTarget=true;
+    Check(!crew::edf41sound::LookupCue(L"unknown_4_1_cue",stockCue,importedCue) && looked.size()==1,
+          "unknown cues are not replaced by unrelated audio");
+    for(const auto& entry:crew::edf41sound::kFallbackCues)
+        Check(crew::edf41sound::FallbackName(entry.source)==entry.target,"every generated entry is reachable by binary search");
+    Check(!crew::edf41sound::FallbackName(nullptr),"a null cue has no fallback");
     using crew::edf41sound::Channels;
     using crew::edf41sound::GunSounds;
     Backend b;

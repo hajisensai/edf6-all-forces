@@ -107,7 +107,10 @@ def team_changes_go_through_set_team() -> None:
                     text = src(rel)
                     found += [f'{rel}: {m.group(0)}' for m in raw.finditer(text) if not in_team_field(rel, text, m.start())]
     assert not found, 'raw team writes (use SetObjectTeam):\n' + '\n'.join(found)
-    assert raw.search('Put<std::int32_t>(v,kTeam,own);'), 'the pattern no longer sees a raw write'
+    for write in ('Put<std::int32_t>(v,kTeam,own);',
+                  'Put<int>(const_cast<void*>(ref.obj),edf::kTeam,team);',
+                  'Put<int>(object+kTeam,0,team);'):
+        assert raw.search(write), f'the pattern no longer sees a raw write: {write}'
 
 
 @test

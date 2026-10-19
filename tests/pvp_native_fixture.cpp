@@ -3,6 +3,7 @@
 #include "../src/pvp_native.cpp"
 #include <cstdio>
 #include <cstdlib>
+#include <new>
 namespace crew {
 bool EnemyControlRadarObserverTeam(const void*,int*) noexcept {return false;}
 }
@@ -13,6 +14,7 @@ const void* watchDead=nullptr;
 const void* unreadableWeapon=nullptr;
 const void* refusedTeamObject=nullptr;
 bool refuseTeamChange=false;
+void* isolatedLockPoint=nullptr;
 alignas(16) unsigned char lockPoints[64][0x50]{};
 void __fastcall DestroyControl(void*) noexcept { ++deletedBlocks; }
 void __fastcall NativeSetTeam(void* object,int team,bool registered) noexcept {
@@ -57,7 +59,10 @@ struct FakeObject {
 namespace edf {
 bool Readable(const void* pointer,std::size_t,bool) noexcept {
     if(pointer==watchDead)++deadObjectReads;
-    return pointer!=nullptr && pointer!=unreadableWeapon;
+    MEMORY_BASIC_INFORMATION region{};
+    const bool inaccessible=pointer && VirtualQuery(pointer,&region,sizeof(region))==sizeof(region) &&
+        (region.Protect&(PAGE_NOACCESS|PAGE_GUARD))!=0;
+    return pointer!=nullptr && pointer!=unreadableWeapon && !inaccessible;
 }
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept { return true; }
 unsigned SeatCount(const unsigned char* object) noexcept {
@@ -99,7 +104,7 @@ bool ReadNativeMissionLocation(unsigned* location) noexcept { if(location)*locat
 namespace edf41c {
 void* AddLockPoint(void* object) noexcept {
     if(lockCalls==_countof(lockPoints))return nullptr;
-    auto* point=lockPoints[lockCalls++];
+    auto* point=isolatedLockPoint ? static_cast<unsigned char*>(isolatedLockPoint) : lockPoints[lockCalls];++lockCalls;
     Put<void*>(point,8,object);Put<unsigned char>(point,0x2A,1);
     auto** points=At<void**>(object,0x368);const auto count=At<std::uint64_t>(object,0x378);
     points[count*2]=point;Put<std::uint64_t>(object,0x378,count+1);return point;
@@ -212,6 +217,78 @@ int main() {
     CHECK(edf::At<LONG>(supportNpc.control,12)==1);
     for(const auto& owner:crew::supportOwners)CHECK(!owner.ref);
     const unsigned failureChecksStart=checks;
+    // A positive strong count plus PAGE_NOACCESS is an unknown identity, not
+    // destruction. Preserve both the restoration ledger and authenticated owner.
+    {
+        void* allocation=VirtualAlloc(nullptr,sizeof(FakeObject),MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE);
+        CHECK(allocation!=nullptr);if(!allocation)return 1;
+        auto* pending=new(allocation) FakeObject(false,5,false,true);
+        edf::Put<int>(pending->bytes,0x318,6);
+        const crew::ObjRef identity=crew::ObjRef::Of(pending->bytes);
+        CHECK(crew::PvpNativeAttachSupport("owner1",&identity,1,0));
+        crew::Collection batch{};batch.objectsCount=1;batch.objects[0]={identity,1,false,true};
+        CHECK(crew::ApplyCollected(batch));CHECK(edf::At<LONG>(pending->control,12)==3);
+        DWORD oldProtection=0;
+        CHECK(VirtualProtect(pending->bytes,0x1000,PAGE_NOACCESS,&oldProtection)!=0);
+        CHECK(!crew::PvpNativeApply(disabled));
+        const auto* retained=crew::Find(identity);
+        CHECK(retained && retained->changed && retained->originalTeam==5 && retained->originalLastTeam==6);
+        CHECK(edf::At<LONG>(pending->control,12)==3);
+        crew::ResetPvpNative();CHECK(crew::Find(identity)!=nullptr);
+        // A different desired set must neither reap nor reuse this owner's slot.
+        crew::Collection empty{};CHECK(!crew::ApplyCollected(empty));
+        bool ownerRetained=false;
+        for(const auto& owner:crew::supportOwners)if(owner.ref.obj==identity.obj && owner.ref.ctrl==identity.ctrl)ownerRetained=true;
+        CHECK(ownerRetained && edf::At<LONG>(pending->control,12)==3);
+        DWORD ignored=0;CHECK(VirtualProtect(pending->bytes,0x1000,oldProtection,&ignored)!=0);
+        CHECK(crew::PvpNativeApply(disabled));
+        CHECK(edf::At<int>(pending->bytes,edf::kTeam)==5 && edf::At<int>(pending->bytes,0x318)==6);
+        CHECK((edf::At<unsigned>(pending->bytes,0x380)&(0x40u|0x2000u))==0);
+        CHECK(edf::At<LONG>(pending->control,12)==2);
+        // Logical scene deletion can precede the last strong release. Do not
+        // re-register that body or discard originals while its allocation lives.
+        CHECK(crew::ApplyCollected(batch));edf::Put<unsigned char>(pending->bytes,0x18,4);
+        CHECK(!crew::PvpNativeApply(disabled));
+        retained=crew::Find(identity);CHECK(retained && retained->changed);
+        CHECK(edf::At<int>(pending->bytes,edf::kTeam)==1 && edf::At<LONG>(pending->control,12)==3);
+        edf::Put<unsigned char>(pending->bytes,0x18,0);CHECK(crew::PvpNativeApply(disabled));
+        CHECK(edf::At<int>(pending->bytes,edf::kTeam)==5 && edf::At<int>(pending->bytes,0x318)==6);
+        // The retained control block itself may be temporarily unreadable too.
+        CHECK(crew::ApplyCollected(batch));
+        auto* controlPage=static_cast<unsigned char*>(allocation)+0x2000;
+        CHECK(VirtualProtect(controlPage,0x1000,PAGE_NOACCESS,&oldProtection)!=0);
+        CHECK(!crew::PvpNativeApply(disabled));retained=crew::Find(identity);
+        CHECK(retained && retained->changed && retained->originalTeam==5);
+        CHECK(VirtualProtect(controlPage,0x1000,oldProtection,&ignored)!=0);
+        CHECK(edf::At<LONG>(pending->control,12)==3 && crew::PvpNativeApply(disabled));
+        CHECK(edf::At<int>(pending->bytes,edf::kTeam)==5 && edf::At<int>(pending->bytes,0x318)==6);
+        crew::PvpNativeForgetSupport(identity);CHECK(edf::At<LONG>(pending->control,12)==1);
+        pending->~FakeObject();CHECK(VirtualFree(allocation,0,MEM_RELEASE)!=0);
+    }
+    // A native-owned lock point has its own readable/writable lifetime. An
+    // inaccessible retained point must not become an absent point or be added twice.
+    {
+        FakeObject player(true,0,true);
+        isolatedLockPoint=VirtualAlloc(nullptr,0x1000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE);
+        CHECK(isolatedLockPoint!=nullptr);if(!isolatedLockPoint)return 1;
+        crew::Collection batch{};batch.objectsCount=1;
+        const auto identity=crew::ObjRef::Of(player.bytes);batch.objects[0]={identity,1,true,false};
+        CHECK(crew::ApplyCollected(batch));const unsigned created=lockCalls;
+        CHECK(crew::Find(identity)->lockPoint==isolatedLockPoint);
+        DWORD oldProtection=0;CHECK(VirtualProtect(isolatedLockPoint,0x1000,PAGE_NOACCESS,&oldProtection)!=0);
+        CHECK(!crew::PvpNativeApply(disabled));
+        CHECK(crew::Find(identity) && crew::Find(identity)->lockPoint==isolatedLockPoint);
+        CHECK(edf::At<LONG>(player.control,12)==2);
+        crew::ResetPvpNative();CHECK(crew::Find(identity)!=nullptr);
+        CHECK(!crew::ApplyCollected(batch));CHECK(lockCalls==created);
+        CHECK(crew::Find(identity) && crew::Find(identity)->lockPoint==isolatedLockPoint);
+        DWORD ignored=0;CHECK(VirtualProtect(isolatedLockPoint,0x1000,oldProtection,&ignored)!=0);
+        CHECK(crew::PvpNativeApply(disabled));CHECK(edf::At<unsigned char>(isolatedLockPoint,0x2A)==0);
+        CHECK(crew::ApplyCollected(batch));CHECK(lockCalls==created);
+        CHECK(crew::Find(identity)->lockPoint==isolatedLockPoint && edf::At<unsigned char>(isolatedLockPoint,0x2A)==1);
+        CHECK(crew::RestoreAll());crew::ResetPvpNative();CHECK(edf::At<LONG>(player.control,12)==1);
+        CHECK(VirtualFree(isolatedLockPoint,0,MEM_RELEASE)!=0);isolatedLockPoint=nullptr;
+    }
     // Start from a complete applied batch, then fail recollection of its second
     // weapon. Independent cache restores can progress, but the body's Saved state
     // stays pending until every captured weapon can be verified/restored.

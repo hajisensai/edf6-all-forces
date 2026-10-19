@@ -95,7 +95,7 @@ void AdvertiseChecked() noexcept {
         api=get ? get(EDF6COOP_MEMBER_ATTRIBUTE_VERSION) : nullptr;
         if(!api || !EDF6COOP_MA_HAS(api,publish) || !api->publish){api=nullptr;return;}
     }
-    if(!published)published=api->publish("EDF6X_PVP","1")!=0;
+    if(!published)published=api->publish("EDF6X_PVP","2")!=0;
 }
 void Advertise() noexcept {
     AcquireSRWLockExclusive(&advertiseLock);AdvertiseChecked();ReleaseSRWLockExclusive(&advertiseLock);

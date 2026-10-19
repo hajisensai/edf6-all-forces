@@ -12,6 +12,11 @@ releases it as its own (release with writer=True), and a file the ledger does no
 writer that releases it, as it did before the ledger.
 A shared file installed over another mod's may carry `restore`: the SHA-256 of that pre-install original, kept under
 Mods/.edf6vc_files_backup (defer_restore); the last release puts it back unless the file was changed since.
+`writers` separately records each writer's committed hash. Releasing its need does not erase that provenance while
+consumers remain; `need` never grants it. A writer can also remember a root's dependency closure, tied to that root's
+committed hash, so an upgrade replaces consumer references instead of accumulating obsolete dependencies.
+An in-progress dependency replacement retains `previous` paths before any root write; they are cleared only after
+all consumer additions and releases succeed, allowing a restarted installer to finish the same reference transfer.
 
 Every write is atomic (pylib/modfiles.py atomic_write): a failed or interrupted write leaves the old file whole.
 
@@ -40,6 +45,19 @@ def key(rel: str) -> str:
     return rel.replace('\\', '/').strip('/').upper()
 
 
+def _merge_mapping(base: dict, mine: dict, disk: dict) -> dict:
+    """Apply only this object's per-key edits, preserving another writer's metadata."""
+    out = copy.deepcopy(disk)
+    for name in set(base) | set(mine):
+        if base.get(name) == mine.get(name):
+            continue
+        if name in mine:
+            out[name] = copy.deepcopy(mine[name])
+        else:
+            out.pop(name, None)
+    return out
+
+
 def _merge_entry(base: dict | None, mine: dict | None, disk: dict | None) -> dict | None:
     """One file's entry: what this object changed since `base` (owners added / removed, the sha rewritten) applied to
     what is on disk now; owners another process added meanwhile are kept."""
@@ -62,6 +80,13 @@ def _merge_entry(base: dict | None, mine: dict | None, disk: dict | None) -> dic
     entry['owners'] = owners
     if sha is not None:
         entry['sha'] = sha
+    for field in ('writers', 'dependencies'):
+        merged = _merge_mapping((base or {}).get(field, {}), (mine or {}).get(field, {}),
+                                (disk or {}).get(field, {}))
+        if merged:
+            entry[field] = merged
+        else:
+            entry.pop(field, None)
     return entry
 
 
@@ -135,6 +160,7 @@ class Ledger:
         if owner not in entry['owners']:
             entry['owners'].append(owner)
         entry['sha'] = sha256(data)
+        entry.setdefault('writers', {})[owner] = entry['sha']
         self._save()
         return path
 
@@ -150,7 +176,58 @@ class Ledger:
         if owner not in entry['owners']:
             entry['owners'].append(owner)
         entry['sha'] = sha
+        entry.setdefault('writers', {})[owner] = sha
         self._save()
+
+    def written_by(self, owner: str, rel: str) -> bool:
+        """Exact committed writer proof, including after that writer's owner was released."""
+        entry = self.files.get(key(rel), {})
+        digest = entry.get('writers', {}).get(owner)
+        return digest is not None and digest == entry.get('sha') and sha256_file(self.disk(rel)) == digest
+
+    def dependency_closure(self, owner: str, rel: str) -> set[str] | None:
+        """The last committed root's schema; a user edit conservatively retains its previous dependencies."""
+        entry = self.files.get(key(rel), {})
+        closure = entry.get('dependencies', {}).get(owner)
+        if not isinstance(closure, dict) or closure.get('sha') != entry.get('sha'):
+            return None
+        return {key(path) for path in closure['files']}
+
+    def remember_dependencies(self, owner: str, rel: str, files: list[str]) -> None:
+        """Record a writer's complete root closure; a consumer cannot create writer provenance."""
+        self._refresh()
+        if not self.written_by(owner, rel):
+            raise ValueError(f'{key(rel)}: not {owner}\'s committed root')
+        entry = self.files[key(rel)]
+        closure = {'sha': entry['sha'], 'files': sorted({key(path) for path in files})}
+        previous = entry.get('dependencies', {}).get(owner, {}).get('previous')
+        if previous:
+            closure['previous'] = previous
+        if entry.get('dependencies', {}).get(owner) != closure:
+            entry.setdefault('dependencies', {})[owner] = closure
+            self._save()
+
+    def pending_dependencies(self, owner: str, rel: str) -> set[str]:
+        """Previous consumer references retained until their replacement has fully committed."""
+        entry = self.files.get(key(rel), {})
+        return set(entry.get('dependencies', {}).get(owner, {}).get('previous', ()))
+
+    def stage_dependencies(self, owner: str, rel: str, files: list[str]) -> None:
+        """Checkpoint the old graph before any root bytes change, so interruption cannot lose references."""
+        self._refresh()
+        if not self.written_by(owner, rel):
+            raise ValueError(f'{key(rel)}: not {owner}\'s committed root')
+        entry = self.files[key(rel)]
+        closure = entry.setdefault('dependencies', {}).setdefault(owner, {'sha': entry['sha'], 'files': []})
+        closure['previous'] = sorted(set(closure.get('previous', ())) | {key(path) for path in files})
+        self._save()
+
+    def complete_dependencies(self, owner: str, rel: str) -> None:
+        """Forget the old graph only after every consumer need/release succeeded."""
+        self._refresh()
+        closure = self.files.get(key(rel), {}).get('dependencies', {}).get(owner, {})
+        if closure.pop('previous', None) is not None:
+            self._save()
 
     def defer_restore(self, rel: str, data: bytes) -> None:
         """Keeps the pre-install bytes until the last consumer releases a shared file.
@@ -222,6 +299,7 @@ class Ledger:
         if owner not in entry['owners']:
             entry['owners'].append(owner)
         entry['sha'] = sha256(data)
+        entry.setdefault('writers', {})[owner] = entry['sha']
         self._save()
         return path
 

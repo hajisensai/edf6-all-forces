@@ -4,6 +4,7 @@
 #include "crew.h"
 #include "enemy_control.h"
 #include "enemy_control_native.h"
+#include "enemy_control_identity.h"
 #include "enemy_control_catalog.h"
 #include "enemy_control_net.h"
 #include "enemy_control_capacity.h"
@@ -90,8 +91,7 @@ bool installed=false,configured=true,deiroiReady=false,humanoidReady=false,walki
 bool On() noexcept { return installed && configured && Cfg().enabled && Cfg().enemyControl; }
 bool Same(const ObjRef& a,const ObjRef& b) noexcept { return a.obj==b.obj && a.ctrl==b.ctrl; }
 bool CurrentObject(const ObjRef& ref) noexcept {
-    if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16) || At<LONG>(ref.ctrl,8)<=0)return false;
-    return Readable(ref.obj,kSelfCtrl+8) && At<const void*>(ref.obj,kSelfCtrl)==ref.ctrl;
+    return enemy_identity::Read(ref.obj,ref.ctrl)==enemy_identity::State::current;
 }
 bool Live(const ObjRef& ref) noexcept {
     if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16) || At<LONG>(ref.ctrl,8)<=0)return false;
@@ -562,7 +562,9 @@ bool ProtectSource(Session& session) noexcept {
 bool RestoreSource(Session& session) noexcept {
     if(!session.sourceProtected)return true;
     __try {
-        if(!CurrentObject(session.owner)){session.sourceProtected=false;return true;}
+        const auto identity=enemy_identity::Read(session.owner.obj,session.owner.ctrl);
+        if(identity==enemy_identity::State::unknown)return false;
+        if(identity==enemy_identity::State::gone){session.sourceProtected=false;return true;}
         auto* owner=const_cast<void*>(session.owner.obj);
         if(!Readable(static_cast<unsigned char*>(owner)+0x380,4,true))return false;
         // Only bits this lease changed from zero to one are ours. PVP registry,
@@ -575,8 +577,10 @@ bool RestoreSource(Session& session) noexcept {
 bool RestoreTable(Session* s) noexcept {
     bool returned=false;
     __try {
-        if(s->catalogue.adapter)returned=!s->adapterAttempted || !CurrentObject(s->target) || s->catalogue.adapter->Restore(s->target.obj);
-        else if(!CurrentObject(s->target))returned=true;
+        const auto identity=enemy_identity::Read(s->target.obj,s->target.ctrl);
+        if(identity==enemy_identity::State::unknown)return false;
+        if(s->catalogue.adapter)returned=!s->adapterAttempted || identity==enemy_identity::State::gone || s->catalogue.adapter->Restore(s->target.obj);
+        else if(identity==enemy_identity::State::gone)returned=true;
         else if(At<const void*>(s->target.obj,0)!=s->vtable+1)returned=true;
         else if(Readable(s->target.obj,8,true)) {
             Put<const void*>(const_cast<void*>(s->target.obj),0,s->original);

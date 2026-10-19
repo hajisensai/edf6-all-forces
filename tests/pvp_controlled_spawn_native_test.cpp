@@ -158,4 +158,3 @@ int main() {
     VirtualFree(crew::image,0,MEM_RELEASE);crew::image=nullptr;
     std::printf("pvp_controlled_spawn_native_test: %u checks, %u failed\n",checks,failures);return failures ? 1 : 0;
 }
-

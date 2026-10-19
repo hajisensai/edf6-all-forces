@@ -16,12 +16,14 @@ struct Pad { bool focused=false,held=false;int selected=kTeam1; };
 struct Input { bool toggle=false,up=false,down=false,confirm=false,back=false,a=false,b=false,mouse=false; };
 struct Result { bool consumed=false;int action=-1; };
 inline Result Step(Pad& pad,const PvpStatus& status,bool visible,const Input& input) noexcept {
-    const bool wasFocused=pad.focused;
+    const bool wasFocused=pad.focused,wasHeld=pad.held;
     const bool available=visible && status.ready && !status.pending && status.epoch && status.localPuid[0];
     if(!available || input.mouse)pad.focused=false;
     if(input.toggle && available && !input.mouse)pad.focused=!pad.focused;
     if(pad.focused && !Allowed(status,pad.selected))pad.selected=kTeam1;
-    Result result;result.consumed=wasFocused || pad.focused || (input.toggle && available);
+    // Leaving focus does not end an A/B gesture: all downstream map commands wait for its release.
+    Result result;result.consumed=wasFocused || pad.focused || (input.toggle && available) ||
+        (wasHeld && (input.a || input.b));
     if(pad.focused) {
         const int first=status.host ? kMode : kTeam1;
         if(input.up)pad.selected=pad.selected==first ? kTeam2 : pad.selected-1;
@@ -29,7 +31,7 @@ inline Result Step(Pad& pad,const PvpStatus& status,bool visible,const Input& in
         if(input.back)pad.focused=false;
         else if(input.confirm && Allowed(status,pad.selected))result.action=pad.selected;
     }
-    pad.held=pad.focused || ((wasFocused || pad.held) && (input.a || input.b));
+    pad.held=pad.focused || ((wasFocused || wasHeld) && (input.a || input.b));
     return result;
 }
 } // namespace crew::pvpmenu

@@ -65,6 +65,12 @@ void Publish() noexcept;
 bool Send(void*,std::uint32_t peer,const void* bytes,std::size_t size) noexcept {
     return transport.ready && transport.send && peer && peer<=transport.peerCount && transport.send(peer,bytes,size);
 }
+ep::SendResult TrySendAction(void*,std::uint32_t peer,const void* bytes,std::size_t size) noexcept {
+    if(!transport.ready || !transport.trySend || !peer || peer>transport.peerCount)return ep::SendResult::unavailable;
+    const auto result=transport.trySend(peer,bytes,size,static_cast<std::uint32_t>(ep::kActionPeerByteCredits),static_cast<std::uint32_t>(ep::kActionPeerPacketCredits));
+    if(result==EDF6COOP_EXTENSION_SEND_ACCEPTED)return ep::SendResult::accepted;
+    return result==EDF6COOP_EXTENSION_SEND_WOULD_BLOCK ? ep::SendResult::wouldBlock : ep::SendResult::unavailable;
+}
 bool Requester(const char* authenticated,const ep::NativeId& id) noexcept {
     if(!ep::ValidPuid(authenticated) || !ep::CanonicalId(id))return false;
     CommandIdentities identities{};
@@ -182,7 +188,7 @@ bool ActionsEmpty(void*,std::uint64_t token,const ep::LeaseSpec&) noexcept {
 bool AbortActions(void*,std::uint64_t token,const ep::LeaseSpec&) noexcept {
     __try{return EnemyControlAbortNetworkActions(token);}__except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-ep::Protocol protocol({nullptr,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&ValidateInput,&ApplyInput,&Restore,&Activate,&ApplyPose,&ApplyAction,&QuiesceActions,&ActionsEmpty,&AbortActions,&NormalizeInput});
+ep::Protocol protocol({nullptr,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&ValidateInput,&ApplyInput,&Restore,&Activate,&ApplyPose,&ApplyAction,&QuiesceActions,&ActionsEmpty,&AbortActions,&NormalizeInput,&TrySendAction});
 const ep::LeaseView* Lease(std::uint64_t id) noexcept {
     if(!id)return nullptr;
     for(std::size_t i=0;i<ep::kMaxLeases;++i)if(const auto* lease=protocol.LeaseAt(i);lease && lease->id==id)return lease;

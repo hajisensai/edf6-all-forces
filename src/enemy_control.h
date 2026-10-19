@@ -65,4 +65,3 @@ bool EnemyControlApply(std::uint64_t lease,const enemy_control::Input&) noexcept
 bool EnemyControlRestore(std::uint64_t lease) noexcept;
 bool EnemyControlLeaseLive(std::uint64_t lease) noexcept;
 }
-

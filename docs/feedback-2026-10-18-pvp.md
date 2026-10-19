@@ -21,15 +21,19 @@
 
 ## 联机契约
 
-`EDF6X_PVP=1` 成员属性只公告支持能力，不决定战斗阵营。运行时使用 support_net 的唯一 extension poll，AFPV v1 消息按已认证 sender PUID 验证，不信任 payload 声称的身份。
+`EDF6X_PVP=2` 成员属性只公告支持能力，不决定战斗阵营。运行时使用 support_net 的唯一 extension poll，AFPV v2 消息按已认证 sender PUID 验证，不信任 payload 声称的身份。v1 与 v2 不兼容；版本不符报协议变化，缺少任一成员的 v2 Hello 就不能建立全员名单或启用，不会静默降级。
 
 协议先收齐全员版本与身份，再建立由房主发送的共享 epoch。成员只请求自己的 team；模式切换只由房主发起。每次更改依次经过 `Prepare → 全员 Prepared ACK → Apply → 全员 Applied ACK → Final`。界面收到 true 只表示请求已排队；只有最终确认才显示完成。未确认、未知成员、旧协议、旧 epoch/revision/token、超时、发送/原生应用失败都不能被当作成功。
 
-失败恢复此前设置；回滚本身失败、Final 丢失或已提交后的原生不变量失效会触发全员停用。场景/运输上下文失效恢复原版阵营。不会使用各端可能相差数秒的 lobby attribute 到达时间独自修改队伍。原生恢复失败不会清掉原始 team / registered / weak 备份；协议进入恢复待办，后续游戏帧完成恢复前禁止建立新对战状态。
+启用后的已提交状态另有全员活性租期：每端每秒向每个已认证成员发送新的 `Lease` nonce，只有该成员在同一共享 epoch、revision 下返回对应 `LeaseAck` 才能续租。每端保留六轮有界挑战窗口，适配延迟 ACK；一个 nonce 只能确认一次，截止时间从本机发出挑战时起算五秒，旧 ACK 的晚到或重放不能延长它。仅同房/链路还在或某次 Send 返回成功都不代表远端扩展仍在运行。
 
-当前 EDF6Coop 2.6.0 的 extension 明确使用 `ReliableOrdered`（`extension_transport.cpp:145`）。`direct_net.cpp:933-935` 即使底层首次 send 拒绝也保留可靠重传；`1660-1690` 的最老未确认消息超过 stall timeout 会关闭链路。`extension_transport.cpp:70-108` 在链路缺失、过旧、拥塞或 pending 过限时重置 generation，收件箱溢出也触发 extension fault。AFPV 依赖“可靠保序送达，或 context / generation 失效”契约；后者立即恢复原版阵营。没有在原生生命周期之上另加延时重试来掩盖失效。
+一秒探测周期与五秒截止是已启用状态的有效期契约，与现有五秒事务截止一致；允许多轮探测和短暂队列流控，已覆盖 600 ms RTT。Send 或 ACK 暂时不能入队不会立即清会话，也不会续租；后续正常挑战能在截止前完成确认。任何参与者持续无法确认，其他仍在更新的端最多在其最后一次有效挑战后五秒恢复原版阵营，并通过 `Fault → FailSafe` 通知仍可达成员。稳定关闭状态没有租期或探测流量。
 
-AFPV v1 当前最多 8 个 PUID 成员、每成员可包含同 PUID 的本地分屏玩家；分屏共用同一阵营。超出人数明确拒绝，未静默截断。单条最大 560 字节，低于 Coop 的 1024 字节上限。
+事务失败只在此前启用状态的全员租期仍有效时恢复此前设置；回滚本身失败、Final 丢失、租期到期或已提交后的原生不变量失效会触发全员停用。改队 Final 不会重授五秒宽限；关闭 Apply 尚未 Final 时保留此前租期，超时 Abort 不能重新激活已过期的启用状态。关闭 Final 已停止租期后，即使同一事务的 Abort 晚到也保持关闭并通知全员停用；重新开战必须经过新的启用事务。场景/运输上下文失效或本端热禁用立即恢复本端原版阵营；即使本端已无法发出通知，其余端也按自己的全员租期收敛关闭。不会使用各端可能相差数秒的 lobby attribute 到达时间独自修改队伍。原生恢复失败不会清掉原始 team / registered / weak 备份；协议进入恢复待办，后续游戏帧完成恢复前禁止建立新对战状态。
+
+EDF6Coop 的 extension 使用 `ReliableOrdered`；底层可靠重传或链路 stall 会影响对应运输上下文。但收件箱溢出等 extension fault 可能只让一个端的 generation 失效，游戏链路和其他端的 ready 仍然健康。因此 AFPV v2 除本端 Context 失效立即恢复外，必须用上述已提交状态租期确认全部远端扩展，不能把单端 generation 变化当作全房都会停用的证明。暂时拥塞与真正的上下文失效分别处理；没有在原生恢复生命周期上加延时重试。
+
+AFPV v2 当前最多 8 个 PUID 成员、每成员可包含同 PUID 的本地分屏玩家；分屏共用同一阵营。超出人数明确拒绝，未静默截断。单条最大 560 字节，低于 Coop 的 1024 字节上限；Lease/LeaseAck 各 32 字节。
 
 ## 接线与验证
 
@@ -37,7 +41,7 @@ AFPV v1 当前最多 8 个 PUID 成员、每成员可包含同 PUID 的本地分
 - `pvp.h`：`SetPvpEnabled`、`SetPvpLocalTeam`、`ReadPvpStatus`、`ReadPvpMembers` 供游戏内菜单使用。`pending` 与 `result` 为事务结果；`note` 提供具体原因。
 - support_net：使用现有 `CommandNetworkContext` 调 `UpdatePvpNetwork`，唯一 poll 按 AFPV magic 分发 `ReceivePvpNetwork`；运输重置调用 `ResetPvpNetwork`。UI动作同时绑定显示时的共享 epoch、revision、真实本机 PUID，游戏线程消费时复核三者，旧菜单点击无法应用到新场景。
 - 玩家 `MapHumanFrame` 与载具 tick 都在游戏线程调用 `PvpFrame`，内部以已验证的 `GameFrame` 去重并在网络/场景重置时清帧闩；无载具的步行任务仍会消费请求、更新锁点/武器和完成恢复。HQ / 房间 UI 线程只调用 `PvpRoomTick` 公告能力；任务场景释放前调用 `ResetPvp`。禁用插件也会恢复原生状态。
-- `tests/pvp_protocol_check.cpp` 是不依赖游戏的多节点网络模拟，覆盖严格字节解码、8 人名单、身份/权限校验、全 ACK、发送/Prepare/Apply/回滚失败、重放、缺版本、超时、Final 丢失与场景重置。
+- `tests/pvp_protocol_check.cpp` 是不依赖游戏的多节点网络模拟，覆盖严格字节解码、8 人名单、身份/权限校验、全 ACK、发送/Prepare/Apply/回滚失败、重放、缺版本、超时、Final 丢失与场景重置。新增三端九种单端失效组合（房主/两客机分别丢 Context、热禁用、仅本端 extension fault），验证本端立即恢复、其余端五秒内关闭；覆盖 Lease 和 ACK 各自三秒暂时 Send=false 后恢复、600 ms RTT 下持续启用与改队、旧 nonce/epoch/revision ACK 无法续租、延迟 Applied 后 Final 不重授租期、关闭事务超时回滚和关闭 Final 后晚到 Abort 均不复活，以及 v1/v2 混合握手明确拒绝。本轮 MSVC `/W4 /WX` 构建后的协议 fixture 共 14888 项检查通过。
 - `tests/pvp_native_fixture.cpp` 调用生产原生缓存/写入/恢复代码，100 次开关只创建一个锁定点，并检查真实 team/武器恢复、weak 引用释放、地址复用前先检查 control block，以及独立支援 NPC/空载载具改队、关闭/网络重置后恢复、forget、原生空载 team 5 重算仍保持 owner1/2、雷达友军行映射。
 - `tests/pvp_support_fixture.cpp` 直接测试生产归属桥，94 项检查覆盖 canonical/严格双解析/Coop 文本/封存世界、事务中拒绝、错误阵营、16 个对象逐项传递且无截断。
 - `tests/pvp_native_audit.py` 对本机受支持 `EDF.dll` 的雷达 owner/当前 team、固定友军行、锁定关系和武器发射 team 链完成只读字节审计。

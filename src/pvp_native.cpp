@@ -2,6 +2,7 @@
 #include "pvp_native.h"
 #include "pvp_controlled_npc.h"
 #include "enemy_control_radar.h"
+#include "enemy_control_identity.h"
 #include "coop_extension_api.h"
 #include "crew.h"
 #include "edf41classes.h"
@@ -49,13 +50,11 @@ pvp_protocol::State activeState{};
 unsigned generation=0;
 using ResolveFn=EDF6CoopResolveMissionPlayerPuidFn;
 
+enemy_identity::State Identity(const ObjRef& ref) noexcept {
+    return enemy_identity::Read(ref.obj,ref.ctrl,kObjectFlags+4);
+}
 bool Live(const ObjRef& ref) noexcept {
-    const auto* o=static_cast<const unsigned char*>(ref.obj);
-    const auto* ctrl=static_cast<const unsigned char*>(ref.ctrl);
-    // Saved references retain the native weak count. Inspect its still-owned
-    // control block before touching an object that its scene may have destroyed.
-    return ctrl && Readable(ctrl,16) && At<LONG>(ctrl,8)>0 && o &&
-        Readable(o,kObjectFlags+4) && At<const void*>(o,kSelfCtrl)==ctrl && !(o[0x18]&4);
+    return Identity(ref)==enemy_identity::State::current && !(At<unsigned char>(ref.obj,0x18)&4);
 }
 bool PuidValid(const char* text) noexcept {
     if(!text || !text[0] || !std::memchr(text,0,65))return false;
@@ -158,7 +157,10 @@ bool SupportDecoy(const void* object) noexcept {
     return object && Readable(object,8) && At<const void*>(object,0)==image+0x17D3F88;
 }
 bool AppendOwnedSupport(Collection& c,const pvp_protocol::State& state) noexcept {
-    for(const auto& owner:supportOwners)if(owner.ref && Live(owner.ref)) {
+    for(const auto& owner:supportOwners)if(owner.ref) {
+        const auto identity=Identity(owner.ref);
+        if(identity==enemy_identity::State::unknown)return false;
+        if(identity==enemy_identity::State::gone || !Live(owner.ref))continue;
         const int team=TeamFor(state,owner.puid);
         if(team!=1 && team!=2)continue; // disconnected owner: old Saved state is restored outside the desired set
         const auto* object=static_cast<const unsigned char*>(owner.ref.obj);
@@ -319,19 +321,31 @@ Saved* Reserve(const Desired& desired) noexcept {
     }
     return nullptr;
 }
-bool OwnLock(const Saved& item) noexcept {
-    if(!item.lockPoint || !Live(item.ref))return false;
+enum class LockLife { owned,absent,unknown };
+LockLife ReadLock(const Saved& item) noexcept {
+    if(!item.lockPoint)return LockLife::absent;
+    const auto identity=Identity(item.ref);
+    if(identity==enemy_identity::State::gone)return LockLife::absent;
+    if(identity!=enemy_identity::State::current || !Live(item.ref))return LockLife::unknown;
     const auto* object=static_cast<const unsigned char*>(item.ref.obj);
-    if(!Readable(object+0x360,0x20))return false;
+    if(!Readable(object+0x360,0x20))return LockLife::unknown;
     const auto* data=At<const unsigned char*>(object,0x368);
     const auto count=At<std::uint64_t>(object,0x378);
-    if(count>1024 || !Readable(data,static_cast<std::size_t>(count)*16))return false;
+    if(count>1024)return LockLife::unknown;
+    if(!count)return LockLife::absent;
+    if(!Readable(data,static_cast<std::size_t>(count)*16))return LockLife::unknown;
     for(std::uint64_t i=0;i<count;++i)if(At<const void*>(data,static_cast<std::size_t>(i)*16)==item.lockPoint)
-        return Readable(item.lockPoint,0x50) && At<const void*>(item.lockPoint,8)==item.ref.obj;
-    return false;
+        return Readable(item.lockPoint,0x50) && At<const void*>(item.lockPoint,8)==item.ref.obj ? LockLife::owned : LockLife::unknown;
+    return LockLife::absent;
 }
-void DisableLock(Saved& item) noexcept {
-    if(OwnLock(item))Put<unsigned char>(item.lockPoint,0x2A,0);
+bool OwnLock(const Saved& item) noexcept {return ReadLock(item)==LockLife::owned;}
+bool DisableLock(Saved& item) noexcept {
+    const auto life=ReadLock(item);
+    if(life==LockLife::unknown)return false;
+    if(life==LockLife::absent)return true;
+    if(!Readable(static_cast<unsigned char*>(item.lockPoint)+0x2A,1,true))return false;
+    Put<unsigned char>(item.lockPoint,0x2A,0);
+    return At<unsigned char>(item.lockPoint,0x2A)==0;
 }
 bool SetNativeTeam(const ObjRef& ref,int team,bool registered) noexcept {
     if(!Live(ref))return false;
@@ -458,7 +472,12 @@ bool Restore(Saved& item) noexcept {
     // Restore independent storage first, while the owner's weak identity is still retained.
     if(!RestoreEmitters(item.ref))return false;
     item.emittersApplied=false;
-    if(!Live(item.ref)){ReleaseWeak(item);return true;}
+    const auto identity=Identity(item.ref);
+    if(identity==enemy_identity::State::gone){ReleaseWeak(item);return true;}
+    // Positive strong owners with unreadable storage are not destruction. Keep
+    // the original fields and weak identity until a later frame can restore.
+    // Scene deletion alone is likewise not permission to re-register or forget.
+    if(identity!=enemy_identity::State::current || !Live(item.ref))return false;
     if(item.changed) {
         const int current=At<int>(item.ref.obj,kTeam);
         // A native revival during PVP stays live; recover its baseline logical side from 318.
@@ -472,7 +491,7 @@ bool Restore(Saved& item) noexcept {
         }
         item.changed=false;
     }
-    DisableLock(item);
+    if(!DisableLock(item))return false;
     // Retain a player's inert lock point with its weak identity until scene reset,
     // so toggling the mode reuses one native point rather than growing its list.
     // Vehicles/old crew have no added point and release their cache entry now.
@@ -485,7 +504,7 @@ bool RestoreAll() noexcept {
     return ok;
 }
 bool ApplyCollected(Collection& c) noexcept {
-    for(auto& owner:supportOwners)if(owner.ref && !Live(owner.ref))ReleaseSupportOwner(owner);
+    for(auto& owner:supportOwners)if(owner.ref && Identity(owner.ref)==enemy_identity::State::gone)ReleaseSupportOwner(owner);
     if(++generation==0){generation=1;for(auto& item:saved)item.wanted=0;}
     // Reserve the entire write set first; a capacity failure must change no object.
     for(unsigned i=0;i<c.objectsCount;++i) {
@@ -521,14 +540,17 @@ bool ApplyCollected(Collection& c) noexcept {
         if(!Weapons(desired,desired.team))return false;
         item.emittersApplied=true;
         if(desired.player) {
-            if(!OwnLock(item))item.lockPoint=edf41c::AddLockPoint(object);
+            const auto lockLife=ReadLock(item);
+            if(lockLife==LockLife::unknown)return false;
+            if(lockLife==LockLife::absent)item.lockPoint=edf41c::AddLockPoint(object);
             if(!OwnLock(item))return false;
             const auto* human=static_cast<const unsigned char*>(object);
             float position[3]={At<float>(human,kPosition),At<float>(human,kPosition+4)+1.2f,At<float>(human,kPosition+8)};
             if(!std::isfinite(position[0]+position[1]+position[2]))return false;
             edf41c::SetLockPoint(item.lockPoint,position);
             Put<unsigned char>(item.lockPoint,0x29,(At<std::uint32_t>(human,kObjectFlags)&kRegistered) ? 1 : 0);
-            Put<unsigned char>(item.lockPoint,0x2A,human[kDead] || At<int>(human,kTeam)==-1 ? 0 : 1);
+            const bool lockEnabled=!human[kDead] && At<int>(human,kTeam)!=-1;
+            Put<unsigned char>(item.lockPoint,0x2A,lockEnabled ? 1 : 0);
         }
     }
     // A player left a vehicle: restore that vehicle and its old crew immediately.
@@ -613,7 +635,7 @@ bool PvpNativeAttachSupport(const char* puid,const ObjRef* objects,unsigned coun
             unsigned selected=kMaxSupportOwned;
             for(unsigned j=0;j<kMaxSupportOwned;++j) {
                 bool reserved=false;for(unsigned k=0;k<additions;++k)reserved=reserved || slots[k]==j;
-                if(!reserved && (!supportOwners[j].ref || !Live(supportOwners[j].ref))){selected=j;break;}
+                if(!reserved && (!supportOwners[j].ref || Identity(supportOwners[j].ref)==enemy_identity::State::gone)){selected=j;break;}
             }
             if(selected==kMaxSupportOwned)return false;
             slots[additions++]=selected;
@@ -672,7 +694,7 @@ void PvpNativeForgetSupport(const ObjRef& object) noexcept {
     __try {
         if(Saved* item=Find(object)) {
             if(Restore(*item)){if(item->ref)ReleaseWeak(*item);}
-            else nativeFaulted=true;
+            else {nativeFaulted=true;return;}
         }
         for(auto& owner:supportOwners)if(owner.ref.obj==object.obj && owner.ref.ctrl==object.ctrl)ReleaseSupportOwner(owner);
     } __except(EXCEPTION_EXECUTE_HANDLER){nativeFaulted=true;}

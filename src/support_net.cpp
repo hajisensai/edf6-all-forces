@@ -26,6 +26,7 @@ namespace {
 support_net::Session session;
 support_net::Hooks hooks;
 EDF6CoopExtensionApi api{};
+EDF6CoopTrySendExtensionFn trySendExtension=nullptr;
 EDF6CoopSnapshot snapshot{};
 EDF6CoopPeer peers[support_net::kMaxPeers+1]{};
 HMODULE module=nullptr;
@@ -122,9 +123,14 @@ bool SendCommand(std::uint32_t peer,const void* bytes,std::size_t count) noexcep
         count<=EDF6COOP_EXTENSION_MAX_PAYLOAD && api.send &&
         api.send(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(count))!=0;
 }
+std::uint32_t TrySendCommand(std::uint32_t peer,const void* bytes,std::size_t count,std::uint32_t byteLimit,std::uint32_t packetLimit) noexcept {
+    if(!running || !peer || peer>snapshot.peerCount || !bytes || !count ||
+       count>EDF6COOP_EXTENSION_MAX_PAYLOAD || !trySendExtension)return EDF6COOP_EXTENSION_SEND_UNAVAILABLE;
+    return trySendExtension(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(count),byteLimit,packetLimit);
+}
 void CommandContext(ULONGLONG now) noexcept {
     const CommandNetworkContext context{running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
-        snapshot.peerCount,snapshot.local.id,&SendCommand};
+        snapshot.peerCount,snapshot.local.id,&SendCommand,&TrySendCommand};
     UpdateCommandNetwork(context,now);
     UpdatePvpNetwork(context,now);
     UpdateEnemyControlNetwork(context,now);
@@ -143,7 +149,7 @@ bool Resolve(ULONGLONG now) noexcept {
         if(!gate)NoteTransport("EDF6Coop mission admission gate not ready");
         return gate;
     }
-    api={};module=nullptr;transportAdmissionReady=nullptr;
+    api={};module=nullptr;transportAdmissionReady=nullptr;trySendExtension=nullptr;
     if(now<nextResolve)return false;nextResolve=now+1000;
     if(!current){NoteTransport("no EDF6Coop.dll loaded (map support online needs the companion EDF6Coop on every player)");return false;}
     const auto get=reinterpret_cast<EDF6CoopGetExtensionApiFn>(GetProcAddress(current,"EDF6CoopGetExtensionApi"));
@@ -154,6 +160,7 @@ bool Resolve(ULONGLONG now) noexcept {
         NoteTransport("EDF6Coop present but without a ready af-support extension (older EDF6Coop, or its admission gate is off)");
         api={};return false;
     }
+    trySendExtension=reinterpret_cast<EDF6CoopTrySendExtensionFn>(GetProcAddress(current,"EDF6CoopTrySendExtension"));
     module=current;return true;
 }
 bool Start(const EDF6CoopSnapshot& next,ULONGLONG now) noexcept {

@@ -23,6 +23,7 @@ import os
 import struct
 import sys
 from collections.abc import Callable
+from functools import partial
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
@@ -125,7 +126,14 @@ def registry() -> dict:
         return json.load(f)
 
 
-def _not_ours(led: ledger.Ledger, rel: str, sha: str) -> bool:
+def _legacy_consumers(led: ledger.Ledger, rel: str) -> bool:
+    entry = led.files.get(ledger.key(rel), {})
+    owners = set(entry.get('owners', ()))
+    return bool(owners) and owners <= DEPENDENT_OWNERS and not entry.get('writers')
+
+
+def _not_ours(led: ledger.Ledger, rel: str, sha: str,
+              legacy_variant: Callable[[str], bool] | None = None) -> bool:
     """A file in Mods this install must not write over: one no tool of ours wrote (no owner in the ledger), or one
     another of our tools holds with other bytes."""
     if not os.path.exists(led.disk(rel)):
@@ -139,9 +147,11 @@ def _not_ours(led: ledger.Ledger, rel: str, sha: str) -> bool:
         return call_weapons.owned_assets(os.path.dirname(led.mods)).get(ledger.key(rel)) != sha
     if led.changed(rel):
         return sha256_file(led.disk(rel)) != sha
-    if OWNER in owners and others and set(others) <= DEPENDENT_OWNERS:
-        # The primary writer may upgrade its own unedited object while the range
-        # still references it. A dependency is not an independent competing writer.
+    if set(others) <= DEPENDENT_OWNERS and (OWNER in owners or led.written_by(OWNER, rel)):
+        # Writer proof outlives its owner: an interrupted uninstall can leave only consumers.
+        return False
+    if _legacy_consumers(led, rel) and legacy_variant is not None and legacy_variant(rel):
+        # Old ledgers had no writer proof. Only an exact source-checked legal variant can migrate.
         return False
     return bool(others) and sha256_file(led.disk(rel)) != sha
 
@@ -150,6 +160,24 @@ def entries(reg: dict) -> list[dict]:
     """Every object the registry installs files for: the ported ones, then the stock SGOs whose missing files it ships
     ('stock_completions': EDF6's Monster501_King without its model archive; the object path is EDF6's own file)."""
     return reg['objects'] + reg.get('stock_completions', [])
+
+
+class _LegacyVariants:
+    """Verify old consumer-only model variants against source hashes once per path."""
+    def __init__(self, root: str, led: ledger.Ledger, reg: dict) -> None:
+        self.root, self.led, self.reg = root, led, reg
+        self.cache: dict[str, bool] = {}
+
+    def matches(self, sourced: dict, rel: str) -> bool:
+        if rel not in self.cache:
+            import edf41materials
+            source = game_source(self.root) if rel in sourced else None
+            data = read(rel, source) if source else read(rel)
+            if sha256(data) != self.reg['files'][rel]:
+                raise ValueError(f'{rel}: not the file the registry lists (a damaged install of the tools)')
+            planned = data if rel in self.reg.get('shared', {}) else edf41materials.transform_models(rel, data)
+            self.cache[rel] = sha256_file(self.led.disk(rel)) == sha256(planned)
+        return self.cache[rel]
 
 
 def unavailable(root: str) -> list[tuple[str, str]]:
@@ -161,9 +189,12 @@ def unavailable(root: str) -> list[tuple[str, str]]:
     led = ledger.Ledger(root)
     stock: _Stock | None = None
     out: list[tuple[str, str]] = []
+    variants = _LegacyVariants(root, led, reg)
     for obj in entries(reg):
         why: list[str] = []
-        foreign = [rel for rel in obj['files'] if _not_ours(led, rel, reg['files'][rel])]
+
+        legacy_variant = partial(variants.matches, stock_members(obj))
+        foreign = [rel for rel in obj['files'] if _not_ours(led, rel, reg['files'][rel], legacy_variant)]
         if foreign:
             why.append(f"another mod's file in Mods: {', '.join(foreign)}")
         sourced = {sha: src for srcs in stock_members(obj).values() for sha, src in srcs.items()}
@@ -203,6 +234,148 @@ def build(root: str, *, material_compat: bool = False) -> tuple[dict[str, bytes]
     return files, skipped
 
 
+def _root_names(obj: dict, files: dict[str, bytes]) -> set[str]:
+    """Canonical, configured spawn and byte-identical compatibility aliases are the same root identity."""
+    root = obj['object']
+    names = {root, obj.get('spawn_object', root)}
+    if root in files:
+        names.update(rel for rel in obj['files'] if rel.endswith('.SGO') and files.get(rel) == files[root])
+    return names
+
+
+def _required(obj: dict, files: dict[str, bytes], shader_cache: dict[str, set[str]]) -> set[str]:
+    required = {rel for rel in obj['files'] if rel in files}
+    if any(rel.startswith('SHADER/') for rel in files):
+        import edf41materials
+        for rel in required:
+            if rel not in shader_cache:
+                shader_cache[rel] = edf41materials.needed_names({rel: files[rel]})
+        names = set().union(*(shader_cache[rel] for rel in required))
+        required.update(rel for name in names
+                        if (rel := edf41materials.shader_path(name)) in files)
+    return required
+
+
+def _strings(value: object):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for child in value.values():
+            yield from _strings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _strings(child)
+
+
+def _installed_references(rel: str, data: bytes) -> set[str]:
+    """Read the previous installed graph, including shader aliases absent from old registries."""
+    if rel.endswith('.SGO'):
+        import sgo
+        return {ledger.key(text[5:]) for text in _strings(sgo.load(data=data))
+                if text.lower().startswith('app:/')}
+    import edf41materials
+    out = set()
+    for _name, raw in edf41materials._models(rel, data):
+        for material in mdb.mdb_read(raw).materials:
+            if material.shader.upper().startswith(edf41materials.PREFIX):
+                name = edf41materials.source_name(material.shader)
+                if name is not None:
+                    out.add(edf41materials.shader_path(name))
+    return out
+
+
+def _old_closure(led: ledger.Ledger, root: str, cache: dict[str, set[str] | None]) -> tuple[set[str], bool]:
+    remembered = led.dependency_closure(OWNER, root)
+    # A user can change a child model's shaders without changing the root SGO.
+    # Retain the last schema, but always merge the actual graph before dropping references.
+    held = (remembered or set()) | led.pending_dependencies(OWNER, root)
+    seen, pending = set(), [root]
+    complete = True
+    while pending:
+        rel = pending.pop()
+        if rel in seen or rel not in led.files:
+            continue
+        seen.add(rel)
+        held.add(rel)
+        if rel not in cache:
+            try:
+                cache[rel] = _installed_references(rel, _read_file(led.disk(rel)))
+            except (OSError, ValueError, AssertionError, IndexError, KeyError, struct.error):
+                # Unknown/edited legacy schemas cannot justify dropping any unproved dependency.
+                cache[rel] = None
+        if cache[rel] is None:
+            complete = False
+        else:
+            pending.extend(cache[rel] - seen)
+    return held, complete
+
+
+def _upgrade_root(led: ledger.Ledger, name: str, data: bytes) -> bool:
+    if led.changed(name):
+        return False
+    if OWNER in led.owners(name) or led.written_by(OWNER, name):
+        return True
+    return _legacy_consumers(led, name) and sha256_file(led.disk(name)) == sha256(data)
+
+
+def _consumer_upgrade(led: ledger.Ledger, reg: dict, files: dict[str, bytes]):
+    """Plan reference replacement before writing, preserving other roots' shared dependencies."""
+    cache: dict[str, set[str] | None] = {}
+    shader_cache: dict[str, set[str]] = {}
+    required, previous, held = {}, {}, {}
+    known_roots = {name for obj in entries(reg) for name in _root_names(obj, files)}
+    for obj in entries(reg):
+        if obj['object'] not in files:
+            continue
+        closure = _required(obj, files, shader_cache)
+        for name in _root_names(obj, files):
+            if name not in files:
+                continue
+            required[name] = closure
+            consumers = set(led.owners(name)) & DEPENDENT_OWNERS
+            if consumers and _upgrade_root(led, name, files[name]):
+                held[name] = consumers
+                previous[name] = _old_closure(led, name, cache)
+    releases = _consumer_releases(led, required, held, previous, known_roots)
+    return required, held, releases, {name: closure for name, (closure, _) in previous.items()}
+
+
+def _consumer_releases(led: ledger.Ledger, required: dict, held: dict, previous: dict, known_roots: set[str]):
+    cache: dict[str, set[str] | None] = {}
+    obsolete, protected = {owner: set() for owner in DEPENDENT_OWNERS}, {owner: set() for owner in DEPENDENT_OWNERS}
+    for name, consumers in held.items():
+        closure, complete = previous[name]
+        for owner in consumers:
+            obsolete[owner].update(closure)
+            protected[owner].update(required[name])
+            if not complete:
+                protected[owner].update(led.owned_by(owner))
+    old_members = set().union(*(closure for closure, _ in previous.values())) if previous else set()
+    for rel, entry in led.files.items():
+        if not rel.endswith('.SGO') or rel in held or (rel in old_members and rel not in known_roots):
+            continue
+        consumers = set(entry['owners']) & DEPENDENT_OWNERS
+        if not consumers:
+            continue
+        closure, complete = _old_closure(led, rel, cache)
+        for owner in consumers:
+            protected[owner].update(closure)
+            if not complete:
+                protected[owner].update(led.owned_by(owner))
+    return {owner: sorted(obsolete[owner] - protected[owner]) for owner in DEPENDENT_OWNERS}
+
+
+def _write_files(led: ledger.Ledger, files: dict[str, bytes], before: set[str]) -> list[str]:
+    paths = []
+    for rel, data in files.items():
+        if ledger.key(rel) in before and sha256_file(led.disk(rel)) == sha256(data):
+            if not led.written_by(OWNER, rel):
+                led.record(OWNER, rel, sha256(data))
+        else:
+            paths.append(led.put(OWNER, rel, data))
+    return paths
+
+
 def install(root: str, files: dict[str, bytes]) -> list[str]:
     """Writes `files` as OWNER's, but a file it already holds with these bytes (a second install writes nothing it
     need not: tools/test_installer_incremental.py); what it wrote before and does not now is released."""
@@ -212,29 +385,22 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
         if rel in files:
             led.record(call_weapons.OWNER, rel, sha)
     before = set(led.owned_by(OWNER))
-    dependencies: list[tuple[set[str], list[str]]] = []
-    for obj in entries(registry()):
-        held = set(led.owners(obj['object'])) & DEPENDENT_OWNERS
-        if not held or OWNER not in led.owners(obj['object']) or led.changed(obj['object']):
-            continue
-        required = [rel for rel in obj['files'] if rel in files]
-        if obj['object'] not in files:
-            continue
-        if any(rel.startswith('SHADER/') for rel in files):
-            import edf41materials
-            private = {rel: files[rel] for rel in required}
-            required += [rel for name in edf41materials.needed_names(private)
-                         if (rel := edf41materials.shader_path(name)) in files]
-        dependencies.append((held, required))
-    paths = []
-    for rel, data in files.items():
-        if ledger.key(rel) in before and sha256_file(led.disk(rel)) == sha256(data):
-            continue
-        paths.append(led.put(OWNER, rel, data))
-    for held, required in dependencies:
-        for dependent in sorted(held):
-            for rel in required:
+    required, held, releases, previous = _consumer_upgrade(led, registry(), files)
+    for name, closure in previous.items():
+        if closure != required[name] or led.pending_dependencies(OWNER, name):
+            if not led.written_by(OWNER, name):
+                led.record(OWNER, name, sha256_file(led.disk(name)))
+            led.stage_dependencies(OWNER, name, sorted(closure))
+    paths = _write_files(led, files, before)
+    for name, closure in required.items():
+        led.remember_dependencies(OWNER, name, sorted(closure))
+        for dependent in sorted(held.get(name, ())):
+            for rel in sorted(closure):
                 led.need(dependent, rel)
+    for dependent, rels in releases.items():
+        led.release(dependent, rels)
+    for name in required:
+        led.complete_dependencies(OWNER, name)
     led.release(OWNER, sorted(before - {ledger.key(rel) for rel in files}))
     return paths
 

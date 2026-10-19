@@ -189,4 +189,3 @@ int main(){
     CHECK(deleteCalls==deleted+1&&oldControl->weaks==0); // uncertain final delete is NEVER repeated
     std::printf("Unit guide: %d checks, %d failures\n",checks,failed);return failed?1:0;
 }
-

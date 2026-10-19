@@ -1,5 +1,6 @@
 // Source/runtime contracts and independent instruction audit: docs/enemy-control-deiroi.md.
 #include "enemy_control_deiroi.h"
+#include "enemy_control_identity.h"
 #include "enemy_control.h"
 #include "enemy_control_deiroi_net.h"
 #include "enemy_control_deiroi_entity_aim.h"
@@ -163,7 +164,9 @@ bool Enumerate(const NativeLease& lease,Entry* out,unsigned capacity,unsigned* t
             if(table==image+0x17AB4B0 || table==image+0x17AB770)continue; // original joint/toe, no weapon
             if(table!=image+kBatteryVtable)return false; // never silently drop an unknown configured part
             const Ref ref=Reference(child);
-            if(!Current(ref))continue;
+            const auto identity=enemy_identity::Read(ref.object,ref.control,0x355);
+            if(identity==enemy_identity::State::unknown)return false;
+            if(identity==enemy_identity::State::gone || (ref.object[0x18]&4) || ref.object[0x2E8])continue;
             if(!Battery(ref,owner))return false;
             if(*total>=kMaxBatteries)return false;
             if(out && *total<capacity)out[*total]={ref,(leg<<16)|part};
@@ -399,7 +402,11 @@ bool Select(const NativeLease& lease,unsigned key,Entry* entry) noexcept {
 Gun* GunFor(Root& root,const Entry& entry) noexcept {
     Gun* free=nullptr;
     for(auto& gun:root.guns) {
-        if(gun.ref.object && !Current(gun.ref,false)) {if(!Drop(gun.ref))return nullptr;gun={};}
+        if(gun.ref.object) {
+            const auto identity=enemy_identity::Read(gun.ref.object,gun.ref.control,0x355);
+            if(identity==enemy_identity::State::unknown)return nullptr;
+            if(identity==enemy_identity::State::gone){if(!Drop(gun.ref))return nullptr;gun={};}
+        }
         if(gun.ref.object==entry.ref.object && gun.ref.control==entry.ref.control && gun.key==entry.key)return &gun;
         if(gun.ref.object && gun.key==entry.key)return nullptr; // reused ordinal never adopts another identity
         if(!gun.ref.object && !free)free=&gun;

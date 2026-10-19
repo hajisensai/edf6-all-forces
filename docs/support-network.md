@@ -69,7 +69,7 @@ mission/roster changes and fail closed at exhaustion. Native hash space remains
 the game's own finite identity space, not a mathematical collision guarantee.
 Callback tokens are separate process-monotonic 64-bit identities and never reset
 with the wire epoch; a late failure callback cannot cancel a new transaction that
-reuses wire slot 1. Both dispatchers retain tokens as keys, not array indexes.
+reuses the same storage slot. Both dispatchers retain tokens as keys, not array indexes.
 
 `EDF6AF_GetMissionParticipants` publishes an atomic frozen current-world PUID
 set and local world epoch. It is sealed only after the native all-team visitor
@@ -122,11 +122,52 @@ this reserved catalog. An active migration for the same vehicle is deduplicated.
 To replace a dead/failed crew, report failure for its previous transaction first;
 the cancelled record permits a fresh transaction with new derived human IDs.
 
-The protocol v2 limits are 1024 remote peers, 16 units per deployment, and 128 transactions
-per mission epoch. Cancelled records remain tombstones; they are not evicted to
-make room for replayed IDs. Player requests are limited to one per two seconds,
-and only one transaction plans or commits at a time. Existing live support may
-remain active while the next request deploys.
+Host-prepared dynamic drone children use a separate explicit admission intent,
+reserved catalog 16, and exactly one canonical submarine/carrier drone resource.
+Their plan retains the registered parent identity, carrier slot, requester and
+team. All peers must announce `kDetailPvpSupport` (1), `kDetailDynamicDrones` (2)
+and `kDetailTransactionGenerations` (4) in the authenticated hello/welcome detail
+word before admission. A PvP-only or dynamic-only older build cannot receive
+these children. The host validates the native reservation before allocating a
+transaction, then uses the same prepare, create and activation barriers as root
+support. A pending child serializes its own parent/slot without occupying the
+ordinary map or rescue request channels.
+
+The protocol v2 limits are 1024 remote peers, 16 units per deployment, and 128
+live transaction storage slots. In a room where every peer announces
+`kDetailTransactionGenerations`, the 32-bit wire transaction is an epoch-unique,
+monotonically increasing identity; `(id - 1) % 128` selects its bounded storage
+slot. Allocation skips busy slots, so a long-lived root cannot strand free
+capacity. Only a cancelled transaction whose destruction has been acknowledged
+by every current peer releases its slot. Generation-capable peers acknowledge
+processing the host's CANCEL with `RESULT !ok` carrying the reserved
+`kCancelAckIndex` (15). A guest-local failure RESULT, including its periodic
+retries, carries an ordinary RequestStatus and cannot satisfy that barrier. A
+missing cancellation or explicit ACK retains that reservation while reliable
+cancellation retries continue, even if enqueue fails without changing the session
+generation. Ordinary support,
+rescue, mission crew and dynamic children share this live capacity; repeated
+cancelled drones no longer exhaust a whole mission's support budget.
+
+Each client retains the latest identity of every slot after cancellation. An
+older BEGIN, unit, prepare, commit, activate, result or ACK cannot reopen that
+identity or affect its replacement. A client accepts a newer identity only on an
+authenticated host BEGIN/cancel after processing its previous cancellation. Wire
+identities, process-monotonic callback tokens and native object ordinals remain
+separate, and each fails closed at exhaustion rather than wrapping. Generation
+capability is rechecked before prepare/create, including ordinary and rescue
+transactions whose wire identity exceeds 128.
+
+An older peer's v2 decoder bounds transaction IDs to 128. With any such peer,
+ordinary support keeps the original 128-per-epoch tombstone budget and never
+emits a higher ID; dynamic children are refused at admission. An old peer's
+unmarked cancellation response can settle the legacy retry loop but never permits
+slot reuse, even after a capability refresh. The wire layout/version remains v2, and this detail
+bit negotiates transaction storage only; it does not advertise an independent
+PvP command/state protocol. Ordinary player requests remain two seconds apart;
+one ordinary deployment plans/commits at a time, alongside supported per-requester
+rescue and per-parent/slot child channels. Existing live support may remain active
+while another request deploys.
 
 ## Validation and limits
 
@@ -134,7 +175,12 @@ remain active while the next request deploys.
 independent peers and tests matching IDs, 16-unit requests, unauthorized senders,
 replay, stale mission handshakes, incomplete plans, missing resources, incremental
 planning, native partial failure, queue failures, cancellation retransmission and
-existing-vehicle migration. `support_net_runtime_test` executes the production
+existing-vehicle migration. Its production three-peer codec fixture also covers
+384 sequential child cancellations, 128 concurrent live transactions, cancellation
+and ACK loss, local failure retransmission while host CANCEL enqueue fails in the
+same session generation, repeated same-slot reuse with 127 other roots alive, stale messages
+at each barrier, old host/guest callbacks, pre-BEGIN cancellation, generation
+capability withdrawal and legacy decoder limits. `support_net_runtime_test` executes the production
 dynamic-ABI bridge against a local recording provider, including generation races
 and teardown. The main DLL is compiled with MSVC `/W4 /WX`.
 

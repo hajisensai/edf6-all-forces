@@ -8,13 +8,17 @@
 // Generation is opaque/local; only an authenticated host Welcome creates the
 // shared wire epoch. At most eight total members keep every datagram < 1024 B.
 // Transport contract: successful sends are reliable and ordered; permanent
-// delivery/link failure must invalidate Context (the Coop 2.6 extension API
-// provides this). The final safety broadcast relies on that contract.
+// delivery/link failure must invalidate the affected Context. That invalidation
+// can be local: enabled commits additionally require fresh ACKs from every
+// participant, so an isolated extension fault cannot leave the others enabled.
 namespace pvp_protocol {
-constexpr std::uint8_t kVersion = 1;
+constexpr std::uint8_t kVersion = 2;
 constexpr std::size_t kMaxMembers = 8;
 constexpr std::size_t kMaxWireBytes = 32 + kMaxMembers * 66;
 constexpr std::uint64_t kTimeoutMs = 5000;
+constexpr std::uint64_t kLeaseProbeMs = 1000;
+constexpr std::uint64_t kLeaseTimeoutMs = 5000;
+constexpr std::size_t kLeaseProbeWindow = kLeaseTimeoutMs / kLeaseProbeMs + 1;
 struct Entry { char puid[65]{}; std::uint8_t team = 2; };
 struct State { bool enabled = false; std::uint8_t count = 0; Entry entries[kMaxMembers]{}; };
 struct Context {
@@ -36,7 +40,7 @@ enum class Result {
 };
 enum class Kind : std::uint8_t {
     Hello = 1, Welcome, RequestMode, RequestTeam, Prepare, Prepared,
-    Apply, Applied, Final, Abort, Fault, FailSafe, Reject
+    Apply, Applied, Final, Abort, Fault, FailSafe, Reject, Lease, LeaseAck
 };
 
 inline bool ValidPuid(const char* value) noexcept {
@@ -106,7 +110,7 @@ inline bool Decode(const void* buffer, std::size_t n, Message& msg) noexcept {
     if (!buffer || n < 32 || n > kMaxWireBytes) return false;
     const auto* in = static_cast<const std::uint8_t*>(buffer);
     if (Get(in, 4) != 0x56504641u || in[4] != kVersion || Get(in + 6, 2) != n ||
-        Get(in + 28, 4) != Checksum(in, n) || in[5] < 1 || in[5] > static_cast<std::uint8_t>(Kind::Reject)) return false;
+        Get(in + 28, 4) != Checksum(in, n) || in[5] < 1 || in[5] > static_cast<std::uint8_t>(Kind::LeaseAck)) return false;
     Message next{};
     next.kind = static_cast<Kind>(in[5]);
     next.epoch = Get(in + 8, 8); next.revision = static_cast<std::uint32_t>(Get(in + 16, 4));
@@ -162,6 +166,7 @@ public:
         broken_ = false; phase_ = Phase::None;
         revision_ = transaction_ = committedToken_ = exposedRevision_ = previousRevision_ = localToken_ = 0;
         sharedEpoch_ = deadline_ = lastHello_ = 0;
+        StopLease();
         result_ = restored ? Result::SessionLost : Result::ApplyFailed;
         ++seed_;
     }
@@ -192,9 +197,10 @@ public:
         }
         if (broken_) return;
         if (Busy() && now >= deadline_) {
-            if (context_.host) Abort(Result::TimedOut);
+            if (context_.host) Abort(Result::TimedOut, now);
             else Fail(now);
         }
+        UpdateLease(now);
         if (!Ready() && (!lastHello_ || now - lastHello_ >= 1000)) SendHello(now);
     }
     bool RequestMode(bool enabled, std::uint64_t now) noexcept {
@@ -214,6 +220,7 @@ public:
         State disabled = state_; disabled.enabled = false;
         const bool restored = Baseline(disabled);
         state_ = disabled; phase_ = Phase::None; saved_ = requestPending_ = false;
+        StopLease();
         result_ = restored ? Result::Faulted : Result::ApplyFailed;
         if (sharedEpoch_) {
             Message msg = Control(Kind::Fault); msg.token = transaction_ ? transaction_ : NextToken();
@@ -224,7 +231,12 @@ public:
                  std::size_t size, std::uint64_t now) noexcept {
         if (!context_.ready || broken_ || !peer || peer > context_.peerCount || !ValidPuid(authenticatedPuid)) return false;
         Message msg{};
-        if (!wire::Decode(data, size, msg)) return false;
+        if (!wire::Decode(data, size, msg)) {
+            const auto* bytes = static_cast<const std::uint8_t*>(data);
+            if (bytes && size >= 5 && wire::Get(bytes, 4) == 0x56504641u && bytes[4] != kVersion)
+                result_ = Result::ProtocolError;
+            return false;
+        }
         if (msg.kind == Kind::Hello) return Hello(peer, authenticatedPuid, msg, now);
         if (!peers_[peer][0] || std::strcmp(peers_[peer], authenticatedPuid)) return false;
         if (msg.kind == Kind::Welcome) return Welcome(peer, msg);
@@ -232,6 +244,27 @@ public:
         if (msg.epoch != sharedEpoch_) return false;
         const bool safetyDuringRestore = restorePending_ && initialized_ && AllKnown() && fromHost && msg.kind == Kind::FailSafe;
         if (!Ready() && !safetyDuringRestore) return false;
+        if (msg.kind == Kind::Lease || msg.kind == Kind::LeaseAck) {
+            if (!state_.enabled || msg.revision != revision_) return false;
+            if (msg.kind == Kind::Lease) {
+                Message ack = Control(Kind::LeaseAck); ack.token = msg.token;
+                // Admission can be temporarily flow-controlled. A missed ACK
+                // does not renew the sender's lease or reset this session.
+                return Send(peer, ack);
+            }
+            if (!leaseArmed_ || leaseRevision_ != revision_ || now >= leaseDeadlines_[peer]) return false;
+            // Measure freshness from our challenge, not the arrival of an old
+            // delayed ACK. Each nonce can renew exactly once.
+            for (auto& probe : leaseProbes_[peer]) {
+                if (probe.token != msg.token) continue;
+                const auto renewed = probe.issued + kLeaseTimeoutMs;
+                probe = {};
+                if (now >= renewed) return false;
+                if (renewed > leaseDeadlines_[peer]) leaseDeadlines_[peer] = renewed;
+                return true;
+            }
+            return false;
+        }
         if (msg.kind == Kind::Fault) {
             const bool lostFinal = revision_ && msg.revision == revision_ - 1 && msg.token == committedToken_;
             if (!context_.host || (msg.revision != revision_ && !lostFinal)) return false;
@@ -243,6 +276,7 @@ public:
             const bool ok = Baseline(disabled);
             state_ = disabled; revision_ = msg.revision; transaction_ = committedToken_ = msg.token;
             phase_ = Phase::None; saved_ = requestPending_ = false; result_ = ok ? Result::Faulted : Result::ApplyFailed;
+            StopLease();
             return true;
         }
         if (msg.kind == Kind::Reject) {
@@ -281,11 +315,12 @@ public:
         }
         if (msg.kind == Kind::Abort) {
             if (!fromHost || !saved_ || msg.token != transaction_ || msg.revision != previousRevision_ + 1) return false;
-            if (!Rollback(Result::Aborted)) Fail(now); return true;
+            if (!Rollback(Result::Aborted, now)) Fail(now); return true;
         }
         if (msg.kind == Kind::Final) {
             if (!fromHost || phase_ != Phase::Applied || !Matches(msg)) return false;
-            revision_ = msg.revision; committedToken_ = transaction_; phase_ = Phase::None; result_ = Result::Complete; return true;
+            revision_ = msg.revision; committedToken_ = transaction_; phase_ = Phase::None; result_ = Result::Complete;
+            UpdateLease(now); return true;
         }
         if (msg.kind == Kind::Apply) {
             if (!fromHost || phase_ != Phase::Prepared || !preparedOk_ || !Matches(msg)) return false;
@@ -299,7 +334,7 @@ public:
         if (msg.kind == Kind::Prepared || msg.kind == Kind::Applied) {
             const Phase expected = msg.kind == Kind::Prepared ? Phase::Preparing : Phase::Applying;
             if (!context_.host || phase_ != expected || !Matches(msg) || acknowledgements_[peer]) return false;
-            if (!msg.status) { Abort(msg.kind == Kind::Prepared ? Result::PrepareFailed : Result::ApplyFailed); return true; }
+            if (!msg.status) { Abort(msg.kind == Kind::Prepared ? Result::PrepareFailed : Result::ApplyFailed, now); return true; }
             acknowledgements_[peer] = true;
             if (AllAcknowledged()) Advance(now);
             return true;
@@ -317,6 +352,54 @@ private:
     Phase phase_ = Phase::None; Result result_ = Result::Idle;
     std::uint32_t revision_ = 0, transaction_ = 0, committedToken_ = 0, exposedRevision_ = 0, previousRevision_ = 0, localToken_ = 0, seed_ = 0, serial_ = 0;
     std::uint64_t sharedEpoch_ = 0, deadline_ = 0, lastHello_ = 0;
+    struct LeaseProbe { std::uint32_t token = 0; std::uint64_t issued = 0; };
+    bool leaseArmed_ = false;
+    std::uint32_t leaseSerial_ = 0, leaseRevision_ = 0;
+    std::size_t leaseRound_ = 0;
+    LeaseProbe leaseProbes_[kMaxMembers][kLeaseProbeWindow]{};
+    std::uint64_t nextLeaseProbe_ = 0, leaseDeadlines_[kMaxMembers]{};
+    void StopLease() noexcept {
+        leaseArmed_ = false; leaseRevision_ = 0; leaseRound_ = 0; nextLeaseProbe_ = 0;
+        for (auto& peer : leaseProbes_) for (auto& probe : peer) probe = {};
+        std::memset(leaseDeadlines_, 0, sizeof(leaseDeadlines_));
+    }
+    void UpdateLease(std::uint64_t now) noexcept {
+        if (!Ready()) { StopLease(); return; }
+        if (!state_.enabled) {
+            // A disable Apply can still roll back to enabled. Retain its old
+            // deadlines until Final, rather than granting fresh time on Abort.
+            if (phase_ == Phase::None) StopLease();
+            return;
+        }
+        if (!leaseArmed_) {
+            if (phase_ != Phase::None) return; // first enable is still uncommitted
+            StopLease(); leaseArmed_ = true; leaseRevision_ = revision_;
+            for (std::uint32_t i = 1; i <= context_.peerCount; ++i) leaseDeadlines_[i] = now + kLeaseTimeoutMs;
+        } else if (leaseRevision_ != revision_) {
+            // A delayed Final/rollback is not fresh evidence of peer liveness.
+            // Change the nonce domain without extending any confirmed deadline.
+            leaseRevision_ = revision_; leaseRound_ = 0; nextLeaseProbe_ = 0;
+            for (auto& peer : leaseProbes_) for (auto& probe : peer) probe = {};
+        }
+        if (LeaseExpired(now)) { Fail(now); StopLease(); return; }
+        if (now < nextLeaseProbe_) return;
+        nextLeaseProbe_ = now + kLeaseProbeMs;
+        for (std::uint32_t i = 1; i <= context_.peerCount; ++i) {
+            if (!++leaseSerial_) ++leaseSerial_;
+            Message msg = Control(Kind::Lease); msg.token = leaseSerial_;
+            auto& probe = leaseProbes_[i][leaseRound_]; probe = {};
+            // Keep a bounded window of independently fresh challenges: delayed
+            // ACKs remain valid, while temporary probe/ACK admission refusal is
+            // naturally covered by the next round without extending any nonce.
+            if (Send(i, msg)) probe = {msg.token, now};
+        }
+        leaseRound_ = (leaseRound_ + 1) % kLeaseProbeWindow;
+    }
+    bool LeaseExpired(std::uint64_t now) const noexcept {
+        if (leaseArmed_) for (std::uint32_t i = 1; i <= context_.peerCount; ++i)
+            if (now >= leaseDeadlines_[i]) return true;
+        return false;
+    }
     bool Baseline(const State& disabled) noexcept {
         const bool ok = !hooks_.Apply || hooks_.Apply(hooks_.user, disabled);
         restorePending_ = !ok;
@@ -427,7 +510,7 @@ private:
         transaction_ = NextToken(); phase_ = Phase::Preparing; deadline_ = now + kTimeoutMs; result_ = Result::Pending;
         std::memset(acknowledgements_, 0, sizeof(acknowledgements_));
         Message msg = Control(Kind::Prepare); msg.revision = revision_ + 1; msg.state = candidate;
-        if (!Broadcast(msg)) { Abort(Result::SendFailed); return false; }
+        if (!Broadcast(msg)) { Abort(Result::SendFailed, now); return false; }
         if (!context_.peerCount) Advance(now);
         return result_ == Result::Pending || result_ == Result::Complete;
     }
@@ -440,23 +523,32 @@ private:
     }
     void Advance(std::uint64_t now) noexcept {
         if (phase_ == Phase::Preparing) {
-            if (hooks_.Apply && !hooks_.Apply(hooks_.user, pending_)) { Abort(Result::ApplyFailed); return; }
+            if (hooks_.Apply && !hooks_.Apply(hooks_.user, pending_)) { Abort(Result::ApplyFailed, now); return; }
             state_ = pending_; phase_ = Phase::Applying; deadline_ = now + kTimeoutMs;
             std::memset(acknowledgements_, 0, sizeof(acknowledgements_));
             Message msg = Control(Kind::Apply); msg.revision = previousRevision_ + 1;
-            if (!Broadcast(msg)) { Abort(Result::SendFailed); return; }
+            if (!Broadcast(msg)) { Abort(Result::SendFailed, now); return; }
             if (context_.peerCount) return;
         }
         if (phase_ == Phase::Applying) {
             Message msg = Control(Kind::Final); msg.revision = previousRevision_ + 1;
             exposedRevision_ = msg.revision;
-            if (!Broadcast(msg)) { Abort(Result::SendFailed); return; }
+            if (!Broadcast(msg)) { Abort(Result::SendFailed, now); return; }
             revision_ = msg.revision; committedToken_ = transaction_; phase_ = Phase::None; result_ = Result::Complete;
+            UpdateLease(now);
         }
     }
-    bool Rollback(Result reason) noexcept {
+    bool Rollback(Result reason, std::uint64_t now) noexcept {
+        if (previous_.enabled && (!leaseArmed_ || LeaseExpired(now))) {
+            State disabled = previous_; disabled.enabled = false;
+            const bool ok = Baseline(disabled);
+            state_ = disabled; revision_ = previousRevision_; phase_ = Phase::None; saved_ = requestPending_ = false;
+            result_ = ok ? Result::Faulted : Result::ApplyFailed;
+            return false; // never reactivate an enabled state whose quorum expired
+        }
         const bool ok = !hooks_.Apply || hooks_.Apply(hooks_.user, previous_);
         state_ = previous_; revision_ = previousRevision_; phase_ = Phase::None; saved_ = requestPending_ = false;
+        if (!state_.enabled) StopLease();
         result_ = ok ? reason : Result::ApplyFailed;
         if (!ok) {
             State disabled = previous_; disabled.enabled = false;
@@ -465,16 +557,17 @@ private:
         }
         return ok;
     }
-    void Abort(Result reason) noexcept {
+    void Abort(Result reason, std::uint64_t now) noexcept {
         if (!saved_) return;
         Message msg = Control(Kind::Abort); msg.revision = previousRevision_ + 1;
-        const bool sent = Broadcast(msg); const bool restored = Rollback(reason);
+        const bool sent = Broadcast(msg); const bool restored = Rollback(reason, now);
         if (!sent || !restored) FailSafe();
     }
     void FailSafe() noexcept {
         State disabled = state_; disabled.enabled = false;
         const bool ok = Baseline(disabled);
         state_ = disabled; phase_ = Phase::None; saved_ = requestPending_ = false;
+        StopLease();
         // A partially sent Final may have advanced one peer even when Abort
         // also failed. Safety must advance beyond every exposed final revision.
         if (exposedRevision_ > revision_) revision_ = exposedRevision_;

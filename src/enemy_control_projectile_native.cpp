@@ -312,15 +312,15 @@ bool RestoreNativeProjectileJournal(NativeProjectileJournal& j) noexcept {
         j={};return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){j.uncertain=true;j.busy=false;return false;}
 }
-void* WithNativeProjectileSampleInPlace(NativeProjectileJournal& j,const NativeLease& l,const void* local,float* muzzle,const NativeProjectileSample& s,NativeProjectileCreateFn create,void* user) noexcept {
+NativeProjectileOutcome WithNativeProjectileOutcomeInPlace(NativeProjectileJournal& j,const NativeLease& l,const void* local,float* muzzle,const NativeProjectileSample& s,NativeProjectileCreateFn create,void* user) noexcept {
     using namespace projectile_native;
     __try {
-        if(!NativeProjectileJournalEmpty(j) || !create || !CanPrepareNativeProjectileSample(l,local,muzzle,s))return nullptr;
+        if(!NativeProjectileJournalEmpty(j) || !create || !CanPrepareNativeProjectileSample(l,local,muzzle,s))return {};
         Ref refs[3]={{l.object,static_cast<unsigned char*>(const_cast<void*>(l.control))},{},{}};Ref lock{};
-        if(!ResolveActor(s.target,refs+1) || !ResolveLock(refs[1],s.lock,&lock) || !ResolveActor(s.extra,refs+2))return nullptr;
+        if(!ResolveActor(s.target,refs+1) || !ResolveLock(refs[1],s.lock,&lock) || !ResolveActor(s.extra,refs+2))return {};
         j.ownerObject=l.object;j.ownerControl=l.control;j.busy=true;
         for(unsigned i=0;i<3;++i)if(refs[i].object) {
-            if(!Pin(refs[i])){j.busy=false;RestoreNativeProjectileJournal(j);return nullptr;}
+            if(!Pin(refs[i])){j.busy=false;RestoreNativeProjectileJournal(j);return {};}
             j.objects[i]=refs[i].object;j.controls[i]=refs[i].control;j.heldMask|=1u<<i;
         }
         j.copyEntered=true;Fn<CopyFn>(0x32EF10)(j.descriptor,local);j.made=true;j.copyEntered=false;
@@ -332,8 +332,12 @@ void* WithNativeProjectileSampleInPlace(NativeProjectileJournal& j,const NativeL
         for(unsigned i=0;i<kProjectileBytes;++i)Put<unsigned char>(j.descriptor,kProjectileScalar8[i],s.bytes[i]);
         Put<std::uint16_t>(j.descriptor,0x178,s.scalar178);Put<std::uint32_t>(j.descriptor,0x1A0,s.random);Put<std::uint32_t>(j.descriptor,0x1A4,s.shot);Put<std::uint32_t>(j.descriptor,0x1A8,s.flags);
         std::memcpy(j.matrix,s.matrix,64);Put<float*>(j.descriptor,8,j.matrix);j.createEntered=true;j.created=create(user,j.matrix,j.descriptor);j.createEntered=false;j.busy=false;
-        void* result=j.created;return RestoreNativeProjectileJournal(j) ? result : nullptr;
-    } __except(EXCEPTION_EXECUTE_HANDLER){j.uncertain=true;j.busy=false;return nullptr;}
+        void* result=j.created;const bool cleaned=RestoreNativeProjectileJournal(j);return {result,cleaned};
+    } __except(EXCEPTION_EXECUTE_HANDLER){j.uncertain=true;j.busy=false;return {j.created,false};}
+}
+void* WithNativeProjectileSampleInPlace(NativeProjectileJournal& j,const NativeLease& l,const void* local,float* muzzle,const NativeProjectileSample& s,NativeProjectileCreateFn create,void* user) noexcept {
+    const auto outcome=WithNativeProjectileOutcomeInPlace(j,l,local,muzzle,s,create,user);
+    return outcome.cleanupComplete ? outcome.created : nullptr;
 }
 bool NativeProjectileJournalsEmpty(const NativeLease& l) noexcept {
     for(const auto& j:projectile_native::journals)if(j.ownerObject==l.object && j.ownerControl==l.control && !NativeProjectileJournalEmpty(j))return false;return true;
@@ -346,11 +350,15 @@ void* WithNativeProjectileSample(const NativeLease& l,const void* local,float* m
     for(auto& j:projectile_native::journals)if(NativeProjectileJournalEmpty(j))return WithNativeProjectileSampleInPlace(j,l,local,muzzle,s,create,user);return nullptr;
 }
 void* ReplayNativeProjectileSampleInPlace(NativeProjectileJournal& j,const NativeLease& l,void* factory,const void* local,float* muzzle,const NativeProjectileSample& s) noexcept {
+    const auto outcome=ReplayNativeProjectileOutcomeInPlace(j,l,factory,local,muzzle,s);
+    return outcome.cleanupComplete ? outcome.created : nullptr;
+}
+NativeProjectileOutcome ReplayNativeProjectileOutcomeInPlace(NativeProjectileJournal& j,const NativeLease& l,void* factory,const void* local,float* muzzle,const NativeProjectileSample& s) noexcept {
     using namespace projectile_native;
-    __try {if(!CanReplayNativeProjectileSample(l,factory,local,muzzle,s) || !Readable(image+0x20B2958,8))return nullptr;
-        Unit unit{At<void*>(image+0x20B2958,0),factory};if(!Readable(unit.manager,0xCB4))return nullptr;
-        return WithNativeProjectileSampleInPlace(j,l,local,muzzle,s,&UnitCreate,&unit);}
-    __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
+    __try {if(!CanReplayNativeProjectileSample(l,factory,local,muzzle,s) || !Readable(image+0x20B2958,8))return {};
+        Unit unit{At<void*>(image+0x20B2958,0),factory};if(!Readable(unit.manager,0xCB4))return {};
+        return WithNativeProjectileOutcomeInPlace(j,l,local,muzzle,s,&UnitCreate,&unit);}
+    __except(EXCEPTION_EXECUTE_HANDLER){return {};}
 }
 void* ReplayNativeProjectileSample(const NativeLease& l,void* factory,const void* local,float* muzzle,const NativeProjectileSample& s) noexcept {
     using namespace projectile_native;

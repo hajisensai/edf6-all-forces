@@ -1,5 +1,6 @@
 // Supported EDF.dll main action contract. No process address or opaque CAS object crosses the wire.
 #include "enemy_control_action_native.h"
+#include "enemy_control_identity.h"
 #include "enemy_control_deiroi_net.h"
 #include "enemy_control_projectile_native.h"
 #include "crew.h"
@@ -690,9 +691,9 @@ bool RestoreNativeActions(const NativeLease& l) noexcept {
         if(b->mainApplying || !ReleaseMainTargets(*b) || !NativeActionsEmpty(l))return false;
         if(b->contract && b->contract->family==Family::deiroi && !RestoreDeiroiAcceptedActions(l))return false;
         for(unsigned i=0;i<extensionCount;++i)if((b->extensionMask&(1u<<i)) && !extensions[i].Restore(l))return false;
-        if(!Readable(b->control,16))return false;
-        if(At<LONG>(b->control,8)<=0){*b={};return true;}
-        if(!Readable(b->object,0x38) || At<const void*>(b->object,0x30)!=b->control){*b={};return true;}
+        const auto identity=enemy_identity::Read(b->object,b->control);
+        if(identity==enemy_identity::State::unknown)return false;
+        if(identity==enemy_identity::State::gone){*b={};return true;}
         auto* actor=static_cast<unsigned char*>(const_cast<void*>(b->object));
         if(b->temporaryGate) {
             if(!Readable(actor+0x1168,4,true))return false;Put<std::uint32_t>(actor,0x1168,b->savedGate);b->temporaryGate=false;

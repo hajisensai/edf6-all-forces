@@ -17,6 +17,7 @@ unsigned actors=0,expectedActors=0;
 const char* actorPuids[4]={"host","client","host","lobby-only"};
 std::uint64_t generation=1;
 unsigned spawnCount=0,destroyCount=0,sendCount=0,peerCount=0;
+unsigned boundedSendCalls=0;std::uint32_t boundedSendResult=EDF6COOP_EXTENSION_SEND_ACCEPTED;
 unsigned commandPackets=0,commandContexts=0;
 unsigned enemyControlPackets=0,enemyControlContexts=0,enemyControlResets=0,subPackets=0,subContexts=0,subResets=0;
 unsigned carrierPackets=0,carrierContexts=0,carrierResets=0;bool reenterCarrier=false;
@@ -156,6 +157,11 @@ std::uint32_t EDF6COOP_CALL Send(std::uint64_t expected,const EDF6CoopPeer*,cons
     Check(expected==generation,"send bound to observed transport generation");
     Message m;Check(Decode(bytes,size,m),"production sends canonical protocol bytes");++sendCount;return 1;
 }
+std::uint32_t EDF6COOP_CALL TrySend(std::uint64_t expected,const EDF6CoopPeer* target,const void* bytes,std::uint32_t size,std::uint32_t byteLimit,std::uint32_t packetLimit) {
+    Check(expected==generation && target && !std::strcmp(target->id,"client"),"bounded send binds the actual roster identity and current SDK generation");
+    Check(bytes && size==4 && byteLimit==768*1024 && packetLimit==768,"bounded send forwards the caller's real SDK ceilings exactly");
+    ++boundedSendCalls;return boundedSendResult;
+}
 std::uint32_t EDF6COOP_CALL Poll(std::uint64_t expected,EDF6CoopPeer* sender,void* bytes,std::uint32_t cap,std::uint32_t* out) {
     Check(expected==generation,"poll bound to observed transport generation");
     *out=0;if(incoming.empty() || cap<kWireSize)return 0;
@@ -175,6 +181,7 @@ std::uint32_t __cdecl ResolvePlayer(std::int32_t index,EDF6CoopPeer* out) {
 std::uint32_t __cdecl TransportGateReady() { return 1; }
 FARPROC WINAPI Proc(HMODULE,LPCSTR name) {
     if(!std::strcmp(name,"EDF6CoopGetExtensionApi"))return reinterpret_cast<FARPROC>(&Api);
+    if(!std::strcmp(name,"EDF6CoopTrySendExtension"))return reinterpret_cast<FARPROC>(&TrySend);
     if(!std::strcmp(name,"EOS_ProductUserId_ToString"))return reinterpret_cast<FARPROC>(&PuidToString);
     if(!std::strcmp(name,"EDF6Coop_ResolveMissionPlayerPuid"))return reinterpret_cast<FARPROC>(&ResolvePlayer);
     if(!std::strcmp(name,"EDF6Coop_MissionAdmissionReady"))return reinterpret_cast<FARPROC>(&TransportGateReady);
@@ -288,6 +295,16 @@ int main() {
     Packet packet{};packet.sender=Peer("intruder");Check(Encode(hello,packet.bytes,sizeof(packet.bytes)),"encode handshake");
     incoming.push_back(packet);Step();Check(sendCount==0,"unknown authenticated sender absent from roster cannot handshake");
     packet.sender=Peer("client");incoming.push_back(packet);Step();Check(sendCount==1,"roster peer receives welcome");
+    static_assert(sizeof(EDF6CoopExtensionApi)==40,"bounded send preserves the legacy support ABI");
+    const unsigned char flowPayload[4]={'E','C','T','L'};
+    for(auto status:{EDF6COOP_EXTENSION_SEND_ACCEPTED,EDF6COOP_EXTENSION_SEND_WOULD_BLOCK,EDF6COOP_EXTENSION_SEND_UNAVAILABLE}) {
+        boundedSendResult=status;Check(crew::TrySendCommand(1,flowPayload,sizeof(flowPayload),768*1024,768)==status,"production wrapper retains all three SDK outcomes");
+    }
+    Check(boundedSendCalls==3 && crew::running && crew::snapshot.generation==generation,"wouldBlock never changes the room or consumes the ordinary support sender");
+    const auto optional=crew::trySendExtension;crew::trySendExtension=nullptr;
+    Check(crew::TrySendCommand(1,flowPayload,sizeof(flowPayload),768*1024,768)==EDF6COOP_EXTENSION_SEND_UNAVAILABLE && crew::running,"missing optional flow ABI disables only high-volume sends");
+    crew::trySendExtension=optional;
+
     auto commandPacket=packet;std::memcpy(commandPacket.bytes,"NCMD",4);incoming.push_back(commandPacket);Step();
     Check(commandPackets==1 && commandContexts>0 && sendCount==1,"shared extension poll routes command packets once without consuming a support message");
     auto markPacket=packet;std::memcpy(markPacket.bytes,"QMRK",4);incoming.push_back(markPacket);Step();

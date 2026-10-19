@@ -4,7 +4,7 @@
 
 ## 原生与 Coop 边界
 
-敌体操控必须获得本机 `EDF6CoopGetExtensionCapacity` version1 的只读证明：1024 字节负载、至少 32 个远端、4096 条 inbox、1 MiB pending 与扩展拥塞 backlog、可靠有序单路由。每个 peer 在 ECTL Hello/Welcome 中独立声明该能力；缺少查询、旧 256 条/256 KiB SDK 或任一成员不符，在线操控明确不可用且不回退为本地敌人。普通支援继续使用原有 ExtensionApi version1，不因新增能力查询而被禁用。配套实现位于独立 Coop 分支，实际限制由导出 API 与 transport 使用同一组常量。
+敌体操控必须获得本机 `EDF6CoopGetExtensionCapacity` version1 的只读证明：1024 字节负载、至少 32 个远端、4096 条 inbox、1 MiB pending 与扩展拥塞 backlog、可靠有序单路由及原子 bounded TrySend。每个 peer 在 ECTL Hello/Welcome 中独立声明该能力；缺少查询、旧 256 条/256 KiB SDK 或任一成员不符，在线操控明确不可用且不回退为本地敌人。普通支援继续使用原有 ExtensionApi version1，不因新增能力查询而被禁用。配套实现位于独立 Coop 分支，实际限制由导出 API 与 transport 使用同一组常量。
 
 本次只读核对的 EDF6Coop 为 `bbef06cb8c7f8445c1e8edd7eb42a9382649c05f`（本机 `edf6-wt-1018-coop-release-2.6.0`）。以下事实不能由“能广播坐标”替代：
 
@@ -16,7 +16,7 @@
 
 ## 身份和 authority
 
-网络采用 ECTL/version3、capability 4：191 字节头、实际负载和 1 字节保留尾，严格长度为 192 + inputSize，最大 704 字节（SDK 上限为 1024）。控制消息为 192 字节，132 字节语义输入为 324 字节，最多 512 字节的完整 pose/action 批一次装入同一封 SDK 消息。旧版拆成 3–4 封的实际技能结果会放大 SDK 收件队列和重试流量；当前 decoder 拒绝旧版本、尾随 padding、截断和非规范分片元数据。
+网络采用 ECTL/version3、capability 5：191 字节头、实际负载和 1 字节保留尾，严格长度为 192 + inputSize，最大 704 字节（SDK 上限为 1024）。控制消息为 192 字节，132 字节语义输入为 324 字节，最多 512 字节的完整 pose/action 批一次装入同一封 SDK 消息。旧版拆成 3–4 封的实际技能结果会放大 SDK 收件队列和重试流量；当前 decoder 拒绝旧版本、尾随 padding、截断和非规范分片元数据。
 
 控制权是独立的 lease，绑定本局 epoch、认证 PUID、原玩家 Soldier NativeNetId、目标敌体 NativeNetId 与实际 profile hash。不会修改敌体 `NetworkObject +0x128` 来伪装客户端拥有者；原敌体仍由原生 host 发送位姿、判定其权威结果并派生子对象身份。
 
@@ -30,7 +30,7 @@ fullFocusId 只表示原生目标身份，瞄准 origin/方向由真实受控体
 
 ## 开始、输入和退出
 
-所有成员先宣告理解 ECTL/version3、capability 4（包括输入版本 3、原子物理状态同步和已接受动作确认）；旧 capability 不能开始控制。协议最多 32 个远端 peer、16 个协议 lease；原生 core 可有更小容量，满额必须明确拒绝，绝不截断或只在某端附体。
+所有成员先宣告理解 ECTL/version3、capability 5（包括输入版本 3、原子物理状态同步和已接受动作确认）；旧 capability 不能开始控制。协议最多 32 个远端 peer、16 个协议 lease；原生 core 可有更小容量，满额必须明确拒绝，绝不截断或只在某端附体。
 
 开始是内部同步屏障：Prepare（只读验证）→全员确认→Begin（捕获原始状态、零输入与暂停自主 AI）→全员确认→Activate（授予原生控制）→全员确认→最终输入 grant。尚未 grant 时不应用任何玩家技能。任一端失败则全员退出并恢复各自实际修改过的状态。
 
@@ -54,7 +54,7 @@ controller 的 sequence/seed 不进入 payload。host 分配单调输入序号�
 
 host 不会因发送而再次执行自己的动作。guest 收齐一批后调用真实原生应用函数，只有整批 `applied` 才确认；累计 ACK 的序号仅表示此前所有批都实际按序应用，房主还会验证这些批确已发给该 peer；`pending` 保留步骤游标并在下一 tick 重试，同一个 action sequence 不重演已完成步骤；`failed` 或 5 秒超时启动全员恢复。重复或丢失 ACK 仅重新确认，不重放已应用技能。每 lease 最多 128 批在途，全 session 共享 1024 批有界存储（16 位池索引），覆盖核心最多 8 个同时控制者各自完整窗口；guest 缓冲后按序实际应用，后续 ACK 可先登记，但只连续释放已全员确认的队头，超限明确失败，不静默丢弃动作。
 
-生产桥只在有窗口与存储余量时读取原生 ledger，背压期间 host 继续记录自己的实际步骤；一次最多 512 字节，将多个步骤打包并流水交付。发送器由真实共享 game frame 推进，最小间隔 16 ms，每个目标 peer 每帧最多 32 封 Action，跨 lease/peer 轮转，全局硬上界为 1024 封；guest 每 32 ms 最多发送一封回执，合并同 peer 的 Prepared/Started/Activated/DrainAck/Restored/Fault/累计 Applied ACK；孤立的拒绝/无 lease 回执与该批共享同一个单封预算。host 对全部条目先验证不可变 lease+请求 nonce 绑定，再按本机封存的完整 spec 处理；同批故障先于成功终止状态。每条 link 另有 768 封已发送未确认 Action 和严格小于 768 KiB 的字节额度：按实际网络包长度加 192 字节最坏 DirectNet 认证 framing 估算，只在真实 Applied ACK 后归还。正常 quota/额度耗尽只保留原动作池，不能报 SendFailed 或丢已接受结果。生产模式明确要求真实 SDK ReliableOrdered 单路由，每个 Action 只提交一次，丢包重传由 SDK 完成；不会用新的应用层副本重复占用队列。待应用的 native 结果仍在每个 game tick 重试，保留真实 5 秒故障期限。原生模块还必须证明 remote 输入/原生网络消息的确权与去重，不能一边独立按键触发技能、一边又重放 host 事件。Deiroi 的原生不同网络模式、charge/fire/cancel 与迟到消息尤其需要独立处理。
+生产桥只在有窗口与存储余量时读取原生 ledger，背压期间 host 继续记录自己的实际步骤；一次最多 512 字节，将多个步骤打包并流水交付。发送器由真实共享 game frame 推进，最小间隔 16 ms，每个目标 peer 每帧最多 32 封 Action，跨 lease/peer 轮转，全局硬上界为 1024 封；guest 每 32 ms 最多发送一封回执，合并同 peer 的 Prepared/Started/Activated/DrainAck/Restored/Fault/累计 Applied ACK；孤立的拒绝/无 lease 回执与该批共享同一个单封预算。host 对全部条目先验证不可变 lease+请求 nonce 绑定，再按本机封存的完整 spec 处理；同批故障先于成功终止状态。每条 link 另有 768 封已发送未确认 Action 和严格小于 768 KiB 的字节额度：按实际网络包长度加 192 字节最坏 DirectNet 认证 framing 估算，只在真实 Applied ACK 后归还。正常 quota/额度耗尽只保留原动作池，不能报 SendFailed 或丢已接受结果。Applied ACK 只证明原生动作已应用，不证明 DirectNet 独立 transport ACK 已抵达；发送前另经 EDF6CoopTrySendExtension 在 SDK 锁内按真实完整 datagram 与共享 pending 作原子准入，限制 768 KiB/768 包。wouldBlock 不改变连接代际、不消费 SDK sequence，原动作保留到真实队列恢复可写；unavailable 才是发送失败。这两层门仅保证 Action 发送不会自行越过真实 768 KiB/768 包上限，不能把它解释为 SDK 对所有业务预留了内存。普通游戏可靠包与其它扩展仍共用同一 pending；若这些背景业务自行把 shared pending 推过 1 MiB，旧布尔扩展接口仍会明确失败并关闭该扩展代际，本实现不承诺这种全局过载下继续正常控制。生产模式明确要求真实 SDK ReliableOrdered 单路由，每个 Action 只提交一次，丢包重传由 SDK 完成；不会用新的应用层副本重复占用队列。待应用的 native 结果仍在每个 game tick 重试，保留真实 5 秒故障期限。原生模块还必须证明 remote 输入/原生网络消息的确权与去重，不能一边独立按键触发技能、一边又重放 host 事件。Deiroi 的原生不同网络模式、charge/fire/cancel 与迟到消息尤其需要独立处理。
 
 入场同一时刻只推进一个 Prepare/Begin/Activate 屏障，其它同时申请明确返回忙碌状态且不修改原生角色，完成后可重试。退出可以并行，控制回执以一封批次回复，避免 32 个远端分别对 8 个角色逐条回复造成收件溢出。
 
@@ -68,6 +68,6 @@ Restore 返回失败时保留 lease/spec、原始 vptr/输入/AI 基线及 weak 
 
 `tests/enemy_control_protocol_test.cpp` 使用真实 Encode/Decode 的三端模拟覆盖身份、屏障、输入序号/seed、分屏、请求结果关联、退出/恢复失败及旧包。`tests/enemy_control_net_input_test.cpp` 检查规范输入 codec；`tests/enemy_control_pose_protocol_test.cpp` 复用基础协议回归并验证认证房主、完整身份绑定、原子组包、防重放和物理应用/恢复失败；`tests/enemy_control_pose_codec_test.cpp` 验证五类规范状态。`tests/enemy_control_action_protocol_test.cpp` 验证原子动作批、applied/pending 累计 ACK、重传、失败、身份、队列上限、八个实际控制者同时满窗、16 位共享池索引回绕、全局/逐 peer 发送额度与 SDK framing 字节额度，以及真实 ACK 恢复后的完整排空。`tests/enemy_control_net_fixture.cpp` 包含生产桥，替换游戏入口/对象和 core 来验证真实桥的身份、authority、前端输入/取消、状态读回与代际处理。
 
-`tools/enemy_control_trace_pack.py` 将生产原生 fixture 导出的 typed hex 轨迹规范化，`tests/enemy_control_provider_trace_test.cpp` 通过生产协议与 codec 重放。轨迹由原生 ABI seam 的实际非空 factory 返回、真实 Capture/Encode 和已核实的资源参数生成，保留空 factory 不产生结果、native invocation clock 与未解析 VM 参数的区别；它们不是实机录制。模型包含 250/600 ms RTT、有序恢复延迟、Applied ACK 丢失、配套 SDK 4096 条 inbox、共享帧最多 512 次 poll 和 1 MiB 完整 datagram pending 字节门，并在实际 backlog/in-flight 未空时开始正常退出。各原生 producer fixture 的导出、打包和重放由 CTest fixture 依赖连接，可从全新 checkout 的 build 目录重建，不依赖临时快照。
+`tools/enemy_control_trace_pack.py` 将生产原生 fixture 导出的 typed hex 轨迹规范化，`tests/enemy_control_provider_trace_test.cpp` 通过生产协议与 codec 重放。轨迹由原生 ABI seam 的实际非空 factory 返回、真实 Capture/Encode 和已核实的资源参数生成，保留空 factory 不产生结果、native invocation clock 与未解析 VM 参数的区别；它们不是实机录制。模型包含 250/600 ms RTT、有序恢复延迟、Applied ACK 丢失、配套 SDK 4096 条 inbox、共享帧最多 512 次 poll 和 1 MiB 完整 datagram pending 字节门，背景档位 0/32/64 KiB 是每条 link 固定保留的共享 pending（按 1 KiB 完整 datagram 计数），并非每秒发送速率；Action 同时经过新的真实 pending 字节/包数量准入模型。模型在实际 backlog/in-flight 未空时开始正常退出。各原生 producer fixture 的导出、打包和重放由 CTest fixture 依赖连接，可从全新 checkout 的 build 目录重建，不依赖临时快照。
 
 这些测试不证明每个敌种的真实技能、网络动画、抓取/近战/GDI 之外的攻击、原生物理观感或两台实际游戏中的完整行为。原生能力以 adapter 准入和只读契约审计为准，完整实机验收必须按具体 profile/技能进行。本次没有给游戏发键、安装 DLL 或运行双机游戏。

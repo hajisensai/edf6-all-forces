@@ -14,10 +14,14 @@ import acb
 import awe
 import edf41_sound
 import edf41_sounds
+import edf41_sound_fallbacks
 import cpk
+import dsgo
 import gamedir
 import make_edf41_objects as objects
 import make_edf41_weapons as weapons
+import make_edf5_weapons as weapons5
+import gen_edf41_sound_fallbacks
 import rootcpk
 import sgo
 
@@ -63,6 +67,63 @@ def bank(names: bytes, cues: bytes) -> bytes:
 
 
 class Edf41SoundLifecycleTests(unittest.TestCase):
+    def test_fallback_generation_rejects_unbounded_and_zero_length_native_choices(self) -> None:
+        own = dsgo.Node(['Weapon_BasicShoot', 'Bullet', dsgo.Node([0.0, 'source_shot'])],
+                        {0: 'xgs_scene_object_class', 1: 'AmmoClass', 2: 'FireSe'})
+        weapon = {'id': 'ported', 'category': 0, 'class': 'Weapon_BasicShoot', 'level': 1.0,
+                  'template': 'nearest_loop', 'weapon': dsgo.dump(own)}
+        class Native:
+            rows = [[name, 'app:/weapon/' + name + '.SGO', 0, 1.0, float(i)] for i, name in
+                    enumerate(('nearest_loop', 'silent', 'finite'))]
+            @staticmethod
+            def weapon(path: str) -> dict:
+                cue = path.rsplit('.', 1)[0]
+                return {'xgs_scene_object_class': 'Weapon_BasicShoot', 'AmmoClass': 'Bullet',
+                        'FireSe': [0.0, cue]}
+        lengths = {'nearest_loop': 0xffffffff, 'silent': 0, 'finite': 1250}
+        result = edf41_sound_fallbacks.build([weapon], Native(), {'source_shot'}, lengths)
+        self.assertEqual(result['source_shot']['cue'], 'finite')
+        self.assertEqual(result['source_shot']['field'], ['FireSe', 1])
+        self.assertEqual(dsgo.to_py(dsgo.load(weapon['weapon']))['FireSe'], [0.0, 'source_shot'])
+        with self.assertRaisesRegex(ValueError, 'no finite resident'):
+            edf41_sound_fallbacks.build([weapon], Native(), {'source_shot'},
+                                       {'nearest_loop': 0xffffffff, 'silent': 0})
+
+    def test_optional_bank_fallback_table_is_generated_and_always_finite(self) -> None:
+        registry = json.loads((ROOT / 'edf41port' / 'weapons.json').read_text(encoding='utf-8'))
+        fallbacks = registry['sound_fallbacks']
+        self.assertTrue(fallbacks)
+        self.assertEqual((ROOT / 'src' / 'edf41_sound_fallbacks.inc').read_text(encoding='utf-8'),
+                         gen_edf41_sound_fallbacks.expected())
+        for source, entry in fallbacks.items():
+            self.assertNotEqual(source, entry['cue'])
+            self.assertTrue(0 < entry['length_ms'] < 0xffffffff, source)
+
+    def test_real_missing_bank_fallbacks_cover_every_imported_weapon_cue(self) -> None:
+        game6 = Path(rootcpk.DEFAULT_GAME)
+        game41 = gamedir.find_other(gamedir.EDF41, str(game6))
+        resident = game6 / 'SOUND' / 'PC' / 'TIKYUUX_SE.ACB'
+        if not game41 or not resident.is_file():
+            self.skipTest('real games unavailable')
+        native_lengths = acb.cue_lengths(resident.read_bytes())
+        source = set(acb.cue_names((Path(game41) / 'SOUND' / 'PC' / 'TIKYUUX_SE.ACB').read_bytes()))
+        registry = json.loads((ROOT / 'edf41port' / 'weapons.json').read_text(encoding='utf-8'))
+        missing = {text for weapon in registry['weapons']
+                   for text in weapons5._strings(dsgo.to_py(dsgo.load(weapon['weapon'])))
+                   if text in source and text not in native_lengths}
+        fallbacks = registry['sound_fallbacks']
+        self.assertEqual(missing, set(fallbacks), 'standalone installs must not leave imported cues unresolved')
+        native = rootcpk.Game(str(game6))
+        for source, entry in fallbacks.items():
+            self.assertIn(entry['cue'], native_lengths, (source, 'fallback is not resident'))
+            self.assertEqual(entry['length_ms'], native_lengths[entry['cue']])
+            self.assertTrue(0 < native_lengths[entry['cue']] < 0xffffffff,
+                            (source, 'one-shot callers cannot own an unbounded fallback'))
+            value = sgo.load(data=native.read('WEAPON', entry['template'] + '.SGO'))
+            for key in entry['field']:
+                value = value[key]
+            self.assertEqual(value, entry['cue'], (source, 'recorded native weapon field differs'))
+
     def test_cue_lengths_follow_indices_not_name_order_or_wave_loop_flags(self) -> None:
         names = utf([('CueName', 'str'), ('CueIndex', 'H')], [
             {'CueName': 'one_shot', 'CueIndex': 1}, {'CueName': 'sustained', 'CueIndex': 0}])

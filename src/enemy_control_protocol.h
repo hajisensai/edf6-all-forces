@@ -12,7 +12,7 @@
 #include <limits>
 
 namespace enemy_control_protocol {
-constexpr std::uint32_t kMagic=0x4c544345u,kCapability=4;
+constexpr std::uint32_t kMagic=0x4c544345u,kCapability=5;
 constexpr std::uint8_t kVersion=3;
 constexpr std::size_t kMaxPeers=32,kMaxLeases=16,kMaxInputBytes=512,kChunkBytes=512,kWirePrefixBytes=192,kWireBytes=kWirePrefixBytes+kMaxInputBytes,kMaxPoseBytes=512,kMaxActions=1024,kActionWindow=128;
 using ActionIndex=std::uint16_t;
@@ -49,6 +49,7 @@ struct RequestView {
     std::uint64_t request=0;NativeId source{},target{};std::uint64_t profileHash=0,lease=0;
     Result result=Result::Idle;bool cancelPending=false;
 };
+enum class SendResult : std::uint8_t { unavailable,accepted,wouldBlock };
 struct Hooks {
     void* user=nullptr;
     bool (*Send)(void*,std::uint32_t,const void*,std::size_t)=nullptr;
@@ -70,6 +71,8 @@ struct Hooks {
     bool (*AbortActions)(void*,std::uint64_t,const LeaseSpec&)=nullptr;
     // Host normalizes a target which died/became illegal after the owner's sample, before validating/broadcasting.
     bool (*NormalizeInput)(void*,std::uint64_t,const LeaseSpec&,const InputMeta&,void*,std::size_t)=nullptr;
+    // Real SDK backlog, independent of native Applied ACKs. wouldBlock retains the queued action unchanged.
+    SendResult (*TrySendAction)(void*,std::uint32_t,const void*,std::size_t)=nullptr;
 };
 inline bool ValidPuid(const char* value) noexcept {
     if(!value || !value[0])return false;
@@ -611,7 +614,13 @@ inline int Protocol::SendOneAction(Lease& l,std::uint64_t now,std::array<std::si
             if(paced_ && (actionPeerBytes_[peer]+credit>=kActionPeerByteCredits || actionPeerPackets_[peer]>=kActionPeerPacketCredits))continue;
             Message m;m.kind=Kind::Action;m.lease=l.view.id;m.request=l.request;m.sequence=action.sequence;m.spec=l.view.spec;
             m.capability=1u<<16;m.inputSize=static_cast<std::uint16_t>(action.size);std::memcpy(m.input.data(),action.bytes.data(),action.size);
-            if(!Send(peer,m)){blocked_=true;End(l,Result::SendFailed,now);return -1;}
+            SendResult sent=SendResult::unavailable;
+            if(paced_ && hooks_.TrySendAction) {
+                m.epoch=context_.epoch;std::uint8_t bytes[kWireBytes]{};const auto size=EncodedSize(m);
+                if(live_ && Encode(m,bytes,size))sent=hooks_.TrySendAction(hooks_.user,peer,bytes,size);
+            } else sent=Send(peer,m) ? SendResult::accepted : SendResult::unavailable;
+            if(sent==SendResult::wouldBlock){if(quota)(*quota)[peer]=0;continue;}
+            if(sent!=SendResult::accepted){blocked_=true;End(l,Result::SendFailed,now);return -1;}
             action.sent[peer]=true;action.sentAt[peer]=now;l.actionRetry=now;
             if(paced_){actionPeerBytes_[peer]+=credit;action.creditBytes[peer]+=static_cast<std::uint32_t>(credit);++actionPeerPackets_[peer];++action.creditPackets[peer];}
             if(quota)--(*quota)[peer];return 1;

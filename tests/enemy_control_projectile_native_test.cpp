@@ -226,7 +226,8 @@ void RegistryChecks(){
 void JournalChecks(){
  Setup();auto s=Sample();side=1;NativeProjectileJournal j{};
  CHECK(NativeProjectileJournalEmpty(j) && RestoreNativeProjectileJournal(j));
- CHECK(WithNativeProjectileSampleInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr)==manager+32 && NativeProjectileJournalEmpty(j) && Balanced());
+ auto outcome=WithNativeProjectileOutcomeInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr);
+ CHECK(outcome.created==manager+32 && outcome.cleanupComplete && NativeProjectileJournalEmpty(j) && Balanced());
  returnNull=true;CHECK(!WithNativeProjectileSampleInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr) && NativeProjectileJournalEmpty(j) && Balanced());returnNull=false;
  createFault=true;const auto dtors=destroyCalls;
  CHECK(!WithNativeProjectileSampleInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr));createFault=false;
@@ -240,17 +241,20 @@ void JournalChecks(){
  CHECK(j.copyEntered && j.uncertain && !j.made && j.heldMask==7 && createCalls==0 && destroyCalls==0 && At<LONG>(actors[6].control,12)==21);
  CHECK(At<const void*>(j.descriptor,0x38)==actors[6].body && !RestoreNativeProjectileJournal(j));DisposeFixture(j,true);CHECK(Balanced());
  Setup();s=Sample();side=1;j={};destroyFault=true;
- CHECK(!WithNativeProjectileSampleInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr));destroyFault=false;
+ outcome=WithNativeProjectileOutcomeInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr);destroyFault=false;
+ CHECK(outcome.created==manager+32 && !outcome.cleanupComplete);
  CHECK(j.created==manager+32 && j.made && j.cleanupEntered && j.uncertain && j.heldMask==7 && destroyCalls==1);
  CHECK(At<const void*>(j.descriptor,8)==j.matrix && !std::memcmp(j.matrix,s.matrix,64) && (reinterpret_cast<std::uintptr_t>(j.matrix)&15u)==0);
  CHECK(!RestoreNativeProjectileJournal(j) && destroyCalls==1 && j.created==manager+32);
  CHECK(!WithNativeProjectileSampleInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr) && journalEmits==1 && destroyCalls==1);DisposeFixture(j);CHECK(Balanced());
  Setup();s=Sample();side=1;j={};auto* r=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));CHECK(r!=nullptr);if(!r)return;
  Put<LONG>(r,0,3);Put<LONG>(r,4,7);Put<void*>(r,8,payloads[1][0]);Put<void*>(templates[1],0x180,r);Put<void*>(templates[1],0x188,payloads[1][0]);protectAtCreate=true;
- CHECK(!WithNativeProjectileSampleInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr));protectAtCreate=false;
+ outcome=WithNativeProjectileOutcomeInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr);protectAtCreate=false;
+ CHECK(outcome.created==manager+32 && !outcome.cleanupComplete);
  CHECK(j.created==manager+32 && j.made && j.heldMask==7 && !j.cleanupEntered && !j.uncertain && destroyCalls==0);
  CHECK(!RestoreNativeProjectileJournal(j) && destroyCalls==0);const auto readonlyEmits=journalEmits;
- CHECK(!WithNativeProjectileSampleInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr) && journalEmits==readonlyEmits);
+ outcome=WithNativeProjectileOutcomeInPlace(j,Lease(1),templates[1],muzzle[1],s,&JournalCreate,nullptr);
+ CHECK(!outcome.created && !outcome.cleanupComplete && journalEmits==readonlyEmits);
  DWORD old=0;CHECK(VirtualProtect(r,0x1000,PAGE_READWRITE,&old)!=0);Sleep(20);
  CHECK(RestoreNativeProjectileJournal(j) && NativeProjectileJournalEmpty(j) && destroyCalls==1 && Balanced());
  CHECK(At<LONG>(r,0)==3 && At<LONG>(r,4)==7 && RestoreNativeProjectileJournal(j) && destroyCalls==1);VirtualFree(r,0,MEM_RELEASE);

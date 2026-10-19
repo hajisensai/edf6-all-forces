@@ -228,9 +228,3 @@ int main() {
     CHECK(EnemyControlBossPvpReset());CHECK(controlDeletes==1);VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     std::printf("enemy_control_pvp_boss_core_test: %u checks, %u failed\n",checks,failures);return failures ? 1 : 0;
 }
-
-
-
-
-
-

@@ -50,7 +50,7 @@ struct Beam {
 };
 struct Stream {
     Ref root{};const NativeProfile* profile=nullptr;bool held=false,retired=false,authority=false,faulted=false,quiescing=false,executing=false,cleanupUncertain=false;
-    Beam beams[kParts*kMuzzles]{};Event waiting{};std::uint64_t waitingHash=0;bool waitingHeld=false,waitingReady=false,aborting=false;unsigned beamDepth=0;NativeProjectileJournal journal{};Ref postBullet{};bool postHeld=false,postCommitted=false,postDeleted=false;Part parts[kParts]{};std::uint64_t next=1,applied=0;unsigned head=0,count=0;
+    Beam beams[kParts*kMuzzles]{};Event waiting{};std::uint64_t waitingHash=0;bool waitingHeld=false,waitingReady=false,aborting=false;unsigned beamDepth=0;NativeProjectileJournal journal{};Ref postBullet{};bool postHeld=false,postCommitted=false,postDeleted=false,postPending=false;Event postEvent{};std::uint64_t postHash=0;void* postNode=nullptr;Part parts[kParts]{};std::uint64_t next=1,applied=0;unsigned head=0,count=0;
     Pending queue[kQueued]{};Receipt receipts[kQueued]{};
 };
 static_assert(std::is_trivially_copyable_v<Stream>,"stream reset requires a value-only local ledger");
@@ -111,6 +111,15 @@ bool FinishPostReference(Stream& s,bool rollback) noexcept {
         if(!DropStrong(s,s.postBullet,&s.postHeld))return false;
         s.postBullet={};s.postCommitted=s.postDeleted=false;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){s.faulted=true;s.cleanupUncertain=true;return false;}
+}
+bool DiscardPendingPost(Stream& s) noexcept {
+    if(s.cleanupUncertain || !FinishPostReference(s,false))return false;
+    if(s.postNode) {
+        auto* node=s.postNode;s.postNode=nullptr;s.cleanupUncertain=true;
+        __try {Fn<void(__fastcall*)(void*,std::size_t)>(0x12D85EC)(node,0x20);s.cleanupUncertain=false;}
+        __except(EXCEPTION_EXECUTE_HANDLER){s.faulted=true;return false;}
+    }
+    s.postPending=false;s.postEvent={};s.postHash=0;return true;
 }
 void DropWeak(unsigned char* control) {
     if(control && !InterlockedDecrement(reinterpret_cast<volatile LONG*>(control+12)))
@@ -239,7 +248,13 @@ unsigned char* Muzzle(const Part& p,unsigned ordinal) noexcept {
     auto* first=At<unsigned char*>(p.battery.object,0x278);return Readable(first,(ordinal+1)*0xD0,true) ? first+ordinal*0xD0 : nullptr;
 }
 bool Before(const NativeLease& l,bool authority,Input*) noexcept {
-    __try {if(NativeActionQuiescing(l.object)){if(auto* old=Find(l))old->quiescing=true;return true;}if(auto* old=Find(l))if(old->retired){if(old->executing || old->beamDepth)return false;ResetStream(*old);}auto* s=Bind(l,authority);if(s && s->authority)ScanBeams(*s);return s && !s->faulted && !s->quiescing && !s->beamDepth && !s->cleanupUncertain && NativeProjectileJournalEmpty(s->journal) && !s->postHeld && Parts(*s);}
+    __try {
+        if(NativeActionQuiescing(l.object)){if(auto* old=Find(l))old->quiescing=true;return true;}
+        if(auto* old=Find(l))if(old->retired){if(old->executing || old->beamDepth)return false;ResetStream(*old);}
+        auto* s=Find(l);if(!s)s=Bind(l,authority);if(s && s->authority)ScanBeams(*s);
+        if(!s || s->authority!=authority || s->faulted || s->quiescing || s->executing || s->beamDepth || s->cleanupUncertain)return false;
+        return s->postPending || (NativeProjectileJournalEmpty(s->journal) && !s->postHeld && Parts(*s));
+    }
     __except(EXCEPTION_EXECUTE_HANDLER){if(auto* s=Find(l))s->faulted=true;return false;}
 }
 void Put(unsigned char*& p,std::uint64_t n,unsigned bytes) noexcept {for(unsigned i=0;i<bytes;++i)*p++=static_cast<unsigned char>(n>>(8*i));}
@@ -473,8 +488,10 @@ void* Invoke(void* manager,const float* matrix,void* factory,void* descriptor) {
     // Ownership is independent of stream lifetime. A still-live closing role
     // must suppress even after this extension's Restore released its stream.
     if(NativeActionQuiescing(l.object))return nullptr;if(auto* old=Find(l))if(old->retired)return nullptr;
-    auto* s=Bind(l,authority);if(!s || s->faulted || s->quiescing || s->cleanupUncertain || !NativeProjectileJournalEmpty(s->journal) || s->postHeld || !Parts(*s)){if(s)s->faulted=true;return nullptr;}
+    // A guest's local battery still ticks while an accepted birth waits for
+    // descriptor cleanup. Its suppressed fire attempt is not another outcome.
     if(!authority)return nullptr;
+    auto* s=Bind(l,authority);if(!s || s->faulted || s->quiescing || s->cleanupUncertain || !NativeProjectileJournalEmpty(s->journal) || s->postHeld || !Parts(*s)){if(s)s->faulted=true;return nullptr;}
     bool beamCapacity=false;for(const auto& b:s->beams)if(!b.held)beamCapacity=true;if(!beamCapacity || s->count==kQueued || !s->next || s->executing){s->faulted=true;return nullptr;}
     Event event{};event.serial=s->next;event.spawn=event.serial;bool found=false;
     for(unsigned i=0;i<kParts;++i) {
@@ -577,12 +594,36 @@ bool Post(Stream& s,const Event& e,void* bullet,void* allocated,bool* linked) {
     }
     if(!Current(s.root) || !RegisterId(bullet,e.id))return false;if(e.generator)crew::Put<unsigned>(At<void*>(battery,0x658),0,e.nextCounter);return true;
 }
+Result ContinuePendingPost(Stream& s) {
+    if(!s.postPending || !s.postHeld || !s.postNode)return Result::failed;
+    if(!RestoreNativeProjectileJournal(s.journal) || !NativeProjectileJournalEmpty(s.journal)) {
+        if(s.journal.uncertain){s.faulted=true;return Result::failed;}return Result::pending;
+    }
+    if(!Parts(s))return Result::pending;
+    const auto& e=s.postEvent;auto& p=s.parts[e.part];auto* muzzle=Muzzle(p,e.muzzle);
+    if(!PostReady(p,muzzle,e) || !IdDestinationReady(e.id))return Result::pending;
+    bool linked=false,completed=false;
+    __try {
+        if(!Post(s,e,s.postBullet.object,s.postNode,&linked)){s.faulted=true;return Result::failed;}
+        s.postCommitted=true;if(!FinishPostReference(s,false)){s.faulted=true;return Result::failed;}
+        s.receipts[e.serial%kQueued]={e.serial,s.postHash};s.applied=e.serial;
+        s.postPending=false;s.postEvent={};s.postHash=0;completed=true;return Result::applied;
+    } __finally {
+        if(linked)s.postNode=nullptr;
+        if(!completed && s.postHeld)FinishPostReference(s,true);
+    }
+}
 Result Apply(const NativeLease& l,const void* bytes,std::size_t size) noexcept {
     __try {
         bool authority=false;if(!NativeActionRole(l.object,&authority) || authority)return Result::failed;
-        Event e{};if(!Decode(bytes,size,&e))return Result::failed;auto* s=Find(l);if(s && s->retired){const auto& r=s->receipts[e.serial%kQueued];return r.serial==e.serial && r.hash==Hash(e) ? Result::applied : Result::failed;}s=Bind(l,false);if(!s || s->faulted || s->executing || s->beamDepth || s->cleanupUncertain || !NativeProjectileJournalEmpty(s->journal) || s->postHeld)return Result::failed;
+        Event e{};if(!Decode(bytes,size,&e))return Result::failed;auto* s=Find(l);if(s && s->authority)return Result::failed;if(s && s->retired){const auto& r=s->receipts[e.serial%kQueued];return r.serial==e.serial && r.hash==Hash(e) ? Result::applied : Result::failed;}if(!s)s=Bind(l,false);if(!s || s->faulted || s->aborting || s->executing || s->beamDepth || s->cleanupUncertain)return Result::failed;
         const auto hash=Hash(e);
         if(e.serial<=s->applied){const auto& r=s->receipts[e.serial%kQueued];return r.serial==e.serial && r.hash==hash ? Result::applied : Result::failed;}
+        if(s->postPending) {
+            if(e.serial!=s->postEvent.serial || hash!=s->postHash)return Result::failed;
+            s->executing=true;__try {return ContinuePendingPost(*s);}__finally {s->executing=false;}
+        }
+        if(!NativeProjectileJournalEmpty(s->journal) || s->postHeld || s->postNode)return Result::failed;
         if(e.serial!=s->applied+1)return Result::failed;if(e.kind!=EventKind::birth){const auto result=ApplyBeam(*s,e,hash);if(result==Result::failed)s->faulted=true;return result;}
         if(!Parts(*s))return Result::pending;auto& p=s->parts[e.part];auto* muzzle=Muzzle(p,e.muzzle);
         if(p.definition!=e.definition)return Result::failed;
@@ -590,26 +631,32 @@ Result Apply(const NativeLease& l,const void* bytes,std::size_t size) noexcept {
             reinterpret_cast<float*>(muzzle+0x70),e.sample))return Result::pending;
         // Reserve the native weak-list node before any factory mutation.
         auto* node=Fn<void*(__fastcall*)(std::size_t)>(0x12D85B0)(0x20);if(!node)return Result::pending;
-        bool linked=false,completed=false;void* bullet=nullptr;s->executing=true;
+        s->postPending=true;s->postEvent=e;s->postHash=hash;s->postNode=node;s->executing=true;
         __try {
-            bullet=ReplayNativeProjectileSampleInPlace(s->journal,l,At<void*>(p.battery.object,0x2F0),p.battery.object+0x300,reinterpret_cast<float*>(muzzle+0x70),e.sample);
-            if(!bullet || !NativeProjectileJournalEmpty(s->journal)){s->faulted=true;return Result::failed;}s->postBullet={static_cast<unsigned char*>(bullet),At<unsigned char*>(bullet,0x30)};s->postHeld=Pin(s->postBullet);if(!s->postHeld){s->faulted=true;return Result::failed;}
-            if(!Post(*s,e,bullet,node,&linked) || !TrackBeam(*s,e,s->postBullet)){s->faulted=true;return Result::failed;}s->postCommitted=true;if(!FinishPostReference(*s,false) || !NativeProjectileJournalEmpty(s->journal)){s->faulted=true;return Result::failed;}
-            s->receipts[e.serial%kQueued]={e.serial,hash};s->applied=e.serial;completed=true;return Result::applied;
-        } __finally {s->executing=false;if(!completed && s->postHeld)FinishPostReference(*s,true);if(!linked)Fn<void(__fastcall*)(void*,std::size_t)>(0x12D85EC)(node,0x20);}
+            const auto outcome=ReplayNativeProjectileOutcomeInPlace(s->journal,l,At<void*>(p.battery.object,0x2F0),p.battery.object+0x300,reinterpret_cast<float*>(muzzle+0x70),e.sample);
+            auto* bullet=static_cast<unsigned char*>(outcome.created);if(!bullet){s->faulted=true;return Result::failed;}
+            // Native creation is irreversible even when descriptor cleanup is
+            // pending. Own and detach a persistent beam before that result can
+            // be hidden behind the cleanup gate or the battery can be released.
+            if(!Readable(bullet,0x38)){s->faulted=s->cleanupUncertain=true;return Result::failed;}
+            s->postBullet={bullet,At<unsigned char*>(bullet,0x30)};s->postHeld=Pin(s->postBullet);
+            if(!s->postHeld || !TrackBeam(*s,e,s->postBullet)){s->faulted=s->cleanupUncertain=true;return Result::failed;}
+            if(!outcome.cleanupComplete){if(s->journal.uncertain){s->faulted=true;return Result::failed;}return Result::pending;}
+            return ContinuePendingPost(*s);
+        } __finally {s->executing=false;}
     } __except(EXCEPTION_EXECUTE_HANDLER){if(auto* s=Find(l))s->faulted=true;return Result::failed;}
 }
 bool Quiesce(const NativeLease& l) noexcept {if(auto* s=Find(l)){s->quiescing=true;ScanBeams(*s);}return true;}
-bool Empty(const NativeLease& l) noexcept {__try {auto* s=Find(l);if(!s)return true;if(s->count || s->executing || s->beamDepth || s->cleanupUncertain || ActiveBeams(*s) || s->waitingHeld)return false;return FinishPostReference(*s,false) && RestoreNativeProjectileJournal(s->journal) && NativeProjectileJournalEmpty(s->journal);}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
+bool Empty(const NativeLease& l) noexcept {__try {auto* s=Find(l);if(!s)return true;if(s->count || s->executing || s->beamDepth || s->cleanupUncertain || ActiveBeams(*s) || s->waitingHeld || s->postPending)return false;return FinishPostReference(*s,false) && RestoreNativeProjectileJournal(s->journal) && NativeProjectileJournalEmpty(s->journal);}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
 bool Release(Stream& s) noexcept {
-    if(s.retired)return !s.cleanupUncertain && NativeProjectileJournalEmpty(s.journal) && !s.postHeld;if(s.executing || s.beamDepth || s.count || s.cleanupUncertain || ActiveBeams(s) || s.waitingHeld || !ReleaseBeams(s) || !FinishPostReference(s,false) || !RestoreNativeProjectileJournal(s.journal) || !NativeProjectileJournalEmpty(s.journal) || (s.held && !CanUnpin(s.root)))return false;
+    if(s.retired)return !s.cleanupUncertain && NativeProjectileJournalEmpty(s.journal) && !s.postHeld && !s.postPending;if(s.executing || s.beamDepth || s.count || s.cleanupUncertain || ActiveBeams(s) || s.waitingHeld || s.postPending || !ReleaseBeams(s) || !DiscardPendingPost(s) || !RestoreNativeProjectileJournal(s.journal) || !NativeProjectileJournalEmpty(s.journal) || (s.held && !CanUnpin(s.root)))return false;
     for(const auto& p:s.parts)if((p.ownerHeld && !CanUnpin(p.owner)) || (p.batteryHeld && !CanUnpin(p.battery)))return false;
     for(auto& p:s.parts){if(!DropStrong(s,p.battery,&p.batteryHeld) || !DropStrong(s,p.owner,&p.ownerHeld))return false;p={};}
     if(!DropStrong(s,s.root,&s.held))return false;s.retired=true;return true;
 }
 bool Restore(const NativeLease& l) noexcept {__try {auto* s=Find(l);return !s || Release(*s);}__except(EXCEPTION_EXECUTE_HANDLER){return false;}}
 bool Abort(const NativeLease& l) noexcept {
-    __try {auto* s=Find(l);if(!s)return true;s->quiescing=true;s->aborting=true;if(s->cleanupUncertain || s->executing || s->beamDepth || !FinishPostReference(*s,false) || !RestoreNativeProjectileJournal(s->journal) || !NativeProjectileJournalEmpty(s->journal))return false;if(s->retired)return true;s->quiescing=true;s->aborting=true;ScanBeams(*s);if(ActiveBeams(*s))return false;s->waiting={};s->waitingHeld=s->waitingReady=false;if(!ReleaseBeams(*s))return false;
+    __try {auto* s=Find(l);if(!s)return true;s->quiescing=true;s->aborting=true;if(s->cleanupUncertain || s->executing || s->beamDepth || !RestoreNativeProjectileJournal(s->journal) || !NativeProjectileJournalEmpty(s->journal))return false;if(s->retired)return true;ScanBeams(*s);if(ActiveBeams(*s))return false;s->waiting={};s->waitingHeld=s->waitingReady=false;if(!ReleaseBeams(*s) || !DiscardPendingPost(*s))return false;
         for(unsigned i=0;i<s->count;++i){auto& p=s->queue[(s->head+i)%kQueued];if(p.held && !CanUnpin(p.bullet))return false;}
         for(unsigned i=0;i<s->count;++i){auto& p=s->queue[(s->head+i)%kQueued];if(!DropStrong(*s,p.bullet,&p.held))return false;if(p.event.kind==EventKind::stop)for(auto& b:s->beams)if(b.held && b.spawn==p.event.spawn){if(!RehomeBeam(b) || !DropStrong(*s,b.ref,&b.held))return false;b={};}p={};}s->count=s->head=0;return Release(*s);}
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}

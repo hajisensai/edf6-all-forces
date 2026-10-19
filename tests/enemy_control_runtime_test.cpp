@@ -184,6 +184,33 @@ bool PendingStop(const crew::enemy_control::Snapshot& snapshot) noexcept {
     ++crew::fixturePendingCancels;crew::fixturePendingPhase=enemy_control_protocol::Phase::restoring;return true;
 }
 }
+void UnreadableSourceRestoration() {
+    using namespace crew;using namespace crew::enemy_control;
+    auto* owner=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+    auto* target=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+    auto* ownerControl=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+    unsigned char targetControl[32]{};Human(owner,ownerControl,0);Enemy(target,targetControl);
+    Put<unsigned>(owner,0x380,0x2840u);
+    Catalogue catalogue{};Check(ReadCatalogue(ObjRef::Of(target),catalogue),"unreadable source fixture reads its native catalogue");
+    Check(EnemyControlBegin(ObjRef::Of(owner),ObjRef::Of(target),catalogue.hash,90001,true),"unreadable source fixture acquires a real controller lease");
+    DWORD protection=0,ignored=0;
+    Check(VirtualProtect(owner,0x1000,PAGE_NOACCESS,&protection)!=0,"source page becomes temporarily inaccessible");Sleep(20);
+    Check(!EnemyControlRestore(90001) && ByLease(90001) && ByLease(90001)->sourceProtected,"inaccessible source retains its owned protection and restoration baseline");
+    Check(VirtualProtect(owner,0x1000,protection,&ignored)!=0,"source page is readable again");Sleep(20);
+    Check((At<unsigned>(owner,0x380)&0x81u)==0x81u,"pending source protection remains on the same native actor");
+    Check(VirtualProtect(ownerControl,0x1000,PAGE_NOACCESS,&protection)!=0,"source control becomes temporarily inaccessible");Sleep(20);
+    Check(!EnemyControlRestore(90001) && ByLease(90001) && ByLease(90001)->sourceProtected,"inaccessible source control cannot prove destruction");
+    Check(VirtualProtect(ownerControl,0x1000,protection,&ignored)!=0,"source control is readable again");Sleep(20);
+    Check(EnemyControlRestore(90001) && !ByLease(90001) && At<unsigned>(owner,0x380)==0x2840u,"source retry restores its exact protection baseline before retiring the lease");
+    Check(At<LONG>(ownerControl,12)==1 && At<LONG>(targetControl,12)==1,"inaccessible identity retries release source and target weak references once");
+    // A known zero strong count permits retirement without reading expired storage.
+    Check(EnemyControlBegin(ObjRef::Of(owner),ObjRef::Of(target),catalogue.hash,90002,true),"destroyed source fixture acquires a fresh controller lease");
+    Put<LONG>(ownerControl,8,0);
+    Check(VirtualProtect(owner,0x1000,PAGE_NOACCESS,&protection)!=0,"expired source storage is inaccessible");Sleep(20);
+    Check(EnemyControlRestore(90002) && !ByLease(90002),"strong zero is explicit destruction even when old storage is unreadable");
+    Check(VirtualProtect(owner,0x1000,protection,&ignored)!=0,"expired source storage restored for fixture cleanup");Sleep(20);
+    VirtualFree(owner,0,MEM_RELEASE);VirtualFree(target,0,MEM_RELEASE);VirtualFree(ownerControl,0,MEM_RELEASE);
+}
 int main() {
     using namespace crew;using namespace crew::enemy_control;
     Input relative{};relative.move[0]=1;
@@ -392,6 +419,6 @@ int main() {
     VirtualFree(protectedControl,0,MEM_RELEASE);
     Check(At<LONG>(ownerCtrl1,12)==1 && At<LONG>(ownerCtrl2,12)==1 && At<LONG>(targetCtrl1,12)==1 && At<LONG>(targetCtrl2,12)==1,"all source/target weak references are released exactly once");
     VirtualFree(target1,0,MEM_RELEASE);VirtualFree(target2,0,MEM_RELEASE);
+    UnreadableSourceRestoration();
     std::printf("enemy control runtime: %d checks, %d failures\n",checks,failures);return failures ? 1 : 0;
 }
-

@@ -113,7 +113,7 @@ void CheckSource(const Object& object) {
     for(unsigned i=0;i<32;++i)CHECK(object.bytes[0x108+i]==0x30+i);
 }
 const wchar_t* robo=L"app:/object/UFOROBO401.sgo";
-const wchar_t* dragon=L"app:/object/EDF41/DRAGONSMALL401.sgo";
+const wchar_t* dragon=L"app:/object/EDF41_DRAGONSMALL401.sgo";
 const wchar_t* paleTb=L"app:/object/EDF41/AIPALEWING_TB.sgo";
 const wchar_t* heavy=L"app:/object/EDF41/AIHEAVYARMOR_SC.sgo";
 bool Ambiguous(const wchar_t* path,SpawnProof* out) noexcept{return crew::ControlledPvpPortedSpawnProof(path,out);}

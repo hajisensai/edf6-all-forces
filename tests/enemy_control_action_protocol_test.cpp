@@ -285,4 +285,38 @@ void ActionsBoundedAndIndependent() {
      Check(!r.nodes[0]->protocol.Ready() && r.nodes[0]->protocol.SubmitAction(1,bytes.data(),bytes.size(),r.now),"another player's restore never interrupts actual accepted events on a live body");r.Pump();Check(actionLedgers[r.nodes[1].get()].sequences.size()==1 && r.Lease(0,1)->phase==Phase::active,"independent live actor retains control");}
 }
 }
-int main(){ExistingEnemyControlProtocolTests();ActionsOrderedAndAtomic();ActionsPendingAndAckLoss();ActionsFailureAndBinding();ActionsBoundedAndIndependent();SharedPoolCoversEightNativeControllers();PacedEightControllersRetainAndRotate();PacedSdkCreditsRetainUnsentBatches();PacedThirtyTwoPeerControlBarriers();CapacityProofChangesAreRealContextBoundaries();BatchedControlCodecAndFailurePriority();ContinuousBatchesSurviveLatency();ClosingDrainsAcceptedOutcomes();MultiGunBurstWindowSurvivesLatency();std::printf("enemy_control_action_protocol: %d checks passed\n",checks);return 0;}
+
+struct TransportBacklog {
+    std::array<std::size_t,kMaxPeers+1> bytes{},packets{};
+    bool delayTransportAck=true;unsigned blocked=0,accepted=0;
+} transportBacklog;
+SendResult BoundedTransportSend(void* user,std::uint32_t peer,const void* bytes,std::size_t size) {
+    auto* node=static_cast<Node*>(user);Check(node->id==0,"only the native host sends accepted actions");
+    const auto framed=size+kActionSdkFramingBytes;
+    if(transportBacklog.bytes[peer]+framed>kActionPeerByteCredits || transportBacklog.packets[peer]>=kActionPeerPacketCredits){++transportBacklog.blocked;return SendResult::wouldBlock;}
+    if(!Send(user,peer,bytes,size))return SendResult::unavailable;
+    ++transportBacklog.accepted;
+    if(transportBacklog.delayTransportAck && peer==1){transportBacklog.bytes[peer]+=framed;++transportBacklog.packets[peer];}
+    return SendResult::accepted;
+}
+void AppliedAckDoesNotReleaseSdkBacklog() {
+    Room r;EnableActions(r);transportBacklog={};
+    for(auto& node:r.nodes){auto h=Backend(node.get());h.ApplyAction=&ApplyAction;h.TrySendAction=&BoundedTransportSend;
+        Check(node->protocol.Configure(h),"bind typed real SDK admission");Check(node->protocol.SetReliableOrderedTransport(true),"use production ordered route");}
+    Check(r.Request(),"independent SDK backlog starts");r.Settle();const auto id=r.Active();const auto bytes=ActionBytes(512);unsigned submitted=0;
+    for(unsigned frame=0;frame<80;++frame){
+        for(unsigned batch=0;batch<32 && r.nodes[0]->protocol.CanCaptureAction(id);++batch){Check(r.nodes[0]->protocol.SubmitAction(id,bytes.data(),bytes.size(),r.now),"accepted result remains in bounded native action pool");++submitted;}
+        r.Step(16);
+    }
+    Check(transportBacklog.blocked && transportBacklog.packets[1]<=kActionPeerPacketCredits && transportBacklog.bytes[1]<=kActionPeerByteCredits,"transport ACK loss blocks on actual SDK backlog even after native Applied ACKs");
+    Check(r.Lease(0,id)->phase==Phase::active && r.nodes[0]->protocol.Ready() && !r.nodes[0]->protocol.CanCaptureAction(id),"wouldBlock retains the lease and full native window without SendFailed");
+    Check(actionLedgers[r.nodes[2].get()].sequences.size()>actionLedgers[r.nodes[1].get()].sequences.size(),"one blocked SDK link cannot prevent other peers consuming queued actions");
+    // Native Applied ACKs above deliberately did not touch transportBacklog. Only the independent SDK ACK frees it.
+    transportBacklog.bytes={};transportBacklog.packets={};transportBacklog.delayTransportAck=false;
+    for(unsigned frame=0;frame<16 && !r.nodes[0]->protocol.ActionIdle(id);++frame)r.Step(16);
+    Check(r.nodes[0]->protocol.ActionIdle(id),"real transport ACK recovery drains every retained action");
+    for(unsigned node=1;node<3;++node){const auto& sequences=actionLedgers[r.nodes[node].get()].sequences;Check(sequences.size()==submitted,"no accepted native outcome is lost or replayed after SDK pressure");for(unsigned i=0;i<submitted;++i)Check(sequences[i]==i+1,"wouldBlock cannot consume an unsent action sequence");}
+    Check(r.nodes[0]->protocol.Exit(id,r.now),"drained body exits normally");r.Settle();r.Closed(id,Result::Complete);
+}
+
+int main(){AppliedAckDoesNotReleaseSdkBacklog();ExistingEnemyControlProtocolTests();ActionsOrderedAndAtomic();ActionsPendingAndAckLoss();ActionsFailureAndBinding();ActionsBoundedAndIndependent();SharedPoolCoversEightNativeControllers();PacedEightControllersRetainAndRotate();PacedSdkCreditsRetainUnsentBatches();PacedThirtyTwoPeerControlBarriers();CapacityProofChangesAreRealContextBoundaries();BatchedControlCodecAndFailurePriority();ContinuousBatchesSurviveLatency();ClosingDrainsAcceptedOutcomes();MultiGunBurstWindowSurvivesLatency();std::printf("enemy_control_action_protocol: %d checks passed\n",checks);return 0;}

@@ -45,6 +45,7 @@ import acb  # noqa: E402
 import dsgo  # noqa: E402
 import edf41calls as ec  # noqa: E402
 import edf41_sounds  # noqa: E402
+import edf41_sound_fallbacks  # noqa: E402
 import edf41zh  # noqa: E402
 import edf5port  # noqa: E402
 import make_edf5_weapons as m5  # noqa: E402
@@ -263,10 +264,12 @@ def stat_lines(line: str, formats: dict, pieces: dict[str, dict[str, str]]) -> l
 
 
 def available_weapon_cues(edf6: str, edf41: str) -> set[str]:
-    """Stock EDF6 cues plus the exact resident bank edf41_sounds installs for fallback lookups.
+    """Stock EDF6 cues plus the optional source bank used by runtime lookups.
 
     P5 substituted missing stock cues before P7 supplied this bank. Keeping those substitutions
     can turn a finite source shot into a template's infinite cue without its stop owner.
+    The separately generated finite resident fallback table covers players who
+    do not install this optional bank, and failures to load it at runtime.
     """
     with open(edf41_sounds.sound_path(edf41, edf41_sounds.SE_BANK), 'rb') as stream:
         fallback = acb.cue_names(stream.read())
@@ -524,9 +527,12 @@ def build(edf41: str, edf5: str, edf6: str, zh: str) -> dict:
             **({'call': call} if call is not None else {}),
         })
     cn = 'CN names their OpenCC s2tw (pylib/edf41zh.py)' if edf41zh.available() else 'CN names translations.json (no OpenCC)'
+    with open(edf41_sounds.sound_path(edf6, edf41_sounds.SE_BANK), 'rb') as stream:
+        resident_lengths = acb.cue_lengths(stream.read())
+    fallbacks = edf41_sound_fallbacks.build(weapons, e6, cues41, resident_lengths)
     return {'source': "EDF4.1 Root.cpk WEAPON/_WEAPONTABLE.SGO + _WEAPONTEXT.SGO; CN / SC / KR edf41port/translations.json; "
                       f"SC names {edf41zh.PATCH} {zh_names.note()}, {cn}",
-            'weapons': weapons, 'skipped': skipped}
+            'weapons': weapons, 'skipped': skipped, 'sound_fallbacks': fallbacks}
 
 
 def is_call(w: dict) -> bool:
@@ -552,6 +558,9 @@ def main() -> int:
     data['weapons'] = m5.keep_order(OUT, [w for w in data['weapons'] if not is_call(w)])
     write(OUT, data)
     write(OUT_CALLS, {'source': data['source'], 'weapons': calls})
+    import gen_edf41_sound_fallbacks
+    gen_edf41_sound_fallbacks.OUT.write_text(edf41_sound_fallbacks.render(data['sound_fallbacks']),
+                                           encoding='utf-8', newline='\n')
     print(f'{OUT}: {len(data["weapons"])} weapons, {len(data["skipped"])} skipped')
     print(f'{OUT_CALLS}: {len(calls)} calls')
     reasons: dict[str, int] = {}

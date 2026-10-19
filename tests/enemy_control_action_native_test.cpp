@@ -447,8 +447,28 @@ void* ActionTestFunction(unsigned rva) noexcept {
     return nullptr;
 }
 }
+void UnreadableActionRestoration() {
+    for(unsigned family=0;family<3;++family) {
+        Fixture actor(family);Input input{};
+        CHECK(BeforeNativeActionInput(actor.lease,false,&input));CHECK(AfterNativeActionInput(actor.lease));
+        const auto* table=At<const void* const*>(actor.object+actor.contract->machine,0);
+        const auto dispatch=table[1];
+        for(void* page:{static_cast<void*>(actor.object),static_cast<void*>(actor.control)}) {
+            DWORD protection=0,ignored=0;
+            CHECK(VirtualProtect(page,0x1000,PAGE_NOACCESS,&protection)!=0);Sleep(20);
+            CHECK(!RestoreNativeActions(actor.lease));CHECK(Find(actor.lease)!=nullptr);
+            CHECK(table[1]==dispatch);
+            CHECK(VirtualProtect(page,0x1000,protection,&ignored)!=0);Sleep(20);
+            CHECK(At<const void*>(actor.object+actor.contract->machine,0)==table);
+        }
+        const auto previous=updates;actor.Invoke(1);CHECK(updates==previous);
+        CHECK(RestoreNativeActions(actor.lease));CHECK(!Find(actor.lease));
+        CHECK(At<const void*>(actor.object+actor.contract->machine,0)==image+actor.contract->machineVtable);
+    }
+}
 int main() {
     BuildImage();for(unsigned i=0;i<3;++i)Lifecycle(i);Throughput(50);Throughput(100);Throughput(250);StockDamagePending();AppliedBodyDamageProgresses();DamageReturnDoesNotRestartMab();FirstSameSemanticAcceptance();WholeBatchPending();StompTargetLifetime();ClosingDrain();QuiescedStockDamageCanFinish();DeadBodyCachedDrain();ReusedAddressRoleAndGate();FullFinalRecordDrain();AdmissionAndOverflow();ExtensionRolesAndFairness();QuiesceEveryProducer();DeadGuestCannotEnter();
+    UnreadableActionRestoration();
     VirtualFree(crew::image,0,MEM_RELEASE);crew::image=nullptr;
     std::printf("enemy main accepted action fixture: %u checks, %u failures\n",checks,failures);return failures ? 1 : 0;
 }

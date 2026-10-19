@@ -191,6 +191,32 @@ bool LaunchOne(Jet& c,const float* pos,const float* nose,const float* aim,const 
 }
 }  // namespace
 
+bool CarrierMetadataReady(Jet& carrier,ULONGLONG ms) noexcept {
+    if(!carrier.supportMetadata)return true;
+    // Metadata describes the same native carrier, not an enduring remote owner.
+    // A guest can leave its previously empty carrier and a real NPC can board on
+    // the host. Promote that existing entry at the actual authority boundary;
+    // recreating it would lose live child slots, tokens and the spent sorties.
+    if(carrier.reap || !Alive(carrier.ref))return false;
+    auto* const v=carrier.Vehicle();
+    Role role{};unsigned char nativeId[32]{};
+    if(v[kDead] || !IsJetVehicle(v,&role,nullptr) || role!=carrier.role || KindOf(role).weapon!=Weapon::drones ||
+       !ReadNativeObjectId(v,nativeId) || !IsOnlineAuthority(v) || !OnlineRunsHere(v) || PlayerJetHolds(v) ||
+       !NpcDriver(v) || !SeatCount(v))return false;
+    const auto* seat=SeatAt(v,0);
+    if(AnyPlayerIn(seat) || !edf::LivingSoldierInSeat(image,seat))return false;
+    const float clear=GroundClearance(reinterpret_cast<const float*>(v+kPosition));
+    carrier.supportMetadata=false;carrier.bornAt=carrier.seen=carrier.modeAt=ms;carrier.lastStep=0;
+    carrier.fuelMs=static_cast<ULONGLONG>(static_cast<float>(Cfg().jetFuelSec)*KindOf(carrier).fuel*1000.0f);
+    std::memcpy(carrier.anchor,v+kPosition,12);
+    carrier.m.ready=false;carrier.m.prevAt=0;carrier.m.blockedFor=0;
+    std::memset(carrier.m.omega,0,sizeof(carrier.m.omega));std::memset(carrier.m.acc,0,sizeof(carrier.m.acc));
+    carrier.t=Aim{};
+    SetMode(carrier,clear!=kNoGround && clear<kTakeoffClear ? Mode::takeoff : Mode::patrol,ms);
+    Log("JET v=%p carrier metadata adopted by its native NPC authority; %d sorties retained",v,carrier.carrier.sorties);
+    return true;
+}
+
 namespace {
 Jet* CarrierEntry(const ObjRef& parent,bool create) noexcept {
     if(!Alive(parent))return nullptr;

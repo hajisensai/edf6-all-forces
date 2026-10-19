@@ -511,4 +511,3 @@ int main() {
     std::printf("enemy native input fixture: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }
-

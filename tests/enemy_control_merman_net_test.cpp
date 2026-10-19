@@ -80,6 +80,7 @@ void __fastcall Callback(void*,void* p,void*){
     ++callbacks;CHECK(current && *static_cast<void**>(p)==current->lastBullet);CHECK(At<LONG>(current->weak,8)>=2);CHECK(At<LONG>(current->lastBullet+0xF00,8)>=2);
     if(replayOnCallback && !withinCallback && callbackPacket){
         withinCallback=true;++reentries;
+        Input input{};CHECK(!extension.Before(current->lease,current->host,&input));
         reentrantResult=extension.Apply(current->lease,callbackPacket->data(),callbackPacket->size());
         withinCallback=false;
     }
@@ -191,21 +192,32 @@ void PostReentryIsNotASecondShot() {
     CHECK(!mn::Find(guest.lease)->faulted && mn::Find(guest.lease)->applied==1);
     CHECK(Apply(guest,packet)==Result::applied && creates==made+1);
 }
+void ExistingStreamKeepsItsAuthority() {
+    World host(true),guest(false);host.Bind();guest.Bind();Input input{};
+    CHECK(!extension.Before(host.lease,false,&input));CHECK(!extension.Before(guest.lease,true,&input));
+    CHECK(Fire(host,0,0,25,26,UINT32_MAX));auto packet=Take(host);const auto made=creates;
+    host.host=false;CHECK(Apply(host,packet)==Result::failed && creates==made);host.host=true;
+    CHECK(Apply(guest,packet)==Result::applied && creates==made+1);
+}
 void RecoverableJournalCleanup() {
     World host(true),guest(false);host.Bind();guest.Bind();CHECK(Fire(host,0,0,31,32,UINT32_MAX));auto packet=Take(host);
-    const auto made=creates,dropped=drops,deleted=deletions;protectOnCreate=true;
-    CHECK(Apply(guest,packet)==Result::failed);protectOnCreate=false;auto* stream=mn::Find(guest.lease);
-    CHECK(stream && stream->faulted && stream->held && !stream->retired && !stream->journal.uncertain);
+    const auto made=creates,dropped=drops,deleted=deletions,called=callbacks;protectOnCreate=true;
+    CHECK(Apply(guest,packet)==Result::pending);protectOnCreate=false;auto* stream=mn::Find(guest.lease);
+    CHECK(stream && !stream->faulted && stream->held && !stream->retired && !stream->journal.uncertain);
     CHECK(stream->journal.made && stream->journal.created==guest.lastBullet && stream->journal.heldMask==1);
+    CHECK(stream->postPending && stream->postHeld && stream->postNode && !stream->postCommitted);
     CHECK(creates==made+1 && drops==dropped && deletions==deleted && At<LONG>(guest.weak,8)==3);
     CHECK(!extension.Empty(guest.lease) && !extension.Restore(guest.lease));
-    CHECK(Apply(guest,packet)==Result::failed && creates==made+1 && drops==dropped);
+    auto* node=stream->postNode;CHECK(Apply(guest,packet)==Result::pending && creates==made+1 && drops==dropped && stream->postNode==node);
+    auto conflict=packet;conflict[24]^=1;CHECK(Apply(guest,conflict)==Result::failed && creates==made+1 && stream->postNode==node);
     DWORD old=0;CHECK(VirtualProtect(guest.weak,0x1000,PAGE_READWRITE,&old));NextMemoryProbeTick();
-    // Core RestoreNativeActions checks Empty before invoking Restore. Empty must
-    // therefore finish this safe descriptor-only cleanup once its pins are writable.
-    CHECK(extension.Empty(guest.lease) && NativeProjectileJournalEmpty(stream->journal));
+    CHECK(!extension.Empty(guest.lease) && !extension.Restore(guest.lease));Input input{};CHECK(!extension.Before(guest.lease,true,&input));CHECK(extension.Before(guest.lease,false,&input));
+    CHECK(!Fire(guest,0,0,999,1000,UINT32_MAX) && !stream->faulted);
+    CHECK(Apply(guest,packet)==Result::applied && NativeProjectileJournalEmpty(stream->journal));
     CHECK(drops==dropped+1 && creates==made+1 && deletions==deleted && At<LONG>(guest.weak,8)==2);
-    CHECK(Apply(guest,packet)==Result::failed && creates==made+1);CHECK(extension.Restore(guest.lease));
+    CHECK(callbacks==called+1 && At<std::size_t>(guest.Battery(0),0x298)==1);
+    CHECK(!stream->postPending && !stream->postHeld && !stream->postNode);
+    CHECK(Apply(guest,packet)==Result::applied && creates==made+1 && callbacks==called+1);CHECK(extension.Restore(guest.lease));
     CHECK(stream->retired && !stream->held && At<LONG>(guest.weak,8)==1);
 }
 void UncertainCopyKeepsOwnership() {
@@ -289,6 +301,59 @@ void NativeContinuousOutcomes() {
     Step(guest,peer);CHECK(At<unsigned>(peer,0xC34)&0x4000u);CHECK(Apply(guest,stop)==Result::applied);CHECK(At<void*>(peer,0xB20)==At<void*>(peer,0xD30));
     CHECK(Apply(guest,stop)==Result::applied && creates==made+2);CHECK(extension.Empty(host.lease) && extension.Empty(guest.lease));
     CHECK(extension.Restore(host.lease));CHECK(extension.Restore(guest.lease));continuous=false;
+}
+void PendingBeamBirthKeepsItsMatrixOwner() {
+    continuous=true;
+    {
+        World host(true),guest(false);host.Bind();guest.Bind();CHECK(Fire(host,0,0,131,132,UINT32_MAX));auto birth=Take(host);
+        const auto made=creates,dropped=drops,called=callbacks;protectOnCreate=true;CHECK(Apply(guest,birth)==Result::pending);protectOnCreate=false;
+        auto* stream=mn::Find(guest.lease);auto* beam=mn::BeamAt(*stream,1);auto* peer=guest.lastBullet;
+        CHECK(beam && beam->held && beam->detached && stream->postHeld && stream->postPending);
+        CHECK(At<void*>(peer,0xB20)==beam->persistent && At<void*>(peer,0xB20)!=At<unsigned char*>(guest.Battery(0),0x278)+0x70);
+        CHECK(At<LONG>(guest.Battery(0)-16,8)==2 && !extension.Empty(guest.lease) && !extension.Restore(guest.lease));
+        CHECK(Apply(guest,birth)==Result::pending && creates==made+1 && callbacks==called && drops==dropped);
+        DWORD old=0;CHECK(VirtualProtect(guest.weak,0x1000,PAGE_READWRITE,&old));NextMemoryProbeTick();
+        Step(guest,peer);CHECK(!(At<unsigned>(peer,0xC34)&0x4000u));
+        CHECK(Apply(guest,birth)==Result::applied && creates==made+1 && callbacks==called+1 && drops==dropped+1);
+        CHECK(!stream->postPending && !stream->postHeld && beam->held && beam->detached);
+        CHECK(Apply(guest,birth)==Result::applied && creates==made+1 && callbacks==called+1);
+        CHECK(extension.Quiesce(host.lease));Step(host,host.lastBullet);auto stop=Take(host);
+        CHECK(Apply(guest,stop)==Result::pending);Step(guest,peer);CHECK(Apply(guest,stop)==Result::applied);
+        CHECK(At<void*>(peer,0xB20)==At<void*>(peer,0xD30));CHECK(extension.Restore(guest.lease));
+    }
+    continuous=false;
+}
+void AbortingPendingBeamRehomesBeforeBatteryRelease() {
+    continuous=true;
+    {
+        World host(true),guest(false);host.Bind();guest.Bind();CHECK(Fire(host,1,1,141,142,UINT32_MAX));auto birth=Take(host);
+        const auto made=creates;protectOnCreate=true;CHECK(Apply(guest,birth)==Result::pending);protectOnCreate=false;
+        auto* stream=mn::Find(guest.lease);auto* peer=guest.lastBullet;auto* beam=mn::BeamAt(*stream,1);
+        CHECK(beam && beam->detached && At<void*>(peer,0xB20)==beam->persistent);
+        CHECK(!extension.Abort(guest.lease) && stream->postPending && stream->postHeld && stream->parts[1].batteryHeld);
+        DWORD old=0;CHECK(VirtualProtect(guest.weak,0x1000,PAGE_READWRITE,&old));NextMemoryProbeTick();
+        CHECK(!extension.Abort(guest.lease));CHECK(NativeProjectileJournalEmpty(stream->journal));
+        CHECK(stream->postPending && stream->postHeld && stream->parts[1].batteryHeld && !stream->retired);
+        CHECK(!extension.Empty(guest.lease) && !extension.Restore(guest.lease));CHECK(Apply(guest,birth)==Result::failed && creates==made+1);
+        Step(guest,peer);CHECK(At<unsigned>(peer,0xC34)&0x4000u);CHECK(extension.Abort(guest.lease));
+        CHECK(At<void*>(peer,0xB20)==At<void*>(peer,0xD30));
+        CHECK(stream->retired && !stream->postHeld && !stream->postPending && !stream->postNode && !stream->parts[1].batteryHeld);
+        CHECK(At<LONG>(guest.Battery(1)-16,8)==1);
+    }
+    continuous=false;
+}
+void UncertainBeamCleanupRetainsDetachedBeam() {
+    continuous=true;
+    {
+        World host(true),guest(false);host.Bind();guest.Bind();CHECK(Fire(host,0,0,151,152,UINT32_MAX));auto birth=Take(host);
+        guest.retain=true;const auto made=creates,dropped=drops,deleted=deletions;raiseDrop=true;CHECK(Apply(guest,birth)==Result::failed);raiseDrop=false;
+        auto* stream=mn::Find(guest.lease);auto* beam=mn::BeamAt(*stream,1);
+        CHECK(stream->journal.uncertain && stream->postHeld && stream->postPending && beam && beam->detached);
+        CHECK(At<void*>(guest.lastBullet,0xB20)==beam->persistent && stream->parts[0].batteryHeld);
+        CHECK(!extension.Empty(guest.lease) && !extension.Restore(guest.lease) && !extension.Abort(guest.lease));
+        CHECK(Apply(guest,birth)==Result::failed && creates==made+1 && drops==dropped+1 && deletions==deleted);
+    }
+    continuous=false;
 }
 void RefreshMarkIsNotConsumptionAck() {
     continuous=true;
@@ -472,7 +537,7 @@ int main(int argc,char** argv){
     Put<void*>(image,profile.vtableRva-8,image+0x400);
     readiness=false;CHECK(!InstallMermanAcceptedProjectiles());readiness=true;CHECK(InstallMermanAcceptedProjectiles());if(argc==3 && !std::strcmp(argv[1],"--dump-trace"))return DumpTrace(argv[2]);
     ActualAndDuplicates();BothOrdinalsAndClose();PreflightAndFailure();GeneratorBurstAndPending();NullCreationAndBackpressure();OwnershipAndPins();NativeContinuousOutcomes();RefreshMarkIsNotConsumptionAck();TerminalBeamAndTrustedAbort();FinishedBitCannotAcknowledgeOldMatrix();PrivateGetterAndInFlightStop();RetiredStepCannotReuseStream();
-    CHECK(destructors==0);PostReentryIsNotASecondShot();RecoverableJournalCleanup();UncertainCopyKeepsOwnership();
+    CHECK(destructors==0);PostReentryIsNotASecondShot();ExistingStreamKeepsItsAuthority();RecoverableJournalCleanup();PendingBeamBirthKeepsItsMatrixOwner();AbortingPendingBeamRehomesBeforeBatteryRelease();UncertainBeamCleanupRetainsDetachedBeam();UncertainCopyKeepsOwnership();
     UncertainCleanupDoesNotRetryOrDeleteCreated();ReleaseSehDoesNotDecrementTwice();RootReleaseSehRetainsItsStream();CaptureSehDoesNotDecrementTwice();
     CHECK(destructors==faultDestructors && faultDestructors==3);VirtualFree(image,0,MEM_RELEASE);
     std::printf("Merman actual factory: %u checks, %u failures\n",checks,failures);return failures ? 1 : 0;

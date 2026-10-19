@@ -1,6 +1,7 @@
 // See enemy_control_native.h. The native player modes drive each class's own
 // locomotion, weapons, animation events and per-variant equipment gates.
 #include "enemy_control_native.h"
+#include "enemy_control_identity.h"
 #include "crew.h"
 #include "memory.h"
 #include <atomic>
@@ -53,10 +54,9 @@ void FloatAt(unsigned char* pad,std::size_t at,float value) noexcept { std::memc
 enum class Life { gone,live,inactive,unknown };
 Life Lifetime(const NativeLease& lease) noexcept {
     if(!lease.object || !lease.profile || !lease.control)return Life::gone;
-    if(!Readable(lease.control,12))return Life::unknown;
-    if(At<LONG>(lease.control,8)<=0)return Life::gone;
-    if(!Readable(lease.object,kPlayer+1))return Life::unknown;
-    if(At<const void*>(lease.object,kSelfControl)!=lease.control)return Life::gone;
+    const auto identity=enemy_identity::Read(lease.object,lease.control,kPlayer+1);
+    if(identity==enemy_identity::State::unknown)return Life::unknown;
+    if(identity==enemy_identity::State::gone)return Life::gone;
     if((lease.object[0x18]&4) || lease.object[kDestroyed])return Life::inactive;
     return Life::live;
 }

@@ -7,7 +7,7 @@
 namespace fixture {
 using namespace crew;
 alignas(16) unsigned char vehicle[0x2200]{},control[16]{},seat[edf::kSeatStride]{};
-alignas(16) unsigned char parent[0x400]{},parentCtrl[16]{};
+alignas(16) unsigned char parent[0x2200]{},parentCtrl[16]{},parentSeat[edf::kSeatStride]{},pilot[0x400]{},pilotCtrl[16]{};
 float matrixSeen[16]{};
 Config config{};
 bool inheritOk=true,entryOk=true,createOk=true,slotOk=true,hookOk=true;
@@ -18,6 +18,7 @@ jet::Role role=jet::Role::drone;
 unsigned nextControl=0,dollCreates=0,submits=0;
 jet::Role parentDrones=jet::Role::drone;
 bool host=true,carrierClass=true,dollCreateOk=true,dollInheritOk=true;
+bool nativeAuthority=false,npcDriver=false,playerHeld=false;
 unsigned endpoint=0;wchar_t dollPaths[3][260]{};
 std::uint64_t submitted=100;
 alignas(16) unsigned char controls[128][16]{},decoy[0x1120]{},decoyControl[16]{};
@@ -52,10 +53,15 @@ void Reset() {
     inheritOk=entryOk=createOk=slotOk=hookOk=carrierClass=dollCreateOk=dollInheritOk=true;
     creates=deletes=attaches=forgets=publishes=releases=terrain=serial=lastForget=firstForget=lastDelete=lastAttach=lastPublish=0;
     seenParent=nullptr;seenChild={};dollCreates=submits=0;nextControl=0;
+    nativeAuthority=npcDriver=playerHeld=false;
     config.enabled=true;config.jetPilot=true;config.jetFuelSec=90;
     jet::spawnOk=true;jet::levelOk=jet::bodyPartOk=false;jet::preloaded[static_cast<int>(jet::Body::drone)]=true;
     std::memset(parent,0,sizeof(parent));std::memset(parentCtrl,0,sizeof(parentCtrl));
     Put<void*>(parent,kSelfCtrl,parentCtrl);Put<LONG>(parentCtrl,8,1);
+    std::memset(parentSeat,0,sizeof(parentSeat));std::memset(pilot,0,sizeof(pilot));std::memset(pilotCtrl,0,sizeof(pilotCtrl));
+    Put<void*>(parent,kSeats,parentSeat);Put<std::uint64_t>(parent,kSeatCount,1);
+    Put<void*>(parentSeat,kSeatRider,pilot);Put<void*>(parentSeat,kSeatRiderCtrl,pilotCtrl);
+    Put<LONG>(pilotCtrl,8,1);Put<const void*>(pilot,0,image+0x17CDF28);Put<float>(pilot,0x2F8,100.0f);
 }
 void Jump(unsigned rva,const void* target) {
     unsigned char code[12]={0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
@@ -75,7 +81,10 @@ bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept {return fals
 bool HeliLeft(const void*) noexcept {return false;}
 bool ProteusReady() noexcept {return false;}
 bool MoveAreaBox(float*,float*) noexcept {return false;}
-bool NpcDriver(const unsigned char*) noexcept {return false;}
+bool NpcDriver(const unsigned char*) noexcept {return fixture::npcDriver;}
+bool IsOnlineAuthority(const void*) noexcept {return fixture::nativeAuthority;}
+bool OnlineRunsHere(const void*) noexcept {return fixture::nativeAuthority;}
+bool PlayerJetHolds(const void*) noexcept {return fixture::playerHeld;}
 bool SeatNpcRider(unsigned char*,bool) noexcept {return false;}
 bool OnlineMaySeatNpc(const void*) noexcept {return true;}
 void NoteLocalCopy(const void*,const void* parent) noexcept {fixture::seenParent=parent;}
@@ -127,7 +136,7 @@ bool IsJetVehicle(const unsigned char* object,Role* role,Role* drones) noexcept 
 void PreloadShells(void*,bool) noexcept {}
 void ResetShells() noexcept {}
 void Toward(const float* from,const float* to,float* out) noexcept {for(unsigned i=0;i<3;++i)out[i]=to[i]-from[i];Normalize(out);}
-void SetMode(Jet& j,Mode mode,ULONGLONG) noexcept {j.mode=mode;}
+void SetMode(Jet& j,Mode mode,ULONGLONG ms) noexcept {if(j.mode!=mode){j.mode=mode;j.modeAt=ms;}}
 void Publish(bool) noexcept {++fixture::publishes;fixture::lastPublish=++fixture::serial;}
 }
 }
@@ -287,6 +296,40 @@ int main() {
     CancelCarrierSupportTransaction(9401);
     // Drain these fixture-only weak entries before their stack control block leaves scope.
     for(auto& entry:jet::jets)if(entry.ref){jet::DropRef(entry.ref);entry={};}
+    // A guest's first drone creates only metadata on the host. After that guest
+    // dismounts, the host's real NPC pilot must be able to take the same entry over.
+    Reset();host=true;parentDrones=jet::Role::drone;
+    auto* takeoverChild=PrepareCarrierSupportDrone(matrix,anchor,ObjRef::Of(parent),SupportDroneKind::gun,2,9500,true);
+    auto* metadata=jet::FindJet(parent);
+    Check(takeoverChild && metadata && metadata->supportMetadata,"guest carrier first creates host metadata without taking its flight");
+    Check(ActivateSupportDrone(ObjRef::Of(takeoverChild)) && ConfirmCarrierSupportDrone(ObjRef::Of(parent),2,9500),
+          "guest carrier transaction confirms before authority handoff");
+    Check(ReserveCarrierSupportDrone(ObjRef::Of(parent),3,9501),"another child remains pending across authority handoff");
+    metadata->carrier.dock[1]=12345;metadata->m.vel[0]=77.0f;
+    const auto beforeHandoff=metadata->carrier;const auto flightBefore=metadata->flight;
+    Check(!jet::CarrierMetadataReady(*metadata,5000) && metadata->supportMetadata,"remote player control cannot promote host metadata");
+    nativeAuthority=true;
+    Check(!jet::CarrierMetadataReady(*metadata,5000),"authority without actual NPC driver leaves metadata inert");
+    npcDriver=true;playerHeld=true;
+    Check(!jet::CarrierMetadataReady(*metadata,5000) && metadata->supportMetadata,"player-held carrier cannot start autonomous flight");
+    playerHeld=false;
+    Put<unsigned char>(pilot,kHumanPlayer,1);Put<void*>(pilot,kHumanPad,pilot);
+    Check(!jet::CarrierMetadataReady(*metadata,5000),"actual player seat cannot promote metadata even during native authority transition");
+    Put<unsigned char>(pilot,kHumanPlayer,0);Put<void*>(pilot,kHumanPad,nullptr);
+    pilot[kDead]=1;Check(!jet::CarrierMetadataReady(*metadata,5000),"dead native pilot cannot promote metadata");pilot[kDead]=0;
+    Put<float>(pilot,0x2F8,0.0f);Check(!jet::CarrierMetadataReady(*metadata,5000),"zero-HP native pilot cannot promote metadata");
+    Put<float>(pilot,0x2F8,100.0f);
+    Check(jet::CarrierMetadataReady(*metadata,5000) && !metadata->supportMetadata && jet::Flown(*metadata,5000),
+          "native authority with real NPC pilot promotes existing metadata into autonomous flight");
+    Check(!std::memcmp(&metadata->carrier,&beforeHandoff,sizeof(beforeHandoff)) && metadata->flight==flightBefore,
+          "promotion preserves confirmed and pending tokens, dock clocks, player intent, sorties and flight identity");
+    Check(metadata->fuelMs>0 && metadata->bornAt==5000 && metadata->seen==5000 && metadata->modeAt==5000 &&
+          metadata->lastStep==0 && metadata->m.vel[0]==77.0f,
+          "promotion starts a fresh fuel/step lifecycle while preserving measured carrier motion");
+    const auto promotedBorn=metadata->bornAt;
+    Check(jet::CarrierMetadataReady(*metadata,6000) && metadata->bornAt==promotedBorn,"promotion is idempotent and never renews fuel twice");
+    Check(DeleteSupportDrone(ObjRef::Of(takeoverChild)),"active child remains independently removable after carrier promotion");
+    CancelCarrierSupportTransaction(9501);
     // More dead transactions than the live jet table must retain bounded weak tombstones and still create anew.
     Reset();ObjRef old[40]{};
     for(unsigned i=0;i<40;++i) {

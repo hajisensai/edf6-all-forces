@@ -30,6 +30,8 @@ struct CommandNetworkContext {
     std::uint32_t hostPeer=0,peerCount=0;
     const char* localPuid=nullptr;
     bool (*send)(std::uint32_t,const void*,std::size_t) noexcept=nullptr;
+    // Optional EDF6CoopTrySendExtension status and real pending-byte/packet ceilings.
+    std::uint32_t (*trySend)(std::uint32_t,const void*,std::size_t,std::uint32_t,std::uint32_t) noexcept=nullptr;
 };
 void UpdateCommandNetwork(const CommandNetworkContext&,std::uint64_t now) noexcept;
 bool ReceiveCommandNetwork(std::uint32_t senderPeer,const char* authenticatedPuid,
