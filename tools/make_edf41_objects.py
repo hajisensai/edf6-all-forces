@@ -178,6 +178,8 @@ class Alias:
     fracture: bool = False    # a voxel-destruction body: animation_model[3] built from the model's extent and the
                               # template's tuning (fracture_block); FRACTURE_CLASSES need it
     guns: tuple[Gun, ...] = ()    # the weapons: meshes merged into the model, muzzles added, gun_control rebuilt
+    shared_model: str = ''    # the model archive (Mods path) every alias naming it shares: one armed body each
+                              # (shared_member) and the textures once (shared_model_archive), not an archive per root
     eye: tuple[str, tuple[float, float, float]] | None = None   # (bone, position): the locator 目の基準位置
     prune: bool = False       # ship only the files the result names (the closure holds 4.1's weapon objects)
     material_from: str = ''   # a 4.1 SGO (OBJECT/<this>) whose bare blobs are material_animation here: the object's own
@@ -332,6 +334,11 @@ HECTOR_COMMON: tuple[tuple[str, object], ...] = (
 )
 
 
+# The one model archive of every Hector variant. 4.1's Hector.mrab holds both generations' bodies, every weapon and their
+# textures (16 MB of each variant's 17); an archive per variant shipped those 21 times (347 MB in Mods for 27 MB of members).
+HECTOR_MODEL = 'OBJECT/HECTOR_VARIANTS.MRAB'
+
+
 def hector_alias(generation: str, left: str, right: str) -> 'Alias':
     """The Alias of one Hector variant: the class and keys every variant shares, and its two guns from HECTOR_WEAPONS."""
     arms = ((left, 'arms_l', '砲台１', 0), (right, 'arms_r', '砲台２', 1))
@@ -349,7 +356,7 @@ def hector_alias(generation: str, left: str, right: str) -> 'Alias':
         # moves the object onto the obstacle first (check_states / CLIMB_KEY). Without the key the class's probe stops
         # at once (EDF+0x540C82 and 0x53CC00 test the node and leave).
         drop=('WalkingEnemyBase/ClimbOver',),
-        guns=guns, eye=(f'Hector{generation}', (0.0, 29.0, 0.0)), prune=True)
+        guns=guns, eye=(f'Hector{generation}', (0.0, 29.0, 0.0)), prune=True, shared_model=HECTOR_MODEL)
 
 
 def ufo301_bullet(cls: str, custom: list, hit: str | None) -> list:
@@ -2837,17 +2844,42 @@ def remove_key(node: dsgo.Node, key: str) -> None:
 
 
 def merged_model(games: 'Games', a: Alias, files: dict[str, bytes], rab_rel: str, mdb_name: str,
-                 template_rab: str, fragments: list[str]) -> tuple[bytes, mdb.Mdb, list[float], tuple[list[float], list[float]]]:
-    """(the object's own model archive, its body model, each gun's barrel length, the body's (min, max) corner).
+                 template_rab: str, fragments: list[str]) -> tuple[bytes, 'Armed']:
+    """(the object's own model archive, its body model with what armed_body says of it).
 
     The archive is 4.1's (files[rab_rel], converted) with its model `mdb_name` holding every gun's mesh
     (mdb.graft_rigid: a rigid object on a bone under the arm bone) and no other model, plus the debris models the
     template's damage map names (`fragments`) with the textures they use, taken from the template's own archive: the
     class loads those from the object's archive by name, and Hector's has none. An archive of its own because the
-    next Hector variant carries other guns."""
+    next Hector variant carries other guns (an alias with shared_model shares one: shared_model_archive)."""
     rab = mdb.rab_read(files[rab_rel])
+    body_file, armed = armed_body(rab, a, mdb_name)
+    rab.files = [body_file if f.name.lower() == mdb_name.lower() else f for f in rab.files
+                 if not f.name.lower().endswith('.mdb') or f.name.lower() == mdb_name.lower()]
+    # 4.1's archive interleaves each model with its own textures (body textures, body model, then each gun's textures
+    # and model); with the guns' models gone the body model sits before the guns' and the shield's textures, which the
+    # engine then never binds (black guns, an invisible shield: mdb.insert_member). Back into folder order, stably.
+    rab.files.sort(key=lambda f: f.folder)
+    add_fragments(games, rab, template_rab, fragments)
+    return mdb.rab_write(rab), armed
+
+
+@dataclass
+class Armed:
+    """armed_body's model: the body with its guns, each gun's barrel length, the body's (min, max) corner before the
+    guns, and {gun SGO: {4.1 material name: the gun's own name for it}} (gun_materials)."""
+    body: mdb.Mdb
+    barrel: list[float]
+    corner: tuple[list[float], list[float]]
+    renamed: dict[str, dict[str, str]]
+
+
+def armed_body(rab: mdb.Rab, a: Alias, mdb_name: str) -> tuple[mdb.RabFile, Armed]:
+    """(a copy of the member `mdb_name` of `rab` holding every gun of `a` (mdb.graft_rigid / graft_skinned: an object on
+    a bone under the arm bone), its guns' materials named apart (gun_materials), and what Armed says of it). `rab` is
+    not changed."""
     by_name = {f.name.lower(): f for f in rab.files}
-    body_file = by_name[mdb_name.lower()]
+    body_file = replace(by_name[mdb_name.lower()])
     body = mdb.mdb_read(body_file.data)
     corner = ([mdb.rigid_extent(body, ax)[0] for ax in range(3)], [mdb.rigid_extent(body, ax)[1] for ax in range(3)])
     barrel = []
@@ -2859,14 +2891,49 @@ def merged_model(games: 'Games', a: Alias, files: dict[str, bytes], rab_rel: str
             mdb.graft_skinned(body, weapon, gun.node, 'gun_' + gun.node)
         else:
             mdb.graft_rigid(body, weapon, gun.node, 'gun_' + gun.node)
+    renamed = gun_materials(body, a.guns)
     raw = mdb.mdb_write(body)
     body_file.stored = mdb.cmpl_compress(raw) if body_file.stored[:4] == b'CMPL' else raw
-    rab.files = [f for f in rab.files if not f.name.lower().endswith('.mdb') or f is body_file]
-    # 4.1's archive interleaves each model with its own textures (body textures, body model, then each gun's textures
-    # and model); with the guns' models gone the body model sits before the guns' and the shield's textures, which the
-    # engine then never binds (black guns, an invisible shield: mdb.insert_member). Back into folder order, stably.
-    rab.files.sort(key=lambda f: f.folder)
-    donor =mdb.rab_read(games.read6(template_rab))
+    return body_file, Armed(body, barrel, corner, renamed)
+
+
+# shared_model_archive's results by (shared archive, SHA-256 of 4.1's archive): every root naming it gets the same bytes
+SHARED_MODELS: dict[tuple[str, str], tuple[bytes, dict[str, Armed]]] = {}
+
+
+def shared_model_archive(games: 'Games', shared: str, rab41: bytes, template_rab: str,
+                         fragments: list[str]) -> tuple[bytes, dict[str, Armed]]:
+    """(the archive `shared`, {root: its armed body}) for every alias of ALIASES with that shared_model: 4.1's archive
+    (`rab41`, converted) without its own models, one armed body per root as shared_member(root) (the body member its
+    4.1 SGO names, with its guns: armed_body), and the template's debris models (add_fragments). Every root of the
+    group gets the same bytes, so the roots' closures agree on the file (build's clash check), and one root built alone
+    (--only) still finds its member there. The class loads the body animation_model[0][1] names; the textures, ahead
+    of every model, serve them all (mdb.insert_member)."""
+    key = (shared, hashlib.sha256(rab41).hexdigest())
+    if key not in SHARED_MODELS:
+        rab = mdb.rab_read(rab41)
+        bodies, out = [], {}
+        for root in sorted(r for r, a in ALIASES.items() if a.shared_model == shared):
+            am = sgo.read(convert(games, 'OBJECT/' + root))[1]['animation_model']
+            member, out[root] = armed_body(rab, ALIASES[root], am[0][0][1])
+            bodies.append(replace(member, name=shared_member(root)))
+        rab.files = sorted((f for f in rab.files if not f.name.lower().endswith('.mdb')), key=lambda f: f.folder)
+        for f in bodies:
+            mdb.insert_member(rab, f)
+        add_fragments(games, rab, template_rab, fragments)
+        SHARED_MODELS[key] = (mdb.rab_write(rab), out)
+    return SHARED_MODELS[key]
+
+
+def shared_member(root: str) -> str:
+    """The body member of `root` in its shared model archive (HECTOR301CC.SGO -> HECTOR301CC.mdb)."""
+    return root.rsplit('/', 1)[-1].rsplit('.', 1)[0] + '.mdb'
+
+
+def add_fragments(games: 'Games', rab: mdb.Rab, template_rab: str, fragments: list[str]) -> None:
+    """The template's debris models (`fragments`, by name) into `rab` with the textures they use, from the template's
+    own archive (merged_model)."""
+    donor = mdb.rab_read(games.read6(template_rab))
     have = {f.name.lower() for f in rab.files}
     members = {f.name.lower(): f for f in donor.files}
     for name in fragments:
@@ -2880,7 +2947,6 @@ def merged_model(games: 'Games', a: Alias, files: dict[str, bytes], rab_rel: str
             if f.name.lower() not in have:
                 have.add(f.name.lower())
                 mdb.insert_member(rab, f)
-    return mdb.rab_write(rab), body, barrel, corner
 
 
 def missing_textures(rab_bytes: bytes, model: str) -> list[str]:
@@ -2931,8 +2997,14 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     mrab, mdb_name = am[0][0][0], am[0][0][1]
     template_rab = rel_of(t_am.items[0].items[0])
     fragments = list(node_path(t_am, '3/3/6').items)
-    rab_rel = 'OBJECT/' + root.rsplit('.', 1)[0] + '.MRAB'
-    rab_bytes, body, barrel, (lo, hi) = merged_model(games, a, files, rel_of(mrab), mdb_name, template_rab, fragments)
+    if a.shared_model:
+        rab_rel = a.shared_model
+        rab_bytes, armed_of = shared_model_archive(games, rab_rel, files[rel_of(mrab)], template_rab, fragments)
+        armed, mdb_name = armed_of[root], shared_member(root)
+    else:
+        rab_rel = 'OBJECT/' + root.rsplit('.', 1)[0] + '.MRAB'
+        rab_bytes, armed = merged_model(games, a, files, rel_of(mrab), mdb_name, template_rab, fragments)
+    barrel, (lo, hi) = armed.barrel, armed.corner
     for model in (mdb_name, *fragments):
         if missing_textures(rab_bytes, model):
             raise ValueError(f'{rab_rel}: {model} would render black: {missing_textures(rab_bytes, model)}')
@@ -2962,7 +3034,7 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
     # each keeps the template's mode.
     light = None
     if a.guns:
-        glow, death, light = hector_materials(files, rab_rel, mdb_name, mine, a.guns)
+        glow, death, light = hector_materials(files, rab_rel, armed, mine, a.guns)
     else:
         glow = death = mine['material_animation'][0]
     slots = [dsgo.Node([dsgo.Blob(death if i == BERSERKER_DEATH_SLOT else glow, 2), c.items[1]])
@@ -3171,30 +3243,14 @@ def hector_blocks(blocks: list, loop: bytes | None, death: bytes | None, what: s
     return glow[0], (end[0] if end else None)
 
 
-def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine: dict, guns: tuple['Gun', ...]
-                     ) -> tuple[bytes, bytes, bytes | None]:
-    """(the glow blob, the death blob, the charge light or None) of a Hector variant, each animating the body's materials
-    and every gun's; the charge light is 301 cannon's third block (120 frames, EDF41.exe 0x2259A0 plays it in mode 1 when
-    the charge starts and stops it when the charge state is left, 0x225AAB) on that cannon's materials.
-
-    The guns' meshes are part of the body model (merged_model) with materials of their own that carry 4.1's names
-    (ufosurface: the body's name too; the 401 shield's glass ufoglass). EDF6 binds an MTAB entry to the first material
-    of that name (EDF+0x110D570, a linear scan returning the first match), so the body's blob lit the body only: the
-    guns' glow and the shield glass's animation were never played. Here each gun's materials get a name of their own
-    (`<name>.<weapon model>`, files[rab_rel] rewritten) and the gun's own 4.1 blocks are merged in under those names."""
-    rab = mdb.rab_read(files[rab_rel])
-    member = next(f for f in rab.files if f.name.lower() == mdb_name.lower())
-    md = mdb.mdb_read(member.data)
-    loop, death = hector_blocks(mine['material_animation'], None, None, rab_rel)
-    glow_parts: list[tuple[bytes, dict[str, str]]] = [(loop, {})]
-    death_parts: list[tuple[bytes, dict[str, str]]] = [(death, {})]
-    light_parts: list[tuple[bytes, dict[str, str]]] = []
-    done: dict[str, str] = {}
+def gun_materials(md: mdb.Mdb, guns: tuple['Gun', ...]) -> dict[str, dict[str, str]]:
+    """{gun SGO: {4.1 material name: its name now}}: each gun's materials in the merged model `md` renamed in place to
+    `<name>.<weapon model>` (why: hector_materials), once per weapon (the same weapon on both arms shares them)."""
+    out: dict[str, dict[str, str]] = {}
     for gun in guns:
-        if gun.fire is None or gun.fire.sgo in done:
+        if gun.fire is None or gun.fire.sgo in out:
             continue      # the same weapon on both arms: one set of materials (_adopt_objects shares them)
         stem = gun.mdb.rsplit('.', 1)[0].lower()
-        done[gun.fire.sgo] = stem
         prefix = 'gun_' + gun.node
         mats = sorted({me.material for ob in md.objects
                        if (lambda n: n == prefix or n.startswith(prefix + '_'))(md.name_of(md.bones[ob.bone].name))
@@ -3205,6 +3261,32 @@ def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine:
             rename[old] = f'{old}.{stem}'
             md.materials[i].name = len(md.names)
             md.names.append(rename[old])
+        out[gun.fire.sgo] = rename
+    return out
+
+
+def hector_materials(files: dict[str, bytes], rab_rel: str, armed: Armed, mine: dict, guns: tuple['Gun', ...]
+                     ) -> tuple[bytes, bytes, bytes | None]:
+    """(the glow blob, the death blob, the charge light or None) of a Hector variant, each animating the body's materials
+    and every gun's; the charge light is 301 cannon's third block (120 frames, EDF41.exe 0x2259A0 plays it in mode 1 when
+    the charge starts and stops it when the charge state is left, 0x225AAB) on that cannon's materials.
+
+    The guns' meshes are part of the body model (merged_model) with materials of their own that carry 4.1's names
+    (ufosurface: the body's name too; the 401 shield's glass ufoglass). EDF6 binds an MTAB entry to the first material
+    of that name (EDF+0x110D570, a linear scan returning the first match), so the body's blob lit the body only: the
+    guns' glow and the shield glass's animation were never played. So each gun's materials have a name of their own
+    (`<name>.<weapon model>`, gun_materials: armed.renamed) and the gun's own 4.1 blocks are merged in under those names."""
+    md = armed.body
+    loop, death = hector_blocks(mine['material_animation'], None, None, rab_rel)
+    glow_parts: list[tuple[bytes, dict[str, str]]] = [(loop, {})]
+    death_parts: list[tuple[bytes, dict[str, str]]] = [(death, {})]
+    light_parts: list[tuple[bytes, dict[str, str]]] = []
+    done: set[str] = set()
+    for gun in guns:
+        if gun.fire is None or gun.fire.sgo in done:
+            continue      # the same weapon on both arms: one set of materials
+        done.add(gun.fire.sgo)
+        rename = armed.renamed[gun.fire.sgo]
         blocks = sgo.read(files['OBJECT/' + gun.fire.sgo])[1].get('material_animation', [])
         if not blocks:
             continue      # 301's gatling: 4.1 animates nothing on it
@@ -3221,9 +3303,6 @@ def hector_materials(files: dict[str, bytes], rab_rel: str, mdb_name: str, mine:
             if stray:
                 raise ValueError(f'{gun.fire.sgo}: its blocks animate {stray}, its meshes use {sorted(rename)}')
             parts.append((blob, rename))
-    raw = mdb.mdb_write(md)
-    member.stored = mdb.cmpl_compress(raw) if member.stored[:4] == b'CMPL' else raw
-    files[rab_rel] = mdb.rab_write(rab)
     blobs = mtab_merge(glow_parts), mtab_merge(death_parts)
     light = mtab_merge(light_parts) if light_parts else None
     names = [md.name_of(x.name) for x in md.materials]
