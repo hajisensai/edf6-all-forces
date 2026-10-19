@@ -28,6 +28,7 @@ bool IsSoldierClass(const void*) noexcept {return true;}
 bool HumanOnFoot(const unsigned char*) noexcept {return true;}
 bool MapHoldsKeys() noexcept {return fixtureMapOwner!=nullptr;}
 bool MapHoldsHumanKeys(const unsigned char* human) noexcept {return fixtureMapOwner && fixtureMapOwner==human;}
+bool MapPadState(std::uint16_t*,std::uint8_t*,std::uint8_t*) noexcept {return false;}
 float MapRay(const float* from,const float* to,float* out) noexcept {
     if(!fixtureRayMode)return -1;
     const float fraction=fixtureRayMode==1 ? 0.0f : 0.025f;
@@ -172,7 +173,8 @@ void NativeStep(unsigned char* object) {
     const auto table=crew::At<void* const*>(object,0);
     reinterpret_cast<crew::enemy_native::InputFn>(table[4])(object,nullptr);
 }
-SHORT WINAPI FixtureKeys(int) {return 0;}
+int fixtureHeldKey=0;
+SHORT WINAPI FixtureKeys(int key) {return fixtureHeldKey && key==fixtureHeldKey ? static_cast<SHORT>(0x8000) : 0;}
 HWND WINAPI FixtureWindow() {return crew::fixtureInputWindow;}
 bool Online() noexcept {return crew::fixtureOnline;}
 bool PendingRequest(const crew::enemy_control::Snapshot& snapshot) noexcept {
@@ -296,9 +298,24 @@ int main() {
     Put<float>(pad+0xA80,0x0C,-0.5f);Put<float>(pad+0xA80,0x24,0.25f);Put<float>(pad+0xA80,0x3C,0.5f);pad[0xA80+0xD0]=1;
     fixtureMapOwner=owner1;Input p1Map{},p2Pad{};Sample(*ByLease(124),p1Map);Sample(*ByLease(secondActive.lease),p2Pad);
     Check(p1Map.move[0]==0 && p1Map.move[2]==0 && !p1Map.active[0].id,"the map owner consumes its own movement and physical trigger");
-    Check(p2Pad.move[0]==-0.5f && p2Pad.move[2]==0.25f && p2Pad.look[0]==0.5f && p2Pad.active[0].id,"P1 map and closing drain cannot swallow P2 native movement look or fire");
+    Check(p2Pad.move[0]==-0.5f && p2Pad.move[2]==-0.25f && p2Pad.look[0]==0.5f && p2Pad.active[0].id,"P1 map and closing drain cannot swallow P2 native movement look or fire");
     fixtureMapOwner=owner2;Input p1Pad{},p2Map{};Sample(*ByLease(124),p1Pad);Sample(*ByLease(secondActive.lease),p2Map);
     Check(p1Pad.move[0]==0.75f && p1Pad.active[0].id && p2Map.move[0]==0 && !p2Map.active[0].id,"owner-aware input holds also isolate P2 map from P1 controls");
+    {
+        // Each attack has its own key: the second attack's key (right mouse button) uses it
+        // directly, with no selection and without the first attack.
+        fixtureMapOwner=nullptr;pad[0xD0]=0;pad[0xA80+0xD0]=0;fixtureHeldKey=VK_RBUTTON;
+        Snapshot p1{};EnemyControlReadSnapshot(ObjRef::Of(owner1),&p1);
+        Ability own[2]{};Check(EnemyControlAbilities(p1,0,own,2)==2,"controlled catalogue readable");
+        Input first{},again{};Sample(*ByLease(124),first);Sample(*ByLease(124),again);
+        const bool held=(own[1].flags&AbilityFlag::held)!=0;
+        Check(first.active[0].id==own[1].id && first.active[0].phase==(held ? 1u : 2u) && !first.active[1].id,"the second attack's own key uses that attack and nothing else");
+        Check(held ? again.active[0].id==own[1].id : !again.active[0].id,"an edge attack is pressed once per key press, a held one stays held");
+        fixtureHeldKey=0;Input up{};Sample(*ByLease(124),up);Check(!up.active[0].id,"releasing the key releases the attack");
+        Check(EnemyControlHoldAbility(p1,own[0].id),"the M card holds an attack directly");
+        Input card{};Sample(*ByLease(124),card);Check(card.active[0].id==own[0].id,"the card's held row uses its attack");
+        Check(EnemyControlHoldAbility(p1,0),"the card lets go");Input none{};Sample(*ByLease(124),none);Check(!none.active[0].id,"no attack after the card lets go");
+    }
     fixtureMapOwner=nullptr;edf::SetInputSource(nullptr,nullptr);DestroyWindow(fixtureInputWindow);fixtureInputWindow=nullptr;std::memset(pad,0,sizeof(pad));
     Snapshot wrong=secondActive;wrong.ownerHumanKey=reinterpret_cast<std::uintptr_t>(owner1);
     Check(!EnemyControlExit(wrong),"P1 cannot exit P2's lease with a changed UI owner key");

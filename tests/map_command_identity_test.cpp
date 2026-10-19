@@ -10,11 +10,13 @@ bool EnemyControlDescribe(const ObjRef& requester,const ObjRef&,enemy_control::S
     return false;
 }
 bool EnemyControlReadSnapshot(const ObjRef&,enemy_control::Snapshot* out) noexcept {if(out)*out={};return false;}
+bool EnemyControlPickable(const void*) noexcept {return false;}
 unsigned EnemyControlAbilities(const enemy_control::Snapshot&,unsigned,enemy_control::Ability*,unsigned) noexcept {return 0;}
 unsigned enemyBeginCalls=0,enemyExitCalls=0;enemy_control::Snapshot enemyLastRequest{};
 bool EnemyControlRequest(const enemy_control::Snapshot& snapshot) noexcept {++enemyBeginCalls;enemyLastRequest=snapshot;return false;}
 bool EnemyControlSelectAbility(const enemy_control::Snapshot&,std::uint32_t) noexcept {return false;}
 bool EnemyControlSetAbilityHeld(const enemy_control::Snapshot&,bool) noexcept {return false;}
+bool EnemyControlHoldAbility(const enemy_control::Snapshot&,std::uint32_t) noexcept {return false;}
 bool EnemyControlExit(const enemy_control::Snapshot& snapshot) noexcept {++enemyExitCalls;enemyLastRequest=snapshot;return false;}
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }

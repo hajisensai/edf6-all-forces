@@ -51,8 +51,8 @@ void CardCase(int width,int height,enemy_control::Phase phase,bool health,bool p
     },s);recording=false;
     CheckDrawing(w,h);Check(sceneEnemyVisible,"rendered card exposes its immutable snapshot");
     const bool active=phase==enemy_control::Phase::active;
-    const int wanted=active ? sceneEnemy.count+4 : 1;
-    Check(sceneEnemyCount==wanted,"active and pending expose actual skill/page/exit actions");
+    const int wanted=active ? sceneEnemy.count+3 : 1;
+    Check(sceneEnemyCount==wanted,"active and pending expose actual attack rows, pages and exit (no fire row)");
     Check(sceneEnemyHitSnapshot.revision==123 && sceneEnemyHitSnapshot.lease==567 && sceneEnemyHitSnapshot.request==890 &&
         sceneEnemyHitSnapshot.ownerHumanKey==0x11110000 && sceneEnemyHitSnapshot.target[0]==2,"click ledger carries displayed owner, target, lease, request and revision");
     bool exit=false,begin=false;int skills=0;
@@ -75,23 +75,46 @@ void InspectCase(int width,int height) {
     SetEnemy(enemy_control::Phase::idle);sceneEnemy.focused=false;sceneEnemy.padRow=-1;
     MapTargetsNone();MapCommandReadout command{};float end=0;
     RecordBegin();Measured([&](Text* text,Line* lines,int* at){end=MapEnemyPanel(image,nullptr,text,w,s,top,bottom,false,command,lines,at);},s);recording=false;
-    CheckDrawing(w,h);Check(sceneEnemyVisible && sceneEnemyCount==0 && std::fabs(end-top-28*s)<0.2f,"idle card is discoverable without permanently consuming source loadout space");
+    CheckDrawing(w,h);Check(sceneEnemyVisible && sceneEnemyCount==1 && sceneEnemyCodes[0]==enemyui::kFold && std::fabs(end-top-28*s)<0.2f,
+        "folded idle card is one clickable title without permanently consuming source loadout space");
     command.pointer=true;command.px=w-30*s;command.py=top+12*s;
     RecordBegin();Measured([&](Text* text,Line* lines,int* at){end=MapEnemyPanel(image,nullptr,text,w,s,top,bottom,false,command,lines,at);},s);recording=false;
-    CheckDrawing(w,h);Check(sceneEnemyCount==1 && sceneEnemyCodes[0]==enemyui::kBegin,"hover expands a real control request button");
-    command.px=(sceneEnemyRects[0][0]+sceneEnemyRects[0][2])*0.5f;command.py=(sceneEnemyRects[0][1]+sceneEnemyRects[0][3])*0.5f;
+    CheckDrawing(w,h);Check(sceneEnemyCount==1 && std::fabs(end-top-28*s)<0.2f,"hovering the title never unfolds the card by itself");
+    sceneEnemy.expanded=true;
+    RecordBegin();Measured([&](Text* text,Line* lines,int* at){end=MapEnemyPanel(image,nullptr,text,w,s,top,bottom,false,command,lines,at);},s);recording=false;
+    CheckDrawing(w,h);
+    bool begin=false,prev=false,next=false,fold=false;int beginAt=-1;
+    for(int i=0;i<sceneEnemyCount;++i) {
+        begin=begin || sceneEnemyCodes[i]==enemyui::kBegin;if(sceneEnemyCodes[i]==enemyui::kBegin)beginAt=i;
+        prev=prev || sceneEnemyCodes[i]==enemyui::kTargetPrev;next=next || sceneEnemyCodes[i]==enemyui::kTargetNext;fold=fold || sceneEnemyCodes[i]==enemyui::kFold;
+    }
+    Check(sceneEnemyCount==4 && begin && prev && next && fold,"the unfolded card offers control, the target arrows and its fold title");
+    command.px=(sceneEnemyRects[beginAt][0]+sceneEnemyRects[beginAt][2])*0.5f;command.py=(sceneEnemyRects[beginAt][1]+sceneEnemyRects[beginAt][3])*0.5f;
     Measured([&](Text* text,Line* lines,int* at){MapEnemyPanel(image,nullptr,text,w,s,top,bottom,false,command,lines,at);},s);
-    Check(sceneEnemyCount==1 && sceneEnemyHitSnapshot.target[0]==2,"moving from title to control button keeps the inspected target and expanded action");
+    Check(sceneEnemyCount==4 && sceneEnemyHitSnapshot.target[0]==2,"moving from title to control button keeps the target and the unfolded card");
     sceneEnemy.snapshot.reason=enemy_control::Reason::building;
     RecordBegin();Measured([&](Text* text,Line* lines,int* at){MapEnemyPanel(image,nullptr,text,w,s,top,bottom,false,command,lines,at);},s);recording=false;
-    CheckDrawing(w,h);Check(sceneEnemyVisible && sceneEnemyCount==0 && TextHas(L"Fixture native unavailable"),"excluded buildings expose a concrete native refusal without a control action");
+    bool refusedBegin=false;for(int i=0;i<sceneEnemyCount;++i)refusedBegin=refusedBegin || sceneEnemyCodes[i]==enemyui::kBegin;
+    CheckDrawing(w,h);Check(sceneEnemyVisible && sceneEnemyCount==3 && !refusedBegin && TextHas(L"Fixture native unavailable"),"excluded buildings expose a concrete native refusal without a control action");
     MapTargetsNone();
 }
 void HudCase(int uiW,int uiH,int width,int height,float user,bool health) {
     const float w=static_cast<float>(width),h=static_cast<float>(height),s=hudscale::Of(uiW,uiH,width,height,user);
     SetEnemy(enemy_control::Phase::active,health);passPlayerRefKey=sceneEnemy.snapshot.ownerHumanKey;passPlayerSoldierKey=0;
     RecordBegin();Measured([&](Text* text,Line* lines,int* at){EnemyControlHud(image,nullptr,text,w,h,s,lines,at);},s);recording=false;
-    CheckDrawing(w,h);Check(drew.size()==7,"production active HUD publishes seven distinct status rows");
+    CheckDrawing(w,h);
+    // The enemy's HUD where the player's was: its name top left, each attack's key -> name bottom right.
+    bool nameTopLeft=false,keysBottomRight=false;int attackNames=0;
+    wchar_t title[256]{};_snwprintf_s(title,_countof(title),_TRUNCATE,Tr(Tx::enemyControlActive),sceneEnemy.snapshot.name);
+    for(const auto& line:drew) {
+        if(line.text==title)nameTopLeft=line.x0<w*0.5f && line.y1<h*0.5f;
+        if(line.text==std::wstring(Tr(Tx::enemyKeyMouseLeft))+L" / RT")keysBottomRight=line.x0>w*0.45f && line.y0>h*0.25f;
+        for(int i=0;i<sceneEnemy.count;++i)if(line.text==sceneEnemy.ability[i].name)++attackNames;
+    }
+    Check(nameTopLeft,"the controlled enemy's name is in the armor gauge's corner");
+    Check(keysBottomRight,"each attack's own key and pad button on the right, where the weapon gauges were");
+    Check(TextHas(Tr(Tx::enemyKeyMouseLeft)) && attackNames>0,"keys are listed with their attacks");
+    Check(TextHas(Tr(Tx::enemyControlAttacks)) && TextHas(Tr(Tx::enemyControlPlayHint)),"the attack block is titled and says how to use it");
     if(health)Check(TextHas(L"12345") && TextHas(L"67890"),"HUD health comes from target numbers rather than protected source");
     else Check(TextHas(Tr(Tx::enemyControlHealthUnavailable)),"HUD unknown target HP never borrows source health");
     passPlayerRefKey=0x22220000;RecordBegin();Measured([&](Text* text,Line* lines,int* at){EnemyControlHud(image,nullptr,text,w,h,s,lines,at);},s);recording=false;
@@ -120,8 +143,8 @@ void StackCase(int width,int height,bool active) {
     scenePvpOpen=found;   // its title clicked (kPvpFold): the panel opens by a click, never by the pointer passing
     RecordBegin();Measured([&](Text* text,Line* lines,int* at){MapCommands(image,nullptr,text,vp,w,h,s,map,lines,at);},s);recording=false;
     CheckDrawing(w,h);
-    if(!(sceneEnemyVisible && (active ? sceneEnemyCount>0 : sceneEnemyCount==0) && scenePvpCount==4 && scenePlaceHitCount>0))std::printf("stack %dx%d active=%d enemy=%d pvp=%d place=%d payload=%d lang=%d pointer=%.1f/%.1f\n",width,height,active,sceneEnemyCount,scenePvpCount,scenePlaceHitCount,scenePayloadButtonCount,static_cast<int>(hudtext::InUse()),sceneCmd.px,sceneCmd.py);
-    Check(sceneEnemyVisible && (active ? sceneEnemyCount>0 : sceneEnemyCount==0) && scenePvpCount==4 && scenePlaceHitCount>0,"enemy/PVP/placement actions remain reachable in the production stack");
+    if(!(sceneEnemyVisible && (active ? sceneEnemyCount>0 : sceneEnemyCount==1) && scenePvpCount==4 && scenePlaceHitCount>0))std::printf("stack %dx%d active=%d enemy=%d pvp=%d place=%d payload=%d lang=%d pointer=%.1f/%.1f\n",width,height,active,sceneEnemyCount,scenePvpCount,scenePlaceHitCount,scenePayloadButtonCount,static_cast<int>(hudtext::InUse()),sceneCmd.px,sceneCmd.py);
+    Check(sceneEnemyVisible && (active ? sceneEnemyCount>0 : sceneEnemyCount==1) && scenePvpCount==4 && scenePlaceHitCount>0,"enemy/PVP/placement actions remain reachable in the production stack");
     Check(scenePayloadButtonCount==(active ? 0 : kMostPayload),"active enemy skills replace paused source loadout while inspection retains payload choices");
     const auto overlaps=[](const float* a,const float* b){return a[0]<b[2] && b[0]<a[2] && a[1]<b[3] && b[1]<a[3];};
     for(int i=0;i<sceneEnemyCount;++i) {

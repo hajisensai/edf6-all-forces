@@ -272,6 +272,13 @@ bool EnemyControlReadSnapshotForView(std::uintptr_t key,enemy_control::Snapshot*
     if(!hasEnemyControl || !value || !key || key!=sceneEnemy.snapshot.ownerHumanKey)return false;
     *value=sceneEnemy.snapshot;return true;
 }
+// The controlled body's published catalogue: the readout's page stands for its first attacks.
+unsigned EnemyControlAbilities(const enemy_control::Snapshot& snapshot,unsigned first,enemy_control::Ability* abilities,unsigned capacity) noexcept {
+    if(!abilities || snapshot.revision!=sceneEnemy.snapshot.revision)return 0;
+    unsigned n=0;
+    for(unsigned i=first;i<static_cast<unsigned>(sceneEnemy.count) && n<capacity;++i)abilities[n++]=sceneEnemy.ability[i];
+    return n;
+}
 void MapCommandEnemyButtons(const float* rects,const int* codes,int n,const enemy_control::Snapshot* snapshot) noexcept {
     sceneEnemyVisible=snapshot!=nullptr;sceneEnemyHitSnapshot=snapshot ? *snapshot : enemy_control::Snapshot{};
     sceneEnemyCount=rects && codes && snapshot ? (std::max)(0,(std::min)(n,kMapEnemyItems)) : 0;

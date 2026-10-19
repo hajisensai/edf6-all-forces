@@ -59,6 +59,7 @@ constexpr float kPointerGain=1.0f;       // px (at 1080 lines) a mouse unit
 constexpr float kClickMove=6.0f;         // mouse units: a left press that moved less is a click, not a pan
 constexpr float kClickBox=6.0f;          // px: a Ctrl box smaller than this both ways is a click
 constexpr float kClickRadius=22.0f;      // px (at 1080 lines) round a unit's icon a click takes it
+constexpr float kPadPickRadius=90.0f;    // px (at 1080 lines) round the screen centre L3 takes an enemy
 
 enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; };
@@ -118,10 +119,14 @@ struct Game {
     rangeplace::Repeat placeUp{},placeDown{};   // , . and the D-pad held: the rows walked (range_place.h Repeats)
     bool placeOn=false;
     pvpmenu::Pad pvpPad{};
+    // The enemy-control target: chosen only by the user (a left click on its map mark, L3 at
+    // the screen centre, or the card's arrows), never by where the pointer happens to pass.
     ObjRef enemyCandidate{};
+    float enemyAimOffset[3]{};  // its picked lock point less its position, to keep the map mark on it
+    bool enemyOpen=false;       // the card unfolded: changed only by its title click, a pick or L3
     enemyui::State enemyMenu{};
     MapEnemyControlReadout enemy{};
-    bool enemyPadFire=false;enemy_control::Snapshot enemyPadFireSnapshot{};
+    bool enemyPadFire=false;int enemyPadEntry=-1;enemy_control::Snapshot enemyPadFireSnapshot{};
 };
 Game game{};
 std::atomic<bool> pvpHoldsPad{false};
@@ -481,8 +486,11 @@ void PickFormation(Game& g,int entry) noexcept {
     Log("MAPCMD formation menu: %s %s, %d",mapbtn::MenuGuard(entry) ? "defence" : "march",
         npc::formation::Name(npc::formation::FromInt(shape)),done);
 }
+void CycleEnemy(Game& g,int direction) noexcept;
 void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
     if(hit.kind==Game::UiKind::enemy) {
+        if(hit.entry==enemyui::kFold){g.enemyOpen=!g.enemyOpen;return;}
+        if(hit.entry==enemyui::kTargetPrev || hit.entry==enemyui::kTargetNext){CycleEnemy(g,hit.entry==enemyui::kTargetPrev ? -1 : 1);return;}
         const auto& snapshot=hit.enemy;
         bool accepted=true;
         if(snapshot.ownerHumanKey!=reinterpret_cast<std::uintptr_t>(g.requester.obj))accepted=false;
@@ -491,11 +499,7 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         else if(hit.entry==enemyui::kPrev || hit.entry==enemyui::kNext) {
             const enemyui::Model model{{},true,snapshot.phase==enemy_control::Phase::active,static_cast<int>(snapshot.abilityCount)};
             enemyui::Page(g.enemyMenu,model,hit.entry==enemyui::kPrev ? -1 : 1);
-        } else if(hit.entry>=0) {
-            enemy_control::Ability ability{};
-            accepted=EnemyControlAbilities(snapshot,static_cast<unsigned>(hit.entry),&ability,1)==1 &&
-                EnemyControlSelectAbility(snapshot,ability.id);
-        }
+        }   // an attack row acts while it is held (MapCommandFrame: EnemyControlHoldAbility), not on release
         if(!accepted)Note(g,L"%ls",hudtext::Tr(hudtext::Tx::enemyControlStale));
         return;
     }
@@ -555,6 +559,8 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
 
 // UI owns presses that began on a rendered panel, including its inert background. Capture remains
 // until release outside the panel; a changed identity/token between press and release cancels action.
+bool EnemyControlling(const Game& g) noexcept;
+bool PickEnemyAt(Game& g,const MapCmdInput& in,const View& v,float x,float y,float radius) noexcept;
 void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept {
     if(!in.front) {
         g.boxing=g.pressing=g.uiLeft=g.uiRight=g.rpressing=false;g.uiPress={};
@@ -602,6 +608,12 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
     if(click && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none){} // release over UI never selects what is underneath
     else if(click && (g.armedOrder || g.armedSupport>=0 || g.place.armed>=0) && !g.boxing)g.armedClick=true;
     else if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
+    else if(click && Cfg().enemyControl && !EnemyControlling(g) && mapcmd::Nearest(marks,n,g.pointer.x,g.pointer.y,kClickRadius*s)<0 &&
+            PickEnemyAt(g,in,*v,g.pointer.x,g.pointer.y,kClickRadius*s)) {
+        // A left click on an enemy (no unit of ours under it) picks it as the enemy-control
+        // target; the NPC selection stays as it was.
+        Note(g,L"%ls",hudtext::Tr(hudtext::Tx::enemyControlPicked));
+    }
     else if(click) {
         const Entry* hit=EntryOf(g,mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift));
         if(hit && !Picked(*hit))Note(g,L"%ls",CommandFailureText(NotPicked(*hit)));
@@ -652,28 +664,93 @@ void Hover(Game& g,const MapCmdInput& in,const View* v) noexcept {
     std::memcpy(g.hoverAt,e.at[i],12);
 }
 
-// Inspect the actual map owner's hostile registry independently of the optional NPC mark feature.
-void EnemyControlCard(Game& g,const MapCmdInput& in,const View* v,bool inspect) noexcept {
+// --- Picking the enemy-control target (the map owner's hostile registry, independent of the NPC mark feature) ---
+bool RequesterTeam(const Game& g,std::int32_t* team) noexcept {
+    __try {
+        if(!Readable(g.requester.obj,kTeam+sizeof(std::int32_t)) || !g.requester.Is(g.requester.obj))return false;
+        *team=At<std::int32_t>(g.requester.obj,kTeam);return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool ReadPosition(const void* object,float* out) noexcept {
+    __try {
+        if(!Readable(object,kPosition+12))return false;
+        std::memcpy(out,static_cast<const unsigned char*>(object)+kPosition,12);
+        return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool EnemyControlling(const Game& g) noexcept {
+    using Phase=enemy_control::Phase;const auto phase=g.enemy.snapshot.phase;
+    return phase==Phase::active || phase==Phase::pending || phase==Phase::restoring;
+}
+void SetEnemyCandidate(Game& g,const void* object,const float* aim) noexcept {
+    npcmark::Assign(g.enemyCandidate,npcmark::Capture(object));
+    float position[3];
+    if(g.enemyCandidate && ReadPosition(object,position))for(int i=0;i<3;++i)g.enemyAimOffset[i]=aim[i]-position[i];
+    else for(float& x:g.enemyAimOffset)x=0.0f;
+    if(g.enemyCandidate){g.enemyOpen=true;g.enemyMenu.first=g.enemyMenu.row=0;}
+}
+// The enemy whose map mark is nearest (x, y) within `radius` px: one enemy control admits
+// before any other (a nest, a part, a fortress), so a mark overlapping its spawner still
+// takes the monster; an inadmissible one alone is still taken, for its card to say why.
+bool PickEnemyAt(Game& g,const MapCmdInput& in,const View& v,float x,float y,float radius) noexcept {
+    std::int32_t team=0;
+    if(!RequesterTeam(g,&team))return false;
+    EnemyMarks& marks=enemyMarks;marks.v=&v;marks.pin=PinOf(in);marks.n=0;
+    VisitEnemiesOf(team,&SeeEnemyMark,&marks);
+    int best=-1,any=-1;float bestD2=radius*radius,anyD2=radius*radius;
+    for(int i=0;i<marks.n;++i) {
+        const mapcmd::Mark& m=marks.m[i];
+        if(!m.on)continue;
+        const float dx=m.x-x,dy=m.y-y,d2=dx*dx+dy*dy;
+        if(d2<=anyD2){anyD2=d2;any=i;}
+        if(d2<=bestD2 && EnemyControlPickable(m.id)){bestD2=d2;best=i;}
+    }
+    const int pick=best>=0 ? best : any;
+    if(pick<0)return false;
+    SetEnemyCandidate(g,marks.m[pick].id,marks.at[pick]);
+    return static_cast<bool>(g.enemyCandidate);
+}
+// Every controllable enemy once (an object has several lock points), nearest the requester first.
+constexpr int kEnemyPicks=1024;
+struct EnemyPicks { float from[3];int n;enemyui::TargetSlot slot[kEnemyPicks]; };
+EnemyPicks enemyPicks{};   // the game thread's (too big for its stack)
+void SeeEnemyPick(void* ctx,const void* object,const float* aim) {
+    auto& e=*static_cast<EnemyPicks*>(ctx);
+    if(e.n>=kEnemyPicks)return;   // the family probe runs after the walk, outside the team manager's lock
+    for(int i=0;i<e.n;++i)if(e.slot[i].id==object)return;
+    const float dx=aim[0]-e.from[0],dy=aim[1]-e.from[1],dz=aim[2]-e.from[2];
+    auto& slot=e.slot[e.n++];slot.id=object;slot.d2=dx*dx+dy*dy+dz*dz;std::memcpy(slot.at,aim,12);
+}
+void CycleEnemy(Game& g,int direction) noexcept {
+    using hudtext::Tr;using hudtext::Tx;
+    std::int32_t team=0;EnemyPicks& e=enemyPicks;e.n=0;
+    if(EnemyControlling(g) || !RequesterTeam(g,&team) || !ReadPosition(g.requester.obj,e.from))return;
+    VisitEnemiesOf(team,&SeeEnemyPick,&e);
+    int kept=0;
+    for(int i=0;i<e.n;++i)if(EnemyControlPickable(e.slot[i].id))e.slot[kept++]=e.slot[i];
+    e.n=kept;
+    const int i=enemyui::CycleTarget(e.slot,e.n,g.enemyCandidate.obj,direction);
+    if(i<0){Note(g,L"%ls",Tr(Tx::enemyControlNoTarget));return;}
+    SetEnemyCandidate(g,e.slot[i].id,e.slot[i].at);
+}
+void EnemyControlCard(Game& g) noexcept {
     using Phase=enemy_control::Phase;
     enemy_control::Snapshot snapshot{};
     const bool controlling=EnemyControlReadSnapshot(g.requester,&snapshot) &&
         (snapshot.phase==Phase::active || snapshot.phase==Phase::pending || snapshot.phase==Phase::restoring);
+    g.enemy.marked=false;
     if(!controlling) {
-        const bool onPanel=v && !in.usingPad && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none;
-        if(inspect && v && !onPanel && !g.enemyMenu.focused) {
-            __try {
-                if(Readable(g.requester.obj,kTeam+sizeof(std::int32_t)) && g.requester.Is(g.requester.obj)) {
-                    EnemyMarks& marks=enemyMarks;marks.v=v;marks.pin=PinOf(in);marks.n=0;
-                    VisitEnemiesOf(At<std::int32_t>(g.requester.obj,kTeam),&SeeEnemyMark,&marks);
-                    const float x=in.usingPad ? v->w*0.5f : g.pointer.x,y=in.usingPad ? v->h*0.5f : g.pointer.y;
-                    const int pick=mapcmd::Nearest(marks.m,marks.n,x,y,kClickRadius*v->h/1080.0f);
-                    if(pick>=0)npcmark::Assign(g.enemyCandidate,npcmark::Capture(marks.m[pick].id));
-                }
-            } __except(EXCEPTION_EXECUTE_HANDLER){}
+        // A target that died or left is let go: the card says how to pick another, no stale reason.
+        if(g.enemyCandidate && !npcmark::Alive(g.enemyCandidate))npcmark::Assign(g.enemyCandidate,{});
+        float position[3];
+        if(g.enemyCandidate && ReadPosition(g.enemyCandidate.obj,position)) {
+            for(int i=0;i<3;++i)g.enemy.markAt[i]=position[i]+g.enemyAimOffset[i];
+            g.enemy.marked=true;
         }
         EnemyControlDescribe(g.requester,g.enemyCandidate,&snapshot);
     }
     g.enemy.visible=Cfg().enemyControl;
+    g.enemy.expanded=g.enemyOpen;
     g.enemy.snapshot=snapshot;
     const int total=static_cast<int>((std::min)(snapshot.abilityCount,static_cast<std::uint32_t>(0x7FFFFFFF)));
     if(g.enemyMenu.first<0 || g.enemyMenu.first>=total)g.enemyMenu.first=0;
@@ -987,9 +1064,15 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         (placeKeys && ((k.padUp && !g.was.padUp) || (k.padDown && !g.was.padDown) || (k.padLeft && !g.was.padLeft) ||
                        (k.padRight && !g.was.padRight) || (g.place.open && k.padA && !g.was.padA)));
     in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);
-    EnemyControlCard(g,in,haveView ? &v : nullptr,false);
+    EnemyControlCard(g);
     const bool enemyToggle=k.padEnemy && !g.was.padEnemy;
     const bool pvpToggle=k.padPvp && !g.was.padPvp;
+    // L3 into the card takes the enemy under the screen centre (the pad's pointer), else
+    // keeps the target there is, else the nearest controllable one; the card unfolds.
+    if(enemyToggle && in.front && haveView && v.enemyVisible && !g.enemyMenu.focused && !EnemyControlling(g)) {
+        if(!PickEnemyAt(g,in,v,v.w*0.5f,v.h*0.5f,kPadPickRadius*v.h/1080.0f) && !g.enemyCandidate)CycleEnemy(g,1);
+        g.enemyOpen=true;EnemyControlCard(g);
+    }
     const auto enemyInput=enemyui::Step(g.enemyMenu,EnemyModel(g.enemy.snapshot,in.front && haveView && v.enemyVisible),
         {enemyToggle,k.padUp && !g.was.padUp,k.padDown && !g.was.padDown,
          k.padLeft && !g.was.padLeft,k.padRight && !g.was.padRight,k.padA && !g.was.padA,
@@ -1000,9 +1083,14 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         k.padPvp=pvpToggle; // R3 transfers focus to PVP on this edge; A/B remain consumed.
         k.padNext=k.padGuard=k.padFollow=k.padRelease=k.padUp=k.padDown=k.padLeft=k.padRight=k.padA=k.padB=false;
     }
+    if(enemyInput.cycle) {
+        // The user's own step keeps the card focused on the new target.
+        CycleEnemy(g,enemyInput.cycle);EnemyControlCard(g);
+        g.enemyMenu.identity=EnemyModel(g.enemy.snapshot,true).identity;g.enemyMenu.row=0;
+    }
     if(enemyInput.action!=enemyui::kNone) {
         Game::UiHit hit;hit.kind=Game::UiKind::enemy;hit.entry=enemyInput.action;hit.enemy=g.enemy.snapshot;UiClick(g,hit,false);
-        if(enemyInput.action==enemyui::kFire)g.enemyPadFireSnapshot=g.enemy.snapshot;
+        if(enemyInput.action>=0){g.enemyPadFireSnapshot=g.enemy.snapshot;g.enemyPadEntry=enemyInput.action;}
     }
     const auto pvpInput=pvpmenu::Step(g.pvpPad,v.pvpStatus,haveView && v.pvpVisible,
         {k.padPvp && !g.was.padPvp,k.padUp && !g.was.padUp,k.padDown && !g.was.padDown,
@@ -1042,13 +1130,20 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         }
     }
     Hover(g,in,haveView ? &v : nullptr);
-    EnemyControlCard(g,in,haveView ? &v : nullptr,true);
+    EnemyControlCard(g);
+    // An attack row of the card is that attack while it is held (mouse button or A on it):
+    // every attack, including those past the last key, without selecting one first.
     const bool mouseSkill=rawKeys.left && g.uiLeft && g.uiPress.kind==Game::UiKind::enemy &&
-        g.uiPress.entry==enemyui::kFire && SameEnemy(g.uiPress.enemy,g.enemy.snapshot);
-    const bool padSkill=enemyui::HoldFire(g.enemyPadFire,enemyInput.action==enemyui::kFire,rawKeys.padA,g.enemyMenu.focused,
-        enemyui::Action(EnemyModel(g.enemy.snapshot,true),g.enemyMenu.first,g.enemyMenu.row)==enemyui::kFire,
-        SameEnemy(g.enemyPadFireSnapshot,g.enemy.snapshot));
-    EnemyControlSetAbilityHeld(g.enemy.snapshot,mouseSkill || padSkill);
+        g.uiPress.entry>=0 && SameEnemy(g.uiPress.enemy,g.enemy.snapshot);
+    const int padRow=enemyui::Action(EnemyModel(g.enemy.snapshot,true),g.enemyMenu.first,g.enemyMenu.row);
+    const bool padSkill=enemyui::HoldFire(g.enemyPadFire,enemyInput.action>=0,rawKeys.padA,g.enemyMenu.focused,
+        padRow>=0 && padRow==g.enemyPadEntry,SameEnemy(g.enemyPadFireSnapshot,g.enemy.snapshot));
+    std::uint32_t heldAbility=0;
+    if(mouseSkill || padSkill) {
+        enemy_control::Ability ability{};
+        if(EnemyControlAbilities(g.enemy.snapshot,static_cast<unsigned>(mouseSkill ? g.uiPress.entry : g.enemyPadEntry),&ability,1)==1)heldAbility=ability.id;
+    }
+    EnemyControlHoldAbility(g.enemy.snapshot,heldAbility);
     boxingNow.store(g.boxing);
     const bool next=(k.tab && !g.was.tab && !k.shift) || (k.padNext && !g.was.padNext),prev=k.tab && !g.was.tab && k.shift;
     bool picked=g.rowPicked;
@@ -1192,7 +1287,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
 
 void ResetMapCommands() noexcept {
     npcmark::Assign(game.hover,{});npcmark::Assign(game.eatHover,{});
-    EnemyControlSetAbilityHeld(game.enemy.snapshot,false);
+    EnemyControlHoldAbility(game.enemy.snapshot,0);
     npcmark::Assign(game.enemyCandidate,{});
     game=Game{};
     boxingNow.store(false);pointerCaptured.store(false);placeHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);enemyHoldsPad.store(false);
@@ -1330,7 +1425,7 @@ void MapCommandUiPanels(const float* rects,int n) noexcept {
 void SuspendMapCommands() noexcept {
     // Closing the map ends a hover/press even if reopened inside kFreshMs. Keep the user's selection.
     Game& g=game;
-    EnemyControlSetAbilityHeld(g.enemy.snapshot,false);
+    EnemyControlHoldAbility(g.enemy.snapshot,0);
     npcmark::Assign(g.enemyCandidate,{});g.enemyMenu={};g.enemyPadFire=false;g.enemy={};enemyHoldsPad.store(false);
     npcmark::Assign(g.hover,{});npcmark::Assign(g.eatHover,{});
     g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=g.rpressing=false;Arm(g,false,Order::none,-1);g.armedClick=g.rightClick=false;
