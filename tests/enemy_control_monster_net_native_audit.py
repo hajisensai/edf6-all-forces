@@ -698,7 +698,17 @@ if source.is_file():
           'all three native 504 level-derived descriptor words belong to the explicit typed sample')
     helper = without_comments((ROOT / 'src/enemy_control_projectile_native.cpp').read_text(encoding='utf-8'))
     captured_sample = body(helper, 'CaptureNativeProjectileSample')
-    replayed_sample = body(helper, 'WithNativeProjectileSampleInPlace')
+    replayed_wrapper = body(helper, 'WithNativeProjectileSampleInPlace')
+    replayed_sample = body(helper, 'WithNativeProjectileOutcomeInPlace')
+    check('constautooutcome=WithNativeProjectileOutcomeInPlace(j,l,local,muzzle,s,create,user);' in replayed_wrapper
+          and 'returnoutcome.cleanupComplete?outcome.created:nullptr;' in replayed_wrapper,
+          'Monster legacy replay enters the typed creation helper and exposes its pointer only after descriptor cleanup succeeds')
+    check('void*result=j.created;constboolcleaned=RestoreNativeProjectileJournal(j);return{result,cleaned};' in replayed_sample
+          and 'return{j.created,false};' in replayed_sample,
+          'typed helper preserves actual creation separately from successful or uncertain native descriptor cleanup')
+    check('if(!NativeProjectileJournalEmpty(j)||!create||!CanPrepareNativeProjectileSample(l,local,muzzle,s))return{};' in replayed_sample
+          and replayed_sample.index('if(!NativeProjectileJournalEmpty(j)') < replayed_sample.index('j.created=create('),
+          'an unresolved typed journal prevents another native factory callback for the same retained ownership')
     capture_words = 'for(unsignedi=0;i<kProjectileWords;++i)s.scalar[i]=At<std::uint32_t>(actual,kProjectileScalar32[i]);'
     replay_words = 'for(unsignedi=0;i<kProjectileWords;++i)Put<std::uint32_t>(j.descriptor,kProjectileScalar32[i],s.scalar[i]);'
     check(capture_words in captured_sample and replay_words in replayed_sample

@@ -29,7 +29,11 @@
 
 ## 验证记录
 
-最终统一验证正在进行，完成后以本节的最终记录为准。所有测试均在隔离目录或临时夹具执行，没有写入、启动或控制真实游戏。
+两个插件 ALL 与 offline_checks 严格构建通过。完整首轮 CTest 482/488 通过、无跳过，974.94 秒；六项失败分别为 Plan padding 整块比较、两种插件加载顺序的新增 API 白名单、能力号守卫、typed helper 源审计及小龙旧路径夹具，均已核实根因后修正。最终增量构建及 53/53 项定向回归通过，25.98 秒，覆盖全部原失败和最后的协议/安装改动。按测试名称汇总为 488/488，无未解决项；不是一次完整运行全绿。汇总见本工作树 `tmp/review-combined-tests.json`。
+
+安装链完整首轮 288/289，唯一旧 raw-team-write 守卫误报已修正并补验。最终安装源码另跑 82 项测试、35 项锁检查，以及 7 项安装 selftest 和该守卫，全部通过；首轮早于最后依赖迁移修复，最终安装证据来自冻结后的专项。387 个 Python 文件（含新增 helper）语法、七组生成表 --check、CRLF 约定下的完整补丁检查均通过。两轮独立复审没有遗留确认问题。
+
+原始日志在本工作树 `tmp/review-{all,offline,ctest}-singlefinal.log`、`tmp/review-{all,offline,ctest}-final-recheck.log`、`tmp/review-selftest.log` 与 `tmp/review-final-install-*.log`。所有测试均在隔离目录或临时夹具执行，没有写入、启动或控制真实游戏。
 
 配套 Coop 已完成真实资源构建、102/102 CTest（无跳过）、实际 DLL 导出与 ABI 检查；修正 mesh 测试只观察瞬时主路径的误判后，另以实际 relay 发送/转发计数补跑 86 项，保留到达量、间隔、恢复与去重要求。
 

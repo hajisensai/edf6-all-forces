@@ -15,6 +15,37 @@ namespace {
 constexpr std::uint32_t kRescue=7;   // the fixture's sea rescue catalog (Hooks::ownChannel)
 int checks=0;
 void Check(bool ok,const char* why) { ++checks;if(!ok){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);} }
+// Plan has ABI padding after target and team. Compare every serialized/adapter field bit-exactly;
+// padding is not a wire property, while all 32 bytes of every canonical native ID remain part of it.
+bool SamePlanSpecs(const Plan& a,const Plan& b) noexcept {
+    if(a.catalogId!=b.catalogId || a.count!=b.count || std::memcmp(a.target,b.target,sizeof(a.target)) ||
+       std::memcmp(a.requester,b.requester,sizeof(a.requester)) || a.team!=b.team)return false;
+    for(std::uint32_t i=0;i<kMaxUnits;++i) {
+        const auto& x=a.units[i];const auto& y=b.units[i];
+        if(x.resourceId!=y.resourceId || x.role!=y.role || x.variant!=y.variant ||
+           std::memcmp(x.matrix,y.matrix,sizeof(x.matrix)) || std::memcmp(x.netId,y.netId,sizeof(x.netId)))return false;
+    }
+    return true;
+}
+void PlanSpecComparison() {
+    Plan a{},b{};
+    auto* left=reinterpret_cast<unsigned char*>(&a);auto* right=reinterpret_cast<unsigned char*>(&b);
+    for(std::size_t offset=offsetof(Plan,target)+sizeof(a.target);offset<offsetof(Plan,units);++offset){left[offset]=0xA5;right[offset]=0x5A;}
+    for(std::size_t offset=offsetof(Plan,team)+sizeof(a.team);offset<sizeof(Plan);++offset){left[offset]=0xA5;right[offset]=0x5A;}
+    Check(SamePlanSpecs(a,b),"different ABI padding cannot create a false wire/native-ID mismatch");
+    b=a;b.catalogId=1;Check(!SamePlanSpecs(a,b),"plan comparison checks catalog");
+    b=a;b.count=1;Check(!SamePlanSpecs(a,b),"plan comparison checks count");
+    b=a;b.team=1;Check(!SamePlanSpecs(a,b),"plan comparison checks team");
+    for(unsigned i=0;i<3;++i){b=a;b.target[i]=1;Check(!SamePlanSpecs(a,b),"plan comparison checks every target coordinate");}
+    for(unsigned i=0;i<32;++i){b=a;b.requester[i]=1;Check(!SamePlanSpecs(a,b),"plan comparison checks all 32 requester identity bytes");}
+    for(unsigned i=0;i<kMaxUnits;++i) {
+        b=a;b.units[i].resourceId=1;Check(!SamePlanSpecs(a,b),"plan comparison checks every unit resource");
+        b=a;b.units[i].role=1;Check(!SamePlanSpecs(a,b),"plan comparison checks every unit role");
+        for(unsigned j=0;j<8;++j){b=a;b.units[i].variant=std::uint64_t{1}<<(j*8);Check(!SamePlanSpecs(a,b),"plan comparison checks all 64 variant bits");}
+        for(unsigned j=0;j<16;++j){b=a;b.units[i].matrix[j]=1;Check(!SamePlanSpecs(a,b),"plan comparison checks all 16 transform components of all 16 units");}
+        for(unsigned j=0;j<32;++j){b=a;b.units[i].netId[j]=1;Check(!SamePlanSpecs(a,b),"plan comparison checks all 32 native identity bytes of all 16 units");}
+    }
+}
 struct Room;
 struct Node {
     Room* room=nullptr;unsigned id=0;
@@ -222,7 +253,7 @@ void Success() {
     Check(r.nodes[0]->loadout==0,"a request with no composed load plans the call's own (loadout 0)");
     for(const auto& n:r.nodes)Check(n->spawns==1 && n->session->ActiveCount()==1,"all peers spawn once");
     Check(!r.nodes[0]->remote && r.nodes[1]->remote && r.nodes[2]->remote,"host authority passed to adapters");
-    Check(!std::memcmp(&r.nodes[0]->last,&r.nodes[2]->last,sizeof(Plan)),"all sixteen object specs and native IDs identical");
+    Check(SamePlanSpecs(r.nodes[0]->last,r.nodes[2]->last),"all sixteen object specs and native IDs identical");
     r.Deliver(Find(r,Kind::commit,1));r.Deliver(Find(r,Kind::begin,1));r.Deliver(Find(r,Kind::request,0));r.Settle();
     Check(r.nodes[1]->spawns==1 && r.nodes[0]->spawns==1,"replayed request/commit never duplicates native objects");
     auto forged=Find(r,Kind::commit,1);forged.from=2;forged.message.transaction=2;r.Deliver(forged);
@@ -658,7 +689,7 @@ void PreparedDroneLifecycle() {
     r.dropTo=999;for(const auto& packet:r.history)if(packet.message.kind==Kind::ready && packet.message.ok)r.Deliver(packet);
     r.dropTo=0;r.dropKind=Kind::result;r.Settle();
     for(const auto& n:r.nodes)Check(n->spawns==1 && !n->session->IsActive(token),"all three registered children stay inactive before all commit results");
-    Check(!std::memcmp(&r.nodes[0]->last,&r.nodes[2]->last,sizeof(Plan)),"entire prepared child spec is identical on every peer");
+    Check(SamePlanSpecs(r.nodes[0]->last,r.nodes[2]->last),"entire prepared child spec is identical on every peer");
     r.dropTo=999;for(const auto& packet:r.history)if(packet.message.kind==Kind::result && packet.message.ok)r.Deliver(packet);
     r.dropTo=2;r.dropKind=Kind::activate;r.Settle();
     Check(r.nodes[0]->session->IsActive(token) && r.nodes[1]->session->IsActive(token) && !r.nodes[2]->session->IsActive(token),
@@ -898,4 +929,4 @@ void PreparedDroneDetails() {
     }
 }
 } // namespace
-int main() { PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }
