@@ -93,9 +93,21 @@ void Numbers() {
     Expect(!armorhud::Publish(true,nan,1600.0f,1.0f,1.0f,&r),"an unreadable armor: nothing shown");
     Expect(armorhud::Publish(true,1350.0f,1600.0f,nan,800.0f,&r) && !r.hasHull,"an unreadable hull: the armor alone");
 }
+// The weapon gauges a controlled enemy hides (stockgauge.cpp HoldWeaponRoot): five a player, all held and given back
+// with what each showed, on the same template with more slots.
+void EnemyWeaponGauges() {
+    maphud::Record holds[16]{};
+    unsigned char shown[5]={1,1,0,1,1};   // the third one already hidden by its own layout
+    int gauge[5]{};
+    for(int i=0;i<5;++i)Expect(armorhud::Step(holds,&gauge[i],7,true,&shown[i]),"each weapon gauge held while controlling");
+    for(int i=0;i<5;++i)Expect(shown[i]==0,"every weapon gauge hidden");
+    for(int i=0;i<5;++i)Expect(!armorhud::Step(holds,&gauge[i],7,false,&shown[i]),"released when the lease ends");
+    Expect(shown[0]==1 && shown[1]==1 && shown[2]==0 && shown[3]==1 && shown[4]==1,"each gauge back as it was, the hidden one still hidden");
+}
 }  // namespace
 
 int main() {
+    EnemyWeaponGauges();
     Ride();
     Missions();
     TwoPlayersAndOldHolds();

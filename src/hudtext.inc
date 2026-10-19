@@ -906,6 +906,8 @@ HUDTEXT(enemyControlHealthUnavailable,L"Controlled HP unavailable",L"受控单�
 HUDTEXT(enemyControlRowTip,L"Hold to use this attack",L"按住发动此攻击",L"按住發動此攻擊",L"長押しでこの攻撃を使用")
 HUDTEXT(enemyControlNoKeys,L"No attack of its own",L"该单位没有可发动的攻击",L"該單位沒有可發動的攻擊",L"使える攻撃はありません")
 HUDTEXT(enemyControlMoreOnCard,L"+%u more: hold them on the M card",L"另有 %u 种：在 M 地图卡上按住发动",L"另有 %u 種：在 M 地圖卡上按住發動",L"ほか %u 種：M カードで長押し")
+HUDTEXT(enemyControlAttacks,L"Attacks: key / pad",L"攻击：键盘 / 手柄",L"攻擊：鍵盤 / 手把",L"攻撃：キー / パッド")
+HUDTEXT(enemyControlAllOnCard,L"%u attacks: open M to see and use them",L"%u 种攻击：按 M 查看并发动",L"%u 種攻擊：按 M 查看並發動",L"攻撃 %u 種：M で確認・使用")
 HUDTEXT(enemyKeyCardOnly,L"M card",L"M 卡",L"M 卡",L"M カード")
 HUDTEXT(enemyKeyMouseLeft,L"LMB",L"左键",L"左鍵",L"左クリック")
 HUDTEXT(enemyKeyMouseRight,L"RMB",L"右键",L"右鍵",L"右クリック")

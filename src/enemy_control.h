@@ -19,6 +19,9 @@ bool EnemyControlDescribe(const ObjRef& requester,const ObjRef& target,enemy_con
 bool EnemyControlPickable(const void* object) noexcept;
 bool EnemyControlReadSnapshot(const ObjRef& requester,enemy_control::Snapshot*) noexcept;
 bool EnemyControlReadSnapshotForView(std::uintptr_t ownerHumanKey,enemy_control::Snapshot*) noexcept;
+// Any thread: `human` (a player's object or its SoldierBase) controls an enemy now, so its stock HUD gives way to the
+// enemy's (stockgauge.cpp). Only the published active lease of that exact owner counts.
+bool EnemyControlReplacesPlayerHud(const void* human) noexcept;
 unsigned EnemyControlAbilities(const enemy_control::Snapshot&,unsigned first,enemy_control::Ability*,unsigned capacity) noexcept;
 bool EnemyControlRequest(const enemy_control::Snapshot&) noexcept;
 bool EnemyControlSelectAbility(const enemy_control::Snapshot&,std::uint32_t ability) noexcept;

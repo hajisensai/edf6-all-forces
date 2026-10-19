@@ -11,6 +11,7 @@
 // mission's hold (a gauge gone with its mission). Pure: tools/armor_hud_check.cpp.
 #pragma once
 #include "map_stock_hud.h"
+#include <cstddef>
 #include <cstdint>
 
 namespace crew {
@@ -19,7 +20,9 @@ constexpr int kGauges=4;   // one a local player; old missions' holds besides
 
 // The record of `gauge` in mission `generation`: its own hold, else a free one (cleared), else the oldest mission's hold
 // (cleared: its gauge is gone with that mission). nullptr: all held this mission (more gauges than kGauges).
-inline maphud::Record* Slot(maphud::Record (&rs)[kGauges],const void* gauge,std::uint64_t generation) noexcept {
+// (Any number of slots: the armor gauges take kGauges, the weapon gauges the controlled enemy hides their own.)
+template<std::size_t N>
+inline maphud::Record* Slot(maphud::Record (&rs)[N],const void* gauge,std::uint64_t generation) noexcept {
     maphud::Record* free=nullptr;
     maphud::Record* stale=nullptr;
     for(auto& r:rs) {
@@ -34,7 +37,8 @@ inline maphud::Record* Slot(maphud::Record (&rs)[kGauges],const void* gauge,std:
 
 // One update of `gauge` (its root's shown flag `shown`): hidden while `hide`, the found value back when it stops.
 // Returns whether the gauge is held hidden now.
-inline bool Step(maphud::Record (&rs)[kGauges],const void* gauge,std::uint64_t generation,bool hide,unsigned char* shown) noexcept {
+template<std::size_t N>
+inline bool Step(maphud::Record (&rs)[N],const void* gauge,std::uint64_t generation,bool hide,unsigned char* shown) noexcept {
     maphud::Record* const r=Slot(rs,gauge,generation);
     if(!r)return false;
     maphud::Step(*r,gauge,generation,hide,shown);

@@ -102,8 +102,19 @@ void HudCase(int uiW,int uiH,int width,int height,float user,bool health) {
     const float w=static_cast<float>(width),h=static_cast<float>(height),s=hudscale::Of(uiW,uiH,width,height,user);
     SetEnemy(enemy_control::Phase::active,health);passPlayerRefKey=sceneEnemy.snapshot.ownerHumanKey;passPlayerSoldierKey=0;
     RecordBegin();Measured([&](Text* text,Line* lines,int* at){EnemyControlHud(image,nullptr,text,w,h,s,lines,at);},s);recording=false;
-    CheckDrawing(w,h);Check(drew.size()==12,"production active HUD: title, six key->attack rows, the rest's line, HP, team, protection, hint");
-    Check(TextHas(Tr(Tx::enemyKeyMouseLeft)) && TextHas(L"/RT]") && TextHas(L"[E/RB]"),"the HUD lists each attack's own key and pad button");
+    CheckDrawing(w,h);
+    // The enemy's HUD where the player's was: its name top left, each attack's key -> name bottom right.
+    bool nameTopLeft=false,keysBottomRight=false;int attackNames=0;
+    wchar_t title[256]{};_snwprintf_s(title,_countof(title),_TRUNCATE,Tr(Tx::enemyControlActive),sceneEnemy.snapshot.name);
+    for(const auto& line:drew) {
+        if(line.text==title)nameTopLeft=line.x0<w*0.5f && line.y1<h*0.5f;
+        if(line.text==std::wstring(Tr(Tx::enemyKeyMouseLeft))+L" / RT")keysBottomRight=line.x0>w*0.45f && line.y0>h*0.25f;
+        for(int i=0;i<sceneEnemy.count;++i)if(line.text==sceneEnemy.ability[i].name)++attackNames;
+    }
+    Check(nameTopLeft,"the controlled enemy's name is in the armor gauge's corner");
+    Check(keysBottomRight,"each attack's own key and pad button on the right, where the weapon gauges were");
+    Check(TextHas(Tr(Tx::enemyKeyMouseLeft)) && attackNames>0,"keys are listed with their attacks");
+    Check(TextHas(Tr(Tx::enemyControlAttacks)) && TextHas(Tr(Tx::enemyControlPlayHint)),"the attack block is titled and says how to use it");
     if(health)Check(TextHas(L"12345") && TextHas(L"67890"),"HUD health comes from target numbers rather than protected source");
     else Check(TextHas(Tr(Tx::enemyControlHealthUnavailable)),"HUD unknown target HP never borrows source health");
     passPlayerRefKey=0x22220000;RecordBegin();Measured([&](Text* text,Line* lines,int* at){EnemyControlHud(image,nullptr,text,w,h,s,lines,at);},s);recording=false;

@@ -5256,6 +5256,11 @@ static void InfantryScope(void* drawer,void* ctx,Text* text,const float* vp,floa
 #include "cockpit_screens.inc"
 
 namespace {
+// The controlled enemy's HUD in the player's place (the user, 2026-10-19: "操控怪物的时候玩家hud没有改成怪物的hud"):
+// stockgauge.cpp hides the player's armor gauge and weapon gauges for the lease; here, where they were, the enemy's
+// own: its name and HP bar top left (the armor gauge's corner, ArmorPanel's), and bottom right (the weapon gauges'
+// corner) each attack with its own key and pad button and its native state. Radar, crosshair and damage marks stay.
+constexpr int kEnemyHudRows=10;   // attack rows at most (the rest: the M card)
 void EnemyControlHud(void* drawer,void* ctx,Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
     enemy_control::Snapshot snapshot{};
     if(!EnemyControlReadSnapshotForView(passPlayerRefKey,&snapshot) &&
@@ -5263,51 +5268,101 @@ void EnemyControlHud(void* drawer,void* ctx,Text* text,float width,float height,
     using Phase=enemy_control::Phase;
     if(snapshot.phase!=Phase::active && snapshot.phase!=Phase::pending && snapshot.phase!=Phase::restoring)return;
     const bool active=snapshot.phase==Phase::active;
-    // Key -> attack for every attack with a key (two a row); the rest are on the M card.
-    constexpr unsigned kShown=8;
-    enemy_control::Ability list[kShown]{};
-    const unsigned shown=active ? EnemyControlAbilities(snapshot,0,list,(std::min)(kShown,enemy_control::kBindingCount)) : 0;
-    const bool more=active && snapshot.abilityCount>shown;
-    const int keyRows=static_cast<int>((shown+1)/2)+(more ? 1 : 0);
-    if(*at+static_cast<int>(shown)+9>kMaxLines)return;
-    const float block=active ? 22.0f*static_cast<float>(keyRows>0 ? keyRows : 1) : 0.0f;
-    const float x=16.0f*s,bottom=height-135.0f*s,
-        top=bottom-((active ? 92.0f+block : 96.0f)+(snapshot.sourceProtected ? 20.0f : 0.0f))*s,right=x+std::fmin(550.0f*s,width*0.45f);
-    Rect(drawer,ctx,x-5.0f*s,top,right,bottom,kMapBand);
-    Label(text,lines,at,x,top+13.0f*s,0,kLineScale*0.72f,kCyan,Tr(Tx::enemyControlActive),snapshot.name);
-    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-5.0f*s);
-    if(active) {
-        const float half=(x+right)*0.5f;
-        for(unsigned i=0;i<shown;++i) {
-            wchar_t key[32]{},pad[32]{},row[192]{};
-            const wchar_t* keyName=EnemyKeyLabel(i,false,key,_countof(key));
-            const auto* binding=enemy_control::BindingOf(i);
-            if(binding && binding->pad)_snwprintf_s(row,_countof(row),_TRUNCATE,L"[%ls/%ls] %ls",keyName,EnemyKeyLabel(i,true,pad,_countof(pad)),list[i].name);
-            else _snwprintf_s(row,_countof(row),_TRUNCATE,L"[%ls] %ls",keyName,list[i].name);
-            const float cx=i%2 ? half+4.0f*s : x,cy=top+37.0f*s+22.0f*s*static_cast<float>(i/2);
-            Label(text,lines,at,cx,cy,0,kLineScale*0.56f,kWhite,L"%ls",row);
-            if(*at>0)MapFitLabel(text,lines[*at-1],cx,(i%2 ? right : half)-5.0f*s);
-        }
-        if(!shown)Label(text,lines,at,x,top+37.0f*s,0,kLineScale*0.56f,kAmber,L"%ls",Tr(Tx::enemyControlNoKeys));
-        if(more) {
-            Label(text,lines,at,x,top+37.0f*s+22.0f*s*static_cast<float>(keyRows-1),0,kLineScale*0.52f,kTeal,
-                Tr(Tx::enemyControlMoreOnCard),static_cast<unsigned>(snapshot.abilityCount-shown));
-            if(*at>0)MapFitLabel(text,lines[*at-1],x,right-5.0f*s);
-        }
-        wchar_t health[128]{};
-        Label(text,lines,at,x,top+(36.0f+block)*s,0,kLineScale*0.6f,kWhite,L"%ls",EnemyHealthText(snapshot,health,_countof(health)));
-        if(*at>0)MapFitLabel(text,lines[*at-1],x,right-5.0f*s);
-        Label(text,lines,at,x,bottom-(snapshot.sourceProtected ? 56.0f : 34.0f)*s,0,kLineScale*0.54f,kAmber,
-            Tr(snapshot.followsOwnerTeam ? Tx::enemyControlTeamOwner : Tx::enemyControlTeamOriginal),snapshot.controlledTeam);
-        if(*at>0)MapFitLabel(text,lines[*at-1],x,right-5.0f*s);
-    } else Label(text,lines,at,x,top+42.0f*s,0,kLineScale*0.58f,kAmber,L"%ls",
-        Tr(snapshot.phase==Phase::restoring ? Tx::enemyControlRestoring : Tx::enemyControlPending));
-    if(active && snapshot.sourceProtected) {
-        Label(text,lines,at,x,bottom-34.0f*s,0,kLineScale*0.54f,kCyan,L"%ls",Tr(Tx::enemyControlSourceSafe));
-        if(*at>0)MapFitLabel(text,lines[*at-1],x,right-5.0f*s);
+    if(*at+6>kMaxLines)return;
+    // --- Top left: who, its HP, its side ---
+    const float x=kArmorPanelX*s,top=kArmorPanelY*s,right=x+std::fmin(380.0f*s,width*0.38f),barW=right-x-16.0f*s;
+    const bool hp=active && enemyui::HealthAvailable(snapshot.healthKnown,snapshot.health,snapshot.maxHealth);
+    const float statusH=active ? (snapshot.sourceProtected ? 104.0f : 84.0f)+(hp ? 12.0f : 0.0f) : 52.0f;
+    Rect(drawer,ctx,x-8.0f*s,top-8.0f*s,right,top+statusH*s,kMapBand);
+    Rect(drawer,ctx,x-8.0f*s,top-8.0f*s,x-5.0f*s,top+statusH*s,kCyan);
+    Label(text,lines,at,x,top+8.0f*s,0,kLineScale*0.72f,kCyan,Tr(Tx::enemyControlActive),snapshot.name);
+    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    float y=top+24.0f*s;
+    if(!active) {
+        Label(text,lines,at,x,y+12.0f*s,0,kLineScale*0.58f,kAmber,L"%ls",
+            Tr(snapshot.phase==Phase::restoring ? Tx::enemyControlRestoring : Tx::enemyControlPending));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+        return;
     }
-    Label(text,lines,at,x,bottom-12.0f*s,0,kLineScale*0.52f,kTeal,L"%ls",Tr(Tx::enemyControlPlayHint));
-    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-5.0f*s);
+    if(hp) {
+        const float share=snapshot.health/snapshot.maxHealth;
+        Bar(drawer,ctx,x,y,barW,10.0f*s,share,share,HpColour(share>1.0f ? 1.0f : share),s);
+        y+=12.0f*s;
+    }
+    wchar_t health[128]{};
+    Label(text,lines,at,x,y+10.0f*s,0,kLineScale*0.6f,kWhite,L"%ls",EnemyHealthText(snapshot,health,_countof(health)));
+    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    y+=22.0f*s;
+    Label(text,lines,at,x,y+10.0f*s,0,kLineScale*0.52f,kAmber,
+        Tr(snapshot.followsOwnerTeam ? Tx::enemyControlTeamOwner : Tx::enemyControlTeamOriginal),snapshot.controlledTeam);
+    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    y+=20.0f*s;
+    if(snapshot.sourceProtected) {
+        Label(text,lines,at,x,y+10.0f*s,0,kLineScale*0.52f,kTeal,L"%ls",Tr(Tx::enemyControlSourceSafe));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    }
+    const float statusBottom=top+statusH*s;
+    // --- Bottom right: key -> attack ---
+    enemy_control::Ability list[kEnemyHudRows]{};
+    const unsigned keyed=(std::min)(static_cast<unsigned>(kEnemyHudRows),enemy_control::kBindingCount);
+    unsigned shown=EnemyControlAbilities(snapshot,0,list,keyed);
+    const float rowH=26.0f*s,x1=width-kArmorPanelX*s,x0=x1-std::fmin(470.0f*s,width*0.44f),bottom=height-kArmorPanelY*s;
+    // Rows that fit (a short split view): up to the status block when the two share columns, else the top margin;
+    // the title, the rest's line and the hint always kept.
+    const float ceiling=x0-8.0f*s<right ? statusBottom+8.0f*s : top-8.0f*s;
+    const float room=bottom-ceiling-(26.0f+22.0f+22.0f+8.0f)*s;
+    const unsigned fit=room>0.0f ? static_cast<unsigned>(room/rowH) : 0u;
+    if(shown>fit)shown=fit;
+    if(*at+3*static_cast<int>(shown)+4>kMaxLines)shown=static_cast<unsigned>((std::max)(0,(kMaxLines-*at-4)/3));
+    const bool more=snapshot.abilityCount>shown;
+    const float blockH=(26.0f+static_cast<float>(shown)*26.0f+(more || !shown ? 22.0f : 0.0f)+22.0f+8.0f)*s;
+    float ry=bottom-blockH;
+    Rect(drawer,ctx,x0-8.0f*s,ry,x1+8.0f*s,bottom,kMapBand);
+    Rect(drawer,ctx,x1+5.0f*s,ry,x1+8.0f*s,bottom,kCyan);
+    Label(text,lines,at,x0,ry+13.0f*s,0,kLineScale*0.6f,kCyan,L"%ls",Tr(Tx::enemyControlAttacks));
+    if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+    ry+=26.0f*s;
+    const float chip=std::fmin(130.0f*s,(x1-x0)*0.34f);
+    for(unsigned i=0;i<shown;++i) {
+        const auto& ability=list[i];
+        wchar_t key[32]{},pad[32]{},chipText[64]{},state[96]{};
+        const auto* binding=enemy_control::BindingOf(i);
+        const wchar_t* keyName=EnemyKeyLabel(i,false,key,_countof(key));
+        if(binding && binding->pad)_snwprintf_s(chipText,_countof(chipText),_TRUNCATE,L"%ls / %ls",keyName,EnemyKeyLabel(i,true,pad,_countof(pad)));
+        else _snwprintf_s(chipText,_countof(chipText),_TRUNCATE,L"%ls",keyName);
+        const bool unavailable=ability.state==enemy_control::AbilityState::unavailable;
+        const bool cooling=ability.state==enemy_control::AbilityState::cooldown;
+        const bool running=ability.state==enemy_control::AbilityState::active;
+        Rect(drawer,ctx,x0,ry+2.0f*s,x0+chip,ry+rowH-3.0f*s,running ? kBtnLit : kBtnFill);
+        Label(text,lines,at,x0+chip*0.5f,ry+rowH*0.47f,1,kLineScale*0.52f,unavailable ? kMapOrderDim : kWhite,L"%ls",chipText);
+        if(*at>0) {
+            Line& l=lines[*at-1];MapFitLabel(text,l,x0+3.0f*s,x0+chip-3.0f*s);l.x=x0+(chip-l.w)*0.5f;
+        }
+        const float nameLeft=x0+chip+8.0f*s;
+        float nameRight=x1;
+        if(cooling || unavailable || running) {
+            Label(text,lines,at,x1,ry+rowH*0.47f,2,kLineScale*0.48f,cooling ? kAmber : running ? kCyan : kMapOrderDim,L"%ls",
+                EnemyAbilityState(ability,state,_countof(state)));
+            if(*at>0) {
+                Line& l=lines[*at-1];MapFitLabel(text,l,nameLeft+(x1-nameLeft)*0.5f,x1);nameRight=l.x-6.0f*s;
+            }
+        }
+        Label(text,lines,at,nameLeft,ry+rowH*0.47f,0,kLineScale*0.6f,unavailable ? kMapOrderDim : kWhite,L"%ls",ability.name);
+        if(*at>0)MapFitLabel(text,lines[*at-1],nameLeft,nameRight);
+        ry+=rowH;
+    }
+    if(more) {
+        Label(text,lines,at,x0,ry+11.0f*s,0,kLineScale*0.5f,kTeal,Tr(shown ? Tx::enemyControlMoreOnCard : Tx::enemyControlAllOnCard),
+            static_cast<unsigned>(snapshot.abilityCount-shown));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+        ry+=22.0f*s;
+    } else if(!shown) {
+        Label(text,lines,at,x0,ry+11.0f*s,0,kLineScale*0.5f,kAmber,L"%ls",Tr(Tx::enemyControlNoKeys));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+        ry+=22.0f*s;
+    }
+    Label(text,lines,at,x0,ry+11.0f*s,0,kLineScale*0.5f,kTeal,L"%ls",Tr(Tx::enemyControlPlayHint));
+    if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
 }
 } // namespace
 

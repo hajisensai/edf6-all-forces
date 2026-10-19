@@ -844,6 +844,10 @@ bool EnemyControlReadSnapshotForView(std::uintptr_t owner,Snapshot* out) noexcep
     }
     ReleaseSRWLockShared(&publishLock);return found;
 }
+bool EnemyControlReplacesPlayerHud(const void* human) noexcept {
+    Snapshot snapshot{};
+    return human && EnemyControlReadSnapshotForView(reinterpret_cast<std::uintptr_t>(human),&snapshot) && snapshot.phase==Phase::active;
+}
 unsigned EnemyControlAbilities(const Snapshot& snapshot,unsigned first,Ability* out,unsigned capacity) noexcept {
     if(!out || !capacity)return 0;unsigned count=0;
     AcquireSRWLockShared(&publishLock);
