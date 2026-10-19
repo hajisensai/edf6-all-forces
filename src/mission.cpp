@@ -21,6 +21,10 @@
 #include "support_soldier.h"
 #include "thermal.h"
 #include "pvp.h"
+#include "enemy_control.h"
+#include "enemy_control_net.h"
+#include "enemy_control_pvp_native.h"
+#include "vulcan_rotor.h"
 #include "support_variants.h"
 #include <iterator>
 
@@ -68,6 +72,10 @@ void MissionStart() noexcept {
     LogMemory("mission start entered");
     CheckCrashFilter();   // the crash dump's filter and abort handler still first (crash_dump.h)
     WatchMissionPhase("resets");
+    ResetVulcanRotors();
+    ResetEnemyControlNetwork(); // stop authenticated leases before native input restoration
+    ResetEnemyControl(); // release native player-mode leases before scene/team identities are reset
+    if(!EnemyControlNativePvpReset())Log("ENEMY CONTROL pending native ownership restore retained across mission reset");
     ResetPvp();  // true world boundary: restore teams and release support-owner weak identities
     ResetPlayer();
     ResetFirstPerson();

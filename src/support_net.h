@@ -87,6 +87,8 @@ bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;
+// Host planner: resolve a transport-authenticated peer to its sealed current-world native player.
+bool SupportAuthenticatedRequester(std::uint32_t peer,ObjRef* out) noexcept;
 // Called before native player construction once this world has sealed its
 // actual participant PUIDs. A newly joined lobby member waits for the next world.
 bool SupportParticipantAllowed(void* puid) noexcept;

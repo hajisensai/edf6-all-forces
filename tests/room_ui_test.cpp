@@ -46,6 +46,32 @@ void Names() {
     Expect(seen.size()==7u+static_cast<std::size_t>(kRows)*7u+kStatusLines,"element count");
 }
 
+void NativeButton() {
+    NativeEntry e;
+    NativeEntryInput(e,true);
+    Expect(!e.enabled && !NativeEntryClick(e,true),"an uncreated native button cannot open the menu");
+    e.ready=true;
+    NativeEntryInput(e,true);
+    Expect(!NativeEntryClick(e,false) && !TakeNativeEntry(e,true),"another screen cannot request this screen's menu");
+    Expect(NativeEntryClick(e,true) && !NativeEntryClick(e,true),"native Click queues at most one open during dispatch");
+    Expect(TakeNativeEntry(e,true) && !TakeNativeEntry(e,true),"the UI consumes the native action exactly once after dispatch");
+    Expect(NativeEntryClick(e,true),"next independent Click can queue");
+    NativeEntryInput(e,false);
+    Expect(!e.requested && !TakeNativeEntry(e,true) && !NativeEntryClick(e,true),"covered, disabled or closing input drops a pending action");
+    NativeEntryInput(e,true);
+    Expect(NativeEntryClick(e,true) && !TakeNativeEntry(e,false) && !TakeNativeEntry(e,true),"screen destruction/replacement discards an already queued action");
+    e=NativeEntry{};
+    Expect(!e.ready && !e.enabled && !e.attempted,"a new screen at a reused address has no inherited button state");
+    roommenu::Menu m;
+    Keys click;click.toggle=true;
+    Expect(roommenu::Step(m,click)==roommenu::Act::opened && m.open && m.level==roommenu::Level::units,
+           "native activation opens the same unit page as the hotkey");
+    Keys heldConfirm;heldConfirm.confirm=true;
+    const auto press=roommenu::Presses(heldConfirm,heldConfirm);
+    Expect(roommenu::Step(m,press)==roommenu::Act::none && m.level==roommenu::Level::units,
+           "the native activation's held confirm does not enter a loadout row");
+}
+
 void Input() {
     Raw r;r.foreground=true;
     Keys k=KeysDown(r,0x00C0);
@@ -506,6 +532,7 @@ void Save() {
 
 int main() {
     Names();
+    NativeButton();
     Input();
     PadTable();
     Colours();

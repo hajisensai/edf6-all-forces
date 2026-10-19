@@ -153,6 +153,8 @@ def vehicle_call(members: dict, template: Node, vehicle: str) -> dsgo.Document:
             if (not isinstance(mine, list) or len(mine) != 3 or not isinstance(mine[2], list)
                     or len(mine[2]) != 1):
                 raise edf5port.Unsupported('not the single-gun 408 setup')
+            import edf41bike
+            mine[2] = edf41bike.native_gun_rows(mine[2])
             drop.items[3] = edf5port.to_value(mine)
         elif leaf(vehicle) == 'vehicle302_heli.sgo':
             # EDF6 added a fuel block and a final fuel weapon. Keep those two

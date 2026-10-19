@@ -10,6 +10,18 @@ SHORT Down(int key) noexcept { return key>=0 && key<256 && keys[key] ? static_ca
 #include <cstdio>
 
 namespace crew {
+// Enemy control is absent in this synthetic world; keep the production UI's
+// core calls linked without admitting a native target or fabricating a lease.
+bool EnemyControlDescribe(const ObjRef& requester,const ObjRef&,enemy_control::Snapshot* out) noexcept {
+    if(out){*out={};out->ownerHumanKey=reinterpret_cast<std::uintptr_t>(requester.obj);out->reason=enemy_control::Reason::unsupportedFamily;}
+    return false;
+}
+bool EnemyControlReadSnapshot(const ObjRef&,enemy_control::Snapshot* out) noexcept {if(out)*out={};return false;}
+unsigned EnemyControlAbilities(const enemy_control::Snapshot&,unsigned,enemy_control::Ability*,unsigned) noexcept {return 0;}
+bool EnemyControlRequest(const enemy_control::Snapshot&) noexcept {return false;}
+bool EnemyControlSelectAbility(const enemy_control::Snapshot&,std::uint32_t) noexcept {return false;}
+bool EnemyControlSetAbilityHeld(const enemy_control::Snapshot&,bool) noexcept {return false;}
+bool EnemyControlExit(const enemy_control::Snapshot&) noexcept {return false;}
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
 int SupportMenuCount() noexcept { return 3; }

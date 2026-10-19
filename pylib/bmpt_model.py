@@ -3,9 +3,11 @@
 Original procedural exterior: no downloaded mesh and no stock hull relabelled
 BMPT. Proportions/configuration follow US Army ARMOR, Summer 2022, Grau and
 Bartles: 6.7 x 3.8 x 3.4 m, twin 30 mm cannon and four Ataka missile tubes.
-The original V603 bones, local matrices and CAS are retained; its six original
-road-wheel pivots constrain suspension spacing. Stock collision remains an
-approximation requiring game acceptance, not a measured T-72 collision hull.
+The original V603 physical bone binds are retained; a private CAS fixes only
+the optic bones' four int16 T/R references (eight bytes) at bind, so their real
+collision proxies carry the visible assemblies in death.
+Per-vehicle contact shapes remain a documented convex approximation requiring
+game acceptance, not a measured T-72 collision hull.
 """
 # Proportion/configuration reference: https://www.benning.army.mil/Armor/eARMOR/content/issues/2022/Summer/3Grau_Barttles22.pdf
 from __future__ import annotations
@@ -65,14 +67,17 @@ def parts(a: t.Assembly) -> None:
         for z in (-.84, .62):
             t.cylinder(tubes, (x, y, z-.045), (x, y, z+.045), .164, 16, cap=False)
         a.muzzle(f'missile_{k+1}', bone, p, .130)
-    sight = a.part('commander_panorama_and_gunner_sights', 'cannon_main')
+    sight = a.part('commander_panorama_and_gunner_sights', 'doppler_radar')
     t.cylinder(sight, (0, 2.19, -.45), (0, 2.84, -.45), .12, 16)
     t.box(sight, (0, 2.94, -.45), (.22, .13, .24))
-    t.box(sight, (-.38, 2.42, .31), (.19, .18, .22))
-    t.box(sight, (.31, 2.44, .30), (.10, .16, .20))
-    glass = a.part('panoramic_optics_glass', 'cannon_main', (30, 56, 58))
+    gunner = a.part('bmpt_gunner_sight', 'tracking_radar')
+    t.box(gunner, (-.38, 2.42, .31), (.19, .18, .22))
+    auxiliary = a.part('bmpt_auxiliary_sight', 'cannon_main')
+    t.box(auxiliary, (.31, 2.44, .30), (.10, .16, .20))
+    glass = a.part('panoramic_optics_glass', 'doppler_radar', (30, 56, 58))
     t.box(glass, (0, 2.96, -.204), (.15, .068, .009))
-    t.box(glass, (-.38, 2.43, .536), (.13, .08, .009))
+    gunner_glass = a.part('gunner_optics_glass', 'tracking_radar', (30, 56, 58))
+    t.box(gunner_glass, (-.38, 2.43, .536), (.13, .08, .009))
     fittings = a.part('smoke_launchers_and_antenna', 'cannon_main', t.DARK_TINT)
     for s in (-1, 1):
         for z in (-.58, -.28, .02):

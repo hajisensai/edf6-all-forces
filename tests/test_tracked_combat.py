@@ -5,6 +5,9 @@ or start the game. Missing game data skips these cases but keeps table tests.
 """
 from pathlib import Path
 import struct
+import copy
+
+import numpy as np
 import sys
 import unittest
 
@@ -16,6 +19,10 @@ import dsgo
 import make_tracked_combat as combat
 import rootcpk
 import vcobjects as vc
+import graft_pure as graft
+import mdb
+import tracked_combat_model as tracked
+import vulcan_model
 
 
 class CatalogContractTests(unittest.TestCase):
@@ -49,6 +56,74 @@ class NativeAssetContractTests(unittest.TestCase):
                 model = combat.model_module(kind)
                 info = model.check(files[f'OBJECT/{model.OUT_ARC}'])
                 self.assertIsNotNone(info)
+
+    def test_private_optics_animation_is_a_required_generated_dependency(self) -> None:
+        for kind, files in self.files.items():
+            with self.subTest(kind=kind):
+                path = combat.animation_path(kind)
+                self.assertIn(path, files)
+                doc = dsgo.parse(files[f'OBJECT/{vc.GROUND_VEHICLES[kind].sgo}.SGO'])
+                self.assertEqual(doc.root.get('animation_model').items[1], 'app:/' + path.lower())
+                missing = dict(files);del missing[path]
+                with self.assertRaisesRegex(ValueError, 'incomplete generated asset set'):
+                    combat.check(missing, kind, self.game)
+                bad = dict(files);bad[path] = self.game.read('OBJECT', combat.model_module(kind).HOST_CAS)
+                with self.assertRaisesRegex(ValueError, 'private optics animation payload differs'):
+                    combat.check(bad, kind, self.game)
+
+    def test_m163_rotor_is_a_declared_preorder_leaf_with_all_native_world_binds(self) -> None:
+        model = vulcan_model
+        native, _rab = tracked.stock(self.game)
+        arc = mdb.rab_read(self.files['vulcan'][f'OBJECT/{model.OUT_ARC}'])
+        md = mdb.mdb_read(tracked.member(arc,model.HOST_MDB).data)
+        self.assertEqual(len(md.bones),len(native.bones)+1)
+        rotor = md.bone_index(model.ROTOR_BONE)
+        self.assertEqual(rotor,6)
+        self.assertEqual(md.bones[rotor].parent,md.bone_index(model.ROTOR_PARENT))
+        self.assertEqual([md.name_of(b.name) for b in md.bones if md.name_of(b.name)!=model.ROTOR_BONE],
+                         [native.name_of(b.name) for b in native.bones])
+        old,new = mdb.bind_world(native),mdb.bind_world(md)
+        for bone in native.bones:
+            np.testing.assert_allclose(new[md.bone_index(native.name_of(bone.name))],old[bone.index],atol=2e-6)
+        self.assertEqual(model.animation(self.game),self.files['vulcan'][combat.animation_path('vulcan')])
+        # A naive end-of-file child produces a backwards native subtree range.
+        broken = copy.deepcopy(md)
+        leaf = broken.bones.pop(rotor)
+        broken.bones.append(leaf)
+        for index,bone in enumerate(broken.bones):
+            bone.index=index
+        with self.assertRaises(tracked.TrackedCombatCheckError):
+            tracked.check_skeleton(broken,model.VISUAL_BONES)
+
+    def test_rotor_pose_moves_six_barrels_and_clamps_without_aim_or_case_drift(self) -> None:
+        model = vulcan_model
+        rab = mdb.rab_read(self.files['vulcan'][f'OBJECT/{model.OUT_ARC}'])
+        md = mdb.mdb_read(tracked.member(rab,model.HOST_MDB).data)
+        rotor=md.bone_index(model.ROTOR_BONE)
+        assembly=tracked.Assembly(md);model.parts(assembly)
+        meshes=dict(zip(assembly.parts,md.objects[0].meshes))
+        moving={'six_m61_barrels','m61_barrel_clamps'}
+        self.assertEqual({name for name,part in assembly.parts.items() if part._rigid_bone==rotor},moving)
+        bind=np.asarray(md.bones[rotor].local).reshape(4,4)
+        parent=np.asarray(mdb.bind_world(md)[md.bones[rotor].parent]).reshape(4,4)
+        inverse=np.asarray(md.bones[rotor].inv_bind).reshape(4,4)
+        centre=np.asarray((*model.MUZZLES['left'][0][1],1.0))
+        original=np.asarray(graft.mesh_positions(meshes['six_m61_barrels']))
+        vertices=np.column_stack((original,np.ones(len(original))))
+        for phase in (.2,.7,1.3,2.2):
+            c,s=np.cos(phase),np.sin(phase)
+            rz=np.asarray(((c,s,0,0),(-s,c,0,0),(0,0,1,0),(0,0,0,1)))
+            world=rz@bind@parent
+            posed=vertices@inverse@world
+            self.assertGreater(np.max(np.abs(posed[:,:3]-original)),.01)
+            np.testing.assert_allclose(centre@inverse@world,centre,atol=2e-6)
+            # Receiver and case port retain the static slide; they cannot orbit
+            # with the rotor or make the existing native aim/muzzle drift.
+            self.assertEqual(assembly.parts['m61_receiver']._rigid_bone,md.bone_index('cannon_r'))
+            self.assertTrue(all(bone=='cannon_slide_l' for bone,_ in model.MUZZLES['left']+model.MUZZLES['right']))
+        bad=copy.deepcopy(md);bad.bones[rotor].kind=0
+        with self.assertRaises(tracked.TrackedCombatCheckError):
+            tracked.check_skeleton(bad,model.VISUAL_BONES)
 
     def test_request_default_setup_has_every_real_holder(self) -> None:
         for kind in combat.KINDS:

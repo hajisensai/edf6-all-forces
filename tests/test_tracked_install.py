@@ -31,6 +31,7 @@ def fixture(kind: str) -> dict[str, bytes]:
     vehicle = make_tracked_combat.vc.GROUND_VEHICLES[kind]
     model = make_tracked_combat.model_module(kind)
     paths = [f'OBJECT/{vehicle.sgo}.SGO', f'OBJECT/{model.OUT_ARC}',
+             make_tracked_combat.collision_path(kind), make_tracked_combat.animation_path(kind),
              *(f'WEAPON/{path.rsplit("/", 1)[1].upper()}' for path in vehicle.weapons)]
     return {rel: f'{kind}:{rel}'.encode() for rel in paths}
 
@@ -46,7 +47,7 @@ class TrackedInstallTests(unittest.TestCase):
                     files = installer.build_asset(cache, builder, builder.OWNER)
                     self.assertEqual(make.call_count, 1)
                     paths = builder.install(game, files)
-                    self.assertEqual(len(paths), 4 if builder.OWNER == 'vulcan' else 5)
+                    self.assertEqual(len(paths), 6 if builder.OWNER == 'vulcan' else 7)
                     cache.record(builder.OWNER, files)
                     cache.save()
                     current = buildcache.Cache(game)
@@ -58,6 +59,12 @@ class TrackedInstallTests(unittest.TestCase):
                     self.assertEqual(installer.build_asset(missing, builder, builder.OWNER), files)
                     self.assertEqual(make.call_count, 2, 'missing ammo is as incomplete as a missing model')
                     builder.install(game, files)
+                    for extension in ('.CAS', '.SHKT'):
+                        dependency = next(rel for rel in files if rel.endswith(extension))
+                        Path(game, 'Mods', dependency).unlink()
+                        self.assertEqual(installer.build_asset(buildcache.Cache(game), builder, builder.OWNER), files)
+                        builder.install(game, files)
+                    self.assertEqual(make.call_count, 4, 'missing private CAS or SHKT must invalidate the complete asset cache')
                     deleted, kept = builder.remove(game)
                     self.assertEqual(len(deleted), len(files))
                     self.assertFalse(kept)

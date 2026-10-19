@@ -59,9 +59,10 @@ import sk_map  # noqa: E402
 from modfiles import load_json, sha256, sha256_file  # noqa: E402
 
 OWNER = 'edf41maps'   # pylib/ledger.py OWNERS
-VERSION = 3           # raise when a converter's output changes: installed maps are converted again
+VERSION = 4           # raise when a converter's output changes: installed maps are converted again
 # 2: wire textures in the MAC, cross-route wire links kept, SK grass, SK leaf shader records (docs/feedback-2026-10-17-edf41-maps.md)
 # 3: .trb in EDF6's form, SK trees / bushes / small objects as plant groups
+# 4: optional SHFB multipliers use an explicit identity; all positive leaf layers retained (up to native 15)
 STAMP = '.edf41maps.json'   # Mods/: {map: {'version': VERSION, 'source': {4.1 file: [size, CRC]}}}
 ARCHIVES = ('Root.cpk', 'Chunk01.cpk', 'Chunk02.cpk', 'DX11.cpk')
 NAVMESH = ('NAVMESH.HKT', 'NAVMESH.NVMD', 'NAVMESH_H.HKT', 'NAVMESH_H.NVMD')

@@ -45,6 +45,13 @@ float ShieldBlock(const unsigned char*,float*) noexcept { MissingDependency();re
 bool JetMotionProps(void*) noexcept { MissingDependency();return false; }
 namespace jet {
 Jet jets[kMaxJets]{};
+bool Alive(const ObjRef& ref) noexcept {
+    // These fixtures own native-shaped buffers; preserve the production weak identity/liveness contract.
+    if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,0x10) || At<long>(ref.ctrl,8)<=0)return false;
+    const auto* object=static_cast<const unsigned char*>(ref.obj);
+    return Readable(object,kSeats+8) && At<const void*>(object,kSelfCtrl)==ref.ctrl && !(object[kObjFlags]&kObjDeleted);
+}
+
 Jet* FindJet(const unsigned char*) noexcept { MissingDependency();return nullptr; }
 bool InstallSpawn() noexcept { MissingDependency();return false; }
 bool InstallBay(bool) noexcept { MissingDependency();return false; }

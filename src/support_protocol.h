@@ -70,7 +70,16 @@ static_assert(kFeatures<1024,"welcome.catalog carries the host's features");
 // Additional capability word in hello/welcome unit.role, outside the full ten-bit features word.
 // A requester-bearing BEGIN uses only the unused unit fields and is sent only to a room where every peer
 // announced kDetailPvpSupport. Older builds ignore BEGIN units, so this all-peer gate is mandatory.
-constexpr std::uint32_t kDetailPvpSupport=1u,kDetails=kDetailPvpSupport;
+// kDetailDynamicDrones separately announces exact prepared-child resources and
+// their parent/slot lifecycle. A build that understands only PvP metadata must
+// reject those children before any native object is created.
+constexpr std::uint32_t kDetailPvpSupport=1u,kDetailDynamicDrones=2u,kDetails=kDetailPvpSupport|kDetailDynamicDrones;
+// The existing submarine catalog also carries host-prepared children of a
+// registered submarine / gun / blast / doll carrier. This is a separate narrow
+// admission contract, never permission to submit an arbitrary prepared plan.
+constexpr std::uint32_t kPreparedDroneCatalog=16;
+enum class PreparedKind : std::uint8_t { missionCrew,dynamicDrone };
+bool ValidPreparedDronePlan(const Plan&) noexcept;
 constexpr std::uint32_t kBeginRequesterMetadata=0x52565050u;
 // Request statuses kept per requester (host) and for this machine's own requests (any machine): the map's call and the
 // sea rescue are separate requests, each told its own outcome even when the other came later.
@@ -104,7 +113,9 @@ public:
     bool Suspended() const noexcept { return suspended_; }
     // `loadout`: support_call.h PackSupportLoadout (0: the call's own), sent in the request's `challenge`.
     bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout=0) noexcept;
-    std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now) noexcept;
+    // The default preserves existing-vehicle migration. An explicit dynamic
+    // intent additionally requires all-peer details and preflight native Validate.
+    std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now,PreparedKind kind=PreparedKind::missionCrew) noexcept;
     void Receive(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;
     void Tick(std::uint64_t now) noexcept;
     void Failed(std::uint64_t token,RequestStatus reason=RequestStatus::cancelled) noexcept;
@@ -147,6 +158,7 @@ private:
     struct Transaction {
         Phase phase=Phase::empty;
         bool external=false;
+        bool dynamicDrone=false; // independent prepared-child channel; same parent/slot serialized only while pending
         bool cancelConfirmed=false;
         bool spawned=false;
         bool rescue=false;   // on the rescue channel (Hooks::ownChannel, every peer kExtRescueChannel)

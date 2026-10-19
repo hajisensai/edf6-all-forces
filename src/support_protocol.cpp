@@ -1,5 +1,6 @@
 #include "support_protocol.h"
 #include "support_loadout.h"
+#include "support_submarine.h"
 #include <cmath>
 #include <cstring>
 
@@ -29,6 +30,13 @@ bool BeginUnit(const Unit& unit) noexcept {
     return unit.resourceId==kBeginRequesterMetadata && unit.role<=2 && CanonicalRequester(unit.netId);
 }
 bool HasRequester(const Plan& plan) noexcept { return !ZeroId(plan.requester); }
+bool DynamicDroneResource(std::uint32_t id) noexcept {return id==kSupportSubDroneResource || IsCarrierDroneResource(id);}
+std::uint32_t RequiredDetails(const Plan& plan) noexcept {
+    std::uint32_t bits=HasRequester(plan) ? kDetailPvpSupport : 0u;
+    for(std::uint32_t i=0;i<plan.count && i<kMaxUnits;++i)
+        if(DynamicDroneResource(plan.units[i].resourceId))bits|=kDetailDynamicDrones;
+    return bits;
+}
 bool ValidUnit(const Unit& u,bool ids) noexcept {
     if(!u.resourceId || u.role>kMaxUnits)return false;
     for(float x:u.matrix)if(!std::isfinite(x) || std::fabs(x)>1.0e6f)return false;
@@ -80,6 +88,11 @@ bool ValidPlan(const Plan& p,bool ids) noexcept {
             if(!std::memcmp(p.units[i].netId,p.units[j].netId,32))return false;
     }
     return true;
+}
+bool ValidPreparedDronePlan(const Plan& plan) noexcept {
+    return ValidPlan(plan,false) && plan.catalogId==kPreparedDroneCatalog && plan.count==1 &&
+        CanonicalRequester(plan.requester) && !plan.units[0].role && plan.units[0].variant &&
+        DynamicDroneResource(plan.units[0].resourceId) && ZeroId(plan.units[0].netId);
 }
 bool Encode(const Message& m,void* bytes,std::size_t size) noexcept {
     if(!bytes || size!=kWireSize || !ValidMessage(m))return false;
@@ -280,6 +293,8 @@ bool Session::InFlight(const Transaction& t) const noexcept {
 // requester's requests 2 s apart; and, when every peer has kExtRescueChannel, the sea rescue's: one in flight per
 // requester beside anything else, each requester's rescues rescueCooldown_ apart from its last one made. Both draw on
 // the same kMaxTransactions ids and ordinals; a failed one of either rolls back alone (Cancel of its own id).
+// Explicit prepared drone children have their own parent/slot channel and never
+// occupy either request channel while awaiting the same all-peer ACK barriers.
 void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now) noexcept {
     if(!m.request || m.catalog>=kMissionCrewCatalog)return;
     if(m.request<=requests_[peer]) {
@@ -299,26 +314,39 @@ void Session::HostRequest(std::uint32_t peer,const Message& m,std::uint64_t now)
     for(const auto& t:transactions_) {
         if(!InFlight(t))continue;
         // The rescue channel: this requester's own rescue in flight blocks it, nothing else. The map's: anything of its own.
-        if(channel ? t.rescue && t.requester==peer : !t.rescue) {Publish(peer,m.request,RequestStatus::refused);return;}
+        if(channel ? t.rescue && t.requester==peer : !t.rescue && !t.dynamicDrone) {Publish(peer,m.request,RequestStatus::refused);return;}
     }
     auto& t=transactions_[nextTransaction_++];t.token=++nextToken_;t.phase=Phase::planning;t.requester=peer;t.request=m.request;t.since=now;
     t.rescue=channel;
     t.plan.catalogId=m.catalog;std::memcpy(t.plan.target,m.target,sizeof(m.target));t.loadout=m.challenge;
     Publish(peer,m.request,RequestStatus::accepted);
 }
-std::uint64_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now) noexcept {
-    if(!host_ || !Ready() || plan.catalogId!=kMissionCrewCatalog || !ValidPlan(plan,false) ||
+std::uint64_t Session::SubmitPrepared(const Plan& plan,std::uint64_t now,PreparedKind kind) noexcept {
+    if(!host_ || !Ready() || !ValidPlan(plan,false) ||
        nextTransaction_>=kMaxTransactions || nextToken_==UINT64_MAX)return 0;
-    unsigned existing=0;
-    for(std::uint32_t i=0;i<plan.count;++i)if(plan.units[i].resourceId==kExistingVehicle) {
-        ++existing;if(!ValidUnit(plan.units[i],true))return 0;
-        for(const auto& prior:transactions_)if(prior.phase!=Phase::empty && prior.phase!=Phase::cancelled)
-            for(std::uint32_t j=0;j<prior.plan.count;++j)if(prior.plan.units[j].resourceId==kExistingVehicle &&
-                !std::memcmp(prior.plan.units[j].netId,plan.units[i].netId,32))return 0;
+    if(kind!=PreparedKind::missionCrew && kind!=PreparedKind::dynamicDrone)return 0;
+    if(kind==PreparedKind::dynamicDrone) {
+        if(!ValidPreparedDronePlan(plan) || !PeersHaveDetails(kDetailPvpSupport|kDetailDynamicDrones) ||
+           !backend_.hooks.validate(plan))return 0;
+        for(const auto& prior:transactions_) {
+            if(!InFlight(prior) || !prior.dynamicDrone || prior.plan.units[0].variant!=plan.units[0].variant)continue;
+            const auto a=prior.plan.units[0].resourceId,b=plan.units[0].resourceId;
+            if(a==kSupportSubDroneResource || b==kSupportSubDroneResource || CarrierDroneSlot(a)==CarrierDroneSlot(b))return 0;
+        }
+    } else {
+        if(plan.catalogId!=kMissionCrewCatalog)return 0;
+        unsigned existing=0;
+        for(std::uint32_t i=0;i<plan.count;++i)if(plan.units[i].resourceId==kExistingVehicle) {
+            ++existing;if(!ValidUnit(plan.units[i],true))return 0;
+            for(const auto& prior:transactions_)if(prior.phase!=Phase::empty && prior.phase!=Phase::cancelled)
+                for(std::uint32_t j=0;j<prior.plan.count;++j)if(prior.plan.units[j].resourceId==kExistingVehicle &&
+                    !std::memcmp(prior.plan.units[j].netId,plan.units[i].netId,32))return 0;
+        }
+        if(existing!=1)return 0;
+        for(const auto& t:transactions_)if(InFlight(t) && !t.rescue && !t.dynamicDrone)return 0;
     }
-    if(existing!=1)return 0;
-    for(const auto& t:transactions_)if(InFlight(t) && !t.rescue)return 0;
     auto& t=transactions_[nextTransaction_++];t.token=++nextToken_;t.phase=Phase::planning;t.external=true;t.plan=plan;t.since=now;
+    t.dynamicDrone=kind==PreparedKind::dynamicDrone;
     return t.token;
 }
 void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
@@ -330,7 +358,8 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
             backend_.hooks.plan(catalog,target,t.loadout,&t.plan);
         if(result==PlanResult::pending)return;
         if(result==PlanResult::refused || t.plan.catalogId!=catalog || !ValidPlan(t.plan,false) ||
-           (HasRequester(t.plan) && !PeersHaveDetails(kDetailPvpSupport))){Cancel(id,true,RequestStatus::refused);return;}
+           (t.dynamicDrone && !ValidPreparedDronePlan(t.plan)) ||
+           (RequiredDetails(t.plan) && !PeersHaveDetails(RequiredDetails(t.plan)))){Cancel(id,true,RequestStatus::refused);return;}
         for(std::uint32_t i=0;i<t.plan.count;++i) {
             if(t.plan.units[i].resourceId==kExistingVehicle)continue;
             if(ordinal_>=0x80000000u || !backend_.hooks.deriveId(ordinal_++,t.plan.units[i].netId)){Cancel(id,true);return;}
@@ -352,7 +381,7 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
         if(!Broadcast(m)){Cancel(id,true);return;}
     }
     if(t.phase==Phase::prepared) {
-        if(HasRequester(t.plan) && !PeersHaveDetails(kDetailPvpSupport)){Cancel(id,true,RequestStatus::refused);return;}
+        if(RequiredDetails(t.plan) && !PeersHaveDetails(RequiredDetails(t.plan))){Cancel(id,true,RequestStatus::refused);return;}
         for(std::uint32_t i=0;i<=peers_;++i)if(!t.ready[i])return;
         t.phase=Phase::spawning;t.since=now;
         Message m;m.kind=Kind::commit;m.transaction=id;
@@ -360,6 +389,7 @@ void Session::Advance(std::uint32_t id,std::uint64_t now) noexcept {
         t.spawned=true;t.result[0]=1;
     }
     if(t.phase==Phase::spawning) {
+        if(RequiredDetails(t.plan) && !PeersHaveDetails(RequiredDetails(t.plan))){Cancel(id,true,RequestStatus::refused);return;}
         for(std::uint32_t i=0;i<=peers_;++i)if(!t.result[i])return;
         t.phase=Phase::active;t.activated[0]=1;t.since=now;
         // A rescue made on every machine: its requester's cooldown starts (whichever channel carried it); a cancelled one
@@ -438,12 +468,12 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     } else if(m.kind==Kind::prepare && t.phase==Phase::assembling) {
         Message reply;reply.kind=Kind::ready;reply.transaction=m.transaction;
         reply.ok=t.received==((1u<<t.plan.count)-1) && ValidPlan(t.plan) &&
-            (!HasRequester(t.plan) || PeersHaveDetails(kDetailPvpSupport)) && backend_.hooks.validate && backend_.hooks.validate(t.plan);
+            (!RequiredDetails(t.plan) || PeersHaveDetails(RequiredDetails(t.plan))) && backend_.hooks.validate && backend_.hooks.validate(t.plan);
         t.phase=reply.ok ? Phase::prepared : Phase::cancelled;t.since=now;Send(hostPeer_,reply);
     } else if(m.kind==Kind::commit && (t.phase==Phase::prepared || t.phase==Phase::spawning || t.phase==Phase::active)) {
         Message reply;reply.kind=Kind::result;reply.transaction=m.transaction;
         const bool alreadySpawned=t.spawned;
-        reply.ok=alreadySpawned || ((!HasRequester(t.plan) || PeersHaveDetails(kDetailPvpSupport)) &&
+        reply.ok=alreadySpawned || ((!RequiredDetails(t.plan) || PeersHaveDetails(RequiredDetails(t.plan))) &&
             backend_.hooks.spawn && backend_.hooks.spawn(t.token,t.plan,true));
         t.spawned=reply.ok!=0;
         if(!alreadySpawned)t.since=now;

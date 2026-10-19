@@ -5,7 +5,9 @@
 // rig over the mech's right shoulder, turning with its heading and pitching with its aim, and the screen's centre is
 // the aim: every weapon fires at what the centre's ray meets (Aim). One ray, ViewRay, for both: the hook places the eye
 // on it each time the game fetches the camera, the game thread aims along it each frame. Both place it off the model's
-// origin (the soles), each where it is in its own context (measured 2026-10-07): on the game thread the vehicle's
+// origin (the soles), each where it is in its own context. In first person the raw monoeye position replaces the
+// shoulder boom; its rotation is the same authoritative aim, not the head's decorative animation.
+// The contexts (measured 2026-10-07): on the game thread the vehicle's
 // position and matrix are the collision box's centre (y 14.0 standing) and the model's origin is sz_root's world;
 // when the camera is fetched the engine has turned the vehicle's matrix (and its position field) into the model's
 // origin (y 1.2: the box's centre less heli_rigid_body[0], as the frames log found `mdl`). A camera
@@ -28,22 +30,75 @@ constexpr ULONGLONG kCentredMs=200;   // ms: the hook placed the camera this rec
 struct View {
     const unsigned char* vehicle=nullptr;
     const unsigned char* seat=nullptr;
+    ObjRef vehicleRef{},riderRef{};   // the exact vehicle, seat and local pilot that published this aim
+    bool cockpit=false;
+    float eyeOffset[3]{};        // raw cockpit eye minus the game-thread root origin, in world axes
     float yaw=0.0f,pitch=0.0f;   // the mech's heading, the aim's pitch (rad; forward = (sin yaw, 0, cos yaw))
     float side=kViewSide,back=kViewBack;   // the boom as the map leaves it (Boom)
     float floor=-1e9f;           // the lowest the eye may be (world y: kViewFloor over the ground under the eye)
     ULONGLONG ms=0;
 };
 SRWLOCK viewLock=SRWLOCK_INIT;
-View view{};
-volatile ULONGLONG placedMs=0;   // GameMs the hook last placed the camera at
+View views[kMaxMechs]{};
+ULONGLONG placedMs[kMaxMechs]{};   // each local pilot's own last camera placement, under viewLock
+
+int ViewSlot(const Mech& m) noexcept {
+    for(int i=0;i<kMaxMechs;++i)if(&m==&mechs[i])return i;
+    return -1;
+}
+// Validate the published identity before touching either reused object or its seat array.
+bool ViewLive(const View& w) noexcept {
+    const auto human=static_cast<const unsigned char*>(w.riderRef.obj);
+    if(!w.vehicle || !w.seat || !human || !w.vehicleRef.ctrl || !w.riderRef.ctrl)return false;
+    const ULONGLONG now=GameMs();
+    if(now<w.ms || now-w.ms>kViewFresh || !Readable(w.vehicleRef.ctrl,12) || !Readable(w.riderRef.ctrl,12) ||
+       At<std::int32_t>(w.vehicleRef.ctrl,8)<=0 || At<std::int32_t>(w.riderRef.ctrl,8)<=0 ||
+       !Readable(w.vehicle,kSeatCount+8) || !Readable(human,kDead+1) || !Readable(human,0x1550) ||
+       !w.vehicleRef.Is(w.vehicle) || !w.riderRef.Is(human) || w.vehicle[kDead] || human[kDead] ||
+       (w.vehicle[0x18]&4) || (human[0x18]&4) || HumanOnFoot(human) || At<const void*>(human,0x1548)!=w.vehicle ||
+       SeatCount(w.vehicle)==0 || SeatAt(const_cast<unsigned char*>(w.vehicle),0)!=w.seat ||
+       !Readable(w.seat,kSeatStride) || At<const void*>(w.seat,kSeatRider)!=human ||
+       At<const void*>(w.seat,edf::kSeatRiderCtrl)!=w.riderRef.ctrl || SeatRider(w.seat)!=Rider::player)return false;
+    return std::isfinite(w.yaw+w.pitch) && Readable(w.vehicle+kMatrix,64);
+}
+bool ReadView(const unsigned char* vehicle,const unsigned char* seat,View* out) noexcept {
+    AcquireSRWLockShared(&viewLock);
+    bool found=false;
+    for(const auto& w:views)if((!vehicle || w.vehicle==vehicle) && (!seat || w.seat==seat)) {
+        if(w.vehicle){*out=w;found=true;break;}
+    }
+    ReleaseSRWLockShared(&viewLock);
+    return found && ViewLive(*out);
+}
+void PlacedView(const View& w,ULONGLONG now) noexcept {
+    AcquireSRWLockExclusive(&viewLock);
+    for(int i=0;i<kMaxMechs;++i)if(views[i].vehicle==w.vehicle && views[i].vehicleRef.ctrl==w.vehicleRef.ctrl &&
+        views[i].seat==w.seat && views[i].riderRef.obj==w.riderRef.obj && views[i].riderRef.ctrl==w.riderRef.ctrl) {
+        placedMs[i]=now;break;
+    }
+    ReleaseSRWLockExclusive(&viewLock);
+}
+bool ViewCentred(const Mech& m) noexcept {
+    const int slot=ViewSlot(m);
+    if(slot<0)return false;
+    AcquireSRWLockShared(&viewLock);
+    const View w=views[slot];const ULONGLONG placed=placedMs[slot];
+    ReleaseSRWLockShared(&viewLock);
+    const ULONGLONG now=GameMs();
+    return !VehicleLookActive(m.vehicle) && w.vehicle==m.vehicle && w.vehicleRef.ctrl==m.ref.ctrl && placed && now>=placed && now-placed<=kCentredMs && ViewLive(w);
+}
 
 // The model's origin as the camera hook sees it: the vehicle's matrix's position then (see the top).
 const float* Where(const unsigned char* v) noexcept { return reinterpret_cast<const float*>(v+kMatrix)+12; }
 
 // The camera's eye and its centre ray's unit direction for `w` with the model's origin (its soles) at `origin`.
 void ViewRay(const View& w,const float* origin,float* eye,float* dir) noexcept {
-    const float cp=std::cos(w.pitch);
-    dir[0]=std::sin(w.yaw)*cp;dir[1]=std::sin(w.pitch);dir[2]=std::cos(w.yaw)*cp;
+    const auto aimed=fpview::HeadingFrame(w.yaw,w.pitch,origin);
+    std::memcpy(dir,aimed.m+8,12);
+    if(w.cockpit) {
+        for(int k=0;k<3;++k)eye[k]=origin[k]+w.eyeOffset[k];
+        return;
+    }
     const float right[3]={-std::cos(w.yaw),0.0f,std::sin(w.yaw)};
     for(int k=0;k<3;++k)eye[k]=origin[k]+(k==1 ? kViewUp+kViewRise : 0.0f)-dir[k]*w.back+right[k]*w.side;
     eye[1]=std::fmax(eye[1],w.floor);
@@ -75,26 +130,42 @@ void Boom(Mech& m,float dt) noexcept {
     m.viewFloor=clear!=kNoGround ? eye[1]-clear+kViewFloor : o[1]-(m.fl.air && m.feetClear!=kNoGround ? m.feetClear : 0.0f)+kViewFloor;
 }
 
-// The view of `m` now (no vehicle or seat): its heading, its aim's pitch, the ground under it.
+// The view of `m` now: its authoritative heading/pitch and either the raw cockpit eye or the third-person boom.
 View ViewOf(const Mech& m) noexcept {
     View w;
     w.yaw=m.heading;w.pitch=m.aimPitch;
     if(!m.rootOk)return w;
+    // Read the actual rider's raw marker, never a final camera matrix (which may be a map, optic, or another view).
+    if(!m.npc && m.vehicle && FirstPersonVehicleView(m.vehicle,0) && SeatCount(m.vehicle)>0) {
+        auto human=At<unsigned char*>(SeatAt(m.vehicle,0),kSeatRider);
+        float eye[3];RideView ride{};
+        if(human && VehicleEye(human,eye,&ride) && ride.vehicle==m.vehicle && ride.seat==0) {
+            w.cockpit=true;
+            for(int k=0;k<3;++k)w.eyeOffset[k]=eye[k]-m.root[12+k];
+            return w;
+        }
+    }
     if(m.viewBack>0.0f){w.back=m.viewBack;w.side=m.viewSide;w.floor=m.viewFloor;}
     else w.floor=m.root[13]-(m.fl.air && m.feetClear!=kNoGround ? m.feetClear : 0.0f)+kViewFloor;
     return w;
 }
 
 void PublishView(const Mech& m,unsigned char* v) noexcept {
+    const int slot=ViewSlot(m);
+    if(slot<0 || SeatCount(v)==0)return;
     View w=ViewOf(m);
-    w.vehicle=v;w.seat=SeatAt(v,0);w.ms=GameMs();
+    w.vehicle=v;w.seat=SeatAt(v,0);w.ms=GameMs();w.vehicleRef=m.ref;
+    w.riderRef=ObjRef::Of(At<const void*>(w.seat,kSeatRider));
     AcquireSRWLockExclusive(&viewLock);
-    view=w;
+    const View& old=views[slot];
+    if(old.vehicleRef.obj!=w.vehicleRef.obj || old.vehicleRef.ctrl!=w.vehicleRef.ctrl || old.seat!=w.seat ||
+       old.riderRef.obj!=w.riderRef.obj || old.riderRef.ctrl!=w.riderRef.ctrl)placedMs[slot]=0;
+    views[slot]=w;
     ReleaseSRWLockExclusive(&viewLock);
 }
-void DropView() noexcept {
+void DropView(const unsigned char* vehicle) noexcept {
     AcquireSRWLockExclusive(&viewLock);
-    view=View{};
+    for(int i=0;i<kMaxMechs;++i)if(!vehicle || views[i].vehicle==vehicle){views[i]=View{};placedMs[i]=0;}
     ReleaseSRWLockExclusive(&viewLock);
 }
 
@@ -263,7 +334,7 @@ void Aim(Mech& m) noexcept {
     float from[3],dir[3];
     if(!m.npc) {
         ViewRay(ViewOf(m),m.root+12,from,dir);   // the model's origin here: sz_root's world
-        a.centred=GameMs()-placedMs<=kCentredMs;
+        a.centred=ViewCentred(m);
     } else {
         BoneAt(m,sazabi::kMuzzle,nullptr,from);
         const float cp=std::cos(m.aimPitch);

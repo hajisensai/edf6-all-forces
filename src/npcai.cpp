@@ -23,6 +23,7 @@
 // does (§2.1).
 #include "crew.h"
 #include "npc_command.h"
+#include "npc_native_hooks.h"
 #include "command_net.h"
 #include "layout.h"
 #include "memory.h"
@@ -57,6 +58,7 @@ constexpr std::size_t kLookPitch=0xD60,kLookYaw=0xD64;                       // 
 constexpr std::size_t kTrigger=0xD70;                                         // WeaponSet i's trigger (held) at +i
 constexpr std::size_t kJumpPress=0xD76;                                       // jump / evade pressed
 constexpr std::size_t kPickWeapon=0xD82;                                      // pick weapon 0..2 (+i)
+constexpr std::size_t kActionLimits=0x5D0;                                    // bit 1: the native action owns look
 constexpr std::size_t kAimPitch=0x1230,kAimYaw=0x1234;                        // the look's target (0x573BA8 adds d60 to it)
 constexpr std::size_t kViewPitch=0x1240,kViewYaw=0x1244;                      // the look as it is (eased onto the target)
 constexpr std::size_t kListFlags=0x1A;constexpr unsigned char kInAiList=8;  // slot 4 leaves the block of these alone
@@ -95,6 +97,9 @@ const Signature kSignatures[]={
     {0x596B50,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56},16},   // Think
     {0x596BAE,{0xE8,0x4D,0x67,0xFD,0xFF,0x49,0x8B,0xD4,0x48,0x8B,0xCB,0xE8,0x42,0x34,0xFB,0xFF},16},   // block cleared, base AI
     {0x573BA8,{0xF3,0x0F,0x10,0x86,0x3C,0x12,0x00,0x00,0x0F,0x10,0x8E,0x30,0x12,0x00,0x00,0x0F},16},   // look target += d60
+    {0x573B9F,{0xF6,0x86,0xD0,0x05,0,0,0x02,0x75,0x2E},9},   // native action owns look: no integration
+    {0x59FE5F,{0x83,0xE5,0x02},3},                                 // same action bit: no replicated look
+    {0x5741E7,{0xF3,0x0F,0x10,0xB6,0x64,0x0D,0,0},8},             // CAS still consumes the turn intent
     {0x59ADE9,{0x41,0x80,0xBC,0x1E,0x70,0x0D,0x00,0x00,0x00,0x74,0x24,0x48,0x8B,0x46,0x40,0x48},16},   // trigger d70 + set
     {0x596C30,{0x48,0x8B,0xC8,0x48,0x8B,0x80,0x48,0x05,0x00,0x00,0x48,0x85,0xC0,0x75,0xF1,0xEB},16},   // up +0x548 to the root
     {0x567080,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0xE8,0xC2,0xFA,0x02,0x00,0x48,0x8D},16},   // Fencer: stock Think first
@@ -585,6 +590,10 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop) noexce
     Move(h,dir,d/6.0f+0.3f);
 }
 void Look(unsigned char* h,const float* dir) noexcept {
+    // The native action may freeze look even while the script's control mask permits it.
+    // 0x573B9F skips integration and 0x59FF65 sends zero in this state, but 0x5741E7
+    // still feeds d64 into CAS. Never add our repeated turn intent to a frozen pose.
+    if(At<std::uint32_t>(h,kActionLimits)&2)return;
     float d[2];
     if(!npc::AimDelta(At<float>(h,kAimPitch),At<float>(h,kAimYaw),dir,1.0f,kLookMost,d))return;
     Put<float>(h,kLookPitch,d[0]);Put<float>(h,kLookYaw,d[1]);
@@ -1702,6 +1711,14 @@ template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
 constexpr ThinkFn kHooks[kClasses]={&ThinkHook<0>,&ThinkHook<1>,&ThinkHook<2>,&ThinkHook<3>};
 constexpr std::size_t kSlotThink=7;
 }  // namespace
+
+bool NpcOwnsNativeThink(const void* nativeTable,const void* function) noexcept {
+    if(!image || !nativeTable || !function)return false;
+    for(int i=0;i<kClasses;++i)if(nativeTable==image+kSoldiers[i].vtable)
+        return function==reinterpret_cast<const void*>(kHooks[i]) &&
+            nextThink[i]==reinterpret_cast<ThinkFn>(image+kSoldiers[i].think);
+    return false;
+}
 
 bool IsSoldierClass(const void* human) noexcept {
     if(!Readable(human,8))return false;

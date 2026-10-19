@@ -1672,3 +1672,358 @@ target_compile_options(autoturret_payload_aim_test PRIVATE /W4 /WX /utf-8 /permi
 target_link_options(autoturret_payload_aim_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks autoturret_payload_aim_test)
 add_test(NAME autoturret_payload_aim COMMAND autoturret_payload_aim_test)
+add_test(NAME edf41_caption_contract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_caption_contract_test.py")
+
+add_executable(enemy_ui_logic_test EXCLUDE_FROM_ALL tests/enemy_ui_logic_test.cpp)
+target_include_directories(enemy_ui_logic_test PRIVATE src common third_party/EDFModLoader)
+target_compile_options(enemy_ui_logic_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks enemy_ui_logic_test)
+add_test(NAME enemy_ui_logic COMMAND enemy_ui_logic_test)
+add_test(NAME room_native_menu_contract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_native_menu_contract_test.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(room_native_menu_contract PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME outfit41_palette_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/outfit41_palette_native_test.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(outfit41_palette_native PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(outfit41_color_warp_test EXCLUDE_FROM_ALL tests/outfit41_color_warp_test.cpp)
+target_compile_options(outfit41_color_warp_test PRIVATE /W4 /WX /utf-8 /permissive-)
+target_link_libraries(outfit41_color_warp_test PRIVATE d3d11 d3dcompiler)
+add_dependencies(offline_checks outfit41_color_warp_test)
+add_test(NAME outfit41_color_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/outfit41_color_native_test.py" --edf6 "${EDF6_GAME_DIR}" --probe "$<TARGET_FILE:outfit41_color_warp_test>")
+set_tests_properties(outfit41_color_native PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 120)
+add_executable(enemy_control_protocol_test EXCLUDE_FROM_ALL tests/enemy_control_protocol_test.cpp)
+target_compile_options(enemy_control_protocol_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks enemy_control_protocol_test)
+add_test(NAME enemy_control_protocol COMMAND enemy_control_protocol_test)
+target_sources(EDF6VehicleCrew PRIVATE src/vulcan_rotor.cpp)
+add_executable(vulcan_rotor_test EXCLUDE_FROM_ALL tests/vulcan_rotor_test.cpp)
+target_include_directories(vulcan_rotor_test PRIVATE src common third_party/EDFModLoader)
+target_compile_options(vulcan_rotor_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks vulcan_rotor_test)
+add_test(NAME vulcan_rotor COMMAND vulcan_rotor_test)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control.cpp src/enemy_control_logic.cpp src/enemy_control_native.cpp src/enemy_control_catalog.cpp src/enemy_control_net.cpp src/sub_support_net.cpp)
+add_executable(terrain_sampler_native_test EXCLUDE_FROM_ALL tests/terrain_sampler_native_test.cpp)
+target_compile_options(terrain_sampler_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+target_link_libraries(terrain_sampler_native_test PRIVATE d3d11 d3dcompiler)
+add_dependencies(offline_checks terrain_sampler_native_test)
+add_test(NAME sk_terrain_materials COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_sk_terrain_materials.py")
+add_test(NAME terrain_shader_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/terrain_shader_native_audit.py" --probe "$<TARGET_FILE:terrain_sampler_native_test>")
+set_tests_properties(terrain_shader_native PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180)
+
+add_executable(camera_frame_native_test EXCLUDE_FROM_ALL tests/camera_frame_native_test.cpp)
+target_compile_options(camera_frame_native_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks camera_frame_native_test)
+add_test(NAME camera_frame_native COMMAND camera_frame_native_test "${EDF6_NATIVE_DLL}")
+set_tests_properties(camera_frame_native PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME edf41_npc_visual_contract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_npc_visual_contract_test.py")
+add_executable(room_native_entry_runtime_test EXCLUDE_FROM_ALL tests/room_native_entry_runtime_test.cpp)
+target_include_directories(room_native_entry_runtime_test PRIVATE src common third_party/EDFModLoader)
+target_link_libraries(room_native_entry_runtime_test PRIVATE edf6common user32)
+target_compile_options(room_native_entry_runtime_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(room_native_entry_runtime_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks room_native_entry_runtime_test)
+add_test(NAME room_native_entry_runtime COMMAND room_native_entry_runtime_test)
+
+add_executable(npc_action_look_test EXCLUDE_FROM_ALL tests/npc_action_look_test.cpp src/ground_navigation.cpp)
+target_include_directories(npc_action_look_test PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_link_libraries(npc_action_look_test PRIVATE edf6common user32)
+target_compile_options(npc_action_look_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(npc_action_look_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks npc_action_look_test)
+add_test(NAME npc_action_look COMMAND npc_action_look_test)
+add_test(NAME npc_action_look_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_action_look_native.py")
+
+add_test(NAME tracked_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_collision.py")
+add_executable(vulcan_rotor_runtime_test EXCLUDE_FROM_ALL tests/vulcan_rotor_runtime_test.cpp)
+target_include_directories(vulcan_rotor_runtime_test PRIVATE src common third_party/EDFModLoader)
+target_compile_options(vulcan_rotor_runtime_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks vulcan_rotor_runtime_test)
+add_test(NAME vulcan_rotor_runtime COMMAND vulcan_rotor_runtime_test)
+add_test(NAME vulcan_rotor_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/vulcan_rotor_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(vulcan_rotor_native PROPERTIES SKIP_RETURN_CODE 77)
+
+# Production-source fixtures use function sections so unrelated game entry points
+# are discarded; the exercised runtime paths still execute the real implementation.
+function(edf6_feedback_fixture target test_name source)
+    add_executable(${target} EXCLUDE_FROM_ALL ${source})
+    target_include_directories(${target} PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+    target_link_libraries(${target} PRIVATE edf6common user32)
+    target_compile_options(${target} PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+    target_link_options(${target} PRIVATE /OPT:REF)
+    add_dependencies(offline_checks ${target})
+    add_test(NAME ${test_name} COMMAND ${target})
+endfunction()
+edf6_feedback_fixture(sub_support_net_test sub_support_net tests/sub_support_net_test.cpp)
+target_sources(sub_support_net_test PRIVATE src/sub_support_net.cpp)
+edf6_feedback_fixture(sub_support_dispatch_test sub_support_dispatch tests/sub_support_dispatch_test.cpp)
+edf6_feedback_fixture(submarine_support_fixture submarine_support tests/submarine_support_fixture.cpp)
+edf6_feedback_fixture(carrier_laser_team_fixture carrier_laser_team tests/carrier_laser_team_fixture.cpp)
+edf6_feedback_fixture(pvp_inherit_support_test pvp_inherit_support tests/pvp_inherit_support_test.cpp)
+edf6_feedback_fixture(pvp_native_inherit_test pvp_native_inherit tests/pvp_native_inherit_test.cpp)
+edf6_feedback_fixture(support_drone_runtime_test support_drone_runtime tests/support_drone_runtime_test.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_legacy.cpp)
+
+add_test(NAME tracked_collision_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/tracked_collision_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(tracked_collision_native PROPERTIES SKIP_RETURN_CODE 77)
+add_executable(enemy_control_net_input_test EXCLUDE_FROM_ALL tests/enemy_control_net_input_test.cpp)
+target_include_directories(enemy_control_net_input_test PRIVATE src)
+target_compile_options(enemy_control_net_input_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks enemy_control_net_input_test)
+add_test(NAME enemy_control_net_input COMMAND enemy_control_net_input_test)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_native_look.cpp)
+edf6_feedback_fixture(enemy_control_runtime_test enemy_control_runtime tests/enemy_control_runtime_test.cpp)
+target_sources(enemy_control_runtime_test PRIVATE src/enemy_control_logic.cpp)
+edf6_feedback_fixture(enemy_control_catalog_test enemy_control_catalog tests/enemy_control_catalog_test.cpp)
+edf6_feedback_fixture(enemy_control_native_fixture enemy_control_native_fixture tests/enemy_control_native_fixture.cpp)
+edf6_feedback_fixture(enemy_control_native_look_test enemy_control_native_look tests/enemy_control_native_look_test.cpp)
+edf6_feedback_fixture(enemy_control_net_fixture enemy_control_net_runtime tests/enemy_control_net_fixture.cpp)
+edf6_feedback_fixture(enemy_control_legacy_robo_test enemy_control_legacy_robo tests/enemy_control_legacy_robo_test.cpp)
+target_sources(enemy_control_legacy_robo_test PRIVATE src/enemy_control_logic.cpp)
+add_test(NAME enemy_control_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_native_audit.py" "${EDF6_NATIVE_DLL}")
+add_test(NAME enemy_control_native_look_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_native_look_audit.py" "${EDF6_NATIVE_DLL}")
+add_test(NAME enemy_control_source_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_source_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
+add_test(NAME enemy_control_catalog_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_catalog_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_native_audit enemy_control_native_look_audit enemy_control_source_native enemy_control_catalog_native PROPERTIES SKIP_RETURN_CODE 77)
+
+target_sources(EDF6VehicleCrew PRIVATE src/carrier_drone_net.cpp src/support_source.cpp src/enemy_control_native_move.cpp src/enemy_control_native_net.cpp)
+edf6_feedback_fixture(carrier_drone_net_test carrier_drone_net tests/carrier_drone_net_test.cpp)
+target_sources(carrier_drone_net_test PRIVATE src/carrier_drone_net.cpp)
+edf6_feedback_fixture(support_source_test support_source tests/support_source_test.cpp)
+edf6_feedback_fixture(edf41dragon_control_fixture edf41dragon_control tests/edf41dragon_control_fixture.cpp)
+edf6_feedback_fixture(edf41mother_control_fixture edf41mother_control tests/edf41mother_control_fixture.cpp)
+edf6_feedback_fixture(edf41mother401_control_fixture edf41mother401_control tests/edf41mother_control_fixture.cpp)
+target_compile_definitions(edf41mother401_control_fixture PRIVATE MOTHER401_FIXTURE)
+
+edf6_feedback_fixture(carrier_support_dispatch_test carrier_support_dispatch tests/carrier_support_dispatch_test.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/pvp_controlled.cpp)
+edf6_feedback_fixture(enemy_control_native_move_test enemy_control_native_move tests/enemy_control_native_move_test.cpp)
+edf6_feedback_fixture(enemy_control_native_look_extra_test enemy_control_native_look_extra tests/enemy_control_native_look_extra_test.cpp)
+edf6_feedback_fixture(enemy_control_native_net_fixture enemy_control_native_net_fixture tests/enemy_control_native_net_fixture.cpp)
+add_test(NAME enemy_control_native_net_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_native_net_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_native_net_audit PROPERTIES SKIP_RETURN_CODE 77)
+edf6_feedback_fixture(enemy_control_pose_protocol_test enemy_control_pose_protocol tests/enemy_control_pose_protocol_test.cpp)
+
+edf6_feedback_fixture(enemy_control_pose_codec_test enemy_control_pose_codec tests/enemy_control_pose_codec_test.cpp)
+
+edf6_feedback_fixture(edf41hector_control_fixture edf41hector_control tests/edf41hector_control_fixture.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_deiroi.cpp src/enemy_control_humanoid.cpp src/enemy_control_native_look_extra.cpp src/enemy_control_native_pose.cpp src/enemy_control_weapon_aim.cpp)
+target_sources(enemy_control_native_look_test PRIVATE src/enemy_control_native_look_extra.cpp)
+edf6_feedback_fixture(enemy_control_deiroi_test enemy_control_deiroi tests/enemy_control_deiroi_test.cpp)
+edf6_feedback_fixture(enemy_control_humanoid_test enemy_control_humanoid tests/enemy_control_humanoid_test.cpp)
+add_test(NAME enemy_control_native_look_extra_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_native_look_extra_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_native_look_extra_audit PROPERTIES SKIP_RETURN_CODE 77)
+edf6_feedback_fixture(enemy_hud_layout_test enemy_hud_layout tests/enemy_hud_layout_test.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_radar.cpp src/enemy_control_target.cpp src/enemy_control_action_native.cpp src/enemy_control_pvp_native.cpp src/enemy_control_pvp_spawn_native.cpp src/pvp_controlled_spawn.cpp)
+edf6_feedback_fixture(enemy_control_radar_native_fixture enemy_control_radar_native tests/enemy_control_radar_native_fixture.cpp)
+add_test(NAME enemy_control_radar_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_radar_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_radar_audit PROPERTIES SKIP_RETURN_CODE 77)
+edf6_feedback_fixture(enemy_control_action_protocol_test enemy_control_action_protocol tests/enemy_control_action_protocol_test.cpp)
+edf6_feedback_fixture(enemy_control_action_native_test enemy_control_action_native tests/enemy_control_action_native_test.cpp)
+add_test(NAME enemy_control_action_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_action_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_action_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+edf6_feedback_fixture(enemy_control_native_pose_test enemy_control_native_pose tests/enemy_control_native_pose_test.cpp)
+add_test(NAME enemy_control_native_pose_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_native_pose_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_native_pose_audit PROPERTIES SKIP_RETURN_CODE 77)
+edf6_feedback_fixture(pvp_controlled_fixture pvp_controlled tests/pvp_controlled_fixture.cpp)
+edf6_feedback_fixture(enemy_control_pvp_tree_test enemy_control_pvp_tree tests/enemy_control_pvp_tree_test.cpp)
+edf6_feedback_fixture(enemy_control_pvp_native_test enemy_control_pvp_native tests/enemy_control_pvp_native_test.cpp)
+
+edf6_feedback_fixture(enemy_control_target_fixture enemy_control_target tests/enemy_control_target_fixture.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_deiroi_net.cpp src/enemy_control_pvp_boss.cpp src/enemy_control_pvp_transport.cpp src/enemy_control_timeship.cpp src/enemy_control_timeship_pods.cpp src/enemy_control_walking_guns.cpp src/enemy_control_walking.cpp)
+edf6_feedback_fixture(enemy_control_deiroi_net_test enemy_control_deiroi_net tests/enemy_control_deiroi_net_test.cpp)
+edf6_feedback_fixture(enemy_control_deiroi_net_codec_test enemy_control_deiroi_net_codec tests/enemy_control_deiroi_net_codec_test.cpp)
+edf6_feedback_fixture(enemy_control_pvp_boss_test enemy_control_pvp_boss tests/enemy_control_pvp_boss_test.cpp)
+edf6_feedback_fixture(enemy_control_pvp_transport_test enemy_control_pvp_transport tests/enemy_control_pvp_transport_test.cpp)
+edf6_feedback_fixture(enemy_control_timeship_test enemy_control_timeship tests/enemy_control_timeship_test.cpp)
+edf6_feedback_fixture(enemy_control_timeship_pods_test enemy_control_timeship_pods tests/enemy_control_timeship_pods_test.cpp)
+edf6_feedback_fixture(enemy_control_walking_test enemy_control_walking tests/enemy_control_walking_test.cpp)
+edf6_feedback_fixture(enemy_control_walking_guns_test enemy_control_walking_guns tests/enemy_control_walking_guns_test.cpp)
+edf6_feedback_fixture(enemy_control_weapon_aim_test enemy_control_weapon_aim tests/enemy_control_weapon_aim_test.cpp)
+add_test(NAME enemy_control_deiroi_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_deiroi_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_deiroi_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME enemy_control_timeship_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_timeship_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_timeship_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME enemy_control_walking_guns_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_walking_guns_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_walking_guns_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME enemy_control_walking_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_walking_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_walking_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME enemy_control_deiroi_net_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_deiroi_net_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_deiroi_net_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME enemy_control_native_move_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_native_move_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_native_move_audit PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME enemy_control_timeship_pods_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_timeship_pods_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_timeship_pods_audit PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME enemy_control_weapon_aim_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_weapon_aim_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_weapon_aim_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME enemy_control_target_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_target_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_target_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_command_actions.cpp)
+edf6_feedback_fixture(enemy_control_command_actions_test enemy_control_command_actions tests/enemy_control_command_actions_test.cpp)
+add_test(NAME enemy_control_command_actions_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_command_actions_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_command_actions_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME enemy_control_command_boss_carrier_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_command_boss_carrier_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_command_boss_carrier_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_pvp_berserker.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_timeship_pods_net.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_timeship_pods_script.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_timeship_script.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_walking_net.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_gun_factory.cpp)
+
+edf6_feedback_fixture(enemy_control_pvp_berserker_test enemy_control_pvp_berserker tests/enemy_control_pvp_berserker_test.cpp)
+
+edf6_feedback_fixture(enemy_control_pvp_boss_core_test enemy_control_pvp_boss_core tests/enemy_control_pvp_boss_core_test.cpp)
+
+edf6_feedback_fixture(pvp_controlled_spawn_native_test pvp_controlled_spawn_native tests/pvp_controlled_spawn_native_test.cpp)
+
+edf6_feedback_fixture(enemy_control_timeship_pods_net_test enemy_control_timeship_pods_net tests/enemy_control_timeship_pods_net_test.cpp)
+
+edf6_feedback_fixture(enemy_control_timeship_script_test enemy_control_timeship_script tests/enemy_control_timeship_script_test.cpp)
+
+edf6_feedback_fixture(carrier_drone_transaction_test carrier_drone_transaction tests/carrier_drone_transaction_test.cpp)
+
+edf6_feedback_fixture(enemy_control_pvp_transport_core_test enemy_control_pvp_transport_core tests/enemy_control_pvp_transport_test.cpp)
+target_compile_definitions(enemy_control_pvp_transport_core_test PRIVATE EDF_TRANSPORT_REAL_CORE=1)
+
+add_test(NAME enemy_control_pvp_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_pvp_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_pvp_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(NAME enemy_control_timeship_pods_net_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_timeship_pods_net_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_timeship_pods_net_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+edf6_feedback_fixture(enemy_control_gun_factory_test enemy_control_gun_factory tests/enemy_control_gun_factory_test.cpp)
+
+add_test(NAME enemy_control_gun_factory_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_gun_factory_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_gun_factory_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+target_sources(carrier_drone_transaction_test PRIVATE src/jet_carrier.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_boss_gun_net.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_merman_net.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_monster_net.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_projectile_native.cpp)
+
+edf6_feedback_fixture(enemy_control_boss_gun_net_test enemy_control_boss_gun_net tests/enemy_control_boss_gun_net_test.cpp)
+
+edf6_feedback_fixture(enemy_control_boss_gun_projectile_test enemy_control_boss_gun_projectile tests/enemy_control_boss_gun_projectile_test.cpp)
+
+edf6_feedback_fixture(enemy_control_merman_net_test enemy_control_merman_net tests/enemy_control_merman_net_test.cpp)
+
+edf6_feedback_fixture(enemy_control_monster_definition_test enemy_control_monster_definition tests/enemy_control_monster_definition_test.cpp)
+
+edf6_feedback_fixture(enemy_control_monster_net_codec_test enemy_control_monster_net_codec tests/enemy_control_monster_net_codec_test.cpp)
+
+edf6_feedback_fixture(enemy_control_monster_net_test enemy_control_monster_net tests/enemy_control_monster_net_test.cpp)
+
+edf6_feedback_fixture(enemy_control_projectile_native_test enemy_control_projectile_native tests/enemy_control_projectile_native_test.cpp)
+
+add_test(NAME enemy_control_boss_gun_net_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_boss_gun_net_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_boss_gun_net_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(NAME enemy_control_merman_net_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_merman_net_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
+set_tests_properties(enemy_control_merman_net_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(NAME enemy_control_monster_net_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_monster_net_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_monster_net_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(NAME enemy_control_projectile_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_projectile_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_projectile_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+edf6_feedback_fixture(enemy_control_pvp_berserker_core_test enemy_control_pvp_berserker_core tests/enemy_control_pvp_berserker_core_test.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_walking_parts.cpp)
+
+edf6_feedback_fixture(enemy_control_walking_net_test enemy_control_walking_net tests/enemy_control_walking_net_test.cpp)
+
+edf6_feedback_fixture(enemy_control_walking_parts_test enemy_control_walking_parts tests/enemy_control_walking_parts_test.cpp)
+
+add_test(NAME enemy_control_walking_parts_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_walking_parts_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_walking_parts_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(NAME online_gate_bridge_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/online_gate_bridge_guard_test.py")
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_deiroi_entity_aim.cpp)
+
+edf6_feedback_fixture(enemy_control_deiroi_entity_aim_test enemy_control_deiroi_entity_aim tests/enemy_control_deiroi_entity_aim_test.cpp)
+
+add_test(NAME enemy_control_deiroi_entity_aim_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_deiroi_entity_aim_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_deiroi_entity_aim_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_capacity.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_unit_guide.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/pvp_controlled_ported_spawn.cpp)
+
+target_sources(EDF6VehicleCrew PRIVATE src/pvp_controlled_npc.cpp)
+
+edf6_feedback_fixture(enemy_control_capacity_test enemy_control_capacity tests/enemy_control_capacity_test.cpp)
+
+edf6_feedback_fixture(enemy_control_unit_guide_test enemy_control_unit_guide tests/enemy_control_unit_guide_test.cpp)
+
+add_test(NAME enemy_control_unit_guide_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_unit_guide_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_unit_guide_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(NAME enemy_control_walking_net_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_walking_net_native_audit.py" --dll "${EDF6_NATIVE_DLL}" --game "${EDF6_GAME_DIR}")
+set_tests_properties(enemy_control_walking_net_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(NAME enemy_control_ported_spawn_profiles COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_enemy_control_ported_spawn_profiles.py")
+
+edf6_feedback_fixture(pvp_controlled_npc_test pvp_controlled_npc tests/pvp_controlled_npc_test.cpp)
+
+edf6_feedback_fixture(pvp_controlled_ported_spawn_test pvp_controlled_ported_spawn tests/pvp_controlled_ported_spawn_test.cpp)
+
+edf6_feedback_fixture(pvp_native_live_emitters_test pvp_native_live_emitters tests/pvp_native_live_emitters_test.cpp)
+
+add_test(NAME pvp_controlled_npc_native_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/pvp_controlled_npc_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(pvp_controlled_npc_native_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+add_test(NAME pvp_native_live_emitters_audit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/pvp_native_live_emitters_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(pvp_native_live_emitters_audit PROPERTIES SKIP_RETURN_CODE 77)
+
+# Source-derived producer payloads are regenerated by the real production fixtures.
+# Every replay uses this build directory, so a clean checkout needs no tmp snapshot.
+add_executable(enemy_control_provider_trace_test EXCLUDE_FROM_ALL tests/enemy_control_provider_trace_test.cpp)
+target_include_directories(enemy_control_provider_trace_test PRIVATE src)
+target_compile_options(enemy_control_provider_trace_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
+target_link_options(enemy_control_provider_trace_test PRIVATE /OPT:REF)
+add_dependencies(offline_checks enemy_control_provider_trace_test)
+add_dependencies(enemy_control_provider_trace_test enemy_control_boss_gun_projectile_test enemy_control_monster_net_test enemy_control_merman_net_test enemy_control_walking_net_test enemy_control_deiroi_net_test)
+set(EDF6_PROVIDER_TRACES "${CMAKE_CURRENT_BINARY_DIR}/provider-traces")
+file(MAKE_DIRECTORY "${EDF6_PROVIDER_TRACES}")
+add_test(NAME enemy_control_export_boss COMMAND $<TARGET_FILE:enemy_control_boss_gun_projectile_test> --dump-trace "${EDF6_PROVIDER_TRACES}/boss.jsonl")
+add_test(NAME enemy_control_export_monster COMMAND $<TARGET_FILE:enemy_control_monster_net_test> --dump-trace "${EDF6_PROVIDER_TRACES}/monster.jsonl")
+add_test(NAME enemy_control_export_merman COMMAND $<TARGET_FILE:enemy_control_merman_net_test> --dump-trace "${EDF6_PROVIDER_TRACES}/merman.jsonl")
+add_test(NAME enemy_control_export_walking COMMAND $<TARGET_FILE:enemy_control_walking_net_test> --dump-trace "${EDF6_PROVIDER_TRACES}/walking.jsonl" --trace-assets "${CMAKE_SOURCE_DIR}/tests/data/walking-net-trace-assets.tsv")
+set(EDF6_PROVIDER_EXPORT_TESTS enemy_control_export_boss enemy_control_export_monster enemy_control_export_merman enemy_control_export_walking)
+foreach(rate 30 60 144)
+    add_test(NAME enemy_control_export_deiroi_${rate} COMMAND $<TARGET_FILE:enemy_control_deiroi_net_test> --dump-trace "${EDF6_PROVIDER_TRACES}/deiroi-${rate}.trace" ${rate} "${CMAKE_SOURCE_DIR}/tests/data/deiroi-xl-native-trace.json")
+    list(APPEND EDF6_PROVIDER_EXPORT_TESTS enemy_control_export_deiroi_${rate})
+endforeach()
+set_tests_properties(${EDF6_PROVIDER_EXPORT_TESTS} PROPERTIES FIXTURES_SETUP ec_provider_sources)
+add_test(NAME enemy_control_trace_pack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/enemy_control_trace_pack.py"
+    "${EDF6_PROVIDER_TRACES}/boss.jsonl" "${EDF6_PROVIDER_TRACES}/monster.jsonl" "${EDF6_PROVIDER_TRACES}/merman.jsonl" "${EDF6_PROVIDER_TRACES}/walking.jsonl"
+    "${EDF6_PROVIDER_TRACES}/deiroi-30.trace" "${EDF6_PROVIDER_TRACES}/deiroi-60.trace" "${EDF6_PROVIDER_TRACES}/deiroi-144.trace" -o "${EDF6_PROVIDER_TRACES}/actual.dat")
+set_tests_properties(enemy_control_trace_pack PROPERTIES FIXTURES_REQUIRED ec_provider_sources FIXTURES_SETUP ec_provider_packed)
+foreach(rtt 250 600)
+    foreach(background 0 32 64)
+        add_test(NAME enemy_control_provider_trace_rtt${rtt}_bg${background} COMMAND $<TARGET_FILE:enemy_control_provider_trace_test> --rtt-ms ${rtt} --background-kib ${background} "${EDF6_PROVIDER_TRACES}/actual.dat")
+        set_tests_properties(enemy_control_provider_trace_rtt${rtt}_bg${background} PROPERTIES FIXTURES_REQUIRED ec_provider_packed TIMEOUT 300)
+    endforeach()
+endforeach()

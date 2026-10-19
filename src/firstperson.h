@@ -21,6 +21,14 @@ bool FirstPersonHidesStockHud(const void* camera) noexcept;
 // camera); the other seats through their cockpit's eye.
 bool FirstPersonGunnerSight() noexcept;
 
+// Game thread: this exact live local seat requests a marker-backed first-person view. Higher camera owners
+// (map/TV, high view and mounted optics) resolve their own precedence; never infer this from a rendered camera ray.
+bool FirstPersonVehicleView(const void* vehicle,unsigned seat) noexcept;
+// Sazabi's controller owns camera rotation independently of its animated neck; frame carries the physical eye.
+bool SazabiFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noexcept;
+
+
+
 // fp_vehicle.cpp (game thread): the eye of `human`'s seat in the vehicle they ride (world, into `eye`): the model's
 // `vc_eye_<seat>` marker, put there with the seat's cockpit. `out`: the vehicle, the seat, its class name, whether the
 // marker was found. False: on foot, the vehicle or seat cannot be read, or the seat has no cockpit (no marker).

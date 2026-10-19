@@ -2,10 +2,11 @@
 
 Procedural exterior, not a downloaded asset or a stock vehicle renamed M163.
 Reference proportions: MCIA Saudi Arabia Country Handbook, M163 entry (4.86 x
-2.85 x 2.736 m, six-barrel 20 mm). Geometry uses the unchanged V603 bone pivots,
-so suspension spacing and collision are approximations. The six barrels are
-static: a rotating barrel animation would require a new independently driven
-bone, which is deliberately not inserted into the stock ragdoll/CAS skeleton.
+2.85 x 2.736 m, six-barrel 20 mm). The six barrels and clamps use an independently
+posed visual rotor under the native left slide. Native physical bone binds
+remain unchanged. Private CAS disables only the two radar T/R references
+(eight bytes), keeping real optics attached alive and matched in death. The
+engine copies every model bone to the draw palette.
 """
 # Proportion/configuration reference: https://info.publicintelligence.net/MCIA-SaudiArabiaHandbook.pdf
 from __future__ import annotations
@@ -22,6 +23,10 @@ DIMENSIONS = (4.86, 2.85, 2.736)
 CAMERA = {'model_eye': (-.23, 2.38, -.20), 'model_look_at': (.747215, 2.218, 5.),
           'third_person_distance': 6.5, 'third_person_height': 2.9}
 DRIVE_SCALE = 1.0
+ROTOR_BONE = 'edf6vc_m61_rotor'
+ROTOR_PARENT = 'cannon_slide_l'
+ROTOR_ORIGIN = (.747214973, 2.217999995, .37)
+VISUAL_BONES = (t.VisualBone(ROTOR_BONE, ROTOR_PARENT, ROTOR_ORIGIN),)
 # Model-space firing centres. Actual visible barrel mouths form the six-point
 # ring around this centre; both weapon slots follow the same physical slide
 # bone through elevation and recoil. The SGO/controller must use this same bone.
@@ -55,33 +60,34 @@ def parts(a: t.Assembly) -> None:
     t.box(ammo, (.54, 2.05, -.17), (.13, .15, .37))
     # The stock left hinge drives the off-centre M61 cradle and all six barrels.
     cx, cy, cz = a.origin('cannon_l')
-    cradle = a.part('m61_elevation_cradle', 'cannon_l')
+    cradle = a.part('m61_elevation_cradle', 'cannon_r')
     t.box(cradle, (cx, cy-.21, cz+.04), (.29, .12, .38))
     for x in (cx-.25, cx+.25):
         t.cylinder(cradle, (x-.025, cy, cz), (x+.025, cy, cz), .22, 16)
-    receiver = a.part('m61_receiver', 'cannon_slide_l', t.DARK_TINT)
+    receiver = a.part('m61_receiver', 'cannon_r', t.DARK_TINT)
     t.cylinder(receiver, (cx, cy, cz-.23), (cx, cy, .37), .225, 20)
     t.cylinder(receiver, (cx, cy, .22), (cx, cy, .46), .245, 20)
-    barrels = a.part('six_m61_barrels', 'cannon_slide_l', t.METAL_TINT)
+    barrels = a.part('six_m61_barrels', ROTOR_BONE, t.METAL_TINT)
     # A real six-barrel ring with six open 20 mm mouths; no solid stock guns remain.
     for k in range(6):
         th = k*math.tau/6
         x, y = cx+.122*math.cos(th), cy+.122*math.sin(th)
         t.barrel(barrels, (x, y), .37, MUZZLES['left'][0][1][2], .034, .020)
-        a.muzzle(f'barrel_{k+1}', 'cannon_slide_l', (x, y, 2.12), .020)
-    collars = a.part('m61_barrel_clamps', 'cannon_slide_l', t.DARK_TINT)
+        a.muzzle(f'barrel_{k+1}', ROTOR_BONE, (x, y, 2.12), .020)
+    collars = a.part('m61_barrel_clamps', ROTOR_BONE, t.DARK_TINT)
     for z in (.57, 1.32, 1.96):
         # Annular clamps leave every barrel visible and all six bores open.
         for k in range(6):
             th = k*math.tau/6
             x, y = cx+.122*math.cos(th), cy+.122*math.sin(th)
             t.cylinder(collars, (x, y, z-.025), (x, y, z+.025), .048, 12, cap=False)
-    sight = a.part('m163_optical_sight_and_range_radar', 'cannon_main')
+    sight = a.part('m163_optical_sight_and_range_radar', 'doppler_radar')
     t.rail(sight, (-.78, 2.18, .27), (-.78, 2.64, .27), .035)
     t.box(sight, (-.78, 2.65, .27), (.17, .086, .16))
     t.cylinder(sight, (-.78, 2.65, .43), (-.78, 2.65, .48), .10, 16)
-    t.box(sight, (.63, 2.50, -.30), (.25, .10, .20))
-    glass = a.part('optical_glass', 'cannon_main', (36, 63, 63))
+    rangefinder = a.part('m163_rangefinder', 'tracking_radar')
+    t.box(rangefinder, (.63, 2.50, -.30), (.25, .10, .20))
+    glass = a.part('optical_glass', 'doppler_radar', (36, 63, 63))
     t.box(glass, (-.78, 2.65, .485), (.105, .055, .007))
     for key in ('left', 'right'):
         bone, p = MUZZLES[key][0]
@@ -90,7 +96,7 @@ def parts(a: t.Assembly) -> None:
 
 def muzzle_local(game) -> dict:
     host, _rab = t.stock(game)
-    a = t.Assembly(host)
+    a = t.Assembly(t.add_visual_bones(host, VISUAL_BONES))
     parts(a)
     return _weapon_muzzles(a)
 
@@ -110,14 +116,15 @@ def ejection_local(game) -> dict:
 
 def build_with_info(game):
     arc, md, info = t.build_with_info(game, parts, 'M163 VADS / M61 Vulcan (procedural exterior)',
-                                    DIMENSIONS, CAMERA, DRIVE_SCALE)
+                                    DIMENSIONS, CAMERA, DRIVE_SCALE, VISUAL_BONES)
     a = t.Assembly(md)
     parts(a)
     info['muzzle_details'] = info['muzzles']
     info['muzzles'] = _weapon_muzzles(a)
     info['visible_barrels'] = 6
     info['road_wheels_per_side'] = 5
-    info['barrel_rotation'] = 'static six-barrel geometry; no extra bone or rotation hook'
+    info['barrel_rotation'] = 'independent visual rotor; actual shot activity drives native pre-worldbuild pose'
+    info['rotor_bone'] = ROTOR_BONE
     return arc, md, info
 
 
@@ -126,7 +133,7 @@ def build(game) -> bytes:
 
 
 def check(arc: bytes, host=None) -> dict:
-    result = t.check(arc, parts, host)
+    result = t.check(arc, parts, host, VISUAL_BONES)
     result['visible_barrels'] = 6
     result['road_wheels_per_side'] = 5
     return result

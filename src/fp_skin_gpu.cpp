@@ -97,6 +97,9 @@ void Submit(ID3D11DeviceContext* context,unsigned count,unsigned first,int base)
 void Begin(const Mask& mask) noexcept { selected=mask;active=true; }
 void End() noexcept { active=false; }
 bool Active() noexcept { return active; }
+MaskState SaveMask() noexcept { return MaskState{active,selected}; }
+void RestoreMask(const MaskState& before) noexcept { selected=before.selected;active=before.active; }
+
 void Clear() noexcept {
     active=false;AcquireSRWLockExclusive(&cacheLock);
     for(Entry& e:entries)e=Entry{};replaceAt=0;

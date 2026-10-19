@@ -490,7 +490,28 @@ void SupportArms() {
     Expect(Seen(view,inView,0.01f) && !Seen(view,below,0.01f) && !Seen(view,behind,0.01f),"the frustum test: ahead seen, below and behind not");
 }
 
+void CameraOwnership() {
+    const float eye[3]={10,20,30};
+    const auto base=crew::fpview::HeadingFrame(.3f,-.2f,eye);
+    auto observed=crew::fpview::HeadingFrame(.9f,.4f,eye);
+    const auto edit=crew::fpview::CameraWriteOf(base,observed);
+    observed.m[12]=200;crew::fpview::ReturnCameraWrite(&observed,edit);
+    Expect(std::memcmp(observed.m,base.m,48)==0 && observed.m[12]==200,"camera ownership returns axes independently of a newer eye");
+    auto moved=base;moved.m[13]+=5;const auto eyeEdit=crew::fpview::CameraWriteOf(base,moved);
+    const auto foreign=crew::fpview::HeadingFrame(-1.1f,.6f,eye);std::memcpy(moved.m,foreign.m,48);
+    crew::fpview::ReturnCameraWrite(&moved,eyeEdit);
+    Expect(std::memcmp(moved.m,foreign.m,48)==0 && moved.m[13]==20,"camera ownership returns eye independently of a newer direction");
+    for(float yaw:{-3.1f,-1.0f,0.0f,1.0f,3.1f})for(float pitch:{-.9f,0.0f,.9f}) {
+        const auto f=crew::fpview::HeadingFrame(yaw,pitch,eye);float to[3];
+        for(int i=0;i<3;++i)to[i]=eye[i]+f.m[8+i]*100;
+        M4 fromRay;const bool ok=crew::fpview::LookFrame(eye,to,&fromRay);
+        float error=0;for(int i=0;i<16;++i)error+=std::fabs(f.m[i]-fromRay.m[i]);
+        Expect(ok && error<1e-5f,"controller heading/pitch and its actual eye/ray form the same native camera frame");
+    }
+}
+
 int main() {
+    CameraOwnership();
     OrientationAndSteadiness();
     SupportArms();
     Expect(Near(CenteredGrip(.17f,.07f),.10f) && Near(CenteredGrip(.34f,.07f),.27f),

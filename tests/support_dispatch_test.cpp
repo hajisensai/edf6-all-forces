@@ -11,12 +11,15 @@
 namespace crew {
 unsigned char* image=nullptr;Config config{};PlayerFix player{{0,0,0},2,1};
 const Config& Cfg() noexcept {return config;}
-bool testOnline=false;ULONGLONG fixtureMs=1000;
+bool testOnline=false,testHost=true;ULONGLONG fixtureMs=1000;
 support::Environment missionEnvironment=support::Environment::normal;
 bool missionUnderground=false;
 support::Policy SupportMissionPolicy() noexcept {return {missionEnvironment,missionUnderground};}
 bool InSession() noexcept {return testOnline;}
-bool OnlineHostOnly() noexcept {return true;}
+bool OnlineHostOnly() noexcept {return testHost;}
+#ifndef SUPPORT_ROUTE_NATIVE_TEST
+bool IsOnlineAuthority(const void*) noexcept {return true;}
+#endif
 ULONGLONG GameMs() noexcept {return fixtureMs;}
 std::uint64_t GameFrame() noexcept {return fixtureMs;}
 int traceLines=0;   // "SUPPORT TRACE" lines (support_dispatch.cpp Trace)
@@ -57,7 +60,7 @@ bool allReady=true,terrain=true,nativeFail=false;
 Sea terrainSea=Sea::land;float waterSurface=0;
 Sea SeaAt(float,float,float* out) noexcept {*out=waterSurface;return terrainSea;}
 #endif
-// The submarine carrier (catalog 16, airKeys "SUB"): surfaces through SubLaunch, never through a plan.
+// Submarine carrier (catalog 16): production uses the real planned hull and pilot transaction below.
 int subLaunches=0;unsigned char subHull[16]{};
 unsigned char* SubLaunch(const float*,const float*) noexcept {++subLaunches;return subHull;}
 bool SupportSubCatalog(int id) noexcept {return id==16;}
@@ -68,6 +71,84 @@ ObjRef Make(bool vehicle=false) noexcept {
     if(vehicle){Put<void*>(o,kSeats,seats[slot]);Put<std::uint64_t>(o,kSeatCount,3);std::memset(seats[slot],0,sizeof(seats[slot]));}
     return ObjRef::Of(o);
 }
+ObjRef submarineParent{};bool subBindOk=true,subActivateOk=true,subDeleteOk=true;
+int subActivated=0,subDeleted=0,dronePrepared=0,droneActivated=0,droneDeleted=0;
+bool PlanSupportSubmarine(const float* target,const float*,float* matrix,float* afloat) noexcept {
+    float surface=0;
+    if(!allReady || SeaAt(0,0,&surface)!=Sea::water || !target || !matrix || !afloat)return false;
+    const float m[16]={1,0,0,0,0,1,0,0,0,0,1,0,target[0],-40,target[2],1};
+    std::memcpy(matrix,m,sizeof(m));*afloat=10;return true;
+}
+bool ValidateSupportSubmarine(const float*,float) noexcept {float surface=0;return allReady && SeaAt(0,0,&surface)==Sea::water;}
+unsigned char* PrepareSupportSubmarine(const float* matrix,float) noexcept {
+    if(nativeFail)return nullptr;
+    ++subLaunches;submarineParent=Make(true);auto* object=static_cast<unsigned char*>(const_cast<void*>(submarineParent.obj));
+    std::memcpy(object+kPosition,matrix+12,12);return object;
+}
+bool ActivateSupportSubmarine(const ObjRef&) noexcept {++subActivated;return subActivateOk;}
+bool DeleteSupportSubmarine(const ObjRef&) noexcept {++subDeleted;return subDeleteOk;}
+bool BindSupportSubmarineOwner(const ObjRef&,const unsigned char[32]) noexcept {return subBindOk;}
+std::uint64_t SubmarineSupportKey(const ObjRef& parent) noexcept {return parent.obj ? 0xAABBCCDDu : 0;}
+bool ResolveSupportSubmarine(std::uint64_t key,ObjRef* out) noexcept {
+    if(!out || key!=0xAABBCCDDu || !submarineParent)return false;*out=submarineParent;return true;
+}
+bool AddSupportSubmarineDrone(const ObjRef&,const ObjRef&) noexcept {return true;}
+bool SupportDroneReady() noexcept {return allReady;}
+unsigned char* PrepareSupportDrone(const float* matrix,const float*,const void*) noexcept {
+    if(nativeFail)return nullptr;++dronePrepared;const auto object=Make(true);
+    auto* raw=static_cast<unsigned char*>(const_cast<void*>(object.obj));std::memcpy(raw+kPosition,matrix+12,12);return raw;
+}
+bool ActivateSupportDrone(const ObjRef&) noexcept {++droneActivated;return true;}
+bool DeleteSupportDrone(const ObjRef&) noexcept {++droneDeleted;return true;}
+bool PvpRefreshSupportOwner(support_net::Plan* plan) noexcept {
+    if(!plan || pvpSupportMode<0)return false;plan->team=static_cast<unsigned>(pvpSupportMode);return true;
+}
+bool carrierReady=true,carrierSlotReady=true,carrierReserveOk=true;
+int carrierPrepared=0,carrierConfirmed=0,carrierCancelled=0,carrierReserved=0,carrierRecalls=0,carrierTransactionsCancelled=0;
+ObjRef carrierDriver{};bool carrierNetworkAccepted=true;
+unsigned carrierNetworkKind=99,carrierNetworkSlot=99;unsigned char carrierNetworkParent[32]{};float carrierNetworkAnchor[3]{};
+bool SupportDroneReady(SupportDroneKind) noexcept {return allReady;}
+bool CarrierSupportDroneReady(const ObjRef& parent,SupportDroneKind kind,unsigned slot) noexcept {
+    return carrierReady && parent.obj && static_cast<unsigned>(kind)<3 && slot<6;
+}
+bool CarrierSupportSlotAvailable(const ObjRef&,unsigned) noexcept {return carrierSlotReady;}
+bool ReserveCarrierSupportDrone(const ObjRef&,unsigned,std::uint64_t) noexcept {++carrierReserved;return carrierReserveOk;}
+unsigned char* PrepareCarrierSupportDrone(const float* matrix,const float* anchor,const ObjRef& parent,SupportDroneKind,unsigned,
+                                        std::uint64_t,bool) noexcept {
+    ++carrierPrepared;return PrepareSupportDrone(matrix,anchor,parent.obj);
+}
+bool ConfirmCarrierSupportDrone(const ObjRef&,unsigned,std::uint64_t) noexcept {++carrierConfirmed;return true;}
+bool CancelCarrierSupportDrone(const ObjRef&,unsigned,std::uint64_t) noexcept {++carrierCancelled;return true;}
+void CancelCarrierSupportTransaction(std::uint64_t) noexcept {++carrierTransactionsCancelled;}
+bool SupportDroneLeft(const ObjRef&) noexcept {return false;}
+int ApplyCarrierSupportRecall(const ObjRef&) noexcept {++carrierRecalls;return 1;}
+bool PvpNativeSupportDriver(const ObjRef&,ObjRef* out) noexcept {if(!out || !carrierDriver)return false;*out=carrierDriver;return true;}
+bool PvpMakeInheritedSupportPlan(const ObjRef&,support_net::Plan* plan) noexcept {
+    if(!plan || pvpSupportMode<0)return false;
+    if(!plan->requester[0])plan->requester[0]=0x55;
+    plan->team=static_cast<unsigned>(pvpSupportMode);return true;
+}
+std::uint64_t SupportSourceKey(const ObjRef& parent) noexcept {return parent.obj ? 0xAABBCCDDu : 0;}
+bool ResolveSupportSource(std::uint64_t key,ObjRef* out) noexcept {return ResolveSupportSubmarine(key,out);}
+bool ReadNativeObjectId(const unsigned char* object,unsigned char* out) noexcept {
+    if(!object || !out)return false;std::memset(out,0,32);out[0]=0x55;
+    if(object==submarineParent.obj)out[0]=0x66;out[12]=5;return true;
+}
+bool ResolveMarkIdentities(const unsigned char* marker,const unsigned char* target,MarkIdentities* out) noexcept {
+    if(!out)return false;*out={};
+    if(target && target[0]==0x66)out->target=submarineParent;
+    if(marker && marker[0]==0x55){out->player=carrierDriver;out->puid=const_cast<char*>("client");}
+    return true;
+}
+bool SupportCommandRequesterMatches(void* puid,const char* authenticated) noexcept {
+    return puid && authenticated && !std::strcmp(static_cast<const char*>(puid),authenticated);
+}
+bool SubmitCarrierDroneNetworkRequest(const unsigned char* parent,unsigned kind,unsigned slot,const float* anchor) noexcept {
+    if(parent)std::memcpy(carrierNetworkParent,parent,32);if(anchor)std::memcpy(carrierNetworkAnchor,anchor,12);
+    carrierNetworkKind=kind;carrierNetworkSlot=slot;return carrierNetworkAccepted;
+}
+SupportPlan preparedSubPlan{};std::uint64_t preparedSubToken=0;
+std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept {preparedSubPlan=plan;return ++preparedSubToken;}
 unsigned char* PlayerHuman() noexcept {return objects[31];}
 int SupportAirCallCount() noexcept {return 21;}
 const wchar_t* SupportAirCallName(int) noexcept {return L"Heli";}
@@ -142,6 +223,7 @@ void RescueHeliDeployed(unsigned char* v,const float* target,bool flown,const Ob
     ++rescueDeployed;rescueHeli=v;std::memcpy(rescueTarget,target,12);rescueFlown=flown;rescueRequester=requester;
 }
 bool SupportTransactionRequester(std::uint64_t,ObjRef* out) noexcept {*out=hostRequester;return static_cast<bool>(hostRequester);}
+bool SupportAuthenticatedRequester(std::uint32_t,ObjRef* out) noexcept {*out=hostRequester;return static_cast<bool>(hostRequester);}
 // A submarine carrier: its deck nearest a point (crew.h SubDeck), when one is out; the takeoff planner's answer.
 bool carrierOut=false;float carrierDeck[3]={300,193,-40};
 bool SubDeck(const float* from,float* deck) noexcept {
@@ -198,8 +280,8 @@ bool DeleteSupportSoldier(const ObjRef& ref) noexcept {
     }
     return true;
 }
-int registered=0;
-bool RegisterSupportObject(const void*,const unsigned char*) noexcept {++registered;if(!seatNow)++registeredBeforeSeat;return true;}
+int registered=0;bool registerSupportOk=true;
+bool RegisterSupportObject(const void*,const unsigned char*) noexcept {++registered;if(!seatNow)++registeredBeforeSeat;return registerSupportOk;}
 bool SupportVehicleReady(SupportVehicleKind,SupportCrewMode) noexcept {return true;}
 std::wstring lastHullVariant;
 unsigned char* SpawnSupportVehicle(SupportVehicleKind,SupportCrewMode,const float*,const float*,const void*,const wchar_t* variant) noexcept {
@@ -400,7 +482,8 @@ int main() {
     SupportCallStatus(note,128);
     check(std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportAirNeedsUpdate))!=nullptr,"older peer: the HUD says why");
     peersAirborne=true;
-    // An older host's runway plan (kAircraft + catalog) is applied as that host planned it: hull, crew walking aboard.
+    // Legacy local runway sequencing is an offline-only compatibility path.
+    testOnline=false;
     {SupportPlan legacy;check(Plan(0,target,0,&legacy)==support_net::PlanResult::ready,"plan for the legacy fixture");
      legacy.units[0].resourceId=kSupportAircraftResource+legacy.catalogId;
      check(Validate(legacy),"an older host's runway plan still validates");
@@ -424,6 +507,7 @@ int main() {
            "ownership attachment failure rolls all constructed objects back before any crew boarding or flight");
      pvpAttachOk=true;}
     // Rollback must respect a real player's independent boarding action, on either machine.
+    testOnline=true;
     for(bool remotePlayer:{false,true}) {
         ResetSupportDispatch();made=deleted=held=0;transactionActive=false;
         check(Spawn(20,networkPlan,false),"prepare rollback occupancy fixture");
@@ -484,39 +568,42 @@ int main() {
     waterSurface=0.2f;check(Foot(0,0,0,footY),"shallow wading matches the navigation allowance");
     terrainSea=Sea::unknown;check(!Foot(0,0,0,footY),"unknown water state is not treated as a safe entry");
     terrainSea=Sea::land;
-    // 2026-10-12 (test site #12: 「潜水母舰在水里也没法召唤」): since #88 the carrier went to the planner, which refused it
-    // (no aircraft). It surfaces where it is called over water, on no plan; over land it is refused; from the map online it
-    // is the call weapon's (replayed on every machine), so the map refuses it there.
+    // Submarine calls now use the same plan, real crew, owner, registration and all-peer activation transaction.
     {
-        const bool wasOnline=testOnline;const int requestsBefore=netRequests;
+        const bool wasOnline=testOnline;
         ResetSupportDispatch();testOnline=false;fixtureMs+=40000;subLaunches=0;made=0;
-        check(!SupportCallAt(16,target,note,128) && subLaunches==0 && std::wcsstr(note,L"没有水域")!=nullptr,
-              "submarine carrier over land: refused, nothing made");
+        SupportPlan subPlan{};
+        check(PlanSubmarine(16,target,nullptr,0,&subPlan)==support_net::PlanResult::refused && subLaunches==0,
+              "submarine planning over land refuses before construction");
         terrainSea=Sea::water;
-        check(SupportCallAt(16,target,note,128) && subLaunches==1 && !offlinePending && made==0 && std::wcsstr(note,L"上浮")!=nullptr,
-              "submarine carrier over water: it surfaces at once, no plan, no planner objects");
-        check(SupportSubCallAt(target,nullptr,false,note,128) && subLaunches==2,"a radio replay on another machine surfaces its own copy");
-        pvpSupportMode=1;
-        check(!SupportSubCallAt(target,nullptr,true,note,128) && subLaunches==2 &&
-              std::wcsstr(note,hudtext::Tr(hudtext::Tx::pvpSubUnsupported)),
-              "active PVP refuses the unowned special carrier before creation with a localized in-game reason");
-        pvpSupportMode=-1;
-        check(!SupportSubCallAt(target,nullptr,false,note,128) && subLaunches==2,
-              "PVP queued/prepare/apply/restore window also refuses a remote special-copy replay");
-        pvpSupportMode=0;
-
-        testOnline=true;
-        check(!SupportCallAt(16,target,note,128) && subLaunches==2 && netRequests==requestsBefore,
-              "online the map refuses it (the call weapon brings it), no host request");
+        check(PlanSubmarine(16,target,nullptr,0,&subPlan)==support_net::PlanResult::ready && subPlan.count==2 &&
+              subPlan.units[0].resourceId==kSupportSubmarineResource && subPlan.units[1].role==1 && subLaunches==0,
+              "host plans the exact underwater hull and its real Ranger without constructing either");
+        check(Validate(subPlan) && SpawnDeployment(90001,subPlan,false,false) && subLaunches==1 && made==2,
+              "the exact offline submarine plan creates one hull and its real crew");
+        check(Assign(deployments[0]) && subActivated==1 && deployments[0].delivered,
+              "submarine assignment seats the crew and activates without aircraft or ground routing");
+        Destroy(90001);check(subDeleted==1,"submarine rollback uses its real native deletion adapter");
+        testOnline=true;const int before=netRequests;
+        check(SupportCallAt(16,target,note,128) && netRequests==before+1 && subLaunches==1,
+              "online map submarine sends exactly one authenticated host request and creates no local copy");
+        check(!SupportSubCallAt(target,nullptr,false,note,128) && netRequests==before+1,
+              "remote native radio replay never submits a duplicate submarine request");
         testOnline=wasOnline;terrainSea=Sea::land;
     }
-    // 2026-10-09: the host of a world with no other participant deploys locally (no EDF6Coop transport needed, no peer
-    // to replicate to); any other online machine still requests through the host.
+    // One-participant online worlds must share Session native IDs and tokens with later submarine/child requests.
     ResetSupportDispatch();testOnline=true;soloHost=true;made=0;netRequests=0;registered=0;resourceCount=0;fixtureMs+=40000;
-    check(SupportCallAt(0,target,note,128) && netRequests==0 && offlinePending,"solo-world host plans locally, no transport request");
+    check(SupportCallAt(0,target,note,128) && netRequests==1 && !offlinePending,"solo-world normal support uses the same registered Session as submarine children");
     SupportDispatchTick();
-    check(made==2 && registered==0 && lastLocal && lastId==nullptr && !deployments[0].networked,
-          "solo-world host creates unregistered local support: no ID, no native registration, no all-peer barrier");
+    check(!made && !registered && !deployments[0].used && nextOffline==1,
+          "solo-world queued request creates no unregistered row or colliding local token");
+    check(SupportCallAt(16,target,note,128) && netRequests==2 && !offlinePending && !made,
+          "normal and submarine requests cannot create two independent token domains in a solo online world");
+    SupportPlan noBypass{};check(Plan(0,target,0,&noBypass)==support_net::PlanResult::ready &&
+          !SpawnDeployment(1,noBypass,false,false) && !made,"online creation rejects an unregistered local bypass even when called directly");
+    const int rescueBefore=netRequests;
+    check(SupportRescueAt(target,note,128) && netRequests==rescueBefore+1 && !made && !offlinePending,
+          "solo-world rescue also stays in the single registered transaction domain");
     soloHost=false;ResetSupportDispatch();netRequests=0;
     check(SupportCallAt(0,target,note,128) && netRequests==1,"a host with other participants still uses the reliable protocol");
     testOnline=false;
@@ -1192,5 +1279,6 @@ int main() {
     SupportActorFrame(nullptr);
     check(protocolTicks==ticksBefore+2,"missing actor cannot create a service frame");
     std::printf("support_dispatch_test: %d checks passed\n",checks);
+    return 0;
 }
 #endif

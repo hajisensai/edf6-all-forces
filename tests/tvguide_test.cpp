@@ -37,6 +37,7 @@ void Prepare(int age=20) noexcept {
 }
 void Start(int age=20) noexcept {
     Prepare(age);Check(TvSteer(missile),"offline live player's Tempest acquired");
+    Check(TvHoldsHumanKeys(owner) && !TvHoldsHumanKeys(other) && !TvHoldsHumanKeys(nullptr),"TV hold belongs only to the exact local soldier");
 }
 bool ViewShown() noexcept {
     const void* h=nullptr;float eye[3],look[3];
@@ -78,7 +79,9 @@ void Lifetime() noexcept {
     TvFrame(owner,false,in);wall+=200;
     Check(TvFrame(owner,false,in) && !tv.active,"a held boost button drains after missile timeout");
     Check(!TvFrame(other,false,in),"second local player does not inherit timeout hold");
+    Check(TvHoldsHumanKeys(owner) && !TvHoldsHumanKeys(other),"timeout drain retains only the original soldier input ownership");
     in.fire=false;Check(!TvFrame(owner,false,in) && !TvHoldsKeys(),"timeout hold released when fire is released");
+    Check(!TvHoldsHumanKeys(owner) && !TvHoldsHumanKeys(other),"released drain frees both soldier records");
 }
 void EarlyReturn() noexcept {
     for(const int age:{0,20,59}) {

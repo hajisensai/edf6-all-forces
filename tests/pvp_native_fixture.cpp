@@ -3,6 +3,9 @@
 #include "../src/pvp_native.cpp"
 #include <cstdio>
 #include <cstdlib>
+namespace crew {
+bool EnemyControlRadarObserverTeam(const void*,int*) noexcept {return false;}
+}
 
 namespace {
 unsigned lockCalls=0,deletedBlocks=0,deadObjectReads=0;
@@ -31,6 +34,7 @@ struct FakeObject {
     void* points[16]{};
     void* weapons[1]{};
     unsigned char weapon[0x220]{};
+    unsigned char weaponControl[0x20]{};
     unsigned char seat[0x348]{};
     FakeObject(bool soldier,int team,bool registered,bool seatedVehicle=false) {
         static void* controlTable[2]={nullptr,reinterpret_cast<void*>(&DestroyControl)};
@@ -44,6 +48,8 @@ struct FakeObject {
         if(soldier) {
             weapons[0]=weapon;edf::Put<void*>(bytes,0x1950,weapons);edf::Put<std::uint64_t>(bytes,0x1960,1);
             edf::Put<void*>(weapon,0x120,bytes);edf::Put<int>(weapon,0x214,team);
+            edf::Put<void*>(weapon,edf::kSelf,weapon);edf::Put<void*>(weapon,edf::kSelfCtrl,weaponControl);
+            edf::Put<void*>(weaponControl,0,controlTable);edf::Put<LONG>(weaponControl,8,1);edf::Put<LONG>(weaponControl,12,1);
         }
     }
 };
@@ -60,10 +66,35 @@ unsigned SeatCount(const unsigned char* object) noexcept {
 bool RedirectCall(unsigned char*,void*,void*,bool& changed) noexcept { changed=false;return false; }
 bool IsAnyPlayer(const unsigned char* object) noexcept { return At<const void*>(object,0)==reinterpret_cast<void*>(1); }
 }
+// This older fixture isolates the cache lifecycle at the typed adapter boundary.
+// pvp_native_live_emitters_test runs the same caller with the real PE-audited adapter.
+namespace crew::controlled_pvp {bool OwnsMember(const ObjRef&) noexcept{return false;}}
+namespace crew {
+bool PvpNativeWeaponEmitters(const ObjRef& owner,const void* weapon,controlled_pvp::Emitter* out,unsigned cap,unsigned* n) noexcept {
+    if(n)*n=0;
+    if(!out || !n || !cap || !Readable(weapon,0x218) || At<const void*>(weapon,0x120)!=owner.obj)return false;
+    const ObjRef storage{weapon,At<const void*>(weapon,kSelfCtrl)};
+    if(!storage.ctrl || !Readable(storage.ctrl,16) || At<LONG>(storage.ctrl,8)<=0)return false;
+    out[0]={controlled_pvp::EmitterKind::ownerTeamCache,owner,static_cast<const unsigned char*>(weapon)+0x214,
+        static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(storage.ctrl)),storage};*n=1;return true;
+}
+controlled_pvp::Life PvpNativeReadWeaponEmitter(const controlled_pvp::Emitter& e,int* team) noexcept {
+    if(!team || !Readable(e.storage.ctrl,16))return controlled_pvp::Life::invalid;
+    if(At<LONG>(e.storage.ctrl,8)<=0)return controlled_pvp::Life::gone;
+    if(!Readable(e.storage.obj,kSelfCtrl+8) || !Readable(e.object,4))return controlled_pvp::Life::invalid;
+    if(At<const void*>(e.storage.obj,kSelfCtrl)!=e.storage.ctrl)return controlled_pvp::Life::gone;
+    *team=At<int>(e.object,0);return controlled_pvp::Life::live;
+}
+bool PvpNativeWriteWeaponEmitter(const controlled_pvp::Emitter& e,int team) noexcept {
+    int current=-1;if(PvpNativeReadWeaponEmitter(e,&current)!=controlled_pvp::Life::live || !Readable(e.object,4,true))return false;
+    Put<int>(const_cast<void*>(e.object),0,team);return true;
+}
+}
 namespace crew {
 unsigned char* image=nullptr;
 void Log(const char*,...) noexcept {}
 bool IsSoldierClass(const void* object) noexcept { return At<const void*>(object,0)==reinterpret_cast<void*>(1); }
+int VehicleClassOf(const void* object) noexcept { return At<const void*>(object,0)==reinterpret_cast<void*>(2) ? 0 : -1; }
 bool ReadNativeMissionLocation(unsigned* location) noexcept { if(location)*location=4;return true; }
 namespace edf41c {
 void* AddLockPoint(void* object) noexcept {
@@ -181,14 +212,15 @@ int main() {
     CHECK(edf::At<LONG>(supportNpc.control,12)==1);
     for(const auto& owner:crew::supportOwners)CHECK(!owner.ref);
     const unsigned failureChecksStart=checks;
-    // Fail Weapons only after a previous object and the current object's first
-    // weapon were changed. Keep the fault active during the first restore: the
-    // current object's team/flags/first weapon can restore, but its Saved state
-    // must remain incomplete until every weapon can be verified/restored.
+    // Start from a complete applied batch, then fail recollection of its second
+    // weapon. Independent cache restores can progress, but the body's Saved state
+    // stays pending until every captured weapon can be verified/restored.
     {
         FakeObject first(true,0,true),partial(true,2,false),tail(true,0,true);
-        unsigned char secondWeapon[0x220]{};
+        unsigned char secondWeapon[0x220]{},secondControl[0x20]{};
         edf::Put<void*>(secondWeapon,0x120,partial.bytes);edf::Put<int>(secondWeapon,0x214,2);
+        edf::Put<void*>(secondWeapon,edf::kSelfCtrl,secondControl);
+        edf::Put<LONG>(secondControl,8,1);edf::Put<LONG>(secondControl,12,1);
         void* partialWeapons[]={partial.weapon,secondWeapon};
         edf::Put<void*>(partial.bytes,0x1950,partialWeapons);edf::Put<std::uint64_t>(partial.bytes,0x1960,2);
         crew::Collection batch{};batch.objectsCount=3;
@@ -198,32 +230,33 @@ int main() {
         const unsigned firstFlags=edf::At<unsigned>(first.bytes,0x380);
         const unsigned partialFlags=edf::At<unsigned>(partial.bytes,0x380);
         const unsigned tailFlags=edf::At<unsigned>(tail.bytes,0x380);
+        CHECK(crew::ApplyCollected(batch));
         unreadableWeapon=secondWeapon;
         CHECK(!crew::ApplyCollected(batch));
         CHECK(edf::At<int>(first.bytes,edf::kTeam)==1);
         CHECK(edf::At<int>(first.weapon,0x214)==1);
         CHECK(edf::At<int>(partial.bytes,edf::kTeam)==1);
         CHECK(edf::At<int>(partial.weapon,0x214)==1);
-        CHECK(edf::At<int>(secondWeapon,0x214)==2);
+        CHECK(edf::At<int>(secondWeapon,0x214)==1);
         CHECK(edf::At<unsigned>(partial.bytes,0x380)==(partialFlags|0x40u|0x2000u));
-        CHECK(edf::At<int>(tail.bytes,edf::kTeam)==0 && edf::At<int>(tail.weapon,0x214)==0);
-        CHECK(edf::At<unsigned>(tail.bytes,0x380)==tailFlags);
+        CHECK(edf::At<int>(tail.bytes,edf::kTeam)==1 && edf::At<int>(tail.weapon,0x214)==1);
+        CHECK(edf::At<unsigned>(tail.bytes,0x380)==(tailFlags|0x2000u));
         CHECK(edf::At<LONG>(first.control,12)==2 && edf::At<LONG>(partial.control,12)==2 && edf::At<LONG>(tail.control,12)==2);
         CHECK(crew::Find(batch.objects[0].ref)->changed);
         CHECK(crew::Find(batch.objects[1].ref)->changed);
-        CHECK(!crew::Find(batch.objects[2].ref)->changed);
+        CHECK(crew::Find(batch.objects[2].ref)->changed);
 
         CHECK(!crew::PvpNativeApply(disabled));
         CHECK(edf::At<int>(first.bytes,edf::kTeam)==0 && edf::At<int>(first.weapon,0x214)==0);
         CHECK(edf::At<unsigned>(first.bytes,0x380)==firstFlags);
         CHECK(crew::Find(batch.objects[0].ref) && !crew::Find(batch.objects[0].ref)->changed);
-        CHECK(edf::At<int>(partial.bytes,edf::kTeam)==2 && edf::At<int>(partial.weapon,0x214)==2);
-        CHECK(edf::At<unsigned>(partial.bytes,0x380)==partialFlags);
+        CHECK(edf::At<int>(partial.bytes,edf::kTeam)==1 && edf::At<int>(partial.weapon,0x214)==2);
+        CHECK(edf::At<unsigned>(partial.bytes,0x380)==(partialFlags|0x40u|0x2000u));
         const auto* partialSaved=crew::Find(batch.objects[1].ref);
         CHECK(partialSaved && partialSaved->changed);
         CHECK(partialSaved && partialSaved->originalTeam==2 && !partialSaved->originalRegistered && !partialSaved->originalNotCounted);
         CHECK(edf::At<LONG>(partial.control,12)==2);
-        CHECK(!crew::Find(batch.objects[2].ref) && edf::At<LONG>(tail.control,12)==1);
+        CHECK(crew::Find(batch.objects[2].ref) && !crew::Find(batch.objects[2].ref)->changed && edf::At<LONG>(tail.control,12)==2);
         CHECK(!crew::activeState.enabled && !crew::radarActive.load());
 
         unreadableWeapon=nullptr;
@@ -232,7 +265,7 @@ int main() {
         CHECK(edf::At<int>(partial.bytes,edf::kTeam)==2 && edf::At<int>(partial.weapon,0x214)==2 && edf::At<int>(secondWeapon,0x214)==2);
         CHECK(edf::At<int>(tail.bytes,edf::kTeam)==0 && edf::At<int>(tail.weapon,0x214)==0);
         CHECK(edf::At<unsigned>(first.bytes,0x380)==firstFlags && edf::At<unsigned>(partial.bytes,0x380)==partialFlags && edf::At<unsigned>(tail.bytes,0x380)==tailFlags);
-        CHECK(!crew::Find(batch.objects[1].ref) && edf::At<LONG>(partial.control,12)==1);
+        CHECK(crew::Find(batch.objects[1].ref) && !crew::Find(batch.objects[1].ref)->changed && edf::At<LONG>(partial.control,12)==2);
         crew::ResetPvpNative();
         CHECK(edf::At<LONG>(first.control,12)==1 && edf::At<LONG>(partial.control,12)==1 && edf::At<LONG>(tail.control,12)==1);
         CHECK(!crew::Find(batch.objects[0].ref) && !crew::Find(batch.objects[1].ref) && !crew::Find(batch.objects[2].ref));
@@ -259,7 +292,7 @@ int main() {
         CHECK(edf::At<int>(first.bytes,edf::kTeam)==2 && edf::At<int>(first.weapon,0x214)==2);
         CHECK(edf::At<unsigned>(first.bytes,0x380)==firstFlags);
         CHECK(!crew::Find(batch.objects[0].ref) && edf::At<LONG>(first.control,12)==1);
-        CHECK(edf::At<int>(middle.bytes,edf::kTeam)==1 && edf::At<int>(middle.weapon,0x214)==1);
+        CHECK(edf::At<int>(middle.bytes,edf::kTeam)==1 && edf::At<int>(middle.weapon,0x214)==0);
         CHECK(edf::At<unsigned>(middle.bytes,0x380)==(middleFlags|0x2000u));
         const auto* middleSaved=crew::Find(batch.objects[1].ref);
         CHECK(middleSaved && middleSaved->changed && middleSaved->originalTeam==0);

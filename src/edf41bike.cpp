@@ -3,7 +3,9 @@
 // calls 2D6BE0 with the SAME local matrix twice, then builds worlds and sends
 // animation-driven proxies to physics. EDF6 VehicleWeaponAim::Pose 5FACD0
 // implements that same-bone operation too. Keep the real source's eight
-// proxies; no guessed angular velocity, fabricated hinge or substitute bike.
+// proxies; the data adapter explicitly selects gun simulation row 1 -> native
+// mode 2 after CarBase resets all proxies to dynamic mode 4. No guessed angular
+// velocity, fabricated hinge or substitute bike.
 #include "crew.h"
 #include "edf41bike.h"
 #include "body506.h"

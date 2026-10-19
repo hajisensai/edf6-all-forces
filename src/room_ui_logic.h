@@ -136,6 +136,26 @@ inline bool AnyDown(const roommenu::Keys& k) noexcept {
     return k.toggle || k.up || k.down || k.left || k.right || k.confirm || k.cancel || k.add || k.remove || k.reset;
 }
 
+// A native menu button queues one open after the game's Click dispatch returns. The native weak-screen callback
+// supplies the screen identity; covered / closing / replaced / disabled screens cannot leave a delayed request behind.
+struct NativeEntry {
+    bool attempted=false,ready=false,enabled=false,requested=false;
+};
+inline void NativeEntryInput(NativeEntry& e,bool canUse) noexcept {
+    e.enabled=e.ready && canUse;
+    if(!e.enabled)e.requested=false;
+}
+inline bool NativeEntryClick(NativeEntry& e,bool currentScreen) noexcept {
+    if(!currentScreen || !e.enabled || e.requested)return false;
+    e.requested=true;
+    return true;
+}
+inline bool TakeNativeEntry(NativeEntry& e,bool currentScreen) noexcept {
+    const bool take=currentScreen && e.enabled && e.requested;
+    e.requested=false;
+    return take;
+}
+
 // --- The input gate ---
 // The screen's own input (ctx+8) is taken away while the menu is open, and, once it closes, until every menu key is up:
 // the key that closed it (toggle, cancel = the room's own cancel, confirm on save) is still down then, and the room would

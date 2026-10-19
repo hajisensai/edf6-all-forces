@@ -27,6 +27,7 @@
 //    of record [human+0xD40], before its /24); a pad is read through XInput (the hold clears the game's own pad input).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "enemy_control.h"
 #include "pvp.h"
 #include "firstperson.h"
 #include "transport.h"
@@ -129,6 +130,7 @@ Pose pose{};
 MapReadout readout{};
 ULONGLONG readoutAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
+ObjRef inputOwner{}; // published identity only, under lock; retained through closing-key drain
 std::atomic<bool> holds{false};
 mapcam::CameraSession cameraSession;
 std::atomic<int> wheel{0};   // WM_MOUSEWHEEL's delta since the game thread last took it
@@ -261,6 +263,7 @@ const float* PosOf(const void* o) noexcept { return reinterpret_cast<const float
 
 // What `human` stands for on the map: the vehicle they ride (alive), else themselves.
 const unsigned char* Body(const unsigned char* human) noexcept {
+    if(const auto controlled=EnemyControlBodyForMap(human))return controlled;
     const auto ctrl=At<const unsigned char*>(human,kHumanVehicleCtrl);
     if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,edf::kCtrlUses)==0)return human;
     const auto v=At<const unsigned char*>(human,kHumanVehicle);
@@ -499,6 +502,7 @@ void Publish(const Game& g,const unsigned char* human,const float* eye,const flo
     AcquireSRWLockExclusive(&lock);
     pose=Pose{g.open,human,{eye[0],eye[1],eye[2]},{look[0],look[1],look[2]},GetTickCount64()};
     MapReadout& r=readout;
+    r.ownerHumanKey=reinterpret_cast<std::uintptr_t>(human);
     r.pad=g.pad;r.follow=g.follow;
     std::memcpy(r.focus,g.view.focus,12);r.yaw=g.view.yaw;r.pitch=g.view.pitch;r.height=g.view.height;
     std::memcpy(r.me,PosOf(body),12);
@@ -534,13 +538,15 @@ void Open(const unsigned char* human) noexcept {
     const float* p=PosOf(body);
     game.view.focus[0]=p[0];game.view.focus[2]=p[2];game.view.focus[1]=GroundAt(p[0],p[2],p[1]);
     float eye[3],dir[3];
-    if(CameraRay(eye,dir) && dir[0]*dir[0]+dir[2]*dir[2]>1e-4f)game.view.yaw=std::atan2(dir[0],dir[2]);
+    if(CameraRayOf(human,eye,dir) && dir[0]*dir[0]+dir[2]*dir[2]>1e-4f)game.view.yaw=std::atan2(dir[0],dir[2]);
     else {
         const float* m=reinterpret_cast<const float*>(body+kMatrix);
         game.view.yaw=std::atan2(m[8],m[10]);
     }
     game.view.pitch=mapcam::kStartPitch;game.view.height=mapcam::kStartHeight;
     game.open=true;game.follow=true;game.gatherAt=0;game.loggedMouse=false;
+    const ObjRef owner=ObjRef::Of(human);
+    AcquireSRWLockExclusive(&lock);inputOwner=owner;ReleaseSRWLockExclusive(&lock);
     holds.store(true);
     Subclass();
     wheel.store(0);
@@ -615,7 +621,7 @@ Keys ReadToggles(bool front,const XINPUT_STATE* pad) noexcept {
         const WORD b=pad->Gamepad.wButtons;
         k.padMap=c.mapButton>0 && (b&static_cast<WORD>(c.mapButton))==static_cast<WORD>(c.mapButton);
         // The test range's 「摆放」 panel open (mapcmd.cpp): its A places, its B shuts it; the map's own wait.
-        const bool place=MapPlaceHoldsPad() || (b&XINPUT_GAMEPAD_RIGHT_THUMB)!=0;
+        const bool place=MapPlaceHoldsPad() || (b&(XINPUT_GAMEPAD_RIGHT_THUMB|XINPUT_GAMEPAD_LEFT_THUMB))!=0;
         k.padClose=(b&XINPUT_GAMEPAD_B)!=0 && !place;
         k.padCentre=(b&XINPUT_GAMEPAD_A)!=0 && !place;
     }
@@ -735,7 +741,9 @@ bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
         DebugSpawnFrame(human);   // the debug spawn tool (off by default: returns before reading a key)
         Edf41Mother401DevTick();   // development only (Edf41Mother401Dev bit 32768); once a frame (the tick keeps its own frame check)
         InfantryScopeFrame(human);   // a scoped weapon open: the real optic's cue (infantryscope.cpp)
-        return TvFrame(human,open && game.open,TvRead(human)) || open;
+        const bool tv=TvFrame(human,open && game.open,TvRead(human));
+        const bool enemy=EnemyControlSuppressHuman(human);
+        return tv || open || enemy;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -935,7 +943,7 @@ void ResetMap() noexcept {
     cellsUsed=0;
     AcquireSRWLockExclusive(&lock);
     cameraSession.Reset();   // the camera hook drops its old matrix on its own thread, before restoring it
-    pose=Pose{};readoutAt=0;
+    pose=Pose{};inputOwner=ObjRef{};readoutAt=0;
     ReleaseSRWLockExclusive(&lock);
 }
 
@@ -948,6 +956,14 @@ bool PlayerMap(MapReadout* out) noexcept {
 }
 
 bool MapHoldsKeys() noexcept { return holds.load(std::memory_order_relaxed) || TvHoldsKeys(); }
+bool MapHoldsHumanKeys(const unsigned char* human) noexcept {
+    if(!human)return false;
+    AcquireSRWLockShared(&lock);
+    const ObjRef owner=inputOwner;const bool held=holds.load(std::memory_order_relaxed);
+    ReleaseSRWLockShared(&lock);
+    __try {return (held && owner.Is(human)) || TvHoldsHumanKeys(human);}
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 bool MapOwnsView() noexcept { return cameraSession.Owns(); }
 bool MapHidesStockHud(const void* camera) noexcept {
     AcquireSRWLockShared(&hudLock);

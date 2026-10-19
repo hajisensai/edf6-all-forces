@@ -15828,14 +15828,8 @@
                "app:/weapon/edf41_v_408motorbike_gun.sgo",
                {
                 "items": [
-                 "AimRecoil",
-                 {
-                  "items": [
-                   0.002618,
-                   0.006283
-                  ],
-                  "names": {}
-                 }
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                },
@@ -18765,14 +18759,8 @@
                "app:/weapon/edf41_v_408motorbike_gun.sgo",
                {
                 "items": [
-                 "AimRecoil",
-                 {
-                  "items": [
-                   0.002618,
-                   0.006283
-                  ],
-                  "names": {}
-                 }
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                },
@@ -25377,14 +25365,8 @@
                "app:/weapon/edf41_v_408motorbike_gun.sgo",
                {
                 "items": [
-                 "AimRecoil",
-                 {
-                  "items": [
-                   0.002618,
-                   0.006283
-                  ],
-                  "names": {}
-                 }
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                },
@@ -31112,14 +31094,8 @@
                "app:/weapon/edf41_v_408motorbike_gun.sgo",
                {
                 "items": [
-                 "AimRecoil",
-                 {
-                  "items": [
-                   0.002618,
-                   0.006283
-                  ],
-                  "names": {}
-                 }
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                },
@@ -35410,14 +35386,8 @@
                "app:/weapon/edf41_v_408motorbike_gun.sgo",
                {
                 "items": [
-                 "AimRecoil",
-                 {
-                  "items": [
-                   0.002618,
-                   0.006283
-                  ],
-                  "names": {}
-                 }
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                },

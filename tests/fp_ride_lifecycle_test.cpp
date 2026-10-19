@@ -3,6 +3,7 @@
 #include "../src/crew.h"
 namespace {
 bool keyDown=false,focused=true,mapOwnsKeys=false,onFoot=true,sazabi=false;
+const unsigned char* mapKeyHuman=nullptr;
 SHORT TestGetAsyncKeyState(int) { return keyDown ? static_cast<SHORT>(0x8000) : 0; }
 HWND TestGetForegroundWindow() { return nullptr; }
 DWORD TestGetWindowThreadProcessId(HWND,LPDWORD pid) { *pid=focused ? 42 : 43;return 0; }
@@ -28,6 +29,12 @@ bool Readable(const void* p,std::size_t n,bool) noexcept {
 bool ChainVtableSlot(void**,void*,void**) noexcept { return false; }
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept { return false; }
 bool IsPlayer(const unsigned char* h) noexcept { return h!=nullptr; }
+unsigned SeatCount(const unsigned char* vehicle) noexcept {
+    const auto count=At<std::uint64_t>(vehicle,kSeatCount);
+    const auto seats=At<const unsigned char*>(vehicle,kSeats);
+    return count>0 && count<=kMaxSeats && Readable(seats,count*kSeatStride,false) ? static_cast<unsigned>(count) : 0;
+}
+
 bool RedirectCall(unsigned char*,void*,void*,bool&) noexcept { return false; }
 }
 namespace crew::thermal {
@@ -43,6 +50,13 @@ bool depthPatchReady=true;
 bool ViewDepthReady() noexcept { return depthPatchReady; }
 void ViewWriteNear(void* camera,float value) noexcept { Put<float>(camera,kCamNear,value); }
 void VehicleLookSetReady(bool) noexcept {}
+bool enemyCamera=false;const unsigned char* enemyCameraHuman=nullptr;
+bool EnemyControlCamera(const unsigned char* human,const float*,const float*,float* eye,float* look) noexcept {
+    if(!enemyCamera || human!=enemyCameraHuman)return false;
+    const float targetEye[3]={70,80,90},targetLook[3]={70,80,190};
+    std::memcpy(eye,targetEye,12);std::memcpy(look,targetLook,12);return true;
+}
+bool SazabiFirstPersonFrame(const void*,unsigned,float*) noexcept { return false; }
 bool observeCamera=false;
 bool VehicleLookCamera(const unsigned char*,float* matrix) noexcept {
     if(!observeCamera)return false;matrix[8]+=.1f;return true;
@@ -56,6 +70,7 @@ float SightZoomNow(const void*) noexcept { return 1.0f; }
 bool SightZoomMounted(const void*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return onFoot; }
 bool MapHoldsKeys() noexcept { return mapOwnsKeys; }
+bool MapHoldsHumanKeys(const unsigned char* human) noexcept { return mapOwnsKeys && (!mapKeyHuman || mapKeyHuman==human); }
 bool haveEye=true;
 unsigned char rideVehicle[0x1200]{};
 fpview::M4 rideFrame=fpview::Identity();
@@ -69,6 +84,18 @@ void* retiredThis=nullptr;unsigned retiredFlags=0;
 void* __fastcall RecordFlashDtor(void* object,unsigned flags) { retiredThis=object;retiredFlags=flags;return object; }
 bool drawArmMask=false;
 void __fastcall RecordBodyDraw(void*,void*,int,void*) { drawArmMask=fpskin::Active(); }
+void* nestedOuter=nullptr;void* nestedInner=nullptr;bool nestedDrawn=false;
+bool nestedOuterMask=false,nestedForeignMask=false,nestedRestoredMask=false;
+void __fastcall RecordNestedSkinDraw(void* model,void* context,int pass,void* view) {
+    if(model==nestedOuter) {
+        nestedOuterMask=fpskin::Active();DrawHook(nestedInner,context,pass,view);nestedRestoredMask=fpskin::Active();
+    } else nestedForeignMask=fpskin::Active();
+}
+
+void __fastcall RecordNestedDraw(void* model,void* context,int pass,void* view) {
+    if(model==nestedOuter && !nestedDrawn){nestedDrawn=true;DrawHook(nestedInner,context,pass,view);}
+}
+
 float laserStart[4]{},laserEnd[4]{};
 void __fastcall RecordLaser(void* object,void*,int,void*) {
     const auto p=static_cast<const unsigned char*>(object);
@@ -80,6 +107,8 @@ int main() {
     using namespace crew;
     edf::SetInputSource(&TestGetAsyncKeyState,&TestGetForegroundWindow);   // the plugin's key source (edf/input_source.h)
     unsigned char human[0x2100]{},cam[0x400]{},weapon[0x1400]{};
+    int humanOwnerCtrl[4]={0,0,1,0},weaponOwnerCtrl[4]={0,0,1,0};
+    Put<void*>(human,kSelfCtrl,humanOwnerCtrl);Put<void*>(weapon,kSelfCtrl,weaponOwnerCtrl);
     void* vt[2]{};
     unsigned char* list[]={weapon};
     auto model=weapon+kWeaponModel;
@@ -105,9 +134,11 @@ int main() {
     Put<std::uint64_t>(human,kWeaponCount,1);
     const auto reset=[&](){
         Current()=State{};Current().on=true;Current().human=human;Current().cam=cam;
-        Current().weapons[0]=model;Current().weaponCount=1;Current().inHand[0]=model;Current().inHandCount=1;
+        Current().bodyCtrl=At<const void*>(human,kSelfCtrl);
+        Current().weapons[0]=model;Current().weaponCtrls[0]=At<const void*>(weapon,kSelfCtrl);Current().weaponCount=1;
+        Current().inHand[0]=model;Current().inHandCtrls[0]=At<const void*>(weapon,kSelfCtrl);Current().inHandCount=1;
         for(auto& u:Current().unbatched)u=Unbatched{};
-        Current().unbatched[0]=Unbatched{model,&batch};Put<void*>(model,kBatch,nullptr);
+        Current().unbatched[0]=Unbatched{model,&batch,weaponOwnerCtrl};Put<void*>(model,kBatch,nullptr);
         Put<std::uint64_t>(human,kWeaponCount,1);haveEye=true;
     };
     reset();
@@ -119,6 +150,7 @@ int main() {
     Put<const wchar_t*>(recordsA,0,L"body");Put<const wchar_t*>(recordsA+kBoneStride,0,L"te_r");Put<const wchar_t*>(recordsA+2*kBoneStride,0,L"head");
     Put<const wchar_t*>(recordsB,0,L"te_r");Put<const wchar_t*>(recordsB+kBoneStride,0,L"body");Put<const wchar_t*>(recordsB+2*kBoneStride,0,L"head");
     Current().body=model;Current().shown[0]=Current().shown[1]=true;
+    Put<void*>(static_cast<unsigned char*>(model)-kBodyModel,kSelfCtrl,humanOwnerCtrl); // native-layout body alias fixture
     Publish();DrawSnap maskSnap{};TakeSnapshot(&maskSnap);drawSnap=&maskSnap;   // the draw path reads its own copy
     const auto baseMask=BodyMask(&batch),lodMask=BodyMask(&replacement);
     drawSnap=nullptr;
@@ -162,6 +194,44 @@ int main() {
     Current().inHandCount=0;Flashes();
     check(Current().flashes[0].model==nullptr,"retiring a held weapon never follows its freed or replaced pose");
     Current().inHand[0]=model;Current().inHandCount=1;Put<void*>(model,kBaseLod+kLodInst,nullptr);
+    // Both calls go through the production DrawHook/Pose/native-next/Unpose path. An inner weapon's original
+    // pose must never replace the outer weapon's saved original (the old file-global backup did exactly that).
+    unsigned char nestedWeapon[0x1400]{},nestedInstA[0x80]{},nestedInstB[0x80]{},nestedBonesA[kBoneStride]{},nestedBonesB[kBoneStride]{};
+    M4 nestedPoseA=fpview::Translate(1,2,3),nestedPoseB=fpview::Translate(7,8,9);
+    const M4 originalPoseA=nestedPoseA,originalPoseB=nestedPoseB;
+    auto nestedModel=nestedWeapon+kWeaponModel;int nestedCtrl[4]={0,0,1,0};Put<void*>(nestedWeapon,kSelfCtrl,nestedCtrl);
+    Put<void*>(model,0,vt);Put<void*>(nestedModel,0,vt);
+    Put<void*>(model,kBaseLod+kLodInst,nestedInstA);Put<void*>(nestedModel,kBaseLod+kLodInst,nestedInstB);
+    Put<void*>(nestedInstA,kInstBones,nestedBonesA);Put<void*>(nestedInstB,kInstBones,nestedBonesB);
+    Put<int>(nestedInstA,kInstCount,1);Put<int>(nestedInstB,kInstCount,1);
+    Put<void*>(nestedInstA,kInstPose,nestedPoseA.m);Put<void*>(nestedInstB,kInstPose,nestedPoseB.m);
+    Put<const wchar_t*>(nestedBonesA,0,L"body");Put<const wchar_t*>(nestedBonesB,0,L"body");
+    Current().inHand[0]=model;Current().inHand[1]=nestedModel;Current().inHandCtrls[0]=weaponOwnerCtrl;Current().inHandCtrls[1]=nestedCtrl;Current().handOf[0]=0;Current().handOf[1]=1;Current().inHandCount=2;
+    Current().viewOk[0]=Current().viewOk[1]=true;Current().view[0]=fpview::Translate(10,0,0);Current().view[1]=fpview::Translate(20,0,0);
+    hooked[0]=Hooked{vt,&RecordNestedDraw};hookedCount=1;nestedOuter=model;nestedInner=nestedModel;nestedDrawn=false;
+    Publish();DrawHook(model,nullptr,1,nullptr);
+    check(nestedDrawn && std::memcmp(nestedPoseA.m,originalPoseA.m,64)==0 && std::memcmp(nestedPoseB.m,originalPoseB.m,64)==0,
+          "nested production model draws restore their own original poses without borrowing another model's backup");
+    unsigned char skippedInst[0x80]{},skippedLod[kLodStride]{};
+    M4 skippedPose=fpview::Translate(91,82,73);const M4 skippedOriginal=skippedPose;
+    Put<int>(skippedInst,kInstCount,1);Put<void*>(skippedInst,kInstPose,skippedPose.m); // missing bones: no backup was captured
+    Put<void*>(skippedLod,kLodInst,skippedInst);Put<void*>(model,kLods,skippedLod);Put<std::uint64_t>(model,kLodCount,1);
+    nestedDrawn=false;DrawHook(model,nullptr,1,nullptr);
+    check(std::memcmp(skippedPose.m,skippedOriginal.m,64)==0 && std::memcmp(nestedPoseA.m,originalPoseA.m,64)==0,
+          "a LOD skipped before capture is never restored from uninitialised backup while valid LODs still return their own poses");
+    // Inject a partial transform fault after this LOD's full backup, before any future LOD is visited.
+    Put<void*>(skippedInst,kInstBones,reinterpret_cast<void*>(1));nestedDrawn=false;DrawHook(model,nullptr,1,nullptr);
+    check(std::memcmp(skippedPose.m,skippedOriginal.m,64)==0 && std::memcmp(nestedPoseA.m,originalPoseA.m,64)==0,
+          "partial transform failure restores only captured native buffers");
+    Put<void*>(model,kLods,nullptr);Put<std::uint64_t>(model,kLodCount,0);
+    // The same production entry also isolates its skin gate for a nested foreign/native model.
+    unsigned char foreignModel[0x300]{};Put<void*>(foreignModel,0,vt);Put<void*>(human+kBodyModel,0,vt);
+    Current().body=human+kBodyModel;Current().bodyCtrl=humanOwnerCtrl;
+    hooked[0]=Hooked{vt,&RecordNestedSkinDraw};nestedOuter=human+kBodyModel;nestedInner=foreignModel;
+    nestedOuterMask=nestedForeignMask=nestedRestoredMask=false;Publish();DrawHook(nestedOuter,nullptr,1,nullptr);
+    check(nestedOuterMask && !nestedForeignMask && nestedRestoredMask && !fpskin::Active(),
+          "a nested foreign/NPC model sees no local body skin mask and restores the enclosing body's exact gate");
+    hookedCount=0;Put<void*>(model,kBaseLod+kLodInst,nullptr);reset();Current().viewOk[0]=true;
     unsigned char laser[0x190]{};Put<void*>(laser,8,weapon);
     const float from[4]={1,2,3,1},hit[4]={20,30,40,1};
     std::memcpy(laser+0x130,from,16);std::memcpy(laser+0x140,hit,16);
@@ -173,6 +243,11 @@ int main() {
     check(std::memcmp(laser,originalLaser,sizeof(laser))==0,"all laser attachment state is restored after native drawing");
     Put<void*>(laser,8,human);LaserDrawHook(laser+0x10,nullptr,2,nullptr);
     check(std::memcmp(laserStart,from,16)==0,"another owner's laser is not relocated even when nearby");
+    reset();int pooledControl[4]={0,0,1,0};Put<void*>(weapon,kSelfCtrl,pooledControl);Gather(human);
+    Current().inHandCtrls[0]=pooledControl;Rebatch(false);
+    check(!Current().unbatched[0].model && At<void*>(model,kBatch)==nullptr,
+          "an old batch record is discarded before the in-hand shortcut when the weapon address belongs to a new owner");
+    Put<void*>(weapon,kSelfCtrl,weaponOwnerCtrl);
     reset();
     Current().shotEvent[0]=State::ShotEvent{weapon,2,.5f};Current().motion.recoilZ.at=-.07f;Current().have=true;Current().reloadLeft=30;
     check(Ride(cam,human),"a fitted vehicle accepts the ride");
@@ -253,7 +328,7 @@ int main() {
     config.fpHideStockHud=true;
     check(!FirstPersonHidesStockHud(human),"another camera's HUD is never hidden");
     camOk=drawOk=true;
-    const auto resetKey=[&](){toggled=false;keyWas=false;keyCancelled=false;keyDown=false;focused=true;mapOwnsKeys=false;onFoot=true;sazabi=false;};
+    const auto resetKey=[&](){toggled=false;keyPress=keyConsumed=0;keyPhysicalDown=false;keyClaimHuman=nullptr;keyClaimControl=nullptr;Current().key={};keyDown=false;focused=true;mapOwnsKeys=false;mapKeyHuman=nullptr;onFoot=true;sazabi=false;};
     resetKey();keyDown=true;Toggle(human);keyDown=false;Toggle(human);
     check(toggled,"an uninterrupted physical press and release toggles first person");
     resetKey();keyDown=true;Toggle(human);focused=false;Toggle(human);
@@ -284,12 +359,25 @@ int main() {
     CamStepHook(cam,nullptr);CamStepHook(cam,nullptr);
     check(std::fabs(At<float>(cam,kCamMatrix+32)-.1f)<1e-6f,
           "a native camera branch that leaves its matrix untouched cannot accumulate observation rotations");
+    // The outer layer/physics changes only translation between steps. Rotation is still ours and must be
+    // retracted independently; whole-matrix memcmp used to accumulate another .1 of left turn each iteration.
+    bool stableRotation=true;
+    for(int i=0;i<40;++i) {
+        Put<float>(cam,kCamEyeRow,100.0f+static_cast<float>(i));CamStepHook(cam,nullptr);
+        stableRotation=stableRotation && std::fabs(At<float>(cam,kCamMatrix+32)-.1f)<1e-6f &&
+            At<float>(cam,kCamEyeRow)==100.0f+static_cast<float>(i);
+    }
+    check(stableRotation,"an independent eye-position write cannot accumulate an observation rotation over native no-write steps");
     observeCamera=false;CamStepHook(cam,nullptr);
-    check(std::memcmp(cam+kCamMatrix,nativeCamera.m,64)==0,"observation restores the last native camera when released");
+    const M4 returned=MatrixAt(cam+kCamMatrix);
+    check(std::memcmp(returned.m,nativeCamera.m,48)==0 && returned.m[12]==139,
+          "observation returns only its rotation and preserves the outer owner's newer eye position");
     // Interleave the actual camera hook as the game does for local split-screen players.
     for(auto& state:states)state=State{};
     selected=&states[0];observeCamera=false;onFoot=true;camOk=drawOk=true;toggled=true;config.firstPerson=true;
     unsigned char p1[0x2100]{},p2[0x2100]{},c1[0x400]{},c2[0x400]{},view1[0xA0]{},view2[0xA0]{};
+    int p1OwnerCtrl[4]={0,0,1,0},p2OwnerCtrl[4]={0,0,1,0};
+    Put<void*>(p1,kSelfCtrl,p1OwnerCtrl);Put<void*>(p2,kSelfCtrl,p2OwnerCtrl);
     image=nativeImage;
     Put<const void*>(p1,0,image+kSoldierVts[0]);Put<const void*>(p2,0,image+kSoldierVts[0]);
     Put<void*>(c1,kCamTarget,p1);Put<void*>(c2,kCamTarget,p2);
@@ -301,6 +389,103 @@ int main() {
     auto a=CameraState(c1),b=CameraState(c2);
     check(a && b && a!=b && a->on && b->on && a->human==p1 && b->human==p2,
           "interleaved P1/P2 native camera steps keep independent active viewmodels");
+    // An independent camera owner replaces direction after our eye-only on-foot edit. Native must see that
+    // direction at the next step; blindly restoring the previous 64-byte stock matrix erased it.
+    M4 nativeSeen{}; // recorded through a stable address, not through a capturing native callback
+    static M4* nativeSeenOut=nullptr;nativeSeenOut=&nativeSeen;
+    nextCamStep=[](void* camera,void*){*nativeSeenOut=MatrixAt(static_cast<unsigned char*>(camera)+kCamMatrix);};
+    const M4 newDirection=fpview::HeadingFrame(.8f,-.2f,MatrixAt(c1+kCamMatrix).m+12);
+    std::memcpy(c1+kCamMatrix,newDirection.m,48);toggled=false;++renderFrame;CamStepHook(c1,nullptr);
+    check(std::memcmp(nativeSeen.m,newDirection.m,48)==0 && !a->on,
+          "leaving first person preserves another owner's newer camera direction for the actual native step");
+    toggled=true;++renderFrame;CamStepHook(c1,nullptr);
+    nextCamStep=[](void*,void*){};
+    // Only this local seat may request the marker-backed mode, before the final camera is rendered.
+    unsigned char requestSeat[kSeatStride]{};int requestVehicleCtrl[4]={0,0,1,0},requestRiderCtrl[4]={0,0,1,0};
+    Put<void*>(rideVehicle,kSelfCtrl,requestVehicleCtrl);Put<void*>(p1,kSelfCtrl,requestRiderCtrl);
+    Put<void*>(requestSeat,edf::kSeatRiderCtrl,requestRiderCtrl);
+    Put<void*>(rideVehicle,kSeats,requestSeat);Put<std::uint64_t>(rideVehicle,kSeatCount,1);
+    Put<void*>(requestSeat,kSeatRider,p1);Put<void*>(p1,kHumanVehicle,rideVehicle);onFoot=false;haveEye=true;
+    check(FirstPersonVehicleView(rideVehicle,0),"the actual live local rider can request its marker-backed first-person mode");
+    check(!FirstPersonVehicleView(rideVehicle,1),"a different or absent seat cannot borrow that first-person request");
+    requestRiderCtrl[2]=0;check(!FirstPersonVehicleView(rideVehicle,0),"an expired occupant control cannot claim first-person camera ownership");requestRiderCtrl[2]=1;
+    Put<void*>(p1,kSelfCtrl,requestVehicleCtrl);check(!FirstPersonVehicleView(rideVehicle,0),"a reused human address with another control cannot borrow the old seat request");Put<void*>(p1,kSelfCtrl,requestRiderCtrl);
+    haveEye=false;check(!FirstPersonVehicleView(rideVehicle,0),"a seat without a physical eye cannot disable its native camera controller");haveEye=true;
+    toggled=false;check(!FirstPersonVehicleView(rideVehicle,0),"turning first person off immediately removes its vehicle ownership request");toggled=true;
+    onFoot=true;Put<void*>(p1,kHumanVehicle,nullptr);
+    // Enemy control uses the same real camera step, with no human viewmodel, and never leaks P1's camera to P2.
+    enemyCamera=true;enemyCameraHuman=p1;keyDown=true;{StateScope scope(a);Current().key={};Toggle(p1);}++renderFrame;CamStepHook(c1,nullptr);
+    check(!a->on && At<float>(c1,kCamEyeRow)==70 && At<float>(c1,kCamEyeRow+4)==80 && At<float>(c1,kCamEyeRow+8)==90,
+          "the local enemy-control camera takes priority over the human first-person eye and model");
+    ++renderFrame;CamStepHook(c2,nullptr);
+    check(b->on && At<float>(c2,kCamEyeRow)!=70,"another local camera retains its own first-person source during P1 enemy control");
+    enemyCamera=false;enemyCameraHuman=nullptr;keyDown=false;++renderFrame;CamStepHook(c1,nullptr);
+    check(a->on && toggled && At<float>(c1,kCamEyeRow)!=70,
+          "enemy-control exit restores native camera input and resumes the requested first-person mode without a false key release");
+    // Exercise actual interleaved camera entry points, not just Toggle: a controlled
+    // viewport may cancel only its own identity while the shared preference flips once.
+    const auto cameraFrame=[&](bool reverse) {
+        ++renderFrame;
+        if(reverse){CamStepHook(c2,nullptr);CamStepHook(c1,nullptr);}
+        else {CamStepHook(c1,nullptr);CamStepHook(c2,nullptr);}
+    };
+    const auto freshCameraKeys=[&]() {
+        keyDown=false;focused=true;mapOwnsKeys=false;mapKeyHuman=nullptr;
+        keyPress=keyConsumed=0;keyPhysicalDown=false;keyClaimHuman=nullptr;keyClaimControl=nullptr;
+        a->key={};b->key={};toggled=false;
+    };
+    for(bool reverse:{false,true}) {
+        freshCameraKeys();enemyCamera=true;enemyCameraHuman=p1;cameraFrame(reverse);
+        keyDown=true;cameraFrame(reverse);check(!toggled,"P2 FP key waits for release while P1 controls an enemy");
+        keyDown=false;cameraFrame(reverse);
+        check(toggled && !a->on && b->on,"P2 completes its own FP gesture during P1 control in either camera order");
+    }
+    freshCameraKeys();enemyCamera=false;enemyCameraHuman=nullptr;cameraFrame(false);
+    keyDown=true;cameraFrame(false); // P1 really owned this press before control took over.
+    enemyCamera=true;enemyCameraHuman=p1;cameraFrame(false);
+    keyDown=false;cameraFrame(true);
+    check(!toggled,"a P1 gesture interrupted by enemy control cannot transfer its release to P2");
+    keyDown=true;cameraFrame(true);keyDown=false;cameraFrame(false);
+    check(toggled && b->on,"P2 can start a fresh gesture after P1's interrupted press has drained");
+
+    for(bool reverse:{false,true}) {
+        freshCameraKeys();enemyCamera=true;enemyCameraHuman=p1;
+        mapOwnsKeys=true;mapKeyHuman=p1;cameraFrame(reverse);
+        keyDown=true;cameraFrame(reverse);keyDown=false;cameraFrame(reverse);
+        check(toggled && b->on,"P1 map open or close-drain ownership does not cancel P2 FP input");
+    }
+    freshCameraKeys();enemyCamera=true;enemyCameraHuman=p1;cameraFrame(false);
+    keyDown=true;cameraFrame(false);
+    mapOwnsKeys=true;mapKeyHuman=p2;cameraFrame(true);cameraFrame(false); // map open, then its closing-key drain
+    mapOwnsKeys=false;cameraFrame(true);keyDown=false;cameraFrame(false);
+    check(!toggled,"P2's own map and close-drain discard its interrupted gesture through release");
+    keyDown=true;cameraFrame(true);keyDown=false;cameraFrame(false);
+    check(toggled,"a fresh P2 gesture works once its own map drain ends");
+
+    freshCameraKeys();enemyCamera=true;enemyCameraHuman=p1;cameraFrame(false);
+    keyDown=true;cameraFrame(true);
+    int nextP2Control[4]={0,0,1,0};Put<void*>(p2,kSelfCtrl,nextP2Control);
+    keyDown=false;cameraFrame(false);
+    check(!toggled,"a reused human address with another control cannot inherit the old FP release");
+    keyDown=true;cameraFrame(true);keyDown=false;cameraFrame(false);
+    check(toggled,"the replacement human identity can start its own fresh FP gesture");
+    Put<void*>(p2,kSelfCtrl,p2OwnerCtrl);cameraFrame(false);
+
+    freshCameraKeys();enemyCamera=true;enemyCameraHuman=p1;cameraFrame(false);
+    keyDown=true;cameraFrame(true);ResetFirstPerson();cameraFrame(false);
+    a=CameraState(c1);b=CameraState(c2);
+    keyDown=false;cameraFrame(true);
+    check(a && b && !toggled,"mission reset consumes the held old-source gesture before new local cameras bind");
+    keyDown=true;cameraFrame(true);keyDown=false;cameraFrame(false);
+    check(toggled && !a->on && b->on,"fresh P2 input resumes after the mission boundary while P1 remains controlled");
+
+    freshCameraKeys();enemyCamera=false;enemyCameraHuman=nullptr;cameraFrame(true);
+    keyDown=true;cameraFrame(true);keyDown=false;++renderFrame;CamStepHook(c2,nullptr);
+    check(toggled,"ordinary split cameras still share one first-person switch per complete gesture");
+    ++renderFrame;CamStepHook(c1,nullptr);
+    check(toggled,"a delayed second camera release cannot toggle the shared preference twice");
+    cameraFrame(false);
+
     a->savedNear=.1f;a->nearSet=true;a->writtenNear=.03f;Put<float>(c1,kCamNear,.03f);
     depthPatchReady=false;++renderFrame;CamStepHook(c1,nullptr);
     check(std::fabs(At<float>(c1,kCamNear)-.1f)<1e-6f && !a->nearSet,
@@ -348,6 +533,11 @@ int main() {
     {StateScope scope(a);int hand=0;DrawSnap snapA{};TakeSnapshot(&snapA);SnapScope taken(&snapA);
         check(PartOf(p1+kBodyModel,&hand)==Part::body && PartOf(p2+kBodyModel,&hand)==Part::none,
               "P2 remains a native world body when drawn in P1's viewport");
+        const auto oldControl=At<const void*>(p1,kSelfCtrl);Put<void*>(p1,kSelfCtrl,p2OwnerCtrl);
+        check(PartOf(p1+kBodyModel,&hand)==Part::none,
+              "a delayed draw snapshot rejects an NPC/new actor reusing the local body model address with another owner");
+        Put<const void*>(p1,kSelfCtrl,oldControl);p1[0x18]|=4;
+        check(PartOf(p1+kBodyModel,&hand)==Part::none,"a logically retired native actor cannot be posed or actively resubmitted from an old snapshot");p1[0x18]&=static_cast<unsigned char>(~4);
         Drew1(p1+kBodyModel);
     }
     {StateScope scope(b);check(!Drew1Now(p1+kBodyModel),"opaque-pass completion records belong to the viewport");}
@@ -367,8 +557,9 @@ int main() {
     hookedCount=0;
     // An outer camera owner changes only P1's final view. Its underlying FP eye remains the transition target,
     // but no old submitted matrix may force arms/guns into the map (or borrow P2's model).
-    a->weapons[0]=model;a->weaponCount=1;a->inHand[0]=model;a->inHandCount=1;
-    a->unbatched[0]=Unbatched{model,&batch};Put<void*>(model,kBatch,nullptr);
+    a->weapons[0]=model;a->weaponCtrls[0]=weaponOwnerCtrl;a->weaponCount=1;
+    a->inHand[0]=model;a->inHandCtrls[0]=weaponOwnerCtrl;a->inHandCount=1;
+    a->unbatched[0]=Unbatched{model,&batch,weaponOwnerCtrl};Put<void*>(model,kBatch,nullptr);
     a->stepNearSet=true;a->stepNear=.8f;a->writtenNear=.03f;Put<float>(c1,kCamNear,.03f);
     FirstPersonCameraOverride(c1,true);
     check(std::fabs(At<float>(c1,kCamNear)-.8f)<1e-6f,"the map retains its own near clip on the first takeover frame");

@@ -44,6 +44,7 @@
 #include <atomic>
 #include <cstdarg>
 #include "map_pvp_input.h"
+#include "map_enemy_ui.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -65,7 +66,7 @@ struct Entry { CommandUnit u; Owner owner; };
 struct Keys { bool tab,shift,ctrl,guard,follow,release,left,right,padNext,padGuard,padFollow,padRelease,
              engage,focus,board,dismount,dismiss,recruit,attackMove,mark,formation,split,merge,sweep,health,digit[9],supportPrev,supportNext,supportCall,
              // The test range's 「摆放」 panel (range_place.h): , . / Enter Backspace; the pad's D-pad, A, B.
-             placePrev,placeNext,placeCategory,placeEnter,placeClose,padUp,padDown,padLeft,padRight,padA,padB,padPvp; };
+             placePrev,placeNext,placeCategory,placeEnter,placeClose,padUp,padDown,padLeft,padRight,padA,padB,padPvp,padEnemy; };
 
 // --- The game thread's own ---
 struct Game {
@@ -98,8 +99,8 @@ struct Game {
     bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
     ObjRef eatHover;            // ...that enemy's original identity, its lock point
     float eatAt[3];
-    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,stats,place,pvp };
-    struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; PvpStatus pvp{}; };
+    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,stats,place,pvp,enemy };
+    struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; PvpStatus pvp{}; enemy_control::Snapshot enemy{}; };
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
     ObjRef requester{},focus{};
@@ -116,9 +117,14 @@ struct Game {
     rangeplace::Press placePress{};
     bool placeOn=false;
     pvpmenu::Pad pvpPad{};
+    ObjRef enemyCandidate{};
+    enemyui::State enemyMenu{};
+    MapEnemyControlReadout enemy{};
+    bool enemyPadFire=false;enemy_control::Snapshot enemyPadFireSnapshot{};
 };
 Game game{};
 std::atomic<bool> pvpHoldsPad{false};
+std::atomic<bool> enemyHoldsPad{false};
 std::atomic<int> pvpPadSelection{-1};
 std::atomic<bool> placeHoldsPad{false};   // MapPlaceHoldsPad
 std::atomic<bool> boxingNow{false};
@@ -134,6 +140,7 @@ struct View {
     int composes=0;mapbtn::Rect compose[mapbtn::kComposeItems]{};int composeCode[mapbtn::kComposeItems]{};
     bool pvpVisible=false;
     int pvps=0;mapbtn::Rect pvp[kMapPvpItems]{};int pvpCode[kMapPvpItems]{};PvpStatus pvpStatus{};
+    bool enemyVisible=false;int enemies=0;mapbtn::Rect enemy[kMapEnemyItems]{};int enemyCode[kMapEnemyItems]{};enemy_control::Snapshot enemyStatus{};
     int places=0;mapbtn::Rect place[kMapPlaceItems]{};int placeCode[kMapPlaceItems]{};   // the 「摆放」 panel
     ObjRef squadIdentity[kUiItems]{};
     bool folds=false;mapbtn::Rect fold{};   // the squad panel's summary row
@@ -145,6 +152,7 @@ SRWLOCK viewLock=SRWLOCK_INIT;
 
 // --- Published for the draw (under `lock`) ---
 MapCommandReadout readout{};
+MapEnemyControlReadout enemyReadout{};
 ULONGLONG readoutAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
 
@@ -265,6 +273,7 @@ Keys ReadKeys(const MapCmdInput& in,bool placeKeys) noexcept {
         k.padLeft=(b&XINPUT_GAMEPAD_DPAD_LEFT)!=0;k.padRight=(b&XINPUT_GAMEPAD_DPAD_RIGHT)!=0;
         k.padA=(b&XINPUT_GAMEPAD_A)!=0;k.padB=(b&XINPUT_GAMEPAD_B)!=0;
         k.padPvp=(b&XINPUT_GAMEPAD_RIGHT_THUMB)!=0;
+        k.padEnemy=(b&XINPUT_GAMEPAD_LEFT_THUMB)!=0;
     }
     return k;
 }
@@ -419,6 +428,8 @@ Game::UiHit UiAt(const View& v,float x,float y) noexcept {
     if(i>=0){hit.kind=Game::UiKind::payload;hit.token=v.payloadToken;hit.seat=v.payloadSeat;hit.entry=v.payloadEntry[i];return hit;}
     i=mapbtn::Hit(v.compose,v.composes,x,y);
     if(i>=0){hit.kind=Game::UiKind::compose;hit.entry=v.composeCode[i];return hit;}
+    i=mapbtn::Hit(v.enemy,v.enemies,x,y);
+    if(i>=0){hit.kind=Game::UiKind::enemy;hit.entry=v.enemyCode[i];hit.enemy=v.enemyStatus;return hit;}
     i=mapbtn::Hit(v.pvp,v.pvps,x,y);
     if(i>=0){hit.kind=Game::UiKind::pvp;hit.entry=v.pvpCode[i];hit.pvp=v.pvpStatus;return hit;}
     i=mapbtn::Hit(v.place,v.places,x,y);
@@ -428,9 +439,14 @@ Game::UiHit UiAt(const View& v,float x,float y) noexcept {
     if(mapbtn::Hit(v.panel,v.panels,x,y)>=0)hit.kind=Game::UiKind::panel;
     return hit;
 }
+bool SameEnemy(const enemy_control::Snapshot& a,const enemy_control::Snapshot& b) noexcept {
+    return a.revision==b.revision && a.lease==b.lease && a.request==b.request && a.ownerHumanKey==b.ownerHumanKey &&
+        a.profileHash==b.profileHash && a.phase==b.phase && a.selectedAbility==b.selectedAbility &&
+        std::memcmp(a.owner,b.owner,sizeof(a.owner))==0 && std::memcmp(a.target,b.target,sizeof(a.target))==0;
+}
 bool SameUi(const Game::UiHit& a,const Game::UiHit& b) noexcept {
     return a.kind==b.kind && a.id==b.id && a.identity.obj==b.identity.obj && a.identity.ctrl==b.identity.ctrl &&
-        a.token==b.token && a.seat==b.seat && a.entry==b.entry && pvpmenu::Same(a.pvp,b.pvp);
+        a.token==b.token && a.seat==b.seat && a.entry==b.entry && pvpmenu::Same(a.pvp,b.pvp) && SameEnemy(a.enemy,b.enemy);
 }
 // One thing armed at a time: a point order or a support call (`order` false: the support `support`, -1 nothing).
 void Arm(Game& g,bool order,Order o,int support) noexcept {
@@ -460,6 +476,23 @@ void PickFormation(Game& g,int entry) noexcept {
         npc::formation::Name(npc::formation::FromInt(shape)),done);
 }
 void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
+    if(hit.kind==Game::UiKind::enemy) {
+        const auto& snapshot=hit.enemy;
+        bool accepted=true;
+        if(snapshot.ownerHumanKey!=reinterpret_cast<std::uintptr_t>(g.requester.obj))accepted=false;
+        else if(hit.entry==enemyui::kBegin)accepted=EnemyControlRequest(snapshot);
+        else if(hit.entry==enemyui::kExit)accepted=EnemyControlExit(snapshot);
+        else if(hit.entry==enemyui::kPrev || hit.entry==enemyui::kNext) {
+            const enemyui::Model model{{},true,snapshot.phase==enemy_control::Phase::active,static_cast<int>(snapshot.abilityCount)};
+            enemyui::Page(g.enemyMenu,model,hit.entry==enemyui::kPrev ? -1 : 1);
+        } else if(hit.entry>=0) {
+            enemy_control::Ability ability{};
+            accepted=EnemyControlAbilities(snapshot,static_cast<unsigned>(hit.entry),&ability,1)==1 &&
+                EnemyControlSelectAbility(snapshot,ability.id);
+        }
+        if(!accepted)Note(g,L"%ls",hudtext::Tr(hudtext::Tx::enemyControlStale));
+        return;
+    }
     if(hit.kind==Game::UiKind::stats){DamageStatsClick(hit.entry);return;}
     if(hit.kind==Game::UiKind::pvp) {
         const auto& snapshot=hit.pvp;
@@ -609,6 +642,44 @@ void Hover(Game& g,const MapCmdInput& in,const View* v) noexcept {
     if(i<0)return;
     npcmark::Assign(g.hover,npcmark::Capture(e.m[i].id));
     std::memcpy(g.hoverAt,e.at[i],12);
+}
+
+// Inspect the actual map owner's hostile registry independently of the optional NPC mark feature.
+void EnemyControlCard(Game& g,const MapCmdInput& in,const View* v,bool inspect) noexcept {
+    using Phase=enemy_control::Phase;
+    enemy_control::Snapshot snapshot{};
+    const bool controlling=EnemyControlReadSnapshot(g.requester,&snapshot) &&
+        (snapshot.phase==Phase::active || snapshot.phase==Phase::pending || snapshot.phase==Phase::restoring);
+    if(!controlling) {
+        const bool onPanel=v && !in.usingPad && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none;
+        if(inspect && v && !onPanel && !g.enemyMenu.focused) {
+            __try {
+                if(Readable(g.requester.obj,kTeam+sizeof(std::int32_t)) && g.requester.Is(g.requester.obj)) {
+                    EnemyMarks& marks=enemyMarks;marks.v=v;marks.pin=PinOf(in);marks.n=0;
+                    VisitEnemiesOf(At<std::int32_t>(g.requester.obj,kTeam),&SeeEnemyMark,&marks);
+                    const float x=in.usingPad ? v->w*0.5f : g.pointer.x,y=in.usingPad ? v->h*0.5f : g.pointer.y;
+                    const int pick=mapcmd::Nearest(marks.m,marks.n,x,y,kClickRadius*v->h/1080.0f);
+                    if(pick>=0)npcmark::Assign(g.enemyCandidate,npcmark::Capture(marks.m[pick].id));
+                }
+            } __except(EXCEPTION_EXECUTE_HANDLER){}
+        }
+        EnemyControlDescribe(g.requester,g.enemyCandidate,&snapshot);
+    }
+    g.enemy.visible=Cfg().enemyControl;
+    g.enemy.snapshot=snapshot;
+    const int total=static_cast<int>((std::min)(snapshot.abilityCount,static_cast<std::uint32_t>(0x7FFFFFFF)));
+    if(g.enemyMenu.first<0 || g.enemyMenu.first>=total)g.enemyMenu.first=0;
+    g.enemy.first=g.enemyMenu.first;
+    g.enemy.count=static_cast<int>(EnemyControlAbilities(snapshot,static_cast<unsigned>(g.enemy.first),g.enemy.ability,enemyui::kPageRows));
+    g.enemy.focused=g.enemyMenu.focused;g.enemy.padRow=g.enemyMenu.focused ? g.enemyMenu.row : -1;
+}
+enemyui::Model EnemyModel(const enemy_control::Snapshot& s,bool visible) noexcept {
+    // Menu identity is the same immutable lease/revision checked again by the core.
+    std::uint32_t target=2166136261u;
+    for(unsigned char byte:s.target)target=(target^byte)*16777619u;
+    return {{s.revision,static_cast<std::uint64_t>(s.ownerHumanKey),s.lease,target,s.profileHash,s.request},
+        visible,s.phase==enemy_control::Phase::active,static_cast<int>((std::min)(s.abilityCount,std::uint32_t{0x7FFFFFFF})),
+        s.phase==enemy_control::Phase::pending || s.phase==enemy_control::Phase::restoring};
 }
 
 // The units that take an order now (`ids`: their identities), the selection kept to those of them selected before.
@@ -861,6 +932,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.placePick=g.place.category>=0 && g.place.category<debugspawn::kCategoryCount ? g.place.pick[g.place.category] : 0;
     r.placeArmed=g.place.armed;
     if(g.placeOn)std::memcpy(r.placeState,placeState,sizeof(placeState));
+    enemyReadout=g.enemy;
     readoutAt=GetTickCount64();
     ReleaseSRWLockExclusive(&lock);
 }
@@ -887,6 +959,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     if(now-g.frameAt>kFreshMs) {
         g.was=k;g.boxing=g.pressing=g.uiLeft=g.uiRight=g.rpressing=false;g.uiPress={};pointerCaptured.store(false);Arm(g,false,Order::none,-1);
         g.pvpPad={};pvpHoldsPad.store(false);pvpPadSelection.store(-1);
+        g.enemyMenu={};g.enemyPadFire=false;enemyHoldsPad.store(false);
         g.place.armed=-1;   // the 「摆放」 panel stays as it was, nothing armed
         npcmark::Assign(g.hover,{});
         g.pointer=mapcmd::PointerPosition{};
@@ -898,11 +971,28 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         (k.supportCall && !g.was.supportCall) || (k.supportPrev && !g.was.supportPrev) || (k.supportNext && !g.was.supportNext) ||
         (k.placePrev && !g.was.placePrev) || (k.placeNext && !g.was.placeNext) || (k.placeCategory && !g.was.placeCategory) ||
         (k.placeEnter && !g.was.placeEnter);
-    const bool padPress=(k.padPvp && !g.was.padPvp) || (k.padNext && !g.was.padNext) || (k.padGuard && !g.was.padGuard) ||
+    const bool padPress=(k.padEnemy && !g.was.padEnemy) || (k.padPvp && !g.was.padPvp) || (k.padNext && !g.was.padNext) || (k.padGuard && !g.was.padGuard) ||
         (k.padFollow && !g.was.padFollow) || (k.padRelease && !g.was.padRelease) ||
         (placeKeys && ((k.padUp && !g.was.padUp) || (k.padDown && !g.was.padDown) || (k.padLeft && !g.was.padLeft) ||
                        (k.padRight && !g.was.padRight) || (g.place.open && k.padA && !g.was.padA)));
     in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);
+    EnemyControlCard(g,in,haveView ? &v : nullptr,false);
+    const bool enemyToggle=k.padEnemy && !g.was.padEnemy;
+    const bool pvpToggle=k.padPvp && !g.was.padPvp;
+    const auto enemyInput=enemyui::Step(g.enemyMenu,EnemyModel(g.enemy.snapshot,in.front && haveView && v.enemyVisible),
+        {enemyToggle,k.padUp && !g.was.padUp,k.padDown && !g.was.padDown,
+         k.padLeft && !g.was.padLeft,k.padRight && !g.was.padRight,k.padA && !g.was.padA,
+         k.padB && !g.was.padB,k.padA,k.padB,mouseOrKey || pvpToggle});
+    enemyHoldsPad.store(g.enemyMenu.held);
+    if(enemyInput.consumed) {
+        g.pvpPad.focused=false;g.place.open=false;g.place.armed=-1;Arm(g,false,Order::none,-1);
+        k.padPvp=pvpToggle; // R3 transfers focus to PVP on this edge; A/B remain consumed.
+        k.padNext=k.padGuard=k.padFollow=k.padRelease=k.padUp=k.padDown=k.padLeft=k.padRight=k.padA=k.padB=false;
+    }
+    if(enemyInput.action!=enemyui::kNone) {
+        Game::UiHit hit;hit.kind=Game::UiKind::enemy;hit.entry=enemyInput.action;hit.enemy=g.enemy.snapshot;UiClick(g,hit,false);
+        if(enemyInput.action==enemyui::kFire)g.enemyPadFireSnapshot=g.enemy.snapshot;
+    }
     const auto pvpInput=pvpmenu::Step(g.pvpPad,v.pvpStatus,haveView && v.pvpVisible,
         {k.padPvp && !g.was.padPvp,k.padUp && !g.was.padUp,k.padDown && !g.was.padDown,
          k.padA && !g.was.padA,k.padB && !g.was.padB,k.padA,k.padB,mouseOrKey});
@@ -941,6 +1031,13 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         }
     }
     Hover(g,in,haveView ? &v : nullptr);
+    EnemyControlCard(g,in,haveView ? &v : nullptr,true);
+    const bool mouseSkill=rawKeys.left && g.uiLeft && g.uiPress.kind==Game::UiKind::enemy &&
+        g.uiPress.entry==enemyui::kFire && SameEnemy(g.uiPress.enemy,g.enemy.snapshot);
+    const bool padSkill=enemyui::HoldFire(g.enemyPadFire,enemyInput.action==enemyui::kFire,rawKeys.padA,g.enemyMenu.focused,
+        enemyui::Action(EnemyModel(g.enemy.snapshot,true),g.enemyMenu.first,g.enemyMenu.row)==enemyui::kFire,
+        SameEnemy(g.enemyPadFireSnapshot,g.enemy.snapshot));
+    EnemyControlSetAbilityHeld(g.enemy.snapshot,mouseSkill || padSkill);
     boxingNow.store(g.boxing);
     const bool next=(k.tab && !g.was.tab && !k.shift) || (k.padNext && !g.was.padNext),prev=k.tab && !g.was.tab && k.shift;
     bool picked=g.rowPicked;
@@ -1083,8 +1180,10 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
 
 void ResetMapCommands() noexcept {
     npcmark::Assign(game.hover,{});npcmark::Assign(game.eatHover,{});
+    EnemyControlSetAbilityHeld(game.enemy.snapshot,false);
+    npcmark::Assign(game.enemyCandidate,{});
     game=Game{};
-    boxingNow.store(false);pointerCaptured.store(false);placeHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);
+    boxingNow.store(false);pointerCaptured.store(false);placeHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);enemyHoldsPad.store(false);
     AcquireSRWLockExclusive(&lock);
     readoutAt=0;
     ReleaseSRWLockExclusive(&lock);
@@ -1092,7 +1191,7 @@ void ResetMapCommands() noexcept {
 
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
-    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.pvps=0;view.folds=false;view.pvpVisible=false;}
+    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.pvps=view.enemies=0;view.folds=false;view.pvpVisible=view.enemyVisible=false;}
     std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=GetTickCount64();
     ReleaseSRWLockExclusive(&viewLock);
 }
@@ -1120,7 +1219,7 @@ void MapCommandPlaceButtons(const float* rects,const int* codes,int n) noexcept 
     for(int i=0;i<n;++i){view.place[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.placeCode[i]=codes[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
-bool MapPlaceHoldsPad() noexcept { return placeHoldsPad.load() || pvpHoldsPad.load(); }
+bool MapPlaceHoldsPad() noexcept { return placeHoldsPad.load() || pvpHoldsPad.load() || enemyHoldsPad.load(); }
 void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpStatus* snapshot) noexcept {
     n=rects && codes && snapshot ? (std::max)(0,(std::min)(n,kMapPvpItems)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.pvps=n;view.pvpVisible=snapshot!=nullptr;view.pvpStatus=snapshot ? *snapshot : PvpStatus{};
@@ -1129,6 +1228,20 @@ void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpSta
 }
 int MapPvpPadSelection() noexcept { return pvpPadSelection.load(); }
 
+bool ReadMapEnemyControl(MapEnemyControlReadout* out) noexcept {
+    if(!out)return false;
+    AcquireSRWLockShared(&lock);
+    const bool fresh=readoutAt && GetTickCount64()-readoutAt<=kFreshMs;
+    if(fresh)*out=enemyReadout;
+    ReleaseSRWLockShared(&lock);return fresh;
+}
+void MapCommandEnemyButtons(const float* rects,const int* codes,int n,const enemy_control::Snapshot* snapshot) noexcept {
+    n=rects && codes && snapshot ? (std::max)(0,(std::min)(n,kMapEnemyItems)) : 0;
+    AcquireSRWLockExclusive(&viewLock);view.enemies=n;view.enemyVisible=snapshot!=nullptr;
+    view.enemyStatus=snapshot ? *snapshot : enemy_control::Snapshot{};
+    for(int i=0;i<n;++i){view.enemy[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.enemyCode[i]=codes[i];}
+    ReleaseSRWLockExclusive(&viewLock);
+}
 void MapCommandComposeButtons(const float* rects,const int* codes,int n) noexcept {
     n=rects && codes ? (std::max)(0,(std::min)(n,mapbtn::kComposeItems)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.composes=n;
@@ -1173,11 +1286,13 @@ void MapCommandUiPanels(const float* rects,int n) noexcept {
 void SuspendMapCommands() noexcept {
     // Closing the map ends a hover/press even if reopened inside kFreshMs. Keep the user's selection.
     Game& g=game;
+    EnemyControlSetAbilityHeld(g.enemy.snapshot,false);
+    npcmark::Assign(g.enemyCandidate,{});g.enemyMenu={};g.enemyPadFire=false;g.enemy={};enemyHoldsPad.store(false);
     npcmark::Assign(g.hover,{});npcmark::Assign(g.eatHover,{});
     g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=g.rpressing=false;Arm(g,false,Order::none,-1);g.armedClick=g.rightClick=false;
     g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};g.formationMenu=false;
     boxingNow.store(false);pointerCaptured.store(false);
-    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.pvps=0;view.folds=false;view.pvpVisible=false;ReleaseSRWLockExclusive(&viewLock);
+    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.pvps=view.enemies=0;view.folds=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
     g.place.armed=-1;g.pvpPad={};placeHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
 }

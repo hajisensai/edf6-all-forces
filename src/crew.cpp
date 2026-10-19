@@ -21,6 +21,8 @@
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
 #include "pvp.h"
+#include "enemy_control.h"
+#include "enemy_control_net.h"
 #include "thermal.h"
 #include "vehicle_look.h"
 #include "aim_line_want.h"
@@ -664,10 +666,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepPvp, kStepThermal, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepPvp, kStepThermal, kStepEnemyControl, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","pvp","thermal"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","pvp","thermal","enemy control"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -820,6 +822,8 @@ void SharedFrameTick() noexcept {
     GuardedTick(kStepWarn,&WarnTick);   // before the HUD's publish: it carries what this decides
     GuardedTick(kStepThermal,&ThermalTick);
     GuardedTick(kStepPvp,&PvpFrame);
+    GuardedTick(kStepEnemyControl,&EnemyControlFrame);
+    GuardedTick(kStepEnemyControl,&EnemyControlNetworkFrame);
     GuardedTick(kStepHudPublish,&HudPublish);
     GuardedTick(kStepUnderground,&BigWorldProbe);
     GuardedTick(kStepUnderground,&PlayAreaTick);   // the walls where the map's ground ends (playarea.cpp)

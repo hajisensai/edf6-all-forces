@@ -58,8 +58,10 @@ class Native(unittest.TestCase):
         self.assertEqual(set(new) - set(old), {bike.MARKER})
         bodies = {o['name'] for o in hk2014.read(self.physics).objects if o.type.name == 'hkpRigidBody'}
         self.assertEqual(bodies, {'RagDollProxys.' + n for n in bike.PROXIES})
+        bike.check(self.members, self.md, self.physics)
         self.assertEqual(self.members['car_aim_node'], [])
         self.assertNotIn('gun', {r[0] for r in self.members['car_base_rigid_body']})
+        self.assertEqual([r for r in self.members['car_base_simulation_node'] if r[0] == 'gun'], [['gun', 1]])
 
     def test_three_physical_wheels_and_original_radii(self) -> None:
         rows = self.members['car_base_wheel']
@@ -90,6 +92,9 @@ class Native(unittest.TestCase):
         self.assertEqual(weapon.root.get('AmmoCount'), source['AmmoCount'])
         self.assertEqual(weapon.root.get('FireInterval'), source['FireInterval'])
         self.assertEqual(len(self.members['vehicle_setup'][2]), 1)
+        self.assertEqual(weapon.root.get('FireRecoil'), source['FireRecoil'].value)
+        for key in ('vehicle_setup', 'mission_setup'):
+            self.assertEqual(sgo.plain(self.members[key][2][0][1]), [0.0, 0.0])
 
     def test_four_class_pelvis_fit_and_posed_mesh_bounds(self) -> None:
         offsets, rows = bike.pose_fit(self.games)
@@ -118,6 +123,16 @@ class Native(unittest.TestCase):
         members['car_base_rigid_body'].append(['gun', -1.0, -1.0, -1.0, -1.0, [], []])
         with self.assertRaisesRegex(ValueError, 'animation-driven'):
             bike.check(members, self.md, self.physics)
+        for rows in ([[n, 0] for n in bike.WHEELS], [[n, 0] for n in bike.WHEELS] + [['gun', 0]],
+                     [[n, 0] for n in bike.WHEELS] + [['gun', 1], ['gun', 1]]):
+            bad = copy.deepcopy(self.members)
+            bad['car_base_simulation_node'] = rows
+            with self.assertRaisesRegex(ValueError, 'explicit native kinematic'):
+                bike.check(bad, self.md, self.physics)
+        bad = copy.deepcopy(self.members)
+        bad['mission_setup'][2][0][1] = ['AimRecoil', [0.1, 0.2]]
+        with self.assertRaisesRegex(ValueError, 'native BodyRecoil'):
+            bike.check(bad, self.md, self.physics)
         md = copy.deepcopy(self.md)
         md.names[md.bones[mdb.bone_named(md, 'side_tire')].name] = 'missing_side'
         with self.assertRaisesRegex(ValueError, 'unresolved bone / body'):

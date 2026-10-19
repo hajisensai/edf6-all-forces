@@ -19,7 +19,16 @@ float CeilingY() noexcept { MissingDependency();return 0; }
 void BodyAttitude(const unsigned char*,const float*,const float*,float,float,float*) noexcept { MissingDependency(); }
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept { MissingDependency();return nullptr; }
 void NpcGear(unsigned char*,float,float) noexcept { MissingDependency(); }
-namespace jet { Jet jets[kMaxJets]{}; }
+namespace jet {
+Jet jets[kMaxJets]{};
+bool Alive(const ObjRef& ref) noexcept {
+    // These fixtures own native-shaped buffers; preserve the production weak identity/liveness contract.
+    if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,0x10) || At<long>(ref.ctrl,8)<=0)return false;
+    const auto* object=static_cast<const unsigned char*>(ref.obj);
+    return Readable(object,kSeats+8) && At<const void*>(object,kSelfCtrl)==ref.ctrl && !(object[kObjFlags]&kObjDeleted);
+}
+}
+
 }
 
 int main() {

@@ -1,11 +1,12 @@
 """Original procedural tracked-vehicle geometry on EDF6's unmodified V603 skeleton.
 
 This is newly authored low-poly geometry, not a downloaded model or renamed stock
-vehicle. Only the player's own V603 material/texture data is reused. Bone order,
-names, hierarchy, flags, local matrices and inverse binds are kept byte-for-byte;
-only bounds change to enclose the new geometry. Consequently the stock CAS and
-ragdoll remain compatible, but the stock collision hull is an approximation of
-these vehicles and is not a validated M113/T-72 collision model.
+vehicle. Only the player's own V603 material/texture data is reused. Original
+physical bone names, relative hierarchy, flags and bind matrices are preserved;
+declared visual leaves are inserted in preorder with consistent index remapping.
+Bounds enclose the new geometry. Per-vehicle collision is emitted separately by
+tracked_collision; private CAS changes only eight radar-reference bytes. These
+remain documented contact approximations, not measured M113/T-72 simulations.
 """
 from __future__ import annotations
 
@@ -13,12 +14,14 @@ import hashlib
 import math
 import struct
 from dataclasses import dataclass, field, replace
+import copy
 
 import numpy as np
 
 import graft_pure as g
 import procmesh as pm
-from mdb import Mdb, Mesh, Rab, bind_world, cmpl_compress, cmpl_decompress, mdb_read, mdb_write, rab_read, rab_write
+from mdb import Mdb, Mesh, Rab, bind_world, cmpl_compress, cmpl_decompress, inverse_affine, insert_bone, mdb_read, mdb_write, mmul, rab_read, rab_write
+from mdb_jet import link
 
 HOST_ARC, HOST_MDB = 'V603_FLAK.MRAB', 'v603_flak.mdb'
 HOST_CAS = 'V603_FLAK.CAS'
@@ -64,6 +67,69 @@ def skeleton_fingerprint(md: Mdb) -> str:
     return h.hexdigest()
 
 
+@dataclass(frozen=True)
+class VisualBone:
+    name: str
+    parent: str
+    origin: tuple[float, float, float]
+
+
+def add_visual_bones(host: Mdb, additions: tuple[VisualBone, ...]) -> Mdb:
+    """Insert visual-only leaves in native preorder; keep every source world bind.
+
+    Native MDB subtree traversal requires each parent's descendants contiguous.
+    insert_bone remaps later links, object roots and mesh blend indices together.
+    The original names stay at the same string indices, and physics/CAS bind by
+    name. No ragdoll proxy or existing native pose owner is repurposed.
+    """
+    md = copy.deepcopy(host)
+    for extra in additions:
+        require(md.bone_index(extra.name) < 0, f'duplicate visual bone {extra.name}')
+        index = insert_bone(md, extra.name, extra.parent)
+        bone = md.bones[index]
+        parent = md.bone_index(extra.parent)
+        world = g.translation(extra.origin)
+        bone.kind = 3
+        bone.bounded = 1
+        bone.local = mmul(world, inverse_affine(bind_world(md)[parent]))
+        bone.inv_bind = inverse_affine(world)
+    return md
+
+
+def check_skeleton(md: Mdb, additions: tuple[VisualBone, ...] = ()) -> None:
+    """The only changes to native skeleton topology are declared visual leaves."""
+    names = [md.name_of(b.name) for b in md.bones]
+    stack: list[int] = []
+    for index,bone in enumerate(md.bones):
+        require(bone.index == index, 'bone indices do not match native file order')
+        while stack and stack[-1] != bone.parent:
+            stack.pop()
+        require(bone.parent < 0 and not stack or bool(stack) and stack[-1] == bone.parent,
+                'bone subtree is not contiguous native preorder')
+        stack.append(index)
+    require(len(names) == len(set(names)), 'duplicate skeleton bone names')
+    extra_names = {extra.name for extra in additions}
+    require(len(extra_names) == len(additions), 'duplicate visual bone declarations')
+    world = bind_world(md)
+    for extra in additions:
+        index = md.bone_index(extra.name)
+        require(index >= 0, f'missing visual bone {extra.name}')
+        b = md.bones[index]
+        require(0 <= b.parent < len(md.bones), f'{extra.name}: invalid visual parent')
+        require(md.name_of(md.bones[b.parent].name) == extra.parent and b.kind == 3,
+                f'{extra.name}: incorrect visual-bone parent or kind')
+        require(not any(other.parent == index for other in md.bones), f'{extra.name}: not a visual leaf')
+        require(max(abs(a-b) for a,b in zip(world[index][12:15],extra.origin)) < 1e-5,
+                f'{extra.name}: rotor origin moved off its barrel axis')
+    native = [b for b in md.bones if md.name_of(b.name) not in extra_names]
+    remap = {b.index: index for index,b in enumerate(native)}
+    restored = [replace(b,index=remap[b.index],parent=remap[b.parent] if b.parent>=0 else -1) for b in native]
+    link(restored)
+    normalized = replace(md,bones=restored)
+    require(skeleton_fingerprint(normalized) == STOCK_SKELETON_SHA256,
+            'native skeleton names, binds or relative hierarchy changed')
+
+
 @dataclass
 class Assembly:
     """Named parts and authoritative barrel mouths, all in model bind space."""
@@ -71,6 +137,7 @@ class Assembly:
     parts: dict[str, pm.Part] = field(default_factory=dict)
     muzzles: dict[str, dict] = field(default_factory=dict)
     wheels: dict[str, tuple[float, float, float]] = field(default_factory=dict)
+    wheel_parts: dict[str, list[str]] = field(default_factory=dict)
 
     def bone(self, name: str) -> int:
         result = self.host.bone_index(name)
@@ -181,7 +248,8 @@ def chassis(a: Assembly, road_letters: str, length: float, width: float, top: fl
     """New M113 or T-72 hull, tracks and independently skinned road wheels.
 
     Every wheel's centre is the original bone pivot. No original mesh triangles
-    are copied. The five-wheel M113 uses G as its rear idler (H is unused).
+    are copied. The five-wheel M113 uses G as its rear idler; its outer half
+    uses H's original bind so each half follows its own physical death body.
     """
     body = a.part('hull_armour', 'body')
     z0, z1 = (-2.18, 2.68) if m113 else (-length / 2, length / 2)
@@ -232,17 +300,32 @@ def chassis(a: Assembly, road_letters: str, length: float, width: float, top: fl
             x, y, z = a.origin(bone)
             road = letter in road_letters
             r = .355 if road else (.355 if m113 and letter == 'G' else .43)
+            split = m113 and letter == 'G'
             p = a.part(f'wheel_{letter}_{side}', bone, DARK_TINT)
-            cylinder(p, (x-.19, y, z), (x+.19, y, z), r, 20)
-            hub = a.part(f'hub_{letter}_{side}', bone)
+            if split:
+                outer_bone = f'tire_moveH_{side}'
+                outer = a.part(f'wheel_G_outer_{side}', outer_bone, DARK_TINT)
+                cylinder(p, (x-sign*.19, y, z), (x, y, z), r, 20)
+                cylinder(outer, (x, y, z), (x+sign*.19, y, z), r, 20)
+                a.wheel_parts[bone] = [f'wheel_G_{side}', f'wheel_G_outer_{side}']
+            else:
+                outer_bone = bone
+                cylinder(p, (x-.19, y, z), (x+.19, y, z), r, 20)
+                a.wheel_parts[bone] = [f'wheel_{letter}_{side}']
+            hub = a.part(f'hub_{letter}_{side}', outer_bone)
             outside = x + sign*.205
             cylinder(hub, (outside-sign*.07, y, z), (outside, y, z), r*.71, 16)
             cylinder(hub, (outside, y, z), (outside+sign*.035, y, z), r*.24, 12)
             if not road:
                 teeth = a.part(f'sprocket_{letter}_{side}', bone, METAL_TINT)
+                outer_teeth = a.part(f'sprocket_G_outer_{side}', outer_bone, METAL_TINT) if split else None
                 for k in range(16):
                     th = k*math.tau/16
-                    box(teeth, (x, y+r*math.cos(th), z+r*math.sin(th)), (.20, .038, .040))
+                    if split:
+                        box(teeth, (x-sign*.10, y+r*math.cos(th), z+r*math.sin(th)), (.10, .038, .040))
+                        box(outer_teeth, (x+sign*.10, y+r*math.cos(th), z+r*math.sin(th)), (.10, .038, .040))
+                    else:
+                        box(teeth, (x, y+r*math.cos(th), z+r*math.sin(th)), (.20, .038, .040))
             a.wheels[bone] = (x, y, z)
         # A closed belt of individually authored shoes around the stock pivots.
         # It is skinned to catapi_body; wheel rotation uses the separate wheel bones.
@@ -294,13 +377,15 @@ def pack_meshes(host: Mdb, rab: Rab, parts: dict[str, pm.Part]) -> list[Mesh]:
     return out
 
 
-def build_with_info(game, make_parts, designation: str, dimensions, camera, drive_scale=1.) -> tuple[bytes, Mdb, dict]:
-    host, rab = stock(game)
+def build_with_info(game, make_parts, designation: str, dimensions, camera, drive_scale=1.,
+                    visual_bones: tuple[VisualBone, ...] = ()) -> tuple[bytes, Mdb, dict]:
+    original, rab = stock(game)
+    host = add_visual_bones(original, visual_bones) if visual_bones else original
     a = Assembly(host)
     make_parts(a)
     meshes = pack_meshes(host, rab, a.parts)
     md = g.recompute_bounds(replace(host, objects=[replace(host.objects[0], meshes=meshes)], buffer_order=None))
-    require(skeleton_fingerprint(md) == skeleton_fingerprint(host), 'host skeleton was changed')
+    check_skeleton(md, visual_bones)
     data = mdb_write(md)
     require(mdb_write(mdb_read(data)) == data, 'MDB write/read/write differs')
     packed = cmpl_compress(data)
@@ -313,27 +398,29 @@ def build_with_info(game, make_parts, designation: str, dimensions, camera, driv
     info = {'designation': designation, 'source': 'original procedural geometry; not downloaded or stock vehicle mesh',
             'dimension_target_m': list(dimensions), 'render_bounds': bounds,
             'skeleton_fingerprint': skeleton_fingerprint(host), 'bone_count': len(md.bones),
-            'stock_skeleton_unchanged': True, 'stock_meshes_retained': 0,
-            'collision_contract': 'Unmodified V603 ragdoll and skeleton; visual hull differs. In-game collision acceptance required.',
-            'cas_contract': 'V603_FLAK.CAS copied unchanged; no inserted or moved bones',
+            'stock_skeleton_unchanged': not visual_bones, 'native_bone_binds_unchanged': True,
+            'visual_bones': [b.name for b in visual_bones], 'stock_meshes_retained': 0,
+            'collision_contract': 'make_tracked_combat builds private fitted SHKT/bindings from these actual parts; native topology/controllers retained. In-game contact acceptance required.',
+            'cas_contract': 'Private V603 CAS changes only eight radar T/R-reference bytes; all other tracks/channels/Fire/state bytes remain native; visual rotor poses before native all-bone world build',
             'camera': camera, 'drive_scale': float(drive_scale), 'muzzles': a.muzzles,
             'wheel_centres': a.wheels, 'parts': {}, 'triangles': sum(len(p.tris) for p in a.parts.values())}
     for name, p in a.parts.items():
         info['parts'][name] = {'bone': host.name_of(host.bones[p._rigid_bone].name), 'triangles': len(p.tris),
                                'bounds': [np.min(p.pos, axis=0).tolist(), np.max(p.pos, axis=0).tolist()]}
-    check(arc, make_parts, host)
+    check(arc, make_parts, original, visual_bones)
     return arc, md, info
 
 
-def check(arc: bytes, make_parts, host: Mdb | None = None) -> dict:
+def check(arc: bytes, make_parts, host: Mdb | None = None,
+          visual_bones: tuple[VisualBone, ...] = ()) -> dict:
     rab = rab_read(arc)
     require(rab_write(rab) == arc, 'RAB write/read/write differs')
     data = member(rab, HOST_MDB).data
     md = mdb_read(data)
     require(mdb_write(md) == data, 'MDB write/read/write differs')
-    require(skeleton_fingerprint(md) == STOCK_SKELETON_SHA256, 'stock skeleton name/link/matrix contract differs')
+    check_skeleton(md, visual_bones)
     if host is not None:
-        require(skeleton_fingerprint(md) == skeleton_fingerprint(host), 'host bone contract differs')
+        require(skeleton_fingerprint(host) == STOCK_SKELETON_SHA256, 'source native bone contract differs')
     a = Assembly(md)
     make_parts(a)
     require(len(md.objects) == 1, 'generated model must have one object')
@@ -366,17 +453,32 @@ def check(arc: bytes, make_parts, host: Mdb | None = None) -> dict:
         ident = np.asarray(w).reshape(4,4) @ np.asarray(b.inv_bind).reshape(4,4)
         require(np.max(np.abs(ident-np.eye(4))) < 2e-5, f'{md.name_of(b.name)}: inverse bind differs')
     for name, wheel in a.wheels.items():
-        p = a.parts[f'wheel_{name[9]}_{name[-1]}']
-        mid = (np.min(p.pos,axis=0)+np.max(p.pos,axis=0))/2
-        require(max(abs(mid[i]-wheel[i]) for i in range(3)) < 1e-6, f'{name}: wheel not at pivot')
+        names = a.wheel_parts.get(name, [f'wheel_{name[9]}_{name[-1]}'])
+        points = np.vstack([a.parts[n].pos for n in names])
+        mid = (points.min(axis=0)+points.max(axis=0))/2
+        require(max(abs(mid[i]-wheel[i]) for i in range(3)) < 1e-6, f'{name}: complete wheel not at pivot')
+        if len(names) == 2:
+            require(a.parts[names[0]]._rigid_bone == a.bone(name), f'{name}: inner half uses another bone')
+            require(a.parts[names[1]]._rigid_bone == a.bone(f'tire_moveH_{name[-1]}'),
+                    f'{name}: outer half lost its death-physics bone')
     return {'bones': len(md.bones), 'skeleton_fingerprint': skeleton_fingerprint(md),
             'meshes': len(meshes), 'triangles': sum(x['triangles'] for x in drawn.values()),
             'stock_meshes_retained': 0, 'parts': drawn, 'muzzles': a.muzzles}
 
 
 def animation(game, _md=None) -> bytes:
-    """No retargeting: all original bone matrices are unchanged."""
-    return game.read('OBJECT', HOST_CAS)
+    """Private CAS: fix only the two donor radar T/R references at bind.
+
+    Each original radar bone carries a real optic. Both are children of main,
+    so bind locals follow turret pose alive and their own proxies drive death.
+    strip_bone changes only four int16 channel references: no shared channel,
+    clip duration/state, track list, firing recoil key or other bone is changed.
+    """
+    import cas_pose
+    data = game.read('OBJECT', HOST_CAS)
+    for name in ('doppler_radar', 'tracking_radar'):
+        data = cas_pose.strip_bone(data, {'doppler_radar_loop'}, name)
+    return data
 
 
 def dump_obj(md: Mdb, path: str) -> None:

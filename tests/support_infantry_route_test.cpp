@@ -32,6 +32,39 @@ bool SupportSoloHostWorld() noexcept{return false;}
 bool SupportAircraftSpec(int,SupportAircraft*) noexcept{return false;}
 bool SupportSubCatalog(int) noexcept{return false;}
 unsigned char* SubLaunch(const float*,const float*) noexcept{return nullptr;}
+bool PlanSupportSubmarine(const float*,const float*,float*,float*) noexcept{return false;}
+bool ValidateSupportSubmarine(const float*,float) noexcept{return false;}
+unsigned char* PrepareSupportSubmarine(const float*,float) noexcept{return nullptr;}
+bool ActivateSupportSubmarine(const ObjRef&) noexcept{return false;}
+bool DeleteSupportSubmarine(const ObjRef&) noexcept{return false;}
+bool BindSupportSubmarineOwner(const ObjRef&,const unsigned char[32]) noexcept{return false;}
+std::uint64_t SubmarineSupportKey(const ObjRef&) noexcept{return 0;}
+bool ResolveSupportSubmarine(std::uint64_t,ObjRef*) noexcept{return false;}
+bool AddSupportSubmarineDrone(const ObjRef&,const ObjRef&) noexcept{return false;}
+bool SupportDroneReady() noexcept{return false;}
+unsigned char* PrepareSupportDrone(const float*,const float*,const void*) noexcept{return nullptr;}
+bool ActivateSupportDrone(const ObjRef&) noexcept{return false;}
+bool DeleteSupportDrone(const ObjRef&) noexcept{return false;}
+bool PvpRefreshSupportOwner(support_net::Plan*) noexcept{return false;}
+std::uint64_t SubmitPreparedSupportPlan(const SupportPlan&) noexcept{return 0;}
+bool SupportAuthenticatedRequester(std::uint32_t,ObjRef*) noexcept{return false;}
+bool SupportDroneReady(SupportDroneKind) noexcept{return false;}
+bool CarrierSupportDroneReady(const ObjRef&,SupportDroneKind,unsigned) noexcept{return false;}
+bool CarrierSupportSlotAvailable(const ObjRef&,unsigned) noexcept{return false;}
+bool ReserveCarrierSupportDrone(const ObjRef&,unsigned,std::uint64_t) noexcept{return false;}
+unsigned char* PrepareCarrierSupportDrone(const float*,const float*,const ObjRef&,SupportDroneKind,unsigned,std::uint64_t,bool) noexcept{return nullptr;}
+bool ConfirmCarrierSupportDrone(const ObjRef&,unsigned,std::uint64_t) noexcept{return false;}
+bool CancelCarrierSupportDrone(const ObjRef&,unsigned,std::uint64_t) noexcept{return false;}
+void CancelCarrierSupportTransaction(std::uint64_t) noexcept{}
+bool SupportDroneLeft(const ObjRef&) noexcept{return false;}
+int ApplyCarrierSupportRecall(const ObjRef&) noexcept{return -1;}
+bool PvpNativeSupportDriver(const ObjRef&,ObjRef*) noexcept{return false;}
+bool PvpMakeInheritedSupportPlan(const ObjRef&,support_net::Plan*) noexcept{return false;}
+std::uint64_t SupportSourceKey(const ObjRef&) noexcept{return 0;}
+bool ResolveSupportSource(std::uint64_t,ObjRef*) noexcept{return false;}
+bool ResolveMarkIdentities(const unsigned char*,const unsigned char*,MarkIdentities*) noexcept{return false;}
+bool SupportCommandRequesterMatches(void*,const char*) noexcept{return false;}
+bool SubmitCarrierDroneNetworkRequest(const unsigned char*,unsigned,unsigned,const float*) noexcept{return false;}
 support::Refusal PlanAirSupport(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
 unsigned char* PrepareSupportAircraft(const SupportAircraft&,const float*,const wchar_t*) noexcept{return nullptr;}
 bool ActivateSupportAircraft(unsigned char*,const SupportAircraft&,const float*,bool) noexcept{return false;}

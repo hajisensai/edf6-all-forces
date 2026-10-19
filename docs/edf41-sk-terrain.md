@@ -5,7 +5,10 @@ SK_CRATER01) have a ground EDF6 cannot load: a heightfield, `<model>_fld2mgrid.s
 `tools/edf41_maps.py` converts them at install like the nine other 4.1 maps (`SK_MAPS`); this is what was found and what
 the converter does. Code: `pylib/sk_terrain.py` (the field), `pylib/fmb_build.py` (the render mesh), `pylib/hkcms_build.py`
 (the collision), `pylib/sk_map.py` (the map around them). Tests: `tools/selftest.py` sk_terrain_real, fmb_build_real,
-hkcms_build_real, edf41_sk_maps_real. Not run in game (see "What to check in game").
+hkcms_build_real, edf41_sk_maps_real; `tests/test_sk_terrain_materials.py` and
+`tests/terrain_shader_native_audit.py` (with `terrain_sampler_native_test.exe` for WARP). Not run in game
+(see "What to check in game"). The 2026-10-19 colour/layer fixes are traced in
+[the terrain feedback report](feedback-2026-10-19-terrain-materials.md).
 
 ## 1. What EDF6 has
 
@@ -38,8 +41,10 @@ blocks of 32 cells, 0x30/0x34 lowest / highest height, 0x38 the blocks (0x20 eac
   (CRATER01), 0.29 (VALLEY01); 74 - 100 % lie within a metre (sk_terrain_real checks HEIGEN02 and VALLEY01).
 * **Layers**: 0x3C holds one 0x14 struct per layer (2 texture settings of 0x30: the texture index and the tiling `uv =
   metres * scale`; a layer may have just the colour). The indices are into the names list at 0x44 (the materials, `_n` /
-  `_nm` are normal maps); the colour array `.cols.dds` (a DX10 BC1 array: SK_HEIGEN02 8 slices, 1024^2) holds exactly the
-  names that are not normal maps in the list's order, and no layer's colour or multiplier index names a normal map.
+  `_nm` are normal maps); the colour array `.cols.dds` (a DX10 BC1 array: SK_HEIGEN02 8 slices, 1024^2) holds the
+  slices bound by `.cols.sgo` (the observed order also matches the non-normal names). Conversion uses those explicit
+  resource bindings and checks the DDS array size; no colour or multiplier may name an unbound material. A colour
+  setting count of one means no multiplier, not a primary slice index of -1 in EDF6 (see below).
 * **Blend weights**: the pair list at 0x54 holds (slot, f16 weight) runs; block (by, bx) (0x850 + 0x20 * k) lists the layers
   it uses and, per vertex, the start of the vertex's run (one pair per used layer and a closing weight 0).
 
@@ -55,12 +60,14 @@ which is also the donor of the two constant trailing tables). 625 leaves of 20 x
 triangles wound as the donor's, normals from the lattice's gradient), a post-order AABB tree split along the longer side;
 each leaf is a 0x30 header (triangle count at 0x1C), one 0x3C mesh record, the indices, the splat grid (**one 0x50 record
 per 4 m cell: list index 0 + the four corners' 16 weight bytes, each corner summing to 255**), one 16 byte layer list and
-the vertices. A leaf lists its layers by weight, at most 5 (the most any stock leaf lists; the shader variants go to 7); its
-mesh record carries the layer count, `n * 0x101` and at +0x28 the index of its shader record in the file's shader
+the vertices. A leaf lists all of its positively weighted source layers, in source-index order, up to the 15
+layer variants actually shipped in EDF6 (pass 0/1/2). More than 15 is refused. The previous top-five selection
+could delete the only painted layers at a vertex and replace sand or rock with another layer; source SK leaves
+need up to 13 layers. Its mesh record carries the layer count, `n * 0x101` and at +0x28 the index of its shader record in the file's shader
 table: the (n, 1, pass 0, flag 0) record, as every one of the 9753 stock meshes (until 2026-10-17 this was written as the
 number of texture slices, which pointed the leaves at flag 6 or other-count records: the black blocks of the feedback,
 docs/feedback-2026-10-17-edf41-maps.md). The trailing tables: the layer table (one 0x50 record per layer: orientation of the colour / multiplier
-tile, colour slice, multiplier slice (-1 none), normal slice 0, the stock 6.0 and 1.0 x 3; the orientations are rotation 90
+tile, colour slice, valid multiplier slice, normal slice 0, the stock 6.0 and 1.0 x 3; the orientations are rotation 90
 degrees about x with the tile size = 1 / scale), the shader table (stock pattern: per pass the counts at flag 6, the smallest
 again, the counts at 0), two constant tables from the donor. Compression is a greedy LZSS (the game's CMPL), not Okumura's
 choice (0.04 s a leaf instead of 15 s per 1.26 MB). 10.5 MB, 20 s.
@@ -73,7 +80,13 @@ stock ones), the `.shfb`, `.cols.sgo` and `.norm.sgo` members dropped. map.rmpa 
 
 **`MAP/<MAP>.RAB`**: the legacy conversion with the colour array renamed `<map>_color.dds` (TEXTURE folder where 4.1 had
 it) and EDF6's own flat normal map (`ig_flat_normal.dds` of IG_CAVE603.RAB) as `<map>_normal.dds`. 4.1's normal arrays
-(`.norm.dds`, 4 slices on some maps, 1 on others) are dropped: which slice goes with which layer is not decoded.
+(`.norm.dds`, 4 slices on some maps, 1 on others) are still dropped by this converter (see Open).
+For a layer without a second colour texture, EDF4.1's shader branches on the packed index byte being 255 and
+skips multiplication. EDF6's primary FMB multiplier is unconditional: writing -1 makes an invalid unsigned array
+sample and darkens the source. Such maps receive one appended BC1 opaque-white slice, at every mip, and those
+layers reference it explicitly. Every authored slice and mip stays byte-identical; layers with a multiplier keep
+their original bindings. SK_KAIGAN01's sand layers 0/4 use colour slices 8/9 and identity slice 11 (11 original
+slices become 12). No gamma, brightness, source colour, global shader, or weather tint is changed.
 
 **`MAP/<MAP>.MAD`** (`hkcms_build.py`): the ground as one body `<piece>.<piece>`, a compound of 2500 tiles of 10 x 10
 cells, one compressed mesh each (one section, one quad per cell, all vertices shared), written on the player's own
@@ -96,6 +109,10 @@ Everything below is in the selftests, on the real files.
 * The MAD: `hkcms_build.selftest`: the writer re-emits the donor and 33 stock MADs byte for byte, a built collision parses
   with hktag / hkcms, its triangles decode to the lattice within 1e-5 m, all face up, `bound_problems` == [], and a tile mesh
   has the stock ground tile's item structure; its bytes differ from a stock mesh only in data fields.
+* The source multiplier contract: sand keeps original source DDS bytes across all 11 mips, the production-appended
+  identity samples as exact white on D3D11 WARP, and source sand RGB multiplied by it is unchanged at every tested
+  mip/UV. All 45 native layer/pass shader files (1..15, passes 0..2) exist and contain the expected structured data
+  and texture-sampling programs; source EDF4.1 checks its absent multiplier before multiplying.
 * The map: `bigmap.verify`, the def / record / mapo entry / externals / members as above, the FMB's vertices == the lattice,
   the MAD's ground compound has 2500 instances and its objects are listed, the RAB's textures.
 
@@ -118,7 +135,7 @@ Everything below is in the selftests, on the real files.
   and flowers (kind 1 `.dds`) become one group, the trees, bushes and small objects (kind 2) three more as the stock
   pieces have them (`<model>.tree` / `<model>.mls` for the MAC's `.trb` / `.mlb`); 4.1's `.trb` gets EDF6's extra 0 in
   its first rule (map_legacy.trb_from_legacy). Not run in game.
-* Normal maps of the layers (`.norm.dds`), the layers' `m_correction`-like value (the stock 6.0 is used) and the ground's
+* Normal maps of the layers (`.norm.dds`), source UV rotation/nonuniform scale and mip bias, the layers' `m_correction`-like value (the stock 6.0 is used) and the ground's
   surface materials (4.1's per-vertex material to EDF6's collision palette: `hkcms_build.build_collision(values=)` takes
   them, the value meanings are not known) are not carried.
 * `triangleIsInterior` bits of the collision meshes are all 0 (stock sets some); the tiles are all shared vertices and 100

@@ -1,5 +1,6 @@
 #include "../src/support_protocol.h"
 #include "../src/support_loadout.h"
+#include "../src/support_submarine.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,7 +18,8 @@ struct Room;
 struct Node {
     Room* room=nullptr;unsigned id=0;
     std::unique_ptr<Session> session=std::make_unique<Session>();
-    bool reject=false,failSpawn=false,pending=false,refusePlan=false;
+    bool reject=false,failSpawn=false,pending=false,refusePlan=false,allowDynamic=true,failDerive=false;
+    unsigned validations=0,rejectValidationAt=0;
     std::uint32_t pendingCatalog=0;   // pending only for this catalog (0: every one)
     unsigned spawns=0,destroys=0,plans=0,requesterPlans=0,requesterPeer=999;
     unsigned char requester[32]{};std::uint32_t team=0;
@@ -25,10 +27,12 @@ struct Node {
     std::uint64_t variant=0;   // given to every planned unit (support_net.h Unit::variant)
     std::uint32_t ext=kExtVariants;unsigned char bloom[32]{};   // its hello's extension (support_variants.h)
     std::uint64_t nonce=0;
+    std::uint64_t lastToken=0;
     bool active[kMaxTransactions+1]{};
     Plan last{};
     bool remote=false;
     std::vector<std::pair<std::uint32_t,RequestStatus>> notices;
+    std::vector<std::uint64_t> destroyedTokens;
 };
 Node* current=nullptr;
 struct Packet { unsigned from,to;Message message; };
@@ -38,7 +42,7 @@ struct Room {
     std::vector<Packet> history;
     std::uint64_t now=10000;
     unsigned failTo=999,dropTo=999,legacyNode=999;   // legacyNode: an older build, its hello announces legacyCaps only
-    std::uint32_t legacyCaps=0,legacyExt=0;
+    std::uint32_t legacyCaps=0,legacyExt=0,legacyDetails=0;
     bool oldHost=false;   // the host's welcome as a build before it carried its capabilities (index 0)
     Kind failKind=Kind::cancel,dropKind=Kind::cancel;
     explicit Room(unsigned count);
@@ -72,7 +76,7 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     Message sent=message;
     // An older (or newer) build's hello: its capabilities and its extension word as that build sends them (a build before
     // the extension: 0 and an empty filter).
-    if(node.id==room.legacyNode && sent.kind==Kind::hello){sent.index=room.legacyCaps;sent.unit=Unit{};sent.unit.resourceId=room.legacyExt;}
+    if(node.id==room.legacyNode && sent.kind==Kind::hello){sent.index=room.legacyCaps;sent.unit=Unit{};sent.unit.resourceId=room.legacyExt;sent.unit.role=room.legacyDetails;}
     if(node.id==0 && room.oldHost && sent.kind==Kind::welcome){sent.catalog=0;sent.ok=0;sent.unit.role=0;}
     if(!Encode(sent,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
     Packet p{node.id,dst,decoded};room.packets.push_back(p);room.history.push_back(p);return true;
@@ -96,23 +100,28 @@ PlanResult PlanForRequester(std::uint32_t requester,std::uint32_t catalog,const 
     return PlanCall(catalog,at,loadout,p);
 }
 bool Validate(const Plan& p) noexcept {
-    if(current->reject)return false;
-    for(unsigned i=0;i<p.count;++i)if(p.units[i].resourceId>2 && p.units[i].resourceId!=kExistingVehicle)return false;
+    ++current->validations;
+    if(current->reject || (current->rejectValidationAt && current->validations>=current->rejectValidationAt))return false;
+    for(unsigned i=0;i<p.count;++i)if(p.units[i].resourceId>2 && p.units[i].resourceId!=kExistingVehicle) {
+        if(!current->allowDynamic || p.count!=1 || p.catalogId!=kPreparedDroneCatalog || p.units[i].role || !p.units[i].variant ||
+           !p.requester[0] || (p.units[i].resourceId!=crew::kSupportSubDroneResource && !crew::IsCarrierDroneResource(p.units[i].resourceId)))return false;
+    }
     return true;
 }
 bool Spawn(std::uint64_t id,const Plan& p,bool remote) noexcept {
-    ++current->spawns;current->active[id]=true;current->last=p;current->remote=remote;
+    ++current->spawns;current->active[id]=true;current->last=p;current->remote=remote;current->lastToken=id;
     return !current->failSpawn;
 }
-void Destroy(std::uint64_t id) noexcept { ++current->destroys;current->active[id]=false; }
+void Destroy(std::uint64_t id) noexcept { ++current->destroys;current->active[id]=false;current->destroyedTokens.push_back(id); }
 bool Derive(std::uint32_t ordinal,unsigned char* out) noexcept {
     std::memset(out,0,32);std::memcpy(out+4,&ordinal,4);out[0]=42;out[12]=5;
     std::memcpy(out+24,&ordinal,4);return true;
 }
+bool DeriveForSession(std::uint32_t ordinal,unsigned char* out) noexcept {return !current->failDerive && Derive(ordinal,out);}
 void Notice(std::uint32_t request,RequestStatus status) noexcept { current->notices.emplace_back(request,status); }
 void Hello(std::uint32_t* ext,unsigned char* bloom) noexcept { *ext=current->ext;std::memcpy(bloom,current->bloom,32); }
 void RequesterPlanner(Node& node,bool only=false) {
-    Backend b{&node,&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&Derive}};
+    Backend b{&node,&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&DeriveForSession}};
     b.hooks.notice=&Notice;b.hooks.variants=&Hello;
     b.hooks.ownChannel=[](std::uint32_t catalog) noexcept {return catalog==kRescue;};
     b.hooks.planForRequester=&PlanForRequester;if(only)b.hooks.plan=nullptr;node.session->Configure(b);
@@ -120,7 +129,7 @@ void RequesterPlanner(Node& node,bool only=false) {
 Room::Room(unsigned count) {
     for(unsigned i=0;i<count;++i) {
         auto n=std::make_unique<Node>();n->id=i;n->room=this;n->nonce=100000+1000*i;
-        Backend b{n.get(),&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&Derive}};
+        Backend b{n.get(),&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&DeriveForSession}};
         b.hooks.notice=&Notice;b.hooks.variants=&Hello;
         b.hooks.ownChannel=[](std::uint32_t catalog) noexcept {return catalog==kRescue;};
         n->session->Configure(b);nodes.push_back(std::move(n));
@@ -566,4 +575,156 @@ void PvpSupport() {
      r.With(0);r.nodes[0]->session->Stop();
      Check(!r.nodes[0]->session->HostDetails(),"stopped host does not advertise usable details");}
 }
-int main() { PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();std::printf("support protocol: %d checks passed\n",checks); }
+namespace {
+Plan DronePlan(std::uint32_t resource=crew::kSupportSubDroneResource,std::uint64_t parent=901) {
+    Plan p{};p.catalogId=kPreparedDroneCatalog;p.count=1;p.team=2;p.requester[0]=41;p.requester[12]=1;
+    p.target[0]=10;p.target[1]=20;p.target[2]=30;
+    auto& u=p.units[0];u.resourceId=resource;u.variant=parent;
+    u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;std::memcpy(u.matrix+12,p.target,12);return p;
+}
+std::uint64_t SubmitDrone(Room& r,const Plan& p) {
+    r.With(0);return r.nodes[0]->session->SubmitPrepared(p,r.now,PreparedKind::dynamicDrone);
+}
+void PreparedDroneAdmission() {
+    static_assert(kDetailPvpSupport==1 && kDetailDynamicDrones==2 && kDetails==3,"independent legacy-compatible detail bits");
+    Room r(3);auto p=DronePlan();
+    Check(ValidPreparedDronePlan(p),"exact submarine child shape admitted by explicit prepared-drone contract");
+    r.With(1);Check(!r.nodes[1]->session->SubmitPrepared(p,r.now,PreparedKind::dynamicDrone),"guest cannot submit a prepared dynamic plan");
+    r.With(0);Check(!r.nodes[0]->session->SubmitPrepared(p,r.now),"default mission-crew entry still refuses dynamic plans");
+    Check(!r.nodes[0]->session->SubmitPrepared(p,r.now,static_cast<PreparedKind>(99)),"unknown prepared intent rejected");
+    for(unsigned mode=0;mode<20;++mode) {
+        auto bad=p;
+        switch(mode) {
+        case 0:bad.catalogId=15;break;
+        case 1:bad.catalogId=kMissionCrewCatalog;break;
+        case 2:bad.count=2;bad.units[1]=bad.units[0];bad.units[1].resourceId=1;bad.units[1].variant=0;break;
+        case 3:bad.units[0].role=1;break;
+        case 4:bad.units[0].variant=0;break;
+        case 5:std::memset(bad.requester,0,32);bad.team=0;break;
+        case 6:bad.requester[20]=1;break;
+        case 7:bad.units[0].resourceId=kExistingVehicle;bad.units[0].netId[0]=1;break;
+        case 8:bad.units[0].resourceId=crew::kSupportSubmarineResource;break;
+        case 9:bad.units[0].resourceId=crew::kSupportSubDroneResource+1;break;
+        case 10:bad.units[0].resourceId=crew::kSupportCarrierDroneBase-1;break;
+        case 11:bad.units[0].resourceId=crew::kSupportCarrierDroneBase+6;break;
+        case 12:bad.units[0].resourceId=crew::kSupportCarrierDroneBase+8;break;
+        case 13:bad.units[0].resourceId=crew::kSupportCarrierDroneBase+48;break;
+        case 14:bad.units[0].resourceId=crew::kSupportCarrierDroneBase+128;break;
+        case 15:bad.units[0].resourceId=1;break;
+        case 16:Derive(0x40000001u,bad.units[0].netId);break;
+        case 17:bad.units[0].matrix[0]=std::numeric_limits<float>::quiet_NaN();break;
+        case 18:bad.target[1]=std::numeric_limits<float>::infinity();break;
+        default:bad.team=3;break;
+        }
+        Check(!ValidPreparedDronePlan(bad) && !SubmitDrone(r,bad),"malformed or unrelated prepared plan fails closed without allocating transaction");
+    }
+    r.nodes[0]->reject=true;
+    Check(!SubmitDrone(r,p) && !r.nodes[0]->destroys,"preflight native Validate rejection returns no token and needs no reservation rollback");
+    r.nodes[0]->reject=false;Check(SubmitDrone(r,p)==1,"invalid/preflight-refused attempts consume no transaction or object IDs");r.Settle();
+    for(const auto& n:r.nodes)Check(n->spawns==1 && n->session->IsActive(1),"admitted dynamic plan completes real three-peer Session");
+    r.With(0);r.nodes[0]->session->Suspend();Check(!SubmitDrone(r,p),"not-ready/suspended host cannot prepare children");
+}
+void PreparedDroneResources() {
+    Room r(3);unsigned total=0;std::vector<std::array<unsigned char,32>> ids;
+    for(unsigned item=0;item<37;++item) {
+        const auto resource=item ? crew::CarrierDroneResource((item-1)/12,((item-1)/2)%6,((item-1)%2)!=0) : crew::kSupportSubDroneResource;
+        auto p=DronePlan(resource,1000+item);const auto token=SubmitDrone(r,p);Check(token==item+1,"all 37 exact dynamic resources receive a host transaction");r.Settle();
+        for(const auto& n:r.nodes)Check(n->session->IsActive(token) && n->last.units[0].resourceId==resource &&
+            n->last.units[0].variant==p.units[0].variant && !std::memcmp(n->last.requester,p.requester,32) && n->last.team==p.team,
+            "kind/slot/ordered and parent/owner/team survive real v2 three-peer codec unchanged");
+        std::array<unsigned char,32> id{};std::memcpy(id.data(),r.nodes[0]->last.units[0].netId,32);
+        for(const auto& prior:ids)Check(std::memcmp(prior.data(),id.data(),32)!=0,"derived child IDs never reuse an earlier deployment identity");
+        ids.push_back(id);++total;
+    }
+    Check(total==37 && r.nodes[0]->session->ActiveCount()==37,"all supported resource encodings use the normal shared Session capacity");
+}
+void PreparedDroneLifecycle() {
+    Room r(3);const auto p=DronePlan(crew::CarrierDroneResource(2,5,true));const auto token=SubmitDrone(r,p);
+    Check(token==1,"explicit dynamic plan accepted before ticking");r.dropTo=0;r.dropKind=Kind::ready;r.Settle();
+    for(const auto& n:r.nodes)Check(!n->spawns,"no native child exists until all prepare ACKs arrive");
+    const auto begin=Find(r,Kind::begin,1),unit=Find(r,Kind::unit,1),commitPlaceholder=begin;
+    static_cast<void>(commitPlaceholder);
+    Check(begin.message.catalog==kPreparedDroneCatalog && begin.message.unit.resourceId==kBeginRequesterMetadata && begin.message.unit.role==2,
+        "dynamic BEGIN carries the existing authenticated-owner metadata contract");
+    Check(unit.message.unit.resourceId==p.units[0].resourceId && unit.message.challenge==p.units[0].variant && unit.message.unit.netId[12]==5,
+        "dynamic unit gets a freshly derived native identity and preserved parent key");
+    r.dropTo=999;for(const auto& packet:r.history)if(packet.message.kind==Kind::ready && packet.message.ok)r.Deliver(packet);
+    r.dropTo=0;r.dropKind=Kind::result;r.Settle();
+    for(const auto& n:r.nodes)Check(n->spawns==1 && !n->session->IsActive(token),"all three registered children stay inactive before all commit results");
+    Check(!std::memcmp(&r.nodes[0]->last,&r.nodes[2]->last,sizeof(Plan)),"entire prepared child spec is identical on every peer");
+    r.dropTo=999;for(const auto& packet:r.history)if(packet.message.kind==Kind::result && packet.message.ok)r.Deliver(packet);
+    r.dropTo=2;r.dropKind=Kind::activate;r.Settle();
+    Check(r.nodes[0]->session->IsActive(token) && r.nodes[1]->session->IsActive(token) && !r.nodes[2]->session->IsActive(token),
+        "host sends final activation only after every creation result");
+    r.dropTo=999;r.Step(1100);r.Settle();for(const auto& n:r.nodes)Check(n->session->IsActive(token),"late activation reliably converges");
+    const auto commit=Find(r,Kind::commit,1);r.Deliver(begin);r.Deliver(unit);r.Deliver(commit);r.Settle();
+    for(const auto& n:r.nodes)Check(n->spawns==1,"replayed dynamic BEGIN/unit/commit cannot duplicate a child");
+    r.With(0);r.nodes[0]->session->Failed(token);r.Settle();
+    for(const auto& n:r.nodes)Check(!n->active[token] && !n->session->IsActive(token) && !n->destroyedTokens.empty() && n->destroyedTokens.back()==token,
+        "dynamic rollback destroys exactly its registered token on every peer");
+    r.Deliver(commit);r.Settle();Check(r.nodes[1]->spawns==1,"cancelled dynamic tombstone cannot resurrect on late commit");
+}
+void PreparedDroneFailure() {
+    for(unsigned mode=0;mode<5;++mode) {
+        Room r(3);const auto p=DronePlan();
+        if(mode==0)r.nodes[0]->rejectValidationAt=2;
+        if(mode==1)r.nodes[0]->failDerive=true;
+        if(mode==2)r.nodes[2]->reject=true;
+        if(mode==3){r.failTo=2;r.failKind=Kind::unit;}
+        if(mode==4)r.nodes[2]->failSpawn=true;
+        const auto token=SubmitDrone(r,p);Check(token==1,"failure fixture first passes host admission");r.Settle();
+        Check(r.nodes[0]->destroys>=1 && r.nodes[0]->destroyedTokens.front()==token,
+            "accepted token always reaches host Destroy even when failure precedes any native create");
+        for(const auto& n:r.nodes)Check(!n->active[token] && !n->session->IsActive(token),"prepare/derive/native/enqueue failure rolls back every peer");
+        if(mode<4)for(const auto& n:r.nodes)Check(!n->spawns,"failure before commit creates no native objects");
+        else for(const auto& n:r.nodes)Check(n->destroys>=1,"native create failure releases every committed copy");
+    }
+}
+void PreparedDroneChannels() {
+    {Room r(3);auto first=DronePlan(crew::CarrierDroneResource(0,0,false));Check(SubmitDrone(r,first)==1,"first carrier slot pending");
+     auto same=first;same.units[0].resourceId=crew::CarrierDroneResource(0,0,true);Check(!SubmitDrone(r,same),"ordered bit cannot bypass pending slot mutex");
+     same.units[0].resourceId=crew::CarrierDroneResource(2,0,false);Check(!SubmitDrone(r,same),"kind cannot bypass same-parent pending slot mutex");
+     same.units[0].resourceId=crew::kSupportSubDroneResource;Check(!SubmitDrone(r,same),"submarine's unslotted child serializes same-parent pending request");
+     auto second=first;second.units[0].resourceId=crew::CarrierDroneResource(0,1,false);Check(SubmitDrone(r,second)==2,"another slot of the same carrier can prepare concurrently");
+     auto other=first;other.units[0].variant=999;Check(SubmitDrone(r,other)==3,"another carrier can prepare concurrently");
+     Check(r.Submit(1,5),"dynamic children do not block ordinary map channel");r.Settle();
+     for(const auto& n:r.nodes)Check(n->session->ActiveCount()==4,"independent channels still complete every real prepare/commit/activate");
+     Check(SubmitDrone(r,first)==5,"active prior transaction cannot permanently block native-approved reuse of a carrier slot");r.Settle();
+     r.With(0);r.nodes[0]->session->Failed(5);r.Settle();
+     for(const auto& n:r.nodes)Check(n->session->IsActive(1) && n->session->IsActive(2) && n->session->IsActive(3) && n->session->IsActive(4),
+        "one dynamic child rollback leaves other slots/parents/map transaction alive");}
+    {Room r(3);r.nodes[0]->pending=true;r.nodes[0]->pendingCatalog=5;Check(r.Submit(1,5),"ordinary map terrain planning pending");r.Settle();
+     Check(SubmitDrone(r,DronePlan())==2,"map planning cannot starve independent submarine child channel");r.Settle();
+     std::uint64_t childTokens[3]{};
+     for(unsigned i=0;i<3;++i){const auto& n=r.nodes[i];childTokens[i]=n->lastToken;Check(n->spawns==1 && n->session->IsActive(childTokens[i]),"child activates while ordinary planner is still pending");}
+     r.With(0);r.nodes[0]->session->Failed(2);r.Settle();r.nodes[0]->pending=false;r.Settle();
+     for(unsigned i=0;i<3;++i){const auto& n=r.nodes[i];Check(n->session->IsActive(n->lastToken) && !n->active[childTokens[i]],"child cancellation does not cancel pending ordinary transaction");}}
+}
+void PreparedDroneDetails() {
+    {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.legacyDetails=kDetailPvpSupport;r.Step(1100);r.Settle();
+     Check(r.nodes[0]->session->PeersHaveDetails(kDetailPvpSupport) && !r.nodes[0]->session->PeersHaveDetails(kDetailDynamicDrones),
+        "PVP-only old endpoint is distinguished from dynamic-child capable endpoint");
+     Check(!SubmitDrone(r,DronePlan()),"one old detail endpoint rejects dynamic admission before allocating a token");
+     bool began=false;for(const auto& packet:r.history)began=began || packet.message.kind==Kind::begin;
+     Check(!began,"no dynamic BEGIN is sent to an old detail endpoint");
+     Check(r.Submit(1,5),"old endpoint retains ordinary map support");r.Settle();for(const auto& n:r.nodes)Check(n->spawns==1,"legacy stock support behavior preserved");}
+    for(bool assembled:{false,true}) {
+        Room r(3);if(assembled){r.dropTo=0;r.dropKind=Kind::ready;}else{r.dropTo=1;r.dropKind=Kind::prepare;}
+        Check(SubmitDrone(r,DronePlan())==1,"dynamic capability-loss fixture accepted");r.Settle();
+        Packet welcome{};for(const auto& packet:r.history)if(packet.to==1 && packet.message.kind==Kind::welcome)welcome=packet;
+        welcome.message.unit.role=kDetailPvpSupport;r.Deliver(welcome);
+        Packet step{0,1,{}};step.message.epoch=r.nodes[1]->session->Epoch();step.message.transaction=1;
+        step.message.kind=Kind::prepare;r.Deliver(step);step.message.kind=Kind::commit;r.Deliver(step);
+        Check(!r.nodes[1]->spawns,"guest rechecks dynamic capability at prepare and immediately before native create");
+    }
+    for(bool spawned:{false,true}) {
+        Room r(3);r.dropTo=0;r.dropKind=spawned ? Kind::result : Kind::ready;
+        Check(SubmitDrone(r,DronePlan())==1,"host capability-loss fixture accepted");r.Settle();
+        r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtensions;r.legacyDetails=kDetailPvpSupport;r.Step(1100);r.Settle();
+        for(const auto& n:r.nodes)Check(!n->active[1] && !n->session->IsActive(1),"host capability loss before commit/finalize rolls back dynamic transaction");
+        if(!spawned)for(const auto& n:r.nodes)Check(!n->spawns,"capability withdrawn before commit never creates children");
+        else for(const auto& n:r.nodes)Check(n->spawns==1 && n->destroys>=1,"registered children roll back when capability disappears before activate");
+    }
+}
+} // namespace
+int main() { PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();std::printf("support protocol: %d checks passed\n",checks); }

@@ -897,14 +897,16 @@ def range_files(sgo_name: str) -> tuple[str, ...]:
     """The generated Mods files a range row needs (also the M-map availability contract).
 
     The tracked builders emit one authored MRAB and their complete native weapon
-    set; Root.cpk still supplies the unchanged skeleton's CAS/SHKT dependencies.
+    set and fitted collision; Root.cpk still supplies the native CAS dependency.
     A call-in SGO is not used by the range and must not be claimed on its behalf.
     """
     own = f'OBJECT/{sgo_name.upper()}.SGO'
     vehicle = TRACKED_MISSION.get(sgo_name)
     if vehicle is None:
         return (own,)
-    return (own, f'OBJECT/{vehicle.sgo}.MRAB',
+    from make_tracked_combat import animation_path, collision_path
+    kind = sgo_name.removeprefix(DERIVED_PREFIX).removesuffix('_mission')
+    return (own, f'OBJECT/{vehicle.sgo}.MRAB', collision_path(kind), animation_path(kind),
             *(path.removeprefix('app:/').upper() for path in vehicle.weapons))
 
 

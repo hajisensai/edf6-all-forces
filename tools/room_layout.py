@@ -6,6 +6,11 @@ online room's and the offline HQ's stock layouts with the menu's elements added,
   Mods/UI/EDF6VC_WHITE.DDS        a plain white 8 x 8 texture the plugin binds to the panel and the chips and tints
                                   (Root.cpk has no plain one; the format is UI/CHATSHORTCUT_CURSOR.DDS's: 32-bit BGRA)
 
+A vcLoad Button definition inherits the screen's original menu button. It is deliberately absent from layout_tree;
+src/room_ui.cpp creates it under the real native button group with HUiLayout::AddByName only after validation.
+Without the plugin there is no instance and no extra focus stop. Mouse, keyboard and pad activation are the native
+Button Click event, with a native weak screen callback whose lifetime ends with the screen.
+
 Every stock member is kept as it is (the values read back unchanged, the file written in the stock files' own layout:
 pylib/sgo.py write_depth_first reproduces both stock files byte for byte); the menu's members are added (names starting
 `vc`, none in the stock files) and one subtree is appended as BaseFrame's last child (drawn last: over the screen).
@@ -100,6 +105,7 @@ def status_name(i: int) -> str:
 
 ROOT, BACK, HEAD, HINT = PREFIX + 'Root', PREFIX + 'Back', PREFIX + 'Head', PREFIX + 'Hint'
 HELP2, HELP3, ENTRY = PREFIX + 'Help2', PREFIX + 'Help3', PREFIX + 'Entry'
+NATIVE_ENTRY = PREFIX + 'Load'  # a definition only: instantiated by the native AddByName after the plugin validates
 ROW_PARTS = ('T', 'A', 'B', 'I', 'N')   # text, primary chip, secondary chip, icon, note
 
 
@@ -126,6 +132,19 @@ def elements() -> dict[str, list]:
     for i in range(STATUS_LINES):
         e[status_name(i)] = _text(UNIT_X, STATUS_Y + i * STATUS_STEP, 1000.0, 34.0, 20)
     return e
+
+
+def native_entry(room: bool) -> list:
+    """A native Button definition, deliberately not in the initial tree.
+
+    The online room has eight 48px menu buttons at 58px intervals and chat starts at y=747. The new final row uses
+    its stock 440px width/skin with a 2px leading gap and 34px height, ending at 744 instead of entering the chat area.
+    HQ has sufficient height for the unchanged 42px/28px original button template, including split-screen menus.
+    """
+    props: list = [['text_dr', '']]
+    if room:
+        props += [['pos', [0.0, 2.0, 0.0]], ['area', [0.0, 0.0, 440.0, 34.0]], ['font_size', [22, 22]]]
+    return [[0, 'Button03Base' if room else 'Button02Base'], props]
 
 
 def white_dds() -> bytes:
@@ -184,6 +203,9 @@ def patch(stock: bytes) -> bytes:
     out = dict(members)
     out['layout_tree'] = tree
     out.update(ours)
+    # The game's own HQ creates its normal menu buttons this way too (0x8456D0). A member outside layout_tree is
+    # inert without the plugin: no drawing, no empty focus stop, and no callback can point into an absent DLL.
+    out[NATIVE_ENTRY] = native_entry(members['xgs_ui_object_class'] == 'HUiRoom')
     data = sgo.write_depth_first(version, out)
     if strip(data) != stock:
         raise AssertionError('补丁后去掉新增部分不等于原版文件')

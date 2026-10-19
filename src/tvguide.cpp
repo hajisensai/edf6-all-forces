@@ -73,9 +73,11 @@ std::atomic<bool> holding{false};
 struct View { bool on; const void* human; float eye[3],look[3]; ULONGLONG at; };
 View view{};
 SRWLOCK lock=SRWLOCK_INIT;
+ObjRef inputOwner{}; // published identity, retained through TV release/drain
 
 void Publish(bool on,const float* eye,const float* look) noexcept {
     AcquireSRWLockExclusive(&lock);
+    inputOwner=tv.owner;
     view.on=on && tv.viewOn;view.human=tv.owner.obj;view.at=tv.seen;
     if(on && eye && look){std::memcpy(view.eye,eye,12);std::memcpy(view.look,look,12);}
     ReleaseSRWLockExclusive(&lock);
@@ -202,6 +204,7 @@ bool TvSteer(unsigned char* b) noexcept {
     if(ours){ReleaseRound(b);return false;}
     if(tv.active || tv.draining || !Available() || !IsPlayersTempest(b,age))return false;
     tv=Tv{};tv.round=ObjRef::Of(b);tv.owner=ObjRef::Of(PlayerHuman());tv.age=age;tv.seen=GameMs();tv.active=true;tv.viewOn=true;
+    Publish(false,nullptr,nullptr); // publish exact input owner before exposing its hold
     holding.store(true);
     Put<std::uint32_t>(b,kDelay,kTvHomingDelay);
     Log("TV take: the player's Tempest %p at %d frames",static_cast<void*>(b),age);
@@ -256,6 +259,14 @@ bool TvView(const void** human,float* eye,float* look) noexcept {
 }
 
 bool TvHoldsKeys() noexcept { return holding.load(std::memory_order_relaxed); }
+bool TvHoldsHumanKeys(const unsigned char* human) noexcept {
+    if(!human)return false;
+    AcquireSRWLockShared(&lock);
+    const ObjRef owner=inputOwner;const bool held=holding.load(std::memory_order_relaxed);
+    ReleaseSRWLockShared(&lock);
+    __try {return held && owner.Is(human);}
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 
 void ResetTv() noexcept {
     tv=Tv{};holding.store(false);

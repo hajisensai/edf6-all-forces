@@ -35,6 +35,14 @@
 #include "gunnerrecoil.h"
 #include "memory.h"
 #include "subcarrier.h"
+#include "enemy_control.h"
+#include "enemy_control_net.h"
+#include "enemy_control_legacy.h"
+#include "enemy_control_weapon_aim.h"
+#include "enemy_control_radar.h"
+#include "pvp_controlled_spawn.h"
+#include "enemy_control_pvp_native.h"
+#include "vulcan_rotor.h"
 #include "edf/host.h"
 #include "version.h"
 #include "pack_notice.h"
@@ -705,6 +713,7 @@ void LoadConfig() noexcept {
     n.firstPerson=ReadBool(L"FirstPerson",n.firstPerson);
     n.fpVehicle=ReadBool(L"FirstPersonVehicle",n.fpVehicle);
     n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);
+    n.enemyControl=ReadBool(L"EnemyControl",n.enemyControl);
     n.thermal=ReadBool(L"VehicleThermal",n.thermal);
     n.thermalKey=ReadInt(L"VehicleThermalKey",static_cast<DWORD>(n.thermalKey));
     n.firstPersonKey=ReadInt(L"FirstPersonKey",static_cast<DWORD>(n.firstPersonKey));
@@ -923,6 +932,7 @@ void LoadConfig() noexcept {
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
         n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
         n.debugSpawnDistance);
+    Log("CONFIG enemyControl=%d",n.enemyControl);
     Log("CONFIG rangePlace=%d all=%d",n.rangePlace,n.rangePlaceAll);
     Log("CONFIG roomLoadout=%d preSync=%d key=0x%X button=0x%X",n.roomLoadout,n.roomPreSync,n.roomLoadoutKey,n.roomLoadoutButton);
     Log("CONFIG allClassesRide=%d",n.allClassesRide);
@@ -1167,6 +1177,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     thermal::Install();    // mesh heat/depth passes, inert in optical mode
     InstallViewDepth();    // shared decal reconstruction follows the actual inverse projection
     InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)
+    Log("ENEMY CONTROL native hooks=%d",InstallEnemyControl());
+    Log("ENEMY CONTROL legacy adapters=%d",InstallEnemyControlLegacy());
+    Log("ENEMY CONTROL network bridge=%d",InstallEnemyControlNetwork());
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
@@ -1196,6 +1209,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallGuidance();      // the stock homing rounds by proportional navigation
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
     Log("EDF41 original sidecar hooks=%d",InstallEdf41Bike());
+    Log("M163 visual rotor=%d",InstallVulcanRotor());
     InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked
     Log("PVP native hooks=%d",InstallPvp());
     InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
@@ -1214,6 +1228,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEdf41Robo();      // EDF4.1's UfoRobo (ini Edf41Robo; edf41robo.cpp)
     InstallEdf41Deiroi();    // a stock crash 4.1's M412 reaches (edf41deiroi.cpp)
     InstallEdf41Mother401(); // EDF4.1's UfoMother401 (ini Edf41Mother401; edf41mother401.cpp)
+    Log("ENEMY CONTROL radar=%d",InstallEnemyControlRadar());
+    Log("ENEMY CONTROL spawn ownership=%d",InstallControlledPvpSpawnBridge());
+    Log("ENEMY CONTROL native PVP ownership=%d",EnemyControlNativePvpInstall());
+    Log("ENEMY CONTROL weapon aiming=%d",InstallEnemyControlWeaponAim());
     InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);

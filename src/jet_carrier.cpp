@@ -2,6 +2,11 @@
 // drone's way back and docking; the blast and doll drones' charges and the dolls they carry.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "pvp.h"
+#include "support_drone.h"
+#include "support_net.h"
+#include "online_authority.h"
+#include "support_soldier.h"
 
 namespace crew {
 namespace jet {
@@ -142,7 +147,7 @@ bool DroneOut(const Jet& c,int i) noexcept {
 void ReplaceLost(Jet& c,ULONGLONG ms) noexcept {
     CarrierState& cs=c.carrier;
     for(int i=0;i<kCarrierDrones;++i) {
-        if(cs.dock[i]!=kDroneOut || DroneOut(c,i))continue;
+        if(cs.transaction[i].pending || cs.dock[i]!=kDroneOut || DroneOut(c,i))continue;
         cs.dock[i]=ms+kReplaceMs;
         Log("JET v=%p carrier: drone %d lost, a new one in %.0f s",c.Vehicle(),i,static_cast<float>(kReplaceMs)*0.001f);
     }
@@ -154,8 +159,10 @@ void ReplaceLost(Jet& c,ULONGLONG ms) noexcept {
 bool LaunchOne(Jet& c,const float* pos,const float* nose,const float* aim,const void* target,ULONGLONG ms) noexcept {
     CarrierState& cs=c.carrier;
     int i=0;
-    while(i<kCarrierDrones && cs.dock[i]>ms)++i;
-    if(i==kCarrierDrones || cs.sorties<=0 || !SlotFree())return false;
+    const bool guest=InSession() && !OnlineHostOnly();
+    while(i<kCarrierDrones && (cs.transaction[i].token || DroneOut(c,i) || (!guest && cs.dock[i]>ms)))++i;
+    int reserved=0;for(const auto& slot:cs.transaction)reserved+=slot.pending ? 1 : 0;
+    if(i==kCarrierDrones || (!guest && (cs.sorties<=reserved || !SlotFree())))return false;
     cs.launchAt=ms;
     float heading[3]={c.m.vel[0],0.0f,c.m.vel[2]};
     if(!Normalize(heading)){heading[0]=nose[0];heading[1]=0.0f;heading[2]=nose[2];}
@@ -163,6 +170,14 @@ bool LaunchOne(Jet& c,const float* pos,const float* nose,const float* aim,const 
     // Its own drones (blast, doll: its body's mark says which) when their body is there this mission, else the gun drone.
     const Kind& own=KindOf(cs.drones);
     const Body b=own.weapon==Weapon::charge && Preloaded(own.body) ? own.body : Body::drone;
+    if(InSession()) {
+        const SupportDroneKind kind=b==Body::blast ? SupportDroneKind::blast : b==Body::doll ? SupportDroneKind::doll : SupportDroneKind::gun;
+        const auto token=SubmitCarrierSupportDrone(c.ref,from,heading,aim,kind,static_cast<unsigned>(i));
+        if(!token)return false;
+        if(token==kCarrierDroneRequestQueued)return true; // guest request only: native Session prepare will reserve later
+        if(!ReserveCarrierSupportDrone(c.ref,static_cast<unsigned>(i),token)){ReportSupportFailure(token);return false;}
+        return true; // a slot remains reserved until every peer has prepared and activated the exact body
+    }
     const float least=KindOf(Row(b).role).minSpeed,s=Len(c.m.vel)+20.0f;
     Jet* d=Launch(b,from,heading,aim,Cfg().jetFuelSec,s>least ? s : least,c.Vehicle());
     if(!d)return false;
@@ -175,6 +190,61 @@ bool LaunchOne(Jet& c,const float* pos,const float* nose,const float* aim,const 
     return true;
 }
 }  // namespace
+
+namespace {
+Jet* CarrierEntry(const ObjRef& parent,bool create) noexcept {
+    if(!Alive(parent))return nullptr;
+    auto* v=static_cast<unsigned char*>(const_cast<void*>(parent.obj));
+    if(v[kDead])return nullptr;
+    Jet* c=FindJet(v);
+    if(!c && create) {
+        Role role{};if(!IsJetVehicle(v,&role,nullptr) || KindOf(role).weapon!=Weapon::drones)return nullptr;
+        c=NewEntry(v,GameMs());if(!c)return nullptr;
+        c->supportMetadata=true;c->mode=Mode::patrol;
+        std::memcpy(c->anchor,v+kPosition,12);JoinFlight(*c,NewFlight());
+    }
+    return c && c->ref.ctrl==parent.ctrl && KindOf(*c).weapon==Weapon::drones ? c : nullptr;
+}
+}
+bool ReserveCarrierSupportDroneImpl(const ObjRef& parent,unsigned slot,std::uint64_t token) noexcept {
+    if(slot>=kCarrierDrones || !token || token==kCarrierDroneRequestQueued)return false;
+    Jet* c=CarrierEntry(parent,true);if(!c)return false;
+    auto& held=c->carrier.transaction[slot];
+    if(held.token==token)return true;
+    const bool guest=InSession() && !OnlineHostOnly();
+    if(held.token || token<=held.lastToken || DroneOut(*c,static_cast<int>(slot)) || (!guest && c->carrier.dock[slot]==kDroneOut))return false;
+    int reserved=0;for(const auto& item:c->carrier.transaction)reserved+=item.pending ? 1 : 0;
+    if(!guest && c->carrier.sorties<=reserved)return false;
+    held.token=held.lastToken=token;held.pending=true;return true;
+}
+bool ConfirmCarrierSupportDroneImpl(const ObjRef& parent,unsigned slot,std::uint64_t token) noexcept {
+    if(slot>=kCarrierDrones || !token || token==kCarrierDroneRequestQueued)return false;
+    Jet* c=CarrierEntry(parent,false);if(!c)return false;
+    auto& held=c->carrier.transaction[slot];
+    if(held.token!=token)return false;
+    if(!held.pending)return true;
+    if(c->carrier.sorties<=0 && !(InSession() && !OnlineHostOnly()))return false;
+    held.pending=false;c->carrier.dock[slot]=kDroneOut;
+    if(c->carrier.sorties>0)--c->carrier.sorties;
+    if(held.ordered) {
+        std::memcpy(c->carrier.order,held.order,12);c->carrier.ordered=true;
+        for(auto& child:jets)if(child.ref && child.drone.mother==parent.ctrl)child.t.target=nullptr;
+        held.ordered=false;
+    }
+    return true;
+}
+bool CancelCarrierSupportDroneImpl(const ObjRef& parent,unsigned slot,std::uint64_t token) noexcept {
+    if(slot>=kCarrierDrones || !token || token==kCarrierDroneRequestQueued)return false;
+    // A deleted parent's cached metadata can still drain its exact pending token.
+    for(auto& c:jets)if(c.ref.obj==parent.obj && c.ref.ctrl==parent.ctrl && c.ref.obj) {
+        auto& held=c.carrier.transaction[slot];
+        if(!held.token)return held.lastToken==token;
+        if(held.token!=token)return false;
+        if(!held.pending && c.carrier.dock[slot]==kDroneOut)c.carrier.dock[slot]=GameMs()+kReplaceMs;
+        held.token=0;held.pending=false;held.ordered=false;return true;
+    }
+    return false;
+}
 
 Jet* MotherOf(const Jet& d) noexcept {
     if(!d.drone.mother)return nullptr;
@@ -203,7 +273,9 @@ bool Recover(const Jet& d,const Jet& mother,const float* pos,float* want,float* 
 
 // Docked: the drone is deleted (JetReap) and its place on the carrier ready kRearmMs on.
 void Dock(Jet& d,Jet& mother,ULONGLONG ms) noexcept {
-    if(d.drone.slot>=0 && d.drone.slot<kCarrierDrones)mother.carrier.dock[d.drone.slot]=ms+kRearmMs;
+    if(d.drone.slot>=0 && d.drone.slot<kCarrierDrones &&
+       (!d.drone.token || mother.carrier.transaction[d.drone.slot].token==d.drone.token))
+        mother.carrier.dock[d.drone.slot]=ms+kRearmMs;
     Log("JET v=%p docked on carrier %p (place %d), ready again in %.0f s",d.Vehicle(),mother.Vehicle(),d.drone.slot,
         static_cast<float>(kRearmMs)*0.001f);
     d.reap=true;d.drone.mother=nullptr;d.drone.carried=false;d.why="docked";
@@ -253,28 +325,46 @@ bool PlayerLaunchDrone(unsigned char* v,const float* at,ULONGLONG ms) noexcept {
     if(ms-c->carrier.launchAt<kLaunchGapMs)return false;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
-    std::memcpy(c->carrier.order,at,12);c->carrier.ordered=true;
-    for(auto& d:jets)if(d.ref && d.drone.mother==c->ref.ctrl)d.t.target=nullptr;   // the drones out pick again round the new point
+    if(!InSession()) {
+        std::memcpy(c->carrier.order,at,12);c->carrier.ordered=true;
+        for(auto& d:jets)if(d.ref && d.drone.mother==c->ref.ctrl)d.t.target=nullptr;
+    } // online order changes commit with the authenticated child transaction, not a local key press
     return LaunchOne(*c,pos,m+8,at,nullptr,ms);
 }
 
 // Its drones out called back to it (Mode::recover: Recover, Dock); how many.
-int RecallDrones(unsigned char* v,ULONGLONG ms) noexcept {
-    Jet* const c=FindJet(v);
-    if(!c)return 0;
+int ApplyCarrierSupportRecallImpl(const ObjRef& parent,ULONGLONG ms) noexcept {
+    Jet* const c=CarrierEntry(parent,false);if(!c)return 0;
     c->carrier.ordered=false;
     int n=0;
     for(auto& d:jets) {
-        if(!d.ref || d.drone.mother!=c->ref.ctrl || d.reap || d.mode==Mode::recover || d.mode==Mode::withdraw || d.drone.blastAt)continue;
+        if(!d.ref || d.supportPending || d.drone.mother!=c->ref.ctrl || d.reap || d.mode==Mode::recover ||
+           d.mode==Mode::withdraw || d.drone.blastAt)continue;
         SetMode(d,Mode::recover,ms);++n;
     }
-    if(n)Log("JET v=%p carrier: %d drones called back by the player",v,n);
+    if(n)Log("JET v=%p carrier: %d drones recalled by authenticated driver",parent.obj,n);
     return n;
+}
+int RecallDrones(unsigned char* v,ULONGLONG ms) noexcept {
+    Jet* const c=FindJet(v);if(!c)return 0;
+    if(InSession())return SubmitCarrierSupportRecall(c->ref) ? 1 : 0;
+    return ApplyCarrierSupportRecallImpl(c->ref,ms);
+}
+bool CarrierSupportSlotAvailableImpl(const ObjRef& parent,unsigned slot) noexcept {
+    if(slot>=kCarrierDrones || (InSession() && !OnlineHostOnly()))return false;
+    unsigned char id[32]{};
+    if(!Alive(parent) || !ReadNativeObjectId(static_cast<const unsigned char*>(parent.obj),id))return false;
+    Jet* c=CarrierEntry(parent,true);if(!c)return false;
+    int reserved=0;for(const auto& item:c->carrier.transaction)reserved+=item.pending ? 1 : 0;
+    return !c->carrier.transaction[slot].token && c->carrier.dock[slot]<=GameMs() &&
+        c->carrier.sorties>reserved && !DroneOut(*c,static_cast<int>(slot));
 }
 
 int DronesLeft(const unsigned char* v) noexcept {
     const Jet* const c=FindJet(v);
-    return c && KindOf(*c).weapon==Weapon::drones ? c->carrier.sorties : 0;
+    if(!c || KindOf(*c).weapon!=Weapon::drones)return 0;
+    int pending=0;for(const auto& item:c->carrier.transaction)pending+=item.pending ? 1 : 0;
+    return c->carrier.sorties>pending ? c->carrier.sorties-pending : 0;
 }
 
 bool OutOfDrones(const Jet& c) noexcept {
@@ -285,7 +375,9 @@ bool OutOfDrones(const Jet& c) noexcept {
 
 void Detonate(Jet& j,Jet* mother,float dist,ULONGLONG ms) noexcept {
     j.drone.blastAt=ms;
-    if(mother && j.drone.slot>=0 && j.drone.slot<kCarrierDrones)mother->carrier.dock[j.drone.slot]=ms+kRearmMs;
+    if(mother && j.drone.slot>=0 && j.drone.slot<kCarrierDrones &&
+       (!j.drone.token || mother->carrier.transaction[j.drone.slot].token==j.drone.token))
+        mother->carrier.dock[j.drone.slot]=ms+kRearmMs;
     j.drone.mother=nullptr;
     Log("JET v=%p %s detonates %.1f m from %p",j.Vehicle(),KindOf(j).name,dist,j.t.target);
 }
@@ -300,26 +392,40 @@ void Blast(Jet& j,unsigned char* v,ULONGLONG ms) noexcept {
 }
 
 // The doll of doll drone `i` (`v`), the three in turn, living `lifeSec`; none when it cannot be made.
-void DollMake(int i,const unsigned char* v,DWORD lifeSec) noexcept {
+bool DollReady() noexcept {return dollOk;}
+bool DollMake(int i,const unsigned char* v,DWORD lifeSec) noexcept {
     DollFree(i);
-    if(!dollOk || !At<void*>(image,kObjectMgr))return;
+    if(!dollOk || !At<void*>(image,kObjectMgr))return false;
     static unsigned next=0;
-    const wchar_t* const sgo=kDollSgo[next++%(sizeof(kDollSgo)/sizeof(kDollSgo[0]))];
+    unsigned variant=next++;
+    if(jets[i].supportDrone) {
+        unsigned char id[32]{};if(!ReadNativeObjectId(v,id))return false;
+        variant=2166136261u;for(unsigned char byte:id)variant=(variant^byte)*16777619u;
+    }
+    const wchar_t* const sgo=kDollSgo[variant%(sizeof(kDollSgo)/sizeof(kDollSgo[0]))];
     DollPose(i,v,GroundClearance(reinterpret_cast<const float*>(v+kPosition)));
     unsigned char* const d=DollCreate(sgo,dolls[i].m);
-    if(!d){Log("JET doll %ls: not made (DLC not installed?)",sgo);return;}
+    if(!d){Log("JET doll %ls: not made (DLC not installed?)",sgo);return false;}
+    bool kept=false;
     __try {
-        if(At<const void*>(d,0)!=image+kDecoyVtable) {
-            Log("JET doll %ls: %p is no Decoy: deleted",sgo,d);
-            reinterpret_cast<DeleteFn>(image+kDelete)(d);
-            return;
+        if(At<const void*>(d,0)!=image+kDecoyVtable)Log("JET doll %ls: %p is no Decoy: deleted",sgo,d);
+        else {
+            reinterpret_cast<SetTeamFn>(image+kSetTeam)(d,kTeamDecoy,true);
+            const DWORD frames=lifeSec<0x1000000 ? lifeSec*60 : 0x3C000000;
+            reinterpret_cast<DecoySetupFn>(image+kDecoySetup)(d,dolls[i].m,kDollHp,static_cast<std::int32_t>(frames));
+            const ObjRef child=ObjRef::Of(d);
+            if(PvpInheritSupport(ObjRef::Of(v),&child,1)) {
+                dolls[i].obj=d;dolls[i].ctrl=child.ctrl;kept=true;
+                Log("JET doll %ls (%p) on drone %p",sgo,d,v);
+            }
         }
-        reinterpret_cast<SetTeamFn>(image+kSetTeam)(d,kTeamDecoy,true);
-        const DWORD frames=lifeSec<0x1000000 ? lifeSec*60 : 0x3C000000;
-        reinterpret_cast<DecoySetupFn>(image+kDecoySetup)(d,dolls[i].m,kDollHp,static_cast<std::int32_t>(frames));
-        dolls[i].obj=d;dolls[i].ctrl=At<const void*>(d,kSelfCtrl);
-        Log("JET doll %ls (%p) on drone %p",sgo,d,v);
     } __except(FaultLog("JET doll setup",GetExceptionInformation())){}
+    if(!kept) __try {
+        if(At<const void*>(d,0)==image+kDecoyVtable)Put<const void*>(d,kDecoyFollow,nullptr);
+        PvpForgetSupportObject(ObjRef::Of(d));
+        reinterpret_cast<DeleteFn>(image+kDelete)(d);
+    } __except(FaultLog("JET doll rollback",GetExceptionInformation())){}
+    return kept;
 }
 
 // Doll `i` deleted (if it is still the one made), after it stops following the plugin's matrix.
@@ -329,6 +435,7 @@ void DollFree(int i) noexcept {
     unsigned char* const o=d.obj;
     d.obj=nullptr;
     if(!o)return;
+    PvpForgetSupportObject(ObjRef{o,d.ctrl});
     __try {
         if(Readable(o,kDecoyFollow+8) && At<const void*>(o,0)==image+kDecoyVtable && At<const void*>(o,kSelfCtrl)==d.ctrl &&
            !(o[kObjFlags]&kObjDeleted)) {
@@ -353,7 +460,7 @@ void DollsFollow() noexcept {
 }
 
 void ResetDolls() noexcept {
-    for(auto& d:dolls){d.obj=nullptr;d.ctrl=nullptr;}
+    for(auto& d:dolls){PvpForgetSupportObject(ObjRef{d.obj,d.ctrl});d.obj=nullptr;d.ctrl=nullptr;}
 }
 
 bool PreloadDolls(void* mgr,bool dollBody) noexcept {
@@ -367,4 +474,32 @@ bool InstallDolls() noexcept {
     return dollOk;
 }
 }  // namespace jet
+bool CarrierSupportSlotAvailable(const ObjRef& parent,unsigned slot) noexcept {
+    __try {return jet::CarrierSupportSlotAvailableImpl(parent,slot);} __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+int ApplyCarrierSupportRecall(const ObjRef& parent) noexcept {
+    if(InSession() && !OnlineHostOnly())return 0;
+    __try {return jet::ApplyCarrierSupportRecallImpl(parent,GameMs());} __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
+}
+bool ReserveCarrierSupportDrone(const ObjRef& parent,unsigned slot,std::uint64_t token) noexcept {
+    __try {return jet::ReserveCarrierSupportDroneImpl(parent,slot,token);} __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool ConfirmCarrierSupportDrone(const ObjRef& parent,unsigned slot,std::uint64_t token) noexcept {
+    __try {return jet::ConfirmCarrierSupportDroneImpl(parent,slot,token);} __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+void CancelCarrierSupportTransaction(std::uint64_t token) noexcept {
+    if(!token || token==kCarrierDroneRequestQueued)return;
+    __try {
+        // Entries hold weak identities. No native object/driver/source access is permitted in this teardown path.
+        for(auto& carrier:jet::jets) {
+            if(!carrier.ref || jet::KindOf(carrier).weapon!=jet::Weapon::drones)continue;
+            for(unsigned slot=0;slot<jet::kCarrierDrones;++slot)
+                if(carrier.carrier.transaction[slot].token==token)
+                    jet::CancelCarrierSupportDroneImpl(carrier.ref,slot,token);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+bool CancelCarrierSupportDrone(const ObjRef& parent,unsigned slot,std::uint64_t token) noexcept {
+    __try {return jet::CancelCarrierSupportDroneImpl(parent,slot,token);} __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 }  // namespace crew

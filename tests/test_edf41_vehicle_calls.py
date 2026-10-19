@@ -56,7 +56,7 @@ class VehicleCalls(unittest.TestCase):
 
     def test_408_keeps_one_gunner_gun_instead_of_503_two_guns_and_fuel(self):
         source = [[1.7, 1.7], [0.1, 10, 0.02, 1, 0.2, 0.8],
-                  [['app:/weapon/v_408motorbike_gun.sgo', [12, 13], [90, .015, .1]]]]
+                  [['app:/weapon/v_408motorbike_gun.sgo', ['AimRecoil', [.002618, .0062832]], [90, .015, .1]]]]
         donor = [[1, 1], [0.1] * 6, [4000, 1],
                  [['stock_l', [0, 0]], ['stock_r', [0, 0]], ['app:/weapon/v_fuel01.sgo']]]
         members = {'Ammo_CustomParameter': [0, 0, 0, 0, ['a', 'b', 'c', source]]}
@@ -64,7 +64,7 @@ class VehicleCalls(unittest.TestCase):
         setup = values(converted.get('Ammo_CustomParameter').items[4].items[3])
         self.assertEqual(setup[:2], source[:2])
         self.assertEqual(len(setup), 3)
-        self.assertEqual(setup[2], [['app:/weapon/edf41_v_408motorbike_gun.sgo', [12, 13], [90, .015, .1]]])
+        self.assertEqual(setup[2], [['app:/weapon/edf41_v_408motorbike_gun.sgo', [0.0, 0.0], [90, .015, .1]]])
 
     def test_bundled_call_snapshot_matches_actual_ported_vehicle(self):
         import json
@@ -90,6 +90,7 @@ class VehicleCalls(unittest.TestCase):
                     self.assertEqual(len(setup), 3)
                     self.assertEqual(len(setup[2]), 1)
                     self.assertEqual(setup[2][0][0], 'app:/weapon/edf41_v_408motorbike_gun.sgo')
+                    self.assertEqual(setup[2][0][1], [0.0, 0.0])
                 if call['vehicle'].startswith('vehicle406_begaruta'):
                     self.assertEqual(len(setup[4]), 6)
                     self.assertTrue(all('v_406begaruta_' in gun[0] for gun in setup[4] if isinstance(gun[0], str)))

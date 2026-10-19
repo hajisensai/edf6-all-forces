@@ -84,7 +84,7 @@ class RangeCatalogTests(unittest.TestCase):
                 row = rows[name]
                 dependencies = catalog.files_of(row)
                 self.assertEqual(dependencies, list(gen.range_files(name)))
-                self.assertEqual(len(dependencies), 4 if 'vulcan' in name else 5)
+                self.assertEqual(len(dependencies), 6 if 'vulcan' in name else 7)
                 for rel in dependencies:
                     path = Path(root, 'Mods', *rel.split('/'))
                     path.parent.mkdir(parents=True, exist_ok=True)

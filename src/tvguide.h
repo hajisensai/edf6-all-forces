@@ -25,6 +25,8 @@ bool TvFrame(unsigned char* human,bool mapOpen,const TvInput& in) noexcept;
 bool TvView(const void** human,float* eye,float* look) noexcept;
 // Whether the TV holds the plugin's keys (MapHoldsKeys: theirs and EDF6AutoTurret's).
 bool TvHoldsKeys() noexcept;
+// Published native owner identity during the view and all release/drain states.
+bool TvHoldsHumanKeys(const unsigned char* human) noexcept;
 // MissileBullet01's update, before the stock step (missile.cpp): takes the player's Tempest as it comes out and steers
 // the one the TV flies. Must run even with Enabled=0 to release a previously owned round safely inside its update.
 // True: round `b` is the TV's (the plugin's own guidance leaves it).

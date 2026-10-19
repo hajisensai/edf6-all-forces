@@ -143,6 +143,22 @@ def seat_mab(block: bytes, offsets: list[list[float]]) -> bytes:
     return bytes(out)
 
 
+def native_gun_rows(rows: object) -> list:
+    """Adapt the old AimRecoil holder to Vehicle_Car's BodyRecoil payload.
+
+    Car's fired callback requests variant 0 and dereferences its result. A named
+    AimRecoil is variant 1 and returns null there. Hull impulse is zero for this
+    small mounted gun; its weapon's real FireRecoil remains unchanged.
+    """
+    if (not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], list)
+            or len(rows[0]) != 3 or not isinstance(rows[0][0], str)
+            or not isinstance(rows[0][2], list) or len(rows[0][2]) != 3):
+        raise ValueError('408 requires its one three-column gun holder')
+    out = copy.deepcopy(rows)
+    out[0][1] = [0.0, 0.0]
+    return out
+
+
 def check(members: dict, md: mdb.Mdb, physics: bytes) -> None:
     names = {md.name_of(b.name) for b in md.bones}
     if MARKER not in names or members.get('car_aim_node') != []:
@@ -177,6 +193,11 @@ def check(members: dict, md: mdb.Mdb, physics: bytes) -> None:
     required.update(row[0] for row in members['car_base_breaking_parts'][1])
     if any(row[0] == 'gun' for row in members['car_base_rigid_body']):
         raise ValueError('408 gun must remain animation-driven, not a dynamic CarBase body')
+    if [row for row in members['car_base_simulation_node'] if row[0] == 'gun'] != [['gun', 1]]:
+        raise ValueError('408 gun needs an explicit native kinematic mode 2 simulation row')
+    for key in ('vehicle_setup', 'mission_setup'):
+        if sgo.plain(members[key][2]) != sgo.plain(native_gun_rows(members[key][2])):
+            raise ValueError('408 Car gun needs a native BodyRecoil pair')
     locators = mab_legacy.mab_locators(members['animation_model'][2])
     required.update(loc.node for _, loc in locators)
     if required - names:
@@ -224,7 +245,9 @@ def build(games, root: str) -> dict[str, bytes]:
     # are dynamic. The gun must retain native mode 2 (animation -> kinematic
     # target), as in EDF4.1, rather than CarBase's mode 4 physics ownership.
     members['car_base_rigid_body'] = [[n, -1.0, -1.0, -1.0, -1.0, [], []] for n in sorted(PROXIES - {'gun'})]
-    members['car_base_simulation_node'] = [[n, 0] for n in WHEELS]
+    # CarBase first resets ALL proxies to mode 4 (6E40B0). Row value 1
+    # explicitly selects mode 2 (66428F -> 6ED480); omission stays dynamic.
+    members['car_base_simulation_node'] = [[n, 0] for n in WHEELS] + [['gun', 1]]
     wheel = members['car_base_wheel'][0]
     members['car_base_wheel'] = []
     for i, old in enumerate(source['vehicle_tire']):
@@ -254,7 +277,7 @@ def build(games, root: str) -> dict[str, bytes]:
         [*copy.deepcopy(source['vehicle_riding_position'][1][:3]), '401_STRIKER_SHEET1', 15, 0.0, 6]]
     members['vehicle_weapon_setting'] = [['gun', 1]]
     gun_name = WEAPONS['v_408motorbike_gun.sgo'][0]
-    gun_rows = copy.deepcopy(source['vehicle_setup'][2])
+    gun_rows = native_gun_rows(source['vehicle_setup'][2])
     if len(gun_rows) != 1:
         raise ValueError('408 source does not have its one machine gun')
     gun_rows[0][0] = 'app:/weapon/' + gun_name + '.sgo'

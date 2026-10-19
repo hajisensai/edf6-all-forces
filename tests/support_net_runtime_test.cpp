@@ -18,6 +18,9 @@ const char* actorPuids[4]={"host","client","host","lobby-only"};
 std::uint64_t generation=1;
 unsigned spawnCount=0,destroyCount=0,sendCount=0,peerCount=0;
 unsigned commandPackets=0,commandContexts=0;
+unsigned enemyControlPackets=0,enemyControlContexts=0,enemyControlResets=0,subPackets=0,subContexts=0,subResets=0;
+unsigned carrierPackets=0,carrierContexts=0,carrierResets=0;bool reenterCarrier=false;
+char enemyControlSender[65]{},subSender[65]{};bool enemyControlReady=false,subReady=false;
 unsigned pvpPackets=0,pvpContexts=0,pvpResets=0;bool pvpReady=false;char pvpSender[65]{};
 unsigned rangePlans=0,rangeValidations=0,rangeSpawns=0,rangeDestroys=0,rangeTicks=0,rangeResets=0,rangeNotices=0;
 std::uint64_t rangeToken=0;
@@ -71,6 +74,30 @@ bool ReceivePvpNetwork(std::uint32_t,const char* sender,const void* bytes,std::s
     if(size<4 || std::memcmp(bytes,"AFPV",4))return false;
     ++fixture::pvpPackets;strcpy_s(fixture::pvpSender,sender);return true;
 }
+void UpdateEnemyControlNetwork(const CommandNetworkContext& context,std::uint64_t) noexcept {
+    ++fixture::enemyControlContexts;fixture::enemyControlReady=context.ready;
+}
+bool ReceiveEnemyControlNetwork(std::uint32_t,const char* sender,const void* bytes,std::size_t size,std::uint64_t) noexcept {
+    if(size<4 || std::memcmp(bytes,"ECTL",4))return false;
+    ++fixture::enemyControlPackets;strcpy_s(fixture::enemyControlSender,sender);return true;
+}
+void ResetEnemyControlNetwork() noexcept {++fixture::enemyControlResets;}
+void UpdateSubSupportNetwork(const CommandNetworkContext& context,std::uint64_t) noexcept {
+    ++fixture::subContexts;fixture::subReady=context.ready;
+}
+bool ReceiveSubSupportNetwork(std::uint32_t,const char* sender,const void* bytes,std::size_t size,std::uint64_t) noexcept {
+    if(size<4 || std::memcmp(bytes,"AFSB",4))return false;
+    ++fixture::subPackets;strcpy_s(fixture::subSender,sender);return true;
+}
+void ResetSubSupportNetwork() noexcept {++fixture::subResets;}
+void UpdateCarrierDroneNetwork(const CommandNetworkContext&,std::uint64_t) noexcept {++fixture::carrierContexts;}
+bool ReceiveCarrierDroneNetwork(std::uint32_t,const char*,const void* bytes,std::size_t size,std::uint64_t) noexcept {
+    if(size<4 || std::memcmp(bytes,"AFDQ",4))return false;
+    ++fixture::carrierPackets;
+    if(fixture::reenterCarrier){fixture::tick+=1;SupportNetTick();}
+    return true;
+}
+void ResetCarrierDroneNetwork() noexcept {++fixture::carrierResets;}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}
@@ -172,7 +199,8 @@ PlanResult PlanCall(std::uint32_t id,const float* target,std::uint64_t,Plan* pla
     *plan={};plan->catalogId=id;plan->count=1;std::memcpy(plan->target,target,12);
     auto& u=plan->units[0];u.resourceId=1;u.matrix[0]=u.matrix[5]=u.matrix[10]=u.matrix[15]=1;return PlanResult::ready;
 }
-bool Validate(const Plan& p) noexcept { return p.count==1 && p.units[0].resourceId==1; }
+bool Validate(const Plan& p) noexcept { return p.count==1 && (p.units[0].resourceId==1 ||
+    (p.catalogId==kPreparedDroneCatalog && (p.units[0].resourceId==crew::kSupportSubDroneResource || crew::IsCarrierDroneResource(p.units[0].resourceId)))); }
 bool Spawn(std::uint64_t,const Plan& plan,bool remote) noexcept {
     Check(!remote,"host native spawn callback authority");++spawnCount;
     lastSupportTeam=plan.team;lastSupportOwner=plan.requester[0];return true;
@@ -269,13 +297,26 @@ int main() {
     Check(pvpPackets==1 && commandPackets==1 && qmarkPackets==1 && !std::strcmp(pvpSender,"client"),
         "PVP receives the shared poll's authenticated sender exactly once without reaching other parsers");
     Check(pvpContexts>0 && pvpReady,"PVP receives the ready sealed-world context");
+    auto enemyControlPacket=packet;std::memcpy(enemyControlPacket.bytes,"ECTL",4);incoming.push_back(enemyControlPacket);Step();
+    Check(enemyControlPackets==1 && !std::strcmp(enemyControlSender,"client") && commandPackets==1 && pvpPackets==1,
+        "enemy control receives the sole poll's authenticated sender exactly once");
+    Check(enemyControlContexts>0 && enemyControlReady,"enemy control receives the ready support epoch context");
+    auto subPacket=packet;std::memcpy(subPacket.bytes,"AFSB",4);incoming.push_back(subPacket);Step();
+    Check(subPackets==1 && !std::strcmp(subSender,"client") && enemyControlPackets==1 && pvpPackets==1,
+        "submarine subsystem state receives only its own shared-poll datagram");
+    Check(subContexts>0 && subReady,"submarine state receives the ready support epoch context");
+    auto carrierPacket=packet;std::memcpy(carrierPacket.bytes,"AFDQ",4);incoming.push_back(carrierPacket);
+    reenterCarrier=true;const auto carrierContextsBefore=carrierContexts;Step();reenterCarrier=false;
+    Check(carrierPackets==1 && enemyControlPackets==1 && subPackets==1,"carrier drone request is consumed once by its own shared-poll handler");
+    Check(carrierContexts-carrierContextsBefore==3,"nested prepared-plan enqueue cannot recursively poll/advance native support");
     Check(crew::SubmitSupportRequest(1,at,note,256),"full handshake queues request");
     installed=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"unloaded bridge disables queued work");
     installed=true;peerCount=0;generation++;tick+=1000;Step();
     online=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"offline never sends multiplayer requests");
-    const unsigned resetsBefore=qmarkResets,pvpResetsBefore=pvpResets;crew::ResetSupportNet();
+    const unsigned resetsBefore=qmarkResets,pvpResetsBefore=pvpResets,enemyResetsBefore=enemyControlResets,subResetsBefore=subResets,carrierResetsBefore=carrierResets;crew::ResetSupportNet();
     Check(qmarkResets>resetsBefore,"the session reset drops the teammates' marks");
     Check(pvpResets>pvpResetsBefore,"the session reset cancels PVP's network epoch");
+    Check(enemyControlResets>enemyResetsBefore && subResets>subResetsBefore && carrierResets>carrierResetsBefore,"session reset invalidates enemy-control, submarine state and carrier request epochs");
     // Same production session, reserved range catalog, with no remote peer: every wrapper must select the range
     // callbacks rather than the ordinary support dispatcher. The multi-peer transaction is tested independently.
     online=true;host=true;ready=true;installed=true;peerCount=0;generation++;tick+=1000;
@@ -292,6 +333,27 @@ int main() {
     Check(rangeTicks>0 && rangeNotices>0,"range activation/status ticks are supplied by the production bridge");
     const auto rangeResetBefore=rangeResets;crew::ResetSupportNet();
     Check(rangeDestroys==1 && rangeResets>rangeResetBefore && !rangeToken,"mission reset rolls back range ownership and request identity");
+    // Real production wrapper -> actual Session::SubmitPrepared: ordinary mission default must not silently reject child plans.
+    online=true;host=true;ready=true;installed=true;peerCount=0;generation++;tick+=1000;pvpTeam=0;
+    crew::ConfigureSupportNet({&PlanCall,&Validate,&Spawn,&Destroy,&Derive});Step();
+    for(unsigned kind=0;kind<4;++kind) {
+        Plan child{};child.catalogId=kPreparedDroneCatalog;child.count=1;child.requester[0]=0x40;
+        auto& unit=child.units[0];unit.resourceId=kind==0 ? crew::kSupportSubDroneResource : crew::CarrierDroneResource(kind-1,kind,true);
+        unit.variant=0x1122334400ull+kind;unit.matrix[0]=unit.matrix[5]=unit.matrix[10]=unit.matrix[15]=1;
+        const auto beforeSpawn=spawnCount;const auto token=crew::SubmitPreparedSupportPlan(child);
+        Check(token!=0 && spawnCount==beforeSpawn,"real wrapper admits only explicitly classified dynamic prepared child without early spawn");
+        Step();Check(crew::SupportTransactionActive(token) && spawnCount==beforeSpawn+1 && lastSupportOwner==0x40,
+            "actual production wrapper and Session derive native ID commit and activate each exact dynamic child");
+        const auto beforeDestroy=destroyCount;crew::ReportSupportFailure(token);
+        Check(destroyCount==beforeDestroy+1 && !crew::SupportTransactionActive(token),"real dynamic wrapper token follows Session Destroy cancellation");
+    }
+    Plan rejected{};rejected.catalogId=kPreparedDroneCatalog;rejected.count=1;rejected.requester[0]=0x40;
+    rejected.units[0].resourceId=crew::kSupportSubDroneResource;rejected.units[0].variant=99;
+    rejected.units[0].matrix[0]=rejected.units[0].matrix[5]=rejected.units[0].matrix[10]=rejected.units[0].matrix[15]=1;
+    rejected.units[0].netId[0]=1;Check(!crew::SubmitPreparedSupportPlan(rejected),"prepared wrapper cannot smuggle an existing native child ID");
+    rejected.units[0].netId[0]=0;rejected.requester[0]=0;
+    Check(!crew::SubmitPreparedSupportPlan(rejected),"dynamic wrapper refuses missing canonical owner");
+    crew::ResetSupportNet();
     WorldParticipants();
     std::printf("support runtime bridge: %d checks passed\n",checks);
 }

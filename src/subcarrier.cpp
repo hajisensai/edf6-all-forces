@@ -33,6 +33,11 @@
 #include "body506.h"
 #include "memory.h"
 #include "online_authority.h"
+#include "pvp.h"
+#include "real_driver_native.h"
+#include "support_soldier.h"
+#include "command_identity.h"
+#include "sub_support_state.h"
 #include "vecmath.h"
 #include <cmath>
 #include <cstring>
@@ -162,6 +167,12 @@ struct Sub {
     float floor;                  // the lowest its origin goes: a mission's own height for it (-inf: called in)
     float lin[3],ang[3];
     bool moving,ready,launched;
+    bool pending,weakHeld;       // support transaction: inert until ACTIVATE; own its weak identity through deletion
+    bool remoteState=false;
+    unsigned char remoteFlags=0,remoteDroneCount=0,remoteTurretMask=0;
+    float remoteTurretAim[kTurrets][3]{};
+    SubSupportState remoteSnapshot{};
+    ULONGLONG remoteSnapshotAt=0;
     bool sea;                     // afloat: it keeps to the water (Follow) and its heading
     bool surfacing;               // called in under the water and still rising to s.floor (kSurfaceClimb, no fire)
     // Its seat weapons per part (Resolve): the weapon (nullptr: none, or off), resolved from holders `holders`.
@@ -178,7 +189,9 @@ struct Sub {
     bool down[kSystemCount];          // worn out (since downAt, game ms)
     ULONGLONG downAt[kSystemCount];
     bool bayLogged;                   // the bay's launch failure was logged
+    unsigned char ownerNativeId[32]{}; // authenticated requester, bound by the support dispatcher before activation
     ObjRef drone[kBayDrones];         // the bay's drones out
+    bool droneWeak[kBayDrones]{};      // online children retain their identity while their transaction activates
     ULONGLONG droneAt;
     // Hits since hitLogAt (the "SUB hit" line): on parts, on the hull (taken, held off), the last one.
     unsigned hits;
@@ -209,7 +222,7 @@ int writing=1,reading=2;
 bool heavyOk[kHeavyCount]{};
 bool spawnOk=false,gaugeOk=false,gaugeTried=false,damageOk=false;
 bool subOk=false;   // InstallSub ran (the heli profile checked out): carriers are driven at all
-// The input stage missed this long (game clock): the physics step drives the carrier (its seat-0 driver gone).
+// The input stage missed this long (game clock): the authority physics step drives the carrier (its seat-0 driver gone).
 constexpr ULONGLONG kNoInputMs=50;
 bool preloaded=false,broken=false;
 
@@ -229,13 +242,35 @@ bool Live(const Sub& s) noexcept {
     return s.vehicle && Readable(ctrl,kCtrlUses+4) && At<std::int32_t>(ctrl,kCtrlUses)>0 && Readable(s.vehicle,kTeam+4) &&
            s.ref.Is(s.vehicle) && !(s.vehicle[kObjFlags]&kObjDeleted) && !s.vehicle[kDead];
 }
+void DropDrone(Sub& s,int index) noexcept {
+    if(s.droneWeak[index] && s.drone[index].ctrl) {
+        auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.drone[index].ctrl));
+        if(InterlockedDecrement(reinterpret_cast<volatile LONG*>(control+0xC))==0)
+            reinterpret_cast<void(__fastcall*)(void*)>(At<void* const*>(control,0)[1])(control);
+    }
+    s.drone[index]={};s.droneWeak[index]=false;
+}
+void DropSub(Sub& s) noexcept {
+    for(int i=0;i<kBayDrones;++i)DropDrone(s,i);
+    if(s.weakHeld && s.ref.ctrl) {
+        auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.ref.ctrl));
+        if(InterlockedDecrement(reinterpret_cast<volatile LONG*>(control+0xC))==0)
+            reinterpret_cast<void(__fastcall*)(void*)>(At<void* const*>(control,0)[1])(control);
+    }
+    s=Sub{};
+}
+bool RetainSub(Sub& s) noexcept {
+    auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(s.ref.ctrl));
+    if(!Readable(control,16) || At<LONG>(control,8)<=0)return false;
+    InterlockedIncrement(reinterpret_cast<volatile LONG*>(control+0xC));s.weakHeld=true;return true;
+}
 // The entries whose carrier is dead or gone, dropped (with their gauges).
 void Sweep() noexcept {
     for(int i=0;i<kMaxSubs;++i) {
         Sub& s=subs[i];
         if(!s.vehicle || Live(s))continue;
         Log("SUB v=%p dropped: %s",s.vehicle,Readable(s.vehicle,kDead+1) && s.ref.Is(s.vehicle) && s.vehicle[kDead] ? "destroyed" : "gone");
-        s=Sub{};staging[i].shown=false;
+        PvpForgetSupportObject(s.ref);DropSub(s);staging[i].shown=false;
     }
 }
 Sub* FindSub(const unsigned char* v) noexcept {
@@ -314,11 +349,11 @@ void Wear(Sub& s,int k,float dmg) noexcept {
 // A damage message to a carrier, routed (see the top): its damage cut to 0 when a part takes it or the hull holds it
 // off. Returns where to put the damage back after the stock handler (`was`), or nullptr: the message as it came.
 float* Route(unsigned char* v,unsigned char* gdi,float* was) noexcept {
-    if(!damageOk || v[kDead] || !Readable(gdi,kDmgAmount+4,true))return nullptr;
+    if(!damageOk || v[kDead] || !OnlineRunsHere(v) || !Readable(gdi,kDmgAmount+4,true))return nullptr;
     Sub* s=FindSub(v);
     const float dmg=At<float>(gdi,kDmgAmount);
     // Heals (< 0) and friends' rounds (the stock rule) are left alone.
-    if(!s || !s->ready || !(dmg>0.0f) || !std::isfinite(dmg) || !Hostile(v,At<std::int32_t>(gdi,kDmgTeam)))return nullptr;
+    if(!s || s->pending || !s->ready || !(dmg>0.0f) || !std::isfinite(dmg) || !Hostile(v,At<std::int32_t>(gdi,kDmgTeam)))return nullptr;
     float at[3];
     ToLocal(reinterpret_cast<const float*>(v+kMatrix),reinterpret_cast<const float*>(gdi+kDmgAt),at);
     const int part=PartAt(*s,at);
@@ -342,6 +377,7 @@ void Thicken(Sub& s,unsigned char* v) noexcept {
     const float max=At<float>(v,kHpMax),hp=At<float>(v,kHp);
     if(!(max>0.0f))return;
     s.tier=max/kSgoHull>1.0f ? max/kSgoHull : 1.0f;
+    if(!OnlineRunsHere(v))return; // adopted remote hull HP belongs to its native network authority
     const float want=Cfg().subHullHp*s.tier;
     if(!(want>0.0f) || want==max){Log("SUB v=%p tier x%.1f, hull hp %.0f",v,s.tier,max);return;}
     Put<float>(v,kHpMax,want);
@@ -362,23 +398,43 @@ void Repair(Sub& s,ULONGLONG ms) noexcept {
 // they guard the carrier (their anchor the launch point) and go when jet.cpp withdraws them.
 void Bay(Sub& s,const float* m,ULONGLONG ms) noexcept {
     int out=0;
-    for(auto& d:s.drone) {
-        if(d && !JetFlying(d.obj,d.ctrl))d=ObjRef{};
-        out+=d ? 1 : 0;
+    for(int i=0;i<kBayDrones;++i) {
+        const auto& d=s.drone[i];
+        if(d) {
+            const auto* control=static_cast<const unsigned char*>(d.ctrl);
+            const bool live=Readable(control,16) && At<LONG>(control,8)>0 && Readable(d.obj,kDead+1) &&
+                d.Is(d.obj) && !(At<unsigned char>(d.obj,kObjFlags)&kObjDeleted) && !At<unsigned char>(d.obj,kDead);
+            if(!live || (!InSession() && !JetFlying(d.obj,d.ctrl)))DropDrone(s,i);
+        }
+        out+=s.drone[i] ? 1 : 0;
     }
     if(s.surfacing || s.down[droneBay] || !s.hasTarget || out>=kBayDrones || ms-s.droneAt<kBayGapMs)return;
     s.droneAt=ms;
     float from[3];
     ToWorld(m,kBayLaunch,from);
     const float nose[3]={m[8],m[9],m[10]};
+    if(InSession()) {
+        // Only the registered authority requests a child. The dispatcher commits its exact plan on every peer.
+        if(!IsOnlineAuthority(s.vehicle) || !SubmarineSupportKey(s.ref) ||
+           !SubmitSubmarineDrone(s.ref,from,nose,from,s.ownerNativeId)) {
+            if(!s.bayLogged)Log("SUB v=%p drone bay: authenticated all-peer child deployment refused",s.vehicle);
+            s.bayLogged=true;
+        } else s.bayLogged=false;
+        return;
+    }
     unsigned char* d=JetLaunchDrone(from,nose,from,Cfg().jetFuelSec,s.vehicle,false);
     if(!d) {
         if(!s.bayLogged)Log("SUB v=%p drone bay: no drone launched (JetPilot off, EDF6VC_JET_DRONE.SGO not preloaded, or jets full)",s.vehicle);
         s.bayLogged=true;
         return;
     }
-    for(auto& slot:s.drone)
-        if(!slot){slot=ObjRef::Of(d);break;}
+    const ObjRef drone=ObjRef::Of(d);
+    auto* control=const_cast<unsigned char*>(static_cast<const unsigned char*>(drone.ctrl));
+    if(!Readable(control,16) || At<LONG>(control,8)<=0)return;
+    for(int i=0;i<kBayDrones;++i)if(!s.drone[i]) {
+        InterlockedIncrement(reinterpret_cast<volatile LONG*>(control+0xC));
+        s.drone[i]=drone;s.droneWeak[i]=true;break;
+    }
     Log("SUB v=%p drone bay launched %p (%d out)",s.vehicle,d,out+1);
 }
 
@@ -662,8 +718,21 @@ void Turrets(Sub& s,unsigned char* v,const float* m,float dt,bool* on,bool* hasP
 // carrier (afloat: s.sea) keeps to the water: its post does not move onto a spot with none (it waits at
 // the shore), and over water it floats kDraft under that spot's surface.
 void Follow(Sub& s,float dt) noexcept {
-    if(!player.at || GameMs()-player.at>5000)return;
-    const float d[3]={player.pos[0]-s.post[0],0.0f,player.pos[2]-s.post[2]};
+    const float* followed=nullptr;
+    bool owned=false;for(unsigned char byte:s.ownerNativeId)owned=owned || byte!=0;
+    MarkIdentities owner{};
+    if(owned) {
+        // Registered support runs on the host; its requester may be another peer. Resolve the current canonical actor.
+        if(!ResolveMarkIdentities(s.ownerNativeId,nullptr,&owner) || !owner.player ||
+           !Readable(owner.player.ctrl,16) || At<LONG>(owner.player.ctrl,8)<=0 ||
+           !Readable(owner.player.obj,kDead+1) || !owner.player.Is(owner.player.obj) || At<unsigned char>(owner.player.obj,kDead))return;
+        followed=reinterpret_cast<const float*>(static_cast<const unsigned char*>(owner.player.obj)+kPosition);
+    } else {
+        if(!player.at || GameMs()-player.at>5000)return;
+        followed=player.pos;
+    }
+    if(!std::isfinite(followed[0]) || !std::isfinite(followed[1]) || !std::isfinite(followed[2]))return;
+    const float d[3]={followed[0]-s.post[0],0.0f,followed[2]-s.post[2]};
     const float dist=Len(d);
     if(dist>kLeash)s.moving=true;
     if(dist<kStop)s.moving=false;
@@ -817,7 +886,9 @@ int SubFault(const EXCEPTION_POINTERS* e) noexcept {
 }
 
 unsigned char* CreateSub(const float* m,InitParam* param) noexcept {
-    __try { return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,kSubSgo,param); }
+    // Wire-plan Unit.matrix is only float-aligned. The native object constructor loads rows with MOVAPS.
+    alignas(16) float nativeMatrix[16];std::memcpy(nativeMatrix,m,sizeof(nativeMatrix));
+    __try { return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),nativeMatrix,kSubSgo,param); }
     __except(SubFault(GetExceptionInformation())) { return nullptr; }
 }
 
@@ -896,6 +967,7 @@ Sub* Adopt(unsigned char* v) noexcept {
     }
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     *s=Sub{};s->ref=ObjRef::Of(v);s->vehicle=v;s->bornAt=GameMs();s->inputAt=s->bornAt;
+    if(!RetainSub(*s)){*s=Sub{};return nullptr;}
     std::memcpy(s->post,pos,12);
     s->floor=pos[1];
     float surface=0.0f;
@@ -917,8 +989,41 @@ Sub* Entry(unsigned char* v) noexcept {
     return nullptr;
 }
 
+void HoldSupportSub(Sub& s,unsigned char* v) noexcept {
+    s.ready=false;
+    std::memset(s.lin,0,sizeof(s.lin));std::memset(s.ang,0,sizeof(s.ang));
+    Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
+    v[kFireGun]=0;v[kFireMissile]=0;
+}
+void PoseRemoteSub(Sub& s,unsigned char* v) noexcept {
+    if(!s.remoteState)return;
+    const unsigned char* inst=v+kModelInst506;
+    const auto* bones=At<const unsigned char*>(inst,kInstBones506);
+    for(int t=0;t<kTurrets;++t) {
+        auto& turret=s.turret[t];
+        if(!bones){turret.bones=nullptr;turret.rec=nullptr;continue;}
+        if(bones!=turret.bones) {
+            turret=Turret{};turret.bones=bones;turret.rec=BoneRecord506(inst,kSystems[t].bone);
+            if(turret.rec && Readable(turret.rec+kBoneLocal506,64))std::memcpy(turret.bind,turret.rec+kBoneLocal506,64);
+            else turret.rec=nullptr;
+        }
+        if(turret.rec && (s.remoteTurretMask&(1u<<t))) {
+            std::memcpy(turret.aim,s.remoteTurretAim[t],12);Pose(turret,turret.aim);
+        }
+    }
+}
+void ObserveRemoteSub(Sub& s,unsigned char* v,ULONGLONG ms) noexcept {
+    if(s.frame==GameFrame())return;
+    s.frame=GameFrame();s.ready=!s.pending && (!s.remoteState || (s.remoteFlags&sub_support::kReady)!=0);
+    PoseRemoteSub(s,v);
+    if(s.ready)Stage(static_cast<int>(&s-subs),s,v,reinterpret_cast<const float*>(v+kMatrix),ms);
+    else staging[&s-subs].shown=false;
+    Publish();CarrierLaserFrame(v);
+}
 // One frame of carrier `s` (see the top), at most once a game frame.
 void Tick(Sub& s,unsigned char* v,ULONGLONG ms) noexcept {
+    if(!OnlineRunsHere(v)){ObserveRemoteSub(s,v,ms);return;}
+    if(s.pending){HoldSupportSub(s,v);return;}
     if(s.frame==GameFrame())return;
     s.frame=GameFrame();
     const float dt=GameStep(s.tickMs ? ms-s.tickMs : 0);
@@ -965,6 +1070,13 @@ bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     if(v[kDead]){Sweep();return false;}   // the wreck falls as the stock 506's does
     Sub* s=Entry(v);
     if(!s) {
+        if(!OnlineRunsHere(v))return false;
+        for(int i=0;i<3;++i)lin[i]=ang[i]=0.0f;
+        return true;
+    }
+    if(!OnlineRunsHere(v)){ObserveRemoteSub(*s,v,GameMs());return false;}
+    if(s->pending) {
+        HoldSupportSub(*s,v);
         for(int i=0;i<3;++i)lin[i]=ang[i]=0.0f;
         return true;
     }
@@ -1014,7 +1126,7 @@ int SubCarriers(SubView* out,int max) noexcept {
 namespace {
 const Sub* SubOf(const ObjRef& ref) noexcept {
     for(const auto& s:subs)
-        if(s.vehicle && s.ref.obj==ref.obj && s.ref.ctrl==ref.ctrl && Live(s))return &s;
+        if(s.vehicle && !s.pending && s.ref.obj==ref.obj && s.ref.ctrl==ref.ctrl && Live(s))return &s;
     return nullptr;
 }
 // The deck's flat bow (z > 280, about ±69 wide, docs/subcarrier-re.md §1.1): a deck point is taken on it, between
@@ -1025,7 +1137,7 @@ constexpr float kDeckAft=320.0f,kDeckFore=700.0f,kDeckSide=40.0f;
 const Sub* NearestSub(const float* from,float* dist) noexcept {
     const Sub* best=nullptr;
     for(const auto& s:subs) {
-        if(!s.vehicle || !Live(s))continue;
+        if(!s.vehicle || s.pending || !Live(s))continue;
         const float* p=reinterpret_cast<const float*>(s.vehicle+kPosition);
         const float d=vec::Flat(p,from);
         if(!best || d<*dist){best=&s;*dist=d;}
@@ -1059,17 +1171,23 @@ bool SubDeckUnder(const ObjRef& sub,const float* p,float* out) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-bool SubDeck(const float* from,float* deck) noexcept {
+bool SubDeckFor(const ObjRef& ref,const float* from,float* deck) noexcept {
     __try {
-        float dist=0.0f;
-        const Sub* s=NearestSub(from,&dist);
-        if(!s)return false;
+        const Sub* s=SubOf(ref);
+        if(!s || !from || !deck)return false;
         const float* m=reinterpret_cast<const float*>(s->vehicle+kMatrix);
         const float* pos=m+12;
         const float rel[3]={from[0]-pos[0],from[1]-pos[1],from[2]-pos[2]};
         const float x=Clamp(Dot(rel,m),-kDeckSide,kDeckSide),z=Clamp(Dot(rel,m+8),kDeckAft,kDeckFore);
         for(int i=0;i<3;++i)deck[i]=pos[i]+m[i]*x+m[4+i]*kSubDeckTop+m[8+i]*z;
         return std::isfinite(deck[0]+deck[1]+deck[2]);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool SubDeck(const float* from,float* deck) noexcept {
+    __try {
+        float dist=0.0f;
+        const Sub* s=NearestSub(from,&dist);
+        return s && SubDeckFor(s->ref,from,deck);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -1099,60 +1217,300 @@ void PreloadSub() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){preloaded=false;}
 }
 
+bool ValidateSupportSubmarine(const float* matrix,float afloatY) noexcept {
+    __try {
+        if(!spawnOk || !subOk || !preloaded || broken || !Body506Ok() || !matrix ||
+           !std::isfinite(afloatY) || !At<void*>(image,kObjectMgr) || LiveSubs()>=kMaxSubs)return false;
+        for(int i=0;i<16;++i)if(!std::isfinite(matrix[i]))return false;
+        // A horizontal right-handed rigid frame, exactly the host's facing/position.
+        if(std::fabs(matrix[3])+std::fabs(matrix[7])+std::fabs(matrix[11])+std::fabs(matrix[15]-1.0f)>0.001f ||
+           std::fabs(matrix[1])+std::fabs(matrix[4])+std::fabs(matrix[6])+std::fabs(matrix[9])+std::fabs(matrix[5]-1.0f)>0.001f)return false;
+        const float right=matrix[0]*matrix[0]+matrix[2]*matrix[2],nose=matrix[8]*matrix[8]+matrix[10]*matrix[10];
+        const float perpendicular=matrix[0]*matrix[8]+matrix[2]*matrix[10],det=matrix[0]*matrix[10]-matrix[2]*matrix[8];
+        if(std::fabs(right-1.0f)>0.001f || std::fabs(nose-1.0f)>0.001f || std::fabs(perpendicular)>0.001f ||
+           std::fabs(det-1.0f)>0.001f || matrix[13]>afloatY+0.1f)return false;
+        float surface=0.0f;
+        return SeaAt(matrix[12],matrix[14],&surface)==Sea::water && std::isfinite(surface) &&
+               std::fabs(surface-kDraft-afloatY)<=0.1f;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool PlanSupportSubmarine(const float* target,const float* from,float* matrix,float* afloatY) noexcept {
+    __try {
+        if(!target || !matrix || !afloatY || !std::isfinite(target[0]) || !std::isfinite(target[1]) ||
+           !std::isfinite(target[2]) || (InSession() && !OnlineHostOnly()))return false;
+        float fwd[3]={0.0f,0.0f,1.0f};
+        if(from) {
+            if(!std::isfinite(from[0]) || !std::isfinite(from[1]) || !std::isfinite(from[2]))return false;
+            float direction[3]={target[0]-from[0],0.0f,target[2]-from[2]};
+            if(Len(direction)>5.0f && Normalize(direction))std::memcpy(fwd,direction,12);
+        }
+        constexpr float ahead[]={1000.0f,600.0f,300.0f,0.0f};
+        for(float distance:ahead) {
+            const float at[3]={target[0]+fwd[0]*distance,target[1],target[2]+fwd[2]*distance};
+            float surface=0.0f;
+            if(SeaAt(at[0],at[2],&surface)!=Sea::water || !std::isfinite(surface))continue;
+            const float afloat=surface-kDraft,under=surface-kSubmerged-kTop;
+            float startY=under,ground=0.0f;
+            if(GroundUnder(at,fwd,&ground) && ground+kHullBottom+kClear>startY)startY=ground+kHullBottom+kClear;
+            if(startY>afloat)startY=afloat;
+            const float exact[16]={fwd[2],0,-fwd[0],0, 0,1,0,0, fwd[0],0,fwd[2],0, at[0],startY,at[2],1};
+            if(!ValidateSupportSubmarine(exact,afloat))return false;
+            std::memcpy(matrix,exact,sizeof(exact));*afloatY=afloat;return true;
+        }
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+unsigned char* PrepareSupportSubmarine(const float* matrix,float afloatY) noexcept {
+    unsigned char* v=nullptr;
+    __try {
+        if(!ValidateSupportSubmarine(matrix,afloatY))return nullptr;
+        Sub* s=FreeSub();if(!s)return nullptr;
+        InitParam param{image+kInitParamVtable,{}};
+        v=CreateSub(matrix,&param);if(!v)return nullptr;
+        *s=Sub{};s->ref=ObjRef::Of(v);s->vehicle=v;s->pending=true;
+        if(!RetainSub(*s)){*s=Sub{};reinterpret_cast<DeleteFn>(image+kDelete)(v);return nullptr;}
+        if(!IsSub(v) || !FixBodyPart506(v,"SUB")) {
+            DeleteSupportSubmarine(s->ref);return nullptr;
+        }
+        reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
+        LevelVehicle(v);
+        if(At<std::int32_t>(v,kTeam)!=kTeamFriend || !PrepareNpcVehicle(v,true)) {
+            DeleteSupportSubmarine(s->ref);return nullptr;
+        }
+        s->bornAt=GameMs();s->inputAt=s->bornAt;s->launched=true;s->pending=true;s->sea=true;s->floor=afloatY;
+        s->surfacing=matrix[13]<afloatY-kSurfaced;
+        std::memcpy(s->post,matrix+12,12);
+        HoldSupportSub(*s,v);Thicken(*s,v);
+        Log("SUB v=%p prepared at exact plan (%.1f,%.1f,%.1f), afloat %.1f; awaiting all-peer activation",v,matrix[12],matrix[13],matrix[14],afloatY);
+        return v;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        if(v)DeleteSupportSubmarine(ObjRef::Of(v));
+        return nullptr;
+    }
+}
+namespace {
+bool CanonicalSubId(const unsigned char* id) noexcept {
+    if(!id)return false;
+    bool any=false;for(unsigned i=0;i<32;++i)any=any || id[i]!=0;
+    for(unsigned i=20;i<24;++i)if(id[i])return false;
+    return any;
+}
+std::uint64_t RawSubKey(const Sub& s) noexcept {
+    if(!Live(s) || !Readable(s.vehicle,0x138) || !(At<unsigned>(s.vehicle,0x128)&3u))return 0;
+    unsigned char nativeId[32]{};
+    if(!ReadNativeObjectId(s.vehicle,nativeId) || !CanonicalSubId(nativeId))return 0;
+    std::uint64_t hash=14695981039346656037ull;
+    for(unsigned char byte:nativeId)hash=(hash^byte)*1099511628211ull;
+    return hash;
+}
+}
+bool BindSupportSubmarineOwner(const ObjRef& ref,const unsigned char owner[32]) noexcept {
+    __try {
+        if(!owner)return false;
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(ref.obj));
+        Sub* s=v ? FindSub(v) : nullptr;
+        if(!s || s->ref.ctrl!=ref.ctrl || !s->pending || !Live(*s))return false;
+        bool any=false;for(unsigned i=0;i<32;++i)any=any || owner[i]!=0;
+        if(!InSession() && !any) {
+            if(CanonicalSubId(s->ownerNativeId))return false;
+            std::memset(s->ownerNativeId,0,32);return true;
+        }
+        if(!CanonicalSubId(owner) || !RawSubKey(*s))return false;
+        if(CanonicalSubId(s->ownerNativeId) && std::memcmp(s->ownerNativeId,owner,32))return false;
+        std::memcpy(s->ownerNativeId,owner,32);return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+std::uint64_t SubmarineSupportKey(const ObjRef& ref) noexcept {
+    __try {
+        std::uint64_t key=0;
+        for(const auto& s:subs)if(s.ref.obj==ref.obj && s.ref.ctrl==ref.ctrl)key=RawSubKey(s);
+        if(!key)return 0;
+        for(const auto& s:subs)if((s.ref.obj!=ref.obj || s.ref.ctrl!=ref.ctrl) && RawSubKey(s)==key)return 0;
+        return key;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
+}
+bool ResolveSupportSubmarine(std::uint64_t key,ObjRef* out) noexcept {
+    if(out)*out={};
+    if(!out || !key)return false;
+    __try {
+        ObjRef found{};
+        for(const auto& s:subs)if(RawSubKey(s)==key) {
+            if(found || s.pending || !CanonicalSubId(s.ownerNativeId))return false;
+            found=s.ref;
+        }
+        if(!found)return false;
+        *out=found;return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool AddSupportSubmarineDrone(const ObjRef& parent,const ObjRef& child) noexcept {
+    __try {
+        ObjRef resolved{};
+        if(!ResolveSupportSubmarine(SubmarineSupportKey(parent),&resolved) ||
+           resolved.obj!=parent.obj || resolved.ctrl!=parent.ctrl || !child.obj || child.obj==parent.obj)return false;
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(parent.obj));
+        Sub* s=FindSub(v);if(!s)return false;
+        const auto* control=static_cast<const unsigned char*>(child.ctrl);
+        if(!Readable(control,16) || At<LONG>(control,8)<=0 || !Readable(child.obj,kDead+1) ||
+           !child.Is(child.obj) || (At<unsigned char>(child.obj,kObjFlags)&kObjDeleted) || At<unsigned char>(child.obj,kDead))return false;
+        unsigned char nativeId[32]{};
+        if(!ReadNativeObjectId(static_cast<const unsigned char*>(child.obj),nativeId) || !CanonicalSubId(nativeId))return false;
+        for(const auto& d:s->drone)if(d.obj==child.obj && d.ctrl==child.ctrl)return true;
+        for(int i=0;i<kBayDrones;++i) {
+            const auto& old=s->drone[i];
+            if(old && Readable(old.ctrl,16) && At<LONG>(old.ctrl,8)>0 && Readable(old.obj,kDead+1) &&
+               old.Is(old.obj) && !(At<unsigned char>(old.obj,kObjFlags)&kObjDeleted) && !At<unsigned char>(old.obj,kDead))continue;
+            DropDrone(*s,i);
+            auto* owned=const_cast<unsigned char*>(control);InterlockedIncrement(reinterpret_cast<volatile LONG*>(owned+0xC));
+            s->drone[i]=child;s->droneWeak[i]=true;return true;
+        }
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+namespace {
+Sub* FindSupportSubState(const unsigned char* nativeId) noexcept {
+    if(!sub_support::ValidId(nativeId))return nullptr;
+    Sub* matched=nullptr;
+    for(auto& s:subs) {
+        if(s.pending || !Live(s) || !Readable(s.vehicle,0x138) || !(At<unsigned>(s.vehicle,0x128)&3u))continue;
+        unsigned char actual[32]{};
+        if(!ReadNativeObjectId(s.vehicle,actual) || std::memcmp(actual,nativeId,32))continue;
+        if(matched)return nullptr; // duplicate registered identity is never resolved by table order
+        matched=&s;
+    }
+    return matched;
+}
+std::uint32_t SubRemaining(ULONGLONG at,ULONGLONG duration,ULONGLONG now) noexcept {
+    if(!at || now-at>=duration)return 0;
+    return static_cast<std::uint32_t>(duration-(now-at));
+}
+ULONGLONG SubStamp(std::uint32_t remaining,ULONGLONG duration,ULONGLONG now) noexcept {
+    return remaining ? now-(duration-remaining) : 0;
+}
+bool SnapshotSub(const Sub& s,SubSupportState* out) noexcept {
+    if(!out || s.pending || !Live(s) || !Readable(s.vehicle,0x138) || !(At<unsigned>(s.vehicle,0x128)&3u))return false;
+    SubSupportState next{};
+    if(!ReadNativeObjectId(s.vehicle,next.netId))return false;
+    const auto now=GameMs();
+    for(unsigned k=0;k<sub_support::kSystems;++k) {
+        next.wear[k]=s.wear[k];
+        if(s.down[k]) {next.downMask|=static_cast<std::uint8_t>(1u<<k);next.repairRemainingMs[k]=SubRemaining(s.downAt[k],kRepairMs,now);}
+        next.reloadRemainingMs[k]=SubRemaining(s.emptyAt[k],kReloadMs,now);
+    }
+    next.missileRemainingMs=SubRemaining(s.missileAt,kMissileMs,now);next.droneRemainingMs=SubRemaining(s.droneAt,kBayGapMs,now);
+    next.flags=static_cast<std::uint8_t>((s.ready ? sub_support::kReady : 0) | (s.surfacing ? sub_support::kSurfacing : 0) | (s.sea ? sub_support::kSea : 0));
+    if(!OnlineRunsHere(s.vehicle) && s.remoteState) {
+        const auto elapsed=now-s.remoteSnapshotAt;
+        const auto left=[elapsed](std::uint32_t value) noexcept {
+            return elapsed>=value ? 0u : static_cast<std::uint32_t>(value-elapsed);
+        };
+        for(unsigned k=0;k<sub_support::kSystems;++k) {
+            next.repairRemainingMs[k]=left(s.remoteSnapshot.repairRemainingMs[k]);
+            next.reloadRemainingMs[k]=left(s.remoteSnapshot.reloadRemainingMs[k]);
+        }
+        next.missileRemainingMs=left(s.remoteSnapshot.missileRemainingMs);next.droneRemainingMs=left(s.remoteSnapshot.droneRemainingMs);
+        next.droneCount=s.remoteDroneCount;next.turretMask=s.remoteTurretMask;
+        std::memcpy(next.turretAim,s.remoteTurretAim,sizeof(next.turretAim));
+    } else {
+        for(const auto& drone:s.drone) {
+            if(drone && Readable(drone.ctrl,16) && At<LONG>(drone.ctrl,8)>0 && Readable(drone.obj,kDead+1) &&
+               drone.Is(drone.obj) && !At<unsigned char>(drone.obj,kDead) && !(At<unsigned char>(drone.obj,kObjFlags)&kObjDeleted))++next.droneCount;
+        }
+        for(int t=0;t<kTurrets;++t)if(s.turret[t].rec && s.turret[t].posed) {
+            next.turretMask|=static_cast<std::uint8_t>(1u<<t);std::memcpy(next.turretAim[t],s.turret[t].aim,12);
+        }
+    }
+    if(!sub_support::ValidState(next))return false;
+    *out=next;return true;
+}
+}
+unsigned EnumerateSubSupportStates(SubSupportState* out,unsigned capacity) noexcept {
+    if(!out || !capacity)return 0;
+    __try {
+        unsigned count=0;
+        for(const auto& s:subs) {
+            if(count>=capacity)break;
+            if(!s.vehicle || !IsOnlineAuthority(s.vehicle) || !OnlineRunsHere(s.vehicle))continue;
+            SubSupportState state{};
+            if(SnapshotSub(s,&state) && FindSupportSubState(state.netId)==&s)out[count++]=state;
+        }
+        return count;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
+}
+bool ReadSubSupportState(const unsigned char nativeId[32],SubSupportState* out) noexcept {
+    if(out)*out={};
+    if(!out)return false;
+    __try {
+        const Sub* s=FindSupportSubState(nativeId);
+        return s && SnapshotSub(*s,out);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool ApplySubSupportState(const SubSupportState& state) noexcept {
+    __try {
+        if(!sub_support::ValidState(state))return false;
+        Sub* s=FindSupportSubState(state.netId);
+        if(!s || (At<unsigned>(s->vehicle,0x128)&3u)!=1u || OnlineRunsHere(s->vehicle) || IsOnlineAuthority(s->vehicle))return false;
+        // Check the whole state against this hull's mission tier before mutating a single plugin field.
+        for(unsigned k=0;k<sub_support::kSystems;++k) {
+            const float hp=PartHp(*s,static_cast<int>(k));
+            if(!std::isfinite(hp) || hp<=0.0f || hp>sub_support::kMaxWear || state.wear[k]>hp ||
+               ((state.downMask&(1u<<k)) && std::fabs(state.wear[k]-hp)>0.01f))return false;
+        }
+        Sub next=*s;const auto now=GameMs();
+        for(unsigned k=0;k<sub_support::kSystems;++k) {
+            next.wear[k]=state.wear[k];next.down[k]=(state.downMask&(1u<<k))!=0;
+            next.downAt[k]=next.down[k] ? now-(kRepairMs-state.repairRemainingMs[k]) : 0;
+            next.emptyAt[k]=SubStamp(state.reloadRemainingMs[k],kReloadMs,now);
+        }
+        next.missileAt=SubStamp(state.missileRemainingMs,kMissileMs,now);next.droneAt=SubStamp(state.droneRemainingMs,kBayGapMs,now);
+        next.ready=(state.flags&sub_support::kReady)!=0;next.surfacing=(state.flags&sub_support::kSurfacing)!=0;next.sea=(state.flags&sub_support::kSea)!=0;
+        next.remoteState=true;next.remoteSnapshot=state;next.remoteSnapshotAt=now;next.remoteFlags=state.flags;next.remoteDroneCount=state.droneCount;next.remoteTurretMask=state.turretMask;
+        std::memcpy(next.remoteTurretAim,state.turretAim,sizeof(next.remoteTurretAim));
+        next.frame=~ULONGLONG{0};*s=next;return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool ActivateSupportSubmarine(const ObjRef& ref) noexcept {
+    __try {
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(ref.obj));
+        Sub* s=v ? FindSub(v) : nullptr;
+        if(!s || s->ref.ctrl!=ref.ctrl || !Live(*s) || !IsSub(v) ||
+           (InSession() && (!CanonicalSubId(s->ownerNativeId) || !SubmarineSupportKey(ref))))return false;
+        if(OnlineRunsHere(v)) {
+            if(!SeatCount(v))return false;
+            const auto* seat=SeatAt(v,0);
+            const auto* driver=At<const unsigned char*>(seat,kSeatRider);
+            if(!edf::LivingSoldierInSeat(image,seat) || !IsSoldierClass(driver) || IsAnyPlayer(driver))return false;
+        } else if(!InSession() || !(At<std::uint16_t>(v,0x128)&3u))return false;
+        s->pending=false;s->ready=true;s->frame=~ULONGLONG{0};s->fireFrame=~ULONGLONG{0};s->tickMs=0;
+        Log("SUB v=%p activated (%s)",v,OnlineRunsHere(v) ? "authority" : "registered remote display");return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool DeleteSupportSubmarine(const ObjRef& ref) noexcept {
+    __try {
+        Sub* s=nullptr;
+        for(auto& entry:subs)if(entry.ref.obj==ref.obj && entry.ref.ctrl==ref.ctrl){s=&entry;break;}
+        if(!s)return !ref.obj;
+        auto* v=s->vehicle;
+        if(Readable(ref.ctrl,16) && At<LONG>(ref.ctrl,8)>0 && Readable(v,kSelfCtrl+8) && ref.Is(v)) {
+            for(unsigned seat=0;seat<SeatCount(v);++seat)if(AnyPlayerIn(SeatAt(v,seat)))return false;
+            PvpForgetSupportObject(ref);
+            if(!(v[kObjFlags]&kObjDeleted))reinterpret_cast<DeleteFn>(image+kDelete)(v);
+        } else PvpForgetSupportObject(ref);
+        staging[s-subs].shown=false;DropSub(*s);Publish();return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){Log("SUB support rollback failed for %p",ref.obj);return false;}
+}
+// Legacy offline calls use the same one-time entry planner and keep their asynchronous real-crew request.
 unsigned char* SubLaunch(const float* pos,const float* heading) noexcept {
     __try {
-        const ULONGLONG ms=GameMs();
-        if(!spawnOk || !preloaded || !pos || !heading || !At<void*>(image,kObjectMgr))return nullptr;
-        if(LiveSubs()>=kMaxSubs){Log("SUB launch: %d carriers out already",kMaxSubs);return nullptr;}
-        float fwd[3]={heading[0],0.0f,heading[2]};
-        if(!Normalize(fwd)){fwd[0]=0.0f;fwd[2]=1.0f;}
-        // Only where there is water: on a map without any, or over land, nothing comes (the call fails).
-        // Afloat its origin is kDraft under the surface (and Drive holds it there: s.floor); with the probe
-        // off (unknown) it surfaces on the ground as before.
-        float surface=0.0f;
-        const Sea sea=SeaAt(pos[0],pos[2],&surface);
-        if(sea==Sea::land){Log("SUB launch: no water at (%.0f,%.0f): the carrier stays away",pos[0],pos[2]);return nullptr;}
-        float start[3]={pos[0],pos[1]+kHullBottom+kClear,pos[2]};
-        float ground=0.0f;
-        const bool grounded=GroundUnder(pos,fwd,&ground);
-        if(grounded)start[1]=ground+kHullBottom+kClear;
-        if(sea==Sea::water) {
-            // Under the water, its tower top kSubmerged down, its box no lower than the seabed under it: it surfaces.
-            const float afloat=surface-kDraft,under=surface-kSubmerged-kTop;
-            start[1]=grounded && start[1]>under ? start[1] : under;
-            if(start[1]>afloat)start[1]=afloat;
-        }
-        // Rows right, up, forward, position (jet.cpp Launch).
-        alignas(16) const float m[16]={fwd[2],0,-fwd[0],0, 0,1,0,0, fwd[0],0,fwd[2],0, start[0],start[1],start[2],1};
-        InitParam param{image+kInitParamVtable,{}};
-        unsigned char* v=CreateSub(m,&param);
+        if(InSession() || !pos || !heading)return nullptr;
+        float fwd[3]={heading[0],0,heading[2]};if(!Normalize(fwd)){fwd[0]=0;fwd[2]=1;}
+        const float from[3]={pos[0]-fwd[0]*10.0f,pos[1],pos[2]-fwd[2]*10.0f};
+        float matrix[16]{},afloat=0.0f;
+        if(!PlanSupportSubmarine(pos,from,matrix,&afloat))return nullptr;
+        auto* v=PrepareSupportSubmarine(matrix,afloat);
         if(!v)return nullptr;
-        NoteLocalCopy(v,nullptr);   // whose its damage is online: the call's (online_authority.h)
-        FixBodyPart506(v,"SUB");
-        reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriend,true);
-        LevelVehicle(v);   // as a script's CreateFriend: the hull's tier (Thicken) is then the difficulty's
-        SeatNpcRider(v,true);   // a copy this machine just made: its own here (online_authority.h)
-        if(!IsSub(v)) {
-            Log("SUB launch: %p is no carrier (mark %.0f): deleted",v,BodyMark(v));
-            reinterpret_cast<DeleteFn>(image+kDelete)(v);
-            return nullptr;
-        }
-        // Its entry before it ever runs: one it cannot have (the count above raced) is no carrier left undriven.
-        Sub* s=FreeSub();
-        if(!s) {
-            Log("SUB launch: %p has no entry free (%d driven): deleted",v,kMaxSubs);
-            reinterpret_cast<DeleteFn>(image+kDelete)(v);
-            return nullptr;
-        }
-        *s=Sub{};s->ref=ObjRef::Of(v);s->vehicle=v;s->bornAt=ms;s->launched=true;s->inputAt=ms;
-        s->sea=sea==Sea::water;s->floor=s->sea ? surface-kDraft : -INFINITY;
-        s->surfacing=s->sea && start[1]<s->floor-kSurfaced;
-        std::memcpy(s->post,start,12);
-        Thicken(*s,v);
-        Log("SUB v=%p launched at (%.0f,%.0f,%.0f) heading (%.2f,%.2f) %s hp=%.0f driver=%d",v,start[0],start[1],start[2],fwd[0],fwd[2],
-            sea==Sea::water ? (s->surfacing ? "under the water: surfacing" : "afloat") : "on the ground (water unknown)",At<float>(v,kHp),
-            SeatCount(v)>0 && SeatRider(SeatAt(v,0))==Rider::dummy);
-        if(s->surfacing)Log("SUB v=%p surfaces %.0f m to y=%.0f (water y=%.0f) at %.0f m/s",v,s->floor-start[1],s->floor,surface,kSurfaceClimb);
+        NoteLocalCopy(v,nullptr);
+        Sub* s=FindSub(v);s->pending=false;
+        SeatNpcRider(v,true);
         return v;
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
@@ -1166,6 +1524,8 @@ void SubFrame(unsigned char* v) noexcept {
     const ULONGLONG ms=GameMs();
     if(s->noInputLogged){Log("SUB v=%p: its input stage is back",v);s->noInputLogged=false;}
     s->inputAt=ms;
+    if(!OnlineRunsHere(v)){ObserveRemoteSub(*s,v,ms);return;}
+    if(s->pending){HoldSupportSub(*s,v);return;}
     Tick(*s,v,ms);
     FireStep(*s,v,reinterpret_cast<const float*>(v+kMatrix),ms);
 }
@@ -1205,7 +1565,7 @@ bool InstallSub() noexcept {
 
 // A new mission (mission.cpp MissionStart): the last mission's carriers are gone with it; their gauges too.
 void ResetSubs() noexcept {
-    for(auto& s:subs)s=Sub{};
+    for(auto& s:subs)DropSub(s);
     for(auto& g:staging)g.shown=false;
     refused=nullptr;
     Publish();

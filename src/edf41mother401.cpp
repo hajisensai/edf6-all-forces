@@ -33,6 +33,9 @@
 #include "crew.h"
 #include "edf41classes.h"
 #include "edf41net.h"
+#include "enemy_control_legacy_mother.h"
+#include "pvp_controlled.h"
+#include "enemy_control_pvp_tree.h"
 #include "heli.h"
 #include "memory.h"
 #include "online_authority.h"
@@ -158,6 +161,7 @@ enum State : int {
 
 struct Part {
     std::uint64_t id=0;
+    ObjRef pvpIdentity{};
     void* obj=nullptr;
     Kind kind=Kind::hull;
     std::uint64_t rng=0x9E3779B97F4A7C15ull;
@@ -227,6 +231,12 @@ struct Part {
     float range=0.0f,charge=0.0f;
 
     // ---- every part ----
+    enemy_legacy::Control control;
+    bool controlledWave=false;
+    mother_control::SpawnWave spawnWave;
+    GenCfg configured;               // remembered only from the mission's real generator message
+    bool configuredOnce=false,pvpParentDeferred=false;
+    std::vector<mother_control::Command> controlInbox;
     int hitSe=-1,hitSe2=-1;      // se_table entries the bullets of shot / shot2 carry as their hit sound (4.1 InitParam +0xB0)
     float lockLocal[3]={};       // the lock-on point (MAB list 1 ターゲット) on the model
     void* lockPoint=nullptr;     // the one the plugin adds (EventAnimationObject registers none)
@@ -320,7 +330,7 @@ void Unregister(Part& p) noexcept {
 // 0x26fce0: vanish after `seconds` (no reward: HP 0 written, no kill).
 void Vanish(Part& p,float seconds) noexcept {
     if(p.vanishing || p.killed)return;
-    p.vanishing=true; p.noDamage=true;
+    p.vanishing=true; p.noDamage=true;p.spawnWave.Finish();
     Unregister(p);
     *F(p.obj,kDurabilityAt)=0.0f;
     p.vanishAfter=seconds;
@@ -330,7 +340,7 @@ void Vanish(Part& p,float seconds) noexcept {
 void Destroy(Part& p,int frames) noexcept {
     if(p.killed && p.state>=sDestroyWait && p.state<=sCore4)return;
     if(p.vanishing && p.state==sShrink)return;
-    p.killed=true; p.noDamage=true;
+    p.killed=true; p.noDamage=true;p.spawnWave.Finish();
     Unregister(p);
     *F(p.obj,kDurabilityAt)=0.0f;
     if(Rd(static_cast<char*>(p.obj)+kDestroyedAt,1,"part destroyed byte"))static_cast<char*>(p.obj)[kDestroyedAt]=1;
@@ -551,6 +561,7 @@ bool ReadGenCfg(const char* d,GenCfg& g) noexcept {
     return true;
 }
 void SetGenerator(Part& p,const GenCfg& g) noexcept {
+    p.configured=g;p.configuredOnce=true;
     Generator& gen=p.gen;
     if(g.type==0) {
         gen.hasPersist=true;
@@ -559,6 +570,7 @@ void SetGenerator(Part& p,const GenCfg& g) noexcept {
         gen.slots.assign(static_cast<std::size_t>(g.count),WeakRef{});
     }
     if(g.type!=0 || !gen.active || gen.cur.type==0) {
+        p.spawnWave.Finish();
         gen.cur=g;
         gen.active=true;
         gen.delay=0;
@@ -580,6 +592,10 @@ void SendSpawnMessage(void* o,std::uint32_t msg,void* data) noexcept {
     reinterpret_cast<std::uint64_t(__fastcall*)(void*,std::uint32_t,void*)>(vt[11])(o,m,pdata);
 }
 bool SpawnOne(Part& p,const GenCfg& g,WeakRef* slot) noexcept {
+    const ObjRef source=ObjRef::Of(p.obj);
+    if(!p.spawnWave.Prepare(source,g.path,static_cast<unsigned>((std::max)(1,p.gen.remaining+1)))) {
+        Log("EDF41M401 controlled spawn refused before construction: %ls",g.path);return false;
+    }
     // 4.1 0x3313c0: the node's world matrix (0x3232d0 on 出現位置 / 排出位置: the locator x its bone), its position the spawn
     // point; the enemy's matrix a fresh yaw there; SpawnerObject 0x3320a0 then sends the node's row 1 as message 0x20102
     // (EDF6: UfoSmall507 0x52EDE0 takes it x 60 as its velocity, Deiroi 0x31ED40 / DragonSmall 0x335110 their drop state;
@@ -606,9 +622,13 @@ bool SpawnOne(Part& p,const GenCfg& g,WeakRef* slot) noexcept {
     ++p.gen.made;
     static std::atomic<int> said{0};
     if(said.fetch_add(1)<40)Log("EDF41M401 %s %p: enemy #%d %ls %s at %.0f %.0f %.0f",KindName(p.kind),p.obj,p.gen.made,g.path,o ? "made" : "NOT made",at[0],at[1],at[2]);
-    if(!o)return false;
+    if(!o){if(mother_control::OwnedSpawner(source))p.spawnWave.fault=true;return false;}
     SetLevel(o,g.level);
-    SetTeam(o,1,true);
+    SetTeam(o,1,true); // the real original generator baseline, captured by adoption before any temporary PVP team
+    if(!p.spawnWave.Adopt(source,ObjRef::Of(o))) {
+        Log("EDF41M401 controlled spawn refused after construction: %ls has no verified native owner",g.path);
+        DeleteObject(o);return false; // never activated, inserted into a live weak slot, or published as a native spawn
+    }
     if(g.flag)Activate(o);
     if(slot)WeakSet(*slot,o);
     NetSpawn(p,o);   // online: the game's child identity, bound to the same enemy on every machine (edf41net)
@@ -633,6 +653,7 @@ void Encount(Part& p) noexcept {
 void RunGenerator(Part& p) noexcept {
     Generator& g=p.gen;
     g.waveDone=false;
+    if(p.control.Active() && !p.controlledWave)return;
     if(DevBits()&64)   // development: the wave's enemies are shot too (the refill of dead slots, Edf41DevShoot)
         for(std::size_t i=0;i<g.slots.size();++i)
             if(float aim[3]; WeakAlive(g.slots[i]) && AimPoint(g.slots[i].object,aim))DevShoot(g.slots[i].object,aim,static_cast<unsigned>(i)+2);
@@ -649,9 +670,10 @@ void RunGenerator(Part& p) noexcept {
         g.interval=g.cur.interval;
     }
     if(g.remaining<=0) {
-        g.waveDone=true;
+        g.waveDone=true;p.spawnWave.Finish();
         g.triggered=false;
-        if(g.hasPersist) { g.cur=g.persist; g.delay=g.persist.delay; g.remaining=g.persist.count; g.interval=0; }
+        if(p.control.Active()) { p.controlledWave=false;g.active=false; }
+        else if(g.hasPersist) { g.cur=g.persist; g.delay=g.persist.delay; g.remaining=g.persist.count; g.interval=0; }
         else g.active=false;
     }
 }
@@ -690,8 +712,8 @@ void MuzzleWorld(Part& p,float* out) noexcept { Point(p.muzzle,F(p.obj,kMatrixAt
 void Down(Part& p,float* out) noexcept { const float* y=F(p.obj,kMatrixAt+16); out[0]=-y[0]; out[1]=-y[1]; out[2]=-y[2]; }
 bool AimAt(Part& p,const float* from,float* dir) noexcept {
     float t[3];
-    void* who=Target(p.obj);
-    if(!who || !AimPoint(who,t))return false;
+    if(p.control.Active()) {float origin[3];if(!AimPoint(p.obj,origin)){std::memcpy(origin,F(p.obj,kPosAt),12);origin[1]+=2.0f;}p.control.Aim(origin,1000.0f,t);}
+    else { void* who=Target(p.obj);if(!who || !AimPoint(who,t))return false; }
     dir[0]=t[0]-from[0]; dir[1]=t[1]-from[1]; dir[2]=t[2]-from[2];
     return Norm(dir);
 }
@@ -863,7 +885,7 @@ bool TickPanel(Part& p) noexcept {
         }
         // BigCannon01
         case sBcIdle:
-            if(!NetDecides(p))break;   // online: a guest copy opens when the host's does (edf41net)
+            if(p.control.Active() || !NetDecides(p))break;   // online: a guest copy opens when the host's does (edf41net)
             if(p.attack && p.arrived && --p.countdown<=0) { p.countdown=p.minWait+Rand(p.rng,p.maxWait-p.minWait); Enter(p,sBcOpen); }
             break;
         case sBcOpen: if(CasDone(p) || f>600)Enter(p,sBcRelay); break;
@@ -877,7 +899,7 @@ bool TickPanel(Part& p) noexcept {
         case sBcClose: if(CasDone(p) || f>600)Enter(p,sBcIdle); break;
         // FinalCannon01
         case sFcIdle:
-            if(!NetDecides(p))break;   // online: the host's choice (edf41net)
+            if(p.control.Active() || !NetDecides(p))break;   // online: the host's choice (edf41net)
             if(p.attack && p.arrived && --p.countdown<=0) {
                 p.countdown=p.minWait+Rand(p.rng,p.maxWait-p.minWait);
                 Enter(p,Rand(p.rng,3)==0 ? sFcGenoCharge : sFcLightCharge);
@@ -898,14 +920,22 @@ bool TickPanel(Part& p) noexcept {
             break;
         // Generator
         case sGenIdle:
-            if(p.gen.active && p.arrived && p.gen.delay<=150)Enter(p,sGenOpen);   // the open clip's length: 150 frames (its MAB events, M)
+            if(p.gen.active && (!p.control.Active() || p.controlledWave) && p.arrived && p.gen.delay<=150) {
+                if(p.spawnWave.Prepare(ObjRef::Of(p.obj),p.gen.cur.path,static_cast<unsigned>((std::max)(0,p.gen.remaining))))Enter(p,sGenOpen);
+                else Log("EDF41M401 generator open refused: unsupported controlled spawn %ls",p.gen.cur.path);
+            }   // the open clip's length: 150 frames (its MAB events, M)
             break;
         case sGenOpen: if(CasDone(p) || f>600)Enter(p,sGenSpawn); break;
         case sGenSpawn: if(p.gen.waveDone)Enter(p,sGenWait); break;
         case sGenWait: if(f>=300)Enter(p,sGenClose); break;
         case sGenClose: if(CasDone(p) || f>600)Enter(p,sGenIdle); break;
         // FinalGenerator
-        case sFgIdle: if(p.gen.active && p.arrived && p.gen.delay<=180)Enter(p,sFgCharge); break;
+        case sFgIdle:
+            if(p.gen.active && (!p.control.Active() || p.controlledWave) && p.arrived && p.gen.delay<=180) {
+                if(p.spawnWave.Prepare(ObjRef::Of(p.obj),p.gen.cur.path,static_cast<unsigned>((std::max)(0,p.gen.remaining))))Enter(p,sFgCharge);
+                else Log("EDF41M401 final generator refused: unsupported controlled spawn %ls",p.gen.cur.path);
+            }
+            break;
         case sFgCharge: MoveSound(p.loopA,F(p.obj,kPosAt)); if(p.gen.waveDone)Enter(p,sFgIdle); break;
         default: break;
     }
@@ -917,7 +947,7 @@ bool TickBattery(Part& b) noexcept {
     const int f=b.frames;
     switch(b.state) {
         case sGbIdle: {
-            if(!b.batteryAttack || !NetDecides(b))break;   // online: a guest copy fires when the host's does (edf41net)
+            if(b.control.Active() || !b.batteryAttack || !NetDecides(b))break;   // online: a guest copy fires when the host's does (edf41net)
             float aim[3];
             void* who=Target(b.obj);
             if(!who || !AimPoint(who,aim) || Dist(aim,F(b.obj,kPosAt))>=b.range)break;
@@ -1307,7 +1337,7 @@ void Forget(const void* self) noexcept {
     std::lock_guard<std::recursive_mutex> hold(lock);
     const auto it=byObj.find(self);
     if(it==byObj.end())return;
-    Part& p=*it->second;
+    Part& p=*it->second;p.spawnWave.Finish();
     StopSound(p.loopA,0); StopSound(p.loopB,0); StopSound(p.ambient,0);
     MaterialAnimsFree(p.mat);   // before the model it is bound to goes
     GlowsBury(p);
@@ -1371,16 +1401,23 @@ void HullLogic(Part& h) noexcept {
     // the hull's team as the script left it (the class's constructor registers 6; a script's SetTeam may come after the first
     // touch): the parts follow (4.1 slot 13 0x260900 hands the team to every panel, Panel01 to its batteries)
     const std::int32_t team=*reinterpret_cast<const std::int32_t*>(F(h.obj,kTeamAt));
-    if(team!=h.team) {
-        Log("EDF41M401 hull %p team %d -> %d: its parts follow",h.obj,h.team,team);
-        h.team=team;
-        for(const Cell& c:h.cells) {
-            Part* p=ById(c.panel);
-            if(!p || p->killed || p->vanishing)continue;
-            p->team=team;
-            SetTeam(p->obj,team,true);
-            for(const Part::Mount& m:p->mounts)
-                if(Part* b=ById(m.battery); b && !b->killed) { b->team=team; SetTeam(b->obj,team,true); }
+    const bool changed=team!=h.team;
+    if(changed) {Log("EDF41M401 hull %p team %d -> %d: its parts follow",h.obj,h.team,team);h.team=team;}
+    for(const Cell& c:h.cells) {
+        Part* p=ById(c.panel);
+        if(!p || p->killed || p->vanishing)continue;
+        int applied=0;
+        if(controlled_pvp::ReadAppliedTeam(ObjRef::Of(p->obj),&applied)) {
+            if(changed)p->pvpParentDeferred=true;
+            continue; // an exact combat-part PVP lease owns its own team while its siblings keep following this hull
+        }
+        if(changed || p->pvpParentDeferred) {p->team=team;SetTeam(p->obj,team,true);p->pvpParentDeferred=false;}
+        for(const Part::Mount& m:p->mounts)if(Part* battery=ById(m.battery);battery && !battery->killed) {
+            if(controlled_pvp::ReadAppliedTeam(ObjRef::Of(battery->obj),&applied)) {
+                if(changed)battery->pvpParentDeferred=true;
+            } else if(changed || battery->pvpParentDeferred) {
+                battery->team=team;SetTeam(battery->obj,team,true);battery->pvpParentDeferred=false;
+            }
         }
     }
     if(h.throttle>0)--h.throttle;
@@ -1606,6 +1643,8 @@ void MoveBattery(Part& b,const Part* panel) noexcept {
     b.batteryAttack=panel->arrived && (panel->attack || (DevBits()&1)) && !panel->killed && !panel->vanishing;
 }
 
+bool ApplyPartControl401(Part&,const mother_control::Command&) noexcept;
+void ControlTick401(Part& p) noexcept;
 std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     const LARGE_INTEGER t0=Now();
     bool del=false,scaled=false;
@@ -1615,7 +1654,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
         Part* p=Find(self);
         if(p) {   // every machine (edf41net; see HullUpdate)
             if(!p->seen) { p->seen=true; InitPart(*p); }
-            NetPartIn(*p);   // online: the host's attack starts, a kill seen from the HP alone
+            NetPartIn(*p);ControlTick401(*p);   // online: the host's attack starts, a kill seen from the HP alone
             if(!p->farDone && p->farTries<600) { ++p->farTries; p->farDone=FarRender(self); }
             if(IsBattery(p->kind)) {
                 Part* panel=ById(p->panel);
@@ -1790,7 +1829,7 @@ void Register(void* obj,Kind kind) noexcept {
     auto rec=std::make_unique<Part>();
     rec->id=nextId++;
     rec->lastTick=hullTick;
-    rec->obj=obj;
+    rec->obj=obj;rec->pvpIdentity=ObjRef::Of(obj);
     rec->kind=kind;
     // GetPartsObject's group (+0x4d0): BigCannon01 1, WeakPanel 2, Core 3, the generators 0, the rest -1 (SPEC 1.5 / notes A, B)
     rec->group=kind==Kind::bigCannon ? 1 : kind==Kind::weak ? 2 : kind==Kind::core ? 3 : (kind==Kind::generator || kind==Kind::finalGenerator) ? 0 : -1;
@@ -1839,7 +1878,7 @@ int IdleOf(int state) noexcept {
 bool NetDecides(const Part& p) noexcept { return !edf41net::Online() || edf41net::Decides(p.obj); }
 
 void NetEntered(Part& p,int from,int state) noexcept {
-    if(!IsDecision(from,state) || !edf41net::Online() || !edf41net::Decides(p.obj))return;
+    if(p.control.Active() || !IsDecision(from,state) || !edf41net::Online() || !edf41net::Decides(p.obj))return;
     const PartEnterMsg m{from,state,p.countdown,0};
     if(edf41net::Send(p.obj,kPartEnter,&m,sizeof(m)) && ++netSent<=3)
         Log("EDF41M401 %s %p online: attack start %d -> %d sent to the guests (%u so far)",KindName(p.kind),p.obj,from,state,netSent);
@@ -1872,6 +1911,11 @@ void NetSpawn(Part& p,void* enemy) noexcept {
 
 void PartApply(void* context,std::uint8_t kind,const unsigned char* data,std::size_t size) noexcept {
     Part& p=*static_cast<Part*>(context);
+    if(kind==19 && size==sizeof(mother_control::Command)) {
+        mother_control::Command command;std::memcpy(&command,data,sizeof(command));
+        if(command.lease && command.lease==p.control.lease && p.controlInbox.size()<enemy_legacy::Control::kPending)p.controlInbox.push_back(command);
+        return;
+    }
     if(kind!=kPartEnter || size!=sizeof(PartEnterMsg)) { Fail("a 401 part event of a kind or size this version does not send (refused)"); return; }
     PartEnterMsg m;
     std::memcpy(&m,data,sizeof(m));
@@ -1934,7 +1978,157 @@ void NetForget(const Part& p) noexcept {
     hullSerials.erase(p.id);
 }
 
+// ---- player control of combat parts (the invisible layout hull and inert armour stay structural) ----
+bool CombatPart401(const Part& p) noexcept {
+    const Part* parent=IsBattery(p.kind) ? ById(p.panel) : &p;
+    const Part* hull=parent ? HullOf(*parent) : nullptr;
+    if(!parent || parent->killed || parent->vanishing || !hull || hull->dying)return false;
+    const Part* core=ById(hull->core);
+    if(hull->core && (!core || core->killed || Hp(core->obj)<=0.0f))return false;
+    return (p.kind==Kind::bigCannon || p.kind==Kind::finalCannon || p.kind==Kind::generator || p.kind==Kind::finalGenerator || IsBattery(p.kind))
+        && p.seen && !p.killed && !p.gone && !p.vanishing && !Deleted(p.obj);
+}
+bool ControlMatch401(const void* object) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);const Part* p=Find(object);return p && CombatPart401(*p);
+}
+unsigned ControlAbilities401(const void* object,enemy_control::Ability* out,unsigned cap) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);const Part* p=Find(object);if(!p || !CombatPart401(*p))return 0;
+    const auto kind=static_cast<unsigned>(p->kind);
+    if(p->kind==Kind::finalCannon) {
+        mother_control::Ability(out,cap,0,mother_control::Id401(0,kind),L"灭绝炮：原生蓄力与发射");
+        mother_control::Ability(out,cap,1,mother_control::Id401(1,kind),L"闪电炮：原生蓄力与五连射");return 2;
+    }
+    const bool generator=p->kind==Kind::generator || p->kind==Kind::finalGenerator;
+    mother_control::Ability(out,cap,0,mother_control::Id401(0,kind),generator ? L"召唤任务配置的敌人" : p->kind==Kind::bigCannon ? L"主炮：开门、蓄力与激光扫射" :
+        p->kind==Kind::rapid ? L"速射炮：蓄力与持续扫射" : p->kind==Kind::sniper ? L"狙击炮：蓄力与发射" : p->kind==Kind::plasma ? L"等离子炮：蓄力与发射" : L"激光炮：蓄力与发射",
+        !generator || (p->configuredOnce && p->configured.path[0] && p->configured.count>0 &&
+        mother_control::SpawnWave::CanPrepare(ObjRef::Of(p->obj),p->configured.path,static_cast<unsigned>(p->configured.count))));return 1;
+}
+bool ControlBegin401(const void* object,std::uint64_t lease) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);Part* p=Find(object);if(!p || !CombatPart401(*p))return false;
+    if(!lease)return false;
+    const bool already=p->control.Active();if(already)return p->control.lease==lease;
+    p->spawnWave.fault=false;
+    if(!already && p->gen.active && p->gen.remaining>0 && !p->gen.waveDone &&
+       (p->state==sGenOpen || p->state==sGenSpawn || p->state==sFgCharge) &&
+       !p->spawnWave.Prepare(ObjRef::Of(p->obj),p->gen.cur.path,static_cast<unsigned>(p->gen.remaining)))return false;
+    if(!p->control.Begin(lease,std::atan2(F(p->obj,kMatrixAt)[8],F(p->obj,kMatrixAt)[10])))return false;
+    if(!already)p->controlledWave=p->gen.active && p->gen.remaining>0 && !p->gen.waveDone &&
+        (p->state==sGenOpen || p->state==sGenSpawn || p->state==sFgCharge);
+    return true;
+}
+bool ControlApply401(const void* object,const enemy_control::Input& in,bool first) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);Part* p=Find(object);return p && CombatPart401(*p) && !p->spawnWave.fault && mother_control::Sample(p->control,in,first);
+}
+bool ControlRestore401(const void* object) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);Part* p=Find(object);if(!p)return true;
+    p->spawnWave.Reset();if(!p->control.Active())return true;
+    p->control.Restore();p->controlledWave=false;p->controlInbox.clear();
+    // Resume the original standing generator with its live weak slots intact: SetGenerator would discard them.
+    if(CombatPart401(*p) && !p->gen.active && p->gen.hasPersist) {
+        p->gen.cur=p->gen.persist;p->gen.active=true;p->gen.delay=p->gen.persist.delay;p->gen.remaining=p->gen.persist.count;p->gen.interval=0;
+    }
+    return true;
+}
+bool ApplyPartControl401(Part& p,const mother_control::Command& command) noexcept {
+    if(!CombatPart401(p) || !p.control.Active() || command.lease!=p.control.lease || command.index!=static_cast<unsigned>(p.kind) || command.action>1 ||
+       (!IsBattery(p.kind) && !p.arrived) || p.killed || p.vanishing)return false;
+    if(p.kind==Kind::bigCannon && !command.action && p.state==sBcIdle){p.rng=command.seed;Enter(p,sBcOpen);return true;}
+    if(p.kind==Kind::finalCannon && p.state==sFcIdle){p.rng=command.seed;Enter(p,command.action ? sFcLightCharge : sFcGenoCharge);return true;}
+    if(IsBattery(p.kind) && !command.action && p.state==sGbIdle){p.rng=command.seed;Enter(p,p.kind==Kind::rapid ? sGbCharge : sGbFire);return true;}
+
+    if(!p.control.Active() || command.action || command.index!=static_cast<unsigned>(p.kind) ||
+       !(p.kind==Kind::generator || p.kind==Kind::finalGenerator) || !p.configuredOnce || !p.configured.path[0] || p.configured.count<=0 ||
+       !p.arrived || p.killed || p.vanishing || !(p.state==sGenIdle || p.state==sFgIdle))return false;
+    if(!p.spawnWave.Prepare(ObjRef::Of(p.obj),p.configured.path,static_cast<unsigned>(p.configured.count))) {
+        Log("EDF41M401 controlled summon refused: %ls has no complete native provider/budget",p.configured.path);return false;
+    }
+    p.rng=command.seed;p.gen.cur=p.configured;p.gen.cur.type=1;p.gen.active=true;p.gen.delay=0;p.gen.interval=0;
+    p.gen.remaining=p.configured.count;p.gen.triggered=false;p.gen.waveDone=false;p.controlledWave=true;return true;
+}
+void ControlTick401(Part& p) noexcept {
+    if(!p.control.Active())return;
+    if(!NetDecides(p))while(!p.controlInbox.empty()) {
+        if(p.controlInbox.front().lease!=p.control.lease){p.controlInbox.erase(p.controlInbox.begin());continue;}
+        if(!ApplyPartControl401(p,p.controlInbox.front()))break;
+        p.controlInbox.erase(p.controlInbox.begin());
+    }
+    if(NetDecides(p))for(unsigned i=0;i<p.control.pending;++i) {
+        const auto& key=p.control.pressed[i];const auto kind=static_cast<unsigned>(p.kind);
+        if((key.id!=mother_control::Id401(0,kind) && !(p.kind==Kind::finalCannon && key.id==mother_control::Id401(1,kind))) || (!IsBattery(p.kind) && !p.arrived) || p.killed || p.vanishing)continue;
+        const mother_control::Command command{key.id==mother_control::Id401(1,kind) ? 1u : 0u,kind,key.seed,p.control.lease};
+        if(ApplyPartControl401(p,command) && edf41net::Online())edf41net::Send(p.obj,19,&command,sizeof(command));
+    }
+    p.control.ClearEdges();
+}
+std::uint64_t ControlHash401(const void* object) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);const Part* p=Find(object);
+    return p && CombatPart401(*p) ? mother_control::Hash(401,static_cast<unsigned>(p->kind)) : 0;
+}
+bool ControlNetwork401(const void* object) noexcept {return edf41net::Enabled() && edf41net::Registered(object);}
+controlled_pvp::Life PvpIdentity401(const ObjRef& ref) noexcept {
+    using controlled_pvp::Life;
+    if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16))return Life::invalid;
+    if(At<LONG>(ref.ctrl,8)<=0)return Life::gone;
+    if(!Readable(ref.obj,kTeamAt+8))return Life::invalid;
+    if(At<const void*>(ref.obj,kSelfCtrl)!=ref.ctrl || (At<unsigned char>(ref.obj,kFlagsAt)&4))return Life::gone;
+    return Life::live;
+}
+bool PvpCollect401(void*,const ObjRef& root,ObjRef* members,unsigned capacity,unsigned* count,
+                   controlled_pvp::Emitter* emitters,unsigned emitterCapacity,unsigned* emitted) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);
+    if(count)*count=0;if(emitted)*emitted=0;
+    if(!members || !count || !emitters || !emitted || !capacity || !emitterCapacity ||
+       PvpIdentity401(root)!=controlled_pvp::Life::live)return false;
+    *count=*emitted=0;const Part* p=Find(root.obj);
+    if(At<const void*>(root.obj,0)!=&partClone.block[1])return false;
+    if(!p || p->pvpIdentity.obj!=root.obj || p->pvpIdentity.ctrl!=root.ctrl ||
+       !(p->kind==Kind::bigCannon || p->kind==Kind::finalCannon || p->kind==Kind::generator || p->kind==Kind::finalGenerator || IsBattery(p->kind)) ||
+       !p->mounts.empty() || p->team<-1 || p->team>=7)return false;
+    for(const auto& entry:byObj)if(entry.second->obj!=root.obj && (entry.second->panel==p->id || entry.second->hull==p->id)) {
+        const auto life=PvpIdentity401(entry.second->pvpIdentity);
+        if(life!=controlled_pvp::Life::gone)return false; // live unknown child or ambiguous memory must never be silently omitted
+    }
+    // Only these eight combat classes are admitted. Mount-owning Panel01 and the 19x19 layout hull are never controlled.
+    // HullLogic skips an applied exact part lease, so its parent and siblings do not enter this independent firing tree.
+    ObjRef native[controlled_pvp::kMaxMembers]{};unsigned total=0;
+    if(!enemy_pvp_native::CollectTree(root,native,controlled_pvp::kMaxMembers,&total) || total!=1)return false;
+    members[0]=root;*count=1;
+    emitters[0]={controlled_pvp::EmitterKind::ownerTeamMirror,root,&p->team,p->id};*emitted=1;return true;
+}
+controlled_pvp::Life PvpRead401(void*,const controlled_pvp::Emitter& emitter,int* team) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);using controlled_pvp::Life;
+    if(!team || emitter.kind!=controlled_pvp::EmitterKind::ownerTeamMirror || !emitter.object || !emitter.incarnation)return Life::invalid;
+    const auto identity=PvpIdentity401(emitter.member);if(identity!=Life::live)return identity;
+    const Part* p=Find(emitter.member.obj);if(!p)return Life::invalid;
+    if(p->id!=emitter.incarnation)return Life::gone;
+    if(p->pvpIdentity.obj!=emitter.member.obj || p->pvpIdentity.ctrl!=emitter.member.ctrl)return Life::gone;
+    if(emitter.object!=&p->team || At<const void*>(emitter.member.obj,0)!=&partClone.block[1] || !(p->kind==Kind::bigCannon || p->kind==Kind::finalCannon || p->kind==Kind::generator ||
+       p->kind==Kind::finalGenerator || IsBattery(p->kind)))return Life::invalid;
+    if(p->team<-1 || p->team>=7)return Life::invalid;
+    *team=p->team;return Life::live;
+}
+bool PvpWrite401(void*,const controlled_pvp::Emitter& emitter,int team) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);int previous=0;
+    if(team<-1 || team>=7 || PvpRead401(nullptr,emitter,&previous)!=controlled_pvp::Life::live)return false;
+    Part* p=Find(emitter.member.obj);p->team=team;return p->team==team;
+}
+bool PvpMemberBaseline401(void*,const ObjRef& root,const ObjRef& member,int,int,int* team,int* last) noexcept {
+    // Admitted combat parts never create structural children: only excluded Panel01 owns mounts, and the excluded hull owns layouts.
+    return controlled_pvp::ReadBaseline(root,member,team,last);
+}
+bool PvpEmitterBaseline401(void*,const controlled_pvp::Emitter&,int,int,int*) noexcept {
+    // The id/field binding lasts exactly as long as this Part. Unknown replacements cannot inherit a temporary PVP cache value.
+    return false;
+}
+bool ControlPvpHooks401(const void* object,controlled_pvp::Hooks* out) noexcept {
+    if(!out || !ControlMatch401(object))return false;
+    *out={nullptr,&PvpCollect401,&PvpRead401,&PvpWrite401,&PvpMemberBaseline401,&PvpEmitterBaseline401};return true;
+}
 }  // namespace
+const EnemyControlAdapter& Edf41Mother401ControlAdapter() noexcept {
+    static const EnemyControlAdapter adapter{"EDF4.1 母舰战斗部件",&ControlMatch401,&ControlAbilities401,&ControlHash401,&ControlBegin401,&ControlApply401,&ControlRestore401,&ControlNetwork401,&ControlPvpHooks401};return adapter;
+}
 
 // Development bit 32768: Edf41DevShoot also shoots the mission's ordinary enemies (every live lockable hostile object that is not
 // one of ours), so the scripts' kill counts / waits advance and a mission that creates the ship late gets there. Once a frame.

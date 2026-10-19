@@ -65,6 +65,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import acb  # noqa: E402
 import edf41_sound  # noqa: E402
+import edf5port  # noqa: E402
 import cas_graft  # noqa: E402
 import cas_pose  # noqa: E402
 import dsgo  # noqa: E402
@@ -1094,20 +1095,12 @@ FRIEND_KEYS = ('ragdoll', 'ragdoll_contact', 'soldier_color', 'soldier_spotlight
 # all 101 stock soldiers say 2; 4.1's point local Y up and all 31 of 4.1's say 1. A 4.1 model under EDF6's 2 turns its
 # spine about the body's side axis -- bends forward and back -- instead of twisting it: the key follows the model.
 SPINE_AXIS_MODE = {0: 2, 1: 1}   # the local axis (row of the bind matrix) that points up -> the mode that turns about it
-# The left hand on the weapon (feedback 2026-10-18 「omega小队持枪姿势有问题」): SoldierBase (EDF+0x597F00) sets the CAS
-# variable v_weapon_grip_ik_target (its index at +0x1988, EDF+0x58DC15) to grab · ik · node, where ik is the weapon
-# model's first record of its MAB list 1 (the 'IK' locator: EDF+0x68C206..0x68C352, matrix +0x7B0, node +0x7A0) and
-# grab the soldier's soldier_weapon_grab_adjust: [offset, rotation in degrees] (EDF+0x58DD70: item 1 as Rx·Ry·Rz, row
-# vectors, degrees by pi / 180; item 0 the offset row, +0x19C0). The CAS's IK puts the left wrist bone (te_l) in that
-# frame. EDF6 re-authored every weapon's IK locator for its own skeleton's te_l, whose axes are turned ~90 degrees from
-# 4.1's: across the 8 ranger AI weapons both games ship with one (WEAPON/AISOLDIER*), EDF6's IK rotation is 88..98
-# degrees from 4.1's, and 8..17 degrees from 4.1's re-expressed in EDF6's te_l (te_l_4.1 · te_l_6^-1; selftest
-# edf41_friend_grip_matches_weapons). The 4.1 soldiers carry EDF6's weapons (the same names, EDF6's files), so their
-# left hand came out turned ~90 degrees off the grip. grab is applied in the target's own frame (left of ik), so one
-# rotation per model re-expresses every weapon's: weapon_grip_adjust. (EDF6's fencers' own (-90, -35, 0) comes out
-# within 3 degrees of none for 4.1's fencer skeleton -- EDF6 kept the old frame for them; their AI weapons carry no IK
-# record, so it moves nothing.)
-GRIP_BONE = 'te_l'
+# The soldier's source CAS, skeleton and private source weapon model/MAB/IK are
+# one visual contract (friend_weapon_contract below). Reusing EDF6's same-named
+# weapons requires weapon-dependent, animated IK frames; one bind-wrist rotation
+# left 8..30 degrees of residual error and did not restore the original contract.
+# The native target is grab * weapon_ik * weapon_node_world (EDF+0x597F00).
+GRIP_BONE = 'te_l'   # retained by the historical bind-frame diagnostic helper
 # What the class reads in another shape than 4.1 wrote it, or by a name 4.1's model lacks (EDF.dll, static, 2026-10-17):
 #  - soldier_sub_weapon_slot: 0 (no sub weapon; 41 / 45, 12 / 24, 34 / 38 stock soldiers of the three classes): EDF6's
 #    own file may name a third weapon there (AIHEAVYARMOR_SP_LEADER: [[2, 'weapon', 'te_l']]), 4.1's units carry two;
@@ -1318,6 +1311,171 @@ def friend_names(games: 'Games', files: dict[str, bytes], rel: str, members: dic
         raise ValueError(f'{rel}: class {members["xgs_scene_object_class"]} looks up {missing}, which its files lack')
 
 
+FRIEND_WEAPON_FOLDER = 'EDF41_NPC'
+FRIEND_WEAPON_SE_FIELDS = ('FireSe', 'FireLoadSe', 'AmmoHitSe', 'ShellCaseDischargeSe')
+
+
+def friend_weapon_rel(source: str) -> str:
+    """Private path of a 4.1 NPC weapon or its original model/animation/physics asset."""
+    folder, name = rel_of(source).split('/', 1)
+    if folder != 'WEAPON' or '/' in name:
+        raise ValueError(f'NPC weapon asset is not a top-level WEAPON file: {source}')
+    return f'WEAPON/{FRIEND_WEAPON_FOLDER}/{name}'
+
+
+def friend_weapon_cues(games: 'Games', source: str, doc: dsgo.Document) -> None:
+    """Keep source playback semantics while requiring an EDF6 resident cue.
+
+    Original AILAZR02 names a player cue that EDF6 only keeps in the optional
+    imported bank; its own native AI counterpart supplies the resident AI cue.
+    Only that same-field name may change, with identical native trigger mode.
+    """
+    _presets, banks = sound_cues(games)
+    resident = set().union(*(banks[name] for name in RESIDENT_BANKS))
+    native = None
+    for key in FRIEND_WEAPON_SE_FIELDS:
+        if key not in doc.root.names.values():
+            continue
+        entry = doc.root.get(key)
+        if not (isinstance(entry, dsgo.Node) and len(entry.items) > 1
+                and isinstance(entry.items[1], str) and entry.items[1]):
+            continue
+        if entry.items[1] in resident:
+            continue
+        if native is None:
+            native = dsgo.parse(games.read6(source)).root
+        fallback = native.get(key)
+        if not (isinstance(fallback, dsgo.Node) and len(fallback.items) > 1
+                and fallback.items[1] in resident and fallback.items[0] == entry.items[0]):
+            raise ValueError(f'{source}: {key} cue {entry.items[1]!r} has no same-mode resident native AI cue')
+        entry.items[1] = fallback.items[1]
+
+
+def friend_weapon(games: 'Games', source: str) -> dict[str, bytes]:
+    """A source NPC weapon and its original visual closure, with no EDF6 HOLD/MAB donor.
+
+    A bind-pose wrist correction cannot reconstruct the source's per-weapon IK or
+    animated attachment frames. Keep its own model, CAS, MAB and holding keys as a
+    unit. Only the documented weapon41 data-format additions are applied. Every
+    file is private, including same-named archives EDF6 re-exported differently.
+    """
+    source = rel_of(source)
+    if not games.has4(source):
+        raise ValueError(f'4.1 NPC weapon is absent from its source game: {source}')
+    _version, own = sgo.read(games.read4(source))
+    names = own.get('name')
+    if not (isinstance(names, list) and len(names) >= 2 and all(isinstance(n, str) for n in names)):
+        raise ValueError(f'{source}: source weapon has no localized name list')
+    # Every native weapon supplies these dictionary fields. 4.1 contains Japanese
+    # and English only; its Japanese display name is the other languages' fallback.
+    localized = {lang: names[1] if lang == 'en' else names[0] for lang in ('ja', 'en', 'cn', 'sc', 'kr')}
+    doc = edf5port.weapon41(own, localized)
+    friend_weapon_cues(games, source, doc)
+    output: dict[str, bytes] = {}
+    moves: dict[str, str] = {}
+    # HUD sights and icons are display-only. The model, its own animation and
+    # shell-case physics must all come from the same source geometry.
+    for path in edf5port.app_paths(doc.root):
+        rel = rel_of(path)
+        if not (rel.startswith('WEAPON/') and rel.endswith(('.RAB', '.MRAB', '.CAS', '.SHKT'))):
+            continue
+        if not games.has4(rel):
+            raise ValueError(f'{source}: source visual asset is absent: {rel}')
+        target = friend_weapon_rel(rel)
+        moves[rel] = target
+        data = games.read4(rel)
+        output[target] = data if rel.endswith('.SHKT') else legacy_assets.convert(rel, data)
+
+    def relocate(value: object) -> object:
+        if isinstance(value, str) and value.lower().startswith('app:/'):
+            return 'app:/' + moves[rel_of(value)].lower() if rel_of(value) in moves else value
+        if isinstance(value, dsgo.Node):
+            value.items = [relocate(v) for v in value.items]
+        return value
+
+    relocate(doc.root)
+    target = friend_weapon_rel(source)
+    output[target] = dsgo.compact(doc)
+    am = dsgo.to_py(doc.root.get('animation_model'))
+    md = model_mdb(lambda ref: output.get(rel_of(ref)), am)
+    if md is None:
+        raise ValueError(f'{source}: private weapon model cannot be resolved')
+    bones = {md.name_of(b.name) for b in md.bones}
+    block = doc.root.get('animation_model').items[2]
+    missing = [loc.node for _kind, loc in mab_legacy.mab_locators(block.data) if loc.node not in bones]
+    if missing:
+        raise ValueError(f'{source}: original MAB locators name absent original bones: {missing}')
+    return output
+
+
+def friend_hold_missing(members: dict, cas: bytes, read: Callable[[str], bytes]) -> set[tuple[str, str, str]]:
+    """Unresolved literal HOLD states, for comparing the port to its original.
+
+    A few source Fencer keys are interpreted conditionally by its weapon class
+    (waist_recoil_M, shield_bash). Do not invent aliases for keys already absent
+    in 4.1. The migrated unit may not add a new unresolved state.
+    """
+    states = cas_graft.states(cas)
+    missing: set[tuple[str, str, str]] = set()
+    for index, path in enumerate(members['soldier_load_weapon']):
+        weapon = sgo.load(data=read(path))
+        players = [slot[1] for slot in members['soldier_weapon_slot'] if index in slot[0]]
+        checks: list[tuple[str, str]] = []
+        base = weapon.get('BaseAnimation')
+        if isinstance(base, str) and base:
+            checks.append(('main', base + '_stand'))
+        for player in players:
+            for key in ('AimAnimation', 'ReloadAnimation'):
+                value = weapon.get(key)
+                if isinstance(value, str) and value:
+                    checks.append((player, value))
+            change = weapon.get('ChangeAnimation')
+            if isinstance(change, str) and change:
+                checks.extend((player, change + suffix) for suffix in ('_up', '_down'))
+            custom = weapon.get('custom_parameter')
+            # These source NPC classes also name attacks inside nested lists
+            # (Fencer shield guard/bash and pile swings), not only element zero.
+            checks.extend((player, animation) for animation in strings(custom) if animation)
+        for player, state in checks:
+            if state not in states.get(player, set()):
+                missing.add((rel_of(path).rsplit('/', 1)[-1], player, state))
+    return missing
+
+
+def friend_weapon_contract(games: 'Games', files: dict[str, bytes], rel: str) -> None:
+    """Bind the soldier to private original weapons, restoring its original IK frame.
+
+    The soldier class still receives EDF6's gameplay/control keys, while the visual
+    side consists exclusively of the source soldier/CAS/weapons. No model-space
+    bind correction is applied to a weapon-specific target anymore.
+    """
+    _version, source = sgo.read(games.read4(rel))
+    doc = dsgo.parse(files[rel])
+    loads = []
+    for path in source['soldier_load_weapon']:
+        assets = friend_weapon(games, path)
+        clash = [r for r in assets if r in files and files[r] != assets[r]]
+        if clash:
+            raise ValueError(f'{rel}: private NPC weapon assets disagree: {clash}')
+        files.update(assets)
+        loads.append('app:/' + friend_weapon_rel(path).lower())
+    doc.root.set('soldier_load_weapon', dsgo.Node(loads))
+    # The legacy class had no grab-adjust key: its target was the original MAB
+    # locator directly. Preserve an explicitly authored value if a source has one.
+    grab = source.get('soldier_weapon_grab_adjust', [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    doc.root.set('soldier_weapon_grab_adjust', dsgo_value(grab))
+    files[rel] = dsgo.compact(doc)
+    source_members = {k: sgo.plain(v) for k, v in source.items()}
+    original_cas = games.read4(rel_of(source_members['animation_model'][1]))
+    read = files_reader(games, files)
+    current = sgo.load(data=files[rel])
+    actual_cas = read(current['animation_model'][1])
+    old_missing = friend_hold_missing(source_members, original_cas, lambda p: games.read4(rel_of(p)))
+    new_missing = friend_hold_missing(current, actual_cas, lambda p: read(p))
+    if new_missing - old_missing:
+        raise ValueError(f'{rel}: migrated HOLD states missing from its actual CAS: {sorted(new_missing - old_missing)}')
+
+
 def friend_look(games: 'Games', root: str) -> dict[str, bytes]:
     """The files of 4.1's soldier `root` (AIARMYSOLDIER_AF.SGO) as it ships: its SGO at look_rel (FRIEND_LOOKS, above)
     and the files of its closure EDF6 lacks (model, CAS with FRIEND_CAS's grafts, ragdoll) at their story paths.
@@ -1348,11 +1506,10 @@ def friend_look(games: 'Games', root: str) -> dict[str, bytes]:
     for k, v in FRIEND_OVERRIDE[cls]:
         root_node.set(k, dsgo_value(v))
     plain41 = {k: sgo.plain(v) for k, v in mine.items()}
-    grab, mode = soldier_grip(files_reader(games, out), plain41, sgo.load(data=t_data), src)
+    mode = spine_mode(model_mdb(files_reader(games, out), plain41['animation_model']), plain41['human_direction_adjust'][1])
     if plain41['human_direction_adjust'][0] != mode:
         raise ValueError(f'{src}: 4.1\'s human_direction_adjust mode {plain41["human_direction_adjust"][0]} does not '
                          f'twist its spine about the up axis ({mode} does)')
-    root_node.set('soldier_weapon_grab_adjust', dsgo_value(grab))
     # animation_model: 4.1's model (its first entry: the _light one names an archive 4.1 itself lacks), CAS and MAB, then
     # the template's entries past them that name nothing of EDF6's model (its scale; its effect archive, a dict); a
     # list there names EDF6's model's bones (the wing divers' skirt chain, ragdoll_skirt5B_*), which 4.1's lacks.
@@ -1362,6 +1519,7 @@ def friend_look(games: 'Games', root: str) -> dict[str, bytes]:
     mab = mab_block(am[2])
     root_node.set('animation_model', dsgo.Node([dsgo_value(entry), am[1], dsgo_value(mab), *tail]))
     out[dst] = dsgo.compact(dsgo.Document(root_node, doc.pool))
+    friend_weapon_contract(games, out, dst)
     members = sgo.load(data=out[dst])
     friend_names(games, out, dst, members, mab)
     check_class_keys(games.stock_by_class(), dst, out[dst])
@@ -2803,20 +2961,15 @@ def fill_class_keys(stock: dict[str, dict[str, dict]], read: Callable[[str], byt
 
 
 def root_soldier_grip(games: 'Games', out: dict[str, bytes], rel: str, filled: dict | None) -> None:
-    """A ROOTS soldier (4.1's own file under an EDF6 soldier class: the Omega team) with soldier_weapon_grab_adjust
-    re-expressed for its 4.1 hand (weapon_grip_adjust) from the EDF6 soldier fill_class_keys took the key from, and its
-    human_direction_adjust checked to twist its model's spine about the up axis (spine_mode). ValueError when the key
-    did not come from such a template or the object is not a DSGO (the soldier classes are DSGO-only)."""
+    """Complete a ROOTS soldier with its private source weapon/model/IK contract."""
     if not filled or 'soldier_weapon_grab_adjust' not in filled['keys'] or out[rel][:4] != b'DSGO':
-        raise ValueError(f'{rel}: soldier_weapon_grab_adjust not filled from an EDF6 soldier into a DSGO ({filled})')
-    doc = dsgo.parse(out[rel])
+        raise ValueError(f'{rel}: soldier_weapon_grab_adjust not filled into a native-compatible soldier ({filled})')
     members = sgo.load(data=out[rel])
-    grab, mode = soldier_grip(files_reader(games, out), members, sgo.load(data=games.read6(filled['template'])), rel)
+    md = model_mdb(files_reader(games, out), members['animation_model'])
+    mode = spine_mode(md, members['human_direction_adjust'][1])
     if members['human_direction_adjust'][0] != mode:
-        raise ValueError(f'{rel}: human_direction_adjust mode {members["human_direction_adjust"][0]} does not twist its '
-                         f'spine about the up axis ({mode} does)')
-    doc.root.set('soldier_weapon_grab_adjust', dsgo_value(grab))
-    out[rel] = dsgo.compact(dsgo.Document(doc.root, doc.pool))
+        raise ValueError(f'{rel}: human_direction_adjust does not twist the source model about its up axis ({mode})')
+    friend_weapon_contract(games, out, rel)
 
 
 def check_class_keys(stock: dict[str, dict[str, dict]], rel: str, data: bytes) -> None:

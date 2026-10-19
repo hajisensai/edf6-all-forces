@@ -31,6 +31,14 @@ struct Fixture {
     crew::ObjRef attachedRefs[crew::support_net::kMaxUnits]{};
     char attachedPuid[65]{};
     bool correctCommandArgs=true,correctMarkArgs=true,correctSealArgs=true,correctLoaderArgs=true;
+    bool cachedOwner=false,readable=true,soldier=true,actualPlayer=true,nativeIdOk=true;
+    crew::ObjRef expectedParent{},driverVehicle{},driverPlayer{};
+    bool driverOk=false,session=true;
+    unsigned driverCalls=0;
+    char cachedText[65]="nativeowner001";
+    unsigned char parentId[32]{};
+    unsigned ownerCalls=0,soldierCalls=0,playerCalls=0,objectIdCalls=0;
+    bool correctOwnerArgs=true,correctObjectIdArgs=true;
     unsigned char expectedId[32]{};
 };
 Fixture fixture{};
@@ -66,7 +74,40 @@ FARPROC FixtureGetProcAddress(HMODULE module,LPCSTR name) noexcept {
 }
 }
 
+namespace edf {
+bool Readable(const void* pointer,std::size_t size,bool) noexcept {
+    return fixture.readable && pointer && size && reinterpret_cast<std::uintptr_t>(pointer)>=0x10000;
+}
+bool IsAnyPlayer(const unsigned char* human) noexcept {
+    ++fixture.playerCalls;
+    return fixture.actualPlayer && human==fixture.expectedParent.obj;
+}
+}
+
 namespace crew {
+bool InSession() noexcept {return fixture.session;}
+bool IsSoldierClass(const void* human) noexcept {
+    ++fixture.soldierCalls;
+    return fixture.soldier && human==fixture.expectedParent.obj;
+}
+bool ReadNativeObjectId(const unsigned char* object,unsigned char* out32) noexcept {
+    ++fixture.objectIdCalls;
+    fixture.correctObjectIdArgs=fixture.correctObjectIdArgs && object==fixture.expectedParent.obj && out32;
+    if(!fixture.nativeIdOk || object!=fixture.expectedParent.obj || !out32)return false;
+    std::memcpy(out32,fixture.parentId,32);return true;
+}
+bool PvpNativeSupportDriver(const ObjRef& parent,ObjRef* out) noexcept {
+    ++fixture.driverCalls;if(!out)return false;*out={};
+    if(!fixture.driverOk || parent.obj!=fixture.driverVehicle.obj || parent.ctrl!=fixture.driverVehicle.ctrl)return false;
+    *out=fixture.driverPlayer;return true;
+}
+bool PvpNativeSupportOwner(const ObjRef& parent,char* puid,unsigned capacity) noexcept {
+    ++fixture.ownerCalls;
+    fixture.correctOwnerArgs=fixture.correctOwnerArgs && puid && capacity>=sizeof(fixture.cachedText);
+    if(!fixture.cachedOwner || parent.obj!=fixture.expectedParent.obj || parent.ctrl!=fixture.expectedParent.ctrl ||
+       !parent.obj || !parent.Is(parent.obj) || !puid || capacity<sizeof(fixture.cachedText))return false;
+    std::memcpy(puid,fixture.cachedText,sizeof(fixture.cachedText));return true;
+}
 bool ResolveCommandIdentities(const unsigned char requester[32],const unsigned char units[][32],
     unsigned count,const unsigned char focus[32],CommandIdentities* out) noexcept {
     ++fixture.strictCalls;

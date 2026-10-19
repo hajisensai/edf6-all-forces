@@ -4634,7 +4634,10 @@ def edf41_clone_destructor_slot() -> None:
     assert 'DtorShaped(c.rvas[kSlotDtor])' in build and build.index('DtorShaped(') < build.index('c.block[1+kSlotDtor]=')
     for rel in ('src/edf41mother.cpp', 'src/edf41mother401.cpp', 'src/edf41robo.cpp'):
         code = re.sub(r'//[^\n]*', '', src(rel))
-        assert 'orig[kSlotDtor]' in code and 'orig[0]' not in code and 'block[1]' not in code, rel
+        assert 'orig[kSlotDtor]' in code and 'orig[0]' not in code, rel
+        # block[1] is the address of the clone's first virtual entry. Read-only
+        # identity comparisons are valid; assigning this slot would corrupt slot 0.
+        assert not re.search(r'\.block\s*\[\s*1\s*\]\s*=(?!=)', code), rel
         assert re.search(r'AtGameShutdown\(&\w+\);', code), f'{rel}: no shutdown callback'
     # the shutdown: the callbacks first (the game whole), the flag after; the sound / material calls inert from then on
     hook = shared.split('void __fastcall ShutdownHook(void* self) {', 1)[1].split('\n}', 1)[0]
@@ -5072,17 +5075,30 @@ def map_wired() -> None:
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'edf::AsyncKey(' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp',
-                                      'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     fp = src('src/firstperson.cpp')
-    key_input = fp.split('bool KeyInputAllowed() noexcept {', 1)[1].split('\n}', 1)[0]
-    assert 'if(MapHoldsKeys())return false;' in key_input
-    assert '!KeyInputAllowed()' in fp and 'keyWas=false;keyCancelled=down;return;' in fp, 'map input cancels the FP key gesture'
+    key_input = fp.split('bool KeyInputAllowed(const unsigned char* human) noexcept {', 1)[1].split('\n}', 1)[0]
+    assert 'if(MapHoldsHumanKeys(human))return false;' in key_input
+    assert '!KeyInputAllowed(human)' in fp and 'key.was=false;key.cancelled=down;return;' in fp, 'map input cancels only its owner camera FP gesture'
+    assert 'CancelToggle(human);if(Current().on)Leave();' in fp and 'keyClaimHuman==human && keyClaimControl==key.control' in fp
     assert 'Foreground() && !MapHoldsKeys()' in src('src/room_ui.cpp'), 'the room menu keys give way to the map'
     thermal = src('src/thermal.cpp')
     assert '!GamePaused() && !MapHoldsKeys() && shot.inSight && down && !keyHeld' in thermal, 'thermal switching gives way to map/pause and requires the actual optic'
     assert 'process==GetCurrentProcessId()' in thermal, 'the thermal key reader requires this game window'
+    controlled = src('src/enemy_control.cpp')
+    sample = controlled.split('void Sample(Session& session,Input& sample) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,0x688)) {' in sample
+    assert 'if(index==0) {' in sample, 'keyboard input belongs only to the first local player'
+    allowed = controlled.split('bool InputAllowed() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(GamePaused())return false;' in allowed and 'pid==GetCurrentProcessId()' in allowed
 
+    opening = code.split('void Open(const unsigned char* human) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'CameraRayOf(human,eye,dir)' in opening and 'CameraRay(eye,dir)' not in opening
+    own_hold = code.split('bool MapHoldsHumanKeys(const unsigned char* human) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'const ObjRef owner=inputOwner' in own_hold and 'held && owner.Is(human)' in own_hold
+    assert 'AcquireSRWLockShared(&lock)' in own_hold and 'ReleaseSRWLockShared(&lock)' in own_hold
+    assert 'TvHoldsHumanKeys(human)' in own_hold
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
     assert 'MapScreen(drawer,ctx,t,viewProj' in hud and '!MapOwnsView())KeepViewProj' in hud
@@ -5141,7 +5157,7 @@ def map_hides_stock_hud() -> None:
     assert 'MapHidesStockHud(At<const void*>(hud,0x18))' in sub
     assert 'if(!hide)draw(hud,viewProj,owner,r9,fifth);' in sub
     draw = hud.split('void HudDraw(const float* viewProj', 1)[1]
-    assert draw.index('if(MapScreen(drawer,ctx,t,viewProj') < draw.index('if(MapOwnsView()){FreeText(text);return;}') < draw.index('CarrierBars(')
+    assert draw.index('if(MapScreen(drawer,ctx,t,viewProj') < draw.index('if(MapOwnsView() && MapHidesStockHud(passCamera)){FreeText(text);return;}') < draw.index('CarrierBars(')
     assert 'inline bool Step(' in h and 'inline bool GameSet(' in h
     assert 'EXCLUDE_FROM_ALL tools/map_hud_check.cpp' in cmake and 'map_hud_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
     assert '#include "../src/map_stock_hud.h"' in src('tools/map_hud_check.cpp')
@@ -5237,7 +5253,13 @@ def stock_guidance_wired() -> None:
     assert '0x691310' not in stores and '0x68FF60' not in stores, "the lock code is lockon.cpp's"
     assert 'InstallLockon();' in src('src/plugin.cpp') and 'InstallGuidance();' in src('src/plugin.cpp')
     m = src('src/map.cpp')
-    assert 'return TvFrame(human,open && game.open,TvRead(human)) || open;' in m, 'one hold shim'
+    human_frame = m.split('bool __fastcall MapHumanFrame(', 1)[1].split('// --- The camera ---', 1)[0]
+    tv_hold = 'const bool tv=TvFrame(human,open && game.open,TvRead(human));'
+    enemy_hold = 'const bool enemy=EnemyControlSuppressHuman(human);'
+    merged_hold = 'return tv || open || enemy;'
+    assert tv_hold in human_frame and enemy_hold in human_frame and merged_hold in human_frame, 'one hold shim runs TV and possession each frame'
+    assert human_frame.index(tv_hold) < human_frame.index(enemy_hold) < human_frame.index(merged_hold), 'hold queries must execute before OR, without short-circuiting either lifecycle'
+    assert human_frame.count('TvFrame(') == 1 and human_frame.count('EnemyControlSuppressHuman(') == 1
     assert 'TvView(&tvHuman,tvEye,tvLook)' in m, 'the TV through the map camera hook'
     assert 'kCamStep' not in src('src/tvguide.cpp'), 'one camera hook: the map\'s'
     assert 'holds.load(std::memory_order_relaxed) || TvHoldsKeys()' in m
@@ -8645,7 +8667,8 @@ def edf41_net_contract() -> None:
     robo, m401, m301 = src('src/edf41robo.cpp'), src('src/edf41mother401.cpp'), src('src/edf41mother.cpp')
     for cpp in (robo, m401, m301):
         assert '#include "edf41net.h"' in cpp and 'edf41net::Attach(obj);' in cpp
-    assert 'if(r.body<kS10 && !NetFollows(r))AiTick(r);' in robo
+    decision = robo.split('if(r.body<kS10 && !NetFollows(r)) {', 1)[1].split('\n    } else {', 1)[0]
+    assert 'if(r.player.Active())PlayerTick(r);' in decision and 'else AiTick(r);' in decision
     assert '!NetFollows(r) && --g.autoCount<=0' in robo and 'NetBody(r);' in robo.split('void BodySet(', 1)[1].split('\n}\n', 1)[0]
     assert 'NetMirrorMake(self);' in robo and 'CreateFromPath(m,L"app:/object/UfoRobo401.sgo")' in robo
     assert 'OnlineRunsHere(self)' not in re.sub(r'//[^\n]*', '', m401), 'the 401 runs on every machine'
@@ -8653,7 +8676,7 @@ def edf41_net_contract() -> None:
         assert 'NetDecides(' in m401.split(case, 1)[1].split('case ', 1)[0], case
     assert 'NetPanel(h,*p);' in m401 and 'NetBattery(p,*b,i);' in m401 and 'NetSpawn(p,o);' in m401 and 'edf41net::Pump(self);' in m401
     assert 'NetEntered(p,netFrom,state);' in m401 and 'NetPartIn(*p);' in m401
-    assert 'if(!NetDecides(obj))break;' in m301.split('case kCanWait:', 1)[1].split('case ', 1)[0]
+    assert 'if((p.manualLease && !p.attack) || !NetDecides(obj))break;' in m301.split('case kCanWait:', 1)[1].split('case ', 1)[0]
     assert 'NetPart(hullObj,part,group,h.parts.size()-1);' in m301 and 'NetSpawn(p,enemy);' in m301 and 'edf41net::Pump(self);' in m301
     for cpp in (robo, m401, m301):   # windows.h macros: the 4.1 class files use (std::min) / (std::max)
         assert 'far' not in re.findall(r'\b(?:float|int|bool|auto)\s+(\w+)', re.sub(r'//[^\n]*', '', cpp))
@@ -10036,91 +10059,110 @@ EDF41_SOLDIERS = ('OBJECT/AIARMYSOLDIER_OMG.SGO', 'OBJECT/AIARMYSOLDIER_OMG_LEAD
 
 @test
 def edf41_friend_grip_shipped() -> None:
-    """4.1's soldiers hold EDF6's weapons with their own skeleton (feedback 2026-10-18 「omega小队持枪姿势有问题」; no game:
-    the files are committed). Every LOOKS soldier and the Omega team: human_direction_adjust's mode twists its 4.1
-    model's spine about the up axis (make_edf41_objects.spine_mode: 4.1's hara bones point local Y up, mode 1; EDF6's 2
-    turns them about the side axis), and soldier_weapon_grab_adjust is the one value of its model (the left wrist's
-    frame change, weapon_grip_adjust): the rangers' a ~84-degree turn, not EDF6's zero, the Omega team's the same as
-    the 4.1 rangers' (one model; both from EDF6 rangers, whose adjust is zero)."""
-    import edf41_objects as eo
-    import edf41friends as ef
-    import make_edf41_objects as m
-    import sgo
-    by_model: dict[tuple, set] = {}
-    for rel in [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS):
-        d = sgo.load(data=eo.read(rel))
-        md = m.model_mdb(lambda r: eo.read(m.rel_of(r)), d['animation_model'])
-        hda = d['human_direction_adjust']
-        assert hda[0] == m.spine_mode(md, hda[1]) == 1, (rel, hda)
-        grab = d['soldier_weapon_grab_adjust']
-        assert len(grab) == 2 and all(len(v) == 3 for v in grab), (rel, grab)
-        # one value per model and class (a class's EDF6 templates share a skeleton and an adjust)
-        model = m.rel_of(m.model_entries(d['animation_model'][0])[0][0])
-        by_model.setdefault((model, d['xgs_scene_object_class']), set()).add(repr(grab))
-    assert all(len(grabs) == 1 for grabs in by_model.values()), by_model
-    ranger = sgo.load(data=eo.read(ef.look_rel('OBJECT/AIARMYSOLDIER_AF.SGO')))['soldier_weapon_grab_adjust']
-    for rel in EDF41_SOLDIERS:
-        assert sgo.load(data=eo.read(rel))['soldier_weapon_grab_adjust'] == ranger, rel
-    assert 60 < _rotation_degrees(m.euler_matrix(ranger[1])) < 120, ranger
-
-
-@test
-def edf41_friend_grip_matches_weapons() -> None:
-    """The 4.1 soldiers' soldier_weapon_grab_adjust against the weapons (needs EDF4.1 and EDF6): make_edf41_objects
-    recomputes the shipped value from each soldier's model and its EDF6 template's; and for every ranger AI weapon both
-    games ship with an IK record (MAB list 1, record 0: what EDF+0x68C206 reads), EDF6's IK frame is 75+ degrees from
-    4.1's own -- the hand 4.1's skeleton got before -- and within 20 of it through the shipped adjust (grab · ik,
-    EDF+0x597F00), i.e. the left hand on each grip as 4.1 itself placed it."""
-    import math
-
+    """All 28 source soldiers carry private source-model weapons, without a bind-pose IK approximation."""
     import dsgo
     import edf41_objects as eo
     import edf41friends as ef
     import mab_legacy
     import make_edf41_objects as m
-    import mdb
+    import sgo
+    reg = eo.registry()
+    units = [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS)
+    weapon_paths = set()
+    for rel in units:
+        d = sgo.load(data=eo.read(rel))
+        md = m.model_mdb(lambda r: eo.read(m.rel_of(r)), d['animation_model'])
+        hda = d['human_direction_adjust']
+        assert hda[0] == m.spine_mode(md, hda[1]) == 1, (rel, hda)
+        assert d['soldier_weapon_grab_adjust'] == [[0.0] * 3, [0.0] * 3], rel
+        for path in d['soldier_load_weapon']:
+            private = m.rel_of(path)
+            assert private.startswith('WEAPON/EDF41_NPC/'), (rel, private)
+            assert private in reg['files'], private
+            weapon_paths.add(private)
+    assert len(units) == 28 and len(weapon_paths) == 19, (len(units), len(weapon_paths))
+    for rel in weapon_paths:
+        doc = dsgo.parse(eo.read(rel))
+        assert all('name.' + lang in doc.root.names.values() for lang in ('ja', 'en', 'cn', 'sc', 'kr')), rel
+        am = doc.root.get('animation_model')
+        ref = dsgo.to_py(am.items[0])
+        assert m.rel_of(ref[0]).startswith('WEAPON/EDF41_NPC/'), (rel, ref)
+        md = m.model_mdb(lambda r: eo.read(m.rel_of(r)), dsgo.to_py(am))
+        assert md is not None, rel
+        bones = {md.name_of(b.name) for b in md.bones}
+        assert all(loc.node in bones for _kind, loc in mab_legacy.mab_locators(am.items[2].data)), rel
+        own_cas = am.items[1]
+        if isinstance(own_cas, str) and own_cas.lower().startswith('app:/'):
+            assert m.rel_of(own_cas).startswith('WEAPON/EDF41_NPC/'), (rel, own_cas)
+
+
+@test
+def edf41_friend_grip_matches_weapons() -> None:
+    """Actual 4.1 source MAB/IK/model/CAS and HOLD fields are preserved exactly, not only close in bind pose."""
+    import dsgo
+    import edf5port
+    import edf41_objects as eo
+    import edf41friends as ef
+    import legacy_assets
+    import mab_legacy
+    import make_edf41_objects as m
     import sgo
     edf41, edf6 = os.path.join(m.STEAM, 'Earth Defense Force 4.1'), os.path.join(m.STEAM, 'EARTH DEFENSE FORCE 6')
     if not all(os.path.isfile(os.path.join(r, 'Root.cpk')) for r in (edf41, edf6)):
         print('skip  edf41_friend_grip_matches_weapons: needs EDF4.1 and EDF6 installed')
         return
     games = m.Games(edf41, edf6)
-    registry = eo.registry()
-    reg = {o['object']: o for o in registry['objects']}
-
-    def file(ref: object) -> bytes | None:
-        r = m.rel_of(str(ref))
-        return eo.read(r) if r in registry['files'] else games.read6(r) if r in games.have6 else None
-
+    _presets, banks = m.sound_cues(games)
+    resident = set().union(*(banks[name] for name in m.RESIDENT_BANKS))
+    seen = set()
     for rel in [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS):
-        o = reg[rel]
-        template = o.get('look_of') or o['class_keys_from']['template']
-        d = sgo.load(data=eo.read(rel))
-        grab, _mode = m.soldier_grip(file, d, sgo.load(data=games.read6(template)), rel)
-        assert grab == d['soldier_weapon_grab_adjust'], (rel, grab, d['soldier_weapon_grab_adjust'])
-
-    def ik(data: bytes) -> list | None:
-        if data[:4] == b'DSGO':
-            item = dsgo.parse(data).root.get('animation_model').items[2]
-            block = getattr(item, 'data', None)
-        else:
-            block = sgo.read(data)[1]['animation_model'][2]
-        if not isinstance(block, bytes):
-            return None
-        first = [loc for i, loc in mab_legacy.mab_locators(block) if i == 1][:1]
-        return m.euler_matrix([math.degrees(a) for a in first[0].c[:3]]) if first and first[0].c else None
-
-    grab = m.euler_matrix(sgo.load(data=eo.read(ef.look_rel('OBJECT/AIARMYSOLDIER_AF.SGO')))['soldier_weapon_grab_adjust'][1])
-    seen = 0
-    for w in sorted(r for r in games.have6 if r.startswith('WEAPON/AISOLDIER') and r.endswith('.SGO') and r in games.in4):
-        q6, q4 = ik(games.read6(w)), ik(games.read4(w))
-        if q6 is None or q4 is None:
-            continue
-        seen += 1
-        before = _rotation_degrees(mdb.mmul(q6, mdb.inverse_affine(q4)))
-        after = _rotation_degrees(mdb.mmul(mdb.mmul(grab, q6), mdb.inverse_affine(q4)))
-        assert before > 75 and after < 20, (w, before, after)
-    assert seen >= 8, seen
+        original = sgo.load(data=games.read4(rel))
+        current = sgo.load(data=eo.read(rel))
+        assert [m.friend_weapon_rel(w) for w in original['soldier_load_weapon']] == [
+            m.rel_of(w) for w in current['soldier_load_weapon']], rel
+        old_missing = m.friend_hold_missing(original, games.read4(m.rel_of(original['animation_model'][1])),
+                                             lambda p: games.read4(m.rel_of(p)))
+        new_missing = m.friend_hold_missing(current, eo.read(m.rel_of(current['animation_model'][1])),
+                                             lambda p: eo.read(m.rel_of(p)))
+        assert not new_missing - old_missing, (rel, sorted(new_missing - old_missing))
+        for path in original['soldier_load_weapon']:
+            source = m.rel_of(path)
+            if source in seen:
+                continue
+            seen.add(source)
+            _version, own = sgo.read(games.read4(source))
+            doc = dsgo.parse(eo.read(m.friend_weapon_rel(source)))
+            native = dsgo.parse(games.read6(source)).root
+            assert set(native.names.values()) <= set(doc.root.names.values()), source
+            assert doc.root.get('xgs_scene_object_class') == native.get('xgs_scene_object_class'), source
+            # All holding keys including class-specific nested attacks, not a
+            # whitelist borrowed from other soldier classes or weapon models.
+            for key in ('ModelConstraint', 'BaseAnimation', 'AimAnimation', 'ChangeAnimation',
+                        'ReloadAnimation', 'custom_parameter'):
+                assert dsgo.to_py(doc.root.get(key)) == dsgo.to_py(edf5port.to_value(own[key])), (source, key)
+            for key in m.FRIEND_WEAPON_SE_FIELDS:
+                if key not in own:
+                    continue
+                expected = edf5port.to_value(own[key])
+                actual = doc.root.get(key)
+                if isinstance(expected, dsgo.Node) and len(expected.items) > 1 and expected.items[1]:
+                    if expected.items[1] not in resident:
+                        expected.items[1] = native.get(key).items[1]
+                    assert actual.items[1] in resident, (source, key, actual.items[1])
+                assert dsgo.to_py(actual) == dsgo.to_py(expected), (source, key)
+            original_am = own['animation_model']
+            assert doc.root.get('animation_model').items[2].data == mab_legacy.mab_from_edf5(original_am[2]), source
+            for path in m.strings(sgo.load(data=games.read4(source))):
+                if not path.lower().startswith('app:/weapon/'):
+                    continue
+                asset = m.rel_of(path)
+                if not asset.endswith(('.RAB', '.MRAB', '.CAS', '.SHKT')):
+                    continue
+                expected = games.read4(asset)
+                if not asset.endswith('.SHKT'):
+                    expected = legacy_assets.convert(asset, expected)
+                assert eo.read(m.friend_weapon_rel(asset)) == expected, (source, asset)
+    assert len(seen) == 19, len(seen)
 
 
 @test
@@ -11141,13 +11183,13 @@ def awb_hca_seconds_synthetic() -> None:
 
 @test
 def edf41_sounds_captions_synthetic() -> None:
-    """tools/edf41_sounds.py: the caption key is the cue cut at the first _E / _S; add_rows leaves every row of the table
+    """tools/edf41_sounds.py: the caption key removes one terminal _E / _S; add_rows leaves every row of the table
     as it was, gives a missing key a row with EDF6's own member names (name = '' , caption = text, else the key: the game
     reads a row BY those names, an unnamed list is a null node and crashed M126) and keeps the row of a key the table has;
     a table whose rows are not laid out name / caption is refused."""
     import dsgo
     import edf41_sounds as s
-    assert [s.cut_key(c) for c in ('A001AA', 'A001AA_E', 'Z105H_S', 'A_E_S', 'VT_B1')] == ['A001AA', 'A001AA', 'Z105H', 'A', 'VT_B1']
+    assert [s.cut_key(c) for c in ('A001AA', 'A001AA_E', 'Z105H_S', 'A_E_S', 'VT_B1')] == ['A001AA', 'A001AA', 'Z105H', 'A_E', 'VT_B1']
 
     def row(name: str, caption: str) -> dsgo.Node:
         return dsgo.Node([name, caption], {0: 'name', 1: 'caption'})
@@ -11215,12 +11257,17 @@ def edf41_sounds_install() -> None:
         stamp_path = os.path.join(game, 'Mods', s.STAMP)
         with open(stamp_path, encoding='utf-8') as f:
             stamp = json.load(f)
-        stamp['table']['version'] = 1   # installed by the version before the rows had member names
-        with open(stamp_path, 'w', encoding='utf-8') as f:
-            json.dump(stamp, f)
-        s.install(game, 'edf41')
-        assert made == ['table'], made   # only the group whose output changed is converted again
-        made.clear()
+        # Version 1 lacked named row members; version 3 cut embedded suffixes.
+        # Both old installations must rebuild only the table, even with identical sources.
+        for old_version in (1, 3):
+            stamp['table']['version'] = old_version
+            with open(stamp_path, 'w', encoding='utf-8') as f:
+                json.dump(stamp, f)
+            s.install(game, 'edf41')
+            assert made == ['table'], (old_version, made)
+            with open(stamp_path, encoding='utf-8') as f:
+                assert json.load(f)['table']['version'] == s.VERSIONS['table']
+            made.clear()
         s.remove(game)
         other = os.path.join(game, 'Mods', 'SOUND', 'PC', 'EDF41_WEAPON_SE.ACB')
         os.makedirs(os.path.dirname(other), exist_ok=True)

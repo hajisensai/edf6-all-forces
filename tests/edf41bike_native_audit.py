@@ -64,6 +64,24 @@ def native(path: Path) -> int:
     require(relative(data,0x62990D)==0x6EB4C0,'VehicleBase must pass its default mode to native ragdoll loading')
     require(data[0x6598E5:0x6598E8].hex()=='488d05','final Car vtable assignment differs')
     require(0x6598EC+struct.unpack_from('<i',data,0x6598E8)[0]==0x17E01B0,'derived setup must use final Car vtable')
+    # The derived CarBase setup resets every proxy to dynamic mode 4 after
+    # VehicleBase's initial mode 1. An omitted gun row therefore stays dynamic.
+    require(relative(data,0x6640A9)==0x6E40B0,'CarBase all-proxy reset differs')
+    require(data[0x6E40F0:0x6E40F5].hex()=='ba04000000','CarBase reset must select dynamic mode 4')
+    require(relative(data,0x6E40F8)==0x6ED480,'CarBase reset no longer sets each proxy mode')
+    require(data[0x664279:0x66427E].hex()=='83fb017529','simulation row value-1 branch differs')
+    require(data[0x66428F:0x664292].hex()=='8d5301','simulation row 1 must select native mode 2')
+    require(relative(data,0x664292)==0x6ED480,'explicit kinematic mode write differs')
+    require(relative(data,0x6642A2)==0x6E94E0,'simulation row 0 restore-default path differs')
+    require(data[0x6E972A:0x6E9730].hex()=='8b8ec8000000','row 0 must restore constructor default')
+    # Vehicle_Car requests BodyRecoil variant 0, unlike the old bike AimRecoil.
+    # There is no null guard between that lookup and the recoil payload call.
+    require(relative(data,0x65A750)==0x62EA10,'Car base FireRecoil path differs')
+    require(data[0x65A76B:0x65A76D].hex()=='33d2','Car callback must request BodyRecoil variant 0')
+    require(relative(data,0x65A76D)==0x5FA150,'Car recoil variant getter differs')
+    require(data[0x5FA150:0x5FA161].hex()=='83fa02740939117505488b4110c333c0c3',
+            'wrong recoil variant must return null')
+    require(relative(data,0x65A83A)==0x5F9FB0,'Car recoil payload consumer differs')
     print(f'EDF6 original 408 adapter: {audited} runtime signatures and native Car/Aim/physics contracts passed')
     return audited
 

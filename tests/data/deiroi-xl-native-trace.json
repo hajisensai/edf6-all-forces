@@ -1,0 +1,299 @@
+{
+  "variant": "E509_DEIROI_XL.SGO",
+  "beamGuns": 30,
+  "missileGuns": 3,
+  "guns": [
+    {
+      "key": 12,
+      "object": "e509_deiroiFootParts_Missile.sgo",
+      "total": 4,
+      "intervalFrames": 8,
+      "chargeFrames": 120,
+      "factoryCount": 1
+    },
+    {
+      "key": 14,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 15,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 16,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 17,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 18,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 19,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 20,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 21,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 22,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 23,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 65548,
+      "object": "e509_deiroiFootParts_Missile.sgo",
+      "total": 4,
+      "intervalFrames": 8,
+      "chargeFrames": 120,
+      "factoryCount": 1
+    },
+    {
+      "key": 65550,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 65551,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 65552,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 65553,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 65554,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 65555,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 65556,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 65557,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 65558,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 65559,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 131084,
+      "object": "e509_deiroiFootParts_Missile.sgo",
+      "total": 4,
+      "intervalFrames": 8,
+      "chargeFrames": 120,
+      "factoryCount": 1
+    },
+    {
+      "key": 131086,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 131087,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 131088,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 131089,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 131090,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 131091,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 131092,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 131093,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 131094,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    },
+    {
+      "key": 131095,
+      "object": "e509_DeiroiFootParts_Beam.sgo",
+      "total": 85,
+      "intervalFrames": 7,
+      "chargeFrames": 240,
+      "factoryCount": 1
+    }
+  ],
+  "provenance": {
+    "kind": "read-only original SGO numeric extraction plus supported EDF.dll instruction audit; not gameplay telemetry",
+    "dllTimeDateStamp": "0x678CCB46",
+    "sourceSnapshot": "2026-10-19",
+    "nativeInterval": "Fire first=chargeFrames+2; subsequent accepted native attempts intervalFrames apart; conservative zero AI/close idle cycle last+3",
+    "sourceRootMain": "deiroi_battery_config one row charge180; 31CBD8/31CBDE waits frame<=180; exporter assumes first181, period182",
+    "sourceFootRows": "XL leg0/1/2 ordered native config; Missile12, Beam14..23 each leg; factoryCount default1",
+    "resources": [
+      {
+        "logicalPackage": "Root.cpk/OBJECT",
+        "name": "E509_DEIROI_XL.SGO",
+        "decodedBytes": 15402,
+        "sha256": "d89d762a52640adb8a8b3d4a1206f06a920feeab27eb5525b318965ea364f315"
+      },
+      {
+        "logicalPackage": "Root.cpk/OBJECT",
+        "name": "E509_DEIROIFOOTPARTS_BEAM.SGO",
+        "decodedBytes": 5036,
+        "sha256": "bebf51ea35eee4afc6f87ddc3d27515e0c17921f7ad21e8280d6088f17ac625e"
+      },
+      {
+        "logicalPackage": "Root.cpk/OBJECT",
+        "name": "E509_DEIROIFOOTPARTS_MISSILE.SGO",
+        "decodedBytes": 8136,
+        "sha256": "3e404ecb3b9f45c4cc152f07e3fb69d1a53d2d5bad9a79645645d94403c4e042"
+      }
+    ]
+  }
+}

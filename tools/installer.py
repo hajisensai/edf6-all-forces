@@ -1238,6 +1238,7 @@ def check_package() -> int:
     assert make_sedan.OWNER in ledger.OWNERS
     import buildcache
     import make_tracked_combat
+    importlib.import_module('tracked_collision')
     for kind in ('vulcan', 'bmpt'):
         builder = importlib.import_module('make_' + kind)
         model = make_tracked_combat.model_module(kind)

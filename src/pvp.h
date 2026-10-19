@@ -39,6 +39,13 @@ void PvpRoomTick() noexcept;
 int PvpSupportTeam(const char* puid) noexcept;
 bool PvpValidateSupportPlan(const support_net::Plan& plan) noexcept;
 bool PvpAttachSupportPlan(const support_net::Plan& plan,const ObjRef* objects,unsigned count) noexcept;
+// Re-authenticate a canonical requester against this world and overwrite its current stable team.
+bool PvpRefreshSupportOwner(support_net::Plan* plan) noexcept;
+// Dynamic child planning: retain an existing canonical requester only when it owns this exact parent.
+bool PvpMakeInheritedSupportPlan(const ObjRef& parent,support_net::Plan* plan) noexcept;
+// Child support inherits authenticated PUID ownership, never a parent's mutable native team.
+// A missing owner preserves legacy behavior only in stable mode-off.
+bool PvpInheritSupport(const ObjRef& parent,const ObjRef* children,unsigned count) noexcept;
 void PvpForgetSupportObject(const ObjRef& object) noexcept;
 // Before scene release / on plugin disable. Restores native state first.
 void ResetPvp() noexcept;

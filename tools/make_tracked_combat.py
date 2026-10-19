@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parent / 'pylib')]
+sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 
 import dsgo
 import ledger
@@ -164,12 +164,36 @@ def missile_sgo(game: vc.Game, points: list[tuple[str, tuple[float, float, float
     return dsgo.compact(doc)
 
 
-def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
-    """Native V603 physics/animation, authored visual model and explicit weapon holders.
+def collision_path(kind: str) -> str:
+    if kind not in KINDS:
+        raise ValueError(f'unsupported tracked combat vehicle: {kind}')
+    return f'OBJECT/EDF6VC_{kind.upper()}_COLLISION.SHKT'
 
-    The skeleton is unchanged, so the original CAS, collision binding and pose
-    function remain a matching set. No custom absolute game addresses are added.
-    """
+
+def animation_path(kind: str) -> str:
+    return f'OBJECT/{model_module(kind).OUT_CAS}'
+
+
+def _assets(game: vc.Game, kind: str):
+    """Share one actual model/collision build within a complete asset transaction."""
+    import tracked_combat_model as tracked
+    import tracked_collision
+    cache = getattr(game, '_tracked_combat_assets', None)
+    if cache is None:
+        cache = {}
+        game._tracked_combat_assets = cache
+    if kind not in cache:
+        model = model_module(kind)
+        arc, md, _info = model.build_with_info(game)
+        assembly = tracked.Assembly(md)
+        model.parts(assembly)
+        shkt, binding, overrides, report = tracked_collision.build(game, kind, md, assembly.parts)
+        cache[kind] = arc, md, shkt, binding, overrides, report
+    return cache[kind]
+
+
+def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
+    """Authored model and fitted physics on the native V603 animation/controllers."""
     vehicle = vc.GROUND_VEHICLES[kind]
     model = model_module(kind)
     doc = dsgo.parse(game.read('OBJECT', STOCK_VEHICLE))
@@ -179,6 +203,13 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
     animation = r.get('animation_model')
     animation.items[0].items[0] = f'app:/Object/{model.OUT_ARC.lower()}'
     animation.items[0].items[1] = model.HOST_MDB
+    animation.items[1] = 'app:/' + animation_path(kind).lower()
+    _arc, _md, _shkt, binding, overrides, _report = _assets(game, kind)
+    ragdoll = r.get('ragdoll')
+    ragdoll.items[0] = 'app:/' + collision_path(kind).lower()
+    ragdoll.items[1] = dsgo.Blob(binding, ragdoll.items[1].kind)
+    for key, value in overrides.items():
+        r.set(key, _node(value))
     setup = r.get('vehicle_setup')
     weapons = setup.items[-1]
     if len(weapons.items) != 2:
@@ -205,11 +236,10 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
     camera.items[0] = _node([0.0, model.CAMERA['model_eye'][1], 2.0])
     camera.items[1] = _node([0.0, model.CAMERA['third_person_height'], -model.CAMERA['third_person_distance']])
     r.set('game_object_durability', vehicle.durability)
-    # Make dependencies explicit for preload; leave the stock skeleton/CAS/SHKT
-    # in place because their native contract is intentionally unchanged.
+    # Include the fitted private SHKT in the same resource transaction.
     resource = r.get('resource') if 'resource' in r.names.values() else None
     if resource is not None:
-        for path in [animation.items[0].items[0], *vehicle.weapons]:
+        for path in [animation.items[0].items[0], animation.items[1], ragdoll.items[0], *vehicle.weapons]:
             if path.lower() not in {str(item).lower() for item in resource.items}:
                 resource.items.append(path)
     return dsgo.compact(doc)
@@ -226,7 +256,7 @@ def _points(model, game: vc.Game) -> dict[str, list[tuple[str, tuple[float, floa
 def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> None:
     vehicle = vc.GROUND_VEHICLES[kind]
     model = model_module(kind)
-    expected = {f'OBJECT/{vehicle.sgo}.SGO', f'OBJECT/{model.OUT_ARC}',
+    expected = {f'OBJECT/{vehicle.sgo}.SGO', f'OBJECT/{model.OUT_ARC}', collision_path(kind), animation_path(kind),
                 *(f'WEAPON/{path.rsplit("/", 1)[1].upper()}' for path in vehicle.weapons)}
     if set(files) != expected:
         raise ValueError(f'{kind}: incomplete generated asset set {sorted(set(files) ^ expected)}')
@@ -240,6 +270,8 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
         raise ValueError(f'{kind}: native vehicle class changed')
     if dsgo.to_py(r.get('animation_model'))[0] != [f'app:/Object/{model.OUT_ARC.lower()}', model.HOST_MDB]:
         raise ValueError(f'{kind}: generated model is not selected')
+    if r.get('animation_model').items[1] != 'app:/' + animation_path(kind).lower():
+        raise ValueError(f'{kind}: private fixed-optics animation is not selected')
     for index, path in enumerate(vehicle.weapons):
         blob = files[f'WEAPON/{path.rsplit("/", 1)[1].upper()}']
         gun = dsgo.parse(blob).root
@@ -253,9 +285,22 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
             raise ValueError(f'{kind}: weapon does not round-trip')
     if game is not None:
         original = dsgo.parse(game.read('OBJECT', STOCK_VEHICLE)).root
-        for key in ('ragdoll', 'car_base_wheel', 'car_base_constraint_data', 'tank_caterpillar_animation'):
+        for key in ('car_base_rigid_body', 'car_base_constraint_data', 'tank_caterpillar_animation'):
             if dsgo.to_py(r.get(key)) != dsgo.to_py(original.get(key)):
                 raise ValueError(f'{kind}: native {key} changed without refitting its contract')
+        import tracked_collision
+        if files[animation_path(kind)] != model.animation(game):
+            raise ValueError(f'{kind}: private optics animation payload differs')
+        _arc, md, shkt, binding, overrides, report = _assets(game, kind)
+        if files[collision_path(kind)] != shkt:
+            raise ValueError(f'{kind}: fitted collision file differs')
+        ragdoll = r.get('ragdoll')
+        if ragdoll.items[0] != 'app:/' + collision_path(kind).lower() or ragdoll.items[1].data != binding:
+            raise ValueError(f'{kind}: fitted collision/binding is not selected')
+        for key, value in overrides.items():
+            if dsgo.to_py(r.get(key)) != value:
+                raise ValueError(f'{kind}: fitted {key} was not applied')
+        tracked_collision.check(shkt, binding, md, overrides, report)
         points = _points(model, game)
         for index, path in enumerate(vehicle.weapons):
             gun = dsgo.parse(files[f'WEAPON/{path.rsplit("/", 1)[1].upper()}']).root
@@ -274,8 +319,10 @@ def build(root: str, kind: str) -> dict[str, bytes]:
     model = model_module(kind)
     vehicle = vc.GROUND_VEHICLES[kind]
     points = _points(model, game)
+    arc, _md, shkt, _binding, _overrides, _report = _assets(game, kind)
     files = {f'OBJECT/{vehicle.sgo}.SGO': vehicle_sgo(game, kind),
-             f'OBJECT/{model.OUT_ARC}': model.build(game)}
+             f'OBJECT/{model.OUT_ARC}': arc, collision_path(kind): shkt,
+             animation_path(kind): model.animation(game)}
     for stock, path, side in zip(STOCK_GUNS, vehicle.weapons[:2], ('left', 'right')):
         files[f'WEAPON/{path.rsplit("/", 1)[1].upper()}'] = gun_sgo(game, kind, stock, side, points[side])
     if kind == 'bmpt':

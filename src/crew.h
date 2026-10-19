@@ -259,6 +259,7 @@ struct Config {
     bool fpMotion=true;             // ...the arms and weapon sway, bob, kick, dip at a reload, a switch, a sprint, a roll
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
     float viewDistance=-1.0f;       // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it; -1: unlimited)
+    bool enemyControl=true;         // native enemy player mode, entered from the map; disabling releases control
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)

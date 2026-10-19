@@ -12,7 +12,7 @@
 
 - 新 marker：`edf41_motorbike`；SGO key：`edf41_bike`，schema 1，原 `bike_gun_ctrl=[-30,20,-15,30]` 与 operator seat 1。
 - `Vehicle_Car` 使用真实的 V512 空 `car_aim_node=[]` 基底；三个原轮子分别有源位置和自己的驱动 / 转向标志。单机炮 holder 为 `['gun',1]`，驾驶座没有武器。
-- gun 不列入 `car_base_rigid_body` 或 `car_base_simulation_node` 的物理写骨名单；所有八个原 proxy 和原双向 binding 保留。载具 / 枪手姿态适配的资源检查见 `tests/test_edf41bike.py`。
+- gun 不列入 `car_base_rigid_body` 动态名单；必须显式加入 `car_base_simulation_node` 的 `['gun',1]` 行，选 native mode 2。所有八个原 proxy 和原双向 binding 保留。载具 / 枪手姿态适配的资源检查见 `tests/test_edf41bike.py`。
 - 不改现有 503 sidecar，也不为普通 Car 改驾驶 / 火控。该模块要求 Car vtable、schema 和独立 marker 同时吻合。
 
 ## 原始单骨双轴算法与物理同步
@@ -28,7 +28,15 @@ EDF6 `VehicleWeaponAim` vtable `0x17D8A68` / `0x17D8A90` 的 slot 3 都是 `0x5F
 3. `0x1100B90`：构建骨的 world 矩阵。
 4. `0x6ED800`：将动画驱动骨同步到真实物理 proxy。
 
-GenericCarBase `0x65C587` 传 mode 1 给 VehicleBase `0x629450`；后续 `0x6298F4 / 0x62990D` → `0x6EB4C0` → `0x6EB760` → `0x6EB9F5..0x6EBA15` 将每个 proxy 以 `0x6ED480(record,1)` 初始化。CarBase 的动态名单随后才覆盖所选 body；排除 gun 后，它保持 **mode 1 动画驱动**，`0x6ED800` 直接更新真实 body transform。并非只转外观、把 collider 留在原处。旧 4.1 的 mode 2 是 kinematic target 分支；新原生 mode 1 的接触表现仍需实机确认。
+GenericCarBase `0x65C587` 传 mode 1 给 VehicleBase `0x629450`；但这不是最终模式。CarBase 在读取 `car_base_simulation_node` 后，`0x6640A9` 无条件调用 `0x6E40B0`，循环以 `0x6E40F0 / 0x6E40F8` 将**所有** proxy 先切到 mode 4。仅从动态名单排除 gun 仍会留下 mode 4，这是上轮遗漏。
+
+现在生成器显式加 `['gun',1]`：`0x664279` 检查行值 1，`0x66428F` 将值加 1，`0x664292` 调 `0x6ED480(record,2)`，使真实 gun body 在 `0x6ED800` 走 kinematic target。三个轮子的行值 0 则经 `0x6642A2 → 0x6E94E0 → 0x6E972A` 恢复构造器默认 mode 1；两种行值含义不能混淆。
+
+### 原生 Car 的开火后坐力
+
+旧 408 setup 使用 `['AimRecoil',[.002618,.0062832]]`。Car fired callback `0x65A740` 先经 `0x65A750 → 0x62EA10` 保留 weapon 的真实 `FireRecoil`，随后 `0x65A76B / 0x65A76D → 0x5FA150` 请求 variant 0（BodyRecoil）。错误 variant 返回 null，而 `0x65A83A → 0x5F9FB0` 消费 payload 前没有检查 null。
+
+`native_gun_rows` 因此只将 holder 的 hull impulse 参数转换成合法 `[0,0]`。实体 `vehicle_setup`、`mission_setup`、独立测试场 SGO 和五个呼叫的覆盖 setup 全部使用同一转换，机枪 SGO 的真实 `FireRecoil=.3` 保留。测试同时检查源值未被清零、坏 variant / 缺显式 mode / 错 mode 被拒绝。
 
 ## 副座初始化、输入与联机
 
@@ -48,7 +56,7 @@ Car 的 setup build `0x65B37E` 原本始终把 seat 0 的 Aim 交给 `0x633330`�
 
 ## 已验证与尚待实机
 
-- `tests/edf41bike_native_audit.py [EDF.dll] [EDF41.exe]`：实际读取两份本机 PE，核八组 runtime signatures、原 pose 分支、Car 构造 / pose 顺序、NetObject 的逐座发收与 mapping 准入。
+- `tests/edf41bike_native_audit.py [EDF.dll] [EDF41.exe]`：实际读取两份本机 PE，核八组 runtime signatures、CarBase 全体 mode 4 重置 / 显式 mode 2 覆盖、开火 BodyRecoil variant 0 消费、原 pose 分支、Car 构造 / pose 顺序、NetObject 的逐座发收与 mapping 准入。
 - `tests/edf41bike_test.cpp`：12 项范围与权限边界。
 - `tests/edf41bike_runtime_test.cpp`：直接包含生产 cpp；仅在测试进程私有 fake image 中以记录 trampoline 替代 native endpoint，验证原参转发、seat 1 路由、只初始化一次 mapping、真实调用顺序、普通 Car 原样、远端 / NPC / 地图 / 死亡 / 关闭、profile 拒绝及部分安装失败。
 - 生产 cpp 和两个 C++ 测试均以 MSVC `/W4 /WX /utf-8 /permissive-` 实际编译运行。
