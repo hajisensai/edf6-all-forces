@@ -73,7 +73,21 @@ def stock_copies(game) -> dict:  # noqa: ANN001 - rootcpk.Game
     return out
 
 
-def closed(what: str, kit) -> None:  # noqa: ANN001 - cockpits.Kit
+# Real cabs (cockpit_kits_ground CABS) closed behind the driver: every line of sight back past his shoulders meets the
+# cab's rear wall or seat. The stock hull round them is seen from inside there, where the game draws none of it: a gap
+# in the cab shows the world (the user, 2026-10-19, of the rescue tank: 「救护车往后看会看到空气」; the ARHAN P880 cut
+# had lost its rear wall to tools/prep_cockpit_ground.py's box). apc_cab (M-ATV) and tracked_cab (Tigr) are cut at
+# their front seats' backs, their rear compartments left out: not closed behind yet, not checked.
+CLOSED_BEHIND = frozenset(('truck_cab', 'trailer_cab'))
+BEHIND = [(float(yaw), float(pitch)) for yaw in range(100, 261, 5) for pitch in range(-40, 21, 5)]
+
+
+def closed(what: str, kit, name: str = '') -> None:  # noqa: ANN001 - cockpits.Kit
+    if name in CLOSED_BEHIND:
+        open_lines = cockpits.unmet(kit, BEHIND)
+        shown = ', '.join(f'({y:+.0f},{p:+.0f})' for y, p in open_lines[:6])
+        expect(not open_lines, f'{what}: closed behind the driver'
+               + (f': {len(open_lines)} lines of sight (yaw, pitch) see through, e.g. {shown}' if open_lines else ''))
     if kit.sill is None:
         return
     open_lines = cockpits.leaks(kit)
@@ -156,7 +170,7 @@ def main() -> int:
                 kinds = {s.kind for s in kit.screens}
                 expect(kinds <= set(cockpits.SCREEN_KINDS),
                        f'{stem} seat {fit.seat} ({fit.kit} on {fit.bone}): laid out inside the hull, screens {sorted(kinds)}')
-                closed(f'{stem} seat {fit.seat} ({fit.kit})', kit)
+                closed(f'{stem} seat {fit.seat} ({fit.kit})', kit, fit.kit)
             except Exception as e:  # noqa: BLE001 - every seat reported, then the count fails the test
                 expect(False, f'{stem} seat {fit.seat} ({fit.kit}): {e}')
             for alt in ALTERNATES.get(fit.kit, ()):
