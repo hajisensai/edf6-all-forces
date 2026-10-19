@@ -15,12 +15,15 @@ struct Status {
     Reason reason=Reason::optical;
     bool eligible=false,installed=false;
     unsigned models=0;
+    bool rejected=false;   // the key was just pressed on a seat without thermal equipment (shown briefly on the HUD)
 };
 // Install once during plugin setup. All native call sites are fingerprinted before any patch is written.
 bool Install() noexcept;
-// Game-thread frame. The key is ignored while a menu/map owns input, while paused, and for non-keyboard seats.
+// Game-thread frame. The key cycles the requested mode on an equipped seat in or out of the sight view (drawn only
+// through the sight); ignored while a menu/map owns input, while paused, and for non-keyboard seats.
 void Tick(bool enabled=true,unsigned toggleKey=0x4E) noexcept;
-// UI-safe requests/readback. An unsupported seat rejects thermal requests; optical is always accepted.
+// UI-safe requests/readback. An unsupported seat rejects thermal requests; optical is always accepted. An accepted
+// request outside the sight or without the render hooks stays optical with that reason.
 bool SetMode(Mode mode) noexcept;
 Mode CycleMode() noexcept;
 Status GetStatus() noexcept;

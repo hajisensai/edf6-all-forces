@@ -38,6 +38,19 @@ assert struct.unpack_from('<Q',binary,vt+8)[0]-pe.OPTIONAL_HEADER.ImageBase==val
 locator=struct.unpack_from('<Q',binary,vt-8)[0]-pe.OPTIONAL_HEADER.ImageBase
 assert struct.unpack_from('<I',binary,locator+4)[0]==0x10,'laser draw this is its umbra subobject'
 print('native render call, signatures, laser draw slot and owner adjustment passed')
+# The laser's start (firstperson.cpp LaserMuzzle): slot 2 0x6890A0 reads [weapon+0x1D0]'s +0x90 (the first muzzle entry's
+# local x bone) less kLaserBelow of its up row; slot 3 copies it to the draw's +0x120 (the main object's +0x130).
+assert binary[0x6890DB:0x6890EE]==bytes.fromhex('488b41084c8b80d0010000410f108090000000'),'laser start from the first muzzle entry'
+assert value('kMuzzles')==0x1D0 and value('kMuzzleCount')==0x1E0 and value('kMuzzleLocal')==0x10 and value('kLaserStart')==0x120
+assert binary[0x68910E:0x689111]==bytes.fromhex('0f5915')
+assert 0x689115+struct.unpack_from('<i',binary,0x689111)[0]==0x17AA990
+below=float(re.search(r'kLaserBelow=([0-9.]+)f',source).group(1))
+assert all(abs(x-below)<1e-7 for x in struct.unpack_from('<4f',binary,0x17AA990)),'the start sits kLaserBelow under the muzzle'
+assert binary[0x688B98:0x688BA6]==bytes.fromhex('0f1087900000000f118730010000'),'slot 3 copies the start to the draw field'
+# 0x6969A0 (the muzzle entry's matrices): +0x90 = local (+0x10) x the bone record [+0] +0xB0..
+assert binary[0x696A03:0x696A06]==bytes.fromhex('488b11'),'the entry +0 is its bone record'
+assert binary[0x696A2F:0x696A36]==bytes.fromhex('0f10b2b0000000'),'the bone record +0xB0 world matrix'
+print('laser start source (muzzle entry, 0.02 below, slot 3 copy) passed')
 # Every flash class uses MuzzleFlashBase's +0x120 borrowed matrix. Check the two destructor routes before
 # trusting a matrix until destruction (secondary Umbra thunks jump directly to the primary body).
 assert binary[0x2BA563:0x2BA56E]==bytes.fromhex('488b433848898720010000')

@@ -866,7 +866,7 @@ HUDTEXT(thermalWhiteHot,L"WHITE HOT",L"白热",L"白熱",L"ホワイトホット
 HUDTEXT(thermalBlackHot,L"BLACK HOT",L"黑热",L"黑熱",L"ブラックホット")
 HUDTEXT(thermalControl,L"[%ls] image mode: %ls",L"[%ls] 切换成像：%ls",L"[%ls] 切換成像：%ls",L"[%ls] 映像切替：%ls")
 HUDTEXT(thermalUnsupportedSeat,L"Thermal is unavailable in this seat",L"此座位不支持热像",L"此座位不支援熱像",L"この座席は熱映像に対応していません")
-HUDTEXT(thermalEnterSight,L"Enter the sight view to use thermal",L"进入观瞄视角后可用",L"進入觀瞄視角後可用",L"照準視点に入ると熱映像を使用できます")
+HUDTEXT(thermalEnterSight,L"applies in the sight view",L"进入观瞄视角后生效",L"進入觀瞄視角後生效",L"照準視点で有効になります")
 HUDTEXT(thermalFallback,L"Thermal unavailable; using optical",L"热像不可用，已回退光学",L"熱像不可用，已回退光學",L"熱映像を使用できず、光学に戻しました")
 HUDTEXT(thermalWaiting,L"Thermal preparing; currently optical",L"热像准备中，当前使用光学",L"熱像準備中，目前使用光學",L"熱映像の準備中。現在は光学です")
 
