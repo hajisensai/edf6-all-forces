@@ -7,6 +7,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'pylib'))
 import dsgo
+import edf41bike
 import edf41calls as ec
 import edf5port
 
@@ -62,7 +63,9 @@ class VehicleCalls(unittest.TestCase):
         members = {'Ammo_CustomParameter': [0, 0, 0, 0, ['a', 'b', 'c', source]]}
         converted = ec.vehicle_call(members, template(donor), 'vehicle408_motorbike.sgo').root
         setup = values(converted.get('Ammo_CustomParameter').items[4].items[3])
-        self.assertEqual(setup[:2], source[:2])
+        self.assertEqual(setup[0], source[0])
+        # The object is a Vehicle_Car: its setup reads seven drive numbers, never 4.1 VehicleBike's own block.
+        self.assertEqual(setup[1], edf41bike.CAR_DRIVE)
         self.assertEqual(len(setup), 3)
         self.assertEqual(setup[2], [['app:/weapon/edf41_v_408motorbike_gun.sgo', [0.0, 0.0], [90, .015, .1]]])
 
@@ -91,11 +94,39 @@ class VehicleCalls(unittest.TestCase):
                     self.assertEqual(len(setup[2]), 1)
                     self.assertEqual(setup[2][0][0], 'app:/weapon/edf41_v_408motorbike_gun.sgo')
                     self.assertEqual(setup[2][0][1], [0.0, 0.0])
+                    self.assertEqual(setup[1], edf41bike.CAR_DRIVE)
                 if call['vehicle'].startswith('vehicle406_begaruta'):
                     self.assertEqual(len(setup[4]), 6)
                     self.assertTrue(all('v_406begaruta_' in gun[0] for gun in setup[4] if isinstance(gun[0], str)))
             checked += 1
         self.assertEqual(checked, 45)
+
+    def test_credit_reload_is_edf6s_credit_reload(self):
+        # EDF+0x693E8D: EDF6's 1 counts down every frame ([自動]秒), its 2 spends the score (pt). 4.1's 1 is pt.
+        self.assertEqual(edf5port.reload_type41(0), 0)
+        self.assertEqual(edf5port.reload_type41(1), 2)
+        for wrong in (2, 3, -1, True, 'x'):
+            with self.assertRaises(edf5port.Unsupported):
+                edf5port.reload_type41(wrong)
+        members = {'ReloadType': 1, 'ReloadTime': 2000, 'AmmoCount': 2,
+                   'Ammo_CustomParameter': [0, 0, 0, 0, ['a', 'b', 'c', [[1, 1], [0.1] * 6, []]]]}
+        root = template([[1, 1], [0.1] * 6, []])
+        root.set('ReloadType', 2.0)
+        converted = ec.vehicle_call(members, root, 'vehicle301_tank.sgo').root
+        self.assertEqual(converted.get('ReloadType'), 2.0)
+        self.assertEqual(dsgo.to_py(edf5port.weapon41({'ReloadType': 1}, {}).root.get('ReloadType')), 2.0)
+
+    def test_bundled_4_1_credit_weapons_reload_by_credit(self):
+        import json
+        seen = 0
+        for registry in ('edf41port/calls.json', 'edf41port/weapons.json'):
+            for row in json.loads((ROOT / registry).read_text(encoding='utf8'))['weapons']:
+                if row.get('edf41_category') not in (31, 36, 37, 38, 39):
+                    continue
+                with self.subTest(id=row['id']):
+                    self.assertEqual(dsgo.load(row['weapon']).get('ReloadType'), 2.0)
+                    seen += 1
+        self.assertEqual(seen, 95)
 
     def test_406_unknown_holder_layout_is_refused(self):
         source = [[1, 1], [], [], [], [], []]
