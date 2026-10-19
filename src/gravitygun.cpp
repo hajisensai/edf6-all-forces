@@ -139,13 +139,73 @@ void Frame(unsigned char* human) noexcept {
 }
 }  // namespace
 
+// GravityAutoTest (a test of the gravity operations without the gun's trigger: the background test drive cannot aim): every
+// kAutoGapMs the nearest enemy within kAutoReach is grabbed, carried to kAutoAhead m in front of the player and kAutoHigh m up
+// (held there kAutoHoldMs at least, kAutoMostMs at most), then thrown ahead and down into the ground. Logged as the gun's grabs are.
+constexpr ULONGLONG kAutoGapMs=5000,kAutoHoldMs=1500,kAutoMostMs=6000;
+constexpr float kAutoReach=400.0f,kAutoAhead=10.0f,kAutoHigh=6.0f;
+struct Auto { gravity::Target held; ULONGLONG since=0,next=0; int grabs=0; };
+Auto autoTest;
+struct Nearest { const float* at; const void* object; float d2; };
+void SeeNearest(void* ctx,const void* object,const float* lock) noexcept {
+    auto& n=*static_cast<Nearest*>(ctx);
+    if(!lock)return;
+    const float d[3]={lock[0]-n.at[0],lock[1]-n.at[1],lock[2]-n.at[2]};
+    const float d2=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
+    if(d2>kAutoReach*kAutoReach || (n.object && d2>=n.d2))return;
+    n.object=object;n.d2=d2;
+}
+void AutoTest(unsigned char* human) noexcept {
+    const ULONGLONG ms=GameMs();
+    const float* pos=reinterpret_cast<const float*>(human+kPosition);
+    const float* fwd=reinterpret_cast<const float*>(human+kMatrix+32);
+    float f[3]={fwd[0],0.0f,fwd[2]};
+    const float fl=Len(f);
+    if(!(fl>0.1f))return;
+    for(float& c:f)c/=fl;
+    if(!autoTest.held) {
+        if(ms<autoTest.next)return;
+        autoTest.next=ms+kAutoGapMs;
+        Nearest n{pos,nullptr,0.0f};
+        VisitEnemiesOf(At<std::int32_t>(human,kTeam),&SeeNearest,&n);
+        gravity::Target t;
+        if(!n.object || !gravity::TargetOf(n.object,0xFFFFFFu,&t) || !(::gravmath::HoldCap(t.kg)>0.0f)) {
+            if(n.object && autoTest.grabs<64)Log("GRAVITYTEST nearest enemy %p (%.0f m) cannot be lifted",n.object,std::sqrt(n.d2));
+            return;
+        }
+        autoTest.held=t;autoTest.since=ms;
+        if(autoTest.grabs++<64)Log("GRAVITYTEST grab %p (kind %d, family %d): %.2f t, %.0f m away, HP %.0f / %.0f",t.obj.obj,
+                                   static_cast<int>(t.kind),static_cast<int>(t.family),t.kg*0.001f,std::sqrt(n.d2),
+                                   At<float>(n.object,0x2F8),At<float>(n.object,0x2F4));
+    }
+    if(!gravity::Refresh(autoTest.held)){autoTest.held=gravity::Target{};return;}
+    const float goal[3]={pos[0]+f[0]*kAutoAhead,pos[1]+kAutoHigh,pos[2]+f[2]*kAutoAhead};
+    float at[3];
+    const bool known=gravity::Position(autoTest.held,at);
+    const float gap[3]={known ? at[0]-goal[0] : 0.0f,known ? at[1]-goal[1] : 0.0f,known ? at[2]-goal[2] : 0.0f};
+    const bool there=known && Len(gap)<3.0f && ms-autoTest.since>=kAutoHoldMs;
+    if(!there && ms-autoTest.since<kAutoMostMs) {   // carried in, then held kAutoHoldMs at least
+        gravity::HoldAt(autoTest.held,goal,nullptr);
+        gravity::Track(autoTest.held,human,true);
+        return;
+    }
+    if(known)Log("GRAVITYTEST held at (%.0f,%.0f,%.0f), goal (%.0f,%.0f,%.0f)",at[0],at[1],at[2],goal[0],goal[1],goal[2]);
+    const float down[3]={f[0],-0.6f,f[2]};
+    const bool thrown=gravity::Throw(autoTest.held,down,Cfg().gravityThrowSpeed,nullptr,human);
+    Log("GRAVITYTEST throw %p: %s",autoTest.held.obj.obj,thrown ? "thrown" : "not thrown");
+    autoTest.held=gravity::Target{};
+}
+
 // From the shared tick (crew.cpp GravityTick), after the gravity operations' own frame.
 void GravityGunTick() noexcept {
-    if(!gravity::Ready()){gun.held=gravity::Target{};return;}
+    if(!gravity::Ready()){gun.held=gravity::Target{};autoTest.held=gravity::Target{};return;}
     unsigned char* human=PlayerHuman();
     if(!human){gun=Gun{};return;}
     __try { Frame(human); } __except(EXCEPTION_EXECUTE_HANDLER){gun.held=gravity::Target{};}
+    if(Cfg().gravityAutoTest) {
+        __try { AutoTest(human); } __except(EXCEPTION_EXECUTE_HANDLER){autoTest.held=gravity::Target{};Log("GRAVITYTEST faulted");}
+    }
 }
 
-void ResetGravityGun() noexcept { gun=Gun{}; }
+void ResetGravityGun() noexcept { gun=Gun{};autoTest=Auto{}; }
 }  // namespace crew

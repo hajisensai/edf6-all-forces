@@ -237,6 +237,7 @@ void Validate(Config& n) noexcept {
     n.floatGuns=static_cast<int>(FixInt("FloatGuns",n.floatGuns,0,2));
     n.floatGunMost=static_cast<int>(FixInt("FloatGunMost",n.floatGunMost,1,8));
     Fix("FloatGunSec",n.floatGunSec,0.0f,3600.0f);
+    Fix("FloatGunReach",n.floatGunReach,1.0f,200.0f);
     n.playerJetBoostKey=static_cast<int>(FixInt("PlayerJetBoostKey",n.playerJetBoostKey,0,254));
     n.playerJetBrakeKey=static_cast<int>(FixInt("PlayerJetBrakeKey",n.playerJetBrakeKey,0,254));
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
@@ -661,9 +662,11 @@ void LoadConfig() noexcept {
     n.gravityDamage=ReadFloat(L"GravityDamage",n.gravityDamage);
     n.gravityGun=ReadBool(L"GravityGun",n.gravityGun);
     n.gravityThrowSpeed=ReadFloat(L"GravityThrowSpeed",n.gravityThrowSpeed);
+    n.gravityAutoTest=ReadBool(L"GravityAutoTest",n.gravityAutoTest);
     n.floatGuns=ReadInt(L"FloatGuns",n.floatGuns);
     n.floatGunMost=ReadInt(L"FloatGunMost",n.floatGunMost);
     n.floatGunSec=ReadFloat(L"FloatGunSec",n.floatGunSec);
+    n.floatGunReach=ReadFloat(L"FloatGunReach",n.floatGunReach);
     n.drill=ReadBool(L"Drill",n.drill);
     n.drillMaxRpm=ReadFloat(L"DrillMaxRpm",n.drillMaxRpm);
     n.drillSpinUpSec=ReadFloat(L"DrillSpinUpSec",n.drillSpinUpSec);
@@ -916,8 +919,8 @@ void LoadConfig() noexcept {
     Log("CONFIG drillLaunch=%d key=0x%02X button=0x%02X range=%.0fm speed=%.0fm/s damage=%.0f heat=%.0f%%",n.drillLaunch,
         n.drillLaunchKey,n.drillLaunchButton,n.drillLaunchRange,n.drillLaunchSpeed,n.drillLaunchDamage,n.drillLaunchHeat*100.0f);
     Log("CONFIG vehicleRam=%d damage=%.2f",n.vehicleRam,n.vehicleRamDamage);
-    Log("CONFIG gravity damage=%.2f gun=%d throw=%.0fm/s floatGuns=%d most=%d sec=%.0f",n.gravityDamage,n.gravityGun,n.gravityThrowSpeed,
-        n.floatGuns,n.floatGunMost,n.floatGunSec);
+    Log("CONFIG gravity damage=%.2f gun=%d throw=%.0fm/s autoTest=%d floatGuns=%d most=%d sec=%.0f reach=%.1fm",n.gravityDamage,
+        n.gravityGun,n.gravityThrowSpeed,n.gravityAutoTest,n.floatGuns,n.floatGunMost,n.floatGunSec,n.floatGunReach);
     Log("CONFIG emcBeam=%d charge=%.1fs beam=%.1fs blast=%.0fm x%.2f break=%.0f/s",n.emcBeam,n.emcChargeSec,n.emcBeamSec,n.emcBlastRadius,
         n.emcBlastShare,n.emcBreak);
     Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);

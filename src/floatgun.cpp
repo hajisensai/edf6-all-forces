@@ -15,7 +15,7 @@
 //    the gun's model falling and lying as the physics has it. Its own update (slot 5, 0x4A1730) deletes it after 600
 //    frames; the plugin's hook keeps ours (its counter +0x830 held at 0). A vehicle's gun has no such model: its wreck is
 //    where it is picked up, and it floats unseen (its rounds show it).
-//  - The pick-up: the local player within kPickReach (horizontally; kPickRise up or down) of it. Up to FloatGunMost float
+//  - The pick-up: the local player within FloatGunReach of it (horizontally; kPickRise up or down, or the reach if more). Up to FloatGunMost float
 //    round them (another replaces the oldest).
 //  - The flight: each its own place on a ring kRingRadius round the player kRingHigh over them, turning; the hook writes the
 //    drop's matrix there and hands it to the model (0x1100B90, the update's own call), the physics steps skipped.
@@ -80,11 +80,12 @@ constexpr std::size_t kLockPoints=0x368,kLockCount=0x378;   // a game object's l
 constexpr std::size_t kDropCounter=0x830,kDropModel=0x210;
 
 constexpr int kMostGuns=24,kMostPending=32;
-constexpr float kPickReach=3.5f,kPickRise=3.0f;           // the stock item box's 3 m, a little more
+constexpr float kPickRise=3.0f;   // m up or down; across: the ini's FloatGunReach (3.5: the stock item box's 3 m, a little more)
 constexpr float kRingRadius=3.2f,kRingHigh=3.0f,kRingTurn=0.6f,kBob=0.25f,kFollow=8.0f;
 constexpr float kMostReach=400.0f,kLeastReach=30.0f;
 constexpr ULONGLONG kGroundMs=120000;                      // a gun no one picked up stays this long
 constexpr int kMostBurst=200;
+constexpr int kShotLogEvery=100;
 
 enum class Source : std::uint8_t { colonist, vehicle };
 enum class State : std::uint8_t { free, ground, floating };
@@ -96,7 +97,11 @@ struct Gun {
     void* factory=nullptr;
     unsigned char numbers[kPCustom-kPTeam]{};   // +0x90 .. +0xE8 of the parameters as the game built them
     float scale=1.0f;          // +0x30
-    const edf41c::SgoNode* custom=nullptr;   // a persistent copy (null: none)
+    const edf41c::SgoNode* custom=nullptr;   // a tag-1 custom parameter (a node pointer): a persistent copy (null: none)
+    // Any other kind of handle (the colonists' solid rounds' are tag 2): a copy the game's own handle table made (the copy the
+    // game's parameter copy 0x32EF10 makes), copied again into each round's parameters (their destructor ends that one).
+    alignas(8) unsigned char customHandle[0x10]{};
+    std::uint16_t customTag=0xFFFF;
     int pellets=1,burst=1,gapFrames=4,coolFrames=60;
     float spread=0.0f,reach=100.0f;
     ULONGLONG since=0,until=0;
@@ -106,6 +111,8 @@ struct Gun {
     int burstLeft=0;
     ULONGLONG nextShot=0;
     std::uint64_t rng=0x9E3779B97F4A7C15ull;
+    int shots=0;               // rounds fired (the log's first and every kShotLogEvery-th)
+    bool drawn=false;          // its model drawn floating once (logged)
     char what[24]{};
 };
 Gun guns[kMostGuns];
@@ -164,12 +171,15 @@ void __fastcall DropUpdateHook(void* self,void* ctx) {
         if(g->state==State::floating) {
             std::memcpy(d+kMatrix,g->matrix,64);
             reinterpret_cast<ModelMatrixFn>(image+kModelMatrix)(d+kDropModel,reinterpret_cast<const float*>(d+kMatrix));
+            if(!g->drawn){g->drawn=true;Log("FLOATGUN %s drawn floating at (%.0f,%.0f,%.0f)",g->what,g->matrix[12],g->matrix[13],g->matrix[14]);}
             return;
         }
     }
     dropUpdate(self,ctx);
 }
 
+// (A slot's customHandle copy is never destroyed: it may hold a reference into the mission's SGO, and the slot outlives the
+// mission's teardown. A handle a gun, a few a mission.)
 void Free(Gun& g) noexcept {
     __try {
         if(g.drop && g.drop.Is(g.drop.obj))reinterpret_cast<DeleteFn>(image+kDelete)(const_cast<void*>(g.drop.obj));
@@ -186,7 +196,8 @@ Gun* NewGun() noexcept {
     return oldest;
 }
 
-// The persistent copy of a parameter block's custom parameter (a node handle: tag 1), null when it holds none / another kind.
+// The persistent copy of a parameter block's custom parameter when it is a node pointer (tag 1); null when it holds none or
+// another kind (`other`).
 const edf41c::SgoNode* CustomOf(const unsigned char* param,bool* other) noexcept {
     *other=false;
     const std::uint16_t tag=At<std::uint16_t>(param,kPCustomTag);
@@ -195,22 +206,36 @@ const edf41c::SgoNode* CustomOf(const unsigned char* param,bool* other) noexcept
     const auto* n=At<const edf41c::SgoNode*>(param,kPCustom);
     return n && Readable(n,sizeof(edf41c::SgoNode)) ? edf41c::Persist(n) : nullptr;
 }
+// The SGO value handle at `src` (tag at +0x10) copied into `dst` by the game's per-tag copy (0x179E1C0; 0x4A4FC0 / 0x32EF10's
+// way). False: a tag past the table, or none.
+bool CopyHandle(void* dst,const void* src,std::uint16_t tag) noexcept {
+    if(tag==kTagNone || tag>64)return false;
+    const auto copy=At<VariantFn>(image,kVariantCopy+static_cast<std::size_t>(tag)*8);
+    if(!copy)return false;
+    const void* from=src;
+    copy(dst,&from);
+    return true;
+}
 
 // The numbers of the game's own parameter block for this gun's rounds, its factory and its rhythm.
 bool Snapshot(Gun& g,void* factory,const unsigned char* param,int pellets,int burst,int gap,float spread,int cool,const char* what) noexcept {
     if(!factory || !Readable(param,kParamSize))return false;
     bool other=false;
     const edf41c::SgoNode* custom=CustomOf(param,&other);
-    if(other) {
-        Log("FLOATGUN %s: its rounds' custom parameter is not a node (tag %u): not taken",what,At<std::uint16_t>(param,kPCustomTag));
-        return false;
+    if(other) {   // another kind of handle: the game's own copy of it
+        const std::uint16_t tag=At<std::uint16_t>(param,kPCustomTag);
+        if(!CopyHandle(g.customHandle,param+kPCustom,tag)) {
+            Log("FLOATGUN %s: its rounds' custom parameter (tag %u) cannot be copied: not taken",what,tag);
+            return false;
+        }
+        g.customTag=tag;
     }
     g.factory=factory;
     std::memcpy(g.numbers,param+kPTeam,sizeof(g.numbers));
     g.scale=At<float>(param,kPScale);
     g.custom=custom;
     auto fix=[](int v,int lo,int hi){return v<lo ? lo : v>hi ? hi : v;};
-    g.pellets=fix(pellets,1,32);g.burst=fix(burst,1,kMostBurst);g.gapFrames=fix(gap,1,600);g.coolFrames=fix(cool,1,1800);
+    g.pellets=fix(pellets,1,64);g.burst=fix(burst,1,kMostBurst);g.gapFrames=fix(gap,1,600);g.coolFrames=fix(cool,1,1800);
     g.spread=std::isfinite(spread) && spread>0.0f ? (spread<0.3f ? spread : 0.3f) : 0.0f;
     const float speed=At<float>(param,kPSpeed),life=static_cast<float>(At<std::int32_t>(param,kPLife));
     const float reach=speed*life;
@@ -220,7 +245,9 @@ bool Snapshot(Gun& g,void* factory,const unsigned char* param,int pellets,int bu
 }
 
 // The dropped gun of colonist gun `w`, the game's own way (0x4A4FC0): its parameter {vtable, zeros, the gun's SGO value},
-// made at the gun's matrix; the shared_ptr it returns let go (the scene keeps its own).
+// made at the gun's matrix. What the factory hands back is a weak reference (0x49CEF9 gives the object to the scene, which
+// owns it; 0x49CFB2 takes a weak count and drops its own strong one): let go as a weak one, the object kept (the first run
+// let a strong count go here and freed the scene's object: heap corruption, 2026-10-20).
 ObjRef MakeDrop(unsigned char* w) noexcept {
     alignas(16) unsigned char param[0x50]{};
     const void* vt=image+kDropParamVtable;
@@ -241,13 +268,12 @@ ObjRef MakeDrop(unsigned char* w) noexcept {
     }
     auto* obj=static_cast<unsigned char*>(out[0]);
     auto* ctrl=static_cast<unsigned char*>(out[1]);
-    if(ctrl && InterlockedDecrement(reinterpret_cast<volatile LONG*>(ctrl+8))==0) {   // never the last: the scene holds it
-        At<void(__fastcall* const*)(void*)>(ctrl,0)[0](ctrl);
-        if(InterlockedDecrement(reinterpret_cast<volatile LONG*>(ctrl+12))==0)At<void(__fastcall* const*)(void*)>(ctrl,0)[1](ctrl);
-        return {};
-    }
-    if(!obj || At<const void*>(obj,0)!=image+kDropVtable)return {};
-    return ObjRef::Of(obj);
+    const bool made=obj && ctrl && At<const void*>(obj,0)==image+kDropVtable && At<LONG>(ctrl,8)>0;
+    const ObjRef ref=made ? ObjRef::Of(obj) : ObjRef{};
+    if(ctrl && InterlockedDecrement(reinterpret_cast<volatile LONG*>(ctrl+12))==0)   // the weak count: the block's own end
+        At<void(__fastcall* const*)(void*)>(ctrl,0)[1](ctrl);
+    if(!made)Log("FLOATGUN the drop factory gave %p (vtable %p, ctrl %p)",obj,obj ? At<const void*>(obj,0) : nullptr,ctrl);
+    return ref;
 }
 
 // A killed colonist's guns, each dropped where it was.
@@ -377,7 +403,8 @@ void FireOne(Gun& g,const unsigned char* soldier,const void* target,const float*
         alignas(16) unsigned char param[kParamSize];
         reinterpret_cast<ParamFn>(image+kParamCtor)(param);
         std::memcpy(param+kPTeam,g.numbers,sizeof(g.numbers));
-        Put<std::int32_t>(param,kPTeam,At<std::int32_t>(soldier,kTeam));
+        const std::int32_t side=At<std::int32_t>(soldier,kTeam);   // the round's team (its parameter block's), not the soldier's own
+        Put<std::int32_t>(param,kPTeam,side);
         if(std::isfinite(g.scale) && g.scale>0.0f)Put<float>(param,kPScale,g.scale);
         reinterpret_cast<WeakAssignFn>(image+kWeakAssign)(param+kPOwner,soldier+kSelf);
         // The target is a lock point, not the object (0x4A0100 hands the round 0x548EF0's: the object's lock point 0, a weak
@@ -392,6 +419,9 @@ void FireOne(Gun& g,const unsigned char* soldier,const void* target,const float*
         if(g.custom) {
             std::memcpy(param+kPCustom,&g.custom,8);
             Put<std::uint16_t>(param,kPCustomTag,kTagNode);
+        } else if(g.customTag!=kTagNone && At<std::uint16_t>(param,kPCustomTag)==kTagNone &&
+                  CopyHandle(param+kPCustom,g.customHandle,g.customTag)) {
+            Put<std::uint16_t>(param,kPCustomTag,g.customTag);
         }
         Put<std::uint32_t>(param,kPSeed,static_cast<std::uint32_t>(Rand(g.rng)*65535.0f));
         reinterpret_cast<SpawnFn>(image+kSpawn)(mgr,m,g.factory,param);
@@ -420,6 +450,11 @@ void Fly(Gun& g,const unsigned char* soldier,int ring,int ringCount,ULONGLONG ms
     if(ms<g.nextShot)return;
     if(g.burstLeft<=0)g.burstLeft=g.burst;
     FireOne(g,soldier,target,at);
+    if(g.shots++%kShotLogEvery==0) {
+        const float* p=g.matrix+12;
+        const float d[3]={at[0]-p[0],at[1]-p[1],at[2]-p[2]};
+        Log("FLOATGUN %s shot %d at %p, %.0f m off (%d pellet(s))",g.what,g.shots,target,Len(d),g.pellets);
+    }
     --g.burstLeft;
     g.nextShot=ms+static_cast<ULONGLONG>((g.burstLeft>0 ? g.gapFrames : g.coolFrames)*1000/60);
 }
@@ -437,7 +472,8 @@ void Step(unsigned char* soldier,ULONGLONG ms,float dt) noexcept {
             }
             if(ms-g.since>kGroundMs){Free(g);continue;}
             const float d[3]={g.at[0]-pp[0],g.at[1]-pp[1],g.at[2]-pp[2]};
-            if(d[0]*d[0]+d[2]*d[2]>kPickReach*kPickReach || std::fabs(d[1])>kPickRise)continue;
+            const float reach=Cfg().floatGunReach;
+            if(d[0]*d[0]+d[2]*d[2]>reach*reach || std::fabs(d[1])>(reach>kPickRise ? reach : kPickRise))continue;
             if(floating>=Cfg().floatGunMost) {   // the oldest of theirs gives way
                 Gun* oldest=nullptr;
                 for(auto& o:guns)if(o.state==State::floating && o.owner.Is(soldier) && (!oldest || o.since<oldest->since))oldest=&o;

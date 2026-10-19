@@ -224,6 +224,7 @@ bool RidesIn(const unsigned char* v,const void* who) noexcept {
 constexpr int kMostFollowed=32,kMostNear=24;
 constexpr float kContactPad=2.0f;        // m past its own size an enemy's lock point is touched (vehicleram.cpp's kBodyPad)
 constexpr float kLeastClosing=4.0f;      // m/s: slower is a push
+constexpr float kLeastBlast=4.0f;        // m: a blow's charge at least this big (the impact charges: 2 / 4 / 8 ... m)
 constexpr ULONGLONG kContactGapMs=500;   // a thing's blows (its charges) at most this often
 constexpr float kLeastDamage=1.0f;
 struct Followed {
@@ -275,9 +276,12 @@ void Step(Followed& f,ULONGLONG ms) noexcept {
     VisitEnemiesOf(At<std::int32_t>(by,kTeam),&SeeNear,&s);
     float closing=0.0f;
     const void* onto=nullptr;
+    // The blow's centre: the thing's own lock point when it is an enemy (a colonist's is high in its body, its root at its
+    // feet: a blast there missed most of it, the 2026-10-20 run), else its centre; at least kLeastBlast across.
+    float centre[3]={at[0],at[1],at[2]};
     for(int i=0;i<s.count;++i) {
         const Near& n=s.found[i];
-        if(n.object==f.t.obj.obj)continue;
+        if(n.object==f.t.obj.obj){std::memcpy(centre,n.at,12);continue;}
         const float c=ram::Closing(at,vel,n.at);
         if(c>closing){closing=c;onto=n.object;}
     }
@@ -292,8 +296,9 @@ void Step(Followed& f,ULONGLONG ms) noexcept {
     // One blow a frame, at most one a kContactGapMs: the impact, or else the contact (the charge reaches every enemy round
     // it either way, the thing itself too when it is one).
     if(ms-f.lastBlow>=kContactGapMs || !f.lastBlow) {
-        if(dv>0.0f){Deal(by,at,f.t.kg,dv,f.t.radius,f.scale,"impact",f.t.obj.obj);f.lastBlow=ms;}
-        else if(closing>=kLeastClosing){Deal(by,at,f.t.kg,closing,f.t.radius,f.scale,"contact",onto);f.lastBlow=ms;f.flight.sinceHit=0.0f;}
+        const float blast=f.t.radius>kLeastBlast ? f.t.radius : kLeastBlast;
+        if(dv>0.0f){Deal(by,centre,f.t.kg,dv,blast,f.scale,"impact",f.t.obj.obj);f.lastBlow=ms;}
+        else if(closing>=kLeastClosing){Deal(by,centre,f.t.kg,closing,blast,f.scale,"contact",onto);f.lastBlow=ms;f.flight.sinceHit=0.0f;}
     }
     if(done)f=Followed{};
 }

@@ -176,9 +176,11 @@ struct Config {
     float gravityDamage=20.0f;      // what a thrown thing deals: 1/2 m dv^2 at 287 kJ a point (the rams' formula) times this (0: none)
     bool gravityGun=true;           // the gravity gun grabs, carries and throws (off: it is the stock Laser Guide Kit it was cloned from)
     float gravityThrowSpeed=40.0f;  // m/s a 2 t thing leaves the gun at (lighter faster, heavier slower: gravity_logic.h ThrowSpeed)
+    bool gravityAutoTest=false;     // a test: every few seconds the nearest enemy is grabbed, held over the player and slammed down (gravitygun.cpp)
     int floatGuns=1;                // dropped guns that float round their finder and fire (floatgun.cpp): 0 off, 1 EDF5's last mission (M099) only, 2 every mission
     int floatGunMost=4;             // ...at most this many round one player (a fifth replaces the oldest)
     float floatGunSec=90.0f;        // ...each fights this long once picked up (0: until the mission ends)
+    float floatGunReach=3.5f;       // ...picked up by walking this near it (m across; 3 m up or down)
     bool vehicleSound=true;         // the ground vehicles' engines, turrets, loaders and main guns heard as the plugin makes them (vehsound.cpp)
     float vehicleEngineVolume=1.0f; // ...each group's volume, times the game's own; 0: that group's stock sound kept
     float vehicleTurretVolume=1.0f;
