@@ -51,6 +51,17 @@ bool SkyOk() noexcept {
 void* FadeMgr() noexcept {
     return SkyOk() && Readable(image+kFadeMgr,8) ? At<void*>(image,kFadeMgr) : nullptr;
 }
+// The manager made when the scene has none yet (the test range's scripts never fade, so none is made there): its getter
+// 0x5BEFA0, as every script call of EventLightTool_EnvFadeAnimation does (0x1A5FDC). Only from a show, so inside a
+// mission's scene (outside one the getter would make a manager no scene owns).
+using MgrGetFn=void*(__fastcall*)();
+void* FadeMgrMade() noexcept {
+    if(void* const mgr=FadeMgr())return mgr;
+    if(!SkyOk())return nullptr;
+    void* const mgr=reinterpret_cast<MgrGetFn>(image+kMgrGet)();
+    Log("ULTIMATE light fade manager: none in this scene, made %p",mgr);
+    return mgr;
+}
 unsigned char* SlotBase(const Slot& s) noexcept {
     if(!s.env)return Readable(image+kRenderer,8) ? At<unsigned char*>(image,kRenderer) : nullptr;
     unsigned char* const root=Readable(image+kEnvRoot,8) ? At<unsigned char*>(image,kEnvRoot) : nullptr;
@@ -195,7 +206,7 @@ float CirclePlane() noexcept {
 }
 
 void Snap() noexcept {
-    show.snapped=FadeMgr()!=nullptr;
+    show.snapped=FadeMgrMade()!=nullptr;
     for(int i=0;i<kSlotCount && show.snapped;++i)show.snapped=SlotNow(kSlots[i].type,show.snap[i]);
     if(!show.snapped)Log("ULTIMATE no light fade manager or its values this scene: the sky stays as it is");
 }
@@ -246,7 +257,9 @@ void DropAll() noexcept {
 }
 
 const float kUp[3]={0.0f,1.0f,0.0f};
-const float kCrimson[4]={6.0f,0.6f,1.4f,1.0f},kBoltLight[4]={2.5f,3.2f,4.0f,1.0f},kViolet[4]={5.0f,1.5f,6.0f,1.0f};
+// The flashes' lights (StencilLight's raw colour: a stock explosion's helper scales its colour by 2.5): low, so the dark sky
+// stays dark (2026-10-19 first run: 6.0 over 300 m turned the whole field pink, the beam's 5-6 washed the picture white).
+const float kCrimson[4]={0.9f,0.08f,0.2f,1.0f},kBoltLight[4]={0.8f,1.0f,1.4f,1.0f},kViolet[4]={1.0f,0.3f,1.3f,1.0f};
 
 void ChargeFrame(int f) noexcept {
     if(f==0) {
@@ -263,7 +276,7 @@ void ChargeFrame(int f) noexcept {
         else if(!RoundSteer(show.aims[i],from,to)){show.aims[i]=RoundObj{};continue;}
         RoundSize(show.aims[i],a.size);
     }
-    if(f%30==0)edf41c::StencilLight(show.at,kCrimson,kRadius*1.4f,40);
+    if(f%30==0)edf41c::StencilLight(show.at,kCrimson,kRadius*0.8f,40);
     if(f%45==0)edf41c::Quake(show.at,0.25f+0.5f*f/kChargeEnd,kRadius*3.0f);
 }
 
@@ -359,9 +372,10 @@ bool UltimateStart(const unsigned char* caller,const float* at,float damage,std:
     show.damage=std::isfinite(damage) && damage>0.0f ? damage : 0.0f;
     show.seed=seed;
     show.start=GameFrame();
-    Log("ULTIMATE at (%.0f,%.0f,%.0f) damage %.0f seed %016llX: charge %d, storm %d, cannon %d, after %d frames",show.at[0],
-        show.at[1],show.at[2],show.damage,static_cast<unsigned long long>(seed),kChargeEnd,kStormEnd-kChargeEnd,
-        kCannonEnd-kStormEnd,kAfterEnd-kCannonEnd);
+    const float* const by=reinterpret_cast<const float*>(caller+0x90);   // its position (the matrix's last row)
+    Log("ULTIMATE at (%.0f,%.0f,%.0f), %.0f m from the caller, damage %.0f seed %016llX: charge %d, storm %d, cannon %d, after %d "
+        "frames",show.at[0],show.at[1],show.at[2],std::hypot(by[0]-show.at[0],by[2]-show.at[2]),show.damage,
+        static_cast<unsigned long long>(seed),kChargeEnd,kStormEnd-kChargeEnd,kCannonEnd-kStormEnd,kAfterEnd-kCannonEnd);
     return true;
 }
 
