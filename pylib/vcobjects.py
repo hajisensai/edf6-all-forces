@@ -1920,6 +1920,89 @@ def check_emc(files: dict[str, bytes], game: Game | None = None) -> None:
         assert abs(stock['reach'] - EMC_BEAM_RANGE) < 1e-3, stock
 
 
+# ------------------------------------------------------------------------------------------ the ultimate strike
+# The ultimate strike's rounds (src/ultimate.cpp, src/ultimate_plan.h, docs/plan-2026-10-19-ultimate.md; the user,
+# 2026-10-19: 「特效拉满 昏天暗地」): DemoIndirectFire SGOs the plugin owns, aims and grows as the EMC's (jet_bay.cpp kEmcFiles,
+# after the Sazabi's and the Proteus's), the satellite laser (PORTAL_LASER_STOCK) remade for each part of the show, and the
+# EMC's impact charge for the blasts. Every damage 0 in the SGO: the plugin writes it (IFC +0xDC) from the weapon's.
+#   ULT_SIGHT_FILE  the charge's aim beams: thin crimson, a round a frame for the whole charge, silent (the plugin grows them)
+#   ULT_BOLT_FILE   a lightning bolt: a blue-white flash ULT_BOLT_ROUNDS frames long, its crack once
+#   ULT_SPARK_FILE  the burst where a bolt lands (ULT_SPARK_RADIUS m)
+#   ULT_BEAM_FILE   the main beam: the satellite's thickest, violet, a round a frame for the whole cannon phase, a deep shot
+#   ULT_CORE_FILE   its white-hot core, silent
+#   ULT_BLAST_FILE  a ring's blast (ULT_BLAST_RADIUS m: src/ultimate_plan.h kRingBlast)
+ULT_SIGHT_FILE = 'EDF6VC_ULT_SIGHT.SGO'
+ULT_BOLT_FILE = 'EDF6VC_ULT_BOLT.SGO'
+ULT_SPARK_FILE = 'EDF6VC_ULT_SPARK.SGO'
+ULT_BEAM_FILE = 'EDF6VC_ULT_BEAM.SGO'
+ULT_CORE_FILE = 'EDF6VC_ULT_CORE.SGO'
+ULT_BLAST_FILE = 'EDF6VC_ULT_BLAST.SGO'
+ULT_FILES = (ULT_SIGHT_FILE, ULT_BOLT_FILE, ULT_SPARK_FILE, ULT_BEAM_FILE, ULT_CORE_FILE, ULT_BLAST_FILE)   # EmcRound's order
+ULT_BOLT_ROUNDS = 8                     # src/ultimate_plan.h kBoltFrames
+ULT_SPARK_RADIUS, ULT_BLAST_RADIUS = 22.0, 55.0
+# (rounds, size, colour, speed m a frame, life frames, shot volume, shot pitch): reach = speed x life, past the farthest
+# start: the aims' ring (900 m up, 520 m out) to the area's far edge, a bolt's 700 m (plus its lean), the beam's 1300 m.
+ULT_BEAMS: dict[str, tuple[int, float, tuple[float, ...], float, int, float, float]] = {
+    ULT_SIGHT_FILE: (360, 0.8, (3.0, 0.2, 0.45, 1.0), 140.0, 10, 0.0, 1.0),
+    ULT_BOLT_FILE: (ULT_BOLT_ROUNDS, 2.5, (1.8, 2.4, 3.0, 1.0), 160.0, 6, 0.7, 1.7),
+    ULT_BEAM_FILE: (260, 48.0, (2.8, 0.45, 3.0, 1.0), 150.0, 10, 1.0, 0.6),
+    ULT_CORE_FILE: (260, 18.0, (3.0, 2.6, 3.0, 1.0), 150.0, 10, 0.0, 1.0),
+}
+ULT_REACH = {ULT_SIGHT_FILE: 1300.0, ULT_BOLT_FILE: 760.0, ULT_BEAM_FILE: 1300.0, ULT_CORE_FILE: 1300.0}
+ULT_CHARGE_COLOUR = (2.2, 0.6, 3.0, 1.0)
+
+
+def _ult_beam(game: Game, rounds: int, size: float, colour: tuple[float, ...], speed: float, life: int, volume: float,
+              pitch: float) -> bytes:
+    """The satellite laser (PORTAL_LASER_STOCK) made one of the ultimate's beams (see ULT_BEAMS)."""
+    version, m = sgo.read(game.read('OBJECT', PORTAL_LASER_STOCK))
+    p = m['indirect_fire_param']
+    if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+            or p[4] != 'LaserBullet02' or p[11] != 1 or not isinstance(p[17], list) or len(p[17]) != 6
+            or not isinstance(p[18], list) or len(p[18]) != 6):
+        raise ValueError(f'{PORTAL_LASER_STOCK} 不是预期的卫星激光')
+    p[0] = [0.0, 0.0]
+    p[2], p[3], p[5], p[7], p[9], p[10] = rounds, 0, speed, size, 0.0, life
+    p[12] = list(colour)
+    p[14], p[15], p[16] = 0, 0, 0
+    p[17][0] = 1.0                      # its shot sound once for all its rounds
+    p[17][2] = volume
+    p[17][3] = pitch
+    p[18][2] = 0.0                      # no hit sound: a round a frame would play it 60 times a second
+    m['indirect_fire_damage'] = 0.0     # the plugin sets the damage (IFC +0xDC)
+    return sgo.write(version, m)
+
+
+def ult_rounds(game: Game) -> dict[str, bytes]:
+    """The ultimate's DemoIndirectFire SGOs (ULT_FILES), {Mods/OBJECT file: bytes}."""
+    out = {name: _ult_beam(game, *spec) for name, spec in ULT_BEAMS.items()}
+    for name, radius in ((ULT_SPARK_FILE, ULT_SPARK_RADIUS), (ULT_BLAST_FILE, ULT_BLAST_RADIUS)):
+        version, m = sgo.read(_emc_charge(game, radius, EMC_BLAST_SPEED, EMC_BLAST_LIFE))
+        m['indirect_fire_param'][12] = list(ULT_CHARGE_COLOUR)
+        out[name] = sgo.write(version, m)
+    return {name: out[name] for name in ULT_FILES}
+
+
+def check_ult(files: dict[str, bytes]) -> None:
+    """The ultimate's SGOs as src/ultimate.cpp fires them: the beams LaserBullet02, penetrating, no blast, a round a frame,
+    reaching past their farthest start, enough rounds for their phase; the charges SolidBullet01, one round, their blast
+    radius ULT_*_RADIUS; every damage 0 (the plugin's)."""
+    assert list(files) == list(ULT_FILES), list(files)
+    for name, (rounds, size, _, speed, life, volume, _) in ULT_BEAMS.items():
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'LaserBullet02' and p[11] == 1, name
+        assert p[2] == rounds and p[3] == 0 and p[9] == 0.0 and p[15] == 0 and m['indirect_fire_damage'] == 0.0, (name, p)
+        assert p[5] * p[10] >= ULT_REACH[name], (name, p[5], p[10])
+        assert p[17][0] == 1.0 and p[18][2] == 0.0 and p[17][2] == volume, name
+    assert ULT_BEAMS[ULT_SIGHT_FILE][0] >= 5 * 60 and ULT_BEAMS[ULT_BEAM_FILE][0] >= 4 * 60, 'rounds for the whole phase'
+    for name, radius in ((ULT_SPARK_FILE, ULT_SPARK_RADIUS), (ULT_BLAST_FILE, ULT_BLAST_RADIUS)):
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'SolidBullet01', name
+        assert p[2] == 1 and p[11] == 0 and p[9] == radius and m['indirect_fire_damage'] == 0.0, (name, p)
+
+
 # ------------------------------------------------------------------------------------------ the Sazabi's arms
 # The Sazabi (JETS[SAZABI_JET], src/sazabi.cpp, tools/make_sazabi.py writes these). Its holders (weapon_bones):
 #   0 the beam shot rifle on sz_muzzle: the 506's own laser (a null model: nothing hangs on the muzzle) made a thick

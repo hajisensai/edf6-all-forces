@@ -162,9 +162,16 @@ const EmcFile kEmcFiles[]={
     {L"app:/object/edf6vc_sz_charge.sgo",L"EDF6VC_SZ_CHARGE.SGO","Sazabi charge"},
     {L"app:/object/edf6vc_sz_funnel.sgo",L"EDF6VC_SZ_FUNNEL.SGO","Sazabi funnel beam"},
     {L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO","Proteus shield",true},   // tools/make_proteus.py
+    // the ultimate strike's (ultimate.cpp; pylib/vcobjects.py ULT_FILES, tools/make_ultimate.py)
+    {L"app:/object/edf6vc_ult_sight.sgo",L"EDF6VC_ULT_SIGHT.SGO","ultimate aim beam"},
+    {L"app:/object/edf6vc_ult_bolt.sgo",L"EDF6VC_ULT_BOLT.SGO","ultimate bolt"},
+    {L"app:/object/edf6vc_ult_spark.sgo",L"EDF6VC_ULT_SPARK.SGO","ultimate spark"},
+    {L"app:/object/edf6vc_ult_beam.sgo",L"EDF6VC_ULT_BEAM.SGO","ultimate beam"},
+    {L"app:/object/edf6vc_ult_core.sgo",L"EDF6VC_ULT_CORE.SGO","ultimate core"},
+    {L"app:/object/edf6vc_ult_blast.sgo",L"EDF6VC_ULT_BLAST.SGO","ultimate blast"},
 };
 constexpr int kEmcCount=static_cast<int>(sizeof(kEmcFiles)/sizeof(kEmcFiles[0]));
-static_assert(kEmcCount==static_cast<int>(EmcRound::proteusShield)+1,"kEmcFiles is indexed by EmcRound");
+static_assert(kEmcCount==static_cast<int>(EmcRound::ultBlast)+1,"kEmcFiles is indexed by EmcRound");
 bool emcReady[kEmcCount]{};               // preloaded this mission (PreloadShells)
 // The IFC's own copy of the round's AmmoSize (#7) and AmmoExplosion (#9), as its config 0x2B5F40 writes them (r14 = the
 // IFC: 0x2B6A15 movss [r14+0x100],xmm0; 0x2B68C5 movss [r14+0xF0],xmm0; docs/carrier-laser-re.md §3): a round takes its

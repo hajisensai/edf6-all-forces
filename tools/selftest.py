@@ -531,7 +531,7 @@ def calls_table_consistent() -> None:
     drones = set(re.search(r'enum class ThrownDrone \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     for c in calls.CALLS:
         assert c.kind in calls.KINDS, c.id
-        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun'), c.id
+        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'ultimate'), c.id
         thrown = c.brings == 'throw'
         assert bool(c.drone) == thrown and (not c.drone or c.drone in drones), c.id
         # A thrown drone's marker: the bits of 1.0 with its code in the low ones, never 1.0 itself (calls.throw_mark).
@@ -543,7 +543,7 @@ def calls_table_consistent() -> None:
         assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground)) == (c.brings == 'vehicle'), c.id
         assert not (c.jet and c.ground) and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
         assert not c.ground or vc.GROUND_VEHICLES[c.ground].sgo == c.vehicle, c.id
-        assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown), c.id
+        assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown or c.brings == 'ultimate'), c.id
         assert not thrown or not c.flown, c.id   # not in the in-mission pick (kCalls)
         for lang in cw.LANGS:
             assert calls.call_name(c, lang) and calls.call_description(c, lang)
@@ -981,10 +981,10 @@ def hand_copies_agree() -> None:
     sgos = set(re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_src))
     assert files and {f.lower() for f in files} == sgos, 'src/jet*: the file names and the app:/object paths disagree'
     # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py; the
-    # Proteus's shield: tools/make_proteus.py
+    # Proteus's shield: tools/make_proteus.py; the ultimate strike's rounds: tools/make_ultimate.py
     import make_proteus
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
-               | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]})
+               | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES))
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -1059,7 +1059,7 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield \};',
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast \};',
                      src('src/crew.h')), 'src/crew.h EmcRound'
     # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
     sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
@@ -1103,6 +1103,52 @@ def emc_copies_agree() -> None:
     import rootcpk
     if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         make_emc.build(rootcpk.DEFAULT_GAME)
+
+
+@test
+def ultimate_copies_agree() -> None:
+    """The ultimate strike (src/ultimate.cpp, src/ultimate_plan.h, pylib/vcobjects.py ULT_*, tools/make_ultimate.py,
+    tools/call_weapons.py ULTIMATE_*): src/jet_bay.cpp preloads and fires exactly the files tools/make_ultimate.py writes,
+    after the EMC's, the Sazabi's and the Proteus's, in EmcRound's order; the C++ copies of the area, a bolt's rounds and a
+    ring's blast are the Python ones; the call is one satellite call of ours (its marker unique, its template a fire state
+    the hook knows); the hook, the tick, the mission reset and the build are wired; the tool is the installer's and the
+    ledger's; the offline check is a target. With the game: the SGOs build and pass check_ult."""
+    import make_ultimate
+    bay, plan = src('src/jet_bay.cpp'), src('src/ultimate_plan.h')
+    files = re.findall(r'\{L"app:/object/(edf6vc_ult_[a-z_]+\.sgo)",L"(EDF6VC_ULT_[A-Z_]+\.SGO)"', bay)
+    assert [f for _, f in files] == list(vc.ULT_FILES) and all(s == f.lower() for s, f in files), files
+    assert bay.index('EDF6VC_PROTEUS_SHIELD.SGO') < bay.index(vc.ULT_FILES[0]), "kEmcFiles: the ultimate's after the Proteus's"
+    import magic_circle
+    assert make_ultimate.names() == [f'OBJECT/{n}' for n in (*vc.ULT_FILES, *magic_circle.files())]
+    assert make_ultimate.OWNER in ledger.OWNERS
+    # the circles: src/ultimate.cpp kCircleFiles in CircleModel's order are pylib/magic_circle.py LAYERS'
+    strike_src = src('src/ultimate.cpp')
+    circles = re.findall(r'\{L"app:/object/(edf6vc_ult_circle_[a-z]+\.sgo)",L"(EDF6VC_ULT_CIRCLE_[A-Z]+\.SGO)"', strike_src)
+    assert [f for _, f in circles] == [magic_circle.sgo_file(k) for k in magic_circle.LAYERS] and \
+        all(s == f.lower() for s, f in circles), circles
+    model = re.search(r'enum class CircleModel : unsigned char \{ ([a-z, ]+) \};', plan)
+    assert model and [m.strip().upper() for m in model.group(1).split(',')] == list(magic_circle.LAYERS), model
+    assert 'PreloadUltimate(mgr);' in src('src/jet_spawn.cpp')
+    for name, value in (('kRadius', cw.ULTIMATE_RADIUS), ('kRingBlast', vc.ULT_BLAST_RADIUS)):
+        m = re.search(rf'\b{name}=([\d.]+)f', plan)
+        assert m and float(m.group(1)) == value, (name, m and m.group(1), value)
+    m = re.search(r'\bkBoltFrames=(\d+);', plan)
+    assert m and int(m.group(1)) == vc.ULT_BOLT_ROUNDS, m and m.group(1)
+    ults = [c for c in calls.CALLS if c.brings == 'ultimate']
+    assert ults and all(cw.template_of(c) == cw.ULTIMATE_TEMPLATE and c.mark >= 1 and float(c.mark).is_integer()
+                        for c in ults), ults
+    strike, crew, airstrike = src('src/ultimate.cpp'), src('src/crew.cpp'), src('src/airstrike.cpp')
+    assert 'InstallUltimate()' in airstrike and 'UltimateStart(owner,aim,' in airstrike
+    assert 'GuardedTick(kStepUltimate,&UltimateTick);' in crew and 'ResetUltimate();' in src('src/mission.cpp')
+    assert 'EmcRound::ultBeam' in strike and 'kSkyBackSec' in strike
+    inst = src('tools/installer.py')
+    assert 'build_asset(cache, make_ultimate,' in inst and 'make_ultimate.install(game, ult)' in inst and 'make_ultimate.remove' in inst
+    assert "'ultimate'" in src('pylib/buildcache.py')
+    cmake = src('CMakeLists.txt')
+    assert 'src/ultimate.cpp' in cmake and 'add_executable(ultimate_check EXCLUDE_FROM_ALL tools/ultimate_check.cpp)' in cmake
+    import rootcpk
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        make_ultimate.build(rootcpk.DEFAULT_GAME)
 
 
 @test
@@ -2617,7 +2663,7 @@ def proteus_wired() -> None:
     # The shield: the stock barrier round raised through the EMC table (preloaded whenever its file is installed).
     bay = src('src/jet_bay.cpp')
     assert 'L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO"' in bay
-    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::proteusShield)+1' in bay
+    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::ultBlast)+1' in bay   # the Proteus's before the ultimate's
     assert 'PreloadShells(mgr,Preloaded(Body::gunship));' in src('src/jet_spawn.cpp')
     assert 'EmcFire(EmcRound::proteusShield,v,p,at,1.0f)' in shield
     assert "SHIELD_FILE = 'OBJECT/EDF6VC_PROTEUS_SHIELD.SGO'" in src('tools/make_proteus.py')

@@ -666,10 +666,10 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepPvp, kStepThermal, kStepEnemyControl, kStepCount };
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepPvp, kStepThermal, kStepEnemyControl, kStepUltimate, kStepCount };
 const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","pvp","thermal","enemy control"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","pvp","thermal","enemy control","ultimate"};
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -832,6 +832,7 @@ void SharedFrameTick() noexcept {
     GuardedTick(kStepView,&ViewTick);
     GuardedTick(kStepBoarding,&BoardingTick);
     GuardedTick(kStepDebugSpawn,&DebugSpawnTick);   // riding: the player's own frame may not come (off by default)
+    GuardedTick(kStepUltimate,&UltimateTick);       // the ultimate strike's show (ultimate.cpp), on with the plugin off too
 }
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {

@@ -11,6 +11,10 @@ The thrown drones (Call.brings 'throw') are clones of the stock eWeapon217 (Patr
 the Robot Bomb list) with a marker in AmmoHitSizeAdjust (calls.throw_mark: about 1.0004, so the bomb hits as the
 stock one): the plugin turns the bomb into its drone where it lands (src/airstrike.cpp kThrows); without the
 plugin the weapon is a plain Patroller.
+The ultimate strike (Call.brings 'ultimate') is a clone of the stock eWeapon116 (Spritefall Destroy,
+Weapon_LaserMarkerCallFire) with its marker in AmmoHitSizeAdjust, which the satellite's own code never reads (its
+state machine 0x6A0C50-0x6A6900 reads +0x89C, +0x8B0, +0x8C8): the plugin catches its fire (src/airstrike.cpp, the
+satellite's fire state) and plays its show (src/ultimate.cpp); without the plugin it is a plain Spritefall Destroy.
 
   python tools/call_weapons.py build OUTDIR [--game DIR]     write the SGOs + the stacked tables into OUTDIR
   python tools/call_weapons.py install [--game DIR]          into <game>/Mods (refuses while EDF6 runs)
@@ -70,6 +74,10 @@ from dsgo import Node  # noqa: E402
 TEMPLATE = 'eWeapon051'          # Combat Bomber KM6
 VEHICLE_TEMPLATE = 'eWeapon394'  # N9 Eros (a heli vehicle request)
 THROW_TEMPLATE = 'eWeapon217'    # Patroller (a Robot Bomb: Weapon_Sub, BombBullet01)
+ULTIMATE_TEMPLATE = 'eWeapon116'  # Spritefall Destroy (Weapon_LaserMarkerCallFire, its fire state CP[3] = 0)
+# The ultimate's AmmoDamage base (the stock curve's stars kept): what src/ultimate.cpp reads off the weapon (+0x89C) and
+# shares out over its bolts, blasts and beam.
+ULTIMATE_DAMAGE = 12000.0
 LANGS = ('JA', 'EN', 'CN', 'KR', 'SC')
 TABLE = 'WEAPON/WEAPONTABLE.SGO'
 TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
@@ -172,6 +180,8 @@ def template_of(call: Call) -> str:
         return vc.GROUND_VEHICLES[call.ground].request
     if call.brings == 'throw':
         return THROW_TEMPLATE
+    if call.brings == 'ultimate':
+        return ULTIMATE_TEMPLATE
     return VEHICLE_TEMPLATE if call.brings == 'vehicle' else TEMPLATE
 
 
@@ -500,10 +510,29 @@ def gun_sgo(template: bytes, call: Call) -> bytes:
     return dsgo.write(doc)
 
 
+def ultimate_sgo(template: bytes, call: Call) -> bytes:
+    """Spritefall Destroy with the ultimate's marker, reload (pt), damage base and names; its laser marker, countdown, voice
+    and stock beam (the fallback without the plugin) as they are."""
+    doc = dsgo.parse(template)
+    r = doc.root
+    if r.get('Ammo_CustomParameter').items[4].items[4] != 'LaserBullet02' or r.get('Ammo_CustomParameter').items[3] != 0:
+        raise ValueError(f'{ULTIMATE_TEMPLATE} 不是预期的卫星激光呼叫（CP[3] = 0 的发射态，LaserBullet02）')
+    r.set('AmmoHitSizeAdjust', float(call.mark))
+    r.get('ReloadTime').items[0] = float(call.reload)
+    r.get('AmmoDamage').items[0] = ULTIMATE_DAMAGE
+    for lang in LANGS:
+        key = f'name.{lang.lower()}'
+        if key in r.names.values():
+            r.set(key, call_name(call, lang))
+    return dsgo.write(doc)
+
+
 def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, float]] | None = None,
                *, fallback: bool = False) -> bytes:
     if call.brings == 'gun':
         return gun_sgo(template, call)
+    if call.brings == 'ultimate':
+        return ultimate_sgo(template, call)
     if call.brings == 'vehicle':
         return vehicle_sgo(template, call, request_tier(curve or [], call.level), fallback=fallback)
     if call.brings == 'throw':
@@ -565,6 +594,9 @@ def _text_row(template: Node, call: Call, lang: str, durability: float | None = 
     if call.brings == 'throw':
         _throw_stats(row, call)
         return row
+    if call.brings == 'ultimate':
+        _ultimate_stats(row, call)
+        return row
     # A vehicle request's stats: [re-request, durability, fuel, fuel cost]; the durability is the jet's.
     stats = row.items[2].items
     if durability is not None and len(stats) > 1 and len(stats[1].items) == 2:
@@ -607,6 +639,26 @@ def _throw_stats(row: Node, call: Call) -> None:
         if len(stat.items) == 3 and isinstance(stat.items[2], Node) and stat.items[2].items:
             stat.items[2].items[0] = value
     row.items[2].items = keep
+
+
+# Spritefall Destroy's stat list: [damage, blast range, reload, laser range, rounds, zoom]. The ultimate's: its damage base,
+# its area (src/ultimate_plan.h kRadius) for the blast range, its pt; the stock beam's round count goes (the show has none).
+_ULT_DAMAGE_STAT, _ULT_RANGE_STAT, _ULT_RELOAD_STAT, _ULT_ROUNDS_STAT = 0, 1, 2, 4
+ULTIMATE_RADIUS = 220   # m: src/ultimate_plan.h kRadius (tools/selftest.py holds the two equal)
+
+
+def _ultimate_stats(row: Node, call: Call) -> None:
+    stats = row.items[2].items
+    if len(stats) <= _ULT_ROUNDS_STAT:
+        return   # another tool rewrote the satellite's text: left as it is
+    for at, value in ((_ULT_DAMAGE_STAT, ULTIMATE_DAMAGE), (_ULT_RELOAD_STAT, float(call.reload))):
+        stat = stats[at]
+        if len(stat.items) == 3 and isinstance(stat.items[2], Node) and stat.items[2].items:
+            stat.items[2].items[0] = value
+    area = stats[_ULT_RANGE_STAT]
+    if len(area.items) == 2 and isinstance(area.items[1], str):
+        area.items[1] = area.items[1].replace('70.0', str(ULTIMATE_RADIUS))
+    del stats[_ULT_ROUNDS_STAT]
 
 
 def _retired_table_row(template: Node, call: Call) -> Node:
