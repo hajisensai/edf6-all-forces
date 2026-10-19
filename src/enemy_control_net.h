@@ -6,7 +6,8 @@
 #include <cstdint>
 
 namespace crew {
-// Startup binds the core's request/input/exit callbacks. It installs no native hook and never polls a second transport.
+// Startup only binds callbacks; native session state is unavailable until the game thread runs.
+// It installs no native hook and never polls a second transport.
 bool InstallEnemyControlNetwork() noexcept;
 void UpdateEnemyControlNetwork(const CommandNetworkContext&,std::uint64_t now) noexcept;
 bool ReceiveEnemyControlNetwork(std::uint32_t peer,const char* authenticatedPuid,

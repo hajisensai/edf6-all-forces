@@ -249,8 +249,8 @@ def check_calls(root: str) -> None:
 
 def check_session(root: str) -> None:
     session = body(code_only(read(root, 'src/netprobe.cpp')), 'bool InSession()')
-    if 'return sig && ' not in session:
-        fail('src/netprobe.cpp InSession: unknown session code counts as online (offline play would lose the gated features)')
+    if not before(session, 'if(!SessionCodeKnown(base))return false;', 'At<const unsigned char*>(base,kGameStatus)'):
+        fail('src/netprobe.cpp InSession: reject an unknown native profile before reading session state')
 
 
 # "A player is aboard, leave it to them" asks for a player of any machine (AnyPlayerIn); "this machine's player" (its

@@ -934,7 +934,7 @@ add_test(NAME proteus_range COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}
 add_test(NAME vehicle_shapes COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/test_vehicle_model_shapes.py")
 add_test(NAME aircraft_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/aircraft_collision_check.py")
 
-foreach(check IN ITEMS heli_command_test jet_command_test bullet_pass_test rocket_guide_prediction_test rocket_impact_readout_test npc_post_test map_command_identity_test)
+foreach(check IN ITEMS heli_command_test jet_command_test bullet_pass_test rocket_guide_prediction_test rocket_impact_readout_test npc_post_test map_command_identity_test net_session_lifecycle_test)
     add_executable(${check} EXCLUDE_FROM_ALL tests/${check}.cpp)
     target_include_directories(${check} PRIVATE src common third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
     target_link_libraries(${check} PRIVATE edf6common user32)
@@ -955,6 +955,8 @@ target_link_options(npc_core_check PRIVATE /OPT:REF)
 add_dependencies(offline_checks npc_core_check)
 add_test(NAME npc_core_check COMMAND npc_core_check)
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks")
+add_test(NAME net_session_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/net_session_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(net_session_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 add_test(NAME item_pickup_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/item_pickup_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
 # The Proteus shield's round carries its model into the IFC (src/ifc_model.h; test hub report #6, the B-key crash):

@@ -287,7 +287,9 @@ bool Online() noexcept {return InSession();} // no local-only fallback when the 
 bool InstallEnemyControlNetwork() noexcept {
     if(configured)return true;
     if(!protocol.SetReliableOrderedTransport(true))return false;
-    ConfigureEnemyControlNetwork({&Request,&Input,&Stop,&Online});configured=true;Publish();return true;
+    // Plugin loading precedes the native session manager. Register callbacks only;
+    // the first game-thread transport update publishes the initial live status.
+    ConfigureEnemyControlNetwork({&Request,&Input,&Stop,&Online});configured=true;return true;
 }
 void UpdateEnemyControlNetwork(const CommandNetworkContext& context,std::uint64_t now) noexcept {
     const bool same=context.epoch==transport.epoch && context.host==transport.host && context.hostPeer==transport.hostPeer &&
