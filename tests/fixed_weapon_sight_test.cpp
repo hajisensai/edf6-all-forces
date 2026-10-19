@@ -38,6 +38,8 @@ bool HudReady() noexcept{return true;}
 bool FuelGauge(const void*,FuelReading*) noexcept{return false;}
 bool IsFuelTank(const unsigned char*) noexcept{return false;}
 unsigned char* PayloadPicked(const void*) noexcept{return nullptr;}
+const StoreSpec* sightStore=nullptr;
+const StoreSpec* StoreOf(const unsigned char*) noexcept{return sightStore;}
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept{return nullptr;}
 int PayloadSightWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}
 int PayloadTriggerWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}
@@ -135,6 +137,20 @@ void Run(){
     Put<void*>(f.weapon,0,nullptr);StockArm ordinary{};ordinary.physicalOnly=false;Arm(f.weapon,true,ordinary);
     Check(ordinary.style==WeaponStyle::projectile && !std::strcmp(ordinary.label,"GUN") && ordinary.ladder.ticks>0,
           "ordinary SolidBullet gun retains its genuine gun semantics and range ladder");
+    // A catalogued round the numbers misname (2026-10-19): a HEAT store bursts but its sight says HEAT, not HE; a
+    // canister is a penetrating body but says CAN; an uncatalogued weapon keeps the sight's own reading.
+    Put<float>(f.weapon,kBlast,3.0f);StockArm burst{};burst.physicalOnly=false;Arm(f.weapon,true,burst);
+    Check(burst.shell==reticle::Shell::he,"a bursting gun round without a store reads HE");
+    const StoreSpec heat{L"EDF6VC_HEAT_","HEAT-MP",StoreRole::gun,0,0,0,0,false,StoreShell::heat},
+                    can{L"EDF6VC_CANISTER_","Canister",StoreRole::gun,0,0,0,0,false,StoreShell::canister},
+                    plain{L"EDF6VC_HE_","HE",StoreRole::gun,0,0};
+    sightStore=&heat;StockArm heatArm{};heatArm.physicalOnly=false;Arm(f.weapon,true,heatArm);
+    Check(heatArm.shell==reticle::Shell::heat && !std::wcscmp(reticle::ShellTag(heatArm.shell),L"HEAT"),"a HEAT store reads HEAT");
+    sightStore=&plain;StockArm heArm{};heArm.physicalOnly=false;Arm(f.weapon,true,heArm);
+    Check(heArm.shell==reticle::Shell::he,"a native-tagged store keeps the sight's reading");
+    Put<float>(f.weapon,kBlast,0.0f);sightStore=&can;StockArm canArm{};canArm.physicalOnly=false;Arm(f.weapon,true,canArm);
+    Check(canArm.shell==reticle::Shell::canister && !std::wcscmp(reticle::ShellTag(canArm.shell),L"CAN"),"a canister store reads CAN");
+    sightStore=nullptr;
     // The production HUD consumer lists the stock mounts a Proteus seat borrows, though native seat 0 holds none.
     unsigned char human[0x400]{},riderCtrl[16]{},hudSeats[2*kSeatStride]{};
     human[edf::kHumanPlayer]=1;Put<void*>(human,edf::kHumanPad,human);Put<int>(riderCtrl,8,1);hudHuman=human;

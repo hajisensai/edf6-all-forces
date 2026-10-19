@@ -181,6 +181,11 @@ void SightOf(const unsigned char* w,const RoundModel& m,bool antiAir,StockArm& a
     t.blast=std::isfinite(blast) ? blast : 0.0f;
     a.reticle=m.kind==RoundKind::none ? reticle::Style::none : reticle::Classify(t);
     a.shell=reticle::ShellOf(t);
+    // A catalogued round the numbers misname (a HEAT round bursts but is no HE): its store says what it is.
+    if(const StoreSpec* spec=a.shell!=reticle::Shell::none ? StoreOf(w) : nullptr) {
+        if(spec->shell==StoreShell::heat)a.shell=reticle::Shell::heat;
+        else if(spec->shell==StoreShell::canister)a.shell=reticle::Shell::canister;
+    }
     a.roundSpeed=t.speed;
 }
 

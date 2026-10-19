@@ -29,7 +29,9 @@
 namespace crew {
 namespace reticle {
 enum class Style : std::uint8_t { none, cannon, precision, autocannon, flak, energy, missile, rocket };
-enum class Shell : std::uint8_t { none, ap, he, beam };
+// heat / canister: a catalogued store round the weapon's numbers would misname (a shaped charge bursts, a canister is a
+// penetrating body): vhud.cpp Arm takes them from the store (stores.h StoreShell), never ShellOf.
+enum class Shell : std::uint8_t { none, ap, he, beam, heat, canister };
 // The posts the magnified scope's field carries (hud.cpp ScopeShade): three (left, right, under: a tank sight's), the
 // duplex's four, or none (a ring sight's field is clear).
 enum class Posts : std::uint8_t { none, three, duplex };
@@ -84,6 +86,8 @@ inline const wchar_t* ShellTag(Shell s) noexcept {
         case Shell::ap: return L"AP";
         case Shell::he: return L"HE";
         case Shell::beam: return L"BEAM";
+        case Shell::heat: return L"HEAT";
+        case Shell::canister: return L"CAN";
         default: return L"";
     }
 }

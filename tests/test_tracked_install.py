@@ -22,6 +22,7 @@ import installer
 import ledger
 import make_bmpt
 import make_vulcan
+import vcobjects as vc
 
 BUILDERS = (make_vulcan, make_bmpt)
 
@@ -47,7 +48,7 @@ class TrackedInstallTests(unittest.TestCase):
                     files = installer.build_asset(cache, builder, builder.OWNER)
                     self.assertEqual(make.call_count, 1)
                     paths = builder.install(game, files)
-                    self.assertEqual(len(paths), 6 if builder.OWNER == 'vulcan' else 7)
+                    self.assertEqual(len(paths), 4 + len(vc.GROUND_VEHICLES[builder.OWNER].weapons))   # model, collision, optics, SGO + weapons
                     cache.record(builder.OWNER, files)
                     cache.save()
                     current = buildcache.Cache(game)

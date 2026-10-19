@@ -210,6 +210,9 @@ class Bomb:
                 'FireBurstCount': 1.0, 'FireInterval': self.interval, 'LockonType': 0.0, 'LockonRange': 0.0}
 
 
+ROUND_KINDS = ('ap', 'he', 'mg', 'heat', 'canister')
+
+
 @dataclass(frozen=True)
 class Shell:
     """A gun's round for a stock vehicle (the user, 2026-10-09: 「坦克应该有ap和he」「机炮车 AP/HE」「防空车高爆近炸」): a
@@ -219,7 +222,11 @@ class Shell:
     the kind of round is the template's, not a guess."""
     template: str           # Root.cpk WEAPON file
     ammo_class: str         # its AmmoClass
-    kind: str               # 'ap' (no blast, penetrating), 'he' (a blast radius) or 'mg' (a machine gun's ball: no blast)
+    # 'ap' (no blast, penetrating), 'he' (a blast radius), 'mg' (a machine gun's ball: no blast), 'heat' (a shaped
+    # charge: the bursting template made a fast, flat, contact-fused round that stops on what it hits, a small
+    # blast, more damage on that one target) or 'canister' (a cloud of balls: the penetrating template firing
+    # FireCount pellets in a wide cone, short reach). ROUND_KINDS; _shell_sgo checks the template and the result.
+    kind: str
     extra: tuple[tuple[str, float], ...] = ()
     # A coaxial gun's muzzle: (the template's single muzzle where it is, where it goes) in the frame of the holder bone
     # it hangs on (make_stock_stores COAX: the gun mantlet's elevating bone, measured on each tank's model). None: the
@@ -409,6 +416,35 @@ STORES: dict[str, Store] = {
     # its top speed, full gravity, an 8 m blast, 350): the stock E series.
     'HE': Store('HE', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'he'),
                 _local('HE', 'HE（榴弾）', 'HE（高爆彈）', 'HE（高爆弹）', 'HE（고폭탄）')),
+    # --- rounds the tanks' real prototypes fire and the stock game lacks (the user, 2026-10-19: 「坦克好像还有串联破甲弹
+    # 或者破甲弹之类的弹种。你看看各种载具缺什么都补一下」; only a round the vehicle's prototype really carries:
+    # docs/feedback-2026-10-19-vehicle-ammo.md). Both from the Blacker's own gun files (their muzzle (0, 0, 2.8) is the
+    # 505's and the 601's main gun's), so they leave the barrel the stock rounds leave.
+    # HEAT-MP: the multi-purpose shaped-charge round of a 120 mm smooth-bore (the Abrams' M830 / M830A1, the Type 10's
+    # JM12A1). The Blacker E's bursting round (RocketBullet01) made one: a shaped charge's jet stops on the one thing
+    # it hits (no penetration through a line of enemies as the APFSDS), so it puts more on that target (450 to the
+    # stock rounds' 350) with a small fragmentation burst (3 m to the howitzer's 8-18); it leaves at 780 m/s (M830
+    # 1140 against M829's 1575: 0.72 of the APFSDS' 18 m a frame), flat (gravity 0.15 against the howitzer's 1),
+    # reaching as far as the APFSDS (140 frames: 1820 m); a contact sphere of 0.8 m (the HE's 1.6); orange-red.
+    'HEAT': Store('HEAT-MP', 'gun', 0.0, 0.0,
+                  Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'heat',
+                        (('AmmoSpeed', 13.0), ('AmmoGravityFactor', 0.15), ('AmmoAlive', 140.0), ('AmmoDamage', 450.0),
+                         ('AmmoExplosion', 3.0), ('AmmoIsPenetration', 0.0), ('AmmoHitSizeAdjust', 0.5)),
+                        colour=(3.2, 1.3, 0.5, 1.0)),
+                  _local('HEAT-MP', 'HEAT-MP（多目的対戦車榴弾）', 'HEAT-MP（多用途破甲彈）', 'HEAT-MP（多用途破甲弹）',
+                         'HEAT-MP（다목적 대전차고폭탄）')),
+    # Canister (the Abrams' M1028: about 1100 tungsten balls, against infantry in the open at up to ~500 m): the
+    # Blacker A's penetrating round made a cloud: 12 pellets a shot in a 0.07 cone, 40 each (480 on a big target at
+    # close range), 840 m/s, gone after 36 frames (~500 m), penetrating soft targets as the template does; no blast.
+    # Only the Blacker's: the Type 10 (the 601's prototype) has no canister round.
+    'CANISTER': Store('Canister', 'gun', 0.0, 0.0,
+                      Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'canister',
+                            (('FireCount', 12.0), ('FireAccuracy', 0.07), ('AmmoSpeed', 14.0), ('AmmoAlive', 36.0),
+                             ('AmmoDamage', 40.0), ('AmmoGravityFactor', 0.5), ('AmmoSize', 0.5),
+                             ('AmmoHitSizeAdjust', 0.6)),
+                            colour=(2.6, 2.2, 1.4, 1.0)),
+                      _local('Canister (M1028)', 'キャニスター弾（M1028）', '霰彈（M1028）', '霰弹（M1028）',
+                             '캐니스터탄（M1028）')),
     # A gun-launched anti-tank missile (LAHAT class: 105/120 mm, 0.975 m, 13 kg, semi-active laser, subsonic, about
     # 8 km): from the tank's own barrel, kicked out at 120 m/s, its motor to 300 m/s. Its warhead a tandem HEAT smaller
     # than the Hellfire's (800 here): 600, a 6 m blast; its lock as the Hellfire's. 0.975 m of the tail-finned icbm01:
@@ -449,6 +485,25 @@ STORES: dict[str, Store] = {
                                max_g=20.0, nav=3.0, life=12.0, damage=1200.0, blast=6.0,
                                lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
                        _local('9M120 Ataka', '9M120 アターカ', '9M120 阿塔卡', '9M120 阿塔卡', '9M120 아타카')),
+    # The BMPT's second belt: its 2A42s are dual-feed guns, HE-FRAG-T (the native belt, tools/make_tracked_combat GUNS)
+    # and the 3UBR8 APDS-T the gunner switches to against armour. Two barrels, one choice (group 3, as the flak's);
+    # its numbers are make_tracked_combat's (the native gun's own file and muzzles, BMPT_AP_BELT), this template only
+    # names the round's family.
+    'BMPT_AP': Store('30 mm APDS', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
+                     _local('30 mm APDS (3UBR8)', '30mm APDS（3UBR8）', '30mm 脫殼穿甲彈（3UBR8）', '30mm 脱壳穿甲弹（3UBR8）',
+                            '30mm 분리철갑탄（3UBR8）'), group=3, barrel=0),
+    'BMPT_AP_R': Store('30 mm APDS', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_R.SGO', 'SolidBullet01', 'ap'),
+                       _local('30 mm APDS (3UBR8)', '30mm APDS（3UBR8）', '30mm 脫殼穿甲彈（3UBR8）', '30mm 脱壳穿甲弹（3UBR8）',
+                              '30mm 분리철갑탄（3UBR8）'), group=3, barrel=1),
+    # The Ataka's thermobaric round (9M120F: the same tube and flight, a thermobaric warhead against infantry and
+    # cover): half the tandem warhead's damage on one target, more than twice its blast. Its own look (the rounds one
+    # control cycles never look alike: tools/selftest.py store_looks).
+    'BMPT_ATGMF': Store('9M120F Ataka', 'ground', 0.0, 0.0,
+                        Missile('9M120F Ataka', Look('airtortoise_missile', 1.83), burn=12.0, top=550.0, accel=180.0,
+                                max_g=20.0, nav=3.0, life=12.0, damage=600.0, blast=14.0,
+                                lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
+                        _local('9M120F Ataka (thermobaric)', '9M120F アターカ（サーモバリック）', '9M120F 阿塔卡（溫壓）',
+                               '9M120F 阿塔卡（温压）', '9M120F 아타카（열압력）')),
     # A tank's / an IFV's coaxial machine gun (COAX_MOUNTS above): fired on its own trigger (src/payload.cpp: the
     # secondary trigger, the main gun staying loaded). The stock Epsilon gunner's machine gun (V_403TANK_MACHINEGUN:
     # SolidBullet01, 6 a round: the lightest round of any stock vehicle gun, a rifle round's; its own tank machine gun
@@ -677,7 +732,11 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
     'bmpt': GroundVehicle('EDF6VC_BMPT', 'V603_FLAK', 'AWEAPON346',
                           ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
                           ('app:/weapon/edf6vc_bmpt_l.sgo', 'app:/weapon/edf6vc_bmpt_r.sgo',
-                           'app:/weapon/edf6vc_bmpt_atgm_4.sgo'), 1600.0, 'make_bmpt'),
+                           'app:/weapon/edf6vc_bmpt_atgm_4.sgo',
+                           # its dual-feed guns' APDS belt (one choice for both barrels) and the Ataka's thermobaric
+                           # round (2026-10-19; tools/make_tracked_combat.py BMPT_AP_BELT, STORES BMPT_AP / BMPT_ATGMF)
+                           'app:/weapon/edf6vc_bmpt_ap_150.sgo', 'app:/weapon/edf6vc_bmpt_ap_r_150.sgo',
+                           'app:/weapon/edf6vc_bmpt_atgmf_4.sgo'), 1600.0, 'make_bmpt'),
     # The drill tank (tools/make_drill.py, src/drill.cpp): the Blacker's class (Vehicle505_Tank, tracks, one weapon
     # holder) in EDF: Iron Rain's drill tank, requested like the Blacker E series; its one weapon fires nothing (the
     # drill is the plugin's: it spins it and bites with DRILL_CHARGE_FILE).
@@ -1577,6 +1636,27 @@ def _named(r, name: str | Store) -> None:
             r.set(key, local.get(key[5:].lower(), plain))
 
 
+def _check_round(shell: Shell, r: dsgo.Node, made: bool) -> None:
+    """Shell `shell`'s round is of its kind: its template's family (`made` False: the game's own round of that family,
+    not a guess) and, once its `extra` is in (`made` True), what the kind means (ValueError otherwise)."""
+    blast, pierce, count = r.get('AmmoExplosion'), r.get('AmmoIsPenetration'), r.get('FireCount')
+    where = f'{shell.template}{"（改后）" if made else ""}'
+    if shell.kind not in ROUND_KINDS:
+        raise ValueError(f'{shell.template}: 未知弹种 {shell.kind}')
+    if shell.kind in ('mg', 'canister') and blast:
+        raise ValueError(f'{where}: {shell.kind} 弹不应有爆炸半径')
+    if shell.kind == 'ap' and (blast or pierce != 1.0):
+        raise ValueError(f'{where}: ap 弹应穿透且无爆炸')
+    if shell.kind in ('he', 'heat') and not blast:
+        raise ValueError(f'{where}: {shell.kind} 弹应有爆炸半径')
+    if not made:
+        return
+    if shell.kind == 'heat' and (pierce != 0.0 or count != 1.0):
+        raise ValueError(f'{where}: 破甲弹一发一弹、不穿透（聚能射流止于所中之物）')
+    if shell.kind == 'canister' and not (isinstance(count, float) and count > 1.0):
+        raise ValueError(f'{where}: 霰弹一发应有多枚弹丸（FireCount > 1）')
+
+
 def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
     """A stock vehicle's round (Shell): its template as it is, but its load and `extra`, and its name."""
     shell = store.weapon
@@ -1584,16 +1664,12 @@ def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
     r = doc.root
     if r.get('AmmoClass') != shell.ammo_class:
         raise ValueError(f'{shell.template} 的弹类是 {r.get("AmmoClass")}，不是 {shell.ammo_class}')
-    blast = r.get('AmmoExplosion')
-    if shell.kind == 'mg':
-        if blast:
-            raise ValueError(f'{shell.template}: 机枪弹不应有爆炸半径')
-    elif (shell.kind == 'ap') != (not blast) or (shell.kind == 'ap' and r.get('AmmoIsPenetration') != 1.0):
-        raise ValueError(f'{shell.template}: {shell.kind} 弹应{"穿透且无爆炸" if shell.kind == "ap" else "有爆炸半径"}')
+    _check_round(shell, r, made=False)
     for key, value in shell.params(rounds).items():
         if r.get(key) is None:
             raise ValueError(f'{shell.template} 缺少 {key}')
         r.set(key, value)
+    _check_round(shell, r, made=True)
     if shell.colour is not None:
         colour = r.get('AmmoColor')
         if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
