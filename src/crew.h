@@ -428,6 +428,9 @@ struct Config {
     float npcRecruitCooldownSec=60.0f;// ...a dismissed squad may be recruited again after this many s
     bool vanillaRecruit=false;      // the stock walk-up recruit (原版率领: a free NPC joins a player within 10 m): false = off,
                                     // the map's FOLLOW / RECRUIT the only way in (npcai.cpp ThinkHook; needs CustomNpcAi)
+    bool npcFreeSquadCover=false;   // the stock's cover of a squad with +0x540 (seen at 1/3 the range; for a while damage
+                                    // taken x0.01, dealt x0.1; npcai.cpp CoverRoot): false = no squad has it (the user
+                                    // 2026-10-19: "暂时取消这个掩护设定吧"), true = kept by its top NPC before and after recruiting
     bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
     float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it

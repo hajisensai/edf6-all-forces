@@ -1044,11 +1044,19 @@ int main() {
         world.enemies=0;ResetNpcAi();
     }
     // The stock's join mark and free-squad cover (the user 2026-10-19: "删除npc顶上的未招募红标" / "删除玩家招募npc以后npc
-    // 的减伤消失问题"): the mark hidden while the map recruits, the cover read from the squad's top NPC, not the player.
+    // 的减伤消失问题", then "暂时取消这个掩护设定吧"): the mark hidden while the map recruits; the cover nobody's by
+    // default (NpcFreeSquadCover=0), read from the squad's top NPC, not the player, with NpcFreeSquadCover=1.
     {
         Reset();dead[kDead]=0;
         Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
         Put<void*>(human,kLeader,dead);Put<void*>(dead,kLeader,other);
+        Expect(!config.npcFreeSquadCover,"NpcFreeSquadCover defaults to 0 (no squad has the cover)");
+        const unsigned char* const uncovered=CoverRoot(human);
+        Expect(uncovered==kNoCover && !uncovered[kAutoFollow] && !uncovered[0x1A],"NpcFreeSquadCover=0, recruited: the read sees no +0x540, no AI-list bit");
+        Put<void*>(dead,kLeader,nullptr);dead[kAutoFollow]=1;
+        Expect(CoverRoot(human)==kNoCover && CoverRoot(dead)==kNoCover,"NpcFreeSquadCover=0, a free +0x540 squad: no cover either");
+        dead[kAutoFollow]=0;Put<void*>(dead,kLeader,other);
+        config.npcFreeSquadCover=true;
         Expect(CoverRoot(human)==dead,"a recruited squad's member: its cover read from the top NPC, not from the player it follows");
         Expect(CoverRoot(dead)==dead,"a recruited squad's top: its own +0x540, as before it joined");
         Put<void*>(dead,kLeader,nullptr);
@@ -1057,6 +1065,9 @@ int main() {
         Expect(CoverRoot(human)==human,"no leader: itself");
         Put<void*>(human,kLeader,dead);Put<void*>(dead,kLeader,other);config.customNpcAi=false;
         Expect(CoverRoot(human)==other,"the AI off: the stock walk up to the player (the cover ends on joining, stock)");
+        config.npcFreeSquadCover=false;
+        Expect(CoverRoot(human)==other,"the AI off, NpcFreeSquadCover=0: still the stock walk");
+        config.npcFreeSquadCover=true;
         config.customNpcAi=true;Put<void*>(dead,kLeader,human);
         const unsigned char* const looped=CoverRoot(human);
         Expect(looped==human || looped==dead,"a leader loop ends (the walk is bounded)");
@@ -1103,6 +1114,9 @@ int main() {
         using WalkRun=const unsigned char*(*)(const unsigned char*);
         const auto run=reinterpret_cast<WalkRun>(entry);
         Expect(run(human)==dead,"executed: the patched walk hands the stock read the top NPC of a recruited squad");
+        config.npcFreeSquadCover=false;
+        Expect(run(human)==kNoCover,"executed, NpcFreeSquadCover=0: the stock read gets the no-cover stand-in");
+        config.npcFreeSquadCover=true;
         config.customNpcAi=false;
         Expect(run(human)==other,"executed, the AI off: the stock walk's player");
         config.customNpcAi=true;nextJoinMark=nullptr;
