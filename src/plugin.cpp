@@ -1227,6 +1227,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");
     StartCallPicker();
+    Log("LOAD complete (build %s)",EDF6_BUILD_ID);
     if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
     return true;
 }

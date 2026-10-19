@@ -301,7 +301,8 @@ std::vector<unsigned char> PoseBytes(std::size_t size,unsigned generation) {
 
 namespace crew {
 const Config& Cfg() noexcept {return config;}
-bool InSession() noexcept {return native.online;}
+unsigned sessionQueries=0;
+bool InSession() noexcept {++sessionQueries;return native.online;}
 void Log(const char*,...) noexcept {}
 bool ResolveCommandIdentities(const unsigned char source[32],const unsigned char units[][32],unsigned count,
                               const unsigned char focus[32],CommandIdentities* out) noexcept {
@@ -1150,7 +1151,16 @@ void EpochRejectsOldPoseEnvelope() {
 
 }
 int main() {
+    // No game session singleton exists while EDFModLoader loads the plugin.
+    CHECK(crew::sessionQueries==0);
     CHECK(crew::InstallEnemyControlNetwork());
+    CHECK(crew::sessionQueries==0);
+    CHECK(callbacks.request && callbacks.input && callbacks.stop && callbacks.online);
+    crew::EnemyControlNetworkStatus initial;
+    CHECK(crew::ReadEnemyControlNetworkStatus(nullptr,&initial));
+    CHECK(!initial.online && !initial.ready && initial.result==ep::Result::Unavailable);
+    CHECK(crew::InstallEnemyControlNetwork());
+    CHECK(crew::sessionQueries==0);
     StartProductionController(0,1);StartProductionController(1,2);
     GuestThroughProductionHost();AuthenticationAndPreparation();LocalCapacityProofGatesEnemyControl();CapacityProofLossRetainsNativeRestoreJournal();PerSourceRejectedStatus();
     SplitScreenAndSampling(0,40);SplitScreenAndSampling(1,41);
