@@ -3,15 +3,16 @@ from pathlib import Path
 import argparse
 import re
 import sys
-import pefile
-import capstone
-from capstone.x86 import X86_OP_IMM
 parser=argparse.ArgumentParser()
 parser.add_argument('--dll',default='')
 args=parser.parse_args()
 if not args.dll or not Path(args.dll).is_file():
     print('SKIP: pass --dll for the supported EDF.dll')
     raise SystemExit(77)
+
+import pefile
+import capstone
+from capstone.x86 import X86_OP_IMM
 p=pefile.PE(args.dll,fast_load=True)
 img=p.get_memory_mapped_image()
 md=capstone.Cs(capstone.CS_ARCH_X86,capstone.CS_MODE_64)

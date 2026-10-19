@@ -3,14 +3,14 @@ from pathlib import Path
 import re
 import struct
 import sys
-import pefile
-import capstone
-from capstone.x86 import X86_OP_IMM, X86_OP_MEM, X86_REG_RIP
-
 path = Path(sys.argv[1]) if len(sys.argv) > 1 else None
 if path is None or not path.is_file():
     print('SKIP: pass the supported EDF.dll path')
     raise SystemExit(77)
+
+import pefile
+import capstone
+from capstone.x86 import X86_OP_IMM, X86_OP_MEM, X86_REG_RIP
 pe = pefile.PE(str(path), fast_load=True)
 checks = 0
 

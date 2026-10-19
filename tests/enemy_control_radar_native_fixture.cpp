@@ -34,6 +34,10 @@ using Invoke=void(__fastcall*)(const void*,const void*,Result*);
 Invoke MakeHarness(unsigned index) {
     Bytes b;Add(b,{0x53,0x56,0x41,0x56,0x48,0x81,0xEC,0xA0,0,0,0});
     Add(b,{0x4C,0x89,0xC3,0x49,0x89,0xCE,0x48,0x89,0xD6}); // RBX=result, R14=HUD, RSI=real source
+    // Every hook starts with defined native stack values. Hostile-team hooks
+    // preserve this center; only the center hook replays/replaces its contents.
+    Add(b,{0x0F,0x10,0x83});U32(b,static_cast<unsigned>(offsetof(Result,center)));
+    Add(b,{0x0F,0x11,0x44,0x24,0x50});
     for(unsigned i=0;i<4;++i) {
         Add(b,{0x0F,0x10,0x83});U32(b,static_cast<unsigned>(offsetof(Result,rotation))+i*16);
         Add(b,{0x0F,0x11,0x84,0x24});U32(b,0x60+i*16);
@@ -58,7 +62,8 @@ Invoke MakeHarness(unsigned index) {
     return reinterpret_cast<Invoke>(page);
 }
 void Seed(Result& out) {
-    out={};for(unsigned i=0;i<16;++i)out.rotation[i]=100+static_cast<float>(i);
+    out={};for(unsigned i=0;i<4;++i)out.center[i]=200+static_cast<float>(i);
+    for(unsigned i=0;i<16;++i)out.rotation[i]=100+static_cast<float>(i);
     for(unsigned i=0;i<6;++i)for(unsigned j=0;j<4;++j)out.xmm[i][j]=static_cast<float>(i*20+j+1);
 }
 bool Close(float a,float b) {return std::fabs(a-b)<0.00001f;}
@@ -75,7 +80,7 @@ void Native(const Invoke* invoke,Hud& hud,const Actor& source,const Row* expecte
         Result out{};Seed(out);const Result before=out;invoke[index](hud.bytes,source.bytes,&out);
         const int team=expected ? expected->team : At<int>(source.bytes,0x314);
         Preserved(out,before,source,index,team);
-        for(unsigned i=0;i<4;++i)CHECK(Close(out.center[i],!index && expected ? expected->center[i] : (!index ? At<float>(source.bytes,0x90+i*4) : 0)));
+        for(unsigned i=0;i<4;++i)CHECK(Close(out.center[i],!index && expected ? expected->center[i] : (!index ? At<float>(source.bytes,0x90+i*4) : before.center[i])));
         for(unsigned i=0;i<16;++i)CHECK(Close(out.rotation[i],!index && expected ? expected->rotation[i] : before.rotation[i]));
     }
     CHECK(!std::memcmp(&source,&sourceBefore,sizeof(source)));CHECK(!std::memcmp(&hud,&hudBefore,sizeof(hud)));
