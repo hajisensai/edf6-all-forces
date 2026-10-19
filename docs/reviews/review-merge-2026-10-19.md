@@ -21,7 +21,7 @@
 4. **已提交 PvP 的单端失效不传播。** 热禁用或单端 extension 故障可使本机恢复、其他端永久保持开启。AFPV v2 增加全员 nonce 挑战与确认租约，旧 epoch/revision/nonce 不能续租；改队、关闭中间阶段与迟到 Abort 不能重新授予旧租期。短暂流控不直接等价于身份失效。
 5. **动态无人机耗尽整局 128 个公共事务号。** 分离 wire 单调身份、callback token 和 128 个活动槽；全员明确处理 CANCEL 的确认后才能复用槽；普通失败 RESULT 不授予回收权，即使发送失败仍保持同一 epoch。旧代消息/回调不能修改新代；新增能力位协商，高 ID 在实际 prepare/commit 边界再验能力。旧 peer 保留原边界，动态新功能在准入前拒绝。
 6. **母舰 metadata 记录阻止后续 NPC 接管。** 仅在核对完整身份、真实存活 NPC 和 native authority 后提升为运行记录，初始化燃料与飞行时钟，保留 slot、token、sortie、order 与 flight。玩家、空座、死亡或远端权威不能触发提升。
-7. **资源 writer 生命周期与消费者引用混为一谈。** ledger 独立保留 writer SHA 证明，need 不授予写权限；兼容旧记录须精确核对合法生成变体。保存带根 SHA 的依赖闭包，升级按消费者所有根的联合图替换引用，释放旧 Hector MRAB；小龙旧别名同样继承新 shader。用户编辑、外来 writer 与不明确旧图仍受保护。
+7. **资源 writer 生命周期与消费者引用混为一谈。** ledger 独立保留 writer SHA 证明，need 不授予写权限；兼容旧记录须精确核对合法生成变体。保存带根 SHA 的依赖闭包，升级按消费者所有根的联合图替换引用，释放旧 Hector MRAB；小龙旧别名同样继承新 shader。用户编辑、外来 writer 与不明确旧图仍受保护。对仅持有自定义 B 根、却新引用 A 旧模型的消费者，先登记真实依赖 need，再释放 writer；否则仅保护消费者 release 仍会丢模型。独立根/子模型两组反例及最后消费者清理均已验证。
 8. **缺可选原声 bank 时 217 把移植武器无声音退路。** 原生 lookup、已加载原声 bank、有限常驻原生 cue 按序解析。208 个去重 cue 从真实 resident bank 同类同字段模板生成，附时长/模板/字段证据；不恢复已证实无限且无停止 owner 的旧替代。缺 bank 时音色与连续声听感属于降级，不能宣称原声还原。
 9. **PvP 菜单退出后的手柄排空漏消费。** 保存进入本帧前的 held 状态，原 A/B 手势全部释放前继续消费，防止方向键和单位命令穿透。
 
@@ -31,7 +31,7 @@
 
 两个插件 ALL 与 offline_checks 严格构建通过。完整首轮 CTest 482/488 通过、无跳过，974.94 秒；六项失败分别为 Plan padding 整块比较、两种插件加载顺序的新增 API 白名单、能力号守卫、typed helper 源审计及小龙旧路径夹具，均已核实根因后修正。最终增量构建及 53/53 项定向回归通过，25.98 秒，覆盖全部原失败和最后的协议/安装改动。按测试名称汇总为 488/488，无未解决项；不是一次完整运行全绿。汇总见本工作树 `tmp/review-combined-tests.json`。
 
-安装链完整首轮 288/289，唯一旧 raw-team-write 守卫误报已修正并补验。最终安装源码另跑 82 项测试、35 项锁检查，以及 7 项安装 selftest 和该守卫，全部通过；首轮早于最后依赖迁移修复，最终安装证据来自冻结后的专项。387 个 Python 文件（含新增 helper）语法、七组生成表 --check、CRLF 约定下的完整补丁检查均通过。两轮独立复审没有遗留确认问题。
+安装链完整首轮 288/289，唯一旧 raw-team-write 守卫误报已修正并补验。最终安装源码另跑 84 项测试、35 项锁检查，以及 7 项安装 selftest 和该守卫，全部通过；首轮早于最后依赖迁移修复，最终安装证据来自冻结后的专项。387 个 Python 文件（含新增 helper）语法、七组生成表 --check、CRLF 约定下的完整补丁检查均通过。两轮独立复审没有遗留确认问题。
 
 原始日志在本工作树 `tmp/review-{all,offline,ctest}-singlefinal.log`、`tmp/review-{all,offline,ctest}-final-recheck.log`、`tmp/review-selftest.log` 与 `tmp/review-final-install-*.log`。所有测试均在隔离目录或临时夹具执行，没有写入、启动或控制真实游戏。
 

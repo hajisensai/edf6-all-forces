@@ -284,18 +284,18 @@ def _installed_references(rel: str, data: bytes) -> set[str]:
     return out
 
 
-def _old_closure(led: ledger.Ledger, root: str, cache: dict[str, set[str] | None]) -> tuple[set[str], bool]:
-    remembered = led.dependency_closure(OWNER, root)
-    # A user can change a child model's shaders without changing the root SGO.
-    # Retain the last schema, but always merge the actual graph before dropping references.
-    held = (remembered or set()) | led.pending_dependencies(OWNER, root)
-    seen, pending = set(), [root]
+def _actual_closure(led: ledger.Ledger, root: str, cache: dict[str, set[str] | None]) -> tuple[set[str], bool]:
+    """Only installed ledger paths reached through the current root's actual references."""
+    held, seen, pending = set(), set(), [root]
     complete = True
     while pending:
         rel = pending.pop()
         if rel in seen or rel not in led.files:
             continue
         seen.add(rel)
+        if not os.path.isfile(led.disk(rel)):
+            complete = False
+            continue
         held.add(rel)
         if rel not in cache:
             try:
@@ -308,6 +308,13 @@ def _old_closure(led: ledger.Ledger, root: str, cache: dict[str, set[str] | None
         else:
             pending.extend(cache[rel] - seen)
     return held, complete
+
+
+def _old_closure(led: ledger.Ledger, root: str, cache: dict[str, set[str] | None]) -> tuple[set[str], bool]:
+    # Root or child edits can add references without updating the last committed schema.
+    actual, complete = _actual_closure(led, root, cache)
+    remembered = led.dependency_closure(OWNER, root) or set()
+    return actual | remembered | led.pending_dependencies(OWNER, root), complete
 
 
 def _upgrade_root(led: ledger.Ledger, name: str, data: bytes) -> bool:
@@ -336,13 +343,14 @@ def _consumer_upgrade(led: ledger.Ledger, reg: dict, files: dict[str, bytes]):
             if consumers and _upgrade_root(led, name, files[name]):
                 held[name] = consumers
                 previous[name] = _old_closure(led, name, cache)
-    releases = _consumer_releases(led, required, held, previous, known_roots)
-    return required, held, releases, {name: closure for name, (closure, _) in previous.items()}
+    releases, needs = _consumer_releases(led, required, held, previous, known_roots)
+    return required, held, releases, {name: closure for name, (closure, _) in previous.items()}, needs
 
 
 def _consumer_releases(led: ledger.Ledger, required: dict, held: dict, previous: dict, known_roots: set[str]):
     cache: dict[str, set[str] | None] = {}
     obsolete, protected = {owner: set() for owner in DEPENDENT_OWNERS}, {owner: set() for owner in DEPENDENT_OWNERS}
+    needs = {owner: set() for owner in DEPENDENT_OWNERS}
     for name, consumers in held.items():
         closure, complete = previous[name]
         for owner in consumers:
@@ -358,11 +366,18 @@ def _consumer_releases(led: ledger.Ledger, required: dict, held: dict, previous:
         if not consumers:
             continue
         closure, complete = _old_closure(led, rel, cache)
+        actual, _ = _actual_closure(led, rel, cache)
         for owner in consumers:
             protected[owner].update(closure)
+            # A root edit may start using another root's old model for the first
+            # time. Its consumer must acquire that real reference before the
+            # primary writer releases it; protection against consumer release
+            # alone does not keep the last writer from deleting the model.
+            needs[owner].update(actual)
             if not complete:
                 protected[owner].update(led.owned_by(owner))
-    return {owner: sorted(obsolete[owner] - protected[owner]) for owner in DEPENDENT_OWNERS}
+    releases = {owner: sorted(obsolete[owner] - protected[owner]) for owner in DEPENDENT_OWNERS}
+    return releases, needs
 
 
 def _write_files(led: ledger.Ledger, files: dict[str, bytes], before: set[str]) -> list[str]:
@@ -385,7 +400,7 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
         if rel in files:
             led.record(call_weapons.OWNER, rel, sha)
     before = set(led.owned_by(OWNER))
-    required, held, releases, previous = _consumer_upgrade(led, registry(), files)
+    required, held, releases, previous, needs = _consumer_upgrade(led, registry(), files)
     for name, closure in previous.items():
         if closure != required[name] or led.pending_dependencies(OWNER, name):
             if not led.written_by(OWNER, name):
@@ -397,6 +412,9 @@ def install(root: str, files: dict[str, bytes]) -> list[str]:
         for dependent in sorted(held.get(name, ())):
             for rel in sorted(closure):
                 led.need(dependent, rel)
+    for dependent, rels in needs.items():
+        for rel in sorted(rels):
+            led.need(dependent, rel)
     for dependent, rels in releases.items():
         led.release(dependent, rels)
     for name in required:

@@ -368,6 +368,74 @@ class ObjectDependencyLifecycleTests(unittest.TestCase):
             self.assertEqual(Path(led.disk(other_model)).read_bytes(), private)
             self.assertEqual(ledger.Ledger(root).owners(self.SHADER), ['testrange'])
 
+    def test_consumer_of_only_other_root_acquires_its_new_model_reference(self) -> None:
+        other, other_model, new = 'OBJECT/OTHER.SGO', 'OBJECT/OTHER.MRAB', 'OBJECT/SHARED.MRAB'
+        foreign = 'OBJECT/FOREIGN.MRAB'
+        root_data = lambda rel: sgo.write(0x102, {'model': 'app:/' + rel.lower()})
+        old_files = {self.OBJ: root_data(self.MODEL), self.MODEL: self.model(),
+                     other: root_data(other_model), other_model: self.model()}
+        roots = {self.OBJ: [self.OBJ, self.MODEL], other: [other, other_model]}
+        for edited_model in (False, True):
+            with self.subTest(edited_model=edited_model), tempfile.TemporaryDirectory() as root:
+                with patch.object(objects, 'registry', return_value=self.plan(roots, old_files)):
+                    objects.install(root, old_files)
+                led = ledger.Ledger(root)
+                for rel in (other, other_model):
+                    led.need('testrange', rel)
+                self.assertEqual(led.owners(self.MODEL), [objects.OWNER])
+                expected_model = self.model('snd_Common_Basic') if edited_model else old_files[self.MODEL]
+                Path(led.disk(self.MODEL)).write_bytes(expected_model)
+                changed = sgo.write(0x102, {'resource': ['app:/' + self.MODEL.lower(), 'app:/' + foreign.lower()]})
+                Path(led.disk(other)).write_bytes(changed)
+                Path(led.disk(foreign)).write_bytes(b'untracked foreign model')
+                new_files = {self.OBJ: root_data(new), new: self.model()}
+                new_roots = roots | {self.OBJ: list(new_files)}
+                with patch.object(objects, 'registry', return_value=self.plan(new_roots, old_files | new_files)):
+                    objects.install(root, new_files)
+                    led = ledger.Ledger(root)
+                    self.assertEqual(led.owners(self.MODEL), ['testrange'])
+                    self.assertFalse(led.written_by('testrange', self.MODEL))
+                    expected_writers = {objects.OWNER: hashlib.sha256(old_files[self.MODEL]).hexdigest()}
+                    self.assertEqual(led.files[self.MODEL]['writers'], expected_writers)
+                    objects.remove(root)
+                self.assertEqual(Path(led.disk(other)).read_bytes(), changed)
+                self.assertEqual(Path(led.disk(self.MODEL)).read_bytes(), expected_model)
+                self.assertEqual(ledger.Ledger(root).owners(foreign), [])
+                ledger.Ledger(root).release('testrange')
+                self.assertEqual(Path(led.disk(self.MODEL)).exists(), edited_model)
+                self.assertEqual(Path(led.disk(other)).read_bytes(), changed)
+                self.assertEqual(Path(led.disk(foreign)).read_bytes(), b'untracked foreign model')
+
+    def test_consumer_of_only_other_root_acquires_its_new_shader_reference(self) -> None:
+        other, other_model = 'OBJECT/OTHER.SGO', 'OBJECT/OTHER.MRAB'
+        root_data = lambda rel: sgo.write(0x102, {'model': 'app:/' + rel.lower()})
+        private = edf41materials.transform_models(self.MODEL, self.model())
+        old_files = {self.OBJ: root_data(self.MODEL), self.MODEL: private,
+                     other: root_data(other_model), other_model: self.model('snd_Common_Basic'),
+                     self.SHADER: sgo.write(0x102, {'passes': []})}
+        roots = {self.OBJ: [self.OBJ, self.MODEL], other: [other, other_model]}
+        with tempfile.TemporaryDirectory() as root:
+            with patch.object(objects, 'registry', return_value=self.plan(roots, old_files)):
+                objects.install(root, old_files)
+            led = ledger.Ledger(root)
+            for rel in (other, other_model):
+                led.need('testrange', rel)
+            self.assertEqual(led.owners(self.SHADER), [objects.OWNER])
+            self.assertNotIn(self.SHADER, led.dependency_closure(objects.OWNER, other))
+            Path(led.disk(other_model)).write_bytes(private)
+            new_files = {self.OBJ: root_data(self.MODEL), self.MODEL: self.model()}
+            with patch.object(objects, 'registry', return_value=self.plan(roots, old_files | new_files)):
+                objects.install(root, new_files)
+                self.assertEqual(ledger.Ledger(root).owners(self.SHADER), ['testrange'])
+                self.assertFalse(ledger.Ledger(root).written_by('testrange', self.SHADER))
+                objects.remove(root)
+            self.assertEqual(Path(led.disk(other)).read_bytes(), old_files[other])
+            self.assertEqual(Path(led.disk(other_model)).read_bytes(), private)
+            self.assertTrue(Path(led.disk(self.SHADER)).exists())
+            ledger.Ledger(root).release('testrange')
+            self.assertFalse(Path(led.disk(self.SHADER)).exists())
+            self.assertEqual(Path(led.disk(other_model)).read_bytes(), private)
+
     def test_interrupted_consumer_migration_retries_without_leaking_old_models(self) -> None:
         new = 'OBJECT/SHARED.MRAB'
         old_files = {self.OBJ: sgo.write(0x102, {'model': 'app:/' + self.MODEL.lower()}), self.MODEL: self.model()}
