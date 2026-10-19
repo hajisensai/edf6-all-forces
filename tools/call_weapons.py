@@ -379,9 +379,19 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
         if ground.setup is not None:
             setup.items = [dsgo.Node([float(tier[0]), float(tier[1])]), dsgo.Node(list(ground.setup)), dsgo.Node([])]
             weapons = []
+        native_weapons = weapons
+        if call.ground == 'bmpt':
+            # BMPT keeps the V603's native paired cannon and adds its four-tube
+            # missile store. This is an explicit 2 -> 3 holder contract with
+            # make_tracked_combat.vehicle_sgo; other ground requests stay strict.
+            if len(weapons) != 2 or len(jet_weapons) != 3:
+                raise ValueError('BMPT request requires two native cannon mounts and one added missile store')
+            extra = copy.deepcopy(weapons[1])
+            extra.items[1] = Node([0.0, 0.0])  # a recoilless missile, still a BodyRecoil variant
+            weapons = [*weapons, extra]
         if len(weapons) != len(jet_weapons):
             raise ValueError(f'{template_of(call)}: {len(weapons)} weapons in its setup, {call.ground} has {len(jet_weapons)}')
-        swap.update({str(w.items[0]).lower(): new for w, new in zip(weapons, jet_weapons)})
+        swap.update({str(w.items[0]).lower(): new for w, new in zip(native_weapons, jet_weapons)})
         setup.items[at].items = [_with_path(w, new) for w, new in zip(weapons, jet_weapons)]
     else:
         # The jet's own weapons (its guns and stores, vcobjects.JETS) with the Eros's fuel tank where the jet SGO has

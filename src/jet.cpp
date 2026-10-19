@@ -35,6 +35,8 @@
 #include "jet_internal.h"
 #include "online_authority.h"
 #include "support_aircraft.h"
+#include "pvp.h"
+#include "support_drone.h"
 #include <intrin.h>
 
 namespace crew {
@@ -43,7 +45,6 @@ Jet jets[kMaxJets]{};
 
 namespace {
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
-constexpr float kTakeoffClear=30.0f;   // m over the ground: done taking off
 constexpr float kThrownHover=12.0f;    // m a thrown charge drone hovers over where its bomb landed, waiting (Rotor)
 // Withdrawing it climbs toward the ceiling and flies away from the player at full speed; it is deleted
 // only out there (never in front of the player): kGone from the player, or, held in by the map's edge,
@@ -70,6 +71,7 @@ using CtrlFn=void(*)(void*);
 // An entry of this mission let go of: its bay and doll torn down, its drones told their carrier is gone, the
 // reference dropped.
 void Release(Jet& j) noexcept {
+    PvpForgetSupportObject(j.ref);
     BayFree(j.bay.ifc);
     DollFree(IndexOf(j));
     for(auto& d:jets) {
@@ -326,6 +328,8 @@ bool SlotFree() noexcept {
     return false;
 }
 
+void ReleaseEntry(Jet& j) noexcept { Release(j); }
+
 Jet* NewEntry(unsigned char* v,ULONGLONG ms) noexcept {
     Role role=Role::fighter,drones=Role::drone;
     const ObjRef ref=ObjRef::Of(v);
@@ -447,7 +451,7 @@ const float* CommandAnchor(const Jet& j,bool follow,const float* own) noexcept {
 // the player flies or that is called down for them), not withdrawing or being deleted, not a
 // carrier's drone (its carrier sends it) nor a Primer creature.
 bool Commandable(const Jet& j,ULONGLONG ms) noexcept {
-    if(!j.ref || j.reap || !Alive(j.ref) || IsPrimer(j) || MotherOf(j))return false;
+    if(!j.ref || j.reap || j.supportPending || j.supportMetadata || !Alive(j.ref) || IsPrimer(j) || MotherOf(j))return false;
     // A ferry takes none: its point is its drop's (transport.cpp keeps the stick's), a new one would carry the soldiers off.
     if(j.mode==Mode::withdraw || j.ferry || ms-j.seen>kCommandSeenMs)return false;
     const unsigned char* v=j.Vehicle();
@@ -545,8 +549,17 @@ bool JetCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexce
 
 void JetFrame(unsigned char* v) noexcept {
     if(!HooksOk())return;
-    // Called down for the player (its NPC pilot still aboard): playerjet.cpp flies it, its fuel clock standing (ResumeNpc).
+    Jet* const staged=FindJet(v);
+    if(staged && staged->supportDrone && staged->supportPending) {
+        v[kFireGun]=0;v[kFireMissile]=0;staged->m.ready=false;staged->seen=GameMs();return;
+    }
+    // A metadata parent never owns a real local player's control; playerjet.cpp flies that player's carrier.
     if(PlayerJetHolds(v))return;
+    if(staged && ((staged->supportMetadata && !CarrierMetadataReady(*staged,GameMs())) ||
+                  (staged->supportDrone && !OnlineRunsHere(v)))) {
+        // Registered remote copies keep native network physics and no local AI or latched fire.
+        v[kFireGun]=0;v[kFireMissile]=0;staged->m.ready=false;staged->seen=GameMs();return;
+    }
     const ULONGLONG ms=GameMs();
     Publish(false);
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
@@ -691,7 +704,7 @@ void JetReap(const void* self) noexcept {
         if(Alive(j.ref) && !v[kDead] && crew::BodyOf(v)==PluginBody::jet) {
             // A support deployment's (its real crew with it) is retired by the dispatcher that made them
             // (support_dispatch.cpp Retire, from SupportAircraftLeft); its entry stays until that delete.
-            if(SupportAircraftOwned(v))continue;
+            if(j.supportDrone || SupportAircraftOwned(v))continue;
             // Its riders off first (the gunship's gunner too), the delete only once the jet has taken itself as empty
             // (see kReapSettleFrames); never with the player in any of its seats.
             const Rider aboard=Aboard(v);
@@ -704,6 +717,7 @@ void JetReap(const void* self) noexcept {
                 continue;   // a player aboard (or the NPC not off yet): no delete under them
             }
             if(j.emptyFrame && At<std::int32_t>(v,kTeam)!=kTeamVehicle && f-j.emptyFrame<kReapSettleFrames)continue;
+            PvpForgetSupportObject(j.ref);
             reinterpret_cast<DeleteFn>(image+kDelete)(v);
             Log("JET v=%p gone (deleted%s%s)",v,j.why ? ": " : "",j.why ? j.why : "");
         }
@@ -726,6 +740,7 @@ void jet::ResumeNpc(unsigned char* v,const float* vel) noexcept {
     const ULONGLONG ms=GameMs();
     Jet* const j=FindJet(v);
     if(!j)return;   // its first frame with its pilot makes the entry (CrewPlaced)
+    if(j->supportMetadata && !CarrierMetadataReady(*j,ms))return;
     if(ms>j->seen)j->bornAt+=ms-j->seen;
     j->seen=ms;j->lastStep=0;
     std::memcpy(j->m.vel,vel,12);
@@ -761,7 +776,8 @@ jet::Jet* jet::Adopt(unsigned char* v) noexcept {
 // reference each entry holds is dropped: it is what kept the control block alive (HoldRef), so the block is
 // still there to drop it from, and keeping it would leak the block every mission.
 void ResetJets() noexcept {
-    for(auto& j:jets){DropRef(j.ref);j=Jet{};}
+    ResetSupportDrones();
+    for(auto& j:jets){PvpForgetSupportObject(j.ref);DropRef(j.ref);j=Jet{};}
     ResetCorpses();
     ResetDolls();
     ResetWalls();

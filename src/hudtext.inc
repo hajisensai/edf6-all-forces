@@ -638,9 +638,10 @@ HUDTEXT(placeHintAll,L"Not preloaded: RangePlaceAll=1 in the ini preloads them a
         L"未預載的：ini 裡 RangePlaceAll=1 才全部預載",L"未プリロード：ini の RangePlaceAll=1 ですべてプリロード")
 HUDTEXT(placeHintPad,L"D-pad: pick / category   A: place at the centre   B: close",L"十字键：选择 / 换分类   A：放在屏幕中心   B：收起",
         L"十字鍵：選擇 / 換分類   A：放在畫面中心   B：收起",L"十字キー：選択 / 分類   A：画面中央に配置   B：閉じる")
-HUDTEXT(placeOnline,L"Offline only: what the plugin makes would be on this machine alone",
-        L"联机时不能摆放：插件生成的物体只在本机，原版不会同步给其他玩家",L"連線時不能擺放：插件生成的物體只在本機，原版不會同步給其他玩家",
-        L"オンラインでは配置できません：プラグインが作る物体はこの PC だけのもので、他のプレイヤーには同期されません")
+HUDTEXT(placeOnline,L"Only enemy spawns sync online; other categories are unavailable",
+        L"仅敌人支持联机同步生成；其它类别暂不可用",L"僅敵人支援連線同步生成；其它類別暫不可用",
+        L"オンライン同期は敵の配置のみ対応。他のカテゴリは現在使用できません")
+HUDTEXT(placeOnlineRow,L" (offline category)",L"（此类暂不支持联机）",L"（此類暫不支援連線）",L"（この種類はオンライン未対応）")
 HUDTEXT(placeMissing,L" (not installed)",L"（未安装）",L"（未安裝）",L"（未インストール）")
 HUDTEXT(placeNotPreloaded,L" (not preloaded)",L"（未预载）",L"（未預載）",L"（未プリロード）")
 HUDTEXT(placeBroken,L" (faulted: off)",L"（出错，已停用）",L"（出錯，已停用）",L"（エラー：停止中）")
@@ -651,6 +652,36 @@ HUDTEXT(placeDone,L"Placed: %ls",L"已放下：%ls",L"已放下：%ls",L"配置�
 HUDTEXT(placeFailed,L"Not placed: %ls (see DEBUGSPAWN in the log)",L"摆放失败：%ls（原因见日志 DEBUGSPAWN）",
         L"擺放失敗：%ls（原因見日誌 DEBUGSPAWN）",L"配置失敗：%ls（理由はログの DEBUGSPAWN）")
 HUDTEXT(placeNoGround,L"No ground under the pointer",L"指针下没有地面",L"指標下沒有地面",L"ポインターの下に地面がありません")
+
+// --- PVP controls on the M map (hud.cpp MapPvpPanel; pvp.h) ---
+HUDTEXT(pvpTitleState,L"PVP: %ls  TEAM %d",L"对战：%ls  阵营 %d",L"對戰：%ls  陣營 %d",L"対戦：%ls  チーム %d")
+HUDTEXT(pvpOn,L"ON",L"开",L"開",L"有効")
+HUDTEXT(pvpOff,L"OFF",L"关",L"關",L"無効")
+HUDTEXT(pvpExpand,L"Hover to expand",L"指向展开",L"指向展開",L"ポインタで開く")
+HUDTEXT(pvpFocusPad,L"R3: PVP",L"R3 对战",L"R3 對戰",L"R3 対戦")
+HUDTEXT(pvpEnable,L"Enable PVP (host)",L"开启对战（仅房主）",L"開啟對戰（僅房主）",L"対戦を有効にする（ホスト）")
+HUDTEXT(pvpDisable,L"Disable PVP (host)",L"关闭对战（仅房主）",L"關閉對戰（僅房主）",L"対戦を無効にする（ホスト）")
+HUDTEXT(pvpTeam1,L"Join team 1",L"加入阵营 1",L"加入陣營 1",L"チーム 1 に参加")
+HUDTEXT(pvpTeam2,L"Join team 2",L"加入阵营 2",L"加入陣營 2",L"チーム 2 に参加")
+HUDTEXT(pvpHostOnly,L"Only the host can change PVP mode",L"仅房主可切换对战模式",L"僅房主可切換對戰模式",L"対戦モードを変更できるのはホストのみ")
+HUDTEXT(pvpMouseHint,L"Hover to expand; click a row to change your team",L"指向展开；点击条目更改自己的阵营",L"指向展開；點擊項目更改自己的陣營",L"ポインタで開き、行をクリックして自分のチームを変更")
+HUDTEXT(pvpPadHint,L"R3: PVP / Up-Down: select / A: confirm / B: back",L"R3 聚焦对战 / ↑↓ 选择 / A 确认 / B 返回",
+        L"R3 聚焦對戰 / ↑↓ 選擇 / A 確認 / B 返回",L"R3 対戦操作 / ↑↓ 選択 / A 決定 / B 戻る")
+HUDTEXT(pvpReady,L"Host sets the mode; each player chooses their own team",L"房主设置模式；每位玩家选择自己的阵营",L"房主設定模式；每位玩家選擇自己的陣營",L"ホストがモードを設定し、各プレイヤーが自分のチームを選択")
+HUDTEXT(pvpPending,L"Waiting for every peer to confirm",L"等待全员确认，请暂勿交战",L"等待全員確認，請暫勿交戰",L"全員の確認待ち。まだ交戦しないでください")
+HUDTEXT(pvpComplete,L"Team settings confirmed by every peer",L"全员已确认阵营设置",L"全員已確認陣營設定",L"全員がチーム設定を確認しました")
+HUDTEXT(pvpNotReady,L"Needs a shared online mission and PVP support on every peer",L"需进入同一联机任务，且全员版本支持对战",L"需進入同一連線任務，且全員版本支援對戰",L"同じオンラインミッションと全員の対戦対応版が必要です")
+HUDTEXT(pvpBusy,L"The previous team change is still pending",L"上一项阵营更改仍在等待确认",L"上一項陣營更改仍在等待確認",L"前のチーム変更はまだ確認待ちです")
+HUDTEXT(pvpInvalid,L"Only the host changes mode; choose team 1 or 2",L"仅房主可切换模式；阵营只能选 1 或 2",L"僅房主可切換模式；陣營只能選 1 或 2",L"モード変更はホストのみ。チームは 1 または 2 を選択")
+HUDTEXT(pvpRoster,L"PVP supports at most 8 online members",L"对战最多支持 8 名联机成员",L"對戰最多支援 8 名連線成員",L"対戦のオンライン人数は最大 8 人です")
+HUDTEXT(pvpChanged,L"Mission or team state changed; select again",L"任务或阵营信息已变化，请重新选择",L"任務或陣營資訊已變化，請重新選擇",L"ミッションかチーム情報が変化しました。再選択してください")
+HUDTEXT(pvpPrepareFailed,L"Check failed: players must be loaded; no rival teams in one vehicle",L"检查未通过：玩家须已加载，同车玩家不能敌对",L"檢查未通過：玩家須已載入，同車玩家不能敵對",L"確認失敗：全員のロード完了と同乗者のチーム一致が必要です")
+HUDTEXT(pvpApplyFailed,L"Team update failed; restoring the previous settings",L"阵营应用失败，正在恢复此前设置",L"陣營套用失敗，正在恢復先前設定",L"チーム変更に失敗。変更前の設定に戻しています")
+HUDTEXT(pvpSendFailed,L"Team message failed to send; change is unconfirmed",L"阵营消息发送失败，更改尚未确认",L"陣營訊息傳送失敗，更改尚未確認",L"チーム情報の送信に失敗。変更は未確認です")
+HUDTEXT(pvpTimedOut,L"Team confirmation timed out; change stopped",L"阵营确认超时，已停止本次更改",L"陣營確認逾時，已停止本次更改",L"チーム確認がタイムアウトし、変更を中止しました")
+HUDTEXT(pvpAborted,L"Host cancelled the change; previous settings restored",L"房主取消了更改，已恢复此前设置",L"房主取消了更改，已恢復先前設定",L"ホストが変更を中止し、変更前の設定に戻しました")
+HUDTEXT(pvpSessionLost,L"Mission or connection changed; stock teams restored",L"任务或联机状态已变化，已恢复原版阵营",L"任務或連線狀態已變化，已恢復原版陣營",L"ミッションか接続が変化し、元のチームに戻しました")
+HUDTEXT(pvpFaulted,L"Player or vehicle state changed; PVP is disabled",L"玩家或载具状态已变化，对战已关闭",L"玩家或載具狀態已變化，對戰已關閉",L"プレイヤーかビークルの状態が変化し、対戦を無効にしました")
 
 // --- The damage statistics page (hud_stats.inc, over the map) ---
 HUDTEXT(statsTitle,L"DAMAGE STATS",L"伤害统计",L"傷害統計",L"ダメージ統計")
@@ -818,3 +849,53 @@ HUDTEXT(roomHint,L"Arrows/D-pad: select, change   Enter/A: open   Esc/B: back   
         L"方向キー/十字キー 選択・変更   Enter/A 決定   Esc/B 戻る   Ins/X 追加   Del/Y 削除   Home/Back 標準に戻す   %ls 閉じる")
 
 HUDTEXT(vehicleLookHold,L"Hold [%ls] + look: free look",L"按住 [%ls] + 转动视角：自由观察",L"按住 [%ls] + 轉動視角：自由觀察",L"[%ls]を押しながら視点移動：見回す")
+// Context-specific room/HQ controls are kept on separate rows by room_ui_logic.h.
+HUDTEXT(roomEntry,L"Vehicle & NPC loadouts: %ls",L"载具与 NPC 配装：%ls",L"載具與 NPC 配裝：%ls",L"車両・NPCの装備：%ls")
+HUDTEXT(roomHintNavigate,L"Arrows / D-pad: select    Enter / A: edit    Esc / B: back",L"↑↓ / 十字键：选择    Enter / A：编辑    Esc / B：返回",L"↑↓ / 十字鍵：選擇    Enter / A：編輯    Esc / B：返回",L"方向キー：選択    Enter / A：編集    Esc / B：戻る")
+HUDTEXT(roomHintFields,L"Up / Down: select field    Left / Right: change",L"↑↓ / 十字键：选择字段    ←→ / 十字键：修改",L"↑↓ / 十字鍵：選擇欄位    ←→ / 十字鍵：修改",L"上下：項目を選択    左右：変更")
+HUDTEXT(roomHintTools,L"Ins / X: add    Del / Y: remove    Home / Back: reset unit",L"Ins / X：增加    Del / Y：删除    Home / Back：还原此单位",L"Ins / X：新增    Del / Y：刪除    Home / Back：還原此單位",L"Ins / X：追加    Del / Y：削除    Home / Back：部隊を初期化")
+HUDTEXT(roomHintFinish,L"Enter / A: done    Esc / B: back    Home / Back: reset unit",L"Enter / A：完成    Esc / B：返回    Home / Back：还原此单位",L"Enter / A：完成    Esc / B：返回    Home / Back：還原此單位",L"Enter / A：完了    Esc / B：戻る    Home / Back：部隊を初期化")
+HUDTEXT(roomHintClose,L"%ls: close and discard unsaved changes",L"%ls：关闭并放弃未保存的修改",L"%ls：關閉並放棄未儲存的修改",L"%ls：閉じて未保存の変更を破棄")
+HUDTEXT(roomHintSave,L"Choose Save to apply for the next sortie",L"选择「保存」应用配置；用于下一次出击",L"選擇「儲存」套用配置；用於下一次出擊",L"「保存」で設定を次の出撃に適用")
+HUDTEXT(vehicleSensorOptical,L"EO  %d contacts  %d m",L"光电识别  %d 个目标  %d m",L"光電識別  %d 個目標  %d m",L"光学識別  %d目標  %d m")
+
+// Effective thermal image state, with the configured keyboard binding (thermal.h).
+HUDTEXT(vehicleSensorContacts,L"%ls  %d contacts  %d m",L"%ls  %d 个目标  %d m",L"%ls  %d 個目標  %d m",L"%ls  %d目標  %d m")
+HUDTEXT(thermalOptical,L"OPTICAL",L"光学",L"光學",L"光学")
+HUDTEXT(thermalWhiteHot,L"WHITE HOT",L"白热",L"白熱",L"ホワイトホット")
+HUDTEXT(thermalBlackHot,L"BLACK HOT",L"黑热",L"黑熱",L"ブラックホット")
+HUDTEXT(thermalControl,L"[%ls] image mode: %ls",L"[%ls] 切换成像：%ls",L"[%ls] 切換成像：%ls",L"[%ls] 映像切替：%ls")
+HUDTEXT(thermalUnsupportedSeat,L"Thermal is unavailable in this seat",L"此座位不支持热像",L"此座位不支援熱像",L"この座席は熱映像に対応していません")
+HUDTEXT(thermalEnterSight,L"Enter the sight view to use thermal",L"进入观瞄视角后可用",L"進入觀瞄視角後可用",L"照準視点に入ると熱映像を使用できます")
+HUDTEXT(thermalFallback,L"Thermal unavailable; using optical",L"热像不可用，已回退光学",L"熱像不可用，已回退光學",L"熱映像を使用できず、光学に戻しました")
+HUDTEXT(thermalWaiting,L"Thermal preparing; currently optical",L"热像准备中，当前使用光学",L"熱像準備中，目前使用光學",L"熱映像の準備中。現在は光学です")
+
+// Enemy possession keeps native skills and their real status visible on the map.
+HUDTEXT(enemyControlTitle,L"Enemy control",L"敌方单位操控",L"敵方單位操控",L"敵ユニット操作")
+HUDTEXT(enemyControlEmpty,L"Point at an enemy to inspect control",L"指向敌方单位，查看操控与技能",L"指向敵方單位，查看操控與技能",L"敵に照準を合わせて操作とスキルを確認")
+HUDTEXT(enemyControlBegin,L"Control this unit",L"操控此单位",L"操控此單位",L"このユニットを操作")
+HUDTEXT(enemyControlReturn,L"Return to your soldier",L"返回原玩家",L"返回原玩家",L"元の兵士に戻る")
+HUDTEXT(enemyControlFire,L"Hold to use selected skill",L"按住发动当前技能",L"按住發動目前技能",L"長押しで選択スキルを使用")
+HUDTEXT(enemyControlPage,L"Skills %u-%u / %u",L"技能 %u-%u / %u",L"技能 %u-%u / %u",L"スキル %u-%u / %u")
+HUDTEXT(enemyControlMouseHint,L"Click a skill to select; hold USE to activate",L"单击选择技能；按住“发动”使用",L"按一下選擇技能；按住「發動」使用",L"クリックでスキル選択、使用を長押しで発動")
+HUDTEXT(enemyControlPadHint,L"L3: focus  D-pad: select/page  A: use  B: back",L"L3 聚焦  方向键选择/翻页  A 确认/发动  B 退卡",L"L3 聚焦  方向鍵選擇/翻頁  A 確認/發動  B 退卡",L"L3:選択  方向:項目/ページ  A:決定/使用  B:戻る")
+HUDTEXT(enemyControlPlayHint,L"M: all skills and return  Fire: selected skill",L"M 查看全部技能或返回；开火键发动当前技能",L"M 查看全部技能或返回；開火鍵發動目前技能",L"M:全スキル/兵士へ戻る  射撃:選択スキル")
+HUDTEXT(enemyControlPending,L"Waiting for authoritative control result",L"等待操控权限与原生接管结果",L"等待操控權限與原生接管結果",L"操作権限とネイティブ制御の結果を待機中")
+HUDTEXT(enemyControlRestoring,L"Restoring original soldier",L"正在恢复原玩家",L"正在恢復原玩家",L"元の兵士を復元中")
+HUDTEXT(enemyControlActive,L"Controlling: %ls",L"操控中：%ls",L"操控中：%ls",L"操作中：%ls")
+HUDTEXT(enemyControlStale,L"Unit or control state changed; select again",L"单位或操控状态已变化，请重新选择",L"單位或操控狀態已變更，請重新選擇",L"ユニットまたは操作状態が変わりました。再選択してください")
+HUDTEXT(enemyControlReady,L"Ready",L"就绪",L"就緒",L"使用可能")
+HUDTEXT(enemyControlRunning,L"Active",L"进行中",L"進行中",L"動作中")
+HUDTEXT(enemyControlCooldown,L"Cooldown %.1f s",L"冷却 %.1f 秒",L"冷卻 %.1f 秒",L"再使用 %.1f 秒")
+HUDTEXT(enemyControlUnavailable,L"Unavailable in current native state",L"当前原生状态不可用",L"目前原生狀態不可用",L"現在のネイティブ状態では使用不可")
+HUDTEXT(enemyControlNativeState,L"Native state: %ls",L"原生状态：%ls",L"原生狀態：%ls",L"ネイティブ状態：%ls")
+HUDTEXT(enemyControlToggle,L"L3 / click",L"L3 / 单击",L"L3 / 按一下",L"L3 / クリック")
+HUDTEXT(enemyControlNativeReady,L"Native action rules",L"由原生动作规则判定",L"由原生動作規則判定",L"ネイティブ動作条件に従う")
+HUDTEXT(enemyControlSourceSafe,L"Your soldier is paused and protected while controlling",L"操控期间原角色暂停并受到保护",L"操控期間原角色暫停並受到保護",L"操作中は元の兵士が停止し、保護されます")
+HUDTEXT(enemyControlTeamOriginal,L"Team %d: original enemy side",L"阵营 %d：保留原敌方阵营",L"陣營 %d：保留原敵方陣營",L"陣営 %d：元の敵側を維持")
+HUDTEXT(enemyControlTeamOwner,L"Team %d: follows your PVP team",L"阵营 %d：跟随玩家对战阵营",L"陣營 %d：跟隨玩家對戰陣營",L"陣営 %d：プレイヤーの対戦陣営に従う")
+HUDTEXT(enemyControlHealth,L"Controlled HP %.0f / %.0f",L"受控单位生命值 %.0f / %.0f",L"受控單位生命值 %.0f / %.0f",L"操作ユニットのHP %.0f / %.0f")
+HUDTEXT(enemyControlHealthUnavailable,L"Controlled HP unavailable",L"受控单位生命值不可用",L"受控單位生命值無法取得",L"操作ユニットのHPを取得できません")
+HUDTEXT(enemyControlInspectHint,L"Hover / L3",L"悬停 / L3",L"懸停 / L3",L"ポインター / L3")
+
+HUDTEXT(enemyControlCapacity,L"Enemy control requires the paired EDF Coop update for every player",L"敌方操控需要配套新版 EDF Coop，请所有玩家更新",L"敵方操控需要配套新版 EDF Coop，請所有玩家更新",L"敵ユニットの操作には対応版 EDF Coop が必要です。全員で更新してください")

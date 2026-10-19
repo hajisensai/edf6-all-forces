@@ -20,9 +20,8 @@ other keeps 4.1's. Calls (plan P5, pylib/edf41calls.py; the entry's 'call' recor
 EDF6 call of the EDF6 vehicle in its place (CallTemplates.vehicle: an EDF6 call of that vehicle, the Air Raider's
 categories first, the nearest level: its category and class); the Whale gunship's (Weapon_BasicShoot smoke candle,
 mode 0) is EDF6's gunship category 311 as it is; a bomber call is an EDF6 Weapon_RadioContact bomber call (312) of a
-template whose bomber run is laid out as its own. Template, AmmoDamageAttribute: as make_edf5_weapons. Sound cues: a cue no EDF6 bank holds (it would
-play nothing; pylib/acb.py) takes the template's cue at the same place ('cues'); a weapon with one the template has no
-cue for stays out.
+template whose bomber run is laid out as its own. Template, AmmoDamageAttribute: as make_edf5_weapons. Sound cues in EDF6 or the installed EDF41_WEAPON_SE bank keep their original names and playback modes.
+A cue neither holds takes the template's cue at the same place ('cues'); a weapon with one the template has no cue for stays out.
 Texts: names and descriptions JA / EN are 4.1's, CN / SC / KR translated (edf41port/translations.json; 4.1 has no
 Chinese or Korean), except the SC name: the Simplified Chinese community patch's where it names the weapon (--zh: its
 mods folder, default <EDF4.1>/mods; pylib/edf41zh.py), and the CN name that in Traditional (OpenCC).
@@ -45,6 +44,8 @@ sys.path.insert(0, HERE)
 import acb  # noqa: E402
 import dsgo  # noqa: E402
 import edf41calls as ec  # noqa: E402
+import edf41_sounds  # noqa: E402
+import edf41_sound_fallbacks  # noqa: E402
 import edf41zh  # noqa: E402
 import edf5port  # noqa: E402
 import make_edf5_weapons as m5  # noqa: E402
@@ -262,6 +263,19 @@ def stat_lines(line: str, formats: dict, pieces: dict[str, dict[str, str]]) -> l
     return out
 
 
+def available_weapon_cues(edf6: str, edf41: str) -> set[str]:
+    """Stock EDF6 cues plus the optional source bank used by runtime lookups.
+
+    P5 substituted missing stock cues before P7 supplied this bank. Keeping those substitutions
+    can turn a finite source shot into a template's infinite cue without its stop owner.
+    The separately generated finite resident fallback table covers players who
+    do not install this optional bank, and failures to load it at runtime.
+    """
+    with open(edf41_sounds.sound_path(edf41, edf41_sounds.SE_BANK), 'rb') as stream:
+        fallback = acb.cue_names(stream.read())
+    return acb.game_cues(edf6) | set(fallback)
+
+
 def cue_swaps(own: dict, template: dict, edf6_cues: set[str], known: set[str]) -> dict[str, str]:
     """Each cue of `own` (a 4.1 cue: in `known`) EDF6 has no bank for -> the template's cue at the same place."""
     swaps: dict[str, str] = {}
@@ -292,7 +306,14 @@ class CallTemplates:
 
     # A 4.1 vehicle EDF6 has no call of: the call of its family's.
     # 4.1's Balam (edf41calls.VEHICLES: its own SGO, which EDF6 has no call of): the Barga's, the same class and turrets.
-    FAMILY = {'vehicle502_groundrobogold.sgo': 'vehicle502_groundrobo.sgo',
+    FAMILY = {**{name: 'v505_tank.sgo' for name in ec.VEHICLES if name.startswith('vehicle301_tank')},
+              'vehicle302_heli.sgo': 'v506_heli.sgo',
+              'vehicle408_motorbike.sgo': 'v503_bike.sgo',
+              'vehicle406_begaruta.sgo': 'v504_begaruta.sgo',
+              'vehicle406_begaruta_red.sgo': 'v504_begaruta_red.sgo',
+              'vehicle406_begaruta_gold.sgo': 'v504_begaruta_gold.sgo',
+              'vehicle406_begaruta_green.sgo': 'v504_begaruta.sgo',
+              'vehicle502_groundrobogold.sgo': 'vehicle502_groundrobo.sgo',
               'vehicle501_fortressrobo.sgo': 'v515_retrobalam.sgo'}
 
     def __init__(self, game: rootcpk.Game) -> None:
@@ -412,7 +433,7 @@ def build(edf41: str, edf5: str, edf6: str, zh: str) -> dict:
     pieces = fragments(formats)
     names5 = {m5.key(r[0]) for L in ('JA', 'EN') for r in plain_table(g5, f'WEAPONTEXT.{L}.SGO', 'text_table')}
     names5 |= {m5.words(r[0]) for r in plain_table(g5, 'WEAPONTEXT.EN.SGO', 'text_table')}
-    cues6 = acb.game_cues(edf6)
+    cues6 = available_weapon_cues(edf6, edf41)
     cues41 = acb.game_cues(edf41)
     with open(TRANSLATIONS, encoding='utf-8') as f:
         translated = json.load(f)
@@ -506,9 +527,12 @@ def build(edf41: str, edf5: str, edf6: str, zh: str) -> dict:
             **({'call': call} if call is not None else {}),
         })
     cn = 'CN names their OpenCC s2tw (pylib/edf41zh.py)' if edf41zh.available() else 'CN names translations.json (no OpenCC)'
+    with open(edf41_sounds.sound_path(edf6, edf41_sounds.SE_BANK), 'rb') as stream:
+        resident_lengths = acb.cue_lengths(stream.read())
+    fallbacks = edf41_sound_fallbacks.build(weapons, e6, cues41, resident_lengths)
     return {'source': "EDF4.1 Root.cpk WEAPON/_WEAPONTABLE.SGO + _WEAPONTEXT.SGO; CN / SC / KR edf41port/translations.json; "
                       f"SC names {edf41zh.PATCH} {zh_names.note()}, {cn}",
-            'weapons': weapons, 'skipped': skipped}
+            'weapons': weapons, 'skipped': skipped, 'sound_fallbacks': fallbacks}
 
 
 def is_call(w: dict) -> bool:
@@ -534,6 +558,9 @@ def main() -> int:
     data['weapons'] = m5.keep_order(OUT, [w for w in data['weapons'] if not is_call(w)])
     write(OUT, data)
     write(OUT_CALLS, {'source': data['source'], 'weapons': calls})
+    import gen_edf41_sound_fallbacks
+    gen_edf41_sound_fallbacks.OUT.write_text(edf41_sound_fallbacks.render(data['sound_fallbacks']),
+                                           encoding='utf-8', newline='\n')
     print(f'{OUT}: {len(data["weapons"])} weapons, {len(data["skipped"])} skipped')
     print(f'{OUT_CALLS}: {len(calls)} calls')
     reasons: dict[str, int] = {}

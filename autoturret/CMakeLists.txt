@@ -9,4 +9,8 @@ target_include_directories(EDF6AutoTurret PRIVATE ${CMAKE_SOURCE_DIR}/third_part
 target_compile_options(EDF6AutoTurret PRIVATE /W4 /WX /utf-8 /permissive-)
 target_link_options(EDF6AutoTurret PRIVATE /DYNAMICBASE /NXCOMPAT /PDBALTPATH:EDF6AutoTurret.pdb)
 set_target_properties(EDF6AutoTurret PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Mods/Plugins")
+# The version is the one project(VERSION) above (src/version.h.in), the commit generated/build_id.h (CMakeLists.txt).
+configure_file(src/version.h.in "${CMAKE_BINARY_DIR}/generated/autoturret_version.h" @ONLY)
+target_include_directories(EDF6AutoTurret PRIVATE "${CMAKE_BINARY_DIR}/generated")
+add_dependencies(EDF6AutoTurret edf6_build_id)
 configure_file(EDF6AutoTurret.ini "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6AutoTurret.ini" COPYONLY)

@@ -7,6 +7,7 @@ research (what EDF6 has, what the field holds, every choice and what is open).
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import struct
@@ -70,29 +71,84 @@ def fmb_file(map_name: str) -> str:
     return piece_of(map_name).upper() + '.FMB'
 
 
-def color_slices(names: list[str]) -> dict[int, int]:
-    """The field's texture index (into the material names it lists) -> slice of the colour array `.cols.dds`: the
-    array holds every name that is not a normal map (`_n` / `_nm`), in the list's order (checked on the 7 maps: the
-    slice count of each cols.dds equals the number of such names, and no layer's colour or multiplier index points at
-    a normal map)."""
+def color_slices(names: list[str], bindings: dict[str, int] | None = None) -> dict[int, int]:
+    """SHFB material index -> colour-array slice, preferably from its authored cols.sgo.
+
+    The name-only form retains the verified legacy query API; conversion uses the
+    actual resource bindings and checks their array size rather than guessing.
+    """
+    if bindings is not None:
+        if (not bindings or set(bindings) - set(names)
+                or any(not isinstance(v, int) for v in bindings.values())
+                or sorted(bindings.values()) != list(range(len(bindings)))):
+            raise ValueError('the colour resource bindings are not a unique contiguous slice table')
+        return {i: bindings[n] for i, n in enumerate(names) if n in bindings}
     out: dict[int, int] = {}
-    for i, n in enumerate(names):
-        if not n.lower().endswith(('_n', '_nm')):
+    for i, name in enumerate(names):
+        if not name.lower().endswith(('_n', '_nm')):
             out[i] = len(out)
     return out
 
 
-def layers_of(s: sk_terrain.Shfb) -> list[fmb_build.Layer]:
-    """EDF6's layer records for the field's layers: the same colour and multiplier slices of the same array, tiled
-    1 / scale metres (the field's texture matrices scale the world position by it)."""
-    slice_of = color_slices(s.layer_names)
+def layers_of(s: sk_terrain.Shfb, neutral_slice: int | None = None,
+              slices: dict[int, int] | None = None) -> list[fmb_build.Layer]:
+    """Translate layers with an explicit valid identity slice for a missing multiplier.
+
+    EDF4.1 skips its optional second colour texture when absent. EDF6's FMB
+    shaders always sample it: a negative primary index is not a no-texture flag.
+    The caller appends the identity slice immediately after the authored slices.
+    """
+    slice_of = color_slices(s.layer_names) if slices is None else slices
+    if any(layer.multip < 0 for layer in s.layers) and neutral_slice != len(slice_of):
+        raise ValueError('a missing multiplier needs an explicit appended identity slice')
     out = []
-    for l in s.layers:
-        if l.color not in slice_of or (l.multip >= 0 and l.multip not in slice_of):
-            raise ValueError(f'a layer paints with a normal map ({l.color}, {l.multip}) in {s.layer_names}')
-        out.append(fmb_build.Layer(slice_of[l.color], slice_of[l.multip] if l.multip >= 0 else -1,
-                                   1.0 / l.scale_color[0], (1.0 / l.scale_multip[0]) if l.multip >= 0 else 0.0))
+    for layer in s.layers:
+        if layer.color not in slice_of or (layer.multip >= 0 and layer.multip not in slice_of):
+            raise ValueError(f'a layer paints with an unbound colour ({layer.color}, {layer.multip}) in {s.layer_names}')
+        color_scale = layer.scale_color[0]
+        mult_scale = layer.scale_multip[0] if layer.multip >= 0 else color_scale
+        if not all(math.isfinite(x) and x > 0 for x in (color_scale, mult_scale)):
+            raise ValueError('terrain texture scales must be positive and finite')
+        multiplier = slice_of[layer.multip] if layer.multip >= 0 else neutral_slice
+        out.append(fmb_build.Layer(slice_of[layer.color], multiplier, 1.0 / color_scale, 1.0 / mult_scale))
     return out
+
+
+def _color_array_layout(data: bytes) -> tuple[int, int, int, int, int]:
+    """Checked DX10 BC1 2D colour array: width, height, mip count, slices, bytes per slice."""
+    if (len(data) < 148 or data[:4] != b'DDS ' or struct.unpack_from('<I', data, 4)[0] != 124
+            or struct.unpack_from('<I', data, 76)[0] != 32
+            or not (struct.unpack_from('<I', data, 80)[0] & 4) or data[84:88] != b'DX10'):
+        raise ValueError('terrain colour array is not a DX10 DDS')
+    height, width = struct.unpack_from('<2I', data, 12)
+    mips = max(1, struct.unpack_from('<I', data, 28)[0])
+    fmt, dimension, misc, count, _alpha = struct.unpack_from('<5I', data, 128)
+    if fmt not in (71, 72) or dimension != 3 or misc & 4 or not 0 < count <= 2048:
+        raise ValueError('terrain colour array must be a supported BC1 2D array')
+    if not width or not height or mips > max(width, height).bit_length():
+        raise ValueError('terrain colour array has invalid dimensions or mip count')
+    stride = sum(max(1, ((width >> level) + 3) // 4) * max(1, ((height >> level) + 3) // 4) * 8
+                 for level in range(mips))
+    if len(data) != 148 + count * stride:
+        raise ValueError('terrain colour array payload does not match its slices and mip chain')
+    return width, height, mips, count, stride
+
+
+def with_identity_multiplier(data: bytes) -> tuple[bytes, int]:
+    """Append an exact RGBA=(1,1,1,1) BC1 slice; preserve every authored pixel/mip.
+
+    This encodes multiplication's identity for an absent texture, not a tint or
+    brightness adjustment. The header changes only arraySize and a required complex-surface cap.
+    """
+    _width, _height, _mips, count, stride = _color_array_layout(data)
+    if count == 2048:
+        raise ValueError('terrain colour array has no room for an identity slice')
+    white_block = struct.pack('<HHI', 0xFFFF, 0, 0)  # four-colour opaque mode, every selector chooses white
+    out = bytearray(data)
+    struct.pack_into('<I', out, 140, count + 1)
+    struct.pack_into('<I', out, 108, struct.unpack_from('<I', out, 108)[0] | 8)  # DDSCAPS_COMPLEX for array surfaces
+    out += white_block * (stride // 8)
+    return bytes(out), count
 
 
 def edit_mapb(mapb: bytes, shfb_name: str, piece: str) -> bytes:
@@ -210,7 +266,8 @@ def field_origin(mapb: bytes, shfb_name: str) -> tuple[float, float, float]:
     raise ValueError('the field is not placed')
 
 
-def convert_rab(rab: bytes, cols_name: str, map_name: str, e6: Reader) -> bytes:
+def convert_rab(rab: bytes, cols_name: str, map_name: str, e6: Reader, *,
+                neutral_multiplier: bool = False) -> bytes:
     """The map's RAB with `<cols>.cols.dds` (the field's colour array) as `<map>_color.dds` and EDF6's flat normal
     as `<map>_normal.dds`: the two textures EDF6's terrain looks up by the map's name (EDF.dll 0x152A06: map name +
     '_color.dds' / '_normal.dds', 0x18DD30). Both go in the TEXTURE folder where 4.1's cols.dds already was."""
@@ -222,6 +279,9 @@ def convert_rab(rab: bytes, cols_name: str, map_name: str, e6: Reader) -> bytes:
     if len(flat) != 1:
         raise ValueError(f'{FLAT_NORMAL} is not in {FLAT_NORMAL_RAB}')
     base = map_name.lower()
+    if neutral_multiplier:
+        raw, _index = with_identity_multiplier(cols[0].data)
+        cols[0].stored = mdb.cmpl_compress(raw) if cols[0].stored[:4] == b'CMPL' else raw
     cols[0].name = f'{base}_color.dds'
     r.files = [f for f in r.files if not f.name.lower().endswith('.norm.dds')]
     mdb.insert_member(r, mdb.RabFile(f'{base}_normal.dds', cols[0].folder, cols[0].flag, flat[0].stored))
@@ -240,7 +300,17 @@ def terrain(mac: bigmap.Marc, rab: bytes, e6: Reader, map_name: str) -> Terrain:
     heights = sk_terrain.lattice(s) + oy
     weights = s.blend[::STEP, ::STEP]
     weights = weights / np.maximum(weights.sum(axis=2, keepdims=True), 1e-9)
-    fmb_bytes = fmb_build.build(e6.read(DONOR_FMB), heights, weights, ox, oz, step, layers_of(s))
+    colors = [file for file in mdb.rab_read(rab).files if file.name.lower().endswith('.cols.dds')]
+    bindings = [data for name, data in mac.files if name.lower().endswith('.cols.sgo')]
+    if len(colors) != 1 or len(bindings) != 1:
+        raise ValueError('the terrain needs exactly one colour array and its authored slice bindings')
+    slices = color_slices(s.layer_names, sgo.load(data=bindings[0]))
+    _width, _height, _mips, count, _stride = _color_array_layout(colors[0].data)
+    if count != len(slices):
+        raise ValueError('the colour array size does not match its authored slice bindings')
+    needs_identity = any(layer.multip < 0 for layer in s.layers)
+    layers = layers_of(s, count if needs_identity else None, slices)
+    fmb_bytes = fmb_build.build(e6.read(DONOR_FMB), heights, weights, ox, oz, step, layers)
     veg = sk_terrain.vegetation(members[shfb_name], s.extent[0])
     plants = [grass_group(veg, ox, oz)] + model_groups(veg, ox, oz, {n.lower() for n, _ in mac.files})
     fmb_bytes = fmex.with_plants(fmb_bytes, plants, veg.jitters)
@@ -260,7 +330,8 @@ def terrain(mac: bigmap.Marc, rab: bytes, e6: Reader, map_name: str) -> Terrain:
     cols_name = [f.name for f in mdb.rab_read(rab).files if f.name.lower().endswith('.cols.dds')]
     if len(cols_name) != 1:
         raise ValueError('the RAB has no single colour array')
-    return Terrain(piece, fmb_bytes, out, convert_rab(rab, cols_name[0], map_name, e6), heights, ox, oz, step, s)
+    return Terrain(piece, fmb_bytes, out, convert_rab(rab, cols_name[0], map_name, e6,
+                                                    neutral_multiplier=needs_identity), heights, ox, oz, step, s)
 
 
 # ------------------------------------------------------------------------------------------------ object bodies

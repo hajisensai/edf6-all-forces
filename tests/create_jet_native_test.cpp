@@ -31,6 +31,9 @@ bool NpcDriver(const unsigned char*) noexcept {UnexpectedWorldCall();}
 bool SeatNpcRider(unsigned char*,bool) noexcept {UnexpectedWorldCall();}
 bool OnlineMaySeatNpc(const void*) noexcept {UnexpectedWorldCall();}
 void NoteLocalCopy(const void*,const void*) noexcept {UnexpectedWorldCall();}
+bool ReserveCarrierSupportDrone(const ObjRef&,unsigned,std::uint64_t) noexcept {UnexpectedWorldCall();}
+bool CancelCarrierSupportDrone(const ObjRef&,unsigned,std::uint64_t) noexcept {UnexpectedWorldCall();}
+void PvpForgetSupportObject(const ObjRef&) noexcept {UnexpectedWorldCall();}
 bool FixBodyPart506(unsigned char*,const char*) noexcept {UnexpectedWorldCall();}
 int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept {UnexpectedWorldCall();}
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept {UnexpectedWorldCall();}
@@ -41,9 +44,12 @@ bool Alive(const ObjRef&) noexcept {UnexpectedWorldCall();}
 Jet* FindJet(const unsigned char*) noexcept {UnexpectedWorldCall();}
 Jet* NewEntry(unsigned char*,ULONGLONG) noexcept {UnexpectedWorldCall();}
 bool SlotFree() noexcept {UnexpectedWorldCall();}
+bool HooksOk() noexcept {UnexpectedWorldCall();}
+void DropRef(const ObjRef&) noexcept {UnexpectedWorldCall();}
 void JoinFlight(Jet&,unsigned) noexcept {UnexpectedWorldCall();}
 bool IsJetVehicle(const unsigned char*,Role*,Role*) noexcept {UnexpectedWorldCall();}
-void DollMake(int,const unsigned char*,DWORD) noexcept {UnexpectedWorldCall();}
+bool DollMake(int,const unsigned char*,DWORD) noexcept {UnexpectedWorldCall();}
+bool DollReady() noexcept {UnexpectedWorldCall();}
 bool PreloadDolls(void*,bool) noexcept {UnexpectedWorldCall();}
 void PreloadShells(void*,bool,bool) noexcept {UnexpectedWorldCall();}
 void ResetShells() noexcept {UnexpectedWorldCall();}

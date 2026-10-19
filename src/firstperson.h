@@ -9,6 +9,8 @@
 namespace crew {
 void ResetFirstPerson() noexcept;   // publish a new mission; camera/render thread retires old pointers
 bool InstallFirstPerson() noexcept;   // at load, before InstallMap (the map's camera step chains outside this one)
+// Outer camera owner (map/TV) finished its step: suspend this viewport's viewmodel while it owns the view.
+void FirstPersonCameraOverride(const void* camera,bool overridden) noexcept;
 bool FirstPersonOn() noexcept;        // game thread: the local player's camera is in first person this frame
 // Draw thread or game thread (map.cpp's camera step): the stock HUD is off on `camera` for a vehicle's first person
 // (its information goes on the cockpit's panels instead; the user, 2026-10-13: "关，信息全上面板").
@@ -18,6 +20,14 @@ bool FirstPersonHidesStockHud(const void* camera) noexcept;
 // "完全把战雷的搬过来": the view on the gun, the reticle on the bore, the barrel never across it; sightzoom.cpp owns that
 // camera); the other seats through their cockpit's eye.
 bool FirstPersonGunnerSight() noexcept;
+
+// Game thread: this exact live local seat requests a marker-backed first-person view. Higher camera owners
+// (map/TV, high view and mounted optics) resolve their own precedence; never infer this from a rendered camera ray.
+bool FirstPersonVehicleView(const void* vehicle,unsigned seat) noexcept;
+// Sazabi's controller owns camera rotation independently of its animated neck; frame carries the physical eye.
+bool SazabiFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noexcept;
+
+
 
 // fp_vehicle.cpp (game thread): the eye of `human`'s seat in the vehicle they ride (world, into `eye`): the model's
 // `vc_eye_<seat>` marker, put there with the seat's cockpit. `out`: the vehicle, the seat, its class name, whether the

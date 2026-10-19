@@ -248,6 +248,9 @@ class Store:
     drag: float             # a round's share of the clean jet's drag
     weapon: Missile | Bomb | Shell
     names: tuple[tuple[str, str], ...] = ()
+    group: int = 0          # nonzero: the barrels of one selectable loadout (not separate R/LB choices)
+    barrel: int = 0         # original native holder index this linked barrel replaces
+    native_control: bool = False  # original native holder, selectable independently (two belts, one gun)
 
 
 def _local(en: str, ja: str, cn: str, sc: str, kr: str) -> tuple[tuple[str, str], ...]:
@@ -425,8 +428,26 @@ STORES: dict[str, Store] = {
     # (V603_FLAK_GLGUN01_DLC_L: GrenadeBullet01_MapNoDamage, 300 m/s, a 4 m blast, 9). Its contact sphere is 4 m
     # (AmmoSize 4 x AmmoHitSizeAdjust 1, docs/carrier-laser-re.md §3): passing within 4 m of an aircraft sets it off, a
     # proximity fuse in effect; it does not harm the map.
+    'FLAK_AP': Store('AP', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
+                     _local('AP belt', '徹甲弾帯', '穿甲彈鏈', '穿甲弹链', '철갑 탄띠'), group=1, barrel=0),
+    'FLAK_AP_R': Store('AP', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_R.SGO', 'SolidBullet01', 'ap'),
+                     _local('AP belt', '徹甲弾帯', '穿甲彈鏈', '穿甲弹链', '철갑 탄띠'), group=1, barrel=1),
     'FLAK_HE': Store('HE-PROX', 'gun', 0.0, 0.0, Shell('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
-                     _local('HE proximity', '近接信管榴弾', '近炸引信高爆彈', '近炸引信高爆弹', '근접신관 고폭탄')),
+                     _local('HE proximity', '近接信管榴弾', '近炸引信高爆彈', '近炸引信高爆弹', '근접신관 고폭탄'), group=2, barrel=0),
+    'FLAK_HE_R': Store('HE-PROX', 'gun', 0.0, 0.0, Shell('V603_FLAK_GLGUN01_DLC_R.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
+                     _local('HE proximity', '近接信管榴弾', '近炸引信高爆彈', '近炸引信高爆弹', '근접신관 고폭탄'), group=2, barrel=1),
+    # Two native 603 holders represent alternate ammunition for the same M61 barrel cluster.
+    'VULCAN_HE': Store('20 mm M61 HE', 'gun', 0.0, 0.0,
+                       Shell('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
+                       _local('20 mm M61 HE', '20mm M61 榴弾', '20mm M61 高爆彈', '20mm M61 高爆弹', '20mm M61 고폭탄'), native_control=True),
+    'VULCAN_AP': Store('20 mm M61 AP', 'gun', 0.0, 0.0,
+                       Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
+                       _local('20 mm M61 AP', '20mm M61 徹甲弾', '20mm M61 穿甲彈', '20mm M61 穿甲弹', '20mm M61 철갑탄'), native_control=True),
+    'BMPT_ATGM': Store('9M120 Ataka', 'ground', 0.0, 0.0,
+                       Missile('9M120 Ataka', Look('bullet_icbm01', 1.83), burn=12.0, top=550.0, accel=180.0,
+                               max_g=20.0, nav=3.0, life=12.0, damage=1200.0, blast=6.0,
+                               lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
+                       _local('9M120 Ataka', '9M120 アターカ', '9M120 阿塔卡', '9M120 阿塔卡', '9M120 아타카')),
     # A tank's / an IFV's coaxial machine gun (COAX_MOUNTS above): fired on its own trigger (src/payload.cpp: the
     # secondary trigger, the main gun staying loaded). The stock Epsilon gunner's machine gun (V_403TANK_MACHINEGUN:
     # SolidBullet01, 6 a round: the lightest round of any stock vehicle gun, a rifle round's; its own tank machine gun
@@ -648,6 +669,14 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
                                ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
                                ('app:/weapon/edf6vc_howitzer_l.sgo', 'app:/weapon/edf6vc_howitzer_r.sgo'), 600.0,
                                'make_artillery'),
+    'vulcan': GroundVehicle('EDF6VC_VULCAN', 'V603_FLAK', 'AWEAPON346',
+                            ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                            ('app:/weapon/edf6vc_vulcan_he_2000.sgo', 'app:/weapon/edf6vc_vulcan_ap_2000.sgo'),
+                            800.0, 'make_vulcan'),
+    'bmpt': GroundVehicle('EDF6VC_BMPT', 'V603_FLAK', 'AWEAPON346',
+                          ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                          ('app:/weapon/edf6vc_bmpt_l.sgo', 'app:/weapon/edf6vc_bmpt_r.sgo',
+                           'app:/weapon/edf6vc_bmpt_atgm_4.sgo'), 1600.0, 'make_bmpt'),
     # The drill tank (tools/make_drill.py, src/drill.cpp): the Blacker's class (Vehicle505_Tank, tracks, one weapon
     # holder) in EDF: Iron Rain's drill tank, requested like the Blacker E series; its one weapon fires nothing (the
     # drill is the plugin's: it spins it and bites with DRILL_CHARGE_FILE).

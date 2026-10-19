@@ -33,6 +33,10 @@
 #include "edf41classes.h"
 #include "edf41robo_ai.h"
 #include "edf41robo_body.h"
+#include "enemy_control_legacy.h"
+#include "pvp_controlled.h"
+#include "enemy_control_pvp_tree.h"
+#include "edf41_sound_channels.h"
 #include "edf41net.h"
 #include "memory.h"
 
@@ -54,6 +58,7 @@ using namespace edf41c;
 
 constexpr int kSlots=45;
 Clone roboClass{"EventAnimationObject",kEaoVtable,kSlots,kEaoSlots,{},{},{}};
+bool factoryRegistered=false;
 
 constexpr float kPi=3.14159265f;
 constexpr int kMostEvents=24;          // per clip (tools/make_edf41_objects.py ROBO_MOST_EVENTS)
@@ -121,7 +126,7 @@ constexpr std::size_t kFindLocator=0x6BADD0,kRagdollOn=0x6E40B0,kPointImpulse=0x
     kCasVar=0x1167170,kCasVarSet=0x116DF60,kDelete=0x118A1B0,kBodyById=0x6EA430,kChargeCreate=0x84A60,kCasSpeed=0x116DF20,
     kMatCtor=0x6DBE90,kMatTarget=0x6DC7B0,kMatLoad=0x6DC6B0,kMatPlay=0x6DC830,kMatStep=0x6DC8B0,kMatFree=0x29D120,
     kRagdollLayer=0x6E9320,kParticleCreate=0x844C0,kParticleParamInit=0x300C80,kTexByName=0x2E8510,kTexAssign=0xF5E10,
-    kTexFree=0x1120820,kParticleParamFree=0x8FDF0,kSetAngVel=0x11B1760,kContactSignal=0xDAB920,kContactAdd=0x6E3A60,kContactCb=0x6EC450;
+    kTexFree=0x1120820,kParticleParamFree=0x8FDF0,kSetAngVel=0x11B1760,kContactSignal=0xDAB920,kContactAdd=0x6E3A60,kContactCb=0x6EC450,kSoundPlaying=0x7A8A20;
 constexpr std::size_t kInitParamBase=0x1762068,kEffects=0x20B2980,kManager=0x20B2958,kChargeVtable=0x17A9338,kParticleParamVtable=0x17620E8;
 struct Print { std::size_t rva; unsigned char bytes[8]; };
 constexpr Print kPrints[]={
@@ -141,6 +146,7 @@ constexpr Print kPrints[]={
     {kTexByName,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{kTexAssign,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},
     {kTexFree,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},{kParticleParamFree,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},
     {kSetAngVel,{0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x4C}},{kContactSignal,{0x48,0x8B,0x89,0x80,0x09,0x00,0x00,0x41}},
+    {kSoundPlaying,{0x48,0x83,0xEC,0x28,0x48,0x8B,0x41,0x08}},
     {kContactAdd,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{kContactCb,{0x40,0x53,0x56,0x57,0x48,0x81,0xEC,0xD0}},
 };
 std::atomic<int> state{0};   // 0 unchecked, 1 good, 2 refused
@@ -158,6 +164,10 @@ bool Ok() noexcept {
 }
 template<class F> F At(std::size_t rva) noexcept { return reinterpret_cast<F>(image+rva); }
 void* Global(std::size_t rva) noexcept { return Readable(image+rva,8) ? *reinterpret_cast<void* const*>(image+rva) : nullptr; }
+
+bool SoundPlaying(const SoundHandle& handle) noexcept {
+    return Ok() && handle.instance && !ShuttingDown() && At<bool(__fastcall*)(const SoundHandle*)>(kSoundPlaying)(&handle);
+}
 
 bool FindLocatorIn(void* model,int list,const wchar_t* name,LocatorHandle* out) noexcept {
     *out={nullptr,nullptr};
@@ -529,6 +539,8 @@ struct Gun {
     wchar_t factory[32]={};
     const wchar_t* chargeSe=nullptr;
     const wchar_t* shotSe=nullptr;
+    bool shotLoops=false;       // source class sets this only for the small gun (EDF41.exe 0x2757CE)
+    edf41sound::GunSounds<SoundHandle> sounds;
     const wchar_t* hitSe=nullptr;   // the bullets' hit sound (4.1 0x275730 fills each group's InitParam +0xB0)
     int flashLife=0;             // the muzzle flash: life in frames (4.1 group +0x3F0), pushed out along the muzzle by
     float flashOffset=0.0f;      // +0x3F4 + the template's +0x38; its size is the charge effect's strength when the charge
@@ -554,6 +566,9 @@ using edf41robo::Timer;   // 4.1 0x271AB0
 
 struct Robo {
     void* obj=nullptr;
+    enemy_legacy::Control player;
+    int playerAttack=-1;
+    std::uint64_t playerEvent=0;
     bool ready=false,broken=false;
     std::uint32_t ticks=0;
     std::uint64_t rng=0;
@@ -569,6 +584,7 @@ struct Robo {
     LocatorHandle footL{},footR{},lockOn{};
     void* lockPoint=nullptr;     // the lock point the plugin keeps on ロックオン (EventAnimationObject has none)
     SoundHandle drive;           // se_table[0], the drive hum, from birth (4.1 +0x1560)
+    edf41sound::Channels<SoundHandle> eventSounds; // MAB channels, separate from the drive and each gun
     bool driveOn=false;
     Gun gun[4];
     // state machines
@@ -762,6 +778,7 @@ void SetLevel(Robo& r) noexcept {
     const float smc[4]={1.0f*k,0.25f*k,0.5f*k,1.0f*k};
     std::memcpy(sm.bullet.color,smc,sizeof(smc));
     sm.aimLimit=0.5f; sm.spread=(std::max)(0.05f,0.25f/s); sm.interval=5; sm.duration=300; sm.charge=180;
+    sm.shotLoops=true;
     sm.chargeSe=L"ロボ小ビームチャージ"; sm.shotSe=L"ロボ小ビーム発射"; sm.look=kChargeSmall; sm.hitSe=L"ロボビーム着弾小"; sm.flashLife=10; sm.flashOffset=0.0f;
     Gun& md=r.gun[kMiddle];
     md.bullet.speed=2.0f; md.bullet.life=600; md.bullet.damage=(std::max)(1.0f,30.0f*s); md.bullet.explosion=9.0f+s; md.bullet.size=40.0f;
@@ -857,7 +874,12 @@ void GunEnter(Robo& r,Gun& g,int state) noexcept {
         if(e && WeakAlive(z.chargeRef) && Readable(e+0x4E4,4))std::memcpy(&g.flashSize,e+0x4E4,4);
         if(!std::isfinite(g.flashSize) || g.flashSize<0.0f)g.flashSize=0.0f;
     }
-    if(g.state==kG1 && state!=kG1)ChargeOff(g);
+    if(g.state==kG1) {
+        g.sounds.LeaveCharge([](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+        if(state!=kG1)ChargeOff(g);
+    }
+    if(g.state==kG2)g.sounds.LeaveFire([](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+    if(state==kG0)g.sounds.Release([](SoundHandle& handle,int fade) { StopSound(handle,fade); });
     g.state=state;
     g.frames=0;
     if(state==kG1)ChargeOn(r,g,static_cast<int>(&g-r.gun));
@@ -868,7 +890,8 @@ void GunEnter(Robo& r,Gun& g,int state) noexcept {
         for(int i=0;i<g.muzzles;++i)
             if(g.muzzle[i].found && LocatorMatrix(g.muzzle[i].loc,m)) { sum[0]+=m[12]; sum[1]+=m[13]; sum[2]+=m[14]; ++n; }
         if(n) { c[0]=sum[0]/n; c[1]=sum[1]/n; c[2]=sum[2]/n; }
-        PlaySe(r,g.chargeSe,c);
+        g.sounds.Charge([&](SoundHandle* handle) { return edf41c::PlaySe(r.obj,g.chargeSe,c,handle); },
+            [](SoundHandle& handle,int fade) { StopSound(handle,fade); });
     }
     if(state==kG2)g.counter=0;
 }
@@ -939,7 +962,7 @@ void GunTick(Robo& r,Gun& g,int group) noexcept {
     ++g.frames;
     switch(g.state) {
     case kG0:
-        if(g.autoFire && !(r.flags&1) && !NetFollows(r) && --g.autoCount<=0) {   // online: a guest copy's start comes from the host (NetGun)
+        if(g.autoFire && !r.player.Active() && !(r.flags&1) && !NetFollows(r) && --g.autoCount<=0) {   // online: a guest copy's start comes from the host (NetGun)
             g.autoCount=g.autoMin+RandInt(r,g.autoMax-g.autoMin);
             GunEnter(r,g,kG1);
             NetGun(r,group);
@@ -958,11 +981,27 @@ void GunTick(Robo& r,Gun& g,int group) noexcept {
                 FireOne(r,g,i,group);
                 if(g.muzzle[i].found && LocatorMatrix(g.muzzle[i].loc,m)) { c[0]+=m[12]; c[1]+=m[13]; c[2]+=m[14]; ++n; }
             }
-            if(n) { c[0]/=n; c[1]/=n; c[2]/=n; PlaySe(r,g.shotSe,c); }   // once a round, at the muzzles' centre (4.1 0x27B500)
+            if(n) {
+                c[0]/=n; c[1]/=n; c[2]/=n;
+                g.sounds.Shot(g.shotLoops,[&](SoundHandle* handle) { return edf41c::PlaySe(r.obj,g.shotSe,c,handle); },
+                    [](const SoundHandle& handle) { return p6::SoundPlaying(handle); },
+                    [](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+            }   // 4.1 0x27B500: finite shots per round; small-gun loop once until G2 exits
         }
         if(g.duration>=0 && g.frames>g.duration)GunEnter(r,g,kG0);
         break;
     }
+    if(g.sounds.Empty())return;
+    float centre[3]={},matrix[16];
+    int count=0;
+    for(int i=0;i<g.muzzles;++i)
+        if(g.muzzle[i].found && LocatorMatrix(g.muzzle[i].loc,matrix)) {
+            for(int axis=0;axis<3;++axis)centre[axis]+=matrix[12+axis];
+            ++count;
+        }
+    if(count)for(float& value:centre)value/=count;
+    else std::memcpy(centre,r.pos,sizeof(centre));
+    g.sounds.MoveAll([&](SoundHandle& handle) { MoveSound(handle,centre); });
 }
 
 // ---- CAS ------------------------------------------------------------------------------------------------------------
@@ -972,6 +1011,7 @@ bool Play(Robo& r,int state,const wchar_t* why) noexcept {
     float t=0.0f,len=0.0f;
     ClipNow(r.obj,&before,&t,&len);
     const bool ok=PlayStateIndex(r.obj,state);
+    if(ok)r.eventSounds.StopAll(16,[](SoundHandle& handle,int fade) { StopSound(handle,fade); });
     if(ok && before==state)ClipRewind(r.obj);   // the same state again (a second walk_f_lr): from its start
     r.evState=-2;     // the events start over with the new clip
     if(r.logged<400) { ++r.logged; Log("EDF41ROBO %p plays %ls (state %d) %s",r.obj,why,state,ok ? "" : "REFUSED"); }
@@ -1342,6 +1382,79 @@ void AiTick(Robo& r) noexcept {
     if(r.flags&1) { r.cmdX=r.cmdY=r.cmdZ=r.yawRate=0.0f; r.turn=0; r.cmdAttack=-1; }
 }
 
+// ---- external player commands: only the AI chooser is replaced ----------------------------------------------------
+constexpr const char* kControlProfile="EDF41.UfoRobo";
+constexpr const wchar_t* kControlCommands[]={L"transform",L"small_gun",L"middle_gun",L"ship_buster"};
+constexpr const wchar_t* kControlNames[]={L"变形为机器人",L"膝部双管光束炮 / 飞船小型齐射",L"肩部导弹 / 飞船中型齐射",L"飞船巴斯特炮"};
+std::uint32_t CommandId(unsigned command) noexcept {
+    return command<4 ? enemy_control::AbilityId(kControlProfile,kControlCommands[command],command) : 0;
+}
+std::uint32_t AttackId(const AttackEntry& attack,unsigned index) noexcept {
+    return enemy_control::AbilityId(kControlProfile,attack.state.c_str(),index+4);
+}
+const wchar_t* AttackName(const AttackEntry& attack) noexcept {
+    struct Name { const wchar_t* state;const wchar_t* label; };
+    constexpr Name names[]={
+        {L"attack_chop_r",L"右手劈击"},{L"attack_chop_l",L"左手劈击"},
+        {L"attack_stomp_r",L"右脚踩踏"},{L"attack_stomp_l",L"左脚踩踏"},
+        {L"attack_fire360",L"双手环形光束扫射"},{L"attack_fire_cross",L"双手交叉光束扫射"},
+        {L"attack_fire_genocide",L"歼灭炮"},{L"attack_fire_straight",L"双手直射光束"}};
+    for(const auto& name:names)if(attack.state==name.state)return name.label;
+    return attack.state.c_str(); // a new authored action remains in the catalogue, rather than silently disappearing
+}
+void ClearPlayerCommands(Robo& r) noexcept {
+    r.cmdX=r.cmdY=r.cmdZ=r.yawRate=0.0f;r.turn=0;
+    r.cmdTransform=r.cmdSmall=r.cmdMiddle=r.cmdBuster=false;r.cmdAttack=-1;
+}
+void PlayerAim(Robo& r) noexcept {
+    // The source camera's absolute aim is shared with every copy, independently
+    // of its native frame cadence. Existing muzzle limits/interpolation remain.
+    float pivot[3]={r.pos[0],r.pos[1]+2.0f,r.pos[2]};
+    AimPoint(r.obj,pivot);
+    r.player.Aim(pivot,1500.0f,r.target);r.haveTarget=true;
+}
+void PlayerTick(Robo& r) noexcept {
+    ClearPlayerCommands(r);PlayerAim(r);
+    const auto& input=r.player.input;
+    if(!(r.flags&1)) {
+        const float length=std::sqrt(input.move[0]*input.move[0]+input.move[1]*input.move[1]+input.move[2]*input.move[2]);
+        const float speed=r.aiSpeed/(std::max)(1.0f,length);
+        float world[3],body[3];
+        ToWorld(r.player.yaw,input.move,world);ToLocal(r.yaw,world,body);
+        r.cmdX=body[0]*speed;r.cmdY=body[1]*speed;r.cmdZ=body[2]*speed;
+        TurnTo(r,r.target,0.01f);
+    }
+    for(unsigned n=0;n<r.player.pending;++n) {
+        const auto& press=r.player.pressed[n];
+        bool accepted=false;
+        if(press.id==CommandId(0) && r.form==0 && r.body==kS0)r.cmdTransform=accepted=true;
+        else if(press.id==CommandId(1) || press.id==CommandId(2)) {
+            const int group=press.id==CommandId(1) ? kSmall : kMiddle;
+            if(!(r.flags&1) && r.gun[group].state==kG0) {
+                if(r.form==1) {
+                    if(press.seed)r.rng=press.seed;
+                    GunEnter(r,r.gun[group],kG1);NetGun(r,group);accepted=true;
+                } else if(r.body==kS0) {
+                    (group==kSmall ? r.cmdSmall : r.cmdMiddle)=true;accepted=true;
+                }
+            }
+        } else if(press.id==CommandId(3) && r.form==0 && r.body==kS0)r.cmdBuster=accepted=true;
+        else if(r.form==1 && (r.body==kS7 || r.body==kS8)) {
+            for(unsigned i=0;i<r.attacks.size();++i)if(press.id==AttackId(r.attacks[i],i) && r.attacks[i].stateIndex>=0) {
+                r.playerAttack=static_cast<int>(i);accepted=true;break;
+            }
+        }
+        if(accepted && press.seed)r.rng=press.seed;
+    }
+    r.player.ClearEdges();
+    if(r.form==1 && r.playerAttack>=0) {
+        // A held walk would otherwise keep alternating the feet forever. Give
+        // the native chooser neutral movement until its real home step ends.
+        r.cmdX=r.cmdY=r.cmdZ=0.0f;r.turn=0;
+        if(r.body==kS7)r.cmdAttack=r.playerAttack;
+    }
+}
+
 // ---- motion (4.1 slot 1, 0x2766A0) ------------------------------------------------------------------------------------
 void Sample(const Motion& m,float t,float* out) noexcept {   // edf41robo_ai.h
     edf41robo::SampleMotion(m.keys.data(),static_cast<int>(m.keys.size()/3),m.length,t,out);
@@ -1421,10 +1534,15 @@ void RaiseEvent(Robo& r,const Event& e) noexcept {
     ++r.events;
     switch(e.kind) {
     case kEvSe:
-        PlaySe(r,e.text.c_str(),r.pos);
+        // The converter preserves an absent channel as -1. 4.1 first stops an occupied channel
+        // (0x321FAC -> 0x322290, fade 16); its 360-degree shot is an infinite ACB cue on channel 0.
+        r.eventSounds.Start(static_cast<int>(e.a),[&](SoundHandle* handle) {
+            return edf41c::PlaySe(r.obj,e.text.c_str(),r.pos,handle);
+        },[](SoundHandle& handle,int fade) { StopSound(handle,fade); });
         break;
     case kEvSeStop:
-        break;   // 4.1 stops the channel's loop (ロボ３６０発射); the cues the plugin plays are one-shots
+        r.eventSounds.StopOne(static_cast<int>(e.a),16,[](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+        break;
     case kEvHit: {   // 4.1 0x277790: damage x s at the ground under the locator, radius scale x the locator's size
         LocatorHandle l{};
         float m[16];
@@ -1611,6 +1729,7 @@ float GdiFloat(const void* gdi,std::size_t at) noexcept {
 // ApplyDamage's (it marked the object destroyed before calling OnDamaged).
 void Die(Robo& r,const void* gdi) noexcept {
     r.dead=true;
+    r.player.Restore();r.playerAttack=-1;r.playerEvent=0;
     SubHit hits[16];
     const int n=SubHits(gdi,hits,16);
     float p[3]={r.pos[0],r.pos[1],r.pos[2]},nrm[3]={0.0f,1.0f,0.0f};
@@ -1661,7 +1780,11 @@ void Die(Robo& r,const void* gdi) noexcept {
     if(r.form) { PlaySe(r,L"ロボ死亡",r.pos); BigExplosion(p,nrm,0.75f,2.0f); }
     else { PlaySe(r,L"ロボ飛行形態死亡",r.pos); BigExplosion(r.pos,back,0.75f,2.0f); }
     StopSound(r.drive,60);
-    for(Gun& g:r.gun)ChargeOff(g);
+    r.eventSounds.StopAll(16,[](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+    for(Gun& g:r.gun) {
+        g.sounds.Release([](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+        ChargeOff(g);
+    }
     float durability=0.0f;
     const char* o=static_cast<const char*>(r.obj);
     if(Readable(o+kDurabilityAt,4))std::memcpy(&durability,o+kDurabilityAt,4);
@@ -1730,10 +1853,10 @@ void Place(Robo& r) noexcept {
 
 void Tick(Robo& r) noexcept {
     ++r.ticks;
-    if(!r.placed && r.ticks<=600 && !NetFollows(r))Place(r);   // the camera may not be a view yet on the first frames
+    if(!r.player.Active() && !r.placed && r.ticks<=600 && !NetFollows(r))Place(r);   // the camera may not be a view yet on the first frames
     // dev: transform this long after the creation, as the script's ObjectAction 0 would
     const float after=Cfg().edf41RoboTransformAfter;
-    if(after>0.0f && !r.forcedTransform && r.form==0 && r.ticks>=static_cast<std::uint32_t>(after*60.0f) && !NetFollows(r)) {
+    if(!r.player.Active() && after>0.0f && !r.forcedTransform && r.form==0 && r.ticks>=static_cast<std::uint32_t>(after*60.0f) && !NetFollows(r)) {
         r.forcedTransform=true;
         Log("EDF41ROBO %p transform forced (ini Edf41RoboTransformAfter=%.0f)",r.obj,after);
         if(Alive(r.obj))BodySet(r,kS4);
@@ -1744,14 +1867,18 @@ void Tick(Robo& r) noexcept {
         if(Readable(o+kDurabilityAt,4))std::memcpy(&durability,o+kDurabilityAt,4);
         if(!(durability>0.0f))Die(r,nullptr);
     }
-    if(r.body<kS10 && !NetFollows(r))AiTick(r);   // online: a guest copy's decisions are the host's (NetIn)
-    else { r.cmdX=r.cmdY=r.cmdZ=r.yawRate=0.0f; r.turn=0; }
+    if(r.body<kS10 && !NetFollows(r)) {
+        if(r.player.Active())PlayerTick(r);
+        else AiTick(r);
+    } else { if(r.player.Active())PlayerAim(r);ClearPlayerCommands(r);r.player.ClearEdges(); }
     BodyTick(r);
+    if(r.body==kS9)r.playerAttack=-1;
     Move(r);
     NetPose(r);   // online: a guest copy pulled to the host's pose
     for(int g=0;g<4;++g)GunTick(r,r.gun[g],g);
     WriteMatrix(r);
     MoveSound(r.drive,r.pos);
+    r.eventSounds.MoveAll([&](SoundHandle& handle) { MoveSound(handle,r.pos); });
     NetOut(r);    // online: the deciding copy's periodic state
     if(r.ticks%600==0) {
         float durability=0.0f;
@@ -1881,9 +2008,14 @@ void FootIk(Robo& r,const float* newMatrix) noexcept {
 // back), the material animation. Used by the destructor (the object is still whole: the stock destructor runs after) and by
 // the shutdown callback (every robot left, while the sound system and the material data still exist).
 void Release(Robo& r) noexcept {
+    r.player.Restore();r.playerAttack=-1;r.playerEvent=0;
+    r.eventSounds.StopAll(0,[](SoundHandle& handle,int fade) { StopSound(handle,fade); });
     StopSound(r.drive,0);
     r.driveOn=false;
-    for(Gun& g:r.gun)ChargeOff(g);
+    for(Gun& g:r.gun) {
+        g.sounds.Release([](SoundHandle& handle,int fade) { StopSound(handle,fade); });
+        ChargeOff(g);
+    }
     p6::LightsEnd(r.lights);
 }
 
@@ -2080,7 +2212,7 @@ void CreateRobo(void* info) noexcept {
 // host's. Its bullets and blasts are its own, as each machine's copy of a stock enemy fires its own: the hit on a player is
 // judged on that player's machine (SoldierBase slot 34 0x5A3600), so each lands once. Durability is the game's (damage judged
 // by the shooter's machine, the HP change broadcast): a guest sees the death from its own HP (Tick) or the host's kNetBody.
-enum NetKind : std::uint8_t { kNetBody=1, kNetGun=2, kNetState=3 };
+enum NetKind : std::uint8_t { kNetBody=1, kNetGun=2, kNetState=3, kNetPlayerBody=4, kNetPlayerGun=5 };
 struct NetBodyMsg {
     std::int32_t body,pending,chain,dieFrames,form,approach;
     float stepPos[3],stepYaw,pos[3],yaw;
@@ -2094,6 +2226,23 @@ struct NetStateMsg {
     std::uint32_t ticks;
 };
 static_assert(sizeof(NetStateMsg)==64,"fixed wire layout");
+// Existing AI packets remain unchanged. Controlled transitions atomically carry
+// their lease, ordinal, source camera and RNG beside the real state/gun payload.
+// A late previous lease or repeated event cannot restart a gun or reseed a volley.
+struct NetPlayerMeta {
+    std::uint64_t lease,sequence,event,rng;
+    float aimYaw,aimPitch,target[3];
+};
+struct NetPlayerBodyMsg { NetPlayerMeta player;NetBodyMsg body; };
+struct NetPlayerGunMsg { NetPlayerMeta player;NetGunMsg gun; };
+static_assert(sizeof(NetPlayerBodyMsg)<=edf41net::kMostPayload && sizeof(NetPlayerGunMsg)<=edf41net::kMostPayload,"controlled state fits existing object-event channel");
+NetPlayerMeta PlayerMeta(Robo& r) noexcept {
+    NetPlayerMeta result{};result.lease=r.player.lease;result.sequence=r.player.sequence;
+    result.event=++r.playerEvent;result.rng=r.rng;
+    result.aimYaw=r.player.yaw;result.aimPitch=r.player.pitch;
+    std::memcpy(result.target,r.target,12);return result;
+}
+
 constexpr std::uint32_t kNetEvery=15;   // frames between two state messages (4 a second, 88 bytes each with the header)
 
 struct RoboNet {
@@ -2121,13 +2270,19 @@ void NetBody(Robo& r) noexcept {
     m.body=r.body; m.pending=r.pendingState; m.chain=r.chain; m.dieFrames=r.dieFrames; m.form=r.form; m.approach=r.approach ? 1 : 0;
     std::memcpy(m.stepPos,r.stepPos,12); m.stepYaw=r.stepYaw;
     std::memcpy(m.pos,r.pos,12); m.yaw=r.yaw;
-    if(edf41net::Send(r.obj,kNetBody,&m,sizeof(m)))++nets[r.obj].sent;
+    if(r.player.Active() && r.player.sequence) {
+        const NetPlayerBodyMsg envelope{PlayerMeta(r),m};
+        if(edf41net::Send(r.obj,kNetPlayerBody,&envelope,sizeof(envelope)))++nets[r.obj].sent;
+    } else if(edf41net::Send(r.obj,kNetBody,&m,sizeof(m)))++nets[r.obj].sent;
 }
 
 void NetGun(Robo& r,int group) noexcept {
     if(NetFollows(r) || group<0 || group>3)return;
     const NetGunMsg m{group,r.gun[group].state,r.gun[group].autoCount,0};
-    if(edf41net::Send(r.obj,kNetGun,&m,sizeof(m)))++nets[r.obj].sent;
+    if(r.player.Active() && r.player.sequence) {
+        const NetPlayerGunMsg envelope{PlayerMeta(r),m};
+        if(edf41net::Send(r.obj,kNetPlayerGun,&envelope,sizeof(envelope)))++nets[r.obj].sent;
+    } else if(edf41net::Send(r.obj,kNetGun,&m,sizeof(m)))++nets[r.obj].sent;
 }
 
 void NetOut(Robo& r) noexcept {
@@ -2210,10 +2365,22 @@ void ApplyState(Robo& r,RoboNet& n,const NetStateMsg& m) noexcept {
     for(int k=0;k<3;++k)r.target[k]=m.target[k]+n.offset[k];
 }
 
+bool ApplyPlayerMeta(Robo& r,const NetPlayerMeta& m) noexcept {
+    if(!NetFollows(r) || !r.player.Active() || r.player.lease!=m.lease || !m.sequence || !m.event || m.event<=r.playerEvent ||
+        !edf41net::Sane(&m.aimYaw,1,kPi) || !edf41net::Sane(&m.aimPitch,1,1.2f) || !edf41net::Sane(m.target,3) || r.dead || r.body>=kS10)return false;
+    r.playerEvent=m.event;r.rng=m.rng;
+    if(m.sequence>=r.player.sequence) {r.player.yaw=m.aimYaw;r.player.pitch=m.aimPitch;}
+    std::memcpy(r.target,m.target,12);r.haveTarget=true;return true;
+}
+
 void NetApply(void* context,std::uint8_t kind,const unsigned char* data,std::size_t size) noexcept {
     Robo& r=*static_cast<Robo*>(context);
     RoboNet& n=nets[r.obj];
-    if(kind==kNetBody && size==sizeof(NetBodyMsg)) { NetBodyMsg m; std::memcpy(&m,data,sizeof(m)); ApplyBody(r,n,m); }
+    if(kind==kNetPlayerBody && size==sizeof(NetPlayerBodyMsg)) {
+        NetPlayerBodyMsg m;std::memcpy(&m,data,sizeof(m));if(ApplyPlayerMeta(r,m.player))ApplyBody(r,n,m.body);
+    } else if(kind==kNetPlayerGun && size==sizeof(NetPlayerGunMsg)) {
+        NetPlayerGunMsg m;std::memcpy(&m,data,sizeof(m));if(ApplyPlayerMeta(r,m.player))ApplyGun(r,m.gun);
+    } else if(kind==kNetBody && size==sizeof(NetBodyMsg)) { NetBodyMsg m; std::memcpy(&m,data,sizeof(m)); ApplyBody(r,n,m); }
     else if(kind==kNetGun && size==sizeof(NetGunMsg)) { NetGunMsg m; std::memcpy(&m,data,sizeof(m)); ApplyGun(r,m); }
     else if(kind==kNetState && size==sizeof(NetStateMsg)) { NetStateMsg m; std::memcpy(&m,data,sizeof(m)); ApplyState(r,n,m); }
     else Fail("an event of a kind or size this version does not send (refused)");
@@ -2308,7 +2475,155 @@ void NetMirrorMake(void* self) noexcept {
 }
 
 void NetForget(const void* self) noexcept { nets.erase(self); }
+
+bool ControlMatch(const void* object) noexcept {
+    std::lock_guard<std::mutex> hold(lock);
+    const auto found=robos.find(object);
+    return found!=robos.end() && found->second.ready && !found->second.broken && !found->second.dead &&
+        found->second.body<kS10 && !ShuttingDown();
+}
+unsigned ControlAbilities(const void* object,enemy_control::Ability* out,unsigned capacity) noexcept {
+    std::lock_guard<std::mutex> hold(lock);
+    const auto found=robos.find(object);
+    if(found==robos.end() || !found->second.ready || found->second.broken)return 0;
+    const Robo& r=found->second;
+    const unsigned count=4+static_cast<unsigned>(r.attacks.size());
+    if(!out)return count;
+    for(unsigned i=0;i<(std::min)(capacity,count);++i) {
+        enemy_control::Ability ability{};ability.channel=i;ability.flags=enemy_control::AbilityFlag::edge;
+        ability.id=i<4 ? CommandId(i) : AttackId(r.attacks[i-4],i-4);
+        wcsncpy_s(ability.name,i<4 ? kControlNames[i] : AttackName(r.attacks[i-4]),_TRUNCATE);
+        using State=enemy_control::AbilityState;
+        ability.state=State::unavailable;
+        if(!r.dead && r.body<kS10) {
+            if(i==0)ability.state=r.body>=kS4 && r.body<=kS6 ? State::active : r.form==0 && r.body==kS0 ? State::native : State::unavailable;
+            else if(i==1 || i==2) {
+                const Gun& gun=r.gun[i==1 ? kSmall : kMiddle];
+                ability.state=gun.state!=kG0 ? State::active : !(r.flags&1) && (r.form==1 || r.body==kS0) ? State::native : State::unavailable;
+            } else if(i==3)ability.state=r.form==0 && r.body==kS3 ? State::active : r.form==0 && r.body==kS0 ? State::native : State::unavailable;
+            else {
+                const auto& attack=r.attacks[i-4];
+                ability.state=r.form==1 && r.body==kS9 && r.pendingState==attack.stateIndex ? State::active :
+                    r.form==1 && (r.body==kS7 || r.body==kS8) && attack.stateIndex>=0 ? State::native : State::unavailable;
+            }
+        }
+        out[i]=ability;
+    }
+    return count;
+}
+std::uint64_t ControlHash(const void* object) noexcept {
+    std::lock_guard<std::mutex> hold(lock);
+    const auto found=robos.find(object);
+    if(found==robos.end() || !found->second.ready || found->second.broken)return 0;
+    const Robo& r=found->second;
+    std::uint64_t hash=14695981039346656037ull;
+    const auto word=[&](std::uint32_t value) {for(unsigned k=0;k<4;++k){hash=(hash^(value&255u))*1099511628211ull;value>>=8;}};
+    word(2); // adapter's semantic command version (never an address or client-provided CAS string)
+    for(unsigned i=0;i<4;++i)word(CommandId(i));
+    for(unsigned i=0;i<r.attacks.size();++i)word(AttackId(r.attacks[i],i));
+    word(static_cast<unsigned>(r.clipEvents.size()));word(static_cast<unsigned>(r.motions.size()));
+    return hash ? hash : 1;
+}
+bool ControlBegin(const void* object,std::uint64_t lease) noexcept {
+    std::lock_guard<std::mutex> hold(lock);
+    const auto found=robos.find(object);
+    if(found==robos.end())return false;
+    Robo& r=found->second;
+    if(!r.ready || r.broken || r.dead || r.body>=kS10 || ShuttingDown())return false;
+    if(r.player.Active())return r.player.lease==lease;
+    r.playerAttack=-1;r.playerEvent=0;ClearPlayerCommands(r);
+    return r.player.Begin(lease,r.yaw);
+}
+bool ControlApply(const void* object,const enemy_control::Input& input,bool first) noexcept {
+    std::lock_guard<std::mutex> hold(lock);
+    const auto found=robos.find(object);
+    if(found==robos.end() || found->second.dead || found->second.broken)return false;
+    Robo& r=found->second;
+    for(const auto& action:input.active)if(action.id) {
+        bool known=false;
+        for(unsigned i=0;i<4;++i)known=known || action.id==CommandId(i);
+        for(unsigned i=0;!known && i<r.attacks.size();++i)known=action.id==AttackId(r.attacks[i],i);
+        if(!known || action.phase!=2)return false;
+    }
+    return r.player.Apply(input,first);
+}
+bool ControlRestore(const void* object) noexcept {
+    std::lock_guard<std::mutex> hold(lock);
+    const auto found=robos.find(object);
+    if(found==robos.end())return true;
+    Robo& r=found->second;r.player.Restore();r.playerAttack=-1;r.playerEvent=0;ClearPlayerCommands(r);
+    // AI and automatic-gun timers were paused in place. The current real action
+    // completes normally; the next update resumes the original state machine.
+    return true;
+}
+bool ControlNetwork(const void* object) noexcept {
+    return !edf41net::Online() || (edf41net::Enabled() && edf41net::Registered(object));
+}
+// UfoRobo has no child GameObjects or persistent emitter-team mirror. Its four
+// Gun records hold Bullet descriptions, not WeaponBase instances. FireOne uses
+// FireSe -> Fire, which copies the current owner +314 to InitParam +90 on every
+// shot; MAB hit events copy the same current +314 to GDI +24 in AreaDamage.
+// Charge particles, muzzle flashes and the lock-point component emit no damage.
+bool CollectRoboPvp(const ObjRef& root,bool allowPending,ObjRef* members,unsigned capacity,unsigned* count,
+                    unsigned* emitted) noexcept {
+    if(!count || !emitted)return false;*count=*emitted=0;
+    std::lock_guard<std::mutex> hold(lock);
+    const auto found=robos.find(root.obj);
+    if(found==robos.end() || found->second.obj!=root.obj || (!allowPending && !found->second.ready) ||
+       found->second.broken || !root.ctrl ||
+       !Readable(root.obj,kSelfCtrl+8) || At<const void*>(root.obj,0)!=&roboClass.block[1] ||
+       At<const void*>(root.obj,kSelf)!=root.obj || ObjRef::Of(root.obj).ctrl!=root.ctrl || !members || capacity<1)return false;
+    // A dying/wreck actor can still own live fields needing restoration; acquisition/deferred setup gate death separately.
+    // The custom producer creates components, not child GOBs. An unexpected native child needs its own typed proof.
+    unsigned actual=0;
+    if(!enemy_pvp_native::CollectTree(root,members,capacity,&actual) || actual!=1)return false;
+    *count=1;return true;
+}
+bool ControlPvpCollect(void*,const ObjRef& root,ObjRef* members,unsigned capacity,unsigned* count,
+                       controlled_pvp::Emitter*,unsigned,unsigned* emitted) noexcept {
+    return CollectRoboPvp(root,false,members,capacity,count,emitted);
+}
+bool SpawnPvpCollect(void*,const ObjRef& root,ObjRef* members,unsigned capacity,unsigned* count,
+                     controlled_pvp::Emitter*,unsigned,unsigned* emitted) noexcept {
+    return CollectRoboPvp(root,true,members,capacity,count,emitted);
+}
+bool PrepareSpawnPvp(void*,const ObjRef& root) noexcept {
+    // This is the same bounded initialization used by the first real Update/Message, before baseline capture.
+    // It must not run during resource preflight: native script SetLevel/SetTeam has not happened there yet.
+    ObjRef collected[1]{};unsigned count=0,emitted=0;
+    if(!CollectRoboPvp(root,true,collected,1,&count,&emitted))return false;
+    std::lock_guard<std::mutex> hold(lock);
+    const auto found=robos.find(root.obj);if(found==robos.end())return false;
+    Robo& r=found->second;
+    const int originalTeam=At<int>(root.obj,kTeamAt);
+    if(!r.ready){r.ready=true;r.broken=!Setup(r);}
+    // Setup logs native SetTeam failure for ordinary AI; an unpublished owned spawn must refuse that failed setup.
+    return !r.broken && !r.dead && r.body<kS10 && (originalTeam!=6 || At<int>(root.obj,kTeamAt)==1);
+}
+controlled_pvp::Life ControlPvpRead(void*,const controlled_pvp::Emitter&,int*) noexcept {return controlled_pvp::Life::invalid;}
+bool ControlPvpWrite(void*,const controlled_pvp::Emitter&,int) noexcept {return false;}
+bool ControlPvpMemberBaseline(void*,const ObjRef& root,const ObjRef& member,int team,int last,int* outTeam,int* outLast) noexcept {
+    if(!outTeam || !outLast || root.obj!=member.obj || root.ctrl!=member.ctrl)return false;
+    *outTeam=team;*outLast=last;return true; // no child can inherit a temporary team
+}
+bool ControlPvpEmitterBaseline(void*,const controlled_pvp::Emitter&,int,int,int*) noexcept {return false;}
+bool ControlPvpHooks(const void* object,controlled_pvp::Hooks* out) noexcept {
+    if(!out || !ControlMatch(object))return false;
+    *out={nullptr,&ControlPvpCollect,&ControlPvpRead,&ControlPvpWrite,&ControlPvpMemberBaseline,&ControlPvpEmitterBaseline};return true;
+}
 }  // namespace
+
+const EnemyControlAdapter& Edf41RoboControlAdapter() noexcept {
+    static const EnemyControlAdapter adapter{"EDF4.1 Argo",&ControlMatch,&ControlAbilities,&ControlHash,&ControlBegin,&ControlApply,&ControlRestore,&ControlNetwork,&ControlPvpHooks};
+    return adapter;
+}
+
+bool Edf41RoboPvpSpawnProof(controlled_pvp::SpawnProof* out) noexcept {
+    if(out)*out={};
+    if(!out || !factoryRegistered || !edf41c::Ready() || !Cfg().edf41Robo)return false;
+    out->hooks={nullptr,&SpawnPvpCollect,&ControlPvpRead,&ControlPvpWrite,&ControlPvpMemberBaseline,&ControlPvpEmitterBaseline};
+    out->maxMembers=1;out->prepareInstance=&PrepareSpawnPvp;return true;
+}
 
 bool InstallEdf41Robo() noexcept {
     if(!Cfg().edf41Robo) {
@@ -2327,6 +2642,7 @@ bool InstallEdf41Robo() noexcept {
     AllowAnyTeam(roboClass);
     AtGameShutdown(&ShutdownRobos);   // the robots' sounds / lights released while the sound system still exists
     const bool ok=AddFactory(L"UfoRobo",&CreateRobo);
+    factoryRegistered=ok;
     Log("EDF41ROBO on: UfoRobo %s",ok ? "queued for the game's registration" : "NOT registered");
     return ok;
 }

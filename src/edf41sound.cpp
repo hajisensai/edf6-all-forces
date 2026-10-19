@@ -15,6 +15,8 @@
 // is redirected, rather than patching the function's entry, because RedirectCall verifies the target it replaces and needs no
 // prologue copy. The bank loads right after EDF6's own SE bank (the call at 0x7B09C6, whose callee we run first): the sound
 // system has just loaded a bank through the same cache (0x7B095C), so it exists. The handle is kept until the game shuts down.
+// Without that optional bank (or if loading fails), reviewed source cues fall back to finite cues in EDF6's resident
+// SE bank. The generated table never substitutes an unbounded cue into a caller with no automatic-stop owner.
 //
 // Shutdown (the exit crash of 2026-10-15/16, docs/edf41-classes.md 12). The loader's reference is a counted one into EDF's static
 // bank cache (EDF+0x20B38A0: std::map of 0xA0-byte nodes, the count at node+0x98, the bank at node+0x48 with its "registered with
@@ -58,6 +60,7 @@
 #include "crew.h"
 #include "memory.h"
 #include "edf41classes.h"
+#include "edf41_sound_fallback.h"
 
 #include <atomic>
 #include <cstdint>
@@ -135,7 +138,7 @@ void LoadWeaponBank() noexcept {
     weaponSystem.store(system);
     weaponBankPtr.store(nullptr);
     if(!ModsFileThere(kWeaponFile)) {
-        Log("EDF41SOUND weapon bank Mods\\SOUND\\PC\\%ls not installed: 4.1's weapon sounds are off",kWeaponFile);
+        Log("EDF41SOUND weapon bank Mods\\SOUND\\PC\\%ls not installed: using finite resident cue fallbacks",kWeaponFile);
         return;
     }
     const GameString path{kWeaponPath,0,wcslen(kWeaponPath),wcslen(kWeaponPath)};
@@ -169,19 +172,27 @@ std::uint64_t __fastcall SeBankLoadHook(void* self,const void* a,std::uint64_t b
     return result;
 }
 
-// The stock lookup first; only a miss for type 0 asks our bank.
+// Stock first, imported source bank second, finite resident fallback last; type 1 voices stay native.
 bool __fastcall LookupHook(void* system,CueRef* out,int type,const wchar_t* name) {
-    if(reinterpret_cast<LookupFn>(image+kLookup)(system,out,type,name))return true;
-    void* bank=weaponBankPtr.load();
-    if(type!=0 || !bank || system!=weaponSystem.load())return false;
-    const wchar_t* cue=name;
-    const int index=reinterpret_cast<FindFn>(image+kBankFind)(bank,cue);
-    if(index==-1)return false;
-    out->bank=bank;
-    out->index=index;
-    const long hits=++fallbackHits;
-    if(hits<=8 || (hits&(hits-1))==0)Log("EDF41SOUND weapon cue '%ls' answered by 4.1's bank (index 0x%X, hit %ld)",cue,index,hits);
-    return true;
+    auto stock=[&](const wchar_t* cue) {
+        return reinterpret_cast<LookupFn>(image+kLookup)(system,out,type,cue);
+    };
+    if(type!=0)return stock(name);
+    auto imported=[&](const wchar_t* cue) {
+        void* bank=weaponBankPtr.load();
+        if(!bank || system!=weaponSystem.load())return false;
+        const int index=reinterpret_cast<FindFn>(image+kBankFind)(bank,cue);
+        if(index==-1)return false;
+        out->bank=bank;
+        out->index=index;
+        const long hits=++fallbackHits;
+        if(hits<=8 || (hits&(hits-1))==0)Log("EDF41SOUND weapon cue '%ls' answered by 4.1's bank (index 0x%X, hit %ld)",cue,index,hits);
+        return true;
+    };
+    // Missing files and failed bank loads are normal for the standalone installer.
+    // The generated targets all belong to the stock resident SE bank and have a
+    // finite lifetime, including when the caller has no automatic-stop owner.
+    return edf41sound::LookupCue(name,stock,imported);
 }
 
 // How many banks the SeManager holds (the std::list's size).

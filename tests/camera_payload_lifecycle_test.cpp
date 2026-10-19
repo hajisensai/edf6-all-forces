@@ -18,6 +18,8 @@ ULONGLONG GameMs() noexcept { return clockMs; }
 unsigned char* PlayerHuman() noexcept { return currentHuman; }
 void Log(const char*,...) noexcept {}
 bool MapHoldsKeys() noexcept { return false; }
+bool MapOwnsView() noexcept { return false; }
+bool FirstPersonVehicleView(const void*,unsigned) noexcept { return false; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
 bool IsPlayerJet(const void*) noexcept { return false; }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}

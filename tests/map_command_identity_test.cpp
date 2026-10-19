@@ -3,6 +3,19 @@
 #include <cstdlib>
 
 namespace crew {
+// Enemy control is absent in this synthetic world; keep the production UI's
+// core calls linked without admitting a native target or fabricating a lease.
+bool EnemyControlDescribe(const ObjRef& requester,const ObjRef&,enemy_control::Snapshot* out) noexcept {
+    if(out){*out={};out->ownerHumanKey=reinterpret_cast<std::uintptr_t>(requester.obj);out->reason=enemy_control::Reason::unsupportedFamily;}
+    return false;
+}
+bool EnemyControlReadSnapshot(const ObjRef&,enemy_control::Snapshot* out) noexcept {if(out)*out={};return false;}
+unsigned EnemyControlAbilities(const enemy_control::Snapshot&,unsigned,enemy_control::Ability*,unsigned) noexcept {return 0;}
+unsigned enemyBeginCalls=0,enemyExitCalls=0;enemy_control::Snapshot enemyLastRequest{};
+bool EnemyControlRequest(const enemy_control::Snapshot& snapshot) noexcept {++enemyBeginCalls;enemyLastRequest=snapshot;return false;}
+bool EnemyControlSelectAbility(const enemy_control::Snapshot&,std::uint32_t) noexcept {return false;}
+bool EnemyControlSetAbilityHeld(const enemy_control::Snapshot&,bool) noexcept {return false;}
+bool EnemyControlExit(const enemy_control::Snapshot& snapshot) noexcept {++enemyExitCalls;enemyLastRequest=snapshot;return false;}
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
 int SupportMenuCount() noexcept { return 3; }
@@ -28,6 +41,8 @@ int payloadRequests=0,payloadSeat=-1,payloadEntry=-1;std::uint64_t payloadToken=
 bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
     ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
 }
+bool SetPvpEnabledAt(bool,std::uint64_t,std::uint32_t,const char*) noexcept {return false;}
+bool SetPvpLocalTeamAt(int,std::uint64_t,std::uint32_t,const char*) noexcept {return false;}
 unsigned char* PlayerHuman() noexcept {return nullptr;}
 const void* remoteAuthority=nullptr;bool allRemote=false,mapOnline=false;
 bool IsOnlineAuthority(const void* object) noexcept {return !allRemote && object!=remoteAuthority;}
@@ -121,5 +136,26 @@ int main() {
     int skipped=0;
     Check(Issue(g,Command{Order::follow,{}},&skipped)==0 && skipped==1,"runtime refusal counted as unable to command");
     g.count=0;KeepSelection(g,ids);Check(g.sel.n==0,"removed unit loses selection");
+    Game enemyGame{};enemyGame.requester=ObjRef{object,control};
+    Game::UiHit hit{};hit.kind=Game::UiKind::enemy;hit.entry=enemyui::kBegin;
+    hit.enemy.ownerHumanKey=reinterpret_cast<std::uintptr_t>(replacement);
+    UiClick(enemyGame,hit,false);
+    Check(!enemyBeginCalls && enemyGame.noteAt,"another local owner's enemy card is rejected before the core seam");
+    hit.enemy.ownerHumanKey=reinterpret_cast<std::uintptr_t>(object);hit.enemy.revision=17;
+    UiClick(enemyGame,hit,false);
+    Check(enemyBeginCalls==1 && enemyLastRequest.revision==17 &&
+          std::wcscmp(enemyGame.note,hudtext::Tr(hudtext::Tx::enemyControlStale))==0,
+          "same-owner begin passes the rendered snapshot and reports core refusal");
+    const Game::UiHit drawn=hit;
+    ++hit.enemy.revision;
+    Check(!SameUi(drawn,hit),"enemy revision change cancels a click before release");
+    hit=drawn;hit.enemy.target[0]=1;
+    Check(!SameUi(drawn,hit),"replacement enemy identity cannot inherit a rendered click");
+    hit=drawn;hit.entry=enemyui::kExit;hit.enemy.phase=enemy_control::Phase::pending;hit.enemy.lease=91;
+    UiClick(enemyGame,hit,false);
+    Check(enemyExitCalls==1 && enemyLastRequest.phase==enemy_control::Phase::pending && enemyLastRequest.lease==91,
+          "pending cancellation reaches the core with its original lease rather than becoming another begin");
+    hit.enemy.ownerHumanKey=reinterpret_cast<std::uintptr_t>(replacement);UiClick(enemyGame,hit,false);
+    Check(enemyExitCalls==1,"another local owner cannot cancel the rendered enemy lease");
     std::printf("map_command_identity_test: %d checks passed\n",checks);
 }

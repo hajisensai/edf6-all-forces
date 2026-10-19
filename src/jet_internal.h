@@ -46,6 +46,7 @@ constexpr float kPi=3.14159265f,kG=9.8f,kGravity=14.7f;
 // m/s no jet is commanded past (see jet_flight.cpp JetSteer and jetprops.cpp).
 constexpr float kBodyTop=250.0f;
 constexpr float kMinAlt=25.0f;         // never lower over the ground than this
+constexpr float kTakeoffClear=30.0f;   // m over the ground: done taking off
 constexpr float kCeilingGap=12.0f;
 // Game ms a jet not flown this long is no longer flown (its position and command stale): left out of the
 // spatial checks (other jets near, in a burst's way, a drone docking). Not its identity: that is its ObjRef.
@@ -341,6 +342,7 @@ struct CarrierState {
     bool docking;
     const void* stationFor;
     ULONGLONG dock[kCarrierDrones];   // its drones: game ms each is ready (kDroneOut: out)
+    struct Slot { std::uint64_t token=0,lastToken=0;bool pending=false,ordered=false;float order[3]{}; } transaction[kCarrierDrones];
     ULONGLONG launchAt;      // its last launch
     int sorties;             // its launches left (kCarrierSorties)
     float order[3];          // the player flying it sent its drones here (PlayerLaunchDrone): they work round it,
@@ -353,6 +355,7 @@ struct DroneState {
     bool carried;
     int slot;
     ULONGLONG blastAt;       // a charge: game ms it went (0: not yet)
+    std::uint64_t token=0; // carrier slot's exact all-peer child transaction
 };
 // The Primer creatures' (primer.cpp). A centipede: the ones ahead of it and behind it in a long one (their
 // entries' control blocks, nullptr: none), the tail it makes for to join, the trail it leaves (kPrimerTrail samples
@@ -448,6 +451,8 @@ struct Jet {
     const char* why;         // why it withdrew
     ULONGLONG emptyFrame;    // the game frame its rider was put off for the reap (JetReap: the delete waits for it), 0 none
     bool launched;           // made by JetLaunch: anchor is its strike point
+    bool supportMetadata=false; // remote carrier metadata alone never drives native input
+    bool supportDrone=false,supportPending=false; // staged network drone: no AI/fire before every peer activates
     bool entered;            // ...its first attack run begun: its arrival over (Entering)
     bool escort;             // ...or the player, while seen (a call's follow variant; anchor: where they were last)
     unsigned flight;         // its rounds pass through the other jets of this flight (kPlacedFlight)
@@ -563,7 +568,11 @@ bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones) noexcept;
 bool HostileJet(const unsigned char* v) noexcept;   // a jet body of the enemy's (BodyRow::hostile)
 void SetJetTeam(unsigned char* v,std::int32_t team) noexcept;   // jet_spawn.cpp: SetTeam, registered with the team manager
 // Whether jet `o` is flown: in the table and flown within kStaleMs (its position and command are current).
-inline bool Flown(const Jet& o,ULONGLONG ms) noexcept { return o.ref && ms-o.seen<=kStaleMs; }
+inline bool Flown(const Jet& o,ULONGLONG ms) noexcept {
+    if(!o.ref || o.supportPending || o.supportMetadata)return false;
+    // Registered remote support is updated by native replication, not our flight step's seen clock.
+    return o.supportDrone ? Alive(o.ref) && !o.reap && !o.Vehicle()[kDead] : ms-o.seen<=kStaleMs;
+}
 
 // A called jet's arrival (the user, 2026-10-05: "有些入场情况，可以一开始就进入攻击状态"): launched by a call, kEntryMs
 // at most, until its first attack run begins (entered). Strike flies it in at its attack speed and the height it came
@@ -654,6 +663,9 @@ bool JetBarrelLog(const unsigned char* v,const float* pos) noexcept;
 void ResetTargets() noexcept;
 
 // --- jet_carrier.cpp ---
+// Metadata gathered for a carrier owned elsewhere may become an autonomous
+// carrier after its actual native pilot/authority changes.
+bool CarrierMetadataReady(Jet& carrier,ULONGLONG ms) noexcept;
 constexpr float kDockBelow=15.0f;
 constexpr float kTriggerHeld=4.0f;
 constexpr ULONGLONG kDroneSortieMs=30000,kIdleMs=4000,kKamikazeSortieMs=90000;
@@ -666,7 +678,8 @@ void LaunchDrones(Jet& c,const float* pos,const float* nose,ULONGLONG ms) noexce
 bool OutOfDrones(const Jet& c) noexcept;
 void Detonate(Jet& j,Jet* mother,float dist,ULONGLONG ms) noexcept;
 void Blast(Jet& j,unsigned char* v,ULONGLONG ms) noexcept;
-void DollMake(int i,const unsigned char* v,DWORD lifeSec) noexcept;
+bool DollMake(int i,const unsigned char* v,DWORD lifeSec) noexcept;
+bool DollReady() noexcept;
 void DollFree(int i) noexcept;
 void DollsFollow() noexcept;              // once a frame (Sweep): every doll kDollBelow under its drone, whoever moves it
 void ResetDolls() noexcept;                // the mission's end: forgotten, not deleted (they went with it)
@@ -732,6 +745,8 @@ void ResumeNpc(unsigned char* v,const float* vel) noexcept;
 // jet.cpp: the entry of one of ours the player boarded, made now if a mission placed it empty (nullptr: none).
 Jet* Adopt(unsigned char* v) noexcept;
 bool SpawnReady() noexcept;
+void ReleaseEntry(Jet& j) noexcept;
+void ResetSupportDrones() noexcept;
 bool InstallSpawn() noexcept;
 bool InstallFarRender() noexcept;
 void ResetFlights() noexcept;

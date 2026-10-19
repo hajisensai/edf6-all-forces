@@ -18,6 +18,9 @@ struct StoreSpec {
     StoreRole role;
     float mass;              // kg a round
     float drag;              // a round's share of the clean jet's parasitic drag
+    unsigned group=0;        // nonzero: one selectable loadout spanning its native barrel holders
+    unsigned barrel=0;       // original native holder index for that linked barrel
+    bool nativeControl=false; // a native trigger source, independently selectable (alternate ammunition)
 };
 // A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
 struct JetMass { float mark,mass,durability; };

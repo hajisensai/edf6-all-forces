@@ -19,8 +19,9 @@
 //  - The muzzle flash (H, fp-render-re.md §5): a shot of the player's weapon (0x696FD0) hands its flash the muzzle's shot
 //    matrix through weapon+0x4C0 (the flash keeps that pointer and copies the matrix each of its 3 updates); the call to
 //    the effect factory there (0x697FD0) is redirected so that, for the player's weapons in first person, the pointer
-//    is a matrix of this file's: the shot matrix through T, kept up to date every camera step. The round itself was
-//    made before that call from the real muzzle.
+//    becomes an owned matrix after native construction: the shot's immutable muzzle-to-weapon offset through the
+//    current weapon pose and T. Both primary and Umbra deleting destructors retire its borrowed matrix; a camera
+//    reset freezes it until then. The round itself was made before that call from the real muzzle.
 //  - The aim line (H call, M meaning): a soldier's weapon with a trajectory line (the grenade launchers' red arc) builds
 //    it with 0x6899F0(line, &start, &velocity, &gravity) from its muzzle (the call at 0x6888D9); the call is redirected and,
 //    for a line that starts at the player in first person, its start is moved through T (the viewmodel's muzzle); the
@@ -57,6 +58,8 @@
 #include "vehicle_look.h"
 #include "fp_motion.h"
 #include "fp_skin_gpu.h"
+#include "thermal.h"
+#include "enemy_control.h"
 #include "map.h"
 #include "memory.h"
 #include "edf/host.h"
@@ -101,10 +104,12 @@ constexpr int kMostWeapons=16;
 // +0x90, the character proxy's support +0x711 (2 = in the air), frames on the ground +0x1264 (0 -> 1 = a landing), the
 // action limits +0x5D0 (each stock move writes its own value on entry); the hands' weapon sets [+0x1970] (count +0x1980,
 // 0x150 each, the weapon in hand **(set+0x40)). A weapon: shots fired +0xBD0, its fire state +0xBD4 (3 = a reload's
-// animation starts), ReloadTime +0x20C (frames), FireRecoil +0x37C.
+// animation runs, 4 = its _finish: 0x693DB5 / 0x693D0E), the reload's frames left +0xE68 (both states run while it is
+// above 0: 0x693BAF; payload.cpp's reload bar reads it too), ReloadTime +0x20C (frames), FireRecoil +0x37C.
 constexpr std::size_t kLook=0x1240,kPos=0x90,kSupport=0x711,kGroundFrames=0x1264,kActLimit=0x5D0,
                       kSets=0x1970,kSetCount=0x1980,kSetStride=0x150,kSetWeapon=0x40,
-                      kShotCount=0xBD0,kFireState=0xBD4,kReloadTime=0x20C,kFireRecoil=0x37C;
+                      kShotCount=0xBD0,kFireState=0xBD4,kReloadTime=0x20C,kFireRecoil=0x37C,
+                      kReloadLeft=0xE68;
 constexpr int kMostSets=4,kMostReloadFrames=900;
 // The stock moves by the value they write to +0x5D0 (§3.3; H for the Ranger's sprint and the rolls, L for the Fencer's
 // and the Wing Diver's: Debug=1 logs every change to match them). Only the Ranger's is a sprint (a run held); the
@@ -115,7 +120,7 @@ constexpr std::uint32_t kSprints[]={0x29E},kDashes[]={0x29,0x3D,0xA38,0x25,0xE39
 // &weapon+0x488: the flash takes its matrix pointer from weapon+0x4C0 = r9+0x38).
 constexpr unsigned kFlashCall=0x697FD0,kEffectCreate=0x1194280;
 constexpr std::size_t kFlashParam=0x488,kFlashMatrix=0x4C0;
-constexpr int kFlashSlots=16,kFlashFrames=8;   // matrices handed out (a flash lives 3 updates)
+constexpr int kFlashSlots=64;   // never reused until the native effect is destroyed
 // The aim line's build (a soldier weapon's call of it) and how near the player's chest its start must be to be theirs.
 constexpr unsigned kAimLineCall=0x6888D9,kAimLineBuild=0x6899F0;
 // Umbra's object transform setter (0x6C06A0 calls it with model+0x110 after an update).
@@ -158,6 +163,11 @@ using CamStepFn=void(__fastcall*)(void*,void*);
 using DrawFn=void(__fastcall*)(void*,void*,int,void*);
 CamStepFn nextCamStep=nullptr;
 bool camOk=false,drawOk=false;
+// The module that holds the model draw when another plugin replaced it outright (not a chain onto the stock draw
+// our hook could sit on): EDF6RangerFPS swaps the slot and recolours the same skin palette, so the two first
+// persons cannot both draw. Named in the install line and once when the key is pressed (empty: not the reason).
+char drawOwner[64]{};
+bool drawOwnerToldOnKey=false;
 
 // The draw hook is on every vtable whose slot 1 is the stock draw (a model class that keeps it): each its own next.
 struct Hooked { const void* vtable; DrawFn next; };
@@ -170,9 +180,15 @@ const unsigned char* HandWeapon(int hand,bool* flip) noexcept;
 bool HandBounds(int hand,const unsigned char* w,M4* out) noexcept;
 int BoneIndex(const unsigned char* inst,const wchar_t* name) noexcept;
 
-struct Unbatched { const void* model; void* batch; };
-struct alignas(16) Flash { float m[16]; const float* src; int age,hand; };
-struct LookApplied { void* cam=nullptr;float before[16]{},written[16]{}; };
+struct Unbatched { const void* model; void* batch; const void* ctrl; };
+struct alignas(16) Flash { float m[16]; M4 local; const void* model; void* effect; int hand; unsigned reserved[3]; };
+struct CameraApplied { void* cam=nullptr;fpview::CameraWrite edit{}; };
+struct KeyGesture {
+    const unsigned char* human=nullptr;
+    const void* control=nullptr;
+    std::uint64_t press=0;
+    bool was=false,rode=false,cancelled=false;
+};
 // --- What the camera step leaves for the draws (State: game thread only; the draws read only DrawSnap) ---
 // What the draws read of a camera's state (docs/fp-render-re.md §17.5): the draws run on a render thread while the
 // game thread's camera step rewrites State, so the step publishes this as a whole (Publish, a sequence count: odd
@@ -181,10 +197,13 @@ struct LookApplied { void* cam=nullptr;float before[16]{},written[16]{}; };
 struct DrawSnap {
     bool on,riding;
     const void* body;
+    const void* bodyCtrl;const void* rideCtrl;
     const void* rideModel;      // riding: the vehicle's model (its instruments)
     const void* weapons[kMostWeapons];
+    const void* weaponCtrls[kMostWeapons];
     int weaponCount;
     const void* inHand[kMostSets];
+    const void* inHandCtrls[kMostSets];
     int handOf[kMostSets];
     int inHandCount;
     bool viewOk[2],shown[2],onOther[2],placeWeaponOk[2],placeBodyOk[2],shoulderOk[2],boundsOk[2];
@@ -204,23 +223,27 @@ struct State {
     Unbatched unbatched[kMostUnbatched]{};
     Flash flashes[kFlashSlots]{};
     int flashNext=0;
-    LookApplied lookApplied{};
+    CameraApplied cameraApplied{};
+    KeyGesture key{};
     const unsigned char* nativeWeapon[2]{};
     float nativeRest[2][3]{};
-    bool on;                    // the local player's camera is in first person
+    bool on;                    // the local player's underlying camera is in first person
+    bool overridden;            // an outer camera owner (map/TV, including its transition) draws this viewport
     unsigned char* human;       // that player
     unsigned char* cam;         // its camera
     const void* body;           // its body model
+    const void* bodyCtrl;const void* rideCtrl;
     const void* weapons[kMostWeapons];
+    const void* weaponCtrls[kMostWeapons];
     int weaponCount;
     const void* inHand[kMostSets];   // the weapons in hand (each set's current one): their models
+    const void* inHandCtrls[kMostSets];
     int handOf[kMostSets];           // ...and the hand each is in (kRight, kLeft)
     int inHandCount;
-    float stock[16];           // the stock matrix this frame (put back before the next step)
     float eyeLocal[3];          // the eased eye in the body frame
     bool fresh;                 // the eye taken as it is next frame
-    float savedNear,savedSmooth;
-    bool nearSet,smoothSet;
+    float savedNear,savedSmooth,stepNear,writtenNear;
+    bool nearSet,smoothSet,stepNearSet;
     // The motion: last frame's readings and the springs.
     bool have;
     float pitch,yaw,pos[3],vy;
@@ -309,11 +332,19 @@ struct SnapScope {
     explicit SnapScope(const DrawSnap* next) noexcept : before(drawSnap) { drawSnap=next; }
     ~SnapScope() { drawSnap=before; }
 };
+// Only inspect the current native model's embedded owner field; never dereference a cached control block.
+// A pooled model address is not its identity. An old snapshot must not pose a new NPC/weapon at that address.
+bool ModelOwnerIs(const void* model,std::size_t ownerOffset,const void* control) noexcept {
+    if(!model || !control)return false;
+    const auto owner=static_cast<const unsigned char*>(model)-ownerOffset;
+    return Readable(owner,kSelfCtrl+8) && !(owner[0x18]&4) && At<const void*>(owner,kSelfCtrl)==control;
+}
 int SnapHand(const DrawSnap& d,const void* model) noexcept {
-    for(int i=0;i<d.inHandCount && i<kMostSets;++i)if(d.inHand[i]==model)return d.handOf[i];
+    for(int i=0;i<d.inHandCount && i<kMostSets;++i)if(d.inHand[i]==model && ModelOwnerIs(model,kWeaponModel,d.inHandCtrls[i]))return d.handOf[i];
     return -1;
 }
 void Publish() noexcept;
+void ResetToggleGestures() noexcept;
 bool TakeSnapshotOf(int index,DrawSnap* out) noexcept {
     Published& p=published[index];
     return SeqTake(&p.seq,&p.snap,out,&p.last,&p.lastOk);
@@ -352,7 +383,13 @@ unsigned appliedSession=0;
 void SyncSession() noexcept {
     const unsigned next=session.load(std::memory_order_acquire);
     if(next==appliedSession)return;
-    for(auto& state:states){state=State{};selected=&state;Publish();ClearViews(static_cast<int>(&state-states));}
+    ResetToggleGestures();
+    for(auto& state:states){
+        Flash flashes[kFlashSlots];std::memcpy(flashes,state.flashes,sizeof(flashes));
+        for(auto& f:flashes)f.model=nullptr;
+        state=State{};std::memcpy(state.flashes,flashes,sizeof(flashes));
+        selected=&state;Publish();ClearViews(static_cast<int>(&state-states));
+    }
     selected=&states[0];fpskin::Clear();appliedSession=next;
 }
 // --- What the draws keep for themselves (render thread only: the game thread never writes or resets it) ---
@@ -379,7 +416,7 @@ void CaptureRenderCamera(void* camera,const float* world) noexcept {
     if(!state)return;
     M4 frame;std::memcpy(frame.m,world,64);
     M4 native;
-    const bool ok=fpview::NativeView(frame,&native) && state->on;
+    const bool ok=fpview::NativeView(frame,&native) && state->on && !state->overridden;
     Published& p=published[state-states];
     SeqPublish(&p.viewSeq,&p.views,[&](ViewHistory& v){
         const int at=v.next>=0 && v.next<kViewHistory ? v.next : 0;
@@ -454,12 +491,19 @@ State* ViewState(const void* view) noexcept {
 }
 using CreateFn=void*(__fastcall*)(void*,void*,void*,void*);
 std::atomic<bool> toggled{false};   // read by FirstPersonGunnerSight on the draw thread too
-bool keyWas=false,keyRode=false,keyCancelled=false;   // keyRode: riding when the key went down
+// One physical key still toggles the shared preference once. Gestures themselves
+// belong to a camera's actual human/control identity, so another local player's
+// map or controlled body cannot cancel them. Delayed camera passes share a press
+// serial rather than relying on which viewport happens to update first.
+std::uint64_t keyPress=0,keyConsumed=0;
+bool keyPhysicalDown=false;
+const unsigned char* keyClaimHuman=nullptr;
+const void* keyClaimControl=nullptr;
 int passLog[2][6]{};   // the body's draws, the weapons' in hand, by pass
 ULONGLONG passLogAt=0;
 
-bool KeyInputAllowed() noexcept {
-    if(MapHoldsKeys())return false;
+bool KeyInputAllowed(const unsigned char* human) noexcept {
+    if(MapHoldsHumanKeys(human))return false;
     DWORD pid=0;
     GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
     return pid==GetCurrentProcessId();
@@ -555,24 +599,61 @@ bool KeyTaken(const unsigned char* h,int vk) noexcept {
 // held while boarding it chose the gunship's gunner seat (GunshipGunnerKey, V too, playerjet.cpp), so a press over
 // which the player got in or out switches nothing (it used to switch on the press, the boarding with it). Where the
 // vehicle uses the key itself (KeyTaken) it is that vehicle's: the switch stays as it was set before boarding.
-void Toggle(const unsigned char* h) noexcept {
+bool ToggleDown() noexcept {
     const Config& c=Cfg();
     const bool down=c.firstPersonKey>0 && (edf::AsyncKey(c.firstPersonKey)&0x8000)!=0;
-    // Loss of input ownership cancels this gesture; it is not a key release. If the
-    // physical key is still held when focus/the map returns, wait for its release
-    // before allowing another gesture, so the held boarding/map key cannot toggle.
-    if(!h || !c.enabled || !c.firstPerson || !camOk || !drawOk || !KeyInputAllowed() || KeyTaken(h,c.firstPersonKey)) {
-        keyWas=false;keyCancelled=down;return;
+    if(down && drawOwner[0] && !drawOwnerToldOnKey && c.enabled && c.firstPerson) {
+        drawOwnerToldOnKey=true;
+        Log("FP key 0x%X: first person is off, the model draw is %s's (another first-person mod)",c.firstPersonKey,drawOwner);
     }
-    if(keyCancelled){if(!down)keyCancelled=false;return;}
-    const bool riding=h && !HumanOnFoot(h);
-    if(down && !keyWas)keyRode=riding;
-    if(!down && keyWas && keyRode==riding){const bool on=!toggled.load();toggled.store(on);Log("FP %s (key 0x%X)",on ? "on" : "off",c.firstPersonKey);}
-    keyWas=down;
+    if(down && !keyPhysicalDown){if(++keyPress==0)++keyPress;keyClaimHuman=nullptr;keyClaimControl=nullptr;}
+    keyPhysicalDown=down;
+    return down;
+}
+void ResetToggleGestures() noexcept {
+    ToggleDown();keyConsumed=keyPress;keyClaimHuman=nullptr;keyClaimControl=nullptr; // consume any in-flight press
+}
+bool BindToggle(const unsigned char* human,bool down) noexcept {
+    auto& key=Current().key;
+    const void* control=human && Readable(human,kSelfCtrl+8) ? At<const void*>(human,kSelfCtrl) : nullptr;
+    if(!human || !control){key.was=false;key.cancelled=down;key.press=0;return false;}
+    if(key.human!=human || key.control!=control) {
+        const bool replaced=key.human!=nullptr;
+        key=KeyGesture{};key.human=human;key.control=control;key.cancelled=replaced && down;
+    }
+    return true;
+}
+void CancelToggle(const unsigned char* human) noexcept {
+    const bool down=ToggleDown();
+    if(human)BindToggle(human,down);
+    Current().key.was=false;Current().key.cancelled=down;
+}
+void Toggle(const unsigned char* human) noexcept {
+    const Config& c=Cfg();
+    const bool down=ToggleDown();
+    if(!BindToggle(human,down))return;
+    auto& key=Current().key;
+    // Ownership loss cancels only this camera's gesture. Keep its cancellation
+    // through the map's close/drain or enemy-control exit until physical release.
+    if(!c.enabled || !c.firstPerson || !camOk || !drawOk || !KeyInputAllowed(human) || KeyTaken(human,c.firstPersonKey)) {
+        key.was=false;key.cancelled=down;return;
+    }
+    if(key.cancelled){if(!down)key.cancelled=false;return;}
+    const bool riding=!HumanOnFoot(human);
+    if(down && !key.was) {
+        key.rode=riding;key.press=keyPress;
+        if(!keyClaimHuman){keyClaimHuman=human;keyClaimControl=key.control;}
+    }
+    if(!down && key.was && key.rode==riding && key.press==keyPress && key.press!=keyConsumed &&
+       keyClaimHuman==human && keyClaimControl==key.control) {
+        keyConsumed=key.press;
+        const bool on=!toggled.load();toggled.store(on);Log("FP %s (key 0x%X)",on ? "on" : "off",c.firstPersonKey);
+    }
+    key.was=down;
 }
 
 void Gather(unsigned char* h) noexcept {
-    Current().body=h+kBodyModel;
+    Current().body=h+kBodyModel;Current().bodyCtrl=At<const void*>(h,kSelfCtrl);
     Current().weaponCount=0;
     const auto list=At<unsigned char* const*>(h,kWeapons);
     const auto n=At<std::uint64_t>(h,kWeaponCount);
@@ -580,7 +661,7 @@ void Gather(unsigned char* h) noexcept {
     for(std::uint64_t i=0;i<n;++i) {
         if(!list[i])continue;
         const unsigned char* model=list[i]+kWeaponModel;
-        Current().weapons[Current().weaponCount++]=model;
+        Current().weapons[Current().weaponCount]=model;Current().weaponCtrls[Current().weaponCount++]=At<const void*>(list[i],kSelfCtrl);
         HookDrawOf(At<void**>(model,0));   // a weapon's model class may be its own (its slot 1 still the stock draw)
     }
 }
@@ -611,8 +692,10 @@ float RecoilOf(const unsigned char* w) noexcept {
     return std::isfinite(r) ? 0.3f+0.7f*std::fmin(std::fabs(r),1.0f) : 0.5f;
 }
 
-// One hand's weapon this frame: its shots, a reload started.
-void Hand(const unsigned char* w,std::uint64_t k,std::int32_t shots,std::int32_t fire,fpmotion::Cue& c) noexcept {
+// One hand's weapon this frame: its shots, and the frames its reload has left (`*reload`, the larger of the hands').
+// The reload is the game's own count (+0xE68 while the state is 3 or 4), not ours from ReloadTime at the state's start:
+// that one ran on through a reload cut short, a weapon switch or the second hand's pause, and missed the _finish.
+void Hand(const unsigned char* w,std::uint64_t k,std::int32_t shots,std::int32_t fire,fpmotion::Cue& c,int* reload) noexcept {
     const std::int32_t d=shots-Current().shots[k];
     int fired=d>0 && d<10 ? d : 0;
     Current().sampledShots+=fired;
@@ -623,24 +706,26 @@ void Hand(const unsigned char* w,std::uint64_t k,std::int32_t shots,std::int32_t
         if(event.weapon==w){Current().notifiedShots+=event.count;fired=(std::max)(fired,event.count);recoil=std::fmax(recoil,event.recoil);event=State::ShotEvent{};}
     }
     if(fired){c.shots+=fired;c.recoil=std::fmax(c.recoil,recoil);}
-    if(fire!=3 || Current().fire[k]==3)return;
-    const std::int32_t t=At<std::int32_t>(w,kReloadTime);
-    Current().reloadLeft=t>0 ? (t<kMostReloadFrames ? t : kMostReloadFrames) : 0;
-    if(Cfg().debug)Log("FP reload %d frames (FireRecoil %.3f)",t,At<float>(w,kFireRecoil));
+    const std::int32_t left=fire==3 || fire==4 ? At<std::int32_t>(w,kReloadLeft) : 0;
+    if(left>0)*reload=(std::max)(*reload,left<kMostReloadFrames ? left : kMostReloadFrames);
+    if(fire==3 && Current().fire[k]!=3 && Cfg().debug)
+        Log("FP reload %d of %d frames (FireRecoil %.3f)",left,At<std::int32_t>(w,kReloadTime),At<float>(w,kFireRecoil));
 }
 
 // The hands' weapons this frame: shots, a reload started, a switch.
 void Weapons(const unsigned char* h,fpmotion::Cue& c) noexcept {
     Current().sampledShots=Current().notifiedShots=0;
+    int reload=0;
     auto n=At<std::uint64_t>(h,kSetCount);
     if(n>kMostSets)n=kMostSets;
     for(std::uint64_t k=0;k<n;++k) {
         const unsigned char* w=SetWeapon(h,k);
         const std::int32_t shots=w ? At<std::int32_t>(w,kShotCount) : 0,fire=w ? At<std::int32_t>(w,kFireState) : 0;
-        if(Current().have && w!=Current().held[k] && Current().held[k]){c.switched=true;Current().reloadLeft=0;}
-        if(Current().have && w && w==Current().held[k])Hand(w,k,shots,fire,c);
+        if(Current().have && w!=Current().held[k] && Current().held[k])c.switched=true;
+        if(Current().have && w && w==Current().held[k])Hand(w,k,shots,fire,c,&reload);
         Current().held[k]=w;Current().shots[k]=shots;Current().fire[k]=fire;
     }
+    Current().reloadLeft=reload;
 }
 
 // What the soldier did since the last frame (fp_motion.h Cue), the readings kept for the next.
@@ -665,7 +750,6 @@ fpmotion::Cue Cues(const unsigned char* h) noexcept {
     }
     Weapons(h,c);
     c.reloading=Current().reloadLeft>0;
-    if(Current().reloadLeft>0)--Current().reloadLeft;
     c.move=MoveOf(act);
     Current().pitch=pitch;Current().yaw=yaw;std::memcpy(Current().pos,pos,12);Current().groundFrames=ground;Current().act=act;Current().have=true;
     return c;
@@ -689,6 +773,17 @@ bool RootPose(const unsigned char* model,M4* out) noexcept {
     if(!pose)return false;
     *out=MatrixAt(pose);
     return true;
+}
+
+// The shot reads muzzle-node bone records (+0xB0), rather than the draw palette. Capture its offset in that
+// same native root frame; the draw palette may already belong to a different queued render/update frame.
+bool ShotRoot(const unsigned char* model,M4* out) noexcept {
+    const auto inst=At<const unsigned char*>(model,kBaseLod+kLodInst);
+    if(!inst || At<std::int32_t>(inst,kInstCount)<=0)return false;
+    const auto bones=At<const unsigned char*>(inst,kInstBones);
+    if(!bones)return false;
+    *out=MatrixAt(bones+kBoneWorld);
+    return fpview::Finite(*out);
 }
 
 // Umbra's place of a model: a box around `eye` (kEyeBox metres each way), or its real bounds (`eye` null: the box the
@@ -726,8 +821,9 @@ void Place(const void* model,const float* eye) noexcept {
 // The body and the weapons in hand around the eye, or (`real`) where they are.
 void PlaceAll(bool real) noexcept {
     const float* eye=real ? nullptr : reinterpret_cast<const float*>(Current().cam+kCamEyeRow);
-    Place(Current().body,eye);
-    for(int i=0;i<Current().inHandCount;++i)Place(Current().inHand[i],eye);
+    if(ModelOwnerIs(Current().body,kBodyModel,Current().bodyCtrl))Place(Current().body,eye);
+    for(int i=0;i<Current().inHandCount;++i)
+        if(ModelOwnerIs(Current().inHand[i],kWeaponModel,Current().inHandCtrls[i]))Place(Current().inHand[i],eye);
 }
 
 // The hand weapon `w` hangs in: the name of its mount bone ends in _l for the left (arms_l, armsFlip_l...).
@@ -761,16 +857,18 @@ void LogWeapon(const unsigned char* w,int hand) noexcept {
         name ? name : L"?",hand==kLeft ? "left" : "right",At<const void*>(model,kUmbraObject),axis[0],axis[1],axis[2]);
 }
 
-bool StillPlayers(const void* model) noexcept {
-    for(int i=0;i<Current().weaponCount;++i)if(Current().weapons[i]==model)return true;
+bool StillPlayers(const void* model,const void* control) noexcept {
+    for(int i=0;i<Current().weaponCount;++i)if(Current().weapons[i]==model && Current().weaponCtrls[i]==control && ModelOwnerIs(model,kWeaponModel,control))return true;
     return false;
 }
 
 // The batches back: of the weapons no longer in hand (all: `all`), into those still the player's.
 void Rebatch(bool all) noexcept {
     for(Unbatched& u:Current().unbatched) {
-        if(!u.model || (!all && HandOfModel(u.model)>=0))continue;
-        if(StillPlayers(u.model) && !At<void*>(u.model,kBatch))Put<void*>(const_cast<void*>(u.model),kBatch,u.batch);
+        if(!u.model)continue;
+        if(!ModelOwnerIs(u.model,kWeaponModel,u.ctrl)){u=Unbatched{};continue;}
+        if(!all && HandOfModel(u.model)>=0)continue;
+        if(StillPlayers(u.model,u.ctrl) && !At<void*>(u.model,kBatch))Put<void*>(const_cast<void*>(u.model),kBatch,u.batch);
         u=Unbatched{};
     }
 }
@@ -778,11 +876,12 @@ void Rebatch(bool all) noexcept {
 // The weapons in hand out of their batches (kept).
 void Unbatch() noexcept {
     for(int i=0;i<Current().inHandCount;++i) {
+        if(!ModelOwnerIs(Current().inHand[i],kWeaponModel,Current().inHandCtrls[i]))continue;
         void* const batch=At<void*>(Current().inHand[i],kBatch);
         if(!batch)continue;
         for(Unbatched& u:Current().unbatched) {
             if(u.model)continue;
-            u=Unbatched{Current().inHand[i],batch};
+            u=Unbatched{Current().inHand[i],batch,Current().inHandCtrls[i]};
             Put<void*>(const_cast<void*>(Current().inHand[i]),kBatch,nullptr);
             if(Cfg().debug)Log("FP weapon model %p out of its batch %p",Current().inHand[i],batch);
             break;
@@ -801,7 +900,7 @@ void Hands(const unsigned char* h,M4* anchor,bool* anchored) noexcept {
         const unsigned char* w=SetWeapon(h,k);
         if(!w)continue;
         const int hand=HandOf(w);
-        Current().inHand[Current().inHandCount]=w+kWeaponModel;Current().handOf[Current().inHandCount++]=hand;
+        Current().inHand[Current().inHandCount]=w+kWeaponModel;Current().inHandCtrls[Current().inHandCount]=At<const void*>(w,kSelfCtrl);Current().handOf[Current().inHandCount++]=hand;
         LogWeapon(w,hand);
         if(!anchored[hand])anchored[hand]=RootPose(w+kWeaponModel,&anchor[hand]);
     }
@@ -809,34 +908,48 @@ void Hands(const unsigned char* h,M4* anchor,bool* anchored) noexcept {
 
 // The hand a weapon model is in, -1: not in hand.
 int HandOfModel(const void* model) noexcept {
-    for(int i=0;i<Current().inHandCount;++i)if(Current().inHand[i]==model)return Current().handOf[i];
+    for(int i=0;i<Current().inHandCount;++i)if(Current().inHand[i]==model && ModelOwnerIs(model,kWeaponModel,Current().inHandCtrls[i]))return Current().handOf[i];
     return -1;
 }
 
-// The Current().flashes handed out lately, moved with the viewmodel (their shot matrix through this frame's T).
+// A flash owns its muzzle-to-weapon transform, captured at that shot. The native muzzle matrix is rewritten only
+// when the gun fires (and reused by the next shot), so keeping its pointer and multiplying it by a later T makes
+// the old world position drift against a moving weapon. Rebuild from the live weapon root instead.
 void Flashes() noexcept {
     for(Flash& f:Current().flashes) {
-        if(!f.src || f.age>=kFlashFrames){f.src=nullptr;continue;}
-        ++f.age;
-        if(Current().viewOk[f.hand])std::memcpy(f.m,fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(f.src)),Current().view[f.hand]).m,64);
+        if(!f.model)continue;
+        if(HandOfModel(f.model)!=f.hand){f.model=nullptr;continue;}   // never read a removed weapon's pose
+        M4 root;
+        if(Current().viewOk[f.hand] && RootPose(static_cast<const unsigned char*>(f.model),&root))
+            std::memcpy(f.m,fpview::Mul(fpview::Mul(f.local,root),Current().view[f.hand]).m,64);
     }
 }
 
 // A shot's flash about to be made for weapon `w`: in first person, its matrix pointer is one of the Current().flashes'.
-void Relocate(unsigned char* w) noexcept {
+Flash* Relocate(unsigned char* w) noexcept {
     const int hand=Current().on ? HandOfModel(w+kWeaponModel) : -1;
-    if(hand<0 || !Current().viewOk[hand])return;
+    if(hand<0 || !Current().viewOk[hand])return nullptr;
     auto& event=Current().shotEvent[hand];
     if(event.weapon!=w)event=State::ShotEvent{w,0,0};
     if(event.count<3)++event.count;
     event.recoil=RecoilOf(w);
     const auto src=At<const float*>(w,kFlashMatrix);
-    if(!src)return;
-    Flash& f=Current().flashes[Current().flashNext];
-    Current().flashNext=(Current().flashNext+1)%kFlashSlots;
-    f.src=src;f.age=0;f.hand=hand;
-    std::memcpy(f.m,fpview::Mul(MatrixAt(reinterpret_cast<const unsigned char*>(src)),Current().view[hand]).m,64);
+    if(!src)return nullptr;
+    M4 root,inverse;
+    if(!ShotRoot(w+kWeaponModel,&root) || !fpview::InverseAffine(root,&inverse))return nullptr;
+    Flash* free=nullptr;
+    for(int k=0;k<kFlashSlots;++k) {
+        Flash& candidate=Current().flashes[(Current().flashNext+k)%kFlashSlots];
+        if(candidate.model || candidate.effect)continue; // never rebind a matrix an older effect still reads
+        free=&candidate;Current().flashNext=(Current().flashNext+k+1)%kFlashSlots;break;
+    }
+    if(!free)return nullptr;   // native flash, rather than another live shot's matrix
+    Flash& f=*free;
+    const M4 shot=MatrixAt(reinterpret_cast<const unsigned char*>(src));
+    f.local=fpview::Mul(shot,inverse);f.model=w+kWeaponModel;f.effect=nullptr;f.hand=hand;
+    std::memcpy(f.m,fpview::Mul(shot,Current().view[hand]).m,64);
     Put<const float*>(w,kFlashMatrix,f.m);
+    return &f;
 }
 
 // The start of a line `start` (x, y, z, w) moved through T into `out` when it is the player's in first person.
@@ -868,18 +981,83 @@ void* __fastcall AimLineHook(void* line,const float* start,const float* velocity
     return reinterpret_cast<LineFn>(image+kAimLineBuild)(line,from,velocity,gravity);
 }
 
+// The factory returns the raw GameObject, and every supported MuzzleFlashBase descendant borrows +0x120's
+// matrix until its real deleting destructor. Track both routes: Umbra's secondary destructor thunk jumps straight
+// to the primary body, so hooking only the primary vtable would miss that route. Native profile is audited offline.
+struct FlashClass {
+    unsigned vtable,dtor,umbra,umbraDtor;
+    void* next=nullptr;void* umbraNext=nullptr;
+};
+FlashClass flashClasses[]={
+    {0x17A5F98,0x2BA580,0,0},           // MuzzleFlashBase
+    {0x17A6068,0x2BAED0,0,0},           // EfsMuzzleFlash
+    {0x17A6158,0x2BBA10,0x17A61C0,0x2BBA04}, // LaserMuzzleFlash01
+    {0x17A6268,0x2BCCF0,0x17A62D0,0x2BCCE4}, // LaserMuzzleFlash02
+    {0x17A6378,0x2BE660,0x17A63E0,0x2BE654}, // LaserMuzzleFlash03
+    {0x17A6478,0x2BF990,0x17A64E0,0x2BF984}, // MuzzleFlash01
+    {0x17A6578,0x2C0A70,0x17A65E0,0x2C0A64}, // MuzzleFlash02
+    {0x17A6678,0x2C1800,0,0},           // MuzzleFlashRailGun
+    {0x17A6880,0x2C3120,0x17A68E8,0x2C3114}, // PileBunkerMuzzleFlash01
+    {0x17A6978,0x2C3FB0,0x17A69E0,0x2C3F98}, // TestMuzzleFlash
+};
+using FlashDtorFn=void*(__fastcall*)(void*,unsigned);
+void RetireFlash(const void* effect) noexcept {
+    for(auto& state:states)for(auto& f:state.flashes)if(f.effect==effect){f.effect=nullptr;f.model=nullptr;}
+}
+template<int Class> void* __fastcall FlashDtorHook(void* effect,unsigned flags) {
+    RetireFlash(effect);
+    return reinterpret_cast<FlashDtorFn>(flashClasses[Class].next)(effect,flags);
+}
+template<int Class> void* __fastcall FlashUmbraDtorHook(void* object,unsigned flags) {
+    RetireFlash(static_cast<unsigned char*>(object)-0x130);
+    return reinterpret_cast<FlashDtorFn>(flashClasses[Class].umbraNext)(object,flags);
+}
+const FlashDtorFn flashDtorHooks[]={
+    &FlashDtorHook<0>,&FlashDtorHook<1>,&FlashDtorHook<2>,&FlashDtorHook<3>,&FlashDtorHook<4>,
+    &FlashDtorHook<5>,&FlashDtorHook<6>,&FlashDtorHook<7>,&FlashDtorHook<8>,&FlashDtorHook<9>,
+};
+const FlashDtorFn flashUmbraDtorHooks[]={
+    &FlashUmbraDtorHook<0>,&FlashUmbraDtorHook<1>,&FlashUmbraDtorHook<2>,&FlashUmbraDtorHook<3>,&FlashUmbraDtorHook<4>,
+    &FlashUmbraDtorHook<5>,&FlashUmbraDtorHook<6>,&FlashUmbraDtorHook<7>,&FlashUmbraDtorHook<8>,&FlashUmbraDtorHook<9>,
+};
+bool HookFlashLifetime(void* effect) noexcept {
+    const auto vt=At<const unsigned char*>(effect,0);
+    for(auto& c:flashClasses)if(vt==image+c.vtable) {
+        const auto index=static_cast<std::size_t>(&c-flashClasses);
+        if(!c.next) {
+            auto slot=reinterpret_cast<void**>(image+c.vtable)+1;
+            if(*slot!=image+c.dtor || !edf::ChainVtableSlot(slot,reinterpret_cast<void*>(flashDtorHooks[index]),&c.next))return false;
+        }
+        if(c.umbra && !c.umbraNext) {
+            if(At<const unsigned char*>(effect,0x130)!=image+c.umbra)return false;
+            auto slot=reinterpret_cast<void**>(image+c.umbra);
+            if(*slot!=image+c.umbraDtor || !edf::ChainVtableSlot(slot,reinterpret_cast<void*>(flashUmbraDtorHooks[index]),&c.umbraNext))return false;
+        }
+        return true;
+    }
+    return false;   // an unknown/custom effect retains its native matrix and ownership
+}
 void* __fastcall FlashCreateHook(void* factory,void* a,void* cls,void* param) {
+    // Keep native creation/shot world transforms intact. Only after a supported effect and its destructor exist
+    // does it borrow one of our matrices; a rejected custom class or a full pool remains entirely native.
+    void* const effect=reinterpret_cast<CreateFn>(image+kEffectCreate)(factory,a,cls,param);
+    if(!effect)return effect;
     State* before=selected;
     __try {
         auto weapon=static_cast<unsigned char*>(param)-kFlashParam;
-        for(auto& state:states)if(state.on) {
+        for(auto& state:states)if(state.on && !state.overridden) {
             selected=&state;
-            if(HandOfModel(weapon+kWeaponModel)>=0){Relocate(weapon);break;}
+            if(HandOfModel(weapon+kWeaponModel)<0)continue;
+            if(HookFlashLifetime(effect)) {
+                const auto native=At<const float*>(weapon,kFlashMatrix);
+                if(auto f=Relocate(weapon)){f->effect=effect;Put<const float*>(effect,0x120,f->m);}
+                Put<const float*>(weapon,kFlashMatrix,native);
+            }
+            break;
         }
-        selected=before;
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     selected=before;
-    return reinterpret_cast<CreateFn>(image+kEffectCreate)(factory,a,cls,param);
+    return effect;
 }
 
 // Debug=1: what the viewmodel is built from, every 5 s (every half second through a reload).
@@ -957,18 +1135,28 @@ void Probe(const bool* anchored,const M4* anchor,const M4& camera) noexcept {
     Current().probeFrames=Current().probeAir=0;Current().probeSpeed=0.0f;
 }
 
+// Return only the near-plane value this camera still owns. The outer map/another camera feature may already
+// have written its own precision; its latest value must not be replaced by an older first-person baseline.
+void ReturnNear(unsigned char* cam) noexcept {
+    if(!Current().nearSet)return;
+    if(At<float>(cam,kCamNear)==Current().writtenNear)ViewWriteNear(cam,Current().savedNear);
+    Current().nearSet=false;
+}
+
 // The camera, the player's state given back: the near clip, the look smoothing.
 void Leave() noexcept {
-    if(Current().on){PlaceAll(true);Rebatch(true);}
-    if(Current().cam && Current().nearSet)Put<float>(Current().cam,kCamNear,Current().savedNear);
-    if(Current().human && Current().smoothSet)Put<float>(Current().human,kLookSmooth,Current().savedSmooth);
+    const bool humanOwned=Current().human && ModelOwnerIs(Current().human+kBodyModel,kBodyModel,Current().bodyCtrl);
+    if(Current().on && humanOwned){PlaceAll(true);Rebatch(true);}
+    if(Current().cam)ReturnNear(Current().cam);
+    if(humanOwned && Current().smoothSet)Put<float>(Current().human,kLookSmooth,Current().savedSmooth);
     if(Current().on)Log("FP view back to the stock camera");
     // Keep the camera binding even when first person is off: its independent free-look restore still runs.
     // Its submitted views go with it: a draw still to come of a first-person frame is drawn stock, never routed to a
     // state with no viewmodel published (nor to another player's).
-    auto cam=Current().cam;const auto look=Current().lookApplied;
+    auto cam=Current().cam;const auto applied=Current().cameraApplied;const auto key=Current().key;
     Flash flashes[kFlashSlots];std::memcpy(flashes,Current().flashes,sizeof(flashes));const int flashNext=Current().flashNext;
-    Current()=State{};Current().cam=cam;Current().lookApplied=look;
+    for(auto& f:flashes)f.model=nullptr;   // freeze detached effects; their destructor releases the borrowed matrix
+    Current()=State{};Current().cam=cam;Current().cameraApplied=applied;Current().key=key;
     ClearViews(static_cast<int>(selected-states));
     std::memcpy(Current().flashes,flashes,sizeof(flashes));Current().flashNext=flashNext;
 }
@@ -1204,13 +1392,15 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
         Log("FP in a vehicle: %s %p seat %d, eye at its cockpit (%.2f %.2f %.2f)",ride.name ? ride.name : "?",
             static_cast<void*>(ride.vehicle),ride.seat,eye[0],eye[1],eye[2]);
     }
-    Current().riding=true;Current().ride=ride;
+    Current().riding=true;Current().ride=ride;Current().rideCtrl=At<const void*>(ride.vehicle,kSelfCtrl);
     HookDrawOf(At<void**>(ride.vehicle+0xE40,0));
-    // The eye marker is also the seat's frame: cockpit, eye and horizon must roll/pitch together.
+    // Most seats follow their physical cockpit frame. Sazabi's decorated neck is not its pilot's view controller:
+    // preserve the physical eye while taking rotation from the same heading/pitch that drives its aim.
+    SazabiFirstPersonFrame(ride.vehicle,static_cast<unsigned>(ride.seat),ride.frame);
     std::memcpy(cam+kCamMatrix,ride.frame,64);
     VehicleLookCamera(h,reinterpret_cast<float*>(cam+kCamMatrix));
     VehicleScreens(ride.vehicle,ride.seat,eye,&Current().screens);
-    if(Current().nearSet){Put<float>(cam,kCamNear,Current().savedNear);Current().nearSet=false;}
+    ReturnNear(cam);
     if(Current().smoothSet){Put<float>(h,kLookSmooth,Current().savedSmooth);Current().smoothSet=false;}
     Current().body=h+kBodyModel;Current().weaponCount=0;Current().inHandCount=0;
     for(int hand=kRight;hand<=kLeft;++hand) {
@@ -1227,16 +1417,14 @@ unsigned char* CameraPlayer(const unsigned char* cam) noexcept {
 void Camera(unsigned char* cam) noexcept {
     const Config& c=Cfg();
     unsigned char* const h=CameraPlayer(cam);
-    static ULONGLONG toggleFrame=~ULONGLONG(0);
-    if(toggleFrame!=renderFrame){toggleFrame=renderFrame;Toggle(h);}
+    Toggle(h);
     if(!Wanted(cam,h)){if(Current().on && Current().cam==cam)Leave();if(!Current().on)Watch(h);return;}
     watched.store(nullptr,std::memory_order_relaxed);
-    if(!Current().on || Current().cam!=cam || Current().human!=h) {
+    if(!Current().on || Current().cam!=cam || Current().human!=h || Current().bodyCtrl!=At<const void*>(h,kSelfCtrl)) {
         Leave();
         Current().on=true;Current().cam=cam;Current().human=h;Current().fresh=true;Current().moved[kRight]=Current().moved[kLeft]=fpview::Identity();
         Log("FP view on %p (player %p)",cam,h);
     }
-    std::memcpy(Current().stock,cam+kCamMatrix,sizeof(Current().stock));
     if(!HumanOnFoot(h)) {
         if(!Ride(cam,h))Leave();
         return;
@@ -1252,12 +1440,19 @@ void Camera(unsigned char* cam) noexcept {
     float eye[3];
     fpview::EyeWorld(body,Current().eyeLocal,eye);
     std::memcpy(cam+kCamEyeRow,eye,12);
-    if(c.fpNear>0.0f){if(!Current().nearSet){Current().savedNear=At<float>(cam,kCamNear);Current().nearSet=true;}Put<float>(cam,kCamNear,c.fpNear);}
+    Current().stepNearSet=false;
+    const bool depthReady=ViewDepthReady();
+    if(!depthReady)ReturnNear(cam);
+    if(depthReady && c.fpNear>0.0f && !Current().overridden){
+        Current().stepNear=At<float>(cam,kCamNear);Current().stepNearSet=true;
+        if(!Current().nearSet){Current().savedNear=Current().stepNear;Current().nearSet=true;}
+        ViewWriteNear(cam,c.fpNear);Current().writtenNear=c.fpNear;
+    }
     if(c.fpAimSnap){if(!Current().smoothSet){Current().savedSmooth=At<float>(h,kLookSmooth);Current().smoothSet=true;}Put<float>(h,kLookSmooth,1.0f);}
     Gather(h);
     Views(h,cam);
-    Rebatch(false);
-    Unbatch();
+    Rebatch(Current().overridden);
+    if(!Current().overridden)Unbatch();
     Flashes();
 }
 
@@ -1265,7 +1460,7 @@ void Camera(unsigned char* cam) noexcept {
 void __fastcall RenderHook(void* system,std::uint8_t a,std::uint8_t b) {
     SyncSession();++renderFrame;
     State* before=selected;
-    __try { for(auto& state:states)if(state.on){selected=&state;PlaceAll(false);} } __except(EXCEPTION_EXECUTE_HANDLER){}
+    __try { for(auto& state:states)if(state.on && !state.overridden){selected=&state;PlaceAll(false);} } __except(EXCEPTION_EXECUTE_HANDLER){}
     selected=before;
     reinterpret_cast<RenderFn>(image+kRender)(system,a,b);
 }
@@ -1295,8 +1490,9 @@ void PassEndSelected(void* system,int pass) {
         if(d.on && pass==1) {
             const void* models[kMostSets+1];
             int n=0;
-            models[n++]=d.body;
-            for(int i=0;i<d.inHandCount && n<kMostSets+1;++i)models[n++]=d.inHand[i];
+            if(ModelOwnerIs(d.body,kBodyModel,d.bodyCtrl))models[n++]=d.body;
+            for(int i=0;i<d.inHandCount && n<kMostSets+1;++i)
+                if(ModelOwnerIs(d.inHand[i],kWeaponModel,d.inHandCtrls[i]))models[n++]=d.inHand[i];
             for(int i=0;i<n;++i)
                 if(models[i] && At<const void*>(models[i],kUmbraObject) && !Drew1Now(models[i]))
                     reinterpret_cast<SubmitFn>(image+kSubmit)(system,const_cast<void*>(models[i]),1);
@@ -1320,9 +1516,11 @@ void Publish() noexcept {
     Published& p=published[selected-states];
     const State& c=Current();
     SeqPublish(&p.seq,&p.snap,[&](DrawSnap& d){
-        d.on=c.on;d.riding=c.riding;d.body=c.body;d.rideModel=c.riding && c.ride.vehicle ? c.ride.vehicle+0xE40 : nullptr;
-        std::memcpy(d.weapons,c.weapons,sizeof(d.weapons));d.weaponCount=c.weaponCount;
-        std::memcpy(d.inHand,c.inHand,sizeof(d.inHand));std::memcpy(d.handOf,c.handOf,sizeof(d.handOf));d.inHandCount=c.inHandCount;
+        d.on=c.on && !c.overridden;d.riding=c.riding;d.body=c.body;d.bodyCtrl=c.bodyCtrl;d.rideCtrl=c.rideCtrl;
+        d.rideModel=c.riding && c.ride.vehicle ? c.ride.vehicle+0xE40 : nullptr;
+        std::memcpy(d.weapons,c.weapons,sizeof(d.weapons));std::memcpy(d.weaponCtrls,c.weaponCtrls,sizeof(d.weaponCtrls));d.weaponCount=c.weaponCount;
+        std::memcpy(d.inHand,c.inHand,sizeof(d.inHand));std::memcpy(d.inHandCtrls,c.inHandCtrls,sizeof(d.inHandCtrls));
+        std::memcpy(d.handOf,c.handOf,sizeof(d.handOf));d.inHandCount=c.inHandCount;
         for(int k=0;k<2;++k) {
             d.viewOk[k]=c.viewOk[k];d.shown[k]=c.shown[k];d.onOther[k]=c.onOther[k];
             d.placeWeaponOk[k]=c.placeWeaponOk[k];d.placeBodyOk[k]=c.placeBodyOk[k];d.shoulderOk[k]=c.shoulderOk[k];
@@ -1338,25 +1536,38 @@ void Publish() noexcept {
 }
 
 void CameraAfterNative(unsigned char* cam) noexcept {
+    const M4 native=MatrixAt(cam+kCamMatrix);
     __try {
-        Camera(cam);
-        if(!Current().on || Current().cam!=cam || !Current().riding) {
-            LookApplied record;record.cam=cam;std::memcpy(record.before,cam+kCamMatrix,64);
-            if(VehicleLookCamera(CameraPlayer(cam),reinterpret_cast<float*>(cam+kCamMatrix))) {
-                std::memcpy(record.written,cam+kCamMatrix,64);Current().lookApplied=record;
-            }
+        const auto human=CameraPlayer(cam);
+        const float* wasEye=native.m+12;
+        const float wasLook[3]={wasEye[0]+native.m[8]*100.0f,wasEye[1]+native.m[9]*100.0f,wasEye[2]+native.m[10]*100.0f};
+        float enemyEye[3],enemyLook[3];M4 controlled;
+        if(human && EnemyControlCamera(human,wasEye,wasLook,enemyEye,enemyLook) && fpview::LookFrame(enemyEye,enemyLook,&controlled)) {
+            // A controlled enemy owns this source player's view. Retire human viewmodel/near/batches and cancel any
+            // interrupted FP-key gesture. The map/TV chain still runs outside this step and has final precedence.
+            CancelToggle(human);if(Current().on)Leave();
+            std::memcpy(cam+kCamMatrix,controlled.m,64);
+        } else {
+            Camera(cam);
+            if(!Current().on || Current().cam!=cam || !Current().riding)
+                VehicleLookCamera(CameraPlayer(cam),reinterpret_cast<float*>(cam+kCamMatrix));
         }
     }
-    __except(EXCEPTION_EXECUTE_HANDLER){Current()=State{};ClearViews(static_cast<int>(selected-states));}
+    __except(EXCEPTION_EXECUTE_HANDLER){CancelToggle(nullptr);const auto key=Current().key;Current()=State{};Current().cam=cam;Current().key=key;ClearViews(static_cast<int>(selected-states));}
+    // One transaction for the final local view, irrespective of its owner. Rotation and eye are separate fields;
+    // another layer moving only the eye must not leave our old rotation as next frame's native starting frame.
+    Current().cameraApplied={cam,fpview::CameraWriteOf(native,MatrixAt(cam+kCamMatrix))};
     Publish();
 }
 
 void CamStepSelected(void* camera,void* step) {
     auto cam=static_cast<unsigned char*>(camera);
-    if(Current().lookApplied.cam==cam && std::memcmp(cam+kCamMatrix,Current().lookApplied.written,64)==0)
-        std::memcpy(cam+kCamMatrix,Current().lookApplied.before,64);
-    if(Current().lookApplied.cam==cam)Current().lookApplied=LookApplied{};
-    if(Current().on && Current().cam==cam)std::memcpy(cam+kCamMatrix,Current().stock,sizeof(Current().stock));
+    if(Current().cameraApplied.cam==cam) {
+        M4 current=MatrixAt(cam+kCamMatrix);
+        fpview::ReturnCameraWrite(&current,Current().cameraApplied.edit);
+        std::memcpy(cam+kCamMatrix,current.m,64);
+        Current().cameraApplied=CameraApplied{};
+    }
     nextCamStep(camera,step);
     CameraAfterNative(cam);
 }
@@ -1383,11 +1594,11 @@ Part PartOf(const void* model,int* hand) noexcept {
     const DrawSnap& d=Snap();
     *hand=kRight;
     if(!d.on)return Part::none;
-    if(d.riding && model==d.rideModel)return Part::instruments;
-    if(model==d.body)return Part::body;
+    if(d.riding && model==d.rideModel && ModelOwnerIs(model,0xE40,d.rideCtrl))return Part::instruments;
+    if(model==d.body && ModelOwnerIs(model,kBodyModel,d.bodyCtrl))return Part::body;
     if((*hand=SnapHand(d,model))>=0)return Part::inHand;
     *hand=kRight;
-    for(int i=0;i<d.weaponCount && i<kMostWeapons;++i)if(d.weapons[i]==model)return Part::stowed;
+    for(int i=0;i<d.weaponCount && i<kMostWeapons;++i)if(d.weapons[i]==model && ModelOwnerIs(model,kWeaponModel,d.weaponCtrls[i]))return Part::stowed;
     return Part::none;
 }
 
@@ -1406,8 +1617,6 @@ int InstancesOf(unsigned char* model,unsigned char** out) noexcept {
     if(lods && count<=8)for(std::uint64_t i=0;i<count;++i)add(At<unsigned char*>(lods+i*kLodStride,kLodInst));
     return n;
 }
-
-float saved[kMostInsts][kMostBones*16];
 
 // --- The arms posed for the first person (fp_view.h RollAngle / TurnAbout / ReachShoulder / SegmentMap) ---
 // The place the upper arm turns toward, in the eye's frame (right, up, ahead; times the viewmodel's scale): down and a
@@ -1502,16 +1711,23 @@ ArmFit FitArm(const unsigned char* inst,const float* pose,const M4& t,int hand,c
     return fit;
 }
 
+// A restore record exists only after a complete original-pose copy. Keep the exact native buffer identity:
+// skipped LODs have no backup, and a native reallocation during draw must never receive an older buffer's pose.
+struct PoseRestore {
+    unsigned char* instance=nullptr;float* pose=nullptr;const unsigned char* bones=nullptr;
+    int count=0;unsigned reserved=0;
+};
 // Arm/weapon poses through T, restored after the draw. Non-arm body bones stay native: fp_skin_gpu submits only
 // triangles owned by one visible arm, excluding mixed torso/shoulder and opposite-arm faces instead of stretching
 // their skinning weights. `t` is each hand's transform (a weapon uses its own hand's twice).
-void Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const fpview::Frustum& frustum,const M4* otherBox,float* backup) noexcept {
+void Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const fpview::Frustum& frustum,const M4* otherBox,float* backup,PoseRestore* captured=nullptr) noexcept {
     const DrawSnap& d=Snap();
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
     if(!pose || !bones || n<=0 || n>kMostBones)return;
     std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
+    if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
     ArmFit fit[2]{};
     if(body && Cfg().fpArmIk && !d.riding)for(int hand=kRight;hand<=kLeft;++hand)fit[hand]=FitArm(inst,backup,t[hand],hand,camera,frustum,otherBox);
     for(std::int32_t i=0;i<n;++i) {
@@ -1533,16 +1749,24 @@ void Pose(unsigned char* inst,const M4* t,bool body,const M4& camera,const fpvie
     }
 }
 
-void Unpose(unsigned char* inst,const float* backup) noexcept {
+void Unpose(unsigned char* inst,const float* backup,const PoseRestore* captured=nullptr) noexcept {
+    if(captured && (!captured->pose || captured->instance!=inst))return;
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
+    if(captured && (pose!=captured->pose || n!=captured->count || At<const unsigned char*>(inst,kInstBones)!=captured->bones))return;
     if(pose && n>0 && n<=kMostBones)std::memcpy(pose,backup,static_cast<std::size_t>(n)*64);
+}
+void RestoreCapturedPoses(unsigned char* const* insts,const float (*backup)[kMostBones*16],const PoseRestore* captured,int count) noexcept {
+    for(int i=0;i<count;++i)if(captured[i].pose) {
+        __try { Unpose(insts[i],backup[i],&captured[i]); }
+        __except(EXCEPTION_EXECUTE_HANDLER){Log("FP pose restore skipped: native instance %p no longer readable",insts[i]);}
+    }
 }
 
 fpskin::Mask BodyMask(const void* palette) noexcept {
     fpskin::Mask mask{};
     const DrawSnap& d=Snap();
-    if(!palette || !d.body)return mask;
+    if(!palette || !ModelOwnerIs(d.body,kBodyModel,d.bodyCtrl))return mask;
     unsigned char* insts[kMostInsts];
     const int instances=InstancesOf(const_cast<unsigned char*>(static_cast<const unsigned char*>(d.body)),insts);
     for(int k=0;k<instances;++k) {
@@ -1564,13 +1788,14 @@ fpskin::Mask BodyMask(const void* palette) noexcept {
     return mask;
 }
 
-void InstrumentPose(unsigned char* inst,float* backup) noexcept {
+void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=nullptr) noexcept {
     const DrawSnap& d=Snap();
     const auto n=At<std::int32_t>(inst,kInstCount);
     auto pose=At<float*>(inst,kInstPose);
     const auto bones=At<const unsigned char*>(inst,kInstBones);
     if(!pose || !bones || n<=0 || n>kMostBones)return;
     std::memcpy(backup,pose,static_cast<std::size_t>(n)*64);
+    if(captured)*captured=PoseRestore{inst,pose,bones,n,0};
     for(int i=0;i<n;++i) {
         const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*kBoneStride,0);
         if(name && std::wcsncmp(name,L"vc_shell_",9)==0) {
@@ -1616,7 +1841,7 @@ void NearWeapon(const void* model,int pass) noexcept {
     static const void* logged[8]{};
     static int next=0;
     const DrawSnap& snap=Snap();
-    if(!Cfg().debug || pass!=1 || snap.inHandCount<=0 || !snap.inHand[0])return;
+    if(!Cfg().debug || pass!=1 || snap.inHandCount<=0 || !snap.inHand[0] || SnapHand(snap,snap.inHand[0])<0)return;
     M4 root,gun;
     if(!RootPose(static_cast<const unsigned char*>(model),&root) || !RootPose(static_cast<const unsigned char*>(snap.inHand[0]),&gun))return;
     const float d[3]={root.m[12]-gun.m[12],root.m[13]-gun.m[13],root.m[14]-gun.m[14]};
@@ -1700,17 +1925,9 @@ void DrawProbe() noexcept {
     o.draws=0;o.drawRoot=o.drawMount=0.0f;
 }
 
-void DrawSelected(void* model,void* ctx,int pass,void* view) {
-    const DrawFn next=NextDraw(model);
-    Part part=Part::none;
-    int hand=kRight;
-    __try { part=PartOf(model,&hand); } __except(EXCEPTION_EXECUTE_HANDLER){part=Part::none;}
-    const bool on=Snap().on;
-    if(part!=Part::none)LogPass(part,pass);
-    else if(!on && model==watched.load(std::memory_order_relaxed))LogPass(Part::inHand,pass);
-    else if(on){__try { NearWeapon(model,pass); } __except(EXCEPTION_EXECUTE_HANDLER){}}
-    if(part==Part::none || pass==3 || pass==4 || pass>5){next(model,ctx,pass,view);return;}
-    if((pass==0 && part!=Part::instruments) || part==Part::stowed)return;
+// Only an owned viewmodel enters this stack frame. Native/foreign models keep the small fast path, while each
+// posed invocation (including nested calls) owns its independent backup for the duration of the native draw.
+__declspec(noinline) void DrawOwnedModel(void* model,void* ctx,int pass,void* view,Part part,int hand,DrawFn next) {
     if(pass==1 && part!=Part::instruments)Drew1(model);
     if(Cfg().debug && pass==1) {
         // The draw-time probe: has the weapon's root moved since the camera step built T from it (the drawn weapon
@@ -1729,6 +1946,10 @@ void DrawSelected(void* model,void* ctx,int pass,void* view) {
         } __except(EXCEPTION_EXECUTE_HANDLER){}
     }
     unsigned char* insts[kMostInsts];
+    // A draw may re-enter another owned model, and separate render workers must never share a backup. The native
+    // pose belongs to this invocation until it is returned; a global/thread-global scratch array cannot own it.
+    alignas(16) float saved[kMostInsts][kMostBones*16];
+    PoseRestore captured[kMostInsts]{};
     int n=0;
     __try {
         const DrawSnap& d=Snap();
@@ -1746,21 +1967,36 @@ void DrawSelected(void* model,void* ctx,int pass,void* view) {
             }
             n=InstancesOf(static_cast<unsigned char*>(model),insts);
             for(int i=0;i<n;++i) {
-                if(part==Part::instruments){InstrumentPose(insts[i],saved[i]);continue;}
+                if(part==Part::instruments){InstrumentPose(insts[i],saved[i],&captured[i]);continue;}
                 M4 t[2];
                 const bool drawn=!d.riding && DrawTransforms(insts[i],part,hand,camera,t);
                 if(!drawn){t[0]=stepT[0];t[1]=stepT[1];}
-                Pose(insts[i],t,part==Part::body,camera,frustum,otherBox,saved[i]);
+                Pose(insts[i],t,part==Part::body,camera,frustum,otherBox,saved[i],&captured[i]);
             }
         }
-    } __except(EXCEPTION_EXECUTE_HANDLER){for(int i=0;i<n;++i)Unpose(insts[i],saved[i]);n=0;}
+    } __except(EXCEPTION_EXECUTE_HANDLER){RestoreCapturedPoses(insts,saved,captured,n);n=0;}
     if(part==Part::body)fpskin::Begin(fpskin::Mask{}); // the mesh draw selects its actual LOD palette
     next(model,ctx,pass,view);
     if(part==Part::body)fpskin::End();
-    __try { for(int i=0;i<n;++i)Unpose(insts[i],saved[i]); } __except(EXCEPTION_EXECUTE_HANDLER){}
+    RestoreCapturedPoses(insts,saved,captured,n);
+}
+
+void DrawSelected(void* model,void* ctx,int pass,void* view) {
+    const DrawFn next=NextDraw(model);
+    Part part=Part::none;
+    int hand=kRight;
+    __try { part=PartOf(model,&hand); } __except(EXCEPTION_EXECUTE_HANDLER){part=Part::none;}
+    const bool on=Snap().on;
+    if(part!=Part::none)LogPass(part,pass);
+    else if(!on && model==watched.load(std::memory_order_relaxed))LogPass(Part::inHand,pass);
+    else if(on){__try { NearWeapon(model,pass); } __except(EXCEPTION_EXECUTE_HANDLER){}}
+    if(part==Part::none || pass==3 || pass==4 || pass>5){next(model,ctx,pass,view);return;}
+    if((pass==0 && part!=Part::instruments) || part==Part::stowed)return;
+    DrawOwnedModel(model,ctx,pass,view,part,hand,next);
 }
 
 void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
+    fpskin::ModelScope maskScope;
     if(pass==3 || pass==4 || pass>5){NextDraw(model)(model,ctx,pass,view);return;}
     State* state=ViewState(view);
     if(!state){NextDraw(model)(model,ctx,pass,view);return;}
@@ -1772,7 +2008,12 @@ void __fastcall DrawHook(void* model,void* ctx,int pass,void* view) {
 
 using MeshFn=void(__fastcall*)(void*,void*,int,std::uint8_t,void*);
 void __fastcall MeshHook(void* mesh,void* ctx,int pass,std::uint8_t flag,void* cache) {
-    if(!fpskin::Active()){reinterpret_cast<MeshFn>(image+kMeshDraw)(mesh,ctx,pass,flag,cache);return;}
+    const bool skin=fpskin::Active();
+    if(!skin && !thermal::WantsCapture()){
+        reinterpret_cast<MeshFn>(image+kMeshDraw)(mesh,ctx,pass,flag,cache);
+        thermal::ObserveSurface(At<ID3D11DeviceContext*>(ctx,8),pass);
+        return;
+    }
     // Repeat the supported native helper's prepare/bind/flush sequence, replacing only its DrawIndexed submission.
     // No COM vtable hooks: Steam's graphics wrapper may replace those while a frame is being built.
     using PrepareFn=std::int64_t(__fastcall*)(void*,void*,int,int,std::uint8_t);
@@ -1791,12 +2032,20 @@ void __fastcall MeshHook(void* mesh,void* ctx,int pass,std::uint8_t flag,void* c
     for(std::uint64_t i=0;i<passes;++i) {
         reinterpret_cast<PassFn>(image+kMeshPass)(ctx,holder,technique,i);
         if(At<unsigned>(ctx,0x78))reinterpret_cast<FlushFn>(image+kFlushDrawState)(static_cast<unsigned char*>(ctx)+0x20,context);
-        ID3D11Buffer* palette=nullptr;context->VSGetConstantBuffers(1,1,&palette);
-        fpskin::Mask mask{};
-        __try { mask=BodyMask(palette); } __except(EXCEPTION_EXECUTE_HANDLER){}
-        if(palette)palette->Release();
-        fpskin::Begin(mask);
-        fpskin::Submit(context,count,0,0);
+        if(skin) {
+            ID3D11Buffer* palette=nullptr;context->VSGetConstantBuffers(1,1,&palette);
+            fpskin::Mask mask{};
+            __try { mask=BodyMask(palette); } __except(EXCEPTION_EXECUTE_HANDLER){}
+            if(palette)palette->Release();
+            fpskin::Begin(mask);
+            fpskin::Submit(context,count,0,0);
+            thermal::CaptureIndexed(context,count,0,0);
+        } else {
+            // Test the same native depth/stencil state before the opaque draw writes depth. Sampling afterward
+            // with EQUAL would heat a coplanar fragment which native LESS rejected. Capture restores GPU state.
+            thermal::CaptureIndexed(context,count,0,0);
+            context->DrawIndexed(count,0,0);
+        }
     }
     if(cache) {
         Put<void*>(cache,0,passes==1 ? material : nullptr);
@@ -1846,6 +2095,34 @@ bool HookDrawOf(void** vt) noexcept {
 }
 }  // namespace
 
+// Called by the outer camera hook after it has chosen this viewport's final view. Keep the underlying eye for
+// its transition back to first person, while returning every render-side override to the native world model.
+void FirstPersonCameraOverride(const void* camera,bool overridden) noexcept {
+    State* const state=CameraState(camera);
+    if(!state || state->overridden==overridden)return;
+    StateScope scope(state);
+    state->overridden=overridden;
+    if(state->on) {
+        if(overridden){
+            PlaceAll(true);Rebatch(true);
+            // The map raised its near plane before our camera step. Return that frame's value, rather than
+            // replacing the map's precision with the viewmodel's close clip for its first frame.
+            if(state->stepNearSet && At<float>(camera,kCamNear)==state->writtenNear)
+                ViewWriteNear(const_cast<void*>(camera),state->stepNear);
+            state->stepNearSet=false;
+        }
+        else if(!state->riding){
+            Unbatch();
+            if(ViewDepthReady() && Cfg().fpNear>0.0f){
+                if(!state->nearSet){state->savedNear=At<float>(camera,kCamNear);state->nearSet=true;}
+                ViewWriteNear(const_cast<void*>(camera),Cfg().fpNear);state->writtenNear=Cfg().fpNear;
+            }
+        }
+    }
+    ClearViews(static_cast<int>(state-states));
+    Publish();
+}
+
 void ResetFirstPerson() noexcept { session.fetch_add(1,std::memory_order_release); }
 
 bool FirstPersonOn() noexcept { for(const auto& state:states)if(state.on)return true;return false; }
@@ -1856,16 +2133,35 @@ void FirstPersonInstrumentReadings(const instruments::Readings& readings,const u
         StateScope scope(&state);Publish();
     }
 }
+bool FirstPersonVehicleView(const void* vehicle,unsigned seat) noexcept {
+    const Config& c=Cfg();
+    if(!vehicle || !camOk || !drawOk || !c.enabled || !c.firstPerson || !c.fpVehicle || !toggled)return false;
+    __try {
+        auto v=static_cast<unsigned char*>(const_cast<void*>(vehicle));
+        if(!Readable(v,kSeatCount+8) || v[kDead] || (v[0x18]&4) || seat>=SeatCount(v))return false;
+        const auto vehicleCtrl=At<const unsigned char*>(v,kSelfCtrl);
+        const auto station=SeatAt(v,seat);
+        auto human=At<unsigned char*>(station,kSeatRider);
+        const auto riderCtrl=At<const unsigned char*>(station,edf::kSeatRiderCtrl);
+        if(!vehicleCtrl || !Readable(vehicleCtrl,edf::kCtrlUses+4) || At<std::int32_t>(vehicleCtrl,edf::kCtrlUses)<=0 ||
+           !riderCtrl || !Readable(riderCtrl,edf::kCtrlUses+4) || At<std::int32_t>(riderCtrl,edf::kCtrlUses)<=0 ||
+           !human || !Readable(human,kHumanVehicle+8) || At<const void*>(human,kSelfCtrl)!=riderCtrl ||
+           !edf::IsPlayer(human) || human[kDead] || (human[0x18]&4) || HumanOnFoot(human) || At<const void*>(human,kHumanVehicle)!=v)return false;
+        float eye[3];RideView ride{};
+        return VehicleEye(human,eye,&ride) && ride.vehicle==v && ride.seat==static_cast<int>(seat);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool FirstPersonGunnerSight() noexcept {
     const Config& c=Cfg();
     return camOk && drawOk && c.enabled && c.firstPerson && c.fpVehicle && toggled;
 }
 bool FirstPersonHidesStockHud(const void* camera) noexcept {
     const auto state=CameraState(camera);
-    return state && state->on && state->riding && state->screens.n>0 && Cfg().fpHideStockHud;
+    return state && state->on && !state->overridden && state->riding && state->screens.n>0 && Cfg().fpHideStockHud;
 }
 bool FirstPersonScreens(CockpitScreens* out,const unsigned char* human) noexcept {
-    for(const auto& state:states)if(state.on && state.riding && state.screens.n && state.human==human){*out=state.screens;return true;}
+    for(const auto& state:states)if(state.on && !state.overridden && state.riding && state.screens.n && state.human==human){*out=state.screens;return true;}
     return false;
 }
 
@@ -1881,6 +2177,21 @@ bool InstallFirstPerson() noexcept {
     if(!camOk){Log("FP off: the camera step not chained");return false;}
     nextCamStep=reinterpret_cast<CamStepFn>(next);
     drawOk=HookDrawOf(reinterpret_cast<void**>(image+kModelVtable));
+    if(!drawOk) {
+        void* const held=reinterpret_cast<void**>(image+kModelVtable)[kModelDrawSlot];
+        HMODULE owner=nullptr;
+        wchar_t path[MAX_PATH]{};
+        if(held!=image+kModelDraw &&
+           GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                              static_cast<LPCWSTR>(held),&owner) && GetModuleFileNameW(owner,path,MAX_PATH)) {
+            const wchar_t* name=wcsrchr(path,L'\\');
+            _snprintf_s(drawOwner,sizeof(drawOwner),_TRUNCATE,"%ls",name ? name+1 : path);
+        } else if(held!=image+kModelDraw) {
+            _snprintf_s(drawOwner,sizeof(drawOwner),_TRUNCATE,"code at %p",held);
+        }
+        if(drawOwner[0])Log("FP off: the model draw (EDF+%X slot %zu) was replaced by %s, not chained: its first person, not ours",
+                            kModelVtable,kModelDrawSlot,drawOwner);
+    }
     bool changed=false;
     const bool cameraSubmitOk=RedirectCall(image+kCameraSubmitCall,image+kCameraSubmit,reinterpret_cast<void*>(&CameraSubmitHook),changed);
     drawOk=drawOk && cameraSubmitOk;

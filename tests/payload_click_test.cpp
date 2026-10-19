@@ -82,6 +82,17 @@ int main() {
     PumpPayloadUi(people[0]);Check(PayloadPicked(c.vehicle)==c.weapon[6] && NoShots(c),"map-only pump consumes click without a native vehicle frame or shot");
     Put<void*>(people[0],kHumanVehicleCtrl,nullptr);PumpPayloadUi(people[0]);
     Check(!PlayerSelectablePayload(&r),"map-only dismount clears the selectable publication");
+    // Map selection names one linked loadout while both barrel identities participate in revalidation.
+    SetUp();Flak(c);c.seatHolders[0][3]=c.holders[2];c.weapon[6][0x101]=6;c.weapon[2][0x100]=2;c.weapon[2][0x101]=7;
+    mapHeld=true;r=Read(c);
+    Check(r.choices==2 && Queue(r,2) && !Queue(r,3),"M exposes one clickable linked-barrel leader and keeps its partner read-only");
+    Tick(c);PlayerPayload(&after);
+    Check(after.picked==2 && after.entry[2].picked && after.entry[3].picked && SightWeapons(c,c.weapon[6],c.weapon[2]) && NoShots(c),"map choice selects both real muzzle owners without fabricating a shot");
+    Check(Queue(after,0),"map can return paired flak to its native gun group");Tick(c);PlayerPayload(&after);
+    Queue(after,2);Put<int>(c.weaponCtrl[2],8,0);Tick(c);PlayerPayload(&r);
+    Check(r.selectionToken!=after.selectionToken && r.picked==0,"expired linked partner rejects the old map snapshot before selecting the remaining group");
+    Check(Queue(r,2),"remaining real linked barrel is selectable from its new validated snapshot");Tick(c);
+    Check(SightWeapons(c,c.weapon[6]) && NoShots(c),"partial linked loadout keeps only its live barrel as optical owner");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("payload click: %d checks, %d failures\n",checks,failed);return failed ? 1 : 0;
 }

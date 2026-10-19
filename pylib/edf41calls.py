@@ -10,7 +10,8 @@ with Transporter401 (a class EDF6 no longer has), EDF6 and EDF5 with v508_transp
 is the EDF6 template's (an EDF6 call of the same vehicle and category: its class, custom_parameter, transport and
 voices; the 4.1 vehicle-named voices are not in EDF6's banks) with 4.1's own: its vehicle (VEHICLES), its settings
 (the vehicle's armour and weapons, the weapons renamed by WEAPONS, a weapon EDF6 split into left / right twice) when
-laid out as the template's (Begaruta 6 weapon slots in 4.1, 8 in EDF6; the bike's another shape: the template's then),
+laid out for the actual object (406 retains its six original holders; 302 adds EDF6's fuel fields;
+408 keeps its original single gun and three-column setup on its CarBase adapter),
 and its use (AmmoCount, ReloadTime, ReloadType, EnergyChargeRequire).
 A 4.1 bomber call (Weapon_Throw smoke candle, mode 2) holds the bomber run in ACP[4] as EDF6's Weapon_RadioContact calls
 hold theirs in ACP[2] ([Bomber401.sgo, count, interval, height, speed, ...], docs/mission-airstrike-re.md): the
@@ -26,16 +27,16 @@ import edf5port
 import sgo
 from dsgo import Node
 
-# 4.1 vehicle (lower case, as the calls name it) -> the EDF6 vehicle in its place.
+# 4.1 vehicle (lower case, as the calls name it) -> the installed vehicle. Originals use their own ported path.
 VEHICLES: dict[str, str] = {
-    'vehicle301_tank.sgo': 'v505_tank.sgo',
-    'vehicle301_tank_bulletgirls.sgo': 'v505_tank.sgo', 'vehicle301_tank_dczero.sgo': 'v505_tank.sgo',
-    'vehicle301_tank_dc55.sgo': 'v505_tank.sgo', 'vehicle301_tank_edf2pv2.sgo': 'v505_tank.sgo',
-    'vehicle301_tank_natsuiro.sgo': 'v505_tank.sgo',
-    'vehicle406_begaruta.sgo': 'v504_begaruta.sgo', 'vehicle406_begaruta_red.sgo': 'v504_begaruta_red.sgo',
-    'vehicle406_begaruta_gold.sgo': 'v504_begaruta_gold.sgo', 'vehicle406_begaruta_green.sgo': 'v504_begaruta.sgo',
-    'vehicle302_heli.sgo': 'v506_heli.sgo',
-    'vehicle408_motorbike.sgo': 'v503_bike.sgo',
+    'vehicle301_tank.sgo': 'vehicle301_tank.sgo',
+    'vehicle301_tank_bulletgirls.sgo': 'vehicle301_tank_bulletgirls.sgo', 'vehicle301_tank_dczero.sgo': 'vehicle301_tank_dczero.sgo',
+    'vehicle301_tank_dc55.sgo': 'vehicle301_tank_dc55.sgo', 'vehicle301_tank_edf2pv2.sgo': 'vehicle301_tank_edf2pv2.sgo',
+    'vehicle301_tank_natsuiro.sgo': 'vehicle301_tank_natsuiro.sgo',
+    'vehicle406_begaruta.sgo': 'vehicle406_begaruta.sgo', 'vehicle406_begaruta_red.sgo': 'vehicle406_begaruta_red.sgo',
+    'vehicle406_begaruta_gold.sgo': 'vehicle406_begaruta_gold.sgo', 'vehicle406_begaruta_green.sgo': 'vehicle406_begaruta_green.sgo',
+    'vehicle302_heli.sgo': 'vehicle302_heli.sgo',
+    'vehicle408_motorbike.sgo': 'vehicle408_motorbike.sgo',
     # 4.1's Balam itself (2026-10-12, test site #12: 「巴拉姆模型依然是巴尔加」): EDF6's v515_retrobalam is the Barga
     # (its "Retro Balam"), another, smaller robot; the 4.1 Balam is ported whole, under its own name, by
     # tools/make_edf41_objects.py (edf41port/objects: the SGO, its model, CAS and SHKT; the same class, and the same
@@ -66,10 +67,10 @@ WEAPONS: dict[str, list[str]] = {
     'v_406begaruta_missile01_l.sgo': ['v_504begaruta_missile01_l'],
     'v_406begaruta_missile01_r.sgo': ['v_504begaruta_missile01_r'],
     'v_406begaruta_rocket01.sgo': ['v_504begaruta_rocket01_l', 'v_504begaruta_rocket01_r'],
-    'v_302heli_lasercannon01.sgo': ['v_506heli_LaserCannon01_l', 'v_506heli_LaserCannon01_r'],
-    'v_302heli_gatling01.sgo': ['v_506heli_gatling01_l', 'v_506heli_gatling01_r'],
-    'v_302heli_missile01.sgo': ['v_506heli_missile01'], 'v_302heli_napalm01.sgo': ['v_506heli_napalm01'],
-    'v_408motorbike_gun.sgo': ['v_503_bike_gun_l', 'v_503_bike_gun_r'],
+    'v_302heli_lasercannon01.sgo': ['edf41_v_302heli_lasercannon01_l', 'edf41_v_302heli_lasercannon01_r'],
+    'v_302heli_gatling01.sgo': ['edf41_v_302heli_gatling01_l', 'edf41_v_302heli_gatling01_r'],
+    'v_302heli_missile01.sgo': ['edf41_v_302heli_missile01'], 'v_302heli_napalm01.sgo': ['edf41_v_302heli_napalm01'],
+    'v_408motorbike_gun.sgo': ['edf41_v_408motorbike_gun'],
 }
 USE = ('AmmoCount', 'ReloadTime', 'ReloadType', 'EnergyChargeRequire')
 
@@ -136,11 +137,42 @@ def vehicle_call(members: dict, template: Node, vehicle: str) -> dsgo.Document:
     tacp = r.get('Ammo_CustomParameter')
     drop = tacp.items[4]
     drop.items[2] = f'app:/Object/{vehicle}'
-    mine = _weapons(sgo.plain(acp[4][3])) if isinstance(acp[4][3], list) else None
-    if mine is not None:
-        converted = edf5port.to_value(mine)
-        if shape(converted) == shape(drop.items[3]):
-            drop.items[3] = converted
+    settings = sgo.plain(acp[4][3]) if isinstance(acp[4][3], list) else None
+    if leaf(vehicle).startswith('vehicle406_begaruta'):
+        # The real 406 uses EDF6's retained VehicleBegaruta class and its six
+        # original weapon holders. Expanding to the 504's eight loses the model
+        # contract; retaining the template on a shape mismatch loses the loadout.
+        if not isinstance(settings, list) or len(settings) != 6 or not isinstance(settings[4], list) or len(settings[4]) != 6:
+            raise edf5port.Unsupported('not the six-holder 406 setup')
+        drop.items[3] = edf5port.to_value(settings)
+    else:
+        mine = _weapons(settings) if settings is not None else None
+        if leaf(vehicle) == 'vehicle408_motorbike.sgo':
+            # This is the true three-wheel, two-seat CarBase adapter, not the
+            # two-gun/fuel 503. Its one holder belongs to the separate gunner.
+            if (not isinstance(mine, list) or len(mine) != 3 or not isinstance(mine[2], list)
+                    or len(mine[2]) != 1):
+                raise edf5port.Unsupported('not the single-gun 408 setup')
+            import edf41bike
+            mine[2] = edf41bike.native_gun_rows(mine[2])
+            drop.items[3] = edf5port.to_value(mine)
+        elif leaf(vehicle) == 'vehicle302_heli.sgo':
+            # EDF6 added a fuel block and a final fuel weapon. Keep those two
+            # fields while carrying all 4.1 flight settings and rebased muzzles.
+            full = drop.items[3]
+            if (not isinstance(mine, list) or len(mine) != 3 or not isinstance(mine[2], list)
+                    or not isinstance(full, Node) or len(full.items) != 4
+                    or not isinstance(full.items[3], Node) or len(full.items[3].items) != 4):
+                raise edf5port.Unsupported('not the 302 setup plus EDF6 fuel fields')
+            full.items[0] = edf5port.to_value(mine[0])
+            full.items[1] = edf5port.to_value(mine[1])
+            guns = edf5port.to_value(mine[2])
+            guns.items.append(copy.deepcopy(full.items[3].items[-1]))
+            full.items[3] = guns
+        elif mine is not None:
+            converted = edf5port.to_value(mine)
+            if shape(converted) == shape(drop.items[3]):
+                drop.items[3] = converted
     _use(r, members)
     return dsgo.Document(r, [])
 

@@ -38,7 +38,12 @@
 #include "edf41_hitlayer.h"
 #include "edf41classes.h"
 #include "edf41mother_pose.h"
+#include "edf41_sound_channels.h"
 #include "edf41net.h"
+#include "enemy_control_legacy_mother.h"
+#include "pvp_controlled.h"
+#include "pvp_controlled_spawn.h"
+#include "enemy_control_pvp_tree.h"
 #include "memory.h"
 
 #include <algorithm>
@@ -50,6 +55,7 @@
 #include <cwchar>
 #include <mutex>
 #include <new>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -381,17 +387,29 @@ void ApplyGlow(Glow& g) noexcept {
 }
 
 // ---- the records ------------------------------------------------------------------------------------------------
+std::atomic<std::uint64_t> pvpSerial301{0};
+std::uint64_t NextPvpIncarnation301() noexcept {return ++pvpSerial301;}
 enum Group { kHatch=0, kCover=1, kCannon=2, kBigCannon=3, kPanel=4 };
 const char* const kGroupNames[5]={"HatchLow","HatchMiddle","Cannon","BigCannon","Panel"};
 
-struct Wave { wchar_t path[260]; int count=0; int interval=1; int delay=0; float level=1.0f; bool active=false; int kind=1; };
+struct Wave { wchar_t path[260]{}; int count=0; int interval=1; int delay=0; float level=1.0f; bool active=false; int kind=1; };
+struct SoundKey { float time=0.0f; int kind=0,channel=-1; std::wstring name,node; bool trace=false; };
+struct SoundClip { int state=-1,clip=0; std::vector<SoundKey> events; };
+struct BoneSound { SoundHandle handle; int bone=-1; bool trace=false; };
+struct AnimationSounds {
+    bool loaded=false;
+    std::vector<SoundClip> clips;
+    edf41sound::Timeline timeline;
+    edf41sound::Channels<BoneSound> channels;
+};
 struct Part {
+    std::uint64_t pvpIncarnation=NextPvpIncarnation301();
     void* hull=nullptr;
     float local[16];                 // A: the entry's euler and position
     int group=0,index=0,ring=0;
     bool enabled=false,attack=false,boost=false,statik=false;
     bool sized=false,dead=false,falling=false,gone=false;
-    bool registered=false;
+    bool registered=false,teamInitialized=false;
     std::int32_t team=-99;
     float fallVel[3]={},lastPos[3]={};
     bool haveLast=false;
@@ -417,6 +435,7 @@ struct Part {
     int cannonBone=-2,hatchBones[4]={-2,-2,-2,-2};
     float beamOffsets[4][3]={};
     SoundHandle chargeLoop;
+    AnimationSounds animationSounds;
     std::uint64_t rng=0;
     Glow glow;                       // 4.1 PartsBase +0xA10 colour, +0xA20 target, +0xA30 rate, +0xA04 scroll
     bool hullDeathSeen=false;        // 4.1 +0x905: the hull's first frame at durability <= 0 (flash, then dark)
@@ -424,6 +443,14 @@ struct Part {
     void* lock=nullptr;              // its lock point (4.1: the MAB lock target ターゲット, lockable while 0x250520 says so)
     int lockBone=-2;
     bool restHeld=false;             // 4.1's rest pose put on the constructor's clip (edf41pose; once, on the first frame)
+    enemy_legacy::Control control;
+    std::uint64_t manualLease=0,manualSeed=0;
+    bool manualSeedSet=false;
+    bool savedEnabled=false,savedAttack=false,savedBoost=false,controlledWave=false,manualBeam=false,panelOnce=false;
+    std::vector<mother_control::Command> controlInbox;
+    bool configuredOnce=false;
+    mother_control::SpawnWave spawnWave;
+    Wave configured;                 // only a mission-authored generator message may supply this path
 };
 // The hull's main state machine (4.1 agent +0xB10, initial 0x252700; ticked only while it lives).
 enum { kHullClosed=1,kHullOpening,kHullOpen,kHullHidden,kHullClosing };
@@ -457,6 +484,9 @@ struct Hull {
     bool moveInit=false,routeSeen=false;
     float pos[3]={},point[3]={},yaw=0.0f;
     bool restHeld=false;             // closed as 4.1's, not the carrier's close_state (= the mothership's close clip) from open
+    enemy_legacy::Control control;
+    float savedYawTarget=0,manualYawLast=0;
+    std::vector<mother_control::Command> controlInbox;
 };
 std::recursive_mutex lock;
 int shotCount[5]={},removedCount[5]={};   // bullets fired and parts removed, for the periodic line
@@ -476,6 +506,10 @@ bool NetDecides(void* part) noexcept;                       // false on a guest 
 void NetCannonFire(void* part,const Part& p) noexcept;      // the deciding copy: a cannon's charge started, with its next wait
 void NetPart(void* hull,void* part,int group,std::size_t order) noexcept;   // a part's child identity (its creation order)
 void NetSpawn(const Part& p,void* enemy) noexcept;          // a hatch's enemy
+bool ApplyControlCommand(void*,const mother_control::Command&) noexcept;
+void ReplayControl301(void*) noexcept;
+void ControlTick(void* object) noexcept;
+void NetControlIn(void* object) noexcept;
 void NetPartIn(void* part,Part& p) noexcept;                // a part's frame: the host's decisions
 void NetForget(void* part) noexcept;
 void Forget(void* o) noexcept { const auto it=refs.find(o); if(it!=refs.end()) { WeakReset(it->second); refs.erase(it); } }
@@ -483,11 +517,17 @@ void Track(void* o) noexcept { Forget(o); WeakSet(refs[o],o); }
 bool Live(void* o) noexcept { const auto it=refs.find(o); return it!=refs.end() && WeakAlive(it->second); }
 Hull* HullOf(void* h) noexcept { const auto it=hulls.find(h); return it==hulls.end() ? nullptr : &it->second; }
 Part* PartOf(void* p) noexcept { const auto it=parts.find(p); return it==parts.end() ? nullptr : &it->second; }
+void StopAnimationSounds(Part& p,int fade) noexcept {
+    p.animationSounds.channels.StopAll(fade,[](BoneSound& sound,int frames) { StopSound(sound.handle,frames); });
+    p.animationSounds.timeline.Reset();
+}
 // A record's own resources go with it (bindings, loops still playing): every erase of a record goes through these.
 void DropPart(void* o) noexcept {
     const auto it=parts.find(o);
     if(it==parts.end())return;
+    it->second.spawnWave.Finish();
     FreeGlow(it->second.glow);
+    StopAnimationSounds(it->second,0);
     StopSound(it->second.chargeLoop);
     parts.erase(it);
 }
@@ -586,6 +626,8 @@ void ShutdownVents() noexcept {
         StopSound(kv.second.fall,0);
     }
     for(auto& kv:parts) {
+        loops+=!kv.second.animationSounds.channels.Empty();
+        StopAnimationSounds(kv.second,0);
         loops+=kv.second.chargeLoop.instance!=nullptr;
         StopSound(kv.second.chargeLoop,0);
     }
@@ -631,7 +673,15 @@ void PartPos(void* obj,float* out) noexcept { std::memcpy(out,static_cast<char*>
 void Matrix(void* obj,float* out) noexcept { std::memcpy(out,static_cast<char*>(obj)+kMatrixAt,64); }
 
 // ---- firing -------------------------------------------------------------------------------------------------------
+const enemy_legacy::Control* ManualAim(const Part& p) noexcept {
+    if(p.control.Active())return &p.control;
+    const Hull* h=HullOf(p.hull);
+    return h && h->control.Active() ? &h->control : nullptr;
+}
 bool AimAt(void* part,float* aim) noexcept {
+    if(const Part* p=PartOf(part))if(const auto* c=ManualAim(*p)) {
+        float pos[3];if(!AimPoint(part,pos)){PartPos(part,pos);pos[1]+=2.0f;}c->Aim(pos,1000.0f,aim);return true;
+    }
     void* t=Target(part);
     if(t && AimPoint(t,aim))return true;
     static std::atomic<int> said{0};
@@ -765,24 +815,30 @@ void RandomDown(Part& p,float maxAngle,float* out) noexcept {
 }
 
 // ---- the state machines (4.1, one to one) ---------------------------------------------------------------------------
-void Switch(Part& p,int state) noexcept { p.state=state; p.frames=0; }
+void Switch(Part& p,int state) noexcept {
+    StopAnimationSounds(p,16); // interrupted clips cannot leave their MAB channels behind
+    p.state=state;
+    p.frames=0;
+}
 enum { kBigClosed=1,kBigOpen,kBigStandby,kBigCharge,kBigFire,kBigDestroyed,kBigClose,kBigFall };
 enum { kCanDormant=1,kCanAppear,kCanStandby,kCanWait,kCanFire,kCanDestroyed,kCanFall };
 enum { kPanDormant=1,kPanStart,kPanLaser,kPanPlasma,kPanDestroyed };
 enum { kHatClosed=1,kHatOpening,kHatOpen,kHatClosing };
 
+void SeedControlSkill301(Part& p) noexcept {
+    if(p.manualLease && p.manualSeedSet){p.rng=p.manualSeed;p.manualSeedSet=false;}
+}
 void BigCannonTick(void* obj,Part& p) noexcept {
     const int f=p.frames;
     float pos[3];
     PartPos(obj,pos);
     switch(p.state) {
         case kBigClosed:
-            if(p.enabled) { Switch(p,kBigOpen); PlayState(obj,L"open"); PlaySe(p.hull,L"母船UFO砲台出現",pos); }
+            if(p.enabled) { Switch(p,kBigOpen); PlayState(obj,L"open"); }
             break;
         case kBigOpen:
             if(f>1 && AnimDone(obj)) {
                 Switch(p,kBigStandby);
-                PlaySe(p.hull,L"母船UFO砲台出現完了",pos);
                 GlowTo(p.glow,1.0f,1.0f,1.0f,1.0f);   // 4.1 0x256A90 exit
                 SetGlow(p.glow,10.0f,10.0f,10.0f,1.0f);
             }
@@ -790,8 +846,8 @@ void BigCannonTick(void* obj,Part& p) noexcept {
         case kBigStandby: {
             const bool trigger=p.boost;
             p.boost=false;   // 4.1 clears the one-shot trigger every frame of this state
-            if(!p.enabled) { Switch(p,kBigClose); PlayState(obj,L"close"); PlaySe(p.hull,L"母船UFO砲台収納",pos); }
-            else if((p.attack || trigger) && !p.statik)Switch(p,kBigCharge);
+            if(!p.enabled) { Switch(p,kBigClose); PlayState(obj,L"close"); }
+            else if((p.attack || trigger) && !p.statik){SeedControlSkill301(p);Switch(p,kBigCharge);}
             break;
         }
         case kBigCharge:
@@ -813,7 +869,7 @@ void BigCannonTick(void* obj,Part& p) noexcept {
             if(f>300) { Switch(p,kBigFall); PlaySe(p.hull,L"母船UFO砲台墜落",pos); p.falling=true; }
             break;
         case kBigClose:
-            if(f>1 && AnimDone(obj)) { Switch(p,kBigClosed); PlayState(obj,L"close_state"); PlaySe(p.hull,L"母船UFO砲台収納完了",pos); }
+            if(f>1 && AnimDone(obj)) { Switch(p,kBigClosed); PlayState(obj,L"close_state"); }
             break;
         case kBigFall:
             if(f==360 || f==380 || f==400) {
@@ -835,21 +891,20 @@ void CannonTick(void* obj,Part& p,Hull& h,float s) noexcept {
     PartPos(obj,pos);
     switch(p.state) {
         case kCanDormant:
-            if(p.enabled) { Switch(p,kCanAppear); PlayAppear(obj); PlaySe(p.hull,L"母船UFO中型砲台出現",pos); }
+            if(p.enabled) { Switch(p,kCanAppear); PlayAppear(obj); }
             break;
         case kCanAppear:
             if(f>1 && AnimDone(obj)) {
                 Switch(p,kCanStandby);
-                PlaySe(p.hull,L"母船UFO中型砲台出現残響",pos);
                 GlowTo(p.glow,5.0f,5.0f,5.0f,1.0f);   // 4.1 0x259D20 exit
                 AtLeast(p.glow,10.0f);
             }
             break;
         case kCanStandby:
-            if(p.attack && !p.statik) { p.roundStarted=true; Switch(p,kCanWait); }
+            if(p.attack && !p.statik) { SeedControlSkill301(p);p.roundStarted=true; Switch(p,kCanWait); }
             break;
         case kCanWait:
-            if(!NetDecides(obj))break;   // online: a guest copy charges when the host's does (edf41net)
+            if((p.manualLease && !p.attack) || !NetDecides(obj))break;   // online: a guest copy charges when the host's does (edf41net)
             if(p.waitFrames<f) { Switch(p,kCanFire); p.waitFrames=1800+static_cast<int>(Random01(p.rng)*1800.0f); NetCannonFire(obj,p); }
             break;
         case kCanFire:
@@ -885,10 +940,11 @@ void CannonTick(void* obj,Part& p,Hull& h,float s) noexcept {
     }
     // The beam machine: only while the cannon lives.
     if(!p.dead) {
+        const bool beam=p.manualLease ? p.manualBeam : p.attack;
         if(p.beamState==0) {
-            if(p.attack && !p.statik && p.roundStarted) { p.beamState=1; p.beamFrames=0; }
+            if(beam && !p.statik && p.roundStarted) { SeedControlSkill301(p);p.beamState=1; p.beamFrames=0; }
         } else {
-            if(!p.attack || p.statik) { p.beamState=0; p.roundStarted=false; }
+            if(!beam || p.statik) { p.beamState=0; p.roundStarted=false; }
             else {
                 if(p.beamFrames%4==0) {
                     if(Throttle(h,5))PlaySe(p.hull,L"母船UFO中型砲台ビーム",pos);
@@ -917,7 +973,7 @@ void PanelTick(void* obj,Part& p,Hull& h,float s) noexcept {
                 if(Throttle(h,0))PlaySe(p.hull,L"母船UFOパネル起動",hp);
             }
             if(t>2.0f)p.started=true;
-            if(t>6.0f && p.attack && !p.statik)Switch(p,p.type==0 ? kPanLaser : kPanPlasma);
+            if(t>6.0f && p.attack && !p.statik){SeedControlSkill301(p);Switch(p,p.type==0 ? kPanLaser : kPanPlasma);}
             break;
         case kPanLaser:
         case kPanPlasma: {
@@ -925,7 +981,8 @@ void PanelTick(void* obj,Part& p,Hull& h,float s) noexcept {
             const int every=p.state==kPanLaser ? (std::max)(30,static_cast<int>(120.0f-5.0f*s)) : 300;
             if(f%every==0) {
                 if(Throttle(h,p.state==kPanLaser ? 1 : 2))PlaySe(p.hull,p.state==kPanLaser ? L"母船UFOパネルレーザー" : L"母船UFOパネルキャノン",pos);
-                PanelShot(obj,p,s);
+                SeedControlSkill301(p);PanelShot(obj,p,s);
+                if(p.manualLease && p.panelOnce) {p.attack=false;p.panelOnce=false;}
             }
             break;
         }
@@ -944,8 +1001,24 @@ void PanelTick(void* obj,Part& p,Hull& h,float s) noexcept {
     }
 }
 
+bool OriginalSpawnTeam301(const Part& part,int* team) noexcept {
+    if(!team)return false;
+    const auto weak=refs.find(part.hull);if(weak==refs.end() || !WeakAlive(weak->second))return false;
+    const ObjRef hull{part.hull,weak->second.control};
+    if(controlled_pvp::HasTemporaryTeam(hull)) {
+        int baseline=0,last=0;
+        if(!controlled_pvp::ReadBaselineForMember(hull,&baseline,&last))return false;
+        *team=baseline==-1 || baseline==3 ? 1 : baseline;
+    } else *team=PartTeam(part.hull); // a stable mode-off lease must honour a task's current team, before its next generic Frame
+    return *team>=0 && *team<7;
+}
+
 // ---- the hatch: 4.1's ObjectGenerator (0x330E70 / 0x331270 / 0x3313C0) ------------------------------------------------
 void SpawnOne(void* obj,Part& p) noexcept {
+    const ObjRef source=ObjRef::Of(obj);int originalTeam=0;
+    if(!OriginalSpawnTeam301(p,&originalTeam) || !p.spawnWave.Prepare(source,p.current.path,static_cast<unsigned>((std::max)(0,p.remaining)))) {
+        Log("EDF41MOTHER hatch #%d spawn refused: no complete controlled native provider/budget for %ls",p.index,p.current.path);return;
+    }
     if(!p.spawnTried) {
         p.spawnTried=true;
         if(!FindLocator(static_cast<char*>(obj)+kEaoModel,L"発生位置",&p.spawnAt))
@@ -958,6 +1031,7 @@ void SpawnOne(void* obj,Part& p) noexcept {
     void* enemy=CreateFromPath(m,p.current.path);
     ++p.made;
     if(!enemy) {
+        if(mother_control::OwnedSpawner(source))p.spawnWave.fault=true;
         static std::atomic<int> said{0};
         if(said.fetch_add(1)<8)Log("EDF41MOTHER hatch #%d: the game made no %ls",p.index,p.current.path);
         return;
@@ -965,18 +1039,22 @@ void SpawnOne(void* obj,Part& p) noexcept {
     // What EDF6's own generator does to what it makes (0x6E335F..0x6E3381): level, team (registered), activate.
     const float level=p.current.level*F(p.hull,kRawLevelAt);
     SetLevel(enemy,level);
-    SetTeam(enemy,PartTeam(p.hull),true);
+    SetTeam(enemy,originalTeam,true);
+    if(!p.spawnWave.Adopt(source,ObjRef::Of(enemy))) {
+        Log("EDF41MOTHER hatch #%d spawn refused after native construction: no verified ownership for %ls",p.index,p.current.path);
+        DeleteObject(enemy);return; // this newly constructed object was never activated or published as a native spawn
+    }
     Activate(enemy);
     NetSpawn(p,enemy);   // online: the game's child identity, bound to the same enemy on every machine (edf41net)
     static std::atomic<int> said{0};
     if(said.fetch_add(1)<12)Log("EDF41MOTHER hatch #%d: enemy #%d %ls at %.0f %.0f %.0f, raw level %.2f, team %d",p.index,p.made,p.current.path,
-                                m[12],m[13],m[14],level,PartTeam(p.hull));
+                                m[12],m[13],m[14],level,I(enemy,kTeamAt));
 }
 
 void HatchTick(void* obj,Part& p) noexcept {
     float pos[3];
     PartPos(obj,pos);
-    if(p.current.active) {   // the generator, each frame
+    if(p.current.active && (!p.manualLease || p.controlledWave)) {   // the real generator, each frame
         if(p.delayLeft>0)--p.delayLeft;
         else if(p.intervalLeft>0)--p.intervalLeft;
         else if(p.permit) {
@@ -986,13 +1064,17 @@ void HatchTick(void* obj,Part& p) noexcept {
                 p.waveDone=true;
                 p.permit=false;
                 p.current.active=false;
-                if(p.permanent.active) { p.current=p.permanent; p.remaining=p.current.count; p.delayLeft=p.current.delay; p.intervalLeft=0; }
+                p.controlledWave=false;p.spawnWave.Finish();
+                if(p.permanent.active && !p.manualLease) { p.current=p.permanent; p.remaining=p.current.count; p.delayLeft=p.current.delay; p.intervalLeft=0; }
             }
         }
     }
     switch(p.state) {
         case kHatClosed:
-            if(p.current.active && static_cast<float>(p.delayLeft)<=p.openFrames) {
+            if(p.current.active && (!p.manualLease || p.controlledWave) && static_cast<float>(p.delayLeft)<=p.openFrames) {
+                if(!p.spawnWave.Prepare(ObjRef::Of(obj),p.current.path,static_cast<unsigned>((std::max)(0,p.remaining)))) {
+                    Log("EDF41MOTHER hatch #%d open refused: unsupported controlled spawn %ls",p.index,p.current.path);break;
+                }
                 Switch(p,kHatOpening);
                 PlayState(obj,L"open");
                 PlaySe(p.hull,L"母船UFO発進口開く",pos);
@@ -1056,9 +1138,11 @@ void AssignWave(Hull& h,int index,const Wave& w) noexcept {
     Part* hatch=nullptr;
     for(void* o:h.parts) { Part* p=PartOf(o); if(p && p->group==kHatch && p->index==index) { hatch=p; break; } }
     if(!hatch) { Log("EDF41MOTHER generator for hatch %d: the hull has no such hatch, dropped",index); return; }
+    hatch->configured=w;hatch->configuredOnce=true;
     const int kind=w.kind;
     if(kind==0)hatch->permanent=w;
     if(kind!=0 || !hatch->current.active) {
+        hatch->spawnWave.Finish();
         hatch->current=w;
         hatch->remaining=w.count;
         hatch->delayLeft=kind==0 ? w.delay : 0;
@@ -1126,6 +1210,7 @@ bool MakePart(void* hullObj,Hull& h,const SgoNode* entry,int group,int index,int
     void* part=CreateFromPath(world,path);
     if(!part) { Log("EDF41MOTHER part %s #%d (%ls): the game made nothing",kGroupNames[group],index,path); return false; }
     rec.state=group==kBigCannon ? kBigClosed : group==kCannon ? kCanDormant : group==kPanel ? kPanDormant : kHatClosed;
+    rec.team=I(part,kTeamAt);   // the cache starts from the real new owner; first Masking still performs the original native SetTeam
     DropPart(part);    // a record left at this address by an object freed without its destructor
     parts[part]=rec;
     Track(part);
@@ -1192,16 +1277,18 @@ void Masking(void* obj,Part& p) noexcept {
     const bool immune=!p.enabled || (p.group==kBigCannon && hullTeam==3) || p.dead;
     SetFlag(obj,kNoHpLoss,immune);
     const bool reg=!immune && !p.statik;
-    const std::int32_t team=PartTeam(p.hull);
+    std::int32_t team=PartTeam(p.hull);
+    // A disabled hull keeps native team -1; its original -1->1 mapping must not overwrite an authenticated PVP part lease.
+    int applied=0;if(controlled_pvp::ReadAppliedTeam(ObjRef::Of(obj),&applied))team=applied;
     const std::int32_t now=I(obj,kTeamAt);
     const bool registeredNow=(static_cast<std::uint32_t>(I(obj,kFlags380))&0x40u)!=0;
-    if(reg!=p.registered || team!=p.team || now!=team || registeredNow!=reg) {
+    if(!p.teamInitialized || reg!=p.registered || team!=p.team || now!=team || registeredNow!=reg) {
         if(p.team==team && now!=team) {   // set before, changed since by someone else: say so once
             static std::atomic<int> said{0};
             if(said.fetch_add(1)<4)Log("EDF41MOTHER part %p: its team was %d, set back to %d",obj,now,team);
         }
         SetTeam(obj,team,reg);
-        p.registered=reg;
+        p.registered=reg;p.teamInitialized=true;
         p.team=team;
     }
     SetFlag(obj,kNotTarget|kNotCounted,!reg);
@@ -1350,6 +1437,79 @@ void PartFrame(void* obj,Part& p,Hull& h) noexcept {
     ++p.frames;
 }
 
+// BigCannon/Cannon's authored MAB sound tracks, sampled from the real CAS clock. In particular,
+// appear stops at 440 / 189 clip units; close has two independent channels at different times.
+// Class-code charge/shot sounds remain on their separate paths (their lengths do not define ownership).
+void LoadAnimationSounds(void* obj,AnimationSounds& sounds) noexcept {
+    if(sounds.loaded)return;
+    sounds.loaded=true;
+    const SgoNode* table=Key(obj,L"edf41_sound_events");
+    const int count=Count(table);
+    if(count<0 || count>128) { Fail("a cannon lacks its authored sound-event table"); return; }
+    for(int i=0;i<count;++i) {
+        const SgoNode* row=Child(table,i);
+        wchar_t state[128];
+        std::int32_t clip=0;
+        if(!Text(Child(row,0),state,128) || !Int(Child(row,1),&clip)) { sounds.clips.clear(); return; }
+        SoundClip entry;
+        entry.state=StateIndex(obj,state);
+        entry.clip=clip;
+        const SgoNode* events=Child(row,2);
+        const int keys=Count(events);
+        if(keys<0 || keys>128) { sounds.clips.clear(); return; }
+        for(int k=0;k<keys;++k) {
+            const SgoNode* key=Child(events,k);
+            SoundKey event;
+            std::int32_t kind=0,channel=-1,trace=0;
+            wchar_t name[128],node[128];
+            if(!Float(Child(key,0),&event.time) || !Int(Child(key,1),&kind) || !Text(Child(key,2),name,128)
+               || !Int(Child(key,3),&channel) || !Text(Child(key,4),node,128) || !Int(Child(key,5),&trace)) {
+                sounds.clips.clear(); return;
+            }
+            event.kind=kind;
+            event.channel=channel;
+            event.name=name;
+            event.node=node;
+            event.trace=trace!=0;
+            entry.events.push_back(std::move(event));
+        }
+        sounds.clips.push_back(std::move(entry));
+    }
+}
+void SoundPoint(void* obj,int bone,float* out) noexcept {
+    float matrix[16];
+    if(bone>=0 && BoneMatrix(static_cast<char*>(obj)+kEaoSkeleton,bone,matrix))std::memcpy(out,matrix+12,12);
+    else PartPos(obj,out);
+}
+void TickAnimationSounds(void* obj,Part& p) noexcept {
+    const bool active=(p.group==kBigCannon && (p.state==kBigOpen || p.state==kBigClose))
+        || (p.group==kCannon && p.state==kCanAppear);
+    if(!active) { StopAnimationSounds(p,16); return; }
+    AnimationSounds& sounds=p.animationSounds;
+    LoadAnimationSounds(obj,sounds);
+    int state=-1;
+    float time=0.0f,length=0.0f;
+    if(!ClipNow(obj,&state,&time,&length))return;
+    const auto stop=[](BoneSound& sound,int fade) { StopSound(sound.handle,fade); };
+    sounds.timeline.Step(state,time,sounds.clips,[&](const SoundKey& event) {
+        if(event.kind==1) { sounds.channels.StopOne(event.channel,16,stop); return; }
+        if(event.kind!=0 || event.name.empty())return;
+        const int bone=event.node.empty() ? -1 : BoneIndex(static_cast<char*>(obj)+kEaoSkeleton,event.node.c_str());
+        float at[3];
+        SoundPoint(obj,bone,at);
+        sounds.channels.Start(event.channel,[&](BoneSound* sound) {
+            if(sound) { sound->bone=bone; sound->trace=event.trace; }
+            return PlaySe(p.hull,event.name.c_str(),at,sound ? &sound->handle : nullptr);
+        },stop);
+    },[&] { sounds.channels.StopAll(16,stop); });
+    sounds.channels.MoveAll([&](BoneSound& sound) {
+        if(!sound.trace)return;
+        float at[3];
+        SoundPoint(obj,sound.bone,at);
+        MoveSound(sound.handle,at);
+    });
+}
+
 // ---- development switches (ini Edf41MotherForce): what the autopilot cannot make happen (it does not shoot) --------------
 // 1: after 5 s every group enabled with attack on (the main cannon's 20 s charge, then its sweep); 2: after 60 s the main
 // cannon destroyed (its fall, then the weak point takes damage); 4: after 90 s the cannons destroyed; 8: after 90 s a quarter
@@ -1426,7 +1586,7 @@ void RouteLog(void* self,Hull& h) noexcept {
     }
 }
 void HoldPose(void* self,Hull& h) noexcept {
-    if(!h.moveInit || Cfg().edf41MotherPlace>0.0f || (CarrierMoves() && h.death==kDeathNone))return;
+    if(!h.moveInit || Cfg().edf41MotherPlace>0.0f || (CarrierMoves() && !h.control.Active() && h.death==kDeathNone))return;
     char* o=static_cast<char*>(self);
     std::memcpy(o+kPosAt,h.death!=kDeathNone ? h.deadPos : h.pos,12);
     const float zero[3]={0.0f,0.0f,0.0f};
@@ -1445,7 +1605,7 @@ void Spin(void* self,Hull& h) noexcept {
         Log("EDF41MOTHER hull %p: 4.1's movement from %.0f %.0f %.0f, yaw %.3f",self,h.pos[0],h.pos[1],h.pos[2],h.yaw);
     }
     RouteLog(self,h);
-    if(Cfg().edf41MotherPlace>0.0f || (CarrierMoves() && h.death==kDeathNone)) {   // development: placed by hand / compared
+    if(Cfg().edf41MotherPlace>0.0f || (CarrierMoves() && !h.control.Active() && h.death==kDeathNone)) {   // development: placed by hand / compared
         float before[3];
         std::memcpy(before,h.pos,12);
         std::memcpy(h.pos,o+kPosAt,12);
@@ -1453,11 +1613,17 @@ void Spin(void* self,Hull& h) noexcept {
         std::memcpy(&h.yaw,o+kCarrierYaw,4);
         return;
     }
-    h.yawRate+=(h.yawTarget-h.yawRate)*0.01f;
-    h.yaw+=h.yawRate;
+    h.yawRate+=(h.yawTarget-h.yawRate)*0.01f;h.yaw+=h.yawRate;
+    if(h.control.Active()) {h.yaw+=h.control.yaw-h.manualYawLast;h.manualYawLast=h.control.yaw;}
     if(h.death==kDeathNone) {
-        const bool route=Readable(o+kExplorer,8) && *reinterpret_cast<void* const*>(o+kExplorer) && o[kRoutePointSet];
-        if(route)std::memcpy(h.point,o+kRoutePoint,12);
+        const bool route=!h.control.Active() && Readable(o+kExplorer,8) && *reinterpret_cast<void* const*>(o+kExplorer) && o[kRoutePointSet];
+        if(h.control.Active()) {
+            const auto& in=h.control.input;
+            const float cap=(std::max)(0.0f,F(self,kMoveSpeed)*0.5f),sn=std::sin(h.control.yaw),cs=std::cos(h.control.yaw);
+            h.point[0]=h.pos[0]+(in.move[0]*cs+in.move[2]*sn)*cap;
+            h.point[1]=h.pos[1]+in.move[1]*cap;
+            h.point[2]=h.pos[2]+(in.move[2]*cs-in.move[0]*sn)*cap;
+        } else if(route)std::memcpy(h.point,o+kRoutePoint,12);
         else for(float& v:h.vel)v*=0.99f;
         float t[3]={h.point[0]-h.pos[0],h.point[1]-h.pos[1],h.point[2]-h.pos[2]};
         const float l=std::sqrt(t[0]*t[0]+t[1]*t[1]+t[2]*t[2]),cap=(std::max)(0.0f,F(self,kMoveSpeed)*0.5f);
@@ -1617,6 +1783,11 @@ void HullMain(void* self,Hull& h) noexcept {
 void StartDeath(void* self,Hull& h) noexcept {
     if(h.dead)return;
     h.dead=true;
+    // Death owns the baseline now. Releasing a player lease later must never restore live attack flags.
+    h.control.Restore();h.controlInbox.clear();
+    for(void* child:h.parts)if(Part* p=PartOf(child)) {
+        p->spawnWave.Finish();p->control.Restore();p->controlInbox.clear();p->manualLease=0;p->manualBeam=false;p->panelOnce=false;p->controlledWave=false;p->manualSeedSet=false;
+    }
     h.death=kDeathExplode;
     h.deathFrames=0;
     h.counter=0;
@@ -1703,9 +1874,16 @@ void DeathTick(void* self,Hull& h) noexcept {
     ++h.deathFrames;
 }
 
+std::uint64_t __fastcall HullThinkControl(void* self,void* dt) {
+    std::lock_guard<std::recursive_mutex> hold(lock);
+    const Hull* h=HullOf(self);
+    if(h && h->control.Active())return 0; // suspend native route decisions, keep slot 5 and the real movement machine
+    return reinterpret_cast<UpdateFn>(hullClass.orig[7])(self,dt);
+}
 std::uint64_t __fastcall HullUpdate(void* self,void* dt) {
     std::lock_guard<std::recursive_mutex> hold(lock);
     Hull& h=hulls[self];
+    NetControlIn(self);ControlTick(self);
     if(Cfg().edf41MotherPlace>0.0f) {   // development: held in front of the camera (ini Edf41MotherPlace)
         float eye[3],dir[3];
         if(CameraRay(eye,dir)) {
@@ -1787,7 +1965,10 @@ std::uint64_t __fastcall HullMessage(void* self,std::uint32_t msg,void* data) {
             return 1;
         }
         if(h && msg==kMsgParts && data) { if(GetParts(*h,static_cast<char*>(data)))return 1; }
-        if(h && msg==kMsgGenerator && data && (Cfg().edf41MotherParts&1)) { if(QueueGenerator(self,static_cast<const char*>(data)))return 1; }
+        if(h && msg==kMsgGenerator) {
+            if(!data || !QueueGenerator(self,static_cast<const char*>(data)))Log("EDF41MOTHER generator refused: invalid 4.1 message on %p",self);
+            return 1; // disabled/missing 4.1 hatches must never activate UfoCarrier508's unrelated stock generator
+        }
         // The carrier's kill message (0x4F94C0: durability to 0, off its team, its own death state): the same, with 4.1's death
         if(h && msg==kMsgKill && MotherPrims()) {
             if(!static_cast<const char*>(self)[kDestroyedAt] && HullAlive(self)) {
@@ -1921,6 +2102,7 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     if(!p)return reinterpret_cast<UpdateFn>(partClass.orig[kSlotUpdate])(self,dt);
     Hull* h=Live(p->hull) ? HullOf(p->hull) : nullptr;
     if(!h) {   // the hull is gone (destroyed, or the script deleted it): the part goes with it (4.1 0x56BBC0)
+        StopAnimationSounds(*p,0);
         if(!p->gone) { DeleteObject(self); p->gone=true; }
         return reinterpret_cast<UpdateFn>(partClass.orig[kSlotUpdate])(self,dt);
     }
@@ -1931,8 +2113,13 @@ std::uint64_t __fastcall PartUpdate(void* self,void* dt) {
     p=PartOf(self);
     h=p && Live(p->hull) ? HullOf(p->hull) : nullptr;
     if(p)TeamGuard(self,*p,"after the class's update");
+    if(p && h && !p->gone)ControlTick(self);
     if(p && h && !p->gone)NetPartIn(self,*p);   // online: the host's decisions (edf41net)
-    if(p && h && !p->gone)PartFrame(self,*p,*h);
+    if(p && h && !p->gone) {
+        TickAnimationSounds(self,*p); // finish crossed keys before PartFrame can leave the old clip
+        PartFrame(self,*p,*h);
+        TickAnimationSounds(self,*p); // a state entered at time zero starts its keys in this frame
+    }
     if(p)TeamGuard(self,*p,"after PartFrame");
     if(p && h && !p->gone){ float aim[3]; if(Alive(self) && DevPoint(self,*p,aim))DevShoot(self,aim); }   // development (ini Edf41DevShoot)
     return r;
@@ -1989,6 +2176,7 @@ void CreatePart(void* info) noexcept {
 void CreateHull(void* info) noexcept {
     void* obj=CloneObject(hullClass,kCarrierCtor,kCarrierSize,info);
     if(!obj)return;
+    edf41net::Attach(obj);   // the controlled hull receives its own semantic events, as its child parts do
     Log("EDF41MOTHER create #%d: UfoMother301 %p on UfoCarrier508's constructor",++created,obj);
     // The parts are made here, as 4.1's constructor makes them (0x24FFF0) and EDF6's UfoMother511 makes its ring units in its own
     // (0x4FE740 -> 0x4FEF00): M603 and M993 send ObjectAction / GetPartsObject on the creation frame, before any Update.
@@ -2038,6 +2226,13 @@ void NetSpawn(const Part& p,void* enemy) noexcept {
 
 void CannonApply(void* context,std::uint8_t kind,const unsigned char* data,std::size_t size) noexcept {
     void* part=context;
+    if(kind==18 && size==sizeof(mother_control::Command)) {
+        // Command application is defined with the adapter below; it runs on this object's real machine.
+        mother_control::Command command;std::memcpy(&command,data,sizeof(command));
+        if(Hull* h=HullOf(part);h && h->control.lease==command.lease && command.lease && h->controlInbox.size()<enemy_legacy::Control::kPending)h->controlInbox.push_back(command);
+        else if(Part* p=PartOf(part);p && p->control.lease==command.lease && command.lease && p->controlInbox.size()<enemy_legacy::Control::kPending)p->controlInbox.push_back(command);
+        return;
+    }
     if(kind!=kCannonFire || size!=sizeof(CannonFireMsg)) { Fail("a 301 part event of a kind or size this version does not send (refused)"); return; }
     CannonFireMsg m;
     std::memcpy(&m,data,sizeof(m));
@@ -2048,8 +2243,8 @@ void CannonApply(void* context,std::uint8_t kind,const unsigned char* data,std::
 }
 
 void NetPartIn(void* part,Part& p) noexcept {
-    if(!edf41net::Online() || p.group!=kCannon || !edf41net::Guest(part))return;
-    edf41net::Drain(part,&CannonApply,part);
+    if(!edf41net::Online() || !edf41net::Guest(part))return;
+    edf41net::Drain(part,&CannonApply,part);ReplayControl301(part);
     const auto it=partNets.find(part);
     if(it==partNets.end() || it->second.pendingWait<0)return;
     PartNet& n=it->second;
@@ -2062,7 +2257,298 @@ void NetPartIn(void* part,Part& p) noexcept {
 }
 
 void NetForget(void* part) noexcept { partNets.erase(part); }
+// ---- player control: semantic commands feed the existing hull/part machines -------------------------
+const wchar_t* const controlNames301[]={L"立即停止旋转",L"缓慢停止旋转",L"恢复缓慢旋转",
+ L"展开主炮",L"收起主炮",L"主炮持续攻击",L"主炮停止攻击",L"主炮单次扫射",
+ L"展开中型炮",L"停用中型炮",L"中型炮持续攻击",L"中型炮停止攻击",L"中型炮强化",
+ L"展开炮台面板",L"停用炮台面板",L"面板持续攻击",L"面板停止攻击",L"面板强化"};
+bool CombatPart301(const Part& p) noexcept {
+    const Hull* h=HullOf(p.hull);
+    return h && !h->dead && !p.statik && !p.dead && !p.gone && p.group!=kCover && Live(p.hull) && HullAlive(p.hull);
+}
+bool ControlMatch301(const void* object) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);void* o=const_cast<void*>(object);
+    if(const Hull* h=HullOf(o))return Live(o) && !h->dead && HullAlive(o);
+    const Part* p=PartOf(o);return p && Live(o) && CombatPart301(*p);
+}
+unsigned ControlAbilities301(const void* object,enemy_control::Ability* out,unsigned cap) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);void* o=const_cast<void*>(object);unsigned count=0;
+    const Hull* h=HullOf(o);const Part* p=PartOf(o);
+    if(h) {
+        const auto hasGroup=[&](int group) {for(void* child:h->parts)if(const Part* q=PartOf(child);q && q->group==group && !q->dead && !q->gone && !q->statik)return true;return false;};
+        for(unsigned a=0;a<18;++a)mother_control::Ability(out,cap,count++,mother_control::Id301(a),controlNames301[a],a<3 || (a!=12 && a!=17 && hasGroup(a<8 ? kBigCannon : a<13 ? kCannon : kPanel)));
+        mother_control::Ability(out,cap,count++,mother_control::Id301(19),L"中型炮单次蓄力发射",hasGroup(kCannon));
+        mother_control::Ability(out,cap,count++,mother_control::Id301(20),L"切换中型炮束流攻击",hasGroup(kCannon));
+        mother_control::Ability(out,cap,count++,mother_control::Id301(21),L"炮台面板单次发射",hasGroup(kPanel));
+        for(void* child:h->parts)if(const Part* q=PartOf(child);q && q->group==kHatch && !q->gone) {
+            wchar_t name[96];std::swprintf(name,96,L"发进舱 %d：召唤任务配置的敌人",q->index+1);
+            mother_control::Ability(out,cap,count++,mother_control::Id301(mother_control::kSummon,static_cast<unsigned>(q->index)),name,q->configuredOnce && q->configured.path[0]!=0 && q->configured.count>0 &&
+                mother_control::SpawnWave::CanPrepare(ObjRef::Of(child),q->configured.path,static_cast<unsigned>(q->configured.count)));
+        }
+    } else if(p && CombatPart301(*p)) {
+        if(p->group==kHatch)mother_control::Ability(out,cap,count++,mother_control::Id301(mother_control::kSummon,static_cast<unsigned>(p->index)),L"召唤任务配置的敌人",p->configuredOnce && p->configured.path[0]!=0 && p->configured.count>0 &&
+            mother_control::SpawnWave::CanPrepare(ObjRef::Of(o),p->configured.path,static_cast<unsigned>(p->configured.count)));
+        else { const unsigned first=p->group==kBigCannon ? 3u : p->group==kCannon ? 8u : 13u;
+            for(unsigned a=first;a<first+5;++a)mother_control::Ability(out,cap,count++,mother_control::Id301(a),controlNames301[a],a!=12 && a!=17);
+            if(p->group==kCannon) {mother_control::Ability(out,cap,count++,mother_control::Id301(19),L"单次蓄力发射");mother_control::Ability(out,cap,count++,mother_control::Id301(20),L"切换束流攻击");}
+            if(p->group==kPanel)mother_control::Ability(out,cap,count++,mother_control::Id301(21),L"单次发射"); }
+    }
+    return count;
+}
+void CapturePart301(Part& p,std::uint64_t lease) noexcept {
+    p.manualLease=lease;p.savedEnabled=p.enabled;p.savedAttack=p.attack;p.savedBoost=p.boost;
+    // A charge or sweep already in progress completes; no new autonomous attack starts.
+    p.attack=false;p.manualBeam=false;p.panelOnce=false;p.manualSeedSet=false;
+    p.boost=false;p.controlledWave=p.group==kHatch && p.current.active && !p.waveDone &&
+        (p.state==kHatOpening || p.state==kHatOpen);
+}
+bool ControlBegin301(const void* object,std::uint64_t lease) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);void* o=const_cast<void*>(object);
+    if(!lease || !ControlMatch301(o))return false;
+    Hull* hull=HullOf(o);Part* selected=PartOf(o);Hull* family=hull ? hull : selected ? HullOf(selected->hull) : nullptr;
+    if(!family)return false;
+    if(hull && hull->control.Active())return hull->control.lease==lease;
+    if(selected && selected->control.Active())return selected->control.lease==lease;
+    if(family->control.Active())return false;
+    // PVP owns the complete 301 family. A second private controller cannot clear another part's pending spawn gate.
+    for(void* child:family->parts)if(const Part* part=PartOf(child);part && part->manualLease)return false;
+    for(void* child:family->parts)if(Part* part=PartOf(child);part && part->group==kHatch) {
+        part->spawnWave.fault=false;
+        if(part->current.active && !part->waveDone && (part->state==kHatOpening || part->state==kHatOpen) &&
+           !part->spawnWave.Prepare(ObjRef::Of(child),part->current.path,static_cast<unsigned>((std::max)(0,part->remaining))))return false;
+    }
+    if(hull) {
+        if(!hull->control.Begin(lease,hull->moveInit ? hull->yaw : std::atan2(-F(o,kMatrixAt+8),F(o,kMatrixAt))))return false;
+        hull->savedYawTarget=hull->yawTarget;hull->manualYawLast=hull->control.yaw;
+        for(void* child:hull->parts)if(Part* part=PartOf(child);part && CombatPart301(*part))CapturePart301(*part,lease);
+        return true;
+    }
+    if(!selected || !selected->control.Begin(lease,std::atan2(F(o,kMatrixAt+32),F(o,kMatrixAt+40))))return false;
+    CapturePart301(*selected,lease);return true;
+}
+bool ControlApply301(const void* object,const enemy_control::Input& in,bool first) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);void* o=const_cast<void*>(object);
+    if(!ControlMatch301(o))return false;
+    const Hull* family=HullOf(o);if(!family)if(const Part* selected=PartOf(o))family=HullOf(selected->hull);
+    if(family)for(void* child:family->parts)if(const Part* part=PartOf(child);part && part->spawnWave.fault)return false;
+    if(Hull* h=HullOf(o))return mother_control::Sample(h->control,in,first);
+    Part* p=PartOf(o);return p && mother_control::Sample(p->control,in,first);
+}
+void RestorePart301(Part& p) noexcept {
+    if(CombatPart301(p)) {p.enabled=p.savedEnabled;p.attack=p.savedAttack;p.boost=p.savedBoost;
+        if(p.group==kHatch && !p.current.active && p.permanent.active) {p.current=p.permanent;p.remaining=p.current.count;p.delayLeft=p.current.delay;p.intervalLeft=0;} }
+    p.manualLease=0;p.controlledWave=false;p.manualBeam=false;p.panelOnce=false;p.manualSeedSet=false;p.controlInbox.clear();p.control.Restore();
+}
+bool ControlRestore301(const void* object) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);void* o=const_cast<void*>(object);
+    if(Hull* h=HullOf(o)) {
+        if(!h->control.Active())for(void* child:h->parts)if(const Part* part=PartOf(child);part && part->manualLease)return true;
+        for(void* child:h->parts)if(Part* part=PartOf(child))part->spawnWave.Reset();
+        if(!h->control.Active())return true;
+        const auto lease=h->control.lease;
+        for(void* child:h->parts)if(Part* p=PartOf(child);p && p->manualLease==lease)RestorePart301(*p);
+        h->yawTarget=h->savedYawTarget;std::memcpy(h->point,h->pos,12);h->controlInbox.clear();h->control.Restore();return true;
+    }
+    if(Part* p=PartOf(o)) {
+        Hull* family=HullOf(p->hull);
+        if(!p->control.Active() && family) {
+            if(family->control.Active())return true;
+            for(void* child:family->parts)if(const Part* other=PartOf(child);other && other->manualLease)return true;
+        }
+        // A failed sibling acquisition must not cancel the already controlled family's reserved wave or fault state.
+        if(family)for(void* child:family->parts)if(Part* part=PartOf(child))part->spawnWave.Reset();
+        if(p->control.Active())RestorePart301(*p);
+    }
+    return true;
+}
+bool ApplyControlCommand(void* object,const mother_control::Command& command) noexcept {
+    if(!ControlMatch301(object))return false;
+    if(command.action>mother_control::kLast301 || command.index>mother_control::kAll)return false;
+    Hull* h=HullOf(object);Part* single=PartOf(object);
+    if((h && !h->control.Active()) || (single && !single->control.Active()) || (!h && !single))return false;
+    const auto lease=h ? h->control.lease : single ? single->control.lease : 0;
+    if(!lease || command.lease!=lease)return false;
+    if(command.action>=19) {
+        const auto eligible=[&](const Part& p) {return CombatPart301(p) && p.enabled &&
+            ((command.action==19 || command.action==20) ? p.group==kCannon : p.group==kPanel);};
+        const auto ready=[&](const Part& p) {return command.action==20 || (command.action==19 ?
+            p.state==kCanStandby || p.state==kCanWait : p.state==kPanStart || p.state==kPanLaser || p.state==kPanPlasma);};
+        bool any=false;
+        if(h) {for(void* child:h->parts)if(const Part* p=PartOf(child);p && eligible(*p)){any=true;if(!ready(*p))return false;}}
+        else {any=single && eligible(*single);if(any && !ready(*single))return false;}
+        if(!any)return false;
+        const auto fire=[&](void* o,Part& p) {
+            if(!eligible(p))return;
+            if(command.action==19)p.rng=command.seed^static_cast<unsigned>(p.index);
+            if(command.action==19 && p.group==kCannon && (p.state==kCanStandby || p.state==kCanWait))Switch(p,kCanFire);
+            if(command.action==20 && p.group==kCannon) {p.manualBeam=!p.manualBeam;p.roundStarted=p.manualBeam;if(p.manualBeam)p.rng=command.seed^static_cast<unsigned>(p.index);}
+            if(command.action==21 && p.group==kPanel) {p.panelOnce=true;p.attack=true;p.manualSeed=command.seed^static_cast<unsigned>(p.index);p.manualSeedSet=true;}
+            (void)o;
+        };
+        if(h)for(void* child:h->parts){if(Part* p=PartOf(child))fire(child,*p);}else if(single)fire(object,*single);
+        return true;
+    }
+    if(command.action<18) {
+        if(command.action==12 || command.action==17)return false;
+        const auto prime=[&](Part& p) {
+            if((p.group==kBigCannon && (command.action==7 || (command.action==5 && !p.attack))) ||
+               (p.group==kCannon && command.action==10 && !p.attack) || (p.group==kPanel && command.action==15 && !p.attack)) {
+                p.manualSeed=command.seed^static_cast<unsigned>(p.index);p.manualSeedSet=true;
+            }
+        };
+        if(h) {for(void* child:h->parts)if(Part* p=PartOf(child);p && p->manualLease)prime(*p);ApplyAction(object,*h,static_cast<int>(command.action));
+            if(command.action==10 || command.action==11)for(void* child:h->parts)if(Part* p=PartOf(child);p && p->group==kCannon){p->manualBeam=command.action==10;p->roundStarted=p->manualBeam;} }
+        else if(single && CombatPart301(*single)) {
+            const unsigned start=single->group==kBigCannon ? 3u : single->group==kCannon ? 8u : 13u;
+            if(single->group==kHatch || command.action<start || command.action>=start+5)return false;
+            prime(*single);const unsigned what=command.action-start;
+            if(what==0)single->enabled=true;else if(what==1)single->enabled=false;else if(what==2)single->attack=true;else if(what==3)single->attack=false;else single->boost=true;
+            if(single->group==kCannon && (what==2 || what==3)){single->manualBeam=what==2;single->roundStarted=single->manualBeam;}
+        }
+        return true;
+    }
+    Part* hatch=single;void* hatchObject=single ? object : nullptr;
+    if(h)for(void* child:h->parts)if(Part* p=PartOf(child);p && p->group==kHatch && p->index==static_cast<int>(command.index)){hatch=p;hatchObject=child;break;}
+    if(!hatch || hatch->group!=kHatch || !hatch->configuredOnce || !hatch->configured.path[0] || hatch->state!=kHatClosed)return false;
+    if(!hatch->spawnWave.Prepare(ObjRef::Of(hatchObject),
+        hatch->configured.path,static_cast<unsigned>(hatch->configured.count))) {
+        Log("EDF41MOTHER controlled summon refused: %ls has no complete native ownership provider/budget",hatch->configured.path);return false;
+    }
+    hatch->current=hatch->configured;hatch->current.kind=1;hatch->current.active=true;hatch->remaining=hatch->current.count;
+    hatch->delayLeft=0;hatch->intervalLeft=0;hatch->controlledWave=true;hatch->rng=command.seed;return true;
+}
+void ControlTick(void* object) noexcept {
+    Hull* h=HullOf(object);Part* p=PartOf(object);auto* c=h ? &h->control : p ? &p->control : nullptr;
+    if(!c || !c->Active())return;
+    if(NetDecides(object))for(unsigned i=0;i<c->pending;++i) {
+        unsigned action=0,index=0;if(!mother_control::Decode301(c->pressed[i].id,action,index))continue;
+        const mother_control::Command command{action,index,c->pressed[i].seed,c->lease};
+        if(ApplyControlCommand(object,command) && edf41net::Online())edf41net::Send(object,18,&command,sizeof(command));
+    }
+    c->ClearEdges();
+}
+bool RetryControl301(void* object,const mother_control::Command& command) noexcept {
+    if(!ControlMatch301(object))return false;
+    const Hull* h=HullOf(object);const Part* single=PartOf(object);
+    const auto pending=[&](const Part& p) {
+        if(!CombatPart301(p))return false;
+        if(command.action==mother_control::kSummon)return p.group==kHatch && p.index==static_cast<int>(command.index) && p.configuredOnce && p.configured.path[0];
+        if(command.action>=19)return p.enabled && p.group==(command.action==21 ? kPanel : kCannon);
+        return false;
+    };
+    if(h)for(void* child:h->parts)if(const Part* p=PartOf(child);p && pending(*p))return true;
+    return single && pending(*single);
+}
+void ReplayControl301(void* object) noexcept {
+    Hull* h=HullOf(object);Part* p=PartOf(object);auto* inbox=h ? &h->controlInbox : p ? &p->controlInbox : nullptr;
+    const auto lease=h ? h->control.lease : p ? p->control.lease : 0;
+    if(!inbox)return;
+    while(!inbox->empty()) {
+        if(inbox->front().lease!=lease){inbox->erase(inbox->begin());continue;}
+        if(!ApplyControlCommand(object,inbox->front()) && RetryControl301(object,inbox->front()))break;
+        // A weapon removed while its accepted command was in flight cannot block the surviving hull's other skills.
+        inbox->erase(inbox->begin());
+    }
+}
+void NetControlIn(void* object) noexcept {
+    if(edf41net::Online() && edf41net::Guest(object)){edf41net::Drain(object,&CannonApply,object);ReplayControl301(object);}
+}
+std::uint64_t ControlHash301(const void* object) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);const Part* p=PartOf(const_cast<void*>(object));
+    return ControlMatch301(object) ? mother_control::Hash(301,p ? static_cast<unsigned>(p->group)+1u : 0u) : 0;
+}
+bool ControlNetwork301(const void* object) noexcept {return edf41net::Enabled() && edf41net::Registered(object);}
+// PVP collects the real complete 301 family: Masking otherwise reattaches every part to its hull's team.
+controlled_pvp::Life PvpIdentity301(const ObjRef& ref) noexcept {
+    using controlled_pvp::Life;
+    if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16))return Life::invalid;
+    if(At<LONG>(ref.ctrl,8)<=0)return Life::gone;
+    if(!Readable(ref.obj,kTeamAt+8))return Life::invalid;
+    if(At<const void*>(ref.obj,kSelfCtrl)!=ref.ctrl || (At<unsigned char>(ref.obj,kFlagsAt)&4))return Life::gone;
+    return Life::live;
+}
+bool PvpCollect301(void*,const ObjRef& root,ObjRef* members,unsigned capacity,unsigned* count,
+                   controlled_pvp::Emitter* emitters,unsigned emitterCapacity,unsigned* emitted) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);
+    if(count)*count=0;if(emitted)*emitted=0;
+    if(!members || !count || !emitters || !emitted || !capacity || PvpIdentity301(root)!=controlled_pvp::Life::live)return false;
+    unsigned used=0,emission=0;
+    void* selected=const_cast<void*>(root.obj);const Hull* h=HullOf(selected);void* hull=selected;
+    if(!h) {const Part* p=PartOf(selected);if(!p)return false;hull=p->hull;h=HullOf(hull);}
+    const auto hullWeak=refs.find(hull);
+    if(!h || !h->built || hullWeak==refs.end())return false;
+    const ObjRef hullRef{hull,hullWeak->second.control};
+    if(PvpIdentity301(hullRef)!=controlled_pvp::Life::live || At<const void*>(hull,0)!=&hullClass.block[1])return false;
+    const auto add=[&](const ObjRef& ref) {
+        for(unsigned i=0;i<used;++i)if(members[i].obj==ref.obj)return members[i].ctrl==ref.ctrl;
+        if(used>=capacity || PvpIdentity301(ref)!=controlled_pvp::Life::live)return false;
+        members[used++]=ref;return true;
+    };
+    if(!add(root) || !add(hullRef))return false;
+    for(void* object:h->parts) {
+        const Part* p=PartOf(object);
+        // The only removal paths erase the typed record on destruction/replacement. Never follow the old raw address.
+        if(!p || p->hull!=hull || p->gone)continue;
+        const auto weak=refs.find(object);if(weak==refs.end())return false;
+        const ObjRef ref{object,weak->second.control};
+        const auto life=PvpIdentity301(ref);if(life==controlled_pvp::Life::gone)continue;
+        if(life!=controlled_pvp::Life::live || At<const void*>(object,0)!=&partClass.block[1])return false;
+        if(p->team<-1 || p->team>=7 || !add(ref) || emission>=emitterCapacity)return false;
+        emitters[emission++]={controlled_pvp::EmitterKind::ownerTeamMirror,ref,&p->team,p->pvpIncarnation};
+    }
+    // Native +550 children are a separate proven container. Any live descendant outside our typed family is unsupported.
+    ObjRef native[controlled_pvp::kMaxMembers]{};
+    for(unsigned i=0;i<used;++i) {
+        unsigned total=0;if(!enemy_pvp_native::CollectTree(members[i],native,controlled_pvp::kMaxMembers,&total))return false;
+        for(unsigned n=0;n<total;++n) {bool known=false;for(unsigned j=0;j<used;++j)known=known ||
+            (members[j].obj==native[n].obj && members[j].ctrl==native[n].ctrl);if(!known)return false;}
+    }
+    *count=used;*emitted=emission;return true;
+}
+controlled_pvp::Life PvpRead301(void*,const controlled_pvp::Emitter& emitter,int* team) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);using controlled_pvp::Life;
+    if(!team || emitter.kind!=controlled_pvp::EmitterKind::ownerTeamMirror || !emitter.object || !emitter.incarnation)return Life::invalid;
+    const auto identity=PvpIdentity301(emitter.member);if(identity!=Life::live)return identity;
+    const Part* p=PartOf(const_cast<void*>(emitter.member.obj));
+    if(!p)return Life::invalid;
+    if(p->pvpIncarnation!=emitter.incarnation)return Life::gone;
+    if(emitter.object!=&p->team || At<const void*>(emitter.member.obj,0)!=&partClass.block[1])return Life::invalid;
+    const auto it=refs.find(const_cast<void*>(emitter.member.obj));
+    if(it==refs.end())return Life::invalid;
+    if(it->second.object!=emitter.member.obj || it->second.control!=emitter.member.ctrl)return Life::invalid;
+    if(p->team<-1 || p->team>=7)return Life::invalid;
+    *team=p->team;return Life::live;
+}
+bool PvpWrite301(void*,const controlled_pvp::Emitter& emitter,int team) noexcept {
+    std::lock_guard<std::recursive_mutex> hold(lock);int previous=0;
+    if(team<-1 || team>=7 || PvpRead301(nullptr,emitter,&previous)!=controlled_pvp::Life::live)return false;
+    Part* p=PartOf(const_cast<void*>(emitter.member.obj));p->team=team;return p->team==team;
+}
+bool PvpMemberBaseline301(void*,const ObjRef& root,const ObjRef& member,int,int,int* team,int* last) noexcept {
+    // SpawnParts is constructor-only (built is permanent). An unexpected new owner has no proven baseline; refuse it.
+    return controlled_pvp::ReadBaseline(root,member,team,last);
+}
+bool PvpEmitterBaseline301(void*,const controlled_pvp::Emitter&,int,int,int*) noexcept {
+    // There is no in-place emitter rebuild in a 301 Part. A new incarnation is a new native owner, never an inherited guess.
+    return false;
+}
+bool ControlPvpHooks301(const void* object,controlled_pvp::Hooks* out) noexcept {
+    if(!out || !ControlMatch301(object))return false;
+    *out={nullptr,&PvpCollect301,&PvpRead301,&PvpWrite301,&PvpMemberBaseline301,&PvpEmitterBaseline301};return true;
+}
+bool ResolveMother301Spawn(const wchar_t* resource,controlled_pvp::SpawnProof* out) noexcept {
+    if(!resource || !out || _wcsicmp(resource,L"app:/Object/UfoMother301.Sgo")!=0)return false;
+    // The shipped port's real SGO class is UfoMother301: 4 hatches, 4 covers, 10 cannons, 1 main, 125 panels.
+    // Cfg only removes these constructor groups. The actual newborn class/full tree is checked again by PvpCollect301.
+    const int mask=Cfg().edf41MotherParts;unsigned partCount=0;
+    if(mask&1)partCount+=4;if(mask&2)partCount+=4;if(mask&4)partCount+=10;if(mask&8)partCount+=1;if(mask&16)partCount+=125;
+    *out={};out->hooks={nullptr,&PvpCollect301,&PvpRead301,&PvpWrite301,&PvpMemberBaseline301,&PvpEmitterBaseline301};
+    out->maxMembers=partCount+1;out->maxEmitters=partCount;return true;
+}
 }  // namespace
+const EnemyControlAdapter& Edf41Mother301ControlAdapter() noexcept {
+    static const EnemyControlAdapter adapter{"EDF4.1 母舰",&ControlMatch301,&ControlAbilities301,&ControlHash301,&ControlBegin301,&ControlApply301,&ControlRestore301,&ControlNetwork301,&ControlPvpHooks301};return adapter;
+}
 
 bool InstallEdf41Mother() noexcept {
     if(!Cfg().edf41Mother) {
@@ -2074,6 +2560,7 @@ bool InstallEdf41Mother() noexcept {
         return false;
     }
     SetSlot(hullClass,kSlotAccept,reinterpret_cast<void*>(&HullAccept));
+    SetSlot(hullClass,7,reinterpret_cast<void*>(&HullThinkControl));
     if(MotherPrims()) {   // 4.1's hit, death and glow (else the carrier's own hit and death stay)
         SetSlot(hullClass,kSlotDamaged,reinterpret_cast<void*>(&HullDamaged));
         SetSlot(hullClass,kSlotDraw,reinterpret_cast<void*>(&HullDraw));
@@ -2084,6 +2571,8 @@ bool InstallEdf41Mother() noexcept {
     const bool ok=AddFactory(L"UfoMother301",&CreateHull) && AddFactory(L"UfoMother301_Hatch",&CreatePart)
         && AddFactory(L"UfoMother301_Panel",&CreatePart) && AddFactory(L"UfoMother301_Cannon",&CreatePart)
         && AddFactory(L"UfoMother301_BigCannon",&CreatePart);
+    const bool spawnProof=ok && RegisterControlledPvpSpawnResolver(&ResolveMother301Spawn);
+    Log("EDF41MOTHER controlled spawn resource proof %s",spawnProof ? "registered" : "REFUSED");
     Log("EDF41MOTHER on: UfoMother301 and its four part classes %s (dev: Edf41MotherParts=%d, Edf41MotherForce=%d)",
         ok ? "queued for the game's registration" : "NOT registered",Cfg().edf41MotherParts,Cfg().edf41MotherForce);
     return ok;

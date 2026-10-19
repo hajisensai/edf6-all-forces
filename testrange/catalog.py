@@ -53,16 +53,17 @@ class Row:
     lift: float = 0.5
     flying: bool = False
     preload: bool = True
+    spawn_sgo: str | None = None   # private configured object; sgo remains the saved-plan/log identity
 
     @property
     def path(self) -> str:
         """The game's path of its SGO (what the plugin preloads and CreateObject reads)."""
-        return f'app:/object/{self.sgo.upper()}.sgo'
+        return f'app:/object/{(self.spawn_sgo or self.sgo).upper()}.sgo'
 
     @property
     def rel(self) -> str:
         """Its SGO under Mods/ (a 'stock' row's is in Root.cpk instead)."""
-        return f'OBJECT/{self.sgo.upper()}.SGO'
+        return f'OBJECT/{(self.spawn_sgo or self.sgo).upper()}.SGO'
 
     @property
     def ident(self) -> str:
@@ -110,7 +111,7 @@ STOCK_ENEMIES: tuple[tuple[str, str, bool, float], ...] = (
     ('e507_goldufo', '金色 UFO（飞）', True, 30.0),
     ('e515_imperialufo', '帝国 UFO（飞）', True, 30.0),
     ('e605_spinnerufo', 'UFO E605（飞）', True, 30.0),
-    ('dragonsmall401', '小龙（飞）', True, 30.0),
+    ('dragonsmall401', '蝌蚪（五六代，飞）', True, 30.0),
     ('e508_carrier', '传送舰（飞）', True, 250.0),
     ('e611_timeship', '星导者新舰（飞）', True, 400.0),
     ('e511_mothership_edf6', '母舰（飞）', True, 900.0),
@@ -120,6 +121,10 @@ STOCK_ENEMIES: tuple[tuple[str, str, bool, float], ...] = (
 # EDF4.1's objects by class: the panel's category and words, how far up it is made, whether it flies.
 EDF41_CLASSES: dict[str, tuple[str, str, float, bool]] = {
     'Vehicle505_Tank': ('vehicle', '4.1 坦克', 0.5, False),
+    'Vehicle_Car': ('vehicle', '4.1 边三轮摩托', 0.5, False),
+    # Empty vehicles wait on the ground for boarding; a helicopter is not an airborne enemy wave.
+    'Vehicle506_Helicopter': ('vehicle', '4.1 直升机 Nereid', 0.5, False),
+    'VehicleBegaruta': ('vehicle', '4.1 步行机 Begaruta', 0.5, False),
     'Vehicle501_FortressRobo': ('vehicle', '4.1 巨型机甲 Balam', 0.5, False),
     'AntHill': ('enemy41', '4.1 蚁巢', 0.5, False),
     'BigNest': ('enemy41', '4.1 巨型巢穴', 0.5, False),
@@ -138,6 +143,16 @@ EDF41_CLASSES: dict[str, tuple[str, str, float, bool]] = {
     'UfoRobo': ('enemy41', '4.1 UFO 机器人（飞船 / 机器人形态）', 150.0, True),
     'UfoMother301': ('enemy41', '4.1 母船（飞）', 300.0, True),
     'UfoMother401': ('enemy41', '4.1 地球吞噬者（飞）', 300.0, True),
+}
+# File identities distinguish 4.1's dragons from EDF5/6's frog dragons (the same native DragonSmall class).
+EDF41_DRAGON_LABELS: dict[str, str] = {
+    'EDF41_DRAGONSMALL401': '4.1 小龙（绿，飞）',
+    'EDF41_REDSMALLDRAGON': '4.1 小龙（红，飞）',
+    'EDF41_YERROWSMALLDRAGON': '4.1 小龙（黄，飞）',
+    'EDF41MP01/DRAGONSMALL401_HS': '4.1 DLC 小龙（绿，飞）',
+    'EDF41MP01/REDSMALLDRAGON_HS': '4.1 DLC 小龙（红，飞）',
+    'EDF41MP01/YERROWSMALLDRAGON_HS': '4.1 DLC 小龙（黄，飞）',
+    'DRAGONBIG401': '4.1 大龙（飞）',
 }
 # Registry objects that are no row, and why (selftest: every other one is).
 EDF41_LEFT_OUT_CLASSES: dict[str, str] = {
@@ -177,7 +192,7 @@ def edf41_left_out(obj: dict) -> str | None:
 def edf41_rows() -> tuple[Row, ...]:
     """The 4.1 rows, most used in 4.1's missions first within a class. The plugin preloads by default the first of each
     class and any other whose files (but its own SGO) the rows before it bring already (a variant on the same model costs
-    no more memory); the others (another 17 MB Hector model each) only with ini RangePlaceAll=1."""
+    no more memory). All ported vehicles are available by default; additional heavy enemy models require RangePlaceAll=1."""
     reg = _edf41_registry()
     objects = [o for o in reg['objects'] if edf41_left_out(o) is None and o['class'] in EDF41_CLASSES]
     order = {c: i for i, c in enumerate(EDF41_CLASSES)}
@@ -188,19 +203,23 @@ def edf41_rows() -> tuple[Row, ...]:
     for o in objects:
         category, words, lift, flying = EDF41_CLASSES[o['class']]
         stem = o['object'].removeprefix('OBJECT/').removesuffix('.SGO')
+        words = EDF41_DRAGON_LABELS.get(stem, words)
         others = {f for f in o['files'] if f != o['object']}
-        preload = o['class'] not in first or others <= brought
+        preload = category == 'vehicle' or o['class'] not in first or others <= brought
         first.add(o['class'])
         if preload:
             brought |= set(o['files'])
-        rows.append(Row(stem.lower(), f'{words} {stem.split("/")[-1]}', category, 'edf41', lift, flying, preload))
+        spawn = o.get('spawn_object')
+        spawn = spawn.removeprefix('OBJECT/').removesuffix('.SGO').lower() if spawn else None
+        rows.append(Row(stem.lower(), f'{words} {stem.split("/")[-1]}', category, 'edf41', lift, flying, preload, spawn))
     return tuple(rows)
 
 
 def edf41_files(sgo: str) -> list[str]:
     """The Mods files a 4.1 row needs (its registry entry's)."""
     rel = f'OBJECT/{sgo.upper()}.SGO'
-    return next(o['files'] for o in _edf41_registry()['objects'] if o['object'] == rel)
+    return next(o['files'] for o in _edf41_registry()['objects']
+                if o['object'] == rel or o.get('spawn_object') == rel)
 
 
 @lru_cache(maxsize=None)
@@ -258,7 +277,10 @@ def files_of(row: Row) -> list[str]:
         return edf5dlc_files(row.sgo)
     if row.source == 'installer':
         return list(next(f for s, _, f in INSTALLER_VEHICLES if s == row.sgo))
-    return [row.rel] if row.source == 'range' else []
+    if row.source == 'range':
+        import gen
+        return list(gen.range_files(row.sgo))
+    return []
 
 
 def available(game_root: str, row: Row) -> bool:

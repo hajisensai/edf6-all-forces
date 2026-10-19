@@ -19,6 +19,9 @@
 #include "log_buffer.h"
 #include "crew.h"
 #include "firstperson.h"
+#include "thermal.h"
+#include "pvp.h"
+#include "edf41bike.h"
 #include "mod_room.h"
 #include "outfit41.h"
 #include "room_ui.h"
@@ -32,9 +35,19 @@
 #include "gunnerrecoil.h"
 #include "memory.h"
 #include "subcarrier.h"
+#include "enemy_control.h"
+#include "enemy_control_net.h"
+#include "enemy_control_legacy.h"
+#include "enemy_control_weapon_aim.h"
+#include "enemy_control_radar.h"
+#include "pvp_controlled_spawn.h"
+#include "enemy_control_pvp_native.h"
+#include "vulcan_rotor.h"
 #include "edf/host.h"
 #include "version.h"
+#include "build_id.h"
 #include "pack_notice.h"
+#include "profile_sigs.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -56,22 +69,7 @@ wchar_t logPath[MAX_PATH]{},logOldPath[MAX_PATH+2]{};
 wchar_t iniPath[MAX_PATH]{};
 edf::IniWatch ini;
 
-struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
-// The code the plugin calls or relies on; any mismatch and it stays off.
-const Signature kSignatures[]={
-    {kCanRideSeat,{0x40,0x57,0x48,0x83,0xEC,0x30,0x8B,0x81,0x14,0x03,0x00,0x00,0x48,0x8B,0xFA,0x39},16},
-    {kCanRide,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48},16},
-    {kSeatRide,{0x40,0x53,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x83,0xEC,0x38,0x45,0x33,0xD2,0x45},16},
-    {kSeatClear,{0x48,0x85,0xD2,0x0F,0x84,0x94,0x00,0x00,0x00,0x48,0x89,0x5C,0x24,0x08,0x57,0x48},16},
-    {kSeatKick,{0x48,0x85,0xD2,0x0F,0x84,0x98,0x01,0x00,0x00,0x48,0x89,0x5C,0x24,0x08,0x48,0x89},16},
-    {kFindSeat,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57},16},
-    {kRideAi,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x55,0x57,0x41,0x56,0x48,0x8D},16},
-    {kPromptVisit,{0x40,0x53,0x48,0x83,0xEC,0x30,0x48,0x8B,0x41,0x08,0x48,0x8B,0xD9,0x4C,0x8B,0xD2},16},
-    {0x5E3B50,{0x8B,0xC2,0x2D,0x15,0x00,0x00,0x10,0x74,0x09,0x83,0xF8,0x01,0x0F,0x85,0xCE,0x69},16},   // dummy rider: get-off -> dies
-    {0x634710,{0x49,0x8B,0x80,0x68,0x02,0x00,0x00,0x48,0x85,0xC0,0x74,0x0A,0x83,0x78,0x08,0x00},16},   // seat+0x268 occupancy
-    {0x62DD32,{0x48,0x8B,0x87,0x38,0x02,0x00,0x00,0x48,0x85,0xC0,0x74,0x06,0x83,0x78,0x08,0x00},16},   // same, prompt check
-    {0x572EFF,{0x44,0x38,0xAE,0x54,0x03,0x00,0x00},7},                                                 // human+0x354 player
-};
+using sigs::kSignatures;   // profile_sigs.h
 
 bool CheckProfile() noexcept {
     __try {
@@ -84,9 +82,9 @@ float ReadFloat(const wchar_t* key,float fallback) noexcept {
     wchar_t text[64]{};
     GetPrivateProfileStringW(L"VehicleCrew",key,L"",text,64,iniPath);
     if(!text[0])return fallback;
-    wchar_t* end=nullptr;
-    const float v=std::wcstof(text,&end);
-    return end!=text && std::isfinite(v) ? v : fallback;
+    float v=fallback;
+    if(!edf::ParseFloat(text,&v))Log("CONFIG %ls=%ls is not a number: %g used",key,text,fallback);
+    return v;
 }
 // HudLanguage: auto / en / zh-CN / zh-TW / ja (hudtext.h ParseSetting); anything else is logged and auto used.
 int ReadLanguage(int fallback) noexcept {
@@ -331,6 +329,7 @@ void Validate(Config& n) noexcept {
     n.sightRangeDownKey=static_cast<int>(FixInt("SightRangeDownKey",n.sightRangeDownKey,0,254));
     n.sightRangeStep=static_cast<int>(FixInt("SightRangeStep",n.sightRangeStep,0,1000));
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
+    n.thermalKey=static_cast<int>(FixInt("VehicleThermalKey",n.thermalKey,0,254));
     n.firstPersonKey=static_cast<int>(FixInt("FirstPersonKey",n.firstPersonKey,0,254));
     Fix("FirstPersonEyeUp",n.fpEyeUp,-0.5f,0.5f);
     Fix("FirstPersonEyeAhead",n.fpEyeAhead,-0.5f,0.5f);
@@ -701,6 +700,9 @@ void LoadConfig() noexcept {
     n.firstPerson=ReadBool(L"FirstPerson",n.firstPerson);
     n.fpVehicle=ReadBool(L"FirstPersonVehicle",n.fpVehicle);
     n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);
+    n.enemyControl=ReadBool(L"EnemyControl",n.enemyControl);
+    n.thermal=ReadBool(L"VehicleThermal",n.thermal);
+    n.thermalKey=ReadInt(L"VehicleThermalKey",static_cast<DWORD>(n.thermalKey));
     n.firstPersonKey=ReadInt(L"FirstPersonKey",static_cast<DWORD>(n.firstPersonKey));
     n.firstPersonStart=ReadBool(L"FirstPersonStart",n.firstPersonStart);
     n.fpEyeUp=ReadFloat(L"FirstPersonEyeUp",n.fpEyeUp);
@@ -917,6 +919,7 @@ void LoadConfig() noexcept {
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
         n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
         n.debugSpawnDistance);
+    Log("CONFIG enemyControl=%d",n.enemyControl);
     Log("CONFIG rangePlace=%d all=%d",n.rangePlace,n.rangePlaceAll);
     Log("CONFIG roomLoadout=%d preSync=%d key=0x%X button=0x%X",n.roomLoadout,n.roomPreSync,n.roomLoadoutKey,n.roomLoadoutButton);
     Log("CONFIG allClassesRide=%d",n.allClassesRide);
@@ -1119,7 +1122,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
     swprintf_s(logOldPath,L"%ls.1",logPath);
     info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Crew";info->version=PLUG_VER(EDF6VC_VERSION_MAJOR,EDF6VC_VERSION_MINOR,EDF6VC_VERSION_PATCH,0);
-    Log("EDF6VehicleCrew %s loading",EDF6VC_VERSION);
+    char file[96];
+    edf::DescribeModuleFile(module,file,sizeof(file));
+    Log("EDF6VehicleCrew %s loading (build %s, %s)",EDF6VC_VERSION,EDF6_BUILD_ID,file);
     ini.Start(iniPath);
     LoadConfig();
     image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
@@ -1158,7 +1163,12 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallSpotRay();       // the stock spot (Q): off for this machine's players (VanillaSpot=0), else along the drawn camera
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
+    thermal::Install();    // mesh heat/depth passes, inert in optical mode
+    InstallViewDepth();    // shared decal reconstruction follows the actual inverse projection
     InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)
+    Log("ENEMY CONTROL native hooks=%d",InstallEnemyControl());
+    Log("ENEMY CONTROL legacy adapters=%d",InstallEnemyControlLegacy());
+    Log("ENEMY CONTROL network bridge=%d",InstallEnemyControlNetwork());
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
@@ -1187,7 +1197,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRouteGuide();    // the stock route guide strip along the navmesh route's corners
     InstallGuidance();      // the stock homing rounds by proportional navigation
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
+    Log("EDF41 original sidecar hooks=%d",InstallEdf41Bike());
+    Log("M163 visual rotor=%d",InstallVulcanRotor());
     InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked
+    Log("PVP native hooks=%d",InstallPvp());
     InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallAllClassesRide();   // every class in every seat: before any mission makes a vehicle (the seat build is in its constructor)
@@ -1204,12 +1217,17 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEdf41Robo();      // EDF4.1's UfoRobo (ini Edf41Robo; edf41robo.cpp)
     InstallEdf41Deiroi();    // a stock crash 4.1's M412 reaches (edf41deiroi.cpp)
     InstallEdf41Mother401(); // EDF4.1's UfoMother401 (ini Edf41Mother401; edf41mother401.cpp)
+    Log("ENEMY CONTROL radar=%d",InstallEnemyControlRadar());
+    Log("ENEMY CONTROL spawn ownership=%d",InstallControlledPvpSpawnBridge());
+    Log("ENEMY CONTROL native PVP ownership=%d",EnemyControlNativePvpInstall());
+    Log("ENEMY CONTROL weapon aiming=%d",InstallEnemyControlWeaponAim());
     InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");
     StartCallPicker();
+    if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
     return true;
 }
 

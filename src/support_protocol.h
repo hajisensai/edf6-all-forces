@@ -67,10 +67,35 @@ constexpr std::uint32_t kFeatures=Features(kCapabilities,kExtensions);
 // says so (support_net.cpp VersionTick). An older host sends 0 in both (its welcome never set them); an older guest
 // ignores them. The hello's own `index` keeps its bound (below kMaxUnits).
 static_assert(kFeatures<1024,"welcome.catalog carries the host's features");
+// Additional capability word in hello/welcome unit.role, outside the full ten-bit features word.
+// A requester-bearing BEGIN uses only the unused unit fields and is sent only to a room where every peer
+// announced kDetailPvpSupport. Older builds ignore BEGIN units, so this all-peer gate is mandatory.
+// kDetailDynamicDrones separately announces exact prepared-child resources and
+// their parent/slot lifecycle. A build that understands only PvP metadata must
+// reject those children before any native object is created.
+// kDetailTransactionGenerations: transaction carries an epoch-unique monotonic wire identity,
+// mapped to one of kMaxTransactions live slots. A slot is reusable only after every peer acknowledges
+// cancellation with kCancelAckIndex (ordinary failure is not an ACK). Older v2 decoders bound
+// transaction to kMaxTransactions, so never reuse with such a peer.
+constexpr std::uint32_t kDetailPvpSupport=1u,kDetailDynamicDrones=2u,kDetailTransactionGenerations=4u,
+    kDetails=kDetailPvpSupport|kDetailDynamicDrones|kDetailTransactionGenerations;
+// The existing submarine catalog also carries host-prepared children of a
+// registered submarine / gun / blast / doll carrier. This is a separate narrow
+// admission contract, never permission to submit an arbitrary prepared plan.
+constexpr std::uint32_t kPreparedDroneCatalog=16;
+enum class PreparedKind : std::uint8_t { missionCrew,dynamicDrone };
+bool ValidPreparedDronePlan(const Plan&) noexcept;
+constexpr std::uint32_t kBeginRequesterMetadata=0x52565050u;
 // Request statuses kept per requester (host) and for this machine's own requests (any machine): the map's call and the
 // sea rescue are separate requests, each told its own outcome even when the other came later.
 constexpr std::uint32_t kRecentRequests=4;
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
+// RESULT !ok with this reserved index acknowledges processing the host's CANCEL. A guest-local
+// failure uses RequestStatus instead, and must keep reporting failure until it actually hears CANCEL.
+// The unchanged old v2 decoder accepts this index; new generation-capable hosts require the marker
+// to recycle a slot. Unmarked legacy responses can only settle an unrecyclable legacy tombstone.
+constexpr std::uint32_t kCancelAckIndex=kMaxUnits-1;
+static_assert(kCancelAckIndex>static_cast<std::uint32_t>(RequestStatus::interrupted),"cancel ACK cannot be an ordinary failure status");
 struct Message {
     Kind kind=Kind::hello;
     std::uint64_t epoch=0,challenge=0;
@@ -99,7 +124,9 @@ public:
     bool Suspended() const noexcept { return suspended_; }
     // `loadout`: support_call.h PackSupportLoadout (0: the call's own), sent in the request's `challenge`.
     bool Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout=0) noexcept;
-    std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now) noexcept;
+    // The default preserves existing-vehicle migration. An explicit dynamic
+    // intent additionally requires all-peer details and preflight native Validate.
+    std::uint64_t SubmitPrepared(const Plan&,std::uint64_t now,PreparedKind kind=PreparedKind::missionCrew) noexcept;
     void Receive(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;
     void Tick(std::uint64_t now) noexcept;
     void Failed(std::uint64_t token,RequestStatus reason=RequestStatus::cancelled) noexcept;
@@ -116,6 +143,9 @@ public:
     // Host: whether every peer of this session announced all of `caps` in its current hello (no peer: true).
     // A client is never asked to plan: true.
     bool PeersHave(std::uint32_t caps) const noexcept;
+    // Current authenticated handshake only. Host: all peers; client: its host. Unknown/not ready: false.
+    bool PeersHaveDetails(std::uint32_t bits) const noexcept;
+    std::uint32_t HostDetails() const noexcept { return running_ && epoch_ ? (host_ ? kDetails : hostDetails_) : 0u; }
     // Host: whether every peer announced all of `ext` (kExtVariants) and, `hash` non-zero, has that variant file by its
     // hello's filter (no peer: true). A client is never asked: true.
     bool PeersHaveVariant(std::uint32_t ext,std::uint64_t hash) const noexcept;
@@ -139,15 +169,16 @@ private:
     struct Transaction {
         Phase phase=Phase::empty;
         bool external=false;
+        bool dynamicDrone=false; // independent prepared-child channel; same parent/slot serialized only while pending
         bool cancelConfirmed=false;
         bool spawned=false;
         bool rescue=false;   // on the rescue channel (Hooks::ownChannel, every peer kExtRescueChannel)
         RequestStatus failure=RequestStatus::cancelled;
         std::uint64_t token=0,loadout=0;
         Plan plan{};
-        std::uint32_t requester=0,request=0,received=0;
+        std::uint32_t id=0,requester=0,request=0,received=0; // id is wire identity; array position is bounded storage only
         std::uint64_t since=0;
-        std::array<unsigned char,kMaxPeers+1> ready{},result{},activated{};
+        std::array<unsigned char,kMaxPeers+1> ready{},result{},activated{}; // cancelled result: 1 legacy response, 2 explicit CANCEL ACK
     };
     Backend backend_{};
     bool running_=false,host_=false,suspended_=false;
@@ -162,12 +193,13 @@ private:
     std::array<std::uint64_t,kMaxPeers+1> challenges_{},lastRequestAt_{};
     std::array<std::uint32_t,kMaxPeers+1> requests_{};
     std::array<std::uint32_t,kMaxPeers+1> peerMissions_{};
-    std::array<std::uint32_t,kMaxPeers+1> peerCaps_{},peerExt_{};
+    std::array<std::uint32_t,kMaxPeers+1> peerCaps_{},peerExt_{},peerDetails_{};
     std::array<std::array<unsigned char,32>,kMaxPeers+1> peerBloom_{};
-    std::uint32_t hostCaps_=0;bool hostCapsKnown_=false,hostRoomBehind_=false;
+    std::uint32_t hostCaps_=0,hostDetails_=0;bool hostCapsKnown_=false,hostRoomBehind_=false;
     std::array<std::uint64_t,kMaxPeers+1> rescueAt_{};   // host: when each requester's last rescue was made (0: none)
     std::uint64_t rescueCooldown_=kRescueCooldownMs;
     bool InFlight(const Transaction& t) const noexcept;
+    Transaction* AllocateTransaction() noexcept;
     struct Reply { std::uint32_t request=0;RequestStatus status=RequestStatus::accepted;bool dirty=false; };
     using Replies=std::array<Reply,kRecentRequests>;
     std::array<Replies,kMaxPeers+1> replies_{};

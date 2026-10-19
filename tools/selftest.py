@@ -107,7 +107,10 @@ def team_changes_go_through_set_team() -> None:
                     text = src(rel)
                     found += [f'{rel}: {m.group(0)}' for m in raw.finditer(text) if not in_team_field(rel, text, m.start())]
     assert not found, 'raw team writes (use SetObjectTeam):\n' + '\n'.join(found)
-    assert raw.search('Put<std::int32_t>(v,kTeam,own);'), 'the pattern no longer sees a raw write'
+    for write in ('Put<std::int32_t>(v,kTeam,own);',
+                  'Put<int>(const_cast<void*>(ref.obj),edf::kTeam,team);',
+                  'Put<int>(object+kTeam,0,team);'):
+        assert raw.search(write), f'the pattern no longer sees a raw write: {write}'
 
 
 @test
@@ -1559,11 +1562,13 @@ def turret_aim_wired() -> None:
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
     assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
-                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding', 'kPlayerAim', 'kAimsTurret'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding', 'kPlayerAim', 'kAimsTurret', 'kPayloadAim'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
     # V4, the one player turret aim (2026-10-09): EDF6AutoTurret answers it, EDF6VehicleCrew's turret camera asks it every
     # frame and says it steers; the flak's own Steer and the tank driver's frame then leave the turret to the camera.
     assert names['kPlayerAim'].endswith('V4') and names['kAimsTurret'].endswith('V4'), names
+    assert names['kPayloadAim'].endswith('V1'), names
+    assert f'bool __cdecl {names["kPayloadAim"]}(' in src('src/turretaim.cpp'), 'optional actual-weapon export must match its shared ABI name'
     assert f'bool __cdecl {names["kPlayerAim"]}(' in src('autoturret/src/designate.cpp')
     assert f'bool __cdecl {names["kAimsTurret"]}(' in src('src/turretaim.cpp')
     assert 'PlayerTurretLead(v,0,TurretGun(v,seat),lead)' in src('src/turretcam.cpp'), 'turretcam.cpp: the camera asks V4'
@@ -1951,11 +1956,20 @@ def spawn_catalog_rows_check_their_files() -> None:
             continue
         files = re.search(r',(?:true|false),(?:true|false),(L".*)\},$', line).group(1)
         got = [n.replace('\\\\', '/') for n in re.findall(r'L"([^"]*)\\0"', files)]
-        assert got == [w.removeprefix('OBJECT/') for w in want] and r.rel in want, (r.sgo, got, want)
+        assert got == [gen_spawn_catalog.mod_file_name(w) for w in want] and r.rel in want, (r.sgo, got, want)
     assert gen_spawn_catalog.files_literal(rows[0]) == 'nullptr'
     code = src('src/debug_spawn.cpp')
     lacks = code.split('const wchar_t* ModRowLacks(const Entry& e) noexcept {', 1)[1].split('\n}', 1)[0]
-    assert 'for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1)' in lacks and 'jet::ModFileThere(f)' in lacks
+    assert 'for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1)' in lacks and 'ModRowFileThere(f)' in lacks
+    assert 'const auto reference=ParseModFile(file);' in code
+    assert gen_spawn_catalog.mod_file_name('OBJECT/EDF41MP01/ANTHILL301UG.SGO') == 'EDF41MP01/ANTHILL301UG.SGO'
+    assert gen_spawn_catalog.mod_file_name('WEAPON/EDF6VC_BMPT_ATGM_4.SGO') == 'WEAPON/EDF6VC_BMPT_ATGM_4.SGO'
+    for unsafe in ('OBJECT/../x', 'WEAPON/a//b', 'WEAPON/a\\b', 'C:/OBJECT/x', '/OBJECT/x', 'OBJECT/.x', 'OBJECT/x.', 'OBJECT/a..b', 'OBJECT/x:ads'):
+        try:
+            gen_spawn_catalog.mod_file_name(unsafe)
+        except ValueError:
+            continue
+        raise AssertionError(f'unsafe spawn catalog file accepted: {unsafe}')
     assert 'missing[i]=lacks!=nullptr;' in code and 'ModRowThere' not in code
     assert 'static_assert(FilesAgree(),' in src('src/debug_spawn.h')
 
@@ -2028,7 +2042,8 @@ def spawn_catalog_covers_every_registry() -> None:
         assert by[s].category == 'vehicle' and by[s].source == 'stock'
     assert {s for s, _, _ in gen.ENEMIES if s not in gen.PRIMER_KINDS} <= set(by), 'a wave enemy is no row'
     assert all(by[s].lift < gen.WAVE_LIFT_MOST for s, _, _ in gen.ENEMIES if s in by), 'a ship among the waves'
-    wanted = {'ufomother301', 'ufomother401', 'uforobo401', 'edf6vc_sedan', 'v507_rescuetank_ai', 'vehicle301_tank_ai'}
+    wanted = {'ufomother301', 'ufomother401', 'uforobo401', 'edf6vc_sedan', 'v507_rescuetank_ai', 'vehicle301_tank',
+              'edf6tr_vulcan_mission', 'edf6tr_bmpt_mission'}
     assert wanted <= set(by), sorted(wanted - set(by))
     # The panel's tabs (src/debug_spawn.h Category) are the catalog's, in its order.
     header = src('src/debug_spawn.h')
@@ -2057,7 +2072,7 @@ def range_leaves_out_what_is_not_installed() -> None:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             open(path, 'wb').close()
         kept, said = gen.without_missing(root, plan)
-        assert 'edf6vc_sedan' in kept.vehicles and 'vehicle301_tank_ai' not in kept.vehicles
+        assert 'edf6vc_sedan' in kept.vehicles and 'vehicle301_tank' not in kept.vehicles
     row = gen.enemy_row('hector301cc')
     assert row and row.source == 'edf41' and gen.enemy_row('giantant01') is None
 
@@ -2127,7 +2142,10 @@ def footprint_covers_the_stock_models() -> None:
     import sgo
     game = gen.Game(rootcpk.DEFAULT_GAME)
     seen = 0
-    for name in sorted({s for s, _ in gen.placements(gen.target_range(gen.Plan()))} - gen.JETS.keys()):
+    # Match gen.install's effective plan: an optional migrated vehicle absent from Mods is not spawned, and is not a
+    # stock Root.cpk model this audit can measure. Installed optional vehicles are still included.
+    plan, _skipped = gen.without_missing(rootcpk.DEFAULT_GAME, gen.target_range(gen.Plan()))
+    for name in sorted({s for s, _ in gen.placements(plan)} - gen.JETS.keys()):
         model = sgo.load(data=gen.vehicle_sgo(game, name)).get('animation_model')
         path, member = model[0][0], model[0][1]
         folder, file = path.split('app:/')[1].rsplit('/', 1)
@@ -2376,6 +2394,8 @@ def heli_sight_after_aim_lines() -> None:
     def read(key: str) -> bool:
         if f'L"{key}"' in plugin or any(f'L"{key}"' in m for m in modules.values()):
             return True
+        if key == 'Edf41MaterialCompatibility':
+            return key.lower() in src('tools/installer.py').lower() and 'material_compat=' in src('tools/installer.py')
         for prefix, known in suffixes.items():
             if key.startswith(prefix) and key[len(prefix):] in known:
                 return any(f'L"{prefix}%ls"' in m for m in modules.values())
@@ -2628,7 +2648,9 @@ def cockpit_warnings_wired() -> None:
         assert len(re.findall(r'(?<!\w)L"', audio.split(table, 1)[1].split('};', 1)[0])) == n_call, table
     repeats = audio.split('kCallRepeat[kCallCount]={', 1)[1].split('};', 1)[0]
     assert len(repeats.split(',')) == n_call, repeats
-    tick = src('src/crew.cpp').split('void FrameTick()', 1)[1].split('\n}', 1)[0]
+    crew_source = src('src/crew.cpp')
+    assert 'void FrameTick() noexcept { SharedFrameTick(); }' in crew_source, 'the public frame entry must use the shared GameFrame guard'
+    tick = crew_source.split('void SharedFrameTick()', 1)[1].split('\n}', 1)[0]
     assert 0 <= tick.find('&WarnTick') < tick.find('&HudPublish'), 'WarnTick must run before HudPublish'
     cmake = src('CMakeLists.txt')
     assert 'src/warn.cpp' in cmake.split('add_library(EDF6VehicleCrew', 1)[1].split(')', 1)[0]
@@ -2790,8 +2812,10 @@ def view_distance_keeps_far_pass_start() -> None:
     assert '#include "view_clip.h"' in code and 'viewclip::Raise(' in code
     assert 'kOverlap' not in code and 'kCamDistantNear' not in code, 'view.cpp: the far pass start must not be moved'
     raise_fn = code.split('bool Raise(', 1)[1].split('\n}', 1)[0]
-    puts = re.findall(r'Put<float>\(at,([^,]+),', raise_fn)
-    assert puts == ['farClip', 'farClip+8'], f'view.cpp Raise writes {puts}: only the far clip and the far pass end'
+    writes = re.findall(r'WriteClip\(at,farClip,(\d),', raise_fn)
+    assert writes == ['0', '2'], f'view.cpp Raise writes fields {writes}: only far clip and far pass end'
+    write_fn = code.split('void WriteClip(', 1)[1].split('\n}', 1)[0]
+    assert 'Put<float>(at,Field(farClip,field),value);' in write_fn
     body = rule.split('inline bool Raise(', 1)[1].split('\n}', 1)[0]
     assert 'distantNear' not in body, 'view_clip.h Raise: the far pass start is the mission\'s'
     assert 'add_executable(view_clip_check EXCLUDE_FROM_ALL tools/view_clip_check.cpp)' in cmake
@@ -3891,7 +3915,7 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(at_build, build_files=_at_build_files))
             enter(patched(describe, table_ids=lambda mods: []))
             enter(patched(installer, bundle_dir=lambda: bundle, check_loader=lambda game: None,
-                          find_edf41=lambda game: None,
+                          find_edf41=lambda game: None, material_compat_wanted=lambda text: False,
                           stack_weapons=lambda game: {}, retire_weapons=lambda game: True,
                           ask=lambda prompt: answers.pop(0)))
             enter(patched(call_weapons, recover=lambda game: False, install=lambda game, files: {},
@@ -4488,7 +4512,8 @@ def stock_payload_and_seats_wired() -> None:
     want = sorted(c.replace('Vehicle', '', 1).lstrip('_') if c != 'VehicleHelicopter409' else 'Helicopter409'
                   for c in mss.BUILT_CLASSES if c != 'Vehicle506_Helicopter')
     assert sorted(builds) == want, (builds, want)
-    assert 'if(IsStoreWeapon(w))return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
+    assert 'if(IsStoreWeapon(w) && !(spec && spec->nativeControl))' in payload
+    assert 'return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;' in payload and 'return StoreOf(w)!=nullptr;' in stores
     hook = src('src/crew.cpp').split('void __fastcall InputHook(', 1)[1].split('\n}\n', 1)[0]
     # The disabled branch also calls AimLines to restore native lines. Check the
     # enabled pipeline's ordering, not that earlier ownership-cleanup call.
@@ -4612,7 +4637,10 @@ def edf41_clone_destructor_slot() -> None:
     assert 'DtorShaped(c.rvas[kSlotDtor])' in build and build.index('DtorShaped(') < build.index('c.block[1+kSlotDtor]=')
     for rel in ('src/edf41mother.cpp', 'src/edf41mother401.cpp', 'src/edf41robo.cpp'):
         code = re.sub(r'//[^\n]*', '', src(rel))
-        assert 'orig[kSlotDtor]' in code and 'orig[0]' not in code and 'block[1]' not in code, rel
+        assert 'orig[kSlotDtor]' in code and 'orig[0]' not in code, rel
+        # block[1] is the address of the clone's first virtual entry. Read-only
+        # identity comparisons are valid; assigning this slot would corrupt slot 0.
+        assert not re.search(r'\.block\s*\[\s*1\s*\]\s*=(?!=)', code), rel
         assert re.search(r'AtGameShutdown\(&\w+\);', code), f'{rel}: no shutdown callback'
     # the shutdown: the callbacks first (the game whole), the flag after; the sound / material calls inert from then on
     hook = shared.split('void __fastcall ShutdownHook(void* self) {', 1)[1].split('\n}', 1)[0]
@@ -4871,9 +4899,9 @@ def map_commands_wired() -> None:
     assert code.count('edf::AsyncKey(') == 1 and 'GetAsyncKeyState' not in code
     reader = code.split('Keys ReadKeys(', 1)[1].split('\n}', 1)[0]
     assert 'Down(VK_TAB)' in reader
-    # The 「摆放」 panel's keys (, . / Enter Backspace) only where the panel works (the test range, offline): on any other map
+    # The 「摆放」 panel's keys (, . / Enter Backspace) only where the panel works (the test range; enemy placement also works online): on any other map
     # they stay the game's and never switch the input back from the pad.
-    assert reader.startswith('const MapCmdInput& in,bool placeKeys)') and 'const bool placeKeys=RangePlaceOn() && !InSession();' in code
+    assert reader.startswith('const MapCmdInput& in,bool placeKeys)') and 'const bool placeKeys=RangePlaceOn();' in code
     for key in ('VK_OEM_COMMA', 'VK_OEM_PERIOD', 'VK_OEM_2', 'VK_RETURN', 'VK_BACK'):
         assert f'Down({key})' in reader.split('if(placeKeys) {', 1)[1] and f'Down({key})' not in reader.split('if(placeKeys) {', 1)[0], key
     assert 'placeHoldsPad.store(placeKeys && ' in code and '(placeKeys && ((k.padUp && !g.was.padUp)' in code
@@ -5050,14 +5078,30 @@ def map_wired() -> None:
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'edf::AsyncKey(' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
                                       'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp',
-                                      'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp']), f'a new key reader: make it give way to the map ({readers})'
+                                      'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     fp = src('src/firstperson.cpp')
-    key_input = fp.split('bool KeyInputAllowed() noexcept {', 1)[1].split('\n}', 1)[0]
-    assert 'if(MapHoldsKeys())return false;' in key_input
-    assert '!KeyInputAllowed()' in fp and 'keyWas=false;keyCancelled=down;return;' in fp, 'map input cancels the FP key gesture'
+    key_input = fp.split('bool KeyInputAllowed(const unsigned char* human) noexcept {', 1)[1].split('\n}', 1)[0]
+    assert 'if(MapHoldsHumanKeys(human))return false;' in key_input
+    assert '!KeyInputAllowed(human)' in fp and 'key.was=false;key.cancelled=down;return;' in fp, 'map input cancels only its owner camera FP gesture'
+    assert 'CancelToggle(human);if(Current().on)Leave();' in fp and 'keyClaimHuman==human && keyClaimControl==key.control' in fp
     assert 'Foreground() && !MapHoldsKeys()' in src('src/room_ui.cpp'), 'the room menu keys give way to the map'
+    thermal = src('src/thermal.cpp')
+    assert '!GamePaused() && !MapHoldsKeys() && shot.inSight && down && !keyHeld' in thermal, 'thermal switching gives way to map/pause and requires the actual optic'
+    assert 'process==GetCurrentProcessId()' in thermal, 'the thermal key reader requires this game window'
+    controlled = src('src/enemy_control.cpp')
+    sample = controlled.split('void Sample(Session& session,Input& sample) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,0x688)) {' in sample
+    assert 'if(index==0) {' in sample, 'keyboard input belongs only to the first local player'
+    allowed = controlled.split('bool InputAllowed() noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(GamePaused())return false;' in allowed and 'pid==GetCurrentProcessId()' in allowed
 
+    opening = code.split('void Open(const unsigned char* human) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'CameraRayOf(human,eye,dir)' in opening and 'CameraRay(eye,dir)' not in opening
+    own_hold = code.split('bool MapHoldsHumanKeys(const unsigned char* human) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'const ObjRef owner=inputOwner' in own_hold and 'held && owner.Is(human)' in own_hold
+    assert 'AcquireSRWLockShared(&lock)' in own_hold and 'ReleaseSRWLockShared(&lock)' in own_hold
+    assert 'TvHoldsHumanKeys(human)' in own_hold
     assert 'InstallMap();' in plugin and 'ResetMap();' in mission and 'src/map.cpp' in cmake
     assert 'EXCLUDE_FROM_ALL tools/map_cam_check.cpp' in cmake and '#include "../src/map_cam.h"' in src('tools/map_cam_check.cpp')
     assert 'MapScreen(drawer,ctx,t,viewProj' in hud and '!MapOwnsView())KeepViewProj' in hud
@@ -5116,7 +5160,7 @@ def map_hides_stock_hud() -> None:
     assert 'MapHidesStockHud(At<const void*>(hud,0x18))' in sub
     assert 'if(!hide)draw(hud,viewProj,owner,r9,fifth);' in sub
     draw = hud.split('void HudDraw(const float* viewProj', 1)[1]
-    assert draw.index('if(MapScreen(drawer,ctx,t,viewProj') < draw.index('if(MapOwnsView()){FreeText(text);return;}') < draw.index('CarrierBars(')
+    assert draw.index('if(MapScreen(drawer,ctx,t,viewProj') < draw.index('if(MapOwnsView() && MapHidesStockHud(passCamera)){FreeText(text);return;}') < draw.index('CarrierBars(')
     assert 'inline bool Step(' in h and 'inline bool GameSet(' in h
     assert 'EXCLUDE_FROM_ALL tools/map_hud_check.cpp' in cmake and 'map_hud_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
     assert '#include "../src/map_stock_hud.h"' in src('tools/map_hud_check.cpp')
@@ -5212,7 +5256,13 @@ def stock_guidance_wired() -> None:
     assert '0x691310' not in stores and '0x68FF60' not in stores, "the lock code is lockon.cpp's"
     assert 'InstallLockon();' in src('src/plugin.cpp') and 'InstallGuidance();' in src('src/plugin.cpp')
     m = src('src/map.cpp')
-    assert 'return TvFrame(human,open && game.open,TvRead(human)) || open;' in m, 'one hold shim'
+    human_frame = m.split('bool __fastcall MapHumanFrame(', 1)[1].split('// --- The camera ---', 1)[0]
+    tv_hold = 'const bool tv=TvFrame(human,open && game.open,TvRead(human));'
+    enemy_hold = 'const bool enemy=EnemyControlSuppressHuman(human);'
+    merged_hold = 'return tv || open || enemy;'
+    assert tv_hold in human_frame and enemy_hold in human_frame and merged_hold in human_frame, 'one hold shim runs TV and possession each frame'
+    assert human_frame.index(tv_hold) < human_frame.index(enemy_hold) < human_frame.index(merged_hold), 'hold queries must execute before OR, without short-circuiting either lifecycle'
+    assert human_frame.count('TvFrame(') == 1 and human_frame.count('EnemyControlSuppressHuman(') == 1
     assert 'TvView(&tvHuman,tvEye,tvLook)' in m, 'the TV through the map camera hook'
     assert 'kCamStep' not in src('src/tvguide.cpp'), 'one camera hook: the map\'s'
     assert 'holds.load(std::memory_order_relaxed) || TvHoldsKeys()' in m
@@ -7245,7 +7295,8 @@ def edf41_weapons_convert_real() -> None:
         for k in dsgo.parse(stock(f'WEAPON/{r.items[0].upper()}.SGO')).root.names.values():
             count[k] = count.get(k, 0) + 1
     common = {k for k, n in count.items() if n >= 0.95 * len(rows[::7])}
-    cues6 = acb.game_cues(edf6)
+    import make_edf41_weapons as m41
+    cues6 = m41.available_weapon_cues(edf6, edf41)
     cues41 = acb.game_cues(edf41)
     ports = [p for p in pw.PORTS if p.game == 'edf41']
     assert ports
@@ -7549,27 +7600,41 @@ def edf41_calls_convert() -> None:
             r.set(k, v)
         return r
 
-    template = call([0.05, 180.0, 120.0, 1.0, ['app:/Object/v508_transport.sgo', 'app:/object/v509_transportbox.sgo',
-                     'app:/Object/v504_begaruta.sgo', [[0.5, 0.7], [[ 'app:/weapon/v_504begaruta_cannon01_l.sgo', 1.0],
-                                                                     ['app:/weapon/v_504begaruta_cannon01_r.sgo', 1.0]]]],
+    donor_weapons = [[f'app:/weapon/v_504begaruta_slot{i}.sgo', [1.0, 2.0]] for i in range(8)]
+    source_weapons = [[f'app:/weapon/v_406begaruta_slot{i}.sgo', [float(i), 3.0]] for i in range(6)]
+    donor_setup = [[0.5, 0.7], [2, 3, 4, 5], [8] * 6, [7], donor_weapons, [9, 10]]
+    source_setup = [[0.4, 0.6], [6, 5, 4, 3], [9] * 6, [8], source_weapons, [10, 11]]
+    template = call([0.05, 180.0, 120.0, 1.0,
+                     ['app:/Object/v508_transport.sgo', 'app:/object/v509_transportbox.sgo',
+                      'app:/Object/v504_begaruta.sgo', donor_setup],
                      ['輸送部隊目標確認', '輸送部隊発射', '輸送部隊攻撃後']])
-    mine = {'Ammo_CustomParameter': [0.05, 180, 120, 1, ['app:/Object/Transporter401.sgo', 'app:/object/Transporter401_ContainerM.sgo',
-                                     'app:/Object/Vehicle406_Begaruta_red.sgo', [[0.4, 0.6], [['app:/weapon/v_406begaruta_cannon01.sgo', 2.0]]]],
-                                     ['x', '輸送部隊発射ベガルタ', 'y']],
+    mine = {'Ammo_CustomParameter': [0.05, 180, 120, 1,
+                                    ['app:/Object/Transporter401.sgo', 'app:/object/Transporter401_ContainerM.sgo',
+                                     'app:/Object/Vehicle406_Begaruta_red.sgo', source_setup],
+                                    ['x', '輸送部隊発射ベガルタ', 'y']],
             'AmmoCount': 3, 'ReloadTime': 900, 'EnergyChargeRequire': -1.0}
     r = ec.vehicle_call(mine, template, ec.VEHICLES['vehicle406_begaruta_red.sgo']).root
     acp = r.get('Ammo_CustomParameter')
     drop = acp.items[4]
-    assert drop.items[0] == 'app:/Object/v508_transport.sgo' and drop.items[2] == 'app:/Object/v504_begaruta_red.sgo'
-    assert dsgo.to_py(drop.items[3]) == [[0.4, 0.6], [['app:/weapon/v_504begaruta_cannon01_l.sgo', 2.0],
-                                                      ['app:/weapon/v_504begaruta_cannon01_r.sgo', 2.0]]], dsgo.to_py(drop.items[3])
+    assert drop.items[0] == 'app:/Object/v508_transport.sgo'
+    assert drop.items[2] == 'app:/Object/vehicle406_begaruta_red.sgo', 'the real 406 model must be summoned'
+    assert dsgo.to_py(drop.items[3]) == source_setup, 'the six original holders and tuning must survive an eight-slot donor'
+    assert len(drop.items[3].items[4].items) == 6
     assert dsgo.to_py(acp.items[5]) == ['輸送部隊目標確認', '輸送部隊発射', '輸送部隊攻撃後'], 'not the template\'s voices'
     assert r.get('AmmoCount') == 3 and r.get('ReloadTime') == 900 and dsgo.to_py(r.get('EnergyChargeRequire')) == [-1.0, -1.0]
     assert template.get('Ammo_CustomParameter').items[4].items[2] == 'app:/Object/v504_begaruta.sgo', 'the template changed'
     odd = dict(mine, Ammo_CustomParameter=mine['Ammo_CustomParameter'][:4] + [mine['Ammo_CustomParameter'][4][:3] + [[0.4]]]
                + mine['Ammo_CustomParameter'][5:])
+    try:
+        ec.vehicle_call(odd, template, ec.VEHICLES['vehicle406_begaruta_red.sgo'])
+    except edf5port.Unsupported as e:
+        assert 'six-holder' in str(e)
+    else:
+        raise AssertionError('a malformed 406 setup must not silently fall back to the 504')
+    # A generic donor route retains its template when the old settings do not
+    # have the donor shape; the dedicated six-holder 406 route above is strict.
     r = ec.vehicle_call(odd, template, 'v504_begaruta_red.sgo').root
-    assert dsgo.to_py(r.get('Ammo_CustomParameter').items[4].items[3]) == dsgo.to_py(template.get('Ammo_CustomParameter').items[4].items[3])
+    assert dsgo.to_py(r.get('Ammo_CustomParameter').items[4].items[3]) == donor_setup
     bomber = call([30.0, 1.0, ['app:/object/Bomber501.sgo', 2.0, [1.0]], ['a']])
     r = ec.bomber_call({'Ammo_CustomParameter': [0.05, 120, 180, 2, ['app:/object/Bomber401.sgo', 3, [5.0]]]}, bomber).root
     assert dsgo.to_py(r.get('Ammo_CustomParameter').items[2]) == ['app:/object/Bomber401.sgo', 3, [5.0]]
@@ -7913,26 +7978,36 @@ def ported_assets_of_another_mod_stay() -> None:
                 assert modfiles.read(_mods(game, asset)) == b'another mod'
 
 
+def _edf41_shared_port_fixture():
+    """Synthetic sharing independent of whether current EDF4.1 objects borrow EDF5 art."""
+    from dataclasses import replace
+    import ported_weapons as pw
+    asset = 'OBJECT/EDF41_SHARED_LEDGER_FIXTURE.MRAB'
+    port = replace(pw.PORTS[0], assets={asset: 'OBJECT/SYNTHETIC_SOURCE.RAB'})
+    ports = tuple(port if p.id == port.id else p for p in pw.PORTS)
+    return asset, port, ports
+
+
 @test
 def edf41_shared_weapon_asset_lifecycle() -> None:
-    """The real shared asset's path, through install -> legacy upgrade -> campaign plan -> either uninstall order.
+    """An explicit synthetic shared asset, through install -> legacy upgrade -> campaign plan -> either uninstall order.
     A weapon-manifest hash is required even for byte-identical unowned files; edited files still block the object."""
     import edf41_objects as eo
     import itertools
     import ported_weapons as pw
-    asset = next(iter(eo.registry()['shared']))
-    port = next(p for p in pw.PORTS if asset in p.assets)
+    asset, port, ports = _edf41_shared_port_fixture()
     obj, data = 'OBJECT/VEHICLE301_TANK_AI.SGO', b'shared model'
     payloads = {obj: b'converted tank', asset: data}
     reg = {'objects': [{'object': obj, 'files': list(payloads)}],
            'files': {r: modfiles.sha256(d) for r, d in payloads.items()}, 'shared': {asset: 'unused'}}
     ids = STOCK + sorted({*cw.templates(), *(p.template for p in pw.PORTS)} - set(STOCK)) + list(calls.IDS)
-    table = ids + [p.id if p is port else pw.retired_id(p.id) for p in pw.PORTS]
+    table = ids + [p.id if p.id == port.id else pw.retired_id(p.id) for p in pw.PORTS]
     for legacy in (False, True):
         for removal, original in itertools.product(('calls', 'repair', 'edf41'), (None, b'original mod model')):
             with tempfile.TemporaryDirectory(prefix='edf6vc-shared-') as game, \
                     patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
                     patched(cw, stock=lambda game_root, rel: b''), \
+                    patched(pw, PORTS=ports, BY_ID={p.id: p for p in ports}), \
                     patched(eo, registry=lambda: reg), patched(eo, read=payloads.__getitem__):
                 if original is not None:
                     modfiles.atomic_write(_mods(game, asset), original)
@@ -7979,21 +8054,21 @@ def edf41_shared_weapon_asset_lifecycle() -> None:
 
 @contextlib.contextmanager
 def _edf41_shared_game(original: bytes | None) -> Iterator[tuple[str, str, bytes, Callable[[], dict[str, bytes]]]]:
-    """A game dir with the real shared EDF4.1 model's path and a weapon table for its port: (game, asset, our bytes,
+    """A game dir with the synthetic shared EDF4.1 model and a weapon table for its port: (game, asset, our bytes,
     the call weapons' files). `original`: a pre-install file at the asset's path (another mod's)."""
     import edf41_objects as eo
     import ported_weapons as pw
-    asset = next(iter(eo.registry()['shared']))
-    port = next(p for p in pw.PORTS if asset in p.assets)
+    asset, port, ports = _edf41_shared_port_fixture()
     obj, data = 'OBJECT/VEHICLE301_TANK_AI.SGO', b'shared model'
     payloads = {obj: b'converted tank', asset: data}
     reg = {'objects': [{'object': obj, 'files': list(payloads)}],
            'files': {r: modfiles.sha256(d) for r, d in payloads.items()}, 'shared': {asset: 'unused'}}
     ids = STOCK + sorted({*cw.templates(), *(p.template for p in pw.PORTS)} - set(STOCK)) + list(calls.IDS)
-    table = ids + [p.id if p is port else pw.retired_id(p.id) for p in pw.PORTS]
+    table = ids + [p.id if p.id == port.id else pw.retired_id(p.id) for p in pw.PORTS]
     with tempfile.TemporaryDirectory(prefix='edf6vc-shared-') as game, \
             patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
             patched(cw, stock=lambda game_root, rel: b''), \
+            patched(pw, PORTS=ports, BY_ID={p.id: p for p in ports}), \
             patched(eo, registry=lambda: reg), patched(eo, read=payloads.__getitem__):
         if original is not None:
             modfiles.atomic_write(_mods(game, asset), original)
@@ -8595,7 +8670,8 @@ def edf41_net_contract() -> None:
     robo, m401, m301 = src('src/edf41robo.cpp'), src('src/edf41mother401.cpp'), src('src/edf41mother.cpp')
     for cpp in (robo, m401, m301):
         assert '#include "edf41net.h"' in cpp and 'edf41net::Attach(obj);' in cpp
-    assert 'if(r.body<kS10 && !NetFollows(r))AiTick(r);' in robo
+    decision = robo.split('if(r.body<kS10 && !NetFollows(r)) {', 1)[1].split('\n    } else {', 1)[0]
+    assert 'if(r.player.Active())PlayerTick(r);' in decision and 'else AiTick(r);' in decision
     assert '!NetFollows(r) && --g.autoCount<=0' in robo and 'NetBody(r);' in robo.split('void BodySet(', 1)[1].split('\n}\n', 1)[0]
     assert 'NetMirrorMake(self);' in robo and 'CreateFromPath(m,L"app:/object/UfoRobo401.sgo")' in robo
     assert 'OnlineRunsHere(self)' not in re.sub(r'//[^\n]*', '', m401), 'the 401 runs on every machine'
@@ -8603,7 +8679,7 @@ def edf41_net_contract() -> None:
         assert 'NetDecides(' in m401.split(case, 1)[1].split('case ', 1)[0], case
     assert 'NetPanel(h,*p);' in m401 and 'NetBattery(p,*b,i);' in m401 and 'NetSpawn(p,o);' in m401 and 'edf41net::Pump(self);' in m401
     assert 'NetEntered(p,netFrom,state);' in m401 and 'NetPartIn(*p);' in m401
-    assert 'if(!NetDecides(obj))break;' in m301.split('case kCanWait:', 1)[1].split('case ', 1)[0]
+    assert 'if((p.manualLease && !p.attack) || !NetDecides(obj))break;' in m301.split('case kCanWait:', 1)[1].split('case ', 1)[0]
     assert 'NetPart(hullObj,part,group,h.parts.size()-1);' in m301 and 'NetSpawn(p,enemy);' in m301 and 'edf41net::Pump(self);' in m301
     for cpp in (robo, m401, m301):   # windows.h macros: the 4.1 class files use (std::min) / (std::max)
         assert 'far' not in re.findall(r'\b(?:float|int|bool|auto)\s+(\w+)', re.sub(r'//[^\n]*', '', cpp))
@@ -9569,51 +9645,63 @@ def edf41_class_names() -> None:
 
 @test
 def edf41_story_small_dragons() -> None:
-    """2026-10-17「这龙怎么还是蝌蚪的模样」: 4.1's story small dragons (app:/Object/DragonSmall401.sgo, RedSmallDragon.sgo,
-    YerrowSmallDragon.sgo) are paths EDF6 holds as EDF5's frog dragons (e518_frogDragon*), which EDF6's own missions spawn,
-    so the 4.1 missions showed the frog. 4.1's own go to OBJECT/EDF41/ (pylib/edf41dlc.py STORY_SHADOWED / story_path,
-    make_edf41_objects STORY_ROOTS: aliased like the DLC's _HS dragons, their shadowed model and CAS moved along) and every
-    converted 4.1 script names them there (edf41dlc.rewrite through bvm41.rewritten for EDF5's story recompiles, through
-    to_edf5 for the packs). Checked: the mapping (only those three SGOs, any case, ';' lists, idempotent, mounted paths as
-    before); the generator's roots and aliases; a story script rewritten names none at the stock path and gives the same
-    bytes back once put back; the registry and the committed scripts agree (a registry shipping OBJECT/EDF41/<x> has no
-    script naming the stock <x>); with the games installed, the three built from 4.1's archives carry 4.1's models and
-    ragdolls from files of their own, none at a path EDF6's archives hold."""
+    """4.1's small dragons have distinct EDF41_ root SGOs: stock DragonSmall401 is EDF5/6's frog dragon. Original
+    and old EDF41/ script paths converge on the prefixed name; only model/CAS dependencies stay in EDF41/. The old
+    namespaced SGO remains a byte-identical compatibility file of each object, not another catalog object. Check
+    mapping, generator roots, every committed BVM, the shipped objects, and (with both games) a real rebuild."""
     import glob
     import bvm41
     import edf41_objects as eo
     import edf41dlc
     import make_edf41_objects as m
+    import mdb
     import sgo
     f = edf41dlc.STORY_FOLDER
-    assert edf41dlc.story_path('app:/Object/DragonSmall401.sgo') == f'app:/Object/{f}/DragonSmall401.sgo'
-    assert edf41dlc.story_path('app:/object/redsmalldragon.sgo') == f'app:/object/{f}/redsmalldragon.sgo'
-    for other in ('app:/Object/DragonBig401.sgo', 'app:/Object/DragonSmall401_HS.sgo', 'app:/Object/DragonSmall401.mrab',
-                  f'app:/Object/{f}/DragonSmall401.sgo', 'app:/Object/EDF41MP01/DragonSmall401_HS.sgo', 'DragonSmall401'):
+    dragons = {'DRAGONSMALL401.SGO': 'EDF41_DRAGONSMALL401.SGO',
+               'REDSMALLDRAGON.SGO': 'EDF41_REDSMALLDRAGON.SGO',
+               'YERROWSMALLDRAGON.SGO': 'EDF41_YERROWSMALLDRAGON.SGO'}
+    assert edf41dlc.STORY_DRAGONS == dragons, edf41dlc.STORY_DRAGONS
+    for name, target in dragons.items():
+        canonical = 'app:/Object/' + target
+        for old in ('app:/Object/' + name, f'app:/Object/{f}/' + name, canonical):
+            for path in (old, old.lower(), old.swapcase()):
+                assert edf41dlc.story_path(path) == canonical, path
+                assert edf41dlc.rewrite(path) == canonical, path
+                assert edf41dlc.rewrite(edf41dlc.rewrite(path)) == canonical, path
+    for other in ('app:/Object/DragonBig401.sgo', 'app:/Object/DragonSmall401_HS.sgo',
+                  'app:/Object/DragonSmall401.mrab', f'app:/Object/{f}/DragonSmall401.cas',
+                  'app:/Object/EDF41MP01/DragonSmall401_HS.sgo', 'DragonSmall401'):
         assert edf41dlc.story_path(other) is None, other
         assert edf41dlc.rewrite(other) == other, other
-    both = 'app:/Object/YerrowSmallDragon.sgo;mp01:/Object/GiantAnt04.sgo'
-    assert edf41dlc.rewrite(both) == f'app:/Object/{f}/YerrowSmallDragon.sgo;app:/Object/EDF41MP01/GiantAnt04.sgo'
-    assert edf41dlc.rewrite(edf41dlc.rewrite(both)) == edf41dlc.rewrite(both)
-    # the generator: one root and alias per shadowed object, in the story folder, under the class with 4.1's ragdoll bodies
-    import edf41friends
-    dragons = [n for n in edf41dlc.STORY_SHADOWED if 'OBJECT/' + n not in edf41friends.LOOKS]   # the soldiers: friend_look
+    mixed = ('app:/Object/DragonSmall401.sgo;app:/object/edf41/redsmalldragon.sgo;'
+             'app:/object/edf41_yerrowsmalldragon.sgo;mp01:/Object/DragonSmall401_HS.sgo;app:/Object/DragonBig401.sgo')
+    expected = ('app:/Object/EDF41_DRAGONSMALL401.SGO;app:/Object/EDF41_REDSMALLDRAGON.SGO;'
+                'app:/Object/EDF41_YERROWSMALLDRAGON.SGO;app:/Object/EDF41MP01/DragonSmall401_HS.sgo;'
+                'app:/Object/DragonBig401.sgo')
+    assert edf41dlc.rewrite(mixed) == expected
+    assert edf41dlc.rewrite(expected) == expected
+    # Canonical root identities remain DragonSmall aliases with the original template and 4.1 ragdoll bodies.
     assert set(m.STORY_ROOTS) == set(dragons), m.STORY_ROOTS
     assert f not in {folder for _, folder in edf41dlc.PACKS.values()}
-    for name in dragons:
-        root = f'{f}/{name}'
-        a = m.ALIASES[root]
-        assert m.ROOTS[root] == m.STORY_ROOTS[name] > 0 and a.cls == 'DragonSmall' and a.template == name, (root, a)
+    for name, target in dragons.items():
+        a = m.ALIASES[target]
+        assert m.ROOTS[target] == m.STORY_ROOTS[name] > 0 and a.cls == 'DragonSmall' and a.template == name, (target, a)
+        assert name not in m.ROOTS and f'{f}/{name}' not in m.ROOTS, name
         assert dict(a.override)['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), a.override
-        assert m.own_folder('OBJECT/' + root) == f and m.pack_folder('OBJECT/' + root) == '', root
+        assert m.own_folder('OBJECT/' + target) == f and m.pack_folder('OBJECT/' + target) == '', target
     assert m.own_folder('OBJECT/EDF41MP01/X.SGO') == 'EDF41MP01' and m.own_folder('OBJECT/X.SGO') == ''
-    # a story script (EDF5's recompile, M165: all three) with its strings mapped; the bytes come back with them put back
-    stock = re.compile(r'(?i)^app:/object/(' + '|'.join(re.escape(n) for n in edf41dlc.STORY_SHADOWED) + r')$')
-    unmap = re.compile(r'(?i)^(app:/object)/' + f + r'/')
+    old_path = re.compile(r'(?i)^app:/object/(?:' + re.escape(f) + r'/)?('
+                          + '|'.join(re.escape(n) for n in dragons) + r')$')
+    canonical_paths = {'app:/object/' + target.lower(): name for name, target in dragons.items()}
 
     def pushed(data: bytes) -> list[str]:
         prog = bvm41.parse(data)
-        return [x.v for code in [prog.init] + [g.code for g in prog.funcs] for x in code if x.op == bvm41.OP_PUSHS]
+        return [p for code in [prog.init] + [g.code for g in prog.funcs] for x in code
+                if x.op == bvm41.OP_PUSHS for p in x.v.split(';')]
+
+    def restore(text: str) -> str:
+        return ';'.join('app:/Object/' + canonical_paths[p.lower()] if p.lower() in canonical_paths else p
+                        for p in text.split(';'))
 
     with open(os.path.join(ROOT, 'edf41port', 'missions', 'M165', 'MISSION.BVM'), 'rb') as fh:
         script = fh.read()
@@ -9621,42 +9709,129 @@ def edf41_story_small_dragons() -> None:
     mapped = bvm41.rewritten(script, edf41dlc.rewrite)
     assert bvm41.rewritten(mapped, edf41dlc.rewrite) == mapped
     names = pushed(mapped)
-    assert not [s for s in names if stock.match(s)], names
-    assert set(dragons) <= {s.split('/')[-1].upper() for s in names if unmap.match(s)} <= set(edf41dlc.STORY_SHADOWED), names
-    restored = bvm41.rewritten(mapped, lambda s: unmap.sub(r'\1/', s))
-    assert bvm41.rewritten(restored, edf41dlc.rewrite) == mapped and not [s for s in pushed(restored) if unmap.match(s)]
-    # the registry and the committed scripts agree: a story dragon shipped in the folder is named there by every script
-    shipped = {o['object'] for o in eo.registry()['objects']}
-    moved = {name for name in edf41dlc.STORY_SHADOWED if f'OBJECT/{f}/{name}' in shipped}
-    assert moved in (set(), set(edf41dlc.STORY_SHADOWED)), moved
-    if moved:
-        for path in glob.glob(os.path.join(ROOT, 'edf41port', '**', '*.BVM'), recursive=True):
-            with open(path, 'rb') as fh:
-                left = [s for s in pushed(fh.read()) if stock.match(s)]
-            assert not left, f'{path} names {left}: regenerate tools/make_edf41_missions.py (story and --dlc)'
+    assert not [s for s in names if old_path.match(s)], names
+    assert set(canonical_paths) <= {s.lower() for s in names}, names
+    restored = bvm41.rewritten(mapped, restore)
+    assert bvm41.rewritten(restored, edf41dlc.rewrite) == mapped
+    assert not [s for s in pushed(restored) if s.lower() in canonical_paths]
+    # Every shipped story/DLC script uses the prefixed identity, never the stock or old namespace name.
+    referenced: set[str] = set()
+    for path in glob.glob(os.path.join(ROOT, 'edf41port', '**', '*.BVM'), recursive=True):
+        with open(path, 'rb') as fh:
+            names = pushed(fh.read())
+        assert not [s for s in names if old_path.match(s)], f'{path} retains an old small-dragon path'
+        for name in names:
+            if name.lower() in canonical_paths:
+                assert name == edf41dlc.rewrite(name), (path, name)
+                referenced.add(name.lower())
+    assert referenced == set(canonical_paths), referenced
+    models = {'DRAGONSMALL401.SGO': 'SmallDragon401Green.mdb', 'REDSMALLDRAGON.SGO': 'RedSmallDragon.mdb',
+              'YERROWSMALLDRAGON.SGO': 'YerrowSmallDragon.mdb'}
+    source_of = {target: name for name, target in dragons.items()}
+
+    def check_object(obj: dict, read: Callable[[str], bytes]) -> None:
+        rel = obj['object']
+        source = source_of[rel.removeprefix('OBJECT/')]
+        legacy = f'OBJECT/{f}/{source}'
+        assert obj['class'] == 'DragonSmall' and legacy in obj['files'], obj
+        assert read(legacy) == read(rel), (rel, 'old namespace SGO differs')
+        top = sgo.load(data=read(rel))
+        assert top['xgs_scene_object_class'] == 'DragonSmall', (rel, top['xgs_scene_object_class'])
+        model = m.model_entries(top['animation_model'][0])[0]
+        model_rel = m.rel_of(model[0])
+        assert model_rel.startswith(f'OBJECT/{f}/') and model[1] == models[source], model
+        assert model_rel in obj['files'], (rel, model_rel)
+        assert model[1].lower() in {x.name.lower() for x in mdb.rab_read(read(model_rel)).files}, model
+        cas_rel = m.rel_of(top['animation_model'][1])
+        assert cas_rel.startswith(f'OBJECT/{f}/') and cas_rel in obj['files'], cas_rel
+        assert 'frogdragon' not in top['ragdoll'][0].lower(), top['ragdoll']
+        assert m.rel_of(top['ragdoll'][0]) in obj['files'], top['ragdoll']
+        assert top['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), top.get('edf41_ragdoll_bodies')
+
+    objects = {o['object']: o for o in eo.registry()['objects']}
+    for name, target in dragons.items():
+        rel = 'OBJECT/' + target
+        assert rel in objects and f'OBJECT/{f}/{name}' not in objects, rel
+        assert 'OBJECT/' + name not in objects, (name, 'would replace EDF5/6 frog dragons')
+        check_object(objects[rel], eo.read)
     if not _e5c_have_game() or not _edf41_root():
         print('skip  edf41_story_small_dragons (real archives): needs EDF6 and EDF4.1 installed')
         return
     import rootcpk
-    import mdb
     games = m.Games(_edf41_root(), rootcpk.DEFAULT_GAME)
-    frog = sgo.load(data=games.read6('OBJECT/DRAGONSMALL401.SGO'))   # why the folder: EDF6's own is EDF5's frog
+    frog = sgo.load(data=games.read6('OBJECT/DRAGONSMALL401.SGO'))
     assert 'frogdragon' in m.model_entries(frog['animation_model'][0])[0][1].lower(), frog['animation_model'][0]
-    roots = tuple(f'{f}/{n}' for n in dragons)
-    data, files = m.build(_edf41_root(), rootcpk.DEFAULT_GAME, roots)
-    assert not data['skipped'] and {o['object'] for o in data['objects']} == {'OBJECT/' + r for r in roots}, data['skipped']
-    models = {'DRAGONSMALL401.SGO': 'SmallDragon401Green.mdb', 'REDSMALLDRAGON.SGO': 'RedSmallDragon.mdb',
-              'YERROWSMALLDRAGON.SGO': 'YerrowSmallDragon.mdb'}
-    for o in data['objects']:
-        rel = o['object']
-        assert not [r for r in o['files'] if r in games.have6], (rel, o['files'])   # nothing EDF6 would load instead
-        top = sgo.load(data=files[rel])
-        model = m.model_entries(top['animation_model'][0])[0]
-        assert m.rel_of(model[0]).startswith(f'OBJECT/{f}/') and model[1] == models[rel.split('/')[-1]], model
-        assert model[1].lower() in {x.name.lower() for x in mdb.rab_read(files[m.rel_of(model[0])]).files}, model
-        assert m.rel_of(top['animation_model'][1]).startswith(f'OBJECT/{f}/'), top['animation_model'][1]
-        assert 'frogdragon' not in top['ragdoll'][0].lower() and m.rel_of(top['ragdoll'][0]) in files, top['ragdoll']
-        assert top['edf41_ragdoll_bodies'] == list(m.SMALL_DRAGON_BODIES), top.get('edf41_ragdoll_bodies')
+    for name, target in dragons.items():
+        assert games.moved['OBJECT/' + target] == 'OBJECT/' + name, target
+        assert games.moved[f'OBJECT/{f}/{name}'] == 'OBJECT/' + name, name
+    data, files = m.build(_edf41_root(), rootcpk.DEFAULT_GAME, tuple(dragons.values()))
+    assert not data['skipped'] and {o['object'] for o in data['objects']} == {'OBJECT/' + r for r in dragons.values()}, data['skipped']
+    for obj in data['objects']:
+        assert not [r for r in obj['files'] if r in games.have6], (obj['object'], obj['files'])
+        check_object(obj, files.__getitem__)
+
+
+@test
+def edf41_story_small_dragons_upgrade() -> None:
+    """An existing edf41-owned EDF41/ dragon install upgrades to the three prefixed roots without foreign-file
+    refusals, dependency rewrites or stock frog overrides; both entry names uninstall without leaving resources."""
+    import edf41_objects as eo
+    import edf41dlc
+    reg = eo.registry()
+    roots = {'OBJECT/' + n for n in edf41dlc.STORY_DRAGONS.values()}
+    aliases = {f'OBJECT/{edf41dlc.STORY_FOLDER}/{n}' for n in edf41dlc.STORY_DRAGONS}
+    objects = [o for o in reg['objects'] if o['object'] in roots]
+    needed = {r for obj in objects for r in obj['files']}
+    assert len(objects) == 3 and roots | aliases <= needed
+    subset = {**reg, 'objects': objects, 'stock_completions': [],
+              'files': {r: reg['files'][r] for r in needed}}
+    payloads = {r: eo.read(r) for r in needed}
+    old = {r: data for r, data in payloads.items() if r not in roots}
+    with tempfile.TemporaryDirectory(prefix='edf6vc-e41dragon-') as game, patched(eo, registry=lambda: subset):
+        os.makedirs(os.path.join(game, 'Mods'))
+        eo.install(game, old)
+        led = ledger.Ledger(game)
+        assert set(led.owned_by(eo.OWNER)) == {ledger.key(r) for r in old}
+        assert all(os.path.isfile(led.disk(r)) for r in aliases)
+        assert not any(os.path.exists(led.disk(r)) for r in roots)
+        assert not eo.unavailable(game), eo.unavailable(game)
+        files, skipped = eo.build(game)
+        assert not skipped and files == payloads, skipped
+        written = eo.install(game, files)
+        assert {os.path.relpath(p, led.mods).replace('\\', '/').upper() for p in written} == roots, written
+        for source, target in edf41dlc.STORY_DRAGONS.items():
+            canonical, legacy = 'OBJECT/' + target, f'OBJECT/{edf41dlc.STORY_FOLDER}/{source}'
+            assert modfiles.read(led.disk(canonical)) == modfiles.read(led.disk(legacy)) == payloads[canonical]
+            assert not os.path.exists(led.disk('OBJECT/' + source)), source
+        assert set(ledger.Ledger(game).owned_by(eo.OWNER)) == {ledger.key(r) for r in needed}
+        assert not eo.unavailable(game) and eo.install(game, files) == []
+        _deleted, kept = eo.remove(game)
+        assert not kept and not any(os.path.exists(led.disk(r)) for r in needed), kept
+        assert not ledger.Ledger(game).owned_by(eo.OWNER)
+
+@test
+def edf41_dragon_catalog_names() -> None:
+    """The object list and range distinguish EDF5/6's stock frog dragon, 4.1's three prefixed small dragons, DLC
+    dragons and the big dragon, while every row's file path still resolves to its own registry object."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import catalog
+    rows = {r.sgo: r for r in catalog.rows()}
+    frog = rows['dragonsmall401']
+    assert frog.source == 'stock' and frog.rel == 'OBJECT/DRAGONSMALL401.SGO'
+    assert '蝌蚪' in frog.label and '小龙' not in frog.label, frog
+    expected = {'edf41_dragonsmall401': '4.1 小龙（绿，飞）',
+                'edf41_redsmalldragon': '4.1 小龙（红，飞）',
+                'edf41_yerrowsmalldragon': '4.1 小龙（黄，飞）',
+                'edf41mp01/dragonsmall401_hs': '4.1 DLC 小龙（绿，飞）',
+                'edf41mp01/redsmalldragon_hs': '4.1 DLC 小龙（红，飞）',
+                'edf41mp01/yerrowsmalldragon_hs': '4.1 DLC 小龙（黄，飞）',
+                'dragonbig401': '4.1 大龙（飞）'}
+    for name, label in expected.items():
+        row = rows[name]
+        assert row.label.startswith(label + ' ') and row.source == 'edf41' and row.flying, row
+        assert row.category == 'enemy41' and row.rel in catalog.edf41_files(row.sgo), row
+        assert row.rel == 'OBJECT/' + name.upper() + '.SGO' and '蝌蚪' not in row.label, row
+    assert not {f'edf41/{n}' for n in ('dragonsmall401', 'redsmalldragon', 'yerrowsmalldragon')} & set(rows)
 
 
 @test
@@ -9986,91 +10161,110 @@ EDF41_SOLDIERS = ('OBJECT/AIARMYSOLDIER_OMG.SGO', 'OBJECT/AIARMYSOLDIER_OMG_LEAD
 
 @test
 def edf41_friend_grip_shipped() -> None:
-    """4.1's soldiers hold EDF6's weapons with their own skeleton (feedback 2026-10-18 「omega小队持枪姿势有问题」; no game:
-    the files are committed). Every LOOKS soldier and the Omega team: human_direction_adjust's mode twists its 4.1
-    model's spine about the up axis (make_edf41_objects.spine_mode: 4.1's hara bones point local Y up, mode 1; EDF6's 2
-    turns them about the side axis), and soldier_weapon_grab_adjust is the one value of its model (the left wrist's
-    frame change, weapon_grip_adjust): the rangers' a ~84-degree turn, not EDF6's zero, the Omega team's the same as
-    the 4.1 rangers' (one model; both from EDF6 rangers, whose adjust is zero)."""
-    import edf41_objects as eo
-    import edf41friends as ef
-    import make_edf41_objects as m
-    import sgo
-    by_model: dict[tuple, set] = {}
-    for rel in [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS):
-        d = sgo.load(data=eo.read(rel))
-        md = m.model_mdb(lambda r: eo.read(m.rel_of(r)), d['animation_model'])
-        hda = d['human_direction_adjust']
-        assert hda[0] == m.spine_mode(md, hda[1]) == 1, (rel, hda)
-        grab = d['soldier_weapon_grab_adjust']
-        assert len(grab) == 2 and all(len(v) == 3 for v in grab), (rel, grab)
-        # one value per model and class (a class's EDF6 templates share a skeleton and an adjust)
-        model = m.rel_of(m.model_entries(d['animation_model'][0])[0][0])
-        by_model.setdefault((model, d['xgs_scene_object_class']), set()).add(repr(grab))
-    assert all(len(grabs) == 1 for grabs in by_model.values()), by_model
-    ranger = sgo.load(data=eo.read(ef.look_rel('OBJECT/AIARMYSOLDIER_AF.SGO')))['soldier_weapon_grab_adjust']
-    for rel in EDF41_SOLDIERS:
-        assert sgo.load(data=eo.read(rel))['soldier_weapon_grab_adjust'] == ranger, rel
-    assert 60 < _rotation_degrees(m.euler_matrix(ranger[1])) < 120, ranger
-
-
-@test
-def edf41_friend_grip_matches_weapons() -> None:
-    """The 4.1 soldiers' soldier_weapon_grab_adjust against the weapons (needs EDF4.1 and EDF6): make_edf41_objects
-    recomputes the shipped value from each soldier's model and its EDF6 template's; and for every ranger AI weapon both
-    games ship with an IK record (MAB list 1, record 0: what EDF+0x68C206 reads), EDF6's IK frame is 75+ degrees from
-    4.1's own -- the hand 4.1's skeleton got before -- and within 20 of it through the shipped adjust (grab · ik,
-    EDF+0x597F00), i.e. the left hand on each grip as 4.1 itself placed it."""
-    import math
-
+    """All 28 source soldiers carry private source-model weapons, without a bind-pose IK approximation."""
     import dsgo
     import edf41_objects as eo
     import edf41friends as ef
     import mab_legacy
     import make_edf41_objects as m
-    import mdb
+    import sgo
+    reg = eo.registry()
+    units = [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS)
+    weapon_paths = set()
+    for rel in units:
+        d = sgo.load(data=eo.read(rel))
+        md = m.model_mdb(lambda r: eo.read(m.rel_of(r)), d['animation_model'])
+        hda = d['human_direction_adjust']
+        assert hda[0] == m.spine_mode(md, hda[1]) == 1, (rel, hda)
+        assert d['soldier_weapon_grab_adjust'] == [[0.0] * 3, [0.0] * 3], rel
+        for path in d['soldier_load_weapon']:
+            private = m.rel_of(path)
+            assert private.startswith('WEAPON/EDF41_NPC/'), (rel, private)
+            assert private in reg['files'], private
+            weapon_paths.add(private)
+    assert len(units) == 28 and len(weapon_paths) == 19, (len(units), len(weapon_paths))
+    for rel in weapon_paths:
+        doc = dsgo.parse(eo.read(rel))
+        assert all('name.' + lang in doc.root.names.values() for lang in ('ja', 'en', 'cn', 'sc', 'kr')), rel
+        am = doc.root.get('animation_model')
+        ref = dsgo.to_py(am.items[0])
+        assert m.rel_of(ref[0]).startswith('WEAPON/EDF41_NPC/'), (rel, ref)
+        md = m.model_mdb(lambda r: eo.read(m.rel_of(r)), dsgo.to_py(am))
+        assert md is not None, rel
+        bones = {md.name_of(b.name) for b in md.bones}
+        assert all(loc.node in bones for _kind, loc in mab_legacy.mab_locators(am.items[2].data)), rel
+        own_cas = am.items[1]
+        if isinstance(own_cas, str) and own_cas.lower().startswith('app:/'):
+            assert m.rel_of(own_cas).startswith('WEAPON/EDF41_NPC/'), (rel, own_cas)
+
+
+@test
+def edf41_friend_grip_matches_weapons() -> None:
+    """Actual 4.1 source MAB/IK/model/CAS and HOLD fields are preserved exactly, not only close in bind pose."""
+    import dsgo
+    import edf5port
+    import edf41_objects as eo
+    import edf41friends as ef
+    import legacy_assets
+    import mab_legacy
+    import make_edf41_objects as m
     import sgo
     edf41, edf6 = os.path.join(m.STEAM, 'Earth Defense Force 4.1'), os.path.join(m.STEAM, 'EARTH DEFENSE FORCE 6')
     if not all(os.path.isfile(os.path.join(r, 'Root.cpk')) for r in (edf41, edf6)):
         print('skip  edf41_friend_grip_matches_weapons: needs EDF4.1 and EDF6 installed')
         return
     games = m.Games(edf41, edf6)
-    registry = eo.registry()
-    reg = {o['object']: o for o in registry['objects']}
-
-    def file(ref: object) -> bytes | None:
-        r = m.rel_of(str(ref))
-        return eo.read(r) if r in registry['files'] else games.read6(r) if r in games.have6 else None
-
+    _presets, banks = m.sound_cues(games)
+    resident = set().union(*(banks[name] for name in m.RESIDENT_BANKS))
+    seen = set()
     for rel in [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS):
-        o = reg[rel]
-        template = o.get('look_of') or o['class_keys_from']['template']
-        d = sgo.load(data=eo.read(rel))
-        grab, _mode = m.soldier_grip(file, d, sgo.load(data=games.read6(template)), rel)
-        assert grab == d['soldier_weapon_grab_adjust'], (rel, grab, d['soldier_weapon_grab_adjust'])
-
-    def ik(data: bytes) -> list | None:
-        if data[:4] == b'DSGO':
-            item = dsgo.parse(data).root.get('animation_model').items[2]
-            block = getattr(item, 'data', None)
-        else:
-            block = sgo.read(data)[1]['animation_model'][2]
-        if not isinstance(block, bytes):
-            return None
-        first = [loc for i, loc in mab_legacy.mab_locators(block) if i == 1][:1]
-        return m.euler_matrix([math.degrees(a) for a in first[0].c[:3]]) if first and first[0].c else None
-
-    grab = m.euler_matrix(sgo.load(data=eo.read(ef.look_rel('OBJECT/AIARMYSOLDIER_AF.SGO')))['soldier_weapon_grab_adjust'][1])
-    seen = 0
-    for w in sorted(r for r in games.have6 if r.startswith('WEAPON/AISOLDIER') and r.endswith('.SGO') and r in games.in4):
-        q6, q4 = ik(games.read6(w)), ik(games.read4(w))
-        if q6 is None or q4 is None:
-            continue
-        seen += 1
-        before = _rotation_degrees(mdb.mmul(q6, mdb.inverse_affine(q4)))
-        after = _rotation_degrees(mdb.mmul(mdb.mmul(grab, q6), mdb.inverse_affine(q4)))
-        assert before > 75 and after < 20, (w, before, after)
-    assert seen >= 8, seen
+        original = sgo.load(data=games.read4(rel))
+        current = sgo.load(data=eo.read(rel))
+        assert [m.friend_weapon_rel(w) for w in original['soldier_load_weapon']] == [
+            m.rel_of(w) for w in current['soldier_load_weapon']], rel
+        old_missing = m.friend_hold_missing(original, games.read4(m.rel_of(original['animation_model'][1])),
+                                             lambda p: games.read4(m.rel_of(p)))
+        new_missing = m.friend_hold_missing(current, eo.read(m.rel_of(current['animation_model'][1])),
+                                             lambda p: eo.read(m.rel_of(p)))
+        assert not new_missing - old_missing, (rel, sorted(new_missing - old_missing))
+        for path in original['soldier_load_weapon']:
+            source = m.rel_of(path)
+            if source in seen:
+                continue
+            seen.add(source)
+            _version, own = sgo.read(games.read4(source))
+            doc = dsgo.parse(eo.read(m.friend_weapon_rel(source)))
+            native = dsgo.parse(games.read6(source)).root
+            assert set(native.names.values()) <= set(doc.root.names.values()), source
+            assert doc.root.get('xgs_scene_object_class') == native.get('xgs_scene_object_class'), source
+            # All holding keys including class-specific nested attacks, not a
+            # whitelist borrowed from other soldier classes or weapon models.
+            for key in ('ModelConstraint', 'BaseAnimation', 'AimAnimation', 'ChangeAnimation',
+                        'ReloadAnimation', 'custom_parameter'):
+                assert dsgo.to_py(doc.root.get(key)) == dsgo.to_py(edf5port.to_value(own[key])), (source, key)
+            for key in m.FRIEND_WEAPON_SE_FIELDS:
+                if key not in own:
+                    continue
+                expected = edf5port.to_value(own[key])
+                actual = doc.root.get(key)
+                if isinstance(expected, dsgo.Node) and len(expected.items) > 1 and expected.items[1]:
+                    if expected.items[1] not in resident:
+                        expected.items[1] = native.get(key).items[1]
+                    assert actual.items[1] in resident, (source, key, actual.items[1])
+                assert dsgo.to_py(actual) == dsgo.to_py(expected), (source, key)
+            original_am = own['animation_model']
+            assert doc.root.get('animation_model').items[2].data == mab_legacy.mab_from_edf5(original_am[2]), source
+            for path in m.strings(sgo.load(data=games.read4(source))):
+                if not path.lower().startswith('app:/weapon/'):
+                    continue
+                asset = m.rel_of(path)
+                if not asset.endswith(('.RAB', '.MRAB', '.CAS', '.SHKT')):
+                    continue
+                expected = games.read4(asset)
+                if not asset.endswith('.SHKT'):
+                    expected = legacy_assets.convert(asset, expected)
+                assert eo.read(m.friend_weapon_rel(asset)) == expected, (source, asset)
+    assert len(seen) == 19, len(seen)
 
 
 @test
@@ -10866,7 +11060,7 @@ def edf41_objects_after_weapons() -> None:
     tank out (2026-10-12, the real install)."""
     text = src('tools/installer.py')
     body = text[text.index('def install(game: str'):]
-    assert body.index('call_weapons.install(game, weapons)') < body.index('edf41_objects.build(game)')
+    assert body.index('call_weapons.install(game, weapons)') < body.index('edf41_objects.build(game, material_compat=material_compat)')
 
 
 
@@ -11091,13 +11285,13 @@ def awb_hca_seconds_synthetic() -> None:
 
 @test
 def edf41_sounds_captions_synthetic() -> None:
-    """tools/edf41_sounds.py: the caption key is the cue cut at the first _E / _S; add_rows leaves every row of the table
+    """tools/edf41_sounds.py: the caption key removes one terminal _E / _S; add_rows leaves every row of the table
     as it was, gives a missing key a row with EDF6's own member names (name = '' , caption = text, else the key: the game
     reads a row BY those names, an unnamed list is a null node and crashed M126) and keeps the row of a key the table has;
     a table whose rows are not laid out name / caption is refused."""
     import dsgo
     import edf41_sounds as s
-    assert [s.cut_key(c) for c in ('A001AA', 'A001AA_E', 'Z105H_S', 'A_E_S', 'VT_B1')] == ['A001AA', 'A001AA', 'Z105H', 'A', 'VT_B1']
+    assert [s.cut_key(c) for c in ('A001AA', 'A001AA_E', 'Z105H_S', 'A_E_S', 'VT_B1')] == ['A001AA', 'A001AA', 'Z105H', 'A_E', 'VT_B1']
 
     def row(name: str, caption: str) -> dsgo.Node:
         return dsgo.Node([name, caption], {0: 'name', 1: 'caption'})
@@ -11165,12 +11359,17 @@ def edf41_sounds_install() -> None:
         stamp_path = os.path.join(game, 'Mods', s.STAMP)
         with open(stamp_path, encoding='utf-8') as f:
             stamp = json.load(f)
-        stamp['table']['version'] = 1   # installed by the version before the rows had member names
-        with open(stamp_path, 'w', encoding='utf-8') as f:
-            json.dump(stamp, f)
-        s.install(game, 'edf41')
-        assert made == ['table'], made   # only the group whose output changed is converted again
-        made.clear()
+        # Version 1 lacked named row members; version 3 cut embedded suffixes.
+        # Both old installations must rebuild only the table, even with identical sources.
+        for old_version in (1, 3):
+            stamp['table']['version'] = old_version
+            with open(stamp_path, 'w', encoding='utf-8') as f:
+                json.dump(stamp, f)
+            s.install(game, 'edf41')
+            assert made == ['table'], (old_version, made)
+            with open(stamp_path, encoding='utf-8') as f:
+                assert json.load(f)['table']['version'] == s.VERSIONS['table']
+            made.clear()
         s.remove(game)
         other = os.path.join(game, 'Mods', 'SOUND', 'PC', 'EDF41_WEAPON_SE.ACB')
         os.makedirs(os.path.dirname(other), exist_ok=True)
@@ -11983,7 +12182,7 @@ def edf41_hector_alias() -> None:
         return
     data, files = m.build(edf41, rootcpk.DEFAULT_GAME, ('HECTOR301CC.SGO',))
     assert not data['skipped'] and [o['object'] for o in data['objects']] == ['OBJECT/HECTOR301CC.SGO'], data['skipped']
-    assert set(files) == {'OBJECT/HECTOR301CC.SGO', 'OBJECT/HECTOR.CAS', 'OBJECT/HECTOR301CC.MRAB',
+    assert set(files) == {'OBJECT/HECTOR301CC.SGO', 'OBJECT/HECTOR.CAS', m.HECTOR_MODEL,
                           'OBJECT/RAGDOLL_HECTOR301_HAS_HKA.SHKT'}, sorted(files)
     root = dsgo.parse(files['OBJECT/HECTOR301CC.SGO']).root
     top = sgo.load(data=files['OBJECT/HECTOR301CC.SGO'])
@@ -12036,16 +12235,23 @@ def edf41_hector_alias() -> None:
     assert top['WalkingEnemyBase']['TurnSpeed'] == [0.3, 0.1], top['WalkingEnemyBase']['TurnSpeed']
     assert top['WalkingEnemyBase']['RandomAnimationTrack'] == [], 'its variables are not in the CAS'
     # the model, the MAB, the ragdoll
-    rab = files['OBJECT/HECTOR301CC.MRAB']
+    # one archive for every variant (a player's report, 2026-10-18: 21 archives each with the same body and textures):
+    # the textures once, an armed body per variant under its root's name, the SGO naming its own
+    rab = files[m.HECTOR_MODEL]
     archive = mdb.rab_read(rab)
     member = {f.name.lower(): f for f in archive.files}
     am = root.get('animation_model')
-    assert am.items[0].items[0].lower() == 'app:/object/hector301cc.mrab' and am.items[1] == 'app:/object/Hector.cas'
+    assert am.items[0].items[0].lower() == 'app:/object/hector_variants.mrab' and am.items[1] == 'app:/object/Hector.cas'
+    assert am.items[0].items[1] == 'HECTOR301CC.mdb', am.items[0].items[1]
     model = mdb.mdb_read(member[am.items[0].items[1].lower()].data)
-    assert [f.name for f in archive.files if f.name.lower().endswith('.mdb') and f.folder == 1 and 'fragment' not in f.name.lower()] == ['Hector301.mdb']
+    bodies = sorted(f.name for f in archive.files if f.name.lower().endswith('.mdb') and 'fragment' not in f.name.lower())
+    assert bodies == sorted(m.shared_member(r) for r in m.HECTOR_VARIANTS), bodies
+    names = [f.name.lower() for f in archive.files]
+    assert len(names) == len(set(names)) and mdb.folder_order_ok(archive)
     bones = {model.name_of(b.name) for b in model.bones}
     assert {'waist', 'arms_l', 'arms_r', 'Hector301', 'gun_arms_l', 'gun_arms_r'} <= bones
-    assert not m.missing_textures(rab, 'Hector301.mdb'), m.missing_textures(rab, 'Hector301.mdb')
+    for body in bodies:
+        assert not m.missing_textures(rab, body), (body, m.missing_textures(rab, body))
     for frag in am.items[3].items[3].items[6].items:
         assert frag.lower() in member, frag
         assert not m.missing_textures(rab, frag)
@@ -12214,8 +12420,8 @@ def edf41_hector_weapon_anim() -> None:
     for clip in (opened, closed):
         frames, step = int(clip[0]), clip[1]
         assert frames == 31 and step == 4.0 and len(clip) == 2 + frames * len(names) * 7, (frames, step, len(clip))
-    rab = mdb.rab_read(files['OBJECT/HECTOR401LS.MRAB'])
-    md = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == 'hector401.mdb').data)
+    rab = mdb.rab_read(files[m.HECTOR_MODEL])
+    md = mdb.mdb_read(next(f for f in rab.files if f.name.lower() == 'hector401ls.mdb').data)
     local = {md.name_of(b.name): b.local for b in md.bones}
     last = opened[2 + 30 * len(names) * 7:]
     for i, n in enumerate(names):
@@ -12349,8 +12555,8 @@ def edf41_hector_guns() -> None:
     # 401's weapons are skinned: their bones come over with blend indices that stay inside the bone table
     for name in ('HECTOR401CS.SGO', 'HECTOR401LG.SGO'):
         import edf41_objects
-        archive = mdb.rab_read(edf41_objects.read('OBJECT/' + name.replace('.SGO', '.MRAB')))
-        body = next(x for x in archive.files if x.name.lower() == 'hector401.mdb')
+        archive = mdb.rab_read(edf41_objects.read(m.HECTOR_MODEL))
+        body = next(x for x in archive.files if x.name.lower() == m.shared_member(name).lower())
         md = mdb.mdb_read(body.data)
         names = {md.name_of(b.name) for b in md.bones}
         assert {'gun_arms_l_gun_arms', 'gun_arms_r_gun_arms'} <= names, name

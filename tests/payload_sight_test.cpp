@@ -13,6 +13,7 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 const bool sightInputHanded=(edf::SetInputSource(&sightinput::Key,&sightinput::Window),true);
 #undef GetWindowThreadProcessId
 #include <cstdio>
+#include <utility>
 namespace crew {
 unsigned char* image=nullptr;
 Config cfg{};
@@ -26,13 +27,17 @@ unsigned char* PlayerHuman() noexcept { return localHuman; }
 void PumpAircraftPayloadUi(unsigned char*) noexcept {}
 PluginBody sightBody=PluginBody::none;
 PluginBody BodyOf(const void*) noexcept { return sightBody; }
-bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
+bool aimApiNpc=false;
+bool AiGunner(const unsigned char*,const unsigned char* seat) noexcept { return aimApiNpc && SeatRider(seat)==Rider::other; }
 void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 bool IsStoreWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 const StoreSpec* sightStoreSpec=nullptr;
-const StoreSpec* StoreOf(const unsigned char* w) noexcept { return w && w[0x100]==2 ? sightStoreSpec : nullptr; }
+const StoreSpec pairedLeft{L"PAIR_L_", "paired", StoreRole::gun,0,0,1,0},pairedRight{L"PAIR_R_", "paired", StoreRole::gun,0,0,1,1},
+                nativeHE{L"NATIVE_HE_", "HE", StoreRole::gun,0,0,0,0,true},nativeAP{L"NATIVE_AP_", "AP", StoreRole::gun,0,0,0,0,true};
+const StoreSpec* StoreOf(const unsigned char* w) noexcept { if(!w || w[0x100]!=2)return nullptr;
+    return w[0x101]==6 ? &pairedLeft : w[0x101]==7 ? &pairedRight : w[0x101]==8 ? &nativeHE : w[0x101]==9 ? &nativeAP : sightStoreSpec; }
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
     const auto f=At<const wchar_t*>(w,8);*n=f ? std::wcslen(f) : 0;return f;
 }
@@ -78,7 +83,7 @@ bool NoShots(const VehicleFixture& c) { for(const auto& w:c.weapon)if(w[kWeaponT
 void SetUp() {
     ResetPayload();std::memset(cars,0,sizeof(cars));std::memset(people,0,sizeof(people));std::memset(personCtrl,0,sizeof(personCtrl));
     std::memset(sightinput::keys,0,sizeof(sightinput::keys));mapHeld=false;
-    sightBody=PluginBody::none;sightStoreSpec=nullptr;
+    sightBody=PluginBody::none;sightStoreSpec=nullptr;aimApiNpc=false;
     cfg.enabled=cfg.stockStores=true;cfg.playerJetSwitchKey='R';pullOk=true;
     for(int i=0;i<3;++i) {
         Put<void*>(people[i],0,image+0x17CDF28);Put<void*>(people[i],kSelfCtrl,personCtrl[i]);
@@ -245,6 +250,37 @@ int main() {
     SetUp();Put<void*>(c.vehicle,0,image+0x1234);Tick(c);
     Check(SightWeapons(c,c.weapon[0]),"unmapped native controls retain only one optic owner, never assume same-seat cofire");
     Check(NoShots(c),"native cofire and fallback queries never generate shots");
+    // Paired AP/HE are one loadout, but preserve the source holder's own left/right muzzle.
+    SetUp();Flak(c);c.seatHolders[0][3]=c.holders[2];c.weapon[6][0x101]=6;c.weapon[2][0x100]=2;c.weapon[2][0x101]=7;
+    Tick(c);PlayerPayload(&r);
+    Check(r.count==4 && r.choices==2 && r.entry[2].selectable && !r.entry[3].selectable,"linked barrels expose one switch choice, not independent left/right choices");
+    sightinput::keys['R']=true;Tick(c);PlayerPayload(&r);
+    Check(r.entry[2].picked && r.entry[3].picked && SightWeapons(c,c.weapon[6],c.weapon[2]),"paired loadout marks both real weapons and reports both muzzle owners");
+    PullHook(c.holders[0]);
+    Check(c.weapon[6][kWeaponTrigger] && !c.weapon[2][kWeaponTrigger],"left native source fires only linked left barrel");
+    c.weapon[6][kWeaponTrigger]=0;PullHook(c.holders[1]);
+    Check(!c.weapon[6][kWeaponTrigger] && c.weapon[2][kWeaponTrigger],"right native source fires only linked right barrel");
+    c.weapon[2][kWeaponTrigger]=0;sightinput::keys['R']=false;
+    std::swap(c.seatHolders[0][0],c.seatHolders[0][1]);Tick(c);PullHook(c.holders[0]);
+    Check(c.weapon[6][kWeaponTrigger] && !c.weapon[2][kWeaponTrigger],"seat-list reorder preserves original holder identity instead of swapping barrels");
+    c.weapon[6][kWeaponTrigger]=0;Put<int>(c.weapon[6],kWeaponAmmo,0);Tick(c);PlayerPayload(&r);
+    Check(r.picked==2 && r.entry[2].selectable && SightWeapons(c,c.weapon[2]),"spent left barrel retains the group while its right barrel still has rounds");
+    PullHook(c.holders[0]);Check(!c.weapon[6][kWeaponTrigger] && !c.weapon[0][kWeaponTrigger],"spent linked barrel cannot leak an original native shot");
+    PullHook(c.holders[1]);Check(c.weapon[2][kWeaponTrigger],"remaining right barrel continues firing from its own source");
+    c.weapon[2][kWeaponTrigger]=0;Put<int>(c.weaponCtrl[2],8,0);
+    Check(SightWeapons(c,nullptr),"removed paired partner cannot retain a stale optical weapon");
+
+    // M163 native holders are two belts for one barrel cluster: only one selection is fired.
+    SetUp();Flak(c);c.weapon[0][0x100]=c.weapon[1][0x100]=2;c.weapon[0][0x101]=8;c.weapon[1][0x101]=9;
+    Put<std::uint64_t>(SeatAt(c.vehicle,0),kSeatWeaponCount,2);Tick(c);PlayerPayload(&r);
+    Check(r.choices==2 && r.entry[0].selectable && r.entry[1].selectable && SightWeapons(c,c.weapon[0]),"native alternate belts expose two mutually exclusive choices using the existing R/LB control");
+    PullHook(c.holders[1]);Check(NoShots(c),"unselected native belt is suppressed even in the default choice");
+    PullHook(c.holders[0]);Check(c.weapon[0][kWeaponTrigger] && !c.weapon[1][kWeaponTrigger],"default native belt fires once");
+    c.weapon[0][kWeaponTrigger]=0;sightinput::keys['R']=true;Tick(c);PullHook(c.holders[0]);
+    Check(!c.weapon[0][kWeaponTrigger] && c.weapon[1][kWeaponTrigger] && SightWeapons(c,c.weapon[1]),"switch selects the other native belt for fire and sight together");
+    c.weapon[1][kWeaponTrigger]=0;PullHook(c.holders[1]);Check(NoShots(c),"second original native pull cannot double-fire the selected belt");
+    cfg.stockStores=false;Tick(c);PullHook(c.holders[1]);Check(NoShots(c),"turning optional added stores off never enables both native ammunition belts");
+    PullHook(c.holders[0]);Check(c.weapon[1][kWeaponTrigger] && SightWeapons(c,c.weapon[1]),"native alternate selection remains authoritative with optional stores disabled");
     VirtualFree(image,0,MEM_RELEASE);
     std::printf("payload sight: %d checks, %d failures\n",checks,failed);return failed ? 1 : 0;
 }

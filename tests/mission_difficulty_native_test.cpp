@@ -1,0 +1,196 @@
+// Mission difficulty on a private EDF.dll 0x678CCB46 mapping, without DllMain or a game process.
+// Runs the complete BVM dispatcher (0x20FF70) for table-0 natives 21 / 22, its real stack-cursor writer
+// (0x2276E0), and AngelScript's GetDifficulty binding (0x1B4BB0 -> 0x1DA2D0) / SetMissionLevelFix (0x1BA1A0).
+// Runs the real level calculation 0xD7AE0, including the actual mode-range reader 0xE0810 and mission-progress
+// reader 0xD7B60 -> 0xE0650, on in-memory mode/list fixtures. No dependency is replaced with a mock.
+// Only reset's small state-clearing slice 0x215059..0x215078 is called in isolation: its successor is temporarily
+// RET in this private mapping, and a wrapper supplies the enclosing function's rdi = BVM object / esi = 0.
+// The rest of reset tears down game services and is outside this fixture. Its actual callers in load, destruction
+// and completion are checked to still target 0x214F10. This does not prove live mission or multiplayer behavior.
+#include <Windows.h>
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <initializer_list>
+
+namespace {
+unsigned char* image=nullptr;
+int checks=0;
+void Check(bool ok,const char* why) {
+    ++checks;
+    if(!ok){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);}
+}
+bool Matches(unsigned rva,std::initializer_list<unsigned char> bytes) {
+    return std::memcmp(image+rva,bytes.begin(),bytes.size())==0;
+}
+template<class T> T Read(const unsigned char* p,std::size_t offset) {
+    T v;std::memcpy(&v,p+offset,sizeof(v));return v;
+}
+template<class T> void Put(unsigned char* p,std::size_t offset,T v) {
+    std::memcpy(p+offset,&v,sizeof(v));
+}
+void Write(unsigned rva,const void* bytes,std::size_t size) {
+    DWORD old=0;
+    Check(VirtualProtect(image+rva,size,PAGE_EXECUTE_READWRITE,&old)!=0,"private mapping writable");
+    std::memcpy(image+rva,bytes,size);
+    DWORD ignored=0;
+    Check(VirtualProtect(image+rva,size,old,&ignored)!=0,"private mapping protection restored");
+    Check(FlushInstructionCache(GetCurrentProcess(),image+rva,size)!=0,"private instruction cache flushed");
+}
+void CallTo(unsigned site,unsigned target) {
+    Check(image[site]==0xE8 && image+site+5+Read<std::int32_t>(image,site+1)==image+target,
+          "BVM load / destructor / completion calls its real reset");
+}
+void CheckCode() {
+    Check(Matches(0x20FF70,{
+        0x48,0x8B,0xC4,0x48,0x89,0x58,0x20,0x55,0x56,0x57,0x41,0x54,0x41,0x55,
+        0x41,0x56,0x41,0x57,0x48,0x8D,0xA8,0xE8,0xFD,0xFF,0xFF,0x48,0x81,0xEC,
+        0xE0,0x02,0x00,0x00,0x0F,0x29,0x70,0xB8,0x0F,0x29,0x78,0xA8,0x44,0x0F,
+        0x29,0x40,0x98,0x44,0x0F,0x29,0x48,0x88}),"BVM dispatcher entry");
+    Check(Matches(0x210DD8,{
+        0x83,0xFA,0x15,0x75,0x20,0x41,0x80,0x7D,0x68,0x00,0x0F,0x85,0xBD,0xF2,0xFF,0xFF,
+        0x48,0x83,0xC6,0x08,0x48,0x8B,0x05,0x9D,0x1A,0xEA,0x01,0x8B,0x48,0x4C,0x89,0x0E,
+        0xE9,0xC6,0xF2,0xFF,0xFF}),"BVM native 21 reads GS+0x4C and pushes the difficulty");
+    Check(Matches(0x210E10,{0x48,0x8B,0x05,0x79,0x1A,0xEA,0x01,0xC6,0x40,0x44,0x01,0xE9,0xA3,0xF2,0xFF,0xFF}),
+          "BVM native 22 sets GS+0x44");
+    Check(Matches(0x2276E0,{0x80,0xB9,0xA0,0x00,0x00,0x00,0x00,0x75,0x08,0x48,0x89,0x91,0x98,0x00,0x00,0x00,0xC3}),
+          "native cursor writer stores the returned stack pointer");
+    Check(Matches(0x1B4BB0,{0x48,0x8B,0x49,0x08,0xE9,0x17,0x57,0x02,0x00}) &&
+          Matches(0x1DA2D0,{0x48,0x8B,0x05,0xB9,0x85,0xED,0x01,0x8B,0x40,0x4C,0xC3}),"AS GetDifficulty binding and GS+0x4C reader");
+    Check(Matches(0x1BA1A0,{0x48,0x8B,0x05,0xE9,0x86,0xEF,0x01,0xC6,0x40,0x44,0x01,0xC3}),"AS SetMissionLevelFix sets the same flag");
+    Check(Matches(0x215059,{
+        0x48,0x8B,0x05,0x30,0xD8,0xE9,0x01,0x40,0x88,0x70,0x44,0x89,0x35,0x62,0xDB,0xE9,0x01,
+        0x40,0x88,0x77,0x0C,0x48,0xC7,0x87,0x9C,0x04,0x00,0x00,0x00,0x00,0x80,0x3F}),
+          "real reset clears fixed mode and restores BVM mission multiplier 1.0");
+    Check(image[0x215079]==0xE8,"reset slice ends before the next game-service call");
+    CallTo(0x222AA2,0x214F10);CallTo(0x20EA2D,0x214F10);CallTo(0x22A35C,0x214F10);CallTo(0x22A397,0x214F10);
+    Check(Matches(0xD7AE0,{
+        0x40,0x53,0x48,0x83,0xEC,0x30,0x80,0x79,0x44,0x00,0x48,0x8B,0xD9,0x0F,0x29,0x74,0x24,0x20,
+        0x0F,0x28,0xF1,0x74,0x16,0xF3,0x0F,0x59,0x35,0x45,0xDF,0x68,0x01,0x0F,0x28,0xC6,0x0F,0x28,
+        0x74,0x24,0x20,0x48,0x83,0xC4,0x30,0x5B,0xC3,0x44,0x8B,0x43,0x4C,0x48,0x8D,0x54,0x24,0x40,
+        0x48,0x81,0xC1,0x30,0x01,0x00,0x00,0xE8,0xEE,0x8C,0x00,0x00,0x48,0x8B,0xCB,0xE8,0x36,0x00,
+        0x00,0x00,0xF3,0x0F,0x10,0x54,0x24,0x44,0xF3,0x0F,0x5C,0x54,0x24,0x40,0xF3,0x0F,0x59,0xD0,
+        0xF3,0x0F,0x58,0x54,0x24,0x40,0xF3,0x0F,0x59,0xD6,0x0F,0x28,0x74,0x24,0x20,0x0F,0x28,0xC2,
+        0x48,0x83,0xC4,0x30,0x5B,0xC3}),"real difficulty calculation, both fixed and mode/range branches");
+    Check(Read<float>(image,0x1765A44)==10.0f,"the fixed-mode level is ten times the requested level");
+    Check(Matches(0xE0810,{
+        0x4C,0x8B,0x49,0x18,0x49,0x63,0x41,0x08,0x4D,0x8D,0x51,0x54,0x4C,0x03,0xD0,0x49,0x63,
+        0xC0,0x4D,0x63,0x4A,0x08,0x48,0x8D,0x0C,0x40,0x4B,0x8D,0x04,0x0A,0x4C,0x63,0x4C,0x88,
+        0x08,0x4C,0x8D,0x04,0x88,0x4D,0x03,0xC8,0x49,0x63,0x49,0x08,0x42,0x8B,0x44,0x09,0x08,
+        0x89,0x02,0x42,0x8B,0x44,0x09,0x14,0x89,0x42,0x04,0x48,0x8B,0xC2,0xC3}),"real mode difficulty range reader");
+    Check(Matches(0xD7B60,{
+        0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x30,0x48,0x8B,0xD9,0x48,0x81,0xC1,0x30,0x01,
+        0x00,0x00,0xE8,0xD7,0x8A,0x00,0x00,0x83,0xF8,0x01,0x77,0x0E,0x0F,0x57,0xC0,0x48,0x8B,0x5C,
+        0x24,0x40,0x48,0x83,0xC4,0x30,0x5F,0xC3,0x8B,0x43,0x48,0x48,0x8D,0x8B,0x30,0x01,0x00,0x00,
+        0x0F,0x29,0x74,0x24,0x20,0x0F,0x57,0xF6,0xF3,0x48,0x0F,0x2A,0xF0,0xE8,0xA8,0x8A,0x00,0x00,
+        0x48,0x8B,0x5C,0x24,0x40,0xFF,0xC8,0x0F,0x57,0xC9,0xF3,0x48,0x0F,0x2A,0xC8,0xF3,0x0F,0x5E,
+        0xF1,0x0F,0x28,0xC6,0x0F,0x28,0x74,0x24,0x20,0x48,0x83,0xC4,0x30,0x5F,0xC3}),"real mission progress interpolation");
+    Check(Matches(0xE0650,{
+        0x48,0x8B,0x91,0xF0,0x00,0x00,0x00,0x48,0x85,0xD2,0x75,0x03,0x33,0xC0,0xC3,0x44,0x8B,
+        0x89,0xF8,0x00,0x00,0x00,0x4C,0x39,0x4A,0x18,0x76,0x26,0x48,0x8B,0x42,0x08,0x46,0x8B,
+        0x04,0x88,0x41,0x83,0xF8,0xFF,0x74,0x18,0x48,0x8B,0x42,0x28,0x4B,0x8D,0x0C,0x80,0x48,
+        0x8D,0x04,0xC8,0x48,0x85,0xC0,0x74,0x07,0x48,0x8B,0x00,0x8B,0x40,0x58,0xC3}),"real cached-list row count path");
+}
+
+struct Fixture {
+    alignas(16) unsigned char gs[0x300]{},bvm[0x500]{},process[0xB0]{},binding[0x10]{};
+    alignas(16) unsigned char node[0x300]{},lists[0x30]{},entries[0x30]{},table[0x60]{};
+    std::uint32_t index[4]{};   // first cached list index; explicit tail keeps the aligned fixture unpadded
+    Fixture() {
+        Put<void*>(binding,8,bvm);
+        // E0810: ModeList's range-array member at node+0x54; each selected row has two float values.
+        Put<void*>(gs,0x130+0x18,node);
+        Put<std::int32_t>(node,0x54+8,0x2C);   // range descriptors at node+0x80
+        for(int d=0;d<5;++d) {
+            const std::size_t row=0x80+static_cast<std::size_t>(d)*12;
+            const std::size_t curve=0x100+static_cast<std::size_t>(d)*0x40;
+            Put<std::int32_t>(node,row+8,static_cast<std::int32_t>(curve-row));
+            Put<std::int32_t>(node,curve+8,0x10);
+            Put<float>(node,curve+0x18,2.0f*static_cast<float>(d+1));
+            Put<float>(node,curve+0x24,6.0f*static_cast<float>(d+1));
+        }
+        // E0650's cache: one list, five rows. D7B60 derives progress from GS+0x48 / (5-1).
+        Put<void*>(gs,0x130+0xF0,lists);Put<void*>(lists,8,&index);Put<std::size_t>(lists,0x18,1);
+        Put<void*>(lists,0x28,entries);Put<void*>(entries,0,table);Put<std::uint32_t>(table,0x58,5);
+    }
+};
+using DispatchFn=void(__fastcall*)(void*,void*,void*,int,int);
+using GetterFn=int(__fastcall*)(void*);
+using FixFn=void(__fastcall*)(void*);
+using LevelFn=float(__fastcall*)(void*,float);
+using ResetFn=void(__fastcall*)(void*);
+
+// The reset slice expects nonvolatile registers from its enclosing function. Preserve the caller's values,
+// supply those two registers and call the real slice; no synthetic implementation of its writes is used.
+ResetFn MakeResetCaller() {
+    unsigned char bytes[]={0x56,0x57,0x48,0x83,0xEC,0x28,0x48,0x8B,0xF9,0x33,0xF6,
+        0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xD0,0x48,0x83,0xC4,0x28,0x5F,0x5E,0xC3};
+    const auto target=reinterpret_cast<std::uintptr_t>(image+0x215059);
+    std::memcpy(bytes+13,&target,sizeof(target));
+    void* const p=VirtualAlloc(nullptr,0x1000,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE);
+    Check(p!=nullptr,"reset caller allocated");std::memcpy(p,bytes,sizeof(bytes));
+    Check(FlushInstructionCache(GetCurrentProcess(),p,sizeof(bytes))!=0,"reset caller cache flushed");
+    return reinterpret_cast<ResetFn>(p);
+}
+void Run(Fixture& f,ResetFn reset) {
+    const auto dispatch=reinterpret_cast<DispatchFn>(image+0x20FF70);
+    const auto getAs=reinterpret_cast<GetterFn>(image+0x1B4BB0);
+    const auto fixAs=reinterpret_cast<FixFn>(image+0x1BA1A0);
+    const auto level=reinterpret_cast<LevelFn>(image+0xD7AE0);
+    constexpr float requested=1.25f;
+    for(int difficulty=0;difficulty<5;++difficulty) {
+        Put<int>(f.gs,0x4C,difficulty);
+        for(int row=0;row<=4;row+=2) {
+            Put<int>(f.gs,0x48,row);f.gs[0x44]=0;
+            alignas(16) std::uint64_t stack[3]={0x1122334455667788ull,0xAABBCCDDEEFF0011ull,0x123456789ABCDEF0ull};
+            dispatch(f.bvm+0x30,f.process,stack,0,21);
+            Check(static_cast<std::uint32_t>(stack[1])==static_cast<std::uint32_t>(difficulty) && getAs(f.binding)==difficulty,
+                  "BVM and AS GetDifficulty return the selected difficulty, 0..4");
+            Check(stack[0]==0x1122334455667788ull && stack[2]==0x123456789ABCDEF0ull && (stack[1]>>32)==0xAABBCCDDull &&
+                  Read<void*>(f.process,0x98)==&stack[1],"BVM getter pushes one int and preserves adjacent stack bytes");
+            const float expected=(2.0f+static_cast<float>(row))*static_cast<float>(difficulty+1)*requested;
+            Check(std::fabs(level(f.gs,requested)-expected)<0.0001f,"real level calculation distinguishes every difficulty and row");
+            unsigned char before[sizeof(f.gs)];std::memcpy(before,f.gs,sizeof(before));before[0x44]=1;
+            dispatch(f.bvm+0x30,f.process,stack,0,22);
+            Check(std::memcmp(f.gs,before,sizeof(before))==0,"BVM fixed mode changes only the fixed flag, preserving difficulty and row");
+            Check(Read<void*>(f.process,0x98)==stack,"BVM fixed mode consumes no stack value");
+            Check(level(f.gs,requested)==requested*10.0f,"BVM fixed mode intentionally bypasses mode difficulty ranges");
+            f.gs[0x44]=0;fixAs(f.binding);
+            Check(std::memcmp(f.gs,before,sizeof(before))==0 && level(f.gs,requested)==requested*10.0f,
+                  "AS fixed mode has the same effect and preserves selected difficulty");
+            Put<float>(f.bvm,0x49C,0.375f);before[0x44]=0;
+            reset(f.bvm);
+            Check(std::memcmp(f.gs,before,sizeof(before))==0 && Read<float>(f.bvm,0x49C)==1.0f,
+                  "real reset clears fixed mode and restores multiplier 1.0 without changing selected difficulty or row");
+            Check(std::fabs(level(f.gs,requested)-expected)<0.0001f,"after reset the selected difficulty's range applies again");
+        }
+    }
+}
+}  // namespace
+
+int main(int argc,char** argv) {
+    if(argc<2 || !argv[1][0] || GetFileAttributesA(argv[1])==INVALID_FILE_ATTRIBUTES) {
+        std::puts("SKIP: pass the supported EDF.dll path (private mapping, no DllMain)");return 77;
+    }
+    image=reinterpret_cast<unsigned char*>(LoadLibraryExA(argv[1],nullptr,DONT_RESOLVE_DLL_REFERENCES));
+    Check(image!=nullptr,"private DLL mapped without its entrypoint");
+    const auto nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(image+reinterpret_cast<const IMAGE_DOS_HEADER*>(image)->e_lfanew);
+    Check(nt->FileHeader.Machine==IMAGE_FILE_MACHINE_AMD64 && nt->FileHeader.TimeDateStamp==0x678CCB46 &&
+          nt->OptionalHeader.SizeOfImage==0x22CE000,"supported x64 EDF.dll profile");
+    CheckCode();
+    Fixture fixture;
+    unsigned char* const originalStatus=Read<unsigned char*>(image,0x20B2890);
+    unsigned char* const status=fixture.gs;
+    Write(0x20B2890,&status,sizeof(status));
+    const unsigned char originalEnd=image[0x215079],ret=0xC3;
+    Write(0x215079,&ret,1);
+    const auto reset=MakeResetCaller();
+    Run(fixture,reset);
+    Write(0x215079,&originalEnd,1);Write(0x20B2890,&originalStatus,sizeof(originalStatus));
+    Check(VirtualFree(reinterpret_cast<void*>(reset),0,MEM_RELEASE)!=0,"reset caller released");
+    Check(FreeLibrary(reinterpret_cast<HMODULE>(image))!=0,"private DLL mapping released");
+    std::printf("mission difficulty native: %d checks passed (five difficulties, three rows; BVM/AS/fix/reset)\n",checks);
+    return 0;
+}

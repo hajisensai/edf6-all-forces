@@ -226,6 +226,8 @@ struct Config {
     int sightRangeStep=0;           // ...its step, m (0: graduated, 25 m to 300, 50 m to 1000, 100 m beyond: sightzoom.h)
     bool sightRangePad=true;        // ...and on a pad the d-pad up / down
     bool infantryScope=true;        // a soldier's scoped weapon zoomed: a real optic's eyepiece and reticle (infantryscope.cpp)
+    bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
+    int thermalKey=0x4E;         // N cycles optical / white hot / black hot
     bool firstPerson=true;          // first person on foot: the key switches it (firstperson.cpp)
     bool fpVehicle=true;            // ...in a vehicle as well: each seat's eye at its station (fp_vehicle.cpp)
     bool fpHideStockHud=true;       // ...and the stock HUD off there (its information on the cockpit's panels)
@@ -257,6 +259,7 @@ struct Config {
     bool fpMotion=true;             // ...the arms and weapon sway, bob, kick, dip at a reload, a switch, a sprint, a roll
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
     float viewDistance=-1.0f;       // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it; -1: unlimited)
+    bool enemyControl=true;         // native enemy player mode, entered from the map; disabling releases control
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
@@ -273,7 +276,7 @@ struct Config {
     float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
     float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
     // The M map's 「摆放」 panel in the test range's mission (range_place.h; the debug spawn tool's catalog and making,
-    // whatever DebugSpawn says): on by default; offline only. RangePlaceAll: every row preloaded, the heavy EDF4.1 ones
+    // whatever DebugSpawn says): on by default; enemies use the host-authoritative online transaction. RangePlaceAll: every row preloaded, the heavy EDF4.1 ones
     // too (Entry::preload false: another 17 MB model each); off: those listed as not preloaded.
     bool rangePlace=true;
     bool rangePlaceAll=false;
@@ -697,6 +700,8 @@ void SeePlayer(const float* pos,std::int32_t team) noexcept;
 // A new mission (MissionStart): the last mission's fix and player human are forgotten. GameMs counts the load
 // as one frame, so without this they would pass for fresh at the new mission's start.
 void ResetPlayer() noexcept;
+// Shared game-thread scene tick, called by the local Soldier and by vehicle inputs; de-duplicated by GameFrame.
+void FrameTick() noexcept;
 
 // The core modules' own declarations (crew, heli, ground, hud, mission, loadout, overlay) are in their
 // headers, included at the end of this file.
@@ -1304,3 +1309,5 @@ bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: not
 #include "npcai.h"
 #include "qmark.h"
 #include "infantryscope.h"
+
+namespace crew { bool InstallViewDepth() noexcept; bool ViewDepthReady() noexcept; void ViewWriteNear(void* camera,float value) noexcept; }

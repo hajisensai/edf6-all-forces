@@ -234,7 +234,7 @@ bool WriteImage(unsigned rva,const unsigned char* code,std::size_t size) noexcep
     DWORD old=0;
     if(!VirtualProtect(at,size,PAGE_EXECUTE_READWRITE,&old))return false;
     std::memcpy(at,code,size);
-    VirtualProtect(at,size,old,&old);
+    edf::RestoreProtection(at,size,old);
     FlushInstructionCache(GetCurrentProcess(),at,size);
     return true;
 }

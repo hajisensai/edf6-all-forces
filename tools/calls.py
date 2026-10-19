@@ -172,6 +172,9 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_BOARDING_GUN_RAIDER', 7303, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='eWeapon120'),
     Call('EDF6VC_CALL_BOARDING_GUN_FENCER', 7304, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='hCannon01'),
     Call('EDF6VC_CALL_SEDAN', 0, 'sedan', False, 0, 1500, .1, 'vehicle', vehicle='EDF6VC_SEDAN', ground='sedan'),
+    # Appended 2026-10-18: authored M163 / BMPT models, native tracked vehicle contracts.
+    Call('EDF6VC_CALL_VULCAN', 0, 'vulcan', False, 0, 6500, 1.0, 'vehicle', vehicle='EDF6VC_VULCAN', ground='vulcan'),
+    Call('EDF6VC_CALL_BMPT', 0, 'bmpt', False, 0, 7500, 1.2, 'vehicle', vehicle='EDF6VC_BMPT', ground='bmpt'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -195,6 +198,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'Sazabi (2026-10-07)': IDS[:40],
     'all-class boarding rifles (2026-10-08)': IDS[:43],
     'civilian sedan (2026-10-16)': IDS[:44],
+    'M163 Vulcan and BMPT (2026-10-19)': IDS[:46],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -220,6 +224,18 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'vulcan': {
+        'SC': ('M163 火神防空车', '请求一辆 M163 火神防空车：M113 底盘和六管 20mm M61 机炮。高爆与穿甲弹在载具挂载菜单或 R / 手柄 LB 间切换，一次只发射选中的弹种。外观为按真实构型自建模型。'),
+        'CN': ('M163 火神防空車', '請求一輛 M163 火神防空車：M113 底盤和六管 20mm M61 機砲。高爆與穿甲彈在載具掛載選單或 R / 手把 LB 間切換，一次只發射選中的彈種。外觀為按真實構型自建模型。'),
+        'JA': ('M163 バルカン対空車両', 'M113 車体に 20mm 六砲身 M61 機関砲を搭載する M163 を要請する。搭載メニューまたは R / LB で榴弾・徹甲弾を切り替える。実車の構成に基づく独自モデル。'),
+        'EN': ('M163 Vulcan', 'Requests an M163 with an M113 hull and six-barrel 20 mm M61 cannon. Select HE or AP in the payload menu or with R / LB; only the selected belt fires. Authored model based on the real vehicle layout.'),
+    },
+    'bmpt': {
+        'SC': ('BMPT 坦克支援车', '请求一辆 BMPT：双 30mm 机炮与四发反坦克导弹。载具挂载菜单或 R / 手柄 LB 在双机炮和导弹之间切换；导弹需要锁定。外观为按真实构型自建模型。'),
+        'CN': ('BMPT 戰車支援車', '請求一輛 BMPT：雙 30mm 機砲與四發反戰車飛彈。載具掛載選單或 R / 手把 LB 在雙機砲和飛彈之間切換；飛彈需要鎖定。外觀為按真實構型自建模型。'),
+        'JA': ('BMPT 戦車支援戦闘車', '30mm 連装機関砲と対戦車ミサイル 4 発を搭載した BMPT を要請する。搭載メニューまたは R / LB で機関砲とミサイルを切り替える。実車の構成に基づく独自モデル。'),
+        'EN': ('BMPT Tank Support Vehicle', 'Requests a BMPT with twin 30 mm autocannons and four anti-tank missiles. Switch between paired cannon and missiles in the payload menu or with R / LB. Missiles require lock-on. Authored model based on the real vehicle layout.'),
+    },
     'sedan': {
         'SC': ('民用轿车', '请求一辆没有武器的民用轿车，单驾驶席。按通常的上车键驾驶，V 切换第一人称，按住鼠标中键或手柄 L3 转动视角自由观察。'),
         'CN': ('民用轎車', '請求一輛沒有武器的民用轎車，單駕駛席。按通常的上車鍵駕駛，V 切換第一人稱，按住滑鼠中鍵或手柄 L3 轉動視角自由觀察。'),
@@ -609,7 +625,7 @@ PLUGIN_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew プラグイン、およびインストーラーが書き出す車両ファイルが必要。',
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
-GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES}
+GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES}
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',
