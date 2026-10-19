@@ -24,12 +24,33 @@ GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'side
 MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi'}
 # The groups whose models carry first-person cockpits (pylib/cockpits.py): the cockpits' asset folder is an input.
 COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'sazabi', 'optics')
+MODULE_FOLDERS = ('tools', 'pylib', 'testrange', 'autoturret/tools')
+
+
+def source_modules(root: str) -> dict[str, Path]:
+    """Unique local modules from the runtime/frozen search set; reject Windows stem aliases.
+
+    Choosing either duplicate silently would fingerprint or freeze a different implementation from the one
+    normal source imports execute. CLI wrappers must have their own module names.
+    """
+    base = Path(root).resolve()
+    modules: dict[str, Path] = {}
+    names: dict[str, Path] = {}
+    for folder in MODULE_FOLDERS:
+        for path in sorted((base / folder).glob('*.py')):
+            if not path.is_file():
+                continue
+            identity = path.stem.casefold()
+            if identity in names:
+                raise ValueError(f'duplicate local module {identity!r}: {names[identity]} and {path}')
+            names[identity] = path
+            modules[path.stem] = path
+    return modules
 
 
 def source_recipes(root: str) -> dict[str, str]:
     """Fingerprint each generator's dependency closure, without importing or executing it."""
-    modules = {p.stem: p for folder in ('pylib', 'tools', 'testrange')
-               for p in (Path(root) / folder).glob('*.py')}
+    modules = source_modules(root)
     dependencies: dict[str, set[str]] = {}
     digests: dict[str, str] = {}
     for name, path in modules.items():

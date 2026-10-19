@@ -455,6 +455,7 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 版本号只有一处：`CMakeLists.txt` 的 `project(VERSION)`（DLL 自报的版本也来自它）。CI 每次推送都打同样的安装器包，
 推 `vX.Y.Z` 标签时要求它与 `project(VERSION)` 一致。不打包时也可直接 `python tools/installer.py install`（从 `build/` 取 DLL，没构建会提示先运行 `build.cmd`）。
 `python tools/selftest.py` 是安装链的自测（CI 里跑）；改了 `tools/calls.py` 后运行 `python tools/gen_calls.py` 重新生成 `src/calls.inc` 并一起提交。
+发布构建和生成资源缓存共用本地模块唯一性检查，拒绝工具与库同名。SHKT 的全游戏检查入口为 `python tools/check_shkt.py`（原版校准加 `--stock`）；冻结包自检会执行合成碰撞数据的实际重绑定和凸包编辑。
 
 制作分享包时，先用当前版本的 `python tools/export_edf41_assets.py <素材目录>` 增量导出 EDF4.1 素材，
 再运行 `python tools/export_edf41_assets.py --check <素材目录> --full`。检查会核对当前安装器所需的地图、声音和

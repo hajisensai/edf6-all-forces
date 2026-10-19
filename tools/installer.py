@@ -1238,7 +1238,8 @@ def check_package() -> int:
     assert make_sedan.OWNER in ledger.OWNERS
     import buildcache
     import make_tracked_combat
-    importlib.import_module('tracked_collision')
+    import frozen_collision_probe
+    frozen_collision_probe.check()
     for kind in ('vulcan', 'bmpt'):
         builder = importlib.import_module('make_' + kind)
         model = make_tracked_combat.model_module(kind)
@@ -1258,7 +1259,7 @@ def check_package() -> int:
     assert mdb.native_cmpl(), 'edf6cmpl.dll not bundled: models would use the pure Python CMPL encoder'
     probe = bytes(range(256)) * 40 + b'EDF6' * 300
     assert mdb.cmpl_compress(probe) == mdb.cmpl_compress_py(probe)
-    print('EDF6VC_PACKAGE_OK cockpit families=4')
+    print('EDF6VC_PACKAGE_OK cockpit families=4 tracked_collision=1')
     return 0
 
 

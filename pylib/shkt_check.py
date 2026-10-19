@@ -22,7 +22,7 @@ What the game does with a SHKT (from that report, the parts these checks rely on
 
     problems(shkt) -> list[Problem]                 the SHKT on its own
     sgo_problems(sgo_bytes, shkt_path, body_names)  body names an SGO binds to `shkt_path` that are missing
-    python -B pylib/shkt_check.py FILE.SHKT ...     print the problems of each file (tools/shkt_check.py does a game)
+    python -B pylib/shkt_check.py FILE.SHKT ...     print the problems of each file (tools/check_shkt.py does a game)
 """
 from __future__ import annotations
 
