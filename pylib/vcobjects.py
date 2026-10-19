@@ -32,7 +32,8 @@ class Jet:
     body: str = 'bomber501'
     anchor: str = 'mdl'
     rigid: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
-    # The bone each weapon hangs on (vehicle_weapon_setting), in `weapons` order; empty: all on `anchor`.
+    # The bone each weapon hangs on (vehicle_weapon_setting), in `weapons` order; empty: jet_weapon_bones (its guns and
+    # stores on its model's hardpoints, HARDPOINT_FILES; the rest, or all on a model without them, on `anchor`).
     weapon_bones: tuple[str, ...] = ()
     # A player jet (src/playerjet.cpp): the player flies it. Its SGO keeps `vehicle_setup` beside
     # `mission_setup` (the Air Raider's call weapon brings it like a stock heli, tools/call_weapons.py), and
@@ -902,6 +903,73 @@ class DoorError(Exception):
     """A jet's boarding point is not where move_door puts it (check_door)."""
 
 
+# The jets' hardpoints (pylib/jet_hardpoints.py; the user, 2026-10-19: 「在地面停着的飞机射导弹，会在地底生成」): the model
+# files that carry the bones HP_GUN / HP_STORE (jet_models makes them), and which of a jet's weapons hangs on which.
+# Without them every weapon hung on `mdl`, the model's origin (the wheels' contact): the stock 506 muzzles, all under
+# their holder bone, then stood 0.24-0.67 m in the ground under a parked jet. Every other weapon (the blast drones'
+# charges, the Primers' guns) and the fuel tank stay on the anchor.
+HARDPOINT_FILES = frozenset({JET_ELEVON_FILE, 'EDF6VC_INTERCEPTOR.MRAB', 'EDF6VC_MULTIROLE.MRAB', 'EDF6VC_DRONE.MRAB',
+                             'EDF6VC_CARRIER.MRAB', GUNSHIP_MODEL_FILE})
+
+
+def model_file(model) -> str:  # noqa: ANN001 - [archive path, member]
+    """The archive file name (upper case) of a vehicle SGO's animation_model[0] ([path, member])."""
+    return str(model[0]).replace('\\', '/').rsplit('/', 1)[-1].upper()
+
+
+def hardpoint_of(weapon: str) -> str | None:
+    """The hardpoint bone weapon path `weapon` hangs on (jet_hardpoints.HP_GUN / HP_STORE), or None (the anchor)."""
+    from jet_hardpoints import HP_GUN, HP_STORE
+    if weapon.lower() in _GUNS:
+        return HP_GUN
+    kind = store_of(weapon)
+    if kind and STORES[kind[0]].role in ('air', 'ground', 'bomb', 'rocket') and isinstance(STORES[kind[0]].weapon, (Missile, Bomb)):
+        return HP_STORE
+    return None
+
+
+def _muzzle_stock(weapon: str) -> str:
+    """The stock weapon whose muzzle list weapon path `weapon` (one hardpoint_of hangs) fires from."""
+    name = weapon.rsplit('/', 1)[-1].upper()
+    if name in JET_GUN_FILES:
+        return JET_GUN_FILES[name]
+    w = STORES[store_of(weapon)[0]].weapon
+    if isinstance(w, Bomb):
+        return JET_BOMB_STOCK
+    return w.muzzle or JET_MISSILE_STOCK
+
+
+@lru_cache(maxsize=None)
+def _stock_muzzles(game: Game, stock: str) -> tuple[tuple[float, float, float], ...]:
+    block = dsgo.parse(game.read('WEAPON', stock)).root.get('animation_model').items[2].data
+    return tuple(tuple(round(v, 6) for v in struct.unpack_from('<3f', block, at)) for _n, _node, at in mab_muzzles(block))
+
+
+def hardpoint_muzzles(game: Game) -> dict[str, tuple[tuple[float, float, float], ...]]:
+    """{bone: every muzzle (from its holder bone) any weapon hung on it may fire from}: the guns' (JET_GUN_FILES) on
+    HP_GUN; on HP_STORE every jet store's (STORE_FILES: a carrier's own load or any a loadout puts on its pylons,
+    tools/support_loadout.py) and both templates' (the missile pods, the bomb racks). Read off the stock weapons they fire
+    from (_muzzle_stock): what jet_hardpoints places, the same on every model."""
+    from jet_hardpoints import HP_GUN, HP_STORE
+    out: dict[str, set[tuple[float, float, float]]] = {HP_GUN: set(), HP_STORE: set()}
+    for stock in JET_GUN_FILES.values():
+        out[HP_GUN].update(_stock_muzzles(game, stock))
+    stocks = {JET_MISSILE_STOCK, JET_BOMB_STOCK} | {_muzzle_stock(_weapon(f)) for f in STORE_FILES if hardpoint_of(_weapon(f))}
+    for stock in sorted(stocks):
+        out[HP_STORE].update(_stock_muzzles(game, stock))
+    return {k: tuple(sorted(v)) for k, v in out.items()}
+
+
+def jet_weapon_bones(jet: 'Jet', model, anchor: str) -> list[str]:  # noqa: ANN001 - [archive path, member]
+    """The bone each of `jet`'s weapons hangs on (vehicle_weapon_setting, without the fuel tank) when it wears `model`:
+    Jet.weapon_bones; on a model with hardpoints (HARDPOINT_FILES) its guns and stores on theirs; else `anchor`."""
+    if jet.weapon_bones:
+        return list(jet.weapon_bones)
+    if model_file(model) in HARDPOINT_FILES:
+        return [hardpoint_of(w) or anchor for w in jet.weapons]
+    return [anchor] * len(jet.weapons)
+
+
 def mab_locator(mab: bytes, name: str) -> tuple[int, int]:
     """(offset of the local vec4, offset of the radius) of locator `name` in the MAB block `mab` (an SGO's
     animation_model[2]). The block: b'MAB\\0'; u32 at 0x14 the record table, its records from +0x20 to the u32 at 0x18,
@@ -1302,7 +1370,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), cas, mab]
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
-    m['vehicle_weapon_setting'] = with_fuel([[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))], [anchor, -1])
+    m['vehicle_weapon_setting'] = with_fuel([[b, 0] for b in jet_weapon_bones(jet, m['animation_model'][0], anchor)], [anchor, -1])
     # Without the plugin the 506 builds weapons for its first four holders only (src/stores.cpp): fewer would read an
     # entry that is not there; the plugin builds them all, one an entry, so the two lists must agree. The fuel tank is
     # among the four (with_fuel): built either way.
