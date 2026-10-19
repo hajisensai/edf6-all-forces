@@ -65,6 +65,9 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x7A3500, 0x10, 'the text table lookup (table, key) -> text'),
     (0x8ABC4D, 0x19, 'the popup: its five items destroyed by 0x8E170, 0x90 bytes each'),
     (0x08E170, 0x2A, 'the popup item destructor: its +0x80 tree, its std::function, its text'),
+    # The EDF4.1 outfit's own colours (outfit41_logic.h Reconcile): the battle reads a player's colour where the plugin
+    # swaps the block: GS +0x6FB0 / +0x7070 + player*0x3E60 + ((0xD8700 outfit + class*4)*2 + channel)*0xC4.
+    (0x591965, 0x65, "battle colour: the block of (0xD8700's outfit + class*4), channel * 0xC4, index +0x7070, chips +0x6FB0"),
 )
 
 # The five stock items' std::function vtables: (vtable rva, its _Do_call) in the popup's order (outfit -1, 2, 3, 1, 0).

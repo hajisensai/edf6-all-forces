@@ -5,6 +5,7 @@
 #pragma once
 #include <atomic>
 #include <cstddef>
+#include <cstring>
 #include <cstdint>
 #include <cwchar>
 #include <string>
@@ -41,19 +42,161 @@ inline constexpr Files kFiles[kClasses]={
 // 0xE3420 do not check it: a 4 would read past SoldierInit once the plugin is gone).
 inline constexpr int kLocalPlayers=2;   // 0 the first player, 1 split screen's second (0xAC650 / 0xAC9E0: slot < 2)
 constexpr bool ValidLocal(int p) noexcept { return p>=0 && p<kLocalPlayers; }
-struct State { bool on[kLocalPlayers]{}; };
+// --- The EDF4.1 outfit's own colours (the user, 2026-10-19: 「4.1等各个种类的皮肤颜色可单独保留自定义，不受其他皮肤颜色影响」)
+// The game keeps a player's colours per class and per stock outfit: GS +0x6FB0 + player*0x3E60 + (outfit + class*4) *
+// 0x188, a block of the primary's 12 HQ chips (float4) and its picked index (+0xC0), then the secondary's (+0xC4, index
+// +0x184) (0xDF1B0 fills it; read by the battle 0x5914C0, the HQ view 0x93B320, the room's member record 0x78E9A0, the
+// colour screens 0x881060 / 0x87D790 ...; docs/room-3d-preview-re.md §1). Every stock outfit already has its own block;
+// the EDF4.1 outfit has none (the save's outfit stays the stock -1..3) and so wore, and edited, the block of the stock
+// outfit under it. Now it has its own block per local player and class, kept by the plugin: while a player wears it,
+// the block of the stock outfit under it (the class's, at the outfit 0xD8700 resolves) holds the EDF4.1 colours and the
+// stock ones wait in the plugin's backup; every reader of the game's (the battle, the views, the colour screens, the
+// room's member record: what the others see) reads the right colours with nothing of theirs hooked. Taken off, the
+// block goes back. The save file's format is untouched; a block the player edits while swapped is the EDF4.1 one.
+inline constexpr std::size_t kColourBlock=0x188,kGsColours=0x6FB0;
+inline constexpr int kStockOutfits=4;
+constexpr std::size_t ColourOffset(int player,int cls,int outfit) noexcept {
+    return kGsColours+static_cast<std::size_t>(player)*0x3E60+static_cast<std::size_t>(outfit+cls*kStockOutfits)*kColourBlock;
+}
+struct Swap {
+    int cls=-1,outfit=-1;                  // the block holding the EDF4.1 colours now; -1 none
+    unsigned char backup[kColourBlock]{};  // that stock outfit's own colours
+    std::uint64_t others=0;                // the player's other blocks' hash when swapped (a save loaded since: changed)
+};
+struct State {
+    bool on[kLocalPlayers]{};
+    bool has[kLocalPlayers][kClasses]{};                      // the EDF4.1 colours known (first worn: the stock ones then)
+    unsigned char own[kLocalPlayers][kClasses][kColourBlock]{};
+    Swap swap[kLocalPlayers];
+};
+
+// FNV-1a over bytes.
+inline std::uint64_t Hash(const unsigned char* p,std::size_t n,std::uint64_t h=0xCBF29CE484222325ull) noexcept {
+    for(std::size_t i=0;i<n;++i){h^=p[i];h*=0x100000001B3ull;}
+    return h;
+}
+// A player's colour blocks but one (the swapped one's neighbours: the game rewrites them all when it loads a save).
+inline std::uint64_t OthersHash(const unsigned char* playerColours,int cls,int outfit) noexcept {
+    std::uint64_t h=0xCBF29CE484222325ull;
+    for(int b=0;b<kClasses*kStockOutfits;++b)
+        if(b!=outfit+cls*kStockOutfits)h=Hash(playerColours+static_cast<std::size_t>(b)*kColourBlock,kColourBlock,h);
+    return h;
+}
+// What Reconcile did (the caller persists and logs).
+enum class ColourAct : std::uint8_t { none, swapped, restored, mirrored, dropped };
+// Makes the game's colour blocks of player `p` (`colours`: GS +0x6FB0 + p*0x3E60, all 16 blocks) agree with what it wears:
+// `wantCls` / `wantOutfit` the block the EDF4.1 colours belong in now (-1: it does not wear the EDF4.1 outfit). Returns
+// the last thing it did, `changed` whether the state needs saving.
+//   - swapped and still wanted there: an edit (the colour screen writes the block) is the EDF4.1 colours, mirrored;
+//     unless the other blocks changed too (a save was loaded): the swap is the old save's, dropped without writing GS
+//     (the block is the loaded save's own), or, when the block is exactly the backup, the save never had the swap.
+//   - swapped and not wanted there: the EDF4.1 colours kept, the backup written back.
+//   - wanted and not swapped: the stock block saved as the backup, the EDF4.1 colours written (the first time: the
+//     stock ones, so nothing changes until the player edits them).
+inline ColourAct Reconcile(State& s,int p,unsigned char* colours,int wantCls,int wantOutfit,bool& changed) noexcept {
+    changed=false;
+    if(!ValidLocal(p) || !colours)return ColourAct::none;
+    if(!ValidClass(wantCls) || wantOutfit<0 || wantOutfit>=kStockOutfits)wantCls=wantOutfit=-1;
+    Swap& w=s.swap[p];
+    ColourAct act=ColourAct::none;
+    if(w.cls>=0) {
+        unsigned char* g=colours+static_cast<std::size_t>(w.outfit+w.cls*kStockOutfits)*kColourBlock;
+        const bool reloaded=OthersHash(colours,w.cls,w.outfit)!=w.others;
+        const bool atOwn=std::memcmp(g,s.own[p][w.cls],kColourBlock)==0;
+        const bool atBackup=std::memcmp(g,w.backup,kColourBlock)==0;
+        if(!atOwn && (reloaded || atBackup)) {   // not our block any more: left as the game has it
+            w=Swap{};changed=true;act=ColourAct::dropped;
+        } else if(w.cls!=wantCls || w.outfit!=wantOutfit) {
+            std::memcpy(s.own[p][w.cls],g,kColourBlock);s.has[p][w.cls]=true;
+            std::memcpy(g,w.backup,kColourBlock);
+            w=Swap{};changed=true;act=ColourAct::restored;
+        } else if(!atOwn) {
+            std::memcpy(s.own[p][w.cls],g,kColourBlock);s.has[p][w.cls]=true;
+            changed=true;act=ColourAct::mirrored;
+        }
+    }
+    if(wantCls>=0 && w.cls<0) {
+        unsigned char* g=colours+static_cast<std::size_t>(wantOutfit+wantCls*kStockOutfits)*kColourBlock;
+        std::memcpy(w.backup,g,kColourBlock);
+        if(!s.has[p][wantCls]){std::memcpy(s.own[p][wantCls],g,kColourBlock);s.has[p][wantCls]=true;}
+        std::memcpy(g,s.own[p][wantCls],kColourBlock);
+        w.cls=wantCls;w.outfit=wantOutfit;w.others=OthersHash(colours,wantCls,wantOutfit);
+        changed=true;act=ColourAct::swapped;
+    }
+    return act;
+}
+
+// --- The file
+inline constexpr char kHexDigits[]="0123456789ABCDEF";
+inline std::string Hex(const unsigned char* p,std::size_t n) {
+    std::string out;out.reserve(n*2);
+    for(std::size_t i=0;i<n;++i){out+=kHexDigits[p[i]>>4];out+=kHexDigits[p[i]&15];}
+    return out;
+}
+inline bool Unhex(std::string_view v,unsigned char* out,std::size_t n) noexcept {
+    if(v.size()!=n*2)return false;
+    const auto nib=[](char c) noexcept -> int { return c>='0' && c<='9' ? c-'0' : c>='A' && c<='F' ? c-'A'+10 : c>='a' && c<='f' ? c-'a'+10 : -1; };
+    for(std::size_t i=0;i<n;++i) {
+        const int a=nib(v[2*i]),b=nib(v[2*i+1]);
+        if(a<0 || b<0)return false;
+        out[i]=static_cast<unsigned char>(a*16+b);
+    }
+    return true;
+}
 inline constexpr const char* kSection="[Outfit41]";
 inline constexpr const char* kPlayerKeys[kLocalPlayers]={"Player1","Player2"};
 
+// Player1=1, then per player and class Colours<P>_<class>=<the block in hex> (known ones), and a swap
+// Swap<P>=<class>,<outfit>,<others hash hex> with Backup<P>=<the block in hex>.
 inline std::string Format(const State& s) {
     std::string out=std::string(kSection)+"\r\n";
     for(int p=0;p<kLocalPlayers;++p)out+=std::string(kPlayerKeys[p])+(s.on[p] ? "=1\r\n" : "=0\r\n");
+    for(int p=0;p<kLocalPlayers;++p) {
+        for(int c=0;c<kClasses;++c)
+            if(s.has[p][c])out+="Colours"+std::to_string(p+1)+"_"+std::to_string(c)+"="+Hex(s.own[p][c],kColourBlock)+"\r\n";
+        const Swap& w=s.swap[p];
+        if(w.cls>=0) {
+            unsigned char h[8];
+            for(int i=0;i<8;++i)h[i]=static_cast<unsigned char>(w.others>>(56-8*i));
+            out+="Swap"+std::to_string(p+1)+"="+std::to_string(w.cls)+","+std::to_string(w.outfit)+","+Hex(h,8)+"\r\n";
+            out+="Backup"+std::to_string(p+1)+"="+Hex(w.backup,kColourBlock)+"\r\n";
+        }
+    }
     return out;
 }
 
+namespace detail {
+inline bool Digit(std::string_view v,int most,int& out) noexcept {
+    if(v.size()!=1 || v[0]<'0' || v[0]-'0'>most)return false;
+    out=v[0]-'0';
+    return true;
+}
+struct PendingSwap { Swap swap; bool backup=false; };
+// Colours<P>_<c>, Swap<P>, Backup<P> (Format); anything malformed is ignored.
+inline void ParseColours(State& s,PendingSwap* pending,std::string_view key,std::string_view value) noexcept {
+    for(int p=0;p<kLocalPlayers;++p) {
+        const char digit=static_cast<char>('1'+p);
+        if(key.size()==10 && key.substr(0,7)=="Colours" && key[7]==digit && key[8]=='_') {
+            int c=0;
+            if(Digit(key.substr(9,1),kClasses-1,c) && Unhex(value,s.own[p][c],kColourBlock))s.has[p][c]=true;
+        } else if(key.size()==5 && key.substr(0,4)=="Swap" && key[4]==digit) {
+            int c=0,o=0;unsigned char h[8];
+            if(value.size()==4+16 && value[1]==',' && value[3]==',' && Digit(value.substr(0,1),kClasses-1,c) &&
+               Digit(value.substr(2,1),kStockOutfits-1,o) && Unhex(value.substr(4),h,8)) {
+                Swap& w=pending[p].swap;
+                w.cls=c;w.outfit=o;w.others=0;
+                for(int i=0;i<8;++i)w.others=(w.others<<8)|h[i];
+            }
+        } else if(key.size()==7 && key.substr(0,6)=="Backup" && key[6]==digit) {
+            pending[p].backup=Unhex(value,pending[p].swap.backup,kColourBlock);
+        }
+    }
+}
+}  // namespace detail
 // Lines "Key=1" under any section; an unknown key, a value other than 1, a missing file: off.
 inline State Parse(std::string_view text) noexcept {
     State s;
+    detail::PendingSwap pending[kLocalPlayers];
     std::size_t at=text.substr(0,3)=="\xEF\xBB\xBF" ? 3 : 0;
     while(at<text.size()) {
         std::size_t end=text.find('\n',at);
@@ -64,9 +207,13 @@ inline State Parse(std::string_view text) noexcept {
         if(eq!=std::string_view::npos) {
             const std::string_view key=line.substr(0,eq),value=line.substr(eq+1);
             for(int p=0;p<kLocalPlayers;++p)if(key==kPlayerKeys[p])s.on[p]=value=="1";
+            detail::ParseColours(s,pending,key,value);
         }
         at=end+1;
     }
+    // a swap is kept only with its backup: without it the game's block is left as it is
+    for(int p=0;p<kLocalPlayers;++p)
+        if(pending[p].swap.cls>=0 && pending[p].backup)s.swap[p]=pending[p].swap;
     return s;
 }
 
