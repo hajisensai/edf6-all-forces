@@ -1043,6 +1043,70 @@ int main() {
         packReady=false;packSlots=0;Put<unsigned char**>(human,kWeapons,nullptr);Put<std::uint64_t>(human,kWeaponCount,0);
         world.enemies=0;ResetNpcAi();
     }
+    // The stock's join mark and free-squad cover (the user 2026-10-19: "删除npc顶上的未招募红标" / "删除玩家招募npc以后npc
+    // 的减伤消失问题"): the mark hidden while the map recruits, the cover read from the squad's top NPC, not the player.
+    {
+        Reset();dead[kDead]=0;
+        Put<unsigned char>(other,kHumanPlayer,1);Put<void*>(other,kHumanPad,other);Put<int>(other,kTeam,0);
+        Put<void*>(human,kLeader,dead);Put<void*>(dead,kLeader,other);
+        Expect(CoverRoot(human)==dead,"a recruited squad's member: its cover read from the top NPC, not from the player it follows");
+        Expect(CoverRoot(dead)==dead,"a recruited squad's top: its own +0x540, as before it joined");
+        Put<void*>(dead,kLeader,nullptr);
+        Expect(CoverRoot(human)==dead,"a free squad: the end of the chain, exactly the stock walk");
+        Put<void*>(human,kLeader,nullptr);
+        Expect(CoverRoot(human)==human,"no leader: itself");
+        Put<void*>(human,kLeader,dead);Put<void*>(dead,kLeader,other);config.customNpcAi=false;
+        Expect(CoverRoot(human)==other,"the AI off: the stock walk up to the player (the cover ends on joining, stock)");
+        config.customNpcAi=true;Put<void*>(dead,kLeader,human);
+        const unsigned char* const looped=CoverRoot(human);
+        Expect(looped==human || looped==dead,"a leader loop ends (the walk is bounded)");
+        Put<void*>(dead,kLeader,other);
+        static int marks=0;marks=0;
+        struct MarkRec { static void __fastcall Run(void*,const unsigned char*) { ++marks; } };
+        nextJoinMark=&MarkRec::Run;
+        JoinMarkHook(nullptr,human);
+        Expect(marks==0,"VanillaRecruit=0: no join mark over a free soldier (the map's RECRUIT is the way in)");
+        config.vanillaRecruit=true;JoinMarkHook(nullptr,human);
+        Expect(marks==1,"VanillaRecruit=1: the stock walk-up's mark stays");
+        config.vanillaRecruit=false;config.customNpcAi=false;JoinMarkHook(nullptr,human);
+        Expect(marks==2,"the AI off: the stock walk-up and its mark stay");
+        config.customNpcAi=true;
+        // Installed on the image stand-in: the vtable slot swapped, the walk replaced by a call that the stock read after it
+        // still follows, then executed with rbx = the soldier and rsp as in 0x59ABB0's body.
+        std::memcpy(image+kJoinMarkVisit,kJoinMarkSig,sizeof(kJoinMarkSig));
+        Put<void*>(image,kJoinMarkSlot,image+kJoinMarkVisit);
+        std::memcpy(image+kCoverWalk,kCoverWalkSig,sizeof(kCoverWalkSig));
+        std::memcpy(image+kCoverWalk+sizeof(kCoverWalkSig),kCoverReadSig,sizeof(kCoverReadSig));
+        nextJoinMark=nullptr;coverOk=false;
+        InstallFreeSquadCover();
+        Expect(At<void*>(image,kJoinMarkSlot)==reinterpret_cast<void*>(&JoinMarkHook) &&
+               reinterpret_cast<void*>(nextJoinMark)==image+kJoinMarkVisit,"the join mark's slot chains onto the stock visit");
+        const unsigned char* const at=image+kCoverWalk;
+        std::int32_t rel=0;std::memcpy(&rel,at+4,4);
+        const unsigned char* const thunk=at+8+rel;
+        const void* jumpTo=nullptr;std::memcpy(&jumpTo,thunk+2,8);
+        Expect(coverOk && at[0]==0x48 && at[1]==0x8B && at[2]==0xCB && at[3]==0xE8 && at[8]==0x48 && at[9]==0x8B && at[10]==0xC8,
+               "the walk becomes mov rcx,rbx; call; mov rcx,rax");
+        Expect(thunk[0]==0x48 && thunk[1]==0xB8 && jumpTo==reinterpret_cast<const void*>(&CoverRoot) && thunk[10]==0xFF && thunk[11]==0xE0,
+               "the call reaches CoverRoot");
+        Expect(Matches(kCoverWalk+sizeof(kCoverWalkSig),kCoverReadSig,sizeof(kCoverReadSig)),"the stock read of +0x540 after it is untouched");
+        // push rbx; mov rbx,rcx; sub rsp,20h; jmp walk -- and after the walk: mov rax,rcx; add rsp,20h; pop rbx; ret
+        constexpr unsigned kEntry=0x1000;
+        unsigned char* const entry=image+kEntry;
+        const unsigned char prologue[]={0x53,0x48,0x8B,0xD9,0x48,0x83,0xEC,0x20,0xE9};
+        std::memcpy(entry,prologue,sizeof(prologue));
+        const auto jump=static_cast<std::int32_t>((image+kCoverWalk)-(entry+sizeof(prologue)+4));
+        std::memcpy(entry+sizeof(prologue),&jump,4);
+        const unsigned char epilogue[]={0x48,0x8B,0xC1,0x48,0x83,0xC4,0x20,0x5B,0xC3};
+        std::memcpy(image+kCoverWalk+sizeof(kCoverWalkSig),epilogue,sizeof(epilogue));
+        FlushInstructionCache(GetCurrentProcess(),image,0x2200000);
+        using WalkRun=const unsigned char*(*)(const unsigned char*);
+        const auto run=reinterpret_cast<WalkRun>(entry);
+        Expect(run(human)==dead,"executed: the patched walk hands the stock read the top NPC of a recruited squad");
+        config.customNpcAi=false;
+        Expect(run(human)==other,"executed, the AI off: the stock walk's player");
+        config.customNpcAi=true;nextJoinMark=nullptr;
+    }
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;
 }
 #endif

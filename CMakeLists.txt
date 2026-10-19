@@ -959,6 +959,10 @@ add_test(NAME net_session_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE
 set_tests_properties(net_session_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 add_test(NAME item_pickup_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/item_pickup_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
+# The stock join mark (hidden while the map recruits) and the free-squad cover a recruited squad keeps (src/npcai.cpp
+# InstallFreeSquadCover): the patched bytes and the original visit run on stand-ins against the real EDF.dll.
+add_test(NAME npc_cover_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_cover_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(npc_cover_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 # The Proteus shield's round carries its model into the IFC (src/ifc_model.h; test hub report #6, the B-key crash):
 # the copy against fake visitors, its wiring in jet_bay.cpp / make_proteus.py, and the contract on the real EDF.dll.
 add_executable(ifc_model_test EXCLUDE_FROM_ALL tests/ifc_model_test.cpp)
