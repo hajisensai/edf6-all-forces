@@ -127,6 +127,15 @@ using PlayerAimFn=bool(__cdecl*)(const void* vehicle,unsigned seat,const void* g
 constexpr char kPlayerAim[]="EDF6AutoTurret_PlayerAimV4";
 constexpr char kAimsTurret[]="EDF6VehicleCrew_AimsTurretV4";
 
+// Optional actual fire-control weapon, additive to V4. `source` must be a live mounted weapon and identifies
+// the native trigger group to resolve (a tank turret must not follow an independent hull-gun optic).
+// true: Crew validated and owns this answer; weapon==nullptr means no usable weapon in that group, never a request
+// to fall back to the native source. false / missing export: leave the consumer's original native behavior intact.
+// A bounded live selection from the preceding vehicle update remains valid: consumers may run before Crew's update.
+struct PayloadAimV1 { std::uint32_t size; const void* weapon; };
+using PayloadAimFn=bool(__cdecl*)(const void* vehicle,unsigned seat,const void* source,PayloadAimV1* out);
+constexpr char kPayloadAim[]="EDF6VehicleCrew_PayloadAimV1";
+
 // What EDF6AutoTurret does with the player's own gun in a frame (a pure rule: tools/turret_lead_check.cpp checks it):
 // `steer` it turns the gun onto its target, `drag` a stick past DragDeadzone is the player aiming by hand (the target
 // let go). `cameraTurret` the camera turns the gun (CameraTurret above), `lead` the lead-circle mode, `locked` the

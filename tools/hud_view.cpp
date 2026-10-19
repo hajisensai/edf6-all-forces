@@ -204,6 +204,10 @@ bool hasHighView=false;
 bool PlayerHighCam(bool* on,bool* keys) noexcept {*on=hasHighView;*keys=true;return hasHighView;}
 bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
 bool MapOwnsView() noexcept { return hasMap || mapEasing; }
+const void* sceneMapHiddenCamera=nullptr;
+bool MapHidesStockHud(const void* camera) noexcept {
+    return (hasMap || mapEasing) && (!sceneMapHiddenCamera || camera==sceneMapHiddenCamera);
+}
 MapCommandReadout sceneCmd{};
 bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;return hasMap; }
 // The damage statistics (damagestats.cpp): on in every map scene (the map's STATS tab), the page shown in StatsScenes.
@@ -250,7 +254,41 @@ bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
 bool DebugSpawnReadout(DebugSpawnCue* o) noexcept { if(sceneDebugSpawnOn)*o=sceneDebugSpawn;return sceneDebugSpawnOn; }
-void MapCommandView(const float*,float,float) noexcept {}
+unsigned sceneMapViewWrites=0;
+void MapCommandView(const float*,float,float) noexcept { ++sceneMapViewWrites; }
+// Enemy-control readers and button publication are external seams in the real HUD.
+// They return immutable stand-ins here; the native renderer and owner gates below
+// are still the production code included above.
+MapEnemyControlReadout sceneEnemy{};bool hasEnemyPanel=false,hasEnemyControl=false;
+enemy_control::Snapshot sceneEnemyHitSnapshot{};
+bool sceneEnemyVisible=false;int sceneEnemyCount=0,sceneEnemyCodes[kMapEnemyItems]{};
+float sceneEnemyRects[kMapEnemyItems][4]{};
+namespace enemy_control { const wchar_t* ReasonText(Reason) noexcept { return L"Fixture native unavailable"; } }
+bool ReadMapEnemyControl(MapEnemyControlReadout* value) noexcept {
+    if(!value || !hasEnemyPanel)return false;*value=sceneEnemy;return true;
+}
+bool EnemyControlReadSnapshotForView(std::uintptr_t key,enemy_control::Snapshot* value) noexcept {
+    if(!hasEnemyControl || !value || !key || key!=sceneEnemy.snapshot.ownerHumanKey)return false;
+    *value=sceneEnemy.snapshot;return true;
+}
+void MapCommandEnemyButtons(const float* rects,const int* codes,int n,const enemy_control::Snapshot* snapshot) noexcept {
+    sceneEnemyVisible=snapshot!=nullptr;sceneEnemyHitSnapshot=snapshot ? *snapshot : enemy_control::Snapshot{};
+    sceneEnemyCount=rects && codes && snapshot ? (std::max)(0,(std::min)(n,kMapEnemyItems)) : 0;
+    for(int i=0;i<sceneEnemyCount;++i){std::memcpy(sceneEnemyRects[i],rects+i*4,16);sceneEnemyCodes[i]=codes[i];}
+}
+// Stand-in PVP state and hit ledger let offline fixtures exercise the production panel.
+PvpStatus scenePvp{},scenePvpSnapshot{};bool scenePvpVisible=false;
+int scenePvpPadPick=-1,scenePvpCount=0,scenePvpCodes[kMapPvpItems]{};float scenePvpRects[kMapPvpItems][4]{};
+bool ReadPvpStatus(PvpStatus* value) noexcept { if(value)*value=scenePvp;return value!=nullptr; }
+void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpStatus* snapshot) noexcept {
+    scenePvpVisible=snapshot!=nullptr;scenePvpSnapshot=snapshot ? *snapshot : PvpStatus{};scenePvpCount=n;
+    for(int i=0;i<n;++i){std::memcpy(scenePvpRects[i],rects+i*4,16);scenePvpCodes[i]=codes[i];}
+}
+int MapPvpPadSelection() noexcept { return scenePvpPadPick; }
+thermal::Status sceneThermal{};
+namespace thermal { Status GetStatus() noexcept { return sceneThermal; } }
+VehicleSensorReadout sceneSensor{};bool sceneSensorOn=false;
+bool PlayerVehicleContacts(VehicleSensorReadout* value) noexcept { if(value)*value=sceneSensor;return value && sceneSensorOn; }
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
 int sceneButtons=0;float sceneButton[mapbtn::kCount][4]{};int sceneButtonId[mapbtn::kCount]{};
 void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
@@ -439,7 +477,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     if(payload){sceneMapPayload.count=kMostPayload;sceneMapPayload.selectionToken=111;sceneMapPayload.seat=1;
         for(int i=0;i<kMostPayload;++i){auto& e=sceneMapPayload.entry[i];e.selectable=i>0 && i!=5;e.picked=i==2;e.rounds=12-i;e.capacity=12;
             _snwprintf_s(e.name,_countof(e.name),_TRUNCATE,L"%ls %ls %ls %d",Tr(Tx::wordWeapon),Tr(Tx::wordWeapon),Tr(Tx::wordWeapon),i+1);}}
-    sceneMap=MapReadout{};
+    sceneMap=MapReadout{};sceneMap.ownerHumanKey=passPlayerRefKey ? passPlayerRefKey : passPlayerSoldierKey;
     sceneMap.pad=pad;sceneMap.follow=true;
     sceneMap.yaw=yawDeg*kDeg;sceneMap.pitch=pitchDeg*kDeg;sceneMap.height=height;
     sceneMap.meDir[0]=std::sin(0.5f);sceneMap.meDir[2]=std::cos(0.5f);
@@ -781,7 +819,7 @@ int StatsScene(const std::wstring& dir,const wchar_t* name,dmgstat::Tab tab,dmgs
     else if(pickName){for(int i=0;i<sceneBook.sources;++i)if(dmgstat::SameName(sceneBook.source[i].name,pickName))pick=i;}
     sceneStatsView=dmgstat::View{};
     sceneStatsView.open=true;sceneStatsView.tab=tab;sceneStatsView.scope=scope;sceneStatsView.pick=pick;
-    sceneMap=MapReadout{};
+    sceneMap=MapReadout{};sceneMap.ownerHumanKey=passPlayerRefKey ? passPlayerRefKey : passPlayerSoldierKey;
     sceneMap.yaw=0.0f;sceneMap.pitch=60.0f*kDeg;sceneMap.height=700.0f;sceneMap.mapKey=0x4D;sceneMap.mapButton=0x20;
     sceneCmd=MapCommandReadout{};
     sceneCmd.pointer=px>=0.0f;sceneCmd.px=px;sceneCmd.py=py;

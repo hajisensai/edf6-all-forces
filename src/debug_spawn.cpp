@@ -1,11 +1,13 @@
 // The debug spawn tool (src/debug_spawn.h, docs/debug-spawn.md): ini DebugSpawn=1 (off by default), F8 opens a menu on the
-// HUD, F5 / F6 pick a row, F7 the next category, F9 spawns it where the crosshair points. Offline only.
+// HUD, F5 / F6 pick a row, F7 the next category, F9 spawns it where the crosshair points. Range enemies also use the reliable online transaction.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 //
 // Nothing of it runs while it is off: PreloadDebugSpawn returns before touching the preload manager, DebugSpawnFrame
 // before reading a key, DebugSpawnReadout has nothing to show. It patches nothing at all, on or off.
 #include "crew.h"
 #include "debug_spawn.h"
+#include "debug_spawn_net.h"
+#include "support_net.h"
 #include "memory.h"
 #include "online_authority.h"
 #include "support_call.h"
@@ -84,6 +86,25 @@ bool broken[kEntryCount]{};        // the game faulted making it: off until the 
 // This mission is the test range pack's (edf5campaign.cpp TestRangeMode at its start): the M map's 「摆放」 is on
 // (ini RangePlace), whatever DebugSpawn says.
 bool rangeMission=false;
+struct NetworkEnemy { std::uint64_t token=0;ObjRef ref{};int row=-1;bool activated=false; };
+NetworkEnemy networkEnemies[support_net::kMaxTransactions]{};
+bool submittingNetwork=false;
+std::uint32_t networkRequest=0;
+int networkRequestRow=-1;
+
+bool NetworkEnemyLive(const NetworkEnemy& e) noexcept {
+    // Weak control blocks are retained until transaction teardown: test the strong count before the actor pointer.
+    return e.ref.ctrl && At<LONG>(e.ref.ctrl,8)>0 && e.ref.Is(e.ref.obj) &&
+        !(At<unsigned char>(e.ref.obj,0x18)&4);
+}
+void ReleaseNetworkEnemy(NetworkEnemy& e) noexcept {
+    if(e.ref.ctrl) {
+        auto* ctrl=const_cast<unsigned char*>(static_cast<const unsigned char*>(e.ref.ctrl));
+        if(InterlockedDecrement(reinterpret_cast<volatile LONG*>(ctrl+0xC))==0)
+            reinterpret_cast<void(__fastcall*)(void*)>(At<void* const*>(ctrl,0)[1])(ctrl);
+    }
+    e={};
+}
 Menu menu{};
 bool held[5]{};                    // the keys' own state (Press)
 ULONGLONG lastFrame=0;
@@ -138,10 +159,23 @@ bool RowReady(int row) noexcept { return StateOf(row)==RowState::ready; }
 
 // A Mods row's files all there (Mods\OBJECT\): the list testrange/catalog.py files_of gives, the one catalog.available
 // checks for the range's own tools (src/spawn_catalog.inc). The first one that is not, or nullptr: every one is.
+bool ModRowFileThere(const wchar_t* file) noexcept {
+    const auto reference=ParseModFile(file);
+    if(!reference)return false;
+    wchar_t path[MAX_PATH];
+    const DWORD length=GetModuleFileNameW(nullptr,path,MAX_PATH);
+    wchar_t* const slash=length && length<MAX_PATH ? std::wcsrchr(path,L'\\') : nullptr;
+    if(!slash)return false;
+    *slash=0;
+    const wchar_t* directory=reference.directory==ModDirectory::weapon ? L"\\Mods\\WEAPON\\" : L"\\Mods\\OBJECT\\";
+    if(wcscat_s(path,directory)!=0 || wcscat_s(path,reference.name)!=0)return false;
+    const DWORD attributes=GetFileAttributesW(path);
+    return attributes!=INVALID_FILE_ATTRIBUTES && !(attributes&FILE_ATTRIBUTE_DIRECTORY);
+}
 const wchar_t* ModRowLacks(const Entry& e) noexcept {
     if(!e.files || !e.files[0])return L"?";   // a Mods row always lists its files (debug_spawn.h FilesAgree)
     for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1)
-        if(!jet::ModFileThere(f))return f;
+        if(!ModRowFileThere(f))return f;
     return nullptr;
 }
 
@@ -288,7 +322,17 @@ int MakeRow(int row,const float* at,const float* heading,const float* look,wchar
     const Entry& e=kEntries[row];
     if(noteOut && noteSize)noteOut[0]=0;
     if(InSession()) {
-        Say(kDebugSpawnOnline,row,nullptr,"%s: refused: online session (a local-only object would not exist on the other machines)",e.id);
+        if(e.how==How::enemy && RangePlaceOn() && StateOf(row)==RowState::ready) {
+            wchar_t note[160]{};
+            submittingNetwork=true;networkRequest=0;networkRequestRow=row;
+            const bool queued=SubmitSupportRequest(static_cast<int>(kNetworkCatalog),at,note,_countof(note),Descriptor(e));
+            submittingNetwork=false;
+            if(noteOut && noteSize)wcsncpy_s(noteOut,noteSize,note,_TRUNCATE);
+            Say(queued ? kDebugSpawnRequested : kDebugSpawnRefused,row,note,
+                "%s: online enemy request %s: waiting for host plan / all-peer native registration",e.id,queued ? "queued" : "refused");
+            return queued ? kDebugSpawnRequested : kDebugSpawnRefused;
+        }
+        Say(kDebugSpawnOnline,row,nullptr,"%s: refused: only preloaded range enemies have an online spawn transaction",e.id);
         return kDebugSpawnOnline;
     }
     alignas(16) float m[16];
@@ -351,6 +395,97 @@ void Spawn(int row,unsigned char* human) noexcept {
 }
 }  // namespace
 
+// The support session supplies authenticated participant admission, a world epoch, host-issued unique native IDs,
+// all-peer PREPARE validation, COMMIT results, ACTIVATE and cancel/timeout rollback. No object is made from a request.
+support_net::PlanResult PlanRangeEnemy(std::uint32_t catalog,const float* target,std::uint64_t descriptor,
+                                      support_net::Plan* out) noexcept {
+    if(catalog!=kNetworkCatalog || !OnlineHostOnly() || !InSession() || !RangePlaceOn() || !target || !out)
+        return support_net::PlanResult::refused;
+    const int row=NetworkRow(descriptor);
+    if(row<0 || StateOf(row)!=RowState::ready)return support_net::PlanResult::refused;
+    float ground[3]={target[0],target[1]-kEntries[row].lift,target[2]};
+    if(!std::isfinite(ground[0]+ground[1]+ground[2]) || !GroundUnder(ground))return support_net::PlanResult::refused;
+    ground[1]+=kEntries[row].lift;
+    const float heading[3]={0.0f,0.0f,1.0f};
+    alignas(16) float matrix[16];FacingMatrix(heading,ground,matrix);
+    return BuildNetworkPlan(row,matrix,out) ? support_net::PlanResult::ready : support_net::PlanResult::refused;
+}
+bool ValidateRangeEnemy(const support_net::Plan& plan) noexcept {
+    const int row=NetworkPlanRow(plan);
+    return InSession() && RangePlaceOn() && row>=0 && StateOf(row)==RowState::ready;
+}
+bool SpawnRangeEnemy(std::uint64_t token,const support_net::Plan& plan,bool remote) noexcept {
+    if(!token || !ValidateRangeEnemy(plan))return false;
+    const int row=NetworkPlanRow(plan);
+    NetworkEnemy* free=nullptr;
+    for(auto& e:networkEnemies) {
+        if(e.token==token)return e.row==row && NetworkEnemyLive(e); // idempotent COMMIT
+        if(!e.token && !free)free=&e;
+    }
+    if(!free)return false;
+    const char* why="";
+    auto* object=Create(row,plan.units[0].matrix,kGameObjectType,&why);
+    if(!object){Log("RANGE NET create failed row=%s: %s",kEntries[row].id,why);return false;}
+    __try {
+        const auto ctrl=At<unsigned char*>(object,kSelfCtrl);
+        if(!Readable(ctrl,16) || At<LONG>(ctrl,8)<=0) {
+            reinterpret_cast<DeleteFn>(image+kDelete)(object);return false;
+        }
+        InterlockedIncrement(reinterpret_cast<volatile LONG*>(ctrl+0xC));
+        *free={token,ObjRef::Of(object),row,false};
+        reinterpret_cast<SetTeamFn>(image+kSetTeam)(object,kTeamEnemy,true);
+        reinterpret_cast<SetLevelFn>(image+kSetLevel)(object,1.0f);
+        // Generic NetworkObject registration, exactly as native script objects: class-5 ID is generated once by the
+        // host, the same ID on each peer; native registration sets host/local vs guest/remote ownership itself.
+        if(At<std::int32_t>(object,kTeam)!=kTeamEnemy || !RegisterSupportObject(object,plan.units[0].netId)) {
+            DestroyRangeEnemy(token);return false;
+        }
+        Log("RANGE NET registered token=%llu row=%s remote=%d flags=%u; waiting for all-peer ACTIVATE",
+            static_cast<unsigned long long>(token),kEntries[row].id,remote,At<unsigned>(object,0x128)&3u);
+        return true;
+    } __except(SpawnFault(row,GetExceptionInformation())) {DestroyRangeEnemy(token);return false;}
+}
+void DestroyRangeEnemy(std::uint64_t token) noexcept {
+    if(!token)return;
+    for(auto& e:networkEnemies)if(e.token==token) {
+        __try {if(NetworkEnemyLive(e))reinterpret_cast<DeleteFn>(image+kDelete)(const_cast<void*>(e.ref.obj));}
+        __except(EXCEPTION_EXECUTE_HANDLER) {Log("RANGE NET rollback fault token=%llu",static_cast<unsigned long long>(token));}
+        ReleaseNetworkEnemy(e);return;
+    }
+}
+void ResetRangeEnemyNetwork() noexcept {
+    // Session::Stop has already rolled back its owned transactions; release any residual weak bookkeeping only.
+    for(auto& e:networkEnemies)ReleaseNetworkEnemy(e);
+    submittingNetwork=false;networkRequest=0;networkRequestRow=-1;
+}
+void RangeEnemyNetworkTick() noexcept {
+    for(auto& e:networkEnemies)if(e.token && !e.activated && SupportTransactionActive(e.token)) {
+        __try {
+            if(!NetworkEnemyLive(e)){ReportSupportFailure(e.token);continue;}
+            reinterpret_cast<ActivateFn>(image+kActivate)(const_cast<void*>(e.ref.obj));
+            e.activated=true;
+            Log("RANGE NET activated token=%llu row=%s (all peers registered)",
+                static_cast<unsigned long long>(e.token),kEntries[e.row].id);
+        } __except(SpawnFault(e.row,GetExceptionInformation())) {ReportSupportFailure(e.token);}
+    }
+}
+bool RangeEnemyRequestNotice(std::uint32_t request,support_net::RequestStatus status) noexcept {
+    if(submittingNetwork && status==support_net::RequestStatus::accepted)networkRequest=request;
+    if(!request || request!=networkRequest)return false;
+    const wchar_t* text=L"正在同步敌人生成请求";
+    int result=kDebugSpawnRequested;
+    switch(status) {
+    case support_net::RequestStatus::accepted:break;
+    case support_net::RequestStatus::active:text=L"全员已创建并登记敌人，已启用原生联机同步";result=kDebugSpawnDone;break;
+    case support_net::RequestStatus::refused:text=L"房主或成员拒绝生成（测试场、资源预载或版本不一致）";result=kDebugSpawnRefused;break;
+    case support_net::RequestStatus::timeout:text=L"成员生成确认超时，已取消并回滚本次敌人";result=kDebugSpawnFailed;break;
+    case support_net::RequestStatus::cancelled:text=L"成员生成失败，本次敌人已回滚";result=kDebugSpawnFailed;break;
+    case support_net::RequestStatus::interrupted:text=L"联机参与者或连接已变化，本次生成中断";result=kDebugSpawnFailed;break;
+    }
+    Say(result,networkRequestRow,text,"online request=%u status=%u",request,static_cast<unsigned>(status));
+    return true;
+}
+
 // Which object rows this mission preloads: in the test range (the M map's 「摆放」, `range`) every row there is (a Mods
 // row whose SGO is in Mods), the heavy ones (Entry::preload false: another 17 MB model each) only with RangePlaceAll=1;
 // elsewhere (the debug spawn tool alone, DebugSpawn=1) the stock rows only, as before the range's rows came in: a Mods
@@ -371,8 +506,9 @@ void PreloadDebugSpawn() noexcept {
     ReleaseSRWLockExclusive(&cueLock);
     const Config& c=Cfg();
     rangeMission=c.enabled && TestRangeMode();
-    // Online the range's 「摆放」 refuses (MakeRow): nothing preloaded for it there.
-    const bool range=rangeMission && c.rangePlace && !InSession();
+    // Preload on every peer before the mission's native WaitPreload. An online enemy is created only after every
+    // participant validates this same descriptor/resource and ACKs the host's plan.
+    const bool range=rangeMission && c.rangePlace;
     if(!c.enabled || (!c.debugSpawn && !range))return;   // off: nothing preloaded, nothing touched
     if(!profileChecked){profileChecked=true;profile=CheckProfile();}
     if(!profile)return;
@@ -380,7 +516,7 @@ void PreloadDebugSpawn() noexcept {
     for(int i=0;i<kEntryCount;++i) {
         const wchar_t* const lacks=kEntries[i].mod ? ModRowLacks(kEntries[i]) : nullptr;
         missing[i]=lacks!=nullptr;
-        if(lacks && ++lacking<=8)Log("DEBUGSPAWN %s: not installed (Mods\\OBJECT\\%ls missing)",kEntries[i].id,lacks);
+        if(lacks && ++lacking<=8)Log("DEBUGSPAWN %s: not installed (required Mods file %ls missing)",kEntries[i].id,lacks);
     }
     int vehicles=0,enemies=0,absent=0;
     __try {
@@ -389,6 +525,7 @@ void PreloadDebugSpawn() noexcept {
         if(!mgr || !missionMgr)return;
         for(int i=0;i<kEntryCount;++i) {
             if(!PreloadsRow(kEntries[i],range) || broken[i])continue;
+            if(InSession() && range && kEntries[i].how!=How::enemy)continue;
             if(missing[i]){++absent;continue;}   // not installed: a missing SGO is never handed to the preload
             reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEntries[i].sgo,2,-1);
             preloaded[i]=true;
@@ -407,7 +544,7 @@ void PreloadDebugSpawn() noexcept {
 bool RangePlaceOn() noexcept { return rangeMission && Cfg().enabled && Cfg().rangePlace; }
 
 RowState SpawnRowState(int row) noexcept {
-    if(InSession())return RowState::online;
+    if(InSession() && (!RangePlaceOn() || row<0 || row>=kEntryCount || kEntries[row].how!=How::enemy))return RowState::online;
     return StateOf(row);
 }
 
@@ -452,7 +589,7 @@ void DebugSpawnFrame(unsigned char* human) noexcept {
 }
 
 bool DebugSpawnReadout(DebugSpawnCue* out) noexcept {
-    if(!Cfg().debugSpawn)return false;
+    if(!Cfg().debugSpawn && !rangeMission)return false;
     AcquireSRWLockShared(&cueLock);
     *out=cue;
     const bool status=statusAt && GetTickCount64()-statusAt<=kStatusMs;

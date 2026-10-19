@@ -20,6 +20,23 @@ int SubCarriers(SubView* out,int max) noexcept;
 bool SubSpot(const ObjRef& sub,float along,float over,float* out) noexcept;
 // Straight down (world -y) from `p` to carrier `sub`'s deck plane, into `out` (at least 5 m, at most 1 km down).
 bool SubDeckUnder(const ObjRef& sub,const float* p,float* out) noexcept;
+// Nearest actual deck point of this exact carrier (for callers filtering by native enemy relations).
+bool SubDeckFor(const ObjRef& sub,const float* from,float* out) noexcept;
+// Exact-plan support transaction. Planning alone chooses the water entry; Prepare creates an inert EMPTY hull.
+// Only an authority's real seated driver or a registered remote copy may activate after all-peer acknowledgement.
+bool PlanSupportSubmarine(const float* target,const float* from,float* matrix,float* afloatY) noexcept;
+bool ValidateSupportSubmarine(const float* matrix,float afloatY) noexcept;
+unsigned char* PrepareSupportSubmarine(const float* matrix,float afloatY) noexcept;
+bool ActivateSupportSubmarine(const ObjRef& ref) noexcept;
+bool DeleteSupportSubmarine(const ObjRef& ref) noexcept;
+// Dispatcher binds only its strictly validated canonical requester before activation.
+bool BindSupportSubmarineOwner(const ObjRef& ref,const unsigned char owner[32]) noexcept;
+std::uint64_t SubmarineSupportKey(const ObjRef& ref) noexcept;
+bool ResolveSupportSubmarine(std::uint64_t parentHash,ObjRef* out) noexcept;
+bool AddSupportSubmarineDrone(const ObjRef& parent,const ObjRef& child) noexcept;
+// Implemented by the support dispatcher: one host-authorized child transaction, all-peer spawn/ACK/activation.
+bool SubmitSubmarineDrone(const ObjRef& parent,const float* from,const float* nose,const float* anchor,
+                          const unsigned char owner[32]) noexcept;
 // The follower gauge's redirect (the carriers' gauges and panels, and hud.cpp's vehicle HUD drawn from it): only the
 // draw's own code is checked, nothing of the carrier's profile. At load, once.
 bool InstallGauge() noexcept;

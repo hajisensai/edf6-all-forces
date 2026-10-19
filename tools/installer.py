@@ -264,6 +264,23 @@ def player_ini_text(game: str, shipped_ini: bytes) -> str:
     return planned_ini(raw.decode('utf-8', errors='replace'), shipped)[0]
 
 
+def material_compat_wanted(ini_text: str) -> bool:
+    """Install-time EDF4.1 material conversion; absent/invalid keeps the shipped default on.
+
+    Read the same effective (first) key and case-insensitive section used by the INI merger. An explicit zero in the
+    player's planned INI restores EDF6's unmodified same-name shaders on the next installation.
+    """
+    lines = ini_text.lstrip('\ufeff').splitlines()
+    at = _keys(lines).get('edf41materialcompatibility')
+    if at is None:
+        return True
+    value = lines[at].partition('=')[2].partition(';')[0].strip()
+    try:
+        return int(value, 0) != 0
+    except ValueError:
+        return True
+
+
 def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN, section: str = SECTION) -> None:
     dst = os.path.join(game, 'Mods', 'Plugins')
     modfiles.atomic_write(os.path.join(dst, name + '.dll'), dll)
@@ -469,6 +486,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_drill
     import make_edf5_campaign
     import make_emc
+    import make_vulcan
+    import make_bmpt
     import make_chute
     import make_jets
     import edf41_objects
@@ -489,7 +508,9 @@ def install(game: str, campaign_requested: bool = False) -> None:
     rootcpk.use(game)
     check_loader(game)
     plugins = plugin_files()
-    stock_stores = make_stock_stores.wanted(player_ini_text(game, plugins[PLUGIN][1]))
+    planned = player_ini_text(game, plugins[PLUGIN][1])
+    stock_stores = make_stock_stores.wanted(planned)
+    material_compat = material_compat_wanted(planned)
     if call_weapons.recover(game):
         print('上次运行没有完成：已把武器表相关文件恢复到那次运行之前。')
     print('检查武器表并生成呼叫武器（只读 Root.cpk 与现有武器表）……')
@@ -511,6 +532,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     chute = build_asset(cache, make_chute, '降落伞')
     drill = build_asset(cache, make_drill, '钻头战车')
     emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
+    vulcan = build_asset(cache, make_vulcan, 'M163 火神炮车（HE / AP 双弹链）')
+    bmpt = build_asset(cache, make_bmpt, 'BMPT（双 30 mm 机炮与反坦克导弹）')
     stock = None
     if stock_stores:
         print('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……')
@@ -543,6 +566,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_chute.install(game, chute) if chute is not None else []) + \
             (make_drill.install(game, drill) if drill is not None else []) + \
             (make_emc.install(game, emc) if emc is not None else []) + \
+            (make_vulcan.install(game, vulcan) if vulcan is not None else []) + \
+            (make_bmpt.install(game, bmpt) if bmpt is not None else []) + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
             (make_sedan.install(game, sedan) if sedan is not None else []) + \
             (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
@@ -562,13 +587,13 @@ def install(game: str, campaign_requested: bool = False) -> None:
     # After the weapons: a model both ship (EDF5's Blacker No.4.1, the 4.1 AI tank's look) is shared only once the
     # weapons' install has recorded it in the ledger; built before, a first upgrade from a version whose weapons
     # recorded it in their own manifest only would leave the 4.1 tank out (2026-10-12, real install).
-    objects41, skipped41 = edf41_objects.build(game)
+    objects41, skipped41 = edf41_objects.build(game, material_compat=material_compat)
     print(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {len(edf41_objects.registry()["objects"])} 种，'
           '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……')
     for obj, why in skipped41:
         print('  跳过', obj, why)
     edf41_objects.install(game, objects41)
-    outfits41, skipped_outfits = edf41_outfits.build(game)
+    outfits41, skipped_outfits = edf41_outfits.build(game, material_compat=material_compat)
     print('写入 EDF4.1 外观（游骑兵、空降兵、飞翼、剑兵各一套，作为新增外观；预先转换好，不需要装 4.1；'
           f'不替换任何原版文件，在战前外观菜单里选「{edf41_outfits.ITEM_ZH}」才使用；'
           'EDF4.1 任务包里外观为「配合任务」或外观更改未解锁时默认使用）……')
@@ -587,7 +612,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     print(f'转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从{edf41src.describe(root41)}转换，16 张地图按空闲内存'
           '分几个进程同时转换，共约 0.5–2 分钟，已转换且未变的跳过）……' if root41
           else f'{edf41src.describe(root41)}：跳过 4.1 地图（4.1 本篇任务包需要它）。')
-    written41, skipped_maps = edf41_maps.install(game, root41)
+    written41, skipped_maps = edf41_maps.install(game, root41, material_compat=material_compat)
     for name, why in skipped_maps:
         print('  跳过', name, why)
     # The pack's rows may name only what is on disk now: objects and maps left out (a shared file's owner only known
@@ -640,7 +665,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('vulcan', vulcan), ('bmpt', bmpt), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -713,6 +738,8 @@ def uninstall(game: str) -> None:
     import make_bigmap
     import make_drill
     import make_emc
+    import make_vulcan
+    import make_bmpt
     import make_chute
     import make_jets
     import edf41_objects
@@ -753,7 +780,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sedan.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sedan.remove, make_sidecar.remove, make_vulcan.remove, make_bmpt.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -1209,6 +1236,18 @@ def check_package() -> int:
                for text in cockpit_instruments.LABELS[key] for ch in text)
     assert make_sedan.FIT == cockpit_fits.FITS['EDF6VC_SEDAN']
     assert make_sedan.OWNER in ledger.OWNERS
+    import buildcache
+    import make_tracked_combat
+    importlib.import_module('tracked_collision')
+    for kind in ('vulcan', 'bmpt'):
+        builder = importlib.import_module('make_' + kind)
+        model = make_tracked_combat.model_module(kind)
+        assert builder.OWNER == kind and kind in ledger.OWNERS and kind in buildcache.GROUPS
+        assert callable(builder.build) and callable(builder.install) and callable(builder.remove)
+        assert callable(model.build) and callable(model.check) and model.OUT_ARC.startswith('EDF6VC_')
+    materials = importlib.import_module('edf41_materials')
+    importlib.import_module('edf41materials')
+    assert callable(materials.apply)
     importlib.import_module('PIL.DdsImagePlugin')   # the city sedan's BC7 glass decoder
     import texfile
     import texfile_accel

@@ -32,18 +32,44 @@ void Names() {
         Expect(seen.insert(s).second,"every name unique");
         Expect(s[0]==L'v' && s[1]==L'c',"every name starts vc");
     };
-    for(const wchar_t* s:{kRootName,kBackName,kHeadName,kHintName})add(s);
+    for(const wchar_t* s:{kRootName,kBackName,kHeadName,kHintName,kHelp2Name,kHelp3Name,kEntryName})add(s);
     for(int i=0;i<kRows;++i) {
         Expect(UnitName(i,n),"unit name");add(n);
         for(Part p:{Part::box,Part::text,Part::primary,Part::secondary,Part::icon,Part::note}){Expect(RowName(i,p,n),"row name");add(n);}
     }
     for(int i=0;i<kStatusLines;++i){Expect(StatusName(i,n),"status name");add(n);}
     Expect(UnitName(3,n) && Same(n,L"vcU03"),"vcU03");
-    Expect(RowName(12,Part::secondary,n) && Same(n,L"vcR12B"),"vcR12B");
+    Expect(RowName(11,Part::secondary,n) && Same(n,L"vcR11B"),"vcR11B");
     Expect(RowName(0,Part::box,n) && Same(n,L"vcR00"),"vcR00");
     Expect(StatusName(2,n) && Same(n,L"vcS2"),"vcS2");
     Expect(!UnitName(kRows,n) && !RowName(kRows,Part::text,n) && !StatusName(kStatusLines,n),"no name past the layout");
-    Expect(seen.size()==4u+static_cast<std::size_t>(kRows)*7u+kStatusLines,"element count");
+    Expect(seen.size()==7u+static_cast<std::size_t>(kRows)*7u+kStatusLines,"element count");
+}
+
+void NativeButton() {
+    NativeEntry e;
+    NativeEntryInput(e,true);
+    Expect(!e.enabled && !NativeEntryClick(e,true),"an uncreated native button cannot open the menu");
+    e.ready=true;
+    NativeEntryInput(e,true);
+    Expect(!NativeEntryClick(e,false) && !TakeNativeEntry(e,true),"another screen cannot request this screen's menu");
+    Expect(NativeEntryClick(e,true) && !NativeEntryClick(e,true),"native Click queues at most one open during dispatch");
+    Expect(TakeNativeEntry(e,true) && !TakeNativeEntry(e,true),"the UI consumes the native action exactly once after dispatch");
+    Expect(NativeEntryClick(e,true),"next independent Click can queue");
+    NativeEntryInput(e,false);
+    Expect(!e.requested && !TakeNativeEntry(e,true) && !NativeEntryClick(e,true),"covered, disabled or closing input drops a pending action");
+    NativeEntryInput(e,true);
+    Expect(NativeEntryClick(e,true) && !TakeNativeEntry(e,false) && !TakeNativeEntry(e,true),"screen destruction/replacement discards an already queued action");
+    e=NativeEntry{};
+    Expect(!e.ready && !e.enabled && !e.attempted,"a new screen at a reused address has no inherited button state");
+    roommenu::Menu m;
+    Keys click;click.toggle=true;
+    Expect(roommenu::Step(m,click)==roommenu::Act::opened && m.open && m.level==roommenu::Level::units,
+           "native activation opens the same unit page as the hotkey");
+    Keys heldConfirm;heldConfirm.confirm=true;
+    const auto press=roommenu::Presses(heldConfirm,heldConfirm);
+    Expect(roommenu::Step(m,press)==roommenu::Act::none && m.level==roommenu::Level::units,
+           "the native activation's held confirm does not enter a loadout row");
 }
 
 void Input() {
@@ -84,6 +110,12 @@ void Input() {
     PadComboName(0x00C0,name,32);Expect(Same(name,L"L3+R3"),"combo name L3+R3");
     PadComboName(static_cast<std::uint16_t>(kPadBack|kPadY),name,32);Expect(Same(name,L"Back+Y"),"combo name Back+Y");
     PadComboName(0,name,32);Expect(!name[0],"no combo: no name");
+    Expect(PadToggleAvailable(true,0x00C0) && PadToggleAvailable(true,0x0180),"default and custom pad bindings available");
+    Expect(!PadToggleAvailable(false,0x00C0) && !PadToggleAvailable(true,0) && !PadToggleAvailable(true,0x0400) &&
+           !PadToggleAvailable(true,0x04C0),"missing pad, disabled and unreadable bits never advertised as usable");
+    wchar_t allButtons[96];
+    PadComboName(kPadKnownBits,allButtons,96);
+    Expect(Has(allButtons,L"LB+RB+L3+R3+Back+Start+A+B+X+Y+Up+Down+Left+Right"),"even the full supported custom chord is named without truncation");
     PadComboName(0xFFFF,name,8);Expect(std::wcslen(name)<8,"a long combination cut to the buffer");
 }
 
@@ -129,11 +161,17 @@ void GateAndPlan() {
     Expect(!TakeInput(g,false,false),"released: the room reads again");
     Expect(!TakeInput(g,false,true),"a later press after release: the room's");
     Plan p=PlanFrame(true,true);
-    Expect(p.step && p.show,"input, open: stepped and shown");
+    Expect(p.step && p.show && !p.entry,"input, open: stepped and shown, no closed-page entry");
     p=PlanFrame(false,true);
-    Expect(!p.step && !p.show,"covered: hidden and frozen");
+    Expect(!p.step && !p.show && !p.entry,"covered: hidden and frozen, no entry");
     p=PlanFrame(true,false);
-    Expect(p.step && !p.show,"shut: stepped (the toggle), not shown");
+    Expect(p.step && !p.show && p.entry,"shut: stepped (the toggle), entry visible before the player knows the key");
+    p=PlanFrame(true,false,false);
+    Expect(!p.entry,"unbound toggle: no unavailable entry advertised");
+    p=PlanFrame(true,false,true,false);
+    Expect(!p.entry,"closing key held: entry waits for the input gate to release");
+    p=PlanFrame(false,false);
+    Expect(!p.entry,"covered closed page: no entry over a native sub-window");
     // A whole close sequence through the menu: Esc on the unit list closes, the room gets nothing while Esc is held.
     roommenu::Menu m;Gate gate;Keys held{};
     Raw r;r.foreground=true;r.toggleKey=true;
@@ -235,6 +273,21 @@ void Texts() {
         NoteLine(r,out,kLineMost);Expect(Same(out,L"x4"),"rounds note");
         r.editing=true;r.field=1;NoteLine(r,out,kLineMost);Expect(Has(out,L"x4") && Has(out,L"<"),"editing rounds");
         HintLine(L"F2",out,kLineMost);Expect(Has(out,L"F2"),"hint names the toggle");
+        EntryLine(L"F7 / LB+R3",out,kLineMost);
+        Expect(Has(out,L"F7 / LB+R3"),"closed-page entry uses the configured keys");
+        for(auto level:{roommenu::Level::units,roommenu::Level::rows,roommenu::Level::fields}) {
+            HelpLine(level,0,L"F7",out,kLineMost);
+            Expect(Same(out,hudtext::Tr(level==roommenu::Level::fields ? Tx::roomHintFields : Tx::roomHintNavigate)),
+                   "first help line matches this menu level");
+            HelpLine(level,1,L"F7",out,kLineMost);
+            Expect(Same(out,hudtext::Tr(level==roommenu::Level::units ? Tx::roomHintSave :
+                                      level==roommenu::Level::rows ? Tx::roomHintTools : Tx::roomHintFinish)),
+                   "second help line offers this level's action");
+            HelpLine(level,2,L"F7",out,kLineMost);
+            Expect(Has(out,L"F7"),"closing help uses the configured key");
+        }
+        HelpLine(roommenu::Level::units,3,L"F7",out,kLineMost);
+        Expect(!out[0],"no fourth help line");
         GenerateStatus s;s.state=GenerateState::failed;wcscpy_s(s.message,L"boom");
         Expect(GenerateLine(s,out,kLineMost) && Has(out,L"boom"),"generator failure with its message");
         s.state=GenerateState::idle;Expect(!GenerateLine(s,out,kLineMost) && !out[0],"idle: no line");
@@ -479,6 +532,7 @@ void Save() {
 
 int main() {
     Names();
+    NativeButton();
     Input();
     PadTable();
     Colours();

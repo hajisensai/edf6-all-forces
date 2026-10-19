@@ -18,6 +18,7 @@
 // Nothing is patched unless every address checks out (REFUSED in the log: both screens as they are). The slots are read
 // and chained, never assumed stock: EDF6Coop chains the room's too.
 #include "room_ui.h"
+#include "pvp.h"
 #include "outfit41.h"
 #include "crew.h"
 #include "hud.h"
@@ -62,6 +63,12 @@ constexpr std::size_t kTint=0xF0,kTintFrom=0x100;   // Skin_Texture: RGBA float4
 constexpr std::size_t kTextFont=0x228;      // HUiTextField: SetText returns at once while it is null (0x863690)
 constexpr std::size_t kFontColour=0x2B0;    // HUiTextField: font colour RGBA float4 (0x8BC68C; drawn by 0x7F890C)
 constexpr std::size_t kCtxSize=0x18,kCtxInput=0x8;
+// The stock HQ appends menu buttons through this exact AddByName path; the new definition is not in layout_tree.
+constexpr unsigned kCreateButton=0x8456D0,kScreenWeak=0x811FC0,kMakeClick=0x8FB930,kAddAction=0x7EAA40,kLockWeak=0x83E4F0,kSetButtonText=0x7F8BB0;
+constexpr unsigned kEnableComponent=0x7EE280,kHasFocus=0x7EBDB0,kFocusComponent=0x7EB360;
+constexpr std::size_t kComponentEnabled=0x70; // native nav's current state; +71 is the public setter's pending state
+constexpr std::size_t kButtonLabel=0x220;   // HUiButton's native weak_ptr<ui::TextField> (0x83B96A / 0x83B97C)
+constexpr const wchar_t* kNativeEntryName=L"vcLoad";
 constexpr unsigned kPadTable=0x2136530;     // two slots of a pointer per pad channel (0x1188315)
 
 struct Sig { unsigned rva; const unsigned char* bytes; std::size_t size; };
@@ -90,6 +97,28 @@ const Sig kDrawSigs[]={{kGetInput,kGetInputSig,sizeof(kGetInputSig)},{kFindIndex
     {0x7F707F,kTintFromSig,sizeof(kTintFromSig)},{0x7F70FC,kTintSig,sizeof(kTintSig)},{0x7F5CD2,kTintInitSig,sizeof(kTintInitSig)},
     {0x8BC68C,kFontColourSig,sizeof(kFontColourSig)},
     {0x7F890C,kFontDrawSig,sizeof(kFontDrawSig)},{0x7E999C,kShowSig,sizeof(kShowSig)}};
+// These contracts are independent of the hotkey overlay: a refused native entry keeps the existing menu usable.
+const unsigned char kCreateButtonSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C};
+const unsigned char kScreenWeakSig[]={0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x4C,0x8B,0x41,0x10,0x48,0x8B};
+const unsigned char kMakeClickSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C,0x24,0x20,0x48,0x89,0x54,0x24,0x10,0x56};
+const unsigned char kAddActionSig[]={0x48,0x89,0x5C,0x24,0x20,0x55,0x56,0x57,0x48,0x83,0xEC,0x60,0x48,0x8B,0x05,0x05};
+const unsigned char kLockWeakSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x30,0x48};
+const unsigned char kSetButtonTextSig[]={0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x74,0x24,0x20,0x55,0x57,0x41,0x54,0x41,0x56};
+const unsigned char kEnableComponentSig[]={0x88,0x51,0x71,0xC3};
+const unsigned char kHasFocusSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0x48,0x8B,0x89,0x88,0x00,0x00,0x00};
+const unsigned char kFocusComponentSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x55,0x57,0x41,0x56,0x48,0x8D};
+const unsigned char kFocusEnabledSig[]={0x41,0x80,0x79,0x70,0x00}; // 0x7F02D9: native next-focus candidate eligibility
+const unsigned char kButtonLabelControlSig[]={0x4C,0x8B,0x81,0x28,0x02,0x00,0x00};
+const unsigned char kButtonLabelObjectSig[]={0x48,0x8B,0xB9,0x20,0x02,0x00,0x00};
+const unsigned char kClickInvokeSig[]={0x48,0x63,0x4D,0x20,0x49,0x8B,0xD6,0x48,0x03,0xCE,0xFF,0x55,0x18};
+const Sig kNativeMenuSigs[]={{kCreateButton,kCreateButtonSig,sizeof(kCreateButtonSig)},
+    {kScreenWeak,kScreenWeakSig,sizeof(kScreenWeakSig)},{kMakeClick,kMakeClickSig,sizeof(kMakeClickSig)},
+    {kAddAction,kAddActionSig,sizeof(kAddActionSig)},{kLockWeak,kLockWeakSig,sizeof(kLockWeakSig)},
+    {kSetButtonText,kSetButtonTextSig,sizeof(kSetButtonTextSig)},
+    {kEnableComponent,kEnableComponentSig,sizeof(kEnableComponentSig)},{kHasFocus,kHasFocusSig,sizeof(kHasFocusSig)},
+    {kFocusComponent,kFocusComponentSig,sizeof(kFocusComponentSig)},{0x7F02D9,kFocusEnabledSig,sizeof(kFocusEnabledSig)},
+    {0x83B96A,kButtonLabelControlSig,sizeof(kButtonLabelControlSig)},
+    {0x83B97C,kButtonLabelObjectSig,sizeof(kButtonLabelObjectSig)},{0x8F8AC9,kClickInvokeSig,sizeof(kClickInvokeSig)}};
 // The screens' own OnUpdates (whatever their slots hold now, these are what the game put there).
 const unsigned char kRoomUpdateSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56};
 // push rbx; sub rsp,30h; mov rbx,rcx; call 0x84B490 (HUiLayout's update: focus, cancel, buttons)
@@ -145,16 +174,29 @@ using SetTextFn=void(__fastcall*)(void*,const wchar_t*);
 using FindFn=Shared*(__fastcall*)(unsigned char*,Shared*,const WideString*);
 using TextureSkinFn=Shared*(__fastcall*)(Shared*,Shared*);
 using SetTextureFn=bool(__fastcall*)(void*,const WideString*);
+using CreateButtonFn=Shared*(__fastcall*)(unsigned char*,Shared*,Shared*,const wchar_t*);
+using ScreenWeakFn=Shared*(__fastcall*)(unsigned char*,Shared*);
+using NativeClickFn=void(__fastcall*)(unsigned char*,void*);
+struct MemberClick { NativeClickFn call; std::int32_t adjust; std::uint32_t padding; };
+static_assert(sizeof(MemberClick)==16,"the native callback copies one MSVC member function pointer");
+using MakeClickFn=Shared*(__fastcall*)(Shared*,Shared*,const MemberClick*);
+using AddActionFn=void(__fastcall*)(void*,const wchar_t*,const Shared*);
+using LockWeakFn=Shared*(__fastcall*)(Shared*,const Shared*);
+using SetButtonTextFn=void(__fastcall*)(void*,const wchar_t*,const void*);
+using EnableComponentFn=void(__fastcall*)(void*,bool);
+using HasFocusFn=bool(__fastcall*)(void*);
+using FocusComponentFn=void(__fastcall*)(void*,bool);
 
 struct Screen { const char* name; unsigned slot,stock,goneSlot,goneStock; bool room; UpdateFn next; GoneFn gone; bool ok; };
 Screen screens[2]={{"room",kRoomSlot,kRoomUpdate,kRoomGoneSlot,kRoomGone,true,nullptr,nullptr,false},
                    {"hq",kHqSlot,kHqUpdate,kHqGoneSlot,kHqGone,false,nullptr,nullptr,false}};
+bool nativeEntryOk=false;
 bool padOk=false;   // the game's pad table checked (else the keyboard alone)
 
 // What was last written into each element of the screen now (the calls reload a texture / re-lay a text: only when it
 // changes). Invalid when the screen object changes and when the menu opens: everything written afresh.
-enum Slot : int { kSlotRoot, kSlotHead, kSlotHint, kSlotUnit, kSlotBox=kSlotUnit+kRows, kSlotText=kSlotBox+kRows,
-                  kSlotNote=kSlotText+kRows, kSlotStatus=kSlotNote+kRows, kSlotCount=kSlotStatus+kStatusLines };
+enum Slot : int { kSlotRoot, kSlotHead, kSlotHint, kSlotHelp2, kSlotHelp3, kSlotEntry, kSlotUnit, kSlotBox=kSlotUnit+kRows, kSlotText=kSlotBox+kRows,
+                  kSlotNote=kSlotText+kRows, kSlotStatus=kSlotNote+kRows, kSlotNativeDesc=kSlotStatus+kStatusLines, kSlotCount };
 enum class RootState : std::uint8_t { unknown, found, missing };
 // The texture-skinned elements: the panel, each row's two chips and its icon.
 enum TexSlot : int { kTexBack, kTexChip, kTexIcon=kTexChip+2*kRows, kTexCount=kTexIcon+kRows };
@@ -172,6 +214,9 @@ struct State {
     bool room=false;
     rm::Menu menu{};
     rm::Keys held{};
+    NativeEntry nativeEntry{};
+    const wchar_t* nativeLabel=nullptr;
+    bool nativeFocused=false;
     Gate gate{};
     bool previewShown=false;
     roompreview::PreviewSpec preview{};
@@ -233,9 +278,14 @@ void ToggleName(wchar_t* out,int size) noexcept {
         const UINT scan=MapVirtualKeyW(static_cast<UINT>(vk),MAPVK_VK_TO_VSC);
         if(!scan || GetKeyNameTextW(static_cast<LONG>(scan<<16),out,size)<=0)_snwprintf_s(out,static_cast<std::size_t>(size),_TRUNCATE,L"0x%X",vk);
     }
-    wchar_t pad[48];
-    PadComboName(static_cast<std::uint16_t>(Cfg().roomLoadoutButton),pad,std::size(pad));
+    wchar_t pad[96];
+    const auto combo=static_cast<std::uint16_t>(Cfg().roomLoadoutButton);
+    PadComboName(PadToggleAvailable(padOk,combo) ? combo : 0,pad,std::size(pad));
     if(pad[0]){const std::size_t used=std::wcslen(out);_snwprintf_s(out+used,static_cast<std::size_t>(size)-used,_TRUNCATE,L"%ls%ls",used ? L" / " : L"",pad);}
+}
+
+bool ToggleAvailable() noexcept {
+    return Cfg().roomLoadoutKey>0 || PadToggleAvailable(padOk,static_cast<std::uint16_t>(Cfg().roomLoadoutButton));
 }
 
 // --- Reading the ini (room_menu.h IniRead) ---
@@ -324,11 +374,18 @@ void Act(rm::Act a) noexcept {
 
 // --- The screen object changed (another room, the HQ, a new instance, one ended by its destructor): its menu goes ---
 // The old object is never touched (it may be gone): nothing drawn is taken back from it.
-void Forget() noexcept {
+// MissionStart drops mission/menu state but does not prove the native room object died: online rooms can be retained.
+// Keep its native button/action identity until Follow observes a different object or its chained destructor.
+void ForgetMenu() noexcept {
     HidePreview();
     if(st.menu.open)rm::Discard(st.menu);
     if(LeaveOnForget(st.switches))roomsync::LeaveRoomSync();
-    st.self=nullptr;st.gate=Gate{};st.missingLogged=false;st.written.valid=false;st.drew=false;
+    NativeEntryInput(st.nativeEntry,false);
+    st.gate=Gate{};st.missingLogged=false;st.written.valid=false;st.drew=false;
+}
+void Forget() noexcept {
+    ForgetMenu();
+    st.self=nullptr;st.nativeEntry=NativeEntry{};st.nativeLabel=nullptr;st.nativeFocused=false;
     followed.store(nullptr);
     followedGone.store(false);
 }
@@ -389,6 +446,100 @@ bool SetShown(unsigned char* self,const wchar_t* name,bool shown) noexcept {
     if(found)Show(c.object,shown);
     Release(c);
     return found;
+}
+// Called by the game's own weak-screen member callback, after native Button mouse/keyboard/pad activation.
+// Only queue here: changing the preview/menu while Component::Click is traversing its action list would be reentrant.
+void __fastcall NativeEntryClicked(unsigned char* self,void*) noexcept {
+    const bool current=self==st.self && followed.load()==self && !followedGone.load() &&
+                       Cfg().enabled && Cfg().roomLoadout && !st.menu.open;
+    NativeEntryClick(st.nativeEntry,current);
+}
+void __fastcall NativeEntryFocused(unsigned char* self,void*) noexcept {
+    if(self==st.self && followed.load()==self && !followedGone.load()) {
+        st.nativeFocused=true;
+        st.written.key[kSlotNativeDesc]=~0ull;
+    }
+}
+void __fastcall NativeEntryUnfocused(unsigned char* self,void*) noexcept {
+    if(self==st.self && followed.load()==self && !followedGone.load())st.nativeFocused=false;
+}
+bool BindNativeEntryAction(unsigned char* self,void* button,const wchar_t* event,NativeClickFn callback) noexcept {
+    Shared weak{},action{};
+    reinterpret_cast<ScreenWeakFn>(image+kScreenWeak)(self,&weak);
+    if(!weak.control)return false;
+    const MemberClick member{callback,0,0};
+    reinterpret_cast<MakeClickFn>(image+kMakeClick)(&action,&weak,&member); // consumes weak, owns native weak lifetime
+    const bool bound=action.object && action.control;
+    if(bound)reinterpret_cast<AddActionFn>(image+kAddAction)(button,event,&action); // copies, does not consume
+    Release(action);
+    return bound;
+}
+void MoveNativeEntryFocus(unsigned char* self) noexcept {
+    const wchar_t* names[2]={st.room ? L"Button_Mission" : L"ButtonGotoSelectMission",
+                             st.room ? L"Button_Exit" : L"ButtonGotoTitle"};
+    for(const wchar_t* name:names) {
+        Shared target=Find(self,name);
+        const bool enabled=target.object && target.control && static_cast<const unsigned char*>(target.object)[kComponentEnabled];
+        if(enabled)reinterpret_cast<FocusComponentFn>(image+kFocusComponent)(target.object,true);
+        Release(target);
+        if(enabled)return;
+    }
+}
+void NativeEntryVisible(unsigned char* self,void* button,bool visible) noexcept {
+    reinterpret_cast<EnableComponentFn>(image+kEnableComponent)(button,visible);
+    if(!visible) {
+        // Parent navigation precedes its children's pending->current update. Commit *our* button's disable now:
+        // otherwise a hidden entry can still be selected for one frame. Showing uses the native transition path.
+        static_cast<unsigned char*>(button)[kComponentEnabled]=0;
+        if(reinterpret_cast<HasFocusFn>(image+kHasFocus)(button))MoveNativeEntryFocus(self);
+    }
+    Show(button,visible);
+}
+void EnsureNativeEntry(unsigned char* self) noexcept {
+    if(st.nativeEntry.attempted || !nativeEntryOk)return;
+    st.nativeEntry.attempted=true;
+    // Old/foreign layouts can keep using the hotkey. Never create a button outside our installed layout contract.
+    Shared root=Find(self,kRootName);
+    const bool installed=root.object!=nullptr;
+    Release(root);
+    if(!installed)return;
+    Shared parent=Find(self,st.room ? L"ButtonsGroup" : L"LeftButtonsBase2");
+    if(!parent.object || !parent.control){Release(parent);return;}
+    InterlockedIncrement(&parent.control->uses);
+    Shared parentCopy=parent,button{};
+    reinterpret_cast<CreateButtonFn>(image+kCreateButton)(self,&button,&parentCopy,kNativeEntryName); // consumes copy
+    Release(parent);
+    if(!button.object || !button.control){Release(button);Log("ROOMUI native entry absent: reinstall layouts; hotkey remains available");return;}
+    // Disable before binding too: a failed weak/action allocation must never leave a hidden focusable Button behind.
+    NativeEntryVisible(self,button.object,false);
+    st.nativeEntry.ready=BindNativeEntryAction(self,button.object,L"Click",&NativeEntryClicked);
+    if(st.nativeEntry.ready) {
+        BindNativeEntryAction(self,button.object,L"focus",&NativeEntryFocused);
+        BindNativeEntryAction(self,button.object,L"kill_focus",&NativeEntryUnfocused);
+    }
+    Release(button);
+    Log("ROOMUI native %s menu entry=%d (stock Button Click/focus, native weak-screen lifetime)",
+        st.room ? "room" : "HQ",st.nativeEntry.ready);
+}
+void NativeEntryDisplay(unsigned char* self,bool shown) noexcept {
+    if(!st.nativeEntry.ready)return;
+    Shared button=Find(self,kNativeEntryName);
+    if(button.object && button.control) {
+        const wchar_t* label=Title(false);
+        if(st.nativeLabel!=label) {
+            Shared text{};
+            reinterpret_cast<LockWeakFn>(image+kLockWeak)(&text,
+                reinterpret_cast<const Shared*>(static_cast<unsigned char*>(button.object)+kButtonLabel));
+            if(text.object) {
+                // Button owns ui::TextField, not HUiTextField: its native SetText accepts a nullable font override.
+                reinterpret_cast<SetButtonTextFn>(image+kSetButtonText)(text.object,label,nullptr);
+                st.nativeLabel=label;
+            }
+            Release(text);
+        }
+        NativeEntryVisible(self,button.object,shown && st.nativeLabel!=nullptr);
+    }
+    Release(button);
 }
 // A TextField's text, font colour and shown flag (the canonical call: index by name, then the TextField at it, 0x886800).
 // No text: the empty text (what SetText gives a null one: 0x86369F), as the layout file has it.
@@ -477,17 +628,20 @@ void ClearMenu(unsigned char* self) noexcept {
     wchar_t name[kNameMost];
     SetText(self,kSlotHead,kHeadName,nullptr);
     SetText(self,kSlotHint,kHintName,nullptr);
+    SetText(self,kSlotHelp2,kHelp2Name,nullptr);
+    SetText(self,kSlotHelp3,kHelp3Name,nullptr);
     SetTextured(self,kTexBack,kBackName,kWhiteTexture,kPanelColour,false);
     for(int i=0;i<kRows;++i){UnitName(i,name);SetText(self,kSlotUnit+i,name,nullptr);DrawRow(self,i,nullptr);}
     for(int i=0;i<kStatusLines;++i){StatusName(i,name);SetText(self,kSlotStatus+i,name,nullptr);}
 }
 // The root's shown flag, and while the menu is not shown everything it set taken back; false when this screen's layout
 // has no menu elements (not looked up again until the screen object changes or the menu opens).
-bool Draw(unsigned char* self,bool shown) noexcept {
+bool Draw(unsigned char* self,bool shown,bool entry=false) noexcept {
     Validate();
+    const bool rootShown=shown || entry;
     if(st.written.root==RootState::missing)return false;
-    if(Changed(kSlotRoot,shown ? 1 : 2) || st.written.root==RootState::unknown) {
-        if(!SetShown(self,kRootName,shown)) {
+    if(Changed(kSlotRoot,rootShown ? 1 : 2) || st.written.root==RootState::unknown) {
+        if(!SetShown(self,kRootName,rootShown)) {
             if(!st.missingLogged)Log("ROOMUI the %s screen's layout has no menu elements (Mods/UI not installed by the installer, "
                                      "or another mod's layout): the menu is not drawn there",st.room ? "room" : "HQ");
             st.missingLogged=true;
@@ -497,6 +651,7 @@ bool Draw(unsigned char* self,bool shown) noexcept {
         st.written.root=RootState::found;
     }
     if(!shown)ClearMenu(self);
+    if(!entry)SetText(self,kSlotEntry,kEntryName,nullptr);
     return true;
 }
 void DrawMenu(unsigned char* self) noexcept {
@@ -521,10 +676,11 @@ void DrawMenu(unsigned char* self) noexcept {
         StatusName(i,name);
         SetText(self,kSlotStatus+i,name,i<s.count ? s.text[i] : nullptr,StatusColour(i<s.count && s.warn[i]));
     }
-    wchar_t key[48];
-    ToggleName(key,48);
-    HintLine(key,line,kLineMost);
-    SetText(self,kSlotHint,kHintName,line);
+    wchar_t key[128];
+    ToggleName(key,128);
+    HelpLine(v.level,0,key,line,kLineMost);SetText(self,kSlotHint,kHintName,line);
+    HelpLine(v.level,1,key,line,kLineMost);SetText(self,kSlotHelp2,kHelp2Name,line);
+    HelpLine(v.level,2,key,line,kLineMost);SetText(self,kSlotHelp3,kHelp3Name,line);
 }
 
 // --- One frame of either screen ---
@@ -533,6 +689,7 @@ void DrawMenu(unsigned char* self) noexcept {
 std::uint64_t Off(Screen& screen,unsigned char* self,void* ctx) noexcept {
     if(st.menu.open){rm::Discard(st.menu);Log("ROOMUI menu closed: RoomLoadout / Enabled turned off");}
     st.held=rm::Keys{};st.gate=Gate{};
+    NativeEntryInput(st.nativeEntry,false);NativeEntryDisplay(self,false);
     HidePreview();
     roompreview::TickPreview(false);
     const std::uint64_t result=screen.next(self,ctx);
@@ -542,10 +699,11 @@ std::uint64_t Off(Screen& screen,unsigned char* self,void* ctx) noexcept {
 std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     if(resetAsked.exchange(false)) {
         Log("ROOMUI a mission started since the last screen frame: the room is left, the menu dropped");
-        Forget();
+        ForgetMenu();
         st.held=rm::Keys{};
     }
     Follow(self,screen.room);
+    PvpRoomTick();       // capability advertisement only; native team changes stay on the game-thread PvpFrame
     Outfit41RoomTick();   // the EDF4.1 outfit told to the room whatever the menu's switches (outfit41.cpp)
     Edf5OnlineRoomTick(); // this machine's word that it creates every player of an EDF5/4.1 mission (edf5online_room.cpp)
     const bool on=Cfg().enabled && Cfg().roomLoadout;
@@ -559,11 +717,14 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     hudtext::Use(hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage()));
     bool hasInput=false;
     __try { hasInput=reinterpret_cast<GetInputFn>(image+kGetInput)(self,ctx)!=nullptr; } __except(EXCEPTION_EXECUTE_HANDLER){ hasInput=false; }
+    EnsureNativeEntry(self);
     const rm::Keys down=KeysDown(ReadRaw(),static_cast<std::uint16_t>(Cfg().roomLoadoutButton));
     const rm::Keys press=rm::Presses(st.held,down);
     const Plan plan=PlanFrame(hasInput,st.menu.open);
     if(plan.step)Act(rm::Step(st.menu,press));
     const bool take=TakeInput(st.gate,st.menu.open,AnyDown(down));
+    NativeEntryInput(st.nativeEntry,hasInput && !st.menu.open && !st.gate.latched && Foreground());
+    NativeEntryDisplay(self,st.nativeEntry.enabled);
     std::uint64_t result;
     if(take && ctx) {
         alignas(16) unsigned char copy[kCtxSize];
@@ -571,11 +732,33 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         std::memset(copy+kCtxInput,0,sizeof(void*));
         result=screen.next(self,copy);
     } else result=screen.next(self,ctx);
+    if(TakeNativeEntry(st.nativeEntry,self==st.self && !followedGone.load() && !st.menu.open)) {
+        rm::Keys clicked;clicked.toggle=true;
+        Act(rm::Step(st.menu,clicked));
+        st.gate.latched=true;
+        NativeEntryInput(st.nativeEntry,false);
+        NativeEntryDisplay(self,false);
+    }
+    if(st.nativeFocused && hasInput && !st.menu.open) {
+        wchar_t key[128],line[kLineMost];
+        ToggleName(key,128);
+        if(key[0])EntryLine(key,line,kLineMost);
+        else wcscpy_s(line,Title(false)); // the native menu remains available when both shortcut bindings are disabled
+        SetText(self,kSlotNativeDesc,L"MenuDescText",line);
+    }
     if(sw.tick)roomsync::TickRoomSync();
-    const bool shown=PlanFrame(hasInput,st.menu.open).show;
-    FollowPreview(shown);
-    roompreview::TickPreview(shown);
-    if(Draw(self,shown) && shown){DrawMenu(self);st.drew=true;}
+    const Plan display=PlanFrame(hasInput,st.menu.open,ToggleAvailable(),!st.gate.latched);
+    FollowPreview(display.show);
+    roompreview::TickPreview(display.show);
+    if(Draw(self,display.show,display.entry)) {
+        if(display.show)DrawMenu(self);
+        if(display.entry) {
+            wchar_t key[128],line[kLineMost];
+            ToggleName(key,128);EntryLine(key,line,kLineMost);
+            SetText(self,kSlotEntry,kEntryName,line);
+        }
+        if(display.show || display.entry)st.drew=true;
+    }
     return result;
 }
 std::uint64_t __fastcall RoomHook(unsigned char* self,void* ctx) { return Frame(screens[0],self,ctx); }
@@ -645,6 +828,7 @@ bool InstallRoomUi() noexcept {
     if(!AllMatch(kDrawSigs,std::size(kDrawSigs),"the layout calls",kUntouched) ||
        !AllMatch(kScreenSigs,std::size(kScreenSigs),"the screens' updates",kUntouched))
         return false;
+    nativeEntryOk=AllMatch(kNativeMenuSigs,std::size(kNativeMenuSigs),"the native menu button contracts","hotkey menu still available");
     padOk=AllMatch(kPadSigs,std::size(kPadSigs),"the pad table","the menu: keyboard only");
     Log("HOOK roomui preview=%d (stage 7; 0: the menu runs without the 3D preview)",roompreview::InstallPreviewHooks());
     const bool room=Chain(screens[0],reinterpret_cast<void*>(&RoomHook),reinterpret_cast<void*>(&RoomGoneHook));

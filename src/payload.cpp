@@ -68,7 +68,7 @@ Class ClassOf(const void* v) noexcept {
 }
 
 // The switch's state per vehicle the player sits in: the weapon picked, the switch down last frame.
-struct Pick { ObjRef ref; unsigned seat; unsigned char* weapon; bool held,listed,npc; ULONGLONG seen; unsigned char* from[kMostPayload]; int redirects; };
+struct Pick { ObjRef ref; unsigned seat; unsigned char* weapon; bool held,listed,npc,nativeControl; ULONGLONG seen; unsigned char* from[kMostPayload]; unsigned char* to[kMostPayload]; int redirects; };
 Pick picks[kTracked]{};
 // One tracked local player's fire-control view. Store selection remains independent and keeps its old contract.
 struct SightPick { ObjRef vehicle,human; unsigned seat; PayloadFire control=PayloadFire::primary; bool primaryHeld,secondaryHeld; };
@@ -301,7 +301,9 @@ constexpr bool FreeSecondary(Class c) noexcept { return c==Class::other; }
 PayloadFire FireOf(Class c,unsigned seat,std::int64_t holder,const unsigned char* w,int weapons,bool playerSeat=true) noexcept {
     const std::int64_t s=static_cast<std::int64_t>(seat);
     // EDF6VC_ also names native drill/Katyusha/Proteus weapons. Only catalogued add-on stores are redirectable.
-    if(IsStoreWeapon(w))return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;
+    const auto spec=StoreOf(w);
+    if(IsStoreWeapon(w) && !(spec && spec->nativeControl))
+        return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;
     switch(c) {
         case Class::heli506: return holder==0 || holder==1 ? PayloadFire::primary : holder==2 ? PayloadFire::secondary : PayloadFire::other;
         case Class::heli409: return holder==0 ? PayloadFire::primary : holder==1 ? PayloadFire::secondary : PayloadFire::other;
@@ -339,7 +341,10 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
         ws[count++]=w;
     }
     int stock=0;
-    for(int i=0;i<count;++i)stock+=IsStoreWeapon(ws[i]) ? 0 : 1;
+    for(int i=0;i<count;++i) {
+        const auto spec=StoreOf(ws[i]);
+        stock+=IsStoreWeapon(ws[i]) && !(spec && spec->nativeControl) ? 0 : 1;
+    }
     for(int i=0;i<count;++i) {
         PayloadEntry& e=r.entry[i];
         e=PayloadEntry{};
@@ -372,7 +377,8 @@ void __fastcall PullHook(unsigned char* holder) {
     unsigned char* w=At<unsigned char*>(holder,kHolderWeapon);
     const ULONGLONG ms=GameMs();
     __try {
-    if(Cfg().enabled && Cfg().stockStores)for(const auto& p:picks) {
+    if(Cfg().enabled)for(const auto& p:picks) {
+        if(!Cfg().stockStores && !p.nativeControl)continue;
         if(!p.redirects || ms-p.seen>kFreshMs || !Readable(p.ref.obj,kSelfCtrl+8) || !p.ref.Is(p.ref.obj))continue;
         const auto v=static_cast<unsigned char*>(const_cast<void*>(p.ref.obj));
         if(p.seat>=SeatCount(v) || v[kDead])continue;
@@ -380,14 +386,19 @@ void __fastcall PullHook(unsigned char* holder) {
         if(p.npc ? !AiGunner(v,seat) : SeatRider(seat)!=Rider::player)continue;
         const auto list=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
-        bool installed=false;
-        if(count<=16 && Readable(list,count*8))for(std::uint64_t i=0;i<count;++i) {
-            if(!Readable(list[i],kHolderWeapon+8))continue;
-            const auto targetCtrl=At<const unsigned char*>(list[i],kHolderCtrl);
-            if(Readable(targetCtrl,12) && At<std::int32_t>(targetCtrl,8)>0 && At<unsigned char*>(list[i],kHolderWeapon)==p.weapon)installed=true;
+        for(int k=0;k<p.redirects;++k)if(p.from[k]==w) {
+            const auto target=p.to[k];
+            if(!target)return; // another native source already owns this single-barrel store
+            bool installed=false;
+            if(count<=16 && Readable(list,count*8))for(std::uint64_t i=0;i<count;++i) {
+                if(!Readable(list[i],kHolderWeapon+8))continue;
+                const auto targetCtrl=At<const unsigned char*>(list[i],kHolderCtrl);
+                if(Readable(targetCtrl,12) && At<std::int32_t>(targetCtrl,8)>0 && At<unsigned char*>(list[i],kHolderWeapon)==target)installed=true;
+            }
+            if(installed && !Spent(target))w=target;
+            else return; // a removed/expired selected barrel never falls through to a stock shot
+            break;
         }
-        if(!installed)continue;
-        for(int i=0;i<p.redirects;++i)if(p.from[i]==w){w=p.weapon;break;}
     }
     } __except(EXCEPTION_EXECUTE_HANDLER) { return; }
     if(Readable(w,kWeaponTrigger+1))w[kWeaponTrigger]=1;
@@ -397,6 +408,46 @@ const unsigned char kPullCode[]={0x48,0x8B,0x41,0x08,0x48,0x85,0xC0,0x74,0x11,0x
                                  0xC6,0x80,0x39,0x01,0x00,0x00,0x01,0xC3};
 bool pullOk=false;
 
+// Linked stores share one switch choice while retaining their own native muzzle and firing lifecycle.
+bool SamePayloadGroup(const unsigned char* a,const unsigned char* b) noexcept {
+    if(a==b)return true;
+    const auto sa=StoreOf(a),sb=StoreOf(b);
+    return sa && sb && sa->group!=0 && sa->group==sb->group;
+}
+bool GroupSpent(int choice,unsigned char* const* ws,const PayloadReadout& r) noexcept {
+    for(int i=0;i<r.count;++i)if(SamePayloadGroup(ws[choice],ws[i]) && !Spent(ws[i]))return false;
+    return true;
+}
+bool NativeAlternates(unsigned char* const* ws,const int* stock,int count) noexcept {
+    for(int i=0;i<count;++i) {const auto spec=StoreOf(ws[stock[i]]);if(spec && spec->nativeControl)return true;}
+    return false;
+}
+std::int64_t NativeHolderIndex(unsigned char* v,unsigned seat,const unsigned char* weapon) noexcept {
+    const auto s=SeatAt(v,seat);
+    const auto list=At<unsigned char* const*>(s,kSeatWeapons);
+    const auto count=At<std::uint64_t>(s,kSeatWeaponCount);
+    if(count<=16 && Readable(list,count*8))for(std::uint64_t i=0;i<count;++i)
+        if(Readable(list[i],kHolderWeapon+8) && At<const unsigned char*>(list[i],kHolderWeapon)==weapon)return HolderIndex(v,list[i]);
+    return -1;
+}
+void RedirectPayload(unsigned char* v,unsigned seat,Pick& p,unsigned char* const* ws,const PayloadReadout& r,
+                     const int* stock,int count,int choice) noexcept {
+    const auto spec=StoreOf(ws[choice]);
+    for(int k=0;k<count && p.redirects<kMostPayload;++k) {
+        unsigned char* target=nullptr;
+        if(spec && spec->group) {
+            const auto holder=NativeHolderIndex(v,seat,ws[stock[k]]);
+            for(int j=0;j<r.count;++j) {
+                const auto other=StoreOf(ws[j]);
+                if(other && other->group==spec->group && static_cast<std::int64_t>(other->barrel)==holder && !Spent(ws[j])) {
+                    target=ws[j];break;
+                }
+            }
+        } else if(k==0)target=ws[choice]; // a single mount receives exactly one native source, never both 603 pulls
+        p.from[p.redirects]=ws[stock[k]];p.to[p.redirects]=target;++p.redirects;
+    }
+}
+
 // The store switch on the player's seat (see the top). `ws` the seat's weapons, `r` their entries.
 bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* const* ws,PayloadReadout& r,bool* uiChoice) noexcept {
     *uiChoice=false;
@@ -404,10 +455,24 @@ bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary && !r.entry[i].coax)ride=PayloadFire::secondary;
     int stock[kMostPayload],ns=0,list[kMostPayload],n=0;
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==ride)stock[ns++]=i;
-    if(ns)list[n++]=stock[0];   // that control's stock weapon(s): one choice (the 603's pair fire together)
-    for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::store)list[n++]=i;
-    const bool enabled=Cfg().enabled && pullOk && Cfg().stockStores && ns>0 && n>=2;
-    if(enabled)for(int k=0;k<n;++k)r.entry[list[k]].selectable=!Spent(ws[list[k]]);
+    const bool alternatives=NativeAlternates(ws,stock,ns);
+    p.nativeControl=alternatives;
+    if(alternatives)for(int k=0;k<ns;++k)list[n++]=stock[k];
+    else if(ns)list[n++]=stock[0]; // a normal native pair remains one trigger group
+    for(int i=0;i<r.count;++i)if(Cfg().stockStores && r.entry[i].fire==PayloadFire::store) {
+        bool linked=false;
+        for(int k=0;k<n;++k)if(SamePayloadGroup(ws[i],ws[list[k]]))linked=true;
+        if(!linked)list[n++]=i;
+    }
+    const bool enabled=Cfg().enabled && pullOk && (Cfg().stockStores || alternatives) && ns>0 && n>=2;
+    const auto spent=[&](int k) -> bool {
+        if(!alternatives && ns && list[k]==stock[0]) {
+            for(int j=0;j<ns;++j)if(!Spent(ws[stock[j]]))return false;
+            return true;
+        }
+        return GroupSpent(list[k],ws,r);
+    };
+    if(enabled)for(int k=0;k<n;++k)r.entry[list[k]].selectable=!spent(k);
     PublishChoices(v,ws,r);
     const int requested=ConsumeChoice(r);
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
@@ -431,19 +496,19 @@ bool Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     if(requestedAt>=0) {
         if(at!=requestedAt){ClearWeaponLock(ws[list[at]]);ClearWeaponLock(ws[list[requestedAt]]);}
         at=requestedAt;*uiChoice=true;
-    } else if(press || Spent(ws[list[at]])) {
+    } else if(press || spent(at)) {
         const int was=at;
         for(int k=1;k<=n;++k) {
             const int next=(at+k)%n;
-            if(!Spent(ws[list[next]]) || k==n){at=next;break;}
+            if(!spent(next) || k==n){at=next;break;}
         }
         if(at!=was){ClearWeaponLock(ws[list[was]]);ClearWeaponLock(ws[list[at]]);}
         if(press)Log("PAYLOAD v=%p picked: %ls (%d rounds)",v,r.entry[list[at]].name,r.entry[list[at]].rounds);
     }
     p.weapon=ws[list[at]];
-    r.entry[list[at]].picked=true;
+    for(int i=0;i<r.count;++i)if(SamePayloadGroup(p.weapon,ws[i]))r.entry[i].picked=true;
     r.picked=list[at];r.choices=n;r.switchButton=kButtonLB;
-    if(at>0)for(int k=0;k<ns && p.redirects<kMostPayload;++k)p.from[p.redirects++]=ws[stock[k]];
+    if(alternatives || r.entry[list[at]].fire==PayloadFire::store)RedirectPayload(v,p.seat,p,ws,r,stock,ns,list[at]);
     Lock(p.weapon);
     return press || *uiChoice;
 }
@@ -502,24 +567,29 @@ void PayloadFrame(unsigned char* v) noexcept {
 // aiming/firing; no shot or weapon object is fabricated here.
 unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bool airborne,PayloadFire* fire) noexcept {
     if(fire)*fire=PayloadFire::other;
-    if(!pullOk || !Cfg().enabled || !Cfg().stockStores || !Cfg().npcGunners || !v || v[kDead] ||
+    if(!pullOk || !Cfg().enabled || !Cfg().npcGunners || !v || v[kDead] ||
        BodyOf(v)!=PluginBody::none || seat>=SeatCount(v))return nullptr;
     const auto s=SeatAt(v,seat);
     if(!AiGunner(v,s))return nullptr;
     Pick* const p=PickFor(v,seat,GameMs());
     if(!p)return nullptr;
     const auto previous=p->weapon;
-    p->seen=GameMs();p->npc=true;p->redirects=0;p->weapon=nullptr;
+    p->seen=GameMs();p->npc=true;p->nativeControl=false;p->redirects=0;p->weapon=nullptr;
     if(!std::isfinite(distance) || distance<=0.0f)return nullptr;
     PayloadReadout r{};unsigned char* ws[kMostPayload]{};
     r.count=ReadSeat(v,seat,ClassOf(v),ws,r,false);
+    if(!Cfg().stockStores) {
+        bool native=false;
+        for(int i=0;i<r.count;++i) {const auto spec=StoreOf(ws[i]);native=native || (spec && spec->nativeControl);}
+        if(!native)return nullptr;
+    }
     // The coaxial gun is not one of the choices: it fires alongside whatever is chosen (NpcCoaxFire).
     for(int i=0;i<r.count;++i)if(r.entry[i].coax)r.entry[i].fire=PayloadFire::other;
     PayloadFire ride=PayloadFire::primary;
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary)ride=PayloadFire::secondary;
     int best=-1;float score=-1.0f;
     for(int i=0;i<r.count;++i) {
-        if(r.entry[i].fire==PayloadFire::other || r.entry[i].rounds<=0)continue;
+        if(r.entry[i].fire==PayloadFire::other || r.entry[i].rounds<=0 || (!Cfg().stockStores && r.entry[i].fire==PayloadFire::store))continue;
         const auto w=ws[i];
         if(!(At<float>(w,0x89C)>0.0f))continue; // healers never target enemies
         float muzzle[3],dir[3];RoundModel m{};
@@ -560,8 +630,11 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
     }
     if(best<0)return nullptr;
     p->weapon=ws[best];
-    if(r.entry[best].fire==PayloadFire::store)
-        for(int i=0;i<r.count;++i)if(r.entry[i].fire==ride)p->from[p->redirects++]=ws[i];
+    int stock[kMostPayload],count=0;
+    for(int i=0;i<r.count;++i)if(r.entry[i].fire==ride)stock[count++]=i;
+    p->nativeControl=NativeAlternates(ws,stock,count);
+    if(r.entry[best].fire==PayloadFire::store || p->nativeControl)
+        RedirectPayload(v,seat,*p,ws,r,stock,count,best);
     if(r.entry[best].fire==PayloadFire::store && !p->redirects){p->weapon=nullptr;return nullptr;}
     if(previous && previous!=p->weapon && Readable(previous,kWeaponCharge+4))ClearWeaponLock(previous);
     if(fire)*fire=r.entry[best].fire==PayloadFire::store ? ride : r.entry[best].fire;
@@ -705,14 +778,14 @@ int SeatFireWeapons(const void* vehicle,unsigned index,bool both,unsigned char**
         const PayloadFire want=current ? sightPick.control : PayloadFire::primary;
         const auto usable=[&](int i) -> bool {return !Spent(ws[i]);}; // reloading guns retain their sight; permanently spent ones do not
         const auto redirected=[&](unsigned char* w) -> unsigned char* {
-            if(pick && Cfg().enabled && Cfg().stockStores)for(int k=0;k<pick->redirects;++k)if(pick->from[k]==w) {
-                for(int j=0;j<r.count;++j)if(ws[j]==pick->weapon && usable(j))return ws[j];
+            if(pick && Cfg().enabled && (Cfg().stockStores || pick->nativeControl))for(int k=0;k<pick->redirects;++k)if(pick->from[k]==w) {
+                for(int j=0;j<r.count;++j)if(ws[j]==pick->to[k] && usable(j))return ws[j];
                 return static_cast<unsigned char*>(nullptr);
             }
             return Spent(w) ? nullptr : w;
         };
         PayloadFire group=want==PayloadFire::store ? PayloadFire::secondary : want;
-        if(want==PayloadFire::store && pick && pick->weapon && Cfg().enabled && Cfg().stockStores)
+        if(want==PayloadFire::store && pick && pick->weapon && Cfg().enabled && (Cfg().stockStores || pick->nativeControl))
             for(int i=0;i<r.count;++i)if(ws[i]==pick->weapon && usable(i)) {
                 // A stock choice represents its whole native trigger group (e.g. both 603 guns).
                 group=r.entry[i].fire;
@@ -770,6 +843,71 @@ bool InstallPayload() noexcept {
         Log("HOOK payload=%d (the holder pull lands on the store picked)",pullOk);
         return pullOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool NativePayloadControl(const void* vehicle,unsigned index) noexcept {
+    __try {
+        const auto* v=static_cast<const unsigned char*>(vehicle);
+        if(!v || !Readable(v,kSeatCount+8) || v[kDead] || index>=SeatCount(v))return false;
+        const auto seat=SeatAt(const_cast<unsigned char*>(v),index);
+        const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
+        const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
+        if(count>16 || !Readable(holders,count*8))return false;
+        for(std::uint64_t i=0;i<count;++i) {
+            if(!Readable(holders[i],kHolderWeapon+8))continue;
+            const auto ctrl=At<const unsigned char*>(holders[i],kHolderCtrl);
+            if(!Readable(ctrl,12) || At<int>(ctrl,8)<=0)continue;
+            const auto weapon=At<const unsigned char*>(holders[i],kHolderWeapon);
+            if(!Readable(weapon,kWeaponCharge+4))continue;
+            const auto spec=StoreOf(weapon);
+            if(spec && spec->nativeControl)return true;
+        }
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool PayloadAimWeapon(const void* vehicle,unsigned index,const void* source,const unsigned char** out) noexcept {
+    if(!out)return false;
+    *out=nullptr;
+    __try {
+        auto* v=static_cast<unsigned char*>(const_cast<void*>(vehicle));
+        if(!Cfg().enabled || !v || !source || !Readable(v,kSeatCount+8) || v[kDead] || index>=SeatCount(v) || BodyOf(v)!=PluginBody::none)return false;
+        const auto identity=ObjRef::Of(v);
+        if(!identity.Is(v))return false;
+        const auto seat=SeatAt(v,index);
+        const bool localSeat=SeatRider(seat)==Rider::player && At<const void*>(seat,kSeatRider)==PlayerHuman();
+        const bool npc=!localSeat && AiGunner(v,seat);
+        if(!localSeat && !npc)return false;
+        PayloadReadout r{};unsigned char* ws[kMostPayload]{};
+        r.count=ReadSeat(v,index,ClassOf(v),ws,r,localSeat);
+        int from=-1;
+        for(int i=0;i<r.count;++i)if(ws[i]==source){from=i;break;}
+        if(from<0)return false;
+        PayloadFire group=r.entry[from].fire;
+        if(group==PayloadFire::store) {
+            group=PayloadFire::primary;
+            for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary && !r.entry[i].coax)group=PayloadFire::secondary;
+        }
+        if(group==PayloadFire::other)return false;
+        const Pick* picked=nullptr;
+        for(const auto& p:picks)if(p.ref.Is(v) && p.seat==index && p.npc==npc){picked=&p;break;}
+        const bool fresh=picked && GameMs()-picked->seen<=kFreshMs && (Cfg().stockStores || picked->nativeControl);
+        bool catalogued=false;
+        for(int i=0;i<r.count;++i)catalogued=catalogued || IsStoreWeapon(ws[i]);
+        // Only managed payload/native-ammunition controllers opt an unmarked source into the peer's aiming path.
+        // Before the first plan, beyond the firing redirect bound, or with this feature disabled the old peer stays native.
+        if(!fresh || !(picked->nativeControl || (Cfg().stockStores && catalogued)))return false;
+        // A fresh NPC target-loss/no-usable-weapon decision must not resurrect its native guns in the aimer.
+        if(npc && fresh && !picked->weapon)return true;
+        for(int i=0;i<r.count;++i)if(r.entry[i].fire==group) {
+            const unsigned char* target=ws[i];
+            if(fresh)for(int k=0;k<picked->redirects;++k)if(picked->from[k]==ws[i]) {target=picked->to[k];break;}
+            if(!target)continue;
+            // Identity comes from the currently installed, live holder set; stale target pointers are never returned.
+            for(int j=0;j<r.count;++j)if(ws[j]==target && !Spent(ws[j])) {*out=ws[j];return true;}
+        }
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){*out=nullptr;return false;}
 }
 
 void ResetPayload() noexcept {

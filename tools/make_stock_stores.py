@@ -138,7 +138,9 @@ COAX: dict[str, Mount] = {
     **{s: Mount(vc.store_file('MG401', vc.COAX_MOUNTS['401'].belt), 0)
        for s in ('VEHICLE401_STRIKER', 'VEHICLE401_STRIKER_MPACK2')},
 }
-_FLAK = (_store('FLAK_HE', 500, 0), _store('AAM_S', 2, 0), _store('AAM_M', 4, 0))
+_FLAK = (_store('FLAK_AP', 500, 0), _store('FLAK_AP_R', 500, 1),
+         _store('FLAK_HE', 500, 0), _store('FLAK_HE_R', 500, 1),
+         _store('AAM_S', 2, 0), _store('AAM_M', 4, 0))
 _LAUNCHER = (_store('AAM_M', 4, 0), _store('AGM', 2, 0), _store('RKT', 19, 0))
 _BIKE = (_store('RKT', 19, 0),)
 _HELI = (_store('RKT', 19, 2), _store('AGM_L', 4, 2), _store('AAM_S', 2, 2))   # beside the 506's missile (holder 2)
@@ -165,7 +167,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     'mbt': ('AP', 'HE', 'GLM', 'role:coax'),             # AP or HE (whichever the stock gun is not), the gun-launched missile,
                                                          # the coaxial machine gun
     'ifv': ('AC_AP', 'AC_HE', 'role:ground', 'role:coax'),   # the autocannon's other belt, an anti-tank missile, the coax
-    'flak': ('FLAK_HE', 'role:air'),                     # HE proximity rounds, surface-to-air missiles
+    'flak': ('FLAK_AP', 'FLAK_AP_R', 'FLAK_HE', 'FLAK_HE_R', 'role:air'),                     # HE proximity rounds, surface-to-air missiles
     'launcher': ('role:air', 'role:ground', 'role:rocket'),
     'heli': ('role:rocket', 'role:ground', 'role:air'),
     'bike': ('role:rocket',),

@@ -58,7 +58,7 @@ void AcceptNetwork(Mech& m,unsigned char* v,const sazabi_net::State& s,ULONGLONG
         DropRemoteEffects(m);m.active=false;
         if(m.insetSaved)Put<float>(v,kAreaInset,m.savedInset);
         m.insetSaved=false;
-        if(view.vehicle==v)DropView();
+        DropView(v);
     }
     if(m.net.source!=s.sender) {
         std::memset(m.net.shotSeen,0,sizeof(m.net.shotSeen));std::memset(m.net.soundSeen,0,sizeof(m.net.soundSeen));
@@ -138,7 +138,7 @@ bool NetworkFrame(Mech& m,unsigned char* v,ULONGLONG ms) noexcept {
             DropRemoteEffects(m);
             if(m.insetSaved)Put<float>(v,kAreaInset,m.savedInset);
             m.insetSaved=false;
-            if(view.vehicle==v)DropView();
+            DropView(v);
         }
         m.net.remote=true;m.active=false;ReplayNetwork(m,v,ms);return true;
     }

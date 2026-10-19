@@ -525,6 +525,13 @@ bool ReadShot(const unsigned char* vehicle,const unsigned char* seat,Shot& shot,
         const float reach=shot.speed*static_cast<float>(At<std::int32_t>(weapon,kAmmoAlive));
         if(reach>range)range=reach;
     });
+    const unsigned char* actual=nullptr;
+    if(ActualWeapon(vehicle,0,SeatGun(seat),&actual)) {
+        if(!actual)return false;
+        armed=true; // Crew's verified managed controller also owns mark-0 native ammunition and add-on weapons.
+        shot.speed=At<float>(actual,kAmmoSpeed);gravity=At<float>(actual,kAmmoGravity);
+        range=shot.speed*static_cast<float>(At<std::int32_t>(actual,kAmmoAlive));
+    }
     if(armed && std::isfinite(gravity) && gravity>0.0f)shot.drop=gravity*Down(vehicle)/kFramesPerSecondSq;
     return armed;
 }
@@ -638,10 +645,13 @@ bool PlayerLofted(const unsigned char* seat) noexcept {
 }
 
 // The seat's gun's barrel (its first holder's muzzles, rebuilt from the bones) and its round's life in frames.
-struct Barrel { bool ok; float pos[3],dir[3]; float life; };
-Barrel SeatBarrel(const unsigned char* seat) noexcept {
+struct Barrel { bool ok; float pos[3],dir[3]; float life; const unsigned char* weapon; };
+Barrel SeatBarrel(const unsigned char* vehicle,const unsigned char* seat) noexcept {
     Barrel b{};
-    const auto gun=SeatGun(seat);
+    const unsigned char* gun=SeatGun(seat);
+    const unsigned char* actual=nullptr;
+    if(ActualWeapon(vehicle,0,gun,&actual))gun=actual;
+    b.weapon=gun;
     if(!gun || !Readable(gun,kAmmoGravity+4) || !Readable(gun+edf::kWeaponMatrix,0x40))return b;
     b.ok=edf::MeanMuzzle(gun,8,b.pos,b.dir);
     b.life=static_cast<float>(At<std::int32_t>(gun,kAmmoAlive));
@@ -660,7 +670,7 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     float world[3]{},local[3]{},range=0.0f;Shot shot{};
     if(!ReadShot(vehicle,seat,shot,range)){diag.stop="unarmed";return -1.0f;}   // a stock flak: leave it alone
     const bool pilot=edf::SeatRider(image,seat)==edf::Rider::player;
-    const Barrel barrel=pilot ? SeatBarrel(seat) : Barrel{};
+    const Barrel barrel=pilot ? SeatBarrel(vehicle,seat) : Barrel{};
     const float* muzzle=barrel.ok ? barrel.pos : nullptr;
     const float* bore=barrel.ok ? barrel.dir : nullptr;
     if(pilot)PilotFrame(vehicle,0,seat,muzzle,bore,range);
@@ -685,13 +695,13 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     const auto target=drag ? nullptr : PickTarget(vehicle,seat,track->target,dropped,only,shot,range,world);
     if(!target) {
         diag.stop=drag ? "manual" : "no-target";track->at=now;track->target=nullptr;
-        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,muzzle,bore,&shot,nullptr,barrel.life);
+        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,muzzle,bore,&shot,nullptr,barrel.life,barrel.weapon);
         return -1.0f;
     }
     diag.stop=rule.steer ? "aiming" : "tracking";
     Lead(vehicle,*track,target,world,local,shot);
     track->at=now;
-    if(pilot)PublishAim(vehicle,true,target,world,muzzle,bore,&shot,track->vel,barrel.life);
+    if(pilot)PublishAim(vehicle,true,target,world,muzzle,bore,&shot,track->vel,barrel.life,barrel.weapon);
     float wantYaw,wantPitch,flight;
     if(!AimAngles(local,shot,wantYaw,wantPitch,flight)){diag.stop="out-of-reach";return -1.0f;}
     if(!rule.steer)return flight;   // the time fuse still bursts the flak at the target's range

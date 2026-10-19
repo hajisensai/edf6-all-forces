@@ -1,0 +1,659 @@
+{
+  "supported_timestamp": "0x678CCB46",
+  "scope": "Original native 34 admitted families; per-row target-coordinate and physical-pattern contracts; no game execution",
+  "families": [
+    {
+      "name": "AlienTrailer",
+      "routes": [
+        "physical_barrier"
+      ],
+      "sites": [
+        "0x30E300"
+      ],
+      "note": "Original shield/high-power and body-contact skills; no projectile factory in all six stock resources.",
+      "stock_objects": [
+        "E513_SHIELDBEARER.SGO",
+        "E513_SHIELDBEARER_FIXED.SGO",
+        "E513_SHIELDBEARER_FIXEDL.SGO",
+        "E513_SHIELDBEARER_FIXEDXL.SGO",
+        "E513_SHIELDBEARER_L.SGO",
+        "E513_SHIELDBEARER_XL.SGO"
+      ]
+    },
+    {
+      "name": "Deiroi",
+      "routes": [
+        "deiroi_owned_adapter",
+        "main_battery_ballistic",
+        "main_battery_warmup_matrix"
+      ],
+      "sites": [
+        "0x32D286",
+        "0x32B422",
+        "0x32CFE8",
+        "0x31CB9A",
+        "0x31CC4B"
+      ],
+      "note": "Whole foot pose/weapon readiness plus separate real root+1638/1648 vector rows (stride290). Main gun canonical point replaces old target before original2312A0 and native spread/RNG; fire0 real locator matrix retains native warmup/weapon state.",
+      "stock_objects": [
+        "E509_DEIROI.SGO",
+        "E509_DEIROI_L.SGO",
+        "E509_DEIROI_L2.SGO",
+        "E509_DEIROI_M.SGO",
+        "E509_DEIROI_S.SGO",
+        "E509_DEIROI_SM.SGO",
+        "E509_DEIROI_XL.SGO",
+        "E509_DEIROI_XL2.SGO"
+      ]
+    },
+    {
+      "name": "DragonSmall",
+      "routes": [
+        "inline_ballistic",
+        "ported_flame"
+      ],
+      "sites": [
+        "0x33AF42"
+      ],
+      "note": "Native flame point before original solver; EDF4.1 Breathe basis before original cone RNG.",
+      "stock_objects": [
+        "DRAGONSMALL401.SGO",
+        "DRAGONSMALL401_HS.SGO",
+        "REDSMALLDRAGON.SGO",
+        "REDSMALLDRAGON_HS.SGO",
+        "YERROWSMALLDRAGON.SGO",
+        "YERROWSMALLDRAGON_HS.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_Berserker_Large",
+      "routes": [
+        "large_per_gun",
+        "parts_point"
+      ],
+      "sites": [
+        "0x34E231",
+        "0x34F978",
+        "0x3403D1"
+      ],
+      "note": "Exact real gun-control roster, per-gun accepted action point and detached-part point before real Parts ctor.",
+      "stock_objects": [
+        "E602_BERSERKER_LARGE.SGO",
+        "E602_BERSERKER_LARGE_ACE.SGO",
+        "E602_BERSERKER_LARGE_LITE.SGO",
+        "E602_BERSERKER_LARGE_PUNCH.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_Berserker_Middle",
+      "routes": [
+        "unit_direct",
+        "parts_point"
+      ],
+      "sites": [
+        "0x6D550B",
+        "0x3403D1"
+      ],
+      "note": "Original batteries and detached hands retain real owner, muzzle and native speed/limits.",
+      "stock_objects": [
+        "E602_BERSERKER_MIDDLE.SGO",
+        "E602_BERSERKER_MIDDLEUG.SGO",
+        "E602_BERSERKER_MIDDLEUG_MG.SGO",
+        "E602_BERSERKER_MIDDLEUG_PUNCH.SGO",
+        "E602_BERSERKER_MIDDLE_MG.SGO",
+        "E602_BERSERKER_MIDDLE_PUNCH.SGO",
+        "E602_BERSERKER_MIDDLE_SPREAD.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_Berserker_TypeA",
+      "routes": [
+        "parts_point",
+        "physical_contact"
+      ],
+      "sites": [
+        "0x3403D1"
+      ],
+      "note": "Real PartsShootList hands/punches consume canonical float4 at common target/null merge before 351940.",
+      "stock_objects": [
+        "E602_BERSERKER.SGO",
+        "E602_BERSERKERUG.SGO",
+        "E602_BERSERKER_ACE.SGO",
+        "E602_BERSERKER_ST.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_Berserker_TypeBommer",
+      "routes": [
+        "physical_hand_bombs"
+      ],
+      "sites": [
+        "0x3403D1"
+      ],
+      "note": "All three stock variants attach real bombs to hand nodes; PartsShootList empty/absent, no aimed projectile. Inherited merge is guarded for future native events.",
+      "stock_objects": [
+        "E602_BERSERKER_BOMMER.SGO",
+        "E602_BERSERKER_BOMMER_ST.SGO",
+        "E602_BERSERKER_MIDDLE_BOMMER.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_Berserker_TypeGrapple",
+      "routes": [
+        "parts_point",
+        "physical_contact"
+      ],
+      "sites": [
+        "0x3403D1"
+      ],
+      "note": "Real detached hand ctor uses the common target/null float4 merge; physical grapple/contact keeps real objects.",
+      "stock_objects": [
+        "E602_BERSERKER_GRAPPLE.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_Berserker_TypeShooter",
+      "routes": [
+        "unit_direct",
+        "parts_point"
+      ],
+      "sites": [
+        "0x6D550B",
+        "0x3403D1"
+      ],
+      "note": "Original native direct battery plus inherited detached-parts path.",
+      "stock_objects": [
+        "E602_BERSERKERUG_BEAMA.SGO",
+        "E602_BERSERKERUG_BEAMB.SGO",
+        "E602_BERSERKER_BEAMA.SGO",
+        "E602_BERSERKER_BEAMB.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_GiantDangoLarge",
+      "routes": [
+        "unit_direct",
+        "physical_rolling"
+      ],
+      "sites": [
+        "0x6D550B"
+      ],
+      "note": "Native battery point before native per-muzzle angle/speed; rolling collision remains physical.",
+      "stock_objects": [
+        "E660_HEAVY_DANGO_L.SGO",
+        "E660_HEAVY_DANGO_M.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_Merman",
+      "routes": [
+        "sweep_base",
+        "physical_contact",
+        "bone_mist"
+      ],
+      "sites": [
+        "0x3A027D",
+        "0x3A85DE"
+      ],
+      "note": "Only sweep base point changes; original 3A9D40 inverse/start/end and per-frame interpolation retained. Poison mist at unit+F0 has no AI target and keeps authored bone pose.",
+      "stock_objects": [
+        "E603_MERMAN.SGO",
+        "E603_MERMAN_LIGHT.SGO",
+        "E603_MERMAN_M063.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_FlyingDyno",
+      "routes": [
+        "unit_direct",
+        "bone_vertical",
+        "physical_contact"
+      ],
+      "sites": [
+        "0x6D550B"
+      ],
+      "note": "Main fireballs and horizontal flame are direct target units; distinct root+1498 vertical flame preserves authored cached bone matrices and physical patterns.",
+      "stock_objects": [
+        "E604_RADON.SGO",
+        "E604_RADON_M051.SGO",
+        "E604_RADON_M118_5.SGO",
+        "E604_RADON_RM034.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_ShellFish",
+      "routes": [
+        "sweep_base"
+      ],
+      "sites": [
+        "0x3C466C"
+      ],
+      "note": "Canonical world float4 before native inverse/local target constraints and sweep; original per-gun pattern remains.",
+      "stock_objects": [
+        "E606_SHELLFISH.SGO",
+        "E606_SHELLFISH_ACE.SGO",
+        "E669_SHELLFISH_MEDIUM.SGO",
+        "E669_SHELLFISH_MEDIUM_ACE.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_SpinnerUfo",
+      "routes": [
+        "sweep_base"
+      ],
+      "sites": [
+        "0x3D87AD",
+        "0x3D87DF"
+      ],
+      "note": "Canonical point converted by original inverse matrix helper71810 before original3DA890 pattern builder; each gun interpolation remains native.",
+      "stock_objects": [
+        "E605_SPINNERUFO.SGO",
+        "E605_SPINNERUFO_ACE.SGO",
+        "E605_SPINNERUFO_BLUE.SGO",
+        "E605_SPINNERUFO_BLUE_ACE.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_SquidSmall",
+      "routes": [
+        "per_component_direction"
+      ],
+      "sites": [
+        "0x3E729A"
+      ],
+      "note": "Exact roster component and real +F0 muzzle, canonical-minus-muzzle before original cone RNG.",
+      "stock_objects": [
+        "E618_SQUID_SMALL.SGO",
+        "E618_SQUID_SMALL_HI.SGO",
+        "E618_SQUID_SMALL_HI_NOSMOKE.SGO",
+        "E618_SQUID_SMALL_NOSMOKE.SGO",
+        "E618_SQUID_SMALL_SSMOKE.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_TimeShip",
+      "routes": [
+        "transport_generator"
+      ],
+      "sites": [
+        "0x3EE300"
+      ],
+      "note": "Doors, drop pods, anchors and generators have no aimed projectile. Spawned children are separate roots.",
+      "stock_objects": [
+        "E611_TIMESHIP.SGO",
+        "E611_TIMESHIP_FULL_LIGHT.SGO",
+        "E611_TIMESHIP_LIGHT.SGO"
+      ]
+    },
+    {
+      "name": "GiantAnt",
+      "routes": [
+        "real_acid_matrix",
+        "physical_capture"
+      ],
+      "sites": [
+        "0x40B13C"
+      ],
+      "note": "Live acid factory gets real bone muzzle matrix rotated before original acid spread; orphan 40DD1A is not the evidence for actual emission.",
+      "stock_objects": [
+        "E650_GIANTANT01.SGO",
+        "E650_GIANTANT01_NETLIGHTSYNCMODE.SGO",
+        "E650_GIANTANT02B.SGO",
+        "E650_GIANTANT03B.SGO",
+        "E650_GIANTANT_GOLD.SGO",
+        "E650_GIANTANT_QUEEN.SGO",
+        "E650_GIANTANT_QUEEN_GOLD.SGO",
+        "GIANTANT01.SGO",
+        "GIANTANT01B.SGO",
+        "GIANTANT01NETLIGHTSYNCMODE.SGO",
+        "GIANTANT02B.SGO",
+        "GIANTANT03B.SGO",
+        "GIANTANT04.SGO",
+        "GIANTANT04SB.SGO",
+        "GIANTANTQUEEN.SGO",
+        "GOLDANT.SGO",
+        "GOLDANTQUEEN.SGO"
+      ]
+    },
+    {
+      "name": "GiantAntEX",
+      "routes": [
+        "real_acid_matrix",
+        "unit_direct",
+        "physical_capture"
+      ],
+      "sites": [
+        "0x40B13C",
+        "0x6D550B"
+      ],
+      "note": "EX inherits actual base acid factory and has an additional direct target battery.",
+      "stock_objects": [
+        "E662_GIANTANT_QUEEN_RED.SGO",
+        "E665_GIANTANT_MEDIUM.SGO"
+      ]
+    },
+    {
+      "name": "GiantBee",
+      "routes": [
+        "inline_ballistic",
+        "physical_capture"
+      ],
+      "sites": [
+        "0x4246EC"
+      ],
+      "note": "Canonical point before original speed/gravity and needle cone; actual contact target remains real.",
+      "stock_objects": [
+        "GIANTBEE01.SGO",
+        "GIANTBEE01CHARGE.SGO",
+        "GIANTBEE02CHARGE.SGO",
+        "GIANTBEEQUEEN.SGO",
+        "GIANTBEEQUEEN02.SGO"
+      ]
+    },
+    {
+      "name": "GiantBeeEX",
+      "routes": [
+        "inline_ballistic",
+        "unit_direct",
+        "physical_capture"
+      ],
+      "sites": [
+        "0x4246EC",
+        "0x6D550B"
+      ],
+      "note": "EX inherits base needle and adds direct battery.",
+      "stock_objects": [
+        "E668_GIANTBEE_MEDIUM.SGO",
+        "E668_GIANTBEE_QUEEN.SGO"
+      ]
+    },
+    {
+      "name": "GiantDango",
+      "routes": [
+        "rolling_point",
+        "physical_rolling"
+      ],
+      "sites": [
+        "0x431CFC"
+      ],
+      "note": "Both target-present and null merge before native rolling speed/state uses canonical float4.",
+      "stock_objects": [
+        "E514_DANGO.SGO"
+      ]
+    },
+    {
+      "name": "GiantSpider",
+      "routes": [
+        "native_ballistic",
+        "physical_capture"
+      ],
+      "sites": [
+        "0x43613B"
+      ],
+      "note": "Common null/present point merge recomputes original2312A0 with real context/muzzle/speed; final native spread/factory unchanged.",
+      "stock_objects": [
+        "E651_SPIDER01.SGO",
+        "E651_SPIDER01_LIGHT.SGO",
+        "E651_SPIDER01_NETLIGHTSYNCMODE.SGO",
+        "E651_SPIDER01_SILVER.SGO",
+        "E651_SPIDER_QUEEN.SGO",
+        "GIANTSPIDER01.SGO",
+        "GIANTSPIDER01NETLIGHTSYNCMODE.SGO",
+        "GIANTSPIDERQUEEN.SGO",
+        "SILVERSPIDER.SGO",
+        "SILVERSPIDERQUEEN.SGO"
+      ]
+    },
+    {
+      "name": "GiantSpiderEX",
+      "routes": [
+        "native_ballistic",
+        "unit_direct",
+        "physical_capture"
+      ],
+      "sites": [
+        "0x43613B",
+        "0x6D550B"
+      ],
+      "note": "EX inherits base web emitter and adds direct target battery.",
+      "stock_objects": [
+        "E667_SPIDER_MEDIUM.SGO",
+        "E667_SPIDER_QUEEN.SGO"
+      ]
+    },
+    {
+      "name": "Humanoid_BigGreyBoss",
+      "routes": [
+        "per_hand_matrix",
+        "boss_ballistic",
+        "meteor"
+      ],
+      "sites": [
+        "0x44500D",
+        "0x447703",
+        "0x44E1E6",
+        "0x44E36F",
+        "0x44E40A",
+        "0x443B5E",
+        "0x443A93"
+      ],
+      "note": "Exact child and plain GunBattery memberships; native mode0/2 dispatch, speed/gravity, genuine/empty lock and scatter retained; meteor local emit only, network replay unchanged. Meteor direction changes before native host sender serialization; the packet and local factory share the same stack float4, guest replays native packet unchanged.",
+      "stock_objects": [
+        "E516_BIGGREYBOSS.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_Martian",
+      "routes": [
+        "per_hand_point",
+        "native_shield"
+      ],
+      "sites": [
+        "0x45448D",
+        "0x455B62",
+        "0x4545B7",
+        "0x455B96",
+        "0x46F572",
+        "0x46F96C"
+      ],
+      "note": "Both soft gun getters, all final native target setters and common physical per-hand aim. Shield guard uses real incoming projectiles, not fake target coordinates.",
+      "stock_objects": [
+        "E601_MARTIAN_GG.SGO",
+        "E601_MARTIAN_GGSS.SGO",
+        "E601_MARTIAN_GS.SGO",
+        "E601_MARTIAN_LL.SGO",
+        "E601_MARTIAN_LLLL.SGO",
+        "E601_MARTIAN_LLSS.SGO",
+        "E601_MARTIAN_LS.SGO",
+        "E601_MARTIAN_N.SGO",
+        "E601_MARTIAN_NN.SGO",
+        "E601_MARTIAN_NS.SGO",
+        "E601_MARTIAN_SSSS.SGO",
+        "E601_MARTIAN_WS.SGO",
+        "E601_MARTIAN_WWSS.SGO",
+        "E661_MARTIAN_LEADER_AASS.SGO",
+        "E661_MARTIAN_LEADER_CS.SGO",
+        "E661_MARTIAN_LEADER_GGSS.SGO"
+      ]
+    },
+    {
+      "name": "EDF6_Venus",
+      "routes": [
+        "per_hand_point",
+        "native_shield"
+      ],
+      "sites": [
+        "0x45448D",
+        "0x455B62",
+        "0x4545B7",
+        "0x455B96",
+        "0x46F572",
+        "0x46F96C"
+      ],
+      "note": "Venus inherits Martian/Humanoid real per-hand emission and shield contracts.",
+      "stock_objects": [
+        "E616_VENUS_CCSS.SGO",
+        "E616_VENUS_GG.SGO",
+        "E616_VENUS_GGSS.SGO",
+        "E616_VENUS_GS.SGO",
+        "E616_VENUS_LLSS.SGO",
+        "E664_ARMOR_VENUS_BB.SGO",
+        "E664_ARMOR_VENUS_GGGG.SGO",
+        "E664_ARMOR_VENUS_WW.SGO"
+      ]
+    },
+    {
+      "name": "Humanoid_Basic",
+      "routes": [
+        "per_hand_point",
+        "native_shield"
+      ],
+      "sites": [
+        "0x46F572",
+        "0x46F96C"
+      ],
+      "note": "Canonical world point before native each-hand angles/bones and native target+720; original2312A0 and1194280 emission remain.",
+      "stock_objects": [
+        "E503_ARMORFROG_AF.SGO",
+        "E503_ARMORFROG_AF_LEADER.SGO",
+        "E503_ARMORFROG_LC.SGO",
+        "E503_ARMORFROG_LC_LEADER.SGO",
+        "E503_ARMORFROG_SG.SGO",
+        "E503_ARMORFROG_SG_LEADER.SGO",
+        "E503_FROG_AF.SGO",
+        "E503_FROG_AF_LEADER.SGO",
+        "E503_FROG_LC.SGO",
+        "E503_FROG_LC_LEADER.SGO",
+        "E503_FROG_SG.SGO",
+        "E503_FROG_SG_LEADER.SGO",
+        "E506_BIGGREY_AF.SGO",
+        "E506_BIGGREY_AF_LEADER.SGO",
+        "E506_BIGGREY_LL.SGO",
+        "E506_BIGGREY_LL_LEADER.SGO",
+        "E506_BIGGREY_SG.SGO",
+        "E506_BIGGREY_SG_LEADER.SGO",
+        "E506_HA_BIGGREY_FL.SGO",
+        "E506_HA_BIGGREY_FL_LEADER.SGO",
+        "E506_HA_BIGGREY_HMG.SGO",
+        "E506_HA_BIGGREY_HMG_LEADER.SGO",
+        "E506_HA_BIGGREY_LL.SGO",
+        "E506_HA_BIGGREY_LL_LEADER.SGO",
+        "E506_HA_BIGGREY_ML.SGO",
+        "E506_HA_BIGGREY_ML_LEADER.SGO",
+        "E506_NUDE_BIGGREY_AF.SGO",
+        "E506_NUDE_BIGGREY_LL.SGO",
+        "E506_NUDE_BIGGREY_SG.SGO",
+        "E506_NUDE_HA_BIGGREY_FL.SGO",
+        "E506_NUDE_HA_BIGGREY_HMG.SGO",
+        "E506_NUDE_HA_BIGGREY_ML.SGO",
+        "E617_WILDFROG_G.SGO",
+        "E617_WILDFROG_G2.SGO"
+      ]
+    },
+    {
+      "name": "Monster501",
+      "routes": [
+        "native_neck_pose",
+        "physical_contact"
+      ],
+      "sites": [
+        "0x4BA0B5"
+      ],
+      "note": "Original enabled neck target scratch before angular limits/interpolation; real501 muzzle1D18 and native fire factory retained.",
+      "stock_objects": [
+        "MONSTER501.SGO",
+        "MONSTER501_KING.SGO"
+      ]
+    },
+    {
+      "name": "Monster504",
+      "routes": [
+        "native_neck_pose",
+        "native_pattern",
+        "physical_contact"
+      ],
+      "sites": [
+        "0x4BA0B5"
+      ],
+      "note": "Shared neck target scratch before native pose; each skill locator and original random/pattern matrices retained.",
+      "stock_objects": [
+        "E504_MONSTERA.SGO",
+        "E504_MONSTERA_M034_3.SGO"
+      ]
+    },
+    {
+      "name": "Nephila",
+      "routes": [
+        "native_ballistic",
+        "physical_contact"
+      ],
+      "sites": [
+        "0x4E3714"
+      ],
+      "note": "Canonical far target uses original2312A0 with root1100 context/10A0 muzzle/10C0 speed; close/contact remains native.",
+      "stock_objects": [
+        "NEPHILA.SGO"
+      ]
+    },
+    {
+      "name": "DropBoat512",
+      "routes": [
+        "transport_generator"
+      ],
+      "sites": [
+        "0x4F3810"
+      ],
+      "note": "Original open/close landing/transport native skills, no target-point projectile.",
+      "stock_objects": [
+        "E512_DROPBOAT.SGO"
+      ]
+    },
+    {
+      "name": "UfoCarrier508",
+      "routes": [
+        "transport_generator"
+      ],
+      "sites": [
+        "0x4F9540"
+      ],
+      "note": "Original native mask0 carrier generator skills. Plugin carrier laser is separate from this original-class contract.",
+      "stock_objects": [
+        "E508_CARRIER.SGO",
+        "E508_CARRIER_FAR.SGO",
+        "E508_CARRIER_FAR_LIGHT.SGO"
+      ]
+    },
+    {
+      "name": "UfoSmall507",
+      "routes": [
+        "inline_ballistic"
+      ],
+      "sites": [
+        "0x52C2A3"
+      ],
+      "note": "All native bullet_pattern0/1/2 merge before native target float4 solve, gravity/spread/factory remain.",
+      "stock_objects": [
+        "E507_GOLDUFO.SGO",
+        "E507_GOLDUFO_ACE.SGO",
+        "E507_GOLDUFO_BIG.SGO",
+        "E507_GOLDUFO_CHARGE.SGO",
+        "E507_GOLDUFO_HI.SGO"
+      ]
+    },
+    {
+      "name": "UfoSmall515",
+      "routes": [
+        "point_before_bone_muzzle"
+      ],
+      "sites": [
+        "0x5351ED"
+      ],
+      "note": "Canonical float4 pointer preserves native bone query535217 before target load535239, original spread and gun local directions.",
+      "stock_objects": [
+        "E515_IMPERIALUFO.SGO",
+        "E515_IMPERIALUFO_ACE.SGO",
+        "E515_IMPERIALUFO_PROTOTYPE.SGO"
+      ]
+    }
+  ]
+}

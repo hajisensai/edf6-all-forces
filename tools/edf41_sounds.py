@@ -19,7 +19,7 @@ Four groups (GROUPS), each written whole or not at all:
              layout is the same); the list is version 2 (pylib/awe.py): 4.1's cue names and wave ids, and per cue its
              length in seconds from the wave's HCA header (what the subtitle stays up for).
   table      MISSION/EDF6_VOICETABLE.<CN|EN|JA|KR|SC>.SGO: EDF6's own table plus one row per 4.1 cue key. The game finds a
-             cue's caption by its key cut at the first '_E' or '_S' (EDF.dll 0x7B17F0), so a row is the cut key; no row
+             cue's caption by its key with one trailing '_E' or '_S' removed (EDF.dll 0x7B17F0), so a row is the cut key; no row
              prints '＊＊不明な再生キー＊＊'. The text is read at install from the subtitle plugin the player has in
              EDF4.1/mods/Plugins (subtitles.txt: Simplified, subtitles_zh.txt: Traditional, subtitles_en.txt): CN gets the
              Traditional, SC the Simplified, EN / JA / KR the English (the plugin has no Japanese or Korean text); a key
@@ -54,7 +54,8 @@ from modfiles import load_json, sha256, sha256_file  # noqa: E402
 OWNER = 'edf41sound'   # pylib/ledger.py OWNERS
 # raise a group's number when its converter's output changes: that group (only) is converted again. table 2: the rows
 # gained the 'name' / 'caption' member names the game reads them by (version 1 wrote unnamed [speaker, text] lists).
-VERSIONS = {'weapon': 1, 'voice.JA': 1, 'voice.EN': 1, 'table': 3}
+# table 4: the native lookup removes one trailing _E / _S, never an embedded one (E115_001_E_B keeps its full key).
+VERSIONS = {'weapon': 1, 'voice.JA': 1, 'voice.EN': 1, 'table': 4}
 STAMP = '.edf41sound.json'   # Mods/: {group: {'version': VERSIONS[group], 'source': {file: [size, mtime ns]}}}
 
 Blob = bytes | bytearray
@@ -191,9 +192,13 @@ def voice_bank(root41: str, lang: str) -> dict[str, Blob]:
 
 
 def cut_key(cue: str) -> str:
-    """The key the game looks a cue's caption up by: the cue name cut at the first '_E' or '_S'."""
-    cut = [i for i in (cue.find('_E'), cue.find('_S')) if i >= 0]
-    return cue[:min(cut)] if cut else cue
+    """EDF.dll 0x7B1900..0x7B1A41 removes one terminal _E / _S, in that order.
+
+    It starts the comparison at len(key)-len(suffix), then shortens by len(suffix)
+    and exits the loop. Embedded markers are part of the key: E115_001_E_B is
+    an actual cue and caption in both source languages, not E115_001.
+    """
+    return cue[:-2] if cue.endswith(('_E', '_S')) else cue
 
 
 def read_captions(path: str) -> dict[str, str]:
@@ -210,7 +215,7 @@ def read_captions(path: str) -> dict[str, str]:
 
 
 def cue_keys(root41: str) -> list[str]:
-    """Every key (cut cue name) of 4.1's two voice lists, sorted."""
+    """Every native caption key of 4.1's two voice lists, sorted."""
     keys: set[str] = set()
     for _awb, awe_name in VOICES.values():
         with open(sound_path(root41, awe_name), 'rb') as f:

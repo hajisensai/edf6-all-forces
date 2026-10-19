@@ -3,11 +3,19 @@
 #include "crew.h"
 #include "support_call.h"
 #include "support_aircraft.h"
+#include "support_submarine.h"
+#include "support_source.h"
+#include "carrier_drone_net.h"
+#include "pvp_native.h"
+#include "command_identity.h"
+#include "support_drone.h"
+#include "subcarrier.h"
 #include "support_config.h"
 #include "support_policy.h"
 #include "support_soldier.h"
 #include "support_spawn.h"
 #include "support_net.h"
+#include "pvp.h"
 #include "mission_crew_support.h"
 #include "mission_participants.h"
 #include "mission_participant_gate.h"
@@ -117,9 +125,9 @@ void Refuse(std::uint32_t catalog,const char* cause,const wchar_t* text) noexcep
     if(IsRescue(catalog))RescueNote(text);else Status(text);
     Log("SUPPORT plan catalog=%u refused: %s",catalog,cause);
 }
-// Whether this machine itself may create and own the deployment: offline, or the host of a world whose only actual
-// participant it is (support_net.h SupportSoloHostWorld). Otherwise the request goes through the host's transaction.
-bool LocalAuthority() noexcept {return !InSession() || SupportSoloHostWorld();}
+// Every online world, including a single admitted participant, uses the one registered Session/token lifecycle.
+// Only a true offline mission may create local unregistered deployments.
+bool LocalAuthority() noexcept {return !InSession();}
 void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexcept {
     using support_net::RequestStatus;
     // The rescue's own request: told to the rescue only (its id taken from the accepted notice of its submission).
@@ -421,6 +429,29 @@ void ComposeOnce(std::uint32_t catalog) noexcept {
     planning.composed=true;planning.load=load;
     Log("SUPPORT plan catalog=%u: composed load of %d",catalog,load.count);
 }
+support_net::PlanResult PlanSubmarine(std::uint32_t catalog,const float* target,const float* from,
+                                         std::uint64_t loadout,SupportPlan* out) noexcept {
+    using support_net::PlanResult;
+    if(!out || !target || !SupportSubCatalog(static_cast<int>(catalog)) || loadout ||
+       !Cfg().enabled || !Cfg().jetAirRaider || !Cfg().customNpcAi || !Cfg().npcBoarding ||
+       !SupportCfg().Enabled(static_cast<int>(catalog)) || !SupportSoldiersReady() || SupportMissionPolicy().underground)
+        return PlanResult::refused;
+    float matrix[16]{},afloat=0.0f;
+    if(!PlanSupportSubmarine(target,from,matrix,&afloat)) {
+        Refuse(catalog,"no verified water entry or submarine resources unavailable",L"潜水母舰需要已核实水域、已预载资源及空余舰位");
+        return PlanResult::refused;
+    }
+    SupportPlan plan{};plan.catalogId=catalog;
+    plan.target[0]=matrix[12];plan.target[1]=afloat;plan.target[2]=matrix[14];
+    if(!AddUnit(plan,kSupportSubmarineResource,0,matrix+12,matrix+8) ||
+       !AddUnit(plan,kSupportRangerResource,1,matrix+12,matrix+8))return PlanResult::refused;
+    // Exact host-selected underwater transform: no peer reruns placement/terrain selection.
+    std::memcpy(plan.units[0].matrix,matrix,sizeof(matrix));
+    std::memcpy(plan.units[1].matrix,matrix,sizeof(matrix));
+    *out=plan;return PlanResult::ready;
+}
+support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalog,const float* target,
+                                         std::uint64_t loadout,SupportPlan* out) noexcept;
 support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint64_t loadout,SupportPlan* out) noexcept {
     using support_net::PlanResult;
     if(!out || !target || catalog>=static_cast<unsigned>(SupportCallCount())) {
@@ -437,6 +468,7 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     // "no clear air corridor", 2026-10-09 16:52:26, 50 ms before the area was in; the same call worked later). It waits.
     // The rescue too (its deck takeoff and its edge both stand on that area): the host's transaction waits; offline,
     // RescueHere says why and heli.cpp asks again.
+    if(SupportSubCatalog(static_cast<int>(catalog)))return PlanSubmarine(catalog,target,player.at ? player.pos : nullptr,loadout,out);
     if(!PlayAreaMeasured())return PlanResult::pending;
     // The rescue plans in one go and never touches the map's request in planning (its entry search state, its composed
     // load): it has no seats to compose (SupportCallSeats 0) and brings its own crew.
@@ -677,9 +709,39 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     *out=plan;planning.active=false;return PlanResult::ready;
 }
 
+support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalog,const float* target,
+                                         std::uint64_t loadout,SupportPlan* out) noexcept {
+    if(SupportSubCatalog(static_cast<int>(catalog))) {
+        ObjRef requester{};
+        if(!SupportAuthenticatedRequester(peer,&requester) || !Live(requester))return support_net::PlanResult::refused;
+        return PlanSubmarine(catalog,target,static_cast<const float*>(static_cast<const void*>(
+            static_cast<const unsigned char*>(requester.obj)+kPosition)),loadout,out);
+    }
+    return Plan(catalog,target,loadout,out);
+}
 bool Validate(const SupportPlan& plan) noexcept {
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ValidateMissionCrewPlan(plan);
-    if(!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) || !SupportSoldiersReady())return false;
+    const bool dynamicDrone=plan.count==1 &&
+        (plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(plan.units[0].resourceId));
+    if(!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) ||
+       (!dynamicDrone && !SupportSoldiersReady()))return false;
+    if(SupportSubCatalog(static_cast<int>(plan.catalogId))) {
+        if(plan.count==2 && plan.units[0].resourceId==kSupportSubmarineResource) {
+            return !SupportMissionPolicy().underground && !plan.units[0].role && !plan.units[0].variant && plan.units[1].role==1 &&
+                plan.units[1].resourceId==kSupportRangerResource && !plan.units[1].variant &&
+                !std::memcmp(plan.units[0].matrix,plan.units[1].matrix,sizeof(plan.units[0].matrix)) &&
+                plan.target[0]==plan.units[0].matrix[12] && plan.target[2]==plan.units[0].matrix[14] &&
+                ValidateSupportSubmarine(plan.units[0].matrix,plan.target[1]);
+        }
+        ObjRef parent{};
+        if(plan.count==1 && IsCarrierDroneResource(plan.units[0].resourceId)) {
+            const auto kind=static_cast<SupportDroneKind>(CarrierDroneKind(plan.units[0].resourceId));
+            return !plan.units[0].role && plan.units[0].variant && ResolveSupportSource(plan.units[0].variant,&parent) &&
+                CarrierSupportDroneReady(parent,kind,CarrierDroneSlot(plan.units[0].resourceId));
+        }
+        return plan.count==1 && plan.units[0].resourceId==kSupportSubDroneResource && !plan.units[0].role &&
+            plan.units[0].variant && ResolveSupportSubmarine(plan.units[0].variant,&parent) && SupportDroneReady();
+    }
     SupportAircraft aircraft;SupportVehicleKind kind{};SupportCrewMode mode{};
     const bool air=AirCatalog(plan.catalogId),ground=GroundCatalog(plan.catalogId,kind,mode);
     const auto capability=CapabilityOf(plan.catalogId);
@@ -927,6 +989,8 @@ void WithdrawGround(Deployment& deployed) noexcept {
     Log("SUPPORT deployment %llu: its withdrawn vehicle is out: its crew deleted",static_cast<unsigned long long>(deployed.id));
 }
 void Destroy(std::uint64_t id) noexcept {
+    // Session may fail during prepare before there is a Deployment row/native child to find below.
+    CancelCarrierSupportTransaction(id);
     for(auto& deployed:deployments)if(deployed.used && deployed.id==id) {
         bool preserve[support_net::kMaxUnits]{};
         bool occupied=false;
@@ -946,13 +1010,24 @@ void Destroy(std::uint64_t id) noexcept {
             const auto parent=deployed.plan.units[i].role;
             if(parent && parent<=deployed.plan.count && preserve[parent-1])preserve[i]=true;
             if(preserve[i] && deployed.plan.units[i].resourceId<kAircraft)HoldSupportSoldier(deployed.objects[i],false);
+            if(!preserve[i]) {
+                const auto resource=deployed.plan.units[i].resourceId;
+                if(IsCarrierDroneResource(resource)) {
+                    ObjRef parentRef{};
+                    if(ResolveSupportSource(deployed.plan.units[i].variant,&parentRef))
+                        CancelCarrierSupportDrone(parentRef,CarrierDroneSlot(resource),deployed.id);
+                }
+                PvpForgetSupportObject(deployed.objects[i]);
+            }
         }
         // Remove crew first so native seat ownership is released before deleting hulls.
         for(unsigned i=0;i<deployed.plan.count;++i)
             if(!preserve[i] && deployed.plan.units[i].resourceId<kAircraft)DeleteSoldier(deployed.objects[i]);
         for(unsigned i=0;i<deployed.plan.count;++i) {
             if(preserve[i])continue;
-            if(deployed.plan.units[i].resourceId>=kVehicle && Live(deployed.objects[i]))DeleteSupportVehicle(static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj)));
+            if(deployed.plan.units[i].resourceId==kSupportSubmarineResource)DeleteSupportSubmarine(deployed.objects[i]);
+            else if(deployed.plan.units[i].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(deployed.plan.units[i].resourceId))DeleteSupportDrone(deployed.objects[i]);
+            else if(deployed.plan.units[i].resourceId>=kVehicle && Live(deployed.objects[i]))DeleteSupportVehicle(static_cast<unsigned char*>(const_cast<void*>(deployed.objects[i].obj)));
             else if(deployed.plan.units[i].resourceId>=kAircraft)DeleteSupportAircraft(deployed.objects[i]);
         }
         const bool rescue=IsRescue(deployed.plan.catalogId);
@@ -999,7 +1074,7 @@ bool BoardAirborne(Deployment& deployed,bool networked) noexcept {
     return true;
 }
 bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool networked) noexcept {
-    if(!Validate(plan))return false;
+    if((InSession() && !networked) || !Validate(plan))return false;
     Deployment* deployed=nullptr;for(auto& row:deployments)if(!row.used){deployed=&row;break;}
     if(!deployed)return false;
     deployed->used=true;deployed->id=id;deployed->plan=plan;deployed->remote=remote;deployed->born=GameMs();deployed->networked=networked;
@@ -1025,7 +1100,16 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
             if(!HoldSupportSoldier(object,true)){Destroy(id);return false;}
         } else {
             unsigned char* vehicle=nullptr;
-            if(unit.resourceId<kVehicle) {
+            if(unit.resourceId==kSupportSubmarineResource)vehicle=PrepareSupportSubmarine(unit.matrix,plan.target[1]);
+            else if(unit.resourceId==kSupportSubDroneResource) {
+                ObjRef parent{};
+                if(ResolveSupportSubmarine(unit.variant,&parent))vehicle=PrepareSupportDrone(unit.matrix,plan.target,parent.obj);
+            } else if(IsCarrierDroneResource(unit.resourceId)) {
+                ObjRef parent{};
+                if(ResolveSupportSource(unit.variant,&parent))vehicle=PrepareCarrierSupportDrone(unit.matrix,plan.target,parent,
+                    static_cast<SupportDroneKind>(CarrierDroneKind(unit.resourceId)),CarrierDroneSlot(unit.resourceId),id,
+                    CarrierDroneOrdered(unit.resourceId));
+            } else if(unit.resourceId<kVehicle) {
                 SupportAircraft spec;
                 if(AircraftSpecOf(plan.catalogId,&spec))vehicle=PrepareSupportAircraft(spec,unit.matrix,made);
             } else {
@@ -1040,6 +1124,18 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
             if(networked && !IsSupportAirborneAircraft(unit.resourceId) && !RegisterSupportObject(vehicle,unit.netId)){Destroy(id);return false;}
         }
         deployed->objects[i]=object;
+    }
+    // Every peer binds the authenticated plan's native requester identity and changes the actual soldier/hull/weapon
+    // teams before any airborne pilot can enter combat. Failure rolls the entire support transaction back.
+    if(!PvpAttachSupportPlan(plan,deployed->objects,plan.count)){Destroy(id);return false;}
+    if(SupportSubCatalog(static_cast<int>(plan.catalogId))) {
+        if(plan.units[0].resourceId==kSupportSubmarineResource) {
+            if(!BindSupportSubmarineOwner(deployed->objects[0],plan.requester)){Destroy(id);return false;}
+        } else if(plan.units[0].resourceId==kSupportSubDroneResource) {
+            ObjRef parent{};
+            if(!ResolveSupportSubmarine(plan.units[0].variant,&parent) ||
+               !AddSupportSubmarineDrone(parent,deployed->objects[0])){Destroy(id);return false;}
+        }
     }
     if(!BoardAirborne(*deployed,networked)){Destroy(id);return false;}
     Log("SUPPORT spawn %llu: catalog %u, %u units created (%s)",static_cast<unsigned long long>(id),plan.catalogId,plan.count,
@@ -1070,6 +1166,27 @@ bool Spawn(std::uint64_t id,const SupportPlan& plan,bool remote) noexcept {
 }
 bool Assign(Deployment& deployed) noexcept {
     const auto& plan=deployed.plan;ObjRef leader;
+    if(SupportSubCatalog(static_cast<int>(plan.catalogId))) {
+        if(plan.units[0].resourceId==kSupportSubmarineResource) {
+            if(!HoldSupportSoldier(deployed.objects[1],false))return false;
+            if(!deployed.remote) {
+                auto* hull=static_cast<unsigned char*>(const_cast<void*>(deployed.objects[0].obj));
+                unsigned char* crew[]={static_cast<unsigned char*>(const_cast<void*>(deployed.objects[1].obj))};
+                if(NpcSeatCrewNow(hull,crew,1)!=1)return false;
+            }
+            if(!ActivateSupportSubmarine(deployed.objects[0]))return false;
+        } else {
+            if(!ActivateSupportDrone(deployed.objects[0]))return false;
+            if(IsCarrierDroneResource(plan.units[0].resourceId)) {
+                ObjRef parent{};
+                if(!ResolveSupportSource(plan.units[0].variant,&parent) ||
+                   !ConfirmCarrierSupportDrone(parent,CarrierDroneSlot(plan.units[0].resourceId),deployed.id))return false;
+            }
+        }
+        deployed.assigned=deployed.started=deployed.delivered=true;
+        Status(plan.units[0].resourceId==kSupportSubmarineResource ? L"全员已确认，潜水母舰正在上浮" : L"舰载无人机已由全员确认并出动");
+        return true;
+    }
     // Native ride/follow events use a different channel. Never emit one until every peer has ACKed
     // construction, or it can arrive before that peer knows the soldier/vehicle's native identity.
     for(unsigned i=0;i<plan.count;++i)if(plan.units[i].resourceId<kAircraft)
@@ -1128,7 +1245,7 @@ void Configure() noexcept {
         [](std::uint32_t ordinal,unsigned char* out) noexcept {
             return OnlineHostOnly() && DeriveSupportSoldierNetId(PlayerHuman(),ordinal,out);
         },&ReadMissionParticipants,&MissionParticipantGateReady,&MissionParticipantCreationsMatch,&RequestNotice,&SupportVariantHello,
-        [](std::uint32_t catalog) noexcept {return IsRescue(catalog);}});
+        [](std::uint32_t catalog) noexcept {return IsRescue(catalog);},&PlanForRequester});
     InstallMissionCrewSupport();configured=true;
 }
 }
@@ -1162,7 +1279,7 @@ int SupportMenuCount() noexcept {return SupportCallCount()-1;}   // the rescue (
 const wchar_t* SupportCallForbidden(int index) noexcept {
     if(index<0 || index>=SupportCallCount() || IsRescue(static_cast<std::uint32_t>(index)))return nullptr;
     const auto policy=SupportMissionPolicy();
-    // The submarine carrier surfaces from the water on no plan (SupportSubCallAt): only a cave keeps it (no sea there).
+    // Submarine plans surface from verified water, so only underground policy excludes this entry.
     const bool allowed=SupportSubCatalog(index) ? !policy.underground : support::Allowed(policy,CapabilityOf(static_cast<std::uint32_t>(index)));
     if(allowed)return nullptr;
     if(policy.underground)return L"地下只能呼叫步兵支援；钻地战车请用空袭兵的载具请求呼叫";
@@ -1229,7 +1346,7 @@ bool SupportCallPreset(int index,SupportLoadout* out) noexcept {
     return true;
 }
 namespace {
-// A request of entry `index` (a map / radio call): planned here (offline, a one-player world's host) or sent to the host.
+// A request of entry `index` (a map / radio call): local offline planning or the registered online host transaction.
 bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
     if(!note || !capacity)return false;
     // A call made as it is (a radio weapon, airstrike.cpp) brings the entry's out-of-game preset, as the bar's panel does.
@@ -1252,16 +1369,7 @@ bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* n
         // The mission's rules, known here before anything is planned or sent (the host's Plan / Validate ask them too).
         Refuse(static_cast<std::uint32_t>(index),"the mission's support rules (support_policy.h Allowed)",why);
     }
-    else if(SupportSubCatalog(index)) {
-        // It surfaces where it is called (SupportSubCallAt), on no plan: from the map, this machine's own copy only, so
-        // online it is the Air Raider's call weapon (replayed on every machine) that brings it.
-        if(InSession())Refuse(static_cast<std::uint32_t>(index),"submarine carrier from the map online",
-                              L"联机时潜水母舰请用空袭兵的呼叫武器（信号弹）召唤");
-        else if(callAt && GameMs()-callAt<kCallCooldown)Status(L"支援调度冷却中（30 秒）");
-        else if(SupportSubCallAt(target,player.at ? player.pos : nullptr,true,note,capacity)){callAt=GameMs();return true;}
-        else return false;
-    }
-    else if(InSession() && !LocalAuthority()) {
+    else if(InSession()) {
         localRequest.acceptNotices=true;
         accepted=SubmitSupportRequest(index,target,note,capacity,loadout);
         if(!accepted || !localRequest.hasNotice) {
@@ -1278,8 +1386,7 @@ bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* n
         Renew(planning);planning.active=true;planning.catalog=static_cast<unsigned>(index);std::memcpy(planning.target,target,12);
         planning.loadout=loadout;
         offlinePending=true;accepted=true;Status(L"正在安排支援入口及路线");
-        Log("SUPPORT request catalog=%d accepted here (%s), load %llX",index,InSession() ? "host of a one-player world" : "offline",
-            static_cast<unsigned long long>(loadout));
+        Log("SUPPORT request catalog=%d accepted offline, load %llX",index,static_cast<unsigned long long>(loadout));
     }
     if(SupportCfg().problems[0] && !configNoticeShown) {
         // An invalid setting is said once a mission (the default it fell back to is used; the log has it too).
@@ -1294,35 +1401,103 @@ bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capac
     return SupportCallComposedAt(index,target,nullptr,note,capacity);
 }
 bool SupportSubCallAt(const float* target,const float* from,bool local,wchar_t* note,std::size_t capacity) noexcept {
-    if(note && capacity)note[0]=0;
-    if(!target || !std::isfinite(target[0]+target[1]+target[2]))return false;
-    // Ahead of the target, away from the caller: the hull's 1664 m clear of them where the water lets it, else nearer.
-    constexpr float kAhead[]={1000.0f,600.0f,300.0f,0.0f};
-    float dir[3]={0.0f,0.0f,1.0f};
-    if(from) {
-        const float dx=target[0]-from[0],dz=target[2]-from[2],l=std::sqrt(dx*dx+dz*dz);
-        if(std::isfinite(l) && l>5.0f){dir[0]=dx/l;dir[2]=dz/l;}
+    (void)from;
+    if(InSession() && !local)return false; // replayed native callbacks never submit duplicate requests
+    for(int i=0;i<SupportCallCount();++i)if(SupportSubCatalog(i))return SupportCallAt(i,target,note,capacity);
+    return false;
+}
+namespace {
+bool BuildCarrierDronePlan(const ObjRef& parent,const float* from,const float* heading,const float* anchor,
+                           SupportDroneKind kind,unsigned slot,bool ordered,SupportPlan* out) noexcept {
+    if(!out || !from || !heading || !anchor || !CarrierSupportDroneReady(parent,kind,slot) ||
+       !CarrierSupportSlotAvailable(parent,slot))return false;
+    const auto key=SupportSourceKey(parent);
+    if(!key)return false;
+    SupportPlan plan{};
+    bool catalog=false;
+    for(int i=0;i<SupportCallCount();++i)if(SupportSubCatalog(i)){plan.catalogId=static_cast<unsigned>(i);catalog=true;break;}
+    if(!catalog)return false;
+    for(const auto& deployed:deployments)if(deployed.used)for(unsigned i=0;i<deployed.plan.count;++i)
+        if(deployed.objects[i].obj==parent.obj && deployed.objects[i].ctrl==parent.ctrl)
+            std::memcpy(plan.requester,deployed.plan.requester,sizeof(plan.requester));
+    std::memcpy(plan.target,anchor,sizeof(plan.target));
+    if(!PvpMakeInheritedSupportPlan(parent,&plan) || !AddUnit(plan,CarrierDroneResource(static_cast<unsigned>(kind),slot,ordered),0,from,heading))return false;
+    plan.units[0].variant=key;
+    if(!Validate(plan))return false;
+    *out=plan;return true;
+}
+std::uint64_t CommitCarrierDronePlan(const ObjRef& parent,const float* from,const float* heading,const float* anchor,
+                                    SupportDroneKind kind,unsigned slot,bool ordered) noexcept {
+    SupportPlan plan{};
+    if(!BuildCarrierDronePlan(parent,from,heading,anchor,kind,slot,ordered,&plan))return 0;
+    const auto token=SubmitPreparedSupportPlan(plan);
+    if(token && !ReserveCarrierSupportDrone(parent,slot,token)){ReportSupportFailure(token);return 0;}
+    return token;
+}
+bool AuthenticatedCarrierDriver(std::uint32_t peer,const char* authenticatedPuid,const unsigned char parentId[32],ObjRef* parent) noexcept {
+    if(!authenticatedPuid || !parentId || !parent || !InSession() || !OnlineHostOnly())return false;
+    MarkIdentities source{};
+    if(!ResolveMarkIdentities(nullptr,parentId,&source) || !source.target)return false;
+    unsigned char full[32]{};
+    if(!ReadNativeObjectId(static_cast<const unsigned char*>(source.target.obj),full) || std::memcmp(full,parentId,32) ||
+       !SupportSourceKey(source.target))return false;
+    ObjRef requester{},driver{};unsigned char requesterId[32]{};MarkIdentities identity{};
+    if(!SupportAuthenticatedRequester(peer,&requester) || !PvpNativeSupportDriver(source.target,&driver) ||
+       requester.obj!=driver.obj || requester.ctrl!=driver.ctrl ||
+       !ReadNativeObjectId(static_cast<const unsigned char*>(requester.obj),requesterId) ||
+       !ResolveMarkIdentities(requesterId,nullptr,&identity) || identity.player.obj!=requester.obj ||
+       identity.player.ctrl!=requester.ctrl || !SupportCommandRequesterMatches(identity.puid,authenticatedPuid))return false;
+    *parent=source.target;return true;
+}
+}
+std::uint64_t SubmitCarrierSupportDrone(const ObjRef& parent,const float* from,const float* heading,const float* anchor,
+                                      SupportDroneKind kind,unsigned slot) noexcept {
+    if(!InSession() || !IsOnlineAuthority(parent.obj) || !CarrierSupportDroneReady(parent,kind,slot))return 0;
+    if(!OnlineHostOnly()) {
+        unsigned char id[32]{};
+        return ReadNativeObjectId(static_cast<const unsigned char*>(parent.obj),id) &&
+            SubmitCarrierDroneNetworkRequest(id,static_cast<unsigned>(kind),slot,anchor) ? kCarrierDroneRequestQueued : 0;
     }
-    const wchar_t* text=L"目标附近没有水域：潜水母舰只能从水下上浮";
-    bool sawWater=false,surfaced=false;
-    for(const float ahead:kAhead) {
-        const float at[3]={target[0]+dir[0]*ahead,target[1],target[2]+dir[2]*ahead};
-        float surface=0.0f;
-        if(SeaAt(at[0],at[2],&surface)==Sea::land)continue;
-        sawWater=true;
-        surfaced=SubLaunch(at,dir)!=nullptr;
-        Log("SUPPORT submarine carrier at (%.0f,%.0f,%.0f), %.0f m past the target: %s",at[0],at[1],at[2],ahead,
-            surfaced ? "surfacing" : "not made (not preloaded, or carriers out already)");
-        break;
-    }
-    if(surfaced)text=L"潜水母舰正在上浮";
-    else if(sawWater)text=L"潜水母舰无法出动：资源未预载或已有 3 艘在场";
-    else Log("SUPPORT submarine carrier: no water at or past (%.0f,%.0f): refused",target[0],target[2]);
-    if(local) {
-        Status(text);
-        if(note && capacity)_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",status);
-    }
-    return surfaced;
+    ObjRef driver{};const bool ordered=PvpNativeSupportDriver(parent,&driver);
+    return CommitCarrierDronePlan(parent,from,heading,anchor,kind,slot,ordered);
+}
+bool SubmitCarrierSupportRecall(const ObjRef& parent) noexcept {
+    if(!InSession() || !IsOnlineAuthority(parent.obj))return false;
+    if(OnlineHostOnly())return ApplyCarrierSupportRecall(parent)>=0;
+    unsigned char id[32]{};const float zero[3]{};
+    return ReadNativeObjectId(static_cast<const unsigned char*>(parent.obj),id) &&
+        SubmitCarrierDroneNetworkRequest(id,carrier_drone_net::kRecall,0,zero);
+}
+bool HandleCarrierDroneNetworkRequest(std::uint32_t peer,const char* authenticatedPuid,const unsigned char parentId[32],
+                                     unsigned kind,unsigned slot,const float anchor[3]) noexcept {
+    ObjRef parent{};
+    if(!AuthenticatedCarrierDriver(peer,authenticatedPuid,parentId,&parent))return false;
+    if(kind==carrier_drone_net::kRecall)return slot==0 && anchor && anchor[0]==0 && anchor[1]==0 && anchor[2]==0 &&
+        ApplyCarrierSupportRecall(parent)>=0;
+    if(kind>2 || slot>=6 || !anchor)return false;
+    __try {
+        const auto* object=static_cast<const unsigned char*>(parent.obj);
+        if(!Readable(object,kMatrix+64))return false;
+        const auto* matrix=reinterpret_cast<const float*>(object+kMatrix);
+        const float from[3]={matrix[12],matrix[13]-25.0f,matrix[14]};
+        float heading[3]={matrix[8],0.0f,matrix[10]};
+        const float length=std::hypot(heading[0],heading[2]);
+        if(!std::isfinite(length) || length<0.001f)return false;
+        heading[0]/=length;heading[2]/=length;
+        return CommitCarrierDronePlan(parent,from,heading,anchor,static_cast<SupportDroneKind>(kind),slot,true)!=0;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool SubmitSubmarineDrone(const ObjRef& parent,const float* from,const float* heading,const float* anchor,
+                          const unsigned char requester[32]) noexcept {
+    if(!InSession() || !OnlineHostOnly() || !from || !heading || !anchor || !requester || !SupportDroneReady())return false;
+    const auto key=SubmarineSupportKey(parent);
+    if(!key)return false;
+    SupportPlan plan{};
+    for(int i=0;i<SupportCallCount();++i)if(SupportSubCatalog(i)){plan.catalogId=static_cast<unsigned>(i);break;}
+    std::memcpy(plan.target,anchor,sizeof(plan.target));std::memcpy(plan.requester,requester,sizeof(plan.requester));
+    if(!PvpRefreshSupportOwner(&plan) || !AddUnit(plan,kSupportSubDroneResource,0,from,heading))return false;
+    plan.units[0].variant=key;
+    return Validate(plan) && SubmitPreparedSupportPlan(plan)!=0;
 }
 bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
     if(note && capacity && index==SupportRescueCatalog()) {
@@ -1332,7 +1507,7 @@ bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* l
     return Request(index,target,load,note,capacity);
 }
 namespace {
-// Offline / a one-player world's host: the rescue planned and made at once (an air plan never waits), with no queue,
+// Offline rescue is planned and made at once (an air plan never waits), with no queue,
 // no cooldown and no map request in planning touched (2026-10-10, the user: 「不用受限制吧」).
 bool RescueHere(const float* target) noexcept {
     SupportPlan plan;
@@ -1401,8 +1576,7 @@ SupportVariant SupportCallVariant(int index) noexcept {
     return mode==SupportCrewMode::unmanned ? SupportVariant::empty : SupportVariant::crewed;
 }
 SupportReadiness SupportCallReadiness() noexcept {
-    // The same tests SupportCallAt makes before it plans, read without asking: a guest's host decides (the host of a
-    // one-player world plans here, through the same pending plan and cooldown as offline).
+    // Online requests use Session admission and readiness; only offline calls use the local pending plan/cooldown.
     if(!Cfg().enabled)return {SupportReady::off,0};
     if(InSession() && !LocalAuthority())return {SupportReady::ready,0};
     if(offlinePending)return {SupportReady::planning,0};
@@ -1474,7 +1648,28 @@ void SupportDispatchTick() noexcept {
         if(!deployed.used)continue;
         bool anyLive=false;
         for(unsigned i=0;i<deployed.plan.count;++i)anyLive=anyLive || Live(deployed.objects[i]);
-        if(!anyLive){Log("SUPPORT deployment %llu: none of its units left",static_cast<unsigned long long>(deployed.id));Renew(deployed);continue;}
+        if(!anyLive) {
+            const bool carrierChild=deployed.plan.count==1 &&
+                (deployed.plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(deployed.plan.units[0].resourceId));
+            if(carrierChild) {
+                // The dead native identity still owns a Session token, slot and prepared weak ledger.
+                // Only the authority retires it globally; peers retain metadata until that Destroy arrives.
+                if(!deployed.networked || !deployed.remote) {
+                    const auto id=deployed.id;if(deployed.networked)ReportSupportFailure(id);else Destroy(id);
+                }
+            } else {Log("SUPPORT deployment %llu: none of its units left",static_cast<unsigned long long>(deployed.id));Renew(deployed);}
+            continue;
+        }
+        if(SupportSubCatalog(static_cast<int>(deployed.plan.catalogId))) {
+            if(!deployed.assigned && (!deployed.networked || SupportTransactionActive(deployed.id)) && !Assign(deployed)) {
+                const auto id=deployed.id;if(deployed.networked)ReportSupportFailure(id);else Destroy(id);
+            }
+            if(deployed.used && deployed.assigned && !deployed.remote && deployed.plan.count==1 &&
+               SupportDroneLeft(deployed.objects[0])) {
+                const auto id=deployed.id;if(deployed.networked)ReportSupportFailure(id);else Destroy(id);
+            }
+            continue; // the ship and drones own movement; never apply ground/aircraft route or reap policy
+        }
         if(!deployed.remote)Trace(deployed);
         if(!deployed.remote)Retire(deployed);
         if(!deployed.assigned) {

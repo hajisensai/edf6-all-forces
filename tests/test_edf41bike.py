@@ -1,0 +1,152 @@
+"""Real V408 data contracts and negative controls; no game is started or written."""
+from __future__ import annotations
+
+import copy
+import math
+import os
+import struct
+import sys
+import unittest
+
+ROOT = os.path.dirname(os.path.dirname(__file__))
+sys.path[:0] = [os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'tools')]
+import cas_graft  # noqa: E402
+import dsgo  # noqa: E402
+import edf41bike as bike  # noqa: E402
+import hk2014  # noqa: E402
+import legacy_sgo  # noqa: E402
+import mab_legacy  # noqa: E402
+import make_edf41_objects as objects  # noqa: E402
+import mdb  # noqa: E402
+import outfit41  # noqa: E402
+import sgo  # noqa: E402
+
+GAME4 = os.environ.get('EDF41_GAME_DIR', r'D:\Steam\steamapps\common\Earth Defense Force 4.1')
+GAME6 = os.environ.get('EDF6_GAME_DIR', r'D:\Steam\steamapps\common\EARTH DEFENSE FORCE 6')
+
+
+def locator_params(block: bytes, name: str) -> dict:
+    _layout, records = mab_legacy._records(block)
+    for group, at in records:
+        n = mab_legacy._text_at(block, at + struct.unpack_from('<i', block, at)[0])
+        if group == 0 and n == name:
+            param = at + struct.unpack_from('<i', block, at + 0x1C)[0]
+            return sgo.read(block[param:])[1]
+    raise ValueError(f'no locator {name}')
+
+
+@unittest.skipUnless(all(os.path.isfile(os.path.join(p, 'Root.cpk')) for p in (GAME4, GAME6)),
+                     'requires EDF4.1 and EDF6 native resources')
+class Native(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.games = objects.Games(GAME4, GAME6)
+        cls.files = bike.build(cls.games, bike.ROOTS[0])
+        cls.source = sgo.read(legacy_sgo.convert(cls.games.read4('OBJECT/' + bike.ROOTS[0])))[1]
+        cls.members = sgo.read(cls.files['OBJECT/' + bike.ROOTS[0]])[1]
+        cls.physics = cls.files['OBJECT/VEHICLE408_MOTORBIKE.SHKT']
+        cls.md = bike.model(cls.files['OBJECT/VEHICLE408_MOTORBIKE.RAB'], 'Vehicle408_motorbike.mdb')
+
+    def test_model_and_all_eight_physics_parts_stay_matched(self) -> None:
+        self.assertEqual(self.physics, self.games.read4('OBJECT/VEHICLE408_MOTORBIKE.SHKT'))
+        self.assertEqual(self.members['ragdoll'], self.source['ragdoll'])
+        self.assertEqual(self.md.version, 0x20)
+        source = bike.model(self.games.read4('OBJECT/VEHICLE408_MOTORBIKE.RAB'), 'Vehicle408_motorbike.mdb')
+        old = {source.name_of(b.name): (b.local, b.inv_bind) for b in source.bones}
+        new = {self.md.name_of(b.name): (b.local, b.inv_bind) for b in self.md.bones}
+        self.assertEqual({k: new[k] for k in old}, old)
+        self.assertEqual(set(new) - set(old), {bike.MARKER})
+        bodies = {o['name'] for o in hk2014.read(self.physics).objects if o.type.name == 'hkpRigidBody'}
+        self.assertEqual(bodies, {'RagDollProxys.' + n for n in bike.PROXIES})
+        bike.check(self.members, self.md, self.physics)
+        self.assertEqual(self.members['car_aim_node'], [])
+        self.assertNotIn('gun', {r[0] for r in self.members['car_base_rigid_body']})
+        self.assertEqual([r for r in self.members['car_base_simulation_node'] if r[0] == 'gun'], [['gun', 1]])
+
+    def test_three_physical_wheels_and_original_radii(self) -> None:
+        rows = self.members['car_base_wheel']
+        self.assertEqual([r[0] for r in rows], list(bike.WHEELS))
+        self.assertEqual([r[8] for r in rows], [r[5] for r in self.source['vehicle_tire']])
+        self.assertEqual([r[-1] for r in rows], [1, 1, 0])
+        self.assertEqual([r[1][-1] for r in self.members['car_base_draw_wheel_info']], [1, 0, 0])
+        self.assertEqual({r[0] for r in self.members['car_base_breaking_parts'][1]}, bike.PROXIES - {'body'})
+
+    def test_two_real_seats_keep_the_original_doors(self) -> None:
+        original = {x.name: x for _, x in mab_legacy.mab_locators(self.source['animation_model'][2])}
+        actual = {x.name: x for _, x in mab_legacy.mab_locators(self.members['animation_model'][2])}
+        for name in ('搭乗口１', '搭乗口２', 'カメラ１', 'カメラ２'):
+            self.assertEqual(actual[name], original[name])
+        for name in ('座席１', '座席２'):
+            params = locator_params(self.members['animation_model'][2], name)
+            self.assertEqual(params, {'Animation': bike.POSE_STATE, 'DispCharacter': 1})
+        self.assertEqual(len(self.members['vehicle_riding_position']), 2)
+        self.assertEqual(self.members['vehicle_weapon_setting'], [['gun', 1]])
+
+    def test_single_source_machinegun_and_real_muzzle(self) -> None:
+        raw = self.games.read4('WEAPON/V_408MOTORBIKE_GUN.SGO')
+        self.assertEqual(raw[:4], b'\0OGS')
+        source = sgo.read(raw)[1]
+        weapon = dsgo.parse(self.files['WEAPON/EDF41_V_408MOTORBIKE_GUN.SGO'])
+        self.assertEqual(mab_legacy.mab_locators(weapon.root.get('animation_model').items[2].data),
+                         mab_legacy.mab_locators(source['animation_model'][2]))
+        self.assertEqual(weapon.root.get('AmmoCount'), source['AmmoCount'])
+        self.assertEqual(weapon.root.get('FireInterval'), source['FireInterval'])
+        self.assertEqual(len(self.members['vehicle_setup'][2]), 1)
+        self.assertEqual(weapon.root.get('FireRecoil'), source['FireRecoil'].value)
+        for key in ('vehicle_setup', 'mission_setup'):
+            self.assertEqual(sgo.plain(self.members[key][2][0][1]), [0.0, 0.0])
+
+    def test_four_class_pelvis_fit_and_posed_mesh_bounds(self) -> None:
+        offsets, rows = bike.pose_fit(self.games)
+        self.assertEqual(len(rows), 4)
+        for (source_class, native_cas, native_model), row in zip(bike.RIDER_CLASSES, rows):
+            self.assertEqual(source_class, row[0])
+            cas = self.games.read6(f'OBJECT/{native_cas}.CAS')
+            clip = cas_graft.state_clips(cas)['main'][bike.POSE_STATE][0]
+            obj = sgo.load(data=self.games.read6(f'OBJECT/{native_model}.SGO'))
+            entry = obj['animation_model'][0]
+            md = bike.model(self.games.read6(bike.rel(entry[0])), entry[1])
+            locals_ = outfit41.clip_locals(cas, clip, 0, md)
+            positions = outfit41.skinned_positions(md, locals_)
+            for seat in range(2):
+                moved = positions + offsets[seat]
+                lo, hi = moved.min(axis=0), moved.max(axis=0)
+                self.assertTrue(all(math.isfinite(float(v)) for v in (*lo, *hi)))
+                self.assertTrue(all(0.15 < float(v) < 5.0 for v in hi - lo))
+                self.assertLess(row[4][seat], 0.08)
+                # Open motorcycle seats are above the wheel contact plane;
+                # a driver-pose fallback at the unshifted origin fails this.
+                self.assertGreater(float(hi[1]), 1.0)
+
+    def test_dynamic_gun_and_missing_body_fail_closed(self) -> None:
+        members = copy.deepcopy(self.members)
+        members['car_base_rigid_body'].append(['gun', -1.0, -1.0, -1.0, -1.0, [], []])
+        with self.assertRaisesRegex(ValueError, 'animation-driven'):
+            bike.check(members, self.md, self.physics)
+        for rows in ([[n, 0] for n in bike.WHEELS], [[n, 0] for n in bike.WHEELS] + [['gun', 0]],
+                     [[n, 0] for n in bike.WHEELS] + [['gun', 1], ['gun', 1]]):
+            bad = copy.deepcopy(self.members)
+            bad['car_base_simulation_node'] = rows
+            with self.assertRaisesRegex(ValueError, 'explicit native kinematic'):
+                bike.check(bad, self.md, self.physics)
+        bad = copy.deepcopy(self.members)
+        bad['mission_setup'][2][0][1] = ['AimRecoil', [0.1, 0.2]]
+        with self.assertRaisesRegex(ValueError, 'native BodyRecoil'):
+            bike.check(bad, self.md, self.physics)
+        md = copy.deepcopy(self.md)
+        md.names[md.bones[mdb.bone_named(md, 'side_tire')].name] = 'missing_side'
+        with self.assertRaisesRegex(ValueError, 'unresolved bone / body'):
+            bike.check(self.members, md, self.physics)
+
+    def test_seat_parameter_injection_rejects_wrong_layout(self) -> None:
+        with self.assertRaisesRegex(ValueError, 'first be converted'):
+            original = sgo.read(self.games.read4('OBJECT/' + bike.ROOTS[0]))[1]
+            bike.seat_mab(original['animation_model'][2], [[0, 0, 0], [0, 0, 0]])
+        broken = bytearray(self.members['animation_model'][2])
+        struct.pack_into('<I', broken, 0x20, 0x7FFFFFFF)
+        with self.assertRaises(ValueError):
+            bike.seat_mab(bytes(broken), [[0, 0, 0], [0, 0, 0]])
+
+
+if __name__ == '__main__':
+    unittest.main()

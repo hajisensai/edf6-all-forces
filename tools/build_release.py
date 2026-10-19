@@ -55,7 +55,7 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
     泰坦和炮手座坦克的副炮自瞄，炮塔镜头下的锁定；
   - AutoTurret 的车辆数据：防空车（KG6 克卜勒系）改高射炮、玻尔斯对地、关卡里的 NPC 防空车、NPC 泰坦的副炮，
     以及这几辆车的武器说明行；
-  - 呼叫武器、战机 / 直升机 / 无人机、潜水母舰、喀秋莎、自行榴弹炮、钻头战车、边三轮、降落伞、EMC 光束、
+  - 呼叫武器、战机 / 直升机 / 无人机、潜水母舰、喀秋莎、自行榴弹炮、钻头战车、边三轮、M163 火神炮车、BMPT、降落伞、EMC 光束、
     大地图和测试场「大混战」关卡（都在你机器上现场生成，见下）。
 
 安装 / 更新：
@@ -86,6 +86,12 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
   载具观察：按住鼠标中键／手柄 L3，再移动鼠标／右摇杆，只转视角，武器保持原操纵方向；松开回正。
   新增空袭兵呼叫「民用轿车」（无武器、单驾驶席），V 切第一人称；手柄 LT 加速、左摇杆转向、LB 倒车。
   本包补齐原版蓝色尼克斯等换色型号的座舱安装，以及加农炮型巴尔加的座舱。
+  离线基地 HQ / 联机待机房间选择「载具与 NPC 配装」，也可按 F2 / 手柄 L3+R3。
+  M 地图指向敌人后，在右侧「敌方单位操控」卡选择接管；接管后关闭 M 移动和战斗，
+  再打开 M 可翻页选择全部实际技能，按住发动，或选择返回原玩家。手柄 L3 聚焦此卡。
+  原玩家暂停并保护；普通模式保留敌方阵营，对战模式跟随操作者阵营。建筑式特殊母体可排除。
+  多人敌方操控还需所有玩家安装本轮配套 EDF6Coop 2.6.0-feedback1019 更新；
+  旧版会提示更新并拒绝接管，普通支援不受此限制。
   座舱仪表随游戏语言／HudLanguage 切换；耐久改为载具轮廓缩略图、百分比与状态色。
 
   房间里每个人都要装同一个版本（同一个安装包），地图、关卡和载具才一致。
@@ -201,7 +207,8 @@ def build_exe(name: str, generator: str | None = None) -> str:
         cmd += ['--paths', p]
     for mod in ('call_weapons', 'edf41_objects', 'edf41_outfits', 'edf41_maps', 'edf41_menu_bg', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model', 'make_sedan',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'catalog', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
-                'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
+                'testhub', 'make_emc', 'make_vulcan', 'make_bmpt', 'make_tracked_combat', 'tracked_combat_model', 'tracked_collision', 'vulcan_model', 'bmpt_model',
+                'edf41_materials', 'edf41materials', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
                 'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'mdb', 'edf6native', 'crilayla',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is

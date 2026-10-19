@@ -52,6 +52,9 @@ PAIR_REACH = 0.25       # m: a same-named pair farther apart than this is not th
 MAX_BONES = 126         # the largest skeleton of any stock EDF6 model (e601_martian, e661_martian_leader; 738 models of
                         # Root.cpk's OBJECT/ archives, 2026-10-17): no model is known to load with more
 LOD_DISTANCES = (15.0, 30.0)
+COLOR_CHANNELS = ('change_color0', 'change_color1')
+COLOR_SHADERS = frozenset(('snd_Chara_2ColorChange', 'snd_Chara_2ColorChange_Alpha'))
+COLOR_MASK = 'param_cm0_cm1_occ'
 # Exceptions every class shares: (4.1 bone name regex, the EDF6 bone it pairs with; re.sub's replacement)
 COMMON: tuple[tuple[str, str], ...] = (
     (r'otherFinger(\d)_([lr])', r'middle\1_\2'),   # 4.1 has one chain for the three outer fingers; EDF6's middle one
@@ -484,6 +487,49 @@ def _dsgo_entry(archive: str, body: str, lods: list[str]) -> dsgo.Node:
     return dsgo.Node(items)
 
 
+def check_color_bindings(battle: bytes, menu: bytes, models: list[mdb.Mdb]) -> list[str]:
+    """The player palette must reach the replacement body in battle and in the HQ preview.
+
+    EDF6's player SGOs route colour slots 0/1, rather than fixed RGBA values, to all materials' change_color0/1.
+    The two menu entries route those same slots by their array index (Draw 0x93C370). Keeping a stock material
+    selector after transplanting a different body would silently lose its colour: refuse such a base instead of
+    shipping an outfit whose saved colours work only in one view or disappear at a LOD boundary. Every drawn
+    2ColorChange material needs both float4s and its cco mask; non-colour hair, glass and emissive eyes keep their
+    own shader contract and are not forced into player colouring.
+    """
+    faults: list[str] = []
+    entries = dsgo.to_py(dsgo.parse(battle).root.get('soldier_color'))
+    expected = [[[[0.0, channel]], float(i)] for i, channel in enumerate(COLOR_CHANNELS)]
+    if entries != expected:
+        faults.append('battle soldier_color must route player colour slots 0/1 to every material')
+    _version, members = sgo.read(menu)
+    if sgo.plain(members.get('change_color')) != [[0, channel] for channel in COLOR_CHANNELS]:
+        faults.append('menu change_color must route player colour slots 0/1 to every material')
+    if not models:
+        faults.append('no player models to receive the colour slots')
+    for lod, model in enumerate(models):
+        # 4.1 Fencer has an unassigned (-1) auxiliary mesh at every LOD; it is not a colour material.
+        used = {me.material for ob in model.objects for me in ob.meshes if me.material != -1}
+        if any(i < 0 or i >= len(model.materials) for i in used):
+            faults.append(f'model {lod}: mesh material index outside the model')
+            continue
+        materials = [model.materials[i] for i in sorted(used)]
+        coloured = [mat for mat in materials if mat.shader in COLOR_SHADERS or any(t.kind == COLOR_MASK for t in mat.textures)]
+        if not coloured:
+            faults.append(f'model {lod}: no drawn material receives the two colour slots')
+        for material in coloured:
+            name = model.name_of(material.name)
+            prefix = f'model {lod}: material {name}'
+            masks = [t for t in material.textures if t.kind == COLOR_MASK]
+            if len(masks) != 1 or not 0 <= masks[0].texture < len(model.textures):
+                faults.append(f'{prefix}: colour mask must reference one texture')
+            for channel in COLOR_CHANNELS:
+                params = [p for p in material.params if p.name == channel]
+                if len(params) != 1 or len(params[0].value) != 4 or not all(math.isfinite(v) for v in params[0].value):
+                    faults.append(f'{prefix}: must expose one finite {channel} float4')
+    return faults
+
+
 def battle_sgo(stock: bytes, archive: str, body: str, lods: list[str]) -> bytes:
     """The stock battle SGO (a DSGO) with only animation_model[0] replaced."""
     doc = dsgo.parse(stock)
@@ -540,6 +586,9 @@ def build(spec: Spec, read41: Callable[[str], bytes], read6: Callable[[str], byt
         f'MENUOBJECT/{spec.out}.SGO': menu_sgo(read6(spec.base_menu), app, names_out[0]),
         archive_rel: archive,
     }
+    color_faults = check_color_bindings(files[f'OBJECT/{spec.out}.SGO'], files[f'MENUOBJECT/{spec.out}.SGO'], out_models)
+    if color_faults:
+        raise ValueError(f'{spec.key}: ' + '; '.join(color_faults))
     report = {
         'class': spec.key, 'edf41': [rel_of(a41), body41] + [n for n, _ in lods41], 'base': spec.base_sgo,
         'pairs': {k: v for k, v in sorted(pairing.to6.items()) if k not in pairing.folded},

@@ -31,6 +31,33 @@ inline M4 Identity() noexcept {
     return r;
 }
 
+// A controller-owned camera frame. Heading/pitch are input state, not a decorative model bone or last
+// rendered view; +X is the native camera's left, +Y up, +Z ahead. Eye placement is an independent physical anchor.
+inline M4 HeadingFrame(float yaw,float pitch,const float* eye) noexcept {
+    const float sy=std::sin(yaw),cy=std::cos(yaw),sp=std::sin(pitch),cp=std::cos(pitch);
+    M4 out{};
+    out.m[0]=cy;out.m[2]=-sy;
+    out.m[4]=-sy*sp;out.m[5]=cp;out.m[6]=-cy*sp;
+    out.m[8]=sy*cp;out.m[9]=sp;out.m[10]=cy*cp;
+    std::memcpy(out.m+12,eye,12);out.m[15]=1.0f;
+    return out;
+}
+
+// Camera edits own rotation and eye separately. A later owner may move the eye without replacing our rotation,
+// or replace the rotation while leaving the eye. Requiring all 64 bytes to match leaks an old rotation into the
+// next native step; restoring all 64 bytes overwrites unrelated newer writes. Neither is a valid transaction.
+struct CameraWrite { M4 before{},written{};bool axes=false,eye=false; };
+inline CameraWrite CameraWriteOf(const M4& before,const M4& written) noexcept {
+    CameraWrite out;out.before=before;out.written=written;
+    out.axes=std::memcmp(before.m,written.m,48)!=0;
+    out.eye=std::memcmp(before.m+12,written.m+12,16)!=0;
+    return out;
+}
+inline void ReturnCameraWrite(M4* current,const CameraWrite& edit) noexcept {
+    if(edit.axes && std::memcmp(current->m,edit.written.m,48)==0)std::memcpy(current->m,edit.before.m,48);
+    if(edit.eye && std::memcmp(current->m+12,edit.written.m+12,16)==0)std::memcpy(current->m+12,edit.before.m+12,16);
+}
+
 // a·b (row vectors: p·(a·b) = (p·a)·b).
 inline M4 Mul(const M4& a,const M4& b) noexcept {
     M4 r{};
@@ -81,6 +108,15 @@ inline void Point(const M4& a,const float* p,float* out) noexcept {
 inline bool Finite(const M4& a) noexcept {
     for(float v:a.m)if(!std::isfinite(v))return false;
     return true;
+}
+
+inline bool LookFrame(const float* eye,const float* look,M4* out) noexcept {
+    float d[3];
+    for(int i=0;i<3;++i){if(!std::isfinite(eye[i]) || !std::isfinite(look[i]))return false;d[i]=look[i]-eye[i];}
+    const float flat=std::sqrt(d[0]*d[0]+d[2]*d[2]);
+    if(!(flat*flat+d[1]*d[1]>1e-8f))return false;
+    *out=HeadingFrame(std::atan2(d[0],d[2]),std::atan2(d[1],flat),eye);
+    return Finite(*out);
 }
 
 // The procedural motion (fp_motion.h) as a matrix in the camera's frame (x right, y up, z ahead): turned about `pivot`

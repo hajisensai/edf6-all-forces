@@ -51,6 +51,7 @@
 // position the vec4 at +0x90 (the vec4 at *(*(+0x368)) + 0x10 when +0x378 is set), the owner's at +0x90.
 #include "crew.h"
 #include "edf41classes.h"
+#include "enemy_control.h"
 #include "hector_ai.h"
 #include "memory.h"
 
@@ -350,7 +351,8 @@ void Tick(void* self) noexcept {
         return;
     }
     float target[3];
-    const bool have=TargetOf(self,target);
+    const bool controlled=EnemyControlTargetActive(self);
+    const bool have=controlled ? EnemyControlWeaponAim(self,target) : TargetOf(self,target);
     const ULONGLONG now=GetTickCount64();
     std::lock_guard<std::mutex> hold(tableLock);
     auto cached=table.find(self);
@@ -376,7 +378,7 @@ void Tick(void* self) noexcept {
     if(have) {
         e->target[0]=target[0]; e->target[1]=target[1]; e->target[2]=target[2];
         e->dist=FlatDistance(self,target);
-        const hector::Event ev=hector::Step(e->cycle,e->cfg,e->rng,e->dist);
+        const hector::Event ev=controlled ? hector::Event::None : hector::Step(e->cycle,e->cfg,e->rng,e->dist);
         if(ev==hector::Event::BackoffStart)
             Log("EDF41AI backoff start %p dist %.1f stop radius %.1f walks backward for %d frames",self,e->dist,e->cycle.stopRadius,e->cycle.retreatLeft);
         else if(ev==hector::Event::BackoffEnd)
@@ -564,11 +566,15 @@ std::uint64_t __fastcall BaseUpdateHook(void* self,void* dt) {
     return result;
 }
 
+// These three call sites belong only to slot-7 AI follow/point/chase states;
+// native pad movement and real attack/root motion use other paths. Do not let a
+// stale AI call overwrite the player's native +1290 movement or +12A4 facing.
 bool __fastcall MoveToHook(void* self,const float* goal,float a,float b,float speed,float c) {
     float aim[4];
     {
         std::lock_guard<std::mutex> hold(tableLock);
         const Entry* e=Find(self);
+        if(e && EnemyControlTargetActive(self))return false;
         if(e) {
             const hector::Walk walk=hector::Steer(e->cycle,e->cfg,e->dist,e->haveTarget);
             speed=walk.speed;
@@ -598,6 +604,7 @@ void __fastcall FaceHook(void* self,const float* point,float limit) {
     {
         std::lock_guard<std::mutex> hold(tableLock);
         const Entry* e=Find(self);
+        if(e && EnemyControlTargetActive(self))return;
         if(e && e->haveTarget) {
             aim[0]=e->target[0]; aim[1]=e->target[1]; aim[2]=e->target[2]; aim[3]=point[3];
             point=aim;
@@ -654,7 +661,7 @@ void __fastcall GunStartHook(void* gun) {
         const char* base=static_cast<char*>(owner);
         void** guns=*reinterpret_cast<void***>(const_cast<char*>(base)+kGunsAt);
         const std::uint64_t count=*reinterpret_cast<const std::uint64_t*>(base+kGunCountAt);
-        if(e && e->haveTarget && count==hector::kArms && guns) {
+        if(e && !EnemyControlTargetActive(owner) && e->haveTarget && count==hector::kArms && guns) {
             int index=-1;
             for(int i=0;i<hector::kArms;++i)
                 if(guns[2*i]==gun)index=i;

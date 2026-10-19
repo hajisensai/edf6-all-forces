@@ -9,6 +9,8 @@
 #include <cstdio>
 
 namespace crew {
+bool PayloadAimWeapon(const void*,unsigned,const void*,const unsigned char** out) noexcept{if(out)*out=nullptr;return false;}
+
 unsigned char* image=nullptr;
 namespace {
 Config testConfig{};

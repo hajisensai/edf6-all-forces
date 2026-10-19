@@ -17,6 +17,23 @@ const void* visibleObjects[40]{};
 float visiblePositions[40][3]{};
 int visibleCount=0;
 float testMapHit=-1.0f;
+float lastRayFrom[3]{},lastRayEnd[3]{};
+const void* fpVehicles[2]{};
+const unsigned char* fpHumans[2]{};
+fpview::M4 fpEyes[2]{};
+bool fpRequests[2]{},observing=false;
+bool FirstPersonVehicleView(const void* v,unsigned seat) noexcept {
+    for(int i=0;i<2;++i)if(v==fpVehicles[i] && seat==0)return fpRequests[i];
+    return false;
+}
+bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept {
+    for(int i=0;i<2;++i)if(human==fpHumans[i]) {
+        *out=RideView{};out->vehicle=static_cast<unsigned char*>(const_cast<void*>(fpVehicles[i]));out->seat=0;
+        std::memcpy(eye,fpEyes[i].m+12,12);std::memcpy(out->frame,fpEyes[i].m,64);return true;
+    }
+    return false;
+}
+bool VehicleLookActive(const void*) noexcept { return observing; }
 const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t*) noexcept { return nullptr; }
@@ -41,7 +58,9 @@ bool RoundSize(const RoundObj&,float) noexcept { return false; }
 void RoundDrop(RoundObj&) noexcept {}
 unsigned char* PlayerHuman() noexcept { return nullptr; }
 bool HumanOnFoot(const unsigned char*) noexcept { return false; }
-float MapRay(const float*,const float*,float*) noexcept { return testMapHit; }
+float MapRay(const float* from,const float* end,float*) noexcept {
+    std::memcpy(lastRayFrom,from,12);std::memcpy(lastRayEnd,end,12);return testMapHit;
+}
 bool VisitEnemies(const unsigned char*,EnemyVisitor visitor,void* context) noexcept {
     ++enemyVisits;
     for(int i=0;i<visibleCount;++i)visitor(context,visibleObjects[i],visiblePositions[i]);
@@ -200,6 +219,99 @@ int main() {
     Check(At<LONG>(replacementControl,0xC)==1,"reusing a mech slot releases the previous lock reference");
     ResetSazabi();
     config=Config{};visibleCount=0;
+
+    // Production camera registry: two local pilots retain their own authoritative aim and raw physical monoeye.
+    // The eye fixture supplies only VehicleEye's native marker output; all camera/assist/aim consumers are production.
+    alignas(16) unsigned char cameraVehicles[2][0x2100]{},cameraSeats[2][kSeatStride]{},cameraHumans[2][0x1600]{};
+    alignas(16) unsigned char cameraControls[2][2][0x10]{},newVehicleControl[0x10]{},newRiderControl[0x10]{};
+    const auto identity=fpview::Identity();
+    config.enabled=config.sazabi=true;config.sazabiAimAssist=false;
+    for(int i=0;i<2;++i) {
+        auto v=cameraVehicles[i],seat=cameraSeats[i],human=cameraHumans[i];
+        Put<void*>(v,kSelfCtrl,cameraControls[i][0]);Put<LONG>(cameraControls[i][0],8,1);
+        Put<void*>(human,kSelfCtrl,cameraControls[i][1]);Put<LONG>(cameraControls[i][1],8,1);
+        Put<void*>(v,kSeats,seat);Put<std::uint64_t>(v,kSeatCount,1);
+        Put<void*>(seat,kSeatRider,human);Put<void*>(seat,kSeatRiderCtrl,cameraControls[i][1]);
+        Put<void*>(human,0x1548,v);Put<void*>(human,edf::kHumanPad,cameraControls[i][1]);human[edf::kHumanPlayer]=1;
+        std::memcpy(v+kMatrix,identity.m,64);
+        fpVehicles[i]=v;fpHumans[i]=human;fpRequests[i]=true;
+        fpEyes[i]=fpview::Translate(102.0f+i*30.0f,25.0f,-27.0f);
+        Mech* m=Make(v);m->rootOk=true;std::memcpy(m->root,identity.m,64);
+        m->root[12]=100.0f+i*30.0f;m->root[13]=5.0f;m->root[14]=-30.0f;
+        Check(exhaust::Inverse(m->root,m->rootInv),"translated camera root is invertible");
+        m->heading=i==0 ? 0.6f : -0.7f;m->aimPitch=i==0 ? 0.2f : -0.3f;PublishView(*m,v);
+    }
+    Mech& c0=*Find(cameraVehicles[0]);Mech& c1=*Find(cameraVehicles[1]);
+    float cameraFrame[16];std::memcpy(cameraFrame,fpEyes[0].m,64);
+    Check(SazabiFirstPersonFrame(cameraVehicles[0],0,cameraFrame),"first local mech reads its own published aim after the second publishes");
+    auto expected=fpview::HeadingFrame(c0.heading,c0.aimPitch,fpEyes[0].m+12);
+    Check(std::memcmp(cameraFrame,expected.m,64)==0,"first-person frame preserves raw eye and uses authoritative heading/pitch");
+    Check(ViewCentred(c0) && !ViewCentred(c1),"one camera placement cannot mark another pilot centred");
+    observing=true;Check(!ViewCentred(c0),"free observation cannot claim the weapon follows the displayed centre");observing=false;
+    // Real torso animation includes the shield-selection 40-degree left glance, guard turn and melee twist.
+    for(int action=0;action<3;++action) {
+        sazabi::PoseInput in{};sazabi::Anim animation{};sazabi::Pose animated{};sazabi::Reset(c0.rig,&animated);
+        animation.ready=1.0f;
+        if(action==0){animation.glance=0.35f;animation.special=0;}
+        if(action==1)animation.guard=1.0f;
+        if(action==2){animation.melee=1.0f;animation.twist=35.0f;}
+        for(int step=0;step<60;++step)sazabi::Torso(in,1.0f/60.0f,animation,&animated);
+        sazabi::Finish(&animated);
+        auto decorated=fpEyes[0];
+        for(int row=0;row<3;++row)for(int col=0;col<3;++col)decorated.m[row*4+col]=animated.modelRot[sazabi::kHead].m[row*3+col];
+        const auto raw=decorated;fpEyes[0]=raw;
+        if(action==0)Check(std::fabs(std::atan2(raw.m[8],raw.m[10])-40.0f*sazabi::kDeg)<0.01f,
+                           "production head pose really contains the 40-degree left glance");
+        Check(SazabiFirstPersonFrame(cameraVehicles[0],0,decorated.m) && std::memcmp(decorated.m,expected.m,64)==0,
+              action==0 ? "40-degree animated left glance never rotates the pilot camera" : action==1 ?
+              "guard chest/head animation never rotates the pilot camera" : "melee torso twist never rotates the pilot camera");
+        Check(std::memcmp(decorated.m+12,raw.m+12,16)==0 && std::memcmp(fpEyes[0].m,raw.m,64)==0,
+              "animation camera keeps the physical eye exactly and never writes the raw marker");
+    }
+    c0.heading=-1.1f;c0.aimPitch=-0.4f;PublishView(c0,cameraVehicles[0]);
+    std::memcpy(cameraFrame,fpEyes[0].m,64);expected=fpview::HeadingFrame(c0.heading,c0.aimPitch,fpEyes[0].m+12);
+    Check(SazabiFirstPersonFrame(cameraVehicles[0],0,cameraFrame) && std::memcmp(cameraFrame,expected.m,64)==0,
+          "authoritative heading and pitch can turn back in the opposite direction");
+    const View cockpit=ViewOf(c0);ViewRay(cockpit,c0.root+12,eye,dir);
+    Check(cockpit.cockpit && Near(eye,fpEyes[0].m+12) && Near(dir,expected.m+8),"game-thread FP ray uses the same raw eye and authoritative direction");
+    // Native camera evaluation temporarily uses model origin, while game input sees the collision centre 12.8m up.
+    std::memcpy(cameraVehicles[0]+kPosition,c0.root+12,12);float placedEye[3],placedLook[3];
+    Check(SazabiCamera(cameraSeats[0],nullptr,nullptr,placedEye,placedLook) && Near(placedEye,eye),
+          "camera-thread model origin reconstitutes the same physical FP eye without the collision-centre offset");
+    Put<float>(cameraVehicles[0],kPosition+4,c0.root[13]+12.8f);
+    float centreEye[3],centreDir[3];ViewRay(ViewOf(c0),c0.root+12,centreEye,centreDir);
+    Check(Near(centreEye,eye) && Near(centreDir,dir),"game-thread collision-centre shift cannot contaminate the FP ray");
+    Aim(c0);const float aimedPoint[3]={eye[0]+dir[0]*kAimRange,eye[1]+dir[1]*kAimRange,eye[2]+dir[2]*kAimRange};
+    Check(Near(lastRayFrom,eye) && Near(lastRayEnd,aimedPoint) && Near(c0.arms.aim,aimedPoint),"production FP Aim fires its ray from the physical monoeye");
+    AssistSeen seen{};Gather(c0,cameraVehicles[0],0.4f,800.0f,&seen);
+    Check(Near(seen.eye,eye) && Near(seen.dir,dir),"production FP assist gathers from the same eye and direction as Aim");
+    fpRequests[0]=false;PublishView(c0,cameraVehicles[0]);const View third=ViewOf(c0);float thirdEye[3],thirdDir[3];
+    ViewRay(third,c0.root+12,thirdEye,thirdDir);
+    Check(!third.cockpit && !Near(thirdEye,eye) && Near(thirdDir,dir),"third person restores the original shoulder boom while keeping the same aim direction");
+    Check(!SazabiFirstPersonFrame(cameraVehicles[0],0,cameraFrame),"third-person request does not rewrite a cockpit frame");
+    fpRequests[0]=true;PublishView(c0,cameraVehicles[0]);
+    Check(!SazabiFirstPersonFrame(cameraVehicles[0],1,cameraFrame) && !SazabiFirstPersonFrame(assistVehicle,0,cameraFrame),"wrong seat and wrong vehicle cannot borrow a published view");
+    View snapshot{};Check(ReadView(cameraVehicles[0],nullptr,&snapshot),"camera view validates its live vehicle-seat-rider identity");
+    Put<LONG>(newVehicleControl,8,1);Put<void*>(cameraVehicles[0],kSelfCtrl,newVehicleControl);
+    Check(!ReadView(cameraVehicles[0],nullptr,&snapshot),"same-address vehicle with a new control rejects the old view");
+    Put<void*>(cameraVehicles[0],kSelfCtrl,cameraControls[0][0]);
+    Put<LONG>(newRiderControl,8,1);Put<void*>(cameraHumans[0],kSelfCtrl,newRiderControl);
+    Check(!ReadView(cameraVehicles[0],nullptr,&snapshot),"same-address rider with a new control rejects the old view");
+    Put<void*>(cameraHumans[0],kSelfCtrl,cameraControls[0][1]);
+    Put<void*>(cameraSeats[0],kSeatRider,cameraHumans[1]);Check(!ReadView(cameraVehicles[0],nullptr,&snapshot),"another occupant cannot inherit the old pilot view");
+    Put<void*>(cameraSeats[0],kSeatRider,cameraHumans[0]);
+    Put<void*>(cameraVehicles[0],kSeats,cameraSeats[1]);Check(!ReadView(cameraVehicles[0],nullptr,&snapshot),"replacement seat array rejects the old seat identity");
+    Put<void*>(cameraVehicles[0],kSeats,cameraSeats[0]);
+    cameraHumans[0][kDead]=1;Check(!ReadView(cameraVehicles[0],nullptr,&snapshot),"dead rider rejects the view");cameraHumans[0][kDead]=0;
+    Put<LONG>(cameraControls[0][0],8,0);Check(!ReadView(cameraVehicles[0],nullptr,&snapshot),"expired vehicle control rejects the view");Put<LONG>(cameraControls[0][0],8,1);
+    testNow+=kViewFresh+1;Check(!ReadView(cameraVehicles[0],nullptr,&snapshot),"stale published view cannot steer a camera");
+    PublishView(c0,cameraVehicles[0]);PublishView(c1,cameraVehicles[1]);--testNow;
+    Check(!ReadView(cameraVehicles[0],nullptr,&snapshot),"future view timestamp is rejected");++testNow;
+    DropView(cameraVehicles[0]);Check(!ReadView(cameraVehicles[0],nullptr,&snapshot) && ReadView(cameraVehicles[1],nullptr,&snapshot),"leaving one mech preserves the other local pilot view");
+    std::memcpy(cameraFrame,fpEyes[1].m,64);Check(SazabiFirstPersonFrame(cameraVehicles[1],0,cameraFrame),"second mech keeps its own first-person camera after the first leaves");
+    ResetSazabi();Check(!ReadView(cameraVehicles[1],nullptr,&snapshot) && !ViewCentred(c1),"mission reset retires every view and centred timestamp");
+    fpVehicles[0]=fpVehicles[1]=nullptr;fpHumans[0]=fpHumans[1]=nullptr;fpRequests[0]=fpRequests[1]=false;
+    config=Config{};
 
     // Real Pose writes and BoneAt/DockPoint reads, interleaved across two different rigs/poses.
     // Both bone arrays are already resolved, so no game model lookup is needed.

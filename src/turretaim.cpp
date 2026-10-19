@@ -180,3 +180,13 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_TurretObserverV1(c
     __try {return Cfg().enabled && CurrentTurretPlayer(vehicle,seat) && (HighCamOn(vehicle) || TurretCamHighTransition(vehicle) || SightZoomMounted(vehicle));}
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
+
+extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_PayloadAimV1(const void* vehicle,unsigned seat,const void* source,
+                                                                         edf::aimlink::PayloadAimV1* out) {
+    if(!out || out->size!=sizeof(edf::aimlink::PayloadAimV1))return false;
+    out->weapon=nullptr;
+    const unsigned char* weapon=nullptr;
+    const bool handled=crew::PayloadAimWeapon(vehicle,seat,source,&weapon);
+    if(handled)out->weapon=weapon;
+    return handled;
+}

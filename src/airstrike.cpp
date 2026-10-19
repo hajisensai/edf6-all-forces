@@ -90,7 +90,7 @@ using DeleteFn=void(*)(void*);
 // ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of fuel
 // (fuelSec) or badly damaged each leaves.
 // What a call brings: jets (`role`), helis (`body`; both made by the support deployment) or the submarine carrier
-// (SubLaunch); the field of what it does not bring is empty.
+// (a planned hull plus its real pilot); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
 struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
               bool follow; const char* name; const wchar_t* id; };
@@ -253,18 +253,7 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
         const auto owner=At<const unsigned char*>(params,0);   // params+0: owner weak pointer (docs/airstrike-re.md section 2)
         const Call* const c=CallOf(ifc,owner);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
-        if(c && c->brings==Brings::sub && std::isfinite(target[0]+target[1]+target[2])) {
-            // The carrier surfaces on every machine the call is replayed on, each its own copy owned by the caller's
-            // machine (as before #88, which sent it to the support planner: refused there for want of an aircraft).
-            const online::CopyOwner was=SetSpawnOwner(CopyOwnerOfCaller(owner));
-            const bool local=!InSession() || IsPlayer(owner);
-            const float* from=owner && Readable(owner+kPosition,12) ? reinterpret_cast<const float*>(owner+kPosition) : nullptr;
-            wchar_t note[128]{};
-            const bool surfaced=SupportSubCallAt(target,from,local,note,_countof(note));
-            SetSpawnOwner(was);
-            Put<std::int32_t>(ifc,kIfcPlanes,0);   // no stock bombers in its place
-            Log("AIRSTRIKE submarine call: local=%d surfaced=%d",local,surfaced);
-        } else if(c && std::isfinite(target[0]+target[1]+target[2])) {
+        if(c && std::isfinite(target[0]+target[1]+target[2])) {
             const online::CopyOwner was=SetSpawnOwner(CopyOwnerOfCaller(owner));   // its copies are the caller's (online_authority.h)
             wchar_t note[128]{};
             // The radio callback is replayed for remote players too. Only the actual caller submits

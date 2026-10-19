@@ -28,8 +28,9 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
     return -1;
 }
 bool MapGroundNear(float x,float z,float,float* out,bool) noexcept {*out=SupportGround(x,z);return supportGround;}
-bool SupportCallAt(int,const float*,wchar_t*,std::size_t) noexcept {return false;}
-bool SupportSubCallAt(const float*,const float*,bool,wchar_t*,std::size_t) noexcept {return false;}
+int supportSubmitted=0,obsoleteSubCopies=0,lastSupportCatalog=-1;
+bool SupportCallAt(int catalog,const float*,wchar_t*,std::size_t) noexcept {++supportSubmitted;lastSupportCatalog=catalog;return true;}
+bool SupportSubCallAt(const float*,const float*,bool,wchar_t*,std::size_t) noexcept {++obsoleteSubCopies;return false;}
 bool testOnline=true;
 const Config& Cfg() noexcept { return config; }
 bool InSession() noexcept { return testOnline; }
@@ -245,6 +246,18 @@ int main() {
           "Air Raider native payload construction remains untouched");
     Check(std::memcmp(image+missionBomber,missionSignature,sizeof(missionSignature))==0,
           "mission-script native payload construction remains untouched");
+    // Execute the real radio hook for SUB. Native IFC startup is an isolated return-only fixture.
+    const unsigned char returnOnly[]={0xB8,42,0,0,0,0xC3};std::memcpy(image+kIfcStart,returnOnly,sizeof(returnOnly));
+    alignas(16) unsigned char params[0x100]{};
+    Put<const void*>(params,0,local);const float radioTarget[3]={10,0,20};std::memcpy(params+kStartTarget,radioTarget,12);
+    picked.store(-1);Put<float>(weapon,kWeaponHitSize,kCalls[16].mark);config.enabled=true;config.jetAirRaider=true;
+    Check(RadioStartHook(ifc,params)==42 && supportSubmitted==1 && lastSupportCatalog==16 && !obsoleteSubCopies,
+          "local submarine radio callback submits the authenticated support transaction instead of a local hull copy");
+    Check(At<std::int32_t>(ifc,kIfcPlanes)==0,"submarine transaction never falls back to unrelated native bombers");
+    Put<const void*>(params,0,remote);RadioStartHook(ifc,params);
+    Check(supportSubmitted==1 && !obsoleteSubCopies,"remote replay does not submit a second submarine transaction or create its own copy");
+    Put<const void*>(params,0,npc);RadioStartHook(ifc,params);
+    Check(supportSubmitted==1,"online NPC callback cannot claim to be an authenticated local requester");
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     std::printf("call picker: %d checks passed\n",checks);
     return 0;

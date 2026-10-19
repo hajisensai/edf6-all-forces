@@ -113,6 +113,24 @@ void StockHudFrame(unsigned char* vehicle) noexcept;   // every vehicle's input 
 bool PlayerStockHud(StockHudReadout* out) noexcept;    // the last frame's, false with none (hud.cpp HudPublish)
 void ResetStockHud() noexcept;                         // mission.cpp MissionStart
 
+// --- Optical target recognition: live hostile lock points, never a thermal image ---
+// Gather on the game thread (HudPublish), publish the value with its existing Snapshot. The draw thread
+// must only project these world points; no game objects, registry walks or map rays cross the boundary.
+enum class VehicleSensorKind : std::uint8_t { none, optical };
+constexpr int kVehicleContacts=16;
+struct VehicleContact { float at[3],range; };
+struct VehicleSensorReadout {
+    VehicleSensorKind kind=VehicleSensorKind::none;
+    bool gunship=false;
+    int count=0;
+    float range=0.0f;
+    VehicleContact contact[kVehicleContacts]{};
+};
+// The local player's eligible vehicle optic (tank/IFV, AA, attack helicopter or gunship gunner).
+// Returns false on foot, in the map, without a live local seat/camera, or when native LOS queries are unavailable.
+// At most 32 terrain/building rays per frame. Contacts are hostile, alive and currently lockable in the native registry.
+bool PlayerVehicleContacts(VehicleSensorReadout* out) noexcept;
+
 // --- stockgauge.cpp: the stock weapon gauges and the fuel tank (docs/hud-re.md §9) ---
 // At load: the stock vehicle weapon gauge's update (HUiHudWeapon slot 1) chained, the FuelTank reads checked; each part
 // off on its own when its EDF.dll code is not as expected.

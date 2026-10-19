@@ -192,6 +192,7 @@ class IncrementalTests(unittest.TestCase):
             plugins = {name: (b'dll', f'[{section}]\nBigWorld=0\n'.encode()) for name, section in installer.PLUGINS}
             for name, replacement in {'check_loader': lambda g: None,
                                       'find_edf41': lambda g: None,   # a stand-in game: no EDF4.1 next to it
+                                      'material_compat_wanted': lambda g: False,  # no native shader archive in this fixture
                                       'plugin_files': lambda: plugins,
                                       'stack_weapons': lambda g: {},
                                       'build_autoturret': lambda g: ({}, False),

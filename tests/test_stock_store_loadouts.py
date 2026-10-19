@@ -95,7 +95,23 @@ class LoadoutTableTests(unittest.TestCase):
         # The seat's stock weapons (at most 3 on one seat of these classes, with the fuel tank left out) and its stores.
         for stem, load in stores.LOADOUTS.items():
             with self.subTest(stem=stem):
-                self.assertLessEqual(len(load) + 4, most_payload())
+                native = 2 if stores.CATEGORIES[stem] == 'flak' else 4
+                self.assertLessEqual(len(load) + native, most_payload())
+
+    def test_flak_ap_and_proximity_are_paired_native_barrels(self) -> None:
+        load = {kind_of(m.weapon): m for m in stores.LOADOUTS['V603_FLAK']}
+        for left, right, ammo in (('FLAK_AP', 'FLAK_AP_R', 'ap'), ('FLAK_HE', 'FLAK_HE_R', 'he')):
+            a, b = vc.STORES[left], vc.STORES[right]
+            self.assertGreater(a.group, 0)
+            self.assertEqual(a.group, b.group, 'one R/LB choice for both barrels')
+            self.assertEqual((a.barrel, b.barrel), (0, 1))
+            self.assertEqual((load[left].like, load[right].like), (0, 1), 'mounted to the matching native holder')
+            self.assertEqual((a.weapon.kind, b.weapon.kind), (ammo, ammo))
+            self.assertTrue(a.weapon.template.endswith('_L.SGO') and b.weapon.template.endswith('_R.SGO'))
+        self.assertNotEqual(vc.STORES['FLAK_AP'].group, vc.STORES['FLAK_HE'].group)
+        for kind in ('VULCAN_HE', 'VULCAN_AP'):
+            self.assertTrue(vc.STORES[kind].native_control, 'M61 belts are exclusive native choices')
+            self.assertEqual(vc.STORES[kind].group, 0)
 
     def test_coaxial_guns_are_real_7_62_mm_coaxes(self) -> None:
         # The user, 2026-10-11: 「这个坦克的同轴机枪做的什么玩意，找现实的模型来做」: each tank's coax is the real gun of its
@@ -218,6 +234,20 @@ class WithGameTests(unittest.TestCase):
                     self.assertEqual(got['AmmoExplosion'], 0.0)
                 else:
                     self.assertGreater(got['AmmoExplosion'], 0.0)
+
+    def test_flak_templates_preserve_native_fuse_and_penetration(self) -> None:
+        rows = stores._read_any(self.game.read('OBJECT', 'V603_FLAK.SGO'))['vehicle_weapon_setting']
+        for kind in ('FLAK_AP', 'FLAK_AP_R', 'FLAK_HE', 'FLAK_HE_R'):
+            spec = vc.STORES[kind]
+            generated = dsgo.to_py(dsgo.parse(vc.store_sgo(self.game, vc.store_file(kind, 500))).root)
+            self.assertEqual(rows[spec.barrel][0], 'cannon_slide_l' if spec.barrel == 0 else 'cannon_slide_r')
+            if spec.weapon.kind == 'ap':
+                self.assertEqual((generated['AmmoExplosion'], generated['AmmoIsPenetration']), (0.0, 1.0))
+                self.assertEqual(generated['AmmoSpeed'] * 60.0, 960.0)
+            else:
+                self.assertEqual(generated['AmmoClass'], 'GrenadeBullet01_MapNoDamage')
+                self.assertEqual(generated['AmmoExplosion'], 4.0)
+                self.assertEqual(generated['AmmoSize'] * generated['AmmoHitSizeAdjust'], 4.0)
 
     def test_coaxial_gun_lays_with_the_main_gun_from_its_own_muzzle(self) -> None:
         # The user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」. Its holder hangs on the bone that elevates the main gun

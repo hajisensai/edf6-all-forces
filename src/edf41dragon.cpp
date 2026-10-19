@@ -25,6 +25,8 @@
 // EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "edf41dragon_wake.h"
+#include "enemy_control_native.h"
+#include "enemy_control_weapon_aim.h"
 #include "memory.h"
 
 #include <cmath>
@@ -226,6 +228,7 @@ void Breathe(char* self,Dragon& d) noexcept {
     }
     alignas(16) float muzzle[16];
     reinterpret_cast<LocatorMatrixFn>(image+kLocatorMatrix)(self+kMuzzleAt,muzzle);
+    EnemyControlAimMatrix(self,muzzle); // accepted control point before the original cone RNG; uncontrolled keeps the native locator
     const float* x=muzzle;
     const float* y=muzzle+4;
     const float* z=muzzle+8;
@@ -298,8 +301,10 @@ char* MainPlayer(char* self) noexcept {
     return index<0 || !players ? nullptr : players+static_cast<std::size_t>(index)*kPlayerSize;
 }
 
-std::uint64_t __fastcall TickHook(void* self,void* arg) {
-    const std::uint64_t r=nextTick(self,arg);
+// Post-AI work belongs to the real action lifecycle: flame windows, the
+// glide clip's completion, damage recovery and bookkeeping continue under player
+// input. Only the native autonomous tick is omitted by ControlledTick.
+std::uint64_t TickMaintenance(void* self,std::uint64_t r) {
     std::lock_guard<std::mutex> hold(lock);
     Dragon* d=Find(self);
     if(!d)return r;
@@ -361,6 +366,24 @@ std::uint64_t __fastcall TickHook(void* self,void* arg) {
     return r;
 }
 
+std::uint64_t __fastcall TickHook(void* self,void* arg) {
+    return TickMaintenance(self,nextTick(self,arg));
+}
+std::uint64_t __fastcall ControlledTick(void* self,void*) {
+    return TickMaintenance(self,0);
+}
+bool OwnsControlledTick(const void* current) noexcept {
+    const auto* slot=reinterpret_cast<void* const*>(image+kVtable)+kSlotTick;
+    return current==reinterpret_cast<const void*>(&TickHook) && nextTick==reinterpret_cast<TickFn>(image+kTick) &&
+        Readable(slot,sizeof(*slot)) && *slot==reinterpret_cast<const void*>(&TickHook);
+}
+
+bool ControlledSeed(void* self,std::uint64_t seed) noexcept {
+    std::lock_guard<std::mutex> hold(lock);
+    if(Dragon* dragon=Find(self))dragon->rng=seed;
+    return true; // ordinary unmarked DragonSmall keeps its original RNG path
+}
+
 void __fastcall CruiseHook(void* self,void* out,float radius) {
     {
         std::lock_guard<std::mutex> hold(lock);
@@ -409,12 +432,14 @@ bool InstallEdf41Dragon() noexcept {
     }
     nextTick=reinterpret_cast<TickFn>(tick);
     const bool t=PatchVtableSlot(vtable+kSlotTick,tick,reinterpret_cast<void*>(&TickHook));
+    const bool control=t && enemy_native::RegisterControlledAiExtension(static_cast<std::uint32_t>(kVtable),static_cast<std::uint32_t>(kTick),
+        &OwnsControlledTick,&ControlledTick,&ControlledSeed);
     bool changed=false;
     int cruise=0;
     for(const std::size_t site:kCruiseSites)
         cruise+=RedirectCall(image+site,image+kCruise,reinterpret_cast<void*>(&CruiseHook),changed) ? 1 : 0;
     const bool glide=RedirectCall(image+kGlideFireSite,image+kFireball,reinterpret_cast<void*>(&GlideFireHook),changed);
-    Log("EDF41DRAGON hooked: tick=%d cruise=%d/2 glide fire=%d",t ? 1 : 0,cruise,glide ? 1 : 0);
-    return t && cruise==2 && glide;
+    Log("EDF41DRAGON hooked: tick=%d cruise=%d/2 glide fire=%d controlled lifecycle=%d",t ? 1 : 0,cruise,glide ? 1 : 0,control ? 1 : 0);
+    return t && cruise==2 && glide && control;
 }
 }  // namespace crew

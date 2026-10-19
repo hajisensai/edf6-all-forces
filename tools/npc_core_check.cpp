@@ -231,6 +231,8 @@ int QMarkTeamEnemies(const void** out,int max) noexcept {
 // The lock registry's valid lock points whatever their lockable flag (the marked enemy out of sight): `lockAt` for `lockOf`.
 const void* lockOf=nullptr;float lockAt[3]{};
 bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ctx,lockOf,lockAt);return true; }
+bool nativePayloadFixture=false;
+bool NativePayloadControl(const void*,unsigned) noexcept {return nativePayloadFixture;}
 unsigned char* chosenGunnerWeapon=nullptr;
 bool suppressGunnerChoice=false;
 PayloadFire chosenGunnerFire=PayloadFire::primary;

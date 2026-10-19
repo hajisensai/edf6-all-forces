@@ -22,6 +22,8 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
 #include "exhaust_pose.h"
+#include "firstperson.h"
+#include "fp_view.h"
 #include "layout.h"
 #include "heli.h"
 #include "lockon.h"
@@ -36,6 +38,7 @@
 #include "sazabi_net.h"
 #include "online_authority.h"
 #include "vecmath.h"
+#include "vehicle_look.h"
 #include <cmath>
 #include <cstring>
 
@@ -115,9 +118,11 @@ Mech* Find(const unsigned char* v) noexcept {
     return nullptr;
 }
 void DropLocalAim(Arms& a) noexcept;
+void DropView(const unsigned char* vehicle=nullptr) noexcept;
 Mech* Make(unsigned char* v) noexcept {
     for(auto& m:mechs) {
         if(m.vehicle && Live(m))continue;
+        if(m.vehicle)DropView(m.vehicle);
         DropLocalAim(m.arms);m=Mech{};m.ref=ObjRef::Of(v);m.vehicle=v;
         return &m;
     }
@@ -268,7 +273,7 @@ void Board(Mech& m,unsigned char* v,bool npc) noexcept {
 
 void Leave(Mech& m,unsigned char* v,bool alive,const char* how) noexcept {
     DropArms(m);
-    if(view.vehicle==v)DropView();   // the stock camera again
+    DropView(v);   // only this mech returns to its stock camera
     m.driven=false;m.npc=false;m.active=false;
     if(m.insetSaved && alive)Put<float>(v,kAreaInset,m.savedInset);
     m.insetSaved=false;
@@ -424,11 +429,9 @@ bool IsSazabi(const void* vehicle) noexcept { return BodyOf(vehicle)==PluginBody
 // camera): its eye and the point it looks at, on the centre ray the game thread aims along (sazabi_camera.inc).
 bool SazabiCamera(const unsigned char* seat,const float* wasEye,const float* wasLook,float* eye,float* look) noexcept {
     if(!seat || !Cfg().enabled || !Cfg().sazabi)return false;
-    AcquireSRWLockShared(&viewLock);
-    const View w=view;
-    ReleaseSRWLockShared(&viewLock);
+    View w;
+    if(!ReadView(nullptr,seat,&w))return false;
     const ULONGLONG now=GameMs();
-    if(w.seat!=seat || !w.vehicle || now-w.ms>kViewFresh || !Readable(w.vehicle+kPosition,12) || !Readable(w.vehicle+kMatrix,64))return false;
     float dir[3];
     ViewRay(w,Where(w.vehicle),eye,dir);
     for(int k=0;k<3;++k){look[k]=eye[k]+dir[k]*100.0f;if(!std::isfinite(eye[k]) || !std::isfinite(look[k]))return false;}
@@ -442,8 +445,25 @@ bool SazabiCamera(const unsigned char* seat,const float* wasEye,const float* was
             f[1],p[0],p[1],p[2],w.yaw/sazabi::kDeg,w.pitch/sazabi::kDeg,eye[0],eye[1],eye[2],look[0],look[1],look[2],wasEye[0],wasEye[1],wasEye[2],
             wasLook[0],wasLook[1],wasLook[2]);
     }
-    placedMs=now;
+    PlacedView(w,now);
     return true;
+}
+
+// The physical monoeye supplies the position; decorative head/torso animation never owns the pilot's aim.
+// Called after VehicleEye on the camera thread, so no game-thread origin or cached eye is reused here.
+bool SazabiFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noexcept {
+    if(!frame || seat!=0 || !Cfg().enabled || !Cfg().sazabi)return false;
+    __try {
+        if(!FirstPersonVehicleView(vehicle,seat))return false;
+        View w;
+        if(!ReadView(static_cast<const unsigned char*>(vehicle),nullptr,&w))return false;
+        const float eye[3]={frame[12],frame[13],frame[14]};
+        const auto aimed=fpview::HeadingFrame(w.yaw,w.pitch,eye);
+        if(!fpview::Finite(aimed))return false;
+        std::memcpy(frame,aimed.m,sizeof aimed.m);
+        PlacedView(w,GameMs());
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 // The HUD's view of the player's Sazabi (crew.h SazabiCue): published each frame it is driven (PublishCue).

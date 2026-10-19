@@ -19,6 +19,17 @@ void Expect(bool ok,const char* what) {
 }
 bool Near(float a,float b,float e=1e-4f) { return std::fabs(a-b)<=e; }
 
+bool SameModName(const wchar_t* a,const wchar_t* b) {
+    if(!a || !b)return false;
+    for(;*a && *b;++a,++b) {
+        wchar_t x=*a==L'\\' ? L'/' : *a,y=*b==L'\\' ? L'/' : *b;
+        if(x>=L'a' && x<=L'z')x-=L'a'-L'A';
+        if(y>=L'a' && y<=L'z')y-=L'a'-L'A';
+        if(x!=y)return false;
+    }
+    return *a==*b;
+}
+
 void Catalog() {
     int total=0;
     for(int c=0;c<kCategoryCount;++c) {
@@ -32,6 +43,10 @@ void Catalog() {
         Expect(RowOf(static_cast<Category>(c),n)==-1,"RowOf past the category: none");
     }
     Expect(total==kEntryCount,"every row in one category");
+    const wchar_t* unsafe[]={nullptr,L"",L"../X.SGO",L"OBJECT/../X.SGO",L"WEAPON/../../X.SGO",
+        L"C:\\X.SGO",L"/X.SGO",L"\\server\\X.SGO",L"OBJECT/A//B.SGO",L"WEAPON/A:stream",
+        L"OBJECT/.hidden",L"OBJECT/A..B",L"OBJECT/A.",L"OBJECT/A/B ",L"OBJECT/A/..\\B.SGO"};
+    for(const auto* path:unsafe)Expect(!ParseModFile(path),"unsafe Mods paths are rejected");
     for(int i=0;i<kEntryCount;++i) {
         const Entry& e=kEntries[i];
         const bool native=e.how==How::vehicle || e.how==How::enemy;
@@ -54,12 +69,14 @@ void Catalog() {
             wchar_t sgo[260]{};   // its app:/object/ path's rest, a folder's slash a backslash (as the list names it)
             for(int k=0;e.sgo && e.sgo[12+k] && k<259;++k)sgo[k]=e.sgo[12+k]==L'/' ? L'\\' : e.sgo[12+k];
             for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1,++n) {
-                Expect(std::wcschr(f,L'/')==nullptr && _wcsnicmp(f,L"OBJECT\\",7)!=0,"a Mods file is named under Mods\\OBJECT\\");
-                own=own || _wcsicmp(f,sgo)==0;
+                const auto ref=ParseModFile(f);
+                Expect(static_cast<bool>(ref),"a Mods file is a safe relative OBJECT/WEAPON resource");
+                own=own || (ref.directory==ModDirectory::object && SameModName(ref.name,sgo));
             }
             Expect(n>0 && own,"a Mods row lists its own SGO among its files");
         }
-        if(!e.preload)Expect(e.category==Category::enemy41,"only EDF4.1's heavy rows wait for RangePlaceAll");
+        if(!e.preload)Expect(e.category==Category::enemy41 && e.mod,"only EDF4.1's heavy enemy rows wait for RangePlaceAll");
+        if(e.mod && e.category==Category::vehicle)Expect(e.preload,"every installed EDF4.1 vehicle is placeable by default");
         if(e.category==Category::ours)Expect(std::wcsncmp(e.sgo,L"app:/object/EDF6TR_",19)==0 || std::wcsncmp(e.sgo,L"app:/object/EDF6VC_",19)==0,
                                             "our vehicles are the range's (EDF6TR_) or the installer's (EDF6VC_)");
         if(e.how==How::supportCall || e.how==How::drone)Expect(e.category==Category::aircraft,"the plugin's aircraft");

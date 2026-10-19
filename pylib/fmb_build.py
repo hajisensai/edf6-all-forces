@@ -38,13 +38,14 @@ ORI_SIZE = 0x20
 SPLAT_SIZE = 0x50
 SLOTS = 16
 SHADER_AT = 0x28   # mesh record: the shader table record of the leaf (shader_index)
-MAX_LAYERS = 5   # layers per leaf: the most this writer lists (DX11.cpk's MAP_FIELD_RENDER<layers>_<mode>_14_<pass> go to 15 layers, modes 1..7)
+MAX_LAYERS = 15  # shipped MAP_FIELD_RENDER<n>_1_14_{0,1,2}; the mass list has 16 byte slots
 
 
 @dataclass(frozen=True)
 class Layer:
     """One terrain layer: slice `color` of the map's colour array tiled every `tile_color` metres, multiplied by
-    slice `multip` (-1: none) tiled every `tile_multip` metres, shaded with normal slice `normal`."""
+    valid slice `multip` tiled every `tile_multip` metres, shaded with normal slice `normal`.
+    A source without a multiplier must explicitly reference a neutral texture: the FMB shader has no skip flag."""
     color: int
     multip: int
     tile_color: float
@@ -155,9 +156,13 @@ def leaf_blob(heights: np.ndarray, normals: np.ndarray, weights: np.ndarray, x0:
     h = heights[r0:r0 + nr + 1, c0:c0 + nc + 1]
     n = normals[r0:r0 + nr + 1, c0:c0 + nc + 1]
     w = weights[r0:r0 + nr + 1, c0:c0 + nc + 1]
+    if not list_ids or not np.isfinite(w).all() or (w < 0).any():
+        raise ValueError('terrain weights need a layer list and finite nonnegative values')
     total = w.reshape(-1, w.shape[2]).sum(0)
-    ranked = sorted((k for k in list_ids if w[:, :, k].max() > 1.0 / 510.0), key=lambda k: -total[k])
-    used = sorted(ranked[:MAX_LAYERS]) or [list_ids[int(total.argmax())]]
+    used = sorted(k for k in list_ids if (w[:, :, k] > 0).any())
+    if len(used) > MAX_LAYERS:
+        raise ValueError(f'terrain leaf ({r0}, {c0}) uses {len(used)} layers; shipped shaders support at most {MAX_LAYERS}')
+    used = used or [max(list_ids, key=lambda k: total[k])]
     rows, cols = h.shape
     xs = x0 + (c0 + np.arange(cols)) * step
     zs = z0 + (r0 + np.arange(rows)) * step
@@ -223,6 +228,11 @@ def layer_table(layers: list[Layer]) -> tuple[bytes, list[float]]:
     dwords), three unused axis pairs -1, paint mode 0, colour slice, -1, -1, multiplier slice, -1, -1, normal slice,
     -1, -1, the 6.0 every stock layer has, 1.0 x 3 (as the single layer pieces). An orientation: rotation 90 degrees
     about x (the xz plane), the tile size in metres on all axes, no offset."""
+    for layer in layers:
+        if layer.color < 0 or layer.multip < 0 or layer.normal < 0:
+            raise ValueError('FMB primary colour, multiplier slice and normal slice must be nonnegative')
+        if not all(math.isfinite(tile) and tile > 0 for tile in (layer.tile_color, layer.tile_multip)):
+            raise ValueError('FMB texture tile sizes must be positive and finite')
     tiles: list[float] = []
     for l in layers:
         for t in (l.tile_color, l.tile_multip if l.multip >= 0 else l.tile_color):
