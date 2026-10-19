@@ -446,6 +446,14 @@ def release_imports() -> None:
 
 
 @test
+def npc_vehicle_ai_declarations() -> None:
+    """Player vehicles retain canonical AI metadata without requiring cockpit models."""
+    sys.path.insert(0, os.path.join(ROOT, 'tests'))
+    import test_npc_vehicle_ai_sgo
+    test_npc_vehicle_ai_sgo.run_checks()
+
+
+@test
 def frozen_collision_consumer() -> None:
     """The package gate runs the real binding and geometry consumers on portable data."""
     import frozen_collision_probe

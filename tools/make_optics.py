@@ -1,6 +1,7 @@
 """Generate measured optic bones and redirect known stock SGOs transactionally.
 
-Only model paths change. Other-mod models are never assigned an invented optic.
+The stock tail pass also supplies a missing native V607 aim declaration from its
+identical official AI variants. Other-mod models are never assigned guessed data.
 Build is read-only; install/remove operate under their own write-ahead journal.
 """
 from __future__ import annotations
@@ -9,18 +10,162 @@ import copy
 import json
 import os
 from pathlib import Path
+import struct
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pylib'))
 import ledger
 import modfiles
 import rootcpk
+import dsgo
+import sgo
 import vehicle_optics as optics
 
 OWNER = 'optics'
 MANIFEST = '.edf6vc_optics.json'
 BACKUP = '.edf6vc_optics_backup'
 redirect = optics.redirect
+AI_REL = 'OBJECT/V607_ROBOTRUCK.SGO'
+AI_KEY = 'v607_aim_info'
+AI_DONORS = ('V607_ROBOTRUCK_AI.SGO', 'V607_ROBOTRUCK_F_AI.SGO',
+             'V607_ROBOTRUCK_G_AI.SGO', 'V607_ROBOTRUCK_M_AI.SGO')
+AI_CONTRACT = ('animation_model', 'car_aim_node', 'vehicle_weapon_setting')
+
+
+def _fields(data: bytes) -> dict:
+    if data[:4] == b'DSGO':
+        root = dsgo.parse(data).root
+        return {name: root.items[index] for index, name in root.names.items()}
+    return sgo.read(data)[1]
+
+
+def _same_fields(left: bytes, right: bytes) -> bool:
+    if left[:4] == right[:4] == b'DSGO':
+        return dsgo.parse(left).root == dsgo.parse(right).root
+    return left[:4] == right[:4] and sgo.read(left) == sgo.read(right)
+
+
+def _plain(value):
+    if isinstance(value, dsgo.Node):
+        return {name: _plain(value.items[index]) for index, name in value.names.items()} if value.names else [
+            _plain(item) for item in value.items]
+    if isinstance(value, list):
+        return [_plain(item) for item in value]
+    if isinstance(value, sgo.Float):
+        return value.value
+    if isinstance(value, dsgo.Blob):
+        return value.data
+    return value
+
+
+def _field_digest(data: bytes) -> str | None:
+    try:
+        value = _plain(_fields(data)[AI_KEY])
+        return modfiles.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode('utf-8'))
+    except (KeyError, TypeError):
+        return None  # a removed/custom raw declaration is not our written value
+
+
+def _field(data: bytes, value=None) -> bytes:
+    """Set the missing declaration, or remove only that field; preserve other nodes/blobs."""
+    if data[:4] != b'DSGO':
+        version, members = sgo.read(data)
+        if value is None:
+            members.pop(AI_KEY, None)
+        else:
+            members[AI_KEY] = copy.deepcopy(value)
+        return sgo.write(version, members)
+    doc = dsgo.parse(data)
+    if value is None:
+        index = next((i for i, name in doc.root.names.items() if name == AI_KEY), None)
+        if index is None:
+            return data
+        doc.root.items.pop(index)
+        doc.root.names = {i - (i > index): name for i, name in doc.root.names.items() if i != index}
+    else:
+        def node(item):
+            return dsgo.Node([node(child) for child in item]) if isinstance(item, list) else item
+        doc.root.set(AI_KEY, node(value))
+    return dsgo.write(doc)
+
+
+def _contract(fields: dict, stock_path: str) -> dict:
+    private = 'app:/object/edf6vc_optic_v607_robotruck.mrab'
+    def normalize(value):
+        if isinstance(value, list):
+            return [normalize(item) for item in value]
+        return stock_path if isinstance(value, str) and value.lower() == private else value
+    return {key: normalize(_plain(fields[key])) for key in AI_CONTRACT}
+
+
+def _native_aim(game) -> tuple[dict, str, list]:
+    player = game.read('OBJECT', 'V607_ROBOTRUCK.SGO')
+    base = _fields(player)
+    if base.get('xgs_scene_object_class') != 'Vehicle607_RoboTruck':
+        raise ValueError('official V607 class changed')
+    path = optics.model_path(player)
+    contract = _contract(base, path)
+    aim = None
+    for name in AI_DONORS:
+        donor = _fields(game.read('OBJECT', name))
+        if (donor.get('xgs_scene_object_class') != base['xgs_scene_object_class'] or
+                _contract(donor, path) != contract or AI_KEY not in donor):
+            raise ValueError('official V607 AI model/mount contract changed: ' + name)
+        declaration = _plain(donor[AI_KEY])
+        if aim is not None and declaration != aim:
+            raise ValueError('official V607 AI variants disagree: ' + name)
+        aim = declaration
+    return contract, path, aim
+
+
+def _native_geometry(root: str, model: str, game) -> bool:
+    """Prove the model actually loaded now, allowing texture-only archive changes."""
+    spec = next(spec for spec in optics.MODELS if spec.stem == 'V607_ROBOTRUCK')
+    if model.lower() == 'app:/object/' + optics.output(spec).lower():
+        rel = 'OBJECT/' + optics.output(spec)
+        led = ledger.Ledger(root)
+        entry = _load(root)['files'].get(rel, {})
+        current = modfiles.sha256_file(led.disk(rel))
+        # Grafted geometry has a different digest. Only our unchanged generated
+        # model, whose builder checked the source profile, inherits that proof.
+        return (current is not None and current in (entry.get('written'), entry.get('pending')) and
+                OWNER in led.owners(rel) and led.written_by(OWNER, rel))
+    loose = Path(root, 'Mods', 'OBJECT', spec.stem + '.MRAB')
+    try:
+        arc = optics.rab_read(loose.read_bytes() if loose.is_file() else game.read('OBJECT', spec.stem + '.MRAB'))
+        models = [item for item in arc.files if item.name.lower() == spec.stem.lower() + '.mdb']
+        return len(models) == 1 and modfiles.sha256(models[0].data) == spec.digest
+    except (AssertionError, ValueError, IndexError, KeyError, struct.error):
+        return False  # unknown/corrupt geometry cannot acquire a native aim table
+
+
+def _prepare_stock(root: str, rel: str, source: bytes, entry=None, game=None):
+    if rel == AI_REL and set(ledger.Ledger(root).owners(rel)) - {OWNER, ledger.LEGACY} and not entry:
+        return source, (), None, False  # another registered writer owns this stock SGO
+    made, needs = redirect(source)
+    claim = (entry or {}).get('npc_ai_added')
+    if rel != AI_REL:
+        return made, needs, None, bool(needs)
+    members = _fields(made)
+    if AI_KEY in members and not claim:
+        return made, needs, None, bool(needs)  # a user's declaration is never ours
+    model = optics.model_path(made)
+    if (members.get('xgs_scene_object_class') != 'Vehicle607_RoboTruck' or not model or
+            model.lower() not in ('app:/object/v607_robotruck.mrab', 'app:/object/edf6vc_optic_v607_robotruck.mrab')):
+        return made, needs, None, bool(needs) and not claim
+    game = game or rootcpk.Game(root)
+    contract, path, aim = _native_aim(game)
+    try:
+        matches = _contract(members, path) == contract
+    except KeyError:
+        matches = False
+    if not matches or not _native_geometry(root, model, game):
+        # Withdraw a stale write-set through the normal field-aware undo path.
+        return made, needs, None, bool(needs) and not claim
+    if claim:
+        return made, needs, None, True  # retain an AI-only claim; never undo a user's deletion/edit
+    made = _field(made, aim)
+    return made, needs, _field_digest(made), True
 
 
 def _build_one(root: str, spec: optics.Model) -> bytes:
@@ -36,17 +181,20 @@ def build_models(root: str) -> dict[str, bytes]:
 
 
 def build_stock_redirects(root: str) -> dict[str, bytes]:
-    """Cheap current-SGO pass, deliberately excluded from the model cache."""
+    """Cheap current-SGO preparation, deliberately excluded from the model cache."""
     game = rootcpk.Game(root)
+    state = _load(root)
     files = {}
     for name in game.names('OBJECT'):
         if not name.upper().endswith('.SGO'):
             continue
         loose = Path(root, 'Mods', 'OBJECT', name)
         source = loose.read_bytes() if loose.is_file() else game.read('OBJECT', name)
-        made, needs = redirect(source)
-        if needs:
-            files['OBJECT/'+name.upper()] = made
+        rel = 'OBJECT/'+name.upper()
+        entry = state['files'].get(rel) if loose.is_file() else None
+        made, needs, _added, keep = _prepare_stock(root, rel, source, entry, game)
+        if keep:
+            files[rel] = made
     return files
 
 
@@ -78,7 +226,7 @@ def install(root: str, files: dict[str, bytes], scope: str = 'all') -> list[str]
     if scope not in ('all', 'models', 'stock') or any(
             (scope == 'models' and not r.endswith('.MRAB')) or (scope == 'stock' and not r.endswith('.SGO')) for r in outputs):
         raise ValueError('optic install scope does not match its outputs')
-    paths = []
+    paths, accepted = [], set()
     for rel in sorted(outputs, key=lambda r: (r.endswith('.SGO'), r)):
         data, path = outputs[rel], led.disk(rel)
         entry = state['files'].get(rel)
@@ -91,15 +239,17 @@ def install(root: str, files: dict[str, bytes], scope: str = 'all') -> list[str]
         changed = entry and current not in (entry.get('written'), entry.get('pending'), entry.get('original'))
         if changed and rel.endswith('.MRAB'):
             raise RuntimeError(f'瞄具模型被其他程序修改，已保留：{rel}')
+        added = None
         if rel.endswith('.SGO'):
             # Mutable SGO writers run before this pass. Always patch their
             # CURRENT bytes, never an initial-install snapshot or cached SGO.
             source = modfiles.read(path)
-            if source is not None:
-                data, needs = redirect(source)
-            else:
-                data, needs = redirect(data)
-            if not needs:
+            loose_source = source is not None
+            if source is None and rel == AI_REL:
+                source = rootcpk.Game(root).read('OBJECT', 'V607_ROBOTRUCK.SGO')
+            data, needs, added, keep = _prepare_stock(root, rel, source if source is not None else data,
+                                                     entry if loose_source else None)
+            if not keep:
                 continue
             if any(not os.path.isfile(led.disk(dep)) for dep in needs):
                 raise ValueError('optic model must be installed before its consumers')
@@ -114,13 +264,16 @@ def install(root: str, files: dict[str, bytes], scope: str = 'all') -> list[str]
             state['files'][rel] = entry
         if changed and rel.endswith('.SGO'):
             entry['preserve_consumer'] = True  # an intervening writer supplied non-model state
+        if added is not None:
+            entry['npc_ai_added'] = added  # checkpoint the field write-set before writing the SGO
         entry['pending'] = modfiles.sha256(data)
         _save(root, state)
         paths.append(led.put(OWNER, rel, data))
+        accepted.add(rel)
         entry['written'] = entry.pop('pending')
         _save(root, state)
     previous = {r for r in state['files'] if scope == 'all' or (r.endswith('.SGO') == (scope == 'stock'))}
-    _remove(root, led, state, previous - set(outputs))
+    _remove(root, led, state, previous - accepted)
     return paths
 
 
@@ -176,6 +329,11 @@ def _restore_consumer(root: str, led: ledger.Ledger, state: dict, rel: str) -> b
         target = None
     else:
         target = optics.restore_path(current, entry.get('source_model'))
+        if entry.get('npc_ai_added') and _field_digest(target) == entry['npc_ai_added']:
+            target = _field(target)
+        # Field-only preparation can restore the pre-install bytes exactly too.
+        if entry.get('npc_ai_added') and original is not None and _same_fields(target, original):
+            target = original
     entry['restoring'] = True
     _save(root, state)
     if target is None:
