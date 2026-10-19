@@ -44,6 +44,17 @@ MovingFortress、UfoMother511、GrandMother、Jormungand 等大型建筑式母�
 
 配套 Coop 提交 `684853738b44495cb36c7039a40cbc6668ffb556` 的真实资源构建及 **102/102** CTest 通过，无跳过。最终反馈安装包在提交后生成，包内二进制、独立启动和多进程生成烟测记录于 `release/validation-feedback1019.json`；首批 `feedback1018` 包保留为历史产物。
 
+## 最终反馈包
+
+| 产物 | 大小（字节） | SHA256 |
+| --- | ---: | --- |
+| `EDF6VehicleCrew-0.8.0-feedback1019.zip` | 617797226 | `0c512c8dafbf18ef2ad139b9cade4fd91c16966a745cf50237243791b4b68dc8` |
+| `EDF6Coop-2.6.0-feedback1019.zip` | 1472191 | `0d7fc0d948ac165ebabf7c4501599793249f6d8a1bdc810d2b2bbd67628e3ba1` |
+
+全军出击安装包来自代码提交 `c12b9a88a4de8c560c78cb58eb743f9d8137bc84`，位于本工作树 `release/`；配套包位于 `D:/APP/edf6-wt-1019-coop-transport/release/`。这是本次反馈构建，不是正式版本标签。完整解压后运行全军出击安装器，联机参与者还需更新配套 Coop。
+
+包内 `EDF6VehicleCrew.dll` 为 21006336 字节、SHA256 `dd7cc8040f558d4cca091d207dc41d9c6f581ebac6958e68cde81f0f9c52fb8d`；`EDF6AutoTurret.dll` 为 844800 字节、SHA256 `1e8b697b3912588fd60661f18f34cfd554399d7f5a023dbbd34c36071041ccfa`。已直接解 CArchive 和 ZIP 对照；从没有源码/Python 环境变量的空目录执行 `--check-package` 与 `--check-workers` 均成功。未启动安装流程。
+
 未启动或写入真实游戏目录。离线 CTest、私有映射原生指令、真实资源和 WARP 检查、SDK 容量/时序模型分别证明相应合同；不等于真实驾驶/听感、完整任务通关或两台机器的联机验收。
 
 更新需要运行完整安装器重新生成模型、地图缓存和菜单布局，不能只替换 DLL。

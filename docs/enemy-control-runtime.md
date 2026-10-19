@@ -43,6 +43,6 @@ Hector 的继承模板若没有真实 CAS 动作，不列出不存在的 armStom
 
 ## 验证
 
-核心生产夹具直接包含 `enemy_control.cpp`，模块边界显式 stub，其原生行为由各模块独立夹具/真实 DLL 审计验证。核心当前 181 项通过，覆盖：多源身份、pressed/held/同帧 press-release、队列溢出、失败恢复保弱引用、死亡对象归还控制器、源保护原值、真实 HP、地图/雷达归属、相机近障碍和 t=0、真实 actor/LockPoint、空槽 14、技能 revision、接受动作排空与可信 abort、晚到原生身份注册、旧网络失败不污染新候选、P1/P2 地图与关图 drain 不串输入、借用真实导引身份不增弱计数、原生导引钩子故障保留弱引用账本并在解除保护后恢复。`enemy_control_source_native_audit.py` 10 项通过。
+核心生产夹具直接包含 `enemy_control.cpp`，模块边界显式 stub，其原生行为由各模块独立夹具/真实 DLL 审计验证。核心当前 183 项通过，覆盖：多源身份、pressed/held/同帧 press-release、队列溢出、失败恢复保弱引用、死亡对象归还控制器、源保护原值、真实 HP、地图/雷达归属、相机近障碍和 t=0、真实 actor/LockPoint、空槽 14、技能 revision、接受动作排空与可信 abort、晚到原生身份注册、旧网络失败不污染新候选、P1/P2 地图与关图 drain 不串输入、借用真实导引身份不增弱计数、原生导引钩子故障保留弱引用账本并在解除保护后恢复。`enemy_control_source_native_audit.py` 10 项通过。
 
 输入/动作/武器、PVP emitter 树、实际 Factory 返回与可靠出弹 outcome 的更细证据分别见 `enemy-control-native-re.md`、`enemy-control-target-re.md`、各家族及网络文档。类型/SGO 数是资源与分派覆盖数，不能替代实机手感、每个任务环境和真实双机验收。
