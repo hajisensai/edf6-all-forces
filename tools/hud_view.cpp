@@ -515,6 +515,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     // 30 m apart; the heli guarding the same point (helis share its orbit); the jet following the player; a box being
     // dragged (Ctrl + left drag) round the crawlers to the pointer; the last command's word.
     sceneCmd=MapCommandReadout{};
+    sceneCmd.squadGroups[0]=0x5;sceneCmd.squadGroups[1]=0x100;   // groups 1 and 3, group 9 (the panel's [13], [9])
     sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<(static_cast<unsigned>(mapcmd::kLastOrder)+1))-1;sceneCmd.selectedSquads=1;sceneCmd.squadToolsAllowed=!online;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
     sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
     auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
@@ -533,6 +534,12 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     cmdUnit(robo1,false,"CRAWLER",Order::guard,guard,true);
     cmdUnit(robo2,false,"CRAWLER",Order::guard,slot1,true);
     sceneCmd.unit[sceneCmd.count-1].owner=sceneCmd.unit[sceneCmd.count-2].owner=kCmdOwnerGround;
+    // The crawlers kept as group 1 (Ctrl+1), the second also in group 2, with two Shift-queued points after its guard.
+    {
+        CmdMark& a=sceneCmd.unit[sceneCmd.count-2];CmdMark& b=sceneCmd.unit[sceneCmd.count-1];
+        a.groups=0x1;b.groups=0x3;b.ways=2;
+        const float w1[3]={200.0f,0.0f,520.0f},w2[3]={320.0f,0.0f,600.0f};std::memcpy(b.way[0],w1,12);std::memcpy(b.way[1],w2,12);
+    }
     // The squads (npcai.cpp, docs/npc-ai-design.md §6.1): a recruited one guarding, a free one, a script's (locked, grey),
     // one dismissed waiting out its cooldown; their panel on the right.
     const float sq1[3]={-30.0f,0.0f,150.0f},sq2[3]={200.0f,0.0f,250.0f},sq3[3]={-250.0f,0.0f,500.0f};
@@ -746,7 +753,8 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     for(int i=0;i<sceneCmd.squads;++i) {
         const SquadRow& r=sceneCmd.squad[i];wchar_t kind[32],status[32];
         hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
-        Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));
+        wchar_t groups[16];MapGroupDigits(sceneCmd.squadGroups[i],groups,_countof(groups));   // its RTS groups ([13]), none: spaces
+        Line expected{};Format(expected,L"%ls  %ls x%d   %ls   %ls",groups,kind,r.alive,status,MapOrderWord(r.now.order));
         if(i<listedRows)shown(expected.text);
         else for(const Drew& d:drew)if(d.text==expected.text){++textFailed;std::printf("FAIL folded squad row shown: %s\n",Narrow(d.text).c_str());}
     }
@@ -761,7 +769,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         bool board=false;
         for(int i=0;i<sceneButtons;++i) {
             board=board || sceneButtonId[i]==static_cast<int>(mapbtn::Id::board);
-            if(sceneButtonId[i]>=static_cast<int>(mapbtn::Id::formation) && sceneButtonId[i]<=static_cast<int>(mapbtn::Id::merge)) {
+            if(sceneButtonId[i]==static_cast<int>(mapbtn::Id::formation)) {
                 ++textFailed;std::puts("FAIL unsupported online squad editor is clickable");
             }
         }

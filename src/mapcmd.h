@@ -119,6 +119,9 @@ bool MapCommandEats(bool front) noexcept;
 // npcai.cpp, the mark key on foot with no enemy near the screen's centre: the units selected on the map guard `at` (as G
 // on the map, in a formation round it). How many accepted it; -1 none selected. Authority is checked per unit.
 int MapCommandGuardAt(const float* at) noexcept;
+// map.cpp Frame, every game frame whether the map is open or not: the Shift-queued points advanced (a unit at its point
+// is given the next one; mapcmd_logic.h Advance). Game thread.
+void MapCommandQueueTick() noexcept;
 
 // What the draw shows (hud.cpp MapScreen): the commandable units, the selection, the pointer and its box, the point,
 // the last word.
@@ -127,7 +130,10 @@ constexpr int kCmdUnits=static_cast<int>(mapcmd::kMaxFormationUnits);
 // HUD's language, hudtext.h Word), `owner` whose unit it is (the HUD names a heli's and a jet's so).
 constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 // `riding`: a squad seated in a vehicle (drawn only when picked from its panel row: its vehicle's mark stands for it).
-struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false; };
+// `groups`: the RTS groups it is in (bit N-1: group N, mapcmd_logic.h GroupKey); `ways`: its Shift-queued points after
+// the one it is on its way to (`way`, mapcmd_logic.h Waypoints).
+struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false;
+    std::uint16_t groups=0; std::uint8_t ways=0; float way[mapcmd::kWaypointsMost][3]{}; };
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
 constexpr int kMapSupports=48;
 constexpr int kMapTransportLinks=16;   // the transports' lines the map draws (MapCommandReadout::link)
@@ -150,7 +156,7 @@ struct MapCommandReadout {
     CmdMark unit[kCmdUnits];
     wchar_t note[80];          // the last command's result or refusal
     bool noteFresh;
-    int squads;                // the squad panel's rows (sorted: mapcmd::SquadRank; number keys 1-9 pick a shown one)
+    int squads;                // the squad panel's rows (sorted: mapcmd::SquadRank; a click picks one)
     SquadTally squadTally{};   // every squad, for the folded panel's summary row
     bool squadOpen=false;      // the panel opened past its commandable rows (its summary row clicked)
     // The formation button's menu (map_buttons.h MenuEntry): open; its defences (a selected squad guards a point; the
@@ -158,6 +164,7 @@ struct MapCommandReadout {
     bool formationMenu=false,formationGuard=false,formationMarch=false;int formationGuardShape=-1;
     SquadRow squad[16];
     bool squadSelected[16];
+    std::uint16_t squadGroups[16]{}; // each row's RTS groups (CmdMark::groups)
     bool sweepOn,healthOn;     // the box sweep going; health boxes for hurt soldiers (npcai.cpp)
     Order armed;               // a point order's button (or Z) clicked: the next left click on the ground is its point
     bool armedOrder;           // ...armed (Order::none with it false)

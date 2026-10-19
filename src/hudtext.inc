@@ -267,21 +267,22 @@ HUDTEXT(selectedSome,L"SELECTED %d / %d",L"已选 %d / %d",L"已選 %d / %d",L"�
 HUDTEXT(npcOfflineOnly,L"NPC COMMANDS: OFFLINE ONLY",L"NPC 指挥：仅限离线",L"NPC 指揮：僅限離線",L"NPC 指揮：オフライン専用")
 HUDTEXT(npcNone,L"NPC COMMANDS: no NPC unit (squads, helis, jets, crawlers, tanks)",L"NPC 指挥：没有 NPC 单位（小队、直升机、喷气机、爬行者、坦克）",
         L"NPC 指揮：沒有 NPC 單位（小隊、直升機、噴射機、爬行者、坦克）",L"NPC 指揮：ユニットなし（分隊・ヘリ・ジェット・クロウラー・戦車）")
-HUDTEXT(npcPadKeys,L"%ls   X select (ALL last)   Y guard crosshair   RB follow me   LB release",
-        L"%ls   X 选择（最后为全部）   Y 守准星处   RB 跟随我   LB 解除",L"%ls   X 選擇（最後為全部）   Y 守準星處   RB 跟隨我   LB 解除",
-        L"%ls   X 選択（最後は全員）   Y 照準点を防衛   RB 自分に追従   LB 解除")
-HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack   Z attack-move   G guard   V follow   X release",
-        L"%ls   右键 移动 / 攻击   Z 攻击移动   G 守点   V 跟随我   X 解除",
-        L"%ls   右鍵 移動 / 攻擊   Z 攻擊移動   G 守點   V 跟隨我   X 解除",
-        L"%ls   右クリック 移動 / 攻撃   Z 攻撃移動   G 防衛   V 追従   X 解除")
+HUDTEXT(npcPadKeys,L"%ls   X select   Y attack-move (hold: HOLD)   RB follow me   LB stop   D-pad groups 1-4 (hold: keep)",
+        L"%ls   X 选择   Y 攻击移动（按住：原地坚守）   RB 跟随我   LB 停止   十字键 编队 1-4（按住：编入）",
+        L"%ls   X 選擇   Y 攻擊移動（按住：原地堅守）   RB 跟隨我   LB 停止   十字鍵 編隊 1-4（按住：編入）",
+        L"%ls   X 選択   Y 攻撃移動（長押し：その場で死守）   RB 自分に追従   LB 停止   十字キー グループ 1-4（長押し：登録）")
+HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack (Shift: queue)   Z attack-move   H hold   V follow   X stop   Ctrl+1-9 group",
+        L"%ls   右键 移动 / 攻击（Shift 排队）   Z 攻击移动   H 原地坚守   V 跟随我   X 停止   Ctrl+1-9 编队",
+        L"%ls   右鍵 移動 / 攻擊（Shift 排隊）   Z 攻擊移動   H 原地堅守   V 跟隨我   X 停止   Ctrl+1-9 編隊",
+        L"%ls   右クリック 移動 / 攻撃（Shift で予約）   Z 攻撃移動   H 死守   V 追従   X 停止   Ctrl+1-9 グループ")
 HUDTEXT(mapTitle,L"MAP   height %ls   grid %ls%ls",L"地图   高度 %ls   网格 %ls%ls",L"地圖   高度 %ls   網格 %ls%ls",L"マップ   高度 %ls   グリッド %ls%ls")
 HUDTEXT(mapPadKeys,L"L stick pan   R stick turn / tilt   RT / LT zoom   A centre   B / map button close",
         L"左摇杆 平移   右摇杆 旋转 / 俯仰   RT / LT 缩放   A 居中   B / 地图键 关闭",L"左搖桿 平移   右搖桿 旋轉 / 俯仰   RT / LT 縮放   A 置中   B / 地圖鍵 關閉",
         L"左スティック 移動   右スティック 回転 / 傾き   RT / LT ズーム   A 中央へ   B / マップボタン 閉じる")
-HUDTEXT(mapMouseKeys,L"LMB drag / WASD pan   RMB drag / Q E turn   R F tilt   wheel / + - zoom   Space centre   %ls / Esc close",
-        L"左键拖动 / WASD 平移   右键拖动 / Q E 旋转   R F 俯仰   滚轮 / + - 缩放   空格 居中   %ls / Esc 关闭",
-        L"左鍵拖曳 / WASD 平移   右鍵拖曳 / Q E 旋轉   R F 俯仰   滾輪 / + - 縮放   空白鍵 置中   %ls / Esc 關閉",
-        L"左ドラッグ / WASD 移動   右ドラッグ / Q E 回転   R F 傾き   ホイール / + - ズーム   スペース 中央へ   %ls / Esc 閉じる")
+HUDTEXT(mapMouseKeys,L"WASD / middle drag pan (LMB drag with no unit)   RMB drag / Q E turn   R F tilt   wheel / + - zoom   Space centre   %ls / Esc close",
+        L"WASD / 中键拖动 平移（没有单位时左键拖动）   右键拖动 / Q E 旋转   R F 俯仰   滚轮 / + - 缩放   空格 居中   %ls / Esc 关闭",
+        L"WASD / 中鍵拖曳 平移（沒有單位時左鍵拖曳）   右鍵拖曳 / Q E 旋轉   R F 俯仰   滾輪 / + - 縮放   空白鍵 置中   %ls / Esc 關閉",
+        L"WASD / 中ドラッグ 移動（ユニットなしは左ドラッグ）   右ドラッグ / Q E 回転   R F 傾き   ホイール / + - ズーム   スペース 中央へ   %ls / Esc 閉じる")
 HUDTEXT(legendYou,L"YOU",L"你",L"你",L"自分")
 HUDTEXT(legendSquad,L"SQUAD",L"小队",L"小隊",L"分隊")
 HUDTEXT(legendFriendly,L"FRIENDLY",L"友军",L"友軍",L"味方")
@@ -300,7 +301,7 @@ HUDTEXT(legendNearestEnemy,L"NEAREST ENEMY",L"最近的敌人",L"最近的敵人
 HUDTEXT(cmdOfflineOnly,L"COMMANDS: OFFLINE ONLY",L"指挥：仅限离线",L"指揮：僅限離線",L"指揮：オフライン専用")
 HUDTEXT(cmdSelectFirst,L"SELECT UNITS FIRST (%ls)",L"请先选择单位（%ls）",L"請先選擇單位（%ls）",L"先にユニットを選択（%ls）")
 HUDTEXT(cmdNoUnit,L"NO UNIT TO COMMAND",L"没有可指挥的单位",L"沒有可指揮的單位",L"指揮できるユニットなし")
-HUDTEXT(cmdSelectHowMouse,L"CTRL+DRAG / CLICK / TAB",L"Ctrl+拖动 / 点击 / Tab",L"Ctrl+拖曳 / 點擊 / Tab",L"Ctrl+ドラッグ / クリック / Tab")
+HUDTEXT(cmdSelectHowMouse,L"DRAG / CLICK / 1-9 / TAB",L"拖动框选 / 点击 / 1-9 / Tab",L"拖曳框選 / 點擊 / 1-9 / Tab",L"ドラッグ / クリック / 1-9 / Tab")
 HUDTEXT(cmdNoGround,L"NO GROUND THERE",L"那里没有地面",L"那裡沒有地面",L"そこに地面がない")
 HUDTEXT(cmdGuardOne,L"%ls (%.0f, %.0f): %d UNIT",L"%ls（%.0f, %.0f）：%d 个单位",L"%ls（%.0f, %.0f）：%d 個單位",L"%ls（%.0f, %.0f）：%d ユニット")
 HUDTEXT(cmdGuardMany,L"%ls (%.0f, %.0f): %d UNITS",L"%ls（%.0f, %.0f）：%d 个单位",L"%ls（%.0f, %.0f）：%d 個單位",L"%ls（%.0f, %.0f）：%d ユニット")
@@ -394,15 +395,16 @@ HUDTEXT(cmdNpcRiding,L"This squad is aboard a vehicle: command its vehicle (or o
 HUDTEXT(npcRiding,L"RIDING",L"乘车中",L"乘車中",L"搭乗中")
 // The command card's tooltips and its hint with nothing selected (hud.cpp MapButtons).
 HUDTEXT(tipKey,L"%ls   key %ls",L"%ls   按键 %ls",L"%ls   按鍵 %ls",L"%ls   キー %ls")
-HUDTEXT(tipRightClick,L"%ls   RIGHT-CLICK THE MAP (an enemy: attack it)",L"%ls   右键点击地图（点敌人：攻击它）",L"%ls   右鍵點擊地圖（點敵人：攻擊它）",
-        L"%ls   マップを右クリック（敵なら攻撃）")
+HUDTEXT(tipRightClick,L"%ls   RIGHT-CLICK THE MAP (an enemy: attack it; you: follow; Shift: queue)",L"%ls   右键点击地图（点敌人：攻击；点你自己：跟随；Shift：排队）",
+        L"%ls   右鍵點擊地圖（點敵人：攻擊；點你自己：跟隨；Shift：排隊）",L"%ls   マップを右クリック（敵：攻撃、自分：追従、Shift：予約）")
 HUDTEXT(tipArms,L"%ls   key %ls; the button: then left-click the map",L"%ls   按键 %ls；点按钮后左键点击地图",L"%ls   按鍵 %ls；點按鈕後左鍵點擊地圖",
         L"%ls   キー %ls、ボタンの後マップを左クリック")
 HUDTEXT(btnFormationShort,L"FORMATION",L"编队",L"編隊",L"隊形")
 HUDTEXT(btnHealth,L"HEALTH BOXES",L"回复箱",L"回復箱",L"回復箱")
-HUDTEXT(cmdHintSelect,L"LEFT-CLICK A UNIT, CTRL+DRAG A BOX OR TAB; THEN RIGHT-CLICK TO MOVE OR ATTACK",
-        L"左键点选单位、Ctrl+拖动框选或 Tab 轮换；然后右键移动或攻击",L"左鍵點選單位、Ctrl+拖曳框選或 Tab 輪換；然後右鍵移動或攻擊",
-        L"左クリックで選択、Ctrl+ドラッグで範囲選択、Tab で切替。右クリックで移動・攻撃")
+HUDTEXT(cmdHintSelect,L"DRAG A BOX OR CLICK A UNIT (TWICE: ITS KIND); CTRL+1-9 KEEPS A GROUP; THEN RIGHT-CLICK TO MOVE OR ATTACK",
+        L"左键拖动框选或点选单位（双击：同类全选）；Ctrl+1-9 编队；然后右键移动或攻击",
+        L"左鍵拖曳框選或點選單位（雙擊：同類全選）；Ctrl+1-9 編隊；然後右鍵移動或攻擊",
+        L"ドラッグで範囲選択、クリックで選択（ダブルクリック：同種全選択）、Ctrl+1-9 でグループ。右クリックで移動・攻撃")
 // The support bar (hud.cpp MapSupportBar): its title, the dispatcher's state, a row's tooltip.
 HUDTEXT(supportTitle,L"SUPPORT",L"支援",L"支援",L"支援")
 HUDTEXT(supportPlanning,L"PLANNING",L"调度中",L"調度中",L"手配中")
@@ -423,11 +425,9 @@ HUDTEXT(cmdCannot,L", %d CANNOT",L"，%d 个无法执行",L"，%d 個無法執�
 HUDTEXT(cmdGuardResult,L"%ls (%.0f, %.0f): %d UNIT(S)%ls",L"%ls（%.0f, %.0f）：%d 个单位%ls",L"%ls（%.0f, %.0f）：%d 個單位%ls",L"%ls（%.0f, %.0f）：%d ユニット%ls")
 HUDTEXT(cmdOrderResult,L"%ls: %d UNIT(S)%ls",L"%ls：%d 个单位%ls",L"%ls：%d 個單位%ls",L"%ls：%d ユニット%ls")
 HUDTEXT(squadTitle,L"SQUADS",L"小队",L"小隊",L"分隊")
-HUDTEXT(squadTitleKeys,L"SQUADS (1-9 pick, Shift add)",L"小队（1-9 选择，Shift 追加）",L"小隊（1-9 選擇，Shift 追加）",L"分隊（1-9 選択、Shift 追加）")
+HUDTEXT(squadTitleKeys,L"SQUADS (click pick, Shift add; [n] group)",L"小队（点击选择，Shift 追加；[n] 编队号）",L"小隊（點擊選擇，Shift 追加；[n] 編隊號）",L"分隊（クリックで選択、Shift 追加、[n] グループ）")
 // The map's command buttons (hud.cpp MapButtons; map_buttons.h).
 HUDTEXT(btnFormation,L"FORMATION: %ls",L"编队：%ls",L"編隊：%ls",L"隊形：%ls")
-HUDTEXT(btnSplit,L"SPLIT",L"分组",L"分組",L"分割")
-HUDTEXT(btnMerge,L"JOIN",L"合并",L"合併",L"合流")
 HUDTEXT(btnSweep,L"FETCH BOXES",L"拾取箱子",L"拾取箱子",L"アイテム回収")
 HUDTEXT(btnSweepStop,L"CALL BACK",L"召回",L"召回",L"呼び戻し")
 HUDTEXT(btnHealthOff,L"HEALTH BOXES: FOR THE PLAYER",L"回复箱：留给玩家",L"回復箱：留給玩家",L"回復箱：プレイヤー用")
@@ -437,8 +437,16 @@ HUDTEXT(cmdSweepOn,L"FETCHING BOXES (%d SELECTED SQUADS; 0: YOUR SQUADS)",L"拾�
 HUDTEXT(cmdSweepOff,L"CALLED BACK",L"已召回",L"已召回",L"呼び戻し")
 HUDTEXT(cmdSweepUnavailable,L"BOX SWEEP UNAVAILABLE (SEE THE LOG)",L"拾取不可用（见日志）",L"拾取不可用（見日誌）",L"回収は使用不可（ログ参照）")
 HUDTEXT(cmdHealthOnline,L" (NOT ONLINE)",L"（联机时不捡）",L"（連線時不撿）",L"（オンラインでは無効）")
-HUDTEXT(cmdSplitResult,L"SPLIT: %d SQUAD(S), %d TOO SMALL",L"分组：%d 个小队，%d 个人数不够",L"分組：%d 個小隊，%d 個人數不夠",L"分割：%d 分隊、%d 分隊は人数不足")
-HUDTEXT(cmdMergeResult,L"JOINED: %d SQUAD(S), %d CANNOT",L"合并：%d 个小队，%d 个无法合并",L"合併：%d 個小隊，%d 個無法合併",L"合流：%d 分隊、%d 分隊は不可")
+HUDTEXT(orderHold,L"HOLD",L"原地坚守",L"原地堅守",L"死守")
+// The RTS groups and the Shift queue (mapcmd.cpp GroupAct, Issue).
+HUDTEXT(cmdGroupSet,L"GROUP %d: %d UNIT(S)",L"编队 %d：%d 个单位",L"編隊 %d：%d 個單位",L"グループ %d：%d ユニット")
+HUDTEXT(cmdGroupCleared,L"GROUP %d CLEARED (%d)",L"编队 %d 已清空（%d）",L"編隊 %d 已清空（%d）",L"グループ %d を解除（%d）")
+HUDTEXT(cmdGroupEmpty,L"GROUP %d IS EMPTY (CTRL+%d KEEPS THE SELECTION)",L"编队 %d 是空的（Ctrl+%d 把当前选择编入）",
+        L"編隊 %d 是空的（Ctrl+%d 把目前選擇編入）",L"グループ %d は空（Ctrl+%d で選択中を登録）")
+HUDTEXT(cmdGroupPicked,L"GROUP %d: %d UNIT(S) SELECTED",L"编队 %d：已选 %d 个单位",L"編隊 %d：已選 %d 個單位",L"グループ %d：%d ユニット選択")
+HUDTEXT(cmdSelectedAll,L"SELECTED ALL: %d",L"已全选：%d",L"已全選：%d",L"全選択：%d")
+HUDTEXT(cmdQueued,L"%ls QUEUED (%.0f, %.0f): %d UNIT(S)%ls",L"%ls 已排队（%.0f, %.0f）：%d 个单位%ls",L"%ls 已排隊（%.0f, %.0f）：%d 個單位%ls",
+        L"%ls 予約（%.0f, %.0f）：%d ユニット%ls")
 // The squads' formations (formation.h Shape, in its order; npcai.cpp, mapcmd.cpp FormationText).
 HUDTEXT(formStock,L"DEFAULT",L"默认",L"預設",L"標準")
 HUDTEXT(formColumn,L"COLUMN",L"纵队",L"縱隊",L"縦隊")

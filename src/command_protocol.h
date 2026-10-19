@@ -7,7 +7,8 @@ namespace crew::command_net {
 // Version 4 (2026-10-09): the transport's WITHDRAW order and its refusal (NpcCommandReason::noTransport).
 // Version 5 (2026-10-09): DISMOUNT ALL (mapcmd::Order::dismountAll) and DISMOUNT's refusal with nobody on a passenger
 // seat (NpcCommandReason::noPassengers); DISMOUNT itself now leaves the driver and the gunners aboard.
-constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=5,kMaxPeers=1024;
+// Version 6 (2026-10-19): HOLD (mapcmd::Order::hold, the map's H): the authority guards where its unit stands.
+constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=6,kMaxPeers=1024;
 constexpr std::size_t kWireSize=828;
 enum class Kind : std::uint32_t { hello=1,capability,request,result };
 enum class Rpc : std::uint32_t { none,notReady,unsupported,invalid,stale,rateLimited,timeout,interrupted,count };

@@ -2,24 +2,29 @@
 // npc", "操作 需要一个框选吧"). While the map (map.cpp) is open:
 //  - the units: the helis the plugin flies (heli.cpp), its jets, rotor carriers and drones with no carrier (jet.cpp), the
 //    Depth Crawlers it drives (ground.cpp) -- each module lists the ones that take an order now (mapcmd.h);
-//  - the mouse moves a pointer the HUD draws (the game's own mouse delta: the game has no cursor of its own there). The
-//    map's mouse stays as it was (map.cpp Steer): a left drag pans, a right drag turns, the wheel zooms; the pointer
-//    stands still while they do. So the box is Ctrl + left drag (Shift adds), a left click with no drag selects the unit
-//    under the pointer (Shift adds / takes it out) or, on empty ground, clears the selection (mapcmd_logic.h Box, Click);
+//  - the mouse moves a pointer the HUD draws (the game's own mouse delta: the game has no cursor of its own there). RTS
+//    since 2026-10-19 (the user: 「合并分组经常无效，分开也是，感觉你这个分组是不是和rts不太一样」): a left drag boxes the
+//    units (Shift adds; with no unit to box, or a point armed, it pans the map as before), the middle drag and WASD pan,
+//    a right drag turns, the wheel zooms; a left click selects the unit under the pointer (Shift adds / takes it out,
+//    twice or Ctrl: every unit of its kind on the screen) or, on empty ground, clears the selection (mapcmd_logic.h Box,
+//    Click, SelectKind); Ctrl+A every unit;
+//  - the RTS groups (mapcmd_logic.h GroupKey): Ctrl+1-9 keeps the selection as a group, 1-9 selects it again (twice: the
+//    map centres on it), held by identity and followed through a squad leader's death (npcai.cpp NpcSquadSuccessor);
+//    the pad's D-pad groups 1-4. They replace SPLIT / JOIN (P / L), which rearranged the native follow trees;
 //  - Tab / Shift+Tab (pad X) step through one unit at a time, then ALL (mapcmd_logic.h Cycle); the map centres on a unit
 //    selected so;
-//  - G (pad Y): every selected unit guards the point under the pointer (with a pad: the screen's centre) -- goes there,
-//    fights what comes within its range of it, circles / patrols it; several stand round it in a formation
-//    (mapcmd_logic.h Formation; guard helis share one orbit round the point instead: heli.cpp GuardOrbit spaces them).
-//    V (pad RB): follow the player; X (pad LB): release (back to what it did before any command).
-//  - RTS (the user, 2026-10-09): the right button let go without a drag (a right drag still turns the map) gives the
-//    selection a move to the ground under the pointer, or, on an enemy, focus fire on it (mapcmd_logic.h
-//    RightClickOrder); Z an attack-move there. A point order's button (move, attack-move, guard) or a support's row arms
-//    the next left click on the map as its point; the right button cancels that instead.
+//  - Z (pad Y): every selected unit attack-moves to the point under the pointer (with a pad: the screen's centre) and
+//    guards it there; several stand round it in a formation (mapcmd_logic.h Formation; guard helis share one orbit round
+//    the point instead: heli.cpp GuardOrbit spaces them). H (pad Y held): HOLD, each unit where it stands. V (pad RB):
+//    follow the player; X (pad LB): stop (back to what it did before any command).
+//  - the right button let go without a drag (a right drag still turns the map), by what is under it: an enemy: focus
+//    fire on it; the player's own mark: FOLLOW; the ground: a move there (mapcmd_logic.h RightClickOrder). Shift with it
+//    (or with Z) queues the point after the ones before it (mapcmd_logic.h Waypoints; MapCommandQueueTick advances them
+//    every frame, the map shut too). A point order's button (move, attack-move) or a support's row arms the next left
+//    click on the map as its point; the right button cancels that instead.
 //  - an enemy under the pointer (the user, 2026-10-07: "应该在地图里面也能按q标记"): the mark key (NpcMarkKey, Q) marks it
-//    for the NPCs (npcai.cpp NpcMarkEnemy; the same one again: let go) instead of turning the map, and H (focus fire)
-//    marks it and sends the selected squads at it in one press. With no enemy under the pointer Q turns the map and H
-//    focuses on the mark there is (made on foot or here).
+//    for the NPCs (npcai.cpp NpcMarkEnemy; the same one again: let go) instead of turning the map. With no enemy under the
+//    pointer Q turns the map.
 // The pointer's point: the map ray under it (mapcmd_logic.h ScreenRay on the view the HUD last drew), else that ray's
 // meeting with the level ground through the focus (RayLevel).
 // Online, owned units execute through their real AI authority. Replica squads are selected by native identity and
@@ -61,10 +66,10 @@ constexpr float kClickBox=6.0f;          // px: a Ctrl box smaller than this bot
 constexpr float kClickRadius=22.0f;      // px (at 1080 lines) round a unit's icon a click takes it
 
 enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
-struct Entry { CommandUnit u; Owner owner; };
+struct Entry { CommandUnit u; Owner owner; ObjRef id{}; };   // id: its identity when listed (the module had it live)
 
-struct Keys { bool tab,shift,ctrl,guard,follow,release,left,right,padNext,padGuard,padFollow,padRelease,
-             engage,focus,board,dismount,dismiss,recruit,attackMove,mark,formation,split,merge,sweep,health,digit[9],supportPrev,supportNext,supportCall,
+struct Keys { bool tab,shift,ctrl,follow,release,left,right,middle,padNext,padGuard,padFollow,padRelease,
+             engage,hold,board,dismount,dismiss,recruit,attackMove,mark,formation,sweep,health,all,digit[9],supportPrev,supportNext,supportCall,
              // The test range's 「摆放」 panel (range_place.h): , . / Enter Backspace; the pad's D-pad, A, B.
              placePrev,placeNext,placeCategory,placeEnter,placeClose,padUp,padDown,padLeft,padRight,padA,padB,padPvp,padEnemy; };
 
@@ -104,6 +109,16 @@ struct Game {
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
     ObjRef requester{},focus{};
+    // The RTS groups (mapcmd_logic.h GroupKey): each one's units by identity (a squad's top; NpcSquadSuccessor follows a
+    // squad through its leader's death), kept while the map is shut; the number keys' double tap; the pad's held buttons.
+    ObjRef group[mapcmd::kGroups][mapcmd::kMaxSel]{};int groupN[mapcmd::kGroups]{};
+    mapcmd::Tap tap{};
+    mapcmd::Held padY{},padDir[4]{};
+    const void* clickUnit=nullptr;ULONGLONG clickAt=0;   // the last click's unit and when (a second one: its kind)
+    // The Shift-queued points (mapcmd_logic.h Waypoints): a unit's, the player who gave them. Advanced every frame,
+    // the map open or not (MapCommandQueueTick).
+    struct Queue { ObjRef unit,requester; mapcmd::Waypoints w; };
+    Queue queue[kCmdUnits]{};
     NpcCommandReason failure=NpcCommandReason::none;
     unsigned affected=0;
     // The last command's units that did not take it, by why (the log: "0 of 32 units took it" said nothing of why).
@@ -167,7 +182,7 @@ bool Down(int vk) noexcept { return (edf::AsyncKey(vk)&0x8000)!=0; }
 void List(Game& g) noexcept {
     CommandUnit buf[kCmdUnits];
     g.count=0;
-    auto add=[&](int n,Owner o){ for(int i=0;i<n && g.count<kCmdUnits;++i)g.list[g.count++]=Entry{buf[i],o}; };
+    auto add=[&](int n,Owner o){ for(int i=0;i<n && g.count<kCmdUnits;++i)g.list[g.count++]=Entry{buf[i],o,ObjRef::Of(buf[i].v)}; };
     add(HeliCommandUnits(buf,kCmdUnits),Owner::heli);
     add(JetCommandUnits(buf,kCmdUnits-g.count),Owner::jet);
     add(GroundCommandUnits(buf,kCmdUnits-g.count),Owner::ground);
@@ -184,6 +199,13 @@ void List(Game& g) noexcept {
 }
 
 void KeepSelection(Game& g,const void* const* ids) noexcept {
+    // A selected squad whose top died is the squad it handed over to (npcai.cpp Succeed), not lost from the selection.
+    for(int i=0;i<g.sel.n;++i) {
+        ObjRef next;
+        if(mapcmd::IndexOf(ids,g.count,g.sel.id[i])>=0 || g.selected[i].obj!=g.sel.id[i] || !NpcSquadSuccessor(g.selected[i],&next) ||
+           mapcmd::IndexOf(ids,g.count,next.obj)<0 || g.sel.Has(next.obj))continue;
+        g.sel.id[i]=next.obj;g.selected[i]=next;
+    }
     mapcmd::Keep(g.sel,ids,g.count);
     for(int i=g.sel.n-1;i>=0;--i) {
         const void* id=g.sel.id[i];
@@ -258,10 +280,11 @@ Keys ReadKeys(const MapCmdInput& in,bool placeKeys) noexcept {
     Keys k{};
     if(in.front) {
         k.tab=Down(VK_TAB);k.shift=Down(VK_SHIFT);k.ctrl=Down(VK_CONTROL);
-        k.guard=Down('G');k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);k.right=Down(VK_RBUTTON);
-        // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt).
-        k.engage=Down('J');k.focus=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');k.split=Down('P');k.merge=Down('L');k.sweep=Down('Y');k.health=Down('O');
-        k.attackMove=Down('Z');
+        k.follow=Down('V');k.release=Down('X');k.left=Down(VK_LBUTTON);k.right=Down(VK_RBUTTON);k.middle=Down(VK_MBUTTON);
+        // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt; A and S
+        // stay its pan, so RTS's A-move is Z and its hold is H). Ctrl+A: every unit (the map does not pan with Ctrl held).
+        k.engage=Down('J');k.hold=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');k.sweep=Down('Y');k.health=Down('O');
+        k.attackMove=Down('Z');k.all=k.ctrl && Down('A');
         k.mark=Cfg().npcMarkKey>0 && Down(Cfg().npcMarkKey);
         for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
         k.supportPrev=Down(VK_OEM_4);k.supportNext=Down(VK_OEM_6);k.supportCall=Down('C');
@@ -297,6 +320,7 @@ const char* OrderName(Order o) noexcept {
     case Order::move: return "MOVE";
     case Order::attackMove: return "ATTACK-MOVE";
     case Order::withdraw: return "WITHDRAW";
+    case Order::hold: return "HOLD";
     default: return "RELEASE";
     }
 }
@@ -315,6 +339,7 @@ const wchar_t* OrderText(Order o) noexcept {
     case Order::move: return hudtext::Tr(Tx::orderMove);
     case Order::attackMove: return hudtext::Tr(Tx::orderAttackMove);
     case Order::withdraw: return hudtext::Tr(Tx::orderWithdraw);
+    case Order::hold: return hudtext::Tr(Tx::orderHold);
     default: return hudtext::Tr(Tx::orderRelease);
     }
 }
@@ -334,11 +359,12 @@ bool Takes(const Entry& e,Order o) noexcept {
         // Its transport (transport.cpp): WITHDRAW sends it off; aboard it the point orders take it there (it gets off short
         // of the point and carries them out on foot).
         if(o==Order::withdraw)return e.u.transport;
-        if(e.u.riding)return o!=Order::follow && o!=Order::engage && o!=Order::focus && (e.u.transport || !mapcmd::PointOrder(o));
+        if(e.u.riding)return o!=Order::follow && o!=Order::engage && o!=Order::focus && o!=Order::hold &&
+                             (e.u.transport || !mapcmd::PointOrder(o));
         return true;
     }
     if(mapcmd::DismountOrder(o))return e.u.carries;   // its riding squad's (Give)
-    if(e.owner==Owner::tank)return o==Order::none || o==Order::focus || mapcmd::PointOrder(o);
+    if(e.owner==Owner::tank)return o==Order::none || o==Order::focus || mapcmd::PlaceOrder(o);
     if(e.owner==Owner::heli || e.owner==Owner::jet)return mapcmd::AirOrder(o);
     return mapcmd::VehicleOrder(o);
 }
@@ -572,7 +598,7 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
         if(g.uiLeft)g.uiPress=Game::UiHit{Game::UiKind::panel};
     }
     const float s=v->h/1080.0f;
-    if(in.mouse && (g.uiLeft || g.uiRight || g.boxing || (!k.left && !k.right))) {
+    if(in.mouse && (g.uiLeft || g.uiRight || g.boxing || (!k.left && !k.right && !k.middle))) {
         g.pointer.x=mapcam::Clamp(g.pointer.x+in.dx*kPointerGain*s,0.0f,v->w-1.0f);
         g.pointer.y=mapcam::Clamp(g.pointer.y+in.dy*kPointerGain*s,0.0f,v->h-1.0f);
     }
@@ -584,10 +610,16 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
     }
     if(!k.right && g.was.right && g.rpressing){g.rightClick=g.rmoved<kClickMove;g.rightOnUi=g.rOnUi;g.rpressing=false;}
     if(!k.right)g.uiRight=false;
+    // RTS (the user, 2026-10-19): a left drag on the map is the selection box whenever there is a unit to box (Ctrl
+    // too, as before); with none, or with a point armed (its click), it pans the map as it did (map.cpp Steer; the
+    // middle button's drag pans always).
+    const bool armed=g.armedOrder || g.armedSupport>=0 || g.place.armed>=0;
+    bool boxes=false;
+    for(int i=0;i<g.count && !boxes;++i)boxes=Picked(g.list[i]);
     if(k.left && !g.was.left && !g.suppressLeft) {
         g.uiPress=UiAt(*v,g.pointer.x,g.pointer.y);g.uiLeft=g.uiPress.kind!=Game::UiKind::none;g.moved=0;
         if(g.uiLeft)g.boxing=g.pressing=false;
-        else if(k.ctrl){g.boxing=true;g.bx=g.pointer.x;g.by=g.pointer.y;}
+        else if(k.ctrl || (boxes && !armed)){g.boxing=true;g.bx=g.pointer.x;g.by=g.pointer.y;}
         else g.pressing=true;
     }
     pointerCaptured.store(g.uiLeft || g.uiRight || (g.suppressLeft && k.left) || (g.suppressRight && k.right));
@@ -600,11 +632,24 @@ void Pointer(Game& g,const MapCmdInput& in,const Keys& k,const View* v) noexcept
     const bool box=g.boxing && (std::fabs(g.pointer.x-g.bx)>=kClickBox*s || std::fabs(g.pointer.y-g.by)>=kClickBox*s);
     const bool click=(g.boxing && !box) || (g.pressing && g.moved<kClickMove);
     if(click && UiAt(*v,g.pointer.x,g.pointer.y).kind!=Game::UiKind::none){} // release over UI never selects what is underneath
-    else if(click && (g.armedOrder || g.armedSupport>=0 || g.place.armed>=0) && !g.boxing)g.armedClick=true;
+    else if(click && armed && !g.boxing)g.armedClick=true;
     else if(box)mapcmd::Box(g.sel,marks,n,g.bx,g.by,g.pointer.x,g.pointer.y,k.shift);
     else if(click) {
-        const Entry* hit=EntryOf(g,mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift));
+        const void* id=mapcmd::Click(g.sel,marks,n,g.pointer.x,g.pointer.y,kClickRadius*s,k.shift);
+        const Entry* hit=EntryOf(g,id);
         if(hit && !Picked(*hit))Note(g,L"%ls",CommandFailureText(NotPicked(*hit)));
+        else if(hit) {
+            // A second click on the same unit within the double-click time, or Ctrl+click: every unit of its kind on the
+            // screen (RTS; Shift adds them).
+            const ULONGLONG at=GetTickCount64();
+            const bool twice=g.clickUnit==id && at-g.clickAt<=mapcmd::kDoubleTapMs;
+            if(twice || k.ctrl) {
+                const char* kind[kCmdUnits];int owner[kCmdUnits];
+                for(int i=0;i<n;++i){kind[i]=g.list[i].u.name;owner[i]=static_cast<int>(g.list[i].owner);}
+                mapcmd::SelectKind(g.sel,marks,kind,owner,n,static_cast<int>(hit-g.list),k.shift);
+            }
+            g.clickUnit=twice ? nullptr : id;g.clickAt=at;
+        }
     }
     g.boxing=g.pressing=false;
 }
@@ -715,8 +760,33 @@ void CommandNetworkReply(Game& g) noexcept {
     g.networkRequest=0;
 }
 
+// How near (m, level) a unit is to its point to be there for its queue (mapcmd_logic.h Advance): a squad within its
+// guard's radius of it (npcai.cpp turns its move into a guard nearer than that), a heli on its orbit, a jet circling it.
+float Reach(const Entry& e) noexcept {
+    switch(e.owner) {
+    case Owner::heli: return std::fmax(40.0f,Cfg().heliGuardRadius+40.0f);
+    case Owner::jet: return 600.0f;
+    case Owner::squad: return Cfg().npcGuardRadius+10.0f;
+    default: return 30.0f;
+    }
+}
+// The queue slot of unit `v` (its identity now; `make`: a free one taken), or nullptr.
+Game::Queue* QueueOf(Game& g,const ObjRef& id,bool make) noexcept {
+    if(!id.obj)return nullptr;
+    Game::Queue* free=nullptr;
+    for(auto& q:g.queue) {
+        if(q.unit.obj==id.obj && q.unit.ctrl==id.ctrl)return &q;
+        if(!free && !q.w.active)free=&q;
+    }
+    if(!make || !free)return nullptr;
+    *free=Game::Queue{id,{},{}};
+    return free;
+}
+
 // The command to every selected unit; a point order's formation round the point (helis sharing one orbit stay on it).
-int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
+// `queue` (Shift): a move / attack-move goes after the points a unit is on its way to (mapcmd_logic.h Enqueue); without
+// it every unit's queue is replaced by this order.
+int Issue(Game& g,const Command& cmd,int* skipped,bool queue=false) noexcept {
     int k=0;
     g.failure=NpcCommandReason::none;g.affected=0;
     g.skipScript=g.skipRiding=g.skipCannot=g.skipRemote=g.skipFailed=0;
@@ -768,7 +838,22 @@ int Issue(Game& g,const Command& cmd,int* skipped) noexcept {
             }
             c.at[1]=ground;
         }
-        if(!Give(g,e,c)){if(g.failure==NpcCommandReason::none)g.failure=NpcCommandReason::failed;++g.skipFailed;++*skipped;continue;}
+        if(cmd.order==Order::hold) {   // its own spot (on the ground under it): the module's guard post / the squad's point
+            float ground;
+            if(!MapGroundNear(e.u.pos[0],e.u.pos[2],e.u.pos[1],&ground,true) || !std::isfinite(ground)) {
+                g.failure=NpcCommandReason::noTarget;++g.skipFailed;++*skipped;continue;
+            }
+            c.at[0]=e.u.pos[0];c.at[1]=ground;c.at[2]=e.u.pos[2];
+        }
+        Game::Queue* q=QueueOf(g,e.id,true);
+        if(q)q->requester=g.requester;
+        if(queue && q && mapcmd::PointOrder(c.order) && !mapcmd::Enqueue(q->w,e.u.now,e.u.pos,Reach(e),c)){++given;continue;}
+        if(!Give(g,e,c)) {
+            if(g.failure==NpcCommandReason::none)g.failure=NpcCommandReason::failed;
+            if(q)q->w=mapcmd::Waypoints{};
+            ++g.skipFailed;++*skipped;continue;
+        }
+        if(q && !queue)mapcmd::Replace(q->w,c);
         e.u.now=c;
         ++given;
     }
@@ -798,25 +883,70 @@ void Formation(Game& g,bool allowed) noexcept {
         marchShape>=0 ? npc::formation::Name(static_cast<npc::formation::Shape>(marchShape)) : "unchanged");
 }
 
-// P (the map open): each selected squad split in two fireteams; L: the selected squads joined under the first selected.
-void Teams(Game& g,bool allowed,bool split) noexcept {
-    using hudtext::Tr;
-    using hudtext::Tx;
-    if(!allowed){Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));return;}
-    const void* first=nullptr;
-    int done=0,squads=0;
-    for(int i=0;i<g.count;++i) {
-        const Entry& e=g.list[i];
-        if(!g.sel.Has(e.u.v) || e.owner!=Owner::squad)continue;
-        ++squads;
-        if(split){if(SplitSquad(e.u.v)>0)++done;continue;}
-        if(!first){first=e.u.v;continue;}
-        if(MergeSquads(first,e.u.v))++done;
+// A group's members now (mapcmd_logic.h GroupKey): a squad whose top died goes on as the squad it handed over to
+// (NpcSquadSuccessor); a unit dead, or another object at its address, is dropped; one only out of the list a while (its
+// soldiers out of this machine's update, a vehicle between drivers) is kept, it comes back.
+void KeepGroup(Game& g,int n,const void* const* ids) noexcept {
+    int kept=0;
+    for(int i=0;i<g.groupN[n];++i) {
+        ObjRef ref=g.group[n][i];
+        if(mapcmd::IndexOf(ids,g.count,ref.obj)<0) {
+            ObjRef next;
+            if(NpcSquadSuccessor(ref,&next))ref=next;
+            else if(!Readable(ref.obj,kSelfCtrl+sizeof(void*)) || !Readable(ref.obj,kDead+1) || !ref.Is(ref.obj) ||
+                    static_cast<const unsigned char*>(ref.obj)[kDead])continue;
+        }
+        bool twice=false;
+        for(int j=0;j<kept && !twice;++j)twice=g.group[n][j].obj==ref.obj;
+        if(!twice)g.group[n][kept++]=ref;
     }
-    if(!squads){Note(g,L"%ls",Tr(Tx::cmdNoUnit));return;}
-    if(split)Note(g,Tr(Tx::cmdSplitResult),done,squads-done);
-    else Note(g,Tr(Tx::cmdMergeResult),done,squads>1 ? squads-1-done : 0);
-    Log("MAPCMD %s: %d of %d selected squads",split ? "split" : "merge",done,squads);
+    g.groupN[n]=kept;
+}
+// Group `n`'s act (a number key's, the pad's D-pad's); true when the map is to centre on `centre` (the group's middle).
+bool GroupAct(Game& g,int n,mapcmd::GroupAct act,const void* const* ids,float* centre) noexcept {
+    using hudtext::Tr;using hudtext::Tx;using mapcmd::GroupAct;
+    if(n<0 || n>=mapcmd::kGroups || act==GroupAct::none)return false;
+    if(act==GroupAct::assign || act==GroupAct::append) {
+        if(act==GroupAct::assign)g.groupN[n]=0;
+        else KeepGroup(g,n,ids);
+        for(int i=0;i<g.sel.n && g.groupN[n]<mapcmd::kMaxSel;++i) {
+            bool in=false;
+            for(int j=0;j<g.groupN[n] && !in;++j)in=g.group[n][j].obj==g.sel.id[i];
+            const int k=mapcmd::IndexOf(ids,g.count,g.sel.id[i]);
+            if(!in && k>=0)g.group[n][g.groupN[n]++]=g.list[k].id;
+        }
+        Note(g,Tr(g.groupN[n] ? Tx::cmdGroupSet : Tx::cmdGroupCleared),n+1,g.groupN[n]);
+        Log("MAPCMD group %d %s: %d unit(s)",n+1,act==GroupAct::assign ? "set" : "added to",g.groupN[n]);
+        return false;
+    }
+    KeepGroup(g,n,ids);
+    if(!g.groupN[n]){Note(g,Tr(Tx::cmdGroupEmpty),n+1,n+1);return false;}
+    if(act!=GroupAct::add)g.sel.Clear();
+    float sum[3]{};int at=0;
+    for(int i=0;i<g.groupN[n];++i) {
+        const int k=mapcmd::IndexOf(ids,g.count,g.group[n][i].obj);
+        if(k<0)continue;   // out of the list now: kept in the group, not selectable this frame
+        g.sel.Add(g.group[n][i].obj);
+        for(int c=0;c<3;++c)sum[c]+=g.list[k].u.pos[c];
+        ++at;
+    }
+    Note(g,Tr(Tx::cmdGroupPicked),n+1,at);
+    if(act!=GroupAct::centre || !at)return false;
+    for(int c=0;c<3;++c)centre[c]=sum[c]/static_cast<float>(at);
+    return true;
+}
+
+// Whether the pointer (right button let go) is on the player's own mark (the map's owner): FOLLOW for the selection.
+bool OnRequester(const Game& g,const View* v) noexcept {
+    if(!v)return false;
+    __try {
+        if(!Readable(g.requester.obj,kPosition+12) || !g.requester.Is(g.requester.obj))return false;
+        float body[3],x,y;
+        mapcmd::BodyPoint(static_cast<const float*>(static_cast<const void*>(static_cast<const unsigned char*>(g.requester.obj)+kPosition)),false,body);
+        if(!mapcmd::Project(v->vp,body,v->w,v->h,&x,&y))return false;
+        const float dx=x-g.pointer.x,dy=y-g.pointer.y,r=kClickRadius*v->h/1080.0f;
+        return dx*dx+dy*dy<=r*r;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 // Y / the sweep button: the selected squads (none: the player's recruited squads) out for the boxes, or called back.
@@ -895,6 +1025,14 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     TransportLink links[kMapTransportLinks];
     const int linkCount=TransportLinks(links,kMapTransportLinks);
     const bool marked=NpcMarked();
+    // Each unit's RTS groups and Shift-queued points (by identity: no game memory read under the lock).
+    std::uint16_t groups[kCmdUnits]{};const Game::Queue* queues[kCmdUnits]{};
+    for(int i=0;i<g.count;++i) {
+        const ObjRef& id=g.list[i].id;
+        for(int n=0;n<mapcmd::kGroups;++n)for(int j=0;j<g.groupN[n];++j)
+            if(g.group[n][j].obj==id.obj && g.group[n][j].ctrl==id.ctrl)groups[i]|=static_cast<std::uint16_t>(1u<<n);
+        for(const auto& q:g.queue)if(q.w.active && q.unit.obj==id.obj && q.unit.ctrl==id.ctrl)queues[i]=&q;
+    }
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,pickCount);r.pickable=pickCount;r.selected=g.sel.n;r.pointOk=pointOk;
@@ -918,12 +1056,19 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         m.now=e.u.now;m.air=e.u.air;m.selected=g.sel.Has(e.u.v);m.locked=e.u.locked;m.riding=e.owner==Owner::squad && e.u.riding;
         m.owner=e.owner==Owner::heli ? kCmdOwnerHeli : e.owner==Owner::jet ? kCmdOwnerJet : kCmdOwnerGround;
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
+        m.groups=groups[i];m.ways=0;
+        if(const Game::Queue* q=queues[i])
+            for(int w=0;w<q->w.n;++w)std::memcpy(m.way[m.ways++],q->w.next[w].at,12);
     }
     r.squads=squads;r.squadTally=tally;r.squadOpen=g.panelOpen;
     r.links=linkCount;std::memcpy(r.link,links,sizeof(TransportLink)*static_cast<std::size_t>(linkCount));
     r.formationMenu=menu.open;r.formationGuard=menu.guard;r.formationGuardShape=menu.guardShape;r.formationMarch=menu.march;
     std::memcpy(r.squad,rows,sizeof(rows));
-    for(int i=0;i<r.squads;++i)r.squadSelected[i]=g.sel.Has(r.squad[i].leader);
+    for(int i=0;i<r.squads;++i) {
+        r.squadSelected[i]=g.sel.Has(r.squad[i].leader);
+        r.squadGroups[i]=0;
+        for(int k=0;k<g.count;++k)if(g.list[k].u.v==r.squad[i].leader)r.squadGroups[i]=groups[k];
+    }
     r.hover=static_cast<bool>(g.hover);
     std::memcpy(r.hoverAt,g.hoverAt,12);
     std::memcpy(r.note,g.note,sizeof(r.note));
@@ -977,13 +1122,15 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     }
     g.frameAt=now;
     const bool mouseOrKey=(in.mouse && (in.dx!=0.0f || in.dy!=0.0f)) || (k.left && !g.was.left) || (k.right && !g.was.right) ||
-        (k.tab && !g.was.tab) || (k.guard && !g.was.guard) || (k.follow && !g.was.follow) || (k.release && !g.was.release) ||
+        (k.tab && !g.was.tab) || (k.hold && !g.was.hold) || (k.follow && !g.was.follow) || (k.release && !g.was.release) ||
         (k.attackMove && !g.was.attackMove) ||
         (k.supportCall && !g.was.supportCall) || (k.supportPrev && !g.was.supportPrev) || (k.supportNext && !g.was.supportNext) ||
         (k.placePrev && !g.was.placePrev) || (k.placeNext && !g.was.placeNext) || (k.placeCategory && !g.was.placeCategory) ||
         (k.placeEnter && !g.was.placeEnter);
     const bool padPress=(k.padEnemy && !g.was.padEnemy) || (k.padPvp && !g.was.padPvp) || (k.padNext && !g.was.padNext) || (k.padGuard && !g.was.padGuard) ||
         (k.padFollow && !g.was.padFollow) || (k.padRelease && !g.was.padRelease) ||
+        (!placeKeys && ((k.padUp && !g.was.padUp) || (k.padDown && !g.was.padDown) || (k.padLeft && !g.was.padLeft) ||
+                        (k.padRight && !g.was.padRight))) ||
         (placeKeys && ((k.padUp && !g.was.padUp) || (k.padDown && !g.was.padDown) || (k.padLeft && !g.was.padLeft) ||
                        (k.padRight && !g.was.padRight) || (g.place.open && k.padA && !g.was.padA)));
     in.usingPad=mapcmd::UsingPad(in.usingPad,mouseOrKey,padPress);
@@ -1015,6 +1162,10 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     }
     if(pvpInput.action>=0) {
         Game::UiHit hit;hit.kind=Game::UiKind::pvp;hit.entry=pvpInput.action;hit.pvp=v.pvpStatus;UiClick(g,hit,false);
+    }
+    // A pad button a side panel took is not let go as a tap of Y / the D-pad's groups either (its release is swallowed).
+    if(enemyInput.consumed || pvpInput.consumed) {
+        for(mapcmd::Held* h:{&g.padY,&g.padDir[0],&g.padDir[1],&g.padDir[2],&g.padDir[3]}){h->down=true;h->fired=true;}
     }
     const void* ids[kCmdUnits];
     Refresh(g,ids);
@@ -1057,28 +1208,43 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         mapcmd::Cycle(g.sel,pickable,PickedIds(g,pickable),next ? 1 : -1);
         picked=g.sel.n==1;
     }
-    // The number keys pick a squad of the panel: its rows shown (SquadRows' order, folded or open: mapcmd_logic.h
-    // SquadRowsShown); Shift adds or takes out. A script's squad says why instead.
-    SquadRow rows[9];
-    const int listed=SquadRows(rows,9);
-    int ranks[9];
-    for(int d=0;d<listed;++d)ranks[d]=rows[d].rank;
-    const int rowCount=mapcmd::SquadRowsShown(ranks,listed,g.panelOpen,9);
-    for(int d=0;d<rowCount;++d) {
-        if(!k.digit[d] || g.was.digit[d])continue;
-        if(rows[d].locked){Note(g,L"%ls",CommandFailureText(NpcCommandReason::scripted));continue;}
-        if(!k.shift)g.sel.Clear();
-        if(k.shift && g.sel.Has(rows[d].leader))g.sel.Remove(rows[d].leader);
-        else g.sel.Add(rows[d].leader);
-        mapcmd::Keep(g.sel,ids,g.count);
-        picked=g.sel.n==1;
+    // RTS groups (mapcmd_logic.h GroupKey): Ctrl+N keeps the selection as group N, Ctrl+Shift+N adds it to group N, N
+    // selects group N (Shift: added), N twice centres the map on it; Ctrl+A every unit. The pad's D-pad: groups 1-4
+    // (a tap selects, twice centres, held it keeps the selection), not on the test range (its 「摆放」 panel has it).
+    bool centred=false;float centreAt[3]{};
+    if(k.all && !g.was.all) {
+        const void* pickable[kCmdUnits];const int n=PickedIds(g,pickable);
+        g.sel.Clear();for(int i=0;i<n;++i)g.sel.Add(pickable[i]);
+        Note(g,hudtext::Tr(hudtext::Tx::cmdSelectedAll),g.sel.n);
     }
-    mapcmd::Press p{next,prev,(k.guard && !g.was.guard) || (k.padGuard && !g.was.padGuard),
+    for(int d=0;d<mapcmd::kGroups;++d) {
+        if(!k.digit[d] || g.was.digit[d])continue;
+        const bool again=mapcmd::DoubleTap(g.tap,d,now);
+        centred=GroupAct(g,d,mapcmd::GroupKey(k.ctrl,k.shift,again),ids,centreAt) || centred;
+    }
+    if(!placeKeys) {
+        const bool dir[4]={k.padUp,k.padRight,k.padDown,k.padLeft};
+        for(int d=0;d<4;++d) {
+            const mapcmd::TapHold t=mapcmd::StepHeld(g.padDir[d],dir[d],now,mapcmd::kPadHoldMs);
+            const int group=mapcmd::PadGroup(d);
+            if(t==mapcmd::TapHold::hold)GroupAct(g,group,mapcmd::GroupAct::assign,ids,centreAt);
+            else if(t==mapcmd::TapHold::tap) {
+                const bool again=mapcmd::DoubleTap(g.tap,100+d,now);
+                centred=GroupAct(g,group,again ? mapcmd::GroupAct::centre : mapcmd::GroupAct::recall,ids,centreAt) || centred;
+            }
+        }
+    }
+    // The pad's Y: tapped an attack-move at the screen's centre, held HOLD (each unit where it stands).
+    const mapcmd::TapHold padY=mapcmd::StepHeld(g.padY,k.padGuard,now,mapcmd::kPadHoldMs);
+    mapcmd::Press p{next,prev,padY==mapcmd::TapHold::tap,
                           (k.follow && !g.was.follow) || (k.padFollow && !g.was.padFollow),
                           (k.release && !g.was.release) || (k.padRelease && !g.was.padRelease),
-                          k.engage && !g.was.engage,k.focus && !g.was.focus,k.board && !g.was.board,
+                          k.engage && !g.was.engage,false,k.board && !g.was.board,
                           k.dismount && !g.was.dismount && !k.shift,k.dismiss && !g.was.dismiss,k.recruit && !g.was.recruit,
-                          false,k.attackMove && !g.was.attackMove,k.dismount && !g.was.dismount && k.shift};   // Shift+N: ALL OUT
+                          false,k.attackMove && !g.was.attackMove,k.dismount && !g.was.dismount && k.shift,   // Shift+N: ALL OUT
+                          false,(k.hold && !g.was.hold) || padY==mapcmd::TapHold::hold};
+    // Shift with a move (the right button) or an attack-move (Z): after the points before it (mapcmd_logic.h Waypoints).
+    const bool queue=k.shift;
     // The armed point order's click on the ground: that order there (disarmed).
     int supportAt=-1;
     SupportLoadout load{};   // the armed support's composed load, taken before disarming closes it
@@ -1115,14 +1281,17 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         if(g.armedClick && g.place.armed>=0 && !g.armedOrder && g.armedSupport<0)placeAt=g.place.armed;
     } else g.place=rangeplace::Panel{};
     placeHoldsPad.store(placeKeys && g.placeOn && (g.place.open || (placeHoldsPad.load() && (k.padA || k.padB))));
-    // The right button let go on the map (RTS): a move to the ground there, or focus fire on the enemy under it.
-    const mapcmd::RightClick right=mapcmd::RightClickOrder(g.rightClick && !g.rightOnUi ? g.sel.n : 0,npcmark::Alive(g.hover),true);
+    // The right button let go on the map (RTS, by what is under it): focus fire on an enemy, FOLLOW on the player's own
+    // mark, else a move to the ground there.
+    const mapcmd::RightClick right=mapcmd::RightClickOrder(g.rightClick && !g.rightOnUi ? g.sel.n : 0,npcmark::Alive(g.hover),true,
+                                                           g.rightClick && !g.rightOnUi && OnRequester(g,haveView ? &v : nullptr));
     p.move=p.move || (right.issue && right.order==Order::move);
+    p.follow=p.follow || (right.issue && right.order==Order::follow);
     const bool rightFocus=right.issue && right.order==Order::focus;
     p.focus=p.focus || rightFocus;
     p.follow=p.follow || clicked(Id::follow);p.release=p.release || clicked(Id::release);p.engage=p.engage || clicked(Id::engage);
     p.focus=p.focus || clicked(Id::focus);p.board=p.board || clicked(Id::board);p.dismount=p.dismount || clicked(Id::dismount);
-    p.dismountAll=p.dismountAll || clicked(Id::dismountAll);p.withdraw=clicked(Id::withdraw);
+    p.dismountAll=p.dismountAll || clicked(Id::dismountAll);p.withdraw=clicked(Id::withdraw);p.hold=p.hold || clicked(Id::hold);
     p.dismiss=p.dismiss || clicked(Id::dismiss);p.recruit=p.recruit || clicked(Id::recruit);
     // The formation menu and an armed order or support (its composition panel) are one at a time, as Arm keeps them.
     if(clicked(Id::formation)){g.formationMenu=!g.formationMenu;if(g.formationMenu)Arm(g,false,Order::none,-1);}
@@ -1131,8 +1300,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         for(int i=0;i<g.count && !squads;++i)squads=g.sel.Has(g.list[i].u.v) && g.list[i].owner==Owner::squad && Picked(g.list[i]);
         g.formationMenu=squads;
     }
-    const bool formation=k.formation && !g.was.formation,split=(k.split && !g.was.split) || clicked(Id::split),
-               merge=(k.merge && !g.was.merge) || clicked(Id::merge),sweep=(k.sweep && !g.was.sweep) || clicked(Id::sweep),
+    const bool formation=k.formation && !g.was.formation,sweep=(k.sweep && !g.was.sweep) || clicked(Id::sweep),
                health=(k.health && !g.was.health) || clicked(Id::health);
     const bool markPress=k.mark && !g.was.mark;
     if(supportAt<0 && k.supportCall && !g.was.supportCall) {   // C: the picked call at the pointer (its composition if open)
@@ -1164,25 +1332,27 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     else if(s.why==mapcmd::Refusal::noMark)Note(g,L"%ls",Tr(Tx::cmdNoMark));
     if(s.issue) {
         int skipped=0;
-        const int given=Issue(g,s.cmd,&skipped);
+        const bool queued=queue && (s.cmd.order==Order::move || s.cmd.order==Order::attackMove);
+        const int given=Issue(g,s.cmd,&skipped,queued);
         wchar_t tail[40]{};
         if(skipped)_snwprintf_s(tail,_countof(tail),_TRUNCATE,Tr(Tx::cmdCannot),skipped);
         if(g.networkQueued)Note(g,Tr(Tx::cmdNpcNetworkQueued),OrderText(s.cmd.order),g.networkQueued,given);
         else if(!given && g.networkMessage[0])Note(g,L"%ls",g.networkMessage);
         else if(!given && g.failure!=NpcCommandReason::none)Note(g,L"%ls",CommandFailureText(g.failure));
         else if(s.cmd.order==Order::board)Note(g,Tr(Tx::cmdBoardAssigned),g.affected,tail);
+        else if(queued)Note(g,Tr(Tx::cmdQueued),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
         else if(mapcmd::PointOrder(s.cmd.order))Note(g,Tr(Tx::cmdGuardResult),OrderText(s.cmd.order),s.cmd.at[0],s.cmd.at[2],given,tail);
         else Note(g,Tr(Tx::cmdOrderResult),OrderText(s.cmd.order),given,tail);
-        Log("MAPCMD %s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it; not: %d script, %d riding, %d cannot take it, "
-            "%d another machine's, %d refused (%s)",OrderName(s.cmd.order),s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],g.sel.n,given,g.count,
+        Log("MAPCMD %s%s (%.0f,%.0f,%.0f) to %d selected: %d of %d units took it; not: %d script, %d riding, %d cannot take it, "
+            "%d another machine's, %d refused (%s)",OrderName(s.cmd.order),queued ? " (queued)" : "",s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],g.sel.n,given,g.count,
             g.skipScript,g.skipRiding,g.skipCannot,g.skipRemote,g.skipFailed,ReasonName(g.failure));
     }
     if(formation)Formation(g,allowed && !InSession());
-    if(split || merge)Teams(g,allowed && !InSession(),split);
     if(sweep)Sweep(g);
     if(health)Health(g);
     RememberSelection(g);
     Publish(g,allowed,pointOk,point,haveView && !in.usingPad);
+    if(centred){std::memcpy(centre,centreAt,12);return std::isfinite(centre[0]+centre[1]+centre[2]);}
     if(!picked)return false;
     const int selected=mapcmd::IndexOf(ids,g.count,g.sel.id[0]);
     if(selected<0)return false;
@@ -1368,6 +1538,40 @@ int MapCommandGuardAt(const float* at) noexcept {
     Log("MAPCMD GUARD (%.0f,%.0f,%.0f) by the mark key on foot to %d selected: %d of %d units took it",at[0],at[1],at[2],
         g.sel.n,given,g.count);
     return given;
+}
+
+void MapCommandQueueTick() noexcept {
+    Game& g=game;
+    bool any=false;
+    for(const auto& q:g.queue)any=any || q.w.active;
+    if(!any)return;
+    static ULONGLONG frame=~0ull;   // once a game frame (map.cpp Frame runs for each local player)
+    const ULONGLONG f=GameFrame();
+    if(f==frame)return;
+    frame=f;
+    List(g);
+    const ObjRef requester=g.requester,focus=g.focus;
+    g.focus={};
+    for(auto& q:g.queue) {
+        if(!q.w.active)continue;
+        Entry* e=nullptr;
+        for(int i=0;i<g.count && !e;++i) {
+            const ObjRef& id=g.list[i].id;
+            if(id.obj==q.unit.obj && id.ctrl==q.unit.ctrl)e=&g.list[i];
+        }
+        if(!e || !IsOnlineAuthority(e->u.v)){q.w=mapcmd::Waypoints{};continue;}   // gone, or another machine's now
+        Command next{};
+        const mapcmd::QueueStep step=mapcmd::Advance(q.w,e->u.now,e->u.pos,Reach(*e),&next);
+        if(step==mapcmd::QueueStep::dropped)Log("MAPCMD queue of %p dropped: its order changed",q.unit.obj);
+        if(step!=mapcmd::QueueStep::give)continue;
+        g.requester=q.requester;
+        const bool given=Give(g,*e,next);
+        if(given)e->u.now=next;
+        else q.w=mapcmd::Waypoints{};
+        Log("MAPCMD queue of %p: %s (%.0f,%.0f,%.0f)%s, %d more",q.unit.obj,OrderName(next.order),next.at[0],next.at[1],next.at[2],
+            given ? "" : " refused, queue dropped",q.w.n);
+    }
+    g.requester=requester;g.focus=focus;
 }
 
 bool PlayerMapCommands(MapCommandReadout* out) noexcept {

@@ -278,6 +278,12 @@ int main() {
     Expect(follows==0,"a fixed-position scripted follower keeps its native leader transition");
     Reset();PreThink(human);Expect(follows==1,"an ordinary friendly remnant still elects its leader");
     Expect(transportSucceededTo==human,"its transport goes with the squad to the new leader (transport.cpp TransportSucceed)");
+    {
+        // The map's selection and RTS groups hold a squad by its top's identity: the hand-over names the new top.
+        ObjRef next{};
+        Expect(NpcSquadSuccessor(ObjRef::Of(dead),&next) && next.obj==human,"the dead top's squad goes on as its new leader's");
+        Expect(!NpcSquadSuccessor(ObjRef::Of(other),&next),"a top that handed over to none has no successor");
+    }
     Reset();world.friends=1;world.frObject[0]=other;Put<std::uint64_t>(other,kFollowerCount,1);Put<unsigned>(other,kObjectFlags,kFixPosition);
     unsigned char* leaders[4];float places[4][3];int sizes[4];
     Expect(OtherSquads(dead,false,leaders,places,sizes,4)==0,"fixed script squads cannot absorb a remnant");
@@ -718,38 +724,12 @@ int main() {
         Expect(std::fabs(hurt.fallTo[0]-300.0f)<0.01f && std::fabs(hurt.fallTo[2]-(40.0f-kBehindPlayer))<0.01f,
                "behind that player, on their side away from the threat (their camera is not this machine's)");
     }
-    // Fireteams (SplitSquad, MergeSquads): a recruited squad of four (its top and three followers in its +0x550 list)
-    // split: the odd places under the first of them, who follows the player; the even under the top; merged back.
+    // HOLD (the map's H, RTS hold position): a guard of the spot the squad's top stands on, whatever point came with it.
     {
-        static unsigned char top[0x2200]{},f1[0x2200]{},f2[0x2200]{},f3[0x2200]{},list[0x18]{},nodes[3][0x18]{};
-        Reset();
-        unsigned char* const team[4]={top,f1,f2,f3};
-        for(auto t:team){std::memset(t,0,0x2200);Put<void*>(t,0,image+kSoldiers[0].vtable);Put<int>(t,kTeam,kTeamFriend);}
-        Put<void*>(top,kLeader,other);   // `other` stands for the player
-        other[edf::kHumanPlayer]=1;Put<void*>(other,edf::kHumanPad,other);
-        Put<void*>(top,kFollowers,list);Put<void*>(list,0,nodes[0]);
-        for(int i=0;i<3;++i){Put<void*>(nodes[i],0,i<2 ? static_cast<void*>(nodes[i+1]) : static_cast<void*>(list));Put<void*>(nodes[i],0x10,team[i+1]);Put<void*>(team[i+1],kLeader,top);}
-        SeeSquad(top,top,0,npc::Control::recruited,now);
-        sessionOn=true;
-        Expect(SplitSquad(top)==-1 && follows==0,"online: no split (the panel's orders are offline only)");
-        sessionOn=false;
-        Put<void*>(f3,kRoute,f3);
-        Expect(SplitSquad(top)==-1 && follows==0,"a scripted follower blocks the whole split before any reparenting");
-        Put<void*>(f3,kRoute,nullptr);
-        Soldier* const boarding=Entry(f1,now);boarding->boardV=ObjRef::Of(vehicle);boarding->boardSeat=1;
-        nextFollowWatch=boarding;
-        Expect(SplitSquad(top)==2,"a squad of four splits two and two");
-        Expect(!boarding->boardV && !boardingAtFollow,"splitting cancels both halves' boarding requests before changing native follow lists");
-        Expect(FollowedBy(f1)==other && FollowedBy(f3)==f1 && FollowedBy(f2)==top && FollowedBy(top)==none,
-               "the new team's leader follows the player, its other soldier it; the one staying follows the top");
-        // Merged back: the new team's top under the old one (another squad entry of the panel).
-        SeeSquad(f1,f1,0,npc::Control::recruited,now);follows=0;
-        Expect(MergeSquads(top,f1) && FollowedBy(f1)==top && follows==1,"joined: the other team's top follows this one's");
-        Expect(!FindSquad(f1) && !MergeSquads(f1,top) && follows==1,
-               "a merged top is retired immediately: reversing the merge cannot create a follow cycle");
-        Expect(!MergeSquads(top,top),"a squad does not join itself");
-        Reset();Put<void*>(human,kLeader,nullptr);SeeSquad(human,human,0,npc::Control::free,now);
-        Expect(SplitSquad(human)==-1 && follows==0,"one soldier: nothing to split");
+        Reset();Put<void*>(human,kLeader,nullptr);Squad* const held=SeeSquad(human,human,0,npc::Control::free,now);
+        const float spot[3]={12.0f,3.0f,-7.0f};std::memcpy(human+kPosition,spot,12);
+        Expect(SquadCommand(human,Command{Order::hold,{900.0f,0.0f,900.0f}}) && held->cmd.order==Order::guard &&
+               held->cmd.at[0]==spot[0] && held->cmd.at[2]==spot[2],"HOLD: a guard where its top stands");
     }
     // Only NPCs this machine can drive may reserve a box; the map must not redirect another player's recruits.
     {
