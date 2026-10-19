@@ -196,6 +196,7 @@
 - 脚本 `Preload(const string&in, int)` 原生 = 0x1B87E0，直接尾调 `0x7A3780(*(img+0x20B29A8), path, 2, int)`。(H)
 - 0x7A3780 内部先对 `mgr+0x98` 上锁（0x50BC0），路径上限 0x400 字符。(H)
 - 预载是异步的：脚本随后 `WaitPreload()`。未预载就 `CreateObject` 会写 `[1]` 崩溃。(H)
+  - 2026-10-19 更正：写 `[1]`（`0x11947EC`）是文件缓存查询 `0x84E80` 返回空句柄时的故意崩溃；`0x84E80` 缓存里没有时会同步读文件，只有读失败（文件不存在）才返回空。任务中途预载可行：加载线程常驻，完成查询 `0x7A3600`（脚本 `IsCompleteResource`，`WaitPreload` 0x1BC200 也轮询它）。见 `docs/feedback-2026-10-19-mapui.md`。
 - 推荐做法：在已有的 0x59DE50 wrapper（调用点 0x1B8F52 / 0x225FB5 = 脚本 `PreloadPlayerResource`）里额外调一次
   `0x7A3780(mgr, L"app:/object/<JET>.sgo", 2, -1)`。
   - 所有正式任务都是 `PreloadPlayerResource(); WaitPreload();` 的顺序，所以资源在任务开始前就绪。(M)
