@@ -143,14 +143,14 @@ def main() -> int:
                 required_bones+=len(kit.screens)
                 shared=set()
                 for control in kit.controls:
-                    if control.control[0] in 'dDplcuv':shared.add(control.control)
+                    if control.control[0] in 'dDplcuve':shared.add(control.control)
                     else:required_bones+=1
                 for index,screen in enumerate(kit.screens):
                     if screen.kind not in ('hud','sensor'):
                         _parts,controls=cockpit_instruments.instrument(screen,index,numbers=fit.seat==0,
                                                                      thumbnail=(("111","111"),1.))
                         for control in controls:
-                            if control.control[0] in 'dDplcuv':shared.add(control.control)
+                            if control.control[0] in 'dDplcuve':shared.add(control.control)
                             else:required_bones+=1
                 required_bones+=len(shared)
                 kinds = {s.kind for s in kit.screens}

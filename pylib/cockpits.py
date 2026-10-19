@@ -250,7 +250,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
             nonlocal md
             # Visibility-only geometry can share a bone even at different positions.
             # Needles and bars keep their own pivots; their transforms are not visibility-only.
-            reusable = control.control[0] in 'dDplcuv'
+            reusable = control.control[0] in 'dDplcuve'
             name = shared.get(control.control) if reusable else None
             if name is None:
                 name = f'vc_i_{fit.seat}_{index}_{control.control}'

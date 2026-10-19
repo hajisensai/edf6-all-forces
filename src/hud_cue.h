@@ -47,6 +47,22 @@ constexpr StoreIcon ArmIconOf(int kind,bool lobbed,int style=0,bool cannon=false
     if(style!=0)return StoreIcon::energy;
     return kind==2 ? StoreIcon::rocket : kind==3 ? StoreIcon::aam : lobbed ? StoreIcon::bomb : cannon ? StoreIcon::shell : StoreIcon::gun;
 }
+// The picture a physical cockpit's weapons screen shows for a store (cockpit_instruments.h arm; the model's pictures are
+// pylib/cockpit_instruments.py GUN .. CHARGE, in this order): the strip's pictures, its three air-to-air sizes one.
+constexpr int CockpitArmGroup(StoreIcon icon) noexcept {
+    switch(icon) {
+    case StoreIcon::gun: return 0;
+    case StoreIcon::shell: return 1;
+    case StoreIcon::rocket: return 2;
+    case StoreIcon::aamShort: case StoreIcon::aam: case StoreIcon::aamLong: return 3;
+    case StoreIcon::agm: case StoreIcon::agmLight: return 4;
+    case StoreIcon::bomb: return 5;
+    case StoreIcon::drone: return 6;
+    case StoreIcon::energy: return 7;
+    case StoreIcon::charge: return 8;
+    }
+    return 0;
+}
 // A weapon cell's loading bar (the user, 2026-10-12: 「两发之间显示『装填 1.8s』，在挂载上加上那种读条呢」): the share loaded,
 // 0..1, or < 0 for no bar. Out of rounds and reloading the magazine (`reload` < 1: vhud.cpp Reload) its share; with rounds,
 // the next round going in (`cycleSec` >= 0: vhud.cpp Cycle, a gun of 0.5 s or more between shots) `cycle`; ready: none.

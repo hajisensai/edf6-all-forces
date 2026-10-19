@@ -1816,7 +1816,8 @@ void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=null
         const bool neutralWidget=mode==L'D' || mode==L'B' || mode==L'T';
         // Adjacent stations visible from this seat use the same language, while their
         // new health/percent widgets remain neutral without that seat's live data.
-        if(!mine && mode!=L'l' && mode!=L'c' && mode!=L'p' && mode!=L'v' && mode!=L'u'
+        // A weapons screen's picture / tag / frame (e) has no neutral look: another seat's is hidden.
+        if(!mine && mode!=L'l' && mode!=L'c' && mode!=L'p' && mode!=L'v' && mode!=L'u' && mode!=L'e'
             && mode!=L'r' && mode!=L'q' && mode!=L'a' && !rangedNeedle && !neutralWidget)continue;
         const bool ready=d.instrumentsReady && (mine || (mode==L'l' && place==0));
         const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));

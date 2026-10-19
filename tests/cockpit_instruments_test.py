@@ -24,7 +24,9 @@ for kind in ('status','weapons','flight','map'):
     s=Screen(kind,(.2,-.3,.7),(0,.18,-.984),.18,.12)
     parts, controls=ci.instrument(s,0,thumbnail=thumb)
     assert controls and len({c.part for c in controls})==len(controls)
-    assert len({c.control for c in controls})==len(controls)
+    # Visibility-only controls may share a bone (cockpits.graft's `reusable`); every other moves its own.
+    moved=[c.control for c in controls if c.control[0] not in 'dDplcuve']
+    assert len(set(moved))==len(moved)
     by_name={p.name:p for p in parts}
     right,up,normal=basis(s.facing,s.up)
     for p in parts:
@@ -48,11 +50,68 @@ for kind in ('status','weapons','flight','map'):
         _,passenger=ci.instrument(s,0,numbers=False,thumbnail=thumb)
         assert len(passenger)==9,'shared passenger state fits the ubyte skin-index budget'
         assert not any(c.control.startswith(f'b_{ci.HULL}') for c in controls),'no redundant unknown hull bar'
-    assert {f'l_{i}_0' for i in range(4)} <= {c.control for c in controls}
+    if kind=='weapons':
+        names={c.control for c in controls}
+        assert {f'l_{i}_{g+1}' for i in range(4) for g in (ci.LOAD,ci.EMPTY)} <= names,'LOADING / EMPTY in each language'
+        assert sum(c.startswith(f'D_{ci.AMMO}_') for c in names)==28,'four rounds digits'
+        assert not any(c.startswith(f'D_{ci.SLOT}_') for c in names),'no lone slot digit'
+        assert {f'e_{ci.ARM}_{g}' for g in range(ci.CHARGE+1)} <= names
+        assert {f'e_{ci.SHELL}_{k}' for k in range(1,len(ci.SHELL_TAGS)+1)} <= names
+        assert {f'{m}_{f}' for m,f in (('v',ci.MAG),('B',ci.MAG),('B',ci.LOAD))} <= names
+        for i in range(ci.ROWS):
+            assert {f'v_{ci.ROW+i}',f'B_{ci.ROW+i}',f'B_{ci.ROWLOAD+i}',f'e_{ci.PICK}_{i}'} <= names
+    else:
+        assert {f'l_{i}_0' for i in range(4)} <= {c.control for c in controls}
     if kind=='map':
         assert sum(c.control.startswith('T_') for c in controls)==6
         assert all(c.extent==(s.width,s.height) for c in controls if c.control.startswith('T_'))
 print('physical instrument geometry and controls passed')
+
+
+def extent(parts, screen, test):
+    """(left, right, bottom, top) in screen fractions of the parts whose name passes `test`."""
+    right,up,_=basis(screen.facing,screen.up)
+    xs,ys=[],[]
+    for p in parts:
+        if test(p.name):
+            for v in p.verts:
+                rel=[v.pos[k]-screen.centre[k] for k in range(3)]
+                xs.append(sum(rel[k]*right[k] for k in range(3))/screen.width)
+                ys.append(sum(rel[k]*up[k] for k in range(3))/screen.height)
+    assert xs,'nothing matched'
+    return min(xs),max(xs),min(ys),max(ys)
+
+
+def apart(a, b):
+    return a[1]<=b[0] or b[1]<=a[0] or a[3]<=b[2] or b[3]<=a[2]
+
+
+# The weapons screen on the displays the kits have (a tank's, a heli's, a truck's, the C-130's tall one): a digit keeps a
+# digit's proportions whatever the screen's shape (its cells were the field's width over the count: one digit across a
+# wide screen came out a flat smear, five squat), and the top line, the picture, the rounds, the fill and the foot's
+# cells never overlap, in every language.
+for w,h in ((.11,.075),(.14,.07),(.16,.08),(.13,.10),(.1,.08),(.19,.26),(.17,.13)):
+    s=Screen('weapons',(.1,-.2,.6),(0,.2,-.98),w,h)
+    parts,_=ci.instrument(s,0)
+    for place in range(4):
+        x0,x1,y0,y1=extent(parts,s,lambda n,place=place: f'_digit_{ci.AMMO}_{place}_' in n)
+        aspect=(x1-x0)*w/((y1-y0)*h)
+        assert abs(aspect-ci.DIGIT_ASPECT)<.02,(w,h,place,aspect)
+    digits=extent(parts,s,lambda n: f'_digit_{ci.AMMO}_' in n)
+    picture=extent(parts,s,lambda n: '_arm_' in n)
+    tags=extent(parts,s,lambda n: '_shell_' in n)
+    fill=extent(parts,s,lambda n: n.endswith(('_magazine_track',)))
+    foot=extent(parts,s,lambda n: '_row_' in n)
+    for language in range(4):
+        for gate in (ci.LOAD+1,ci.EMPTY+1):
+            caption=extent(parts,s,lambda n,l=language,g=gate: n.endswith(f'_caption_{l}_{g}'))
+            assert caption[0]>=-.5 and caption[1]<=.5,(w,h,language,gate,'caption off the screen')
+            for other,what in ((digits,'rounds'),(picture,'picture'),(tags,'tag'),(fill,'fill')):
+                assert apart(caption,other),(w,h,language,gate,what)
+    for a,b,what in ((digits,picture,'rounds / picture'),(digits,fill,'rounds / fill'),(picture,fill,'picture / fill'),
+                     (fill,foot,'fill / foot'),(tags,picture,'tag / picture'),(digits,tags,'rounds / tag')):
+        assert apart(a,b),(w,h,what)
+print('weapons screen: digits keep their shape, its blocks never overlap on any display')
 
 # Tall transport displays and five-digit altitude scales must remain inside their measured aperture.
 tall=Screen('flight',(0,0,0),(0,0,-1),.19,.26)

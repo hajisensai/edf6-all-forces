@@ -614,6 +614,36 @@ int main() {
     reading.share[hp]=.25f;
     M4 bar=crew::instruments::Pose(Identity(),L'b',hp,0,0,reading,true);
     Expect(Near(bar.m[0],.25f) && Near(bar.m[5],1),"a physical bar scales only along its own horizontal axis");
+    {   // The weapons screen (cockpit_screens.inc PublishInstruments -> ArmReadings -> e / B / v / D controls).
+        Readings w{};
+        for(float& v:w.value)v=-1.0f;
+        ArmRow rows[3]{};
+        rows[0]=ArmRow{1,1,1.0f,0.42f,2,false};      // a tank gun's next round going in, HE
+        rows[1]=ArmRow{0,286,0.57f,-1.0f,0,false};   // its coaxial gun
+        rows[2]=ArmRow{2,0,0.0f,-1.0f,0,true};       // a launcher spent for good
+        ArmReadings(w,rows,3,0);
+        auto shown=[&](wchar_t mode,int field,int place){return crew::instruments::Pose(Identity(),mode,field,place,0,w,true).m[0]!=0;};
+        int pictures=0,frames=0;
+        for(int g=0;g<9;++g)pictures+=shown(L'e',arm,g);
+        for(int i=0;i<kRows;++i)frames+=shown(L'e',pick,i);
+        Expect(pictures==1 && shown(L'e',arm,1),"the weapons screen shows the picked weapon's one picture");
+        Expect(frames==1 && shown(L'e',pick,0),"one weapon cell framed: the picked one");
+        Expect(shown(L'e',crew::instruments::shell,2) && !shown(L'e',crew::instruments::shell,1),"the round's tag (HE) alone");
+        Expect(shown(L'l',w.language,load+1) && !shown(L'l',w.language,empty+1),"LOADING while the next round goes in");
+        Expect(Near(crew::instruments::Pose(Identity(),L'b',load,0,0,w,true).m[0],.42f) && crew::instruments::Pose(Identity(),L'b',mag,0,0,w,true).m[0]==0,
+               "loading fills the bar in place of the magazine");
+        Expect(Near(crew::instruments::Pose(Identity(),L'b',row+1,0,0,w,true).m[0],.57f) && shown(L'v',row+2,0) && !shown(L'v',row+3,0),
+               "each listed weapon's cell has its fill; no cell past the seat's weapons");
+        Expect(Segment(w.value[ammo],0,1) && !Segment(w.value[ammo],0,0),"the rounds digits read the picked weapon's");
+        ArmReadings(w,rows,3,2);
+        Expect(shown(L'l',w.language,empty+1) && !shown(L'l',w.language,load+1) && !shown(L'e',crew::instruments::shell,2),
+               "a spent launcher: EMPTY, no loading, no stale tag");
+        Readings one{};
+        for(float& v:one.value)v=-1.0f;
+        ArmReadings(one,rows,1,0);
+        Expect(one.value[pick]<0 && one.value[row]<0,"a single weapon lists no cells");
+        Expect(crew::instruments::Pose(Identity(),L'e',arm,1,0,one,false).m[0]==0,"another seat's picture is hidden, not all nine at once");
+    }
     AuthoredActions();
     Identity_();
     Hold();
