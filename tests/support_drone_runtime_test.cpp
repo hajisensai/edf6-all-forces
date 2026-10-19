@@ -74,6 +74,7 @@ bool PvpInheritSupport(const ObjRef& parent,const ObjRef* children,unsigned coun
 bool ReserveCarrierSupportDrone(const ObjRef&,unsigned,std::uint64_t) noexcept {return true;}
 bool CancelCarrierSupportDrone(const ObjRef&,unsigned,std::uint64_t) noexcept {return true;}
 void PvpForgetSupportObject(const ObjRef&) noexcept {++fixture::forgets;fixture::lastForget=++fixture::serial;if(!fixture::firstForget)fixture::firstForget=fixture::lastForget;}
+void PreloadUltimate(void*) noexcept {}   // jet_spawn.cpp's PreloadJets loads the ultimate's circles (ultimate.cpp, not linked here)
 namespace jet {
 Jet jets[kMaxJets]{};
 float FerryTurn(const Kind&) noexcept {return 0;}
