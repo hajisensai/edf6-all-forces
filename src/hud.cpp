@@ -5567,6 +5567,16 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             float top=height*0.28f;
             for(int i=0;i<count && i<3;++i)top=Panel(drawer,ctx,t,panels[i],i,count,width,top,s,lines,&at)+10.0f*s;
         }
+        // A vehicle's first person: the weapons screen names a weapon by its picture and its round's tag (model geometry
+        // has no game font); a switch shows the picked one's own name over the view for a moment, as the loadout strip's
+        // banner does in third person (the strip itself gives way to the screen).
+        if(screensOn && storeSwitched) {
+            LoadCell cells[kStockArms>kMostStores ? kStockArms : kMostStores];
+            int n=0,pickedCell=-1;
+            if(snap.cockpit){n=JetCells(snap.jet,cells);pickedCell=snap.jet.store;}
+            else if(snap.stock)n=StockCells(snap.stockHud,cells,&pickedCell);
+            if(pickedCell>=0 && pickedCell<n)LoadoutBanner(drawer,ctx,t,width,height*0.8f,s,cells[pickedCell],lines,&at);
+        }
         if(screensOn)DrawCockpitScreens(drawer,ctx,t,viewProj,width,height,s,snap,lines,&at);
         if(t && textOk)DrawAll(*t,lines,at);
         FreeText(text);

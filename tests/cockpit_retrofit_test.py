@@ -53,14 +53,17 @@ for p in pieces:
 
 small=Kit([source],{'original':KitMaterial((50,50,50))})
 rt.apply(small,(rt.Block('small_map',(0,0,0),(0,0,-1),.3,.1,mode='readout_map'),))
-assert all(np.allclose(c.extent,(.3*.94,.1*.92)) for c in small.controls if c.control.startswith('T_')), \
-    'added map widgets carry their own extents instead of borrowing the last main display'
+contacts=[c for c in small.controls if c.control.startswith('T_')]
+# A contact moves in the nav card's own radius (its range at .35): the same both ways (true bearings) and
+# within the added display's own face, not the last main display's.
+assert contacts and all(c.extent[0]==c.extent[1]==contacts[0].extent[0] for c in contacts)
+assert .35*contacts[0].extent[0]<=.1*.92/2+1e-9,'added map widgets carry their own extents'
 print('source cut-outs, UV preservation, foreground occlusion and live analogue controls passed')
 
 # Surveyed apertures are not a regular grid. Their centres and case diameters
 # must survive fitting, including the live needle pivots, without automatic shrink.
 sites=(rt.DialAt((-.27,.16,0),.20),rt.DialAt((.19,-.13,0),.16))
-block=rt.Block('surveyed',(0,0,0),(0,0,-1),1,1,2,(rt.ci.PITCH,rt.ci.SPEED),dials=sites)
+block=rt.Block('surveyed',(0,0,0),(0,0,-1),1,1,2,(rt.ci.CLIMB,rt.ci.SPEED),dials=sites)
 for scale in (1.,.43):
     k=Kit([panel('source','original',(0,0,0),2*scale,2*scale,(0,0,-1))],{'original':KitMaterial((50,50,50))})
     rt.apply(k,(block,),lambda p:np.asarray(p)*scale)
@@ -78,6 +81,7 @@ print('surveyed dial mounts and fitted control pivots passed')
 # Captions sit below the lowest numeric scale and remain inside the face, in
 # every language. Enlarging cases to their bores must not enlarge a text overlap.
 for field in rt.TITLES:
+    if field in (rt.ci.HEADING,rt.ci.PITCH,rt.ci.ALT):continue   # cards and a whole-dial altimeter: checked below
     labels={i:[] for i in range(4)}
     parts,_=rt._dial('layout',(0,0,0),(0,0,-1),(0,1,0),.118,field,False,labels,{})
     numbers=[v.pos[1] for p in parts if p.name.endswith('_number') for v in p.verts]
@@ -85,3 +89,21 @@ for field in rt.TITLES:
     for p in captions:
         assert max(v.pos[1] for v in p.verts)<min(numbers),'caption overlaps the lower numeric scale'
         assert max(np.linalg.norm(v.pos[:2]) for v in p.verts)<=.118*.5*.91+1e-9,'caption exceeds the dial face'
+
+# The cards and the altimeter: the compass card's numbers and the altimeter's lie inside the face; the attitude card's
+# pivot is the dial's centre, its travel no more than its bezel hides.
+for field in (rt.ci.HEADING,rt.ci.PITCH,rt.ci.ALT):
+    parts,controls=rt._dial('card',(0,0,0),(0,0,-1),(0,1,0),.118,field,False,{i:[] for i in range(4)},{})
+    for p in parts:
+        if p.name.endswith(('_card','_number','_unit','_title')):
+            assert max(np.linalg.norm(v.pos[:2]) for v in p.verts)<=.118*.5*.91+1e-9,(field,p.name,'off the face')
+    if field==rt.ci.PITCH:
+        moving=[c for c in controls if c.control.startswith('g_')]
+        assert len(moving)==3 and all(np.allclose(c.centre[:2],0) for c in moving)
+        _,_,degree,travel=moving[0].control.split('_')
+        lip=next(p for p in parts if p.name.endswith('_bezel'))
+        window=min(np.linalg.norm(v.pos[:2]) for v in lip.verts);outer=max(np.linalg.norm(v.pos[:2]) for v in lip.verts)
+        reach=max(np.linalg.norm(v.pos[:2]) for p in parts if p.name.endswith(('_sky','_ground')) for v in p.verts)
+        shift=int(travel)*1e-4*.059
+        assert reach>=window+shift-1e-6 and reach+shift<=outer+1e-6,'the card covers the window and hides behind the bezel'
+print('compass card, attitude card and altimeter faces passed')

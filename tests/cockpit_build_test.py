@@ -82,6 +82,27 @@ CLOSED_BEHIND = frozenset(('truck_cab', 'trailer_cab'))
 BEHIND = [(float(yaw), float(pitch)) for yaw in range(100, 261, 5) for pitch in range(-40, 21, 5)]
 
 
+GENERATED_SKELETON = 32
+ROOM = dict(left=1.5, right=1.5, up=1.0, down=1.0, ahead=2.0, back=2.0)
+
+
+def generated_bones(fits) -> int:  # noqa: ANN001
+    """The marker and instrument bones the fits' cockpits add (cockpits.graft's sharing), each kit laid out in ROOM."""
+    def key(c):  # noqa: ANN001, ANN202
+        return c.control if c.control[0] in 'dDplcuveZ' else (c.control, c.centre, c.facing, c.up, c.extent)
+    total = 0
+    for fit in fits:
+        kit = cockpit_kits.KITS[fit.kit](ROOM)
+        shared = {key(c) for c in kit.controls}
+        for index, screen in enumerate(kit.screens):
+            if screen.kind not in ('hud', 'sensor'):
+                _parts, controls = cockpit_instruments.instrument(screen, index, numbers=fit.seat == 0,
+                                                                   thumbnail=(('111', '111'), 1.), ranges=dict(kit.ranges))
+                shared |= {key(c) for c in controls}
+        total += 1 + len(kit.screens) + len(shared)
+    return total
+
+
 def closed(what: str, kit, name: str = '') -> None:  # noqa: ANN001 - cockpits.Kit
     if name in CLOSED_BEHIND:
         open_lines = cockpits.unmet(kit, BEHIND)
@@ -133,7 +154,11 @@ def main() -> int:
     expect(set(copies) <= set(cockpit_fits.FITS), f'the stock copies {sorted(copies)} are fitted')
     for stem, fits in sorted(cockpit_fits.FITS.items()):
         if stem not in stock and stem not in copies:
-            print(f'      {stem}: a generated model (its generator builds it)')
+            # Its model is its generator's; its cockpits' instrument bones laid out in a generous room must leave the
+            # skeleton GENERATED_SKELETON bones (EV603_MARINE, the largest a generator starts from, has 19).
+            need = generated_bones(fits)
+            expect(need + GENERATED_SKELETON <= 256,
+                   f'{stem}: a generated model; its cockpits need {need} bones, {256 - need} left for its skeleton')
             continue
         started = time.perf_counter()
         md = copies[stem] if stem in copies else model_of(game, stem)
@@ -156,16 +181,17 @@ def main() -> int:
                 kit = cockpits.fitted(hull, fit, cockpit_kits.KITS[fit.kit])
                 required_bones+=len(kit.screens)
                 shared=set()
+                def key(control):   # as cockpits.graft shares a bone
+                    return (control.control if control.control[0] in 'dDplcuveZ' else
+                            (control.control,control.centre,control.facing,control.up,control.extent))
                 for control in kit.controls:
-                    if control.control[0] in 'dDplcuv':shared.add(control.control)
-                    else:required_bones+=1
+                    shared.add(key(control))
                 for index,screen in enumerate(kit.screens):
                     if screen.kind not in ('hud','sensor'):
                         _parts,controls=cockpit_instruments.instrument(screen,index,numbers=fit.seat==0,
                                                                      thumbnail=(("111","111"),1.))
                         for control in controls:
-                            if control.control[0] in 'dDplcuv':shared.add(control.control)
-                            else:required_bones+=1
+                            shared.add(key(control))
                 required_bones+=len(shared)
                 kinds = {s.kind for s in kit.screens}
                 expect(kinds <= set(cockpits.SCREEN_KINDS),

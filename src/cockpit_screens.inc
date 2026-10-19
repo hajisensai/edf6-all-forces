@@ -102,16 +102,43 @@ void PublishInstruments(const Snapshot& snap) noexcept {
         const float range=vec::Clamp(distance/600.0f,0.0f,1.0f)*.35f;
         r.contact[i]=true;r.at[i][0]=range*std::sin(bearing);r.at[i][1]=range*std::cos(bearing);
     }
-    if(snap.cockpit) {
+    ArmRow rows[kStockArms>kMostStores+1 ? kStockArms : kMostStores+1];
+    int n=0,picked=-1;
+    if(snap.cockpit) {   // a plugin aircraft: its stores, then its guns
         const auto& j=snap.jet;
-        if(j.store>=0 && j.store<j.stores && j.store<kMostStores) {
-            r.value[slot]=static_cast<float>(j.store+1);r.value[ammo]=static_cast<float>(j.storeRounds[j.store]);
-        } else if(j.guns>0)r.value[ammo]=static_cast<float>(j.gunRounds);
-    } else if(snap.stock && snap.stockHud.arms>0) {
+        for(int i=0;i<j.stores && i<kMostStores;++i) {
+            ArmRow& w=rows[n++];
+            w.round=static_cast<int>(hudcue::CockpitRoundOf(hudcue::StoreIconOf(j.storeName[i],j.storeRole[i])));
+            w.rounds=j.storeRounds[i];w.spent=j.storeRounds[i]<=0;
+            if(i==j.store)picked=i;
+        }
+        if(j.guns>0) {
+            ArmRow& w=rows[n++];
+            w.round=static_cast<int>(hudcue::CockpitRound::mg);w.rounds=j.gunRounds;w.spent=j.gunRounds<=0;
+            if(picked<0)picked=n-1;
+        }
+    } else if(snap.stock && snap.stockHud.arms>0) {   // a stock vehicle's (a heli's too), as the loadout strip lays them
         const auto& a=snap.stockHud;
-        const int picked=a.selected>=0 && a.selected<a.arms ? a.selected : a.sight>=0 && a.sight<a.arms ? a.sight : 0;
-        if(picked<kStockArms){r.value[slot]=static_cast<float>(picked+1);r.value[ammo]=static_cast<float>(a.arm[picked].ammo);}
+        const int arms=a.arms<kStockArms ? a.arms : kStockArms;
+        const int fired=a.selected>=0 && a.selected<arms ? a.selected : a.sight>=0 && a.sight<arms ? a.sight : 0;
+        float side[kStockArms];int order[kStockArms];
+        for(int i=0;i<arms;++i)side[i]=a.arm[i].side;
+        hudcue::SideOrder(side,arms,order);
+        for(int k=0;k<arms;++k) {
+            const StockArm& m=a.arm[order[k]];
+            const reticle::Style sight=m.reticle;
+            ArmRow& w=rows[n++];
+            w.round=static_cast<int>(hudcue::CockpitRoundOfArm(static_cast<int>(m.kind),m.lobbed,static_cast<int>(m.style),
+                                                                sight==reticle::Style::cannon || sight==reticle::Style::precision,
+                                                                static_cast<int>(m.shell)));
+            w.rounds=m.ammo;
+            w.magazine=m.ammoMax>0 ? static_cast<float>(m.ammo)/static_cast<float>(m.ammoMax) : -1.0f;
+            w.loading=hudcue::CellLoad(m.ammo,m.reload,m.cycleSec,m.cycle);
+            w.spent=m.ammo<=0 && !m.canReload;
+            if(order[k]==fired)picked=k;
+        }
     }
+    ArmReadings(r,rows,n,picked);
     FirstPersonInstrumentReadings(r,PlayerHuman());
 }
 } // namespace

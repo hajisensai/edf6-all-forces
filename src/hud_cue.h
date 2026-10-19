@@ -47,6 +47,41 @@ constexpr StoreIcon ArmIconOf(int kind,bool lobbed,int style=0,bool cannon=false
     if(style!=0)return StoreIcon::energy;
     return kind==2 ? StoreIcon::rocket : kind==3 ? StoreIcon::aam : lobbed ? StoreIcon::bomb : cannon ? StoreIcon::shell : StoreIcon::gun;
 }
+// What a physical cockpit's weapons screen calls a weapon (cockpit_instruments.h arm / rowRound): its round's class, each
+// with its tag, colour and picture there (pylib/cockpit_instruments.py ROUNDS, in this order). The user, 2026-10-19:
+// 「看不出来1，2是啥弹种啊。你可以做成彩色的或者有区分之类的。或者战雷」.
+enum class CockpitRound { mg, gun, ap, he, heat, can, beam, rkt, msl, aam, bomb, spc };
+// A plugin aircraft's store by its picture.
+constexpr CockpitRound CockpitRoundOf(StoreIcon icon) noexcept {
+    switch(icon) {
+    case StoreIcon::gun: return CockpitRound::mg;
+    case StoreIcon::shell: return CockpitRound::gun;
+    case StoreIcon::rocket: return CockpitRound::rkt;
+    case StoreIcon::aamShort: case StoreIcon::aam: case StoreIcon::aamLong: return CockpitRound::aam;
+    case StoreIcon::agm: case StoreIcon::agmLight: return CockpitRound::msl;
+    case StoreIcon::bomb: return CockpitRound::bomb;
+    case StoreIcon::energy: return CockpitRound::beam;
+    case StoreIcon::drone: case StoreIcon::charge: return CockpitRound::spc;
+    }
+    return CockpitRound::mg;
+}
+// A stock weapon by its round (ArmIconOf's `kind`, `lobbed`, `style`, `bigGun`: a gun laid shot by shot) and the round
+// its sight names (reticle.h Shell as an int: ap 1, he 2, beam 3, heat 4, canister 5): a gun's round by that tag, a
+// lobbed one without a tag HE, a big gun without one GUN, any other gun MG.
+constexpr CockpitRound CockpitRoundOfArm(int kind,bool lobbed,int style,bool bigGun,int shell) noexcept {
+    if(style!=0)return CockpitRound::beam;
+    if(kind==2)return CockpitRound::rkt;
+    if(kind==3)return CockpitRound::msl;
+    switch(shell) {
+    case 1: return CockpitRound::ap;
+    case 2: return CockpitRound::he;
+    case 3: return CockpitRound::beam;
+    case 4: return CockpitRound::heat;
+    case 5: return CockpitRound::can;
+    default: break;
+    }
+    return lobbed ? CockpitRound::he : bigGun ? CockpitRound::gun : CockpitRound::mg;
+}
 // A weapon cell's loading bar (the user, 2026-10-12: 「两发之间显示『装填 1.8s』，在挂载上加上那种读条呢」): the share loaded,
 // 0..1, or < 0 for no bar. Out of rounds and reloading the magazine (`reload` < 1: vhud.cpp Reload) its share; with rounds,
 // the next round going in (`cycleSec` >= 0: vhud.cpp Cycle, a gun of 0.5 s or more between shots) `cycle`; ready: none.
