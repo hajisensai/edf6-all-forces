@@ -1078,6 +1078,8 @@ add_test(NAME sightzoom_native COMMAND sightzoom_test "${EDF6_NATIVE_DLL}")
 set_tests_properties(sightzoom_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME npc_gunner_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_gunner_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(npc_gunner_native PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME npc_mech_aim_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_mech_aim_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(npc_mech_aim_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The NPCs' backpack weapons: the source guard always, the code read against an installed EDF.dll when one is given.
 add_test(NAME npc_backpack_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_backpack_guard.py")
 add_test(NAME npc_backpack_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_backpack_native_audit.py" "${EDF6_NATIVE_DLL}")
