@@ -171,6 +171,14 @@ struct Config {
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
     bool vehicleRam=true;           // a driven ground vehicle's parts (hull, feet, fists) hit what they drive into (vehicleram.cpp)
     float vehicleRamDamage=20.0f;   // ...their kinetic energy's damage (the jets' formula) times this (0: none; 20: a ground vehicle is 5-10x slower than a jet, so 1 would leave the ram unnoticeable)
+    // The gravity operations (gravity.cpp) and their users: the gravity gun (gravitygun.cpp, the Air Raider's EDF6VC_CALL_GRAVITY_GUN)
+    // and the M099 float guns (floatgun.cpp).
+    float gravityDamage=20.0f;      // what a thrown thing deals: 1/2 m dv^2 at 287 kJ a point (the rams' formula) times this (0: none)
+    bool gravityGun=true;           // the gravity gun grabs, carries and throws (off: it is the stock Laser Guide Kit it was cloned from)
+    float gravityThrowSpeed=40.0f;  // m/s a 2 t thing leaves the gun at (lighter faster, heavier slower: gravity_logic.h ThrowSpeed)
+    int floatGuns=1;                // dropped guns that float round their finder and fire (floatgun.cpp): 0 off, 1 EDF5's last mission (M099) only, 2 every mission
+    int floatGunMost=4;             // ...at most this many round one player (a fifth replaces the oldest)
+    float floatGunSec=90.0f;        // ...each fights this long once picked up (0: until the mission ends)
     bool vehicleSound=true;         // the ground vehicles' engines, turrets, loaders and main guns heard as the plugin makes them (vehsound.cpp)
     float vehicleEngineVolume=1.0f; // ...each group's volume, times the game's own; 0: that group's stock sound kept
     float vehicleTurretVolume=1.0f;

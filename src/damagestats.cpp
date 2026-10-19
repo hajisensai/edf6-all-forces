@@ -14,6 +14,7 @@
 //    attack): the attacker itself names the source (an enemy's kind is its weapon).
 // 0x54A586 itself is left alone: subcarrier.cpp checks that its call still reaches 0x547C30 (DamageCallReaches).
 #include "crew.h"
+#include "floatgun.h"
 #include "edf/host.h"
 #include "edf/patch.h"
 #include "hudtext.h"
@@ -336,12 +337,20 @@ void NoteWasted(const unsigned char* obj,const unsigned char* gdi,const Before& 
         WastedFireHit(At<const void*>(gdi,kGdiAttacker),obj,hp<b.hp);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
+// A kill (alive before the hit, dead after it) for floatgun.cpp: what it leaves is taken on the next tick.
+void NoteKill(const unsigned char* obj,const Before& b) noexcept {
+    if(!b.ok || b.dead)return;
+    bool dead=false;
+    __try { dead=obj[kDead]!=0; } __except(EXCEPTION_EXECUTE_HANDLER){return;}
+    if(dead)FloatGunNoteKill(obj);
+}
 std::uintptr_t __fastcall DamageHook(unsigned char* obj,unsigned char* gdi,std::uintptr_t r8,std::uintptr_t r9) noexcept {
     const bool on=On();
     const Before b=Read(obj);
     const std::uintptr_t r=damageNext(obj,gdi,r8,r9);
     if(on && b.ok)Record(obj,gdi,b.hp,b.dead);
     NoteWasted(obj,gdi,b);
+    NoteKill(obj,b);
     return r;
 }
 unsigned char* __fastcall SpawnHook(void* mgr,void* matrix,void* factory,unsigned char* param) noexcept {

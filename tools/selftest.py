@@ -531,13 +531,16 @@ def calls_table_consistent() -> None:
     drones = set(re.search(r'enum class ThrownDrone \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     for c in calls.CALLS:
         assert c.kind in calls.KINDS, c.id
-        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun'), c.id
+        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'gravity'), c.id
         thrown = c.brings == 'throw'
         assert bool(c.drone) == thrown and (not c.drone or c.drone in drones), c.id
         # A thrown drone's marker: the bits of 1.0 with its code in the low ones, never 1.0 itself (calls.throw_mark).
         bits = calls.mark_bits(c)
         assert not thrown or (bits & ~0xFFF == calls.THROW_MARK_BASE and bits != calls.THROW_MARK_BASE), c.id
         assert bool(c.gun) == (c.brings == 'gun') and (not c.gun or c.reload == 0), c.id
+        assert bool(c.weapon) == (c.brings == 'gravity'), c.id
+        # The gravity gun's marker is a thrown drone's kind (the bits of 1.0 with a code in the low ones).
+        assert c.brings != 'gravity' or (bits & ~0xFFF == calls.THROW_MARK_BASE and bits != calls.THROW_MARK_BASE), c.id
         assert bool(c.role) == (c.brings == 'jets') and (not c.role or c.role in roles), c.id
         assert bool(c.body) == (c.brings == 'helis') and (not c.body or c.body in bodies), c.id
         assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground)) == (c.brings == 'vehicle'), c.id
@@ -552,6 +555,23 @@ def calls_table_consistent() -> None:
         assert not calls.retired_id(c.id).startswith(calls.ID_PREFIX)   # GrantCalls never owns a placeholder
     names = [calls.call_name(c, 'SC') for c in calls.FLOWN]
     assert len(set(names)) == len(names), 'two calls with one banner label'
+
+
+@test
+def gravity_gun_mark_in_plugin() -> None:
+    """The gravity gun (tools/calls.py brings 'gravity'): src/gravitygun.cpp tells it by its AmmoHitSizeAdjust's bits (the
+    call's mark) and its class's vtable (Weapon_LaserMarker: the template call_weapons.gravity_sgo keeps); its SGO is the kit
+    with that mark, the reach and the damage scale the plugin reads, and its stat list the range and the zoom."""
+    guns = [c for c in calls.CALLS if c.brings == 'gravity']
+    assert len(guns) == 1, guns
+    g = guns[0]
+    plugin = src('src/gravitygun.cpp')
+    m = re.search(r'kGravityMarkBits=0x([0-9A-Fa-f]+)', plugin)
+    assert m and int(m.group(1), 16) == calls.mark_bits(g), 'gravitygun.cpp kGravityMarkBits vs tools/calls.py'
+    assert 'kLaserMarkerVtable=0x17E45E8' in plugin and g.weapon == 'eLockonMarkerL01'
+    assert cw.template_of(g) == 'eLockonMarkerL01' and g.reload == 0 and g.count == 0
+    assert 'gravity::Pick' in plugin and 'gravity::HoldAt' in plugin and 'gravity::Throw' in plugin, 'the gun is the gravity operations\' user'
+    assert 'GravityGunTick' in src('src/crew.cpp'), 'the gun runs from the shared tick'
 
 
 @test

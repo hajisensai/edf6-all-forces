@@ -1,0 +1,83 @@
+// The plugin's gravity operations (gravity.cpp; docs/gravity-re.md; the user, 2026-10-20: 「把"操作重力"做成函数之类的方便
+// 操作，以后要经常使用它」): one way to grab, carry, push, pull and throw whatever the game's physics moves, and to deal what a
+// thrown thing hits as its mass and speed say (gravity_logic.h; the user: 「根据速度和质量造成伤害」). The gravity gun
+// (gravitygun.cpp) is its first user.
+//  - A Target is what can be moved: a live character through its own controller (an insect / berserker's cling, a walker's
+//    walk: the game's own way of launching them), a corpse or a vehicle through its ragdoll's bodies, anything else the
+//    physics simulates through its rigid body. TargetOf(object) / Pick(ray) make one; it is a weak reference (an ObjRef
+//    and a body id), so a target gone since is simply not live.
+//  - Every move is a velocity (m/s, world): SetVelocity, AddVelocity / Impulse, HoldAt (a frame of the carry spring), Throw
+//    (the throw speed for its mass, then followed for its impacts), Radial (a pull or a push of everything round a point).
+//  - What is thrown (Throw, Radial, or Track) is followed each frame (Frame, crew.cpp's shared tick): an impact (the speed
+//    it loses beyond gravity, or the fall it lands with) deals gravity_logic.h ImpactDamage of its mass at the point; an
+//    enemy it passes through is hit at its closing speed. Both through the impact charges (jet_bay.cpp ImpactDamage):
+//    the thrower's side's enemies only, the thrower's kills.
+// Game thread only. Offline only for now: the plugin's own velocities are not replicated (InSession: nothing moves).
+#pragma once
+#include "crew.h"
+#include "gravity_logic.h"
+#include <cstdint>
+
+namespace crew::gravity {
+enum class Kind : std::uint8_t { none, body, cling, walk, ragdoll };
+struct Target {
+    ObjRef obj;                // the scene object (none: an ownerless body, a debris piece)
+    std::uint32_t body=0xFFFFFFu;   // a Havok body id: the body moved (body), the one read for a ragdoll's place and speed
+    std::size_t ctrl=0;        // cling / walk: the controller's offset in the object; ragdoll: the ragdoll's
+    bool ragdollPtr=false;     // ragdoll: the object holds a pointer to it at `ctrl` (a humanoid's), not the ragdoll itself
+    Kind kind=Kind::none;
+    ::gravmath::Family family=::gravmath::Family::walker;
+    float kg=0.0f;             // its mass (gravity_logic.h: the physics' own, or the family's estimate)
+    float radius=1.0f;         // m: its size (the reach of its contacts, the blast of its impacts)
+    explicit operator bool() const noexcept { return kind!=Kind::none; }
+};
+
+bool Install() noexcept;        // the code checks (plugin.cpp, at load); false: every operation refuses
+// Whether `obj`'s class has the MSVC RTTI type descriptor `td` (an RVA) among its bases: its primary vtable's complete object
+// locator (vt[-1]), class hierarchy and base class array, read as memory (no call; docs/gravity-re.md §1.3). Under the
+// caller's __try. E.g. InsectBase 0x202A270, HumanoidBase 0x203B5B0, HumanBase 0x2016A98, VehicleBase 0x2006480.
+bool IsA(const void* obj,std::uint32_t td) noexcept;
+bool Ready() noexcept;          // installed, offline, in a mission (the physics world there)
+void Reset() noexcept;          // a new mission (mission.cpp): nothing is followed any more
+void Frame() noexcept;          // once a frame (crew.cpp SharedFrameTick): the followed throws' impacts and contacts
+
+// What `object` is to gravity (false: nothing it can move: the map, a static body, an unknown class). `body`: the body a ray
+// hit on it (0xFFFFFF: none; a ragdoll's place is then its first body's).
+bool TargetOf(const void* object,std::uint32_t body,Target* out) noexcept;
+// The first thing along a->b gravity can move, `self` (and what it rides) never; `hit` the point the ray met it at (or its
+// own place for one found near the ray: an enemy's lock point within a few metres of it counts, the aim's help). False:
+// nothing there.
+bool Pick(const float* a,const float* b,const void* self,Target* out,float* hit) noexcept;
+bool Live(const Target& t) noexcept;                    // still there (a corpse is; a deleted object is not)
+// A live character that has died since is its corpse now: its ragdoll (the family's) takes over. False: gone, or nothing left
+// to move. Frame does this for what it follows; a carrier calls it each frame for what it holds.
+bool Refresh(Target& t) noexcept;
+bool Position(const Target& t,float* at) noexcept;      // its centre (a ragdoll's: its read body's), world
+bool Velocity(const Target& t,float* vel) noexcept;     // m/s
+bool Landed(const Target& t) noexcept;                  // a character on the ground (a body: never)
+
+bool SetVelocity(const Target& t,const float* vel) noexcept;
+bool AddVelocity(const Target& t,const float* dv) noexcept;
+bool Impulse(const Target& t,const float* impulse) noexcept;   // N s: dv = impulse / kg
+// One frame of carrying it to `goal` (moving at `goalVel`, may be null): gravity_logic.h HoldVelocity for its mass. False:
+// too heavy to move, or gone.
+bool HoldAt(const Target& t,const float* goal,const float* goalVel) noexcept;
+
+// Throws it along `dir` (any length) at the speed gravity_logic.h ThrowSpeed gives `baseSpeed` for its mass (plus `carry`,
+// the carrier's own motion, may be null), and follows it for `by` (Track). False: not thrown.
+bool Throw(const Target& t,const float* dir,float baseSpeed,const float* carry,const unsigned char* by,float scale=1.0f) noexcept;
+// Follows `t` for `by`'s side: its impacts and the enemies it passes through are hit (`held`: being carried, contacts only:
+// its own velocity is the carrier's to change). A target already followed is taken over (its flight goes on). What it deals
+// is the ini's GravityDamage times `scale` (the gravity gun's: its weapon's AmmoDamage, which grows with its stars).
+void Track(const Target& t,const unsigned char* by,bool held,float scale=1.0f) noexcept;
+void Untrack(const Target& t) noexcept;
+// Every enemy of `by`'s side within `radius` of `centre` given `speed` m/s along the line from the centre (negative: toward
+// it, a pull), less with the distance (none at the edge), and followed for `by`. How many were moved.
+int Radial(const float* centre,float radius,float speed,const unsigned char* by,float scale=1.0f) noexcept;
+}  // namespace crew::gravity
+
+namespace crew {
+// gravitygun.cpp: the gravity gun (the shared tick, after gravity::Frame; a new mission forgets what it held).
+void GravityGunTick() noexcept;
+void ResetGravityGun() noexcept;
+}  // namespace crew

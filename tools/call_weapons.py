@@ -168,6 +168,8 @@ def template_of(call: Call) -> str:
     thrown drone: its row, and so its place in the Robot Bomb list, category 331)."""
     if call.gun:
         return call.gun
+    if call.weapon:
+        return call.weapon
     if call.ground:
         return vc.GROUND_VEHICLES[call.ground].request
     if call.brings == 'throw':
@@ -500,10 +502,37 @@ def gun_sgo(template: bytes, call: Call) -> bytes:
     return dsgo.write(doc)
 
 
+# The gravity gun (Call.brings 'gravity', src/gravitygun.cpp): the Laser Guide Kit (Weapon_LaserMarker: its beam is drawn
+# while the trigger is held, it fires no round, so its one shot never runs out) under its own name, its AmmoHitSizeAdjust the
+# call's mark (the plugin's test, with the class's vtable; the class never reads the field). Its beam reaches AmmoSpeed x
+# AmmoAlive (1) m: GRAVITY_RANGE, the reach of what it grabs (the plugin reads the product off the weapon). AmmoDamage, 0
+# in the stock kit (it deals none), is the throw's damage scale the plugin reads (weapon +0x89C). The beam's colour and width.
+GRAVITY_RANGE = 150.0
+GRAVITY_COLOR = (0.55, 0.35, 1.0, 1.0)
+GRAVITY_WIDTH = 1.5
+
+
+def gravity_sgo(template: bytes, call: Call) -> bytes:
+    doc = dsgo.parse(template)
+    r = doc.root
+    r.set('AmmoHitSizeAdjust', float(call.mark))
+    r.get('AmmoSpeed').items[0] = GRAVITY_RANGE
+    r.set('AmmoColor', Node([float(c) for c in GRAVITY_COLOR]))
+    r.set('AmmoSize', GRAVITY_WIDTH)
+    r.set('AmmoDamage', 1.0)
+    for lang in LANGS:
+        key = f'name.{lang.lower()}'
+        if key in r.names.values():
+            r.set(key, call_name(call, lang))
+    return dsgo.write(doc)
+
+
 def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, float]] | None = None,
                *, fallback: bool = False) -> bytes:
     if call.brings == 'gun':
         return gun_sgo(template, call)
+    if call.brings == 'gravity':
+        return gravity_sgo(template, call)
     if call.brings == 'vehicle':
         return vehicle_sgo(template, call, request_tier(curve or [], call.level), fallback=fallback)
     if call.brings == 'throw':
@@ -565,6 +594,9 @@ def _text_row(template: Node, call: Call, lang: str, durability: float | None = 
     if call.brings == 'throw':
         _throw_stats(row, call)
         return row
+    if call.brings == 'gravity':
+        _gravity_stats(row)
+        return row
     # A vehicle request's stats: [re-request, durability, fuel, fuel cost]; the durability is the jet's.
     stats = row.items[2].items
     if durability is not None and len(stats) > 1 and len(stats[1].items) == 2:
@@ -606,6 +638,23 @@ def _throw_stats(row: Node, call: Call) -> None:
     for stat, value in zip(keep, (float(call.count), float(call.reload) / 60.0)):
         if len(stat.items) == 3 and isinstance(stat.items[2], Node) and stat.items[2].items:
             stat.items[2].items[0] = value
+    row.items[2].items = keep
+
+
+# The Laser Guide Kit's stat list: [projection range (its AmmoSpeed curve), lock-on speed, lock-on range, zoom]. The gravity
+# gun's: its range (GRAVITY_RANGE) and the zoom; the lock-on lines are the kit's (the beam still paints, but that is not
+# what this weapon is for).
+_GRAVITY_RANGE_STAT, _GRAVITY_ZOOM_STAT = 0, 3
+
+
+def _gravity_stats(row: Node) -> None:
+    stats = row.items[2].items
+    if len(stats) <= _GRAVITY_ZOOM_STAT:
+        return   # another tool rewrote the kit's text: left as it is
+    keep = [stats[_GRAVITY_RANGE_STAT], stats[_GRAVITY_ZOOM_STAT]]
+    rng = keep[0]
+    if len(rng.items) == 3 and isinstance(rng.items[2], Node) and rng.items[2].items:
+        rng.items[2].items[0] = GRAVITY_RANGE
     row.items[2].items = keep
 
 

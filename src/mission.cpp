@@ -7,6 +7,8 @@
 // loadout only wraps the call when it is on (LoadoutPreload). Layout: docs/loadout-re.md.
 #include "crash_dump.h"
 #include "crew.h"
+#include "gravity.h"
+#include "floatgun.h"
 #include "firstperson.h"
 #include "mission_watch.h"
 #include "transport.h"
@@ -123,6 +125,9 @@ void MissionStart() noexcept {
     ResetMissiles();
     ResetDrills();
     ResetVehicleRams();
+    gravity::Reset();
+    ResetGravityGun();
+    FloatGunsMissionStart();   // which mission this is (EDF5's last: the float guns), nothing kept from the last
     ResetEmc();
     ResetSidecars();
     ResetProteus();
