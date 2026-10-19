@@ -9,7 +9,7 @@
 //    kHoldMin.. m out (from where it was met, drawn in to kCarry m past its own size), keeping pace with the player; while
 //    carried it hits the enemies it is swung through (gravity::Track, held);
 //  - let go: thrown along the aim (gravity::Throw: the speed for its mass from the ini's GravityThrowSpeed, plus the player's
-//    own motion), then followed for its impacts, the damage times the kit's AmmoDamage (+0x89C, 1: the scale its stars grow);
+//    own motion), then followed for its impacts, the damage times the kit's AmmoDamage (+0x89C: 1, tools/call_weapons.py);
 //  - put away (+0x13E clear), or the gun off: what it carries is let fall, still followed.
 // Offline only (gravity::Ready): online the kit is its stock self. The player's own Laser Guide Kit is never touched.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
@@ -35,6 +35,7 @@ constexpr float kDrawIn=20.0f;        // m/s the hold distance closes at
 constexpr float kLostAfter=25.0f;     // m from its hold point...
 constexpr ULONGLONG kLostMs=2000;     // ...this long (stuck, or too heavy to follow): let go
 constexpr float kLeastReach=10.0f,kMostReach=1000.0f;
+constexpr float kMostCarrySpeed=30.0f;   // m/s: the player moving faster than this in a frame was moved (a ride, a warp)
 
 struct Gun {
     ObjRef human;
@@ -66,7 +67,8 @@ const unsigned char* GravityGunOf(const unsigned char* human) noexcept {
 float Len(const float* v) noexcept { return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
 
 void LetGo(const unsigned char* human) noexcept {
-    if(gun.held && human)gravity::Track(gun.held,human,false);   // falls on its own, still followed for its impacts
+    // Falls on its own, still followed for its impacts (Track takes nothing too heavy to have been lifted).
+    if(gun.held && human)gravity::Track(gun.held,human,false);
     gun.held=gravity::Target{};
     gun.farSince=0;
 }
@@ -79,6 +81,7 @@ void Frame(unsigned char* human) noexcept {
     float playerVel[3]{};
     const float dt=gun.lastMs ? static_cast<float>(ms-gun.lastMs)*0.001f : 0.0f;
     if(gun.havePos && dt>0.0f && dt<0.25f)for(int k=0;k<3;++k)playerVel[k]=(pos[k]-gun.lastPos[k])/dt;
+    if(Len(playerVel)>kMostCarrySpeed)playerVel[0]=playerVel[1]=playerVel[2]=0.0f;
     std::memcpy(gun.lastPos,pos,12);gun.havePos=true;gun.lastMs=ms;
 
     const unsigned char* w=GravityGunOf(human);
@@ -117,9 +120,11 @@ void Frame(unsigned char* human) noexcept {
                               static_cast<int>(t.family),t.kg*0.001f,gun.holdDist);
     }
     if(!gravity::Refresh(gun.held)){gun.held=gravity::Target{};gun.latched=true;return;}
-    // Drawn in to its carry distance, then held there on the aim's line.
+    // Drawn in to its carry distance (no faster than it can be carried), then held there on the aim's line.
     const float carry=kCarry+gun.held.radius*1.5f;
-    if(gun.holdDist>carry)gun.holdDist=std::fmax(carry,gun.holdDist-kDrawIn*dt);
+    const float cap=::gravmath::HoldCap(gun.held.kg);
+    const float drawIn=cap*0.5f<kDrawIn ? cap*0.5f : kDrawIn;
+    if(gun.holdDist>carry)gun.holdDist=std::fmax(carry,gun.holdDist-drawIn*dt);
     const float goal[3]={from[0]+aim[0]*gun.holdDist,from[1]+aim[1]*gun.holdDist,from[2]+aim[2]*gun.holdDist};
     if(!gravity::HoldAt(gun.held,goal,playerVel)){LetGo(human);gun.latched=true;return;}
     gravity::Track(gun.held,human,true,scale);   // swung through enemies it hits them
@@ -128,7 +133,7 @@ void Frame(unsigned char* human) noexcept {
         const float d[3]={at[0]-goal[0],at[1]-goal[1],at[2]-goal[2]};
         if(Len(d)>kLostAfter) {
             if(!gun.farSince)gun.farSince=ms;
-            else if(ms-gun.farSince>kLostMs){LetGo(human);gun.latched=true;}
+            else if(ms-gun.farSince>(cap<20.0f ? kLostMs*3 : kLostMs)){LetGo(human);gun.latched=true;}   // a heavy one is given longer
         } else gun.farSince=0;
     }
 }

@@ -11,7 +11,8 @@
 //  - What is thrown (Throw, Radial, or Track) is followed each frame (Frame, crew.cpp's shared tick): an impact (the speed
 //    it loses beyond gravity, or the fall it lands with) deals gravity_logic.h ImpactDamage of its mass at the point; an
 //    enemy it passes through is hit at its closing speed. Both through the impact charges (jet_bay.cpp ImpactDamage):
-//    the thrower's side's enemies only, the thrower's kills.
+//    the thrower's side's enemies only, the thrower's kills. One charge a frame at most per thing followed: an impact and the
+//    enemies it touches that frame are one blow (the charge reaches all of them), each thing's next at kContactGapMs.
 // Game thread only. Offline only for now: the plugin's own velocities are not replicated (InSession: nothing moves).
 #pragma once
 #include "crew.h"
@@ -68,7 +69,8 @@ bool HoldAt(const Target& t,const float* goal,const float* goalVel) noexcept;
 bool Throw(const Target& t,const float* dir,float baseSpeed,const float* carry,const unsigned char* by,float scale=1.0f) noexcept;
 // Follows `t` for `by`'s side: its impacts and the enemies it passes through are hit (`held`: being carried, contacts only:
 // its own velocity is the carrier's to change). A target already followed is taken over (its flight goes on). What it deals
-// is the ini's GravityDamage times `scale` (the gravity gun's: its weapon's AmmoDamage, which grows with its stars).
+// is the ini's GravityDamage times `scale` (the gravity gun's: its weapon's AmmoDamage). Nothing too heavy to lift
+// (gravity_logic.h kMostLiftKg) is followed: it was never moved, so it hits nothing.
 void Track(const Target& t,const unsigned char* by,bool held,float scale=1.0f) noexcept;
 void Untrack(const Target& t) noexcept;
 // Every enemy of `by`'s side within `radius` of `centre` given `speed` m/s along the line from the centre (negative: toward

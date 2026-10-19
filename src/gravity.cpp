@@ -221,20 +221,18 @@ bool RidesIn(const unsigned char* v,const void* who) noexcept {
 }
 
 // ---- following what is thrown (Frame) ----
-constexpr int kMostFollowed=32,kContactHits=16,kMostNear=24;
+constexpr int kMostFollowed=32,kMostNear=24;
 constexpr float kContactPad=2.0f;        // m past its own size an enemy's lock point is touched (vehicleram.cpp's kBodyPad)
 constexpr float kLeastClosing=4.0f;      // m/s: slower is a push
-constexpr ULONGLONG kContactGapMs=500;   // the same enemy hit by the same thing at most this often
+constexpr ULONGLONG kContactGapMs=500;   // a thing's blows (its charges) at most this often
 constexpr float kLeastDamage=1.0f;
-struct Hit { ObjRef target; ULONGLONG at; };
 struct Followed {
     Target t;
     ObjRef by;
     ::gravmath::Flight flight;
     bool held=false;
     float scale=1.0f;
-    ULONGLONG lastMs=0;
-    Hit hits[kContactHits]{};
+    ULONGLONG lastMs=0,lastBlow=0;
 };
 Followed followed[kMostFollowed];
 
@@ -256,13 +254,6 @@ void SeeNear(void* ctx,const void* object,const float* lock) noexcept {
     n.object=object;std::memcpy(n.at,lock,12);
 }
 
-bool Due(Followed& f,const void* object,ULONGLONG ms) noexcept {
-    const int slot=ram::CooldownSlot(f.hits,kContactHits,ms,kContactGapMs,[object](const ObjRef& target){return target.Is(object);});
-    if(slot<0)return false;
-    f.hits[slot]=Hit{ObjRef::Of(object),ms};
-    return true;
-}
-
 void Deal(const unsigned char* by,const float* at,float kg,float dv,float radius,float scale,const char* what,const void* object) noexcept {
     const float damage=::gravmath::ImpactDamage(kg,dv,Cfg().gravityDamage*scale);
     if(damage<kLeastDamage)return;
@@ -278,23 +269,33 @@ void Step(Followed& f,ULONGLONG ms) noexcept {
     const float dt=GameStep(f.lastMs ? ms-f.lastMs : 0);
     f.lastMs=ms;
     float at[3],vel[3];
-    if(!Position(f.t,at) || !Velocity(f.t,vel))return;
-    if(!f.held) {
-        bool done=false;
-        const float dv=f.flight.Step(vel,Landed(f.t),dt,&done);
-        if(dv>0.0f)Deal(by,at,f.t.kg,dv,f.t.radius,f.scale,"impact",f.t.obj.obj);
-        if(done){f=Followed{};return;}
-    }
-    // What it passes through: the enemies of the thrower's side round it, hit at its closing speed onto each.
+    if(!Position(f.t,at) || !Velocity(f.t,vel)){f=Followed{};return;}   // nothing left to read: no longer followed
+    // What it passes through: the enemies of the thrower's side round it; the fastest closing speed onto one of them.
     NearScan s{at,f.t.radius+kContactPad,{},0};
     VisitEnemiesOf(At<std::int32_t>(by,kTeam),&SeeNear,&s);
+    float closing=0.0f;
+    const void* onto=nullptr;
     for(int i=0;i<s.count;++i) {
         const Near& n=s.found[i];
         if(n.object==f.t.obj.obj)continue;
-        const float closing=ram::Closing(at,vel,n.at);
-        if(closing<kLeastClosing || !Due(f,n.object,ms))continue;
-        Deal(by,n.at,f.t.kg,closing,f.t.radius,f.scale,"contact",n.object);
+        const float c=ram::Closing(at,vel,n.at);
+        if(c>closing){closing=c;onto=n.object;}
     }
+    float dv=0.0f;
+    bool done=false;
+    if(!f.held) {
+        const bool landed=Landed(f.t);
+        dv=f.flight.Step(vel,landed,dt,&done);
+        // A thrown character that has landed is on its own feet again: its walking is no impact.
+        if(landed && f.flight.age>0.1f)done=true;
+    }
+    // One blow a frame, at most one a kContactGapMs: the impact, or else the contact (the charge reaches every enemy round
+    // it either way, the thing itself too when it is one).
+    if(ms-f.lastBlow>=kContactGapMs || !f.lastBlow) {
+        if(dv>0.0f){Deal(by,at,f.t.kg,dv,f.t.radius,f.scale,"impact",f.t.obj.obj);f.lastBlow=ms;}
+        else if(closing>=kLeastClosing){Deal(by,at,f.t.kg,closing,f.t.radius,f.scale,"contact",onto);f.lastBlow=ms;f.flight.sinceHit=0.0f;}
+    }
+    if(done)f=Followed{};
 }
 }  // namespace
 
@@ -359,8 +360,11 @@ bool TargetOf(const void* object,std::uint32_t body,Target* out) noexcept {
 bool Live(const Target& t) noexcept {
     if(!t || !ok)return false;
     __try {
-        if(t.obj.obj)return t.obj.Is(t.obj.obj);
-        return Dynamic(BodyOf(t.body));
+        if(t.obj.obj && !t.obj.Is(t.obj.obj))return false;
+        if(t.kind!=Kind::body)return true;
+        // A body: still dynamic, and (an owned one) still its owner's (a freed id may be another's by now).
+        if(!Dynamic(BodyOf(t.body)))return false;
+        return !t.obj.obj || reinterpret_cast<BodyObjectFn>(image+kBodyObject)(t.body)==t.obj.obj;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -440,7 +444,10 @@ bool SetVelocity(const Target& t,const float* vel) noexcept {
         }
         case Kind::ragdoll: {
             auto* rg=const_cast<unsigned char*>(RagdollOf(t));
-            if(!rg || !Readable(rg,kRagCount+8))return false;
+            void* bodies[kMostRagdollBodies];
+            const int n=RagdollBodies(rg,bodies,static_cast<int>(kMostRagdollBodies));
+            // 0x6ECF20 walks every entry under the world's lock, reading its body without a check: each must have one.
+            if(n<=0 || static_cast<std::uint64_t>(n)!=At<std::uint64_t>(rg,kRagCount))return false;
             reinterpret_cast<RagdollSetFn>(image+kRagdollSetVel)(rg,v);
             return true;
         }
@@ -501,7 +508,7 @@ bool Throw(const Target& t,const float* dir,float baseSpeed,const float* carry,c
 }
 
 void Track(const Target& t,const unsigned char* by,bool held,float scale) noexcept {
-    if(!t || !by)return;
+    if(!t || !by || !(::gravmath::HoldCap(t.kg)>0.0f))return;   // too heavy: never moved, hits nothing
     Followed* f=Find(t);
     if(!f) {
         for(auto& slot:followed)if(!slot.t){f=&slot;break;}
@@ -527,7 +534,7 @@ int Radial(const float* centre,float radius,float speed,const unsigned char* by,
     int moved=0;
     for(int i=0;i<s.count;++i) {
         Target t;
-        if(!TargetOf(s.found[i].object,kNoBody,&t))continue;
+        if(!TargetOf(s.found[i].object,kNoBody,&t) || !(::gravmath::HoldCap(t.kg)>0.0f))continue;
         float at[3];
         if(!Position(t,at))continue;
         float d[3]={at[0]-centre[0],at[1]-centre[1],at[2]-centre[2]};

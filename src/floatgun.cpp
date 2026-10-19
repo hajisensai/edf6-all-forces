@@ -44,7 +44,7 @@ constexpr unsigned kDropMake=0x49CE80,kDropUpdate=0x4A1730,kModelMatrix=0x1100B9
 constexpr unsigned kDropVtable=0x17C4308,kDropParamVtable=0x17C42F8,kColonistVtable=0x17C4D70,
                    kGunBasicVtable=0x17C4920,kGunHeavyVtable=0x17C4B50;
 constexpr unsigned kVariantCopy=0x179E1C0,kVariantDtor=0x1765220;   // per-tag tables of the SGO value handle
-constexpr std::uint32_t kTdVehicle=0x2006480;
+constexpr std::uint32_t kTdVehicle=0x2006480,kTdWeapon=0x2045768;   // VehicleBase, WeaponBase
 const unsigned char kModePathSig[]={0x40,0x53,0x48,0x83,0xEC,0x40,0x48,0x81,0xC1,0xF0,0x00,0x00,0x00,0x48,0x8B,0x19};
 const unsigned char kRowStoreSig[]={0x8B,0x51,0x48,0x89,0x91,0x00,0x50,0x01,0x00};   // mov edx,[rcx+0x48]; mov [rcx+0x15000],edx
 const unsigned char kDropMakeSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x20,0x57};
@@ -62,7 +62,7 @@ const unsigned char kDeleteSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0
 // A colonist and its guns.
 constexpr std::size_t kGunRows=0x1120,kGunCount=0x1130,kGunOwner=0x5B0,kGunSgo=0x100,kGunFactory=0x170,kGunParam=0x180,
                       kGunPellets=0x480,kGunBurst=0x484,kGunGap=0x488,kGunSpread=0x48C,kGunCool=0x490,kGunMuzzles=0x620,
-                      kGunMuzzleCount=0x630,kGunMuzzleStride=0x90,kGunMuzzleMatrix=0x50;
+                      kGunMuzzleCount=0x630,kGunMuzzleStride=0x90,kGunMuzzleMatrix=0x50,kGunEnabled=0x5E2;
 // A vehicle and its main gun (a WeaponBase).
 // Its rhythm: FireSpreadWidth +0x364, FireCount (rounds a shot) +0x368, FireInterval (frames between shots) +0x36C, FireBurstCount
 // +0x370 and FireBurstInterval +0x374 (a burst's shots, the frames between them), AmmoCount +0x248, ReloadTime +0x20C (WeaponInfo
@@ -76,6 +76,7 @@ constexpr std::size_t kMounts=0x638,kMountCount=0x648,kMountStride=0x48,kMountWe
 constexpr std::size_t kParamSize=0x1E0,kPOwner=0x38,kPTarget=0x60,kPMuzzle=0x70,kPTeam=0x90,kPNumbers=0x94,kPCustom=0xE8,
                       kPCustomTag=0xF8,kPSeed=0x1A0,kPScale=0x30,kPSpeed=0x94,kPLife=0x98,kPDamage=0x9C;
 constexpr std::uint16_t kTagNode=1,kTagNone=0xFFFF;
+constexpr std::size_t kLockPoints=0x368,kLockCount=0x378;   // a game object's lock points: {LockPoint*, ctrl} each
 constexpr std::size_t kDropCounter=0x830,kDropModel=0x210;
 
 constexpr int kMostGuns=24,kMostPending=32;
@@ -259,6 +260,7 @@ void TakeColonist(unsigned char* c) noexcept {
         const auto* ctrl=At<const unsigned char*>(rows+i*16,8);
         if(!w || !ctrl || !Readable(ctrl,24) || At<LONG>(ctrl,8)<=0 || At<const void*>(ctrl,16)!=w)continue;
         if(!Readable(w,kGunMuzzleCount+8) || At<const unsigned char*>(w,kGunOwner)!=c)continue;
+        if(!w[kGunEnabled])continue;   // its arm was shot off: the game dropped this gun already (0x4A4C80 -> 0x4A4FC0)
         const auto vt=At<const unsigned char*>(w,0);
         if(vt!=image+kGunBasicVtable && vt!=image+kGunHeavyVtable)continue;
         Gun* g=NewGun();
@@ -288,7 +290,7 @@ void TakeVehicle(unsigned char* v) noexcept {
     if(!mounts || count==0 || count>16 || !Readable(mounts,static_cast<std::size_t>(count)*kMountStride))return;
     for(std::uint64_t i=0;i<count;++i) {
         auto* w=At<unsigned char*>(mounts+static_cast<std::size_t>(i)*kMountStride,kMountWeapon);
-        if(!w || !Readable(w,kVehParam+kParamSize))continue;
+        if(!w || !Readable(w,kVehParam+kParamSize) || !gravity::IsA(w,kTdWeapon))continue;   // a WeaponBase
         void* factory=At<void*>(w,kVehFactory);
         if(!factory)continue;   // a gun with no round of its own (a marker, a support call)
         Gun* g=NewGun();
@@ -378,7 +380,14 @@ void FireOne(Gun& g,const unsigned char* soldier,const void* target,const float*
         Put<std::int32_t>(param,kPTeam,At<std::int32_t>(soldier,kTeam));
         if(std::isfinite(g.scale) && g.scale>0.0f)Put<float>(param,kPScale,g.scale);
         reinterpret_cast<WeakAssignFn>(image+kWeakAssign)(param+kPOwner,soldier+kSelf);
-        if(target)reinterpret_cast<WeakAssignFn>(image+kWeakAssign)(param+kPTarget,static_cast<const unsigned char*>(target)+kSelf);
+        // The target is a lock point, not the object (0x4A0100 hands the round 0x548EF0's: the object's lock point 0, a weak
+        // reference out of its array +0x368, count +0x378).
+        if(target && Readable(static_cast<const unsigned char*>(target)+kLockPoints,kLockCount-kLockPoints+8) &&
+           At<std::uint64_t>(target,kLockCount)>0) {
+            const auto* points=At<const unsigned char*>(target,kLockPoints);
+            if(points && Readable(points,16) && At<const void*>(points,8))
+                reinterpret_cast<WeakAssignFn>(image+kWeakAssign)(param+kPTarget,points);
+        }
         std::memcpy(param+kPMuzzle,&follow,8);
         if(g.custom) {
             std::memcpy(param+kPCustom,&g.custom,8);

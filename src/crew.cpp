@@ -812,8 +812,8 @@ void PerfTick() noexcept {
 }
 
 void ThermalTick() noexcept { const auto& c=Cfg();thermal::Tick(c.enabled && c.thermal,static_cast<unsigned>(c.thermalKey)); }
-void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); Edf41Mother401DevTick(); }
-void GravityTick() noexcept { gravity::Frame(); GravityGunTick(); FloatGunTick(); }   // (the 401's dev enemy shooter: edf41mother401.cpp)
+void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); Edf41Mother401DevTick(); }   // (the 401's dev enemy shooter: edf41mother401.cpp)
+void GravityTick() noexcept { gravity::Frame(); GravityGunTick(); FloatGunTick(); }
 
 void SharedFrameTick() noexcept {
     if(tickFrame==GameFrame())return;

@@ -8,6 +8,6 @@
 namespace crew {
 bool InstallFloatGuns() noexcept;                // at load: the code checks, the dropped gun's update hook
 void FloatGunsMissionStart() noexcept;           // mission.cpp MissionStart: which mission this is; nothing kept from the last
-void FloatGunNoteKill(const void* object) noexcept;   // damagestats.cpp: `object` was killed by this hit (any thread the hit is)
+void FloatGunNoteKill(const void* object) noexcept;   // damagestats.cpp: `object` was killed by this hit (the game thread's damage function)
 void FloatGunTick() noexcept;                    // the shared tick (crew.cpp): drops, pick-ups, the floating guns' flight and fire
 }  // namespace crew
