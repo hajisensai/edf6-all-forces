@@ -11802,7 +11802,7 @@ def edf41_rest_behaviour_real() -> None:
     assert all(n.startswith('小型UFO507') for n in load('UFO401')['se_table'])
     tank = load('VEHICLE301_TANK_AI')
     assert plain(tank['game_object_ai_route_update_distance']) == 3.0 and plain(tank['car_base_submerge_height']) == 1.7
-    assert tank['xgs_scene_object_class'] == 'Vehicle505_Tank' and plain(tank['game_object_durability']) == 700.0
+    assert tank['xgs_scene_object_class'] == 'Vehicle601_Tank' and plain(tank['game_object_durability']) == 700.0
 
 
 def _mini_mab(flag: int) -> bytes:

@@ -8,7 +8,9 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'pylib'))
 import edf41tank
+import dsgo
 import mdb
+import sgo
 
 
 def fixture():
@@ -75,6 +77,27 @@ class RecoilBindingModelTests(unittest.TestCase):
         archive.files.append(copy.deepcopy(archive.files[-1]))
         with self.assertRaisesRegex(ValueError, 'exactly one'):
             edf41tank.recoil_model_archive(mdb.rab_write(archive), 'tank.mdb')
+
+
+class TemplateContractTests(unittest.TestCase):
+    def test_actual_dsgo_value_kinds_keep_their_raw_blobs_and_arrays(self):
+        node = dsgo.Node(['Vehicle601_Tank', dsgo.Node([2.5, dsgo.Blob(b'raw model/MAB'),
+                                                      dsgo.Node([0.0, 1.0])])],
+                         {0: 'xgs_scene_object_class', 1: 'animation_model'})
+        version, members = edf41tank._template(dsgo.write(dsgo.Document(node, [])))
+        self.assertEqual(version, 0x102)
+        self.assertEqual(members['animation_model'], [2.5, b'raw model/MAB', [0.0, 1.0]])
+        reread = sgo.read(sgo.write_depth_first(version, members))[1]
+        self.assertEqual(reread['xgs_scene_object_class'], 'Vehicle601_Tank')
+        self.assertEqual(reread['animation_model'][1], b'raw model/MAB')
+
+    def test_unrepresentable_dsgo_template_fields_are_refused(self):
+        cases = ((dsgo.Node([1.0]), 'unnamed fields'),
+                 (dsgo.Node([dsgo.Node([1.0], {0: 'inner'})], {0: 'field'}), 'named nested'),
+                 (dsgo.Node([dsgo.Blob(b'expr', 4)], {0: 'field'}), 'typed expression'))
+        for node, message in cases:
+            with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                edf41tank._template(dsgo.write(dsgo.Document(node, [])))
 
 
 if __name__ == '__main__':

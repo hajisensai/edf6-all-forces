@@ -48,6 +48,7 @@ VEHICLES: dict[str, str] = {
 }
 # 4.1 vehicle weapon -> EDF6's (two: EDF6 split it into a left and a right one); [] none: the template's settings.
 WEAPONS: dict[str, list[str]] = {
+    'v_301tank_ai_cannon01.sgo': ['v_505_tank_ai_cannon01'],
     'v_301tank_cannon01.sgo': ['v_505tank_cannon01'], 'v_301tank_cannon02.sgo': ['v_505tank_cannon02'],
     'v_301tank_cannon02l.sgo': ['v_505tank_cannon02L'], 'v_301tank_cannon03.sgo': ['v_505tank_cannon03'],
     'v_301tank_cannon03l.sgo': ['v_505tank_cannon03L'], 'v_301tank_cannon04.sgo': ['v_505tank_cannon04'],

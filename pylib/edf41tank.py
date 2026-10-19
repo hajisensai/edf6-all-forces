@@ -1,9 +1,9 @@
 """The real EDF4.1 V301 tank, including its promotional paint variants, on EDF6 CarBase.
 
-VehicleTank301 was removed. Reusing V505's behavior requires translating its physical
-and rendering contracts, not replacing animation_model alone: V301 has seven wheel
-pairs and no V505 antenna or mudguard bones. Keep the source model, textures, Havok
-collision and bindings. EDF6's ragdoll loader migrates hkpPhysicsData to hknp itself
+VehicleTank301 was removed. The native Vehicle601_Tank keeps the single-gun tracked
+behavior without Vehicle505_Tank's hard-coded antenna and mudguard bodies. V301
+keeps its seven wheel pairs and real model/physics contracts. The source model,
+textures, Havok collision and bindings stay together. EDF6's ragdoll loader migrates hkpPhysicsData to hknp itself
 (src/legacymap.cpp); the map loader's separate limitation does not apply here.
 """
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 
 import cas_pose
+import dsgo
 import edf41calls
 import hk2014
 import legacy_assets
@@ -23,6 +24,7 @@ import sgo
 ROOTS = tuple('VEHICLE301_TANK' + suffix + '.SGO' for suffix in
               ('', '_AI', '_BULLETGIRLS', '_DCZERO', '_DC55', '_EDF2PV2', '_NATSUIRO'))
 RECOIL_BIND_BONE = 'edf6vc_cannon_slide_physics'
+RUNTIME_CLASS = 'Vehicle601_Tank'
 
 
 def rel(ref: str) -> str:
@@ -63,8 +65,34 @@ def recoil_model_archive(data: bytes, name: str) -> bytes:
     return mdb.rab_write(archive)
 
 
+def _template(data: bytes) -> tuple[int, dict]:
+    """Read the actual 601 DSGO template without turning its raw blobs into text.
+
+    V301 uses SGO 0x102. This template has a fully named root, unnamed nested
+    arrays and ordinary raw blobs; refuse unrepresentable named/typed content.
+    """
+    if data[:4] != b'DSGO':
+        return sgo.read(data)
+    root = dsgo.parse(data).root
+    if len(root.names) != len(root.items):
+        raise ValueError('V301 template root has unnamed fields')
+    def value(node):
+        if isinstance(node, dsgo.Node):
+            if node.names:
+                raise ValueError('V301 template has a named nested container')
+            return [value(item) for item in node.items]
+        if isinstance(node, dsgo.Blob):
+            if node.kind != 2:
+                raise ValueError('V301 template has a typed expression blob')
+            return node.data
+        return node
+    return 0x102, {name: value(root.items[index]) for index, name in root.names.items()}
+
+
 def check(members: dict, md: mdb.Mdb, physics: bytes, cas: bytes) -> None:
     """Refuse unresolved bones, Havok bodies, locators or animation ownership conflicts."""
+    if members.get('xgs_scene_object_class') != RUNTIME_CLASS:
+        raise ValueError('V301 requires the audited Vehicle601_Tank class contract')
     names = {md.name_of(b.name) for b in md.bones}
     proxies = {o['name']: o['motion']['motionState']['transform'] for o in hk2014.read(physics).objects
                if o.type.name == 'hkpRigidBody'}
@@ -93,7 +121,7 @@ def check(members: dict, md: mdb.Mdb, physics: bytes, cas: bytes) -> None:
             delta = max(delta, *(abs(rotation[i][j] - expected[1][i][j]) for i in range(3) for j in range(3)))
             if delta > 1e-3:
                 raise ValueError(f'{key}: {link.src} / {link.dst} physics bind frames disagree ({delta:.6f})')
-    required = {members['car_base_body_name']}
+    required = {members['car_base_body_name'], 'body', 'cannon_main', 'cannon'}
     for key in ('car_base_rigid_body', 'car_base_simulation_node', 'car_base_wheel', 'vehicle_weapon_setting'):
         required.update(row[0] for row in members[key])
     for row in members['car_base_constraint_data']:
@@ -103,7 +131,8 @@ def check(members: dict, md: mdb.Mdb, physics: bytes, cas: bytes) -> None:
     missing = required - names
     if missing:
         raise ValueError(f'V301 runtime bone contract: {sorted(missing)}')
-    missing = {'RagDollProxys.' + row[0] for row in members['car_base_rigid_body']} - bodies
+    required_bodies = {row[0] for row in members['car_base_rigid_body']} | {'body', 'cannon_main', 'cannon'}
+    missing = {'RagDollProxys.' + name for name in required_bodies} - bodies
     if missing:
         raise ValueError(f'V301 runtime body contract: {sorted(missing)}')
     wheels = members['car_base_wheel']
@@ -147,8 +176,10 @@ def build(games, root: str) -> dict[str, bytes]:
         raise ValueError(f'not a V301 tank: {root}')
     obj = 'OBJECT/' + root
     original = sgo.read(legacy_sgo.convert(games.read4(obj)))[1]
-    template = 'OBJECT/V505_TANK' + ('_AI' if root.endswith('_AI.SGO') else '') + '.SGO'
-    version, members = sgo.read(games.read6(template))
+    template = 'OBJECT/V601_TANK' + ('_AI' if root.endswith('_AI.SGO') else '') + '.SGO'
+    version, members = _template(games.read6(template))
+    if members.get('xgs_scene_object_class') != RUNTIME_CLASS:
+        raise ValueError('V301 native 601 template has another runtime class')
     members = copy.deepcopy(members)
     am = original['animation_model']
     entry = am[0] if isinstance(am[0][0], str) else am[0][0]
@@ -160,8 +191,8 @@ def build(games, root: str) -> dict[str, bytes]:
     donor_md = model(games.read6(rel(donor_am[0][0])), donor_am[0][1])
     cas_data = games.read6(rel(donor_am[1]))
     pose = cas_pose.CasPose(cas_data)
-    # Only the recoil is portable. Every other donor track encodes V505's absolute
-    # rest pose and would move the original wheels/turret back onto V505's skeleton.
+    # Only the recoil is portable. Every other donor track encodes V601's absolute
+    # rest pose and would move the original wheels/turret back onto V601's skeleton.
     free = {t.name for c in pose.clips for t in c.tracks} - {'cannon_slide'}
     cas_data = cas_pose.retarget(cas_data, donor_md, md, {'default', 'fire'}, free)
     cas_rel = 'OBJECT/EDF41_V301_RECOIL.CAS'
@@ -211,13 +242,19 @@ def build(games, root: str) -> dict[str, bytes]:
     for key in ('game_object_durability', 'game_object_camera_setting', 'vehicle_damage_effect', 'vehicle_weapon_setting'):
         members[key] = copy.deepcopy(original[key])
     # Keep EDF6's driver animation/row layout, but the source MAB supplies the seat.
-    setup = copy.deepcopy(original['vehicle_setup'])
-    for row in setup[2]:
-        mapped = edf41calls.WEAPONS.get(edf41calls.leaf(row[0]))
-        if not mapped or len(mapped) != 1:
-            raise ValueError('V301 weapon has no single-barrel EDF6 counterpart')
-        row[0] = 'app:/weapon/' + mapped[0] + '.sgo'
-    members['vehicle_setup'] = setup
+    # The AI file has an authored mission loadout too. Inheriting 601's one
+    # would silently replace the original cannon with the donor's weapon/rate.
+    for field in ('vehicle_setup', 'mission_setup'):
+        if field not in original:
+            members.pop(field, None)
+            continue
+        setup = copy.deepcopy(original[field])
+        for row in setup[2]:
+            mapped = edf41calls.WEAPONS.get(edf41calls.leaf(row[0]))
+            if not mapped or len(mapped) != 1:
+                raise ValueError('V301 weapon has no single-barrel EDF6 counterpart')
+            row[0] = 'app:/weapon/' + mapped[0] + '.sgo'
+        members[field] = setup
     check(members, md, out[shkt], cas_data)
     out[obj] = sgo.write_depth_first(version, members)
     return out

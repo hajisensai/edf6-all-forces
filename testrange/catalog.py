@@ -120,7 +120,7 @@ STOCK_ENEMIES: tuple[tuple[str, str, bool, float], ...] = (
 
 # EDF4.1's objects by class: the panel's category and words, how far up it is made, whether it flies.
 EDF41_CLASSES: dict[str, tuple[str, str, float, bool]] = {
-    'Vehicle505_Tank': ('vehicle', '4.1 坦克', 0.5, False),
+    'Vehicle601_Tank': ('vehicle', '4.1 坦克', 0.5, False),
     'Vehicle_Car': ('vehicle', '4.1 边三轮摩托', 0.5, False),
     # Empty vehicles wait on the ground for boarding; a helicopter is not an airborne enemy wave.
     'Vehicle506_Helicopter': ('vehicle', '4.1 直升机 Nereid', 0.5, False),
