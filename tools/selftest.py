@@ -10222,6 +10222,35 @@ def edf41_friend_grip_shipped() -> None:
 
 
 @test
+def edf41_friend_climb_shipped() -> None:
+    """No shipped soldier carries human_climb_settings (EDF6's climb over a ledge) unless its CAS's main player has every
+    climb state the climb plays (make_edf41_objects SOLDIER_CLIMB_STATES): the climb state leaves only when that state is done,
+    so a CAS without them froze the soldier in place for good (2026-10-19: 「NPC有的会立正」). 4.1's three soldier CAS
+    have none, so none of the 28 4.1 soldiers climbs; every other shipped soldier keeps its climb only with the states."""
+    import cas_graft
+    import edf41_objects as eo
+    import edf41friends as ef
+    import make_edf41_objects as m
+    import sgo
+    reg = eo.registry()
+    soldiers = 0
+    for rel in sorted(r for r in reg['files'] if r.endswith('.SGO')):
+        d = sgo.load(data=eo.read(rel))
+        if str(d.get('xgs_scene_object_class')) not in m.NULL_CHECKED_KEYS:
+            continue
+        soldiers += 1
+        cas_rel = m.rel_of(d['animation_model'][1])
+        assert cas_rel in reg['files'], (rel, cas_rel)
+        missing = m.climb_states_missing(eo.read(cas_rel))
+        assert m.SOLDIER_CLIMB_KEY not in d or not missing, (rel, cas_rel, missing)
+    for cas_rel in m.FRIEND_CAS:
+        assert m.climb_states_missing(eo.read(cas_rel)) == list(m.SOLDIER_CLIMB_STATES), cas_rel
+    units = [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS)
+    assert all(m.SOLDIER_CLIMB_KEY not in sgo.load(data=eo.read(r)) for r in units)
+    assert soldiers >= len(units) == 28, (soldiers, len(units))
+
+
+@test
 def edf41_friend_grip_matches_weapons() -> None:
     """Actual 4.1 source MAB/IK/model/CAS and HOLD fields are preserved exactly, not only close in bind pose."""
     import dsgo
