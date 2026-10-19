@@ -1317,6 +1317,15 @@ int OtherSquads(const unsigned char* except,bool playersOnly,unsigned char** lea
     return n;
 }
 
+// The hand-overs Succeed made lately (NpcSquadSuccessor): the dead top's identity and the squad's top after it (its new
+// leader, or the squad its remnant joined), so that what the map holds by the top's identity (its selection, its RTS
+// groups) goes on with the squad instead of losing it with its leader.
+struct Handover { ObjRef old,now; ULONGLONG at; };
+constexpr int kHandovers=32;
+constexpr ULONGLONG kHandoverMs=300000;
+Handover handovers[kHandovers]{};
+int handoverNext=0;
+
 void Succeed(unsigned char* dead) noexcept {
     unsigned char* m[kMaxSquad];
     const int n=Followers(dead,m,kMaxSquad);
@@ -1344,6 +1353,7 @@ void Succeed(unsigned char* dead) noexcept {
     unsigned char* const top=join>=0 ? others[join] : lead;
     if(join<0)Follow(lead,up);
     for(int i=0;i<n;++i)if(m[i]!=top)Follow(m[i],top);
+    handovers[handoverNext]=Handover{ObjRef::Of(dead),ObjRef::Of(top),GameMs()};handoverNext=(handoverNext+1)%kHandovers;
     TransportSucceed(dead,join>=0 ? nullptr : lead);   // its transport goes with the squad (transport.cpp)
     if(Squad* const old=FindSquad(dead)) {
         if(join>=0){if(old->dismissed){old->dismissed=false;--dismissedCount;}old->top=ObjRef{};}
@@ -2504,65 +2514,20 @@ bool NpcDriver(const unsigned char* v) noexcept {
 // player's (the stock SetFollow, as the stock recruit does), refused during its dismissal's cooldown; dismiss lets go a
 // recruited squad where it stands and starts the cooldown (+0x540 cleared meanwhile, or the stock would take it back at
 // once). The squads of a mission script take none (§4.3).
-// --- Fireteams (the user, 2026-10-08: "支持编组") ---
-// A squad is the stock follow tree (§5.1); a fireteam is a squad of its own: SplitSquad makes one squad two (its places
-// in Members' order: the even ones stay under the top, the odd ones under the first of them, who follows the top's own
-// leader: the player for a recruited squad, nobody for a free one), every member re-parented explicitly (a moved
-// soldier's own followers are not dragged along with it); MergeSquads puts other squads' tops under one squad's top.
-// Each half is then a squad like any other: its own row on the panel, its own orders and formation. Offline only (as
-// the other orders: the follow tree's changes are replicated by vslot 39, but the panel's orders are not, §9).
-namespace {
-Squad* Commandable(const void* leader) noexcept {
-    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession() || !followOk)return nullptr;
-    Squad* const q=FindSquad(leader);
-    if(!q || npc::Scripted(q->control) || q->dismissed || GameMs()-q->seen>kOrderSeenMs)return nullptr;
-    auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
-    return q->top.Is(top) && !top[kDead] && IsSoldierClass(top) && TopNpc(top)==top &&
-           !npc::Scripted(ControlOf(top,RootLeader(top))) ? q : nullptr;
-}
-
-// A mission can take control of a follower independently of its top. Reparenting changes every affected tree,
-// so reject the whole operation before its first native call when any member belongs to a mission script.
-bool CanRegroup(unsigned char* const* members,int n) noexcept {
-    for(int i=0;i<n;++i)if(npc::Scripted(ControlOf(members[i],RootLeader(members[i]))))return false;
-    return true;
-}
-}  // namespace
-
-int SplitSquad(const void* leader) noexcept {
-    __try {
-        Squad* const q=Commandable(leader);
-        if(!q)return -1;
-        auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
-        unsigned char* m[kMaxSquad];
-        const int n=Members(top,m,kMaxSquad);
-        if(n<2 || !CanRegroup(m,n))return -1;
-        unsigned char* const above=At<unsigned char*>(top,kLeader);
-        unsigned char* const second=m[1];
-        CancelBoarding(top);   // both halves, before the native follow lists are changed
-        Follow(second,above);
-        for(int i=2;i<n;++i)Follow(m[i],i%2 ? second : top);
-        Log("NPCAI squad %p split: %d stay, %d go with %p",top,(n+1)/2,n/2,second);
-        return n/2;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
-}
-
-bool MergeSquads(const void* into,const void* from) noexcept {
-    __try {
-        Squad* const a=Commandable(into);
-        Squad* const b=Commandable(from);
-        if(!a || !b || a==b)return false;
-        auto top=static_cast<unsigned char*>(const_cast<void*>(into));
-        auto other=static_cast<unsigned char*>(const_cast<void*>(from));
-        unsigned char* aMembers[kMaxSquad];unsigned char* bMembers[kMaxSquad];
-        const int na=Members(top,aMembers,kMaxSquad),nb=Members(other,bMembers,kMaxSquad);
-        if(na+nb>kMaxSquad || !CanRegroup(aMembers,na) || !CanRegroup(bMembers,nb))return false;
-        CancelBoarding(other);
-        Follow(other,top);
-        npcmark::Assign(b->commandFocus,{});*b=Squad{};   // no stale panel/roster entry may command the former top and form a follow cycle
-        Log("NPCAI squad %p joins squad %p",other,top);
-        return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept {
+    if(!old.obj || !now)return false;
+    const ULONGLONG ms=GameMs();
+    ObjRef at=old;bool found=false;
+    for(int hop=0;hop<4;++hop) {   // a new leader dead too: its own hand-over (newest first)
+        bool step=false;
+        for(int k=1;k<=kHandovers && !step;++k) {
+            const Handover& h=handovers[(handoverNext-k+kHandovers)%kHandovers];
+            if(h.old.obj && h.old.obj==at.obj && h.old.ctrl==at.ctrl && ms-h.at<=kHandoverMs){at=h.now;step=found=true;}
+        }
+        if(!step)break;
+    }
+    if(found)*now=at;
+    return found;
 }
 
 // A guarding squad's defence (the shape from the map's formation menu or T's cycle): the shape, -1 when it guards
@@ -2796,7 +2761,9 @@ NpcCommandResult NpcMapCommandForRequester(const ObjRef& selected,const mapcmd::
         if(npc::Scripted(ControlOf(top,root)))return CommandResult(Reason::scripted);
         const auto* q=FindSquad(top);
         if(!q || !q->top.Is(top) || GameMs()-q->seen>kOrderSeenMs)return CommandResult(Reason::stale);
-        const Command order{mapcmd::VehicleCommandOf(c.order),{c.at[0],c.at[1],c.at[2]}};
+        // HOLD: the post where the vehicle is now (the authority's own reading of it).
+        const float* at=c.order==Order::hold ? Pos(v) : c.at;
+        const Command order{mapcmd::VehicleCommandOf(c.order),{at[0],at[1],at[2]}};
         if(order.order!=Order::guard && order.order!=Order::none && order.order!=Order::focus)return CommandResult(Reason::unsupported);
         const bool accepted=TankCommand(v,order,focus);
         return CommandResult(accepted ? Reason::none : Reason::failed,accepted ? 1u : 0u);
@@ -2842,7 +2809,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             const Reason why=TransportWithdraw(top);
             return why==Reason::none ? CommandResult(Reason::none,1) : CommandResult(why);
         }
-        if(mapcmd::PointOrder(c.order) || c.order==Order::engage || c.order==Order::focus) {
+        if(mapcmd::PlaceOrder(c.order) || c.order==Order::engage || c.order==Order::focus) {
             affected=0;
             for(int i=0;i<count;++i)if(HumanOnFoot(members[i]) && IsOnlineAuthority(members[i]) &&
                 !npc::Scripted(ControlOf(members[i],RootLeader(members[i]))))++affected;
@@ -2856,6 +2823,8 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             GuardOrder(*q,c,caller);break;
         case Order::engage:
             q->cmd=c;q->cmdLead=npc::LeadOf(control);std::memcpy(q->cmd.at,Pos(top),12);break;
+        case Order::hold:   // RTS hold position: a guard of the spot its top stands on now (each squad its own)
+            GuardOrder(*q,Command{Order::guard,{Pos(top)[0],Pos(top)[1],Pos(top)[2]}},caller);break;
         case Order::focus: {
             if(!focus.obj || !Readable(focus.obj,kDead+1) || static_cast<const unsigned char*>(focus.obj)[kDead])return CommandResult(Reason::noTarget);
             CommandFocusCheck checked{focus};VisitEnemiesOf(caller ? callerTeam : team,&SeeCommandFocus,&checked);

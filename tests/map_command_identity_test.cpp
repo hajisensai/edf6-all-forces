@@ -86,8 +86,12 @@ int CycleMarchFormation() noexcept {return 0;}
 int SetGuardFormation(const void*,int) noexcept {return -2;}
 int NpcGuardShape(const void*) noexcept {return -2;}
 int SetMarchFormation(int) noexcept {return -2;}
-int SplitSquad(const void*) noexcept {return -1;}
-bool MergeSquads(const void*,const void*) noexcept {return false;}
+ObjRef successorOld{},successorNew{};
+ULONGLONG GameFrame() noexcept {return 1;}
+bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept {
+    if(!successorOld.obj || old.obj!=successorOld.obj || old.ctrl!=successorOld.ctrl)return false;
+    *now=successorNew;return true;
+}
 bool NpcSweepToggle(const void* const*,int) noexcept {return false;}
 bool NpcSweepOn() noexcept {return false;}
 bool NpcPickupHealthToggle() noexcept {return false;}

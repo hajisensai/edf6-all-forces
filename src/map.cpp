@@ -579,8 +579,10 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         return;
     }
     if(front) {
-        ahead=static_cast<float>((Down('W') || Down(VK_UP))-(Down('S') || Down(VK_DOWN)));
-        right=static_cast<float>((Down('D') || Down(VK_RIGHT))-(Down('A') || Down(VK_LEFT)));
+        // With Ctrl held the letters are the commands' (Ctrl+A every unit, mapcmd.cpp): the arrows still pan.
+        const bool letters=!Down(VK_CONTROL);
+        ahead=static_cast<float>(((letters && Down('W')) || Down(VK_UP))-((letters && Down('S')) || Down(VK_DOWN)));
+        right=static_cast<float>(((letters && Down('D')) || Down(VK_RIGHT))-((letters && Down('A')) || Down(VK_LEFT)));
         const bool turnRight=Down('E') && !(eat && Cfg().npcMarkKey=='E'),turnLeft=Down('Q') && !(eat && Cfg().npcMarkKey=='Q');
         turn=static_cast<float>(static_cast<int>(turnRight)-static_cast<int>(turnLeft))*mapcam::kTurnRate*dt;
         tilt=static_cast<float>(Down('R')-Down('F'))*mapcam::kTurnRate*0.5f*dt;
@@ -589,8 +591,9 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         float dx=0.0f,dy=0.0f;
         if(MouseDelta(human,&dx,&dy) && (dx!=0.0f || dy!=0.0f)) {
             if(!game.loggedMouse && Cfg().debug){game.loggedMouse=true;Log("MAP mouse delta (%.1f,%.1f) a frame",dx,dy);}
-            // Ctrl + left drag is the NPC commands' selection box (mapcmd.cpp), not a pan.
-            if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured()){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
+            // A left drag that is the NPC commands' selection box (mapcmd.cpp: whenever there is a unit to box, or Ctrl
+            // held) is not a pan; the middle button's drag always is (RTS).
+            if(Down(VK_MBUTTON) || (Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured())){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
             else if(Down(VK_RBUTTON) && !MapCommandPointerCaptured()){mapcam::Turn(v,dx*mapcam::kDragTurn,dy*mapcam::kDragTurn);keys=true;}
         }
     }
@@ -642,6 +645,8 @@ bool Frame(unsigned char* human) noexcept {
     float dt=game.last.QuadPart ? static_cast<float>(t.QuadPart-game.last.QuadPart)/static_cast<float>(hz.QuadPart) : 0.0f;
     game.last=t;
     if(!(dt>0.0f) || dt>0.1f)dt=1.0f/60.0f;
+    // The map's Shift-queued points go on with the map shut too (mapcmd.cpp; the units walk on to the next one).
+    MapCommandQueueTick();
     if(game.open && now-game.frameAt>kFreshMs)Close("the game was paused");   // its Esc read by the pause menu, not here
     game.frameAt=now;
     if(!c.enabled || !c.map){Close(c.enabled ? "Map=0" : "plugin off");return false;}

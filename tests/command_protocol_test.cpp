@@ -70,9 +70,15 @@ void Codec() {
     m.request=Make(1,mapcmd::Order::dismountAll);
     Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==mapcmd::Order::dismountAll,
           "DISMOUNT ALL round trips");
-    Check(static_cast<int>(mapcmd::Order::dismountAll)==12 && mapcmd::kLastOrder==mapcmd::Order::dismountAll,
-          "DISMOUNT ALL is appended (12): the older orders keep their wire values");
-    Check(kVersion==5,"the wire is version 5 (DISMOUNT ALL): an older peer refuses it instead of misreading it");
+    Check(static_cast<int>(mapcmd::Order::dismountAll)==12,"DISMOUNT ALL is appended (12): the older orders keep their wire values");
+    // Version 6: HOLD (13), no point and no formation slots (the authority reads where its unit stands).
+    m.request=Make(1,mapcmd::Order::hold);
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==mapcmd::Order::hold,
+          "HOLD round trips");
+    m.request.formationTotal=1;
+    Check(!Encode(m,bytes,sizeof(bytes)),"HOLD carries no formation slots");
+    Check(static_cast<int>(mapcmd::Order::hold)==13 && mapcmd::kLastOrder==mapcmd::Order::hold,"HOLD is appended (13)");
+    Check(kVersion==6,"the wire is version 6 (HOLD): an older peer refuses it instead of misreading it");
     for(auto order:{mapcmd::Order::move,mapcmd::Order::attackMove}) {
         m.request=Make(2,order);m.request.formationTotal=3;m.request.formationSlots[0]=0;m.request.formationSlots[1]=2;
         Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==order &&
@@ -88,7 +94,7 @@ void Codec() {
         std::uint32_t was;std::memcpy(&was,edit+kOrderAt,4);
         Check(was==static_cast<std::uint32_t>(mapcmd::Order::guard),"the order word where the codec writes it");
         std::memcpy(edit+kOrderAt,&last,4);
-        Check(Decode(edit,sizeof(edit),out) && out.request.command.order==mapcmd::kLastOrder,"the last order (withdraw) decodes");
+        Check(Decode(edit,sizeof(edit),out) && out.request.command.order==mapcmd::kLastOrder,"the last order (hold) decodes");
         std::memcpy(edit+kOrderAt,&past,4);
         Check(!Decode(edit,sizeof(edit),out),"an order past the last one is not decoded");
     }

@@ -1,6 +1,6 @@
 // The map's NPC commands (src/mapcmd_logic.h) checked offline: the screen and the ground (the centre's ray meets the
 // ground at the focus for every map view; a unit projected onto the screen and the ray under that screen point find it
-// again), the floor in a cave (src/map_floor.h: the roof seen from above passed through, a lower level kept), the selection (Ctrl + drag box, Shift adding; a click picking one, Shift toggling, empty ground clearing; the
+// again), the floor in a cave (src/map_floor.h: the roof seen from above passed through, a lower level kept), the selection (a drag's box, Shift adding; a click picking one, Shift toggling, empty ground clearing; the
 // Tab / pad X cycle through one unit at a time and ALL; units gone dropped), what each key press comes to (a command to
 // the selection, or the refusal: no unit, no point, online), and the guard formation (slots apart, the first on the point).
 //   cmake --build build --target map_cmd_check && build\map_cmd_check.exe      (exit code 1 on a failure)
@@ -430,9 +430,9 @@ int main() {
         Check(VehicleOrder(Order::move) && VehicleOrder(Order::attackMove) && VehicleCommandOf(Order::move)==Order::guard &&
               VehicleCommandOf(Order::attackMove)==Order::guard && VehicleCommandOf(Order::follow)==Order::follow,
               "a vehicle takes a move / attack-move as its post's guard");
-        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::dismountAll) && static_cast<int>(Order::recruit)==8 &&
+        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::hold) && static_cast<int>(Order::recruit)==8 &&
               static_cast<int>(Order::attackMove)==10 && static_cast<int>(Order::withdraw)==11 && static_cast<int>(Order::dismountAll)==12,
-              "the wire's order values: recruit stays 8, the new ones after it (move, attack-move, withdraw, dismount all)");
+              "the wire's order values: recruit stays 8, the new ones after it (move, attack-move, withdraw, dismount all, hold)");
         Check(!VehicleOrder(Order::withdraw) && !AirOrder(Order::withdraw) && !PointOrder(Order::withdraw),
               "withdraw: a squad's transport order, no vehicle's own and no point");
         // The command's priority over the soldier's own fight.
@@ -478,6 +478,61 @@ int main() {
         Check(mark[1]==20.0f,"an aircraft's on it");
         const float pinTop=mapcam::PinHeight(800.0f,mapcam::kStartPitch);
         Check(kBodyLift<pinTop*0.1f,"the body point far below where the pin's icon stood",pinTop);
+    }
+
+    // --- The RTS groups, the pad's held buttons, the Shift queue, a double click's kind, HOLD (2026-10-19) ---
+    {
+        Check(GroupKey(true,false,false)==GroupAct::assign && GroupKey(true,true,false)==GroupAct::append &&
+              GroupKey(false,true,true)==GroupAct::add && GroupKey(false,false,false)==GroupAct::recall &&
+              GroupKey(false,false,true)==GroupAct::centre,"Ctrl+N keeps, Ctrl+Shift+N adds to, Shift+N adds, N selects, NN centres");
+        Tap t{};
+        Check(!DoubleTap(t,1,1000) && DoubleTap(t,1,1200) && !DoubleTap(t,1,1300),"the same key twice in time: a double tap; a third starts over");
+        Check(!DoubleTap(t,2,5000) && !DoubleTap(t,3,5100) && !DoubleTap(t,3,5100+kDoubleTapMs+1),"another key, or too late: none");
+        Held h{};
+        Check(StepHeld(h,true,0,600)==TapHold::none && StepHeld(h,true,300,600)==TapHold::none && StepHeld(h,false,350,600)==TapHold::tap,
+              "a pad button let go before its hold: a tap on the release");
+        Check(StepHeld(h,true,1000,600)==TapHold::none && StepHeld(h,true,1600,600)==TapHold::hold && StepHeld(h,true,2000,600)==TapHold::none &&
+              StepHeld(h,false,2100,600)==TapHold::none,"held: its hold once, no tap after it");
+        Held swallowed{};swallowed.down=swallowed.fired=true;
+        Check(StepHeld(swallowed,false,10,600)==TapHold::none,"a press a side panel took: its release is no tap");
+        Check(PadGroup(0)==0 && PadGroup(3)==3 && PadGroup(4)==-1,"the D-pad: groups 1-4");
+        Check(SameKind("RANGER x4","RANGER x2") && !SameKind("RANGER x4","FENCER x4") && SameKind("TANK","TANK") &&
+              !SameKind("TANK","TANKS"),"a kind: the name up to its count");
+        Mark ms[3]={{reinterpret_cast<const void*>(1),10,10,true},{reinterpret_cast<const void*>(2),20,20,true},
+                    {reinterpret_cast<const void*>(3),30,30,false}};
+        const char* kinds[3]={"RANGER x4","RANGER x1","RANGER x3"};const int owners[3]={3,3,3};
+        Selection kindSel;
+        Check(SelectKind(kindSel,ms,kinds,owners,3,0,false)==2 && kindSel.n==2,"a double click: its kind on the screen (not one off it)");
+        // The queue.
+        const float there[3]={100,0,0},far2[3]={300,0,0},far3[3]={500,0,0},start[3]={0,0,0};
+        Waypoints w{};
+        const Command idle{Order::none,{0,0,0}},go{Order::move,{100,0,0}},second{Order::move,{300,0,0}},third{Order::attackMove,{500,0,0}};
+        Check(Enqueue(w,idle,start,20,go) && w.active && w.n==0,"Shift with nothing on the way: given at once");
+        Check(!Enqueue(w,go,start,20,second) && !Enqueue(w,go,start,20,third) && w.n==2,"Shift while on the way: queued");
+        Command next{};
+        Check(Advance(w,go,start,20,&next)==QueueStep::wait,"not there: waits");
+        Check(Advance(w,Command{Order::guard,{100,0,0}},there,20,&next)==QueueStep::give && next.at[0]==300 && w.n==1,
+              "there (its move turned guard on arrival): the next one");
+        Check(Advance(w,second,far2,20,&next)==QueueStep::give && next.order==Order::attackMove && w.n==0,"the last one");
+        Check(Advance(w,third,far3,20,&next)==QueueStep::done && !w.active,"the last reached: done");
+        Waypoints taken{};
+        Check(!Enqueue(taken,go,start,20,second) && taken.issued.at[0]==100,"Shift while a plain move is on its way: it stays first");
+        Check(Advance(taken,Command{Order::follow,{0,0,0}},start,20,&next)==QueueStep::dropped && !taken.active,
+              "another order now: the queue dropped");
+        Waypoints full{};
+        Enqueue(full,idle,start,20,go);
+        for(int i=0;i<kWaypointsMost+3;++i)Enqueue(full,go,start,20,second);
+        Check(full.n==kWaypointsMost,"a full queue keeps its first points");
+        Replace(full,Command{Order::follow,{0,0,0}});
+        Check(!full.active && !full.n,"a plain order replaces the queue");
+        // HOLD: an order of its own (wire value appended), a vehicle's guard of its spot, no point of the pointer's.
+        Check(static_cast<int>(Order::hold)==13 && kLastOrder==Order::hold && PlaceOrder(Order::hold) && !PointOrder(Order::hold) &&
+              VehicleOrder(Order::hold) && VehicleCommandOf(Order::hold)==Order::guard,"HOLD: the vehicles' guard of their spot");
+        Press holdPress{};holdPress.hold=true;
+        const Step hs=Decide(2,holdPress,true,point,false);
+        Check(hs.issue && hs.cmd.order==Order::hold,"H needs no point under the pointer");
+        Check(RightClickOrder(1,false,true,true).order==Order::follow && RightClickOrder(1,true,true,true).order==Order::focus,
+              "the right button on the player: follow (an enemy over it still first)");
     }
 
     std::printf("map_cmd_check: %d cases, %d failures\n",cases,failures);

@@ -3828,6 +3828,7 @@ const wchar_t* MapOrderWord(Order o) noexcept {
     case Order::move: return Tr(Tx::orderMove);
     case Order::attackMove: return Tr(Tx::orderAttackMove);
     case Order::dismountAll: return Tr(Tx::orderDismountAll);
+    case Order::hold: return Tr(Tx::orderHold);
     case Order::none: break;
     }
     return L"-";
@@ -3845,8 +3846,15 @@ void MapSquadStatus(const SquadRow& r,wchar_t* out,std::size_t size) noexcept {
     if(std::strncmp(r.status,"WAIT ",5)==0)_snwprintf_s(out,size,_TRUNCATE,Tr(Tx::squadWait),r.cooldown);
     else hudtext::WordTo(r.status,out,size);
 }
+// A unit's RTS groups as their digits in brackets ("[13]": groups 1 and 3), nothing (three spaces) in none.
+void MapGroupDigits(std::uint16_t groups,wchar_t* out,std::size_t size) noexcept {
+    if(!groups){_snwprintf_s(out,size,_TRUNCATE,L"   ");return;}
+    wchar_t digits[mapcmd::kGroups+1]{};int n=0;
+    for(int g=0;g<mapcmd::kGroups;++g)if(groups&(1u<<g))digits[n++]=static_cast<wchar_t>(L'1'+g);
+    _snwprintf_s(out,size,_TRUNCATE,L"[%ls]",digits);
+}
 // The panel's rows (the user, 2026-10-09: "小队太多了吧，怎么处理合适，感觉看不过来"): sorted by SquadRank (the player's,
-// the free ones, riding, a script's), folded to the ones on foot that take orders (at most 9: the number keys), the rest
+// the free ones, riding, a script's), folded to the ones on foot that take orders (at most 9), the rest
 // summed in a row that opens it (mapcmd_logic.h SquadRowsShown). Its bottom (px), for what goes under it; `top` none.
 float MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,const MapCommandReadout& c,Line* lines,int* at) noexcept {
     const float x0=16.0f*s,rowH=22.0f*s,top=56.0f*s;
@@ -3866,8 +3874,9 @@ float MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool p
     for(int i=0;i<rows;++i) {
         const SquadRow& r=c.squad[i];
         const float* tint=r.locked ? kMapLocked : c.squadSelected[i] ? kWhite : kMapOrder;
-        wchar_t key[4]=L" ";
-        if(i<mapcmd::kSquadRowsFolded)_snwprintf_s(key,_countof(key),_TRUNCATE,L"%d",i+1);
+        // Its RTS groups (Ctrl+1-9; the number keys select a group now, not a row).
+        wchar_t key[16]=L"   ";
+        MapGroupDigits(c.squadGroups[i],key,_countof(key));
         wchar_t name[32],status[32];hudtext::WordTo(r.name,name,_countof(name));MapSquadStatus(r,status,_countof(status));
         Line& row=lines[(*at)++];Format(row,L"%ls  %ls x%d   %ls   %ls",key,name,r.alive,status,MapOrderWord(r.now.order));row.rgba=tint;
     }
@@ -3986,6 +3995,10 @@ void MapOrderIcon(void* d,void* c,mapbtn::Id id,float x,float y,float h,float s,
     case Id::guard:         // a shield
         Seg(d,c,x-r*0.75f,y-r*0.8f,x+r*0.75f,y-r*0.8f,t,rgba);Seg(d,c,x-r*0.75f,y-r*0.8f,x-r*0.75f,y,t,rgba);
         Seg(d,c,x+r*0.75f,y-r*0.8f,x+r*0.75f,y,t,rgba);Seg(d,c,x-r*0.75f,y,x,y+r*0.9f,t,rgba);Seg(d,c,x+r*0.75f,y,x,y+r*0.9f,t,rgba);break;
+    case Id::hold:          // a shield with a dot in it (each where it stands)
+        Seg(d,c,x-r*0.75f,y-r*0.8f,x+r*0.75f,y-r*0.8f,t,rgba);Seg(d,c,x-r*0.75f,y-r*0.8f,x-r*0.75f,y,t,rgba);
+        Seg(d,c,x+r*0.75f,y-r*0.8f,x+r*0.75f,y,t,rgba);Seg(d,c,x-r*0.75f,y,x,y+r*0.9f,t,rgba);Seg(d,c,x+r*0.75f,y,x,y+r*0.9f,t,rgba);
+        Rect(d,c,x-r*0.22f,y-r*0.3f,x+r*0.22f,y+r*0.14f,rgba);break;
     case Id::follow:        // two chevrons towards a dot (the player)
         for(const float o:kIconChevrons){Seg(d,c,x+o*r,y-r*0.6f,x+(o+0.4f)*r,y,t,rgba);Seg(d,c,x+(o+0.4f)*r,y,x+o*r,y+r*0.6f,t,rgba);}
         Rect(d,c,x+r*0.45f,y-r*0.25f,x+r*0.95f,y+r*0.25f,rgba);break;
@@ -4026,10 +4039,6 @@ void MapOrderIcon(void* d,void* c,mapbtn::Id id,float x,float y,float h,float s,
         }
         break;
     }
-    case Id::split:         // a fork
-        Seg(d,c,x,y+r*0.9f,x,y,t,rgba);Seg(d,c,x,y,x-r*0.7f,y-r*0.8f,t,rgba);Seg(d,c,x,y,x+r*0.7f,y-r*0.8f,t,rgba);break;
-    case Id::merge:         // two lines joining
-        Seg(d,c,x-r*0.7f,y+r*0.8f,x,y,t,rgba);Seg(d,c,x+r*0.7f,y+r*0.8f,x,y,t,rgba);Seg(d,c,x,y,x,y-r*0.9f,t,rgba);break;
     case Id::sweep:         // a crate
         Seg(d,c,x-r*0.8f,y-r*0.6f,x+r*0.8f,y-r*0.6f,t,rgba);Seg(d,c,x+r*0.8f,y-r*0.6f,x+r*0.8f,y+r*0.7f,t,rgba);
         Seg(d,c,x+r*0.8f,y+r*0.7f,x-r*0.8f,y+r*0.7f,t,rgba);Seg(d,c,x-r*0.8f,y+r*0.7f,x-r*0.8f,y-r*0.6f,t,rgba);
@@ -4161,9 +4170,8 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
     constexpr int n=mapbtn::kCount;
     static const Tx kWord[n]={Tx::orderMove,Tx::orderAttackMove,Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,
                               Tx::orderFocus,Tx::orderBoard,Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit,Tx::orderWithdraw,
-                              Tx::orderDismountAll,Tx::btnFormationShort,Tx::btnSplit,Tx::btnMerge,Tx::btnSweep,Tx::btnHealth};
-    const wchar_t* const kKey[n]={L"",L"Z / G",L"G",L"V",L"X",L"J",L"H",L"B",L"N",L"K",L"U",L"",Tr(Tx::keyDismountAll),L"T",L"P",L"L",L"Y",
-                                  L"O"};
+                              Tx::orderDismountAll,Tx::orderHold,Tx::btnFormationShort,Tx::btnSweep,Tx::btnHealth};
+    const wchar_t* const kKey[n]={L"",L"Z",L"-",L"V",L"X",L"J",L"-",L"B",L"N",L"K",L"U",L"",Tr(Tx::keyDismountAll),L"H",L"T",L"Y",L"O"};
     const std::uint32_t orders=c.allowed && c.selected>0 ? c.allowedOrders : 0u;
     const bool tools=c.allowed && c.squadToolsAllowed && c.selectedSquads>0;
     const float scale=kLineScale*0.7f;
@@ -4888,10 +4896,23 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
             }
             float gx,gy,depth;
             if(shown && Project(vp,u.now.at,width,height,&gx,&gy,&depth))Seg(drawer,ctx,ux,uy,gx,gy,1.5f*s,u.now.order==Order::guard ? kMapOrderDim : order);
+            // Its Shift-queued points after that one (mapcmd_logic.h Waypoints): a line on through them, a small ring each.
+            const float* from=u.now.at;
+            for(int w=0;w<u.ways && w<mapcmd::kWaypointsMost;++w) {
+                const float a[3]={from[0],from[1]+1.0f,from[2]},b[3]={u.way[w][0],u.way[w][1]+1.0f,u.way[w][2]};
+                MapLine(drawer,ctx,vp,width,height,a,b,1.5f*s,kMapOrderDim);
+                float wx,wy,wd;
+                if(Project(vp,b,width,height,&wx,&wy,&wd))Arc(drawer,ctx,wx,wy,5.0f*s,0.0f,kTurn,1.5f*s,12,kMapOrder);
+                from=u.way[w];
+            }
         }
         if(!shown)continue;
         Arc(drawer,ctx,ux,uy,13.0f*s,0.0f,kTurn,1.5f*s,20,u.selected ? kWhite : u.locked ? kMapLocked : kMapOrderDim);
         if(u.selected)MapBrackets(drawer,ctx,ux,uy,20.0f*s,2.5f*s,kWhite);
+        if(u.groups) {   // its RTS groups by its mark (Ctrl+1-9)
+            wchar_t digits[16];MapGroupDigits(u.groups,digits,_countof(digits));
+            Label(text,lines,at,ux+15.0f*s,uy-15.0f*s,0,kLineScale*0.55f,u.selected ? kWhite : kMapOrder,L"%ls",digits);
+        }
         if(u.now.order==Order::follow)Label(text,lines,at,ux,uy+22.0f*s,1,kLineScale*0.6f,kMapOrder,L"%ls",Tr(Tx::orderFollow));
         if(u.selected && c.selected==1) {
             wchar_t kind[48];

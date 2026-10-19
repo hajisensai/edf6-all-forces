@@ -4930,8 +4930,16 @@ def map_commands_wired() -> None:
     assert 'placeHoldsPad.store(placeKeys && ' in code and '(placeKeys && ((k.padUp && !g.was.padUp)' in code
     frame = mapc.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
     assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(in,onto)'), 'the commands read keys only with the map open'
-    # The box (Ctrl + left drag) never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧").
-    assert 'if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured()){mapcam::Drag(v,dx,dy);' in mapc
+    # The box never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧"; RTS since
+    # 2026-10-19: a plain left drag boxes whenever there is a unit to box, the middle button's drag pans).
+    assert 'if(Down(VK_MBUTTON) || (Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured())){mapcam::Drag(v,dx,dy);' in mapc
+    assert 'else if(k.ctrl || (boxes && !armed)){g.boxing=true;' in code, 'a plain left drag over the map is the box'
+    # The RTS groups, the Shift queue and HOLD (2026-10-19: 「合并分组经常无效，分开也是」): SPLIT / JOIN are gone, the
+    # queue goes on with the map shut (map.cpp Frame ticks it before its open test), a group follows a squad's hand-over.
+    assert 'SplitSquad' not in code and 'MergeSquads' not in code and 'SplitSquad' not in src('src/npcai.cpp')
+    assert frame.index('MapCommandQueueTick();') < frame.index('if(!game.open) {'), 'the queue advances with the map shut'
+    assert 'NpcSquadSuccessor(' in code and 'handovers[handoverNext]=Handover{' in src('src/npcai.cpp')
+    assert 'crew::RtsGroups();' in src('tools/map_command_runtime_check.cpp')
     assert frame.index('MapCommandEats(front)') < frame.index('MapCommandFrame(in,onto)') < frame.index('Steer(human,dt,front') < frame.index('PumpPayloadUi(human)'), 'UI capture and mark edges precede camera drag; map requests pump while native inputs are held'
     assert 'Down(VK_RBUTTON) && !MapCommandPointerCaptured()' in mapc
     assert 'MapCommandView(vp,width,height);' in src('src/hud.cpp')
@@ -4944,7 +4952,7 @@ def map_commands_wired() -> None:
     assert 'const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;' in ground
     cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus)', 1)[1].split('\n}\n', 1)[0]
     assert 'h->guard=true;' in cmd and 'h->orbitSet=false;' in cmd and 'h->guard=h->ownGuard;' in cmd
-    for key in ('Ctrl', 'Shift', 'Tab', 'G', 'V', 'X', '联机指令', '框选'):
+    for key in ('Ctrl', 'Shift', 'Tab', 'Z', 'H', 'V', 'X', '联机指令', '框选', '编队'):
         assert key in readme, key
     assert '指挥 NPC' in readme
 

@@ -20,7 +20,8 @@ enum class Id : int {
     move, attackMove, guard, follow, release, engage, focus, board, dismount, dismiss, recruit,   // the orders
     withdraw,                                                                                    // ...a squad's transport sent off
     dismountAll,                                                                                 // ...every rider off, its crew too
-    formation, split, merge,                                                                     // the squads' shape and fireteams
+    hold,                                                                                        // ...each unit where it stands (H)
+    formation,                                                                                   // the squads' shape
     sweep, health,                                                                               // the box sweep, its health-box switch
     count
 };
@@ -30,8 +31,10 @@ constexpr int kCount=static_cast<int>(Id::count);
 // unchanged): GUARD (an attack-move turns into one at its point; G gives an attack-move), ENGAGE AT WILL (an attack-move
 // on the spot), FOCUS FIRE (the right button on an enemy, or H). RECRUIT and DISMISS never both show (mapcmd.cpp Takes):
 // one button that reads as the squad's state. STOP (release) apart from DISMISS it was mistaken for.
-constexpr Id kCardOrder[]={Id::move,Id::attackMove,Id::follow,Id::board,Id::dismount,Id::dismountAll,Id::withdraw,Id::recruit,
-                           Id::dismiss,Id::release,Id::formation,Id::split,Id::merge,Id::sweep,Id::health};
+// SPLIT / JOIN went on 2026-10-19 (the user: 「合并分组经常无效，分开也是，感觉你这个分组是不是和rts不太一样」): the RTS
+// groups (Ctrl+number) put any units together without changing the squads (mapcmd_logic.h GroupKey). HOLD came.
+constexpr Id kCardOrder[]={Id::move,Id::attackMove,Id::hold,Id::follow,Id::board,Id::dismount,Id::dismountAll,Id::withdraw,Id::recruit,
+                           Id::dismiss,Id::release,Id::formation,Id::sweep,Id::health};
 constexpr int kCardCount=static_cast<int>(sizeof(kCardOrder)/sizeof(kCardOrder[0]));
 constexpr int kOrders=static_cast<int>(Id::formation);
 struct Rect { float x0,y0,x1,y1; };
@@ -41,7 +44,7 @@ inline mapcmd::Order OrderOf(Id b) noexcept {
     using mapcmd::Order;
     static const Order kOrder[kOrders]={Order::move,Order::attackMove,Order::guard,Order::follow,Order::none,Order::engage,
                                          Order::focus,Order::board,Order::dismount,Order::dismiss,Order::recruit,Order::withdraw,
-                                         Order::dismountAll};
+                                         Order::dismountAll,Order::hold};
     const int i=static_cast<int>(b);
     return i>=0 && i<kOrders ? kOrder[i] : Order::none;
 }
