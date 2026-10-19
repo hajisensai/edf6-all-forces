@@ -45,12 +45,14 @@ class Layer:
     seed: int
 
 
-# src/ultimate.cpp kCircles (tools/selftest.py holds the two equal): the ground's three, the sky's one.
+# src/ultimate_plan.h CircleModel and kModelRadius (tools/selftest.py holds them equal): the ground's three, the sky's one,
+# and the shock waves' ring (scaled out by the plugin as a wave runs: 「最后的爆炸加个冲击波」, 2026-10-20).
 LAYERS: dict[str, Layer] = {
     'OUTER': Layer('OUTER', 220.0, (4.0, 0.55, 0.25, 0.0), (3.2, 1.3, 0.25, 0.0), 0x0E1),
     'STAR': Layer('STAR', 176.0, (4.0, 0.35, 0.9, 0.0), (2.6, 0.3, 1.6, 0.0), 0x57A),
     'CORE': Layer('CORE', 72.0, (4.0, 3.2, 2.4, 0.0), (4.0, 1.4, 0.5, 0.0), 0xC0E),
     'SKY': Layer('SKY', 160.0, (2.4, 0.7, 4.0, 0.0), (1.2, 0.4, 3.6, 0.0), 0x5C1),
+    'SHOCK': Layer('SHOCK', 100.0, (4.0, 3.4, 4.0, 0.0), (2.4, 1.0, 3.6, 0.0), 0x5D0),
 }
 
 
@@ -225,7 +227,20 @@ def _sky(pen: _Pen, rnd: random.Random) -> None:
     pen.circle(0.40, 0.008)
 
 
-_DRAW = {'OUTER': _outer, 'STAR': _star, 'CORE': _core, 'SKY': _sky}
+def _shock(pen: _Pen, rnd: random.Random) -> None:
+    """A shock wave's front: a broad bright rim, its ripples falling behind it, streaks thrown outwards; empty inside."""
+    pen.circle(0.985, 0.03)
+    pen.circle(0.94, 0.012)
+    pen.circle(0.90, 0.006)
+    pen.circle(0.85, 0.003)
+    pen.circle(0.78, 0.002)
+    for i in range(160):
+        a = 2.0 * math.pi * (i + rnd.random() * 0.8) / 160
+        r0 = 0.80 + 0.08 * rnd.random()
+        pen.line(pen.polar(r0, a), pen.polar(min(1.0, r0 + 0.08 + 0.1 * rnd.random()), a), 0.002 + 0.002 * rnd.random())
+
+
+_DRAW = {'OUTER': _outer, 'STAR': _star, 'CORE': _core, 'SKY': _sky, 'SHOCK': _shock}
 
 
 def pattern(layer: str):  # noqa: ANN201 - (PIL.Image, PIL.Image)

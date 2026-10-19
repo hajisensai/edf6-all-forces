@@ -7,11 +7,14 @@
 //  - effects without damage: EffectGenUtil's explosions, fires, smoke and camera quake, StencilLight flashes (edf41classes.h);
 //  - the sky: the game's own light fade manager, what the missions' EventLightTool_EnvFadeAnimation calls (EnvFade below),
 //    faded into the dark at the start and back to what it was (a snapshot of the renderer's values) at the end.
+//  - the circles and shock waves: flat disc objects of the plugin's (FarEventObject, pylib/magic_circle.py);
+//  - the sounds: the player's recordings (jetaudio.h UltClip) or else the game's own cues (Sound below); no speech.
 // One show at a time (a second call while one plays is refused and logged). Offline only for now: online, the call's
 // other machines do not see it (docs/plan-2026-10-19-ultimate.md, M3).
 #include "crew.h"
 #include "edf41classes.h"
 #include "heli.h"          // MapRay
+#include "jetaudio.h"      // the recordings (UltClip)
 #include "memory.h"
 #include "ultimate_plan.h"
 #include <cmath>
@@ -86,6 +89,8 @@ void Fade(FadeType t,const float* to,float sec) noexcept {
 }
 
 // ---- the show ----
+// A flat disc object of the plugin's (a magic circle, a shock wave): see the circles below.
+struct Disc { unsigned char* obj; const void* ctrl; bool tried; };
 struct Show {
     bool on=false;
     const unsigned char* caller=nullptr;
@@ -94,18 +99,21 @@ struct Show {
     std::uint64_t seed=0;
     ULONGLONG start=0;       // GameFrame() at frame 0
     int done=-1;             // the last frame played
-    RoundObj aims[kAims]{},beam{},core{};
+    RoundObj aims[kAims]{},gather[kGatherRays]{},beam{},core{};
     bool snapped=false;
     float snap[kSlotCount][4]{};
     float plane=0.0f;        // the ground circles' height: a little over the area's highest ground (CirclePlane)
-    struct { unsigned char* obj; const void* ctrl; bool tried; } circles[kCircleCount]{};
+    Disc circles[kCircleCount]{},waves[kWaveCount]{};
+    bool heard=false;        // a recording of the show's played: the plugin's voices beat every frame (jetaudio.h Beat)
+    int thunder=-100;        // the storm frame of the last thunder
 } show;
 
-// ---- the magic circles (pylib/magic_circle.py, tools/make_ultimate.py; ultimate_plan.h kCircles) ----
+// ---- the magic circles and the shock waves (pylib/magic_circle.py, tools/make_ultimate.py; ultimate_plan.h) ----
 // Each a FarEventObject with no ragdoll, as the parachute's canopy (playerjet.cpp Chute*, docs/player-jet-re.md §8): its
 // update only renders its model at its matrix (+0x60), which the plugin writes every frame (turned, its x and z rows
-// scaled: the circle opens and closes); nothing collides with it. Made with CreateObject (preloaded with the mission:
-// PreloadUltimate), put on the neutral team, deleted when it has closed or the show ends; forgotten at a new mission.
+// scaled: the circle opens and closes, the wave runs out); nothing collides with it. Made with CreateObject (preloaded with
+// the mission: PreloadUltimate), put on the neutral team, deleted when it has closed or the show ends; forgotten at a new
+// mission.
 constexpr unsigned kFarEventVtable=0x17D5DA0,kCreateObjectFn=0x11945E0,kInitParamVt=0x1762068,kObjectMgr=0x20B2958;
 constexpr unsigned kPreloadFn=0x7A3780,kDeleteFn=0x118A1B0;
 constexpr std::size_t kObjMatrix=0x60,kObjSelfCtrl=0x30,kObjTeam=0x314,kObjFlagsAt=0x18;
@@ -118,69 +126,121 @@ const CircleFile kCircleFiles[]={   // CircleModel's order
     {L"app:/object/edf6vc_ult_circle_star.sgo",L"EDF6VC_ULT_CIRCLE_STAR.SGO","star"},
     {L"app:/object/edf6vc_ult_circle_core.sgo",L"EDF6VC_ULT_CIRCLE_CORE.SGO","core"},
     {L"app:/object/edf6vc_ult_circle_sky.sgo",L"EDF6VC_ULT_CIRCLE_SKY.SGO","sky"},
+    {L"app:/object/edf6vc_ult_circle_shock.sgo",L"EDF6VC_ULT_CIRCLE_SHOCK.SGO","shock"},
 };
-static_assert(sizeof(kCircleFiles)/sizeof(kCircleFiles[0])==static_cast<std::size_t>(CircleModel::sky)+1,"a file a model");
-bool circleReady[sizeof(kCircleFiles)/sizeof(kCircleFiles[0])]{};   // preloaded this mission
+static_assert(sizeof(kCircleFiles)/sizeof(kCircleFiles[0])==kModelCount,"a file a model");
+bool circleReady[kModelCount]{};   // preloaded this mission
 
-bool CircleLive(int i) noexcept {
-    unsigned char* const o=show.circles[i].obj;
-    return o && Readable(o,kObjTeam+4) && At<const void*>(o,0)==image+kFarEventVtable &&
-           At<const void*>(o,kObjSelfCtrl)==show.circles[i].ctrl && !(o[kObjFlagsAt]&kObjGone);
+bool DiscLive(const Disc& d) noexcept {
+    unsigned char* const o=d.obj;
+    return o && Readable(o,kObjTeam+4) && At<const void*>(o,0)==image+kFarEventVtable && At<const void*>(o,kObjSelfCtrl)==d.ctrl &&
+           !(o[kObjFlagsAt]&kObjGone);
 }
-void CircleDrop(int i) noexcept {
-    __try { if(CircleLive(i))reinterpret_cast<void(*)(void*)>(image+kDeleteFn)(show.circles[i].obj); }
-    __except(FaultLog("ULTIMATE circle delete",GetExceptionInformation())){}
-    show.circles[i].obj=nullptr;show.circles[i].ctrl=nullptr;
+void DiscDrop(Disc& d) noexcept {
+    __try { if(DiscLive(d))reinterpret_cast<void(*)(void*)>(image+kDeleteFn)(d.obj); }
+    __except(FaultLog("ULTIMATE disc delete",GetExceptionInformation())){}
+    d.obj=nullptr;d.ctrl=nullptr;
 }
-// Circle `i`'s matrix for `pose`: turned by its angle about the vertical, its x and z rows scaled, at its height.
-void CircleMatrix(int i,const CirclePose& pose,float* m) noexcept {
-    const float c=std::cos(pose.angle)*pose.scale,s=std::sin(pose.angle)*pose.scale;
-    const float y=(kCircles[i].sky ? show.at[1] : show.plane)+pose.lift;
+// A disc's matrix: turned by `angle` about the vertical, its x and z rows scaled by `scale`, at height `y`.
+void DiscMatrix(float angle,float scale,float y,float* m) noexcept {
+    const float c=std::cos(angle)*scale,s=std::sin(angle)*scale;
     const float out[16]={c,0,-s,0, 0,1,0,0, s,0,c,0, show.at[0],y,show.at[2],1};
     std::memcpy(m,out,sizeof(out));
 }
-void CircleMake(int i,const float* m) noexcept {
-    show.circles[i].tried=true;
-    const int model=static_cast<int>(kCircles[i].model);
+// True when made (the first try only: a disc that cannot be made is not tried again this show).
+bool DiscMake(Disc& d,CircleModel cm,const float* m) noexcept {
+    d.tried=true;
+    const int model=static_cast<int>(cm);
     if(!circleReady[model] || !At<void*>(image,kObjectMgr)) {
-        Log("ULTIMATE circle %d (%s) not made: %s",i,kCircleFiles[model].name,!circleReady[model] ?
+        Log("ULTIMATE %s disc not made: %s",kCircleFiles[model].name,!circleReady[model] ?
             "not preloaded this mission (python tools/make_ultimate.py, or the installer)" : "no object manager");
-        return;
+        return false;
     }
     CircleParam param{image+kInitParamVt,{}};
     unsigned char* o=nullptr;
     __try { o=reinterpret_cast<CreateFn>(image+kCreateObjectFn)(At<void*>(image,kObjectMgr),m,kCircleFiles[model].sgo,&param); }
-    __except(FaultLog("ULTIMATE circle create (off this mission)",GetExceptionInformation())){circleReady[model]=false;return;}
-    if(!o)return;
+    __except(FaultLog("ULTIMATE disc create (off this mission)",GetExceptionInformation())){circleReady[model]=false;return false;}
+    if(!o)return false;
     if(At<const void*>(o,0)!=image+kFarEventVtable) {
-        Log("ULTIMATE circle %p is no FarEventObject: deleted",o);
+        Log("ULTIMATE disc %p is no FarEventObject: deleted",o);
         reinterpret_cast<void(*)(void*)>(image+kDeleteFn)(o);
-        return;
+        return false;
     }
     SetObjectTeam(o,kTeamNeutral);
-    show.circles[i].obj=o;show.circles[i].ctrl=At<const void*>(o,kObjSelfCtrl);
+    d.obj=o;d.ctrl=At<const void*>(o,kObjSelfCtrl);
+    return true;
 }
-// Every circle on show frame `frame`: made on its first, put where its pose says, deleted once closed.
+// A disc this frame: made on its first shown frame (true then), put at `m`, deleted once not shown.
+bool DiscFrame(Disc& d,CircleModel cm,bool shown,const float* m) noexcept {
+    if(!shown) {
+        if(d.obj)DiscDrop(d);
+        return false;
+    }
+    if(!d.obj)return !d.tried && DiscMake(d,cm,m);
+    __try {
+        if(!DiscLive(d)){d.obj=nullptr;return false;}
+        std::memcpy(d.obj+kObjMatrix,m,64);
+    } __except(FaultLog("ULTIMATE disc move",GetExceptionInformation())){d.obj=nullptr;}
+    return false;
+}
+void DiscsDrop() noexcept {
+    for(Disc& d:show.circles)if(d.obj)DiscDrop(d);
+    for(Disc& d:show.waves)if(d.obj)DiscDrop(d);
+}
+// The base height of circle `i`'s lift: the ground plane for a ground circle, the centre for a sky one.
+float CircleBase(int i) noexcept { return kCircles[i].sky ? show.at[1] : show.plane; }
+// Circle `i`'s point at `rim` of its radius and `angle` on its turn on frame `frame`, in the world.
+void CircleWorld(int i,int frame,float rim,float angle,float* out) noexcept {
+    float p[3];
+    CirclePoint(i,frame,rim,angle,p);
+    out[0]=show.at[0]+p[0];out[1]=CircleBase(i)+p[1];out[2]=show.at[2]+p[2];
+}
+// Where the main beam starts on frame `frame`: the top sky circle's centre.
+void BeamTop(int frame,float* out) noexcept {
+    out[0]=show.at[0];out[1]=show.at[1]+CircleAt(kSkyTop,frame).lift;out[2]=show.at[2];
+}
+
+// ---- the sounds: the player's recordings (jetaudio.h UltClip: tools/sound_pack.py) or the game's own cues ----
+// The game's: cues of the always-loaded TIKYUUX_SE.ACB (src/edf41classes.h PlayCue), the stock satellite's and the
+// genocide weapons' (the 2026-10-20 user: 「缺少音效」; no speech: 「没人说你用说话的语音啊」).
+struct Sfx { const wchar_t* cue; float volume,pitch; };
+const Sfx kSfx[audio::kUltClipCount]={   // UltClip's order
+    {L"weapon_gimmick_Engineer_genocide_open",1.0f,0.7f},          // charge
+    {L"weapon_fencer_HM_gimmick_genocideExtend",0.9f,0.8f},        // a circle opens
+    {L"common_damages_impactWD_ThunderCluster",1.0f,0.8f},         // thunder
+    {L"weapon_Fencer_HM_chargeLv3",1.0f,0.6f},                     // the gather
+    {L"common_damages_kuubakuGenocideBlaster",1.0f,1.0f},          // the main beam
+    {L"vhc_common_explode2_XL",1.0f,1.0f},                         // a ring's blasts
+    {L"common_damages_explode_LL",1.0f,0.7f},                      // a shock wave
+};
+constexpr float kSfxNear=300.0f;   // m: a recording at full volume within this, falling off as 1/r past it
+void Sound(audio::UltClip c,const float* pos,float pitch=1.0f) noexcept {
+    if(audio::UltClipThere(c)) {
+        SoundPlace p{};
+        const bool placed=SoundAt(pos,nullptr,&p);
+        const float d=placed ? p.distance : 0.0f,g=kSfx[c].volume*(d>kSfxNear ? kSfxNear/d : 1.0f);
+        audio::Beat(GameEffectVolume());
+        show.heard=true;
+        audio::PlayUlt(c,audio::Heard{g*(placed ? p.left : 1.0f),g*(placed ? p.right : 1.0f),pitch*(placed ? p.doppler : 1.0f),
+                                      d/2500.0f<1.0f ? d/2500.0f : 1.0f});
+        return;
+    }
+    edf41c::SeParams sp{};
+    sp.volume=kSfx[c].volume;sp.pitch=kSfx[c].pitch*pitch;sp.inner=50.0f;sp.reference=600.0f;sp.cull=20.0f;
+    edf41c::PlayCue(kSfx[c].cue,pos,nullptr,sp);
+}
+
 void CirclesFrame(int frame) noexcept {
     for(int i=0;i<kCircleCount;++i) {
         const CirclePose pose=CircleAt(i,frame);
-        if(!pose.shown) {
-            if(show.circles[i].obj)CircleDrop(i);
-            continue;
-        }
         alignas(16) float m[16];
-        CircleMatrix(i,pose,m);
-        if(!show.circles[i].obj) {
-            if(!show.circles[i].tried)CircleMake(i,m);
-            continue;
+        DiscMatrix(pose.angle,pose.scale,CircleBase(i)+pose.lift,m);
+        if(DiscFrame(show.circles[i],kCircles[i].model,pose.shown,m)) {
+            const float c[3]={show.at[0],CircleBase(i)+pose.lift,show.at[2]};
+            Sound(audio::kUltCircle,c,1.0f-0.08f*static_cast<float>(i));
         }
-        __try {
-            if(!CircleLive(i)){show.circles[i].obj=nullptr;continue;}
-            std::memcpy(show.circles[i].obj+kObjMatrix,m,sizeof(m));
-        } __except(FaultLog("ULTIMATE circle move",GetExceptionInformation())){show.circles[i].obj=nullptr;}
     }
 }
-void CirclesDrop() noexcept { for(int i=0;i<kCircleCount;++i)if(show.circles[i].obj)CircleDrop(i); }
 
 // The damage's shares: a bolt (all its rounds), a ring's blast, the main beam's round (a frame, penetrating), a spark.
 constexpr float kBoltShare=0.25f,kSparkShare=0.25f,kBlastShare=1.0f,kBeamShare=0.03f,kCoreShare=0.03f;
@@ -253,46 +313,87 @@ void SkyBack(float sec) noexcept {
 void Drop(RoundObj& r) noexcept { if(r.obj)RoundDrop(r); }
 void DropAll() noexcept {
     for(auto& a:show.aims)Drop(a);
+    for(auto& g:show.gather)Drop(g);
     Drop(show.beam);Drop(show.core);
+}
+// Round `r` of `kind` from `from` at `to` this frame at `size`: fired when there is none yet, else steered.
+void Steer(RoundObj& r,EmcRound kind,const float* from,const float* to,float size) noexcept {
+    if(!r.obj)r=EmcFire(kind,show.caller,from,to,0.0f);
+    else if(!RoundSteer(r,from,to)){r=RoundObj{};return;}
+    RoundSize(r,size);
 }
 
 const float kUp[3]={0.0f,1.0f,0.0f};
 // The flashes' lights (StencilLight's raw colour: a stock explosion's helper scales its colour by 2.5): low, so the dark sky
 // stays dark (2026-10-19 first run: 6.0 over 300 m turned the whole field pink, the beam's 5-6 washed the picture white).
 const float kCrimson[4]={0.9f,0.08f,0.2f,1.0f},kBoltLight[4]={0.8f,1.0f,1.4f,1.0f},kViolet[4]={1.0f,0.3f,1.3f,1.0f};
+const float kGold[4]={1.2f,0.9f,0.5f,1.0f};
 
 void ChargeFrame(int f) noexcept {
     if(f==0) {
         Snap();
         Darken();
         edf41c::Quake(show.at,0.6f,kRadius*4.0f);
+        Sound(audio::kUltCharge,show.at);
     }
     for(int i=0;i<kAims;++i) {
         const Aim a=AimAt(i,f);
-        const float from[3]={show.at[0]+a.from[0],show.at[1]+kAimHeight,show.at[2]+a.from[1]};
+        if(!a.shown){Drop(show.aims[i]);continue;}
+        const float from[3]={show.at[0]+a.from[0],show.at[1]+a.from[1],show.at[2]+a.from[2]};   // a sky circle's rim
         const float x=show.at[0]+a.at[0],z=show.at[2]+a.at[1];
         const float to[3]={x,GroundAt(x,z),z};
-        if(!show.aims[i].obj)show.aims[i]=EmcFire(EmcRound::ultSight,show.caller,from,to,0.0f);
-        else if(!RoundSteer(show.aims[i],from,to)){show.aims[i]=RoundObj{};continue;}
-        RoundSize(show.aims[i],a.size);
+        Steer(show.aims[i],EmcRound::ultSight,from,to,a.size);
     }
     if(f%30==0)edf41c::StencilLight(show.at,kCrimson,kRadius*0.8f,40);
     if(f%45==0)edf41c::Quake(show.at,0.25f+0.5f*f/kChargeEnd,kRadius*3.0f);
 }
 
+// The gather (show frame `frame`, kGatherAt..kStormEnd): each ray's pulse from its circle's rim to the beam's start.
+void GatherFrame(int frame) noexcept {
+    float top[3];
+    BeamTop(frame,top);
+    const int g=frame-kGatherAt;
+    if(g==0)Sound(audio::kUltGather,top);
+    for(int k=0;k<kGatherRays;++k) {
+        const GatherRay r=GatherAt(k,frame);
+        float rim[3];
+        CircleWorld(r.circle,frame,kGatherRim,r.angle,rim);
+        const float d[3]={top[0]-rim[0],top[1]-rim[1],top[2]-rim[2]};
+        const float len=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+        if(!(len>kGatherReach)){Drop(show.gather[k]);continue;}
+        const float s=r.slide*(len-kGatherReach)/len;   // the pulse ends on the beam's start at the latest
+        const float from[3]={rim[0]+d[0]*s,rim[1]+d[1]*s,rim[2]+d[2]*s};
+        Steer(show.gather[k],EmcRound::ultGather,from,top,r.size);
+    }
+    const float t=static_cast<float>(g)/kGather;
+    if(g%8==0)edf41c::StencilLight(top,kGold,40.0f+160.0f*t,10);
+    if(g%20==0)edf41c::Quake(show.at,0.3f+0.9f*t,kRadius*4.0f);
+}
+
 void StormFrame(int f) noexcept {
+    const int frame=f+kChargeEnd;
     if(f==0)for(auto& a:show.aims)Drop(a);
     Bolt bolts[kMaxBoltsAFrame];
     const int n=BoltsAt(show.seed,f,bolts);
+    const float lift=show.at[1]+CircleAt(kSkyLow,frame).lift;   // the lowest sky circle
     for(int k=0;k<n;++k) {
         const float x=show.at[0]+bolts[k].at[0],z=show.at[2]+bolts[k].at[1];
         const float to[3]={x,GroundAt(x,z),z};
-        const float from[3]={x+bolts[k].lean[0],to[1]+kBoltHeight,z+bolts[k].lean[1]};
+        const float from[3]={show.at[0]+bolts[k].from[0],lift,show.at[2]+bolts[k].from[1]};
         EmcFire(EmcRound::ultBolt,show.caller,from,to,show.damage*kBoltShare/kBoltFrames);
         const float above[3]={to[0],to[1]+2.0f,to[2]};
         EmcFire(EmcRound::ultSpark,show.caller,above,to,show.damage*kSparkShare);
         edf41c::StencilLight(to,kBoltLight,110.0f,8);
         edf41c::Explosion(to,kUp,20.0f);   // the spark's size (ULT_SPARK_RADIUS 40): the storm fills the circle
+        if(k==0 && f-show.thunder>=9) {    // a thunder now and then, never on top of the last
+            show.thunder=f;
+            Rng g=FrameRng(show.seed^0x7A0Dull,f);
+            Sound(audio::kUltThunder,to,0.85f+0.3f*g.Unit());
+        }
+    }
+    if(frame>=kGatherAt) {
+        GatherFrame(frame);
+        return;
     }
     if(f%20==0)edf41c::Quake(show.at,0.5f,kRadius*3.0f);
     if(f%50==25 && show.snapped) {   // the whole sky lights with the storm now and then
@@ -301,16 +402,20 @@ void StormFrame(int f) noexcept {
 }
 
 void CannonFrame(int f) noexcept {
-    const float top[3]={show.at[0],show.at[1]+kBeamHeight,show.at[2]};
+    float top[3];
+    BeamTop(f+kStormEnd,top);
     const float scale=BeamScale(f);
     if(f==0) {
+        for(auto& g:show.gather)Drop(g);
         show.beam=EmcFire(EmcRound::ultBeam,show.caller,top,show.at,show.damage*kBeamShare);
         show.core=EmcFire(EmcRound::ultCore,show.caller,top,show.at,show.damage*kCoreShare);
         Flash(1.0f);
         edf41c::Quake(show.at,1.5f,kRadius*5.0f);
+        Sound(audio::kUltBeam,show.at);
     }
     if(f==6)FlashBack(1.2f);
     if(scale>0.0f) {
+        RoundSteer(show.beam,top,show.at);RoundSteer(show.core,top,show.at);
         RoundSize(show.beam,kBeamSize*scale);
         RoundSize(show.core,kCoreSize*scale);
     }
@@ -326,10 +431,38 @@ void CannonFrame(int f) noexcept {
             EmcFire(EmcRound::ultBlast,show.caller,above,to,show.damage*kBlastShare);
             edf41c::BigExplosion(to,kUp,kRingBlast*0.5f,1.0f);
         }
+        Sound(audio::kUltBlast,show.at,1.0f-0.02f*static_cast<float>(k));
         edf41c::Quake(show.at,1.2f,kRadius*4.0f);
         if(k%3==0) {   // the flash of every third ring
             Tint(kLight0,1.3f,0.9f,1.5f,0.05f);
         } else if(k%3==1) FlashBack(0.5f);
+    }
+}
+
+// The shock waves on show frame `frame`: each disc run out; a ground wave sounds as it starts and throws up dust at its
+// front while that is still near the area; the great one shakes the world and flashes.
+void WavesFrame(int frame) noexcept {
+    for(int w=0;w<kWaveCount;++w) {
+        const WaveSpec& s=kWaves[w];
+        const WavePose p=WaveAt(w,frame);
+        alignas(16) float m[16];
+        DiscMatrix(p.angle,p.scale,(s.sky ? show.at[1] : show.plane)+s.lift,m);
+        DiscFrame(show.waves[w],CircleModel::shock,p.shown,m);
+        if(frame==s.at && !s.sky) {
+            Sound(audio::kUltShock,show.at,w==kGreatWave ? 0.85f : 1.0f);
+            if(w==kGreatWave) {
+                Flash(1.3f);
+                edf41c::Quake(show.at,2.5f,kRadius*8.0f);
+            }
+        }
+        if(frame==s.at+8 && w==kGreatWave)FlashBack(1.5f);
+        if(!p.shown || s.sky || (frame-s.at)%5 || p.radius>kRadius*1.6f)continue;
+        for(int k=0;k<16;++k) {
+            const float a=2.0f*kPi*(static_cast<float>(k)+0.5f*static_cast<float>((frame-s.at)/5%2))/16.0f;
+            const float x=show.at[0]+p.radius*std::cos(a),z=show.at[2]+p.radius*std::sin(a);
+            const float pt[3]={x,GroundAt(x,z),z};
+            edf41c::Smoke(pt,w==kGreatWave ? 40.0f : 25.0f);
+        }
     }
 }
 
@@ -347,7 +480,7 @@ void AfterFrame(int f) noexcept {
 
 void Finish(const char* why) noexcept {
     DropAll();
-    CirclesDrop();
+    DiscsDrop();
     Log("ULTIMATE over (%s)",why);
     show.on=false;
 }
@@ -372,6 +505,7 @@ bool UltimateStart(const unsigned char* caller,const float* at,float damage,std:
     show.damage=std::isfinite(damage) && damage>0.0f ? damage : 0.0f;
     show.seed=seed;
     show.start=GameFrame();
+    (void)audio::ClipsReady();   // the recordings read on their thread from the first call: ready by the first sound
     const float* const by=reinterpret_cast<const float*>(caller+0x90);   // its position (the matrix's last row)
     Log("ULTIMATE at (%.0f,%.0f,%.0f), %.0f m from the caller, damage %.0f seed %016llX: charge %d, storm %d, cannon %d, after %d "
         "frames",show.at[0],show.at[1],show.at[2],std::hypot(by[0]-show.at[0],by[2]-show.at[2]),show.damage,
@@ -386,7 +520,10 @@ void UltimateTick() noexcept {
     // Every frame from the last played to now (a hitch skips none: the rings and the sky must all happen)
     for(int f=show.done+1;f<=frame && show.on;++f) {
         show.done=f;
-        if(f<kAfterEnd)CirclesFrame(f);
+        if(f<kAfterEnd) {
+            CirclesFrame(f);
+            WavesFrame(f);
+        }
         switch(PhaseAt(f)) {
             case Phase::charge: ChargeFrame(f); break;
             case Phase::storm: StormFrame(f-kChargeEnd); break;
@@ -395,16 +532,18 @@ void UltimateTick() noexcept {
             case Phase::over: Finish("its time"); break;
         }
     }
+    // The plugin's voices go quiet without a beat (paused: no tick, no beat): the recordings play on with the show.
+    if(show.heard && audio::Running())audio::Beat(GameEffectVolume());
 }
 
 // A mission's start (jet_spawn.cpp, with the shells): the circles' objects preloaded when their files are installed.
 void PreloadUltimate(void* mgr) noexcept {
     int ready=0;
-    for(std::size_t i=0;i<sizeof(kCircleFiles)/sizeof(kCircleFiles[0]);++i) {
+    for(int i=0;i<kModelCount;++i) {
         circleReady[i]=mgr && jet::ModFileThere(kCircleFiles[i].file);
         if(circleReady[i]){reinterpret_cast<void(*)(void*,const wchar_t*,std::int32_t,std::int32_t)>(image+kPreloadFn)(mgr,kCircleFiles[i].sgo,2,-1);++ready;}
     }
-    Log("ULTIMATE preload: %d of 4 magic circles",ready);
+    Log("ULTIMATE preload: %d of %d magic circle models",ready,kModelCount);
 }
 
 void ResetUltimate() noexcept {

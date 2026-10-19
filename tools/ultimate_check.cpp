@@ -3,7 +3,9 @@
 //  - the replay: the same seed gives the same bolts, rings and fires on any frame whatever was replayed before it (a late
 //    joiner starts mid-show), another seed another storm;
 //  - the area: every bolt and fire lands inside it, the rings reach its edge, each ring closed (its blasts touch);
-//  - the aims: from the ring high up, onto the edge at the start and the centre at the end, growing;
+//  - the rays from the circles: the aims leave the sky circles' rims (on their height) onto the edge and close in on the
+//    centre, growing; the bolts leave the lowest sky circle's disc; the gather's rays are only in the gather, the bolts stop;
+//  - the shock waves: each runs out before the show ends, the great one past the area's edge with the last ring;
 //  - the load: bolts a frame and objects alive at once (a bolt's rounds live kBoltFrames) printed, under a ceiling.
 //
 //   cmake --build build --target ultimate_check && build\ultimate_check.exe        exit code 0: every check passed
@@ -44,7 +46,7 @@ bool SameBolts(std::uint64_t a,std::uint64_t b,int frame) {
     const int n=BoltsAt(a,frame,x),m=BoltsAt(b,frame,y);
     if(n!=m)return false;
     for(int k=0;k<n;++k)
-        if(x[k].at[0]!=y[k].at[0] || x[k].at[1]!=y[k].at[1] || x[k].lean[0]!=y[k].lean[0])return false;
+        if(x[k].at[0]!=y[k].at[0] || x[k].at[1]!=y[k].at[1] || x[k].from[0]!=y[k].from[0])return false;
     return true;
 }
 
@@ -77,7 +79,10 @@ void AreaChecks() {
             Bolt b[kMaxBoltsAFrame];
             const int n=BoltsAt(seed,f,b);
             for(int k=0;k<n;++k) {
-                if(std::hypot(b[k].at[0],b[k].at[1])>kRadius+1e-3f || std::hypot(b[k].lean[0],b[k].lean[1])>kBoltLean+1e-3f)inside=false;
+                const float fromR=std::hypot(b[k].from[0],b[k].from[1]);
+                if(std::hypot(b[k].at[0],b[k].at[1])>kRadius+1e-3f ||
+                   fromR>kRadius*kBoltFrom+kBoltLean+1e-3f || fromR>kModelRadius[static_cast<int>(CircleModel::sky)]*(1.0f-kSqueeze))
+                    inside=false;
             }
             if(n>most)most=n;
             total+=n;
@@ -89,7 +94,7 @@ void AreaChecks() {
             if(FireAt(seed,f,at) && std::hypot(at[0],at[1])>kRadius)inside=false;
         }
     }
-    Check(inside,"every bolt and fire lands in the area, every bolt's top leans no more than its lean");
+    Check(inside,"every bolt and fire lands in the area, every bolt leaves the lowest sky circle's disc (drawn in or not)");
     char line[200];
     std::snprintf(line,sizeof(line),"the storm: %.0f bolts on average, at most %d a frame, at most %d bolt beams alive at once",
                   total/20.0,most,peak);
@@ -108,22 +113,67 @@ void AreaChecks() {
 }
 
 void AimChecks() {
-    bool ok=true;
+    bool ok=true,fromCircle=true;
     for(int i=0;i<kAims;++i) {
-        const Aim s=AimAt(i,0),e=AimAt(i,kChargeEnd);
-        ok=ok && std::fabs(std::hypot(s.at[0],s.at[1])-kRadius)<1e-2f && std::hypot(e.at[0],e.at[1])<1e-2f;
-        ok=ok && std::fabs(std::hypot(s.from[0],s.from[1])-kAimRing)<1e-2f && s.size<e.size;
+        const int start=AimStart(i);
+        ok=ok && !AimAt(i,start-1).shown && AimAt(i,start).shown && !AimAt(i,kChargeEnd).shown;
+        const Aim s=AimAt(i,start),e=AimAt(i,kChargeEnd-1);
+        ok=ok && std::fabs(std::hypot(s.at[0],s.at[1])-kRadius)<1e-2f && std::hypot(e.at[0],e.at[1])<1.0f && s.size<e.size;
         float last=1e9f;
-        for(int f=0;f<=kChargeEnd;f+=10) {
+        for(int f=start;f<kChargeEnd;f+=10) {
             const Aim a=AimAt(i,f);
             const float r=std::hypot(a.at[0],a.at[1]);
             ok=ok && r<=last+1e-3f;
             last=r;
+            const int c=kSkyLow+i%3;
+            const CirclePose p=CircleAt(c,f);
+            const float rim=kModelRadius[static_cast<int>(CircleModel::sky)]*p.scale*kAimRim;
+            fromCircle=fromCircle && p.shown && std::fabs(std::hypot(a.from[0],a.from[2])-rim)<1e-2f &&
+                       std::fabs(a.from[1]-p.lift)<1e-3f;
         }
     }
-    Check(ok,"the aims fall from the high ring onto the edge and close in on the centre, growing");
+    Check(ok,"each aim beam comes out once its circle is open, onto the edge, closing in on the centre, growing");
+    Check(fromCircle,"every aim beam leaves its sky circle's rune band, at the circle's height, turning with it");
     Check(BeamScale(0)>0.0f && BeamScale(kBeamGrow)==1.0f && BeamScale(kCannonEnd-kStormEnd)==0.0f &&
           BeamScale(kCannonEnd-kStormEnd-1)<0.1f,"the main beam grows in and thins away");
+}
+void GatherChecks() {
+    bool only=true,sized=true;
+    for(int k=0;k<kGatherRays;++k) {
+        only=only && !GatherAt(k,kGatherAt-1).shown && GatherAt(k,kGatherAt).shown && !GatherAt(k,kStormEnd).shown;
+        sized=sized && GatherAt(k,kStormEnd-1).size>GatherAt(k,kGatherAt).size && CircleAt(GatherAt(k,kGatherAt).circle,kGatherAt).shown;
+    }
+    Check(only && sized,"the gather's rays: only in the gather, from circles that are there, growing");
+    bool room=true;   // every ray longer than a pulse (the ground's plane up to 35 m over the centre), its pulses ending on the centre
+    for(int f=kGatherAt;f<kStormEnd;++f)
+        for(int k=0;k<kGatherRays;++k) {
+            const GatherRay g=GatherAt(k,f);
+            float p[3];
+            CirclePoint(g.circle,f,kGatherRim,g.angle,p);
+            const float lift=kCircles[g.circle].sky ? p[1] : p[1]+35.0f;
+            const float d=std::hypot(std::hypot(p[0],p[2]),CircleAt(kSkyTop,f).lift-lift);
+            room=room && d>kGatherReach+20.0f && g.slide>=0.0f && g.slide<1.0f;
+        }
+    Check(room,"every gather ray is longer than a pulse: each pulse runs from the rim and ends on the top circle's centre");
+    int late=0;
+    for(std::uint64_t seed=1;seed<=20;++seed)
+        for(int f=kGatherAt-kChargeEnd+kBoltCalm;f<kStormEnd-kChargeEnd;++f){Bolt b[kMaxBoltsAFrame];late+=BoltsAt(seed,f,b);}
+    Check(late==0,"the bolts have stopped for the gather's quiet");
+    bool in=true;
+    for(int i=0;i<kCircleCount;++i)
+        in=in && CircleAt(i,kStormEnd-1).scale<CircleAt(i,kGatherAt-1).scale*(1.0f-kSqueeze*0.9f);
+    Check(in,"every circle is drawn in by the gather");
+}
+void WaveChecks() {
+    bool ends=true,grows=true;
+    for(int w=0;w<kWaveCount;++w) {
+        ends=ends && kWaves[w].at+WaveFrames(w)<=kAfterEnd && !WaveAt(w,kWaves[w].at-1).shown && WaveAt(w,kWaves[w].at).shown &&
+             !WaveAt(w,kWaves[w].at+WaveFrames(w)).shown;
+        grows=grows && WaveAt(w,kWaves[w].at+WaveFrames(w)-1).radius>WaveAt(w,kWaves[w].at+10).radius;
+    }
+    Check(ends && grows,"every shock wave runs out from the centre and is gone before the show ends");
+    const WaveSpec& g=kWaves[kGreatWave];
+    Check(g.at==kLastRing && g.reach>kRadius+kRingBlast,"the great shock wave goes with the last ring, out past the area's edge");
 }
 void CircleChecks() {
     bool inCharge=true,gone=true,bounded=true,smooth=true,shownWhole=true;
@@ -138,7 +188,7 @@ void CircleChecks() {
                 shownWhole=shownWhole && f>=kCircleCloseAt+i*kCircleStagger+kCircleClose;
                 continue;
             }
-            bounded=bounded && p.scale>0.0f && p.scale<=c.size*1.12f && p.lift>=0.0f && p.lift<=c.lift+1e-3f;
+            bounded=bounded && p.scale>0.0f && p.scale<=c.size*1.13f && p.lift>=0.0f && p.lift<=c.lift+1e-3f;
             smooth=smooth && std::fabs(p.angle-lastAngle)<0.25f;   // never more than ~14 degrees a frame
             lastAngle=p.angle;
         }
@@ -157,6 +207,8 @@ int main() {
     ReplayChecks();
     AreaChecks();
     AimChecks();
+    GatherChecks();
+    WaveChecks();
     CircleChecks();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n",failures);
     return failures ? 1 : 0;

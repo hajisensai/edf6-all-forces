@@ -1059,7 +1059,7 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast \};',
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather \};',
                      src('src/crew.h')), 'src/crew.h EmcRound'
     # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
     sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
@@ -1128,10 +1128,14 @@ def ultimate_copies_agree() -> None:
         all(s == f.lower() for s, f in circles), circles
     model = re.search(r'enum class CircleModel : unsigned char \{ ([a-z, ]+) \};', plan)
     assert model and [m.strip().upper() for m in model.group(1).split(',')] == list(magic_circle.LAYERS), model
+    radii = re.search(r'kModelRadius\[kModelCount\]=\{([^}]*)\}', plan)
+    assert radii and [float(x.strip().rstrip('f')) for x in radii.group(1).split(',')] ==         [magic_circle.LAYERS[k].radius for k in magic_circle.LAYERS], radii
     assert 'PreloadUltimate(mgr);' in src('src/jet_spawn.cpp')
     for name, value in (('kRadius', cw.ULTIMATE_RADIUS), ('kRingBlast', vc.ULT_BLAST_RADIUS)):
         m = re.search(rf'\b{name}=([\d.]+)f', plan)
         assert m and float(m.group(1)) == value, (name, m and m.group(1), value)
+    m = re.search(r'\bkGatherReach=([\d.]+)f', plan)
+    assert m and float(m.group(1)) == vc.ULT_GATHER_REACH, m and m.group(1)
     m = re.search(r'\bkBoltFrames=(\d+);', plan)
     assert m and int(m.group(1)) == vc.ULT_BOLT_ROUNDS, m and m.group(1)
     ults = [c for c in calls.CALLS if c.brings == 'ultimate']
@@ -2663,7 +2667,7 @@ def proteus_wired() -> None:
     # The shield: the stock barrier round raised through the EMC table (preloaded whenever its file is installed).
     bay = src('src/jet_bay.cpp')
     assert 'L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO"' in bay
-    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::ultBlast)+1' in bay   # the Proteus's before the ultimate's
+    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::ultGather)+1' in bay   # the Proteus's before the ultimate's
     assert 'PreloadShells(mgr,Preloaded(Body::gunship));' in src('src/jet_spawn.cpp')
     assert 'EmcFire(EmcRound::proteusShield,v,p,at,1.0f)' in shield
     assert "SHIELD_FILE = 'OBJECT/EDF6VC_PROTEUS_SHIELD.SGO'" in src('tools/make_proteus.py')

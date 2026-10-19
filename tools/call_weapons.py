@@ -78,6 +78,9 @@ ULTIMATE_TEMPLATE = 'eWeapon116'  # Spritefall Destroy (Weapon_LaserMarkerCallFi
 # The ultimate's AmmoDamage base (the stock curve's stars kept): what src/ultimate.cpp reads off the weapon (+0x89C) and
 # shares out over its bolts, blasts and beam.
 ULTIMATE_DAMAGE = 12000.0
+# The template's radio lines (SOUND/SUPPORT_UNIT_TALK.SGO keys), emptied in the ultimate: CP[5] (fire, -, after) and
+# Ammo_EquipVoice (equipped, unavailable).
+ULTIMATE_VOICES = (('スプライト発射', '', 'スプライト攻撃後'), ('スプライト出撃直後', 'スプライト支援不能'))
 LANGS = ('JA', 'EN', 'CN', 'KR', 'SC')
 TABLE = 'WEAPON/WEAPONTABLE.SGO'
 TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
@@ -511,12 +514,21 @@ def gun_sgo(template: bytes, call: Call) -> bytes:
 
 
 def ultimate_sgo(template: bytes, call: Call) -> bytes:
-    """Spritefall Destroy with the ultimate's marker, reload (pt), damage base and names; its laser marker, countdown, voice
-    and stock beam (the fallback without the plugin) as they are."""
+    """Spritefall Destroy with the ultimate's marker, reload (pt), damage base and names; its laser marker, countdown and
+    stock beam (the fallback without the plugin) as they are. Its radio lines silenced (the user, 2026-10-20: 「语音还是用的
+    原版语音」, 「没人说你用说话的语音啊」: the show has its own sounds, no speech): ULTIMATE_VOICES, the satellite's fire /
+    after-fire lines (CP[5]) and its equip / unavailable lines (Ammo_EquipVoice), every one emptied (the stock CP[5][1] is
+    already empty: the game plays nothing for an empty name)."""
     doc = dsgo.parse(template)
     r = doc.root
-    if r.get('Ammo_CustomParameter').items[4].items[4] != 'LaserBullet02' or r.get('Ammo_CustomParameter').items[3] != 0:
+    cp = r.get('Ammo_CustomParameter')
+    if cp.items[4].items[4] != 'LaserBullet02' or cp.items[3] != 0:
         raise ValueError(f'{ULTIMATE_TEMPLATE} 不是预期的卫星激光呼叫（CP[3] = 0 的发射态，LaserBullet02）')
+    voices = (cp.items[5], r.get('Ammo_EquipVoice'))
+    if [list(v.items) for v in voices] != [list(v) for v in ULTIMATE_VOICES]:
+        raise ValueError(f'{ULTIMATE_TEMPLATE} 的语音不是预期的 {ULTIMATE_VOICES}')
+    for v in voices:
+        v.items[:] = [''] * len(v.items)
     r.set('AmmoHitSizeAdjust', float(call.mark))
     r.get('ReloadTime').items[0] = float(call.reload)
     r.get('AmmoDamage').items[0] = ULTIMATE_DAMAGE

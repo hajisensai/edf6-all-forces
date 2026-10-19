@@ -1931,13 +1931,17 @@ def check_emc(files: dict[str, bytes], game: Game | None = None) -> None:
 #   ULT_BEAM_FILE   the main beam: the satellite's thickest, violet, a round a frame for the whole cannon phase, a deep shot
 #   ULT_CORE_FILE   its white-hot core, silent
 #   ULT_BLAST_FILE  a ring's blast (ULT_BLAST_RADIUS m: src/ultimate_plan.h kRingBlast)
+#   ULT_GATHER_FILE the gather's pulse: a short gold-white laser, exactly ULT_GATHER_REACH m (src/ultimate_plan.h
+#                   kGatherReach: fired from a point that far short of the beam's start, it ends on it), silent
 ULT_SIGHT_FILE = 'EDF6VC_ULT_SIGHT.SGO'
 ULT_BOLT_FILE = 'EDF6VC_ULT_BOLT.SGO'
 ULT_SPARK_FILE = 'EDF6VC_ULT_SPARK.SGO'
 ULT_BEAM_FILE = 'EDF6VC_ULT_BEAM.SGO'
 ULT_CORE_FILE = 'EDF6VC_ULT_CORE.SGO'
 ULT_BLAST_FILE = 'EDF6VC_ULT_BLAST.SGO'
-ULT_FILES = (ULT_SIGHT_FILE, ULT_BOLT_FILE, ULT_SPARK_FILE, ULT_BEAM_FILE, ULT_CORE_FILE, ULT_BLAST_FILE)   # EmcRound's order
+ULT_GATHER_FILE = 'EDF6VC_ULT_GATHER.SGO'
+ULT_FILES = (ULT_SIGHT_FILE, ULT_BOLT_FILE, ULT_SPARK_FILE, ULT_BEAM_FILE, ULT_CORE_FILE, ULT_BLAST_FILE,
+             ULT_GATHER_FILE)   # EmcRound's order
 ULT_BOLT_ROUNDS = 8                     # src/ultimate_plan.h kBoltFrames
 ULT_SPARK_RADIUS, ULT_BLAST_RADIUS = 40.0, 55.0
 # (rounds, size, colour, speed m a frame, life frames, shot volume, shot pitch): reach = speed x life, past the farthest
@@ -1947,8 +1951,11 @@ ULT_BEAMS: dict[str, tuple[int, float, tuple[float, ...], float, int, float, flo
     ULT_BOLT_FILE: (ULT_BOLT_ROUNDS, 2.5, (1.8, 2.4, 3.0, 1.0), 160.0, 6, 0.7, 1.7),
     ULT_BEAM_FILE: (500, 48.0, (2.8, 0.45, 3.0, 1.0), 150.0, 10, 1.0, 0.6),
     ULT_CORE_FILE: (500, 18.0, (3.0, 2.6, 3.0, 1.0), 150.0, 10, 0.0, 1.0),
+    ULT_GATHER_FILE: (200, 0.6, (3.0, 2.4, 1.4, 1.0), 12.0, 10, 0.0, 1.0),
 }
-ULT_REACH = {ULT_SIGHT_FILE: 1300.0, ULT_BOLT_FILE: 760.0, ULT_BEAM_FILE: 1300.0, ULT_CORE_FILE: 1300.0}
+ULT_GATHER_REACH = 120.0
+ULT_REACH = {ULT_SIGHT_FILE: 1300.0, ULT_BOLT_FILE: 760.0, ULT_BEAM_FILE: 1300.0, ULT_CORE_FILE: 1300.0,
+             ULT_GATHER_FILE: ULT_GATHER_REACH}
 ULT_CHARGE_COLOUR = (2.2, 0.6, 3.0, 1.0)
 
 
@@ -1994,6 +2001,7 @@ def check_ult(files: dict[str, bytes]) -> None:
         assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'LaserBullet02' and p[11] == 1, name
         assert p[2] == rounds and p[3] == 0 and p[9] == 0.0 and p[15] == 0 and m['indirect_fire_damage'] == 0.0, (name, p)
         assert p[5] * p[10] >= ULT_REACH[name], (name, p[5], p[10])
+        assert name != ULT_GATHER_FILE or p[5] * p[10] == ULT_GATHER_REACH, (name, p[5], p[10])   # never past the beam's start
         assert p[17][0] == 1.0 and p[18][2] == 0.0 and p[17][2] == volume, name
     assert ULT_BEAMS[ULT_SIGHT_FILE][0] >= 12 * 60 and ULT_BEAMS[ULT_BEAM_FILE][0] >= 8 * 60, 'rounds for the whole phase'
     for name, radius in ((ULT_SPARK_FILE, ULT_SPARK_RADIUS), (ULT_BLAST_FILE, ULT_BLAST_RADIUS)):

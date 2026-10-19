@@ -880,7 +880,7 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // particle cannon's beam, its charge's glow at the chest, a funnel's burst. The Proteus's shield is raised the same way
 // (proteus_shield.inc; tools/make_proteus.py): one BarrierBullet01, the stock Air Raider's electromagnetic barrier.
 enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,
-                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast };
+                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;

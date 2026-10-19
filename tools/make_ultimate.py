@@ -8,7 +8,8 @@ into <game>/Mods/OBJECT:
   EDF6VC_ULT_CORE.SGO    its white-hot core
   EDF6VC_ULT_BLAST.SGO   a ring's blast
   EDF6VC_ULT_CIRCLE_<LAYER>.MRAB / .SGO   the magic circles (pylib/magic_circle.py): the ground's OUTER, STAR and CORE,
-                         the sky's SKY; their patterns drawn here with Pillow, the stock mothership barrier's material
+                         the sky's SKY, the shock waves' SHOCK; their patterns drawn here with Pillow, the stock mothership
+                         barrier's material
 
 Without these files the ultimate call is the stock satellite call it is made from (Spritefall Destroy). Built in memory
 from the player's own Root.cpk (only read), written atomically and recorded in the ledger as this tool's; --remove
