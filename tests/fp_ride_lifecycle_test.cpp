@@ -254,6 +254,28 @@ int main() {
     check(std::memcmp(laser,originalLaser,sizeof(laser))==0,"all laser attachment state is restored after native drawing");
     Put<void*>(laser,8,human);LaserDrawHook(laser+0x10,nullptr,2,nullptr);
     check(std::memcmp(laserStart,from,16)==0,"another owner's laser is not relocated even when nearby");
+    {
+        // The start rebuilt from the weapon's drawn pose (the muzzle entry's local x its bone's pose), not the
+        // update-time start the attachment holds: through the draw's own T in first person, as drawn in third.
+        unsigned char laserMuzzle[0xF0]{},bones[2*kBoneStride]{},inst[0x80]{};
+        alignas(16) float pose[32];
+        const M4 root=fpview::Translate(10,0,0),boneAt=fpview::Translate(10,1,0),local=fpview::Translate(0,0,1);
+        std::memcpy(pose,root.m,64);std::memcpy(pose+16,boneAt.m,64);
+        Put<void*>(laserMuzzle,0,bones+kBoneStride);std::memcpy(laserMuzzle+kMuzzleLocal,local.m,64);
+        Put<void*>(inst,kInstBones,bones);Put<std::int32_t>(inst,kInstCount,2);Put<void*>(inst,kInstPose,pose);
+        Put<void*>(weapon,kMuzzles,laserMuzzle);Put<std::uint64_t>(weapon,kMuzzleCount,1);Put<void*>(model,kBaseLod+kLodInst,inst);
+        Put<void*>(laser,8,weapon);
+        Current().placeWeaponOk[0]=true;Current().placeWeapon[0]=fpview::Translate(0,0,0.5f);Publish();
+        LaserDrawHook(laser+0x10,nullptr,2,nullptr);
+        const auto at=[](const float* a,float x,float y,float z){return std::fabs(a[0]-x)<1e-4f && std::fabs(a[1]-y)<1e-4f && std::fabs(a[2]-z)<1e-4f;};
+        check(at(laserStart,0,0.98f,1.5f) && std::memcmp(laserEnd,hit,16)==0,
+              "first person: the laser starts at the viewmodel's muzzle as this draw places the weapon, the hit stays in the world");
+        check(std::memcmp(laser+0x130,from,16)==0,"the update-time start is restored after the draw");
+        Current().inHandCount=0;Publish();LaserDrawHook(laser+0x10,nullptr,2,nullptr);
+        check(at(laserStart,10,0.98f,1),"third person: the laser starts at the muzzle of the gun as drawn, not where an earlier step left it");
+        Put<void*>(weapon,kMuzzles,nullptr);Put<std::uint64_t>(weapon,kMuzzleCount,0);Put<void*>(model,kBaseLod+kLodInst,nullptr);
+        Current().inHandCount=1;Current().placeWeaponOk[0]=false;Publish();
+    }
     reset();int pooledControl[4]={0,0,1,0};Put<void*>(weapon,kSelfCtrl,pooledControl);Gather(human);
     Current().inHandCtrls[0]=pooledControl;Rebatch(false);
     check(!Current().unbatched[0].model && At<void*>(model,kBatch)==nullptr,

@@ -5,7 +5,7 @@
 
 namespace {
 ULONGLONG testFrame=1;
-bool testPaused=false,testMap=false,testOptic=true,testTrait=true,testOnFoot=false,testKey=false;
+bool testPaused=false,testMap=false,testOptic=true,testTrait=true,testOnFoot=false,testKey=false,testFp=false;
 unsigned char* testHuman=nullptr;
 HWND testWindow=nullptr;
 SHORT WINAPI Key(int key) {return key==0x4E && testKey ? static_cast<SHORT>(0x8000) : 0;}
@@ -23,6 +23,7 @@ bool KnownVehicle(const void*) noexcept {return true;}
 bool GunshipCrewSeats(const void*) noexcept {return false;}
 bool SightZoomMounted(const void*) noexcept {return testOptic;}
 bool VehicleHasThermal(const unsigned char*,unsigned) noexcept {return testTrait;}
+bool FirstPersonVehicleView(const void*,unsigned) noexcept {return testFp;}
 bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept {return true;}
 // Deliberately false: this function means online session, which must not gate offline thermal seats.
 bool InSession() noexcept {return false;}
@@ -72,18 +73,29 @@ int main() {
     testPaused=false;step(false);step(true);check(GetStatus().requested==Mode::whiteHot,"key works again after pause");
     testOptic=false;step(false);
     check(GetStatus().effective==Mode::optical && GetStatus().reason==Reason::notInSight,"leaving sight falls back to optical");
-    check(!SetMode(Mode::blackHot),"UI cannot enable thermal outside actual sight");
-    testOptic=true;step(false);check(SetMode(Mode::blackHot),"UI accepts supported active sight");
+    check(SetMode(Mode::blackHot) && GetStatus().requested==Mode::blackHot && GetStatus().effective==Mode::optical &&
+          GetStatus().reason==Reason::notInSight,"a request outside the sight is kept, drawn optical with the reason");
+    step(true);check(GetStatus().requested==Mode::optical,"the key cycles the equipped seat's mode outside the sight view");
+    step(false);step(true);check(GetStatus().requested==Mode::whiteHot && GetStatus().effective==Mode::optical &&
+          GetStatus().reason==Reason::notInSight,"a mode chosen outside the sight answers at once and waits for the sight");
+    testFp=true;step(false);
+    check(GetStatus().reason==Reason::waitingFrame,"the seat's own first-person view counts as looking through its sight");
+    testFp=false;step(false);
+    testOptic=true;step(false);check(SetMode(Mode::blackHot) && GetStatus().reason==Reason::waitingFrame,"UI accepts supported active sight");
     Put<void*>(seats,kSeatRider,nullptr);Put<void*>(seats+kSeatStride,kSeatRider,human);Put<void*>(seats+kSeatStride,kSeatRiderCtrl,riderControl);
     step(false);check(GetStatus().requested==Mode::optical,"different seat cannot inherit previous sensor mode");
     testTrait=false;step(false);check(!GetStatus().eligible && GetStatus().reason==Reason::unsupportedSeat,"unsupported equipment is distinguished from no vehicle");
+    check(!GetStatus().rejected,"no press on the unsupported seat: nothing to answer");
+    step(true);check(GetStatus().rejected && GetStatus().requested==Mode::optical,"a press on an unsupported seat is answered, never a request");
+    step(false);
     testTrait=true;testOnFoot=true;step(false);
     check(!GetStatus().eligible && GetStatus().reason==Reason::optical,"on-foot state retires sensor without unsupported-seat warning");
     check(!SetMode(Mode::whiteHot) && SetMode(Mode::optical),"only optical is admissible on foot");
     testOnFoot=false;step(false);installed.store(false);
-    check(!SetMode(Mode::whiteHot),"missing native hooks cannot advertise an active mode");
+    check(SetMode(Mode::whiteHot) && GetStatus().effective==Mode::optical && GetStatus().reason==Reason::hooksUnavailable,
+          "missing native hooks keep optical and say so instead of dropping the press");
     installed.store(true);check(SetMode(Mode::whiteHot),"restore fixture hook readiness");
-    Reset();check(GetStatus().requested==Mode::optical && GetStatus().models==0 && !GetStatus().eligible,"mission reset clears all published identities and requests");
+    Reset();check(GetStatus().requested==Mode::optical && GetStatus().models==0 && !GetStatus().eligible && !GetStatus().rejected,"mission reset clears all published identities and requests");
     edf::SetInputSource(nullptr,nullptr);DestroyWindow(testWindow);VirtualFree(image,0,MEM_RELEASE);
     std::printf("thermal runtime: %d checks, %d failures\n",checks,failures);return failures ? 1 : 0;
 }

@@ -847,16 +847,23 @@ const wchar_t* ThermalReasonWord(thermal::Reason reason) noexcept {
     }
     return L"";
 }
+// The mode the player chose (the key's answer at once, in or out of the sight), then why it is not drawn yet when it is not.
+// A press on a seat without the equipment is answered too (status.rejected), never silently dropped.
 void ThermalControlText(Line& line,const thermal::Status& status) noexcept {
     wchar_t key[32];KeyName(Cfg().thermalKey,key,_countof(key));
-    Format(line,Tr(Tx::thermalControl),key,ThermalModeWord(status.effective));
+    if(!status.eligible){Format(line,Tr(Tx::thermalControl),key,Tr(Tx::thermalUnsupportedSeat));return;}
+    // A failed render (no hooks, unsupported surface) shows what is on screen, optical, with the fallback; a mode that
+    // only waits (for the sight, for the first composite) shows the choice the key made.
+    const bool failed=status.reason==thermal::Reason::unsupportedSurface || status.reason==thermal::Reason::hooksUnavailable;
+    Format(line,Tr(Tx::thermalControl),key,ThermalModeWord(failed ? status.effective : status.requested));
     const wchar_t* reason=ThermalReasonWord(status.reason);
-    if(reason[0])Append(line,L" / %ls",reason);
+    const bool idle=status.requested==thermal::Mode::optical && status.reason==thermal::Reason::notInSight;   // nothing waits
+    if(reason[0] && !idle)Append(line,L" / %ls",reason);
 }
 void ThermalControlHint(Text* text,float width,float height,float s,const thermal::Status& status,Line* lines,int* at) noexcept {
-    if(!status.eligible || *at>=kMaxLines)return;
+    if((!status.eligible && !status.rejected) || *at>=kMaxLines)return;
     Line& line=lines[(*at)++];ThermalControlText(line,status);
-    line.scale=kLineScale*0.65f;line.rgba=status.reason==thermal::Reason::unsupportedSurface ||
+    line.scale=kLineScale*0.65f;line.rgba=!status.eligible || status.reason==thermal::Reason::unsupportedSurface ||
         status.reason==thermal::Reason::hooksUnavailable ? kAmber : kCyan;line.w=line.h=0.0f;
     if(text) {
         MeasureAll(*text,&line,1);

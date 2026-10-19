@@ -39,6 +39,9 @@ std::atomic<Mode> requested{Mode::optical},effective{Mode::optical};
 std::atomic<Reason> reason{Reason::optical};
 std::atomic<unsigned> modelCount{0};
 ObjRef owner{};unsigned ownerSeat=0;bool keyHeld=true;
+// A key edge on a seat with no thermal equipment: the HUD says so for kRejectMs instead of ignoring the press silently.
+constexpr ULONGLONG kRejectMs=2500;
+std::atomic<ULONGLONG> rejectedAt{0};
 ULONGLONG ticked=~ULONGLONG(0);
 struct RenderFrame {
     Renderer gpu;
@@ -127,12 +130,22 @@ bool Seat(unsigned char** vehicle,unsigned* index) noexcept {
     }
     return false;
 }
+// The configured key held on this keyboard seat, in this game's foreground window.
+bool KeyDown(unsigned char* vehicle,unsigned seat,unsigned toggleKey) noexcept {
+    const bool keys=At<unsigned char>(SeatAt(vehicle,seat),edf::kSeatPad)==0;
+    DWORD process=0;GetWindowThreadProcessId(edf::ForegroundWindow(),&process);
+    return keys && toggleKey && toggleKey<=0xFF && process==GetCurrentProcessId() && (edf::AsyncKey(static_cast<int>(toggleKey))&0x8000)!=0;
+}
 void TickNative(bool enabled,unsigned toggleKey) noexcept {
     Snapshot shot{};shot.at=GetTickCount64();shot.enabled=enabled;
     unsigned char* vehicle=nullptr;unsigned seat=0;
     const bool seated=enabled && Seat(&vehicle,&seat);
+    const bool admitted=!GamePaused() && !MapHoldsKeys();
     if(!seated || !VehicleHasThermal(vehicle,seat)) {
-        owner={};keyHeld=true;requested.store(Mode::optical,std::memory_order_release);
+        // A seat without the equipment: the press is answered on the HUD (rejectedAt), never turned into a request.
+        const bool down=seated && KeyDown(vehicle,seat,toggleKey);
+        if(seated && admitted && down && !keyHeld)rejectedAt.store(GetTickCount64(),std::memory_order_release);
+        owner={};keyHeld=seated ? down : true;requested.store(Mode::optical,std::memory_order_release);
         effective.store(Mode::optical,std::memory_order_release);
         reason.store(seated ? Reason::unsupportedSeat : Reason::optical,std::memory_order_release);Publish(shot);return;
     }
@@ -140,13 +153,18 @@ void TickNative(bool enabled,unsigned toggleKey) noexcept {
         owner=ObjRef::Of(vehicle);ownerSeat=seat;keyHeld=true;
         requested.store(Mode::optical,std::memory_order_release);effective.store(Mode::optical,std::memory_order_release);
     }
+    rejectedAt.store(0,std::memory_order_release);
     shot.eligible=true;
-    shot.inSight=!MapOwnsView() && ((GunshipCrewSeats(vehicle) && seat==kGunnerSeat) || SightZoomMounted(vehicle));
+    // Looking through the seat's sight: the gunship gunner's sensor display, the model-authored optic (SightZoomMounted),
+    // or this seat's own first-person view (the only view a lens-less eligible seat, an AA gun or an attack heli, has).
+    shot.inSight=!MapOwnsView() && ((GunshipCrewSeats(vehicle) && seat==kGunnerSeat) || SightZoomMounted(vehicle) ||
+                                    FirstPersonVehicleView(vehicle,seat));
     Publish(shot); // SetMode/CycleMode can now admit this exact seat's request.
-    const bool keys=At<unsigned char>(SeatAt(vehicle,seat),edf::kSeatPad)==0;
-    DWORD process=0;GetWindowThreadProcessId(edf::ForegroundWindow(),&process);
-    const bool down=keys && toggleKey && toggleKey<=0xFF && process==GetCurrentProcessId() && (edf::AsyncKey(static_cast<int>(toggleKey))&0x8000)!=0;
-    if(!GamePaused() && !MapHoldsKeys() && shot.inSight && down && !keyHeld)CycleMode();
+    // The key chooses the mode on the equipped seat at any time (2026-10-19: 「切换成像没反应」: an edge outside the sight
+    // view was dropped with no change on screen). The image itself is drawn only through the sight; until then the HUD
+    // shows the chosen mode and that it waits for the sight.
+    const bool down=KeyDown(vehicle,seat,toggleKey);
+    if(admitted && down && !keyHeld)CycleMode();
     keyHeld=down;
     const Mode want=requested.load(std::memory_order_acquire);
     if(!shot.inSight) {
@@ -156,6 +174,11 @@ void TickNative(bool enabled,unsigned toggleKey) noexcept {
     } else if(!installed.load(std::memory_order_acquire)) {
         effective.store(Mode::optical,std::memory_order_release);reason.store(Reason::hooksUnavailable,std::memory_order_release);
     } else {
+        // Into the sight with a mode already chosen: waiting for the GPU's first composite (EndHook: active), or its
+        // failure (unsupportedSurface) as the render reported it; not the reason left from outside the sight.
+        const Reason was=reason.load(std::memory_order_acquire);
+        if(was==Reason::notInSight || was==Reason::optical || was==Reason::hooksUnavailable)
+            reason.store(Reason::waitingFrame,std::memory_order_release);
         VisitEnemies(vehicle,&Gather,&shot);Publish(shot);
     }
 }
@@ -181,23 +204,32 @@ void Tick(bool enabled,unsigned toggleKey) noexcept {
 }
 bool SetMode(Mode mode) noexcept {
     if(mode!=Mode::optical && mode!=Mode::whiteHot && mode!=Mode::blackHot)return false;
-    if(mode!=Mode::optical && (!eligible.load(std::memory_order_acquire) || !inSight.load(std::memory_order_acquire) ||
-       !installed.load(std::memory_order_acquire)))return false;
+    // A request needs the equipped seat only; whether it can be drawn now (in the sight, hooks installed) is the
+    // reason the HUD reports, never a press silently dropped.
+    if(mode!=Mode::optical && !eligible.load(std::memory_order_acquire))return false;
     requested.store(mode,std::memory_order_release);effective.store(Mode::optical,std::memory_order_release);
-    reason.store(mode==Mode::optical ? Reason::optical : Reason::waitingFrame,std::memory_order_release);return true;
+    const Reason why=mode==Mode::optical ? Reason::optical : !installed.load(std::memory_order_acquire) ? Reason::hooksUnavailable :
+        !inSight.load(std::memory_order_acquire) ? Reason::notInSight : Reason::waitingFrame;
+    reason.store(why,std::memory_order_release);return true;
 }
 Mode CycleMode() noexcept {
     const Mode was=requested.load(std::memory_order_acquire);
     const Mode next=was==Mode::optical ? Mode::whiteHot : was==Mode::whiteHot ? Mode::blackHot : Mode::optical;
     return SetMode(next) ? next : was;
 }
+bool Rejected() noexcept {
+    const ULONGLONG at=rejectedAt.load(std::memory_order_acquire);
+    return at && GetTickCount64()-at<kRejectMs;
+}
 Status GetStatus() noexcept {
     return {requested.load(std::memory_order_acquire),effective.load(std::memory_order_acquire),reason.load(std::memory_order_acquire),
-        eligible.load(std::memory_order_acquire),installed.load(std::memory_order_acquire),modelCount.load(std::memory_order_acquire)};
+        eligible.load(std::memory_order_acquire),installed.load(std::memory_order_acquire),modelCount.load(std::memory_order_acquire),
+        Rejected()};
 }
 void Reset() noexcept {
     Publish(Snapshot{});requested.store(Mode::optical,std::memory_order_release);effective.store(Mode::optical,std::memory_order_release);
     reason.store(Reason::optical,std::memory_order_release);owner={};keyHeld=true;ticked=~ULONGLONG(0);
+    rejectedAt.store(0,std::memory_order_release);
 }
 bool WantsCapture() noexcept {return frame.active && frame.target && !frame.failed;}
 void ObserveSurface(ID3D11DeviceContext* context,int pass) noexcept {

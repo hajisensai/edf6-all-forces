@@ -94,6 +94,11 @@ void ThermalCases(int width,int height) {
     TaskCheck(wcsstr(controls.text,Tr(Tx::thermalWhiteHot))==nullptr,"failed thermal request never claims an active white-hot image");
     status.reason=thermal::Reason::notInSight;ThermalControlText(controls,status);
     TaskCheck(wcsstr(controls.text,Tr(Tx::thermalEnterSight))!=nullptr,"outside-sight reason explains how to enable thermal");
+    TaskCheck(wcsstr(controls.text,Tr(Tx::thermalWhiteHot))!=nullptr,"a mode chosen outside the sight is shown as chosen, with what it waits for");
+    status.requested=thermal::Mode::optical;ThermalControlText(controls,status);
+    TaskCheck(wcsstr(controls.text,Tr(Tx::thermalEnterSight))==nullptr,"optical outside the sight waits for nothing");
+    status.eligible=false;status.rejected=true;status.reason=thermal::Reason::unsupportedSeat;ThermalControlText(controls,status);
+    TaskCheck(wcsstr(controls.text,Tr(Tx::thermalUnsupportedSeat))!=nullptr,"a press on a seat without thermal is answered on the HUD");
 }
 }
 int main() {
