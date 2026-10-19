@@ -75,7 +75,8 @@ void Catalog() {
             }
             Expect(n>0 && own,"a Mods row lists its own SGO among its files");
         }
-        if(!e.preload)Expect(e.category==Category::enemy41 && e.mod,"only EDF4.1's heavy enemy rows wait for RangePlaceAll");
+        if(!e.preload)Expect((e.category==Category::enemy41 || e.category==Category::enemy) && e.how==How::enemy,
+                             "only enemy rows load when first placed (vehicles are preloaded: the player boards them at once)");
         if(e.mod && e.category==Category::vehicle)Expect(e.preload,"every installed EDF4.1 vehicle is placeable by default");
         if(e.category==Category::ours)Expect(std::wcsncmp(e.sgo,L"app:/object/EDF6TR_",19)==0 || std::wcsncmp(e.sgo,L"app:/object/EDF6VC_",19)==0,
                                             "our vehicles are the range's (EDF6TR_) or the installer's (EDF6VC_)");
@@ -84,7 +85,7 @@ void Catalog() {
                                                  "a crewed aircraft only as a support call (its real crew), the drone alone launched");
         if(e.how==How::soldier)Expect(e.category==Category::soldier,"soldiers");
         if(e.how==How::supportCall)Expect(e.arg>=0 && e.arg<kSupportCallCount,"a kSupportCalls index");
-        if(e.how==How::soldier)Expect(e.arg>=0 && e.arg<5,"a SupportWeapon (5 weapons, support_call.h)");
+        if(e.how==How::soldier)Expect(e.arg>=0 && e.arg<14,"a SupportWeapon (14 kinds, support_call.h)");
         for(int k=0;k<i;++k)Expect(std::strcmp(kEntries[k].id,e.id)!=0,"log ids are unique");
     }
 }

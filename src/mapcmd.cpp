@@ -99,7 +99,7 @@ struct Game {
     bool eat,eatWas;            // the mark key's press took the enemy under the pointer: not the map's (MapCommandEats)
     ObjRef eatHover;            // ...that enemy's original identity, its lock point
     float eatAt[3];
-    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,stats,place,pvp,enemy };
+    enum class UiKind : std::uint8_t { none,command,squad,payload,support,panel,fold,formation,compose,stats,place,pvp,enemy,legend };
     struct UiHit { UiKind kind=UiKind::none;int id=-1;ObjRef identity{};std::uint64_t token=0;int seat=-1,entry=-1; PvpStatus pvp{}; enemy_control::Snapshot enemy{}; };
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
@@ -115,6 +115,7 @@ struct Game {
     // keys), whether it is there this mission (debug_spawn.cpp RangePlaceOn).
     rangeplace::Panel place{};
     rangeplace::Press placePress{};
+    rangeplace::Repeat placeUp{},placeDown{};   // , . and the D-pad held: the rows walked (range_place.h Repeats)
     bool placeOn=false;
     pvpmenu::Pad pvpPad{};
     ObjRef enemyCandidate{};
@@ -127,6 +128,8 @@ std::atomic<bool> pvpHoldsPad{false};
 std::atomic<bool> enemyHoldsPad{false};
 std::atomic<int> pvpPadSelection{-1};
 std::atomic<bool> placeHoldsPad{false};   // MapPlaceHoldsPad
+std::atomic<bool> pvpOpen{false};         // MapPvpOpen: the PVP panel unfolded by a click on its title
+std::atomic<bool> legendOpen{false};      // MapLegendOpen: the legend unfolded by a click on its title
 std::atomic<bool> boxingNow{false};
 std::atomic<bool> pointerCaptured{false};
 
@@ -135,13 +138,15 @@ constexpr int kUiItems=16;
 struct View {
     float vp[16],w,h; ULONGLONG at; int buttons; mapbtn::Rect button[mapbtn::kCount]; int id[mapbtn::kCount];
     int squads=0,payloads=0,panels=0,supports=0;
-    mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kUiItems]{},support[kMapSupports]{};
+    mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kMapUiPanels]{},support[kMapSupports]{};
     int supportEntry[kMapSupports]{};
     int composes=0;mapbtn::Rect compose[mapbtn::kComposeItems]{};int composeCode[mapbtn::kComposeItems]{};
     bool pvpVisible=false;
     int pvps=0;mapbtn::Rect pvp[kMapPvpItems]{};int pvpCode[kMapPvpItems]{};PvpStatus pvpStatus{};
     bool enemyVisible=false;int enemies=0;mapbtn::Rect enemy[kMapEnemyItems]{};int enemyCode[kMapEnemyItems]{};enemy_control::Snapshot enemyStatus{};
     int places=0;mapbtn::Rect place[kMapPlaceItems]{};int placeCode[kMapPlaceItems]{};   // the 「摆放」 panel
+    int placeWindow=0;                                     // ...its list's rows drawn (0: shut / not drawn)
+    bool legend=false;mapbtn::Rect legendRow{};            // the legend's title row
     ObjRef squadIdentity[kUiItems]{};
     bool folds=false;mapbtn::Rect fold{};   // the squad panel's summary row
     int menus=0;mapbtn::Rect menu[kMapFormationEntries]{};int menuEntry[kMapFormationEntries]{};   // the formation menu's rows
@@ -434,6 +439,7 @@ Game::UiHit UiAt(const View& v,float x,float y) noexcept {
     if(i>=0){hit.kind=Game::UiKind::pvp;hit.entry=v.pvpCode[i];hit.pvp=v.pvpStatus;return hit;}
     i=mapbtn::Hit(v.place,v.places,x,y);
     if(i>=0){hit.kind=Game::UiKind::place;hit.entry=v.placeCode[i];return hit;}
+    if(v.legend && mapbtn::Hit(&v.legendRow,1,x,y)>=0){hit.kind=Game::UiKind::legend;return hit;}
     i=mapbtn::Hit(v.support,v.supports,x,y);
     if(i>=0){hit.kind=Game::UiKind::support;hit.entry=v.supportEntry[i];return hit;}
     if(mapbtn::Hit(v.panel,v.panels,x,y)>=0)hit.kind=Game::UiKind::panel;
@@ -494,6 +500,8 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         return;
     }
     if(hit.kind==Game::UiKind::stats){DamageStatsClick(hit.entry);return;}
+    if(hit.kind==Game::UiKind::legend){legendOpen.store(!legendOpen.load());return;}
+    if(hit.kind==Game::UiKind::pvp && hit.entry==kPvpFold){pvpOpen.store(!pvpOpen.load());return;}
     if(hit.kind==Game::UiKind::pvp) {
         const auto& snapshot=hit.pvp;
         bool accepted=false;
@@ -842,9 +850,10 @@ void Place(Game& g,int row,bool pointOk,const float* point) noexcept {
     if(!pointOk){Note(g,L"%ls",Tr(Tx::placeNoGround));return;}
     const RowState state=SpawnRowState(row);
     if(state==RowState::online){Note(g,L"%ls",Tr(Tx::placeOnline));return;}
-    if(e.sgo && state!=RowState::ready) {
-        Note(g,L"%ls%ls",e.name,Tr(state==RowState::missing ? Tx::placeMissing : state==RowState::notPreloaded ?
-                                                Tx::placeNotPreloaded : state==RowState::broken ? Tx::placeBroken : Tx::debugSpawnUnavailable));
+    // A row not loaded yet (or still loading) goes on: its spawn queues the load and is made here once it is complete.
+    if(e.sgo && state!=RowState::ready && state!=RowState::notPreloaded && state!=RowState::loading) {
+        Note(g,L"%ls%ls",e.name,Tr(state==RowState::missing ? Tx::placeMissing : state==RowState::broken ? Tx::placeBroken :
+                                    Tx::debugSpawnUnavailable));
         return;
     }
     wchar_t answer[96]{};
@@ -852,6 +861,7 @@ void Place(Game& g,int row,bool pointOk,const float* point) noexcept {
     switch(status) {
     case kDebugSpawnDone: Note(g,Tr(Tx::placeDone),e.name);break;
     case kDebugSpawnRequested: Note(g,Tr(Tx::debugSpawnRequested),e.name,answer);break;
+    case kDebugSpawnLoading: Note(g,Tr(Tx::placeLoadingNote),e.name);break;
     case kDebugSpawnRefused: Note(g,Tr(Tx::debugSpawnRefused),e.name,answer);break;
     case kDebugSpawnOnline: Note(g,L"%ls",Tr(Tx::placeOnline));break;
     case kDebugSpawnNoPlace: Note(g,L"%ls",Tr(Tx::placeNoGround));break;
@@ -931,6 +941,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     r.placeOn=g.placeOn;r.placeOnline=placeOnline;r.placeOpen=g.placeOn && g.place.open;r.placeCategory=g.place.category;
     r.placePick=g.place.category>=0 && g.place.category<debugspawn::kCategoryCount ? g.place.pick[g.place.category] : 0;
     r.placeArmed=g.place.armed;
+    r.placeTop=g.place.category>=0 && g.place.category<debugspawn::kCategoryCount ? g.place.top[g.place.category] : 0;
     if(g.placeOn)std::memcpy(r.placeState,placeState,sizeof(placeState));
     enemyReadout=g.enemy;
     readoutAt=GetTickCount64();
@@ -1084,10 +1095,11 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     int placeAt=-1;
     g.placeOn=RangePlaceOn();
     if(g.placeOn) {
+        if(haveView && v.placeWindow>0)g.place.window=v.placeWindow;   // a page is what the HUD has room for
         rangeplace::Press& pk=g.placePress;   // the clicks (UiClick) as they are; the keys and the pad only when it works
         const bool pad=placeKeys;
-        pk.prev=(k.placePrev && !g.was.placePrev) || (pad && k.padUp && !g.was.padUp);
-        pk.next=(k.placeNext && !g.was.placeNext) || (pad && k.padDown && !g.was.padDown);
+        pk.prev=rangeplace::Repeats(g.placeUp,k.placePrev || (pad && k.padUp),g.was.placePrev || (pad && g.was.padUp),now);
+        pk.next=rangeplace::Repeats(g.placeDown,k.placeNext || (pad && k.padDown),g.was.placeNext || (pad && g.was.padDown),now);
         pk.catPrev=pad && k.padLeft && !g.was.padLeft;
         pk.catNext=(k.placeCategory && !g.was.placeCategory) || (pad && k.padRight && !g.was.padRight);
         pk.close=(k.placeClose && !g.was.placeClose) || (pad && k.padB && !g.was.padB);
@@ -1191,7 +1203,7 @@ void ResetMapCommands() noexcept {
 
 void MapCommandView(const float* viewProj,float width,float height) noexcept {
     AcquireSRWLockExclusive(&viewLock);
-    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.pvps=view.enemies=0;view.folds=false;view.pvpVisible=view.enemyVisible=false;}
+    if(view.w!=width || view.h!=height){view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;}
     std::memcpy(view.vp,viewProj,sizeof(view.vp));view.w=width;view.h=height;view.at=GetTickCount64();
     ReleaseSRWLockExclusive(&viewLock);
 }
@@ -1213,13 +1225,45 @@ void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexc
     ReleaseSRWLockExclusive(&viewLock);
 }
 
-void MapCommandPlaceButtons(const float* rects,const int* codes,int n) noexcept {
+void MapCommandPlaceButtons(const float* rects,const int* codes,int n,int window) noexcept {
     n=rects && codes ? (std::max)(0,(std::min)(n,kMapPlaceItems)) : 0;
-    AcquireSRWLockExclusive(&viewLock);view.places=n;
+    AcquireSRWLockExclusive(&viewLock);view.places=n;view.placeWindow=(std::max)(0,(std::min)(window,rangeplace::kWindow));
     for(int i=0;i<n;++i){view.place[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.placeCode[i]=codes[i];}
     ReleaseSRWLockExclusive(&viewLock);
 }
 bool MapPlaceHoldsPad() noexcept { return placeHoldsPad.load() || pvpHoldsPad.load() || enemyHoldsPad.load(); }
+bool MapPvpOpen() noexcept { return pvpOpen.load(); }
+bool MapLegendOpen() noexcept { return legendOpen.load(); }
+void MapCommandLegendButton(const float* rect) noexcept {
+    AcquireSRWLockExclusive(&viewLock);
+    view.legend=rect!=nullptr;
+    if(rect)view.legendRow={rect[0],rect[1],rect[2],rect[3]};
+    ReleaseSRWLockExclusive(&viewLock);
+}
+bool MapCommandWheel(int delta) noexcept {
+    Game& g=game;
+    static int part=0;   // a fine wheel's part-notches, kept until they make one
+    if(!delta || !g.placeOn || !g.place.open || !g.pointer.placed){part=0;return false;}
+    // Over the list the HUD drew (its click targets' bounds: the title, the tabs, the rows and the arrows).
+    AcquireSRWLockShared(&viewLock);
+    const int n=view.places;
+    float x0=1e30f,y0=1e30f,x1=-1e30f,y1=-1e30f;
+    for(int i=0;i<n;++i) {
+        const mapbtn::Rect& q=view.place[i];
+        x0=(std::min)(x0,q.x0);y0=(std::min)(y0,q.y0);x1=(std::max)(x1,q.x1);y1=(std::max)(y1,q.y1);
+    }
+    ReleaseSRWLockShared(&viewLock);
+    const float x=g.pointer.x,y=g.pointer.y;
+    if(!n || x<x0 || x>=x1 || y<y0 || y>=y1){part=0;return false;}
+    part+=delta;
+    const int notches=part/WHEEL_DELTA;
+    part-=notches*WHEEL_DELTA;
+    if(notches) {
+        rangeplace::Press k{};k.scroll=-notches*rangeplace::kWheelRows;   // away from the user: up the list
+        rangeplace::Step(g.place,k);
+    }
+    return true;
+}
 void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpStatus* snapshot) noexcept {
     n=rects && codes && snapshot ? (std::max)(0,(std::min)(n,kMapPvpItems)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.pvps=n;view.pvpVisible=snapshot!=nullptr;view.pvpStatus=snapshot ? *snapshot : PvpStatus{};
@@ -1277,7 +1321,7 @@ void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,co
     ReleaseSRWLockExclusive(&viewLock);
 }
 void MapCommandUiPanels(const float* rects,int n) noexcept {
-    n=rects ? (std::max)(0,(std::min)(n,kUiItems)) : 0;
+    n=rects ? (std::max)(0,(std::min)(n,kMapUiPanels)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.panels=n;
     for(int i=0;i<n;++i)view.panel[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};
     ReleaseSRWLockExclusive(&viewLock);
@@ -1292,7 +1336,7 @@ void SuspendMapCommands() noexcept {
     g.frameAt=0;g.eat=g.eatWas=false;g.boxing=g.pressing=g.rpressing=false;Arm(g,false,Order::none,-1);g.armedClick=g.rightClick=false;
     g.button=-1;g.uiLeft=g.uiRight=false;g.uiPress={};g.formationMenu=false;
     boxingNow.store(false);pointerCaptured.store(false);
-    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.pvps=view.enemies=0;view.folds=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
+    AcquireSRWLockExclusive(&viewLock);view.at=0;view.buttons=view.squads=view.payloads=view.panels=view.supports=view.menus=view.composes=view.places=view.placeWindow=view.pvps=view.enemies=0;view.folds=view.legend=false;view.pvpVisible=view.enemyVisible=false;ReleaseSRWLockExclusive(&viewLock);
     g.place.armed=-1;g.pvpPad={};placeHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);
     AcquireSRWLockExclusive(&lock);readoutAt=0;ReleaseSRWLockExclusive(&lock);
 }

@@ -595,7 +595,8 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         }
     }
     const int notches=wheel.exchange(0);
-    if(notches){mapcam::Zoom(v,static_cast<float>(notches)/static_cast<float>(WHEEL_DELTA));keys=true;}
+    // Over the 「摆放」 list the wheel scrolls it (mapcmd.cpp), elsewhere it zooms.
+    if(notches && !MapCommandWheel(notches)){mapcam::Zoom(v,static_cast<float>(notches)/static_cast<float>(WHEEL_DELTA));keys=true;}
     if(pad) {
         const XINPUT_GAMEPAD& p=pad->Gamepad;
         const float lx=Stick(p.sThumbLX),ly=Stick(p.sThumbLY),rx=Stick(p.sThumbRX),ry=Stick(p.sThumbRY);

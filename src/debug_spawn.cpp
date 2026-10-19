@@ -31,11 +31,33 @@ using namespace debugspawn;
 // VehicleBase 0x2006480 are the ones those call sites name.
 constexpr unsigned kPreload=0x7A3780,kCreate=0x11945E0,kDelete=0x118A1B0,kReadSetup=0x62D6E0,kSetLevel=0x54E740;
 constexpr unsigned kActivate=0x548D50,kCast=0x12DA7AA,kInitVtable=0x1762068,kSetupDtors=0x1765220;
+// The resource manager's completion query (the script's IsCompleteResource, 0x70ED20 -> 0x7A3600; WaitPreload 0x1BC200
+// polls it): false while its command queue holds a load or one of its four work slots (+0x1A4 + i*0x90) is busy, true
+// once a fence confirms every worker idle. The loader threads run all mission long, so a load queued mid-mission
+// (0x7A3780) is worked off and reported here; its entry lives in the same group-2 table the mission's end releases
+// (0x7A2EE0). docs/debug-spawn.md 「按需加载」.
+constexpr unsigned kLoadDone=0x7A3600,kLoadDoneScript=0x70ED20;
+// An empty vehicle as the script's CreateVehicle2 (0x1B28C0) makes one: its creation descriptor's SetLevel flag cleared
+// (+0x85 = 0 at 0x1B2A2E, team 5 at 0x1B2A27), then at 0x1B2BD9..0x1B2C09
+//   lvl = max(0xD7AE0(GameStatus *(EDF+0x20B2890), level) / 10, 1);  0x633280(vehicle, lvl)
+// 0x633280 reads its mission_setup (0x62D6E0), keeps lvl at +0x67C, applies the setup (slot 46), +0xE30 = 2, +0xE34 = lvl,
+// 0x6DD730: never SetLevel (0x54E740), whose tail 0x54E8F7 always calls 0x118A4B0(obj, 8): +0x1A |= 8, the native AI
+// list. A vehicle on that list gets the AI pass every frame (603: slot 7 0x673300 clears every seat's input block
+// 0x62C120(seat+0x2C0) before its AI action) and is skipped by the per-frame crew team pass (0x63049E): the player in it
+// neither drives nor fires (the user, 2026-10-19: 「火神炮和bmpt没办法移动和开火，不知道是不是用m地图召唤的原因」).
+constexpr unsigned kVehicleLevelSetup=0x633280,kLevelScale=0xD7AE0,kCreateVehicleLevelSite=0x1B2BD9;
+constexpr std::size_t kGameStatus=0x20B2890;
+constexpr float kVehicleLevel=1.0f;   // the range's vehicles' level (testrange/gen.py plan.vehicle_level's default)
 constexpr unsigned kSceneObjectType=0x2006450,kGameObjectType=0x2006400,kVehicleType=0x2006480;
 constexpr unsigned kEnemyCastSite=0x1D893E,kVehicleCastSite=0x1B2AFF,kActivateSite=0x1D8A9E,kEnemyTeamSite=0x1AD37F;
 constexpr std::size_t kPreloadMgr=0x20B29A8,kObjectMgr=0x20B2958;
-constexpr std::int32_t kTeamEnemy=1,kTeamFriendly=2;
+constexpr std::int32_t kTeamEnemy=1,kTeamVehicle=5;   // 5: an empty vehicle's (CreateVehicle2 0x1B2A27)
 const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48};
+// mov [rsp+18h],rbx; push rdi; sub rsp,20h; mov rbx,rcx; add rcx,20h; call 0x51E70 (the queue empty); test al,al
+const unsigned char kLoadDoneSig[]={0x48,0x89,0x5C,0x24,0x18,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0x48,0x83,0xC1,0x20,
+                                    0xE8,0x5A,0xE8,0x8A,0xFF,0x84,0xC0};
+// mov rcx,[the resource manager 0x20B29A8]; jmp 0x7A3600: the script's IsCompleteResource asks the same manager
+const unsigned char kLoadDoneScriptSig[]={0x48,0x8B,0x0D,0x81,0x3C,0x9A,0x01,0xE9,0xD4,0x48,0x09,0x00};
 const unsigned char kCreateSig[]={0x40,0x55,0x53,0x56,0x57,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x8D,0x6C,0x24,0xD9};
 const unsigned char kDeleteSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x60,0x48};
 const unsigned char kReadSetupSig[]={0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x40,0x48,0x8B,0xDA};
@@ -53,6 +75,15 @@ const unsigned char kVehicleCastSiteSig[]={0x4C,0x8D,0x0D,0x7A,0x39,0xE5,0x01,0x
                                            0x49,0x8B,0xCA,0xE8,0x93,0x7C,0x12,0x01};
 // cmp byte [r14+84h],0; je +8; mov rcx,rsi; call 0x548D50
 const unsigned char kActivateSiteSig[]={0x41,0x80,0xBE,0x84,0x00,0x00,0x00,0x00,0x74,0x08,0x48,0x8B,0xCE,0xE8,0xA0,0x02,0x37,0x00};
+// push rbx; sub rsp,60h; movaps [rsp+50h],xmm6; mov rax,[__security_cookie]
+const unsigned char kVehicleLevelSetupSig[]={0x40,0x53,0x48,0x83,0xEC,0x60,0x0F,0x29,0x74,0x24,0x50,0x48,0x8B,0x05};
+// push rbx; sub rsp,30h; cmp byte [rcx+44h],0; mov rbx,rcx; movaps [rsp+20h],xmm6
+const unsigned char kLevelScaleSig[]={0x40,0x53,0x48,0x83,0xEC,0x30,0x80,0x79,0x44,0x00,0x48,0x8B,0xD9,0x0F,0x29,0x74,0x24,0x20};
+// CreateVehicle2's level: movaps xmm1,xmm7; mov rcx,[GameStatus]; call 0xD7AE0; divss xmm0,[10.0]; comiss xmm0,[1.0];
+// ja +8; movss xmm0,[1.0]; movaps xmm1,xmm0; mov rcx,[rsp+30h]; call 0x633280
+const unsigned char kCreateVehicleLevelSiteSig[]={0x0F,0x28,0xCF,0x48,0x8B,0x0D,0xAD,0xFC,0xEF,0x01,0xE8,0xF8,0x4E,0xF2,0xFF,
+    0xF3,0x0F,0x5E,0x05,0x54,0x2E,0x5B,0x01,0x0F,0x2F,0x05,0x9D,0x3D,0xA8,0x01,0x77,0x08,0xF3,0x0F,0x10,0x05,0x93,0x3D,0xA8,0x01,
+    0x0F,0x28,0xC8,0x48,0x8B,0x4C,0x24,0x30,0xE8,0x72,0x06,0x48,0x00};
 // mov dword [rbp+8],1: CreateEnemy's team
 const unsigned char kEnemyTeamSiteSig[]={0xC7,0x45,0x08,0x01,0x00,0x00,0x00};
 struct Sig { unsigned rva; const unsigned char* bytes; std::size_t size; };
@@ -61,11 +92,16 @@ const Sig kSigs[]={{kPreload,kPreloadSig,sizeof(kPreloadSig)},{kCreate,kCreateSi
     {kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)},{kSetLevel,kSetLevelSig,sizeof(kSetLevelSig)},
     {kActivate,kActivateSig,sizeof(kActivateSig)},{kCast,kCastSig,sizeof(kCastSig)},
     {kEnemyCastSite,kEnemyCastSiteSig,sizeof(kEnemyCastSiteSig)},{kVehicleCastSite,kVehicleCastSiteSig,sizeof(kVehicleCastSiteSig)},
-    {kActivateSite,kActivateSiteSig,sizeof(kActivateSiteSig)},{kEnemyTeamSite,kEnemyTeamSiteSig,sizeof(kEnemyTeamSiteSig)}};
+    {kActivateSite,kActivateSiteSig,sizeof(kActivateSiteSig)},{kEnemyTeamSite,kEnemyTeamSiteSig,sizeof(kEnemyTeamSiteSig)},
+    {kVehicleLevelSetup,kVehicleLevelSetupSig,sizeof(kVehicleLevelSetupSig)},{kLevelScale,kLevelScaleSig,sizeof(kLevelScaleSig)},
+    {kCreateVehicleLevelSite,kCreateVehicleLevelSiteSig,sizeof(kCreateVehicleLevelSiteSig)}};
 
 struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
 static_assert(sizeof(InitParam)==0x30);
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
+using LoadDoneFn=bool(*)(void*);
+using VehicleLevelSetupFn=void(__fastcall*)(void*,float);
+using LevelScaleFn=float(__fastcall*)(void*,float);
 using CreateFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParam*);
 using DeleteFn=void(*)(void*);
 using SetTeamFn=void(*)(void*,std::int32_t,bool);
@@ -83,6 +119,14 @@ void* missionMgr=nullptr;          // the object manager this mission's preload 
 bool preloaded[kEntryCount]{};     // its SGO queued for this mission
 bool missing[kEntryCount]{};       // a Mods row with a file not in Mods (not installed): never preloaded nor made
 bool broken[kEntryCount]{};        // the game faulted making it: off until the game restarts (as support_spawn.cpp)
+// Loading on demand (RequestLoad): a row not preloaded at the mission's start is queued when it is first asked for, and
+// the spawn asked for is made where it was asked as soon as the manager reports every queued load complete.
+bool loadOk=false;                 // the completion query matched (CheckProfile)
+bool loading[kEntryCount]{};       // queued this mission, not yet reported complete
+struct PendingSpawn { int row=-1; float at[3]{},heading[3]{},look[3]{}; };
+PendingSpawn pending{};            // the last spawn asked for a row still loading (a newer ask replaces it)
+ULONGLONG loadAskedAt=0;           // wall ms of the last load queued (the log's how long)
+ULONGLONG loadTickFrame=0;
 // This mission is the test range pack's (edf5campaign.cpp TestRangeMode at its start): the M map's 「摆放」 is on
 // (ini RangePlace), whatever DebugSpawn says.
 bool rangeMission=false;
@@ -117,6 +161,8 @@ ULONGLONG statusAt=0;              // wall ms; 0 none
 bool CheckProfile() noexcept {
     __try {
         for(const auto& s:kSigs)if(!Matches(s.rva,s.bytes,s.size)){Log("DEBUGSPAWN profile mismatch at %#x: the tool stays off",s.rva);return false;}
+        loadOk=Matches(kLoadDone,kLoadDoneSig,sizeof(kLoadDoneSig)) && Matches(kLoadDoneScript,kLoadDoneScriptSig,sizeof(kLoadDoneScriptSig));
+        if(!loadOk)Log("DEBUGSPAWN the resource manager's completion query differs: rows not preloaded stay off (no loading on demand)");
         return Readable(image+kInitVtable,8) && Readable(image+kSetupDtors,8) && Readable(image+kSceneObjectType,16) &&
                Readable(image+kGameObjectType,16) && Readable(image+kVehicleType,16);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -147,6 +193,7 @@ RowState StateOf(int row) noexcept {
     case How::enemy:
         if(missing[row])return RowState::missing;
         if(broken[row])return RowState::broken;
+        if(loading[row])return RowState::loading;
         return profile && preloaded[row] ? RowState::ready : RowState::notPreloaded;
     case How::drone: return Cfg().jetPilot && jet::SpawnReady() ? RowState::ready : RowState::unavailable;
     case How::supportCall:
@@ -238,19 +285,23 @@ unsigned char* Create(int row,const float* matrix,unsigned type,const char** why
     } __except(SpawnFault(row,GetExceptionInformation())) { *why="the game faulted making it";return nullptr; }
 }
 
-// A stock vehicle, empty, on the friend team: support_spawn.cpp's steps (CreateObject, its mission_setup, SetTeam(2),
-// SetLevel(1), NoteLocalCopy), its class checked by the script's own VehicleBase cast instead of a table of vtables.
+// A vehicle, empty, as the script's CreateVehicle2 makes one (kVehicleLevelSetup above): CreateObject, the VehicleBase
+// cast, SetTeam(5), then 0x633280 with CreateVehicle2's level, which reads and applies its mission_setup. No SetLevel: it
+// would put the vehicle on the native AI list, whose pass clears the seats' input every frame. NoteLocalCopy as before.
 unsigned char* SpawnVehicle(int row,const float* matrix,const char** why) noexcept {
     unsigned char* const v=Create(row,matrix,kVehicleType,why);
     if(!v)return nullptr;
     __try {
-        if(!ApplyMissionSetup(v)) {
-            *why="its mission_setup did not apply";
+        void* const status=At<void*>(image,kGameStatus);
+        if(!status) {
+            *why="no GameStatus for the vehicle's level";
             reinterpret_cast<DeleteFn>(image+kDelete)(v);
             return nullptr;
         }
-        reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamFriendly,true);
-        reinterpret_cast<SetLevelFn>(image+kSetLevel)(v,1.0f);
+        reinterpret_cast<SetTeamFn>(image+kSetTeam)(v,kTeamVehicle,true);
+        const float scaled=reinterpret_cast<LevelScaleFn>(image+kLevelScale)(status,kVehicleLevel)/10.0f;
+        reinterpret_cast<VehicleLevelSetupFn>(image+kVehicleLevelSetup)(v,scaled>1.0f ? scaled : 1.0f);
+        if(At<unsigned char>(v,0x1A)&8)Log("DEBUGSPAWN %s: on the native AI list after its setup (unexpected)",kEntries[row].id);
         NoteLocalCopy(v,nullptr);
         return v;
     } __except(SpawnFault(row,GetExceptionInformation())) { *why="the game faulted setting it up";return nullptr; }
@@ -312,6 +363,27 @@ bool Where(const Entry& e,const unsigned char* human,float* at,float* heading,fl
     return true;
 }
 
+// Queues row `row`'s load (the resource manager's 0x7A3780, as the mission's own preload) when it was not preloaded at
+// the mission's start, and keeps `at` / `heading` / `look` to make it there once the manager reports the load complete
+// (LoadTick). False when it cannot be queued: a session (every peer would need the same load before an online spawn),
+// the completion query not this build's, the tool off this mission, or another mission's object manager.
+bool RequestLoad(int row,const float* at,const float* heading,const float* look) noexcept {
+    if(row<0 || row>=kEntryCount || !kEntries[row].sgo || !profile || !loadOk || InSession())return false;
+    __try {
+        void* const mgr=At<void*>(image,kPreloadMgr);
+        void* const objects=At<void*>(image,kObjectMgr);
+        if(!mgr || !objects || objects!=missionMgr)return false;
+        if(!loading[row]) {
+            reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEntries[row].sgo,2,-1);
+            loading[row]=true;loadAskedAt=GetTickCount64();
+            Log("DEBUGSPAWN %s: not loaded this mission: its load queued (%ls)",kEntries[row].id,kEntries[row].sgo);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) { Log("DEBUGSPAWN %s: queuing its load faulted",kEntries[row].id);return false; }
+    pending.row=row;
+    std::memcpy(pending.at,at,12);std::memcpy(pending.heading,heading,12);std::memcpy(pending.look,look,12);
+    return true;
+}
+
 // Makes row `row` at `at` (its lift in already) facing `heading` (`look`: the drone's flight heading), by its How; the
 // result for the HUD and the log (Say), and returned (DebugSpawnStatus) with a support call's own answer in `note`. The
 // one way every spawn goes, the debug spawn tool's (Spawn) and the M map's 「摆放」 (PlaceRow): online it refuses
@@ -345,7 +417,14 @@ int MakeRow(int row,const float* at,const float* heading,const float* look,wchar
         if(!profile)why="EDF.dll profile mismatch (see DEBUGSPAWN profile)";
         else if(missing[row])why="a file of it is not in Mods (not installed: run the installer / install the test range)";
         else if(broken[row])why="it faulted before: off until the game restarts";
-        else if(!preloaded[row])why="not preloaded this mission (turned on mid-mission, or a heavy row with RangePlaceAll=0)";
+        else if(!preloaded[row]) {
+            if(RequestLoad(row,at,heading,look)) {
+                Say(kDebugSpawnLoading,row,nullptr,"%s: loading on demand; made at (%.1f,%.1f,%.1f) once the game reports it loaded",
+                    e.id,at[0],at[1],at[2]);
+                return kDebugSpawnLoading;
+            }
+            why="not loaded this mission, and its load cannot be queued now (see the lines above)";
+        }
         else made=e.how==How::enemy ? SpawnEnemy(row,m,&why) : SpawnVehicle(row,m,&why);
         break;
     case How::supportCall: {
@@ -381,6 +460,42 @@ int MakeRow(int row,const float* at,const float* heading,const float* look,wchar
     }
     Say(kDebugSpawnFailed,row,nullptr,"%s: failed at (%.1f,%.1f,%.1f): %s",e.id,at[0],at[1],at[2],why);
     return kDebugSpawnFailed;
+}
+
+// Once a game frame while a load is queued: the manager's completion query (0x7A3600, the one WaitPreload polls); done,
+// every queued row is ready and the spawn asked for last is made where it was asked. Another mission's object manager:
+// the queue is this mission's no more (the mission's end released it), dropped.
+void LoadTick() noexcept {
+    bool any=false;
+    for(const bool l:loading)any=any || l;
+    if(!any)return;
+    const ULONGLONG frame=GameFrame();
+    if(frame==loadTickFrame)return;
+    loadTickFrame=frame;
+    bool done=false;
+    __try {
+        void* const objects=At<void*>(image,kObjectMgr);
+        void* const mgr=At<void*>(image,kPreloadMgr);
+        if(!objects || objects!=missionMgr || !mgr) {
+            for(auto& l:loading)l=false;
+            pending=PendingSpawn{};
+            Log("DEBUGSPAWN loads on demand dropped: the mission changed");
+            return;
+        }
+        done=reinterpret_cast<LoadDoneFn>(image+kLoadDone)(mgr);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        for(auto& l:loading)l=false;
+        pending=PendingSpawn{};loadOk=false;
+        Log("DEBUGSPAWN the completion query faulted: loading on demand off until the game restarts");
+        return;
+    }
+    if(!done)return;
+    int rows=0;
+    for(int i=0;i<kEntryCount;++i)if(loading[i]){loading[i]=false;preloaded[i]=true;++rows;}
+    Log("DEBUGSPAWN %d row(s) loaded on demand in %llu ms",rows,static_cast<unsigned long long>(GetTickCount64()-loadAskedAt));
+    const PendingSpawn p=pending;
+    pending=PendingSpawn{};
+    if(p.row>=0 && preloaded[p.row])MakeRow(p.row,p.at,p.heading,p.look,nullptr,0);
 }
 
 void Spawn(int row,unsigned char* human) noexcept {
@@ -499,6 +614,8 @@ bool PreloadsRow(const Entry& e,bool range) noexcept {
 void PreloadDebugSpawn() noexcept {
     for(auto& p:preloaded)p=false;
     for(auto& m:missing)m=false;
+    for(auto& l:loading)l=false;
+    pending=PendingSpawn{};
     missionMgr=nullptr;
     menu.open=false;
     AcquireSRWLockExclusive(&cueLock);
@@ -565,6 +682,7 @@ int PlaceRow(int row,const float* ground,wchar_t* note,std::size_t size) noexcep
 }
 
 void DebugSpawnFrame(unsigned char* human) noexcept {
+    LoadTick();   // a load queued on demand (the M map's 「摆放」 too): made once complete, whatever the tool's keys
     if(!human)return;
     const Config& c=Cfg();
     if(!c.enabled || !c.debugSpawn) {   // off (or turned off in the ini): no key read; a menu left open goes

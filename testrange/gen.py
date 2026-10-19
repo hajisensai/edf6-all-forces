@@ -192,7 +192,7 @@ PRIMER_KINDS: dict[str, tuple[int, int, float]] = {'edf6vc_centipede': (16, 64, 
 WAVE_LIFT_MOST = 100.0
 ENEMIES: list[tuple[str, str, bool]] = (
     [(s, label if s != 'shootingtarget' else '训练靶子（地面 + 空中，不动）', flying)
-     for s, label, flying, lift in catalog.STOCK_ENEMIES if lift < WAVE_LIFT_MOST]
+     for s, label, flying, lift, _ in catalog.STOCK_ENEMIES if lift < WAVE_LIFT_MOST]
     + [('edf6vc_centipede', '星导者·百足龙虫（插件；会合体成长龙）', False),
        ('edf6vc_dragonfly', '星导者·蜻蜓空优机（插件，飞）', True)]
     + [(r.sgo, r.label + '（安装器装的）', r.flying) for r in (*catalog.edf5dlc_rows(), *catalog.edf41_rows())

@@ -32,6 +32,7 @@
 #include "../src/hud.cpp"
 #include "../src/player_name.h"
 #include "../src/map_cam.h"
+#include <array>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -285,6 +286,12 @@ void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpSta
     for(int i=0;i<n;++i){std::memcpy(scenePvpRects[i],rects+i*4,16);scenePvpCodes[i]=codes[i];}
 }
 int MapPvpPadSelection() noexcept { return scenePvpPadPick; }
+bool scenePvpOpen=false;   // the PVP panel unfolded by a click on its title (mapcmd.cpp MapPvpOpen)
+bool MapPvpOpen() noexcept { return scenePvpOpen; }
+// The legend at the dock's foot (hud.cpp MapLegend): unfolded or not, its title row as drawn.
+bool sceneLegendOpen=false,sceneLegendOn=false;float sceneLegendRow[4]{};
+bool MapLegendOpen() noexcept { return sceneLegendOpen; }
+void MapCommandLegendButton(const float* r) noexcept { sceneLegendOn=r!=nullptr;if(r)std::memcpy(sceneLegendRow,r,16); }
 thermal::Status sceneThermal{};
 namespace thermal { Status GetStatus() noexcept { return sceneThermal; } }
 VehicleSensorReadout sceneSensor{};bool sceneSensorOn=false;
@@ -295,7 +302,7 @@ void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
     sceneButtons=n;
     for(int i=0;i<n;++i){for(int k=0;k<4;++k)sceneButton[i][k]=r[i*4+k];sceneButtonId[i]=ids[i];}
 }
-float sceneUiPanels[16][4]{};int sceneUiCount=0;
+float sceneUiPanels[kMapUiPanels][4]{};int sceneUiCount=0;
 float sceneSquadButtons[16][4]{};int sceneSquadButtonCount=0;
 float sceneSquadFold[4]{};bool sceneSquadFoldOn=false;
 float scenePayloadButtons[kMostPayload][4]{};int scenePayloadButtonCount=0;
@@ -324,9 +331,10 @@ void MapCommandComposeButtons(const float* r,const int* codes,int n) noexcept {
     sceneComposeHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneComposeHits[i],r+i*4,16);sceneComposeCode[i]=codes[i];}
 }
 // The test range's 「摆放」 panel's click targets as drawn (hud.cpp MapPlacePanel).
-float scenePlaceHits[kMapPlaceItems][4]{};int scenePlaceCode[kMapPlaceItems]{},scenePlaceHitCount=0;
-void MapCommandPlaceButtons(const float* r,const int* codes,int n) noexcept {
-    scenePlaceHitCount=n;for(int i=0;i<n;++i){std::memcpy(scenePlaceHits[i],r+i*4,16);scenePlaceCode[i]=codes[i];}
+float scenePlaceHits[kMapPlaceItems][4]{};int scenePlaceCode[kMapPlaceItems]{},scenePlaceHitCount=0,scenePlaceWindow=0;
+void MapCommandPlaceButtons(const float* r,const int* codes,int n,int window) noexcept {
+    if(!r || !codes)n=0;
+    scenePlaceHitCount=n;scenePlaceWindow=window;for(int i=0;i<n;++i){std::memcpy(scenePlaceHits[i],r+i*4,16);scenePlaceCode[i]=codes[i];}
 }
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
@@ -697,6 +705,37 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
             for(int k=0;k<scenePayloadButtonCount;++k)under(scenePayloadButtons[k],"the payload panel",k);
         }
     } else if(scenePlaceHitCount){++textFailed;std::printf("FAIL place panel in a mission without it: %d\n",scenePlaceHitCount);}
+    // The legend (the user, 2026-10-19: 「操作区域和图例冲突了」): its title row at the dock's foot, clickable with the
+    // mouse, clear of the command card, the support bar, the payload panel, PVP and every 「摆放」 target; open, none of
+    // its words under any of those targets either.
+    if(pad ? sceneLegendOn : !sceneLegendOn){++textFailed;std::printf("FAIL legend title clickable %d with pad %d\n",sceneLegendOn,pad);}
+    {
+        std::vector<std::array<float,4>> targets;
+        for(int k=0;k<sceneButtons;++k)targets.push_back({sceneButton[k][0],sceneButton[k][1],sceneButton[k][2],sceneButton[k][3]});
+        for(int k=0;k<sceneSupportHitCount;++k)targets.push_back({sceneSupportHits[k][0],sceneSupportHits[k][1],sceneSupportHits[k][2],sceneSupportHits[k][3]});
+        for(int k=0;k<scenePayloadButtonCount;++k)targets.push_back({scenePayloadButtons[k][0],scenePayloadButtons[k][1],scenePayloadButtons[k][2],scenePayloadButtons[k][3]});
+        for(int k=0;k<scenePlaceHitCount;++k)targets.push_back({scenePlaceHits[k][0],scenePlaceHits[k][1],scenePlaceHits[k][2],scenePlaceHits[k][3]});
+        for(int k=0;k<scenePvpCount;++k)targets.push_back({scenePvpRects[k][0],scenePvpRects[k][1],scenePvpRects[k][2],scenePvpRects[k][3]});
+        for(int k=0;k<sceneComposeHitCount;++k)targets.push_back({sceneComposeHits[k][0],sceneComposeHits[k][1],sceneComposeHits[k][2],sceneComposeHits[k][3]});
+        for(int k=0;k<sceneSquadButtonCount;++k)targets.push_back({sceneSquadButtons[k][0],sceneSquadButtons[k][1],sceneSquadButtons[k][2],sceneSquadButtons[k][3]});
+        auto hits=[](const float* a,const std::array<float,4>& q){ return a[0]<q[2] && q[0]<a[2] && a[1]<q[3] && q[1]<a[3]; };
+        if(sceneLegendOn) {
+            const float* b=sceneLegendRow;
+            if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::puts("FAIL legend off the screen");}
+            for(const auto& q:targets)if(hits(b,q)){++textFailed;std::puts("FAIL legend title under another target");break;}
+        }
+        static const Tx kLegendWords[]={Tx::legendYou,Tx::legendSquad,Tx::legendFriendly,Tx::legendVehicle,Tx::legendAircraft,
+            Tx::legendHelicopter,Tx::legendEmpty,Tx::legendCarrier,Tx::legendLargeEnemy,Tx::legendLargeEnemyAir,Tx::legendObjective,
+            Tx::legendEnemy,Tx::legendEnemyFlying,Tx::legendLock,Tx::legendNearestEnemy};
+        int words=0;
+        for(const Drew& d:drew)for(const Tx w:kLegendWords)if(d.text==Tr(w)) {
+            ++words;
+            const float a[4]={d.x0,d.y0,d.x1,d.y1};
+            for(const auto& q:targets)if(hits(a,q)){++textFailed;std::printf("FAIL legend word %s under a target\n",Narrow(d.text).c_str());break;}
+        }
+        if(sceneLegendOpen && !pad && words!=static_cast<int>(sizeof(kLegendWords)/sizeof(kLegendWords[0])))
+            {++textFailed;std::printf("FAIL open legend: %d words drawn\n",words);}
+    }
     // The squad panel (the user, 2026-10-09: "小队太多了…看不过来"): folded, the rows on foot that take orders, the rest
     // (a script's) in the summary row that opens it; open, every row and the row that folds it.
     int ranks[16];
@@ -2372,6 +2411,11 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_place_narrow",700.0f,60.0f,20.0f,false,9,1280,1.0f,false,false,false,2);
     MapScene(dir,L"map_place_payload",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,false,2);
     MapScene(dir,L"map_place_online",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,true,3);
+    // The legend unfolded at the dock's foot under the open 「摆放」 (the user, 2026-10-19: 「操作区域和图例冲突了」).
+    sceneLegendOpen=true;
+    MapScene(dir,L"map_place_legend",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,false,2);
+    MapScene(dir,L"map_place_legend_narrow",700.0f,60.0f,20.0f,false,9,1280,1.0f,true,false,false,2);
+    sceneLegendOpen=false;
     StatsScenes(dir);
     StockTank(ground);
     failed+=!MapDrawsMapAlone(ground,sceneStock.hull);

@@ -628,22 +628,30 @@ HUDTEXT(debugSpawnEnemies41,L"EDF4.1 ENEMIES",L"EDF4.1 敌人",L"EDF4.1 敵人",
 
 // --- The test range's 「摆放」 panel on the M map (hud.cpp MapPlacePanel; range_place.h, mapcmd.cpp; ini RangePlace) ---
 HUDTEXT(placeTitle,L"PLACE",L"摆放",L"擺放",L"配置")
-HUDTEXT(placeTabTip,L"Place vehicles and enemies on the map (, . / keys, D-pad)",L"在地图上摆放载具和敌人（, . / 键，手柄十字键）",
-        L"在地圖上擺放載具和敵人（, . / 鍵，手把十字鍵）",L"マップにビークルと敵を配置（, . / キー、十字キー）")
-HUDTEXT(placeHintMouse,L"Click a row, then the map: one a click   Right click: stop",L"点一行，再点地图：每点一次放一个   右键：取消",
-        L"點一行，再點地圖：每點一次放一個   右鍵：取消",L"行をクリック、次にマップ：1 回で 1 体   右クリック：中止")
-HUDTEXT(placeHintKeys,L", . pick   / category   Enter: at the pointer   Backspace: close",L", . 选择   / 换分类   Enter：放在指针处   Backspace：收起",
-        L", . 選擇   / 換分類   Enter：放在指標處   Backspace：收起",L", . 選択   / 分類   Enter：ポインターの位置   Backspace：閉じる")
-HUDTEXT(placeHintAll,L"Not preloaded: RangePlaceAll=1 in the ini preloads them all",L"未预载的：ini 里 RangePlaceAll=1 才全部预载",
-        L"未預載的：ini 裡 RangePlaceAll=1 才全部預載",L"未プリロード：ini の RangePlaceAll=1 ですべてプリロード")
-HUDTEXT(placeHintPad,L"D-pad: pick / category   A: place at the centre   B: close",L"十字键：选择 / 换分类   A：放在屏幕中心   B：收起",
-        L"十字鍵：選擇 / 換分類   A：放在畫面中心   B：收起",L"十字キー：選択 / 分類   A：画面中央に配置   B：閉じる")
+HUDTEXT(placeTabTip,L"Place vehicles, enemies and soldiers. Keys: , . pick   / category   Enter: at the pointer   Backspace: close",
+        L"摆放载具、敌人和士兵。键盘：, . 选择   / 换分类   Enter 放在指针处   Backspace 收起",
+        L"擺放載具、敵人和士兵。鍵盤：, . 選擇   / 換分類   Enter 放在指標處   Backspace 收起",
+        L"ビークル・敵・兵士を配置。キー：, . 選択   / 分類   Enter ポインター位置   Backspace 閉じる")
+HUDTEXT(placeHintMouse,L"Click a row, then the map (one a click)   Right click: stop   Wheel: scroll",
+        L"点一行再点地图（每点一次放一个）  右键取消  滚轮翻动",L"點一行再點地圖（每點一次放一個）  右鍵取消  滾輪翻動",
+        L"行をクリック→マップ（1 回 1 体）  右クリック：中止  ホイール：スクロール")
+HUDTEXT(placeOpenMouse,L"click to open",L"点击展开",L"點擊展開",L"クリックで開く")
+HUDTEXT(placeOpenPad,L"D-pad: open",L"十字键展开",L"十字鍵展開",L"十字キーで開く")
+HUDTEXT(placePage,L"page %d / %d",L"第 %d / %d 页",L"第 %d / %d 頁",L"%d / %d ページ")
+HUDTEXT(placePageUpTip,L"Previous page (the wheel scrolls too)",L"上一页（滚轮也可翻动）",L"上一頁（滾輪也可翻動）",L"前のページ（ホイールでもスクロール）")
+HUDTEXT(placePageDownTip,L"Next page (the wheel scrolls too)",L"下一页（滚轮也可翻动）",L"下一頁（滾輪也可翻動）",L"次のページ（ホイールでもスクロール）")
+
+HUDTEXT(placeHintPad,L"D-pad: pick / category   A: place at the centre   B: close",L"十字键 选择 / 换分类   A 放在屏幕中心   B 收起",
+        L"十字鍵 選擇 / 換分類   A 放在畫面中心   B 收起",L"十字キー 選択 / 分類   A 画面中央に配置   B 閉じる")
 HUDTEXT(placeOnline,L"Only enemy spawns sync online; other categories are unavailable",
         L"仅敌人支持联机同步生成；其它类别暂不可用",L"僅敵人支援連線同步生成；其它類別暫不可用",
         L"オンライン同期は敵の配置のみ対応。他のカテゴリは現在使用できません")
 HUDTEXT(placeOnlineRow,L" (offline category)",L"（此类暂不支持联机）",L"（此類暫不支援連線）",L"（この種類はオンライン未対応）")
 HUDTEXT(placeMissing,L" (not installed)",L"（未安装）",L"（未安裝）",L"（未インストール）")
-HUDTEXT(placeNotPreloaded,L" (not preloaded)",L"（未预载）",L"（未預載）",L"（未プリロード）")
+HUDTEXT(placeNotPreloaded,L" (loads when placed)",L"（放置时加载）",L"（放置時載入）",L"（配置時に読み込み）")
+HUDTEXT(placeLoading,L" (loading...)",L"（加载中…）",L"（載入中…）",L"（読み込み中…）")
+HUDTEXT(placeLoadingNote,L"%ls: loading, placed there as soon as it is loaded",L"%ls：正在加载，加载完成后自动放在点选处",
+        L"%ls：正在載入，載入完成後自動放在點選處",L"%ls：読み込み中、完了したら指定位置に配置")
 HUDTEXT(placeBroken,L" (faulted: off)",L"（出错，已停用）",L"（出錯，已停用）",L"（エラー：停止中）")
 HUDTEXT(placeArmed,L"%ls: click the map (right click: stop)",L"摆放 %ls：在地图上点击放下（右键取消）",
         L"擺放 %ls：在地圖上點擊放下（右鍵取消）",L"%ls：マップをクリックして配置（右クリックで中止）")
@@ -657,14 +665,14 @@ HUDTEXT(placeNoGround,L"No ground under the pointer",L"指针下没有地面",L"
 HUDTEXT(pvpTitleState,L"PVP: %ls  TEAM %d",L"对战：%ls  阵营 %d",L"對戰：%ls  陣營 %d",L"対戦：%ls  チーム %d")
 HUDTEXT(pvpOn,L"ON",L"开",L"開",L"有効")
 HUDTEXT(pvpOff,L"OFF",L"关",L"關",L"無効")
-HUDTEXT(pvpExpand,L"Hover to expand",L"指向展开",L"指向展開",L"ポインタで開く")
+HUDTEXT(pvpExpand,L"Click to expand",L"点击展开",L"點擊展開",L"クリックで開く")
 HUDTEXT(pvpFocusPad,L"R3: PVP",L"R3 对战",L"R3 對戰",L"R3 対戦")
 HUDTEXT(pvpEnable,L"Enable PVP (host)",L"开启对战（仅房主）",L"開啟對戰（僅房主）",L"対戦を有効にする（ホスト）")
 HUDTEXT(pvpDisable,L"Disable PVP (host)",L"关闭对战（仅房主）",L"關閉對戰（僅房主）",L"対戦を無効にする（ホスト）")
 HUDTEXT(pvpTeam1,L"Join team 1",L"加入阵营 1",L"加入陣營 1",L"チーム 1 に参加")
 HUDTEXT(pvpTeam2,L"Join team 2",L"加入阵营 2",L"加入陣營 2",L"チーム 2 に参加")
 HUDTEXT(pvpHostOnly,L"Only the host can change PVP mode",L"仅房主可切换对战模式",L"僅房主可切換對戰模式",L"対戦モードを変更できるのはホストのみ")
-HUDTEXT(pvpMouseHint,L"Hover to expand; click a row to change your team",L"指向展开；点击条目更改自己的阵营",L"指向展開；點擊項目更改自己的陣營",L"ポインタで開き、行をクリックして自分のチームを変更")
+HUDTEXT(pvpMouseHint,L"Click the title to open / fold; click a row to change your team",L"点击标题展开 / 收起；点击条目更改自己的阵营",L"點擊標題展開 / 收起；點擊項目更改自己的陣營",L"タイトルをクリックで開閉、行をクリックで自分のチームを変更")
 HUDTEXT(pvpPadHint,L"R3: PVP / Up-Down: select / A: confirm / B: back",L"R3 聚焦对战 / ↑↓ 选择 / A 确认 / B 返回",
         L"R3 聚焦對戰 / ↑↓ 選擇 / A 確認 / B 返回",L"R3 対戦操作 / ↑↓ 選択 / A 決定 / B 戻る")
 HUDTEXT(pvpReady,L"Host sets the mode; each player chooses their own team",L"房主设置模式；每位玩家选择自己的阵营",L"房主設定模式；每位玩家選擇自己的陣營",L"ホストがモードを設定し、各プレイヤーが自分のチームを選択")

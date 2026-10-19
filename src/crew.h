@@ -276,8 +276,9 @@ struct Config {
     float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
     float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
     // The M map's 「摆放」 panel in the test range's mission (range_place.h; the debug spawn tool's catalog and making,
-    // whatever DebugSpawn says): on by default; enemies use the host-authoritative online transaction. RangePlaceAll: every row preloaded, the heavy EDF4.1 ones
-    // too (Entry::preload false: another 17 MB model each); off: those listed as not preloaded.
+    // whatever DebugSpawn says): on by default; enemies use the host-authoritative online transaction. RangePlaceAll: every
+    // row preloaded at the mission's start (Entry::preload false: a model archive of its own); off: those load the first
+    // time they are placed (debug_spawn.cpp RequestLoad).
     bool rangePlace=true;
     bool rangePlaceAll=false;
     bool roomLoadout=true;          // the room / HQ support loadout menu (room_ui.cpp; 0 at load: nothing installed, both
@@ -1288,8 +1289,10 @@ struct DebugSpawnCue {
     wchar_t note[96];         // ...a support call's own answer (support_dispatch.cpp SupportCallAt), else empty
     int keys[5];              // the ini's keys: toggle, prev, next, category, spawn
 };
+// kDebugSpawnLoading: the row was not loaded this mission; its load is queued (debug_spawn.cpp RequestLoad) and the
+// spawn is made at the same place as soon as the game reports its resources complete.
 enum DebugSpawnStatus : int { kDebugSpawnNone, kDebugSpawnDone, kDebugSpawnFailed, kDebugSpawnOnline, kDebugSpawnNoPlace,
-                                   kDebugSpawnRequested, kDebugSpawnRefused };
+                                   kDebugSpawnRequested, kDebugSpawnRefused, kDebugSpawnLoading };
 bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: nothing to show
 }  // namespace crew
 

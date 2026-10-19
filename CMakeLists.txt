@@ -784,6 +784,10 @@ set_tests_properties(sound_pack PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # It never launches a crewed aircraft without its crew (JetLaunch / HeliLaunch): those come as support calls.
 add_test(NAME debug_spawn_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_launch_guard.py")
 set_tests_properties(debug_spawn_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# An empty vehicle it makes is CreateVehicle2's (0x633280), never SetLevel's: off the native AI list, so the player in
+# it drives and fires; with EDF6_NATIVE_DLL its signatures are compared with the DLL.
+add_test(NAME debug_spawn_vehicle_level_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/debug_spawn_vehicle_level_guard.py")
+set_tests_properties(debug_spawn_vehicle_level_guard PROPERTIES ENVIRONMENT "PYTHONIOENCODING=utf-8;EDF6_NATIVE_DLL=${EDF6_NATIVE_DLL}")
 # The doll drone's doll follows its drone once a frame, whoever flies it (src/jet_carrier.cpp DollsFollow).
 add_test(NAME doll_follow_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/doll_follow_guard.py")
 set_tests_properties(doll_follow_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
