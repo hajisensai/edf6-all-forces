@@ -32,9 +32,11 @@ enum : std::uint32_t {
     kFeatBikeGunner=8u,        // the 408's sidecar gunner seat (edf41bike.cpp, #219)
     kFeatOutfit41Colours=16u,  // the EDF4.1 outfit keeps its own colours, in the member record too (#226)
     kFeatNoClimb41=32u,        // EDF4.1 friends do not enter EDF6's climb (#225)
+    kFeatBikeGrounded=64u,     // the 408's gun is an animated part, not a keyframed body pinning the chassis in the air;
+                               // its fall-out seats are its own (the object SGO's data, docs/edf41-bike-re.md 「悬空」)
 };
 inline constexpr std::uint32_t kFeatures=kFeatHostSettings|kFeatCreditReload41|kFeatBikeCarDrive|kFeatBikeGunner|
-                                         kFeatOutfit41Colours|kFeatNoClimb41;
+                                         kFeatOutfit41Colours|kFeatNoClimb41|kFeatBikeGrounded;
 inline constexpr std::size_t kVersionMost=24;
 
 struct Word {

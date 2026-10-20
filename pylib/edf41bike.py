@@ -168,6 +168,46 @@ def native_gun_rows(rows: object) -> list:
     return out
 
 
+def joints(physics: bytes) -> list[tuple[str, str]]:
+    """The SHKT's proxy constraints as (child, parent) bare proxy names, in file order (the order CarBase's ragdoll keeps:
+    the 2026-10-21 run logged `constraint 0: proxy 1 (gun) - proxy 0 (body)` for the first instance, gun <-> body)."""
+    tf = hk2014.read(physics)
+    def name(ref: int) -> str:
+        return str(tf.objects[ref - 1]['name']).removeprefix('RagDollProxys.')
+    return [(name(o['entities'][0]), name(o['entities'][1])) for o in tf.objects if o.type.name == 'hkpConstraintInstance']
+
+
+def pinned(members: dict, physics: bytes) -> list[tuple[str, str]]:
+    """The constraints that join a keyframed proxy to a dynamic one once CarBase has set the modes: what held the 408 in
+    the air (docs/edf41-bike-re.md 「悬空」). CarBase resets every proxy to dynamic mode 4 (0x6E40B0) and adds every
+    constraint between two bodies in the world (0x6E4A70), then walks car_base_simulation_node: a row value 1 makes that
+    proxy keyframed (0x66428F -> 0x6ED480 mode 2: motion type 1, kept in the world) and leaves its constraint; a row value
+    0 (0x6642A2 -> 0x6E94E0 -> 0x6E96C0, recursive) removes the constraint to its parent (0x6E9725 -> 0x6EC840) and takes
+    the proxy and its children out of the world (constructor default mode 1, +0xC8). A keyframed body has infinite mass:
+    a dynamic chassis joined to it can only move where the keyframed body is moved, and its target is the chassis' own
+    pose of the frame before, so it stays where it was made (the run: gun mode 2 / motion 1 / constraint added, body never
+    fell)."""
+    links = joints(physics)
+    parent = dict(links)
+    children: dict[str, list[str]] = {}
+    for child, up in links:
+        children.setdefault(up, []).append(child)
+    mode = {n: 4 for n in PROXIES}
+    removed: set[tuple[str, str]] = set()
+    def default(node: str) -> None:
+        if node in parent:
+            removed.add((node, parent[node]))
+        mode[node] = 1
+        for child in children.get(node, ()):
+            default(child)
+    for name, value in members['car_base_simulation_node']:
+        if value == 0:
+            default(name)
+        elif value == 1:
+            mode[name] = 2
+    return [(a, b) for a, b in links if (a, b) not in removed and {mode[a], mode[b]} == {2, 4}]
+
+
 def check(members: dict, md: mdb.Mdb, physics: bytes) -> None:
     names = {md.name_of(b.name) for b in md.bones}
     if MARKER not in names or members.get('car_aim_node') != []:
@@ -202,8 +242,15 @@ def check(members: dict, md: mdb.Mdb, physics: bytes) -> None:
     required.update(row[0] for row in members['car_base_breaking_parts'][1])
     if any(row[0] == 'gun' for row in members['car_base_rigid_body']):
         raise ValueError('408 gun must remain animation-driven, not a dynamic CarBase body')
-    if [row for row in members['car_base_simulation_node'] if row[0] == 'gun'] != [['gun', 1]]:
-        raise ValueError('408 gun needs an explicit native kinematic mode 2 simulation row')
+    if [row for row in members['car_base_simulation_node'] if row[0] == 'gun'] != [['gun', 0]]:
+        raise ValueError('408 gun needs its one animation-driven simulation row 0, like a stock car moving part')
+    held = pinned(members, physics)
+    if held:
+        raise ValueError(f'408 keyframed proxies pin the dynamic chassis through their constraints: {held}')
+    seats = len(members['vehicle_riding_position'])
+    fall = members['car_base_fall_out'][4]
+    if not isinstance(fall, list) or any(not isinstance(i, int) or not 0 <= i < seats for i in fall):
+        raise ValueError(f'408 car_base_fall_out names seats it does not have: {fall} of {seats}')
     for key in ('vehicle_setup', 'mission_setup'):
         if sgo.plain(members[key][2]) != sgo.plain(native_gun_rows(members[key][2])):
             raise ValueError('408 Car gun needs a native BodyRecoil pair')
@@ -252,13 +299,14 @@ def build(games, root: str) -> dict[str, bytes]:
     # Keep both directions, including gun. The runtime applies its live gun pose
     # after native physics readback; death returns to the untouched wreck path.
     members['car_base_body_name'] = 'body'
-    # Keep all eight source proxies, but only the seven chassis/suspension parts
-    # are dynamic. The gun must retain native mode 2 (animation -> kinematic
-    # target), as in EDF4.1, rather than CarBase's mode 4 physics ownership.
+    # Keep all eight source proxies; the gun is not a dynamic CarBase body: its bone is posed from the gunner's Aim
+    # (src/edf41bike.cpp Pose408), never by physics.
     members['car_base_rigid_body'] = [[n, -1.0, -1.0, -1.0, -1.0, [], []] for n in sorted(PROXIES - {'gun'})]
-    # CarBase first resets ALL proxies to mode 4 (6E40B0). Row value 1
-    # explicitly selects mode 2 (66428F -> 6ED480); omission stays dynamic.
-    members['car_base_simulation_node'] = [[n, 0] for n in WHEELS] + [['gun', 1]]
+    # CarBase first resets ALL proxies to mode 4 (6E40B0); a row value 0 takes the proxy out of the world and removes
+    # its constraint to the body (6E94E0 -> 6E96C0), as for the wheels and the stock V603's spinning radars. The gun was
+    # row 1 (mode 2, keyframed) until 2026-10-21: still joined to the body by its ragdoll constraint it held the
+    # dynamic chassis where it was made, in the air (pinned(), docs/edf41-bike-re.md 「悬空」).
+    members['car_base_simulation_node'] = [[n, 0] for n in WHEELS] + [['gun', 0]]
     wheel = members['car_base_wheel'][0]
     members['car_base_wheel'] = []
     for i, old in enumerate(source['vehicle_tire']):
@@ -287,6 +335,10 @@ def build(games, root: str) -> dict[str, bytes]:
         [*copy.deepcopy(source['vehicle_riding_position'][0][:3]), '512_KEITRUCK_DRIVER', 15, 5.0, 0],
         [*copy.deepcopy(source['vehicle_riding_position'][1][:3]), '401_STRIKER_SHEET1', 15, 0.0, 6]]
     members['vehicle_weapon_setting'] = [['gun', 1]]
+    # car_base_fall_out [4]: the seats thrown off at a hard impact. The template's are V512's own [1, 2, 3, 4] (its
+    # bed); 0x673F41 indexes the seat array with them unchecked (seat * 0x340 + 0x268), so on the two-seat 408 the
+    # first hard knock read past it (2026-10-21 run: C0000005 at EDF.dll+0x673F5A). Every seat but the driver's.
+    members['car_base_fall_out'][4] = list(range(1, len(members['vehicle_riding_position'])))
     gun_name = WEAPONS['v_408motorbike_gun.sgo'][0]
     gun_rows = native_gun_rows(source['vehicle_setup'][2])
     if len(gun_rows) != 1:

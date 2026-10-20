@@ -1780,7 +1780,7 @@ add_test(NAME pvp_native_contract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURC
 set_tests_properties(pvp_native_contract PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME edf41_vehicle_spawn COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf41_vehicle_spawn.py")
 add_test(NAME edf41_vehicle_spawn_data COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf41_vehicle_spawn_data.py")
-target_sources(EDF6VehicleCrew PRIVATE src/edf41bike.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41bike.cpp src/edf41bike_diag.cpp)
 add_executable(edf41bike_check EXCLUDE_FROM_ALL tests/edf41bike_test.cpp)
 target_compile_options(edf41bike_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks edf41bike_check)

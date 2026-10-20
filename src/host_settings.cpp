@@ -144,7 +144,7 @@ int HostSettingsLines(roomsync::SyncLine* out,int capacity) noexcept {
     if(n<capacity && (b.silent || b.differing)) {
         wchar_t names[96]{};
         const struct { std::uint32_t bit; Tx text; } kNames[]={{kFeatBikeGunner,Tx::featBikeGunner},{kFeatCreditReload41,Tx::featCreditReload41},
-            {kFeatBikeCarDrive,Tx::featBikeCarDrive},{kFeatOutfit41Colours,Tx::featOutfit41Colours},{kFeatNoClimb41,Tx::featNoClimb41},
+            {kFeatBikeCarDrive,Tx::featBikeCarDrive},{kFeatOutfit41Colours,Tx::featOutfit41Colours},{kFeatNoClimb41,Tx::featNoClimb41},{kFeatBikeGrounded,Tx::featBikeGrounded},
             {kFeatHostSettings,Tx::featHostSettings}};
         for(const auto& k:kNames) {
             if(!(b.missing&k.bit))continue;

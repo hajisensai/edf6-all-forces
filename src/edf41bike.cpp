@@ -3,9 +3,11 @@
 // calls 2D6BE0 with the SAME local matrix twice, then builds worlds and sends
 // animation-driven proxies to physics. EDF6 VehicleWeaponAim::Pose 5FACD0
 // implements that same-bone operation too. Keep the real source's eight
-// proxies; the data adapter explicitly selects gun simulation row 1 -> native
-// mode 2 after CarBase resets all proxies to dynamic mode 4. No guessed angular
-// velocity, fabricated hinge or substitute bike.
+// proxies; the data adapter gives the gun simulation row 0 (out of the physics
+// world, its joint to the body removed, posed from the bone like the wheels):
+// as row 1 (native mode 2, keyframed) its ragdoll joint held the dynamic chassis
+// where it was made, in the air (docs/edf41-bike-re.md 「悬空」, 2026-10-21 run).
+// No guessed angular velocity, fabricated hinge or substitute bike.
 #include "crew.h"
 #include "edf41bike.h"
 #include "host_settings.h"
@@ -98,14 +100,25 @@ void RegisterMappings(unsigned char* v,unsigned char* aim) noexcept {
 // from the source gun entry. Never copy an Aim containing shared references.
 void __fastcall SetWeapon(unsigned char* v,void* aim,void* entry,int holder) {
     unsigned char* target=nullptr;
+    int why=0;   // Debug=1 log: 1 off / not allowed, 2 not the 408, 3 no known seat-1 Aim, 4 routed, 5 unreadable
     __try {
-        if(on && Edf41BikeGunnerAllowed() && Tagged(v)) {
-            auto* seat=Operator(v);
-            if(seat && KnownAim(Aim(seat)))target=Aim(seat);
+        why=1;
+        if(on && Edf41BikeGunnerAllowed()) {
+            why=2;
+            if(Tagged(v)) {
+                why=3;
+                auto* seat=Operator(v);
+                if(seat && KnownAim(Aim(seat))){target=Aim(seat);why=4;}
+            }
         }
-    } __except(EXCEPTION_EXECUTE_HANDLER) { target=nullptr; }
+    } __except(EXCEPTION_EXECUTE_HANDLER) { target=nullptr;why=5; }
     reinterpret_cast<SetWeaponFn>(image+kSetWeapon)(v,target ? target : aim,entry,holder);
     if(target)RegisterMappings(v,target);
+    if(Cfg().debug) {   // Debug=1: where the Car's gun went, and the Aim's turn parameters as 5FB810 left them
+        const auto* built=target ? target : static_cast<unsigned char*>(aim);
+        Log("EDF41BIKE weapon build v=%p holder %d why=%d aim=%p turn=(%.3f,%.3f,%.3f)",v,holder,why,built,
+            At<float>(built,0x90),At<float>(built,0x94),At<float>(built,0x98));
+    }
 }
 
 bool Ours(unsigned char* v) noexcept {
@@ -136,6 +149,20 @@ void Update(unsigned char* v) noexcept {
     // interpolation-only update with no occupant and no input/fire rights.
     reinterpret_cast<AimStepFn>(table[2])(aim,input);
     Limits(aim);
+    if(Cfg().debug && decision.input) {   // Debug=1: the gunner's live angles and trigger, once a second, 120 lines a run
+        static ULONGLONG said=0;
+        static int lines=0;
+        const ULONGLONG now=GetTickCount64();
+        if(now-said>=1000 && lines<120) {
+            said=now;++lines;
+            // +0x90..+0x98 the Aim's turn parameters (5FB810 from the gun entry), axis +0x0C the turn speed (5FBC00)
+            Log("EDF41BIKE gunner v=%p yaw=%.3f [%.3f,%.3f] v%.4f pitch=%.3f [%.3f,%.3f] v%.4f turn=(%.3f,%.3f,%.3f) remote=%d input=(%.2f,%.2f) fire=%d",
+                v,At<float>(aim,kAimAxes+kAxisAngle),At<float>(aim,kAimAxes+kAxisMin),At<float>(aim,kAimAxes+kAxisMax),At<float>(aim,kAimAxes+0xC),
+                At<float>(aim,kAimAxes+kAxisStride+kAxisAngle),At<float>(aim,kAimAxes+kAxisStride+kAxisMin),At<float>(aim,kAimAxes+kAxisStride+kAxisMax),
+                At<float>(aim,kAimAxes+kAxisStride+0xC),At<float>(aim,0x90),At<float>(aim,0x94),At<float>(aim,0x98),At<std::uint8_t>(aim,0xC0),
+                input[0],input[1],decision.fire ? 1 : 0);
+        }
+    }
     if(!decision.fire)return;
     const auto holders=At<void* const*>(seat,kSeatHolders);
     const auto count=At<std::uint64_t>(seat,kSeatHoldersCount);
@@ -144,6 +171,7 @@ void Update(unsigned char* v) noexcept {
 }
 void __fastcall Frame(unsigned char* v) {
     reinterpret_cast<VehicleFn>(nextFrame)(v);
+    if(Cfg().debug)Edf41BikeDiagFrame(v);   // Debug=1: every Car's first minute of physics (edf41bike_diag.cpp)
     if(!on || !Edf41BikeGunnerAllowed())return;   // a member's build lacks the seat: a stock Car for everyone
     __try { if(Ours(v))Update(v); }
     __except(EXCEPTION_EXECUTE_HANDLER) { Log("EDF41BIKE gunner frame rejected unreadable native state v=%p",v); }
@@ -152,8 +180,8 @@ void Pose408(unsigned char* v,unsigned char* gun,unsigned char* aim) noexcept {
     reinterpret_cast<SyncFn>(image+kPhysicsToBones)(v+kRagdoll);
     auto* local=reinterpret_cast<float*>(gun+kBoneLocal506);
     // The same local matrix twice is the original 408's single-bone branch.
-    // gun is an animation-driven proxy: the final sync moves its actual
-    // collision body and retains the original ragdoll's two-axis limits.
+    // gun is an animation-driven proxy (mode 1, out of the world): the final
+    // sync only carries its body along with the bone (0x6EDAB6).
     reinterpret_cast<AimPoseFn>(image+kAimPose)(aim,local,local);
     reinterpret_cast<WorldFn>(image+kBuildWorld)(v+kModelInst506,v+0x60);
     reinterpret_cast<SyncFn>(image+kBonesToPhysics)(v+kRagdoll);

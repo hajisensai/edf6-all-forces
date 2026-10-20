@@ -11,7 +11,7 @@ unsigned char vehicle[0x3000]{},seats[2*edf::kSeatStride]{},gun[0x110]{},marker[
 crew::Config config{};
 edf::Rider rider=edf::Rider::player;
 bool tagged=true,marked=true,living=true,npc=false,map=false,matches=true,gunnerAllowed=true;
-int chainCalls=0,failChain=0,sets=0,steps=0,pulls=0,frames=0,poses=0,registrations=0;
+int diags=0,diagSawFrames=-1,chainCalls=0,failChain=0,sets=0,steps=0,pulls=0,frames=0,poses=0,registrations=0;
 void* aimed=nullptr;void* pulled=nullptr;void* entrySeen=nullptr;int holderSeen=-1;
 void* callHook=nullptr;
 float input[2]{};
@@ -62,6 +62,7 @@ const Config& Cfg() noexcept{return fixture::config;}
 void Log(const char*,...) noexcept{}
 bool MapHoldsKeys() noexcept{return fixture::map;}
 bool Edf41BikeGunnerAllowed() noexcept{return fixture::gunnerAllowed;}
+void Edf41BikeDiagFrame(unsigned char*) noexcept{++fixture::diags;fixture::diagSawFrames=fixture::frames;}
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept{return fixture::npc;}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept{
  if(!fixture::marked)return nullptr;
@@ -105,6 +106,11 @@ int main(){
  reinterpret_cast<crew::SetWeaponFn>(callHook)(vehicle,originalAim,&entry,7);crew::Frame(vehicle);crew::Pose(vehicle);
  Check(sets==1&&aimed==originalAim&&registrations==0&&frames==1&&steps==0&&pulls==0&&poses==1,"a room without the gunner seat: the stock Car everywhere");
  Reset();Check(crew::InstallEdf41Bike(),"reinstall for disabled lifecycle");config.enabled=false;crew::Frame(vehicle);crew::Pose(vehicle);Check(poses==1&&steps==0&&pulls==0,"disabled feature leaves original callbacks and no owned input");
+ // The hover diagnostic (edf41bike_diag.cpp): every Car frame with Debug=1, after the native frame, whatever the gunner
+ // seat's state (a closed room or a disabled feature included); never with Debug=0.
+ Reset();Check(crew::InstallEdf41Bike(),"reinstall for the diagnostic");diags=0;config.debug=true;gunnerAllowed=false;
+ crew::Frame(vehicle);Check(diags==1&&frames==1&&diagSawFrames==1,"Debug=1: the diagnostic samples each Car frame after the native one");
+ config.debug=false;gunnerAllowed=true;crew::Frame(vehicle);Check(diags==1&&frames==2,"Debug=0: no diagnostic");
  VirtualFree(crew::image,0,MEM_RELEASE);crew::image=nullptr;
  std::puts("original 408 production routing and lifecycle checks passed");
 }

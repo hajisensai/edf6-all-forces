@@ -6,6 +6,8 @@
 namespace crew {
 bool InstallEdf41Bike() noexcept;
 bool IsEdf41Bike(const void* vehicle) noexcept;
+// Debug=1: a Vehicle_Car's position, clearance and ragdoll proxy / constraint states over its first frames (edf41bike_diag.cpp).
+void Edf41BikeDiagFrame(unsigned char* vehicle) noexcept;
 namespace edf41bike {
 constexpr wchar_t kMarker[]=L"edf41_motorbike";
 constexpr wchar_t kSchema[]=L"edf41_bike";
