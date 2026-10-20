@@ -402,7 +402,7 @@ def _convex_check(shape):
     _req(radius>0 and math.isfinite(radius),'invalid convex radius')
     _req(bool(np.isfinite(N).all()) and len(N)>=4,'invalid convex planes')
     _req(np.max(np.abs(np.linalg.norm(N[:,:3],axis=1)-1))<2e-4,'nonunit convex plane')
-    outside=float((P@N[:,:3].T+N[:,3]).max())
+    outside=sc.hull_outside(points,planes)        # the SHKT checker's measure (pylib/shkt_check.py)
     _req(outside<max(1e-4,.0001*float(np.ptp(P,axis=0).max())),'convex planes miss vertices')
     hull=hkshape.read_hull(shape)
     bad=hkshape.hull_problems(hull)
