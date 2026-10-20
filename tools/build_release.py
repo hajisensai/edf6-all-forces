@@ -43,7 +43,7 @@ GENERATOR_NAME = os.path.splitext(installer.GENERATOR)[0]   # EDF6VehicleCrew.ge
 # graft_pure, ledger, mdb, mdb_jet, modfiles, rootcpk, sgo, support_loadout, vcobjects).
 GENERATOR_EXCLUDES = ('numpy', 'PIL', 'tkinter', 'matplotlib', 'pandas', 'installer', 'testhub', 'procmesh', 'jet_models',
                       'aircraft_collision', 'support_config', 'gamelease', 'urllib3', 'requests')
-RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'cockpits')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model.MODEL_SUBDIR, cockpits.ASSET_DIR
+RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'cockpits', 'wt_m163', 'wt_bmpt')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model.MODEL_SUBDIR, cockpits.ASSET_DIR, wt_tracked.FOLDERS
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 

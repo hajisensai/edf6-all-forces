@@ -1,6 +1,8 @@
-"""Newly authored low-poly M163 VADS (M113 hull and six-barrel M61 Vulcan).
+"""The M163 VADS (M113 hull and six-barrel M61 Vulcan).
 
-Procedural exterior, not a downloaded asset or a stock vehicle renamed M163.
+When the War Thunder model folder is there (models/wt_m163: pylib/wt_tracked.py, docs/wt-tracked-models.md) every
+function below builds from it; else the procedural exterior that follows, not a downloaded asset or a stock vehicle
+renamed M163.
 Reference proportions: MCIA Saudi Arabia Country Handbook, M163 entry (4.86 x
 2.85 x 2.736 m, six-barrel 20 mm). The six barrels and clamps use an independently
 posed visual rotor under the native left slide. Native physical bone binds
@@ -15,6 +17,7 @@ import math
 import os
 
 import tracked_combat_model as t
+import wt_tracked as wt
 from tracked_combat_model import HOST_ARC, HOST_MDB, HOST_CAS, TrackedCombatCheckError
 
 OUT_ARC = 'EDF6VC_VULCAN.MRAB'
@@ -39,6 +42,8 @@ EJECTIONS = {'left': ('cannon_slide_l', (.972215, 2.218, 0.0)),
 
 
 def parts(a: t.Assembly) -> None:
+    if wt.available('vulcan'):
+        return wt.parts(a, 'vulcan')
     t.chassis(a, 'BCDEF', *DIMENSIONS[:2], 1.61, True)
     turret = a.part('m163_turntable_and_turret_well', 'cannon_main')
     t.cylinder(turret, (0, 1.60, .10), (0, 1.80, .10), .91, 24)
@@ -95,6 +100,8 @@ def parts(a: t.Assembly) -> None:
 
 
 def muzzle_local(game) -> dict:
+    if wt.available('vulcan'):
+        return wt.muzzle_local(game, 'vulcan')
     host, _rab = t.stock(game)
     a = t.Assembly(t.add_visual_bones(host, VISUAL_BONES))
     parts(a)
@@ -107,6 +114,8 @@ def _weapon_muzzles(a) -> dict:
 
 
 def ejection_local(game) -> dict:
+    if wt.available('vulcan'):
+        return wt.ejection_local(game, 'vulcan')
     host, _rab = t.stock(game)
     a = t.Assembly(host)
     for key, (bone, position) in EJECTIONS.items():
@@ -115,6 +124,11 @@ def ejection_local(game) -> dict:
 
 
 def build_with_info(game):
+    if wt.available('vulcan'):
+        arc, md, info = wt.build_with_info(game, 'vulcan')
+        info.update(visible_barrels=6, road_wheels_per_side=5, rotor_bone=ROTOR_BONE,
+                    barrel_rotation='independent visual rotor; actual shot activity drives native pre-worldbuild pose')
+        return arc, md, info
     arc, md, info = t.build_with_info(game, parts, 'M163 VADS / M61 Vulcan (procedural exterior)',
                                     DIMENSIONS, CAMERA, DRIVE_SCALE, VISUAL_BONES)
     a = t.Assembly(md)
@@ -133,6 +147,10 @@ def build(game) -> bytes:
 
 
 def check(arc: bytes, host=None) -> dict:
+    if wt.available('vulcan'):
+        result = wt.check(arc, 'vulcan', host)
+        result.update(visible_barrels=6, road_wheels_per_side=5)
+        return result
     result = t.check(arc, parts, host, VISUAL_BONES)
     result['visible_barrels'] = 6
     result['road_wheels_per_side'] = 5
@@ -140,7 +158,15 @@ def check(arc: bytes, host=None) -> dict:
 
 
 def animation(game, md=None) -> bytes:
+    if wt.available('vulcan'):
+        return wt.animation(game, 'vulcan', md)
     return t.animation(game, md)
+
+
+def collision_layout() -> dict | None:
+    """What tracked_collision fits each physics proxy to: the model folder's collision groups, None for the
+    procedural model (tracked_collision's own named-part rules)."""
+    return wt.collision_layout('vulcan') if wt.available('vulcan') else None
 
 
 def main(argv: list[str]) -> int:

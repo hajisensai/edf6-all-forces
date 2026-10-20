@@ -352,22 +352,33 @@ MESH_FITTED = True        # the collision fitted to the authored parts' mesh (Fa
                           # each part's box, the earlier approximation); docs/model-pipeline-2026-10-20.md
 
 
-def build(game,kind,md,parts,fitted=None):
+def build(game,kind,md,parts,fitted=None,layout=None):
     """Return (SHKT, ragdoll-binding SGO, vehicle SGO overrides, quantitative report). `fitted` (default MESH_FITTED):
-    each proxy's collision from its parts' own triangles (pylib/model_pieces.py) instead of stretched donor hulls."""
+    each proxy's collision from its parts' own triangles (pylib/model_pieces.py) instead of stretched donor hulls.
+    `layout` (a model folder's: pylib/wt_tracked.py collision_layout): proxy -> {'parts', 'target'} for every proxy,
+    in place of the procedural models' named-part rules; its model's bones moved, so the stock ragdoll is first
+    refitted to them (ragdoll_fit.fit: every proxy with its bone, the joints with their child)."""
     _req(kind in KINDS,f'unsupported tracked vehicle {kind}')
     raw=game.read('OBJECT',HOST)
     root=dsgo.parse(game.read('OBJECT','V603_FLAK.SGO')).root
     blob=root.get('ragdoll').items[1].data
-    targets=_targets(md,parts,kind)
+    if layout is None:
+        targets=_targets(md,parts,kind)
+        owners=_proxy_parts(md,parts,kind)
+    else:
+        import tracked_combat_model as tracked
+        stock_model,_rab=tracked.stock(game)
+        raw,blob=rf.fit(md,raw,blob,stock_model)
+        targets={proxy:np.asarray(row['target'],dtype=float) for proxy,row in layout.items()}
+        owners={proxy:list(row['parts']) for proxy,row in layout.items()}
     framed,binding,moved=_reframe(md,raw,blob,targets,kind)
     reader=sc.Shkt(framed)
     edit=_Editor(reader.tf)
     record=[]
     fitted=MESH_FITTED if fitted is None else fitted
-    owners=_proxy_parts(md,parts,kind)
     for body in reader.systems[0].bodies:
         name=body.name.removeprefix('ragdoll_')
+        _req(name in targets,f'no collision target for {body.name}')
         target=targets[name]
         local=_world_target_to_proxy(target,body.position,body.orientation)
         made=_fitted_shape(edit,body.shape,owners.get(name,[]),parts,body,local,body.mass) if fitted else None

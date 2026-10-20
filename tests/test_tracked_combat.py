@@ -56,8 +56,12 @@ class CatalogContractTests(unittest.TestCase):
 
 @unittest.skipUnless((Path(rootcpk.DEFAULT_GAME) / 'Root.cpk').is_file(), 'EDF6 Root.cpk is unavailable')
 class NativeAssetContractTests(unittest.TestCase):
+    """The procedural models' contracts (tests/test_wt_tracked.py: the War Thunder models')."""
     @classmethod
     def setUpClass(cls) -> None:
+        import wt_tracked
+        cls.addClassCleanup(setattr, wt_tracked, 'ENABLED', wt_tracked.ENABLED)
+        wt_tracked.ENABLED = False
         cls.game = rootcpk.default()
         cls.files = {kind: combat.build(cls.game.root, kind) for kind in combat.KINDS}
 
