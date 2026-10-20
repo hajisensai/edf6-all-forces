@@ -19,6 +19,7 @@ import graft_pure as g
 import hkcms
 import hkcms_build as hb
 import hkshape
+import model_pieces
 from mdb import bind_world
 import ragdoll_fit as rf
 import sgo
@@ -187,6 +188,66 @@ def _targets(md,parts,kind):
     return out
 
 
+def _proxy_parts(md,parts,kind):
+    """The authored parts each proxy's collision is made of: the parts _targets measures for it (its named parts, else
+    the parts whose bone it owns), so that the fitted pieces and the target box come from the same geometry."""
+    groups={}
+    for name,p in parts.items():
+        bone=p._rigid_bone
+        ancestry=[]
+        while bone>=0:
+            ancestry.append(md.name_of(md.bones[bone].name));bone=md.bones[bone].parent
+        owner=next((n for n in ancestry if n in ('cannon_l','cannon_r') or n.startswith('tire_move')),None)
+        if owner is None and ancestry[0]=='body':owner='body'
+        if owner is not None:groups.setdefault(owner,[]).append(name)
+    if kind=='vulcan':
+        groups['cannon_main']=['m163_turntable_and_turret_well']
+        groups['cannon_l']=['six_m61_barrels','m61_barrel_clamps']
+        groups['cannon_r']=['m61_elevation_cradle','m61_receiver']
+        groups['doppler_radar']=['m163_optical_sight_and_range_radar','optical_glass']
+        groups['tracking_radar']=['m163_rangefinder']
+        for side in 'lr':
+            groups[f'tire_moveG_{side}']=groups[f'tire_moveH_{side}']=[f'wheel_G_{side}',f'wheel_G_outer_{side}']
+    else:
+        groups['cannon_main']=['bmpt_turntable_and_low_turret']
+        groups['doppler_radar']=['commander_panorama_and_gunner_sights','panoramic_optics_glass']
+        groups['tracking_radar']=['bmpt_gunner_sight','gunner_optics_glass']
+    for side in 'lr':
+        for letter in ('A','B','C','D','E','F','G','H'):
+            if kind=='vulcan' and letter in 'GH':continue
+            groups[f'tire_move{letter}_{side}']=[f'wheel_{letter}_{side}']
+    return groups
+
+
+FITTED_RADIUS = .005      # m: the fitted hulls' convex radius (each hull squeezed by it: the same box with it)
+FITTED_TOLERANCE = .02    # m: a piece is cut until no vertex stands deeper than this inside its hull
+
+
+def _fitted_shape(edit, shape, names, parts, body, target, mass):
+    """The proxy's collision fitted to its authored parts (pylib/model_pieces.py): their triangles in the proxy's
+    frame as nearly convex pieces, each solid cut to its target box, each a hull with its own mass properties: a
+    compressed mesh of them for a compressed-mesh donor, else their one hull. None when nothing falls in the box."""
+    q=body.orientation;t=body.position
+    inv=rf.conj(q)
+    tris=[]
+    for n in names:
+        p=parts[n]
+        pts=[rf.rot(inv,rf.sub(tuple(v),t)) for v in p.pos]
+        tris+=[(pts[a],pts[b],pts[c]) for a,b,c in p.tris]
+    box=(tuple(float(x) for x in target[0]),tuple(float(x) for x in target[1]))
+    sets=model_pieces.fit(tris,box,FITTED_TOLERANCE,max_vertices=64,min_size=.01)
+    if not sets:
+        return None
+    if shape.type.full_name!='hknpCompressedMeshShape':
+        pts,r=model_pieces.shrink(hkshape.hull_vertices([p for s in sets for p in s]),FITTED_RADIUS)
+        new=hkshape.write_convex(edit.tf,hkshape.convex_data(model_pieces.reduce(pts,64),r),keep=shape)
+        return new,_shape_box(new),1
+    children=[hkshape.write_convex(edit.tf,hkshape.convex_data(*model_pieces.shrink(s,FITTED_RADIUS))) for s in sets]
+    out=hkshape.write_convex_mesh(edit.tf,children,mass,keep=shape)
+    boxes=[_shape_box(c) for c in children]
+    return out,np.asarray((np.min([b[0] for b in boxes],0),np.max([b[1] for b in boxes],0))),len(children)
+
+
 def _wheel_overrides(stock,parts,kind):
     roads='BCDEF' if kind=='vulcan' else 'BCDEFG'
     active=[f'tire_move{letter}_{side}' for letter in roads for side in 'lr']
@@ -287,8 +348,13 @@ def _reframe(md,raw,blob,targets,kind):
     return *out,moved
 
 
-def build(game,kind,md,parts):
-    """Return (SHKT, ragdoll-binding SGO, vehicle SGO overrides, quantitative report)."""
+MESH_FITTED = True        # the collision fitted to the authored parts' mesh (False: the donor's hulls stretched over
+                          # each part's box, the earlier approximation); docs/model-pipeline-2026-10-20.md
+
+
+def build(game,kind,md,parts,fitted=None):
+    """Return (SHKT, ragdoll-binding SGO, vehicle SGO overrides, quantitative report). `fitted` (default MESH_FITTED):
+    each proxy's collision from its parts' own triangles (pylib/model_pieces.py) instead of stretched donor hulls."""
     _req(kind in KINDS,f'unsupported tracked vehicle {kind}')
     raw=game.read('OBJECT',HOST)
     root=dsgo.parse(game.read('OBJECT','V603_FLAK.SGO')).root
@@ -298,20 +364,27 @@ def build(game,kind,md,parts):
     reader=sc.Shkt(framed)
     edit=_Editor(reader.tf)
     record=[]
+    fitted=MESH_FITTED if fitted is None else fitted
+    owners=_proxy_parts(md,parts,kind)
     for body in reader.systems[0].bodies:
         name=body.name.removeprefix('ragdoll_')
         target=targets[name]
         local=_world_target_to_proxy(target,body.position,body.orientation)
-        shape,box=_fit_shape(edit,body.shape,local,body.mass)
+        made=_fitted_shape(edit,body.shape,owners.get(name,[]),parts,body,local,body.mass) if fitted else None
+        if made is not None:
+            shape,box,pieces=made
+        else:
+            (shape,box),pieces=_fit_shape(edit,body.shape,local,body.mass),0
         body.body.set_shape(shape)
         record.append({'proxy':body.name,'target_world':target.tolist(),'actual_proxy_box':box.tolist(),
-                       'mass':body.mass,'shape':shape.type.full_name})
+                       'mass':body.mass,'shape':shape.type.full_name,'fitted_pieces':pieces})
     out=reader.tf.write()
     stock=dsgo.to_py(root)
     overrides,radii=_wheel_overrides(stock,parts,kind)
     report={'kind':kind,'proxies':record,'reframed':moved,'road_wheels_per_side':len(radii)//2,
             'wheel_radii':radii,'mass_model':'hulls: their own (hkshape.from_hull); meshes: the stock solid-domain box rule (x1.5)',
-            'collision_model':'affine-fitted source convex partitions; conservative contact approximation',
+            'collision_model':('convex pieces of the authored parts, cut to each proxy box' if fitted else
+                               'affine-fitted source convex partitions; conservative contact approximation'),
             'open_basket':'solid turntable interior only' if kind=='vulcan' else None,
             'sibling_filter':'same-group siblings do collide (D93250); split gun volumes and split idler axial halves',
             'simulation_contract':'6640A9 resets all to mode4; explicit value0 restores mode1 via 6E94E0/6E96C0; AFR owner retained',
@@ -393,7 +466,8 @@ def _cms_check(shape):
     _req((shape.value['numTriangles'].int(),shape.value['numConvexShapes'].int())==(0,len(rows)),
          'stale CMS convex count')
     key_count,bits,max_key=tree['numPrimitiveKeys'].int(),tree['bitsPerKey'].int(),tree['maxKeyValue'].int()
-    _req(key_count==len(routes) and max_key==2*(len(routes)-1) and bits==max_key.bit_length(),'stale CMS key metadata')
+    _req(key_count==len(routes) and max_key==2*(len(routes)-1) and bits==max(1,max_key.bit_length()),
+         'stale CMS key metadata')
     top=tree['nodes'].target
     _req(top.count==1,'unexpected CMS top tree')
     top_box=hkcms.decode_box(domain,bytes(top.data[:3]))

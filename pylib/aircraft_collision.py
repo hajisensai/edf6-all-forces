@@ -23,6 +23,7 @@ from functools import lru_cache
 import hkfile
 import hkshape
 import jet_models
+import model_pieces
 from mdb import bind_world, ident, read_elem
 
 MAGIC = 0x4544463641495231  # EDF6AIR1: native hknpShape::userData, src/body506.cpp
@@ -122,15 +123,34 @@ def _compound(tf, boxes, magic=0):
     return hkshape.write_compound(tf, children, user_data=magic)
 
 
+# 'cells' (the default): the 24 x 32 height field of solid boxes above. 'pieces': the model's own connected pieces,
+# each cut until nearly convex and wrapped in a hull (pylib/model_pieces.py): tighter round the wings' sweep and the
+# fuselage's curves, but untested in the game (docs/model-pipeline-2026-10-20.md has the offline comparison).
+MODE = 'cells'
+PIECE_TOLERANCE = 0.05     # m: how deep a model vertex may stand inside its piece's hull
+PIECE_LIMIT = 512          # compound children at most (the cells reach 466)
+
+
+def _pieces(tf, tris, magic=0):
+    """A compound of the model's convex pieces (MODE 'pieces')."""
+    sets = model_pieces.fit(tris, tolerance=PIECE_TOLERANCE, max_vertices=32, max_pieces=PIECE_LIMIT,
+                            min_size=0.05, thickness=2*SKIN)
+    children = [((0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0), hkshape.write_convex(tf, hkshape.convex_data(s)))
+                for s in sets]
+    return hkshape.write_compound(tf, children, user_data=magic)
+
+
 @lru_cache(maxsize=32)
-def build(game, key):
+def build(game, key, mode=None):
     """Return one complete .SHKT; all points relative to the unchanged full-model centre."""
     md = jet_models._model_of(game, key)
     centre = jet_models.model_box(game, key)[0]
+    model_tris = list(triangles(md))
     boxes = [(tuple(lo[k]-centre[k] for k in range(3)), tuple(hi[k]-centre[k] for k in range(3)))
-             for lo, hi in mesh_cells(triangles(md))]
+             for lo, hi in mesh_cells(model_tris)]
+    tris = [tuple(tuple(p[k]-centre[k] for k in range(3)) for p in tri) for tri in model_tris]
     physics = hkfile.Physics.read(game.read('OBJECT', STOCK))
-    body = _compound(physics.tf, boxes, MAGIC)
+    body = _pieces(physics.tf, tris, MAGIC) if (mode or MODE) == 'pieces' else _compound(physics.tf, boxes, MAGIC)
     # Retain all stock proxy names and constraints for the 506's animation/death
     # code, but its helicopter blades must no longer collide outside the aircraft.
     lo, hi = max(boxes, key=lambda b: math.prod(b[1][k]-b[0][k] for k in range(3)))
