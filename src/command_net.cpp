@@ -28,7 +28,7 @@ void Execute(void*,const char* sender,const command_net::Request& request,comman
     if(!ResolveCommandIdentities(request.requester,request.units,request.count,focus,&ids)) {
         Reject(out,request.count,NpcCommandReason::notFound);return;
     }
-    if(!SupportCommandRequesterMatches(ids.requesterPuid,sender)) {
+    if(!SenderIsPlayer(ids.requesterPuid,sender)) {
         Reject(out,request.count,NpcCommandReason::invalidRequester);return;
     }
     // Resolve once under the native registry's lock, then release it before any

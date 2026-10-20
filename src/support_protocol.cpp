@@ -222,7 +222,10 @@ bool Session::Broadcast(Message m) noexcept {
 }
 void Session::Welcome(std::uint32_t peer) noexcept {
     Message m;m.kind=Kind::welcome;m.challenge=challenges_[peer];m.request=epochSerial_;
-    m.catalog=kFeatures;m.ok=PeersBehind(nullptr) ? 1u : 0u;   // this build's features (support_protocol.h kFeatures)
+    // This build's features (support_protocol.h kFeatures): the low ten bits where an older guest reads them, the whole
+    // extension word beside them (WelcomeFeatures).
+    m.catalog=kFeatures&kWelcomeCatalogMask;m.ok=PeersBehind(nullptr) ? 1u : 0u;
+    m.unit.resourceId=kExtensions;
     m.unit.role=kDetails;
     Send(peer,m);
 }
@@ -445,7 +448,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     }
     if(!host_ && peer==hostPeer_ && m.kind==Kind::welcome && m.challenge==challenge_ && m.request>=seenEpochSerial_) {
         if(m.request==seenEpochSerial_ && epoch_!=m.epoch)return;
-        hostCaps_=m.catalog;hostDetails_=m.unit.role;hostRoomBehind_=m.ok!=0;hostCapsKnown_=true;   // the host's kFeatures (0: an older host)
+        hostCaps_=WelcomeFeatures(m.catalog,m.unit.resourceId);hostDetails_=m.unit.role;hostRoomBehind_=m.ok!=0;hostCapsKnown_=true;   // the host's kFeatures (0: an older host)
         if(epoch_!=m.epoch){if(HasSpawned()){Suspend();return;}ClearTransactions();epoch_=m.epoch;}
         seenEpochSerial_=m.request;
         return;

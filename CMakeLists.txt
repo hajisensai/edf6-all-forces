@@ -21,6 +21,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/gravity.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/gravitygun.cpp)
 # Their online sharing (src/gravity_net.cpp, the float guns' too: the wire src/gravity_net_protocol.cpp, tests/gravity_net_test.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/gravity_net.cpp src/gravity_net_protocol.cpp)
+# The plugin's online message channels (src/plugin_net.cpp: the registry every plugin-to-plugin message goes through, the
+# host's roster of the peers' features; the pure part src/plugin_net_logic.h and src/wire.h, tests/plugin_net_test.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/plugin_net.cpp)
 # The float guns (src/floatgun.cpp: EDF5's last mission's dropped colonist guns and vehicle guns that float round the player).
 target_sources(EDF6VehicleCrew PRIVATE src/floatgun.cpp)
 # The gun stabilizer (its own line, as the Nix's).
@@ -1269,7 +1272,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_protocol.cpp src/support_net.
 add_executable(support_protocol_test tests/support_protocol_test.cpp src/support_protocol.cpp)
 target_compile_options(support_protocol_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_protocol COMMAND support_protocol_test)
-add_executable(support_net_runtime_test tests/support_net_runtime_test.cpp src/support_protocol.cpp)
+add_executable(support_net_runtime_test tests/support_net_runtime_test.cpp src/support_protocol.cpp src/plugin_net.cpp)
 target_include_directories(support_net_runtime_test PRIVATE src common third_party/EDFModLoader)
 target_compile_options(support_net_runtime_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_net_runtime COMMAND support_net_runtime_test)
@@ -1531,6 +1534,12 @@ add_executable(gravity_net_test EXCLUDE_FROM_ALL tests/gravity_net_test.cpp src/
 target_compile_options(gravity_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks gravity_net_test)
 add_test(NAME gravity_net COMMAND gravity_net_test)
+# The plugin's online channels (src/plugin_net_logic.h, src/wire.h): registration, routing by magic, the version and size
+# drops, the feature bits (an older peer left out), the joins, the roster's wire.
+add_executable(plugin_net_test EXCLUDE_FROM_ALL tests/plugin_net_test.cpp)
+target_compile_options(plugin_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks plugin_net_test)
+add_test(NAME plugin_net COMMAND plugin_net_test)
 # The marker's name from the game's own name tag source (src/player_name.cpp), read from EDF.dll without running it.
 add_test(NAME player_name_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_name_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(player_name_native PROPERTIES SKIP_RETURN_CODE 77)

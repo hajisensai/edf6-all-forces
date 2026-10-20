@@ -27,6 +27,7 @@ unsigned rangePlans=0,rangeValidations=0,rangeSpawns=0,rangeDestroys=0,rangeTick
 std::uint64_t rangeToken=0;
 int pvpTeam=0;bool identityMismatch=false,nativeIdMissing=false;
 unsigned lastSupportTeam=0,lastSupportOwner=0;
+unsigned gravityPackets=0;
 unsigned qmarkPackets=0,qmarkContexts=0,qmarkResets=0;std::uint32_t qmarkPeers=0;bool qmarkReady=false;
 EDF6CoopPeer Peer(const char* id) { EDF6CoopPeer p{};strcpy_s(p.id,id);return p; }
 struct Packet { EDF6CoopPeer sender;unsigned char bytes[176]; };
@@ -100,12 +101,17 @@ bool ReceiveCarrierDroneNetwork(std::uint32_t,const char*,const void* bytes,std:
 }
 void ResetCarrierDroneNetwork() noexcept {++fixture::carrierResets;}
 // The gravity operations' and the float guns' (gravity_net.cpp, floatgun.cpp): not under test here.
-void UpdateGravityNetwork(const CommandNetworkContext&,std::uint64_t) noexcept {}
-bool ReceiveGravityNetwork(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return false;}
-void ResetGravityNetwork() noexcept {}
-void UpdateFloatGunNetwork(const CommandNetworkContext&,std::uint64_t) noexcept {}
-bool ReceiveFloatGunNetwork(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return false;}
-void ResetFloatGunNetwork() noexcept {}
+// Their channels (plugin_net.h) as registered: GRVT for kExtGravity peers, FGUN for kExtFloatGun ones.
+bool ReceiveGravity(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {++fixture::gravityPackets;return true;}
+plugin_net::Channel GravityNetChannel() noexcept {
+    plugin_net::Channel c;c.name="gravity";c.magic=0x54565247u;c.version=1;c.featureBit=support_net::kExtGravity;
+    c.minSize=c.maxSize=160;c.receive=&ReceiveGravity;return c;
+}
+bool ReceiveFloatGun(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+plugin_net::Channel FloatGunNetChannel() noexcept {
+    plugin_net::Channel c;c.name="float guns";c.magic=0x4E554746u;c.version=1;c.featureBit=support_net::kExtFloatGun;
+    c.minSize=c.maxSize=96;c.receive=&ReceiveFloatGun;return c;
+}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}
@@ -333,6 +339,13 @@ int main() {
     reenterCarrier=true;const auto carrierContextsBefore=carrierContexts;Step();reenterCarrier=false;
     Check(carrierPackets==1 && enemyControlPackets==1 && subPackets==1,"carrier drone request is consumed once by its own shared-poll handler");
     Check(carrierContexts-carrierContextsBefore==3,"nested prepared-plan enqueue cannot recursively poll/advance native support");
+    // The newer channels (plugin_net.h): a peer that did not announce kExtGravity (this fixture's hellos carry no extension
+    // word) is never heard on it; a channel this build does not have is dropped, never fed to the support parser.
+    auto gravityPacket=packet;std::memset(gravityPacket.bytes,0,sizeof(gravityPacket.bytes));std::memcpy(gravityPacket.bytes,"GRVT",5);
+    const unsigned sendsBefore=sendCount;incoming.push_back(gravityPacket);Step();
+    Check(gravityPackets==0 && sendCount==sendsBefore && carrierPackets==1,"a gravity message from a peer without the bit: dropped");
+    auto unknownPacket=packet;std::memcpy(unknownPacket.bytes,"ZZZZ",4);incoming.push_back(unknownPacket);Step();
+    Check(sendCount==sendsBefore && commandPackets==1 && qmarkPackets==1 && crew::running,"a channel this build does not have: dropped quietly");
     Check(crew::SubmitSupportRequest(1,at,note,256),"full handshake queues request");
     installed=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"unloaded bridge disables queued work");
     installed=true;peerCount=0;generation++;tick+=1000;Step();

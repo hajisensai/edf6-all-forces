@@ -589,6 +589,8 @@ HUDTEXT(versionFeatVariants,L"coloured / armed support variants",L"支援外观�
 HUDTEXT(versionFeatOutfit41,L"the EDF4.1 outfit (others see the stock one)",L"4.1外观（其他人看到原版外观）",L"4.1外觀（其他人看到原版外觀）",L"4.1の外見（他の人には標準の外見）")
 HUDTEXT(versionFeatBvmPlayers,L"players 5+ in EDF5/4.1 missions (four created)",L"EDF5/4.1任务第5人起的角色（只建4人）",L"EDF5/4.1任務第5人起的角色（只建4人）",L"EDF5/4.1ミッションの5人目以降（4人のみ）")
 HUDTEXT(versionFeatBackpack,L"support soldiers' backpack weapons",L"支援士兵的背包武器",L"支援士兵的背包武器",L"支援兵のバックパック武器")
+HUDTEXT(versionFeatGravity,L"gravity gun grabs and throws",L"重力枪抓取与投掷同步",L"重力槍抓取與投擲同步",L"グラビティガンの掴み・投げの同期")
+HUDTEXT(versionFeatFloatGun,L"float guns",L"悬浮炮同步",L"懸浮炮同步",L"浮遊砲の同期")
 // The HQ outfit popup's fifth outfit (outfit41.cpp): EDF4.1's subtitle. English and Japanese as the game is titled in both
 // (「地球防衛軍4.1 THE SHADOW OF NEW DESPAIR」: the Japanese title keeps the English subtitle); Chinese as the user names it
 // (2026-10-18: 「绝望阴影再袭」, the name Chinese media give the game; no Chinese edition was released), Traditional alike.

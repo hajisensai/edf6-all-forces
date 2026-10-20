@@ -1,4 +1,5 @@
 #include "gravity_net_protocol.h"
+#include "wire.h"
 #include <cmath>
 #include <cstring>
 
@@ -11,87 +12,61 @@ static_assert(kGUsed<=kGrabWire,"a grab fits its wire size");
 // FGUN: magic, version, kind (byte 8), serial (u16 at 10), index (byte 12), origin; who[32]; at[3]; leftMs.
 constexpr std::size_t kUSerial=10,kUIndex=12,kUOrigin=16,kUWho=20,kUAt=52,kULeft=64,kUUsed=68;
 static_assert(kUUsed<=kGunWire,"a gun message fits its wire size");
+// The fields go in this order (wire.h writes and reads them in sequence from each Seek).
+static_assert(kGGrab==kGOrigin+4 && kGGrabber==kGGrab+4 && kGTarget==kGGrabber+32 && kGAt==kGTarget+32 && kGRayA==kGAt+12 &&
+              kGRayB==kGRayA+12 && kGGoal==kGRayB+12 && kGVel==kGGoal+12 && kGUsed==kGVel+12,"the grab's layout");
+static_assert(kUIndex==kUSerial+2 && kUWho==kUOrigin+4 && kUAt==kUWho+32 && kULeft==kUAt+12 && kUUsed==kULeft+4,"the gun's layout");
 
-void Put32(unsigned char* p,std::uint32_t v) noexcept { for(int i=0;i<4;++i)p[i]=static_cast<unsigned char>(v>>(8*i)); }
-std::uint32_t Get32(const unsigned char* p) noexcept {
-    std::uint32_t v=0;
-    for(int i=0;i<4;++i)v|=static_cast<std::uint32_t>(p[i])<<(8*i);
-    return v;
-}
-void PutF(unsigned char* p,float f) noexcept { std::uint32_t v;std::memcpy(&v,&f,4);Put32(p,v); }
-float GetF(const unsigned char* p) noexcept { const std::uint32_t v=Get32(p);float f;std::memcpy(&f,&v,4);return f; }
-void PutV(unsigned char* p,const float* v) noexcept { for(int i=0;i<3;++i)PutF(p+4*i,v[i]); }
-void GetV(const unsigned char* p,float* v) noexcept { for(int i=0;i<3;++i)v[i]=GetF(p+4*i); }
-// A native ID as command_identity.cpp takes it (bytes 20..23 zero), or all zero (none).
-bool IdOk(const unsigned char* id) noexcept { for(int i=20;i<24;++i)if(id[i])return false;return true; }
-bool Finite(const float* v) noexcept { return std::isfinite(v[0]) && std::isfinite(v[1]) && std::isfinite(v[2]); }
-bool Owned(const void* bytes,std::size_t size,std::uint32_t magic) noexcept {
-    return bytes && size>=4 && Get32(static_cast<const unsigned char*>(bytes))==magic;
-}
-bool GrabFinite(const Grab& g) noexcept {
-    return Finite(g.at) && Finite(g.rayA) && Finite(g.rayB) && Finite(g.goal) && Finite(g.vel);
-}
+bool Owned(const void* bytes,std::size_t size,std::uint32_t magic) noexcept { return wire::HeadWord(bytes,size,0)==magic && size>=4; }
+bool Kind(GrabKind k) noexcept { return k==GrabKind::hold || k==GrabKind::thrown || k==GrabKind::letGo; }
+bool Kind(GunKind k) noexcept { return k==GunKind::drop || k==GunKind::pick || k==GunKind::owner || k==GunKind::gone; }
 }  // namespace
 
 bool OwnedGrab(const void* bytes,std::size_t size) noexcept { return Owned(bytes,size,kGrabMagic); }
 bool OwnedGun(const void* bytes,std::size_t size) noexcept { return Owned(bytes,size,kGunMagic); }
 
 bool Encode(const Grab& g,void* bytes,std::size_t size) noexcept {
-    if(!bytes || size!=kGrabWire || !IdOk(g.grabber) || !IdOk(g.target) || !GrabFinite(g))return false;
-    if(g.kind!=GrabKind::hold && g.kind!=GrabKind::thrown && g.kind!=GrabKind::letGo)return false;
-    auto* p=static_cast<unsigned char*>(bytes);
-    std::memset(p,0,size);
-    Put32(p,kGrabMagic);Put32(p+4,kVersion);p[8]=static_cast<unsigned char>(g.kind);
-    Put32(p+kGOrigin,g.origin);Put32(p+kGGrab,g.grab);
-    std::memcpy(p+kGGrabber,g.grabber,32);std::memcpy(p+kGTarget,g.target,32);
-    PutV(p+kGAt,g.at);PutV(p+kGRayA,g.rayA);PutV(p+kGRayB,g.rayB);PutV(p+kGGoal,g.goal);PutV(p+kGVel,g.vel);
-    return true;
+    if(!bytes || size!=kGrabWire || !Kind(g.kind))return false;
+    wire::Writer w(bytes,size);
+    w.U32(kGrabMagic).U32(kVersion).U8(static_cast<std::uint8_t>(g.kind)).Seek(kGOrigin).U32(g.origin).U32(g.grab)
+     .Id(g.grabber).Id(g.target).V3(g.at).V3(g.rayA).V3(g.rayB).V3(g.goal).V3(g.vel);
+    return w.Ok() && w.Used()==kGUsed;
 }
 
 bool Decode(const void* bytes,std::size_t size,Grab& out) noexcept {
     if(!OwnedGrab(bytes,size) || size!=kGrabWire)return false;
-    const auto* p=static_cast<const unsigned char*>(bytes);
-    if(Get32(p+4)!=kVersion)return false;
+    wire::Reader r(bytes,size);
     Grab g{};
-    g.kind=static_cast<GrabKind>(p[8]);
-    if(g.kind!=GrabKind::hold && g.kind!=GrabKind::thrown && g.kind!=GrabKind::letGo)return false;
-    g.origin=Get32(p+kGOrigin);g.grab=Get32(p+kGGrab);
-    std::memcpy(g.grabber,p+kGGrabber,32);std::memcpy(g.target,p+kGTarget,32);
-    GetV(p+kGAt,g.at);GetV(p+kGRayA,g.rayA);GetV(p+kGRayB,g.rayB);GetV(p+kGGoal,g.goal);GetV(p+kGVel,g.vel);
-    if(!IdOk(g.grabber) || !IdOk(g.target) || !GrabFinite(g))return false;
+    r.Skip(4);
+    if(r.U32()!=kVersion)return false;
+    g.kind=static_cast<GrabKind>(r.U8());
+    r.Seek(kGOrigin);g.origin=r.U32();g.grab=r.U32();
+    r.Id(g.grabber);r.Id(g.target);
+    r.V3(g.at);r.V3(g.rayA);r.V3(g.rayB);r.V3(g.goal);r.V3(g.vel);
+    if(!r.Ok() || !Kind(g.kind))return false;
     out=g;
     return true;
 }
 
 bool Encode(const Gun& g,void* bytes,std::size_t size) noexcept {
-    if(!bytes || size!=kGunWire || !IdOk(g.who) || !Finite(g.at) || g.leftMs>kMostLeftMs)return false;
-    if(g.kind!=GunKind::drop && g.kind!=GunKind::pick && g.kind!=GunKind::owner && g.kind!=GunKind::gone)return false;
-    auto* p=static_cast<unsigned char*>(bytes);
-    std::memset(p,0,size);
-    Put32(p,kGunMagic);Put32(p+4,kVersion);p[8]=static_cast<unsigned char>(g.kind);
-    p[kUSerial]=static_cast<unsigned char>(g.serial);p[kUSerial+1]=static_cast<unsigned char>(g.serial>>8);
-    p[kUIndex]=g.index;
-    Put32(p+kUOrigin,g.origin);
-    std::memcpy(p+kUWho,g.who,32);
-    PutV(p+kUAt,g.at);
-    Put32(p+kULeft,g.leftMs);
-    return true;
+    if(!bytes || size!=kGunWire || g.leftMs>kMostLeftMs || !Kind(g.kind))return false;
+    wire::Writer w(bytes,size);
+    w.U32(kGunMagic).U32(kVersion).U8(static_cast<std::uint8_t>(g.kind)).Seek(kUSerial).U16(g.serial).U8(g.index)
+     .Seek(kUOrigin).U32(g.origin).Id(g.who).V3(g.at).U32(g.leftMs);
+    return w.Ok() && w.Used()==kUUsed;
 }
 
 bool Decode(const void* bytes,std::size_t size,Gun& out) noexcept {
     if(!OwnedGun(bytes,size) || size!=kGunWire)return false;
-    const auto* p=static_cast<const unsigned char*>(bytes);
-    if(Get32(p+4)!=kVersion)return false;
+    wire::Reader r(bytes,size);
     Gun g{};
-    g.kind=static_cast<GunKind>(p[8]);
-    if(g.kind!=GunKind::drop && g.kind!=GunKind::pick && g.kind!=GunKind::owner && g.kind!=GunKind::gone)return false;
-    g.serial=static_cast<std::uint16_t>(p[kUSerial]|(p[kUSerial+1]<<8));
-    g.index=p[kUIndex];
-    g.origin=Get32(p+kUOrigin);
-    std::memcpy(g.who,p+kUWho,32);
-    GetV(p+kUAt,g.at);
-    g.leftMs=Get32(p+kULeft);
-    if(!IdOk(g.who) || !Finite(g.at) || g.leftMs>kMostLeftMs)return false;
+    r.Skip(4);
+    if(r.U32()!=kVersion)return false;
+    g.kind=static_cast<GunKind>(r.U8());
+    r.Seek(kUSerial);g.serial=r.U16();g.index=r.U8();
+    r.Seek(kUOrigin);g.origin=r.U32();
+    r.Id(g.who);r.V3(g.at);g.leftMs=r.U32();
+    if(!r.Ok() || !Kind(g.kind) || g.leftMs>kMostLeftMs)return false;
     out=g;
     return true;
 }

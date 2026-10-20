@@ -9,6 +9,7 @@
 // Game thread only.
 #pragma once
 #include "command_net.h"
+#include "plugin_net_logic.h"
 #include "gravity.h"
 #include <cstdint>
 
@@ -28,4 +29,6 @@ void UpdateGravityNetwork(const CommandNetworkContext& context,std::uint64_t now
 bool ReceiveGravityNetwork(std::uint32_t peer,const char* authenticatedPuid,const void* bytes,std::size_t size,
                            std::uint64_t now) noexcept;
 void ResetGravityNetwork() noexcept;
+// Its plugin_net.h channel (support_net.cpp registers it): GRVT, support_protocol.h kExtGravity.
+plugin_net::Channel GravityNetChannel() noexcept;
 }  // namespace crew

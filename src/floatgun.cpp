@@ -32,8 +32,6 @@
 //    player, and the game deals a round's hit only on the machine whose player the attacker is (EDF6Coop docs/net-re/damage.md), so
 //    each gun's damage counts once.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
-#define _CRT_RAND_S
-#include <cstdlib>
 #include "floatgun.h"
 #include "crew.h"
 #include "command_identity.h"
@@ -42,6 +40,8 @@
 #include "memory.h"
 #include "npc_mark.h"
 #include "online_authority.h"
+#include "plugin_net.h"
+#include "support_protocol.h"
 #include "support_net.h"
 #include "support_soldier.h"
 #include <cmath>
@@ -660,9 +660,7 @@ void FloatGunsMissionStart() noexcept {
     for(auto& w:watched)Forget(w);
     for(auto& d:drops)d=Drop{};
     outCount=0;nextSerial=0;missionLogs=0;lastMs=0;hostOrigin=0;
-    std::uint32_t origin=0;   // this mission's run: a peer tells the host's messages of the last one from this one's
-    if(rand_s(&origin))origin=static_cast<std::uint32_t>(GetTickCount64());
-    netOrigin=origin|1u;
+    netOrigin=plugin_net::NewOrigin();   // this mission's run: a peer tells the host's messages of the last one from this one's
     active=false;
     const int mode=Cfg().floatGuns;
     if(!ok || mode<=0)return;
@@ -707,8 +705,8 @@ void UpdateFloatGunNetwork(const CommandNetworkContext& context,std::uint64_t) n
     unsigned char bytes[gravity_net::kGunWire];
     for(int i=0;i<outCount;++i) {
         if(!gravity_net::Encode(outgoing[i].m,bytes,sizeof(bytes)))continue;
-        if(outgoing[i].toHost){if(hostPeer)context.send(hostPeer,bytes,sizeof(bytes));}
-        else for(std::uint32_t p=1;p<=netPeers;++p)context.send(p,bytes,sizeof(bytes));
+        if(outgoing[i].toHost)plugin_net::SendHost(support_net::kExtFloatGun,bytes,sizeof(bytes));
+        else plugin_net::Broadcast(support_net::kExtFloatGun,bytes,sizeof(bytes));
     }
     outCount=0;
 }
@@ -724,7 +722,7 @@ bool ReceiveFloatGunNetwork(std::uint32_t peer,const char* puid,const void* byte
             Gun* g=GunOf(m.serial);
             if(!g || g->state!=State::ground)return true;
             MarkIdentities ids{};
-            if(!ResolveMarkIdentities(m.who,nullptr,&ids) || !ids.player || !ids.puid || !SupportCommandRequesterMatches(ids.puid,puid)) {
+            if(!SenderIsPlayer(m.who,puid,&ids)) {
                 Log("FLOATGUN peer %u asked for gun %u for a player not its own (or not found): refused",peer,m.serial);
                 return true;
             }
@@ -777,5 +775,13 @@ bool ReceiveFloatGunNetwork(std::uint32_t peer,const char* puid,const void* byte
 void ResetFloatGunNetwork() noexcept {   // the run's origin stays the mission's (FloatGunsMissionStart)
     outCount=0;
     netReady=false;netHost=false;netPeers=0;hostPeer=0;
+}
+
+plugin_net::Channel FloatGunNetChannel() noexcept {
+    plugin_net::Channel c;
+    c.name="float guns";c.magic=gravity_net::kGunMagic;c.version=gravity_net::kVersion;c.featureBit=support_net::kExtFloatGun;
+    c.minSize=c.maxSize=gravity_net::kGunWire;
+    c.receive=&ReceiveFloatGunNetwork;c.update=&UpdateFloatGunNetwork;c.reset=&ResetFloatGunNetwork;
+    return c;
 }
 }  // namespace crew

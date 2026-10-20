@@ -48,11 +48,24 @@ static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits")
 // soldier variant's backpack weapon (support_loadout.h LookVariant bits 50-57) and makes that soldier from its file. An
 // older Validate refuses a variant with those bits (the whole plan, no reason anyone sees), so a host sends them only when
 // every peer announced this (SupportPeersApplyBackpacks); otherwise the soldier carries its colours alone, said. The last
-// bit the welcome's features word has room for (kFeatures below 1024).
+// bit the welcome's old features word (`catalog`, below 1024) has room for: the bits from here on reach a guest in the
+// welcome's unit.resourceId (the host's whole extension word, below), and an older guest never reads them.
+// The plugin's own channels (plugin_net.h, 2026-10-20, the user: 「所有功能都要支持联机」; a channel sends only to a peer that
+// announced its bit, so an older build in the room is left out, never sent bytes it would log as malformed):
+// kExtPeerRoster: it reads the host's roster (plugin_net_logic.h: each member's extension word by PUID; a guest hears no
+// other guest's hello) and so knows which guests have which channel. Every build with plugin_net.cpp announces it.
+// kExtGravity: it plays the gravity operations' grabs and throws (gravity_net_protocol.h GRVT: the gravity gun online).
+// kExtFloatGun: it takes part in the float guns' drops, picks and owners (gravity_net_protocol.h FGUN).
+// kExtUltimate (reserved, not announced yet): the ultimate strike's channel (天罚, ultimate.cpp), for the build that brings
+// its online part: that build adds it to kExtensions / kExtBuilt and names it in support_net.cpp Features. No other use.
 constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtOutfit41=8u,kExtBvmPlayers=16u,
-    kExtBackpack=32u,
-    kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack;
-constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack;   // what every hello of this build announces (Tick)
+    kExtBackpack=32u,kExtPeerRoster=64u,kExtGravity=128u,kExtFloatGun=256u,
+    kExtUltimate=512u,   // reserved (see above)
+    kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|
+        kExtGravity|kExtFloatGun;
+static_assert(!(kExtensions&kExtUltimate),"kExtUltimate is reserved until its build announces it");
+// What every hello of this build announces (Tick):
+constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|kExtFloatGun;
 constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it
 // What a build has, both words in one (the version notice compares and names these, support_net.cpp VersionTick): the
 // capability bits low (below kMaxUnits, 4 bits), the extension bits above them.
@@ -66,7 +79,14 @@ constexpr std::uint32_t kFeatures=Features(kCapabilities,kExtensions);
 // the room announced fewer than the host: a guest then knows an older host, a newer one, or an older third player, and
 // says so (support_net.cpp VersionTick). An older host sends 0 in both (its welcome never set them); an older guest
 // ignores them. The hello's own `index` keeps its bound (below kMaxUnits).
-static_assert(kFeatures<1024,"welcome.catalog carries the host's features");
+// From kExtPeerRoster on the features pass 1024: the welcome's `catalog` carries their low ten bits (all an older guest
+// knows), and its unit.resourceId the host's whole extension word (an older host sends 0 there: its catalog is all of it).
+constexpr std::uint32_t kWelcomeCatalogMask=1023u;
+constexpr std::uint32_t WelcomeFeatures(std::uint32_t catalog,std::uint32_t ext) noexcept {
+    return ext ? Features(catalog&(kMaxUnits-1),ext) : catalog;
+}
+static_assert(WelcomeFeatures(kFeatures&kWelcomeCatalogMask,kExtensions)==kFeatures,"a welcome carries the host's features whole");
+static_assert(Features(kCapabilities,kExtensions)<(1u<<31),"the features fit a word");
 // Additional capability word in hello/welcome unit.role, outside the full ten-bit features word.
 // A requester-bearing BEGIN uses only the unused unit fields and is sent only to a room where every peer
 // announced kDetailPvpSupport. Older builds ignore BEGIN units, so this all-peer gate is mandatory.
@@ -151,6 +171,10 @@ public:
     bool PeersHaveVariant(std::uint32_t ext,std::uint64_t hash) const noexcept;
     // Host: whether every peer announced all of `ext` in its hello's extension word (kExtSeaRescue). A client: true.
     bool PeersHaveExtension(std::uint32_t ext) const noexcept { return PeersHaveVariant(ext,0); }
+    // Host: the extension word of peer `peer`'s current hello (0: not heard, or not the host). plugin_net.h's roster.
+    std::uint32_t PeerExtension(std::uint32_t peer) const noexcept {
+        return running_ && host_ && peer && peer<=peers_ && challenges_[peer] ? peerExt_[peer] : 0u;
+    }
     // Host: the heard peers whose features (Features: capabilities and extensions) lack some of this build's kFeatures
     // (`missing`: what they lack between them, feature bits).
     std::uint32_t PeersBehind(std::uint32_t* missing) const noexcept;

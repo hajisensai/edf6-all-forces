@@ -8,6 +8,7 @@
 // machine shows each gun where it lies and round whoever has it, and fires it; its damage counts on its owner's machine alone.
 #pragma once
 #include "command_net.h"
+#include "plugin_net_logic.h"
 #include <cstddef>
 #include <cstdint>
 
@@ -20,4 +21,6 @@ void UpdateFloatGunNetwork(const CommandNetworkContext& context,std::uint64_t no
 bool ReceiveFloatGunNetwork(std::uint32_t peer,const char* authenticatedPuid,const void* bytes,std::size_t size,
                             std::uint64_t now) noexcept;
 void ResetFloatGunNetwork() noexcept;
+// Its plugin_net.h channel (support_net.cpp registers it): FGUN, support_protocol.h kExtFloatGun.
+plugin_net::Channel FloatGunNetChannel() noexcept;
 }  // namespace crew

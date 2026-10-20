@@ -109,7 +109,7 @@ bool Send(void* ctx,std::uint32_t peer,const Message& message) noexcept {
     // An older (or newer) build's hello: its capabilities and its extension word as that build sends them (a build before
     // the extension: 0 and an empty filter).
     if(node.id==room.legacyNode && sent.kind==Kind::hello){sent.index=room.legacyCaps;sent.unit=Unit{};sent.unit.resourceId=room.legacyExt;sent.unit.role=room.legacyDetails;}
-    if(node.id==0 && room.oldHost && sent.kind==Kind::welcome){sent.catalog=0;sent.ok=0;sent.unit.role=0;}
+    if(node.id==0 && room.oldHost && sent.kind==Kind::welcome){sent.catalog=0;sent.ok=0;sent.unit.role=0;sent.unit.resourceId=0;}
     if(node.id==room.legacyNode && !(room.legacyDetails&kDetailTransactionGenerations) &&
        sent.kind==Kind::result && !sent.ok && sent.index==kCancelAckIndex)sent.index=0;
     if(!Encode(sent,wire,sizeof(wire)) || !Decode(wire,sizeof(wire),decoded))return false;
@@ -405,7 +405,7 @@ void RoomBuilds() {
     {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.With(2);r.nodes[2]->session->Stop();
      r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();r.Step(1100);r.Settle();
      std::uint32_t missing=0;
-     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==FeatureExt(kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack) &&
+     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==FeatureExt(kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|kExtFloatGun) &&
            r.nodes[0]->session->PeersAhead()==0,"a guest without the sea rescue (all four capabilities) is behind, the rescue and the EDF4.1 outfit named");
      Check(r.nodes[1]->session->RoomBehindHost(),"and the other guest is told");}
     // A newer guest: the capability bits are full (kCapabilities<kMaxUnits), so newer is an extension bit this build lacks.
@@ -489,7 +489,8 @@ void RescueChannel() {
      Check(LastFor(r,1)==RequestStatus::active,"a rescue that was cancelled started no cooldown (it starts once made everywhere)");}
 }
 void PvpSupportCodec() {
-    static_assert(kVersion==2 && kWireSize==176 && kFeatures<1024,"PvP detail does not change the v2 ABI");
+    static_assert(kVersion==2 && kWireSize==176 && (kFeatures&kWelcomeCatalogMask)<1024 &&
+                  WelcomeFeatures(kFeatures&kWelcomeCatalogMask,kExtensions)==kFeatures,"PvP detail does not change the v2 ABI");
     Message begin;begin.kind=Kind::begin;begin.epoch=22;begin.transaction=1;begin.catalog=5;begin.count=1;
     unsigned char wire[kWireSize]{};Message decoded;
     Check(Encode(begin,wire,sizeof(wire)) && Decode(wire,sizeof(wire),decoded),"legacy BEGIN still round-trips");

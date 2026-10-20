@@ -18,6 +18,10 @@
 #include "command_identity.h"
 #include "version_notice.h"
 #include "hudtext.h"
+#include "plugin_net.h"
+#include "qmark.h"
+#include "qmark_protocol.h"
+#include "enemy_control_protocol.h"
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
@@ -130,19 +134,63 @@ std::uint32_t TrySendCommand(std::uint32_t peer,const void* bytes,std::size_t co
        count>EDF6COOP_EXTENSION_MAX_PAYLOAD || !trySendExtension)return EDF6COOP_EXTENSION_SEND_UNAVAILABLE;
     return trySendExtension(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(count),byteLimit,packetLimit);
 }
-void CommandContext(ULONGLONG now) noexcept {
-    const CommandNetworkContext context{running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
-        snapshot.peerCount,snapshot.local.id,&SendCommand,&TrySendCommand};
-    UpdateCommandNetwork(context,now);
-    UpdatePvpNetwork(context,now);
-    UpdateEnemyControlNetwork(context,now);
-    UpdateSubSupportNetwork(context,now);
-    UpdateCarrierDroneNetwork(context,now);
-    UpdateGravityNetwork(context,now);
-    UpdateFloatGunNetwork(context,now);
+const char* PeerPuid(std::uint32_t peer) noexcept {
+    return peer<=snapshot.peerCount && peer<=support_net::kMaxPeers ? peers[peer].id : nullptr;
 }
-// The Q marks (qmark.cpp) go peer to peer over the same transport, with no host step: only the room has to be up.
-void QMarkContext(ULONGLONG now) noexcept { UpdateQMarkNetwork(running,snapshot.peerCount,&SendCommand,now); }
+std::uint32_t HeardExtension(std::uint32_t peer) noexcept { return session.PeerExtension(peer); }
+std::uint32_t OwnExtension() noexcept {
+    std::uint32_t ext=0;unsigned char bloom[32]{};
+    if(hooks.variants)hooks.variants(&ext,bloom);
+    return ext|support_net::kExtBuilt;
+}
+// Every plugin channel's frame (plugin_net.h: the registry, the roster, the joins). The Q marks go peer to peer with no
+// host step: the context's `linked` (the transport alone) is theirs.
+void CommandContext(ULONGLONG now) noexcept {
+    plugin_net::Room room;
+    room.context=CommandNetworkContext{running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
+        snapshot.peerCount,snapshot.local.id,&SendCommand,&TrySendCommand,running};
+    room.puid=&PeerPuid;room.heard=&HeardExtension;room.ownExt=OwnExtension();
+    plugin_net::Update(room,now);
+}
+void QMarkUpdate(const CommandNetworkContext& c,std::uint64_t now) noexcept { UpdateQMarkNetwork(c.linked,c.peerCount,c.send,now); }
+bool PvpOwns(const void* bytes,std::size_t size) noexcept {
+    const auto* b=static_cast<const unsigned char*>(bytes);
+    return bytes && size>=4 && b[0]=='A' && b[1]=='F' && b[2]=='P' && b[3]=='V';
+}
+// The channels, in the old chain's order (qmark, command, PvP, enemy control, the submarine's and the carrier's drones,
+// then the gravity operations and the float guns). The older ones read their own versions (version 0) and are read by
+// every build that has them (no feature bit); the newer ones are only sent to the peers that announced theirs.
+void RegisterPluginChannels() noexcept {
+    static bool registered=false;
+    if(registered)return;
+    registered=true;
+    using plugin_net::Channel;
+    Channel c;
+    c=Channel{};c.name="qmark";c.magic=qmark_net::kMagic;c.receive=&ReceiveQMarkNetwork;c.update=&QMarkUpdate;c.reset=&ResetQMarkNetwork;
+    plugin_net::RegisterChannel(c);
+    c=Channel{};c.name="command";c.magic=command_net::kMagic;c.receive=&ReceiveCommandNetwork;c.update=&UpdateCommandNetwork;
+    c.reset=&ResetCommandNetwork;plugin_net::RegisterChannel(c);
+    c=Channel{};c.name="pvp";c.owns=&PvpOwns;c.receive=&ReceivePvpNetwork;c.update=&UpdatePvpNetwork;c.reset=&ResetPvpNetwork;
+    plugin_net::RegisterChannel(c);
+    c=Channel{};c.name="enemy control";c.magic=enemy_control_protocol::kMagic;c.receive=&ReceiveEnemyControlNetwork;
+    c.update=&UpdateEnemyControlNetwork;c.reset=&ResetEnemyControlNetwork;plugin_net::RegisterChannel(c);
+    c=Channel{};c.name="submarine drones";c.magic=sub_support::kMagic;c.receive=&ReceiveSubSupportNetwork;
+    c.update=&UpdateSubSupportNetwork;c.reset=&ResetSubSupportNetwork;plugin_net::RegisterChannel(c);
+    c=Channel{};c.name="carrier drones";c.magic=carrier_drone_net::kMagic;c.receive=&ReceiveCarrierDroneNetwork;
+    c.update=&UpdateCarrierDroneNetwork;c.reset=&ResetCarrierDroneNetwork;plugin_net::RegisterChannel(c);
+    plugin_net::RegisterChannel(GravityNetChannel());
+    plugin_net::RegisterChannel(FloatGunNetChannel());
+}
+// A message no channel and not the support protocol owns (a newer build's channel this one does not have): dropped,
+// said once a magic (a few magics), never once a message.
+void NoteUnknown(std::uint32_t peer,const unsigned char* bytes,std::uint32_t count) noexcept {
+    static std::uint32_t seen[8]{};static unsigned seenCount=0;
+    std::uint32_t magic=0;if(count>=4)std::memcpy(&magic,bytes,4);
+    for(unsigned i=0;i<seenCount;++i)if(seen[i]==magic)return;
+    if(seenCount>=_countof(seen))return;
+    seen[seenCount++]=magic;
+    Log("SUPPORT NET peer %u sends messages of a channel this build does not have (magic 0x%08X, %u bytes): ignored",peer,magic,count);
+}
 bool PeerValid(const EDF6CoopPeer& peer) noexcept {
     return peer.id[0] && std::memchr(peer.id,0,sizeof(peer.id));
 }
@@ -209,6 +257,8 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
         {FeatureExt(support_net::kExtOutfit41),Tx::versionFeatOutfit41},
         {FeatureExt(support_net::kExtBvmPlayers),Tx::versionFeatBvmPlayers},
         {FeatureExt(support_net::kExtBackpack),Tx::versionFeatBackpack},
+        {FeatureExt(support_net::kExtGravity),Tx::versionFeatGravity},
+        {FeatureExt(support_net::kExtFloatGun),Tx::versionFeatFloatGun},
         {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapTransports,Tx::versionFeatTransport},
         {support_net::kCapLoadout,Tx::versionFeatCompose},{FeatureExt(support_net::kExtVariants),Tx::versionFeatVariants},
         {support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
@@ -343,12 +393,11 @@ void ResetSupportNet() noexcept {
     session.Stop();ResetRangeEnemyNetwork();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
     for(auto& v:commandVersionOf)v=0;
     versionShown={};AcquireSRWLockExclusive(&versionLock);versionAt=0;ReleaseSRWLockExclusive(&versionLock);
-    commandHostPeer=0;ResetCommandNetwork();ResetQMarkNetwork();ResetPvpNetwork();
-    ResetEnemyControlNetwork();ResetSubSupportNetwork();ResetCarrierDroneNetwork();ResetGravityNetwork();ResetFloatGunNetwork();
+    commandHostPeer=0;RegisterPluginChannels();plugin_net::Reset();
 }
 void SuspendSupportNet() noexcept {
     session.Suspend();running=false;blockedUntilMission=true;
-    CommandContext(GetTickCount64());QMarkContext(GetTickCount64());
+    CommandContext(GetTickCount64());
     Log("SUPPORT NET suspended: existing actors retained; mission participant resynchronization required");
 }
 void RunSupportNetTick() noexcept {
@@ -371,7 +420,6 @@ void RunSupportNetTick() noexcept {
     if(!running && !Start(next,now)){NoteTransport("EDF6Coop snapshot rejected (peer list / host identity)");return;}
     NoteTransport(next.isHost ? "ready (host)" : "ready (client)");
     CommandContext(now);
-    QMarkContext(now);
     // Never spawn on the DirectNet worker. The map/crew game-thread frame owns
     // both deserialization and the native create/register/destroy callbacks.
     for(unsigned received=0;received<512;++received) {
@@ -383,21 +431,16 @@ void RunSupportNetTick() noexcept {
         if(peer) {
             NoteForeignVersion(peer,bytes,count);
             CommandContext(now);
-            if(ReceiveQMarkNetwork(peer,sender.id,bytes,count,now))continue;   // before the support parser, as the commands
-            if(ReceiveCommandNetwork(peer,sender.id,bytes,count,now))continue;
-            if(ReceivePvpNetwork(peer,sender.id,bytes,count,now))continue;
-            if(ReceiveEnemyControlNetwork(peer,sender.id,bytes,count,now))continue;
-            if(ReceiveSubSupportNetwork(peer,sender.id,bytes,count,now))continue;
-            if(ReceiveCarrierDroneNetwork(peer,sender.id,bytes,count,now))continue;
-            if(ReceiveGravityNetwork(peer,sender.id,bytes,count,now))continue;
-            if(ReceiveFloatGunNetwork(peer,sender.id,bytes,count,now))continue;
+            if(plugin_net::Receive(peer,sender.id,bytes,count,now))continue;   // a channel's (plugin_net.h), before the support parser
             support_net::Message message;
             if(support_net::Decode(bytes,count,message)) {
                 const auto pending=session.PendingHandshakes();
                 session.Receive(peer,message,now);
                 if(session.PendingHandshakes()!=pending)Log("SUPPORT NET handshake: kind=%u peer=%u pending=%u ready=%d",
                     static_cast<unsigned>(message.kind),peer,session.PendingHandshakes(),session.Ready());
-            } else Log("SUPPORT NET malformed application packet: peer=%u bytes=%u",peer,count);
+            } else if(count>=4 && wire::HeadWord(bytes,count,0)==support_net::kMagic) {
+                Log("SUPPORT NET malformed application packet: peer=%u bytes=%u",peer,count);
+            } else NoteUnknown(peer,bytes,count);
         }
     }
     session.SetRescueCooldown(static_cast<std::uint64_t>(Cfg().seaRescueCooldownSec)*1000);   // the host's own setting decides
@@ -405,7 +448,6 @@ void RunSupportNetTick() noexcept {
     RangeEnemyNetworkTick();
     VersionTick(running);
     CommandContext(now);
-    QMarkContext(now);
     if(session.Suspended())SuspendSupportNet();
 }
 void SupportNetTick() noexcept {

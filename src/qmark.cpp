@@ -67,7 +67,7 @@ void Look(Tracked& t,ULONGLONG now) noexcept {
     MarkIdentities ids{};
     if(!ResolveMarkIdentities(Zero(t.marker) ? nullptr : t.marker,Zero(t.target) ? nullptr : t.target,&ids))return;
     // Named only when it is its sender's own player (a peer cannot name another): the name tag's name.
-    if(ids.player && ids.puid && SupportCommandRequesterMatches(ids.puid,t.puid)) {
+    if(ids.player && SenderIsPlayer(ids.puid,t.puid)) {
         t.slot=ids.slot;
         if(!ReadPlayerName(ids.player.obj,t.name,kQMarkName))t.name[0]=0;
     }

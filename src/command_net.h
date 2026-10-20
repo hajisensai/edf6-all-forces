@@ -32,6 +32,9 @@ struct CommandNetworkContext {
     bool (*send)(std::uint32_t,const void*,std::size_t) noexcept=nullptr;
     // Optional EDF6CoopTrySendExtension status and real pending-byte/packet ceilings.
     std::uint32_t (*trySend)(std::uint32_t,const void*,std::size_t,std::uint32_t,std::uint32_t) noexcept=nullptr;
+    // The transport alone is up (the support handshake may still be pending): what the Q marks need, peer to peer
+    // with no host step (qmark.cpp). `ready` implies it.
+    bool linked=false;
 };
 void UpdateCommandNetwork(const CommandNetworkContext&,std::uint64_t now) noexcept;
 bool ReceiveCommandNetwork(std::uint32_t senderPeer,const char* authenticatedPuid,

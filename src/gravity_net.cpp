@@ -1,10 +1,10 @@
 // The gravity operations online (gravity_net.h; the wire gravity_net_protocol.h). Game thread only.
-#define _CRT_RAND_S
-#include <cstdlib>
 #include "gravity_net.h"
 #include "command_identity.h"
 #include "gravity_net_protocol.h"
 #include "memory.h"
+#include "plugin_net.h"
+#include "support_protocol.h"
 #include "support_net.h"
 #include "support_soldier.h"
 #include <cmath>
@@ -76,7 +76,7 @@ bool Look(std::uint32_t peer,const gravity_net::Grab& g,ULONGLONG now) noexcept 
     r.lookedAt=now;r.found=false;r.t=gravity::Target{};
     MarkIdentities ids{};
     if(!ResolveGrabIdentities(g.grabber,Zero(g.target) ? nullptr : g.target,&ids) || !ids.player)return false;
-    if(!ids.puid || !SupportCommandRequesterMatches(ids.puid,r.puid)) {
+    if(!SenderIsPlayer(ids.puid,r.puid)) {
         if(logs++<32)Log("GRAVITY NET peer %u's grab names a player that is not its own: ignored",peer);
         return false;
     }
@@ -174,14 +174,24 @@ void UpdateGravityNetwork(const CommandNetworkContext& context,std::uint64_t now
     if(!netReady || context.peerCount!=peerCount){ResetGravityNetwork();netReady=true;peerCount=context.peerCount;}
     unsigned char bytes[gravity_net::kGrabWire];
     for(int i=0;i<out.queued;++i)
-        if(gravity_net::Encode(out.queue[i],bytes,sizeof(bytes)))for(std::uint32_t p=1;p<=peerCount;++p)context.send(p,bytes,sizeof(bytes));
+        if(gravity_net::Encode(out.queue[i],bytes,sizeof(bytes)))plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
     out.queued=0;
     const ULONGLONG ms=GameMs();
     if(!out.holding || (out.sentAt && ms-out.sentAt<gravity_net::kHoldGapMs))return;
     out.sentAt=ms;
     if(!gravity_net::Encode(out.hold,bytes,sizeof(bytes)))return;
-    for(std::uint32_t p=1;p<=peerCount;++p)context.send(p,bytes,sizeof(bytes));
+    plugin_net::Broadcast(support_net::kExtGravity,bytes,sizeof(bytes));
     (void)now;
+}
+// A peer newly has the gravity channel (a new member, or its hello heard only now): the hold goes out in full at once.
+void GravityNetworkJoined(std::uint32_t) noexcept { if(out.holding)out.sentAt=0; }
+
+plugin_net::Channel GravityNetChannel() noexcept {
+    plugin_net::Channel c;
+    c.name="gravity";c.magic=gravity_net::kGrabMagic;c.version=gravity_net::kVersion;c.featureBit=support_net::kExtGravity;
+    c.minSize=c.maxSize=gravity_net::kGrabWire;
+    c.receive=&ReceiveGravityNetwork;c.update=&UpdateGravityNetwork;c.reset=&ResetGravityNetwork;c.joined=&GravityNetworkJoined;
+    return c;
 }
 
 bool ReceiveGravityNetwork(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t) noexcept {
@@ -219,9 +229,7 @@ void ResetGravityNetwork() noexcept {
     for(auto& r:in)r=In{};
     inbox.Reset();
     out.queued=0;
-    std::uint32_t origin=0;
-    if(rand_s(&origin))origin=static_cast<std::uint32_t>(GetTickCount64());
-    out.origin=origin|1u;out.serial=0;
+    out.origin=plugin_net::NewOrigin();out.serial=0;
     if(out.holding)out.sentAt=0;   // the hold goes out again in full to the new roster
     netReady=false;peerCount=0;
 }
