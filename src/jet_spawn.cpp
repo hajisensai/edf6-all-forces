@@ -169,7 +169,7 @@ unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
     // A copy this machine just made: never registered, so its own here (online_authority.h). A drone gets the native
     // init alone (mission_setup, its weapons): no one is seated in it, JetFrame flies it (Unmanned); a crewed body asks
     // the soldiers near it to walk aboard (SeatNpcRider).
-    if(!Unmanned(row.role))SeatNpcRider(v,true);
+    if(!Unmanned(row))SeatNpcRider(v,true);
     else if(OnlineMaySeatNpc(v))PrepareNpcVehicle(v,true);
     const bool jet=row.mark>0.0f;
     Role role=Role::fighter;
@@ -185,7 +185,7 @@ Jet* Launch(Body b,const float* from,const float* heading,const float* target,DW
     if(!spawnOk || !Cfg().jetPilot || !Preloaded(b) || !At<void*>(image,kObjectMgr) || !SlotFree())return nullptr;
     // Made in the air with no one in it, only a drone flies (Unmanned): a crewed body would be an empty hull falling.
     // Crewed aircraft come through the support deployment with their real crew (support_dispatch.cpp).
-    if(!Unmanned(Row(b).role)){Log("JET launch: %ls is crewed: not launched without its crew (support calls bring it)",Row(b).file);return nullptr;}
+    if(!Unmanned(Row(b))){Log("JET launch: %ls is crewed: not launched without its crew (support calls bring it)",Row(b).file);return nullptr;}
     const ULONGLONG ms=GameMs();
     float start[3]={from[0],from[1],from[2]};
     ClearGround(start,clear);
@@ -542,7 +542,7 @@ void PreloadJets() noexcept {
     __try {
         const auto mgr=At<void*>(image,kPreloadMgr);
         if(!mgr)return;
-        char line[512];
+        char line[768];
         int at=0;
         for(int k=0;k<kBodyCount;++k) {
             // The hostile bodies only come from a mission, which preloads them itself (docs/primer-plan.md): the Primer
@@ -561,7 +561,8 @@ void PreloadJets() noexcept {
         Log("JET preload %s (dolls %d)",line,dolls);
         // The gunship's shells (GunshipFire), with its body; the impact charges; the EMC / Sazabi rounds and the Proteus's
         // shield whenever their files are installed (a Proteus may be called any time, ProteusRework switched on mid-mission).
-        PreloadShells(mgr,Preloaded(Body::gunship));
+        // ...and with the Dreadnought, whose turrets fire the cannon's round (jet_bay.cpp TurretRound)
+        PreloadShells(mgr,Preloaded(Body::gunship) || ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));
         PreloadUltimate(mgr);   // the ultimate strike's magic circles (ultimate.cpp)
     } __except(FaultLog("JET preload (nothing preloaded)",GetExceptionInformation())) {
         for(auto& p:preloaded)p=false;
@@ -599,6 +600,23 @@ unsigned char* JetLaunchDrone(const float* from,const float* heading,const float
     }
     __except(FaultLog("JET drone launch",GetExceptionInformation())){return nullptr;}
 }
+
+// A Dreadnought fighter (kind 0..3: Body::dnFighter + kind, crewless) off its hangar (dreadnought_hangar.inc): its role's
+// least speed and kDnLaunchOver on top, so it flies off the deck at once.
+constexpr float kDnLaunchOver=25.0f;
+unsigned char* JetLaunchDreadnoughtFighter(int kind,const float* from,const float* heading,const float* target,DWORD fuelSec,
+                                           const void* source,bool escort) noexcept {
+    if(kind<0 || kind>=kDnFighterKinds)return nullptr;
+    __try {
+        const Body b=static_cast<Body>(static_cast<int>(Body::dnFighter)+kind);
+        Jet* const j=Launch(b,from,heading,target,fuelSec,KindOf(Row(b).role).minSpeed+kDnLaunchOver,source,0.0f);
+        if(!j)return nullptr;
+        j->escort=escort;
+        return j->Vehicle();
+    }
+    __except(FaultLog("JET dreadnought fighter launch",GetExceptionInformation())){return nullptr;}
+}
+static_assert(static_cast<int>(Body::dnInterceptor)-static_cast<int>(Body::dnFighter)+1==kDnFighterKinds,"the Dreadnought fighters' bodies");
 
 namespace {
 // Thrown drones (JetLaunchThrown): a rotor drone starts kThrownRotorClear over its bomb's spot, drifting off at

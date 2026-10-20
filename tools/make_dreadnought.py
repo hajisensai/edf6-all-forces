@@ -98,7 +98,9 @@ def check(files: dict[str, bytes]) -> None:
         names = {md.name_of(b.name) for b in md.bones}
         missing = {b for b, _ in v['vehicle_weapon_setting']} - names
         assert not missing, f'{file}: model lacks weapon bones {missing}'
-        if file == SGO_FILE:   # a gunner seat a turret, every turret's bones in the model
+        if file == SGO_FILE:   # its box's centre the plugin's keel; a gunner seat a turret, every turret's bones in the model
+            centre = float(v['heli_rigid_body'][0][1])
+            assert abs(centre - vc.DREADNOUGHT_KEEL) < 0.01, f'{file}: box centre {centre} over the keel, vcobjects says {vc.DREADNOUGHT_KEEL}'
             make_jets.check_passenger_seats(files[f'OBJECT/{file}'], 1 + vc.DREADNOUGHT_TURRETS, file, 1)
             turrets = {f'dn_turret_{n}{s}' for n in range(vc.DREADNOUGHT_TURRETS) for s in ('', '_gun', '_muzzle')}
             assert turrets <= names and f'dn_turret_{vc.DREADNOUGHT_TURRETS}' not in names, sorted(turrets - names)

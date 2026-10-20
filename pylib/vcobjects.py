@@ -724,6 +724,9 @@ DREADNOUGHT_WEAPON_BONES = ('dn_muzzle', 'dn_muzzle', 'dn_missile')
 # Its turrets (the user, 2026-10-21: 「船的炮塔是可以上人的」): a gunner seat each after the pilot's (seat 1 + n: turret n,
 # its bones dn_turret_<n> / _gun / _muzzle, tools/prep_dreadnought.py), the plugin turning it and firing from its muzzle.
 DREADNOUGHT_TURRETS = 8
+# Its collision box's centre over its keel (heli_rigid_body[0][1]: the model's whole box, the model standing on its keel):
+# the vehicle's position is that centre (src/dreadnought.cpp kKeel; tools/make_dreadnought.py check holds the SGO to it).
+DREADNOUGHT_KEEL = 55.25
 DREADNOUGHT_CAMERA = (0.0, 160.0, -640.0)            # behind and over a 500 m ship, all of it in view
 # Riding: over its stern, looking along its deck at the horizon ahead (model frame: x left, y up, z forward).
 DREADNOUGHT_SEAT_CAMERA = ((0.0, 190.0, -560.0), (0.0, 80.0, 200.0))

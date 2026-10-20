@@ -156,6 +156,8 @@ struct Config {
     float dreadnoughtFloor=30.0f;      // m: the least its keel flies over the ground
     int dreadnoughtBoostKey=0x10;      // ...on the keyboard: the boost (VK_SHIFT; on a pad A)
     int dreadnoughtDescendKey=0x11;    // ...on the keyboard: down (VK_CONTROL; on a pad the right stick back)
+    int dreadnoughtHangarKey=0x48;     // the pilot launches an escort flight from its hangar (H; 0 none)
+    int dreadnoughtHangarButton=0x08;  // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x08 Y; 0 none)
     char testBoardVehicle[32]{};    // tests: class substring, optionally @exactModelBone to distinguish models sharing 506
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
                                     // once a mission near the player, then the player put into what it brings
@@ -776,6 +778,14 @@ bool JetLaunch(JetRole role,const float* from,const float* heading,const float* 
 // jet does (fuel, damage, ammo). The vehicle, or nullptr (not preloaded this mission, kMaxJets flying).
 unsigned char* JetLaunchDrone(const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                               bool escort) noexcept;
+// A Dreadnought fighter off its hangar (dreadnought_hangar.inc): kind 0 fighter, 1 defender, 2 bomber, 3 interceptor (its
+// crewless NPC body, jet_internal.h Body::dn*), launched as JetLaunchDrone launches a drone. The vehicle, or nullptr.
+constexpr int kDnFighterKinds=4;
+unsigned char* JetLaunchDreadnoughtFighter(int kind,const float* from,const float* heading,const float* target,DWORD fuelSec,
+                                           const void* source,bool escort) noexcept;
+// Whether the local player leaving `fighter` goes back aboard a dreadnought near it (dreadnought_hangar.inc: one of its
+// fighters within its return range): no parachute, no catch (playerjet.cpp Leave / Left), the fighter handed back.
+bool DreadnoughtTakesBack(const unsigned char* fighter) noexcept;
 // A drone a thrown Robot Bomb releases where it landed (airstrike.cpp kThrows; tools/calls.py brings 'throw'): the
 // blast or doll drone (rotor, a few metres over `at`) or the gun drone (fixed wing, taking off from ~20 m over it),
 // with no carrier, working round `at` within a short reach and leaving (a charge: blowing up there) out of fuel
@@ -1139,6 +1149,11 @@ bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The gunship gunner's seat camera (playerjet_crew.inc GunnerLook): from turretcam.cpp's native Type-1 seat camera hook,
 // the eye and look-at for the local player at the gun; false for any other seat (the stock camera stays).
 bool GunshipGunnerCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept;
+// The Dreadnought's turrets (dreadnought_turrets.inc): the local gunner's camera (turretcam.cpp LookHook), their sight
+// (hud.cpp), and a round of a turret (jet_bay.cpp: the gunship's cannon round, from `from` at `at`; false: not fired).
+bool DreadnoughtGunnerCamera(const unsigned char* seat,float* eye,float* look) noexcept;
+bool DreadnoughtGunnerHud(GunnerReadout* out) noexcept;
+bool DreadnoughtRound(unsigned char* owner,const float* from,const float* at) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;
 // The boarding gun (boarding.cpp): a real friendly hit suppresses damage and asks the game thread to board the

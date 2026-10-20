@@ -3395,7 +3395,7 @@ void HudPublish() noexcept {
     s.emc=PlayerEmcCue(&s.emcCue);
     s.launcher=PlayerLauncher(&s.launch);
     s.heliSight=PlayerHeliSight(&s.heliAim);
-    s.gunner=PlayerGunnerHud(&s.gun);
+    s.gunner=PlayerGunnerHud(&s.gun) || DreadnoughtGunnerHud(&s.gun);   // the gunship's gun or a Dreadnought turret
     s.sensor=PlayerVehicleContacts(&s.sensorHud);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
     s.turret=PlayerTurretAim(&s.turretAim);

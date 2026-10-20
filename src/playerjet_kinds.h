@@ -73,6 +73,7 @@ constexpr const char* kOwnTwin="its own kind's requested twin";
 constexpr const char* kStrikeTwin="no requested twin of its own: the player strike jet, the same airframe, model and stores";
 constexpr const char* kBomberCatch="a stock bomber a strike jet took over (no SGO of ours to make it): the player strike jet";
 constexpr const char* kCarrierCatch="a 59 x 77 m rotor craft (the catch is a wing's flight): the player fighter";
+constexpr const char* kDnCatch="a Dreadnought fighter (no player twin of its own): the player fighter";
 constexpr const char* kChargeCatch="a rotor drone its own charge destroys (the catch is a wing's flight): the player fighter";
 
 // The player's flight model's numbers (playerjet.cpp Kind, the same fields and units).
@@ -141,6 +142,11 @@ inline constexpr Boardable kBoardable[]={
     {Body::blast,Airframe::rotor,Arm::charge,Rotor("blast",MarkOf(Body::blast),Npc(jet::Role::blast),3.0f),kCatchPlayerFighter,kChargeCatch},
     {Body::doll,Airframe::rotor,Arm::charge,Rotor("doll",MarkOf(Body::doll),Npc(jet::Role::doll),3.0f),kCatchPlayerFighter,kChargeCatch},
     {Body::gunship,Airframe::wing,Arm::shells,Wing("gunship",MarkOf(Body::gunship),Npc(jet::Role::gunship),20.0f),kCatchGunship,kOwnTwin},
+    // The Dreadnought's fighters (29, 30, 28 m across; the interceptor 30 m long): its hangar's, crewless.
+    {Body::dnFighter,Airframe::wing,Arm::none,Wing("dnFighter",MarkOf(Body::dnFighter),Npc(jet::Role::fighter),14.0f),kCatchPlayerFighter,kDnCatch},
+    {Body::dnDefender,Airframe::wing,Arm::none,Wing("dnDefender",MarkOf(Body::dnDefender),Npc(jet::Role::fighter),15.0f),kCatchPlayerFighter,kDnCatch},
+    {Body::dnBomber,Airframe::wing,Arm::none,Wing("dnBomber",MarkOf(Body::dnBomber),Npc(jet::Role::strike),14.0f),kCatchPlayerFighter,kDnCatch},
+    {Body::dnInterceptor,Airframe::wing,Arm::none,Wing("dnInterceptor",MarkOf(Body::dnInterceptor),Npc(jet::Role::interceptor),15.0f),kCatchPlayerFighter,kDnCatch},
 };
 constexpr int kBoardableCount=static_cast<int>(sizeof(kBoardable)/sizeof(kBoardable[0]));
 

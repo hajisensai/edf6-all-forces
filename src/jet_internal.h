@@ -96,8 +96,8 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
                   gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic,
-                  heliTransport, transportPlane };
-constexpr int kBodyCount=22;
+                  heliTransport, transportPlane, dnFighter, dnDefender, dnBomber, dnInterceptor };
+constexpr int kBodyCount=26;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -108,6 +108,8 @@ struct BodyRow {
     const char* name;
     bool hostile=false;             // the enemy's: on first sight it joins the enemy team (CrewPlaced) and hunts the
                                     // player's side round the player, as a friendly one guards them
+    bool crewless=false;            // flown with no one in it whatever its role (Unmanned): the Dreadnought's fighters,
+                                    // which its hangar launches (dreadnought_hangar.inc) and the player may board
 };
 // The strike jets that take over a BOMBER401 or BOMBER501_2 fly that bomber's own model with the strike jet's
 // mark; tools/make_jets.py writes them all (testrange/gen.py JETS has the marks of the mission-placed ones).
@@ -146,6 +148,13 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     // strike jet with twelve behind its pilot (flown as a strike jet that attacks nothing: jet.cpp JetFerry).
     {Body::heliTransport,L"app:/object/edf6vc_heli_transport.sgo",L"EDF6VC_HELI_TRANSPORT.SGO",0.0f,Role::fighter,Role::drone,"heliTransport"},
     {Body::transportPlane,L"app:/object/edf6vc_jet_transport.sgo",L"EDF6VC_JET_TRANSPORT.SGO",7001.0f,Role::strike,Role::drone,"transportPlane"},
+    // The Dreadnought's fighters (tools/make_dreadnought.py, pylib/vcobjects.py DREADNOUGHT_FIGHTERS): the Dreadnought game's
+    // fighters' models, crewless (its hangar launches them), each flying its role's way.
+    {Body::dnFighter,L"app:/object/edf6vc_dn_fighter.sgo",L"EDF6VC_DN_FIGHTER.SGO",7041.0f,Role::fighter,Role::drone,"dnFighter",false,true},
+    {Body::dnDefender,L"app:/object/edf6vc_dn_defender.sgo",L"EDF6VC_DN_DEFENDER.SGO",7042.0f,Role::fighter,Role::drone,"dnDefender",false,true},
+    {Body::dnBomber,L"app:/object/edf6vc_dn_bomber.sgo",L"EDF6VC_DN_BOMBER.SGO",7043.0f,Role::strike,Role::drone,"dnBomber",false,true},
+    {Body::dnInterceptor,L"app:/object/edf6vc_dn_interceptor.sgo",L"EDF6VC_DN_INTERCEPTOR.SGO",7044.0f,Role::interceptor,Role::drone,
+     "dnInterceptor",false,true},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;
@@ -452,6 +461,7 @@ struct Jet {
     const char* why;         // why it withdrew
     ULONGLONG emptyFrame;    // the game frame its rider was put off for the reap (JetReap: the delete waits for it), 0 none
     bool launched;           // made by JetLaunch: anchor is its strike point
+    bool crewless=false;     // its body's BodyRow::crewless (NewEntry)
     bool supportMetadata=false; // remote carrier metadata alone never drives native input
     bool supportDrone=false,supportPending=false; // staged network drone: no AI/fire before every peer activates
     bool entered;            // ...its first attack run begun: its arrival over (Entering)
@@ -502,7 +512,8 @@ inline const Kind& KindOf(const Jet& j) noexcept { return KindOf(j.role); }
 // doll drones driver=0, seats=[-], falling through the ground). Every crewed body comes with its real crew instead
 // (support_dispatch.cpp: made inside it, seated at spawn); Launch makes no crewed one.
 constexpr bool Unmanned(Role r) noexcept { return r==Role::drone || r==Role::blast || r==Role::doll; }
-inline bool FliesItself(const Jet& j) noexcept { return j.launched && Unmanned(j.role); }
+constexpr bool Unmanned(const BodyRow& b) noexcept { return Unmanned(b.role) || b.crewless; }
+inline bool FliesItself(const Jet& j) noexcept { return j.launched && (Unmanned(j.role) || j.crewless); }
 inline int IndexOf(const Jet& j) noexcept { return static_cast<int>(&j-jets); }
 
 // Retargeting abandons an old attack but preserves ammunition cooldowns and lifecycle flight modes.
@@ -567,6 +578,7 @@ bool SlotFree() noexcept;                 // NewEntry would find an entry (logge
 void JoinFlight(Jet& j,unsigned flight) noexcept;   // its flight and its place in it
 bool IsJetVehicle(const unsigned char* v,Role* role,Role* drones) noexcept;
 bool HostileJet(const unsigned char* v) noexcept;   // a jet body of the enemy's (BodyRow::hostile)
+bool CrewlessJet(const unsigned char* v) noexcept;  // a jet body flown with no one in it (BodyRow::crewless)
 void SetJetTeam(unsigned char* v,std::int32_t team) noexcept;   // jet_spawn.cpp: SetTeam, registered with the team manager
 // Whether jet `o` is flown: in the table and flown within kStaleMs (its position and command are current).
 inline bool Flown(const Jet& o,ULONGLONG ms) noexcept {

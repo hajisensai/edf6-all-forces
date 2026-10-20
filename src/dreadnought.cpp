@@ -12,7 +12,9 @@
 //    its door, or up onto its deck (its collision is the model's own: pylib/aircraft_collision.py);
 //  - physics (506 slot 57, body506.cpp -> DreadnoughtBodyStep): that velocity, and the spin that keeps it level facing its
 //    heading (body506.h BodyAttitude). Never flown (just delivered): nothing written, the stock body holds it.
-// Its weapons are the stock heli's triggers on its bow gun and its missile cells (vcobjects DREADNOUGHT_WEAPON_BONES).
+// Its weapons are the stock heli's triggers on its bow gun and its missile cells (vcobjects DREADNOUGHT_WEAPON_BONES);
+// its eight turrets are its gunner seats' (dreadnought_turrets.inc); its hangar launches its fighters, and a player leaving
+// it in the air flies off in one (dreadnought_hangar.inc).
 // Online the machine its work counts on (online_authority.h IsOnlineAuthority) flies it; the others see the stock 506's
 // own replication of its body.
 // Water is no hazard: the 506's ditching message is taken whole (map rays see the seabed under the sea).
@@ -24,6 +26,7 @@
 #include "map.h"
 #include "memory.h"
 #include "online_authority.h"
+#include "turretcam.h"
 #include "vecmath.h"
 #include <cmath>
 #include <cstring>
@@ -32,6 +35,7 @@ namespace crew {
 namespace {
 using vec::Clamp;
 constexpr float kDreadnoughtMark=7601.0f;   // pylib/vcobjects.py DREADNOUGHT_MARK (tools/selftest.py dreadnought_agrees)
+constexpr float kDnFighterMark=7041.0f;     // its first fighter's (jet_internal.h kBodies Body::dnFighter, then one a kind)
 constexpr std::size_t kBody=0x1650;
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
 constexpr std::size_t kAreaInset=0xE00;   // playerjet.cpp: the move-area clamp's inset
@@ -44,7 +48,7 @@ constexpr float kDeg=0.017453292f,kPi=3.14159265f;
 // Its hull (tools/make_dreadnought.py measures the SGO's box; tools/selftest.py dreadnought_agrees holds these to it):
 // the vehicle's position is its box's centre, kKeel m over its keel; the probes for the ground under it, in its frame
 // (x left, z ahead), at its bow and stern kReach, its beams kBeam off its centre line.
-constexpr float kKeel=53.812f,kReach=220.0f,kBeam=100.0f;
+constexpr float kKeel=55.25f,kReach=220.0f,kBeam=100.0f;   // kKeel: pylib/vcobjects.py DREADNOUGHT_KEEL
 constexpr float kProbeUp=2.0f;            // m over the keel the rays start (under what it rests on)
 constexpr float kSettleSpeed=8.0f;        // m/s down, nobody in it, to the ground
 constexpr float kSettleGap=0.5f;          // m: settled, its keel this far over the ground (the collision takes the rest)
@@ -229,9 +233,13 @@ void Report(Ship& s,const unsigned char* v,const Controls& c,ULONGLONG ms) noexc
         c.forward,c.right,c.turn,c.climb,c.boost);
 }
 
+#include "dreadnought_turrets.inc"
+#include "dreadnought_hangar.inc"
+
 void Drive(Ship& s,unsigned char* v,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float dt=Measure(s,pos,ms);
+    TurretsFrame(s,v,dt,ms);   // on every machine: each gunner's own turret is theirs
     if(drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) && !IsOnlineAuthority(v)) {
         s.active=false;   // another machine flies it: its body is the stock replication's
         return;
@@ -247,6 +255,7 @@ void Drive(Ship& s,unsigned char* v,ULONGLONG ms) noexcept {
     }
     if(!s.driven)Board(s,v);
     c=Read(SeatAt(v,0),dt);
+    HangarKey(s,v,SeatAt(v,0),ms);
     Fly(s,v,c,dt);
     Report(s,v,c,ms);
 }
@@ -264,6 +273,7 @@ void DreadnoughtFrame(unsigned char* v) noexcept {
     if(!s && (s=Make(v))==nullptr)return;
     s->frame=GameFrame();
     Drive(*s,v,GameMs());
+    WatchPlayer(GameMs());   // once a frame: the local player's sortie or way back (dreadnought_hangar.inc)
 }
 
 // The 506 physics step (body506.cpp), after the stock one: its velocity, the spin that keeps it level.
@@ -292,5 +302,39 @@ bool InstallDreadnought() noexcept {
 
 void ResetDreadnought() noexcept {
     for(auto& s:ships)s=Ship{};
+    for(auto& r:turrets)r=Turrets{};
+    for(auto& h:hangars)h=Hangar{};
+    transfer=Transfer{};riddenLast=riddenCtrl=nullptr;watchedFrame=0;
+    AcquireSRWLockExclusive(&gunnerViewLock);gunnerView=GunnerView{};ReleaseSRWLockExclusive(&gunnerViewLock);
+    gunnerHudFrame=0;
+}
+
+// The camera hook's side of a gunner's view (dreadnought_turrets.inc GunnerLook): the eye over their turret's seat and
+// back along the view, looking along it: the screen's centre is their aim.
+bool DreadnoughtGunnerCamera(const unsigned char* seat,float* eye,float* look) noexcept {
+    AcquireSRWLockShared(&gunnerViewLock);const GunnerView view=gunnerView;ReleaseSRWLockShared(&gunnerViewLock);
+    if(!Cfg().enabled || !Cfg().dreadnought || !view.seat || seat!=view.seat || view.frame+2<GameFrame() ||
+       !view.ref.Is(view.vehicle) || view.vehicle[kDead] || SeatRider(seat)!=Rider::player ||
+       At<const void*>(seat,kSeatRider)!=PlayerHuman())return false;
+    float dir[3];
+    tcam::Dir(view.yaw,view.pitch,dir);
+    for(int i=0;i<3;++i) {
+        eye[i]=view.pivot[i]+(i==1 ? kCamUp : 0.0f)-dir[i]*kCamBack;
+        look[i]=eye[i]+dir[i]*100.0f;
+        if(!std::isfinite(eye[i]+look[i]))return false;
+    }
+    return true;
+}
+
+bool DreadnoughtTakesBack(const unsigned char* fighter) noexcept {
+    if(!installed || !Cfg().enabled || !Cfg().dreadnought || !IsDnFighter(fighter))return false;
+    return NearestShip(reinterpret_cast<const float*>(fighter+kPosition))!=nullptr;
+}
+
+// The local gunner's sight, fresh this frame (hud.cpp GunnerMarks).
+bool DreadnoughtGunnerHud(GunnerReadout* out) noexcept {
+    if(!out || !gunnerHudFrame || gunnerHudFrame+1<GameFrame())return false;
+    *out=gunnerHud;
+    return true;
 }
 }  // namespace crew
