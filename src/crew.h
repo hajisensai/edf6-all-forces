@@ -177,6 +177,7 @@ struct Config {
     bool gravityGun=true;           // the gravity gun grabs, carries and throws (off: it is the stock Laser Guide Kit it was cloned from)
     float gravityThrowSpeed=40.0f;  // m/s a 2 t thing leaves the gun at (lighter faster, heavier slower: gravity_logic.h ThrowSpeed)
     bool gravityAutoTest=false;     // a test: every few seconds the nearest enemy is grabbed, held over the player and slammed down (gravitygun.cpp)
+    bool gravityGrabPlayers=false;  // the gravity gun may grab players (any machine's) and vehicles a player rides (off: it passes them by)
     int floatGuns=1;                // dropped guns that float round their finder and fire (floatgun.cpp): 0 off, 1 EDF5's last mission (M099) only, 2 every mission
     int floatGunMost=4;             // ...at most this many round one player (a fifth replaces the oldest)
     float floatGunSec=90.0f;        // ...each fights this long once picked up (0: until the mission ends)

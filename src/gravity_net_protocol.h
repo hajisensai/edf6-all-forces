@@ -11,9 +11,12 @@
 // player walks up to one asks for it (`pick`), the host gives it to the first who asked (`owner`) and ends it (`gone`);
 // every machine draws and fires each gun round its owner, and only the owner's machine's rounds deal damage (the game's
 // own rule: a round whose attacker is another machine's hurts nothing here; EDF6Coop docs/net-re/damage.md).
-// Wire: fixed sizes, little-endian, over the EDF6Coop extension transport (support_net.cpp routes them by magic). Version 1:
-// a newer version is owned and ignored. Objects go by their native network ID (support_soldier.h ReadNativeObjectId), all
-// zero for one without it (a debris piece, a body of an unregistered object): found by the grab's ray and position instead.
+// Wire: fixed sizes, little-endian (wire.h), plugin_net.h channels GRVT (kExtGravity) and FGUN (kExtFloatGun): sent only
+// to a peer that announced the bit, another version dropped by the registry. Version 2 (2026-10-20): the grab's flight
+// and radial kinds, the float guns taken from the game's own drop. Objects go by their native network ID
+// (support_soldier.h ReadNativeObjectId), all zero for one without it (a debris piece, a body of an unregistered object):
+// found by the grab's ray and position instead, and, thrown, steered on every copy by its grabber's flight states (the
+// game replicates no pose of these: docs/gravity-re.md §11).
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -21,14 +24,22 @@
 namespace crew::gravity_net {
 constexpr std::uint32_t kGrabMagic=0x54565247u;   // "GRVT"
 constexpr std::uint32_t kGunMagic=0x4E554746u;    // "FGUN"
-constexpr std::uint32_t kVersion=1;
+constexpr std::uint32_t kVersion=2;
 constexpr std::size_t kGrabWire=160,kGunWire=96;
 constexpr std::uint32_t kMaxPeers=1024;
 constexpr std::uint64_t kHoldGapMs=50;     // a hold's state goes out this often while it lasts
 constexpr std::uint64_t kHoldSilentMs=600; // a hold not heard of this long is let go (its grabber left, its plugin stopped)
 constexpr std::uint32_t kMostLeftMs=3600000;
+constexpr std::uint64_t kFlightGapMs=100;    // a thrown thing with no ID: its state goes out this often while it flies...
+constexpr std::uint64_t kFlightMostMs=4000;  // ...for at most this long (or until it rests)
+constexpr std::uint64_t kFlightSilentMs=600; // a flight not heard of this long is left to this machine's physics
+constexpr float kMostRadial=200.0f;          // m: a radial's reach at most (gravity::Radial)
+constexpr float kMostRadialSpeed=200.0f;     // m/s
 
-enum class GrabKind : std::uint8_t { hold=1, thrown=2, letGo=3 };
+// hold / thrown / letGo: a grab's life. flight: a thrown grab's state after its throw (`at` where it is, `vel` how fast it
+// goes), for a thing found by the ray (no ID) whose copies would drift apart. radial: gravity::Radial at `at`, goal[0] its
+// radius, goal[1] its speed (a one-off: the grabber's hold, if any, goes on).
+enum class GrabKind : std::uint8_t { hold=1, thrown=2, letGo=3, flight=4, radial=5 };
 struct Grab {
     GrabKind kind=GrabKind::hold;
     std::uint32_t origin=0;          // the sender's run (a new one: its grabs start over)
@@ -59,8 +70,21 @@ bool OwnedGun(const void* bytes,std::size_t size) noexcept;    // the FGUN magic
 bool Encode(const Gun&,void* bytes,std::size_t size) noexcept;
 bool Decode(const void* bytes,std::size_t size,Gun& out) noexcept;
 
+// Two players holding one thing (both grabbed it before either heard of the other): whose grab wins, the same answer on
+// both machines. A host's over a guest's; between guests the lower PUID's. `self*`: this machine's, `other*`: the peer's.
+// (A grab of a thing a peer is already heard holding is refused outright: the first comes first, gravity_net.cpp Hold.)
+inline bool OtherOutranks(bool selfHost,bool otherHost,const char* selfPuid,const char* otherPuid) noexcept {
+    if(selfHost)return false;
+    if(otherHost)return true;
+    if(!selfPuid || !otherPuid || !selfPuid[0] || !otherPuid[0])return false;
+    for(std::size_t i=0;;++i) {
+        if(selfPuid[i]!=otherPuid[i])return static_cast<unsigned char>(otherPuid[i])<static_cast<unsigned char>(selfPuid[i]);
+        if(!selfPuid[i])return false;   // the same PUID (one machine): neither
+    }
+}
+
 // The receiver of the grabs: each peer's current one.
-enum class GrabEvent { none, started, held, thrown, letGo };
+enum class GrabEvent { none, started, held, thrown, letGo, flight, radial };
 struct RemoteGrab {
     bool active=false;
     std::uint64_t heardAt=0;
@@ -70,7 +94,8 @@ class GrabInbox {
 public:
     // A peer's message: `started` for a hold of a grab not followed yet (the receiver finds its target), `held` for a later
     // state of the one followed, `thrown` / `letGo` ending it (a throw of a grab never followed is still `thrown`: its target
-    // is found then), `none` for one of an ended grab or of an older one of the same run.
+    // is found then), `flight` for a state of the grab it last threw, `radial` for a radial (the hold untouched), `none`
+    // for one of an ended grab, an older one of the same run, a flight of a grab not thrown.
     GrabEvent Receive(std::uint32_t peer,const Grab& g,std::uint64_t now) noexcept;
     // Whether the peer's grab is still held at `now` (heard within kHoldSilentMs); a silent one is let go here.
     bool Holding(std::uint32_t peer,std::uint64_t now) noexcept;
@@ -78,7 +103,7 @@ public:
     void End(std::uint32_t peer) noexcept { if(peer && peer<=kMaxPeers)peer_[peer].active=false; }
     void Reset() noexcept { for(auto& r:peer_)r=RemoteGrab{}; for(auto& d:done_)d=Done{}; }
 private:
-    struct Done { std::uint32_t origin=0,grab=0; bool any=false; };   // the last grab each peer ended (late holds of it: none)
+    struct Done { std::uint32_t origin=0,grab=0; bool any=false,thrown=false; };   // the last grab each peer ended (late holds of it: none)
     RemoteGrab peer_[kMaxPeers+1]{};
     Done done_[kMaxPeers+1]{};
 };

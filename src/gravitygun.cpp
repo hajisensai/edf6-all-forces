@@ -69,17 +69,24 @@ const unsigned char* GravityGunOf(const unsigned char* human) noexcept {
 
 float Len(const float* v) noexcept { return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]); }
 
-void LetGo(const unsigned char* human) noexcept {
-    // Falls on its own, still followed for its impacts (Track takes nothing too heavy to have been lifted).
-    if(gun.held && human)gravity::Track(gun.held,human,false);
-    if(gun.held)gravity::net::LetGo(gun.held,human);
-    gun.held=gravity::Target{};
-    gun.farSince=0;
+// Every way a hold ends but a throw (let go, put away, the target gone or contested, the player gone, the mission's
+// physics gone, a fault): what was held falls, still followed for its impacts with its thrower (`human`; Track takes
+// nothing too heavy to have been lifted), or, with no thrower left, is followed no more (never left in a held slot); the
+// peers are told it was let go (gravity_net.h). A throw ends its hold in gravity::Throw (followed, not held) and
+// gravity::net::Thrown.
+void Release(gravity::Target& held,const unsigned char* human) noexcept {
+    if(held) {
+        if(human)gravity::Track(held,human,false);
+        else gravity::Untrack(held);
+        gravity::net::LetGo(held,human);
+    }
+    held=gravity::Target{};
 }
+void Release(const unsigned char* human) noexcept { Release(gun.held,human);gun.farSince=0; }
 
 void Frame(unsigned char* human) noexcept {
     const ULONGLONG ms=GameMs();
-    if(!gun.human.Is(human)){gun=Gun{};gun.human=ObjRef::Of(human);}
+    if(!gun.human.Is(human)){Release(nullptr);gun=Gun{};gun.human=ObjRef::Of(human);}   // another player object (a respawn)
     // The player's own motion (the hold keeps pace with it; a throw carries it).
     const float* pos=reinterpret_cast<const float*>(human+kPosition);
     float playerVel[3]{};
@@ -90,7 +97,7 @@ void Frame(unsigned char* human) noexcept {
 
     const unsigned char* w=GravityGunOf(human);
     const bool inHand=w && w[kInHand];
-    if(!inHand || !Cfg().gravityGun){LetGo(human);gun.latched=false;return;}
+    if(!inHand || !Cfg().gravityGun){Release(human);gun.latched=false;return;}
     const bool held=w[kHeld]!=0;
     float from[3],aim[3];
     if(!edf::MeanMuzzle(w,4,from,aim))std::memcpy(from,pos,12);
@@ -103,11 +110,11 @@ void Frame(unsigned char* human) noexcept {
     if(!held) {
         if(gun.held) {   // let go: thrown along the aim
             float vel[3];
-            const bool thrown=gravity::Refresh(gun.held) &&
+            // A dying one (settling) is thrown too: gravity::Launch gives its corpse the velocity once it is on.
+            const bool thrown=gravity::Update(gun.held)!=gravity::Liveness::gone &&
                               gravity::Throw(gun.held,aim,Cfg().gravityThrowSpeed,playerVel,human,scale,vel);
-            if(thrown)gravity::net::Thrown(gun.held,human,vel);
-            else LetGo(human);
-            gun.held=gravity::Target{};
+            if(thrown){gravity::net::Thrown(gun.held,human,vel);gun.held=gravity::Target{};}
+            else Release(human);
         }
         gun.latched=false;
         return;
@@ -118,6 +125,8 @@ void Frame(unsigned char* human) noexcept {
         const float to[3]={from[0]+aim[0]*reach,from[1]+aim[1]*reach,from[2]+aim[2]*reach};
         gravity::Target t;float hit[3];
         if(!gravity::Pick(from,to,human,&t,hit))return;
+        // A player (any machine's) or a vehicle a player rides is not taken unless the ini says so (GravityGrabPlayers).
+        if(!Cfg().gravityGrabPlayers && gravity::IsPlayerOrRidden(t))return;
         float at[3];
         if(!gravity::Position(t,at))std::memcpy(at,hit,12);
         const float d[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
@@ -126,22 +135,29 @@ void Frame(unsigned char* human) noexcept {
         if(gun.grabs++<64)Log("GRAVITYGUN grab %p (kind %d, family %d): %.2f t, %.1f m out",t.obj.obj,static_cast<int>(t.kind),
                               static_cast<int>(t.family),t.kg*0.001f,gun.holdDist);
     }
-    if(!gravity::Refresh(gun.held)){gun.held=gravity::Target{};gun.latched=true;return;}
+    const gravity::Liveness live=gravity::Update(gun.held);
+    if(live==gravity::Liveness::gone){Release(human);gun.latched=true;return;}
     // Drawn in to its carry distance (no faster than it can be carried), then held there on the aim's line.
     const float carry=kCarry+gun.held.radius*1.5f;
     const float cap=::gravmath::HoldCap(gun.held.kg);
     const float drawIn=cap*0.5f<kDrawIn ? cap*0.5f : kDrawIn;
     if(gun.holdDist>carry)gun.holdDist=std::fmax(carry,gun.holdDist-drawIn*dt);
     const float goal[3]={from[0]+aim[0]*gun.holdDist,from[1]+aim[1]*gun.holdDist,from[2]+aim[2]*gun.holdDist};
-    if(!gravity::HoldAt(gun.held,goal,playerVel)){LetGo(human);gun.latched=true;return;}
-    gravity::net::Hold(gun.held,human,gun.hit,gun.rayA,gun.rayB,goal,playerVel);
+    // The peers told first: a target another player holds already (or outranks this one on) is not this machine's to hold.
+    if(!gravity::net::Hold(gun.held,human,gun.hit,gun.rayA,gun.rayB,goal,playerVel)) {
+        if(gun.grabs<64)Log("GRAVITYGUN %p is another player's grab: let go",gun.held.obj.obj);
+        Release(human);gun.latched=true;return;
+    }
+    // A dying one between its body and its ragdoll (settling): held on, moved once its corpse is on.
+    if(live==gravity::Liveness::settling)return;
+    if(!gravity::HoldAt(gun.held,goal,playerVel)){Release(human);gun.latched=true;return;}
     gravity::Track(gun.held,human,true,scale);   // swung through enemies it hits them
     float at[3];
     if(gravity::Position(gun.held,at)) {
         const float d[3]={at[0]-goal[0],at[1]-goal[1],at[2]-goal[2]};
         if(Len(d)>kLostAfter) {
             if(!gun.farSince)gun.farSince=ms;
-            else if(ms-gun.farSince>(cap<20.0f ? kLostMs*3 : kLostMs)){LetGo(human);gun.latched=true;}   // a heavy one is given longer
+            else if(ms-gun.farSince>(cap<20.0f ? kLostMs*3 : kLostMs)){Release(human);gun.latched=true;}   // a heavy one is given longer
         } else gun.farSince=0;
     }
 }
@@ -180,7 +196,8 @@ void AutoTest(unsigned char* human) noexcept {
         Nearest n{pos,nullptr,0.0f};
         VisitEnemiesOf(At<std::int32_t>(human,kTeam),&SeeNearest,&n);
         gravity::Target t;
-        if(!n.object || !gravity::TargetOf(n.object,0xFFFFFFu,&t) || !(::gravmath::HoldCap(t.kg)>0.0f)) {
+        if(!n.object || !gravity::TargetOf(n.object,0xFFFFFFu,&t) || !(::gravmath::HoldCap(t.kg)>0.0f) ||
+           (!Cfg().gravityGrabPlayers && gravity::IsPlayerOrRidden(t))) {
             if(n.object && autoTest.grabs<64)Log("GRAVITYTEST nearest enemy %p (%.0f m) cannot be lifted",n.object,std::sqrt(n.d2));
             return;
         }
@@ -190,16 +207,19 @@ void AutoTest(unsigned char* human) noexcept {
                                    static_cast<int>(t.kind),static_cast<int>(t.family),t.kg*0.001f,std::sqrt(n.d2),
                                    At<float>(n.object,0x2F8),At<float>(n.object,0x2F4));
     }
-    if(!gravity::Refresh(autoTest.held)){autoTest.held=gravity::Target{};return;}
+    const gravity::Liveness live=gravity::Update(autoTest.held);
+    if(live==gravity::Liveness::gone){Release(autoTest.held,human);return;}
+    if(live==gravity::Liveness::settling)return;
     const float goal[3]={pos[0]+f[0]*kAutoAhead,pos[1]+kAutoHigh,pos[2]+f[2]*kAutoAhead};
     float at[3];
     const bool known=gravity::Position(autoTest.held,at);
     const float gap[3]={known ? at[0]-goal[0] : 0.0f,known ? at[1]-goal[1] : 0.0f,known ? at[2]-goal[2] : 0.0f};
     const bool there=known && Len(gap)<3.0f && ms-autoTest.since>=kAutoHoldMs;
     if(!there && ms-autoTest.since<kAutoMostMs) {   // carried in, then held kAutoHoldMs at least
+        // One grab told at a time (the gun's first); one another player holds is let go.
+        if(!gun.held && !gravity::net::Hold(autoTest.held,human,autoTest.at,pos,autoTest.at,goal,nullptr)){Release(autoTest.held,human);return;}
         gravity::HoldAt(autoTest.held,goal,nullptr);
         gravity::Track(autoTest.held,human,true);
-        if(!gun.held)gravity::net::Hold(autoTest.held,human,autoTest.at,pos,autoTest.at,goal,nullptr);   // one grab told at a time: the gun's first
         return;
     }
     if(known)Log("GRAVITYTEST held at (%.0f,%.0f,%.0f), goal (%.0f,%.0f,%.0f)",at[0],at[1],at[2],goal[0],goal[1],goal[2]);
@@ -210,22 +230,25 @@ void AutoTest(unsigned char* human) noexcept {
     const float down[3]={f[0],-0.6f,f[2]};
     float vel[3];
     const bool thrown=gravity::Throw(autoTest.held,down,Cfg().gravityThrowSpeed,nullptr,human,1.0f,vel);
-    if(thrown && !gun.held)gravity::net::Thrown(autoTest.held,human,vel);
-    else gravity::net::LetGo(autoTest.held,human);
     Log("GRAVITYTEST throw %p: %s",autoTest.held.obj.obj,thrown ? "thrown" : "not thrown");
-    autoTest.held=gravity::Target{};
+    if(thrown && !gun.held){gravity::net::Thrown(autoTest.held,human,vel);autoTest.held=gravity::Target{};}
+    else if(thrown){gravity::net::LetGo(autoTest.held,human);autoTest.held=gravity::Target{};}
+    else Release(autoTest.held,human);
 }
 
 // From the shared tick (crew.cpp GravityTick), after the gravity operations' own frame.
+// Every path that drops what is held goes through Release (never a bare reset: a held slot of gravity.cpp's followed
+// table left behind, and the peers left carrying it till their silence timer).
 void GravityGunTick() noexcept {
-    if(!gravity::Ready()){gun.held=gravity::Target{};autoTest.held=gravity::Target{};return;}
+    if(!gravity::Ready()){Release(nullptr);Release(autoTest.held,nullptr);return;}
     unsigned char* human=PlayerHuman();
-    if(!human){gun=Gun{};return;}
-    __try { Frame(human); } __except(EXCEPTION_EXECUTE_HANDLER){gun.held=gravity::Target{};}
+    if(!human){Release(nullptr);Release(autoTest.held,nullptr);gun=Gun{};return;}
+    __try { Frame(human); } __except(EXCEPTION_EXECUTE_HANDLER){Release(nullptr);}
     if(Cfg().gravityAutoTest) {
-        __try { AutoTest(human); } __except(EXCEPTION_EXECUTE_HANDLER){autoTest.held=gravity::Target{};Log("GRAVITYTEST faulted");}
-    }
+        __try { AutoTest(human); } __except(EXCEPTION_EXECUTE_HANDLER){Release(autoTest.held,nullptr);Log("GRAVITYTEST faulted");}
+    } else if(autoTest.held)Release(autoTest.held,human);
 }
 
+// A new mission: gravity::Reset has cleared the followed table already; the peers' copies go with the room's reset.
 void ResetGravityGun() noexcept { gun=Gun{};autoTest=Auto{}; }
 }  // namespace crew

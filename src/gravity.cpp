@@ -78,6 +78,9 @@ constexpr std::uint64_t kMostRagdollBodies=128;
 constexpr int kDynamic=2;               // GetMotionType: 0 static, 1 keyframed, 2 dynamic
 constexpr std::uint32_t kGrabLayer=0x0F;// layer 15's filter: ragdolls, vehicles, containers, debris (docs/gravity-re.md §4.1)
 constexpr std::uint32_t kNoBody=0xFFFFFFu;
+constexpr float kSameMass=0.01f;        // an ownerless body's mass within this share of its own: still the same body
+constexpr float kMostJump=5.0f;         // m an ownerless body may be off its last place beyond its speed...
+constexpr float kMostBodySpeed=300.0f;  // ...m/s at most (a throw is at most 90 m/s, a blast's debris less)
 
 bool ok=false;
 
@@ -263,8 +266,16 @@ void Deal(const unsigned char* by,const float* at,float kg,float dv,float radius
                        damage,radius,dealt ? "" : " (not dealt: no impact charge this mission)");
 }
 
+// What waits to be launched: a dying character thrown (or told thrown by a peer) before its ragdoll is on (Launch).
+constexpr int kMostPending=16;
+struct PendingLaunch { Target t; float vel[3]{}; };
+PendingLaunch pending[kMostPending];
+
 void Step(Followed& f,ULONGLONG ms) noexcept {
-    if(!Refresh(f.t)){f=Followed{};return;}
+    const Liveness l=Update(f.t);
+    if(l==Liveness::gone){f=Followed{};return;}
+    if(l==Liveness::settling)return;   // its corpse not on yet: kept, nothing read
+
     const auto* by=static_cast<const unsigned char*>(f.by.obj);
     if(!f.by.Is(by)){f=Followed{};return;}   // the thrower is gone: nobody's to deal
     const float dt=GameStep(f.lastMs ? ms-f.lastMs : 0);
@@ -320,6 +331,7 @@ bool Ready() noexcept { return ok && World(); }
 
 void Reset() noexcept {
     for(auto& f:followed)f=Followed{};
+    for(auto& p:pending)p=PendingLaunch{};
 }
 
 bool TargetOf(const void* object,std::uint32_t body,Target* out) noexcept {
@@ -368,22 +380,55 @@ bool Live(const Target& t) noexcept {
         if(t.obj.obj && !t.obj.Is(t.obj.obj))return false;
         if(t.kind!=Kind::body)return true;
         // A body: still dynamic, and (an owned one) still its owner's (a freed id may be another's by now).
-        if(!Dynamic(BodyOf(t.body)))return false;
-        return !t.obj.obj || reinterpret_cast<BodyObjectFn>(image+kBodyObject)(t.body)==t.obj.obj;
+        void* b=BodyOf(t.body);
+        if(!Dynamic(b))return false;
+        if(t.obj.obj)return reinterpret_cast<BodyObjectFn>(image+kBodyObject)(t.body)==t.obj.obj;
+        // An ownerless one (a debris piece) has nothing else to tell it by: its id is the physics' slot, freed and given
+        // again. Its own mass (the physics' inverse mass, never changed for a body) is the first test, its place the next
+        // (Update: no body moves further in a frame than kMostJump allows).
+        const float kg=MassOf(b);
+        return std::isfinite(kg) && std::fabs(kg-t.kg)<=t.kg*kSameMass;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-bool Refresh(Target& t) noexcept {
-    if(!Live(t))return false;
-    if(t.kind!=Kind::cling && t.kind!=Kind::walk)return true;
+Liveness Update(Target& t) noexcept {
+    if(!Live(t))return Liveness::gone;
     __try {
+        if(t.kind==Kind::body && !t.obj.obj) {
+            float at[3];
+            if(!Vec(BodyOf(t.body),kGetPos,at))return Liveness::gone;
+            const ULONGLONG ms=GameMs();
+            if(t.lastAtMs) {
+                const float dt=static_cast<float>(ms>t.lastAtMs ? ms-t.lastAtMs : 0)*0.001f;
+                const float d[3]={at[0]-t.lastAt[0],at[1]-t.lastAt[1],at[2]-t.lastAt[2]};
+                if(::gravmath::Len(d)>kMostJump+kMostBodySpeed*dt)return Liveness::gone;   // another body in its slot
+            }
+            std::memcpy(t.lastAt,at,12);t.lastAtMs=ms;
+            return Liveness::live;
+        }
+        if(t.kind!=Kind::cling && t.kind!=Kind::walk)return Liveness::live;
         const auto* o=static_cast<const unsigned char*>(t.obj.obj);
-        if(!o[kDead])return true;
+        if(!o[kDead]){t.settlingSince=0;return Liveness::live;}
         Target corpse;
-        if(!CorpseTarget(o,t.body,&corpse))return false;
-        t=corpse;
-        return true;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+        if(CorpseTarget(o,t.body,&corpse)){t=corpse;return Liveness::live;}
+        // Dead, its ragdoll not on yet (its ground body already out of the world): kept a while, moved by nobody.
+        const ULONGLONG ms=GameMs();
+        if(!t.settlingSince)t.settlingSince=ms ? ms : 1;
+        return ms-t.settlingSince<=kSettleMs ? Liveness::settling : Liveness::gone;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return Liveness::gone;}
+}
+
+bool IsPlayerOrRidden(const Target& t) noexcept {
+    const auto* o=static_cast<const unsigned char*>(t.obj.obj);
+    if(!o)return false;
+    __try {
+        if(IsA(o,kTdHuman) && edf::IsAnyPlayer(o))return true;
+        if(IsA(o,kTdVehicle)) {
+            const unsigned n=SeatCount(o);
+            for(unsigned i=0;i<n && i<16;++i)if(AnyPlayerIn(SeatAt(const_cast<unsigned char*>(o),i)))return true;
+        }
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return true;}   // unreadable: not taken
 }
 
 bool Position(const Target& t,float* at) noexcept {
@@ -480,6 +525,19 @@ bool SetVelocity(const Target& t,const float* vel) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+bool Launch(const Target& t,const float* vel) noexcept {
+    if(!vel || !std::isfinite(vel[0]+vel[1]+vel[2]))return false;
+    Target now=t;
+    const Liveness l=Update(now);
+    if(l==Liveness::live)return SetVelocity(now,vel);
+    if(l==Liveness::gone)return false;
+    PendingLaunch* slot=nullptr;
+    for(auto& p:pending)if(!p.t || (p.t.obj.obj==t.obj.obj && p.t.obj.ctrl==t.obj.ctrl)){slot=&p;break;}
+    if(!slot)slot=&pending[0];   // full: the first gives way
+    slot->t=now;std::memcpy(slot->vel,vel,12);
+    return true;
+}
+
 bool AddVelocity(const Target& t,const float* dv) noexcept {
     float v[3];
     if(!dv || !Velocity(t,v))return false;
@@ -506,7 +564,7 @@ bool Throw(const Target& t,const float* dir,float baseSpeed,const float* carry,c
     if(!(len>1e-4f) || !(speed>0.0f) || t.kg>::gravmath::kMostLiftKg)return false;
     float v[3];
     for(int k=0;k<3;++k)v[k]=dir[k]/len*speed+(carry ? carry[k] : 0.0f);
-    if(!SetVelocity(t,v))return false;
+    if(!Launch(t,v))return false;   // a dying one: once its corpse is on
     if(vel)std::memcpy(vel,v,12);
     Track(t,by,false,scale);
     if(Cfg().debug)Log("GRAVITY throw %p (kind %d, %.1f t) at %.1f m/s",t.obj.obj,static_cast<int>(t.kind),t.kg*0.001f,::gravmath::Len(v));
@@ -533,7 +591,7 @@ void Untrack(const Target& t) noexcept {
     if(Followed* f=Find(t))*f=Followed{};
 }
 
-int Radial(const float* centre,float radius,float speed,const unsigned char* by,float scale) noexcept {
+int Radial(const float* centre,float radius,float speed,const unsigned char* by,float scale,bool track) noexcept {
     if(!centre || !by || !(radius>0.0f) || !Ready())return 0;
     NearScan s{centre,radius,{},0};
     __try { VisitEnemiesOf(At<std::int32_t>(by,kTeam),&SeeNear,&s); } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
@@ -549,7 +607,7 @@ int Radial(const float* centre,float radius,float speed,const unsigned char* by,
         if(len<1e-3f){d[0]=0.0f;d[1]=1.0f;d[2]=0.0f;}
         else for(float& c:d)c/=len;
         const float dv[3]={d[0]*speed*falloff,d[1]*speed*falloff,d[2]*speed*falloff};
-        if(AddVelocity(t,dv)){Track(t,by,false,scale);++moved;}
+        if(AddVelocity(t,dv)){if(track)Track(t,by,false,scale);++moved;}
     }
     return moved;
 }
@@ -610,6 +668,15 @@ bool Pick(const float* a,const float* b,const void* self,Target* out,float* hit)
 void Frame() noexcept {
     if(!Ready())return;
     const ULONGLONG ms=GameMs();
+    // The launches waiting for a corpse first: a followed throw's first reading is then its flight's.
+    for(auto& p:pending) {
+        if(!p.t)continue;
+        __try {
+            const Liveness l=Update(p.t);
+            if(l==Liveness::live)SetVelocity(p.t,p.vel);
+            if(l!=Liveness::settling)p=PendingLaunch{};
+        } __except(EXCEPTION_EXECUTE_HANDLER){p=PendingLaunch{};}
+    }
     for(auto& f:followed) {
         if(!f.t)continue;
         __try { Step(f,ms); } __except(EXCEPTION_EXECUTE_HANDLER){f=Followed{};}

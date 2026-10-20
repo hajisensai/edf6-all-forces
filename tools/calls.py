@@ -690,10 +690,10 @@ ULTIMATE_NOTES: dict[str, str] = {
           'satellite laser call.',
 }
 GRAVITY_NOTES: dict[str, str] = {
-    'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通的激光导引装置。仅离线（联机时只有光束）。',
-    'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通的雷射導引裝置。僅離線（連線時只有光束）。',
-    'JA': 'EDF6VehicleCrew プラグインが必要。未導入時は通常のレーザー誘導装置になる。オフライン専用（オンラインではビームのみ）。',
-    'EN': 'Needs the EDF6VehicleCrew plugin; without it this is a plain Laser Guide Kit. Offline only (online: the beam alone).',
+    'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通的激光导引装置。联机可用：房间里每台机器都要装同一版本插件（旧版本玩家看不到抓取与投掷）。',
+    'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通的雷射導引裝置。連線可用：房間裡每台機器都要裝同一版本外掛（舊版本玩家看不到抓取與投擲）。',
+    'JA': 'EDF6VehicleCrew プラグインが必要。未導入時は通常のレーザー誘導装置になる。オンライン対応：部屋の全員が同じ版のプラグインを入れていること（古い版の人には掴み・投げが見えない）。',
+    'EN': 'Needs the EDF6VehicleCrew plugin; without it this is a plain Laser Guide Kit. Works online when every player has this plugin version (an older one does not see the grabs and throws).',
 }
 
 

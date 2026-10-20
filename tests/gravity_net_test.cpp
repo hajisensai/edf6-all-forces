@@ -37,7 +37,7 @@ void WireChecks() {
           back.rayB[2]==400.0f && back.goal[1]==4.0f && back.vel[2]==-2.0f,"a grab round trip");
     Check(!Encode(g,bytes,sizeof(bytes)-1),"a grab: the wrong size is refused");
     unsigned char copy[kGrabWire];
-    std::memcpy(copy,bytes,sizeof(copy));copy[4]=2;
+    std::memcpy(copy,bytes,sizeof(copy));copy[4]=static_cast<unsigned char>(kVersion+1);
     Check(OwnedGrab(copy,sizeof(copy)) && !Decode(copy,sizeof(copy),back),"a grab of a newer version: owned, not taken");
     std::memcpy(copy,bytes,sizeof(copy));copy[8]=9;
     Check(!Decode(copy,sizeof(copy),back),"a grab of an unknown kind is refused");
@@ -83,11 +83,44 @@ void InboxChecks() {
     in.Reset();
     Check(!in.Holding(1,3000),"reset: nothing held");
 }
+
+// Version 2: a thrown grab's flight states, the radial (beside a hold), their bounds on the wire.
+void FlightChecks() {
+    GrabInbox in;
+    Check(in.Receive(1,MakeGrab(GrabKind::flight,7,1),900)==GrabEvent::none,"a flight of a grab never thrown is nothing");
+    Check(in.Receive(1,MakeGrab(GrabKind::hold,7,1),1000)==GrabEvent::started,"a hold");
+    Check(in.Receive(1,MakeGrab(GrabKind::flight,7,1),1010)==GrabEvent::none,"a flight while still held is nothing");
+    Check(in.Receive(1,MakeGrab(GrabKind::thrown,7,1),1100)==GrabEvent::thrown,"thrown");
+    Check(in.Receive(1,MakeGrab(GrabKind::flight,7,1),1200)==GrabEvent::flight,"its flight's states follow");
+    Check(in.Receive(1,MakeGrab(GrabKind::flight,7,2),1210)==GrabEvent::none,"a flight of another grab is nothing");
+    Check(in.Receive(1,MakeGrab(GrabKind::hold,7,2),1300)==GrabEvent::started,"the next grab");
+    Grab radial=MakeGrab(GrabKind::radial,7,2);radial.goal[0]=30.0f;radial.goal[1]=-25.0f;
+    Check(in.Receive(1,radial,1310)==GrabEvent::radial && in.Holding(1,1310),"a radial beside a hold leaves the hold");
+    Check(in.Receive(1,MakeGrab(GrabKind::letGo,7,2),1400)==GrabEvent::letGo,"its let-go");
+    Check(in.Receive(1,MakeGrab(GrabKind::flight,7,2),1410)==GrabEvent::none,"a flight of a grab let go is nothing");
+
+    unsigned char bytes[kGrabWire];Grab back{};
+    Check(Encode(radial,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),back) && back.kind==GrabKind::radial &&
+          back.goal[0]==30.0f && back.goal[1]==-25.0f,"a radial round trip");
+    Grab far=radial;far.goal[0]=kMostRadial+1.0f;
+    Check(!Encode(far,bytes,sizeof(bytes)),"a radial past its reach is refused");
+    Grab fast=radial;fast.goal[1]=kMostRadialSpeed+1.0f;
+    Check(!Encode(fast,bytes,sizeof(bytes)),"a radial past its speed is refused");
+    Grab none=radial;none.goal[0]=0.0f;
+    Check(!Encode(none,bytes,sizeof(bytes)),"a radial of no reach is refused");
+    const Grab flight=MakeGrab(GrabKind::flight,7,1);
+    Check(Encode(flight,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),back) && back.kind==GrabKind::flight,"a flight round trip");
+}
 }  // namespace
 
 int main() {
     WireChecks();
     InboxChecks();
+    FlightChecks();
+    // Two grabs of one thing: the same winner seen from both machines.
+    Check(OtherOutranks(false,true,"0002b","0002a") && !OtherOutranks(true,false,"0002a","0002b"),"the host's grab wins, from both sides");
+    Check(OtherOutranks(false,false,"0002b","0002a") && !OtherOutranks(false,false,"0002a","0002b"),"between guests the lower PUID's, from both sides");
+    Check(!OtherOutranks(false,false,"0002a","0002a") && !OtherOutranks(false,false,"","0002a"),"the same PUID or none: neither");
     std::printf("gravity_net: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }

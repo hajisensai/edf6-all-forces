@@ -11,10 +11,15 @@
 //      bytes: the class's damage times the enemy's level and the difficulty), its rhythm (+0x480: pellets, burst, frames
 //      between shots, spread, frames after a burst) and its SGO (+0x100). A wrecked vehicle leaves nothing: the game keeps
 //      its wreck whole (no turret comes off), and the gravity gun can pick that up.
-//  - The drop: a colonist's gun is the game's own dropped gun, HumanoidWeaponBase::Drop (the factory 0x49CE80 the game calls
-//    when a colonist's arm is shot off, 0x4A4FC0, made the same way: the gun's SGO in its parameter, at the gun's matrix):
-//    the gun's model falling and lying as the physics has it. Its own update (slot 5, 0x4A1730) deletes it after 600
-//    frames; the plugin's hook keeps ours (its counter +0x830 held at 0).
+//  - The drop: a colonist's gun is put down the game's own way, SetEnabled 0x4A4C80(gun, 0), what the game does when a
+//    colonist's arm is shot off (docs/gravity-re.md §7.2.3, §12 B; static RE 2026-10-20): it hides the gun in the hand on
+//    every machine, and on the colonist's owner (offline: this machine; online: the host, the colonist's +0x128 bit 0
+//    clear) also counts the gun's drops (+0xCC0), sends them (0x473E10) and makes the drop (0x4A4FC0: the factory 0x49CE80,
+//    HumanoidWeaponBase::Drop, then 0x474F90 registers it in the owner's network state); a guest's copy makes its own on
+//    that message (0x475D20 -> 0x4A1B10: a count past the gun's own -> 0x4A4FC0). So every machine has the game's own
+//    drop and no other: the plugin makes none (the first build made one more beside the one in the hand). Each machine
+//    claims its drop in the drop's update hook: the fresh one (+0x830 below kFreshFrames) nearest the gun's place. Its own
+//    update (slot 5, 0x4A1730) deletes it after 600 frames; the hook keeps ours (its counter +0x830 held at 0).
 //  - The pick-up: the local player within FloatGunReach of it (horizontally; kPickRise up or down, or the reach if more). Up to FloatGunMost float
 //    round a player (another replaces the oldest).
 //  - The flight: each its own place on a ring kRingRadius round its owner kRingHigh over them, turning; the hook writes the
@@ -29,8 +34,9 @@
 //    that colonist once it is dead there too (or kDropWaitMs after the message: as it is). A pick-up is the host's: its own
 //    player's at once, a peer's player's by `pick`, the first asked; `owner` tells every machine whose it is, `gone` ends one
 //    (replaced, or never picked up). Every machine draws each gun round its owner and fires it: a round's owner is that
-//    player, and the game deals a round's hit only on the machine whose player the attacker is (EDF6Coop docs/net-re/damage.md), so
-//    each gun's damage counts once.
+//    player, and its damage counts only on the owner's machine: elsewhere the rounds fly with damage 0 (online_authority.h
+//    ShotCounts' rule, as jet_bay.cpp ShellMake's), whatever the room's hit authority does with another machine's
+//    attacker. A peer that joins (plugin_net.h joined) is sent every gun again (drop, owner).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "floatgun.h"
 #include "crew.h"
@@ -55,12 +61,17 @@ constexpr unsigned kModePath=0xE1560,kRowStore=0x70F100;
 constexpr std::size_t kSceneMgr=0x20B2958;
 constexpr unsigned kDropMake=0x49CE80,kDropUpdate=0x4A1730,kModelMatrix=0x1100B90,kParamCtor=0x1001D0,kParamDtor=0x100C90,
                    kWeakAssign=0x6CEBB0,kSpawn=0x1194280,kDelete=0x118A1B0;
-constexpr unsigned kDropVtable=0x17C4308,kDropParamVtable=0x17C42F8,kColonistVtable=0x17C4D70,
+constexpr unsigned kSetEnabled=0x4A4C80,kDropSpawn=0x4A4FC0;   // HumanoidWeapon SetEnabled(gun, on), its drop's maker
+constexpr unsigned kDropVtable=0x17C4308,kColonistVtable=0x17C4D70,
                    kGunBasicVtable=0x17C4920,kGunHeavyVtable=0x17C4B50;
-constexpr unsigned kVariantCopy=0x179E1C0,kVariantDtor=0x1765220;   // per-tag tables of the SGO value handle
+constexpr unsigned kVariantCopy=0x179E1C0;   // the per-tag copy table of the SGO value handle
 const unsigned char kModePathSig[]={0x40,0x53,0x48,0x83,0xEC,0x40,0x48,0x81,0xC1,0xF0,0x00,0x00,0x00,0x48,0x8B,0x19};
 const unsigned char kRowStoreSig[]={0x8B,0x51,0x48,0x89,0x91,0x00,0x50,0x01,0x00};   // mov edx,[rcx+0x48]; mov [rcx+0x15000],edx
 const unsigned char kDropMakeSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x20,0x57};
+// SetEnabled: movzx edi,dl; mov rbx,rcx; cmp [rcx+0x5E2],dl (the gun's enabled byte).
+const unsigned char kSetEnabledSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x0F,0xB6,0xFA,0x48,0x8B,0xD9,0x38,0x91,
+                                      0xE2,0x05,0x00,0x00};
+const unsigned char kDropSpawnSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,0x55,0x41,0x54};
 // The dropped gun's update whole: its counter, the delete past 600 frames, the ragdoll step, the model's matrix, the ragdoll's end.
 const unsigned char kDropUpdateSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x8B,0x91,0x30,0x08,0x00,0x00,0x48,0x8B,0xF9,
     0x8D,0x42,0x01,0x89,0x81,0x30,0x08,0x00,0x00,0x81,0xFA,0x58,0x02,0x00,0x00,0x76,0x05,0xE8,0x57,0x8A,0xCE,0x00,0x48,0x8D,0x8F,
@@ -90,6 +101,9 @@ constexpr ULONGLONG kWatchDeadMs=15000; // a dead one is kept this long (a peer'
 constexpr ULONGLONG kDropWaitMs=3000;   // a peer: a drop of a colonist still alive here is taken this long after its message
 constexpr ULONGLONG kDropLostMs=10000;  // ...and one of a colonist not found here at all is given up this long after
 constexpr ULONGLONG kAskGapMs=1000;     // a peer asks the host for a gun it stands by no more often than this
+constexpr ULONGLONG kClaimMs=10000;     // a gun put down waits this long for the game's drop of it (a guest's comes by message)
+constexpr std::int32_t kFreshFrames=480;// a drop claimed is one this young (the game deletes one at 600)
+constexpr float kClaimReach=6.0f;       // m from the gun's place when put down (the drop falls from the colonist's hand)
 constexpr float kPickRise=3.0f;   // m up or down; across: the ini's FloatGunReach (3.5: the stock item box's 3 m, a little more)
 constexpr float kRingRadius=3.2f,kRingHigh=3.0f,kRingTurn=0.6f,kBob=0.25f,kFollow=8.0f;
 constexpr float kMostReach=400.0f,kLeastReach=30.0f;
@@ -121,6 +135,11 @@ struct Gun {
     std::uint64_t rng=0x9E3779B97F4A7C15ull;
     std::uint16_t serial=0;    // the host's for it (online: the gun's name on every machine; 0 offline)
     unsigned char ownerId[32]{};   // floating: its owner's native ID (online)
+    unsigned char fromId[32]{};    // the host's: the colonist it came from and its place in its list (a joining peer is told)
+    std::uint8_t fromIndex=0;
+    bool claiming=false;       // put down, the game's drop of it not claimed yet (claimAt: the gun's place then)
+    float claimAt[3]{};
+    ULONGLONG claimUntil=0;
     ULONGLONG askedAt=0;       // a peer: when it last asked the host for it
     ULONGLONG lastSeenLog=0;   // Debug: when it was last logged lying out of reach
     int shots=0;               // rounds fired (the log's first and every kShotLogEvery-th)
@@ -151,7 +170,6 @@ using UpdateFn=void(__fastcall*)(void*,void*);
 UpdateFn dropUpdate=nullptr;
 
 using ModePathFn=const wchar_t*(__fastcall*)(void*,unsigned);
-using DropMakeFn=void*(__fastcall*)(void*,void*,const float*,void*);
 using ModelMatrixFn=void(__fastcall*)(void*,const float*);
 using ParamFn=void(__fastcall*)(void*);
 using WeakAssignFn=void*(__fastcall*)(void*,const void*);
@@ -196,11 +214,36 @@ Gun* GunOfDrop(const void* drop) noexcept {
     return nullptr;
 }
 
+// A drop the game made that is not ours yet: the gun put down nearest it (within kClaimReach of where it was put down)
+// takes it, if it is fresh (the one the game made for it, not an older one lying there).
+Gun* Claim(void* self) noexcept {
+    const auto* d=static_cast<const unsigned char*>(self);
+    if(At<std::int32_t>(d,kDropCounter)>kFreshFrames)return nullptr;
+    const float* at=reinterpret_cast<const float*>(d+kPosition);
+    Gun* best=nullptr;float bestD=kClaimReach;
+    for(auto& g:guns) {
+        if(g.state==State::free || !g.claiming || g.drop.obj)continue;
+        const float v[3]={at[0]-g.claimAt[0],at[1]-g.claimAt[1],at[2]-g.claimAt[2]};
+        const float dist=std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2]);
+        if(dist<=bestD){best=&g;bestD=dist;}
+    }
+    if(!best)return nullptr;
+    const ObjRef ref=ObjRef::Of(self);
+    if(!ref.ctrl || !ref.Is(self))return nullptr;
+    npcmark::Assign(best->drop,ref);   // the gun's pin on the drop's control block (Unpin lets it go)
+    best->claiming=false;
+    if(missionLogs++<64)Log("FLOATGUN %s %u: the game's drop claimed, %.1f m from where it was put down",best->what,best->serial,bestD);
+    return best;
+}
+
 // The dropped gun's update (slot 5): ours on the ground are kept (their counter held); ours floating are drawn where the
-// plugin flies them, the physics steps skipped; any other is the game's.
+// plugin flies them, the physics steps skipped; a fresh one a gun put down waits for is claimed first; any other is the game's.
 void __fastcall DropUpdateHook(void* self,void* ctx) {
     Gun* g=nullptr;
-    __try { g=active ? GunOfDrop(self) : nullptr; } __except(EXCEPTION_EXECUTE_HANDLER){g=nullptr;}
+    __try {
+        g=active ? GunOfDrop(self) : nullptr;
+        if(!g && active)g=Claim(self);
+    } __except(EXCEPTION_EXECUTE_HANDLER){g=nullptr;}
     if(g) {
         auto* d=static_cast<unsigned char*>(self);
         Put<std::int32_t>(d,kDropCounter,0);
@@ -295,43 +338,9 @@ bool Snapshot(Gun& g,void* factory,const unsigned char* param,int pellets,int bu
     return true;
 }
 
-// The dropped gun of colonist gun `w`, the game's own way (0x4A4FC0): its parameter {vtable, zeros, the gun's SGO value},
-// made at the gun's matrix. What the factory hands back is a weak reference (0x49CEF9 gives the object to the scene, which
-// owns it; 0x49CFB2 takes a weak count and drops its own strong one): kept as the gun's pin on the drop's control block
-// (Unpin lets it go), the object the scene's (the first run let a strong count go here and freed the scene's object: heap
-// corruption, 2026-10-20).
-ObjRef MakeDrop(unsigned char* w) noexcept {
-    alignas(16) unsigned char param[0x50]{};
-    const void* vt=image+kDropParamVtable;
-    std::memcpy(param,&vt,8);
-    const std::uint16_t tag=At<std::uint16_t>(w,kGunSgo+0x10);
-    Put<std::uint16_t>(param,0x40,tag);
-    if(tag!=kTagNone) {
-        const auto copy=At<VariantFn>(image,kVariantCopy+static_cast<std::size_t>(tag)*8);
-        void* src=w+kGunSgo;
-        copy(param+0x30,&src);
-    }
-    void* out[2]={nullptr,nullptr};
-    void* mgr=At<void*>(image,kSceneMgr);
-    reinterpret_cast<DropMakeFn>(image+kDropMake)(mgr,out,reinterpret_cast<const float*>(w+kMatrix),param);
-    if(tag!=kTagNone) {
-        unsigned char scratch[8];
-        At<VariantFn>(image,kVariantDtor+static_cast<std::size_t>(tag)*8)(param+0x30,scratch);
-    }
-    auto* obj=static_cast<unsigned char*>(out[0]);
-    auto* ctrl=static_cast<unsigned char*>(out[1]);
-    const bool made=obj && ctrl && At<const void*>(obj,0)==image+kDropVtable && At<LONG>(ctrl,8)>0;
-    const ObjRef ref=made ? ObjRef::Of(obj) : ObjRef{};
-    if(made && ref.ctrl==ctrl)return ref;   // the factory's weak count is the gun's now
-    if(ctrl && InterlockedDecrement(reinterpret_cast<volatile LONG*>(ctrl+12))==0)   // the weak count: the block's own end
-        At<void(__fastcall* const*)(void*)>(ctrl,0)[1](ctrl);
-    if(made)return {};
-    if(!made)Log("FLOATGUN the drop factory gave %p (vtable %p, ctrl %p)",obj,obj ? At<const void*>(obj,0) : nullptr,ctrl);
-    return ref;
-}
-
-// Gun `i` (its weak list's order, the same on every machine) of dead colonist `c`, dropped where it was. Null: none there (shot
-// off already: the game dropped it, 0x4A4C80 -> 0x4A4FC0; not a gun of the two classes; no drop made).
+// Gun `i` (its weak list's order, the same on every machine) of dead colonist `c`, put down the game's way (SetEnabled 0,
+// see the head: the game's drop of it is claimed by DropUpdateHook). Null: none there (shot off already: the game dropped it
+// and it is the game's; not a gun of the two classes).
 Gun* TakeGun(unsigned char* c,std::size_t i) noexcept {
     const auto rows=At<const unsigned char*>(c,kGunRows);
     const auto count=At<std::size_t>(c,kGunCount);
@@ -352,12 +361,14 @@ Gun* TakeGun(unsigned char* c,std::size_t i) noexcept {
         *g=Gun{};
         return nullptr;
     }
-    g->drop=MakeDrop(w);
-    if(!g->drop){*g=Gun{};Log("FLOATGUN a colonist's gun: no drop made");return nullptr;}
     g->state=State::ground;g->since=GameMs();
     std::memcpy(g->at,w+kPosition,12);
+    std::memcpy(g->claimAt,w+kPosition,12);
+    g->claiming=true;g->claimUntil=g->since+kClaimMs;
+    using SetEnabledFn=void(__fastcall*)(void*,bool);
+    reinterpret_cast<SetEnabledFn>(image+kSetEnabled)(w,false);   // out of the hand; the owner's machine makes its drop
     g->rng^=reinterpret_cast<std::uintptr_t>(w);
-    if(missionLogs++<64)Log("FLOATGUN %s dropped at (%.0f,%.0f,%.0f): %d pellet(s), bursts of %d every %d frames, %d frames after; %.2f damage, reach %.0f m",
+    if(missionLogs++<64)Log("FLOATGUN %s put down at (%.0f,%.0f,%.0f): %d pellet(s), bursts of %d every %d frames, %d frames after; %.2f damage, reach %.0f m",
                             g->what,g->at[0],g->at[1],g->at[2],g->pellets,g->burst,g->gapFrames,g->coolFrames,
                             At<float>(g->numbers,kPDamage-kPTeam),g->reach);
     return g;
@@ -372,6 +383,7 @@ void TakeColonist(unsigned char* c,const Watched& w) noexcept {
         if(!netReady || !w.hasId)continue;   // offline (or no ID to name it by): this machine's alone
         if(++nextSerial==0)nextSerial=1;
         g->serial=nextSerial;
+        std::memcpy(g->fromId,w.id,32);g->fromIndex=static_cast<std::uint8_t>(i);
         gravity_net::Gun m{};
         m.kind=gravity_net::GunKind::drop;m.serial=g->serial;m.index=static_cast<std::uint8_t>(i);
         std::memcpy(m.who,w.id,32);std::memcpy(m.at,g->at,12);
@@ -409,6 +421,9 @@ bool TargetFor(const float* from,float reach,std::int32_t team,const void** obje
 }
 
 void FireOne(Gun& g,const unsigned char* soldier,const void* target,const float* at) noexcept {
+    // The rounds count on the owner's machine alone (online_authority.h ShotCounts' rule): every machine fires each gun round
+    // its owner (the same sight), only there with its damage.
+    const bool counts=!InSession() || soldier==PlayerHuman();
     const float* p=g.matrix+12;
     float dir[3]={at[0]-p[0],at[1]-p[1],at[2]-p[2]};
     const float dl=Len(dir);
@@ -434,6 +449,7 @@ void FireOne(Gun& g,const unsigned char* soldier,const void* target,const float*
         std::memcpy(param+kPTeam,g.numbers,sizeof(g.numbers));
         const std::int32_t side=At<std::int32_t>(soldier,kTeam);   // the round's team (its parameter block's), not the soldier's own
         Put<std::int32_t>(param,kPTeam,side);
+        if(!counts)Put<float>(param,kPDamage,0.0f);   // another machine's player's gun: seen here, its damage dealt there
         if(std::isfinite(g.scale) && g.scale>0.0f)Put<float>(param,kPScale,g.scale);
         reinterpret_cast<WeakAssignFn>(image+kWeakAssign)(param+kPOwner,soldier+kSelf);
         // The target is a lock point, not the object (0x4A0100 hands the round 0x548EF0's: the object's lock point 0, a weak
@@ -530,6 +546,10 @@ void Step(ULONGLONG ms,float dt) noexcept {
     for(auto& g:guns) {
         if(g.state==State::free)continue;
         if(g.state==State::ground) {
+            if(g.claiming && ms>g.claimUntil) {
+                g.claiming=false;
+                if(missionLogs++<64)Log("FLOATGUN %s %u: no drop of the game's came for it: it lies unseen (it can still be picked up)",g.what,g.serial);
+            }
             if(g.drop) {
                 if(!Present(g.drop)) {   // the game deleted it (the mission's clean-up)
                     if(missionLogs++<64)Log("FLOATGUN %s on the ground: its drop is gone (strong %ld)",g.what,
@@ -642,7 +662,8 @@ bool InstallFloatGuns() noexcept {
        Matches(kDropMake,kDropMakeSig,sizeof(kDropMakeSig)) && Matches(kDropUpdate,kDropUpdateSig,sizeof(kDropUpdateSig)) &&
        Matches(kModelMatrix,kModelMatrixSig,sizeof(kModelMatrixSig)) && Matches(kParamCtor,kParamCtorSig,sizeof(kParamCtorSig)) &&
        Matches(kParamDtor,kParamDtorSig,sizeof(kParamDtorSig)) && Matches(kWeakAssign,kWeakAssignSig,sizeof(kWeakAssignSig)) &&
-       Matches(kSpawn,kSpawnSig,sizeof(kSpawnSig)) && Matches(kDelete,kDeleteSig,sizeof(kDeleteSig));
+       Matches(kSpawn,kSpawnSig,sizeof(kSpawnSig)) && Matches(kDelete,kDeleteSig,sizeof(kDeleteSig)) &&
+       Matches(kSetEnabled,kSetEnabledSig,sizeof(kSetEnabledSig)) && Matches(kDropSpawn,kDropSpawnSig,sizeof(kDropSpawnSig));
     if(ok) {
         void** slot=reinterpret_cast<void**>(image+kDropVtable)+5;
         if(*slot==image+kDropUpdate && PatchVtableSlot(slot,image+kDropUpdate,reinterpret_cast<void*>(&DropUpdateHook))) {
@@ -777,11 +798,32 @@ void ResetFloatGunNetwork() noexcept {   // the run's origin stays the mission's
     netReady=false;netHost=false;netPeers=0;hostPeer=0;
 }
 
+// A peer newly has the float guns' channel (a member back, or heard only now): the host tells it every gun again, where it
+// lies (drop) and whose it is (owner), as it told the room when each happened.
+void FloatGunNetworkJoined(std::uint32_t peer) noexcept {
+    if(!netReady || !netHost || !active)return;
+    unsigned char bytes[gravity_net::kGunWire];
+    const ULONGLONG ms=GameMs();
+    for(const auto& g:guns) {
+        if(g.state==State::free || !g.serial)continue;
+        gravity_net::Gun m{};
+        m.kind=gravity_net::GunKind::drop;m.origin=netOrigin;m.serial=g.serial;m.index=g.fromIndex;
+        std::memcpy(m.who,g.fromId,32);std::memcpy(m.at,g.at,12);
+        if(gravity_net::Encode(m,bytes,sizeof(bytes)))plugin_net::Send(peer,support_net::kExtFloatGun,bytes,sizeof(bytes));
+        if(g.state!=State::floating)continue;
+        m=gravity_net::Gun{};
+        m.kind=gravity_net::GunKind::owner;m.origin=netOrigin;m.serial=g.serial;std::memcpy(m.who,g.ownerId,32);
+        const ULONGLONG left=g.until ? (g.until>ms ? g.until-ms : 1) : 0;
+        m.leftMs=static_cast<std::uint32_t>(left<gravity_net::kMostLeftMs ? left : gravity_net::kMostLeftMs);
+        if(gravity_net::Encode(m,bytes,sizeof(bytes)))plugin_net::Send(peer,support_net::kExtFloatGun,bytes,sizeof(bytes));
+    }
+}
+
 plugin_net::Channel FloatGunNetChannel() noexcept {
     plugin_net::Channel c;
     c.name="float guns";c.magic=gravity_net::kGunMagic;c.version=gravity_net::kVersion;c.featureBit=support_net::kExtFloatGun;
     c.minSize=c.maxSize=gravity_net::kGunWire;
-    c.receive=&ReceiveFloatGunNetwork;c.update=&UpdateFloatGunNetwork;c.reset=&ResetFloatGunNetwork;
+    c.receive=&ReceiveFloatGunNetwork;c.update=&UpdateFloatGunNetwork;c.reset=&ResetFloatGunNetwork;c.joined=&FloatGunNetworkJoined;
     return c;
 }
 }  // namespace crew

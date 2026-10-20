@@ -18,7 +18,14 @@ static_assert(kGGrab==kGOrigin+4 && kGGrabber==kGGrab+4 && kGTarget==kGGrabber+3
 static_assert(kUIndex==kUSerial+2 && kUWho==kUOrigin+4 && kUAt==kUWho+32 && kULeft==kUAt+12 && kUUsed==kULeft+4,"the gun's layout");
 
 bool Owned(const void* bytes,std::size_t size,std::uint32_t magic) noexcept { return wire::HeadWord(bytes,size,0)==magic && size>=4; }
-bool Kind(GrabKind k) noexcept { return k==GrabKind::hold || k==GrabKind::thrown || k==GrabKind::letGo; }
+bool Kind(GrabKind k) noexcept {
+    return k==GrabKind::hold || k==GrabKind::thrown || k==GrabKind::letGo || k==GrabKind::flight || k==GrabKind::radial;
+}
+// A radial's numbers in its goal: a reach and a speed within their bounds.
+bool RadialOk(const Grab& g) noexcept {
+    return g.kind!=GrabKind::radial ||
+        (g.goal[0]>0.0f && g.goal[0]<=kMostRadial && g.goal[1]>=-kMostRadialSpeed && g.goal[1]<=kMostRadialSpeed);
+}
 bool Kind(GunKind k) noexcept { return k==GunKind::drop || k==GunKind::pick || k==GunKind::owner || k==GunKind::gone; }
 }  // namespace
 
@@ -26,7 +33,7 @@ bool OwnedGrab(const void* bytes,std::size_t size) noexcept { return Owned(bytes
 bool OwnedGun(const void* bytes,std::size_t size) noexcept { return Owned(bytes,size,kGunMagic); }
 
 bool Encode(const Grab& g,void* bytes,std::size_t size) noexcept {
-    if(!bytes || size!=kGrabWire || !Kind(g.kind))return false;
+    if(!bytes || size!=kGrabWire || !Kind(g.kind) || !RadialOk(g))return false;
     wire::Writer w(bytes,size);
     w.U32(kGrabMagic).U32(kVersion).U8(static_cast<std::uint8_t>(g.kind)).Seek(kGOrigin).U32(g.origin).U32(g.grab)
      .Id(g.grabber).Id(g.target).V3(g.at).V3(g.rayA).V3(g.rayB).V3(g.goal).V3(g.vel);
@@ -43,7 +50,7 @@ bool Decode(const void* bytes,std::size_t size,Grab& out) noexcept {
     r.Seek(kGOrigin);g.origin=r.U32();g.grab=r.U32();
     r.Id(g.grabber);r.Id(g.target);
     r.V3(g.at);r.V3(g.rayA);r.V3(g.rayB);r.V3(g.goal);r.V3(g.vel);
-    if(!r.Ok() || !Kind(g.kind))return false;
+    if(!r.Ok() || !Kind(g.kind) || !RadialOk(g))return false;
     out=g;
     return true;
 }
@@ -75,6 +82,9 @@ GrabEvent GrabInbox::Receive(std::uint32_t peer,const Grab& g,std::uint64_t now)
     if(!peer || peer>kMaxPeers)return GrabEvent::none;
     RemoteGrab& r=peer_[peer];
     Done& d=done_[peer];
+    if(g.kind==GrabKind::radial)return GrabEvent::radial;   // a one-off beside the grab
+    if(g.kind==GrabKind::flight)   // the grab it threw last, still flying
+        return d.any && d.thrown && d.origin==g.origin && d.grab==g.grab ? GrabEvent::flight : GrabEvent::none;
     const bool same=r.active && r.last.origin==g.origin && r.last.grab==g.grab;
     // An ended grab, or an older one of the same run: nothing (the transport is ordered; this guards a replay).
     if(d.any && d.origin==g.origin && static_cast<std::int32_t>(g.grab-d.grab)<=0)return GrabEvent::none;
@@ -84,7 +94,7 @@ GrabEvent GrabInbox::Receive(std::uint32_t peer,const Grab& g,std::uint64_t now)
         return same ? GrabEvent::held : GrabEvent::started;
     }
     r.active=false;r.last=g;r.heardAt=now;
-    d=Done{g.origin,g.grab,true};
+    d=Done{g.origin,g.grab,true,g.kind==GrabKind::thrown};
     if(g.kind==GrabKind::letGo)return same ? GrabEvent::letGo : GrabEvent::none;
     return GrabEvent::thrown;
 }

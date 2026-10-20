@@ -32,8 +32,18 @@ struct Target {
     ::gravmath::Family family=::gravmath::Family::walker;
     float kg=0.0f;             // its mass (gravity_logic.h: the physics' own, or the family's estimate)
     float radius=1.0f;         // m: its size (the reach of its contacts, the blast of its impacts)
+    // Update's bookkeeping. settlingSince: a live character found dead with no ragdoll on yet (its game time, 0: not);
+    // lastAt / lastAtMs: an ownerless body's place when last updated (its id may be another body's once it is freed).
+    std::uint64_t settlingSince=0,lastAtMs=0;
+    float lastAt[3]{};
     explicit operator bool() const noexcept { return kind!=Kind::none; }
 };
+// What Update finds (docs/gravity-re.md §5, §12 A): a character that dies has its ground body taken out of the world at
+// once (0x6DAE80, the death's damage handler 0x4A8E4D) and its ragdoll put in only later, in its death state (0x4A8570 ->
+// 0x6E4160): between the two there is nothing to move. `settling` is that gap: the target is kept (no move), its corpse
+// taken over once the ragdoll is on, given up after kSettleMs.
+enum class Liveness : std::uint8_t { live, settling, gone };
+constexpr std::uint64_t kSettleMs=500;   // about 30 frames
 
 bool Install() noexcept;        // the code checks (plugin.cpp, at load); false: every operation refuses
 // Whether `obj`'s class has the MSVC RTTI type descriptor `td` (an RVA) among its bases: its primary vtable's complete object
@@ -51,15 +61,23 @@ bool TargetOf(const void* object,std::uint32_t body,Target* out) noexcept;
 // own place for one found near the ray: an enemy's lock point within a few metres of it counts, the aim's help). False:
 // nothing there.
 bool Pick(const float* a,const float* b,const void* self,Target* out,float* hit) noexcept;
-bool Live(const Target& t) noexcept;                    // still there (a corpse is; a deleted object is not)
-// A live character that has died since is its corpse now: its ragdoll (the family's) takes over. False: gone, or nothing left
-// to move. Frame does this for what it follows; a carrier calls it each frame for what it holds.
-bool Refresh(Target& t) noexcept;
+// Still there (a corpse is; a deleted object is not; an ownerless body whose mass is no longer its own is another's).
+bool Live(const Target& t) noexcept;
+// Each frame for what a caller keeps (Frame does it for what it follows; a carrier for what it holds; gravity_net.h for the
+// peers' grabs): a live character that has died since is its corpse now (its ragdoll, the family's, takes over), or
+// `settling` while that ragdoll is not on yet; an ownerless body that jumped further than anything flies in a frame is
+// `gone` (its id freed and taken by another). Every caller treats the three alike: live moves it, settling keeps it unmoved.
+Liveness Update(Target& t) noexcept;
+inline bool Refresh(Target& t) noexcept { return Update(t)==Liveness::live; }
+// A player character (any machine's), or a vehicle with a player aboard: not grabbed unless the ini's GravityGrabPlayers.
+bool IsPlayerOrRidden(const Target& t) noexcept;
 bool Position(const Target& t,float* at) noexcept;      // its centre (a ragdoll's: its read body's), world
 bool Velocity(const Target& t,float* vel) noexcept;     // m/s
 bool Landed(const Target& t) noexcept;                  // a character on the ground (a body: never)
 
 bool SetVelocity(const Target& t,const float* vel) noexcept;
+// SetVelocity now, or (a dying character, `settling`) once its corpse's ragdoll is on, within kSettleMs. False: gone.
+bool Launch(const Target& t,const float* vel) noexcept;
 bool AddVelocity(const Target& t,const float* dv) noexcept;
 bool Impulse(const Target& t,const float* impulse) noexcept;   // N s: dv = impulse / kg
 // One frame of carrying it to `goal` (moving at `goalVel`, may be null): gravity_logic.h HoldVelocity for its mass. False:
@@ -78,8 +96,9 @@ bool Throw(const Target& t,const float* dir,float baseSpeed,const float* carry,c
 void Track(const Target& t,const unsigned char* by,bool held,float scale=1.0f) noexcept;
 void Untrack(const Target& t) noexcept;
 // Every enemy of `by`'s side within `radius` of `centre` given `speed` m/s along the line from the centre (negative: toward
-// it, a pull), less with the distance (none at the edge), and followed for `by`. How many were moved.
-int Radial(const float* centre,float radius,float speed,const unsigned char* by,float scale=1.0f) noexcept;
+// it, a pull), less with the distance (none at the edge), and (`track`) followed for `by`. How many were moved. This
+// machine's copies alone: online use gravity::net::Radial (every machine moves its copies, the damage dealt here only).
+int Radial(const float* centre,float radius,float speed,const unsigned char* by,float scale=1.0f,bool track=true) noexcept;
 }  // namespace crew::gravity
 
 namespace crew {
