@@ -163,36 +163,10 @@ def half_width(z: float, inset: float = 0.0) -> float:
 
 # ------------------------------------------------------------------------------------------ primitives
 
-def _flip_outward(part: pm.Part, start: int, ref, outward: bool = True) -> None:  # noqa: ANN001 - point -> point
-    """Turn the triangles added since `start` so that most face away from (outward) or toward `ref(centroid)`: the
-    winding the stock meshes use (cross(b - a, c - a) along the face's normal, out of the solid)."""
-    P = np.array(part.pos)
-    T = np.array(part.tris[start:], dtype=np.int64)
-    if not len(T):
-        return
-    a, b, c = P[T[:, 0]], P[T[:, 1]], P[T[:, 2]]
-    n = np.cross(b - a, c - a)
-    cen = (a + b + c) / 3.0
-    away = cen - np.array([ref(x) for x in cen])
-    score = float(np.sign(np.einsum('ij,ij->i', n, away)).sum())
-    if (score < 0) == outward:
-        part.tris[start:] = [(t[0], t[2], t[1]) for t in part.tris[start:]]
-
-
-def _facing(part: pm.Part, tris: list[int], want: np.ndarray) -> None:
-    """Turn each of the triangles `tris` (indices into part.tris) so that its normal goes along `want`."""
-    for i in tris:
-        a, b, c = (np.asarray(part.pos[k]) for k in part.tris[i])
-        if float(np.dot(np.cross(b - a, c - a), want)) < 0.0:
-            t = part.tris[i]
-            part.tris[i] = (t[0], t[2], t[1])
-
-
-def _cap_ends(part: pm.Part, start: int, centres: tuple[int, int], ends: tuple[np.ndarray, np.ndarray]) -> None:
-    """The end caps among the triangles since `start` (those fanned round the cap centres `centres`) turned to face
-    out of the ends: along `ends` (the way out of the first end, the way out of the last)."""
-    for m, want in zip(centres, ends):
-        _facing(part, [i for i in range(start, len(part.tris)) if m in part.tris[i]], want)
+_flip_outward = pm.flip_outward
+_facing = pm.facing
+_cap_ends = pm.cap_ends
+_path_ref = pm.path_ref
 
 
 def _axis_ref(c: np.ndarray) -> np.ndarray:
@@ -200,42 +174,14 @@ def _axis_ref(c: np.ndarray) -> np.ndarray:
     return np.array([TUB_X, c[1], min(max(c[2], TUB_TAIL + 0.45), TUB_NOSE - 0.45)])
 
 
-def _path_ref(path: list[Vec3]):  # noqa: ANN202
-    """The nearest point of the polyline `path`."""
-    pts = [np.array(p, dtype=np.float64) for p in path]
-
-    def ref(c: np.ndarray) -> np.ndarray:
-        best, bd = pts[0], math.inf
-        for a, b in zip(pts, pts[1:]):
-            d = b - a
-            t = min(1.0, max(0.0, float(np.dot(c - a, d) / max(np.dot(d, d), 1e-12))))
-            q = a + d * t
-            dd = float(np.dot(c - q, c - q))
-            if dd < bd:
-                best, bd = q, dd
-        return best
-    return ref
-
-
 def hexahedron(part: pm.Part, corners: list[Vec3], skin: pm.Skin) -> None:
-    """A six-faced solid of 8 corners (0-3 the bottom ring, 4-7 the top ring over them), each face flat (its own 4
-    vertices), wound out of the solid."""
-    C = [np.array(p, dtype=np.float64) for p in corners]
-    centre = sum(C) / 8.0
-    for f in ((0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)):
-        start = len(part.tris)
-        q = [part.add(C[i], skin, uv) for i, uv in zip(f, ((0, 0), (1, 0), (1, 1), (0, 1)))]
-        part.tris += [(q[0], q[1], q[2]), (q[0], q[2], q[3])]
-        _flip_outward(part, start, lambda _c: centre)
+    """A six-faced solid of 8 corners, each face flat (its own 4 vertices), wound out of it (procmesh.flat_hexahedron)."""
+    pm.flat_hexahedron(part, corners, skin)
 
 
 def tube(part: pm.Part, path: list[Vec3], radius: float, skin: pm.Skin, segs: int = 10) -> None:
-    """procmesh.tube (capped) along `path`, wound out of it."""
-    start = len(part.tris)
-    pm.tube(part, path, [radius] * len(path), [skin] * len(path), segs)
-    _flip_outward(part, start, _path_ref(path))
-    P = [np.array(p, dtype=np.float64) for p in path]
-    _cap_ends(part, start, (len(part.pos) - 2, len(part.pos) - 1), (P[0] - P[1], P[-1] - P[-2]))
+    """procmesh.tube (capped) along `path`, wound out of it (procmesh.closed_tube)."""
+    pm.closed_tube(part, path, radius, skin, segs)
 
 
 # ------------------------------------------------------------------------------------------ the sidecar's parts
