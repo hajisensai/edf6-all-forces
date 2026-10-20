@@ -26,9 +26,14 @@ struct StoreSpec {
     unsigned barrel=0;       // original native holder index for that linked barrel
     bool nativeControl=false; // a native trigger source, independently selectable (alternate ammunition)
     StoreShell shell=StoreShell::native;
+    bool independentSecondary=false; // intrinsic weapon on the seat's otherwise unread secondary (the BMPT's missiles): concurrent
+                                     // with the primary; R/LB cycles it only among the other weapons of its kind
 };
 // A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
 struct JetMass { float mark,mass,durability; };
+// A barrel that fires in turn with the other of its pair (pylib/vcobjects.py GroundVehicle.alternate, twin_barrels;
+// src/twin_cadence.h): its weapon file (exact, any case) and its pair (from 1: one per belt of a twin gun).
+struct TwinBarrel { const wchar_t* file; unsigned pair; };
 
 // One holder of seat 0 that holds a store, as its weapon is now.
 struct Store {
@@ -54,6 +59,8 @@ const JetMass* JetMassOf(float mark) noexcept;
 bool IsStoreWeapon(const unsigned char* w) noexcept;
 // The store weapon `w` is (its SGO one of kStores'), else nullptr.
 const StoreSpec* StoreOf(const unsigned char* w) noexcept;
+// The twin-barrel pair weapon `w` fires in turn within (its SGO one of kTwinBarrels'), else 0.
+unsigned TwinPairOf(const unsigned char* w) noexcept;
 // The file name of weapon `w`'s SGO (after the last separator of its resource key, upper case), `length` characters;
 // nullptr when it cannot be read. Not zero-terminated where the key goes on.
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* length) noexcept;

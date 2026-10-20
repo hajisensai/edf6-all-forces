@@ -80,6 +80,14 @@ const StoreSpec* StoreOf(const unsigned char* w) noexcept {
 
 bool IsStoreWeapon(const unsigned char* w) noexcept { return StoreOf(w)!=nullptr; }
 
+unsigned TwinPairOf(const unsigned char* w) noexcept {
+    std::size_t length=0;
+    const wchar_t* name=WeaponFile(w,&length);
+    if(!name)return 0;
+    for(const auto& t:kTwinBarrels)if(std::wcslen(t.file)==length && _wcsnicmp(name,t.file,length)==0)return t.pair;
+    return 0;
+}
+
 namespace {
 void __fastcall MarkDrawHook(unsigned char* slot,void* ctx,void* camera) {
     __try {

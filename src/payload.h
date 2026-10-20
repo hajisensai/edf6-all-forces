@@ -13,6 +13,8 @@ constexpr int kMostPayload=8;
 // button bit 0x20, fire byte +0x2021; the Titan's left trigger +0x2E0), `store` one of the stores the secondary fires
 // when it is the one picked (any of the plugin's weapons hung on the seat: they ride the seat's secondary when a stock
 // weapon is on it, else its primary), `other` a control the plugin has not read for this class (a mech's arms).
+// The BMPT's intrinsic missiles (the Ataka, the 9M120F) use the V603's otherwise unused secondary input: their own
+// cycle on R / LB (payload.cpp Switch), never a choice of the primary's.
 // A coaxial gun (StoreRole::coax, tools/make_stock_stores.py COAX) is `secondary` for the player on a class whose stock
 // input reads no second control (the Blacker 505, the Varius 601, the Grape): payload.cpp pulls it on that trigger.
 enum class PayloadFire : std::uint8_t { other, primary, secondary, store };
@@ -75,7 +77,7 @@ int PayloadTriggerWeapons(const void* vehicle,unsigned seat,unsigned char** out,
 // true + null is an authoritative empty group; false leaves an unsupported/non-authoritative caller native.
 // Uses the same fresh from/to mapping as PullHook, including surviving linked barrels and preceding-frame NPC picks.
 bool PayloadAimWeapon(const void* vehicle,unsigned seat,const void* source,const unsigned char** out) noexcept;
-// Native alternate ammunition remains managed even when optional add-on stores are disabled.
+// Intrinsic alternate ammunition and independent secondary weapons remain managed with optional stores disabled.
 bool NativePayloadControl(const void* vehicle,unsigned seat) noexcept;
 // Authoritative NPC seat: choose an existing, loaded, reachable weapon for this target.
 // Call before native seat aiming/firing; writes no trigger. nullptr means none is usable.
@@ -88,6 +90,14 @@ unsigned char* NpcPayloadSelect(unsigned char* vehicle,unsigned seat,float dista
 // locked: whether a burst from -> to would pass a friend (heli.h FriendInLine); nullptr none checked.
 using LineBlocked=bool(*)(const float* from,const float* to,const void* self) noexcept;
 bool NpcCoaxFire(unsigned char* vehicle,unsigned seat,const void* target,LineBlocked blocked=nullptr) noexcept;
+// Intrinsic secondary weapon: plan separately from the primary; the NPC caller must run native seat aim/lock/safety.
+unsigned char* NpcSecondarySelect(unsigned char* vehicle,unsigned seat,float distance,bool airborne) noexcept;
+// Pull the live intrinsic secondary from its real seat input; local player or authoritative NPC only.
+// NPCs pass the exact weapon whose native lock/safety evaluation approved this intent.
+bool FireIndependentSecondary(unsigned char* vehicle,unsigned seat,const unsigned char* expectedWeapon=nullptr) noexcept;
+// Every vehicle's input, after the stock step and PayloadFrame: the twin barrels' pulls held back to fire them in turn
+// (twin_cadence.h; GroundVehicle.alternate: the BMPT). Clears only latches this frame set; any rider, any machine's copy.
+void TwinBarrelFrame(unsigned char* vehicle) noexcept;
 void ResetPayload() noexcept;
 bool InstallPayload() noexcept;                       // at load: the holder pull 0x62C000 taken over (checked)
 
