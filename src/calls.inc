@@ -100,6 +100,7 @@ const CallRow kCallRows[]={
     {L"EDF6VC_CALL_SEDAN",L"EDF6VC_CALL_SEDAN.SGO",L"EDF6VC_SEDAN.SGO"},
     {L"EDF6VC_CALL_VULCAN",L"EDF6VC_CALL_VULCAN.SGO",L"EDF6VC_VULCAN.SGO"},
     {L"EDF6VC_CALL_BMPT",L"EDF6VC_CALL_BMPT.SGO",L"EDF6VC_BMPT.SGO"},
+    {L"EDF6VC_CALL_ULTIMATE",L"EDF6VC_CALL_ULTIMATE.SGO",nullptr},
 };
 constexpr int kCallRowCount=static_cast<int>(sizeof(kCallRows)/sizeof(kCallRows[0]));
 // The thrown drones: their weapons' AmmoHitSizeAdjust bits (weapon +0x8C4), in tools/calls.py CALLS order.
@@ -107,4 +108,8 @@ const Throw kThrows[]={
     {0x3F800D61u,ThrownDrone::blast,90,"thrown blast drone",L"EDF6VC_CALL_THROW_BLAST"},
     {0x3F800D62u,ThrownDrone::doll,120,"thrown doll drone",L"EDF6VC_CALL_THROW_DOLL"},
     {0x3F800D63u,ThrownDrone::drone,180,"thrown gun drone",L"EDF6VC_CALL_THROW_DRONE"},
+};
+// The ultimate strikes: their weapons' AmmoHitSizeAdjust (weapon +0x8C4), in tools/calls.py CALLS order.
+const Ultimate kUltimates[]={
+    {7501.0f,"ultimate strike",L"EDF6VC_CALL_ULTIMATE"},
 };

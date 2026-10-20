@@ -486,6 +486,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_drill
     import make_edf5_campaign
     import make_emc
+    import make_ultimate
     import make_vulcan
     import make_bmpt
     import make_chute
@@ -532,6 +533,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     chute = build_asset(cache, make_chute, '降落伞')
     drill = build_asset(cache, make_drill, '钻头战车')
     emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
+    ult = build_asset(cache, make_ultimate, '终极支援「天罚」特效')
     vulcan = build_asset(cache, make_vulcan, 'M163 火神炮车（HE / AP 双弹链）')
     bmpt = build_asset(cache, make_bmpt, 'BMPT（双 30 mm 机炮与反坦克导弹）')
     stock = None
@@ -566,6 +568,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_chute.install(game, chute) if chute is not None else []) + \
             (make_drill.install(game, drill) if drill is not None else []) + \
             (make_emc.install(game, emc) if emc is not None else []) + \
+            (make_ultimate.install(game, ult) if ult is not None else []) + \
             (make_vulcan.install(game, vulcan) if vulcan is not None else []) + \
             (make_bmpt.install(game, bmpt) if bmpt is not None else []) + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
@@ -665,7 +668,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('vulcan', vulcan), ('bmpt', bmpt), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('vulcan', vulcan), ('bmpt', bmpt), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -738,6 +741,7 @@ def uninstall(game: str) -> None:
     import make_bigmap
     import make_drill
     import make_emc
+    import make_ultimate
     import make_vulcan
     import make_bmpt
     import make_chute
@@ -780,7 +784,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sedan.remove, make_sidecar.remove, make_vulcan.remove, make_bmpt.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sedan.remove, make_sidecar.remove, make_vulcan.remove, make_bmpt.remove, make_emc.remove, make_ultimate.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

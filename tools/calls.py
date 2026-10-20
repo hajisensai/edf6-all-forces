@@ -30,7 +30,8 @@ class Call:
     reload: float        # ReloadTime[0], the base of the star curve (a thrown one's: frames, 60 a second)
     level: float         # WEAPONTABLE column 4, same units as docs/weapons.csv level_raw
     brings: str          # 'jets' / 'helis' (the support deployment), 'sub' (SubLaunch), 'vehicle' (a vehicle request),
-                         # 'throw' (a Robot Bomb whose bomb releases a drone where it lands: JetLaunchThrown)
+                         # 'throw' (a Robot Bomb whose bomb releases a drone where it lands: JetLaunchThrown),
+                         # 'ultimate' (a satellite call whose fire becomes the plugin's show: src/ultimate.cpp)
     log: str = ''        # its name in the plugin's log
     fuel_sec: int = 0    # the plugin's fuel limit for what it brings (0: none)
     role: str = ''       # brings 'jets': the JetRole (src/crew.h)
@@ -175,6 +176,10 @@ CALLS: tuple[Call, ...] = (
     # Appended 2026-10-18: authored M163 / BMPT models, native tracked vehicle contracts.
     Call('EDF6VC_CALL_VULCAN', 0, 'vulcan', False, 0, 6500, 1.0, 'vehicle', vehicle='EDF6VC_VULCAN', ground='vulcan'),
     Call('EDF6VC_CALL_BMPT', 0, 'bmpt', False, 0, 7500, 1.2, 'vehicle', vehicle='EDF6VC_BMPT', ground='bmpt'),
+    # Appended 2026-10-19: the ultimate strike (src/ultimate.cpp, docs/plan-2026-10-19-ultimate.md; the user: 「特效拉满
+    # 昏天暗地」「清一片区域的终极技能 pt要求很高」): a stock satellite call (call_weapons.ULTIMATE_TEMPLATE: the laser
+    # marker, its countdown and voice) whose fire the plugin turns into its show. 15000 pt: the stock satellites ask 2400-5400.
+    Call('EDF6VC_CALL_ULTIMATE', 7501, 'ultimate', False, 0, 15000, 2.4, 'ultimate', 'ultimate strike'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -199,6 +204,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'all-class boarding rifles (2026-10-08)': IDS[:43],
     'civilian sedan (2026-10-16)': IDS[:44],
     'M163 Vulcan and BMPT (2026-10-19)': IDS[:46],
+    'ultimate strike (2026-10-19)': IDS[:47],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -572,6 +578,22 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Medic Helis', 'Calls medic helicopters whose door guns fire healing rounds: a friend they hit gets health '
                               'back. Their gunners aim at hurt friends (you included) on their own and never at enemies.'),
     },
+    'ultimate': {
+        'SC': ('天罚', '终极支援：用激光指示一点，倒计时后天色骤暗、雾气压近，标记点上空展开魔法阵，数道光束从高空会聚；'
+                  '随后半径 220 米内雷暴连劈约 6 秒，最后一道巨型光柱贯下，爆炸由中心一圈圈推到边缘，余火燃烧。'
+                  '整场约 25 秒，范围内敌我不分。'),
+        'CN': ('天罰', '終極支援：用雷射指示一點，倒數後天色驟暗、霧氣壓近，標記點上空展開魔法陣，數道光束從高空會聚；'
+                  '隨後半徑 220 公尺內雷暴連劈約 6 秒，最後一道巨型光柱貫下，爆炸由中心一圈圈推到邊緣，餘火燃燒。'
+                  '整場約 25 秒，範圍內敵我不分。'),
+        'JA': ('天罰', '最終支援。レーザーで地点を指示すると、カウントダウンの後に空が暗転し霧が迫り、魔法陣が展開して上空から'
+                  '光線が収束する。続いて半径 220m に約 6 秒間雷が降り注ぎ、最後に巨大な光柱が貫いて、爆発が中心から'
+                  '外縁へ輪になって広がる。全体で約 25 秒。範囲内は敵味方を区別しない。'),
+        'EN': ('Divine Judgment', 'The ultimate support. Mark a point with the laser: after the countdown the sky goes dark, '
+                              'fog closes in, magic circles open over the mark and beams converge on it from high above; '
+                              'then a lightning storm strikes everything within 220 m for six seconds, a colossal beam '
+                              'comes down and rings of blasts roll out from the centre to the edge, leaving fires. About '
+                              '25 seconds in all; it hits friend and foe alike inside the area.'),
+    },
     'heli': {
         'SC': ('武装直升机', '呼叫武装直升机，攻击附近的敌人。'),
         'CN': ('武裝直升機', '呼叫武裝直升機，攻擊附近的敵人。'),
@@ -632,6 +654,13 @@ GROUND_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew と EDF6AutoTurret のプラグイン、およびインストーラーが書き出す車両ファイルが必要。',
     'EN': 'Needs the EDF6VehicleCrew and EDF6AutoTurret plugins and the vehicle files the installer writes.',
 }
+ULTIMATE_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件和安装器生成的特效文件；未安装插件时为普通的卫星激光呼叫。',
+    'CN': '需要 EDF6VehicleCrew 插件和安裝器產生的特效檔案；未安裝插件時為普通的衛星雷射呼叫。',
+    'JA': 'EDF6VehicleCrew プラグインとインストーラーが書き出すエフェクトのファイルが必要。未導入時は通常の衛星レーザー要請になる。',
+    'EN': 'Needs the EDF6VehicleCrew plugin and the effect files the installer writes; without the plugin this is a plain '
+          'satellite laser call.',
+}
 GUN_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通的 ＫＦＦ５０ＬＳ 狙击枪。',
     'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通的 ＫＦＦ５０ＬＳ 狙擊槍。',
@@ -670,6 +699,8 @@ def call_description(call: Call, lang: str) -> str:
         return KINDS[call.kind][lang][1] + '\n\n' + THROW_NOTES[lang]
     if call.brings == 'gun':
         return KINDS[call.kind][lang][1] + '\n\n' + GUN_NOTES[lang]
+    if call.brings == 'ultimate':
+        return KINDS[call.kind][lang][1] + '\n\n' + ULTIMATE_NOTES[lang]
     if not call.modal:
         return KINDS[call.kind][lang][1] + '\n\n' + NOTES[lang]
     sep = ' ' if lang == 'EN' else ''

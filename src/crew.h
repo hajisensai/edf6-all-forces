@@ -883,7 +883,8 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // The Sazabi's beams are made and fired the same way (sazabi.cpp; pylib/vcobjects.py SAZABI_ROUND_FILES): the mega
 // particle cannon's beam, its charge's glow at the chest, a funnel's burst. The Proteus's shield is raised the same way
 // (proteus_shield.inc; tools/make_proteus.py): one BarrierBullet01, the stock Air Raider's electromagnetic barrier.
-enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield };
+enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,
+                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;
@@ -892,6 +893,14 @@ bool RoundSize(const RoundObj& r,float size) noexcept;       // its next rounds'
 bool RoundBlast(const RoundObj& r,float radius) noexcept;    // its next rounds' blast radius (AmmoExplosion)
 void RoundDrop(RoundObj& r) noexcept;                        // deleted while it is there; forgotten
 bool EmcIfcOk() noexcept;                                    // RoundSize / RoundBlast's IFC fields are where they write
+
+// ultimate.cpp: the ultimate strike (docs/plan-2026-10-19-ultimate.md, src/ultimate_plan.h): the satellite call's fire
+// (airstrike.cpp) starts its show at `at` by `caller` with the weapon's `damage`; UltimateTick plays it a frame at a time
+// (SharedFrameTick); ResetUltimate at a new mission forgets it, nothing touched (its objects were the last mission's).
+bool UltimateStart(const unsigned char* caller,const float* at,float damage,std::uint64_t seed) noexcept;
+void UltimateTick() noexcept;
+void ResetUltimate() noexcept;
+void PreloadUltimate(void* mgr) noexcept;   // the magic circles, with the shells (jet_spawn.cpp)
 
 // emc.cpp: the EMC's charged beam (docs/emc-re.md, README EMC 蓄力光束): the player's trigger in a Vehicle510_Maser charges,
 // and one thick beam carries the stock burst's damage through every enemy and building on its line, a blast at its end.
