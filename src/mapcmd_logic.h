@@ -32,9 +32,12 @@ inline constexpr unsigned kMaxFormationUnits=96;
 // Appended: the values are the map command wire's (command_protocol.cpp).
 // hold (the user, 2026-10-19: 「操作手感看看能不能再往rts进化进化」, RTS's H "hold position"): every unit guards the
 // spot it stands on now, each its own (no formation round one point): the authority reads where its unit is.
+// formation (2026-10-20, the map's T and its formation menu online: command protocol v7): a squad's formation set by the
+// order's `param` (FormationParam below): a guarding squad's defence cycled or set, the march of the requester's own
+// recruited squads set. No point; the authority reads each squad's state (guarding or marching) itself.
 enum class Order : std::uint8_t { none, guard, follow, engage, focus, board, dismount, dismiss, recruit, move, attackMove, withdraw,
-                                  dismountAll, hold };
-inline constexpr Order kLastOrder=Order::hold;
+                                  dismountAll, hold, formation };
+inline constexpr Order kLastOrder=Order::formation;
 // The seats a dismount empties, by the seat's role (npcai.cpp SeatPriority: 0 the driver's, 1 an armed seat, 2 a
 // passenger's): DISMOUNT the passengers', DISMOUNT ALL every one.
 inline constexpr int kSeatDriver=0,kSeatGunner=1,kSeatPassenger=2;
@@ -51,7 +54,27 @@ inline Order VehicleCommandOf(Order o) noexcept { return PlaceOrder(o) ? Order::
 // Whether an aircraft unit (heli, jet) takes `o`: a vehicle's orders and focus fire on the marked enemy (the user,
 // 2026-10-09: "飞机没办法指定攻击目标"; jet.cpp / heli.cpp JetCommand / HeliCommand take it as a squad's focus).
 inline bool AirOrder(Order o) noexcept { return VehicleOrder(o) || o==Order::focus; }
-struct Command { Order order; float at[3]; };   // at: the point of a point order (on the ground)
+// at: the point of a point order (on the ground). param: the formation order's (FormationParam), 0 for every other order.
+struct Command { Order order; float at[3]; std::uint32_t param=0; };
+
+// --- The formation order's parameter (Order::formation; command protocol v7 carries it in its own word) ---
+// Its low byte: a guarding squad's defence -- 0 left as it is, kFormationCycle the next one (T), 1 + shape set (the menu);
+// the next byte: the march of the requester's recruited squads -- 0 left as it is, 1 + shape set. The shapes are
+// formation.h's (below 0xFE); the authority checks each one is a defence / a march (npcai.cpp SetGuardFormation).
+inline constexpr std::uint32_t kFormationKeep=0,kFormationCycle=0xFF;
+inline std::uint32_t FormationParam(int guard,int march) noexcept {   // guard: -1 keep, -2 cycle, else the shape; march: -1 keep
+    const std::uint32_t g=guard==-2 ? kFormationCycle : guard>=0 && guard<0xFE ? static_cast<std::uint32_t>(guard)+1u : kFormationKeep;
+    const std::uint32_t m=march>=0 && march<0xFE ? static_cast<std::uint32_t>(march)+1u : kFormationKeep;
+    return g|(m<<8);
+}
+inline bool FormationCycles(std::uint32_t p) noexcept { return (p&0xFFu)==kFormationCycle; }
+inline int FormationGuardShape(std::uint32_t p) noexcept {   // the defence set, -1 none (kept or cycled)
+    const std::uint32_t g=p&0xFFu;
+    return g==kFormationKeep || g==kFormationCycle ? -1 : static_cast<int>(g)-1;
+}
+inline int FormationMarchShape(std::uint32_t p) noexcept { const std::uint32_t m=(p>>8)&0xFFu; return m ? static_cast<int>(m)-1 : -1; }
+// A formation order's param says something (a defence or a march) and nothing past its two bytes.
+inline bool FormationParamValid(std::uint32_t p) noexcept { return !(p>>16) && (p&0xFFFFu)!=0 && ((p>>8)&0xFFu)!=kFormationCycle; }
 
 // --- The squads' moves under an order (npcai.cpp Drive), the player's command over the soldiers' own fight ---
 // The user, 2026-10-09: "一个移动攻击是全消灭再走。一个移动攻击是先走次要消灭" -- the two RTS moves:
@@ -413,10 +436,12 @@ inline int SelectKind(Selection& s,const Mark* m,const char* const* kind,const i
 }
 
 // --- Shift-queued waypoints (RTS: Shift + right click, Shift + Z) ---
-// A unit's points after the one it is on its way to: `issued` the order given it last (from here, or from the map before
-// the first Shift), the rest in `next`. Each frame (map open or not) its order now and where it is: once it is within
-// `reach` (level) of `issued`'s point the next is given; an order now that is not `issued` (another order given it,
-// released, a module's own) drops the queue: the player took it over.
+// A unit's points after the one it is on its way to: `issued` the order given it last (the Shift's, or the one it was on
+// its way to when the first Shift came), the rest in `next`. Kept where the unit's AI runs, its authority (mapcmd.cpp
+// MapCommandAuthority: the map's own Issue and a network request alike, command protocol v7's queued flag), and advanced
+// by the scene's tick (every frame, whoever's map is open, whether the player lives): once the unit is within `reach`
+// (level) of `issued`'s point the next is given; an order now that is not `issued` (another order given it, released, a
+// module's own) drops the queue: the player took it over. A plain order (no Shift) registers nothing (Replace).
 inline constexpr int kWaypointsMost=8;
 struct Waypoints { bool active=false; Command issued{}; int n=0; Command next[kWaypointsMost]{}; };
 inline float Level(const float* a,const float* b) noexcept {
@@ -441,11 +466,9 @@ inline bool Enqueue(Waypoints& w,const Command& now,const float* pos,float reach
     w=Waypoints{};w.active=true;w.issued=c;
     return true;
 }
-// A plain order (no Shift): the queue gone, `c` the order (followed while it is a place order).
-inline void Replace(Waypoints& w,const Command& c) noexcept {
-    w=Waypoints{};
-    if(PlaceOrder(c.order)){w.active=true;w.issued=c;}
-}
+// A plain order (no Shift): the queue gone. Nothing is registered for it: a later Shift finds the unit on its way by its
+// order now (Enqueue), so no unit sits in the table (and is looked up every frame) for an order with nothing after it.
+inline void Replace(Waypoints& w,const Command&) noexcept { w=Waypoints{}; }
 enum class QueueStep : std::uint8_t { idle, wait, give, done, dropped };
 inline QueueStep Advance(Waypoints& w,const Command& now,const float* pos,float reach,Command* out) noexcept {
     if(!w.active)return QueueStep::idle;
@@ -456,5 +479,46 @@ inline QueueStep Advance(Waypoints& w,const Command& now,const float* pos,float 
     for(int i=1;i<w.n;++i)w.next[i-1]=w.next[i];
     --w.n;w.issued=*out;
     return QueueStep::give;
+}
+
+// --- A unit's identity that outlives its top (UnitRef) ---
+// A squad is its members, not its leader: the map's RTS groups, its selection and the Shift queue hold every member's
+// identity (an object and its control block, an ObjRef's pair) as well as the top's when they take it in, and find the
+// squad again through any member still alive (the user, 2026-10-19: groups kept through a leader's death). A guest never
+// sees the host's hand-over (npcai.cpp Succeed runs on the authority alone), but the native follow tree it replicates
+// gives each living member's top (npcai.cpp NpcSquadTopOf): the squad's new top. A vehicle is its own object (no members).
+struct UnitKey { const void* obj=nullptr; const void* ctrl=nullptr; };
+inline bool SameKey(const UnitKey& a,const UnitKey& b) noexcept { return a.obj && a.obj==b.obj && a.ctrl==b.ctrl; }
+inline constexpr int kUnitMembers=12;
+struct UnitRef { UnitKey top{}; int n=0; UnitKey member[kUnitMembers]{}; };
+// Whether `r` names `k` (its top, or one of its members).
+inline bool Names(const UnitRef& r,const UnitKey& k) noexcept {
+    if(SameKey(r.top,k))return true;
+    for(int i=0;i<r.n;++i)if(SameKey(r.member[i],k))return true;
+    return false;
+}
+// Where `r`'s unit is among the units listed now (`listed`, `n`): its top's index; else (its top dead, or out of the
+// list) the index of the listed top of its first living member (`topOf(member, &top)`: false for a member dead or gone,
+// true with that member's top now); -1 none listed. `alive` (may be null): whether any of it lives still -- a unit out
+// of the list a while (a vehicle between drivers, soldiers out of this machine's update) comes back, a dead one does not.
+// The top found is written back (`r.top`), so the next look starts from it.
+template<class TopOf> int ResolveUnit(UnitRef& r,const UnitKey* listed,int n,TopOf topOf,bool* alive=nullptr) noexcept {
+    if(alive)*alive=false;
+    for(int i=0;i<n;++i)if(SameKey(listed[i],r.top)){if(alive)*alive=true;return i;}
+    for(int m=-1;m<r.n;++m) {   // the old top first (it joined another squad: that one's top), then its members
+        UnitKey top{};
+        if(!topOf(m<0 ? r.top : r.member[m],&top))continue;
+        if(alive)*alive=true;
+        for(int i=0;i<n;++i)if(SameKey(listed[i],top)){r.top=top;return i;}
+    }
+    return -1;
+}
+// A unit's members taken in again (the squad grew, a member died): the ones it has now, the old ones it has not lost
+// kept after them (they may be out of this machine's update a while), at most kUnitMembers.
+inline void Remember(UnitRef& r,const UnitKey& top,const UnitKey* members,int count) noexcept {
+    UnitRef next{};next.top=top;
+    for(int i=0;i<count && next.n<kUnitMembers;++i)if(members[i].obj && !Names(next,members[i]))next.member[next.n++]=members[i];
+    for(int i=0;i<r.n && next.n<kUnitMembers;++i)if(!Names(next,r.member[i]))next.member[next.n++]=r.member[i];
+    r=next;
 }
 }  // namespace mapcmd

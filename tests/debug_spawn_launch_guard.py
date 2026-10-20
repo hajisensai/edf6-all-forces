@@ -5,7 +5,7 @@ aircraft JetLaunch / HeliLaunch makes in the air has no pilot (HeliFrame turns i
   - the crewed aircraft rows are support calls (SupportCallAt: the map's air support, real crew seated aboard), each key
     one of the calls tools/calls.py ships (src/calls.inc), and none of them a drone-only or submarine call;
   - the one launched aircraft is the gun drone (JetLaunchDrone), which flies with no one aboard;
-  - the online refusal comes before any spawn path.
+  - the online branch (NetSpawn: every peer makes it through the support transaction) comes before any local spawn path.
 python tests/debug_spawn_launch_guard.py [--root DIR]; exit 1 on a failure."""
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def main() -> int:
     spawn = parts[1].split('\n}\n', 1)[0] if len(parts) == 2 else ''
     paths = [spawn.index(x) for x in ('SupportCallAt(', 'JetLaunchDrone(', 'SpawnEnemy(', 'SpawnVehicle(') if x in spawn]
     if not spawn or len(paths) != 4 or 'InSession()' not in spawn or spawn.index('InSession()') > min(paths):
-        failures.append('debug_spawn.cpp MakeRow: the online refusal must come before every spawn path')
+        failures.append('debug_spawn.cpp MakeRow: the online branch must come before every local spawn path')
     for caller in ('void Spawn(int row,unsigned char* human)', 'int PlaceRow('):
         body = cpp.split(caller, 1)[-1].split('\n}\n', 1)[0] if caller in cpp else ''
         if 'MakeRow(' not in body or any(x in body for x in ('SupportCallAt(', 'JetLaunchDrone(', 'SpawnEnemy(', 'SpawnVehicle(')):

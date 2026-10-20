@@ -49,7 +49,7 @@ def main() -> int:
     sigs = dict(re.findall(r'const unsigned char (k\w+)Sig\[\]=\{([^}]+)\}', source))
     addresses = dict((k, int(v, 16)) for k, v in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+)', source))
     addresses['kSetTeam'] = 0x54EE70   # crew.h
-    assert len(sigs) == 17, sorted(sigs)
+    assert len(sigs) == 19, sorted(sigs)
     for name, text in sigs.items():
         data = bytes(int(x.strip(), 16) for x in text.split(','))
         assert pe.get_data(addresses[name], len(data)) == data, name
@@ -74,7 +74,14 @@ def main() -> int:
     # The loading on demand asks the manager the script's IsCompleteResource asks (0x70ED20: mov rcx,[mgr]; jmp).
     assert rel32_target(pe, addresses['kLoadDoneScript'] + 7, 5) == addresses['kLoadDone']
     assert rel32_target(pe, addresses['kLoadDoneScript'], 7) == addresses['kPreloadMgr']
-    checks += 5
+    # WaitPreload's render-thread step between its two completion queries (0x1BC20B): the manager's query, then
+    # 0x111CC20 on the renderer global the tool passes it (LoadTick makes the same step once its loads are complete).
+    site = addresses['kWaitPreloadSyncSite']
+    assert rel32_target(pe, site, 7) == addresses['kPreloadMgr'], hex(site)
+    assert rel32_target(pe, site + 10, 5) == addresses['kLoadDone'], hex(site)
+    assert rel32_target(pe, site + 15, 7) == addresses['kRenderer'], hex(site)
+    assert rel32_target(pe, site + 22, 5) == addresses['kRenderSync'], hex(site)
+    checks += 9
     for name, cls in (('kSceneObjectType', b'.?AVSceneObject@game@xgs@@'), ('kGameObjectType', b'.?AVGameObjectBase@@'),
                       ('kVehicleType', b'.?AVVehicleBase@@')):
         assert pe.get_data(addresses[name] + 0x10, len(cls)) == cls, name

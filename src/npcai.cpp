@@ -2636,13 +2636,41 @@ bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept {
     return found;
 }
 
+// A squad's members by identity (mapcmd_logic.h UnitRef): its top and its followers down the tree, at most `most`.
+int NpcSquadMembers(const void* top,ObjRef* out,int most) noexcept {
+    if(!top || !out || most<=0)return 0;
+    __try {
+        auto* t=static_cast<unsigned char*>(const_cast<void*>(top));
+        if(!Readable(t,kDead+1) || t[kDead] || !IsSoldierClass(t))return 0;
+        unsigned char* m[kMaxSquad];
+        const int n=Members(t,m,kMaxSquad);
+        int k=0;
+        for(int i=0;i<n && k<most;++i)if(m[i] && !m[i][kDead])out[k++]=ObjRef::Of(m[i]);
+        return k;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
+}
+// The top of a living member's squad now (the native follow tree, which a guest replicates: the host's hand-over seen
+// there too). False when `member` is dead, gone or another object at its address.
+bool NpcSquadTopOf(const ObjRef& member,ObjRef* top) noexcept {
+    if(!member.obj || !top)return false;
+    __try {
+        auto* h=static_cast<unsigned char*>(const_cast<void*>(member.obj));
+        if(!Readable(h,kLeader+8) || !Readable(h,kSelfCtrl+8) || !member.Is(h) || h[kDead] || !IsSoldierClass(h))return false;
+        unsigned char* const t=TopNpc(h);
+        if(!t || t[kDead])return false;
+        *top=ObjRef::Of(t);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 // A guarding squad's defence (the shape from the map's formation menu or T's cycle): the shape, -1 when it guards
 // nothing, -2 when it takes no orders or `shape` is no defence (formation.h kGuard).
 Squad* GuardingSquad(const void* leader,int* why) noexcept {
     *why=-2;
-    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return nullptr;
+    if(!ok || !Cfg().enabled || !Cfg().customNpcAi)return nullptr;
     Squad* const q=FindSquad(leader);
-    if(!q || npc::Scripted(q->control))return nullptr;
+    // Online only the squad's authority keeps its defence (the order reaches it as Order::formation, v7).
+    if(!q || npc::Scripted(q->control) || (InSession() && !IsOnlineAuthority(q->top.obj)))return nullptr;
     *why=-1;
     return q->cmd.order==Order::guard ? q : nullptr;
 }
@@ -2958,6 +2986,22 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             if(!BoardSquad(top,ms,caller,&affected,&why,&vehicle))return CommandResult(why);
             TransportPair(top,vehicle);   // its transport from now on, when it is one (transport.cpp)
             break;
+        }
+        case Order::formation: {
+            // The map's T / formation menu (command protocol v7): a guarding squad's defence, or the march of the
+            // requester's own recruited squads. Nothing else of the squad's changes (its trip, its boarding, its route).
+            if(!mapcmd::FormationParamValid(c.param))return CommandResult(Reason::unsupported);
+            if(q->cmd.order==Order::guard) {
+                const int shape=mapcmd::FormationCycles(c.param) ? static_cast<int>(npc::formation::Next(q->guardShape,true)) :
+                                mapcmd::FormationGuardShape(c.param);
+                if(shape<0 || SetGuardFormation(top,shape)<0)return CommandResult(Reason::unsupported);
+            } else if(q->cmd.order==Order::none && recruited && caller && root==caller) {
+                // The march is this machine's player's (MarchRoster: the squads round PlayerHuman()): another
+                // machine's player's squads keep the stock follow here, whatever that player's own march is.
+                const int marchShape=mapcmd::FormationMarchShape(c.param);
+                if(marchShape<0 || caller!=PlayerHuman() || SetMarchFormation(marchShape)<0)return CommandResult(Reason::unsupported);
+            } else return CommandResult(Reason::unsupported);
+            return CommandResult(Reason::none,static_cast<unsigned>(count>0 ? count : 1));
         }
         case Order::dismount:
         case Order::dismountAll:

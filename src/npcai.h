@@ -57,6 +57,12 @@ int SetMarchFormation(int shape) noexcept;
 // remnant joined; false when `old` handed over to none lately. The map's selection and its RTS groups follow a squad
 // through its leader's death with it (they hold the top's identity). Game thread.
 bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept;
+// A squad's members by identity, its top among them (mapcmd_logic.h UnitRef: the map's groups, selection and queues
+// find a squad again through any member alive), at most `most`; how many. The top of a living member's squad now (the
+// native follow tree: on a guest too, where the host's hand-over is not recorded); false for a member dead or gone.
+// Game thread.
+int NpcSquadMembers(const void* top,ObjRef* out,int most) noexcept;
+bool NpcSquadTopOf(const ObjRef& member,ObjRef* top) noexcept;
 int CycleMarchFormation() noexcept;
 struct FormationCue { int shape; int key; };
 bool PlayerFormationCue(FormationCue* out) noexcept;

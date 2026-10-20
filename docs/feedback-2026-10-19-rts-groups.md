@@ -62,3 +62,28 @@ A（攻击移动）和 S（停止）是地图镜头的 WASD 平移键，不能�
   守点若被模块挪动超过 5 米（`kSamePoint`），排队会被当作「命令被改」而清空（安全退化：单位停在当前命令）。
 - 直升机 / 战机原地坚守 = 在当前位置下方地面守点盘旋 / 巡逻。
 - 手柄长按 Y 原地坚守后，Y 点按改为在**松开**时下令（之前按下即下令）。
+
+## 2026-10-20 审查修复（PR #220 / #224 / #221 的审查）
+
+用户要求「所有功能都要支持联机」。审查发现的问题与修法：
+
+| # | 问题（审查时的代码） | 修法 |
+|---|---|---|
+| B1 | 联机 Shift 排队变成立即替换：远端单位打包直接 `SubmitMapCommand`，排队只对本机单位，`QueueTick` 遇到非权威单位清空 | 命令协议 v7：请求带 `kQueued`；排队放到**单位的权威端**（`MapCommandAuthority`，本机 `Dispatch` 与网络 `Execute` 共用这一入口）按单位保存。与 v6 对端协商：hello 一律按 v6 发并带最高版本，双方按较低版本；v6 房主收不到排队指令（本机拒绝并提示），不会静默变成立即命令 |
+| B2 | 客人编队长阵亡丢小队：`Succeed` 只在房主跑，客人的 `NpcSquadSuccessor` 查不到，`KeepGroup` 删组 | 编队记全体队员身份（`mapcmd_logic.h UnitRef`），找不到队长时取任一活着队员的当前队长（`npcai.cpp NpcSquadTopOf`，读原版同步的跟随树，客人也有）；选择同样 |
+| B3 | `QueueTick` 挂在玩家地图帧上（玩家死 / 观战停）；`Replace` 对所有普通命令登记，每帧 `List()`；单位暂离列表或队长阵亡立即丢 | 场景 tick 推进（每个士兵的 pre-update + 载具输入 `SharedFrameTick`，每帧一次）；不按 Shift 不登记；按 UnitRef 查找，暂离列表保留，全部阵亡才丢 |
+| B4 | 换任务不清编队与队列 | 核实：`MissionStart → ResetMap → ResetMapCommands` 原本就整份重置地图状态（编队随之清空）；排队移到权威端后由 `ResetMapCommands` 显式清空，离线检查覆盖 |
+| B5 | 左键点敌人 `SetEnemyCandidate` 强制展开怪物面板，下面的面板跳动 | 点选只高亮、不改折叠；展开 / 收起只由点击标题（或 L3）触发。**「停靠列每块固定段」没有做**：已有的布局契约（`enemy_hud_layout`：折叠时只占标题行；`pvp_hud_layout`；`hud_layout` 要求「摆放」列表至少约 25 个可点项）与固定段冲突，按固定段排版后「摆放」只剩 1 个可点项。根因是自动展开，去掉后面板只在用户自己点击时移动 |
+| B6 | 操控怪物的移动语义改了（摇杆前后、右向），协议仍是 v3 | `enemy_control_protocol.h kVersion=4`：v3 的 hello 在 v4 房主处解不开、永远不 capable，房主拒绝整个房间的操控（离线检查覆盖混装房间） |
+| B7 | 按需加载只记一个待生成项，新点选静默顶掉；未做 `WaitPreload` 的渲染线程同步 | 待生成项改成队列（16 个，满了拒绝并提示）；完成后照 `WaitPreload`（`0x1BC200`）的顺序：完成查询 → `0x111CC20(&0x2136FF0)`（向渲染线程命令队列压一个栅栏并等它，期间泵窗口消息；静态阅读，用途为推测）→ 再查询，签名不符就跳过这一步 |
+
+联机缺口：
+
+- **阵形 T / 阵形菜单**：作为 v7 的 `Order::formation`（参数在 `Command::param`：守点防御阵形轮换 / 设定，行军阵形设定）走同一通道。行军阵形只对权威端自己的玩家的小队生效（`npcai.cpp MarchRoster` 只排 `PlayerHuman()` 的小队），客人的已招募小队在房主那边按原版跟随，对它们改行军会返回「不支持」——这是现有行军实现的限制，没有改成按玩家分别排行军。
+- **摆放载具 / 士兵 / 无人机、按需加载**：资源号高字节区分种类（敌人 0xE1、载具 0xE2、士兵 0xE3、无人机 0xE4，`debug_spawn_net.h`），`SpawnRangeEnemy` 按种类生成（`SpawnVehicle` / `ApplySupportSoldierResource` / `PrepareSupportDrone`）后 `RegisterSupportObject`，激活照旧（敌人 `0x548D50`、士兵放开、无人机起飞）。按需加载：房主规划时返回 pending 直到本机加载完；各成员 PREPARE 时排入加载，加载完才回 READY（`support_net.h Hooks::prepare`，`support_protocol.cpp` 的 READY 延后，受事务原有 20 秒期限约束）。
+
+统一：`UnitRef`（`mapcmd_logic.h`）；`Dispatch(units, Command, {queue})`（本机权威 → `MapCommandAuthority`，其余一次请求；Issue、排队推进、`MapCommandGuardAt`、阵形都走它）；`NetSpawn`（测试场的物体行联机走同一套 preload → prepare → 全员创建 → activate；支援呼叫行仍走支援呼叫自己的规划器，同一会话）。
+
+离线验证：`tests/command_protocol_test.cpp`（v7 字段、v6 拒收、各版本组合协商）、`tools/map_cmd_check.cpp`（阵形参数、`Replace` 不登记、`UnitRef` 回选）、`tools/map_command_runtime_check.cpp`（网络排队经权威入口保存并由场景 tick 推进、暂离列表保留、换任务清空、客人视角经队员找回编队、阵形联机请求）、`tests/debug_spawn_net_test.cpp`（各种类的计划与三机事务、PREPARE 延后到加载完、永不加载则超时且什么都不生成）、`tests/enemy_control_protocol_test.cpp`（v3 成员在房间里时拒绝操控）。
+
+未实机：以上全部；特别是联机摆放的载具 / 士兵 / 无人机在客人那边的表现、`0x111CC20` 在任务中途调用是否会卡顿或死锁、客人经跟随树找回编队的时机。

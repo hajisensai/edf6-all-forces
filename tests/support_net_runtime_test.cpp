@@ -136,6 +136,9 @@ support_net::PlanResult PlanRangeEnemy(std::uint32_t catalog,const float* at,std
     return catalog==debugspawn::kNetworkCatalog && debugspawn::BuildNetworkPlan(row,matrix,out) ?
         support_net::PlanResult::ready : support_net::PlanResult::refused;
 }
+support_net::PlanResult PrepareRangeEnemy(const support_net::Plan& plan) noexcept {
+    return debugspawn::NetworkPlanRow(plan)>=0 ? support_net::PlanResult::ready : support_net::PlanResult::refused;
+}
 bool ValidateRangeEnemy(const support_net::Plan& plan) noexcept {
     ++fixture::rangeValidations;return debugspawn::NetworkPlanRow(plan)>=0;
 }

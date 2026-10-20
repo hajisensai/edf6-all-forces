@@ -824,7 +824,7 @@ void RejectNonCanonicalSizes(Room& current,const Packet& packet) {
     auto padded=packet.bytes;padded.push_back(0);attempt(padded.data(),padded.size());
 }
 void HostPoseSamplingAndAtomicDelivery() {
-    Room current(0,100);native.fallback=true;CHECK(ep::kVersion==3 && ep::kCapability==5);
+    Room current(0,100);native.fallback=true;CHECK(ep::kVersion==4 && ep::kCapability==5);
     CHECK(current.Request(0,5));current.Until(0,ep::Phase::beginning);
     crew::EnemyControlNetworkFrame();CHECK(native.poseCaptureCalls==0 && PosePacketCount(current)==0);
     current.Until(0,ep::Phase::activating);crew::EnemyControlNetworkFrame();

@@ -16,11 +16,14 @@ struct CommandNetworkResult {
 };
 // Nonzero means queued, never that the native order executed. Read the correlated
 // result below. More than 16 units is rejected, never silently truncated.
+// `queued` (Shift): after the points each unit is on its way to, kept by its authority (command protocol v7). A host of
+// an older version is refused it here, with the reason in `note` (no immediate order sent in its place).
 std::uint32_t SubmitMapCommand(const ObjRef& requester,const ObjRef* units,unsigned count,
     const mapcmd::Command& command,const ObjRef& focus,wchar_t* note,std::size_t noteSize,
-    const std::uint32_t* formationSlots=nullptr,std::uint32_t formationTotal=0) noexcept;
+    const std::uint32_t* formationSlots=nullptr,std::uint32_t formationTotal=0,bool queued=false) noexcept;
 bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept;
 bool MapCommandNetworkReady() noexcept;
+std::uint32_t MapCommandNetworkVersion() noexcept;   // the version agreed with the host (command_protocol.h), 0 none yet
 
 // Single consumer: support_net owns the only extension poll. All callbacks run
 // synchronously on the game thread and identity strings come from that poll.

@@ -11,15 +11,21 @@ bool Puid(const char* text) noexcept {
 }
 bool Same(const Request& a,const Request& b) noexcept {
     return a.count==b.count && a.command.order==b.command.order && !std::memcmp(a.command.at,b.command.at,12) &&
+        a.command.param==b.command.param && a.flags==b.flags &&
         !std::memcmp(a.requester,b.requester,32) && !std::memcmp(a.focus,b.focus,32) && !std::memcmp(a.units,b.units,sizeof(a.units)) &&
         a.formationTotal==b.formationTotal && !std::memcmp(a.formationSlots,b.formationSlots,sizeof(a.formationSlots));
 }
+// The last order a version carries (6: HOLD; 7: the formation order).
+mapcmd::Order LastOrder(std::uint32_t version) noexcept { return version>=7 ? mapcmd::kLastOrder : mapcmd::Order::hold; }
 bool Valid(const Message& m) noexcept {
-    if(!m.epoch || m.kind<Kind::hello || m.kind>Kind::result || m.rpc>=Rpc::count)return false;
-    if(m.kind==Kind::hello || m.kind==Kind::capability)return m.sequence==0 && m.request.count==0 &&
+    if(!Compatible(m.version) || !m.epoch || m.kind<Kind::hello || m.kind>Kind::result || m.rpc>=Rpc::count)return false;
+    // A hello / capability: its formationTotal the sender's highest version (0 from a version-6 build), nothing else.
+    if(m.kind==Kind::hello || m.kind==Kind::capability)return m.sequence==0 && m.request.count==0 && !m.request.flags &&
+        !m.request.command.param && m.request.formationTotal<=0xFFFFu &&
         (m.rpc==Rpc::none || (m.kind==Kind::capability && m.rpc==Rpc::unsupported));
     if(!m.sequence || !m.request.count || m.request.count>kCommandNetUnits)return false;
-    if(m.kind==Kind::request)return m.rpc==Rpc::none && ValidRequest(m.request);
+    if(m.kind==Kind::request)return m.rpc==Rpc::none && ValidRequest(m.request,m.version);
+    if(m.request.flags || m.request.command.param)return false;   // a result echoes no order's flag or parameter
     for(std::uint32_t i=0;i<m.request.count;++i) {
         const auto& r=m.results[i];
         if(r.reason>=static_cast<std::uint32_t>(NpcCommandReason::count) || r.affected>256)return false;
@@ -33,8 +39,16 @@ std::uint32_t U32(const unsigned char*& p) noexcept {std::uint32_t v=0;for(unsig
 bool CanonicalId(const unsigned char* id,bool allowEmpty) noexcept {
     if(!id)return false;for(unsigned i=20;i<24;++i)if(id[i])return false;return allowEmpty || !Empty(id);
 }
-bool ValidRequest(const Request& r) noexcept {
-    if(!r.count || r.count>kCommandNetUnits || r.command.order>mapcmd::kLastOrder || !CanonicalId(r.requester))return false;
+std::uint32_t RequestVersion(const Request& r) noexcept {
+    return r.flags || r.command.param || r.command.order>mapcmd::Order::hold ? 7u : kMinVersion;
+}
+bool ValidRequest(const Request& r,std::uint32_t version) noexcept {
+    if(!Compatible(version) || !r.count || r.count>kCommandNetUnits || r.command.order>LastOrder(version) ||
+       !CanonicalId(r.requester))return false;
+    if(RequestVersion(r)>version)return false;   // a flag or a parameter a version-6 peer would not read
+    if(r.flags&~kQueued)return false;
+    if((r.flags&kQueued) && !mapcmd::PointOrder(r.command.order))return false;   // only a point goes after the others
+    if(r.command.order==mapcmd::Order::formation ? !mapcmd::FormationParamValid(r.command.param) : r.command.param!=0)return false;
     for(float f:r.command.at)if(!std::isfinite(f) || std::fabs(f)>1.0e6f)return false;
     if(r.command.order==mapcmd::Order::focus) {if(!CanonicalId(r.focus) || !std::memcmp(r.focus,r.requester,32))return false;}
     else if(!Empty(r.focus))return false;
@@ -56,10 +70,11 @@ bool ValidRequest(const Request& r) noexcept {
 }
 bool Encode(const Message& m,void* bytes,std::size_t size) noexcept {
     if(!bytes || size!=kWireSize || !Valid(m))return false;
-    auto p=static_cast<unsigned char*>(bytes);U32(p,kMagic);U32(p,kVersion);U32(p,static_cast<std::uint32_t>(m.kind));U32(p,0);
+    // Version 6's two reserved words: the flags (after `kind`) and the order's parameter (after the point), zero there.
+    auto p=static_cast<unsigned char*>(bytes);U32(p,kMagic);U32(p,m.version);U32(p,static_cast<std::uint32_t>(m.kind));U32(p,m.request.flags);
     U32(p,static_cast<std::uint32_t>(m.epoch));U32(p,static_cast<std::uint32_t>(m.epoch>>32));
     U32(p,m.sequence);U32(p,m.request.count);U32(p,static_cast<std::uint32_t>(m.request.command.order));U32(p,static_cast<std::uint32_t>(m.rpc));
-    for(float f:m.request.command.at){std::uint32_t bits;std::memcpy(&bits,&f,4);U32(p,bits);}U32(p,0);
+    for(float f:m.request.command.at){std::uint32_t bits;std::memcpy(&bits,&f,4);U32(p,bits);}U32(p,m.request.command.param);
     std::memcpy(p,m.request.requester,32);p+=32;std::memcpy(p,m.request.focus,32);p+=32;
     std::memcpy(p,m.request.units,sizeof(m.request.units));p+=sizeof(m.request.units);
     U32(p,m.request.formationTotal);for(auto slot:m.request.formationSlots)U32(p,slot);
@@ -67,12 +82,13 @@ bool Encode(const Message& m,void* bytes,std::size_t size) noexcept {
 }
 bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     if(!bytes || size!=kWireSize)return false;
-    auto p=static_cast<const unsigned char*>(bytes);if(U32(p)!=kMagic || U32(p)!=kVersion)return false;
-    Message m;m.kind=static_cast<Kind>(U32(p));if(U32(p))return false;
+    auto p=static_cast<const unsigned char*>(bytes);if(U32(p)!=kMagic)return false;
+    Message m;m.version=U32(p);if(!Compatible(m.version))return false;
+    m.kind=static_cast<Kind>(U32(p));m.request.flags=U32(p);
     m.epoch=U32(p);m.epoch|=static_cast<std::uint64_t>(U32(p))<<32;m.sequence=U32(p);m.request.count=U32(p);
-    const auto order=U32(p);if(order>static_cast<std::uint32_t>(mapcmd::kLastOrder))return false;
+    const auto order=U32(p);if(order>static_cast<std::uint32_t>(LastOrder(m.version)))return false;
     m.request.command.order=static_cast<mapcmd::Order>(order);m.rpc=static_cast<Rpc>(U32(p));
-    for(float& f:m.request.command.at){const auto bits=U32(p);std::memcpy(&f,&bits,4);}if(U32(p))return false;
+    for(float& f:m.request.command.at){const auto bits=U32(p);std::memcpy(&f,&bits,4);}m.request.command.param=U32(p);
     std::memcpy(m.request.requester,p,32);p+=32;std::memcpy(m.request.focus,p,32);p+=32;
     std::memcpy(m.request.units,p,sizeof(m.request.units));p+=sizeof(m.request.units);
     m.request.formationTotal=U32(p);for(auto& slot:m.request.formationSlots)slot=U32(p);
@@ -81,7 +97,7 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
 bool Owned(const void* bytes,std::size_t size) noexcept {
     if(!bytes || size<4)return false;auto p=static_cast<const unsigned char*>(bytes);return U32(p)==kMagic;
 }
-void Session::Reset() noexcept {ready_=false;hostCapable_=false;epoch_=0;nextSequence_=0;lastHello_=0;result_={};peer_.fill(Peer{});}
+void Session::Reset() noexcept {ready_=false;hostCapable_=false;epoch_=0;nextSequence_=0;lastHello_=0;hostVersion_=0;result_={};peer_.fill(Peer{});}
 bool Session::Ready() const noexcept {return ready_ && epoch_ && (host_ ? backend_.execute!=nullptr : hostCapable_);}
 bool Session::Send(std::uint32_t to,const Message& message) noexcept {return backend_.send && backend_.send(backend_.context,to,message);}
 void Session::ResultOf(const Message& m) noexcept {
@@ -105,7 +121,9 @@ void Session::Update(bool ready,bool host,std::uint64_t epoch,std::uint32_t host
     if(epoch_!=epoch) {Reset();epoch_=epoch;lastHello_=now>1000 ? now-1000 : 0;}
     ready_=true;host_=host;hostPeer_=hostPeer;peers_=peers;
     if(!host_ && !hostCapable_ && now-lastHello_>=1000) {
-        Message hello;hello.epoch=epoch_;Send(hostPeer_,hello);lastHello_=now;
+        // At the lowest version, the highest this build speaks in it (a version-6 host reads it and answers in 6).
+        Message hello;hello.version=kMinVersion;hello.epoch=epoch_;hello.request.formationTotal=maxVersion_;
+        Send(hostPeer_,hello);lastHello_=now;
     }
     if(result_.state==CommandNetworkState::pending) {
         if(now-pendingAt_>=10000){auto reply=pending_;reply.rpc=Rpc::timeout;ResultOf(reply);}
@@ -117,10 +135,15 @@ void Session::Execute(std::uint32_t peer,const char* puid,const Message& request
     if(cache.have && request.sequence<=cache.request.sequence) {
         if(request.sequence==cache.request.sequence && Same(request.request,cache.request.request)) {
             if(peer)Send(peer,cache.reply);else ResultOf(cache.reply);
-        } else {auto denied=request;denied.kind=Kind::result;denied.rpc=Rpc::stale;if(peer)Send(peer,denied);else ResultOf(denied);}
+        } else {
+            Message denied;denied.version=request.version;denied.kind=Kind::result;denied.epoch=request.epoch;denied.sequence=request.sequence;
+            denied.request.count=request.request.count;denied.rpc=Rpc::stale;
+            if(peer)Send(peer,denied);else ResultOf(denied);
+        }
         return;
     }
-    Message reply;reply.kind=Kind::result;reply.epoch=epoch_;reply.sequence=request.sequence;reply.request.count=request.request.count;
+    Message reply;reply.version=request.version;reply.kind=Kind::result;reply.epoch=epoch_;reply.sequence=request.sequence;
+    reply.request.count=request.request.count;
     if(!backend_.execute || !cache.capable)reply.rpc=Rpc::unsupported;
     else if(cache.lastAt && now-cache.lastAt<200)reply.rpc=Rpc::rateLimited;
     else {backend_.execute(backend_.context,puid,request.request,reply.results);cache.lastAt=now;}
@@ -134,18 +157,33 @@ void Session::Receive(std::uint32_t peer,const char* puid,const Message& message
     if(!identity.puid[0])std::memcpy(identity.puid,puid,std::strlen(puid)+1);
     if(host_) {
         if(message.kind==Kind::hello) {
-            peer_[peer].capable=true;Message reply;reply.kind=Kind::capability;reply.epoch=epoch_;
+            // The lower of the peer's highest (a version-6 build says none: its hello's own version) and this build's.
+            const std::uint32_t said=message.request.formationTotal ? message.request.formationTotal : message.version;
+            const std::uint32_t theirs=said<kMinVersion ? kMinVersion : said;
+            peer_[peer].capable=true;peer_[peer].version=theirs<maxVersion_ ? theirs : maxVersion_;
+            Message reply;reply.version=peer_[peer].version;reply.kind=Kind::capability;reply.epoch=epoch_;
+            reply.request.formationTotal=maxVersion_;
             reply.rpc=backend_.execute ? Rpc::none : Rpc::unsupported;Send(peer,reply);
-        } else if(message.kind==Kind::request)Execute(peer,puid,message,now);
+        } else if(message.kind==Kind::request) {
+            // Above what this peer agreed (a reset, a replayed packet of another session): not executed.
+            if(message.version>peer_[peer].version)return;
+            Execute(peer,puid,message,now);
+        }
     } else if(peer==hostPeer_) {
-        if(message.kind==Kind::capability)hostCapable_=message.rpc==Rpc::none;
+        if(message.kind==Kind::capability) {
+            hostCapable_=message.rpc==Rpc::none;
+            hostVersion_=message.version<maxVersion_ ? message.version : maxVersion_;
+        }
         else if(message.kind==Kind::result && result_.state==CommandNetworkState::pending &&
                 message.sequence==pending_.sequence && message.request.count==pending_.request.count)ResultOf(message);
     }
 }
 std::uint32_t Session::Submit(const Request& request,const char* puid,std::uint64_t now) noexcept {
-    if(!Ready() || !puid || !puid[0] || !ValidRequest(request) || nextSequence_==UINT32_MAX || result_.state==CommandNetworkState::pending)return 0;
-    pending_={};pending_.kind=Kind::request;pending_.epoch=epoch_;pending_.sequence=++nextSequence_;pending_.request=request;
+    const std::uint32_t version=host_ ? maxVersion_ : hostVersion_;
+    if(!Ready() || !puid || !puid[0] || !ValidRequest(request,version) || nextSequence_==UINT32_MAX ||
+       result_.state==CommandNetworkState::pending)return 0;
+    pending_={};pending_.version=version;pending_.kind=Kind::request;pending_.epoch=epoch_;pending_.sequence=++nextSequence_;
+    pending_.request=request;
     result_={};result_.request=pending_.sequence;result_.count=request.count;result_.state=CommandNetworkState::pending;
     pendingAt_=lastSend_=now;
     if(host_) {peer_[0].capable=true;Execute(0,puid,pending_,now);}

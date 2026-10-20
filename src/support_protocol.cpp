@@ -513,6 +513,16 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
         if((t.received&bit) && std::memcmp(&t.plan.units[m.index],&unit,sizeof(Unit))) {Failed(t.token);return;}
         t.plan.units[m.index]=unit;t.received|=bit;
     } else if(m.kind==Kind::prepare && t.phase==Phase::assembling) {
+        // What it needs being loaded here (Hooks::prepare): READY once it is (Tick), within the transaction's deadline.
+        if(t.received==((1u<<t.plan.count)-1) && ValidPlan(t.plan) && backend_.hooks.prepare) {
+            const PlanResult loaded=backend_.hooks.prepare(t.plan);
+            if(loaded==PlanResult::pending){if(!t.readyPending){t.readyPending=true;t.since=now;}return;}
+            if(loaded==PlanResult::refused) {
+                t.readyPending=false;t.phase=Phase::cancelled;t.since=now;
+                Message reply;reply.kind=Kind::ready;reply.transaction=m.transaction;Send(hostPeer_,reply);return;
+            }
+        }
+        t.readyPending=false;
         Message reply;reply.kind=Kind::ready;reply.transaction=m.transaction;
         reply.ok=t.received==((1u<<t.plan.count)-1) && ValidPlan(t.plan) &&
             (!RequiredDetails(t.plan,t.id) || PeersHaveDetails(RequiredDetails(t.plan,t.id))) && backend_.hooks.validate && backend_.hooks.validate(t.plan);
@@ -546,6 +556,18 @@ void Session::Tick(std::uint64_t now) noexcept {
     }
     for(std::uint32_t id=1;id<=kMaxTransactions;++id) {
         auto& t=transactions_[id-1];
+        if(!host_ && t.phase==Phase::assembling && t.readyPending) {   // PREPARE's READY, once loaded here
+            const PlanResult loaded=backend_.hooks.prepare ? backend_.hooks.prepare(t.plan) : PlanResult::ready;
+            if(loaded!=PlanResult::pending) {
+                t.readyPending=false;
+                Message reply;reply.kind=Kind::ready;reply.transaction=t.id;
+                reply.ok=loaded==PlanResult::ready && ValidPlan(t.plan) &&
+                    (!RequiredDetails(t.plan,t.id) || PeersHaveDetails(RequiredDetails(t.plan,t.id))) &&
+                    backend_.hooks.validate && backend_.hooks.validate(t.plan);
+                t.phase=reply.ok ? Phase::prepared : Phase::cancelled;t.since=now;Send(hostPeer_,reply);
+                continue;
+            }
+        }
         if(t.phase==Phase::active && host_ && now-t.since>=1000) {
             Message m;m.kind=Kind::activate;m.transaction=t.id;
             for(std::uint32_t peer=1;peer<=peers_;++peer)if(!t.activated[peer])Send(peer,m);

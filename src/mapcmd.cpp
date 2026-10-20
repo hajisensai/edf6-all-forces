@@ -9,7 +9,8 @@
 //    twice or Ctrl: every unit of its kind on the screen) or, on empty ground, clears the selection (mapcmd_logic.h Box,
 //    Click, SelectKind); Ctrl+A every unit;
 //  - the RTS groups (mapcmd_logic.h GroupKey): Ctrl+1-9 keeps the selection as a group, 1-9 selects it again (twice: the
-//    map centres on it), held by identity and followed through a squad leader's death (npcai.cpp NpcSquadSuccessor);
+//    map centres on it), held by every member's identity (mapcmd_logic.h UnitRef) and found again through any member
+//    alive after its leader's death, on a guest too (npcai.cpp NpcSquadTopOf; NpcSquadSuccessor on the host);
 //    the pad's D-pad groups 1-4. They replace SPLIT / JOIN (P / L), which rearranged the native follow trees;
 //  - Tab / Shift+Tab (pad X) step through one unit at a time, then ALL (mapcmd_logic.h Cycle); the map centres on a unit
 //    selected so;
@@ -19,9 +20,11 @@
 //    follow the player; X (pad LB): stop (back to what it did before any command).
 //  - the right button let go without a drag (a right drag still turns the map), by what is under it: an enemy: focus
 //    fire on it; the player's own mark: FOLLOW; the ground: a move there (mapcmd_logic.h RightClickOrder). Shift with it
-//    (or with Z) queues the point after the ones before it (mapcmd_logic.h Waypoints; MapCommandQueueTick advances them
-//    every frame, the map shut too). A point order's button (move, attack-move) or a support's row arms the next left
-//    click on the map as its point; the right button cancels that instead.
+//    (or with Z) queues the point after the ones before it (mapcmd_logic.h Waypoints), kept by the unit's authority
+//    (MapCommandAuthority: this machine's for its own units, the host's for the others through command protocol v7's
+//    queued flag) and advanced by the scene's tick (MapCommandQueueTick: every frame, any map shut, the player dead or
+//    watching). A point order's button (move, attack-move) or a support's row arms the next left click on the map as its
+//    point; the right button cancels that instead.
 //  - an enemy under the pointer (the user, 2026-10-07: "应该在地图里面也能按q标记"): the mark key (NpcMarkKey, Q) marks it
 //    for the NPCs (npcai.cpp NpcMarkEnemy; the same one again: let go) instead of turning the map. With no enemy under the
 //    pointer Q turns the map.
@@ -29,7 +32,8 @@
 // meeting with the level ground through the focus (RayLevel).
 // Online, owned units execute through their real AI authority. Replica squads are selected by native identity and
 // requested through command_net; accepted transport is displayed separately from the correlated authority result.
-// Remote vehicle commands are not fabricated by writing a local copy.
+// Remote vehicle commands are not fabricated by writing a local copy. Every order goes one way (Dispatch: this machine's
+// units through MapCommandAuthority, the others' in one request), the formation (T and its menu) too.
 #include "crew.h"
 #include "formation.h"
 #include "map_buttons.h"
@@ -68,6 +72,7 @@ constexpr float kPadPickRadius=90.0f;    // px (at 1080 lines) round the screen 
 
 enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; ObjRef id{}; };   // id: its identity when listed (the module had it live)
+struct DispatchFlags { bool queue=false; };                  // Dispatch: Shift (a point after the ones before it)
 
 struct Keys { bool tab,shift,ctrl,follow,release,left,right,middle,padNext,padGuard,padFollow,padRelease,
              engage,hold,board,dismount,dismiss,recruit,attackMove,mark,formation,sweep,health,all,digit[9],supportPrev,supportNext,supportCall,
@@ -78,6 +83,7 @@ struct Keys { bool tab,shift,ctrl,follow,release,left,right,middle,padNext,padGu
 struct Game {
     mapcmd::Selection sel;
     ObjRef selected[kCmdUnits]; // identity when selected; an address recycled since then is another unit
+    mapcmd::UnitRef selRef[kCmdUnits]; // ...and its members' (a squad found again through any of them)
     Keys was;
     ULONGLONG frameAt;          // wall ms of the last frame (a gap: the map was closed, no edges the first frame)
     int count;
@@ -110,16 +116,13 @@ struct Game {
     UiHit uiPress{};
     bool uiLeft=false,uiRight=false,rowPicked=false,suppressLeft=false,suppressRight=false;
     ObjRef requester{},focus{};
-    // The RTS groups (mapcmd_logic.h GroupKey): each one's units by identity (a squad's top; NpcSquadSuccessor follows a
-    // squad through its leader's death), kept while the map is shut; the number keys' double tap; the pad's held buttons.
-    ObjRef group[mapcmd::kGroups][mapcmd::kMaxSel]{};int groupN[mapcmd::kGroups]{};
+    // The RTS groups (mapcmd_logic.h GroupKey): each one's units by every member's identity (mapcmd_logic.h UnitRef: a
+    // squad found again through any member alive), kept while the map is shut and dropped with the mission
+    // (ResetMapCommands); the number keys' double tap; the pad's held buttons.
+    mapcmd::UnitRef group[mapcmd::kGroups][mapcmd::kMaxSel]{};int groupN[mapcmd::kGroups]{};
     mapcmd::Tap tap{};
     mapcmd::Held padY{},padDir[4]{};
     const void* clickUnit=nullptr;ULONGLONG clickAt=0;   // the last click's unit and when (a second one: its kind)
-    // The Shift-queued points (mapcmd_logic.h Waypoints): a unit's, the player who gave them. Advanced every frame,
-    // the map open or not (MapCommandQueueTick).
-    struct Queue { ObjRef unit,requester; mapcmd::Waypoints w; };
-    Queue queue[kCmdUnits]{};
     NpcCommandReason failure=NpcCommandReason::none;
     unsigned affected=0;
     // The last command's units that did not take it, by why (the log: "0 of 32 units took it" said nothing of why).
@@ -183,33 +186,78 @@ SRWLOCK lock=SRWLOCK_INIT;
 
 bool Down(int vk) noexcept { return (edf::AsyncKey(vk)&0x8000)!=0; }
 
-// Every unit that takes an order now, in a stable order (the vehicles' addresses).
-void List(Game& g) noexcept {
+// Every unit that takes an order now, in a stable order (the vehicles' addresses), into `list`; how many.
+int ListUnits(Entry* list) noexcept {
     CommandUnit buf[kCmdUnits];
-    g.count=0;
-    auto add=[&](int n,Owner o){ for(int i=0;i<n && g.count<kCmdUnits;++i)g.list[g.count++]=Entry{buf[i],o,ObjRef::Of(buf[i].v)}; };
+    int count=0;
+    auto add=[&](int n,Owner o){ for(int i=0;i<n && count<kCmdUnits;++i)list[count++]=Entry{buf[i],o,ObjRef::Of(buf[i].v)}; };
     add(HeliCommandUnits(buf,kCmdUnits),Owner::heli);
-    add(JetCommandUnits(buf,kCmdUnits-g.count),Owner::jet);
-    add(GroundCommandUnits(buf,kCmdUnits-g.count),Owner::ground);
-    add(TankCommandUnits(buf,kCmdUnits-g.count),Owner::tank);
-    add(SquadCommandUnits(buf,kCmdUnits-g.count),Owner::squad);
+    add(JetCommandUnits(buf,kCmdUnits-count),Owner::jet);
+    add(GroundCommandUnits(buf,kCmdUnits-count),Owner::ground);
+    add(TankCommandUnits(buf,kCmdUnits-count),Owner::tank);
+    add(SquadCommandUnits(buf,kCmdUnits-count),Owner::squad);
     // A vehicle unit carrying a squad that takes orders: DISMOUNT / DISMOUNT ALL given to it are that squad's (the user,
     // 2026-10-09: the crew's squad is not boxed with its vehicle any more, so the vehicle is where its crew is told off).
-    for(int i=0;i<g.count;++i) {
-        const Entry& q=g.list[i];
+    for(int i=0;i<count;++i) {
+        const Entry& q=list[i];
         if(q.owner!=Owner::squad || q.u.locked || !q.u.riding || !q.u.vehicle)continue;
-        for(int k=0;k<g.count;++k)if(g.list[k].owner!=Owner::squad && g.list[k].u.v==q.u.vehicle)g.list[k].u.carries=true;
+        for(int k=0;k<count;++k)if(list[k].owner!=Owner::squad && list[k].u.v==q.u.vehicle)list[k].u.carries=true;
     }
-    std::sort(g.list,g.list+g.count,[](const Entry& a,const Entry& b){ return std::less<const void*>()(a.u.v,b.u.v); });
+    std::sort(list,list+count,[](const Entry& a,const Entry& b){ return std::less<const void*>()(a.u.v,b.u.v); });
+    return count;
+}
+void List(Game& g) noexcept { g.count=ListUnits(g.list); }
+
+// --- A unit's identity that outlives its top (mapcmd_logic.h UnitRef) ---
+mapcmd::UnitKey Key(const ObjRef& r) noexcept { return mapcmd::UnitKey{r.obj,r.ctrl}; }
+ObjRef RefOf(const mapcmd::UnitKey& k) noexcept { return ObjRef{k.obj,k.ctrl}; }
+// The unit `e` as a UnitRef: its top (the vehicle, the squad's top) and, a squad, its members now (npcai.cpp).
+mapcmd::UnitRef Capture(const Entry& e) noexcept {
+    mapcmd::UnitRef r{};r.top=Key(e.id);
+    if(e.owner!=Owner::squad)return r;
+    ObjRef members[mapcmd::kUnitMembers];
+    const int n=NpcSquadMembers(e.u.v,members,mapcmd::kUnitMembers);
+    mapcmd::UnitKey keys[mapcmd::kUnitMembers];
+    for(int i=0;i<n;++i)keys[i]=Key(members[i]);
+    mapcmd::Remember(r,r.top,keys,n);
+    return r;
+}
+// The top of what `k` names now: a living soldier's squad top (the native follow tree), a live vehicle itself; false
+// for one dead or gone (another object at its address).
+bool TopNow(const mapcmd::UnitKey& k,mapcmd::UnitKey* top) noexcept {
+    if(!k.obj)return false;
+    ObjRef t;
+    if(NpcSquadTopOf(RefOf(k),&t)){*top=Key(t);return true;}
+    __try {
+        const auto* o=static_cast<const unsigned char*>(k.obj);
+        if(!Readable(o,kSelfCtrl+sizeof(void*)) || !Readable(o,kDead+1) || !RefOf(k).Is(o) || o[kDead])return false;   // a live soldier: NpcSquadTopOf above
+        *top=k;return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+// Where `r`'s unit is in `list` now (mapcmd_logic.h ResolveUnit; the host's own record of a hand-over first), -1 none;
+// `alive`: whether any of it lives still.
+int Resolve(mapcmd::UnitRef& r,const Entry* list,int count,bool* alive) noexcept {
+    mapcmd::UnitKey keys[kCmdUnits];
+    for(int i=0;i<count;++i)keys[i]=Key(list[i].id);
+    ObjRef next;
+    if(NpcSquadSuccessor(RefOf(r.top),&next))
+        for(int i=0;i<count;++i)if(mapcmd::SameKey(keys[i],Key(next))){r.top=keys[i];if(alive)*alive=true;return i;}
+    return mapcmd::ResolveUnit(r,keys,count,&TopNow,alive);
+}
+// `r` refreshed from its unit listed now (`e`): its members as they are, the ones it had and still may come back kept.
+void Refresh(mapcmd::UnitRef& r,const Entry& e) noexcept {
+    const mapcmd::UnitRef now=Capture(e);
+    mapcmd::Remember(r,now.top,now.member,now.n);
 }
 
 void KeepSelection(Game& g,const void* const* ids) noexcept {
-    // A selected squad whose top died is the squad it handed over to (npcai.cpp Succeed), not lost from the selection.
+    // A selected squad whose top died is the same squad under its new top, found through any member still alive
+    // (mapcmd_logic.h UnitRef), not lost from the selection.
     for(int i=0;i<g.sel.n;++i) {
-        ObjRef next;
-        if(mapcmd::IndexOf(ids,g.count,g.sel.id[i])>=0 || g.selected[i].obj!=g.sel.id[i] || !NpcSquadSuccessor(g.selected[i],&next) ||
-           mapcmd::IndexOf(ids,g.count,next.obj)<0 || g.sel.Has(next.obj))continue;
-        g.sel.id[i]=next.obj;g.selected[i]=next;
+        if(mapcmd::IndexOf(ids,g.count,g.sel.id[i])>=0 || g.selected[i].obj!=g.sel.id[i])continue;
+        const int k=Resolve(g.selRef[i],g.list,g.count,nullptr);
+        if(k<0 || g.sel.Has(g.list[k].u.v))continue;
+        g.sel.id[i]=g.list[k].u.v;g.selected[i]=g.list[k].id;
     }
     mapcmd::Keep(g.sel,ids,g.count);
     for(int i=g.sel.n-1;i>=0;--i) {
@@ -222,53 +270,60 @@ void KeepSelection(Game& g,const void* const* ids) noexcept {
 }
 
 void RememberSelection(Game& g) noexcept {
-    for(int i=0;i<kCmdUnits;++i)g.selected[i]=i<g.sel.n ? ObjRef::Of(g.sel.id[i]) : ObjRef{};
+    static mapcmd::UnitRef was[kCmdUnits];   // game thread only; too big for its stack
+    std::memcpy(static_cast<void*>(was),g.selRef,sizeof(was));
+    for(int i=0;i<kCmdUnits;++i) {
+        g.selected[i]=i<g.sel.n ? ObjRef::Of(g.sel.id[i]) : ObjRef{};
+        g.selRef[i]=mapcmd::UnitRef{};
+        if(i>=g.sel.n)continue;
+        g.selRef[i].top=Key(g.selected[i]);
+        for(const auto& old:was)if(mapcmd::Names(old,g.selRef[i].top)){g.selRef[i]=old;g.selRef[i].top=Key(g.selected[i]);break;}
+        for(int k=0;k<g.count;++k)if(g.list[k].u.v==g.sel.id[i]){Refresh(g.selRef[i],g.list[k]);break;}
+    }
 }
 
-bool Give(Game& g,const Entry& e,const Command& order) noexcept {
+// An order to unit `e` (this machine its authority) from `requester`: what its module did with it. `list` the units
+// listed with it (a vehicle's riding squads); `sel` the selection it came with (a squad selected too gives its own), may
+// be null (a queued point, a network request).
+NpcCommandResult GiveUnit(const Entry& e,const Command& order,const ObjRef& requester,const ObjRef& focus,
+                          const Entry* list,int count,const mapcmd::Selection* sel) noexcept {
+    const auto picked=[&](const void* v){return sel && sel->Has(v);};
     // DISMOUNT / DISMOUNT ALL to a vehicle: its riding squads' (each once: not those selected themselves, their own row
     // gives it).
     if(e.owner!=Owner::squad && mapcmd::DismountOrder(order.order)) {
-        bool any=false;
-        for(int i=0;i<g.count;++i) {
-            const Entry& q=g.list[i];
-            if(q.owner!=Owner::squad || q.u.locked || q.u.vehicle!=e.u.v || g.sel.Has(q.u.v))continue;
-            const auto result=NpcSquadCommandForRequester(ObjRef::Of(q.u.v),order,g.requester,g.focus);
-            if(!result.Accepted())g.failure=result.reason;
-            else{g.affected+=result.affected;any=true;}
+        NpcCommandResult all{NpcCommandReason::failed,0};bool any=false;
+        for(int i=0;i<count;++i) {
+            const Entry& q=list[i];
+            if(q.owner!=Owner::squad || q.u.locked || q.u.vehicle!=e.u.v || picked(q.u.v))continue;
+            const auto result=NpcSquadCommandForRequester(ObjRef::Of(q.u.v),order,requester,focus);
+            if(!result.Accepted()){if(!any)all.reason=result.reason;}
+            else{all.affected+=result.affected;any=true;all.reason=NpcCommandReason::none;}
         }
-        return any;
+        return all;
     }
     // A transport carrying its squad (transport.cpp; the user, 2026-10-09: "卡车之类的运输载具改成断剑那种操作方式"): a point
     // order to the vehicle is the squad's (they ride there and get off short of the point), unless the squad is selected
     // too (its own row gives it, once).
     if(e.owner!=Owner::squad && mapcmd::PointOrder(order.order))
-        if(const void* rider=TransportRiderOf(e.u.v); rider && !g.sel.Has(rider)) {
-            const auto result=NpcSquadCommandForRequester(ObjRef::Of(rider),order,g.requester,g.focus);
-            if(!result.Accepted())g.failure=result.reason;
-            else g.affected+=result.affected;
-            return result.Accepted();
-        }
+        if(const void* rider=TransportRiderOf(e.u.v); rider && !picked(rider))
+            return NpcSquadCommandForRequester(ObjRef::Of(rider),order,requester,focus);
     // A vehicle's module keeps one point (its post / anchor): a move or an attack-move reaches it as a guard of it.
     const Command c=e.owner==Owner::squad ? order : Command{mapcmd::VehicleCommandOf(order.order),{order.at[0],order.at[1],order.at[2]}};
+    const auto done=[](bool ok){return ok ? NpcCommandResult{NpcCommandReason::none,1} : NpcCommandResult{NpcCommandReason::failed,0};};
     switch(e.owner) {
-    case Owner::heli: return HeliCommand(e.u.v,c,g.focus);
-    case Owner::jet: return JetCommand(e.u.v,c,g.focus);
-    case Owner::ground: return GroundCommand(e.u.v,c);
-    case Owner::squad: {
-        const auto result=NpcSquadCommandForRequester(ObjRef::Of(e.u.v),c,g.requester,g.focus);
-        if(!result.Accepted())g.failure=result.reason;
-        else g.affected+=result.affected;
-        return result.Accepted();
+    case Owner::heli: return done(HeliCommand(e.u.v,c,focus));
+    case Owner::jet: return done(JetCommand(e.u.v,c,focus));
+    case Owner::ground: return done(GroundCommand(e.u.v,c));
+    case Owner::squad: return NpcSquadCommandForRequester(ObjRef::Of(e.u.v),c,requester,focus);
+    case Owner::tank: return NpcMapCommandForRequester(ObjRef::Of(e.u.v),c,requester,focus);
     }
-    case Owner::tank: {
-        const auto result=NpcMapCommandForRequester(ObjRef::Of(e.u.v),c,g.requester,g.focus);
-        if(!result.Accepted())g.failure=result.reason;
-        else g.affected+=result.affected;
-        return result.Accepted();
-    }
-    }
-    return false;
+    return NpcCommandResult{NpcCommandReason::failed,0};
+}
+bool Give(Game& g,const Entry& e,const Command& order) noexcept {
+    const auto result=GiveUnit(e,order,g.requester,g.focus,g.list,g.count,&g.sel);
+    if(!result.Accepted())g.failure=result.reason;
+    else g.affected+=result.affected;
+    return result.Accepted();
 }
 
 // The ground point along the ray from `eye` along unit `dir`: the first floor the map ray meets (a cave's roof seen from
@@ -326,6 +381,7 @@ const char* OrderName(Order o) noexcept {
     case Order::attackMove: return "ATTACK-MOVE";
     case Order::withdraw: return "WITHDRAW";
     case Order::hold: return "HOLD";
+    case Order::formation: return "FORMATION";
     default: return "RELEASE";
     }
 }
@@ -345,6 +401,7 @@ const wchar_t* OrderText(Order o) noexcept {
     case Order::attackMove: return hudtext::Tr(Tx::orderAttackMove);
     case Order::withdraw: return hudtext::Tr(Tx::orderWithdraw);
     case Order::hold: return hudtext::Tr(Tx::orderHold);
+    case Order::formation: return hudtext::Tr(Tx::btnFormationShort);
     default: return hudtext::Tr(Tx::orderRelease);
     }
 }
@@ -355,6 +412,7 @@ const wchar_t* OrderText(Order o) noexcept {
 // own squads alone (recruit and dismiss never both), BOARD on foot, DISMOUNT riding.
 bool Takes(const Entry& e,Order o) noexcept {
     if(e.u.locked)return false;
+    if(o==Order::formation)return e.owner==Owner::squad && !e.u.joinOnly && !e.u.riding;   // a squad on foot's (T)
     if(e.owner==Owner::squad) {
         if(e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;   // the script keeps the rest
         if(o==Order::recruit)return e.u.recruitable;
@@ -498,19 +556,21 @@ void Arm(Game& g,bool order,Order o,int support) noexcept {
 }
 // The formation menu's pick (map_buttons.h MenuEntry): a defence for the selected squads on a guard point, or the march
 // of the player's squads; the menu closed.
+int Dispatch(Game& g,const Command& cmd,int* skipped,DispatchFlags flags) noexcept;
+void FormationNote(Game& g,int given,int shape) noexcept;
 void PickFormation(Game& g,int entry) noexcept {
     using hudtext::Tr;using hudtext::Tx;
     g.formationMenu=false;
     const int shape=mapbtn::MenuShape(entry);
-    if(InSession() || !Cfg().enabled){Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));return;}
-    int done=0;
-    if(mapbtn::MenuGuard(entry)) {
-        for(int i=0;i<g.count;++i)if(g.sel.Has(g.list[i].u.v) && g.list[i].owner==Owner::squad && SetGuardFormation(g.list[i].u.v,shape)>=0)++done;
-    } else if(SetMarchFormation(shape)>=0)done=1;
-    if(done)Note(g,Tr(Tx::cmdFormationResult),FormationText(shape),done);
-    else Note(g,L"%ls",Tr(Tx::cmdNoUnit));
-    Log("MAPCMD formation menu: %s %s, %d",mapbtn::MenuGuard(entry) ? "defence" : "march",
-        npc::formation::Name(npc::formation::FromInt(shape)),done);
+    if(!Cfg().enabled){Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));return;}
+    // The order goes to every selected squad (online their authority's: command protocol v7); a guarding one takes the
+    // defence, one following the player the march.
+    const Command c{Order::formation,{0.0f,0.0f,0.0f},mapbtn::MenuGuard(entry) ? mapcmd::FormationParam(shape,-1) : mapcmd::FormationParam(-1,shape)};
+    int skipped=0;
+    const int given=Dispatch(g,c,&skipped,{});
+    FormationNote(g,given,shape);
+    Log("MAPCMD formation menu: %s %s, %d given, %d not",mapbtn::MenuGuard(entry) ? "defence" : "march",
+        npc::formation::Name(npc::formation::FromInt(shape)),given,skipped);
 }
 void CycleEnemy(Game& g,int direction) noexcept;
 void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
@@ -732,7 +792,9 @@ void SetEnemyCandidate(Game& g,const void* object,const float* aim) noexcept {
     float position[3];
     if(g.enemyCandidate && ReadPosition(object,position))for(int i=0;i<3;++i)g.enemyAimOffset[i]=aim[i]-position[i];
     else for(float& x:g.enemyAimOffset)x=0.0f;
-    if(g.enemyCandidate){g.enemyOpen=true;g.enemyMenu.first=g.enemyMenu.row=0;}
+    // Picked, not unfolded (the user, 2026-10-19: 「这个展开和收起会自动变，我不好点」): the card is folded and unfolded by
+    // its title alone (and L3 into it); a pick only marks the enemy and starts its card's list from the top.
+    if(g.enemyCandidate)g.enemyMenu.first=g.enemyMenu.row=0;
 }
 // The enemy whose map mark is nearest (x, y) within `radius` px: one enemy control admits
 // before any other (a nest, a part, a fortress), so a mark overlapping its spawner still
@@ -847,23 +909,62 @@ float Reach(const Entry& e) noexcept {
     default: return 30.0f;
     }
 }
-// The queue slot of unit `v` (its identity now; `make`: a free one taken), or nullptr.
-Game::Queue* QueueOf(Game& g,const ObjRef& id,bool make) noexcept {
-    if(!id.obj)return nullptr;
-    Game::Queue* free=nullptr;
-    for(auto& q:g.queue) {
-        if(q.unit.obj==id.obj && q.unit.ctrl==id.ctrl)return &q;
+}  // namespace
+
+// --- The Shift queues: the authority's (mapcmd_logic.h Waypoints) ---
+// Kept where the unit's AI runs, whoever gave the points: this machine's map for its own units, a client's through the
+// network (command protocol v7's queued flag, command_net.cpp Execute). By the unit's UnitRef (a squad goes on under its
+// next top), the player who gave them. Advanced by the scene's tick (MapCommandQueueTick), dropped with the mission.
+namespace {
+struct UnitQueue { mapcmd::UnitRef unit; ObjRef requester; mapcmd::Waypoints w; };
+UnitQueue unitQueues[kCmdUnits]{};
+Entry authorityList[kCmdUnits];   // the authority's own listing (a network request, the tick): never the map's Game
+
+UnitQueue* QueueFor(const mapcmd::UnitKey& top,bool make) noexcept {
+    if(!top.obj)return nullptr;
+    UnitQueue* free=nullptr;
+    for(auto& q:unitQueues) {
+        if(q.w.active && mapcmd::SameKey(q.unit.top,top))return &q;
         if(!free && !q.w.active)free=&q;
     }
     if(!make || !free)return nullptr;
-    *free=Game::Queue{id,{},{}};
+    *free=UnitQueue{};
     return free;
 }
+const UnitQueue* QueueOfListed(const ObjRef& id) noexcept {
+    for(const auto& q:unitQueues)if(q.w.active && mapcmd::SameKey(q.unit.top,Key(id)))return &q;
+    return nullptr;
+}
 
-// The command to every selected unit; a point order's formation round the point (helis sharing one orbit stay on it).
-// `queue` (Shift): a move / attack-move goes after the points a unit is on its way to (mapcmd_logic.h Enqueue); without
-// it every unit's queue is replaced by this order.
-int Issue(Game& g,const Command& cmd,int* skipped,bool queue=false) noexcept {
+// The order `c` to unit `e` (this machine its authority), from `requester`, through `give` (the module's own way:
+// GiveUnit). `queue` (Shift, a point order): after the points it is on its way to (mapcmd_logic.h Enqueue: stored,
+// `*stored` true, nothing given now), else given; without it the unit's queue is gone (Replace: nothing registered).
+// A refused order drops its queue. The one way the map's Issue, the queue's tick and a network request reach a unit.
+template<class GiveFn> NpcCommandResult Authority(const Entry& e,const Command& c,const ObjRef& requester,bool queue,
+                                                  bool* stored,GiveFn give) noexcept {
+    *stored=false;
+    const mapcmd::UnitKey top=Key(e.id);
+    UnitQueue* q=QueueFor(top,queue && mapcmd::PointOrder(c.order));
+    if(queue && mapcmd::PointOrder(c.order) && !q) {   // no slot left (one a listed unit: not expected): refused, not given at once
+        Log("MAPCMD queue table full: a queued point for %p refused",e.u.v);
+        return NpcCommandResult{NpcCommandReason::failed,0};
+    }
+    if(queue && mapcmd::PointOrder(c.order)) {
+        if(!q->w.active)q->unit=Capture(e);
+        q->requester=requester;
+        if(!mapcmd::Enqueue(q->w,e.u.now,e.u.pos,Reach(e),c)){*stored=true;return NpcCommandResult{NpcCommandReason::none,1};}
+    } else if(q)mapcmd::Replace(q->w,c);
+    const NpcCommandResult result=give();
+    if(!result.Accepted())if(UnitQueue* drop=QueueFor(top,false))drop->w=mapcmd::Waypoints{};
+    return result;
+}
+
+// The command to every selected unit (Dispatch); a point order's formation round the point (helis sharing one orbit stay
+// on it). `queue` (Shift): a move / attack-move goes after the points a unit is on its way to (Authority); without it
+// every unit's queue is gone. This machine's units are given it here (Authority), the others' authority asked for it in
+// one request (command_net SubmitMapCommand, the same flag).
+int Dispatch(Game& g,const Command& cmd,int* skipped,DispatchFlags flags) noexcept {
+    const bool queue=flags.queue && mapcmd::PointOrder(cmd.order);
     int k=0;
     g.failure=NpcCommandReason::none;g.affected=0;
     g.skipScript=g.skipRiding=g.skipCannot=g.skipRemote=g.skipFailed=0;
@@ -889,7 +990,7 @@ int Issue(Game& g,const Command& cmd,int* skipped,bool queue=false) noexcept {
     }
     if(remotes) {
         const auto request=SubmitMapCommand(g.requester,remote,remotes,cmd,g.focus,g.networkMessage,_countof(g.networkMessage),
-            mapcmd::PointOrder(cmd.order) ? remoteSlots : nullptr,mapcmd::PointOrder(cmd.order) ? static_cast<std::uint32_t>(k) : 0);
+            mapcmd::PointOrder(cmd.order) ? remoteSlots : nullptr,mapcmd::PointOrder(cmd.order) ? static_cast<std::uint32_t>(k) : 0,queue);
         if(request){g.networkRequest=request;g.networkQueued=remotes;g.networkOrder=cmd.order;}
     }
     int given=0;
@@ -922,15 +1023,16 @@ int Issue(Game& g,const Command& cmd,int* skipped,bool queue=false) noexcept {
             }
             c.at[0]=e.u.pos[0];c.at[1]=ground;c.at[2]=e.u.pos[2];
         }
-        Game::Queue* q=QueueOf(g,e.id,true);
-        if(q)q->requester=g.requester;
-        if(queue && q && mapcmd::PointOrder(c.order) && !mapcmd::Enqueue(q->w,e.u.now,e.u.pos,Reach(e),c)){++given;continue;}
-        if(!Give(g,e,c)) {
-            if(g.failure==NpcCommandReason::none)g.failure=NpcCommandReason::failed;
-            if(q)q->w=mapcmd::Waypoints{};
+        bool stored=false;
+        const auto result=Authority(e,c,g.requester,queue,&stored,[&]{
+            return GiveUnit(e,c,g.requester,g.focus,g.list,g.count,&g.sel);
+        });
+        if(stored){++given;continue;}
+        if(!result.Accepted()) {
+            g.failure=result.reason==NpcCommandReason::none ? NpcCommandReason::failed : result.reason;
             ++g.skipFailed;++*skipped;continue;
         }
-        if(q && !queue)mapcmd::Replace(q->w,c);
+        g.affected+=result.affected;
         e.u.now=c;
         ++given;
     }
@@ -938,43 +1040,45 @@ int Issue(Game& g,const Command& cmd,int* skipped,bool queue=false) noexcept {
 }
 
 
+// The formation order's word (T, the menu): the shape this machine's squads have now (a guard's defence, else the
+// march), the request's when another machine's are waiting for their authority.
+void FormationNote(Game& g,int given,int shape) noexcept {
+    using hudtext::Tr;using hudtext::Tx;
+    if(g.networkQueued){Note(g,Tr(Tx::cmdNpcNetworkQueued),OrderText(Order::formation),g.networkQueued,given);return;}
+    if(!given){Note(g,L"%ls",g.networkMessage[0] ? g.networkMessage : g.failure!=NpcCommandReason::none ?
+                              CommandFailureText(g.failure) : Tr(Tx::cmdNoUnit));return;}
+    for(int i=0;i<g.count && shape<0;++i)if(g.sel.Has(g.list[i].u.v) && g.list[i].owner==Owner::squad)shape=NpcGuardShape(g.list[i].u.v);
+    if(shape<0)shape=NpcMarchShape();
+    Note(g,Tr(Tx::cmdFormationResult),FormationText(shape),given);
+}
 // T (the map open): the selected squads' formation. A squad guarding a point cycles its own defence; the others
-// (the player's recruited squads following them) the march, once however many are selected.
+// (the player's recruited squads following them) the march, to the one after this machine's march now however many are
+// selected (set, not cycled: each squad given it sets the same one). Online their authority's (Order::formation, v7).
 void Formation(Game& g,bool allowed) noexcept {
     using hudtext::Tr;
     using hudtext::Tx;
     if(!allowed){Note(g,L"%ls",Tr(Tx::cmdOfflineOnly));return;}
-    int guards=0,marching=0,shape=-1,marchShape=-1;
-    for(int i=0;i<g.count;++i) {
-        const Entry& e=g.list[i];
-        if(!g.sel.Has(e.u.v) || e.owner!=Owner::squad)continue;
-        const int r=CycleGuardFormation(e.u.v);
-        if(r>=0){shape=r;++guards;}
-        else if(r==-1)++marching;
-    }
-    if(marching)marchShape=CycleMarchFormation();
-    if(!guards && !marching){Note(g,L"%ls",Tr(Tx::cmdNoUnit));return;}
-    if(marching)Note(g,Tr(Tx::cmdFormationResult),FormationText(marchShape),marching);
-    else Note(g,Tr(Tx::cmdFormationResult),FormationText(shape),guards);
-    Log("MAPCMD formation: %d guarding squad(s) %s, the march %s",guards,shape>=0 ? npc::formation::Name(static_cast<npc::formation::Shape>(shape)) : "-",
-        marchShape>=0 ? npc::formation::Name(static_cast<npc::formation::Shape>(marchShape)) : "unchanged");
+    const int march=static_cast<int>(npc::formation::Next(npc::formation::FromInt(NpcMarchShape()),false));
+    int skipped=0;
+    const int given=Dispatch(g,Command{Order::formation,{0.0f,0.0f,0.0f},mapcmd::FormationParam(-2,march)},&skipped,{});
+    FormationNote(g,given,-1);
+    Log("MAPCMD formation: %d squad(s) took it, %d not, the march to %s",given,skipped,
+        npc::formation::Name(static_cast<npc::formation::Shape>(march)));
 }
 
-// A group's members now (mapcmd_logic.h GroupKey): a squad whose top died goes on as the squad it handed over to
-// (NpcSquadSuccessor); a unit dead, or another object at its address, is dropped; one only out of the list a while (its
-// soldiers out of this machine's update, a vehicle between drivers) is kept, it comes back.
-void KeepGroup(Game& g,int n,const void* const* ids) noexcept {
+// A group's members now (mapcmd_logic.h GroupKey): each unit by its UnitRef, a squad whose top died found again under
+// the top of any member alive (Resolve: on a guest too); a unit with nothing of it alive is dropped; one only out of the
+// list a while (its soldiers out of this machine's update, a vehicle between drivers) is kept, it comes back.
+void KeepGroup(Game& g,int n,const void* const*) noexcept {
     int kept=0;
     for(int i=0;i<g.groupN[n];++i) {
-        ObjRef ref=g.group[n][i];
-        if(mapcmd::IndexOf(ids,g.count,ref.obj)<0) {
-            ObjRef next;
-            if(NpcSquadSuccessor(ref,&next))ref=next;
-            else if(!Readable(ref.obj,kSelfCtrl+sizeof(void*)) || !Readable(ref.obj,kDead+1) || !ref.Is(ref.obj) ||
-                    static_cast<const unsigned char*>(ref.obj)[kDead])continue;
-        }
+        mapcmd::UnitRef ref=g.group[n][i];
+        bool alive=false;
+        const int k=Resolve(ref,g.list,g.count,&alive);
+        if(k>=0)Refresh(ref,g.list[k]);
+        else if(!alive)continue;
         bool twice=false;
-        for(int j=0;j<kept && !twice;++j)twice=g.group[n][j].obj==ref.obj;
+        for(int j=0;j<kept && !twice;++j)twice=mapcmd::SameKey(g.group[n][j].top,ref.top);
         if(!twice)g.group[n][kept++]=ref;
     }
     g.groupN[n]=kept;
@@ -987,10 +1091,10 @@ bool GroupAct(Game& g,int n,mapcmd::GroupAct act,const void* const* ids,float* c
         if(act==GroupAct::assign)g.groupN[n]=0;
         else KeepGroup(g,n,ids);
         for(int i=0;i<g.sel.n && g.groupN[n]<mapcmd::kMaxSel;++i) {
-            bool in=false;
-            for(int j=0;j<g.groupN[n] && !in;++j)in=g.group[n][j].obj==g.sel.id[i];
             const int k=mapcmd::IndexOf(ids,g.count,g.sel.id[i]);
-            if(!in && k>=0)g.group[n][g.groupN[n]++]=g.list[k].id;
+            bool in=false;
+            for(int j=0;j<g.groupN[n] && !in && k>=0;++j)in=mapcmd::SameKey(g.group[n][j].top,Key(g.list[k].id));
+            if(!in && k>=0)g.group[n][g.groupN[n]++]=Capture(g.list[k]);
         }
         Note(g,Tr(g.groupN[n] ? Tx::cmdGroupSet : Tx::cmdGroupCleared),n+1,g.groupN[n]);
         Log("MAPCMD group %d %s: %d unit(s)",n+1,act==GroupAct::assign ? "set" : "added to",g.groupN[n]);
@@ -1001,9 +1105,9 @@ bool GroupAct(Game& g,int n,mapcmd::GroupAct act,const void* const* ids,float* c
     if(act!=GroupAct::add)g.sel.Clear();
     float sum[3]{};int at=0;
     for(int i=0;i<g.groupN[n];++i) {
-        const int k=mapcmd::IndexOf(ids,g.count,g.group[n][i].obj);
+        const int k=mapcmd::IndexOf(ids,g.count,g.group[n][i].top.obj);
         if(k<0)continue;   // out of the list now: kept in the group, not selectable this frame
-        g.sel.Add(g.group[n][i].obj);
+        g.sel.Add(g.list[k].u.v);
         for(int c=0;c<3;++c)sum[c]+=g.list[k].u.pos[c];
         ++at;
     }
@@ -1085,6 +1189,9 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     for(int i=0;i<g.count && g.formationMenu;++i) {
         const Entry& e=g.list[i];
         if(!g.sel.Has(e.u.v) || e.owner!=Owner::squad || e.u.locked || e.u.riding)continue;
+        // Another machine's squad (online): whether it guards or marches is its authority's (this machine lists it
+        // with no order): both sections offered, the authority applies the one that fits it (else says unsupported).
+        if(!IsOnlineAuthority(e.u.v)){menu.guard=menu.march=true;continue;}
         const int shape=NpcGuardShape(e.u.v);
         if(shape>=0){if(!menu.guard)menu.guardShape=shape;menu.guard=true;}
         else if(shape==-1)menu.march=true;
@@ -1103,18 +1210,18 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     const int linkCount=TransportLinks(links,kMapTransportLinks);
     const bool marked=NpcMarked();
     // Each unit's RTS groups and Shift-queued points (by identity: no game memory read under the lock).
-    std::uint16_t groups[kCmdUnits]{};const Game::Queue* queues[kCmdUnits]{};
+    std::uint16_t groups[kCmdUnits]{};const UnitQueue* queues[kCmdUnits]{};
     for(int i=0;i<g.count;++i) {
         const ObjRef& id=g.list[i].id;
         for(int n=0;n<mapcmd::kGroups;++n)for(int j=0;j<g.groupN[n];++j)
-            if(g.group[n][j].obj==id.obj && g.group[n][j].ctrl==id.ctrl)groups[i]|=static_cast<std::uint16_t>(1u<<n);
-        for(const auto& q:g.queue)if(q.w.active && q.unit.obj==id.obj && q.unit.ctrl==id.ctrl)queues[i]=&q;
+            if(mapcmd::SameKey(g.group[n][j].top,Key(id)))groups[i]|=static_cast<std::uint16_t>(1u<<n);
+        queues[i]=QueueOfListed(id);   // this machine's units' (another machine's are kept by their authority)
     }
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,pickCount);r.pickable=pickCount;r.selected=g.sel.n;r.pointOk=pointOk;
     r.allowedOrders=0;r.selectedSquads=0;
-    r.squadToolsAllowed=!InSession();
+    r.squadToolsAllowed=!InSession() || MapCommandNetworkVersion()>=7;   // the formation order online (v7)
     for(int i=0;i<g.count;++i)if(g.sel.Has(g.list[i].u.v)) {
         const auto& entry=g.list[i];
         if(entry.owner==Owner::squad && !entry.u.locked)++r.selectedSquads;
@@ -1134,7 +1241,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         m.owner=e.owner==Owner::heli ? kCmdOwnerHeli : e.owner==Owner::jet ? kCmdOwnerJet : kCmdOwnerGround;
         std::snprintf(m.name,sizeof(m.name),"%s",e.u.name ? e.u.name : "?");
         m.groups=groups[i];m.ways=0;
-        if(const Game::Queue* q=queues[i])
+        if(const UnitQueue* q=queues[i])
             for(int w=0;w<q->w.n;++w)std::memcpy(m.way[m.ways++],q->w.next[w].at,12);
     }
     r.squads=squads;r.squadTally=tally;r.squadOpen=g.panelOpen;
@@ -1428,7 +1535,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     if(s.issue) {
         int skipped=0;
         const bool queued=queue && (s.cmd.order==Order::move || s.cmd.order==Order::attackMove);
-        const int given=Issue(g,s.cmd,&skipped,queued);
+        const int given=Dispatch(g,s.cmd,&skipped,{queued});
         wchar_t tail[40]{};
         if(skipped)_snwprintf_s(tail,_countof(tail),_TRUNCATE,Tr(Tx::cmdCannot),skipped);
         if(g.networkQueued)Note(g,Tr(Tx::cmdNpcNetworkQueued),OrderText(s.cmd.order),g.networkQueued,given);
@@ -1442,7 +1549,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
             "%d another machine's, %d refused (%s)",OrderName(s.cmd.order),queued ? " (queued)" : "",s.cmd.at[0],s.cmd.at[1],s.cmd.at[2],g.sel.n,given,g.count,
             g.skipScript,g.skipRiding,g.skipCannot,g.skipRemote,g.skipFailed,ReasonName(g.failure));
     }
-    if(formation)Formation(g,allowed && !InSession());
+    if(formation)Formation(g,allowed);
     if(sweep)Sweep(g);
     if(health)Health(g);
     RememberSelection(g);
@@ -1456,10 +1563,14 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
 }
 
 void ResetMapCommands() noexcept {
+    // A new mission (map.cpp ResetMap from MissionStart): no group, selection or queue outlives the world its
+    // identities were taken in (an address of the last mission may be another object of this one).
+    for(auto& q:unitQueues)q=UnitQueue{};
     npcmark::Assign(game.hover,{});npcmark::Assign(game.eatHover,{});
     EnemyControlHoldAbility(game.enemy.snapshot,0);
     npcmark::Assign(game.enemyCandidate,{});
-    game=Game{};
+    static const Game kFresh{};   // the state is large (its UnitRefs): copied from here, no temporary on the stack
+    game=kFresh;
     boxingNow.store(false);pointerCaptured.store(false);placeHoldsPad.store(false);pvpHoldsPad.store(false);pvpPadSelection.store(-1);enemyHoldsPad.store(false);
     AcquireSRWLockExclusive(&lock);
     readoutAt=0;
@@ -1628,45 +1739,62 @@ int MapCommandGuardAt(const float* at) noexcept {
     Refresh(g,ids);
     if(!g.sel.n)return -1;
     int skipped=0;
-    const int given=Issue(g,Command{Order::guard,{at[0],at[1],at[2]}},&skipped);
+    const int given=Dispatch(g,Command{Order::guard,{at[0],at[1],at[2]}},&skipped,{});
     RememberSelection(g);
     Log("MAPCMD GUARD (%.0f,%.0f,%.0f) by the mark key on foot to %d selected: %d of %d units took it",at[0],at[1],at[2],
         g.sel.n,given,g.count);
     return given;
 }
 
+NpcCommandResult MapCommandAuthority(const ObjRef& unit,const Command& c,const ObjRef& requester,const ObjRef& focus,
+                                     bool queued,MapCommandGive executor) noexcept {
+    const int count=ListUnits(authorityList);
+    const Entry* e=nullptr;
+    for(int i=0;i<count && !e;++i)if(authorityList[i].id.obj==unit.obj && authorityList[i].id.ctrl==unit.ctrl)e=&authorityList[i];
+    const auto give=[&]{return executor ? executor(unit,c,requester,focus) : NpcCommandResult{NpcCommandReason::disabled,0};};
+    if(!e) {
+        // Not one of this machine's commandable units now: a queued point has no order now to go after (refused, never
+        // given at once instead); any other order is the executor's to judge.
+        if(queued && mapcmd::PointOrder(c.order))return NpcCommandResult{NpcCommandReason::stale,0};
+        for(auto& q:unitQueues)if(q.w.active && mapcmd::SameKey(q.unit.top,Key(unit)))q.w=mapcmd::Waypoints{};
+        return give();
+    }
+    bool stored=false;
+    const auto result=Authority(*e,c,requester,queued,&stored,give);
+    if(stored)Log("MAPCMD queued for %p by a network request: %s (%.0f,%.0f,%.0f)",unit.obj,OrderName(c.order),c.at[0],c.at[1],c.at[2]);
+    return result;
+}
+
 void MapCommandQueueTick() noexcept {
-    Game& g=game;
     bool any=false;
-    for(const auto& q:g.queue)any=any || q.w.active;
+    for(const auto& q:unitQueues)any=any || q.w.active;
     if(!any)return;
-    static ULONGLONG frame=~0ull;   // once a game frame (map.cpp Frame runs for each local player)
+    static ULONGLONG frame=~0ull;   // once a game frame (every soldier's pre-update and every vehicle's input call it)
     const ULONGLONG f=GameFrame();
     if(f==frame)return;
     frame=f;
-    List(g);
-    const ObjRef requester=g.requester,focus=g.focus;
-    g.focus={};
-    for(auto& q:g.queue) {
+    const int count=ListUnits(authorityList);
+    for(auto& q:unitQueues) {
         if(!q.w.active)continue;
-        Entry* e=nullptr;
-        for(int i=0;i<g.count && !e;++i) {
-            const ObjRef& id=g.list[i].id;
-            if(id.obj==q.unit.obj && id.ctrl==q.unit.ctrl)e=&g.list[i];
+        bool alive=false;
+        const int k=Resolve(q.unit,authorityList,count,&alive);
+        if(k<0) {   // out of the list a while (between drivers, its soldiers out of the update): kept while any of it lives
+            if(!alive){Log("MAPCMD queue of %p dropped: nothing of the unit lives",q.unit.top.obj);q.w=mapcmd::Waypoints{};}
+            continue;
         }
-        if(!e || !IsOnlineAuthority(e->u.v)){q.w=mapcmd::Waypoints{};continue;}   // gone, or another machine's now
+        Entry& e=authorityList[k];
+        if(!IsOnlineAuthority(e.u.v)){Log("MAPCMD queue of %p dropped: another machine's unit now",q.unit.top.obj);q.w=mapcmd::Waypoints{};continue;}
+        Refresh(q.unit,e);
         Command next{};
-        const mapcmd::QueueStep step=mapcmd::Advance(q.w,e->u.now,e->u.pos,Reach(*e),&next);
-        if(step==mapcmd::QueueStep::dropped)Log("MAPCMD queue of %p dropped: its order changed",q.unit.obj);
+        const mapcmd::QueueStep step=mapcmd::Advance(q.w,e.u.now,e.u.pos,Reach(e),&next);
+        if(step==mapcmd::QueueStep::dropped)Log("MAPCMD queue of %p dropped: its order changed",q.unit.top.obj);
         if(step!=mapcmd::QueueStep::give)continue;
-        g.requester=q.requester;
-        const bool given=Give(g,*e,next);
-        if(given)e->u.now=next;
+        const auto result=GiveUnit(e,next,q.requester,ObjRef{},authorityList,count,nullptr);
+        if(result.Accepted())e.u.now=next;
         else q.w=mapcmd::Waypoints{};
-        Log("MAPCMD queue of %p: %s (%.0f,%.0f,%.0f)%s, %d more",q.unit.obj,OrderName(next.order),next.at[0],next.at[1],next.at[2],
-            given ? "" : " refused, queue dropped",q.w.n);
+        Log("MAPCMD queue of %p: %s (%.0f,%.0f,%.0f)%s, %d more",q.unit.top.obj,OrderName(next.order),next.at[0],next.at[1],next.at[2],
+            result.Accepted() ? "" : " refused, queue dropped",q.w.n);
     }
-    g.requester=requester;g.focus=focus;
 }
 
 bool PlayerMapCommands(MapCommandReadout* out) noexcept {
