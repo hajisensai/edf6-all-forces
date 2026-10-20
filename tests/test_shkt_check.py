@@ -9,7 +9,10 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'pylib'))
+sys.path.insert(1, os.path.join(os.path.dirname(__file__), '..', 'tools'))
 import gamedir  # noqa: E402
+import hkfile  # noqa: E402
+import hkshape  # noqa: E402
 import sgo  # noqa: E402
 import shkt_check as sc  # noqa: E402
 
@@ -24,6 +27,33 @@ def mapping_sgo(rows_afr: list[tuple[str, str]], rows_rfa: list[tuple[str, str]]
         return [list(names), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0]]
     return sgo.write(0x102, {'animation_from_ragdoll': [row(r) for r in rows_afr],
                              'ragdoll_from_animation': [row(r) for r in rows_rfa]})
+
+
+def _hk_int(v: int) -> bytes:
+    """pylib/hk2014.py's variable-length int."""
+    neg, v = v < 0, abs(v)
+    out = [(v & 0x3F) << 1 | neg]
+    v >>= 6
+    while v:
+        out[-1] |= 0x80
+        out.append(v & 0x7F)
+        v >>= 7
+    return bytes(out)
+
+
+def _hk_str(s: str) -> bytes:
+    return _hk_int(len(s)) + s.encode('latin-1')
+
+
+def legacy_ragdoll(names: list[str]) -> bytes:
+    """A minimal Havok 2014 binary tagfile (pylib/hk2014.py's format): one hkpRigidBody object (a name only) per name."""
+    import hk2014
+    out = bytearray(hk2014.MAGIC)
+    out += _hk_int(1) + _hk_int(5) + _hk_str('hk_2014.1.0-r1') + hk2014.PREAMBLE
+    out += _hk_int(2) + _hk_str('hkpRigidBody') + _hk_int(0) + _hk_int(0) + _hk_int(1) + _hk_str('name') +         _hk_int(hk2014.T_CSTRING)
+    for n in names:
+        out += _hk_int(4) + _hk_int(1) + bytes([1]) + _hk_str(n)
+    return bytes(out + _hk_int(7))
 
 
 class Portable(unittest.TestCase):
@@ -71,6 +101,48 @@ class Portable(unittest.TestCase):
         self.assertEqual(sc.sgo_problems(sgo_bytes, 'app:/object/Test_ragdoll.shkt',
                                          {'RagDollProxys.body', 'RagDollProxys.gone'}), [])
 
+    def test_legacy_tagfile_bodies(self) -> None:
+        """A 4.1 ragdoll (Havok 2014 tagfile) is not skipped: its body names are what its SGO is checked against."""
+        data = legacy_ragdoll(['RagDollProxys.body', 'RagDollProxys.turret'])
+        self.assertEqual(sc.body_names(data), {'RagDollProxys.body', 'RagDollProxys.turret'})
+        self.assertEqual(sc.problems(data), [])
+        inner = mapping_sgo([('RagDollProxys.body', 'body'), ('RagDollProxys.turret', 'turret')], [])
+        sgo_bytes = sgo.write(0x102, {'ragdoll': ['app:/object/Ragdoll_x401.shkt', inner]})
+        self.assertEqual(sc.sgo_problems(sgo_bytes, 'app:/object/Ragdoll_x401.shkt', sc.body_names(data)), [])
+        renamed = legacy_ragdoll(['RagDollProxys.body', 'RagDollProxys.turreX'])
+        missing = sc.sgo_problems(sgo_bytes, 'app:/object/Ragdoll_x401.shkt', sc.body_names(renamed))
+        self.assertEqual([p.what for p in missing], ["body 'RagDollProxys.turret' is not in OBJECT/RAGDOLL_X401.SHKT"])
+        twice = legacy_ragdoll(['RagDollProxys.body', 'RagDollProxys.body'])
+        self.assertEqual([p.severity for p in sc.problems(twice)], ['error'])
+
+    def test_ragdoll_rules(self) -> None:
+        """The filter rule, GJK's distance and the stale massDistribution rule on synthetic data."""
+        group = 3 << 15
+        parent, child = group | 1 << 5, group | 2 << 5 | 1 << 10          # the child's no-collide = the parent's subsystem
+        self.assertTrue(sc.collision_disabled(parent, child))
+        self.assertFalse(sc.collision_disabled(parent, group | 2 << 5))
+        self.assertFalse(sc.collision_disabled(1 << 5, 2 << 5 | 1 << 10))   # system group 0: decided by layers
+        cube = [(x, y, z) for x in (0.0, 1.0) for y in (0.0, 1.0) for z in (0.0, 1.0)]
+        moved = [(x + 3.0, y + 0.5, z) for x, y, z in cube]
+        self.assertAlmostEqual(sc.gjk_distance(cube, moved), 2.0, places=9)
+        self.assertEqual(sc.gjk_distance(cube, [(x + 0.5, y, z) for x, y, z in cube]), 0.0)
+        import frozen_collision_probe
+        import hkfile
+        import hkshape
+        raw, _ = frozen_collision_probe._sample()
+        tf = hkfile.read(raw)
+        bodies = hkfile.Physics(tf).bodies()
+        dist = tf.new('hkUint32')                       # stands in for a massDistribution object
+        for b in bodies:
+            b.value['massDistribution'].set_target(dist)
+        donor = tf.write()
+        cube_shape = bodies[0].shape
+        bodies[0].set_shape(hkshape.affine_convex(tf, cube_shape, [[2, 0, 0], [0, 1, 0], [0, 0, 1]], (0, 0, 0)))
+        stale = sc.stale_mass_distributions(tf.write(), donor)
+        self.assertEqual([p.where for p in stale], ["body 'ragdoll_doppler_radar'"])
+        bodies[0].value['massDistribution'].set_target(None)
+        self.assertEqual(sc.stale_mass_distributions(tf.write(), donor), [])
+
     def test_not_an_sgo(self) -> None:
         self.assertIsNone(sc.load_plain(b'CAS\0' + bytes(12)))
         with self.assertRaises(ValueError):
@@ -97,6 +169,21 @@ class StockMutations(unittest.TestCase):
     def errors(self, data: bytes) -> list[str]:
         return [p.what for p in sc.problems(data) if p.severity == 'error']
 
+    def test_every_stock_file_keeps_the_ragdoll_rules(self) -> None:
+        """No stock SHKT overlaps parts that may collide by 5 cm or leaves a body out of its ragdoll (warnings); the
+        jointed pairs the filter lets collide are 112 in 5 files (info)."""
+        import rootcpk
+        g = rootcpk.Game(GAME)
+        info = 0
+        for name in g.names('OBJECT'):
+            if name.upper().endswith('.SHKT'):
+                d = g.read('OBJECT', name)
+                if d[4:8] == b'TAG0':
+                    found = sc.ragdoll_problems(sc.Shkt(d))
+                    self.assertEqual([str(p) for p in found if p.severity != 'info'], [], name)
+                    info += len(found)
+        self.assertEqual(info, 112)
+
     def test_stock_is_clean(self) -> None:
         self.assertEqual(sc.problems(self.data), [])
         self.assertEqual(sc.sgo_problems(self.sgo, 'app:/OBJECT/Ragdoll_v506_heli.shkt', sc.body_names(self.data)),
@@ -110,49 +197,38 @@ class StockMutations(unittest.TestCase):
         self.assertTrue(found)
         self.assertTrue(all("'RagDollProxys.rotor'" in p.what for p in found), [str(p) for p in found])
 
-    def _first(self, kind: str) -> tuple[sc.Shkt, int]:
+    def _first(self, kind: str) -> tuple[sc.Shkt, hkfile.Block]:
         s = sc.Shkt(self.data)
-        for i, (f, _, _) in enumerate(s.tag.items):
-            if i and s.tag.tname(f & 0xFFFFFF) == kind:
-                return s, i
+        for blk in s.tf.blocks():
+            if blk.type.full_name == kind:
+                return s, blk
         raise AssertionError(f'no {kind}')
 
     def test_moved_hull_vertex_is_stale(self) -> None:
         s, shape = self._first('hknpConvexShape')
-        t = s.tag
-        _, at, _ = t.item(shape)
-        vi = t.u32(at + t.offset('hknpConvexShape', 'hull') + t.offset('hknpConvexHull', 'vertices'))
-        _, va, _ = t.item(vi)
-        bad = bytearray(self.data)
-        x = struct.unpack_from('<f', bad, va)[0]
-        struct.pack_into('<f', bad, va, x + 5.0 * (1 if x >= 0 else -1))
-        self.assertTrue(any('stale planes' in e for e in self.errors(bytes(bad))))
+        verts = shape.value['hull']['vertices'].target
+        x = struct.unpack_from('<f', verts.data, 0)[0]
+        struct.pack_into('<f', verts.data, 0, x + 5.0 * (1 if x >= 0 else -1))
+        self.assertTrue(any('stale planes' in e for e in self.errors(s.tf.write())))
 
     def test_shrunk_tree_leaf_is_stale(self) -> None:
         s, comp = self._first('hknpCompoundShape')
-        _, simd = s.compound_bounds(comp)
-        nodes = s.simd_lanes(simd)
+        _, simd = hkshape.compound_bounds(comp)
+        assert simd is not None
+        nodes = hkshape.simd_lanes(simd)
         k = next(i for i, (leaf, lanes) in enumerate(nodes) if leaf and lanes)
-        _, at, _ = s.tag.item(simd)
-        base = at + k * s.tag.size('hkcdSimdTree::Node')
-        bad = bytearray(self.data)
         lo, hi = nodes[k][1][0][0], nodes[k][1][0][1]
-        struct.pack_into('<f', bad, base + 4 * 4, lo[0] + 0.25 * (hi[0] - lo[0]))     # hx of lane 0
-        self.assertTrue(any('stale tree' in e for e in self.errors(bytes(bad))))
+        struct.pack_into('<f', simd.data, k * simd.size + 4 * 4, lo[0] + 0.25 * (hi[0] - lo[0]))     # hx of lane 0
+        self.assertTrue(any('stale tree' in e for e in self.errors(s.tf.write())))
 
     def test_moved_body_splits_its_joint(self) -> None:
         s = sc.Shkt(self.data)
         system = next(x for x in s.systems if x.joints)
-        j = system.joints[0]
-        t = s.tag
-        S = 'hknpPhysicsSystemData'
-        sat = t.item(t.u32(t.root_variant('hknpPhysicsSceneData') + t.offset('hknpPhysicsSceneData', 'systemDatas')))[1]
-        _, sys_at, _ = t.item(t.u32(sat + 4 * system.index))
-        _, bat, _ = t.item(t.u32(sys_at + t.offset(S, 'bodyCinfos')))
-        at = bat + j.body_a * t.size(sc.B) + t.offset(sc.B, 'position')
-        bad = bytearray(self.data)
-        struct.pack_into('<f', bad, at, struct.unpack_from('<f', bad, at)[0] + 0.5)
-        self.assertTrue(any('put the pivot' in e for e in self.errors(bytes(bad))))
+        body = system.bodies[system.joints[0].body_a].body
+        assert body is not None
+        p = body.position
+        body.set_position((p[0] + 0.5, p[1], p[2]))
+        self.assertTrue(any('put the pivot' in e for e in self.errors(s.tf.write())))
 
 
 if __name__ == '__main__':

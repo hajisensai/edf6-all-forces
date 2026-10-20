@@ -591,6 +591,19 @@ def npc_vehicle_ai_declarations() -> None:
 
 
 @test
+def release_third_party_notices() -> None:
+    """The release zip carries THIRD-PARTY-NOTICES.txt with the licence of the EDF6 SHKT Editor code ported to pylib
+    (MIT, Copyright (c) 2026 Ktaro) next to edf6-cpk's; every ported module names its source and that licence."""
+    import build_release
+    text = build_release.notices()
+    assert 'Copyright (c) 2026 Ktaro' in text and 'MIT License' in text and 'edf6-cpk' in text, text[:200]
+    assert "z.writestr('THIRD-PARTY-NOTICES.txt', notices()" in src('tools/build_release.py')
+    for mod in ('hkfile', 'hkshape', 'model_pieces', 'shkt_check', 'vehicle_check'):
+        head = src(f'pylib/{mod}.py').split('from __future__', 1)[0]
+        assert 'Ktaro' in head and 'LICENSE.edf6-shkt-editor' in head, mod
+
+
+@test
 def frozen_collision_consumer() -> None:
     """The package gate runs the real binding and geometry consumers on portable data."""
     import frozen_collision_probe
@@ -1412,14 +1425,15 @@ def sidecar_tub_holds_the_gunner() -> None:
 @test
 def shkt_check_on_synthetic_data() -> None:
     """pylib/shkt_check.py without the game (tests/test_shkt_check.py Portable): hull / box geometry, SHKT refs, and
-    an SGO whose ragdoll mapping or accessory names a body its SHKT lacks is an error. The stock-file mutations of the
-    same test file need the game; tools/check_shkt.py checks an installed Mods folder."""
+    an SGO whose ragdoll mapping or accessory names a body its SHKT lacks is an error, a 4.1 ragdoll (Havok 2014
+    tagfile, pylib/hk2014.py) included. The stock-file mutations of the same test file need the game;
+    tools/check_shkt.py checks an installed Mods folder."""
     import unittest
     sys.path.insert(0, os.path.join(ROOT, 'tests'))
     import test_shkt_check
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(test_shkt_check.Portable)
     result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
-    assert result.wasSuccessful() and result.testsRun == 5, (result.failures, result.errors)
+    assert result.wasSuccessful() and result.testsRun == 7, (result.failures, result.errors)
 
 
 @test
@@ -4617,8 +4631,9 @@ def artillery_ragdoll_is_the_models() -> None:
     import struct
     parsed = rf.Shkt(shkt)
     assert parsed.joints and len(parsed.ref) == len(parsed.bodies) == 22, 'the Kepler reference pose was not loaded'
-    corrupted = bytearray(shkt)
-    struct.pack_into('<f', corrupted, parsed.ref[0], parsed.ref_t(0)[0] + 1.0)
+    damaged = rf.Shkt(shkt)
+    damaged.set_ref_t(0, (parsed.ref_t(0)[0] + 1.0, *parsed.ref_t(0)[1:]))
+    corrupted = damaged.bytes()
     assert any(x.startswith('reference pose of ') for x in rf.problems(kepler, bytes(corrupted), blob)), \
         'a corrupt reference pose escaped validation'
     # Move a real stock turret without requiring an external model folder: fitting must rewrite the serialized
@@ -4630,9 +4645,9 @@ def artillery_ragdoll_is_the_models() -> None:
     changed = [k for k in range(len(parsed.ref)) if rf.dist(parsed.ref_t(k), fitted.ref_t(k)) > 1e-3]
     assert changed, 'the moved turret retained the stock reference pose'
     assert rf.problems(moved, moved_shkt, moved_blob) == []
-    stale = bytearray(moved_shkt)
     for k in changed:
-        struct.pack_into('<3f', stale, fitted.ref[k], *parsed.ref_t(k))
+        fitted.set_ref_t(k, parsed.ref_t(k))
+    stale = fitted.bytes()
     assert any(x.startswith('reference pose of ') for x in rf.problems(moved, bytes(stale), moved_blob)), \
         'refitting stopped checking the serialized reference pose'
     assert make_artillery.ragdoll(game, kepler) == (shkt, blob), 'refitting the Kepler to itself changed it'

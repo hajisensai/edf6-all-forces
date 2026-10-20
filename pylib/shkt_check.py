@@ -1,8 +1,9 @@
 """Checks of an object SHKT (Havok physics tagfile) and of the SGOs that bind to it, before the game sees them.
 
-The checks and their thresholds follow EDF6 SHKT Editor's ShktChecker / SgoChecker and its format report
-(ktaro, MIT License, Copyright (c) 2026 ktaro; https://github.com/ktaro: EDF6_SHKT_Format_Spec §5, Usage
-Analysis §1): the rules are re-implemented here on pylib/hktag.py, no code is copied.
+The checks and their thresholds follow EDF6 SHKT Editor's ShktChecker / SgoChecker / OverlapChecker, its format
+report and its manual (Copyright (c) 2026 Ktaro, MIT License, pylib/LICENSE.edf6-shkt-editor;
+https://codeberg.org/Ktaro/EDF6_SHKT_Editor: EDF6_SHKT_Format_Spec §5, Usage Analysis §1, the Manual), re-implemented
+on pylib/hkfile.py / pylib/hkshape.py.
 
 What the game does with a SHKT (from that report, the parts these checks rely on):
   * bodyCinfo.name is the only link to the SGO. A name an SGO mapping row (animation_from_ragdoll /
@@ -23,6 +24,11 @@ What the game does with a SHKT (from that report, the parts these checks rely on
     problems(shkt) -> list[Problem]                 the SHKT on its own
     sgo_problems(sgo_bytes, shkt_path, body_names)  body names an SGO binds to `shkt_path` that are missing
     python -B pylib/shkt_check.py FILE.SHKT ...     print the problems of each file (tools/check_shkt.py does a game)
+
+Legacy Havok 2014 binary tagfiles (magic 1E0DB0CA CEFA11D0: the EDF4.1 port ships its ragdolls as they are, EDF.dll
+keeps the old readers) are read with pylib/hk2014.py: their hkpRigidBody names are what an SGO binds to (body_names),
+and problems() checks what that format has of the rules above (duplicate / empty body names, joints between bodies of
+the file). Their shapes are not checked (hkp shapes, another layout).
 """
 from __future__ import annotations
 
@@ -32,12 +38,15 @@ import sys
 from dataclasses import dataclass
 
 import dsgo
+import hk2014
+import hkfile
+import hkshape
 import sgo
-from hktag import Tag
 
 Vec3 = tuple[float, float, float]
 Quat = tuple[float, float, float, float]      # x, y, z, w (Havok's order)
 
+PACKFILE_MAGIC = hk2014.MAGIC                 # a legacy Havok 2014 binary tagfile (the EDF4.1 port's ragdolls)
 MASS_PROPERTIES_KEY = 0xF100
 NO_ID = 0xFFFF
 STATIC, DYNAMIC = 0, 1                        # hknpMotionType
@@ -47,13 +56,15 @@ PLANE_RELATIVE = 0.02                         # ... or this share of the hull's 
                                               # (stock: up to 0.118 m on a 6.7 m hull, 1.75 % of the extent at most)
 UNIT_TOLERANCE = 1e-3                         # |plane normal| - 1
 BOX_TOLERANCE = 1e-3                          # m a box may miss what it should hold (float32 storage)
+OVERLAP_WARNING = 0.05                        # m: overlaps this deep of parts that may collide (the editor's warning)
 B = 'hknpPhysicsSystemData::bodyCinfoWithAttachment'
 TRANSFORM_ATOMS = ('transforms', 'suspensionBase')   # the hkpSetLocalTransformsConstraintAtom of each joint type
 
 
 @dataclass(frozen=True)
 class Problem:
-    severity: str     # 'error': the game crashes or the data is invalid; 'warning': unlike every stock file
+    severity: str     # 'error': the game crashes or the data is invalid; 'warning': unlike every stock file;
+                      # 'info': worth a look, but some stock files do it too
     where: str
     what: str
 
@@ -65,7 +76,7 @@ class Problem:
 class BodyInfo:
     index: int
     name: str
-    shape: int                 # item index (0: none)
+    shape: hkfile.Block | None
     mass: float
     filter_info: int
     material_id: int
@@ -73,7 +84,8 @@ class BodyInfo:
     motion_type: int
     position: Vec3
     orientation: Quat
-    mass_distribution: int     # item index (0: the game derives it from the shape)
+    mass_distribution: hkfile.Block | None     # None: the game derives it from the shape
+    body: hkfile.Body | None = None
 
 
 @dataclass
@@ -135,169 +147,34 @@ def box_misses(outer: tuple[Vec3, Vec3], inner: tuple[Vec3, Vec3], tol: float = 
 # ------------------------------------------------------------------------------------------ reading
 
 class Shkt:
-    """The parts of an object SHKT these checks read (offsets from pylib/hktag.py's type table)."""
+    """The parts of an object SHKT these checks read (pylib/hkfile.py's graph: `physics` its systems, shapes are
+    blocks)."""
 
     def __init__(self, data: bytes) -> None:
-        self.tag = t = Tag(bytes(data))
-        self.b = t.b
-        scene = t.root_variant('hknpPhysicsSceneData')
-        si = t.u32(scene + t.offset('hknpPhysicsSceneData', 'systemDatas'))
+        self.physics = hkfile.Physics.read(bytes(data))
+        self.tf = self.physics.tf
         self.systems: list[SystemInfo] = []
-        if not si:
-            return
-        _, sat, ns = t.item(si)
-        for k in range(ns):
-            _, at, _ = t.item(t.u32(sat + 4 * k))
-            self.systems.append(self._system(k, at))
+        for k, system in enumerate(self.physics.systems):
+            bodies = [BodyInfo(b.index, b.name, b.shape, b.mass, b.filter_info, b.material_id, b.motion_properties_id,
+                               b.motion_type, b.position, b.orientation, b.mass_distribution, b)
+                      for b in system.bodies]
+            joints = [JointInfo(j.index, j.kind, j.body_a, j.body_b, j.pivot('A'), j.pivot('B')) for j in system.joints]
+            self.systems.append(SystemInfo(k, system.materials, system.motion_properties, bodies, joints))
 
-    def _count(self, at: int, type_name: str, member: str) -> int:
-        idx = self.tag.u32(at + self.tag.offset(type_name, member))
-        return self.tag.item(idx)[2] if idx else 0
+    @staticmethod
+    def hull(shape: hkfile.Block) -> tuple[float, list[Vec3], list[tuple[float, float, float, float]]] | None:
+        return hkshape.convex_hull(shape)
 
-    def _system(self, k: int, at: int) -> SystemInfo:
-        t = self.tag
-        S = 'hknpPhysicsSystemData'
-        bodies: list[BodyInfo] = []
-        bi = t.u32(at + t.offset(S, 'bodyCinfos'))
-        if bi:
-            _, bat, nb = t.item(bi)
-            size = t.size(B)
-            o = {m: t.offset(B, m) for m in ('shape', 'collisionFilterInfo', 'materialId', 'name', 'motionType',
-                                              'position', 'orientation', 'mass', 'massDistribution',
-                                              'motionPropertiesId')}
-            for j in range(nb):
-                a = bat + j * size
-                bodies.append(BodyInfo(
-                    j, t.cstr(t.u32(a + o['name'])), t.u32(a + o['shape']),
-                    struct.unpack_from('<f', self.b, a + o['mass'])[0], t.u32(a + o['collisionFilterInfo']),
-                    struct.unpack_from('<H', self.b, a + o['materialId'])[0],
-                    struct.unpack_from('<H', self.b, a + o['motionPropertiesId'])[0], self.b[a + o['motionType']],
-                    struct.unpack_from('<3f', self.b, a + o['position']),
-                    struct.unpack_from('<4f', self.b, a + o['orientation']), t.u32(a + o['massDistribution'])))
-        joints: list[JointInfo] = []
-        ci = t.u32(at + t.offset(S, 'constraintCinfos'))
-        if ci:
-            C = 'hknpConstraintCinfo'
-            _, cat, nc = t.item(ci)
-            for j in range(nc):
-                a = cat + j * t.size(C)
-                kind, dat, _ = t.item(t.u32(a + t.offset(C, 'constraintData')))
-                pa, pb = self._pivots(kind, dat)
-                joints.append(JointInfo(j, kind, t.u32(a + t.offset(C, 'bodyA')), t.u32(a + t.offset(C, 'bodyB')),
-                                        pa, pb))
-        return SystemInfo(k, self._count(at, S, 'materials'), self._count(at, S, 'motionProperties'), bodies, joints)
-
-    def _pivots(self, kind: str, at: int) -> tuple[Vec3 | None, Vec3 | None]:
-        t = self.tag
-        members = t.members(t.type_index(kind)) if kind in t._by_name else {}
-        if 'atoms' not in members:
-            return None, None
-        atoms = t.tname(members['atoms'].type)
-        am = t.members(members['atoms'].type)
-        name = next((n for n in TRANSFORM_ATOMS if n in am), None)
-        if name is None or t.tname(am[name].type) != 'hkpSetLocalTransformsConstraintAtom':
-            return None, None
-        A = 'hkpSetLocalTransformsConstraintAtom'
-        tr = at + members['atoms'].offset + t.offset(atoms, name) if atoms in t._by_name else \
-            at + members['atoms'].offset + am[name].offset
-        tl = t.offset('hkTransform', 'translation')
-        return (struct.unpack_from('<3f', self.b, tr + t.offset(A, 'transformA') + tl),
-                struct.unpack_from('<3f', self.b, tr + t.offset(A, 'transformB') + tl))
-
-    # ---------------------------------------------------------------------- shapes
-
-    def shape_members(self, kind: str) -> dict:
-        return self.tag.members(self.tag.type_index(kind))
-
-    def has_mass_properties(self, shape: int) -> bool:
-        t = self.tag
-        kind, at, _ = t.item(shape)
-        pi = t.u32(at + t.offset('hknpShape', 'properties') + t.offset('hknpShapeProperties', 'properties'))
-        if not pi:
-            return False
-        P = 'hknpShapeProperties::Property'
-        _, pat, n = t.item(pi)
-        return any(struct.unpack_from('<H', self.b, pat + k * t.size(P) + t.offset(P, 'key'))[0] == MASS_PROPERTIES_KEY
-                   and t.u32(pat + k * t.size(P) + t.offset(P, 'object')) for k in range(n))
-
-    def hull(self, shape: int) -> tuple[float, list[Vec3], list[tuple[float, float, float, float]]] | None:
-        """(convex radius, vertices, planes) of a convex shape (box, capsule, sphere, cylinder too); None otherwise."""
-        t = self.tag
-        kind, at, _ = t.item(shape)
-        m = self.shape_members(kind)
-        if 'hull' not in m:
-            return None
-        H = at + m['hull'].offset
-        vi = t.u32(H + t.offset('hknpConvexHull', 'vertices'))
-        pi = t.u32(H + t.offset('hknpConvexHull', 'planes'))
-        verts: list[Vec3] = []
-        planes: list[tuple[float, float, float, float]] = []
-        if vi:
-            _, va, vn = t.item(vi)
-            verts = [struct.unpack_from('<3f', self.b, va + 12 * k) for k in range(vn)]
-        if pi:
-            _, pa, pn = t.item(pi)
-            planes = [struct.unpack_from('<4f', self.b, pa + 16 * k) for k in range(pn)]
-        return struct.unpack_from('<f', self.b, at + m['convexRadius'].offset)[0], verts, planes
-
-    def instances(self, compound: int) -> list[tuple[Quat, Vec3, Vec3, int]]:
-        """A compound's instances: (rotation, translation, scale, shape item)."""
-        t = self.tag
-        _, at, _ = t.item(compound)
-        ii = t.u32(at + t.offset('hknpCompoundShape', 'instances'))
-        if not ii:
-            return []
-        _, iat, n = t.item(ii)
-        I = 'hknpShapeInstance'
-        size = t.size(I)
-        o_r, o_t, o_s, o_sh = (t.offset(I, m) for m in ('rotation', 'translation', 'scale', 'shape'))
-        return [(struct.unpack_from('<4f', self.b, iat + k * size + o_r),
-                 struct.unpack_from('<3f', self.b, iat + k * size + o_t),
-                 struct.unpack_from('<3f', self.b, iat + k * size + o_s),
-                 t.u32(iat + k * size + o_sh)) for k in range(n)]
-
-    def instance_box(self, inst: tuple[Quat, Vec3, Vec3, int]) -> tuple[Vec3, Vec3] | None:
+    @staticmethod
+    def instance_box(inst: tuple[Quat, Vec3, Vec3, hkfile.Block | None]) -> tuple[Vec3, Vec3] | None:
         """The box of an instance's convex shape in the compound's frame (its convex radius included)."""
         q, tr, sc, shape = inst
-        h = self.hull(shape)
+        h = hkshape.convex_hull(shape) if shape is not None else None
         if h is None or not h[1]:
             return None
         radius, verts, _ = h
         pts = [place(tr, q, (v[0] * sc[0], v[1] * sc[1], v[2] * sc[2])) for v in verts]
         return box_of(pts, radius)
-
-    def compound_bounds(self, compound: int) -> tuple[tuple[Vec3, Vec3], int]:
-        """(the compound's stored aabb, its simd tree's node item: 0 when it has none)."""
-        t = self.tag
-        _, at, _ = t.item(compound)
-        C = 'hknpCompoundShape'
-        a = struct.unpack_from('<8f', self.b, at + t.offset(C, 'aabb'))
-        bvd = at + t.offset(C, 'boundingVolumeData')
-        D = 'hknpCompoundShapeData'
-        simd = 0
-        if self.b[bvd + t.offset(D, 'type')] == 2:
-            simd = t.u32(bvd + t.offset(D, 'simdTree') + t.offset('hkcdSimdTree', 'nodes'))
-        return ((a[0], a[1], a[2]), (a[4], a[5], a[6])), simd
-
-    def simd_lanes(self, nodes: int) -> list[tuple[bool, list[tuple[Vec3, Vec3, int]]]]:
-        """Each node of a simd tree: (is leaf, its non-empty lanes (lo, hi, data))."""
-        t = self.tag
-        N = 'hkcdSimdTree::Node'
-        _, at, n = t.item(nodes)
-        size, o_data, o_leaf = t.size(N), t.offset(N, 'data'), t.offset(N, 'isLeaf')
-        out = []
-        for k in range(n):
-            base = at + k * size
-            f = struct.unpack_from('<24f', self.b, base)
-            data = struct.unpack_from('<4I', self.b, base + o_data)
-            lanes = []
-            for lane in range(4):
-                lo = (f[lane], f[8 + lane], f[16 + lane])
-                hi = (f[4 + lane], f[12 + lane], f[20 + lane])
-                if lo[0] <= hi[0]:
-                    lanes.append((lo, hi, data[lane]))
-            out.append((bool(self.b[base + o_leaf]), lanes))
-        return out
 
 
 # ------------------------------------------------------------------------------------------ checks
@@ -309,7 +186,7 @@ def _body_problems(sys_: SystemInfo, out: list[Problem]) -> None:
         if b.name in seen:
             out.append(Problem('error', w, f'the same name as body {seen[b.name]}: the SGO cannot tell them apart'))
         seen.setdefault(b.name, b.index)
-        if not b.shape:
+        if b.shape is None:
             out.append(Problem('error', w, 'no shape'))
         if b.material_id >= sys_.materials:
             out.append(Problem('error', w, f'materialId {b.material_id} of {sys_.materials} materials'))
@@ -346,8 +223,8 @@ def _joint_problems(sys_: SystemInfo, out: list[Problem]) -> None:
                                            f'(stock joints: at most 0.0008 m)'))
 
 
-def _hull_problems(s: Shkt, shape: int, w: str, out: list[Problem]) -> None:
-    h = s.hull(shape)
+def _hull_problems(shape: hkfile.Block, w: str, out: list[Problem]) -> None:
+    h = hkshape.convex_hull(shape)
     if h is None:
         return
     _, verts, planes = h
@@ -366,16 +243,16 @@ def _hull_problems(s: Shkt, shape: int, w: str, out: list[Problem]) -> None:
                                            '(stale planes)'))
 
 
-def _compound_problems(s: Shkt, shape: int, w: str, out: list[Problem]) -> list[int]:
+def _compound_problems(shape: hkfile.Block, w: str, out: list[Problem]) -> list[hkfile.Block | None]:
     """Bound checks of a compound of convex shapes; returns its instances' shapes for the walk."""
-    insts = s.instances(shape)
-    boxes = [s.instance_box(i) for i in insts]
-    aabb, simd = s.compound_bounds(shape)
+    insts = hkshape.instances(shape)
+    boxes = [Shkt.instance_box(i) for i in insts]
+    aabb, simd = hkshape.compound_bounds(shape)
     for k, box in enumerate(boxes):
         if box is not None and box_misses(aabb, box) > 0:
             out.append(Problem('error', w, f'instance {k} sticks {box_misses(aabb, box):.4f} m out of the aabb'))
-    if simd:
-        nodes = s.simd_lanes(simd)
+    if simd is not None:
+        nodes = hkshape.simd_lanes(simd)
 
         def union(i: int) -> tuple[Vec3, Vec3] | None:
             lanes = nodes[i][1] if 0 <= i < len(nodes) else []
@@ -399,8 +276,255 @@ def _compound_problems(s: Shkt, shape: int, w: str, out: list[Problem]) -> list[
     return [i[3] for i in insts]
 
 
+# ------------------------------------------------------------------------------------------ ragdoll rules
+# The SHKT Editor manual's ragdoll rules (2.6, 2.7, 12.1), measured again on the stock files (tests/test_shkt_check.py):
+#   * jointed parts must not collide: each body its own subsystem ID, its no-collide ID its joint parent's
+#     (hknpGroupCollisionFilter: same non-zero system group and one's subsystem the other's no-collide);
+#   * parts that are neither jointed nor excluded must not overlap deeply: the corpse fights itself and flies apart;
+#   * a body whose shape changed must not keep its old massDistribution (the game then computes it from the new
+#     shape: confirmed in game by the editor's author); that needs the donor: stale_mass_distributions.
+
+
+def subsystem(info: int) -> int:
+    return info >> 5 & 0x1F
+
+
+def no_collide(info: int) -> int:
+    return info >> 10 & 0x1F
+
+
+def system_group(info: int) -> int:
+    return info >> 15
+
+
+def collision_disabled(a: int, b: int) -> bool:
+    """The group filter keeps the two bodies apart (ShktChecker.CollisionDisabled)."""
+    return system_group(a) != 0 and system_group(a) == system_group(b) and \
+        (no_collide(a) == subsystem(b) or no_collide(b) == subsystem(a))
+
+
+def _solve(m: list[list[float]], n: int) -> bool:
+    for c in range(n):
+        piv = max(range(c, n), key=lambda r: abs(m[r][c]))
+        if abs(m[piv][c]) < 1e-14:
+            return False
+        m[c], m[piv] = m[piv], m[c]
+        d = m[c][c]
+        m[c] = [x / d for x in m[c]]
+        for r in range(n):
+            if r != c and m[r][c]:
+                f = m[r][c]
+                m[r] = [x - f * y for x, y in zip(m[r], m[c])]
+    return True
+
+
+def _affine(p: list[Vec3]) -> Vec3 | None:
+    k = len(p) - 1
+    if k == 0:
+        return p[0]
+    e = [tuple(p[i + 1][j] - p[0][j] for j in range(3)) for i in range(k)]
+    g = [[sum(e[i][t] * e[j][t] for t in range(3)) for j in range(k)] + [-sum(e[i][t] * p[0][t] for t in range(3))]
+         for i in range(k)]
+    if not _solve(g, k):
+        return None
+    lam = [g[i][k] for i in range(k)]
+    if any(x <= 1e-12 for x in lam) or sum(lam) >= 1 - 1e-12:
+        return None
+    return tuple(p[0][t] + sum(e[i][t] * lam[i] for i in range(k)) for t in range(3))   # type: ignore[return-value]
+
+
+def _closest(s: list[Vec3]) -> tuple[Vec3, list[Vec3]]:
+    best: tuple[Vec3, list[Vec3]] | None = None
+    best_d = math.inf
+    for mask in range(1, 1 << len(s)):
+        sub = [s[i] for i in range(len(s)) if mask >> i & 1]
+        p = _affine(sub)
+        if p is None:
+            continue
+        d = p[0] ** 2 + p[1] ** 2 + p[2] ** 2
+        if d < best_d - 1e-18 or (abs(d - best_d) <= 1e-18 and best is not None and len(sub) < len(best[1])):
+            best_d, best = d, (p, sub)
+    return best if best is not None else (s[-1], [s[-1]])
+
+
+def gjk_distance(a: list[Vec3], b: list[Vec3]) -> float:
+    """The distance between the convex hulls of two point sets (0 when they meet: OverlapChecker's Gjk)."""
+    def support(d: Vec3) -> Vec3:
+        pa = max(a, key=lambda p: p[0] * d[0] + p[1] * d[1] + p[2] * d[2])
+        pb = max(b, key=lambda p: -(p[0] * d[0] + p[1] * d[1] + p[2] * d[2]))
+        return (pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2])
+    simplex = [(a[0][0] - b[0][0], a[0][1] - b[0][1], a[0][2] - b[0][2])]
+    v = simplex[0]
+    for _ in range(64):
+        vv = v[0] ** 2 + v[1] ** 2 + v[2] ** 2
+        if vv < 1e-14:
+            return 0.0
+        w = support((-v[0], -v[1], -v[2]))
+        if vv - (v[0] * w[0] + v[1] * w[1] + v[2] * w[2]) <= 1e-10 * max(1.0, vv):
+            return math.sqrt(vv)
+        simplex.append(w)
+        v, simplex = _closest(simplex)
+        if len(simplex) == 4:
+            return 0.0
+    return math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
+
+
+def pieces(b: BodyInfo) -> list[tuple[list[Vec3], float]]:
+    """A body's convex pieces in model space: (hull vertices, convex radius); compressed meshes' externs included."""
+    out: list[tuple[list[Vec3], float]] = []
+    if b.shape is None:
+        return out
+
+    def add(shape: hkfile.Block, q: Quat, t: Vec3) -> None:
+        h = hkshape.convex_hull(shape)
+        if h is not None and h[1]:
+            out.append(([place(b.position, b.orientation, place(t, q, v)) for v in h[1]], h[0]))
+        elif shape.type.full_name in ('hknpCompoundShape', 'hknpCompressedMeshShape'):
+            for q2, t2, _, sub in hkshape.instances(shape):
+                if sub is not None:
+                    add(sub, _qmul(q, q2), place(t, q, t2))
+    add(b.shape, (0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0))
+    return out
+
+
+def _qmul(a: Quat, b: Quat) -> Quat:
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz)
+
+
+OVERLAP_TOLERANCE = 0.01       # m: touching parts (OverlapChecker.Tolerance)
+
+
+def overlaps(sys_: SystemInfo, tolerance: float = OVERLAP_TOLERANCE) -> list[tuple[int, int, float]]:
+    """(body, body, depth) of every pair neither jointed nor kept apart by the filter whose convex pieces overlap more
+    than `tolerance` (the deepest pair of pieces)."""
+    joined = {(j.body_a, j.body_b) for j in sys_.joints} | {(j.body_b, j.body_a) for j in sys_.joints}
+    ps = [pieces(b) for b in sys_.bodies]
+    boxes = [[box_of(p, r) for p, r in pp] for pp in ps]
+    out = []
+    for i in range(len(sys_.bodies)):
+        for j in range(i + 1, len(sys_.bodies)):
+            a, b = sys_.bodies[i], sys_.bodies[j]
+            if (i, j) in joined or collision_disabled(a.filter_info, b.filter_info):
+                continue
+            worst = 0.0
+            for (pa, ra), ba in zip(ps[i], boxes[i]):
+                for (pb, rb), bb in zip(ps[j], boxes[j]):
+                    if box_misses(_grow(ba, tolerance), bb, 0.0) > 0:
+                        continue
+                    depth = ra + rb - gjk_distance(pa, pb)
+                    worst = max(worst, depth)
+            if worst > tolerance:
+                out.append((i, j, worst))
+    return out
+
+
+def _grow(box: tuple[Vec3, Vec3], d: float) -> tuple[Vec3, Vec3]:
+    return (tuple(c - d for c in box[0]), tuple(c + d for c in box[1]))     # type: ignore[return-value]
+
+
+def ragdoll_problems(s: Shkt, overlap_warning: float | None = None) -> list[Problem]:
+    """The ragdoll rules of one SHKT (the systems with joints): jointed pairs the filter lets collide, bodies joined to
+    nothing, overlaps of parts that may collide deeper than `overlap_warning` (default OVERLAP_WARNING)."""
+    limit = OVERLAP_WARNING if overlap_warning is None else overlap_warning
+    out: list[Problem] = []
+    for sys_ in s.systems:
+        if not sys_.joints:
+            continue
+        n = len(sys_.bodies)
+        for j in sys_.joints:
+            if not (j.body_a < n and j.body_b < n):
+                continue
+            a, b = sys_.bodies[j.body_a], sys_.bodies[j.body_b]
+            both_zero = system_group(a.filter_info) == 0 and system_group(b.filter_info) == 0
+            if not both_zero and not collision_disabled(a.filter_info, b.filter_info):
+                # info, not warning: 5 stock files have 112 such joints (the martians', the squids', the Barga cannon)
+                out.append(Problem('info', f'system {sys_.index} joint {j.index}', f'{a.name!r} and {b.name!r} are '
+                                   'jointed but the filter lets them collide (the child\'s no-collide ID must be the '
+                                   'parent\'s subsystem ID)'))
+        parent = list(range(n))
+
+        def find(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+        for j in sys_.joints:
+            if j.body_a < n and j.body_b < n:
+                parent[find(j.body_a)] = find(j.body_b)
+        groups: dict[int, list[int]] = {}
+        for i in range(n):
+            groups.setdefault(find(i), []).append(i)
+        for g in sorted(groups.values(), key=len, reverse=True)[1:]:
+            for i in g:
+                out.append(Problem('warning', f'system {sys_.index} body {i} {sys_.bodies[i].name!r}',
+                                   'joined to no other body of the ragdoll'))
+        for i, k, depth in overlaps(sys_):
+            if depth >= limit:
+                out.append(Problem('warning', f'system {sys_.index}', f'{sys_.bodies[i].name!r} and '
+                                   f'{sys_.bodies[k].name!r} overlap {depth:.3f} m and may collide (neither jointed '
+                                   'nor excluded): the corpse fights itself'))
+    return out
+
+
+def stale_mass_distributions(data: bytes, donor: bytes) -> list[Problem]:
+    """Bodies (matched by name with the donor SHKT) whose shape is no longer the donor's but whose massDistribution
+    still is (the manual, 2.7: remove it, or give the body one of the new shape)."""
+    new, old = Shkt(data), Shkt(donor)
+    was = {b.name: b for sys_ in old.systems for b in sys_.bodies}
+    out = []
+    for sys_ in new.systems:
+        for b in sys_.bodies:
+            d = was.get(b.name)
+            if d is None or b.mass_distribution is None or d.mass_distribution is None:
+                continue
+            if not hkfile.content_equal(b.shape, d.shape) and hkfile.content_equal(b.mass_distribution,
+                                                                                d.mass_distribution):
+                out.append(Problem('warning', f'body {b.name!r}', 'its shape changed but it keeps the donor\'s '
+                                                                  'massDistribution (stale centre of mass / inertia)'))
+    return out
+
+
+def legacy_bodies(data: bytes) -> list[str]:
+    """The hkpRigidBody names of a legacy Havok 2014 tagfile, in file order (static bodies included: an SGO may bind
+    to any of them)."""
+    return [str(o.get('name') or '') for o in hk2014.read(data).objects if o.type.name == 'hkpRigidBody']
+
+
+def _legacy_problems(data: bytes) -> list[Problem]:
+    tf = hk2014.read(data)
+    out: list[Problem] = []
+    number = {id(o): k + 1 for k, o in enumerate(tf.objects)}
+    seen: dict[str, int] = {}
+    bodies = set()
+    for k, o in enumerate(tf.objects):
+        if o.type.name != 'hkpRigidBody':
+            continue
+        bodies.add(number[id(o)])
+        name = str(o.get('name') or '')
+        w = f'object {k + 1} body {name!r}'
+        if not name:
+            out.append(Problem('error', w, 'a body without a name: the SGO cannot bind it'))
+        elif name in seen:
+            out.append(Problem('error', w, f'the same name as object {seen[name]}: the SGO cannot tell them apart'))
+        seen.setdefault(name, k + 1)
+    for k, o in enumerate(tf.objects):
+        if o.type.name != 'hkpConstraintInstance':
+            continue
+        ents = list(o.get('entities') or [])        # a tuple of two object numbers (0: the world)
+        if any(e and e not in bodies for e in ents):
+            out.append(Problem('error', f'object {k + 1} joint', f'joins objects {ents}, not all rigid bodies'))
+        elif len(ents) == 2 and ents[0] and ents[0] == ents[1]:
+            out.append(Problem('error', f'object {k + 1} joint', f'joins body object {ents[0]} to itself'))
+    return out
+
+
 def problems(data: bytes) -> list[Problem]:
     """Every problem of one SHKT on its own (no SGO)."""
+    if data[:8] == PACKFILE_MAGIC:
+        return _legacy_problems(data)
     s = Shkt(data)
     out: list[Problem] = []
     seen: set[int] = set()
@@ -408,25 +532,29 @@ def problems(data: bytes) -> list[Problem]:
         _body_problems(sys_, out)
         _joint_problems(sys_, out)
         for b in sys_.bodies:
-            if b.shape and not b.mass_distribution and not s.has_mass_properties(b.shape):
+            if b.shape is not None and b.mass_distribution is None and hkshape.mass_properties(b.shape) is None:
                 out.append(Problem('warning', f'body {b.name!r}', 'no massDistribution and its shape stores no mass '
                                                                   'properties (every stock shape has them)'))
             stack = [(b.shape, f'body {b.name!r}')]
             while stack:
                 shape, w = stack.pop()
-                if not shape or shape in seen:
+                if shape is None or id(shape) in seen:
                     continue
-                seen.add(shape)
-                kind = s.tag.item(shape)[0]
+                seen.add(id(shape))
+                kind = shape.type.full_name
                 if kind == 'hknpCompoundShape':
-                    for k, sub in enumerate(_compound_problems(s, shape, f'{w} compound', out)):
+                    for k, sub in enumerate(_compound_problems(shape, f'{w} compound', out)):
                         stack.append((sub, f'{w} instance {k}'))
                 else:
-                    _hull_problems(s, shape, f'{w} {kind}', out)
+                    _hull_problems(shape, f'{w} {kind}', out)
+    out += ragdoll_problems(s)
     return out
 
 
 def body_names(data: bytes) -> set[str]:
+    """Every body name of a SHKT (a Havok 2020 tagfile or a legacy 2014 one)."""
+    if data[:8] == PACKFILE_MAGIC:
+        return set(legacy_bodies(data))
     return {b.name for sys_ in Shkt(data).systems for b in sys_.bodies}
 
 
@@ -521,17 +649,11 @@ def sgo_problems(sgo_bytes: bytes, shkt_path: str, names: set[str], sgo_name: st
             for shkt, where, body in bound_names(members) if shkt == want and body not in names]
 
 
-PACKFILE_MAGIC = bytes.fromhex('1e0db0cacefa11d0')     # a legacy Havok packfile (the EDF4.1 port's ragdolls)
-
-
 def main(argv: list[str]) -> int:
     bad = 0
     for path in argv:
         with open(path, 'rb') as h:
             data = h.read()
-        if data[:8] == PACKFILE_MAGIC:
-            print(f'{path}: skipped: a legacy Havok packfile, not a tagfile')
-            continue
         found = problems(data)
         for p in found:
             print(f'{path}: {p}')

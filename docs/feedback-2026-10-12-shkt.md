@@ -38,6 +38,8 @@
 
 ## 未覆盖 / 缺口
 
+> 2026-10-20 更新（`docs/model-pipeline-2026-10-20.md`）：下面第一条已解决——旧版文件由 `pylib/hk2014.py` 读出刚体名，`check_shkt` 不再 skipped（Mods 里指向它们的绑定 4,838 条全部核对）；tagfile 完整写出、质量属性、凸包 / 凸分解也已移植（`pylib/hkfile.py`、`pylib/hkshape.py`、`pylib/model_pieces.py`）。
+
 - 18 个旧版 Havok packfile SHKT（EDF4.1 移植的 Deiroi / 异星拖车 / 蚁巢 / 运兵船 / 士兵 / 要塞机器人 ragdoll）读不出刚体名：Mods SGO 指向它们的 1,056 条绑定**没有核对**，工具列为 skipped。
 - 检查器不在安装流程里自动跑（生成器各自已有专用检查；装游戏前手动跑 `tools/check_shkt.py`）。是否接进 `installer.install` 之后的 `check` 留给后续决定。
 - 未真机验证：本工具只读文件，不改任何游戏资源，不涉及运行时行为。

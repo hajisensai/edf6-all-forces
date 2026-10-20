@@ -1,8 +1,9 @@
 """Portable real collision consumers for the frozen installer's package gate.
 
-The tiny tagfile is synthetic: three static bodies share one cube hull. No game
-or test module is read. Keep its schema independent of shkt_check's constants so
-that importing a CLI wrapper under that library name cannot satisfy the check.
+The tiny tagfile is synthetic (pylib/hkfile.py writes it from a minimal type table): three
+static bodies share one cube hull. No game or test module is read. Keep its schema
+independent of shkt_check's constants so that importing a CLI wrapper under that library
+name cannot satisfy the check.
 """
 from __future__ import annotations
 
@@ -10,6 +11,8 @@ import struct
 
 import numpy as np
 
+import hkfile
+import hkshape
 import ragdoll_fit as rf
 import sgo
 import shkt_check as sc
@@ -17,104 +20,149 @@ import tracked_collision as tc
 from mdb import Bone, Mdb
 
 
-def _sample() -> tuple[bytes, int]:
-    body_type = 'hknpPhysicsSystemData::bodyCinfoWithAttachment'
-    specs = [
-        ('hkRootLevelContainer', 4, None, {'namedVariants': (0, 'hkUint32')}),
-        ('hkRootLevelContainer::NamedVariant', 12, None, {}),
-        ('hknpPhysicsSceneData', 4, None, {'systemDatas': (0, 'hkUint32')}),
-        ('hknpPhysicsSystemData', 16, None, {'materials': (0, 'hkUint32'),
-         'motionProperties': (4, 'hkUint32'), 'bodyCinfos': (8, body_type), 'constraintCinfos': (12, 'hkUint32')}),
-        (body_type, 64, None, {'shape': (0, 'hknpConvexShape'), 'collisionFilterInfo': (4, 'hkUint32'),
-         'materialId': (8, 'hkUint32'), 'motionPropertiesId': (10, 'hkUint32'), 'motionType': (12, 'hkUint32'),
-         'name': (16, 'char'), 'position': (20, 'hkVector3'), 'orientation': (32, 'hkVector4'),
-         'mass': (48, 'hkUint32'), 'massDistribution': (52, 'hkUint32')}),
-        ('hknpShape', 4, None, {'properties': (0, 'hknpShapeProperties')}),
-        ('hknpShapeProperties', 4, None, {'properties': (0, 'hknpShapeProperties::Property')}),
-        ('hknpConvexHull', 24, None, {'vertices': (0, 'hkVector3'), 'planes': (4, 'hkVector4'),
-         'faces': (8, 'Face'), 'indices': (12, 'char')}),
-        ('hknpConvexShape', 40, 'hknpShape', {'convexRadius': (4, 'hkUint32'),
-         'maxAllowedPenetration': (8, 'hkUint32'), 'hull': (16, 'hknpConvexHull')}),
-        ('hknpShapeProperties::Property', 8, None, {'object': (0, 'hknpShapeMassProperties'), 'key': (4, 'hkUint32')}),
-        ('hknpShapeMassProperties', 32, None, {}), ('hkUint32', 4, None, {}), ('char', 1, None, {}),
-        ('hkVector3', 12, None, {}), ('hkVector4', 16, None, {}), ('Face', 4, None, {}),
-    ]
-    types = {name: i + 1 for i, (name, _, _, _) in enumerate(specs)}
-    fields = list(dict.fromkeys(name for _, _, _, members in specs for name in members))
+def _schema() -> hkfile.TypeTable:
+    """A minimal type table of the hknp classes the consumers read, with Havok's kinds (subTypeFlags) and the
+    stock compact layout's member names; sizes and offsets are its own."""
+    table = hkfile.TypeTable()
 
-    def vi(value):
-        if value < 128:
-            return bytes([value])
-        if value < 16384:
-            return bytes([0x80 | (value >> 8), value & 255])
-        raise ValueError(value)
+    def ty(name, kind, size, align=4, members=(), pointee=None, tuple_n=0, parent=None):  # noqa: ANN001, ANN202
+        t = hkfile.Type(name)
+        t.has_body = True
+        t.body_flags = 0x01 | 0x08 | (0x02 if pointee is not None else 0) | (0x20 if members else 0)
+        t.subtype_flags = kind | ((0x20 | tuple_n << 8) if tuple_n else 0)
+        t.pointee, t.size, t.align_raw, t.parent = pointee, size, align, parent
+        t.members = [hkfile.Member(n, 0, o, m) for n, o, m in members]
+        table.add(t)
+        return t
+    char = ty('char', hkfile.INT, 1, 1)
+    u8 = ty('hkUint8', hkfile.INT, 1, 1)
+    u16 = ty('hkUint16', hkfile.INT, 2, 2)
+    u32 = ty('hkUint32', hkfile.INT, 4)
+    real = ty('hkReal', hkfile.FLOAT, 4)
+    half = ty('hkHalf16', hkfile.FLOAT, 2, 2)
+    vec4 = ty('hkVector4', hkfile.ARRAY, 16, 16, pointee=real, tuple_n=4)
+    vec3 = ty('hkFloat3', hkfile.ARRAY, 12, 4, pointee=real, tuple_n=3)
+    string = ty('hkStringPtr', hkfile.STRING, 4, pointee=char)
 
-    def section(name, payload, leaf=True):
-        return struct.pack('>I', len(payload) + 8 | (0x40000000 if leaf else 0)) + name.encode() + payload
+    def array(of):  # noqa: ANN001, ANN202
+        return table.find(f'hkArray<{of.name}>') or ty(f'hkArray<{of.name}>', hkfile.ARRAY, 4, pointee=of)
 
-    tst = b''.join(name.encode() + b'\0' for name, _, _, _ in specs)
-    fst = b''.join(name.encode() + b'\0' for name in fields)
-    tna = vi(len(specs) + 1) + b''.join(vi(i) + vi(0) for i in range(len(specs)))
-    tbd = bytearray()
-    for name, size, parent, members in specs:
-        tbd += b''.join(vi(x) for x in (types[name], types.get(parent, 0), 0x28, size, 16, len(members)))
-        for field, (offset, kind) in members.items():
-            tbd += b''.join(vi(x) for x in (fields.index(field), 0, offset, types[kind]))
-    data = bytearray()
-    items = [(0, 0, 0)]
+    def ptr(of):  # noqa: ANN001, ANN202
+        return table.find(f'hkRefPtr<{of.name}>') or ty(f'hkRefPtr<{of.name}>', hkfile.POINTER, 4, pointee=of)
+    mass = ty('hknpShapeMassProperties', hkfile.RECORD, 32, 8, [('compressedMassProperties', 0, u32)])
+    prop = ty('hknpShapeProperties::Property', hkfile.RECORD, 8, 4, [('object', 0, ptr(mass)), ('key', 4, u16)])
+    props = ty('hknpShapeProperties', hkfile.RECORD, 4, 4, [('properties', 0, array(prop))])
+    face = ty('hknpConvexHull::Face', hkfile.RECORD, 4, 2, [('firstIndex', 0, u16), ('numIndices', 2, u8),
+                                                           ('minHalfAngle', 3, u8)])
+    edge = ty('hknpConvexHull::Edge', hkfile.RECORD, 2, 1, [('faceIndex', 0, u8), ('edgeIndex', 1, u8)])
+    hull = ty('hknpConvexHull', hkfile.RECORD, 24, 4, [
+        ('vertices', 0, array(vec3)), ('planes', 4, array(vec4)), ('faces', 8, array(face)),
+        ('indices', 12, array(u8)), ('faceLinks', 16, array(edge)), ('vertexEdges', 20, array(edge))])
+    u64 = ty('hkUint64', hkfile.INT, 8, 4)
+    i32 = ty('int', hkfile.INT | 0x200, 4)
+    shape = ty('hknpShape', hkfile.RECORD, 24, 4, [
+        ('type', 0, u8), ('dispatchType', 1, u8), ('flags', 2, u16), ('numShapeKeyBits', 4, u8),
+        ('convexRadius', 8, real), ('userData', 12, u64), ('properties', 20, props)])
+    convex = ty('hknpConvexShape', hkfile.RECORD, 52, 4, [('hull', 24, hull), ('maxAllowedPenetration', 48, half)],
+                parent=shape)
+    aabb = ty('hkAabb', hkfile.RECORD, 32, 16, [('min', 0, vec4), ('max', 16, vec4)])
+    lanes = ty('T[N]<hkUint32,4>', hkfile.ARRAY, 16, 4, pointee=u32, tuple_n=4)
+    node = ty('hkcdSimdTree::Node', hkfile.RECORD, 128, 16, [
+        ('lx', 0, vec4), ('hx', 16, vec4), ('ly', 32, vec4), ('hy', 48, vec4), ('lz', 64, vec4), ('hz', 80, vec4),
+        ('data', 96, lanes), ('isLeaf', 112, u8)])
+    simd = ty('hkcdSimdTree', hkfile.RECORD, 8, 4, [('nodes', 0, array(node)), ('isCompact', 4, u8)])
+    inst_members = [('rotation', 0, vec4), ('translation', 16, vec3), ('leafIndex', 28, u16), ('flags', 30, u8),
+                    ('scale', 32, vec3), ('shapeTag', 44, u16), ('destructionTag', 46, u16), ('shape', 48, ptr(shape))]
+    inst = ty('hknpShapeInstance', hkfile.RECORD, 64, 16, inst_members)
+    element = ty('hkFreeListArrayElement<hknpShapeInstance>', hkfile.RECORD, 64, 16, [], parent=inst)
+    free_list = ty('hkFreeListRelArray<hknpShapeInstance,8>', hkfile.RECORD, 12, 4, [
+        ('elements', 0, array(element)), ('firstFree', 4, i32), ('numAllocated', 8, u32)])
+    bvd = ty('hknpCompoundShapeData', hkfile.RECORD, 32, 4, [('simdTree', 20, simd), ('type', 28, u8)])
+    ty('hknpCompoundShape', hkfile.RECORD, 128, 16, [
+        ('shapeTagCodecInfo', 24, u32), ('instances', 28, free_list), ('aabb', 48, aabb), ('boundingRadius', 80, real),
+        ('isMutable', 84, u8), ('estimatedNumShapeKeys', 88, i32), ('boundingVolumeData', 92, bvd)], parent=shape)
+    a4 = ty('hkcdCompressedAabbCodecs::Aabb4BytesCodec', hkfile.RECORD, 4, 1, [('xyz', 0, u8)])
+    a5 = ty('hkcdCompressedAabbCodecs::Aabb5BytesCodec', hkfile.RECORD, 5, 1, [('xyz', 0, u8)])
+    reals6 = ty('T[N]<hkReal,6>', hkfile.ARRAY, 24, 4, pointee=real, tuple_n=6)
+    section = ty('hkcdStaticMeshTree::Section', hkfile.RECORD, 96, 16, [
+        ('nodes', 0, array(a4)), ('domain', 16, aabb), ('codecParms', 48, reals6), ('firstPackedVertexIndex', 72, u32),
+        ('firstSharedVertexIndex', 76, u32), ('firstPrimitiveIndex', 80, u32), ('firstDataRunIndex', 84, u32),
+        ('numPackedVertices', 88, u8), ('numPrimitives', 89, u8), ('numDataRuns', 90, u8), ('page', 91, u8),
+        ('leafIndex', 92, u16), ('layerData', 94, u8), ('flags', 95, u8)])
+    prim = ty('hkcdStaticMeshTree::Primitive', hkfile.RECORD, 4, 1, [('indices', 0, u8)])
+    run = ty('hkcdDefaultStaticMeshTree::PrimitiveDataRun', hkfile.RECORD, 4, 2, [
+        ('value', 0, u16), ('index', 2, u8), ('count', 3, u8)])
+    tree = ty('hknpCompressedMeshShapeTree', hkfile.RECORD, 96, 16, [
+        ('nodes', 0, array(a5)), ('domain', 16, aabb), ('numPrimitiveKeys', 48, i32), ('bitsPerKey', 52, i32),
+        ('maxKeyValue', 56, u32), ('primitiveStoresIsFlatConvex', 60, u8), ('sections', 64, array(section)),
+        ('primitives', 68, array(prim)), ('sharedVerticesIndex', 72, array(u16)), ('packedVertices', 76, array(u32)),
+        ('sharedVertices', 80, array(u64)), ('primitiveDataRuns', 84, array(run))])
+    data = ty('hknpCompressedMeshShapeData', hkfile.RECORD, 120, 16, [
+        ('meshTree', 0, tree), ('simdTree', 96, simd), ('hasSimdTree', 116, u8)])
+    bits = ty('hkRelBitField', hkfile.RECORD, 8, 4, [('words', 0, array(u32)), ('numBits', 4, i32)])
+    ty('hknpCompressedMeshShape', hkfile.RECORD, 52, 4, [
+        ('shapeTagCodecInfo', 24, u32), ('data', 28, ptr(data)), ('triangleIsInterior', 32, bits),
+        ('numTriangles', 40, i32), ('numConvexShapes', 44, i32), ('externShapes', 48, array(inst))], parent=shape)
+    body = ty('hknpPhysicsSystemData::bodyCinfoWithAttachment', hkfile.RECORD, 128, 16, [
+        ('shape', 0, ptr(shape)), ('collisionFilterInfo', 12, u32), ('materialId', 16, u16), ('name', 20, string),
+        ('motionType', 32, u8), ('position', 48, vec4), ('orientation', 64, vec4), ('mass', 80, real),
+        ('massDistribution', 84, ptr(u32)), ('motionPropertiesId', 88, u16)])
+    system = ty('hknpPhysicsSystemData', hkfile.RECORD, 16, 4, [
+        ('materials', 0, array(u32)), ('motionProperties', 4, array(u32)), ('bodyCinfos', 8, array(body)),
+        ('constraintCinfos', 12, array(u32))])
+    scene = ty('hknpPhysicsSceneData', hkfile.RECORD, 4, 4, [('systemDatas', 0, array(ptr(system)))])
+    variant = ty('hkRootLevelContainer::NamedVariant', hkfile.RECORD, 12, 4, [
+        ('name', 0, string), ('className', 4, string), ('variant', 8, ptr(scene))])
+    ty('hkRootLevelContainer', hkfile.RECORD, 4, 4, [('namedVariants', 0, array(variant))])
+    return table
 
-    def add(kind, blob, count=1):
-        data.extend(bytes(-len(data) % 16))
-        index = len(items)
-        items.append((types[kind] | ((16 if count == 1 else 32) << 24), len(data), count))
-        data.extend(blob)
-        return index
 
-    def put(index, offset, fmt, *values):
-        struct.pack_into(fmt, data, items[index][1] + offset, *values)
+def _sample() -> tuple[bytes, hkfile.Block]:
+    """(the tagfile, its cube hull shape block in a graph of that file): three static bodies share one cube hull."""
+    table = _schema()
+    tf = hkfile.Tagfile(table, hkfile.Block(table.get('hkRootLevelContainer'), 1))
 
-    root = add('hkRootLevelContainer', bytes(4))
-    variants = add('hkRootLevelContainer::NamedVariant', bytes(12))
-    class_name = add('char', b'hknpPhysicsSceneData\0', 20)
-    scene = add('hknpPhysicsSceneData', bytes(4))
-    systems = add('hkUint32', bytes(4))
-    system = add('hknpPhysicsSystemData', bytes(16))
-    library = add('hkUint32', bytes(4))
+    def array(type_name: str, count: int, data: bytes | None = None) -> hkfile.Block:
+        return tf.new(table.get(type_name), count, data)
     points = np.asarray([(x, y, z) for x in (-1., 1.) for y in (-1., 1.) for z in (-1., 1.)])
     planes = np.asarray([(1., 0., 0., -1.), (-1., 0., 0., -1.), (0., 1., 0., -1.),
                          (0., -1., 0., -1.), (0., 0., 1., -1.), (0., 0., -1., -1.)])
     polygons = [(4, 5, 7, 6), (0, 2, 3, 1), (2, 6, 7, 3), (0, 1, 5, 4), (1, 3, 7, 5), (0, 4, 6, 2)]
-    vertices = add('hkVector3', points.astype('<f4').tobytes(), 8)
-    plane_item = add('hkVector4', planes.astype('<f4').tobytes(), 6)
-    faces = add('Face', b''.join(struct.pack('<HBB', 4 * i, 4, 127) for i in range(6)), 6)
-    indices = add('char', bytes(v for polygon in polygons for v in polygon), 24)
-    mass = add('hknpShapeMassProperties', tc._mass_cache(np.asarray(((-1.05,) * 3, (1.05,) * 3)), 2.))
-    properties = add('hknpShapeProperties::Property', struct.pack('<IH2x', mass, 0xF100))
-    convex = bytearray(40)
-    struct.pack_into('<IfH', convex, 0, properties, .05, 0x3c23)
-    struct.pack_into('<4I', convex, 16, vertices, plane_item, faces, indices)
-    shape = add('hknpConvexShape', convex)
-    strings = [add('char', ('ragdoll_' + name + '\0').encode(), len('ragdoll_' + name) + 1)
-               for name in ('doppler_radar', 'tracking_radar', 'cannon_main')]
-    bodies = bytearray(64 * 3)
-    for i, name_item in enumerate(strings):
-        offset = 64 * i
-        struct.pack_into('<I', bodies, offset, shape)
-        struct.pack_into('<I', bodies, offset + 16, name_item)
-        struct.pack_into('<4f', bodies, offset + 32, 0., 0., 0., 1.)
-        struct.pack_into('<f', bodies, offset + 48, 2.)
-    body_item = add(body_type, bodies, 3)
-    put(root, 0, '<I', variants)
-    put(variants, 4, '<II', class_name, scene)
-    put(scene, 0, '<I', systems)
-    put(systems, 0, '<I', system)
-    put(system, 0, '<4I', library, library, body_item, 0)
-    type_section = (section('TST1', tst) + section('TNA1', tna) + section('FST1', fst) +
-                    section('TBDY', tbd) + section('TPAD', b''))
-    raw = section('TAG0', section('SDKV', b'20200000') + section('DATA', data) +
-                  section('TYPE', type_section, False) + section('INDX', section('ITEM',
-                  b''.join(struct.pack('<III', *item) for item in items)), False), False)
-    return raw, shape
+    shape = tf.new('hknpConvexShape')
+    h = shape.value['hull']
+    h['vertices'].set_target(array('hkFloat3', 8, points.astype('<f4').tobytes()))
+    h['planes'].set_target(array('hkVector4', 6, planes.astype('<f4').tobytes()))
+    h['faces'].set_target(array('hknpConvexHull::Face', 6, b''.join(struct.pack('<HBB', 4 * i, 4, 127) for i in range(6))))
+    h['indices'].set_target(array('hkUint8', 24, bytes(v for polygon in polygons for v in polygon)))
+    shape.value['convexRadius'].set_f32(.05)
+    shape.value['maxAllowedPenetration'].set_f32(struct.unpack('<f', struct.pack('<I', 0x3c23 << 16))[0])
+    mass = tf.new('hknpShapeMassProperties', 1, hkshape.mass_bytes(hkshape.from_hull(hkshape.build_hull(points), .05)))
+    prop = array('hknpShapeProperties::Property', 1)
+    prop[0]['object'].set_target(mass)
+    prop[0]['key'].set_int(0xF100)
+    shape.value['properties']['properties'].set_target(prop)
+    bodies = array('hknpPhysicsSystemData::bodyCinfoWithAttachment', 3)
+    for i, name in enumerate(('doppler_radar', 'tracking_radar', 'cannon_main')):
+        bodies[i]['shape'].set_target(shape)
+        bodies[i]['name'].set_target(tf.string('ragdoll_' + name))
+        bodies[i]['orientation'].set_vec((0., 0., 0., 1.))
+        bodies[i]['mass'].set_f32(2.)
+    library = array('hkUint32', 1)
+    system = tf.new('hknpPhysicsSystemData')
+    for member in ('materials', 'motionProperties'):
+        system.value[member].set_target(library)
+    system.value['bodyCinfos'].set_target(bodies)
+    systems = array('hkRefPtr<hknpPhysicsSystemData>', 1)
+    systems[0].set_target(system)
+    scene = tf.new('hknpPhysicsSceneData')
+    scene.value['systemDatas'].set_target(systems)
+    variants = array('hkRootLevelContainer::NamedVariant', 1)
+    variants[0]['className'].set_target(tf.string('hknpPhysicsSceneData'))
+    variants[0]['variant'].set_target(scene)
+    tf.root.value['namedVariants'].set_target(variants)
+    raw = tf.write()
+    reread = sc.Shkt(raw)
+    return raw, reread.systems[0].bodies[0].shape
 
 
 def check() -> None:
@@ -149,23 +197,23 @@ def check() -> None:
             pair = ['ragdoll_' + name, name] if reverse else [name, 'ragdoll_' + name]
             mapped = next(row for row in rows if row[0] == pair)
             assert np.allclose([rf._f(value) for value in mapped[1]], -np.asarray(position) if reverse else position, atol=1e-6)
-    editor = tc._Editor(framed)
-    new_shape, new_box = editor.convex(shape, np.diag((2., 3., 4.)), np.asarray((5., 6., 7.)))
+    framed_reader = sc.Shkt(framed)
+    editor = tc._Editor(framed_reader.tf)
+    source = framed_reader.systems[0].bodies[0]
+    new_shape, new_box = editor.convex(source.shape, np.diag((2., 3., 4.)), np.asarray((5., 6., 7.)))
     # Attach the edited shape so the full SHKT checker visits its geometry and mass.
-    editor.put(rf.Shkt(framed).bodies[0].at + editor.tag.offset(sc.B, 'shape'), '<I', new_shape)
-    output = editor.finish()
+    source.body.set_shape(new_shape)
+    output = framed_reader.tf.write()
     output_reader = sc.Shkt(output)
-    actual = tc._convex_check(output_reader, new_shape)
+    written = output_reader.systems[0].bodies[0].shape
+    actual = tc._convex_check(written)
     assert np.allclose(actual, new_box, atol=1e-5)
     assert np.allclose(actual, [[2.9, 2.9, 2.9], [7.1, 9.1, 11.1]], atol=1e-5)
     assert sc.problems(output) == []
-    bad = bytearray(output)
-    _, offset, _ = output_reader.tag.item(new_shape)
-    hull = offset + output_reader.tag.offset('hknpConvexShape', 'hull')
-    _, plane_offset, _ = output_reader.tag.item(output_reader.tag.u32(hull + 4))
-    struct.pack_into('<f', bad, plane_offset + 12, 0.)
+    planes = written.value['hull']['planes'].target
+    struct.pack_into('<f', planes.data, 12, 0.)
     try:
-        tc._convex_check(sc.Shkt(bytes(bad)), new_shape)
+        tc._convex_check(written)
     except tc.CollisionError as error:
         assert 'planes miss vertices' in str(error)
     else:

@@ -26,7 +26,7 @@ def read_shape(blob):
     t = Tag(blob)
     _, comp, _ = t.item(bodies(t)['RagDollProxys.body'])
     assert struct.unpack_from('<Q', blob, comp+t.offset('hknpCompoundShape', 'userData'))[0] == ac.MAGIC
-    assert t.u32(comp+t.offset('hknpCompoundShape', 'properties')) == 0
+    assert t.u32(comp+t.offset('hknpCompoundShape', 'properties')) != 0   # its mass properties (pylib/hkshape.py)
     _, instances, count = t.item(t.u32(comp+t.offset('hknpCompoundShape', 'instances')))
     result = []
     for i in range(count):
@@ -36,7 +36,7 @@ def read_shape(blob):
         typ, shape, _ = t.item(t.u32(inst+t.offset('hknpShapeInstance', 'shape')))
         assert typ == 'hknpConvexShape'
         assert struct.unpack_from('<f', blob, shape+t.offset(typ, 'convexRadius'))[0] == 0
-        assert t.u32(shape+t.offset(typ, 'properties')) == 0
+        assert t.u32(shape+t.offset(typ, 'properties')) != 0
         h = shape+t.offset(typ, 'hull')
         _, vs, vn = t.item(t.u32(h))
         _, ps, pn = t.item(t.u32(h+4))
@@ -99,12 +99,16 @@ class Geometry(unittest.TestCase):
         self.assertAlmostEqual(min(b[0][1] for b in cells), 0.)
 
     def test_bvh_four_way_root_and_sparse_lanes(self):
+        import hkshape
         boxes = [((i*2., 0., 0.), (i*2.+1, 1., 1.)) for i in range(19)]
-        data, n = ac._tree(boxes)
+        data = hkshape.simd_tree(boxes, list(range(19)))
+        n = len(data)//128
         self.assertEqual(len(data), n*128)
         f = struct.unpack_from('<24f4I?', data, 128)
         self.assertFalse(f[28])
-        self.assertTrue(all(0 < i < n for i in f[24:28]))
+        used = [lane for lane in range(4) if f[lane] <= f[4+lane]]
+        self.assertTrue(used and all(0 < f[24+lane] < n for lane in used))
+        self.assertTrue(all(f[24+lane] == 0 for lane in range(4) if lane not in used))
 
 
 class GameAssets(unittest.TestCase):
