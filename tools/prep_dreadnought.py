@@ -21,6 +21,10 @@ kept with the fighters a fighter's size (17.6 m) and the dreadnought SHIP_LENGTH
 The hangar module (Abilities/Dreadnought/Hangar, the dreadnoughts' "Fighters" primary) has no socket in the files
 (the game places modules by a runtime tag): it is set into the dreadnought's flat foredeck, its rail bays up, so the
 fighters stand on the deck (HANGAR_AT). Its six bones (two lifts, two lower and two upper doors) are kept.
+Its turrets (the user, 2026-10-21: 「船的炮塔是可以上人的」): the dreadnoughts' secondary guns (Weapons/Dreadnought/Sec*)
+on the hull's turret mounts (turret_mounts: its round seats, found as pieces of their own), each with a yaw bone, its
+guns' pitch bone and its muzzle (turret_<n>, turret_<n>_gun, turret_<n>_muzzle), so the plugin turns them and a
+gunner seat fires from each (src/dreadnought.cpp).
 
     python tools/prep_dreadnought.py [EXPORT_DIR] [--out <models>/dreadnought]
 """
@@ -48,7 +52,8 @@ TEX = 1024                 # every texture's size
 # parameters (its colour mask MC's R / G / B pick CustomColor01 / 02 / 03, BaseColor where none), each instance's
 # overriding its faction master's (MASTERS: the instance's Parent, read with dnexport -info, as the export's JSON
 # names none). Metal and roughness likewise per mask channel.
-MASTERS = {'VH_DreadH_': 'VH_YPawn_JupA_MASTERINST', 'AB_DN_Pri_Hangar_': 'VH_YPawn_JupA_MASTERINST'}
+MASTERS = {'VH_DreadH_': 'VH_YPawn_JupA_MASTERINST', 'AB_DN_Pri_Hangar_': 'VH_YPawn_JupA_MASTERINST',
+           'WP_Dread': 'VH_YPawn_JupA_MASTERINST'}
 MASTER_DIR = 'Ships/_SHARED/Materials'
 DEFAULT_BASE = 'BDB8B2'     # a master without BaseColor: its DetailSurfaceColor01 (Jupiter Arms')
 AO_DEFAULT = 0.8           # AoInfluence when the material has none
@@ -56,13 +61,20 @@ AO_DEFAULT = 0.8           # AoInfluence when the material has none
 
 @dataclass(frozen=True)
 class Part:
-    """One source mesh in a model: its glb, offset in the source's space (its units) before the common scale."""
+    """One source mesh in a model: its glb, scaled by `scale` about its origin and set at `at` in the source's space
+    (its units) before the common scale. `bones`: source bone -> our bone ('': the model's body bone), a bone's pivot
+    the first of its sources'; `parents`: our bone -> its parent (default: the part's first bone under the model, the
+    others under that one); `muzzle`: the bone whose geometry's tip gets a muzzle bone (<bone less _gun>_muzzle)."""
     glb: str
     at: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    bones: tuple[tuple[str, str], ...] = (('root', ''),)   # source bone -> our bone ('' : the model's body bone)
+    bones: tuple[tuple[str, str], ...] = (('root', ''),)
+    scale: float = 1.0
+    parents: tuple[tuple[str, str], ...] = ()
+    muzzle: str = ''
 
 
 HANGAR_AT = (3.05, 0.94, 0.0)
+HANGAR_HALF = 1.85   # its half length (source units)
 HANGAR_BONES = (('root', 'hangar'), ('b_elevator_01', 'hangar_lift_f'), ('b_elevator_02', 'hangar_lift_a'),
                 ('b_bottom_door01', 'hangar_door_lf'), ('b_bottom_door02', 'hangar_door_la'),
                 ('b_upper_door01', 'hangar_door_uf'), ('b_upper_door02', 'hangar_door_ua'))
@@ -75,6 +87,65 @@ MODELS: dict[str, tuple[Part, ...]] = {
     'interceptor': (Part('Ships/RespawnJet/Booster/VH_Interceptor_SK.glb'),),
 }
 SCALE_FROM = 'dreadnought'     # SHIP_LENGTH is this model's length
+MUZZLE_DEPTH = 0.02   # source units: a gun's tip, what of it is this near its farthest forward
+
+# The turrets (turret_mounts): a mount is a piece of the hull of MOUNT_TRIS triangles (the hull's round seats; the deck's
+# own pieces are larger, its fittings smaller), its top over MOUNT_TOP (the upper deck: those lower down sit on the hull's
+# flanks and belly), not under the hangar. Its kind by its shape (source units): a dome MOUNT_DOME wide or more, a flat
+# pad (under MOUNT_FLAT tall), else a small seat. Each kind's gun and its scale (to the seat's size).
+MOUNT_TRIS, MOUNT_TOP, MOUNT_DOME, MOUNT_FLAT = 88, 0.9, 0.9, 0.25
+WEAPONS = 'Weapons/Dreadnought'
+TURRET_KINDS = {
+    'dome': (f'{WEAPONS}/SecShort/Mesh/WP_DreadSecShort01_SK.glb', 1.9),
+    'small': (f'{WEAPONS}/SecMid/MAT/WP_DreadnoughtSecMid01_SK.glb', 1.4),
+    'pad': (f'{WEAPONS}/SecLong/Mesh/WP_DreadSecLong01_SK.glb', 1.6),
+}
+GUN_BONES = ('b_barrel', 'b_barrel_01', 'b_barrel_02', 'b_recoil01', 'b_recoil02')
+
+
+def turret_mounts(hull: 'Mesh') -> list[tuple[str, np.ndarray]]:
+    """(kind, the seat's top centre, source units) of every turret mount, bow first, port before starboard."""
+    key = np.round(hull.pos * 200.0).astype(np.int64)
+    _, weld = np.unique(key, axis=0, return_inverse=True)
+    weld = weld.ravel()
+    parent = np.arange(weld.max() + 1)
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for a, b, c in weld[hull.tris]:
+        for u, v in ((a, b), (b, c)):
+            ru, rv = find(u), find(v)
+            if ru != rv:
+                parent[ru] = rv
+    piece = np.array([find(x) for x in weld[hull.tris[:, 0]]])
+    out = []
+    for pid, count in zip(*np.unique(piece, return_counts=True)):
+        if count != MOUNT_TRIS:
+            continue
+        pts = hull.pos[np.unique(hull.tris[piece == pid])]
+        lo, hi = pts.min(0), pts.max(0)
+        top = np.array([(lo[0] + hi[0]) / 2, hi[1], (lo[2] + hi[2]) / 2])
+        if top[1] < MOUNT_TOP or abs(top[0] - HANGAR_AT[0]) < HANGAR_HALF + (hi[0] - lo[0]) / 2:
+            continue
+        size = hi - lo
+        kind = 'pad' if size[1] < MOUNT_FLAT else 'dome' if size[0] >= MOUNT_DOME else 'small'
+        out.append((kind, top))
+    return sorted(out, key=lambda m: (-round(float(m[1][0]), 2), -float(m[1][2])))
+
+
+def turret_part(n: int, kind: str, top: np.ndarray) -> Part:
+    glb, scale = TURRET_KINDS[kind]
+    t, g = f'turret_{n}', f'turret_{n}_gun'
+    return Part(glb, tuple(float(x) for x in top), (('b_base', t), ('root', t)) + tuple((b, g) for b in GUN_BONES),
+                scale, ((t, ''), (g, t)), g)
+
+
+def ship_parts(hull: 'Mesh') -> tuple[Part, ...]:
+    """The dreadnought: its hull, its hangar, its turrets."""
+    return MODELS['dreadnought'] + tuple(turret_part(n, k, top) for n, (k, top) in enumerate(turret_mounts(hull)))
 
 
 # ------------------------------------------------------------------------------------------ the source's glb
@@ -118,8 +189,12 @@ def read_glb(path: str) -> Mesh:
     skin = g['skins'][0] if g.get('skins') else None
     joints = skin['joints'] if skin else []
     names = [g['nodes'][j].get('name', f'joint{j}') for j in joints] or ['root']
-    pivots = {g['nodes'][j].get('name', ''): np.array(g['nodes'][j].get('translation', (0.0, 0.0, 0.0)), float)
-              for j in joints}
+    up = {c: i for i, nd in enumerate(g['nodes']) for c in nd.get('children', [])}
+
+    def world(i: int) -> np.ndarray:   # a joint's place: its translations up its chain (the joints are unrotated)
+        t = np.array(g['nodes'][i].get('translation', (0.0, 0.0, 0.0)), float)
+        return t + world(up[i]) if i in up and up[i] in joints else t
+    pivots = {g['nodes'][j].get('name', ''): world(j) for j in joints}
     P, N, U, B, T, M = [], [], [], [], [], []
     base = 0
     for mesh in g['meshes']:
@@ -244,14 +319,21 @@ def write_model(name: str, parts: tuple[Part, ...], export: str, scale: float, o
         m = read_glb(os.path.join(export, *GENERIC.split('/'), *part.glb.split('/')))
         at = np.array(part.at)
         rename = dict(part.bones)
+        first = next((o for _, o in part.bones), '') or name
+        parents = {o or name: (p or name) for o, p in part.parents}
+        tips: dict[str, list[np.ndarray]] = {}
+        for _src, ours in part.bones:   # every bone the part names, with its pivot (the first of its sources')
+            bone = ours or name
+            if bone in bones:
+                continue
+            src = next(s for s, o in part.bones if (o or name) == bone)
+            pivot = to_game((m.pivots.get(src, np.zeros(3)) * part.scale + at)[None], scale)[0]
+            bones[bone] = {'parent': parents.get(bone, name if bone == first else first),
+                           'pivot': [round(float(x), 4) for x in pivot]}
         for src in sorted(set(m.bone.tolist())):
             sname = m.names[src] if src < len(m.names) else 'root'
-            ours = rename.get(sname, rename.get('root', ''))
-            bone = ours or name
-            if bone not in bones:
-                pivot = to_game(((m.pivots.get(sname, np.zeros(3)) + at)[None]), scale)[0]
-                bones[bone] = {'parent': name if bone == rename.get('root', bone) else (rename.get('root') or name),
-                               'pivot': [round(float(x), 4) for x in pivot]}
+            bone = rename.get(sname, rename.get('root', '')) or name
+            assert bone in bones, f'{part.glb}: bone {sname} -> {bone} not named'
             for mi, mat in enumerate(m.materials):
                 sel = (m.bone[m.tris[:, 0]] == src) & (m.mat == mi)
                 if not sel.any():
@@ -260,7 +342,9 @@ def write_model(name: str, parts: tuple[Part, ...], export: str, scale: float, o
                 used = np.unique(tris)
                 remap = np.zeros(len(m.pos), np.int64)
                 remap[used] = np.arange(len(used)) + vi
-                p = to_game(m.pos[used] + at, scale)
+                p = to_game(m.pos[used] * part.scale + at, scale)
+                if bone == part.muzzle:
+                    tips.setdefault(bone, []).append(p)
                 n = to_game(m.nrm[used], 1.0)
                 lo, hi = np.minimum(lo, p.min(0)), np.maximum(hi, p.max(0))
                 obj.append(f'o {bone}\nusemtl {mat}\n')
@@ -271,6 +355,11 @@ def write_model(name: str, parts: tuple[Part, ...], export: str, scale: float, o
                 vi += len(used)
                 if mat not in materials:
                     materials.append(mat)
+        for gun, pts in tips.items():   # its muzzle: the middle of its guns' tips (their farthest forward, +z)
+            q = np.vstack(pts)
+            tip = q[q[:, 2] > q[:, 2].max() - MUZZLE_DEPTH * scale]
+            at_tip = [(tip[:, 0].min() + tip[:, 0].max()) / 2, (tip[:, 1].min() + tip[:, 1].max()) / 2, float(q[:, 2].max())]
+            bones[gun.removesuffix('_gun') + '_muzzle'] = {'parent': gun, 'pivot': [round(float(x), 4) for x in at_tip]}
     for mat in materials:
         mtl.append(f'newmtl {mat}\nKd 1 1 1\nmap_Kd {mat}_df.png\nnorm {mat}_nm.png\nmap_Pr {mat}_rml.png\n')
         if mat not in done:
@@ -303,6 +392,8 @@ def main(argv: list[str]) -> int:
     manifest = {'scale': scale, 'models': {}}
     done: set[str] = set()
     for name, parts in MODELS.items():
+        if name == SCALE_FROM:
+            parts = ship_parts(ship)
         manifest['models'][name] = write_model(name, parts, a.export, scale, a.out, done)
         e = manifest['models'][name]
         print(name, 'size', [round(h - l, 1) for l, h in zip(e['min'], e['max'])], 'bones', list(e['bones']))
