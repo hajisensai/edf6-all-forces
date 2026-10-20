@@ -360,7 +360,8 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 | 武器栏的根节点 | `HUiHudWeapon` 的构造 `0x82D070`：`0x82D0B9` 写虚表 `0x17FD150`，`0x82D372` 调 HUiHud 基类 `0x816080`（按名字 `Guage_Root` 找节点，存到 `+0x788`，控制块 `+0x790`）。Root.cpk 里 `UI/LYT_HUDWEAPONGUAGEL / R / SUBWEAPONGUAGER / ENERGYGUAGE_R / VEHICLE` 这几个武器栏布局都有 `Guage_Root` | H |
 | 隐藏方式 | 和护甲条一样：在已经串接的更新槽 1（`UpdateHook` / `ArmorHook`）跑完之后，用 `stock_armor_hud.h` 的记录把根节点 `+0x1F8` 压成 0；租约结束那一帧写回原值（原本隐藏的仍然隐藏）。不跳过任何绘制调用 | H（代码）/ 未实机 |
 | 谁算「在操控」 | `EnemyControlReplacesPlayerHud`：这个仪表的 owner（`+0x778`）或它转成的 SoldierBase，在已发布的会话中有 `phase == active` 的租约。会话在等待、恢复期间照常显示玩家自己的 HUD | H（代码） |
-| 不隐藏的 | 雷达（已经跟随受控体）、准星、伤害标记、`CenterReloadIcon`（在 `Guage_Root` 之外，只在换弹时出现） | 设计 |
+| 不隐藏的 | 雷达（已经跟随受控体）、伤害标记、`CenterReloadIcon`（在 `Guage_Root` 之外，只在换弹时出现） | 设计 |
+| 准星（2026-10-21 起隐藏） | 用户：「操控怪物的时候没隐藏武器准星」。`HudPlayer_CrossHair` 第 3 槽 `0x8039F0` 已由 `infantryscope.cpp CrossDrawHook` 串接；它的士兵 `+0x580` 满足 `EnemyControlReplacesPlayerHud` 时直接返回（与原函数自己的不画路径一样），租约结束下一帧照常画。守卫 `tests/enemy_control_crosshair_guard.py` | H（代码）/ 未实机 |
 | 替代显示 | `hud.cpp EnemyControlHud`：左上角是名字、HP 条和数值、阵营、原角色保护说明；右下角是「键 / 手柄 → 攻击」，每行带原生状态（冷却、不可用、进行中），放不下的进 M 卡 | 设计 |
 
 签名 `kWeaponRootSigs`（任何一项不符都只关掉这一项）：`0x82D0B9`、`0x82D372`、`0x8160C7`、`0x816101`、`0x7E999C`。离线检查：`tools/armor_hud_check.cpp EnemyWeaponGauges`（五个仪表同时压住，再逐个按原值还原），以及 `tests/enemy_hud_layout_test.cpp HudCase`（四种语言、六种视口）。
