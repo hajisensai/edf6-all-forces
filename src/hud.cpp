@@ -5171,6 +5171,13 @@ void VersionBanner(Text* text,float width,float height,float s,Line* lines,int* 
     Label(text,lines,at,width*0.5f,height*0.5f+286.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
     if(second && *second)Label(text,lines,at,width*0.5f,height*0.5f+314.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",second);
 }
+// The ultimate strike's caller online (ultimate.cpp): peers of an older build see the stock beam; a moment, under the
+// version banner.
+void UltimateBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    wchar_t line[160];
+    if(!PlayerUltimateCue(line,_countof(line)))return;
+    Label(text,lines,at,width*0.5f,height*0.5f+342.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
+}
 // The mark key with no enemy near the aim (npcai.cpp SendToPoint): what came of it under the point for a moment (the
 // selected units sent there, how many; none selected; online); the point's own ring is the Q mark's (QMarkHud). An
 // enemy near the aim but not on it: a ring there and the word to aim at it.
@@ -5596,6 +5603,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         SweepBanner(t,width,height,s,lines,&at);
         RescueCueBanner(t,width,height,s,lines,&at);
         VersionBanner(t,width,height,s,lines,&at);
+        UltimateBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {

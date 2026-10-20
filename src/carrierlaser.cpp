@@ -40,6 +40,7 @@
 #include "enemy_control_native.h"
 #include "memory.h"
 #include "online_authority.h"
+#include "scene_object.h"
 #include "subcarrier.h"
 #include "vecmath.h"
 #include <cmath>
@@ -54,7 +55,7 @@ constexpr std::size_t kShipAiSlot=7;
 constexpr std::size_t kYawRate=0xB54,kMoveState=0xDF0,kRoute=0x4A8;
 constexpr unsigned kDemoVtable=0x17D4B20,kDemoUpdate=0x5B5C50;
 constexpr std::size_t kDemoUpdateSlot=5,kDemoIfc=0x170;
-constexpr unsigned kPreload=0x7A3780,kCreateObject=0x11945E0,kDelete=0x118A1B0,kInitParamVtable=0x1762068;
+constexpr unsigned kPreload=0x7A3780,kCreateObject=scene::kCreateObject,kDelete=0x118A1B0,kInitParamVtable=scene::kInitParamBaseVtable;
 constexpr std::size_t kPreloadMgr=0x20B29A8,kObjectMgr=0x20B2958;
 constexpr std::size_t kTeams=0x20B2978,kTeamRows=0x38,kTeamStride=0x38,kTeamRelation=0x18;
 constexpr int kMaxTeams=64,kEnemyRelation=2;
@@ -111,10 +112,8 @@ const unsigned char kFlyToWishSig[]={0x48,0x8D,0xBB,0x40,0x0B,0x00,0x00};
 const unsigned char kUpdateStateSig[]={0x8B,0x87,0xF0,0x0D,0x00,0x00,0x85,0xC0};
 const unsigned char kUpdateWishSig[]={0x0F,0x10,0x87,0x40,0x0B,0x00,0x00,0x0F,0x11,0x87,0xD0,0x05,0x00,0x00};
 
-struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
 struct Weak { const void* object; const void* ctrl; };
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
-using CreateObjectFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParam*);
 using DeleteFn=void(*)(void*);
 using OwnerFn=void(*)(void*,const Weak*);
 using DamageFn=void(*)(void*,float);
@@ -285,8 +284,7 @@ int MakeFault(const EXCEPTION_POINTERS* e) noexcept {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 unsigned char* Create(const wchar_t* sgo,const float* m) noexcept {
-    InitParam param{image+kInitParamVtable,{}};
-    __try { return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,sgo,&param); }
+    __try { return scene::CreateSceneObject(m,sgo); }
     __except(MakeFault(GetExceptionInformation())) { return nullptr; }
 }
 

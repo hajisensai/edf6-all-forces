@@ -1564,6 +1564,12 @@ add_executable(plugin_net_test EXCLUDE_FROM_ALL tests/plugin_net_test.cpp)
 target_compile_options(plugin_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks plugin_net_test)
 add_test(NAME plugin_net COMMAND plugin_net_test)
+# The ultimate strike online and its shows (src/ultimate_net_protocol.h's wire, src/ultimate_show.h's slots, dark sky
+# holders and seeks; tests/ultimate_net_test.cpp).
+add_executable(ultimate_net_test EXCLUDE_FROM_ALL tests/ultimate_net_test.cpp)
+target_compile_options(ultimate_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks ultimate_net_test)
+add_test(NAME ultimate_net COMMAND ultimate_net_test)
 # The marker's name from the game's own name tag source (src/player_name.cpp), read from EDF.dll without running it.
 add_test(NAME player_name_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_name_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(player_name_native PROPERTIES SKIP_RETURN_CODE 77)

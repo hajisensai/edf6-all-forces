@@ -112,6 +112,12 @@ plugin_net::Channel FloatGunNetChannel() noexcept {
     plugin_net::Channel c;c.name="float guns";c.magic=0x4E554746u;c.version=1;c.featureBit=support_net::kExtFloatGun;
     c.minSize=c.maxSize=96;c.receive=&ReceiveFloatGun;return c;
 }
+// The ultimate strike's (ultimate.cpp): ULTS for kExtUltimate peers, not under test here.
+bool ReceiveUltimate(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+plugin_net::Channel UltimateNetChannel() noexcept {
+    plugin_net::Channel c;c.name="ultimate";c.magic=0x53544C55u;c.version=1;c.featureBit=support_net::kExtUltimate;
+    c.minSize=c.maxSize=96;c.receive=&ReceiveUltimate;return c;
+}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}

@@ -909,10 +909,22 @@ bool EmcIfcOk() noexcept;                                    // RoundSize / Roun
 // ultimate.cpp: the ultimate strike (docs/plan-2026-10-19-ultimate.md, src/ultimate_plan.h): the satellite call's fire
 // (airstrike.cpp) starts its show at `at` by `caller` with the weapon's `damage`; UltimateTick plays it a frame at a time
 // (SharedFrameTick); ResetUltimate at a new mission forgets it, nothing touched (its objects were the last mission's).
+// False: no show (its rounds not preloaded, every show slot taken): the stock satellite beam fires instead.
+// Several play at once; online every machine plays each machine's player's shows (ultimate_net_protocol.h).
 bool UltimateStart(const unsigned char* caller,const float* at,float damage,std::uint64_t seed) noexcept;
 void UltimateTick() noexcept;
 void ResetUltimate() noexcept;
 void PreloadUltimate(void* mgr) noexcept;   // the magic circles, with the shells (jet_spawn.cpp)
+// Online, another machine's player's call here (airstrike.cpp SatFireHook): its stock beam is held back only for a show of
+// its caller's heard here (UltimateHeardFrom: began lately, not matched to a call yet), or one whose start comes before the
+// stock beam fires (UltimateStockHoldBack, from ultimate.cpp, true when one was held back). An older build's call (no
+// show heard) keeps its stock beam. Within kUltimateStockWaitMs of each other.
+constexpr ULONGLONG kUltimateStockWaitMs=4000;
+bool UltimateHeardFrom(const unsigned char* caller) noexcept;
+bool UltimateStockHoldBack(const unsigned char* caller) noexcept;
+void UltimateStockReset() noexcept;
+// The caller's HUD line (hud.cpp): peers of an older build in the room see the stock beam.
+bool PlayerUltimateCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // emc.cpp: the EMC's charged beam (docs/emc-re.md, README EMC 蓄力光束): the player's trigger in a Vehicle510_Maser charges,
 // and one thick beam carries the stock burst's damage through every enemy and building on its line, a blast at its end.

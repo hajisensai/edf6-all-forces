@@ -6,6 +6,7 @@
 #include "vehicleram.h"
 #include "gunmuzzle.h"
 #include "ifc_model.h"
+#include "scene_object.h"
 #include <malloc.h>
 #include <cstdio>
 #include <cwchar>
@@ -242,8 +243,7 @@ Body BodyOfBomber(JetBody b) noexcept {
 }
 
 unsigned char* ShellCreate(const wchar_t* sgo,const float* m,bool& ok) noexcept {
-    InitParam param{image+kInitParamVtable,{}};
-    __try { return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,sgo,&param); }
+    __try { return scene::CreateSceneObject(m,sgo); }
     __except(FaultLog("JET shell create (off for this mission)",GetExceptionInformation())) {
         ok=false;
         return nullptr;

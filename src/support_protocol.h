@@ -56,16 +56,15 @@ static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits")
 // other guest's hello) and so knows which guests have which channel. Every build with plugin_net.cpp announces it.
 // kExtGravity: it plays the gravity operations' grabs and throws (gravity_net_protocol.h GRVT: the gravity gun online).
 // kExtFloatGun: it takes part in the float guns' drops, picks and owners (gravity_net_protocol.h FGUN).
-// kExtUltimate (reserved, not announced yet): the ultimate strike's channel (天罚, ultimate.cpp), for the build that brings
-// its online part: that build adds it to kExtensions / kExtBuilt and names it in support_net.cpp Features. No other use.
+// kExtUltimate (2026-10-20): it plays every machine's player's ultimate strike (天罚, ultimate.cpp; ultimate_net_protocol.h
+// ULTS) and holds back the stock beam of a call whose show it heard.
 constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtOutfit41=8u,kExtBvmPlayers=16u,
     kExtBackpack=32u,kExtPeerRoster=64u,kExtGravity=128u,kExtFloatGun=256u,
-    kExtUltimate=512u,   // reserved (see above)
+    kExtUltimate=512u,
     kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|
-        kExtGravity|kExtFloatGun;
-static_assert(!(kExtensions&kExtUltimate),"kExtUltimate is reserved until its build announces it");
+        kExtGravity|kExtFloatGun|kExtUltimate;
 // What every hello of this build announces (Tick):
-constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|kExtFloatGun;
+constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|kExtFloatGun|kExtUltimate;
 constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it
 // What a build has, both words in one (the version notice compares and names these, support_net.cpp VersionTick): the
 // capability bits low (below kMaxUnits, 4 bits), the extension bits above them.

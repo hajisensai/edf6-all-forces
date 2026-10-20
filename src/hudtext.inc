@@ -591,6 +591,9 @@ HUDTEXT(versionFeatBvmPlayers,L"players 5+ in EDF5/4.1 missions (four created)",
 HUDTEXT(versionFeatBackpack,L"support soldiers' backpack weapons",L"支援士兵的背包武器",L"支援士兵的背包武器",L"支援兵のバックパック武器")
 HUDTEXT(versionFeatGravity,L"gravity gun grabs and throws",L"重力枪抓取与投掷同步",L"重力槍抓取與投擲同步",L"グラビティガンの掴み・投げの同期")
 HUDTEXT(versionFeatFloatGun,L"float guns",L"悬浮炮同步",L"懸浮炮同步",L"浮遊砲の同期")
+HUDTEXT(versionFeatUltimate,L"the ultimate strike (others see the stock beam)",L"终极支援天罚（其他人看到原版光束）",L"終極支援天罰（其他人看到原版光束）",L"究極支援「天罰」（他の人には標準のビーム）")
+// The ultimate strike's caller online (ultimate.cpp SayOldPeers): a peer without its channel sees the stock satellite beam.
+HUDTEXT(ultimateOldPeers,L"Some teammates run an older version: they may see the stock satellite beam",L"部分队员版本旧，可能看到原版光束",L"部分隊員版本舊，可能看到原版光束",L"一部の隊員は旧版のため、標準の衛星ビームが見えることがあります")
 // --- The room's host settings and builds (host_settings.cpp; the room menu's status lines) ---
 HUDTEXT(hostSettingsHost,L"Host's settings: walk-up recruit %ls, free squad cover %ls",L"按房主设置：原版走近招募 %ls，自由小队掩护 %ls",L"按房主設定：原版走近招募 %ls，自由小隊掩護 %ls",L"ホストの設定：近づいて合流 %ls・自由小隊の援護 %ls")
 HUDTEXT(hostSettingsSilent,L"The host's All Forces is older: recruit / cover by this machine's ini",L"房主的全军出击较旧：招募 / 掩护按本机 ini",L"房主的全軍出擊較舊：招募 / 掩護按本機 ini",L"ホストの全軍出撃が古い：合流 / 援護はこの機の ini")
