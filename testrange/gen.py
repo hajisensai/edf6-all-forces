@@ -25,10 +25,11 @@ sys.path.insert(0, HERE)
 import catalog  # noqa: E402
 import recoil  # noqa: E402
 import rmpa  # noqa: E402
+import dreadnought_model  # noqa: E402
 import sazabi_model  # noqa: E402
 import sgo  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
-from vcobjects import (DEFAULT_GAME, SAZABI_JET, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
+from vcobjects import (DEFAULT_GAME, DREADNOUGHT_JET, DREADNOUGHT_TURRETS, SAZABI_JET, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
                        GROUND_VEHICLES, as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
 
 OWNER = 'testrange'   # pylib/ledger.py: the files the range writes or uses
@@ -90,6 +91,7 @@ OWN_VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_pjet_fighter_mission', '玩家战斗机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_pjet_strike_mission', '玩家攻击机（自己驾驶，空着停放；测试场生成）'),
     (SAZABI_JET, '沙扎比 MSN-04（自己驾驶，空着停放；要有沙扎比模型目录）'),
+    (DREADNOUGHT_JET, '无畏舰（自己驾驶，空着停放，全长 500 米，放在最远的点；要有无畏舰模型目录）'),
     # The NPC kinds parked for the player (BOARDABLE_PARKED): each one's parked twin (vcobjects Jet.parked: the whole
     # plane is solid, its boarding point at its side on the ground, every class may fly it).
     (parked_name('edf6tr_jet_fighter_mission'), '制空战斗机·停放（自己驾驶；测试场生成）'),
@@ -163,13 +165,14 @@ DERIVED: dict[str, str] = {
     'edf6tr_pjet_fighter_mission': 'V506_HELI',
     'edf6tr_pjet_strike_mission': 'V506_HELI',
     SAZABI_JET: 'V506_HELI',   # the Sazabi: its own model on the V506 body (vcobjects JETS)
+    DREADNOUGHT_JET: 'V506_HELI',   # the Dreadnought: the same (tools/make_dreadnought.py)
     **{parked_name(k): 'V506_HELI' for k in PARKED_KINDS},
     # Ground vehicles with no stock `_mission` SGO: the call-in one, vehicle_setup renamed (same layout).
     'edf6tr_vehicle401_striker_mission': 'VEHICLE401_STRIKER',
     'edf6tr_vehicle502_groundrobo_mission': 'VEHICLE502_GROUNDROBO',
 }
-# Vehicles too big for a spot by the player (the 1664 m submarine): they take the farthest free points.
-BIG = frozenset({'edf6tr_sub_carrier_mission'})
+# Vehicles too big for a spot by the player (the 1664 m submarine, the 500 m Dreadnought): they take the farthest free points.
+BIG = frozenset({'edf6tr_sub_carrier_mission', DREADNOUGHT_JET})
 # The range's own vehicles the M map's 「摆放」 makes (empty, for the player to drive: testrange/catalog.py category 'ours'):
 # install writes every one of them whether the plan places it or not (placeable_derived). Not an NPC kind of jet (empty,
 # it is its parked twin's place), not the enemy's jets, not the submarine carrier (1664 m, BIG).
@@ -977,6 +980,10 @@ def _with_player_heli_motion(game: Game, sgo_name: str, data: bytes) -> bytes:
 
 def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:
     """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
+    if sgo_name == DREADNOUGHT_JET:   # with its turrets' gunner seats (tools/make_dreadnought.py)
+        import make_jets
+        return make_jets.with_passenger_seats(jet_sgo(game, sgo_name, jet_model), 0, DREADNOUGHT_TURRETS,
+                                              game.read('OBJECT', make_jets.GUNNER_STOCK))
     if sgo_name in JETS:
         return jet_sgo(game, sgo_name, jet_model)
     row = OPTIONAL_VEHICLES.get(sgo_name) or next(
@@ -1070,6 +1077,14 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
         for name, data in jet_guns(game).items():
             led.put(OWNER, f'WEAPON/{name}', data)
             held.add(ledger.key(f'WEAPON/{name}'))
+    if DREADNOUGHT_JET in jets:
+        # Its fighters (the hangar launches them) and every model's airframe: tools/make_dreadnought.py's files, its own
+        # SGO aside (the range's is EDF6TR_DREADNOUGHT_MISSION.SGO: vehicle_sgo).
+        import make_dreadnought
+        for rel, data in make_dreadnought.build(game.root).items():
+            if rel != f'OBJECT/{make_dreadnought.SGO_FILE}':
+                led.put(OWNER, rel, data)
+                held.add(ledger.key(rel))
     if SAZABI_JET in jets:
         from vcobjects import sazabi_weapons, sazabi_rounds
         # A standalone range needs both the mounted weapons and plugin-fired beams. Register these
@@ -1092,7 +1107,7 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
     for name in sorted(jets):
         key = aircraft_collision.model_key(JETS[name], JET_ELEVON_MODEL if elevons else None)
         if key is not False:
-            rel = f'OBJECT/{aircraft_collision.FILES[key]}'
+            rel = f'OBJECT/{aircraft_collision.file_of(key)}'
             # Rebuild from the same Root.cpk/model recipe, never reuse a stale
             # loose shape with a different mesh or a previous collision version.
             led.put(OWNER, rel, aircraft_collision.build(game, key))
@@ -1169,6 +1184,11 @@ def _need_model(led: ledger.Ledger, game: Game, file: str) -> str:
         if folder is None:
             raise RuntimeError('没有沙扎比模型目录（models/sazabi）：测试场放不了沙扎比')
         led.put(OWNER, rel, sazabi_model.build_archive(game, folder)[0])
+    elif file in jet_models.DN_FILES:   # tools/make_dreadnought.py's, else made from its model folder
+        folder = dreadnought_model.model_dir()
+        if folder is None:
+            raise RuntimeError('没有无畏舰模型目录（models/dreadnought）：测试场放不了无畏舰')
+        led.put(OWNER, rel, dreadnought_model.build_archive(game, folder, jet_models.DN_FILES[file])[0])
     elif file in jet_models.GENERATED_FILES:
         led.put(OWNER, rel, jet_models.generated(game, file))
     else:
