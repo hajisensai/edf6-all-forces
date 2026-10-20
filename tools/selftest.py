@@ -591,6 +591,19 @@ def npc_vehicle_ai_declarations() -> None:
 
 
 @test
+def release_third_party_notices() -> None:
+    """The release zip carries THIRD-PARTY-NOTICES.txt with the licence of the EDF6 SHKT Editor code ported to pylib
+    (MIT, Copyright (c) 2026 Ktaro) next to edf6-cpk's; every ported module names its source and that licence."""
+    import build_release
+    text = build_release.notices()
+    assert 'Copyright (c) 2026 Ktaro' in text and 'MIT License' in text and 'edf6-cpk' in text, text[:200]
+    assert "z.writestr('THIRD-PARTY-NOTICES.txt', notices()" in src('tools/build_release.py')
+    for mod in ('hkfile', 'hkshape', 'model_pieces', 'shkt_check', 'vehicle_check'):
+        head = src(f'pylib/{mod}.py').split('from __future__', 1)[0]
+        assert 'Ktaro' in head and 'LICENSE.edf6-shkt-editor' in head, mod
+
+
+@test
 def frozen_collision_consumer() -> None:
     """The package gate runs the real binding and geometry consumers on portable data."""
     import frozen_collision_probe

@@ -129,6 +129,18 @@ def cmake_version() -> str:
     return m.group(1)
 
 
+def notices() -> str:
+    """THIRD-PARTY-NOTICES.txt of the release zip: the licences of the third-party code the installer carries
+    (pylib/LICENSE.*: edf6-cpk; EDF6 SHKT Editor, ported to pylib/hkfile.py, hkshape.py, model_pieces.py and the
+    rules of shkt_check.py / vehicle_check.py)."""
+    folder = os.path.join(ROOT, 'pylib')
+    parts = []
+    for name in sorted(f for f in os.listdir(folder) if f.startswith('LICENSE.')):
+        with open(os.path.join(folder, name), encoding='utf-8') as h:
+            parts.append(f'{"=" * 78}\n{name[len("LICENSE."):]}\n{"=" * 78}\n\n{h.read().strip()}\n')
+    return 'EDF6VehicleCrew - third-party notices\n\n' + '\n'.join(parts)
+
+
 def plugin_data() -> list[str]:
     """The build/Mods/Plugins files the exe bundles: each plugin installer.PLUGINS installs, its dll and its ini."""
     return [name + ext for name, _ in installer.PLUGINS for ext in installer.PLUGIN_FILES]
@@ -308,6 +320,7 @@ def main(argv: list[str]) -> int:
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:
         z.write(exe, EXE_NAME + '.exe')
         z.writestr('说明.txt', README.format(version=version).replace('\n', '\r\n').encode('utf-8-sig'))
+        z.writestr('THIRD-PARTY-NOTICES.txt', notices().replace('\n', '\r\n').encode('utf-8'))
         for src, arc in release_models():
             z.write(src, arc)
     shutil.copy2(exe, os.path.join(OUT, EXE_NAME + '.exe'))
