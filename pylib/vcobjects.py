@@ -642,8 +642,10 @@ PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15
 # src/jet_internal.h kBodies; tools/selftest.py boardable_seats_take_every_class holds them together): every SGO of one
 # takes every class into its seat, the NPC body's too (the user, 2026-10-07: the carrier an NPC called took Rangers and Air
 # Raiders only), whatever brings it: the NPC jet, its parked and requested twins, the airstrike bombers and the gunship
-# made from the strike jet (7001). The enemy's, the Primer creatures' and the submarine carrier keep the 506's seat.
-BOARDABLE_MARKS = frozenset({7001.0, 7002.0, 7003.0, 7004.0, 7005.0, 7006.0, 7007.0, 7008.0, 7009.0, 7010.0, 7011.0})
+# made from the strike jet (7001), and the Dreadnought's fighters (7041-7044). The enemy's, the Primer creatures' and the
+# submarine carrier keep the 506's seat.
+BOARDABLE_MARKS = frozenset({7001.0, 7002.0, 7003.0, 7004.0, 7005.0, 7006.0, 7007.0, 7008.0, 7009.0, 7010.0, 7011.0,
+                             7041.0, 7042.0, 7043.0, 7044.0})
 
 
 @dataclass(frozen=True)
@@ -706,6 +708,33 @@ SAZABI_CAMERA = (0.0, 26.0, -48.0)                 # over the 25.6 m mech's shou
 # funnel packs reach 25.5 m up and the tubes 15 m back), far enough back that the whole mech is in view, feet and all (the
 # simulated riding view, tools/sazabi_pose_view.py cam, 2026-10-07), the ground ahead above it.
 SAZABI_SEAT_CAMERA = ((-8.0, 28.0, -52.0), (0.0, 13.0, 10.0))
+
+# The Dreadnought (JETS[DREADNOUGHT_JET], src/dreadnought.cpp, docs/dreadnought-plan.md): the Dreadnought game's Jupiter
+# Arms heavy dreadnought, 500 m bow to stern, the player pilots; its archives are pylib/dreadnought_model.py's (built
+# from the model folder by tools/make_dreadnought.py, which checks these names). Its bow gun on its prow's muzzle bone,
+# its missiles in their cells amidships (dreadnought_model.SHIP_MUZZLES). Marks 7501-7599 are its own (src/body506.cpp).
+DREADNOUGHT_JET = 'edf6tr_dreadnought_mission'
+DREADNOUGHT_MARK = 7501.0
+DREADNOUGHT_DURABILITY = 60000.0
+_DREADNOUGHT_ARC, _DREADNOUGHT_MDB = 'EDF6VC_DN_DREADNOUGHT.MRAB', 'edf6vc_dn_dreadnought.mdb'
+DREADNOUGHT_WEAPON_BONES = ('dn_muzzle', 'dn_muzzle', 'dn_missile')
+DREADNOUGHT_CAMERA = (0.0, 160.0, -640.0)            # behind and over a 500 m ship, all of it in view
+# Riding: over its stern, looking along its deck at the horizon ahead (model frame: x left, y up, z forward).
+DREADNOUGHT_SEAT_CAMERA = ((0.0, 190.0, -560.0), (0.0, 80.0, 200.0))
+# Its hangar's fighters (src/dreadnought_hangar.cpp; src/jet_internal.h kBodies Body::dn*): NPC jets in the Dreadnought
+# game's fighters' models, crewless (its hangar launches them), boardable (src/playerjet_kinds.h kBoardable).
+# kind -> (JETS name, mark, durability, arms); each one's SGO is EDF6VC_DN_<KIND>.SGO, its model EDF6VC_DN_<KIND>.MRAB.
+DREADNOUGHT_FIGHTERS: dict[str, tuple[str, float, float, tuple[str, ...]]] = {
+    'fighter': ('edf6tr_dn_fighter_mission', 7041.0, 1100.0, _FIGHTER),
+    'defender': ('edf6tr_dn_defender_mission', 7042.0, 1300.0, _FIGHTER),
+    'bomber': ('edf6tr_dn_bomber_mission', 7043.0, 1600.0, _STRIKE),
+    'interceptor': ('edf6tr_dn_interceptor_mission', 7044.0, 900.0, _INTERCEPTOR),
+}
+
+
+def dn_file(kind: str, ext: str) -> str:
+    """A Dreadnought model's file: its archive (MRAB, pylib/dreadnought_model.py archive_name) or SGO."""
+    return f'EDF6VC_DN_{kind.upper()}.{ext}'
 
 
 # The Katyusha (tools/make_katyusha.py): a rocket truck on the Naegling's class (Vehicle402_Rocket: its turret, its
@@ -830,6 +859,15 @@ JETS: dict[str, Jet] = {
     SAZABI_JET: Jet(SAZABI_MARK, SAZABI_DURABILITY, SAZABI_WEAPONS, (f'app:/object/{_SAZABI_ARC.lower()}', _SAZABI_MDB),
                     _SAZABI_ARC, 'body', 'body', weapon_bones=SAZABI_WEAPON_BONES, player=True,
                     camera=SAZABI_CAMERA, seat_camera=SAZABI_SEAT_CAMERA, locators_on_origin=True),
+    # The Dreadnought (src/dreadnought.cpp): a 500 m ship the player pilots, on the V506 body, flown by the plugin.
+    DREADNOUGHT_JET: Jet(DREADNOUGHT_MARK, DREADNOUGHT_DURABILITY, _SHIP,
+                         (f'app:/object/{_DREADNOUGHT_ARC.lower()}', _DREADNOUGHT_MDB), _DREADNOUGHT_ARC, 'body', 'body',
+                         weapon_bones=DREADNOUGHT_WEAPON_BONES, player=True, camera=DREADNOUGHT_CAMERA,
+                         seat_camera=DREADNOUGHT_SEAT_CAMERA, locators_on_origin=True),
+    # Its fighters: NPC jets (the hangar launches them crewless) the player boards.
+    **{name: Jet(mark, hp, arms, (f'app:/object/{dn_file(k, "MRAB").lower()}', f'edf6vc_dn_{k}.mdb'), dn_file(k, 'MRAB'),
+                 'body', 'body')
+       for k, (name, mark, hp, arms) in DREADNOUGHT_FIGHTERS.items()},
 }
 # The NPC kinds the test range parks for the player (testrange/gen.py BOARDABLE_PARKED): each one's parked twin
 # (Jet.parked), named after it: edf6tr_jet_<kind>_parked_mission. Same mark, model and arms: the plugin tells them
@@ -1457,7 +1495,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         else:
             place_seat_camera(m, box, jet.seat_camera, mdl_at(jet))
     rag = m['ragdoll']
-    m['ragdoll'] = [rag[0] if airframe is False else 'app:/object/' + aircraft_collision.FILES[airframe].lower(),
+    m['ragdoll'] = [rag[0] if airframe is False else 'app:/object/' + aircraft_collision.file_of(airframe).lower(),
                     _jet_ragdoll(rag[1], body, box[0] if door or airframe is not False else None)]
     se = m.get('heli_se_table')
     if not isinstance(se, list) or len(se) <= max(JET_ROTOR_SE_ROWS):

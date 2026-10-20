@@ -33,11 +33,19 @@ SKIN = 0.03
 FILES = {None: 'EDF6VC_AIRFRAME_BOMBER.SHKT',
          **{k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.MODELS},
          **{k: f'EDF6VC_AIRFRAME_{k.upper()}.SHKT' for k in jet_models.STOCK_BOMBERS}}
+# The Dreadnought's ships (pylib/dreadnought_model.py): made from the user's model folder, so tools/make_dreadnought.py
+# writes these (assets_of), not tools/make_jets.py (assets: FILES).
+DN_FILES = {k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.DN_FILES}
+
+
+def file_of(key) -> str:
+    """The airframe file of a model_key."""
+    return FILES[key] if key in FILES else DN_FILES[key]
 
 
 def model_key(jet, model):
     """Supported rendered model, or False for aircraft built elsewhere (Primer/sub)."""
-    if jet.file in jet_models.MODELS:
+    if jet.file in jet_models.MODELS or jet.file in DN_FILES:
         return jet.file
     if jet.box_model in jet_models.STOCK_BOMBERS:
         return jet.box_model
@@ -176,7 +184,11 @@ def build(game, key, mode=None):
 
 
 def assets(game):
-    return {name: build(game, key) for key, name in FILES.items()}
+    return assets_of(game, FILES)
+
+
+def assets_of(game, files: dict) -> dict:
+    return {name: build(game, key) for key, name in files.items()}
 
 
 # The carrier's nacelles (src/nacelle_reach.h, jet_flight.cpp Thrusters): the collision is the grounded bind pose, its

@@ -42,7 +42,7 @@ def mdb_name(model: str) -> str:
     return f'edf6vc_dn_{model}.mdb'
 
 
-FILES = {archive_name(m): m for m in MODELS}   # archive -> model (pylib/jet_models.py measures them from here)
+FILES = {archive_name(m): m for m in MODELS}   # archive -> model (pylib/jet_models.py DN_FILES, which must agree)
 BODY_AT = (0.0, 1.637, 0.0)      # the V506 CAS's `default` clip: body's position (sazabi_model.BODY_AT)
 HULL = 'dn_hull'
 # The prep tool's bones (dreadnought.json) -> ours: the model's own name is its hull.
@@ -68,7 +68,16 @@ def skeleton(model: str, manifest: dict) -> list[tuple[str, str | None]]:
         for c in kids.get(b, []):
             walk(c, _ours(model, b))
     walk(model, 'body')
+    if model == SHIP:
+        out += [(b, HULL) for b in SHIP_MUZZLES]
     return out
+
+
+# The dreadnought's weapon bones (no geometry; vcobjects.DREADNOUGHT_WEAPON_BONES): its bow gun's muzzle, at the tip of
+# its prow (the vertices within MUZZLE_BAND m of its centre line and MUZZLE_BAND m of its farthest forward, at their
+# height's middle), and its missile cells, on the top of its hull over its middle.
+SHIP_MUZZLES = ('dn_muzzle', 'dn_missile')
+MUZZLE_BAND = 8.0
 
 
 # Templates (the player's Root.cpk, read only): (archive, model, material).
@@ -174,6 +183,13 @@ def build_model(game, folder: str, model: str) -> tuple[Mdb, dict[str, bytes], d
     for b, e in entry['bones'].items():
         pivots[_ours(model, b)] = tuple(e['pivot'][k] + shift[k] for k in range(3))
     pivots[HULL] = (0.0, 0.0, 0.0)
+    if model == SHIP:
+        pts = np.array([v.pos for p, _ in pieces for v in p.verts])
+        mid = pts[np.abs(pts[:, 0]) < MUZZLE_BAND]
+        tip = mid[mid[:, 2] > mid[:, 2].max() - MUZZLE_BAND]
+        pivots['dn_muzzle'] = (0.0, float(tip[:, 1].min() + tip[:, 1].max()) / 2.0, float(tip[:, 2].max()))
+        top = mid[np.abs(mid[:, 2]) < MUZZLE_BAND]
+        pivots['dn_missile'] = (0.0, float(top[:, 1].max()), 0.0)
     joints = [(n, names.index(p) if p else -1, pivots[n]) for n, p in bones]
     body_md, body_mesh = _host(game, BODY_HOST)
     light_md, light_mesh = _host(game, LIGHT_HOST)
