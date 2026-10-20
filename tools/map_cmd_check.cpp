@@ -430,7 +430,7 @@ int main() {
         Check(VehicleOrder(Order::move) && VehicleOrder(Order::attackMove) && VehicleCommandOf(Order::move)==Order::guard &&
               VehicleCommandOf(Order::attackMove)==Order::guard && VehicleCommandOf(Order::follow)==Order::follow,
               "a vehicle takes a move / attack-move as its post's guard");
-        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::hold) && static_cast<int>(Order::recruit)==8 &&
+        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::formation) && static_cast<int>(Order::recruit)==8 &&
               static_cast<int>(Order::attackMove)==10 && static_cast<int>(Order::withdraw)==11 && static_cast<int>(Order::dismountAll)==12,
               "the wire's order values: recruit stays 8, the new ones after it (move, attack-move, withdraw, dismount all, hold)");
         Check(!VehicleOrder(Order::withdraw) && !AirOrder(Order::withdraw) && !PointOrder(Order::withdraw),
@@ -525,14 +525,66 @@ int main() {
         Check(full.n==kWaypointsMost,"a full queue keeps its first points");
         Replace(full,Command{Order::follow,{0,0,0}});
         Check(!full.active && !full.n,"a plain order replaces the queue");
+        // B3: a plain point order registers nothing (no unit in the table for an order with nothing after it); a later
+        // Shift still goes after it, found on its way by its order now.
+        Waypoints plain{};
+        Replace(plain,go);
+        Check(!plain.active && !plain.n,"a plain move: nothing registered");
+        Check(!Enqueue(plain,go,start,20,second) && plain.active && plain.issued.at[0]==100 && plain.n==1,
+              "Shift after a plain move: queued after it, from its order now");
         // HOLD: an order of its own (wire value appended), a vehicle's guard of its spot, no point of the pointer's.
-        Check(static_cast<int>(Order::hold)==13 && kLastOrder==Order::hold && PlaceOrder(Order::hold) && !PointOrder(Order::hold) &&
+        Check(static_cast<int>(Order::hold)==13 && PlaceOrder(Order::hold) && !PointOrder(Order::hold) &&
               VehicleOrder(Order::hold) && VehicleCommandOf(Order::hold)==Order::guard,"HOLD: the vehicles' guard of their spot");
         Press holdPress{};holdPress.hold=true;
         const Step hs=Decide(2,holdPress,true,point,false);
         Check(hs.issue && hs.cmd.order==Order::hold,"H needs no point under the pointer");
         Check(RightClickOrder(1,false,true,true).order==Order::follow && RightClickOrder(1,true,true,true).order==Order::focus,
               "the right button on the player: follow (an enemy over it still first)");
+        // The formation order (v7): appended (14), no point, no vehicle's; its parameter's two bytes.
+        Check(static_cast<int>(Order::formation)==14 && kLastOrder==Order::formation && !PointOrder(Order::formation) &&
+              !PlaceOrder(Order::formation) && !VehicleOrder(Order::formation) && !AirOrder(Order::formation),
+              "FORMATION: appended, no point, a squad's alone");
+        const std::uint32_t cycle=FormationParam(-2,7),set=FormationParam(3,-1),march=FormationParam(-1,5);
+        Check(FormationCycles(cycle) && FormationGuardShape(cycle)==-1 && FormationMarchShape(cycle)==7 && FormationParamValid(cycle),
+              "T: the defence cycled, the march set");
+        Check(!FormationCycles(set) && FormationGuardShape(set)==3 && FormationMarchShape(set)==-1 && FormationParamValid(set),
+              "a defence from the menu");
+        Check(FormationGuardShape(march)==-1 && FormationMarchShape(march)==5 && FormationParamValid(march),"a march from the menu");
+        Check(!FormationParamValid(0) && !FormationParamValid(0x10000u|set) && !FormationParamValid(0xFF00u),
+              "nothing said, a third byte, or a march 'cycled': not a formation order");
+        Check(Command{}.param==0 && Command{Order::guard,{1,2,3}}.param==0,"every other order's param is 0");
+        // UnitRef (B2): a squad found again through any member alive; its top's identity written back.
+        const UnitKey top{reinterpret_cast<const void*>(0x100),reinterpret_cast<const void*>(0x101)},
+                      m1{reinterpret_cast<const void*>(0x200),reinterpret_cast<const void*>(0x201)},
+                      m2{reinterpret_cast<const void*>(0x300),reinterpret_cast<const void*>(0x301)},
+                      other{reinterpret_cast<const void*>(0x400),reinterpret_cast<const void*>(0x401)};
+        UnitRef ref{};const UnitKey ms2[2]={m1,m2};Remember(ref,top,ms2,2);
+        Check(ref.n==2 && Names(ref,top) && Names(ref,m2) && !Names(ref,other),"a squad's ref: its top and members");
+        const UnitKey listed[2]={other,top};
+        struct World { bool topAlive,m1Alive,m2Alive; UnitKey m2Top; } wd{true,true,true,top};
+        const auto topOf=[&](const UnitKey& k,UnitKey* t){
+            if(SameKey(k,top)){if(!wd.topAlive)return false;*t=top;return true;}
+            if(SameKey(k,m1)){if(!wd.m1Alive)return false;*t=top;return true;}
+            if(SameKey(k,m2)){if(!wd.m2Alive)return false;*t=wd.m2Top;return true;}
+            if(SameKey(k,other)){*t=other;return true;}
+            return false;
+        };
+        bool alive=false;
+        Check(ResolveUnit(ref,listed,2,topOf,&alive)==1 && alive,"its top listed: that one");
+        wd.topAlive=false;wd.m1Alive=false;wd.m2Top=other;
+        const UnitKey listedNew[1]={other};
+        Check(ResolveUnit(ref,listedNew,1,topOf,&alive)==0 && alive && SameKey(ref.top,other),
+              "its top dead: the top of its living member (a guest's view: no hand-over record)");
+        wd.m2Alive=false;UnitRef lost{};lost.top=m1;lost.n=1;lost.member[0]=m2;
+        Check(ResolveUnit(lost,listedNew,1,topOf,&alive)==-1 && !alive,"none of it alive: gone");
+        wd.m2Alive=true;wd.m2Top=m2;UnitRef apart{};apart.top=m1;apart.n=1;apart.member[0]=m2;
+        Check(ResolveUnit(apart,listedNew,1,topOf,&alive)==-1 && alive,"alive but not listed (out of the update a while): kept");
+        UnitKey many[kUnitMembers+4];
+        for(int i=0;i<kUnitMembers+4;++i)many[i]=UnitKey{reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x1000+16*i)),nullptr};
+        UnitRef big{};Remember(big,top,many,kUnitMembers+4);
+        Check(big.n==kUnitMembers,"members bounded (kUnitMembers)");
+        UnitRef grown=ref;const UnitKey now1[1]={m2};Remember(grown,top,now1,1);
+        Check(grown.n==2 && SameKey(grown.member[0],m2) && Names(grown,m1),"members taken in again: the ones now first, the old kept");
     }
 
     std::printf("map_cmd_check: %d cases, %d failures\n",cases,failures);

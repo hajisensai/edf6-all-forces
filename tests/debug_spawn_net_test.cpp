@@ -42,8 +42,9 @@ struct Node {
     Room* room=nullptr;unsigned id=0;
     std::unique_ptr<Session> session=std::make_unique<Session>();
     std::uint64_t nonce=0;
-    unsigned plans=0,validations=0,spawns=0,destroys=0;
+    unsigned plans=0,validations=0,spawns=0,destroys=0,prepares=0;
     bool failSpawn=false,remote=false;
+    int loadsLeft=0;   // PREPARE's loads (Hooks::prepare): pending this many more times, -1 for ever, then ready
     Plan last{};
     std::vector<Registration> registrations;
 };
@@ -123,6 +124,13 @@ bool Spawn(std::uint64_t token,const Plan& p,bool remote) noexcept {
     for(unsigned i=0;i<p.count;++i)current->registrations.push_back({token,p.units[i],true});
     return !current->failSpawn;
 }
+PlanResult Prepare(const Plan& p) noexcept {
+    ++current->prepares;
+    if(ds::NetworkPlanRow(p)<0)return PlanResult::refused;
+    if(current->loadsLeft<0)return PlanResult::pending;
+    if(current->loadsLeft>0){--current->loadsLeft;return PlanResult::pending;}
+    return PlanResult::ready;
+}
 void Destroy(std::uint64_t token) noexcept {
     ++current->destroys;
     for(auto& r:current->registrations)if(r.token==token)r.alive=false;
@@ -131,6 +139,7 @@ Room::Room() {
     for(unsigned i=0;i<nodes.size();++i) {
         auto n=std::make_unique<Node>();n->room=this;n->id=i;n->nonce=100000+1000*i;
         Backend backend{n.get(),&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&Derive}};
+        backend.hooks.prepare=&Prepare;
         n->session->Configure(backend);nodes[i]=std::move(n);
     }
     Start();
@@ -157,7 +166,7 @@ void SuccessAndReplay() {
 }
 void PrepareMismatch() {
     Room r;r.corruptDescriptorTo=2;Check(r.Submit(),"descriptor mismatch request submitted");r.Settle();
-    Check(r.nodes[2]->validations>0,"mismatched peer validates the complete prepared plan");
+    Check(r.nodes[2]->validations+r.nodes[2]->prepares>0,"mismatched peer checks the complete prepared plan (its loads / validation)");
     for(const auto& n:r.nodes)Check(!n->spawns && n->registrations.empty() && !n->session->ActiveCount(),"descriptor mismatch at prepare prevents any native creation");
     Check(!r.Sent(Kind::commit) && !r.Sent(Kind::activate),"a rejected prepare cannot commit or activate");
 }
@@ -229,8 +238,8 @@ void InvalidPlans() {
     Check(ds::NetworkPlanRow(p)==row,"valid enemy plan resolves its native row");
     Check(!ds::BuildNetworkPlan(-1,p.units[0].matrix,&p) && !ds::BuildNetworkPlan(ds::kEntryCount,p.units[0].matrix,&p),"out-of-range catalog rows rejected");
     Check(!ds::BuildNetworkPlan(row,nullptr,&p) && !ds::BuildNetworkPlan(row,p.units[0].matrix,nullptr),"missing plan inputs rejected");
-    for(int i=0;i<ds::kEntryCount;++i)if(ds::kEntries[i].how!=ds::How::enemy)
-        Check(!ds::BuildNetworkPlan(i,valid.units[0].matrix,&p),"non-enemy rows never enter enemy network catalog");
+    for(int i=0;i<ds::kEntryCount;++i)if(!ds::NetworkKind(ds::kEntries[i].how))
+        Check(!ds::BuildNetworkPlan(i,valid.units[0].matrix,&p),"a support call's row never enters the range's network catalog");
     float bad[16];std::memcpy(bad,valid.units[0].matrix,sizeof(bad));bad[0]=std::numeric_limits<float>::quiet_NaN();
     Check(!ds::BuildNetworkPlan(row,bad,&p),"NaN matrix rejected before planning");
     std::memcpy(bad,valid.units[0].matrix,sizeof(bad));bad[12]=std::numeric_limits<float>::infinity();
@@ -259,7 +268,57 @@ void InvalidPlans() {
     Check(!Encode(unit,bytes,sizeof(bytes)),"wire codec also rejects malformed enemy matrices");
 }
 }
+// The kinds online (the map's 「摆放」 of vehicles, soldiers and drones): each its own resource byte, the enemies' the one
+// an older build reads (it refuses the others at PREPARE instead of making an enemy of them).
+void Kinds() {
+    int kinds[4]{};
+    for(int row=0;row<ds::kEntryCount;++row) {
+        const auto& e=ds::kEntries[row];
+        if(!ds::NetworkKind(e.how))continue;
+        const float at[3]={1,2,3};float matrix[16];Matrix(matrix,at);Plan p;
+        Check(ds::BuildNetworkPlan(row,matrix,&p) && ds::NetworkPlanRow(p,false)==row,"every object row builds and resolves its plan");
+        const std::uint32_t byte=p.units[0].resourceId>>24;
+        Check(byte==ds::KindByte(e.how) && (e.how==ds::How::enemy)==(byte==0xE1u),"its kind in the resource's high byte; 0xE1 the enemies'");
+        ++kinds[e.how==ds::How::enemy ? 0 : e.how==ds::How::vehicle ? 1 : e.how==ds::How::soldier ? 2 : 3];
+        // An older build's reading (enemy rows alone, 0xE1): a non-enemy plan resolves to no row there.
+        if(e.how!=ds::How::enemy) {
+            int legacy=-1;
+            for(int i=0;i<ds::kEntryCount;++i)if(ds::kEntries[i].how==ds::How::enemy &&
+                (0xE1000000u|(static_cast<std::uint32_t>(ds::Descriptor(ds::kEntries[i]))&0xFFFFFFu))==p.units[0].resourceId)legacy=i;
+            Check(legacy<0,"an older build finds no enemy row for a vehicle / soldier / drone plan");
+        }
+    }
+    Check(kinds[0] && kinds[1] && kinds[2] && kinds[3],"the catalog has every kind (enemy, vehicle, soldier, drone)");
+    // One of each kind round trips through the real transaction on three peers.
+    for(ds::How how:{ds::How::vehicle,ds::How::soldier,ds::How::drone}) {
+        int row=-1;for(int i=0;i<ds::kEntryCount && row<0;++i)if(ds::kEntries[i].how==how)row=i;
+        Room r;Check(r.Submit(1,ds::Descriptor(ds::kEntries[row])),"a vehicle / soldier / drone row requested online");r.Settle();
+        for(const auto& n:r.nodes)Check(n->spawns==1 && n->registrations.size()==1 && n->session->ActiveCount()==1 &&
+            ds::NetworkPlanRow(n->last)==row,"every peer makes the same row and activates it");
+    }
+}
+// On-demand loads online (Hooks::prepare): a peer still loading the row holds its READY; nothing is made anywhere until
+// every peer has it; one that never loads times the transaction out with nothing made.
+void DeferredPrepare() {
+    {
+        Room r;r.nodes[2]->loadsLeft=10;
+        Check(r.Submit(),"a request for a row peer 2 has not loaded");r.Settle();
+        Check(r.nodes[2]->prepares>=2 && !r.Sent(Kind::commit),"peer 2 loading: its READY waits, no commit");
+        for(const auto& n:r.nodes)Check(!n->spawns,"nothing made while a peer loads");
+        r.Settle();r.Settle();
+        Check(r.Sent(Kind::commit),"loaded: READY sent, the host commits");
+        for(const auto& n:r.nodes)Check(n->spawns==1 && n->session->ActiveCount()==1,"then every peer makes and activates it");
+    }
+    {
+        Room r;r.nodes[1]->loadsLeft=-1;
+        Check(r.Submit(2),"a request for a row peer 1 never loads");r.Settle();
+        for(unsigned i=0;i<25;++i)r.Step(1000);
+        for(const auto& n:r.nodes)Check(!n->spawns && !n->session->ActiveCount(),"never loaded: timed out, nothing made anywhere");
+        Check(!r.Sent(Kind::commit),"no commit without every READY");
+    }
+}
 int main() {
     CatalogIdentity();InvalidPlans();SuccessAndReplay();PrepareMismatch();SpawnFailure();ActivationGate();StaleEpoch();
+    Kinds();DeferredPrepare();
     std::printf("debug_spawn_net: %d checks passed\n",checks);return 0;
 }

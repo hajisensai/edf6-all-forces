@@ -30,8 +30,9 @@ struct Packet {unsigned from=0,to=0;std::vector<std::uint8_t> bytes;};
 struct Room {
     std::vector<std::unique_ptr<Node>> nodes;std::deque<Packet> queue;std::vector<Packet> history;
     std::uint64_t now=10000;unsigned legacy=99,dropFrom=99,dropTo=99,failFrom=99,failTo=99;
+    unsigned oldVersion=99;   // this node's datagrams go out as version 3 (a build before the camera-relative move)
     Kind dropKind=Kind::Started,failKind=Kind::Input;bool holdActivationReplies=false;
-    explicit Room(unsigned count=3,unsigned legacyPeer=99);
+    explicit Room(unsigned count=3,unsigned legacyPeer=99,unsigned oldPeer=99);
     unsigned Peer(unsigned local,unsigned global) const {return global<local ? global+1 : global;}
     unsigned Global(unsigned local,unsigned peer) const {return peer<=local ? peer-1 : peer;}
     void Deliver(const Packet& p,const char* auth=nullptr) {
@@ -39,6 +40,7 @@ struct Room {
     }
     void Pump(){unsigned guard=0;while(!queue.empty()){
         Check(++guard<20000,"bounded reliable protocol traffic");const Packet p=queue.front();queue.pop_front();Message m;
+        if(p.from==oldVersion){Deliver(p);continue;}   // an older build's: delivered as it is (the receiver decides)
         Check(Decode(p.bytes.data(),p.bytes.size(),m),"every transported datagram decodes");
         if(p.from==dropFrom && p.to==dropTo && m.kind==dropKind)continue;
         if(holdActivationReplies && p.from==2 && p.to==0 && (m.kind==Kind::Activated || m.kind==Kind::Fault))continue;
@@ -68,7 +70,9 @@ bool Send(void* user,std::uint32_t peer,const void* bytes,std::size_t size){
     if(!Decode(bytes,size,m))return false;const unsigned to=r.Global(n.id,peer);
     if(n.id==r.failFrom && to==r.failTo && m.kind==r.failKind)return false;
     if(n.id==r.legacy && m.kind==Kind::Hello)m.capability=0;
-    const Packet p=r.PacketOf(n.id,to,m);r.history.push_back(p);r.queue.push_back(p);return true;
+    Packet p=r.PacketOf(n.id,to,m);
+    if(n.id==r.oldVersion)p.bytes[4]=3;
+    r.history.push_back(p);r.queue.push_back(p);return true;
 }
 bool Authenticate(void* user,const char* puid,const NativeId& player){
     const auto& n=*static_cast<Node*>(user);for(const auto& peer:n.room->nodes)if(peer->puid==puid)return peer->player==player || (CanonicalId(peer->secondPlayer) && peer->secondPlayer==player);return false;
@@ -87,7 +91,7 @@ bool Restore(void* user,std::uint64_t id,const LeaseSpec&){auto& n=*static_cast<
 }
 bool Activate(void* user,std::uint64_t,const LeaseSpec&){auto& n=*static_cast<Node*>(user);++n.activates;return !n.failActivate;}
 Hooks Backend(Node* n){return {n,&Send,&Authenticate,&Resolve,&Prepare,&Begin,&Validate,&Apply,&Restore,&Activate};}
-Room::Room(unsigned count,unsigned legacyPeer):legacy(legacyPeer){
+Room::Room(unsigned count,unsigned legacyPeer,unsigned oldPeer):legacy(legacyPeer),oldVersion(oldPeer){
     for(unsigned i=0;i<count;++i){auto n=std::make_unique<Node>();n->id=i;n->room=this;n->puid="player-"+std::to_string(i);n->player=Id(10+i);nodes.push_back(std::move(n));}
     for(auto& n:nodes){n->context={true,n->id==0,777,n->id ? Peer(n->id,0) : 0,count-1,n->puid.c_str()};Check(n->protocol.Configure(Backend(n.get())),"startup backend accepted");}
     Settle();
@@ -96,7 +100,7 @@ Message Unpack(const Packet& p){Message m;Check(Decode(p.bytes.data(),p.bytes.si
 void Codec(){
     Message m;m.kind=Kind::Request;m.epoch=123;m.request=7;m.spec.requesterPlayer=Id(10);m.spec.target=Id(100);
     std::vector<std::uint8_t> bytes(EncodedSize(m));Check(Encode(m,bytes.data(),bytes.size()),"request codec accepts canonical native identities");
-    Check(bytes[0]=='E' && bytes[1]=='C' && bytes[2]=='T' && bytes[3]=='L' && bytes[4]==3,"explicit ECTL/version3 byte prefix");
+    Check(bytes[0]=='E' && bytes[1]=='C' && bytes[2]=='T' && bytes[3]=='L' && bytes[4]==4,"explicit ECTL/version4 byte prefix");
     Message back;Check(Decode(bytes.data(),bytes.size(),back) && back.spec.target==m.spec.target,"semantic fields roundtrip without native struct layout");
     Room r;
     for(std::size_t n=0;n<bytes.size();++n){Check(!Decode(bytes.data(),n,back),"all truncated datagrams rejected");Check(r.nodes[0]->protocol.Receive(1,r.nodes[1]->puid.c_str(),bytes.data(),n,r.now)==(n>=4),"owned malformed/truncated magic is consumed, foreign prefix is not");}
@@ -135,6 +139,11 @@ void CapabilityAndProfiles(){
     {Room r;Check(r.Request(1,100,456),"explicit profile request queued");r.Settle();Check(!r.nodes[0]->prepares && !r.nodes[0]->begins,"mismatched requested profile rejected before prepare");}
     {Room r;r.nodes[2]->rejectPrepare=true;Check(r.Request(),"unsupported local profile request queued");r.Settle();for(const auto& n:r.nodes)Check(!n->begins,"any peer missing native support prevents every Begin");r.Closed(1,Result::PrepareFailed);}
     {Room r(34);for(const auto& n:r.nodes)Check(!n->protocol.Ready() && n->protocol.LastResult()==Result::Unsupported,"over-limit roster is unavailable, never truncated");}
+    // Version 4 (the camera-relative move): a room with a version-3 build in it is refused everywhere, not run with the
+    // enemy moving mirrored on that machine. Its hello never decodes on the host; ours never decodes there.
+    {Room r(3,99,2);Check(!r.nodes[0]->protocol.Ready(),"a version-3 peer: the host is never ready");
+     Check(!r.Request() && !r.nodes[0]->begins,"a version-3 peer in the room: no control begins");
+     Check(!r.nodes[2]->begins && !r.nodes[2]->prepares,"the version-3 peer prepares and begins nothing");}
 }
 void Authentication(){
     Room r;Message m;m.kind=Kind::Request;m.epoch=777;m.request=50;m.spec.requesterPlayer=r.nodes[2]->player;m.spec.target=Id(100);

@@ -7,6 +7,7 @@
 #pragma once
 #include <Windows.h>
 #include "mapcmd_logic.h"
+#include "npc_command.h"
 #include "range_place.h"
 #include "support_call.h"
 #include "transport.h"
@@ -119,9 +120,18 @@ bool MapCommandEats(bool front) noexcept;
 // npcai.cpp, the mark key on foot with no enemy near the screen's centre: the units selected on the map guard `at` (as G
 // on the map, in a formation round it). How many accepted it; -1 none selected. Authority is checked per unit.
 int MapCommandGuardAt(const float* at) noexcept;
-// map.cpp Frame, every game frame whether the map is open or not: the Shift-queued points advanced (a unit at its point
-// is given the next one; mapcmd_logic.h Advance). Game thread.
+// The scene's tick (crew.cpp SharedFrameTick and every soldier's pre-update, map.cpp MapHumanFrame; once a game frame
+// whoever's map is open, the player dead or watching too): the Shift-queued points of the units this machine is the
+// authority for advanced (a unit at its point is given the next one; mapcmd_logic.h Advance). Game thread.
 void MapCommandQueueTick() noexcept;
+// The one entry of an order to a unit this machine is the authority for, from `requester`: the map's own Dispatch for
+// its units, the queue's tick, and a client's network request (command_net.cpp Execute). `queued` (Shift, a point
+// order): kept after the points the unit is on its way to (accepted, nothing given yet), else given now; a plain order
+// drops the unit's queue. A queued point for a unit not listed here is refused (stale), never given at once instead.
+// `give`: how the order is given when it is (the network's executor, npcai.cpp NpcMapCommandForRequester).
+using MapCommandGive=NpcCommandResult(*)(const ObjRef&,const mapcmd::Command&,const ObjRef&,const ObjRef&) noexcept;
+NpcCommandResult MapCommandAuthority(const ObjRef& unit,const mapcmd::Command& c,const ObjRef& requester,const ObjRef& focus,
+                                     bool queued,MapCommandGive give) noexcept;
 
 // What the draw shows (hud.cpp MapScreen): the commandable units, the selection, the pointer and its box, the point,
 // the last word.
@@ -144,7 +154,7 @@ struct MapCommandReadout {
     int selected;              // how many are
     std::uint32_t allowedOrders=0; // union of this selection's supported Order bits (keyboard still explains refusals)
     int selectedSquads=0;      // selected, unlocked NPC squads for formation/team controls
-    bool squadToolsAllowed=false; // regroup/formation editors do not have a remote execution protocol
+    bool squadToolsAllowed=false; // the formation tools: offline, or a host of command protocol v7 (Order::formation)
     bool pointOk;
     float point[3];            // where G sends them (the pointer's ground point; the screen centre's with a pad)
     bool pointer;              // the mouse pointer shown at (px, py)

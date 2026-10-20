@@ -5180,7 +5180,13 @@ def map_commands_wired() -> None:
     # The RTS groups, the Shift queue and HOLD (2026-10-19: 「合并分组经常无效，分开也是」): SPLIT / JOIN are gone, the
     # queue goes on with the map shut (map.cpp Frame ticks it before its open test), a group follows a squad's hand-over.
     assert 'SplitSquad' not in code and 'MergeSquads' not in code and 'SplitSquad' not in src('src/npcai.cpp')
-    assert frame.index('MapCommandQueueTick();') < frame.index('if(!game.open) {'), 'the queue advances with the map shut'
+    # The Shift queues advance on the scene's tick (2026-10-20): every soldier's pre-update before the player test, and the
+    # shared frame tick (vehicles' input) -- not the player's map frame, which stops with the player dead or watching.
+    human_frame = mapc.split('bool __fastcall MapHumanFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert 'MapCommandQueueTick();' not in frame and \
+        human_frame.index('MapCommandQueueTick();') < human_frame.index('if(!human || !human[kHumanPlayer]'), 'the queue advances on the scene tick'
+    assert 'GuardedTick(kStepMapQueue,&MapCommandQueueTick);' in src('src/crew.cpp')
+    assert 'crew::AuthorityQueue();' in src('tools/map_command_runtime_check.cpp')
     assert 'NpcSquadSuccessor(' in code and 'handovers[handoverNext]=Handover{' in src('src/npcai.cpp')
     assert 'crew::RtsGroups();' in src('tools/map_command_runtime_check.cpp')
     assert frame.index('MapCommandEats(front)') < frame.index('MapCommandFrame(in,onto)') < frame.index('Steer(human,dt,front') < frame.index('PumpPayloadUi(human)'), 'UI capture and mark edges precede camera drag; map requests pump while native inputs are held'

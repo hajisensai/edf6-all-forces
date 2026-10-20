@@ -244,7 +244,7 @@ void NoteForeignVersion(std::uint32_t peer,const unsigned char* bytes,std::uint3
     if(!peer || peer>support_net::kMaxPeers || count<8)return;
     std::uint32_t magic=0,version=0;std::memcpy(&magic,bytes,4);std::memcpy(&version,bytes+4,4);
     if(magic!=command_net::kMagic)return;
-    const std::uint32_t seen=version==command_net::kVersion ? 0u : version;
+    const std::uint32_t seen=command_net::Compatible(version) ? 0u : version;   // v6 and v7 negotiate (command_protocol.h)
     if(commandVersionOf[peer]!=seen && seen)
         Log("SUPPORT NET peer %u sends map commands of protocol v%u (this build: v%u): its map orders are not synchronised",peer,version,
             command_net::kVersion);
@@ -376,6 +376,10 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
         return hooks.plan ? hooks.plan(catalog,target,loadout,out) : support_net::PlanResult::refused;
     };
     combined.planForRequester=&PlanForRequester;
+    combined.prepare=[](const support_net::Plan& plan) noexcept {   // the range's rows load before READY (debug_spawn.cpp)
+        return plan.catalogId==debugspawn::kNetworkCatalog ? PrepareRangeEnemy(plan) :
+            hooks.prepare ? hooks.prepare(plan) : support_net::PlanResult::ready;
+    };
     combined.validate=[](const support_net::Plan& plan) noexcept {
         return plan.catalogId==debugspawn::kNetworkCatalog ? ValidateRangeEnemy(plan) :
             PvpValidateSupportPlan(plan) && hooks.validate && hooks.validate(plan);

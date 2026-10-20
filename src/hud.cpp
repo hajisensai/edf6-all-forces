@@ -3872,6 +3872,7 @@ const wchar_t* MapOrderWord(Order o) noexcept {
     case Order::attackMove: return Tr(Tx::orderAttackMove);
     case Order::dismountAll: return Tr(Tx::orderDismountAll);
     case Order::hold: return Tr(Tx::orderHold);
+    case Order::formation: return Tr(Tx::btnFormationShort);
     case Order::none: break;
     }
     return L"-";
@@ -4980,7 +4981,10 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     const float barBottom=height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+40.0f)*s;
     MapSupportBar(drawer,ctx,text,width,s,barTop,barBottom,m.pad,c,lines,at);
     // The right-hand dock (MapDock): under the scale / compass and the payload panel, the enemy control, PVP and the
-    // range's 「摆放」 down to the legend folded at its foot, each in its own band.
+    // range's 「摆放」 down to the legend folded at its foot, each in its own band. A band changes only by the user's own
+    // click on its panel's title (or L3 / R3 into it): a pick, a hover or a selection never folds or unfolds one
+    // (mapcmd.cpp SetEnemyCandidate), so the panels under it never move on their own (the user, 2026-10-19: 「这个展开和
+    // 收起会自动变，我不好点」). A folded panel keeps only its title's height: the 「摆放」 list keeps its rows.
     const float dockTop=std::fmax(206.0f*s,payloadBottom+10.0f*s);
     const float dockBottom=MapLegend(drawer,ctx,text,width,s,barBottom,m.pad,c,lines,at)-8.0f*s;
     const float enemyBottom=MapEnemyPanel(drawer,ctx,text,width,s,dockTop,dockBottom,m.pad,c,lines,at);

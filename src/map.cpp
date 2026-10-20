@@ -645,8 +645,6 @@ bool Frame(unsigned char* human) noexcept {
     float dt=game.last.QuadPart ? static_cast<float>(t.QuadPart-game.last.QuadPart)/static_cast<float>(hz.QuadPart) : 0.0f;
     game.last=t;
     if(!(dt>0.0f) || dt>0.1f)dt=1.0f/60.0f;
-    // The map's Shift-queued points go on with the map shut too (mapcmd.cpp; the units walk on to the next one).
-    MapCommandQueueTick();
     if(game.open && now-game.frameAt>kFreshMs)Close("the game was paused");   // its Esc read by the pause menu, not here
     game.frameAt=now;
     if(!c.enabled || !c.map){Close(c.enabled ? "Map=0" : "plugin off");return false;}
@@ -738,6 +736,9 @@ TvInput TvRead(const unsigned char* human) noexcept {
 bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
     __try {
         SupportActorFrame(human);
+        // The Shift-queued points of this machine's units (mapcmd.cpp): from every soldier's pre-update, once a frame,
+        // so they go on with every map shut, the player dead or watching (a vehicle's input ticks it too: crew.cpp).
+        MapCommandQueueTick();
         if(!human || !human[kHumanPlayer] || !IsPlayer(human))return false;
         FrameTick();       // shared scene-clock anchor, including missions with no surviving vehicle
         TransportTick();   // the squads' transports (transport.cpp), after the deliveries that start them
