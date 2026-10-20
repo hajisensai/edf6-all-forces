@@ -591,7 +591,10 @@ _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
 JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7005.0: 120000.0, 7006.0: 2200.0,
               7007.0: 2200.0, 7008.0: 2200.0, 7009.0: 120000.0, 7010.0: 120000.0, 7011.0: 70000.0, 7020.0: 16000.0,
               7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0,
-              7401.0: 71200.0}   # the Sazabi: its canonical full weight (30.5 t empty)
+              7401.0: 71200.0,   # the Sazabi: its canonical full weight (30.5 t empty)
+              # the Dreadnought's fighters (a light fighter's, the bomber a strike jet's), and the Dreadnought: a 500 m
+              # ship's displacement (a supercarrier's ~100 kt)
+              7041.0: 14000.0, 7042.0: 15000.0, 7043.0: 22000.0, 7044.0: 13000.0, 7601.0: 1.0e8}
 # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
 # round (name -> damage, frames between rounds, m a frame, frames of life, round size, blast radius, colour, spread,
 # the share of the world's gravity it falls at). Damage is per round against the player (the stock gatling's is 10,
