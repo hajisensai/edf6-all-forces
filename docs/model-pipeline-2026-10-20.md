@@ -114,8 +114,21 @@ M163 / BMPT（`tracked_collision.MESH_FITTED = True`，**默认新路径**；`bu
 
 ## 未覆盖 / 风险
 
-- 所有改变游戏物理的改动都**未实机**：机身主体 massDistribution 删除；M163 / BMPT 默认改贴模型碰撞；各形状的质量属性从「AABB 盒 ×1.5 / 清零」改为按凸包算；Havok 规则重排的文件布局（与原版文件同一种布局，但游戏只验证过我们旧的追加式布局）。
+- 所有改变游戏物理的改动都**未实机**：机身主体 massDistribution 删除（飞行刚体 `src/body506.cpp MakeAirframe` 也用这个复合形状，它现在带合成的质量属性；若该刚体按形状推导惯量，飞行手感可能变化）；M163 / BMPT 默认改贴模型碰撞；各形状的质量属性从「AABB 盒 ×1.5 / 清零」改为按凸包算；Havok 规则重排的文件布局（与原版文件同一种布局，但游戏只验证过我们旧的追加式布局）。
 - 残骸抽搐的第二来源（`docs/feedback-2026-10-12-ragdoll-twitch.md`）仍未定位；机身 7 个替身代理保留 V506 的 massDistribution 是有意的例外。
 - 车辆检查的轮径规则阈值很宽（原版跨度本来就大），只能抓明显错配；悬挂压缩是「刚体底盘 + 竖直弹簧」的静态估算，游戏的 g 值没有核对。
 - V-HACD 未移植；`model_pieces` 的切分是简化版，空心细长件会切出很多块（M163 炮管 60 块）。
 - `tools/check_shkt.py` 仍未接进安装流程（与 10-12 一样，生成器各自自检）。
+
+## 全部生成器：改前 / 改后
+
+旧 = 本分支起点（`f74336b3`）的代码导出后运行；新 = 本分支末尾；同一份游戏数据（只读）。
+
+| 生成器 | 文件 | 逐字节相同 | 不同的文件 |
+|---|---|---|---|
+| make_jets | 84 | 77 | 7 个机身 SHKT：格子几何逐位相同，主体去掉 V506 的 massDistribution，凸块 / 复合带质量属性，树由统一构建器重建 |
+| make_vulcan / make_bmpt | 6 / 10 | 5 / 9 | 碰撞 SHKT：贴模型的凸块（问题 6） |
+| make_sidecar | 3 | 2 | 碰撞 SHKT：凸块几何逐位相同，地板凸包重建、树重建、质量属性 |
+| make_sedan | 3 | 2 | 碰撞 SHKT：车身凸块几何逐位相同，车门改为真正缩小的凸包（旧文件 8 个 error） |
+| make_artillery、make_chute、make_drill、make_katyusha、make_sub、make_emc、make_ultimate、make_sazabi、make_proteus、make_optics | 6、2、5、3、22、4、17、7、1、147 | 全部 | — |
+| 地图碰撞（`hkcms_build.build_collision` 的两个合成场景） | 2 | 0 | 内容相同（`hkfile.content_equal`），只是 Havok 规则的排布 |
