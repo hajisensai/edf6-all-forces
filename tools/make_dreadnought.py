@@ -29,6 +29,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import aircraft_collision  # noqa: E402
+import make_jets  # noqa: E402
 import dreadnought_model as dm  # noqa: E402
 import ledger  # noqa: E402
 import sgo  # noqa: E402
@@ -57,7 +58,9 @@ def build(root: str) -> dict[str, bytes]:
             arc, _info = dm.build_archive(game, folder, model)
             files[f'OBJECT/{dm.archive_name(model)}'] = arc
         files.update({f'OBJECT/{n}': d for n, d in aircraft_collision.assets_of(game, aircraft_collision.DN_FILES).items()})
-        files[f'OBJECT/{SGO_FILE}'] = vc.jet_sgo(game, vc.DREADNOUGHT_JET)
+        # its turrets' gunner seats after the pilot's (vcobjects.DREADNOUGHT_TURRETS): the 410 door gunner's pose
+        files[f'OBJECT/{SGO_FILE}'] = make_jets.with_passenger_seats(
+            vc.jet_sgo(game, vc.DREADNOUGHT_JET), 0, vc.DREADNOUGHT_TURRETS, game.read('OBJECT', make_jets.GUNNER_STOCK))
         for kind, (name, *_rest) in vc.DREADNOUGHT_FIGHTERS.items():
             files[f'OBJECT/{FIGHTER_SGOS[kind]}'] = vc.jet_sgo(game, name)
     check(files)
@@ -95,6 +98,10 @@ def check(files: dict[str, bytes]) -> None:
         names = {md.name_of(b.name) for b in md.bones}
         missing = {b for b, _ in v['vehicle_weapon_setting']} - names
         assert not missing, f'{file}: model lacks weapon bones {missing}'
+        if file == SGO_FILE:   # a gunner seat a turret, every turret's bones in the model
+            make_jets.check_passenger_seats(files[f'OBJECT/{file}'], 1 + vc.DREADNOUGHT_TURRETS, file, 1)
+            turrets = {f'dn_turret_{n}{s}' for n in range(vc.DREADNOUGHT_TURRETS) for s in ('', '_gun', '_muzzle')}
+            assert turrets <= names and f'dn_turret_{vc.DREADNOUGHT_TURRETS}' not in names, sorted(turrets - names)
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

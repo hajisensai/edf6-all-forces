@@ -721,6 +721,9 @@ DREADNOUGHT_MARK = 7601.0
 DREADNOUGHT_DURABILITY = 60000.0
 _DREADNOUGHT_ARC, _DREADNOUGHT_MDB = 'EDF6VC_DN_DREADNOUGHT.MRAB', 'edf6vc_dn_dreadnought.mdb'
 DREADNOUGHT_WEAPON_BONES = ('dn_muzzle', 'dn_muzzle', 'dn_missile')
+# Its turrets (the user, 2026-10-21: 「船的炮塔是可以上人的」): a gunner seat each after the pilot's (seat 1 + n: turret n,
+# its bones dn_turret_<n> / _gun / _muzzle, tools/prep_dreadnought.py), the plugin turning it and firing from its muzzle.
+DREADNOUGHT_TURRETS = 8
 DREADNOUGHT_CAMERA = (0.0, 160.0, -640.0)            # behind and over a 500 m ship, all of it in view
 # Riding: over its stern, looking along its deck at the horizon ahead (model frame: x left, y up, z forward).
 DREADNOUGHT_SEAT_CAMERA = ((0.0, 190.0, -560.0), (0.0, 80.0, 200.0))
