@@ -42,6 +42,9 @@ bool Send(std::uint32_t peer,std::uint32_t featureBit,const void* bytes,std::siz
 std::uint32_t Broadcast(std::uint32_t featureBit,const void* bytes,std::size_t size) noexcept;
 // A guest to its host (false on the host itself, or a host without the feature).
 bool SendHost(std::uint32_t featureBit,const void* bytes,std::size_t size) noexcept;
+// The room's changes so far (RoomWatch: another epoch, roster, host, local PUID; and the whole Reset): state keyed by
+// the room's members outside a channel (payload.cpp's pick gates) is dropped when it moves. Game thread.
+std::uint32_t RoomGeneration() noexcept;
 // A new run's origin (rand_s; never zero).
 std::uint32_t NewOrigin() noexcept;
 }  // namespace crew::plugin_net

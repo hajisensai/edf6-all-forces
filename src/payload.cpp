@@ -36,6 +36,7 @@
 #include "edf/weapon.h"
 #include "online_authority.h"
 #include "seat_net_transport.h"
+#include "plugin_net.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -76,8 +77,13 @@ Pick picks[kTracked]{};
 // Online (seat_net.h Pick): the pick of a seat another machine runs (its player's, or the NPC gunner of the machine that
 // runs it), as its last message said: the weapon by its holder in the vehicle's holder array. And what this machine last
 // sent for a seat it runs (sent again on a change, else every kPickRefreshMs).
-struct RemotePick { ObjRef ref; unsigned seat; std::int32_t holder; bool npc; ULONGLONG at; seat_net::BasicGate<64> gate; };
+struct RemotePick { ObjRef ref; unsigned seat; std::int32_t holder; bool npc; ULONGLONG at; };
 RemotePick remotes[kTracked]{};
+// Each seat's sender watermarks, apart from the records (seat_net.h StreamGates): a record dropped when stale or taken
+// for another seat keeps its seat's gate, so a delayed older pick is never admitted again. Dropped with the vehicle,
+// the room's members (plugin_net::RoomGeneration) and the mission (ResetPayload).
+seat_net::StreamGates<kTracked*2,64> pickGates;
+std::uint32_t pickGatesRoom=0;
 struct SentPick { ObjRef ref; unsigned seat; std::int32_t holder; ULONGLONG at; };
 SentPick sentPicks[kTracked]{};
 bool pickNetOk=false;
@@ -490,8 +496,14 @@ void PickReceived(unsigned char* v,const void* block,std::size_t size) noexcept 
             if(!slot && (!r.ref || !r.ref.Is(r.ref.obj) || now-r.at>seat_net::kPickStaleMs*4))slot=&r;
         }
         if(!slot)return;
-        if(!slot->ref.Is(v) || slot->seat!=m.seat){*slot=RemotePick{};slot->ref=ObjRef::Of(v);slot->seat=m.seat;slot->holder=-1;}
-        if(!slot->gate.Admit(m.head,InSession(),here,seat_net::SeatController(v,m.seat)))return;
+        const std::uint32_t room=plugin_net::RoomGeneration();
+        if(room!=pickGatesRoom){pickGates.Reset();pickGatesRoom=room;}   // other members: their watermarks with them
+        const ObjRef ref=ObjRef::Of(v);
+        auto* const gate=pickGates.For({ref.obj,ref.ctrl,m.seat},[](const void* obj,const void* ctrl) noexcept {
+            return Readable(obj,kSelfCtrl+8) && ObjRef{obj,ctrl}.Is(obj);
+        });
+        if(!gate || !gate->Admit(m.head,InSession(),here,seat_net::SeatController(v,m.seat)))return;
+        if(!slot->ref.Is(v) || slot->seat!=m.seat){*slot=RemotePick{};slot->ref=ref;slot->seat=m.seat;slot->holder=-1;}
         slot->holder=m.holder;slot->npc=(m.flags&seat_net::kNpc)!=0;slot->at=now;
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
@@ -1032,6 +1044,7 @@ void ResetPayload() noexcept {
     ClearRedirect(nullptr);
     for(auto& p:picks)p=Pick{};
     for(auto& r:remotes)r=RemotePick{};
+    pickGates.Reset();
     for(auto& x:sentPicks)x=SentPick{};
     latest=PayloadReadout{};latestMs=0;
     sightPick=SightPick{};

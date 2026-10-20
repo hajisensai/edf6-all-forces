@@ -70,6 +70,29 @@ int main() {
     drill_net::Gate dg;drill.phase=drill_net::Phase::home;
     Check(dg.Admit(drill,true,false,42) && !dg.Admit(drill,true,false,42),"the drill's gate over the common one");
 
+    // The streams' gates apart from their records (2026-10-20 review): kept until the object goes or the room's
+    // members change; a full table takes a gone object's slot, never a live one's.
+    {
+        seat_net::StreamGates<2,4> gates;
+        int objs[3]{};bool alive[3]={true,true,true};
+        const auto live=[&](const void* o,const void*) noexcept {for(int i=0;i<3;++i)if(o==&objs[i])return alive[i];return false;};
+        auto* g0=gates.For({&objs[0],nullptr,1},live);
+        Check(g0 && g0->Admit(p.head,true,false,42),"a stream's first pick");
+        Check(gates.For({&objs[0],nullptr,1},live)==g0,"the same stream: the same gate");
+        Check(!gates.For({&objs[0],nullptr,1},live)->Admit(p.head,true,false,42),"its watermark kept (a duplicate refused)");
+        auto* g1=gates.For({&objs[0],nullptr,2},live);
+        Check(g1 && g1!=g0,"another seat of it: its own gate");
+        Check(!gates.For({&objs[1],nullptr,0},live) && gates.Used()==2,"full of live streams: refused, nothing evicted");
+        alive[0]=false;
+        auto* g2=gates.For({&objs[1],nullptr,0},live);
+        Check(g2 && g2->Admit(p.head,true,false,42),"a gone object's slot taken");
+        gates.Forget(&objs[1]);Check(gates.Used()==1,"an object forgotten: its streams with it");
+        Check(!gates.For({nullptr,nullptr,0},live),"no object: no gate");
+        gates.Reset();Check(!gates.Used(),"the room's members changed: every gate dropped");
+        auto* again=gates.For({&objs[2],nullptr,0},live);
+        Check(again && again->Admit(p.head,true,false,42),"after the reset a sender starts over");
+    }
+
     // When a pick goes out.
     Check(seat_net::PickDue(false,1000,0) && seat_net::PickDue(true,1001,1000) && !seat_net::PickDue(false,1001,1000) &&
           seat_net::PickDue(false,1000+seat_net::kPickRefreshMs,1000),"at once on a change, else every refresh");

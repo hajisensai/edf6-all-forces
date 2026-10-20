@@ -241,6 +241,28 @@ void WaysMessages() {
     ++r.epoch;r.Step();
     Check(!r.nodes[1]->session->WaysOf(unit,&got),"a new mission forgets them");
 }
+// A client's short drop in the same epoch (2026-10-20 review): the host clears a queue while the client is away (the
+// clearing is never heard), the client comes back: the host's capability forgets what it kept, the queues still out are
+// sent again, the cleared one is drawn no more.
+void WaysReconnect() {
+    Room r(2);
+    const unsigned char gone[32]={7},kept[32]={8};const float pts[2][3]={{10,0,1},{20,0,2}};
+    const mapcmd::Command now{mapcmd::Order::move,{3,0,4}};
+    r.nodes[0]->session->PublishWays(gone,now,pts,2);r.nodes[0]->session->PublishWays(kept,now,pts,1);r.Pump();
+    command_net::Ways got;
+    Check(r.nodes[1]->session->WaysOf(gone,&got) && r.nodes[1]->session->WaysOf(kept,&got),"both queues drawn on the client");
+    // The client drops: not ready (its transport down), the epoch the same.
+    r.now+=300;r.nodes[1]->session->Update(false,false,r.epoch,1,1,r.now);
+    r.nodes[0]->session->PublishWays(gone,mapcmd::Command{},nullptr,0);r.Pump();   // cleared while it is away: unheard
+    Check(r.nodes[1]->session->WaysOf(gone,&got),"the clearing was not heard (the client was down)");
+    r.Step(1100);   // back: hello, the host's capability, then every queue out
+    Check(r.nodes[1]->session->Ready(),"the client is ready again");
+    Check(!r.nodes[1]->session->WaysOf(gone,&got),"the queue the host cleared while it was away is gone");
+    Check(r.nodes[1]->session->WaysOf(kept,&got) && got.n==1,"the queue still out is drawn again, from the resend");
+    // A later change still applies (the revisions the host keeps go on from the resend).
+    r.nodes[0]->session->PublishWays(kept,now,pts,2);r.Pump();
+    Check(r.nodes[1]->session->WaysOf(kept,&got) && got.n==2,"a later change after the reconnect applies");
+}
 void Protocol() {
     Room r;Check(r.nodes[1]->session->Ready(),"host command capability negotiated on current support epoch");
     Check(r.nodes[1]->session->Submit(Make(2),r.Name(1),r.now)==1,"request queues without pretending to execute");
@@ -275,4 +297,4 @@ void Protocol() {
     Check(rebound.nodes[0]->executed==1 && rebound.sent.size()==packets,"peer index cannot inherit another PUID's capability or result cache");
 }
 }
-int main(){Codec();Version7();Negotiation();WaysMessages();Protocol();std::printf("command protocol: %d checks passed\n",checks);}
+int main(){Codec();Version7();Negotiation();WaysMessages();WaysReconnect();Protocol();std::printf("command protocol: %d checks passed\n",checks);}

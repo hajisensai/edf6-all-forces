@@ -101,6 +101,19 @@ class Portable(unittest.TestCase):
         self.assertEqual(sc.sgo_problems(sgo_bytes, 'app:/object/Test_ragdoll.shkt',
                                          {'RagDollProxys.body', 'RagDollProxys.gone'}), [])
 
+    def test_mass_distribution_note_matches_aircraft_collision(self) -> None:
+        """The module's note on massDistribution says what pylib/aircraft_collision.py does (2026-10-20 review: it said
+        the airframe bodies keep their own, while the code removes the airframe body's)."""
+        doc = ' '.join((sc.__doc__ or '').split())
+        self.assertNotIn("all of pylib/aircraft_collision.py's keyframed airframe bodies", doc)
+        self.assertIn("removes the airframe body's (RagDollProxys.body", doc)
+        with open(os.path.join(os.path.dirname(__file__), '..', 'pylib', 'aircraft_collision.py'), encoding='utf-8') as f:
+            code = f.read()
+        build = code.split('def build(', 1)[1].split('def assets(', 1)[0]
+        airframe, stand_ins = build.split("if b.name == 'RagDollProxys.body':", 1)[1].split('else:', 1)
+        self.assertIn("b.value['massDistribution'].set_target(None)", airframe)
+        self.assertNotIn('set_target(None)', stand_ins.split('out = physics.write()', 1)[0])
+
     def test_legacy_tagfile_bodies(self) -> None:
         """A 4.1 ragdoll (Havok 2014 tagfile) is not skipped: its body names are what its SGO is checked against."""
         data = legacy_ragdoll(['RagDollProxys.body', 'RagDollProxys.turret'])

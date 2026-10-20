@@ -81,10 +81,15 @@ void Read(bool mission) noexcept {
     if(mission) {
         // Offline: the gunner seat as built. Online: only with every member's word saying it has it (every machine then
         // decides the same; one older member and the 408 is a stock Car for everyone).
-        const bool allowed=!room.inRoom || (surveyed && survey.builds.silent==0 && EveryoneHas(survey.common,kFeatBikeGunner));
+        const bool allowed=BikeGunnerAtSync(room.inRoom!=0,surveyed,survey.builds.silent,survey.common);
         if(bikeGunner.exchange(allowed)!=allowed || !allowed)
             Log("HOSTCFG this mission's 408 sidecar gunner seat: %s",allowed ? "open" :
                 "closed (a member's All Forces does not have it: the 408 drives as a stock Car for everyone)");
+    } else {
+        // The room / HQ frame (no mission decided here): out of a room the seat is this machine's again, so the last
+        // online mission's closed seat does not follow into an offline one.
+        const bool open=BikeGunnerOutOfMission(room.inRoom!=0,bikeGunner.load());
+        if(bikeGunner.exchange(open)!=open)Log("HOSTCFG out of the room: the 408 sidecar gunner seat is this machine's again (open)");
     }
 }
 }  // namespace
@@ -105,6 +110,11 @@ void HostSettingsRoomTick() noexcept {
 }
 
 void HostSettingsMissionSync() noexcept { Read(true); }
+
+void HostSettingsOfflineMission() noexcept {
+    const bool open=BikeGunnerOffline();
+    if(bikeGunner.exchange(open)!=open)Log("HOSTCFG an offline mission: the 408 sidecar gunner seat is this machine's (open)");
+}
 
 bool VanillaRecruitInEffect() noexcept {
     const int h=hostRecruit.load(std::memory_order_relaxed);

@@ -17,7 +17,9 @@ What the game does with a SHKT (from that report, the parts these checks rely on
   * A body whose massDistribution is null gets it from its shape's mass properties (hknpShapeProperties key
     0xF100). Every stock shape (11,281 in OBJECT) stores them; such a body over a shape without them is unlike any
     file the game ships (what the game then does is not measured: warning). A body with its own massDistribution
-    (all of pylib/aircraft_collision.py's keyframed airframe bodies) does not read them.
+    does not read them. pylib/aircraft_collision.py removes the airframe body's (RagDollProxys.body: its centre of mass
+    and inertia then come from the new shape's mass properties, the manual's 2.7) and keeps the stand-in proxies' (the
+    506 part's, over a tiny box; stale_mass_distributions lists exactly those).
   * collisionFilterInfo: bits 0-4 layer (overwritten by the game), 5-9 subsystem, 10-14 "don't collide with",
     15-30 system group; all bodies of one file share one system group.
 

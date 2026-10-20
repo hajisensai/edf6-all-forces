@@ -13,11 +13,10 @@ Registry registry;
 Peers peers;
 Room room{};
 bool ready=false;
-// The room the peers' words are of: a change (another epoch, host, roster size, this machine) forgets them.
-std::uint64_t roomEpoch=0;
-std::uint32_t roomPeers=0,roomHostPeer=0;
-bool roomHost=false;
-char roomLocal[kPuidChars+1]{};
+// The room the peers' words and the channels' state are of (plugin_net_logic.h RoomWatch): a change (another epoch, host,
+// roster size, this machine) forgets the words and resets every channel.
+RoomWatch roomWatch;
+std::uint32_t roomGeneration=0;   // RoomGeneration: each change and each whole reset
 // Host: the roster last sent, and when.
 std::uint64_t rosterSum=0,rosterAt=0;
 constexpr std::uint64_t kRosterGapMs=3000;   // sent again this often (and at once on a change): a guest that missed one
@@ -69,11 +68,6 @@ void ReceiveRoster(std::uint32_t peer,const void* bytes,std::size_t size) noexce
     }
 }
 
-bool SameRoom(const CommandNetworkContext& c) noexcept {
-    const char* local=c.localPuid ? c.localPuid : "";
-    return c.epoch==roomEpoch && c.peerCount==roomPeers && c.hostPeer==roomHostPeer && c.host==roomHost &&
-        !std::strcmp(local,roomLocal);
-}
 }  // namespace
 
 bool RegisterChannel(const Channel& channel) noexcept {
@@ -87,11 +81,14 @@ void Update(const Room& next,std::uint64_t now) noexcept {
     room=next;
     const CommandNetworkContext& c=room.context;
     const bool up=c.ready && c.send && c.peerCount && c.peerCount<=kMaxPeers;
-    if(!up || !SameRoom(c)) {
-        peers.Reset();rosterSum=0;rosterAt=0;
-        roomEpoch=c.epoch;roomPeers=c.peerCount;roomHostPeer=c.hostPeer;roomHost=c.host;
-        roomLocal[0]=0;
-        if(c.localPuid && ValidPuid(c.localPuid))strcpy_s(roomLocal,c.localPuid);
+    const RoomStep step=roomWatch.See(c,up);
+    if(step.forgetPeers){peers.Reset();rosterSum=0;rosterAt=0;}
+    if(step.resetChannels) {
+        Log("PLUGIN NET the room changed (epoch %llu, %u peers, host peer %u%s): every channel reset",
+            static_cast<unsigned long long>(c.epoch),c.peerCount,c.hostPeer,c.host ? ", hosting" : "");
+        ++roomGeneration;
+        ready=false;           // a reset sends nothing: the indexes are the new room's already
+        registry.ResetAll();   // before any channel's update of the new room
     }
     ready=up;
     if(ready && c.host && room.heard) {
@@ -116,12 +113,15 @@ bool Receive(std::uint32_t peer,const char* puid,const void* bytes,std::size_t s
 }
 
 void Reset() noexcept {
-    for(std::size_t i=0;i<registry.Count();++i)if(registry.At(i).reset)registry.At(i).reset();
-    peers.Reset();ready=false;rosterSum=0;rosterAt=0;
-    roomEpoch=0;roomPeers=0;roomHostPeer=0;roomHost=false;roomLocal[0]=0;
+    ++roomGeneration;
+    ready=false;
+    registry.ResetAll();
+    peers.Reset();rosterSum=0;rosterAt=0;
+    roomWatch.Reset();
 }
 
 bool Ready() noexcept { return ready; }
+std::uint32_t RoomGeneration() noexcept { return roomGeneration; }
 bool Host() noexcept { return ready && room.context.host; }
 std::uint32_t HostPeer() noexcept { return ready && !room.context.host ? room.context.hostPeer : 0u; }
 std::uint32_t PeerCount() noexcept { return ready ? room.context.peerCount : 0u; }

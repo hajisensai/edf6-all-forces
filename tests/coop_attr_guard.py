@@ -60,5 +60,36 @@ order = [hook.find(x) for x in ('Outfit41MissionSync();', 'HostSettingsMissionSy
 check(all(i >= 0 for i in order) and order == sorted(order), 'MissionSyncHook: colours, host settings, dialog, then the record')
 check('RedirectCall(image+kSyncCall,image+kSyncRecord' in mission, 'the call at 0x7920EA redirected only while it targets 0x78E9A0')
 
+
+# The 408's gunner seat (2026-10-20 review): an offline mission's start gives it back to this machine (the offline
+# preload only: the online one is decided by the sync above), and the room / HQ read gives it back out of a room.
+NL = chr(10)
+
+
+def body(text: str, head: str) -> str:
+    return text.split(head, 1)[1].split(NL + '}', 1)[0] if head in text else ''
+
+
+offline = body(mission, 'std::uintptr_t __fastcall PreloadHook(')
+online = body(mission, 'std::uintptr_t __fastcall SessionPreloadHook(')
+check(0 <= offline.find('HostSettingsOfflineMission();') < offline.find('LoadoutPreload('),
+      "PreloadHook (offline): the seat is this machine's before the mission loads")
+check('HostSettingsOfflineMission' not in online, "SessionPreloadHook (online): the sync's say kept")
+hs = src('src/host_settings.cpp')
+read = body(hs, 'void Read(bool mission) noexcept {')
+check('BikeGunnerAtSync(' in read and 'BikeGunnerOutOfMission(' in read, 'host_settings Read: the sync decides, the room frame resets out of a room')
+
+# The save hook (2026-10-20 review): the colour lock is held over the game's copy of GS and the put-back, one step.
+outfit = src('src/outfit41.cpp')
+save = body(outfit, 'void* __fastcall SaveJobHook(')
+lock_at = save.find('ColourLockHeld held')
+call_at = save.find('image+kSaveJob')
+restore_at = save.find('RestoreJobCopy(')
+check(0 <= lock_at < call_at < restore_at, 'SaveJobHook: the colour lock taken before the game copies GS, held to the put-back')
+check(save.find('ColourLockHeld held') < save.find('Log(') and save.rfind('}', 0, save.find('Log(')) > restore_at,
+      'SaveJobHook: the lock scope closes before logging')
+recolour = body(outfit, 'void Recolour(int p) noexcept {')
+check('AcquireSRWLockExclusive(&colourLock)' in recolour, 'Recolour swaps under the same lock')
+
 print(f'coop_attr_guard: {checks - failed}/{checks} checks passed')
 sys.exit(1 if failed else 0)
