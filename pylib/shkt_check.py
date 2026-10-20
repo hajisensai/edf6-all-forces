@@ -23,6 +23,11 @@ What the game does with a SHKT (from that report, the parts these checks rely on
     problems(shkt) -> list[Problem]                 the SHKT on its own
     sgo_problems(sgo_bytes, shkt_path, body_names)  body names an SGO binds to `shkt_path` that are missing
     python -B pylib/shkt_check.py FILE.SHKT ...     print the problems of each file (tools/check_shkt.py does a game)
+
+Legacy Havok 2014 binary tagfiles (magic 1E0DB0CA CEFA11D0: the EDF4.1 port ships its ragdolls as they are, EDF.dll
+keeps the old readers) are read with pylib/hk2014.py: their hkpRigidBody names are what an SGO binds to (body_names),
+and problems() checks what that format has of the rules above (duplicate / empty body names, joints between bodies of
+the file). Their shapes are not checked (hkp shapes, another layout).
 """
 from __future__ import annotations
 
@@ -32,12 +37,14 @@ import sys
 from dataclasses import dataclass
 
 import dsgo
+import hk2014
 import sgo
 from hktag import Tag
 
 Vec3 = tuple[float, float, float]
 Quat = tuple[float, float, float, float]      # x, y, z, w (Havok's order)
 
+PACKFILE_MAGIC = hk2014.MAGIC                 # a legacy Havok 2014 binary tagfile (the EDF4.1 port's ragdolls)
 MASS_PROPERTIES_KEY = 0xF100
 NO_ID = 0xFFFF
 STATIC, DYNAMIC = 0, 1                        # hknpMotionType
@@ -399,8 +406,44 @@ def _compound_problems(s: Shkt, shape: int, w: str, out: list[Problem]) -> list[
     return [i[3] for i in insts]
 
 
+def legacy_bodies(data: bytes) -> list[str]:
+    """The hkpRigidBody names of a legacy Havok 2014 tagfile, in file order (static bodies included: an SGO may bind
+    to any of them)."""
+    return [str(o.get('name') or '') for o in hk2014.read(data).objects if o.type.name == 'hkpRigidBody']
+
+
+def _legacy_problems(data: bytes) -> list[Problem]:
+    tf = hk2014.read(data)
+    out: list[Problem] = []
+    number = {id(o): k + 1 for k, o in enumerate(tf.objects)}
+    seen: dict[str, int] = {}
+    bodies = set()
+    for k, o in enumerate(tf.objects):
+        if o.type.name != 'hkpRigidBody':
+            continue
+        bodies.add(number[id(o)])
+        name = str(o.get('name') or '')
+        w = f'object {k + 1} body {name!r}'
+        if not name:
+            out.append(Problem('error', w, 'a body without a name: the SGO cannot bind it'))
+        elif name in seen:
+            out.append(Problem('error', w, f'the same name as object {seen[name]}: the SGO cannot tell them apart'))
+        seen.setdefault(name, k + 1)
+    for k, o in enumerate(tf.objects):
+        if o.type.name != 'hkpConstraintInstance':
+            continue
+        ents = list(o.get('entities') or [])        # a tuple of two object numbers (0: the world)
+        if any(e and e not in bodies for e in ents):
+            out.append(Problem('error', f'object {k + 1} joint', f'joins objects {ents}, not all rigid bodies'))
+        elif len(ents) == 2 and ents[0] and ents[0] == ents[1]:
+            out.append(Problem('error', f'object {k + 1} joint', f'joins body object {ents[0]} to itself'))
+    return out
+
+
 def problems(data: bytes) -> list[Problem]:
     """Every problem of one SHKT on its own (no SGO)."""
+    if data[:8] == PACKFILE_MAGIC:
+        return _legacy_problems(data)
     s = Shkt(data)
     out: list[Problem] = []
     seen: set[int] = set()
@@ -427,6 +470,9 @@ def problems(data: bytes) -> list[Problem]:
 
 
 def body_names(data: bytes) -> set[str]:
+    """Every body name of a SHKT (a Havok 2020 tagfile or a legacy 2014 one)."""
+    if data[:8] == PACKFILE_MAGIC:
+        return set(legacy_bodies(data))
     return {b.name for sys_ in Shkt(data).systems for b in sys_.bodies}
 
 
@@ -521,17 +567,11 @@ def sgo_problems(sgo_bytes: bytes, shkt_path: str, names: set[str], sgo_name: st
             for shkt, where, body in bound_names(members) if shkt == want and body not in names]
 
 
-PACKFILE_MAGIC = bytes.fromhex('1e0db0cacefa11d0')     # a legacy Havok packfile (the EDF4.1 port's ragdolls)
-
-
 def main(argv: list[str]) -> int:
     bad = 0
     for path in argv:
         with open(path, 'rb') as h:
             data = h.read()
-        if data[:8] == PACKFILE_MAGIC:
-            print(f'{path}: skipped: a legacy Havok packfile, not a tagfile')
-            continue
         found = problems(data)
         for p in found:
             print(f'{path}: {p}')

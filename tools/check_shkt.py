@@ -7,7 +7,8 @@ python tools/check_shkt.py [--game DIR]            Mods/OBJECT and Mods/WEAPON: 
 python tools/check_shkt.py --stock [--game DIR]    the same over the game's own files (calibration: must be clean)
 
 Exit 1 on any error. A name an SGO binds that its SHKT lacks crashes the game before the mission starts.
-Legacy Havok packfiles (the EDF4.1 port's ragdolls) are not tagfiles: listed as skipped.
+Legacy Havok 2014 tagfiles (the EDF4.1 port's ragdolls) are read with pylib/hk2014.py: their body names are checked
+like the others', of their own rules only the ones that format has (pylib/shkt_check.py).
 """
 from __future__ import annotations
 
@@ -57,14 +58,11 @@ def check(files: Files, stock_only: bool) -> Iterator[tuple[str, str]]:
     def body_names(ref: str) -> set[str] | None:
         if ref not in names:
             data = files.read(ref)
-            names[ref] = None if data is None or data[:8] == sc.PACKFILE_MAGIC else sc.body_names(data)
+            names[ref] = None if data is None else sc.body_names(data)
         return names[ref]
 
     for ref in files.own(stock_only, '.SHKT'):
         data = files.read(ref) or b''
-        if data[:8] == sc.PACKFILE_MAGIC:
-            yield ref, 'skipped: a legacy Havok packfile, not a tagfile'
-            continue
         for p in sc.problems(data):
             yield ref, str(p)
     for ref in files.own(stock_only, '.SGO'):

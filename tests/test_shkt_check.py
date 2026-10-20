@@ -26,6 +26,33 @@ def mapping_sgo(rows_afr: list[tuple[str, str]], rows_rfa: list[tuple[str, str]]
                              'ragdoll_from_animation': [row(r) for r in rows_rfa]})
 
 
+def _hk_int(v: int) -> bytes:
+    """pylib/hk2014.py's variable-length int."""
+    neg, v = v < 0, abs(v)
+    out = [(v & 0x3F) << 1 | neg]
+    v >>= 6
+    while v:
+        out[-1] |= 0x80
+        out.append(v & 0x7F)
+        v >>= 7
+    return bytes(out)
+
+
+def _hk_str(s: str) -> bytes:
+    return _hk_int(len(s)) + s.encode('latin-1')
+
+
+def legacy_ragdoll(names: list[str]) -> bytes:
+    """A minimal Havok 2014 binary tagfile (pylib/hk2014.py's format): one hkpRigidBody object (a name only) per name."""
+    import hk2014
+    out = bytearray(hk2014.MAGIC)
+    out += _hk_int(1) + _hk_int(5) + _hk_str('hk_2014.1.0-r1') + hk2014.PREAMBLE
+    out += _hk_int(2) + _hk_str('hkpRigidBody') + _hk_int(0) + _hk_int(0) + _hk_int(1) + _hk_str('name') +         _hk_int(hk2014.T_CSTRING)
+    for n in names:
+        out += _hk_int(4) + _hk_int(1) + bytes([1]) + _hk_str(n)
+    return bytes(out + _hk_int(7))
+
+
 class Portable(unittest.TestCase):
     def test_rotation(self) -> None:
         q = (0.0, 0.0, math.sin(math.pi / 4), math.cos(math.pi / 4))     # 90 degrees about z
@@ -70,6 +97,20 @@ class Portable(unittest.TestCase):
         self.assertTrue(all(p.severity == 'error' for p in missing))
         self.assertEqual(sc.sgo_problems(sgo_bytes, 'app:/object/Test_ragdoll.shkt',
                                          {'RagDollProxys.body', 'RagDollProxys.gone'}), [])
+
+    def test_legacy_tagfile_bodies(self) -> None:
+        """A 4.1 ragdoll (Havok 2014 tagfile) is not skipped: its body names are what its SGO is checked against."""
+        data = legacy_ragdoll(['RagDollProxys.body', 'RagDollProxys.turret'])
+        self.assertEqual(sc.body_names(data), {'RagDollProxys.body', 'RagDollProxys.turret'})
+        self.assertEqual(sc.problems(data), [])
+        inner = mapping_sgo([('RagDollProxys.body', 'body'), ('RagDollProxys.turret', 'turret')], [])
+        sgo_bytes = sgo.write(0x102, {'ragdoll': ['app:/object/Ragdoll_x401.shkt', inner]})
+        self.assertEqual(sc.sgo_problems(sgo_bytes, 'app:/object/Ragdoll_x401.shkt', sc.body_names(data)), [])
+        renamed = legacy_ragdoll(['RagDollProxys.body', 'RagDollProxys.turreX'])
+        missing = sc.sgo_problems(sgo_bytes, 'app:/object/Ragdoll_x401.shkt', sc.body_names(renamed))
+        self.assertEqual([p.what for p in missing], ["body 'RagDollProxys.turret' is not in OBJECT/RAGDOLL_X401.SHKT"])
+        twice = legacy_ragdoll(['RagDollProxys.body', 'RagDollProxys.body'])
+        self.assertEqual([p.severity for p in sc.problems(twice)], ['error'])
 
     def test_not_an_sgo(self) -> None:
         self.assertIsNone(sc.load_plain(b'CAS\0' + bytes(12)))
