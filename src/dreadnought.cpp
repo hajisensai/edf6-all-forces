@@ -20,7 +20,9 @@
 // Water is no hazard: the 506's ditching message is taken whole (map rays see the seabed under the sea).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
+#include "dreadnought_net.h"
 #include "drill_net.h"
+#include "seat_net_transport.h"
 #include "heli.h"
 #include "layout.h"
 #include "map.h"
@@ -70,6 +72,7 @@ struct Ship {
 constexpr int kMaxShips=4;
 Ship ships[kMaxShips]{};
 bool installed=false;
+bool netReady=false;   // the turrets' blocks (dreadnought_net.h) go over seat_net
 
 bool Live(const Ship& s) noexcept {
     const auto ctrl=static_cast<const unsigned char*>(s.ref.ctrl);
@@ -294,9 +297,29 @@ bool DreadnoughtMessage(unsigned char* v,std::uint32_t msg,void*,MessageRestore*
     return msg==kMsgWater;
 }
 
+// A turret block from another machine (dreadnought_net.h): its gunner's turret turns, and fires of no damage, here.
+void ReceivedTurrets(unsigned char* v,const void* block,std::size_t size) noexcept {
+    dreadnought_net::State s;
+    if(!installed || !Cfg().enabled || !Cfg().dreadnought || !InSession() || !IsDreadnought(v) || v[kDead] ||
+       !dreadnought_net::Decode(block,size,s))return;
+    Ship* sh=Find(v);
+    if(!sh && (sh=Make(v))==nullptr)return;
+    Turrets& r=TurretsOf(*sh);
+    if(!r.gate.Admit(s.head,true,false,-1))return;
+    const ULONGLONG ms=GameMs();
+    for(int n=0;n<kTurrets;++n) {
+        if(!(s.manned&(1u<<n)))continue;
+        Remote& rm=r.remote[n];
+        rm.yaw=s.yaw[n];rm.pitch=s.pitch[n];rm.at=ms;
+        if(s.fired&(1u<<n)){rm.fire=true;std::memcpy(rm.aim,s.aim[n],12);}
+    }
+}
+
 bool InstallDreadnought() noexcept {
     installed=Body506Ok();
-    Log("HOOK dreadnought body=%d (mark %.0f)",installed,kDreadnoughtMark);
+    netReady=installed && seat_net::Install() && seat_net::Register(dreadnought_net::kMagic,&ReceivedTurrets) &&
+             seat_net::ChainSlot(0x17DB4C8,"Dreadnought (506)");   // the 506's NetworkObject slot 17 (sazabi_net.cpp's)
+    Log("HOOK dreadnought body=%d network=%d (mark %.0f)",installed,netReady,kDreadnoughtMark);
     return installed;
 }
 

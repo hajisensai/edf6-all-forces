@@ -1153,7 +1153,8 @@ bool GunshipGunnerCamera(const unsigned char* seat,const float* stockEye,const f
 // (hud.cpp), and a round of a turret (jet_bay.cpp: the gunship's cannon round, from `from` at `at`; false: not fired).
 bool DreadnoughtGunnerCamera(const unsigned char* seat,float* eye,float* look) noexcept;
 bool DreadnoughtGunnerHud(GunnerReadout* out) noexcept;
-bool DreadnoughtRound(unsigned char* owner,const float* from,const float* at) noexcept;
+// `real`: the gunner's own round (its damage); false: a remote gunner's, seen here (no damage: theirs is theirs).
+bool DreadnoughtRound(unsigned char* owner,const float* from,const float* at,bool real) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;
 // The boarding gun (boarding.cpp): a real friendly hit suppresses damage and asks the game thread to board the

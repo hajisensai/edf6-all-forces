@@ -12,8 +12,9 @@
 //    GunnerMarks) on that point.
 //  - A turret nobody of this machine mans swings back to its rest (ahead, level).
 // Every turret is posed every frame (its two local matrices: Pose), the engine composing the worlds (sazabi.cpp's way).
-// Online, see docs/dreadnought-plan.md: a remote gunner's turret is not posed here yet, and the rounds are the gunner's
-// machine's own (the gunship's, docs/online-re.md).
+// Online (dreadnought_net.h, over seat_net.h's tag 15): each machine sends its own gunner's turret (its aim kSendMs apart,
+// at once when it fires); a turret a remote gunner mans turns to their aim here (fresh within kRemoteMs, else back to its
+// rest) and their rounds are fired here too, of no damage (the damage is theirs, once).
 constexpr int kTurrets=8;                    // pylib/vcobjects.py DREADNOUGHT_TURRETS (tools/selftest.py dreadnought_agrees)
 const wchar_t* const kTurretBones[kTurrets][3]={
     {L"dn_turret_0",L"dn_turret_0_gun",L"dn_turret_0_muzzle"},{L"dn_turret_1",L"dn_turret_1_gun",L"dn_turret_1_muzzle"},
@@ -30,6 +31,8 @@ constexpr float kCamUp=16.0f,kCamBack=42.0f; // m: the gunner's eye over its tur
 constexpr std::size_t kSeatAimStick=0x2D0;   // the rider's aim stick (the mouse's per-frame share), docs/camera-re.md §4
 constexpr std::size_t kSeatFire=0x2E4;       // the seat's primary trigger (docs/heli-input-re.md §3)
 constexpr float kSeatFireOn=0.8f;
+constexpr ULONGLONG kSendMs=50;             // ms between a gunner's aim blocks
+constexpr ULONGLONG kRemoteMs=600;          // ms a remote gunner's aim stays fresh
 
 struct Turret {
     unsigned char* rec[3]{};      // its bones' records (yaw, gun, muzzle)
@@ -38,10 +41,16 @@ struct Turret {
     ULONGLONG shotAt=0;
     int shots=0;
 };
+// A turret's remote gunner, as their blocks tell it (ReceivedTurrets).
+struct Remote { float yaw=0.0f,pitch=0.0f; ULONGLONG at=0; bool fire=false; float aim[3]{}; };
 struct Turrets {
     const void* bones=nullptr;    // the instance's bone array the records were found in
     bool ok=false,said=false;
     Turret t[kTurrets]{};
+    Remote remote[kTurrets]{};
+    seat_net::BasicGate<64> gate{};
+    dreadnought_net::State out{};  // this machine's next block: its gunner's turret and what it fired
+    ULONGLONG sentAt=0;
 };
 Turrets turrets[kMaxShips]{};
 
@@ -129,7 +138,7 @@ void GunnerLook(unsigned char* v,const unsigned char* seat,int n,const Turret& t
 }
 
 // The local gunner at turret `n`: the turret after their view, its guns at the screen's centre on the trigger.
-void Man(unsigned char* v,const unsigned char* seat,int n,Turret& t,float dt,ULONGLONG ms) noexcept {
+void Man(Turrets& r,unsigned char* v,const unsigned char* seat,int n,Turret& t,float dt,ULONGLONG ms) noexcept {
     GunnerLook(v,seat,n,t);
     float eye[3],dir[3];
     if(!CameraRay(eye,dir))return;
@@ -144,8 +153,10 @@ void Man(unsigned char* v,const unsigned char* seat,int n,Turret& t,float dt,ULO
     const bool onAim=Swing(t,std::atan2(local[0],local[2]),std::atan2(local[1],std::sqrt(local[0]*local[0]+local[2]*local[2])),dt);
     const float trigger=At<float>(seat,kSeatFire);
     const bool ready=ms-t.shotAt>=kGapMs;
-    if(onAim && ready && std::isfinite(trigger) && trigger>=kSeatFireOn && DreadnoughtRound(v,muzzle,aim)) {
+    if(onAim && ready && std::isfinite(trigger) && trigger>=kSeatFireOn && DreadnoughtRound(v,muzzle,aim,true)) {
         t.shotAt=ms;
+        r.out.fired|=static_cast<std::uint8_t>(1u<<n);
+        std::memcpy(r.out.aim[n],aim,12);
         if(Cfg().debug && t.shots++%10==0)
             Log("DREADNOUGHT v=%p turret %d round #%d at (%.0f,%.0f,%.0f), %.0f m",v,n,t.shots,aim[0],aim[1],aim[2],vec::Len(to));
     }
@@ -159,7 +170,18 @@ void Man(unsigned char* v,const unsigned char* seat,int n,Turret& t,float dt,ULO
     gunnerHudFrame=GameFrame();
 }
 
-// Every turret this frame: the local player's own (Man), the others back to their rest; all posed.
+// This machine's gunner's turret to the room (dreadnought_net.h): kSendMs apart, at once when it fired.
+void SendTurrets(Turrets& r,unsigned char* v,ULONGLONG ms) noexcept {
+    if(!r.out.manned || !(r.out.fired || ms-r.sentAt>=kSendMs))return;
+    if(!drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128))){r.out=dreadnought_net::State{};return;}
+    dreadnought_net::State s=r.out;
+    s.head.controller=-1;
+    if(netReady && seat_net::Stamp(&s,sizeof(s)) && dreadnought_net::Valid(s) && seat_net::Send(v,&s,sizeof(s)))r.sentAt=ms;
+    r.out=dreadnought_net::State{};
+}
+
+// Every turret this frame: the local player's own (Man), a remote gunner's (their blocks), the others back to their rest; all
+// posed.
 void TurretsFrame(Ship& s,unsigned char* v,float dt,ULONGLONG ms) noexcept {
     Turrets& r=TurretsOf(s);
     if(!Rig(r,v))return;
@@ -169,14 +191,21 @@ void TurretsFrame(Ship& s,unsigned char* v,float dt,ULONGLONG ms) noexcept {
     for(int n=0;n<kTurrets;++n) {
         Turret& t=r.t[n];
         const unsigned char* const seat=1+n<seats ? SeatAt(v,1+n) : nullptr;
+        Remote& rm=r.remote[n];
         if(seat && me && SeatRider(seat)==Rider::player && At<const void*>(seat,kSeatRider)==me) {
-            Man(v,seat,n,t,dt,ms);
+            Man(r,v,seat,n,t,dt,ms);
             manned=true;
+            r.out.manned|=static_cast<std::uint8_t>(1u<<n);
+            r.out.yaw[n]=t.yaw;r.out.pitch[n]=t.pitch;
+        } else if(rm.at && ms-rm.at<kRemoteMs) {   // a remote gunner's: their aim, and their round of no damage
+            Swing(t,rm.yaw,rm.pitch,dt);
+            if(rm.fire){rm.fire=false;DreadnoughtRound(v,BoneAt(t.rec[2]),rm.aim,false);}
         } else {
             Swing(t,0.0f,0.0f,dt);
         }
         Pose(t);
     }
+    SendTurrets(r,v,ms);
     if(!manned) {
         AcquireSRWLockShared(&gunnerViewLock);const bool mine=gunnerView.vehicle==v;ReleaseSRWLockShared(&gunnerViewLock);
         if(mine){AcquireSRWLockExclusive(&gunnerViewLock);gunnerView=GunnerView{};ReleaseSRWLockExclusive(&gunnerViewLock);}
