@@ -58,7 +58,9 @@ bool EnemyControlCamera(const unsigned char* human,const float*,const float*,flo
 }
 bool SazabiFirstPersonFrame(const void*,unsigned,float*) noexcept { return false; }
 bool observeCamera=false;
-bool VehicleLookCamera(const unsigned char*,float* matrix) noexcept {
+int lookOrbit=-1;   // the last VehicleLookCamera call's `orbit`: 1 round the vehicle (third person), 0 the head in place
+bool VehicleLookCamera(const unsigned char*,float* matrix,bool orbit) noexcept {
+    lookOrbit=orbit ? 1 : 0;
     if(!observeCamera)return false;matrix[8]+=.1f;return true;
 }
 const Config& Cfg() noexcept { return config; }
@@ -392,6 +394,7 @@ int main() {
     CamStepHook(cam,nullptr);CamStepHook(cam,nullptr);
     check(std::fabs(At<float>(cam,kCamMatrix+32)-.1f)<1e-6f,
           "a native camera branch that leaves its matrix untouched cannot accumulate observation rotations");
+    check(lookOrbit==1,"third person observes round the vehicle (2026-10-21: \"应该是绕着车转，而不是车后面原地转\")");
     // The outer layer/physics changes only translation between steps. Rotation is still ours and must be
     // retracted independently; whole-matrix memcmp used to accumulate another .1 of left turn each iteration.
     bool stableRotation=true;
