@@ -86,3 +86,55 @@
 - 发起者屏幕提示：房间里有对端没宣告 `kExtUltimate` 时，开演后显示「部分队员版本旧，可能看到原版光束」。
 - 离线测试 `tests/ultimate_net_test.cpp`：协议编解码与校验、多实例槽位、天色引用计数与「仍是演出写的值」判断、Seek 不补发一次性事件。
   联机部分**未实机**（无两机测试）。
+
+## 第四轮：冒烟测试的两个问题（2026-10-20，日志 `vcE.log` / `cdbE.out`）
+
+### 每帧 `FAULT ultimate: C0000005`
+
+- 栈：`UltimateTick → CirclesFrame → Sound → SoundAt → Place → Dot`。`Sound` 播玩家录音（`UltClipThere`）时调
+  `SoundAt(pos,nullptr,&p)`，`jetsound.cpp Place` 无条件 `Dot(vel,u)` 读空指针（H，代码与栈一致）。只在装了录音时触发；
+  没有录音走 `PlayCue`，不经 `SoundAt`。
+- 契约定为：`vel` 可空，表示静止声源（`src/crew.h` 注释）。定位算术抽到 `src/sound_place.h`（纯函数，监听者速度同样可空），
+  `jetsound.cpp Place` 只转调它；离线检查 `tools/sound_place_check.cpp`（ctest），`tools/selftest.py sound_at_takes_a_still_sound`
+  守 jetsound.cpp 里不再有直接读速度的副本。其它调用点：`vehsound.cpp` 7 处都传载具的速度数组（非空），`sazabi_sound.cpp`
+  已自行换成 `kStill`。
+- `GuardedTick` 吞掉异常后演出为什么还在：SEH 从 `Sound` 一路退出整个 `UltimateTick`。`Play` 开头已写 `s.done=f`，下一帧从
+  `f+1` 接着播，所以演出照常推进、到时 `Finish`。但出错那一帧 `Sound` 之后的事件**永久丢失**（不是只晚一帧）：
+  - 法阵展开音：同帧后面的法阵晚一帧生成（`tried` 还没置）；同帧的 `WavesFrame` 与阶段帧（蓄力 / 风暴 / 主炮 / 余波）整帧丢。
+  - 风暴的雷声在第 0 道闪电之后：同帧其余闪电（含伤害弹）和汇聚光那一帧丢。
+  - 主炮第 0 帧 `Sound(kUltBeam)` 在发主光柱之前，而主光柱只在第 0 帧或 Seek 落点发：**有录音时主光柱与核心光柱整段不出现**
+    （伤害的 6 % 与主视觉一起没了）。
+  - 每圈爆炸：弹已发，之后的震屏 / 闪光丢；冲击波：大冲击波的闪光与震屏丢。
+  - 同一 tick 里排在后面的其它演出、追帧剩余帧与 `Finish` 只是推迟到下一帧。
+  根因修掉后这些都不再发生；`GuardedTick` 仍只是最后一道防线（让出错帧重播会每帧重复出错，所以保持「跳过该帧」）。
+
+### 日志 `damage 2400`（应为 12000）
+
+- `UltimateStart` 用的是 `weapon+0x89C`。它由武器加载器 `0x68A920` 在 `0x68D6E3` 调星级曲线 `0xD7CE0` 求值后写入（`0x68D6EC`），
+  不是 SGO 原值（H，反汇编）。`0xD7CE0`：曲线 `[基值, 模式, 星级槽, 星级上限, 比例, 指数, 整数位]`，
+  `s = min(武器该槽星级, 上限)`、`x = 比例 × (s / 5)^指数`；模式 `& 3 == 0`（上升）取 `基值 × (1 − 比例 + x)`，`== 1`（下降）取
+  `基值 × (1 + 比例 − x)`，其它为 0；不小于 0，保留基值符号（常量 5.0 在 `0x1765A38`，H）。即 5 星时等于基值。
+- 呼叫武器由插件以 **0 星**拥有（`src/unlock_ported.h Own`：首次拥有清空 8 个星级字节，与 DLC 武器相同）。卫星模板 `eWeapon116`
+  的 AmmoDamage 曲线 `[670, 8, 0, 10, 0.8, 0.7, 1]`：0 星 = 0.2 × 基值，**12000 × 0.2 = 2400**，与日志完全一致（10 星约 1.5 倍）。
+  ReloadTime 曲线 `[3200, 21, 1, 10, 1.0, 0.3, 0]` 是下降型，0 星 = 2 × 基值：原来 15000 pt 实际要 **30000 pt**（同一根因，
+  菜单的 `$0pt` 行用同一条曲线）。
+- 不是测试者的运行时补丁造成的：`D:\APP\edf6-smoke-1020\run_installer.py` 的 `ultimate_sgo` 与源码一样写
+  `AmmoDamage.items[0] = ULTIMATE_DAMAGE`，补的只是丢掉的名字循环与 `return`；2400 恰为 0 星的 0.2 倍。
+- 修法（生成器写对字段，让游戏算出预期值）：`tools/call_weapons.py flat_curve` 把天罚 SGO 的 AmmoDamage、ReloadTime 两条曲线的
+  「比例」置 0、基值设为 12000 / 15000，任何星级都得到这两个值；菜单行（伤害、`$0pt`）同样处理。`ultimate_sgo` 生成后用
+  `star_value`（`0xD7CE0` 的 Python 版）在 0 / 5 / 10 星核对，模板曲线变成未知形状就拒绝安装。插件端不改：继续按游戏算好的
+  `+0x89C` 分配伤害。12000 / 15000 本身是方案定的数值，未调。
+- 其它呼叫武器也有同样的星级依赖（ReloadTime 都是下降型 `比例 1.0`，0 星时 pt 为基值的 2 倍，例如 KM6 模板 1020 → 2040），
+  这次没改：它们的 pt 是按实机手感调过的，改成平直会改变已有平衡，留给用户决定。
+- 未实机：改后的伤害日志应为 `damage 12000`，菜单显示 12000 / 15000pt（待下次冒烟测试确认）。
+
+### 测试覆盖缺口
+
+合并时 `ultimate_sgo` 丢了 `return dsgo.write(doc)`、`_text_row` 的 ultimate 分支丢了 `return row`，离线测试都没发现。
+`tools/selftest.py` 新增：
+- `every_call_kind_builds_synthetic`：`calls.CALLS` 每一种 brings（jets / helis / sub / vehicle / throw / gun / ultimate / gravity）
+  用合成模板（无游戏，CI 能跑）调 `weapon_sgo` 与 `_text_row`：返回 bytes / Node，各自写的字段写对；天罚伤害与 pt 在 0–10 星
+  都是预期值；非载具呼叫的文本行不被写上耐久（ultimate 分支漏 `return` 会掉进载具分支，被这一条抓到）。新增 brings 种类没有合成
+  模板时测试直接失败。三种回归（去掉两个 `return`、去掉 `flat_curve`）已逐一验证会被抓到。
+- `every_call_kind_builds_real`：有游戏时用真实模板与菜单行跑全部 calls（同 `stack` 的参数），并核对卫星伤害曲线仍是 0 星 0.2 倍
+  的形状；无游戏跳过。

@@ -909,6 +909,215 @@ def thrown_drones_marked_and_wired() -> None:
     assert 'kThrows' in src('src/airstrike.cpp') and 'JetLaunchThrown' in src('src/jet_spawn.cpp')
 
 
+# ---------------------------------------------------------------- every call's SGO and text row
+# The kinds a call brings (calls.Call.brings): tools/call_weapons.py weapon_sgo / _text_row branch on each. The 2026-10-20
+# merge dropped ultimate_sgo's `return dsgo.write(doc)` and the ultimate text branch's `return row` and nothing offline saw
+# it: these run every call through both, on synthetic templates (no game: CI) and on the real ones (with the game).
+CALL_KINDS = ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'ultimate', 'gravity')
+_STOCK_PT = [1020.0, 21.0, 1.0, 10.0, 1.0, 0.30000001192092896, 0.0]          # a call's ReloadTime star curve
+_SAT_DAMAGE = [670.0, 8.0, 0.0, 10.0, 0.800000011920929, 0.699999988079071, 1.0]   # Spritefall Destroy's AmmoDamage
+_SAT_PT = [3200.0, 21.0, 1.0, 10.0, 1.0, 0.30000001192092896, 0.0]                 # ...and its ReloadTime
+
+
+def _dnode(v):
+    """A plain value as DSGO: a list a list node, a dict a named node."""
+    if isinstance(v, dict):
+        return dsgo.Node([_dnode(x) for x in v.values()], dict(enumerate(v)))
+    return dsgo.Node([_dnode(x) for x in v]) if isinstance(v, list) else v
+
+
+def _synthetic_call_sgo(c: calls.Call) -> bytes:
+    """A stand-in for call `c`'s stock template with the fields its kind's builder reads and writes."""
+    k = c.brings
+    if k in ('jets', 'helis', 'sub'):
+        root = {'AmmoHitSizeAdjust': 0.0, 'ReloadTime': list(_STOCK_PT),
+                'Ammo_CustomParameter': [0.0, 'bomber', [1.0, 3.0, 0.5], 'app:/object/x.sgo']}
+    elif k == 'vehicle':
+        entry, fuel = ['app:/weapon/v_506heli_gatling01_l.sgo', [1.0, 0.0]], ['app:/weapon/v_fueltank.sgo', [1.0]]
+        if c.ground:
+            n = 2 if c.ground == 'bmpt' else len(cw.vehicle_weapons(c))
+            setup = [[1.0, 1.0], [0.0, 1.0], [[f'app:/weapon/stock_{i}.sgo', [1.0, [0.0, 0.0]]] for i in range(n)]]
+        else:
+            setup = [[1.0, 1.0], [0.0, 1.0, 2.0], [100.0], [entry, fuel]]
+        root = {'use_underground': 0.0, 'ReloadTime': [8000.0, 21.0, 0.0, 8.0, 1.0, 0.5, 0.0],
+                'Ammo_CustomParameter': [0.0, 0.0, 0.0, 0.0,
+                                         ['transport', 'box', 'app:/object/v506_heli.sgo', setup, ['voice']]],
+                'resource': ['app:/object/v506_heli.sgo', 'app:/weapon/v_506heli_gatling01_l.sgo']}
+    elif k == 'throw':
+        root = {'AmmoHitSizeAdjust': 1.0, 'AmmoCount': [8.0, 0.0, 0.0, 7.0, 0.5, 0.5, 0.0],
+                'ReloadTime': [480.0, 21.0, 2.0, 8.0, 1.0, 0.5, 0.0]}
+    elif k == 'gun':
+        bases = {'AmmoSpeed': 25.0, 'FireAccuracy': 0.125, 'AmmoCount': 8.0, 'ReloadTime': 360.0, 'FireInterval': 90.0}
+        root = {key: [base, float(i + 10), 0.5, 2.0, 1.0] for i, (key, base) in enumerate(bases.items())}
+        root.update({key: 0.0 for key in cw.GUN_SCALARS})
+        root.update({'AmmoAlive': 40.0, 'AmmoColor': [0.25, 0.5, 0.75, 1.0], 'AmmoClass': 'LaserBullet01',
+                     'Ammo_CustomParameter': [1.0]})
+    elif k == 'ultimate':
+        root = {'AmmoHitSizeAdjust': 0.0, 'AmmoDamage': list(_SAT_DAMAGE), 'ReloadTime': list(_SAT_PT),
+                'Ammo_CustomParameter': [0.0, 0.0, 0.0, 0.0, [0.0, 0.0, 0.0, 0.0, 'LaserBullet02'],
+                                         list(cw.ULTIMATE_VOICES[0])],
+                'Ammo_EquipVoice': list(cw.ULTIMATE_VOICES[1])}
+    elif k == 'gravity':
+        root = {'AmmoHitSizeAdjust': 0.0, 'AmmoSpeed': [30.0, 8.0, 0.0, 10.0, 0.5, 0.5, 1.0], 'AmmoAlive': 1.0,
+                'AmmoColor': [1.0, 0.0, 0.0, 1.0], 'AmmoSize': 0.5, 'AmmoDamage': 0.0}
+    else:
+        raise AssertionError(f'{c.id}: a kind this test does not know: {k}')
+    root.update({f'name.{lang.lower()}': f'stock {lang}' for lang in cw.LANGS})
+    return dsgo.write(dsgo.Document(_dnode(root), []))
+
+
+def _synthetic_call_text(c: calls.Call, template: bytes) -> dsgo.Node:
+    """A stand-in for call `c`'s template's menu row: [name, description, stat lines] as its stock one is laid out."""
+    k = c.brings
+    if k in ('jets', 'helis', 'sub'):
+        stats = [['Planes', '3'], ['Reload', '$0pt', list(_STOCK_PT)]]
+    elif k == 'vehicle':
+        stats = [['Re-request', '$0pt', [8000.0, 21.0, 0.0, 8.0, 1.0, 0.5, 0.0]], ['Durability', '1000'],
+                 ['Fuel', '100'], ['Fuel cost', '1']]
+    elif k == 'throw':
+        stats = [['Number', '$0', [8.0, 0.0, 0.0, 7.0, 0.5, 0.5, 0.0]], ['Damage', '$0', [18.0]], ['Search', '$0m', [30.0]],
+                 ['Reload', '$0 sec', [8.0, 21.0, 2.0, 8.0, 1.0, 0.5, 1.0]], ['Spread', '75.0m']]
+    elif k == 'gun':
+        stats = [[f'line {i}', '', [old, *stars, -1.0]] for i, (old, stars, _) in enumerate(cw.gun_stats(template))]
+    elif k == 'ultimate':
+        stats = [['Damage', '$0', list(_SAT_DAMAGE)], ['Attack Range', 'Radius 70.0m'], ['Reload', '$0pt', list(_SAT_PT)],
+                 ['Laser Range', '$0m', [600.0, 16.0, 2.0, 10.0, 0.8, 1.0, 1.0]], ['Shots', '160'], ['Zoom', '4.0x']]
+    else:   # gravity
+        stats = [['Projection Range', '$0m', [30.0, 8.0, 0.0, 10.0, 0.5, 0.5, 1.0]], ['Lock-on Speed', '1.0x'],
+                 ['Lock-on Range', '300m'], ['Zoom', '2.0x']]
+    return _dnode(['stock name', 'stock description', stats])
+
+
+def _check_call_outputs(c: calls.Call, out: object, row: object, lang: str, durability: float | None) -> None:
+    """Call `c`'s weapon_sgo result `out` and its `lang` text row `row` (made with `durability`): bytes / a Node, and
+    the fields its kind writes written."""
+    assert isinstance(out, bytes) and out, f'{c.id}: weapon_sgo gave {type(out).__name__}, not the SGO'
+    r = dsgo.parse(out).root
+    if 'name.en' in r.names.values():
+        assert r.get('name.en') == calls.call_name(c, 'EN'), (c.id, r.get('name.en'))
+    k = c.brings
+    if k in ('jets', 'helis', 'sub', 'throw', 'ultimate', 'gravity'):
+        assert r.get('AmmoHitSizeAdjust') == float(c.mark), (c.id, r.get('AmmoHitSizeAdjust'), c.mark)
+    if k in ('jets', 'helis', 'sub'):
+        assert r.get('ReloadTime').items[0] == c.reload, c.id
+        assert r.get('Ammo_CustomParameter').items[2].items[1] == c.count, c.id
+    elif k == 'vehicle':
+        assert r.get('ReloadTime').items[0] == c.reload, c.id
+        assert r.get('Ammo_CustomParameter').items[4].items[2] == cw._object_path(c), c.id
+        assert r.get('use_underground') == (1.0 if c.underground else 0.0), c.id
+        assert cw._object_path(c) in r.get('resource').items, c.id
+    elif k == 'throw':
+        assert r.get('AmmoCount').items[0] == c.count and r.get('ReloadTime').items[0] == c.reload, c.id
+    elif k == 'gun':
+        for key, value in cw.GUN_CURVES.items():
+            field = r.get(key)
+            assert (field.items[0] if isinstance(field, dsgo.Node) else field) == value, (c.id, key)
+        assert r.get('AmmoClass') == 'SolidBullet01' and r.get('AmmoAlive') == cw.GUN_LIFE, c.id
+    elif k == 'ultimate':
+        # The damage and the pt the call asks for at every star count (a call is owned at 0 stars: the 2026-10-20 2400).
+        for stars in range(11):
+            assert cw.star_value(r.get('AmmoDamage'), stars) == cw.ULTIMATE_DAMAGE, \
+                (c.id, stars, dsgo.to_py(r.get('AmmoDamage')))
+            assert cw.star_value(r.get('ReloadTime'), stars) == c.reload, (c.id, stars, dsgo.to_py(r.get('ReloadTime')))
+        voices = (*r.get('Ammo_CustomParameter').items[5].items, *r.get('Ammo_EquipVoice').items)
+        assert all(v == '' for v in voices), (c.id, 'its radio lines silenced', voices)
+    elif k == 'gravity':
+        assert r.get('AmmoSpeed').items[0] == cw.GRAVITY_RANGE and r.get('AmmoDamage') == 1.0, c.id
+        assert dsgo.to_py(r.get('AmmoColor')) == list(cw.GRAVITY_COLOR) and r.get('AmmoSize') == cw.GRAVITY_WIDTH, c.id
+    assert isinstance(row, dsgo.Node), f'{c.id} {lang}: _text_row gave {type(row).__name__}, not the row'
+    assert row.items[0] == calls.call_name(c, lang) and row.items[1] == calls.call_description(c, lang), (c.id, lang)
+    stats = dsgo.to_py(row.items[2])
+    if k in ('jets', 'helis', 'sub', 'vehicle'):
+        pt = [s for s in stats if len(s) == 3 and str(s[1]).startswith('$0pt')]
+        assert pt and all(s[2][0] == c.reload for s in pt), (c.id, lang, stats)
+    if k == 'vehicle' and durability is not None:
+        assert stats[1][1] == f'{durability:.0f}', (c.id, lang, stats[1])
+    elif durability is not None:
+        assert f"'{durability:.0f}'" not in repr(stats), (c.id, lang, "a vehicle request's durability line written", stats)
+    if k == 'throw':
+        assert len(stats) == 2 and stats[0][2][0] == c.count and abs(stats[1][2][0] - c.reload / 60.0) < 1e-9, (c.id, stats)
+    elif k == 'ultimate':
+        assert len(stats) == 5, (c.id, lang, "the stock beam's round count left", stats)
+        damage, reload = stats[cw._ULT_DAMAGE_STAT][2], stats[cw._ULT_RELOAD_STAT][2]
+        for stars in range(11):
+            assert cw.star_value(damage, stars) == cw.ULTIMATE_DAMAGE and cw.star_value(reload, stars) == c.reload, \
+                (c.id, lang, stars, damage, reload)
+        assert str(cw.ULTIMATE_RADIUS) in stats[cw._ULT_RANGE_STAT][1], (c.id, lang, stats[cw._ULT_RANGE_STAT])
+    elif k == 'gravity':
+        assert len(stats) == 2 and stats[0][2][0] == cw.GRAVITY_RANGE, (c.id, lang, stats)
+
+
+@test
+def every_call_kind_builds_synthetic() -> None:
+    """Every call (calls.CALLS, every kind it brings) through weapon_sgo and _text_row on stand-ins for its template
+    (no game needed: CI): the SGO comes back as bytes with its kind's fields written, each language's menu row as a
+    Node with its name, description and kind's lines; a vehicle request's durability goes on its durability line and
+    on no other kind's (the ultimate's row is not a vehicle request's)."""
+    kinds = {c.brings for c in calls.CALLS}
+    assert kinds == set(CALL_KINDS), f'a kind of call with no stand-in here: {sorted(kinds - set(CALL_KINDS))}'
+    for c in calls.CALLS:
+        template = _synthetic_call_sgo(c)
+        out = cw.weapon_sgo(template, c, [(0.0, 1.0, 1.0), (5.0, 10.0, 10.0)] if c.brings == 'vehicle' else None)
+        text = _synthetic_call_text(c, template)
+        stats = cw.gun_stats(template) if c.brings == 'gun' else None
+        for lang in cw.LANGS:
+            _check_call_outputs(c, out, cw._text_row(text, c, lang, 4321.0, stats), lang, 4321.0)
+            if c.brings != 'vehicle':
+                _check_call_outputs(c, out, cw._text_row(text, c, lang, None, stats), lang, None)
+    # The star curve as EDF.dll 0xD7CE0 reads it: the satellite's damage a fifth of its base at 0 stars, its base at 5,
+    # about 1.5 times at 10 (the most); its pt twice its base at 0 (a falling curve), its base at 5.
+    near = lambda a, b: abs(a - b) <= 1e-6 * abs(b)   # noqa: E731  (the game's float shares, read back as doubles)
+    assert near(cw.star_value([12000.0, *_SAT_DAMAGE[1:]], 0), 2400.0)
+    assert near(cw.star_value([12000.0, *_SAT_DAMAGE[1:]], 5), 12000.0)
+    assert near(cw.star_value([12000.0, *_SAT_DAMAGE[1:]], 10), 12000.0 * (0.2 + 0.8 * 2 ** 0.7))
+    assert near(cw.star_value([15000.0, *_SAT_PT[1:]], 0), 30000.0) and near(cw.star_value([15000.0, *_SAT_PT[1:]], 5), 15000.0)
+    assert cw.star_value([15000.0, *_SAT_PT[1:]], 12) == cw.star_value([15000.0, *_SAT_PT[1:]], 10), 'most stars 10'
+
+
+@test
+def every_call_kind_builds_real() -> None:
+    """With the game: every call through weapon_sgo and _text_row on its real stock template, SGO and menu rows, as
+    call_weapons.stack makes them (the vehicle requests on their families' curves, the durability shown), the same
+    checks as every_call_kind_builds_synthetic. The satellite's damage curve is still the one the flat curve was made
+    against (a fifth of its base at the 0 stars a call is owned with)."""
+    import rootcpk
+    game = rootcpk.DEFAULT_GAME
+    if not os.path.isfile(os.path.join(game, 'Root.cpk')):
+        return
+    ids = cw.row_ids(cw.stock(game, cw.TABLE))
+    texts = {lang: cw._rows(dsgo.parse(cw.stock(game, rel)), rel) for lang, rel in zip(cw.LANGS, cw.TEXTS)}
+    sgo = {t: cw.stock(game, f'WEAPON/{t.upper()}.SGO') for t in cw.templates()}
+    stock_damage = dsgo.parse(sgo[cw.ULTIMATE_TEMPLATE]).root.get('AmmoDamage')
+    assert abs(cw.star_value([cw.ULTIMATE_DAMAGE, *stock_damage.items[1:]], 0) - cw.ULTIMATE_DAMAGE * 0.2) < 0.01, \
+        dsgo.to_py(stock_damage)
+    families = {cw.request_family(c) for c in calls.CALLS if c.brings == 'vehicle'}
+    curves = {f: cw.request_curve(game, f) for f in families}
+    for c in calls.CALLS:
+        t = cw.template_of(c)
+        out = cw.weapon_sgo(sgo[t], c, curves.get(cw.request_family(c)))
+        durability = cw.vehicle_durability(game, c) if c.brings == 'vehicle' else None
+        stats = cw.gun_stats(sgo[t]) if c.brings == 'gun' else None
+        at = cw._template_index(ids, t)
+        for lang in cw.LANGS:
+            _check_call_outputs(c, out, cw._text_row(texts[lang][at], c, lang, durability, stats), lang, durability)
+
+
+@test
+def sound_at_takes_a_still_sound() -> None:
+    """SoundAt's contract (src/crew.h, src/sound_place.h): `vel` may be nullptr, a still sound; the arithmetic that reads
+    it is sound_place.h's, which checks it (2026-10-20 smoke test: the ultimate's recordings passed none, jetsound.cpp's
+    Place read through it and the show's step faulted on every cue). jetsound.cpp reads no velocity outside it; the
+    offline check runs in CI."""
+    place, jet = src('src/sound_place.h'), src('src/jetsound.cpp')
+    assert 'if(!v)return 0.0f;' in place and 'Closing(vel,u)' in place and 'Closing(camVel,u)' in place
+    assert '*out=soundplace::Place(listener,listenerVel,pos,vel);' in jet
+    assert not re.search(r'Dot\(\s*(vel|listenerVel)\s*,', jet), 'jetsound.cpp reads a velocity outside sound_place.h'
+    assert '`vel` may be nullptr' in src('src/crew.h')
+    cmake = src('CMakeLists.txt')
+    assert 'add_executable(sound_place_check EXCLUDE_FROM_ALL tools/sound_place_check.cpp)' in cmake
+    assert re.search(r'set\(EDF6_OFFLINE_CHECKS[^)]*\bsound_place_check\b', cmake)
+
+
 @test
 def cockpit_fields_current() -> None:
     """The instruments' field numbers and the round classes are one table (pylib/cockpit_fields.py): the C++ enums are
