@@ -22,12 +22,27 @@ import make_edf41_objects
 import sgo
 
 
+def _classic(v):
+    """A DSGO's values as the classic SGO the module built had them: DSGO numbers are doubles, the module's indices
+    and counts were ints (as_dsgo turned them into doubles; whole numbers back to int here)."""
+    if isinstance(v, list):
+        return [_classic(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _classic(x) for k, x in v.items()}
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    return v
+
+
 class BundledV301(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.samples = {}
         for root in edf41tank.ROOTS:
-            members = sgo.read(edf41_objects.read('OBJECT/' + root))[1]
+            data = edf41_objects.read('OBJECT/' + root)
+            # Vehicle601_Tank ships only as DSGO in EDF6 (make_edf41_objects check_class_format): so does V301
+            assert data[:4] == b'DSGO', root
+            members = _classic(edf41tank._template(data)[1])
             entry = members['animation_model'][0]
             md = edf41tank.model(edf41_objects.read(edf41tank.rel(entry[0])), entry[1])
             physics = edf41_objects.read(edf41tank.rel(members['ragdoll'][0]))

@@ -5762,7 +5762,8 @@ def npc_ai_wired() -> None:
     hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
     assert hook.index('HideWalkUp(') < hook.index('nextThink[I](human,dt);') < hook.index('h[kAutoFollow]=walkUp;')
     walk = code.split('bool WalkUpOff() noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'followOk' in walk and 'Cfg().customNpcAi' in walk and '!Cfg().vanillaRecruit' in walk, \
+    # VanillaRecruit as played (host_settings.h: the host's online, this machine's ini otherwise; 2026-10-20 review)
+    assert 'followOk' in walk and 'Cfg().customNpcAi' in walk and '!VanillaRecruitInEffect()' in walk, \
         'the walk-up stays when the map cannot recruit (AI off, SetFollow not as read) or VanillaRecruit=1'
     assert '!(joinOrder && NativeJoinable(top))' in cmd.split('switch', 1)[0]
     assert 'if(e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;' in takes
@@ -12024,8 +12025,9 @@ def edf41_rest_behaviour_real() -> None:
         with open(os.path.join(base, name + '.SGO'), 'rb') as f:
             return sgo.load(data=f.read())
 
-    def plain(v: object) -> object:
-        return [plain(x) for x in v] if isinstance(v, list) else round(v.value, 6) if isinstance(v, sgo.Float) else v
+    def plain(v: object) -> object:   # a classic SGO's Float or a DSGO's double (V301 is a DSGO: Vehicle601_Tank's form)
+        return ([plain(x) for x in v] if isinstance(v, list) else round(v.value, 6) if isinstance(v, sgo.Float) else
+                round(v, 6) if isinstance(v, float) else v)
 
     def pairs(v: list) -> list[int]:
         assert all(isinstance(x, list) and len(x) == 2 and isinstance(x[1], int) for x in v), 'not [blob, slot] pairs'

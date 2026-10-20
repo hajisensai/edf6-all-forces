@@ -169,6 +169,9 @@ ULONGLONG GameFrame() noexcept { return frame; }
 void SeeFrame(const void*) noexcept {}
 bool InSession() noexcept { return sessionOn; }
 bool OnlineHostOnly() noexcept { return !sessionOn || host; }
+// host_settings.h stand-ins: no room here, so this machine's ini (host_settings_logic.h Decide outside a room).
+bool VanillaRecruitInEffect() noexcept { return Cfg().vanillaRecruit; }
+bool NpcFreeSquadCoverInEffect() noexcept { return Cfg().npcFreeSquadCover; }
 // The real rules (online_authority.h) on the stand-in objects' flags: a soldier, no vehicle facts.
 bool IsOnlineAuthority(const void* o) noexcept {
     return online::Authority(online::Facts{sessionOn,true,host,At<std::uint16_t>(o,0x128),false,false,o==vehicle ? vehicleCopyOwner : online::kCopyHost,0});

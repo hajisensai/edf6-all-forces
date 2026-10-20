@@ -3817,7 +3817,14 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             if only and root not in only:
                 continue
             out = module.build(games, root)
-            check_vehicle_sounds(games, out['OBJECT/' + root], 'OBJECT/' + root)
+            # The same format rule as every other object (below): a class EDF6 ships only as DSGO gets a DSGO.
+            # V301 is built on Vehicle601_Tank (pylib/edf41tank.py), whose every stock SGO is one; the module
+            # writes the classic form its 4.1 source is in.
+            rel = 'OBJECT/' + root
+            check_vehicle_sounds(games, out[rel], rel)   # reads the classic form the module wrote
+            if str(sgo.load(data=out[rel]).get('xgs_scene_object_class')) in games.dsgo_only_classes():
+                out[rel] = as_dsgo(out[rel])
+            check_class_format(games.dsgo_only_classes(), rel, out[rel])
             clash = [r for r in out if r in files and files[r] != out[r]]
             if clash:
                 raise ValueError(f'{root}: vehicle resources differ between variants: {clash}')

@@ -39,17 +39,24 @@ def rip(img: bytes, site: int, length: int, disp_at: int) -> int:
 
 def audit_source() -> None:
     src = open(os.path.join(ROOT, 'src', 'room_dialog.cpp'), encoding='utf-8').read()
+    shared = open(os.path.join(ROOT, 'src', 'game_dialog.h'), encoding='utf-8').read()
     import room_dialog_sigs as sigs
     for name, value in (('kParamCtor', 0x8C320), ('kParamVtable', 0x17621F8), ('kParamBaseDtor', 0x8E540),
-                        ('kItemsDtor', 0xA9460), ('kItemDtor', 0x8E170), ('kShow', 0x119C600), ('kClose', 0x7E2EB0),
+                        ('kItemsDtor', 0xA9460), ('kShow', 0x119C600), ('kClose', 0x7E2EB0),
                         ('kLayoutName', sigs.LAYOUT_NAME_POINTER), ('kLayoutText', sigs.LAYOUT_NAME),
-                        ('kLambdaVtable', sigs.LAMBDA_VTABLE)):
+                        ('kLambdaVtable', sigs.LAMBDA_VTABLE), ('kDialogVtable', sigs.DIALOG_VTABLE),
+                        ('kDialogUpdate', sigs.DIALOG_UPDATE)):
         m = re.search(rf'\b{name}=0x([0-9A-F]+)', src)
         check(bool(m) and int(m.group(1), 16) == value, f'room_dialog.cpp {name} = {value:#x}')
-    for field, value in (('kParamTitle', 0x108), ('kParamFlags', 0x128), ('kParamCursor', 0x148), ('kParamItems', 0x150),
-                         ('kItemSize', 0x90), ('kItemImpl', 0x58), ('kItemTree', 0x80)):
+    for field, value in (('kParamTitle', 0x108), ('kParamFlags', 0x128), ('kParamCursor', 0x148), ('kParamItems', 0x150)):
         m = re.search(rf'\b{field}=0x([0-9A-F]+)', src)
         check(bool(m) and int(m.group(1), 16) == value, f'room_dialog.cpp {field} = {value:#x}')
+    # the items' layout and the game's item functions: game_dialog.h, shared with outfit41.cpp
+    for field, value in (('kItemSize', 0x90), ('kItemImpl', 0x58), ('kItemTree', 0x80), ('kItemDestroyRva', 0x8E170),
+                         ('kReserveRva', 0xB91D0), ('kItemCopyRva', 0x89950)):
+        m = re.search(rf'\b{field}=0x([0-9A-F]+)', shared)
+        check(bool(m) and int(m.group(1), 16) == value, f'game_dialog.h {field} = {value:#x}')
+    check('ok=Matches(' not in src and 'CheckSignatures(kSignatures,"ROOMDIALOG")' in src, 'the signatures checked by code_signatures.h')
     logic = open(os.path.join(ROOT, 'src', 'room_dialog_logic.h'), encoding='utf-8').read()
     check('kItemsMost=kPerPage+4' in logic, 'a page: its entries, previous, next, one action, back')
     ui = open(os.path.join(ROOT, 'src', 'room_ui.cpp'), encoding='utf-8').read()
@@ -57,6 +64,17 @@ def audit_source() -> None:
           'a screen forgotten closes the dialog over it')
     check('nativedialog::CloseDialog(st.dialog)' in ui.split('std::uint64_t Off(', 1)[1].split('}', 1)[0],
           'the menu switched off closes its dialog')
+    gone = ui.split('void NoteGone(', 1)[1].split(chr(10) + '}', 1)[0]
+    check('nativedialog::CloseDialog(st.dialog)' in gone and 'uiThread' in gone,
+          "the screen's destructor (on the UI thread) closes the dialog over it at once")
+    check('nativedialog::RequestCloseDialogs()' in ui.split('void ResetRoomUi()', 1)[1].split(chr(10) + '}', 1)[0],
+          "a mission starting has the dialog's own frame close it")
+    # a fault after the dialog was shown: closed and its weak reference released, never leaked
+    faulted = src.split('if(faulted) {', 1)[1].split('return false;', 1)[0]
+    check('CloseNow(weak.object,weak.control)' in faulted and 'ReleaseWeak(weak.control)' in faulted,
+          'a fault after the dialog was shown closes it and releases the weak reference')
+    # each dialog its own pick: no global picked / hasPicked
+    check(not re.search(r'^std::uint64_t picked', src, re.M) and 'o->handle->picked=' in src, 'the pick lands in its own Handle')
 
 
 def audit_code(img: bytes, base: int) -> None:
@@ -87,6 +105,12 @@ def audit_code(img: bytes, base: int) -> None:
     copy = struct.unpack_from('<Q', img, sigs.LAMBDA_VTABLE)[0] - base
     check(copy == 0x8AD410 and img[copy + 7:copy + 0x16] == bytes.fromhex('488902488b410848894208488bc2c3'),
           'the stock lambda copies its vtable and 8 bytes')
+    # HUiDialogBox's own frame (chained to close ours when a mission starts): slot 1 of its vtable, RTTI-named
+    check(struct.unpack_from('<Q', img, sigs.DIALOG_VTABLE + 8)[0] - base == sigs.DIALOG_UPDATE,
+          'HUiDialogBox vtable 0x17F7260 slot 1 is OnUpdate 0x810D10')
+    col = struct.unpack_from('<Q', img, sigs.DIALOG_VTABLE - 8)[0] - base
+    td = struct.unpack_from('<I', img, col + 12)[0]
+    check(img[td + 0x10:td + 0x10 + 32].split(b'\0')[0] == b'.?AVHUiDialogBox@ui@@', 'vtable 0x17F7260 is HUiDialogBox')
     # The item handed to the stock lambda's call: rdx -> [rdx] the dialog, closed by 0x7E2EB0 (0x8AD560 .. 0x8AD5B0)
     check(img[0x8AD560:0x8AD563] == bytes.fromhex('4c8b02') and img[0x8AD5AD:0x8AD5B0] == bytes.fromhex('498bc8') and
           img[0x8AD5B0] == 0xE9 and 0x8AD5B5 + struct.unpack_from('<i', img, 0x8AD5B1)[0] == 0x7E2EB0,

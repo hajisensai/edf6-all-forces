@@ -591,6 +591,18 @@ HUDTEXT(versionFeatBvmPlayers,L"players 5+ in EDF5/4.1 missions (four created)",
 HUDTEXT(versionFeatBackpack,L"support soldiers' backpack weapons",L"支援士兵的背包武器",L"支援士兵的背包武器",L"支援兵のバックパック武器")
 HUDTEXT(versionFeatGravity,L"gravity gun grabs and throws",L"重力枪抓取与投掷同步",L"重力槍抓取與投擲同步",L"グラビティガンの掴み・投げの同期")
 HUDTEXT(versionFeatFloatGun,L"float guns",L"悬浮炮同步",L"懸浮炮同步",L"浮遊砲の同期")
+// --- The room's host settings and builds (host_settings.cpp; the room menu's status lines) ---
+HUDTEXT(hostSettingsHost,L"Host's settings: walk-up recruit %ls, free squad cover %ls",L"按房主设置：原版走近招募 %ls，自由小队掩护 %ls",L"按房主設定：原版走近招募 %ls，自由小隊掩護 %ls",L"ホストの設定：近づいて合流 %ls・自由小隊の援護 %ls")
+HUDTEXT(hostSettingsSilent,L"The host's All Forces is older: recruit / cover by this machine's ini",L"房主的全军出击较旧：招募 / 掩护按本机 ini",L"房主的全軍出擊較舊：招募 / 掩護按本機 ini",L"ホストの全軍出撃が古い：合流 / 援護はこの機の ini")
+HUDTEXT(hostSettingsOn,L"on",L"开",L"開",L"オン")
+HUDTEXT(hostSettingsOff,L"off",L"关",L"關",L"オフ")
+HUDTEXT(buildsDiffer,L"%u member(s) run another All Forces build; may differ: %ls",L"%u 名成员的全军出击版本与本机不同，可能不一致：%ls",L"%u 名成員的全軍出擊版本與本機不同，可能不一致：%ls",L"%u 人の全軍出撃が別の版：食い違う恐れ：%ls")
+HUDTEXT(featHostSettings,L"recruit / cover",L"招募 / 掩护",L"招募 / 掩護",L"合流 / 援護")
+HUDTEXT(featCreditReload41,L"4.1 calls' score reload",L"4.1 呼叫积分装填",L"4.1 呼叫積分裝填",L"4.1 要請のポイント補充")
+HUDTEXT(featBikeCarDrive,L"the 408's drive",L"408 驾驶参数",L"408 駕駛參數",L"408 の走行設定")
+HUDTEXT(featBikeGunner,L"the 408's gunner (closed)",L"408 边三轮炮手（已关闭）",L"408 邊三輪砲手（已關閉）",L"408 の銃手席（閉鎖）")
+HUDTEXT(featOutfit41Colours,L"4.1 outfit colours",L"4.1 外观颜色",L"4.1 外觀顏色",L"4.1 外見の色")
+HUDTEXT(featNoClimb41,L"4.1 friends' climbing",L"4.1 友军翻越",L"4.1 友軍翻越",L"4.1 友軍の乗り越え")
 // The HQ outfit popup's fifth outfit (outfit41.cpp): EDF4.1's subtitle. English and Japanese as the game is titled in both
 // (「地球防衛軍4.1 THE SHADOW OF NEW DESPAIR」: the Japanese title keeps the English subtitle); Chinese as the user names it
 // (2026-10-18: 「绝望阴影再袭」, the name Chinese media give the game; no Chinese edition was released), Traditional alike.
