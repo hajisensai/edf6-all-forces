@@ -70,3 +70,34 @@ BMPT（`EDF6VC_BMPT.MRAB`）和 M163（`EDF6VC_VULCAN.MRAB`）三条都没有：
 - `tools/hud_view.cpp`（ctest `hud_layout`）：各瞄具样式放大场景里 `HudDraw` 之后 `HudScopeHoldsCrosshair` 对该士兵为真、1 倍为假、对其他士兵为假。
 
 未实机：两车第一人称的实际画面、瞄具下准星确实消失（需要游戏内看）。
+
+## 3. 追加：中键自由视角（同日用户反馈）
+
+用户原话：
+
+> 鼠标中键移动视角的时候，底下的挂载会变化，应该挂载顺序不动才对。还有鼠标中键的时候应该是绕着车转，而不是车后面原地转。可以参考战雷。还有战雷一样的那个圆的鼠标指示点怎么没了
+
+### 3a. 挂载条随视角重排
+
+根因（已验证，代码路径）：挂载条左右顺序由 `hud_cue.h` `SideOrder` 按每件武器的 `side` 分组，`side` 来自 `vhud.cpp` `SideOf`：炮口离车体中线的距离投影在**相机视线**的左方向上（`a.side=SideOf(w,r.pos,r.lookOk ? r.look : r.hull)`，`r.look` 是 `CameraRay` 的画面中心射线）。按住中键转相机，左右随之翻转，挂载条就重排。
+
+修复：`SideOf` 改投影到**武器自己的炮膛方向**的左方（炮膛竖直时退回车头方向）。炮膛随炮塔 / 躯干 / 手臂转，不随观察转；原来要解决的 Nix 左右手问题（2026-10-12）照样成立。测试 `tests/fixed_weapon_sight_test.cpp`：同一门炮在三种「视线」下 `side` 相同，且等于按炮膛算的值。
+
+### 3b. 中键在车后原地转 / 3c. 战雷式圆形鼠标指示点不见了
+
+根因（已验证，git 与代码路径）：同一个原因。
+
+- 炮塔镜头 `turretcam.cpp`（2026-10-06 `4e5f4503`）本来就有战雷式自由视角：按住 FreeLookKey，视角在镜头支架（rig）上绕车转，炮塔保持指向按下时的点，HUD `TurretMark` 用青色圆圈标住那个点（`r.aimValid && (r.decoupled || r.freeLook)`）。
+- 2026-10-16 `450a1346` 加了通用的 `vehicle_look.cpp`（所有座位按住观察键扭头）。它在 `crew.cpp` `InputHook` 里先于炮塔镜头运行，把座位的视角输入清零，再在 `VehicleLookCamera` 里以**相机自己的位置**为枢轴转相机（`pivot={0,0,0}`）：第三人称下就是在车后原地转。
+- 2026-10-19 `c12b9a88` 的 `turretcam.cpp` `ExternalView` 把 `VehicleLookActive(v)` 算作外部视角：中键一按，炮塔镜头 `SuspendView`，发布空的读数（`Publish(TurretCamReadout{})`），`TurretMark` 的圆圈随之消失。
+
+修复：
+
+- `turretcam.cpp` `TurretCamFreeLook(vehicle, seat)`：这个座位的自由视角归炮塔镜头（它放置相机的炮塔 0 号位、第三人称、没开地图、没开第一人称座舱、瞄具没起）。`vehicle_look.cpp` 在拿锁之前问它，是则这一帧让出：不清零摇杆、不转相机、`VehicleLookActive` 为假，炮塔镜头的绕车自由视角和青色圆圈回来。第一人称（座舱扭头）与瞄具里的观察不变。
+- 炮塔镜头不管的车（卡车、直升机、摩托等）第三人称下，`VehicleLookCamera(…, orbit=true)` 改为绕车转：枢轴取视线上与车体原点等深的点（`vehicle_look.h` `OrbitPivot`），眼点保持到枢轴的距离、视线仍指向它；第一人称仍在眼点原地扭头。车在眼点后方时退回原地转。
+
+测试：`tests/vehicle_look_test.cpp`（第三人称绕枢轴、保持距离、仍看着枢轴、沿弧移动；第一人称原地；炮塔镜头的座位让出：不取摇杆、不转相机、不压炮塔镜头）。
+
+与瞄具隐藏准星不冲突：瞄具起来时 `TurretCamFreeLook` 为假、炮塔镜头本就让位给瞄具（`ExternalView` 的 `SightZoomMounted`），`TurretMark` 在 `mountedOptic` 时也不画；瞄具里只有瞄具分划，原版准星按第 2 节藏起。
+
+未实机：绕车转时眼点贴地 / 穿墙（炮塔镜头的 rig 有原生防穿地，`vehicle_look` 的绕车没有）；圆圈在中键自由视角中的实际显示。

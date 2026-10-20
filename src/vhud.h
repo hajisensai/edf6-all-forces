@@ -64,7 +64,7 @@ struct StockArm {
     float reload;                // 0..1 share reloaded while it reloads (ammo 0); 1 not reloading
     float reloadSec;             // seconds left of it, < 0 unknown
     bool canReload;              // ReloadTime >= 0: it reloads once empty (else EMPTY is the end)
-    float side=0.0f;             // m its first muzzle is left of the vehicle's middle across the camera's view (- right; 0 unknown)
+    float side=0.0f;             // m its first muzzle is left of the vehicle's middle across its own bore (- right; 0 unknown)
     float cycle=1.0f;            // 0..1 share of the round loaded since the last shot (rounds left, a gun laid shot by shot)
     float cycleSec=-1.0f;        // seconds until it can fire again, < 0 ready (or a quick gun: no loading to show)
     RoundKind kind;

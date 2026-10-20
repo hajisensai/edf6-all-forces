@@ -895,6 +895,18 @@ bool TurretCamTurret(const void* vehicle,unsigned seat) noexcept {
         GameMs()-s.seenMs<=kFreshMs && s.ref.Is(vehicle);
 }
 
+bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept {
+    if(!lookOk || seat!=0 || !vehicle || !Cfg().enabled)return false;
+    AcquireSRWLockShared(&lock);
+    const Shared s=shared;
+    ReleaseSRWLockShared(&lock);
+    if(s.v!=vehicle || !s.ref.Is(vehicle) || GameMs()-s.seenMs>kFreshMs)return false;
+    // The same owners ExternalView yields to, but the free look itself (vehicle_look.cpp asks this to know whether it
+    // is its look at all): the map, first person's cockpit eye, the optic up (magnified, or the gunner sight at 1x).
+    if(MapHoldsKeys() || MapOwnsView() || HighCamOn(vehicle) || FirstPersonVehicleView(vehicle,0))return false;
+    return !(SightZoomCanMount(vehicle,0) && (SightZoomNow(vehicle)>1.0f || FirstPersonGunnerSight()));
+}
+
 bool TurretCamSteers(const void* vehicle) noexcept {
     if(!TurretCamTurret(vehicle,0))return false;
     AcquireSRWLockShared(&lock);

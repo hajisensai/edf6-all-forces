@@ -108,6 +108,16 @@ void Run(){
     terrain=false;StockArm sky{};Arm(f.weapon,true,sky);
     Check(sky.paths==2&&!sky.hit&&!sky.path[1].hit&&sky.flight==5,"no terrain keeps explicit finite lifetime endpoints");
     Check(sky.path[0].at[0]<0&&sky.path[1].at[0]>0&&sky.at[2]>500,"no-hit path still follows actual barrels");
+    {   // The loadout strip's left-to-right order (SideOf -> hud_cue.h SideOrder) is read across the weapon's own bore, never
+        // across a view the free-look key turns round the vehicle (2026-10-21: "鼠标中键移动视角的时候，底下的挂载会变化").
+        const float centre[3]={0,5,0},ahead[3]={0,0,1},behind[3]={0,0,-1},across[3]={1,0,0};
+        float pos[3],dir[3];
+        Check(edf::MuzzleFrame(f.weapon,f.muzzle,pos,dir),"fixture muzzle frame");
+        const float want=(pos[0]-centre[0])*dir[2]-(pos[2]-centre[2])*dir[0];
+        const float s0=SideOf(f.weapon,centre,ahead),s1=SideOf(f.weapon,centre,behind),s2=SideOf(f.weapon,centre,across);
+        Check(want<-1.0f && std::fabs(s0-want)<1e-4f,"a gun right of the middle reads right across its bore");
+        Check(s0==s1 && s0==s2,"whatever way the view looks, the weapon's side stays");
+    }
     Put<float>(f.weapon,edf::kWeaponAmmoOwnerMove,1);Put<float>(f.weapon,edf::kWeaponOwnerVel,12);StockArm moving{};Arm(f.weapon,true,moving);
     Check(moving.at[0]>sky.at[0]+50,"physical path retains inherited vehicle velocity");
     Put<std::uint64_t>(f.weapon,edf::kMuzzleCount,0);StockArm absent{};Arm(f.weapon,true,absent);Check(!absent.aimed&&!absent.paths,"missing muzzle has no fictitious point");

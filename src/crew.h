@@ -1026,6 +1026,11 @@ bool TurretCamLarge(const void* vehicle) noexcept;
 // turned that seat's aim itself in its last step (not another plugin's hand): nix.cpp then leaves the torso's yaw to it.
 bool TurretCamTurret(const void* vehicle,unsigned seat) noexcept;
 bool TurretCamSteers(const void* vehicle) noexcept;
+// TurretCamFreeLook: the free-look key in `vehicle`'s seat `seat` is the turret camera's own (War Thunder's: the view
+// swings round the vehicle on the rig, the turret holds the point it was on and the HUD keeps that point's circle,
+// TurretMark): seat 0 of the turret it places, in third person, the optic not up. vehicle_look.cpp yields to it there
+// (the user, 2026-10-21: "鼠标中键的时候应该是绕着车转…战雷一样的那个圆的鼠标指示点怎么没了").
+bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept;
 void ResetTurretCam() noexcept;
 // The player's turret against their view (hud.cpp's marker; any HUD may draw it), fresh within 200 ms while the camera
 // is decoupled or looking round: `aim` the point the turret is sent to (under the screen's centre, or the one it holds
