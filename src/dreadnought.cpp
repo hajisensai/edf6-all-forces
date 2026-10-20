@@ -39,6 +39,8 @@ using vec::Clamp;
 constexpr float kDreadnoughtMark=7601.0f;   // pylib/vcobjects.py DREADNOUGHT_MARK (tools/selftest.py dreadnought_agrees)
 constexpr float kDnFighterMark=7041.0f;     // its first fighter's (jet_internal.h kBodies Body::dnFighter, then one a kind)
 constexpr std::size_t kBody=0x1650;
+constexpr std::size_t kContact=0x1580;   // heli.cpp: bit 2, the body rests on something
+constexpr unsigned char kContactGround=2;
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
 constexpr std::size_t kAreaInset=0xE00;   // playerjet.cpp: the move-area clamp's inset
 constexpr float kNoInset=-1.0e6f;
@@ -55,6 +57,8 @@ constexpr float kProbeUp=2.0f;            // m over the keel the rays start (und
 constexpr float kSettleSpeed=8.0f;        // m/s down, nobody in it, to the ground
 constexpr float kSettleGap=0.5f;          // m: settled, its keel this far over the ground (the collision takes the rest)
 constexpr float kFloorGain=1.5f;          // 1/s: the keel pushed back over the floor
+constexpr float kHoldGain=0.8f;           // 1/s: no climb asked, its height held (the solver's gravity after the step
+                                          // takes ~g dt off the velocity written: it sank 0.15 m/s, range 2026-10-21)
 constexpr float kTurnAccel=10.0f;         // deg/s^2 its turn changes at most
 constexpr float kAttitudeGain=2.0f,kAttitudeMost=0.6f;   // BodyAttitude: 1/s, rad/s
 constexpr float kStrafeShare=0.4f;        // of its speed sideways
@@ -68,6 +72,8 @@ struct Ship {
     ULONGLONG frame=0,lastMs=0,logAt=0;
     float prev[3]{},measured[3]{},vel[3]{},omega[3]{};
     float heading=0.0f,turn=0.0f,clear=0.0f;
+    bool holding=false;   // holdY: the height (its position's y) it keeps while no climb is asked
+    float holdY=0.0f;
 };
 constexpr int kMaxShips=4;
 Ship ships[kMaxShips]{};
@@ -162,10 +168,25 @@ void Approach(float* vel,const float* want,float accel,float dt) noexcept {
     for(int i=0;i<3;++i)vel[i]+=d[i]*k;
 }
 
-// Its keel kept over DreadnoughtFloor m: the vertical velocity pushed up by the shortfall.
-void Floor(Ship& s,float floor) noexcept {
-    if(s.clear==kNoGround)return;
-    if(s.clear<floor)s.vel[1]=std::fmax(s.vel[1],(floor-s.clear)*kFloorGain);
+// Its keel kept over DreadnoughtFloor m: the vertical velocity pushed up by the shortfall, at most what `accel` brings to
+// rest on the floor (sqrt(2 a d)). Set whole, a keel 25 m low went up at 37.7 m/s and, braked at 4 m/s^2, stopped 160 m
+// over the floor (range 2026-10-21).
+void Floor(Ship& s,float floor,float accel) noexcept {
+    if(s.clear==kNoGround || s.clear>=floor)return;
+    const float d=floor-s.clear;
+    s.vel[1]=std::fmax(s.vel[1],std::fmin(d*kFloorGain,std::sqrt(2.0f*accel*d)));
+}
+
+// No climb asked: a height kept against the solver's gravity. Let go climbing or sinking, the height it comes to rest at
+// braking at `accel` (latched there, it had braked past the height let go and been pulled back 17 m); under the floor, the
+// floor's. Toward it no faster than `accel` stops it there (sqrt(2 a d): 0.8 d had overshot the floor 11 m).
+float HoldClimb(Ship& s,const unsigned char* v,float climb,float floor,float accel) noexcept {
+    const float y=reinterpret_cast<const float*>(v+kPosition)[1];
+    if(climb!=0.0f){s.holding=false;return climb*Cfg().dreadnoughtClimb;}
+    if(!s.holding){s.holdY=y+s.vel[1]*std::fabs(s.vel[1])/(2.0f*accel);s.holding=true;}
+    if(s.clear!=kNoGround && s.clear<floor)s.holdY=std::fmax(s.holdY,y+floor-s.clear);
+    const float gap=s.holdY-y,most=std::fmin(Cfg().dreadnoughtClimb,std::sqrt(2.0f*accel*std::fabs(gap)));
+    return Clamp(gap*kHoldGain,-most,most);
 }
 
 void Board(Ship& s,unsigned char* v) noexcept {
@@ -174,6 +195,7 @@ void Board(Ship& s,unsigned char* v) noexcept {
     const float* f=reinterpret_cast<const float*>(v+kMatrix)+8;
     s.heading=std::atan2(f[0],f[2]);
     s.turn=0.0f;
+    s.holding=false;
     std::memcpy(s.vel,s.measured,12);
     Log("DREADNOUGHT v=%p boarded by the player: hp %.0f/%.0f, keel %.1f m over the ground",v,At<float>(v,kHp),At<float>(v,kHpMax),s.clear);
 }
@@ -203,10 +225,15 @@ void Settle(Ship& s,unsigned char* v,float dt) noexcept {
     const float* f=reinterpret_cast<const float*>(v+kMatrix)+8;
     if(std::fabs(f[0])+std::fabs(f[2])>1e-3f)s.heading=std::atan2(f[0],f[2]);
     s.turn=0.0f;
-    const float down=s.clear==kNoGround ? 0.0f : -Clamp((s.clear-kSettleGap)*kFloorGain,0.0f,kSettleSpeed);
+    // Resting on something (the contact bit), it is down: pushed on, it had kept -6 m/s into the ground 4.6 m under its
+    // keel's probes (range 2026-10-21).
+    const bool resting=(v[kContact]&kContactGround)!=0;
+    const float down=s.clear==kNoGround || resting ? 0.0f : -Clamp((s.clear-kSettleGap)*kFloorGain,0.0f,kSettleSpeed);
     const float want[3]={0.0f,down,0.0f};
     Approach(s.vel,want,Cfg().dreadnoughtAccel,dt);
-    Floor(s,0.0f);
+    if(resting)s.vel[1]=std::fmax(s.vel[1],0.0f);
+    Floor(s,0.0f,Cfg().dreadnoughtAccel);
+    s.holding=false;
     Hold(s,v);
 }
 
@@ -220,9 +247,10 @@ void Fly(Ship& s,unsigned char* v,const Controls& c,float dt) noexcept {
     const float sh=std::sin(s.heading),ch=std::cos(s.heading);
     // ahead (sin, 0, cos); its right is -x of its frame (x is its left): (-cos, 0, sin)
     const float ahead=c.forward*speed,right=c.right*speed*kStrafeShare;
-    const float want[3]={sh*ahead-ch*right,c.climb*Cfg().dreadnoughtClimb,ch*ahead+sh*right};
-    Approach(s.vel,want,Cfg().dreadnoughtAccel*(c.boost ? Cfg().dreadnoughtBoost : 1.0f),dt);
-    Floor(s,Cfg().dreadnoughtFloor);
+    const float accel=Cfg().dreadnoughtAccel*(c.boost ? Cfg().dreadnoughtBoost : 1.0f);
+    const float want[3]={sh*ahead-ch*right,HoldClimb(s,v,c.climb,Cfg().dreadnoughtFloor,accel),ch*ahead+sh*right};
+    Approach(s.vel,want,accel,dt);
+    Floor(s,Cfg().dreadnoughtFloor,accel);
     Hold(s,v);
     Put<float>(v,kAreaInset,kNoInset);   // the move area's clamp off (playerjet.cpp)
 }

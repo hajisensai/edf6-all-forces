@@ -3,6 +3,8 @@
               its name, its role, a round's mass and drag, its barrel group, its round's name on the sight (SHELLS)
   kJetMasses  a jet's mass without stores by its mark (JET_MASSES) and the durability its SGO gives it (JETS; the gunship
               tools/make_jets.py builds from the strike jet's): the ram's damage scales by its HP over that (src/playerjet.cpp)
+  kJetWeapons each NPC jet mark's weapon SGOs (JETS, marks 7001-7099: its guns and stores, app:/weapon/...):
+              src/jet_spawn.cpp PreloadJets preloads them with the jets it preloads
 
   python tools/gen_stores.py            write it
   python tools/gen_stores.py --check    exit 1 when the committed file is not what this would write (CI)
@@ -51,6 +53,10 @@ def render() -> str:
     durability = durabilities()
     for mark, mass in sorted(vc.JET_MASSES.items()):
         lines.append(f'    {{{mark:.1f}f,{mass:.1f}f,{durability.get(mark, 0.0):.1f}f}},')
+    lines.append('};')
+    lines.append('inline constexpr JetWeaponRow kJetWeapons[]={')
+    for mark, w in sorted({(jet.mark, w) for jet in vc.JETS.values() if 7001.0 <= jet.mark <= 7099.0 for w in jet.weapons}):
+        lines.append(f'    {{{mark:.1f}f,L"{w}"}},')
     lines.append('};')
     return '\n'.join(lines) + '\n'
 

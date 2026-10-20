@@ -50,6 +50,10 @@ struct Burden { float mass,drag; };
 Burden BurdenOf(float mark,const Store* stores,int count) noexcept;
 // The kind of mark `mark` (pylib/vcobjects.py JET_MASSES: every jet's), or nullptr.
 const JetMass* JetMassOf(float mark) noexcept;
+// The `i`th of the NPC jets' weapon SGOs (stores.inc kJetWeapons): its jet's mark and its path (app:/weapon/...); nullptr
+// past the last.
+struct JetWeaponRow { float mark; const wchar_t* sgo; };
+const JetWeaponRow* JetWeapon(int i) noexcept;
 // Whether weapon `w` is one of the stores' (its SGO one of kStores'): the cockpit marks and sounds their locks itself.
 bool IsStoreWeapon(const unsigned char* w) noexcept;
 // The store weapon `w` is (its SGO one of kStores'), else nullptr.

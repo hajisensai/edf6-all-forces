@@ -14,6 +14,7 @@
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
+#include <iterator>
 
 namespace crew {
 namespace {
@@ -264,6 +265,10 @@ void TriggerStore(const Store& s) noexcept {
 const JetMass* JetMassOf(float mark) noexcept {
     for(const auto& m:kJetMasses)if(m.mark==mark)return &m;
     return nullptr;
+}
+
+const JetWeaponRow* JetWeapon(int i) noexcept {
+    return i>=0 && i<static_cast<int>(std::size(kJetWeapons)) ? &kJetWeapons[i] : nullptr;
 }
 
 Burden BurdenOf(float mark,const Store* stores,int count) noexcept {

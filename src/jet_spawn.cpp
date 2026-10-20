@@ -129,15 +129,19 @@ unsigned char* CreateJet(Body b,const float* m,InitParam* param,const wchar_t* s
 }
 }  // namespace
 
-bool ModFileThere(const wchar_t* file) noexcept {
+namespace {
+bool ModFileIn(const wchar_t* dir,const wchar_t* file) noexcept {
     wchar_t path[MAX_PATH];
     const DWORD n=GetModuleFileNameW(nullptr,path,MAX_PATH);
     wchar_t* slash=n && n<MAX_PATH ? wcsrchr(path,L'\\') : nullptr;
     if(!slash)return false;
     *slash=0;
-    if(wcscat_s(path,L"\\Mods\\OBJECT\\")!=0 || wcscat_s(path,file)!=0)return false;
+    if(wcscat_s(path,L"\\Mods\\")!=0 || wcscat_s(path,dir)!=0 || wcscat_s(path,L"\\")!=0 || wcscat_s(path,file)!=0)
+        return false;
     return GetFileAttributesW(path)!=INVALID_FILE_ATTRIBUTES;
 }
+}  // namespace
+bool ModFileThere(const wchar_t* file) noexcept { return ModFileIn(L"OBJECT",file); }
 
 bool Preloaded(Body b) noexcept { return preloaded[static_cast<int>(b)]; }
 unsigned NewFlight() noexcept { return nextFlight++; }
@@ -558,7 +562,25 @@ void PreloadJets() noexcept {
         }
         // The doll drones' dolls (as the Recruiter's weapon SGO has its doll preloaded, its `resource`).
         const bool dolls=PreloadDolls(mgr,Preloaded(Body::doll));
-        Log("JET preload %s (dolls %d)",line,dolls);
+        // The preloaded jets' weapons (guns and stores, stores.inc kJetWeapons), each once: a jet's SGO preloaded leaves
+        // them to its first build, and a strike load built at a launch stalled that frame 1.6 s (a Dreadnought's hangar,
+        // range 2026-10-21).
+        int weapons=0,missing=0;
+        constexpr std::size_t kWeaponDir=12;   // L"app:/weapon/"
+        const auto wanted=[](float mark) noexcept {
+            for(int k=0;k<kBodyCount;++k)if(preloaded[k] && kBodies[k].mark==mark)return true;
+            return false;
+        };
+        for(int i=0;JetWeapon(i);++i) {
+            const JetWeaponRow& w=*JetWeapon(i);
+            bool again=false;   // an earlier row of a preloaded jet had it
+            for(int e=0;e<i && !again;++e)again=wcscmp(JetWeapon(e)->sgo,w.sgo)==0 && wanted(JetWeapon(e)->mark);
+            if(again || !wanted(w.mark))continue;
+            if(wcslen(w.sgo)<=kWeaponDir || !ModFileIn(L"WEAPON",w.sgo+kWeaponDir)){++missing;continue;}
+            reinterpret_cast<PreloadFn>(image+kPreload)(mgr,w.sgo,2,-1);
+            ++weapons;
+        }
+        Log("JET preload %s (dolls %d) weapons %d (%d not installed)",line,dolls,weapons,missing);
         // The gunship's shells (GunshipFire), with its body; the impact charges; the EMC / Sazabi rounds and the Proteus's
         // shield whenever their files are installed (a Proteus may be called any time, ProteusRework switched on mid-mission).
         // ...and with the Dreadnought, whose turrets fire the cannon's round (jet_bay.cpp TurretRound)
