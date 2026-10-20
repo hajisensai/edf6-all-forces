@@ -37,8 +37,13 @@ constexpr float kAimSizeFrom=0.8f,kAimSizeTo=7.0f;
 constexpr float kAimRim=0.83f;            // of a sky circle's radius: its rune band, where an aim beam leaves it
 constexpr int kAimStagger=25;             // frames between a circle's three aim beams
 // The bolts: from the lowest sky circle (their landing scaled in by kBoltFrom, a little off plumb), kBoltsPerSec on average,
-// more as the storm goes on.
+// more as the storm goes on. They break out from the centre the aim beams closed in on: the disc they land in grows from
+// kBoltCore of the area to all of it over the storm's first kBoltSpread frames (the user, 2026-10-20, of bolts all over the
+// area the moment the aims had met on the centre: 「射线会往中间蓄力，但是又突然开始散射，感觉稍微有点怪」).
 constexpr float kBoltFrom=0.5f,kBoltLean=15.0f;
+constexpr int kBoltSpread=180;
+static_assert(kChargeEnd+kBoltSpread<kGatherAt,"the bolts cover the area before the gather");
+constexpr float kBoltCore=0.08f;
 constexpr float kBoltsPerSec=150.0f;
 constexpr int kBoltFrames=8;              // a bolt's rounds (the SGO's: pylib/vcobjects.py ULT_BOLT_ROUNDS)
 // The main beam: from the top sky circle's centre straight down, growing to full size in kBeamGrow frames (and thinning
@@ -87,7 +92,9 @@ inline float Smooth(float t) noexcept { t=t<0.0f ? 0.0f : t>1.0f ? 1.0f : t; ret
 // ---- the magic circles (the user: 「魔法阵是必须有」) ----
 // Instances of the models (pylib/magic_circle.py LAYERS; src/ultimate.cpp kCircleFiles in this order), each spawned on its
 // frame, opened out from nothing, turned, drawn in for the gather and closed away in the after. The ground's three lie on the
-// area (a little over its highest ground: `lift` m), the sky's three rise to `lift` m over it. Their sizes are the models'
+// area, each `lift` m over its own plane (src/ultimate.cpp CirclePlane: kPlaneOver over the highest ground under its disc as
+// it opens out past its size, never more than kPlaneMost over the centre: the user, 2026-10-20, 「法阵会进入地里一部分」), the
+// sky's three rise to `lift` m over the centre. Their sizes are the models'
 // own (kModelRadius: the pattern's radius in metres) times `size`. The shock waves' model is the last.
 enum class CircleModel : unsigned char { outer, star, core, sky, shock };
 constexpr int kModelCount=5;
@@ -102,6 +109,9 @@ constexpr CircleSpec kCircles[]={
     {CircleModel::sky,400,600.0f,0.5f,-0.45f,true},
 };
 constexpr int kCircleCount=static_cast<int>(sizeof(kCircles)/sizeof(kCircles[0]));
+constexpr int kGroundCircles=3;                   // the first three
+constexpr float kPlaneOver=1.5f,kPlaneMost=60.0f;
+constexpr float kPlaneReach=1.12f;                // of a circle's size: the most it opens out to (EaseOutBack, the release)
 constexpr int kSkyLow=3,kSkyTop=5;                // the bolts' circle, the main beam's
 constexpr int kCircleOpen=100;                    // frames to open out
 constexpr int kCircleRise=180;                    // frames a sky circle takes to rise
@@ -112,6 +122,7 @@ constexpr float kSqueeze=0.18f;                   // the gather draws every circ
 constexpr int kRelease=36;                        // frames the circles take to spring back out when the beam fires
 static_assert(kCircleCloseAt+(kCircleCount-1)*kCircleStagger+kCircleClose<=kAfterEnd,"every circle is gone before the end");
 static_assert(kCircles[kSkyLow].appear+kCircleRise<kChargeEnd,"the bolts' circle is up before the storm");
+static_assert(!kCircles[kGroundCircles-1].sky && kCircles[kGroundCircles].sky && kSkyLow==kGroundCircles,"the ground's circles first");
 
 // The turn's pace by stretch of the show: 1 in the charge, quicker as it builds, quickest in the gather. Joined, so the
 // angle never jumps.
@@ -198,9 +209,13 @@ static_assert(kCircles[kSkyTop].appear+kCircleOpen+2*kAimStagger<kChargeEnd,"eve
 
 // Bolts landing on storm frame `frame` (0 = the storm's first): how many (at most kMaxBoltsAFrame), each one's landing
 // offset and where it leaves the lowest sky circle (x, z offset: its landing scaled in by kBoltFrom, off by its lean).
-// The rate climbs from a third to five thirds kBoltsPerSec over the storm and dies out as the gather begins.
+// BoltReach: the radius they land in on that frame. The rate climbs from a third to five thirds kBoltsPerSec over the storm and dies out as the gather begins.
 constexpr int kMaxBoltsAFrame=6;
 struct Bolt { float at[2],from[2]; };
+inline float BoltReach(int frame) noexcept {
+    const float t=frame>=kBoltSpread ? 1.0f : static_cast<float>(frame>0 ? frame : 0)/kBoltSpread;
+    return kRadius*(kBoltCore+(1.0f-kBoltCore)*(1.0f-(1.0f-t)*(1.0f-t)));   // ease out: bursting out, slowing to the edge
+}
 inline int BoltsAt(std::uint64_t seed,int frame,Bolt* out) noexcept {
     if(frame<0 || frame>=kStormEnd-kChargeEnd)return 0;
     Rng g=FrameRng(seed^0xB017ull,frame);
@@ -212,7 +227,7 @@ inline int BoltsAt(std::uint64_t seed,int frame,Bolt* out) noexcept {
     if(g.Unit()<mean-static_cast<float>(n))++n;
     if(n>kMaxBoltsAFrame)n=kMaxBoltsAFrame;
     for(int k=0;k<n;++k) {
-        InDisc(g,kRadius,out[k].at);
+        InDisc(g,BoltReach(frame),out[k].at);
         float lean[2];
         InDisc(g,kBoltLean,lean);
         out[k].from[0]=out[k].at[0]*kBoltFrom+lean[0];out[k].from[1]=out[k].at[1]*kBoltFrom+lean[1];

@@ -79,6 +79,7 @@ void AreaChecks() {
             Bolt b[kMaxBoltsAFrame];
             const int n=BoltsAt(seed,f,b);
             for(int k=0;k<n;++k) {
+                if(std::hypot(b[k].at[0],b[k].at[1])>BoltReach(f)+1e-3f)inside=false;
                 const float fromR=std::hypot(b[k].from[0],b[k].from[1]);
                 if(std::hypot(b[k].at[0],b[k].at[1])>kRadius+1e-3f ||
                    fromR>kRadius*kBoltFrom+kBoltLean+1e-3f || fromR>kModelRadius[static_cast<int>(CircleModel::sky)]*(1.0f-kSqueeze))
@@ -94,7 +95,7 @@ void AreaChecks() {
             if(FireAt(seed,f,at) && std::hypot(at[0],at[1])>kRadius)inside=false;
         }
     }
-    Check(inside,"every bolt and fire lands in the area, every bolt leaves the lowest sky circle's disc (drawn in or not)");
+    Check(inside,"every bolt and fire lands in the area (a bolt in the disc spreading from the centre), every bolt leaves the lowest sky circle's disc (drawn in or not)");
     char line[200];
     std::snprintf(line,sizeof(line),"the storm: %.0f bolts on average, at most %d a frame, at most %d bolt beams alive at once",
                   total/20.0,most,peak);
@@ -144,13 +145,13 @@ void GatherChecks() {
         sized=sized && GatherAt(k,kStormEnd-1).size>GatherAt(k,kGatherAt).size && CircleAt(GatherAt(k,kGatherAt).circle,kGatherAt).shown;
     }
     Check(only && sized,"the gather's rays: only in the gather, from circles that are there, growing");
-    bool room=true;   // every ray longer than a pulse (the ground's plane up to 35 m over the centre), its pulses ending on the centre
+    bool room=true;   // every ray longer than a pulse (the ground's plane up to kPlaneMost over the centre), its pulses ending on the centre
     for(int f=kGatherAt;f<kStormEnd;++f)
         for(int k=0;k<kGatherRays;++k) {
             const GatherRay g=GatherAt(k,f);
             float p[3];
             CirclePoint(g.circle,f,kGatherRim,g.angle,p);
-            const float lift=kCircles[g.circle].sky ? p[1] : p[1]+35.0f;
+            const float lift=kCircles[g.circle].sky ? p[1] : p[1]+kPlaneMost;
             const float d=std::hypot(std::hypot(p[0],p[2]),CircleAt(kSkyTop,f).lift-lift);
             room=room && d>kGatherReach+20.0f && g.slide>=0.0f && g.slide<1.0f;
         }
@@ -188,14 +189,14 @@ void CircleChecks() {
                 shownWhole=shownWhole && f>=kCircleCloseAt+i*kCircleStagger+kCircleClose;
                 continue;
             }
-            bounded=bounded && p.scale>0.0f && p.scale<=c.size*1.13f && p.lift>=0.0f && p.lift<=c.lift+1e-3f;
+            bounded=bounded && p.scale>0.0f && p.scale<=c.size*kPlaneReach && p.lift>=0.0f && p.lift<=c.lift+1e-3f;
             smooth=smooth && std::fabs(p.angle-lastAngle)<0.25f;   // never more than ~14 degrees a frame
             lastAngle=p.angle;
         }
     }
     Check(inCharge,"every circle opens out within the charge");
     Check(gone && shownWhole,"every circle is there from its frame until it has closed, and gone before the show ends");
-    Check(bounded,"no circle grows past its size (the open's overshoot aside) or rises past its height");
+    Check(bounded,"no circle grows past kPlaneReach of its size (the open's overshoot: its plane is clear of the ground that far) or rises past its height");
     Check(smooth,"the circles turn without jumps, the phases' paces joined");
     Check(std::fabs(SpinTime(kChargeEnd)-kChargeEnd/static_cast<float>(kFps))<1e-3f &&
           SpinTime(kStormEnd)>SpinTime(kChargeEnd),"the turn's time adds up phase by phase");

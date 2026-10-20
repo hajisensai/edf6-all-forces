@@ -102,7 +102,7 @@ struct Show {
     RoundObj aims[kAims]{},gather[kGatherRays]{},beam{},core{};
     bool snapped=false;
     float snap[kSlotCount][4]{};
-    float plane=0.0f;        // the ground circles' height: a little over the area's highest ground (CirclePlane)
+    float plane[kGroundCircles]{};   // each ground circle's height: over the highest ground under it (CirclePlane)
     Disc circles[kCircleCount]{},waves[kWaveCount]{};
     bool heard=false;        // a recording of the show's played: the plugin's voices beat every frame (jetaudio.h Beat)
     int thunder=-100;        // the storm frame of the last thunder
@@ -188,7 +188,7 @@ void DiscsDrop() noexcept {
     for(Disc& d:show.waves)if(d.obj)DiscDrop(d);
 }
 // The base height of circle `i`'s lift: the ground plane for a ground circle, the centre for a sky one.
-float CircleBase(int i) noexcept { return kCircles[i].sky ? show.at[1] : show.plane; }
+float CircleBase(int i) noexcept { return kCircles[i].sky ? show.at[1] : show.plane[i]; }
 // Circle `i`'s point at `rim` of its radius and `angle` on its turn on frame `frame`, in the world.
 void CircleWorld(int i,int frame,float rim,float angle,float* out) noexcept {
     float p[3];
@@ -252,16 +252,20 @@ float GroundAt(float x,float z) noexcept {
     return MapRay(from,to,hit)>=0.0f ? hit[1] : show.at[1];
 }
 
-// The ground circles' height: over the highest ground of the centre and a ring at 60 % of the area (so a slope does not cut
-// through them), but never more than kPlaneMost over the centre (a cliff in the area: the circle cuts into it there).
-constexpr float kPlaneMost=35.0f;
-float CirclePlane() noexcept {
+// Ground circle `i`'s height: kPlaneOver over the highest ground under its disc as far as it opens out (the centre and rings
+// out to kPlaneReach of its radius: a slope or a bump inside it does not cut through it), but never more than kPlaneMost over
+// the centre (a cliff or a tower in the area: the circle cuts into it there).
+float CirclePlane(int i) noexcept {
+    constexpr int kRingsOut=5,kRound=32;
+    const float reach=kModelRadius[static_cast<int>(kCircles[i].model)]*kCircles[i].size*kPlaneReach;
     float top=show.at[1];
-    for(int k=0;k<12;++k) {
-        const float a=2.0f*kPi*static_cast<float>(k)/12.0f;
-        const float y=GroundAt(show.at[0]+0.6f*kRadius*std::cos(a),show.at[2]+0.6f*kRadius*std::sin(a));
-        if(y>top)top=y;
-    }
+    for(int r=1;r<=kRingsOut;++r)
+        for(int k=0;k<kRound;++k) {
+            const float a=2.0f*kPi*(static_cast<float>(k)+0.5f*static_cast<float>(r&1))/kRound,d=reach*static_cast<float>(r)/kRingsOut;
+            const float y=GroundAt(show.at[0]+d*std::cos(a),show.at[2]+d*std::sin(a));
+            if(y>top)top=y;
+        }
+    top+=kPlaneOver;
     return top<show.at[1]+kPlaneMost ? top : show.at[1]+kPlaneMost;
 }
 
@@ -446,7 +450,7 @@ void WavesFrame(int frame) noexcept {
         const WaveSpec& s=kWaves[w];
         const WavePose p=WaveAt(w,frame);
         alignas(16) float m[16];
-        DiscMatrix(p.angle,p.scale,(s.sky ? show.at[1] : show.plane)+s.lift,m);
+        DiscMatrix(p.angle,p.scale,(s.sky ? show.at[1] : show.plane[0])+s.lift,m);   // a ground wave: over the widest circle
         DiscFrame(show.waves[w],CircleModel::shock,p.shown,m);
         if(frame==s.at && !s.sky) {
             Sound(audio::kUltShock,show.at,w==kGreatWave ? 0.85f : 1.0f);
@@ -501,7 +505,7 @@ bool UltimateStart(const unsigned char* caller,const float* at,float damage,std:
     show.caller=caller;
     std::memcpy(show.at,at,12);
     show.at[1]=GroundAt(at[0],at[2]);
-    show.plane=CirclePlane();
+    for(int i=0;i<kGroundCircles;++i)show.plane[i]=CirclePlane(i);
     show.damage=std::isfinite(damage) && damage>0.0f ? damage : 0.0f;
     show.seed=seed;
     show.start=GameFrame();
