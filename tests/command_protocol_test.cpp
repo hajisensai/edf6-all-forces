@@ -186,6 +186,48 @@ void Negotiation() {
         Check(r.nodes[0]->executed==1,"a version-7 request above a peer's agreed version is not executed");
     }
 }
+// Kind::ways (v7): the host's Shift queues for the clients' maps -- sent to a version-7 peer when they change, never to
+// a version-6 one, all of them again to a peer saying hello, cleared when gone; newest revision wins.
+void WaysMessages() {
+    Message m;m.kind=Kind::ways;m.epoch=7;m.sequence=3;m.request.count=1;m.request.units[0][0]=9;m.ways.n=2;
+    m.ways.at[0][0]=1;m.ways.at[1][2]=-4;
+    unsigned char bytes[kWireSize];Message copy;
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.kind==Kind::ways && copy.ways.n==2 &&
+          copy.ways.at[1][2]==-4 && !copy.request.formationTotal,"a unit's queue round trips");
+    m.version=6;Check(!Encode(m,bytes,sizeof(bytes)),"no ways message at version 6");m.version=7;
+    m.ways.n=9;Check(!Encode(m,bytes,sizeof(bytes)),"at most eight points");m.ways.n=1;
+    Check(!Encode(m,bytes,sizeof(bytes)),"a point past the count must be zero");m.ways.n=2;
+    m.ways.at[0][1]=std::numeric_limits<float>::quiet_NaN();Check(!Encode(m,bytes,sizeof(bytes)),"no NaN point");m.ways.at[0][1]=0;
+    m.sequence=0;Check(!Encode(m,bytes,sizeof(bytes)),"a revision is required");
+
+    Room r(3,true,2);   // node 2 is a version-6 build
+    const unsigned char unit[32]={5};const float pts[2][3]={{10,0,1},{20,0,2}};
+    const auto waysTo=[&](unsigned to){unsigned n=0;for(const auto& p:r.sent)if(p.to==to && p.message.kind==Kind::ways)++n;return n;};
+    r.nodes[0]->session->PublishWays(unit,pts,2);r.Pump();
+    command_net::Ways got;
+    Check(r.nodes[1]->session->WaysOf(unit,&got) && got.n==2 && got.at[1][0]==20,"a version-7 client gets the host's queue");
+    Check(!waysTo(2),"a version-6 client is never sent one");
+    const auto sent=r.sent.size();r.nodes[0]->session->PublishWays(unit,pts,2);r.Pump();
+    Check(r.sent.size()==sent,"unchanged: not sent again");
+    // A peer saying hello again (a reconnect, a new member) is sent every queue out now.
+    const auto before=waysTo(1);
+    Message hello;hello.version=6;hello.epoch=r.epoch;hello.request.formationTotal=7;
+    r.nodes[0]->session->Receive(1,r.Name(1),hello,r.now);r.Pump();
+    Check(waysTo(1)==before+1,"hello: the queues out sent to it again");
+    unsigned char out[4][32];Check(r.nodes[0]->session->PublishedWays(out,4)==1,"the host lists what is out");
+    r.nodes[0]->session->PublishWays(unit,nullptr,0);r.Pump();
+    Check(!r.nodes[1]->session->WaysOf(unit,&got) && !r.nodes[0]->session->PublishedWays(out,4),"cleared on both sides");
+    // An older revision arriving late does not undo a newer one.
+    r.nodes[0]->session->PublishWays(unit,pts,1);r.Pump();
+    Message late;for(const auto& p:r.sent)if(p.to==1 && p.message.kind==Kind::ways && p.message.ways.n==2)late=p.message;
+    r.nodes[1]->session->Receive(1,r.Name(0),late,r.now);
+    Check(r.nodes[1]->session->WaysOf(unit,&got) && got.n==1,"an older revision is ignored");
+    // A client cannot publish; another client cannot forge the host's.
+    r.nodes[1]->session->PublishWays(unit,pts,2);r.Pump();
+    Check(r.nodes[1]->session->WaysOf(unit,&got) && got.n==1,"a client publishes nothing");
+    ++r.epoch;r.Step();
+    Check(!r.nodes[1]->session->WaysOf(unit,&got),"a new mission forgets them");
+}
 void Protocol() {
     Room r;Check(r.nodes[1]->session->Ready(),"host command capability negotiated on current support epoch");
     Check(r.nodes[1]->session->Submit(Make(2),r.Name(1),r.now)==1,"request queues without pretending to execute");
@@ -220,4 +262,4 @@ void Protocol() {
     Check(rebound.nodes[0]->executed==1 && rebound.sent.size()==packets,"peer index cannot inherit another PUID's capability or result cache");
 }
 }
-int main(){Codec();Version7();Negotiation();Protocol();std::printf("command protocol: %d checks passed\n",checks);}
+int main(){Codec();Version7();Negotiation();WaysMessages();Protocol();std::printf("command protocol: %d checks passed\n",checks);}

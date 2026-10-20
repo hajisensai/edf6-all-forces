@@ -21,7 +21,14 @@ constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=7,kMinVersion=6,kMaxPeers=10
 constexpr bool Compatible(std::uint32_t version) noexcept { return version>=kMinVersion && version<=kVersion; }
 constexpr std::uint32_t kQueued=1u;   // Request::flags: after the points the unit is on its way to (Shift)
 constexpr std::size_t kWireSize=828;
-enum class Kind : std::uint32_t { hello=1,capability,request,result };
+// ways (version 7): the host's Shift queue of one unit, for a client's map to draw (the queue itself is the host's:
+// mapcmd.cpp MapCommandAuthority). units[0] the unit's native ID, sequence the host's revision (newest wins), the
+// points in Message::ways (written where a result's words are); none: its queue is gone. Sent to every peer at version
+// 7 when it changes, and all of them again to a peer when it says hello (a new member, a reconnect).
+enum class Kind : std::uint32_t { hello=1,capability,request,result,ways };
+constexpr unsigned kWaysMost=8;   // mapcmd::kWaypointsMost
+static_assert(kWaysMost==static_cast<unsigned>(mapcmd::kWaypointsMost),"a ways message carries a whole queue");
+struct Ways { std::uint32_t n=0; float at[kWaysMost][3]{}; };
 enum class Rpc : std::uint32_t { none,notReady,unsupported,invalid,stale,rateLimited,timeout,interrupted,count };
 struct Request {
     std::uint32_t count=0;
@@ -38,6 +45,7 @@ struct Message {
     Request request{};
     Rpc rpc=Rpc::none;
     struct Result { std::uint32_t reason=0,affected=0; } results[kCommandNetUnits]{};
+    Ways ways{};   // Kind::ways only (its count in request.formationTotal on the wire)
 };
 bool CanonicalId(const unsigned char* id,bool allowEmpty=false) noexcept;
 // `version`: the one it is to travel at (a version-6 peer takes no flag, no parameter, no order past HOLD).
@@ -65,7 +73,19 @@ public:
     const CommandNetworkResult& Result() const noexcept { return result_; }
     // Offline tests only: this session behaves as a build whose highest version is `version` (an older peer).
     void LimitVersion(std::uint32_t version) noexcept { if(Compatible(version))maxVersion_=version; }
+    // The Shift queues the host publishes for the clients' maps (Kind::ways). Host: `unit`'s points now (n 0: none), sent
+    // to every peer of version 7 when they differ from the last sent; `Published` lists what is out. Client: the
+    // points its host published for `unit` (false: none). Both forget them with the epoch.
+    static constexpr unsigned kWaysUnits=96;
+    void PublishWays(const unsigned char* unit,const float (*at)[3],unsigned n) noexcept;
+    unsigned PublishedWays(unsigned char (*out)[32],unsigned most) const noexcept;
+    bool WaysOf(const unsigned char* unit,Ways* out) const noexcept;
 private:
+    struct WaysEntry { bool used=false; unsigned char unit[32]{}; std::uint32_t revision=0; Ways ways{}; };
+    std::array<WaysEntry,kWaysUnits> ways_{};
+    std::uint32_t waysRevision_=0;
+    WaysEntry* WaysSlot(const unsigned char* unit,bool make) noexcept;
+    void SendWays(std::uint32_t peer,const WaysEntry& e) noexcept;
     struct Peer {
         std::uint32_t version=kMinVersion;   // the host's: what it answers this peer at
         bool capable=false,have=false;

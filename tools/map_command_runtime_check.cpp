@@ -78,6 +78,19 @@ std::uint32_t SubmitMapCommand(const ObjRef&,const ObjRef* ids,unsigned count,co
 bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {*out=networkReply;return out->request!=0;}
 bool MapCommandNetworkReady() noexcept {return true;}
 std::uint32_t MapCommandNetworkVersion() noexcept {return 7;}
+// Kind::ways (command_net.cpp): what the host shares, what the client's host published for a unit.
+unsigned waysSyncs=0,waysShared=0;MapCommandWays waysLast{};
+void SyncMapCommandWays(const MapCommandWays* list,unsigned count) noexcept {
+    ++waysSyncs;waysShared=count;if(count)waysLast=list[0];
+}
+const void* hostWaysUnit=nullptr;unsigned hostWaysN=0;float hostWaysAt[8][3]{};
+unsigned ReadMapCommandWays(const ObjRef& unit,float (*at)[3],unsigned most) noexcept {
+    if(!hostWaysUnit || unit.obj!=hostWaysUnit)return 0;
+    const unsigned n=hostWaysN<most ? hostWaysN : most;
+    for(unsigned i=0;i<n;++i)for(unsigned c=0;c<3;++c)at[i][c]=hostWaysAt[i][c];
+    return n;
+}
+
 
 ObjRef NpcMarkedIdentity() noexcept {return {};}
 extern const void* guardLeader;extern int guardCalls,marchCalls,guardSet,marchSet;
@@ -1226,6 +1239,12 @@ void AuthorityQueue() noexcept {
     Check(r.Accepted() && squadOrders==0,"a network Shift: kept by the authority, nothing given yet");
     r=MapCommandAuthority(unit,Command{Order::attackMove,{500.0f,0.0f,0.0f}},ObjRef{},ObjRef{},true,&NetGive);
     Check(r.Accepted() && squadOrders==0,"a second one after it");
+    // The host shares the queue for the clients' maps (Kind::ways), from the scene's tick.
+    waysSyncs=waysShared=0;++stubFrame;MapCommandQueueTick();
+    Check(waysSyncs==1 && waysShared==1 && waysLast.obj==squadObj && waysLast.n==2 && waysLast.at[0][0]==300.0f &&
+          waysLast.at[1][0]==500.0f,"the tick shares the unit's two queued points");
+    ++stubFrame;MapCommandQueueTick();
+    Check(waysSyncs==2,"once a frame");
     ++stubFrame;MapCommandQueueTick();
     Check(squadOrders==0,"on its way: the tick waits");
     squadPos[0]=100.0f;
@@ -1237,6 +1256,7 @@ void AuthorityQueue() noexcept {
     squadPos[0]=500.0f;
     ++stubFrame;MapCommandQueueTick();
     Check(squadOrders==2,"the last reached: nothing more");
+    Check(!waysShared,"none queued any more: nothing shared (the clients' maps cleared)");
     // A queue, then a plain order through the same entry: the queue gone (no point given after it).
     squadGot=Command{Order::move,{100.0f,0.0f,0.0f}};squadPos[0]=0.0f;
     MapCommandAuthority(unit,Command{Order::move,{300.0f,0.0f,0.0f}},ObjRef{},ObjRef{},true,&NetGive);
@@ -1255,6 +1275,20 @@ void AuthorityQueue() noexcept {
     static unsigned char stranger[0x400]{},strangerCtrl[0x10]{};Put<void*>(stranger,kSelfCtrl,strangerCtrl);
     r=MapCommandAuthority(ObjRef::Of(stranger),Command{Order::move,{1.0f,0.0f,1.0f}},ObjRef{},ObjRef{},true,&NetGive);
     Check(!r.Accepted() && r.reason==NpcCommandReason::stale && squadOrders==4,"a queued point for a unit not listed: refused (stale)");
+    // A client's map: another machine's squad (no queue here) is drawn with the points its host published.
+    {
+        ResetMapCommands();mapOnline=true;remoteAuthority=squadObj;squadGot=Command{};
+        hostWaysUnit=squadObj;hostWaysN=2;hostWaysAt[0][0]=10.0f;hostWaysAt[1][0]=20.0f;hostWaysAt[1][2]=5.0f;
+        MapCmdInput in{};in.front=true;float centre[3]{};
+        const float vp[16]={0.01f,0,0,0, 0,0.01f,0,0, 0,0,1,0, 0,0,0,1};
+        MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+        MapCommandReadout drawn{};
+        Check(PlayerMapCommands(&drawn) && drawn.count>=1 && drawn.unit[0].ways==2 && drawn.unit[0].way[0][0]==10.0f &&
+              drawn.unit[0].way[1][2]==5.0f,"a client's map draws the host's queue of the host's squad");
+        hostWaysN=0;MapCommandFrame(in,centre);PlayerMapCommands(&drawn);
+        Check(drawn.unit[0].ways==0,"its queue cleared on the host: nothing drawn");
+        hostWaysUnit=nullptr;mapOnline=false;remoteAuthority=nullptr;SuspendMapCommands();
+    }
     // B4: a new mission drops every queue (ResetMapCommands from map.cpp ResetMap at MissionStart).
     squadGot=Command{Order::move,{100.0f,0.0f,0.0f}};squadPos[0]=0.0f;
     MapCommandAuthority(unit,Command{Order::move,{300.0f,0.0f,0.0f}},ObjRef{},ObjRef{},true,&NetGive);

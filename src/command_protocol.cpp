@@ -18,7 +18,15 @@ bool Same(const Request& a,const Request& b) noexcept {
 // The last order a version carries (6: HOLD; 7: the formation order).
 mapcmd::Order LastOrder(std::uint32_t version) noexcept { return version>=7 ? mapcmd::kLastOrder : mapcmd::Order::hold; }
 bool Valid(const Message& m) noexcept {
-    if(!Compatible(m.version) || !m.epoch || m.kind<Kind::hello || m.kind>Kind::result || m.rpc>=Rpc::count)return false;
+    if(!Compatible(m.version) || !m.epoch || m.kind<Kind::hello || m.kind>Kind::ways || m.rpc>=Rpc::count)return false;
+    if(m.kind==Kind::ways) {   // version 7: one unit's queue, its points finite and bounded
+        if(m.version<7 || m.rpc!=Rpc::none || !m.sequence || m.request.count!=1 || !CanonicalId(m.request.units[0]) ||
+           m.request.flags || m.request.command.param || m.ways.n>kWaysMost)return false;
+        for(unsigned i=1;i<kCommandNetUnits;++i)if(!Empty(m.request.units[i]))return false;
+        for(unsigned i=0;i<kWaysMost;++i)for(float f:m.ways.at[i])
+            if(i<m.ways.n ? (!std::isfinite(f) || std::fabs(f)>1.0e6f) : f!=0.0f)return false;
+        return true;
+    }
     // A hello / capability: its formationTotal the sender's highest version (0 from a version-6 build), nothing else.
     if(m.kind==Kind::hello || m.kind==Kind::capability)return m.sequence==0 && m.request.count==0 && !m.request.flags &&
         !m.request.command.param && m.request.formationTotal<=0xFFFFu &&
@@ -77,7 +85,13 @@ bool Encode(const Message& m,void* bytes,std::size_t size) noexcept {
     for(float f:m.request.command.at){std::uint32_t bits;std::memcpy(&bits,&f,4);U32(p,bits);}U32(p,m.request.command.param);
     std::memcpy(p,m.request.requester,32);p+=32;std::memcpy(p,m.request.focus,32);p+=32;
     std::memcpy(p,m.request.units,sizeof(m.request.units));p+=sizeof(m.request.units);
-    U32(p,m.request.formationTotal);for(auto slot:m.request.formationSlots)U32(p,slot);
+    U32(p,m.kind==Kind::ways ? m.ways.n : m.request.formationTotal);for(auto slot:m.request.formationSlots)U32(p,slot);
+    if(m.kind==Kind::ways) {   // the points where a result's words are (24 of its 32), the rest zero
+        unsigned words=0;
+        for(const auto& at:m.ways.at)for(float f:at){std::uint32_t bits;std::memcpy(&bits,&f,4);U32(p,bits);++words;}
+        for(;words<2*kCommandNetUnits;++words)U32(p,0);
+        return true;
+    }
     for(const auto& r:m.results){U32(p,r.reason);U32(p,r.affected);}return true;
 }
 bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
@@ -92,12 +106,62 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     std::memcpy(m.request.requester,p,32);p+=32;std::memcpy(m.request.focus,p,32);p+=32;
     std::memcpy(m.request.units,p,sizeof(m.request.units));p+=sizeof(m.request.units);
     m.request.formationTotal=U32(p);for(auto& slot:m.request.formationSlots)slot=U32(p);
+    if(m.kind==Kind::ways) {
+        m.ways.n=m.request.formationTotal;m.request.formationTotal=0;
+        unsigned words=0;
+        for(auto& at:m.ways.at)for(float& f:at){const auto bits=U32(p);std::memcpy(&f,&bits,4);++words;}
+        for(;words<2*kCommandNetUnits;++words)if(U32(p))return false;
+        if(!Valid(m))return false;out=m;return true;
+    }
     for(auto& r:m.results){r.reason=U32(p);r.affected=U32(p);}if(!Valid(m))return false;out=m;return true;
 }
 bool Owned(const void* bytes,std::size_t size) noexcept {
     if(!bytes || size<4)return false;auto p=static_cast<const unsigned char*>(bytes);return U32(p)==kMagic;
 }
-void Session::Reset() noexcept {ready_=false;hostCapable_=false;epoch_=0;nextSequence_=0;lastHello_=0;hostVersion_=0;result_={};peer_.fill(Peer{});}
+void Session::Reset() noexcept {
+    ready_=false;hostCapable_=false;epoch_=0;nextSequence_=0;lastHello_=0;hostVersion_=0;result_={};peer_.fill(Peer{});
+    ways_.fill(WaysEntry{});waysRevision_=0;
+}
+Session::WaysEntry* Session::WaysSlot(const unsigned char* unit,bool make) noexcept {
+    WaysEntry* free=nullptr;
+    for(auto& e:ways_) {
+        if(e.used && !std::memcmp(e.unit,unit,32))return &e;
+        if(!e.used && !free)free=&e;
+    }
+    if(!make || !free)return nullptr;
+    *free=WaysEntry{};free->used=true;std::memcpy(free->unit,unit,32);
+    return free;
+}
+void Session::SendWays(std::uint32_t peer,const WaysEntry& e) noexcept {
+    if(!peer || peer>peers_ || !peer_[peer].capable || peer_[peer].version<7)return;   // a version-6 peer has no such message
+    Message m;m.version=peer_[peer].version;m.kind=Kind::ways;m.epoch=epoch_;m.sequence=e.revision;
+    m.request.count=1;std::memcpy(m.request.units[0],e.unit,32);m.ways=e.ways;
+    Send(peer,m);
+}
+void Session::PublishWays(const unsigned char* unit,const float (*at)[3],unsigned n) noexcept {
+    if(!ready_ || !host_ || !unit || !CanonicalId(unit) || n>kWaysMost || waysRevision_==UINT32_MAX)return;
+    Ways next{};next.n=n;
+    for(unsigned i=0;i<n;++i)for(unsigned c=0;c<3;++c) {
+        if(!std::isfinite(at[i][c]) || std::fabs(at[i][c])>1.0e6f)return;
+        next.at[i][c]=at[i][c];
+    }
+    WaysEntry* e=WaysSlot(unit,n>0);
+    if(!e)return;   // none out for it and none now: nothing to say
+    if(e->ways.n==next.n && !std::memcmp(e->ways.at,next.at,sizeof(next.at)))return;
+    e->ways=next;e->revision=++waysRevision_;
+    for(std::uint32_t peer=1;peer<=peers_;++peer)SendWays(peer,*e);
+    if(!n)e->used=false;   // its clearing sent: forgotten
+}
+unsigned Session::PublishedWays(unsigned char (*out)[32],unsigned most) const noexcept {
+    unsigned n=0;
+    for(const auto& e:ways_)if(e.used && n<most)std::memcpy(out[n++],e.unit,32);
+    return n;
+}
+bool Session::WaysOf(const unsigned char* unit,Ways* out) const noexcept {
+    if(!unit || !out || host_)return false;
+    for(const auto& e:ways_)if(e.used && !std::memcmp(e.unit,unit,32) && e.ways.n){*out=e.ways;return true;}
+    return false;
+}
 bool Session::Ready() const noexcept {return ready_ && epoch_ && (host_ ? backend_.execute!=nullptr : hostCapable_);}
 bool Session::Send(std::uint32_t to,const Message& message) noexcept {return backend_.send && backend_.send(backend_.context,to,message);}
 void Session::ResultOf(const Message& m) noexcept {
@@ -164,6 +228,8 @@ void Session::Receive(std::uint32_t peer,const char* puid,const Message& message
             Message reply;reply.version=peer_[peer].version;reply.kind=Kind::capability;reply.epoch=epoch_;
             reply.request.formationTotal=maxVersion_;
             reply.rpc=backend_.execute ? Rpc::none : Rpc::unsupported;Send(peer,reply);
+            // A new member (or one back): every queue out now, so its map draws them from the start.
+            for(const auto& e:ways_)if(e.used)SendWays(peer,e);
         } else if(message.kind==Kind::request) {
             // Above what this peer agreed (a reset, a replayed packet of another session): not executed.
             if(message.version>peer_[peer].version)return;
@@ -173,6 +239,13 @@ void Session::Receive(std::uint32_t peer,const char* puid,const Message& message
         if(message.kind==Kind::capability) {
             hostCapable_=message.rpc==Rpc::none;
             hostVersion_=message.version<maxVersion_ ? message.version : maxVersion_;
+        }
+        else if(message.kind==Kind::ways) {
+            WaysEntry* e=WaysSlot(message.request.units[0],message.ways.n>0);
+            if(e && message.sequence>e->revision) {   // newest wins (a reordered older one ignored)
+                e->revision=message.sequence;e->ways=message.ways;
+                if(!message.ways.n)e->used=false;
+            }
         }
         else if(message.kind==Kind::result && result_.state==CommandNetworkState::pending &&
                 message.sequence==pending_.sequence && message.request.count==pending_.request.count)ResultOf(message);

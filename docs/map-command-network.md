@@ -77,6 +77,15 @@ whatever map is open and whether the requester lives; a unit out of the list a w
 top died goes on under the top of any living member (`mapcmd_logic.h UnitRef`). A queued point for a unit the host
 does not list is refused as stale.
 
+Version 7 also has the host's queues travel the other way, for the clients' maps (`Kind::ways`): one unit's points
+after the one it is on its way to, sent to every version-7 peer when they change (`Session::PublishWays`, from
+`MapCommandQueueTick` through `SyncMapCommandWays`), a clearing when its queue is gone, every queue again to a peer
+that says hello. Newest revision wins; the epoch forgets them; a version-6 peer is never sent one.
+
+The march formation is per player on the squads' authority (`npcai.cpp PeerMarch`): a guest's formation order for its
+own recruited squads sets the march the host keeps round that guest (anchored on the guest, facing its body), the host
+player's own march unchanged.
+
 ## Integration and checks
 
 `InstallNpcAi` registers the executor once through `ConfigureNpcCommandNetwork`,

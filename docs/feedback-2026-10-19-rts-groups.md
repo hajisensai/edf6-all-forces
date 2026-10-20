@@ -79,11 +79,12 @@ A（攻击移动）和 S（停止）是地图镜头的 WASD 平移键，不能�
 
 联机缺口：
 
-- **阵形 T / 阵形菜单**：作为 v7 的 `Order::formation`（参数在 `Command::param`：守点防御阵形轮换 / 设定，行军阵形设定）走同一通道。行军阵形只对权威端自己的玩家的小队生效（`npcai.cpp MarchRoster` 只排 `PlayerHuman()` 的小队），客人的已招募小队在房主那边按原版跟随，对它们改行军会返回「不支持」——这是现有行军实现的限制，没有改成按玩家分别排行军。
+- **阵形 T / 阵形菜单**：作为 v7 的 `Order::formation`（参数在 `Command::param`：守点防御阵形轮换 / 设定，行军阵形设定）走同一通道。行军阵形按玩家分别排（`npcai.cpp` `PeerMarch` / `MarchOf`，`MarchRoster(ms, march, player)`）：房主替每名客人保存一份行军状态（阵形、朝向、跃进分组），锚点是那名客人的位置，朝向取他身体的前向（客人的镜头在他自己的机器上，房主读不到）；客人的 T 发出「行军设为下一个」，客人本机同步记下这个阵形，下一次 T 从它往后轮换。
+- **客人地图画排队路线**：v7 新消息 `ways`（`command_protocol.h`）：房主在场景 tick 里把本机各单位的排队（目标点之后的路点）与上次发出的比较，有变化才发给 v7 成员，排队没了发清除；成员 hello 时补发全部；按修订号新者为准，换任务清空；v6 成员从不收到。客人地图对非本机权威的单位画房主发来的路点。
 - **摆放载具 / 士兵 / 无人机、按需加载**：资源号高字节区分种类（敌人 0xE1、载具 0xE2、士兵 0xE3、无人机 0xE4，`debug_spawn_net.h`），`SpawnRangeEnemy` 按种类生成（`SpawnVehicle` / `ApplySupportSoldierResource` / `PrepareSupportDrone`）后 `RegisterSupportObject`，激活照旧（敌人 `0x548D50`、士兵放开、无人机起飞）。按需加载：房主规划时返回 pending 直到本机加载完；各成员 PREPARE 时排入加载，加载完才回 READY（`support_net.h Hooks::prepare`，`support_protocol.cpp` 的 READY 延后，受事务原有 20 秒期限约束）。
 
 统一：`UnitRef`（`mapcmd_logic.h`）；`Dispatch(units, Command, {queue})`（本机权威 → `MapCommandAuthority`，其余一次请求；Issue、排队推进、`MapCommandGuardAt`、阵形都走它）；`NetSpawn`（测试场的物体行联机走同一套 preload → prepare → 全员创建 → activate；支援呼叫行仍走支援呼叫自己的规划器，同一会话）。
 
-离线验证：`tests/command_protocol_test.cpp`（v7 字段、v6 拒收、各版本组合协商）、`tools/map_cmd_check.cpp`（阵形参数、`Replace` 不登记、`UnitRef` 回选）、`tools/map_command_runtime_check.cpp`（网络排队经权威入口保存并由场景 tick 推进、暂离列表保留、换任务清空、客人视角经队员找回编队、阵形联机请求）、`tests/debug_spawn_net_test.cpp`（各种类的计划与三机事务、PREPARE 延后到加载完、永不加载则超时且什么都不生成）、`tests/enemy_control_protocol_test.cpp`（v3 成员在房间里时拒绝操控）。
+离线验证：`tests/command_protocol_test.cpp`（v7 字段、v6 拒收、各版本组合协商、`ways` 的编解码 / 只发 v7 成员 / 不变不重发 / hello 补发 / 清除 / 旧修订不覆盖 / 换任务清空）、`tests/command_native_dispatch_test.cpp`（客人对自己小队设行军阵形：房主为他单独保存并把他的小队排进他的行军，房主自己的行军不变）、`tools/map_cmd_check.cpp`（阵形参数、`Replace` 不登记、`UnitRef` 回选）、`tools/map_command_runtime_check.cpp`（网络排队经权威入口保存并由场景 tick 推进、暂离列表保留、换任务清空、客人视角经队员找回编队、阵形联机请求）、`tests/debug_spawn_net_test.cpp`（各种类的计划与三机事务、PREPARE 延后到加载完、永不加载则超时且什么都不生成）、`tests/enemy_control_protocol_test.cpp`（v3 成员在房间里时拒绝操控）。
 
 未实机：以上全部；特别是联机摆放的载具 / 士兵 / 无人机在客人那边的表现、`0x111CC20` 在任务中途调用是否会卡顿或死锁、客人经跟随树找回编队的时机。

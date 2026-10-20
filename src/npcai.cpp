@@ -374,6 +374,13 @@ struct March {
 };
 March march{};
 SRWLOCK marchLock=SRWLOCK_INIT;
+// The other players' marches (online, on the squads' authority: the host runs every member's recruited squads, so the
+// march of a guest's squads round that guest is kept here; 2026-10-20, the user: 「所有功能都要支持联机」). Each by its
+// player's identity; a slot whose player is gone (dead, left, another object at its address) is taken again. The shape
+// starts at this machine's ini (NpcFormation) until that player's map sets it (Order::formation).
+struct PeerMarch { ObjRef player; March m; };
+constexpr int kPeerMarches=8;
+PeerMarch peerMarches[kPeerMarches]{};
 
 npc::formation::Shape MarchShape() noexcept {
     if(!march.shapeSet) {
@@ -382,6 +389,41 @@ npc::formation::Shape MarchShape() noexcept {
         march.shapeSet=true;
     }
     return march.shape;
+}
+bool PeerLive(const ObjRef& p) noexcept {
+    const auto* h=static_cast<const unsigned char*>(p.obj);
+    return h && Readable(h,kDead+1) && p.Is(h) && !h[kDead];
+}
+// The march round player `root`: this machine's player's (`march`), or another player's (`make`: a slot taken for it).
+March* MarchOf(const unsigned char* root,bool make) noexcept {
+    if(!root)return nullptr;
+    if(root==PlayerHuman())return &march;
+    PeerMarch* free=nullptr;
+    for(auto& p:peerMarches) {
+        if(p.player.obj==root && PeerLive(p.player))return &p.m;
+        if(!free && !PeerLive(p.player))free=&p;
+    }
+    if(!make || !free)return nullptr;
+    *free=PeerMarch{ObjRef::Of(root),March{}};
+    return &free->m;
+}
+npc::formation::Shape ShapeOf(March& m) noexcept {
+    if(&m==&march)return MarchShape();
+    if(!m.shapeSet) {
+        const npc::formation::Shape s=npc::formation::FromInt(Cfg().npcFormation);
+        m.shape=npc::formation::MarchShape(s) ? s : npc::formation::Shape::stock;m.shapeSet=true;
+    }
+    return m.shape;
+}
+void SetMarchShape(npc::formation::Shape s,const char* by) noexcept;
+// Another player's march set (its map's formation order, on this machine: its squads' authority).
+bool SetPeerMarchShape(const unsigned char* who,npc::formation::Shape s) noexcept {
+    March* const m=MarchOf(who,true);
+    if(!m)return false;
+    if(m==&march){SetMarchShape(s,"the map");return true;}
+    m->shape=s;m->shapeSet=true;m->bound=npc::formation::Bound{};
+    Log("NPCAI formation of player %p's squads: %s (its map)",who,npc::formation::Name(s));
+    return true;
 }
 void SetMarchShape(npc::formation::Shape s,const char* by) noexcept {
     AcquireSRWLockExclusive(&marchLock);
@@ -1887,6 +1929,7 @@ void ResetNpcAi() noexcept {
     world=World{};
     march.heading=npc::formation::Heading{};march.bound=npc::formation::Bound{};march.frame=0;march.n=0;
     march.movers=march.pending=march.moversLast=march.pendingLast=0;
+    for(auto& p:peerMarches)p=PeerMarch{};
     ResetSweep();
     fullLoggedAt=listLoggedAt=0;
 }
@@ -2050,13 +2093,13 @@ int Members(unsigned char* top,unsigned char** out,int most) noexcept {
     return n;
 }
 
-// The march's roster this frame: the player's recruited squads with no order (on foot), squad by squad.
-void MarchRoster(ULONGLONG ms) noexcept {
-    if(march.frame==GameFrame())return;
-    march.frame=GameFrame();march.n=0;
-    march.moversLast=march.movers;march.pendingLast=march.pending;march.movers=march.pending=0;
-    if(MarchShape()==npc::formation::Shape::bounding)npc::formation::Step(march.bound,march.moversLast,march.pendingLast,ms);
-    unsigned char* const me=PlayerHuman();
+// The march's roster this frame round player `me` (this machine's player's `march`, or another player's): its recruited
+// squads with no order (on foot), squad by squad.
+void MarchRoster(ULONGLONG ms,March& mr,const unsigned char* me) noexcept {
+    if(mr.frame==GameFrame())return;
+    mr.frame=GameFrame();mr.n=0;
+    mr.moversLast=mr.movers;mr.pendingLast=mr.pending;mr.movers=mr.pending=0;
+    if(ShapeOf(mr)==npc::formation::Shape::bounding)npc::formation::Step(mr.bound,mr.moversLast,mr.pendingLast,ms);
     if(!me)return;
     for(const Squad& q:squads) {
         if(!Live(q,ms) || q.control!=npc::Control::recruited || q.cmd.order!=Order::none)continue;
@@ -2064,11 +2107,12 @@ void MarchRoster(ULONGLONG ms) noexcept {
         if(!q.top.Is(top) || top[kDead] || TopNpc(top)!=top || RootLeader(top)!=me)continue;
         unsigned char* m[kMaxSquad];
         const int k=Members(top,m,kMaxSquad);
-        for(int i=0;i<k && march.n<static_cast<int>(sizeof(march.member)/sizeof(march.member[0]));++i)
+        for(int i=0;i<k && mr.n<static_cast<int>(sizeof(mr.member)/sizeof(mr.member[0]));++i)
             if(HumanOnFoot(m[i]) && IsOnlineAuthority(m[i]) && !npc::Scripted(ControlOf(m[i],RootLeader(m[i]))))
-                march.member[march.n++]=m[i];
+                mr.member[mr.n++]=m[i];
     }
 }
+void MarchRoster(ULONGLONG ms) noexcept { MarchRoster(ms,march,PlayerHuman()); }
 
 // Walks the soldier to its formation slot (formation.h) and holds it there; false when it has none (stock shape,
 // not in a formation). Blocked routes wait/replan inside MoveTo; they never fall back to walking through a wall.
@@ -2081,20 +2125,32 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
     float fwd[2]={0.0f,1.0f};
     int k=-1,n=0;
     bool marching=false;
+    March* mr=nullptr;   // the march it is in (its player's)
     if(q && mapcmd::PointOrder(q->cmd.order) && q->guardShape!=Shape::stock) {
         shape=q->guardShape;anchor=q->cmd.at;fwd[0]=q->guardFwd[0];fwd[1]=q->guardFwd[1];
         unsigned char* m[kMaxSquad];
         const int c=Members(static_cast<unsigned char*>(const_cast<void*>(q->top.obj)),m,kMaxSquad);
         for(int i=0;i<c;++i){if(!HumanOnFoot(m[i]))continue;if(m[i]==h)k=n;++n;}
-    } else if(s.control==npc::Control::recruited && root && root==PlayerHuman() && (!q || q->cmd.order==Order::none) &&
-              MarchShape()!=Shape::stock && world.player) {
-        MarchRoster(ms);
-        shape=MarchShape();anchor=world.playerAt;marching=true;
-        for(int i=0;i<march.n;++i)if(march.member[i]==h)k=i;
-        n=march.n;
-        const float look[2]={world.lookOk ? world.look[0] : 0.0f,world.lookOk ? world.look[2] : 1.0f};
-        Track(march.heading,anchor,look,2.0f);
-        fwd[0]=march.heading.fwd[0];fwd[1]=march.heading.fwd[1];
+    } else if(s.control==npc::Control::recruited && root && (!q || q->cmd.order==Order::none) &&
+              ((root==PlayerHuman() && world.player) || (InSession() && IsAnyPlayer(root))) &&
+              (mr=MarchOf(root,true))!=nullptr && ShapeOf(*mr)!=Shape::stock) {
+        // This machine's player's march round where it stands and looks; another player's (online: its squads' authority
+        // here) round that player, ahead along its body's facing (its camera is its own machine's).
+        MarchRoster(ms,*mr,root);
+        shape=ShapeOf(*mr);marching=true;
+        float look[2]={0.0f,1.0f};
+        if(mr==&march) {
+            anchor=world.playerAt;
+            if(world.lookOk){look[0]=world.look[0];look[1]=world.look[2];}
+        } else {
+            anchor=Pos(root);
+            const float* m=reinterpret_cast<const float*>(root+kMatrix);
+            look[0]=m[8];look[1]=m[10];
+        }
+        for(int i=0;i<mr->n;++i)if(mr->member[i]==h)k=i;
+        n=mr->n;
+        Track(mr->heading,anchor,look,2.0f);
+        fwd[0]=mr->heading.fwd[0];fwd[1]=mr->heading.fwd[1];
     }
     float x,z;
     if(!anchor || k<0 || !Offset(shape,k,n,spacing,&x,&z))return false;
@@ -2103,12 +2159,12 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
     const float d=npc::Horiz(pos,slot);
     if(left)*left=d;
     if(marching && shape==Shape::bounding) {
-        if(TeamOf(k)!=march.bound.moving && npc::Horiz(pos,anchor)<Cfg().npcLeash) {
+        if(TeamOf(k)!=mr->bound.moving && npc::Horiz(pos,anchor)<Cfg().npcLeash) {
             Stand(h);*move="overwatch";   // the other half covers: it holds where it is
             return true;
         }
-        ++march.movers;
-        if(d>kArrive)++march.pending;
+        ++mr->movers;
+        if(d>kArrive)++mr->pending;
     }
     // World() inherits the anchor's height, which is only a hint on a slope.
     // Project locally; never search the whole vertical map and choose a roof.
@@ -2996,10 +3052,12 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
                                 mapcmd::FormationGuardShape(c.param);
                 if(shape<0 || SetGuardFormation(top,shape)<0)return CommandResult(Reason::unsupported);
             } else if(q->cmd.order==Order::none && recruited && caller && root==caller) {
-                // The march is this machine's player's (MarchRoster: the squads round PlayerHuman()): another
-                // machine's player's squads keep the stock follow here, whatever that player's own march is.
+                // The march of the requester's own squads (MarchRoster round that player: this machine's player's, or
+                // online another player's whose squads this machine runs).
                 const int marchShape=mapcmd::FormationMarchShape(c.param);
-                if(marchShape<0 || caller!=PlayerHuman() || SetMarchFormation(marchShape)<0)return CommandResult(Reason::unsupported);
+                const npc::formation::Shape marchAs=npc::formation::FromInt(marchShape);
+                if(marchShape<0 || !npc::formation::MarchShape(marchAs) || static_cast<int>(marchAs)!=marchShape ||
+                   !SetPeerMarchShape(caller,marchAs))return CommandResult(Reason::unsupported);
             } else return CommandResult(Reason::unsupported);
             return CommandResult(Reason::none,static_cast<unsigned>(count>0 ? count : 1));
         }

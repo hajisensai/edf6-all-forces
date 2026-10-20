@@ -568,6 +568,8 @@ void PickFormation(Game& g,int entry) noexcept {
     const Command c{Order::formation,{0.0f,0.0f,0.0f},mapbtn::MenuGuard(entry) ? mapcmd::FormationParam(shape,-1) : mapcmd::FormationParam(-1,shape)};
     int skipped=0;
     const int given=Dispatch(g,c,&skipped,{});
+    // Sent to another machine's squads: this machine's own march follows the shape asked (the next T steps from it).
+    if(g.networkQueued && !mapbtn::MenuGuard(entry))SetMarchFormation(shape);
     FormationNote(g,given,shape);
     Log("MAPCMD formation menu: %s %s, %d given, %d not",mapbtn::MenuGuard(entry) ? "defence" : "march",
         npc::formation::Name(npc::formation::FromInt(shape)),given,skipped);
@@ -1061,6 +1063,7 @@ void Formation(Game& g,bool allowed) noexcept {
     const int march=static_cast<int>(npc::formation::Next(npc::formation::FromInt(NpcMarchShape()),false));
     int skipped=0;
     const int given=Dispatch(g,Command{Order::formation,{0.0f,0.0f,0.0f},mapcmd::FormationParam(-2,march)},&skipped,{});
+    if(g.networkQueued)SetMarchFormation(march);   // the next T steps on from it (the squads' march is their authority's)
     FormationNote(g,given,-1);
     Log("MAPCMD formation: %d squad(s) took it, %d not, the march to %s",given,skipped,
         npc::formation::Name(static_cast<npc::formation::Shape>(march)));
@@ -1217,6 +1220,10 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
             if(mapcmd::SameKey(g.group[n][j].top,Key(id)))groups[i]|=static_cast<std::uint16_t>(1u<<n);
         queues[i]=QueueOfListed(id);   // this machine's units' (another machine's are kept by their authority)
     }
+    // Another machine's units: the points their authority keeps, as it published them (command protocol v7 Kind::ways).
+    static float hostWays[kCmdUnits][mapcmd::kWaypointsMost][3];unsigned hostWayCount[kCmdUnits]{};
+    if(InSession())for(int i=0;i<g.count;++i)
+        if(!queues[i] && !IsOnlineAuthority(g.list[i].u.v))hostWayCount[i]=ReadMapCommandWays(g.list[i].id,hostWays[i],mapcmd::kWaypointsMost);
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,pickCount);r.pickable=pickCount;r.selected=g.sel.n;r.pointOk=pointOk;
@@ -1243,6 +1250,7 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         m.groups=groups[i];m.ways=0;
         if(const UnitQueue* q=queues[i])
             for(int w=0;w<q->w.n;++w)std::memcpy(m.way[m.ways++],q->w.next[w].at,12);
+        else for(unsigned w=0;w<hostWayCount[i] && w<mapcmd::kWaypointsMost;++w)std::memcpy(m.way[m.ways++],hostWays[i][w],12);
     }
     r.squads=squads;r.squadTally=tally;r.squadOpen=g.panelOpen;
     r.links=linkCount;std::memcpy(r.link,links,sizeof(TransportLink)*static_cast<std::size_t>(linkCount));
@@ -1765,14 +1773,24 @@ NpcCommandResult MapCommandAuthority(const ObjRef& unit,const Command& c,const O
     return result;
 }
 
+// Host: this machine's queues out to the clients' maps (command_net.cpp SyncMapCommandWays: what changed, what went).
+void ShareQueues() noexcept {
+    static MapCommandWays out[kCmdUnits];
+    unsigned n=0;
+    for(const auto& q:unitQueues)if(q.w.active && q.w.n) {
+        MapCommandWays& w=out[n++];w.obj=q.unit.top.obj;w.ctrl=q.unit.top.ctrl;w.n=static_cast<unsigned>(q.w.n);
+        for(int i=0;i<q.w.n && i<mapcmd::kWaypointsMost;++i)std::memcpy(w.at[i],q.w.next[i].at,12);
+    }
+    SyncMapCommandWays(out,n);
+}
 void MapCommandQueueTick() noexcept {
-    bool any=false;
-    for(const auto& q:unitQueues)any=any || q.w.active;
-    if(!any)return;
     static ULONGLONG frame=~0ull;   // once a game frame (every soldier's pre-update and every vehicle's input call it)
     const ULONGLONG f=GameFrame();
     if(f==frame)return;
     frame=f;
+    bool any=false;
+    for(const auto& q:unitQueues)any=any || q.w.active;
+    if(!any){ShareQueues();return;}   // none left: any still on the clients' maps cleared
     const int count=ListUnits(authorityList);
     for(auto& q:unitQueues) {
         if(!q.w.active)continue;
@@ -1795,6 +1813,7 @@ void MapCommandQueueTick() noexcept {
         Log("MAPCMD queue of %p: %s (%.0f,%.0f,%.0f)%s, %d more",q.unit.top.obj,OrderName(next.order),next.at[0],next.at[1],next.at[2],
             result.Accepted() ? "" : " refused, queue dropped",q.w.n);
     }
+    ShareQueues();
 }
 
 bool PlayerMapCommands(MapCommandReadout* out) noexcept {
