@@ -107,3 +107,34 @@ for field in (rt.ci.HEADING,rt.ci.PITCH,rt.ci.ALT):
         shift=int(travel)*1e-4*.059
         assert reach>=window+shift-1e-6 and reach+shift<=outer+1e-6,'the card covers the window and hides behind the bezel'
 print('compass card, attitude card and altimeter faces passed')
+
+# A block's fields on the cells its panel can carry (2026-10-21, docs/feedback-2026-10-21-attitude-indicator.md): a
+# cell the panel cannot carry gives its place to the next one (the least needed fields run out, never one in the
+# middle), and the attitude indicator takes the carried cell nearest the line of sight.
+P,S,A,C=rt.ci.PITCH,rt.ci.SPEED,rt.ci.ALT,rt.ci.CLIMB
+cells=[(0,np.array((0,-.40,1.)),.05),(1,np.array((.1,-.40,1.)),.05),(3,np.array((0,-.55,1.)),.05)]   # cell 2 not carried
+got=rt.placed_fields((S,A,P,C),cells)
+assert [(i,f) for i,f,_,_ in got]==[(0,P),(1,A),(3,S)],got
+assert rt.placed_fields((S,A,C),cells)==[(i,f,c,d) for (i,c,d),f in zip(cells,(S,A,C))],'without an attitude: grid order'
+
+# Every fighter's first person (its eye frame is the camera's: firstperson.cpp Ride) shows an attitude indicator: the
+# game's view is pi/4 high (docs/view-distance-re.md), so a dial's face must lie within 22.5 degrees above or below
+# the line of sight and 36.4 degrees aside (16:9). Before the fix the F-16's were 34 and 40 degrees under it, out of
+# view (the user, 2026-10-21: 「飞机的地平线角度表盘没显示」).
+import math
+import cockpit_kits as ck
+HALF_UP=22.5;HALF_ASIDE=math.degrees(math.atan(math.tan(math.radians(HALF_UP))*16/9))
+for name in ('jet_f16','jet_f16_narrow'):
+    kit=ck.KITS[name]({s:3.0 for s in ('left','right','up','down','ahead','back')})
+    seen=[]
+    for c in kit.controls:
+        if not c.control.startswith('g_'):continue
+        parts=[p for p in kit.parts if p.name==c.part]
+        radius=max(np.linalg.norm(np.asarray(v.pos)-c.centre) for p in parts for v in p.verts)
+        x,y,z=c.centre;d=float(np.linalg.norm(c.centre));spread=math.degrees(math.asin(min(1.,radius/d)))
+        down,aside=math.degrees(math.atan2(-y,z)),math.degrees(math.atan2(abs(x),z))
+        seen.append((round(down,1),round(aside,1)))
+        if down+spread<=HALF_UP and aside+spread<=HALF_ASIDE:break
+    else:
+        raise AssertionError(f'{name}: no attitude indicator in the first-person view (down, aside): {seen}')
+print('attitude indicator in every fighter view passed')

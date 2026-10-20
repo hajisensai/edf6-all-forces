@@ -1801,6 +1801,25 @@ fpskin::Mask BodyMask(const void* palette) noexcept {
     return mask;
 }
 
+// Debug=1: an attitude card's readings and its pose as drawn, every 2 s (render thread): the bank / pitch it was given,
+// the drawn card's turn and drop against the model's own, and the bone's row lengths (its screen-height units).
+std::atomic<ULONGLONG> attitudeLogAt{0};
+void AttitudeProbe(const wchar_t* name,const M4& original,const M4& moved,const DrawSnap& d,bool ready) noexcept {
+    const ULONGLONG now=GetTickCount64();
+    ULONGLONG last=attitudeLogAt.load(std::memory_order_relaxed);
+    if(now-last<2000 || !attitudeLogAt.compare_exchange_strong(last,now))return;
+    auto len=[](const float* r){return std::sqrt(r[0]*r[0]+r[1]*r[1]+r[2]*r[2]);};
+    auto dot=[](const float* a,const float* b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];};
+    const float sx=len(original.m),sy=len(original.m+4);
+    // The card's turn about its own facing: its drawn x row against the model's x and y rows.
+    const float turned=sx>0 && sy>0 ? std::atan2(dot(moved.m,original.m+4)/(sx*sy),dot(moved.m,original.m)/(sx*sx))/0.01745329252f : 0.0f;
+    float shift[3];fpview::Sub(moved.m+12,original.m+12,shift);
+    const float drop=sy>0 ? dot(shift,original.m+4)/(sy*sy) : 0.0f;
+    const auto& r=d.instruments;
+    Log("FP attitude %ls: ready %d flight %d pitch %.1f roll %.1f deg -> card turned %.1f deg, dropped %.4f (rows %.4f %.4f %.4f)",
+        name,ready,r.flight,r.value[instruments::pitch],r.value[instruments::roll],turned,drop,sx,sy,len(original.m+8));
+}
+
 void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=nullptr) noexcept {
     const DrawSnap& d=Snap();
     const auto n=At<std::int32_t>(inst,kInstCount);
@@ -1830,6 +1849,7 @@ void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=null
         const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
         const M4 moved=instruments::Pose(original,mode,field,place,segment,d.instruments,ready);
         std::memcpy(pose+i*16,moved.m,64);
+        if(mode==L'g' && Cfg().debug)AttitudeProbe(name,original,moved,d,ready);
     }
 }
 
@@ -2226,6 +2246,13 @@ void FirstPersonInstrumentReadings(const instruments::Readings& readings,const u
         const float* m=state.ride.frame;
         state.instruments.value[instruments::roll]=readings.flight && std::isfinite(m[1]+m[5]) && (m[1]!=0.0f || m[5]!=0.0f) ?
             std::atan2(m[1],m[5])/0.01745329252f : -1.0f;
+        static ULONGLONG readingsLogAt=0;
+        const ULONGLONG now=GetTickCount64();
+        if(Cfg().debug && now-readingsLogAt>=2000) {
+            readingsLogAt=now;
+            Log("FP attitude readings: flight %d pitch %.1f deg, seat frame left.y %.3f up.y %.3f ahead.y %.3f -> roll %.1f deg",
+                readings.flight,readings.value[instruments::pitch],m[1],m[5],m[9],state.instruments.value[instruments::roll]);
+        }
         StateScope scope(&state);Publish();
     }
 }
