@@ -5608,7 +5608,8 @@ def map_wired() -> None:
         assert 'seatsw::ChordOwns(' in src(rel) and 'c.thermalButton' in src(rel), f'{rel}: its button gives way to the thermal chord'
     controlled = src('src/enemy_control.cpp')
     sample = controlled.split('void Sample(Session& session,Input& sample) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,0x688)) {' in sample
+    assert 'if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,kRecordBytes) && Readable(pad,kPadPathField+sizeof(int))) {' in sample
+    assert 'ReadPadSticks(pad,record,At<int>(pad,kPadPathField)!=0 || PadFlag())' in sample, 'movement and look are read as the soldier reads its controller (enemy_control_pad.h)'
     assert 'if(index==0) {' in sample, 'keyboard input belongs only to the first local player'
     allowed = controlled.split('bool InputAllowed() noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(GamePaused())return false;' in allowed and 'pid==GetCurrentProcessId()' in allowed
