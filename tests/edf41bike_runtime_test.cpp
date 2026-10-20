@@ -10,6 +10,7 @@ namespace fixture {
 unsigned char vehicle[0x3000]{},seats[2*edf::kSeatStride]{},gun[0x110]{},marker[0x110]{};
 crew::Config config{};
 edf::Rider rider=edf::Rider::player;
+unsigned char patches[2][21]{},stubs[2][96]{};std::size_t stubSize[2]{};bool failGate=false;
 bool tagged=true,marked=true,living=true,npc=false,map=false,matches=true,gunnerAllowed=true;
 int diags=0,diagSawFrames=-1,chainCalls=0,failChain=0,sets=0,steps=0,pulls=0,frames=0,poses=0,registrations=0;
 void* aimed=nullptr;void* pulled=nullptr;void* entrySeen=nullptr;int holderSeen=-1;
@@ -35,7 +36,7 @@ void Reset(){
  std::memset(vehicle,0,sizeof vehicle);std::memset(seats,0,sizeof seats);std::memset(gun,0,sizeof gun);
  config.enabled=true;tagged=marked=living=matches=gunnerAllowed=true;npc=map=false;rider=edf::Rider::player;
  chainCalls=failChain=sets=steps=pulls=frames=poses=registrations=0;aimed=pulled=entrySeen=nullptr;holderSeen=-1;order.clear();
- crew::on=false;crew::nextFrame=crew::nextPose=nullptr;callHook=nullptr;
+ crew::on=false;crew::nextFrame=crew::nextPose=nullptr;callHook=nullptr;failGate=false;
  edf::Put<void*>(vehicle,0,crew::image+0x17E01B0);edf::Put<void*>(vehicle,0x608,seats);edf::Put<std::uint64_t>(vehicle,0x618,2);
  edf::Put<std::uint16_t>(vehicle,0x110,2);edf::Put<int>(vehicle+0xEE0,0x20,13);edf::Put<int>(gun,0xC,11);
  for(unsigned i=0;i<2;++i)edf::Put<void*>(seats+i*edf::kSeatStride,0xE0,crew::image+0x17D8A68);
@@ -52,6 +53,16 @@ bool Readable(const void* at,std::size_t,bool) noexcept{return at!=nullptr;}
 bool Matches(const unsigned char*,std::size_t,const unsigned char*,std::size_t) noexcept{return fixture::matches;}
 bool ChainVtableSlot(void** slot,void* hook,void** next) noexcept{++fixture::chainCalls;if(fixture::chainCalls==fixture::failChain)return false;*next=*slot;*slot=hook;return true;}
 bool RedirectCall(unsigned char*,void*,void* replacement,bool& changed) noexcept{fixture::callHook=replacement;changed=true;return true;}
+bool PatchCode(unsigned char* at,const unsigned char* expected,const unsigned char* replacement,std::size_t size) noexcept{
+ const int k=at==crew::image+0x65B14B ? 0 : at==crew::image+0x65B31B ? 1 : -1;
+ fixture::Check(k>=0 && size==(k ? 8u : 21u) && expected[0]==(k ? 0x85 : 0x49),"the gun gate patches the two stock tests whole");
+ std::memcpy(fixture::patches[k],replacement,size);return !fixture::failGate;}
+void* AllocateNearCode(const void* anchor,const unsigned char* code,std::size_t size) noexcept{
+ const int k=anchor==crew::image+0x65B14B ? 0 : anchor==crew::image+0x65B31B ? 1 : -1;
+ fixture::Check(k>=0 && size<=sizeof(fixture::stubs[0]),"each stub near its test");
+ std::memcpy(fixture::stubs[k],code,size);fixture::stubSize[k]=size;
+ // a stub address the rel32 jmp reaches: inside the private image, past everything the test writes
+ return crew::image+0x1700000+static_cast<std::size_t>(k)*0x100;}
 unsigned SeatCount(const unsigned char* v) noexcept{return static_cast<unsigned>(At<std::uint64_t>(v,kSeatCount));}
 Rider SeatRider(const unsigned char*,const unsigned char*) noexcept{return fixture::rider;}
 bool LivingSoldierInSeat(const unsigned char*,const unsigned char*) noexcept{return fixture::living;}
@@ -111,6 +122,30 @@ int main(){
  Reset();Check(crew::InstallEdf41Bike(),"reinstall for the diagnostic");diags=0;config.debug=true;gunnerAllowed=false;
  crew::Frame(vehicle);Check(diags==1&&frames==1&&diagSawFrames==1,"Debug=1: the diagnostic samples each Car frame after the native one");
  config.debug=false;gunnerAllowed=true;crew::Frame(vehicle);Check(diags==1&&frames==2,"Debug=0: no diagnostic");
+ // The gun gate (2026-10-21): the stock loop skips any Car whose seat 0 owns no gun, and in it every row of another seat;
+ // for the 408 the two stubs ask BuildsGun / BuildsRow.
+ Reset();Check(crew::InstallEdf41Bike(),"install with the gun gate");
+ for(int k=0;k<2;++k) {
+  const unsigned rva=k ? 0x65B31Bu : 0x65B14Bu;std::int32_t rel=0;std::memcpy(&rel,patches[k]+1,4);
+  Check(patches[k][0]==0xE9 && crew::image+rva+5+rel==crew::image+0x1700000+static_cast<std::size_t>(k)*0x100 &&
+        patches[k][5]==0x90,"each test jumps to its stub");
+ }
+ {const unsigned char head[]={0x49,0x8B,0x87,0x08,0x06,0x00,0x00,0x48,0x83,0xB8,0xD8,0x00,0x00,0x00,0x00,0x75,0x1D};
+  Check(std::memcmp(stubs[0],head,sizeof(head))==0,"a gun on seat 0 keeps the stock loop first");}
+ {const unsigned char head[]={0x85,0xDB,0x74,0x1D};Check(std::memcmp(stubs[1],head,sizeof(head))==0,"a seat-0 row keeps the stock build first");}
+ auto at64=[](const unsigned char* p){std::uint64_t v=0;std::memcpy(&v,p,8);return v;};
+ Check(at64(stubs[0]+15+13)==reinterpret_cast<std::uint64_t>(&crew::BuildsGun)&&at64(stubs[1]+2+13)==reinterpret_cast<std::uint64_t>(&crew::BuildsRow),
+       "each stub asks its own question");
+ Check(at64(stubs[0]+stubSize[0]-22)==reinterpret_cast<std::uint64_t>(crew::image+0x65B160)&&at64(stubs[0]+stubSize[0]-8)==reinterpret_cast<std::uint64_t>(crew::image+0x65B3EF),
+       "the count gate goes on to the stock loop or the stock skip");
+ Check(at64(stubs[1]+stubSize[1]-22)==reinterpret_cast<std::uint64_t>(crew::image+0x65B323)&&at64(stubs[1]+stubSize[1]-8)==reinterpret_cast<std::uint64_t>(crew::image+0x65B3A6),
+       "the row gate goes on to the stock build or the next row");
+ Check(crew::BuildsGun(vehicle)&&crew::BuildsRow(vehicle,1),"the 408 with its one seat-1 holder: its gun row is built");
+ Check(!crew::BuildsRow(vehicle,2),"a row of another seat: the stock skip");
+ gunnerAllowed=false;Check(!crew::BuildsGun(vehicle)&&!crew::BuildsRow(vehicle,1),"a room without the seat and its gun: the stock skips");gunnerAllowed=true;
+ tagged=false;Check(!crew::BuildsGun(vehicle)&&!crew::BuildsRow(vehicle,1),"another Car: the stock skips");tagged=true;
+ edf::Put<std::uint64_t>(seats+edf::kSeatStride,0xD8,0);Check(!crew::BuildsGun(vehicle),"no seat-1 holder: nothing to build");
+ Reset();failGate=true;Check(!crew::InstallEdf41Bike()&&!crew::on,"a gate that cannot be patched: not installed");
  VirtualFree(crew::image,0,MEM_RELEASE);crew::image=nullptr;
  std::puts("original 408 production routing and lifecycle checks passed");
 }

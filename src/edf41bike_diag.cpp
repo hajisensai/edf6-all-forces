@@ -134,7 +134,23 @@ void Sample(unsigned char* v) noexcept {
         riders[i]="-dPo"[static_cast<int>(SeatRider(SeatAt(v,i)))];
         occupied=occupied || riders[i]!='-';
     }
-    if(!Sampled(f) && !(occupied && f%60==0 && f<=7200))return;   // ridden: once a second as well (the drive), first two minutes
+    // the local player's distance (the boarding runs walk up to it)
+    float playerDist=-1.0f,playerLocal[4]{};
+    if(const unsigned char* human=PlayerHuman(); human && Readable(human+kPosition,12)) {
+        const float* q=reinterpret_cast<const float*>(human+kPosition);
+        const float d[3]={q[0]-At<float>(v,kPosition),q[1]-At<float>(v,kPosition+4),q[2]-At<float>(v,kPosition+8)};
+        playerDist=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+        // ...and where, in the vehicle's own frame (its matrix rows: x, y, z, position), and which way they face
+        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+        const float* h=reinterpret_cast<const float*>(human+kMatrix);
+        if(Readable(human+kMatrix,0x40)) {
+            playerLocal[0]=d[0]*m[0]+d[1]*m[1]+d[2]*m[2];playerLocal[1]=d[0]*m[8]+d[1]*m[9]+d[2]*m[10];
+            playerLocal[2]=h[8]*m[0]+h[9]*m[1]+h[10]*m[2];playerLocal[3]=h[8]*m[8]+h[9]*m[9]+h[10]*m[10];
+        }
+    }
+    const bool nearby=playerDist>=0.0f && playerDist<15.0f;
+    // ridden or the player near: twice a second as well (the drive, the walk up), first two minutes
+    if(!Sampled(f) && !((occupied || nearby) && f%30==0 && f<=7200))return;
     const char* kind=IsEdf41Bike(v) ? "408" : "car";
     const float dt=f>1 && now>before ? static_cast<float>(now-before)/1000.0f : 0.0f;
     float vel[3]{};
@@ -148,8 +164,8 @@ void Sample(unsigned char* v) noexcept {
     if(driver && Readable(driver+0x2C0,0x28)) {
         in[0]=At<float>(driver,0x2C0);in[1]=At<float>(driver,0x2C4);in[2]=At<float>(driver,0x2E0);in[3]=At<float>(driver,0x2E4);
     }
-    Log("EDF41BIKE DIAG v=%p %s f=%u pos=(%.3f,%.3f,%.3f) vel=(%.2f,%.2f,%.2f) ground=%.3f clearance=%.3f seats=[%s] drive=(%.2f,%.2f,%.2f,%.2f) dead=%d",
-        v,kind,f,p[0],p[1],p[2],vel[0],vel[1],vel[2],ground ? hit[1] : NAN,ground ? p[1]-hit[1] : NAN,riders,in[0],in[1],in[2],in[3],v[kDead]);
+    Log("EDF41BIKE DIAG v=%p %s f=%u pos=(%.3f,%.3f,%.3f) vel=(%.2f,%.2f,%.2f) ground=%.3f clearance=%.3f seats=[%s] drive=(%.2f,%.2f,%.2f,%.2f) player=%.1f local=(%.2f,%.2f) facing=(%.2f,%.2f) dead=%d",
+        v,kind,f,p[0],p[1],p[2],vel[0],vel[1],vel[2],ground ? hit[1] : NAN,ground ? p[1]-hit[1] : NAN,riders,in[0],in[1],in[2],in[3],playerDist,playerLocal[0],playerLocal[1],playerLocal[2],playerLocal[3],v[kDead]);
     if(Detailed(f))Records(kind,v,f);
 }
 }  // namespace

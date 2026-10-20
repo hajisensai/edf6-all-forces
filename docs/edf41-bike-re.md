@@ -40,7 +40,7 @@ GenericCarBase `0x65C587` 传 mode 1 给 VehicleBase `0x629450`；但这不是�
 
 ## 副座初始化、输入与联机
 
-Car 的 setup build `0x65B37E` 原本始终把 seat 0 的 Aim 交给 `0x633330`。专属 wrapper 只在模块全部安装成功且 schema 匹配时改为 seat 1 Aim，其余参数不变。原生 `0x5FB810` 读取源机枪第三项 `[90,.015,.1]` 初始化速度 / 加速度，避免复制含共享引用的 Aim 内存。
+Car 的 setup build `0x65B37E` 原本始终把 seat 0 的 Aim 交给 `0x633330`。专属 wrapper 只在模块全部安装成功且 schema 匹配时改为 seat 1 Aim，其余参数不变。原生 `0x5FB810` 读取源机枪第三项 `[90,.015,.1]` 初始化速度 / 加速度，避免复制含共享引用的 Aim 内存。 **2026-10-21 实机更正**：这段循环原版只为 seat 0 的枪跑（`0x65B152` 先看 seat 0 的 holder 数，`0x65B31B` 再逐行跳过别的座位），408 的枪在 seat 1，所以以前从未经过这里；现由「炮手机枪从未建成」一节的两道门放行。
 
 该调用发生在所有座位建立之后：VehicleBase `0x629B36 / 0x629C47` 完成 seat vector，Car ctor `0x6598E5` 设最终主 vtable `0x17E01B0`，再由 slot 46 `0x65A910` 执行 setup。构造期不会因“两座尚未建立”漏掉副座。
 
@@ -103,7 +103,7 @@ EDF6 读 `ReloadType`（武器 `+0x208`）在 `0x693E8D`：0 / 3 手动换弹；
 
 ### 诊断
 
-`src/edf41bike_diag.cpp`（`Debug=1` 时，Car vtable 帧钩子 `Frame` 里调 `Edf41BikeDiagFrame`，全程 SEH，所调原生函数先核签名）：每辆 Vehicle_Car（408 与同类的 V512）出车后第 1–3、6、10、20、40、80、160、320 帧，之后每 600 帧到 7200 帧，记 `pos` / 逐帧速度 / 正下方地图高度（`edf41c::GroundHit`）/ `clearance` / 各座位乘员、驾驶座输入 `drive=(+0x2C0,+0x2C4,+0x2E0,+0x2E4)`；有人乘坐时前 7200 帧内每 60 帧也记一次。第 1、40、600 帧另记 ragdoll 每个代理（`+0x9C` 模式、`+0xA0`、`+0xA4`、`0x17E720` 是否在世界里、`0x11B14A0` motion type 0 静态 / 1 运动学 / 2 动态、hknpBody `+0x54` flags（8 = active）、body 高度）与每条代理关节（两端代理、`0x11C1220` 是否已加入世界）。日志前缀 `EDF41BIKE DIAG`。`edf41bike.cpp` 另在 Debug=1 时记 `EDF41BIKE gunner`（炮手有输入权时每秒一行、每次运行至多 120 行：两轴角度、限位、转速、Aim `+0x90..+0x98` 转速参数、`+0xC0`、输入、扳机）与 `EDF41BIKE weapon build`（Car 建枪调用的路由结果 `why` 与建好后的转速参数）。
+`src/edf41bike_diag.cpp`（`Debug=1` 时，Car vtable 帧钩子 `Frame` 里调 `Edf41BikeDiagFrame`，全程 SEH，所调原生函数先核签名）：每辆 Vehicle_Car（408 与同类的 V512）出车后第 1–3、6、10、20、40、80、160、320 帧，之后每 600 帧到 7200 帧，记 `pos` / 逐帧速度 / 正下方地图高度（`edf41c::GroundHit`）/ `clearance` / 各座位乘员、驾驶座输入 `drive=(+0x2C0,+0x2C4,+0x2E0,+0x2E4)`、本机玩家的距离与在车体坐标里的位置 / 朝向（`player= local= facing=`）；有人乘坐或玩家在 40 m 内时，前 7200 帧内每 30 帧也记一次。第 1、40、600 帧另记 ragdoll 每个代理（`+0x9C` 模式、`+0xA0`、`+0xA4`、`0x17E720` 是否在世界里、`0x11B14A0` motion type 0 静态 / 1 运动学 / 2 动态、hknpBody `+0x54` flags（8 = active）、body 高度）与每条代理关节（两端代理、`0x11C1220` 是否已加入世界）。日志前缀 `EDF41BIKE DIAG`。`edf41bike.cpp` 另在 Debug=1 时记 `EDF41BIKE gunner`（炮手有输入权时每秒一行、每次运行至多 120 行：枪对象与剩余弹数 `rounds`、两轴角度、限位、转速、Aim `+0x90..+0x98` 转速参数、`+0xC0`、输入、扳机）与 `EDF41BIKE weapon build`（Car 建枪调用的路由结果 `why` 与建好后的转速参数）。
 
 ### 实机证据
 
@@ -118,7 +118,7 @@ EDF6 读 `ReloadType`（武器 `+0x208`）在 `0x693E8D`：0 / 3 手动换弹；
 
 4. 驾驶与炮手位（run 6–11，改后数据；玩家站在车侧上车点 1.2 m 半径内，`pad_b` =「搭乘 / 救援」）：
    - 驾驶座 `seats=[P-]`，左摇杆不驱动 Car，原生油门是座位 `+0x2E0`（`pad_lt`）：`f=2100 pos=(-253.433,0.871,225.024) ... drive=(0.00,0.00,1.00,0.00)` → `f=2220 pos=(-256.219,0.832,218.856)` → 松开后 `f=2340 ... clearance=-0.031`，约 2 秒开出 7 m，全程贴地。
-   - 炮手座 `seats=[-P]`：`EDF41BIKE gunner ... input=(0.32,0.00) fire=0`、扳机时 `fire=1`，座位改造的帧路径（`Update` → 原生 Aim slot 2 → 拉唯一 holder）在跑。**但 yaw / pitch 一直是 0**：`turn=(0.000,0.000,0.000)`，即 seat 1 Aim 的转速参数（`+0x90..+0x98`，应由 `0x633330 → 0x5FB810` 从机枪行第三项 `[90,.015,.1]` 填入）从未初始化。run 13 证实脚本 / 摆放生成的 408 根本没经过 `SetWeapon` 包装（`0x65A910` 的 `0x65B37E`，Debug=1 日志 `EDF41BIKE weapon build` 一行都没有），而 seat 1 仍有 holder，说明这条生成路径由别处建枪。这与本节的物理修复无关（gun 行值不影响 Aim），是另一个既有问题，本次未修：先查 `mission_setup` 路径由哪个 `0x633330` 调用点（`0x6000E0` / `0x644580` / `0x647390` 等，未核实）建枪，再决定在哪里路由到 seat 1 Aim。呼叫（`vehicle_setup`）路径是否经过 `0x65B37E` 未实测。
+   - 炮手座 `seats=[-P]`：`EDF41BIKE gunner ... input=(0.32,0.00) fire=0`、扳机时 `fire=1`，座位改造的帧路径（`Update` → 原生 Aim slot 2 → 拉唯一 holder）在跑。**但 yaw / pitch 一直是 0**：`turn=(0.000,0.000,0.000)`，即 seat 1 Aim 的转速参数（`+0x90..+0x98`，应由 `0x633330 → 0x5FB810` 从机枪行第三项 `[90,.015,.1]` 填入）从未初始化。run 13 证实脚本 / 摆放生成的 408 根本没经过 `SetWeapon` 包装（`0x65A910` 的 `0x65B37E`，Debug=1 日志 `EDF41BIKE weapon build` 一行都没有），而 seat 1 仍有 holder（后来查明：holder 有，枪对象根本没建）。这与本节的物理修复无关（gun 行值不影响 Aim），根因与修复见下节「炮手机枪从未建成」。
    - 对照：同一位置用安装着的旧数据（run 9）`f=1 ... clearance=0.418` → `f=600 ... clearance=0.513`，又一次悬空，且玩家够不着上车点（`seats=[--]`）。
 
 ### 根因
@@ -138,3 +138,40 @@ EDF6 读 `ReloadType`（武器 `+0x208`）在 `0x693E8D`：0 / 3 手动换弹；
 - `tests/edf41bike_native_audit.py`：CarBase 加全部关节、行值 0 递归删关节、mode 2 是运动学、fall-out 下标无检查这四条原生合同。
 - `tests/coop_attr_test.cpp`：缺 `kFeatBikeGrounded` 的成员被列出。
 - 变异：生成器改回 `['gun',1]` → `ValueError: 408 gun needs its one animation-driven simulation row 0`；去掉 fall-out 修正 → `ValueError: 408 car_base_fall_out names seats it does not have: [1, 2, 3, 4] of 2`；`pinned()` 不再把行值 1 记为运动学 → `FAIL: test_no_keyframed_proxy_holds_the_chassis`；`kFeatures` 去掉 `kFeatBikeGrounded` → `FAIL a member whose 408 still hovers: named in the notice`；`Frame` 不再调诊断 → `FAIL: Debug=1: the diagnostic samples each Car frame after the native one`（`tests/edf41bike_runtime_test.cpp`）。
+
+## 2026-10-21 实机：炮手机枪从未建成（转炮 / 开火）
+
+### 根因
+
+所有出车路径都走 Car 设定 slot 46 `0x65A910`：呼叫 / 空投与调试召唤、M 地图摆放的 `CreateVehicle2` 步骤 `0x633280`（`0x6332BE call [rax+0x170]`），任务脚本的 `mission_setup` 路径（`0x926A7 → 0x926B8`）。它建枪的循环有两道原版门：
+
+1. `0x65B14B..0x65B15A`：`mov rax,[r15+0x608]; cmp qword [rax+0xD8],0; jbe 0x65B3EF`，**seat 0** 没有 holder 就跳过整个循环；
+2. 循环里逐行读 `vehicle_weapon_setting`（`0x65B1B2` 取该名），`0x65B31B test ebx,ebx; jne 0x65B3A6`：行的座位号（`[1]`）不是 0 就跳到下一行。
+
+408 唯一的枪是 `['gun',1]`（炮手座），两道门都挡住，`0x633330` 一次都没调用：车的 holder 里没有枪对象，seat 1 Aim 的转速参数（`+0x90..+0x98`，`0x5FB810` 从机枪行第三项填）一直是 0，于是 `0x5FBC00` 每帧算出的转速为 0。上一版的 `SetWeapon` 包装（`0x65B37E`）写好了却永远不会被调到（实机 `EDF41BIKE weapon build` 无一行）。
+
+### 修复（`src/edf41bike.cpp` `InstallGunGate` / `BuildsGun` / `BuildsRow`）
+
+两道门各换成一个近址桩（`rel32 jmp`，原字节先核对）：桩里先执行原版测试，原版本来就会建（seat 0 有枪 / 本行是 seat 0）时照原路走；否则问 `BuildsGun(r15)` / `BuildsRow(r15, ebx)`：只有 408（`Tagged`）、炮手座开放（`Edf41BikeGunnerAllowed`）、seat 1 恰有一个 holder、且该行就是 seat 1 时，才进入原版循环 / 原版这一行的建枪。于是原版 `0x633330` 照常建枪，`SetWeapon` 把 Aim 换成 seat 1 的，`0x5FB810` 用数据里的 `[90,.015,.1]` 初始化转速（不写死），`RegisterMappings` 登记联机映射。其它 Car（实测 V512：`gun build gate ...: stock skip`）与关闭的房间都走原版跳过。
+
+### 实机证据（同一租约，`drive.py` 后台，测后逐字节还原、清单 0 差异，游戏目录 DLL 回到 `2213ef80…`）
+
+- 摆放（测试场脚本 `CreateVehicle2`，玩家站在炮手门旁 `pad_b` 上车）：
+  `EDF41BIKE gun build gate v=000001B71E208680: the loop runs for the seat 1 gun`、`EDF41BIKE gun row ... seat 1: built`、
+  `EDF41BIKE weapon build v=000001B71E208680 holder 0 why=4 aim=000001B71DA15D20 turn=(0.100,0.015,0.026)`；
+  上炮手座后 `yaw=0.000 → 0.205 → 0.524`（右摇杆，到 +30° 限位）、`pitch → -0.455`，扳机 `rounds=1200 → 1193 → 1178 → 1163`。
+- 呼叫（空降兵载具栏放 4.1 呼叫第 2028 行 `EDF6VC_E41_WEAPON753`，`pad_y` 点按；运输机投下后由一个临时闭环脚本（未入库，只调 `drive.py key`）按 `EDF41BIKE DIAG ... local=(..) facing=(..)` 走到炮手门上车）：
+  `gun build gate v=00000287BC6D6670: the loop runs for the seat 1 gun`、`weapon build ... why=4 ... turn=(0.100,0.015,0.026)`；
+  `yaw=0.000 → 0.185 → 0.384`、`pitch → -0.390`、`rounds=1200 → 1193 → 1178 → 1170`。
+- 修前同一路径：`turn=(0.000,0.000,0.000)`、yaw / pitch 恒 0（run 11、G1）。
+
+### 联机（#219 门控）
+
+新增功能位 `kFeatBikeGunMount`。炮手座的开放条件 `BikeGunnerAtSync` 改为全员同时有 `kFeatBikeGunner | kFeatBikeGunMount`：#219 / 本 PR 第一版的构建有座位、没有建成的枪，与新版混在一个房间时，新版这边会开火、旧版那边不会，所以整个任务都按原版 Car（不建枪、不改造座位），房间状态行列出「408 炮手机枪（已关闭）」。
+
+### 测试与变异
+
+- `tests/edf41bike_runtime_test.cpp`：两处补丁都整段核对原字节、跳到各自的桩；桩先放行原版、再问对的函数、去对的原版落点；408 / 关闭房间 / 别的 Car / 无 seat 1 holder / 别的座位行的判定；补丁失败则整个模块不装。
+- `tests/edf41bike_native_audit.py`：两道门、`vehicle_weapon_setting` 名字、行跳转目标、三条出车路径都经过 slot 46。
+- `tests/coop_attr_test.cpp`：缺 `kFeatBikeGunMount` 的成员让炮手座关闭；`tests/coop_attr_guard.py`：四处按任务门控。
+- 变异：`BuildsGun` 恒 false → `FAIL: the 408 with its one seat-1 holder: its gun is built`；桩里原版跳转偏移改错 → `FAIL: a gun on seat 0 keeps the stock loop first`；门控只要 `kFeatBikeGunner` → `FAIL the gunner seat needs every member's built gun as well`。

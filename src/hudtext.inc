@@ -606,6 +606,7 @@ HUDTEXT(featBikeCarDrive,L"the 408's drive",L"408 驾驶参数",L"408 駕駛參�
 HUDTEXT(featBikeGunner,L"the 408's gunner (closed)",L"408 边三轮炮手（已关闭）",L"408 邊三輪砲手（已關閉）",L"408 の銃手席（閉鎖）")
 HUDTEXT(featOutfit41Colours,L"4.1 outfit colours",L"4.1 外观颜色",L"4.1 外觀顏色",L"4.1 外見の色")
 HUDTEXT(featNoClimb41,L"4.1 friends' climbing",L"4.1 友军翻越",L"4.1 友軍翻越",L"4.1 友軍の乗り越え")
+HUDTEXT(featBikeGunMount,L"the 408's gunner gun (closed)",L"408 炮手机枪（已关闭）",L"408 砲手機槍（已關閉）",L"408 の銃手機銃（閉鎖）")
 HUDTEXT(featBikeGrounded,L"the 408 landing (not hovering)",L"408 落地（不悬空）",L"408 落地（不懸空）",L"408 の着地（宙に浮かない）")
 // The HQ outfit popup's fifth outfit (outfit41.cpp): EDF4.1's subtitle. English and Japanese as the game is titled in both
 // (「地球防衛軍4.1 THE SHADOW OF NEW DESPAIR」: the Japanese title keeps the English subtitle); Chinese as the user names it

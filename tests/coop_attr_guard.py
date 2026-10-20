@@ -51,7 +51,8 @@ npcai = src('src/npcai.cpp')
 check('Cfg().vanillaRecruit' not in npcai and 'VanillaRecruitInEffect()' in npcai, 'npcai: VanillaRecruit is the host\'s online')
 check('Cfg().npcFreeSquadCover' not in npcai and 'NpcFreeSquadCoverInEffect()' in npcai, 'npcai: NpcFreeSquadCover is the host\'s online')
 bike = src('src/edf41bike.cpp')
-check(bike.count('Edf41BikeGunnerAllowed()') == 3, 'edf41bike: the seat build, the frame and the pose all gated per mission')
+check(bike.count('Edf41BikeGunnerAllowed()') == 4 and 'bool __fastcall BuildsGun(' in bike,
+      'edf41bike: the gun build gate, the seat build, the frame and the pose all gated per mission')
 
 # MissionSync_Begin: colours, host settings, the dialog, then the record.
 mission = src('src/mission.cpp')
