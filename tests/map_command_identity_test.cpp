@@ -61,7 +61,7 @@ bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {*out=netwo
 bool MapCommandNetworkReady() noexcept {return true;}
 std::uint32_t MapCommandNetworkVersion() noexcept {return 7;}
 void SyncMapCommandWays(const MapCommandWays*,unsigned) noexcept {}
-unsigned ReadMapCommandWays(const ObjRef&,float (*)[3],unsigned) noexcept {return 0;}
+unsigned ReadMapCommandWays(const ObjRef&,Command*,float (*)[3],unsigned) noexcept {return 0;}
 
 ObjRef NpcMarkedIdentity() noexcept {return {};}
 NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Command& command,const ObjRef&,const ObjRef&) noexcept {

@@ -83,9 +83,10 @@ unsigned waysSyncs=0,waysShared=0;MapCommandWays waysLast{};
 void SyncMapCommandWays(const MapCommandWays* list,unsigned count) noexcept {
     ++waysSyncs;waysShared=count;if(count)waysLast=list[0];
 }
-const void* hostWaysUnit=nullptr;unsigned hostWaysN=0;float hostWaysAt[8][3]{};
-unsigned ReadMapCommandWays(const ObjRef& unit,float (*at)[3],unsigned most) noexcept {
+const void* hostWaysUnit=nullptr;unsigned hostWaysN=0;float hostWaysAt[8][3]{};Command hostWaysNow{};
+unsigned ReadMapCommandWays(const ObjRef& unit,Command* current,float (*at)[3],unsigned most) noexcept {
     if(!hostWaysUnit || unit.obj!=hostWaysUnit)return 0;
+    *current=hostWaysNow;
     const unsigned n=hostWaysN<most ? hostWaysN : most;
     for(unsigned i=0;i<n;++i)for(unsigned c=0;c<3;++c)at[i][c]=hostWaysAt[i][c];
     return n;
@@ -1243,6 +1244,8 @@ void AuthorityQueue() noexcept {
     waysSyncs=waysShared=0;++stubFrame;MapCommandQueueTick();
     Check(waysSyncs==1 && waysShared==1 && waysLast.obj==squadObj && waysLast.n==2 && waysLast.at[0][0]==300.0f &&
           waysLast.at[1][0]==500.0f,"the tick shares the unit's two queued points");
+    Check(waysLast.current.order==Order::move && waysLast.current.at[0]==100.0f,
+          "...and the order it carries out now, its point first (the client's line has no gap)");
     ++stubFrame;MapCommandQueueTick();
     Check(waysSyncs==2,"once a frame");
     ++stubFrame;MapCommandQueueTick();
@@ -1279,12 +1282,15 @@ void AuthorityQueue() noexcept {
     {
         ResetMapCommands();mapOnline=true;remoteAuthority=squadObj;squadGot=Command{};
         hostWaysUnit=squadObj;hostWaysN=2;hostWaysAt[0][0]=10.0f;hostWaysAt[1][0]=20.0f;hostWaysAt[1][2]=5.0f;
+        hostWaysNow=Command{Order::attackMove,{4.0f,0.0f,3.0f}};
         MapCmdInput in{};in.front=true;float centre[3]{};
         const float vp[16]={0.01f,0,0,0, 0,0.01f,0,0, 0,0,1,0, 0,0,0,1};
         MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
         MapCommandReadout drawn{};
         Check(PlayerMapCommands(&drawn) && drawn.count>=1 && drawn.unit[0].ways==2 && drawn.unit[0].way[0][0]==10.0f &&
               drawn.unit[0].way[1][2]==5.0f,"a client's map draws the host's queue of the host's squad");
+        Check(drawn.unit[0].now.order==Order::attackMove && drawn.unit[0].now.at[0]==4.0f && drawn.unit[0].now.at[2]==3.0f,
+              "...from the unit through its current point (the host's order now), then the queued ones");
         hostWaysN=0;MapCommandFrame(in,centre);PlayerMapCommands(&drawn);
         Check(drawn.unit[0].ways==0,"its queue cleared on the host: nothing drawn");
         hostWaysUnit=nullptr;mapOnline=false;remoteAuthority=nullptr;SuspendMapCommands();

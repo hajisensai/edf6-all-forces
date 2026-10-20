@@ -1222,8 +1222,10 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     }
     // Another machine's units: the points their authority keeps, as it published them (command protocol v7 Kind::ways).
     static float hostWays[kCmdUnits][mapcmd::kWaypointsMost][3];unsigned hostWayCount[kCmdUnits]{};
+    static Command hostNow[kCmdUnits];
     if(InSession())for(int i=0;i<g.count;++i)
-        if(!queues[i] && !IsOnlineAuthority(g.list[i].u.v))hostWayCount[i]=ReadMapCommandWays(g.list[i].id,hostWays[i],mapcmd::kWaypointsMost);
+        if(!queues[i] && !IsOnlineAuthority(g.list[i].u.v))
+            hostWayCount[i]=ReadMapCommandWays(g.list[i].id,&hostNow[i],hostWays[i],mapcmd::kWaypointsMost);
     AcquireSRWLockExclusive(&lock);
     MapCommandReadout& r=readout;
     r.allowed=allowed;r.all=mapcmd::IsAll(g.sel,pickCount);r.pickable=pickCount;r.selected=g.sel.n;r.pointOk=pointOk;
@@ -1250,7 +1252,10 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
         m.groups=groups[i];m.ways=0;
         if(const UnitQueue* q=queues[i])
             for(int w=0;w<q->w.n;++w)std::memcpy(m.way[m.ways++],q->w.next[w].at,12);
-        else for(unsigned w=0;w<hostWayCount[i] && w<mapcmd::kWaypointsMost;++w)std::memcpy(m.way[m.ways++],hostWays[i][w],12);
+        else if(hostWayCount[i]) {   // another machine's: its current order from its host (this machine lists it with none)
+            m.now=hostNow[i];
+            for(unsigned w=0;w<hostWayCount[i] && w<mapcmd::kWaypointsMost;++w)std::memcpy(m.way[m.ways++],hostWays[i][w],12);
+        }
     }
     r.squads=squads;r.squadTally=tally;r.squadOpen=g.panelOpen;
     r.links=linkCount;std::memcpy(r.link,links,sizeof(TransportLink)*static_cast<std::size_t>(linkCount));
@@ -1778,7 +1783,9 @@ void ShareQueues() noexcept {
     static MapCommandWays out[kCmdUnits];
     unsigned n=0;
     for(const auto& q:unitQueues)if(q.w.active && q.w.n) {
+        if(!mapcmd::PointOrder(q.w.issued.order))continue;   // a HOLD it is on: no point a client draws from
         MapCommandWays& w=out[n++];w.obj=q.unit.top.obj;w.ctrl=q.unit.top.ctrl;w.n=static_cast<unsigned>(q.w.n);
+        w.current=q.w.issued;   // the one it is on its way to: the client's line runs unit -> it -> the rest
         for(int i=0;i<q.w.n && i<mapcmd::kWaypointsMost;++i)std::memcpy(w.at[i],q.w.next[i].at,12);
     }
     SyncMapCommandWays(out,n);

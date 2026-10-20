@@ -22,6 +22,10 @@ bool Valid(const Message& m) noexcept {
     if(m.kind==Kind::ways) {   // version 7: one unit's queue, its points finite and bounded
         if(m.version<7 || m.rpc!=Rpc::none || !m.sequence || m.request.count!=1 || !CanonicalId(m.request.units[0]) ||
            m.request.flags || m.request.command.param || m.ways.n>kWaysMost)return false;
+        // A queue: its current order a point order at a finite point; a clearing: neither.
+        if(m.ways.n ? !mapcmd::PointOrder(static_cast<mapcmd::Order>(m.ways.order)) || m.ways.order>static_cast<std::uint32_t>(mapcmd::kLastOrder) :
+                      m.ways.order!=0)return false;
+        for(float f:m.ways.current)if(m.ways.n ? (!std::isfinite(f) || std::fabs(f)>1.0e6f) : f!=0.0f)return false;
         for(unsigned i=1;i<kCommandNetUnits;++i)if(!Empty(m.request.units[i]))return false;
         for(unsigned i=0;i<kWaysMost;++i)for(float f:m.ways.at[i])
             if(i<m.ways.n ? (!std::isfinite(f) || std::fabs(f)>1.0e6f) : f!=0.0f)return false;
@@ -86,9 +90,12 @@ bool Encode(const Message& m,void* bytes,std::size_t size) noexcept {
     std::memcpy(p,m.request.requester,32);p+=32;std::memcpy(p,m.request.focus,32);p+=32;
     std::memcpy(p,m.request.units,sizeof(m.request.units));p+=sizeof(m.request.units);
     U32(p,m.kind==Kind::ways ? m.ways.n : m.request.formationTotal);for(auto slot:m.request.formationSlots)U32(p,slot);
-    if(m.kind==Kind::ways) {   // the points where a result's words are (24 of its 32), the rest zero
+    if(m.kind==Kind::ways) {   // where a result's words are (28 of its 32): the current order and point, the points; the rest zero
         unsigned words=0;
-        for(const auto& at:m.ways.at)for(float f:at){std::uint32_t bits;std::memcpy(&bits,&f,4);U32(p,bits);++words;}
+        const auto F=[&](float f){std::uint32_t bits;std::memcpy(&bits,&f,4);U32(p,bits);++words;};
+        U32(p,m.ways.order);++words;
+        for(float f:m.ways.current)F(f);
+        for(const auto& at:m.ways.at)for(float f:at)F(f);
         for(;words<2*kCommandNetUnits;++words)U32(p,0);
         return true;
     }
@@ -109,7 +116,10 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     if(m.kind==Kind::ways) {
         m.ways.n=m.request.formationTotal;m.request.formationTotal=0;
         unsigned words=0;
-        for(auto& at:m.ways.at)for(float& f:at){const auto bits=U32(p);std::memcpy(&f,&bits,4);++words;}
+        const auto F=[&](float& f){const auto bits=U32(p);std::memcpy(&f,&bits,4);++words;};
+        m.ways.order=U32(p);++words;
+        for(float& f:m.ways.current)F(f);
+        for(auto& at:m.ways.at)for(float& f:at)F(f);
         for(;words<2*kCommandNetUnits;++words)if(U32(p))return false;
         if(!Valid(m))return false;out=m;return true;
     }
@@ -138,16 +148,25 @@ void Session::SendWays(std::uint32_t peer,const WaysEntry& e) noexcept {
     m.request.count=1;std::memcpy(m.request.units[0],e.unit,32);m.ways=e.ways;
     Send(peer,m);
 }
-void Session::PublishWays(const unsigned char* unit,const float (*at)[3],unsigned n) noexcept {
+void Session::PublishWays(const unsigned char* unit,const mapcmd::Command& current,const float (*at)[3],unsigned n) noexcept {
     if(!ready_ || !host_ || !unit || !CanonicalId(unit) || n>kWaysMost || waysRevision_==UINT32_MAX)return;
+    if(n && !mapcmd::PointOrder(current.order))return;
     Ways next{};next.n=n;
+    if(n) {
+        next.order=static_cast<std::uint32_t>(current.order);
+        for(unsigned c=0;c<3;++c) {
+            if(!std::isfinite(current.at[c]) || std::fabs(current.at[c])>1.0e6f)return;
+            next.current[c]=current.at[c];
+        }
+    }
     for(unsigned i=0;i<n;++i)for(unsigned c=0;c<3;++c) {
         if(!std::isfinite(at[i][c]) || std::fabs(at[i][c])>1.0e6f)return;
         next.at[i][c]=at[i][c];
     }
     WaysEntry* e=WaysSlot(unit,n>0);
     if(!e)return;   // none out for it and none now: nothing to say
-    if(e->ways.n==next.n && !std::memcmp(e->ways.at,next.at,sizeof(next.at)))return;
+    if(e->ways.n==next.n && e->ways.order==next.order && !std::memcmp(e->ways.current,next.current,sizeof(next.current)) &&
+       !std::memcmp(e->ways.at,next.at,sizeof(next.at)))return;
     e->ways=next;e->revision=++waysRevision_;
     for(std::uint32_t peer=1;peer<=peers_;++peer)SendWays(peer,*e);
     if(!n)e->used=false;   // its clearing sent: forgotten

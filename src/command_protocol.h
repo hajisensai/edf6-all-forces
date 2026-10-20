@@ -23,12 +23,14 @@ constexpr std::uint32_t kQueued=1u;   // Request::flags: after the points the un
 constexpr std::size_t kWireSize=828;
 // ways (version 7): the host's Shift queue of one unit, for a client's map to draw (the queue itself is the host's:
 // mapcmd.cpp MapCommandAuthority). units[0] the unit's native ID, sequence the host's revision (newest wins), the
-// points in Message::ways (written where a result's words are); none: its queue is gone. Sent to every peer at version
+// order it is carrying out now and its point (current: a guard / move / attack-move, so the client's line runs from the
+// unit to it and on through the rest with no gap) and the points after it, in Message::ways (written where a result's
+// words are); none: its queue is gone (order and current zero). Sent to every peer at version
 // 7 when it changes, and all of them again to a peer when it says hello (a new member, a reconnect).
 enum class Kind : std::uint32_t { hello=1,capability,request,result,ways };
 constexpr unsigned kWaysMost=8;   // mapcmd::kWaypointsMost
 static_assert(kWaysMost==static_cast<unsigned>(mapcmd::kWaypointsMost),"a ways message carries a whole queue");
-struct Ways { std::uint32_t n=0; float at[kWaysMost][3]{}; };
+struct Ways { std::uint32_t order=0; float current[3]{}; std::uint32_t n=0; float at[kWaysMost][3]{}; };
 enum class Rpc : std::uint32_t { none,notReady,unsupported,invalid,stale,rateLimited,timeout,interrupted,count };
 struct Request {
     std::uint32_t count=0;
@@ -77,7 +79,7 @@ public:
     // to every peer of version 7 when they differ from the last sent; `Published` lists what is out. Client: the
     // points its host published for `unit` (false: none). Both forget them with the epoch.
     static constexpr unsigned kWaysUnits=96;
-    void PublishWays(const unsigned char* unit,const float (*at)[3],unsigned n) noexcept;
+    void PublishWays(const unsigned char* unit,const mapcmd::Command& current,const float (*at)[3],unsigned n) noexcept;
     unsigned PublishedWays(unsigned char (*out)[32],unsigned most) const noexcept;
     bool WaysOf(const unsigned char* unit,Ways* out) const noexcept;
 private:

@@ -88,7 +88,7 @@ void SyncMapCommandWays(const MapCommandWays* list,unsigned count) noexcept {
     unsigned char ids[command_net::Session::kWaysUnits][32]{};unsigned published=0;
     for(unsigned i=0;i<count && published<command_net::Session::kWaysUnits;++i) {
         if(!Id(ObjRef{list[i].obj,list[i].ctrl},ids[published]))continue;   // no native identity (not registered): nothing a client can match
-        commands.PublishWays(ids[published],list[i].at,list[i].n<command_net::kWaysMost ? list[i].n : command_net::kWaysMost);
+        commands.PublishWays(ids[published],list[i].current,list[i].at,list[i].n<command_net::kWaysMost ? list[i].n : command_net::kWaysMost);
         ++published;
     }
     unsigned char out[command_net::Session::kWaysUnits][32];
@@ -96,13 +96,14 @@ void SyncMapCommandWays(const MapCommandWays* list,unsigned count) noexcept {
     for(unsigned i=0;i<n;++i) {
         bool now=false;
         for(unsigned k=0;k<published && !now;++k)now=!std::memcmp(out[i],ids[k],32);
-        if(!now)commands.PublishWays(out[i],nullptr,0);   // its queue gone (or its unit): cleared on every map
+        if(!now)commands.PublishWays(out[i],mapcmd::Command{},nullptr,0);   // its queue gone (or its unit): cleared on every map
     }
 }
-unsigned ReadMapCommandWays(const ObjRef& unit,float (*at)[3],unsigned most) noexcept {
-    if(!context.ready || context.host || !at)return 0;
+unsigned ReadMapCommandWays(const ObjRef& unit,mapcmd::Command* current,float (*at)[3],unsigned most) noexcept {
+    if(!context.ready || context.host || !at || !current)return 0;
     unsigned char id[32];command_net::Ways ways;
     if(!Id(unit,id) || !commands.WaysOf(id,&ways))return 0;
+    *current=mapcmd::Command{static_cast<mapcmd::Order>(ways.order),{ways.current[0],ways.current[1],ways.current[2]}};
     const unsigned n=ways.n<most ? ways.n : most;
     for(unsigned i=0;i<n;++i)for(unsigned c=0;c<3;++c)at[i][c]=ways.at[i][c];
     return n;

@@ -27,10 +27,11 @@ std::uint32_t MapCommandNetworkVersion() noexcept;   // the version agreed with 
 // The Shift queues for the clients' maps (command protocol v7 Kind::ways). Host: the queues of this machine's units now
 // (mapcmd.cpp MapCommandQueueTick, once a frame); each one changed is sent, one gone is cleared, a member saying hello
 // is sent them all. Client / offline: nothing. Game thread.
-struct MapCommandWays { const void* obj; const void* ctrl; unsigned n; float at[8][3]; };   // obj/ctrl: the unit's ObjRef
+// obj/ctrl: the unit's ObjRef; current: the order it carries out now (a point order); at: the n points after it.
+struct MapCommandWays { const void* obj; const void* ctrl; mapcmd::Command current; unsigned n; float at[8][3]; };
 void SyncMapCommandWays(const MapCommandWays* list,unsigned count) noexcept;
-// Client: the points the host keeps for `unit` after the one it is on its way to (at most `most`); 0 none.
-unsigned ReadMapCommandWays(const ObjRef& unit,float (*at)[3],unsigned most) noexcept;
+// Client: the order the host's `unit` carries out now (`current`) and the points it keeps after it (at most `most`); 0 none.
+unsigned ReadMapCommandWays(const ObjRef& unit,mapcmd::Command* current,float (*at)[3],unsigned most) noexcept;
 
 // Single consumer: support_net owns the only extension poll. All callbacks run
 // synchronously on the game thread and identity strings come from that poll.

@@ -80,7 +80,7 @@ A（攻击移动）和 S（停止）是地图镜头的 WASD 平移键，不能�
 联机缺口：
 
 - **阵形 T / 阵形菜单**：作为 v7 的 `Order::formation`（参数在 `Command::param`：守点防御阵形轮换 / 设定，行军阵形设定）走同一通道。行军阵形按玩家分别排（`npcai.cpp` `PeerMarch` / `MarchOf`，`MarchRoster(ms, march, player)`）：房主替每名客人保存一份行军状态（阵形、朝向、跃进分组），锚点是那名客人的位置，朝向取他身体的前向（客人的镜头在他自己的机器上，房主读不到）；客人的 T 发出「行军设为下一个」，客人本机同步记下这个阵形，下一次 T 从它往后轮换。
-- **客人地图画排队路线**：v7 新消息 `ways`（`command_protocol.h`）：房主在场景 tick 里把本机各单位的排队（目标点之后的路点）与上次发出的比较，有变化才发给 v7 成员，排队没了发清除；成员 hello 时补发全部；按修订号新者为准，换任务清空；v6 成员从不收到。客人地图对非本机权威的单位画房主发来的路点。
+- **客人地图画排队路线**：v7 新消息 `ways`（`command_protocol.h`）：房主在场景 tick 里把本机各单位的排队（当前正执行的命令及其目标点、其后的路点）与上次发出的比较，有变化才发给 v7 成员，排队没了发清除；成员 hello 时补发全部；按修订号新者为准，换任务清空；v6 成员从不收到。客人地图对非本机权威的单位画房主发来的路点。
 - **摆放载具 / 士兵 / 无人机、按需加载**：资源号高字节区分种类（敌人 0xE1、载具 0xE2、士兵 0xE3、无人机 0xE4，`debug_spawn_net.h`），`SpawnRangeEnemy` 按种类生成（`SpawnVehicle` / `ApplySupportSoldierResource` / `PrepareSupportDrone`）后 `RegisterSupportObject`，激活照旧（敌人 `0x548D50`、士兵放开、无人机起飞）。按需加载：房主规划时返回 pending 直到本机加载完；各成员 PREPARE 时排入加载，加载完才回 READY（`support_net.h Hooks::prepare`，`support_protocol.cpp` 的 READY 延后，受事务原有 20 秒期限约束）。
 
 统一：`UnitRef`（`mapcmd_logic.h`）；`Dispatch(units, Command, {queue})`（本机权威 → `MapCommandAuthority`，其余一次请求；Issue、排队推进、`MapCommandGuardAt`、阵形都走它）；`NetSpawn`（测试场的物体行联机走同一套 preload → prepare → 全员创建 → activate；支援呼叫行仍走支援呼叫自己的规划器，同一会话）。

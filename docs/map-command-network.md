@@ -77,8 +77,8 @@ whatever map is open and whether the requester lives; a unit out of the list a w
 top died goes on under the top of any living member (`mapcmd_logic.h UnitRef`). A queued point for a unit the host
 does not list is refused as stale.
 
-Version 7 also has the host's queues travel the other way, for the clients' maps (`Kind::ways`): one unit's points
-after the one it is on its way to, sent to every version-7 peer when they change (`Session::PublishWays`, from
+Version 7 also has the host's queues travel the other way, for the clients' maps (`Kind::ways`): the order one unit carries out now and its point, and the points
+after it (the client's line runs unit -> current -> the rest, no gap), sent to every version-7 peer when they change (`Session::PublishWays`, from
 `MapCommandQueueTick` through `SyncMapCommandWays`), a clearing when its queue is gone, every queue again to a peer
 that says hello. Newest revision wins; the epoch forgets them; a version-6 peer is never sent one.
 
