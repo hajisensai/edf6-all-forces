@@ -13,6 +13,7 @@
 #include "carrier_drone_net.h"
 #include "floatgun.h"
 #include "gravity_net.h"
+#include "ultimate_net.h"
 #include "support_submarine.h"
 #include "support_soldier.h"
 #include "command_identity.h"
@@ -158,7 +159,7 @@ bool PvpOwns(const void* bytes,std::size_t size) noexcept {
     return bytes && size>=4 && b[0]=='A' && b[1]=='F' && b[2]=='P' && b[3]=='V';
 }
 // The channels, in the old chain's order (qmark, command, PvP, enemy control, the submarine's and the carrier's drones,
-// then the gravity operations and the float guns). The older ones read their own versions (version 0) and are read by
+// then the gravity operations, the float guns and the ultimate strike). The older ones read their own versions (version 0) and are read by
 // every build that has them (no feature bit); the newer ones are only sent to the peers that announced theirs.
 void RegisterPluginChannels() noexcept {
     static bool registered=false;
@@ -180,6 +181,7 @@ void RegisterPluginChannels() noexcept {
     c.update=&UpdateCarrierDroneNetwork;c.reset=&ResetCarrierDroneNetwork;plugin_net::RegisterChannel(c);
     plugin_net::RegisterChannel(GravityNetChannel());
     plugin_net::RegisterChannel(FloatGunNetChannel());
+    plugin_net::RegisterChannel(UltimateNetChannel());
 }
 // A message no channel and not the support protocol owns (a newer build's channel this one does not have): dropped,
 // said once a magic (a few magics), never once a message.
@@ -259,6 +261,7 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
         {FeatureExt(support_net::kExtBackpack),Tx::versionFeatBackpack},
         {FeatureExt(support_net::kExtGravity),Tx::versionFeatGravity},
         {FeatureExt(support_net::kExtFloatGun),Tx::versionFeatFloatGun},
+        {FeatureExt(support_net::kExtUltimate),Tx::versionFeatUltimate},
         {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapTransports,Tx::versionFeatTransport},
         {support_net::kCapLoadout,Tx::versionFeatCompose},{FeatureExt(support_net::kExtVariants),Tx::versionFeatVariants},
         {support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};

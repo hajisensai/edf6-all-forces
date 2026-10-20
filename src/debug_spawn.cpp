@@ -10,6 +10,7 @@
 #include "support_net.h"
 #include "memory.h"
 #include "online_authority.h"
+#include "scene_object.h"
 #include "support_call.h"
 #include "support_soldier.h"
 #include "support_spawn.h"
@@ -87,6 +88,8 @@ const unsigned char kCreateVehicleLevelSiteSig[]={0x0F,0x28,0xCF,0x48,0x8B,0x0D,
 // mov dword [rbp+8],1: CreateEnemy's team
 const unsigned char kEnemyTeamSiteSig[]={0xC7,0x45,0x08,0x01,0x00,0x00,0x00};
 struct Sig { unsigned rva; const unsigned char* bytes; std::size_t size; };
+// The hex stays here (tests/debug_spawn_resource_audit.py reads it): the same as scene_object.h's.
+static_assert(kCreate==scene::kCreateObject && kInitVtable==scene::kInitParamBaseVtable,"scene_object.h's CreateObject");
 const Sig kSigs[]={{kPreload,kPreloadSig,sizeof(kPreloadSig)},{kCreate,kCreateSig,sizeof(kCreateSig)},
     {kDelete,kDeleteSig,sizeof(kDeleteSig)},{kReadSetup,kReadSetupSig,sizeof(kReadSetupSig)},
     {kSetTeam,kSetTeamSig,sizeof(kSetTeamSig)},{kSetLevel,kSetLevelSig,sizeof(kSetLevelSig)},
@@ -96,13 +99,10 @@ const Sig kSigs[]={{kPreload,kPreloadSig,sizeof(kPreloadSig)},{kCreate,kCreateSi
     {kVehicleLevelSetup,kVehicleLevelSetupSig,sizeof(kVehicleLevelSetupSig)},{kLevelScale,kLevelScaleSig,sizeof(kLevelScaleSig)},
     {kCreateVehicleLevelSite,kCreateVehicleLevelSiteSig,sizeof(kCreateVehicleLevelSiteSig)}};
 
-struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
-static_assert(sizeof(InitParam)==0x30);
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
 using LoadDoneFn=bool(*)(void*);
 using VehicleLevelSetupFn=void(__fastcall*)(void*,float);
 using LevelScaleFn=float(__fastcall*)(void*,float);
-using CreateFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParam*);
 using DeleteFn=void(*)(void*);
 using SetTeamFn=void(*)(void*,std::int32_t,bool);
 using SetLevelFn=void(__fastcall*)(void*,float);
@@ -268,14 +268,11 @@ int SpawnFault(int row,const EXCEPTION_POINTERS* e) noexcept {
 // deleted again; one whose cast moves the pointer too (the plugin's code takes the object's own address for every
 // class) is refused the same way, rather than guessed at.
 unsigned char* Create(int row,const float* matrix,unsigned type,const char** why) noexcept {
-    InitParam param{image+kInitVtable,{}};
-    alignas(16) float nativeMatrix[16];   // SceneObject's constructor loads its rows with MOVAPS (support-soldier-native.md)
-    std::memcpy(nativeMatrix,matrix,sizeof(nativeMatrix));
     unsigned char* object=nullptr;
     __try {
         void* const mgr=At<void*>(image,kObjectMgr);
         if(!mgr || mgr!=missionMgr){*why="the object manager is not this mission's preload's";return nullptr;}
-        object=reinterpret_cast<CreateFn>(image+kCreate)(mgr,nativeMatrix,kEntries[row].sgo,&param);
+        object=scene::CreateSceneObject(matrix,kEntries[row].sgo);   // the matrix copied aligned there (MOVAPS)
         if(!object){*why="CreateObject returned null";return nullptr;}
         void* const cast=reinterpret_cast<CastFn>(image+kCast)(object,0,image+kSceneObjectType,image+type,0);
         if(cast==object)return object;

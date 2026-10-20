@@ -6,6 +6,7 @@
 
 #include "crew.h"
 #include "memory.h"
+#include "scene_object.h"
 
 #include <cmath>
 #include <cstdio>
@@ -25,10 +26,9 @@ constexpr std::size_t kRegisterFactory=0x119AF00;     // RegisterSceneObjectFact
 constexpr std::size_t kGetFactory=0x1195C50;          // GetSceneObjectFactory(manager, const wchar_t* name)
 constexpr std::size_t kManagerGlobal=0x20B2958;       // the scene system (factories, objects, bullets, cameras)
 constexpr std::size_t kNew=0x12D85B0;                 // the game's operator new(size)
-constexpr std::size_t kCreateFromPath=0x11945E0;      // Object* (manager, const float matrix[16], const wchar_t* sgoPath, CreateContext*)
+constexpr std::size_t kCreateFromPath=scene::kCreateObject;   // scene_object.h CreateSceneObject
 constexpr std::size_t kSgoKey=0x528A0;                // node* (SgoRoot* = object+0xA0, const wchar_t* key)
 constexpr std::size_t kDeleteObject=0x118A1B0;        // marks a scene object deleted (bit 4 of +0x18)
-constexpr std::size_t kCreateContextVtable=0x1762068;
 constexpr std::size_t kSetCasState=0x116C2D0;         // bool (CasPlayers* = object+0x8F0, int player = [object+0xC80], const wchar_t* state, int)
 constexpr std::size_t kCasAt=0x8F0,kCasPlayerAt=0xC80;
 constexpr std::size_t kFactoryByName=0x1195C50;       // the same lookup serves bullet classes
@@ -78,7 +78,6 @@ using CtorFn=void*(__fastcall*)(void*,void*);
 using RegisterFn=void(__fastcall*)(void*,void*);
 using GetFactoryFn=void*(__fastcall*)(void*,const wchar_t*);
 using RegisterAllFn=std::uint64_t(__fastcall*)(void*,void*,void*,void*);
-using CreateFromPathFn=void*(__fastcall*)(void*,const float*,const wchar_t*,void*);
 using SgoKeyFn=const void*(__fastcall*)(const void*,const wchar_t*);
 using DeleteObjectFn=void(__fastcall*)(void*);
 using ParamCtorFn=void*(__fastcall*)(void*);
@@ -358,15 +357,9 @@ const SgoNode* Persist(const SgoNode* n) noexcept {
 void* CreateFromPath(const float* matrix,const wchar_t* sgoPath) noexcept {
     void* manager=Manager();
     if(!manager) { Fail("the scene manager is gone"); return nullptr; }
-    alignas(16) unsigned char context[0x30]={};
-    const std::uint64_t vt=reinterpret_cast<std::uint64_t>(image+kCreateContextVtable);
-    std::memcpy(context,&vt,8);
-    // The SceneObject constructor 0x1189C00 loads the four rows with MOVAPS (1189CB0..1189CCE; the native tests
-    // support_soldier_create_native / create_jet_native fault on a misaligned one). Callers build plain float[16]
-    // locals (edf41mother.cpp, edf41mother401.cpp), which C++ aligns to 4 only: copy, as CreateJet and the soldiers do.
-    alignas(16) float nativeMatrix[16];
-    std::memcpy(nativeMatrix,matrix,sizeof(nativeMatrix));
-    return reinterpret_cast<CreateFromPathFn>(image+kCreateFromPath)(manager,nativeMatrix,sgoPath,context);
+    // The plain InitParamBase; the matrix copied aligned (callers build plain float[16] locals: edf41mother.cpp,
+    // edf41mother401.cpp; the constructor loads its rows with MOVAPS).
+    return scene::CreateSceneObject(matrix,sgoPath);
 }
 void DeleteObject(void* object) noexcept {
     const char* o=static_cast<const char*>(object);
