@@ -54,6 +54,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "firstperson.h"
+#include "edf/weapon.h"
 #include "fp_view.h"
 #include "vehicle_look.h"
 #include "fp_motion.h"
@@ -2070,16 +2071,14 @@ void* nextLaserDraw=nullptr;
 // another: moving or jumping, the line left the gun (the user, 2026-10-19: 「跳或者移动的时候红外瞄准的线没有实时跟随」).
 // The start is rebuilt here from the very pose array the weapon is drawn with: local x pose[bone], then for the first
 // person through that draw's own T (DrawTransforms), the one the viewmodel is drawn with.
-constexpr std::size_t kMuzzles=0x1D0,kMuzzleCount=0x1E0,kMuzzleLocal=0x10,kLaserStart=0x120;
+constexpr std::size_t kLaserStart=0x120;
 constexpr float kLaserBelow=0.02f;
 // The muzzle's matrix in the weapon's draw pose and the skeleton instance holding its bone; false: not readable as one.
 bool LaserMuzzle(const unsigned char* weapon,unsigned char** inst,M4* out) noexcept {
     if(!Readable(weapon,kWeaponModel+kBaseLod+kLodInst+8))return false;
-    const auto muzzles=At<const unsigned char*>(weapon,kMuzzles);
-    const auto count=At<std::uint64_t>(weapon,kMuzzleCount);
-    if(!count || count>64 || !Readable(muzzles,kMuzzleLocal+64))return false;
-    const auto bone=At<const unsigned char*>(muzzles,0);
-    const M4 local=MatrixAt(muzzles+kMuzzleLocal);
+    const unsigned char* const muzzle=edf::MuzzleAt(weapon,0);
+    if(!muzzle)return false;
+    const auto bone=At<const unsigned char*>(muzzle,0);
     unsigned char* insts[kMostInsts];
     const int n=InstancesOf(const_cast<unsigned char*>(weapon)+kWeaponModel,insts);
     for(int i=0;i<n;++i) {
@@ -2092,7 +2091,9 @@ bool LaserMuzzle(const unsigned char* weapon,unsigned char** inst,M4* out) noexc
         if(off%kBoneStride || off/kBoneStride>=static_cast<std::size_t>(bonesCount))continue;
         const std::size_t at=off/kBoneStride;
         if(!Readable(pose+at*64,64))continue;
-        *out=fpview::Mul(local,MatrixAt(pose+at*64));*inst=insts[i];
+        // The same muzzle matrix a shot is built with (edf::MuzzleWorld), its bone's pose this draw's.
+        if(!edf::MuzzleWorld(muzzle,reinterpret_cast<const float*>(pose+at*64),out->m))return false;
+        *inst=insts[i];
         return fpview::Finite(*out);
     }
     return false;

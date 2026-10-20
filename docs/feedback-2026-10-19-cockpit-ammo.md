@@ -52,12 +52,13 @@
 - 新增字段追加在 `Field` 末尾，旧模型字段编号不变，旧 `slot`/`ammo` 照填。
 - **滚转角**：`FirstPersonInstrumentReadings` 用乘员座位标记 `vc_eye_<seat>` 的世界矩阵（行：左、上、前）算 `atan2(left.y, up.y)`，右翼下沉为正；仅飞行载具有效（与俯仰、升降相同）。
 - 移动控件只要「控件名 + 枢轴 + 朝向 + 范围」完全相同就共用一根骨骼（地平线卡的天、地、刻线三块），`cockpits.graft` 与骨骼预算测试同一规则。`g_` 与 `t_` 一样按 extent 缩放骨骼轴：地平线卡以屏高为单位移动。
-- 邻席看到的 `e` 控件隐藏；`h`/`g`/`w` 保持原姿态（罗盘北朝上、地平线水平），不显示别席的数值。
+- 邻席看到的 `e` 控件隐藏。航向、高度、速度、升降、俯仰、滚转是整车读数（`cockpit_instruments.h VehicleField`），所有席位共用：邻席面板上的罗盘卡、高度针、姿态卡和航向数字照常转动；没有读数时（`ready=false`）收起，不再停在原姿态叠在一起（2026-10-20 审查 B1：原先邻席只放行 l/c/p/v/u/e，新 h/w/g 走 `continue` 保持原姿态，地面罗盘卡与飞行姿态卡叠显且不转）。判断在 `SeatPoseOf`（`fp_view_check` 覆盖）。
 
 ### 武器屏：弹种分色的 MFD（`weapons()`）
 
 - 弹种类别 12 种（`hud_cue.h` `CockpitRound`，Python `ROUNDS`）：MG、GUN、AP、HE、HEAT、CAN、BEAM、RKT、MSL、AAM、BOMB、SPC。每类有固定颜色（参考战雷：穿甲蓝、榴弹黄、破甲橙、导弹红 / 空空青、火箭粉……）、缩写标签与专属弹头剖面图标（尾翼脱壳穿甲弹、钝头榴弹、带炸高探针的破甲弹、霰弹罐里的弹丸、火箭、导弹……）。
 - 原版载具按武器自身数据分类：能量武器 BEAM；火箭 RKT；制导 MSL；有弹种标签的炮按标签（AP/HE/BEAM/HEAT/CAN）；无标签的抛射武器 HE；逐发装填的大炮 GUN；其余 MG。插件战机按挂载图标分类。
+- 武器屏、第三人称挂载条（`StockCells` / `JetCells`）和切换横幅用同一张列表与同一个选中规则（`hud_cue.h SeatArms`：原版载具按 SideOrder 排列，选中 = 火控所选 → 瞄具所跟 → 第一件；插件战机 = 挂载 + 机炮，选中 = 当前挂载 → 机炮）。原先武器屏按 selected→sight→0、挂载条只认 selected，直升机门炮手等没有 selected 的席位两边框的不是同一件（2026-10-20 审查 B2）。
 - 布局：顶行当前弹种标签（彩色）+「装填中」/「弹尽」；中部彩色弹头图标 + 四位大号弹数；弹匣条（25% 刻度，装填时由琥珀色装填进度取代）；「STORES」分区线下每件武器一格：彩色小图标 + 弹种缩写 + 一根余量条（该武器装填时改为装填进度），当前武器亮框。武器超过 3 件时格子是包含当前武器的滑动窗口。单武器席位不显示 STORES 分区。
 - 七段数字：固定宽高比、加粗笔画、两端削角的笔段且每个接缝留同样的缝隙（4、7 的笔画彼此分开），位间距 1.3 个字宽，**未点亮的段以暗色常显**（真实液晶 / 荧光屏的样子），孤立的「1」读得出是一位数字。
 
@@ -112,4 +113,5 @@
 - 插件战机挂载没有弹匣上限读数：大进度条与刻度隐藏，格子只表示有 / 无。
 - 坦克炮塔相对车体的方位指示没有做：需要新增读数字段和骨骼，地面车骨骼余量虽够，但不在本次范围，可另开。
 - 原版制导武器统一归为 MSL（反坦克 / 空对地 / 防空没有区分的数据）。
-- HEAT / CAN 依赖 #216（`reticle::Shell` 新增 heat=4、canister=5）；未合并时只出现 AP / HE / BEAM。
+- HEAT / CAN 依赖 #216（`reticle::Shell` 新增 heat、canister）；`CockpitRoundOfArm` 直接按 `reticle::Shell` 枚举分类，不再用裸整数 4 / 5。
+- 字段号与弹种顺序只有一份：`pylib/cockpit_fields.py`。`tools/gen_cockpit_fields.py` 由它生成 `src/cockpit_fields.inc`（`Field`、`kRows`、`CockpitRound`），CI 的生成文件检查跑 `--check`，selftest `cockpit_fields_current` 核对生成结果和已建模型的旧编号；`pylib/cockpit_instruments.py` 与 `tools/instrument_preview.py` 从同一张表导入（2026-10-20 审查 B6）。

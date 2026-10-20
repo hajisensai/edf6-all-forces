@@ -1568,7 +1568,7 @@ add_test(NAME edf5_online_foreign_build COMMAND edf5_online_native_test "${EDF6_
 add_test(NAME edf5_online_rollback COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}" rollback)
 set_tests_properties(edf5_online_native edf5_online_foreign_build edf5_online_rollback PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(fp_ride_lifecycle_test EXCLUDE_FROM_ALL tests/fp_ride_lifecycle_test.cpp)
-target_sources(fp_ride_lifecycle_test PRIVATE src/fp_skin_gpu.cpp)
+target_sources(fp_ride_lifecycle_test PRIVATE src/fp_skin_gpu.cpp common/weapon.cpp)
 target_include_directories(fp_ride_lifecycle_test PRIVATE src common)
 target_link_libraries(fp_ride_lifecycle_test PRIVATE user32)
 target_compile_options(fp_ride_lifecycle_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
