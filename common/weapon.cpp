@@ -14,15 +14,30 @@ bool AllFinite(const float* v,int n) noexcept {
 float Dot3(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 }  // namespace
 
-bool MuzzleFrame(const unsigned char* weapon,const unsigned char* muzzle,float* pos,float* dir) noexcept {
-    const auto bone=At<const unsigned char*>(muzzle,0);
-    if(!Readable(bone,kBoneRows+0x40))return false;
+const unsigned char* MuzzleAt(const unsigned char* weapon,std::uint64_t index) noexcept {
+    const auto muzzles=At<const unsigned char*>(weapon,kMuzzles);
+    const auto count=At<std::uint64_t>(weapon,kMuzzleCount);
+    if(index>=count || count>64 || !Readable(muzzles,(index+1)*kMuzzleStride))return nullptr;
+    return muzzles+index*kMuzzleStride;
+}
+
+bool MuzzleWorld(const unsigned char* muzzle,const float* bone,float* out) noexcept {
     float b[4][4],l[4][4];
-    std::memcpy(b,bone+kBoneRows,sizeof(b));std::memcpy(l,muzzle+kMuzzleLocal,sizeof(l));
-    for(int c=0;c<3;++c) {
-        dir[c]=l[2][0]*b[0][c]+l[2][1]*b[1][c]+l[2][2]*b[2][c];
-        pos[c]=l[3][0]*b[0][c]+l[3][1]*b[1][c]+l[3][2]*b[2][c]+l[3][3]*b[3][c];
+    if(bone)std::memcpy(b,bone,sizeof(b));
+    else {
+        const auto record=At<const unsigned char*>(muzzle,0);
+        if(!Readable(record,kBoneRows+0x40))return false;
+        std::memcpy(b,record+kBoneRows,sizeof(b));
     }
+    std::memcpy(l,muzzle+kMuzzleLocal,sizeof(l));
+    for(int r=0;r<4;++r)for(int c=0;c<4;++c)out[r*4+c]=l[r][0]*b[0][c]+l[r][1]*b[1][c]+l[r][2]*b[2][c]+l[r][3]*b[3][c];
+    return AllFinite(out,16);
+}
+
+bool MuzzleFrame(const unsigned char* weapon,const unsigned char* muzzle,float* pos,float* dir,const float* bone) noexcept {
+    float m[16];
+    if(!MuzzleWorld(muzzle,bone,m))return false;
+    std::memcpy(pos,m+12,12);std::memcpy(dir,m+8,12);
     if(At<std::int32_t>(muzzle,kMuzzleMode)==kModeWeaponRows)std::memcpy(dir,weapon+kWeaponMatrix+0x20,12);
     const float length=std::sqrt(Dot3(dir,dir));
     return AllFinite(pos,3) && std::isfinite(length) && length>0.5f && length<2.0f;

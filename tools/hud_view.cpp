@@ -300,7 +300,7 @@ bool sceneLegendOpen=false,sceneLegendOn=false;float sceneLegendRow[4]{};
 bool MapLegendOpen() noexcept { return sceneLegendOpen; }
 void MapCommandLegendButton(const float* r) noexcept { sceneLegendOn=r!=nullptr;if(r)std::memcpy(sceneLegendRow,r,16); }
 thermal::Status sceneThermal{};
-namespace thermal { Status GetStatus() noexcept { return sceneThermal; } }
+namespace thermal { Status GetStatus(const void*) noexcept { return sceneThermal; } }
 VehicleSensorReadout sceneSensor{};bool sceneSensorOn=false;
 bool PlayerVehicleContacts(VehicleSensorReadout* value) noexcept { if(value)*value=sceneSensor;return value && sceneSensorOn; }
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.

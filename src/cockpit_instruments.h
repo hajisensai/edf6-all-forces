@@ -1,6 +1,8 @@
-// Live cockpit geometry. Field order and digit segment order are shared with pylib/cockpit_instruments.py.
+// Live cockpit geometry. The fields' numbers are pylib/cockpit_fields.py's (src/cockpit_fields.inc, generated); the digit
+// segment order is shared with pylib/cockpit_instruments.py.
 #pragma once
 #include "fp_view.h"
+#include "cockpit_fields.inc"
 
 namespace crew {
 namespace instruments {
@@ -10,9 +12,7 @@ namespace instruments {
 // good, pick its cell; for each of the kRows cells (a window over the seat's weapons, the picked one in it) row + i its
 // rounds (share: its magazine's fill, or its loading while it loads: one bar a cell), rowRound + i its round class. roll: the bank, degrees,
 // right wing down positive (flight only, as climb and pitch).
-constexpr int kRows=3;
-enum Field { hp,hull,fuel,speed,altitude,heading,slot,ammo,warn,climb,pitch,power,
-             arm,mag,load,empty,pick,row,rowRound=row+kRows,roll=rowRound+kRows,count };
+// kRows and Field: src/cockpit_fields.inc.
 struct Readings { float value[count]; float share[count]; bool contact[6]; float at[6][2]; int language=0; bool flight=false; };
 
 // Native cabin fragments retain their original animated parent outside the local
@@ -60,6 +60,32 @@ inline void ArmReadings(Readings& r,const ArmRow* rows,int n,int picked) noexcep
         r.share[row+i]=!listed ? 0.0f : busy ? unit(w.loading) : w.magazine>=0.0f ? unit(w.magazine) : w.rounds>0 ? 1.0f : 0.0f;
         r.value[rowRound+i]=listed && w.round>=0 ? static_cast<float>(w.round) : -1.0f;
     }
+}
+
+// Readings of the whole vehicle, not of one seat (its weapons, its armour): the speed, height, heading, climb, pitch
+// and bank are the same from every seat, so a neighbour's compass card, altimeter, attitude card and their numbers
+// show them live too (a neighbour's weapons screen does not show this seat's weapons).
+constexpr bool VehicleField(int field) noexcept {
+    return field==speed || field==altitude || field==heading || field==climb || field==pitch || field==roll;
+}
+
+// How a widget bone (mode, field, place as its name gives them; `fields` how many the name had) of `mine` or a neighbour
+// seat is posed: skip (left as the model has it), neutral (posed without readings: hidden or at rest) or live (posed with
+// the readings when they are ready). l's field is a language and t's a contact, not a reading.
+enum class SeatPose { skip, neutral, live };
+inline SeatPose SeatPoseOf(bool mine,wchar_t mode,int field,int place,int fields) noexcept {
+    if(mine)return SeatPose::live;
+    if(mode!=L'l' && mode!=L't' && VehicleField(field))return SeatPose::live;
+    if(mode==L'l')return place==0 ? SeatPose::live : SeatPose::neutral;
+    const bool rangedNeedle=mode==L'n' && fields>=5;
+    const bool neutralWidget=mode==L'D' || mode==L'B' || mode==L'T' || mode==L'Z';
+    // Adjacent stations visible from this seat use the same language, while their new health/percent widgets remain
+    // neutral without that seat's live data. A weapons screen's picture / tag / frame (e) has no neutral look: another
+    // seat's is hidden. A compass card / altimeter hand / attitude card (h, w, g) reads only vehicle fields (above);
+    // one on another field is hidden as well.
+    if(mode==L'c' || mode==L'p' || mode==L'v' || mode==L'u' || mode==L'e' || mode==L'r' || mode==L'q' || mode==L'a'
+        || mode==L'h' || mode==L'w' || mode==L'g' || rangedNeedle || neutralWidget)return SeatPose::neutral;
+    return SeatPose::skip;
 }
 
 inline bool Available(const Readings& r,int field) noexcept {

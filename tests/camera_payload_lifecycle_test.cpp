@@ -2,6 +2,7 @@
 // Link payload.cpp, stores.cpp, rounds.cpp, launcher.cpp, edf6common and user32 (/Gy /OPT:REF).
 #include "../src/turretcam.cpp"
 #include "../src/stores.h"
+#include "seat_net_fake.inc"
 #include <cstdio>
 #include <cstdlib>
 #include <cwchar>

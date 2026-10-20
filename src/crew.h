@@ -239,6 +239,7 @@ struct Config {
     bool infantryScope=true;        // a soldier's scoped weapon zoomed: a real optic's eyepiece and reticle (infantryscope.cpp)
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
+    int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)
     bool firstPerson=true;          // first person on foot: the key switches it (firstperson.cpp)
     bool fpVehicle=true;            // ...in a vehicle as well: each seat's eye at its station (fp_vehicle.cpp)
     bool fpHideStockHud=true;       // ...and the stock HUD off there (its information on the cockpit's panels)

@@ -261,9 +261,9 @@ int main() {
         alignas(16) float pose[32];
         const M4 root=fpview::Translate(10,0,0),boneAt=fpview::Translate(10,1,0),local=fpview::Translate(0,0,1);
         std::memcpy(pose,root.m,64);std::memcpy(pose+16,boneAt.m,64);
-        Put<void*>(laserMuzzle,0,bones+kBoneStride);std::memcpy(laserMuzzle+kMuzzleLocal,local.m,64);
+        Put<void*>(laserMuzzle,0,bones+kBoneStride);std::memcpy(laserMuzzle+edf::kMuzzleLocal,local.m,64);
         Put<void*>(inst,kInstBones,bones);Put<std::int32_t>(inst,kInstCount,2);Put<void*>(inst,kInstPose,pose);
-        Put<void*>(weapon,kMuzzles,laserMuzzle);Put<std::uint64_t>(weapon,kMuzzleCount,1);Put<void*>(model,kBaseLod+kLodInst,inst);
+        Put<void*>(weapon,edf::kMuzzles,laserMuzzle);Put<std::uint64_t>(weapon,edf::kMuzzleCount,1);Put<void*>(model,kBaseLod+kLodInst,inst);
         Put<void*>(laser,8,weapon);
         Current().placeWeaponOk[0]=true;Current().placeWeapon[0]=fpview::Translate(0,0,0.5f);Publish();
         LaserDrawHook(laser+0x10,nullptr,2,nullptr);
@@ -273,7 +273,7 @@ int main() {
         check(std::memcmp(laser+0x130,from,16)==0,"the update-time start is restored after the draw");
         Current().inHandCount=0;Publish();LaserDrawHook(laser+0x10,nullptr,2,nullptr);
         check(at(laserStart,10,0.98f,1),"third person: the laser starts at the muzzle of the gun as drawn, not where an earlier step left it");
-        Put<void*>(weapon,kMuzzles,nullptr);Put<std::uint64_t>(weapon,kMuzzleCount,0);Put<void*>(model,kBaseLod+kLodInst,nullptr);
+        Put<void*>(weapon,edf::kMuzzles,nullptr);Put<std::uint64_t>(weapon,edf::kMuzzleCount,0);Put<void*>(model,kBaseLod+kLodInst,nullptr);
         Current().inHandCount=1;Current().placeWeaponOk[0]=false;Publish();
     }
     reset();int pooledControl[4]={0,0,1,0};Put<void*>(weapon,kSelfCtrl,pooledControl);Gather(human);

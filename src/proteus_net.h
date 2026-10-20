@@ -4,7 +4,7 @@
 #include "drill_net.h"
 #include "proteus_logic.h"
 namespace crew::proteus_net {
-constexpr std::int8_t kTag=15;
+constexpr std::int8_t kTag=seat_net::kTag;
 constexpr std::uint32_t kMagic=0x544E5250,kVersion=2;
 enum class Kind : std::uint32_t { control,defense };
 constexpr std::uint32_t kActive=1,kShieldOn=2,kOverheated=4,kTwoSeats=8,kBroken=16,kFlags=31;
@@ -48,12 +48,12 @@ inline bool Decode(const void* bytes,std::size_t size,State& out) noexcept {
     if(!Valid(s))return false;out=s;return true;
 }
 struct Gate {
-    drill_net::Gate control,defense;
+    seat_net::Gate control,defense;
     bool Admit(const State& s,bool session,bool localControl,bool localDefense,std::int32_t controller) noexcept {
         if(!Valid(s))return false;
-        drill_net::State key;key.sender=s.sender;key.sequence=s.sequence;key.controller=s.controller;
-        return s.kind==Kind::control ? control.Admit(key,session,localControl,controller)
-                                    : defense.Admit(key,session,localDefense,controller);
+        seat_net::Head h;std::memcpy(&h,&s,sizeof(h));
+        return s.kind==Kind::control ? control.Admit(h,session,localControl,controller)
+                                    : defense.Admit(h,session,localDefense,controller);
     }
 };
 }

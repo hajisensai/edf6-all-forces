@@ -132,7 +132,7 @@ Changes: {what}; turned into the seat's eye frame and scaled to metres, triangle
 
 
 def default_out() -> str:
-    return os.path.join(om.DEV_MODELS, 'cockpits')
+    return os.path.join(om.REPO_MODELS, 'cockpits')
 
 
 def basis(a: Asset) -> np.ndarray:

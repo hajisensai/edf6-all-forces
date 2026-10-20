@@ -1,0 +1,4 @@
+AH-64A  Peten (War Thunder) Attack Helicopter by KojfDiscord, CC BY 4.0
+Source: https://sketchfab.com/3d-models/ah-64a-peten-war-thunder-attack-helicopter-486f3845d88647abae002e1222788686 (via Sketchfab)
+Licence: CC BY 4.0, http://creativecommons.org/licenses/by/4.0/
+Changes: cut down to War Thunder's AH-64A front (copilot / gunner) station (crew figures, glass and everything the seated eye cannot see left out), turned, scaled to metres and re-exported with its base colour textures resized to at most 1024 px (tools/prep_cockpit_air.py); the EDF6 plugin's cockpit builder (pylib/cockpit_kits_air.py) scales it to the vehicle and places it there.

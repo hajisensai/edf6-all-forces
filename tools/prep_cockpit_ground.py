@@ -16,13 +16,13 @@ license.json; <assets>/sketchfab/<uid>/model.glb): the cab round the driver's ey
   5. every edge longer than EDGE is split: the kit draws the cab in toward the eye where the vehicle is smaller,
      vertex by vertex (pylib/cockpit_kits_ground.py squeeze), and a big face needs vertices to follow.
 
-What is written to <model dir>/cockpits/parts/<asset>/: cab.npz (positions, normals, UVs, triangles, each triangle's
+What is written to models/cockpits/parts/<asset>/ (the repository's, tracked): cab.npz (positions, normals, UVs, triangles, each triangle's
 material; per material its sRGB colour and texture file) and each textured material's base colour texture, times its
 colour factor, as a PNG of at most 1024 px (m<k>.png), and LICENSE.txt.
 CREDITS_ground.txt lists every source with its author, licence and page. The sources are read as data only (pylib/
 gltf.py parses them); nothing in them is run.
 
-    python tools/prep_cockpit_ground.py [--assets D:/APP/edf6-cockpit-assets] [--out <model dir>/cockpits]
+    python tools/prep_cockpit_ground.py [--assets D:/APP/edf6-cockpit-assets] [--out models/cockpits]
         [--only ASSET] [--view DIR]
 --view: also renders each cut cab from its eye (ahead, left, right, behind) into DIR, to check the eye and the cut.
 """
@@ -103,14 +103,16 @@ SOURCES = (
            ((-0.6, -1.0, -0.7), (1.3, 0.5, 1.3)), mirror=True,
            shows="a pickup's cab (mirrored: driven from the right): dashboard with its gauges, wheel, doors, roof"),
     # An Oshkosh M-ATV's (from Squad, as its uploader says): a real MRAP's driver's station, its dashboard's gauges,
-    # switch panels and the GPS on its mount.
+    # switch panels and the GPS on its mount. Its box keeps the crew compartment back to the rear door (2.8 m behind
+    # the eye): cut at the front seats' backs (0.7 m) the Grape's driver looking back saw the world past his seat.
     Source('sf-oshkosh-matv', '1585f5837cda40a3944e45c73166d64c', 'Oshkosh M-ATV (woodland)', '42manako',
-           (-0.84, 2.595, 3.244), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), ((-1.9, -1.3, -0.7), (0.6, 0.6, 2.0)),
+           (-0.84, 2.595, 3.244), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), ((-1.9, -1.3, -2.8), (0.6, 0.6, 2.0)),
            scale=0.262, shows="an MRAP's driver's station: dashboard with its gauges, wheel, switch panels, GPS, doors"),
     # A GAZ-2330 Tigr's (from Squad, as its uploader says): its steering wheel was not exported, the ATF Dingo's (from
-    # Battlefield, the same uploader) is put on its column.
+    # Battlefield, the same uploader) is put on its column. Its box keeps the troop compartment back to the rear door
+    # (2.8 m behind the eye), as the M-ATV's: cut at 0.6 m the Naegling's driver looking back saw the world.
     Source('sf-gaz-tigr', '2b3a105cf2f64046ac19977ce35c1a5e', 'GAZ-2330 Tigr', '42manako', (2.25, 1.3, -0.7),
-           (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), ((-1.9, -1.3, -0.6), (0.8, 0.6, 1.8)), scale=0.2,
+           (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), ((-1.9, -1.3, -2.8), (0.8, 0.6, 1.8)), scale=0.2,
            drop=('SmokeGrenades', 'KordBase'),
            shows="an armoured car's driver's station: the gauge panel, switch panels, levers, doors, roof",
            extras=(Extra('f7ee9b3b50934d1dbb3097a1ea4f4a5c', 'ATF Dingo', '42manako', 'steering', 101.0,
@@ -134,6 +136,9 @@ class Cut:
     tris: np.ndarray
     mat: np.ndarray
     materials: list[tuple[str, tuple[int, int, int], bytes | None]] = field(default_factory=list)
+    # The cab's real glass (left out of the mesh: the open windscreen) in the box, (k, 3, 3): what the eye looks out
+    # through is a window, not a gap (cockpits.Kit.windows, the leak tests).
+    windows: np.ndarray = field(default_factory=lambda: np.zeros((0, 3, 3)))
 
 
 def srgb(linear: tuple[float, ...]) -> tuple[int, int, int]:
@@ -223,7 +228,8 @@ def borrowed(e: Extra, assets: str, base: int) -> Cut:
 
 def joined(a: Cut, b: Cut) -> Cut:
     return Cut(np.vstack([a.pos, b.pos]), np.vstack([a.nrm, b.nrm]), np.vstack([a.uv, b.uv]),
-               np.vstack([a.tris, b.tris + len(a.pos)]), np.concatenate([a.mat, b.mat]), a.materials + b.materials)
+               np.vstack([a.tris, b.tris + len(a.pos)]), np.concatenate([a.mat, b.mat]), a.materials + b.materials,
+               np.concatenate([a.windows, b.windows]))
 
 
 def cut(src: Source, assets: str) -> Cut:
@@ -244,10 +250,12 @@ def cut(src: Source, assets: str) -> Cut:
         tris = tris[:, ::-1]
     lo, hi = np.array(src.box[0]), np.array(src.box[1])
     c = pos[tris].mean(1)
-    keep &= ((c >= lo) & (c <= hi)).all(1)
+    inside = ((c >= lo) & (c <= hi)).all(1)
+    glass = np.array([g for _, _, _, g in mats])[s.material] & inside
+    keep &= inside
     uv = s.uvs if s.uvs is not None else np.zeros((len(pos), 2))
     out = Cut(pos, nrm, uv, tris[keep], s.material[keep],
-              [(n, srgb(b), tex and texture_png(tex, b)) for n, b, tex, _ in mats])
+              [(n, srgb(b), tex and texture_png(tex, b)) for n, b, tex, _ in mats], pos[tris[glass]])
     for e in src.extras:
         out = joined(out, borrowed(e, assets, len(out.materials)))
     return out
@@ -289,7 +297,7 @@ def facing_eye(c: Cut) -> Cut:
     used, inv = np.unique(key.reshape(-1), return_inverse=True)
     vid, flip = used // 2, (used % 2).astype(bool)
     nrm = np.where(flip[:, None], -c.nrm[vid], c.nrm[vid])
-    return Cut(c.pos[vid], nrm, c.uv[vid], inv.reshape(-1, 3), c.mat[vis], c.materials)
+    return Cut(c.pos[vid], nrm, c.uv[vid], inv.reshape(-1, 3), c.mat[vis], c.materials, c.windows)
 
 
 EDGE = 0.22   # m: no edge longer (the kit draws a cab in toward the eye per vertex: long edges would bend wrongly)
@@ -349,14 +357,16 @@ def subdivide(c: Cut, limit: float = EDGE) -> Cut:
                     out_t += [(v[0], m01, m20), (m01, v[1], v[2]), (m01, v[2], m20)]
             out_m += [m] * (len(out_t) - len(out_m))
         tris, mats = out_t, out_m
-    return Cut(np.array(pos), np.array(nrm), np.array(uv), np.array(tris, dtype=np.int64), np.array(mats), c.materials)
+    return Cut(np.array(pos), np.array(nrm), np.array(uv), np.array(tris, dtype=np.int64), np.array(mats), c.materials,
+               c.windows)
 
 
 # ------------------------------------------------------------------------------------------ writing
 
 def write_npz(c: Cut, dest: str) -> None:
     """cab.npz in `dest` (as tools/prep_cockpit_tank.py's station.npz: pos, nrm, uv, tris, mat, textures, colours;
-    the triangles' materials renumbered to the used ones) and one PNG per textured material."""
+    the triangles' materials renumbered to the used ones; windows: the glass left out, (k, 3, 3), a key a reader
+    without it ignores) and one PNG per textured material."""
     os.makedirs(dest, exist_ok=True)
     used = sorted(set(int(m) for m in c.mat))
     textures, colours = [], []
@@ -373,7 +383,8 @@ def write_npz(c: Cut, dest: str) -> None:
     np.savez_compressed(os.path.join(dest, 'cab.npz'), pos=c.pos.astype(np.float32), nrm=nrm.astype(np.float32),
                         uv=c.uv.astype(np.float32), tris=c.tris.astype(np.int32), mat=remap[c.mat],
                         textures=np.array(textures), colours=np.array(colours, dtype=np.uint8),
-                        names=np.array([c.materials[k][0] for k in used]))
+                        names=np.array([c.materials[k][0] for k in used]),
+                        windows=np.asarray(c.windows, dtype=np.float32).reshape(-1, 3, 3))
 
 
 LICENSE = """{title} by {author}, CC BY 4.0
@@ -414,7 +425,8 @@ def view(c: Cut, dest_png: str) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--assets', default=r'D:\APP\edf6-cockpit-assets')
-    ap.add_argument('--out', default=os.path.join(om.DEV_MODELS, 'cockpits'))
+    # The repository's models/cockpits/ (tracked: the release and CI build from it, pylib/obj_model.py model_roots).
+    ap.add_argument('--out', default=os.path.join(om.REPO_MODELS, 'cockpits'))
     ap.add_argument('--only')
     ap.add_argument('--view')
     a = ap.parse_args()

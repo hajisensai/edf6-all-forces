@@ -20,7 +20,7 @@
 - 第一人称（根因，代码确认）：`LaserDrawSelected` 用的是**镜头步进时**的 `d.view[hand]` 去变换这个起点，而枪模本身按**本次绘制**的 `DrawTransforms`（`anchor_now⁻¹ × placeWeapon × C_draw`）放置。走动 / 跳跃时这两者相差镜头步进之后游戏又走过的位移，线就离开了枪口——正是 `DrawTransforms` 当初为枪模解决、但激光没跟上的那类问题。
 - 第三人称（推测，未实机）：激光 slot 2/3 与武器 slot 5 在同一步里的先后未逆向到调度器，若激光先于武器更新，原版自身就会晚一步。
 
-修复（`src/firstperson.cpp` `LaserMuzzle` / `LaserDrawSelected`）：每次激光绘制时，从武器第一个枪口条目的局部矩阵 × 该骨骼在**枪模绘制姿态数组**里的矩阵重算起点（同样减 0.02 上方向）；第一人称再乘本次绘制的 `DrawTransforms`（与枪模同一个 T），第三人称直接用。读不到枪口条目 / 骨骼时第一人称退回原做法（镜头步进 T × 原生起点），第三人称保持原生。命中点、射线、子弹、网络都不改，绘制后逐字节恢复。
+修复（`src/firstperson.cpp` `LaserMuzzle` / `LaserDrawSelected`；2026-10-20 起枪口矩阵与开火、直升机炮管、NPC 选弹共用 `common/edf/weapon.h MuzzleWorld`：同一个 `0x6969A0` 的「局部矩阵 × 骨骼姿态」，姿态来源可选骨骼记录或某次绘制的姿态数组）：每次激光绘制时，从武器第一个枪口条目的局部矩阵 × 该骨骼在**枪模绘制姿态数组**里的矩阵重算起点（同样减 0.02 上方向）；第一人称再乘本次绘制的 `DrawTransforms`（与枪模同一个 T），第三人称直接用。读不到枪口条目 / 骨骼时第一人称退回原做法（镜头步进 T × 原生起点），第三人称保持原生。命中点、射线、子弹、网络都不改，绘制后逐字节恢复。
 
 ## 2. 切换成像没反应
 
@@ -41,3 +41,9 @@
 验证：`thermal_runtime_test`（瞄具外按键、第一人称算观瞄、无设备座位应答、钩子缺失原因）、`pvp_hud_layout_test`（HUD 文本）、`fp_ride_lifecycle_test`（第一人称 / 第三人称起点按绘制姿态）、`fp_render_native_audit.py`（激光起点来源字节）。
 
 未实机：GPU 合成能否在实际观瞄画面里成功（`MainView` 判定、表面格式）、第三人称原版是否本来就晚一步、手柄座位仍无切换键（`keys` 只认键盘座位）。
+
+## 2026-10-20 审查补充：手柄座位、分屏
+
+- **手柄座位切不了热像**（B3）：`thermal.cpp KeyDown` 只认键盘座位（`kSeatPad==0`），手柄座位没有任何按法。改为在座位按键字（`seat+0x2E8`，`PayloadReadout.switchButton` 的 LB 读的同一个字）上加组合键 `VehicleThermalButton`（默认 192 = L3+R3）：所有键都按住的那一刻算一次按下（`seat_switch_logic.h ChordHeld`）。座位按键的每一位都已有载具功能（A/B/X/Y/LB/RB/L3/R3：换座、切挂载、副射击、锁定、观察、高视角 / 放大……），所以只能是组合：两键都按住时，R3 的瞄具放大 / 高视角、L3 的观察让给热像（`ChordOwns`，`sightzoom.cpp` / `highcam.cpp` / `turretcam.cpp`）；先按住 L3 再按 R3 不会退出放大，单按 R3 / L3 照旧。手柄座位的提示行写 `L3+R3`。
+- **分屏 2P 没热像**（B4）：热像是全局单例，`Seat()` 只看 `PlayerHuman()`（第一个本地玩家），渲染只认第一个相机槽的视图。改为每个本地玩家一份状态（`thermal.cpp Player`，按玩家对象保留，仿 `seatswitch.cpp RiderFor`；本地玩家由各自相机的步进给出：`firstperson.cpp LocalPlayers`），渲染按视图找主人：视图参数块 `+0x20` 的原生视图与哪台本地相机最近提交的矩阵相同（`LocalViewPlayer`，同 `MatchView` 的匹配，不要求第一人称）就是谁的；匹配不到时只有第一个相机槽的视图归 1P（旧行为），不借用别人的画面。`thermal_runtime_test` 覆盖手柄组合键、地图 / 暂停让路、两名本地玩家各自循环与视图归属。
+- 未实机：分屏两视口的视图参数块是否每帧都能与各自相机的提交矩阵对上（与第一人称 `MatchView` 同一依据，单视口已实测，双人分屏未实测）；L3+R3 在各载具上与原版手柄操作是否还有冲突。

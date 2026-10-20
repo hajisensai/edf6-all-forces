@@ -302,7 +302,7 @@ def photos_in_use() -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--src', default=SRC)
-    ap.add_argument('--out', default=os.path.join(om.DEV_MODELS, 'cockpits'))
+    ap.add_argument('--out', default=os.path.join(om.REPO_MODELS, 'cockpits'))
     ap.add_argument('--only', default='', help='comma-separated asset slugs (default: all)')
     args = ap.parse_args()
     want = [s for s in args.only.split(',') if s] or list(ASSETS)

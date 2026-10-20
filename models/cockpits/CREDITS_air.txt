@@ -1,0 +1,8 @@
+Helicopter cockpits (pylib/cockpit_kits_air.py): third-party material
+
+AH-64A  Peten (War Thunder) Attack Helicopter by KojfDiscord, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/), via Sketchfab: https://sketchfab.com/3d-models/ah-64a-peten-war-thunder-attack-helicopter-486f3845d88647abae002e1222788686 (cropped/scaled)  ->  parts/wt-ah64a-cpg/cockpit.glb, tex_m1.png, tex_m3.png
+AH-64A  Peten (War Thunder) Attack Helicopter by KojfDiscord, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/), via Sketchfab: https://sketchfab.com/3d-models/ah-64a-peten-war-thunder-attack-helicopter-486f3845d88647abae002e1222788686 (cropped/scaled)  ->  parts/wt-ah64a-pilot/cockpit.glb, tex_m1.png, tex_m3.png
+AH-64E Apache "Guardian" by Jeyhun1985, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/), via Sketchfab: https://sketchfab.com/3d-models/ah-64e-apache-guardian-9eb641f9179d413e87367ebd9b96347a (cropped/scaled)  ->  parts/sf-ah64e-cpg/cockpit.glb, tex_m6.png, tex_m11.png, tex_m15.png, tex_m23.png, tex_m25.png, tex_m27.png
+Sikorsky UH-60M Blackhawk by Muhamad Mirza Arrafi, CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/), via Sketchfab: https://sketchfab.com/3d-models/sikorsky-uh-60m-blackhawk-12b4e525676a49678ac3006b360c8750 (cropped/scaled)  ->  parts/sf-uh60m-pilot/cockpit.glb, tex_m4.png, tex_m5.png, tex_m8.png, tex_m9.png
+
+The other textures the helicopter kits use (air_tub, air_overhead) are drawn by tools/make_cockpit_textures_air.py.

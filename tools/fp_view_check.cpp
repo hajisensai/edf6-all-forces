@@ -693,6 +693,24 @@ int main() {
         Expect(Segment(74,2,0,true) && !Segment(74,2,6,true) && !Segment(74,2,0),"a heading's digits are zero-padded: 074");
         Expect(Pose(Identity(),L'Z',heading,2,0,f,true).m[0]!=0,"Z digits light the leading zero");
     }
+    {   // A neighbour seat's panel (firstperson.cpp InstrumentPose): the vehicle's own readings are every seat's.
+        using crew::instruments::SeatPose;
+        Expect(SeatPoseOf(false,L'h',heading,1,4)==SeatPose::live && SeatPoseOf(false,L'w',altitude,1000,4)==SeatPose::live
+               && SeatPoseOf(false,L'g',pitch,45,6)==SeatPose::live && SeatPoseOf(false,L'Z',heading,2,6)==SeatPose::live,
+               "a neighbour's compass card, altimeter, attitude card and heading digits read the vehicle live");
+        Expect(SeatPoseOf(false,L'e',arm,2,4)==SeatPose::neutral && SeatPoseOf(false,L'v',row,0,4)==SeatPose::neutral
+               && SeatPoseOf(false,L'd',ammo,0,6)==SeatPose::skip && SeatPoseOf(false,L'l',0,ammo+1,4)==SeatPose::neutral,
+               "a neighbour's weapons screen does not show this seat's weapons");
+        Expect(SeatPoseOf(false,L'l',0,0,4)==SeatPose::live && SeatPoseOf(false,L't',heading,0,4)==SeatPose::skip,
+               "l's field is a language, t's a contact: not vehicle readings");
+        Expect(SeatPoseOf(false,L'h',hp,0,4)==SeatPose::neutral,"a card on a seat's own field stays hidden next door");
+        Readings none{};
+        for(float& v:none.value)v=-1.0f;
+        none.flight=true;none.value[heading]=90;
+        Expect(crew::instruments::Pose(Identity(),L'h',heading,0,0,none,false).m[0]==0 && crew::instruments::Pose(Identity(),L'g',pitch,45,1400,none,false).m[0]==0
+               && crew::instruments::Pose(Identity(),L'w',altitude,1000,0,none,false).m[0]==0,
+               "no readings yet: the cards and hands are put away, not left overlapping at rest");
+    }
     AuthoredActions();
     Identity_();
     Hold();

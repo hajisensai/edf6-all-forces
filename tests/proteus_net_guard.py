@@ -51,8 +51,9 @@ assert 'contribution.source.Is(v)' in field, 'reused source slots must not retai
 
 # Mixed builds: another version's packet is reported, never decoded; an incompatible Proteus is stock here.
 transport = code_only((root / 'src/proteus_net.cpp').read_text(encoding='utf-8'))
-receive_hook = body(transport, 'void __fastcall Receive(')
-assert receive_hook.index('if(valid)ProteusNetReceived(') < receive_hook.index('else if(foreign)ProteusNetIncompatible(')
+receive_hook = body(transport, 'void Received(')
+assert receive_hook.index('ProteusNetReceived(v,state);') < receive_hook.index('ProteusNetIncompatible(v,foreign);')
+assert 'seat_net::Register(proteus_net::kMagic,&Received)' in transport and '0x17DEE98' in transport
 assert 'if(u.net.incompatible)return nullptr;' in body(source, 'Unit* ActiveOf(')
 assert frame.index('u->net.incompatible') < frame.index('NetworkFrame('), 'an incompatible Proteus never runs the rework'
 assert 'kDefenseSilentMs' in frame and 'Incompatible(*u,v,0)' in frame, 'a local driver that hears no owner count goes stock'

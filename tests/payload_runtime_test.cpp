@@ -1,4 +1,5 @@
 #include "../src/payload.cpp"
+#include "seat_net_fake.inc"
 #include <cstdio>
 #include <initializer_list>
 namespace crew {
@@ -285,6 +286,95 @@ int main() {
         check(NpcPayloadSelect(v,0,400,true)==w[1],"NPC keeps native alternate ammunition selection when optional stores are off");
         PullHook(h[1]);check(!w[1][kWeaponTrigger],"optional stores off still suppresses NPC's redundant second native pull");
         PullHook(h[0]);check(w[1][kWeaponTrigger] && !w[0][kWeaponTrigger],"optional stores off preserves NPC single-belt firing");cfg.stockStores=true;
+    }
+    // Online (seat_net.h Pick): a seat's pick goes to the vehicle's copies; there the seat's pulls land on it too.
+    {
+        using seat_net::Pick;
+        ResetPayload();now+=1000;cfg.stockStores=true;
+        auto v=vehicles[0];auto seat=SeatAt(v,0);
+        // The vehicle's holder array at the real stride (veh +0x638): a pick names its weapon by the holder's index there.
+        alignas(16) static unsigned char array[3*kHolderStride]{};
+        unsigned char* const* const oldList=At<unsigned char* const*>(seat,kSeatWeapons);
+        static unsigned char* list[3]{};
+        for(int i=0;i<3;++i){list[i]=array+i*kHolderStride;Put<void*>(list[i],kHolderWeapon,weapons[0][i]);Put<void*>(list[i],kHolderCtrl,ctrl[0]);}
+        Put<void*>(v,kHolders,array);Put<void*>(seat,kSeatWeapons,list);
+        unsigned char* holders0[3]={list[0],list[1],list[2]};
+        Put<void*>(v,0,image+kVt403);Put<std::uint64_t>(seat,kSeatWeaponCount,3);Put<std::uint64_t>(v,kHolderCount,3);
+        for(int i=0;i<3;++i){Put<int>(weapons[0][i],kWeaponAmmo,10);weapons[0][i][kWeaponTrigger]=0;weapons[0][i][0x102]=0;
+                             Put<float>(weapons[0][i],0x89C,10);}
+        weapons[0][1][0x101]=1;Put<const wchar_t*>(weapons[0][1],0x08,L"EDF6VC_AAM_S_2.SGO");
+        pickNetOk=seat_net::Register(seat_net::kPickMagic,&PickReceived);   // InstallPayload's, past its native pull patch
+        check(pickNetOk && seat_net::fakeMagic==seat_net::kPickMagic && seat_net::fakeHandler,"the pick kind has its receiver");
+        // This machine's player in the gunner seat, on a pad: LB picks the next weapon; the pick goes out at once.
+        riders[0][edf::kHumanPlayer]=1;Put<void*>(riders[0],edf::kHumanPad,riders[0]);riders[0][edf::kRiderNet+edf::kNetFlags]=0;
+        trackedHuman=riders[0];authority=true;
+        seat[kSeatPad]=1;Put<std::uint16_t>(seat,kSeatButtons,0);
+        fakeSession=true;Put<std::uint16_t>(v,0x128,2);
+        int from=seat_net::fakeSends;
+        now+=16;PayloadFrame(v);
+        Pick sent{};
+        check(seat_net::LastPick(from,&sent) && sent.seat==0 && sent.holder==0 && !(sent.flags&seat_net::kNpc),
+              "boarding: the seat's pick (the main gun, holder 0) goes to the copies");
+        from=seat_net::fakeSends;now+=16;PayloadFrame(v);
+        check(seat_net::fakeSends==from,"unchanged within the refresh: nothing sent");
+        Put<std::uint16_t>(seat,kSeatButtons,0x10);now+=16;PayloadFrame(v);Put<std::uint16_t>(seat,kSeatButtons,0);
+        check(seat_net::LastPick(from,&sent) && sent.holder==1,"LB: the new pick (holder 1) at once");
+        from=seat_net::fakeSends;now+=seat_net::kPickRefreshMs;PayloadFrame(v);
+        check(seat_net::LastPick(from,&sent) && sent.holder==1,"refreshed every kPickRefreshMs");
+        fakeSession=false;from=seat_net::fakeSends;now+=seat_net::kPickRefreshMs;PayloadFrame(v);
+        check(seat_net::fakeSends==from,"offline: no pick goes out");
+        // Another machine's copy of that vehicle: the seat's rider is that machine's player (its network flag), this
+        // machine runs no one there. Before any pick its pulls are the stock gun's.
+        ResetPayload();fakeSession=true;authority=false;trackedHuman=nullptr;
+        riders[0][edf::kRiderNet+edf::kNetFlags]=1;Put<void*>(riders[0],edf::kHumanPad,nullptr);
+        check(SeatRider(seat)==Rider::other && IsAnyPlayer(riders[0]),"fixture: another machine's player in the seat");
+        for(int i=0;i<3;++i)weapons[0][i][kWeaponTrigger]=0;
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"no pick heard: the stock pull is the gun's");
+        weapons[0][0][kWeaponTrigger]=0;
+        sent.head.sender=0x77;sent.head.sequence=5;sent.head.controller=-1;
+        seat_net::fakeHandler(v,&sent,sizeof(sent));
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"the remote player's pick: this copy's pull lands on it too");
+        check(!PayloadPicked(v),"a remote pick is no pick of this machine's player (its HUD, its sight)");
+        Pick back=sent;back.holder=0;back.head.sequence=4;
+        seat_net::fakeHandler(v,&back,sizeof(back));
+        weapons[0][1][kWeaponTrigger]=0;now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1,"an older message from that sender cannot undo the pick");
+        Pick epoch=sent;epoch.holder=0;epoch.head.sequence=9;epoch.head.controller=42;
+        seat_net::fakeHandler(v,&epoch,sizeof(epoch));
+        weapons[0][1][kWeaponTrigger]=0;now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1,"a message of another control epoch (a rider who left) is refused");
+        Pick bad=sent;bad.reserved=1;bad.head.sequence=10;bad.holder=0;
+        seat_net::fakeHandler(v,&bad,sizeof(bad));seat_net::fakeHandler(v,&bad,sizeof(bad)-4);
+        weapons[0][1][kWeaponTrigger]=0;now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1,"a malformed block is ignored");
+        weapons[0][1][kWeaponTrigger]=0;now+=seat_net::kPickStaleMs+1;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"a pick not refreshed goes stale: stock again");
+        weapons[0][0][kWeaponTrigger]=0;
+        // This machine's own player takes the seat: a pick heard for it never applies (it runs the seat itself).
+        sent.head.sequence=20;seat_net::fakeHandler(v,&sent,sizeof(sent));
+        riders[0][edf::kRiderNet+edf::kNetFlags]=0;Put<void*>(riders[0],edf::kHumanPad,riders[0]);trackedHuman=riders[0];
+        sent.head.sequence=21;seat_net::fakeHandler(v,&sent,sizeof(sent));
+        Put<std::uint16_t>(seat,kSeatButtons,0);now+=16;PayloadFrame(v);
+        PayloadReadout local{};
+        check(PlayerPayload(&local) && local.picked==0,"the local player's own pick (the gun), not the remote one");
+        // An NPC gunner: the machine that runs it (AiGunner) sends its pick, flagged; a copy lands its pulls the same way.
+        ResetPayload();trackedHuman=nullptr;riders[0][edf::kHumanPlayer]=0;Put<void*>(riders[0],edf::kHumanPad,nullptr);
+        riders[0][edf::kRiderNet+edf::kNetFlags]=0;authority=true;
+        from=seat_net::fakeSends;
+        check(NpcPayloadSelect(v,0,400,true)==weapons[0][1],"the NPC picks the AA store against an aircraft");
+        check(seat_net::LastPick(from,&sent) && sent.holder==1 && (sent.flags&seat_net::kNpc),"...and sends it, flagged as an NPC's");
+        ResetPayload();authority=false;   // the copy: this machine does not run that NPC
+        sent.head.sender=0x99;seat_net::fakeHandler(v,&sent,sizeof(sent));
+        for(int i=0;i<3;++i)weapons[0][i][kWeaponTrigger]=0;
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"the host's NPC pick: the copy's pull lands on the store");
+        fakeSession=false;now+=16;PayloadFrame(v);weapons[0][1][kWeaponTrigger]=0;PullHook(holders0[0]);
+        check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"the session left: remote picks dropped");
+        seat[kSeatPad]=0;Put<std::uint16_t>(v,0x128,0);authority=true;
+        Put<void*>(v,kHolders,holders[0]);Put<void*>(seat,kSeatWeapons,const_cast<unsigned char**>(oldList));
+        for(int i=0;i<3;++i)weapons[0][i][kWeaponTrigger]=0;
     }
     ResetPayload();check(!PayloadPicked(vehicles[0]),"mission reset clears choices");
     VirtualFree(image,0,MEM_RELEASE);std::printf("payload runtime: %d checks, %d failures\n",checks,fail);return fail ? 1 : 0;

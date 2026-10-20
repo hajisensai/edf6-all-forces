@@ -1,6 +1,7 @@
 // Read-only EDF.dll: its real serializer, native object envelope and final event packet writer. No game entry point,
 // no running-game attachment, no EOS call. 750130's queue/peer lookup is replaced with a recorder only in this process.
 #include "../src/sazabi_net.cpp"
+#include "../src/seat_net.cpp"
 #include "edf/host.h"
 #include <cstdio>
 #include <climits>
@@ -17,7 +18,7 @@ void DrillNetReceived(unsigned char*,const drill_net::State&) noexcept { ++drill
 }
 namespace {
 using namespace crew;
-namespace transport=crew::sazabi_transport;
+namespace transport=crew::seat_transport;
 int checks=0;
 std::size_t messageBytes=0,objectBytes=0,packetBytes=0;
 void Check(bool ok,const char* why) { ++checks;if(!ok){std::printf("FAIL: %s\n",why);std::exit(1);} }
@@ -82,8 +83,9 @@ int main(int argc,char** argv) {
         s.sender=1;s.sequence=1;
         transport::Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(transport::kWriteBlock)(written.bytes,&s,sizeof(s));
         alignas(16) unsigned char reader[0x600]{};Reader(written.bytes,reader);
-        sazabi_net::State decoded;bool valid=false;
-        Check(transport::Peek(reader,decoded,valid)==(tag==15) && At<std::int64_t>(reader,8)==0,"peek preserves unrelated coop message position");
+        std::uint32_t magic=0;transport::Block block;
+        Check(transport::Peek(reader,&magic,&block)==(tag==15) && (tag!=15 || magic==sazabi_net::kMagic) && At<std::int64_t>(reader,8)==0,
+              "peek preserves unrelated coop message position");
         unsigned char before[sizeof(sazabiVehicle)];std::memcpy(before,sazabiVehicle,sizeof(before));
         transport::Fn<transport::ReceiveFn>(transport::kReceive)(sazabiVehicle+0x120,reader);
         Check(!std::memcmp(before,sazabiVehicle,sizeof(before)) && At<std::int64_t>(reader,8)==1,"stock receiver ignores custom tags safely");
@@ -92,8 +94,9 @@ int main(int argc,char** argv) {
     transport::Stream wrong;transport::Fn<bool(__fastcall*)(void*,std::int8_t)>(transport::kWriteSmall)(wrong.bytes,15);
     transport::Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(transport::kWriteBlock)(wrong.bytes,&drill,sizeof(drill));
     alignas(16) unsigned char reader[0x600]{};Reader(wrong.bytes,reader);
-    sazabi_net::State decoded;bool valid=false;
-    Check(!transport::Peek(reader,decoded,valid) && At<std::int64_t>(reader,8)==0,"different magic passes through unchanged");
+    std::uint32_t magic=0;transport::Block block;
+    Check(transport::Peek(reader,&magic,&block) && magic==drill_net::kMagic && At<std::int64_t>(reader,8)==0,
+          "a block of another kind is told by its magic, the stream left as it came");
     // The full native object wrapper -> broadcast wrapper -> final event packet writer, with a max-width descriptor.
     alignas(16) unsigned char world[0x1600]{},manager[0x100]{},session[0x100]{},descriptor[0x40]{},reference[16]{};
     Put<void*>(image,0x20B2AC0,world+0x98);Put<void*>(image,0x20B2AC8,world);
