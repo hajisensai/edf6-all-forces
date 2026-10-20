@@ -19,6 +19,6 @@ for line in presentation.splitlines():
         assert ',0.0f)' in line, 'replayed special effects must carry zero damage'
 assert 'm.net.state.controller==SazabiNetController(v)' in body(replay, 'bool RemoteFresh(')
 assert '0x300' not in body(transport, 'std::int32_t SazabiNetController('), 'last driver cannot retain authority epoch'
-assert '0x17DB4C8' in transport and 'sazabi_net::kMagic' in body(transport, 'bool Peek(')
+assert '0x17DB4C8' in transport and 'seat_net::Register(sazabi_net::kMagic,&Received)' in transport
 assert 'f.target=-1' in body(replay, 'void AcceptNetwork('), 'wire ids must never become local target-slot indices'
 print('sazabi_net_guard: replay, physics, shield, identity and zero-damage boundaries passed')

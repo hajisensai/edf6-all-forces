@@ -34,6 +34,8 @@
 #include "stores.h"
 #include "retired_loadout.h"
 #include "edf/weapon.h"
+#include "online_authority.h"
+#include "seat_net_transport.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -68,8 +70,17 @@ Class ClassOf(const void* v) noexcept {
 }
 
 // The switch's state per vehicle the player sits in: the weapon picked, the switch down last frame.
-struct Pick { ObjRef ref; unsigned seat; unsigned char* weapon; bool held,listed,npc,nativeControl; ULONGLONG seen; unsigned char* from[kMostPayload]; unsigned char* to[kMostPayload]; int redirects; };
+// `remote`: another machine's choice for a seat it runs (RemotePick), applied here so this copy's pulls land on it too.
+struct Pick { ObjRef ref; unsigned seat; unsigned char* weapon; bool held,listed,npc,nativeControl,remote; ULONGLONG seen; unsigned char* from[kMostPayload]; unsigned char* to[kMostPayload]; int redirects; };
 Pick picks[kTracked]{};
+// Online (seat_net.h Pick): the pick of a seat another machine runs (its player's, or the NPC gunner of the machine that
+// runs it), as its last message said: the weapon by its holder in the vehicle's holder array. And what this machine last
+// sent for a seat it runs (sent again on a change, else every kPickRefreshMs).
+struct RemotePick { ObjRef ref; unsigned seat; std::int32_t holder; bool npc; ULONGLONG at; seat_net::BasicGate<64> gate; };
+RemotePick remotes[kTracked]{};
+struct SentPick { ObjRef ref; unsigned seat; std::int32_t holder; ULONGLONG at; };
+SentPick sentPicks[kTracked]{};
+bool pickNetOk=false;
 // One tracked local player's fire-control view. Store selection remains independent and keeps its old contract.
 struct SightPick { ObjRef vehicle,human; unsigned seat; PayloadFire control=PayloadFire::primary; bool primaryHeld,secondaryHeld; };
 SightPick sightPick{};
@@ -154,7 +165,7 @@ Pick* PickFor(const void* v,unsigned seat,ULONGLONG ms) noexcept {
     return slot;
 }
 Pick* FindPick(const void* v) noexcept {
-    for(auto& p:picks)if(p.ref.Is(v) && !p.npc && p.seat<SeatCount(static_cast<const unsigned char*>(v)) &&
+    for(auto& p:picks)if(p.ref.Is(v) && !p.npc && !p.remote && p.seat<SeatCount(static_cast<const unsigned char*>(v)) &&
         SeatRider(SeatAt(static_cast<unsigned char*>(const_cast<void*>(v)),p.seat))==Rider::player &&
         At<const void*>(SeatAt(static_cast<unsigned char*>(const_cast<void*>(v)),p.seat),kSeatRider)==PlayerHuman())return &p;
     return nullptr;
@@ -371,6 +382,12 @@ void Lock(unsigned char* w) noexcept {
 void ClearRedirect(const void* v) noexcept {
     for(auto& p:picks)if(!v || p.ref.obj==v)p.redirects=0;
 }
+// A seat another machine runs: no player of this machine in it and no NPC gunner this machine runs; a player's pick
+// needs that machine's player there (another machine's player copied here, IsAnyPlayer).
+bool RemoteSeat(const unsigned char* v,const unsigned char* seat,bool npc) noexcept {
+    if(SeatRider(seat)==Rider::player || AiGunner(v,seat))return false;
+    return npc || IsAnyPlayer(At<const unsigned char*>(seat,kSeatRider));
+}
 void __fastcall PullHook(unsigned char* holder) {
     const auto ctrl=At<const unsigned char*>(holder,kHolderCtrl);
     if(!ctrl || At<std::int32_t>(ctrl,8)==0)return;
@@ -383,7 +400,9 @@ void __fastcall PullHook(unsigned char* holder) {
         const auto v=static_cast<unsigned char*>(const_cast<void*>(p.ref.obj));
         if(p.seat>=SeatCount(v) || v[kDead])continue;
         const auto seat=SeatAt(v,p.seat);
-        if(p.npc ? !AiGunner(v,seat) : SeatRider(seat)!=Rider::player)continue;
+        // The seat's pull is this pick's: this machine's player, its NPC gunner, or (a remote pick) the rider another
+        // machine runs there, its player (IsAnyPlayer) or its NPC, while this machine runs neither.
+        if(p.remote ? !RemoteSeat(v,seat,p.npc) : p.npc ? !AiGunner(v,seat) : SeatRider(seat)!=Rider::player)continue;
         const auto list=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto count=At<std::uint64_t>(seat,kSeatWeaponCount);
         for(int k=0;k<p.redirects;++k)if(p.from[k]==w) {
@@ -430,6 +449,85 @@ std::int64_t NativeHolderIndex(unsigned char* v,unsigned seat,const unsigned cha
         if(Readable(list[i],kHolderWeapon+8) && At<const unsigned char*>(list[i],kHolderWeapon)==weapon)return HolderIndex(v,list[i]);
     return -1;
 }
+void RedirectPayload(unsigned char* v,unsigned seat,Pick& p,unsigned char* const* ws,const PayloadReadout& r,
+                     const int* stock,int count,int choice) noexcept;
+
+// --- Online: a seat's pick to the vehicle's copies (seat_net.h Pick). The machine that runs the seat sends it; every
+// other one lands that seat's pulls on the same weapon (ApplyRemotePicks -> PullHook). ---
+// Send the pick of seat `seat` (`weapon`, null none) this machine runs, when it changed or is due again.
+void SendPick(unsigned char* v,unsigned seat,const unsigned char* weapon,bool npc) noexcept {
+    if(!pickNetOk || !seat_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)))return;
+    seat_net::ChainVehicle(v);   // this class hears its copies' picks too
+    const ULONGLONG now=GameMs();
+    SentPick* slot=nullptr;
+    for(auto& x:sentPicks) {
+        if(x.ref.Is(v) && x.seat==seat){slot=&x;break;}
+        if(!slot && (!x.ref || !x.ref.Is(x.ref.obj) || now-x.at>seat_net::kPickStaleMs*4))slot=&x;
+    }
+    if(!slot)return;
+    if(!slot->ref.Is(v) || slot->seat!=seat)*slot=SentPick{ObjRef::Of(v),seat,-2,0};
+    const std::int64_t index=weapon ? NativeHolderIndex(v,seat,weapon) : -1;
+    const std::int32_t holder=index>=0 && index<static_cast<std::int64_t>(seat_net::kMostHolders) ? static_cast<std::int32_t>(index) : -1;
+    if(!seat_net::PickDue(holder!=slot->holder,now,slot->at))return;
+    seat_net::Pick m;
+    m.seat=seat;m.holder=holder;m.flags=npc ? seat_net::kNpc : 0;m.head.controller=seat_net::SeatController(v,seat);
+    if(!seat_net::Stamp(&m,sizeof(m)) || !seat_net::Valid(m))return;
+    if(seat_net::Send(v,&m,sizeof(m))){slot->holder=holder;slot->at=now;}
+}
+// A pick from another machine (game thread). Admitted for a seat this machine does not run itself, in the control epoch
+// this machine sees there (the rider's ReferenceId, -1 an NPC or none), newer than that sender's last.
+void PickReceived(unsigned char* v,const void* block,std::size_t size) noexcept {
+    seat_net::Pick m;
+    if(!pickNetOk || !Cfg().enabled || !InSession() || !seat_net::Decode(block,size,m))return;
+    __try {
+        if(!Readable(v,kSeatCount+8) || v[kDead] || m.seat>=SeatCount(v))return;
+        const unsigned char* const seat=SeatAt(v,m.seat);
+        const bool here=SeatRider(seat)==Rider::player || AiGunner(v,seat);
+        const ULONGLONG now=GameMs();
+        RemotePick* slot=nullptr;
+        for(auto& r:remotes) {
+            if(r.ref.Is(v) && r.seat==m.seat){slot=&r;break;}
+            if(!slot && (!r.ref || !r.ref.Is(r.ref.obj) || now-r.at>seat_net::kPickStaleMs*4))slot=&r;
+        }
+        if(!slot)return;
+        if(!slot->ref.Is(v) || slot->seat!=m.seat){*slot=RemotePick{};slot->ref=ObjRef::Of(v);slot->seat=m.seat;slot->holder=-1;}
+        if(!slot->gate.Admit(m.head,InSession(),here,seat_net::SeatController(v,m.seat)))return;
+        slot->holder=m.holder;slot->npc=(m.flags&seat_net::kNpc)!=0;slot->at=now;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+// The remote picks of `v` as redirects of its seats' picks (each frame: PullHook takes only fresh ones). A seat this
+// machine now runs, a pick not refreshed for kPickStaleMs, a session left: the record is dropped.
+void ApplyRemotePicks(unsigned char* v) noexcept {
+    const ULONGLONG ms=GameMs();
+    const bool session=InSession();
+    for(auto& r:remotes) {
+        if(!r.ref.Is(v))continue;
+        if(!session || ms-r.at>seat_net::kPickStaleMs || r.seat>=SeatCount(v)) {
+            for(auto& p:picks)if(p.remote && p.ref.Is(v) && p.seat==r.seat){p.redirects=0;p.weapon=nullptr;p.remote=false;}
+            r=RemotePick{};continue;
+        }
+        unsigned char* const seat=SeatAt(v,r.seat);
+        if(!RemoteSeat(v,seat,r.npc))continue;
+        Pick* const p=PickFor(v,r.seat,ms);
+        if(!p)continue;
+        p->remote=true;p->npc=r.npc;p->seen=ms;p->redirects=0;p->weapon=nullptr;p->nativeControl=false;
+        if(r.holder<0)continue;
+        PayloadReadout pr{};unsigned char* ws[kMostPayload]{};
+        pr.count=ReadSeat(v,r.seat,ClassOf(v),ws,pr,!r.npc);
+        if(r.npc)for(int i=0;i<pr.count;++i)if(pr.entry[i].coax)pr.entry[i].fire=PayloadFire::other;   // as NpcPayloadSelect
+        int choice=-1;
+        for(int i=0;i<pr.count;++i)if(NativeHolderIndex(v,r.seat,ws[i])==r.holder){choice=i;break;}
+        if(choice<0)continue;
+        PayloadFire ride=PayloadFire::primary;   // the stores ride the seat's secondary when a stock weapon is on it (Switch)
+        for(int i=0;i<pr.count;++i)if(pr.entry[i].fire==PayloadFire::secondary && !pr.entry[i].coax)ride=PayloadFire::secondary;
+        int stock[kMostPayload],count=0;
+        for(int i=0;i<pr.count;++i)if(pr.entry[i].fire==ride)stock[count++]=i;
+        p->nativeControl=NativeAlternates(ws,stock,count);
+        p->weapon=ws[choice];
+        if(pr.entry[choice].fire==PayloadFire::store || p->nativeControl)RedirectPayload(v,r.seat,*p,ws,pr,stock,count,choice);
+    }
+}
+
 void RedirectPayload(unsigned char* v,unsigned seat,Pick& p,unsigned char* const* ws,const PayloadReadout& r,
                      const int* stock,int count,int choice) noexcept {
     const auto spec=StoreOf(ws[choice]);
@@ -518,13 +616,17 @@ void PayloadFrame(unsigned char* v) noexcept {
     if(!Cfg().enabled){ClearRedirect(v);ClearChoiceContext(v);return;}
     if(v[kDead]){ClearRedirect(v);ClearChoiceContext(v);return;}
     if(BodyOf(v)!=PluginBody::none){ClearRedirect(v);if(!choiceContext.aircraft)ClearChoiceContext(v);return;}
+    if(pickNetOk) {
+        if(seat_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)))seat_net::ChainVehicle(v);   // this class hears its copies' picks
+        ApplyRemotePicks(v);
+    }
     const int seat=PlayerSeatOf(v);
     if(seat<0){if(sightPick.vehicle.Is(v))sightPick=SightPick{};ClearChoiceContext(v);return;}
     const ULONGLONG ms=GameMs();
     Pick* const p=PickFor(v,static_cast<unsigned>(seat),ms);
     if(!p)return;
-    const bool takeover=p->npc;
-    p->seen=ms;p->npc=false;
+    const bool takeover=p->npc || p->remote;
+    p->seen=ms;p->npc=false;p->remote=false;
     const Class c=ClassOf(v);
     PayloadReadout r{};
     unsigned char* ws[kMostPayload]{};
@@ -561,11 +663,13 @@ void PayloadFrame(unsigned char* v) noexcept {
                 CoaxBelt(ws[i]);ws[i][kWeaponTrigger]=1;
             }
     latest=r;latestMs=ms;PublishSelectableSnapshot(r);
+    if(r.choices>=2 || p->weapon)SendPick(v,static_cast<unsigned>(seat),p->weapon,false);   // this seat's pick to its copies
 }
 
 // Select only loaded weapons already attached to this seat. The native caller owns
 // aiming/firing; no shot or weapon object is fabricated here.
-unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bool airborne,PayloadFire* fire) noexcept {
+namespace {
+unsigned char* NpcPayloadPick(unsigned char* v,unsigned seat,float distance,bool airborne,PayloadFire* fire) noexcept {
     if(fire)*fire=PayloadFire::other;
     if(!pullOk || !Cfg().enabled || !Cfg().npcGunners || !v || v[kDead] ||
        BodyOf(v)!=PluginBody::none || seat>=SeatCount(v))return nullptr;
@@ -573,8 +677,8 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
     if(!AiGunner(v,s))return nullptr;
     Pick* const p=PickFor(v,seat,GameMs());
     if(!p)return nullptr;
-    const auto previous=p->weapon;
-    p->seen=GameMs();p->npc=true;p->nativeControl=false;p->redirects=0;p->weapon=nullptr;
+    const auto previous=p->remote ? nullptr : p->weapon;
+    p->seen=GameMs();p->npc=true;p->remote=false;p->nativeControl=false;p->redirects=0;p->weapon=nullptr;
     if(!std::isfinite(distance) || distance<=0.0f)return nullptr;
     PayloadReadout r{};unsigned char* ws[kMostPayload]{};
     r.count=ReadSeat(v,seat,ClassOf(v),ws,r,false);
@@ -639,6 +743,17 @@ unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bo
     if(previous && previous!=p->weapon && Readable(previous,kWeaponCharge+4))ClearWeaponLock(previous);
     if(fire)*fire=r.entry[best].fire==PayloadFire::store ? ride : r.entry[best].fire;
     return p->weapon;
+}
+}  // namespace
+
+// The NPC gunner's pick runs on the machine that runs the gunner (AiGunner: the host's NPC, IsOnlineAuthority); that
+// machine sends it to the vehicle's copies (SendPick), so their pulls land on the same weapon.
+unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float distance,bool airborne,PayloadFire* fire) noexcept {
+    unsigned char* const picked=NpcPayloadPick(v,seat,distance,airborne,fire);
+    __try {
+        if(pickNetOk && v && !v[kDead] && seat<SeatCount(v) && AiGunner(v,SeatAt(v,seat)))SendPick(v,seat,picked,true);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    return picked;
 }
 
 bool NpcCoaxFire(unsigned char* v,unsigned seat,const void* target,LineBlocked blocked) noexcept {
@@ -774,7 +889,7 @@ int SeatFireWeapons(const void* vehicle,unsigned index,bool both,unsigned char**
         // Selection ownership lasts until identity/seat/weapon changes, not until a HUD timer expires.
         // Every returned weapon still comes from the live ReadSeat set below. Fire redirects retain
         // their separate kFreshMs guard in PullHook; a slow/pause frame never grants a stale shot.
-        if(current)for(const auto& p:picks)if(!p.npc && p.ref.Is(v) && p.seat==index){pick=&p;break;}
+        if(current)for(const auto& p:picks)if(!p.npc && !p.remote && p.ref.Is(v) && p.seat==index){pick=&p;break;}
         const PayloadFire want=current ? sightPick.control : PayloadFire::primary;
         const auto usable=[&](int i) -> bool {return !Spent(ws[i]);}; // reloading guns retain their sight; permanently spent ones do not
         const auto redirected=[&](unsigned char* w) -> unsigned char* {
@@ -841,6 +956,8 @@ bool InstallPayload() noexcept {
         std::memcpy(jump+6,&to,8);
         pullOk=edf::PatchCode(image+kPull,kPullCode,jump,sizeof(jump));
         Log("HOOK payload=%d (the holder pull lands on the store picked)",pullOk);
+        pickNetOk=pullOk && seat_net::Install() && seat_net::Register(seat_net::kPickMagic,&PickReceived);
+        Log("HOOK payload online=%d (a seat's pick to the vehicle's copies, tag 15 'SPCK')",pickNetOk);
         return pullOk;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -890,7 +1007,7 @@ bool PayloadAimWeapon(const void* vehicle,unsigned index,const void* source,cons
         }
         if(group==PayloadFire::other)return false;
         const Pick* picked=nullptr;
-        for(const auto& p:picks)if(p.ref.Is(v) && p.seat==index && p.npc==npc){picked=&p;break;}
+        for(const auto& p:picks)if(p.ref.Is(v) && p.seat==index && p.npc==npc && !p.remote){picked=&p;break;}
         const bool fresh=picked && GameMs()-picked->seen<=kFreshMs && (Cfg().stockStores || picked->nativeControl);
         bool catalogued=false;
         for(int i=0;i<r.count;++i)catalogued=catalogued || IsStoreWeapon(ws[i]);
@@ -914,6 +1031,8 @@ void ResetPayload() noexcept {
     ClearChoiceContext();
     ClearRedirect(nullptr);
     for(auto& p:picks)p=Pick{};
+    for(auto& r:remotes)r=RemotePick{};
+    for(auto& x:sentPicks)x=SentPick{};
     latest=PayloadReadout{};latestMs=0;
     sightPick=SightPick{};
 }

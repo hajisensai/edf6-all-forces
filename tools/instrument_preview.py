@@ -16,22 +16,25 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import math
 import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# Fields (src/cockpit_instruments.h Field). An older pylib reads the first twelve.
-HP, HULL, FUEL, SPEED, ALT, HEADING, SLOT, AMMO, WARN, CLIMB, PITCH, POWER = range(12)
-ROWS = 3
-ARM, MAG, LOAD, EMPTY, PICK = range(12, 17)
-ROW, ROWROUND = 17, 17 + ROWS
-ROLL = 17 + 2 * ROWS
-COUNT = ROLL + 1
+# Fields and round classes: this checkout's pylib/cockpit_fields.py (the plugin's numbers; src/cockpit_fields.inc), loaded
+# by path so that --pylib may name an older checkout without it. Fields are appended only: an older pylib reads the first.
+_spec = importlib.util.spec_from_file_location('_preview_cockpit_fields', os.path.join(HERE, '..', 'pylib', 'cockpit_fields.py'))
+_cf = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_cf)
+HP, HULL, FUEL, SPEED, ALT, HEADING, SLOT, AMMO, WARN, CLIMB, PITCH, POWER = (
+    _cf.HP, _cf.HULL, _cf.FUEL, _cf.SPEED, _cf.ALT, _cf.HEADING, _cf.SLOT, _cf.AMMO, _cf.WARN, _cf.CLIMB, _cf.PITCH, _cf.POWER)
+ROWS, ARM, MAG, LOAD, EMPTY, PICK, ROW, ROWROUND, ROLL, COUNT = (
+    _cf.ROWS, _cf.ARM, _cf.MAG, _cf.LOAD, _cf.EMPTY, _cf.PICK, _cf.ROW, _cf.ROWROUND, _cf.ROLL, _cf.COUNT)
 FLIGHT_ONLY = (CLIMB, PITCH, ROLL)
-# Round classes (src/hud_cue.h CockpitRound).
-MG, GUN, AP, HE, HEAT, CAN, BEAM, RKT, MSL, AAM, BOMB, SPC = range(12)
+MG, GUN, AP, HE, HEAT, CAN, BEAM, RKT, MSL, AAM, BOMB, SPC = (
+    _cf.MG, _cf.GUN, _cf.AP, _cf.HE, _cf.HEAT, _cf.CAN, _cf.BEAM, _cf.RKT, _cf.MSL, _cf.AAM, _cf.BOMB, _cf.SPC)
 
 
 def arms(rows: list[tuple[int, int, float, float]], picked: int, empty: bool = False) -> dict:

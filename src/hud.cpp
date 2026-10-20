@@ -567,6 +567,17 @@ void SeatButtonName(int mask,wchar_t* out,int size) noexcept {
         wcscat_s(out,size,names[i]);
     }
 }
+// A chord of seat buttons, all held at once (seat_switch_logic.h ChordHeld): "L3+R3".
+void SeatChordName(int mask,wchar_t* out,int size) noexcept {
+    static const wchar_t* names[]={L"A",L"B",L"X",L"Y",L"LB",L"RB",L"L3",L"R3"};
+    out[0]=0;
+    if(mask<=0){wcsncpy_s(out,size,Tr(Tx::controlUnbound),_TRUNCATE);return;}
+    if(mask&~0xFF){std::swprintf(out,size,Tr(Tx::padButton),mask);return;}
+    for(int i=0;i<8;++i)if(mask&(1<<i)) {
+        if(out[0])wcscat_s(out,size,L"+");
+        wcscat_s(out,size,names[i]);
+    }
+}
 void AircraftControls(Line& line,bool keys,int choices,int storeButton,int targetButton,bool target,bool flares) noexcept {
     Format(line,L"");
     auto add=[&](Tx text,const wchar_t* key){if(line.text[0])Append(line,L"   ");Append(line,Tr(text),key);};
@@ -850,7 +861,9 @@ const wchar_t* ThermalReasonWord(thermal::Reason reason) noexcept {
 // The mode the player chose (the key's answer at once, in or out of the sight), then why it is not drawn yet when it is not.
 // A press on a seat without the equipment is answered too (status.rejected), never silently dropped.
 void ThermalControlText(Line& line,const thermal::Status& status) noexcept {
-    wchar_t key[32];KeyName(Cfg().thermalKey,key,_countof(key));
+    // A pad seat's toggle is its seat-button chord (ini VehicleThermalButton), a keyboard seat's the key.
+    wchar_t key[32];
+    if(status.pad)SeatChordName(Cfg().thermalButton,key,_countof(key));else KeyName(Cfg().thermalKey,key,_countof(key));
     if(!status.eligible){Format(line,Tr(Tx::thermalControl),key,Tr(Tx::thermalUnsupportedSeat));return;}
     // A failed render (no hooks, unsupported surface) shows what is on screen, optical, with the fallback; a mode that
     // only waits (for the sight, for the first composite) shows the choice the key made.
@@ -1337,13 +1350,17 @@ void LoadoutBanner(void* drawer,void* ctx,Text* text,float width,float bottom,fl
 }
 
 // The plugin aircraft's stores as cells: each one's picture (hud_cue.h StoreIconOf), its name and rounds; out of rounds
-// dim; the picked one cyan.
+// dim; the picked one cyan. In the seat's order and with its pick (hud_cue.h JetSeatArms); the gun has its own line
+// (StoresText), not a cell, so a cell's index is its store's.
 int JetCells(const PlayerJetReadout& j,LoadCell* cells) noexcept {
+    const hudcue::SeatArms a=hudcue::JetSeatArms(j.stores<kMostStores ? j.stores : kMostStores,j.store,j.guns>0);
     int n=0;
-    for(int i=0;i<j.stores && i<kMostStores;++i) {
+    for(int k=0;k<a.n;++k) {
+        if(a.rows[k].source!=hudcue::ArmSource::store)continue;
+        const int i=a.rows[k].index;
         LoadCell& c=cells[n++];
         c.icon=hudcue::StoreIconOf(j.storeName[i],j.storeRole[i]);
-        c.picked=i==j.store;
+        c.picked=k==a.picked;
         _snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%hs %d",j.storeName[i] ? j.storeName[i] : "?",j.storeRounds[i]);
         c.rgba=j.storeRounds[i]<=0 ? kHudDim : c.picked ? kCyan : kHud;
     }
@@ -3188,26 +3205,31 @@ void StockVehicleHud(void* drawer,void* ctx,Text* text,const float* vp,float wid
     }
 }
 
-// A stock heli's stores for the helicopter HUD's loadout strip (HeliStrip): each weapon's picture by its round
-// (hud_cue.h ArmIconOf), its rounds and its reload (ArmLine's text and colour); the picked one cyan. Laid out as the
-// weapons stand on the vehicle, left to right (hud_cue.h SideOrder); `picked` (if given): the cell of r.selected, or -1.
-int StockCells(const StockHudReadout& r,LoadCell* cells,int* picked=nullptr) noexcept {
-    int n=0;
+// A stock vehicle's (a heli's too) weapons in the seat's order and with its pick (hud_cue.h StockSeatArms: the
+// fire-control's selected arm, else the sight's, else the first), as the cockpit's weapons screen lists them.
+hudcue::SeatArms StockSeatArmsOf(const StockHudReadout& r) noexcept {
     const int arms=r.arms<kStockArms ? r.arms : kStockArms;
-    float side[kStockArms];int order[kStockArms];
+    float side[kStockArms];
     for(int i=0;i<arms;++i)side[i]=r.arm[i].side;
-    hudcue::SideOrder(side,arms,order);
-    if(picked)*picked=-1;
-    for(int k=0;k<arms;++k) {
-        const int i=order[k];
-        if(picked && i==r.selected)*picked=n;
+    return hudcue::StockSeatArms(side,arms,r.selected,r.sight);
+}
+
+// A stock vehicle's stores for the loadout strips (HeliStrip, StockDockHud): each weapon's picture by its round
+// (hud_cue.h ArmIconOf), its rounds and its reload (ArmLine's text and colour); the picked one cyan. In StockSeatArmsOf's
+// order and pick; `picked` (if given): the picked one's cell, or -1.
+int StockCells(const StockHudReadout& r,LoadCell* cells,int* picked=nullptr) noexcept {
+    const hudcue::SeatArms a=StockSeatArmsOf(r);
+    if(picked)*picked=a.picked;
+    int n=0;
+    for(int k=0;k<a.n;++k) {
+        const int i=a.rows[k].index;
         Line l{};
         ArmLine(l,r.arm[i],false);
         LoadCell& c=cells[n++];
         const reticle::Style sight=r.arm[i].reticle;
         c.icon=hudcue::ArmIconOf(static_cast<int>(r.arm[i].kind),r.arm[i].lobbed,static_cast<int>(r.arm[i].style),
                                  sight==reticle::Style::cannon || sight==reticle::Style::precision);
-        c.picked=i==r.selected;
+        c.picked=k==a.picked;
         c.load=hudcue::CellLoad(r.arm[i].ammo,r.arm[i].reload,r.arm[i].cycleSec,r.arm[i].cycle);
         if(r.arm[i].name[0]) {
             if(r.arm[i].ammo<=0 && r.arm[i].canReload)_snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%ls  %ls",r.arm[i].name,l.text);
@@ -3220,6 +3242,20 @@ int StockCells(const StockHudReadout& r,LoadCell* cells,int* picked=nullptr) noe
         c.rgba=c.picked && l.rgba==kHud ? kCyan : l.rgba;
     }
     return n;
+}
+
+// The weapons of the player's seat as every read-out lists them (hud_cue.h SeatArms): a plugin aircraft's, else a stock
+// vehicle's (a heli's too); none.
+hudcue::SeatArms SeatArmList(const Snapshot& snap) noexcept {
+    if(snap.cockpit)return hudcue::JetSeatArms(snap.jet.stores<kMostStores ? snap.jet.stores : kMostStores,snap.jet.store,snap.jet.guns>0);
+    if(snap.stock)return StockSeatArmsOf(snap.stockHud);
+    return hudcue::SeatArms{};
+}
+// The picked weapon as one number (a switch's banner watches it): its arm or store, the gun kGunPick, none -1.
+constexpr int kGunPick=1000;
+int SeatArmPick(const hudcue::SeatArms& a) noexcept {
+    if(a.picked<0 || a.picked>=a.n)return -1;
+    return a.rows[a.picked].source==hudcue::ArmSource::gun ? kGunPick : a.rows[a.picked].index;
 }
 
 void StockDockHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
@@ -5452,7 +5488,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         static hudcue::Change storePick{},aimMode{};
         const bool fresh=now-snap.tick<=kFreshMs,storesShown=fresh && (snap.cockpit || snap.heliFly || snap.stock);
         if(!storesShown)storePick.seen=false;
-        const int picked=snap.cockpit ? snap.jet.store : snap.stock ? snap.stockHud.selected : -1;
+        const int picked=SeatArmPick(SeatArmList(snap));
         const bool storeSwitched=storesShown && hudcue::Changed(storePick,picked,now,kSwitchMs);
         const bool aimFlipped=fresh && snap.turret && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
         const bool rotorHud=snap.cockpit && snap.jet.rotor && Cfg().heliFlightHud;   // a rotor craft: the helicopter HUD
@@ -5573,7 +5609,10 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(screensOn && storeSwitched) {
             LoadCell cells[kStockArms>kMostStores ? kStockArms : kMostStores];
             int n=0,pickedCell=-1;
-            if(snap.cockpit){n=JetCells(snap.jet,cells);pickedCell=snap.jet.store;}
+            if(snap.cockpit) {   // the cell of the picked store (a picked gun has no cell: no banner)
+                n=JetCells(snap.jet,cells);
+                for(int i=0;i<n;++i)if(cells[i].picked)pickedCell=i;
+            }
             else if(snap.stock)n=StockCells(snap.stockHud,cells,&pickedCell);
             if(pickedCell>=0 && pickedCell<n)LoadoutBanner(drawer,ctx,t,width,height*0.8f,s,cells[pickedCell],lines,&at);
         }

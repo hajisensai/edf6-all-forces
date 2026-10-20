@@ -294,6 +294,10 @@ struct State {
 /// Each local camera owns its pose, motion, batches and effects. Never evict another local player's view.
 constexpr int kLocalViews=4;
 State states[kLocalViews]{};
+// Each local camera's player as its last step saw it (game thread): this machine's players, split screen's two.
+struct LocalSeen { unsigned char* human; ULONGLONG at; };
+LocalSeen localSeen[kLocalViews]{};
+constexpr ULONGLONG kLocalSeenMs=1000;
 // What the camera step and the camera submit leave for the draws (docs/fp-render-re.md §17.5), each published whole
 // under a sequence count (odd while it is written: SeqPublish) and read as a whole copy (SeqTake). The draws run on a
 // render thread, up to three update steps behind the game thread, so nothing on their path reads a State field.
@@ -301,7 +305,8 @@ State states[kLocalViews]{};
 // update it renders, which may be a few submits older than the newest (§17.2: 0-3 steps), and matching only the newest
 // left a lagging draw of a turning camera unowned (L1 error past 0.1: the stock body and gun for that draw).
 constexpr int kViewHistory=8;
-struct ViewHistory { M4 view[kViewHistory]; bool ok[kViewHistory]; int next; };   // ok: submitted in first person
+// ok: submitted in first person; sent: submitted (any view), by the local player `who` the camera followed then.
+struct ViewHistory { M4 view[kViewHistory]; bool ok[kViewHistory]; bool sent[kViewHistory]; const void* who[kViewHistory]; int next; };
 // The draws' copies, beside the states (a State is reset by assigning it whole: never under a reader's feet). last /
 // lastViews: the render thread's own (the last whole copy, while a writer keeps the count odd).
 struct Published { DrawSnap snap; volatile LONG seq; DrawSnap last; bool lastOk;
@@ -390,6 +395,7 @@ void SyncSession() noexcept {
         state=State{};std::memcpy(state.flashes,flashes,sizeof(flashes));
         selected=&state;Publish();ClearViews(static_cast<int>(&state-states));
     }
+    for(auto& seen:localSeen)seen=LocalSeen{};
     selected=&states[0];fpskin::Clear();appliedSession=next;
 }
 // --- What the draws keep for themselves (render thread only: the game thread never writes or resets it) ---
@@ -411,16 +417,19 @@ DrawOwn& Own() noexcept {
     if(!o.live || o.session!=now){o=DrawOwn{};o.live=true;o.session=now;o.pass1=1;}   // a new mission: nothing carried
     return o;
 }
+unsigned char* CameraPlayer(const unsigned char* cam) noexcept;
 void CaptureRenderCamera(void* camera,const float* world) noexcept {
     State* state=CameraState(camera);
     if(!state)return;
     M4 frame;std::memcpy(frame.m,world,64);
     M4 native;
-    const bool ok=fpview::NativeView(frame,&native) && state->on && !state->overridden;
+    const bool sent=fpview::NativeView(frame,&native);
+    const bool ok=sent && state->on && !state->overridden;
+    const void* const who=CameraPlayer(static_cast<const unsigned char*>(camera));
     Published& p=published[state-states];
     SeqPublish(&p.viewSeq,&p.views,[&](ViewHistory& v){
         const int at=v.next>=0 && v.next<kViewHistory ? v.next : 0;
-        v.view[at]=native;v.ok[at]=ok;v.next=(at+1)%kViewHistory;
+        v.view[at]=native;v.ok[at]=ok;v.sent[at]=sent && who;v.who[at]=who;v.next=(at+1)%kViewHistory;
     });
     if(Cfg().debug && state->on && state->builtReady && !state->riding) {
         float off=0.0f;for(int i=0;i<16;++i)off+=std::fabs(frame.m[i]-state->built.m[i]);
@@ -1572,13 +1581,16 @@ void CamStepSelected(void* camera,void* step) {
     CameraAfterNative(cam);
 }
 
+void SeeLocal(const State* state,unsigned char* cam) noexcept {
+    if(state)localSeen[state-states]=LocalSeen{CameraPlayer(cam),GetTickCount64()};
+}
 void __fastcall CamStepHook(void* camera,void* step) {
     SyncSession();
-    if(auto state=CameraState(camera)){StateScope scope(state);CamStepSelected(camera,step);return;}
-    nextCamStep(camera,step);
     auto cam=static_cast<unsigned char*>(camera);
+    if(auto state=CameraState(camera)){StateScope scope(state);CamStepSelected(camera,step);SeeLocal(state,cam);return;}
+    nextCamStep(camera,step);
     if(!CameraPlayer(cam))return; // Menu and remote cameras must not consume local player slots.
-    if(auto state=AcquireCamera(camera)){StateScope scope(state);CameraAfterNative(cam);}
+    if(auto state=AcquireCamera(camera)){StateScope scope(state);CameraAfterNative(cam);SeeLocal(state,cam);}
 }
 
 // --- The draw ---
@@ -1811,15 +1823,9 @@ void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=null
         int seat=-1,screen=-1,field=-1,place=0,segment=0;wchar_t mode=0;
         const int fields=swscanf_s(name,L"vc_i_%d_%d_%lc_%d_%d_%d",&seat,&screen,&mode,1u,&field,&place,&segment);
         if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'Z' || mode==L'p') && fields!=6))continue;
-        const bool mine=seat==d.rideSeat;
-        const bool rangedNeedle=mode==L'n' && fields>=5;
-        const bool neutralWidget=mode==L'D' || mode==L'B' || mode==L'T' || mode==L'Z';
-        // Adjacent stations visible from this seat use the same language, while their
-        // new health/percent widgets remain neutral without that seat's live data.
-        // A weapons screen's picture / tag / frame (e) has no neutral look: another seat's is hidden.
-        if(!mine && mode!=L'l' && mode!=L'c' && mode!=L'p' && mode!=L'v' && mode!=L'u' && mode!=L'e'
-            && mode!=L'r' && mode!=L'q' && mode!=L'a' && !rangedNeedle && !neutralWidget)continue;
-        const bool ready=d.instrumentsReady && (mine || (mode==L'l' && place==0));
+        const instruments::SeatPose how=instruments::SeatPoseOf(seat==d.rideSeat,mode,field,place,fields);
+        if(how==instruments::SeatPose::skip)continue;
+        const bool ready=d.instrumentsReady && how==instruments::SeatPose::live;
         const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
         const M4 moved=instruments::Pose(original,mode,field,place,segment,d.instruments,ready);
         std::memcpy(pose+i*16,moved.m,64);
@@ -2179,6 +2185,35 @@ void FirstPersonCameraOverride(const void* camera,bool overridden) noexcept {
 }
 
 void ResetFirstPerson() noexcept { session.fetch_add(1,std::memory_order_release); }
+
+int LocalPlayers(unsigned char** out,int most) noexcept {
+    int n=0;
+    const ULONGLONG now=GetTickCount64();
+    for(const auto& seen:localSeen) {
+        if(!seen.human || now-seen.at>kLocalSeenMs || n>=most)continue;
+        bool twice=false;
+        for(int i=0;i<n;++i)twice=twice || out[i]==seen.human;
+        if(!twice)out[n++]=seen.human;
+    }
+    return n;
+}
+const void* LocalViewPlayer(const void* view) noexcept {
+    if(!view || !Readable(view,0x60))return nullptr;
+    M4 native;std::memcpy(native.m,static_cast<const unsigned char*>(view)+0x20,64);
+    const void* match=nullptr;
+    for(int k=0;k<kLocalViews;++k) {
+        ViewHistory v;
+        if(!TakeViews(k,&v))continue;
+        for(int i=0;i<kViewHistory;++i) {
+            if(!v.sent[i])continue;
+            float error=0;for(int j=0;j<16;++j)error+=std::fabs(native.m[j]-v.view[i].m[j]);
+            if(!std::isfinite(error) || error>=0.1f)continue;
+            if(match && match!=v.who[i])return nullptr;   // two players' cameras on one frame: neither's
+            match=v.who[i];
+        }
+    }
+    return match;
+}
 
 bool FirstPersonOn() noexcept { for(const auto& state:states)if(state.on)return true;return false; }
 void FirstPersonInstrumentReadings(const instruments::Readings& readings,const unsigned char* human) noexcept {

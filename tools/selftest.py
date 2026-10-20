@@ -897,6 +897,27 @@ def thrown_drones_marked_and_wired() -> None:
 
 
 @test
+def cockpit_fields_current() -> None:
+    """The instruments' field numbers and the round classes are one table (pylib/cockpit_fields.py): the C++ enums are
+    generated from it, and the model side imports it, not a copy."""
+    import gen_cockpit_fields
+    import cockpit_fields as cf
+    with open(gen_cockpit_fields.OUT, encoding='utf-8', newline='') as f:
+        assert f.read().replace('\r\n', '\n') == gen_cockpit_fields.render(), \
+            'src/cockpit_fields.inc is stale: python tools/gen_cockpit_fields.py'
+    assert '#include "cockpit_fields.inc"' in src('src/cockpit_instruments.h')
+    assert '#include "cockpit_fields.inc"' in src('src/hud_cue.h')
+    assert 'enum Field' not in src('src/cockpit_instruments.h') and 'enum class CockpitRound' not in src('src/hud_cue.h')
+    assert 'from cockpit_fields import' in src('pylib/cockpit_instruments.py')
+    # The numbers the models already built carry (appended only).
+    assert (cf.HP, cf.POWER, cf.ARM, cf.PICK, cf.ROW, cf.ROWROUND, cf.ROLL, cf.COUNT) == (0, 11, 12, 16, 17, 20, 23, 24)
+    assert cf.ROUNDS == ('MG', 'GUN', 'AP', 'HE', 'HEAT', 'CAN', 'BEAM', 'RKT', 'MSL', 'AAM', 'BOMB', 'SPC')
+    # A stock weapon's round class reads the sight's tag by reticle::Shell, not by bare numbers.
+    hud_cue = src('src/hud_cue.h')
+    assert 'reticle::Shell shell' in hud_cue and 'case reticle::Shell::canister: return CockpitRound::can;' in hud_cue
+
+
+@test
 def stores_inc_current() -> None:
     with open(gen_stores.OUT, encoding='utf-8', newline='') as f:
         assert f.read().replace('\r\n', '\n') == gen_stores.render(), 'src/stores.inc is stale: python tools/gen_stores.py'
@@ -5325,8 +5346,20 @@ def map_wired() -> None:
     assert 'CancelToggle(human);if(Current().on)Leave();' in fp and 'keyClaimHuman==human && keyClaimControl==key.control' in fp
     assert 'Foreground() && !MapHoldsKeys()' in src('src/room_ui.cpp'), 'the room menu keys give way to the map'
     thermal = src('src/thermal.cpp')
-    assert '!GamePaused() && !MapHoldsKeys() && shot.inSight && down && !keyHeld' in thermal, 'thermal switching gives way to map/pause and requires the actual optic'
+    # Thermal switching (#217: a press chooses the mode on an equipped seat in or out of the sight; it is drawn only
+    # through the sight): it gives way to the map and the pause, and only a seat with the actual thermal equipment
+    # (VehicleHasThermal) turns a press into a request; elsewhere the press is only answered on the HUD (rejectedAt).
+    tick = thermal.split('void TickPlayer(Player& p,unsigned char* human,bool enabled,unsigned toggleKey) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'const bool admitted=!GamePaused() && !MapHoldsKeys();' in tick, 'thermal switching gives way to map/pause'
+    assert 'const bool equipped=seated && VehicleHasThermal(vehicle,seat);' in tick, 'thermal switching requires the actual optic'
+    assert 'if(admitted && equipped && press)CycleModeOf(p);' in tick and tick.count('CycleModeOf(') == 1, 'thermal: one gated request'
+    assert tick.index('if(!equipped) {') < tick.index('CycleModeOf(p)'), 'a seat without the equipment returns before any request'
+    assert 'shot.inSight=!MapOwnsView() &&' in tick, 'the image is drawn only through the sight, never under the map'
     assert 'process==GetCurrentProcessId()' in thermal, 'the thermal key reader requires this game window'
+    assert 'seatsw::ChordHeld(At<std::uint16_t>(s,edf::kSeatButtons),static_cast<unsigned>(Cfg().thermalButton))' in thermal, \
+        'a pad seat toggles thermal by its seat-button chord'
+    for rel in ('src/sightzoom.cpp', 'src/highcam.cpp', 'src/turretcam.cpp'):
+        assert 'seatsw::ChordOwns(' in src(rel) and 'c.thermalButton' in src(rel), f'{rel}: its button gives way to the thermal chord'
     controlled = src('src/enemy_control.cpp')
     sample = controlled.split('void Sample(Session& session,Input& sample) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,0x688)) {' in sample

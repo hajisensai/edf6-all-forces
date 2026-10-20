@@ -13,17 +13,13 @@ from cockpits import KitMaterial, Screen, InstrumentControl as Moving
 from cockpit_label_glyphs import LABELS, GLYPHS
 import obj_model as om
 
-# Keep in step with src/cockpit_instruments.h. Negative readings mean unavailable, never zero.
-HP, HULL, FUEL, SPEED, ALT, HEADING, SLOT, AMMO, WARN, CLIMB, PITCH, POWER = range(12)
-# Appended fields (a model built before them keeps its fields' numbers), src/cockpit_instruments.h Field.
-ROWS = 3                                     # the weapons screen's cells: a window over the seat's weapons
-ARM, MAG, LOAD, EMPTY, PICK = range(12, 17)
-ROW, ROWROUND = 17, 17 + ROWS               # + i: cell i's rounds (its bar: fill, or loading), its round class
-ROLL = 17 + 2*ROWS
-# Round classes (src/hud_cue.h CockpitRound, in this order): the tag, colour and picture a weapon shows by. The colours
-# after a war-game's shell icons: armour piercing blue, high explosive yellow, shaped charge orange, missiles red / teal.
-ROUNDS = ('MG', 'GUN', 'AP', 'HE', 'HEAT', 'CAN', 'BEAM', 'RKT', 'MSL', 'AAM', 'BOMB', 'SPC')
-MG, GUN, AP, HE, HEAT, CAN, BEAM, RKT, MSL, AAM, BOMB, SPC = range(len(ROUNDS))
+# The fields' and round classes' numbers: pylib/cockpit_fields.py (the C++ side generated from it: src/cockpit_fields.inc).
+# Negative readings mean unavailable, never zero.
+from cockpit_fields import (HP, HULL, FUEL, SPEED, ALT, HEADING, SLOT, AMMO, WARN, CLIMB, PITCH, POWER,  # noqa: F401
+                            ROWS, ARM, MAG, LOAD, EMPTY, PICK, ROW, ROWROUND, ROLL,
+                            ROUNDS, MG, GUN, AP, HE, HEAT, CAN, BEAM, RKT, MSL, AAM, BOMB, SPC)
+# The colours (one a round class, in ROUNDS' order) after a war-game's shell icons: armour piercing blue, high explosive
+# yellow, shaped charge orange, missiles red / teal.
 ROUND_COLOURS = ((215,225,222),(150,210,250),(80,160,255),(255,214,64),(255,135,50),(150,230,90),(190,130,255),
                  (255,110,170),(255,72,72),(70,225,210),(205,165,110),(165,170,205))
 ADI_DEGREE = .0045                           # an attitude card's pitch scale: screen heights a degree

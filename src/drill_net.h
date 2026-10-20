@@ -4,10 +4,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include "seat_net.h"
 
 namespace crew {
 namespace drill_net {
-constexpr std::int8_t kTag=15; // coop reserves 13 (hits) and 14 (RNG)
+constexpr std::int8_t kTag=seat_net::kTag;   // the vehicles' one tag (seat_net.h): this kind is its kMagic
 constexpr std::uint32_t kMagic=0x4C495244,kVersion=1;
 enum class Phase : std::uint32_t { home,out,back };
 struct State {
@@ -45,28 +46,17 @@ inline bool Decode(const void* data,std::size_t size,State& out) noexcept {
     if(!Valid(s))return false;
     out=s;return true;
 }
-// Kept inside the tank's ObjRef-bound Drill, never keyed by a raw address alone. Each sender's watermark survives
-// a driver change; a delayed packet from the previous driver cannot undo the new driver's launch or catch.
-struct Gate {
-    struct Seen { std::uint64_t sender=0;std::uint32_t sequence=0; };
-    static constexpr std::size_t kMaxSenders=1024; // the coop room's supported peer capacity
-    Seen seen[kMaxSenders]{};
+// Kept inside the tank's ObjRef-bound Drill, never keyed by a raw address alone (seat_net.h Gate: each sender's
+// watermark survives a driver change; a delayed packet from the previous driver cannot undo the new driver's launch or
+// catch).
+struct Gate : seat_net::Gate {
     bool Admit(const State& s,bool session,bool authority,std::int32_t controller) noexcept {
-        if(!session || authority || s.controller!=controller || !Valid(s))return false;
-        Seen* empty=nullptr;
-        for(auto& x:seen) {
-            if(!x.sender && !empty)empty=&x;
-            if(x.sender!=s.sender)continue;
-            // Serial-number arithmetic also accepts the sender's uint32 wrap, while rejecting older messages.
-            const std::uint32_t delta=s.sequence-x.sequence;
-            if(!delta || delta>=0x80000000u)return false;
-            x.sequence=s.sequence;return true;
-        }
-        if(!empty)return false; // bounded, do not evict a watermark and re-admit an old event
-        *empty=Seen{s.sender,s.sequence};return true;
+        if(!Valid(s))return false;
+        seat_net::Head h;std::memcpy(&h,&s,sizeof(h));
+        return seat_net::Gate::Admit(h,session,authority,controller);
     }
 };
-constexpr bool Replicated(bool session,std::uint16_t flags) noexcept { return session && (flags&3)!=0; }
+using seat_net::Replicated;
 } // namespace drill_net
 bool InstallDrillNet() noexcept;
 bool DrillNetSend(unsigned char* vehicle,drill_net::State state) noexcept;
