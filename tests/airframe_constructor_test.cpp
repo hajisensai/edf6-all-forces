@@ -11,11 +11,13 @@ bool JetBodyStep(unsigned char*,float*,float*) noexcept { Unused(); return false
 bool SubBodyStep(unsigned char*,float*,float*) noexcept { Unused(); return false; }
 bool PlayerJetBodyStep(unsigned char*,float*,float*) noexcept { Unused(); return false; }
 bool SazabiBodyStep(unsigned char*,float*,float*) noexcept { Unused(); return false; }
+bool DreadnoughtBodyStep(unsigned char*,float*,float*) noexcept { Unused(); return false; }
 float MapRay(const float*,const float*,float*) noexcept { Unused(); return false; }
 bool SubMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { Unused(); return false; }
 bool PlayerJetMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { Unused(); return false; }
 bool PrimerMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { Unused(); return false; }
 bool SazabiMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { Unused(); return false; }
+bool DreadnoughtMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { Unused(); return false; }
 namespace {
 unsigned char shapeFixture[0x80]{};
 int partIndex=0,findCalls=0;

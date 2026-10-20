@@ -145,6 +145,17 @@ struct Config {
     float sazabiCannonDamage=300.0f;   // a mega particle beam's round at full charge (90 rounds a beam, 5 beams)
     float sazabiFunnelDamage=500.0f;   // a funnel beam's round (6 rounds a shot)
     bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
+    // The Dreadnought (dreadnought.cpp, docs/dreadnought-plan.md): flown by the plugin with the player in it.
+    bool dreadnought=true;
+    float dreadnoughtSpeed=45.0f;      // m/s at the full left stick ahead
+    float dreadnoughtBoost=1.8f;       // ...times that, and its acceleration, with the boost held
+    float dreadnoughtAccel=4.0f;       // m/s^2 its velocity changes at most
+    float dreadnoughtClimb=18.0f;      // m/s up (or down) at the full ascend (descend)
+    float dreadnoughtTurn=9.0f;        // deg/s at the full right stick
+    float dreadnoughtMouseTurn=0.25f;  // deg/s of turn per unit of the mouse's frame movement a frame
+    float dreadnoughtFloor=30.0f;      // m: the least its keel flies over the ground
+    int dreadnoughtBoostKey=0x10;      // ...on the keyboard: the boost (VK_SHIFT; on a pad A)
+    int dreadnoughtDescendKey=0x11;    // ...on the keyboard: down (VK_CONTROL; on a pad the right stick back)
     char testBoardVehicle[32]{};    // tests: class substring, optionally @exactModelBone to distinguish models sharing 506
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
                                     // once a mission near the player, then the player put into what it brings
@@ -808,7 +819,7 @@ JetBody BomberBody(const unsigned char* inst) noexcept;
 // from its SGO's mark (veh+0x162C, kMark* in body506.cpp, the one table of them); the 506's physics step
 // (slot 57) is hooked once, there, and hands each body to its owner's step, which returns the velocity and
 // spin to set (false: leave the stock step's).
-enum class PluginBody { none, jet, sub, playerJet, sazabi };
+enum class PluginBody { none, jet, sub, playerJet, sazabi, dreadnought };
 PluginBody BodyOf(const void* vehicle) noexcept;
 float BodyMark(const void* vehicle) noexcept;      // the mark of a 506 body, 0 for anything else
 bool InstallBody506() noexcept;                    // before InstallJets / InstallSub / InstallPlayerJets
@@ -818,9 +829,13 @@ bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet
 bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // subcarrier.cpp
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // playerjet.cpp
 bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept;     // sazabi.cpp
+bool DreadnoughtBodyStep(unsigned char* v,float* lin,float* ang) noexcept;   // dreadnought.cpp
 // sazabi.cpp: the Sazabi (docs/gundam-plan.md), a 506 body with the Sazabi mark (7401-7499): never crewed, never flown
 // as a heli; with the player in seat 0 it walks and flies; its bones are posed every frame.
 bool IsSazabi(const void* vehicle) noexcept;
+// dreadnought.cpp: the Dreadnought (docs/dreadnought-plan.md), a 506 body with its mark (7601-7699): never crewed, never
+// flown as a heli; with the player in seat 0 the plugin flies it, empty after that it settles on the ground.
+bool IsDreadnought(const void* vehicle) noexcept;
 void BoardingRequest(unsigned char* vehicle) noexcept;   // boarding.cpp: the player into it (the boarding gun's path)
 // The local player's Sazabi as the HUD shows it (sazabi.cpp publishes it each frame on the game thread; hud.cpp reads it,
 // fresh for kSazabiCueMs). False with none (not riding one).
@@ -860,6 +875,9 @@ bool PlayerSazabiCue(SazabiCue* out) noexcept;
 // seat is no player's Sazabi's (the stock camera then).
 bool SazabiCamera(const unsigned char* seat,const float* wasEye,const float* wasLook,float* eye,float* look) noexcept;
 void SazabiFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
+void DreadnoughtFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
+bool InstallDreadnought() noexcept;                   // after InstallBody506
+void ResetDreadnought() noexcept;                     // a new mission
 bool InstallSazabi() noexcept;                        // after InstallBody506
 void ResetSazabi() noexcept;                          // a new mission
 // An impact `by` a vehicle (a crash, jet.cpp / playerjet.cpp; a ground vehicle's ram, vehicleram.cpp) at `at`: `damage`

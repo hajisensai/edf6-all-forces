@@ -64,6 +64,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/proteus_net.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/sazabi.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/dreadnought.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/sazabi_sound.cpp)
 # What a blocked jet ran into, logged (src/impact.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)

@@ -712,9 +712,9 @@ SAZABI_SEAT_CAMERA = ((-8.0, 28.0, -52.0), (0.0, 13.0, 10.0))
 # The Dreadnought (JETS[DREADNOUGHT_JET], src/dreadnought.cpp, docs/dreadnought-plan.md): the Dreadnought game's Jupiter
 # Arms heavy dreadnought, 500 m bow to stern, the player pilots; its archives are pylib/dreadnought_model.py's (built
 # from the model folder by tools/make_dreadnought.py, which checks these names). Its bow gun on its prow's muzzle bone,
-# its missiles in their cells amidships (dreadnought_model.SHIP_MUZZLES). Marks 7501-7599 are its own (src/body506.cpp).
+# its missiles in their cells amidships (dreadnought_model.SHIP_MUZZLES). Marks 7601-7699 are its own (src/body506.cpp).
 DREADNOUGHT_JET = 'edf6tr_dreadnought_mission'
-DREADNOUGHT_MARK = 7501.0
+DREADNOUGHT_MARK = 7601.0
 DREADNOUGHT_DURABILITY = 60000.0
 _DREADNOUGHT_ARC, _DREADNOUGHT_MDB = 'EDF6VC_DN_DREADNOUGHT.MRAB', 'edf6vc_dn_dreadnought.mdb'
 DREADNOUGHT_WEAPON_BONES = ('dn_muzzle', 'dn_muzzle', 'dn_missile')

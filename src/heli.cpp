@@ -2422,7 +2422,7 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
 }  // namespace
 
 bool HeliCrewed(const void* vehicle) noexcept {
-    if(IsJet(vehicle) || IsSub(vehicle) || IsSazabi(vehicle))return false;   // flown by jet.cpp / subcarrier.cpp / sazabi.cpp
+    if(IsJet(vehicle) || IsSub(vehicle) || IsSazabi(vehicle) || IsDreadnought(vehicle))return false;   // flown by jet.cpp / subcarrier.cpp / sazabi.cpp / dreadnought.cpp
     const HeliType* const type=TypeOf(vehicle);
     if(!type)return false;
     const ULONGLONG ms=GameMs();
@@ -2984,7 +2984,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     for(auto& r:rescues)if(r.phase!=RescuePhase::none && r.ref.Is(vehicle))r.seenFrame=GameFrame();   // RescueHeliAlive
     if(call.phase==CallPhase::assigned && call.ref.Is(vehicle))call.seenFrame=GameFrame();   // a peer's copy too (Replay)
     if(!profileOk || vehicle[kDead])return;
-    const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
+    const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && !IsDreadnought(vehicle) && TypeOf(vehicle);
     if(stockHeli)NoteParked(vehicle);
     // NPC gunners have their own firing authority. A remote player pilot must not suppress host/local NPC door
     // gunners; the native weapon messages replicate their shots. NPC pilots already call DoorGun through Fly.
@@ -3017,6 +3017,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(IsSub(vehicle))return;   // the submarine carrier: driven from the input hook (crew.cpp SubStep)
     if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
     if(IsSazabi(vehicle))return;      // the Sazabi (sazabi.cpp): never flown as a heli
+    if(IsDreadnought(vehicle))return; // the Dreadnought (dreadnought.cpp): the same
     if(!Cfg().heliPilot)return;
     Heli* h=Find(vehicle);
     if(!h){if(!HeliCrewed(vehicle))return;h=Find(vehicle);}   // a mission-spawned NPC heli (CreateFriend): fly it too

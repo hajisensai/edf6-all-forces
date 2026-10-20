@@ -187,6 +187,11 @@ CALLS: tuple[Call, ...] = (
     # Laser Guide Kit (eLockonMarkerL01: its beam held while the trigger is, no round of its own) that grabs, carries and
     # throws what its beam is on (src/gravitygun.cpp, src/gravity.h).
     Call('EDF6VC_CALL_GRAVITY_GUN', throw_mark(0xE01), 'gravity_gun', False, 0, 0, 0.5, 'gravity', weapon='eLockonMarkerL01'),
+    # Appended 2026-10-21 (the user: 「无畏舰拿出来放到edf里面……可以放飞船……玩家也可以操纵无畏舰」): the Dreadnought
+    # (src/dreadnought.cpp, tools/make_dreadnought.py), a 500 m ship the player pilots, its hangar's fighters the player
+    # boards; requested empty like the Sazabi; `mark` its body's (pylib/vcobjects.py DREADNOUGHT_MARK).
+    Call('EDF6VC_CALL_DREADNOUGHT', 7601, 'dreadnought', False, 0, 30000, 3.2, 'vehicle', vehicle='EDF6VC_DREADNOUGHT',
+         jet='edf6tr_dreadnought_mission'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -213,6 +218,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'M163 Vulcan and BMPT (2026-10-19)': IDS[:46],
     'ultimate strike (2026-10-19)': IDS[:47],
     'gravity gun (2026-10-20)': IDS[:48],
+    'Dreadnought (2026-10-21)': IDS[:49],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -522,6 +528,21 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                                   'flare. It walks and runs, dashes and flies on its thrusters; beam shot rifle, beam '
                                   'tomahawk, shield (with missiles), funnels, and the chest mega particle cannon.'),
     },
+    'dreadnought': {
+        'SC': ('无畏舰', '请求一艘由你自己驾驶的无畏舰（游戏《Dreadnought》的重型无畏舰，全长 500 米），空着送到信号弹处。'
+                       '舰首主炮和导弹；前甲板的机库放出舰载机（战斗机、防御战斗机、轰炸机、截击机）随舰作战，'
+                       '舰载机停在甲板上时可以登机驾驶。'),
+        'CN': ('無畏艦', '請求一艘由你自己駕駛的無畏艦（遊戲《Dreadnought》的重型無畏艦，全長 500 公尺），空著送到信號彈處。'
+                       '艦首主砲和飛彈；前甲板的機庫放出艦載機（戰鬥機、防禦戰鬥機、轟炸機、攔截機）隨艦作戰，'
+                       '艦載機停在甲板上時可以登機駕駛。'),
+        'JA': ('ドレッドノート', '自分で操縦するドレッドノート（ゲーム『Dreadnought』の重ドレッドノート、全長 500 m）を'
+                            '信号弾の位置へ要請する。艦首主砲とミサイル。前甲板の格納庫から艦載機（戦闘機、防衛戦闘機、爆撃機、'
+                            '迎撃機）が発艦して随伴し、甲板に駐機中の艦載機には乗り込んで操縦できる。'),
+        'EN': ('Dreadnought', 'Requests a Dreadnought you pilot yourself (the heavy dreadnought of the game "Dreadnought", '
+                              '500 m long), delivered empty to the flare. Bow gun and missiles; the hangar on its foredeck '
+                              'launches fighters (fighter, defender, bomber, interceptor) that fight beside it, and you can '
+                              'board one while it stands on the deck.'),
+    },
     'pjet_fighter': {
         'SC': ('玩家战斗机', '请求一架由你自己驾驶的战斗机，空着送到信号弹处：两门机炮和导弹，轻快，转弯最急。'
                          '前推左摇杆或按上升键加油门，后拉减油门；右摇杆或鼠标转弯和俯仰。'),
@@ -652,6 +673,14 @@ VEHICLE_NOTES: dict[str, str] = {
 }
 # A plugin vehicle request whose files need more than tools/make_jets.py: its notes in place of VEHICLE_NOTES.
 VEHICLE_NOTES_BY_KIND: dict[str, dict[str, str]] = {
+    'dreadnought': {
+        'SC': '需要 EDF6VehicleCrew 插件，以及安装器用无畏舰模型（models/dreadnought）生成的文件；没有模型时请求来的是普通的 N9 Eros 直升机。',
+        'CN': '需要 EDF6VehicleCrew 插件，以及安裝器用無畏艦模型（models/dreadnought）產生的檔案；沒有模型時請求來的是普通的 N9 Eros 直升機。',
+        'JA': 'EDF6VehicleCrew プラグインと、インストーラーがドレッドノートのモデル（models/dreadnought）から書き出すファイルが必要。'
+              'モデルがない場合は通常の N9 エロス ヘリが来る。',
+        'EN': 'Needs the EDF6VehicleCrew plugin and the files the installer makes from the Dreadnought model '
+              '(models/dreadnought); without the model the request brings a plain N9 Eros heli.',
+    },
     'sazabi': {
         'SC': '需要 EDF6VehicleCrew 插件，以及安装器用沙扎比模型（models/sazabi）生成的文件；没有模型时请求来的是普通的 N9 Eros 直升机。',
         'CN': '需要 EDF6VehicleCrew 插件，以及安裝器用沙薩比模型（models/sazabi）產生的檔案；沒有模型時請求來的是普通的 N9 Eros 直升機。',

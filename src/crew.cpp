@@ -625,7 +625,7 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     // A sidecar passenger does not grant driver authority; an existing real driver is assigned separately.
     if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle) ||
-       JetFliesItself(vehicle)){st.emptySince=0;return;}   // a drone of the plugin's: no one is ever seated in it
+       JetFliesItself(vehicle) || IsDreadnought(vehicle)){st.emptySince=0;return;}   // a drone of the plugin's: no one is ever seated in it; the Dreadnought waits for the player
     // Online, the host coordinates recruitment for registered vehicles. Real soldiers keep their native
     // network identities and announce boarding; each vehicle copy follows the resulting native authority.
     if(!OnlineMaySeatNpc(vehicle)){st.emptySince=0;return;}
@@ -879,6 +879,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHeliReap,&HeliReapStep,v);
     Guarded(kStepPlayerJet,&PlayerJetFrame,v);
     Guarded(kStepSazabi,&SazabiFrame,v);
+    Guarded(kStepSazabi,&DreadnoughtFrame,v);
     Guarded(kStepSub,&SubStep,v);
     Guarded(kStepHeli,&HeliStep,v);
     Guarded(kStepHeli,&HeliCueStep,v);
