@@ -558,6 +558,22 @@ def chute_wired_through() -> None:
 
 
 @test
+def release_models_whole_folders() -> None:
+    """tools/build_release.py ships every RELEASE_MODELS folder whole, its subfolders too: the cockpits' cut interiors
+    (models/cockpits/parts/<vehicle>/, textures/, in the repo since #230) are below the folder's top (it once took the top
+    files alone: the CI zip had the cockpits' CREDITS and none of the parts)."""
+    import build_release
+    import cockpits
+    shipped = {arc for _src, arc in build_release.release_models()}
+    root = os.path.join(ROOT, 'models', 'cockpits')
+    want = {f'models/cockpits/{os.path.relpath(os.path.join(d, f), root).replace(os.sep, "/")}'
+            for d, _dirs, files in os.walk(root) for f in files}
+    assert any('/parts/' in w for w in want) and any('/textures/' in w for w in want), 'the repo holds the cockpit parts'
+    assert want <= shipped, sorted(want - shipped)[:5]
+    assert cockpits.ASSET_DIR == 'cockpits' and 'cockpits' in build_release.RELEASE_MODELS, cockpits.ASSET_DIR
+
+
+@test
 def release_imports() -> None:
     """Every project module tools/installer.py imports inside a function (tools/, pylib/, testrange/) is one of
     tools/build_release.py's PyInstaller hidden imports: a generator left out installs in a dev checkout and is missing
