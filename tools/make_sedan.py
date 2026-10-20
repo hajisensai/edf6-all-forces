@@ -177,7 +177,7 @@ def collision(game, members):
     """Retain native suspension/tyres; refit the five body hulls to chassis, cabin, hood and boot."""
     name = members['ragdoll'][0].rsplit('/', 1)[-1]
     raw = game.read('OBJECT', name)
-    # Shared tagfile helpers also update every BVH leaf/parent after editing a convex hull.
+    # pylib/hkshape.py rebuilds each refitted hull (planes, faces, mass properties) and the compound's tree and box.
     shape = sidecar_model._Shkt(raw)
     if shape.inst_n != 5 or not all(shape.identity(k) for k in range(5)):
         raise ValueError('native car body collision changed')
@@ -189,43 +189,32 @@ def collision(game, members):
              ((-.84, .30, -1.94), (.84, .52, -1.87))]
     for k,(lo,hi) in enumerate(boxes):
         radius = shape.radius(k)
-        _instance, convex = shape.instance(k)
-        convex.value['properties']['properties'].set_target(None)
         old = shape.vertices(k)
         lower, upper = [min(v[c] for v in old) for c in range(3)], [max(v[c] for v in old) for c in range(3)]
         target_lo = [lo[c]-(body_y if c == 1 else 0)+radius for c in range(3)]
         target_hi = [hi[c]-(body_y if c == 1 else 0)-radius for c in range(3)]
         scale = [(target_hi[c]-target_lo[c])/(upper[c]-lower[c]) for c in range(3)]
         shift = [target_lo[c]-lower[c]*scale[c] for c in range(3)]
-        shape.set_vertices(k, [tuple(p[c]*scale[c]+shift[c] for c in range(3)) for p in old])
-        planes = []
-        for p in shape.planes(k):
-            normal = [p[c]/scale[c] for c in range(3)]
-            length = math.sqrt(sum(x*x for x in normal))
-            d = p[3]-sum(normal[c]*shift[c] for c in range(3))
-            planes.append((*(x/length for x in normal), d/length))
-        shape.set_planes(k, planes)
-        sidecar_model._refresh_tree(shape, k)
-    shape.compound.value['properties']['properties'].set_target(None)
-    lo = [min(shape.box(k)[0][c] for k in range(5)) for c in range(3)]
-    hi = [max(shape.box(k)[1][c] for k in range(5)) for c in range(3)]
-    shape.set_aabb(lo, hi, (0., 0.))
-    shape.set_bounding_radius(math.sqrt(sum(max(abs(lo[c]),abs(hi[c]))**2 for c in range(3))))
-    # Original doors are not moving parts of the sedan. Their contacts stay inside the lower chassis.
+        shape.replace(k, [[scale[0], 0, 0], [0, scale[1], 0], [0, 0, scale[2]]], shift, radius=radius)
+    shape.refresh()
+    # Original doors are not moving parts of the sedan. Their contacts stay inside the lower chassis: each door hull
+    # shrunk to a millimetre-scale copy (its vertices and radius x 0.001) at a point there. No instance scale: no
+    # stock file scales an instance, and the game keeps a scaled hull's radius.
     for door in ('door_l', 'door_r'):
-        name = 'RagDollProxys.'+door
-        s = sidecar_model._Shkt(shape.bytes(), name)
+        s = sidecar_model._Shkt(shape.bytes(), 'RagDollProxys.'+door)
+        point = (-.15 if door.endswith('_l') else .15, -.83, -1.75)
         for k in range(s.inst_n):
-            instance,_shape = s.instance(k)
-            instance['scale'].set_vec((.001, .001, .001))
-            instance['translation'].set_vec((-.15 if door.endswith('_l') else .15, -.83, -1.75))
-            sidecar_model._refresh_tree(s, k)
-        lower = [min(s.box(k)[0][c] for k in range(s.inst_n)) for c in range(3)]
-        upper = [max(s.box(k)[1][c] for k in range(s.inst_n)) for c in range(3)]
-        s.set_aabb(lower, upper, (0., 0.))
-        s.set_bounding_radius(math.sqrt(sum(max(abs(lower[c]),abs(upper[c]))**2 for c in range(3))))
+            s.replace(k, [[.001, 0, 0], [0, .001, 0], [0, 0, .001]], point)
+        s.refresh()
         shape = s
-    return shape.bytes()
+    out = shape.bytes()
+    # The chassis keeps the truck's tuned massDistribution (centre of mass, inertia: its handling), and so do the
+    # inert doors: the bodies pylib/shkt_check.py may flag as kept, no other.
+    import shkt_check
+    kept = sorted(p.where for p in shkt_check.stale_mass_distributions(out, raw))
+    if kept != ["body 'RagDollProxys.body'", "body 'RagDollProxys.door_l'", "body 'RagDollProxys.door_r'"]:
+        raise ValueError(f'sedan mass distributions kept from the truck: {kept}')
+    return out
 
 
 def build(root):

@@ -1399,7 +1399,7 @@ def shkt_check_on_synthetic_data() -> None:
     import test_shkt_check
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(test_shkt_check.Portable)
     result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
-    assert result.wasSuccessful() and result.testsRun == 6, (result.failures, result.errors)
+    assert result.wasSuccessful() and result.testsRun == 7, (result.failures, result.errors)
 
 
 @test

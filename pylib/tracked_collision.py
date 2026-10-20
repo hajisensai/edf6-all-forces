@@ -26,7 +26,6 @@ import shkt_check as sc
 
 HOST = 'Ragdoll_v603_flak.shkt'
 KINDS = ('vulcan', 'bmpt')
-IDENTITY_MASS_QUAT = bytes.fromhex('00800080008030f5')
 
 
 class CollisionError(ValueError):
@@ -44,107 +43,21 @@ def _bbox(points):
     return np.asarray((p.min(0), p.max(0)))
 
 
-def _pack_vec(v):
-    """Native hkPackedVector3 bit-exact encoder (EDF.dll 0x1305DE0)."""
-    v=np.asarray(v,dtype=np.float32)
-    _req(v.shape==(3,) and bool(np.isfinite(v).all()),'finite vec3 required')
-    def bits(x):return struct.unpack('<I',struct.pack('<f',x))[0]
-    def from_bits(x):return struct.unpack('<f',struct.pack('<I',x&0xffffffff))[0]
-    guarded=np.asarray([*v,2.**-46],dtype=np.float32)
-    guarded*=np.float32(from_bits(0x3f800089))
-    exponent=int((guarded.view(np.uint32)&np.uint32(0x7f800000)).max())
-    words=[]
-    for x in v:
-        scaled=from_bits(bits(x)+0x4e800000-exponent)
-        n=2147483647 if scaled>=2147483648 else int(scaled)
-        words.append(((n+0x8000)>>16)&0xffff)
-    words.append(((exponent-0x4e800000+0x3f800000)>>16)&0xffff)
-    return struct.pack('<4H',*words)
-
-
-def _unpack_vec(blob, offset=0):
-    x, y, z, exponent = struct.unpack_from('<3hH', blob, offset)
-    scale = struct.unpack('<f', struct.pack('<I', exponent << 16))[0] * 65536.
-    return np.asarray((x, y, z), dtype=float) * scale
-
-
-def _mass_cache(box, mass):
-    """The same conservative AABB mass model measured on the stock CMS wrappers."""
-    size = box[1] - box[0]
-    _req(bool((size > 1e-6).all()) and mass > 0, 'degenerate mass box')
-    inertia = mass / 8. * np.asarray((size[1]**2 + size[2]**2,
-                                     size[0]**2 + size[2]**2,
-                                     size[0]**2 + size[1]**2))
-    return (_pack_vec(box.mean(0)) + _pack_vec(inertia) + IDENTITY_MASS_QUAT +
-            struct.pack('<2f', mass, float(np.prod(size))))
-
-
 class _Editor:
-    """New shapes made beside the donor's in one tagfile graph (pylib/hkfile.py): the donor's blocks are only read;
-    every fitted shape is a new block, and what nothing points at any more is not written."""
+    """New shapes made beside the donor's in one tagfile graph (pylib/hkfile.py, pylib/hkshape.py): the donor's
+    blocks are only read; every fitted shape is a new block, and what nothing points at any more is not written."""
     def __init__(self, tf):
         self.tf = tf
-        self.generic = next(b for b in tf.items[1:] if b is not None and b.type.full_name == 'hknpConvexShape')
-
-    def mass(self, old_shape, box, mass):
-        """A copy of the shape's property array with a new 0xF100 mass cache for `box` and `mass`."""
-        props = hkshape.properties(old_shape)
-        _req(props is not None, 'source shape has no properties')
-        out = props.copy()
-        found = False
-        for p in out:
-            if p['key'].int() == sc.MASS_PROPERTIES_KEY:
-                old = p['object'].target
-                _req(old is not None and old.type.full_name == 'hknpShapeMassProperties', 'unexpected mass-cache type')
-                p['object'].set_target(self.tf.new(old.type, 1, _mass_cache(box, mass)))
-                found = True
-        _req(found, 'source shape has no 0xF100 mass property')
-        return out
 
     def convex(self, shape, matrix, offset):
-        """General positive affine map; subtype caches become a generic convex hull."""
-        hull = shape.value['hull']
+        """`shape` under a positive affine map (hkshape.affine_convex): rebuilt hull, radius x the smallest singular
+        value, its own mass properties; with its box (vertices +- radius)."""
         _req(np.isfinite(matrix).all() and np.linalg.det(matrix)>1e-12,'invalid or mirrored convex affine map')
-        vb, pb = hull['vertices'].target, hull['planes'].target
-        old_v = np.asarray([struct.unpack_from('<3f', vb.data, 12*i) for i in range(vb.count)])
-        old_p = np.asarray([struct.unpack_from('<4f', pb.data, 16*i) for i in range(pb.count)])
-        points = old_v @ matrix.T + offset
-        normals = old_p[:,:3] @ np.linalg.inv(matrix)
-        distances = old_p[:,3] - normals @ offset
-        length = np.linalg.norm(normals, axis=1)
-        planes = np.column_stack((normals/length[:,None], distances/length))
-        # Dihedral-angle bounds are derived from the transformed face planes.
-        fb, ib = hull['faces'].target, hull['indices'].target
-        faces = fb.copy()
-        polygons=[]
-        for f in fb:
-            first,count=f['firstIndex'].int(),f['numIndices'].int()
-            polygons.append(set(ib.data[first:first+count]))
-        for i,vertices in enumerate(polygons):
-            adjacent=[j for j,v in enumerate(polygons) if j!=i and len(vertices&v)>=2]
-            _req(bool(adjacent),'convex face has no neighbours')
-            cosine=max(float(np.dot(planes[i,:3],planes[j,:3])) for j in adjacent)
-            faces[i]['minHalfAngle'].set_int(max(0,min(255,int(math.acos(np.clip(cosine,-1.,1.))*255./math.pi))))
-        old_radius = shape.value['convexRadius'].f32()
-        radius = max(.00001, old_radius*float(np.linalg.svd(matrix,compute_uv=False).min()))
-        box = _bbox(points) + np.asarray((-np.ones(3)*radius, np.ones(3)*radius))
-        out = self.generic.copy()
-        h = out.value['hull']
-        for member in ('vertices', 'planes', 'faces', 'indices', 'faceLinks', 'vertexEdges'):
-            h[member].set_target(hull[member].target)
-        h['vertices'].set_target(self.tf.new(vb.type, vb.count, points.astype('<f4').tobytes()))
-        h['planes'].set_target(self.tf.new(pb.type, pb.count, planes.astype('<f4').tobytes()))
-        h['faces'].set_target(faces)
-        out.value['convexRadius'].set_f32(radius)
-        # hkHalf16 stores the high word of a float32. A donor hull's 7.8 cm
-        # tolerance must not survive on a centimetre-thick optic contact shape.
-        old_pen=shape.value['maxAllowedPenetration'].f32()
-        penetration=max(1e-6,min(old_pen*float(np.linalg.svd(matrix,compute_uv=False).min()),float(np.min(box[1]-box[0]))*.1))
-        out.value['maxAllowedPenetration'].set_f32(penetration)
-        # Preserve the source shape's nominal mass, rebuilding its COM and inertia.
-        old_mass = _mass_record(shape)[1]
-        out.value['properties']['properties'].set_target(self.mass(shape,box,old_mass))
-        return out, box
+        try:
+            new = hkshape.affine_convex(self.tf, shape, np.asarray(matrix).tolist(), np.asarray(offset).tolist())
+        except hkshape.HullError as e:
+            raise CollisionError(f'fitted convex: {e}') from e
+        return new, _shape_box(new)
 
 
 def _mass_record(shape):
@@ -188,55 +101,29 @@ def _routing(shape):
 
 
 def _fit_shape(edit, shape, target, mass):
-    """Fit one complete proxy shape, preserving the source CMS routing and topology."""
+    """Fit one complete proxy shape: a convex one mapped onto `target`, a compressed mesh of convex shapes written
+    again over its mapped externs (hkshape.write_convex_mesh: canonical routing, both trees, the stock box mass rule
+    with `mass`)."""
     source=_shape_box(shape)
     scale=(target[1]-target[0])/(source[1]-source[0])
     _req(bool((scale>0).all()),'nonpositive shape scale')
     offset=target[0]-source[0]*scale
     if shape.type.full_name!='hknpCompressedMeshShape':
-        result,box=edit.convex(shape,np.diag(scale),offset)
-        return result,box
-    insts,instances=_instances(shape)
-    data_block,sections,routes=_routing(shape)
+        return edit.convex(shape,np.diag(scale),offset)
+    _,instances=_instances(shape)
+    _,_,routes=_routing(shape)
     _req(sorted(routes)==list(range(len(instances))),'extern routing is not one-to-one')
-    inst=insts.copy()
+    children=[]
     boxes=[]
-    for i,(q,tr,scales,child) in enumerate(instances):
+    for q,tr,scales,child in instances:
         R=np.asarray(rf.axes(q)).T
         M=np.diag(scale) @ R @ np.diag(scales)
         O=np.asarray(tr)*scale+offset
         new,box=edit.convex(child,M,O)
+        children.append(new)
         boxes.append(box)
-        inst[i]['rotation'].set_vec((0.,0.,0.,1.))
-        inst[i]['translation'].set_vec((0.,0.,0.))
-        inst[i]['scale'].set_vec((1.,1.,1.))
-        inst[i]['shape'].set_target(new)
-    box=np.asarray((np.min([b[0] for b in boxes],0),np.max([b[1] for b in boxes],0)))
-    domain=hb._out32(box+np.asarray((-np.ones(3)*.0001,np.ones(3)*.0001)))
-    pb=np.asarray([boxes[i] for i in routes])
-    tf=edit.tf
-    data=data_block.copy()
-    tree=data.value['meshTree']
-    section=sections.copy()
-    sv=section[0]
-    nodes=sv['nodes'].target
-    code=hb._section_tree(pb,domain)
-    sv['nodes'].set_target(tf.new(nodes.type,len(code)//4,code))
-    sv['domain']['min'].set_vec((*domain[0],1.))
-    sv['domain']['max'].set_vec((*domain[1],1.))
-    tree['sections'].set_target(section)
-    tree['domain']['min'].set_vec((*domain[0],1.))
-    tree['domain']['max'].set_vec((*domain[1],1.))
-    top=tree['nodes'].target
-    tree['nodes'].set_target(tf.new(top.type,1,hkcms.encode_box(domain,domain)+b'\0\0'))
-    old_simd=data.value['simdTree']['nodes'].target
-    simd=hb.simd_tree(pb,[i<<1 for i in range(len(pb))])
-    data.value['simdTree']['nodes'].set_target(tf.new(old_simd.type,len(simd)//128,simd))
-    out=shape.copy()
-    out.value['data'].set_target(data)
-    out.value['externShapes'].set_target(inst)
-    out.value['properties']['properties'].set_target(edit.mass(shape,box,mass))
-    return out,box
+    out=hkshape.write_convex_mesh(edit.tf,children,mass,keep=shape)
+    return out,np.asarray((np.min([b[0] for b in boxes],0),np.max([b[1] for b in boxes],0)))
 
 
 def _world_target_to_proxy(box, position, orientation):
@@ -423,7 +310,7 @@ def build(game,kind,md,parts):
     stock=dsgo.to_py(root)
     overrides,radii=_wheel_overrides(stock,parts,kind)
     report={'kind':kind,'proxies':record,'reframed':moved,'road_wheels_per_side':len(radii)//2,
-            'wheel_radii':radii,'mass_model':'solid AABB; native CMS inertia factor 1.5; positive rebuilt 0xF100',
+            'wheel_radii':radii,'mass_model':'hulls: their own (hkshape.from_hull); meshes: the stock solid-domain box rule (x1.5)',
             'collision_model':'affine-fitted source convex partitions; conservative contact approximation',
             'open_basket':'solid turntable interior only' if kind=='vulcan' else None,
             'sibling_filter':'same-group siblings do collide (D93250); split gun volumes and split idler axial halves',
@@ -444,31 +331,27 @@ def _convex_check(shape):
     _req(np.max(np.abs(np.linalg.norm(N[:,:3],axis=1)-1))<2e-4,'nonunit convex plane')
     outside=float((P@N[:,:3].T+N[:,3]).max())
     _req(outside<max(1e-4,.0001*float(np.ptp(P,axis=0).max())),'convex planes miss vertices')
+    hull=hkshape.read_hull(shape)
+    bad=hkshape.hull_problems(hull)
+    _req(not bad,'inconsistent convex hull: '+'; '.join(bad[:3]))
     box=_shape_box(shape)
     penetration=shape.value['maxAllowedPenetration'].f32()
-    _req(0<penetration<=float(np.min(box[1]-box[0]))*.1001,'stale maximum penetration tolerance')
-    hull=shape.value['hull']
-    fb,ib=hull['faces'].target,hull['indices'].target
-    polygons=[];angles=[]
-    for f in fb:
-        first,count,angle=f['firstIndex'].int(),f['numIndices'].int(),f['minHalfAngle'].int()
-        _req(first+count<=ib.count and count>=3,'invalid convex face indices')
-        vertices=set(ib.data[first:first+count]);_req(max(vertices)<len(P),'convex face index exceeds vertices')
-        polygons.append(vertices);angles.append(angle)
-    for i,vertices in enumerate(polygons):
-        adjacent=[j for j,v in enumerate(polygons) if j!=i and len(vertices&v)>=2]
-        _req(bool(adjacent),'convex face missing adjacent face')
-        cosine=max(float(np.dot(N[i,:3],N[j,:3])) for j in adjacent)
-        expected_angle=max(0,min(255,int(math.acos(np.clip(cosine,-1.,1.))*255./math.pi)))
-        _req(abs(angles[i]-expected_angle)<=1,'stale convex dihedral-angle cache')
-    cache,mass,volume=_mass_record(shape)
-    _req(mass>0 and volume>0 and math.isfinite(mass) and math.isfinite(volume),'nonpositive mass cache')
-    _req(cache[16:24]==IDENTITY_MASS_QUAT,'invalid mass principal-axis quaternion')
-    expected=_mass_cache(box,mass)
-    for offset in (0,8):
-        got=_unpack_vec(cache,offset);want=_unpack_vec(expected,offset)
-        _req(np.max(np.abs(got-want))<max(1e-5,float(np.max(np.abs(want)))*2e-4),'stale mass COM/inertia')
-    _req(abs(volume-float(np.prod(box[1]-box[0])))<max(1e-5,volume*2e-4),'stale mass volume')
+    want=hkshape.PENETRATION_FACTOR*(hull.min_width()+2*radius)
+    _req(0<penetration<=want and penetration>=want*(1-2**-7),'stale maximum penetration tolerance')
+    m=hkshape.mass_properties(shape)
+    _req(m is not None,'shape mass properties absent')
+    got=hkshape.read_mass(m)
+    _req(got.mass>0 and got.volume>0 and math.isfinite(got.mass) and math.isfinite(got.volume),'nonpositive mass cache')
+    plain=hkshape.from_hull(hull,radius,1.0)
+    _req(abs(got.volume-plain.volume)<=max(1e-6,plain.volume*1e-4),'stale mass volume')
+    extent=float(np.ptp(P,axis=0).max())
+    packing=max(abs(c) for c in plain.com)*2**-14      # hkPackedVector3: 16-bit mantissas of the largest component
+    _req(max(abs(got.com[k]-plain.com[k]) for k in range(3))<=max(1e-5,extent*1e-4,packing),'stale mass COM')
+    _req(abs(math.sqrt(sum(c*c for c in got.axes))-1)<3e-4,'invalid mass principal-axis quaternion')
+    factor=(sum(got.moments)/got.mass)/(sum(plain.moments)/plain.mass)
+    _req(min(abs(factor-1.0),abs(factor-1.5))<2e-3,'stale mass inertia')
+    want=np.asarray(plain.tensor())*(1.5 if abs(factor-1.5)<abs(factor-1.0) else 1.0)*got.mass/plain.mass
+    _req(float(np.max(np.abs(np.asarray(got.tensor())-want)))<=2e-3*float(np.max(np.abs(want))),'stale mass inertia axes')
     return box
 
 
@@ -531,13 +414,15 @@ def _cms_check(shape):
         return np.asarray((np.min([v[0] for v in lanes],0),np.max([v[1] for v in lanes],0)))
     simd_visit(1)
     _req(seen==set(range(len(routes))),'SIMD missing external shape')
-    cache,mass,volume=_mass_record(shape);expected=_mass_cache(actual,mass)
-    _req(cache[16:24]==IDENTITY_MASS_QUAT,'invalid CMS mass principal-axis quaternion')
+    cache,mass,volume=_mass_record(shape)
+    expected=hkshape.mass_bytes(hkshape.box_mass(tuple(domain[0]),tuple(domain[1]),mass))
+    _req(cache[16:24]==expected[16:24],'invalid CMS mass principal-axis quaternion')
     _req(mass>0 and volume>0 and math.isfinite(mass) and math.isfinite(volume),'invalid CMS mass cache')
     for offset in (0,8):
-        _req(np.max(np.abs(_unpack_vec(cache,offset)-_unpack_vec(expected,offset)))<max(1e-5,mass*1e-4),
+        _req(np.max(np.abs(np.asarray(hkshape.unpack_vec3(struct.unpack_from('<4H',cache,offset)))-
+                           np.asarray(hkshape.unpack_vec3(struct.unpack_from('<4H',expected,offset)))))<max(1e-5,mass*1e-4),
              'stale CMS mass cache')
-    _req(abs(volume-float(np.prod(actual[1]-actual[0])))<max(1e-5,volume*2e-4),'stale CMS volume')
+    _req(abs(volume-float(np.prod(domain[1]-domain[0])))<max(1e-5,volume*2e-4),'stale CMS volume')
     return actual
 
 
@@ -562,8 +447,11 @@ def _sweep(report):
 def check(shkt,binding,md,overrides,report):
     """Inspect serialized shapes, derived trees/mass caches and unique pose ownership."""
     reader=sc.Shkt(shkt)
-    bad=[str(x) for x in sc.problems(shkt) if x.severity=='error']
+    bad=[str(x) for x in sc.problems(shkt) if x.severity in ('error','warning')]
     _req(not bad,'SHKT validation: '+'; '.join(bad))
+    # The V603 bodies keep no massDistribution: the game derives each from its fitted shape's mass properties.
+    _req(all(b.mass_distribution is None and hkshape.mass_properties(b.shape) is not None
+             for b in reader.systems[0].bodies),'a body whose mass does not follow its fitted shape')
     bad=rf.problems(md,shkt,binding)
     _req(not bad,'ragdoll binding: '+'; '.join(bad))
     _req(len(reader.systems)==1 and len(reader.systems[0].bodies)==22 and len(reader.systems[0].joints)==21,

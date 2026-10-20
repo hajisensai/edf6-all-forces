@@ -52,7 +52,7 @@ class Files:
 
 
 def check(files: Files, stock_only: bool) -> Iterator[tuple[str, str]]:
-    """(file, line) for everything found; the line starts with 'error', 'warning' or 'skipped'."""
+    """(file, line) for everything found; the line starts with 'error', 'warning', 'info' or 'skipped'."""
     names: dict[str, set[str] | None] = {}
 
     def body_names(ref: str) -> set[str] | None:
@@ -91,11 +91,11 @@ def main(argv: list[str]) -> int:
         print(f'not an EDF6 directory: {game}')
         return 2
     files = Files(game, a.stock)
-    counts = {'error': 0, 'warning': 0, 'skipped': 0}
+    counts = {'error': 0, 'warning': 0, 'info': 0, 'skipped': 0}
     for ref, line in check(files, a.stock):
         counts[line.split(':', 1)[0]] = counts.get(line.split(':', 1)[0], 0) + 1
         print(f'{ref}: {line}')
-    print(f"{counts['error']} error(s), {counts['warning']} warning(s), {counts['skipped']} skipped "
+    print(f"{counts['error']} error(s), {counts['warning']} warning(s), {counts['info']} info, {counts['skipped']} skipped "
           f"({'stock files' if a.stock else 'Mods'} of {game})")
     return 1 if counts['error'] else 0
 

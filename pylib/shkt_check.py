@@ -56,13 +56,15 @@ PLANE_RELATIVE = 0.02                         # ... or this share of the hull's 
                                               # (stock: up to 0.118 m on a 6.7 m hull, 1.75 % of the extent at most)
 UNIT_TOLERANCE = 1e-3                         # |plane normal| - 1
 BOX_TOLERANCE = 1e-3                          # m a box may miss what it should hold (float32 storage)
+OVERLAP_WARNING = 0.05                        # m: overlaps this deep of parts that may collide (the editor's warning)
 B = 'hknpPhysicsSystemData::bodyCinfoWithAttachment'
 TRANSFORM_ATOMS = ('transforms', 'suspensionBase')   # the hkpSetLocalTransformsConstraintAtom of each joint type
 
 
 @dataclass(frozen=True)
 class Problem:
-    severity: str     # 'error': the game crashes or the data is invalid; 'warning': unlike every stock file
+    severity: str     # 'error': the game crashes or the data is invalid; 'warning': unlike every stock file;
+                      # 'info': worth a look, but some stock files do it too
     where: str
     what: str
 
@@ -274,6 +276,217 @@ def _compound_problems(shape: hkfile.Block, w: str, out: list[Problem]) -> list[
     return [i[3] for i in insts]
 
 
+# ------------------------------------------------------------------------------------------ ragdoll rules
+# The SHKT Editor manual's ragdoll rules (2.6, 2.7, 12.1), measured again on the stock files (tests/test_shkt_check.py):
+#   * jointed parts must not collide: each body its own subsystem ID, its no-collide ID its joint parent's
+#     (hknpGroupCollisionFilter: same non-zero system group and one's subsystem the other's no-collide);
+#   * parts that are neither jointed nor excluded must not overlap deeply: the corpse fights itself and flies apart;
+#   * a body whose shape changed must not keep its old massDistribution (the game then computes it from the new
+#     shape: confirmed in game by the editor's author); that needs the donor: stale_mass_distributions.
+
+
+def subsystem(info: int) -> int:
+    return info >> 5 & 0x1F
+
+
+def no_collide(info: int) -> int:
+    return info >> 10 & 0x1F
+
+
+def system_group(info: int) -> int:
+    return info >> 15
+
+
+def collision_disabled(a: int, b: int) -> bool:
+    """The group filter keeps the two bodies apart (ShktChecker.CollisionDisabled)."""
+    return system_group(a) != 0 and system_group(a) == system_group(b) and \
+        (no_collide(a) == subsystem(b) or no_collide(b) == subsystem(a))
+
+
+def _solve(m: list[list[float]], n: int) -> bool:
+    for c in range(n):
+        piv = max(range(c, n), key=lambda r: abs(m[r][c]))
+        if abs(m[piv][c]) < 1e-14:
+            return False
+        m[c], m[piv] = m[piv], m[c]
+        d = m[c][c]
+        m[c] = [x / d for x in m[c]]
+        for r in range(n):
+            if r != c and m[r][c]:
+                f = m[r][c]
+                m[r] = [x - f * y for x, y in zip(m[r], m[c])]
+    return True
+
+
+def _affine(p: list[Vec3]) -> Vec3 | None:
+    k = len(p) - 1
+    if k == 0:
+        return p[0]
+    e = [tuple(p[i + 1][j] - p[0][j] for j in range(3)) for i in range(k)]
+    g = [[sum(e[i][t] * e[j][t] for t in range(3)) for j in range(k)] + [-sum(e[i][t] * p[0][t] for t in range(3))]
+         for i in range(k)]
+    if not _solve(g, k):
+        return None
+    lam = [g[i][k] for i in range(k)]
+    if any(x <= 1e-12 for x in lam) or sum(lam) >= 1 - 1e-12:
+        return None
+    return tuple(p[0][t] + sum(e[i][t] * lam[i] for i in range(k)) for t in range(3))   # type: ignore[return-value]
+
+
+def _closest(s: list[Vec3]) -> tuple[Vec3, list[Vec3]]:
+    best: tuple[Vec3, list[Vec3]] | None = None
+    best_d = math.inf
+    for mask in range(1, 1 << len(s)):
+        sub = [s[i] for i in range(len(s)) if mask >> i & 1]
+        p = _affine(sub)
+        if p is None:
+            continue
+        d = p[0] ** 2 + p[1] ** 2 + p[2] ** 2
+        if d < best_d - 1e-18 or (abs(d - best_d) <= 1e-18 and best is not None and len(sub) < len(best[1])):
+            best_d, best = d, (p, sub)
+    return best if best is not None else (s[-1], [s[-1]])
+
+
+def gjk_distance(a: list[Vec3], b: list[Vec3]) -> float:
+    """The distance between the convex hulls of two point sets (0 when they meet: OverlapChecker's Gjk)."""
+    def support(d: Vec3) -> Vec3:
+        pa = max(a, key=lambda p: p[0] * d[0] + p[1] * d[1] + p[2] * d[2])
+        pb = max(b, key=lambda p: -(p[0] * d[0] + p[1] * d[1] + p[2] * d[2]))
+        return (pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2])
+    simplex = [(a[0][0] - b[0][0], a[0][1] - b[0][1], a[0][2] - b[0][2])]
+    v = simplex[0]
+    for _ in range(64):
+        vv = v[0] ** 2 + v[1] ** 2 + v[2] ** 2
+        if vv < 1e-14:
+            return 0.0
+        w = support((-v[0], -v[1], -v[2]))
+        if vv - (v[0] * w[0] + v[1] * w[1] + v[2] * w[2]) <= 1e-10 * max(1.0, vv):
+            return math.sqrt(vv)
+        simplex.append(w)
+        v, simplex = _closest(simplex)
+        if len(simplex) == 4:
+            return 0.0
+    return math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
+
+
+def pieces(b: BodyInfo) -> list[tuple[list[Vec3], float]]:
+    """A body's convex pieces in model space: (hull vertices, convex radius); compressed meshes' externs included."""
+    out: list[tuple[list[Vec3], float]] = []
+    if b.shape is None:
+        return out
+
+    def add(shape: hkfile.Block, q: Quat, t: Vec3) -> None:
+        h = hkshape.convex_hull(shape)
+        if h is not None and h[1]:
+            out.append(([place(b.position, b.orientation, place(t, q, v)) for v in h[1]], h[0]))
+        elif shape.type.full_name in ('hknpCompoundShape', 'hknpCompressedMeshShape'):
+            for q2, t2, _, sub in hkshape.instances(shape):
+                if sub is not None:
+                    add(sub, _qmul(q, q2), place(t, q, t2))
+    add(b.shape, (0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0))
+    return out
+
+
+def _qmul(a: Quat, b: Quat) -> Quat:
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return (aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx,
+            aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz)
+
+
+OVERLAP_TOLERANCE = 0.01       # m: touching parts (OverlapChecker.Tolerance)
+
+
+def overlaps(sys_: SystemInfo, tolerance: float = OVERLAP_TOLERANCE) -> list[tuple[int, int, float]]:
+    """(body, body, depth) of every pair neither jointed nor kept apart by the filter whose convex pieces overlap more
+    than `tolerance` (the deepest pair of pieces)."""
+    joined = {(j.body_a, j.body_b) for j in sys_.joints} | {(j.body_b, j.body_a) for j in sys_.joints}
+    ps = [pieces(b) for b in sys_.bodies]
+    boxes = [[box_of(p, r) for p, r in pp] for pp in ps]
+    out = []
+    for i in range(len(sys_.bodies)):
+        for j in range(i + 1, len(sys_.bodies)):
+            a, b = sys_.bodies[i], sys_.bodies[j]
+            if (i, j) in joined or collision_disabled(a.filter_info, b.filter_info):
+                continue
+            worst = 0.0
+            for (pa, ra), ba in zip(ps[i], boxes[i]):
+                for (pb, rb), bb in zip(ps[j], boxes[j]):
+                    if box_misses(_grow(ba, tolerance), bb, 0.0) > 0:
+                        continue
+                    depth = ra + rb - gjk_distance(pa, pb)
+                    worst = max(worst, depth)
+            if worst > tolerance:
+                out.append((i, j, worst))
+    return out
+
+
+def _grow(box: tuple[Vec3, Vec3], d: float) -> tuple[Vec3, Vec3]:
+    return (tuple(c - d for c in box[0]), tuple(c + d for c in box[1]))     # type: ignore[return-value]
+
+
+def ragdoll_problems(s: Shkt, overlap_warning: float | None = None) -> list[Problem]:
+    """The ragdoll rules of one SHKT (the systems with joints): jointed pairs the filter lets collide, bodies joined to
+    nothing, overlaps of parts that may collide deeper than `overlap_warning` (default OVERLAP_WARNING)."""
+    limit = OVERLAP_WARNING if overlap_warning is None else overlap_warning
+    out: list[Problem] = []
+    for sys_ in s.systems:
+        if not sys_.joints:
+            continue
+        n = len(sys_.bodies)
+        for j in sys_.joints:
+            if not (j.body_a < n and j.body_b < n):
+                continue
+            a, b = sys_.bodies[j.body_a], sys_.bodies[j.body_b]
+            both_zero = system_group(a.filter_info) == 0 and system_group(b.filter_info) == 0
+            if not both_zero and not collision_disabled(a.filter_info, b.filter_info):
+                # info, not warning: 5 stock files have 112 such joints (the martians', the squids', the Barga cannon)
+                out.append(Problem('info', f'system {sys_.index} joint {j.index}', f'{a.name!r} and {b.name!r} are '
+                                   'jointed but the filter lets them collide (the child\'s no-collide ID must be the '
+                                   'parent\'s subsystem ID)'))
+        parent = list(range(n))
+
+        def find(i: int) -> int:
+            while parent[i] != i:
+                parent[i] = parent[parent[i]]
+                i = parent[i]
+            return i
+        for j in sys_.joints:
+            if j.body_a < n and j.body_b < n:
+                parent[find(j.body_a)] = find(j.body_b)
+        groups: dict[int, list[int]] = {}
+        for i in range(n):
+            groups.setdefault(find(i), []).append(i)
+        for g in sorted(groups.values(), key=len, reverse=True)[1:]:
+            for i in g:
+                out.append(Problem('warning', f'system {sys_.index} body {i} {sys_.bodies[i].name!r}',
+                                   'joined to no other body of the ragdoll'))
+        for i, k, depth in overlaps(sys_):
+            if depth >= limit:
+                out.append(Problem('warning', f'system {sys_.index}', f'{sys_.bodies[i].name!r} and '
+                                   f'{sys_.bodies[k].name!r} overlap {depth:.3f} m and may collide (neither jointed '
+                                   'nor excluded): the corpse fights itself'))
+    return out
+
+
+def stale_mass_distributions(data: bytes, donor: bytes) -> list[Problem]:
+    """Bodies (matched by name with the donor SHKT) whose shape is no longer the donor's but whose massDistribution
+    still is (the manual, 2.7: remove it, or give the body one of the new shape)."""
+    new, old = Shkt(data), Shkt(donor)
+    was = {b.name: b for sys_ in old.systems for b in sys_.bodies}
+    out = []
+    for sys_ in new.systems:
+        for b in sys_.bodies:
+            d = was.get(b.name)
+            if d is None or b.mass_distribution is None or d.mass_distribution is None:
+                continue
+            if not hkfile.content_equal(b.shape, d.shape) and hkfile.content_equal(b.mass_distribution,
+                                                                                d.mass_distribution):
+                out.append(Problem('warning', f'body {b.name!r}', 'its shape changed but it keeps the donor\'s '
+                                                                  'massDistribution (stale centre of mass / inertia)'))
+    return out
+
+
 def legacy_bodies(data: bytes) -> list[str]:
     """The hkpRigidBody names of a legacy Havok 2014 tagfile, in file order (static bodies included: an SGO may bind
     to any of them)."""
@@ -334,6 +547,7 @@ def problems(data: bytes) -> list[Problem]:
                         stack.append((sub, f'{w} instance {k}'))
                 else:
                     _hull_problems(shape, f'{w} {kind}', out)
+    out += ragdoll_problems(s)
     return out
 
 

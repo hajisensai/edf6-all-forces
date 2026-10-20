@@ -1209,11 +1209,13 @@ def write_compound(tf: hkfile.Tagfile, children: list[tuple[Quat, Vec3, Block]],
     return comp
 
 
-def affine_convex(tf: hkfile.Tagfile, shape: Block, matrix, offset, inertia_factor: float | None = None) -> Block:  # noqa: ANN001
+def affine_convex(tf: hkfile.Tagfile, shape: Block, matrix, offset, inertia_factor: float | None = None,  # noqa: ANN001
+                  radius: float | None = None) -> Block:
     """A new convex shape: `shape`'s hull under p -> matrix p + offset (a positive determinant; rows of `matrix`),
-    built again (planes, faces, links, angles), its convex radius x the smallest singular value, its mass properties
-    its own (from_hull; the inertia factor the old shape's, 1.0 or 1.5, unless given) and the other properties kept."""
-    radius, verts, _ = convex_hull(shape)      # type: ignore[misc]
+    built again (planes, faces, links, angles), its convex radius `radius` (None: the old one x the smallest singular
+    value), its mass properties its own (from_hull; the inertia factor the old shape's, 1.0 or 1.5, unless given) and
+    the other properties kept."""
+    old_radius, verts, _ = convex_hull(shape)  # type: ignore[misc]
     M = [list(r) for r in matrix]
     det = (M[0][0] * (M[1][1] * M[2][2] - M[1][2] * M[2][1]) - M[0][1] * (M[1][0] * M[2][2] - M[1][2] * M[2][0])
            + M[0][2] * (M[1][0] * M[2][1] - M[1][1] * M[2][0]))
@@ -1227,13 +1229,13 @@ def affine_convex(tf: hkfile.Tagfile, shape: Block, matrix, offset, inertia_fact
         old = mass_properties(shape)
         if old is not None:
             try:
-                plain = from_hull(read_hull(shape), radius, 1.0)
+                plain = from_hull(read_hull(shape), old_radius, 1.0)
                 stored = read_mass(old)
                 ratio = sum(stored.moments) / stored.mass / (sum(plain.moments) / plain.mass)
                 inertia_factor = 1.5 if abs(ratio - 1.5) < abs(ratio - 1.0) else 1.0
             except (HullError, ZeroDivisionError):
                 pass
-    data = convex_data(pts, max(1e-5, radius * smallest), inertia_factor)
+    data = convex_data(pts, max(1e-5, old_radius * smallest) if radius is None else radius, inertia_factor)
     return write_convex(tf, data, keep=shape)
 
 

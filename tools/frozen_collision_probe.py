@@ -12,6 +12,7 @@ import struct
 import numpy as np
 
 import hkfile
+import hkshape
 import ragdoll_fit as rf
 import sgo
 import shkt_check as sc
@@ -135,7 +136,7 @@ def _sample() -> tuple[bytes, hkfile.Block]:
     h['indices'].set_target(array('hkUint8', 24, bytes(v for polygon in polygons for v in polygon)))
     shape.value['convexRadius'].set_f32(.05)
     shape.value['maxAllowedPenetration'].set_f32(struct.unpack('<f', struct.pack('<I', 0x3c23 << 16))[0])
-    mass = tf.new('hknpShapeMassProperties', 1, tc._mass_cache(np.asarray(((-1.05,) * 3, (1.05,) * 3)), 2.))
+    mass = tf.new('hknpShapeMassProperties', 1, hkshape.mass_bytes(hkshape.from_hull(hkshape.build_hull(points), .05)))
     prop = array('hknpShapeProperties::Property', 1)
     prop[0]['object'].set_target(mass)
     prop[0]['key'].set_int(0xF100)

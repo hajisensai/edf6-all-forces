@@ -34,11 +34,12 @@ of its own (a bone the vehicle's animation does not know is never posed on scree
 The collision (build_collision): the bike's chassis is the ragdoll's RagDollProxys.body compound (14 convex hulls, the
 proxy frame = the model frame less the body bone's bind, BODY_PROXY). One hull, FLOOR_HULL (the rear seat's top cover,
 overlapped by the hulls round it), is moved and scaled onto FLOOR, the slab of the tub's plan from its bottom up to
-its inner floor; the compound's bounding tree and box follow. The hull is turned half round its long axis on the way
+its inner floor (pylib/hkshape.py: the hull built again with its own mass properties); the compound's bounding tree,
+box and mass properties follow. The hull is turned half round its long axis on the way
 (x and y negated: a rotation, not a mirror): its flat bottom face becomes the slab's top, the floor the gunner stands
 on. The tub's walls are drawn only (one convex hull cannot hold a hollow; a wall a soldier stands between would
 squeeze their capsule, and the plugin holds them in the tub anyway: docs/sidecar-re.md §2). Nothing else in the file
-changes (sizes, items, the mass distributions: the bike weighs and balances as before).
+changes (the other hulls, the bodies, their mass distributions: the bike weighs and balances as before).
 """
 from __future__ import annotations
 
@@ -763,28 +764,29 @@ class _Shkt:
         p = self._hull(k, 'planes')
         return [struct.unpack_from('<4f', p.data, 16 * j) for j in range(p.count)]
 
-    def set_vertices(self, k: int, points: list) -> None:
-        v = self._hull(k, 'vertices')
-        _req(len(points) == v.count, 'a hull keeps its vertex count')
-        for j, q in enumerate(points):
-            struct.pack_into('<3f', v.data, 12 * j, *q)
-
-    def set_planes(self, k: int, planes: list) -> None:
-        p = self._hull(k, 'planes')
-        _req(len(planes) == p.count, 'a hull keeps its plane count')
-        for j, q in enumerate(planes):
-            struct.pack_into('<4f', p.data, 16 * j, *q)
-
     def box(self, k: int) -> tuple[list[float], list[float]]:
-        """The instance's box as its tree leaf holds it: its hull's vertices' box grown by its convex radius."""
-        r = self.radius(k)
-        from ragdoll_fit import rot
-        e, _ = self.instance(k)
-        q, p, scale = e['rotation'].vec(4), e['translation'].vec(3), e['scale'].vec(3)
-        V = [tuple(rot(q, tuple(v[c]*scale[c] for c in range(3)))[c]+p[c] for c in range(3))
-             for v in self.vertices(k)]
-        r *= max(abs(x) for x in scale)
-        return [min(v[c] for v in V)-r for c in range(3)], [max(v[c] for v in V)+r for c in range(3)]
+        """The instance's box as its tree leaf holds it: its placed vertices' box grown by its convex radius
+        (pylib/hkshape.py instance_box)."""
+        import hkshape
+        lo, hi = hkshape.instance_box(hkshape.instances(self.compound)[k])      # type: ignore[misc]
+        return list(lo), list(hi)
+
+    def replace(self, k: int, matrix, offset, radius: float | None = None) -> None:  # noqa: ANN001
+        """Instance k's convex shape mapped p -> matrix p + offset (pylib/hkshape.py affine_convex: the hull built
+        again with its own mass properties; `radius` its convex radius, None: scaled with it)."""
+        import hkshape
+        e, shape = self.instance(k)
+        e['shape'].set_target(hkshape.affine_convex(self.physics.tf, shape, matrix, offset, radius=radius))
+
+    def refresh(self) -> None:
+        """The compound's derived data from its instances (aabb, bounding radius, simd tree) and its mass properties
+        their combination (pylib/hkshape.py)."""
+        import hkshape
+        parts = [(hkshape.read_mass(hkshape.mass_properties(sh)), q, t) for q, t, _, sh in
+                 hkshape.instances(self.compound)]
+        hkshape.write_mass(self.physics.tf, self.compound, hkshape.combine(parts), keep=self.compound)
+        hkshape.refresh_compound(self.physics.tf, self.compound)
+        self.simd = self.compound.value['boundingVolumeData']['simdTree']['nodes'].target
 
     @property
     def aabb(self) -> tuple[float, ...]:
@@ -792,19 +794,9 @@ class _Shkt:
         a = self.compound.value['aabb']
         return a['min'].vec(4) + a['max'].vec(4)
 
-    def set_aabb(self, lo, hi, w=None) -> None:  # noqa: ANN001 - 3 floats each; w: the two w (None: kept)
-        a = self.compound.value['aabb']
-        old = self.aabb
-        w = (old[3], old[7]) if w is None else w
-        a['min'].set_vec((*lo, w[0]))
-        a['max'].set_vec((*hi, w[1]))
-
     @property
     def bounding_radius(self) -> float:
         return self.compound.value['boundingRadius'].f32()
-
-    def set_bounding_radius(self, r: float) -> None:
-        self.compound.value['boundingRadius'].set_f32(r)
 
     def leaves(self) -> dict[int, tuple[list[float], list[float]]]:
         """Every leaf lane of the simd tree: instance -> its box as stored."""
@@ -837,9 +829,9 @@ def hull_map(V: list[Vec3], radius: float) -> tuple[Vec3, Vec3]:
 
 def build_collision(game) -> tuple[bytes, dict]:  # noqa: ANN001 - rootcpk.Game
     """The bike's ragdoll with its body compound's FLOOR_HULL moved onto the floor slab (see the module doc): its
-    vertices mapped p -> p * scale + offset (a positive determinant: a turn and a stretch, no mirror), each plane
-    (n, d) of n.p + d = 0 rewritten exactly for the map (n' = n / scale, renormalised with d'), its tree leaf, the
-    tree's inner boxes, the compound's box and bounding radius grown to hold it."""
+    vertices mapped p -> p * scale + offset (a positive determinant: a turn and a stretch, no mirror), the hull built
+    again over them (pylib/hkshape.py: planes, faces, its own mass properties), its convex radius kept; the
+    compound's box, bounding radius, simd tree and mass properties follow from its instances."""
     s = _Shkt(game.read('OBJECT', HOST_RAGDOLL))
     _req(s.inst_n == 14, f'RagDollProxys.body has {s.inst_n} hulls')
     _req(all(s.identity(k) for k in range(s.inst_n)), 'a body hull with a transform of its own')
@@ -849,57 +841,11 @@ def build_collision(game) -> tuple[bytes, dict]:  # noqa: ANN001 - rootcpk.Game
     V = s.vertices(FLOOR_HULL)
     scale, off = hull_map(V, radius)
     _req(scale[0] * scale[1] * scale[2] > 0.0, 'the map mirrors the hull')
-    s.set_vertices(FLOOR_HULL, [tuple(v[c] * scale[c] + off[c] for c in range(3)) for v in V])
-    planes = []
-    for n0, n1, n2, d in s.planes(FLOOR_HULL):
-        n = [n0 / scale[0], n1 / scale[1], n2 / scale[2]]
-        L = math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2])
-        d2 = d - (n[0] * off[0] + n[1] * off[1] + n[2] * off[2])
-        planes.append((n[0] / L, n[1] / L, n[2] / L, d2 / L))
-    s.set_planes(FLOOR_HULL, planes)
-    _refresh_tree(s, FLOOR_HULL)
+    s.replace(FLOOR_HULL, [[scale[0], 0.0, 0.0], [0.0, scale[1], 0.0], [0.0, 0.0, scale[2]]], off, radius=radius)
+    s.refresh()
     lo, hi = s.box(FLOOR_HULL)
-    box = s.aabb
-    s.set_aabb((min(box[0], lo[0]), min(box[1], lo[1]), min(box[2], lo[2])),
-               (max(box[4], hi[0]), max(box[5], hi[1]), max(box[6], hi[2])))
-    far = max(math.sqrt(sum(c * c for c in v)) for v in s.vertices(FLOOR_HULL)) + radius
-    old = s.bounding_radius
-    s.set_bounding_radius(max(old, far))
-    return s.bytes(), {'hull': FLOOR_HULL, 'scale': scale, 'offset': off, 'box': (lo, hi), 'bounding radius': max(old, far)}
-
-
-def _refresh_tree(s: _Shkt, k: int) -> None:
-    """The simd tree's leaf lane of instance `k` := its box (Shkt.box), every inner lane := the union of its child
-    node's lanes; the other leaves keep what they hold."""
-    nodes = s.simd
-    N = nodes.type
-    size, o_data, o_leaf = nodes.size, N.member('data').offset, N.member('isLeaf').offset
-    buf = nodes.data
-
-    def node(i: int) -> tuple[list[float], list[float]]:
-        base = size * i
-        f = list(struct.unpack_from('<24f', buf, base))
-        data = struct.unpack_from('<4I', buf, base + o_data)
-        leaf = buf[base + o_leaf]
-        lo_all, hi_all = [math.inf] * 3, [-math.inf] * 3
-        for lane in range(4):
-            if f[lane] > f[4 + lane]:
-                continue       # an empty lane (+FLT_MAX / -FLT_MAX)
-            if leaf:
-                if data[lane] == k:
-                    lo, hi = s.box(k)
-                else:
-                    lo, hi = [f[lane], f[8 + lane], f[16 + lane]], [f[4 + lane], f[12 + lane], f[20 + lane]]
-            else:
-                lo, hi = node(data[lane])
-            f[lane], f[8 + lane], f[16 + lane] = lo
-            f[4 + lane], f[12 + lane], f[20 + lane] = hi
-            lo_all = [min(a, b) for a, b in zip(lo_all, lo)]
-            hi_all = [max(a, b) for a, b in zip(hi_all, hi)]
-        struct.pack_into('<24f', buf, base, *f)
-        return lo_all, hi_all
-    _req(nodes.count >= 2, 'an empty simd tree')
-    node(1)
+    return s.bytes(), {'hull': FLOOR_HULL, 'scale': scale, 'offset': off, 'box': (lo, hi),
+                       'bounding radius': s.bounding_radius}
 
 
 def check_collision(data: bytes, stock: bytes | None = None) -> dict:
@@ -925,6 +871,7 @@ def check_collision(data: bytes, stock: bytes | None = None) -> dict:
         _req(max(dist) < 1e-4, f'plane {p}: a vertex {max(dist):.5f} m outside it')
         _req(sum(1 for d in dist if abs(d) < 1e-4) >= 3, f'plane {p}: fewer than three vertices on it')
     leaves = s.leaves()
+    _req(sorted(leaves) == list(range(s.inst_n)), 'a tree leaf for every hull')
     for k in range(s.inst_n):
         blo, bhi = s.box(k)
         llo, lhi = leaves[k]
@@ -936,20 +883,24 @@ def check_collision(data: bytes, stock: bytes | None = None) -> dict:
     if stock is not None:
         import hkfile
         st = _Shkt(stock)
-        changed = hkfile.changed_blocks(st.physics.tf.root, s.physics.tf.root)
-        _req(changed is not None, 'the file\'s structure changed')
-        allowed = {id(st._hull(FLOOR_HULL, 'vertices')), id(st._hull(FLOOR_HULL, 'planes')), id(st.simd)}
-        C = st.compound.type
-        bounds = set(range(C.member('aabb').offset, C.member('aabb').offset + 32)) | \
-            set(range(C.member('boundingRadius').offset, C.member('boundingRadius').offset + 4))
-        for old_block, _new, diff in changed:
-            if id(old_block) in allowed:
-                continue
-            _req(old_block is st.compound and set(diff) <= bounds,
-                 f'{old_block!r} changed outside the floor edit (bytes {diff[:4]})')
+        _req(s.inst_n == st.inst_n, 'the compound changed its hull count')
         for k in range(s.inst_n):
+            e, shape = s.instance(k)
+            e0, shape0 = st.instance(k)
+            _req(bytes(e.raw) [:48] == bytes(e0.raw)[:48], f'instance {k} moved')
             if k != FLOOR_HULL:
-                _req(s.vertices(k) == st.vertices(k) and s.planes(k) == st.planes(k), f'hull {k} changed')
-                _req(leaves[k] == st.leaves()[k], f'tree leaf {k} changed')
+                _req(hkfile.content_equal(shape, shape0), f'hull {k} changed')
+        bodies, bodies0 = s.physics.bodies(), st.physics.bodies()
+        _req([b.name for b in bodies] == [b.name for b in bodies0], 'the bodies changed')
+        for b, b0 in zip(bodies, bodies0):
+            _req(b.position == b0.position and b.orientation == b0.orientation and b.mass == b0.mass and
+                 hkfile.content_equal(b.mass_distribution, b0.mass_distribution), f'body {b.name} changed')
+            if b.name != 'RagDollProxys.body':
+                _req(hkfile.content_equal(b.shape, b0.shape), f'the shape of {b.name} changed')
+        # The bike keeps its stock massDistribution on purpose (its tuned centre of mass and inertia: the floor slab
+        # is collision only, src/sidecar.cpp holds the outfit level): the one body pylib/shkt_check.py may flag.
+        import shkt_check
+        kept = [p.where for p in shkt_check.stale_mass_distributions(data, stock)]
+        _req(kept == ["body 'RagDollProxys.body'"], f'mass distributions kept from the bike: {kept}')
     return {'hull box': (vlo, vhi), 'top y (model)': vhi[1] + BODY_PROXY[1] + radius, 'floor m2': round(floor, 3),
             'radius': radius}

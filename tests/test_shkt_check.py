@@ -9,6 +9,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'pylib'))
+sys.path.insert(1, os.path.join(os.path.dirname(__file__), '..', 'tools'))
 import gamedir  # noqa: E402
 import hkfile  # noqa: E402
 import hkshape  # noqa: E402
@@ -114,6 +115,34 @@ class Portable(unittest.TestCase):
         twice = legacy_ragdoll(['RagDollProxys.body', 'RagDollProxys.body'])
         self.assertEqual([p.severity for p in sc.problems(twice)], ['error'])
 
+    def test_ragdoll_rules(self) -> None:
+        """The filter rule, GJK's distance and the stale massDistribution rule on synthetic data."""
+        group = 3 << 15
+        parent, child = group | 1 << 5, group | 2 << 5 | 1 << 10          # the child's no-collide = the parent's subsystem
+        self.assertTrue(sc.collision_disabled(parent, child))
+        self.assertFalse(sc.collision_disabled(parent, group | 2 << 5))
+        self.assertFalse(sc.collision_disabled(1 << 5, 2 << 5 | 1 << 10))   # system group 0: decided by layers
+        cube = [(x, y, z) for x in (0.0, 1.0) for y in (0.0, 1.0) for z in (0.0, 1.0)]
+        moved = [(x + 3.0, y + 0.5, z) for x, y, z in cube]
+        self.assertAlmostEqual(sc.gjk_distance(cube, moved), 2.0, places=9)
+        self.assertEqual(sc.gjk_distance(cube, [(x + 0.5, y, z) for x, y, z in cube]), 0.0)
+        import frozen_collision_probe
+        import hkfile
+        import hkshape
+        raw, _ = frozen_collision_probe._sample()
+        tf = hkfile.read(raw)
+        bodies = hkfile.Physics(tf).bodies()
+        dist = tf.new('hkUint32')                       # stands in for a massDistribution object
+        for b in bodies:
+            b.value['massDistribution'].set_target(dist)
+        donor = tf.write()
+        cube_shape = bodies[0].shape
+        bodies[0].set_shape(hkshape.affine_convex(tf, cube_shape, [[2, 0, 0], [0, 1, 0], [0, 0, 1]], (0, 0, 0)))
+        stale = sc.stale_mass_distributions(tf.write(), donor)
+        self.assertEqual([p.where for p in stale], ["body 'ragdoll_doppler_radar'"])
+        bodies[0].value['massDistribution'].set_target(None)
+        self.assertEqual(sc.stale_mass_distributions(tf.write(), donor), [])
+
     def test_not_an_sgo(self) -> None:
         self.assertIsNone(sc.load_plain(b'CAS\0' + bytes(12)))
         with self.assertRaises(ValueError):
@@ -139,6 +168,21 @@ class StockMutations(unittest.TestCase):
 
     def errors(self, data: bytes) -> list[str]:
         return [p.what for p in sc.problems(data) if p.severity == 'error']
+
+    def test_every_stock_file_keeps_the_ragdoll_rules(self) -> None:
+        """No stock SHKT overlaps parts that may collide by 5 cm or leaves a body out of its ragdoll (warnings); the
+        jointed pairs the filter lets collide are 112 in 5 files (info)."""
+        import rootcpk
+        g = rootcpk.Game(GAME)
+        info = 0
+        for name in g.names('OBJECT'):
+            if name.upper().endswith('.SHKT'):
+                d = g.read('OBJECT', name)
+                if d[4:8] == b'TAG0':
+                    found = sc.ragdoll_problems(sc.Shkt(d))
+                    self.assertEqual([str(p) for p in found if p.severity != 'info'], [], name)
+                    info += len(found)
+        self.assertEqual(info, 112)
 
     def test_stock_is_clean(self) -> None:
         self.assertEqual(sc.problems(self.data), [])

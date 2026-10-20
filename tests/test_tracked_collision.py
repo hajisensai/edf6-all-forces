@@ -22,19 +22,21 @@ import tracked_collision as tc
 
 
 class PackedMassTests(unittest.TestCase):
+    """The packer and the mass rule are pylib/hkshape.py's (tests/test_hkshape.py checks them on the stock files)."""
     def test_native_packed_vector_reference(self):
         for raw in ('0000ec534ef78030','5a419f4fec0f8038'):
-            data=bytes.fromhex(raw)
-            self.assertEqual(tc._pack_vec(tc._unpack_vec(data)),data)
-        self.assertEqual(tc._pack_vec((0,0,0)).hex(),'0000000000008019')
-        with self.assertRaises(tc.CollisionError):tc._pack_vec((0,float('nan'),0))
+            words=struct.unpack('<4H',bytes.fromhex(raw))
+            self.assertEqual(hkshape.pack_vec3(hkshape.unpack_vec3(words)),words)
+        self.assertEqual(struct.pack('<4H',*hkshape.pack_vec3((0,0,0))).hex(),'0000000000008019')
+        with self.assertRaises(ValueError):hkshape.pack_vec3((0,float('nan'),0))
 
     def test_mass_box_has_positive_inertia_and_correct_volume(self):
-        box=np.asarray(((-1.,.4,-2.),(1.,1.6,2.)))
-        packed=tc._mass_cache(box,1000.)
-        self.assertTrue((tc._unpack_vec(packed,8)>0).all())
-        np.testing.assert_allclose(tc._unpack_vec(packed),box.mean(0),atol=1e-4)
+        box=((-1.,.4,-2.),(1.,1.6,2.))
+        packed=hkshape.mass_bytes(hkshape.box_mass(*box,1000.))
+        self.assertTrue(all(x>0 for x in hkshape.unpack_vec3(struct.unpack_from('<4H',packed,8))))
+        np.testing.assert_allclose(hkshape.unpack_vec3(struct.unpack_from('<4H',packed,0)),np.asarray(box).mean(0),atol=1e-4)
         self.assertAlmostEqual(struct.unpack_from('<f',packed,28)[0],9.6,places=5)
+        self.assertEqual(packed[16:24],bytes.fromhex('008000800080'+'2ff5'))
 
 
 class NativeAssetTests(unittest.TestCase):
@@ -97,7 +99,7 @@ class NativeAssetTests(unittest.TestCase):
                 cache,mass,volume=tc._mass_record(b.shape)
                 self.assertGreater(mass,0)
                 self.assertGreater(volume,0)
-                self.assertTrue(np.isfinite(tc._unpack_vec(cache,8)).all())
+                self.assertTrue(np.isfinite(hkshape.unpack_vec3(struct.unpack_from('<4H',cache,8))).all())
 
     def test_siblings_remain_disjoint_through_native_rotation_and_recoil(self):
         md,parts,(_,_,_,report)=self.assets['vulcan']
