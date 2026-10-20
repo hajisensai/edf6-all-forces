@@ -256,6 +256,10 @@ void Session::Receive(std::uint32_t peer,const char* puid,const Message& message
         }
     } else if(peer==hostPeer_) {
         if(message.kind==Kind::capability) {
+            // The host answers a hello with this, then every queue it has out (above): what was kept here is of before
+            // and may hold one the host cleared while this machine was away in the same epoch (a short drop: Update
+            // keeps the epoch's state, the clearing was never heard). Forgotten, so only what follows is drawn.
+            ways_.fill(WaysEntry{});
             hostCapable_=message.rpc==Rpc::none;
             hostVersion_=message.version<maxVersion_ ? message.version : maxVersion_;
         }

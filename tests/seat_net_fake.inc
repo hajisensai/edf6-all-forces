@@ -38,4 +38,8 @@ inline bool LastPick(int from,Pick* into) noexcept {
     return s.size==sizeof(Pick) && Decode(s.bytes,s.size,*into);
 }
 }  // namespace seat_net
+namespace plugin_net {
+std::uint32_t fakeRoomGeneration=0;
+std::uint32_t RoomGeneration() noexcept { return fakeRoomGeneration; }
+}  // namespace plugin_net
 }  // namespace crew

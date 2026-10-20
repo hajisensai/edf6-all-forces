@@ -472,23 +472,41 @@ std::uintptr_t __fastcall ShowDialogHook(std::uintptr_t system,std::uintptr_t ou
 // copy gets that block's own stock colours back (the swap's backup) before the job runs, so the save file never holds
 // the EDF4.1 colours (the plugin removed, the stock outfit is as the player left it) and GS is never touched: the
 // game's views and the room keep seeing what the player wears. Only a block still swapped exactly as the plugin left
-// it (the copy's block is the EDF4.1 colours) is put back. Whatever thread the job is made on: under the swap's lock.
+// it (the copy's block is the EDF4.1 colours) is put back. Whatever thread the job is made on: under the swap's lock,
+// taken before the game copies GS (2026-10-20 review: taken only after the copy, a Recolour on another thread could
+// swap the block between the game's copy and the put-back, and the copy then held neither outfit's colours as the
+// swap's record says, saved as it was). The constructor only memcpys the block into the job's own vector
+// (docs/edf41-outfits.md: 0x7BD9F4..0x7BDA1B) and reaches none of the plugin's colour hooks, so holding the lock over it
+// cannot deadlock (read from its body; not measured under contention in game).
 using SaveJobFn=void*(__fastcall*)(void*,std::uintptr_t,const unsigned char*,std::uintptr_t,std::uintptr_t,std::uintptr_t,
                                    std::uintptr_t,std::uintptr_t,std::uintptr_t,std::uintptr_t);
-void* __fastcall SaveJobHook(void* job,std::uintptr_t a,const unsigned char* block,std::uintptr_t size,std::uintptr_t e,
-                             std::uintptr_t f,std::uintptr_t g,std::uintptr_t h,std::uintptr_t i,std::uintptr_t j) {
-    void* const made=reinterpret_cast<SaveJobFn>(image+kSaveJob)(job,a,block,size,e,f,g,h,i,j);
-    if(!made)return made;
-    AcquireSRWLockExclusive(&colourLock);
-    int put=0;
-    bool ours=false;
+struct ColourLockHeld {
+    ColourLockHeld() noexcept { AcquireSRWLockExclusive(&colourLock); }
+    ~ColourLockHeld() { ReleaseSRWLockExclusive(&colourLock); }
+    ColourLockHeld(const ColourLockHeld&)=delete;
+    ColourLockHeld& operator=(const ColourLockHeld&)=delete;
+};
+// The job's copy put back (the lock held by the caller): the blocks put back, -1 unreadable; `ours` the main block's job.
+int RestoreJobCopy(void* made,const unsigned char* block,std::uintptr_t size,bool* ours) noexcept {
+    *ours=false;
     __try {
         unsigned char* gs=GameStatus();
         unsigned char* copy=At<unsigned char*>(made,kJobData);
-        ours=gs && block==gs+kMainBlock && size==kMainSize && At<std::size_t>(made,kJobSize)==kMainSize && copy;
-        if(ours)put=RestoreSavedCopy(state,copy);
-    } __except(EXCEPTION_EXECUTE_HANDLER){put=-1;}
-    ReleaseSRWLockExclusive(&colourLock);
+        *ours=gs && block==gs+kMainBlock && size==kMainSize && At<std::size_t>(made,kJobSize)==kMainSize && copy;
+        return *ours ? RestoreSavedCopy(state,copy) : 0;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
+void* __fastcall SaveJobHook(void* job,std::uintptr_t a,const unsigned char* block,std::uintptr_t size,std::uintptr_t e,
+                             std::uintptr_t f,std::uintptr_t g,std::uintptr_t h,std::uintptr_t i,std::uintptr_t j) {
+    void* made=nullptr;
+    int put=0;
+    bool ours=false;
+    {
+        const ColourLockHeld held;   // the copy and the put-back as one step against the colour swap
+        made=reinterpret_cast<SaveJobFn>(image+kSaveJob)(job,a,block,size,e,f,g,h,i,j);
+        if(made)put=RestoreJobCopy(made,block,size,&ours);
+    }
+    if(!made)return made;
     if(put>0)Log("OUTFIT41 save: %d EDF4.1 colour block(s) written to MAIN.GST as the stock outfit's own (the game's copy only)",put);
     else if(put<0)Log("OUTFIT41 save: the save job's copy unreadable: saved as the game made it");
     else if(!ours)Log("OUTFIT41 save: a job of another block (%p, %zu bytes) left alone",static_cast<const void*>(block),static_cast<std::size_t>(size));

@@ -1426,14 +1426,14 @@ def sidecar_tub_holds_the_gunner() -> None:
 def shkt_check_on_synthetic_data() -> None:
     """pylib/shkt_check.py without the game (tests/test_shkt_check.py Portable): hull / box geometry, SHKT refs, and
     an SGO whose ragdoll mapping or accessory names a body its SHKT lacks is an error, a 4.1 ragdoll (Havok 2014
-    tagfile, pylib/hk2014.py) included. The stock-file mutations of the same test file need the game;
-    tools/check_shkt.py checks an installed Mods folder."""
+    tagfile, pylib/hk2014.py) included; the module's massDistribution note matches pylib/aircraft_collision.py. The
+    stock-file mutations of the same test file need the game; tools/check_shkt.py checks an installed Mods folder."""
     import unittest
     sys.path.insert(0, os.path.join(ROOT, 'tests'))
     import test_shkt_check
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(test_shkt_check.Portable)
     result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
-    assert result.wasSuccessful() and result.testsRun == 7, (result.failures, result.errors)
+    assert result.wasSuccessful() and result.testsRun == 8, (result.failures, result.errors)
 
 
 @test

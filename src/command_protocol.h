@@ -77,7 +77,8 @@ public:
     void LimitVersion(std::uint32_t version) noexcept { if(Compatible(version))maxVersion_=version; }
     // The Shift queues the host publishes for the clients' maps (Kind::ways). Host: `unit`'s points now (n 0: none), sent
     // to every peer of version 7 when they differ from the last sent; `Published` lists what is out. Client: the
-    // points its host published for `unit` (false: none). Both forget them with the epoch.
+    // points its host published for `unit` (false: none). Both forget them with the epoch; a client also at each
+    // capability (the host's answer to its hello, which every queue out follows: a reconnect starts from those).
     static constexpr unsigned kWaysUnits=96;
     void PublishWays(const unsigned char* unit,const mapcmd::Command& current,const float (*at)[3],unsigned n) noexcept;
     unsigned PublishedWays(unsigned char (*out)[32],unsigned most) const noexcept;

@@ -67,6 +67,7 @@ std::uintptr_t __fastcall MissionSyncHook(std::uintptr_t arg) {
 
 std::uintptr_t __fastcall PreloadHook(std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d) {
     WatchMissionPhase("the game's player preload");
+    HostSettingsOfflineMission();   // the offline preload: no room's word decides this mission (host_settings.h)
     const auto result=LoadoutPreload(preloadOrig,a,b,c,d);
     MissionStart();
     return result;

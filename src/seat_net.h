@@ -71,6 +71,38 @@ template<std::size_t N> struct BasicGate {
 };
 using Gate=BasicGate<1024>;   // the coop room's supported peer capacity
 
+// A receiver's gates of many streams (a vehicle's seat each: payload.cpp's picks), kept apart from the records the
+// messages fill. A record is forgotten when not refreshed for a while (kPickStaleMs) or taken for another stream; its
+// gate is not: before 2026-10-20 the gate lived in the record, so 2 s after a pick stopped coming a delayed older pick
+// of the same sender was admitted again and undid the newer choice (2026-10-20 review). A stream's gate is dropped only
+// with its object (`live` false: a slot is taken from a gone object when no free one is left; never from a live one,
+// which would re-admit an old message) or with the room's members (Reset: another room, a mission's end).
+template<std::size_t Streams,std::size_t Senders> class StreamGates {
+public:
+    struct Key { const void* obj=nullptr; const void* ctrl=nullptr; unsigned stream=0; };
+    // The gate of `k` (made when new), null when every slot is a live object's other stream (the message refused).
+    // `live(obj,ctrl)`: whether that object still lives.
+    template<class Live> BasicGate<Senders>* For(const Key& k,Live live) noexcept {
+        if(!k.obj)return nullptr;
+        Slot* free=nullptr;
+        for(auto& s:slots_) {
+            if(s.used && s.key.obj==k.obj && s.key.ctrl==k.ctrl && s.key.stream==k.stream)return &s.gate;
+            if(!s.used && !free)free=&s;
+        }
+        if(!free)for(auto& s:slots_)if(!live(s.key.obj,s.key.ctrl)){free=&s;break;}
+        if(!free)return nullptr;
+        *free=Slot{};free->used=true;free->key=k;
+        return &free->gate;
+    }
+    // An object gone (every stream of it).
+    void Forget(const void* obj) noexcept { for(auto& s:slots_)if(s.used && s.key.obj==obj)s=Slot{}; }
+    void Reset() noexcept { for(auto& s:slots_)s=Slot{}; }
+    std::size_t Used() const noexcept { std::size_t n=0;for(const auto& s:slots_)n+=s.used ? 1u : 0u;return n; }
+private:
+    struct Slot { bool used=false; Key key{}; BasicGate<Senders> gate{}; };
+    Slot slots_[Streams]{};
+};
+
 // A vehicle copy that is replicated (registered: its network flags +0x128 bit 0 or 1) in a session.
 constexpr bool Replicated(bool session,std::uint16_t flags) noexcept { return session && (flags&3)!=0; }
 

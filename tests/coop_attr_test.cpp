@@ -162,6 +162,24 @@ void WordAndRoom() {
     Expect(EveryoneHas(kFeatures,kFeatBikeGunner) && !EveryoneHas(older.features,kFeatBikeGunner),"the gunner seat: every member must have it");
     Expect(std::strlen(kKey)<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_KEY && !std::strncmp(kKey,EDF6COOP_MEMBER_ATTRIBUTE_KEY_PREFIX,6),"the key's form");
 }
+// The 408's gunner seat over missions (2026-10-20 review): a closed seat of an online mission does not follow into an
+// offline one, whether the player left the room first (the room / HQ frame) or went straight to an offline mission.
+void GunnerSeat() {
+    using namespace crew::hostcfg;
+    bool seat=kBikeGunnerLocal;
+    Expect(seat,"this machine's own: open");
+    seat=BikeGunnerAtSync(true,true,1,kFeatures);
+    Expect(!seat,"an online mission with an older member: closed");
+    Expect(!BikeGunnerAtSync(true,true,0,kFeatures&~kFeatBikeGunner) && !BikeGunnerAtSync(true,false,0,kFeatures),
+           "a member without it, or the room not read: closed");
+    Expect(BikeGunnerAtSync(true,true,0,kFeatures) && BikeGunnerAtSync(false,false,3,0),"every member has it, or offline: open");
+    Expect(!BikeGunnerOutOfMission(true,seat),"still in the room: the last sync's say kept");
+    Expect(BikeGunnerOutOfMission(false,seat),"the room left: this machine's again");
+    seat=BikeGunnerAtSync(true,true,1,kFeatures);
+    seat=BikeGunnerOffline();
+    Expect(seat,"an offline mission straight after a closed online one: open");
+    Expect(BikeGunnerOutOfMission(true,true) && BikeGunnerOutOfMission(false,true),"an open seat stays open");
+}
 }  // namespace
 
 int main() {
@@ -169,6 +187,7 @@ int main() {
     Publishing();
     Reading();
     WordAndRoom();
+    GunnerSeat();
     std::printf("coop_attr_test: %d/%d checks passed\n",checks-failures,checks);
     return failures ? 1 : 0;
 }

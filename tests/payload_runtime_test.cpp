@@ -352,6 +352,30 @@ int main() {
         weapons[0][1][kWeaponTrigger]=0;now+=seat_net::kPickStaleMs+1;PayloadFrame(v);PullHook(holders0[0]);
         check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"a pick not refreshed goes stale: stock again");
         weapons[0][0][kWeaponTrigger]=0;
+        // The record went with it, the sender's watermark did not (2026-10-20 review: it lived in the record): a delayed
+        // older pick is still refused, a newer one taken; another room's members start the watermarks over.
+        Pick late=sent;late.head.sequence=3;
+        seat_net::fakeHandler(v,&late,sizeof(late));
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"a delayed older pick after the record expired: still refused");
+        weapons[0][0][kWeaponTrigger]=0;
+        Pick newer=sent;newer.head.sequence=6;
+        seat_net::fakeHandler(v,&newer,sizeof(newer));
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"a newer pick of that sender: taken");
+        weapons[0][1][kWeaponTrigger]=0;
+        seat_net::fakeHandler(v,&late,sizeof(late));
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1,"...and the old one after it refused");
+        weapons[0][1][kWeaponTrigger]=0;
+        Pick gun=sent;gun.holder=0;gun.head.sequence=7;
+        seat_net::fakeHandler(v,&gun,sizeof(gun));
+        ++plugin_net::fakeRoomGeneration;
+        seat_net::fakeHandler(v,&late,sizeof(late));   // sequence 3, the store: below 7, but the room is another now
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"another room's members: the watermarks start over");
+        weapons[0][1][kWeaponTrigger]=0;
+        now+=seat_net::kPickStaleMs+1;PayloadFrame(v);
         // This machine's own player takes the seat: a pick heard for it never applies (it runs the seat itself).
         sent.head.sequence=20;seat_net::fakeHandler(v,&sent,sizeof(sent));
         riders[0][edf::kRiderNet+edf::kNetFlags]=0;Put<void*>(riders[0],edf::kHumanPad,riders[0]);trackedHuman=riders[0];

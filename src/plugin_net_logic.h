@@ -68,6 +68,8 @@ public:
         for(std::size_t i=0;i<count_;++i)if(!rows_[i].magic && rows_[i].owns && rows_[i].owns(bytes,size)){if(index)*index=i;return &rows_[i];}
         return nullptr;
     }
+    // Every channel's reset (the room changed: RoomWatch; or the transport reset whole).
+    void ResetAll() const noexcept { for(std::size_t i=0;i<count_;++i)if(rows_[i].reset)rows_[i].reset(); }
     // `has(peer,bit)`: whether the peer announced the feature bit (plugin_net::Peers::Has).
     template<class Has>
     Route Dispatch(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t now,Has has) const noexcept {
@@ -184,6 +186,39 @@ inline bool DecodeRoster(const void* bytes,std::size_t size,RosterEntry* out,std
     *count=n;
     return true;
 }
+
+// Which room the peers' words and the channels' per-peer state are of (plugin_net.cpp Update, every frame). The room is
+// its epoch, roster size, host peer, whether this machine hosts and this machine's PUID: another of any of them and the
+// peer indexes mean other machines now. Before 2026-10-20 only the peer table was forgotten then; the channels'
+// reset (the contract above) was called by the transport's whole reset alone, so a member joining or leaving kept each
+// channel's state of the old indexes (2026-10-20 review).
+//  - forgetPeers: the peers' words dropped (not up, or another room): heard again, each channel told `joined` again;
+//  - resetChannels: every channel's reset, once a change, never each frame. A room left for none (offline, the
+//    transport gone) is a change; none to a first room is not (no channel holds a peer's state yet). A short drop with
+//    the room unchanged (the same epoch and roster when it comes back) is none: the peers are told `joined` again and
+//    each channel's own update sees that it was not ready (an update must recover from frames it was not ready in).
+struct RoomStep { bool forgetPeers=false,resetChannels=false; };
+class RoomWatch {
+public:
+    RoomStep See(const CommandNetworkContext& c,bool up) noexcept {
+        const char* local=ValidPuid(c.localPuid) ? c.localPuid : "";
+        const bool same=c.epoch==epoch_ && c.peerCount==peers_ && c.hostPeer==hostPeer_ && c.host==host_ && !std::strcmp(local,local_);
+        RoomStep step;
+        step.forgetPeers=!up || !same;
+        if(!same) {
+            step.resetChannels=epoch_!=0 || peers_!=0;   // there was a room
+            epoch_=c.epoch;peers_=c.peerCount;hostPeer_=c.hostPeer;host_=c.host;
+            std::memcpy(local_,local,std::strlen(local)+1);
+        }
+        return step;
+    }
+    void Reset() noexcept { epoch_=0;peers_=0;hostPeer_=0;host_=false;local_[0]=0; }
+private:
+    std::uint64_t epoch_=0;
+    std::uint32_t peers_=0,hostPeer_=0;
+    bool host_=false;
+    char local_[kPuidChars+1]{};
+};
 
 // A sender's run (a channel's `origin`: a new one tells receivers its state starts over): random, never zero.
 constexpr std::uint32_t Origin(std::uint32_t random,std::uint64_t fallback) noexcept {

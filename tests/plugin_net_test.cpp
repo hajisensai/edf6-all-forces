@@ -5,7 +5,8 @@
 //    a channel without a bit reads every peer's;
 //  - joins: a channel is told once per peer when it newly has its bit, again after Forget / Reset;
 //  - the roster's wire: round trip, a bigger room in parts, refusals;
-//  - wire.h: field order, sticky failure, finite floats, canonical IDs.
+//  - wire.h: field order, sticky failure, finite floats, canonical IDs;
+//  - the room watch: which changes reset every channel, once.
 #include "../src/plugin_net_logic.h"
 #include <cmath>
 #include <cstdio>
@@ -154,12 +155,56 @@ void WireChecks() {
     Check(!w4.Ok(),"a write past the end fails");
     Check(crew::wire::HeadWord(b,8,1)==2 && crew::wire::HeadWord(b,7,1)==0,"the head words");
 }
+
+// The room watch (2026-10-20 review): a member joining or leaving, another mission, a room left: every channel's reset
+// once; a short drop of the same room: the peers forgotten (told `joined` again) but no channel reset; offline frames
+// and a first room: none.
+int resetsA=0,resetsB=0;
+void ResetA() noexcept { ++resetsA; }
+void ResetB() noexcept { ++resetsB; }
+void RoomChecks() {
+    Registry reg;
+    Channel a;a.name="a";a.magic=kA;a.receive=&ReceiveA;a.reset=&ResetA;
+    Channel b;b.name="b";b.magic=kB;b.receive=&ReceiveB;b.reset=&ResetB;
+    Channel c;c.name="c";c.magic=kC;c.receive=&ReceiveC;   // no reset: skipped
+    Check(reg.Register(a) && reg.Register(b) && reg.Register(c),"three channels");
+    RoomWatch w;
+    const auto see=[&](const crew::CommandNetworkContext& ctx,bool up) {
+        const RoomStep s=w.See(ctx,up);
+        if(s.resetChannels)reg.ResetAll();
+        return s;
+    };
+    crew::CommandNetworkContext off{};
+    for(int i=0;i<5;++i){const RoomStep s=see(off,false);Check(s.forgetPeers && !s.resetChannels,"offline: no channel reset, frame after frame");}
+    crew::CommandNetworkContext room{};room.ready=true;room.epoch=9;room.peerCount=2;room.hostPeer=1;room.localPuid="me";
+    RoomStep s=see(room,true);
+    Check(s.forgetPeers && !s.resetChannels && !resetsA,"the first room: the peers new, nothing to reset");
+    s=see(room,true);Check(!s.forgetPeers && !s.resetChannels,"the same room: nothing");
+    crew::CommandNetworkContext joined=room;joined.peerCount=3;
+    s=see(joined,true);
+    Check(s.forgetPeers && s.resetChannels && resetsA==1 && resetsB==1,"a member joined: every channel reset, once");
+    s=see(joined,true);Check(!s.resetChannels && resetsA==1,"...and not again the next frame");
+    s=see(room,true);Check(s.resetChannels && resetsA==2,"a member left: reset");
+    s=see(room,false);Check(s.forgetPeers && !s.resetChannels && resetsA==2,"a short drop of the same room: peers forgotten, no reset");
+    s=see(room,true);Check(s.forgetPeers==false && !s.resetChannels && resetsA==2,"back in the same room: no reset");
+    crew::CommandNetworkContext host=room;host.host=true;host.hostPeer=0;
+    s=see(host,true);Check(s.resetChannels && resetsA==3,"this machine the host now: reset");
+    crew::CommandNetworkContext other=host;other.localPuid="someone";
+    s=see(other,true);Check(s.resetChannels && resetsA==4,"another local PUID: reset");
+    crew::CommandNetworkContext mission=other;mission.epoch=10;
+    s=see(mission,true);Check(s.resetChannels && resetsA==5,"another epoch: reset");
+    s=see(off,false);Check(s.resetChannels && resetsA==6 && resetsB==6,"the room left: reset");
+    for(int i=0;i<3;++i){s=see(off,false);Check(!s.resetChannels,"offline after it: no more");}
+    Check(resetsA==6 && resetsB==6,"each reset reached every channel that has one");
+    w.Reset();s=see(room,true);Check(!s.resetChannels && resetsA==6,"after the transport's whole reset the next room is a first");
+}
 }  // namespace
 
 int main() {
     RegistryChecks();
     RosterChecks();
     WireChecks();
+    RoomChecks();
     std::printf("plugin_net: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }

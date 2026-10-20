@@ -111,4 +111,20 @@ inline void Count(Builds& b,bool self,bool has,const Word* w,const char* myVersi
 }
 // A feature every member must have (the 408's gunner seat): every member's word has it.
 constexpr bool EveryoneHas(std::uint32_t features,std::uint32_t want) noexcept { return (features&want)==want; }
+
+// The 408's sidecar gunner seat (kFeatBikeGunner). This machine's own value: open (as built). Decided for an online
+// mission at its MissionSync (every member said it has it), kept for that mission. Before 2026-10-20 it was decided
+// there alone, so a closed seat of the last online mission stayed closed offline (2026-10-20 review): it goes back to
+// this machine's value wherever a mission without a room may begin, out of the room (the room / HQ frame seeing no
+// room) and at an offline mission's start (mission.cpp PreloadHook: the offline preload, never reached online).
+inline constexpr bool kBikeGunnerLocal=true;
+// At an online mission's sync: the room's say (offline: this machine's).
+constexpr bool BikeGunnerAtSync(bool inRoom,bool surveyed,std::uint32_t silent,std::uint32_t common) noexcept {
+    return !inRoom ? kBikeGunnerLocal : surveyed && silent==0 && EveryoneHas(common,kFeatBikeGunner);
+}
+// At the room / HQ frame's read (no mission decided there): out of a room, this machine's; in one, as the last sync
+// decided (the next sync decides again).
+constexpr bool BikeGunnerOutOfMission(bool inRoom,bool current) noexcept { return inRoom ? current : kBikeGunnerLocal; }
+// At an offline mission's start: this machine's.
+constexpr bool BikeGunnerOffline() noexcept { return kBikeGunnerLocal; }
 }  // namespace crew::hostcfg

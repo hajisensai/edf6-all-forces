@@ -10,6 +10,9 @@ void HostSettingsRoomTick() noexcept;
 // MissionSync_Begin (mission.cpp, the script's thread), before the load: the same read once more, and what every member
 // must have for this mission decided (the 408's gunner seat), kept for the whole mission.
 void HostSettingsMissionSync() noexcept;
+// An offline mission's start (mission.cpp PreloadHook, the offline preload; online missions never reach it): what a
+// mission sync decided for the room is dropped, this machine's values played by (the 408's gunner seat open).
+void HostSettingsOfflineMission() noexcept;
 // The values to play by (any thread; cheap): the host's as a guest whose host published them, else this machine's ini.
 bool VanillaRecruitInEffect() noexcept;
 bool NpcFreeSquadCoverInEffect() noexcept;
