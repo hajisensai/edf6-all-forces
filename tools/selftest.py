@@ -5325,7 +5325,11 @@ def map_wired() -> None:
     assert 'CancelToggle(human);if(Current().on)Leave();' in fp and 'keyClaimHuman==human && keyClaimControl==key.control' in fp
     assert 'Foreground() && !MapHoldsKeys()' in src('src/room_ui.cpp'), 'the room menu keys give way to the map'
     thermal = src('src/thermal.cpp')
-    assert '!GamePaused() && !MapHoldsKeys() && shot.inSight && down && !keyHeld' in thermal, 'thermal switching gives way to map/pause and requires the actual optic'
+    # the key gives way to the map / pause; it picks the mode on an equipped seat at any time (2026-10-19 「切换成像没反应」,
+    # #fix/1019-sight), the image itself only through the actual optic
+    assert 'admitted=!GamePaused() && !MapHoldsKeys();' in thermal and 'if(admitted && down && !keyHeld)CycleMode();' in thermal, \
+        'thermal switching gives way to map/pause'
+    assert 'if(!shot.inSight) {\n        effective.store(Mode::optical' in thermal, 'the thermal image only through the actual optic'
     assert 'process==GetCurrentProcessId()' in thermal, 'the thermal key reader requires this game window'
     controlled = src('src/enemy_control.cpp')
     sample = controlled.split('void Sample(Session& session,Input& sample) noexcept {', 1)[1].split('\n}\n', 1)[0]
@@ -11991,8 +11995,9 @@ def edf41_rest_behaviour_real() -> None:
         with open(os.path.join(base, name + '.SGO'), 'rb') as f:
             return sgo.load(data=f.read())
 
-    def plain(v: object) -> object:
-        return [plain(x) for x in v] if isinstance(v, list) else round(v.value, 6) if isinstance(v, sgo.Float) else v
+    def plain(v: object) -> object:   # a classic SGO's Float or a DSGO's double (V301 is a DSGO: Vehicle601_Tank's form)
+        return ([plain(x) for x in v] if isinstance(v, list) else round(v.value, 6) if isinstance(v, sgo.Float) else
+                round(v, 6) if isinstance(v, float) else v)
 
     def pairs(v: list) -> list[int]:
         assert all(isinstance(x, list) and len(x) == 2 and isinstance(x[1], int) for x in v), 'not [blob, slot] pairs'
