@@ -295,9 +295,13 @@ def release_models() -> list[tuple[str, str]]:
         if folder is None:
             print(f'note: model {name} not found ({", ".join(obj_model.model_roots())}): the release goes without it')
             continue
-        for f in sorted(os.listdir(folder)):
-            if os.path.isfile(os.path.join(folder, f)):
-                out.append((os.path.join(folder, f), f'models/{name}/{f}'))
+        # Every file under it, its subfolders too: the cockpits' cut interiors are models/cockpits/parts/<vehicle>/ and
+        # textures/ (a first install without them fails); the other models are flat.
+        for dirpath, dirnames, files in os.walk(folder):
+            dirnames.sort()
+            for f in sorted(files):
+                rel = os.path.relpath(os.path.join(dirpath, f), folder).replace(os.sep, '/')
+                out.append((os.path.join(dirpath, f), f'models/{name}/{rel}'))
     return out
 
 
