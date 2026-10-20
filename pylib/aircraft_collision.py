@@ -5,7 +5,9 @@ ragdoll (normally a helicopter). We generate a tagged ragdoll body compound; bod
 also uses that exact compound for the flight body. NPC, parked and requested aircraft
 share these files. No game directory is written by this module.
 
-The compound is a height-field of small solid convex cells. Triangles are clipped to
+The compound is a height-field of small solid convex cells (pylib/hkshape.py: each a hull with its own mass
+properties, the compound their combination; the body proxy's massDistribution is removed so that the game derives
+it from them). Triangles are clipped to
 each X/Z cell before measuring its Y range, so empty corners around swept wings stay
 empty. Unlike a vertex-only sampler this includes long triangles spanning many cells.
 This is a conservative collision approximation, not a triangle-perfect mesh: 24 by 32
@@ -18,9 +20,10 @@ import math
 import struct
 from functools import lru_cache
 
+import hkfile
+import hkshape
 import jet_models
-from hktag import Tag, sections
-from hkcms import bodies
+import model_pieces
 from mdb import bind_world, ident, read_elem
 
 MAGIC = 0x4544463641495231  # EDF6AIR1: native hknpShape::userData, src/body506.cpp
@@ -110,154 +113,66 @@ def mesh_cells(tris, nx=NX, nz=NZ):
             for _, (a, b) in sorted(cells.items())]
 
 
-class _Edit:
-    """Append DATA/ITEM records without changing any original item indices or TYPEs."""
-    def __init__(self, blob):
-        self.tag = Tag(blob)
-        self.sec = sections(blob)
-        a, b = self.sec['/TAG0/DATA']
-        self.data = bytearray(blob[a:b])
-        self.items = list(self.tag.items)
-
-    def add(self, template, data, count=1):
-        self.data.extend(b'\0' * (-len(self.data) % 16))
-        index = len(self.items)
-        self.items.append((self.items[template][0], len(self.data), count))
-        self.data.extend(data)
-        return index
-
-    def original(self, item):
-        _, at, n = self.tag.item(item)
-        return bytearray(self.tag.b[at:at + self.tag.size(self.tag.item(item)[0])*n])
-
-    def finish(self):
-        def chunk(name, payload, leaf=True):
-            return struct.pack('>I', len(payload)+8 | (0x40000000 if leaf else 0)) + name.encode() + payload
-        source = self.tag.b
-        def old(path):
-            a, b = self.sec[path]
-            return source[a-8:b]
-        self.data.extend(b'\0' * (-len(self.data) % 16))
-        items = b''.join(struct.pack('<III', *e) for e in self.items)
-        return chunk('TAG0', old('/TAG0/SDKV') + chunk('DATA', self.data) + old('/TAG0/TYPE') +
-                     chunk('INDX', chunk('ITEM', items), False), False)
-
-
-def _tree(boxes):
-    nodes = [bytearray(128)]  # Havok sentinel; root is node 1.
-    def node(ids):
-        index = len(nodes)
-        buf = bytearray(128)
-        nodes.append(buf)
-        leaves = len(ids) <= 4
-        if leaves:
-            groups = [[i] for i in ids]
-        else:
-            centres = {i: [(boxes[i][0][k]+boxes[i][1][k])/2 for k in range(3)] for i in ids}
-            axis = max(range(3), key=lambda k: max(centres[i][k] for i in ids)-min(centres[i][k] for i in ids))
-            ids = sorted(ids, key=lambda i: centres[i][axis])
-            width = math.ceil(len(ids)/4)
-            groups = [ids[i:i+width] for i in range(0, len(ids), width)]
-        f = [3.402823466e38 if k%2 == 0 else -3.402823466e38 for k in range(6) for _ in range(4)]
-        data = [0]*4
-        for lane, group in enumerate(groups):
-            data[lane] = group[0] if leaves else node(group)
-            for k in range(3):
-                # Outward padding covers float32 rounding of the serialized hull.
-                f[8*k+lane] = min(boxes[i][0][k] for i in group)-0.0001
-                f[8*k+4+lane] = max(boxes[i][1][k] for i in group)+0.0001
-        struct.pack_into('<24f4I?', buf, 0, *f, *data, leaves)
-        return index
-    node(list(range(len(boxes))))
-    return b''.join(nodes), len(nodes)
-
-
-def _compound(edit, template, boxes, magic=0):
-    """New compound of axis-aligned convex hulls, with a rebuilt 4-way BVH."""
-    t = edit.tag
-    _, cat, _ = t.item(template)
-    inst = t.u32(cat+t.offset('hknpCompoundShape', 'instances'))
-    _, iat, _ = t.item(inst)
-    # V506 body instance 3 is an eight-vertex, six-plane, axis-aligned box.
-    original = iat+3*t.size('hknpShapeInstance')
-    shape = t.u32(original+t.offset('hknpShapeInstance', 'shape'))
-    shape_data = edit.original(shape)
-    _, sat, _ = t.item(shape)
-    hull = t.offset('hknpConvexShape', 'hull')
-    vi, pi = t.u32(sat+hull), t.u32(sat+hull+4)
-    _, va, vn = t.item(vi)
-    _, pa, pn = t.item(pi)
-    if vn != 8 or pn != 6:
-        raise ValueError('V506 box hull template changed')
-    vertices = [struct.unpack_from('<3f', t.b, va+12*i) for i in range(8)]
-    planes = [struct.unpack_from('<4f', t.b, pa+16*i) for i in range(6)]
-    mid = [(min(v[k] for v in vertices)+max(v[k] for v in vertices))/2 for k in range(3)]
-    if any(sum(abs(n) > 1e-6 for n in p[:3]) != 1 for p in planes):
-        raise ValueError('V506 box hull is no longer axis aligned')
-    instances = bytearray()
+def _compound(tf, boxes, magic=0):
+    """A new compound of axis-aligned solid boxes (pylib/hkshape.py: each a convex hull with its own mass properties,
+    the compound their combination, its aabb / radius / simd tree from them)."""
+    children = []
     for lo, hi in boxes:
-        sh = bytearray(shape_data)
-        struct.pack_into('<f', sh, t.offset('hknpConvexShape', 'convexRadius'), 0.0)
-        # Cached mass properties describe the donor's tiny box. Let Havok derive
-        # inertia from the new vertices instead of retaining the helicopter's.
-        struct.pack_into('<I', sh, t.offset('hknpConvexShape', 'properties'), 0)
-        verts = b''.join(struct.pack('<3f', *(hi[k] if p[k] > mid[k] else lo[k] for k in range(3))) for p in vertices)
-        normals = []
-        for p in planes:
-            axis = max(range(3), key=lambda k: abs(p[k]))
-            normals.append(struct.pack('<4f', *p[:3], -p[axis]*(hi[axis] if p[axis] > 0 else lo[axis])))
-        struct.pack_into('<II', sh, hull, edit.add(vi, verts, 8), edit.add(pi, b''.join(normals), 6))
-        shape_id = edit.add(shape, sh)
-        instance = bytearray(t.b[original:original+64])
-        struct.pack_into('<I', instance, t.offset('hknpShapeInstance', 'shape'), shape_id)
-        instances.extend(instance)
-    comp = edit.original(template)
-    struct.pack_into('<I', comp, t.offset('hknpCompoundShape', 'properties'), 0)
-    inst_id = edit.add(inst, instances, len(boxes))
-    struct.pack_into('<III', comp, t.offset('hknpCompoundShape', 'instances'), inst_id, 0xFFFFFFFF, len(boxes))
-    comp[t.offset('hknpCompoundShape', 'numShapeKeyBits')] = max(1, (len(boxes)-1).bit_length())
-    struct.pack_into('<Q', comp, t.offset('hknpCompoundShape', 'userData'), magic)
-    lo = [min(b[0][k] for b in boxes)-0.0001 for k in range(3)]
-    hi = [max(b[1][k] for b in boxes)+0.0001 for k in range(3)]
-    struct.pack_into('<8f', comp, t.offset('hknpCompoundShape', 'aabb'), *lo, 0, *hi, 0)
-    struct.pack_into('<f', comp, t.offset('hknpCompoundShape', 'boundingRadius'),
-                     math.sqrt(sum(max(abs(lo[k]), abs(hi[k]))**2 for k in range(3))))
-    struct.pack_into('<I', comp, t.offset('hknpCompoundShape', 'estimatedNumShapeKeys'), len(boxes))
-    bvd = t.offset('hknpCompoundShape', 'boundingVolumeData')
-    tree_at = bvd+t.offset('hknpCompoundShapeData', 'simdTree')+t.offset('hkcdSimdTree', 'nodes')
-    tree_template = t.u32(cat+tree_at)
-    data, count = _tree(boxes)
-    struct.pack_into('<I', comp, tree_at, edit.add(tree_template, data, count))
-    return edit.add(template, comp)
+        corners = [(x, y, z) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+        children.append(((0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0), hkshape.write_convex(tf, hkshape.convex_data(corners))))
+    return hkshape.write_compound(tf, children, user_data=magic)
+
+
+# 'cells' (the default): the 24 x 32 height field of solid boxes above. 'pieces': the model's own connected pieces,
+# each cut until nearly convex and wrapped in a hull (pylib/model_pieces.py): tighter round the wings' sweep and the
+# fuselage's curves, but untested in the game (docs/model-pipeline-2026-10-20.md has the offline comparison).
+MODE = 'cells'
+PIECE_TOLERANCE = 0.05     # m: how deep a model vertex may stand inside its piece's hull
+PIECE_LIMIT = 512          # compound children at most (the cells reach 466)
+
+
+def _pieces(tf, tris, magic=0):
+    """A compound of the model's convex pieces (MODE 'pieces')."""
+    sets = model_pieces.fit(tris, tolerance=PIECE_TOLERANCE, max_vertices=32, max_pieces=PIECE_LIMIT,
+                            min_size=0.05, thickness=2*SKIN)
+    children = [((0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0), hkshape.write_convex(tf, hkshape.convex_data(s)))
+                for s in sets]
+    return hkshape.write_compound(tf, children, user_data=magic)
 
 
 @lru_cache(maxsize=32)
-def build(game, key):
+def build(game, key, mode=None):
     """Return one complete .SHKT; all points relative to the unchanged full-model centre."""
     md = jet_models._model_of(game, key)
     centre = jet_models.model_box(game, key)[0]
+    model_tris = list(triangles(md))
     boxes = [(tuple(lo[k]-centre[k] for k in range(3)), tuple(hi[k]-centre[k] for k in range(3)))
-             for lo, hi in mesh_cells(triangles(md))]
-    e = _Edit(game.read('OBJECT', STOCK))
-    t = e.tag
-    template = bodies(t)['RagDollProxys.body']
-    body = _compound(e, template, boxes, MAGIC)
+             for lo, hi in mesh_cells(model_tris)]
+    tris = [tuple(tuple(p[k]-centre[k] for k in range(3)) for p in tri) for tri in model_tris]
+    physics = hkfile.Physics.read(game.read('OBJECT', STOCK))
+    body = _pieces(physics.tf, tris, MAGIC) if (mode or MODE) == 'pieces' else _compound(physics.tf, boxes, MAGIC)
     # Retain all stock proxy names and constraints for the 506's animation/death
     # code, but its helicopter blades must no longer collide outside the aircraft.
     lo, hi = max(boxes, key=lambda b: math.prod(b[1][k]-b[0][k] for k in range(3)))
     point = [(lo[k]+hi[k])/2 for k in range(3)]
-    tiny = _compound(e, template, [(tuple(p-0.005 for p in point), tuple(p+0.005 for p in point))])
-    scene = t.root_variant('hknpPhysicsSceneData')
-    _, sat, ns = t.item(t.u32(scene+t.offset('hknpPhysicsSceneData', 'systemDatas')))
-    B = 'hknpPhysicsSystemData::bodyCinfoWithAttachment'
-    for i in range(ns):
-        _, system, _ = t.item(t.u32(sat+4*i))
-        _, at, n = t.item(t.u32(system+t.offset('hknpPhysicsSystemData', 'bodyCinfos')))
-        for j in range(n):
-            pos = at+j*t.size(B)
-            name = t.cstr(t.u32(pos+t.offset(B, 'name')))
-            struct.pack_into('<I', e.data, pos-t.data0+t.offset(B, 'shape'), body if name == 'RagDollProxys.body' else tiny)
-    return e.finish()
+    tiny = _compound(physics.tf, [(tuple(p-0.005 for p in point), tuple(p+0.005 for p in point))])
+    for b in physics.bodies():
+        if b.name == 'RagDollProxys.body':
+            b.set_shape(body)
+            # The helicopter's centre of mass and inertia do not belong to the airframe: without a massDistribution
+            # the game derives them from the new shape's (SHKT Editor manual 2.7, confirmed in game there).
+            b.value['massDistribution'].set_target(None)
+        else:
+            # The other proxies stand in for the 506's parts (its death animation and joints name them): their
+            # massDistribution stays the 506 part's, the tiny box only keeps them out of every collision.
+            b.set_shape(tiny)
+    out = physics.write()
+    import shkt_check
+    kept = {p.where for p in shkt_check.stale_mass_distributions(out, game.read('OBJECT', STOCK))}
+    want = {f'body {b.name!r}' for b in physics.bodies() if b.name != 'RagDollProxys.body'}
+    if kept != want:
+        raise ValueError(f'airframe mass distributions: kept {sorted(kept)}, expected the stand-ins {sorted(want)}')
+    return out
 
 
 def assets(game):

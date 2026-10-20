@@ -4,7 +4,7 @@
 #include "drill_net.h"
 #include <type_traits>
 namespace crew::sazabi_net {
-constexpr std::int8_t kTag=15;
+constexpr std::int8_t kTag=seat_net::kTag;
 constexpr std::uint32_t kMagic=0x49425A53,kVersion=1;
 constexpr std::uint32_t kDriven=1,kNpc=2,kAir=4,kBoost=8,kClimb=16,kOverheat=32,kFlags=63;
 struct Pose {
@@ -68,11 +68,11 @@ inline bool Decode(const void* data,std::size_t size,State& out) noexcept {
     State s;std::memcpy(&s,data,sizeof(s));if(!Valid(s))return false;out=s;return true;
 }
 struct Gate {
-    drill_net::Gate watermarks;
+    seat_net::Gate watermarks;
     bool Admit(const State& s,bool session,bool authority,std::int32_t controller) noexcept {
         if(!Valid(s))return false;
-        drill_net::State key;key.sender=s.sender;key.sequence=s.sequence;key.controller=s.controller;
-        return watermarks.Admit(key,session,authority,controller);
+        seat_net::Head h;std::memcpy(&h,&s,sizeof(h));
+        return watermarks.Admit(h,session,authority,controller);
     }
 };
 } // namespace crew::sazabi_net

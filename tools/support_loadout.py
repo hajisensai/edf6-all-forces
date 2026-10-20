@@ -733,9 +733,13 @@ def jet_sgo(root: str | None, game: rootcpk.Game, l: Loadout) -> bytes:
         raise ValueError(f'{base} 不是插件战机的武器表（机炮 L / R 与油箱）')
     gun_rows = rows[:2]
     fuel = next(g for g in guns if isinstance(g, list) and str(g[0]).lower() == FUEL)
-    fuel_row = rows[[i for i, g in enumerate(guns) if isinstance(g, list) and str(g[0]).lower() == FUEL][0]]
+    fuel_at = [i for i, g in enumerate(guns) if isinstance(g, list) and str(g[0]).lower() == FUEL][0]
+    fuel_row = rows[fuel_at]
     weapons = list(guns[:2]) + [[_weapon(store_file(n, r)), _as_sgo(_store_params(n))] for n, r in l.pylons]
-    w_rows = list(gun_rows) + [list(gun_rows[0]) for _ in l.pylons]
+    # The pylons hang where the jet's own stores hang (its first store holder: vcobjects.jet_weapon_bones, the model's
+    # hp_store, not the guns' hp_gun: pylib/jet_hardpoints.py); a jet without one, where its guns do.
+    store_row = next((rows[i] for i, g in enumerate(guns) if i >= 2 and i != fuel_at and isinstance(g, list)), gun_rows[0])
+    w_rows = list(gun_rows) + [list(store_row) for _ in l.pylons]
     while len(weapons) < FUEL_AT:
         weapons.append(sgo.Float(struct.pack('<f', 0.0)))
         w_rows.append(list(gun_rows[0]))

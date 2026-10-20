@@ -13,6 +13,7 @@
 #include "stores.h"
 #include "edf/seat.h"
 #include "mission_packs.h"
+#include "sound_place.h"
 
 namespace crew {
 extern unsigned char* image;
@@ -171,6 +172,17 @@ struct Config {
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
     bool vehicleRam=true;           // a driven ground vehicle's parts (hull, feet, fists) hit what they drive into (vehicleram.cpp)
     float vehicleRamDamage=20.0f;   // ...their kinetic energy's damage (the jets' formula) times this (0: none; 20: a ground vehicle is 5-10x slower than a jet, so 1 would leave the ram unnoticeable)
+    // The gravity operations (gravity.cpp) and their users: the gravity gun (gravitygun.cpp, the Air Raider's EDF6VC_CALL_GRAVITY_GUN)
+    // and the M099 float guns (floatgun.cpp).
+    float gravityDamage=20.0f;      // what a thrown thing deals: 1/2 m dv^2 at 287 kJ a point (the rams' formula) times this (0: none)
+    bool gravityGun=true;           // the gravity gun grabs, carries and throws (off: it is the stock Laser Guide Kit it was cloned from)
+    float gravityThrowSpeed=40.0f;  // m/s a 2 t thing leaves the gun at (lighter faster, heavier slower: gravity_logic.h ThrowSpeed)
+    bool gravityAutoTest=false;     // a test: every few seconds the nearest enemy is grabbed, held over the player and slammed down (gravitygun.cpp)
+    bool gravityGrabPlayers=false;  // the gravity gun may grab players (any machine's) and vehicles a player rides (off: it passes them by)
+    int floatGuns=1;                // dropped guns that float round their finder and fire (floatgun.cpp): 0 off, 1 EDF5's last mission (M099) only, 2 every mission
+    int floatGunMost=4;             // ...at most this many round one player (a fifth replaces the oldest)
+    float floatGunSec=90.0f;        // ...each fights this long once picked up (0: until the mission ends)
+    float floatGunReach=3.5f;       // ...picked up by walking this near it (m across; 3 m up or down)
     bool vehicleSound=true;         // the ground vehicles' engines, turrets, loaders and main guns heard as the plugin makes them (vehsound.cpp)
     float vehicleEngineVolume=1.0f; // ...each group's volume, times the game's own; 0: that group's stock sound kept
     float vehicleTurretVolume=1.0f;
@@ -228,6 +240,7 @@ struct Config {
     bool infantryScope=true;        // a soldier's scoped weapon zoomed: a real optic's eyepiece and reticle (infantryscope.cpp)
     bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
     int thermalKey=0x4E;         // N cycles optical / white hot / black hot
+    int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)
     bool firstPerson=true;          // first person on foot: the key switches it (firstperson.cpp)
     bool fpVehicle=true;            // ...in a vehicle as well: each seat's eye at its station (fp_vehicle.cpp)
     bool fpHideStockHud=true;       // ...and the stock HUD off there (its information on the cockpit's panels)
@@ -276,8 +289,9 @@ struct Config {
     float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
     float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
     // The M map's 「摆放」 panel in the test range's mission (range_place.h; the debug spawn tool's catalog and making,
-    // whatever DebugSpawn says): on by default; enemies use the host-authoritative online transaction. RangePlaceAll: every row preloaded, the heavy EDF4.1 ones
-    // too (Entry::preload false: another 17 MB model each); off: those listed as not preloaded.
+    // whatever DebugSpawn says): on by default; enemies use the host-authoritative online transaction. RangePlaceAll: every
+    // row preloaded at the mission's start (Entry::preload false: a model archive of its own); off: those load the first
+    // time they are placed (debug_spawn.cpp RequestLoad).
     bool rangePlace=true;
     bool rangePlaceAll=false;
     bool roomLoadout=true;          // the room / HQ support loadout menu (room_ui.cpp; 0 at load: nothing installed, both
@@ -428,6 +442,9 @@ struct Config {
     float npcRecruitCooldownSec=60.0f;// ...a dismissed squad may be recruited again after this many s
     bool vanillaRecruit=false;      // the stock walk-up recruit (原版率领: a free NPC joins a player within 10 m): false = off,
                                     // the map's FOLLOW / RECRUIT the only way in (npcai.cpp ThinkHook; needs CustomNpcAi)
+    bool npcFreeSquadCover=false;   // the stock's cover of a squad with +0x540 (seen at 1/3 the range; for a while damage
+                                    // taken x0.01, dealt x0.1; npcai.cpp CoverRoot): false = no squad has it (the user
+                                    // 2026-10-19: "暂时取消这个掩护设定吧"), true = kept by its top NPC before and after recruiting
     bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
     float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
@@ -609,11 +626,10 @@ void JetSoundTick() noexcept;
 float GameEffectVolume() noexcept;   // jetsound.cpp: the game's master volume times its effect volume (0..1)
 // The lock-on beeps of a vehicle's weapons: kept for a local player's seat, silenced for every other (jetsound.cpp).
 void LockSound(unsigned char* vehicle) noexcept;
-// Where a sound is heard from the camera (jetsound.cpp, the sound system's listener 0, as the jets' engines are placed):
-// its gain in each ear (equal power, the spread kept), its distance (m), the Doppler ratio between it and the camera,
-// the unit line from it to the camera.
-struct SoundPlace { float left,right,distance,doppler; float toCamera[3]; };
-bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;   // false: no listener this frame
+// Where a sound at `pos` moving `vel` (m/s) is heard from the camera (jetsound.cpp, the sound system's listener 0, as the
+// jets' engines are placed; SoundPlace and the arithmetic: sound_place.h). `vel` may be nullptr: a still sound. False: no
+// listener this frame.
+bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;
 bool SoundListening() noexcept;   // the listener is placed this frame (JetSoundTick ran for the jets or the vehicles)
 // The ground vehicles' sounds (vehsound.cpp, ini VehicleSound): checked at load; every vehicle's input, the plugin off
 // too (then it gives the stock sounds back); a new mission.
@@ -879,7 +895,8 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // The Sazabi's beams are made and fired the same way (sazabi.cpp; pylib/vcobjects.py SAZABI_ROUND_FILES): the mega
 // particle cannon's beam, its charge's glow at the chest, a funnel's burst. The Proteus's shield is raised the same way
 // (proteus_shield.inc; tools/make_proteus.py): one BarrierBullet01, the stock Air Raider's electromagnetic barrier.
-enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield };
+enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,
+                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;
@@ -888,6 +905,26 @@ bool RoundSize(const RoundObj& r,float size) noexcept;       // its next rounds'
 bool RoundBlast(const RoundObj& r,float radius) noexcept;    // its next rounds' blast radius (AmmoExplosion)
 void RoundDrop(RoundObj& r) noexcept;                        // deleted while it is there; forgotten
 bool EmcIfcOk() noexcept;                                    // RoundSize / RoundBlast's IFC fields are where they write
+
+// ultimate.cpp: the ultimate strike (docs/plan-2026-10-19-ultimate.md, src/ultimate_plan.h): the satellite call's fire
+// (airstrike.cpp) starts its show at `at` by `caller` with the weapon's `damage`; UltimateTick plays it a frame at a time
+// (SharedFrameTick); ResetUltimate at a new mission forgets it, nothing touched (its objects were the last mission's).
+// False: no show (its rounds not preloaded, every show slot taken): the stock satellite beam fires instead.
+// Several play at once; online every machine plays each machine's player's shows (ultimate_net_protocol.h).
+bool UltimateStart(const unsigned char* caller,const float* at,float damage,std::uint64_t seed) noexcept;
+void UltimateTick() noexcept;
+void ResetUltimate() noexcept;
+void PreloadUltimate(void* mgr) noexcept;   // the magic circles, with the shells (jet_spawn.cpp)
+// Online, another machine's player's call here (airstrike.cpp SatFireHook): its stock beam is held back only for a show of
+// its caller's heard here (UltimateHeardFrom: began lately, not matched to a call yet), or one whose start comes before the
+// stock beam fires (UltimateStockHoldBack, from ultimate.cpp, true when one was held back). An older build's call (no
+// show heard) keeps its stock beam. Within kUltimateStockWaitMs of each other.
+constexpr ULONGLONG kUltimateStockWaitMs=4000;
+bool UltimateHeardFrom(const unsigned char* caller) noexcept;
+bool UltimateStockHoldBack(const unsigned char* caller) noexcept;
+void UltimateStockReset() noexcept;
+// The caller's HUD line (hud.cpp): peers of an older build in the room see the stock beam.
+bool PlayerUltimateCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // emc.cpp: the EMC's charged beam (docs/emc-re.md, README EMC 蓄力光束): the player's trigger in a Vehicle510_Maser charges,
 // and one thick beam carries the stock burst's damage through every enemy and building on its line, a blast at its end.
@@ -968,6 +1005,8 @@ void ResetSightZoom() noexcept;
 // swallowed and counted, up +; the count since the last call), and the first XInput pad's buttons now (false: none).
 int TakeScopeWheel(bool hold) noexcept;
 bool MapPadButtons(std::uint16_t* buttons) noexcept;
+// The same pad with its analog triggers (0..255), for the controlled enemy's attack keys.
+bool MapPadState(std::uint16_t* buttons,std::uint8_t* leftTrigger,std::uint8_t* rightTrigger) noexcept;
 
 // turretcam.cpp: the turret camera (README 炮塔镜头, docs/camera-re.md §3b, §5). InstallTurretCam at load (the riding
 // camera's look-at fetch, the seat aim's step); TurretCamFrame from every vehicle's input, the plugin off too (it lets
@@ -1288,8 +1327,10 @@ struct DebugSpawnCue {
     wchar_t note[96];         // ...a support call's own answer (support_dispatch.cpp SupportCallAt), else empty
     int keys[5];              // the ini's keys: toggle, prev, next, category, spawn
 };
+// kDebugSpawnLoading: the row was not loaded this mission; its load is queued (debug_spawn.cpp RequestLoad) and the
+// spawn is made at the same place as soon as the game reports its resources complete.
 enum DebugSpawnStatus : int { kDebugSpawnNone, kDebugSpawnDone, kDebugSpawnFailed, kDebugSpawnOnline, kDebugSpawnNoPlace,
-                                   kDebugSpawnRequested, kDebugSpawnRefused };
+                                   kDebugSpawnRequested, kDebugSpawnRefused, kDebugSpawnLoading };
 bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: nothing to show
 }  // namespace crew
 

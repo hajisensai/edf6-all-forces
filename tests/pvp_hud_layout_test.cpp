@@ -24,6 +24,7 @@ void PvpCase(int width,int height,bool payload,int kind) {
     scenePvp.localTeam=kind==6 ? 1 : 2;strcpy_s(scenePvp.localPuid,kind==6 ? "guest8-puid" : "fixture-puid");
     scenePvp.result=scenePvp.pending ? pvp_protocol::Result::Pending : pvp_protocol::Result::Idle;
     const bool pad=kind==5;scenePvpPadPick=pad ? kPvpTeam1 : -1;
+    scenePvpOpen=kind!=0 && !pad;   // the title clicked open (kPvpFold); the pad's R3 focus opens it by itself
     MapCommandReadout command{};command.pointer=kind!=0 && !pad;
     command.placeOn=true;command.placeOpen=true;command.placeOnline=true;
     command.placeCategory=static_cast<int>(debugspawn::Category::enemy41);
@@ -50,11 +51,14 @@ void PvpCase(int width,int height,bool payload,int kind) {
             }
         }
     },scale);
-    const int expected=kind==0 || kind==2 || kind==4 ? 0 : kind==3 || kind==6 ? 2 : 3;
+    const int rowsExpected=kind==0 || kind==2 || kind==4 ? 0 : kind==3 || kind==6 ? 2 : 3;
+    const int expected=rowsExpected+(command.pointer ? 1 : 0);   // with the pointer the title row folds it (kPvpFold)
     TaskCheck(scenePvpVisible && scenePvpCount==expected,"collapsed/not-ready/pending/host/guest expose the correct actions");
+    int folds=0;for(int i=0;i<scenePvpCount;++i)folds+=scenePvpCodes[i]==kPvpFold;
+    TaskCheck(folds==(command.pointer ? 1 : 0),"the title row (and only it) folds the panel, and only with the pointer");
     TaskCheck(scenePvpSnapshot.epoch==scenePvp.epoch && scenePvpSnapshot.revision==scenePvp.revision &&
               !std::strcmp(scenePvpSnapshot.localPuid,scenePvp.localPuid),"hit ledger keeps the displayed world, revision and member");
-    TaskCheck(std::fabs(pvpBottom-pvpTop-(kind==0 ? 28.0f : 146.0f)*scale)<0.1f,"hover or pad focus expands the tab without changing its anchor");
+    TaskCheck(std::fabs(pvpBottom-pvpTop-(kind==0 ? 28.0f : 146.0f)*scale)<0.1f,"a click or pad focus expands the tab without changing its anchor");
     for(int i=0;i<scenePvpCount;++i) {
         const auto* rect=scenePvpRects[i];
         TaskCheck(rect[1]>=pvpTop && rect[3]<=pvpBottom,"PVP hit lies inside its captured background");
@@ -90,6 +94,11 @@ void ThermalCases(int width,int height) {
     TaskCheck(wcsstr(controls.text,Tr(Tx::thermalWhiteHot))==nullptr,"failed thermal request never claims an active white-hot image");
     status.reason=thermal::Reason::notInSight;ThermalControlText(controls,status);
     TaskCheck(wcsstr(controls.text,Tr(Tx::thermalEnterSight))!=nullptr,"outside-sight reason explains how to enable thermal");
+    TaskCheck(wcsstr(controls.text,Tr(Tx::thermalWhiteHot))!=nullptr,"a mode chosen outside the sight is shown as chosen, with what it waits for");
+    status.requested=thermal::Mode::optical;ThermalControlText(controls,status);
+    TaskCheck(wcsstr(controls.text,Tr(Tx::thermalEnterSight))==nullptr,"optical outside the sight waits for nothing");
+    status.eligible=false;status.rejected=true;status.reason=thermal::Reason::unsupportedSeat;ThermalControlText(controls,status);
+    TaskCheck(wcsstr(controls.text,Tr(Tx::thermalUnsupportedSeat))!=nullptr,"a press on a seat without thermal is answered on the HUD");
 }
 }
 int main() {

@@ -42,6 +42,8 @@ CATEGORIES = ('vehicle', 'ours', 'aircraft', 'enemy', 'enemy41', 'soldier')
 # Where a row's file is: Root.cpk ('stock'), Mods/OBJECT written by the range's install ('range'), by the installer
 # ('installer', 'edf41', 'edf5dlc').
 SOURCES = ('stock', 'range', 'installer', 'edf41', 'edf5dlc')
+# A model archive (the 4.1 preload rule: what a variant costs in memory; tools/gen_spawn_catalog.py MODEL_ARCHIVES too).
+MODEL_ARCHIVES = ('.MRAB', '.RAB')
 
 
 @dataclass(frozen=True)
@@ -90,37 +92,190 @@ STOCK_VEHICLES: tuple[tuple[str, str], ...] = (
     ('v503_bike', '摩托 503'),
     ('v613_bike', '摩托 613'),
     ('v512_keitruck', '轻卡车 512'),
+    # 2026-10-19 (the user: 「载具与npc少了」): every other stock vehicle a stock mission places with its own mission_setup
+    # (Root.cpk, tests/debug_spawn_resource_audit.py): the colours, the DLC bikes and mechs, and the kinds that only come
+    # as an NPC-crewed `_ai` SGO (their mission_setup carries the AI's weapons and durability; placed empty all the same).
+    ('v504_begaruta_g_mission', '机甲 Begaruta 504（G）'),
+    ('v504_begaruta_fw', '机甲 Begaruta 504（FW）'),
+    ('v504_begaruta_dlchs_mission', '机甲 Begaruta 504（DLC 高速型）'),
+    ('vehicle407_bigbegaruta', '大型机甲 407（原型）'),
+    ('vehicle407_bigbegaruta_flame_ai', '大型机甲 407 火焰（NPC 型）'),
+    ('v515_retrobalam_gold', '巨型机甲 Balam 515（金）'),
+    ('v515_retrobalam_green', '巨型机甲 Balam 515（绿）'),
+    ('v515_retrobalam_gray', '巨型机甲 Balam 515（灰）'),
+    ('v515_retrobalam_ulti', '巨型机甲 Balam 515（终极）'),
+    ('v601_tank_ai', '坦克 601（NPC 型）'),
+    ('v607_robotruck_ai', '机器人卡车 607（NPC 型）'),
+    ('v607_robotruck_f_ai', '机器人卡车 607 F（NPC 型）'),
+    ('v607_robotruck_g_ai', '机器人卡车 607 G（NPC 型）'),
+    ('v607_robotruck_m_ai', '机器人卡车 607 M（NPC 型）'),
+    ('v610_ptruck_gun_ai', '武装皮卡 610 机枪（NPC 型）'),
+    ('v611_ptruck_rocket_ai', '武装皮卡 611 火箭（NPC 型）'),
+    ('vehicle402_rocket_ai', '火箭车 402（NPC 型）'),
+    ('v612_nix_ai', '机甲 Nix 612（NPC 型）'),
+    ('v608_oldrobot_ai', '旧型机甲 608（NPC 型）'),
+    ('v608_oldrobot_long_ai', '旧型机甲 608 长炮（NPC 型）'),
+    ('v614_proteus_mk2_flame_ai', '机甲 Proteus 614 火焰（NPC 型）'),
+    ('v614_proteus_mk2_laser_ai', '机甲 Proteus 614 激光（NPC 型）'),
+    ('v503_bike_edf6benefits', '摩托 503（特典）'),
+    ('v503_bike_omegaz', '摩托 503（Omega Z）'),
+    ('v512_keitruck_bgp', '轻卡车 512（BGP）'),
+    ('v513_trailertruck01cab', '拖车头 513'),
 )
 
-# EDF6's own enemies: those the range's waves and the grand battle use, and the debug spawn tool's. (sgo, label, flying,
-# lift: m over the clicked ground; a flier is made up there and flies off on its own, a ship is made at its height)
-STOCK_ENEMIES: tuple[tuple[str, str, bool, float], ...] = (
-    ('giantant01', '巨蚁', False, 0.5),
-    ('e650_giantant01', '巨蚁（EDF6）', False, 0.5),
-    ('giantspider01', '巨蜘蛛', False, 0.5),
-    ('giantantqueen', '母体（女王巨蚁）', False, 0.5),
-    ('e651_spider01_light', '蜘蛛（轻）', False, 0.5),
-    ('e503_frog_af_leader', '青蛙兵（队长）', False, 0.5),
-    ('e503_frog_af', '青蛙兵', False, 0.5),
-    ('e503_armorfrog_af', '装甲青蛙', False, 0.5),
-    ('e601_martian_gs', '火星人 GS', False, 0.5),
-    ('e601_martian_ls', '火星人 LS', False, 0.5),
-    ('e602_berserker', '狂战士 E602', False, 0.5),
-    ('e513_shieldbearer', '护盾运载者 E513', False, 0.5),
-    ('giantbee01charge', '巨蜂（飞）', True, 20.0),
-    ('e507_goldufo', '金色 UFO（飞）', True, 30.0),
-    ('e515_imperialufo', '帝国 UFO（飞）', True, 30.0),
-    ('e605_spinnerufo', 'UFO E605（飞）', True, 30.0),
-    ('dragonsmall401', '蝌蚪（五六代，飞）', True, 30.0),
-    ('e508_carrier', '传送舰（飞）', True, 250.0),
-    ('e611_timeship', '星导者新舰（飞）', True, 400.0),
-    ('e511_mothership_edf6', '母舰（飞）', True, 900.0),
-    ('shootingtarget', '训练靶子（不动）', False, 0.5),
+# EDF6's own enemies: those the range's waves and the grand battle use, the debug spawn tool's, and every other one the
+# stock missions place. (sgo, label, flying, lift: m over the clicked ground; a flier is made up there and flies off on
+# its own, a ship is made at its height; preloaded at the mission's start, else loaded when first placed)
+STOCK_ENEMIES: tuple[tuple[str, str, bool, float, bool], ...] = (
+    ('giantant01', '巨蚁', False, 0.5, True),
+    ('e650_giantant01', '巨蚁（EDF6）', False, 0.5, True),
+    ('giantspider01', '巨蜘蛛', False, 0.5, True),
+    ('giantantqueen', '母体（女王巨蚁）', False, 0.5, True),
+    ('e651_spider01_light', '蜘蛛（轻）', False, 0.5, True),
+    ('e503_frog_af_leader', '青蛙兵（队长）', False, 0.5, True),
+    ('e503_frog_af', '青蛙兵', False, 0.5, True),
+    ('e503_armorfrog_af', '装甲青蛙', False, 0.5, True),
+    ('e601_martian_gs', '火星人 GS', False, 0.5, True),
+    ('e601_martian_ls', '火星人 LS', False, 0.5, True),
+    ('e602_berserker', '狂战士 E602', False, 0.5, True),
+    ('e513_shieldbearer', '护盾运载者 E513', False, 0.5, True),
+    ('giantbee01charge', '巨蜂（飞）', True, 20.0, True),
+    ('e507_goldufo', '金色 UFO（飞）', True, 30.0, True),
+    ('e515_imperialufo', '帝国 UFO（飞）', True, 30.0, True),
+    ('e605_spinnerufo', 'UFO E605（飞）', True, 30.0, True),
+    ('dragonsmall401', '蝌蚪（五六代，飞）', True, 30.0, True),
+    ('e508_carrier', '传送舰（飞）', True, 250.0, True),
+    ('e611_timeship', '星导者新舰（飞）', True, 400.0, True),
+    ('e511_mothership_edf6', '母舰（飞）', True, 900.0, True),
+    ('shootingtarget', '训练靶子（不动）', False, 0.5, True),
+    # 2026-10-19 (the user: 「好多怪物少了」): every other enemy the stock missions' scripts place (Root.cpk MISSION/**/
+    # MISSION.AC: CreateEnemy*, CreateEnemyGroup*, generators), each kind with its colours, ranks and weapons. The last field:
+    # preloaded at the mission's start (its model archives are already the rows' above, so no more memory), else loaded
+    # the first time it is placed (debug_spawn.cpp RequestLoad: a few seconds, then it is made where it was asked).
+    ('e503_frog_lc', '异星殖民者（激光）', False, 0.5, True),
+    ('e503_frog_sg', '异星殖民者（霰弹）', False, 0.5, True),
+    ('e503_frog_lc_leader', '异星殖民者（激光·队长）', False, 0.5, True),
+    ('e503_frog_sg_leader', '异星殖民者（霰弹·队长）', False, 0.5, True),
+    ('e503_armorfrog_lc', '装甲殖民者（激光）', False, 0.5, True),
+    ('e503_armorfrog_sg', '装甲殖民者（霰弹）', False, 0.5, True),
+    ('e503_armorfrog_af_leader', '装甲殖民者（队长）', False, 0.5, True),
+    ('e617_wildfrog_g', '野生殖民者', False, 0.5, False),
+    ('e617_wildfrog_g2', '野生殖民者 2', False, 0.5, False),
+    ('e506_biggrey_af', '异星航天员（突击）', False, 0.5, False),
+    ('e506_biggrey_ll', '异星航天员（激光）', False, 0.5, False),
+    ('e506_biggrey_sg', '异星航天员（霰弹）', False, 0.5, False),
+    ('e506_biggrey_af_leader', '异星航天员（队长）', False, 0.5, False),
+    ('e506_nude_biggrey_af', '异星航天员（无护甲）', False, 0.5, False),
+    ('e506_ha_biggrey_hmg', '重装航天员（重机枪）', False, 0.5, False),
+    ('e506_ha_biggrey_fl', '重装航天员（火焰）', False, 0.5, False),
+    ('e506_ha_biggrey_ml', '重装航天员（导弹）', False, 0.5, False),
+    ('e506_ha_biggrey_ll', '重装航天员（激光）', False, 0.5, False),
+    ('e516_biggreyboss', '银之人', False, 0.5, False),
+    ('e601_martian_gg', '库鲁鲁 GG', False, 0.5, True),
+    ('e601_martian_ll', '库鲁鲁 LL', False, 0.5, True),
+    ('e601_martian_ws', '库鲁鲁 WS', False, 0.5, True),
+    ('e601_martian_ns', '库鲁鲁 NS', False, 0.5, True),
+    ('e601_martian_n', '库鲁鲁 N', False, 0.5, True),
+    ('e601_martian_nn', '库鲁鲁 NN', False, 0.5, True),
+    ('e601_martian_ggss', '库鲁鲁 GGSS', False, 0.5, True),
+    ('e601_martian_llss', '库鲁鲁 LLSS', False, 0.5, True),
+    ('e601_martian_wwss', '库鲁鲁 WWSS', False, 0.5, True),
+    ('e601_martian_ssss', '库鲁鲁 SSSS', False, 0.5, True),
+    ('e601_martian_llll', '库鲁鲁 LLLL', False, 0.5, True),
+    ('e661_martian_leader_cs', '库鲁鲁队长 CS', False, 0.5, False),
+    ('e661_martian_leader_ggss', '库鲁鲁队长 GGSS', False, 0.5, False),
+    ('e661_martian_leader_aass', '库鲁鲁队长 AASS', False, 0.5, False),
+    ('giantant02b', '侵略生物α（红）', False, 0.5, True),
+    ('giantant03b', '侵略生物α（酸）', False, 0.5, True),
+    ('giantant04', '侵略生物α 04', False, 0.5, True),
+    ('e650_giantant02b', '侵略生物α（红，EDF6）', False, 0.5, True),
+    ('goldant', '金色侵略生物α', False, 0.5, False),
+    ('e650_giantant_gold', '金色侵略生物α（EDF6）', False, 0.5, False),
+    ('e665_giantant_medium', '中型侵略生物α', False, 0.5, False),
+    ('giantant01egg', '蚁卵', False, 0.5, False),
+    ('e650_giantant_queen', '母体生物（EDF6）', False, 0.5, True),
+    ('e650_giantant_queen_gold', '金色母体生物（EDF6）', False, 0.5, False),
+    ('goldantqueen', '金色母体生物', False, 0.5, False),
+    ('e662_giantant_queen_red', '红色母体生物', False, 0.5, False),
+    ('e651_spider01', '侵略生物β', False, 0.5, True),
+    ('e651_spider01_silver', '银色侵略生物β（EDF6）', False, 0.5, False),
+    ('silverspider', '银色侵略生物β', False, 0.5, False),
+    ('e667_spider_medium', '中型侵略生物β', False, 0.5, False),
+    ('e663_spider_egg_sac', '蜘蛛卵囊', False, 0.5, False),
+    ('giantspiderqueen', '国王', False, 0.5, True),
+    ('e651_spider_queen', '国王（EDF6）', False, 0.5, True),
+    ('e667_spider_queen', '国王（中型）', False, 0.5, True),
+    ('silverspiderqueen', '银色国王', False, 0.5, False),
+    ('giantbee01', '飞天型侵略生物（飞）', True, 20.0, True),
+    ('giantbee02charge', '飞天型侵略生物 02（飞）', True, 20.0, True),
+    ('e668_giantbee_medium', '中型飞天型侵略生物（飞）', True, 20.0, False),
+    ('giantbeequeen', '女王（飞）', True, 20.0, True),
+    ('giantbeequeen02', '女王 02（飞）', True, 20.0, True),
+    ('e668_giantbee_queen', '女王（中型，飞）', True, 20.0, True),
+    ('yerrowsmalldragon', '蝌蚪（黄，飞）', True, 30.0, False),
+    ('redsmalldragon', '大型蝌蚪（红，飞）', True, 30.0, False),
+    ('e604_radon', '飞行恐龙（飞）', True, 40.0, False),
+    ('e602_berserker_beama', '机械生命体（光束 A）', False, 0.5, True),
+    ('e602_berserker_beamb', '机械生命体（光束 B）', False, 0.5, True),
+    ('e602_berserker_ace', '超级机械生命体', False, 0.5, True),
+    ('e602_berserker_grapple', '高机动型机械生命体', False, 0.5, True),
+    ('e602_berserker_bommer', '掷弹兵', False, 0.5, True),
+    ('e602_berserker_middle', '大型机械生命体', False, 0.5, True),
+    ('e602_berserker_middle_mg', '大型机械生命体（机枪）', False, 0.5, True),
+    ('e602_berserker_middle_punch', '大型机械生命体（拳）', False, 0.5, True),
+    ('e602_berserker_middle_spread', '大型机械生命体（散射）', False, 0.5, True),
+    ('e602_berserker_middle_bommer', '大型掷弹兵', False, 0.5, True),
+    ('e602_berserker_large', '独眼巨人', False, 0.5, True),
+    ('e602_berserker_large_ace', '独眼巨人（高阶）', False, 0.5, True),
+    ('e602_berserker_large_punch', '独眼巨人（拳）', False, 0.5, True),
+    ('e616_venus_gs', '海怪克拉肯 GS（飞）', True, 20.0, False),
+    ('e616_venus_ggss', '海怪克拉肯 GGSS（飞）', True, 20.0, False),
+    ('e616_venus_llss', '海怪克拉肯 LLSS（飞）', True, 20.0, False),
+    ('e616_venus_ccss', '海怪克拉肯 CCSS（飞）', True, 20.0, False),
+    ('e664_armor_venus_gggg', '装甲克拉肯 GGGG（飞）', True, 20.0, False),
+    ('e664_armor_venus_bb', '装甲克拉肯 BB（飞）', True, 20.0, False),
+    ('e664_armor_venus_ww', '装甲克拉肯 WW（飞）', True, 20.0, False),
+    ('e618_squid_small', '黑霾（飞）', True, 30.0, False),
+    ('e606_shellfish', '涅加', False, 0.5, False),
+    ('e606_shellfish_ace', '高阶涅加', False, 0.5, False),
+    ('e669_shellfish_medium', '中型涅加', False, 0.5, False),
+    ('e669_shellfish_medium_ace', '中型高阶涅加', False, 0.5, False),
+    ('e603_merman', '斯库拉', False, 0.5, False),
+    ('e514_dango', '侵略生物γ', False, 0.5, False),
+    ('e660_heavy_dango_m', '重装侵略生物γ（中）', False, 0.5, False),
+    ('e660_heavy_dango_l', '重装侵略生物γ（大）', False, 0.5, False),
+    ('e509_deiroi', '迪洛伊', False, 0.5, False),
+    ('e513_shieldbearer_l', '防护者 L', False, 0.5, True),
+    ('e513_shieldbearer_xl', '防护者 XL', False, 0.5, True),
+    ('e507_goldufo_ace', '红色无人机（飞）', True, 30.0, True),
+    ('e507_goldufo_big', '大型无人机（飞）', True, 30.0, False),
+    ('e515_imperialufo_ace', '帝国无人机（高阶，飞）', True, 30.0, True),
+    ('e515_imperialufo_prototype', '第２类无人机（飞）', True, 30.0, True),
+    ('e605_spinnerufo_blue', '第３类无人机（蓝，飞）', True, 30.0, True),
+    ('e605_spinnerufo_ace', '高阶第３类无人机（飞）', True, 30.0, True),
+    ('e605_spinnerufo_blue_ace', '高阶第３类无人机（蓝，飞）', True, 30.0, True),
+    ('e505_generator', '传送锚塔', False, 0.5, False),
+    ('e505_generator_large', '传送锚塔（大）', False, 0.5, False),
+    ('e505_generator_superlarge', '传送锚塔（超大）', False, 0.5, False),
+    ('e517_anthill', '传送装置', False, 0.5, False),
+    ('e615_hornetnest_small01', '小型土巢', False, 0.5, False),
+    ('hornetnest401', '土巢', False, 0.5, False),
+    ('e612_anchor', '尾型锚塔', False, 0.5, True),
+    ('e666_anchor_small_heavyfire', '小型尾型锚塔（重火力）', False, 0.5, False),
+    ('nephila', '厄拉尼亚', False, 0.5, False),
+    ('monster501', '艾尔基努斯', False, 0.5, False),
+    ('monster501_king', '艾尔基努斯（王）', False, 0.5, False),
+    ('e504_monstera', '亚凯鲁斯', False, 0.5, False),
+    ('e510_fortress', '前哨基地', False, 0.5, True),
+    ('e512_dropboat', '运兵艇（飞）', True, 30.0, False),
+    ('e511_mothership', '母舰（EDF5，飞）', True, 900.0, True),
+    ('e609_jormungand', '耶梦加得', False, 0.5, False),
+    ('e614_grandmother', '圆环（飞）', True, 300.0, False),
 )
 
 # EDF4.1's objects by class: the panel's category and words, how far up it is made, whether it flies.
 EDF41_CLASSES: dict[str, tuple[str, str, float, bool]] = {
-    'Vehicle505_Tank': ('vehicle', '4.1 坦克', 0.5, False),
+    'Vehicle601_Tank': ('vehicle', '4.1 坦克', 0.5, False),
     'Vehicle_Car': ('vehicle', '4.1 边三轮摩托', 0.5, False),
     # Empty vehicles wait on the ground for boarding; a helicopter is not an airborne enemy wave.
     'Vehicle506_Helicopter': ('vehicle', '4.1 直升机 Nereid', 0.5, False),
@@ -191,8 +346,10 @@ def edf41_left_out(obj: dict) -> str | None:
 @lru_cache(maxsize=None)
 def edf41_rows() -> tuple[Row, ...]:
     """The 4.1 rows, most used in 4.1's missions first within a class. The plugin preloads by default the first of each
-    class and any other whose files (but its own SGO) the rows before it bring already (a variant on the same model costs
-    no more memory). All ported vehicles are available by default; additional heavy enemy models require RangePlaceAll=1."""
+    class and any other whose model archives (MODEL_ARCHIVES) the rows before it bring already (a variant on the same
+    model costs no more memory: a ragdoll SHKT or a CAS of its own is no model). All ported vehicles are preloaded; the
+    other enemies load the first time they are placed (src/debug_spawn.cpp RequestLoad; ini RangePlaceAll=1 preloads
+    every row at the mission's start)."""
     reg = _edf41_registry()
     objects = [o for o in reg['objects'] if edf41_left_out(o) is None and o['class'] in EDF41_CLASSES]
     order = {c: i for i, c in enumerate(EDF41_CLASSES)}
@@ -204,11 +361,11 @@ def edf41_rows() -> tuple[Row, ...]:
         category, words, lift, flying = EDF41_CLASSES[o['class']]
         stem = o['object'].removeprefix('OBJECT/').removesuffix('.SGO')
         words = EDF41_DRAGON_LABELS.get(stem, words)
-        others = {f for f in o['files'] if f != o['object']}
-        preload = category == 'vehicle' or o['class'] not in first or others <= brought
+        models = {f for f in o['files'] if f.upper().endswith(MODEL_ARCHIVES)}
+        preload = category == 'vehicle' or o['class'] not in first or models <= brought
         first.add(o['class'])
         if preload:
-            brought |= set(o['files'])
+            brought |= {f for f in o['files'] if f.upper().endswith(MODEL_ARCHIVES)}
         spawn = o.get('spawn_object')
         spawn = spawn.removeprefix('OBJECT/').removesuffix('.SGO').lower() if spawn else None
         rows.append(Row(stem.lower(), f'{words} {stem.split("/")[-1]}', category, 'edf41', lift, flying, preload, spawn))
@@ -237,9 +394,12 @@ def edf5dlc_rows() -> tuple[Row, ...]:
 
 
 def edf5dlc_files(sgo: str) -> list[str]:
+    """The Mods files of an EDF5 DLC object: its group's own. Its `needs` are Root.cpk's (the stock fortress's missile and
+    debris models, E509 / E510): tools/edf5_dlc.py checks them in the player's game when it installs; asking for them
+    under Mods kept the row 「未安装」 for good (2026-10-19)."""
     with open(EDF5_DLC_REGISTRY, encoding='utf-8') as f:
         g = json.load(f)['groups'][f'OBJECT/{sgo.upper()}.SGO']
-    return list(g['files']) + list(g.get('needs', []))
+    return list(g['files'])
 
 
 # The installer's vehicles placeable as they are (their SGO keeps the mission_setup of the stock SGO it is made from):
@@ -263,7 +423,7 @@ def rows() -> list[Row]:
     labels = dict(gen.VEHICLES)
     out += [Row(s, short(labels[s]), 'ours', 'range') for s in gen.PLACEABLE_DERIVED]
     out += [Row(s, label, 'ours', 'installer') for s, label, _ in INSTALLER_VEHICLES]
-    out += [Row(s, label, 'enemy', 'stock', lift, flying) for s, label, flying, lift in STOCK_ENEMIES]
+    out += [Row(s, label, 'enemy', 'stock', lift, flying, preload) for s, label, flying, lift, preload in STOCK_ENEMIES]
     out += list(edf5dlc_rows())
     out += [r for r in edf41_rows() if r.category == 'enemy41']
     return out

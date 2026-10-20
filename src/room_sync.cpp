@@ -5,6 +5,7 @@
 // (loadout_store.h) and the host's configuration (support_variants.h ForEachConfiguredVariant). UI thread only.
 #include "room_sync.h"
 #include "room_sync_logic.h"
+#include "coop_attr.h"
 #include "crew.h"
 #include "loadout_store.h"
 #include "support_variants.h"
@@ -29,25 +30,18 @@ void PublishHostList() noexcept {
     hostCopyHash=hash;
     ReleaseSRWLockExclusive(&hostLock);
 }
-const EDF6CoopMemberAttributeApi* api=nullptr;
 bool apiLogged=false;
 
+// coop_attr.h: v1's functions up to snapshot required; lastError (appended within v1) optional (room_sync_logic.h asks
+// EDF6COOP_MA_HAS before calling it).
 const EDF6CoopMemberAttributeApi* Api() noexcept {
-    if(api)return api;
-    const HMODULE coop=GetModuleHandleW(L"EDF6Coop.dll");
-    const auto get=coop ? reinterpret_cast<EDF6CoopGetMemberAttributeApiFn>(GetProcAddress(coop,"EDF6CoopGetMemberAttributeApi")) : nullptr;
-    const EDF6CoopMemberAttributeApi* table=nullptr;
-    __try { table=get ? get(EDF6COOP_MEMBER_ATTRIBUTE_VERSION) : nullptr; } __except(EXCEPTION_EXECUTE_HANDLER) { table=nullptr; }
-    // The table only appends: v1's functions up to snapshot are required; lastError (appended within v1) is optional
-    // (room_sync_logic.h asks EDF6COOP_MA_HAS before calling it).
-    if(table && (table->version!=EDF6COOP_MEMBER_ATTRIBUTE_VERSION || !EDF6COOP_MA_HAS(table,snapshot)))table=nullptr;
+    const EDF6CoopMemberAttributeApi* table=coopattr::Api();
     if(!apiLogged) {
         apiLogged=true;
         Log("ROOMSYNC EDF6Coop member attributes %s",table ? "found: room pre-sync on" :
-            coop ? "missing (older EDF6Coop): room pre-sync off, the pending list as before" : "missing (no EDF6Coop.dll)");
+            "missing (older EDF6Coop or no EDF6Coop.dll): room pre-sync off, the pending list as before");
     }
-    api=table;
-    return api;
+    return table;
 }
 
 // Mods/OBJECT beside EDF6.exe (support_variants.cpp ModsPath).

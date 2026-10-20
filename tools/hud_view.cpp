@@ -32,6 +32,7 @@
 #include "../src/hud.cpp"
 #include "../src/player_name.h"
 #include "../src/map_cam.h"
+#include <array>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -250,6 +251,8 @@ bool SupportVersionCue(wchar_t* line,std::size_t capacity) noexcept {
     if(sceneVersionOn)_snwprintf_s(line,capacity,_TRUNCATE,L"%ls",sceneVersion);
     return sceneVersionOn;
 }
+// The ultimate strike's caller line (ultimate.cpp PlayerUltimateCue): not drawn in any scene.
+bool PlayerUltimateCue(wchar_t*,std::size_t) noexcept { return false; }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
@@ -271,6 +274,13 @@ bool EnemyControlReadSnapshotForView(std::uintptr_t key,enemy_control::Snapshot*
     if(!hasEnemyControl || !value || !key || key!=sceneEnemy.snapshot.ownerHumanKey)return false;
     *value=sceneEnemy.snapshot;return true;
 }
+// The controlled body's published catalogue: the readout's page stands for its first attacks.
+unsigned EnemyControlAbilities(const enemy_control::Snapshot& snapshot,unsigned first,enemy_control::Ability* abilities,unsigned capacity) noexcept {
+    if(!abilities || snapshot.revision!=sceneEnemy.snapshot.revision)return 0;
+    unsigned n=0;
+    for(unsigned i=first;i<static_cast<unsigned>(sceneEnemy.count) && n<capacity;++i)abilities[n++]=sceneEnemy.ability[i];
+    return n;
+}
 void MapCommandEnemyButtons(const float* rects,const int* codes,int n,const enemy_control::Snapshot* snapshot) noexcept {
     sceneEnemyVisible=snapshot!=nullptr;sceneEnemyHitSnapshot=snapshot ? *snapshot : enemy_control::Snapshot{};
     sceneEnemyCount=rects && codes && snapshot ? (std::max)(0,(std::min)(n,kMapEnemyItems)) : 0;
@@ -285,8 +295,14 @@ void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpSta
     for(int i=0;i<n;++i){std::memcpy(scenePvpRects[i],rects+i*4,16);scenePvpCodes[i]=codes[i];}
 }
 int MapPvpPadSelection() noexcept { return scenePvpPadPick; }
+bool scenePvpOpen=false;   // the PVP panel unfolded by a click on its title (mapcmd.cpp MapPvpOpen)
+bool MapPvpOpen() noexcept { return scenePvpOpen; }
+// The legend at the dock's foot (hud.cpp MapLegend): unfolded or not, its title row as drawn.
+bool sceneLegendOpen=false,sceneLegendOn=false;float sceneLegendRow[4]{};
+bool MapLegendOpen() noexcept { return sceneLegendOpen; }
+void MapCommandLegendButton(const float* r) noexcept { sceneLegendOn=r!=nullptr;if(r)std::memcpy(sceneLegendRow,r,16); }
 thermal::Status sceneThermal{};
-namespace thermal { Status GetStatus() noexcept { return sceneThermal; } }
+namespace thermal { Status GetStatus(const void*) noexcept { return sceneThermal; } }
 VehicleSensorReadout sceneSensor{};bool sceneSensorOn=false;
 bool PlayerVehicleContacts(VehicleSensorReadout* value) noexcept { if(value)*value=sceneSensor;return value && sceneSensorOn; }
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
@@ -295,7 +311,7 @@ void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
     sceneButtons=n;
     for(int i=0;i<n;++i){for(int k=0;k<4;++k)sceneButton[i][k]=r[i*4+k];sceneButtonId[i]=ids[i];}
 }
-float sceneUiPanels[16][4]{};int sceneUiCount=0;
+float sceneUiPanels[kMapUiPanels][4]{};int sceneUiCount=0;
 float sceneSquadButtons[16][4]{};int sceneSquadButtonCount=0;
 float sceneSquadFold[4]{};bool sceneSquadFoldOn=false;
 float scenePayloadButtons[kMostPayload][4]{};int scenePayloadButtonCount=0;
@@ -324,9 +340,10 @@ void MapCommandComposeButtons(const float* r,const int* codes,int n) noexcept {
     sceneComposeHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneComposeHits[i],r+i*4,16);sceneComposeCode[i]=codes[i];}
 }
 // The test range's 「摆放」 panel's click targets as drawn (hud.cpp MapPlacePanel).
-float scenePlaceHits[kMapPlaceItems][4]{};int scenePlaceCode[kMapPlaceItems]{},scenePlaceHitCount=0;
-void MapCommandPlaceButtons(const float* r,const int* codes,int n) noexcept {
-    scenePlaceHitCount=n;for(int i=0;i<n;++i){std::memcpy(scenePlaceHits[i],r+i*4,16);scenePlaceCode[i]=codes[i];}
+float scenePlaceHits[kMapPlaceItems][4]{};int scenePlaceCode[kMapPlaceItems]{},scenePlaceHitCount=0,scenePlaceWindow=0;
+void MapCommandPlaceButtons(const float* r,const int* codes,int n,int window) noexcept {
+    if(!r || !codes)n=0;
+    scenePlaceHitCount=n;scenePlaceWindow=window;for(int i=0;i<n;++i){std::memcpy(scenePlaceHits[i],r+i*4,16);scenePlaceCode[i]=codes[i];}
 }
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
@@ -507,6 +524,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     // 30 m apart; the heli guarding the same point (helis share its orbit); the jet following the player; a box being
     // dragged (Ctrl + left drag) round the crawlers to the pointer; the last command's word.
     sceneCmd=MapCommandReadout{};
+    sceneCmd.squadGroups[0]=0x5;sceneCmd.squadGroups[1]=0x100;   // groups 1 and 3, group 9 (the panel's [13], [9])
     sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<(static_cast<unsigned>(mapcmd::kLastOrder)+1))-1;sceneCmd.selectedSquads=1;sceneCmd.squadToolsAllowed=!online;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
     sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
     auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
@@ -525,6 +543,12 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     cmdUnit(robo1,false,"CRAWLER",Order::guard,guard,true);
     cmdUnit(robo2,false,"CRAWLER",Order::guard,slot1,true);
     sceneCmd.unit[sceneCmd.count-1].owner=sceneCmd.unit[sceneCmd.count-2].owner=kCmdOwnerGround;
+    // The crawlers kept as group 1 (Ctrl+1), the second also in group 2, with two Shift-queued points after its guard.
+    {
+        CmdMark& a=sceneCmd.unit[sceneCmd.count-2];CmdMark& b=sceneCmd.unit[sceneCmd.count-1];
+        a.groups=0x1;b.groups=0x3;b.ways=2;
+        const float w1[3]={200.0f,0.0f,520.0f},w2[3]={320.0f,0.0f,600.0f};std::memcpy(b.way[0],w1,12);std::memcpy(b.way[1],w2,12);
+    }
     // The squads (npcai.cpp, docs/npc-ai-design.md §6.1): a recruited one guarding, a free one, a script's (locked, grey),
     // one dismissed waiting out its cooldown; their panel on the right.
     const float sq1[3]={-30.0f,0.0f,150.0f},sq2[3]={200.0f,0.0f,250.0f},sq3[3]={-250.0f,0.0f,500.0f};
@@ -697,6 +721,37 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
             for(int k=0;k<scenePayloadButtonCount;++k)under(scenePayloadButtons[k],"the payload panel",k);
         }
     } else if(scenePlaceHitCount){++textFailed;std::printf("FAIL place panel in a mission without it: %d\n",scenePlaceHitCount);}
+    // The legend (the user, 2026-10-19: 「操作区域和图例冲突了」): its title row at the dock's foot, clickable with the
+    // mouse, clear of the command card, the support bar, the payload panel, PVP and every 「摆放」 target; open, none of
+    // its words under any of those targets either.
+    if(pad ? sceneLegendOn : !sceneLegendOn){++textFailed;std::printf("FAIL legend title clickable %d with pad %d\n",sceneLegendOn,pad);}
+    {
+        std::vector<std::array<float,4>> targets;
+        for(int k=0;k<sceneButtons;++k)targets.push_back({sceneButton[k][0],sceneButton[k][1],sceneButton[k][2],sceneButton[k][3]});
+        for(int k=0;k<sceneSupportHitCount;++k)targets.push_back({sceneSupportHits[k][0],sceneSupportHits[k][1],sceneSupportHits[k][2],sceneSupportHits[k][3]});
+        for(int k=0;k<scenePayloadButtonCount;++k)targets.push_back({scenePayloadButtons[k][0],scenePayloadButtons[k][1],scenePayloadButtons[k][2],scenePayloadButtons[k][3]});
+        for(int k=0;k<scenePlaceHitCount;++k)targets.push_back({scenePlaceHits[k][0],scenePlaceHits[k][1],scenePlaceHits[k][2],scenePlaceHits[k][3]});
+        for(int k=0;k<scenePvpCount;++k)targets.push_back({scenePvpRects[k][0],scenePvpRects[k][1],scenePvpRects[k][2],scenePvpRects[k][3]});
+        for(int k=0;k<sceneComposeHitCount;++k)targets.push_back({sceneComposeHits[k][0],sceneComposeHits[k][1],sceneComposeHits[k][2],sceneComposeHits[k][3]});
+        for(int k=0;k<sceneSquadButtonCount;++k)targets.push_back({sceneSquadButtons[k][0],sceneSquadButtons[k][1],sceneSquadButtons[k][2],sceneSquadButtons[k][3]});
+        auto hits=[](const float* a,const std::array<float,4>& q){ return a[0]<q[2] && q[0]<a[2] && a[1]<q[3] && q[1]<a[3]; };
+        if(sceneLegendOn) {
+            const float* b=sceneLegendRow;
+            if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::puts("FAIL legend off the screen");}
+            for(const auto& q:targets)if(hits(b,q)){++textFailed;std::puts("FAIL legend title under another target");break;}
+        }
+        static const Tx kLegendWords[]={Tx::legendYou,Tx::legendSquad,Tx::legendFriendly,Tx::legendVehicle,Tx::legendAircraft,
+            Tx::legendHelicopter,Tx::legendEmpty,Tx::legendCarrier,Tx::legendLargeEnemy,Tx::legendLargeEnemyAir,Tx::legendObjective,
+            Tx::legendEnemy,Tx::legendEnemyFlying,Tx::legendLock,Tx::legendNearestEnemy};
+        int words=0;
+        for(const Drew& d:drew)for(const Tx w:kLegendWords)if(d.text==Tr(w)) {
+            ++words;
+            const float a[4]={d.x0,d.y0,d.x1,d.y1};
+            for(const auto& q:targets)if(hits(a,q)){++textFailed;std::printf("FAIL legend word %s under a target\n",Narrow(d.text).c_str());break;}
+        }
+        if(sceneLegendOpen && !pad && words!=static_cast<int>(sizeof(kLegendWords)/sizeof(kLegendWords[0])))
+            {++textFailed;std::printf("FAIL open legend: %d words drawn\n",words);}
+    }
     // The squad panel (the user, 2026-10-09: "小队太多了…看不过来"): folded, the rows on foot that take orders, the rest
     // (a script's) in the summary row that opens it; open, every row and the row that folds it.
     int ranks[16];
@@ -707,7 +762,8 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     for(int i=0;i<sceneCmd.squads;++i) {
         const SquadRow& r=sceneCmd.squad[i];wchar_t kind[32],status[32];
         hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
-        Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));
+        wchar_t groups[16];MapGroupDigits(sceneCmd.squadGroups[i],groups,_countof(groups));   // its RTS groups ([13]), none: spaces
+        Line expected{};Format(expected,L"%ls  %ls x%d   %ls   %ls",groups,kind,r.alive,status,MapOrderWord(r.now.order));
         if(i<listedRows)shown(expected.text);
         else for(const Drew& d:drew)if(d.text==expected.text){++textFailed;std::printf("FAIL folded squad row shown: %s\n",Narrow(d.text).c_str());}
     }
@@ -722,7 +778,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         bool board=false;
         for(int i=0;i<sceneButtons;++i) {
             board=board || sceneButtonId[i]==static_cast<int>(mapbtn::Id::board);
-            if(sceneButtonId[i]>=static_cast<int>(mapbtn::Id::formation) && sceneButtonId[i]<=static_cast<int>(mapbtn::Id::merge)) {
+            if(sceneButtonId[i]==static_cast<int>(mapbtn::Id::formation)) {
                 ++textFailed;std::puts("FAIL unsupported online squad editor is clickable");
             }
         }
@@ -2372,6 +2428,11 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_place_narrow",700.0f,60.0f,20.0f,false,9,1280,1.0f,false,false,false,2);
     MapScene(dir,L"map_place_payload",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,false,2);
     MapScene(dir,L"map_place_online",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,true,3);
+    // The legend unfolded at the dock's foot under the open 「摆放」 (the user, 2026-10-19: 「操作区域和图例冲突了」).
+    sceneLegendOpen=true;
+    MapScene(dir,L"map_place_legend",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,false,2);
+    MapScene(dir,L"map_place_legend_narrow",700.0f,60.0f,20.0f,false,9,1280,1.0f,true,false,false,2);
+    sceneLegendOpen=false;
     StatsScenes(dir);
     StockTank(ground);
     failed+=!MapDrawsMapAlone(ground,sceneStock.hull);

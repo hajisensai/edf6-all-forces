@@ -151,7 +151,7 @@ def main() -> int:
         fail('SoldierVariant: a pack sent to a room with an older build (its Validate refuses the whole plan)')
     protocol = code_only(read(root, 'src/support_protocol.h'))
     checks += 1
-    if not re.search(r'kExtensions=[^;]*kExtBackpack', protocol) or not re.search(r'kExtBuilt=[^;]*kExtBackpack;', protocol):
+    if not re.search(r'kExtensions=[^;]*kExtBackpack', protocol) or not re.search(r'kExtBuilt=[^;]*kExtBackpack[|;]', protocol):
         fail('support_protocol.h: kExtBackpack not announced by every hello')
     net = code_only(read(root, 'src/support_net.cpp'))
     checks += 1

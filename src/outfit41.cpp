@@ -21,12 +21,18 @@
 // the room's frame when they change); a remote member is resolved from its mission index to its EOS id
 // (EDF6Coop_ResolveMissionPlayerPuid) and its value read. No value (an older All Forces): the stock outfit, logged; the
 // room's version notice names the feature (support_protocol.h kExtOutfit41).
+// The EDF4.1 outfit's own colours (outfit41_logic.h Reconcile) reach the others in this machine's member record: the
+// swap is made right before MissionSync_Begin packs it (Outfit41MissionSync, from mission.cpp). The save never holds
+// them: the save job's copy of MAIN.GST gets the stock colours back (SaveJobHook; docs/edf41-outfits.md §1.3).
 #include "outfit41.h"
 #include "outfit41_logic.h"
-#include "coop_extension_api.h"
-#include "coop_member_attribute_api.h"
+#include "code_signatures.h"
+#include "coop_attr.h"
 #include "crew.h"
 #include "edf/patch.h"
+#include "edf/wstr.h"
+#include "game_dialog.h"
+#include "host_settings.h"
 #include "hud.h"
 #include "hudtext.h"
 #include "loadout_file.h"
@@ -43,6 +49,7 @@ using namespace outfit41;
 
 // EDF.dll 0x678CCB46 RVAs (tools/outfit41_sigs.py checks every one).
 constexpr std::size_t kGameStatus=0x20B2890,kGsClass=0x6E90,kGsOutfit=0x6E94,kGsStride=0x3E60,kGsUnlocked=0x300;
+constexpr std::size_t kGsLocalPlayers=0x14FF4;   // this machine's players (the HQ / room views are made for these)
 constexpr std::size_t kBattlePath=0xE34E0,kMenuPath=0xE3420,kOwnPath=0xD8730,kPlayerOutfit=0xD8700;
 constexpr std::size_t kCreate=0x5A3F90,kCreateOnline=0x591234,kCreateOffline=0x59145B;
 constexpr std::size_t kMemberDesc=0x595960,kMemberDescCall=0x591219;
@@ -51,24 +58,34 @@ constexpr std::size_t kMenuPathCalls[]={0x93B426,0x93BD03};
 constexpr std::size_t kViewVtable=0x180FA60,kOnMessage=0x93B320;
 constexpr std::size_t kViewBuiltCall=0x9393D3;   // the view's constructor 0x938760: OnMessage(this, 3, ...) called directly
 constexpr std::size_t kShowDialog=0x119C600,kOutfitDialogCall=0x8ABC10;
-constexpr std::size_t kReserve=0xB91D0,kItemCopy=0x89950,kAssign=0x3D450,kClosePopup=0x7E2EB0,kRebuildView=0x8BDE80;
+constexpr std::size_t kClosePopup=0x7E2EB0,kRebuildView=0x8BDE80;
+// The save (MAIN.GST: GS +0x6E68, 0xDCE8 bytes): 0x7BCD40's job constructor 0x7BD910 (called at 0x7BCE7C) copies the
+// block into the job (+0x90 data, +0x98 size), which the job's run checksums and writes (tools/outfit41_sigs.py).
+constexpr std::size_t kSaveJobCall=0x7BCE7C,kSaveJob=0x7BD910,kJobData=0x90,kJobSize=0x98;
 // The five stock items' std::function vtables, in the popup's order (outfit -1, 2, 3, 1, 0); the first is the one ours
 // is copied from.
 constexpr std::size_t kItemVtables[kStockItems]={0x1805CF0,0x1805D28,0x1805D60,0x1805D98,0x1805DD0};
+// The outfit change still locked (outfit41_logic.h OfferLocked): HUiHQSoldierSelect's OnUpdate (vtable 0x1805788 slot 1,
+// 0x8AB310: the popup is built there), the item's destructor (0x8E170: the popup's own eh-vector destructor, 0x8ABC4D),
+// the text table's lookup (0x7A3500 on [0x20B29A8], 0x8A9B53), the two help keys the unlocked screen picks from and the
+// pad-mode flag it asks (0x1183D70, 0x8A9B3F).
+constexpr std::size_t kSoldierVtable=0x1805788,kSoldierSlotUpdate=1,kSoldierUpdate=0x8AB310;
+constexpr std::size_t kTextTable=0x20B29A8,kTextLookup=0x7A3500,kPadMode=0x1183D70;
+constexpr std::size_t kHelpKeyboard=0x18058F0,kHelpPad=0x18058A0;
 
 using PathFn=const wchar_t*(__fastcall*)(void*,int,int);
 using Call4=std::uintptr_t(__fastcall*)(std::uintptr_t,std::uintptr_t,std::uintptr_t,std::uintptr_t);
-using ReserveFn=void(__fastcall*)(void*,std::size_t);
-using ItemCopyFn=void*(__fastcall*)(void*,void*,const void*);
-using AssignFn=void*(__fastcall*)(void*,const wchar_t*,std::size_t);
 using CloseFn=std::uintptr_t(__fastcall*)(void*);
 using RebuildFn=void(__fastcall*)(int,int,int);
 using OutfitFn=int(__fastcall*)(void*,int);
 using FuncCopyFn=void*(__fastcall*)(void*,void*);
 using FuncCallFn=std::uintptr_t(__fastcall*)(void*,void*);
 using MessageFn=std::uintptr_t(__fastcall*)(unsigned char*,std::uintptr_t,std::uintptr_t);
+using ScreenUpdateFn=std::uintptr_t(__fastcall*)(unsigned char*,void*);
+using TextLookupFn=const wchar_t*(__fastcall*)(void*,const wchar_t*);
+using PadModeFn=bool(__fastcall*)();
 
-struct Signature { std::size_t rva; const unsigned char* bytes; std::size_t size; };
+using Signature=CodeSignature;
 #include "outfit41_signatures.inc"
 
 // The choice and the files: the UI thread writes, the mission's load reads (a bool a player: no lock).
@@ -87,26 +104,26 @@ thread_local int memberIndex=-1;    // 0x595960's member (0x591219), for the cre
 thread_local int viewPlayer=-1;     // inside the 3D view's OnMessage: its player
 FuncCallFn stockCall[kStockItems]{};
 MessageFn nextMessage=nullptr;
-void* ourVtable[1+kFuncSlots]{};   // [0] the stock vtable's [-1] (its RTTI locator), then the six slots
+ScreenUpdateFn nextSoldierUpdate=nullptr;
+unsigned char* forcedScreen=nullptr;   // the soldier screen whose +0x7A4 we set (UI thread)
+gamedialog::FuncVtable ourVtable{};   // [0] the stock vtable's [-1] (its RTTI locator), then the six slots
 
 unsigned char* GameStatus() noexcept { return At<unsigned char*>(image,kGameStatus); }
+SRWLOCK colourLock=SRWLOCK_INIT;   // the colour swap: the UI thread and a mission's preload may both ask
 
-bool CheckCode() noexcept {
-    for(const auto& s:kSignatures) {
-        bool ok=false;
-        __try { ok=Matches(s.rva,s.bytes,s.size); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-        if(!ok){Log("OUTFIT41 REFUSED: code at EDF+0x%zX is not the expected (%zu bytes)",s.rva,s.size);return false;}
-    }
-    return true;
-}
+bool CheckCode() noexcept { return CheckSignatures(kSignatures,"OUTFIT41"); }
 
 // --- The choice and the files
 void LoadState() noexcept {
     std::string text;
     state=ReadFileBytes(statePath,&text) ? Parse(text) : State{};
 }
+// The file's other lines kept (ini_text.h: key by key), only our keys written.
 void SaveState() noexcept {
-    if(!ReplaceFileAtomic(statePath,Format(state)))Log("OUTFIT41 could not save %ls",statePath);
+    std::string was,text;
+    if(!ReadFileBytes(statePath,&was))was.clear();
+    if(!outfit41::Store(was,state,&text)){Log("OUTFIT41 %ls is UTF-16: not rewritten",statePath);return;}
+    if(!ReplaceFileAtomic(statePath,text))Log("OUTFIT41 could not save %ls",statePath);
 }
 void CheckFiles() noexcept {
     for(int c=0;c<kClasses;++c) {
@@ -148,83 +165,68 @@ int ClassOf(int who) noexcept {
     return gs && ValidLocal(who) ? At<std::int32_t>(gs,kGsClass+static_cast<std::size_t>(who)*kGsStride) : -1;
 }
 
-// --- The room (EDF6Coop): this machine's value, the others'
-const EDF6CoopMemberAttributeApi* attrApi=nullptr;
-EDF6CoopResolveMissionPlayerPuidFn resolvePuid=nullptr;
-bool coopLooked=false;
-void LookCoop() noexcept {
-    if(coopLooked)return;
-    const HMODULE coop=GetModuleHandleW(L"EDF6Coop.dll");
-    if(!coop)return;   // looked again later: EDF6Coop loads before us, but a test harness may not
-    coopLooked=true;
-    const auto get=reinterpret_cast<EDF6CoopGetMemberAttributeApiFn>(GetProcAddress(coop,"EDF6CoopGetMemberAttributeApi"));
-    const EDF6CoopMemberAttributeApi* table=nullptr;
-    __try { table=get ? get(EDF6COOP_MEMBER_ATTRIBUTE_VERSION) : nullptr; } __except(EXCEPTION_EXECUTE_HANDLER) { table=nullptr; }
-    if(table && (table->version!=EDF6COOP_MEMBER_ATTRIBUTE_VERSION || !EDF6COOP_MA_HAS(table,snapshot)))table=nullptr;
-    attrApi=table;
-    resolvePuid=reinterpret_cast<EDF6CoopResolveMissionPlayerPuidFn>(GetProcAddress(coop,"EDF6Coop_ResolveMissionPlayerPuid"));
-    Log("OUTFIT41 EDF6Coop: member attributes %s, mission player ids %s",attrApi ? "found" : "missing (older EDF6Coop)",
-        resolvePuid ? "found" : "missing (older EDF6Coop)");
+// --- The EDF4.1 outfit's own colours (outfit41_logic.h Reconcile): the block of the stock outfit under it holds them while
+// the player wears it. Asked wherever the game may read a player's colours next: the soldier screen's frame, the popup's
+// picks, the HQ / room frame and 3D view, a mission's preload.
+const char* kColourActs[]={"","worn: its colours put in","taken off: the stock colours put back","edited","dropped (a save was loaded)"};
+void Recolour(int p) noexcept {
+    if(!ValidLocal(p))return;
+    AcquireSRWLockExclusive(&colourLock);
+    ColourAct act=ColourAct::none;
+    bool changed=false;
+    int cls=-1,outfit=-1;
+    __try {
+        unsigned char* gs=GameStatus();
+        if(gs && (p==0 || At<std::int32_t>(gs,kGsLocalPlayers)>p)) {
+            cls=ClassOf(p);
+            if(ValidClass(cls) && LocalWears(p,cls))outfit=reinterpret_cast<OutfitFn>(image+kPlayerOutfit)(gs,p);
+            act=Reconcile(state,p,gs+ColourOffset(p,0,0),outfit>=0 ? cls : -1,outfit,changed);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){act=ColourAct::none;changed=false;}
+    if(changed)SaveState();
+    ReleaseSRWLockExclusive(&colourLock);
+    if(act!=ColourAct::none && act!=ColourAct::mirrored)
+        Log("OUTFIT41 player %d class %d: the EDF4.1 outfit's own colours %s (stock outfit %d's block)",p+1,cls,
+            kColourActs[static_cast<int>(act)],outfit);
 }
-char published[kWireSize]{};   // the value EDF6Coop last accepted from us ("" none yet)
+void RecolourAll() noexcept { for(int p=0;p<kLocalPlayers;++p)Recolour(p); }
+
+// --- The room (EDF6Coop, coop_attr.h): this machine's value, the others'
+coopattr::Publisher publisher{kAttrKey};
 void PublishOwn() noexcept {
-    LookCoop();
-    if(!attrApi)return;
+    const coopattr::Table* t=coopattr::Api();
+    if(!t){publisher.Forget();return;}
     char value[kWireSize];
     FormatWire(LocalWire(0),value);
-    if(std::strcmp(value,published)==0)return;
-    std::uint32_t ok=0;
-    __try { ok=attrApi->publish(kAttrKey,value); } __except(EXCEPTION_EXECUTE_HANDLER){ok=0;}
-    if(ok){std::memcpy(published,value,sizeof(value));Log("OUTFIT41 told the room %s=%s",kAttrKey,value);}
-    else {
-        std::uint32_t why=0;
-        __try { why=EDF6COOP_MA_HAS(attrApi,lastError) && attrApi->lastError ? attrApi->lastError() : 0u; } __except(EXCEPTION_EXECUTE_HANDLER){why=0;}
-        static std::uint32_t loggedWhy=~0u;
-        if(why!=loggedWhy){loggedWhy=why;Log("OUTFIT41 EDF6Coop refused %s=%s (lastError %u): tried again next frame",kAttrKey,value,why);}
-    }
-}
-struct Lookup {
-    const char* id=nullptr;
-    bool found=false,has=false;
-    char value[EDF6COOP_MEMBER_ATTRIBUTE_MAX_VALUE+1]{};
-};
-void EDF6COOP_MA_CALL Each(void* context,const EDF6CoopMemberValue* m) {
-    auto* l=static_cast<Lookup*>(context);
-    if(!m || !m->memberId || std::strcmp(m->memberId,l->id)!=0)return;
-    l->found=true;
-    l->has=m->hasValue!=0 && m->value;
-    if(l->has)strncpy_s(l->value,m->value,_TRUNCATE);
+    std::uint32_t why=0;
+    coopattr::Publisher::Result r=coopattr::Publisher::Result::refusedAgain;
+    __try { r=publisher.Publish(t,value,&why); } __except(EXCEPTION_EXECUTE_HANDLER){r=coopattr::Publisher::Result::refusedAgain;}
+    if(r==coopattr::Publisher::Result::published)Log("OUTFIT41 told the room %s=%s",kAttrKey,value);
+    else if(r==coopattr::Publisher::Result::refused)Log("OUTFIT41 EDF6Coop refused %s=%s (lastError %u): tried again next frame",kAttrKey,value,why);
 }
 // A remote member's flags by its mission index; false (logged why) when there is no valid value: the stock outfit.
 bool RemoteWire(int index,Wire& out) noexcept {
-    LookCoop();
-    if(!attrApi || !resolvePuid){Log("OUTFIT41 mission player %d: no EDF6Coop member attributes here: stock outfit",index);return false;}
-    EDF6CoopPeer peer{};
-    std::uint32_t ok=0;
-    __try { ok=resolvePuid(index,&peer); } __except(EXCEPTION_EXECUTE_HANDLER){ok=0;}
-    if(!ok || !peer.id[0]){Log("OUTFIT41 mission player %d: EDF6Coop does not know its member id: stock outfit",index);return false;}
-    Lookup l;l.id=peer.id;
-    __try { ok=attrApi->snapshot(kAttrKey,&Each,&l,nullptr); } __except(EXCEPTION_EXECUTE_HANDLER){ok=0;}
-    if(!ok || !l.found){Log("OUTFIT41 mission player %d (%s): not among the room's members: stock outfit",index,peer.id);return false;}
-    if(!l.has){Log("OUTFIT41 mission player %d (%s): tells the room nothing of the EDF4.1 outfit (an older All Forces): stock outfit",index,peer.id);return false;}
-    if(!ParseWire(l.value,out)){Log("OUTFIT41 mission player %d (%s): %s=\"%s\" of another version: stock outfit",index,peer.id,kAttrKey,l.value);return false;}
+    coopattr::Value v;
+    char why[160]="";
+    bool read=false;
+    __try { read=coopattr::MissionPlayerValue(coopattr::Api(),coopattr::ResolvePuid(),kAttrKey,index,v,why,sizeof(why)); }
+    __except(EXCEPTION_EXECUTE_HANDLER){read=false;strcpy_s(why,"the room's members unreadable");}
+    if(!read){Log("OUTFIT41 mission player %d: %s: stock outfit",index,why);return false;}
+    if(!v.found){Log("OUTFIT41 mission player %d (%s): not among the room's members: stock outfit",index,v.id);return false;}
+    if(!v.has){Log("OUTFIT41 mission player %d (%s): tells the room nothing of the EDF4.1 outfit (an older All Forces): stock outfit",index,v.id);return false;}
+    if(!ParseWire(v.text,out)){Log("OUTFIT41 mission player %d (%s): %s=\"%s\" of another version: stock outfit",index,v.id,kAttrKey,v.text);return false;}
     return true;
 }
 // This machine's value told when it changed, the others' watched (EDF6Coop watches a key from its first read on: a preload
-// reads them at once). At most every kTickMs: from the room's frame and from the 3D view's messages (the HQ and the room,
-// also with RoomLoadout=0, where room_ui installs nothing), so a save loaded or an outfit unlocked reaches the room
-// before the next mission.
-constexpr ULONGLONG kTickMs=500;
-ULONGLONG lastTick=0;
+// reads them at once). At most every 0.5 s (coop_attr.h Beat): from the room's frame and from the 3D view's messages
+// (the HQ and the room, also with RoomLoadout=0, where room_ui installs nothing), so a save loaded or an outfit unlocked
+// reaches the room before the next mission; and right before the member record is packed (Outfit41MissionSync).
+coopattr::Beat beat;
 void Tick() noexcept {
-    const ULONGLONG now=GetTickCount64();
-    if(lastTick && now-lastTick<kTickMs)return;
-    lastTick=now;
+    if(!beat.Due(GetTickCount64()))return;
+    RecolourAll();   // before telling the room: the member record the game sends reads these blocks
     PublishOwn();
-    if(attrApi) {
-        Lookup none;none.id="";
-        __try { attrApi->snapshot(kAttrKey,&Each,&none,nullptr); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-    }
+    __try { coopattr::Watch(coopattr::Api(),kAttrKey); } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 bool RemoteWears(int index,int cls) noexcept {
     if(!Cfg().enabled || !Installed(cls))return false;   // Enabled=0: every model the stock one
@@ -243,6 +245,7 @@ const wchar_t* __fastcall BattlePathHook(void* tables,int cls,int outfit) {
     const wchar_t* ours=nullptr;
     if(ValidClass(cls)) {
         if(b.what==Build::preloadOnline && ValidIndex(b.who)) {
+            if(!b.remote)Recolour(0);
             const bool wears=b.remote ? RemoteWears(b.who,cls) : LocalWears(0,cls);
             ours=Decided(cls,wears,preloads.Online(b.who));
             Log("OUTFIT41 online preload: mission player %d (%s) class %d: %s",b.who,b.remote ? "remote" : "this machine's",cls,
@@ -255,6 +258,7 @@ const wchar_t* __fastcall BattlePathHook(void* tables,int cls,int outfit) {
 const wchar_t* __fastcall OwnPathHook(void* gs,int who,int cls) {
     if(ValidLocal(who) && ValidClass(cls)) {
         preloads.BeginPreload();
+        Recolour(who);   // this mission's outfit decides the block (the mission's outfit -1 resolves per mission)
         const wchar_t* ours=Decided(cls,LocalWears(who,cls),preloads.Local(who));
         const Wire w=LocalWire(who);
         Log("OUTFIT41 preload: player %d class %d: %s (chosen %d, mission outfit or locked %d, EDF4.1 pack %d, files %d)",who+1,
@@ -303,6 +307,7 @@ std::uintptr_t __fastcall MessageHook(unsigned char* view,std::uintptr_t id,std:
     viewPlayer=was;
     preloads.MissionOver();   // the HQ / room 3D view: out of any mission (also with RoomLoadout=0: no screen frame then)
     Tick();
+    HostSettingsRoomTick();   // so is this machine's word to the room (host_settings.h; beat-limited)
     return result;
 }
 // The constructor's own first build calls OnMessage directly (0x9393D3), past the vtable: the same, to the stock function.
@@ -355,6 +360,7 @@ std::uintptr_t __fastcall OurPicked(void* impl,void* arg) {
         SaveState();
         Log("OUTFIT41 player %d: the EDF4.1 outfit chosen",who+1);
     }
+    if(ValidLocal(who))Recolour(who);   // its own colours in before the view is rebuilt
     const auto result=reinterpret_cast<CloseFn>(image+kClosePopup)(At<void*>(arg,0));
     if(ValidLocal(who))Rebuild(who,ClassOf(who));
     if(who==0)PublishOwn();
@@ -367,13 +373,60 @@ template<int I> std::uintptr_t __fastcall StockPicked(void* impl,void* arg) {
         state.on[who]=false;
         SaveState();
         Log("OUTFIT41 player %d: the EDF4.1 outfit off (stock item %d)",who+1,I);
+        Recolour(who);   // the stock block back before the stock item changes the outfit
     }
     const auto result=stockCall[I](impl,arg);
+    if(ValidLocal(who))Recolour(who);   // the outfit may now resolve to another block (the EDF4.1 pack's default)
     if(was)Rebuild(who,ClassOf(who));
     if(who==0)PublishOwn();   // the save's outfit may have changed the mission default too
     return result;
 }
 constexpr FuncCallFn kStockHooks[kStockItems]={&StockPicked<0>,&StockPicked<1>,&StockPicked<2>,&StockPicked<3>,&StockPicked<4>};
+
+// GS +0x300: the stock outfit change unlocked (1), locked (0); -1 unreadable.
+int Unlocked() noexcept {
+    __try {
+        unsigned char* gs=GameStatus();
+        return gs ? (At<unsigned char>(gs,kGsUnlocked)!=0 ? 1 : 0) : -1;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
+// The help line the unlocked screen shows (0x8A9B37..0x8A9BB1): the text table's entry assigned to +0x738, +0x6F2 set.
+void UnlockedHelp(unsigned char* screen) noexcept {
+    const bool keyboard=KeyboardHelp(At<std::int32_t>(screen,kScreenPlayer),reinterpret_cast<PadModeFn>(image+kPadMode)());
+    void* table=At<void*>(image,kTextTable);
+    if(!table)return;
+    const wchar_t* text=reinterpret_cast<TextLookupFn>(image+kTextLookup)(table,
+        reinterpret_cast<const wchar_t*>(image+(keyboard ? kHelpKeyboard : kHelpPad)));
+    if(!text)return;
+    edf::wstr::Assign(image,screen+kScreenHelp,text);
+    Put<unsigned char>(screen,kScreenHelpDirty,1);
+}
+// Every frame of the soldier screen, before its own update builds the popup: a locked screen whose class has our files
+// gets the popup (+0x7A4) and the unlocked help once; given back (0, the locked stock value) when that stops holding.
+void OfferWhileLocked(unsigned char* screen) noexcept {
+    if(Unlocked()!=0)return;   // unlocked: the game's own; unreadable: left alone
+    const bool set=At<unsigned char>(screen,kScreenUnlocked)!=0;
+    if(set && forcedScreen!=screen)return;   // not ours to take back
+    const int who=At<std::int32_t>(screen,kScreenPlayer);
+    if(!set)CheckFiles();                     // once a screen (and while the files are missing), not every frame
+    const bool offer=OfferLocked(Cfg().enabled,false,ValidLocal(who) && Installed(ClassOf(who)));
+    if(offer && !set) {
+        Put<unsigned char>(screen,kScreenUnlocked,1);
+        UnlockedHelp(screen);
+        if(forcedScreen!=screen)Log("OUTFIT41 player %d: the outfit change is locked (GS +0x300 = 0): the outfit popup offered "
+                                    "with the mission's outfit and the EDF4.1 outfit only",who+1);
+        forcedScreen=screen;
+    } else if(!offer && set && forcedScreen==screen) {
+        Put<unsigned char>(screen,kScreenUnlocked,0);
+        forcedScreen=nullptr;
+    }
+}
+std::uintptr_t __fastcall SoldierUpdateHook(unsigned char* screen,void* ctx) {
+    int who=-1;
+    __try { if(screen){OfferWhileLocked(screen);who=At<std::int32_t>(screen,kScreenPlayer);} } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    Recolour(who);   // a class changed on this screen: its block follows
+    return nextSoldierUpdate(screen,ctx);
+}
 
 // Adds our item to the outfit popup's request (`req`, 0x119C600's fourth argument at 0x8ABC10) when the screen is a local
 // player's and its class's files are in Mods. Anything not as 0x8AB310 builds it: left alone.
@@ -388,25 +441,76 @@ void AddItem(unsigned char* req) noexcept {
     if(!impl0 || At<void*>(impl0,0)!=image+kItemVtables[0])return;
     const int who=ScreenPlayer(impl0);
     CheckFiles();
+    const bool locked=Unlocked()==0;
+    const gamedialog::ItemOps ops=gamedialog::GameOps(image);
+    if(locked) {
+        // Only a screen we gave the popup reaches here locked: the four stock outfits stay behind the game's unlock,
+        // destroyed in place (the game's own item destructor) before ours is added. Without our files: item 0 alone.
+        gamedialog::Truncate(ops,vec,kLockedKeep);
+        size=kLockedKeep;
+        Put<std::int32_t>(req,kReqCursor,0);
+    }
     if(!ValidLocal(who) || !Installed(ClassOf(who)))return;
     const wchar_t* label=hudtext::Tr(hudtext::Tx::outfit41Item,hudtext::Resolve(Cfg().hudLanguage,GameTextLanguage()));
-    if(size==At<std::size_t>(vec,kVecCapacity)) {
-        reinterpret_cast<ReserveFn>(image+kReserve)(vec,Grown(size));
-        data=At<unsigned char*>(vec,kVecData);
-    }
-    unsigned char* item=data+size*kItemSize;
-    Put<std::size_t>(vec,kVecSize,size+1);   // as the game's loop: the size first, then the item made in place
-    reinterpret_cast<ItemCopyFn>(image+kItemCopy)(vec,item,data);
-    reinterpret_cast<AssignFn>(image+kAssign)(item+kItemText,label,std::wcslen(label));
+    // a copy of item 0 pushed as the game's loop pushes (game_dialog.h: grown when full, the size first), then relabelled
+    unsigned char* item=gamedialog::PushCopyOf(ops,vec,0);
+    edf::wstr::Assign(image,item+kItemText,label);
     auto impl=At<unsigned char*>(item,kItemImpl);
     if(impl)Put<void*>(impl,0,&ourVtable[1]);
-    Put<std::int32_t>(req,kReqCursor,Cursor(state.on[who],At<std::int32_t>(req,kReqCursor)));
+    Put<std::int32_t>(req,kReqCursor,locked ? LockedCursor(state.on[who]) :
+                                       Cursor(state.on[who],At<std::int32_t>(req,kReqCursor),static_cast<std::int32_t>(size)));
 }
 std::uintptr_t __fastcall ShowDialogHook(std::uintptr_t system,std::uintptr_t out,std::uintptr_t type,std::uintptr_t req) {
     __try { AddItem(reinterpret_cast<unsigned char*>(req)); } __except(EXCEPTION_EXECUTE_HANDLER) {
         Log("OUTFIT41 the popup's request was not as expected: no EDF4.1 item");
     }
     return reinterpret_cast<Call4>(image+kShowDialog)(system,out,type,req);
+}
+
+// --- The save (2026-10-20 review of #226): the game writes MAIN.GST from a copy of GS +0x6E68 its save job makes
+// (0x7BD910). While a player wears the EDF4.1 outfit the stock outfit's block under it holds the EDF4.1 colours; the
+// copy gets that block's own stock colours back (the swap's backup) before the job runs, so the save file never holds
+// the EDF4.1 colours (the plugin removed, the stock outfit is as the player left it) and GS is never touched: the
+// game's views and the room keep seeing what the player wears. Only a block still swapped exactly as the plugin left
+// it (the copy's block is the EDF4.1 colours) is put back. Whatever thread the job is made on: under the swap's lock,
+// taken before the game copies GS (2026-10-20 review: taken only after the copy, a Recolour on another thread could
+// swap the block between the game's copy and the put-back, and the copy then held neither outfit's colours as the
+// swap's record says, saved as it was). The constructor only memcpys the block into the job's own vector
+// (docs/edf41-outfits.md: 0x7BD9F4..0x7BDA1B) and reaches none of the plugin's colour hooks, so holding the lock over it
+// cannot deadlock (read from its body; not measured under contention in game).
+using SaveJobFn=void*(__fastcall*)(void*,std::uintptr_t,const unsigned char*,std::uintptr_t,std::uintptr_t,std::uintptr_t,
+                                   std::uintptr_t,std::uintptr_t,std::uintptr_t,std::uintptr_t);
+struct ColourLockHeld {
+    ColourLockHeld() noexcept { AcquireSRWLockExclusive(&colourLock); }
+    ~ColourLockHeld() { ReleaseSRWLockExclusive(&colourLock); }
+    ColourLockHeld(const ColourLockHeld&)=delete;
+    ColourLockHeld& operator=(const ColourLockHeld&)=delete;
+};
+// The job's copy put back (the lock held by the caller): the blocks put back, -1 unreadable; `ours` the main block's job.
+int RestoreJobCopy(void* made,const unsigned char* block,std::uintptr_t size,bool* ours) noexcept {
+    *ours=false;
+    __try {
+        unsigned char* gs=GameStatus();
+        unsigned char* copy=At<unsigned char*>(made,kJobData);
+        *ours=gs && block==gs+kMainBlock && size==kMainSize && At<std::size_t>(made,kJobSize)==kMainSize && copy;
+        return *ours ? RestoreSavedCopy(state,copy) : 0;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+}
+void* __fastcall SaveJobHook(void* job,std::uintptr_t a,const unsigned char* block,std::uintptr_t size,std::uintptr_t e,
+                             std::uintptr_t f,std::uintptr_t g,std::uintptr_t h,std::uintptr_t i,std::uintptr_t j) {
+    void* made=nullptr;
+    int put=0;
+    bool ours=false;
+    {
+        const ColourLockHeld held;   // the copy and the put-back as one step against the colour swap
+        made=reinterpret_cast<SaveJobFn>(image+kSaveJob)(job,a,block,size,e,f,g,h,i,j);
+        if(made)put=RestoreJobCopy(made,block,size,&ours);
+    }
+    if(!made)return made;
+    if(put>0)Log("OUTFIT41 save: %d EDF4.1 colour block(s) written to MAIN.GST as the stock outfit's own (the game's copy only)",put);
+    else if(put<0)Log("OUTFIT41 save: the save job's copy unreadable: saved as the game made it");
+    else if(!ours)Log("OUTFIT41 save: a job of another block (%p, %zu bytes) left alone",static_cast<const void*>(block),static_cast<std::size_t>(size));
+    return made;
 }
 
 int Redirect(std::size_t site,std::size_t target,void* hook) noexcept {
@@ -436,6 +540,11 @@ std::uintptr_t Outfit41SessionPreload(PlayerPreloadFn call,std::uintptr_t a,std:
     return result;
 }
 
+void Outfit41MissionSync() noexcept {
+    if(!installed)return;
+    RecolourAll();   // the record 0x78E9A0 packs next reads these blocks (0x78EC70: the class's four outfits' colours)
+}
+
 void Outfit41RoomTick() noexcept {
     if(!installed)return;
     preloads.MissionOver();   // the online room / the HQ: out of any mission (an aborted load, another room since)
@@ -457,12 +566,8 @@ bool InstallOutfit41() noexcept {
     LoadState();
     CheckFiles();
     // our item's vtable: the first stock item's, with copy / move / call ours
-    auto stock=reinterpret_cast<void* const*>(image+kItemVtables[0]);
-    ourVtable[0]=stock[-1];
-    for(int i=0;i<kFuncSlots;++i)ourVtable[1+i]=stock[i];
-    ourVtable[1+kSlotCopy]=reinterpret_cast<void*>(&OurCopy);
-    ourVtable[1+kSlotMove]=reinterpret_cast<void*>(&OurMove);
-    ourVtable[1+kSlotCall]=reinterpret_cast<void*>(&OurPicked);
+    gamedialog::CloneFuncVtable(ourVtable,reinterpret_cast<void* const*>(image+kItemVtables[0]),reinterpret_cast<void*>(&OurCopy),
+                                reinterpret_cast<void*>(&OurMove),reinterpret_cast<void*>(&OurPicked));
     installed=true;   // before the first redirect: the hooks may run at once
     int battle=Redirect(kOwnPathCall,kOwnPath,reinterpret_cast<void*>(&OwnPathHook));
     battle+=Redirect(kSessionPathCall,kBattlePath,reinterpret_cast<void*>(&BattlePathHook));
@@ -471,6 +576,9 @@ bool InstallOutfit41() noexcept {
     battle+=Redirect(kCreateOnline,kCreate,reinterpret_cast<void*>(&CreateOnlineHook));
     battle+=Redirect(kCreateOffline,kCreate,reinterpret_cast<void*>(&CreateOfflineHook));
     constexpr int kBattleSites=6;
+    // the save's copy (not required for the rest: without it the save keeps the swapped block, as before; logged)
+    const int save=Redirect(kSaveJobCall,kSaveJob,reinterpret_cast<void*>(&SaveJobHook));
+    if(!save)Log("OUTFIT41 the save job could not be hooked: MAIN.GST keeps the EDF4.1 colours in the stock outfit's block while worn");
     int menu=0;
     {
         void* next=nullptr;
@@ -490,8 +598,17 @@ bool InstallOutfit41() noexcept {
     // our item only once every stock item can turn the outfit off again
     const int popup=items==static_cast<int>(kStockItems) ?
         Redirect(kOutfitDialogCall,kShowDialog,reinterpret_cast<void*>(&ShowDialogHook)) : 0;
-    Log("OUTFIT41 battle=%d/%d menu=%d/%zu stock items=%d/%zu popup=%d files ranger=%d wingdiver=%d airraider=%d fencer=%d "
-        "chosen=%d%d EDF41Content=%d (%ls)",battle,kBattleSites,menu,std::size(kMenuPathCalls)+1,items,kStockItems,popup,
+    // and offered to a locked screen only once the popup carries it (else the locked screen keeps the stock look)
+    int locked=0;
+    if(popup) {
+        void* next=nullptr;
+        auto slot=reinterpret_cast<void**>(image+kSoldierVtable)+kSoldierSlotUpdate;
+        if(*slot!=image+kSoldierUpdate)Log("OUTFIT41 the soldier screen's OnUpdate is %p, not the stock one: chained onto it",*slot);
+        if(edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&SoldierUpdateHook),&next)){nextSoldierUpdate=reinterpret_cast<ScreenUpdateFn>(next);locked=1;}
+        else Log("OUTFIT41 the soldier screen's OnUpdate could not be chained: the EDF4.1 outfit waits for the stock unlock");
+    }
+    Log("OUTFIT41 save=%d battle=%d/%d menu=%d/%zu stock items=%d/%zu popup=%d locked=%d (unlocked %d) files ranger=%d wingdiver=%d airraider=%d fencer=%d "
+        "chosen=%d%d EDF41Content=%d (%ls)",save,battle,kBattleSites,menu,std::size(kMenuPathCalls)+1,items,kStockItems,popup,locked,Unlocked(),
         available[0].load(),available[1].load(),available[2].load(),available[3].load(),state.on[0],state.on[1],
         Cfg().edf41Content,statePath);
     return battle==kBattleSites && menu==static_cast<int>(std::size(kMenuPathCalls))+1 && popup==1;

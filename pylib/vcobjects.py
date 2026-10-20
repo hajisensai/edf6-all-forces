@@ -32,7 +32,8 @@ class Jet:
     body: str = 'bomber501'
     anchor: str = 'mdl'
     rigid: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
-    # The bone each weapon hangs on (vehicle_weapon_setting), in `weapons` order; empty: all on `anchor`.
+    # The bone each weapon hangs on (vehicle_weapon_setting), in `weapons` order; empty: jet_weapon_bones (its guns and
+    # stores on its model's hardpoints, HARDPOINT_FILES; the rest, or all on a model without them, on `anchor`).
     weapon_bones: tuple[str, ...] = ()
     # A player jet (src/playerjet.cpp): the player flies it. Its SGO keeps `vehicle_setup` beside
     # `mission_setup` (the Air Raider's call weapon brings it like a stock heli, tools/call_weapons.py), and
@@ -209,6 +210,9 @@ class Bomb:
                 'FireBurstCount': 1.0, 'FireInterval': self.interval, 'LockonType': 0.0, 'LockonRange': 0.0}
 
 
+ROUND_KINDS = ('ap', 'he', 'mg', 'heat', 'canister')
+
+
 @dataclass(frozen=True)
 class Shell:
     """A gun's round for a stock vehicle (the user, 2026-10-09: 「坦克应该有ap和he」「机炮车 AP/HE」「防空车高爆近炸」): a
@@ -218,7 +222,11 @@ class Shell:
     the kind of round is the template's, not a guess."""
     template: str           # Root.cpk WEAPON file
     ammo_class: str         # its AmmoClass
-    kind: str               # 'ap' (no blast, penetrating), 'he' (a blast radius) or 'mg' (a machine gun's ball: no blast)
+    # 'ap' (no blast, penetrating), 'he' (a blast radius), 'mg' (a machine gun's ball: no blast), 'heat' (a shaped
+    # charge: the bursting template made a fast, flat, contact-fused round that stops on what it hits, a small
+    # blast, more damage on that one target) or 'canister' (a cloud of balls: the penetrating template firing
+    # FireCount pellets in a wide cone, short reach). ROUND_KINDS; _shell_sgo checks the template and the result.
+    kind: str
     extra: tuple[tuple[str, float], ...] = ()
     # A coaxial gun's muzzle: (the template's single muzzle where it is, where it goes) in the frame of the holder bone
     # it hangs on (make_stock_stores COAX: the gun mantlet's elevating bone, measured on each tank's model). None: the
@@ -408,6 +416,35 @@ STORES: dict[str, Store] = {
     # its top speed, full gravity, an 8 m blast, 350): the stock E series.
     'HE': Store('HE', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'he'),
                 _local('HE', 'HE（榴弾）', 'HE（高爆彈）', 'HE（高爆弹）', 'HE（고폭탄）')),
+    # --- rounds the tanks' real prototypes fire and the stock game lacks (the user, 2026-10-19: 「坦克好像还有串联破甲弹
+    # 或者破甲弹之类的弹种。你看看各种载具缺什么都补一下」; only a round the vehicle's prototype really carries:
+    # docs/feedback-2026-10-19-vehicle-ammo.md). Both from the Blacker's own gun files (their muzzle (0, 0, 2.8) is the
+    # 505's and the 601's main gun's), so they leave the barrel the stock rounds leave.
+    # HEAT-MP: the multi-purpose shaped-charge round of a 120 mm smooth-bore (the Abrams' M830 / M830A1, the Type 10's
+    # JM12A1). The Blacker E's bursting round (RocketBullet01) made one: a shaped charge's jet stops on the one thing
+    # it hits (no penetration through a line of enemies as the APFSDS), so it puts more on that target (450 to the
+    # stock rounds' 350) with a small fragmentation burst (3 m to the howitzer's 8-18); it leaves at 780 m/s (M830
+    # 1140 against M829's 1575: 0.72 of the APFSDS' 18 m a frame), flat (gravity 0.15 against the howitzer's 1),
+    # reaching as far as the APFSDS (140 frames: 1820 m); a contact sphere of 0.8 m (the HE's 1.6); orange-red.
+    'HEAT': Store('HEAT-MP', 'gun', 0.0, 0.0,
+                  Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'heat',
+                        (('AmmoSpeed', 13.0), ('AmmoGravityFactor', 0.15), ('AmmoAlive', 140.0), ('AmmoDamage', 450.0),
+                         ('AmmoExplosion', 3.0), ('AmmoIsPenetration', 0.0), ('AmmoHitSizeAdjust', 0.5)),
+                        colour=(3.2, 1.3, 0.5, 1.0)),
+                  _local('HEAT-MP', 'HEAT-MP（多目的対戦車榴弾）', 'HEAT-MP（多用途破甲彈）', 'HEAT-MP（多用途破甲弹）',
+                         'HEAT-MP（다목적 대전차고폭탄）')),
+    # Canister (the Abrams' M1028: about 1100 tungsten balls, against infantry in the open at up to ~500 m): the
+    # Blacker A's penetrating round made a cloud: 12 pellets a shot in a 0.07 cone, 40 each (480 on a big target at
+    # close range), 840 m/s, gone after 36 frames (~500 m), penetrating soft targets as the template does; no blast.
+    # Only the Blacker's: the Type 10 (the 601's prototype) has no canister round.
+    'CANISTER': Store('Canister', 'gun', 0.0, 0.0,
+                      Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'canister',
+                            (('FireCount', 12.0), ('FireAccuracy', 0.07), ('AmmoSpeed', 14.0), ('AmmoAlive', 36.0),
+                             ('AmmoDamage', 40.0), ('AmmoGravityFactor', 0.5), ('AmmoSize', 0.5),
+                             ('AmmoHitSizeAdjust', 0.6)),
+                            colour=(2.6, 2.2, 1.4, 1.0)),
+                      _local('Canister (M1028)', 'キャニスター弾（M1028）', '霰彈（M1028）', '霰弹（M1028）',
+                             '캐니스터탄（M1028）')),
     # A gun-launched anti-tank missile (LAHAT class: 105/120 mm, 0.975 m, 13 kg, semi-active laser, subsonic, about
     # 8 km): from the tank's own barrel, kicked out at 120 m/s, its motor to 300 m/s. Its warhead a tandem HEAT smaller
     # than the Hellfire's (800 here): 600, a 6 m blast; its lock as the Hellfire's. 0.975 m of the tail-finned icbm01:
@@ -448,6 +485,25 @@ STORES: dict[str, Store] = {
                                max_g=20.0, nav=3.0, life=12.0, damage=1200.0, blast=6.0,
                                lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
                        _local('9M120 Ataka', '9M120 アターカ', '9M120 阿塔卡', '9M120 阿塔卡', '9M120 아타카')),
+    # The BMPT's second belt: its 2A42s are dual-feed guns, HE-FRAG-T (the native belt, tools/make_tracked_combat GUNS)
+    # and the 3UBR8 APDS-T the gunner switches to against armour. Two barrels, one choice (group 3, as the flak's);
+    # its numbers are make_tracked_combat's (the native gun's own file and muzzles, BMPT_AP_BELT), this template only
+    # names the round's family.
+    'BMPT_AP': Store('30 mm APDS', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
+                     _local('30 mm APDS (3UBR8)', '30mm APDS（3UBR8）', '30mm 脫殼穿甲彈（3UBR8）', '30mm 脱壳穿甲弹（3UBR8）',
+                            '30mm 분리철갑탄（3UBR8）'), group=3, barrel=0),
+    'BMPT_AP_R': Store('30 mm APDS', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_R.SGO', 'SolidBullet01', 'ap'),
+                       _local('30 mm APDS (3UBR8)', '30mm APDS（3UBR8）', '30mm 脫殼穿甲彈（3UBR8）', '30mm 脱壳穿甲弹（3UBR8）',
+                              '30mm 분리철갑탄（3UBR8）'), group=3, barrel=1),
+    # The Ataka's thermobaric round (9M120F: the same tube and flight, a thermobaric warhead against infantry and
+    # cover): half the tandem warhead's damage on one target, more than twice its blast. Its own look (the rounds one
+    # control cycles never look alike: tools/selftest.py store_looks).
+    'BMPT_ATGMF': Store('9M120F Ataka', 'ground', 0.0, 0.0,
+                        Missile('9M120F Ataka', Look('airtortoise_missile', 1.83), burn=12.0, top=550.0, accel=180.0,
+                                max_g=20.0, nav=3.0, life=12.0, damage=600.0, blast=14.0,
+                                lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
+                        _local('9M120F Ataka (thermobaric)', '9M120F アターカ（サーモバリック）', '9M120F 阿塔卡（溫壓）',
+                               '9M120F 阿塔卡（温压）', '9M120F 아타카（열압력）')),
     # A tank's / an IFV's coaxial machine gun (COAX_MOUNTS above): fired on its own trigger (src/payload.cpp: the
     # secondary trigger, the main gun staying loaded). The stock Epsilon gunner's machine gun (V_403TANK_MACHINEGUN:
     # SolidBullet01, 6 a round: the lightest round of any stock vehicle gun, a rifle round's; its own tank machine gun
@@ -676,7 +732,11 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
     'bmpt': GroundVehicle('EDF6VC_BMPT', 'V603_FLAK', 'AWEAPON346',
                           ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
                           ('app:/weapon/edf6vc_bmpt_l.sgo', 'app:/weapon/edf6vc_bmpt_r.sgo',
-                           'app:/weapon/edf6vc_bmpt_atgm_4.sgo'), 1600.0, 'make_bmpt'),
+                           'app:/weapon/edf6vc_bmpt_atgm_4.sgo',
+                           # its dual-feed guns' APDS belt (one choice for both barrels) and the Ataka's thermobaric
+                           # round (2026-10-19; tools/make_tracked_combat.py BMPT_AP_BELT, STORES BMPT_AP / BMPT_ATGMF)
+                           'app:/weapon/edf6vc_bmpt_ap_150.sgo', 'app:/weapon/edf6vc_bmpt_ap_r_150.sgo',
+                           'app:/weapon/edf6vc_bmpt_atgmf_4.sgo'), 1600.0, 'make_bmpt'),
     # The drill tank (tools/make_drill.py, src/drill.cpp): the Blacker's class (Vehicle505_Tank, tracks, one weapon
     # holder) in EDF: Iron Rain's drill tank, requested like the Blacker E series; its one weapon fires nothing (the
     # drill is the plugin's: it spins it and bites with DRILL_CHARGE_FILE).
@@ -900,6 +960,73 @@ def walkup_box(game: Game, file: str | None, box: tuple) -> tuple:
 
 class DoorError(Exception):
     """A jet's boarding point is not where move_door puts it (check_door)."""
+
+
+# The jets' hardpoints (pylib/jet_hardpoints.py; the user, 2026-10-19: 「在地面停着的飞机射导弹，会在地底生成」): the model
+# files that carry the bones HP_GUN / HP_STORE (jet_models makes them), and which of a jet's weapons hangs on which.
+# Without them every weapon hung on `mdl`, the model's origin (the wheels' contact): the stock 506 muzzles, all under
+# their holder bone, then stood 0.24-0.67 m in the ground under a parked jet. Every other weapon (the blast drones'
+# charges, the Primers' guns) and the fuel tank stay on the anchor.
+HARDPOINT_FILES = frozenset({JET_ELEVON_FILE, 'EDF6VC_INTERCEPTOR.MRAB', 'EDF6VC_MULTIROLE.MRAB', 'EDF6VC_DRONE.MRAB',
+                             'EDF6VC_CARRIER.MRAB', GUNSHIP_MODEL_FILE})
+
+
+def model_file(model) -> str:  # noqa: ANN001 - [archive path, member]
+    """The archive file name (upper case) of a vehicle SGO's animation_model[0] ([path, member])."""
+    return str(model[0]).replace('\\', '/').rsplit('/', 1)[-1].upper()
+
+
+def hardpoint_of(weapon: str) -> str | None:
+    """The hardpoint bone weapon path `weapon` hangs on (jet_hardpoints.HP_GUN / HP_STORE), or None (the anchor)."""
+    from jet_hardpoints import HP_GUN, HP_STORE
+    if weapon.lower() in _GUNS:
+        return HP_GUN
+    kind = store_of(weapon)
+    if kind and STORES[kind[0]].role in ('air', 'ground', 'bomb', 'rocket') and isinstance(STORES[kind[0]].weapon, (Missile, Bomb)):
+        return HP_STORE
+    return None
+
+
+def _muzzle_stock(weapon: str) -> str:
+    """The stock weapon whose muzzle list weapon path `weapon` (one hardpoint_of hangs) fires from."""
+    name = weapon.rsplit('/', 1)[-1].upper()
+    if name in JET_GUN_FILES:
+        return JET_GUN_FILES[name]
+    w = STORES[store_of(weapon)[0]].weapon
+    if isinstance(w, Bomb):
+        return JET_BOMB_STOCK
+    return w.muzzle or JET_MISSILE_STOCK
+
+
+@lru_cache(maxsize=None)
+def _stock_muzzles(game: Game, stock: str) -> tuple[tuple[float, float, float], ...]:
+    block = dsgo.parse(game.read('WEAPON', stock)).root.get('animation_model').items[2].data
+    return tuple(tuple(round(v, 6) for v in struct.unpack_from('<3f', block, at)) for _n, _node, at in mab_muzzles(block))
+
+
+def hardpoint_muzzles(game: Game) -> dict[str, tuple[tuple[float, float, float], ...]]:
+    """{bone: every muzzle (from its holder bone) any weapon hung on it may fire from}: the guns' (JET_GUN_FILES) on
+    HP_GUN; on HP_STORE every jet store's (STORE_FILES: a carrier's own load or any a loadout puts on its pylons,
+    tools/support_loadout.py) and both templates' (the missile pods, the bomb racks). Read off the stock weapons they fire
+    from (_muzzle_stock): what jet_hardpoints places, the same on every model."""
+    from jet_hardpoints import HP_GUN, HP_STORE
+    out: dict[str, set[tuple[float, float, float]]] = {HP_GUN: set(), HP_STORE: set()}
+    for stock in JET_GUN_FILES.values():
+        out[HP_GUN].update(_stock_muzzles(game, stock))
+    stocks = {JET_MISSILE_STOCK, JET_BOMB_STOCK} | {_muzzle_stock(_weapon(f)) for f in STORE_FILES if hardpoint_of(_weapon(f))}
+    for stock in sorted(stocks):
+        out[HP_STORE].update(_stock_muzzles(game, stock))
+    return {k: tuple(sorted(v)) for k, v in out.items()}
+
+
+def jet_weapon_bones(jet: 'Jet', model, anchor: str) -> list[str]:  # noqa: ANN001 - [archive path, member]
+    """The bone each of `jet`'s weapons hangs on (vehicle_weapon_setting, without the fuel tank) when it wears `model`:
+    Jet.weapon_bones; on a model with hardpoints (HARDPOINT_FILES) its guns and stores on theirs; else `anchor`."""
+    if jet.weapon_bones:
+        return list(jet.weapon_bones)
+    if model_file(model) in HARDPOINT_FILES:
+        return [hardpoint_of(w) or anchor for w in jet.weapons]
+    return [anchor] * len(jet.weapons)
 
 
 def mab_locator(mab: bytes, name: str) -> tuple[int, int]:
@@ -1302,7 +1429,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), cas, mab]
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
-    m['vehicle_weapon_setting'] = with_fuel([[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))], [anchor, -1])
+    m['vehicle_weapon_setting'] = with_fuel([[b, 0] for b in jet_weapon_bones(jet, m['animation_model'][0], anchor)], [anchor, -1])
     # Without the plugin the 506 builds weapons for its first four holders only (src/stores.cpp): fewer would read an
     # entry that is not there; the plugin builds them all, one an entry, so the two lists must agree. The fuel tank is
     # among the four (with_fuel): built either way.
@@ -1509,6 +1636,27 @@ def _named(r, name: str | Store) -> None:
             r.set(key, local.get(key[5:].lower(), plain))
 
 
+def _check_round(shell: Shell, r: dsgo.Node, made: bool) -> None:
+    """Shell `shell`'s round is of its kind: its template's family (`made` False: the game's own round of that family,
+    not a guess) and, once its `extra` is in (`made` True), what the kind means (ValueError otherwise)."""
+    blast, pierce, count = r.get('AmmoExplosion'), r.get('AmmoIsPenetration'), r.get('FireCount')
+    where = f'{shell.template}{"（改后）" if made else ""}'
+    if shell.kind not in ROUND_KINDS:
+        raise ValueError(f'{shell.template}: 未知弹种 {shell.kind}')
+    if shell.kind in ('mg', 'canister') and blast:
+        raise ValueError(f'{where}: {shell.kind} 弹不应有爆炸半径')
+    if shell.kind == 'ap' and (blast or pierce != 1.0):
+        raise ValueError(f'{where}: ap 弹应穿透且无爆炸')
+    if shell.kind in ('he', 'heat') and not blast:
+        raise ValueError(f'{where}: {shell.kind} 弹应有爆炸半径')
+    if not made:
+        return
+    if shell.kind == 'heat' and (pierce != 0.0 or count != 1.0):
+        raise ValueError(f'{where}: 破甲弹一发一弹、不穿透（聚能射流止于所中之物）')
+    if shell.kind == 'canister' and not (isinstance(count, float) and count > 1.0):
+        raise ValueError(f'{where}: 霰弹一发应有多枚弹丸（FireCount > 1）')
+
+
 def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
     """A stock vehicle's round (Shell): its template as it is, but its load and `extra`, and its name."""
     shell = store.weapon
@@ -1516,16 +1664,12 @@ def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
     r = doc.root
     if r.get('AmmoClass') != shell.ammo_class:
         raise ValueError(f'{shell.template} 的弹类是 {r.get("AmmoClass")}，不是 {shell.ammo_class}')
-    blast = r.get('AmmoExplosion')
-    if shell.kind == 'mg':
-        if blast:
-            raise ValueError(f'{shell.template}: 机枪弹不应有爆炸半径')
-    elif (shell.kind == 'ap') != (not blast) or (shell.kind == 'ap' and r.get('AmmoIsPenetration') != 1.0):
-        raise ValueError(f'{shell.template}: {shell.kind} 弹应{"穿透且无爆炸" if shell.kind == "ap" else "有爆炸半径"}')
+    _check_round(shell, r, made=False)
     for key, value in shell.params(rounds).items():
         if r.get(key) is None:
             raise ValueError(f'{shell.template} 缺少 {key}')
         r.set(key, value)
+    _check_round(shell, r, made=True)
     if shell.colour is not None:
         colour = r.get('AmmoColor')
         if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
@@ -1918,6 +2062,97 @@ def check_emc(files: dict[str, bytes], game: Game | None = None) -> None:
     if game is not None:
         stock = emc_stock(game)
         assert abs(stock['reach'] - EMC_BEAM_RANGE) < 1e-3, stock
+
+
+# ------------------------------------------------------------------------------------------ the ultimate strike
+# The ultimate strike's rounds (src/ultimate.cpp, src/ultimate_plan.h, docs/plan-2026-10-19-ultimate.md; the user,
+# 2026-10-19: 「特效拉满 昏天暗地」): DemoIndirectFire SGOs the plugin owns, aims and grows as the EMC's (jet_bay.cpp kEmcFiles,
+# after the Sazabi's and the Proteus's), the satellite laser (PORTAL_LASER_STOCK) remade for each part of the show, and the
+# EMC's impact charge for the blasts. Every damage 0 in the SGO: the plugin writes it (IFC +0xDC) from the weapon's.
+#   ULT_SIGHT_FILE  the charge's aim beams: thin crimson, a round a frame for the whole charge, silent (the plugin grows them)
+#   ULT_BOLT_FILE   a lightning bolt: a blue-white flash ULT_BOLT_ROUNDS frames long, its crack once
+#   ULT_SPARK_FILE  the burst where a bolt lands (ULT_SPARK_RADIUS m)
+#   ULT_BEAM_FILE   the main beam: the satellite's thickest, violet, a round a frame for the whole cannon phase, a deep shot
+#   ULT_CORE_FILE   its white-hot core, silent
+#   ULT_BLAST_FILE  a ring's blast (ULT_BLAST_RADIUS m: src/ultimate_plan.h kRingBlast)
+#   ULT_GATHER_FILE the gather's pulse: a short gold-white laser, exactly ULT_GATHER_REACH m (src/ultimate_plan.h
+#                   kGatherReach: fired from a point that far short of the beam's start, it ends on it), silent
+ULT_SIGHT_FILE = 'EDF6VC_ULT_SIGHT.SGO'
+ULT_BOLT_FILE = 'EDF6VC_ULT_BOLT.SGO'
+ULT_SPARK_FILE = 'EDF6VC_ULT_SPARK.SGO'
+ULT_BEAM_FILE = 'EDF6VC_ULT_BEAM.SGO'
+ULT_CORE_FILE = 'EDF6VC_ULT_CORE.SGO'
+ULT_BLAST_FILE = 'EDF6VC_ULT_BLAST.SGO'
+ULT_GATHER_FILE = 'EDF6VC_ULT_GATHER.SGO'
+ULT_FILES = (ULT_SIGHT_FILE, ULT_BOLT_FILE, ULT_SPARK_FILE, ULT_BEAM_FILE, ULT_CORE_FILE, ULT_BLAST_FILE,
+             ULT_GATHER_FILE)   # EmcRound's order
+ULT_BOLT_ROUNDS = 8                     # src/ultimate_plan.h kBoltFrames
+ULT_SPARK_RADIUS, ULT_BLAST_RADIUS = 40.0, 55.0
+# (rounds, size, colour, speed m a frame, life frames, shot volume, shot pitch): reach = speed x life, past the farthest
+# start: the aims' ring (900 m up, 520 m out) to the area's far edge, a bolt's 700 m (plus its lean), the beam's 1300 m.
+ULT_BEAMS: dict[str, tuple[int, float, tuple[float, ...], float, int, float, float]] = {
+    ULT_SIGHT_FILE: (760, 0.8, (3.0, 0.2, 0.45, 1.0), 140.0, 10, 0.0, 1.0),
+    ULT_BOLT_FILE: (ULT_BOLT_ROUNDS, 2.5, (1.8, 2.4, 3.0, 1.0), 160.0, 6, 0.7, 1.7),
+    ULT_BEAM_FILE: (500, 48.0, (2.8, 0.45, 3.0, 1.0), 150.0, 10, 1.0, 0.6),
+    ULT_CORE_FILE: (500, 18.0, (3.0, 2.6, 3.0, 1.0), 150.0, 10, 0.0, 1.0),
+    ULT_GATHER_FILE: (200, 0.6, (3.0, 2.4, 1.4, 1.0), 12.0, 10, 0.0, 1.0),
+}
+ULT_GATHER_REACH = 120.0
+ULT_REACH = {ULT_SIGHT_FILE: 1300.0, ULT_BOLT_FILE: 760.0, ULT_BEAM_FILE: 1300.0, ULT_CORE_FILE: 1300.0,
+             ULT_GATHER_FILE: ULT_GATHER_REACH}
+ULT_CHARGE_COLOUR = (2.2, 0.6, 3.0, 1.0)
+
+
+def _ult_beam(game: Game, rounds: int, size: float, colour: tuple[float, ...], speed: float, life: int, volume: float,
+              pitch: float) -> bytes:
+    """The satellite laser (PORTAL_LASER_STOCK) made one of the ultimate's beams (see ULT_BEAMS)."""
+    version, m = sgo.read(game.read('OBJECT', PORTAL_LASER_STOCK))
+    p = m['indirect_fire_param']
+    if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+            or p[4] != 'LaserBullet02' or p[11] != 1 or not isinstance(p[17], list) or len(p[17]) != 6
+            or not isinstance(p[18], list) or len(p[18]) != 6):
+        raise ValueError(f'{PORTAL_LASER_STOCK} 不是预期的卫星激光')
+    p[0] = [0.0, 0.0]
+    p[2], p[3], p[5], p[7], p[9], p[10] = rounds, 0, speed, size, 0.0, life
+    p[12] = list(colour)
+    p[14], p[15], p[16] = 0, 0, 0
+    p[17][0] = 1.0                      # its shot sound once for all its rounds
+    p[17][2] = volume
+    p[17][3] = pitch
+    p[18][2] = 0.0                      # no hit sound: a round a frame would play it 60 times a second
+    m['indirect_fire_damage'] = 0.0     # the plugin sets the damage (IFC +0xDC)
+    return sgo.write(version, m)
+
+
+def ult_rounds(game: Game) -> dict[str, bytes]:
+    """The ultimate's DemoIndirectFire SGOs (ULT_FILES), {Mods/OBJECT file: bytes}."""
+    out = {name: _ult_beam(game, *spec) for name, spec in ULT_BEAMS.items()}
+    for name, radius in ((ULT_SPARK_FILE, ULT_SPARK_RADIUS), (ULT_BLAST_FILE, ULT_BLAST_RADIUS)):
+        version, m = sgo.read(_emc_charge(game, radius, EMC_BLAST_SPEED, EMC_BLAST_LIFE))
+        m['indirect_fire_param'][12] = list(ULT_CHARGE_COLOUR)
+        out[name] = sgo.write(version, m)
+    return {name: out[name] for name in ULT_FILES}
+
+
+def check_ult(files: dict[str, bytes]) -> None:
+    """The ultimate's SGOs as src/ultimate.cpp fires them: the beams LaserBullet02, penetrating, no blast, a round a frame,
+    reaching past their farthest start, enough rounds for their phase; the charges SolidBullet01, one round, their blast
+    radius ULT_*_RADIUS; every damage 0 (the plugin's)."""
+    assert list(files) == list(ULT_FILES), list(files)
+    for name, (rounds, size, _, speed, life, volume, _) in ULT_BEAMS.items():
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'LaserBullet02' and p[11] == 1, name
+        assert p[2] == rounds and p[3] == 0 and p[9] == 0.0 and p[15] == 0 and m['indirect_fire_damage'] == 0.0, (name, p)
+        assert p[5] * p[10] >= ULT_REACH[name], (name, p[5], p[10])
+        assert name != ULT_GATHER_FILE or p[5] * p[10] == ULT_GATHER_REACH, (name, p[5], p[10])   # never past the beam's start
+        assert p[17][0] == 1.0 and p[18][2] == 0.0 and p[17][2] == volume, name
+    assert ULT_BEAMS[ULT_SIGHT_FILE][0] >= 12 * 60 and ULT_BEAMS[ULT_BEAM_FILE][0] >= 8 * 60, 'rounds for the whole phase'
+    for name, radius in ((ULT_SPARK_FILE, ULT_SPARK_RADIUS), (ULT_BLAST_FILE, ULT_BLAST_RADIUS)):
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'SolidBullet01', name
+        assert p[2] == 1 and p[11] == 0 and p[9] == radius and m['indirect_fire_damage'] == 0.0, (name, p)
 
 
 # ------------------------------------------------------------------------------------------ the Sazabi's arms

@@ -1,5 +1,6 @@
 #pragma once
 #include "crew.h"
+#include "support_net.h"
 
 namespace crew {
 constexpr unsigned kMaxCommandIdentities=16;
@@ -29,4 +30,26 @@ struct MarkIdentities {
     ObjRef target{};
 };
 bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char target[32],MarkIdentities* out) noexcept;
+// The gravity operations' (gravity_net.cpp): as ResolveMarkIdentities, but the target may be dead (a corpse is still
+// thrown about), only not deleted.
+bool ResolveGrabIdentities(const unsigned char grabber[32],const unsigned char target[32],MarkIdentities* out) noexcept;
+}
+namespace crew {
+// The sender check of every plugin channel (plugin_net.h) for a message that speaks for a player: `nativePuid` (a resolved
+// player's, ResolveCommandIdentities' requesterPuid / ResolveMarkIdentities' puid) is the authenticated transport sender's
+// own PUID, and one of the sealed current world's participants (support_net.cpp SupportCommandRequesterMatches). A peer can
+// never speak for another machine's player.
+inline bool SenderIsPlayer(void* nativePuid,const char* authenticatedPuid) noexcept {
+    return nativePuid && authenticatedPuid && SupportCommandRequesterMatches(nativePuid,authenticatedPuid);
+}
+// The same from the player's native ID: it resolves (ResolveMarkIdentities; `deadOk`: ResolveGrabIdentities, a body too) to
+// a player of this world whose PUID passes the check above. `out` (optional): the identities found, cleared on failure.
+inline bool SenderIsPlayer(const unsigned char playerId[32],const char* authenticatedPuid,MarkIdentities* out=nullptr,
+                           bool deadOk=false) noexcept {
+    MarkIdentities ids{};
+    const bool found=playerId && (deadOk ? ResolveGrabIdentities(playerId,nullptr,&ids) : ResolveMarkIdentities(playerId,nullptr,&ids)) &&
+        ids.player && SenderIsPlayer(ids.puid,authenticatedPuid);
+    if(out)*out=found ? ids : MarkIdentities{};
+    return found;
+}
 }

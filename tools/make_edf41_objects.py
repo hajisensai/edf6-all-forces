@@ -1092,8 +1092,8 @@ PATCHES.update(DLC_INSECT_PATCHES)
 # human_direction_adjust, which names its model's spine bones and the axis they turn about (below: SPINE_AXIS_MODE).
 # Not: game_object_camera_setting (4.1's one camera pair, EDF6 reads a list of four, EDF+0x54DDF0), soldier_config
 # (4.1's second number is 0 / 1, EDF6's 0.35 in every stock soldier: not known to mean the same), soldier_weapon_grab_
-# adjust (EDF6 only: re-expressed for 4.1's hand instead, weapon_grip_adjust), human_climb_settings,
-# human_character_control_mass, the grip offsets (EDF6 only), appeal_animation (EDF6's folder of emotes exists; 4.1's
+# adjust (EDF6 only: re-expressed for 4.1's hand instead, weapon_grip_adjust), human_climb_settings (4.1 has none;
+# EDF6's is then dropped, as 4.1's CAS cannot play a climb: drop_climb), human_character_control_mass, the grip offsets (EDF6 only), appeal_animation (EDF6's folder of emotes exists; 4.1's
 # names OBJECT/ARMYSOLDIER/APPEAL/*.CANM, which EDF6 lacks).
 FRIEND_KEYS = ('ragdoll', 'ragdoll_contact', 'soldier_color', 'soldier_spotlight', 'game_object_talk_setting',
                'human_voice', 'human_se_table', 'game_object_durability', 'soldier_load_weapon', 'soldier_weapon_slot',
@@ -1146,15 +1146,34 @@ def friend_states(unarmed: str, extra: tuple[str, ...] = (), ranger: bool = Fals
     """The states EDF6's soldiers have and 4.1's lack that a 4.1 soldier reaches, each as a copy of 4.1's state for the
     same move (cas_graft.alias_states: one-shot for one-shot, loop for loop; a state the class waits to end is never
     aliased to a loop): EDF6's unarmed set (noWeapon_*) as 4.1's `unarmed` stance's, knockout as down, EDF6's bike
-    seats as 4.1's bike seat, and the rangers' sprint (<stance>_dash, a run) as their run. Left out: EDF6's sprint ends,
-    dodges (common_elude_*), sword / dash-lance / left-hand-throw moves and NPC talk gestures, which 4.1's units have
-    no counterpart of (a missing state: the play call answers false and the soldier keeps its state, cas_graft)."""
+    seats as 4.1's bike seat, and the rangers' sprint (<stance>_dash, a run) as their run. Left out: EDF6's sprint ends
+    (only a player's dash key reaches them), climbs (common_elude_*: not played at all, SOLDIER_CLIMB_STATES), sword /
+    dash-lance / left-hand-throw moves and NPC talk gestures, which 4.1's units have no counterpart of (a missing state:
+    the play call answers false and the soldier keeps its state, cas_graft)."""
     main = [(f'noWeapon_{mv}', f'{unarmed}_{mv}') for mv in MOVES + extra]
     main += [('knockout', 'down'), ('vehicle503_bike_driver', 'vehicle_bike_driver'),
              ('vehicle613_bike_driver', 'vehicle_bike_driver')]
     if ranger:
         main += [(f'{st}_dash', f'{st}_run_f') for st in RANGER_STANCES] + [('noWeapon_dash', f'{unarmed}_run_f')]
     return tuple(('main', new, old) for new, old in main)
+
+
+# EDF6's climb over a ledge (a vault; 4.1's soldiers never climb). EDF.dll 0x678CCB46, static (2026-10-19, the user:
+# 「NPC有的会立正」 -- a 4.1 friend frozen in place, rifle up, no longer moving or fighting):
+#  - human_climb_settings (read at 0x56F0E3) makes the climb data the class keeps at human+0x1298 (0x56F8BF); without the
+#    key it stays null and every reader checks that first (0x56FCC0, 0x56FCE0, 0x57BF9F, 0x596CCA, 0x596E4B, 0x5A0E5C,
+#    0x5A0ECC, 0x5A0F3C: no climb, and the route explorer's climb height +0x84 is 0, so no route through one);
+#  - the move's ledge test 0x57BF90 (called from 0x56E067 / 0x57B675) enters the climb state, the soldier classes' vtable
+#    slot 72 (0x5790A0), for an NPC too: slot 49 (0x598F00) answers 1 for a soldier without a pad;
+#  - that state plays one of SOLDIER_CLIMB_STATES on the main player by the indices resolved once at 0x5784D4..0x578543
+#    (human+0x1530..+0x153C) and leaves only when the main player's state is done (0x5798DF -> 0x116BBE0, back to
+#    0x5503FC). A CAS without them resolves -1: the play (0x116BFC0) refuses -1 and changes nothing, so the main player
+#    keeps the state it was in -- a walk (end type 0, end -1: never done, 0x116C2B3) as the soldier meets the ledge --
+#    and the soldier stays in the climb state for good: in place, its action limits 0x62D (0x5791DA), the plugin's moves and the stock AI's alike ignored.
+# 4.1's three soldier CAS have none of the four (EDF6's have all four). A soldier whose CAS lacks them does not climb,
+# as in 4.1 (drop_climb); one that has only some of them is refused (which one a ledge picks is the height's).
+SOLDIER_CLIMB_KEY = 'human_climb_settings'
+SOLDIER_CLIMB_STATES = ('common_elude_large_up', 'common_elude_middle_over', 'common_elude_middle_up', 'common_elude_small_up')
 
 
 @dataclass(frozen=True)
@@ -1185,6 +1204,44 @@ def friend_cas(games: 'Games', rel: str, cas: bytes) -> bytes:
     for player, new, old in spec.states:
         aliases.setdefault(player, []).append((new, old))
     return cas_graft.alias_states(cas, aliases)
+
+
+def without_key(data: bytes, key: str) -> bytes:
+    """The SGO / DSGO `data` without its top-level member `key` (the rest as it was)."""
+    if data[:4] == b'DSGO':
+        doc = dsgo.parse(data)
+        root = dsgo.Node([])
+        for i, v in enumerate(doc.root.items):
+            name = doc.root.names.get(i)
+            if name != key:
+                root.set(name, v)
+        return dsgo.compact(dsgo.Document(root, doc.pool))
+    version, members = sgo.read(data)
+    members.pop(key, None)
+    return sgo.write_depth_first(version, members)
+
+
+def climb_states_missing(cas: bytes | None) -> list[str]:
+    """SOLDIER_CLIMB_STATES the main player of `cas` lacks."""
+    have = cas_graft.states(cas).get('main', set()) if cas else set()
+    return [st for st in SOLDIER_CLIMB_STATES if st not in have]
+
+
+def drop_climb(games: 'Games', files: dict[str, bytes], rel: str) -> bool:
+    """A soldier at `rel` (in `files`) whose CAS has none of SOLDIER_CLIMB_STATES loses SOLDIER_CLIMB_KEY: it does not
+    climb (as in 4.1) instead of entering a climb it can never leave. True when dropped. ValueError when the CAS has only some of them."""
+    members = sgo.load(data=files[rel])
+    if SOLDIER_CLIMB_KEY not in members:
+        return False
+    am = members.get('animation_model')
+    cas = files_reader(games, files)(am[1]) if isinstance(am, list) and len(am) > 1 else None
+    missing = climb_states_missing(cas)
+    if not missing:
+        return False
+    if len(missing) != len(SOLDIER_CLIMB_STATES):
+        raise ValueError(f'{rel}: its CAS has some of the climb states but not {missing}')
+    files[rel] = without_key(files[rel], SOLDIER_CLIMB_KEY)
+    return True
 
 
 def friend_roots(games: 'Games') -> dict[str, int]:
@@ -1528,6 +1585,7 @@ def friend_look(games: 'Games', root: str) -> dict[str, bytes]:
     mab = mab_block(am[2])
     root_node.set('animation_model', dsgo.Node([dsgo_value(entry), am[1], dsgo_value(mab), *tail]))
     out[dst] = dsgo.compact(dsgo.Document(root_node, doc.pool))
+    drop_climb(games, out, dst)
     friend_weapon_contract(games, out, dst)
     members = sgo.load(data=out[dst])
     friend_names(games, out, dst, members, mab)
@@ -2596,6 +2654,8 @@ class ClassNames:
                                        # it, those are the ragdoll bodies needed (src/edf41smalldragon.cpp)
     variables: tuple[str, ...] = ()    # CAS variables
     bone_keys: tuple[str, ...] = ()    # SGO keys naming a bone of the model (animation_model[0]'s first MDB)
+    # (SGO key, states): states needed only by an object that has that key (the class plays them because of it)
+    when_key: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
 
 # What check_class_names holds every object of the class to. DragonSmall (EDF.dll 0x32c000..0x33c000, the names its code
@@ -2621,7 +2681,8 @@ CLASS_NAMES: dict[str, ClassNames] = {
     # 4.1's soldiers under EDF6's soldier classes (FRIEND_LOOKS, and the Omega team's ROOTS): the nodes the classes
     # find by name in the model and the aliased states their CAS gets (FRIEND_CAS)
     **{cls: ClassNames(states=('knockout', 'down', 'noWeapon_stand', 'vehicle503_bike_driver'),
-                       bone_keys=('human_move_node', 'human_wakeup_node', 'human_aim_target_adjust_node') + extra)
+                       bone_keys=('human_move_node', 'human_wakeup_node', 'human_aim_target_adjust_node') + extra,
+                       when_key=((SOLDIER_CLIMB_KEY, SOLDIER_CLIMB_STATES),))
        for cls, extra in (('AssultSoldier', ()), ('HeavyArmor', ()), ('PaleWing', ('pale_wing_booster_cetner',)))},
     # The plugin's own class (src/edf41robo.cpp): what it looks up by name (ROBO_STATES / ROBO_LOCATORS above).
     'UfoRobo': ClassNames(states=ROBO_STATES, locators=ROBO_LOCATORS),
@@ -2685,6 +2746,7 @@ def check_class_names(games: 'Games', files: dict[str, bytes], rel: str) -> None
     states = set().union(*cas_graft.states(cas).values()) if cas else set()
     events = {k for track in (mab_legacy.mab_events(mab) if mab else {}).values() for k, _t in track}
     want = list(spec.states) + [st for ev, sts in spec.when_event if ev in events for st in sts]
+    want += [st for key, sts in spec.when_key if key in members for st in sts]
     missing = [f'state {n}' for n in want if n not in states]
     locators = {loc.name for _l, loc in mab_legacy.mab_locators(mab)} if mab else set()
     missing += [f'locator {n}' for n in spec.locators if n not in locators]
@@ -2985,9 +3047,19 @@ def root_soldier_grip(games: 'Games', out: dict[str, bytes], rel: str, filled: d
     friend_weapon_contract(games, out, rel)
 
 
+# Keys every stock SGO of the class has whose absence the class checks before any use (with where): an object may leave
+# them out.
+NULL_CHECKED_KEYS: dict[str, dict[str, str]] = {
+    cls: {SOLDIER_CLIMB_KEY: 'human+0x1298 stays null and every reader tests it first (SOLDIER_CLIMB_STATES)'}
+    for cls in ('AssultSoldier', 'HeavyArmor', 'PaleWing', 'Engineer')
+}
+
+
 def check_class_keys(stock: dict[str, dict[str, dict]], rel: str, data: bytes) -> None:
-    """ValueError when the SGO `data` lacks a key every stock SGO of its class has."""
-    need = missing_class_keys(stock, sgo.load(data=data))
+    """ValueError when the SGO `data` lacks a key every stock SGO of its class has (but NULL_CHECKED_KEYS')."""
+    members = sgo.load(data=data)
+    optional = NULL_CHECKED_KEYS.get(str(members.get('xgs_scene_object_class')), {})
+    need = [k for k in missing_class_keys(stock, members) if k not in optional]
     if need:
         raise ValueError(f'{rel}: lacks {need}, which every EDF6 SGO of its class has')
 
@@ -3745,7 +3817,14 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
             if only and root not in only:
                 continue
             out = module.build(games, root)
-            check_vehicle_sounds(games, out['OBJECT/' + root], 'OBJECT/' + root)
+            # The same format rule as every other object (below): a class EDF6 ships only as DSGO gets a DSGO.
+            # V301 is built on Vehicle601_Tank (pylib/edf41tank.py), whose every stock SGO is one; the module
+            # writes the classic form its 4.1 source is in.
+            rel = 'OBJECT/' + root
+            check_vehicle_sounds(games, out[rel], rel)   # reads the classic form the module wrote
+            if str(sgo.load(data=out[rel]).get('xgs_scene_object_class')) in games.dsgo_only_classes():
+                out[rel] = as_dsgo(out[rel])
+            check_class_format(games.dsgo_only_classes(), rel, out[rel])
             clash = [r for r in out if r in files and files[r] != out[r]]
             if clash:
                 raise ValueError(f'{root}: vehicle resources differ between variants: {clash}')
@@ -3845,6 +3924,7 @@ def build(edf41: str, edf6: str, only: tuple[str, ...] = ()) -> tuple[dict, dict
                 check_class_format(games.dsgo_only_classes(), rel, out[rel])
                 if str(sgo.load(data=out[rel]).get('xgs_scene_object_class')) in FRIEND_OVERRIDE:
                     root_soldier_grip(games, out, rel, filled)   # the Omega team: 4.1's soldiers kept whole
+                    drop_climb(games, out, rel)
                 check_class_keys(stock, rel, out[rel])
                 check_model_mab(stock, rel, out[rel])
                 check_fracture(sgo.load(data=out[rel]), out, rel)

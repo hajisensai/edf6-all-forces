@@ -46,7 +46,7 @@ bool ResolveOwner(const unsigned char (&requester)[32],const ObjRef* expected,ED
     EDF6CoopPeer owner{};
     __try {
         if(!resolve(mark.slot,&owner) || !pvp_protocol::ValidPuid(owner.id) ||
-           !SupportCommandRequesterMatches(mark.puid,owner.id))return false;
+           !SenderIsPlayer(mark.puid,owner.id))return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
     *out=owner;return true;
 }

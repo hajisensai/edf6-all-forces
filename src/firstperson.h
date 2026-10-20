@@ -50,4 +50,11 @@ int VehicleScreens(const unsigned char* vehicle,int seat,const float* eye,Cockpi
 // Game thread (HudPublish): this machine's player's cockpit screens as of the last camera step; false: no vehicle first
 // person now (the HUD's own panels then).
 bool FirstPersonScreens(CockpitScreens* out,const unsigned char* human) noexcept;
+// Game thread: this machine's players (split screen: two), as their own cameras' last steps (within a second) saw them;
+// up to `most` into `out`, how many. None before the camera step is chained (InstallFirstPerson).
+int LocalPlayers(unsigned char** out,int most) noexcept;
+// Render thread: the local player whose camera submitted the frame `view` (a world view's parameter block: its native
+// view at +0x20) is drawn with, first person or not; null when no camera's recent submit is it, or two players' are
+// (docs/fp-render-re.md 2026-10-17: the block is reused for shadow cascades and both viewports, only its value tells).
+const void* LocalViewPlayer(const void* view) noexcept;
 }  // namespace crew

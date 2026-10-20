@@ -7,6 +7,7 @@
 #pragma once
 #include <Windows.h>
 #include "mapcmd_logic.h"
+#include "npc_command.h"
 #include "range_place.h"
 #include "support_call.h"
 #include "transport.h"
@@ -102,7 +103,8 @@ void MapCommandSquadFold(const float* rect) noexcept; // the panel's summary row
 constexpr int kMapFormationEntries=24;
 void MapCommandFormationButtons(const float* rects,const int* entries,int n) noexcept;
 void MapCommandPayloadButtons(const float* rects,std::uint64_t token,int seat,const int* entries,int n) noexcept; // up to 16
-void MapCommandUiPanels(const float* rects,int n) noexcept; // up to 16 complete background rectangles
+constexpr int kMapUiPanels=32;
+void MapCommandUiPanels(const float* rects,int n) noexcept; // up to kMapUiPanels complete background rectangles
 // Game thread, after MapCommandFrame and before map camera steering. A press begun on UI stays
 // captured until its own release, even outside that panel (left, Ctrl-left, and right mouse).
 bool MapCommandPointerCaptured() noexcept;
@@ -118,6 +120,18 @@ bool MapCommandEats(bool front) noexcept;
 // npcai.cpp, the mark key on foot with no enemy near the screen's centre: the units selected on the map guard `at` (as G
 // on the map, in a formation round it). How many accepted it; -1 none selected. Authority is checked per unit.
 int MapCommandGuardAt(const float* at) noexcept;
+// The scene's tick (crew.cpp SharedFrameTick and every soldier's pre-update, map.cpp MapHumanFrame; once a game frame
+// whoever's map is open, the player dead or watching too): the Shift-queued points of the units this machine is the
+// authority for advanced (a unit at its point is given the next one; mapcmd_logic.h Advance). Game thread.
+void MapCommandQueueTick() noexcept;
+// The one entry of an order to a unit this machine is the authority for, from `requester`: the map's own Dispatch for
+// its units, the queue's tick, and a client's network request (command_net.cpp Execute). `queued` (Shift, a point
+// order): kept after the points the unit is on its way to (accepted, nothing given yet), else given now; a plain order
+// drops the unit's queue. A queued point for a unit not listed here is refused (stale), never given at once instead.
+// `give`: how the order is given when it is (the network's executor, npcai.cpp NpcMapCommandForRequester).
+using MapCommandGive=NpcCommandResult(*)(const ObjRef&,const mapcmd::Command&,const ObjRef&,const ObjRef&) noexcept;
+NpcCommandResult MapCommandAuthority(const ObjRef& unit,const mapcmd::Command& c,const ObjRef& requester,const ObjRef& focus,
+                                     bool queued,MapCommandGive give) noexcept;
 
 // What the draw shows (hud.cpp MapScreen): the commandable units, the selection, the pointer and its box, the point,
 // the last word.
@@ -126,7 +140,10 @@ constexpr int kCmdUnits=static_cast<int>(mapcmd::kMaxFormationUnits);
 // HUD's language, hudtext.h Word), `owner` whose unit it is (the HUD names a heli's and a jet's so).
 constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 // `riding`: a squad seated in a vehicle (drawn only when picked from its panel row: its vehicle's mark stands for it).
-struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false; };
+// `groups`: the RTS groups it is in (bit N-1: group N, mapcmd_logic.h GroupKey); `ways`: its Shift-queued points after
+// the one it is on its way to (`way`, mapcmd_logic.h Waypoints).
+struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false;
+    std::uint16_t groups=0; std::uint8_t ways=0; float way[mapcmd::kWaypointsMost][3]{}; };
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
 constexpr int kMapSupports=48;
 constexpr int kMapTransportLinks=16;   // the transports' lines the map draws (MapCommandReadout::link)
@@ -137,7 +154,7 @@ struct MapCommandReadout {
     int selected;              // how many are
     std::uint32_t allowedOrders=0; // union of this selection's supported Order bits (keyboard still explains refusals)
     int selectedSquads=0;      // selected, unlocked NPC squads for formation/team controls
-    bool squadToolsAllowed=false; // regroup/formation editors do not have a remote execution protocol
+    bool squadToolsAllowed=false; // the formation tools: offline, or a host of command protocol v7 (Order::formation)
     bool pointOk;
     float point[3];            // where G sends them (the pointer's ground point; the screen centre's with a pad)
     bool pointer;              // the mouse pointer shown at (px, py)
@@ -149,7 +166,7 @@ struct MapCommandReadout {
     CmdMark unit[kCmdUnits];
     wchar_t note[80];          // the last command's result or refusal
     bool noteFresh;
-    int squads;                // the squad panel's rows (sorted: mapcmd::SquadRank; number keys 1-9 pick a shown one)
+    int squads;                // the squad panel's rows (sorted: mapcmd::SquadRank; a click picks one)
     SquadTally squadTally{};   // every squad, for the folded panel's summary row
     bool squadOpen=false;      // the panel opened past its commandable rows (its summary row clicked)
     // The formation button's menu (map_buttons.h MenuEntry): open; its defences (a selected squad guards a point; the
@@ -157,6 +174,7 @@ struct MapCommandReadout {
     bool formationMenu=false,formationGuard=false,formationMarch=false;int formationGuardShape=-1;
     SquadRow squad[16];
     bool squadSelected[16];
+    std::uint16_t squadGroups[16]{}; // each row's RTS groups (CmdMark::groups)
     bool sweepOn,healthOn;     // the box sweep going; health boxes for hurt soldiers (npcai.cpp)
     Order armed;               // a point order's button (or Z) clicked: the next left click on the ground is its point
     bool armedOrder;           // ...armed (Order::none with it false)
@@ -181,15 +199,26 @@ struct MapCommandReadout {
     // index, -1 none), each row's state now (debugspawn::RowState).
     bool placeOn=false,placeOnline=false,placeOpen=false;
     int placeCategory=0,placePick=0,placeArmed=-1;
+    int placeTop=0;            // the first row the shown category's list scrolled to (range_place.h Panel::top)
     debugspawn::RowState placeState[debugspawn::kEntryCount]{};
 };
 bool PlayerMapCommands(MapCommandReadout* out) noexcept;
 // hud.cpp: the 「摆放」 panel's click targets as drawn (`codes`: map_buttons.h-style codes, kPlace* below), for the clicks.
 constexpr int kPlaceTab=0x1000,kPlaceToggle=0x2000,kPlacePageUp=0x2001,kPlacePageDown=0x2002;   // a row's code: its kEntries index
 constexpr int kMapPlaceItems=rangeplace::kWindow+debugspawn::kCategoryCount+3;
-void MapCommandPlaceButtons(const float* rects,const int* codes,int n) noexcept;
+// `window`: the list's rows drawn (with a pad too, where no click target is published): what a page is (range_place.h).
+void MapCommandPlaceButtons(const float* rects,const int* codes,int n,int window) noexcept;
+// map.cpp Steer, before the wheel zooms: a wheel over the 「摆放」 list scrolls it instead (`delta` WHEEL_DELTA units, +
+// away from the user). True when taken. Game thread.
+bool MapCommandWheel(int delta) noexcept;
+// The legend's title row as drawn (hud.cpp MapLegend; null: none, a pad), and whether it is open (a click on it turns
+// it). Any thread.
+void MapCommandLegendButton(const float* rect) noexcept;
+bool MapLegendOpen() noexcept;
 struct PvpStatus;
-constexpr int kPvpModeToggle=0,kPvpTeam1=1,kPvpTeam2=2,kMapPvpItems=3;
+// kPvpFold: the panel's title row (a click opens / folds it: MapPvpOpen).
+constexpr int kPvpModeToggle=0,kPvpTeam1=1,kPvpTeam2=2,kPvpFold=3,kMapPvpItems=4;
+bool MapPvpOpen() noexcept;
 // The exact rendered state accompanies every action; stale world/revision/member identity is rejected on use.
 void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpStatus* snapshot) noexcept;
 int MapPvpPadSelection() noexcept; // selected code, -1 when R3 has not focused the panel

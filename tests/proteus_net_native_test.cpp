@@ -1,6 +1,7 @@
 // Read-only EDF.dll: its real serializer, native object envelope and final event packet writer. No game entry point,
 // no running-game attachment, no EOS call. 750130's queue/peer lookup is replaced with a recorder only in this process.
 #include "../src/proteus_net.cpp"
+#include "../src/seat_net.cpp"
 #include "../src/sazabi_net.h"
 #include "edf/host.h"
 #include <cstdio>
@@ -21,7 +22,7 @@ void SazabiNetReceived(unsigned char*,const sazabi_net::State&) noexcept { ++saz
 }
 namespace {
 using namespace crew;
-namespace transport=crew::proteus_transport;
+namespace transport=crew::seat_transport;
 int checks=0;
 std::size_t messageBytes=0,objectBytes=0,packetBytes=0;
 void Check(bool ok,const char* why) { ++checks;if(!ok){std::printf("FAIL: %s\n",why);std::exit(1);} }
@@ -91,8 +92,9 @@ int main(int argc,char** argv) {
         s.sender=1;s.sequence=1;
         transport::Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(transport::kWriteBlock)(written.bytes,&s,sizeof(s));
         alignas(16) unsigned char reader[0x600]{};Reader(written.bytes,reader);
-        proteus_net::State decoded;bool valid=false;
-        Check(transport::Peek(reader,decoded,valid)==(tag==15) && At<std::int64_t>(reader,8)==0,"peek preserves unrelated coop message position");
+        std::uint32_t magic=0;transport::Block block;
+        Check(transport::Peek(reader,&magic,&block)==(tag==15) && (tag!=15 || magic==proteus_net::kMagic) && At<std::int64_t>(reader,8)==0,
+              "peek preserves unrelated coop message position");
         unsigned char before[sizeof(proteusVehicle)];std::memcpy(before,proteusVehicle,sizeof(before));
         transport::Fn<transport::ReceiveFn>(transport::kReceive)(proteusVehicle+0x120,reader);
         Check(!std::memcmp(before,proteusVehicle,sizeof(before)) && At<std::int64_t>(reader,8)==1,"stock receiver ignores custom tags safely");
@@ -101,8 +103,9 @@ int main(int argc,char** argv) {
     transport::Stream wrong;transport::Fn<bool(__fastcall*)(void*,std::int8_t)>(transport::kWriteSmall)(wrong.bytes,15);
     transport::Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(transport::kWriteBlock)(wrong.bytes,&drill,sizeof(drill));
     alignas(16) unsigned char reader[0x600]{};Reader(wrong.bytes,reader);
-    proteus_net::State decoded;bool valid=false;
-    Check(!transport::Peek(reader,decoded,valid) && At<std::int64_t>(reader,8)==0,"different magic passes through unchanged");
+    std::uint32_t magic=0;transport::Block block;
+    Check(transport::Peek(reader,&magic,&block) && magic==drill_net::kMagic && At<std::int64_t>(reader,8)==0,
+          "a block of another kind is told by its magic, the stream left as it came");
     // A version-1 block (an older build of the rework): ours, not decoded, reported as an incompatible peer.
     {
         proteus_net::State old=s;old.version=1;old.sender=3;old.sequence=1;

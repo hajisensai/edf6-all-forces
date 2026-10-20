@@ -114,6 +114,9 @@ def wkey(p: Vec3) -> tuple[int, int, int]:
 # ------------------------------------------------------------------------------------------ model folders
 
 DEV_MODELS = r'D:\APP\edf6-models'        # the developer's model folder
+# The repository's models/: its cockpits/ is tracked (.gitignore; CI's release carries it), where the cockpit prep tools
+# (tools/prep_cockpit_*.py, make_cockpit_textures*.py) write.
+REPO_MODELS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'models'))
 
 
 def model_roots() -> list[str]:

@@ -562,6 +562,7 @@ void PreloadJets() noexcept {
         // The gunship's shells (GunshipFire), with its body; the impact charges; the EMC / Sazabi rounds and the Proteus's
         // shield whenever their files are installed (a Proteus may be called any time, ProteusRework switched on mid-mission).
         PreloadShells(mgr,Preloaded(Body::gunship));
+        PreloadUltimate(mgr);   // the ultimate strike's magic circles (ultimate.cpp)
     } __except(FaultLog("JET preload (nothing preloaded)",GetExceptionInformation())) {
         for(auto& p:preloaded)p=false;
         ResetShells();

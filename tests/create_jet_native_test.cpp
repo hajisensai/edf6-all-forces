@@ -37,6 +37,7 @@ void PvpForgetSupportObject(const ObjRef&) noexcept {UnexpectedWorldCall();}
 bool FixBodyPart506(unsigned char*,const char*) noexcept {UnexpectedWorldCall();}
 int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept {UnexpectedWorldCall();}
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept {UnexpectedWorldCall();}
+void PreloadUltimate(void*) noexcept {UnexpectedWorldCall();}
 namespace jet {
 Jet jets[kMaxJets]{};
 float FerryTurn(const Kind&) noexcept {UnexpectedWorldCall();}

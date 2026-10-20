@@ -84,6 +84,14 @@ def _cab_mesh(asset: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarra
                 z['mat'], tuple(str(t) for t in z['textures']), z['colours'])
 
 
+def _cab_windows(asset: str) -> np.ndarray:
+    """A real cab's glass (tools/prep_cockpit_ground.py left it out of the mesh), (k, 3, 3) eye frame; none in a cab
+    cut before it was kept."""
+    path = os.path.join(cockpits.asset_root(), 'parts', asset, 'cab.npz')
+    with np.load(path, allow_pickle=False) as z:
+        return z['windows'].astype(np.float64) if 'windows' in z.files else np.zeros((0, 3, 3))
+
+
 SOFT = 0.8   # of the way to a wall, where the cab starts being drawn in toward the eye
 ROUND = 4    # the room's shape the cab is drawn into: |x/X|^4 + |y/Y|^4 + |z/Z|^4 = 1, a box with rounded corners (a
              # hull's corners are bevelled: the room is measured straight out, its box corners can lie outside)
@@ -236,7 +244,11 @@ def real_cab(cabin: Cabin, spec: CabSpec) -> Kit:
         screens.append(s)
     mats = _materials('screen', 'metal_dark')
     mats.update(cab_mats)
-    kit=Kit(parts + cab, mats, screens=tuple(screens))
+    # The cab's real glass, drawn in with it (each corner along its own sight line): a line out through it is a view.
+    glass = _cab_windows(spec.asset)
+    windows = tuple(tuple(tuple(map(float, q)) for q in squeeze(t, np.array(lo), np.array(hi), spec.tuck, spec.knee))
+                    for t in glass)
+    kit=Kit(parts + cab, mats, screens=tuple(screens), windows=windows)
     import cockpit_retrofit as retrofit
     def mapped(p):return squeeze(np.asarray([p]),np.asarray(lo),np.asarray(hi),spec.tuck,spec.knee)[0]
     return retrofit.apply(kit,retrofit.GROUND.get(spec.asset,()),mapped,ground=True,limits=(np.asarray(lo),np.asarray(hi)))

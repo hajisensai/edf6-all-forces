@@ -5,8 +5,8 @@
 
 ## 清单与测试场的「摆放」（2026-10-17）
 
-- 物体行（载具、敌人）不再手写：`src/spawn_catalog.inc` 由 `tools/gen_spawn_catalog.py` 从 `testrange/catalog.py` 生成，测试场自己的载具 / 波次清单也来自那里（`docs/feature-2026-10-17-testrange-update.md`）。分类加了「插件载具」和「EDF4.1 敌人」；`How::stockVehicle` 改名 `How::vehicle`（原版 SGO 或 Mods 里的 SGO，同一条生成路）。`Entry::mod` 的行只有它需要的每个文件（`Entry::files`，即 `catalog.files_of`、Python 侧 `catalog.available` 查的同一份清单：SGO 以及 MRAB / SHKT 等）都在 `Mods\OBJECT\` 下时才预载 / 生成；`Entry::preload=false` 的行只在测试场且 `RangePlaceAll=1` 时预载。
-- 所有生成都走 `MakeRow`（联机拒绝在任何生成路径之前，`tests/debug_spawn_launch_guard.py` 校验）：调试召唤的 `Spawn`（准星点）和测试场 M 地图「摆放」面板的 `PlaceRow`（地图点到的地面点）都只调它。
+- 物体行（载具、敌人）不再手写：`src/spawn_catalog.inc` 由 `tools/gen_spawn_catalog.py` 从 `testrange/catalog.py` 生成，测试场自己的载具 / 波次清单也来自那里（`docs/feature-2026-10-17-testrange-update.md`）。分类加了「插件载具」和「EDF4.1 敌人」；`How::stockVehicle` 改名 `How::vehicle`（原版 SGO 或 Mods 里的 SGO，同一条生成路）。`Entry::mod` 的行只有它需要的每个文件（`Entry::files`，即 `catalog.files_of`、Python 侧 `catalog.available` 查的同一份清单：SGO 以及 MRAB / SHKT 等）都在 `Mods\OBJECT\` 下时才预载 / 生成；`Entry::preload=false` 的行只在测试场且 `RangePlaceAll=1` 时进关预载，否则第一次生成时按需加载（`RequestLoad` / `LoadTick`，2026-10-19，见 [feedback-2026-10-19-mapui.md](feedback-2026-10-19-mapui.md)）。空车按脚本 `CreateVehicle2` 的步骤生成（`0x633280`，不调 SetLevel：不进原生 AI 表）。
+- 所有生成都走 `MakeRow`（联机分支在任何本机生成路径之前：2026-10-20 起物体行联机走 `NetSpawn`，每个成员都生成，支援呼叫行走它自己的呼叫；`tests/debug_spawn_launch_guard.py` 校验）：调试召唤的 `Spawn`（准星点）和测试场 M 地图「摆放」面板的 `PlaceRow`（地图点到的地面点）都只调它。
 - 预载：调试召唤（`DebugSpawn=1`）在普通任务里只预载原版行（与以前相同）；测试场任务（`TestRangeMode`）里 `RangePlace=1` 时预载清单中文件在的行，不看 `DebugSpawn`。
 
 ## 没有自己的钩子

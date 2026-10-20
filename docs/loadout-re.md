@@ -154,7 +154,7 @@ void __fastcall PreloadPlayerHook(int slot) { Apply(*(uint8_t**)(base + kGameSta
 
 ### 3.5 联机（仅备注）
 
-联机时每个玩家从 `GS+0x14C78+index*0xD4` 的记录建人（`0x591130`），记录由 `0x78E9A0` 在 `MissionSync("Sync")` 时从 GS 打包：记录 `+0 class, +4 外观, +8..+0x1C 武器[6], +0x20 护甲数, +0xA4+i*8 星级`[推断]。要在联机下强制，需在 `0x78E9A0` 之前改 GS，所有人看到的都是改后的装备。
+联机时每个玩家从 `GS+0x14C78+index*0xD4` 的记录建人（`0x591130`），记录由 `0x78E9A0` 在 `MissionSync("Sync")` 时从 GS 打包（2026-10-20 核实：唯一调用者是 AngelScript 绑定 `int MissionSync_Begin(int)` 的实现 `0x7920E0`，`0x7920EA call 0x78E9A0(edx)`；绑定登记在 `0x794076..0x79409E`，名字串 `0x17EF1A8`；插件在这里先做 4.1 颜色交换、读房主设置、关房间菜单的对话框，`src/mission.cpp MissionSyncHook`）：记录 `+0 class, +4 外观, +8..+0x1C 武器[6], +0x20 护甲数, +0xA4+i*8 星级`[推断]。要在联机下强制，需在 `0x78E9A0` 之前改 GS，所有人看到的都是改后的装备。
 
 ---
 

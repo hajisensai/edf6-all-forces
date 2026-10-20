@@ -20,7 +20,9 @@ class VehicleSounds(unittest.TestCase):
                 'car_base_se_table': ['engine'], 'game_sound': ['app:/sound/adx/TANK.ACB']}
 
     def test_native_carbase_table_is_checked(self):
-        self.check(self.object())
+        for runtime in ('Vehicle505_Tank', 'Vehicle601_Tank'):
+            with self.subTest(runtime=runtime):
+                self.check(self.object() | {'xgs_scene_object_class': runtime})
 
     def test_unknown_class_preset_is_refused(self):
         for key in ('car_base_se_table', 'heli_se_table', 'begaruta_se_table', 'begaruta_aim_se_table'):

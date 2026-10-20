@@ -78,6 +78,32 @@ int main() {
     Check(!TurretOverlayOwned(3,0),"a pick the turret does not turn with (the Titan's hull gatling): none");
     Check(!TurretOverlayOwned(-1,-1) && !TurretOverlayOwned(0,-1),"no pick, or no turret gun: none");
 
+    // One list, one pick for the weapons screen, the loadout strips and the switch banner (SeatArms).
+    {
+        const float tank[3]={0.0f,0.0f,1.0f};   // the main gun, its HE store, a launcher out on the left
+        SeatArms a=StockSeatArms(tank,3,1,0);
+        Check(a.n==3 && a.rows[0].index==2 && a.rows[1].index==0 && a.rows[2].index==1,"the stock list is SideOrder's");
+        Check(a.picked==2 && a.rows[a.picked].index==1,"the fire-control's selected arm is the picked row");
+        a=StockSeatArms(tank,3,-1,0);
+        Check(a.picked==1 && a.rows[a.picked].index==0,"no selected arm: the sight's (a door gunner), not none");
+        a=StockSeatArms(tank,3,-1,-1);
+        Check(a.picked>=0 && a.rows[a.picked].index==0,"neither: the first arm");
+        a=StockSeatArms(tank,3,7,9);
+        Check(a.picked>=0 && a.rows[a.picked].index==0,"picks out of range fall back to the first");
+        Check(StockSeatArms(tank,0,0,0).n==0 && StockSeatArms(tank,0,0,0).picked<0,"no arms: no rows, no pick");
+        a=JetSeatArms(3,1,true);
+        Check(a.n==4 && a.rows[3].source==ArmSource::gun && a.picked==1 && a.rows[1].source==ArmSource::store,
+              "a jet: its stores then its gun, the picked store");
+        a=JetSeatArms(0,0,true);
+        Check(a.n==1 && a.picked==0 && a.rows[0].source==ArmSource::gun,"no stores: the gun is the pick");
+        Check(JetSeatArms(2,0,false).n==2,"no gun: stores only");
+    }
+    Check(CockpitRoundOfArm(1,false,0,true,crew::reticle::Shell::heat)==CockpitRound::heat
+          && CockpitRoundOfArm(1,false,0,true,crew::reticle::Shell::canister)==CockpitRound::can
+          && CockpitRoundOfArm(1,false,0,true,crew::reticle::Shell::none)==CockpitRound::gun
+          && CockpitRoundOfArm(1,true,0,false,crew::reticle::Shell::none)==CockpitRound::he,
+          "a stock weapon's round class by the sight's reticle::Shell tag");
+
     std::printf("hud_cue_check: %d cases, %d failures\n",cases,failures);
     return failures ? 1 : 0;
 }

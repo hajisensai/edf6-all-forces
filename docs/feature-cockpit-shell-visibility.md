@@ -32,3 +32,20 @@ python tools/cabin_view.py ARCHIVE MODEL.mdb --bone vc_eye_0 --first-person-seat
 省略 `--first-person-seat` 可检查完整外部模型。`cockpit_preview.py` 的席位和自由观察预览自动带此参数，外部预览保留完整模型。
 
 更新需要完整安装器同时安装 DLL 并重建资源。`cockpit_shell` 已进入冻结导入检查及资源配方依赖，更新会触发对应缓存重建。实机抽查和最终检查结果记录在第一人称反馈记录中；离线遍历不等同于所有型号的实机／多人验收。
+
+## 真实驾驶室的后墙（2026-10-19）
+
+用户反馈「救护车往后看会看到空气」：救援车驾驶席向左后方看，座椅靠背与车门后柱之间有一条竖缝，能看到车外。
+
+根因不在显隐：关掉席位掩码、完整绘制原模型时缝仍在。救援车、机器人卡车、拖车头和喀秋莎共用的 ARHAN P880 驾驶室（`truck_cab` / `trailer_cab`）由 `tools/prep_cockpit_ground.py` 按眼睛坐标系的 `box` 裁出，原后界是眼后 0.45 m，而 P880 的后墙在眼后 0.86–0.93 m（角上更靠外），整面后墙被裁掉，只剩座椅靠背挡住正后方。座椅外侧的视线落在原车壳上，从车内看到的是车壳背面，游戏不画，于是露出外景。
+
+修复：P880 的后界放到 1.0 m，重新生成 `cockpits/parts/sf-arhan-p880/cab.npz`（贴图不变）。机器人卡车车壳的后下角比座舱空间的测量值更窄，新后墙的五个顶点会从车外露出，而它们未超过任何一面墙的 `NEAR`，原逻辑直接报错；`cockpits._sides` 改为在点同时超过两面墙的 `CORNER`（0.5）时收缩最靠外的那面墙，只影响原本会报错的情况。
+
+`tests/cockpit_build_test.py` 新增后方封闭检查：`truck_cab`、`trailer_cab` 的每个席位在左右 100° 以后、俯仰 −40° 到 +20° 的视线都必须碰到座舱正面。修复前救援车、机器人卡车和拖车头各有 31 条视线漏光。`apc_cab`（M-ATV）与 `tracked_cab`（Tigr）的后舱同样在前排座椅后方被裁掉，离线射线显示格雷普、纳格林驾驶席向后也有类似漏光，但它们的原车后舱另有乘员区，补后墙要另做取舍，本次没有处理也没有纳入检查。
+
+### 2026-10-20 审查 B5：数据进真实构建路径；格雷普、纳格林同一根因
+
+- **重新生成的 `cab.npz` 不在仓库里**：座舱资源（`models/cockpits/`）原本被 `.gitignore` 排除，只在开发机 `D:\APP\edf6-models\cockpits\`；`tools/build_release.py` 找到才打进包，CI（windows-latest，无此目录）打出的安装包**整个不带座舱**（只打印 `note: model cockpits not found`），新后墙自然也到不了用户手里。另一个后果是数据与代码脱节：所有分支 / worktree 共读同一个开发目录。用 `origin/main` 的代码（旧 `cockpits._sides`，没有 CORNER 规则）读开发目录里新的 P880 `cab.npz` 实测：`cockpit_build_test` 报 `V607_ROBOTRUCK seat 0 (truck_cab): parts away from the walls show outside the hull: ['cab1']`——没合入 40cb2d58 的分支装座舱时机器人卡车会失败。npz 格式本身没变（读取端只取 pos / nrm / uv / tris / mat / textures / colours，新增的 `windows` 键旧代码不读）。
+- **修复**：`models/cockpits/`（62 MB：裁好的座舱网格、贴图、`CREDITS_*.txt`、各件 `LICENSE.txt`）入库（`.gitignore` 例外），`pylib/obj_model.py model_roots` 本来就先找仓库的 `models/`，所以本地构建、selftest、CI 打包都用仓库里与代码同版本的这份；所有座舱裁剪 / 贴图脚本（`tools/prep_cockpit_*.py`、`make_cockpit_textures*.py`）默认写回仓库的 `models/cockpits/`（`obj_model.REPO_MODELS`），不再写共享开发目录。原始 Sketchfab 素材仍只在开发机（需要 API 下载），所以不在 CI 里重新生成。
+- **格雷普（M-ATV）、纳格林（Tigr）**：同一根因——`prep_cockpit_ground.py` 的 `box` 后界停在前排座椅靠背（眼后 0.7 / 0.6 m），后舱整个被裁掉。后界放到 2.8 m（到后门），两车驾驶席往后看是自己的乘员舱、座椅和后门。裁剪时把被剔除的玻璃三角形另存进 `cab.npz` 的 `windows`（`cockpit_kits_ground` 随座舱一起收进车内空间，作为 `Kit.windows`）：从车窗看出去是视野，不算漏光。`cockpit_build_test` 的后方封闭检查纳入 `apc_cab`、`tracked_cab`；两车后舱顶上的舱口在源模型里就是开着的（没有舱盖），从驾驶员眼睛看在后上方 20° 以上，这两种座舱只查 20° 以下（`HATCH_PITCH`）。
+- 未实机：加长后的两种座舱在游戏里的观感（后舱被收进车内空间后的比例）、舱口外是否能看到天空。

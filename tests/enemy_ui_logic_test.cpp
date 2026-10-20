@@ -23,17 +23,17 @@ int main() {
     result=Step(state,model,{});Check(!state.held && !result.consumed,"gesture drains when both buttons are released");
     model=MakeModel(true,20);state={};Step(state,model,{true});
     result=Step(state,model,{false,false,false,false,false,true,false,true});
-    Check(result.action==0,"first skill selects stable full-list ordinal");
+    Check(result.action==0,"the first attack row acts with its stable full-list ordinal");
     Step(state,model,{false,false,false,false,true});
     Check(state.first==6 && state.row==0,"D-pad right pages through six skills");
     result=Step(state,model,{false,false,false,false,false,true});Check(result.action==6,"second page does not alias its first skill to zero");
     Step(state,model,{false,false,false,true});Check(state.first==0,"left page restores first list page");
-    Step(state,model,{false,true});Check(state.row==7,"up from first skill selects explicit return-to-player action");
+    Step(state,model,{false,true});Check(state.row==6,"up from the first attack selects the explicit return-to-player row");
     result=Step(state,model,{false,false,false,false,false,true});Check(result.action==kExit,"return row issues exit rather than an ability");
     Step(state,model,{false,true});result=Step(state,model,{false,false,false,false,false,true});
-    Check(result.action==kFire,"activation has its own row, separated from selecting a skill");
+    Check(result.action==5,"no separate fire row: above return is the page's last attack itself");
     Page(state,model,-1);Check(state.first==18 && Count(model,state.first)==2,"last partial page is reachable without phantom skills");
-    state.row=2;Check(Action(model,state.first,state.row)==kFire,"partial-page action begins after actual row count");
+    state.row=2;Check(Action(model,state.first,state.row)==kExit,"partial page's return row follows its actual attacks");
     Page(state,model,1);Check(state.first==0,"pagination wraps over exact page count");
     state.row=4;++model.identity.target;result=Step(state,model,{false,false,false,false,false,true,false,true});
     Check(!state.focused && state.first==0 && state.row==0 && result.action==kNone,"replacement target cancels current confirmation and resets page");
@@ -47,7 +47,7 @@ int main() {
     Check(!state.focused && result.consumed,"mouse takeover consumes last pad gesture");
     model.visible=false;result=Step(state,model,{true});Check(!state.focused && !result.consumed,"hidden card leaves map input untouched");
     model=MakeModel(true,0);state={};Step(state,model,{true});
-    Check(Rows(model,0)==2 && Action(model,0,0)==kFire && Action(model,0,1)==kExit,"empty current skill list retains explicit exit");
+    Check(Rows(model,0)==1 && Action(model,0,0)==kExit,"empty current attack list retains explicit exit");
     Page(state,model,1);Check(state.first==0,"empty skill list cannot divide by zero");
     model=MakeModel(true,4096);state={};Step(state,model,{true});
     for(int i=0;i<682;++i)Page(state,model,1);
@@ -60,8 +60,8 @@ int main() {
     ++model.identity.request;result=Step(state,model,{false,false,false,false,false,true,false,true});
     Check(!state.focused && result.action==kNone,"replacement online request cancels a pending confirm gesture");
     bool firing=false;
-    Check(!HoldFire(firing,false,true,true,true,true),"held A entering USE from SELECT never starts a skill");
-    Check(HoldFire(firing,true,true,true,true,true),"new A press on USE starts the held native skill");
+    Check(!HoldFire(firing,false,true,true,true,true),"held A moved onto an attack row never starts it");
+    Check(HoldFire(firing,true,true,true,true,true),"a new A press on an attack row holds that attack");
     Check(HoldFire(firing,false,true,true,true,true),"unchanged held gesture remains active");
     Check(!HoldFire(firing,false,true,true,false,true),"navigating off USE immediately releases the skill");
     Check(!HoldFire(firing,false,true,true,true,true),"moving back to USE while still holding A does not retrigger");
@@ -81,5 +81,20 @@ int main() {
     Check(!HealthAvailable(true,50.0f,std::numeric_limits<float>::infinity()),"non-finite maximum HP is unavailable");
     Check(HealthAvailable(true,0.0f,100.0f),"real zero target HP remains a valid health readout");
     Check(HealthAvailable(true,120.0f,100.0f),"real native overheal is shown without fabricating a clamped value");
+    {
+        // Not controlling: left/right step the target instead of paging.
+        auto idle=MakeModel(false);State pick{};Step(pick,idle,{true});
+        auto r=Step(pick,idle,{false,false,false,false,true});Check(r.cycle==1 && r.action==kNone,"right steps to the next target");
+        r=Step(pick,idle,{false,false,false,true});Check(r.cycle==-1,"left steps to the previous target");
+        auto busy=MakeModel(true,20);State page{};Step(page,busy,{true});
+        r=Step(page,busy,{false,false,false,false,true});Check(!r.cycle && page.first==6,"controlling: right pages attacks, never retargets");
+        int a=1,b=2,c=3;
+        TargetSlot slots[3]{{&c,9.0f},{&a,1.0f},{&b,4.0f}};
+        Check(CycleTarget(slots,3,nullptr,1)==0 && slots[0].id==&a,"nothing picked: the nearest first");
+        Check(slots[1].id==&b && slots[2].id==&c,"targets ordered nearest first");
+        Check(CycleTarget(slots,3,&a,1)==1 && CycleTarget(slots,3,&c,1)==0,"next wraps after the farthest");
+        Check(CycleTarget(slots,3,&a,-1)==2,"previous wraps before the nearest");
+        Check(CycleTarget(slots,0,&a,1)==-1,"no controllable enemy: none");
+    }
     std::printf("enemy control UI: %d checks passed\n",checks);
 }

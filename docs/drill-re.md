@@ -374,6 +374,8 @@ Y 键是否与原版 505 的某个操作冲突。
 
 ### 8.5 联机发射与姿态复制（审查修复）
 
+> 2026-10-20：传输（签名、读写、接收钩子、发送者 / 序号、去重 Gate）已与钻头、沙扎比、座位选弹合为一份 `src/seat_net.cpp`，按块头 magic 分发；本文的格式、版本与行为不变。见 [seat-net.md](seat-net.md)。
+
 旧实现只有本机 R/Y 把 `launchAsked` 置位，远端复制的车辆输入里没有这个插件动作；`OnlineShotCounts` 只能避免重复伤害，不能让其它机器的钻头离开车头。
 
 `src/drill_net.cpp` 使用原版车辆的 NetworkObject（车辆 `+0x120`）发送，不另开连接。505 的 NetworkObject vtable 接收槽

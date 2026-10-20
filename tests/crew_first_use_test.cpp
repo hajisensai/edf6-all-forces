@@ -122,6 +122,11 @@ unsigned int GunshipBoardSeat(void) noexcept{unexpectedHook();return {};}
 void BoardingTick(void) noexcept{unexpectedHook();return;}
 void DebugSpawnFrame(unsigned char *) noexcept{}
 void Edf41Mother401DevTick() noexcept{}   // crew.cpp's DebugSpawnTick calls it (edf41mother401.cpp, not linked here)
+void UltimateTick() noexcept{}   // crew.cpp's SharedFrameTick plays the ultimate's show (ultimate.cpp, not linked here)
+namespace gravity { void Frame() noexcept{} namespace net { void Frame() noexcept{} } }   // crew.cpp's GravityTick calls these (gravity.cpp, gravitygun.cpp, floatgun.cpp, not linked here)
+void GravityGunTick() noexcept{}
+void MapCommandQueueTick() noexcept{}   // crew.cpp's SharedFrameTick advances the map's queues (mapcmd.cpp, not linked here)
+void FloatGunTick() noexcept{}
 void const * BoardingOnly(void) noexcept{unexpectedHook();return {};}
 void PlayerJetFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void LauncherFrame(unsigned char *) noexcept{unexpectedHook();return;}

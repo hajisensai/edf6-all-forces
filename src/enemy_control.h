@@ -13,12 +13,21 @@ void ResetEnemyControl() noexcept;
 void EnemyControlFrame() noexcept;
 // The map passes its own local player; split-screen never falls back to P1.
 bool EnemyControlDescribe(const ObjRef& requester,const ObjRef& target,enemy_control::Snapshot*) noexcept;
+// Cheap game-thread family probe for picking on the map: a registered plugin controller
+// matches it or its exact native class has an admitted input profile. Admission itself
+// (skills, network, requester) is still EnemyControlDescribe's.
+bool EnemyControlPickable(const void* object) noexcept;
 bool EnemyControlReadSnapshot(const ObjRef& requester,enemy_control::Snapshot*) noexcept;
 bool EnemyControlReadSnapshotForView(std::uintptr_t ownerHumanKey,enemy_control::Snapshot*) noexcept;
+// Any thread: `human` (a player's object or its SoldierBase) controls an enemy now, so its stock HUD gives way to the
+// enemy's (stockgauge.cpp). Only the published active lease of that exact owner counts.
+bool EnemyControlReplacesPlayerHud(const void* human) noexcept;
 unsigned EnemyControlAbilities(const enemy_control::Snapshot&,unsigned first,enemy_control::Ability*,unsigned capacity) noexcept;
 bool EnemyControlRequest(const enemy_control::Snapshot&) noexcept;
 bool EnemyControlSelectAbility(const enemy_control::Snapshot&,std::uint32_t ability) noexcept;
 bool EnemyControlSetAbilityHeld(const enemy_control::Snapshot&,bool held) noexcept;
+// The M card holds this one attack directly (0 lets go); no selection is changed.
+bool EnemyControlHoldAbility(const enemy_control::Snapshot&,std::uint32_t ability) noexcept;
 bool EnemyControlExit(const enemy_control::Snapshot&) noexcept;
 // Called before the local Soldier's native control input. Its physics/lifetime and
 // identity stay native; only input competing with an active enemy lease is blocked.

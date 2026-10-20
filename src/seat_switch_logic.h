@@ -56,5 +56,22 @@ int Wanted(unsigned count,unsigned at,int number,Takeable takeable) noexcept {
     }
     return -1;
 }
+
+// A pad chord of seat buttons (the seat's button word, kSeatButtons): every button of `mask` held at once. The thermal
+// sight's pad toggle (ini VehicleThermalButton, default L3 + R3: every single seat button already has a vehicle action,
+// so it is two at once). While a chord is held, the single-button actions of its buttons give way (ChordOwns): the
+// sight's zoom (R3) does not drop out as R3 completes the chord after L3. A mask of one button is no chord: it owns
+// nothing (its button keeps every other action it has).
+constexpr int ButtonCount(unsigned mask) noexcept {
+    int n=0;
+    for(unsigned m=mask&0xFFFFu;m;m&=m-1)++n;
+    return n;
+}
+constexpr bool ChordHeld(std::uint16_t buttons,unsigned mask) noexcept {
+    return (mask&0xFFFFu)!=0 && (buttons&mask)==(mask&0xFFFFu);
+}
+constexpr bool ChordOwns(std::uint16_t buttons,unsigned chord,unsigned button) noexcept {
+    return ButtonCount(chord)>=2 && (chord&button)!=0 && ChordHeld(buttons,chord);
+}
 }  // namespace seatsw
 }  // namespace crew

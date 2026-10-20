@@ -16,6 +16,7 @@
 //    barrel climbs.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "seat_switch_logic.h"
 #include "vehicle_look.h"
 #include "layout.h"
 #include "sightzoom.h"
@@ -301,7 +302,8 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
     if(GamePaused()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
     const bool keys=At<unsigned char>(s,kSeatPad)==0;
     const bool down=keys ? KeyHeld(c.sightZoomKey)
-                         : padButton && c.sightZoomButton && (At<std::uint16_t>(s,kSeatButtons)&static_cast<std::uint16_t>(c.sightZoomButton))!=0;
+                         : padButton && c.sightZoomButton && (At<std::uint16_t>(s,kSeatButtons)&static_cast<std::uint16_t>(c.sightZoomButton))!=0 &&
+                           !seatsw::ChordOwns(At<std::uint16_t>(s,kSeatButtons),static_cast<unsigned>(c.thermalButton),static_cast<unsigned>(c.sightZoomButton));
     if(MapHoldsKeys()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
     if(down && !toggle.held) {
         toggle.step=sightzoom::Next(toggle.step);

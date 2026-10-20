@@ -21,6 +21,7 @@
 // Online: only the soldiers this machine runs (online_authority.h IsOnlineAuthority: its own registered ones, the host for
 // one with no identity), as the stock AI writes only theirs; the block goes to the other machines the way the stock AI's
 // does (§2.1).
+#include "host_settings.h"
 #include "crew.h"
 #include "npc_command.h"
 #include "npc_native_hooks.h"
@@ -151,6 +152,8 @@ struct Soldier {
     float packDir[3];
     bool packEmpty[2];
     ULONGLONG packReloadAt[2];
+    ULONGLONG climbSince;    // its action limits have read as the climb's (kClimbLimits) since then; 0: not
+    bool climbSaid;          // that stretch logged (StuckClimb)
 };
 Soldier soldiers[kMaxSoldiers]{};
 ULONGLONG fullLoggedAt=0,listLoggedAt=0;
@@ -372,6 +375,13 @@ struct March {
 };
 March march{};
 SRWLOCK marchLock=SRWLOCK_INIT;
+// The other players' marches (online, on the squads' authority: the host runs every member's recruited squads, so the
+// march of a guest's squads round that guest is kept here; 2026-10-20, the user: 「所有功能都要支持联机」). Each by its
+// player's identity; a slot whose player is gone (dead, left, another object at its address) is taken again. The shape
+// starts at this machine's ini (NpcFormation) until that player's map sets it (Order::formation).
+struct PeerMarch { ObjRef player; March m; };
+constexpr int kPeerMarches=8;
+PeerMarch peerMarches[kPeerMarches]{};
 
 npc::formation::Shape MarchShape() noexcept {
     if(!march.shapeSet) {
@@ -380,6 +390,41 @@ npc::formation::Shape MarchShape() noexcept {
         march.shapeSet=true;
     }
     return march.shape;
+}
+bool PeerLive(const ObjRef& p) noexcept {
+    const auto* h=static_cast<const unsigned char*>(p.obj);
+    return h && Readable(h,kDead+1) && p.Is(h) && !h[kDead];
+}
+// The march round player `root`: this machine's player's (`march`), or another player's (`make`: a slot taken for it).
+March* MarchOf(const unsigned char* root,bool make) noexcept {
+    if(!root)return nullptr;
+    if(root==PlayerHuman())return &march;
+    PeerMarch* free=nullptr;
+    for(auto& p:peerMarches) {
+        if(p.player.obj==root && PeerLive(p.player))return &p.m;
+        if(!free && !PeerLive(p.player))free=&p;
+    }
+    if(!make || !free)return nullptr;
+    *free=PeerMarch{ObjRef::Of(root),March{}};
+    return &free->m;
+}
+npc::formation::Shape ShapeOf(March& m) noexcept {
+    if(&m==&march)return MarchShape();
+    if(!m.shapeSet) {
+        const npc::formation::Shape s=npc::formation::FromInt(Cfg().npcFormation);
+        m.shape=npc::formation::MarchShape(s) ? s : npc::formation::Shape::stock;m.shapeSet=true;
+    }
+    return m.shape;
+}
+void SetMarchShape(npc::formation::Shape s,const char* by) noexcept;
+// Another player's march set (its map's formation order, on this machine: its squads' authority).
+bool SetPeerMarchShape(const unsigned char* who,npc::formation::Shape s) noexcept {
+    March* const m=MarchOf(who,true);
+    if(!m)return false;
+    if(m==&march){SetMarchShape(s,"the map");return true;}
+    m->shape=s;m->shapeSet=true;m->bound=npc::formation::Bound{};
+    Log("NPCAI formation of player %p's squads: %s (its map)",who,npc::formation::Name(s));
+    return true;
 }
 void SetMarchShape(npc::formation::Shape s,const char* by) noexcept {
     AcquireSRWLockExclusive(&marchLock);
@@ -1194,6 +1239,43 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
     return p;
 }
 
+// A soldier held in EDF6's climb over a ledge (the soldier classes' slot 72, 0x5790A0: the only writer of action limits
+// 0x62D, 0x5791DA). The state leaves only when the climb clip it played on the main player is done (0x5798DF), so a CAS
+// without the climb states (their indices at +0x1530..+0x153C resolved -1 at 0x5784D4..0x578543, the play refused) never
+// lets it go: the soldier stands frozen, its moves and fire ignored (2026-10-19: 「NPC有的会立正」; tools/make_edf41_objects.py
+// drop_climb keeps 4.1's soldiers, whose CAS has none, from climbing at all). Logged once a stretch, after kClimbStuckMs:
+// a real climb takes about a second. Diagnostic only: nothing of the soldier is changed.
+constexpr std::uint32_t kClimbLimits=0x62D;
+constexpr std::size_t kClimbStates=0x1530;   // 4 x int: common_elude_large_up, middle_over, middle_up, small_up
+constexpr ULONGLONG kClimbStuckMs=4000;
+constexpr std::size_t kClimbPlayer=0xB90,kClimbTrack=0x1420;   // the main CAS player and the track the state waits on
+void StuckClimb(Soldier& s,const unsigned char* h,int cls,ULONGLONG ms) noexcept {
+    if(At<std::uint32_t>(h,kActionLimits)!=kClimbLimits){s.climbSince=0;s.climbSaid=false;return;}
+    if(!s.climbSince){s.climbSince=ms;return;}
+    if(s.climbSaid || ms-s.climbSince<kClimbStuckMs)return;
+    s.climbSaid=true;
+    const float* pos=Pos(h);
+    // What the state waits on (0x5798D2..0x5798E6: 0x116BBE0(human+0xB90, track [human+0x1420])): that track's record
+    // (player +0x60 + track*0x160) state +0x104 (-1: done at once), end +0xF0 (below 0: a loop, never done), done once
+    // +0x100 + +0xE8 reaches it (0x116BC0C). A soldier whose CAS has every climb
+    // state (EDF6's own, the 2026-10-19 town screenshot's) and still hangs shows here what holds the track instead.
+    std::int32_t track=-1,state=-2;float end=0,start=0,now=0;
+    __try {
+        const unsigned char* cas=h+kClimbPlayer;
+        track=At<std::int32_t>(h,kClimbTrack);
+        const unsigned char* records=At<const unsigned char*>(cas,0x60);
+        if(track>=0 && track<16 && records && Readable(records+static_cast<std::size_t>(track)*0x160,0x110)) {
+            const unsigned char* r=records+static_cast<std::size_t>(track)*0x160;
+            state=At<std::int32_t>(r,0x104);end=At<float>(r,0xF0);start=At<float>(r,0xE8);now=At<float>(r,0x100);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){state=-2;}
+    Log("NPCAI %s %p: held in the climb state %.0f s at (%.0f,%.0f,%.0f); its CAS's climb states %d %d %d %d (-1: none, "
+        "the climb never ends); main track %d plays state %d, +0x100 %.2f +0xE8 %.2f end %.2f (below 0: a loop, the "
+        "climb never ends)",kSoldiers[cls].name,h,static_cast<double>(ms-s.climbSince)/1000.0,pos[0],pos[1],pos[2],
+        At<std::int32_t>(h,kClimbStates),At<std::int32_t>(h,kClimbStates+4),At<std::int32_t>(h,kClimbStates+8),
+        At<std::int32_t>(h,kClimbStates+12),track,state,static_cast<double>(now),static_cast<double>(start),static_cast<double>(end));
+}
+
 void Think(unsigned char* h,int cls) noexcept {
     if(IsAnyPlayer(h) || h[kDead] || !IsOnlineAuthority(h))return;   // only the NPCs whose AI this machine runs (online_authority.h)
     const std::int32_t team=At<std::int32_t>(h,kTeam);
@@ -1221,6 +1303,7 @@ void Think(unsigned char* h,int cls) noexcept {
     Soldier* const s=Entry(h,ms);
     if(!s)return;
     s->seen=ms;
+    StuckClimb(*s,h,cls,ms);
     const float* pos=Pos(h);
     const float eye[3]={pos[0],pos[1]+kEye,pos[2]};
     if(!s->controlSet || control!=s->control) {
@@ -1317,6 +1400,15 @@ int OtherSquads(const unsigned char* except,bool playersOnly,unsigned char** lea
     return n;
 }
 
+// The hand-overs Succeed made lately (NpcSquadSuccessor): the dead top's identity and the squad's top after it (its new
+// leader, or the squad its remnant joined), so that what the map holds by the top's identity (its selection, its RTS
+// groups) goes on with the squad instead of losing it with its leader.
+struct Handover { ObjRef old,now; ULONGLONG at; };
+constexpr int kHandovers=32;
+constexpr ULONGLONG kHandoverMs=300000;
+Handover handovers[kHandovers]{};
+int handoverNext=0;
+
 void Succeed(unsigned char* dead) noexcept {
     unsigned char* m[kMaxSquad];
     const int n=Followers(dead,m,kMaxSquad);
@@ -1344,6 +1436,7 @@ void Succeed(unsigned char* dead) noexcept {
     unsigned char* const top=join>=0 ? others[join] : lead;
     if(join<0)Follow(lead,up);
     for(int i=0;i<n;++i)if(m[i]!=top)Follow(m[i],top);
+    handovers[handoverNext]=Handover{ObjRef::Of(dead),ObjRef::Of(top),GameMs()};handoverNext=(handoverNext+1)%kHandovers;
     TransportSucceed(dead,join>=0 ? nullptr : lead);   // its transport goes with the squad (transport.cpp)
     if(Squad* const old=FindSquad(dead)) {
         if(join>=0){if(old->dismissed){old->dismissed=false;--dismissedCount;}old->top=ObjRef{};}
@@ -1381,7 +1474,7 @@ void PreThink(unsigned char* h) noexcept {
 // of it (a dismissal, its cooldown, ScriptNpcRecruit) stay as they were; the map reads it (NativeJoinable). Only while
 // the plugin's AI is on and SetFollow is as read: else the stock walk-up is the only way in, and it stays.
 bool WalkUpOff() noexcept {
-    return ok && followOk && Cfg().enabled && Cfg().customNpcAi && !Cfg().vanillaRecruit;
+    return ok && followOk && Cfg().enabled && Cfg().customNpcAi && !VanillaRecruitInEffect();   // online: the host's (host_settings.h)
 }
 // Before the stock Think: +0x540 that the walk-up gate would read, cleared (returned, to be put back); 0 when none.
 std::uint8_t HideWalkUp(unsigned char* h) noexcept {
@@ -1398,6 +1491,88 @@ bool NativeJoinable(const unsigned char* top) noexcept {
 // A script's squad the map takes FOLLOW / RECRUIT for alone (mapcmd.h CommandUnit::joinOnly): not locked on the map.
 bool JoinOnly(npc::Control control,const void* top) noexcept {
     return npc::Scripted(control) && NativeJoinable(static_cast<const unsigned char*>(top));
+}
+
+// --- The stock's join mark and free-squad cover (the user 2026-10-19: "同时删除npc顶上的未招募红标（因为已经改成m里面
+// 招募了）和删除玩家招募npc以后npc的减伤消失问题"; docs/npc-ai-design.md §5.2) ---
+// The join mark: the HUD object built at 0xF5200 (vtable 0x1768BC8, its texture "合流マーク.dds") is handed every soldier;
+// its slot 1 (0xF7280) keeps the head (+0x90, y + 2.25 m) of each one with +0x540 set and no leader (+0x548) and draws
+// the mark there. It is the stock walk-up's invitation, so it goes with it: while WalkUpOff the slot draws nothing
+// (the map's RECRUIT is the way in); with VanillaRecruit=1 or the AI off it is the stock's.
+// The cover: the soldier's update (vslot 5, 0x59ABB0) walks +0x548 from the soldier to the end of the chain
+// (0x59B4B4..0x59B4CD) and, when that one has +0x540 set and is on the AI list (+0x1A bit 3), gives the soldier the
+// stock's cover of a free squad: +0x478 = 3 (0x59B4DE; every observer's sight +0x470 is divided by it, 0x54A343: it is
+// seen at a third of the range) and, while its budget +0x1D40 lasts (1800 frames at spawn 0x596ADD, at most 600 after
+// a leader change 0x596D91 / 0x59D42D, spent only while covered), damage taken x0.01 (+0x384, 0x59B51A) and its guns'
+// damage factor x0.1 (+0x788, 0x59B502); else +0x478 = 1 (0x59B524). A recruited squad's chain ends at the player,
+// whose +0x540 is 0: the cover ended the moment the squad joined, by the stock walk-up or by the map alike. With the
+// plugin's AI on the walk is CoverRoot's, by NpcFreeSquadCover: 0 (the default; the user 2026-10-19: "暂时取消这个掩护
+// 设定吧") hands the read kNoCover, a soldier with no +0x540, so no squad has the cover at all (recruited or free, led
+// from the start, a support soldier); 1 stops the walk below a player, so a squad's cover is its top NPC's, before and
+// after it is recruited (a squad under no player ends where the stock's does). Each machine computes it from its own
+// objects, as the stock does (the leader is replicated by vslot 39; +0x540 is not, §2.3).
+constexpr unsigned kJoinMarkSlot=0x1768BD0,kJoinMarkVisit=0xF7280;
+const unsigned char kJoinMarkSig[]={0x48,0x83,0xEC,0x38,0x80,0xBA,0x40,0x05,0x00,0x00,0x00,0x74,0x72,0x48,0x83,0xBA,
+                                    0x48,0x05,0x00,0x00,0x00,0x75,0x68};   // sub rsp,38h; cmp [rdx+540h],0; je; cmp [rdx+548h],0; jne
+constexpr unsigned kCoverWalk=0x59B4B4;
+// mov rax,rbx; nop; @: lea rcx,[rax]; mov rax,[rax+548h]; test rax,rax; jne @ -- then cmp [rcx+540h],r15b (0x59B4CF)
+const unsigned char kCoverWalkSig[]={0x48,0x8B,0xC3,0x66,0x0F,0x1F,0x84,0x00,0x00,0x00,0x00,0x00,0x48,0x8D,0x08,0x48,
+                                     0x8B,0x80,0x48,0x05,0x00,0x00,0x48,0x85,0xC0,0x75,0xF1};
+const unsigned char kCoverReadSig[]={0x44,0x38,0xB9,0x40,0x05,0x00,0x00,0x74,0x4C,0xF6,0x41,0x1A,0x08,0x74,0x46,
+                                     0xC7,0x83,0x78,0x04,0x00,0x00,0x00,0x00,0x40,0x40};   // ... mov [rbx+478h],3.0
+using JoinMarkFn=void(__fastcall*)(void*,const unsigned char*);
+JoinMarkFn nextJoinMark=nullptr;
+bool coverOk=false;
+// What the cover's read sees with NpcFreeSquadCover=0: +0x540 0 (0x59B4CF -> 0x59B524, +0x478 = 1, no budget spent).
+alignas(16) const unsigned char kNoCover[kAutoFollow+0x10]{};
+void __fastcall JoinMarkHook(void* marks,const unsigned char* human) noexcept {
+    if(WalkUpOff())return;
+    nextJoinMark(marks,human);
+}
+// The one whose +0x540 / +0x1A the stock's cover reads for `h` (rcx at 0x59B4CF): up +0x548 to the end of the chain;
+// with the plugin's AI on, kNoCover (NpcFreeSquadCover=0) or the walk stopping below a player (its squad's top NPC).
+const unsigned char* __fastcall CoverRoot(const unsigned char* h) noexcept {
+    __try {
+        const bool own=ok && Cfg().enabled && Cfg().customNpcAi;
+        if(own && !NpcFreeSquadCoverInEffect())return kNoCover;   // online: the host's (host_settings.h)
+        const bool belowPlayer=own;
+        const unsigned char* top=h;
+        for(int i=0;i<kMaxRoot*4;++i) {
+            const auto up=At<const unsigned char*>(top,kLeader);
+            if(!up || !Readable(up,kLeader+8) || (belowPlayer && IsAnyPlayer(up)))return top;
+            top=up;
+        }
+        return top;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return h;}
+}
+// Both once, from InstallNpcAi. The walk's 27 bytes become: mov rcx,rbx; call CoverRoot (a near thunk); mov rcx,rax;
+// 16 bytes of nop. Every register the rest of 0x59ABB0 reads after them is non-volatile or written first (rax, rdx,
+// xmm1 at 0x59B4E8 / 0x59B53E / 0x59B4FA or 0x59B52E), and rsp is 16-aligned there (seven pushes, sub rsp,260h).
+void InstallFreeSquadCover() noexcept {
+    __try {
+        auto slot=reinterpret_cast<void**>(image+kJoinMarkSlot);
+        void* const current=Readable(slot,8) ? *slot : nullptr;
+        if(current==image+kJoinMarkVisit && Matches(kJoinMarkVisit,kJoinMarkSig,sizeof(kJoinMarkSig))) {
+            nextJoinMark=reinterpret_cast<JoinMarkFn>(current);
+            if(!PatchVtableSlot(slot,current,reinterpret_cast<void*>(&JoinMarkHook)))nextJoinMark=nullptr;
+        }
+        Log("NPCAI join mark (合流マーク) %s",nextJoinMark ? "hooked: hidden while the map recruits" : "not as read: stays stock");
+        if(Matches(kCoverWalk,kCoverWalkSig,sizeof(kCoverWalkSig)) &&
+           Matches(kCoverWalk+sizeof(kCoverWalkSig),kCoverReadSig,sizeof(kCoverReadSig))) {
+            unsigned char* const at=image+kCoverWalk;
+            void* const thunk=AllocateNearThunk(at,reinterpret_cast<void*>(&CoverRoot));
+            const auto rel=thunk ? static_cast<unsigned char*>(thunk)-(at+8) : 0;
+            if(thunk && rel>-0x7FFFFFF0 && rel<0x7FFFFFF0) {
+                unsigned char code[sizeof(kCoverWalkSig)]={0x48,0x8B,0xCB,0xE8,0,0,0,0,0x48,0x8B,0xC8,
+                    0x0F,0x1F,0x84,0x00,0x00,0x00,0x00,0x00,0x0F,0x1F,0x84,0x00,0x00,0x00,0x00,0x00};
+                const auto rel32=static_cast<std::int32_t>(rel);
+                std::memcpy(code+4,&rel32,4);
+                coverOk=edf::PatchCode(at,kCoverWalkSig,code,sizeof(code));
+            }
+            if(thunk && !coverOk)VirtualFree(thunk,0,MEM_RELEASE);
+        }
+        Log("NPCAI free-squad cover %s",coverOk ? "patched (NpcFreeSquadCover: 0 none, 1 kept on recruiting)" : "not as read: stays stock");
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
 // The plugin (or its AI) turned off while a dismissed squad cools down: its +0x540 back as it was (stock again).
@@ -1754,7 +1929,7 @@ bool InstallNpcAi() noexcept {
     }
     ok=hooked==kClasses;
     Log("NPCAI soldiers' Think hooked %d/%d%s",hooked,kClasses,ok ? "" : ": the custom AI stays off");
-    if(ok)InstallDriverPayload();
+    if(ok){InstallDriverPayload();InstallFreeSquadCover();}
     ConfigureNpcCommandNetwork(ok ? &NpcMapCommandForRequester : nullptr);
     return ok;
 }
@@ -1771,6 +1946,7 @@ void ResetNpcAi() noexcept {
     world=World{};
     march.heading=npc::formation::Heading{};march.bound=npc::formation::Bound{};march.frame=0;march.n=0;
     march.movers=march.pending=march.moversLast=march.pendingLast=0;
+    for(auto& p:peerMarches)p=PeerMarch{};
     ResetSweep();
     fullLoggedAt=listLoggedAt=0;
 }
@@ -1934,13 +2110,13 @@ int Members(unsigned char* top,unsigned char** out,int most) noexcept {
     return n;
 }
 
-// The march's roster this frame: the player's recruited squads with no order (on foot), squad by squad.
-void MarchRoster(ULONGLONG ms) noexcept {
-    if(march.frame==GameFrame())return;
-    march.frame=GameFrame();march.n=0;
-    march.moversLast=march.movers;march.pendingLast=march.pending;march.movers=march.pending=0;
-    if(MarchShape()==npc::formation::Shape::bounding)npc::formation::Step(march.bound,march.moversLast,march.pendingLast,ms);
-    unsigned char* const me=PlayerHuman();
+// The march's roster this frame round player `me` (this machine's player's `march`, or another player's): its recruited
+// squads with no order (on foot), squad by squad.
+void MarchRoster(ULONGLONG ms,March& mr,const unsigned char* me) noexcept {
+    if(mr.frame==GameFrame())return;
+    mr.frame=GameFrame();mr.n=0;
+    mr.moversLast=mr.movers;mr.pendingLast=mr.pending;mr.movers=mr.pending=0;
+    if(ShapeOf(mr)==npc::formation::Shape::bounding)npc::formation::Step(mr.bound,mr.moversLast,mr.pendingLast,ms);
     if(!me)return;
     for(const Squad& q:squads) {
         if(!Live(q,ms) || q.control!=npc::Control::recruited || q.cmd.order!=Order::none)continue;
@@ -1948,11 +2124,12 @@ void MarchRoster(ULONGLONG ms) noexcept {
         if(!q.top.Is(top) || top[kDead] || TopNpc(top)!=top || RootLeader(top)!=me)continue;
         unsigned char* m[kMaxSquad];
         const int k=Members(top,m,kMaxSquad);
-        for(int i=0;i<k && march.n<static_cast<int>(sizeof(march.member)/sizeof(march.member[0]));++i)
+        for(int i=0;i<k && mr.n<static_cast<int>(sizeof(mr.member)/sizeof(mr.member[0]));++i)
             if(HumanOnFoot(m[i]) && IsOnlineAuthority(m[i]) && !npc::Scripted(ControlOf(m[i],RootLeader(m[i]))))
-                march.member[march.n++]=m[i];
+                mr.member[mr.n++]=m[i];
     }
 }
+void MarchRoster(ULONGLONG ms) noexcept { MarchRoster(ms,march,PlayerHuman()); }
 
 // Walks the soldier to its formation slot (formation.h) and holds it there; false when it has none (stock shape,
 // not in a formation). Blocked routes wait/replan inside MoveTo; they never fall back to walking through a wall.
@@ -1965,20 +2142,32 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
     float fwd[2]={0.0f,1.0f};
     int k=-1,n=0;
     bool marching=false;
+    March* mr=nullptr;   // the march it is in (its player's)
     if(q && mapcmd::PointOrder(q->cmd.order) && q->guardShape!=Shape::stock) {
         shape=q->guardShape;anchor=q->cmd.at;fwd[0]=q->guardFwd[0];fwd[1]=q->guardFwd[1];
         unsigned char* m[kMaxSquad];
         const int c=Members(static_cast<unsigned char*>(const_cast<void*>(q->top.obj)),m,kMaxSquad);
         for(int i=0;i<c;++i){if(!HumanOnFoot(m[i]))continue;if(m[i]==h)k=n;++n;}
-    } else if(s.control==npc::Control::recruited && root && root==PlayerHuman() && (!q || q->cmd.order==Order::none) &&
-              MarchShape()!=Shape::stock && world.player) {
-        MarchRoster(ms);
-        shape=MarchShape();anchor=world.playerAt;marching=true;
-        for(int i=0;i<march.n;++i)if(march.member[i]==h)k=i;
-        n=march.n;
-        const float look[2]={world.lookOk ? world.look[0] : 0.0f,world.lookOk ? world.look[2] : 1.0f};
-        Track(march.heading,anchor,look,2.0f);
-        fwd[0]=march.heading.fwd[0];fwd[1]=march.heading.fwd[1];
+    } else if(s.control==npc::Control::recruited && root && (!q || q->cmd.order==Order::none) &&
+              ((root==PlayerHuman() && world.player) || (InSession() && IsAnyPlayer(root))) &&
+              (mr=MarchOf(root,true))!=nullptr && ShapeOf(*mr)!=Shape::stock) {
+        // This machine's player's march round where it stands and looks; another player's (online: its squads' authority
+        // here) round that player, ahead along its body's facing (its camera is its own machine's).
+        MarchRoster(ms,*mr,root);
+        shape=ShapeOf(*mr);marching=true;
+        float look[2]={0.0f,1.0f};
+        if(mr==&march) {
+            anchor=world.playerAt;
+            if(world.lookOk){look[0]=world.look[0];look[1]=world.look[2];}
+        } else {
+            anchor=Pos(root);
+            const float* m=reinterpret_cast<const float*>(root+kMatrix);
+            look[0]=m[8];look[1]=m[10];
+        }
+        for(int i=0;i<mr->n;++i)if(mr->member[i]==h)k=i;
+        n=mr->n;
+        Track(mr->heading,anchor,look,2.0f);
+        fwd[0]=mr->heading.fwd[0];fwd[1]=mr->heading.fwd[1];
     }
     float x,z;
     if(!anchor || k<0 || !Offset(shape,k,n,spacing,&x,&z))return false;
@@ -1987,12 +2176,12 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
     const float d=npc::Horiz(pos,slot);
     if(left)*left=d;
     if(marching && shape==Shape::bounding) {
-        if(TeamOf(k)!=march.bound.moving && npc::Horiz(pos,anchor)<Cfg().npcLeash) {
+        if(TeamOf(k)!=mr->bound.moving && npc::Horiz(pos,anchor)<Cfg().npcLeash) {
             Stand(h);*move="overwatch";   // the other half covers: it holds where it is
             return true;
         }
-        ++march.movers;
-        if(d>kArrive)++march.pending;
+        ++mr->movers;
+        if(d>kArrive)++mr->pending;
     }
     // World() inherits the anchor's height, which is only a hint on a slope.
     // Project locally; never search the whole vertical map and choose a roof.
@@ -2504,63 +2693,45 @@ bool NpcDriver(const unsigned char* v) noexcept {
 // player's (the stock SetFollow, as the stock recruit does), refused during its dismissal's cooldown; dismiss lets go a
 // recruited squad where it stands and starts the cooldown (+0x540 cleared meanwhile, or the stock would take it back at
 // once). The squads of a mission script take none (§4.3).
-// --- Fireteams (the user, 2026-10-08: "支持编组") ---
-// A squad is the stock follow tree (§5.1); a fireteam is a squad of its own: SplitSquad makes one squad two (its places
-// in Members' order: the even ones stay under the top, the odd ones under the first of them, who follows the top's own
-// leader: the player for a recruited squad, nobody for a free one), every member re-parented explicitly (a moved
-// soldier's own followers are not dragged along with it); MergeSquads puts other squads' tops under one squad's top.
-// Each half is then a squad like any other: its own row on the panel, its own orders and formation. Offline only (as
-// the other orders: the follow tree's changes are replicated by vslot 39, but the panel's orders are not, §9).
-namespace {
-Squad* Commandable(const void* leader) noexcept {
-    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession() || !followOk)return nullptr;
-    Squad* const q=FindSquad(leader);
-    if(!q || npc::Scripted(q->control) || q->dismissed || GameMs()-q->seen>kOrderSeenMs)return nullptr;
-    auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
-    return q->top.Is(top) && !top[kDead] && IsSoldierClass(top) && TopNpc(top)==top &&
-           !npc::Scripted(ControlOf(top,RootLeader(top))) ? q : nullptr;
+bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept {
+    if(!old.obj || !now)return false;
+    const ULONGLONG ms=GameMs();
+    ObjRef at=old;bool found=false;
+    for(int hop=0;hop<4;++hop) {   // a new leader dead too: its own hand-over (newest first)
+        bool step=false;
+        for(int k=1;k<=kHandovers && !step;++k) {
+            const Handover& h=handovers[(handoverNext-k+kHandovers)%kHandovers];
+            if(h.old.obj && h.old.obj==at.obj && h.old.ctrl==at.ctrl && ms-h.at<=kHandoverMs){at=h.now;step=found=true;}
+        }
+        if(!step)break;
+    }
+    if(found)*now=at;
+    return found;
 }
 
-// A mission can take control of a follower independently of its top. Reparenting changes every affected tree,
-// so reject the whole operation before its first native call when any member belongs to a mission script.
-bool CanRegroup(unsigned char* const* members,int n) noexcept {
-    for(int i=0;i<n;++i)if(npc::Scripted(ControlOf(members[i],RootLeader(members[i]))))return false;
-    return true;
-}
-}  // namespace
-
-int SplitSquad(const void* leader) noexcept {
+// A squad's members by identity (mapcmd_logic.h UnitRef): its top and its followers down the tree, at most `most`.
+int NpcSquadMembers(const void* top,ObjRef* out,int most) noexcept {
+    if(!top || !out || most<=0)return 0;
     __try {
-        Squad* const q=Commandable(leader);
-        if(!q)return -1;
-        auto top=static_cast<unsigned char*>(const_cast<void*>(leader));
+        auto* t=static_cast<unsigned char*>(const_cast<void*>(top));
+        if(!Readable(t,kDead+1) || t[kDead] || !IsSoldierClass(t))return 0;
         unsigned char* m[kMaxSquad];
-        const int n=Members(top,m,kMaxSquad);
-        if(n<2 || !CanRegroup(m,n))return -1;
-        unsigned char* const above=At<unsigned char*>(top,kLeader);
-        unsigned char* const second=m[1];
-        CancelBoarding(top);   // both halves, before the native follow lists are changed
-        Follow(second,above);
-        for(int i=2;i<n;++i)Follow(m[i],i%2 ? second : top);
-        Log("NPCAI squad %p split: %d stay, %d go with %p",top,(n+1)/2,n/2,second);
-        return n/2;
-    } __except(EXCEPTION_EXECUTE_HANDLER){return -1;}
+        const int n=Members(t,m,kMaxSquad);
+        int k=0;
+        for(int i=0;i<n && k<most;++i)if(m[i] && !m[i][kDead])out[k++]=ObjRef::Of(m[i]);
+        return k;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return 0;}
 }
-
-bool MergeSquads(const void* into,const void* from) noexcept {
+// The top of a living member's squad now (the native follow tree, which a guest replicates: the host's hand-over seen
+// there too). False when `member` is dead, gone or another object at its address.
+bool NpcSquadTopOf(const ObjRef& member,ObjRef* top) noexcept {
+    if(!member.obj || !top)return false;
     __try {
-        Squad* const a=Commandable(into);
-        Squad* const b=Commandable(from);
-        if(!a || !b || a==b)return false;
-        auto top=static_cast<unsigned char*>(const_cast<void*>(into));
-        auto other=static_cast<unsigned char*>(const_cast<void*>(from));
-        unsigned char* aMembers[kMaxSquad];unsigned char* bMembers[kMaxSquad];
-        const int na=Members(top,aMembers,kMaxSquad),nb=Members(other,bMembers,kMaxSquad);
-        if(na+nb>kMaxSquad || !CanRegroup(aMembers,na) || !CanRegroup(bMembers,nb))return false;
-        CancelBoarding(other);
-        Follow(other,top);
-        npcmark::Assign(b->commandFocus,{});*b=Squad{};   // no stale panel/roster entry may command the former top and form a follow cycle
-        Log("NPCAI squad %p joins squad %p",other,top);
+        auto* h=static_cast<unsigned char*>(const_cast<void*>(member.obj));
+        if(!Readable(h,kLeader+8) || !Readable(h,kSelfCtrl+8) || !member.Is(h) || h[kDead] || !IsSoldierClass(h))return false;
+        unsigned char* const t=TopNpc(h);
+        if(!t || t[kDead])return false;
+        *top=ObjRef::Of(t);
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -2569,9 +2740,10 @@ bool MergeSquads(const void* into,const void* from) noexcept {
 // nothing, -2 when it takes no orders or `shape` is no defence (formation.h kGuard).
 Squad* GuardingSquad(const void* leader,int* why) noexcept {
     *why=-2;
-    if(!ok || !Cfg().enabled || !Cfg().customNpcAi || InSession())return nullptr;
+    if(!ok || !Cfg().enabled || !Cfg().customNpcAi)return nullptr;
     Squad* const q=FindSquad(leader);
-    if(!q || npc::Scripted(q->control))return nullptr;
+    // Online only the squad's authority keeps its defence (the order reaches it as Order::formation, v7).
+    if(!q || npc::Scripted(q->control) || (InSession() && !IsOnlineAuthority(q->top.obj)))return nullptr;
     *why=-1;
     return q->cmd.order==Order::guard ? q : nullptr;
 }
@@ -2796,7 +2968,9 @@ NpcCommandResult NpcMapCommandForRequester(const ObjRef& selected,const mapcmd::
         if(npc::Scripted(ControlOf(top,root)))return CommandResult(Reason::scripted);
         const auto* q=FindSquad(top);
         if(!q || !q->top.Is(top) || GameMs()-q->seen>kOrderSeenMs)return CommandResult(Reason::stale);
-        const Command order{mapcmd::VehicleCommandOf(c.order),{c.at[0],c.at[1],c.at[2]}};
+        // HOLD: the post where the vehicle is now (the authority's own reading of it).
+        const float* at=c.order==Order::hold ? Pos(v) : c.at;
+        const Command order{mapcmd::VehicleCommandOf(c.order),{at[0],at[1],at[2]}};
         if(order.order!=Order::guard && order.order!=Order::none && order.order!=Order::focus)return CommandResult(Reason::unsupported);
         const bool accepted=TankCommand(v,order,focus);
         return CommandResult(accepted ? Reason::none : Reason::failed,accepted ? 1u : 0u);
@@ -2842,7 +3016,7 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             const Reason why=TransportWithdraw(top);
             return why==Reason::none ? CommandResult(Reason::none,1) : CommandResult(why);
         }
-        if(mapcmd::PointOrder(c.order) || c.order==Order::engage || c.order==Order::focus) {
+        if(mapcmd::PlaceOrder(c.order) || c.order==Order::engage || c.order==Order::focus) {
             affected=0;
             for(int i=0;i<count;++i)if(HumanOnFoot(members[i]) && IsOnlineAuthority(members[i]) &&
                 !npc::Scripted(ControlOf(members[i],RootLeader(members[i]))))++affected;
@@ -2856,6 +3030,8 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             GuardOrder(*q,c,caller);break;
         case Order::engage:
             q->cmd=c;q->cmdLead=npc::LeadOf(control);std::memcpy(q->cmd.at,Pos(top),12);break;
+        case Order::hold:   // RTS hold position: a guard of the spot its top stands on now (each squad its own)
+            GuardOrder(*q,Command{Order::guard,{Pos(top)[0],Pos(top)[1],Pos(top)[2]}},caller);break;
         case Order::focus: {
             if(!focus.obj || !Readable(focus.obj,kDead+1) || static_cast<const unsigned char*>(focus.obj)[kDead])return CommandResult(Reason::noTarget);
             CommandFocusCheck checked{focus};VisitEnemiesOf(caller ? callerTeam : team,&SeeCommandFocus,&checked);
@@ -2883,6 +3059,24 @@ NpcCommandResult NpcSquadCommandForRequester(const ObjRef& selected,const mapcmd
             if(!BoardSquad(top,ms,caller,&affected,&why,&vehicle))return CommandResult(why);
             TransportPair(top,vehicle);   // its transport from now on, when it is one (transport.cpp)
             break;
+        }
+        case Order::formation: {
+            // The map's T / formation menu (command protocol v7): a guarding squad's defence, or the march of the
+            // requester's own recruited squads. Nothing else of the squad's changes (its trip, its boarding, its route).
+            if(!mapcmd::FormationParamValid(c.param))return CommandResult(Reason::unsupported);
+            if(q->cmd.order==Order::guard) {
+                const int shape=mapcmd::FormationCycles(c.param) ? static_cast<int>(npc::formation::Next(q->guardShape,true)) :
+                                mapcmd::FormationGuardShape(c.param);
+                if(shape<0 || SetGuardFormation(top,shape)<0)return CommandResult(Reason::unsupported);
+            } else if(q->cmd.order==Order::none && recruited && caller && root==caller) {
+                // The march of the requester's own squads (MarchRoster round that player: this machine's player's, or
+                // online another player's whose squads this machine runs).
+                const int marchShape=mapcmd::FormationMarchShape(c.param);
+                const npc::formation::Shape marchAs=npc::formation::FromInt(marchShape);
+                if(marchShape<0 || !npc::formation::MarchShape(marchAs) || static_cast<int>(marchAs)!=marchShape ||
+                   !SetPeerMarchShape(caller,marchAs))return CommandResult(Reason::unsupported);
+            } else return CommandResult(Reason::unsupported);
+            return CommandResult(Reason::none,static_cast<unsigned>(count>0 ? count : 1));
         }
         case Order::dismount:
         case Order::dismountAll:

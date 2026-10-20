@@ -100,6 +100,8 @@ struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* ob
 // A thrown drone's weapon (tools/calls.py brings 'throw'): its AmmoHitSizeAdjust's bits (calls.throw_mark), the
 // drone its bomb releases and that drone's fuel.
 struct Throw { std::uint32_t markBits; ThrownDrone drone; DWORD fuelSec; const char* name; const wchar_t* id; };
+// An ultimate strike's weapon (tools/calls.py brings 'ultimate'): its AmmoHitSizeAdjust (an integer, as kCalls').
+struct Ultimate { float mark; const char* name; const wchar_t* id; };
 #include "calls.inc"
 // The in-mission pick (CallPick, overlay.cpp's keys): -1 = each weapon's own call; otherwise only local players'
 // call weapons bring kCalls[picked]. This UI preference is not carried in the native radio-call message.
@@ -425,6 +427,117 @@ bool InstallThrows() noexcept {
     return PatchVtableSlot(reinterpret_cast<void**>(image+kSubShotSlot),shot,reinterpret_cast<void*>(&SubShotHook));
 }
 
+// --- The ultimate strike (ultimate.cpp, docs/plan-2026-10-19-ultimate.md) ---
+// Weapon_LaserMarkerCallFire's fire state with CP[3] = 0 (0x6A59F0; docs/tvguide-re.md §1.3) loads its IndirectFireUnit
+// (weapon+0x18A0) on entering: 0x6A5A22 add rcx,0x18A0; 0x6A5A29 call 0x2B8090 (the shots of its spec into the unit's
+// +0x2F0), then every frame waits for 0x2B7B90 (no shot left, every round dead) to go back to idle. At that call (redirected:
+// SatFireHook) one of ours has its shots set to 0 after the load when a show plays instead, so the stock beam never fires
+// and the weapon goes back to idle on its next frame; the show starts at the laser's smoothed point (+0x1D60, which follows
+// the laser's hit +0x1780). The weapon's damage +0x89C (its AmmoDamage with its stars, read by the satellite at 0x6A1A62) is
+// the show's.
+// Whose call (the weapon's owner +0x120):
+//  - this machine's player's: the show (UltimateStart); the shots cleared only once it started (B: before 2026-10-20 they
+//    were cleared first, and a call the show refused spent its points on nothing): refused, the stock beam fires;
+//  - another machine's player's (online; every machine runs the call on its copy of the weapon: 推测 from the shots it saw
+//    cleared, docs/plan-2026-10-19-ultimate.md 待确认 6): that player's machine plays the show and tells this one
+//    (ultimate_net_protocol.h), which plays it too. Its stock beam is held back only when the show was heard (A: before
+//    2026-10-20 it was cleared here whatever the caller's build, and a peer of an older one, or one whose show did not
+//    start, left this machine with neither): heard before this call, at once; heard within kUltimateStockWaitMs after it,
+//    while the stock round is not out yet (the unit's first-shot wait, M), then (UltimateStockHoldBack). Never heard: the
+//    stock beam is this machine's sight of the call;
+//  - a soldier's: the stock beam.
+constexpr unsigned kSatFire=0x6A5A22,kSatFireCall=0x6A5A29,kUnitLoad=0x2B8090,kLaserMarkerVtable=0x17E4750;
+constexpr std::size_t kSatUnit=0x18A0,kSatAim=0x1D60,kSatLaser=0x1780,kWeaponDamage=0x89C,kUnitShots=0x2F0;
+constexpr std::size_t kUnitRounds=0x468;   // the unit's list of rounds made (+0x460): its size (docs/tvguide-re.md §1.1, +0x1D08)
+const unsigned char kSatFireSig[]={0x48,0x81,0xC1,0xA0,0x18,0x00,0x00,0xE8,0x62,0x26,0xC1,0xFF};
+using UnitLoadFn=void(__fastcall*)(unsigned char*);
+
+// The ultimate weapon `w` is (its mark), or nullptr.
+const Ultimate* UltimateOf(const unsigned char* w) noexcept {
+    if(!Readable(w+kWeaponHitSize,4))return nullptr;
+    const float mark=At<float>(w,kWeaponHitSize);
+    for(const auto& u:kUltimates)if(std::fabs(mark-u.mark)<0.5f)return &u;
+    return nullptr;
+}
+
+// Another machine's player's calls whose show was not heard yet: the weapon (checked by its class and owner when the show
+// comes: a weapon is no scene object with a weak-this), its owner, when.
+struct StockCall { unsigned char* weapon; const unsigned char* owner; ULONGLONG at; };
+StockCall stockCalls[8]{};
+int stockNext=0;
+
+void __fastcall SatFireHook(unsigned char* unit) {
+    reinterpret_cast<UnitLoadFn>(image+kUnitLoad)(unit);
+    if(!Cfg().enabled)return;
+    __try {
+        unsigned char* const w=unit-kSatUnit;
+        const Ultimate* const u=UltimateOf(w);
+        if(!u)return;
+        const auto owner=At<const unsigned char*>(w,kWeaponOwner);
+        if(IsPlayer(owner)) {
+            const float* aim=reinterpret_cast<const float*>(w+kSatAim);
+            if(!std::isfinite(aim[0]+aim[1]+aim[2]))aim=reinterpret_cast<const float*>(w+kSatLaser);
+            const std::uint64_t seed=GetTickCount64()*0x9E3779B97F4A7C15ull^reinterpret_cast<std::uintptr_t>(w);
+            if(UltimateStart(owner,aim,At<float>(w,kWeaponDamage),seed))Put<std::int32_t>(unit,kUnitShots,0);   // the show instead
+            else Log("ULTIMATE %s: no show: the stock satellite beam fires instead",u->name);
+            return;
+        }
+        if(InSession() && IsAnyPlayer(owner)) {
+            if(UltimateHeardFrom(owner)) {
+                Put<std::int32_t>(unit,kUnitShots,0);
+                Log("ULTIMATE %s: another machine's call, its show heard already: no stock beam here",u->name);
+                return;
+            }
+            stockCalls[stockNext]=StockCall{w,owner,GetTickCount64()};
+            stockNext=(stockNext+1)%static_cast<int>(sizeof(stockCalls)/sizeof(stockCalls[0]));
+            Log("ULTIMATE %s: another machine's call, no show of its caller's heard yet: the stock beam stays unless the show's "
+                "start comes before it fires",u->name);
+            return;
+        }
+        Log("ULTIMATE %s: a soldier's call: the stock satellite beam",u->name);
+    } __except(FaultLog("ULTIMATE call (the stock beam)",GetExceptionInformation())) {}
+}
+
+}  // namespace
+
+bool UltimateStockHoldBack(const unsigned char* caller) noexcept {
+    bool any=false;
+    const ULONGLONG now=GetTickCount64();
+    for(StockCall& c:stockCalls) {
+        if(!c.weapon || c.owner!=caller)continue;
+        const StockCall was=c;
+        c=StockCall{};
+        if(now-was.at>kUltimateStockWaitMs)continue;
+        int held=0;   // 1 held back, 2 already out, 0 the weapon gone
+        __try {
+            unsigned char* const w=was.weapon;
+            if(Readable(w,kSatUnit+kUnitRounds+8) && At<const void*>(w,0)==image+kLaserMarkerVtable &&
+               At<const unsigned char*>(w,kWeaponOwner)==caller) {
+                unsigned char* const unit=w+kSatUnit;
+                if(At<std::int32_t>(unit,kUnitShots)>0 && At<std::uint64_t>(unit,kUnitRounds)==0){Put<std::int32_t>(unit,kUnitShots,0);held=1;}
+                else held=2;
+            }
+        } __except(FaultLog("ULTIMATE stock beam hold-back",GetExceptionInformation())){held=0;}
+        Log("ULTIMATE another machine's call: its show came %llu ms after it: %s",static_cast<unsigned long long>(now-was.at),
+            held==1 ? "its stock beam held back" : held==2 ? "its stock beam was out already (both seen here)" : "its weapon is gone");
+        any=any || held==1;
+    }
+    return any;
+}
+void UltimateStockReset() noexcept { for(StockCall& c:stockCalls)c=StockCall{}; stockNext=0; }
+
+namespace {
+bool InstallUltimate() noexcept {
+    if(!Matches(kSatFire,kSatFireSig,sizeof(kSatFireSig))) {
+        Log("ULTIMATE satellite fire state: profile mismatch (the ultimate stays a stock satellite call)");
+        return false;
+    }
+    bool changed=false;
+    const bool ok=RedirectCall(image+kSatFireCall,image+kUnitLoad,reinterpret_cast<void*>(&SatFireHook),changed);
+    if(!ok)Log("ULTIMATE satellite fire state %s",changed ? "half patched" : "not patched");
+    return ok;
+}
+
 using UnlockFn=void(__fastcall*)(unsigned char*);
 using RowCountFn=std::uint32_t(__fastcall*)(void*);
 using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
@@ -624,8 +737,10 @@ bool InstallAirstrikes() noexcept {
         // update vtable untouched so their original payload/timeline cannot be suppressed.
         const bool throws=InstallThrows();
         const bool pickSend=calls && InstallPickSend();
-        Log("HOOK airstrikes calls=%d owned=%d packSaves=%d stockBombers=native throws=%d pickSend=%d",calls,owned,script,throws,pickSend);
-        return calls || throws;
+        const bool ultimate=InstallUltimate();
+        Log("HOOK airstrikes calls=%d owned=%d packSaves=%d stockBombers=native throws=%d pickSend=%d ultimate=%d",calls,owned,script,
+            throws,pickSend,ultimate);
+        return calls || throws || ultimate;
     } __except(FaultLog("AIRSTRIKE install",GetExceptionInformation())){return false;}
 }
 // A new mission (mission.cpp MissionStart): the thrown bombs were the last mission's (their

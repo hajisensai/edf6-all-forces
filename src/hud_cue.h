@@ -6,6 +6,8 @@
 //    The HUD draws only flat quads with the drawer's white texture and text (docs/hud-re.md §1, §2: no texture of the
 //    game's is reachable from it), so the pictures are vector silhouettes drawn with those quads, one per kind of store.
 #pragma once
+#include "cockpit_fields.inc"
+#include "reticle.h"
 #include <cstring>
 
 namespace crew::hudcue {
@@ -47,6 +49,41 @@ constexpr StoreIcon ArmIconOf(int kind,bool lobbed,int style=0,bool cannon=false
     if(style!=0)return StoreIcon::energy;
     return kind==2 ? StoreIcon::rocket : kind==3 ? StoreIcon::aam : lobbed ? StoreIcon::bomb : cannon ? StoreIcon::shell : StoreIcon::gun;
 }
+// What a physical cockpit's weapons screen calls a weapon (cockpit_instruments.h arm / rowRound): its round's class, each
+// with its tag, colour and picture there (pylib/cockpit_instruments.py ROUNDS, in this order). The user, 2026-10-19:
+// 「看不出来1，2是啥弹种啊。你可以做成彩色的或者有区分之类的。或者战雷」.
+// CockpitRound: src/cockpit_fields.inc (generated from pylib/cockpit_fields.py ROUND_CLASSES).
+// A plugin aircraft's store by its picture.
+constexpr CockpitRound CockpitRoundOf(StoreIcon icon) noexcept {
+    switch(icon) {
+    case StoreIcon::gun: return CockpitRound::mg;
+    case StoreIcon::shell: return CockpitRound::gun;
+    case StoreIcon::rocket: return CockpitRound::rkt;
+    case StoreIcon::aamShort: case StoreIcon::aam: case StoreIcon::aamLong: return CockpitRound::aam;
+    case StoreIcon::agm: case StoreIcon::agmLight: return CockpitRound::msl;
+    case StoreIcon::bomb: return CockpitRound::bomb;
+    case StoreIcon::energy: return CockpitRound::beam;
+    case StoreIcon::drone: case StoreIcon::charge: return CockpitRound::spc;
+    }
+    return CockpitRound::mg;
+}
+// A stock weapon by its round (ArmIconOf's `kind`, `lobbed`, `style`, `bigGun`: a gun laid shot by shot) and the round
+// its sight names (reticle.h Shell): a gun's round by that tag, a lobbed one without a tag HE, a big gun without one GUN,
+// any other gun MG.
+constexpr CockpitRound CockpitRoundOfArm(int kind,bool lobbed,int style,bool bigGun,reticle::Shell shell) noexcept {
+    if(style!=0)return CockpitRound::beam;
+    if(kind==2)return CockpitRound::rkt;
+    if(kind==3)return CockpitRound::msl;
+    switch(shell) {
+    case reticle::Shell::ap: return CockpitRound::ap;
+    case reticle::Shell::he: return CockpitRound::he;
+    case reticle::Shell::beam: return CockpitRound::beam;
+    case reticle::Shell::heat: return CockpitRound::heat;
+    case reticle::Shell::canister: return CockpitRound::can;
+    case reticle::Shell::none: break;
+    }
+    return lobbed ? CockpitRound::he : bigGun ? CockpitRound::gun : CockpitRound::mg;
+}
 // A weapon cell's loading bar (the user, 2026-10-12: 「两发之间显示『装填 1.8s』，在挂载上加上那种读条呢」): the share loaded,
 // 0..1, or < 0 for no bar. Out of rounds and reloading the magazine (`reload` < 1: vhud.cpp Reload) its share; with rounds,
 // the next round going in (`cycleSec` >= 0: vhud.cpp Cycle, a gun of 0.5 s or more between shots) `cycle`; ready: none.
@@ -68,6 +105,47 @@ inline void SideOrder(const float* side,int n,int* order) noexcept {
             const int g=side[i]>kSideApart ? 0 : side[i]<-kSideApart ? 2 : 1;
             if(g==group)order[k++]=i;
         }
+}
+
+// A seat's weapons in the one order and with the one pick every read-out of them uses: the cockpit's weapons screen
+// (cockpit_screens.inc PublishInstruments), the loadout strips (hud.cpp StockCells, JetCells) and the switch banner. Each
+// row is where its weapon is read from: a stock vehicle's arm (vhud.h StockHudReadout.arm[index]), a plugin aircraft's
+// store (PlayerJetReadout store `index`) or its gun (index -1). They read the same pick: a strip once framed only the
+// fire-control's selected arm while the screen fell back to the sight's (a heli's door gunner: no selected arm).
+enum class ArmSource : unsigned char { stock, store, gun };
+struct SeatArmRow { ArmSource source; int index; };
+constexpr int kMostSeatArms=16;
+struct SeatArms { int n=0; int picked=-1; SeatArmRow rows[kMostSeatArms]{}; };
+// A stock vehicle's `arms` weapons laid out as they stand (SideOrder); the picked one the fire-control's `selected`, else
+// the one the sight is laid by (`sight`), else the first.
+inline SeatArms StockSeatArms(const float* side,int arms,int selected,int sight) noexcept {
+    SeatArms a{};
+    if(!side || arms<=0)return a;
+    if(arms>kMostSeatArms)arms=kMostSeatArms;
+    int order[kMostSeatArms];
+    SideOrder(side,arms,order);
+    const int fired=selected>=0 && selected<arms ? selected : sight>=0 && sight<arms ? sight : 0;
+    for(int k=0;k<arms;++k) {
+        a.rows[a.n++]=SeatArmRow{ArmSource::stock,order[k]};
+        if(order[k]==fired)a.picked=k;
+    }
+    return a;
+}
+// A plugin aircraft's `stores` (the secondary's, `store` the one it fires), then its gun (the primary, when it has one);
+// without a picked store the gun.
+inline SeatArms JetSeatArms(int stores,int store,bool gun) noexcept {
+    SeatArms a{};
+    if(stores<0)stores=0;
+    if(stores>kMostSeatArms-1)stores=kMostSeatArms-1;
+    for(int i=0;i<stores;++i) {
+        a.rows[a.n++]=SeatArmRow{ArmSource::store,i};
+        if(i==store)a.picked=i;
+    }
+    if(gun) {
+        a.rows[a.n++]=SeatArmRow{ArmSource::gun,-1};
+        if(a.picked<0)a.picked=a.n-1;
+    }
+    return a;
 }
 
 // Whether a stock vehicle's turret aim overlay (the auto-aim state and keys, the lock box, the range, the lead circle:

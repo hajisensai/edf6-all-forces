@@ -1620,9 +1620,10 @@ void Spin(void* self,Hull& h) noexcept {
         if(h.control.Active()) {
             const auto& in=h.control.input;
             const float cap=(std::max)(0.0f,F(self,kMoveSpeed)*0.5f),sn=std::sin(h.control.yaw),cs=std::cos(h.control.yaw);
-            h.point[0]=h.pos[0]+(in.move[0]*cs+in.move[2]*sn)*cap;
+            // Camera-relative: the screen's right of heading yaw is (-cos, 0, sin) (enemy_control_camera.h).
+            h.point[0]=h.pos[0]+(in.move[2]*sn-in.move[0]*cs)*cap;
             h.point[1]=h.pos[1]+in.move[1]*cap;
-            h.point[2]=h.pos[2]+(in.move[2]*cs-in.move[0]*sn)*cap;
+            h.point[2]=h.pos[2]+(in.move[2]*cs+in.move[0]*sn)*cap;
         } else if(route)std::memcpy(h.point,o+kRoutePoint,12);
         else for(float& v:h.vel)v*=0.99f;
         float t[3]={h.point[0]-h.pos[0],h.point[1]-h.pos[1],h.point[2]-h.pos[2]};

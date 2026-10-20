@@ -75,7 +75,7 @@ bool Requester(const char* authenticated,const ep::NativeId& id) noexcept {
     if(!ep::ValidPuid(authenticated) || !ep::CanonicalId(id))return false;
     CommandIdentities identities{};
     return ResolveCommandIdentities(id.data(),nullptr,0,nullptr,&identities) && identities.requester &&
-        SupportCommandRequesterMatches(identities.requesterPuid,authenticated);
+        SenderIsPlayer(identities.requesterPuid,authenticated);
 }
 bool Authenticate(void*,const char* puid,const ep::NativeId& source) noexcept {
     __try {return InSession() && Requester(puid,source);}
@@ -89,7 +89,7 @@ bool ResolveActors(const ep::LeaseSpec& spec,Actors* out) noexcept {
     CommandIdentities identities{};
     if(!ResolveCommandIdentities(spec.requesterPlayer.data(),nullptr,0,spec.target.data(),&identities) ||
        !identities.requester || !identities.focus ||
-       !SupportCommandRequesterMatches(identities.requesterPuid,spec.ownerPuid))return false;
+       !SenderIsPlayer(identities.requesterPuid,spec.ownerPuid))return false;
     // Native IDs must still be registered. The host proves this target really is its authority; guests only accept
     // that same host-issued lease and must see a remote copy, never turn their object into a local owner.
     const auto* target=static_cast<const unsigned char*>(identities.focus.obj);

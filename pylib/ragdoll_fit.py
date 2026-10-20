@@ -24,11 +24,10 @@ held at two pivots cannot yaw.
 from __future__ import annotations
 
 import math
-import struct
 from dataclasses import dataclass
 
+import hkfile
 import sgo
-from hktag import Tag
 from mdb import Mdb, bind_world
 
 Vec3 = tuple[float, float, float]
@@ -99,83 +98,68 @@ def rows_off(a: list[Vec3], b: list[Vec3]) -> float:
 @dataclass
 class Body:
     name: str
-    at: int          # bodyCinfo offset
     frame: Frame
+    src: hkfile.Body
 
 
 @dataclass
 class Joint:
     child: int       # bodyA
     parent: int      # bodyB
-    a: int           # transformA's offset (rotation columns, then translation at +48)
-    b: int
+    src: hkfile.Joint
 
 
 class Shkt:
-    """The ragdoll tagfile's bodies, joints and reference pose (offsets from pylib/hktag.py's type table)."""
+    """The ragdoll tagfile's bodies, joints and reference pose (pylib/hkfile.py's graph; set_* write them back)."""
 
     def __init__(self, data: bytes) -> None:
-        self.buf = bytearray(data)
-        self.tag = t = Tag(bytes(data))
-        scene = t.root_variant('hknpPhysicsSceneData')
-        _, sat, ns = t.item(t.u32(scene + t.offset('hknpPhysicsSceneData', 'systemDatas')))
-        _req(ns == 1, f'{ns} physics systems, a vehicle ragdoll has one')
-        system_type, rag, _ = t.item(t.u32(sat))
-        _req(system_type in ('hknpRagdollData', 'hknpPhysicsSystemData'), f'the physics system is a {system_type}')
-        B = 'hknpPhysicsSystemData::bodyCinfoWithAttachment'
-        _, bat, nb = t.item(t.u32(rag + t.offset('hknpPhysicsSystemData', 'bodyCinfos')))
-        o_name, o_pos, o_q = t.offset(B, 'name'), t.offset(B, 'position'), t.offset(B, 'orientation')
-        self.bodies = []
-        for j in range(nb):
-            at = bat + j * t.size(B)
-            self.bodies.append(Body(t.cstr(t.u32(at + o_name)), at,
-                                    Frame(self._v3(at + o_pos), struct.unpack_from('<4f', self.buf, at + o_q))))
+        self.physics = p = hkfile.Physics.read(bytes(data))
+        _req(len(p.systems) == 1, f'{len(p.systems)} physics systems, a vehicle ragdoll has one')
+        system = p.systems[0]
+        _req(system.kind in ('hknpRagdollData', 'hknpPhysicsSystemData'), f'the physics system is a {system.kind}')
+        self.bodies = [Body(b.name, Frame(b.position, b.orientation), b) for b in system.bodies]
         self.index = {b.name: k for k, b in enumerate(self.bodies)}
-        _, cat, nc = t.item(t.u32(rag + t.offset('hknpPhysicsSystemData', 'constraintCinfos')))
-        C = 'hknpConstraintCinfo'
         self.joints = []
-        for j in range(nc):
-            at = cat + j * t.size(C)
-            constraint_type, dat, _ = t.item(t.u32(at + t.offset(C, 'constraintData')))
-            tr = dat + t.offset(constraint_type, 'atoms') + t.offset(f'{constraint_type}::Atoms', 'transforms')
-            A = 'hkpSetLocalTransformsConstraintAtom'
-            self.joints.append(Joint(t.u32(at + t.offset(C, 'bodyA')), t.u32(at + t.offset(C, 'bodyB')),
-                                     tr + t.offset(A, 'transformA'), tr + t.offset(A, 'transformB')))
-        self.parents, self.bone_body, self.ref = [], [], []
-        if system_type != 'hknpRagdollData':     # a plain physics system (the Blacker's): no ragdoll skeleton
+        for j in system.joints:
+            _req(j.transforms is not None, f'joint {j.index} ({j.kind}) has no local transforms')
+            self.joints.append(Joint(j.body_a, j.body_b, j))
+        self.parents: list[int] = []
+        self.bone_body: list[int] = []
+        self.ref: list[hkfile.Value] = []
+        if system.kind != 'hknpRagdollData':     # a plain physics system (the Blacker's): no ragdoll skeleton
             return
-        _, sat, _ = t.item(t.u32(rag + t.offset('hknpRagdollData', 'skeleton')))
-        S = 'hkaSkeleton'
-        _, pa, pn = t.item(t.u32(sat + t.offset(S, 'parentIndices')))
-        _, ba, bn = t.item(t.u32(sat + t.offset(S, 'bones')))
-        _, ra, rn = t.item(t.u32(sat + t.offset(S, 'referencePose')))
-        _, ma, mn = t.item(t.u32(rag + t.offset('hknpRagdollData', 'boneToBodyMap')))
-        _req(pn == bn == rn == mn, f'ragdoll skeleton: {pn} parents, {bn} bones, {rn} poses, {mn} body links')
-        self.parents = list(struct.unpack_from(f'<{pn}h', self.buf, pa))
-        self.bone_body = list(struct.unpack_from(f'<{mn}i', self.buf, ma))
-        qs = t.offset('hkQsTransform', 'scale') + 16     # translation, rotation, scale: one hkVector4 each (no size entry)
-        self.ref = [ra + k * qs for k in range(rn)]
+        _req(system.skeleton is not None, 'a ragdoll without a skeleton')
+        self.parents, self.bone_body, self.ref = system.parents(), system.bone_bodies(), system.reference_pose()
+        bones = system.skeleton.value['bones'].count     # type: ignore[union-attr]
+        _req(len(self.parents) == bones == len(self.ref) == len(self.bone_body),
+             f'ragdoll skeleton: {len(self.parents)} parents, {bones} bones, {len(self.ref)} poses, '
+             f'{len(self.bone_body)} body links')
 
-    def _v3(self, at: int) -> Vec3:
-        return struct.unpack_from('<3f', self.buf, at)  # type: ignore[return-value]
+    def set_position(self, k: int, t: Vec3) -> None:
+        b = self.bodies[k]
+        b.frame = Frame(t, b.frame.q)
+        b.src.set_position(t)
 
-    def _put(self, at: int, v: Vec3) -> None:
-        struct.pack_into('<3f', self.buf, at, *v)
+    def pivot(self, j: Joint, side: str) -> Vec3:
+        """The joint in the child's (side 'A') or the parent's ('B') frame: its transform's translation."""
+        return j.src.pivot(side)  # type: ignore[return-value]
 
-    def pivot(self, at: int) -> Vec3:
-        """A joint transform's translation (after its three rotation columns)."""
-        return self._v3(at + 48)
+    def set_pivot(self, j: Joint, side: str, v: Vec3) -> None:
+        j.src.set_pivot(side, v)
 
     def joint_world(self, j: Joint) -> tuple[Vec3, Vec3]:
         """The joint's point as the child and as the parent place it."""
         A, B = self.bodies[j.child].frame, self.bodies[j.parent].frame
-        return add(A.t, rot(A.q, self.pivot(j.a))), add(B.t, rot(B.q, self.pivot(j.b)))
+        return add(A.t, rot(A.q, self.pivot(j, 'A'))), add(B.t, rot(B.q, self.pivot(j, 'B')))
 
     def ref_t(self, k: int) -> Vec3:
-        return self._v3(self.ref[k])
+        return self.ref[k]['translation'].vec(3)  # type: ignore[return-value]
+
+    def set_ref_t(self, k: int, v: Vec3) -> None:
+        self.ref[k]['translation'].set_vec(v)
 
     def bytes(self) -> bytes:
-        return bytes(self.buf)
+        return self.physics.write()
 
 
 # ------------------------------------------------------------------------------------------ the binding blob
@@ -288,22 +272,20 @@ def fit(md: Mdb, shkt: bytes, blob: bytes, stock: Mdb) -> tuple[bytes, bytes]:
         f = Frame(t, _bone_q(r)) * ln.off
         _req(rows_off(axes(f.q), axes(old[ln.dst].q)) < TOL, f'bone {ln.src} turned: its proxy {ln.dst} would turn')
         moved[ln.dst] = Frame(f.t, old[ln.dst].q)
-    o_pos = s.tag.offset('hknpPhysicsSystemData::bodyCinfoWithAttachment', 'position')
-    for b in s.bodies:
+    for k, b in enumerate(s.bodies):
         if b.name in moved and dist(moved[b.name].t, b.frame.t) > KEEP:
-            b.frame = moved[b.name]
-            s._put(b.at + o_pos, b.frame.t)
+            s.set_position(k, moved[b.name].t)
     for j in s.joints:      # the joint stays on its child: where transformA puts it, the parent's transformB follows
         A, B = s.bodies[j.child].frame, s.bodies[j.parent].frame
-        want = rot(conj(B.q), sub(add(A.t, rot(A.q, s.pivot(j.a))), B.t))
-        if dist(want, s.pivot(j.b)) > KEEP:
-            s._put(j.b + 48, want)
+        want = rot(conj(B.q), sub(add(A.t, rot(A.q, s.pivot(j, 'A'))), B.t))
+        if dist(want, s.pivot(j, 'B')) > KEEP:
+            s.set_pivot(j, 'B', want)
     for k, p in enumerate(s.parents):
         me = s.bodies[s.bone_body[k]].frame
         par = s.bodies[s.bone_body[p]].frame if p >= 0 else Frame((0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
         want = rot(conj(par.q), sub(me.t, par.t))
         if dist(want, s.ref_t(k)) > KEEP:
-            s._put(s.ref[k], want)
+            s.set_ref_t(k, want)
     for ln in links(inner, 'animation_from_ragdoll'):
         P = s.bodies[s.index[ln.src]].frame
         t, _r = bones[ln.dst]

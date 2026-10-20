@@ -1344,9 +1344,8 @@ Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool
 // error not closing for kStuckMs flips its sign too.
 constexpr std::size_t kDoorBlock=0x2030,kDoorStride=0x20,kDoorPull=0x10;
 // The seat aim's axes (kSeatAim, kAimAxes, ...): common/edf/layout.h.
-constexpr std::size_t kMuzzles=0x1D0,kMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleLocal=0x10,kBoneRows=0xB0;
-constexpr std::size_t kMuzzleMode=0xE0,kWeaponRows=0x150;
-constexpr std::int32_t kModeWeaponRows=0;
+// The muzzles: common/edf/weapon.h (MuzzleWorld, MuzzleFrame, MeanMuzzle). kBoneRows: a bone record's world rows.
+constexpr std::size_t kBoneRows=0xB0;
 constexpr float kMuzzleReach=30.0f;   // m: a muzzle farther than this from the vehicle is garbage
 constexpr float kAxisMargin=0.03f;    // rad past a stop still counted as reachable
 constexpr float kTurnPerInput=1.1f/60.0f,kTurnMin=0.2f/60.0f,kTurnMax=6.0f/60.0f,kSettleFrames=6.0f;
@@ -1371,36 +1370,9 @@ void Angles(const float* local,float* geo) noexcept {
     geo[1]=std::atan2(local[1],std::sqrt(local[0]*local[0]+local[2]*local[2]));
 }
 
-// One muzzle's world position and direction as fire (0x6969A0) builds them: the position is row 3 of
-// local x bone, the direction row 2 of the matrix its mode picks.
-bool MuzzleFrame(const unsigned char* weapon,const unsigned char* muzzle,float* pos,float* dir) noexcept {
-    const auto bone=At<const unsigned char*>(muzzle,0);
-    if(!Readable(bone,kBoneRows+0x40))return false;
-    float b[4][4],l[4][4];
-    std::memcpy(b,bone+kBoneRows,sizeof(b));std::memcpy(l,muzzle+kMuzzleLocal,sizeof(l));
-    for(int c=0;c<3;++c) {
-        dir[c]=l[2][0]*b[0][c]+l[2][1]*b[1][c]+l[2][2]*b[2][c];
-        pos[c]=l[3][0]*b[0][c]+l[3][1]*b[1][c]+l[3][2]*b[2][c]+l[3][3]*b[3][c];
-    }
-    if(At<std::int32_t>(muzzle,kMuzzleMode)==kModeWeaponRows)std::memcpy(dir,weapon+kWeaponRows+0x20,12);
-    const float length=std::sqrt(Dot3(dir,dir));
-    return std::isfinite(pos[0]+pos[1]+pos[2]) && std::isfinite(length) && length>0.5f && length<2.0f;
-}
-
-// The barrel: the mean of the gun's muzzles.
+// The barrel: the mean of the gun's muzzles (edf::MeanMuzzle, at most eight), within reach of the vehicle.
 bool Barrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept {
-    const auto muzzles=At<const unsigned char*>(weapon,kMuzzles);
-    const auto count=At<std::uint64_t>(weapon,kMuzzleCount);
-    if(count==0 || count>8 || !Readable(muzzles,count*kMuzzleStride))return false;
-    std::memset(pos,0,12);std::memset(dir,0,12);
-    for(std::uint64_t i=0;i<count;++i) {
-        float p[3],f[3];
-        if(!MuzzleFrame(weapon,muzzles+i*kMuzzleStride,p,f))return false;
-        for(int c=0;c<3;++c){pos[c]+=p[c];dir[c]+=f[c];}
-    }
-    const float length=std::sqrt(Dot3(dir,dir));
-    if(!(length>0.1f))return false;
-    for(int c=0;c<3;++c){pos[c]/=static_cast<float>(count);dir[c]/=length;}
+    if(!edf::MeanMuzzle(weapon,8,pos,dir))return false;
     const float* at=reinterpret_cast<const float*>(v+kPosition);
     const float d[3]={pos[0]-at[0],pos[1]-at[1],pos[2]-at[2]};
     return Dot3(d,d)<kMuzzleReach*kMuzzleReach;
@@ -3690,10 +3662,13 @@ float MapFixedRay(const float* a,const float* b,float* hit) noexcept {
 // §2 step 1b), with the plain nearest-hit collector (kHitVtbl: every hit, not the ground filter's). Metres to it, -1 with
 // none; `hit` the point, `body` its id (collector +0x78, 24 bits; docs/raycast-re.md §2.2).
 float ObjectRay(const float* a,const float* b,float* hit,std::uint32_t* body) noexcept {
+    return LayerRay(a,b,kObjectLayer,hit,body);
+}
+float LayerRay(const float* a,const float* b,std::uint32_t filter,float* hit,std::uint32_t* body) noexcept {
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
-    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},kObjectLayer,0,0};
+    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
     RayHits col{};
     *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
     reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);

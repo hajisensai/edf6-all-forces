@@ -57,14 +57,24 @@ uint32_t BridgeApi(uint32_t version,uint32_t size,EDF6CoopExtensionApi* out){
     return 1;
 }
 uint32_t Admission(){return dependencyMode==3 ? 0u : 1u;}
+uint32_t EDF6COOP_MA_CALL NoSnapshot(const char*,EDF6CoopMemberValueFn,void*,uint64_t*){return 0;}
+EDF6CoopMemberAttributeApi attributeTable{};
+const EDF6CoopMemberAttributeApi* EDF6COOP_MA_CALL AttributeTable(uint32_t version){
+    Check(version==EDF6COOP_MEMBER_ATTRIBUTE_VERSION,"the room check asks for member attribute ABI v1");
+    attributeTable=EDF6CoopMemberAttributeApi{};
+    attributeTable.size=static_cast<uint32_t>(offsetof(EDF6CoopMemberAttributeApi,lastError));
+    attributeTable.version=dependencyMode==7 ? 2u : EDF6COOP_MEMBER_ATTRIBUTE_VERSION;
+    attributeTable.snapshot=&NoSnapshot;
+    return &attributeTable;
+}
 uint32_t Identity(int32_t,EDF6CoopPeer*){++worldQueries;return 0;}
 FARPROC ResolveDependency(const char* name) noexcept {
     if(dependencyMode==0)return nullptr;
     if(!std::strcmp(name,"EDF6CoopGetExtensionApi"))return reinterpret_cast<FARPROC>(&BridgeApi);
     if(!std::strcmp(name,"EDF6Coop_MissionAdmissionReady"))return reinterpret_cast<FARPROC>(&Admission);
     if(!std::strcmp(name,"EDF6Coop_ResolveMissionPlayerPuid"))return dependencyMode==2 ? nullptr : reinterpret_cast<FARPROC>(&Identity);
-    // Only looked up (never called) by the room check: any non-null address stands for the export.
-    if(!std::strcmp(name,"EDF6CoopGetMemberAttributeApi"))return dependencyMode==6 ? nullptr : reinterpret_cast<FARPROC>(&Admission);
+    // The room check asks for the v1 table and refuses one it cannot use (coop_attr.h Usable): 6 none, 7 another version.
+    if(!std::strcmp(name,"EDF6CoopGetMemberAttributeApi"))return dependencyMode==6 ? nullptr : reinterpret_cast<FARPROC>(&AttributeTable);
     return nullptr;
 }
 void RecordNotice(const wchar_t* text) noexcept {++notices;depNotice=text;}
@@ -377,7 +387,7 @@ int main(int argc,char** argv){
     // Both native entry points must reject missing/old/incomplete/uninitialized
     // Coop while a matching bridge is usable in the menu (world still absent).
     const auto make=base ? reinterpret_cast<crew::Create>(*Slot("EOS_Lobby_CreateLobby")) : &CreateRoom;
-    for(int mode:{0,1,2,3,4,6}){   // 6: an EDF6Coop without the member attributes (the EDF4.1 outfits' sync)
+    for(int mode:{0,1,2,3,4,6,7}){   // 6: an EDF6Coop without the member attributes (the EDF4.1 outfits' sync), 7: of another version
         dependencyMode=mode;Check(!EDF6AF_RoomIsolationReady(),"Coop virtual admission sees failed online prerequisites");
         const auto oldJoins=joins,oldNotices=notices;result=-999;
         make(nullptr,nullptr,reinterpret_cast<void*>(9),&RecordCallback);
@@ -385,7 +395,7 @@ int main(int argc,char** argv){
         value.value=kAllForcesRoomPrefix+0x93;result=-999;
         enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
         Check(joins==oldJoins && result==10 && notices==oldNotices+2,"dependency failure refuses join with visible explanation");
-        if(mode==6)Check(depNotice.find(L"成员属性接口")!=std::wstring::npos && depNotice.find(L"版本过旧")!=std::wstring::npos,
+        if(mode==6 || mode==7)Check(depNotice.find(L"成员属性接口")!=std::wstring::npos && depNotice.find(L"版本过旧")!=std::wstring::npos,
                          "an EDF6Coop without member attributes is named to the player as too old, not only in the log");
         Check(crew::lastLog.find("matching EDF6Coop required")!=std::string::npos,"dependency failure logged explicitly");
     }

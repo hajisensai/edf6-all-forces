@@ -1,0 +1,6 @@
+F-16A Block 15 Fighting Falcon (War Thunder) by KojfDiscord, CC BY 4.0
+Source: https://sketchfab.com/3d-models/f-16a-block-15-fighting-falcon-war-thunder-a6fa145facf045fca90ac499340db5b0 (via Sketchfab)
+Licence: Creative Commons Attribution 4.0 (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+Changes: the cockpit round the pilot's seat only; the canopy's and the HUD's glass left out; turned into the seat's eye frame and scaled to metres, triangles facing away from the eye left out
+(a double-sided material's turned to it); textures resized and re-saved as PNG. The EDF6 plugin's cockpit builder
+(pylib/cockpit_kits_plugin.py) cuts it to each vehicle's room.

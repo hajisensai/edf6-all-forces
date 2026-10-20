@@ -20,9 +20,11 @@ import rootcpk  # noqa: E402
 import sgo  # noqa: E402
 
 # The game's vehicle classes the stock rows use (xgs_scene_object_class); a new row's class must be added knowingly.
-VEHICLE_CLASSES = {'Vehicle505_Tank', 'Vehicle403_Tank', 'Vehicle404_Tank', 'Vehicle603_Flak', 'Vehicle510_Maser',
+VEHICLE_CLASSES = {'Vehicle505_Tank', 'Vehicle601_Tank', 'Vehicle403_Tank', 'Vehicle404_Tank', 'Vehicle603_Flak', 'Vehicle510_Maser',
                    'Vehicle501_FortressRobo', 'Vehicle507_Rescuetank', 'Vehicle_Car', 'Vehicle503_Bike',
-                   'Vehicle504_begaruta', 'VehicleBigBegaruta', 'Vehicle612_nix'}
+                   'Vehicle504_begaruta', 'VehicleBigBegaruta', 'Vehicle612_nix',
+                   # 2026-10-19: the NPC-crewed kinds' `_ai` SGOs placed empty (testrange/catalog.py STOCK_VEHICLES)
+                   'Vehicle601_Tank', 'Vehicle607_RoboTruck', 'Vehicle60X_Truck', 'Vehicle402_Rocket'}
 
 
 def rel32_target(pe, at: int, length: int) -> int:
@@ -47,7 +49,7 @@ def main() -> int:
     sigs = dict(re.findall(r'const unsigned char (k\w+)Sig\[\]=\{([^}]+)\}', source))
     addresses = dict((k, int(v, 16)) for k, v in re.findall(r'\b(k\w+)=(0x[0-9A-Fa-f]+)', source))
     addresses['kSetTeam'] = 0x54EE70   # crew.h
-    assert len(sigs) == 12, sorted(sigs)
+    assert len(sigs) == 19, sorted(sigs)
     for name, text in sigs.items():
         data = bytes(int(x.strip(), 16) for x in text.split(','))
         assert pe.get_data(addresses[name], len(data)) == data, name
@@ -63,6 +65,23 @@ def main() -> int:
         checks += 3
     assert rel32_target(pe, addresses['kActivateSite'] + 13, 5) == addresses['kActivate']
     checks += 1
+    # An empty vehicle is CreateVehicle2's: its level through 0xD7AE0 and its setup through 0x633280 (never SetLevel,
+    # whose tail 0x54E902 puts the object on the native AI list: tests/debug_spawn_vehicle_level_guard.py).
+    site = addresses['kCreateVehicleLevelSite']
+    assert rel32_target(pe, site + 10, 5) == addresses['kLevelScale'], hex(site)
+    assert rel32_target(pe, site + 48, 5) == addresses['kVehicleLevelSetup'], hex(site)
+    assert rel32_target(pe, 0x54E902, 5) == 0x118A4B0, 'SetLevel no longer enters the AI list where expected'
+    # The loading on demand asks the manager the script's IsCompleteResource asks (0x70ED20: mov rcx,[mgr]; jmp).
+    assert rel32_target(pe, addresses['kLoadDoneScript'] + 7, 5) == addresses['kLoadDone']
+    assert rel32_target(pe, addresses['kLoadDoneScript'], 7) == addresses['kPreloadMgr']
+    # WaitPreload's render-thread step between its two completion queries (0x1BC20B): the manager's query, then
+    # 0x111CC20 on the renderer global the tool passes it (LoadTick makes the same step once its loads are complete).
+    site = addresses['kWaitPreloadSyncSite']
+    assert rel32_target(pe, site, 7) == addresses['kPreloadMgr'], hex(site)
+    assert rel32_target(pe, site + 10, 5) == addresses['kLoadDone'], hex(site)
+    assert rel32_target(pe, site + 15, 7) == addresses['kRenderer'], hex(site)
+    assert rel32_target(pe, site + 22, 5) == addresses['kRenderSync'], hex(site)
+    checks += 9
     for name, cls in (('kSceneObjectType', b'.?AVSceneObject@game@xgs@@'), ('kGameObjectType', b'.?AVGameObjectBase@@'),
                       ('kVehicleType', b'.?AVVehicleBase@@')):
         assert pe.get_data(addresses[name] + 0x10, len(cls)) == cls, name

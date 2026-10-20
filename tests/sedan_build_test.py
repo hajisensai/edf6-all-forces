@@ -53,7 +53,7 @@ def main():
     for body in ('body','door_l','door_r',*sedan.WHEELS):
         shape = sidecar_model._Shkt(raw, 'RagDollProxys.'+body)
         leaves = shape.leaves()
-        bounds = struct.unpack_from('<8f', raw, shape.aabb_at)
+        bounds = shape.aabb
         for i in range(shape.inst_n):
             lo,hi = shape.box(i)
             assert all(leaves[i][0][k] <= lo[k]+1e-4 and leaves[i][1][k] >= hi[k]-1e-4 for k in range(3)), (body,i,'tree')

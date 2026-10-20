@@ -579,8 +579,10 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         return;
     }
     if(front) {
-        ahead=static_cast<float>((Down('W') || Down(VK_UP))-(Down('S') || Down(VK_DOWN)));
-        right=static_cast<float>((Down('D') || Down(VK_RIGHT))-(Down('A') || Down(VK_LEFT)));
+        // With Ctrl held the letters are the commands' (Ctrl+A every unit, mapcmd.cpp): the arrows still pan.
+        const bool letters=!Down(VK_CONTROL);
+        ahead=static_cast<float>(((letters && Down('W')) || Down(VK_UP))-((letters && Down('S')) || Down(VK_DOWN)));
+        right=static_cast<float>(((letters && Down('D')) || Down(VK_RIGHT))-((letters && Down('A')) || Down(VK_LEFT)));
         const bool turnRight=Down('E') && !(eat && Cfg().npcMarkKey=='E'),turnLeft=Down('Q') && !(eat && Cfg().npcMarkKey=='Q');
         turn=static_cast<float>(static_cast<int>(turnRight)-static_cast<int>(turnLeft))*mapcam::kTurnRate*dt;
         tilt=static_cast<float>(Down('R')-Down('F'))*mapcam::kTurnRate*0.5f*dt;
@@ -589,13 +591,15 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         float dx=0.0f,dy=0.0f;
         if(MouseDelta(human,&dx,&dy) && (dx!=0.0f || dy!=0.0f)) {
             if(!game.loggedMouse && Cfg().debug){game.loggedMouse=true;Log("MAP mouse delta (%.1f,%.1f) a frame",dx,dy);}
-            // Ctrl + left drag is the NPC commands' selection box (mapcmd.cpp), not a pan.
-            if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured()){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
+            // A left drag that is the NPC commands' selection box (mapcmd.cpp: whenever there is a unit to box, or Ctrl
+            // held) is not a pan; the middle button's drag always is (RTS).
+            if(Down(VK_MBUTTON) || (Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured())){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
             else if(Down(VK_RBUTTON) && !MapCommandPointerCaptured()){mapcam::Turn(v,dx*mapcam::kDragTurn,dy*mapcam::kDragTurn);keys=true;}
         }
     }
     const int notches=wheel.exchange(0);
-    if(notches){mapcam::Zoom(v,static_cast<float>(notches)/static_cast<float>(WHEEL_DELTA));keys=true;}
+    // Over the 「摆放」 list the wheel scrolls it (mapcmd.cpp), elsewhere it zooms.
+    if(notches && !MapCommandWheel(notches)){mapcam::Zoom(v,static_cast<float>(notches)/static_cast<float>(WHEEL_DELTA));keys=true;}
     if(pad) {
         const XINPUT_GAMEPAD& p=pad->Gamepad;
         const float lx=Stick(p.sThumbLX),ly=Stick(p.sThumbLY),rx=Stick(p.sThumbRX),ry=Stick(p.sThumbRY);
@@ -732,6 +736,9 @@ TvInput TvRead(const unsigned char* human) noexcept {
 bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
     __try {
         SupportActorFrame(human);
+        // The Shift-queued points of this machine's units (mapcmd.cpp): from every soldier's pre-update, once a frame,
+        // so they go on with every map shut, the player dead or watching (a vehicle's input ticks it too: crew.cpp).
+        MapCommandQueueTick();
         if(!human || !human[kHumanPlayer] || !IsPlayer(human))return false;
         FrameTick();       // shared scene-clock anchor, including missions with no surviving vehicle
         TransportTick();   // the squads' transports (transport.cpp), after the deliveries that start them
@@ -987,6 +994,12 @@ bool MapPadButtons(std::uint16_t* buttons) noexcept {
     XINPUT_STATE s{};
     if(!PadState(&s))return false;
     *buttons=s.Gamepad.wButtons;
+    return true;
+}
+bool MapPadState(std::uint16_t* buttons,std::uint8_t* leftTrigger,std::uint8_t* rightTrigger) noexcept {
+    XINPUT_STATE s{};
+    if(!PadState(&s))return false;
+    *buttons=s.Gamepad.wButtons;*leftTrigger=s.Gamepad.bLeftTrigger;*rightTrigger=s.Gamepad.bRightTrigger;
     return true;
 }
 }  // namespace crew

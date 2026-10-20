@@ -60,7 +60,7 @@ ScreenFeed FeedOf(const Snapshot& snap) noexcept {
     if(snap.stock) {   // a stock vehicle's (a heli's stores too)
         const StockHudReadout& r=snap.stockHud;
         if(!snap.cockpit) {
-            f.cells=StockCells(r,f.cell);f.picked=r.selected;
+            f.cells=StockCells(r,f.cell,&f.picked);
             f.threats=r.threats<kStockThreats ? r.threats : kStockThreats;
             for(int i=0;i<f.threats;++i)std::memcpy(f.threatAt[i],r.threatAt[i],12);
         }
@@ -102,16 +102,33 @@ void PublishInstruments(const Snapshot& snap) noexcept {
         const float range=vec::Clamp(distance/600.0f,0.0f,1.0f)*.35f;
         r.contact[i]=true;r.at[i][0]=range*std::sin(bearing);r.at[i][1]=range*std::cos(bearing);
     }
-    if(snap.cockpit) {
-        const auto& j=snap.jet;
-        if(j.store>=0 && j.store<j.stores && j.store<kMostStores) {
-            r.value[slot]=static_cast<float>(j.store+1);r.value[ammo]=static_cast<float>(j.storeRounds[j.store]);
-        } else if(j.guns>0)r.value[ammo]=static_cast<float>(j.gunRounds);
-    } else if(snap.stock && snap.stockHud.arms>0) {
-        const auto& a=snap.stockHud;
-        const int picked=a.selected>=0 && a.selected<a.arms ? a.selected : a.sight>=0 && a.sight<a.arms ? a.sight : 0;
-        if(picked<kStockArms){r.value[slot]=static_cast<float>(picked+1);r.value[ammo]=static_cast<float>(a.arm[picked].ammo);}
+    // The seat's weapons in the order and with the pick the loadout strips and the switch banner use (hud.cpp SeatArmList).
+    const hudcue::SeatArms list=SeatArmList(snap);
+    ArmRow rows[hudcue::kMostSeatArms];
+    const int n=list.n;
+    for(int k=0;k<n;++k) {
+        const hudcue::SeatArmRow& at=list.rows[k];
+        ArmRow& w=rows[k];
+        if(at.source==hudcue::ArmSource::store) {   // a plugin aircraft's store
+            const auto& j=snap.jet;
+            w.round=static_cast<int>(hudcue::CockpitRoundOf(hudcue::StoreIconOf(j.storeName[at.index],j.storeRole[at.index])));
+            w.rounds=j.storeRounds[at.index];w.spent=j.storeRounds[at.index]<=0;
+        } else if(at.source==hudcue::ArmSource::gun) {   // its gun
+            w.round=static_cast<int>(hudcue::CockpitRound::mg);w.rounds=snap.jet.gunRounds;w.spent=snap.jet.gunRounds<=0;
+        } else {   // a stock vehicle's (a heli's too)
+            const StockArm& m=snap.stockHud.arm[at.index];
+            const reticle::Style sight=m.reticle;
+            w.round=static_cast<int>(hudcue::CockpitRoundOfArm(static_cast<int>(m.kind),m.lobbed,static_cast<int>(m.style),
+                                                                sight==reticle::Style::cannon || sight==reticle::Style::precision,
+                                                                m.shell));
+            w.rounds=m.ammo;
+            w.magazine=m.ammoMax>0 ? static_cast<float>(m.ammo)/static_cast<float>(m.ammoMax) : -1.0f;
+            w.loading=hudcue::CellLoad(m.ammo,m.reload,m.cycleSec,m.cycle);
+            w.spent=m.ammo<=0 && !m.canReload;
+        }
     }
+    const int picked=list.picked;
+    ArmReadings(r,rows,n,picked);
     FirstPersonInstrumentReadings(r,PlayerHuman());
 }
 } // namespace

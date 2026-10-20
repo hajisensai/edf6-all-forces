@@ -9,6 +9,7 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 }
 #define GetWindowThreadProcessId sightinput::Process
 #include "../src/payload.cpp"
+#include "seat_net_fake.inc"
 // The plugin's key source (edf/input_source.h) at load: payload_click_test includes this file with its own main.
 const bool sightInputHanded=(edf::SetInputSource(&sightinput::Key,&sightinput::Window),true);
 #undef GetWindowThreadProcessId

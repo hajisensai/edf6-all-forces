@@ -6,8 +6,12 @@ python tools/check_shkt.py [--game DIR]            Mods/OBJECT and Mods/WEAPON: 
                                                    game would load (Mods first, else Root.cpk / Chunk01 / Chunk02)
 python tools/check_shkt.py --stock [--game DIR]    the same over the game's own files (calibration: must be clean)
 
+Each vehicle SGO's car_base_* settings are checked against its SHKT and model too (pylib/vehicle_check.py: names,
+cast modes, mass, each wheel's suspension compression at rest and its size).
+
 Exit 1 on any error. A name an SGO binds that its SHKT lacks crashes the game before the mission starts.
-Legacy Havok packfiles (the EDF4.1 port's ragdolls) are not tagfiles: listed as skipped.
+Legacy Havok 2014 tagfiles (the EDF4.1 port's ragdolls) are read with pylib/hk2014.py: their body names are checked
+like the others', of their own rules only the ones that format has (pylib/shkt_check.py).
 """
 from __future__ import annotations
 
@@ -20,6 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 import gamedir  # noqa: E402
 import rootcpk  # noqa: E402
 import shkt_check as sc  # noqa: E402
+import vehicle_check  # noqa: E402
 
 FOLDERS = ('OBJECT', 'WEAPON')
 ARCHIVES = ('Root.cpk', 'Chunk01.cpk', 'Chunk02.cpk')
@@ -51,20 +56,17 @@ class Files:
 
 
 def check(files: Files, stock_only: bool) -> Iterator[tuple[str, str]]:
-    """(file, line) for everything found; the line starts with 'error', 'warning' or 'skipped'."""
+    """(file, line) for everything found; the line starts with 'error', 'warning', 'info' or 'skipped'."""
     names: dict[str, set[str] | None] = {}
 
     def body_names(ref: str) -> set[str] | None:
         if ref not in names:
             data = files.read(ref)
-            names[ref] = None if data is None or data[:8] == sc.PACKFILE_MAGIC else sc.body_names(data)
+            names[ref] = None if data is None else sc.body_names(data)
         return names[ref]
 
     for ref in files.own(stock_only, '.SHKT'):
         data = files.read(ref) or b''
-        if data[:8] == sc.PACKFILE_MAGIC:
-            yield ref, 'skipped: a legacy Havok packfile, not a tagfile'
-            continue
         for p in sc.problems(data):
             yield ref, str(p)
     for ref in files.own(stock_only, '.SGO'):
@@ -81,6 +83,12 @@ def check(files: Files, stock_only: bool) -> Iterator[tuple[str, str]]:
                 yield ref, f'error: {where}: binds to {shkt}, which the game does not have'
             elif have is not None and body not in have:
                 yield ref, f'error: {where}: body {body!r} is not in {shkt}'
+        shkt = vehicle_check.shkt_of(doc) if doc.get('car_base_wheel') else None
+        data = files.read(shkt) if shkt else None
+        if data is not None and (data[4:8] == b'TAG0' or data[:8] == sc.PACKFILE_MAGIC):
+            for p in vehicle_check.vehicle_problems(doc, data, vehicle_check.model_bones(doc, lambda r: files.read(r)),
+                                                    ref.split('/', 1)[1]):
+                yield ref, str(p)
 
 
 def main(argv: list[str]) -> int:
@@ -93,11 +101,11 @@ def main(argv: list[str]) -> int:
         print(f'not an EDF6 directory: {game}')
         return 2
     files = Files(game, a.stock)
-    counts = {'error': 0, 'warning': 0, 'skipped': 0}
+    counts = {'error': 0, 'warning': 0, 'info': 0, 'skipped': 0}
     for ref, line in check(files, a.stock):
         counts[line.split(':', 1)[0]] = counts.get(line.split(':', 1)[0], 0) + 1
         print(f'{ref}: {line}')
-    print(f"{counts['error']} error(s), {counts['warning']} warning(s), {counts['skipped']} skipped "
+    print(f"{counts['error']} error(s), {counts['warning']} warning(s), {counts['info']} info, {counts['skipped']} skipped "
           f"({'stock files' if a.stock else 'Mods'} of {game})")
     return 1 if counts['error'] else 0
 

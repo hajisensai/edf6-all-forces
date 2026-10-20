@@ -54,6 +54,7 @@
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "firstperson.h"
+#include "edf/weapon.h"
 #include "fp_view.h"
 #include "vehicle_look.h"
 #include "fp_motion.h"
@@ -294,6 +295,10 @@ struct State {
 /// Each local camera owns its pose, motion, batches and effects. Never evict another local player's view.
 constexpr int kLocalViews=4;
 State states[kLocalViews]{};
+// Each local camera's player as its last step saw it (game thread): this machine's players, split screen's two.
+struct LocalSeen { unsigned char* human; ULONGLONG at; };
+LocalSeen localSeen[kLocalViews]{};
+constexpr ULONGLONG kLocalSeenMs=1000;
 // What the camera step and the camera submit leave for the draws (docs/fp-render-re.md §17.5), each published whole
 // under a sequence count (odd while it is written: SeqPublish) and read as a whole copy (SeqTake). The draws run on a
 // render thread, up to three update steps behind the game thread, so nothing on their path reads a State field.
@@ -301,7 +306,8 @@ State states[kLocalViews]{};
 // update it renders, which may be a few submits older than the newest (§17.2: 0-3 steps), and matching only the newest
 // left a lagging draw of a turning camera unowned (L1 error past 0.1: the stock body and gun for that draw).
 constexpr int kViewHistory=8;
-struct ViewHistory { M4 view[kViewHistory]; bool ok[kViewHistory]; int next; };   // ok: submitted in first person
+// ok: submitted in first person; sent: submitted (any view), by the local player `who` the camera followed then.
+struct ViewHistory { M4 view[kViewHistory]; bool ok[kViewHistory]; bool sent[kViewHistory]; const void* who[kViewHistory]; int next; };
 // The draws' copies, beside the states (a State is reset by assigning it whole: never under a reader's feet). last /
 // lastViews: the render thread's own (the last whole copy, while a writer keeps the count odd).
 struct Published { DrawSnap snap; volatile LONG seq; DrawSnap last; bool lastOk;
@@ -390,6 +396,7 @@ void SyncSession() noexcept {
         state=State{};std::memcpy(state.flashes,flashes,sizeof(flashes));
         selected=&state;Publish();ClearViews(static_cast<int>(&state-states));
     }
+    for(auto& seen:localSeen)seen=LocalSeen{};
     selected=&states[0];fpskin::Clear();appliedSession=next;
 }
 // --- What the draws keep for themselves (render thread only: the game thread never writes or resets it) ---
@@ -411,16 +418,19 @@ DrawOwn& Own() noexcept {
     if(!o.live || o.session!=now){o=DrawOwn{};o.live=true;o.session=now;o.pass1=1;}   // a new mission: nothing carried
     return o;
 }
+unsigned char* CameraPlayer(const unsigned char* cam) noexcept;
 void CaptureRenderCamera(void* camera,const float* world) noexcept {
     State* state=CameraState(camera);
     if(!state)return;
     M4 frame;std::memcpy(frame.m,world,64);
     M4 native;
-    const bool ok=fpview::NativeView(frame,&native) && state->on && !state->overridden;
+    const bool sent=fpview::NativeView(frame,&native);
+    const bool ok=sent && state->on && !state->overridden;
+    const void* const who=CameraPlayer(static_cast<const unsigned char*>(camera));
     Published& p=published[state-states];
     SeqPublish(&p.viewSeq,&p.views,[&](ViewHistory& v){
         const int at=v.next>=0 && v.next<kViewHistory ? v.next : 0;
-        v.view[at]=native;v.ok[at]=ok;v.next=(at+1)%kViewHistory;
+        v.view[at]=native;v.ok[at]=ok;v.sent[at]=sent && who;v.who[at]=who;v.next=(at+1)%kViewHistory;
     });
     if(Cfg().debug && state->on && state->builtReady && !state->riding) {
         float off=0.0f;for(int i=0;i<16;++i)off+=std::fabs(frame.m[i]-state->built.m[i]);
@@ -1572,13 +1582,16 @@ void CamStepSelected(void* camera,void* step) {
     CameraAfterNative(cam);
 }
 
+void SeeLocal(const State* state,unsigned char* cam) noexcept {
+    if(state)localSeen[state-states]=LocalSeen{CameraPlayer(cam),GetTickCount64()};
+}
 void __fastcall CamStepHook(void* camera,void* step) {
     SyncSession();
-    if(auto state=CameraState(camera)){StateScope scope(state);CamStepSelected(camera,step);return;}
-    nextCamStep(camera,step);
     auto cam=static_cast<unsigned char*>(camera);
+    if(auto state=CameraState(camera)){StateScope scope(state);CamStepSelected(camera,step);SeeLocal(state,cam);return;}
+    nextCamStep(camera,step);
     if(!CameraPlayer(cam))return; // Menu and remote cameras must not consume local player slots.
-    if(auto state=AcquireCamera(camera)){StateScope scope(state);CameraAfterNative(cam);}
+    if(auto state=AcquireCamera(camera)){StateScope scope(state);CameraAfterNative(cam);SeeLocal(state,cam);}
 }
 
 // --- The draw ---
@@ -1810,15 +1823,10 @@ void InstrumentPose(unsigned char* inst,float* backup,PoseRestore* captured=null
         if(!name || std::wcsncmp(name,L"vc_i_",5)!=0)continue;
         int seat=-1,screen=-1,field=-1,place=0,segment=0;wchar_t mode=0;
         const int fields=swscanf_s(name,L"vc_i_%d_%d_%lc_%d_%d_%d",&seat,&screen,&mode,1u,&field,&place,&segment);
-        if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'p') && fields!=6))continue;
-        const bool mine=seat==d.rideSeat;
-        const bool rangedNeedle=mode==L'n' && fields>=5;
-        const bool neutralWidget=mode==L'D' || mode==L'B' || mode==L'T';
-        // Adjacent stations visible from this seat use the same language, while their
-        // new health/percent widgets remain neutral without that seat's live data.
-        if(!mine && mode!=L'l' && mode!=L'c' && mode!=L'p' && mode!=L'v' && mode!=L'u'
-            && mode!=L'r' && mode!=L'q' && mode!=L'a' && !rangedNeedle && !neutralWidget)continue;
-        const bool ready=d.instrumentsReady && (mine || (mode==L'l' && place==0));
+        if(fields<4 || ((mode==L'd' || mode==L'D' || mode==L'Z' || mode==L'p') && fields!=6))continue;
+        const instruments::SeatPose how=instruments::SeatPoseOf(seat==d.rideSeat,mode,field,place,fields);
+        if(how==instruments::SeatPose::skip)continue;
+        const bool ready=d.instrumentsReady && how==instruments::SeatPose::live;
         const M4 original=MatrixAt(reinterpret_cast<const unsigned char*>(pose+i*16));
         const M4 moved=instruments::Pose(original,mode,field,place,segment,d.instruments,ready);
         std::memcpy(pose+i*16,moved.m,64);
@@ -2054,6 +2062,46 @@ void __fastcall MeshHook(void* mesh,void* ctx,int pass,std::uint8_t flag,void* c
 }
 
 void* nextLaserDraw=nullptr;
+// The laser sight's start as the game builds it (WeaponAttachment_LaserSight slot 2, 0x6890A0, H): the weapon's first
+// muzzle entry ([weapon+0x1D0], count +0x1E0, 0xF0 each; fp-soldier-re.md §2.1) at its +0x90, the local matrix (+0x10)
+// times its bone's world record (+0 -> +0xB0, 0x6969A0), less 0.02 (0x17AA990) of that matrix's up row; slot 3
+// (0x688970) copies it to the draw's +0x120. Both run in the update steps, not at this draw: the bone record and the
+// muzzle entry are written by the weapon's own update (slot 5 -> 0x6934F0 -> 0x6969A0) on its own schedule, and the
+// draws run up to three steps behind (§17). So the start the draw finds belongs to some step, the weapon's drawn pose to
+// another: moving or jumping, the line left the gun (the user, 2026-10-19: 「跳或者移动的时候红外瞄准的线没有实时跟随」).
+// The start is rebuilt here from the very pose array the weapon is drawn with: local x pose[bone], then for the first
+// person through that draw's own T (DrawTransforms), the one the viewmodel is drawn with.
+constexpr std::size_t kLaserStart=0x120;
+constexpr float kLaserBelow=0.02f;
+// The muzzle's matrix in the weapon's draw pose and the skeleton instance holding its bone; false: not readable as one.
+bool LaserMuzzle(const unsigned char* weapon,unsigned char** inst,M4* out) noexcept {
+    if(!Readable(weapon,kWeaponModel+kBaseLod+kLodInst+8))return false;
+    const unsigned char* const muzzle=edf::MuzzleAt(weapon,0);
+    if(!muzzle)return false;
+    const auto bone=At<const unsigned char*>(muzzle,0);
+    unsigned char* insts[kMostInsts];
+    const int n=InstancesOf(const_cast<unsigned char*>(weapon)+kWeaponModel,insts);
+    for(int i=0;i<n;++i) {
+        if(!Readable(insts[i],kInstPose+8))continue;
+        const auto bones=At<const unsigned char*>(insts[i],kInstBones);
+        const auto bonesCount=At<std::int32_t>(insts[i],kInstCount);
+        const auto pose=At<const unsigned char*>(insts[i],kInstPose);
+        if(!bones || !pose || bonesCount<=0 || bonesCount>kMostBones || bone<bones)continue;
+        const auto off=static_cast<std::size_t>(bone-bones);
+        if(off%kBoneStride || off/kBoneStride>=static_cast<std::size_t>(bonesCount))continue;
+        const std::size_t at=off/kBoneStride;
+        if(!Readable(pose+at*64,64))continue;
+        // The same muzzle matrix a shot is built with (edf::MuzzleWorld), its bone's pose this draw's.
+        if(!edf::MuzzleWorld(muzzle,reinterpret_cast<const float*>(pose+at*64),out->m))return false;
+        *inst=insts[i];
+        return fpview::Finite(*out);
+    }
+    return false;
+}
+// The start of the drawn line: `m`'s place less kLaserBelow of its up row (as 0x6890A0 builds it).
+void LaserStartOf(const M4& m,float* out) noexcept {
+    for(int j=0;j<3;++j)out[j]=m.m[12+j]-kLaserBelow*m.m[4+j];
+}
 void LaserDrawSelected(void* object,void* ctx,int pass,void* view) {
     auto draw=static_cast<unsigned char*>(object);
     float savedStart[4]{};bool moved=false;
@@ -2063,23 +2111,37 @@ void LaserDrawSelected(void* object,void* ctx,int pass,void* view) {
         const auto weapon=At<const unsigned char*>(draw-0x10,8);
         const DrawSnap& d=Snap();
         const int hand=d.on && !d.riding && weapon ? SnapHand(d,weapon+kWeaponModel) : -1;
+        unsigned char* inst=nullptr;M4 muzzle;
+        const bool posed=weapon && LaserMuzzle(weapon,&inst,&muzzle);
+        float from[3];bool have=false;
         if(hand>=0 && d.viewOk[hand]) {
-            std::memcpy(savedStart,draw+0x120,16);
-            float from[3];fpview::Point(d.view[hand],savedStart,from);
-            std::memcpy(draw+0x120,from,12);moved=true;
+            M4 t[2];
+            if(posed && DrawTransforms(inst,Part::inHand,hand,DrawCamera(view),t)) {
+                LaserStartOf(fpview::Mul(muzzle,t[0]),from);have=true;
+            } else {
+                // No drawn pose to place it by: the camera step's T on the native start (the viewmodel's own fallback).
+                float native[4];std::memcpy(native,draw+kLaserStart,16);fpview::Point(d.view[hand],native,from);have=true;
+            }
+        } else if(posed) {
+            LaserStartOf(muzzle,from);have=true;   // third person, any soldier's: the gun as it is drawn
+        }
+        if(have && std::isfinite(from[0]) && std::isfinite(from[1]) && std::isfinite(from[2])) {
+            std::memcpy(savedStart,draw+kLaserStart,16);
+            std::memcpy(draw+kLaserStart,from,12);moved=true;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     reinterpret_cast<DrawFn>(nextLaserDraw)(object,ctx,pass,view);
-    if(moved)std::memcpy(draw+0x120,savedStart,16);
+    if(moved)std::memcpy(draw+kLaserStart,savedStart,16);
 }
 
 void __fastcall LaserDrawHook(void* object,void* ctx,int pass,void* view) {
-    if(pass==3 || pass==4 || pass>5){reinterpret_cast<DrawFn>(nextLaserDraw)(object,ctx,pass,view);return;}
+    if(pass==3 || pass==4 || pass>5 || !Cfg().enabled){reinterpret_cast<DrawFn>(nextLaserDraw)(object,ctx,pass,view);return;}
+    // Not a first-person view (or none published): no snapshot, so LaserDrawSelected takes the third-person path.
     State* state=ViewState(view);
-    if(!state){reinterpret_cast<DrawFn>(nextLaserDraw)(object,ctx,pass,view);return;}
+    if(!state){LaserDrawSelected(object,ctx,pass,view);return;}
     StateScope scope(state);
     DrawSnap snap;
-    if(!TakeSnapshot(&snap)){reinterpret_cast<DrawFn>(nextLaserDraw)(object,ctx,pass,view);return;}
+    if(!TakeSnapshot(&snap)){LaserDrawSelected(object,ctx,pass,view);return;}
     SnapScope taken(&snap);LaserDrawSelected(object,ctx,pass,view);
 }
 
@@ -2125,11 +2187,45 @@ void FirstPersonCameraOverride(const void* camera,bool overridden) noexcept {
 
 void ResetFirstPerson() noexcept { session.fetch_add(1,std::memory_order_release); }
 
+int LocalPlayers(unsigned char** out,int most) noexcept {
+    int n=0;
+    const ULONGLONG now=GetTickCount64();
+    for(const auto& seen:localSeen) {
+        if(!seen.human || now-seen.at>kLocalSeenMs || n>=most)continue;
+        bool twice=false;
+        for(int i=0;i<n;++i)twice=twice || out[i]==seen.human;
+        if(!twice)out[n++]=seen.human;
+    }
+    return n;
+}
+const void* LocalViewPlayer(const void* view) noexcept {
+    if(!view || !Readable(view,0x60))return nullptr;
+    M4 native;std::memcpy(native.m,static_cast<const unsigned char*>(view)+0x20,64);
+    const void* match=nullptr;
+    for(int k=0;k<kLocalViews;++k) {
+        ViewHistory v;
+        if(!TakeViews(k,&v))continue;
+        for(int i=0;i<kViewHistory;++i) {
+            if(!v.sent[i])continue;
+            float error=0;for(int j=0;j<16;++j)error+=std::fabs(native.m[j]-v.view[i].m[j]);
+            if(!std::isfinite(error) || error>=0.1f)continue;
+            if(match && match!=v.who[i])return nullptr;   // two players' cameras on one frame: neither's
+            match=v.who[i];
+        }
+    }
+    return match;
+}
+
 bool FirstPersonOn() noexcept { for(const auto& state:states)if(state.on)return true;return false; }
 void FirstPersonInstrumentReadings(const instruments::Readings& readings,const unsigned char* human) noexcept {
     // Game thread (the HUD's vehicle snapshot): published at once, as the draws read only what is published.
     for(auto& state:states)if(state.on && state.riding && state.human==human) {
         state.instruments=readings;state.instrumentsReady=true;
+        // The bank for the attitude indicator, from the seat's own frame (vc_eye_<seat>: rows left, up, ahead in the
+        // world): right wing down positive. A flying vehicle's only, as its pitch.
+        const float* m=state.ride.frame;
+        state.instruments.value[instruments::roll]=readings.flight && std::isfinite(m[1]+m[5]) && (m[1]!=0.0f || m[5]!=0.0f) ?
+            std::atan2(m[1],m[5])/0.01745329252f : -1.0f;
         StateScope scope(&state);Publish();
     }
 }

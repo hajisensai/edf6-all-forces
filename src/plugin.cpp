@@ -18,6 +18,8 @@
 #include "crash_dump.h"
 #include "log_buffer.h"
 #include "crew.h"
+#include "gravity.h"
+#include "floatgun.h"
 #include "firstperson.h"
 #include "thermal.h"
 #include "pvp.h"
@@ -230,6 +232,12 @@ void Validate(Config& n) noexcept {
     n.vehicleHudCount=static_cast<int>(FixInt("VehicleHudCount",n.vehicleHudCount,0,12));
     Fix("PlayerJetRamDamage",n.playerJetRamDamage,0.0f,100.0f);
     Fix("VehicleRamDamage",n.vehicleRamDamage,0.0f,100.0f);
+    Fix("GravityDamage",n.gravityDamage,0.0f,1000.0f);
+    Fix("GravityThrowSpeed",n.gravityThrowSpeed,5.0f,90.0f);
+    n.floatGuns=static_cast<int>(FixInt("FloatGuns",n.floatGuns,0,2));
+    n.floatGunMost=static_cast<int>(FixInt("FloatGunMost",n.floatGunMost,1,8));
+    Fix("FloatGunSec",n.floatGunSec,0.0f,3600.0f);
+    Fix("FloatGunReach",n.floatGunReach,1.0f,200.0f);
     n.playerJetBoostKey=static_cast<int>(FixInt("PlayerJetBoostKey",n.playerJetBoostKey,0,254));
     n.playerJetBrakeKey=static_cast<int>(FixInt("PlayerJetBrakeKey",n.playerJetBrakeKey,0,254));
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
@@ -330,6 +338,7 @@ void Validate(Config& n) noexcept {
     n.sightRangeStep=static_cast<int>(FixInt("SightRangeStep",n.sightRangeStep,0,1000));
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
     n.thermalKey=static_cast<int>(FixInt("VehicleThermalKey",n.thermalKey,0,254));
+    n.thermalButton=static_cast<int>(FixInt("VehicleThermalButton",n.thermalButton,0,255));
     n.firstPersonKey=static_cast<int>(FixInt("FirstPersonKey",n.firstPersonKey,0,254));
     Fix("FirstPersonEyeUp",n.fpEyeUp,-0.5f,0.5f);
     Fix("FirstPersonEyeAhead",n.fpEyeAhead,-0.5f,0.5f);
@@ -651,6 +660,15 @@ void LoadConfig() noexcept {
     n.heliSoftEdge=ReadFloat(L"HeliSoftEdge",n.heliSoftEdge);
     n.vehicleRam=ReadBool(L"VehicleRam",n.vehicleRam);
     n.vehicleRamDamage=ReadFloat(L"VehicleRamDamage",n.vehicleRamDamage);
+    n.gravityDamage=ReadFloat(L"GravityDamage",n.gravityDamage);
+    n.gravityGun=ReadBool(L"GravityGun",n.gravityGun);
+    n.gravityThrowSpeed=ReadFloat(L"GravityThrowSpeed",n.gravityThrowSpeed);
+    n.gravityAutoTest=ReadBool(L"GravityAutoTest",n.gravityAutoTest);
+    n.gravityGrabPlayers=ReadBool(L"GravityGrabPlayers",n.gravityGrabPlayers);
+    n.floatGuns=ReadInt(L"FloatGuns",n.floatGuns);
+    n.floatGunMost=ReadInt(L"FloatGunMost",n.floatGunMost);
+    n.floatGunSec=ReadFloat(L"FloatGunSec",n.floatGunSec);
+    n.floatGunReach=ReadFloat(L"FloatGunReach",n.floatGunReach);
     n.drill=ReadBool(L"Drill",n.drill);
     n.drillMaxRpm=ReadFloat(L"DrillMaxRpm",n.drillMaxRpm);
     n.drillSpinUpSec=ReadFloat(L"DrillSpinUpSec",n.drillSpinUpSec);
@@ -703,6 +721,7 @@ void LoadConfig() noexcept {
     n.enemyControl=ReadBool(L"EnemyControl",n.enemyControl);
     n.thermal=ReadBool(L"VehicleThermal",n.thermal);
     n.thermalKey=ReadInt(L"VehicleThermalKey",static_cast<DWORD>(n.thermalKey));
+    n.thermalButton=ReadInt(L"VehicleThermalButton",static_cast<DWORD>(n.thermalButton));
     n.firstPersonKey=ReadInt(L"FirstPersonKey",static_cast<DWORD>(n.firstPersonKey));
     n.firstPersonStart=ReadBool(L"FirstPersonStart",n.firstPersonStart);
     n.fpEyeUp=ReadFloat(L"FirstPersonEyeUp",n.fpEyeUp);
@@ -840,6 +859,7 @@ void LoadConfig() noexcept {
     n.npcFreeRange=ReadFloat(L"NpcFreeRange",n.npcFreeRange);
     n.npcRecruitCooldownSec=ReadFloat(L"NpcRecruitCooldownSec",n.npcRecruitCooldownSec);
     n.vanillaRecruit=ReadBool(L"VanillaRecruit",n.vanillaRecruit);
+    n.npcFreeSquadCover=ReadBool(L"NpcFreeSquadCover",n.npcFreeSquadCover);
     n.scriptNpcRecruit=ReadBool(L"ScriptNpcRecruit",n.scriptNpcRecruit);
     n.scriptNpcSettleSec=ReadFloat(L"ScriptNpcSettleSec",n.scriptNpcSettleSec);
     n.tankReturnToPost=ReadBool(L"TankReturnToPost",n.tankReturnToPost);
@@ -891,8 +911,8 @@ void LoadConfig() noexcept {
     Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);
     Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,n.npcGuardFormation);
     Log("CONFIG npc pickup key=0x%X range=%.0f sec=%.0f health=%d",n.npcPickupKey,n.npcPickupRange,n.npcPickupSec,n.npcPickupHealth);
-    Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs vanillaRecruit=%d",n.npcGuardRadius,n.npcFreeRange,
-        n.npcRecruitCooldownSec,n.vanillaRecruit);
+    Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs vanillaRecruit=%d freeSquadCover=%d",
+        n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec,n.vanillaRecruit,n.npcFreeSquadCover);
     Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
@@ -903,6 +923,9 @@ void LoadConfig() noexcept {
     Log("CONFIG drillLaunch=%d key=0x%02X button=0x%02X range=%.0fm speed=%.0fm/s damage=%.0f heat=%.0f%%",n.drillLaunch,
         n.drillLaunchKey,n.drillLaunchButton,n.drillLaunchRange,n.drillLaunchSpeed,n.drillLaunchDamage,n.drillLaunchHeat*100.0f);
     Log("CONFIG vehicleRam=%d damage=%.2f",n.vehicleRam,n.vehicleRamDamage);
+    Log("CONFIG gravity damage=%.2f gun=%d throw=%.0fm/s autoTest=%d grabPlayers=%d floatGuns=%d most=%d sec=%.0f reach=%.1fm",
+        n.gravityDamage,n.gravityGun,n.gravityThrowSpeed,n.gravityAutoTest,n.gravityGrabPlayers,n.floatGuns,n.floatGunMost,
+        n.floatGunSec,n.floatGunReach);
     Log("CONFIG emcBeam=%d charge=%.1fs beam=%.1fs blast=%.0fm x%.2f break=%.0f/s",n.emcBeam,n.emcChargeSec,n.emcBeamSec,n.emcBlastRadius,
         n.emcBlastShare,n.emcBreak);
     Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);
@@ -1155,6 +1178,8 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallSazabi();        // the same: the 506 physics hook and the vehicles' own input
     InstallVehicleRam();    // the ground vehicles' ram (its charges are the jets' impact charges: jet_bay.cpp)
+    gravity::Install();     // the gravity operations (their impacts are the jets' impact charges too); the gravity gun's on them
+    InstallFloatGuns();     // M099's dropped guns that float round the player and fire (the dropped gun's update hook)
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
     InstallEmc();           // the EMC's charged beam (its rounds are the jets' shells too: jet_bay.cpp)
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram

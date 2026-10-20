@@ -40,9 +40,17 @@ constexpr GunRole RoleOf(std::int32_t mark) noexcept {
 constexpr std::size_t kMuzzles=0x1D0,kMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleLocal=0x10,kBoneRows=0xB0;
 constexpr std::size_t kMuzzleMode=0xE0,kWeaponMatrix=0x150;
 constexpr std::int32_t kModeWeaponRows=0;
-// One muzzle's world position and direction as 0x6969A0 builds them for a shot: the position is row 3 of local x
-// bone, the direction row 2 of the matrix its mode picks. Under the caller's __try.
-bool MuzzleFrame(const unsigned char* weapon,const unsigned char* muzzle,float* pos,float* dir) noexcept;
+// The muzzle entry `index` of `weapon` (null when it has none that many, or they cannot be read).
+const unsigned char* MuzzleAt(const unsigned char* weapon,std::uint64_t index) noexcept;
+// A muzzle's world matrix (rows right, up, forward, position) as 0x6969A0 builds it: its local matrix (+0x10) times
+// its bone's pose. `bone` is where that pose comes from: null its bone record's world rows (+0 -> +0xB0: the pose the
+// weapon's own update last wrote, what a shot leaves from), else a 4x4 row matrix of the caller's (a draw's pose array
+// entry for that bone: the gun where that draw puts it, firstperson.cpp LaserMuzzle). Under the caller's __try.
+bool MuzzleWorld(const unsigned char* muzzle,const float* bone,float* out) noexcept;
+// One muzzle's world position and direction as 0x6969A0 builds them for a shot: the position is row 3 of MuzzleWorld,
+// the direction row 2 of the matrix its mode picks (mode 0: the weapon's own rows). `bone` as MuzzleWorld's. Under the
+// caller's __try.
+bool MuzzleFrame(const unsigned char* weapon,const unsigned char* muzzle,float* pos,float* dir,const float* bone=nullptr) noexcept;
 // The mean of a weapon's first `most` muzzles (a launcher's tubes, the Titan's two side-cannon barrels): position
 // and unit direction. False when it has none or more than `most`, or one cannot be read. Under the caller's __try.
 bool MeanMuzzle(const unsigned char* weapon,std::uint64_t most,float* pos,float* dir) noexcept;

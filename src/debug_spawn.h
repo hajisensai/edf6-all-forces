@@ -75,12 +75,22 @@ inline constexpr Entry kEntries[]={
     {Category::aircraft,How::supportCall,"call_heli",L"直升机 Brute 410（支援呼叫·守点）",nullptr,9,0.0f},
     {Category::aircraft,How::supportCall,"call_medic_heli_f",L"医疗直升机（支援呼叫）",nullptr,10,0.0f},
     {Category::aircraft,How::drone,"jet_drone",L"机炮无人机（无人驾驶）",nullptr,0,60.0f},
-    // soldier: SupportWeapon's order (support_call.h): rifle, flame, rocket, shotgun, sniper.
+    // soldier: SupportWeapon's order (support_call.h): every kind the support soldiers make (support_soldier.cpp: each
+    // class's body is preloaded every mission), the Wing Divers and Fencers too (the user, 2026-10-19: 「载具与npc少了」).
     {Category::soldier,How::soldier,"ranger_rifle",L"游骑兵（步枪）",nullptr,0,0.2f},
     {Category::soldier,How::soldier,"ranger_flame",L"游骑兵（火焰）",nullptr,1,0.2f},
     {Category::soldier,How::soldier,"ranger_rocket",L"游骑兵（火箭）",nullptr,2,0.2f},
     {Category::soldier,How::soldier,"ranger_shotgun",L"游骑兵（霰弹）",nullptr,3,0.2f},
     {Category::soldier,How::soldier,"ranger_sniper",L"游骑兵（狙击）",nullptr,4,0.2f},
+    {Category::soldier,How::soldier,"wing_lance",L"飞翼潜行兵（长矛）",nullptr,5,0.2f},
+    {Category::soldier,How::soldier,"wing_laser",L"飞翼潜行兵（激光）",nullptr,6,0.2f},
+    {Category::soldier,How::soldier,"wing_monster",L"飞翼潜行兵（狙击）",nullptr,7,0.2f},
+    {Category::soldier,How::soldier,"wing_izuna",L"飞翼潜行兵（雷链）",nullptr,8,0.2f},
+    {Category::soldier,How::soldier,"wing_thunderbow",L"飞翼潜行兵（雷弓）",nullptr,9,0.2f},
+    {Category::soldier,How::soldier,"fencer_cannon",L"重装兵（重炮）",nullptr,10,0.2f},
+    {Category::soldier,How::soldier,"fencer_middle_cannon",L"重装兵（中炮）",nullptr,11,0.2f},
+    {Category::soldier,How::soldier,"fencer_pile_banker",L"重装兵（打桩）",nullptr,12,0.2f},
+    {Category::soldier,How::soldier,"fencer_shotgun",L"重装兵（霰弹）",nullptr,13,0.2f},
 };
 constexpr int kEntryCount=static_cast<int>(sizeof(kEntries)/sizeof(kEntries[0]));
 // Every Mods row lists its files and nothing else does; a list is not empty.
@@ -187,10 +197,11 @@ inline void FacingMatrix(const float* heading,const float* at,float* m) noexcept
 enum class RowState : std::uint8_t {
     ready,
     missing,        // a Mods row with a file not in Mods: not installed (the installer's EDF4.1 objects, the range's vehicles)
-    notPreloaded,   // not preloaded this mission (a heavy row with RangePlaceAll=0; DebugSpawn turned on mid-mission)
+    notPreloaded,   // not loaded yet this mission: its first spawn loads it (debug_spawn.cpp RequestLoad), then makes it
     broken,         // the game faulted making it: off until the game restarts
     unavailable,    // its module is not up now (the support calls' cooldown, JetPilot=0, ...)
     online,         // a session: the plugin's objects would be this machine's alone
+    loading,        // its load is queued: made as soon as the game reports it complete
 };
 }  // namespace debugspawn
 

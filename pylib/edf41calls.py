@@ -11,8 +11,8 @@ is the EDF6 template's (an EDF6 call of the same vehicle and category: its class
 voices; the 4.1 vehicle-named voices are not in EDF6's banks) with 4.1's own: its vehicle (VEHICLES), its settings
 (the vehicle's armour and weapons, the weapons renamed by WEAPONS, a weapon EDF6 split into left / right twice) when
 laid out for the actual object (406 retains its six original holders; 302 adds EDF6's fuel fields;
-408 keeps its original single gun and three-column setup on its CarBase adapter),
-and its use (AmmoCount, ReloadTime, ReloadType, EnergyChargeRequire).
+408 keeps its armour and original single gun, with the Car chassis' own drive block edf41bike.CAR_DRIVE),
+and its use (AmmoCount, ReloadTime, ReloadType as EDF6 means it: edf5port.reload_type41, EnergyChargeRequire).
 A 4.1 bomber call (Weapon_Throw smoke candle, mode 2) holds the bomber run in ACP[4] as EDF6's Weapon_RadioContact calls
 hold theirs in ACP[2] ([Bomber401.sgo, count, interval, height, speed, ...], docs/mission-airstrike-re.md): the
 template's call with 4.1's run and use.
@@ -48,6 +48,7 @@ VEHICLES: dict[str, str] = {
 }
 # 4.1 vehicle weapon -> EDF6's (two: EDF6 split it into a left and a right one); [] none: the template's settings.
 WEAPONS: dict[str, list[str]] = {
+    'v_301tank_ai_cannon01.sgo': ['v_505_tank_ai_cannon01'],
     'v_301tank_cannon01.sgo': ['v_505tank_cannon01'], 'v_301tank_cannon02.sgo': ['v_505tank_cannon02'],
     'v_301tank_cannon02l.sgo': ['v_505tank_cannon02L'], 'v_301tank_cannon03.sgo': ['v_505tank_cannon03'],
     'v_301tank_cannon03l.sgo': ['v_505tank_cannon03L'], 'v_301tank_cannon04.sgo': ['v_505tank_cannon04'],
@@ -124,6 +125,8 @@ def _use(r: Node, members: dict) -> None:
             v = members[k]
             if k == 'EnergyChargeRequire' and not isinstance(v, list):
                 v = [v, v]   # edf5port.weapon41: one number in 4.1, [curve, value] in every EDF6 weapon
+            if k == 'ReloadType':
+                v = edf5port.reload_type41(v)   # 4.1's credit reload (1) is EDF6's 2; EDF6's 1 is a timer
             r.set(k, edf5port.to_value(v))
 
 
@@ -154,6 +157,9 @@ def vehicle_call(members: dict, template: Node, vehicle: str) -> dsgo.Document:
                     or len(mine[2]) != 1):
                 raise edf5port.Unsupported('not the single-gun 408 setup')
             import edf41bike
+            # [1] is 4.1 VehicleBike's own four-number block; the object is a Vehicle_Car, whose setup reads seven
+            # (edf41bike.CAR_DRIVE). The request carries the object's: 4.1's armour [0] and gun [2] stay the call's.
+            mine[1] = list(edf41bike.CAR_DRIVE)
             mine[2] = edf41bike.native_gun_rows(mine[2])
             drop.items[3] = edf5port.to_value(mine)
         elif leaf(vehicle) == 'vehicle302_heli.sgo':

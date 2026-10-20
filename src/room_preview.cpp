@@ -9,6 +9,7 @@
 // reads only the override, under `shared.lock`, and the Desc copy it is handed.
 #include "room_preview.h"
 #include "room_preview_logic.h"
+#include "code_signatures.h"
 #include "crew.h"
 #include "edf/patch.h"
 #include <cwchar>
@@ -67,17 +68,10 @@ struct Ui {
 } ui;
 bool installed=false;
 
-struct Signature { std::size_t rva; const unsigned char* bytes; std::size_t size; };
+using Signature=CodeSignature;
 #include "room_preview_signatures.inc"
 
-bool CheckCode() noexcept {
-    for(const auto& s:kSignatures) {
-        bool ok=false;
-        __try { ok=Matches(s.rva,s.bytes,s.size); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-        if(!ok){Log("ROOM preview REFUSED: code at EDF+0x%zX is not the expected (%zu bytes)",s.rva,s.size);return false;}
-    }
-    return true;
-}
+bool CheckCode() noexcept { return CheckSignatures(kSignatures,"ROOM preview"); }
 
 unsigned char* GameStatus() noexcept { return At<unsigned char*>(image,kGameStatus); }
 float* At4(unsigned char* view,std::size_t off) noexcept { return reinterpret_cast<float*>(view+off); }

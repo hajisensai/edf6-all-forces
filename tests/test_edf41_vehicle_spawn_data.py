@@ -13,7 +13,7 @@ import sgo
 
 class PrivateData(unittest.TestCase):
     def generate(self, *, dsgo=False, mission=None, ai=False):
-        members = {'xgs_scene_object_class': 'Vehicle505_Tank', 'game_object_durability': 1000.0,
+        members = {'xgs_scene_object_class': 'Vehicle601_Tank', 'game_object_durability': 1000.0,
                    'vehicle_setup': [[1.0, 1.0], [0.1, 2.0], [['app:/weapon/test.sgo', [0.2, 3.0]]]],
                    'unrelated': ['original', 13.0]}
         if mission is not None:
@@ -22,7 +22,7 @@ class PrivateData(unittest.TestCase):
         if dsgo:
             raw = mo.as_dsgo(raw)
         source = 'OBJECT/EXAMPLE' + ('_AI' if ai else '') + '.SGO'
-        obj = {'object': source, 'class': 'Vehicle505_Tank', 'files': [source]}
+        obj = {'object': source, 'class': 'Vehicle601_Tank', 'files': [source]}
         files = {source: raw}
         mo.vehicle_spawn_objects([obj], files)
         self.assertEqual(files[source], raw)
@@ -52,9 +52,9 @@ class PrivateData(unittest.TestCase):
 
     def test_missing_default_setup_is_rejected(self):
         source = 'OBJECT/EXAMPLE.SGO'
-        files = {source: sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Vehicle505_Tank'})}
+        files = {source: sgo.write_depth_first(0x102, {'xgs_scene_object_class': 'Vehicle601_Tank'})}
         with self.assertRaisesRegex(ValueError, 'no final vehicle_setup'):
-            mo.vehicle_spawn_objects([{'object': source, 'class': 'Vehicle505_Tank', 'files': [source]}], files)
+            mo.vehicle_spawn_objects([{'object': source, 'class': 'Vehicle601_Tank', 'files': [source]}], files)
 
 
 class NativeClosure(unittest.TestCase):

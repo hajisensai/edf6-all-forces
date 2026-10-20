@@ -10,11 +10,13 @@ bool EnemyControlDescribe(const ObjRef& requester,const ObjRef&,enemy_control::S
     return false;
 }
 bool EnemyControlReadSnapshot(const ObjRef&,enemy_control::Snapshot* out) noexcept {if(out)*out={};return false;}
+bool EnemyControlPickable(const void*) noexcept {return false;}
 unsigned EnemyControlAbilities(const enemy_control::Snapshot&,unsigned,enemy_control::Ability*,unsigned) noexcept {return 0;}
 unsigned enemyBeginCalls=0,enemyExitCalls=0;enemy_control::Snapshot enemyLastRequest{};
 bool EnemyControlRequest(const enemy_control::Snapshot& snapshot) noexcept {++enemyBeginCalls;enemyLastRequest=snapshot;return false;}
 bool EnemyControlSelectAbility(const enemy_control::Snapshot&,std::uint32_t) noexcept {return false;}
 bool EnemyControlSetAbilityHeld(const enemy_control::Snapshot&,bool) noexcept {return false;}
+bool EnemyControlHoldAbility(const enemy_control::Snapshot&,std::uint32_t) noexcept {return false;}
 bool EnemyControlExit(const enemy_control::Snapshot& snapshot) noexcept {++enemyExitCalls;enemyLastRequest=snapshot;return false;}
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
@@ -46,17 +48,20 @@ bool SetPvpLocalTeamAt(int,std::uint64_t,std::uint32_t,const char*) noexcept {re
 unsigned char* PlayerHuman() noexcept {return nullptr;}
 const void* remoteAuthority=nullptr;bool allRemote=false,mapOnline=false;
 bool IsOnlineAuthority(const void* object) noexcept {return !allRemote && object!=remoteAuthority;}
-CommandNetworkResult networkReply{};unsigned networkSubmits=0,networkUnits=0,networkTotal=0;
+CommandNetworkResult networkReply{};unsigned networkSubmits=0,networkUnits=0,networkTotal=0;bool networkQueuedFlag=false;
 std::uint32_t networkSlots[kCommandNetUnits]{};ObjRef networkIdentities[kCommandNetUnits]{};Command networkCommand{};
 std::uint32_t SubmitMapCommand(const ObjRef&,const ObjRef* ids,unsigned count,const mapcmd::Command& command,const ObjRef&,
-    wchar_t* note,std::size_t size,const std::uint32_t* slots,std::uint32_t total) noexcept {
-    ++networkSubmits;networkUnits=count;networkTotal=total;networkCommand=command;
+    wchar_t* note,std::size_t size,const std::uint32_t* slots,std::uint32_t total,bool queued) noexcept {
+    ++networkSubmits;networkUnits=count;networkTotal=total;networkCommand=command;networkQueuedFlag=queued;
     for(unsigned i=0;i<count && i<kCommandNetUnits;++i){networkIdentities[i]=ids[i];networkSlots[i]=slots ? slots[i] : 0;}
     networkReply={};networkReply.request=91;networkReply.state=CommandNetworkState::pending;networkReply.count=count;
     _snwprintf_s(note,size,_TRUNCATE,L"queued");return 91;
 }
 bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {*out=networkReply;return out->request!=0;}
 bool MapCommandNetworkReady() noexcept {return true;}
+std::uint32_t MapCommandNetworkVersion() noexcept {return 7;}
+void SyncMapCommandWays(const MapCommandWays*,unsigned) noexcept {}
+unsigned ReadMapCommandWays(const ObjRef&,Command*,float (*)[3],unsigned) noexcept {return 0;}
 
 ObjRef NpcMarkedIdentity() noexcept {return {};}
 NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Command& command,const ObjRef&,const ObjRef&) noexcept {
@@ -84,8 +89,14 @@ int CycleMarchFormation() noexcept {return 0;}
 int SetGuardFormation(const void*,int) noexcept {return -2;}
 int NpcGuardShape(const void*) noexcept {return -2;}
 int SetMarchFormation(int) noexcept {return -2;}
-int SplitSquad(const void*) noexcept {return -1;}
-bool MergeSquads(const void*,const void*) noexcept {return false;}
+ObjRef successorOld{},successorNew{};
+ULONGLONG GameFrame() noexcept {return 1;}
+bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept {
+    if(!successorOld.obj || old.obj!=successorOld.obj || old.ctrl!=successorOld.ctrl)return false;
+    *now=successorNew;return true;
+}
+int NpcSquadMembers(const void*,ObjRef*,int) noexcept {return 0;}
+bool NpcSquadTopOf(const ObjRef&,ObjRef*) noexcept {return false;}
 bool NpcSweepToggle(const void* const*,int) noexcept {return false;}
 bool NpcSweepOn() noexcept {return false;}
 bool NpcPickupHealthToggle() noexcept {return false;}
@@ -123,20 +134,21 @@ namespace {
 int checks=0;
 void Check(bool b,const char* why) { ++checks;if(!b){std::fprintf(stderr,"FAIL: %s\n",why);std::exit(1);} }
 }
+namespace crew { namespace { const Game kNewGame{}; } }   // the map state is large: tests keep theirs static
 int main() {
     using namespace crew;
     unsigned char object[0x100]{},control[1]{},replacement[1]{};
     Put<const void*>(object,kSelfCtrl,control);
-    Game g{};g.count=1;g.list[0]=Entry{CommandUnit{object,"NPC",{},false,{},false,nullptr},Owner::squad};
+    static Game g;g=kNewGame;g.count=1;g.list[0]=Entry{CommandUnit{object,"NPC",{},false,{},false,nullptr},Owner::squad};
     const void* ids[]={object};g.sel.Add(object);RememberSelection(g);
     KeepSelection(g,ids);Check(g.sel.Has(object),"live selected identity retained");
     Put<const void*>(object,kSelfCtrl,replacement);
     KeepSelection(g,ids);Check(g.sel.n==0,"recycled address cannot inherit selection");
     g.sel.Add(object);RememberSelection(g);KeepSelection(g,ids);Check(g.sel.n==1,"replacement can be explicitly selected");
     int skipped=0;
-    Check(Issue(g,Command{Order::follow,{}},&skipped)==0 && skipped==1,"runtime refusal counted as unable to command");
+    Check(Dispatch(g,Command{Order::follow,{}},&skipped,{})==0 && skipped==1,"runtime refusal counted as unable to command");
     g.count=0;KeepSelection(g,ids);Check(g.sel.n==0,"removed unit loses selection");
-    Game enemyGame{};enemyGame.requester=ObjRef{object,control};
+    static Game enemyGame;enemyGame=kNewGame;enemyGame.requester=ObjRef{object,control};
     Game::UiHit hit{};hit.kind=Game::UiKind::enemy;hit.entry=enemyui::kBegin;
     hit.enemy.ownerHumanKey=reinterpret_cast<std::uintptr_t>(replacement);
     UiClick(enemyGame,hit,false);

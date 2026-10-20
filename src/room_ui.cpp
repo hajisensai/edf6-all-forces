@@ -15,11 +15,19 @@
 //      when it changes (Written). The layout draws nothing by itself (empty texts, texture skins with no texture): without
 //      the plugin the screen looks stock. While the menu is not shown everything the plugin set is taken back (texts
 //      emptied, tints transparent, elements and the root hidden).
+// 2026-10-19 (the user: "房间界面f2太垃圾了，换成游戏自带的那种"): the menu itself is the game's own dialog box
+// (room_dialog.h: HUiDialogBox, the window the soldier screen's outfit popup is; room_dialog_logic.h the pages), so the
+// game draws it and moves through it with the mouse, the keyboard and the pad, with its own confirm / cancel and sounds.
+// The overlay above (the layout's elements) only draws the closed page's entry hint now, and the whole menu only when
+// the dialog's code did not check out (NativeDialogReady false: the menu as before, never no menu).
 // Nothing is patched unless every address checks out (REFUSED in the log: both screens as they are). The slots are read
 // and chained, never assumed stock: EDF6Coop chains the room's too.
 #include "room_ui.h"
+#include "room_dialog.h"
+#include "room_dialog_logic.h"
 #include "pvp.h"
 #include "outfit41.h"
+#include "host_settings.h"
 #include "crew.h"
 #include "hud.h"
 #include "loadout_store.h"
@@ -230,6 +238,11 @@ struct State {
     rm::UnitSpec specs[rm::kMostUnits]{};
     int specCount=0;
     Written written{};
+    // The native dialogs (room_dialog.h): where the player is, the dialog shown, the button picked in it.
+    roomdialog::Nav nav{};
+    nativedialog::Handle dialog{};
+    bool hasPick=false;
+    roomdialog::Choice pick{};
 };
 State st;
 rm::SaveSet saveSet;   // big: not on the stack
@@ -240,6 +253,8 @@ std::atomic<bool> resetAsked{false};
 // its destructor has run since: the next frame forgets it even when the new screen sits at the same address.
 std::atomic<unsigned char*> followed{nullptr};
 std::atomic<bool> followedGone{false};
+// The thread the screens' frames run on (the UI thread): a destructor hook running there may touch the menu's state.
+std::atomic<DWORD> uiThread{0};
 
 void NoteSave(Tx t,const wchar_t* arg,bool warn) noexcept {
     _snwprintf_s(st.saveNote,_TRUNCATE,hudtext::Tr(t),arg ? arg : L"");
@@ -377,6 +392,8 @@ void Act(rm::Act a) noexcept {
 // MissionStart drops mission/menu state but does not prove the native room object died: online rooms can be retained.
 // Keep its native button/action identity until Follow observes a different object or its chained destructor.
 void ForgetMenu() noexcept {
+    nativedialog::CloseDialog(st.dialog);   // the screen it stood over is going: nothing of ours left on top
+    st.hasPick=false;
     HidePreview();
     if(st.menu.open)rm::Discard(st.menu);
     if(LeaveOnForget(st.switches))roomsync::LeaveRoomSync();
@@ -400,9 +417,17 @@ void Follow(unsigned char* self,bool room) noexcept {
     st.self=self;st.room=room;
     followed.store(self);
 }
-// A screen's destructor (any thread): the one followed is marked gone; nothing else is touched here.
+// A screen's destructor: the one followed is marked gone (the next frame forgets it). On the UI thread (where the game
+// destroys its screens) the dialog standing over it is closed right here: it hangs on the game's global UI, not on the
+// screen, and would stay on top of whatever comes next (2026-10-20 review of #218). Elsewhere only the mark: the
+// menu's state is the UI thread's (and the dialog's own frame closes it once a mission starts: RequestCloseDialogs).
 void NoteGone(unsigned char* self) noexcept {
-    if(self && followed.load()==self)followedGone.store(true);
+    if(!self || followed.load()!=self)return;
+    followedGone.store(true);
+    if(GetCurrentThreadId()!=uiThread.load())return;
+    if(st.dialog.control)Log("ROOMUI screen %p ended with the menu's dialog open: closed with it",self);
+    nativedialog::CloseDialog(st.dialog);
+    st.hasPick=false;
 }
 
 // --- Drawing ---
@@ -683,10 +708,63 @@ void DrawMenu(unsigned char* self) noexcept {
     HelpLine(v.level,2,key,line,kLineMost);SetText(self,kSlotHelp3,kHelp3Name,line);
 }
 
+// --- The menu as the game's dialogs (room_dialog_logic.h pages, room_dialog.h windows) ---
+bool Dialogs() noexcept { return nativedialog::NativeDialogReady(); }
+void OpenMenu() noexcept {
+    st.menu.open=true;st.menu.level=rm::Level::units;
+    Opened();
+    roomdialog::Begin(st.menu,st.nav);
+    st.hasPick=false;
+}
+// The status lines the units page's message carries (ComposeStatus, as the overlay showed them).
+Status MenuStatus() noexcept {
+    const ULONGLONG now=GetTickCount64();
+    if(!st.genAt || now-st.genAt>500){st.gen=VariantGenerationStatus();st.genAt=now;}
+    roomsync::SyncLine sync[kStatusLines]{};
+    int syncCount=st.room ? HostSettingsLines(sync,kStatusLines) : 0;   // the host's settings, the builds that differ
+    if(st.room)syncCount+=roomsync::RoomSyncLines(sync+syncCount,kStatusLines-syncCount);
+    return ComposeStatus(st.room && !OnlineHostOnly(),st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
+}
+roomdialog::Dialog page;   // big: not on the stack
+// Each frame while the menu is open: the dialog's pick taken; once the game has closed it (picked, or its own cancel),
+// the menu steps (Apply / Cancel) and the next page opens as a new dialog, when the screen is the input owner again.
+void DriveDialog(bool hasInput) noexcept {
+    if(st.dialog.control) {
+        std::uint64_t id=0;
+        if(nativedialog::TakePicked(st.dialog,&id)){st.pick=roomdialog::Unpack(id);st.hasPick=true;}
+        if(nativedialog::DialogAlive(st.dialog))return;   // open, or still closing
+        nativedialog::ForgetDialog(st.dialog);
+        const roomdialog::Result r=st.hasPick ? roomdialog::Apply(st.menu,st.nav,st.pick) : roomdialog::Cancel(st.menu,st.nav);
+        st.hasPick=false;
+        if(r==roomdialog::Result::save) {
+            Save();
+            st.menu.open=true;st.nav=roomdialog::Nav{};   // the units page again, its message the save's result
+        }
+        if(r==roomdialog::Result::close || !st.menu.open) {
+            st.menu.open=false;
+            Log("ROOMUI menu closed");
+            return;
+        }
+    }
+    if(!hasInput)return;   // something of the game's over the screen: the next page waits for it
+    const Status s=MenuStatus();
+    roomdialog::Context ctx;
+    for(int i=0;i<s.count && i<4;++i)ctx.status[ctx.statusCount++]=s.text[i];
+    page=roomdialog::Build(st.menu,st.nav,ctx);
+    nativedialog::Button buttons[roomdialog::kItemsMost];
+    for(int i=0;i<page.count;++i)buttons[i]=nativedialog::Button{page.item[i].text,roomdialog::Pack(page.item[i].choice)};
+    if(!nativedialog::OpenDialog(page.title,buttons,page.count,page.cursor,&st.dialog)) {
+        rm::Discard(st.menu);   // never a menu open with nothing on screen: closed, its edits dropped (logged)
+        Log("ROOMUI the game opened no dialog: the menu closed, its edits dropped");
+    }
+}
+
 // --- One frame of either screen ---
 // Off (Enabled / RoomLoadout turned 0 since the load): the screen's own update with its own ctx, nothing read; the menu
 // dropped, the preview put back, and what the menu drew on this screen taken back (write-on-change: once).
 std::uint64_t Off(Screen& screen,unsigned char* self,void* ctx) noexcept {
+    nativedialog::CloseDialog(st.dialog);
+    st.hasPick=false;
     if(st.menu.open){rm::Discard(st.menu);Log("ROOMUI menu closed: RoomLoadout / Enabled turned off");}
     st.held=rm::Keys{};st.gate=Gate{};
     NativeEntryInput(st.nativeEntry,false);NativeEntryDisplay(self,false);
@@ -697,6 +775,7 @@ std::uint64_t Off(Screen& screen,unsigned char* self,void* ctx) noexcept {
     return result;
 }
 std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
+    uiThread.store(GetCurrentThreadId());
     if(resetAsked.exchange(false)) {
         Log("ROOMUI a mission started since the last screen frame: the room is left, the menu dropped");
         ForgetMenu();
@@ -705,6 +784,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     Follow(self,screen.room);
     PvpRoomTick();       // capability advertisement only; native team changes stay on the game-thread PvpFrame
     Outfit41RoomTick();   // the EDF4.1 outfit told to the room whatever the menu's switches (outfit41.cpp)
+    HostSettingsRoomTick();   // this machine's word to the room, the host's settings and the room's builds (host_settings.h)
     Edf5OnlineRoomTick(); // this machine's word that it creates every player of an EDF5/4.1 mission (edf5online_room.cpp)
     const bool on=Cfg().enabled && Cfg().roomLoadout;
     const SwitchPlan sw=PlanSwitches(st.switches,on,Cfg().roomPreSync,screen.room);
@@ -721,7 +801,11 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     const rm::Keys down=KeysDown(ReadRaw(),static_cast<std::uint16_t>(Cfg().roomLoadoutButton));
     const rm::Keys press=rm::Presses(st.held,down);
     const Plan plan=PlanFrame(hasInput,st.menu.open);
-    if(plan.step)Act(rm::Step(st.menu,press));
+    const bool dialogs=Dialogs();
+    if(dialogs) {
+        // The dialogs own every key while open (the game's focus, confirm, cancel); the toggle only opens.
+        if(plan.step && press.toggle && !st.menu.open)OpenMenu();
+    } else if(plan.step)Act(rm::Step(st.menu,press));
     const bool take=TakeInput(st.gate,st.menu.open,AnyDown(down));
     NativeEntryInput(st.nativeEntry,hasInput && !st.menu.open && !st.gate.latched && Foreground());
     NativeEntryDisplay(self,st.nativeEntry.enabled);
@@ -734,7 +818,8 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     } else result=screen.next(self,ctx);
     if(TakeNativeEntry(st.nativeEntry,self==st.self && !followedGone.load() && !st.menu.open)) {
         rm::Keys clicked;clicked.toggle=true;
-        Act(rm::Step(st.menu,clicked));
+        if(dialogs)OpenMenu();
+        else Act(rm::Step(st.menu,clicked));
         st.gate.latched=true;
         NativeEntryInput(st.nativeEntry,false);
         NativeEntryDisplay(self,false);
@@ -747,9 +832,13 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
         SetText(self,kSlotNativeDesc,L"MenuDescText",line);
     }
     if(sw.tick)roomsync::TickRoomSync();
-    const Plan display=PlanFrame(hasInput,st.menu.open,ToggleAvailable(),!st.gate.latched);
-    FollowPreview(display.show);
-    roompreview::TickPreview(display.show);
+    if(dialogs && st.menu.open)DriveDialog(hasInput);
+    Plan display=PlanFrame(hasInput,st.menu.open,ToggleAvailable(),!st.gate.latched);
+    // The dialogs: the soldier being edited stays on the 3D view under them; the overlay shows nothing of the menu.
+    const bool preview=dialogs ? st.menu.open : display.show;
+    if(dialogs)display.show=false;
+    FollowPreview(preview);
+    roompreview::TickPreview(preview);
     if(Draw(self,display.show,display.entry)) {
         if(display.show)DrawMenu(self);
         if(display.entry) {
@@ -831,6 +920,7 @@ bool InstallRoomUi() noexcept {
     nativeEntryOk=AllMatch(kNativeMenuSigs,std::size(kNativeMenuSigs),"the native menu button contracts","hotkey menu still available");
     padOk=AllMatch(kPadSigs,std::size(kPadSigs),"the pad table","the menu: keyboard only");
     Log("HOOK roomui preview=%d (stage 7; 0: the menu runs without the 3D preview)",roompreview::InstallPreviewHooks());
+    Log("HOOK roomui native dialogs=%d (0: the menu drawn by the layout overlay as before)",nativedialog::InstallNativeDialog());
     const bool room=Chain(screens[0],reinterpret_cast<void*>(&RoomHook),reinterpret_cast<void*>(&RoomGoneHook));
     const bool hq=Chain(screens[1],reinterpret_cast<void*>(&HqHook),reinterpret_cast<void*>(&HqGoneHook));
     Log("HOOK roomui room=%d hq=%d (the support loadout menu in the online room and the offline HQ)",room,hq);
@@ -838,8 +928,11 @@ bool InstallRoomUi() noexcept {
 }
 
 void ResetRoomUi() noexcept {
-    // MissionStart's thread is not known to be the UI thread: the state is the UI thread's, and room_sync.h /
-    // room_preview.h are called from it only. Asked here, done by the next screen frame (Frame).
+    // MissionStart's / MissionSync's thread is not known to be the UI thread: the state is the UI thread's, and
+    // room_sync.h / room_preview.h are called from it only. Asked here, done by the next screen frame (Frame). The
+    // menu's dialog does not wait for that frame (the room may not update again before the load: the host started the
+    // mission while this machine's menu was open): its own frame closes it (room_dialog.h RequestCloseDialogs).
     resetAsked.store(true);
+    nativedialog::RequestCloseDialogs();
 }
 }  // namespace crew

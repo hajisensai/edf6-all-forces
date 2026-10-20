@@ -46,6 +46,10 @@ struct Hooks {
     // Host only: requesterPeer comes from the authenticated transport, 0 for this machine.
     PlanResult (*planForRequester)(std::uint32_t requesterPeer,std::uint32_t catalog,const float* target,
                                   std::uint64_t loadout,Plan*) noexcept=nullptr;
+    // Optional, a peer's PREPARE (support_protocol.cpp): what `plan` needs is loaded here (ready), being loaded (pending:
+    // its READY waits, the transaction's own deadline still running), or cannot be (refused). Null: ready. The test
+    // range's rows not preloaded this mission (debug_spawn.cpp PrepareRangeEnemy) load on every peer before any is made.
+    PlanResult (*prepare)(const Plan&) noexcept=nullptr;
 };
 bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net

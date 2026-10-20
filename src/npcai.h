@@ -53,10 +53,16 @@ int CycleGuardFormation(const void* leader) noexcept;
 int SetGuardFormation(const void* leader,int shape) noexcept;
 int NpcGuardShape(const void* leader) noexcept;
 int SetMarchFormation(int shape) noexcept;
-// Fireteams (the map's P and L): split a squad in two (the soldiers moved to the new one, -1 when it cannot be), put
-// squad `from` under squad `into`'s top (false when either takes no orders or the two are more than a squad holds).
-int SplitSquad(const void* leader) noexcept;
-bool MergeSquads(const void* into,const void* from) noexcept;
+// The squad a squad's top `old` handed over to (its leader died: §5.3 Succeed): the new top, or the top of the squad the
+// remnant joined; false when `old` handed over to none lately. The map's selection and its RTS groups follow a squad
+// through its leader's death with it (they hold the top's identity). Game thread.
+bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept;
+// A squad's members by identity, its top among them (mapcmd_logic.h UnitRef: the map's groups, selection and queues
+// find a squad again through any member alive), at most `most`; how many. The top of a living member's squad now (the
+// native follow tree: on a guest too, where the host's hand-over is not recorded); false for a member dead or gone.
+// Game thread.
+int NpcSquadMembers(const void* top,ObjRef* out,int most) noexcept;
+bool NpcSquadTopOf(const ObjRef& member,ObjRef* top) noexcept;
 int CycleMarchFormation() noexcept;
 struct FormationCue { int shape; int key; };
 bool PlayerFormationCue(FormationCue* out) noexcept;

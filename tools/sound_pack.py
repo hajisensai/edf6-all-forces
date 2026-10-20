@@ -2,7 +2,9 @@
 「修改的音效重新修改，音效太烂了。可以使用 00_win32_audio.zip 这个」).
 
 The plugin already takes a recording for any of its sounds: <dll name>_veh_<clip>.wav next to the DLL (src/jetaudio.cpp
-MakeClipsNow, kClipName) and <dll name>_jet.wav for the jets' roar (Start). This tool cuts, pitches, layers and loops the
+MakeClipsNow, kClipName), <dll name>_jet.wav for the jets' roar (Start) and the ultimate strike's <dll name>_ult_<name>.wav
+(kUltClipName: only recordings, no sound of the plugin's own; without one the show plays the game's cue). This tool cuts,
+pitches, layers and loops the
 recordings MAPPING names out of a sound archive the player has (read straight from the zip: nothing in it is extracted
 or run), levels each like the clip it replaces and writes those WAVs. The repository is public and the archive is
 another game's sounds, so only this recipe is kept here, never the sounds: the player builds them from their own copy.
@@ -45,6 +47,8 @@ RATE = 48000          # the plugin's own rate (jetaudio.cpp kRate)
 JET = 'jet'           # the jets' roar: <dll>_jet.wav, not a kClipName clip
 JET_PEAK = 0.85       # SynthRoar's
 JET_LOOP = True
+ULT = 'ult_'          # the ultimate's clips: 'ult_<kUltClipName>', <dll>_ult_<name>.wav, one-shots
+ULT_PEAK = 0.95
 SAMPLES = 'sound/samples/'
 
 
@@ -145,6 +149,29 @@ MAPPING: tuple[Recipe, ...] = (
            why='另一段更长的机甲踏步（2.2 s，中段还有金属件的余振），当落地'),
     Recipe('sazabi_dash', (Layer('weapon_fire/power_wooshes_01.wav'),),
            why='能量冲刺「呼」声：0.1 s 升起、0.5 s 内衰减 20 dB'),
+    # The ultimate strike (src/ultimate.cpp; 2026-10-20 user: 「缺少音效」, the sounds from this archive, no speech).
+    Recipe('ult_charge', (Layer('machines/core_descent.wav'),
+                          Layer('engines/bass_atmospheric_03.wav', 0.0, 12.0, gain_db=-6.0),
+                          Layer('weapon_fire/charging_power_5s.wav', gain_db=-4.0, delay=6.5),
+                          Layer('machines/risers_tech_01.wav', gain_db=-2.0, delay=10.0)), fade=0.6,
+           why='蓄力 12 s：9 s 恒定的「核心降临」低鸣 + 低 6 dB 的大气低频垫底，6.5 s 起叠 5 s 充能啸声，10 s 起叠上扬音'),
+    Recipe('ult_circle', (Layer('explosions/portal_open.wav', pitch=0.8),), fade=0.3,
+           why='传送门开启（2.4 s 恒定的展开声）降 0.8 倍：每层法阵展开一声'),
+    Recipe('ult_thunder', (Layer('ambient/thunder_03.wav'),), fade=0.4,
+           why='雷声录音：起音最猛（-15 dB 起）、4.2 s 滚动尾音；插件每次播放随机变调'),
+    Recipe('ult_gather', (Layer('weapon_fire/charging_power_long.wav'),
+                          Layer('explosions/alien_imploder.wav', pitch=0.8, gain_db=-3.0, delay=0.9)), fade=0.2,
+           why='汇聚 2.5 s：2.7 s 的充能声 + 0.9 s 起降 0.8 倍的「内爆」吸入声，收在开炮前'),
+    Recipe('ult_beam', (Layer('explosions/alien_bomb_big.wav'),
+                        Layer('weapon_fire/dramatic_hit_hard_09.wav', pitch=0.8, gain_db=-4.0),
+                        Layer('weapon_fire/boss_laser_scanning.wav', pitch=0.6, gain_db=-8.0, delay=0.2)), fade=1.5,
+           why='主炮：外星巨型炸弹起音 + 降 0.8 倍的 15 s 重击长尾 + 降 0.6 倍的激光嗡鸣（光柱持续感）'),
+    Recipe('ult_blast', (Layer('explosions/explosion_generic_large_close_01.wav'),
+                         Layer('explosions/industrial_sphere_tank_explosion.wav', gain_db=-4.0)), fade=0.5,
+           why='环形爆炸每圈一声：大型近爆 + 低 4 dB 的储罐爆炸加厚低频'),
+    Recipe('ult_shock', (Layer('explosions/core_shockwave.wav'),
+                         Layer('explosions/bass_drop_02.wav', gain_db=-2.0)), fade=0.6,
+           why='冲击波：「核心冲击波」录音 + 低 2 dB 的重低音下坠'),
 )
 
 
@@ -168,11 +195,18 @@ def clip_table(path: str = JETAUDIO) -> dict[str, tuple[bool, float]]:
         raise SystemExit(f'{JETAUDIO}: kClipName / kClipLoops / kClipPeak lengths differ')
     table = {n: (lp, pk) for n, lp, pk in zip(names, loops, peaks)}
     table[JET] = (JET_LOOP, JET_PEAK)
+    m = re.search(r'kUltClipName\[kUltClipCount\]=\{(.*?)\};', text, re.S)
+    if not m:
+        raise SystemExit(f'{JETAUDIO}: no kUltClipName[kUltClipCount] table')
+    for s in (s.strip() for s in m.group(1).split(',') if s.strip()):
+        table[ULT + re.fullmatch(r'L"(\w+)"', s).group(1)] = (False, ULT_PEAK)
     return table
 
 
 def file_name(clip: str) -> str:
-    return f'{PLUGIN}_jet.wav' if clip == JET else f'{PLUGIN}_veh_{clip}.wav'
+    if clip == JET:
+        return f'{PLUGIN}_jet.wav'
+    return f'{PLUGIN}_{clip}.wav' if clip.startswith(ULT) else f'{PLUGIN}_veh_{clip}.wav'
 
 
 # --- Reading and writing WAVs ---

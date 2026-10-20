@@ -17,10 +17,12 @@ bool EnemyControlDescribe(const ObjRef& requester,const ObjRef&,enemy_control::S
     return false;
 }
 bool EnemyControlReadSnapshot(const ObjRef&,enemy_control::Snapshot* out) noexcept {if(out)*out={};return false;}
+bool EnemyControlPickable(const void*) noexcept {return false;}
 unsigned EnemyControlAbilities(const enemy_control::Snapshot&,unsigned,enemy_control::Ability*,unsigned) noexcept {return 0;}
 bool EnemyControlRequest(const enemy_control::Snapshot&) noexcept {return false;}
 bool EnemyControlSelectAbility(const enemy_control::Snapshot&,std::uint32_t) noexcept {return false;}
 bool EnemyControlSetAbilityHeld(const enemy_control::Snapshot&,bool) noexcept {return false;}
+bool EnemyControlHoldAbility(const enemy_control::Snapshot&,std::uint32_t) noexcept {return false;}
 bool EnemyControlExit(const enemy_control::Snapshot&) noexcept {return false;}
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {if(out && capacity)out[0]=0;}
 int SupportCallCount() noexcept { return 3; }
@@ -64,20 +66,48 @@ bool SetPvpLocalTeamAt(int team,std::uint64_t epoch,std::uint32_t revision,const
 unsigned char* PlayerHuman() noexcept {return nullptr;}
 const void* remoteAuthority=nullptr;bool allRemote=false,mapOnline=false;
 bool IsOnlineAuthority(const void* object) noexcept {return !allRemote && object!=remoteAuthority;}
-CommandNetworkResult networkReply{};unsigned networkSubmits=0,networkUnits=0,networkTotal=0;
+CommandNetworkResult networkReply{};unsigned networkSubmits=0,networkUnits=0,networkTotal=0;bool networkQueuedFlag=false;
 std::uint32_t networkSlots[kCommandNetUnits]{};ObjRef networkIdentities[kCommandNetUnits]{};Command networkCommand{};
 std::uint32_t SubmitMapCommand(const ObjRef&,const ObjRef* ids,unsigned count,const mapcmd::Command& command,const ObjRef&,
-    wchar_t* note,std::size_t size,const std::uint32_t* slots,std::uint32_t total) noexcept {
-    ++networkSubmits;networkUnits=count;networkTotal=total;networkCommand=command;
+    wchar_t* note,std::size_t size,const std::uint32_t* slots,std::uint32_t total,bool queued) noexcept {
+    ++networkSubmits;networkUnits=count;networkTotal=total;networkCommand=command;networkQueuedFlag=queued;
     for(unsigned i=0;i<count && i<kCommandNetUnits;++i){networkIdentities[i]=ids[i];networkSlots[i]=slots ? slots[i] : 0;}
     networkReply={};networkReply.request=91;networkReply.state=CommandNetworkState::pending;networkReply.count=count;
     _snwprintf_s(note,size,_TRUNCATE,L"queued");return 91;
 }
 bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {*out=networkReply;return out->request!=0;}
 bool MapCommandNetworkReady() noexcept {return true;}
+std::uint32_t MapCommandNetworkVersion() noexcept {return 7;}
+// Kind::ways (command_net.cpp): what the host shares, what the client's host published for a unit.
+unsigned waysSyncs=0,waysShared=0;MapCommandWays waysLast{};
+void SyncMapCommandWays(const MapCommandWays* list,unsigned count) noexcept {
+    ++waysSyncs;waysShared=count;if(count)waysLast=list[0];
+}
+const void* hostWaysUnit=nullptr;unsigned hostWaysN=0;float hostWaysAt[8][3]{};Command hostWaysNow{};
+unsigned ReadMapCommandWays(const ObjRef& unit,Command* current,float (*at)[3],unsigned most) noexcept {
+    if(!hostWaysUnit || unit.obj!=hostWaysUnit)return 0;
+    *current=hostWaysNow;
+    const unsigned n=hostWaysN<most ? hostWaysN : most;
+    for(unsigned i=0;i<n;++i)for(unsigned c=0;c<3;++c)at[i][c]=hostWaysAt[i][c];
+    return n;
+}
+
 
 ObjRef NpcMarkedIdentity() noexcept {return {};}
+extern const void* guardLeader;extern int guardCalls,marchCalls,guardSet,marchSet;
 NpcCommandResult NpcSquadCommandForRequester(const ObjRef& id,const mapcmd::Command& command,const ObjRef&,const ObjRef&) noexcept {
+    // The formation order (npcai.cpp): the squad at `guardLeader` guards (its defence cycled to 10, or set), the others
+    // follow (the march set).
+    if(command.order==Order::formation) {
+        if(id.obj==guardLeader) {
+            const int shape=mapcmd::FormationCycles(command.param) ? 10 : mapcmd::FormationGuardShape(command.param);
+            if(shape<0)return {NpcCommandReason::unsupported,0};
+            ++guardCalls;guardSet=shape;return {NpcCommandReason::none,1};
+        }
+        const int shape=mapcmd::FormationMarchShape(command.param);
+        if(shape<0)return {NpcCommandReason::unsupported,0};
+        ++marchCalls;marchSet=shape;return {NpcCommandReason::none,1};
+    }
     return SquadCommand(id.obj,command) ? NpcCommandResult{NpcCommandReason::none,1} : NpcCommandResult{NpcCommandReason::failed,0};
 }
 unsigned char* image=nullptr;
@@ -117,20 +147,32 @@ bool JetCommand(const void*,const Command&,const ObjRef&) noexcept { return fals
 bool GroundCommand(const void*,const Command&) noexcept { return false; }
 bool HeliSharesPost() noexcept { return true; }
 // One stand-in squad (when `squadOn`), its last order; the enemies the lock registry would list; the mark npcai.cpp keeps.
-unsigned char squadObj[0x100]{},squadCtrl[0x10]{};
+unsigned char squadObj[0x400]{},squadCtrl[0x10]{};   // past kDead (0x2E8): its liveness is read (mapcmd.cpp TopNow)
 bool squadOn=false,squadLocked=false,squadRiding=false;
 Command squadGot{};int squadOrders=0;
+// A second stand-in squad (the RTS groups' cases), where each one is, and the order each reports now (its last one,
+// as npcai.cpp reports a squad's q.cmd) when `squadReports`.
+unsigned char squad2Obj[0x400]{},squad2Ctrl[0x10]{};
+bool squad2On=false,squadReports=false;
+Command squad2Got{};int squad2Orders=0;
+float squadPos[3]{},squad2Pos[3]{};
+ULONGLONG stubFrame=1;
+ULONGLONG GameFrame() noexcept {return stubFrame;}
 int TransportLinks(TransportLink*,int) noexcept { return 0; }
 const void* TransportRiderOf(const void*) noexcept { return nullptr; }
 int SquadCommandUnits(CommandUnit* out,int most) noexcept {
-    if(!squadOn || most<1)return 0;
-    out[0]=CommandUnit{squadObj,"squad",Command{},false,{0.0f,0.0f,0.0f}};
-    out[0].locked=squadLocked;out[0].riding=squadRiding;
-    return 1;
+    int n=0;
+    if(squadOn && n<most) {
+        out[n]=CommandUnit{squadObj,"squad x4",squadReports ? squadGot : Command{},false,{squadPos[0],squadPos[1],squadPos[2]}};
+        out[n].locked=squadLocked;out[n].riding=squadRiding;++n;
+    }
+    if(squad2On && n<most)out[n++]=CommandUnit{squad2Obj,"squad x3",squadReports ? squad2Got : Command{},false,{squad2Pos[0],squad2Pos[1],squad2Pos[2]}};
+    return n;
 }
 int TankCommandUnits(CommandUnit*,int) noexcept {return 0;}
 int SquadRows(SquadRow*,int,SquadTally* tally) noexcept {if(tally)*tally=SquadTally{};return 0;}
 bool SquadCommand(const void* leader,const Command& c) noexcept {
+    if(leader==squad2Obj){squad2Got=c;++squad2Orders;return true;}
     if(leader!=squadObj)return false;
     squadGot=c;++squadOrders;
     return true;
@@ -151,8 +193,24 @@ int guardSet=-1,marchSet=-1;
 int SetGuardFormation(const void* leader,int shape) noexcept { if(leader!=guardLeader)return -1;guardSet=shape;return shape; }
 int NpcGuardShape(const void* leader) noexcept { return leader==guardLeader ? 10 : -1; }
 int SetMarchFormation(int shape) noexcept { marchSet=shape;return shape; }
-int SplitSquad(const void*) noexcept {return -1;}
-bool MergeSquads(const void*,const void*) noexcept {return false;}
+ObjRef successorOld{},successorNew{};
+bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept {
+    if(!successorOld.obj || old.obj!=successorOld.obj || old.ctrl!=successorOld.ctrl)return false;
+    *now=successorNew;return true;
+}
+// The squads' members (npcai.cpp NpcSquadMembers / NpcSquadTopOf): the first stand-in squad has one soldier besides its
+// top, `memberObj`, whose squad's top now is `memberTop` (nullptr: that soldier is dead). A guest sees no hand-over
+// (NpcSquadSuccessor above is the host's record): only the replicated follow tree.
+unsigned char memberObj[0x400]{},memberCtrl[0x10]{};
+const void* memberTop=nullptr;
+int NpcSquadMembers(const void* top,ObjRef* out,int most) noexcept {
+    if(top!=squadObj || most<1 || !memberTop)return 0;
+    out[0]=ObjRef::Of(memberObj);return 1;
+}
+bool NpcSquadTopOf(const ObjRef& member,ObjRef* top) noexcept {
+    if(member.obj!=memberObj || !memberTop)return false;
+    *top=ObjRef::Of(memberTop);return true;
+}
 int sweepCalls=0,healthCalls=0;bool sweepState=false,healthState=false;
 bool NpcSweepToggle(const void* const*,int) noexcept { ++sweepCalls;sweepState=!sweepState;return sweepState; }
 bool NpcSweepOn() noexcept { return sweepState; }
@@ -185,6 +243,9 @@ int DamageStatsUiAt(float x,float y) noexcept {
 void DamageStatsClick(int code) noexcept { ++statsClicks;statsLastCode=code; }
 bool DamageStatsShown() noexcept { return statsShown; }
 namespace {
+// A map command state is large (its groups' and selection's UnitRefs): the tests' own are static, reset from this one
+// (no copy of it on the stack).
+const Game kNewGame{};
 int failures=0,cases=0;
 void Check(bool ok,const char* what) noexcept {
     ++cases;
@@ -225,7 +286,7 @@ void UnitLifetime() noexcept {
     if(protectedPage) {
         CommandUnit gone{};
         Check(!ReadCommandUnit(ref,"test",Command{},false,&gone),"unmapped or newly protected unit rejected even with cached Readable");
-        Game snap{};snap.count=1;snap.list[0]=Entry{unit,Owner::ground};
+        static Game snap;snap=kNewGame;snap.count=1;snap.list[0]=Entry{unit,Owner::ground};
         Check(PublishGuarded(snap),"publication uses sampled coordinates after object becomes inaccessible");
         const bool unlocked=TryAcquireSRWLockShared(&lock)!=FALSE;
         Check(unlocked,"publication leaves HUD lock available");
@@ -256,7 +317,7 @@ void PointerAndInput() noexcept {
     in.mouse=false;in.dx=0.0f;in.pad=true;in.buttons=XINPUT_GAMEPAD_Y;
     MapCommandFrame(in,centre);
     Check(in.usingPad && PlayerMapCommands(&r) && !r.pointer,"gamepad command changes source without stick movement");
-    in.buttons=0;inputstub::keys['G']=true;
+    in.buttons=0;inputstub::keys['Z']=true;   // G (an alias of Z) went on 2026-10-19
     MapCommandFrame(in,centre);
     Check(!in.usingPad && PlayerMapCommands(&r) && r.pointer,"keyboard command restores pointer input without map movement");
     inputstub::keys['G']=false;
@@ -295,21 +356,34 @@ void StatsPage() noexcept {
 // T on the map: each selected squad that guards cycles its own defence, the march once however many follow; online
 // (orders refused) nothing changes.
 void FormationKey() noexcept {
-    static int a=0,b=0,c=0,d=0;
-    Game g{};
+    static unsigned char a[0x400]{},b[0x400]{},c[0x400]{},d[0x400]{};
+    static Game g;g=kNewGame;
     g.count=4;
-    const void* who[4]={&a,&b,&c,&d};
+    const void* who[4]={a,b,c,d};
     for(int i=0;i<4;++i){g.list[i]=Entry{CommandUnit{who[i],"squad",Command{}},Owner::squad};}
-    g.sel.Add(&a);g.sel.Add(&b);g.sel.Add(&c);   // d not selected
-    guardLeader=&a;guardCalls=marchCalls=0;
+    g.sel.Add(a);g.sel.Add(b);g.sel.Add(c);   // d not selected
+    guardLeader=a;guardCalls=marchCalls=0;marchSet=-1;
     Formation(g,true);
-    Check(guardCalls==3 && marchCalls==1,"T: the guard squad cycled, the march once for two following squads");
+    // One formation order (Order::formation, through Dispatch as every order): the guarding squad cycles its defence,
+    // each following squad sets the march to the one after this machine's now (the same one: the march steps once).
+    const int next=static_cast<int>(npc::formation::Next(npc::formation::FromInt(NpcMarchShape()),false));
+    Check(guardCalls==1 && marchCalls==2 && marchSet==next,"T: the guard squad cycled, the two following squads given one march");
     guardCalls=marchCalls=0;
     Formation(g,false);
-    Check(guardCalls==0 && marchCalls==0,"T online: nothing cycled");
-    g.sel.Clear();g.sel.Add(&a);guardCalls=marchCalls=0;
+    Check(guardCalls==0 && marchCalls==0,"T with the plugin off: nothing given");
+    g.sel.Clear();g.sel.Add(a);guardCalls=marchCalls=0;
     Formation(g,true);
     Check(guardCalls==1 && marchCalls==0,"T on a guarding squad alone: the march untouched");
+    // Online (the user: 「所有功能都要支持联机」): another machine's squad is asked of its authority as the formation order
+    // itself (command protocol v7), its parameter with it -- not refused as offline-only any more.
+    mapOnline=true;remoteAuthority=b;networkSubmits=0;networkCommand=Command{};
+    for(int i=0;i<4;++i)Put<void*>(const_cast<void*>(who[i]),kSelfCtrl,const_cast<void*>(who[i]));
+    g.sel.Clear();g.sel.Add(b);guardCalls=marchCalls=0;
+    Formation(g,true);
+    Check(networkSubmits==1 && networkCommand.order==Order::formation && mapcmd::FormationCycles(networkCommand.param) &&
+          mapcmd::FormationMarchShape(networkCommand.param)==next && !guardCalls && !marchCalls,
+          "T online on another machine's squad: the formation order requested of its authority, nothing done here");
+    mapOnline=false;remoteAuthority=nullptr;networkSubmits=0;
 }
 // The map's buttons (hud.cpp draws them and hands their rectangles over): a click on the sweep's button runs it and
 // selects nothing; the guard's arms the next click on the ground (no unit picked by it), clicked again disarms it;
@@ -409,12 +483,13 @@ void MarkFromMap() noexcept {
     // H with no mark and nothing under the pointer: refused, nothing marked.
     Put<void*>(squadObj,kSelfCtrl,squadCtrl);squadOn=true;
     game.sel.Clear();game.sel.Add(squadObj);game.selected[0]=ObjRef::Of(squadObj);
+    // H is HOLD since 2026-10-19 (RTS): with no ground found under the unit it is refused, and it never marks.
     inputstub::keys['H']=true;MapCommandFrame(in,centre);inputstub::keys['H']=false;MapCommandFrame(in,centre);
-    Check(squadOrders==0 && marked==nullptr,"H with no mark and no enemy under the pointer: refused");
-    // H on the enemy: marked and the squad focuses on it in one press.
+    Check(squadOrders==0 && marked==nullptr,"H (HOLD) with no ground under the unit: refused, nothing marked");
+    // The right button on the enemy: marked and the squad focuses on it in one press.
     in.mouse=true;in.dx=-300.0f;MapCommandFrame(in,centre);in.mouse=false;in.dx=0.0f;
-    inputstub::keys['H']=true;MapCommandFrame(in,centre);inputstub::keys['H']=false;MapCommandFrame(in,centre);
-    Check(marked==foe && squadOrders==1 && squadGot.order==Order::focus,"H on an enemy marks it and the squad focuses on it");
+    inputstub::keys[VK_RBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_RBUTTON]=false;MapCommandFrame(in,centre);
+    Check(marked==foe && squadOrders==1 && squadGot.order==Order::focus,"the right button on an enemy marks it and the squad focuses on it");
     // On foot: the point goes to the selection kept from the map.
     const float at[3]={50.0f,2.0f,-80.0f};groundReady=true;
     Check(MapCommandGuardAt(at)==1 && squadOrders==2 && squadGot.order==Order::guard && squadGot.at[0]==50.0f &&
@@ -609,6 +684,13 @@ void PlacePanel() noexcept {
     // A row that is not installed: said so, not made.
     placeStateStub=debugspawn::RowState::missing;tap(VK_RETURN);
     Check(placeCalls==1 && std::wcsstr(game.note,hudtext::Tr(hudtext::Tx::placeMissing)),"a row not installed: said so, not made");
+    // A row not loaded this mission (or loading): placing it goes on to PlaceRow, which queues its load and makes it there
+    // once loaded (debug_spawn.cpp RequestLoad / LoadTick), instead of refusing with 「未预载」.
+    placeStateStub=debugspawn::RowState::notPreloaded;tap(VK_RETURN);
+    Check(placeCalls==2,"a row not loaded yet is still placed: its load is queued");
+    placeStateStub=debugspawn::RowState::loading;tap(VK_RETURN);
+    Check(placeCalls==3,"a row loading takes the newer point");
+    placeCalls=1;
     placeStateStub=debugspawn::RowState::ready;
     tap(VK_BACK);
     Check(!game.place.open,"Backspace shuts it");
@@ -619,7 +701,7 @@ void PlacePanel() noexcept {
     MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
     const int row=RowOf(Category::enemy41,2);
     const float rect[4]={1000,300,1260,324};
-    MapCommandPlaceButtons(rect,&row,1);
+    MapCommandPlaceButtons(rect,&row,1,8);
     game.armedSupport=1;
     in.dx=(1100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(312.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
     const auto left=[&]{inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);};
@@ -627,7 +709,28 @@ void PlacePanel() noexcept {
     left();
     Check(game.place.armed==row && game.place.open && game.place.category==static_cast<int>(Category::enemy41) && game.armedSupport<0 &&
           PlayerMapCommands(&r) && r.placeArmed==row && placeCalls==1,"a row's click arms it, the support disarmed, nothing made yet");
-    MapCommandPlaceButtons(nullptr,nullptr,0);
+    // The wheel over the list scrolls it (map.cpp asks before it zooms); a notch three rows, a fine wheel's parts kept.
+    Check(game.place.window==8,"a page is the rows the HUD drew");
+    const bool wheeled=MapCommandWheel(-WHEEL_DELTA);MapCommandFrame(in,centre);
+    Check(wheeled && game.place.top[game.place.category]==3 && game.place.pick[game.place.category]==3 &&
+          PlayerMapCommands(&r) && r.placeTop==3,"a notch toward the user scrolls the list down three rows, the pick kept in view");
+    Check(MapCommandWheel(WHEEL_DELTA/2) && game.place.top[game.place.category]==3,"half a notch: taken, not scrolled yet");
+    Check(MapCommandWheel(WHEEL_DELTA/2) && game.place.top[game.place.category]==0,"the other half: back up three rows");
+    in.dx=(300.0f-game.pointer.x)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
+    Check(!MapCommandWheel(-WHEEL_DELTA) && game.place.top[game.place.category]==0,"off the list the wheel is the map's zoom");
+    // The legend's title and the PVP title fold by a click (never by the pointer passing over them).
+    const float legend[4]={1000,600,1260,628};
+    MapCommandLegendButton(legend);
+    const bool legendWas=MapLegendOpen();
+    in.dx=(1100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(614.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+    Check(MapLegendOpen()==legendWas,"the pointer over the legend's title does not open it");
+    left();
+    Check(MapLegendOpen()!=legendWas && placeCalls==1,"a click on it does, and places nothing");
+    left();
+    Check(MapLegendOpen()==legendWas,"another click folds it");
+    MapCommandLegendButton(nullptr);
+    in.dx=(1100.0f-game.pointer.x)/(720.0f/1080.0f);in.dy=(312.0f-game.pointer.y)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=in.dy=0.0f;
+    MapCommandPlaceButtons(nullptr,nullptr,0,0);
     in.dx=(500.0f-game.pointer.x)/(720.0f/1080.0f);MapCommandFrame(in,centre);in.dx=0.0f;
     left();left();
     Check(placeCalls==3 && placeRowStub==row && game.place.armed==row && !supportCalls,"armed: each left click on the map places one, still armed");
@@ -849,7 +952,7 @@ void RtsClicks() noexcept {
     game.sel.Clear();RememberSelection(game);right();
     Check(squadOrders==4,"nothing selected: a right click gives no order");
     // A squad seated in a vehicle: no RECRUIT offered, no point order taken; release still is.
-    Game g{};g.count=1;
+    static Game g;g=kNewGame;g.count=1;
     CommandUnit riding{squadObj,"squad",Command{},false,{0,0,0}};riding.riding=true;riding.recruitable=false;
     g.list[0]=Entry{riding,Owner::squad};
     Check(!Takes(g.list[0],Order::recruit) && !Takes(g.list[0],Order::follow) && !Takes(g.list[0],Order::move) &&
@@ -871,7 +974,7 @@ void RtsClicks() noexcept {
     {   // A vehicle carrying a squad that takes orders (List marks it): its DISMOUNT / ALL OUT are that squad's (the crew's squad
         // is not boxed with its vehicle, so the vehicle is where its crew is told off), given once.
         unsigned char hull[0x100]{};
-        Game v{};v.count=2;
+        static Game v;v=kNewGame;v.count=2;
         CommandUnit crewSquad{squadObj,"crew",Command{},false,{0,0,0}};crewSquad.riding=true;crewSquad.vehicle=hull;
         CommandUnit carrier{hull,"tank",Command{},false,{0,0,0}};carrier.carries=true;
         v.list[0]=Entry{crewSquad,Owner::squad};v.list[1]=Entry{carrier,Owner::tank};
@@ -927,11 +1030,11 @@ void RemoteCommandResults() noexcept {
     ResetMapCommands();mapOnline=true;groundReady=true;networkSubmits=0;squadOrders=0;squadOn=true;
     unsigned char remote[0x100]{},remoteCtrl[0x10]{};Put<void*>(squadObj,kSelfCtrl,squadCtrl);Put<void*>(remote,kSelfCtrl,remoteCtrl);
     remoteAuthority=remote;
-    Game mixed{};mixed.count=2;
+    static Game mixed;mixed=kNewGame;mixed.count=2;
     mixed.list[0]={CommandUnit{squadObj,"local",{},false,{}},Owner::squad};
     mixed.list[1]={CommandUnit{remote,"remote",{},false,{}},Owner::squad};
     mixed.sel.Add(squadObj);mixed.sel.Add(remote);int skipped=0;
-    Check(Issue(mixed,Command{Order::guard,{10,2,20}},&skipped)==1 && !skipped && mixed.networkQueued==1,
+    Check(Dispatch(mixed,Command{Order::guard,{10,2,20}},&skipped,{})==1 && !skipped && mixed.networkQueued==1,
         "mixed selection executes only local authority immediately and queues its remote squad");
     Check(networkSubmits==1 && networkUnits==1 && networkSlots[0]==1 && networkTotal==2 &&
           networkCommand.at[0]==10 && networkCommand.at[2]==20 && networkIdentities[0].ctrl==remoteCtrl,
@@ -948,23 +1051,32 @@ void RemoteCommandResults() noexcept {
     Check(mixed.networkRequest==94,"late result cannot replace another pending request");
     networkReply.request=94;networkReply.state=CommandNetworkState::timedOut;CommandNetworkReply(mixed);
     Check(!mixed.networkRequest && std::wcscmp(mixed.note,hudtext::Tr(hudtext::Tx::cmdNpcNetworkTimeout))==0,"timeout ends waiting with a concrete message");
-    unsigned char many[17][0x100]{},controls[17][0x10]{};Game over{};over.count=17;allRemote=true;
+    unsigned char many[17][0x100]{},controls[17][0x10]{};static Game over;over=kNewGame;over.count=17;allRemote=true;
     for(int i=0;i<17;++i){Put<void*>(many[i],kSelfCtrl,controls[i]);over.list[i]={CommandUnit{many[i],"remote",{},false,{}},Owner::squad};over.sel.Add(many[i]);}
-    Check(Issue(over,Command{Order::engage,{}},&skipped)==0 && skipped==17 && networkSubmits==1,
+    Check(Dispatch(over,Command{Order::engage,{}},&skipped,{})==0 && skipped==17 && networkSubmits==1,
         "more than sixteen remote squads are rejected before any partial submission");
     allRemote=false;remoteAuthority=remote;networkSubmits=0;
-    Game remoteVehicle{};remoteVehicle.count=1;remoteVehicle.list[0]={CommandUnit{remote,"vehicle",{},false,{}},Owner::tank};
+    static Game remoteVehicle;remoteVehicle=kNewGame;remoteVehicle.count=1;remoteVehicle.list[0]={CommandUnit{remote,"vehicle",{},false,{}},Owner::tank};
     remoteVehicle.sel.Add(remote);
-    Check(Issue(remoteVehicle,Command{Order::focus,{}},&skipped)==0 && !skipped && remoteVehicle.networkQueued==1 && networkSubmits==1,
+    Check(Dispatch(remoteVehicle,Command{Order::focus,{}},&skipped,{})==0 && !skipped && remoteVehicle.networkQueued==1 && networkSubmits==1,
           "client ground vehicle commands go to the authenticated authority RPC instead of failing locally");
+    // Shift online (B1, command protocol v7): another machine's units get the point as a queued one -- the flag goes with
+    // the request (their authority keeps it after the points they are on their way to), never an immediate move here.
+    networkSubmits=0;networkQueuedFlag=false;
+    static Game queued;queued=kNewGame;queued.count=1;queued.list[0]={CommandUnit{remote,"remote",{},false,{}},Owner::squad};queued.sel.Add(remote);
+    Check(Dispatch(queued,Command{Order::move,{30,0,40}},&skipped,{true})==0 && networkSubmits==1 && networkQueuedFlag &&
+          networkCommand.order==Order::move,"Shift on another machine's squad: requested with the queued flag");
+    networkSubmits=0;networkQueuedFlag=true;
+    Check(Dispatch(queued,Command{Order::move,{30,0,40}},&skipped,{})==0 && networkSubmits==1 && !networkQueuedFlag,
+          "without Shift: requested as a plain order");
     allRemote=false;remoteAuthority=nullptr;mapOnline=false;groundReady=false;squadOn=false;ResetMapCommands();
 }
 void SelectionCapabilityMask() noexcept {
-    Game selection{};selection.count=1;selection.list[0]={CommandUnit{squadObj,"tank",{},false,{}},Owner::tank};selection.sel.Add(squadObj);
+    static Game selection;selection=kNewGame;selection.count=1;selection.list[0]={CommandUnit{squadObj,"tank",{},false,{}},Owner::tank};selection.sel.Add(squadObj);
     const float point[3]{};Publish(selection,true,true,point,true);MapCommandReadout r{};PlayerMapCommands(&r);
     Check(r.allowedOrders==((1u<<static_cast<unsigned>(Order::guard))|(1u<<static_cast<unsigned>(Order::move))|
-                            (1u<<static_cast<unsigned>(Order::attackMove))|1u) && !r.selectedSquads,
-        "tank selection enables only its post's point orders (guard, move, attack-move as its post) and release");
+                            (1u<<static_cast<unsigned>(Order::attackMove))|(1u<<static_cast<unsigned>(Order::hold))|1u) && !r.selectedSquads,
+        "tank selection enables only its post's point orders (guard, move, attack-move, hold as its post) and release");
     selection.list[0].owner=Owner::squad;selection.list[0].u.locked=true;Publish(selection,true,true,point,true);PlayerMapCommands(&r);
     Check(!r.allowedOrders && !r.selectedSquads,"script locked squad exposes no executable buttons");
     // The card shows no order that would only be refused (the user, 2026-10-09: "解散解除交战集火是不是重叠了").
@@ -988,6 +1100,210 @@ void SelectionCapabilityMask() noexcept {
           "map ground-vehicle dispatch forwards the selected focus identity");
     marked=nullptr;
 }
+// The RTS model (the user, 2026-10-19: 「合并分组经常无效，分开也是，感觉你这个分组是不是和rts不太一样」): a plain left
+// drag boxes, Ctrl+N keeps a group that N selects again (twice: the map centres on it), a double click takes the
+// clicked unit's kind, a group follows a squad through its leader's death, Shift + right click queues the moves that
+// go on frame by frame with the map shut, H holds each unit where it stands, the right button on the player follows.
+void RtsGroups() noexcept {
+    ResetMapCommands();view=View{};config=Config{};groundReady=true;
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));
+    squadOn=squad2On=true;squadLocked=squadRiding=false;squadReports=true;squadOrders=squad2Orders=0;squadGot=squad2Got={};
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);Put<void*>(squad2Obj,kSelfCtrl,squad2Ctrl);
+    // A view 100 m across: screen (640 + 6.4 x, 360 - 3.6 (y + 1.2)) for a unit on foot (its mark 1.2 m up).
+    const float p1[3]={-50.0f,0.0f,0.0f},p2[3]={50.0f,0.0f,0.0f};
+    std::memcpy(squadPos,p1,12);std::memcpy(squad2Pos,p2,12);
+    MapCmdInput in{};in.front=true;in.mouse=true;in.eye[1]=100.0f;float centre[3]{};
+    const float vp[16]={0.01f,0,0,0, 0,0.01f,0,0, 0,0,1,0, 0,0,0,1};
+    const float k=1080.0f/720.0f;   // mouse units a pixel of the 720-line view
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    const auto move=[&](float x,float y){in.dx=(x-game.pointer.x)*k;in.dy=(y-game.pointer.y)*k;MapCommandFrame(in,centre);in.dx=in.dy=0.0f;};
+    const auto press=[&](int key){inputstub::keys[key]=true;MapCommandFrame(in,centre);inputstub::keys[key]=false;MapCommandFrame(in,centre);};
+    // A plain left drag over both: a box (no Ctrl), the map not panned meanwhile.
+    move(200.0f,200.0f);
+    inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(in,centre);
+    move(1100.0f,500.0f);
+    Check(MapCommandBoxing(),"a plain left drag over the map is the box, not the pan");
+    inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(in,centre);
+    Check(game.sel.Has(squadObj) && game.sel.Has(squad2Obj),"the box takes both squads without Ctrl");
+    // Ctrl+1 keeps them; a click on empty ground clears; 1 selects both again; 1 twice centres on them.
+    inputstub::keys[VK_CONTROL]=true;press('1');inputstub::keys[VK_CONTROL]=false;
+    Check(game.groupN[0]==2,"Ctrl+1: group 1 is the selection");
+    MapCommandReadout r{};
+    Check(PlayerMapCommands(&r) && r.unit[0].groups==1u && r.unit[1].groups==1u,"each unit's mark carries its group");
+    move(640.0f,650.0f);press(VK_LBUTTON);
+    Check(!game.sel.n,"a click on empty ground clears the selection");
+    game.tap=mapcmd::Tap{};
+    inputstub::keys['1']=true;MapCommandFrame(in,centre);
+    Check(game.sel.Has(squadObj) && game.sel.Has(squad2Obj),"1: group 1 selected");
+    inputstub::keys['1']=false;MapCommandFrame(in,centre);
+    inputstub::keys['1']=true;const bool centred=MapCommandFrame(in,centre);inputstub::keys['1']=false;MapCommandFrame(in,centre);
+    Check(centred && std::fabs(centre[0])<1e-4f,"1 twice: the map centres on group 1");
+    // An empty group says how to fill it and leaves the selection.
+    press('2');
+    Check(game.sel.n==2 && std::wcsstr(game.note,L"2")!=nullptr,"an empty group: the selection kept, the note says so");
+    // Ctrl+Shift+2 adds the selection to group 2, Shift+2 adds group 2 to the selection.
+    game.sel.Clear();game.sel.Add(squadObj);RememberSelection(game);
+    inputstub::keys[VK_CONTROL]=inputstub::keys[VK_SHIFT]=true;press('2');inputstub::keys[VK_CONTROL]=inputstub::keys[VK_SHIFT]=false;
+    game.sel.Clear();game.sel.Add(squad2Obj);RememberSelection(game);
+    inputstub::keys[VK_SHIFT]=true;press('2');inputstub::keys[VK_SHIFT]=false;
+    Check(game.groupN[1]==1 && game.sel.Has(squadObj) && game.sel.Has(squad2Obj),"Ctrl+Shift+N adds to a group, Shift+N adds a group");
+    // A double click on a unit: every unit of its kind on the screen (both are squads).
+    game.sel.Clear();RememberSelection(game);
+    move(320.0f,360.0f);press(VK_LBUTTON);
+    Check(game.sel.n==1 && game.sel.Has(squadObj),"a click: that unit");
+    press(VK_LBUTTON);
+    Check(game.sel.n==2,"clicked again at once: every unit of its kind");
+    // A squad's leader died: the group (and the selection) go on with the squad it handed over to.
+    successorOld=ObjRef::Of(squadObj);successorNew=ObjRef::Of(squad2Obj);
+    game.groupN[2]=1;game.group[2][0]=mapcmd::UnitRef{};game.group[2][0].top={squadObj,squadCtrl};
+    squadOn=false;game.sel.Clear();RememberSelection(game);
+    press('3');
+    Check(game.sel.n==1 && game.sel.Has(squad2Obj) && game.group[2][0].top.obj==squad2Obj,"group 3 follows its squad to its new leader");
+    successorOld=successorNew=ObjRef{};squadOn=true;
+    // B2 (a guest: no hand-over recorded here): the group holds every member's identity when it is set; its top dead,
+    // a member still alive now follows another top (the replicated follow tree): the group goes on under that one.
+    memberTop=squadObj;Put<void*>(memberObj,kSelfCtrl,memberCtrl);
+    game.sel.Clear();game.sel.Add(squadObj);RememberSelection(game);
+    inputstub::keys[VK_CONTROL]=true;press('4');inputstub::keys[VK_CONTROL]=false;
+    Check(game.groupN[3]==1 && game.group[3][0].n==1 && game.group[3][0].member[0].obj==memberObj,"Ctrl+4: the squad kept with its member");
+    memberTop=squad2Obj;squadOn=false;game.sel.Clear();RememberSelection(game);
+    press('4');
+    Check(game.sel.n==1 && game.sel.Has(squad2Obj) && game.group[3][0].top.obj==squad2Obj,
+          "group 4 found again through its living member's top (no hand-over record, as on a guest)");
+    // The member dead too and nothing listed of the squad (its top's address another object's now): dropped from the
+    // group, not kept for ever.
+    static unsigned char otherCtrl[0x10]{};
+    memberTop=nullptr;memberObj[kDead]=1;squad2On=false;Put<void*>(squad2Obj,kSelfCtrl,otherCtrl);
+    press('4');
+    Check(game.groupN[3]==0,"nothing of the squad alive: dropped from its group");
+    Put<void*>(squad2Obj,kSelfCtrl,squad2Ctrl);memberObj[kDead]=0;squadOn=squad2On=true;memberTop=nullptr;
+    // The Shift queue: a move, then Shift + right click twice: queued; the squad there, the next given (the map shut).
+    // (This view has no eye: the point is the ground under the camera's look, set for each click.)
+    const auto look=[&](float x,float z){in.eye[0]=in.look[0]=x;in.eye[2]=in.look[2]=z;in.eye[1]=100.0f;in.look[1]=0.0f;};
+    game.sel.Clear();game.sel.Add(squadObj);RememberSelection(game);
+    look(100.0f,0.0f);move(900.0f,360.0f);press(VK_RBUTTON);
+    const float firstAt=squadGot.at[0];
+    Check(squadOrders==1 && squadGot.order==Order::move,"a right click: the move");
+    inputstub::keys[VK_SHIFT]=true;
+    look(200.0f,50.0f);move(1000.0f,200.0f);press(VK_RBUTTON);
+    look(300.0f,100.0f);move(1250.0f,200.0f);press(VK_RBUTTON);
+    look(0.0f,0.0f);
+    inputstub::keys[VK_SHIFT]=false;
+    Check(squadOrders==1 && PlayerMapCommands(&r) && r.unit[0].ways==2,"Shift + right click: two points queued after the move, none given yet");
+    SuspendMapCommands();
+    ++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==1,"not there yet: the queue waits");
+    squadPos[0]=firstAt;squadPos[2]=squadGot.at[2];
+    ++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==2 && squadGot.order==Order::move && squadGot.at[0]==200.0f && squadGot.at[2]==50.0f,"there: the next point given, the map shut");
+    MapCommandQueueTick();
+    Check(squadOrders==2,"once a frame");
+    // Another order without Shift drops what was queued (the map open again: its view drawn).
+    MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+    press('X');
+    squadPos[0]=squadGot.at[0];squadPos[2]=squadGot.at[2];
+    ++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==3 && squadGot.order==Order::none,"X: stopped, its queue gone (no point given after it)");
+    // H: each unit guards its own spot.
+    std::memcpy(squadPos,p1,12);
+    game.sel.Clear();game.sel.Add(squadObj);RememberSelection(game);
+    press('H');
+    Check(squadOrders==4 && squadGot.order==Order::hold && squadGot.at[0]==p1[0] && squadGot.at[2]==p1[2],"H: HOLD where it stands");
+    // The right button on the player's own mark: FOLLOW.
+    static unsigned char me[0x400]{},meCtrl[0x10]{};
+    Put<void*>(me,kSelfCtrl,meCtrl);const float mine[3]={0.0f,0.0f,0.0f};std::memcpy(me+kPosition,mine,12);
+    in.requester=ObjRef::Of(me);
+    move(640.0f,360.0f);press(VK_RBUTTON);
+    Check(squadOrders==5 && squadGot.order==Order::follow,"the right button on the player: FOLLOW");
+    in.requester=ObjRef{};
+    // Ctrl+A: every unit.
+    game.sel.Clear();RememberSelection(game);
+    inputstub::keys[VK_CONTROL]=true;press('A');inputstub::keys[VK_CONTROL]=false;
+    Check(game.sel.n==2,"Ctrl+A: every unit");
+    std::memset(inputstub::keys,0,sizeof(inputstub::keys));
+    squadOn=squad2On=squadReports=false;groundReady=false;std::memset(squadPos,0,12);std::memset(squad2Pos,0,12);ResetMapCommands();
+}
+// B1 / B3: a client's Shift reaches the host as a queued point (command protocol v7, command_net.cpp Execute ->
+// MapCommandAuthority): the host keeps it after the point its unit is on its way to, and the scene's tick gives it once
+// the unit is there -- with no map open anywhere. A plain order through the same entry drops the queue; a queued point
+// for a unit not listed is refused, never given at once.
+NpcCommandResult NetGive(const ObjRef& unit,const mapcmd::Command& c,const ObjRef& requester,const ObjRef& focus) noexcept {
+    return NpcSquadCommandForRequester(unit,c,requester,focus);
+}
+void AuthorityQueue() noexcept {
+    ResetMapCommands();view=View{};config=Config{};groundReady=true;
+    squadOn=true;squad2On=false;squadLocked=squadRiding=false;squadReports=true;squadOrders=0;
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);
+    squadGot=Command{Order::move,{100.0f,0.0f,0.0f}};std::memset(squadPos,0,12);
+    const ObjRef unit=ObjRef::Of(squadObj);
+    auto r=MapCommandAuthority(unit,Command{Order::move,{300.0f,0.0f,0.0f}},ObjRef{},ObjRef{},true,&NetGive);
+    Check(r.Accepted() && squadOrders==0,"a network Shift: kept by the authority, nothing given yet");
+    r=MapCommandAuthority(unit,Command{Order::attackMove,{500.0f,0.0f,0.0f}},ObjRef{},ObjRef{},true,&NetGive);
+    Check(r.Accepted() && squadOrders==0,"a second one after it");
+    // The host shares the queue for the clients' maps (Kind::ways), from the scene's tick.
+    waysSyncs=waysShared=0;++stubFrame;MapCommandQueueTick();
+    Check(waysSyncs==1 && waysShared==1 && waysLast.obj==squadObj && waysLast.n==2 && waysLast.at[0][0]==300.0f &&
+          waysLast.at[1][0]==500.0f,"the tick shares the unit's two queued points");
+    Check(waysLast.current.order==Order::move && waysLast.current.at[0]==100.0f,
+          "...and the order it carries out now, its point first (the client's line has no gap)");
+    ++stubFrame;MapCommandQueueTick();
+    Check(waysSyncs==2,"once a frame");
+    ++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==0,"on its way: the tick waits");
+    squadPos[0]=100.0f;
+    ++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==1 && squadGot.order==Order::move && squadGot.at[0]==300.0f,"there: the scene's tick gives the next (no map open)");
+    squadPos[0]=300.0f;
+    ++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==2 && squadGot.order==Order::attackMove && squadGot.at[0]==500.0f,"and the one after it");
+    squadPos[0]=500.0f;
+    ++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==2,"the last reached: nothing more");
+    Check(!waysShared,"none queued any more: nothing shared (the clients' maps cleared)");
+    // A queue, then a plain order through the same entry: the queue gone (no point given after it).
+    squadGot=Command{Order::move,{100.0f,0.0f,0.0f}};squadPos[0]=0.0f;
+    MapCommandAuthority(unit,Command{Order::move,{300.0f,0.0f,0.0f}},ObjRef{},ObjRef{},true,&NetGive);
+    r=MapCommandAuthority(unit,Command{Order::none,{0.0f,0.0f,0.0f}},ObjRef{},ObjRef{},false,&NetGive);
+    Check(r.Accepted() && squadOrders==3 && squadGot.order==Order::none,"a plain order: given");
+    squadPos[0]=100.0f;++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==3,"...and the queue it replaced is gone");
+    // The unit out of the list a while (its soldiers out of this machine's update): its queue kept, given once back.
+    squadGot=Command{Order::move,{100.0f,0.0f,0.0f}};squadPos[0]=0.0f;
+    MapCommandAuthority(unit,Command{Order::move,{300.0f,0.0f,0.0f}},ObjRef{},ObjRef{},true,&NetGive);
+    squadOn=false;++stubFrame;MapCommandQueueTick();squadPos[0]=100.0f;++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==3,"out of the list: nothing given meanwhile");
+    squadOn=true;++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==4 && squadGot.at[0]==300.0f,"back in the list: its queue goes on (not dropped when it left it)");
+    // A queued point for a unit this machine does not list: refused, not given at once.
+    static unsigned char stranger[0x400]{},strangerCtrl[0x10]{};Put<void*>(stranger,kSelfCtrl,strangerCtrl);
+    r=MapCommandAuthority(ObjRef::Of(stranger),Command{Order::move,{1.0f,0.0f,1.0f}},ObjRef{},ObjRef{},true,&NetGive);
+    Check(!r.Accepted() && r.reason==NpcCommandReason::stale && squadOrders==4,"a queued point for a unit not listed: refused (stale)");
+    // A client's map: another machine's squad (no queue here) is drawn with the points its host published.
+    {
+        ResetMapCommands();mapOnline=true;remoteAuthority=squadObj;squadGot=Command{};
+        hostWaysUnit=squadObj;hostWaysN=2;hostWaysAt[0][0]=10.0f;hostWaysAt[1][0]=20.0f;hostWaysAt[1][2]=5.0f;
+        hostWaysNow=Command{Order::attackMove,{4.0f,0.0f,3.0f}};
+        MapCmdInput in{};in.front=true;float centre[3]{};
+        const float vp[16]={0.01f,0,0,0, 0,0.01f,0,0, 0,0,1,0, 0,0,0,1};
+        MapCommandView(vp,1280,720);MapCommandFrame(in,centre);
+        MapCommandReadout drawn{};
+        Check(PlayerMapCommands(&drawn) && drawn.count>=1 && drawn.unit[0].ways==2 && drawn.unit[0].way[0][0]==10.0f &&
+              drawn.unit[0].way[1][2]==5.0f,"a client's map draws the host's queue of the host's squad");
+        Check(drawn.unit[0].now.order==Order::attackMove && drawn.unit[0].now.at[0]==4.0f && drawn.unit[0].now.at[2]==3.0f,
+              "...from the unit through its current point (the host's order now), then the queued ones");
+        hostWaysN=0;MapCommandFrame(in,centre);PlayerMapCommands(&drawn);
+        Check(drawn.unit[0].ways==0,"its queue cleared on the host: nothing drawn");
+        hostWaysUnit=nullptr;mapOnline=false;remoteAuthority=nullptr;SuspendMapCommands();
+    }
+    // B4: a new mission drops every queue (ResetMapCommands from map.cpp ResetMap at MissionStart).
+    squadGot=Command{Order::move,{100.0f,0.0f,0.0f}};squadPos[0]=0.0f;
+    MapCommandAuthority(unit,Command{Order::move,{300.0f,0.0f,0.0f}},ObjRef{},ObjRef{},true,&NetGive);
+    game.groupN[0]=1;game.group[0][0].top={squadObj,squadCtrl};
+    ResetMapCommands();
+    squadPos[0]=100.0f;++stubFrame;MapCommandQueueTick();
+    Check(squadOrders==4 && !game.groupN[0],"a new mission: its queues and groups gone");
+    squadOn=squadReports=false;groundReady=false;std::memset(squadPos,0,12);ResetMapCommands();
+}
 }  // namespace
 }  // namespace crew
 int main() {
@@ -997,6 +1313,7 @@ int main() {
     crew::SupportInput();
     crew::UiCaptureAndSnapshots();crew::RtsClicks();crew::PickOnlyCommandable();crew::FormationMenu();
     crew::RemoteCommandResults();crew::SelectionCapabilityMask();crew::PlacePanel();crew::PvpUiActions();
+    crew::RtsGroups();crew::AuthorityQueue();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

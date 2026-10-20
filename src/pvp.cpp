@@ -1,3 +1,4 @@
+#include "coop_attr.h"
 #include "pvp.h"
 #include "pvp_native.h"
 #include "coop_member_attribute_api.h"
@@ -84,18 +85,10 @@ void PublishView() noexcept {
 void AdvertiseChecked() noexcept {
     // Capability/preselection only. Lobby attributes can arrive seconds apart;
     // they never change gameplay teams. All runtime changes use Prepare/Apply ACKs.
-    static HMODULE module=nullptr;
-    static const EDF6CoopMemberAttributeApi* api=nullptr;
-    static bool published=false;
-    const HMODULE current=GetModuleHandleW(L"EDF6Coop.dll");
-    if(current!=module){module=current;api=nullptr;published=false;}
-    if(!current)return;
-    if(!api) {
-        const auto get=reinterpret_cast<EDF6CoopGetMemberAttributeApiFn>(GetProcAddress(current,"EDF6CoopGetMemberAttributeApi"));
-        api=get ? get(EDF6COOP_MEMBER_ATTRIBUTE_VERSION) : nullptr;
-        if(!api || !EDF6COOP_MA_HAS(api,publish) || !api->publish){api=nullptr;return;}
-    }
-    if(!published)published=api->publish("EDF6X_PVP","2")!=0;
+    static coopattr::Publisher publisher{"EDF6X_PVP"};   // coop_attr.h: published once, again after EDF6Coop changes
+    const coopattr::Table* t=coopattr::Api();
+    if(!t){publisher.Forget();return;}
+    publisher.Publish(t,"2");
 }
 void Advertise() noexcept {
     AcquireSRWLockExclusive(&advertiseLock);AdvertiseChecked();ReleaseSRWLockExclusive(&advertiseLock);

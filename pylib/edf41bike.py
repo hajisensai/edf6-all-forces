@@ -26,6 +26,15 @@ import sgo
 ROOTS = ('VEHICLE408_MOTORBIKE.SGO',)
 MARKER = 'edf41_motorbike'
 WEAPONS = {'v_408motorbike_gun.sgo': ['edf41_v_408motorbike_gun']}
+CAR_TEMPLATE = 'OBJECT/V512_KEITRUCK.SGO'
+# vehicle_setup[1] of the Car chassis, as the object carries it (CAR_TEMPLATE's own; build checks it) and as every
+# call must hand it to the vehicle. Vehicle_Car's setup slot 46 (EDF+0x65A910) reads exactly seven numbers from it:
+# [0] (or [0][0..4] when a list) scales car_base_brake_and_friction (0x66EEC0 / 0x66EF20), [1] / [2] scale the engine
+# gear table (0x66E1A0), [3] / [4] are the steering rates (0x66B730 -> +0x1B44 / +0x1B40), [5] / [6] the traction
+# curve (0x66EE60 -> +0x17F4..+0x17FC); a missing index reads as 0. 4.1's VehicleBike block is another class's
+# (four numbers, [2.0, 0.9, 30, 100] in the first request): given to the Car the gear table was scaled by 0.9 / 30
+# instead of 30 / 0.0075, the steering rates became 100 / 0 and the traction factors 0 (2026-10-19 static review).
+CAR_DRIVE = [0.8, 30.0, 0.0075, 0.7, 0.075, 0.3, 0.6]
 POSE_STATE = 'vehicle_striker_rear'  # all four native classes have this visible seated pose
 RIDER_CLASSES = (('ARMYSOLDIER', 'EDF6ARMYSOLDIER', 'P505_RANGER'),
                  ('ENGINEER', 'EDF6ENGINEER', 'P508_AIRRADER'),
@@ -219,10 +228,12 @@ def build(games, root: str) -> dict[str, bytes]:
     source = sgo.read(legacy_sgo.convert(games.read4('OBJECT/' + root)))[1]
     if source['xgs_scene_object_class'] != 'VehicleBike':
         raise ValueError('408 source has another runtime class')
-    version, members = sgo.read(games.read6('OBJECT/V512_KEITRUCK.SGO'))
+    version, members = sgo.read(games.read6(CAR_TEMPLATE))
     members = copy.deepcopy(members)
     if members['xgs_scene_object_class'] != 'Vehicle_Car' or members['car_aim_node']:
         raise ValueError('408 template must be the native car with an empty aim')
+    if [round(float(x), 6) for x in sgo.plain(members['vehicle_setup'][1])] != CAR_DRIVE:
+        raise ValueError('408 Car drive block differs from CAR_DRIVE, which the requests carry')
     am = source['animation_model']
     entry = copy.deepcopy(am[0][0])
     archive_rel = rel(entry[0])

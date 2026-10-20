@@ -253,7 +253,8 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
 - 刚体包装（Vehicle `kBody` 指向的对象）：`+0x60` 它自己的 props 副本（0x70 字节），`+0xF0` bodyId（u32），
   `+0xF6` propsId（u16），`+0x100` 世界包装，世界包装 `+0x58` = hknpWorld。
   jet.cpp 的 SetLinearVelocity 签名字节就是这条链：`mov rax,[rcx+100h]; mov edx,[rcx+F0h]; mov r10,[rax+58h]; lea rcx,[r10+18h]`。
-- hknpWorld `+0x18` 是写接口，vtable 槽 32 = `image+0xE50720`：`setBodyMotionProperties(iface, u32 bodyId, u16 propsId)`。
+- hknpWorld `+0x18` 是写接口，vtable 是 `0x18BC740`（构造 `0xDA3140`：`[X]=0x18BC720`、`[X+0x18]=0x18BC740`），**槽 28**（`+0xE0`）= `image+0xE50720`：`setBodyMotionProperties(iface, u32 bodyId, u16 propsId)`（函数里 `[iface+0x910]` 即 world+0x928 的属性库）。
+  - 2026-10-20 更正：原先写的「槽 32」是错的（槽 32 是 `0xE4FBF0`），`jetprops.cpp` 的运行时门因此从未成立，此前喷气机实际一直被 200 m/s 上限卡着。
 - hknpWorld `+0x928` 是运动属性库：`+0x40` entries，`+0x48` count，每项 0x70 字节。
 - `image+0xE15190` = `add(library, u16* outId, const props*)`：库满时 outId 写 0xFFFF；可能重新分配 entries（调用后必须重读）。
   props `+0` 必须为 0 它才会复用相等的已有项（去重）。

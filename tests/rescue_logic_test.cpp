@@ -85,7 +85,8 @@ void Versions() {
     const std::uint32_t rescueBit=FeatureExt(kExtSeaRescue|kExtRescueChannel);
     // ... and the EDF4.1 outfit, the EDF5 / EDF4.1 missions' players 5.. and the support soldiers' backpacks (2026-10-18)
     // after them: #100's build lacks them as well.
-    const std::uint32_t laterBits=rescueBit|FeatureExt(kExtOutfit41|kExtBvmPlayers|kExtBackpack);
+    const std::uint32_t laterBits=rescueBit|FeatureExt(kExtOutfit41|kExtBvmPlayers|kExtBackpack|crew::support_net::kExtPeerRoster|
+        crew::support_net::kExtGravity|crew::support_net::kExtFloatGun|crew::support_net::kExtUltimate);
     State s;s.online=true;s.mine=kFeatures;s.silentHost=Features(kCapabilities,kExtVariants);
     Check(Compare(s).kind==Kind::none,"a guest before the welcome: nothing said");
     s.hostKnown=true;s.hostCaps=kFeatures;

@@ -37,6 +37,7 @@
 // then holds the gun), for every seat it holds, the player's or not; a gun it holds is steered from where it holds it
 // (Steer: stab.cpp StabHeld). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "seat_switch_logic.h"
 #include "vehicle_look.h"
 #include "firstperson.h"
 #include "heli.h"
@@ -322,7 +323,9 @@ bool LeadCircleOn() noexcept {
 bool FreeHeld(const unsigned char* seat) noexcept {
     const Config& c=Cfg();
     if(At<unsigned char>(seat,kSeatPad)==0)return KeyHeld(c.freeLookKey);
-    return c.freeLookButton>0 && (At<std::uint16_t>(seat,kSeatButtons)&static_cast<std::uint16_t>(c.freeLookButton))!=0;
+    const std::uint16_t buttons=At<std::uint16_t>(seat,kSeatButtons);
+    return c.freeLookButton>0 && (buttons&static_cast<std::uint16_t>(c.freeLookButton))!=0 &&
+        !seatsw::ChordOwns(buttons,static_cast<unsigned>(c.thermalButton),static_cast<unsigned>(c.freeLookButton));   // the thermal chord's
 }
 
 void Publish(const TurretCamReadout& r) noexcept {

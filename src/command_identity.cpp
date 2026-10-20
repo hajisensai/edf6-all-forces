@@ -63,7 +63,15 @@ struct MarkVisitor {
     const unsigned char* target;
     unsigned expected=0;
     MarkIdentities out{};
+    bool deadTarget=false;   // the target may be dead (not deleted)
 };
+// Not deleted, its own weak reference live (dead or alive).
+bool Present(const unsigned char* object,ObjRef* ref) noexcept {
+    if(!Readable(object,kDead+1) || (object[0x18]&4))return false;
+    const auto ctrl=At<const unsigned char*>(object,kSelfCtrl);
+    if(!Readable(ctrl,16) || At<LONG>(ctrl,8)<=0 || At<const void*>(object,kSelf)!=object)return false;
+    *ref=ObjRef{object,ctrl};return true;
+}
 void __fastcall VisitMark(MarkVisitor* v,const unsigned char* object) noexcept {
     if(!object)return;
     __try {
@@ -72,7 +80,7 @@ void __fastcall VisitMark(MarkVisitor* v,const unsigned char* object) noexcept {
         ObjRef ref{};
         if(v->marker && !std::memcmp(id,v->marker,32) && Live(object,&ref) && Requester(object,v->expected,&v->out.puid,&v->out.slot))
             v->out.player=ref;
-        else if(v->target && !std::memcmp(id,v->target,32) && Live(object,&ref))v->out.target=ref;
+        else if(v->target && !std::memcmp(id,v->target,32) && (v->deadTarget ? Present(object,&ref) : Live(object,&ref)))v->out.target=ref;
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 const void* const kMarkVisitorVtable[]={reinterpret_cast<const void*>(&Ignore),reinterpret_cast<const void*>(&VisitMark)};
@@ -119,12 +127,14 @@ bool ResolveCommandIdentities(const unsigned char requester[32],const unsigned c
         *out=result;return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char target[32],MarkIdentities* out) noexcept {
+namespace {
+bool ResolveMarks(const unsigned char marker[32],const unsigned char target[32],bool deadTarget,MarkIdentities* out) noexcept {
     using namespace command_identity;
     if(!out)return false;
     *out=MarkIdentities{};
     __try {
         MarkVisitor visitor{kMarkVisitorVtable,Canonical(marker) ? marker : nullptr,Canonical(target) ? target : nullptr};
+        visitor.deadTarget=deadTarget;
         if(!visitor.marker && !visitor.target)return false;
         if(!Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)))return false;
         void* mgr=At<void*>(image,kTeamManager);
@@ -136,5 +146,12 @@ bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char ta
         *out=visitor.out;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){*out=MarkIdentities{};return false;}
+}
+}  // namespace
+bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char target[32],MarkIdentities* out) noexcept {
+    return ResolveMarks(marker,target,false,out);
+}
+bool ResolveGrabIdentities(const unsigned char grabber[32],const unsigned char target[32],MarkIdentities* out) noexcept {
+    return ResolveMarks(grabber,target,true,out);
 }
 }

@@ -1,0 +1,4 @@
+AH-64E Apache "Guardian" by Jeyhun1985, CC BY 4.0
+Source: https://sketchfab.com/3d-models/ah-64e-apache-guardian-9eb641f9179d413e87367ebd9b96347a (via Sketchfab)
+Licence: CC BY 4.0, http://creativecommons.org/licenses/by/4.0/
+Changes: cut down to an AH-64E's front (copilot / gunner) station (crew figures, glass and everything the seated eye cannot see left out), turned, scaled to metres and re-exported with its base colour textures resized to at most 1024 px (tools/prep_cockpit_air.py); the EDF6 plugin's cockpit builder (pylib/cockpit_kits_air.py) scales it to the vehicle and places it there.

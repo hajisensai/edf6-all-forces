@@ -122,6 +122,21 @@ EDF41_ADDED: dict[str, list[float]] = {'AmmoDamageReduce': [1.0, 1.0], 'ExtPrams
 # EDF4.1's fields EDF6 has no use for: 'name' (one list [ja, en, ja]; EDF6 has name.<lang>) and 'Range' (AmmoSpeed x
 # AmmoAlive in every 4.1 weapon, which is how EDF5 and EDF6 get a weapon's range).
 EDF41_DROPPED = ('name', 'Range')
+# ReloadType: EDF4.1 has two (every 4.1 weapon SGO: 0 or 1), EDF6 four, and 4.1's 1 is not EDF6's 1. EDF6 reads it
+# at EDF+0x693E8D (weapon +0x208): 0 / 3 reload the magazine by hand, 1 (cmp eax, edi=1 at 0x693EA4) counts
+# +0xE68 down every frame (its texts: 「[自動]$0秒」, hand grenades, drones, the Whale's 105 mm), 2 takes the score
+# gained since the last frame off it (0x693EAC..0x693F18; its texts: 「$0pt」, every vehicle request, bomber,
+# Tempest). 4.1's 1 is the credit reload: all 150 of its Air Raider calls, each one's text 「リロード 900pt」 etc.
+# Copied as it is, a 4.1 vehicle request recharged by itself on a timer (2026-10-19 user: 「会自动装填」).
+RELOAD_TYPE41: dict[int, int] = {0: 0, 1: 2}
+
+
+def reload_type41(value: object) -> int:
+    """EDF6's ReloadType for EDF4.1's `value` (RELOAD_TYPE41); Unsupported for one 4.1 never wrote."""
+    number = value.value if isinstance(value, sgo.Float) else value
+    if isinstance(number, bool) or not isinstance(number, (int, float)) or number not in RELOAD_TYPE41:
+        raise Unsupported(f'EDF4.1 ReloadType {value!r} has no EDF6 meaning')
+    return RELOAD_TYPE41[int(number)]
 
 
 def weapon41(members: dict[str, object], names: dict[str, str]) -> dsgo.Document:
@@ -131,6 +146,8 @@ def weapon41(members: dict[str, object], names: dict[str, str]) -> dsgo.Document
     into [-1, -1]; a Wing Diver weapon's 4.1 number is EDF5's curve base and value, Rapier 25 / [[25, ...], 25]; a
     plain number where a curve goes is a curve that does not grow, as EDF6's own plain AmmoCount etc.)."""
     members = dict(members)
+    if 'ReloadType' in members:
+        members['ReloadType'] = reload_type41(members['ReloadType'])
     energy = members.get('EnergyChargeRequire')
     if isinstance(energy, (int, float, sgo.Float)) and not isinstance(energy, bool):
         members['EnergyChargeRequire'] = [energy, energy]

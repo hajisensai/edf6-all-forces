@@ -11,6 +11,7 @@
 //    is wrecked, HighCam or the plugin is switched off in the ini, and on a new mission.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "seat_switch_logic.h"
 #include "layout.h"
 #include "memory.h"
 #include "edf/weapon.h"
@@ -88,7 +89,10 @@ void Off(const char* why) noexcept {
 // The key or button pressed this frame (its edge).
 bool Pressed(const unsigned char* seat,bool keys) noexcept {
     const Config& c=Cfg();
-    const bool down=keys ? KeyHeld(c.highCamKey) : (At<std::uint16_t>(seat,kSeatButtons)&static_cast<std::uint16_t>(c.highCamButton))!=0;
+    // A pad's button gives way while the thermal chord it is part of is held (seat_switch_logic.h ChordOwns).
+    const std::uint16_t buttons=At<std::uint16_t>(seat,kSeatButtons);
+    const bool down=keys ? KeyHeld(c.highCamKey) : (buttons&static_cast<std::uint16_t>(c.highCamButton))!=0 &&
+        !seatsw::ChordOwns(buttons,static_cast<unsigned>(c.thermalButton),static_cast<unsigned>(c.highCamButton));
     const bool press=down && !cam.held;
     cam.held=down;
     return press;

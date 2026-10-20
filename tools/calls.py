@@ -30,7 +30,8 @@ class Call:
     reload: float        # ReloadTime[0], the base of the star curve (a thrown one's: frames, 60 a second)
     level: float         # WEAPONTABLE column 4, same units as docs/weapons.csv level_raw
     brings: str          # 'jets' / 'helis' (the support deployment), 'sub' (SubLaunch), 'vehicle' (a vehicle request),
-                         # 'throw' (a Robot Bomb whose bomb releases a drone where it lands: JetLaunchThrown)
+                         # 'throw' (a Robot Bomb whose bomb releases a drone where it lands: JetLaunchThrown),
+                         # 'ultimate' (a satellite call whose fire becomes the plugin's show: src/ultimate.cpp)
     log: str = ''        # its name in the plugin's log
     fuel_sec: int = 0    # the plugin's fuel limit for what it brings (0: none)
     role: str = ''       # brings 'jets': the JetRole (src/crew.h)
@@ -54,6 +55,9 @@ class Call:
     # whose rounds put the player into the vehicle they hit (src/boarding.cpp);
     # `mark` is then its bullets' tag (call_weapons.gun_sgo), `reload` 0 (the template's own).
     gun: str = ''
+    # ...or (brings 'gravity') the gravity gun (src/gravitygun.cpp on src/gravity.h): this stock weapon row (its SGO, row and
+    # texts) under its own name, `mark` its AmmoHitSizeAdjust (throw_mark: the plugin tells it by the float's bits).
+    weapon: str = ''
 
     @property
     def flown(self) -> bool:
@@ -175,6 +179,14 @@ CALLS: tuple[Call, ...] = (
     # Appended 2026-10-18: authored M163 / BMPT models, native tracked vehicle contracts.
     Call('EDF6VC_CALL_VULCAN', 0, 'vulcan', False, 0, 6500, 1.0, 'vehicle', vehicle='EDF6VC_VULCAN', ground='vulcan'),
     Call('EDF6VC_CALL_BMPT', 0, 'bmpt', False, 0, 7500, 1.2, 'vehicle', vehicle='EDF6VC_BMPT', ground='bmpt'),
+    # Appended 2026-10-19: the ultimate strike (src/ultimate.cpp, docs/plan-2026-10-19-ultimate.md; the user: 「特效拉满
+    # 昏天暗地」「清一片区域的终极技能 pt要求很高」): a stock satellite call (call_weapons.ULTIMATE_TEMPLATE: the laser
+    # marker, its countdown and voice) whose fire the plugin turns into its show. 15000 pt: the stock satellites ask 2400-5400.
+    Call('EDF6VC_CALL_ULTIMATE', 7501, 'ultimate', False, 0, 15000, 2.4, 'ultimate', 'ultimate strike'),
+    # Appended 2026-10-20 (the user: 「看看这里面的重力枪，咱们也做一个……根据速度和质量造成伤害」): the gravity gun, the Air Raider's
+    # Laser Guide Kit (eLockonMarkerL01: its beam held while the trigger is, no round of its own) that grabs, carries and
+    # throws what its beam is on (src/gravitygun.cpp, src/gravity.h).
+    Call('EDF6VC_CALL_GRAVITY_GUN', throw_mark(0xE01), 'gravity_gun', False, 0, 0, 0.5, 'gravity', weapon='eLockonMarkerL01'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -199,6 +211,8 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'all-class boarding rifles (2026-10-08)': IDS[:43],
     'civilian sedan (2026-10-16)': IDS[:44],
     'M163 Vulcan and BMPT (2026-10-19)': IDS[:46],
+    'ultimate strike (2026-10-19)': IDS[:47],
+    'gravity gun (2026-10-20)': IDS[:48],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -224,6 +238,26 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'gravity_gun': {
+        'SC': ('重力枪', '按住扳机：光束照到的东西被抓起，悬在准星前方随视线移动——敌人、尸体、车辆、集装箱、碎片都行（60 吨以内；'
+                      '越重拖得越慢，太重的抓不动）。松开扳机：把它朝准星方向甩出去，越轻飞得越快，越重飞得越慢但更有力。'
+                      '被甩出的东西撞到地面、墙壁或敌人时，按自身质量和撞击速度造成伤害（½·质量·速度²），被抓的敌人自己摔下也受伤；'
+                      '飞过敌人身边会撞伤它。只伤敌人，不伤友军。射程 150 米。'),
+        'CN': ('重力槍', '按住扳機：光束照到的東西被抓起，懸在準星前方隨視線移動——敵人、屍體、車輛、貨櫃、碎片都行（60 噸以內；'
+                      '越重拖得越慢，太重的抓不動）。放開扳機：把它朝準星方向甩出去，越輕飛得越快，越重飛得越慢但更有力。'
+                      '被甩出的東西撞到地面、牆壁或敵人時，按自身質量和撞擊速度造成傷害（½·質量·速度²），被抓的敵人自己摔下也受傷；'
+                      '飛過敵人身邊會撞傷它。只傷敵人，不傷友軍。射程 150 公尺。'),
+        'JA': ('グラビティガン', '引き金を引き続けると、ビームが当たったもの（敵・死体・ビークル・コンテナ・破片。60 t まで、重いほどゆっくり、'
+                            'それ以上は動かない）をつかみ、照準の先に浮かべて視線に合わせて動かす。離すと照準の方向へ投げる。軽いほど速く、'
+                            '重いほど遅いが強い。投げたものが地面・壁・敵にぶつかると、その質量と衝突速度に応じたダメージ（½·質量·速度²）を与え、'
+                            'つかまれた敵は自分が叩きつけられてもダメージを受ける。そばを通過した敵にも当たる。味方には当たらない。射程 150 m。'),
+        'EN': ('Gravity Gun', 'Hold the trigger: what the beam is on is picked up and held in front of the sight, following your '
+                              'aim (enemies, corpses, vehicles, containers, debris; up to 60 t, the heavier the slower, heavier '
+                              'than that does not move). Release: it is thrown where the sight points, the lighter the faster, '
+                              'the heavier the slower but harder. What is thrown deals damage by its own mass and impact speed '
+                              '(1/2 mass speed^2) when it hits the ground, a wall or an enemy (a thrown enemy is hurt by its own '
+                              'fall too), and hits the enemies it flies past. Enemies only, never friends. Range 150 m.'),
+    },
     'vulcan': {
         'SC': ('M163 火神防空车', '请求一辆 M163 火神防空车：M113 底盘和六管 20mm M61 机炮。高爆与穿甲弹在载具挂载菜单或 R / 手柄 LB 间切换，一次只发射选中的弹种。外观为按真实构型自建模型。'),
         'CN': ('M163 火神防空車', '請求一輛 M163 火神防空車：M113 底盤和六管 20mm M61 機砲。高爆與穿甲彈在載具掛載選單或 R / 手把 LB 間切換，一次只發射選中的彈種。外觀為按真實構型自建模型。'),
@@ -231,10 +265,10 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('M163 Vulcan', 'Requests an M163 with an M113 hull and six-barrel 20 mm M61 cannon. Select HE or AP in the payload menu or with R / LB; only the selected belt fires. Authored model based on the real vehicle layout.'),
     },
     'bmpt': {
-        'SC': ('BMPT 坦克支援车', '请求一辆 BMPT：双 30mm 机炮与四发反坦克导弹。载具挂载菜单或 R / 手柄 LB 在双机炮和导弹之间切换；导弹需要锁定。外观为按真实构型自建模型。'),
-        'CN': ('BMPT 戰車支援車', '請求一輛 BMPT：雙 30mm 機砲與四發反戰車飛彈。載具掛載選單或 R / 手把 LB 在雙機砲和飛彈之間切換；飛彈需要鎖定。外觀為按真實構型自建模型。'),
-        'JA': ('BMPT 戦車支援戦闘車', '30mm 連装機関砲と対戦車ミサイル 4 発を搭載した BMPT を要請する。搭載メニューまたは R / LB で機関砲とミサイルを切り替える。実車の構成に基づく独自モデル。'),
-        'EN': ('BMPT Tank Support Vehicle', 'Requests a BMPT with twin 30 mm autocannons and four anti-tank missiles. Switch between paired cannon and missiles in the payload menu or with R / LB. Missiles require lock-on. Authored model based on the real vehicle layout.'),
+        'SC': ('BMPT 坦克支援车', '请求一辆 BMPT：双 30mm 双路供弹机炮（高爆 / APDS 穿甲弹链）与 9M120 阿塔卡导弹（串联破甲 / 9M120F 温压）。载具挂载菜单或 R / 手柄 LB 切换弹链与导弹；导弹需要锁定。外观为按真实构型自建模型。'),
+        'CN': ('BMPT 戰車支援車', '請求一輛 BMPT：雙 30mm 雙路供彈機砲（高爆 / APDS 穿甲彈鏈）與 9M120 阿塔卡飛彈（串聯破甲 / 9M120F 溫壓）。載具掛載選單或 R / 手把 LB 切換彈鏈與飛彈；飛彈需要鎖定。外觀為按真實構型自建模型。'),
+        'JA': ('BMPT 戦車支援戦闘車', '30mm 連装機関砲（二系統給弾：榴弾 / APDS）と 9M120 アターカ（タンデム HEAT / 9M120F サーモバリック）を搭載した BMPT を要請する。搭載メニューまたは R / LB で弾帯とミサイルを切り替える。実車の構成に基づく独自モデル。'),
+        'EN': ('BMPT Tank Support Vehicle', 'Requests a BMPT with twin dual-feed 30 mm autocannons (HE or APDS belt) and 9M120 Ataka missiles (tandem HEAT or 9M120F thermobaric). Switch belts and missiles in the payload menu or with R / LB. Missiles require lock-on. Authored model based on the real vehicle layout.'),
     },
     'sedan': {
         'SC': ('民用轿车', '请求一辆没有武器的民用轿车，单驾驶席。按通常的上车键驾驶，V 切换第一人称，按住鼠标中键或手柄 L3 转动视角自由观察。'),
@@ -572,6 +606,22 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Medic Helis', 'Calls medic helicopters whose door guns fire healing rounds: a friend they hit gets health '
                               'back. Their gunners aim at hurt friends (you included) on their own and never at enemies.'),
     },
+    'ultimate': {
+        'SC': ('天罚', '终极支援：用激光指示一点，倒计时后天色骤暗、雾气压近，标记点上空展开魔法阵，数道光束从高空会聚；'
+                  '随后半径 220 米内雷暴连劈约 6 秒，最后一道巨型光柱贯下，爆炸由中心一圈圈推到边缘，余火燃烧。'
+                  '整场约 25 秒，范围内敌我不分。'),
+        'CN': ('天罰', '終極支援：用雷射指示一點，倒數後天色驟暗、霧氣壓近，標記點上空展開魔法陣，數道光束從高空會聚；'
+                  '隨後半徑 220 公尺內雷暴連劈約 6 秒，最後一道巨型光柱貫下，爆炸由中心一圈圈推到邊緣，餘火燃燒。'
+                  '整場約 25 秒，範圍內敵我不分。'),
+        'JA': ('天罰', '最終支援。レーザーで地点を指示すると、カウントダウンの後に空が暗転し霧が迫り、魔法陣が展開して上空から'
+                  '光線が収束する。続いて半径 220m に約 6 秒間雷が降り注ぎ、最後に巨大な光柱が貫いて、爆発が中心から'
+                  '外縁へ輪になって広がる。全体で約 25 秒。範囲内は敵味方を区別しない。'),
+        'EN': ('Divine Judgment', 'The ultimate support. Mark a point with the laser: after the countdown the sky goes dark, '
+                              'fog closes in, magic circles open over the mark and beams converge on it from high above; '
+                              'then a lightning storm strikes everything within 220 m for six seconds, a colossal beam '
+                              'comes down and rings of blasts roll out from the centre to the edge, leaving fires. About '
+                              '25 seconds in all; it hits friend and foe alike inside the area.'),
+    },
     'heli': {
         'SC': ('武装直升机', '呼叫武装直升机，攻击附近的敌人。'),
         'CN': ('武裝直升機', '呼叫武裝直升機，攻擊附近的敵人。'),
@@ -632,6 +682,21 @@ GROUND_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew と EDF6AutoTurret のプラグイン、およびインストーラーが書き出す車両ファイルが必要。',
     'EN': 'Needs the EDF6VehicleCrew and EDF6AutoTurret plugins and the vehicle files the installer writes.',
 }
+ULTIMATE_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件和安装器生成的特效文件；未安装插件时为普通的卫星激光呼叫。',
+    'CN': '需要 EDF6VehicleCrew 插件和安裝器產生的特效檔案；未安裝插件時為普通的衛星雷射呼叫。',
+    'JA': 'EDF6VehicleCrew プラグインとインストーラーが書き出すエフェクトのファイルが必要。未導入時は通常の衛星レーザー要請になる。',
+    'EN': 'Needs the EDF6VehicleCrew plugin and the effect files the installer writes; without the plugin this is a plain '
+          'satellite laser call.',
+}
+GRAVITY_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通的激光导引装置。联机可用：房间里每台机器都要装同一版本插件（旧版本玩家看不到抓取与投掷）。',
+    'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通的雷射導引裝置。連線可用：房間裡每台機器都要裝同一版本外掛（舊版本玩家看不到抓取與投擲）。',
+    'JA': 'EDF6VehicleCrew プラグインが必要。未導入時は通常のレーザー誘導装置になる。オンライン対応：部屋の全員が同じ版のプラグインを入れていること（古い版の人には掴み・投げが見えない）。',
+    'EN': 'Needs the EDF6VehicleCrew plugin; without it this is a plain Laser Guide Kit. Works online when every player has this plugin version (an older one does not see the grabs and throws).',
+}
+
+
 GUN_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通的 ＫＦＦ５０ＬＳ 狙击枪。',
     'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通的 ＫＦＦ５０ＬＳ 狙擊槍。',
@@ -670,6 +735,10 @@ def call_description(call: Call, lang: str) -> str:
         return KINDS[call.kind][lang][1] + '\n\n' + THROW_NOTES[lang]
     if call.brings == 'gun':
         return KINDS[call.kind][lang][1] + '\n\n' + GUN_NOTES[lang]
+    if call.brings == 'ultimate':
+        return KINDS[call.kind][lang][1] + '\n\n' + ULTIMATE_NOTES[lang]
+    if call.brings == 'gravity':
+        return KINDS[call.kind][lang][1] + '\n\n' + GRAVITY_NOTES[lang]
     if not call.modal:
         return KINDS[call.kind][lang][1] + '\n\n' + NOTES[lang]
     sep = ' ' if lang == 'EN' else ''

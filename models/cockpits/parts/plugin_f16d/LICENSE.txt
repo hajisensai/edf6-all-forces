@@ -1,0 +1,6 @@
+"General Dynamics F-16D Block 60" by Muhamad Mirza Arrafi, CC BY 4.0
+Source: https://sketchfab.com/3d-models/general-dynamics-f-16d-block-60-ea8edb08d79e4eafa9c794c581f88cf3 (via Sketchfab)
+Licence: Creative Commons Attribution 4.0 (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+Changes: the front seat's cockpit only; the canopy and the HUD's glass left out; turned into the seat's eye frame and scaled to metres, triangles facing away from the eye left out;
+textures resized and re-saved as PNG. The EDF6 plugin's cockpit builder (pylib/cockpit_kits_plugin.py) cuts it to each
+vehicle's room.

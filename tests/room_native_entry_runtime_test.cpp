@@ -20,6 +20,8 @@ __declspec(noinline) void UnexpectedRoomDependency() noexcept {
 void PvpRoomTick() noexcept {UnexpectedRoomDependency();}
 void Outfit41RoomTick() noexcept {UnexpectedRoomDependency();}
 void Edf5OnlineRoomTick() noexcept {UnexpectedRoomDependency();}
+void HostSettingsRoomTick() noexcept {UnexpectedRoomDependency();}
+int HostSettingsLines(roomsync::SyncLine*,int) noexcept {UnexpectedRoomDependency();return 0;}
 const wchar_t* ConfigPath() noexcept {UnexpectedRoomDependency();return nullptr;}
 int GameTextLanguage() noexcept {UnexpectedRoomDependency();return 0;}
 bool MapHoldsKeys() noexcept {UnexpectedRoomDependency();return false;}
@@ -37,6 +39,18 @@ bool InstallPreviewHooks() noexcept {UnexpectedRoomDependency();return false;}
 void ShowPreview(const PreviewSpec&) noexcept {UnexpectedRoomDependency();}
 void HidePreview() noexcept {++nativePreviewHides;}
 void TickPreview(bool) noexcept {UnexpectedRoomDependency();}
+}
+// The native dialogs (room_dialog.cpp): not ready here, so the menu keeps its overlay path this fixture drives; with no
+// dialog open, closing / forgetting one is a no-op.
+namespace nativedialog {
+bool InstallNativeDialog() noexcept {UnexpectedRoomDependency();return false;}
+bool NativeDialogReady() noexcept {return false;}
+bool OpenDialog(const wchar_t*,const Button*,int,int,Handle*) noexcept {UnexpectedRoomDependency();return false;}
+bool DialogAlive(const Handle&) noexcept {UnexpectedRoomDependency();return false;}
+bool TakePicked(Handle&,std::uint64_t*) noexcept {UnexpectedRoomDependency();return false;}
+void RequestCloseDialogs() noexcept {}
+void CloseDialog(Handle& h) noexcept {h=Handle{};}
+void ForgetDialog(Handle& h) noexcept {h=Handle{};}
 }
 namespace roomsync {
 void TickRoomSync() noexcept {UnexpectedRoomDependency();}

@@ -1,0 +1,6 @@
+"Sikorsky UH-60M Blackhawk" by Muhamad Mirza Arrafi, CC BY 4.0
+Source: https://sketchfab.com/3d-models/sikorsky-uh-60m-blackhawk-12b4e525676a49678ac3006b360c8750 (via Sketchfab)
+Licence: Creative Commons Attribution 4.0 (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+Changes: the troop cabin and the cockpit ahead of it; the crew figures and the windows' glass left out; turned into the seat's eye frame and scaled to metres, triangles facing away from the eye left out;
+textures resized and re-saved as PNG. The EDF6 plugin's cockpit builder (pylib/cockpit_kits_plugin.py) cuts it to each
+vehicle's room.

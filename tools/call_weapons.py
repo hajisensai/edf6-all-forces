@@ -11,6 +11,10 @@ The thrown drones (Call.brings 'throw') are clones of the stock eWeapon217 (Patr
 the Robot Bomb list) with a marker in AmmoHitSizeAdjust (calls.throw_mark: about 1.0004, so the bomb hits as the
 stock one): the plugin turns the bomb into its drone where it lands (src/airstrike.cpp kThrows); without the
 plugin the weapon is a plain Patroller.
+The ultimate strike (Call.brings 'ultimate') is a clone of the stock eWeapon116 (Spritefall Destroy,
+Weapon_LaserMarkerCallFire) with its marker in AmmoHitSizeAdjust, which the satellite's own code never reads (its
+state machine 0x6A0C50-0x6A6900 reads +0x89C, +0x8B0, +0x8C8): the plugin catches its fire (src/airstrike.cpp, the
+satellite's fire state) and plays its show (src/ultimate.cpp); without the plugin it is a plain Spritefall Destroy.
 
   python tools/call_weapons.py build OUTDIR [--game DIR]     write the SGOs + the stacked tables into OUTDIR
   python tools/call_weapons.py install [--game DIR]          into <game>/Mods (refuses while EDF6 runs)
@@ -70,6 +74,39 @@ from dsgo import Node  # noqa: E402
 TEMPLATE = 'eWeapon051'          # Combat Bomber KM6
 VEHICLE_TEMPLATE = 'eWeapon394'  # N9 Eros (a heli vehicle request)
 THROW_TEMPLATE = 'eWeapon217'    # Patroller (a Robot Bomb: Weapon_Sub, BombBullet01)
+ULTIMATE_TEMPLATE = 'eWeapon116'  # Spritefall Destroy (Weapon_LaserMarkerCallFire, its fire state CP[3] = 0)
+# The ultimate's damage: what src/ultimate.cpp reads off the weapon (+0x89C) and shares out over its bolts, blasts and
+# beam, and its pt (calls.py reload): each at every star count (flat_curve). The stock curves scale them by the stars, and a
+# call weapon is owned at 0 (src/unlock_ported.h Own): the 2026-10-20 smoke test's show had damage 2400, 12000 x 0.2, and
+# would have needed 30000 pt (docs/plan-2026-10-19-ultimate.md, 「伤害 2400 的根因」).
+ULTIMATE_DAMAGE = 12000.0
+
+# A star curve [base, mode, star slot, most stars, share, power, integer flag] (EDF.dll 0xD7CE0, the weapon loader's and
+# the menu's): with s = min(the weapon's stars in that slot, most stars), x = share * (s / 5) ** power, its value is
+# base * (1 - share + x) for mode & 3 == 0 (growing with the stars), base * (1 + share - x) for 1 (falling), base else;
+# never below 0, the base's sign kept. Its value at 5 stars is the base.
+STAR_SHARE = 4
+STAR_PIVOT = 5.0
+
+
+def star_value(curve: list, stars: int) -> float:
+    """What the game makes of star curve `curve` (a list, or a Node) at `stars` stars (see STAR_SHARE)."""
+    c = [float(x) for x in (curve.items if isinstance(curve, Node) else curve)]
+    base, sign = (c[0], 1.0) if c[0] >= 0.0 else (-c[0], -1.0)
+    s = min(stars, int(round(abs(c[3]))))
+    low, grown = c[STAR_SHARE] * base, c[STAR_SHARE] * base * (s / STAR_PIVOT) ** c[5]
+    mode = int(round(abs(c[1]))) & 3
+    value = base - low + grown if mode == 0 else low + base - grown if mode == 1 else 0.0
+    return max(0.0, value) * sign
+
+
+def flat_curve(curve: Node, value: float) -> None:
+    """Star curve `curve` (a weapon field's or its menu line's) made `value` at every star count: its share 0."""
+    curve.items[0] = float(value)
+    curve.items[STAR_SHARE] = 0.0
+# The template's radio lines (SOUND/SUPPORT_UNIT_TALK.SGO keys), emptied in the ultimate: CP[5] (fire, -, after) and
+# Ammo_EquipVoice (equipped, unavailable).
+ULTIMATE_VOICES = (('スプライト発射', '', 'スプライト攻撃後'), ('スプライト出撃直後', 'スプライト支援不能'))
 LANGS = ('JA', 'EN', 'CN', 'KR', 'SC')
 TABLE = 'WEAPON/WEAPONTABLE.SGO'
 TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
@@ -168,10 +205,14 @@ def template_of(call: Call) -> str:
     thrown drone: its row, and so its place in the Robot Bomb list, category 331)."""
     if call.gun:
         return call.gun
+    if call.weapon:
+        return call.weapon
     if call.ground:
         return vc.GROUND_VEHICLES[call.ground].request
     if call.brings == 'throw':
         return THROW_TEMPLATE
+    if call.brings == 'ultimate':
+        return ULTIMATE_TEMPLATE
     return VEHICLE_TEMPLATE if call.brings == 'vehicle' else TEMPLATE
 
 
@@ -381,14 +422,14 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
             weapons = []
         native_weapons = weapons
         if call.ground == 'bmpt':
-            # BMPT keeps the V603's native paired cannon and adds its four-tube
-            # missile store. This is an explicit 2 -> 3 holder contract with
-            # make_tracked_combat.vehicle_sgo; other ground requests stay strict.
-            if len(weapons) != 2 or len(jet_weapons) != 3:
-                raise ValueError('BMPT request requires two native cannon mounts and one added missile store')
+            # BMPT keeps the V603's native paired cannon and adds its stores: the four-tube missile, the guns' APDS
+            # belt (two barrels) and the thermobaric missile. An explicit 2 -> 6 holder contract with
+            # make_tracked_combat.vehicle_sgo (BMPT_SLOTS); other ground requests stay strict.
+            if len(weapons) != 2 or len(jet_weapons) != 6:
+                raise ValueError('BMPT request requires two native cannon mounts and four added stores')
             extra = copy.deepcopy(weapons[1])
-            extra.items[1] = Node([0.0, 0.0])  # a recoilless missile, still a BodyRecoil variant
-            weapons = [*weapons, extra]
+            extra.items[1] = Node([0.0, 0.0])  # no hull impulse (a missile, a 30 mm belt), still a BodyRecoil variant
+            weapons = [*weapons, *(copy.deepcopy(extra) for _ in range(4))]
         if len(weapons) != len(jet_weapons):
             raise ValueError(f'{template_of(call)}: {len(weapons)} weapons in its setup, {call.ground} has {len(jet_weapons)}')
         swap.update({str(w.items[0]).lower(): new for w, new in zip(native_weapons, jet_weapons)})
@@ -500,10 +541,69 @@ def gun_sgo(template: bytes, call: Call) -> bytes:
     return dsgo.write(doc)
 
 
+def ultimate_sgo(template: bytes, call: Call) -> bytes:
+    """Spritefall Destroy with the ultimate's marker, its reload (pt) and damage at every star count (ULTIMATE_DAMAGE) and
+    names; its laser marker, countdown and stock beam (the fallback without the plugin) as they are. Its radio lines silenced (the user, 2026-10-20: 「语音还是用的
+    原版语音」, 「没人说你用说话的语音啊」: the show has its own sounds, no speech): ULTIMATE_VOICES, the satellite's fire /
+    after-fire lines (CP[5]) and its equip / unavailable lines (Ammo_EquipVoice), every one emptied (the stock CP[5][1] is
+    already empty: the game plays nothing for an empty name)."""
+    doc = dsgo.parse(template)
+    r = doc.root
+    cp = r.get('Ammo_CustomParameter')
+    if cp.items[4].items[4] != 'LaserBullet02' or cp.items[3] != 0:
+        raise ValueError(f'{ULTIMATE_TEMPLATE} 不是预期的卫星激光呼叫（CP[3] = 0 的发射态，LaserBullet02）')
+    voices = (cp.items[5], r.get('Ammo_EquipVoice'))
+    if [list(v.items) for v in voices] != [list(v) for v in ULTIMATE_VOICES]:
+        raise ValueError(f'{ULTIMATE_TEMPLATE} 的语音不是预期的 {ULTIMATE_VOICES}')
+    for v in voices:
+        v.items[:] = [''] * len(v.items)
+    r.set('AmmoHitSizeAdjust', float(call.mark))
+    # Flat: the pt and the damage asked for at the 0 stars a call is owned with (ULTIMATE_DAMAGE).
+    flat_curve(r.get('ReloadTime'), call.reload)
+    flat_curve(r.get('AmmoDamage'), ULTIMATE_DAMAGE)
+    for key, want in (('ReloadTime', float(call.reload)), ('AmmoDamage', ULTIMATE_DAMAGE)):
+        if any(star_value(r.get(key), stars) != want for stars in (0, 5, 10)):
+            raise ValueError(f'{ULTIMATE_TEMPLATE} 的 {key} 不是已知的星级曲线（{dsgo.to_py(r.get(key))}）')
+    for lang in LANGS:
+        key = f'name.{lang.lower()}'
+        if key in r.names.values():
+            r.set(key, call_name(call, lang))
+    return dsgo.write(doc)
+
+
+# The gravity gun (Call.brings 'gravity', src/gravitygun.cpp): the Laser Guide Kit (Weapon_LaserMarker: its beam is drawn
+# while the trigger is held, it fires no round, so its one shot never runs out) under its own name, its AmmoHitSizeAdjust the
+# call's mark (the plugin's test, with the class's vtable; the class never reads the field). Its beam reaches AmmoSpeed x
+# AmmoAlive (1) m: GRAVITY_RANGE, the reach of what it grabs (the plugin reads the product off the weapon). AmmoDamage, 0
+# in the stock kit (it deals none), is the throw's damage scale the plugin reads (weapon +0x89C). The beam's colour and width.
+GRAVITY_RANGE = 150.0
+GRAVITY_COLOR = (0.55, 0.35, 1.0, 1.0)
+GRAVITY_WIDTH = 1.5
+
+
+def gravity_sgo(template: bytes, call: Call) -> bytes:
+    doc = dsgo.parse(template)
+    r = doc.root
+    r.set('AmmoHitSizeAdjust', float(call.mark))
+    r.get('AmmoSpeed').items[0] = GRAVITY_RANGE
+    r.set('AmmoColor', Node([float(c) for c in GRAVITY_COLOR]))
+    r.set('AmmoSize', GRAVITY_WIDTH)
+    r.set('AmmoDamage', 1.0)
+    for lang in LANGS:
+        key = f'name.{lang.lower()}'
+        if key in r.names.values():
+            r.set(key, call_name(call, lang))
+    return dsgo.write(doc)
+
+
 def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, float]] | None = None,
                *, fallback: bool = False) -> bytes:
     if call.brings == 'gun':
         return gun_sgo(template, call)
+    if call.brings == 'ultimate':
+        return ultimate_sgo(template, call)
+    if call.brings == 'gravity':
+        return gravity_sgo(template, call)
     if call.brings == 'vehicle':
         return vehicle_sgo(template, call, request_tier(curve or [], call.level), fallback=fallback)
     if call.brings == 'throw':
@@ -565,6 +665,12 @@ def _text_row(template: Node, call: Call, lang: str, durability: float | None = 
     if call.brings == 'throw':
         _throw_stats(row, call)
         return row
+    if call.brings == 'ultimate':
+        _ultimate_stats(row, call)
+        return row
+    if call.brings == 'gravity':
+        _gravity_stats(row)
+        return row
     # A vehicle request's stats: [re-request, durability, fuel, fuel cost]; the durability is the jet's.
     stats = row.items[2].items
     if durability is not None and len(stats) > 1 and len(stats[1].items) == 2:
@@ -606,6 +712,43 @@ def _throw_stats(row: Node, call: Call) -> None:
     for stat, value in zip(keep, (float(call.count), float(call.reload) / 60.0)):
         if len(stat.items) == 3 and isinstance(stat.items[2], Node) and stat.items[2].items:
             stat.items[2].items[0] = value
+    row.items[2].items = keep
+
+
+# Spritefall Destroy's stat list: [damage, blast range, reload, laser range, rounds, zoom]. The ultimate's: its damage base,
+# its area (src/ultimate_plan.h kRadius) for the blast range, its pt; the stock beam's round count goes (the show has none).
+_ULT_DAMAGE_STAT, _ULT_RANGE_STAT, _ULT_RELOAD_STAT, _ULT_ROUNDS_STAT = 0, 1, 2, 4
+ULTIMATE_RADIUS = 220   # m: src/ultimate_plan.h kRadius (tools/selftest.py holds the two equal)
+
+
+def _ultimate_stats(row: Node, call: Call) -> None:
+    stats = row.items[2].items
+    if len(stats) <= _ULT_ROUNDS_STAT:
+        return   # another tool rewrote the satellite's text: left as it is
+    for at, value in ((_ULT_DAMAGE_STAT, ULTIMATE_DAMAGE), (_ULT_RELOAD_STAT, float(call.reload))):
+        stat = stats[at]
+        if len(stat.items) == 3 and isinstance(stat.items[2], Node) and len(stat.items[2].items) > STAR_SHARE:
+            flat_curve(stat.items[2], value)   # the menu's curve: the weapon's at every star count
+    area = stats[_ULT_RANGE_STAT]
+    if len(area.items) == 2 and isinstance(area.items[1], str):
+        area.items[1] = area.items[1].replace('70.0', str(ULTIMATE_RADIUS))
+    del stats[_ULT_ROUNDS_STAT]
+
+
+# The Laser Guide Kit's stat list: [projection range (its AmmoSpeed curve), lock-on speed, lock-on range, zoom]. The gravity
+# gun's: its range (GRAVITY_RANGE) and the zoom; the lock-on lines are the kit's (the beam still paints, but that is not
+# what this weapon is for).
+_GRAVITY_RANGE_STAT, _GRAVITY_ZOOM_STAT = 0, 3
+
+
+def _gravity_stats(row: Node) -> None:
+    stats = row.items[2].items
+    if len(stats) <= _GRAVITY_ZOOM_STAT:
+        return   # another tool rewrote the kit's text: left as it is
+    keep = [stats[_GRAVITY_RANGE_STAT], stats[_GRAVITY_ZOOM_STAT]]
+    rng = keep[0]
+    if len(rng.items) == 3 and isinstance(rng.items[2], Node) and rng.items[2].items:
+        rng.items[2].items[0] = GRAVITY_RANGE
     row.items[2].items = keep
 
 

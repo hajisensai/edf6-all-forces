@@ -168,58 +168,24 @@ def skin(part: pm.Part):
 
 
 def polygon(part: pm.Part, points, outward) -> None:
-    """A planar convex polygon, isolated vertices for hard armour edges."""
-    start = len(part.pos)
-    centre = np.mean(points, axis=0)
-    normal = np.cross(np.asarray(points[1]) - points[0], np.asarray(points[2]) - points[0])
-    order = list(range(len(points)))
-    if np.dot(normal, outward) < 0:
-        order.reverse()
-    for k in order:
-        p = points[k]
-        part.add(p, skin(part), (0.5 + 0.1 * (p[0] - centre[0]), 0.5 + 0.1 * (p[2] - centre[2])))
-    part.tris.extend((start, start + i, start + i + 1) for i in range(1, len(points) - 1))
+    """A planar convex polygon, isolated vertices for hard armour edges (pylib/procmesh.py hard_polygon)."""
+    pm.hard_polygon(part, points, outward, skin(part))
 
 
 def hexahedron(part: pm.Part, lower, upper) -> None:
     """Four corners at each height, ordered cyclically in XZ; outward hard faces."""
-    points = list(lower) + list(upper)
-    centre = np.mean(points, axis=0)
-    faces = ((0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7))
-    for face in faces:
-        p = [np.asarray(points[k], dtype=float) for k in face]
-        polygon(part, p, np.mean(p, axis=0) - centre)
+    pm.hard_hexahedron(part, lower, upper, skin(part))
 
 
 def box(part: pm.Part, centre, half) -> None:
-    x, y, z = centre
-    a, b, c = half
-    hexahedron(part, [(x-a, y-b, z-c), (x+a, y-b, z-c), (x+a, y-b, z+c), (x-a, y-b, z+c)],
-               [(x-a, y+b, z-c), (x+a, y+b, z-c), (x+a, y+b, z+c), (x-a, y+b, z+c)])
+    pm.hard_box(part, centre, half, skin(part))
 
 
 def cylinder(part: pm.Part, start, end, radius: float, segments: int = 16,
              end_radius: float | None = None, cap: bool = True) -> None:
-    """Tube with correct outward winding and flat caps; arbitrary axis."""
-    a, b = np.asarray(start, dtype=float), np.asarray(end, dtype=float)
-    axis = b - a
-    require(np.linalg.norm(axis) > 1e-6, 'zero-length cylinder')
-    axis /= np.linalg.norm(axis)
-    ref = np.array((0., 1., 0.)) if abs(axis[1]) < .9 else np.array((1., 0., 0.))
-    u = np.cross(axis, ref)
-    u /= np.linalg.norm(u)
-    v = np.cross(axis, u)
-    r1 = radius if end_radius is None else end_radius
-    rows = []
-    for centre, r, t in ((a, radius, 0.), (b, r1, 1.)):
-        rows.append([part.add(centre + r * (u*math.cos(k*math.tau/segments) + v*math.sin(k*math.tau/segments)),
-                              skin(part), (k / segments, t)) for k in range(segments)])
-    for k in range(segments):
-        j = (k+1) % segments
-        part.tris.extend(((rows[0][k], rows[0][j], rows[1][j]), (rows[0][k], rows[1][j], rows[1][k])))
-    if cap:
-        for centre, row, wanted in ((a, rows[0], -axis), (b, rows[1], axis)):
-            polygon(part, [part.pos[i] for i in row], wanted)
+    """Tube with correct outward winding and flat caps; arbitrary axis (pylib/procmesh.py hard_cylinder)."""
+    require(np.linalg.norm(np.asarray(end, dtype=float) - np.asarray(start, dtype=float)) > 1e-6, 'zero-length cylinder')
+    pm.hard_cylinder(part, start, end, radius, skin(part), segments, end_radius, cap)
 
 
 def barrel(part: pm.Part, centre, z0: float, z1: float, radius: float, bore: float) -> None:

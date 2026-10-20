@@ -243,6 +243,143 @@ def nozzle_bones_in_a_made_model() -> None:
     assert mdb_write(jet_models.strip_nozzles(out)) == mdb_write(md), 'strip_nozzles does not give the model back'
 
 
+def _belly_model(belly: float) -> 'object':
+    """A stand-in grounded jet: mdl; body (skin) with gear_nose (z 4) and gear_main_l / _r (z -2, x +-2) under it, then
+    the object's bone; a flat belly (two skinned triangles on body) at y `belly` over x -3..3, z -6..6, and on each main
+    gear leg a triangle down to the ground (y 0) beside the belly's centre line."""
+    import struct
+    from mdb import Bone, MatParam, MatTex, Material, Mdb, Mesh, Object, VElem
+    import mdb_jet
+    ident = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+
+    def at(x: float, y: float, z: float) -> list[float]:
+        return ident[:12] + [x, y, z, 1.0]
+    binds = [ident, ident, at(0.0, 0.8, 4.0), at(2.0, 0.8, -2.0), at(-2.0, 0.8, -2.0), ident]
+    parents = [-1, 0, 1, 1, 1, 0]
+    kinds = [0, 3, 3, 3, 3, 2]
+    bones = [Bone(i, parents[i], -1, -1, i, 0, kinds[i], 0, int(kinds[i] == 3), 0, 0, list(binds[i]),
+                  ident[:12] + [-binds[i][12], -binds[i][13], -binds[i][14], 1.0], [0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0, 1.0])
+             for i in range(6)]
+    mdb_jet.link(bones)
+    elems = [VElem(4, 0, 0, 'position'), VElem(1, 12, 0, 'BLENDWEIGHT'), VElem(21, 28, 0, 'BLENDINDICES')]
+    pts = [((-3.0, belly, -6.0), 1), ((3.0, belly, -6.0), 1), ((3.0, belly, 6.0), 1), ((-3.0, belly, 6.0), 1),
+           ((1.0, 0.0, -2.5), 3), ((1.2, 0.0, -1.5), 3), ((1.1, belly, -2.0), 3),
+           ((-1.0, 0.0, -2.5), 4), ((-1.2, 0.0, -1.5), 4), ((-1.1, belly, -2.0), 4)]
+    rows = b''.join(struct.pack('<3f4f4B', *p, 1.0, 0.0, 0.0, 0.0, bone, 0, 0, 0) for p, bone in pts)
+    tris = struct.pack('<12H', 0, 1, 2, 0, 2, 3, 4, 5, 6, 7, 8, 9)
+    me = Mesh(bytes((0, 1, 1, 0)), 0, 0, 32, elems, 0, rows, tris)
+    mat = Material(0, 0, 0, 3, 'snd_BRDF_Common_Basic', [MatParam([0.5, 0.5, 0.5, 0.0], (0, 0), 'diffuse', 0x402)],
+                   [MatTex(0, 'albedo', (0,) * 5)], 3)
+    return Mdb(0x20, ['mdl', 'body', 'gear_nose', 'gear_main_l', 'gear_main_r', 'body_mesh', 'Material'], bones,
+               [Object(5, 5, [me])], [mat], [])
+
+
+# The stock 506 weapons' muzzles from their holder bone (Root.cpk: V_506HELI_GATLING01_L / _R, V_506HELI_MISSILE01's
+# pods, V_409HELI_BOMB01's racks; vcobjects.hardpoint_muzzles reads them off the game).
+_GUN_MUZZLES = ((-2.5, -0.24, 2.53), (2.5, -0.24, 2.53))
+_STORE_MUZZLES = ((-1.96, -0.49, 1.1), (-1.76, -0.67, 0.2), (-1.37, -0.48, 1.5), (-1.05, -0.67, 0.2), (1.05, -0.67, 0.2),
+                  (1.37, -0.48, 1.5), (1.76, -0.67, 0.2), (1.96, -0.49, 1.1))
+
+
+@test
+def jet_hardpoints_keep_the_muzzles_out_of_the_ground() -> None:
+    """pylib/jet_hardpoints.py on a stand-in grounded jet (no game; the user, 2026-10-19: 「在地面停着的飞机射导弹，会在
+    地底生成」): the stock muzzles on the root (the model's origin, the wheels' contact: what every jet hung its weapons
+    on) are all under the ground; the hardpoints put the stores' bone over the main gear and the guns' over the nose gear,
+    each as high as leaves every muzzle at or under the belly (the gear's triangles, down to the ground, not taken for
+    airframe), every muzzle GROUND_CLEAR over the ground; the bones are transform only on the mesh bone, the model written
+    and read back passes check_hardpoints, strip_hardpoints gives it back byte for byte; a belly too low for the missile
+    pods' 0.67 m drop leaves no place (HardpointError), never a muzzle in the ground."""
+    import jet_hardpoints as jh
+    from mdb import mdb_read, mdb_write
+    assert all(m[1] < 0.0 for m in _GUN_MUZZLES + _STORE_MUZZLES), 'every stock muzzle is under its holder bone'
+    md = _belly_model(1.0)
+    want = {jh.HP_GUN: _GUN_MUZZLES, jh.HP_STORE: _STORE_MUZZLES}
+    hps = jh.hardpoints(md, want)
+    at = {h.name: h.at for h in hps}
+    assert [h.name for h in hps] == [jh.HP_GUN, jh.HP_STORE], hps
+    assert max(abs(a - b) for a, b in zip(at[jh.HP_STORE], (0.0, 1.0 + 0.48, -2.0))) < 1e-6, at   # the racks on the belly
+    assert max(abs(a - b) for a, b in zip(at[jh.HP_GUN], (0.0, 1.0 + 0.24, 4.0))) < 1e-6, at
+    out = jh.with_hardpoints(md, hps)
+    names = [out.name_of(b.name) for b in out.bones]
+    assert names == ['mdl', 'body', 'gear_nose', 'gear_main_l', 'gear_main_r', 'hp_gun', 'hp_store', 'body_mesh'], names
+    back = mdb_read(mdb_write(out))
+    jh.check_hardpoints(back, hps)
+    for h in hps:
+        pts = jh.muzzle_points(back, h.name, h.muzzles)
+        assert min(p[1] for p in pts) >= jh.GROUND_CLEAR and max(p[1] for p in pts) <= 1.0 + 1e-6, (h.name, pts)
+        assert all(p[1] < 0.0 for p in jh.muzzle_points(back, 'mdl', h.muzzles)), 'on the root they were in the ground'
+    assert back.objects[0].bone == back.bone_index('body_mesh')
+    assert mdb_write(jh.strip_hardpoints(out)) == mdb_write(md), 'strip_hardpoints does not give the model back'
+    low = _belly_model(0.5)   # 0.5 m: the pods 0.19 m under the racks still clear the ground
+    pts = [p for h in jh.hardpoints(low, want) for p in jh.muzzle_points(jh.with_hardpoints(low, jh.hardpoints(low, want)),
+                                                                          h.name, h.muzzles)]
+    assert min(p[1] for p in pts) >= jh.GROUND_CLEAR, pts
+    try:
+        jh.hardpoints(_belly_model(0.1), want)
+    except jh.HardpointError:
+        pass
+    else:
+        raise AssertionError('a belly 0.1 m over the ground took the stores')
+
+
+@test
+def jet_weapons_hang_on_their_hardpoints() -> None:
+    """pylib/vcobjects.py jet_sgo hangs each jet's weapons (jet_weapon_bones): on a model with hardpoints
+    (HARDPOINT_FILES, which pylib/jet_models.py gives the bones) its guns on hp_gun, its missiles, rockets and bombs on
+    hp_store, anything else (the blast drones' charges) on the anchor; on any other model (the stock bombers the airstrike
+    takes over) all on the anchor; Jet.weapon_bones as given. tools/make_jets.py checks every SGO's holder bones against its
+    model (check_weapon_bones), and tools/support_loadout.py hangs a loadout's pylons on the jet's store holder. With the
+    game: every hardpoint model as made carries the bones, every muzzle GROUND_CLEAR over its ground and under its skin
+    (check_hardpoints), where the same muzzles on the root were in the ground."""
+    import jet_hardpoints as jh
+    import jet_models
+    import rootcpk
+    assert vc.HARDPOINT_FILES == {vc.JET_ELEVON_FILE, *(f for f, r in jet_models.MODELS.items() if r.grounded),
+                                  vc.GUNSHIP_MODEL_FILE}, sorted(vc.HARDPOINT_FILES)
+    assert jet_models.ELEVON_FILE == vc.JET_ELEVON_FILE
+    seen = 0
+    for name, jet in vc.JETS.items():
+        model = list(jet.model) if jet.model is not None else vc.JET_ELEVON_MODEL
+        bones = vc.jet_weapon_bones(jet, model, jet.anchor)
+        if jet.weapon_bones:
+            assert bones == list(jet.weapon_bones), name
+            continue
+        if vc.model_file(model) not in vc.HARDPOINT_FILES:
+            assert bones == [jet.anchor] * len(jet.weapons), name
+            continue
+        seen += 1
+        for w, b in zip(jet.weapons, bones):
+            kind = vc.store_of(w)
+            want = jh.HP_GUN if w in vc._GUNS else jh.HP_STORE if kind and vc.STORES[kind[0]].role in \
+                ('air', 'ground', 'bomb', 'rocket') else jet.anchor
+            assert b == want, (name, w, b)
+        assert vc.jet_weapon_bones(jet, vc.JET_MODEL, jet.anchor) == [jet.anchor] * len(jet.weapons), name
+    assert seen >= 20, seen
+    jets = src('tools/make_jets.py')
+    assert 'check_weapon_bones(out, game)' in jets.split('\ndef build(', 1)[1].split('\ndef ', 1)[0]
+    assert "jet_weapon_bones(jet, m['animation_model'][0], anchor)" in src('pylib/vcobjects.py')
+    loadout = src('tools/support_loadout.py')
+    assert 'store_row = next(' in loadout and '[list(store_row) for _ in l.pylons]' in loadout
+    if not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.Game(rootcpk.DEFAULT_GAME)
+    muzzles = vc.hardpoint_muzzles(game)
+    assert muzzles == {jh.HP_GUN: _GUN_MUZZLES, jh.HP_STORE: _STORE_MUZZLES}, muzzles
+    from mdb import mdb_read, rab_read
+    models = {f: jet_models._model_of(game, None if f == vc.JET_ELEVON_FILE else f)
+              for f in vc.HARDPOINT_FILES if f != vc.GUNSHIP_MODEL_FILE}
+    raw = jet_models.stock_copy(game, vc.GUNSHIP_MODEL_FILE)
+    models[vc.GUNSHIP_MODEL_FILE] = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == 'bomber401.mdb').data)
+    for f, md in models.items():
+        r = jet_models.MODELS.get(f)
+        hps = jet_models.hardpoints_for(game, jh.strip_hardpoints(md), f)
+        jh.check_hardpoints(md, hps, bool(r and r.skids))
+        for h in hps:
+            assert min(p[1] for p in jh.muzzle_points(md, h.name, h.muzzles)) >= jh.GROUND_CLEAR, (f, h)
+            assert min(p[1] for p in jh.muzzle_points(md, 'mdl', h.muzzles)) < 0.0, (f, h.name, 'was not in the ground')
+
+
 @test
 def gear_legs_as_the_models_fold_them() -> None:
     """src/gear.cpp's legs (kLegNames, kLegUp) are pylib/jet_gear.py's (LEGS, LEG_UP): the plugin folds each leg by the
@@ -454,6 +591,19 @@ def npc_vehicle_ai_declarations() -> None:
 
 
 @test
+def release_third_party_notices() -> None:
+    """The release zip carries THIRD-PARTY-NOTICES.txt with the licence of the EDF6 SHKT Editor code ported to pylib
+    (MIT, Copyright (c) 2026 Ktaro) next to edf6-cpk's; every ported module names its source and that licence."""
+    import build_release
+    text = build_release.notices()
+    assert 'Copyright (c) 2026 Ktaro' in text and 'MIT License' in text and 'edf6-cpk' in text, text[:200]
+    assert "z.writestr('THIRD-PARTY-NOTICES.txt', notices()" in src('tools/build_release.py')
+    for mod in ('hkfile', 'hkshape', 'model_pieces', 'shkt_check', 'vehicle_check'):
+        head = src(f'pylib/{mod}.py').split('from __future__', 1)[0]
+        assert 'Ktaro' in head and 'LICENSE.edf6-shkt-editor' in head, mod
+
+
+@test
 def frozen_collision_consumer() -> None:
     """The package gate runs the real binding and geometry consumers on portable data."""
     import frozen_collision_probe
@@ -531,19 +681,22 @@ def calls_table_consistent() -> None:
     drones = set(re.search(r'enum class ThrownDrone \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     for c in calls.CALLS:
         assert c.kind in calls.KINDS, c.id
-        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun'), c.id
+        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'ultimate', 'gravity'), c.id
         thrown = c.brings == 'throw'
         assert bool(c.drone) == thrown and (not c.drone or c.drone in drones), c.id
         # A thrown drone's marker: the bits of 1.0 with its code in the low ones, never 1.0 itself (calls.throw_mark).
         bits = calls.mark_bits(c)
         assert not thrown or (bits & ~0xFFF == calls.THROW_MARK_BASE and bits != calls.THROW_MARK_BASE), c.id
         assert bool(c.gun) == (c.brings == 'gun') and (not c.gun or c.reload == 0), c.id
+        assert bool(c.weapon) == (c.brings == 'gravity'), c.id
+        # The gravity gun's marker is a thrown drone's kind (the bits of 1.0 with a code in the low ones).
+        assert c.brings != 'gravity' or (bits & ~0xFFF == calls.THROW_MARK_BASE and bits != calls.THROW_MARK_BASE), c.id
         assert bool(c.role) == (c.brings == 'jets') and (not c.role or c.role in roles), c.id
         assert bool(c.body) == (c.brings == 'helis') and (not c.body or c.body in bodies), c.id
         assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground)) == (c.brings == 'vehicle'), c.id
         assert not (c.jet and c.ground) and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
         assert not c.ground or vc.GROUND_VEHICLES[c.ground].sgo == c.vehicle, c.id
-        assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown), c.id
+        assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown or c.brings == 'ultimate'), c.id
         assert not thrown or not c.flown, c.id   # not in the in-mission pick (kCalls)
         for lang in cw.LANGS:
             assert calls.call_name(c, lang) and calls.call_description(c, lang)
@@ -552,6 +705,23 @@ def calls_table_consistent() -> None:
         assert not calls.retired_id(c.id).startswith(calls.ID_PREFIX)   # GrantCalls never owns a placeholder
     names = [calls.call_name(c, 'SC') for c in calls.FLOWN]
     assert len(set(names)) == len(names), 'two calls with one banner label'
+
+
+@test
+def gravity_gun_mark_in_plugin() -> None:
+    """The gravity gun (tools/calls.py brings 'gravity'): src/gravitygun.cpp tells it by its AmmoHitSizeAdjust's bits (the
+    call's mark) and its class's vtable (Weapon_LaserMarker: the template call_weapons.gravity_sgo keeps); its SGO is the kit
+    with that mark, the reach and the damage scale the plugin reads, and its stat list the range and the zoom."""
+    guns = [c for c in calls.CALLS if c.brings == 'gravity']
+    assert len(guns) == 1, guns
+    g = guns[0]
+    plugin = src('src/gravitygun.cpp')
+    m = re.search(r'kGravityMarkBits=0x([0-9A-Fa-f]+)', plugin)
+    assert m and int(m.group(1), 16) == calls.mark_bits(g), 'gravitygun.cpp kGravityMarkBits vs tools/calls.py'
+    assert 'kLaserMarkerVtable=0x17E45E8' in plugin and g.weapon == 'eLockonMarkerL01'
+    assert cw.template_of(g) == 'eLockonMarkerL01' and g.reload == 0 and g.count == 0
+    assert 'gravity::Pick' in plugin and 'gravity::HoldAt' in plugin and 'gravity::Throw' in plugin, 'the gun is the gravity operations\' user'
+    assert 'GravityGunTick' in src('src/crew.cpp'), 'the gun runs from the shared tick'
 
 
 @test
@@ -737,6 +907,236 @@ def thrown_drones_marked_and_wired() -> None:
     plugin, ini, readme = src('src/plugin.cpp'), src('EDF6VehicleCrew.ini'), src('README.md')
     assert 'L"ThrowDrones"' in plugin and re.search(r'^ThrowDrones=1', ini, re.M) and 'ThrowDrones' in readme
     assert 'kThrows' in src('src/airstrike.cpp') and 'JetLaunchThrown' in src('src/jet_spawn.cpp')
+
+
+# ---------------------------------------------------------------- every call's SGO and text row
+# The kinds a call brings (calls.Call.brings): tools/call_weapons.py weapon_sgo / _text_row branch on each. The 2026-10-20
+# merge dropped ultimate_sgo's `return dsgo.write(doc)` and the ultimate text branch's `return row` and nothing offline saw
+# it: these run every call through both, on synthetic templates (no game: CI) and on the real ones (with the game).
+CALL_KINDS = ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'ultimate', 'gravity')
+_STOCK_PT = [1020.0, 21.0, 1.0, 10.0, 1.0, 0.30000001192092896, 0.0]          # a call's ReloadTime star curve
+_SAT_DAMAGE = [670.0, 8.0, 0.0, 10.0, 0.800000011920929, 0.699999988079071, 1.0]   # Spritefall Destroy's AmmoDamage
+_SAT_PT = [3200.0, 21.0, 1.0, 10.0, 1.0, 0.30000001192092896, 0.0]                 # ...and its ReloadTime
+
+
+def _dnode(v):
+    """A plain value as DSGO: a list a list node, a dict a named node."""
+    if isinstance(v, dict):
+        return dsgo.Node([_dnode(x) for x in v.values()], dict(enumerate(v)))
+    return dsgo.Node([_dnode(x) for x in v]) if isinstance(v, list) else v
+
+
+def _synthetic_call_sgo(c: calls.Call) -> bytes:
+    """A stand-in for call `c`'s stock template with the fields its kind's builder reads and writes."""
+    k = c.brings
+    if k in ('jets', 'helis', 'sub'):
+        root = {'AmmoHitSizeAdjust': 0.0, 'ReloadTime': list(_STOCK_PT),
+                'Ammo_CustomParameter': [0.0, 'bomber', [1.0, 3.0, 0.5], 'app:/object/x.sgo']}
+    elif k == 'vehicle':
+        entry, fuel = ['app:/weapon/v_506heli_gatling01_l.sgo', [1.0, 0.0]], ['app:/weapon/v_fueltank.sgo', [1.0]]
+        if c.ground:
+            n = 2 if c.ground == 'bmpt' else len(cw.vehicle_weapons(c))
+            setup = [[1.0, 1.0], [0.0, 1.0], [[f'app:/weapon/stock_{i}.sgo', [1.0, [0.0, 0.0]]] for i in range(n)]]
+        else:
+            setup = [[1.0, 1.0], [0.0, 1.0, 2.0], [100.0], [entry, fuel]]
+        root = {'use_underground': 0.0, 'ReloadTime': [8000.0, 21.0, 0.0, 8.0, 1.0, 0.5, 0.0],
+                'Ammo_CustomParameter': [0.0, 0.0, 0.0, 0.0,
+                                         ['transport', 'box', 'app:/object/v506_heli.sgo', setup, ['voice']]],
+                'resource': ['app:/object/v506_heli.sgo', 'app:/weapon/v_506heli_gatling01_l.sgo']}
+    elif k == 'throw':
+        root = {'AmmoHitSizeAdjust': 1.0, 'AmmoCount': [8.0, 0.0, 0.0, 7.0, 0.5, 0.5, 0.0],
+                'ReloadTime': [480.0, 21.0, 2.0, 8.0, 1.0, 0.5, 0.0]}
+    elif k == 'gun':
+        bases = {'AmmoSpeed': 25.0, 'FireAccuracy': 0.125, 'AmmoCount': 8.0, 'ReloadTime': 360.0, 'FireInterval': 90.0}
+        root = {key: [base, float(i + 10), 0.5, 2.0, 1.0] for i, (key, base) in enumerate(bases.items())}
+        root.update({key: 0.0 for key in cw.GUN_SCALARS})
+        root.update({'AmmoAlive': 40.0, 'AmmoColor': [0.25, 0.5, 0.75, 1.0], 'AmmoClass': 'LaserBullet01',
+                     'Ammo_CustomParameter': [1.0]})
+    elif k == 'ultimate':
+        root = {'AmmoHitSizeAdjust': 0.0, 'AmmoDamage': list(_SAT_DAMAGE), 'ReloadTime': list(_SAT_PT),
+                'Ammo_CustomParameter': [0.0, 0.0, 0.0, 0.0, [0.0, 0.0, 0.0, 0.0, 'LaserBullet02'],
+                                         list(cw.ULTIMATE_VOICES[0])],
+                'Ammo_EquipVoice': list(cw.ULTIMATE_VOICES[1])}
+    elif k == 'gravity':
+        root = {'AmmoHitSizeAdjust': 0.0, 'AmmoSpeed': [30.0, 8.0, 0.0, 10.0, 0.5, 0.5, 1.0], 'AmmoAlive': 1.0,
+                'AmmoColor': [1.0, 0.0, 0.0, 1.0], 'AmmoSize': 0.5, 'AmmoDamage': 0.0}
+    else:
+        raise AssertionError(f'{c.id}: a kind this test does not know: {k}')
+    root.update({f'name.{lang.lower()}': f'stock {lang}' for lang in cw.LANGS})
+    return dsgo.write(dsgo.Document(_dnode(root), []))
+
+
+def _synthetic_call_text(c: calls.Call, template: bytes) -> dsgo.Node:
+    """A stand-in for call `c`'s template's menu row: [name, description, stat lines] as its stock one is laid out."""
+    k = c.brings
+    if k in ('jets', 'helis', 'sub'):
+        stats = [['Planes', '3'], ['Reload', '$0pt', list(_STOCK_PT)]]
+    elif k == 'vehicle':
+        stats = [['Re-request', '$0pt', [8000.0, 21.0, 0.0, 8.0, 1.0, 0.5, 0.0]], ['Durability', '1000'],
+                 ['Fuel', '100'], ['Fuel cost', '1']]
+    elif k == 'throw':
+        stats = [['Number', '$0', [8.0, 0.0, 0.0, 7.0, 0.5, 0.5, 0.0]], ['Damage', '$0', [18.0]], ['Search', '$0m', [30.0]],
+                 ['Reload', '$0 sec', [8.0, 21.0, 2.0, 8.0, 1.0, 0.5, 1.0]], ['Spread', '75.0m']]
+    elif k == 'gun':
+        stats = [[f'line {i}', '', [old, *stars, -1.0]] for i, (old, stars, _) in enumerate(cw.gun_stats(template))]
+    elif k == 'ultimate':
+        stats = [['Damage', '$0', list(_SAT_DAMAGE)], ['Attack Range', 'Radius 70.0m'], ['Reload', '$0pt', list(_SAT_PT)],
+                 ['Laser Range', '$0m', [600.0, 16.0, 2.0, 10.0, 0.8, 1.0, 1.0]], ['Shots', '160'], ['Zoom', '4.0x']]
+    else:   # gravity
+        stats = [['Projection Range', '$0m', [30.0, 8.0, 0.0, 10.0, 0.5, 0.5, 1.0]], ['Lock-on Speed', '1.0x'],
+                 ['Lock-on Range', '300m'], ['Zoom', '2.0x']]
+    return _dnode(['stock name', 'stock description', stats])
+
+
+def _check_call_outputs(c: calls.Call, out: object, row: object, lang: str, durability: float | None) -> None:
+    """Call `c`'s weapon_sgo result `out` and its `lang` text row `row` (made with `durability`): bytes / a Node, and
+    the fields its kind writes written."""
+    assert isinstance(out, bytes) and out, f'{c.id}: weapon_sgo gave {type(out).__name__}, not the SGO'
+    r = dsgo.parse(out).root
+    if 'name.en' in r.names.values():
+        assert r.get('name.en') == calls.call_name(c, 'EN'), (c.id, r.get('name.en'))
+    k = c.brings
+    if k in ('jets', 'helis', 'sub', 'throw', 'ultimate', 'gravity'):
+        assert r.get('AmmoHitSizeAdjust') == float(c.mark), (c.id, r.get('AmmoHitSizeAdjust'), c.mark)
+    if k in ('jets', 'helis', 'sub'):
+        assert r.get('ReloadTime').items[0] == c.reload, c.id
+        assert r.get('Ammo_CustomParameter').items[2].items[1] == c.count, c.id
+    elif k == 'vehicle':
+        assert r.get('ReloadTime').items[0] == c.reload, c.id
+        assert r.get('Ammo_CustomParameter').items[4].items[2] == cw._object_path(c), c.id
+        assert r.get('use_underground') == (1.0 if c.underground else 0.0), c.id
+        assert cw._object_path(c) in r.get('resource').items, c.id
+    elif k == 'throw':
+        assert r.get('AmmoCount').items[0] == c.count and r.get('ReloadTime').items[0] == c.reload, c.id
+    elif k == 'gun':
+        for key, value in cw.GUN_CURVES.items():
+            field = r.get(key)
+            assert (field.items[0] if isinstance(field, dsgo.Node) else field) == value, (c.id, key)
+        assert r.get('AmmoClass') == 'SolidBullet01' and r.get('AmmoAlive') == cw.GUN_LIFE, c.id
+    elif k == 'ultimate':
+        # The damage and the pt the call asks for at every star count (a call is owned at 0 stars: the 2026-10-20 2400).
+        for stars in range(11):
+            assert cw.star_value(r.get('AmmoDamage'), stars) == cw.ULTIMATE_DAMAGE, \
+                (c.id, stars, dsgo.to_py(r.get('AmmoDamage')))
+            assert cw.star_value(r.get('ReloadTime'), stars) == c.reload, (c.id, stars, dsgo.to_py(r.get('ReloadTime')))
+        voices = (*r.get('Ammo_CustomParameter').items[5].items, *r.get('Ammo_EquipVoice').items)
+        assert all(v == '' for v in voices), (c.id, 'its radio lines silenced', voices)
+    elif k == 'gravity':
+        assert r.get('AmmoSpeed').items[0] == cw.GRAVITY_RANGE and r.get('AmmoDamage') == 1.0, c.id
+        assert dsgo.to_py(r.get('AmmoColor')) == list(cw.GRAVITY_COLOR) and r.get('AmmoSize') == cw.GRAVITY_WIDTH, c.id
+    assert isinstance(row, dsgo.Node), f'{c.id} {lang}: _text_row gave {type(row).__name__}, not the row'
+    assert row.items[0] == calls.call_name(c, lang) and row.items[1] == calls.call_description(c, lang), (c.id, lang)
+    stats = dsgo.to_py(row.items[2])
+    if k in ('jets', 'helis', 'sub', 'vehicle'):
+        pt = [s for s in stats if len(s) == 3 and str(s[1]).startswith('$0pt')]
+        assert pt and all(s[2][0] == c.reload for s in pt), (c.id, lang, stats)
+    if k == 'vehicle' and durability is not None:
+        assert stats[1][1] == f'{durability:.0f}', (c.id, lang, stats[1])
+    elif durability is not None:
+        assert f"'{durability:.0f}'" not in repr(stats), (c.id, lang, "a vehicle request's durability line written", stats)
+    if k == 'throw':
+        assert len(stats) == 2 and stats[0][2][0] == c.count and abs(stats[1][2][0] - c.reload / 60.0) < 1e-9, (c.id, stats)
+    elif k == 'ultimate':
+        assert len(stats) == 5, (c.id, lang, "the stock beam's round count left", stats)
+        damage, reload = stats[cw._ULT_DAMAGE_STAT][2], stats[cw._ULT_RELOAD_STAT][2]
+        for stars in range(11):
+            assert cw.star_value(damage, stars) == cw.ULTIMATE_DAMAGE and cw.star_value(reload, stars) == c.reload, \
+                (c.id, lang, stars, damage, reload)
+        assert str(cw.ULTIMATE_RADIUS) in stats[cw._ULT_RANGE_STAT][1], (c.id, lang, stats[cw._ULT_RANGE_STAT])
+    elif k == 'gravity':
+        assert len(stats) == 2 and stats[0][2][0] == cw.GRAVITY_RANGE, (c.id, lang, stats)
+
+
+@test
+def every_call_kind_builds_synthetic() -> None:
+    """Every call (calls.CALLS, every kind it brings) through weapon_sgo and _text_row on stand-ins for its template
+    (no game needed: CI): the SGO comes back as bytes with its kind's fields written, each language's menu row as a
+    Node with its name, description and kind's lines; a vehicle request's durability goes on its durability line and
+    on no other kind's (the ultimate's row is not a vehicle request's)."""
+    kinds = {c.brings for c in calls.CALLS}
+    assert kinds == set(CALL_KINDS), f'a kind of call with no stand-in here: {sorted(kinds - set(CALL_KINDS))}'
+    for c in calls.CALLS:
+        template = _synthetic_call_sgo(c)
+        out = cw.weapon_sgo(template, c, [(0.0, 1.0, 1.0), (5.0, 10.0, 10.0)] if c.brings == 'vehicle' else None)
+        text = _synthetic_call_text(c, template)
+        stats = cw.gun_stats(template) if c.brings == 'gun' else None
+        for lang in cw.LANGS:
+            _check_call_outputs(c, out, cw._text_row(text, c, lang, 4321.0, stats), lang, 4321.0)
+            if c.brings != 'vehicle':
+                _check_call_outputs(c, out, cw._text_row(text, c, lang, None, stats), lang, None)
+    # The star curve as EDF.dll 0xD7CE0 reads it: the satellite's damage a fifth of its base at 0 stars, its base at 5,
+    # about 1.5 times at 10 (the most); its pt twice its base at 0 (a falling curve), its base at 5.
+    near = lambda a, b: abs(a - b) <= 1e-6 * abs(b)   # noqa: E731  (the game's float shares, read back as doubles)
+    assert near(cw.star_value([12000.0, *_SAT_DAMAGE[1:]], 0), 2400.0)
+    assert near(cw.star_value([12000.0, *_SAT_DAMAGE[1:]], 5), 12000.0)
+    assert near(cw.star_value([12000.0, *_SAT_DAMAGE[1:]], 10), 12000.0 * (0.2 + 0.8 * 2 ** 0.7))
+    assert near(cw.star_value([15000.0, *_SAT_PT[1:]], 0), 30000.0) and near(cw.star_value([15000.0, *_SAT_PT[1:]], 5), 15000.0)
+    assert cw.star_value([15000.0, *_SAT_PT[1:]], 12) == cw.star_value([15000.0, *_SAT_PT[1:]], 10), 'most stars 10'
+
+
+@test
+def every_call_kind_builds_real() -> None:
+    """With the game: every call through weapon_sgo and _text_row on its real stock template, SGO and menu rows, as
+    call_weapons.stack makes them (the vehicle requests on their families' curves, the durability shown), the same
+    checks as every_call_kind_builds_synthetic. The satellite's damage curve is still the one the flat curve was made
+    against (a fifth of its base at the 0 stars a call is owned with)."""
+    import rootcpk
+    game = rootcpk.DEFAULT_GAME
+    if not os.path.isfile(os.path.join(game, 'Root.cpk')):
+        return
+    ids = cw.row_ids(cw.stock(game, cw.TABLE))
+    texts = {lang: cw._rows(dsgo.parse(cw.stock(game, rel)), rel) for lang, rel in zip(cw.LANGS, cw.TEXTS)}
+    sgo = {t: cw.stock(game, f'WEAPON/{t.upper()}.SGO') for t in cw.templates()}
+    stock_damage = dsgo.parse(sgo[cw.ULTIMATE_TEMPLATE]).root.get('AmmoDamage')
+    assert abs(cw.star_value([cw.ULTIMATE_DAMAGE, *stock_damage.items[1:]], 0) - cw.ULTIMATE_DAMAGE * 0.2) < 0.01, \
+        dsgo.to_py(stock_damage)
+    families = {cw.request_family(c) for c in calls.CALLS if c.brings == 'vehicle'}
+    curves = {f: cw.request_curve(game, f) for f in families}
+    for c in calls.CALLS:
+        t = cw.template_of(c)
+        out = cw.weapon_sgo(sgo[t], c, curves.get(cw.request_family(c)))
+        durability = cw.vehicle_durability(game, c) if c.brings == 'vehicle' else None
+        stats = cw.gun_stats(sgo[t]) if c.brings == 'gun' else None
+        at = cw._template_index(ids, t)
+        for lang in cw.LANGS:
+            _check_call_outputs(c, out, cw._text_row(texts[lang][at], c, lang, durability, stats), lang, durability)
+
+
+@test
+def sound_at_takes_a_still_sound() -> None:
+    """SoundAt's contract (src/crew.h, src/sound_place.h): `vel` may be nullptr, a still sound; the arithmetic that reads
+    it is sound_place.h's, which checks it (2026-10-20 smoke test: the ultimate's recordings passed none, jetsound.cpp's
+    Place read through it and the show's step faulted on every cue). jetsound.cpp reads no velocity outside it; the
+    offline check runs in CI."""
+    place, jet = src('src/sound_place.h'), src('src/jetsound.cpp')
+    assert 'if(!v)return 0.0f;' in place and 'Closing(vel,u)' in place and 'Closing(camVel,u)' in place
+    assert '*out=soundplace::Place(listener,listenerVel,pos,vel);' in jet
+    assert not re.search(r'Dot\(\s*(vel|listenerVel)\s*,', jet), 'jetsound.cpp reads a velocity outside sound_place.h'
+    assert '`vel` may be nullptr' in src('src/crew.h')
+    cmake = src('CMakeLists.txt')
+    assert 'add_executable(sound_place_check EXCLUDE_FROM_ALL tools/sound_place_check.cpp)' in cmake
+    assert re.search(r'set\(EDF6_OFFLINE_CHECKS[^)]*\bsound_place_check\b', cmake)
+
+
+@test
+def cockpit_fields_current() -> None:
+    """The instruments' field numbers and the round classes are one table (pylib/cockpit_fields.py): the C++ enums are
+    generated from it, and the model side imports it, not a copy."""
+    import gen_cockpit_fields
+    import cockpit_fields as cf
+    with open(gen_cockpit_fields.OUT, encoding='utf-8', newline='') as f:
+        assert f.read().replace('\r\n', '\n') == gen_cockpit_fields.render(), \
+            'src/cockpit_fields.inc is stale: python tools/gen_cockpit_fields.py'
+    assert '#include "cockpit_fields.inc"' in src('src/cockpit_instruments.h')
+    assert '#include "cockpit_fields.inc"' in src('src/hud_cue.h')
+    assert 'enum Field' not in src('src/cockpit_instruments.h') and 'enum class CockpitRound' not in src('src/hud_cue.h')
+    assert 'from cockpit_fields import' in src('pylib/cockpit_instruments.py')
+    # The numbers the models already built carry (appended only).
+    assert (cf.HP, cf.POWER, cf.ARM, cf.PICK, cf.ROW, cf.ROWROUND, cf.ROLL, cf.COUNT) == (0, 11, 12, 16, 17, 20, 23, 24)
+    assert cf.ROUNDS == ('MG', 'GUN', 'AP', 'HE', 'HEAT', 'CAN', 'BEAM', 'RKT', 'MSL', 'AAM', 'BOMB', 'SPC')
+    # A stock weapon's round class reads the sight's tag by reticle::Shell, not by bare numbers.
+    hud_cue = src('src/hud_cue.h')
+    assert 'reticle::Shell shell' in hud_cue and 'case reticle::Shell::canister: return CockpitRound::can;' in hud_cue
 
 
 @test
@@ -981,10 +1381,10 @@ def hand_copies_agree() -> None:
     sgos = set(re.findall(r'L"app:/object/(edf6vc_[a-z0-9_]+\.sgo)"', jet_src))
     assert files and {f.lower() for f in files} == sgos, 'src/jet*: the file names and the app:/object paths disagree'
     # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py; the
-    # Proteus's shield: tools/make_proteus.py
+    # Proteus's shield: tools/make_proteus.py; the ultimate strike's rounds: tools/make_ultimate.py
     import make_proteus
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
-               | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]})
+               | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES))
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -1059,7 +1459,7 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield \};',
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather \};',
                      src('src/crew.h')), 'src/crew.h EmcRound'
     # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
     sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
@@ -1103,6 +1503,56 @@ def emc_copies_agree() -> None:
     import rootcpk
     if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         make_emc.build(rootcpk.DEFAULT_GAME)
+
+
+@test
+def ultimate_copies_agree() -> None:
+    """The ultimate strike (src/ultimate.cpp, src/ultimate_plan.h, pylib/vcobjects.py ULT_*, tools/make_ultimate.py,
+    tools/call_weapons.py ULTIMATE_*): src/jet_bay.cpp preloads and fires exactly the files tools/make_ultimate.py writes,
+    after the EMC's, the Sazabi's and the Proteus's, in EmcRound's order; the C++ copies of the area, a bolt's rounds and a
+    ring's blast are the Python ones; the call is one satellite call of ours (its marker unique, its template a fire state
+    the hook knows); the hook, the tick, the mission reset and the build are wired; the tool is the installer's and the
+    ledger's; the offline check is a target. With the game: the SGOs build and pass check_ult."""
+    import make_ultimate
+    bay, plan = src('src/jet_bay.cpp'), src('src/ultimate_plan.h')
+    files = re.findall(r'\{L"app:/object/(edf6vc_ult_[a-z_]+\.sgo)",L"(EDF6VC_ULT_[A-Z_]+\.SGO)"', bay)
+    assert [f for _, f in files] == list(vc.ULT_FILES) and all(s == f.lower() for s, f in files), files
+    assert bay.index('EDF6VC_PROTEUS_SHIELD.SGO') < bay.index(vc.ULT_FILES[0]), "kEmcFiles: the ultimate's after the Proteus's"
+    import magic_circle
+    assert make_ultimate.names() == [f'OBJECT/{n}' for n in (*vc.ULT_FILES, *magic_circle.files())]
+    assert make_ultimate.OWNER in ledger.OWNERS
+    # the circles: src/ultimate.cpp kCircleFiles in CircleModel's order are pylib/magic_circle.py LAYERS'
+    strike_src = src('src/ultimate.cpp')
+    circles = re.findall(r'\{L"app:/object/(edf6vc_ult_circle_[a-z]+\.sgo)",L"(EDF6VC_ULT_CIRCLE_[A-Z]+\.SGO)"', strike_src)
+    assert [f for _, f in circles] == [magic_circle.sgo_file(k) for k in magic_circle.LAYERS] and \
+        all(s == f.lower() for s, f in circles), circles
+    model = re.search(r'enum class CircleModel : unsigned char \{ ([a-z, ]+) \};', plan)
+    assert model and [m.strip().upper() for m in model.group(1).split(',')] == list(magic_circle.LAYERS), model
+    radii = re.search(r'kModelRadius\[kModelCount\]=\{([^}]*)\}', plan)
+    assert radii and [float(x.strip().rstrip('f')) for x in radii.group(1).split(',')] ==         [magic_circle.LAYERS[k].radius for k in magic_circle.LAYERS], radii
+    assert 'PreloadUltimate(mgr);' in src('src/jet_spawn.cpp')
+    for name, value in (('kRadius', cw.ULTIMATE_RADIUS), ('kRingBlast', vc.ULT_BLAST_RADIUS)):
+        m = re.search(rf'\b{name}=([\d.]+)f', plan)
+        assert m and float(m.group(1)) == value, (name, m and m.group(1), value)
+    m = re.search(r'\bkGatherReach=([\d.]+)f', plan)
+    assert m and float(m.group(1)) == vc.ULT_GATHER_REACH, m and m.group(1)
+    m = re.search(r'\bkBoltFrames=(\d+);', plan)
+    assert m and int(m.group(1)) == vc.ULT_BOLT_ROUNDS, m and m.group(1)
+    ults = [c for c in calls.CALLS if c.brings == 'ultimate']
+    assert ults and all(cw.template_of(c) == cw.ULTIMATE_TEMPLATE and c.mark >= 1 and float(c.mark).is_integer()
+                        for c in ults), ults
+    strike, crew, airstrike = src('src/ultimate.cpp'), src('src/crew.cpp'), src('src/airstrike.cpp')
+    assert 'InstallUltimate()' in airstrike and 'UltimateStart(owner,aim,' in airstrike
+    assert 'GuardedTick(kStepUltimate,&UltimateTick);' in crew and 'ResetUltimate();' in src('src/mission.cpp')
+    assert 'EmcRound::ultBeam' in strike and 'kSkyBackSec' in strike
+    inst = src('tools/installer.py')
+    assert 'build_asset(cache, make_ultimate,' in inst and 'make_ultimate.install(game, ult)' in inst and 'make_ultimate.remove' in inst
+    assert "'ultimate'" in src('pylib/buildcache.py')
+    cmake = src('CMakeLists.txt')
+    assert 'src/ultimate.cpp' in cmake and 'add_executable(ultimate_check EXCLUDE_FROM_ALL tools/ultimate_check.cpp)' in cmake
+    import rootcpk
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        make_ultimate.build(rootcpk.DEFAULT_GAME)
 
 
 @test
@@ -1184,14 +1634,15 @@ def sidecar_tub_holds_the_gunner() -> None:
 @test
 def shkt_check_on_synthetic_data() -> None:
     """pylib/shkt_check.py without the game (tests/test_shkt_check.py Portable): hull / box geometry, SHKT refs, and
-    an SGO whose ragdoll mapping or accessory names a body its SHKT lacks is an error. The stock-file mutations of the
-    same test file need the game; tools/check_shkt.py checks an installed Mods folder."""
+    an SGO whose ragdoll mapping or accessory names a body its SHKT lacks is an error, a 4.1 ragdoll (Havok 2014
+    tagfile, pylib/hk2014.py) included; the module's massDistribution note matches pylib/aircraft_collision.py. The
+    stock-file mutations of the same test file need the game; tools/check_shkt.py checks an installed Mods folder."""
     import unittest
     sys.path.insert(0, os.path.join(ROOT, 'tests'))
     import test_shkt_check
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(test_shkt_check.Portable)
     result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
-    assert result.wasSuccessful() and result.testsRun == 5, (result.failures, result.errors)
+    assert result.wasSuccessful() and result.testsRun == 8, (result.failures, result.errors)
 
 
 @test
@@ -2617,7 +3068,7 @@ def proteus_wired() -> None:
     # The shield: the stock barrier round raised through the EMC table (preloaded whenever its file is installed).
     bay = src('src/jet_bay.cpp')
     assert 'L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO"' in bay
-    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::proteusShield)+1' in bay
+    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::ultGather)+1' in bay   # the Proteus's before the ultimate's
     assert 'PreloadShells(mgr,Preloaded(Body::gunship));' in src('src/jet_spawn.cpp')
     assert 'EmcFire(EmcRound::proteusShield,v,p,at,1.0f)' in shield
     assert "SHIELD_FILE = 'OBJECT/EDF6VC_PROTEUS_SHIELD.SGO'" in src('tools/make_proteus.py')
@@ -4389,8 +4840,9 @@ def artillery_ragdoll_is_the_models() -> None:
     import struct
     parsed = rf.Shkt(shkt)
     assert parsed.joints and len(parsed.ref) == len(parsed.bodies) == 22, 'the Kepler reference pose was not loaded'
-    corrupted = bytearray(shkt)
-    struct.pack_into('<f', corrupted, parsed.ref[0], parsed.ref_t(0)[0] + 1.0)
+    damaged = rf.Shkt(shkt)
+    damaged.set_ref_t(0, (parsed.ref_t(0)[0] + 1.0, *parsed.ref_t(0)[1:]))
+    corrupted = damaged.bytes()
     assert any(x.startswith('reference pose of ') for x in rf.problems(kepler, bytes(corrupted), blob)), \
         'a corrupt reference pose escaped validation'
     # Move a real stock turret without requiring an external model folder: fitting must rewrite the serialized
@@ -4402,9 +4854,9 @@ def artillery_ragdoll_is_the_models() -> None:
     changed = [k for k in range(len(parsed.ref)) if rf.dist(parsed.ref_t(k), fitted.ref_t(k)) > 1e-3]
     assert changed, 'the moved turret retained the stock reference pose'
     assert rf.problems(moved, moved_shkt, moved_blob) == []
-    stale = bytearray(moved_shkt)
     for k in changed:
-        struct.pack_into('<3f', stale, fitted.ref[k], *parsed.ref_t(k))
+        fitted.set_ref_t(k, parsed.ref_t(k))
+    stale = fitted.bytes()
     assert any(x.startswith('reference pose of ') for x in rf.problems(moved, bytes(stale), moved_blob)), \
         'refitting stopped checking the serialized reference pose'
     assert make_artillery.ragdoll(game, kepler) == (shkt, blob), 'refitting the Kepler to itself changed it'
@@ -4930,8 +5382,22 @@ def map_commands_wired() -> None:
     assert 'placeHoldsPad.store(placeKeys && ' in code and '(placeKeys && ((k.padUp && !g.was.padUp)' in code
     frame = mapc.split('bool Frame(unsigned char* human)', 1)[1].split('\n}\n', 1)[0]
     assert frame.index('if(!game.open) {') < frame.index('MapCommandFrame(in,onto)'), 'the commands read keys only with the map open'
-    # The box (Ctrl + left drag) never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧").
-    assert 'if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured()){mapcam::Drag(v,dx,dy);' in mapc
+    # The box never pans: the map's left drag gives way to it (the user, 2026-10-06: "操作 需要一个框选吧"; RTS since
+    # 2026-10-19: a plain left drag boxes whenever there is a unit to box, the middle button's drag pans).
+    assert 'if(Down(VK_MBUTTON) || (Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured())){mapcam::Drag(v,dx,dy);' in mapc
+    assert 'else if(k.ctrl || (boxes && !armed)){g.boxing=true;' in code, 'a plain left drag over the map is the box'
+    # The RTS groups, the Shift queue and HOLD (2026-10-19: 「合并分组经常无效，分开也是」): SPLIT / JOIN are gone, the
+    # queue goes on with the map shut (map.cpp Frame ticks it before its open test), a group follows a squad's hand-over.
+    assert 'SplitSquad' not in code and 'MergeSquads' not in code and 'SplitSquad' not in src('src/npcai.cpp')
+    # The Shift queues advance on the scene's tick (2026-10-20): every soldier's pre-update before the player test, and the
+    # shared frame tick (vehicles' input) -- not the player's map frame, which stops with the player dead or watching.
+    human_frame = mapc.split('bool __fastcall MapHumanFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert 'MapCommandQueueTick();' not in frame and \
+        human_frame.index('MapCommandQueueTick();') < human_frame.index('if(!human || !human[kHumanPlayer]'), 'the queue advances on the scene tick'
+    assert 'GuardedTick(kStepMapQueue,&MapCommandQueueTick);' in src('src/crew.cpp')
+    assert 'crew::AuthorityQueue();' in src('tools/map_command_runtime_check.cpp')
+    assert 'NpcSquadSuccessor(' in code and 'handovers[handoverNext]=Handover{' in src('src/npcai.cpp')
+    assert 'crew::RtsGroups();' in src('tools/map_command_runtime_check.cpp')
     assert frame.index('MapCommandEats(front)') < frame.index('MapCommandFrame(in,onto)') < frame.index('Steer(human,dt,front') < frame.index('PumpPayloadUi(human)'), 'UI capture and mark edges precede camera drag; map requests pump while native inputs are held'
     assert 'Down(VK_RBUTTON) && !MapCommandPointerCaptured()' in mapc
     assert 'MapCommandView(vp,width,height);' in src('src/hud.cpp')
@@ -4944,7 +5410,7 @@ def map_commands_wired() -> None:
     assert 'const float* leader=r.cmd.order==Order::guard ? r.cmd.at : hasLeader ? player.pos : nullptr;' in ground
     cmd = heli.split('bool HeliCommand(const void* vehicle,const Command& c,const ObjRef& focus)', 1)[1].split('\n}\n', 1)[0]
     assert 'h->guard=true;' in cmd and 'h->orbitSet=false;' in cmd and 'h->guard=h->ownGuard;' in cmd
-    for key in ('Ctrl', 'Shift', 'Tab', 'G', 'V', 'X', '联机指令', '框选'):
+    for key in ('Ctrl', 'Shift', 'Tab', 'Z', 'H', 'V', 'X', '联机指令', '框选', '编队'):
         assert key in readme, key
     assert '指挥 NPC' in readme
 
@@ -5110,8 +5576,20 @@ def map_wired() -> None:
     assert 'CancelToggle(human);if(Current().on)Leave();' in fp and 'keyClaimHuman==human && keyClaimControl==key.control' in fp
     assert 'Foreground() && !MapHoldsKeys()' in src('src/room_ui.cpp'), 'the room menu keys give way to the map'
     thermal = src('src/thermal.cpp')
-    assert '!GamePaused() && !MapHoldsKeys() && shot.inSight && down && !keyHeld' in thermal, 'thermal switching gives way to map/pause and requires the actual optic'
+    # Thermal switching (#217: a press chooses the mode on an equipped seat in or out of the sight; it is drawn only
+    # through the sight): it gives way to the map and the pause, and only a seat with the actual thermal equipment
+    # (VehicleHasThermal) turns a press into a request; elsewhere the press is only answered on the HUD (rejectedAt).
+    tick = thermal.split('void TickPlayer(Player& p,unsigned char* human,bool enabled,unsigned toggleKey) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'const bool admitted=!GamePaused() && !MapHoldsKeys();' in tick, 'thermal switching gives way to map/pause'
+    assert 'const bool equipped=seated && VehicleHasThermal(vehicle,seat);' in tick, 'thermal switching requires the actual optic'
+    assert 'if(admitted && equipped && press)CycleModeOf(p);' in tick and tick.count('CycleModeOf(') == 1, 'thermal: one gated request'
+    assert tick.index('if(!equipped) {') < tick.index('CycleModeOf(p)'), 'a seat without the equipment returns before any request'
+    assert 'shot.inSight=!MapOwnsView() &&' in tick, 'the image is drawn only through the sight, never under the map'
     assert 'process==GetCurrentProcessId()' in thermal, 'the thermal key reader requires this game window'
+    assert 'seatsw::ChordHeld(At<std::uint16_t>(s,edf::kSeatButtons),static_cast<unsigned>(Cfg().thermalButton))' in thermal, \
+        'a pad seat toggles thermal by its seat-button chord'
+    for rel in ('src/sightzoom.cpp', 'src/highcam.cpp', 'src/turretcam.cpp'):
+        assert 'seatsw::ChordOwns(' in src(rel) and 'c.thermalButton' in src(rel), f'{rel}: its button gives way to the thermal chord'
     controlled = src('src/enemy_control.cpp')
     sample = controlled.split('void Sample(Session& session,Input& sample) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,0x688)) {' in sample
@@ -5514,7 +5992,8 @@ def npc_ai_wired() -> None:
     hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
     assert hook.index('HideWalkUp(') < hook.index('nextThink[I](human,dt);') < hook.index('h[kAutoFollow]=walkUp;')
     walk = code.split('bool WalkUpOff() noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'followOk' in walk and 'Cfg().customNpcAi' in walk and '!Cfg().vanillaRecruit' in walk, \
+    # VanillaRecruit as played (host_settings.h: the host's online, this machine's ini otherwise; 2026-10-20 review)
+    assert 'followOk' in walk and 'Cfg().customNpcAi' in walk and '!VanillaRecruitInEffect()' in walk, \
         'the walk-up stays when the map cannot recruit (AI off, SetFollow not as read) or VanillaRecruit=1'
     assert '!(joinOrder && NativeJoinable(top))' in cmd.split('switch', 1)[0]
     assert 'if(e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;' in takes
@@ -10222,6 +10701,35 @@ def edf41_friend_grip_shipped() -> None:
 
 
 @test
+def edf41_friend_climb_shipped() -> None:
+    """No shipped soldier carries human_climb_settings (EDF6's climb over a ledge) unless its CAS's main player has every
+    climb state the climb plays (make_edf41_objects SOLDIER_CLIMB_STATES): the climb state leaves only when that state is done,
+    so a CAS without them froze the soldier in place for good (2026-10-19: 「NPC有的会立正」). 4.1's three soldier CAS
+    have none, so none of the 28 4.1 soldiers climbs; every other shipped soldier keeps its climb only with the states."""
+    import cas_graft
+    import edf41_objects as eo
+    import edf41friends as ef
+    import make_edf41_objects as m
+    import sgo
+    reg = eo.registry()
+    soldiers = 0
+    for rel in sorted(r for r in reg['files'] if r.endswith('.SGO')):
+        d = sgo.load(data=eo.read(rel))
+        if str(d.get('xgs_scene_object_class')) not in m.NULL_CHECKED_KEYS:
+            continue
+        soldiers += 1
+        cas_rel = m.rel_of(d['animation_model'][1])
+        assert cas_rel in reg['files'], (rel, cas_rel)
+        missing = m.climb_states_missing(eo.read(cas_rel))
+        assert m.SOLDIER_CLIMB_KEY not in d or not missing, (rel, cas_rel, missing)
+    for cas_rel in m.FRIEND_CAS:
+        assert m.climb_states_missing(eo.read(cas_rel)) == list(m.SOLDIER_CLIMB_STATES), cas_rel
+    units = [ef.look_rel(r) for r in ef.LOOKS] + list(EDF41_SOLDIERS)
+    assert all(m.SOLDIER_CLIMB_KEY not in sgo.load(data=eo.read(r)) for r in units)
+    assert soldiers >= len(units) == 28, (soldiers, len(units))
+
+
+@test
 def edf41_friend_grip_matches_weapons() -> None:
     """Actual 4.1 source MAB/IK/model/CAS and HOLD fields are preserved exactly, not only close in bind pose."""
     import dsgo
@@ -11747,8 +12255,9 @@ def edf41_rest_behaviour_real() -> None:
         with open(os.path.join(base, name + '.SGO'), 'rb') as f:
             return sgo.load(data=f.read())
 
-    def plain(v: object) -> object:
-        return [plain(x) for x in v] if isinstance(v, list) else round(v.value, 6) if isinstance(v, sgo.Float) else v
+    def plain(v: object) -> object:   # a classic SGO's Float or a DSGO's double (V301 is a DSGO: Vehicle601_Tank's form)
+        return ([plain(x) for x in v] if isinstance(v, list) else round(v.value, 6) if isinstance(v, sgo.Float) else
+                round(v, 6) if isinstance(v, float) else v)
 
     def pairs(v: list) -> list[int]:
         assert all(isinstance(x, list) and len(x) == 2 and isinstance(x[1], int) for x in v), 'not [blob, slot] pairs'
@@ -11802,7 +12311,7 @@ def edf41_rest_behaviour_real() -> None:
     assert all(n.startswith('小型UFO507') for n in load('UFO401')['se_table'])
     tank = load('VEHICLE301_TANK_AI')
     assert plain(tank['game_object_ai_route_update_distance']) == 3.0 and plain(tank['car_base_submerge_height']) == 1.7
-    assert tank['xgs_scene_object_class'] == 'Vehicle505_Tank' and plain(tank['game_object_durability']) == 700.0
+    assert tank['xgs_scene_object_class'] == 'Vehicle601_Tank' and plain(tank['game_object_durability']) == 700.0
 
 
 def _mini_mab(flag: int) -> bytes:

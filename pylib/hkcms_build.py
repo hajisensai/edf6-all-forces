@@ -4,8 +4,7 @@ stock EDF6 files have (docs/map-collision.md; the tree rules are pylib/hkcms.py'
 map loader can use, so the terrain converted from EDF4.1 (pylib/sk_terrain.py) goes in as a triangle mesh like EDF6's
 own ground (ig_heigen507_2).
 
-  load(raw) -> Doc                  a tagfile as items (type, flags, bytes, count) + the donor's type tables
-  Doc.emit() -> bytes               the tagfile again: with nothing changed, byte for byte the same file
+  The tagfile itself is pylib/hkfile.py's graph (read, written back by Havok's layout rules).
   build_collision(donor, terrain_name, heights, x0, z0, step, bodies, tile_cells) -> bytes   the collision.hkt
   write_mad(hkt) -> bytes           the MAD (a MARC holding that file)
 
@@ -19,187 +18,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-import hktag
-
-PRIM = {'hkUint32': (4, 4), 'unsigned int': (4, 4), 'hkUint16': (2, 2), 'hkUint8': (1, 1), 'char': (1, 1),
-        'unsigned long long': (8, 4), 'hkVector4': (16, 16),
-        'hkFreeListArrayElement<hknpShapeInstance>': (64, 16),
-        'hknpThreadSafeObjectPoolElement<hknpMaterial>': (60, 4),
-        'hknpThreadSafeObjectPoolElement<hknpMotionProperties>': (104, 4)}
-
-
-@dataclass
-class Item:
-    tidx: int            # type index (TNA1 order)
-    flags: int           # 16 = one object, 32 = an array (the stock files' two values)
-    count: int
-    data: bytes
-
-
-@dataclass
-class Doc:
-    sdkv: bytes                  # payload of SDKV
-    tst1: bytes
-    tna1: bytes
-    fst1: bytes
-    tbdy: bytes
-    tpad: bytes
-    items: list[Item]            # [0] is the null item
-    layout: list[int] = field(default_factory=list)    # item indices in DATA order
-    tag: hktag.Tag | None = None
-    aligns: dict[int, tuple[int | None, int | None]] = field(default_factory=dict)   # type index -> (size, align)
-
-    def tname(self, tidx: int) -> str:
-        return self.tag.tname(tidx)
-
-    def size_align(self, tidx: int) -> tuple[int, int]:
-        name = self.tname(tidx)
-        if name in PRIM:
-            return PRIM[name]
-        s, a = self.aligns.get(tidx, (None, None))
-        if s is None:
-            raise ValueError('no size for type ' + name)
-        return s, a or 1
-
-    def add(self, type_name: str, count: int, data: bytes, flags: int = 32) -> int:
-        """A new item (its index)."""
-        tidx = self.tag.type_index(type_name)
-        size, _ = self.size_align(tidx)
-        if len(data) != size * count:
-            raise ValueError(f'{type_name}: {len(data)} bytes for {count} x {size}')
-        self.items.append(Item(tidx, flags, count, data))
-        self.layout.append(len(self.items) - 1)
-        return len(self.items) - 1
-
-    # --------------------------------------------------------------------------------------------- emit
-
-    def emit(self) -> bytes:
-        data = bytearray()
-        offs = [0] * len(self.items)
-        for i in self.layout:
-            it = self.items[i]
-            _, a = self.size_align(it.tidx)
-            data += bytes(-len(data) % a)
-            offs[i] = len(data)
-            data += it.data
-        data += bytes(-len(data) % 16)              # DATA ends on a 16 byte boundary
-        index = bytearray()
-        for it, o in zip(self.items, offs):
-            index += struct.pack('<III', it.tidx | it.flags << 24, o, it.count)
-        types = _sec(b'TST1', self.tst1, True) + _sec(b'TNA1', self.tna1, True) + _sec(b'FST1', self.fst1, True) + \
-            _sec(b'TBDY', self.tbdy, True) + _sec(b'TPAD', self.tpad, True)
-        body = _sec(b'SDKV', self.sdkv, True) + _sec(b'DATA', bytes(data), True) + _sec(b'TYPE', types, False) + \
-            _sec(b'INDX', _sec(b'ITEM', bytes(index), True), False)
-        return _sec(b'TAG0', body, False)
-
-
-def _sec(tag: bytes, payload: bytes, leaf: bool) -> bytes:
-    return struct.pack('>I', (1 << 30 if leaf else 0) | (len(payload) + 8)) + tag + payload
-
-
-def _tbdy_sizes(b: bytes, o: int, end: int) -> dict[int, tuple[int | None, int | None]]:
-    """type index -> (size, alignment) of every TBDY entry (hktag.Tag drops the alignment)."""
-    out: dict[int, tuple[int | None, int | None]] = {}
-    while o < end:
-        ti, o = hktag.varint(b, o)
-        if ti == 0:
-            continue
-        _, o = hktag.varint(b, o)
-        opt, o = hktag.varint(b, o)
-        for bit in (1, 2, 4):
-            if opt & bit:
-                _, o = hktag.varint(b, o)
-        size = align = None
-        if opt & 8:
-            size, o = hktag.varint(b, o)
-            align, o = hktag.varint(b, o)
-        if opt & 0x10:
-            _, o = hktag.varint(b, o)
-        if opt & 0x20:
-            n, o = hktag.varint(b, o)
-            for _ in range((n & 0xFFFF) * 4):
-                _, o = hktag.varint(b, o)
-        if opt & 0x40:
-            n, o = hktag.varint(b, o)
-            for _ in range(2 * n):
-                _, o = hktag.varint(b, o)
-        if opt & 0x80:
-            _, o = hktag.varint(b, o)
-        out[ti] = (size, align)
-    return out
-
-
-def load(raw: bytes) -> Doc:
-    """A tagfile as a Doc (ValueError when its sections are not the stock layout)."""
-    tag = hktag.Tag(raw)
-    sec = hktag.sections(raw)
-    part = {k: raw[a:b] for k, (a, b) in sec.items()}
-    doc = Doc(part['/TAG0/SDKV'], part['/TAG0/TYPE/TST1'], part['/TAG0/TYPE/TNA1'], part['/TAG0/TYPE/FST1'],
-              part['/TAG0/TYPE/TBDY'], part['/TAG0/TYPE/TPAD'], [], [], tag,
-              _tbdy_sizes(raw, *sec['/TAG0/TYPE/TBDY']))
-    d0 = sec['/TAG0/DATA'][0]
-    spans = []
-    for f, o, n in tag.items:
-        tidx, fl = f & 0xFFFFFF, f >> 24
-        if tidx == 0:
-            doc.items.append(Item(0, 0, 0, b''))
-            continue
-        size, _ = doc.size_align(tidx)
-        doc.items.append(Item(tidx, fl, n, raw[d0 + o:d0 + o + size * n]))
-        spans.append((o, len(doc.items) - 1))
-    doc.layout = [i for _, i in sorted(spans)]
-    return doc
-
-
-# ------------------------------------------------------------------------------------------------ pointers
-
-_PTR_PREFIX = ('hkRelPtr<', 'hkRelArray<', 'hkRelArrayView<', 'hkArray<', 'hkRefPtr<', 'hkFreeListRelArray<')
-
-
-def pointer_offsets(doc: Doc, tidx: int) -> list[int]:
-    """Byte offsets inside one object of `tidx` that hold an item index (compact layout: every pointer and array is
-    one u32 item index)."""
-    cache = doc.__dict__.setdefault('_ptr_cache', {})
-    if tidx in cache:
-        return cache[tidx]
-    tag = doc.tag
-    out: list[int] = []
-
-    def walk(ti: int, base: int) -> None:
-        for m in tag.members(ti).values():
-            name = tag.tname(m.type)
-            if name.startswith(_PTR_PREFIX) or name == 'hkStringPtr' or '*' in name:
-                out.append(base + m.offset)
-            elif m.type in tag.bodies and tag.members(m.type):
-                walk(m.type, base + m.offset)
-    walk(tidx, 0)
-    cache[tidx] = sorted(set(out))
-    return cache[tidx]
-
-
-def pointers(doc: Doc, i: int) -> list[tuple[int, int]]:
-    """(byte offset in the item's data, target item) of every non-null pointer of item i."""
-    it = doc.items[i]
-    size, _ = doc.size_align(it.tidx)
-    out = []
-    for off in pointer_offsets(doc, it.tidx):
-        for k in range(it.count):
-            v = struct.unpack_from('<I', it.data, k * size + off)[0]
-            if v:
-                out.append((k * size + off, v))
-    return out
-
-
-def reachable(doc: Doc, roots: list[int]) -> set[int]:
-    seen: set[int] = set()
-    todo = list(roots)
-    while todo:
-        i = todo.pop()
-        if i in seen:
-            continue
-        seen.add(i)
-        todo += [v for _, v in pointers(doc, i)]
-    return seen
+import hkfile
+from hkfile import Block, Tagfile
 
 
 # ------------------------------------------------------------------------------------------------ meshes
@@ -386,137 +206,114 @@ SECTION = 'hkcdStaticMeshTree::Section'
 
 
 class Builder:
-    """Adds the stock layout's items for meshes, compounds and bodies to a donor Doc (offsets looked up in its TBDY)."""
+    """Adds the stock layout's blocks for meshes, compounds and bodies to a donor tagfile (its own types)."""
 
-    def __init__(self, doc: Doc) -> None:
-        self.doc = doc
-        self.tag = doc.tag
-        t = self.tag
-        self.o = {m: t.offset(TREE, m) for m in ('nodes', 'domain', 'numPrimitiveKeys', 'bitsPerKey', 'maxKeyValue',
-                                                  'primitiveStoresIsFlatConvex', 'sections', 'primitives',
-                                                  'sharedVerticesIndex', 'packedVertices', 'sharedVertices',
-                                                  'primitiveDataRuns')}
-        self.o_simd = t.offset(CMS_DATA, 'simdTree') + t.offset('hkcdSimdTree', 'nodes')
-        self.o_simd_compact = t.offset(CMS_DATA, 'simdTree') + t.offset('hkcdSimdTree', 'isCompact')
-        self.o_has_simd = t.offset(CMS_DATA, 'hasSimdTree')
-        self.sz_data = t.size(CMS_DATA)
-        self.sz_cms = t.size(CMS)
-        self.sz_sec = t.size(SECTION)
-        self.sz_comp = t.size('hknpCompoundShape')
-        self.sz_inst = 64
-        self.shape_o = {m: t.offset(CMS, m) for m in ('properties', 'data', 'triangleIsInterior', 'numTriangles',
-                                                      'numConvexShapes', 'externShapes', 'shapeTagCodecInfo')}
-        self.comp_o = {m: t.offset('hknpCompoundShape', m) for m in ('properties', 'instances', 'instanceVelocities',
-                                                                     'aabb', 'boundingRadius', 'isMutable',
-                                                                     'estimatedNumShapeKeys', 'boundingVolumeData')}
-        self.comp_simd = self.comp_o['boundingVolumeData'] + t.offset('hknpCompoundShapeData', 'simdTree')
-        self.comp_type = self.comp_o['boundingVolumeData'] + t.offset('hknpCompoundShapeData', 'type')
+    def __init__(self, tf: Tagfile) -> None:
+        self.tf = tf
 
     # ---- strings and properties
 
-    def chars(self, text: str) -> int:
-        return self.doc.add('char', len(text.encode()) + 1, text.encode() + b'\0')
+    def string_object(self, text: str) -> Block:
+        so = self.tf.new('hkStringObject')
+        so.value['string'].set_target(self.tf.string(text))
+        return so
 
-    def string_object(self, text: str) -> int:
-        c = self.chars(text)
-        return self.doc.add('hkStringObject', 1, struct.pack('<I', c), 16)
-
-    def prop(self, string_obj: int) -> int:
-        return self.doc.add('hknpShapeProperties::Property', 1, struct.pack('<II', string_obj, 0xF201))
+    def prop(self, string_obj: Block) -> Block:
+        p = self.tf.new('hknpShapeProperties::Property')
+        p[0]['object'].set_target(string_obj)
+        p[0]['key'].set_int(0xF201)
+        return p
 
     # ---- a mesh
 
-    def mesh(self, m: Mesh, string_obj: int) -> int:
-        """The items of one compressed mesh; its hknpCompressedMeshShape item."""
-        d, o = self.doc, self.o
+    def mesh(self, m: Mesh, string_obj: Block) -> Block:
+        """The blocks of one compressed mesh; its hknpCompressedMeshShape."""
+        tf = self.tf
         nm = len(m.prims)
         keys = m.max_key + 1
         bpk = keys.bit_length()
-        sec_nodes = d.add('hkcdCompressedAabbCodecs::Aabb4BytesCodec', 2 * nm - 1, _section_tree(m.boxes, m.domain))
-        mesh_node = hkcms.encode_box(m.domain, m.domain) + b'\0\0'
-        nodes = d.add('hkcdCompressedAabbCodecs::Aabb5BytesCodec', 1, mesh_node)
-        sec = bytearray(self.sz_sec)
-        so = {k: self.tag.offset(SECTION, k) for k in ('nodes', 'domain', 'codecParms', 'firstPackedVertexIndex',
-                                                      'firstSharedVertexIndex', 'firstPrimitiveIndex',
-                                                      'firstDataRunIndex', 'numPackedVertices', 'numPrimitives',
-                                                      'numDataRuns')}
+        sec_nodes = tf.new('hkcdCompressedAabbCodecs::Aabb4BytesCodec', 2 * nm - 1, _section_tree(m.boxes, m.domain))
+        nodes = tf.new('hkcdCompressedAabbCodecs::Aabb5BytesCodec', 1, hkcms.encode_box(m.domain, m.domain) + b'\0\0')
         runs = _runs(m.values)
-        struct.pack_into('<I', sec, so['nodes'], sec_nodes)
-        struct.pack_into('<8f', sec, so['domain'], *m.domain[0], 1.0, *m.domain[1], 1.0)
-        struct.pack_into('<6I', sec, so['codecParms'], *([0x7F7FFFEE] * 3 + [0xFF800000] * 3))
-        sec[so['numPackedVertices']] = 0
-        sec[so['numPrimitives']] = nm
-        sec[so['numDataRuns']] = len(runs)
-        sections = d.add(SECTION, 1, bytes(sec))
-        prims = d.add('hkcdStaticMeshTree::Primitive', nm, m.prims.tobytes())
-        svi = d.add('hkUint16', len(m.sv), np.arange(len(m.sv), dtype='<u2').tobytes())
-        sv = d.add('unsigned long long', len(m.sv), m.sv.astype('<u8').tobytes())
-        pdr = d.add('hkcdDefaultStaticMeshTree::PrimitiveDataRun', len(runs), b''.join(runs))
-        keys_boxes = m.boxes
-        simd_bytes = simd_tree(keys_boxes, [p << 1 for p in range(nm)])
-        simd = d.add('hkcdSimdTree::Node', len(simd_bytes) // 128, simd_bytes)
-        data = bytearray(self.sz_data)
-        struct.pack_into('<I', data, o['nodes'], nodes)
-        struct.pack_into('<8f', data, o['domain'], *m.domain[0], 1.0, *m.domain[1], 1.0)
-        struct.pack_into('<iiI', data, o['numPrimitiveKeys'], m.num_triangles, bpk, m.max_key)
-        data[o['primitiveStoresIsFlatConvex']] = 255
-        struct.pack_into('<I', data, o['sections'], sections)
-        struct.pack_into('<I', data, o['primitives'], prims)
-        struct.pack_into('<I', data, o['sharedVerticesIndex'], svi)
-        struct.pack_into('<I', data, o['sharedVertices'], sv)
-        struct.pack_into('<I', data, o['primitiveDataRuns'], pdr)
-        struct.pack_into('<I', data, self.o_simd, simd)
-        data[self.o_simd_compact] = 1
-        data[self.o_has_simd] = 1
-        data_item = d.add(CMS_DATA, 1, bytes(data), 16)
-        words = d.add('hkUint32', (keys + 31) // 32, bytes(4 * ((keys + 31) // 32)))   # no triangle marked interior
-        shape = bytearray(self.sz_cms)
-        shape[0], shape[1] = 8, 3
-        struct.pack_into('<H', shape, 2, 4)
-        shape[4] = bpk
-        struct.pack_into('<I', shape, self.shape_o['properties'], self.prop(string_obj))
-        struct.pack_into('<I', shape, self.shape_o['shapeTagCodecInfo'], 0xFFFFFFFF)
-        struct.pack_into('<I', shape, self.shape_o['data'], data_item)
-        struct.pack_into('<I', shape, self.shape_o['triangleIsInterior'], words)
-        struct.pack_into('<i', shape, self.shape_o['triangleIsInterior'] + 4, keys)
-        struct.pack_into('<i', shape, self.shape_o['numTriangles'], m.num_triangles)
-        return d.add(CMS, 1, bytes(shape), 16)
+        sections = tf.new(SECTION)
+        sec = sections[0]
+        sec['nodes'].set_target(sec_nodes)
+        sec['domain']['min'].set_vec((*m.domain[0], 1.0))
+        sec['domain']['max'].set_vec((*m.domain[1], 1.0))
+        struct.pack_into('<6I', sections.data, sec['codecParms'].offset, *([0x7F7FFFEE] * 3 + [0xFF800000] * 3))
+        sec['numPackedVertices'].set_int(0)
+        sec['numPrimitives'].set_int(nm)
+        sec['numDataRuns'].set_int(len(runs))
+        data = tf.new(CMS_DATA)
+        d = data.value
+        tree = d['meshTree']
+        tree['nodes'].set_target(nodes)
+        tree['domain']['min'].set_vec((*m.domain[0], 1.0))
+        tree['domain']['max'].set_vec((*m.domain[1], 1.0))
+        tree['numPrimitiveKeys'].set_int(m.num_triangles)
+        tree['bitsPerKey'].set_int(bpk)
+        tree['maxKeyValue'].set_int(m.max_key)
+        tree['primitiveStoresIsFlatConvex'].set_int(255)
+        tree['sections'].set_target(sections)
+        tree['primitives'].set_target(tf.new('hkcdStaticMeshTree::Primitive', nm, m.prims.tobytes()))
+        tree['sharedVerticesIndex'].set_target(tf.new('hkUint16', len(m.sv),
+                                                      np.arange(len(m.sv), dtype='<u2').tobytes()))
+        tree['sharedVertices'].set_target(tf.new('unsigned long long', len(m.sv), m.sv.astype('<u8').tobytes()))
+        tree['primitiveDataRuns'].set_target(tf.new('hkcdDefaultStaticMeshTree::PrimitiveDataRun', len(runs),
+                                                    b''.join(runs)))
+        simd_bytes = simd_tree(m.boxes, [p << 1 for p in range(nm)])
+        d['simdTree']['nodes'].set_target(tf.new('hkcdSimdTree::Node', len(simd_bytes) // 128, simd_bytes))
+        d['simdTree']['isCompact'].set_int(1)
+        d['hasSimdTree'].set_int(1)
+        shape = tf.new(CMS)
+        v = shape.value
+        shape.data[0], shape.data[1] = 8, 3                  # type, dispatchType
+        v['flags'].set_int(4)
+        v['numShapeKeyBits'].set_int(bpk)
+        v['properties']['properties'].set_target(self.prop(string_obj))
+        v['shapeTagCodecInfo'].set_int(0xFFFFFFFF)
+        v['data'].set_target(data)
+        v['triangleIsInterior']['words'].set_target(tf.new('hkUint32', (keys + 31) // 32))   # no triangle interior
+        v['triangleIsInterior']['numBits'].set_int(keys)
+        v['numTriangles'].set_int(m.num_triangles)
+        return shape
 
     # ---- a compound
 
-    def compound(self, shapes: list[int], domains: list[np.ndarray], bits: list[int], string_obj: int) -> int:
-        d = self.doc
+    def compound(self, shapes: list[Block], domains: list[np.ndarray], bits: list[int], string_obj: Block) -> Block:
+        tf = self.tf
         n = len(shapes)
-        inst = bytearray()
-        for sh in shapes:
-            e = bytearray(self.sz_inst)
-            struct.pack_into('<4f', e, 0, 0.0, 0.0, 0.0, 1.0)
-            struct.pack_into('<H', e, 28, 0xFFFF)
-            e[30] = 0x40
-            struct.pack_into('<3f', e, 32, 1.0, 1.0, 1.0)
-            struct.pack_into('<HH', e, 44, 0xFFFF, 0xFFFF)
-            struct.pack_into('<I', e, 48, sh)
-            inst += e
-        instances = d.add('hkFreeListArrayElement<hknpShapeInstance>', n, bytes(inst))
+        inst = tf.new('hkFreeListArrayElement<hknpShapeInstance>', n)
+        for e, sh in zip(inst, shapes):
+            e['rotation'].set_vec((0.0, 0.0, 0.0, 1.0))
+            e['leafIndex'].set_int(0xFFFF)
+            e['flags'].set_int(0x40)
+            e['scale'].set_vec((1.0, 1.0, 1.0))
+            e['shapeTag'].set_int(0xFFFF)
+            e['destructionTag'].set_int(0xFFFF)
+            e['shape'].set_target(sh)
         doms = np.array(domains)
         simd_bytes = simd_tree(doms, list(range(n)))
-        simd = d.add('hkcdSimdTree::Node', len(simd_bytes) // 128, simd_bytes)
         lo, hi = doms[:, 0].min(0), doms[:, 1].max(0)
-        c = bytearray(self.sz_comp)
-        c[0], c[1] = 0x0B, 3
-        struct.pack_into('<H', c, 2, 4)
-        c[4] = n.bit_length()
-        co = self.comp_o
-        struct.pack_into('<I', c, co['properties'], self.prop(string_obj))
-        struct.pack_into('<I', c, 24, 0xFFFFFFFF)
-        struct.pack_into('<IiI', c, co['instances'], instances, -1, n)
-        struct.pack_into('<8f', c, co['aabb'], *lo, 0.0, *hi, 0.0)
-        struct.pack_into('<f', c, co['boundingRadius'], float(np.float32(np.linalg.norm(hi - lo) * 0.5)))
-        struct.pack_into('<i', c, co['estimatedNumShapeKeys'], sum(1 << b for b in bits))
-        struct.pack_into('<I', c, self.comp_simd, simd)
-        c[self.comp_simd + 4] = 1
-        c[self.comp_type] = 2
-        return d.add('hknpCompoundShape', 1, bytes(c), 16)
+        c = tf.new('hknpCompoundShape')
+        v = c.value
+        c.data[0], c.data[1] = 0x0B, 3
+        v['flags'].set_int(4)
+        v['numShapeKeyBits'].set_int(n.bit_length())
+        v['properties']['properties'].set_target(self.prop(string_obj))
+        v['shapeTagCodecInfo'].set_int(0xFFFFFFFF)
+        v['instances']['elements'].set_target(inst)
+        v['instances']['firstFree'].set_int(-1)
+        v['instances']['numAllocated'].set_int(n)
+        v['aabb']['min'].set_vec((*lo, 0.0))
+        v['aabb']['max'].set_vec((*hi, 0.0))
+        v['boundingRadius'].set_f32(float(np.float32(np.linalg.norm(hi - lo) * 0.5)))
+        v['estimatedNumShapeKeys'].set_int(sum(1 << b for b in bits))
+        bvd = v['boundingVolumeData']
+        bvd['simdTree']['nodes'].set_target(tf.new('hkcdSimdTree::Node', len(simd_bytes) // 128, simd_bytes))
+        bvd['simdTree']['isCompact'].set_int(1)
+        bvd['type'].set_int(2)
+        return c
 
 
 def _runs(values: np.ndarray) -> list[bytes]:
@@ -532,52 +329,7 @@ def _runs(values: np.ndarray) -> list[bytes]:
     return out
 
 
-# ------------------------------------------------------------------------------------------------ graph edits
-
-
-def clone(doc: Doc, root: int) -> int:
-    """A deep copy of item `root` and everything it reaches (shared items stay shared); the copy's root item."""
-    order = sorted(reachable(doc, [root]))
-    new = {}
-    for i in order:
-        it = doc.items[i]
-        doc.items.append(Item(it.tidx, it.flags, it.count, it.data))
-        doc.layout.append(len(doc.items) - 1)
-        new[i] = len(doc.items) - 1
-    for i in order:
-        it = doc.items[new[i]]
-        data = bytearray(it.data)
-        for off, v in pointers(doc, i):
-            struct.pack_into('<I', data, off, new[v])
-        it.data = bytes(data)
-    return new[root]
-
-
-def compact(doc: Doc, root: int = 1) -> Doc:
-    """The items reachable from `root`, renumbered in their old order (pointers rewritten), laid out in the old
-    DATA order: the donor's bodies and everything only they used are gone."""
-    keep = sorted(reachable(doc, [root]))
-    remap = {old: new for new, old in enumerate(keep, 1)}
-    items = [doc.items[0]]
-    for old in keep:
-        it = doc.items[old]
-        data = bytearray(it.data)
-        for off, v in pointers(doc, old):
-            struct.pack_into('<I', data, off, remap[v])
-        items.append(Item(it.tidx, it.flags, it.count, bytes(data)))
-    return Doc(doc.sdkv, doc.tst1, doc.tna1, doc.fst1, doc.tbdy, doc.tpad, items,
-               [remap[i] for i in doc.layout if i in remap], doc.tag, doc.aligns)
-
-
-def _u32(doc: Doc, item: int, off: int) -> int:
-    return struct.unpack_from('<I', doc.items[item].data, off)[0]
-
-
-def _put32(doc: Doc, item: int, off: int, v: int) -> None:
-    it = doc.items[item]
-    d = bytearray(it.data)
-    struct.pack_into('<I', d, off, v)
-    it.data = bytes(d)
+# ------------------------------------------------------------------------------------------------ the donor
 
 
 @dataclass
@@ -590,44 +342,31 @@ class Body:
 
 @dataclass
 class Donor:
-    """Where a donor Doc keeps what the builder rewrites and copies."""
-    variants: int            # the root's NamedVariant array item
-    system: int              # the physics system data item
-    cinfos: int              # its body cinfo array
-    cinfo0: bytes            # the donor's first body cinfo (the ground: the template of ours)
-    palette_terrain: int | None
-    palette_object: int | None
-    scene_variant: tuple[int, int, int]    # the scene's own NamedVariant entry (name, class, item)
+    """What the builder rewrites and copies in a donor tagfile."""
+    variants: Block          # the root's NamedVariant array
+    system: Block            # the physics system data
+    cinfos: Block            # its body cinfo array
+    palette_terrain: Block | None
+    palette_object: Block | None
+    scene_variant: int       # the scene's own NamedVariant entry
 
 
-def find_donor(doc: Doc) -> Donor:
-    tag = doc.tag
-    variants = _u32(doc, 1, 0)
-    entries = []
-    for k in range(doc.items[variants].count):
-        entries.append(struct.unpack_from('<III', doc.items[variants].data, 12 * k))
-    scene_entry = next(e for e in entries if _cstr(doc, e[1]) == 'hknpPhysicsSceneData')
-    scene = scene_entry[2]
-    sd_item = _u32(doc, scene, tag.offset('hknpPhysicsSceneData', 'systemDatas'))
-    system = _u32(doc, sd_item, 0)
-    cinfos = _u32(doc, system, tag.offset('hknpPhysicsSystemData', 'bodyCinfos'))
-    bsz = tag.size('hknpPhysicsSystemData::bodyCinfoWithAttachment')
-    cinfo0 = doc.items[cinfos].data[:bsz]
-    name0 = _cstr(doc, struct.unpack_from('<I', cinfo0, tag.offset('hknpPhysicsSystemData::bodyCinfoWithAttachment', 'name'))[0])
+def find_donor(tf: Tagfile) -> Donor:
+    variants = tf.root.value['namedVariants'].target
+    scene_k = next(k for k, e in enumerate(variants) if e['className'].string() == 'hknpPhysicsSceneData')
+    system = variants[scene_k]['variant'].target.value['systemDatas'].target[0].target
+    cinfos = system.value['bodyCinfos'].target
+    name0 = cinfos[0]['name'].string()
     pal_t = pal_o = None
-    for e in entries:
-        if _cstr(doc, e[1]) != 'hknpMaterialPalette':
+    for e in variants:
+        if e['className'].string() != 'hknpMaterialPalette':
             continue
-        descr = _u32(doc, e[2], 0)
-        if _cstr(doc, e[0]) == name0:
-            pal_t = e[2]
-        elif doc.items[descr].count == 1 and pal_o is None:
-            pal_o = e[2]
-    return Donor(variants, system, cinfos, cinfo0, pal_t, pal_o, scene_entry)
-
-
-def _cstr(doc: Doc, item: int) -> str:
-    return doc.items[item].data.split(b'\0')[0].decode('utf-8', 'replace') if item else ''
+        palette = e['variant'].target
+        if e['name'].string() == name0:
+            pal_t = palette
+        elif palette.value[palette.type.all_members()[0].name].count == 1 and pal_o is None:
+            pal_o = palette
+    return Donor(variants, system, cinfos, pal_t, pal_o, scene_k)
 
 
 # ------------------------------------------------------------------------------------------------ geometry
@@ -689,27 +428,19 @@ def build_collision(donor: bytes, terrain_name: str, heights: np.ndarray, x0: fl
     system are kept, its bodies dropped."""
     if tile_cells * tile_cells > MAX_PRIMS:
         raise ValueError('a tile holds at most %d quads' % MAX_PRIMS)
-    doc = load(donor)
-    don = find_donor(doc)
-    b = Builder(doc)
-    tag = doc.tag
-    cinfo_sz = len(don.cinfo0)
-    co = {k: tag.offset('hknpPhysicsSystemData::bodyCinfoWithAttachment', k) for k in ('shape', 'name', 'materialId')}
-    cinfos = bytearray()
-    entries: list[tuple[int, int, int]] = []
+    tf = hkfile.read(donor)
+    don = find_donor(tf)
+    b = Builder(tf)
+    made: list[tuple[str, Block]] = []
+    entries: list[tuple[str, Block]] = []
 
-    def add_body(name: str, shape: int, palette_src: int | None) -> None:
-        k = len(cinfos) // cinfo_sz
-        c = bytearray(don.cinfo0)
-        struct.pack_into('<I', c, co['shape'], shape)
-        struct.pack_into('<I', c, co['name'], b.chars(name))
-        struct.pack_into('<H', c, co['materialId'], 0)
-        cinfos.extend(c)
+    def add_body(name: str, shape: Block, palette_src: Block | None) -> None:
+        made.append((name, shape))
         if palette_src is not None:
-            entries.append((b.chars(name), b.chars('hknpMaterialPalette'), clone(doc, palette_src)))
+            entries.append((name, hkfile.clone(palette_src)))
 
-    def shapes_of(parts: list[tuple[np.ndarray, np.ndarray, np.ndarray]], name: str) -> int:
-        so = b.string_object('{"name": "%s",id=%d }' % (name, len(cinfos) // cinfo_sz))
+    def shapes_of(parts: list[tuple[np.ndarray, np.ndarray, np.ndarray]], name: str) -> Block:
+        so = b.string_object('{"name": "%s",id=%d }' % (name, len(made)))
         items, doms, bits = [], [], []
         for verts, prims, vals in parts:
             m = make_mesh(verts, prims, vals)
@@ -726,13 +457,21 @@ def build_collision(donor: bytes, terrain_name: str, heights: np.ndarray, x0: fl
         parts = soup_tiles(np.asarray(body.triangles, dtype=np.float64).reshape(-1, 3, 3))
         if parts:
             add_body(body.name, shapes_of(parts, body.name), don.palette_object)
-    n = len(cinfos) // cinfo_sz
-    new_cinfos = doc.add('hknpPhysicsSystemData::bodyCinfoWithAttachment', n, bytes(cinfos))
-    _put32(doc, don.system, tag.offset('hknpPhysicsSystemData', 'bodyCinfos'), new_cinfos)
-    ents = [don.scene_variant] + entries
-    new_variants = doc.add('hkRootLevelContainer::NamedVariant', len(ents), b''.join(struct.pack('<III', *e) for e in ents))
-    _put32(doc, 1, 0, new_variants)
-    return compact(doc).emit()
+    cinfos = tf.new(don.cinfos.type, len(made))
+    for k, (name, shape) in enumerate(made):
+        don.cinfos.copy_element(0, cinfos, k)          # the donor's first body (the ground): the template of ours
+        cinfos[k]['shape'].set_target(shape)
+        cinfos[k]['name'].set_target(tf.string(name))
+        cinfos[k]['materialId'].set_int(0)
+    don.system.value['bodyCinfos'].set_target(cinfos)
+    variants = tf.new(don.variants.type, 1 + len(entries))
+    don.variants.copy_element(don.scene_variant, variants, 0)
+    for k, (name, palette) in enumerate(entries, 1):
+        variants[k]['name'].set_target(tf.string(name))
+        variants[k]['className'].set_target(tf.string('hknpMaterialPalette'))
+        variants[k]['variant'].set_target(palette)
+    tf.root.value['namedVariants'].set_target(variants)
+    return tf.write()
 
 
 def write_mad(hkt: bytes) -> bytes:
@@ -744,30 +483,26 @@ def write_mad(hkt: bytes) -> bytes:
 # ------------------------------------------------------------------------------------------------ checks
 
 
-def walk(doc: Doc, item: int, path: str = '', out: list | None = None) -> list[tuple[str, str, int, int, int]]:
-    """(member path, type, flags, count, item) of everything reachable from `item` through named pointer members."""
+def walk(block: Block, path: str = '', out: list | None = None) -> list[tuple[str, str, int, Block]]:
+    """(member path, type, count, block) of everything reachable from `block` through named reference members."""
     out = [] if out is None else out
-    it = doc.items[item]
-    out.append((path, doc.tname(it.tidx), it.flags, it.count, item))
-    tag = doc.tag
+    out.append((path, block.type.full_name, block.count, block))
 
-    def rec(ty: int, base: int, pre: str) -> None:
-        for name, m in tag.members(ty).items():
-            tn = tag.tname(m.type)
-            off = base + m.offset
-            if tn.startswith(_PTR_PREFIX) or tn == 'hkStringPtr' or '*' in tn:
-                v = struct.unpack_from('<I', it.data, off)[0]
-                if v:
-                    walk(doc, v, path + '/' + pre + name, out)
-            elif m.type in tag.bodies and tag.members(m.type):
-                rec(m.type, off, pre + name + '.')
-    rec(it.tidx, 0, '')
+    def rec(v: hkfile.Value, pre: str) -> None:
+        for m in v.type.all_members():
+            mv = v[m.name]
+            if mv.type.kind in (hkfile.POINTER, hkfile.STRING) or (mv.type.kind == hkfile.ARRAY and not mv.type.is_tuple):
+                t = mv.target
+                if t is not None:
+                    walk(t, path + '/' + pre + m.name, out)
+            elif mv.type.kind == hkfile.RECORD and mv.type.all_members():
+                rec(mv, pre + m.name + '.')
+    rec(block.value, '')
     return out
 
 
-def _first_instance(doc: Doc, compound: int) -> int:
-    inst = _u32(doc, compound, doc.tag.offset('hknpCompoundShape', 'instances'))
-    return _u32(doc, inst, doc.tag.offset('hknpShapeInstance', 'shape'))
+def _first_instance(compound: Block) -> Block:
+    return compound.value['instances']['elements'].target[0]['shape'].target
 
 
 def selftest(donor: bytes) -> list[str]:
@@ -775,9 +510,9 @@ def selftest(donor: bytes) -> list[str]:
     compound of compressed meshes (IG_HEIGEN601's)."""
     import hktag as H
     log: list[str] = []
-    doc = load(donor)
-    assert doc.emit() == donor, 'identity round trip differs'
-    log.append(f'identity: {len(doc.items) - 1} items re-emitted byte for byte ({len(donor)} bytes)')
+    stock = hkfile.read(donor)
+    assert stock.write() == donor, 'identity round trip differs'
+    log.append(f'identity: {len(stock.items) - 1} items re-emitted byte for byte ({len(donor)} bytes)')
     yy, xx = np.mgrid[0:41, 0:41]
     h = 5 * np.sin(xx / 6.0) + 3 * np.cos(yy / 5.0)
     vals = ((xx[:-1, :-1] // 8) % 6).astype(np.uint8)
@@ -811,12 +546,12 @@ def selftest(donor: bytes) -> list[str]:
     log.append(f'objects: {len(ring)}-triangle soup in {len(rr.instances)} meshes and a 2-triangle body '
                '(a single mesh, no compound) decode to their input, bound_problems == []')
     # the field-by-field comparison with the stock ground
-    mine, stock = load(out), doc
-    gb = hkcms.bodies(stock.tag)
-    sc = gb[next(iter(gb))]
-    wm = walk(mine, _first_instance(mine, bodies['sk_test01_fld2mgrid.sk_test01_fld2mgrid']))
-    ws = walk(stock, _first_instance(stock, sc))
-    assert [x[:3] for x in wm] == [x[:3] for x in ws], 'item structure of a tile differs from the stock ground tile'
+    mine = hkfile.Physics.read(out)
+    ground = mine.body('sk_test01_fld2mgrid.sk_test01_fld2mgrid').shape
+    stock_ground = hkfile.Physics(stock).bodies()[0].shape
+    wm = walk(_first_instance(ground))
+    ws = walk(_first_instance(stock_ground))
+    assert [x[:2] for x in wm] == [x[:2] for x in ws], 'item structure of a tile differs from the stock ground tile'
     consts = ('hknpCompressedMeshShape', 'hknpCompressedMeshShapeData', 'hkcdStaticMeshTree::Section',
               'hkcdCompressedAabbCodecs::Aabb5BytesCodec', 'hknpShapeProperties::Property')
     free = {'hknpCompressedMeshShape': {4, 20, 21, 28, 29, 32, 33, 36, 40, 41},
@@ -824,20 +559,20 @@ def selftest(donor: bytes) -> list[str]:
                                                                                      80, 81, 84, 85, 96, 97},
             'hkcdStaticMeshTree::Section': {0, 1, 89, 90} | set(range(16, 48)),
             'hkcdCompressedAabbCodecs::Aabb5BytesCodec': set(), 'hknpShapeProperties::Property': {0, 1}}
-    for (_, tn, _, _, i), (_, _, _, _, j) in zip(wm, ws):
+    for (_, tn, _, x), (_, _, _, y) in zip(wm, ws):
         if tn in consts:
-            da, db = mine.items[i].data, stock.items[j].data
-            diff = {k for k in range(len(da)) if da[k] != db[k]}
+            slots = {e * x.size + off + k for e in range(x.count) for off, _ in x.slots for k in range(4)}
+            diff = {k for k in range(len(x.data)) if x.data[k] != y.data[k]} - slots
             assert diff <= free[tn], (tn, sorted(diff - free[tn]))
-    log.append(f'structure: a tile mesh has the stock ground tile\'s {len(wm)} items (type, flags, member path); its '
+    log.append(f'structure: a tile mesh has the stock ground tile\'s {len(wm)} items (type, member path); its '
                'shape / data / section / node / property bytes differ from the stock mesh only in data fields')
-    cm = mine.items[[x[4] for x in walk(mine, bodies['sk_test01_fld2mgrid.sk_test01_fld2mgrid'])][0]].data
-    cs = stock.items[sc].data
-    var = {4, 20, 21, 28, 29, 36, 37, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 64, 65, 66, 67, 68, 69, 70, 71,
-           72, 73, 74, 75, 80, 81, 82, 83, 88, 89, 112, 113}
-    assert {k for k in range(128) if cm[k] != cs[k]} <= var
+    cm, cs = ground.data, stock_ground.data
+    slots = {off + k for off, _ in ground.slots for k in range(4)}
+    var = {4, 36, 37, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 64, 65, 66, 67, 68, 69, 70, 71,
+           72, 73, 74, 75, 80, 81, 82, 83, 88, 89}
+    assert {k for k in range(128) if cm[k] != cs[k]} - slots <= var
     log.append('compound: the 128 bytes differ from the stock ground compound only where stock compounds differ among '
-               'themselves (key bits, item indices, counts, aabb, radius, key estimate, simd node)')
+               'themselves (key bits, counts, aabb, radius, key estimate)')
     return log
 
 

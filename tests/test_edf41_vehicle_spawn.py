@@ -34,8 +34,8 @@ class PrivateSpawnContract(unittest.TestCase):
         row = self.row()
         setup = [[1.0, 1.0], [0.1, 10.0, 0.025, 2.0, 0.1, 0.8],
                  [['app:/weapon/v_505tank_cannon01.sgo', [0.2, 3.0], [20.0, 0.01, 0.1]]]]
-        original = sgo.write(0x102, {'xgs_scene_object_class': 'Vehicle505_Tank', 'vehicle_setup': setup})
-        configured = sgo.write(0x102, {'xgs_scene_object_class': 'Vehicle505_Tank',
+        original = sgo.write(0x102, {'xgs_scene_object_class': 'Vehicle601_Tank', 'vehicle_setup': setup})
+        configured = sgo.write(0x102, {'xgs_scene_object_class': 'Vehicle601_Tank',
                                      'vehicle_setup': setup, 'mission_setup': setup})
         with tempfile.TemporaryDirectory() as root, patch.dict(gen.OPTIONAL_VEHICLES, {row.sgo: row}, clear=True):
             base = Path(root, 'Mods', 'OBJECT')
