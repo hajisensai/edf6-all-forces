@@ -150,14 +150,17 @@ void Frame(unsigned char* human) noexcept {
 // GravityAutoTest (a test of the gravity operations without the gun's trigger: the background test drive cannot aim): every
 // kAutoGapMs the nearest enemy within kAutoReach is grabbed, carried to kAutoAhead m in front of the player and kAutoHigh m up
 // (held there kAutoHoldMs at least, kAutoMostMs at most), then thrown ahead and down into the ground. Logged as the gun's grabs are.
+// One that ends its carry still kAutoStuck m off (held back by a wall, a building) is passed over after (kMostSkipped kept).
 constexpr ULONGLONG kAutoGapMs=5000,kAutoHoldMs=1500,kAutoMostMs=6000;
-constexpr float kAutoReach=400.0f,kAutoAhead=10.0f,kAutoHigh=6.0f;
-struct Auto { gravity::Target held; float at[3]{}; ULONGLONG since=0,next=0; int grabs=0; };
+constexpr float kAutoReach=400.0f,kAutoAhead=10.0f,kAutoHigh=6.0f,kAutoStuck=20.0f;
+constexpr int kMostSkipped=8;
+struct Auto { gravity::Target held; float at[3]{}; ULONGLONG since=0,next=0; int grabs=0; const void* skipped[kMostSkipped]{}; int skips=0; };
 Auto autoTest;
 struct Nearest { const float* at; const void* object; float d2; };
 void SeeNearest(void* ctx,const void* object,const float* lock) noexcept {
     auto& n=*static_cast<Nearest*>(ctx);
     if(!lock)return;
+    for(const void* o:autoTest.skipped)if(o==object)return;
     const float d[3]={lock[0]-n.at[0],lock[1]-n.at[1],lock[2]-n.at[2]};
     const float d2=d[0]*d[0]+d[1]*d[1]+d[2]*d[2];
     if(d2>kAutoReach*kAutoReach || (n.object && d2>=n.d2))return;
@@ -200,6 +203,10 @@ void AutoTest(unsigned char* human) noexcept {
         return;
     }
     if(known)Log("GRAVITYTEST held at (%.0f,%.0f,%.0f), goal (%.0f,%.0f,%.0f)",at[0],at[1],at[2],goal[0],goal[1],goal[2]);
+    if(known && Len(gap)>kAutoStuck) {   // held back: the next grab another
+        autoTest.skipped[autoTest.skips++%kMostSkipped]=autoTest.held.obj.obj;
+        Log("GRAVITYTEST %p held back %.0f m off its goal: passed over from now",autoTest.held.obj.obj,Len(gap));
+    }
     const float down[3]={f[0],-0.6f,f[2]};
     float vel[3];
     const bool thrown=gravity::Throw(autoTest.held,down,Cfg().gravityThrowSpeed,nullptr,human,1.0f,vel);

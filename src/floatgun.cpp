@@ -122,6 +122,7 @@ struct Gun {
     std::uint16_t serial=0;    // the host's for it (online: the gun's name on every machine; 0 offline)
     unsigned char ownerId[32]{};   // floating: its owner's native ID (online)
     ULONGLONG askedAt=0;       // a peer: when it last asked the host for it
+    ULONGLONG lastSeenLog=0;   // Debug: when it was last logged lying out of reach
     int shots=0;               // rounds fired (the log's first and every kShotLogEvery-th)
     bool drawn=false;          // its model drawn floating once (logged)
     char what[24]{};
@@ -530,7 +531,11 @@ void Step(ULONGLONG ms,float dt) noexcept {
         if(g.state==State::free)continue;
         if(g.state==State::ground) {
             if(g.drop) {
-                if(!Present(g.drop)){Unpin(g.drop);g=Gun{};continue;}   // the game deleted it (the mission's clean-up)
+                if(!Present(g.drop)) {   // the game deleted it (the mission's clean-up)
+                    if(missionLogs++<64)Log("FLOATGUN %s on the ground: its drop is gone (strong %ld)",g.what,
+                                            g.drop.ctrl ? At<LONG>(g.drop.ctrl,8) : -1L);
+                    Unpin(g.drop);g=Gun{};continue;
+                }
                 std::memcpy(g.at,static_cast<const unsigned char*>(g.drop.obj)+kPosition,12);
             }
             if(ms-g.since>kGroundMs){Free(g);continue;}
@@ -538,7 +543,13 @@ void Step(ULONGLONG ms,float dt) noexcept {
             const float* pp=reinterpret_cast<const float*>(me+kPosition);
             const float d[3]={g.at[0]-pp[0],g.at[1]-pp[1],g.at[2]-pp[2]};
             const float reach=Cfg().floatGunReach;
-            if(d[0]*d[0]+d[2]*d[2]>reach*reach || std::fabs(d[1])>(reach>kPickRise ? reach : kPickRise))continue;
+            if(d[0]*d[0]+d[2]*d[2]>reach*reach || std::fabs(d[1])>(reach>kPickRise ? reach : kPickRise)) {
+                if(Cfg().debug && ms-g.lastSeenLog>=5000) {
+                    g.lastSeenLog=ms;
+                    Log("FLOATGUN %s on the ground at (%.0f,%.0f,%.0f), the player at (%.0f,%.0f,%.0f)",g.what,g.at[0],g.at[1],g.at[2],pp[0],pp[1],pp[2]);
+                }
+                continue;
+            }
             if(!g.serial)Give(g,me,nullptr,ms);   // this machine's alone (offline, or not told to anyone)
             else if(host){if(haveId)Give(g,me,myId,ms);}   // the peers are told whose it is by that ID
             else if(haveId && (!g.askedAt || ms-g.askedAt>=kAskGapMs)) {   // a peer: the host's to give
