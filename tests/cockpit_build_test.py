@@ -76,9 +76,15 @@ def stock_copies(game) -> dict:  # noqa: ANN001 - rootcpk.Game
 # Real cabs (cockpit_kits_ground CABS) closed behind the driver: every line of sight back past his shoulders meets the
 # cab's rear wall or seat. The stock hull round them is seen from inside there, where the game draws none of it: a gap
 # in the cab shows the world (the user, 2026-10-19, of the rescue tank: 「救护车往后看会看到空气」; the ARHAN P880 cut
-# had lost its rear wall to tools/prep_cockpit_ground.py's box). apc_cab (M-ATV) and tracked_cab (Tigr) are cut at
-# their front seats' backs, their rear compartments left out: not closed behind yet, not checked.
-CLOSED_BEHIND = frozenset(('truck_cab', 'trailer_cab'))
+# had lost its rear wall to tools/prep_cockpit_ground.py's box). apc_cab (M-ATV: the Grape) and tracked_cab (Tigr: the
+# Naegling) had the same cut at their front seats' backs (looking back the Grape's and the Naegling's drivers saw the
+# world): their boxes now keep the rear compartments to the rear doors.
+# A line out through a cab's real glass is a view (Kit.windows: the side and rear door windows, which the prep keeps
+# as glass triangles). The M-ATV's and the Tigr's rear compartments have a roof hatch, open in both sources (a real
+# opening, no lid): from the driver's eye it is above 15 degrees behind, so for those two cabs the lines from 20 degrees
+# up are not checked (HATCH_PITCH; a residual sky through the hatch is the hatch's, not a cut wall).
+CLOSED_BEHIND = frozenset(('truck_cab', 'trailer_cab', 'apc_cab', 'tracked_cab'))
+HATCH_PITCH = {'apc_cab': 20.0, 'tracked_cab': 20.0}
 BEHIND = [(float(yaw), float(pitch)) for yaw in range(100, 261, 5) for pitch in range(-40, 21, 5)]
 
 
@@ -105,7 +111,8 @@ def generated_bones(fits) -> int:  # noqa: ANN001
 
 def closed(what: str, kit, name: str = '') -> None:  # noqa: ANN001 - cockpits.Kit
     if name in CLOSED_BEHIND:
-        open_lines = cockpits.unmet(kit, BEHIND)
+        top = HATCH_PITCH.get(name, 90.0)
+        open_lines = cockpits.unmet(kit, [(y, p) for y, p in BEHIND if p < top])
         shown = ', '.join(f'({y:+.0f},{p:+.0f})' for y, p in open_lines[:6])
         expect(not open_lines, f'{what}: closed behind the driver'
                + (f': {len(open_lines)} lines of sight (yaw, pitch) see through, e.g. {shown}' if open_lines else ''))

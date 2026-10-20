@@ -1,0 +1,5 @@
+The cockpit by Romain Revert (poly.pizza), CC-BY 3.0
+Source: https://poly.pizza/m/ccQg0nHGSA9
+Licence: Creative Commons Attribution 3.0 (CC BY 3.0), https://creativecommons.org/licenses/by/3.0/
+Changes: none to this file; the EDF6 plugin's cockpit builder (pylib/cockpit_kits_mech.py) leaves out its screen tower
+and roof bar, scales it and places it in the mech cockpits it builds.

@@ -12,8 +12,11 @@ __pycache__/
 *.log
 testrange/testrange.json
 testrange/runs/
-# User-supplied vehicle models (pylib/obj_model.py model_dir): never committed
-models/
+# User-supplied vehicle models (pylib/obj_model.py model_dir): never committed, but for the cockpits: their cut
+# interiors (tools/prep_cockpit_*.py from the Sketchfab sources, CC BY / CC0, models/cockpits/CREDITS_*.txt) are the
+# data the installer grafts, tracked so that CI's release carries the same ones the code that reads them was made for
+models/*
+!models/cockpits/
 
 # Development-only data (tools/make_edf41_objects.py --mother-dev): never committed, never in a release
 edf41port_dev/

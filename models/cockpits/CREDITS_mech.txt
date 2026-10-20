@@ -1,0 +1,8 @@
+Mech cockpits (pylib/cockpit_kits_mech.py): third-party material
+
+The cockpit by Romain Revert (poly.pizza), CC-BY 3.0
+    https://poly.pizza/m/ccQg0nHGSA9 (cockpits/parts/pp-scifi-cockpit-revert/)
+Photograph by TSgt Lance Cheung, USAF, Public domain (work of the US federal government)
+    https://commons.wikimedia.org/wiki/File:C-141C_Glass_Cockpit_Upgrade.JPEG (cropped and resized: cockpits/textures/mech_dash.png, mech_overhead.png)
+Photograph by Master Sgt. Vincent De Groot, USAF, Public domain (work of the US federal government)
+    https://commons.wikimedia.org/wiki/File:KC-135_Block_45_glass_cockpit_2017.jpg (cropped and resized: cockpits/textures/mech_mfd.png, mech_sill.png)

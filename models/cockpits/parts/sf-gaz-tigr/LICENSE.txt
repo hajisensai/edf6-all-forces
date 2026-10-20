@@ -1,0 +1,9 @@
+GAZ-2330 Tigr by 42manako, CC BY 4.0
+Source: https://sketchfab.com/3d-models/gaz-2330-tigr-2b3a105cf2f64046ac19977ce35c1a5e (downloaded through the Sketchfab API; its API page saved as license.json in the developer's asset
+folder)
+Licence: Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+Changes: only the cab round the driver's seat is kept (cropped), turned into the seat's eye frame and scaled to metres;
+glass and every part the seated driver cannot see are removed; faces are turned toward the driver; textures are resized
+to at most 1024 px. The EDF6 plugin's cockpit builder (pylib/cockpit_kits_ground.py) places it in the vehicle.
+
+Also in cab.npz, from another model: ATF Dingo by 42manako (https://sketchfab.com/42manako), CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), via Sketchfab: https://sketchfab.com/3d-models/atf-dingo-f7ee9b3b50934d1dbb3097a1ea4f4a5c (one part: nodes /steering/, scaled)  ->  parts/sf-gaz-tigr/.

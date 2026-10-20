@@ -1,0 +1,4 @@
+Photo-based textures in this folder (photo_*.png) are cropped and scaled from the following photos (Wikimedia Commons).
+Modifications: cropped and downscaled. Public-domain items need no attribution but it is given anyway.
+Files derived from CC BY-SA photos (marked [SA]) are themselves licensed CC BY-SA under the same version.
+

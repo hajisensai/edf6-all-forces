@@ -1,0 +1,3 @@
+Tank gunner cockpits (pylib/cockpit_kits.py tank_gunner): third-party material
+
+"T-62A Main Battle Tank" by Muhamad Mirza Arrafi, CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), via Sketchfab: https://sketchfab.com/3d-models/t-62a-main-battle-tank-c61279bad4ca4502bcc8e584b558d10e (cropped: the gunner's station only; scaled)  ->  parts/sf-t62a-arrafi/station.npz, parts/sf-t62a-arrafi/tex*.png
