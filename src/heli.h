@@ -51,6 +51,9 @@ void LearnMapNormals(const float* standing) noexcept;
 float BuildingRay(const float* a,const float* b,float* hit) noexcept;
 // hitpredict.cpp: the nearest object body along a->b (the bullets' object layer 11), metres or -1; `body` its id.
 float ObjectRay(const float* a,const float* b,float* hit,std::uint32_t* body) noexcept;
+// gravity.cpp: the same on another collision layer's filter (`filter`: the layer number, docs/raycast-re.md §3; layer 15 meets
+// the ragdolls, vehicles, containers and debris, docs/gravity-re.md §4), metres or -1; `body` its id.
+float LayerRay(const float* a,const float* b,std::uint32_t filter,float* hit,std::uint32_t* body) noexcept;
 // Whether there is water at (x, z) (docs/water-re.md): the game's own water areas; `surface` gets the
 // highest surface there. unknown: the probe is off (EDF.dll differs) or the map's areas are not there.
 enum class Sea { unknown, land, water };

@@ -3690,10 +3690,13 @@ float MapFixedRay(const float* a,const float* b,float* hit) noexcept {
 // §2 step 1b), with the plain nearest-hit collector (kHitVtbl: every hit, not the ground filter's). Metres to it, -1 with
 // none; `hit` the point, `body` its id (collector +0x78, 24 bits; docs/raycast-re.md §2.2).
 float ObjectRay(const float* a,const float* b,float* hit,std::uint32_t* body) noexcept {
+    return LayerRay(a,b,kObjectLayer,hit,body);
+}
+float LayerRay(const float* a,const float* b,std::uint32_t filter,float* hit,std::uint32_t* body) noexcept {
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
-    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},kObjectLayer,0,0};
+    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
     RayHits col{};
     *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
     reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);

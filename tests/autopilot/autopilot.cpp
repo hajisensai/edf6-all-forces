@@ -654,7 +654,8 @@ LONG ReadPackContent(const wchar_t* key) noexcept {
 // "mission <row|RM015|M001|range|edf41:ROW> [difficulty]": the offline list's row (0-based: RM015 is 13, M001 is 1),
 // difficulty 0-4. RM015 is the stock mission again (the test range left it for its own pack); "range" is that pack's
 // row 0; "edf41:ROW" row ROW of the EDF4.1 story pack (EDF41Content), "edf41mp01:ROW" / "edf41mp02:ROW" of its
-// Mission Pack 1 / 2 (EDF41Content + 1 / + 2: the plugin's run of the three 4.1 packs).
+// Mission Pack 1 / 2 (EDF41Content + 1 / + 2: the plugin's run of the three 4.1 packs); "edf5:ROW" row ROW of the EDF5
+// campaign's main pack (EDF5CampaignContent: its last mission M099 is row 109).
 void AskMission(const char* text) noexcept {
     char name[32]{},mode[8]{};int difficulty=1;
     if(sscanf_s(text,"%*s %31s %d %7s",name,static_cast<unsigned>(sizeof(name)),&difficulty,mode,
@@ -665,18 +666,20 @@ void AskMission(const char* text) noexcept {
     const int pack41=!_strnicmp(name,"edf41:",6) ? 0 : !_strnicmp(name,"edf41mp01:",10) ? 1
                     : !_strnicmp(name,"edf41mp02:",10) ? 2 : -1;
     const bool edf41=pack41>=0;
-    const char* rowText=pack41==0 ? name+6 : name+10;
-    const int row=range ? 0 : edf41 ? std::atoi(rowText) : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1
+    const bool edf5=!_strnicmp(name,"edf5:",5);
+    const char* rowText=edf5 ? name+5 : pack41==0 ? name+6 : name+10;
+    const int row=range ? 0 : edf41 || edf5 ? std::atoi(rowText) : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1
                                                                                                     : std::atoi(name);
     missionDifficulty=difficulty<0 || difficulty>4 ? 1 : difficulty;
     const long first41=edf41 ? ReadPackContent(L"EDF41Content") : -1;
-    rangeContent=range ? ReadPackContent(L"TestRangeContent") : edf41 ? (first41>0 ? first41+pack41 : first41) : -1;
+    rangeContent=range ? ReadPackContent(L"TestRangeContent") : edf41 ? (first41>0 ? first41+pack41 : first41)
+                 : edf5 ? ReadPackContent(L"EDF5CampaignContent") : -1;
     missionRow=row;
     Log("MISSION asked: %s row %d, difficulty %ld (applied when the script starts its title)",
-        range ? "the test range pack's" : pack41==0 ? "the EDF4.1 story pack's" : pack41==1 ? "the EDF4.1 Mission Pack 1's"
-        : pack41==2 ? "the EDF4.1 Mission Pack 2's" : "offline",row,missionDifficulty);
-    if(range || edf41)Log("MISSION the pack's content id %ld (EDF6VehicleCrew.ini %s)",rangeContent,
-                          range ? "TestRangeContent" : "EDF41Content");
+        range ? "the test range pack's" : edf5 ? "the EDF5 campaign's" : pack41==0 ? "the EDF4.1 story pack's"
+        : pack41==1 ? "the EDF4.1 Mission Pack 1's" : pack41==2 ? "the EDF4.1 Mission Pack 2's" : "offline",row,missionDifficulty);
+    if(range || edf41 || edf5)Log("MISSION the pack's content id %ld (EDF6VehicleCrew.ini %s)",rangeContent,
+                                  range ? "TestRangeContent" : edf5 ? "EDF5CampaignContent" : "EDF41Content");
 }
 
 // "crash av|abort|terminate [game]": a crash on purpose, for EDF6VehicleCrew's crash dump (src/crash_dump.cpp) in the

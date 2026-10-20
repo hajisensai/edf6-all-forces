@@ -27,7 +27,9 @@ import vulcan_model
 
 class CatalogContractTests(unittest.TestCase):
     def test_new_requests_append_without_reordering_shipped_ids(self) -> None:
-        self.assertEqual(calls.IDS[44:46], ('EDF6VC_CALL_VULCAN', 'EDF6VC_CALL_BMPT'))   # later calls append after them
+        # The two rows were appended together, in this order (later calls go after them: tools/calls.py's rule).
+        at = calls.IDS.index('EDF6VC_CALL_VULCAN')
+        self.assertEqual(calls.IDS[at:at + 2], ('EDF6VC_CALL_VULCAN', 'EDF6VC_CALL_BMPT'))
         for release in calls.RELEASED.values():
             self.assertEqual(calls.IDS[:len(release)], release)
 

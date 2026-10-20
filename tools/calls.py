@@ -55,6 +55,9 @@ class Call:
     # whose rounds put the player into the vehicle they hit (src/boarding.cpp);
     # `mark` is then its bullets' tag (call_weapons.gun_sgo), `reload` 0 (the template's own).
     gun: str = ''
+    # ...or (brings 'gravity') the gravity gun (src/gravitygun.cpp on src/gravity.h): this stock weapon row (its SGO, row and
+    # texts) under its own name, `mark` its AmmoHitSizeAdjust (throw_mark: the plugin tells it by the float's bits).
+    weapon: str = ''
 
     @property
     def flown(self) -> bool:
@@ -180,6 +183,10 @@ CALLS: tuple[Call, ...] = (
     # 昏天暗地」「清一片区域的终极技能 pt要求很高」): a stock satellite call (call_weapons.ULTIMATE_TEMPLATE: the laser
     # marker, its countdown and voice) whose fire the plugin turns into its show. 15000 pt: the stock satellites ask 2400-5400.
     Call('EDF6VC_CALL_ULTIMATE', 7501, 'ultimate', False, 0, 15000, 2.4, 'ultimate', 'ultimate strike'),
+    # Appended 2026-10-20 (the user: 「看看这里面的重力枪，咱们也做一个……根据速度和质量造成伤害」): the gravity gun, the Air Raider's
+    # Laser Guide Kit (eLockonMarkerL01: its beam held while the trigger is, no round of its own) that grabs, carries and
+    # throws what its beam is on (src/gravitygun.cpp, src/gravity.h).
+    Call('EDF6VC_CALL_GRAVITY_GUN', throw_mark(0xE01), 'gravity_gun', False, 0, 0, 0.5, 'gravity', weapon='eLockonMarkerL01'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -205,6 +212,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'civilian sedan (2026-10-16)': IDS[:44],
     'M163 Vulcan and BMPT (2026-10-19)': IDS[:46],
     'ultimate strike (2026-10-19)': IDS[:47],
+    'gravity gun (2026-10-20)': IDS[:48],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -230,6 +238,26 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'gravity_gun': {
+        'SC': ('重力枪', '按住扳机：光束照到的东西被抓起，悬在准星前方随视线移动——敌人、尸体、车辆、集装箱、碎片都行（60 吨以内；'
+                      '越重拖得越慢，太重的抓不动）。松开扳机：把它朝准星方向甩出去，越轻飞得越快，越重飞得越慢但更有力。'
+                      '被甩出的东西撞到地面、墙壁或敌人时，按自身质量和撞击速度造成伤害（½·质量·速度²），被抓的敌人自己摔下也受伤；'
+                      '飞过敌人身边会撞伤它。只伤敌人，不伤友军。射程 150 米。'),
+        'CN': ('重力槍', '按住扳機：光束照到的東西被抓起，懸在準星前方隨視線移動——敵人、屍體、車輛、貨櫃、碎片都行（60 噸以內；'
+                      '越重拖得越慢，太重的抓不動）。放開扳機：把它朝準星方向甩出去，越輕飛得越快，越重飛得越慢但更有力。'
+                      '被甩出的東西撞到地面、牆壁或敵人時，按自身質量和撞擊速度造成傷害（½·質量·速度²），被抓的敵人自己摔下也受傷；'
+                      '飛過敵人身邊會撞傷它。只傷敵人，不傷友軍。射程 150 公尺。'),
+        'JA': ('グラビティガン', '引き金を引き続けると、ビームが当たったもの（敵・死体・ビークル・コンテナ・破片。60 t まで、重いほどゆっくり、'
+                            'それ以上は動かない）をつかみ、照準の先に浮かべて視線に合わせて動かす。離すと照準の方向へ投げる。軽いほど速く、'
+                            '重いほど遅いが強い。投げたものが地面・壁・敵にぶつかると、その質量と衝突速度に応じたダメージ（½·質量·速度²）を与え、'
+                            'つかまれた敵は自分が叩きつけられてもダメージを受ける。そばを通過した敵にも当たる。味方には当たらない。射程 150 m。'),
+        'EN': ('Gravity Gun', 'Hold the trigger: what the beam is on is picked up and held in front of the sight, following your '
+                              'aim (enemies, corpses, vehicles, containers, debris; up to 60 t, the heavier the slower, heavier '
+                              'than that does not move). Release: it is thrown where the sight points, the lighter the faster, '
+                              'the heavier the slower but harder. What is thrown deals damage by its own mass and impact speed '
+                              '(1/2 mass speed^2) when it hits the ground, a wall or an enemy (a thrown enemy is hurt by its own '
+                              'fall too), and hits the enemies it flies past. Enemies only, never friends. Range 150 m.'),
+    },
     'vulcan': {
         'SC': ('M163 火神防空车', '请求一辆 M163 火神防空车：M113 底盘和六管 20mm M61 机炮。高爆与穿甲弹在载具挂载菜单或 R / 手柄 LB 间切换，一次只发射选中的弹种。外观为按真实构型自建模型。'),
         'CN': ('M163 火神防空車', '請求一輛 M163 火神防空車：M113 底盤和六管 20mm M61 機砲。高爆與穿甲彈在載具掛載選單或 R / 手把 LB 間切換，一次只發射選中的彈種。外觀為按真實構型自建模型。'),
@@ -661,6 +689,14 @@ ULTIMATE_NOTES: dict[str, str] = {
     'EN': 'Needs the EDF6VehicleCrew plugin and the effect files the installer writes; without the plugin this is a plain '
           'satellite laser call.',
 }
+GRAVITY_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通的激光导引装置。仅离线（联机时只有光束）。',
+    'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通的雷射導引裝置。僅離線（連線時只有光束）。',
+    'JA': 'EDF6VehicleCrew プラグインが必要。未導入時は通常のレーザー誘導装置になる。オフライン専用（オンラインではビームのみ）。',
+    'EN': 'Needs the EDF6VehicleCrew plugin; without it this is a plain Laser Guide Kit. Offline only (online: the beam alone).',
+}
+
+
 GUN_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通的 ＫＦＦ５０ＬＳ 狙击枪。',
     'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通的 ＫＦＦ５０ＬＳ 狙擊槍。',
@@ -701,6 +737,8 @@ def call_description(call: Call, lang: str) -> str:
         return KINDS[call.kind][lang][1] + '\n\n' + GUN_NOTES[lang]
     if call.brings == 'ultimate':
         return KINDS[call.kind][lang][1] + '\n\n' + ULTIMATE_NOTES[lang]
+    if call.brings == 'gravity':
+        return KINDS[call.kind][lang][1] + '\n\n' + GRAVITY_NOTES[lang]
     if not call.modal:
         return KINDS[call.kind][lang][1] + '\n\n' + NOTES[lang]
     sep = ' ' if lang == 'EN' else ''

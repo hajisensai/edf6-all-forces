@@ -29,4 +29,7 @@ struct MarkIdentities {
     ObjRef target{};
 };
 bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char target[32],MarkIdentities* out) noexcept;
+// The gravity operations' (gravity_net.cpp): as ResolveMarkIdentities, but the target may be dead (a corpse is still
+// thrown about), only not deleted.
+bool ResolveGrabIdentities(const unsigned char grabber[32],const unsigned char target[32],MarkIdentities* out) noexcept;
 }
