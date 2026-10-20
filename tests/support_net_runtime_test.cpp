@@ -99,6 +99,13 @@ bool ReceiveCarrierDroneNetwork(std::uint32_t,const char*,const void* bytes,std:
     return true;
 }
 void ResetCarrierDroneNetwork() noexcept {++fixture::carrierResets;}
+// The gravity operations' and the float guns' (gravity_net.cpp, floatgun.cpp): not under test here.
+void UpdateGravityNetwork(const CommandNetworkContext&,std::uint64_t) noexcept {}
+bool ReceiveGravityNetwork(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return false;}
+void ResetGravityNetwork() noexcept {}
+void UpdateFloatGunNetwork(const CommandNetworkContext&,std::uint64_t) noexcept {}
+bool ReceiveFloatGunNetwork(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return false;}
+void ResetFloatGunNetwork() noexcept {}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}

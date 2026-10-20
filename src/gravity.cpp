@@ -316,7 +316,7 @@ bool Install() noexcept {
     return ok;
 }
 
-bool Ready() noexcept { return ok && !InSession() && World(); }
+bool Ready() noexcept { return ok && World(); }
 
 void Reset() noexcept {
     for(auto& f:followed)f=Followed{};
@@ -499,7 +499,7 @@ bool HoldAt(const Target& t,const float* goal,const float* goalVel) noexcept {
     return SetVelocity(t,v);
 }
 
-bool Throw(const Target& t,const float* dir,float baseSpeed,const float* carry,const unsigned char* by,float scale) noexcept {
+bool Throw(const Target& t,const float* dir,float baseSpeed,const float* carry,const unsigned char* by,float scale,float* vel) noexcept {
     if(!dir)return false;
     const float len=::gravmath::Len(dir);
     const float speed=::gravmath::ThrowSpeed(t.kg,baseSpeed);
@@ -507,6 +507,7 @@ bool Throw(const Target& t,const float* dir,float baseSpeed,const float* carry,c
     float v[3];
     for(int k=0;k<3;++k)v[k]=dir[k]/len*speed+(carry ? carry[k] : 0.0f);
     if(!SetVelocity(t,v))return false;
+    if(vel)std::memcpy(vel,v,12);
     Track(t,by,false,scale);
     if(Cfg().debug)Log("GRAVITY throw %p (kind %d, %.1f t) at %.1f m/s",t.obj.obj,static_cast<int>(t.kind),t.kg*0.001f,::gravmath::Len(v));
     return true;

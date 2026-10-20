@@ -11,10 +11,12 @@
 //  - let go: thrown along the aim (gravity::Throw: the speed for its mass from the ini's GravityThrowSpeed, plus the player's
 //    own motion), then followed for its impacts, the damage times the kit's AmmoDamage (+0x89C: 1, tools/call_weapons.py);
 //  - put away (+0x13E clear), or the gun off: what it carries is let fall, still followed.
-// Offline only (gravity::Ready): online the kit is its stock self. The player's own Laser Guide Kit is never touched.
+// Online every move is told to the peers too (gravity_net.h): each machine carries and throws its own copy the same way, the
+// damage dealt here alone (this machine's player is the thrower). The player's own Laser Guide Kit is never touched.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
 #include "gravity.h"
+#include "gravity_net.h"
 #include "memory.h"
 #include "edf/weapon.h"
 #include <cmath>
@@ -41,6 +43,7 @@ struct Gun {
     ObjRef human;
     gravity::Target held;
     float holdDist=0.0f;
+    float rayA[3]{},rayB[3]{},hit[3]{};   // the grab's ray and where it met the thing (gravity_net.h Hold)
     float lastPos[3]{};
     ULONGLONG lastMs=0,farSince=0;
     bool havePos=false;
@@ -69,6 +72,7 @@ float Len(const float* v) noexcept { return std::sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v
 void LetGo(const unsigned char* human) noexcept {
     // Falls on its own, still followed for its impacts (Track takes nothing too heavy to have been lifted).
     if(gun.held && human)gravity::Track(gun.held,human,false);
+    if(gun.held)gravity::net::LetGo(gun.held,human);
     gun.held=gravity::Target{};
     gun.farSince=0;
 }
@@ -98,9 +102,11 @@ void Frame(unsigned char* human) noexcept {
 
     if(!held) {
         if(gun.held) {   // let go: thrown along the aim
+            float vel[3];
             const bool thrown=gravity::Refresh(gun.held) &&
-                              gravity::Throw(gun.held,aim,Cfg().gravityThrowSpeed,playerVel,human,scale);
-            if(!thrown)LetGo(human);
+                              gravity::Throw(gun.held,aim,Cfg().gravityThrowSpeed,playerVel,human,scale,vel);
+            if(thrown)gravity::net::Thrown(gun.held,human,vel);
+            else LetGo(human);
             gun.held=gravity::Target{};
         }
         gun.latched=false;
@@ -116,6 +122,7 @@ void Frame(unsigned char* human) noexcept {
         if(!gravity::Position(t,at))std::memcpy(at,hit,12);
         const float d[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
         gun.held=t;gun.holdDist=Len(d)>kHoldMin ? Len(d) : kHoldMin;gun.farSince=0;
+        std::memcpy(gun.rayA,from,12);std::memcpy(gun.rayB,to,12);std::memcpy(gun.hit,hit,12);
         if(gun.grabs++<64)Log("GRAVITYGUN grab %p (kind %d, family %d): %.2f t, %.1f m out",t.obj.obj,static_cast<int>(t.kind),
                               static_cast<int>(t.family),t.kg*0.001f,gun.holdDist);
     }
@@ -127,6 +134,7 @@ void Frame(unsigned char* human) noexcept {
     if(gun.holdDist>carry)gun.holdDist=std::fmax(carry,gun.holdDist-drawIn*dt);
     const float goal[3]={from[0]+aim[0]*gun.holdDist,from[1]+aim[1]*gun.holdDist,from[2]+aim[2]*gun.holdDist};
     if(!gravity::HoldAt(gun.held,goal,playerVel)){LetGo(human);gun.latched=true;return;}
+    gravity::net::Hold(gun.held,human,gun.hit,gun.rayA,gun.rayB,goal,playerVel);
     gravity::Track(gun.held,human,true,scale);   // swung through enemies it hits them
     float at[3];
     if(gravity::Position(gun.held,at)) {
@@ -144,7 +152,7 @@ void Frame(unsigned char* human) noexcept {
 // (held there kAutoHoldMs at least, kAutoMostMs at most), then thrown ahead and down into the ground. Logged as the gun's grabs are.
 constexpr ULONGLONG kAutoGapMs=5000,kAutoHoldMs=1500,kAutoMostMs=6000;
 constexpr float kAutoReach=400.0f,kAutoAhead=10.0f,kAutoHigh=6.0f;
-struct Auto { gravity::Target held; ULONGLONG since=0,next=0; int grabs=0; };
+struct Auto { gravity::Target held; float at[3]{}; ULONGLONG since=0,next=0; int grabs=0; };
 Auto autoTest;
 struct Nearest { const float* at; const void* object; float d2; };
 void SeeNearest(void* ctx,const void* object,const float* lock) noexcept {
@@ -174,6 +182,7 @@ void AutoTest(unsigned char* human) noexcept {
             return;
         }
         autoTest.held=t;autoTest.since=ms;
+        if(!gravity::Position(t,autoTest.at))std::memcpy(autoTest.at,pos,12);
         if(autoTest.grabs++<64)Log("GRAVITYTEST grab %p (kind %d, family %d): %.2f t, %.0f m away, HP %.0f / %.0f",t.obj.obj,
                                    static_cast<int>(t.kind),static_cast<int>(t.family),t.kg*0.001f,std::sqrt(n.d2),
                                    At<float>(n.object,0x2F8),At<float>(n.object,0x2F4));
@@ -187,11 +196,15 @@ void AutoTest(unsigned char* human) noexcept {
     if(!there && ms-autoTest.since<kAutoMostMs) {   // carried in, then held kAutoHoldMs at least
         gravity::HoldAt(autoTest.held,goal,nullptr);
         gravity::Track(autoTest.held,human,true);
+        if(!gun.held)gravity::net::Hold(autoTest.held,human,autoTest.at,pos,autoTest.at,goal,nullptr);   // one grab told at a time: the gun's first
         return;
     }
     if(known)Log("GRAVITYTEST held at (%.0f,%.0f,%.0f), goal (%.0f,%.0f,%.0f)",at[0],at[1],at[2],goal[0],goal[1],goal[2]);
     const float down[3]={f[0],-0.6f,f[2]};
-    const bool thrown=gravity::Throw(autoTest.held,down,Cfg().gravityThrowSpeed,nullptr,human);
+    float vel[3];
+    const bool thrown=gravity::Throw(autoTest.held,down,Cfg().gravityThrowSpeed,nullptr,human,1.0f,vel);
+    if(thrown && !gun.held)gravity::net::Thrown(autoTest.held,human,vel);
+    else gravity::net::LetGo(autoTest.held,human);
     Log("GRAVITYTEST throw %p: %s",autoTest.held.obj.obj,thrown ? "thrown" : "not thrown");
     autoTest.held=gravity::Target{};
 }

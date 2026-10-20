@@ -33,6 +33,7 @@
 #include "game_clock.h"
 #include "game_frame.h"
 #include "gravity.h"
+#include "gravity_net.h"
 #include "floatgun.h"
 #include "edf/host.h"
 #include "heli.h"
@@ -813,7 +814,7 @@ void PerfTick() noexcept {
 
 void ThermalTick() noexcept { const auto& c=Cfg();thermal::Tick(c.enabled && c.thermal,static_cast<unsigned>(c.thermalKey)); }
 void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); Edf41Mother401DevTick(); }   // (the 401's dev enemy shooter: edf41mother401.cpp)
-void GravityTick() noexcept { gravity::Frame(); GravityGunTick(); FloatGunTick(); }
+void GravityTick() noexcept { gravity::Frame(); GravityGunTick(); gravity::net::Frame(); FloatGunTick(); }
 
 void SharedFrameTick() noexcept {
     if(tickFrame==GameFrame())return;

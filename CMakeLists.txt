@@ -19,6 +19,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/vehicleram.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/gravity.cpp)
 # The gravity gun (src/gravitygun.cpp: tools/calls.py EDF6VC_CALL_GRAVITY_GUN, the Laser Guide Kit that grabs and throws).
 target_sources(EDF6VehicleCrew PRIVATE src/gravitygun.cpp)
+# Their online sharing (src/gravity_net.cpp, the float guns' too: the wire src/gravity_net_protocol.cpp, tests/gravity_net_test.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/gravity_net.cpp src/gravity_net_protocol.cpp)
 # The float guns (src/floatgun.cpp: EDF5's last mission's dropped colonist guns and vehicle guns that float round the player).
 target_sources(EDF6VehicleCrew PRIVATE src/floatgun.cpp)
 # The gun stabilizer (its own line, as the Nix's).
@@ -1499,6 +1501,11 @@ target_compile_options(qmark_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
 target_link_options(qmark_test PRIVATE /OPT:REF)
 add_dependencies(offline_checks qmark_test)
 add_test(NAME qmark COMMAND qmark_test)
+# The gravity operations' and the float guns' wire (src/gravity_net_protocol.cpp): round trips, refusals, the grab inbox.
+add_executable(gravity_net_test EXCLUDE_FROM_ALL tests/gravity_net_test.cpp src/gravity_net_protocol.cpp)
+target_compile_options(gravity_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks gravity_net_test)
+add_test(NAME gravity_net COMMAND gravity_net_test)
 # The marker's name from the game's own name tag source (src/player_name.cpp), read from EDF.dll without running it.
 add_test(NAME player_name_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_name_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(player_name_native PROPERTIES SKIP_RETURN_CODE 77)

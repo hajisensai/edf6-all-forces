@@ -13,7 +13,9 @@
 //    enemy it passes through is hit at its closing speed. Both through the impact charges (jet_bay.cpp ImpactDamage):
 //    the thrower's side's enemies only, the thrower's kills. One charge a frame at most per thing followed: an impact and the
 //    enemies it touches that frame are one blow (the charge reaches all of them), each thing's next at kContactGapMs.
-// Game thread only. Offline only for now: the plugin's own velocities are not replicated (InSession: nothing moves).
+// Game thread only. Every operation moves this machine's copy alone (the game replicates none of these velocities: an
+// insect in the air, a corpse, a container, debris are each machine's own physics; docs/gravity-re.md §11): online, a move
+// every machine must see goes through gravity_net.h (the gravity gun's do), which has each machine's copy moved the same way.
 #pragma once
 #include "crew.h"
 #include "gravity_logic.h"
@@ -38,7 +40,7 @@ bool Install() noexcept;        // the code checks (plugin.cpp, at load); false:
 // locator (vt[-1]), class hierarchy and base class array, read as memory (no call; docs/gravity-re.md §1.3). Under the
 // caller's __try. E.g. InsectBase 0x202A270, HumanoidBase 0x203B5B0, HumanBase 0x2016A98, VehicleBase 0x2006480.
 bool IsA(const void* obj,std::uint32_t td) noexcept;
-bool Ready() noexcept;          // installed, offline, in a mission (the physics world there)
+bool Ready() noexcept;          // installed, in a mission (the physics world there)
 void Reset() noexcept;          // a new mission (mission.cpp): nothing is followed any more
 void Frame() noexcept;          // once a frame (crew.cpp SharedFrameTick): the followed throws' impacts and contacts
 
@@ -65,8 +67,10 @@ bool Impulse(const Target& t,const float* impulse) noexcept;   // N s: dv = impu
 bool HoldAt(const Target& t,const float* goal,const float* goalVel) noexcept;
 
 // Throws it along `dir` (any length) at the speed gravity_logic.h ThrowSpeed gives `baseSpeed` for its mass (plus `carry`,
-// the carrier's own motion, may be null), and follows it for `by` (Track). False: not thrown.
-bool Throw(const Target& t,const float* dir,float baseSpeed,const float* carry,const unsigned char* by,float scale=1.0f) noexcept;
+// the carrier's own motion, may be null), and follows it for `by` (Track). `vel`: the velocity it was given (may be null;
+// gravity_net.h Thrown takes it). False: not thrown.
+bool Throw(const Target& t,const float* dir,float baseSpeed,const float* carry,const unsigned char* by,float scale=1.0f,
+           float* vel=nullptr) noexcept;
 // Follows `t` for `by`'s side: its impacts and the enemies it passes through are hit (`held`: being carried, contacts only:
 // its own velocity is the carrier's to change). A target already followed is taken over (its flight goes on). What it deals
 // is the ini's GravityDamage times `scale` (the gravity gun's: its weapon's AmmoDamage). Nothing too heavy to lift

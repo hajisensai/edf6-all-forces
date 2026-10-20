@@ -11,6 +11,8 @@
 #include "enemy_control_net.h"
 #include "sub_support_state.h"
 #include "carrier_drone_net.h"
+#include "floatgun.h"
+#include "gravity_net.h"
 #include "support_submarine.h"
 #include "support_soldier.h"
 #include "command_identity.h"
@@ -136,6 +138,8 @@ void CommandContext(ULONGLONG now) noexcept {
     UpdateEnemyControlNetwork(context,now);
     UpdateSubSupportNetwork(context,now);
     UpdateCarrierDroneNetwork(context,now);
+    UpdateGravityNetwork(context,now);
+    UpdateFloatGunNetwork(context,now);
 }
 // The Q marks (qmark.cpp) go peer to peer over the same transport, with no host step: only the room has to be up.
 void QMarkContext(ULONGLONG now) noexcept { UpdateQMarkNetwork(running,snapshot.peerCount,&SendCommand,now); }
@@ -340,7 +344,7 @@ void ResetSupportNet() noexcept {
     for(auto& v:commandVersionOf)v=0;
     versionShown={};AcquireSRWLockExclusive(&versionLock);versionAt=0;ReleaseSRWLockExclusive(&versionLock);
     commandHostPeer=0;ResetCommandNetwork();ResetQMarkNetwork();ResetPvpNetwork();
-    ResetEnemyControlNetwork();ResetSubSupportNetwork();ResetCarrierDroneNetwork();
+    ResetEnemyControlNetwork();ResetSubSupportNetwork();ResetCarrierDroneNetwork();ResetGravityNetwork();ResetFloatGunNetwork();
 }
 void SuspendSupportNet() noexcept {
     session.Suspend();running=false;blockedUntilMission=true;
@@ -385,6 +389,8 @@ void RunSupportNetTick() noexcept {
             if(ReceiveEnemyControlNetwork(peer,sender.id,bytes,count,now))continue;
             if(ReceiveSubSupportNetwork(peer,sender.id,bytes,count,now))continue;
             if(ReceiveCarrierDroneNetwork(peer,sender.id,bytes,count,now))continue;
+            if(ReceiveGravityNetwork(peer,sender.id,bytes,count,now))continue;
+            if(ReceiveFloatGunNetwork(peer,sender.id,bytes,count,now))continue;
             support_net::Message message;
             if(support_net::Decode(bytes,count,message)) {
                 const auto pending=session.PendingHandshakes();

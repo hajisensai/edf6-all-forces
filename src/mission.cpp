@@ -8,6 +8,7 @@
 #include "crash_dump.h"
 #include "crew.h"
 #include "gravity.h"
+#include "gravity_net.h"
 #include "floatgun.h"
 #include "firstperson.h"
 #include "mission_watch.h"
@@ -126,6 +127,7 @@ void MissionStart() noexcept {
     ResetDrills();
     ResetVehicleRams();
     gravity::Reset();
+    gravity::net::Reset();
     ResetGravityGun();
     FloatGunsMissionStart();   // which mission this is (EDF5's last: the float guns), nothing kept from the last
     ResetEmc();
