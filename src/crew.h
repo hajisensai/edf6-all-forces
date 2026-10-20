@@ -13,6 +13,7 @@
 #include "stores.h"
 #include "edf/seat.h"
 #include "mission_packs.h"
+#include "sound_place.h"
 
 namespace crew {
 extern unsigned char* image;
@@ -625,11 +626,10 @@ void JetSoundTick() noexcept;
 float GameEffectVolume() noexcept;   // jetsound.cpp: the game's master volume times its effect volume (0..1)
 // The lock-on beeps of a vehicle's weapons: kept for a local player's seat, silenced for every other (jetsound.cpp).
 void LockSound(unsigned char* vehicle) noexcept;
-// Where a sound is heard from the camera (jetsound.cpp, the sound system's listener 0, as the jets' engines are placed):
-// its gain in each ear (equal power, the spread kept), its distance (m), the Doppler ratio between it and the camera,
-// the unit line from it to the camera.
-struct SoundPlace { float left,right,distance,doppler; float toCamera[3]; };
-bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;   // false: no listener this frame
+// Where a sound at `pos` moving `vel` (m/s) is heard from the camera (jetsound.cpp, the sound system's listener 0, as the
+// jets' engines are placed; SoundPlace and the arithmetic: sound_place.h). `vel` may be nullptr: a still sound. False: no
+// listener this frame.
+bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;
 bool SoundListening() noexcept;   // the listener is placed this frame (JetSoundTick ran for the jets or the vehicles)
 // The ground vehicles' sounds (vehsound.cpp, ini VehicleSound): checked at load; every vehicle's input, the plugin off
 // too (then it gives the stock sounds back); a new mission.

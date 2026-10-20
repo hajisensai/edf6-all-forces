@@ -18,6 +18,7 @@
 #include "stores.h"
 #include "layout.h"
 #include "memory.h"
+#include "sound_place.h"
 #include <cmath>
 #include <cstring>
 
@@ -29,13 +30,10 @@ constexpr std::size_t kPresetBank=0x20;   // SePreset: its cue (the bank: null p
 // The listeners (0x7AF3E0 rebuilds them every frame from the cameras): a vector at SoundSystem +0x58 (count +0x68)
 // of 0x50-byte entries: the camera's position, then the four rows of its world matrix's inverse (a point's camera
 // coordinates p.x R1 + p.y R2 + p.z R3 + R4; +x is the camera's left, +z ahead: the game's pan atan2(-x, z), 0x7ACD20).
-constexpr std::size_t kListeners=0x58,kListenerCount=0x68,kListenerFloats=20;
+constexpr std::size_t kListeners=0x58,kListenerCount=0x68,kListenerFloats=soundplace::kListenerFloats;
 constexpr std::size_t kMasterVolume=0x2E8,kEffectVolume=0x2F0;
 constexpr float kRoarRef=180.0f,kWhineRef=90.0f; // full volume within these; 1/r beyond (the whine's highs fall faster)
 constexpr float kFarAt=2500.0f;                  // the air's dulling at its fullest this far
-constexpr float kSpread=0.75f;                   // how far a sound to one side leaves the other ear
-constexpr float kSoundSpeed=340.0f;
-constexpr float kMaxClosing=0.8f*kSoundSpeed;   // the Doppler ratio's speeds along the line, clamped short of c
 constexpr float kListenerJump=60.0f;             // a camera moving this far in a frame cut: no velocity from it
 constexpr ULONGLONG kStaleMs=200;                // a jet not seen this long (game ms) is gone: its sound stops
 constexpr int kSounds=32;
@@ -122,29 +120,11 @@ float GameVolume() noexcept {
     return std::isfinite(m) && std::isfinite(e) ? Clamp01(m)*Clamp01(e) : 1.0f;
 }
 
-// Where a sound at `pos` moving `vel` (m/s) is heard from the camera (see SoundPlace); false with no listener.
+// Where a sound at `pos` moving `vel` (m/s; nullptr: still) is heard from the camera (sound_place.h); false with no
+// listener.
 bool Place(const float* pos,const float* vel,SoundPlace* out) noexcept {
     if(!hasListener)return false;
-    const float* r=listener+4;   // the inverse's rows
-    float local[3];
-    for(int c=0;c<3;++c)local[c]=pos[0]*r[c]+pos[1]*r[4+c]+pos[2]*r[8+c]+r[12+c];
-    const float d=std::sqrt(Dot(local,local));
-    const float right=d>1.0f ? -local[0]/d : 0.0f;
-    SoundPlace p{};
-    p.left=std::sqrt(0.5f*(1.0f-kSpread*right));p.right=std::sqrt(0.5f*(1.0f+kSpread*right));
-    p.distance=d;p.doppler=1.0f;
-    // Toward the camera from the sound: the Doppler ratio along it.
-    float u[3]={listener[0]-pos[0],listener[1]-pos[1],listener[2]-pos[2]};
-    const float n=std::sqrt(Dot(u,u));
-    if(n>1.0f) {
-        for(auto& c:u)c/=n;
-        float vs=Dot(vel,u),vl=Dot(listenerVel,u);   // the source closing in; the listener going away
-        vs=vs>kMaxClosing ? kMaxClosing : vs<-kMaxClosing ? -kMaxClosing : vs;
-        vl=vl>kMaxClosing ? kMaxClosing : vl<-kMaxClosing ? -kMaxClosing : vl;
-        p.doppler=(kSoundSpeed-vl)/(kSoundSpeed-vs);
-        std::memcpy(p.toCamera,u,12);
-    }
-    *out=p;
+    *out=soundplace::Place(listener,listenerVel,pos,vel);
     return true;
 }
 

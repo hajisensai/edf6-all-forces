@@ -285,7 +285,7 @@ constexpr float kSfxNear=300.0f;   // m: a recording at full volume within this,
 void Sound(Show& s,audio::UltClip c,const float* pos,float pitch=1.0f) noexcept {
     if(audio::UltClipThere(c)) {
         SoundPlace p{};
-        const bool placed=SoundAt(pos,nullptr,&p);
+        const bool placed=SoundAt(pos,nullptr,&p);   // a still sound (no velocity: sound_place.h)
         const float d=placed ? p.distance : 0.0f,g=kSfx[c].volume*(d>kSfxNear ? kSfxNear/d : 1.0f);
         audio::Beat(GameEffectVolume());
         s.heard=true;

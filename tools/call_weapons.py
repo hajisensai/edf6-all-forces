@@ -75,9 +75,35 @@ TEMPLATE = 'eWeapon051'          # Combat Bomber KM6
 VEHICLE_TEMPLATE = 'eWeapon394'  # N9 Eros (a heli vehicle request)
 THROW_TEMPLATE = 'eWeapon217'    # Patroller (a Robot Bomb: Weapon_Sub, BombBullet01)
 ULTIMATE_TEMPLATE = 'eWeapon116'  # Spritefall Destroy (Weapon_LaserMarkerCallFire, its fire state CP[3] = 0)
-# The ultimate's AmmoDamage base (the stock curve's stars kept): what src/ultimate.cpp reads off the weapon (+0x89C) and
-# shares out over its bolts, blasts and beam.
+# The ultimate's damage: what src/ultimate.cpp reads off the weapon (+0x89C) and shares out over its bolts, blasts and
+# beam, and its pt (calls.py reload): each at every star count (flat_curve). The stock curves scale them by the stars, and a
+# call weapon is owned at 0 (src/unlock_ported.h Own): the 2026-10-20 smoke test's show had damage 2400, 12000 x 0.2, and
+# would have needed 30000 pt (docs/plan-2026-10-19-ultimate.md, 「伤害 2400 的根因」).
 ULTIMATE_DAMAGE = 12000.0
+
+# A star curve [base, mode, star slot, most stars, share, power, integer flag] (EDF.dll 0xD7CE0, the weapon loader's and
+# the menu's): with s = min(the weapon's stars in that slot, most stars), x = share * (s / 5) ** power, its value is
+# base * (1 - share + x) for mode & 3 == 0 (growing with the stars), base * (1 + share - x) for 1 (falling), base else;
+# never below 0, the base's sign kept. Its value at 5 stars is the base.
+STAR_SHARE = 4
+STAR_PIVOT = 5.0
+
+
+def star_value(curve: list, stars: int) -> float:
+    """What the game makes of star curve `curve` (a list, or a Node) at `stars` stars (see STAR_SHARE)."""
+    c = [float(x) for x in (curve.items if isinstance(curve, Node) else curve)]
+    base, sign = (c[0], 1.0) if c[0] >= 0.0 else (-c[0], -1.0)
+    s = min(stars, int(round(abs(c[3]))))
+    low, grown = c[STAR_SHARE] * base, c[STAR_SHARE] * base * (s / STAR_PIVOT) ** c[5]
+    mode = int(round(abs(c[1]))) & 3
+    value = base - low + grown if mode == 0 else low + base - grown if mode == 1 else 0.0
+    return max(0.0, value) * sign
+
+
+def flat_curve(curve: Node, value: float) -> None:
+    """Star curve `curve` (a weapon field's or its menu line's) made `value` at every star count: its share 0."""
+    curve.items[0] = float(value)
+    curve.items[STAR_SHARE] = 0.0
 # The template's radio lines (SOUND/SUPPORT_UNIT_TALK.SGO keys), emptied in the ultimate: CP[5] (fire, -, after) and
 # Ammo_EquipVoice (equipped, unavailable).
 ULTIMATE_VOICES = (('スプライト発射', '', 'スプライト攻撃後'), ('スプライト出撃直後', 'スプライト支援不能'))
@@ -516,8 +542,8 @@ def gun_sgo(template: bytes, call: Call) -> bytes:
 
 
 def ultimate_sgo(template: bytes, call: Call) -> bytes:
-    """Spritefall Destroy with the ultimate's marker, reload (pt), damage base and names; its laser marker, countdown and
-    stock beam (the fallback without the plugin) as they are. Its radio lines silenced (the user, 2026-10-20: 「语音还是用的
+    """Spritefall Destroy with the ultimate's marker, its reload (pt) and damage at every star count (ULTIMATE_DAMAGE) and
+    names; its laser marker, countdown and stock beam (the fallback without the plugin) as they are. Its radio lines silenced (the user, 2026-10-20: 「语音还是用的
     原版语音」, 「没人说你用说话的语音啊」: the show has its own sounds, no speech): ULTIMATE_VOICES, the satellite's fire /
     after-fire lines (CP[5]) and its equip / unavailable lines (Ammo_EquipVoice), every one emptied (the stock CP[5][1] is
     already empty: the game plays nothing for an empty name)."""
@@ -532,8 +558,12 @@ def ultimate_sgo(template: bytes, call: Call) -> bytes:
     for v in voices:
         v.items[:] = [''] * len(v.items)
     r.set('AmmoHitSizeAdjust', float(call.mark))
-    r.get('ReloadTime').items[0] = float(call.reload)
-    r.get('AmmoDamage').items[0] = ULTIMATE_DAMAGE
+    # Flat: the pt and the damage asked for at the 0 stars a call is owned with (ULTIMATE_DAMAGE).
+    flat_curve(r.get('ReloadTime'), call.reload)
+    flat_curve(r.get('AmmoDamage'), ULTIMATE_DAMAGE)
+    for key, want in (('ReloadTime', float(call.reload)), ('AmmoDamage', ULTIMATE_DAMAGE)):
+        if any(star_value(r.get(key), stars) != want for stars in (0, 5, 10)):
+            raise ValueError(f'{ULTIMATE_TEMPLATE} 的 {key} 不是已知的星级曲线（{dsgo.to_py(r.get(key))}）')
     for lang in LANGS:
         key = f'name.{lang.lower()}'
         if key in r.names.values():
@@ -697,8 +727,8 @@ def _ultimate_stats(row: Node, call: Call) -> None:
         return   # another tool rewrote the satellite's text: left as it is
     for at, value in ((_ULT_DAMAGE_STAT, ULTIMATE_DAMAGE), (_ULT_RELOAD_STAT, float(call.reload))):
         stat = stats[at]
-        if len(stat.items) == 3 and isinstance(stat.items[2], Node) and stat.items[2].items:
-            stat.items[2].items[0] = value
+        if len(stat.items) == 3 and isinstance(stat.items[2], Node) and len(stat.items[2].items) > STAR_SHARE:
+            flat_curve(stat.items[2], value)   # the menu's curve: the weapon's at every star count
     area = stats[_ULT_RANGE_STAT]
     if len(area.items) == 2 and isinstance(area.items[1], str):
         area.items[1] = area.items[1].replace('70.0', str(ULTIMATE_RADIUS))
