@@ -534,6 +534,13 @@ def ultimate_sgo(template: bytes, call: Call) -> bytes:
     r.set('AmmoHitSizeAdjust', float(call.mark))
     r.get('ReloadTime').items[0] = float(call.reload)
     r.get('AmmoDamage').items[0] = ULTIMATE_DAMAGE
+    for lang in LANGS:
+        key = f'name.{lang.lower()}'
+        if key in r.names.values():
+            r.set(key, call_name(call, lang))
+    return dsgo.write(doc)
+
+
 # The gravity gun (Call.brings 'gravity', src/gravitygun.cpp): the Laser Guide Kit (Weapon_LaserMarker: its beam is drawn
 # while the trigger is held, it fires no round, so its one shot never runs out) under its own name, its AmmoHitSizeAdjust the
 # call's mark (the plugin's test, with the class's vtable; the class never reads the field). Its beam reaches AmmoSpeed x
@@ -630,6 +637,7 @@ def _text_row(template: Node, call: Call, lang: str, durability: float | None = 
         return row
     if call.brings == 'ultimate':
         _ultimate_stats(row, call)
+        return row
     if call.brings == 'gravity':
         _gravity_stats(row)
         return row
@@ -695,6 +703,8 @@ def _ultimate_stats(row: Node, call: Call) -> None:
     if len(area.items) == 2 and isinstance(area.items[1], str):
         area.items[1] = area.items[1].replace('70.0', str(ULTIMATE_RADIUS))
     del stats[_ULT_ROUNDS_STAT]
+
+
 # The Laser Guide Kit's stat list: [projection range (its AmmoSpeed curve), lock-on speed, lock-on range, zoom]. The gravity
 # gun's: its range (GRAVITY_RANGE) and the zoom; the lock-on lines are the kit's (the beam still paints, but that is not
 # what this weapon is for).
