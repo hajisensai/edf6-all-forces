@@ -39,6 +39,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "player_view.h"
+#include "scope_hold.h"
 #include "sight.h"
 #include "turretaim.h"
 #include "vecmath.h"
@@ -2739,6 +2740,16 @@ void ScopeArm(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
 // The optic the player looks through this frame (HudDraw sets it before the vehicle's marks: ScopeShade's field).
 struct ScopeNow { bool on; scope::Field field; float zoom; int zero; };
 ScopeNow scopeNow{};
+// Whose sight field HudDraw drew last, and when (scope_hold.h): the stock crosshair's draw (infantryscope.cpp) reads it
+// from its own pass, so it is published under a lock.
+scopehold::Drawn scopeDrawn{};
+SRWLOCK scopeDrawnLock=SRWLOCK_INIT;
+void PublishScopeDrawn(const void* soldier) noexcept {
+    const scopehold::Drawn d{soldier,soldier ? GetTickCount64() : 0};
+    AcquireSRWLockExclusive(&scopeDrawnLock);
+    scopeDrawn=d;
+    ReleaseSRWLockExclusive(&scopeDrawnLock);
+}
 
 // `reticle`: this gun's sight is GunReticle (the seat's sight gun: StockMarks), its pipper unlabelled (the reticle
 // reads its range).
@@ -5475,14 +5486,18 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         EnemyControlHud(drawer,ctx,t,width,height,s,lines,&at);
         const ULONGLONG now=GetTickCount64();
         const sightzoom::Kind sightKind=SightZoomView();
-        const float sightMagnification=SightZoomNow(nullptr);
-        const sightzoom::Mask sightMask=sightzoom::MaskOf(sightKind);
-        // Magnified, or the mounted optic up at 1x in a vehicle's first person (War Thunder's gunner sight).
-        const bool scopeOverlay=(sightMagnification>1.0f || SightZoomMounted(nullptr)) && sightMask!=sightzoom::Mask::none;
+        // Magnified, or the mounted optic up at 1x in a vehicle's first person (War Thunder's gunner sight): one snapshot
+        // of the seat's sight (sightzoom.h ScopeField), the same answer the stock crosshair is held back by.
+        SightScope sight{};
+        const bool scopeOverlay=SightZoomScope(&sight);
+        const float sightMagnification=scopeOverlay ? sight.zoom : 1.0f;
+        const sightzoom::Mask sightMask=sightzoom::MaskOf(sight.kind);
         scopeNow=ScopeNow{};
         {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
-            if(scopeOverlay && now-z.tick<=kFreshMs) {
+            const bool drawn=scopeOverlay && now-z.tick<=kFreshMs;
+            PublishScopeDrawn(drawn ? sight.human : nullptr);   // the stock crosshair gives way to it (scope_hold.h)
+            if(drawn) {
                 ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask==sightzoom::Mask::sensor,lines,&at);
                 // The optic's reticle goes with the weapon's marks (StockMark: ScopeArm), etched across this field.
                 if(sightMask==sightzoom::Mask::round)
@@ -5634,8 +5649,15 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         DrawLog(shown,count,lines,at,w,h);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
+bool HudScopeHoldsCrosshair(const void* soldier) noexcept {
+    AcquireSRWLockShared(&scopeDrawnLock);
+    const scopehold::Drawn d=scopeDrawn;
+    ReleaseSRWLockShared(&scopeDrawnLock);
+    return scopehold::Holds(d,soldier,GetTickCount64());
+}
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone; the next publish is empty.
 void ResetHud() noexcept {
+    PublishScopeDrawn(nullptr);
     for(auto& w:work)w=Work{};
 }
 }  // namespace crew

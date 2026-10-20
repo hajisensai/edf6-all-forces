@@ -22,4 +22,7 @@ struct CarrierPanel {
 // From the follower gauge's draw (the draw thread): the published readouts and `count` carrier panels.
 // `viewProj`, `ctx` and `viewport` as the gauge drawer 0x804300 gets them.
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept;
+// Whether the stock crosshair's draw for `soldier` gives way to the vehicle sight's field HudDraw drew for that soldier
+// (scope_hold.h; infantryscope.cpp CrossDrawHook asks it). Any thread.
+bool HudScopeHoldsCrosshair(const void* soldier) noexcept;
 }  // namespace crew
