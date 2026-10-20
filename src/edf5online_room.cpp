@@ -1,9 +1,8 @@
 // More than four players in an EDF5 / EDF4.1 script mission online: whether EDF6Coop's BvmPlayerTableHooks are in
 // place, this machine's word to the room, and whether every mission player's machine gave it (edf5online_room.h).
-// The game-facing half of src/edf5online.cpp's count; the member attributes as outfit41.cpp uses them.
+// The game-facing half of src/edf5online.cpp's count; the member attributes through coop_attr.h.
 #include "edf5online_room.h"
-#include "coop_extension_api.h"
-#include "coop_member_attribute_api.h"
+#include "coop_attr.h"
 #include "crew.h"
 #include <Windows.h>
 #include <cstdio>
@@ -67,89 +66,37 @@ bool Edf5CoopBvmTableHooked() noexcept {
 }
 
 namespace {
-const EDF6CoopMemberAttributeApi* attrApi=nullptr;
-EDF6CoopResolveMissionPlayerPuidFn resolvePuid=nullptr;
-bool looked=false;
-void LookCoop() noexcept {
-    if(looked)return;
-    const HMODULE coop=Coop();
-    if(!coop)return;   // looked again later: EDF6Coop may load after us
-    looked=true;
-    const auto get=reinterpret_cast<EDF6CoopGetMemberAttributeApiFn>(GetProcAddress(coop,"EDF6CoopGetMemberAttributeApi"));
-    const EDF6CoopMemberAttributeApi* table=nullptr;
-    __try { table=get ? get(EDF6COOP_MEMBER_ATTRIBUTE_VERSION) : nullptr; } __except(EXCEPTION_EXECUTE_HANDLER){table=nullptr;}
-    if(table && (table->version!=EDF6COOP_MEMBER_ATTRIBUTE_VERSION || !EDF6COOP_MA_HAS(table,snapshot)))table=nullptr;
-    attrApi=table;
-    resolvePuid=reinterpret_cast<EDF6CoopResolveMissionPlayerPuidFn>(GetProcAddress(coop,"EDF6Coop_ResolveMissionPlayerPuid"));
-    Log("EDF5 online: EDF6Coop member attributes %s, mission player ids %s",attrApi ? "found" : "missing (older EDF6Coop)",
-        resolvePuid ? "found" : "missing (older EDF6Coop)");
-}
-
-bool published=false;
-ULONGLONG lastTick=0;
-void EDF6COOP_MA_CALL Ignore(void*,const EDF6CoopMemberValue*) {}
-
-// The capable members' ids, from one snapshot.
-constexpr std::uint32_t kMost=EDF6COOP_EXTENSION_MAX_PEERS;
-struct Members {
-    std::uint32_t count=0;
-    char id[kMost][EDF6COOP_MEMBER_ID_SIZE];
-    char lacking[EDF6COOP_MEMBER_ID_SIZE]{};   // one member without the word, for the log
-};
-Members members;
-void EDF6COOP_MA_CALL Collect(void* context,const EDF6CoopMemberValue* m) {
-    auto* s=static_cast<Members*>(context);
-    if(!m || !m->memberId)return;
-    if(!(m->hasValue && Capable(m->value))) {
-        if(!s->lacking[0])strncpy_s(s->lacking,m->memberId,_TRUNCATE);
-        return;
-    }
-    if(s->count<kMost)strncpy_s(s->id[s->count++],m->memberId,_TRUNCATE);
-}
-bool Among(const Members& s,const char* id) noexcept {
-    for(std::uint32_t i=0;i<s.count;++i)if(std::strcmp(s.id[i],id)==0)return true;
-    return false;
-}
+coopattr::Publisher publisher{kKey};
+coopattr::Beat beat;
+bool Says(const char* value,void*) { return Capable(value); }
 }  // namespace
 
 // This machine's word told once it can create them (the attribute stays published in every room after), the others'
 // watched (EDF6Coop reads a key from its first snapshot on). The room's and the HQ's frame, at most every 0.5 s.
 void Edf5OnlineRoomTick() noexcept {
-    const ULONGLONG now=GetTickCount64();
-    if(lastTick && now-lastTick<500)return;
-    lastTick=now;
-    LookCoop();
-    if(!attrApi)return;
-    __try { attrApi->snapshot(kKey,&Ignore,nullptr,nullptr); } __except(EXCEPTION_EXECUTE_HANDLER) {}
-    if(published || !Edf5OnlineReady() || !resolvePuid || !Edf5CoopBvmTableHooked())return;
-    std::uint32_t ok=0;
-    __try { ok=attrApi->publish(kKey,kValue); } __except(EXCEPTION_EXECUTE_HANDLER){ok=0;}
-    if(ok){published=true;Log("EDF5 online: told the room %s=%s (EDF5/4.1 missions create every player here)",kKey,kValue);}
+    if(!beat.Due(GetTickCount64()))return;
+    const coopattr::Table* t=coopattr::Api();
+    if(!t){publisher.Forget();return;}
+    __try { coopattr::Watch(t,kKey); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    if(!Edf5OnlineReady() || !coopattr::ResolvePuid() || !Edf5CoopBvmTableHooked())return;
+    std::uint32_t why=0;
+    coopattr::Publisher::Result r=coopattr::Publisher::Result::refusedAgain;
+    __try { r=publisher.Publish(t,kValue,&why); } __except(EXCEPTION_EXECUTE_HANDLER){r=coopattr::Publisher::Result::refusedAgain;}
+    if(r==coopattr::Publisher::Result::published)Log("EDF5 online: told the room %s=%s (EDF5/4.1 missions create every player here)",kKey,kValue);
+    else if(r==coopattr::Publisher::Result::refused)Log("EDF5 online: EDF6Coop refused %s=%s (lastError %u): tried again",kKey,kValue,why);
 }
 
 // Every mission player 0..count-1 resolved to its member, and every one of them told the room kKey = kValue in this
 // machine's copy of the lobby (itself included: what the others read of it).
 bool Edf5RoomAllowsBvmPlayers(std::uint32_t count,char* why,std::size_t size) noexcept {
-    LookCoop();
-    if(!attrApi || !resolvePuid) {
-        std::snprintf(why,size,"EDF6Coop's member attributes or mission player ids missing (older EDF6Coop)");
-        return false;
-    }
-    members.count=0;members.lacking[0]=0;
-    std::uint32_t ok=0;
-    __try { ok=attrApi->snapshot(kKey,&Collect,&members,nullptr); } __except(EXCEPTION_EXECUTE_HANDLER){ok=0;}
-    if(!ok){std::snprintf(why,size,"the room's members unreadable");return false;}
-    for(std::uint32_t i=0;i<count;++i) {
-        EDF6CoopPeer peer{};
-        std::uint32_t got=0;
-        __try { got=resolvePuid(static_cast<std::int32_t>(i),&peer); } __except(EXCEPTION_EXECUTE_HANDLER){got=0;}
-        if(!got || !peer.id[0]){std::snprintf(why,size,"EDF6Coop knows no member for mission player %u",i+1);return false;}
-        if(!Among(members,peer.id)) {
-            std::snprintf(why,size,"mission player %u (%s) did not tell the room %s=%s (an older All Forces, or EDF6Coop's "
-                          "BvmPlayerTableHooks missing there)",i+1,peer.id,kKey,kValue);
-            return false;
-        }
-    }
-    return true;
+    bool ok=false;
+    __try {
+        ok=coopattr::EveryMissionPlayer(coopattr::Api(),coopattr::ResolvePuid(),kKey,count,&Says,nullptr,why,size);
+    } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;std::snprintf(why,size,"the room's members unreadable");}
+    if(!ok && why && std::strstr(why,"says otherwise"))std::snprintf(why+std::strlen(why),size-std::strlen(why),
+        " (%s is not %s)",kKey,kValue);
+    else if(!ok && why && std::strstr(why,"nothing of it"))std::snprintf(why+std::strlen(why),size-std::strlen(why),
+        " (%s=%s: an older All Forces, or EDF6Coop's BvmPlayerTableHooks missing there)",kKey,kValue);
+    return ok;
 }
 }  // namespace crew

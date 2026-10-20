@@ -2,29 +2,38 @@
 // (docs/room-native-dialog-re.md): the window, its focus, mouse / keyboard / pad navigation, confirm / cancel keys and
 // sounds are the game's; the plugin hands it a title and a list of (text, 8-byte id) and learns which one was picked.
 // Built exactly as the soldier screen builds its outfit popup (0x8AB310): HUiDialogBox::InitParam (ctor 0x8C320),
-// its items vector, 0x119C600(system, out weak, layout name, param), then the param destroyed as the game does.
-// UI thread only (a screen's OnUpdate).
+// its items vector (game_dialog.h), 0x119C600(system, out weak, layout name, param), then the param destroyed as the
+// game does. UI thread only (a screen's OnUpdate, the dialog's own OnUpdate) except RequestCloseDialogs.
 #pragma once
 #include <cstdint>
 
 namespace crew::nativedialog {
 
 struct Button { const wchar_t* text; std::uint64_t id; };
-// The dialog: a weak reference to the game's object (it ends when the game closes and frees it).
-struct Handle { void* object=nullptr; void* control=nullptr; std::uint32_t serial=0; };
+// The dialog: a weak reference to the game's object (it ends when the game closes and frees it), and the button picked
+// in it (each dialog its own: a pick lands in the Handle of the dialog it was made for, and in no other). The caller
+// keeps the Handle where OpenDialog wrote it (its address is how a pick finds it) until CloseDialog / ForgetDialog.
+struct Handle {
+    void* object=nullptr; void* control=nullptr; std::uint32_t serial=0;
+    std::uint64_t picked=0; bool hasPicked=false;
+};
 
 // At load (room_ui.cpp InstallRoomUi): every address checked; false (logged) leaves the menu without dialogs.
 bool InstallNativeDialog() noexcept;
 bool NativeDialogReady() noexcept;
-// Opens one; `cursor` the button focused first. False when the game refused (nothing open then).
+// Opens one; `cursor` the button focused first. False when the game refused (nothing open then, nothing held).
 bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out) noexcept;
 // The game still holds it (open or still closing).
 bool DialogAlive(const Handle& h) noexcept;
 // The button picked in this dialog (its id), once: false while none was.
-bool TakePicked(const Handle& h,std::uint64_t* id) noexcept;
+bool TakePicked(Handle& h,std::uint64_t* id) noexcept;
 // Closes it now when it is still open (the screen went, the menu was turned off); the reference dropped either way.
 void CloseDialog(Handle& h) noexcept;
 // The reference dropped (the dialog gone or not ours any more).
 void ForgetDialog(Handle& h) noexcept;
+// Any thread (a mission starting, MissionSync on the script thread): every dialog of ours open now is closed by its
+// own next frame (HUiDialogBox::OnUpdate, chained: it runs while the dialog is on screen, whether or not the room or
+// the HQ screen under it still updates). Dialogs opened after the request are not touched.
+void RequestCloseDialogs() noexcept;
 
 }  // namespace crew::nativedialog

@@ -35,15 +35,26 @@ EDF.dll TimeDateStamp `0x678CCB46`，RVA；2026-10-19。证据为本机原版二
 1. F2 / L3+R3 或原生菜单按钮：载入 ini（同以前 `Opened`），从单位页开始。
 2. 每帧：对话框活着 → 只取点选；weak 失效（游戏已关闭并释放）→ 有点选则 `Apply`，否则视为游戏自带的取消（Esc / B / 右键）`Cancel` = 返回上一页；单位页取消 = 关闭（有未保存修改先问「放弃 / 保存 / 继续编辑」）。
 3. 画面重新成为输入拥有者（`GetInput 0x8DAD00` 非空）后打开下一页。菜单期间画面本身的输入照旧被挡（ctx+8 置空），3D 预览跟随当前编辑的士兵 / 乘员。
-4. 画面替换 / 析构、任务开始、`Enabled` / `RoomLoadout` 关闭：`CloseDialog` 锁 weak（`0x83E4F0`）后 `0x7E2EB0` 关掉还开着的对话框，序号作废。
+4. 画面替换 / 析构、任务开始、`Enabled` / `RoomLoadout` 关闭：`CloseDialog` 锁 weak（`0x83E4F0`）后 `0x7E2EB0` 关掉还开着的对话框，它的点选不再被采纳。何时关见下节「关闭时机」。
 5. 打开失败（游戏未返回对话框）：菜单关闭并记日志，不留不可见的菜单状态。
 
 页面（`room_dialog_logic.h`）：单位列表 → 单位（士兵 / 主炮 / 挂点 / 乘员颜色，添加、恢复原配）→ 士兵（兵种、主色、副色、背包武器、在后复制、删除）/ 挂点（挂载、弹数、删除）/ 乘员（主色、副色）→ 取值页。每页最多 10 个条目，超出加「上一页 / 下一页」；取值页打开在当前值所在页、焦点在当前值；每页最后一个按钮「返回」（单位页「关闭」）。
+
+## 关闭时机（2026-10-20，#218 审查）
+
+对话框挂在游戏的全局 UI 上（`0x119C600` 的 system = `[0x20B2960] - 0x88`），不是房间 / HQ 画面的子对象：画面析构或不再更新，它照样留在屏幕上。原先只在下一个画面帧（`ForgetMenu`）关，画面析构钩子（`NoteGone`）与任务开始（`ResetRoomUi`）都只打标记，所以房主开任务时客人开着的菜单会被带进读盘。现在：
+
+- **画面析构**：`RoomGoneHook` / `HqGoneHook` → `NoteGone` 在 UI 线程（记录在画面帧里的线程号；游戏在 UI 线程析构画面）上直接 `CloseDialog`。不在 UI 线程时只打标记（菜单状态是 UI 线程的），由下面的对话框自身帧兜底。
+- **任务开始**：`ResetRoomUi`（`MissionStart` 的 preload，以及新增的 `MissionSync_Begin` 钩子，见 `docs/loadout-re.md` §3.5）调 `RequestCloseDialogs()`（任何线程，原子量）：记下「到目前为止打开的对话框」。`HUiDialogBox::OnUpdate`（vtable `0x17F7260`，RTTI `.?AVHUiDialogBox@ui@@`，slot 1 = `0x810D10`，与各 HUi 画面同布局）被链上：对话框自己的帧里，若它是插件的、且在请求之前打开，就在原帧之后 `0x7E2EB0(self)` 关掉（与原版按钮在帧内关闭同一做法），之后打开的不受影响。它只要对话框还在屏幕上就会被更新，不依赖房间画面是否还在跑。（推测：读盘期间全局 UI 仍逐帧更新对话框；比较用的 `weak.object` 就是对话框对象本身，与原版 lambda 交给 `0x7E2EB0` 的是同一种指针；**未实机**。）链不上时日志说明，退回只靠画面帧 / 析构钩子。
+- **打开时出错**：`OpenDialog` 的 `__except` 若发生在 `0x119C600` 已返回 weak 之后（拆参数时出错），先 `CloseNow` 关掉已显示的对话框，再释放 weak（控制块 `+0xC` 减一），不再泄漏引用、也不留一个没人驱动的对话框。
+- **点选按对话框存放**：点选结果原来是全局单例（`picked` / `hasPicked`），现在放进各自的 `Handle`（`picked` / `hasPicked`）。打开时登记 Handle 的地址（最多 8 个），按钮 id 高 24 位的序号找到它所属的 Handle；关闭 / 遗忘时注销。被「请求关闭」关掉的对话框之后的点选不采纳。
+
+与士兵画面「更换士兵模型」弹窗（`outfit41.cpp`）共用的条目操作抽到 `src/game_dialog.h`（向量扩容 `0xB91D0` 按 capacity*2+2、先加 size 再 `0x89950` 拷贝、按下标拷贝时在扩容后再取源、`0x8E170` 析构截断、`_Func_impl` vtable 克隆），游戏 `std::wstring` 的布局与 `0x3D450` / `0x3D3C0` 在 `common/edf/wstr.h`，签名检查统一走 `src/code_signatures.h CheckSignatures`。离线：`tests/game_dialog_test.cpp`（ctest `game_dialog`）。
 
 ## 验证范围
 
 - `tests/room_dialog_test.cpp`（ctest `room_dialog`）：页面、跳转、编辑、分页、焦点、取消、未保存确认、两万步随机点选不越界且每次保存都能被真实解析器读回。
 - `tests/room_dialog_native_audit.py`（ctest `room_dialog_native`）：`room_dialog_signatures.inc` 与 EDF.dll 一致；构造者的调用顺序、全局与数据指针、InitParam 的 RTTI、原版 lambda 的拷贝形状与关闭调用、LYT_HUIDIALOGBOX 的类与结构。
-- 插件运行时还逐段比对 30 段签名、核对 `[0x1F77810]` 指向布局名；不符则不启用对话框（回退旧覆盖层）。
+- 插件运行时还逐段比对 31 段签名（含 `HUiDialogBox::OnUpdate 0x810D10`）、核对 `[0x1F77810]` 指向布局名；不符则不启用对话框（回退旧覆盖层）。
 
-**未实机**：对话框能否同时容纳 14 个按钮而不出屏、多行说明文字（`\n`）的排版、关闭动画期间的时序、联机房间里与 Coop 的共存，都需要游戏内验收。
+**未实机**：读盘期间对话框自身帧是否继续运行（任务开始时的关闭靠它）、对话框能否同时容纳 14 个按钮而不出屏、多行说明文字（`\n`）的排版、关闭动画期间的时序、联机房间里与 Coop 的共存，都需要游戏内验收。

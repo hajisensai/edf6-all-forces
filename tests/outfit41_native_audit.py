@@ -104,6 +104,26 @@ def audit_code(img: bytes, base: int) -> None:
     check(img[0x8A9B23:0x8A9B29] == bytes.fromhex('888ea4070000'), 'the screen init copies GS +0x300 into +0x7A4')
     check(img[0x8ABC4D:0x8ABC50] == bytes.fromhex('4c8d0d') and 0x8ABC54 + struct.unpack_from('<i', img, 0x8ABC50)[0] == 0x8E170
           and struct.unpack_from('<I', img, 0x8ABC55)[0] == 0x90, 'the popup destroys its 0x90-byte items with 0x8E170')
+    # 2026-10-20 (#226 review): the member record packed by MissionSync_Begin, and the save's copy of the main block.
+    mission = open(os.path.join(ROOT, 'src', 'mission.cpp'), encoding='utf-8').read()
+    m = re.search(r'kSyncSig\[\]=\{([^}]*)\}', mission)
+    sync = bytes(int(x, 16) for x in re.findall(r'0x([0-9A-F]{2})', m.group(1))) if m else b''
+    check(sync == img[0x7920E0:0x7920E0 + len(sync)] and len(sync) == 0x17, "mission.cpp's MissionSync_Begin bytes are EDF.dll's")
+    names = [n for n in re.findall(rb'int MissionSync_Begin\(int \)', img[0x17EF1A8:0x17EF1C8])]
+    check(len(names) == 1 and 0x794097 + 7 + struct.unpack_from('<i', img, 0x79409A)[0] == 0x17EF1A8 and
+          0x794079 + 7 + struct.unpack_from('<i', img, 0x79407C)[0] == 0x7920E0,
+          'the binding 0x7920E0 is registered as "int MissionSync_Begin(int )"')
+    src = open(os.path.join(ROOT, 'src', 'outfit41.cpp'), encoding='utf-8').read()
+    logic = open(os.path.join(ROOT, 'src', 'outfit41_logic.h'), encoding='utf-8').read()
+    check(f'kJobData=0x{sigs.JOB_DATA:X},kJobSize=0x{sigs.JOB_SIZE:X}' in src and
+          f'kMainBlock=0x{sigs.MAIN_BLOCK:X},kMainSize=0x{sigs.MAIN_SIZE:X}' in logic,
+          'the job copy (+0x90 / +0x98) and the main block (GS +0x6E68, 0xDCE8) as the plugin reads them')
+    check(img[0x7BCE6D:0x7BCE73] == bytes.fromhex('41b9e8dc0000') and img[0x7C2F0C:0x7C2F13] == bytes.fromhex('4881c3686e0000'),
+          'the save hands 0xDCE8 bytes of GS + 0x6E68 to the job')
+    check(img[0x7BDA0D:0x7BDA14] == bytes.fromhex('48898690000000') and img[0x7BDA14:0x7BDA1B] == bytes.fromhex('4889be98000000'),
+          'the job keeps its copy at +0x90 (data) / +0x98 (size)')
+    check(img[0x7C2232:0x7C2240] == bytes.fromhex('488b9698000000488b8e90000000') and img[0x7C2240] == 0xE8 and
+          0x7C2245 + struct.unpack_from('<i', img, 0x7C2241)[0] == 0x7C1270, 'the run checksums that copy (0x7C1270)')
 
 
 def audit_game(game, reg: dict) -> None:

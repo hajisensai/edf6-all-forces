@@ -102,6 +102,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 target_sources(EDF6VehicleCrew PRIVATE src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
 # word (src/edf5online_room.h; the creation and the table: src/edf5online.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/edf5online_room.cpp)
@@ -638,6 +639,23 @@ add_test(NAME outfit41 COMMAND outfit41_test)
 add_executable(room_dialog_test tests/room_dialog_test.cpp)
 target_compile_options(room_dialog_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_dialog COMMAND room_dialog_test)
+# What the room menu's dialogs and the HQ outfit popup share (src/game_dialog.h: the items vector's growth, the
+# std::function vtable; common/edf/wstr.h: the game's std::wstring layout), over fakes of the game's functions.
+add_executable(game_dialog_test tests/game_dialog_test.cpp)
+target_include_directories(game_dialog_test PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/common)
+target_compile_options(game_dialog_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME game_dialog COMMAND game_dialog_test)
+# The ini text read / rewritten key by key (src/ini_text.h: the room menu's ini and the EDF4.1 outfit's file).
+add_executable(ini_text_test tests/ini_text_test.cpp)
+target_include_directories(ini_text_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(ini_text_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME ini_text COMMAND ini_text_test)
+# EDF6Coop's member attributes as every module reads them (src/coop_attr.h) over a fake table, and the host's settings /
+# the room's builds word (src/host_settings_logic.h).
+add_executable(coop_attr_test tests/coop_attr_test.cpp)
+target_include_directories(coop_attr_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(coop_attr_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME coop_attr COMMAND coop_attr_test)
 add_executable(room_ui_test tests/room_ui_test.cpp)
 target_compile_options(room_ui_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_ui COMMAND room_ui_test)
@@ -785,6 +803,8 @@ add_test(NAME installer_lock COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR
 set_tests_properties(installer_lock PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The menu screen's switches (RoomLoadout / RoomPreSync) and screen identity, from its source (no game needed).
 add_test(NAME room_ui_wiring COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_wiring_guard.py")
+# EDF6Coop's member attributes taken in one place, the host's switches read through host_settings.h (tests/coop_attr_guard.py).
+add_test(NAME coop_attr_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/coop_attr_guard.py")
 # The room menu's palette (src/hq_palette.inc) against the game's HQ colour-select chips (Root.cpk CUSTOMCOLOR*.SGO, EDF.dll
 # read as files; skipped without the game).
 add_test(NAME hq_palette COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/hq_palette_audit.py")
@@ -895,7 +915,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test room_ui_test room_dialog_test loadout_writer_test room_coop_capability_test room_sync_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test room_ui_test room_dialog_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)

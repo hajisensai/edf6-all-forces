@@ -5,6 +5,7 @@
 // pack's identity (AF_PACK): a guest checks it before the native JoinLobby, so a
 // different pack definition or a row this machine lacks is refused with a dialog
 // instead of a black screen or the wrong mission (docs/mod-room-isolation.md).
+#include "coop_attr.h"
 #include "mod_room.h"
 #include "coop_extension_api.h"
 #include "mission_packs.h"
@@ -68,7 +69,8 @@ const wchar_t* CoopDependencyProblem() noexcept {
         return L"EDF6Coop 缺少本版全军出击所需的任务准入与玩家身份接口。";
     // The members' EDF4.1 outfits (outfit41.cpp) and the room pre-sync travel on its member attributes: without them the
     // others would be shown in their stock outfits with no word said, so the room is refused with this reason instead.
-    if(!resolveCoop("EDF6CoopGetMemberAttributeApi"))
+    const auto attributes=reinterpret_cast<EDF6CoopGetMemberAttributeApiFn>(resolveCoop("EDF6CoopGetMemberAttributeApi"));
+    if(!attributes || !coopattr::Usable(attributes(EDF6COOP_MEMBER_ATTRIBUTE_VERSION)))   // coop_attr.h: what every reader needs
         return L"EDF6Coop 缺少成员属性接口（各玩家的 4.1 外观等联机同步需要），版本过旧。";
     if(admission()!=1)return L"EDF6Coop 的任务准入保护尚未就绪，已阻止进入联机。";
     return nullptr;

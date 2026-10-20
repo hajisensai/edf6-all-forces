@@ -16,4 +16,8 @@ std::uintptr_t Outfit41SessionPreload(PlayerPreloadFn call,std::uintptr_t a,std:
 // The room's / HQ's frame (room_ui.cpp, the UI thread, whatever the room menu's switches; the 3D view's messages do the same
 // inside outfit41.cpp): this machine's value told to the room when it changed, the others' watched. At most every 0.5 s.
 void Outfit41RoomTick() noexcept;
+// mission.cpp's MissionSync_Begin hook, right before the game packs this machine's member record from GS (0x78E9A0,
+// what the others build this machine's player from): the EDF4.1 colours put into the block the record reads, so the
+// others never wait for a frame of the room to see them (whatever thread the script runs on: the swap is locked).
+void Outfit41MissionSync() noexcept;
 }  // namespace crew

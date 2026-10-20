@@ -8,6 +8,7 @@
 // velocity, fabricated hinge or substitute bike.
 #include "crew.h"
 #include "edf41bike.h"
+#include "host_settings.h"
 #include "body506.h"
 #include "ifc_model.h"
 #include "layout.h"
@@ -98,7 +99,7 @@ void RegisterMappings(unsigned char* v,unsigned char* aim) noexcept {
 void __fastcall SetWeapon(unsigned char* v,void* aim,void* entry,int holder) {
     unsigned char* target=nullptr;
     __try {
-        if(on && Tagged(v)) {
+        if(on && Edf41BikeGunnerAllowed() && Tagged(v)) {
             auto* seat=Operator(v);
             if(seat && KnownAim(Aim(seat)))target=Aim(seat);
         }
@@ -143,7 +144,7 @@ void Update(unsigned char* v) noexcept {
 }
 void __fastcall Frame(unsigned char* v) {
     reinterpret_cast<VehicleFn>(nextFrame)(v);
-    if(!on)return;
+    if(!on || !Edf41BikeGunnerAllowed())return;   // a member's build lacks the seat: a stock Car for everyone
     __try { if(Ours(v))Update(v); }
     __except(EXCEPTION_EXECUTE_HANDLER) { Log("EDF41BIKE gunner frame rejected unreadable native state v=%p",v); }
 }
@@ -160,7 +161,7 @@ void Pose408(unsigned char* v,unsigned char* gun,unsigned char* aim) noexcept {
 void __fastcall Pose(unsigned char* v) {
     bool ours=false;unsigned char *gun=nullptr,*aim=nullptr;
     __try {
-        if(on && Cfg().enabled && !v[kDead] && Ours(v) && !At<void*>(v,kCas)) {
+        if(on && Edf41BikeGunnerAllowed() && Cfg().enabled && !v[kDead] && Ours(v) && !At<void*>(v,kCas)) {
             auto* seat=Operator(v);
             if(seat && KnownAim(Aim(seat))) {
                 gun=BoneRecord506(v+kModelInst506,L"gun");aim=Aim(seat);ours=gun!=nullptr;

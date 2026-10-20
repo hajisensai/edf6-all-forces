@@ -21,6 +21,7 @@
 // Online: only the soldiers this machine runs (online_authority.h IsOnlineAuthority: its own registered ones, the host for
 // one with no identity), as the stock AI writes only theirs; the block goes to the other machines the way the stock AI's
 // does (§2.1).
+#include "host_settings.h"
 #include "crew.h"
 #include "npc_command.h"
 #include "npc_native_hooks.h"
@@ -1205,16 +1206,32 @@ Plan Drive(Soldier& s,unsigned char* h,const SoldierClass& c,const Arms& a,const
 constexpr std::uint32_t kClimbLimits=0x62D;
 constexpr std::size_t kClimbStates=0x1530;   // 4 x int: common_elude_large_up, middle_over, middle_up, small_up
 constexpr ULONGLONG kClimbStuckMs=4000;
+constexpr std::size_t kClimbPlayer=0xB90,kClimbTrack=0x1420;   // the main CAS player and the track the state waits on
 void StuckClimb(Soldier& s,const unsigned char* h,int cls,ULONGLONG ms) noexcept {
     if(At<std::uint32_t>(h,kActionLimits)!=kClimbLimits){s.climbSince=0;s.climbSaid=false;return;}
     if(!s.climbSince){s.climbSince=ms;return;}
     if(s.climbSaid || ms-s.climbSince<kClimbStuckMs)return;
     s.climbSaid=true;
     const float* pos=Pos(h);
+    // What the state waits on (0x5798D2..0x5798E6: 0x116BBE0(human+0xB90, track [human+0x1420])): that track's record
+    // (player +0x60 + track*0x160) state +0x104 (-1: done at once), end +0xF0 (below 0: a loop, never done), done once
+    // +0x100 + +0xE8 reaches it (0x116BC0C). A soldier whose CAS has every climb
+    // state (EDF6's own, the 2026-10-19 town screenshot's) and still hangs shows here what holds the track instead.
+    std::int32_t track=-1,state=-2;float end=0,start=0,now=0;
+    __try {
+        const unsigned char* cas=h+kClimbPlayer;
+        track=At<std::int32_t>(h,kClimbTrack);
+        const unsigned char* records=At<const unsigned char*>(cas,0x60);
+        if(track>=0 && track<16 && records && Readable(records+static_cast<std::size_t>(track)*0x160,0x110)) {
+            const unsigned char* r=records+static_cast<std::size_t>(track)*0x160;
+            state=At<std::int32_t>(r,0x104);end=At<float>(r,0xF0);start=At<float>(r,0xE8);now=At<float>(r,0x100);
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){state=-2;}
     Log("NPCAI %s %p: held in the climb state %.0f s at (%.0f,%.0f,%.0f); its CAS's climb states %d %d %d %d (-1: none, "
-        "the climb never ends)",kSoldiers[cls].name,h,static_cast<double>(ms-s.climbSince)/1000.0,pos[0],pos[1],pos[2],
+        "the climb never ends); main track %d plays state %d, +0x100 %.2f +0xE8 %.2f end %.2f (below 0: a loop, the "
+        "climb never ends)",kSoldiers[cls].name,h,static_cast<double>(ms-s.climbSince)/1000.0,pos[0],pos[1],pos[2],
         At<std::int32_t>(h,kClimbStates),At<std::int32_t>(h,kClimbStates+4),At<std::int32_t>(h,kClimbStates+8),
-        At<std::int32_t>(h,kClimbStates+12));
+        At<std::int32_t>(h,kClimbStates+12),track,state,static_cast<double>(now),static_cast<double>(start),static_cast<double>(end));
 }
 
 void Think(unsigned char* h,int cls) noexcept {
@@ -1415,7 +1432,7 @@ void PreThink(unsigned char* h) noexcept {
 // of it (a dismissal, its cooldown, ScriptNpcRecruit) stay as they were; the map reads it (NativeJoinable). Only while
 // the plugin's AI is on and SetFollow is as read: else the stock walk-up is the only way in, and it stays.
 bool WalkUpOff() noexcept {
-    return ok && followOk && Cfg().enabled && Cfg().customNpcAi && !Cfg().vanillaRecruit;
+    return ok && followOk && Cfg().enabled && Cfg().customNpcAi && !VanillaRecruitInEffect();   // online: the host's (host_settings.h)
 }
 // Before the stock Think: +0x540 that the walk-up gate would read, cleared (returned, to be put back); 0 when none.
 std::uint8_t HideWalkUp(unsigned char* h) noexcept {
@@ -1475,7 +1492,7 @@ void __fastcall JoinMarkHook(void* marks,const unsigned char* human) noexcept {
 const unsigned char* __fastcall CoverRoot(const unsigned char* h) noexcept {
     __try {
         const bool own=ok && Cfg().enabled && Cfg().customNpcAi;
-        if(own && !Cfg().npcFreeSquadCover)return kNoCover;
+        if(own && !NpcFreeSquadCoverInEffect())return kNoCover;   // online: the host's (host_settings.h)
         const bool belowPlayer=own;
         const unsigned char* top=h;
         for(int i=0;i<kMaxRoot*4;++i) {

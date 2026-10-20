@@ -10,6 +10,8 @@
 #include <cwchar>
 #include <string>
 #include <string_view>
+#include "game_dialog.h"
+#include "ini_text.h"
 #include "unlock_ported.h"
 
 namespace crew::outfit41 {
@@ -82,6 +84,35 @@ inline std::uint64_t OthersHash(const unsigned char* playerColours,int cls,int o
         if(b!=outfit+cls*kStockOutfits)h=Hash(playerColours+static_cast<std::size_t>(b)*kColourBlock,kColourBlock,h);
     return h;
 }
+// The block swapped for player `p` (`colours` its 16 blocks) still holds the EDF4.1 colours as the plugin left them
+// or as the player edited them since; false when there is no swap, or the block is the game's own again (a save
+// loaded: the other blocks changed too, or the block is exactly the stock backup). Reconcile's and the save's test.
+inline bool SwappedHere(const State& s,int p,const unsigned char* colours) noexcept {
+    if(!ValidLocal(p) || !colours)return false;
+    const Swap& w=s.swap[p];
+    if(w.cls<0)return false;
+    const unsigned char* g=colours+static_cast<std::size_t>(w.outfit+w.cls*kStockOutfits)*kColourBlock;
+    if(std::memcmp(g,s.own[p][w.cls],kColourBlock)==0)return true;
+    return OthersHash(colours,w.cls,w.outfit)==w.others && std::memcmp(g,w.backup,kColourBlock)!=0;
+}
+// The save (outfit41.cpp SaveJobHook): the game's copy of MAIN.GST (`mainCopy`: GS +kMainBlock, kMainSize bytes) with
+// every block still swapped given its stock colours back (the swap's backup), so the file never holds the EDF4.1
+// colours; GS itself is not touched. Returns how many blocks were put back.
+inline constexpr std::size_t kMainBlock=0x6E68,kMainSize=0xDCE8;
+inline int RestoreSavedCopy(const State& s,unsigned char* mainCopy) noexcept {
+    int put=0;
+    for(int p=0;p<kLocalPlayers && mainCopy;++p) {
+        const Swap& w=s.swap[p];
+        unsigned char* colours=mainCopy+(ColourOffset(p,0,0)-kMainBlock);
+        if(!SwappedHere(s,p,colours))continue;
+        std::memcpy(colours+static_cast<std::size_t>(w.outfit+w.cls*kStockOutfits)*kColourBlock,w.backup,kColourBlock);
+        ++put;
+    }
+    return put;
+}
+static_assert(ColourOffset(kLocalPlayers-1,kClasses-1,kStockOutfits-1)+kColourBlock<=kMainBlock+kMainSize,
+              "every colour block is inside the save's main block");
+
 // What Reconcile did (the caller persists and logs).
 enum class ColourAct : std::uint8_t { none, swapped, restored, mirrored, dropped };
 // Makes the game's colour blocks of player `p` (`colours`: GS +0x6FB0 + p*0x3E60, all 16 blocks) agree with what it wears:
@@ -101,10 +132,8 @@ inline ColourAct Reconcile(State& s,int p,unsigned char* colours,int wantCls,int
     ColourAct act=ColourAct::none;
     if(w.cls>=0) {
         unsigned char* g=colours+static_cast<std::size_t>(w.outfit+w.cls*kStockOutfits)*kColourBlock;
-        const bool reloaded=OthersHash(colours,w.cls,w.outfit)!=w.others;
         const bool atOwn=std::memcmp(g,s.own[p][w.cls],kColourBlock)==0;
-        const bool atBackup=std::memcmp(g,w.backup,kColourBlock)==0;
-        if(!atOwn && (reloaded || atBackup)) {   // not our block any more: left as the game has it
+        if(!SwappedHere(s,p,colours)) {   // not our block any more: left as the game has it
             w=Swap{};changed=true;act=ColourAct::dropped;
         } else if(w.cls!=wantCls || w.outfit!=wantOutfit) {
             std::memcpy(s.own[p][w.cls],g,kColourBlock);s.has[p][w.cls]=true;
@@ -126,7 +155,7 @@ inline ColourAct Reconcile(State& s,int p,unsigned char* colours,int wantCls,int
     return act;
 }
 
-// --- The file
+// --- The file (EDF6VehicleCrew.outfit41.ini; ini_text.h reads and writes it key by key, as the room menu's ini)
 inline constexpr char kHexDigits[]="0123456789ABCDEF";
 inline std::string Hex(const unsigned char* p,std::size_t n) {
     std::string out;out.reserve(n*2);
@@ -143,25 +172,44 @@ inline bool Unhex(std::string_view v,unsigned char* out,std::size_t n) noexcept 
     }
     return true;
 }
+inline constexpr const char* kSectionName="Outfit41";
 inline constexpr const char* kSection="[Outfit41]";
-inline constexpr const char* kPlayerKeys[kLocalPlayers]={"Player1","Player2"};
+// The keys, per local player (initext::Key): Player<P>=1 the choice; per local player and class Colours<P>_<class>=<the
+// block in hex> (known ones); a swap Swap<P>=<class>,<outfit>,<others hash hex> with Backup<P>=<the block in hex>.
+inline std::string PlayerKey(int p) { return initext::Key("Player",p); }
+inline std::string ColoursKey(int p,int c) { return initext::Key("Colours",p,c); }
+inline std::string SwapKey(int p) { return initext::Key("Swap",p); }
+inline std::string BackupKey(int p) { return initext::Key("Backup",p); }
 
-// Player1=1, then per player and class Colours<P>_<class>=<the block in hex> (known ones), and a swap
-// Swap<P>=<class>,<outfit>,<others hash hex> with Backup<P>=<the block in hex>.
-inline std::string Format(const State& s) {
-    std::string out=std::string(kSection)+"\r\n";
-    for(int p=0;p<kLocalPlayers;++p)out+=std::string(kPlayerKeys[p])+(s.on[p] ? "=1\r\n" : "=0\r\n");
+// Every key of `s` written into `was` (the file as it is: every other line, comment and key kept), a key the state no
+// longer has (colours unknown, no swap) removed. False only for a UTF-16 file.
+inline bool Store(const std::string& was,const State& s,std::string* out) {
+    std::string text=was,next;
+    const auto set=[&](const std::string& key,const std::string& value) {
+        if(!initext::Rewrite(text,kSectionName,key,value,&next))return false;
+        text.swap(next);
+        return true;
+    };
+    for(int p=0;p<kLocalPlayers;++p)if(!set(PlayerKey(p),s.on[p] ? "1" : "0"))return false;
     for(int p=0;p<kLocalPlayers;++p) {
-        for(int c=0;c<kClasses;++c)
-            if(s.has[p][c])out+="Colours"+std::to_string(p+1)+"_"+std::to_string(c)+"="+Hex(s.own[p][c],kColourBlock)+"\r\n";
+        for(int c=0;c<kClasses;++c)if(!set(ColoursKey(p,c),s.has[p][c] ? Hex(s.own[p][c],kColourBlock) : std::string{}))return false;
         const Swap& w=s.swap[p];
+        std::string swap,backup;
         if(w.cls>=0) {
             unsigned char h[8];
             for(int i=0;i<8;++i)h[i]=static_cast<unsigned char>(w.others>>(56-8*i));
-            out+="Swap"+std::to_string(p+1)+"="+std::to_string(w.cls)+","+std::to_string(w.outfit)+","+Hex(h,8)+"\r\n";
-            out+="Backup"+std::to_string(p+1)+"="+Hex(w.backup,kColourBlock)+"\r\n";
+            swap=std::to_string(w.cls)+","+std::to_string(w.outfit)+","+Hex(h,8);
+            backup=Hex(w.backup,kColourBlock);
         }
+        if(!set(SwapKey(p),swap) || !set(BackupKey(p),backup))return false;
     }
+    *out=std::move(text);
+    return true;
+}
+// A new file of `s` alone.
+inline std::string Format(const State& s) {
+    std::string out;
+    Store(std::string{},s,&out);
     return out;
 }
 
@@ -171,49 +219,25 @@ inline bool Digit(std::string_view v,int most,int& out) noexcept {
     out=v[0]-'0';
     return true;
 }
-struct PendingSwap { Swap swap; bool backup=false; };
-// Colours<P>_<c>, Swap<P>, Backup<P> (Format); anything malformed is ignored.
-inline void ParseColours(State& s,PendingSwap* pending,std::string_view key,std::string_view value) noexcept {
-    for(int p=0;p<kLocalPlayers;++p) {
-        const char digit=static_cast<char>('1'+p);
-        if(key.size()==10 && key.substr(0,7)=="Colours" && key[7]==digit && key[8]=='_') {
-            int c=0;
-            if(Digit(key.substr(9,1),kClasses-1,c) && Unhex(value,s.own[p][c],kColourBlock))s.has[p][c]=true;
-        } else if(key.size()==5 && key.substr(0,4)=="Swap" && key[4]==digit) {
-            int c=0,o=0;unsigned char h[8];
-            if(value.size()==4+16 && value[1]==',' && value[3]==',' && Digit(value.substr(0,1),kClasses-1,c) &&
-               Digit(value.substr(2,1),kStockOutfits-1,o) && Unhex(value.substr(4),h,8)) {
-                Swap& w=pending[p].swap;
-                w.cls=c;w.outfit=o;w.others=0;
-                for(int i=0;i<8;++i)w.others=(w.others<<8)|h[i];
-            }
-        } else if(key.size()==7 && key.substr(0,6)=="Backup" && key[6]==digit) {
-            pending[p].backup=Unhex(value,pending[p].swap.backup,kColourBlock);
-        }
-    }
-}
 }  // namespace detail
-// Lines "Key=1" under any section; an unknown key, a value other than 1, a missing file: off.
-inline State Parse(std::string_view text) noexcept {
+// The keys in any section (the file only ever had [Outfit41]); a missing or malformed one: off / unknown / no swap. A
+// swap is kept only with its backup: without it the game's block is left as it is.
+inline State Parse(std::string_view text) {
     State s;
-    detail::PendingSwap pending[kLocalPlayers];
-    std::size_t at=text.substr(0,3)=="\xEF\xBB\xBF" ? 3 : 0;
-    while(at<text.size()) {
-        std::size_t end=text.find('\n',at);
-        if(end==std::string_view::npos)end=text.size();
-        std::string_view line=text.substr(at,end-at);
-        while(!line.empty() && (line.back()=='\r' || line.back()==' '))line.remove_suffix(1);
-        const std::size_t eq=line.find('=');
-        if(eq!=std::string_view::npos) {
-            const std::string_view key=line.substr(0,eq),value=line.substr(eq+1);
-            for(int p=0;p<kLocalPlayers;++p)if(key==kPlayerKeys[p])s.on[p]=value=="1";
-            detail::ParseColours(s,pending,key,value);
+    std::string v;
+    for(int p=0;p<kLocalPlayers;++p) {
+        s.on[p]=initext::Get(text,{},PlayerKey(p),&v) && v=="1";
+        for(int c=0;c<kClasses;++c)
+            if(initext::Get(text,{},ColoursKey(p,c),&v) && Unhex(v,s.own[p][c],kColourBlock))s.has[p][c]=true;
+        Swap w;int c=0,o=0;unsigned char h[8];
+        if(initext::Get(text,{},SwapKey(p),&v) && v.size()==4+16 && v[1]==',' && v[3]==',' &&
+           detail::Digit(std::string_view(v).substr(0,1),kClasses-1,c) && detail::Digit(std::string_view(v).substr(2,1),kStockOutfits-1,o) &&
+           Unhex(std::string_view(v).substr(4),h,8) && initext::Get(text,{},BackupKey(p),&v) && Unhex(v,w.backup,kColourBlock)) {
+            w.cls=c;w.outfit=o;w.others=0;
+            for(int i=0;i<8;++i)w.others=(w.others<<8)|h[i];
+            s.swap[p]=w;
         }
-        at=end+1;
     }
-    // a swap is kept only with its backup: without it the game's block is left as it is
-    for(int p=0;p<kLocalPlayers;++p)
-        if(pending[p].swap.cls>=0 && pending[p].backup)s.swap[p]=pending[p].swap;
     return s;
 }
 
@@ -292,19 +316,22 @@ constexpr Wire Effective(bool enabled,const Wire& w) noexcept { return enabled ?
 // --- The HQ outfit popup (built in 0x8AB310, shown by 0x119C600(system, out, type, request)): its request object
 // holds a vector of 0x90-byte items {wstring text, std::function<void(ctx*)> picked, ...}; five stock items (the
 // mission's outfit -1, then 2, 3, 1, 0), the cursor index, and the dialog type.
-inline constexpr std::size_t kReqVector=0x150,kVecData=0x8,kVecCapacity=0x10,kVecSize=0x18;
+inline constexpr std::size_t kReqVector=0x150;
+// The items vector and an item's layout, its growth and the std::function vtable: game_dialog.h (shared with the room
+// menu's dialogs).
+using gamedialog::kVecData;using gamedialog::kVecCapacity;using gamedialog::kVecSize;
 inline constexpr std::size_t kReqCursor=0x148,kReqType=0x128;
 inline constexpr std::int32_t kOutfitDialog=6;
-inline constexpr std::size_t kItemSize=0x90,kItemText=0x0,kItemImpl=0x58;
+using gamedialog::kItemSize;using gamedialog::kItemText;using gamedialog::kItemImpl;
 inline constexpr std::size_t kStockItems=5;
 inline constexpr std::int32_t kItemEdf41=5;           // ours: after the five stock items
 // The vector's growth when full, as the game's own loop does it (0x8ABAF3): reserve(capacity * 2 + 2).
-constexpr std::size_t Grown(std::size_t capacity) noexcept { return capacity*2+2; }
+using gamedialog::Grown;
 // The stock items' std::function implementation: {vtable, the screen}; the screen's player slot and outfit.
 inline constexpr std::size_t kLambdaScreen=0x8;
 inline constexpr std::size_t kScreenPlayer=0x798,kScreenOutfit=0x7A0;
 // std::_Func_impl's vtable (MSVC): _Copy, _Move, _Do_call, _Target_type, _Delete_this, _Get.
-inline constexpr int kFuncSlots=6,kSlotCopy=0,kSlotMove=1,kSlotCall=2;
+using gamedialog::kFuncSlots;using gamedialog::kSlotCopy;using gamedialog::kSlotMove;using gamedialog::kSlotCall;
 
 // The cursor the popup opens on: ours (at `ours`) when the EDF4.1 outfit is chosen, else the game's own choice.
 constexpr std::int32_t Cursor(bool on,std::int32_t stock,std::int32_t ours=kItemEdf41) noexcept { return on ? ours : stock; }

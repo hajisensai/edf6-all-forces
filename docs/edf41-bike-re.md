@@ -82,3 +82,19 @@ EDF6 读 `ReloadType`（武器 `+0x208`）在 `0x693E8D`：0 / 3 手动换弹；
 本机 2026-10-19 20:05 的会话（`EDF6Coop.log` 打开 `EDF6VC_E41_WEAPON753` 与 `VEHICLE408_MOTORBIKE.SGO`）：第一辆 408 生成时 `pos=(-272,2,234)`，附近地面 y≈1（同区 `(-250,1,212)`、`(-294,1,207)`），此后十余分钟停在 y=2 不再下落；21 秒后第二辆生成在 `(-274,4,235)`，即叠在第一辆上方，第一辆位置不变。原版集装箱出车点本就离地约 1 m（`docs/airdrop-vehicle-re.md` §2.3，Grape 出车后落到地面），所以 408 底盘在出车后没有受重力下落，且对第二辆的穿透推挤表现得像不可动刚体。
 
 已静态排除：碰撞层（4.1 SHKT 全部 layer 0 / group 1，与 V503 的 TAG0 相同）、重力系数（hkp `gravityFactor` 1.0）、`car_base_all_rigid_body` 的 [1] [2]（`0x6660D0` 写的是 motion properties 线 / 角阻尼，不是重力）、`car_base_rigid_body`（-1 字段全部跳过）、上面那组错误驾驶参数（只影响刹车、齿轮、转向、牵引）。仍可疑、无法静态定论的差异：408 是唯一把代理设为 mode 2（`0x6ED480` → 运动学 `motionType 1`，碰撞 `0x6ED2D0(…,3)`）的车辆，且 `front_sus` / `handle` 为动态代理（V503 只有 body 在世界里；4.1 源 `vehicle_dactive_node` 把 gun / front_sus / handle / front_tire 列为动画驱动），以及 hkp→hknp 迁移（`0x160B950`）生成的 motion / 激活状态。下一次实测请在出车后读每个代理的 `+0x9C` 模式、`0x11B14A0` motion type 与激活状态，再决定修改；不以降低出车高度或强制落地掩盖。
+
+## 2026-10-20 审查（#219）：版本混装与悬空现状
+
+### 版本混装：门控与提示
+
+#219 的三项改动在两台机器上必须一致才不出岔子：4.1 呼叫按积分装填（武器 SGO 的 `ReloadType`，安装进 Mods 的数据）、408 请求带 Car 的七数驾驶块（呼叫 SGO 的数据）、边三轮炮手座位（本 DLL 的 `edf41bike.cpp`）。每台机器自己跑投送链与载具设定（`docs/online-re.md` §2），所以一台旧版机器会在自己那边按计时回满、按四数块造车、炮手座位按原版 Car。
+
+- **提示**：每个成员经 EDF6Coop 成员属性 `EDF6X_AF_ROOM` 发布「版本 + 功能位」（`src/host_settings_logic.h`：`kFeatCreditReload41` / `kFeatBikeCarDrive` / `kFeatBikeGunner` 等）。房间菜单的状态行在有成员没有这个值（旧版）或功能位不全时写「N 名成员的全军出击版本与本机不同，可能不一致：…」并列出缺的项；日志 `HOSTCFG the room's builds: ...`。功能位是该构建的声明（DLL 与安装器一起发布）；没法从成员属性得知对方 Mods 里实际装的是哪一版数据。
+- **门控**：炮手座位照 `Edf5RoomAllowsBvmPlayers` 的做法，全员声明支持才开放：`MissionSync_Begin` 时（`host_settings.cpp Read(true)`）房间内每个成员的值都解析成功且都带 `kFeatBikeGunner`，本任务才启用 `edf41bike.cpp` 的座位改造（`Edf41BikeGunnerAllowed`）；否则这一任务里所有新版机器都把 408 当原版 Car（不改造座位、不接管帧与姿态），与旧版一致，日志 `HOSTCFG this mission's 408 sidecar gunner seat: closed`。单机永远开放。离线：`tests/edf41bike_runtime_test.cpp`「a room without the gunner seat」。积分装填与驾驶块是数据，无法按任务关掉，只提示。
+
+### 悬空（根因仍未定，未修）
+
+沿代码与本文上面的静态结果再查了一遍，没有能离线证实的根因，**不宣称已修**，也没有用降低出车高度或强制落地掩盖：
+
+- 仍然成立的线索：408 是唯一显式把一个代理（`gun`）选成 mode 2 的车辆（`car_base_simulation_node` 的 `['gun',1]` → `0x66428F` 加 1 → `0x6ED480(record,2)`，运动学目标）；三个轮子行值 0 经 `0x6E94E0 → 0x6E972A` 回到构造器的 mode 1；`front_sus` / `handle` 是动态代理。一个运动学刚体与动态底盘之间若有约束（原 `hkpRagdollConstraintData` 双轴约束保留），运动学一侧质量无穷，底盘会被它「吊住」：与「出车后不下落、第二辆叠上去第一辆不动」的表现一致（推测）。但 gun 的运动学目标又来自底盘自身的姿态（`Pose408`：`0x6EDCA0` 物理 → 骨骼，`0x5FACD0`，`0x1100B90`，`0x6ED800` 骨骼 → 物理），是否真的形成这种闭环，取决于 hknp 迁移（`0x160B950`）后 mode 1 / mode 2 的实际 motion type 与激活状态，离线读不到。
+- 下一次实机请记录：出车后每个代理的 `+0x9C` 模式、`0x11B14A0` 的 motion type、激活状态，以及把 gun 行临时改成动态（删掉 `['gun',1]`，只在测试场 SGO 里）时是否下落。确认之前不改发布数据。

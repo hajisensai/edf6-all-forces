@@ -10,7 +10,7 @@ namespace fixture {
 unsigned char vehicle[0x3000]{},seats[2*edf::kSeatStride]{},gun[0x110]{},marker[0x110]{};
 crew::Config config{};
 edf::Rider rider=edf::Rider::player;
-bool tagged=true,marked=true,living=true,npc=false,map=false,matches=true;
+bool tagged=true,marked=true,living=true,npc=false,map=false,matches=true,gunnerAllowed=true;
 int chainCalls=0,failChain=0,sets=0,steps=0,pulls=0,frames=0,poses=0,registrations=0;
 void* aimed=nullptr;void* pulled=nullptr;void* entrySeen=nullptr;int holderSeen=-1;
 void* callHook=nullptr;
@@ -33,7 +33,7 @@ void __fastcall PriorPose(unsigned char*){++poses;}
 void __fastcall Find(const void*,void* request){static_cast<crew::ifcmodel::Find*>(request)->index=tagged ? 0 : -1;}
 void Reset(){
  std::memset(vehicle,0,sizeof vehicle);std::memset(seats,0,sizeof seats);std::memset(gun,0,sizeof gun);
- config.enabled=true;tagged=marked=living=matches=true;npc=map=false;rider=edf::Rider::player;
+ config.enabled=true;tagged=marked=living=matches=gunnerAllowed=true;npc=map=false;rider=edf::Rider::player;
  chainCalls=failChain=sets=steps=pulls=frames=poses=registrations=0;aimed=pulled=entrySeen=nullptr;holderSeen=-1;order.clear();
  crew::on=false;crew::nextFrame=crew::nextPose=nullptr;callHook=nullptr;
  edf::Put<void*>(vehicle,0,crew::image+0x17E01B0);edf::Put<void*>(vehicle,0x608,seats);edf::Put<std::uint64_t>(vehicle,0x618,2);
@@ -61,6 +61,7 @@ unsigned char* image=nullptr;
 const Config& Cfg() noexcept{return fixture::config;}
 void Log(const char*,...) noexcept{}
 bool MapHoldsKeys() noexcept{return fixture::map;}
+bool Edf41BikeGunnerAllowed() noexcept{return fixture::gunnerAllowed;}
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept{return fixture::npc;}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept{
  if(!fixture::marked)return nullptr;
@@ -98,6 +99,11 @@ int main(){
  Check(chainedSteps==1&&steps==1&&pulls==1,"the gunner's step goes through the chained vtable slot");
  Reset();reinterpret_cast<void**>(crew::image+0x17D8A68)[3]=reinterpret_cast<void*>(&ChainedStep);
  Check(!crew::InstallEdf41Bike(),"a replaced aim pose slot still refuses the profile");
+ // A member of the room lacks the gunner seat (host_settings.h Edf41BikeGunnerAllowed false this mission): every
+ // machine builds and drives the 408 as the stock Car (original constructor arguments, no gunner frame, no pose).
+ Reset();Check(crew::InstallEdf41Bike(),"reinstall for a room without the gunner seat");gunnerAllowed=false;
+ reinterpret_cast<crew::SetWeaponFn>(callHook)(vehicle,originalAim,&entry,7);crew::Frame(vehicle);crew::Pose(vehicle);
+ Check(sets==1&&aimed==originalAim&&registrations==0&&frames==1&&steps==0&&pulls==0&&poses==1,"a room without the gunner seat: the stock Car everywhere");
  Reset();Check(crew::InstallEdf41Bike(),"reinstall for disabled lifecycle");config.enabled=false;crew::Frame(vehicle);crew::Pose(vehicle);Check(poses==1&&steps==0&&pulls==0,"disabled feature leaves original callbacks and no owned input");
  VirtualFree(crew::image,0,MEM_RELEASE);crew::image=nullptr;
  std::puts("original 408 production routing and lifecycle checks passed");

@@ -5733,7 +5733,8 @@ def npc_ai_wired() -> None:
     hook = code.split('void __fastcall ThinkHook(void* human,const float* dt)', 1)[1].split('\n}', 1)[0]
     assert hook.index('HideWalkUp(') < hook.index('nextThink[I](human,dt);') < hook.index('h[kAutoFollow]=walkUp;')
     walk = code.split('bool WalkUpOff() noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'followOk' in walk and 'Cfg().customNpcAi' in walk and '!Cfg().vanillaRecruit' in walk, \
+    # VanillaRecruit as played (host_settings.h: the host's online, this machine's ini otherwise; 2026-10-20 review)
+    assert 'followOk' in walk and 'Cfg().customNpcAi' in walk and '!VanillaRecruitInEffect()' in walk, \
         'the walk-up stays when the map cannot recruit (AI off, SetFollow not as read) or VanillaRecruit=1'
     assert '!(joinOrder && NativeJoinable(top))' in cmd.split('switch', 1)[0]
     assert 'if(e.u.joinOnly)return (o==Order::recruit || o==Order::follow) && e.u.recruitable;' in takes
