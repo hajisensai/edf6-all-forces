@@ -1833,6 +1833,7 @@ add_test(NAME tracked_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_
 add_test(NAME hkfile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_hkfile.py")
 add_test(NAME shkt_check COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_shkt_check.py")
 add_test(NAME hkshape COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_hkshape.py")
+add_test(NAME vehicle_check COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_vehicle_check.py")
 add_executable(vulcan_rotor_runtime_test EXCLUDE_FROM_ALL tests/vulcan_rotor_runtime_test.cpp)
 target_include_directories(vulcan_rotor_runtime_test PRIVATE src common third_party/EDFModLoader)
 target_compile_options(vulcan_rotor_runtime_test PRIVATE /W4 /WX /utf-8 /permissive-)
