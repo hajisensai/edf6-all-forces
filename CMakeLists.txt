@@ -1828,6 +1828,11 @@ add_test(NAME npc_action_look COMMAND npc_action_look_test)
 add_test(NAME npc_action_look_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_action_look_native.py")
 
 add_test(NAME tracked_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_collision.py")
+# The Havok tagfile graph and its writer (pylib/hkfile.py), the SHKT / SGO binding checks (pylib/shkt_check.py): the
+# portable parts always, the stock files' round trips and mutations with the game.
+add_test(NAME hkfile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_hkfile.py")
+add_test(NAME shkt_check COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_shkt_check.py")
+add_test(NAME hkshape COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_hkshape.py")
 add_executable(vulcan_rotor_runtime_test EXCLUDE_FROM_ALL tests/vulcan_rotor_runtime_test.cpp)
 target_include_directories(vulcan_rotor_runtime_test PRIVATE src common third_party/EDFModLoader)
 target_compile_options(vulcan_rotor_runtime_test PRIVATE /W4 /WX /utf-8 /permissive-)

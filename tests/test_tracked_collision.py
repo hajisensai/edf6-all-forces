@@ -17,6 +17,7 @@ sys.path[:0]=[str(Path(__file__).resolve().parents[1]/'pylib')]
 
 import numpy as np
 
+import hkshape
 import tracked_collision as tc
 
 
@@ -93,7 +94,7 @@ class NativeAssetTests(unittest.TestCase):
                 self.assertLessEqual(by_name['ragdoll_cannon_main'][1,1],1.8001)
                 self.assertGreater(by_name['ragdoll_tire_moveH_l'][0,2],-2.2)
             for b in reader.systems[0].bodies:
-                cache,mass,volume=tc._mass_record(reader,b.shape)
+                cache,mass,volume=tc._mass_record(b.shape)
                 self.assertGreater(mass,0)
                 self.assertGreater(volume,0)
                 self.assertTrue(np.isfinite(tc._unpack_vec(cache,8)).all())
@@ -254,19 +255,20 @@ class NativeAssetTests(unittest.TestCase):
     def test_corrupt_vertices_trees_mass_and_wheel_indices_are_rejected(self):
         import shkt_check as sc
         md,parts,(shkt,binding,overrides,report)=self.assets['vulcan']
-        reader=sc.Shkt(shkt);t=reader.tag;body=reader.systems[0].bodies[0]
-        _,rows=tc._instances(reader,body.shape);shape=rows[0][3];kind,at,_=t.item(shape)
-        vi=t.u32(at+t.offset(kind,'hull'));_,va,_=t.item(vi)
-        corrupt=bytearray(shkt);struct.pack_into('<f',corrupt,va,999.)
-        with self.assertRaises(tc.CollisionError):tc.check(bytes(corrupt),binding,md,overrides,report)
-        data,sec,sa,routes=tc._routing(reader,body.shape)
-        corrupt=bytearray(shkt);struct.pack_into('<f',corrupt,sa+t.offset('hkcdStaticMeshTree::Section','domain'),999.)
-        with self.assertRaises(tc.CollisionError):tc.check(bytes(corrupt),binding,md,overrides,report)
-        pi=t.u32(at+t.offset(kind,'properties'));_,pa,_=t.item(pi);_,ma,_=t.item(t.u32(pa))
-        corrupt=bytearray(shkt);struct.pack_into('<f',corrupt,ma+24,-1.)
-        with self.assertRaises(tc.CollisionError):tc.check(bytes(corrupt),binding,md,overrides,report)
-        corrupt=bytearray(shkt);corrupt[ma+16:ma+24]=bytes.fromhex('0080008000800080')
-        with self.assertRaises(tc.CollisionError):tc.check(bytes(corrupt),binding,md,overrides,report)
+        def corrupt(edit):
+            reader=sc.Shkt(shkt);body=reader.systems[0].bodies[0]
+            edit(body.shape,tc._instances(body.shape)[1][0][3])
+            return reader.tf.write()
+        def vertex(cms,convex):
+            struct.pack_into('<f',convex.value['hull']['vertices'].target.data,0,999.)
+        def domain(cms,convex):
+            cms.value['data'].target.value['meshTree']['sections'].target[0]['domain']['min'][0].set_f32(999.)
+        def mass(cms,convex):
+            struct.pack_into('<f',hkshape.mass_properties(convex).data,24,-1.)
+        def axes(cms,convex):
+            hkshape.mass_properties(convex).data[16:24]=bytes.fromhex('0080008000800080')
+        for edit in (vertex,domain,mass,axes):
+            with self.assertRaises(tc.CollisionError,msg=edit.__name__):tc.check(corrupt(edit),binding,md,overrides,report)
         broken=copy.deepcopy(overrides);broken['car_base_draw_wheel_info'][0][0][0]=99
         with self.assertRaises(tc.CollisionError):tc.check(shkt,binding,md,broken,report)
 

@@ -10,6 +10,8 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'pylib'))
 import gamedir  # noqa: E402
+import hkfile  # noqa: E402
+import hkshape  # noqa: E402
 import sgo  # noqa: E402
 import shkt_check as sc  # noqa: E402
 
@@ -151,49 +153,38 @@ class StockMutations(unittest.TestCase):
         self.assertTrue(found)
         self.assertTrue(all("'RagDollProxys.rotor'" in p.what for p in found), [str(p) for p in found])
 
-    def _first(self, kind: str) -> tuple[sc.Shkt, int]:
+    def _first(self, kind: str) -> tuple[sc.Shkt, hkfile.Block]:
         s = sc.Shkt(self.data)
-        for i, (f, _, _) in enumerate(s.tag.items):
-            if i and s.tag.tname(f & 0xFFFFFF) == kind:
-                return s, i
+        for blk in s.tf.blocks():
+            if blk.type.full_name == kind:
+                return s, blk
         raise AssertionError(f'no {kind}')
 
     def test_moved_hull_vertex_is_stale(self) -> None:
         s, shape = self._first('hknpConvexShape')
-        t = s.tag
-        _, at, _ = t.item(shape)
-        vi = t.u32(at + t.offset('hknpConvexShape', 'hull') + t.offset('hknpConvexHull', 'vertices'))
-        _, va, _ = t.item(vi)
-        bad = bytearray(self.data)
-        x = struct.unpack_from('<f', bad, va)[0]
-        struct.pack_into('<f', bad, va, x + 5.0 * (1 if x >= 0 else -1))
-        self.assertTrue(any('stale planes' in e for e in self.errors(bytes(bad))))
+        verts = shape.value['hull']['vertices'].target
+        x = struct.unpack_from('<f', verts.data, 0)[0]
+        struct.pack_into('<f', verts.data, 0, x + 5.0 * (1 if x >= 0 else -1))
+        self.assertTrue(any('stale planes' in e for e in self.errors(s.tf.write())))
 
     def test_shrunk_tree_leaf_is_stale(self) -> None:
         s, comp = self._first('hknpCompoundShape')
-        _, simd = s.compound_bounds(comp)
-        nodes = s.simd_lanes(simd)
+        _, simd = hkshape.compound_bounds(comp)
+        assert simd is not None
+        nodes = hkshape.simd_lanes(simd)
         k = next(i for i, (leaf, lanes) in enumerate(nodes) if leaf and lanes)
-        _, at, _ = s.tag.item(simd)
-        base = at + k * s.tag.size('hkcdSimdTree::Node')
-        bad = bytearray(self.data)
         lo, hi = nodes[k][1][0][0], nodes[k][1][0][1]
-        struct.pack_into('<f', bad, base + 4 * 4, lo[0] + 0.25 * (hi[0] - lo[0]))     # hx of lane 0
-        self.assertTrue(any('stale tree' in e for e in self.errors(bytes(bad))))
+        struct.pack_into('<f', simd.data, k * simd.size + 4 * 4, lo[0] + 0.25 * (hi[0] - lo[0]))     # hx of lane 0
+        self.assertTrue(any('stale tree' in e for e in self.errors(s.tf.write())))
 
     def test_moved_body_splits_its_joint(self) -> None:
         s = sc.Shkt(self.data)
         system = next(x for x in s.systems if x.joints)
-        j = system.joints[0]
-        t = s.tag
-        S = 'hknpPhysicsSystemData'
-        sat = t.item(t.u32(t.root_variant('hknpPhysicsSceneData') + t.offset('hknpPhysicsSceneData', 'systemDatas')))[1]
-        _, sys_at, _ = t.item(t.u32(sat + 4 * system.index))
-        _, bat, _ = t.item(t.u32(sys_at + t.offset(S, 'bodyCinfos')))
-        at = bat + j.body_a * t.size(sc.B) + t.offset(sc.B, 'position')
-        bad = bytearray(self.data)
-        struct.pack_into('<f', bad, at, struct.unpack_from('<f', bad, at)[0] + 0.5)
-        self.assertTrue(any('put the pivot' in e for e in self.errors(bytes(bad))))
+        body = system.bodies[system.joints[0].body_a].body
+        assert body is not None
+        p = body.position
+        body.set_position((p[0] + 0.5, p[1], p[2]))
+        self.assertTrue(any('put the pivot' in e for e in self.errors(s.tf.write())))
 
 
 if __name__ == '__main__':

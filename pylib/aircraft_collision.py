@@ -18,9 +18,9 @@ import math
 import struct
 from functools import lru_cache
 
+import hkfile
+import hkshape
 import jet_models
-from hktag import Tag, sections
-from hkcms import bodies
 from mdb import bind_world, ident, read_elem
 
 MAGIC = 0x4544463641495231  # EDF6AIR1: native hknpShape::userData, src/body506.cpp
@@ -110,39 +110,6 @@ def mesh_cells(tris, nx=NX, nz=NZ):
             for _, (a, b) in sorted(cells.items())]
 
 
-class _Edit:
-    """Append DATA/ITEM records without changing any original item indices or TYPEs."""
-    def __init__(self, blob):
-        self.tag = Tag(blob)
-        self.sec = sections(blob)
-        a, b = self.sec['/TAG0/DATA']
-        self.data = bytearray(blob[a:b])
-        self.items = list(self.tag.items)
-
-    def add(self, template, data, count=1):
-        self.data.extend(b'\0' * (-len(self.data) % 16))
-        index = len(self.items)
-        self.items.append((self.items[template][0], len(self.data), count))
-        self.data.extend(data)
-        return index
-
-    def original(self, item):
-        _, at, n = self.tag.item(item)
-        return bytearray(self.tag.b[at:at + self.tag.size(self.tag.item(item)[0])*n])
-
-    def finish(self):
-        def chunk(name, payload, leaf=True):
-            return struct.pack('>I', len(payload)+8 | (0x40000000 if leaf else 0)) + name.encode() + payload
-        source = self.tag.b
-        def old(path):
-            a, b = self.sec[path]
-            return source[a-8:b]
-        self.data.extend(b'\0' * (-len(self.data) % 16))
-        items = b''.join(struct.pack('<III', *e) for e in self.items)
-        return chunk('TAG0', old('/TAG0/SDKV') + chunk('DATA', self.data) + old('/TAG0/TYPE') +
-                     chunk('INDX', chunk('ITEM', items), False), False)
-
-
 def _tree(boxes):
     nodes = [bytearray(128)]  # Havok sentinel; root is node 1.
     def node(ids):
@@ -172,63 +139,55 @@ def _tree(boxes):
     return b''.join(nodes), len(nodes)
 
 
-def _compound(edit, template, boxes, magic=0):
-    """New compound of axis-aligned convex hulls, with a rebuilt 4-way BVH."""
-    t = edit.tag
-    _, cat, _ = t.item(template)
-    inst = t.u32(cat+t.offset('hknpCompoundShape', 'instances'))
-    _, iat, _ = t.item(inst)
+def _compound(tf, template, boxes, magic=0):
+    """New compound of axis-aligned convex hulls, with a rebuilt 4-way BVH (pylib/hkfile.py blocks of `tf`)."""
+    insts = hkshape.instance_array(template)
     # V506 body instance 3 is an eight-vertex, six-plane, axis-aligned box.
-    original = iat+3*t.size('hknpShapeInstance')
-    shape = t.u32(original+t.offset('hknpShapeInstance', 'shape'))
-    shape_data = edit.original(shape)
-    _, sat, _ = t.item(shape)
-    hull = t.offset('hknpConvexShape', 'hull')
-    vi, pi = t.u32(sat+hull), t.u32(sat+hull+4)
-    _, va, vn = t.item(vi)
-    _, pa, pn = t.item(pi)
-    if vn != 8 or pn != 6:
+    original = insts[3]
+    box_shape = original['shape'].target
+    hull = box_shape.value['hull']
+    vertices = [struct.unpack_from('<3f', hull['vertices'].target.data, 12*i) for i in range(hull['vertices'].count)]
+    planes = [struct.unpack_from('<4f', hull['planes'].target.data, 16*i) for i in range(hull['planes'].count)]
+    if len(vertices) != 8 or len(planes) != 6:
         raise ValueError('V506 box hull template changed')
-    vertices = [struct.unpack_from('<3f', t.b, va+12*i) for i in range(8)]
-    planes = [struct.unpack_from('<4f', t.b, pa+16*i) for i in range(6)]
     mid = [(min(v[k] for v in vertices)+max(v[k] for v in vertices))/2 for k in range(3)]
     if any(sum(abs(n) > 1e-6 for n in p[:3]) != 1 for p in planes):
         raise ValueError('V506 box hull is no longer axis aligned')
-    instances = bytearray()
-    for lo, hi in boxes:
-        sh = bytearray(shape_data)
-        struct.pack_into('<f', sh, t.offset('hknpConvexShape', 'convexRadius'), 0.0)
+    arr = tf.new(insts.type, len(boxes))
+    for i, (lo, hi) in enumerate(boxes):
+        sh = box_shape.copy()
+        sh.value['convexRadius'].set_f32(0.0)
         # Cached mass properties describe the donor's tiny box. Let Havok derive
         # inertia from the new vertices instead of retaining the helicopter's.
-        struct.pack_into('<I', sh, t.offset('hknpConvexShape', 'properties'), 0)
+        sh.value['properties']['properties'].set_target(None)
         verts = b''.join(struct.pack('<3f', *(hi[k] if p[k] > mid[k] else lo[k] for k in range(3))) for p in vertices)
         normals = []
         for p in planes:
             axis = max(range(3), key=lambda k: abs(p[k]))
             normals.append(struct.pack('<4f', *p[:3], -p[axis]*(hi[axis] if p[axis] > 0 else lo[axis])))
-        struct.pack_into('<II', sh, hull, edit.add(vi, verts, 8), edit.add(pi, b''.join(normals), 6))
-        shape_id = edit.add(shape, sh)
-        instance = bytearray(t.b[original:original+64])
-        struct.pack_into('<I', instance, t.offset('hknpShapeInstance', 'shape'), shape_id)
-        instances.extend(instance)
-    comp = edit.original(template)
-    struct.pack_into('<I', comp, t.offset('hknpCompoundShape', 'properties'), 0)
-    inst_id = edit.add(inst, instances, len(boxes))
-    struct.pack_into('<III', comp, t.offset('hknpCompoundShape', 'instances'), inst_id, 0xFFFFFFFF, len(boxes))
-    comp[t.offset('hknpCompoundShape', 'numShapeKeyBits')] = max(1, (len(boxes)-1).bit_length())
-    struct.pack_into('<Q', comp, t.offset('hknpCompoundShape', 'userData'), magic)
+        h = sh.value['hull']
+        h['vertices'].set_target(tf.new(hull['vertices'].target.type, 8, verts))
+        h['planes'].set_target(tf.new(hull['planes'].target.type, 6, b''.join(normals)))
+        insts.copy_element(3, arr, i)
+        arr[i]['shape'].set_target(sh)
+    comp = template.copy()
+    v = comp.value
+    v['properties']['properties'].set_target(None)
+    v['instances']['elements'].set_target(arr)
+    v['instances']['firstFree'].set_int(-1)
+    v['instances']['numAllocated'].set_int(len(boxes))
+    v['numShapeKeyBits'].set_int(max(1, (len(boxes)-1).bit_length()))
+    v['userData'].set_int(magic)
     lo = [min(b[0][k] for b in boxes)-0.0001 for k in range(3)]
     hi = [max(b[1][k] for b in boxes)+0.0001 for k in range(3)]
-    struct.pack_into('<8f', comp, t.offset('hknpCompoundShape', 'aabb'), *lo, 0, *hi, 0)
-    struct.pack_into('<f', comp, t.offset('hknpCompoundShape', 'boundingRadius'),
-                     math.sqrt(sum(max(abs(lo[k]), abs(hi[k]))**2 for k in range(3))))
-    struct.pack_into('<I', comp, t.offset('hknpCompoundShape', 'estimatedNumShapeKeys'), len(boxes))
-    bvd = t.offset('hknpCompoundShape', 'boundingVolumeData')
-    tree_at = bvd+t.offset('hknpCompoundShapeData', 'simdTree')+t.offset('hkcdSimdTree', 'nodes')
-    tree_template = t.u32(cat+tree_at)
+    v['aabb']['min'].set_vec((*lo, 0))
+    v['aabb']['max'].set_vec((*hi, 0))
+    v['boundingRadius'].set_f32(math.sqrt(sum(max(abs(lo[k]), abs(hi[k]))**2 for k in range(3))))
+    v['estimatedNumShapeKeys'].set_int(len(boxes))
+    tree = v['boundingVolumeData']['simdTree']['nodes']
     data, count = _tree(boxes)
-    struct.pack_into('<I', comp, tree_at, edit.add(tree_template, data, count))
-    return edit.add(template, comp)
+    tree.set_target(tf.new(tree.target.type, count, data))
+    return comp
 
 
 @lru_cache(maxsize=32)
@@ -238,26 +197,17 @@ def build(game, key):
     centre = jet_models.model_box(game, key)[0]
     boxes = [(tuple(lo[k]-centre[k] for k in range(3)), tuple(hi[k]-centre[k] for k in range(3)))
              for lo, hi in mesh_cells(triangles(md))]
-    e = _Edit(game.read('OBJECT', STOCK))
-    t = e.tag
-    template = bodies(t)['RagDollProxys.body']
-    body = _compound(e, template, boxes, MAGIC)
+    physics = hkfile.Physics.read(game.read('OBJECT', STOCK))
+    template = physics.body('RagDollProxys.body').shape
+    body = _compound(physics.tf, template, boxes, MAGIC)
     # Retain all stock proxy names and constraints for the 506's animation/death
     # code, but its helicopter blades must no longer collide outside the aircraft.
     lo, hi = max(boxes, key=lambda b: math.prod(b[1][k]-b[0][k] for k in range(3)))
     point = [(lo[k]+hi[k])/2 for k in range(3)]
-    tiny = _compound(e, template, [(tuple(p-0.005 for p in point), tuple(p+0.005 for p in point))])
-    scene = t.root_variant('hknpPhysicsSceneData')
-    _, sat, ns = t.item(t.u32(scene+t.offset('hknpPhysicsSceneData', 'systemDatas')))
-    B = 'hknpPhysicsSystemData::bodyCinfoWithAttachment'
-    for i in range(ns):
-        _, system, _ = t.item(t.u32(sat+4*i))
-        _, at, n = t.item(t.u32(system+t.offset('hknpPhysicsSystemData', 'bodyCinfos')))
-        for j in range(n):
-            pos = at+j*t.size(B)
-            name = t.cstr(t.u32(pos+t.offset(B, 'name')))
-            struct.pack_into('<I', e.data, pos-t.data0+t.offset(B, 'shape'), body if name == 'RagDollProxys.body' else tiny)
-    return e.finish()
+    tiny = _compound(physics.tf, template, [(tuple(p-0.005 for p in point), tuple(p+0.005 for p in point))])
+    for b in physics.bodies():
+        b.set_shape(body if b.name == 'RagDollProxys.body' else tiny)
+    return physics.write()
 
 
 def assets(game):

@@ -4597,8 +4597,9 @@ def artillery_ragdoll_is_the_models() -> None:
     import struct
     parsed = rf.Shkt(shkt)
     assert parsed.joints and len(parsed.ref) == len(parsed.bodies) == 22, 'the Kepler reference pose was not loaded'
-    corrupted = bytearray(shkt)
-    struct.pack_into('<f', corrupted, parsed.ref[0], parsed.ref_t(0)[0] + 1.0)
+    damaged = rf.Shkt(shkt)
+    damaged.set_ref_t(0, (parsed.ref_t(0)[0] + 1.0, *parsed.ref_t(0)[1:]))
+    corrupted = damaged.bytes()
     assert any(x.startswith('reference pose of ') for x in rf.problems(kepler, bytes(corrupted), blob)), \
         'a corrupt reference pose escaped validation'
     # Move a real stock turret without requiring an external model folder: fitting must rewrite the serialized
@@ -4610,9 +4611,9 @@ def artillery_ragdoll_is_the_models() -> None:
     changed = [k for k in range(len(parsed.ref)) if rf.dist(parsed.ref_t(k), fitted.ref_t(k)) > 1e-3]
     assert changed, 'the moved turret retained the stock reference pose'
     assert rf.problems(moved, moved_shkt, moved_blob) == []
-    stale = bytearray(moved_shkt)
     for k in changed:
-        struct.pack_into('<3f', stale, fitted.ref[k], *parsed.ref_t(k))
+        fitted.set_ref_t(k, parsed.ref_t(k))
+    stale = fitted.bytes()
     assert any(x.startswith('reference pose of ') for x in rf.problems(moved, bytes(stale), moved_blob)), \
         'refitting stopped checking the serialized reference pose'
     assert make_artillery.ragdoll(game, kepler) == (shkt, blob), 'refitting the Kepler to itself changed it'

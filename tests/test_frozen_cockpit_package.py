@@ -56,7 +56,7 @@ class FrozenCockpitPackageTests(unittest.TestCase):
         cli = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cli)
         with patch.object(tracked_collision, 'sc', cli):
-            with self.assertRaisesRegex(AttributeError, "'B'"):
+            with self.assertRaisesRegex(AttributeError, "shkt_cli_probe' has no attribute"):
                 frozen_collision_probe.check()
         frozen_collision_probe.check()
 
