@@ -1410,6 +1410,7 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     std::memcpy(cam+kCamMatrix,ride.frame,64);
     VehicleLookCamera(h,reinterpret_cast<float*>(cam+kCamMatrix));
     VehicleScreens(ride.vehicle,ride.seat,eye,&Current().screens);
+    std::memcpy(Current().screens.frame,Current().ride.frame,64);
     ReturnNear(cam);
     if(Current().smoothSet){Put<float>(h,kLookSmooth,Current().savedSmooth);Current().smoothSet=false;}
     Current().body=h+kBodyModel;Current().weaponCount=0;Current().inHandCount=0;
@@ -2244,8 +2245,7 @@ void FirstPersonInstrumentReadings(const instruments::Readings& readings,const u
         // The bank for the attitude indicator, from the seat's own frame (vc_eye_<seat>: rows left, up, ahead in the
         // world): right wing down positive. A flying vehicle's only, as its pitch.
         const float* m=state.ride.frame;
-        state.instruments.value[instruments::roll]=readings.flight && std::isfinite(m[1]+m[5]) && (m[1]!=0.0f || m[5]!=0.0f) ?
-            std::atan2(m[1],m[5])/0.01745329252f : -1.0f;
+        state.instruments.value[instruments::roll]=readings.flight ? instruments::BankOf(m) : -1.0f;
         static ULONGLONG readingsLogAt=0;
         const ULONGLONG now=GetTickCount64();
         if(Cfg().debug && now-readingsLogAt>=2000) {

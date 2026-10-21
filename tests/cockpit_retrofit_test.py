@@ -138,3 +138,23 @@ for name in ('jet_f16','jet_f16_narrow'):
     else:
         raise AssertionError(f'{name}: no attitude indicator in the first-person view (down, aside): {seen}')
 print('attitude indicator in every fighter view passed')
+
+# Every pilot's station (a kit with a flight display) has a head-up glass on its line of sight, where the plugin draws
+# the conformal horizon, the ladder and the flight readouts (hud.cpp HeadUpGlass): the F-16's combiner, the Apache's
+# and the UH-60M's helmet display, the C-130J's HUD (docs/feedback-2026-10-21-attitude-indicator.md). The rule is the
+# kits' data, checked here for every kit, not per aircraft.
+pilots=0
+for name,make in sorted(ck.KITS.items()):
+    try:kit=make({s:3.0 for s in ('left','right','up','down','ahead','back')})
+    except Exception:continue   # a kit for another room (a hold, a door): no pilot's station in it
+    kinds=[s.kind for s in kit.screens]
+    if 'flight' not in kinds:continue
+    pilots+=1
+    glass=[s for s in kit.screens if s.kind=='hud']
+    assert glass,f'{name}: a pilot station without a head-up glass'
+    for s in glass:
+        c=np.asarray(s.centre);off=math.degrees(math.acos(c[2]/np.linalg.norm(c)))
+        assert off<=5.0 and c[2]>0,f'{name}: its head-up glass is {off:.1f} degrees off the line of sight'
+        assert abs(np.dot(np.asarray(s.facing),c/np.linalg.norm(c))+1)<0.05,f'{name}: the glass does not face the eye'
+assert pilots>=7,pilots
+print(f'a head-up glass on the line of sight in every pilot station ({pilots}) passed')

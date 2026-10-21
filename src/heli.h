@@ -12,6 +12,7 @@ void PressBoardButton(unsigned char* human) noexcept;
 void PressBoardButtonBumping(unsigned char* human) noexcept;
 // Whether the board button and the seats' riding points can be used (their code checked, CheckHeliProfile).
 bool BoardButtonReady() noexcept;
+bool BoardButtonBlocked(const unsigned char* human) noexcept;   // the button's gates (+0x128 bit 0, +0x5D0 bit 2, +0x39C)
 // Whether `human` rides no vehicle (its vehicle weak_ptr +0x1550 empty or expired).
 bool HumanOnFoot(const unsigned char* human) noexcept;
 // Seat `seat`'s riding point (world) and the stock reach round it a human must be within to board it (CanRideSeat);
