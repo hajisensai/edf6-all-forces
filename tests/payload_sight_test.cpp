@@ -16,6 +16,7 @@ const bool sightInputHanded=(edf::SetInputSource(&sightinput::Key,&sightinput::W
 #include <cstdio>
 #include <utility>
 namespace crew {
+bool MapPadState(std::uint16_t* b,std::uint8_t* lt,std::uint8_t* rt) noexcept { *b=0;*lt=*rt=0;return false; }   // no pad on these fixtures
 unsigned char* image=nullptr;
 Config cfg{};
 ULONGLONG now=100;

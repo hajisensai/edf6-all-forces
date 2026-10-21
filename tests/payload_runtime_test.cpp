@@ -32,6 +32,8 @@ const StoreSpec* StoreOf(const unsigned char* w) noexcept {
     return w[0x101]==10 ? &bmptMissile : w[0x101]==11 ? &bmptApLeft : w[0x101]==12 ? &bmptApRight : w[0x101]==13 ? &bmptThermobaric : w[0x101]==8 ? &npcNativeHE : w[0x101]==9 ? &npcNativeAP : w[0x101]==6 ? &npcPairedLeft : w[0x101]==7 ? &npcPairedRight : w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : w[0x101]==5 ? &coaxSpec : nullptr;
 }
 unsigned TwinPairOf(const unsigned char* w) noexcept { return w[0x103]; }   // stores.cpp's, by kTwinBarrels
+std::uint16_t padButtons=0;   // the XInput pad's buttons (map.cpp MapPadState): the own secondary's switch on a pad
+bool MapPadState(std::uint16_t* b,std::uint8_t* lt,std::uint8_t* rt) noexcept { *b=padButtons;*lt=*rt=0;return true; }
 int fileQueries=0;
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
     ++fileQueries;const auto file=At<const wchar_t*>(w,0x08);*n=file ? std::wcslen(file) : 0;return file;
@@ -558,10 +560,24 @@ int main() {
         m=frame(true,true);
         check((m&8u) && !(m&16u) && (m&4u) && !(m&3u),"APDS picked: the pulls land on the APDS barrels, in turn; the Ataka beside them");
         // A secondary edge, then R / LB: the missile cycle moves, the cannons keep APDS.
+        // Each switch its own control, whatever was fired last (the user, 2026-10-21: 「学学战雷」): LB after a
+        // secondary edge still the gun's rounds; the d-pad right (VehicleSecondarySwitchButton) the missile, after a
+        // primary edge too.
         frame(false,false);frame(false,true);frame(false,false);   // a secondary edge of its own (released first)
         Put<std::uint16_t>(s,kSeatButtons,kButtonLB);frame(false,false);Put<std::uint16_t>(s,kSeatButtons,0);
-        check(PlayerPayload(&r) && r.entry[5].picked && !r.entry[2].picked && r.entry[3].picked,
-              "LB after a secondary edge: the 9M120F picked, the APDS belt kept");
+        check(PlayerPayload(&r) && r.entry[0].picked && !r.entry[3].picked && r.entry[2].picked && !r.entry[5].picked,
+              "LB after a secondary edge: the gun's rounds (APDS -> HE), never the missile");
+        frame(false,false);Put<std::uint16_t>(s,kSeatButtons,kButtonLB);frame(false,false);Put<std::uint16_t>(s,kSeatButtons,0);
+        check(PlayerPayload(&r) && r.entry[3].picked && r.entry[2].picked,"LB again: APDS, the missile still the Ataka");
+        frame(true,false);frame(false,false);   // a primary edge
+        padButtons=0x0008;frame(false,false);padButtons=0;
+        check(PlayerPayload(&r) && r.entry[5].picked && !r.entry[2].picked && r.entry[3].picked && r.ownPicked==5 &&
+              r.ownChoices==2 && r.picked==3 && r.choices==2 && r.ownSwitchButton==cfg.vehicleSecondarySwitchButton,
+              "d-pad right after a primary edge: the 9M120F picked, the APDS belt kept; the readout names both cycles");
+        padButtons=0x0008;frame(false,false);
+        check(PlayerPayload(&r) && r.entry[5].picked,"the switch held: one press, one step");padButtons=0;
+        Put<unsigned char>(s,kSeatPad,0);mapHeld=true;frame(false,false);mapHeld=false;Put<unsigned char>(s,kSeatPad,1);
+        check(PlayerPayload(&r) && r.entry[5].picked,"a pad seat ignores the keyboard key; the map holding keys switches nothing");
         m=frame(true,true);
         check((m&32u) && !(m&4u) && (m&8u),"secondary pulls the 9M120F only; the primary still the APDS belt");
         unsigned char* all[kMostPayload]{};

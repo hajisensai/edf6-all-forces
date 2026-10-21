@@ -313,6 +313,7 @@ void StockHudFrame(unsigned char* v) noexcept {
     const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
     // The store the payload switch has picked (payload.cpp: the secondary fires it), found by its weapon: selected.
     const unsigned char* const picked=PayloadPicked(v);
+    const unsigned char* const ownPicked=PayloadOwnSecondaryPicked(v);   // the missile the secondary fires (both are shown)
     const unsigned char* const sight=PayloadSightPicked(v,r.seat);
     const unsigned char* const turret=PlayerTurretGun(v,seat);
     unsigned char* fired[kStockArms]{};
@@ -337,6 +338,7 @@ void StockHudFrame(unsigned char* v) noexcept {
             if(turret && w==turret)r.turret=r.arms;
             if(static_cast<int>(i)==store)storeArm=r.arms;
             StockArm& a=r.arm[r.arms++];
+            a.ownPick=ownPicked && w==ownPicked;
             const auto freedom=weaponmount::Of(v,seat,holders[i]);
             a.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
             for(int k=0;k<firing;++k)if(fired[k]==w)a.coFired=true;

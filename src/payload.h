@@ -38,6 +38,9 @@ struct PayloadReadout {
     int picked;                // the entry the secondary fires, -1 when the seat has no stores to switch between
     int choices;               // how many the switch goes round (>= 2 when `picked` >= 0)
     int switchButton;          // EDF seat-button mask used by Switch (read-only HUD binding)
+    // The own secondary's cycle (the BMPT's missiles: their own switch, VehicleSecondarySwitchKey / -Button): the entry it
+    // fires (-1 none), how many it goes round (>= 2 when it switches), its pad buttons (XInput bits).
+    int ownPicked,ownChoices,ownSwitchButton;
     bool keys;                 // the player is on the keyboard and mouse (else a pad): which switch to name
     PayloadEntry entry[kMostPayload];
 };
@@ -62,6 +65,8 @@ void PumpAircraftPayloadUi(unsigned char* vehicle) noexcept; // playerjet.cpp br
 // The weapon the secondary fires now on `vehicle` when its seat's stores are switched (helisight.cpp's mark follows
 // it), else nullptr: the stock weapon stands.
 unsigned char* PayloadPicked(const void* vehicle) noexcept;
+// The own secondary's pick on the player's seat of `vehicle` (the missile the BMPT's secondary fires), else nullptr.
+unsigned char* PayloadOwnSecondaryPicked(const void* vehicle) noexcept;
 // Independent fire-control target: default native primary, most recent trigger edge, or explicit R/LB payload choice.
 // Read-only, validates live holders; retains a reloading weapon but safely falls back from a spent/removed one.
 unsigned char* PayloadSightPicked(const void* vehicle,unsigned seat) noexcept;

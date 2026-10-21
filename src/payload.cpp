@@ -75,7 +75,7 @@ Class ClassOf(const void* v) noexcept {
 // `remote`: another machine's choice for a seat it runs (RemotePick), applied here so this copy's pulls land on it too.
 // `secondary`: the intrinsic weapon the seat's own secondary fires (IndependentSecondary: the BMPT's Ataka or 9M120F),
 // chosen apart from `weapon` (the primary's belt): the two controls fire at once, each its own pick.
-struct Pick { ObjRef ref; unsigned seat; unsigned char* weapon; unsigned char* secondary; bool held,listed,npc,nativeControl,remote; ULONGLONG seen; unsigned char* from[kMostPayload]; unsigned char* to[kMostPayload]; int redirects; };
+struct Pick { ObjRef ref; unsigned seat; unsigned char* weapon; unsigned char* secondary; bool held,ownHeld,listed,npc,nativeControl,remote; ULONGLONG seen; unsigned char* from[kMostPayload]; unsigned char* to[kMostPayload]; int redirects; };
 Pick picks[kTracked]{};
 // Online (seat_net.h Pick): the pick of a seat another machine runs (its player's, or the NPC gunner of the machine that
 // runs it), as its last message said: the weapon by its holder in the vehicle's holder array. And what this machine last
@@ -589,11 +589,13 @@ template<class SpentFn> int NextChoice(int at,int n,SpentFn spent) noexcept {
 // The store switch on the player's seat (see the top). `ws` the seat's weapons, `r` their entries. Two cycles: the
 // primary's (its native belts and the stores riding it: `p.weapon`) and the intrinsic secondary's (IndependentSecondary:
 // `p.secondary`, the BMPT's two Ataka rounds on the V603's otherwise unread second trigger). Both fire at once, each on
-// its own trigger. The R / LB press goes to the cycle of `focus` (the control of the latest trigger edge,
-// sightPick.control) when that one has a choice, else to the one that has; a menu choice (ConsumeChoice) to the cycle of
-// the entry chosen. `chosen`: the control a press or a menu choice changed (`store` the primary's cycle, the sight
-// following its pick; `secondary` the own secondary's), `other` none.
-void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* const* ws,PayloadReadout& r,PayloadFire focus,
+// its own trigger, and each has its own switch, whatever was fired last (as War Thunder's: the gun's rounds on their own
+// keys, the ATGM its own fire and selection; the user, 2026-10-21: 「学学战雷」): R / LB (PlayerJetSwitchKey) goes round the
+// primary's cycle only, VehicleSecondarySwitchKey (T) / VehicleSecondarySwitchButton (the d-pad right) the own
+// secondary's only; a menu choice (ConsumeChoice) goes to the cycle of the entry chosen. `chosen`: the control a press or
+// a menu choice changed (`store` the primary's cycle, the sight following its pick; `secondary` the own secondary's),
+// `other` none.
+void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* const* ws,PayloadReadout& r,
             PayloadFire* chosen) noexcept {
     *chosen=PayloadFire::other;
     const Class c=ClassOf(v);
@@ -633,7 +635,13 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
         (At<std::uint16_t>(seat,kSeatButtons)&kButtonLB)!=0;
     const bool press=!MapHoldsKeys() && down && !p.held;
     p.held=down;
-    const bool pressOwn=ownEnabled && (focus==PayloadFire::secondary || !enabled);
+    // The own secondary's switch: its key on the keyboard, its pad buttons (XInput: the seat button word has no d-pad).
+    const int ownVk=Cfg().vehicleSecondarySwitchKey,ownMask=Cfg().vehicleSecondarySwitchButton;
+    std::uint16_t padButtons=0;std::uint8_t lt=0,rt=0;
+    const bool ownDown=keys ? (MapHoldsKeys() ? ownVk>0 && (edf::AsyncKey(ownVk)&0x8000)!=0 : KeyDown(ownVk)) :
+        ownMask>0 && MapPadState(&padButtons,&lt,&rt) && (padButtons&ownMask)==ownMask;
+    const bool pressOwn=ownEnabled && !MapHoldsKeys() && ownDown && !p.ownHeld;
+    p.ownHeld=ownDown;
     if(!p.listed) {
         p.listed=true;
         for(int k=0;k<n;++k)Log("PAYLOAD v=%p %s %d: %ls (%d rounds)",v,ride==PayloadFire::secondary ? "secondary" : "primary",k,
@@ -648,9 +656,9 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
         int requestedAt=-1;
         for(int k=0;k<no;++k)if(own[k]==requested)requestedAt=k;
         if(ownEnabled && requestedAt>=0){ownAt=requestedAt;*chosen=PayloadFire::secondary;}
-        else if(ownEnabled && ((press && pressOwn) || ownSpent(ownAt))) {
+        else if(ownEnabled && (pressOwn || ownSpent(ownAt))) {
             ownAt=NextChoice(ownAt,no,ownSpent);
-            if(press && pressOwn) {
+            if(pressOwn) {
                 *chosen=PayloadFire::secondary;
                 Log("PAYLOAD v=%p secondary picked: %ls (%d rounds)",v,r.entry[own[ownAt]].name,r.entry[own[ownAt]].rounds);
             }
@@ -659,10 +667,10 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
         p.secondary=ws[own[ownAt]];
         r.entry[own[ownAt]].picked=true;
     } else p.secondary=nullptr;
-    r.switchButton=kButtonLB;
+    r.switchButton=kButtonLB;r.ownSwitchButton=ownMask;
+    if(ownEnabled){r.ownPicked=own[ownAt];r.ownChoices=no;}
     if(!enabled) {
         p.weapon=nullptr;
-        if(ownEnabled){r.picked=own[ownAt];r.choices=no;}
         if(p.secondary)Lock(p.secondary);
         if(*chosen==PayloadFire::other && Cfg().enabled && pullOk && Cfg().stockStores && ns>0 && n>=2 && press)*chosen=PayloadFire::store;
         return;
@@ -676,21 +684,19 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     if(requestedAt>=0) {
         if(at!=requestedAt){ClearWeaponLock(ws[list[at]]);ClearWeaponLock(ws[list[requestedAt]]);}
         at=requestedAt;*chosen=PayloadFire::store;
-    } else if((press && !pressOwn) || spent(at)) {
+    } else if(press || spent(at)) {
         const int was=at;
         at=NextChoice(at,n,spent);
         if(at!=was){ClearWeaponLock(ws[list[was]]);ClearWeaponLock(ws[list[at]]);}
-        if(press && !pressOwn){*chosen=PayloadFire::store;Log("PAYLOAD v=%p picked: %ls (%d rounds)",v,r.entry[list[at]].name,r.entry[list[at]].rounds);}
+        if(press){*chosen=PayloadFire::store;Log("PAYLOAD v=%p picked: %ls (%d rounds)",v,r.entry[list[at]].name,r.entry[list[at]].rounds);}
     }
     p.weapon=ws[list[at]];
     for(int i=0;i<r.count;++i)if(SamePayloadGroup(p.weapon,ws[i]))r.entry[i].picked=true;
-    // The readout's pick and count are those of the cycle the press goes to now (the HUD's switch hint).
-    if(pressOwn){r.picked=own[ownAt];r.choices=no;}
-    else {r.picked=list[at];r.choices=n;}
+    r.picked=list[at];r.choices=n;   // the primary's cycle (R / LB); the own secondary's: ownPicked / ownChoices
     if(alternatives || r.entry[list[at]].fire==PayloadFire::store)RedirectPayload(v,p.seat,p,ws,r,stock,ns,list[at]);
-    // One lock tone: the homing weapon of the control in use (a store missile the primary picked, else the own secondary).
+    // One lock tone: a homing store the primary picked, else the own secondary's missile.
     const bool primaryHoming=At<std::int32_t>(p.weapon,kWeaponLockon)==kHoming;
-    Lock(p.secondary && (focus==PayloadFire::secondary || !primaryHoming) ? p.secondary : p.weapon);
+    Lock(p.secondary && !primaryHoming ? p.secondary : p.weapon);
 }
 }  // namespace
 
@@ -712,7 +718,7 @@ void PayloadFrame(unsigned char* v) noexcept {
     const Class c=ClassOf(v);
     PayloadReadout r{};
     unsigned char* ws[kMostPayload]{};
-    r.seat=seat;r.seats=static_cast<int>(SeatCount(v));r.picked=-1;
+    r.seat=seat;r.seats=static_cast<int>(SeatCount(v));r.picked=-1;r.ownPicked=-1;
     r.count=ReadSeat(v,static_cast<unsigned>(seat),c,ws,r);
     const unsigned char* const s=SeatAt(v,static_cast<unsigned>(seat));
     r.keys=At<unsigned char>(s,kSeatPad)==0;
@@ -727,7 +733,7 @@ void PayloadFrame(unsigned char* v) noexcept {
     }
     p->redirects=0;
     PayloadFire chosen=PayloadFire::other;
-    Switch(v,s,*p,ws,r,sightPick.control,&chosen);
+    Switch(v,s,*p,ws,r,&chosen);
     // An explicit choice aims what it chose without firing: a primary-cycle choice the picked payload (`store`), an
     // own-secondary choice the secondary (whose group is that one pick: SeatFireWeapons).
     if(chosen!=PayloadFire::other && MapHoldsKeys())sightPick.control=chosen;
@@ -983,7 +989,7 @@ int AircraftPayloadChoice(unsigned char* v,const Store* stores,int count,int pic
        SeatRider(SeatAt(v,0))!=Rider::player || At<const void*>(SeatAt(v,0),kSeatRider)!=PlayerHuman()) {
         ForgetAircraftPayload(v);return -1;
     }
-    PayloadReadout r{};r.seat=0;r.seats=static_cast<int>(SeatCount(v));r.count=count;r.picked=picked;
+    PayloadReadout r{};r.seat=0;r.seats=static_cast<int>(SeatCount(v));r.count=count;r.picked=picked;r.ownPicked=-1;
     r.keys=At<unsigned char>(SeatAt(v,0),kSeatPad)==0;r.switchButton=kButtonLB;
     unsigned char* ws[kMostPayload]{};
     const auto holders=At<unsigned char* const*>(SeatAt(v,0),kSeatWeapons);
@@ -1033,6 +1039,10 @@ void PumpPayloadUi(unsigned char* human) noexcept {
 unsigned char* PayloadPicked(const void* vehicle) noexcept {
     const Pick* const p=FindPick(vehicle);
     return p && p->weapon && GameMs()-p->seen<=kFreshMs ? p->weapon : nullptr;
+}
+unsigned char* PayloadOwnSecondaryPicked(const void* vehicle) noexcept {
+    const Pick* const p=FindPick(vehicle);
+    return p && p->secondary && GameMs()-p->seen<=kFreshMs ? p->secondary : nullptr;
 }
 
 unsigned char* PayloadSightPicked(const void* vehicle,unsigned index) noexcept {

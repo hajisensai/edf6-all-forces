@@ -18,7 +18,11 @@
 
 - `0b3a0b22` 落地（cherry-pick 后按六挂点重做）：`Store.independent_secondary`（`pylib/vcobjects.py`），`BMPT_ATGM` 与 `BMPT_ATGMF` 两种导弹都是；`gen_stores.py` 生成 `StoreSpec::independentSecondary`。运行时只在 V603（其输入 `0x6214A4` 只读主攻击，副攻击 `seat+0x2E0` 原生不读）上认它。
 - `Switch` 拆成两个循环：主攻击（HE 原生弹链 / APDS 弹链，`Pick::weapon`，照旧重定向两门炮）与副攻击（两种导弹，`Pick::secondary`）。主攻击拉炮、副攻击拉所选导弹（`FireIndependentSecondary(v,seat,p->secondary)`），互不重定向、互不抑制；可同时按住。
-- R / LB：切「最近一次扳机边沿那一路」（`sightPick.control`）的循环；那一路没有选择时切另一路。地图 M 的挂载菜单两路都能点。所选导弹用完（无弹且不再装填）自动换到另一种。
+- 切换（用户否决了第一版「R / LB 切最近扣过扳机的那一路」：「不太好吧，你想想怎么做。学学战雷」）：按战争雷霆的做法，每一路有自己的开火键和自己的弹种切换，与最近开过哪一路无关：
+  - 战争雷霆地面载具：主炮开火、机枪开火（默认空格）、特种武器（反坦克导弹）开火（默认左 Ctrl）是三个独立的键；炮的弹种用数字键 1–4 直接选（BMPT 的 APDS / HEI 弹链就是按 1 / 2 切）；BMP-2/3 这类车用「Select secondary weapon」在 30mm 与 ATGM 瞄准之间切，但左 Ctrl 发射 ATGM 时可以留在主炮视角、炮照样能打。出处：[DefKey 战雷坦克键位表](https://defkey.com/war-thunder-tank-shortcuts)、[官方论坛 BMP-2 ATGM 讨论](https://forum.warthunder.com/t/to-use-the-tech-tree-bmp-2s-atgm-it-makes-you-to-switch-weapon-and-doesnt-let-you-use-the-autocannon-is-this-a-bug/254762)、[官方论坛 BMPT 弹链 1 / 2 切换](https://forum.warthunder.com/t/bmpt-ammo-bug/315204)、[官方 wiki 多炮塔射击](https://wiki.warthunder.com/mechanics/5392-how-to-shoot-on-multi-turreted-tanks)（均为社区 / wiki 资料，未在游戏内核对默认键）。
+  - 本插件：开火仍是原版主攻击 / 副攻击两个键（游戏自己的键位设置）。主武器弹种 = `PlayerJetSwitchKey`（R）/ 手柄 LB，只切主攻击的循环；副武器导弹 = 新键 `VehicleSecondarySwitchKey`（默认 T）/ `VehicleSecondarySwitchButton`（XInput 位，默认 8 = 十字键右），只切副攻击的循环。数字键 1–9 在载具里已是 `SeatNumberKeys`（换座位），所以没学战雷的数字键直选；T 只在步行（编队）和普罗透斯上有用，载具里空闲；手柄座位按键字只有 A/B/X/Y/LB/RB/L3/R3 且都有功能，十字键上 / 下在开镜时是表尺，十字键右在载具里没有占用，从 XInput 读（与地图键同一读法）。地图打开时两键都不起作用。
+  - HUD：挂载条同时点亮主武器当前弹种和副武器当前导弹（`StockArm.ownPick`），下方按键行写 `[R] 主武器：<弹种>   [T] 副武器：<导弹>`（手柄为 `LB` / `十字右`）；地图 M 的挂载菜单两路的当前项都标出，都能点。
+  - 所选导弹用完（无弹且不再装填）自动换到另一种。
 - `StockVehicleStores=0` 只关可选挂载（APDS 弹链属于挂载，随之关闭）；两种导弹是车自带的，照常工作。
 - HUD / 瞄具：`PayloadTriggerWeapons` 的副攻击组只给所选的那一枚导弹；副攻击边沿后瞄具跟导弹。`PayloadAimWeapon` 对自带副攻击直接回它自己。
 - 联机：`ApplyRemotePicks` 改用与本机相同的分组（`SwitchSecondary`、NPC 记录把自带副攻击标为 other），远端选弹只描述主攻击那一件，不会被导弹挤歪；导弹本身只在操作者那台机器拉（本机玩家或 `AiGunner` 为真的 NPC），射击经原生武器消息（每个 holder 一条）到各副本，副本不会再拉第二发。
@@ -56,7 +60,7 @@ M163：一门 M61、HE/AP 两条互斥弹链（原生 `nativeControl`），不�
 
 ## 测试
 
-- `tests/payload_runtime_test.cpp`（生产 `payload.cpp`）：六挂点 BMPT——两个循环；双扳机同帧时左炮 + 阿塔卡同时出、右炮等半个间隔；左、右、左；没弹的伙伴不挡；剩弹多者先打；`twinOk` 关闭时原版成对；主攻击边沿后 LB 切 APDS、导弹不动；副攻击边沿后 LB 切 9M120F、APDS 不动；HUD 扳机组只含所选导弹；瞄具跟副攻击；所选导弹打空自动换；`StockVehicleStores=0` 时 HE 与阿塔卡照样同射；NPC 主炮与导弹分开、只拉被批准的导弹、炮也轮流；远端副本不拉导弹、炮的拉动也轮流。原 `0b3a0b22` 的三挂点用例保留。
+- `tests/payload_runtime_test.cpp`（生产 `payload.cpp`）：六挂点 BMPT——两个循环；双扳机同帧时左炮 + 阿塔卡同时出、右炮等半个间隔；左、右、左；没弹的伙伴不挡；剩弹多者先打；`twinOk` 关闭时原版成对；LB 只切机炮弹链（副攻击刚开过火也一样）、导弹不动；十字键右只切导弹（主攻击刚开过火也一样）、弹链不动，按住只算一次，键盘座位不读手柄键，地图占键时都不切；读数同时给出两路的当前项与键；HUD 扳机组只含所选导弹；瞄具跟副攻击；所选导弹打空自动换；`StockVehicleStores=0` 时 HE 与阿塔卡照样同射；NPC 主炮与导弹分开、只拉被批准的导弹、炮也轮流；远端副本不拉导弹、炮的拉动也轮流。原 `0b3a0b22` 的三挂点用例保留。
 - `tests/twin_cadence_test.cpp`：按原生冷却模型模拟 60 帧：严格左右交替、间隔恰为 6 帧、首发为左、弹链持平；停火后再开由剩弹多者先；单门有弹时按自身射速；不同弹链 / 无配对不受影响；半间隔边界。
 - `tests/barrel_recoil_test.cpp`（生产 `barrel_recoil.cpp`）：左炮一发只推左炮骨骼、只沿炮管方向、同帧二次 pose 不重复；逐帧回位、CAS 不重写时不累加且静止时还原；右炮、APDS（同侧骨骼）、副本收到的射击；装填不算；关闭 / 残骸 / 无双炮车不碰。`vulcan_rotor_runtime_test` 加一条：同一钩子每次构建调用一次后坐。
 - `tests/twin_cadence_native.py`（需 `EDF6_NATIVE_DLL`，本机实跑通过）：冷却 = `FireInterval`、倒数 `+0xE10` 与 `FLT_EPSILON`、更新读清 `+0x139`、拉动写 `+0x139`、V603 slot 48 对任意 holder 播 `Fire`。
