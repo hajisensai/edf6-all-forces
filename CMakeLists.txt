@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(EDF6VehicleCrew VERSION 0.8.0 LANGUAGES CXX)
+# Every exe / DLL this file builds carries a version resource (cmake/versioninfo.cmake: antivirus false positives).
+include("${CMAKE_SOURCE_DIR}/cmake/versioninfo.cmake")
+edf6_version_info_at_end()
 set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only generated-asset checks")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
