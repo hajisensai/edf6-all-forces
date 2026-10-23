@@ -11,12 +11,30 @@
 // The user (2026-10-21): 「我怎么左键往右走，右键往后走，wasd没反应」. The sampler read the pad
 // floats of the record whatever the path: on the keyboard path those are not the sticks (the
 // soldier never reads them there), and the keys the soldier walks with were not read at all.
+//
+// Which record, and whose keys (static disassembly 2026-10-24):
+//  - [human+0xD40] is the soldier CLASS's key-configuration record, not a player number. Each
+//    class constructor writes its own: HumanBase 0x56AAF6 and AssultSoldier (Ranger) 0,
+//    PaleWing (Wing Diver) 1 at 0x57CD80, Engineer (Air Raider) 2 at 0x563706, HeavyArmor
+//    (Fencer) 3 at 0x5652C8. The controller object holds the four classes' records.
+//  - The local pad bound to this player is [human+0x338]: 0x54ED40 (human, pad) writes it and
+//    takes the controller object 0x77030(manager, pad) = manager+8+pad*0x2D70 into +0x340.
+//    0x22AB90 (the mission's player creation) calls it with its 5th argument, the pad, and skips
+//    it for a negative one (0x22ACFB: a remote online user, -1); 0x54EDB0 / 0x54E830 reset it
+//    to -1 for a soldier with no pad. So the first local player of this machine has pad 0,
+//    offline (the creation loop's pads 0..3) and online (this machine's own count) alike.
+// The sampler once gated the plugin's own attack keys / XInput on [human+0xD40]==0: only a
+// Ranger had them (and, before reading the record's keys, WASD at all); a Wing Diver, Air
+// Raider or Fencer had nothing but the native fire action.
 #pragma once
 #include <cstddef>
 #include <cstring>
 
 namespace crew::enemy_control {
+constexpr std::size_t kHumanClassRecord=0xD40,kHumanLocalPad=0x338;
 constexpr std::size_t kPadRecordStride=0xA80,kPadRecords=4,kPadPathField=0x2D68;
+// This machine's keyboard and the plugin's own XInput read belong to its first local player (pad 0).
+inline bool FirstLocalPad(int localPad) noexcept { return localPad==0; }
 constexpr std::size_t kPadStickRight=0x0C,kPadStickForward=0x24,kPadLookRight=0x3C,kPadLookDown=0x54;
 constexpr std::size_t kKeyForward=0x610,kKeyLeft=0x628,kKeyBack=0x640,kKeyRight=0x658;
 constexpr std::size_t kMouseRight=0x66C,kMouseDown=0x684,kRecordBytes=0x688;

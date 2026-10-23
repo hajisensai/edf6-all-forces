@@ -536,8 +536,11 @@ bool Held(int key) noexcept { return (edf::AsyncKey(key)&0x8000)!=0; }
 void Sample(Session& session,Input& sample) noexcept {
     const auto* human=static_cast<const unsigned char*>(session.owner.obj);
     const auto* pad=At<const unsigned char*>(human,kHumanPad);
-    const int index=At<int>(human,0xD40);
-    const auto* record=pad && index>=0 && index<static_cast<int>(kPadRecords) ? pad+static_cast<std::size_t>(index)*kPadRecordStride : nullptr;
+    // The soldier class's key record (Ranger 0 .. Fencer 3) and the local pad bound to this player
+    // (enemy_control_pad.h): two different things.
+    const int classRecord=At<int>(human,kHumanClassRecord);
+    const bool firstLocal=FirstLocalPad(At<int>(human,kHumanLocalPad));
+    const auto* record=pad && classRecord>=0 && classRecord<static_cast<int>(kPadRecords) ? pad+static_cast<std::size_t>(classRecord)*kPadRecordStride : nullptr;
     bool physical=false,keys=false;
     std::uint16_t buttons=0;std::uint8_t leftTrigger=0,rightTrigger=0;bool padRead=false;
     if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,kRecordBytes) && Readable(pad,kPadPathField+sizeof(int))) {
@@ -550,9 +553,9 @@ void Sample(Session& session,Input& sample) noexcept {
         sample.move[0]=Axis(sticks.right);sample.move[2]=Axis(sticks.forward);
         sample.look[0]=Axis(sticks.lookRight);sample.look[1]=Axis(sticks.lookDown);
         physical=record[0xD0]!=0;
-        // The attack keys (and the plugin's own XInput) are the first local player's only. A
-        // second local player uses its own native record and never inherits P1's keys.
-        if(index==0) {
+        // The attack keys (and the plugin's own XInput) are the first local player's (pad 0) only,
+        // whatever its class. A second local player uses its own native record and never inherits P1's keys.
+        if(firstLocal) {
             if(session.catalogue.adapter || (session.catalogue.profile->axes&8))
                 sample.move[1]=(Held(VK_SPACE) ? 1.0f : 0.0f)-(Held(VK_CONTROL) ? 1.0f : 0.0f);
             padRead=MapPadState(&buttons,&leftTrigger,&rightTrigger);
@@ -575,7 +578,7 @@ void Sample(Session& session,Input& sample) noexcept {
     for(unsigned i=0;i<bound;++i) {
         const auto& binding=kBindings[i];
         bool down=keys && i==0 && physical;
-        if(keys && index==0)down=down || Held(binding.vk) || (padRead && PadDown(binding.pad,buttons,leftTrigger,rightTrigger));
+        if(keys && firstLocal)down=down || Held(binding.vk) || (padRead && PadDown(binding.pad,buttons,leftTrigger,rightTrigger));
         use(session.catalogue.abilities[i],down,session.keyWas[i]);
     }
     for(unsigned i=bound;i<kBindingCount;++i)session.keyWas[i]=false;

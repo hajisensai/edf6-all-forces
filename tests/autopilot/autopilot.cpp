@@ -38,6 +38,7 @@
 #include "airdrop_probe.h"
 #include "wdenergy_probe.h"
 #include "hector_probe.h"
+#include "players_probe.h"
 
 namespace {
 HMODULE self=nullptr;
@@ -718,6 +719,8 @@ void RunCommand(const char* text) noexcept {
             Log("PROBE wdenergy installed=%d",autopilot::InstallWdEnergyProbe(image,&Log));
         else if(named && !std::strcmp(what,"hector"))
             Log("PROBE hector installed=%d",autopilot::InstallHectorProbe(image,&Log));
+        else if(named && !std::strcmp(what,"players"))
+            Log("PROBE players installed=%d",autopilot::InstallPlayersProbe(image,&Log));
         else Log("CMD probe: unknown probe %s",what);
     }
     else if(!std::strcmp(word,"crash"))Crash(text);
@@ -780,6 +783,7 @@ DWORD WINAPI Loop(void*) {
         autopilot::AirdropProbeTick();
         autopilot::WdEnergyProbeTick();
         autopilot::HectorProbeTick();
+        autopilot::PlayersProbeTick();
         Sleep(15);
     }
 }

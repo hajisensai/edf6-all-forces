@@ -5631,7 +5631,9 @@ def map_wired() -> None:
     sample = controlled.split('void Sample(Session& session,Input& sample) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,kRecordBytes) && Readable(pad,kPadPathField+sizeof(int))) {' in sample
     assert 'ReadPadSticks(pad,record,At<int>(pad,kPadPathField)!=0 || PadFlag())' in sample, 'movement and look are read as the soldier reads its controller (enemy_control_pad.h)'
-    assert 'if(index==0) {' in sample, 'keyboard input belongs only to the first local player'
+    assert 'const bool firstLocal=FirstLocalPad(At<int>(human,kHumanLocalPad));' in sample and 'if(firstLocal) {' in sample, \
+        'keyboard input belongs only to the first local player (pad 0), whatever its class'
+    assert 'index==0' not in sample, 'the class record (+0xD40) is not the player'
     allowed = controlled.split('bool InputAllowed() noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert 'if(GamePaused())return false;' in allowed and 'pid==GetCurrentProcessId()' in allowed
 

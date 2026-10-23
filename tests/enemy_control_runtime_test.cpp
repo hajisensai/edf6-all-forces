@@ -168,11 +168,12 @@ unsigned char owner1[0x3000]{},owner2[0x3000]{},ownerCtrl1[32]{},ownerCtrl2[32]{
 // Controller objects (human+0x340): four 0xA80 records, the pad-path flag at +0x2D68 (enemy_control_pad.h).
 alignas(16) unsigned char pad[0x2E00]{},pad2[0x2E00]{};
 std::uint64_t __fastcall NativeUpdate(void*,void*) {++crew::fixtureUpdates;return 77;}
-void Human(unsigned char* object,unsigned char* control,int record,unsigned char* controller=pad) {
+// `localPad` the pad bound to the player (+0x338: P1 0, P2 1), `record` its class's key record (+0xD40: Ranger 0 .. Fencer 3).
+void Human(unsigned char* object,unsigned char* control,int localPad,int record,unsigned char* controller=pad) {
     std::memset(object,0,0x3000);std::memset(control,0,32);
     crew::Put<const void*>(object,0x30,control);crew::Put<LONG>(control,8,1);crew::Put<LONG>(control,12,1);
-    object[0x20]=static_cast<unsigned char>(record+1);
-    object[crew::kHumanPlayer]=1;crew::Put<const void*>(object,crew::kHumanPad,controller);crew::Put<int>(object,0xD40,record);
+    object[0x20]=static_cast<unsigned char>(localPad+1);
+    object[crew::kHumanPlayer]=1;crew::Put<const void*>(object,crew::kHumanPad,controller);crew::Put<int>(object,0xD40,record);crew::Put<int>(object,0x338,localPad);
 }
 void Enemy(unsigned char* object,unsigned char* control) {
     std::memset(object,0,0x3000);std::memset(control,0,32);
@@ -206,7 +207,7 @@ void SoldierKeys() {
     using namespace crew;using namespace crew::enemy_control;
     auto* owner=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     auto* target=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
-    unsigned char ownerControl[32]{},targetControl[32]{};Human(owner,ownerControl,0);Enemy(target,targetControl);
+    unsigned char ownerControl[32]{},targetControl[32]{};Human(owner,ownerControl,0,0);Enemy(target,targetControl);
     enemy_native::fixtureActive=&enemy_native::fixtureSoldier;
     Catalogue soldier{};Check(ReadCatalogue(ObjRef::Of(target),soldier) && soldier.abilities.size()==6,"soldier catalogue read");
     const wchar_t* order[]={L"装备武器齐射",L"举枪瞄准",L"武器",L"跳跃",L"进入／退出掩体",L"翻滚回避"};
@@ -232,7 +233,7 @@ void UnreadableSourceRestoration() {
     auto* owner=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     auto* target=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     auto* ownerControl=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
-    unsigned char targetControl[32]{};Human(owner,ownerControl,0);Enemy(target,targetControl);
+    unsigned char targetControl[32]{};Human(owner,ownerControl,0,0);Enemy(target,targetControl);
     Put<unsigned>(owner,0x380,0x2840u);
     Catalogue catalogue{};Check(ReadCatalogue(ObjRef::Of(target),catalogue),"unreadable source fixture reads its native catalogue");
     Check(EnemyControlBegin(ObjRef::Of(owner),ObjRef::Of(target),catalogue.hash,90001,true),"unreadable source fixture acquires a real controller lease");
@@ -264,7 +265,7 @@ int main() {
     Check(!ValidInput(relative),"skill input without an absolute view cannot bypass the wire validator");
     originalTable[5]=originalTable[6]=reinterpret_cast<void*>(&NativeUpdate);
     originalTable[8]=reinterpret_cast<void*>(&NativeUpdate);
-    Human(owner1,ownerCtrl1,0);Human(owner2,ownerCtrl2,1,pad2);
+    Human(owner1,ownerCtrl1,0,0);Human(owner2,ownerCtrl2,1,1,pad2);
     auto* target1=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     auto* target2=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     unsigned char targetCtrl1[32]{},targetCtrl2[32]{};
@@ -377,6 +378,15 @@ int main() {
         Check(first.active[0].id==own[1].id && first.active[0].phase==(held ? 1u : 2u) && !first.active[1].id,"the second attack's own key uses that attack and nothing else");
         Check(held ? again.active[0].id==own[1].id : !again.active[0].id,"an edge attack is pressed once per key press, a held one stays held");
         fixtureHeldKey=0;Input up{};Sample(*ByLease(124),up);Check(!up.active[0].id,"releasing the key releases the attack");
+        // +0xD40 is the soldier class's key record, not the player (enemy_control_pad.h): P1 as an Air Raider
+        // (record 2) walks with that record's keys and keeps the attack keys; P2 with the Ranger's record 0
+        // (pad 1) still never reads P1's keys.
+        Put<int>(owner1,0xD40,2);Put<int>(owner2,0xD40,0);pad[2*0xA80+0x610]=1;fixtureHeldKey=VK_RBUTTON;
+        Input raider{},p2Ranger{};Sample(*ByLease(124),raider);Sample(*ByLease(secondActive.lease),p2Ranger);
+        Check(raider.move[2]==1.0f && raider.active[0].id==own[1].id,"P1 as an Air Raider (record 2): its record's W and the attack keys");
+        Check(!p2Ranger.active[0].id && p2Ranger.move[2]==0,"P2 with the Ranger's record 0 still never reads P1's keys");
+        fixtureHeldKey=0;pad[2*0xA80+0x610]=0;Input released{};Sample(*ByLease(124),released);Sample(*ByLease(secondActive.lease),p2Ranger);
+        Put<int>(owner1,0xD40,0);Put<int>(owner2,0xD40,1);
         Check(EnemyControlHoldAbility(p1,own[0].id),"the M card holds an attack directly");
         Input card{};Sample(*ByLease(124),card);Check(card.active[0].id==own[0].id,"the card's held row uses its attack");
         Check(EnemyControlHoldAbility(p1,0),"the card lets go");Input none{};Sample(*ByLease(124),none);Check(!none.active[0].id,"no attack after the card lets go");
