@@ -867,6 +867,7 @@ bool IsSazabi(const void* vehicle) noexcept;
 // flown as a heli; with the player in seat 0 the plugin flies it, empty after that it settles on the ground.
 bool IsDreadnought(const void* vehicle) noexcept;
 void BoardingRequest(unsigned char* vehicle) noexcept;   // boarding.cpp: the player into it (the boarding gun's path)
+bool BoardingUnderway() noexcept;                        // boarding.cpp: a boarding is still pressing the button
 // The local player's Sazabi as the HUD shows it (sazabi.cpp publishes it each frame on the game thread; hud.cpp reads it,
 // fresh for kSazabiCueMs). False with none (not riding one).
 struct SazabiCue {
