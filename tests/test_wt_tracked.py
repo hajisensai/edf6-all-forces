@@ -66,7 +66,10 @@ class WtAssetTests(unittest.TestCase):
         import make_tracked_combat as combat
         cls.combat = combat
         cls.game = rootcpk.default()
-        cls.files = {kind: combat.build(cls.game.root, kind) for kind in combat.KINDS}
+        # The authored files (make_tracked_combat.authored): the model these tests check is the War Thunder geometry on
+        # the native skeleton, without the seats' cockpits build() grafts onto it (its extra bones and materials:
+        # test_grafted_eyes_sit_on_the_war_thunder_geometry).
+        cls.files = {kind: combat.authored(cls.game.root, kind) for kind in combat.KINDS}
 
     def model(self, kind: str):  # noqa: ANN201
         import mdb
@@ -126,6 +129,53 @@ class WtAssetTests(unittest.TestCase):
             P = spec.part(k)[0]
             self.assertAlmostEqual(spec.info['muzzles'][side][0]['point'][2], float(P[:, 2].max()), places=5)
         self.assertEqual(len(spec.info['muzzles']['missiles']), 4)
+
+    def test_grafted_eyes_sit_on_the_war_thunder_geometry(self) -> None:
+        # build() is authored() with the seats' cockpits grafted (cockpits.graft_files, the fits by the model's stem):
+        # the first-person eye (vc_eye_<seat>, src/fp_vehicle.cpp VehicleEye) is where pylib/cockpit_fits_plugin.py
+        # puts it, on its fit's bone, and that place is the one measured on this model: clear of its meshes, at the
+        # BMPT's gunner sight window (ahead of its hood), over the M163's gun receiver in the turret's well.
+        import cockpit_fits
+        import cockpits
+        import mdb
+        import vcobjects as vc
+        if not cockpits.assets_present():
+            self.skipTest('the cockpit assets (models/cockpits) are unavailable')
+        eyes = {}
+        for kind in self.files:
+            with self.subTest(kind=kind):
+                module = self.combat.model_module(kind)
+                rel = f'OBJECT/{module.OUT_ARC}'
+                built = cockpits.graft_files(vc.Game(self.game.root), self.files[kind])
+                self.assertEqual({k: v for k, v in built.items() if k != rel},
+                                 {k: v for k, v in self.files[kind].items() if k != rel})
+                arc = mdb.rab_read(built[rel])
+                md = mdb.mdb_read(next(f for f in arc.files if f.name.lower() == module.HOST_MDB).data)
+                world = mdb.bind_world(md)
+                (fit,) = cockpit_fits.FITS[module.OUT_ARC.rsplit('.', 1)[0]]
+                eye = md.bone_index(f'vc_eye_{fit.seat}')
+                self.assertGreaterEqual(eye, 0, f'{kind}: seat {fit.seat} has no eye')
+                self.assertEqual(md.name_of(md.bones[md.bones[eye].parent].name), fit.bone)
+                np.testing.assert_allclose(world[eye][12:15], fit.eye, atol=1e-4)
+                spec = wt.load(kind)
+                P = np.vstack([spec.part(k)[0] for k in range(len(spec.info['parts']))])
+                self.assertGreater(float(np.linalg.norm(P - np.asarray(fit.eye), axis=1).min()), 0.05,
+                                   f'{kind}: the eye is inside the model')
+                eyes[kind] = (np.asarray(fit.eye), spec)
+
+        def bounds(spec, name: str):  # noqa: ANN001, ANN202
+            k = next(i for i, p in enumerate(spec.info['parts']) if p['name'].startswith(name))
+            P = spec.part(k)[0]
+            return P.min(axis=0), P.max(axis=0)
+        eye, spec = eyes['bmpt']
+        lo, hi = bounds(spec, 'cannon_main.wt_optic_glass_c')
+        self.assertTrue(lo[0] < eye[0] < hi[0] and lo[1] < eye[1] < hi[1] and eye[2] > hi[2],
+                        'BMPT: the eye looks out of the gunner sight window')
+        eye, spec = eyes['vulcan']
+        lo, hi = bounds(spec, 'cannon_main.wt_m163_vulcan_gun')
+        radar_lo, radar_hi = bounds(spec, 'doppler_radar.')
+        self.assertTrue(eye[1] > hi[1] and eye[2] < hi[2] and radar_hi[0] < eye[0] < hi[0],
+                        'M163: the eye is behind and above the M61, left of the radar')
 
     def test_cas_retargets_absolute_clip_and_drops_radar_tracks(self) -> None:
         import cas_pose
