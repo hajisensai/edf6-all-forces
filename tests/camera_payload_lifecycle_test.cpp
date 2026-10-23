@@ -19,6 +19,7 @@ ULONGLONG GameMs() noexcept { return clockMs; }
 unsigned char* PlayerHuman() noexcept { return currentHuman; }
 void Log(const char*,...) noexcept {}
 bool MapHoldsKeys() noexcept { return false; }
+bool MapPadState(std::uint16_t* b,std::uint8_t* lt,std::uint8_t* rt) noexcept { *b=0;*lt=*rt=0;return false; }   // no pad here
 bool MapOwnsView() noexcept { return false; }
 bool FirstPersonVehicleView(const void*,unsigned) noexcept { return false; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
