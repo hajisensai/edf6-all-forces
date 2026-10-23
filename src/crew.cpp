@@ -553,8 +553,15 @@ float Distance2(const unsigned char* vehicle,const float* pos) noexcept {
 
 // TestBoardVehicle (tests only, tests/autopilot): kTestBoardMs after the first vehicle of that class is seen (the player
 // has landed), the player on foot is put into it once a mission, as the boarding gun puts them (BoardingRequest).
+// A request is made only while the board button can act (not BoardButtonBlocked) and none is underway; one that ends
+// with the player still on foot is made again, up to kTestBoardTries. Until 2026-10-21 it was made once, whenever the
+// time came: in the test range the soldier is busy (+0x5D0 bit 2, act 0x29E) for 10 s at a time, the boarding's
+// kTryMs of presses ran out inside it ("no seat of 1 taken in 90 presses ... +0x5D0=0000029e") and two background runs
+// in three never boarded (docs/feedback-2026-10-21-attitude-indicator.md).
 constexpr ULONGLONG kTestBoardMs=6000;
+constexpr int kTestBoardTries=8;
 bool testBoarded=false;
+int testBoardTries=0;
 ULONGLONG testBoardSeen=0;
 bool TestBoardMatches(const unsigned char* vehicle,int cls,const char* want) noexcept {
     // Several unrelated models (stock heli, fighters, Sazabi) share 506_Helicopter. An optional @bone filter makes
@@ -586,9 +593,12 @@ void TestBoard(unsigned char* vehicle,int cls) noexcept {
     const ULONGLONG ms=GameMs();
     if(!testBoardSeen)testBoardSeen=ms;
     unsigned char* const human=PlayerHuman();
-    if(ms-testBoardSeen<kTestBoardMs || !human || !HumanOnFoot(human))return;
-    testBoarded=true;
-    Log("TESTBOARD v=%p %s: the player put into it",vehicle,kClasses[cls].name);
+    if(ms-testBoardSeen<kTestBoardMs || !human)return;
+    if(!HumanOnFoot(human)){testBoarded=true;Log("TESTBOARD: the player is aboard (request %d)",testBoardTries);return;}
+    if(BoardingUnderway() || BoardButtonBlocked(human))return;
+    if(testBoardTries>=kTestBoardTries){testBoarded=true;Log("TESTBOARD: not aboard after %d requests, given up",testBoardTries);return;}
+    ++testBoardTries;
+    Log("TESTBOARD v=%p %s: the player put into it (request %d)",vehicle,kClasses[cls].name,testBoardTries);
     BoardingRequest(vehicle);
 }
 
@@ -1041,7 +1051,7 @@ void ResetCrew() noexcept {
     for(auto& s:states)s=State{};
     fullLoggedAt=0;
     for(auto& p:doorLogged)p=nullptr;
-    testBoarded=false;testBoardSeen=0;
+    testBoarded=false;testBoardSeen=0;testBoardTries=0;
 }
 int VehicleClassOf(const void* object) noexcept { return ClassOf(object); }
 }  // namespace crew

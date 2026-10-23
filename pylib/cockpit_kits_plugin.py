@@ -267,6 +267,10 @@ DECK_SCREENS = (
     ScreenAt('map', (-0.727, -0.533, 0.851), (0.0, 0.0, -1.0), 0.19, 0.26),
     ScreenAt('weapons', (-0.961, -0.533, 0.851), (0.0, 0.0, -1.0), 0.19, 0.26),
     ScreenAt('flight', (-1.217, -0.533, 0.851), (0.0, 0.0, -1.0), 0.19, 0.26),
+    # The pilot's HUD where the model's slab was (tools/prep_cockpit_plugin.py C130_DECK: right on the line of sight
+    # 0.4 m ahead, left out of the cut), a combiner of the C-130J HUD's 30 x 24 degree field: the plugin draws its
+    # symbols on it (hud.cpp HeadUpGlass; docs/feedback-2026-10-21-attitude-indicator.md).
+    ScreenAt('hud', (0.0, 0.0, 0.4), (0.0, 0.0, -1.0), 0.214, 0.170),
 )
 DECK = Model('plugin_c130_deck', {'left': 1.4, 'right': 3.2, 'up': 1.2, 'down': 1.3, 'ahead': 2.3, 'back': 1.4},
              {'left': 0.3, 'right': 0.5, 'up': 0.2, 'down': 0.5, 'ahead': 0.7, 'back': 0.3},
