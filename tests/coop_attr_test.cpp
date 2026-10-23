@@ -129,7 +129,7 @@ void WordAndRoom() {
     hostcfg::Word w;
     strcpy_s(w.version,"0.8.0");w.features=kFeatures;w.vanillaRecruit=true;w.npcFreeSquadCover=false;
     char text[kWordMost];
-    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"1;v=0.8.0;f=3F;r=1;c=0"),"the word");
+    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"1;v=0.8.0;f=FF;r=1;c=0"),"the word");
     hostcfg::Word back;
     Expect(ParseWord(text,back) && !std::strcmp(back.version,"0.8.0") && back.features==kFeatures && back.vanillaRecruit &&
            !back.npcFreeSquadCover,"parsed back");
@@ -160,6 +160,14 @@ void WordAndRoom() {
     Expect(b.members==4 && b.silent==1 && b.differing==1 && (b.missing&kFeatBikeGunner) && (b.missing&kFeatHostSettings),
            "one older (no word: everything may differ), one without the gunner");
     Expect(EveryoneHas(kFeatures,kFeatBikeGunner) && !EveryoneHas(older.features,kFeatBikeGunner),"the gunner seat: every member must have it");
+    // 2026-10-21: a build whose 408 data still holds the chassis in the air (gun keyframed) is named, nothing gated (data).
+    Builds h;hostcfg::Word hover;strcpy_s(hover.version,"0.8.0");hover.features=kFeatures&~kFeatBikeGrounded;
+    Count(h,true,true,&same,"0.8.0");Count(h,false,true,&hover,"0.8.0");
+    Expect(h.members==2 && h.differing==1 && h.missing==kFeatBikeGrounded && (kFeatures&kFeatBikeGrounded),
+           "a member whose 408 still hovers: named in the notice");
+    // 2026-10-21: a member with the gunner seat but not its built gun (the #219 / #234-first builds) closes the seat.
+    Expect(!BikeGunnerAtSync(true,true,0,kFeatures&~kFeatBikeGunMount) && BikeGunnerAtSync(true,true,0,kFeatures),
+           "the gunner seat needs every member's built gun as well");
     Expect(std::strlen(kKey)<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_KEY && !std::strncmp(kKey,EDF6COOP_MEMBER_ATTRIBUTE_KEY_PREFIX,6),"the key's form");
 }
 // The 408's gunner seat over missions (2026-10-20 review): a closed seat of an online mission does not follow into an

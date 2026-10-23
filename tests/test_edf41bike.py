@@ -61,7 +61,40 @@ class Native(unittest.TestCase):
         bike.check(self.members, self.md, self.physics)
         self.assertEqual(self.members['car_aim_node'], [])
         self.assertNotIn('gun', {r[0] for r in self.members['car_base_rigid_body']})
-        self.assertEqual([r for r in self.members['car_base_simulation_node'] if r[0] == 'gun'], [['gun', 1]])
+        self.assertEqual([r for r in self.members['car_base_simulation_node'] if r[0] == 'gun'], [['gun', 0]])
+
+    def test_no_keyframed_proxy_holds_the_chassis(self) -> None:
+        # The SHKT's seven constraints, (child, parent): the gun's ragdoll joint is to the body itself.
+        self.assertEqual(bike.joints(self.physics), [
+            ('side_tire', 'body'), ('rear_tire', 'rear_sus'), ('rear_sus', 'body'), ('front_tire', 'front_sus'),
+            ('front_sus', 'handle'), ('handle', 'body'), ('gun', 'body')])
+        self.assertEqual(bike.pinned(self.members, self.physics), [])
+        # The 2026-10-19 data (gun row 1, mode 2 keyframed) kept that joint between a keyframed gun and the dynamic
+        # body: the hover (2026-10-21 run). A wheel made keyframed the same way would hold it too.
+        old = copy.deepcopy(self.members)
+        old['car_base_simulation_node'] = [[n, 0] for n in bike.WHEELS] + [['gun', 1]]
+        self.assertEqual(bike.pinned(old, self.physics), [('gun', 'body')])
+        with self.assertRaisesRegex(ValueError, 'gun needs its one animation-driven'):
+            bike.check(old, self.md, self.physics)
+        sus = copy.deepcopy(self.members)
+        sus['car_base_simulation_node'].append(['rear_sus', 1])
+        self.assertEqual(bike.pinned(sus, self.physics), [('rear_sus', 'body')])
+        with self.assertRaisesRegex(ValueError, 'pin the dynamic chassis'):
+            bike.check(sus, self.md, self.physics)
+        # A row 0 takes the whole subtree out: front_sus with front_tire, no joint to a dynamic part left behind.
+        sub = copy.deepcopy(self.members)
+        sub['car_base_simulation_node'].append(['handle', 0])
+        self.assertEqual(bike.pinned(sub, self.physics), [])
+
+    def test_fall_out_names_only_the_408s_own_seats(self) -> None:
+        self.assertEqual(sgo.plain(self.members['car_base_fall_out'][4]), [1])
+        template = sgo.read(self.games.read6(bike.CAR_TEMPLATE))[1]
+        self.assertEqual(sgo.plain(template['car_base_fall_out'][4]), [1, 2, 3, 4])   # V512's bed, five seats
+        self.assertEqual(sgo.plain(self.members['car_base_fall_out'][:4]), sgo.plain(template['car_base_fall_out'][:4]))
+        bad = copy.deepcopy(self.members)
+        bad['car_base_fall_out'][4] = [1, 2, 3, 4]
+        with self.assertRaisesRegex(ValueError, 'fall_out names seats'):
+            bike.check(bad, self.md, self.physics)
 
     def test_three_physical_wheels_and_original_radii(self) -> None:
         rows = self.members['car_base_wheel']
@@ -123,11 +156,11 @@ class Native(unittest.TestCase):
         members['car_base_rigid_body'].append(['gun', -1.0, -1.0, -1.0, -1.0, [], []])
         with self.assertRaisesRegex(ValueError, 'animation-driven'):
             bike.check(members, self.md, self.physics)
-        for rows in ([[n, 0] for n in bike.WHEELS], [[n, 0] for n in bike.WHEELS] + [['gun', 0]],
-                     [[n, 0] for n in bike.WHEELS] + [['gun', 1], ['gun', 1]]):
+        for rows in ([[n, 0] for n in bike.WHEELS], [[n, 0] for n in bike.WHEELS] + [['gun', 1]],
+                     [[n, 0] for n in bike.WHEELS] + [['gun', 0], ['gun', 0]]):
             bad = copy.deepcopy(self.members)
             bad['car_base_simulation_node'] = rows
-            with self.assertRaisesRegex(ValueError, 'explicit native kinematic'):
+            with self.assertRaisesRegex(ValueError, 'gun needs its one animation-driven'):
                 bike.check(bad, self.md, self.physics)
         bad = copy.deepcopy(self.members)
         bad['mission_setup'][2][0][1] = ['AimRecoil', [0.1, 0.2]]
