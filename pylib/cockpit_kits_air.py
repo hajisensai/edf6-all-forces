@@ -197,7 +197,9 @@ REAL: dict[str, RealCockpit] = {
         (('flight', (-0.0952, -0.389, 0.6856), (0.036, 0.0, -0.999), 0.19, 0.115),
          ('map', (0.1846, -0.3954, 0.7005), (0.036, 0.0, -0.999), 0.19, 0.125),
          ('status', (0.6874, -0.3895, 0.7004), (-0.035, 0.0, -0.999), 0.19, 0.125)),
-        {'left': 0.3, 'right': 0.2, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, sill=-40.0),
+        # No combiner in the UH-60M's cockpit: a helmet's display, as the Apache's (every pilot's station shows the
+        # attitude on the line of sight, docs/feedback-2026-10-21-attitude-indicator.md).
+        {'left': 0.3, 'right': 0.2, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, helmet_hud=True, sill=-40.0),
 }
 SCALED_BY = ('left', 'right', 'up', 'down')   # the sides a real cockpit is scaled to fit; ahead and back it is cut
 

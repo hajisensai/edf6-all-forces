@@ -17,6 +17,19 @@ export function parseAccounts(text) {
   return out;
 }
 
+// Independent ACCOUNT_* secrets let administrators add an account without replacing the encrypted list.
+// Existing accounts always win, so an added binding cannot change their password, role, group or session.
+export function loadAccounts(env) {
+  const out = parseAccounts(env.ACCOUNTS);
+  for (const name of Object.keys(env).filter((key) => /^ACCOUNT_[A-Z0-9_]+$/.test(key)).sort()) {
+    if (typeof env[name] !== 'string') continue;
+    for (const [user, account] of parseAccounts(env[name])) {
+      if (!out.has(user)) out.set(user, account);
+    }
+  }
+  return out;
+}
+
 function who(a) {
   return { user: a.user, role: a.role, group: a.group };
 }

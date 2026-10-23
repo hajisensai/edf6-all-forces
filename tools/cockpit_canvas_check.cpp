@@ -5,7 +5,11 @@
 //    the average of the corners (an affine guess);
 //  - the stretch is the quad's scale over the canvas (a rectangle twice the canvas's size: 2), bigger at the near end of
 //    a quad in perspective;
-//  - a quad with no area is refused.
+//  - a quad with no area is refused;
+//  - the head-up glass (Glass, Through, Level, Toward, DownOnGlass) is conformal: for an aircraft at a heading, nose up
+//    and banked, the horizon drawn on its glass is turned by the bank (its right end up in a right bank), lies the
+//    glass's distance x tan(pitch) under the boresight, the nose lands on the glass's centre, and the bank pointer is
+//    square to the horizon; level, the horizon is level and through the centre.
 // Exit code 1 when one fails. cmake --build build --target cockpit_canvas_check && build\cockpit_canvas_check.exe
 #include "../src/cockpit_canvas.h"
 #include <cmath>
@@ -36,7 +40,57 @@ void Corners(const float* x,const float* y,const char* what) {
 }
 }  // namespace
 
+// An aircraft heading `heading` degrees (sight::HeadingOf: the world's +z 0, its -x 90), nose `pitch` up, banked `bank`
+// degrees (right wing down), its glass `dist` m ahead of the eye along the nose, its axes the body's right and up.
+Glass GlassOf(float heading,float pitch,float bank,float dist) {
+    const float k=0.01745329252f,hh=heading*k,p=pitch*k,b=bank*k;
+    const float h[3]={-std::sin(hh),0.0f,std::cos(hh)},r[3]={-h[2],0.0f,h[0]},up[3]={0.0f,1.0f,0.0f};
+    float f[3],u0[3];
+    for(int i=0;i<3;++i){f[i]=std::cos(p)*h[i]+std::sin(p)*up[i];u0[i]=-std::sin(p)*h[i]+std::cos(p)*up[i];}
+    Glass g{};
+    for(int i=0;i<3;++i) {
+        g.off[i]=f[i]*dist;
+        g.right[i]=std::cos(b)*r[i]-std::sin(b)*u0[i];
+        g.up[i]=std::sin(b)*r[i]+std::cos(b)*u0[i];
+    }
+    g.w=0.14f;g.h=0.15f;g.ch=1080.0f;g.cw=g.ch*g.w/g.h;
+    return g;
+}
+
+void HeadUpGlassChecks() {
+    static const float cases[3][3]={{30.0f,8.0f,25.0f},{200.0f,-12.0f,-40.0f},{0.0f,0.0f,0.0f}};   // heading, pitch, bank
+    for(const auto& c:cases) {
+        const float heading=c[0],pitch=c[1],bank=c[2],dist=0.8f;
+        const Glass g=GlassOf(heading,pitch,bank,dist);
+        float nose[3];for(int i=0;i<3;++i)nose[i]=g.off[i]/dist;
+        float h[3],r[3],a[3],b[3],nx=0,ny=0,x0=0,y0=0,x1=0,y1=0;
+        Expect(Level(nose,h,r),"the nose's level frame");
+        Toward(h,r,0.0f,-0.2f,a);Toward(h,r,0.0f,0.2f,b);
+        Expect(Through(g,nose,&nx,&ny) && Near(nx,g.cw*0.5f,0.05f) && Near(ny,g.ch*0.5f,0.05f),"the nose lands on the glass's centre",nx,ny);
+        Expect(Through(g,a,&x0,&y0) && Through(g,b,&x1,&y1),"the horizon either side of the heading crosses the glass");
+        const float turn=std::atan2(y1-y0,x1-x0)/0.01745329252f;
+        Expect(Near(turn,-bank,0.05f),"the horizon on the glass is turned by the bank (its right end up in a right bank)",turn,-bank);
+        // The boresight's distance from the drawn horizon, in metres on the glass: the glass's distance x tan(pitch),
+        // the horizon under the boresight with the nose up.
+        const float ux=(x1-x0)/g.cw*g.w,uy=(y1-y0)/g.ch*g.h,len=std::sqrt(ux*ux+uy*uy);
+        const float cx=(nx-x0)/g.cw*g.w,cy=(ny-y0)/g.ch*g.h,across=(ux*cy-uy*cx)/len;
+        Expect(Near(across,-dist*std::tan(pitch*0.01745329252f),2e-4f),"the horizon lies dist x tan(pitch) from the boresight, under it nose up",
+               across,-dist*std::tan(pitch*0.01745329252f));
+        const float pointer=DownOnGlass(bank),square=std::atan2(y1-y0,x1-x0)+1.5707963f;
+        Expect(Near(pointer,square,1e-3f),"the bank pointer is square to the drawn horizon, toward the ground",pointer,square);
+    }
+    float x=0,y=0;
+    const Glass g=GlassOf(0.0f,0.0f,0.0f,0.8f);
+    const float behind[3]={0.0f,0.0f,-1.0f};
+    Expect(!Through(g,behind,&x,&y),"a direction behind the eye never lands on the glass");
+    float ax=-10,ay=50,bx=300,by=50;
+    Expect(Clip(ax,ay,bx,by,0,0,100,100) && Near(ax,0) && Near(bx,100),"a segment is cut to the glass's edges",ax,bx);
+    ax=-10;ay=-10;bx=-5;by=-1;
+    Expect(!Clip(ax,ay,bx,by,0,0,100,100),"a segment off the glass is left out");
+}
+
 int main() {
+    HeadUpGlassChecks();
     const float rx[4]={100,500,500,100},ry[4]={50,50,250,250};
     Corners(rx,ry,"a rectangle");
     const float px[4]={100,500,560,160},py[4]={50,50,250,250};

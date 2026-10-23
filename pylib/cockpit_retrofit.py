@@ -345,6 +345,30 @@ def _dial(name,centre,facing,up,diameter,field,ground,labels,ranges):
     return parts,controls
 
 
+def off_sight(p) -> float:
+    """Degrees between the eye's line of sight (+z of the kit's eye frame, the eye at the origin) and the point p."""
+    p=np.asarray(p,dtype=float);n=float(np.linalg.norm(p))
+    return math.degrees(math.acos(max(-1.,min(1.,float(p[2])/n)))) if n>1e-9 else 180.
+
+
+def placed_fields(fields, cells) -> list:
+    """A block's fields (most needed first) on the cells the panel can carry a dial in (`cells`: (cell, centre,
+    diameter) in the grid's order): [(cell, field, centre, diameter)]. A cell the panel cannot carry gives its place to
+    the next one, so the fields the block runs out of cells for are its least needed (the tail), never one in the
+    middle. The attitude indicator then takes the carried cell nearest the line of sight, swapping with its field: it is
+    the instrument a pilot reads most (a basic T's centre), and a real cockpit's panel lies low under the game's narrow
+    view, so the dial nearest the line of sight is the one still in view. Until 2026-10-21 each field kept its own cell
+    and was dropped with it: the F-16's right_flight block lost the attitude indicator (its cell off the panel's edge),
+    the one dial in view, and kept a climb dial; its other attitude indicators lie 34-40 degrees under the line of
+    sight, below a 45-degree view (docs/feedback-2026-10-21-attitude-indicator.md)."""
+    out=[[i,field,centre,diameter] for (i,centre,diameter),field in zip(cells,fields)]
+    attitude=next((k for k,c in enumerate(out) if c[1]==ci.PITCH),None)
+    if attitude is not None:
+        nearest=min(range(len(out)),key=lambda k:off_sight(out[k][2]))
+        out[attitude][1],out[nearest][1]=out[nearest][1],out[attitude][1]
+    return [tuple(c) for c in out]
+
+
 def apply(kit: Kit, blocks: tuple[Block,...], transform=lambda p:np.asarray(p), ground=False,
           limits=None, ranges=None) -> Kit:
     """Replace surveyed faces on the final, scaled/deformed cab, including their live control pivots."""
@@ -408,7 +432,8 @@ def apply(kit: Kit, blocks: tuple[Block,...], transform=lambda p:np.asarray(p), 
             if b.dials and len(b.dials)!=len(b.fields):
                 raise ValueError(f'{b.name}: every field needs its own surveyed dial mount')
             rows=math.ceil(len(b.fields)/b.columns);cw,ch=width/b.columns,height/rows
-            for i,field in enumerate(b.fields):
+            cells=[]   # (cell, its dial's centre, diameter): the cells the panel's surface can carry a dial in
+            for i in range(len(b.fields)):
                 x=(i%b.columns-(b.columns-1)/2)*cw;y=((rows-1)/2-i//b.columns)*ch
                 diameter=min(cw,ch)*(.64 if ground else .83)
                 mount=np.asarray(at(x,y,0))
@@ -430,7 +455,8 @@ def apply(kit: Kit, blocks: tuple[Block,...], transform=lambda p:np.asarray(p), 
                         diameter*=.85
                 if not fitted:continue
                 front=_front(corners,mount,axes,diameter*.51)
-                anchor=mount+f*(front+.002)
+                cells.append((i,mount+f*(front+.002),diameter))
+            for i,field,anchor,diameter in placed_fields(b.fields,cells):
                 pp,cc=_dial(name+f'_{i}',tuple(anchor+f*.001),tuple(f),tuple(u),diameter,field,ground,labels,ranges)
                 parts+=pp;controls+=cc
         elif b.mode=='switches':

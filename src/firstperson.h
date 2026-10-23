@@ -42,7 +42,9 @@ bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept;
 enum class ScreenKind : std::uint8_t { flight, weapons, status, hud, map, sensor };   // sensor: a remote station's monitor
 struct CockpitScreen { ScreenKind kind; float off[3],right[3],up[3],w,h; };
 constexpr int kMostScreens=8;
-struct CockpitScreens { int n; CockpitScreen s[kMostScreens]; bool physical; };
+// `frame`: the seat's eye frame (vc_eye_<seat>, rows left, up, ahead, the eye) the screens were taken in: the head-up
+// glass's bank scale reads the bank from it (instruments::BankOf, as the attitude cards).
+struct CockpitScreens { int n; CockpitScreen s[kMostScreens]; bool physical; float frame[16]; };
 // Game thread, from HudPublish. Consumed only by the vehicle's model draw, never by physics / native bone updates.
 void FirstPersonInstrumentReadings(const instruments::Readings& readings,const unsigned char* human) noexcept;
 // fp_vehicle.cpp (game thread): `vehicle`'s seat `seat` screens round the eye `eye`.

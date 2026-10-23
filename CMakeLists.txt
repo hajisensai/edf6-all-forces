@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(EDF6VehicleCrew VERSION 0.8.0 LANGUAGES CXX)
+# Every exe / DLL this file builds carries a version resource (cmake/versioninfo.cmake: antivirus false positives).
+include("${CMAKE_SOURCE_DIR}/cmake/versioninfo.cmake")
+edf6_version_info_at_end()
 set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only generated-asset checks")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -347,6 +350,12 @@ set_target_properties(exhaust_pose_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${
 add_executable(exhaust_nozzles_check EXCLUDE_FROM_ALL tools/exhaust_nozzles_check.cpp)
 target_compile_options(exhaust_nozzles_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(exhaust_nozzles_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The arrival's smoke (src/smoke_trail.h): a jet arriving, its trail laid and drawn as the stock LineStripObject does,
+# the smoke's head on its nozzle and every node where it was laid (tools/smoke_trail_check.cpp). Not part of the plugin build:
+# cmake --build build --target smoke_trail_check && build\smoke_trail_check.exe
+add_executable(smoke_trail_check EXCLUDE_FROM_ALL tools/smoke_trail_check.cpp)
+target_compile_options(smoke_trail_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(smoke_trail_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 
 # The gun stabilizer (src/stab.h) on a hull driven over bumps and through turns against the stock aim axis step, the
 # gun's world pointing error with and without it, offline (tools/stab_check.cpp). Not part of the plugin build:
@@ -880,7 +889,7 @@ set_target_properties(fp_view_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test common_host_check pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check damage_stats_check fp_view_check cockpit_canvas_check unlock_ported_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check fp_view_check cockpit_canvas_check unlock_ported_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_test(NAME npc_backpack_native_check COMMAND npc_backpack_native_check)
@@ -1780,7 +1789,7 @@ add_test(NAME pvp_native_contract COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURC
 set_tests_properties(pvp_native_contract PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME edf41_vehicle_spawn COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf41_vehicle_spawn.py")
 add_test(NAME edf41_vehicle_spawn_data COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf41_vehicle_spawn_data.py")
-target_sources(EDF6VehicleCrew PRIVATE src/edf41bike.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41bike.cpp src/edf41bike_diag.cpp)
 add_executable(edf41bike_check EXCLUDE_FROM_ALL tests/edf41bike_test.cpp)
 target_compile_options(edf41bike_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks edf41bike_check)

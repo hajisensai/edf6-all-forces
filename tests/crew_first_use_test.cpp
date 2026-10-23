@@ -8,6 +8,8 @@ VehicleLookInput::VehicleLookInput(unsigned char*) noexcept {}
 VehicleLookInput::~VehicleLookInput() noexcept {}
 void MissionCrewVehicleFrame(unsigned char*) noexcept {}
 void BoardingRequest(unsigned char*) noexcept {}   // TestBoardVehicle (off here)
+bool BoardingUnderway() noexcept { return false; }
+bool BoardButtonBlocked(const unsigned char*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }
 void SupportDispatchTick() noexcept {}
 void ResetMissionCrew() noexcept {}
