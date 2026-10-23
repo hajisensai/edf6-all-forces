@@ -29,6 +29,7 @@
 #include "enemy_control_net.h"
 #include "enemy_control_pvp_native.h"
 #include "vulcan_rotor.h"
+#include "barrel_recoil.h"
 #include "support_variants.h"
 #include <iterator>
 
@@ -96,6 +97,7 @@ void MissionStart() noexcept {
     CheckCrashFilter();   // the crash dump's filter and abort handler still first (crash_dump.h)
     WatchMissionPhase("resets");
     ResetVulcanRotors();
+    ResetBarrelRecoil();
     ResetEnemyControlNetwork(); // stop authenticated leases before native input restoration
     ResetEnemyControl(); // release native player-mode leases before scene/team identities are reset
     if(!EnemyControlNativePvpReset())Log("ENEMY CONTROL pending native ownership restore retained across mission reset");

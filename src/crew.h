@@ -97,6 +97,11 @@ struct Config {
     int playerJetBoostKey=0x10;     // ...on the keyboard and mouse: the boost key (a Windows virtual-key code; VK_SHIFT)
     int playerJetBrakeKey=0x11;     // ...and the brake key (VK_CONTROL)
     int playerJetSwitchKey=0x52;    // ...and the key that switches stores ('R'; on a pad LB)
+    // A stock-class vehicle's own secondary weapon (the BMPT's missiles, payload.cpp IndependentSecondary): the key that
+    // switches its round ('T'), and the pad buttons (XInput bits as MapButton's: 8 the d-pad right). The primary's rounds
+    // stay on PlayerJetSwitchKey / LB: each switch one control, whatever was fired last (the user, 2026-10-21: 「学学战雷」).
+    int vehicleSecondarySwitchKey=0x54;
+    int vehicleSecondarySwitchButton=0x08;
     bool playerJetCatch=true;       // ...and after ejecting, another of the same jet catches the player in the air
     int playerJetFlareKey=0x58;     // the key that drops a pair of flares ('X'; missile.cpp FlareDrop)
     int playerJetFlares=8;          // the pairs a player jet carries
