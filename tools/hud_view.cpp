@@ -116,6 +116,7 @@ std::set<std::pair<wchar_t,int>> glyphs;
 struct PanelBox { float x0,y0,x1,y1; };
 std::vector<PanelBox> panels;   // the scene's panels (the HUD's kPanel rects) while `recording`
 bool recording=false;
+bool keepHud=false;std::vector<std::array<float,8>> hudQuads;   // the HUD-green quads drawn while keepHud (the glass scene)
 bool probeIntent=false;float intentX=0,intentY=0;int intentQuads=0;
 void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_t,const float* v,std::int32_t n,void*) {
     if(rgba==kScopeDark)++scopePieces;
@@ -128,6 +129,7 @@ void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_
     if(recording && n==4 && std::memcmp(rgba,kPanel,16)==0 && p[0][1]==p[1][1] && p[0][0]==p[2][0])
         panels.push_back(PanelBox{p[0][0],p[0][1],p[3][0],p[3][1]});
     if(boxing){++drawn;for(int i=0;i<n && i<4;++i)Grow(p[i][0],p[i][1]);}
+    if(keepHud && n==4 && rgba==kHud)hudQuads.push_back({p[0][0],p[0][1],p[1][0],p[1][1],p[2][0],p[2][1],p[3][0],p[3][1]});
     if(!out)return;
     for(int i=0;i+2<n && i<2;++i)
         std::fprintf(out,"T %.1f %.1f %.1f %.1f %.1f %.1f %.3f %.3f %.3f %.3f\n",p[i][0],p[i][1],p[i+1][0],p[i+1][1],p[i+2][0],p[i+2][1],
@@ -1851,6 +1853,55 @@ int ScreensDrawn(const wchar_t* name,const float* pos,const float* fwd,int width
     return failed;
 }
 
+// A physical cockpit's head-up glass (cockpit_screens.inc HeadUpGlass; docs/feedback-2026-10-21-attitude-indicator.md):
+// a heli flown nose 3 degrees up and banked 20 degrees right, its glass (an F-16 combiner's size, 0.14 x 0.15 m, 0.8 m
+// ahead along the nose) turned with the body; the scene's camera is level. Through the glass the drawn horizon must lie
+// on the world's: on the view it is level and on the view's middle row (a level camera's horizon), though the glass is
+// turned 20 degrees; the glass's other symbols (the boxes' numbers) are drawn too; a model's own screens (physical)
+// get no canvas of their own.
+int HeadUpGlassScene(const std::wstring& dir,const float* pos) {
+    int failed=0;
+    const float p=3.0f*kDeg,b=20.0f*kDeg;
+    const float nose[3]={0.0f,std::sin(p),std::cos(p)},level[3]={-1.0f,0.0f,0.0f},u0[3]={0.0f,std::cos(p),-std::sin(p)};
+    std::memcpy(sceneHeli.sym.nose,nose,12);
+    CockpitScreen g{};
+    g.kind=ScreenKind::hud;g.w=0.14f;g.h=0.15f;
+    for(int k=0;k<3;++k) {
+        g.right[k]=std::cos(b)*level[k]-std::sin(b)*u0[k];g.up[k]=std::sin(b)*level[k]+std::cos(b)*u0[k];g.off[k]=nose[k]*0.8f;
+    }
+    sceneScreens=CockpitScreens{};
+    sceneScreens.s[sceneScreens.n++]=g;
+    sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::flight,nose,-0.13f);
+    sceneScreens.physical=true;
+    for(int k=0;k<3;++k){sceneScreens.frame[k]=-g.right[k];sceneScreens.frame[4+k]=g.up[k];sceneScreens.frame[8+k]=nose[k];}
+    sceneScreens.frame[15]=1.0f;
+    hudQuads.clear();keepHud=true;
+    Prime(pos);Scene(dir,L"cockpit_hud_glass",pos);
+    keepHud=false;
+    // The ladder's pieces: the HUD quads at least 30 px long that lie level on the view (a Seg: corners a0 b0 a1 b1,
+    // its long edges a0-b0 and a1-b1). The horizon is the one on the view's middle row; the glass-fixed symbols (the
+    // tape, the boxes, the bank scale) are turned 20 degrees with the glass and are not among them.
+    int pieces=0;float cy=1e9f;
+    for(const auto& q:hudQuads) {
+        const float len=std::hypot(q[2]-q[0],q[3]-q[1]);
+        if(len<30.0f || std::fabs(q[3]-q[1])>0.02f*len)continue;
+        ++pieces;
+        const float row=(q[1]+q[3]+q[5]+q[7])*0.25f;
+        if(std::fabs(row-540.0f)<std::fabs(cy-540.0f))cy=row;
+    }
+    if(pieces<2 || std::fabs(cy-540.0f)>3.0f) {
+        ++failed;
+        std::printf("FAIL cockpit_hud_glass: the drawn horizon is not the world's (%d level pieces, the nearest at row %.1f)\n",pieces,cy);
+    }
+    int numbers=0;
+    for(const Drew& d:drew)numbers+=!d.text.empty() && (d.text==L"151" || d.text==L"85");
+    if(numbers<2){++failed;std::printf("FAIL cockpit_hud_glass: the speed and height boxes show %d of 2\n",numbers);}
+    if(!failed)std::printf("ok  cockpit_hud_glass: the horizon level on the world's (row %.1f, %d level pieces), speed and height on the glass\n",cy,pieces);
+    sceneScreens=CockpitScreens{};
+    sceneHeli.sym.nose[0]=sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
+    return failed;
+}
+
 int CockpitScenes(const std::wstring& dir,const float* ground,const float* pos) {
     int failed=0;
     hasJet=hasHeli=hasWarn=hasSazabi=hasDrill=hasNix=hasProteus=false;hasStock=true;
@@ -1872,6 +1923,7 @@ int CockpitScenes(const std::wstring& dir,const float* ground,const float* pos) 
     sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::map,sceneHeli.sym.nose,0.13f);
     Prime(pos);Scene(dir,L"cockpit_heli_pilot",pos);
     failed+=ScreensDrawn(L"cockpit_heli_pilot",pos,sceneHeli.sym.nose,1920);
+    failed+=HeadUpGlassScene(dir,pos);
     // An unmanned gun's station (remote_display): its monitor over the whole view, its title, bearing, elevation, weapon.
     hasHeli=false;hasStock=true;
     StockTank(ground);

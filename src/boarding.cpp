@@ -219,6 +219,7 @@ void BoardingTick() noexcept {
 }
 
 const void* BoardingOnly() noexcept { return only; }
+bool BoardingUnderway() noexcept { return boarding.ref.obj!=nullptr; }
 
 // A board request of the plugin's own (sazabi.cpp's SazabiTestBoard): the player into `v` as a boarding gun round at it
 // would put them (StartBoarding; BoardingTick presses on until they are in or kTryMs is out).

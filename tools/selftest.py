@@ -175,6 +175,27 @@ def exhausts_come_from_the_models() -> None:
             assert len(want) == (4 if f == jet_models.CARRIER_FILE else 1 if f == 'EDF6VC_DRONE.MRAB' else 2), f'{f}: {len(want)}'
 
 
+@test
+def arrival_smoke_is_drawn_where_it_is_laid() -> None:
+    """The arrival's smoke trail is made with the identity as its object's matrix (the user, 2026-10-21: 「飞机的入场尾烟与实际
+    偏移了好多」): the stock LineStripObject draws its world-laid nodes through that matrix (src/smoke_trail.h), so made with the
+    nozzle's world matrix the smoke was drawn turned and moved by where the nozzle was when it began, far off its jet. The
+    emitter is placed from the nozzle by smoke::Emitter alone, when made and every frame (it was laid forward when made and
+    rearward after)."""
+    booster = src('src/booster.cpp')
+    make = booster.split('void TrailMake(', 1)[1].split('\n}\n', 1)[0]
+    frame = booster.split('void SmokeFrame(', 1)[1].split('\n}\n', 1)[0]
+    calls = re.findall(r'\(image\+kTrailMake\)\(([^)]*)\)', make)
+    assert calls == ['mgr,out,smoke::kObjectFrame,p'], f'TrailMake hands the factory {calls}: its matrix must be smoke::kObjectFrame'
+    for body, where in ((make, 'TrailMake'), (frame, 'SmokeFrame')):
+        assert 'smoke::Emitter(' in body, f'{where} places the emitter without smoke::Emitter'
+        assert not re.search(r'-m\[8\]|m\[8\],m\[9\],m\[10\]', body), f'{where} works the emitter\'s way out by hand again'
+    header = src('src/smoke_trail.h')
+    rows = re.search(r'kObjectFrame\[16\]=\{([^}]*)\}', header)
+    assert rows and [float(x) for x in rows.group(1).split(',')] == [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], \
+        f'src/smoke_trail.h: kObjectFrame is not the identity ({rows and rows.group(1)})'
+
+
 def _nozzle_model() -> 'object':
     """A stand-in jet model: mdl; body (skin) with a pod (skin) and a tail (skin) under it, then the object's bone; one
     skinned triangle on each skin bone (its blend index that bone), and on the body a hexagonal exhaust rim 0.5 m across

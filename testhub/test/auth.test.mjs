@@ -1,9 +1,30 @@
 // node --test test/*.test.mjs  (Node 20+: WebCrypto, atob, btoa are globals)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAccounts, checkLogin, makeSession, readSession, basicUser } from '../src/auth.js';
+import { parseAccounts, loadAccounts, checkLogin, makeSession, readSession, basicUser } from '../src/auth.js';
 
 const accounts = parseAccounts('alice:pw1:tester, bob:pw2:dev, broken');
+
+test('independent account secrets preserve existing credentials, roles, groups and sessions', async () => {
+  const original = parseAccounts('alice:pw1:tester:original');
+  const now = Date.now();
+  const session = await makeSession(original.get('alice'), now + 1000, 'k');
+  const combined = loadAccounts({
+    ACCOUNTS: 'alice:pw1:tester:original',
+    ACCOUNT_NEW: 'carol:pw3:tester:new',
+    ACCOUNT_DUPLICATE: 'alice:replacement:dev:other',
+    ACCOUNT_INVALID: 'bad:pw:tester:bad group!',
+    ACCOUNT_OBJECT: {},
+    UNRELATED: 'mallory:pw:dev',
+  });
+  assert.deepEqual(checkLogin(combined, 'carol', 'pw3'), { user: 'carol', role: 'tester', group: 'new' });
+  assert.equal(checkLogin(combined, 'alice', 'replacement'), null);
+  assert.equal(combined.has('bad'), false);
+  assert.equal(combined.has('mallory'), false);
+  assert.deepEqual(await readSession(`s=${session}`, 'k', combined, now),
+    { user: 'alice', role: 'tester', group: 'original' });
+  assert.equal(checkLogin(loadAccounts({ ACCOUNTS: 'alice:pw1:tester:original' }), 'carol', 'pw3'), null);
+});
 
 test('accounts and roles', () => {
   assert.deepEqual(checkLogin(accounts, 'alice', 'pw1'), { user: 'alice', role: 'tester', group: '' });

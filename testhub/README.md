@@ -44,6 +44,11 @@ secret `ACCOUNTS = "user:password:role[:组名],..."`（role `tester` / `dev`；
 浏览器用登录页拿 60 天 cookie（签名里带密码：改密码即全部下线）；脚本和安装器用 HTTP Basic。
 改账号：`wrangler secret put ACCOUNTS --config wrangler.toml`。
 
+新增账号也可以单独存为 `ACCOUNT_<大写字母或数字或下划线>` secret，值仍为 `user:password:role[:组名]`，例如
+`wrangler secret put ACCOUNT_PLANNER2 --config wrangler.toml`。这样无需读取或替换原有加密的 `ACCOUNTS`。
+独立配置中的重名账号不会覆盖原有账号（包括密码、角色、分组和现有会话）；不同独立配置重名时按配置名排序，第一份生效。
+这些配置仅由 Cloudflare 管理员维护，不读取请求中的账号配置；密码不得写入源码或普通 vars。删除对应 secret 即撤销该账号。
+
 ## 部署
 
 ```
