@@ -153,6 +153,7 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool nix; NixTorso nixTorso;
                   bool proteus; ProteusReadout proteusRo;
                   bool sazabi; SazabiCue sazabiCue;
+                  bool dreadnought; DreadnoughtCue dnCue;
                   bool armor; armorhud::Readout armorRo;
                   bool screens; CockpitScreens scr; };   // a vehicle's first person: its cockpit's screens (cockpit_screens.inc)
 constexpr unsigned kFresh=4;
@@ -2486,6 +2487,90 @@ void SazabiHud(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     SazabiPanel(drawer,ctx,text,width,height,s,c,lines,at);
 }
 
+// The Dreadnought's own HUD (dreadnought.cpp DreadnoughtCue; the user, 2026-10-21: 「独立的hud显示呢？」), for the local
+// player in any of its seats: a panel at the screen's left (the ship and the seat they hold, its way and throttle, its
+// keel's height and climb, its heading, its hull and boost, its turrets by who trains them, its hangar), and the keys
+// low in the middle. The stock gauges give way to it (HudPublish).
+constexpr float kDnLeft=24.0f,kDnWidth=430.0f,kDnRow=26.0f,kDnBar=180.0f,kDnBarH=11.0f;
+alignas(16) const float kDnGold[4]={0.95f,0.78f,0.35f,1.0f};
+alignas(16) const float kDnIdle[4]={0.6f,0.65f,0.7f,0.55f};
+void DnThrottle(void* drawer,void* ctx,float x,float y,float w,float h,float throttle,bool boosting,float s) noexcept {
+    constexpr float kAstern=0.35f;   // dreadnought.cpp kReverse
+    const float zero=x+w*kAstern/(1.0f+kAstern);
+    const float e=s>0.5f ? s : 0.5f;
+    Rect(drawer,ctx,x-e,y-e,x+w+e,y+h+e,kBarEdge);
+    Rect(drawer,ctx,x,y,x+w,y+h,kBarBack);
+    const float at=zero+(throttle>=0.0f ? (x+w-zero)*Unit(throttle) : -(zero-x)*Unit(-throttle/kAstern));
+    Rect(drawer,ctx,std::fmin(zero,at),y,std::fmax(zero,at),y+h,throttle<0.0f ? kAmber : boosting ? kCyan : kGreen);
+    Rect(drawer,ctx,zero-e,y-2.0f*s,zero+e,y+h+2.0f*s,kWhite);
+}
+void DreadnoughtHud(void* drawer,void* ctx,Text* text,float width,float height,float s,const DreadnoughtCue& c,Line* lines,
+                    int* at) noexcept {
+    const float pad=12.0f*s,row=kDnRow*s,barW=kDnBar*s,barH=kDnBarH*s;
+    const int rows=8;
+    const float w=kDnWidth*s,h=2.0f*pad+row*(rows+0.4f);
+    const float x0=kDnLeft*s,y0=height*0.80f-h;
+    Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
+    Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,kDnGold);
+    Rect(drawer,ctx,x0,y0,x0+3.0f*s,y0+h,kDnGold);
+    const float tx=x0+pad,bx=x0+w-pad-barW;
+    float y=y0+pad+row*0.5f;
+    wchar_t seat[32];
+    if(c.seat==0)wcscpy_s(seat,Tr(Tx::dnSeatBridge));
+    else std::swprintf(seat,32,Tr(Tx::dnSeatTurret),c.seat);
+    Label(text,lines,at,tx,y,0,kTitleScale,kDnGold,L"%ls",Tr(Tx::dnTitle));
+    Label(text,lines,at,x0+w-pad,y,2,kLineScale,kWhite,L"%ls",seat);
+    y+=row*1.2f;
+    Label(text,lines,at,tx,y,0,kLineScale,kWhite,Tr(Tx::dnSpeed),static_cast<int>(std::lround(c.speed*3.6f)));
+    DnThrottle(drawer,ctx,bx,y-barH*0.5f,barW,barH,c.throttle,c.boosting,s);
+    y+=row;
+    const int pct=static_cast<int>(std::lround(std::fabs(c.throttle)*(c.throttle<0.0f ? 100.0f/0.35f : 100.0f)));
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,c.throttle<0.0f ? kAmber : kWhite,Tr(c.throttle<0.0f ? Tx::dnAstern : Tx::dnThrottle),pct);
+    Label(text,lines,at,x0+w-pad,y,2,kLineScale*0.9f,kWhite,Tr(Tx::dnHeading),static_cast<int>(std::lround(c.heading))%360);
+    y+=row;
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,kWhite,Tr(Tx::dnAltitude),c.keel>=0.0f ? static_cast<int>(std::lround(c.keel)) : 0,c.climb);
+    y+=row;
+    const float hull=c.hpMax>0.0f ? Unit(c.hp/c.hpMax) : 0.0f;
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,kWhite,Tr(Tx::dnHull),static_cast<int>(std::lround(hull*100.0f)));
+    Bar(drawer,ctx,bx,y-barH*0.5f,barW,barH,hull,hull,HullColour(hull),s);
+    y+=row;
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,c.boosting ? kCyan : kWhite,L"%ls",Tr(Tx::dnBoost));
+    Bar(drawer,ctx,bx,y-barH*0.5f,barW,barH,c.boost,c.boost,c.boost>0.25f ? kCyan : kAmber,s);
+    y+=row;
+    // the turrets: a box each, filled by who trains it, outlined bright when on its aim
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,kWhite,L"%ls",Tr(Tx::dnTurrets));
+    const int n=c.turrets>0 && c.turrets<=8 ? c.turrets : 8;
+    const float box=16.0f*s,gap=(barW-box*static_cast<float>(n))/static_cast<float>(n>1 ? n-1 : 1);
+    for(int i=0;i<n;++i) {
+        const unsigned bit=1u<<i;
+        const float* fill=(c.mine&bit) ? kGreen : (c.others&bit) ? kCyan : (c.commanded&bit) ? kAmber : kDnIdle;
+        const float bx0=bx+static_cast<float>(i)*(box+gap),by0=y-box*0.5f;
+        Rect(drawer,ctx,bx0,by0,bx0+box,by0+box,(c.onAim&bit) ? kWhite : kBarEdge);
+        Rect(drawer,ctx,bx0+2.0f*s,by0+2.0f*s,bx0+box-2.0f*s,by0+box-2.0f*s,fill);
+        if(c.seat==1+i)Rect(drawer,ctx,bx0,by0+box+2.0f*s,bx0+box,by0+box+4.0f*s,kGreen);
+    }
+    y+=row;
+    wchar_t hangar[96];
+    std::swprintf(hangar,96,Tr(Tx::dnHangar),c.stowed,c.out);
+    if(c.lifting>0)wcscat_s(hangar,Tr(Tx::dnHangarLift));
+    else if(c.flightWait>0.5f){const std::size_t k=wcslen(hangar);std::swprintf(hangar+k,96-k,Tr(Tx::dnHangarWait),c.flightWait);}
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,kWhite,L"%ls",hangar);
+    y+=row;
+    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kDnIdle,L"%ls",Tr(Tx::dnLegend));
+    // the keys, low in the middle
+    const Config& k=Cfg();
+    wchar_t seats[32],view[32],hangarKey[32],descend[32],boost[32];
+    if(c.keys){KeyName(k.seatNextKey,seats,32);KeyName(k.firstPersonKey,view,32);KeyName(k.dreadnoughtHangarKey,hangarKey,32);
+               KeyName(k.dreadnoughtDescendKey,descend,32);KeyName(k.dreadnoughtBoostKey,boost,32);}
+    else{SeatButtonName(k.dreadnoughtSeatButton,seats,32);wcscpy_s(view,L"V");SeatButtonName(k.dreadnoughtHangarButton,hangarKey,32);
+         SeatButtonName(k.dreadnoughtDescendButton,descend,32);SeatButtonName(k.dreadnoughtBoostButton,boost,32);}
+    if(c.seat==0) {
+        if(c.keys)Label(text,lines,at,width*0.5f,height*0.905f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysFly),descend,boost);
+        else Label(text,lines,at,width*0.5f,height*0.905f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnPadFly),descend,boost);
+        Label(text,lines,at,width*0.5f,height*0.935f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysBridge),hangarKey,seats,view);
+    } else Label(text,lines,at,width*0.5f,height*0.935f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysGun),seats,view);
+}
+
 // A carrier's world bars (see the top): the hull's over its tower, each deck part's over its place.
 constexpr float kCarrierFar=1500.0f,kPartFar=600.0f;
 void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const CarrierPanel& p,
@@ -3409,13 +3494,17 @@ void HudPublish() noexcept {
     s.turretCamOk=PlayerTurretCam(&s.turretCam);   // the turret camera (turretcam.cpp): the gun's mark, free look
     s.nix=PlayerNixTorso(&s.nixTorso);   // the Nix's legs and torso (nix.cpp): the stock HUD's hull / turret ring
     s.sazabi=PlayerSazabiCue(&s.sazabiCue);   // the Sazabi's thrusters, weapons, flight, aim and lock (sazabi.cpp; SazabiHud)
+    // The Dreadnought's own HUD (DreadnoughtHud): the stock heli's readouts are none of its (its guns and missiles never
+    // fire, it is no heli): theirs give way.
+    s.dreadnought=PlayerDreadnoughtCue(&s.dnCue);
+    if(s.dreadnought){s.stock=false;s.heliFly=false;s.heli=false;s.heliSight=false;}
     // The stock weapon gauge gives way (stockgauge.cpp, HideStockGauges) where HudDraw lists the vehicle's weapons and
     // their rounds: a plugin aircraft's stores line (CockpitStrip, the old Cockpit, HeliStrip), StockBlock, a stock heli's
     // HeliStrip (HeliFlightHud), the Sazabi's own HUD (SazabiPanel / SazabiSpecial: its rifle, missiles, cannon, funnels;
     // the stock gauge listed its seat's beam rifles and shield missiles and the 506 body's FUEL). Its text must draw: the
     // lists are text.
     const bool heliLists=s.stock && s.stockHud.heli && s.heliFly && !s.cockpit && Cfg().heliFlightHud;
-    SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists || (s.sazabi && !s.cockpit)));
+    SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists || (s.sazabi && !s.cockpit) || s.dreadnought));
     s.armor=PlayerStockArmor(&s.armorRo);   // the stock armor gauge's numbers while that cover hides it (stockgauge.cpp)
     s.proteus=PlayerProteus(&s.proteusRo);   // the Proteus's stance, shield, field, launcher (proteus.cpp)
     s.screens=FirstPersonScreens(&s.scr,PlayerHuman());    // the cockpit's screens in a vehicle's first person (firstperson.cpp)
@@ -5555,6 +5644,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kSazabiCueMs && snap.sazabi && !snap.cockpit) {   // the Sazabi's own HUD (it is no stock vehicle)
             SazabiHud(drawer,ctx,t,viewProj,width,height,s,snap.sazabiCue,lines,&at);
         }
+        if(now-snap.tick<=kFreshMs && snap.dreadnought && !snap.cockpit && !screensOn)
+            DreadnoughtHud(drawer,ctx,t,width,height,s,snap.dnCue,lines,&at);
         const bool gunnerSight=fresh && snap.gunner && !snap.cockpit;
         const bool mechSight=fresh && snap.sazabi && !snap.cockpit;
         const bool overhead=fresh && ((snap.highCam && snap.highCamOn) || sightKind==sightzoom::Kind::indirect);

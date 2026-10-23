@@ -22,6 +22,7 @@ Built in memory first, written atomically and recorded in the ledger as this too
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 
@@ -104,6 +105,115 @@ def check(files: dict[str, bytes]) -> None:
             make_jets.check_passenger_seats(files[f'OBJECT/{file}'], 1 + vc.DREADNOUGHT_TURRETS, file, 1)
             turrets = {f'dn_turret_{n}{s}' for n in range(vc.DREADNOUGHT_TURRETS) for s in ('', '_gun', '_muzzle')}
             assert turrets <= names and f'dn_turret_{vc.DREADNOUGHT_TURRETS}' not in names, sorted(turrets - names)
+            check_markers(md, {k: files[f'OBJECT/{dm.archive_name(k)}'] for k in dm.BAY_KINDS})
+
+
+# The markers' checks (check_markers): the bridge marker stands on the collision (its cell's top within STAND m under
+# it: aircraft_collision's height field is what the player stands on), its roof drawn within ROOF m of that top; the
+# bridge eye sees CLEAR m ahead (level and VIEW_DOWN degrees down, VIEW_SIDE degrees either side) past every triangle.
+# The bays: dn_bay_<i> a mesh bone carrying its kind's fighter (its box the kind's model's within FIT m, its origin the
+# box's centre), nose outboard (port for bays 0-3, starboard 4-7); dn_bay_<i>_out the same frame straight outboard,
+# its fighter's box BAY_MARGIN m larger overlapping no collision cell. dn_ready on the collision's top under the largest
+# fighter's footprint (READY_FLAT m level), drawn within ROOF m of it; dn_ready_side on the collision's top.
+STAND, ROOF, CLEAR, VIEW_DOWN, VIEW_SIDE = 0.5, 0.75, 30.0, 10.0, 30.0
+FIT, BAY_MARGIN, READY_FLAT = 0.05, 1.0, 0.5
+
+
+def on(y: float) -> float:
+    """How near a point at height `y` m is to stand on a collision top: the model's half-float vertices' step there (0.0625 m
+    at 64-128 m: a 500 m ship's deck), 0.02 m at least."""
+    return max(0.02, 2.0 ** (math.floor(math.log2(max(abs(y), 1e-3))) - 10))
+
+
+
+
+def check_markers(md, kinds: dict[str, bytes]) -> None:  # noqa: ANN001 - mdb.Mdb
+    """Every marker bone the plugin reads on its parent (dreadnought_model.BRIDGE, EYE, the bays', the ready spot's),
+    and standing / seeing / clear as STAND .. READY_FLAT say. `kinds`: each fighter kind's archive."""
+    import math
+    import numpy as np
+    from mdb import bind_world
+    bones = {md.name_of(b.name): b for b in md.bones}
+    world = bind_world(md)
+    level = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+
+    def rows(name: str) -> tuple[float, ...]:
+        m = world[bones[name].index]
+        return tuple(m[k] for k in (0, 1, 2, 4, 5, 6, 8, 9, 10))
+    want = {dm.BRIDGE: (dm.HULL, level, 0), dm.EYE.format(0): (dm.HULL, level, 0), dm.READY: (dm.HULL, level, 0),
+            dm.READY_SIDE: (dm.HULL, level, 0)}
+    want.update({dm.EYE.format(1 + n): (f'dn_turret_{n}_gun', level, 0) for n in range(vc.DREADNOUGHT_TURRETS)})
+    for i in range(dm.BAYS):
+        side = 1.0 if i < dm.BAYS // 2 else -1.0   # outboard: port (+x), starboard
+        out = (0.0, 0.0, -side, 0.0, 1.0, 0.0, side, 0.0, 0.0)   # left, up, ahead
+        want[f'dn_bay_{i}'] = (dm.HULL, out, 3)
+        want[f'dn_bay_{i}_out'] = (dm.HULL, out, 0)
+    want.update({f'dn_hangar_{m}': (dm.HULL, level, 3) for m in range(dm.HANGARS)})
+    for name, (parent, frame, kind) in want.items():
+        b = bones.get(name)
+        assert b is not None, f'the dreadnought model has no {name}'
+        assert md.name_of(md.bones[b.parent].name) == parent, (name, md.name_of(md.bones[b.parent].name), parent)
+        assert b.kind == kind, f'{name}: kind {b.kind}, not {kind}'
+        assert max(abs(a - f) for a, f in zip(rows(name), frame)) < 1e-5, f'{name}: frame {rows(name)}, not {frame}'
+    for i in range(dm.BAYS):
+        assert {f'dn_lift_{i}', f'dn_door_u_{i}', f'dn_door_l_{i}'} <= set(bones), f'bay {i}: its lift or doors'
+    assert dm.EYE.format(1 + vc.DREADNOUGHT_TURRETS) not in bones and f'dn_bay_{dm.BAYS}' not in bones
+    tris = np.array(list(aircraft_collision.triangles(md)), float)
+    cells = aircraft_collision.mesh_cells([tuple(map(tuple, t)) for t in tris])
+    c0, c1 = np.array([c[0] for c in cells]), np.array([c[1] for c in cells])
+
+    def at(name: str) -> np.ndarray:
+        return np.array(world[bones[name].index][12:15])
+
+    def under(lo, hi) -> np.ndarray:   # noqa: ANN001 - the tops of the cells a box overlaps
+        return c1[np.all((c0 < np.asarray(hi) - 1e-6) & (c1 > np.asarray(lo) + 1e-6), axis=1), 1]
+    sizes = {}
+    for kind, arc in kinds.items():
+        km = mdb_read(next(f for f in rab_read(arc).files if f.name.lower() == dm.mdb_name(kind)).data)
+        pts = np.array(list(aircraft_collision.triangles(km)), float).reshape(-1, 3)
+        sizes[kind] = pts.max(0) - pts.min(0)   # its model frame: span (x), height, length (z)
+    for i in range(dm.BAYS):
+        b, size = bones[f'dn_bay_{i}'], sizes[dm.BAY_KINDS[i % len(dm.BAY_KINDS)]]
+        assert all(abs(2 * b.half[k] - size[k]) < FIT for k in range(3)), (i, b.half, size)
+        assert all(abs(b.centre[k]) < FIT for k in range(3)), f'bay {i}: its origin off its box\'s centre {b.centre}'
+        p, q = at(f'dn_bay_{i}'), at(f'dn_bay_{i}_out')
+        ahead = np.array(rows(f'dn_bay_{i}')[6:9])
+        assert abs(p[1] - q[1]) < 1e-4 and abs(p[2] - q[2]) < 1e-4 and (q - p) @ ahead > 0, (i, p, q)
+        half = np.abs(np.array([size[2], size[1], size[0]])) / 2.0 + BAY_MARGIN   # across the ship it is its length
+        assert not under(q - half, q + half).size, f'dn_bay_{i}_out: its fighter in the collision'
+    ready, side = at(dm.READY), at(dm.READY_SIDE)
+    big = np.array([max(s[0] for s in sizes.values()), 0.0, max(s[2] for s in sizes.values())]) / 2.0
+    tops = under(ready - big - [0, 1e4, 0], ready + big + [0, 1e4, 0])
+    assert tops.size and abs(tops.max() - ready[1]) <= on(ready[1]) and tops.max() - tops.min() <= READY_FLAT, (ready, tops)
+    tops = under(side - [0.01, 1e4, 0.01], side + [0.01, 1e4, 0.01])
+    assert tops.size and abs(tops.max() - side[1]) <= on(side[1]), (side, tops)
+    stand = at(dm.BRIDGE)
+    top = float(under(stand - [0.01, 1e4, 0.01], stand + [0.01, 1e4, 0.01]).max())
+    assert 0.0 <= stand[1] - top <= STAND, f'{dm.BRIDGE} at y {stand[1]:.2f}, its collision top {top:.2f}'
+
+    def ray(o, d):   # the nearest triangle along unit d from o, or inf
+        v0 = tris[:, 0]
+        e1, e2 = tris[:, 1] - v0, tris[:, 2] - v0
+        h = np.cross(d, e2)
+        a = (e1 * h).sum(1)
+        ok = np.abs(a) > 1e-12
+        f = np.where(ok, 1.0 / np.where(ok, a, 1.0), 0.0)
+        s = o - v0
+        u, q = f * (s * h).sum(1), np.cross(s, e1)
+        v, t = f * (q * d).sum(1), f * (e2 * q).sum(1)
+        hit = ok & (u >= 0) & (v >= 0) & (u + v <= 1) & (t > 1e-6)
+        return float(t[hit].min()) if hit.any() else math.inf
+    roof = stand[1] - ray(stand, np.array([0.0, -1.0, 0.0]))
+    assert abs(top - roof) <= ROOF, f'{dm.BRIDGE}: its roof drawn at {roof:.2f}, its collision at {top:.2f}'
+    deck = ready[1] + 0.5 - ray(ready + [0.0, 0.5, 0.0], np.array([0.0, -1.0, 0.0]))
+    assert abs(ready[1] - deck) <= ROOF, f'{dm.READY}: its deck drawn at {deck:.2f}, its collision at {ready[1]:.2f}'
+    eye = np.array(world[bones[dm.EYE.format(0)].index][12:15])
+    for yaw in (-VIEW_SIDE, 0.0, VIEW_SIDE):
+        for pitch in (0.0, -VIEW_DOWN):
+            y, p = math.radians(yaw), math.radians(pitch)
+            d = np.array([math.sin(y) * math.cos(p), math.sin(p), math.cos(y) * math.cos(p)])
+            t = ray(eye, d)
+            assert t > CLEAR, f'the bridge eye {eye} sees the hull {t:.1f} m off (yaw {yaw}, pitch {pitch})'
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

@@ -592,8 +592,8 @@ JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0
               7007.0: 2200.0, 7008.0: 2200.0, 7009.0: 120000.0, 7010.0: 120000.0, 7011.0: 70000.0, 7020.0: 16000.0,
               7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0,
               7401.0: 71200.0,   # the Sazabi: its canonical full weight (30.5 t empty)
-              # the Dreadnought's fighters (a light fighter's, the bomber a strike jet's), and the Dreadnought: a 500 m
-              # ship's displacement (a supercarrier's ~100 kt)
+              # the Dreadnought's fighters (a light fighter's, the bomber a strike jet's), and the Dreadnought: a
+              # supercarrier's displacement (~100 kt)
               7041.0: 14000.0, 7042.0: 15000.0, 7043.0: 22000.0, 7044.0: 13000.0, 7601.0: 1.0e8}
 # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
 # round (name -> damage, frames between rounds, m a frame, frames of life, round size, blast radius, colour, spread,
@@ -1407,6 +1407,10 @@ def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE, centre: list[float] | t
     return sgo.write(version, inner)
 
 
+# The SGO member that marks a body built on its ragdoll's mesh compound (src/body506.cpp kAirframeMember).
+AIRFRAME_MEMBER = 'edf6vc_airframe'
+
+
 def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = JET_BODY_BONE,
             rigid: list[list[float]] | None = None, airborne: bool = False) -> bytes:
     """`model`: the model archive and file (default JET_MODEL, the stock bomber); `body`: its mesh bone, which
@@ -1483,6 +1487,11 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     if len(m['vehicle_weapon_setting']) < 4 or len(m['vehicle_weapon_setting']) != len(setup[3]):
         raise ValueError(f'{name}: {len(setup[3])} weapons for {len(m["vehicle_weapon_setting"])} holders (at least 4)')
     m['vehicle_dead_effect'] = _dead_effect(_rebone(m['vehicle_dead_effect'], bones, anchor))
+    if airframe in aircraft_collision.DN_FILES:
+        # Its body is its ragdoll's mesh compound (src/body506.cpp MakeAirframe), told by this member: the game keeps
+        # no shape userData of a compact SHKT (aircraft_collision.MAGIC read 0 at shape +0x28 in every vehicle, range
+        # 2026-10-21: the Dreadnought flew as its whole box, its deck 12 m over its hull).
+        m[AIRFRAME_MEMBER] = 1
     m['roter_contact_damage_scale'] = 0.0
     m['heli_contact_damage_scale'] = 0.0005
     rb = m['heli_rigid_body']

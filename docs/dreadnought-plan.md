@@ -14,46 +14,68 @@
   工具在 `D:\APP\edf6-assets\tools\dnexport`（不入库），导出到 `D:\APP\edf6-assets\export`。
 - 选用的网格（`DreadGame/Content/Generic/...`）：
   - 舰体 `Ships/Dreadnought/Heavy/VH_DreadH_SK`（Jupiter Arms 重型无畏舰，1.57 万顶点，两个材质）；
-  - 机库 `Abilities/Dreadnought/Hangar/AB_DN_Pri_Hangar_SK`（「Fighters」主技能模块，6 根骨骼：两部升降机、上下舱门各两扇）；
+  - 机库 `Abilities/Dreadnought/Hangar/AB_DN_Pri_Hangar_SK`（「Fighters」主技能模块，6 根骨骼：两部升降机、上下舱门各两扇），装 4 个；
   - 炮塔 `Weapons/Dreadnought/SecShort|SecMid|SecLong`（副炮，各有 `b_base` 旋转 / `b_barrel` 俯仰骨骼）；
   - 舰载机 `Ships/RespawnJet/Fighter/VH_Fighter_SK`、`Defender/DN_Fighter_SK`、`Bomber/VH_Bomber_SK`、`Booster/VH_Interceptor_SK`。
-- 挂点：机库和武器在原作里靠运行时标签（`m_meshSocketTag`）挂到舰体，资产里**没有坐标**（M）。所以：
-  - 机库嵌进舰体前甲板的平台（`HANGAR_AT`，轨道面朝上）；
-  - 炮塔装在舰体自带的炮座上：舰体里 88 个三角形的独立圆顶 / 平台（`prep_dreadnought.turret_mounts`），只取上甲板、不在机库下面的 8 个。
+- 挂点：模块在原作里按能力的 `m_meshSocketTag` 挂到舰体骨架（`VH_DreadH_SKEL`，`dnexport -json`）上同标签的插座：
+  - 机库：能力 `AB_DN_Pri_Jet_Fighter_Ability_BP` 的标签 `AB_primary` → 两舷各两个插座 `WP_broadside_left01/03`、`right01/03`
+    （UE −176.5 / −550, ±270, 120.5 cm，右舷 yaw 180），每个插座一个模块（`prep_dreadnought.HANGAR_SOCKETS`），开口朝舷外（H）。
+    2026-10-21 之前的版本没找到插座，把一个模块放在前甲板中线（`HANGAR_AT`），开口正对舰体中脊，已改掉；前甲板改放待命战机（`dn_ready`）。
+  - 炮塔装在舰体自带的炮座上：舰体里 88 个三角形的独立圆顶 / 平台（`prep_dreadnought.turret_mounts`），只取上甲板、不在前甲板中脊
+    （`FOREDECK`，即旧机库位置）的 8 个。
 - 材质：`_D` 是以 0.5 为中性的细节叠加图，颜色来自材质参数（`_MC` 的 R/G/B 选 `CustomColor01/02/03`，否则 `BaseColor`），
   实例的参数继承阵营母材质 `VH_YPawn_JupA_MASTERINST`（导出的 JSON 不写 Parent，用 `dnexport -info` 查到）；`_AO` 的 G 是 AO，
   Alpha 是舷窗 / 引擎灯（舰体用；舰载机的 Alpha 全是 1，不当灯）。PIL 缩放 RGBA 会按 Alpha 预乘，必须逐通道缩放。
-- 尺寸：原作世界是缩小的（舰长 19.4、战机 0.68 个 UE 米），没有官方米数。按原作舰 : 机比例（约 28 : 1）、战机按正常战机大小，
-  舰长定为 **500 m**（`SHIP_LENGTH`），战机 17.7–30 m。
+- 尺寸：原作世界是缩小的（舰长 19.4、战机 0.68 个 UE 米），没有官方米数。按舰载机取正常战机大小，舰长 **500 m**（`SHIP_LENGTH`，
+  1 个 UE 米 = 25.8 m），舰载机 17.5–30.2 m 长、17.5–30.1 m 翼展（原作约 28 : 1）。中间一度改成 200 m：用户第一次试玩说「这个模型比实际的模型大了很多」，
+  当时理解成舰太大；其实那时网格碰撞体从未生效（§3 碰撞体），整艘船按包围盒碰撞，「模型」更可能指碰撞比画出来的大。第二次试玩用户说
+  「无畏舰太小了，你找参照物找的不对。飞机也小了」，改回 500 m。随尺寸变的常量：`vcobjects.DREADNOUGHT_KEEL` 55.25、`DREADNOUGHT_CAMERA` /
+  `_SEAT_CAMERA`、`src/dreadnought.cpp` `kLength`（`kReach` = 0.44 kLength、`kBeam` = 0.2 kLength）、`dreadnought_hangar.inc` `kSize`
+  （机库进近距离按 200 m 时的数等比放大）与 `kOverDeck`（舰载机 SGO `heli_rigid_body[0][1]`）；selftest `dreadnought_agrees`、
+  `make_dreadnought.check` 钉住 keel（标记贴碰撞顶的容差按该高度半精度浮点的步长：79 m 处 0.0625 m）。
 - 素材授权：用户 2026-10 起的规则「选3D素材不管授权来源」。模型目录和生成物不进仓库（`D:\APP\edf6-models\dreadnought`，发布包 `models/dreadnought`）。
 
 ## 2. 管线（H，离线验证）
 
 | 步骤 | 文件 |
 |---|---|
-| 导出 → 模型目录（OBJ/MTL、每材质 `_df/_nm/_rml.png`、`dreadnought.json` 骨骼与枢轴） | `tools/prep_dreadnought.py` |
+| 导出 → 模型目录（OBJ/MTL、每材质 `_df/_nm/_rml.png`、`dreadnought.json` 骨骼、枢轴与转过的骨骼的 `frame`；标记骨骼按碰撞格算） | `tools/prep_dreadnought.py` |
 | 模型目录 → 5 个 MRAB（V505 车身材质；有灯的材质用复古巴拉姆 light 材质） | `pylib/dreadnought_model.py` |
 | MRAB → 网格复合碰撞体（24×32 凸格高度场，甲板可站人） | `pylib/aircraft_collision.py DN_FILES` |
-| SGO（V506 机体壳）、炮手座 ×8、舰载机 NPC 机体 ×4 | `tools/make_dreadnought.py`、`pylib/vcobjects.py` |
+| SGO（V506 机体壳）、炮手座 ×8、舰载机 NPC 机体 ×4；检查标记骨骼（舰桥、眼位、机库位、待命位） | `tools/make_dreadnought.py`、`pylib/vcobjects.py` |
 | 呼叫行 `EDF6VC_CALL_DREADNOUGHT`（第 49 行，空袭兵载具请求） | `tools/calls.py`、`tools/call_weapons.py MODEL_VEHICLES` |
 
 没有模型目录时：`EDF6VC_DREADNOUGHT.SGO` 写原版 V506_HELI，请求叫来普通 N9 Eros，不写舰载机（与沙扎比同一套退回逻辑，已泛化为 `MODEL_VEHICLES`）。
 
-## 3. 插件
+## 3. 插件（2026-10-21 第二轮按用户反馈重写，`docs/feedback-dreadnought.md`）
 
 - 标记：无畏舰 7601–7699（`PluginBody::dreadnought`）；舰载机 7041–7044（`Body::dnFighter..dnInterceptor`，`BodyRow::crewless`）。
-- `src/dreadnought.cpp`：玩家在座位 0 时插件驾驶（慢加速、慢转向，舰底离地 ≥ `DreadnoughtFloor`，5 条地图射线）；
-  没人驾驶且开过之后降落到地面停住；原版 506 的开火键打舰首主炮和导弹；水的消息整条吞掉。
-- `src/dreadnought_turrets.inc`：座位 1–8 = 炮塔 0–7。本机玩家坐炮手座：视角由插件维护（右摇杆 / 鼠标），镜头在炮塔后上方，
-  炮塔按限速跟随视角、对准后主射击键开火（`jet_bay.cpp TurretRound`：炮舰侧炮 CANNON 的弹体 ×1.5 伤害），HUD 用炮舰炮手的瞄准框。
-- `src/dreadnought_hangar.inc`：
-  - 驾驶员按机库键（H / 手柄 Y）放出护航编队（4 种各一架，无人驾驶）；
-  - 在空中（舰底离地 > 25 m）离开任何座位 = 驾机出击：机库放出下一种舰载机，登机枪路径把你送进去；
-  - 驾驶舰载机时在母舰 800 m 内下机 = 返舰（不跳伞、不派接机），回到母舰的第一个空座位，舰载机交回无人驾驶。
+- `src/dreadnought.cpp` 舰桥驾驶（座位 0，原作手感）：W/S（左摇杆前后）推拉油门、停在推到的位置（可倒车到 -35%）；A/D 转向（转向有惯性、
+  侧倾 ≤4°、加速时舰首微沉 ≤1.5°）；Q/E 横移；空格 / LT 上升、Ctrl / LB 下降；Shift / A 加速（能量 8 秒、16 秒回满）；舰底离地 ≥
+  `DreadnoughtFloor`。视角与舰首分离（鼠标 / 右摇杆），准星 = 所有空炮塔的瞄准点，主射击 = 它们一起开火。原版 506 的开火字节每帧清零
+  （「原版的导弹和机炮」不再开火）。指挥官去了炮塔（舰上还有玩家）：保持航向、油门、高度巡航；最后一个人下舰：水平速度立即清零，
+  之后落地停住。舰从出现那一帧就由插件托住（落到地面）。
+- `src/dreadnought_turrets.inc`：座位 1–8 = 炮塔 0–7，换座位键（F / 数字键 / 手柄 RB `DreadnoughtSeatButton`，`seatswitch.cpp`
+  放行无畏舰）。每个本机玩家的视角（`View`）：舰桥和炮手座都在舰后 2.2×kReach、舰上方绕整艘船（炮塔附近的镜头试过座位后 18 m、瞄具点
+  上方 2–8 m 后方 5–22 m，都落在舰体几何里面）；车辆第一人称（V）从 `vc_eye_<seat>`（舰桥窗口 / 炮塔瞄具）看（未实机验证）。HUD：`hud.cpp DreadnoughtHud`（航速、油门、离地、航向、舰体、加速能量、8 座炮塔谁在操纵、
+  机库）+ 按键提示；原版仪表让位。
+- `src/dreadnought_hangar.inc`：两舷 4 个机库、8 个机库位（位 i 停 i % 4 种战机的静态副本 `dn_bay_<i>`）：
+  - 出：副本沿机头（舷外）滑到 `dn_bay_<i>_out`（2.5 s），在那里缩成 0、同一位姿生成真正的战机，由机库托住（`jet.cpp JetHangarHold`：
+    速度与角速度由机库写，`body506.cpp JetHeldStep` 排在玩家与 NPC 飞行之前）再放出；
+  - 回：护航机燃料 / 血量 / 弹药不足（`JetLeaving`）或被召回时，机库把它飞到自己机库位的开口外 60 m、对正后机头朝外倒进开口，
+    等游戏删掉它（`JetHangarStow`），再在开口显示副本、滑回；
+  - 舰桥按机库键（H / Y）：护航编队（有的每种一架）或召回；
+  - 前甲板待命机（`dn_ready`）：下一种战机自动出库停在前甲板；玩家走过去登机 → 从舰首弹射（1.6 s 加速到舰速 +90 m/s，
+    `playerjet.cpp PlayerJetLaunched` 接手）；开着舰载机在 1500 m 内按机库键 → 自动降落到前甲板，玩家被放到旁边（`dn_ready_side`），
+    这架就是新的待命机；
+  - 下舰站舰桥 `dn_bridge`、返舰后放到 `dn_ready_side`（都在标记上方 `kPutOver` 1.5 m 放下，落到碰撞格顶上；§8）。
+- 碰撞体：`body506.cpp MakeAirframe` 用 SGO 成员 `edf6vc_airframe`（`pylib/vcobjects.py AIRFRAME_MEMBER`）认出插件生成的网格复合体；
+  原来的 shape userData 标记在游戏加载紧凑 SHKT 时会丢失（实测 +0x28 一直是 0），历史日志里这条路一次都没生效过，所有插件飞机都是包围盒。
+  目前只给无畏舰和它的 4 种舰载机打了这个成员（其他飞机的改动需要另外实机验证）。
 
 ## 4. 未验证 / 风险（L，需实机）
 
-1. 500 m 的复合碰撞体（466 个凸格）在 Havok 里的表现：站人、降落时压到建筑、被写速度时甲板上的人是否被带走（同潜水母舰 §6 第 1 项）。
+1. 500 m 的复合碰撞体（640 个凸格，4 个两舷机库计在内）在 Havok 里的表现：站人、降落时压到建筑、被写速度时甲板上的人是否被带走（同潜水母舰 §6 第 1 项）。
 2. 舱门在右舷外侧地面（`move_door`）；舰体 500 m，玩家要走到右舷中段。
 3. 炮手座：410 门炮手姿势套在 506 机体上，所有炮手座共用驾驶座的定位点；炮塔骨骼局部矩阵每帧写入后引擎是否按它画（沙扎比同法，H for sazabi）。
 4. 炮塔开火的瞄准点取屏幕中心射线；`kOnAim` 2° 内才开火。
@@ -61,12 +83,53 @@
 6. 返舰：`DreadnoughtTakesBack` 拦掉跳伞和接机；`HandBack` 把无人机交回自飞（M）。
 7. 模型左右是否镜像：CUE4Parse glTF 的手性按 UE 左手系 → glTF 右手系推断（M），舰体基本对称，看不出差别。
 
-## 5. 联机（未完成，如实记录）
+## 4.1 标记骨骼（H，离线；`prep_dreadnought.ship_markers`，`make_dreadnought.check_markers` 检查）
+
+无几何、水平朝向（行：左、上、前、点），插件按名字读世界矩阵：
+
+- `dn_bridge`（父 `dn_hull`）：舰桥顶（原作插座 `PreviewTarget_Bridge` 上方的平顶，栏杆之前）上 0.2 m。碰撞高度场每格取格内最高点，
+  栏杆那一格比顶面高 0.6 m，所以放在栏杆前面那一格（顶面本身的高度）；检查：站点比该格碰撞顶高 0–0.5 m，画出来的顶面与碰撞顶差 ≤ 0.75 m。
+- `vc_eye_0`（父 `dn_hull`）：舰桥正面前 0.5 m、顶面下 1.6 m；检查：水平 / 下俯 10°、左右 30° 的视线 30 m 内不碰任何三角形。
+- `vc_eye_<1+n>`（父 `dn_turret_<n>_gun`，随炮塔转、随炮俯仰）：炮塔与炮最高点上 0.5 m、炮尾后 0.5 m、炮的中线上，看炮管方向（+z）。
+- 机库：模块 `dn_hangar_<m>`（m 0–3 = left01、left03、right01、right03，父 `dn_hull`）；机库位 i = 2m（DroneSocket0）、2m + 1
+  （DroneSocket1），各有 `dn_lift_<i>`、`dn_door_u_<i>`、`dn_door_l_<i>`（父 `dn_hangar_<m>`，水平，绑定姿势 = 门开、升降机升起）。
+- `dn_bay_<i>`（父 `dn_hull`，**网格骨骼**，带 `BAY_KINDS[i % 4]` 的战机模型，材质与该战机的 MRAB 相同，不上舰体涂装）：原点 =
+  该战机 SGO 碰撞盒中心（插件的载具位置），机底贴在升起的升降机顶面上；转过的坐标系，前 = 舷外（0–3 号 +x，4–7 号 −x），左 = 上 × 前。
+  检查：骨骼包围盒 = 该机型模型的盒（误差 0.05 m），中心在原点。
+- `dn_bay_<i>_out`（父 `dn_hull`，无几何，同一朝向、同高）：沿舷外方向第一个让该机型的盒（四周再加 1 m）不碰任何碰撞格的点（0.25 m 步长）。
+- `dn_ready`（父 `dn_hull`，水平，机头朝前）：前甲板中线上，最大的机型（翼展 12.05 m、长 12.08 m）占地下的碰撞格最平（≤ 0.5 m）的点，
+  **在碰撞顶面上**（插件自己加机型的原点高度）；`dn_ready_side`：最大翼尖外 3 m（左舷），该处碰撞顶面上，放下机的驾驶员。
+- 机型原点（碰撞盒中心）离脚下面的高度（SGO `heli_rigid_body[0][1]`）：0 战斗机 1.171、1 防御战斗机 1.161、2 轰炸机 2.059、3 截击机 2.189 m。
+
+## 4.2 原作机库（H，资产直接读出；已照此放置）
+
+- **机库不是舰体自带的**：重型无畏舰的两套原作预设配装（`Loadouts/Precast/T4|T5/VH_DreadnoughtHeavy_T*_PrecastLoadout_BP`，`dnexport -json`）
+  主技能都是舷侧炮（T5 `AB_DN_Pri_BS_Scatter_Ability_BP`，T4 `AB_DN_Pri_BS_Plasma_Ability_T3_BP`），主炮 `WP_DreadnoughtHPri01`，副炮
+  SecShort / SecMid；舰体网格没有机库。机库是可换装的主技能「Fighters」（`AB_DN_Pri_Jet_Fighter_Ability_BP`），装上后游戏把机库模块挂在同一组
+  `AB_primary` 插座上。用户 2026-10-21 问「这机库不是额外的机库模块吗…自带的话没关系不是的话修一下」：如实答复是额外模块（原作就这样挂），等用户定。
+
+- 安装位置：机库能力 `AB_DN_Pri_Jet_Fighter_Ability_BP` 的 `m_meshSocketTag` = `AB_primary`，重型舰骨架上带这个标签的插座是
+  **两舷各两个** `WP_broadside_left01/03`、`right01/03`（UE −176.5 / −550, ±270, 120.5 cm；右舷的 yaw 180），
+  不是前甲板。模块的开口朝模块局部 −Y，即朝舷外。（旧版的 `HANGAR_AT` 前甲板中线是没找到插座时的猜测：开口正对舰体中脊。）
+- 动作：唯一动画 `AB_Pri_Hangar_Preview_AS`（4.3 s，只在改装预览里播，`dnexport -anim`）：起点关门、升降机放低，终点 = 绑定姿势 =
+  开门、升降机升起（出击位）。实战里动画蓝图保持绑定姿势，战机在 `DroneSocket0/1`（模块局部 X ±100、Z −50 cm，yaw −90：机头朝舷外）
+  生成，以 2000 cm/s 从舷侧开口平飞出去，最多同时 8 架（4 个模块 × 2）。
+- 200 m 下的数（现在 500 m：都 ×2.5）：升降机平台 12.7 m（沿舰长）× 9.7 m（横向），行程 2.43 m（放低 = 收纳）；舱内净高 3.2 m（放低后 5.6 m），
+  舷侧开口高 3.2 m、长 14.6 m；上舱门关闭 = 向舷外 2.07 m、向下 1.45 m 并绕纵轴转 23°，下舱门关闭 = 上移 2.07 m、外移 0.52 m、转 13°。
+  原作舰载机（`AI/Fighter/VH_Fighter_SK`，与 RespawnJet 的 Fighter 同尺寸）站在升起的升降机上（机底比平台高 6 cm）。
+- 四种舰载机能否放进一个升降机：机头朝舷外（原作）时战斗机、防御战斗机、轰炸机放得下（长 ≤ 9.7、翼展 ≤ 12.7），截击机长 12.1 m 放不下；
+  机头朝前时只有截击机放得下。轰炸机（高 4.1 m）、截击机（4.4 m）高过 3.2 m 的舷侧开口。
+- 现在的放法（全部机头朝舷外，接受穿模）：截击机的机尾伸出升降机内侧 3.0 m、轰炸机 1.5 m（伸进模块里）；轰炸机 / 截击机的顶比舱顶高
+  0.9 / 1.15 m（在模块的顶板里，从外面看不见）；滑出时这两种前几米会穿过开口上沿。模块底面离下面的舰体 1.66 m（原作插座就是这个位置）。
+
+## 5. 联机（如实记录）
 
 - 无畏舰本体：只有联机权威写速度，其他机器看原版 506 的位置同步（与沙扎比相同）。
-- 炮手：每个炮手由自己的机器驱动，炮塔角度与开火经 tag 15 的 `DNTR` 块同步（src/dreadnought_net.h）；远端只画无伤害的炮弹，伤害由炮手那台机器结算一次。未两机实测。
-- 舰载机：插件飞机没有网络身份（docs/online-re.md「插件飞机 / 无人机的网络身份：没做」），出击 / 护航的战机是本机的。
-- 下一步：舰载机走 `SubmitCarrierSupportDrone` 那条已有的联机放飞路径。
+- 炮塔：每台机器驱动它自己的玩家操纵的炮塔（炮手座，或舰桥指挥的空炮塔），角度与开火经 tag 15 的 `DNTR` 块同步（`src/dreadnought_net.h`）；
+  远端只画无伤害的炮弹，伤害由那台机器结算一次。未两机实测。
+- 换座、下舰站舰桥、HUD、视角：各自在自己的机器上。
+- 机库与舰载机：插件飞机没有网络身份（`docs/online-re.md`「插件飞机 / 无人机的网络身份：没做」），机库只在驾驶无畏舰（联机权威）的机器上运行，
+  舰载机是那台机器的；其他机器上的机库位副本一直显示停着。下一步：舰载机走 `SubmitCarrierSupportDrone` 那条已有的联机放飞路径。
 
 ## 6. 实机记录（2026-10-21，测试场 M045，drive.py 后台 + 虚拟手柄）
 
@@ -82,3 +145,48 @@
 第三轮复测：离地爬到地板 30 m 只过冲 0.5 m；松开上升在 64 m 停住无回弹；悬停高度不变；前进 45 m/s 加速 4 m/s²；机库一次放 4 架无卡顿；空中下船直接换乘战机（出击）；无人时降到地面后停住。
 
 未在实机测到：炮手座（手柄换座键未找到对应，B 是下船）、800 m 内弃机返舰（战机已飞远，走了原有的弹射接机）、联机。
+
+## 7. 第二轮实机记录（2026-10-21 下午，测试场 M045，drive.py 后台 + 虚拟手柄，200 m）
+
+- 舰身被一直往下压 12 m/s：待命机从舱口直接竖直上升，顶进舰体外伸部分，被机库「无限质量」地托着把整艘船压下去。改为先横移到舷外
+  `kSideClear` 再上升。
+- 待命机停在甲板上方 12 m 落不下去：停在的高度恰好是舰体包围盒顶（中心 +22.1 m）。查到网格复合碰撞体从未生效（见 §3 碰撞体），改用 SGO 成员识别后
+  日志出现 `BODY506 airframe compound`，待命机正常停上前甲板。
+- 复合体生效后，舰在交付时略陷入地面，留给原版步进时穿过地形掉了 270 m：改为从第一帧就由插件托住（落地停住）。
+- 护航编队：4 架依次滑出机库、弹射起飞；召回后 4 架都飞回各自的开口、入库（`at its mouth: in` → `docked`）。
+- 换座位（手柄 RB）正常；手柄 B 是下舰（所以无畏舰用自己的 `DreadnoughtSeatButton`）。
+- 炮塔第三人称镜头放在炮塔附近（座位后 18 m；瞄具点上方 2–8 m、后方 5–22 m）都落在舰体几何里（满屏灰色板 / 漆黑）；改为和舰桥一样绕整艘船，
+  准星照样操纵本炮塔。截图确认正常。
+- **士兵站不上舰体**（第三轮已找到根因并修好，见 §8）。下舰被放到舰桥上（`0.0 m off`），随后直接穿过舰体掉到地面；放到前甲板也一样。已排除：
+  - 层：静态逆向 `CollisionFilter` 0x105510（循环出口 rbx=30，141 对），士兵步行刚体在层 1，载具 ragdoll 在层 6，1↔6 本来就开；飞行刚体层 3，3↔6 关
+    （`tmp`/报告：layers-re.md，结论写在这里）。ragdoll 8 个部件都在世界里、keyframed（模式 2）、跟着船走（偏差 1–3 m）。
+  - 把装舰体复合体的部件改到 17（建筑 / EAO 的层）：整艘船被弹到每秒数千米（17↔3，与自己的飞行刚体重叠）；把飞行刚体放进 ragdoll 的组（sub 0）后
+    不再弹飞，但士兵照样穿过，且层 22 的地图射线也打不到它——`0x11B1840(body, info, 1)` 改了 filterInfo 似乎没进到世界的宽相；改到 18 同样穿过。
+  - 形状：层 15 的射线能打到舰体（甲板高度 9.9 / 舰桥 21.9），命中的标志位与地形相同（`& 2`），复合体本身可被查询。
+  剩下的方向（未做）：士兵的「脚下」判定具体怎么选刚体（keyframed 的载具 ragdoll 是否被排除）、层在世界里怎么真正生效。在弄清之前 `kStandsOnHull` 关着，
+  下舰走原版舱门。
+- 舰体看起来偏白：舰体材质约一半是裸金属（原作配色 `m_baseMetalic` 1），在 EDF 明亮的天空下像镜子；舰的金属度已减半（`SHIP_METAL`），
+  仍偏银白，待用户看。
+
+## 8. 第三轮（2026-10-21 晚，用户第二次试玩反馈 `docs/feedback-dreadnought.md` 第二段）
+
+- **加农炮打到自己**：舰的 ragdoll 部件刚体的对象不是舰本身，原版子弹收集器只按指针排除开火者，所以炮塔炮弹在炮口（就在舰体复合体的格子里）
+  打中自己的舰体。`jet_hooks.cpp` 的子弹候选钩子加了「舰体」表（`HullBodies`：每艘无畏舰的飞行刚体 + ragdoll 部件 id，每帧发布）：舰本身
+  （离线）或坐在舰上的玩家（联机 `ShooterIsAttacker`）的炮弹不碰它。实机日志 `DREADNOUGHT own round kept off its hull` 出现。
+- **站不住、会跳**：用户那次的「跳」发生在船无人后以 8 m/s 下沉落地的过程中（日志：470 m 处下舰，人在甲板上方 14.7–20.5 m 来回）。改为：玩家开过的船
+  无人后**原地悬停**（`Ship::flown`，`HOLDING`），只有从没被开过的船才落地。
+- **下舰在侧面 / 站不住（已修，实机确认）**：`kStandsOnHull` 打开，下舰放到舰桥。先实机诊断（Debug 的 `stand report`：舰体部件 hknpBody 的 flags /
+  filterInfo / 是否在世界里，士兵的支撑状态 `walk+0x91` 与接触表）：部件全部 keyframed、在世界里、层 6，士兵只和部件 0 有接触且法线全是水平的。
+  静态逆向（tmp 报告 walk-re.md：步行控制器是 hknpCharacterRigidBody 定制版，靠求解器接触，keyframed 体可站，下车放人无忽略表）与逐字段比对
+  （hkshape-fix.md：插件 compound 与原版同模式）排除了过滤和数据格式。真正的原因有三处，都在插件自己：
+  1. `aircraft_collision.build` 给 `RagDollProxys.body` 以外的 7 个替身也用了 compound（1 cm 小盒）。`AirframeShape` 按机身骨骼名找部件，
+     无畏舰模型没有 506 的骨骼，找到的是替身——**飞行刚体一直是 1 cm 的小盒**：这才是复合体生效那轮穿过地形掉 270 m 的原因（此后被插件按射线托着）。
+     改为替身用 convex，`AirframeShape` 扫部件取唯一的 compound。
+  2. `RagDollProxys.body` 保留了原版直升机刚体相对机体原点的位置 (0, 1.637, 0)，整个碰撞体比模型高 1.6 m。改为 (0, 0, 0)。
+  3. 舰桥标记是画出来的顶面，碰撞格取格内最高点、可高出 0.5 m；士兵放在标记上方 0.2 m，实际在格内 0.3 m，又正好在中线两格的接缝上，
+     两侧推力抵消，顺着接缝掉下去。改为标记上方 1.5 m（`kPutOver`）。
+  实机（19:06）：落到舰桥顶，支撑 2，接触法线 (0, 1, 0)，9 s 内相对高度不变；舰空着悬停在 72 m 高。
+- 甲板上的人不随舰移动（游戏的地面不带走站在移动刚体上的士兵）：单机时没人开船舰就不动；联机时别人开船，站在甲板上的人会被甩下——未做。
+- **鼠标转炮塔**：视角改用原版输入之前的瞄准摇杆快照（`DreadnoughtInput`，与观察键读的同一时刻）；Debug 日志每秒打出「之前 / 之后」两个值。
+  后台驱动只能当手柄（游戏不从可拦截的键盘接口读按键），键鼠下未实机验证。
+- **尺寸**：改回 500 m（§1）。**机库**：原作预设配装里没有，是可换装的主技能模块（§4.2），等用户定。

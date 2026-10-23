@@ -202,6 +202,7 @@ bool InfantryScopeNow(InfantryScopeCue* o) noexcept { if(hasInfantry && o)*o=sce
 bool hasGunner=false;GunnerReadout sceneGunner{};
 bool PlayerGunnerHud(GunnerReadout* o) noexcept { if(hasGunner)*o=sceneGunner;return hasGunner; }
 bool DreadnoughtGunnerHud(GunnerReadout*) noexcept { return false; }
+bool PlayerDreadnoughtCue(DreadnoughtCue*) noexcept { return false; }
 bool hasHighView=false;
 bool PlayerHighCam(bool* on,bool* keys) noexcept {*on=hasHighView;*keys=true;return hasHighView;}
 bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }

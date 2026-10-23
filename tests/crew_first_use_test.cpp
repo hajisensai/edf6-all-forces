@@ -60,6 +60,7 @@ bool IsSazabi(const void*) noexcept{return false;}
 bool IsDreadnought(const void*) noexcept{return false;}
 void SazabiFrame(unsigned char*) noexcept{}
 void DreadnoughtFrame(unsigned char*) noexcept{}
+void DreadnoughtInput(unsigned char*) noexcept{}
 bool PlayerJetHolds(const void*) noexcept{return false;}
 bool SidecarHoldsPlayer(const void*) noexcept{return false;}
 bool IsPrimerVehicle(const void*) noexcept{return false;}

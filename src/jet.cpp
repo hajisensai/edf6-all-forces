@@ -536,6 +536,56 @@ bool JetWithdrawNow(const void* vehicle,const char* why) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+// A Dreadnought's hangar (dreadnought_hangar.inc) holds one of its fighters: this frame's motion is the hangar's.
+bool JetHangarHold(unsigned char* v,const float* vel,const float* omega) noexcept {
+    __try {
+        Jet* const j=FindJet(v);
+        if(!j || j->reap || v[kDead])return false;
+        if(!j->held)Log("JET v=%p held by its hangar",v);
+        const ULONGLONG ms=GameMs();
+        if(j->held && j->seen && ms>j->seen)j->bornAt+=ms-j->seen;   // no fuel spent while held (GunnerHold's way)
+        j->held=true;j->heldFrame=GameFrame();j->seen=ms;
+        for(int i=0;i<3;++i){j->m.vel[i]=vel[i];j->m.omega[i]=omega[i];}
+        j->m.ready=true;
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+// ...lets it go: it flies on from its motion now (its own flight, an escort; a player's as they fly it).
+void JetHangarRelease(unsigned char* v) noexcept {
+    __try {
+        Jet* const j=FindJet(v);
+        if(!j || !j->held)return;
+        j->held=false;j->escort=true;
+        if(j->mode==Mode::withdraw || j->mode==Mode::recover)j->mode=Mode::patrol;
+        j->modeAt=GameMs();
+        Log("JET v=%p let go by its hangar at %.0f m/s",v,Len(j->m.vel));
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+// ...takes it in: deleted where it is (down its lift, out of sight), as a reaped jet is (JetReap).
+void JetHangarStow(unsigned char* v) noexcept {
+    __try {
+        Jet* const j=FindJet(v);
+        if(!j || j->reap)return;
+        j->reap=true;j->why="stowed in its hangar";
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+// Its velocity as its flight (or its hangar) last sent it.
+bool JetMotion(const void* vehicle,float* vel) noexcept {
+    __try {
+        const Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
+        if(!j || !std::isfinite(j->m.vel[0]+j->m.vel[1]+j->m.vel[2]))return false;
+        std::memcpy(vel,j->m.vel,12);
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+// Whether it is on its way out (withdrawing: its fuel, its hull or its stores gone; or recovering).
+bool JetLeaving(const void* vehicle) noexcept {
+    __try {
+        const Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
+        return j && !j->reap && (j->mode==Mode::withdraw || j->mode==Mode::recover);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool JetCommand(const void* vehicle,const Command& c,const ObjRef& focus) noexcept {
     __try {
         Jet* const j=FindJet(static_cast<const unsigned char*>(vehicle));
@@ -559,6 +609,13 @@ void JetFrame(unsigned char* v) noexcept {
     Jet* const staged=FindJet(v);
     if(staged && staged->supportDrone && staged->supportPending) {
         v[kFireGun]=0;v[kFireMissile]=0;staged->m.ready=false;staged->seen=GameMs();return;
+    }
+    // Its hangar holds it (dreadnought_hangar.inc): no flight, no fire of its own.
+    if(staged && staged->held && staged->heldFrame+1>=GameFrame()) {
+        v[kFireGun]=0;v[kFireMissile]=0;staged->seen=GameMs();staged->m.ready=true;
+        Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
+        Put<float>(v,kInThrottle,1.0f);Put<float>(v,kInW,1.0f);
+        return;
     }
     // A metadata parent never owns a real local player's control; playerjet.cpp flies that player's carrier.
     if(PlayerJetHolds(v))return;

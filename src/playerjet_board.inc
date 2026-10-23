@@ -820,6 +820,8 @@ bool BoardableNow(const unsigned char* v) noexcept {
     // jet's catch is: the low-and-slow gate below is for one standing by, and turned the catch's every board press
     // down (no seat for them: "not aboard yet" under the parachute for 45 s, then handed back to its NPC).
     if(bail.state==Eject::chute && bail.caught.Is(v) && catchFlight.v==v)return true;
+    // Parked on a Dreadnought's foredeck (dreadnought_hangar.inc): boarded where it stands, however high the ship flies.
+    if(DreadnoughtParked(v))return true;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float clear=GroundClearance(pos);
     if(clear==kNoGround || clear>kBoardClear)return false;

@@ -71,6 +71,16 @@ void OwnBodies(const unsigned char* v,ownround::Craft& c) noexcept {
     } __except(FaultLog("JET own bodies",GetExceptionInformation())) {}
 }
 
+// The Dreadnoughts' hulls (dreadnought.cpp HullBodies): a turret's round leaves its muzzle inside the hull's own compound
+// (its cells take each cell's highest point: the turrets' own) and the hull's ragdoll parts are not the ship's object, so
+// the stock owner test (the owner by pointer) lets them take it (the user, 2026-10-21: 「这个加农炮会打到自己，射不出去」).
+// A round of the ship (offline its owner) or of a player riding it (online: online_authority.h ShooterIsAttacker) never
+// meets the ship's object or any of its bodies. Slots as dreadnought.cpp's ships; the same lock discipline as Flights.
+constexpr int kHulls=4;
+ownround::Craft hulls[kHulls]{};
+SRWLOCK hullsLock=SRWLOCK_INIT;
+std::atomic<int> hullsOn{0};
+
 // What the hook kept off, per thread (no counter shared across threads). Own rounds are logged whatever the debug switch
 // (at most every kOwnLogMs, the first at once): a user's log then shows whether a jet's rounds ever came at its own
 // airframe (the user, 2026-10-10: 「炮舰机的机炮有可能会打在自己身上」), and through which body.
@@ -142,13 +152,39 @@ bool SparesOwnRide(void* collector,std::uint32_t body) noexcept {
     return online::SparesRide(true,IsPlayer(human),target,target);
 }
 
+// Whether candidate `body` of a round is a Dreadnought's own whose round it is (see hulls).
+bool SparesHull(void* collector,std::uint32_t body) noexcept {
+    if(!hullsOn.load(std::memory_order_relaxed))return false;
+    const void* owner=nullptr;
+    const void* target=nullptr;
+    if(!Candidate(collector,body,&owner,&target) || !owner)return false;
+    const auto human=static_cast<const unsigned char*>(owner);
+    const void* const ride=Readable(human,kHumanVehicle+8) ? At<const void*>(human,kHumanVehicle) : nullptr;   // compared only
+    bool spare=false;
+    AcquireSRWLockShared(&hullsLock);
+    for(const auto& c:hulls)
+        if(c.vehicle && (owner==c.vehicle || ride==c.vehicle) && (target==c.vehicle || ownround::HasBody(c,body))){spare=true;break;}
+    ReleaseSRWLockShared(&hullsLock);
+    if(spare && Cfg().debug) {   // per thread, as OwnLog
+        thread_local ULONGLONG at=0;
+        thread_local unsigned kept=0;
+        ++kept;
+        const ULONGLONG now=GetTickCount64();
+        if(!at || now-at>=kOwnLogMs){Log("DREADNOUGHT own round kept off its hull: %u candidate bodies since the last line",kept);at=now;kept=0;}
+    }
+    return spare;
+}
+
 void __fastcall AddBodyHook(void* collector,std::uint32_t body) {
     // A slow round through the Shield Bearer's shield (shield.cpp), whoever fired it.
     bool through=false;
     __try { through=ShieldLetsThrough(collector,body); } __except(FaultLog("SHIELD round",GetExceptionInformation())) { through=false; }
     if(through)return;
-    // A round a player of this machine fired from their vehicle, named theirs online (online_authority.h SparesRide).
+    // A Dreadnought's round at its own hull (hulls).
     bool spare=false;
+    __try { spare=SparesHull(collector,body); } __except(FaultLog("BULLET own hull",GetExceptionInformation())) { spare=false; }
+    if(spare)return;
+    // A round a player of this machine fired from their vehicle, named theirs online (online_authority.h SparesRide).
     __try { spare=SparesOwnRide(collector,body); } __except(FaultLog("BULLET own ride",GetExceptionInformation())) { spare=false; }
     if(spare)return;
     bool pass=false;
@@ -188,6 +224,7 @@ void Publish(bool force) noexcept {
 }
 
 bool PassThrough() noexcept { return passOk; }
+
 bool HooksOk() noexcept { return hooksOk; }
 }  // namespace jet
 
@@ -195,7 +232,28 @@ using namespace jet;
 
 bool SidecarBulletHooked() noexcept { return jet::PassThrough(); }
 
+void HullBodies(int slot,const unsigned char* v) noexcept {
+    if(slot<0 || slot>=kHulls)return;
+    ownround::Craft c{};
+    if(v){c.vehicle=v;OwnBodies(v,c);}
+    AcquireSRWLockExclusive(&hullsLock);
+    hulls[slot]=c;
+    int on=0;
+    for(const auto& h:hulls)on+=h.vehicle!=nullptr;
+    ReleaseSRWLockExclusive(&hullsLock);
+    hullsOn.store(on,std::memory_order_relaxed);
+}
+
 // The 506 physics step (body506.cpp), after the stock one: the jet's velocity and spin replace the heli's.
+// A jet its Dreadnought's hangar holds (JetHangarHold): the hangar's motion, a player aboard or not.
+bool JetHeldStep(unsigned char* v,float* lin,float* ang) noexcept {
+    if(v[kDead])return false;
+    const Jet* const j=FindJet(v);
+    if(!j || !j->held || j->heldFrame+1<GameFrame() || !At<void*>(v,kBody))return false;
+    for(int i=0;i<3;++i){lin[i]=j->m.vel[i];ang[i]=j->m.omega[i];}
+    return true;
+}
+
 bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept {
     if(v[kDead]){PrimerCorpseStep(v);return false;}   // a shot-down centipede's body curls as it falls
     const ULONGLONG ms=GameMs();

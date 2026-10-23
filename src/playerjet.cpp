@@ -1682,6 +1682,16 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
     Put<float>(v,kAreaInset,kNoInset);
+    // Held by a Dreadnought's hangar (dreadnought_hangar.inc: parked on its deck, run off its bow, brought home): its
+    // motion is the hangar's whole (jet.cpp JetHangarHold, body506.cpp JetHeldStep): no flight of its own, no crash test
+    // against a motion it did not ask for, nothing mirrored back over the hangar's; its own flight takes over from that
+    // motion when let go (PlayerJetLaunched).
+    if(const jet::Jet* const e=jet::FindJet(v);e && e->held && e->heldFrame+1>=GameFrame()) {
+        std::memcpy(j.vel,e->m.vel,12);std::memcpy(j.sent,e->m.vel,12);
+        j.blockedSince=0;j.active=false;
+        Report(j,v,s,pos,clear,water,ms);
+        return;
+    }
     if(j.board && j.board->frame==pjet::Airframe::rotor){HoverStep(j,v,s,pos,clear,water || wet,dt,ms);Report(j,v,s,pos,clear,water,ms);return;}
     EnemyRam(j,v,pos,ms);
     if(v[kDead]){j.active=false;return;}
@@ -2015,6 +2025,17 @@ bool PlayerJetHolds(const void* vehicle) noexcept {
     if(!flyOk || !Cfg().playerJet)return false;
     __try { return BodyOf(vehicle)==PluginBody::jet && Held(static_cast<const unsigned char*>(vehicle)); }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+void PlayerJetLaunched(unsigned char* v) noexcept {
+    __try {
+        PJet* const j=Find(v);
+        const jet::Jet* const e=jet::FindJet(v);
+        if(!j || !e || !std::isfinite(e->m.vel[0]+e->m.vel[1]+e->m.vel[2]))return;
+        std::memcpy(j->vel,e->m.vel,12);std::memcpy(j->measured,e->m.vel,12);
+        j->phase=Phase::air;j->throttle=1.0f;j->hasUp=false;j->hasAim=false;
+        Log("PJET v=%p launched off its deck at %.0f m/s",v,Len(j->vel));
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
 bool IsPlayerJet(const void* vehicle) noexcept {

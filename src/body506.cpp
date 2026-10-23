@@ -8,6 +8,8 @@
 // The tools every owner needs the same way (the body part, the attitude, the ground and ceiling, the bones, the
 // game's step, the death) are here too (body506.h).
 #include "body506.h"
+#include "ifc_model.h"
+#include <atomic>
 #include "memory.h"
 #include "subcarrier.h"
 #include "vecmath.h"
@@ -84,11 +86,35 @@ constexpr std::size_t kShapeCall=0x65713C,kMakeBox=0x11A63F0,kGetShape=0x11B15E0
 constexpr std::size_t kAddRef=0x978F20,kRelease=0x978FB0,kCompoundVtable=0x18A9860;
 constexpr std::size_t kHelicopterBase=0x17DF790; // constructor 0x64E420, before 506's final vtable
 constexpr std::uint64_t kAirframeMagic=0x4544463641495231ULL; // pylib/aircraft_collision.py
+// The vehicle's SGO member that says its body is its ragdoll's compound (pylib/vcobjects.py AIRFRAME_MEMBER): the shape's
+// userData tag above never survives the game's compact SHKT load (it read 0 at +0x28 in every vehicle, range
+// 2026-10-21), so the SGO, which does, carries it. The SGO's root: vehicle +0x100 (a variant, ifc_model.h; edf41bike.cpp).
+constexpr wchar_t kAirframeMember[]=L"edf6vc_airframe";
+constexpr std::size_t kVehicleSgo=0x100;
 const unsigned char kShapeCallCode[]={0xE8,0xAF,0xF2,0xB4,0x00};
 const unsigned char kGetShapeCode[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x81,0x00,0x01,0x00,0x00};
 using MakeBoxFn=bool(*)(void**,const float*);
 using GetShapeFn=void*(*)(void*);
 using RefFn=void(*)(void*);
+
+// The first kAirframeSaid vehicles' reasons, logged: the compound had never been taken once in a 175k-line log
+// (range 2026-10-21: the Dreadnought flew as its whole box, its deck 12 m over its hull).
+constexpr int kAirframeSaid=12;
+std::atomic<int> airframeSaid{0};
+void AirframeWhy(const unsigned char* v,const char* why,long long a=0,long long b=0) noexcept {
+    if(airframeSaid.fetch_add(1)<kAirframeSaid)Log("BODY506 airframe v=%p: no compound: %s (%llX, %llX)",v,why,a,b);
+}
+
+// Whether the vehicle's SGO carries kAirframeMember.
+bool SgoSaysAirframe(const unsigned char* v) noexcept {
+    if(!Readable(v,kVehicleSgo+0x18))return false;
+    const unsigned char* root=v+kVehicleSgo;
+    const std::uint16_t alt=ifcmodel::AlternativeOf(root);
+    if(alt>=ifcmodel::kVariantAlternatives)return false;
+    ifcmodel::Find found{kAirframeMember,-1};
+    ifcmodel::Visitor(image,ifcmodel::kVariantFind,alt)(root,&found);
+    return found.index>=0;
+}
 
 void* AirframeShape(unsigned char* v) noexcept {
     __try {
@@ -97,26 +123,37 @@ void* AirframeShape(unsigned char* v) noexcept {
         // vtable is only assigned by 0x61B5B2 AFTER this constructor returns.
         // BodyOf/BodyMark intentionally reject that intermediate identity.
         const auto vt=At<const unsigned char*>(v,0);
-        if(vt!=image+kHelicopterBase && vt!=image+kHeli506)return nullptr;
-        // BindDependency indexes model-side names; use the same fuselage names
-        // as FixBodyPart506. The userData tag guards old packs/Primer creatures:
-        // never substitute an unconverted stock helicopter ragdoll for the box.
-        for(const wchar_t* bone:kFuselageBones) {
-            const auto part=reinterpret_cast<FindPartFn>(image+kFindPart)(v+kParts,bone);
-            if(part<0)continue;
-            const auto count=At<std::size_t>(v,0x13A8); // parts+0x88, 0x6E82F3
-            if(count>64 || std::size_t(part)>=count)return nullptr;
-            const auto base=At<unsigned char*>(v,0x1398);
-            if(!base || !Readable(base+std::size_t(part)*0xC0,0x58))return nullptr;
-            void* proxy=At<void*>(base+std::size_t(part)*0xC0,0x50);
-            if(!proxy)return nullptr;
+        if(vt!=image+kHelicopterBase && vt!=image+kHeli506){AirframeWhy(v,"vtable",vt-image);return nullptr;}
+        // The airframe is the ragdoll's one compound (pylib/aircraft_collision.py: its other parts' stand-ins are
+        // convex). Not by a fuselage bone's name (FixBodyPart506's): a model without the 506's bones binds every part to
+        // its root, and the name found a stand-in (range 2026-10-21: the Dreadnought flew as a 1 cm box, through the
+        // ground). The SGO member (or the userData tag) guards old packs / Primer creatures: never substitute an
+        // unconverted stock helicopter ragdoll for the box.
+        const auto count=At<std::size_t>(v,0x13A8); // parts+0x88, 0x6E82F3
+        const auto base=At<unsigned char*>(v,0x1398);
+        if(count>64 || !base || !Readable(base,count*0xC0)){AirframeWhy(v,"parts",static_cast<long long>(count),reinterpret_cast<long long>(base));return nullptr;}
+        for(std::size_t part=0;part<count;++part) {
+            void* proxy=At<void*>(base+part*0xC0,0x50);
+            if(!proxy)continue;
             auto* shape=static_cast<unsigned char*>(reinterpret_cast<GetShapeFn>(image+kGetShape)(proxy));
             // hknpShape native header: ctor 0xD89410 / copy 0xD89340: type
             // +0x18, convexRadius +0x20, userData +0x28 (compact SHKT: +12).
-            if(!Readable(shape,0x30) || At<const unsigned char*>(shape,0)!=image+kCompoundVtable ||
-               At<std::uint64_t>(shape,0x28)!=kAirframeMagic)return nullptr;
+            if(!Readable(shape,0x30) || At<const unsigned char*>(shape,0)!=image+kCompoundVtable)continue;
+            if(At<std::uint64_t>(shape,0x28)!=kAirframeMagic && !SgoSaysAirframe(v)) {
+                if(airframeSaid.load()<kAirframeSaid && Readable(shape,0x100)) {   // where its tag is, if anywhere
+                    for(std::size_t at=0;at+8<=0x100;at+=4)
+                        if(At<std::uint64_t>(shape,at)==kAirframeMagic)Log("BODY506 airframe v=%p: the tag at shape+0x%zX",v,at);
+                    const auto* q=reinterpret_cast<const std::uint32_t*>(shape);
+                    Log("BODY506 airframe shape %p: %08X %08X %08X %08X %08X %08X %08X %08X | %08X %08X %08X %08X %08X %08X %08X %08X",shape,
+                        q[0],q[1],q[2],q[3],q[4],q[5],q[6],q[7],q[8],q[9],q[10],q[11],q[12],q[13],q[14],q[15]);
+                }
+                AirframeWhy(v,"compound untagged (no SGO member, userData)",static_cast<long long>(part),
+                            static_cast<long long>(At<std::uint64_t>(shape,0x28)));
+                return nullptr;
+            }
             return shape;
         }
+        AirframeWhy(v,"no compound part");
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     return nullptr;
 }
@@ -158,7 +195,7 @@ bool InstallAirframeShape() noexcept {
 // A jet is the player's while they fly it (or it comes down for them, playerjet.cpp): its step first, which says no
 // for every jet it does not fly.
 bool JetOrPlayerStep(unsigned char* v,float* lin,float* ang) noexcept {
-    return PlayerJetBodyStep(v,lin,ang) || JetBodyStep(v,lin,ang);
+    return JetHeldStep(v,lin,ang) || PlayerJetBodyStep(v,lin,ang) || JetBodyStep(v,lin,ang);
 }
 
 StepFn StepOf(PluginBody body) noexcept {

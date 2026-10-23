@@ -498,6 +498,10 @@ struct Jet {
     // line from off the map through the point to off the map past it, either way in turn (`ferryPass`) until its stick is
     // out (JetFerryDone); past the end of that pass `ferryGone`: deleted there (JetFrame reaps it), off the map.
     bool ferry=false,ferryGone=false;
+    // Held by a Dreadnought's hangar (JetHangarHold: on its lift, being brought in, launched off its deck): the hangar's
+    // velocity and spin are its motion (m.vel / m.omega), whoever sits in it; fresh while heldFrame is this frame or the last.
+    bool held=false;
+    ULONGLONG heldFrame=0;
     support::PassLine ferryLine{};
     ferry::Pass ferryPass{};
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }

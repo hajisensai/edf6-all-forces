@@ -9,7 +9,9 @@ colour (<material>_df.png), normal map (_nm) and R roughness / G metal / B light
 The skeleton (SKELETONS, preorder; every bone bound level, as the Sazabi's: sazabi_model.py):
   mdl (root: the V506 MAB's locators hang on it, vcobjects.JET_MAB_ROOT) -> <model> (the skinned object's bone),
   globalSRT -> body (the V506's anchor, at BODY_AT where the V506 CAS's `default` clip puts it; no geometry) -> the
-  ship's own bones (dn_hull, and the dreadnought's hangar and its doors and lifts, which the plugin poses).
+  ship's own bones (dn_hull, and the dreadnought's hangar and its doors and lifts, which the plugin poses), and the
+  dreadnought's marker bones (no geometry; tools/prep_dreadnought.py ship_markers): dn_bridge, where its pilot stands on
+  leaving it, and every seat's first-person eye vc_eye_<seat> (MARKERS; src/fp_vehicle.cpp VehicleEye reads it by name).
 The model stands on its lowest point (origin y = 0: the game sets a vehicle down on its origin), centred on x and z.
 Materials: one a source material, in Retro-Balam's `light` material (snd_BRDF_Common_Light_NoOcc) where its map has
 lights (the dreadnought's windows and engines glow in their master's LightColor), else the Blacker's hull material.
@@ -45,13 +47,19 @@ def mdb_name(model: str) -> str:
 FILES = {archive_name(m): m for m in MODELS}   # archive -> model (pylib/jet_models.py DN_FILES, which must agree)
 BODY_AT = (0.0, 1.637, 0.0)      # the V506 CAS's `default` clip: body's position (sazabi_model.BODY_AT)
 HULL = 'dn_hull'
-# The prep tool's bones (dreadnought.json) -> ours: the model's own name is its hull.
-HANGAR_BONES = ('dn_hangar', 'dn_hangar_door_uf', 'dn_hangar_door_ua', 'dn_hangar_door_lf', 'dn_hangar_door_la',
-                'dn_hangar_lift_a', 'dn_hangar_lift_f')
+# The prep tool's bones (dreadnought.json) -> ours: the model's own name is its hull, a first-person eye (vc_) keeps the
+# name the plugin looks for (src/fp_vehicle.cpp), the others are dn_<bone>.
+# The hangars (tools/prep_dreadnought.py HANGAR_SOCKETS: on the broadsides, left01, left03, right01, right03): module m
+# dn_hangar_<m>; its bays 2m, 2m + 1, each bay i its lift dn_lift_<i>, upper and lower doors dn_door_u_<i> / dn_door_l_<i>,
+# its fighter's copy dn_bay_<i> (kind BAY_KINDS[i % 4]: a mesh bone, turned: nose out of the bay) and dn_bay_<i>_out
+# (no geometry: where the copy is out of the ship); the ready fighter's spot on the foredeck dn_ready, dn_ready_side.
+HANGARS, BAYS = 4, 8
+BAY_KINDS = ('fighter', 'defender', 'bomber', 'interceptor')
+READY, READY_SIDE = 'dn_ready', 'dn_ready_side'
 
 
 def _ours(model: str, bone: str) -> str:
-    return HULL if bone == model else 'dn_' + bone
+    return HULL if bone == model else bone if bone.startswith('vc_') else 'dn_' + bone
 
 
 def skeleton(model: str, manifest: dict) -> list[tuple[str, str | None]]:
@@ -78,6 +86,10 @@ def skeleton(model: str, manifest: dict) -> list[tuple[str, str | None]]:
 # height's middle), and its missile cells, on the top of its hull over its middle.
 SHIP_MUZZLES = ('dn_muzzle', 'dn_missile')
 MUZZLE_BAND = 8.0
+# Its markers: the bridge, and seat 0's eye (the bridge's) and seat 1 + n's (turret n's, on dn_turret_<n>_gun) for its
+# eight turrets (vcobjects.DREADNOUGHT_TURRETS; tools/make_dreadnought.py checks them).
+BRIDGE = 'dn_bridge'
+EYE = 'vc_eye_{}'
 
 
 # Templates (the player's Root.cpk, read only): (archive, model, material).
@@ -157,6 +169,28 @@ def _textures(folder: str, model: str, material: str) -> tuple[bool, dict[str, b
     return lit, files, slots
 
 
+def _with_frames(md: Mdb, frames: dict, pivots: dict, posed: list, names: list[str]) -> Mdb:
+    """`md` with the bones in `frames` turned (rows left, up, ahead in model space, at their pivots): their local and
+    inverse bind matrices, and a skin bone's bounds in its own frame (procmesh.bones makes every bone level)."""
+    import numpy as np
+    from mdb import inverse_affine
+    bones = list(md.bones)
+    for name, rows in frames.items():
+        j = names.index(name)
+        t = pivots[name]
+        bind = [*rows[0], 0.0, *rows[1], 0.0, *rows[2], 0.0, *t, 1.0]
+        world = bind_world(replace(md, bones=bones))
+        b = bones[j]
+        b = replace(b, local=mmul(bind, inverse_affine(world[b.parent])), inv_bind=inverse_affine(bind))
+        if b.kind == 3:
+            pts = np.vstack([pos[[max(sk, key=lambda x: x[1])[0] == j for sk in skins]] for pos, skins in posed])
+            local = (pts - np.array(t)) @ np.array(rows).T
+            lo, hi = local.min(0), local.max(0)
+            b = replace(b, centre=[*((lo + hi) / 2).tolist(), 1.0], half=[*((hi - lo) / 2).tolist(), 1.0])
+        bones[j] = b
+    return replace(md, bones=bones)
+
+
 def build_model(game, folder: str, model: str) -> tuple[Mdb, dict[str, bytes], dict]:  # noqa: ANN001 - rootcpk.Game
     """(model, its textures {file: DDS}, info)."""
     import numpy as np
@@ -210,6 +244,8 @@ def build_model(game, folder: str, model: str) -> tuple[Mdb, dict[str, bytes], d
     skel = procmesh.bones(joints, model, posed, 1.0)
     all_names = list(md.names) + [model] if model not in md.names else list(md.names)
     md = replace(md, names=all_names, bones=skel, objects=[Object(all_names.index(model), names.index(model), meshes)])
+    md = _with_frames(md, {_ours(model, b): e['frame'] for b, e in entry['bones'].items() if 'frame' in e}, pivots,
+                      posed, names)
     tris = sum(len(me.indices) // 6 for me in meshes)
     _req(tris >= MIN_TRIANGLES[model], f'{model}: {tris} triangles: the model folder is not tools/prep_dreadnought.py\'s')
     info = {'triangles': tris, 'meshes': len(meshes), 'materials': len(md.materials), 'bones': len(skel),

@@ -147,16 +147,21 @@ struct Config {
     bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
     // The Dreadnought (dreadnought.cpp, docs/dreadnought-plan.md): flown by the plugin with the player in it.
     bool dreadnought=true;
-    float dreadnoughtSpeed=45.0f;      // m/s at the full left stick ahead
-    float dreadnoughtBoost=1.8f;       // ...times that, and its acceleration, with the boost held
-    float dreadnoughtAccel=4.0f;       // m/s^2 its velocity changes at most
+    float dreadnoughtSpeed=45.0f;      // m/s at its throttle full ahead
+    float dreadnoughtBoost=1.8f;       // ...times that, and its acceleration, with the boost on
+    float dreadnoughtAccel=5.0f;       // m/s^2 its velocity changes at most
     float dreadnoughtClimb=18.0f;      // m/s up (or down) at the full ascend (descend)
-    float dreadnoughtTurn=9.0f;        // deg/s at the full right stick
-    float dreadnoughtMouseTurn=0.25f;  // deg/s of turn per unit of the mouse's frame movement a frame
+    float dreadnoughtTurn=10.0f;       // deg/s at the full left stick across (A / D)
     float dreadnoughtFloor=30.0f;      // m: the least its keel flies over the ground
-    int dreadnoughtBoostKey=0x10;      // ...on the keyboard: the boost (VK_SHIFT; on a pad A)
-    int dreadnoughtDescendKey=0x11;    // ...on the keyboard: down (VK_CONTROL; on a pad the right stick back)
-    int dreadnoughtHangarKey=0x48;     // the pilot launches an escort flight from its hangar (H; 0 none)
+    int dreadnoughtBoostKey=0x10;      // ...on the keyboard: the boost (VK_SHIFT)
+    int dreadnoughtDescendKey=0x11;    // ...on the keyboard: down (VK_CONTROL)
+    int dreadnoughtStrafeLeftKey=0x51;   // ...on the keyboard: sideways to its left ('Q'; 0 none)
+    int dreadnoughtStrafeRightKey=0x45;  // ...and to its right ('E'; 0 none)
+    // ...on a pad: the seat's button bits (docs/stores-re.md §4): the boost (0x01 A), down (0x10 LB); 0 none
+    int dreadnoughtBoostButton=0x01;
+    int dreadnoughtDescendButton=0x10;
+    int dreadnoughtSeatButton=0x20;      // ...its seats round on a pad (RB: its B gets out of it; SeatNextKey on the keyboard)
+    int dreadnoughtHangarKey=0x48;     // the commander launches an escort flight from its hangar (H; 0 none)
     int dreadnoughtHangarButton=0x08;  // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x08 Y; 0 none)
     char testBoardVehicle[32]{};    // tests: class substring, optionally @exactModelBone to distinguish models sharing 506
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
@@ -786,6 +791,20 @@ unsigned char* JetLaunchDreadnoughtFighter(int kind,const float* from,const floa
 // Whether the local player leaving `fighter` goes back aboard a dreadnought near it (dreadnought_hangar.inc: one of its
 // fighters within its return range): no parachute, no catch (playerjet.cpp Leave / Left), the fighter handed back.
 bool DreadnoughtTakesBack(const unsigned char* fighter) noexcept;
+// A Dreadnought's hangar and its fighters (dreadnought_hangar.inc; jet.cpp): the hangar holds one (on a lift, landing,
+// launched off the deck): this frame's velocity and spin are its motion, a player aboard or not (false: none of the
+// plugin's jets); lets it go (it flies on from that motion: its own flight as an escort, or the player's); takes it in
+// (deleted, out of sight down its lift). JetLeaving: it is withdrawing or recovering (fuel, hull, stores).
+bool JetHangarHold(unsigned char* v,const float* vel,const float* omega) noexcept;
+void JetHangarRelease(unsigned char* v) noexcept;
+void JetHangarStow(unsigned char* v) noexcept;
+bool JetLeaving(const void* vehicle) noexcept;
+bool JetMotion(const void* vehicle,float* vel) noexcept;   // its velocity as its flight (or hangar) last sent it
+// Whether `fighter` is the one parked on a Dreadnought's foredeck (dreadnought_hangar.inc): boarded where it stands.
+bool DreadnoughtParked(const void* fighter) noexcept;
+// The player's jet `v` launched off a deck (dreadnought_hangar.inc): its flight takes over at the motion its launch gave
+// it (jet.cpp's entry), in the air, full throttle.
+void PlayerJetLaunched(unsigned char* v) noexcept;
 // A drone a thrown Robot Bomb releases where it landed (airstrike.cpp kThrows; tools/calls.py brings 'throw'): the
 // blast or doll drone (rotor, a few metres over `at`) or the gun drone (fixed wing, taking off from ~20 m over it),
 // with no carrier, working round `at` within a short reach and leaving (a charge: blowing up there) out of fuel
@@ -836,6 +855,7 @@ bool InstallBody506() noexcept;                    // before InstallJets / Insta
 bool Body506Ok() noexcept;                         // the physics hook is in
 bool Body506ReadsSolver() noexcept;                // ...and it reads the solver's velocity before the stock step (GroundContact)
 bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet.cpp
+bool JetHeldStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet_hooks.cpp: a hangar's (JetHangarHold)
 bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // subcarrier.cpp
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // playerjet.cpp
 bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept;     // sazabi.cpp
@@ -886,6 +906,7 @@ bool PlayerSazabiCue(SazabiCue* out) noexcept;
 bool SazabiCamera(const unsigned char* seat,const float* wasEye,const float* wasLook,float* eye,float* look) noexcept;
 void SazabiFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
 void DreadnoughtFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
+void DreadnoughtInput(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, before it: the local rider's aim stick
 bool InstallDreadnought() noexcept;                   // after InstallBody506
 void ResetDreadnought() noexcept;                     // a new mission
 bool InstallSazabi() noexcept;                        // after InstallBody506
@@ -986,6 +1007,9 @@ bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtr
 bool WarpHuman(unsigned char* human,const float* pos) noexcept;
 int SidecarPassengers() noexcept;     // passengers riding now (the bullets' hook's quick "nothing to pass" test)
 bool SidecarBulletHooked() noexcept;  // jet_hooks.cpp: the bullets' candidate hook is in (InstallBulletPass)
+// jet_hooks.cpp: Dreadnought `v`'s hull bodies in slot `slot` (0..3, dreadnought.cpp's ships; nullptr: none), its own and its
+// riders' rounds pass through them.
+void HullBodies(int slot,const unsigned char* v) noexcept;
 void SidecarLevel(const void* body,float* w) noexcept;
 void ResetSidecars() noexcept;
 // physics.cpp: the car step's final setAngVel (0x6746C6) goes through the plugin (SidecarLevel), redirected at load.
@@ -1149,10 +1173,26 @@ bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The gunship gunner's seat camera (playerjet_crew.inc GunnerLook): from turretcam.cpp's native Type-1 seat camera hook,
 // the eye and look-at for the local player at the gun; false for any other seat (the stock camera stays).
 bool GunshipGunnerCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept;
-// The Dreadnought's turrets (dreadnought_turrets.inc): the local gunner's camera (turretcam.cpp LookHook), their sight
-// (hud.cpp), and a round of a turret (jet_bay.cpp: the gunship's cannon round, from `from` at `at`; false: not fired).
-bool DreadnoughtGunnerCamera(const unsigned char* seat,float* eye,float* look) noexcept;
+// The Dreadnought aboard (dreadnought_turrets.inc): the local player's camera on its bridge or at a turret (turretcam.cpp
+// LookHook), their sight (hud.cpp GunnerMarks), and a round of a turret (jet_bay.cpp: the gunship's cannon round, from
+// `from` at `at`; false: not fired).
+bool DreadnoughtCamera(const unsigned char* seat,float* eye,float* look) noexcept;
 bool DreadnoughtGunnerHud(GunnerReadout* out) noexcept;
+// The ship's readout for the local player in any of its seats (hud.cpp DreadnoughtHud): `seat` 0 its bridge, 1 + n turret
+// n; its way (m/s), climb (m/s), throttle (-0.35 .. 1), boost left (0 .. 1), keel over the ground (m, -1 none seen),
+// heading (deg, 0 north, clockwise), hull; its turrets by bit (trained by this player, by other players, by the commander
+// for the guns nobody mans, on their aim now); its hangar (fighters stowed, out, on the lifts' way up or down; s till the
+// next flight may go); keyboard or pad; first person.
+struct DreadnoughtCue {
+    int seat,turrets;
+    float speed,climb,throttle,boost,keel,heading,hp,hpMax;
+    bool boosting;
+    std::uint8_t mine,others,commanded,onAim;
+    int stowed,out,lifting;
+    float flightWait;
+    bool keys,firstPerson;
+};
+bool PlayerDreadnoughtCue(DreadnoughtCue* out) noexcept;
 // `real`: the gunner's own round (its damage); false: a remote gunner's, seen here (no damage: theirs is theirs).
 bool DreadnoughtRound(unsigned char* owner,const float* from,const float* at,bool real) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
