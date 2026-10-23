@@ -552,9 +552,14 @@ void ApplyRemotePicks(unsigned char* v) noexcept {
         for(int i=0;i<pr.count;++i)if(SwitchSecondary(ClassOf(v),ws[i],pr.entry[i]))ride=PayloadFire::secondary;
         int stock[kMostPayload],count=0;
         for(int i=0;i<pr.count;++i)if(pr.entry[i].fire==ride)stock[count++]=i;
-        p->nativeControl=NativeAlternates(ws,stock,count) || HasIndependentSecondary(ClassOf(v),ws,pr);
+        // As Switch / NpcPayloadPick: the stock pulls are redirected only for a store or among native alternates. The
+        // intrinsic secondary makes the pick PullHook's to honour (nativeControl), never a redirect of a stock belt: the
+        // BMPT's HE is its native pair, and a redirect of it would map the right barrel's pull to no target (a single
+        // mount receives one source, RedirectPayload), dropping it (2026-10-24 review: latches L=1 R=0).
+        const bool alternates=NativeAlternates(ws,stock,count);
+        p->nativeControl=alternates || HasIndependentSecondary(ClassOf(v),ws,pr);
         p->weapon=ws[choice];
-        if(pr.entry[choice].fire==PayloadFire::store || p->nativeControl)RedirectPayload(v,r.seat,*p,ws,pr,stock,count,choice);
+        if(pr.entry[choice].fire==PayloadFire::store || alternates)RedirectPayload(v,r.seat,*p,ws,pr,stock,count,choice);
     }
 }
 

@@ -14,7 +14,8 @@ constexpr int kMostPayload=8;
 // when it is the one picked (any of the plugin's weapons hung on the seat: they ride the seat's secondary when a stock
 // weapon is on it, else its primary), `other` a control the plugin has not read for this class (a mech's arms).
 // The BMPT's intrinsic missiles (the Ataka, the 9M120F) use the V603's otherwise unused secondary input: their own
-// cycle on R / LB (payload.cpp Switch), never a choice of the primary's.
+// cycle on VehicleSecondarySwitchKey (T) / VehicleSecondarySwitchButton (the d-pad right) (payload.cpp Switch), never a
+// choice of the primary's, whose cycle alone is R / LB.
 // A coaxial gun (StoreRole::coax, tools/make_stock_stores.py COAX) is `secondary` for the player on a class whose stock
 // input reads no second control (the Blacker 505, the Varius 601, the Grape): payload.cpp pulls it on that trigger.
 enum class PayloadFire : std::uint8_t { other, primary, secondary, store };
@@ -27,7 +28,8 @@ struct PayloadEntry {
     PayloadFire fire;
     bool picked;               // selected loadout (every linked barrel is marked; r.picked remains its leader)
     bool homing;               // it locks on (LockonType 1)
-    bool selectable;           // a live choice in the R/LB cycle; independent primary guns remain read-only
+    bool selectable;           // a live choice in its cycle (R / LB the primary's, T / the d-pad right the own
+                               // secondary's); independent primary guns remain read-only
     bool coax;                 // a coaxial machine gun (StoreRole::coax): its own secondary trigger, never cycled
 };
 // The local player's seat on a stock vehicle (a plugin aircraft has the cockpit readout, PlayerJetHud, instead).
@@ -67,7 +69,7 @@ void PumpAircraftPayloadUi(unsigned char* vehicle) noexcept; // playerjet.cpp br
 unsigned char* PayloadPicked(const void* vehicle) noexcept;
 // The own secondary's pick on the player's seat of `vehicle` (the missile the BMPT's secondary fires), else nullptr.
 unsigned char* PayloadOwnSecondaryPicked(const void* vehicle) noexcept;
-// Independent fire-control target: default native primary, most recent trigger edge, or explicit R/LB payload choice.
+// Independent fire-control target: default native primary, most recent trigger edge, or an explicit switch choice.
 // Read-only, validates live holders; retains a reloading weapon but safely falls back from a spent/removed one.
 unsigned char* PayloadSightPicked(const void* vehicle,unsigned seat) noexcept;
 // The same fire-control view, including all known native weapons fired by that control.

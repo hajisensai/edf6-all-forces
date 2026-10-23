@@ -613,6 +613,37 @@ int main() {
         check(!(latches()&36u),"a copy never pulls a remote seat's missile (its shot comes from the shooter's machine)");
         PullHook(list[0]);PullHook(list[1]);TwinBarrelFrame(v);
         check((latches()&3u)==1u || (latches()&3u)==2u,"a copy's pulls of the guns: in turn");
+        // ...and that copy hearing the seat's pick (2026-10-24 review: the remote HE pick was redirected because the seat
+        // has an intrinsic secondary, the left pull mapped to itself and the right one to no target: latches L=1 R=0).
+        // A pick lands the copy's pulls as the shooter's own machine does (Switch): HE leaves the stock pair theirs,
+        // APDS moves both onto its barrels; the cadence comes after (TwinBarrelFrame), so both pulls are seen first.
+        {
+            ResetPayload();fakeSession=true;Put<std::uint16_t>(v,0x128,2);Put<float>(s,0x2E0,0.0f);
+            pickNetOk=seat_net::Register(seat_net::kPickMagic,&PickReceived);
+            seat_net::Pick heard{};heard.head.sender=0x77;heard.head.controller=-1;
+            std::uint32_t sequence=0;
+            const auto hear=[&](std::int32_t holder,bool npc) {
+                heard.seat=0;heard.holder=holder;heard.flags=npc ? seat_net::kNpc : 0;heard.head.sequence=++sequence;
+                seat_net::fakeHandler(v,&heard,sizeof(heard));
+                clear();now+=16;PayloadFrame(v);PullHook(list[0]);PullHook(list[1]);
+                return latches();
+            };
+            for(const bool npc:{false,true}) {
+                riders[1][edf::kHumanPlayer]=npc ? 0 : 1;Put<void*>(riders[1],edf::kHumanPad,nullptr);
+                check(npc ? !AiGunner(v,s) : SeatRider(s)==Rider::other && IsAnyPlayer(riders[1]),
+                      npc ? "fixture: another machine's NPC gunner in the BMPT" : "fixture: another machine's player in the BMPT");
+                m=hear(0,npc);
+                check(m==3u,npc ? "remote NPC picks HE: both stock pulls latch their own barrel (L and R)"
+                                : "remote player picks HE: both stock pulls latch their own barrel (L and R)");
+                m=hear(3,npc);
+                check(m==24u,npc ? "remote NPC picks APDS: both pulls land on the APDS pair, none on HE"
+                                 : "remote player picks APDS: both pulls land on the APDS pair, none on HE");
+                m=hear(0,npc);
+                check(m==3u,"back to HE: the stock pair again, both barrels");
+                ResetPayload();
+            }
+            riders[1][edf::kHumanPlayer]=0;fakeSession=false;Put<std::uint16_t>(v,0x128,0);
+        }
         riders[1][edf::kRiderNet+edf::kNetFlags]=0;authority=true;
         Put<void*>(v,kHolders,oldHolders);Put<std::uint64_t>(v,kHolderCount,3);
         Put<void*>(s,kSeatWeapons,oldList);Put<std::uint64_t>(s,kSeatWeaponCount,3);

@@ -27,7 +27,8 @@ struct StoreSpec {
     bool nativeControl=false; // a native trigger source, independently selectable (alternate ammunition)
     StoreShell shell=StoreShell::native;
     bool independentSecondary=false; // intrinsic weapon on the seat's otherwise unread secondary (the BMPT's missiles): concurrent
-                                     // with the primary; R/LB cycles it only among the other weapons of its kind
+                                     // with the primary; its own switch (T / the d-pad right, payload.cpp Switch)
+                                     // cycles it only among the other weapons of its kind, never R / LB
 };
 // A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
 struct JetMass { float mark,mass,durability; };
