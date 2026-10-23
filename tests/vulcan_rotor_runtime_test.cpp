@@ -52,6 +52,8 @@ bool RedirectCall(unsigned char* at,void* prior,void* replacement,bool& changed)
 }
 }
 namespace crew {
+int recoilPoses=0;const void* recoilVehicle=nullptr;
+void BarrelRecoilPose(unsigned char* v) noexcept{++recoilPoses;recoilVehicle=v;}   // barrel_recoil.cpp (its own test)
 unsigned char* image=nullptr;
 const Config& Cfg() noexcept{return fixture::config;}
 ULONGLONG GameMs() noexcept{return fixture::now;}
@@ -76,6 +78,7 @@ int main(){
  Jump(0x1100B90,reinterpret_cast<void*>(&NativeBuild));Jump(0x66F430,reinterpret_cast<void*>(&NativeWheels));
  Reset();Check(crew::InstallVulcanRotor(),"actual production install succeeds");Call();
  Check(builds==1&&lastInst==vehicle+0xEE0&&lastMatrix==vehicle+0x60,"forward native world-build exactly once with unchanged arguments");
+ Check(crew::recoilPoses==1&&crew::recoilVehicle==vehicle,"the same last pose step gives the BMPT's barrels their recoil, once a build");
  Check(Angle()==0&&edf::At<int>(rotor,8)==1,"idle visual bone uses bind and native dirty flag");
  edf::Put<int>(weapon[0],0xBD4,1);edf::Put<int>(weapon[0],0xBE8,1999);Tick();
  Check(std::fabs(Angle())>.001f,"actual native HE firing rotates the real production bone");

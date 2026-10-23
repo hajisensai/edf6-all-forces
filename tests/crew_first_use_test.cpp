@@ -153,6 +153,7 @@ bool PlayerStockOwnSight(void const *) noexcept{unexpectedHook();return {};}
 void StockHudFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void PlayAreaTick(void) noexcept{unexpectedHook();return;}
 void PayloadFrame(unsigned char *) noexcept{unexpectedHook();return;}
+void TwinBarrelFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void SeatSwitchFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void ProteusFrame(unsigned char *) noexcept{unexpectedHook();return;}
 float GroundClearance(float const *) noexcept{unexpectedHook();return {};}

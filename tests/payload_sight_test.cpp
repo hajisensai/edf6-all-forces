@@ -16,6 +16,7 @@ const bool sightInputHanded=(edf::SetInputSource(&sightinput::Key,&sightinput::W
 #include <cstdio>
 #include <utility>
 namespace crew {
+bool MapPadState(std::uint16_t* b,std::uint8_t* lt,std::uint8_t* rt) noexcept { *b=0;*lt=*rt=0;return false; }   // no pad on these fixtures
 unsigned char* image=nullptr;
 Config cfg{};
 ULONGLONG now=100;
@@ -37,6 +38,7 @@ bool IsStoreWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 const StoreSpec* sightStoreSpec=nullptr;
 const StoreSpec pairedLeft{L"PAIR_L_", "paired", StoreRole::gun,0,0,1,0},pairedRight{L"PAIR_R_", "paired", StoreRole::gun,0,0,1,1},
                 nativeHE{L"NATIVE_HE_", "HE", StoreRole::gun,0,0,0,0,true},nativeAP{L"NATIVE_AP_", "AP", StoreRole::gun,0,0,0,0,true};
+unsigned TwinPairOf(const unsigned char*) noexcept { return 0; }   // no twin barrels on these fixtures
 const StoreSpec* StoreOf(const unsigned char* w) noexcept { if(!w || w[0x100]!=2)return nullptr;
     return w[0x101]==6 ? &pairedLeft : w[0x101]==7 ? &pairedRight : w[0x101]==8 ? &nativeHE : w[0x101]==9 ? &nativeAP : sightStoreSpec; }
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {

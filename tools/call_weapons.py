@@ -443,9 +443,17 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
             # make_tracked_combat.vehicle_sgo (BMPT_SLOTS); other ground requests stay strict.
             if len(weapons) != 2 or len(jet_weapons) != 6:
                 raise ValueError('BMPT request requires two native cannon mounts and four added stores')
-            extra = copy.deepcopy(weapons[1])
-            extra.items[1] = Node([0.0, 0.0])  # no hull impulse (a missile, a 30 mm belt), still a BodyRecoil variant
-            weapons = [*weapons, *(copy.deepcopy(extra) for _ in range(4))]
+            # Each added holder after its slot (GroundVehicle.slots): the APDS barrels the native gun mount of their
+            # side (its BodyRecoil kick, as the HE belt's: one firing shake whichever belt fires), a missile no hull
+            # impulse (still a BodyRecoil variant). The same rule as make_tracked_combat.vehicle_sgo's entity.
+            def extra(side: str):
+                entry = copy.deepcopy(weapons[1])
+                if side == 'left':
+                    entry.items[1] = copy.deepcopy(weapons[0].items[1])
+                elif side != 'right':
+                    entry.items[1] = Node([0.0, 0.0])
+                return entry
+            weapons = [*weapons, *(extra(side) for side in vc.GROUND_VEHICLES['bmpt'].slots[2:])]
         if len(weapons) != len(jet_weapons):
             raise ValueError(f'{template_of(call)}: {len(weapons)} weapons in its setup, {call.ground} has {len(jet_weapons)}')
         swap.update({str(w.items[0]).lower(): new for w, new in zip(native_weapons, jet_weapons)})
