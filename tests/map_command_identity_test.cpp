@@ -91,6 +91,7 @@ int NpcGuardShape(const void*) noexcept {return -2;}
 int SetMarchFormation(int) noexcept {return -2;}
 ObjRef successorOld{},successorNew{};
 ULONGLONG GameFrame() noexcept {return 1;}
+ULONGLONG GameMs() noexcept {return 16;}   // the paced march's clock (mapcmd.cpp Pace)
 bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept {
     if(!successorOld.obj || old.obj!=successorOld.obj || old.ctrl!=successorOld.ctrl)return false;
     *now=successorNew;return true;

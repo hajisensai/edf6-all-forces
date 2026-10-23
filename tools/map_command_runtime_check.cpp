@@ -158,6 +158,7 @@ Command squad2Got{};int squad2Orders=0;
 float squadPos[3]{},squad2Pos[3]{};
 ULONGLONG stubFrame=1;
 ULONGLONG GameFrame() noexcept {return stubFrame;}
+ULONGLONG GameMs() noexcept {return stubFrame*16;}   // the paced march's clock (mapcmd.cpp Pace)
 int TransportLinks(TransportLink*,int) noexcept { return 0; }
 const void* TransportRiderOf(const void*) noexcept { return nullptr; }
 int SquadCommandUnits(CommandUnit* out,int most) noexcept {
@@ -1304,6 +1305,48 @@ void AuthorityQueue() noexcept {
     Check(squadOrders==4 && !game.groupN[0],"a new mission: its queues and groups gone");
     squadOn=squadReports=false;groundReady=false;std::memset(squadPos,0,12);ResetMapCommands();
 }
+
+// The paced march (march_pace.h; the user, 2026-10-23: "支持全体一块战术移动，可选择全速移动或者以最慢单位为基准"): two squads
+// given one move with the pace on; the one ahead waits for the other, never with the pace off; one stuck is not waited
+// for; at its point a unit leaves the march.
+void PacedMarch() {
+    ResetMapCommands();
+    Put<void*>(squadObj,kSelfCtrl,squadCtrl);Put<void*>(squad2Obj,kSelfCtrl,squad2Ctrl);
+    squadOn=squad2On=squadReports=true;groundReady=true;
+    std::memset(squadPos,0,12);std::memset(squad2Pos,0,12);
+    static Game g{};
+    g=Game{};List(g);g.sel.Add(squadObj);g.sel.Add(squad2Obj);RememberSelection(g);
+    int skipped=0;
+    Check(Dispatch(g,Command{Order::move,{400.0f,0.0f,0.0f}},&skipped,{false,true})==2 && !skipped,"a paced move: both squads take it");
+    ++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squadObj)==1.0f && MapPaceScale(squad2Obj)==1.0f,"side by side: both at full speed");
+    squad2Pos[0]=200.0f;++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squadObj)==1.0f && MapPaceScale(squad2Obj)==0.0f,"half way ahead of the slowest: held for it");
+    squadPos[0]=190.0f;++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squad2Obj)>0.0f,"the slowest caught up: on again");
+    // The slowest stuck (no 2 m gained for 8 s): the other goes on.
+    squad2Pos[0]=300.0f;stubFrame+=600;MapCommandQueueTick();
+    Check(MapPaceScale(squad2Obj)==1.0f,"the slowest stuck: not waited for");
+    // At its point: out of the march (a squad's order turned into a guard of it there).
+    squad2Pos[0]=squad2Got.at[0];squad2Pos[2]=squad2Got.at[2];squad2Got.order=Order::guard;++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squad2Obj)==1.0f && MapPaceScale(squadObj)==1.0f,"one there: nobody left to wait for");
+    // The pace off: no march at all.
+    std::memset(squadPos,0,12);squad2Pos[0]=200.0f;squad2Pos[2]=0.0f;
+    List(g);Check(Dispatch(g,Command{Order::move,{400.0f,0.0f,0.0f}},&skipped,{false,false})==2,"a move at full speed");
+    ++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squad2Obj)==1.0f,"full speed: the one ahead goes on");
+    // Paced again, then any other order to a unit takes it out of its march.
+    List(g);Dispatch(g,Command{Order::move,{400.0f,0.0f,0.0f}},&skipped,{false,true});
+    squad2Pos[0]=300.0f;++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squad2Obj)==0.0f,"paced: held");
+    List(g);Dispatch(g,Command{Order::none,{}},&skipped,{});
+    ++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squad2Obj)==1.0f,"stopped (X): out of the march");
+    // The pace key toggles the mode the map's orders go with.
+    ResetMapCommands();
+    Check(MapPaceScale(squad2Obj)==1.0f,"a new mission: no march");
+    squadOn=squad2On=squadReports=false;groundReady=false;std::memset(squadPos,0,12);std::memset(squad2Pos,0,12);
+}
 }  // namespace
 }  // namespace crew
 int main() {
@@ -1313,7 +1356,7 @@ int main() {
     crew::SupportInput();
     crew::UiCaptureAndSnapshots();crew::RtsClicks();crew::PickOnlyCommandable();crew::FormationMenu();
     crew::RemoteCommandResults();crew::SelectionCapabilityMask();crew::PlacePanel();crew::PvpUiActions();
-    crew::RtsGroups();crew::AuthorityQueue();
+    crew::RtsGroups();crew::AuthorityQueue();crew::PacedMarch();
     std::printf("map_command_runtime_check: %d checks, %d failed\n",crew::cases,crew::failures);
     return crew::failures ? 1 : 0;
 }

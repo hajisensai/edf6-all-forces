@@ -83,7 +83,7 @@ namespace crew {
 void SupportNetTick() noexcept {}
 // mapcmd.cpp's authority entry (its queue: tools/map_command_runtime_check.cpp): a plain order given by the executor.
 NpcCommandResult MapCommandAuthority(const ObjRef& unit,const mapcmd::Command& c,const ObjRef& requester,const ObjRef& focus,
-                                     bool,MapCommandGive give) noexcept {
+                                     bool,MapCommandGive give,std::uint32_t) noexcept {
     return give(unit,c,requester,focus);
 }
 bool MapGroundNear(float,float,float,float* out,bool) noexcept { *out=0;return rpc_fixture::projectionOk; }

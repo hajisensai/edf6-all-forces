@@ -258,6 +258,9 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     const Goal g=GoalOf(pos,leader,p.best,p.aim,reach);
     float move[2];
     MoveStick(r,v,g,move);
+    // The paced march (mapcmd.cpp MapPaceScale): its stick a share of full, to keep with the slowest.
+    const float pace=MapPaceScale(v);
+    move[0]*=pace;move[1]*=pace;
     float face[3]{};
     const float* want=nullptr;
     // Faced in 3D: Turn takes it onto the surface the crawler clings to.

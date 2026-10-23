@@ -276,6 +276,7 @@ struct Config {
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
+    bool mapMarchPace=false;        // ...a move / attack-move given together keeps to the slowest unit's pace (P toggles; march_pace.h)
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
     bool damageStats=true;          // the damage statistics (damagestats.cpp): every hit booked, its page over the map
     int damageStatsKey=0x49;        // ...the page's key ('I': the map opened on it; a Windows virtual-key code, 0: none)
