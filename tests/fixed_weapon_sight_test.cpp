@@ -38,6 +38,7 @@ bool HudReady() noexcept{return true;}
 bool FuelGauge(const void*,FuelReading*) noexcept{return false;}
 bool IsFuelTank(const unsigned char*) noexcept{return false;}
 unsigned char* PayloadPicked(const void*) noexcept{return nullptr;}
+unsigned char* PayloadOwnSecondaryPicked(const void*) noexcept{return nullptr;}
 const StoreSpec* sightStore=nullptr;
 const StoreSpec* StoreOf(const unsigned char*) noexcept{return sightStore;}
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept{return nullptr;}

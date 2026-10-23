@@ -177,8 +177,9 @@ def gun_sgo(game: vc.Game, kind: str, stock: str, side: str,
 
 
 # Each BMPT holder's part (vehicle weapons in order): the native guns' sides, the missile tubes, then the second belt's
-# sides (on the same moving barrels) and the thermobaric missile (the same tubes).
-BMPT_SLOTS = ('left', 'right', 'missiles', 'left', 'right', 'missiles')
+# sides (on the same moving barrels) and the thermobaric missile (the same tubes). The registry's (GroundVehicle.slots):
+# the plugin's twin-barrel cadence (vcobjects.twin_barrels) pairs the barrels from the same table.
+BMPT_SLOTS = vc.GROUND_VEHICLES['bmpt'].slots
 
 
 def slot(kind: str, index: int) -> str:
@@ -246,11 +247,14 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
     native = list(weapons.items)
     weapons.items = []
     for index, path in enumerate(vehicle.weapons):
-        entry = copy.deepcopy(native[min(index, 1)])
+        side = slot(kind, index)
+        entry = copy.deepcopy(native[1 if side == 'right' else 0 if side == 'left' else min(index, 1)])
         entry.items[0] = path
-        # Both classes require a BodyRecoil variant. A missile and small
-        # autocannons do not need the native heavy hull impulse.
-        entry.items[1] = _node([0.0, 0.0])
+        # Both classes require a BodyRecoil variant. The BMPT's barrels (either belt) keep the native gun mount's
+        # (its kick on every shot: the firing shake the request already has, call_weapons.vehicle_sgo; 2026-10-21
+        # 「开火动画没了」: the entity / test range copy had none); its missiles and the M163's one M61 none.
+        if kind != 'bmpt' or side not in ('left', 'right'):
+            entry.items[1] = _node([0.0, 0.0])
         weapons.items.append(entry)
     setting = r.get('vehicle_weapon_setting')
     if len(setting.items) != 2:

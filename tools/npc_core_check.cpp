@@ -237,6 +237,13 @@ bool VisitLockPoints(EnemyVisitor visit,void* ctx) noexcept { if(lockOf)visit(ct
 bool nativePayloadFixture=false;
 bool NativePayloadControl(const void*,unsigned) noexcept {return nativePayloadFixture;}
 unsigned char* chosenGunnerWeapon=nullptr;
+unsigned char* chosenSecondaryWeapon=nullptr;const void* lastIndependentWeapon=nullptr;int independentPulls=0;
+unsigned char* NpcSecondarySelect(unsigned char*,unsigned,float,bool) noexcept {return chosenSecondaryWeapon;}
+bool FireIndependentSecondary(unsigned char* v,unsigned seat,const unsigned char* expectedWeapon) noexcept {
+    if(!chosenSecondaryWeapon || (expectedWeapon && expectedWeapon!=chosenSecondaryWeapon) ||
+       At<float>(SeatAt(v,seat),0x2E0)<0.8f)return false;
+    lastIndependentWeapon=expectedWeapon;++independentPulls;return true;
+}
 bool suppressGunnerChoice=false;
 PayloadFire chosenGunnerFire=PayloadFire::primary;
 bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }   // heli.cpp's (NpcCoaxFire's check)

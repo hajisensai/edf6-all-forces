@@ -75,6 +75,7 @@ struct StockArm {
     float bore[3],at[3],lead[3],range,flight;   // first real barrel path; at/range/flight never replaced by target selection
     bool physicalOnly=true,coFired=false; // fixed/partial/unknown mount; this weapon shares the active trigger
     bool armed=false;            // on one of the seat's triggers now (payload.cpp PayloadTriggerWeapons): its marks are drawn too
+    bool ownPick=false;          // the own secondary's pick (payload.cpp PayloadOwnSecondaryPicked: the BMPT's missile now)
     float targetRange=0;         // optional articulated-gun lead cue, never replaces physical path data above
     int paths=0;
     roundaim::Impact path[roundaim::kSightPaths]{};
