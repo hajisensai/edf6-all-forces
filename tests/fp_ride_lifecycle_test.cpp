@@ -343,6 +343,36 @@ int main() {
     check(pose[0]==0 && pose[16]==0,"new neighbouring bars and contacts do not inherit this seat's readings");
     Unpose(inst,backup);
     check(std::memcmp(pose,originals,sizeof(pose))==0,"new widget dispatch restores every original pose byte");
+    {   // The attitude card end to end (2026-10-21, docs/feedback-2026-10-21-attitude-indicator.md): the HUD's readings
+        // (FirstPersonInstrumentReadings, the bank from the seat's own frame) through the published draw snapshot into
+        // the production pose of a g_ bone. A nose 10 degrees up in a 30 degree right bank must draw a card dropped
+        // and turned, never the level card at rest.
+        const State keep=Current();
+        Current().on=true;Current().riding=true;Current().human=human;Current().ride.seat=0;
+        const float ahead[3]={0,0,1},side[3]={1,0,0};
+        const float pitch=10.0f*0.01745329252f,bank=30.0f*0.01745329252f;
+        // Rows left, up, ahead: the bank turns the frame about its own ahead (right wing down: the left row up), then
+        // the nose up about its left row.
+        const M4 banked=fpview::Mul(fpview::Rotation(ahead,std::cos(bank),std::sin(bank)),
+                                    fpview::Rotation(side,std::cos(pitch),-std::sin(pitch)));
+        std::memcpy(Current().ride.frame,banked.m,64);
+        instruments::Readings r{};
+        for(float& v:r.value)v=-1.0f;
+        r.flight=true;r.value[instruments::pitch]=10.0f;
+        FirstPersonInstrumentReadings(r,human);
+        check(std::fabs(Current().instruments.value[instruments::roll]-30.0f)<0.5f,
+              "the bank read from the seat's frame: 30 degrees right wing down");
+        Put<const wchar_t*>(bones,0,L"vc_i_0_0_g_10_45_950");
+        Put<const wchar_t*>(bones+kBoneStride,0,L"vc_i_0_0_v_10");
+        drawInstruments();
+        const float turned=std::atan2(pose[1],pose[0])/0.01745329252f;
+        check(std::fabs(std::fabs(turned)-30.0f)<0.5f && std::fabs(pose[12]*pose[12]+pose[13]*pose[13]-.045f*.045f)<1e-5f,
+              "a banked, nose-up aircraft's attitude card is drawn turned by the bank and dropped by the pitch");
+        check(pose[16]==1 && pose[21]==1,"the fixed aircraft symbol stays shown in flight");
+        Unpose(inst,backup);
+        check(std::memcmp(pose,originals,sizeof(pose))==0,"the attitude card's pose is restored byte for byte");
+        Current()=keep;
+    }
 
 
     reset();Put<std::uint64_t>(human,kWeaponCount,0);

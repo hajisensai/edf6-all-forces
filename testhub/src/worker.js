@@ -3,7 +3,7 @@
 //  - cases: what to test, how, and its state; reports: the tester's results with logs / videos attached;
 //  - the developer's replies sit under each report.
 // Everything is behind a login (ACCOUNTS secret); scripts and the installer use HTTP Basic instead of the cookie.
-import { parseAccounts, checkLogin, makeSession, readSession, basicUser } from './auth.js';
+import { loadAccounts, checkLogin, makeSession, readSession, basicUser } from './auth.js';
 import { HttpError, json, body } from './http.js';
 import { planRoute } from './plan.js';
 import MISSIONS from './missions.json' with { type: 'json' };
@@ -54,7 +54,7 @@ async function who(request, env, accounts) {
 
 async function route(request, env) {
   if (!env.ACCOUNTS || !env.SESSION_SECRET) return json({ error: 'server not configured' }, 500);   // fail closed
-  const accounts = parseAccounts(env.ACCOUNTS);
+  const accounts = loadAccounts(env);
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;

@@ -3577,6 +3577,10 @@ bool PlayerRescueCue(RescueCue* out) noexcept {
 void PressBoardButton(unsigned char* human) noexcept { PressBoard(human); }
 void PressBoardButtonBumping(unsigned char* human) noexcept { PressBoard(human,true); }
 bool BoardButtonReady() noexcept { return profileOk && boardOk; }
+// The board button's own gates (0x56D700, see kBoardButton): it does nothing while one is set (the soldier busy).
+bool BoardButtonBlocked(const unsigned char* human) noexcept {
+    return (At<unsigned char>(human,0x128)&1u)!=0 || (At<std::uint32_t>(human,0x5D0)&4u)!=0 || At<std::int32_t>(human,0x39C)!=0;
+}
 bool HumanOnFoot(const unsigned char* human) noexcept { return OnFoot(human); }
 
 bool SeatPoint(const unsigned char* v,unsigned seat,float* at,float* reach) noexcept {

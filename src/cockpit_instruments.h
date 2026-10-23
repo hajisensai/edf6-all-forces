@@ -88,6 +88,13 @@ inline SeatPose SeatPoseOf(bool mine,wchar_t mode,int field,int place,int fields
     return SeatPose::skip;
 }
 
+// The bank of a seat's eye frame `m` (rows left, up, ahead in the world: vc_eye_<seat>), degrees, right wing down
+// positive; -1 for a degenerate frame. The attitude cards' roll (firstperson.cpp FirstPersonInstrumentReadings) and the
+// head-up glass's bank scale (hud.cpp HeadUpGlass) read it the same way.
+inline float BankOf(const float* m) noexcept {
+    return std::isfinite(m[1]+m[5]) && (m[1]!=0.0f || m[5]!=0.0f) ? std::atan2(m[1],m[5])/0.01745329252f : -1.0f;
+}
+
 inline bool Available(const Readings& r,int field) noexcept {
     return field>=0 && field<count && std::isfinite(r.value[field]) &&
         ((field!=hp && field!=hull) || std::isfinite(r.share[field])) &&
