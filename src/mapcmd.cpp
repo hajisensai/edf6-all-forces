@@ -917,22 +917,30 @@ float Reach(const Entry& e) noexcept {
 
 // --- The paced march (march_pace.h), the authority's ---
 // The units this machine is the authority for that took one move / attack-move with the pace on, by march (`group`):
-// each one's way and its share of its own full speed now (MapPaceScale, read by the modules that drive them). A unit
-// leaves its march at its point (Reach), on another order (its order now not this point), or dead; a jet does not
-// march (it cannot fly slower than it does). Game thread.
-struct PacedUnit { ObjRef id; std::uint32_t group; float at[3]; pace::Member m; float scale; };
+// each one's way and its share of its own full speed now (MapPaceScale, read by the modules that drive them). By the
+// unit's UnitRef (a squad goes on under its next top, as its Shift queue does). A unit leaves its march at its point
+// (Reach), on another order (its order now not this point, nor a trip of its transport taking it there), and when it is
+// not listed here any more (dead, gone, no driver, another machine's: what it does then is not this machine's to read,
+// and its progress frozen where it was last seen would hold the rest of the march as its slowest); a jet does not march
+// (it cannot fly slower than it does). A unit carried there by its transport (transport.cpp: a squad aboard, its vehicle
+// driven by its own driver) gives that vehicle its share too. Game thread.
+struct PacedUnit { mapcmd::UnitRef unit; std::uint32_t group; float at[3]; pace::Member m; ObjRef carrier; };
 PacedUnit paced[kCmdUnits]{};
 std::uint32_t paceGroups=0;
+constexpr float kPaceOnPoint=2.0f;   // m: an order's point still the march's (a squad's move turned into a guard of it there)
 
 float Across(const float* a,const float* b) noexcept { return std::hypot(b[0]-a[0],b[2]-a[2]); }
-static_assert(pace::kShares==kCmdUnits,"a share for every unit that can march");
-// The shares the driving modules read (march_pace.h MapPaceScale): the marching units', no one else's.
+static_assert(pace::kShares==2*kCmdUnits,"a share for every unit that can march and for its transport");
+// The shares the driving modules read (march_pace.h MapPaceScale): the marching units' and their transports', no one else's.
 void PublishShares() noexcept {
-    for(int i=0;i<kCmdUnits;++i)
-        pace::shares[i]=paced[i].m.active ? pace::Share{paced[i].id.obj,paced[i].id.ctrl,paced[i].scale} : pace::Share{};
+    for(int i=0;i<kCmdUnits;++i) {
+        const PacedUnit& p=paced[i];
+        pace::shares[2*i]=p.m.active ? pace::Share{p.unit.top.obj,p.unit.top.ctrl,p.m.scale} : pace::Share{};
+        pace::shares[2*i+1]=p.m.active && p.carrier ? pace::Share{p.carrier.obj,p.carrier.ctrl,p.m.scale} : pace::Share{};
+    }
 }
 void Unpace(const ObjRef& id) noexcept {
-    for(auto& p:paced)if(p.m.active && p.id.obj==id.obj && p.id.ctrl==id.ctrl)p=PacedUnit{};
+    for(auto& p:paced)if(p.m.active && mapcmd::SameKey(p.unit.top,Key(id)))p=PacedUnit{};
     PublishShares();
 }
 // Unit `e` given `c` (accepted, given now): in march `group` (0 none) from here, out of any it was in.
@@ -940,27 +948,30 @@ void Pace(const Entry& e,const Command& c,std::uint32_t group) noexcept {
     Unpace(e.id);
     if(!group || e.owner==Owner::jet || (c.order!=Order::move && c.order!=Order::attackMove))return;
     for(auto& p:paced)if(!p.m.active) {
-        p=PacedUnit{e.id,group,{c.at[0],c.at[1],c.at[2]},{},1.0f};
+        p=PacedUnit{Capture(e),group,{c.at[0],c.at[1],c.at[2]},{},ObjRef{}};
         pace::Begin(p.m,Across(e.u.pos,c.at),GameMs());
+        PublishShares();
         return;
     }
+    Log("MAPCMD the paced march's table full (%d): %p goes at its own speed",kCmdUnits,e.u.v);
 }
 // Every march on: each unit's way left from where it is now, and its share of full speed.
 void PaceTick(const Entry* list,int count) noexcept {
     const ULONGLONG now=GameMs();
-    bool any=false;
     for(auto& p:paced) {
         if(!p.m.active)continue;
-        const Entry* e=nullptr;
-        for(int i=0;i<count && !e;++i)if(list[i].id.obj==p.id.obj && list[i].id.ctrl==p.id.ctrl)e=&list[i];
-        if(!e)continue;   // out of the listing a frame (between drivers): kept, its way as it was
-        const float left=Across(e->u.pos,p.at);
-        // Its order now: still this point (a squad's move turned into a guard of it there: mapcmd_logic.h Arrive)?
-        if(!mapcmd::PointOrder(e->u.now.order) || Across(e->u.now.at,p.at)>2.0f || left<=Reach(*e)){p=PacedUnit{};continue;}
+        const int k=Resolve(p.unit,list,count,nullptr);
+        if(k<0 || !IsOnlineAuthority(list[k].u.v)){p=PacedUnit{};continue;}   // not listed here now: out of its march
+        const Entry& e=list[k];
+        Refresh(p.unit,e);
+        const float left=Across(e.u.pos,p.at);
+        // Its order now: still this point, or its transport's trip there (the squad's own order is held till it is off)?
+        const void* carrier=TransportTripTo(e.u.v,p.at,kPaceOnPoint);
+        const bool onIt=carrier || (mapcmd::PointOrder(e.u.now.order) && Across(e.u.now.at,p.at)<=kPaceOnPoint);
+        if(!onIt || left<=Reach(e)){p=PacedUnit{};continue;}
+        p.carrier=carrier && carrier!=e.u.v ? ObjRef::Of(carrier) : ObjRef{};
         pace::Update(p.m,left,now);
-        any=true;
     }
-    if(!any){PublishShares();return;}
     for(auto& p:paced)if(p.m.active && p.group) {
         bool first=true;   // each march once: at its first unit in the table
         for(const auto& o:paced){if(&o==&p)break;if(o.m.active && o.group==p.group){first=false;break;}}
@@ -968,8 +979,8 @@ void PaceTick(const Entry* list,int count) noexcept {
         pace::Member m[kCmdUnits];int idx[kCmdUnits];int n=0;
         for(int i=0;i<kCmdUnits;++i)if(paced[i].m.active && paced[i].group==p.group){m[n]=paced[i].m;idx[n++]=i;}
         float scale[kCmdUnits];
-        pace::Scales(m,n,now,scale);
-        for(int i=0;i<n;++i)paced[idx[i]].scale=scale[i];
+        pace::Scales(m,n,scale);
+        for(int i=0;i<n;++i)paced[idx[i]].m=m[i];
     }
     PublishShares();
 }

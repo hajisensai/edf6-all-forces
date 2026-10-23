@@ -122,6 +122,7 @@ int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int TankCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int TransportLinks(TransportLink*,int) noexcept { return 0; }
 const void* TransportRiderOf(const void*) noexcept { return nullptr; }
+const void* TransportTripTo(const void*,const float*,float) noexcept { return nullptr; }
 int SquadCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int SquadRows(SquadRow*,int,SquadTally* tally) noexcept { if(tally)*tally=SquadTally{};return 0; }
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }

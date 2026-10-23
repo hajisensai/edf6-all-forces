@@ -161,6 +161,12 @@ ULONGLONG GameFrame() noexcept {return stubFrame;}
 ULONGLONG GameMs() noexcept {return stubFrame*16;}   // the paced march's clock (mapcmd.cpp Pace)
 int TransportLinks(TransportLink*,int) noexcept { return 0; }
 const void* TransportRiderOf(const void*) noexcept { return nullptr; }
+// A transport's trip (transport.cpp TransportTripTo): `tripVehicle` carrying `tripRider` (a squad's top) to `tripAt`.
+const void* tripVehicle=nullptr;const void* tripRider=nullptr;float tripAt[3]{};
+const void* TransportTripTo(const void* unit,const float* at,float within) noexcept {
+    if(!tripVehicle || !unit || (unit!=tripVehicle && unit!=tripRider))return nullptr;
+    return std::hypot(tripAt[0]-at[0],tripAt[2]-at[2])<=within ? tripVehicle : nullptr;
+}
 int SquadCommandUnits(CommandUnit* out,int most) noexcept {
     int n=0;
     if(squadOn && n<most) {
@@ -1342,6 +1348,30 @@ void PacedMarch() {
     List(g);Dispatch(g,Command{Order::none,{}},&skipped,{});
     ++stubFrame;MapCommandQueueTick();
     Check(MapPaceScale(squad2Obj)==1.0f,"stopped (X): out of the march");
+    // Held for the slowest (review of PR #241): however long it waits, it is not "stuck" -- the time it was told to stand
+    // is not time it failed to get on. The slowest on its way: the one ahead still held after 30 s.
+    std::memset(squadPos,0,12);std::memset(squad2Pos,0,12);
+    List(g);Dispatch(g,Command{Order::move,{400.0f,0.0f,0.0f}},&skipped,{false,true});
+    squad2Pos[0]=300.0f;++stubFrame;MapCommandQueueTick();
+    for(int s=0;s<30;++s){squadPos[0]+=3.0f;stubFrame+=63;MapCommandQueueTick();}
+    Check(MapPaceScale(squad2Obj)==0.0f,"held 30 s for a slowest getting on: still held, never stuck");
+    // A unit gone from the listing (dead, another machine's) leaves the march at once: the one it held goes on, and its
+    // row is free (no frozen "slowest" left behind holding the rest).
+    squadOn=false;++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squad2Obj)==1.0f && MapPaceScale(squadObj)==1.0f,"the slowest gone: the other goes on at once");
+    squadOn=true;++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squad2Obj)==1.0f,"back in the listing: not in the march it left");
+    // Carried by its transport (transport.cpp: the squad's own order held until it is off): still in the march, its
+    // vehicle -- the one driven -- given its share; the trip over (no trip, its order not the point), out of it.
+    std::memset(squadPos,0,12);squad2Pos[0]=0.0f;
+    List(g);Dispatch(g,Command{Order::move,{400.0f,0.0f,0.0f}},&skipped,{false,true});
+    static unsigned char truckObj[0x400]{},truckCtrl[0x10]{};Put<void*>(truckObj,kSelfCtrl,truckCtrl);
+    tripVehicle=truckObj;tripRider=squad2Obj;std::memcpy(tripAt,squad2Got.at,12);
+    squad2Got.order=Order::guard;squad2Got.at[0]=0.0f;squad2Got.at[2]=0.0f;   // held where it boarded
+    squad2Pos[0]=300.0f;++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squad2Obj)==0.0f && MapPaceScale(truckObj)==0.0f,"on its transport's trip: in the march, the truck held");
+    tripVehicle=tripRider=nullptr;++stubFrame;MapCommandQueueTick();
+    Check(MapPaceScale(squad2Obj)==1.0f && MapPaceScale(truckObj)==1.0f,"the trip over: out of the march");
     // The pace key toggles the mode the map's orders go with.
     ResetMapCommands();
     Check(MapPaceScale(squad2Obj)==1.0f,"a new mission: no march");

@@ -429,6 +429,22 @@ const void* TransportRiderOf(const void* vehicle) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
 
+const void* TransportTripTo(const void* unit,const float* at,float within) noexcept {
+    __try {
+        if(!unit)return nullptr;
+        for(const auto& t:trips) {
+            if(t.count<=0 || !Live(t.vehicle))continue;
+            const bool carrier=t.vehicle.Is(unit);
+            for(int i=0;i<t.count;++i) {
+                const TripRider& r=t.riders[i];
+                if(!(carrier || r.top.Is(unit)) || !mapcmd::PointOrder(r.after.order))continue;
+                if(std::hypot(r.after.at[0]-at[0],r.after.at[2]-at[2])<=within)return t.vehicle.obj;
+            }
+        }
+        return nullptr;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
+}
+
 bool TransportOrder(const void* top,const mapcmd::Command& c) noexcept {
     __try {
         const Pair* p=PairOf(top);

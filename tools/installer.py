@@ -95,10 +95,18 @@ NEW_DEFAULTS_1017: dict[str, dict[str, tuple[str, str]]] = {
 }
 DEFAULTS_MARK_1017 = '; edf6vc-defaults-2026-10-17：安装器已把仍是旧出厂值 15 的 Edf41MotherParts 改成 31' \
                      '（4.1 母舰的板甲也建出来；想改就改，之后安装不会再改）'
+# The high view (the user, 2026-10-23: "俯瞰视角太小了"): its eye from 45 m over / 35 m behind to 90 / 55 (src/crew.h
+# highCamHeight / highCamBack); merge_ini keeps an old ini's 45 / 35, so it never saw the farther view.
+NEW_DEFAULTS_1024: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'HighCamHeight': ('45', '90'), 'HighCamBack': ('35', '55')},
+}
+DEFAULTS_MARK_1024 = '; edf6vc-defaults-2026-10-24：安装器已把仍是旧出厂值的高视角 HighCamHeight 45 / HighCamBack 35 ' \
+                     '改成 90 / 55（想改就改，之后安装不会再改）'
 # Every step in order: (its mark, its flips). A step whose mark the ini has is done.
 DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = (
     (DEFAULTS_MARK, NEW_DEFAULTS),
     (DEFAULTS_MARK_1017, NEW_DEFAULTS_1017),
+    (DEFAULTS_MARK_1024, NEW_DEFAULTS_1024),
 )
 
 
@@ -245,7 +253,7 @@ def _apply_defaults_step(text: str, section: str, mark: str,
 
 
 def planned_ini(user: str, shipped: str, section: str = SECTION) -> tuple[str, list[str], list[str], list[str]]:
-    """The player's ini as install_plugin writes it: merge_ini, then apply_new_defaults. (text, added, gone, turned on)."""
+    """The player's ini as install_plugin writes it: merge_ini, then apply_new_defaults. (text, added, gone, moved to a new default)."""
     text, added, gone = merge_ini(user, shipped, section)
     text, flipped = apply_new_defaults(text, section)
     return text, added, gone, flipped
@@ -306,7 +314,7 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN
     elif not flipped:
         print(f'保留你的 {ini}（没有需要补的新设置）')
     if flipped:
-        print(f'  这些设置的默认值已改为开启，你的 ini 里还是旧默认值，已改成开启：{", ".join(flipped)}（想关就改回，之后安装不会再改）')
+        print(f'  这些设置的出厂默认值已更新，你的 ini 里还是旧默认值，已改成新默认值：{", ".join(flipped)}（想改就改回，之后安装不会再改）')
     if gone:
         print(f'  其中 {", ".join(gone)} 新版本已不再使用，可以手动删掉')
 
