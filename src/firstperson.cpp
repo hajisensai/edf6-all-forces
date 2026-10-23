@@ -1561,7 +1561,7 @@ void CameraAfterNative(unsigned char* cam) noexcept {
         } else {
             Camera(cam);
             if(!Current().on || Current().cam!=cam || !Current().riding)
-                VehicleLookCamera(CameraPlayer(cam),reinterpret_cast<float*>(cam+kCamMatrix));
+                VehicleLookCamera(CameraPlayer(cam),reinterpret_cast<float*>(cam+kCamMatrix),true);   // third person: round the vehicle
         }
     }
     __except(EXCEPTION_EXECUTE_HANDLER){CancelToggle(nullptr);const auto key=Current().key;Current()=State{};Current().cam=cam;Current().key=key;ClearViews(static_cast<int>(selected-states));}

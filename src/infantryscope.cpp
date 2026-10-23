@@ -54,12 +54,16 @@ const unsigned char* OpenScope(const unsigned char* human) noexcept {
     return nullptr;
 }
 
-// Slot 3 of the stock crosshair: not drawn for the soldier whose scope this plugin draws (the function's own early
-// returns leave exactly as much undone: docs in infantryscope.h).
+// Slot 3 of the stock crosshair: not drawn for the soldier whose scope this plugin draws, on foot (InfantryScopeNow) or
+// through a vehicle's sight (hud.cpp HudScopeHoldsCrosshair, scope_hold.h) (the function's own early returns leave
+// exactly as much undone: docs in infantryscope.h).
 void __fastcall CrossDrawHook(void* self,void* a,void* b) {
     __try {
-        InfantryScopeCue c;
-        if(InfantryScopeNow(&c) && Readable(self,kCrossHuman+8) && At<const void*>(self,kCrossHuman)==c.human)return;
+        if(Readable(self,kCrossHuman+8)) {
+            const void* const soldier=At<const void*>(self,kCrossHuman);
+            InfantryScopeCue c;
+            if(soldier && ((InfantryScopeNow(&c) && soldier==c.human) || HudScopeHoldsCrosshair(soldier)))return;
+        }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     nextCrossDraw(self,a,b);
 }

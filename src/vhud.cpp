@@ -101,16 +101,20 @@ void Reload(const unsigned char* w,StockArm& a) noexcept {
     a.reloadSec=left>0 ? static_cast<float>(left)/60.0f : 0.0f;
 }
 
-// How far left of the vehicle's middle `centre` its weapon `w`'s first muzzle is, m, across the camera's view `look` (the
-// strip's order, hud_cue.h SideOrder); 0 unknown. Left is up x look: (look z, 0, -look x), as the hull's row 0 is its left
-// (turretcam.h) for its row 1 up and row 2 its nose.
-float SideOf(const unsigned char* w,const float* centre,const float* look) noexcept {
+// How far left of the vehicle's middle `centre` its weapon `w`'s first muzzle is, m, across the weapon's own bore (the
+// strip's order, hud_cue.h SideOrder); 0 unknown. Left is up x bore: (bore z, 0, -bore x), as the hull's row 0 is its left
+// (turretcam.h) for its row 1 up and row 2 its nose; a bore straight up or down (no level left) is read across `hull`.
+// Not across the camera's view: holding the free-look key (vehicle_look.cpp) turns the camera round the vehicle, and the
+// strip's left-to-right order turned with it (the user, 2026-10-21: "鼠标中键移动视角的时候，底下的挂载会变化，应该挂载
+// 顺序不动才对"). The bore turns with the turret, the torso, the arm the weapon is on, never with the look.
+float SideOf(const unsigned char* w,const float* centre,const float* hull) noexcept {
     const auto muzzles=At<const unsigned char*>(w,edf::kMuzzles);
     const auto count=At<std::uint64_t>(w,edf::kMuzzleCount);
     if(!count || count>kMostMuzzles || !Readable(muzzles,edf::kMuzzleStride))return 0.0f;
     float pos[3],dir[3];
-    float left[3]={look[2],0.0f,-look[0]};
-    if(!edf::MuzzleFrame(w,muzzles,pos,dir) || !vec::Normalize(left))return 0.0f;
+    if(!edf::MuzzleFrame(w,muzzles,pos,dir))return 0.0f;
+    float left[3]={dir[2],0.0f,-dir[0]};
+    if(!vec::Normalize(left)){left[0]=hull[2];left[1]=0.0f;left[2]=-hull[0];if(!vec::Normalize(left))return 0.0f;}
     const float off[3]={pos[0]-centre[0],pos[1]-centre[1],pos[2]-centre[2]};
     const float side=vec::Dot(off,left);
     return std::isfinite(side) ? side : 0.0f;
@@ -346,7 +350,7 @@ void StockHudFrame(unsigned char* v) noexcept {
             // The range to what it is aimed at: the pick's, and every gun on a trigger (each keeps its own sight, hud.cpp
             // OtherTriggerSight: the Titan's Requiem cannon while its machine gun is picked).
             Arm(w,!r.heli && (a.coFired || a.armed),a,(w==sight || a.armed) && !(HighCamOn(v) || TurretCamHighTransition(v)),antiAir);
-            a.side=SideOf(w,r.pos,r.lookOk ? r.look : r.hull);
+            a.side=SideOf(w,r.pos,r.hull);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     // A Proteus seat also works the stock mounts it borrows (proteus.cpp: the driver both cannons with nobody at the
@@ -357,7 +361,7 @@ void StockHudFrame(unsigned char* v) noexcept {
         for(int i=0;i<lent && r.arms<kStockArms;++i) {
             auto& a=r.arm[r.arms++];a.coFired=true;
             Arm(borrowed[i],true,a,false);
-            a.side=SideOf(borrowed[i],r.pos,r.lookOk ? r.look : r.hull);
+            a.side=SideOf(borrowed[i],r.pos,r.hull);
             if(!r.aimOk && a.aimed){std::memcpy(r.aim,a.bore,12);r.aimOk=true;}
         }
     }
