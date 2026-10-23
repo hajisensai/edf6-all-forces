@@ -15,6 +15,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 
+import cockpits
 import dsgo
 import ledger
 import vcobjects as vc
@@ -352,7 +353,10 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
                 raise ValueError(f'{kind}: muzzle left the authored barrel/launcher')
 
 
-def build(root: str, kind: str) -> dict[str, bytes]:
+def authored(root: str, kind: str) -> dict[str, bytes]:
+    """Every file build() writes, checked, before its seats' cockpits are grafted into the model: the authored
+    geometry's contracts (check) are made on this, and readers of the weapons alone (gen_spawn_catalog) need no
+    cockpit."""
     game = vc.Game(root)
     model = model_module(kind)
     vehicle = vc.GROUND_VEHICLES[kind]
@@ -371,6 +375,14 @@ def build(root: str, kind: str) -> dict[str, bytes]:
         files[f'WEAPON/{name(5)}'] = missile_sgo(game, points['missiles'], name(5))
     check(files, kind, game)
     return files
+
+
+def build(root: str, kind: str) -> dict[str, bytes]:
+    """Every file this tool writes, {path under Mods: bytes}: authored() with its seats' first-person cockpits grafted
+    into the model (pylib/cockpits.py; the fits are pylib/cockpit_fits_plugin.py's, by the model's stem), as every
+    generated vehicle's are: without a `vc_eye_<seat>` marker in the model a seat has no first person
+    (src/fp_vehicle.cpp VehicleEye)."""
+    return cockpits.graft_files(vc.Game(root), authored(root, kind))
 
 
 def install(root: str, files: dict[str, bytes], kind: str) -> list[str]:

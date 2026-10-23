@@ -23,7 +23,7 @@ RECIPES = 'asset_recipes.json'
 GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'ultimate', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'bigmap', 'sazabi', 'proteus', 'optics')
 MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi', 'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt'}
 # The groups whose models carry first-person cockpits (pylib/cockpits.py): the cockpits' asset folder is an input.
-COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'sazabi', 'optics')
+COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'sazabi', 'optics')
 MODULE_FOLDERS = ('tools', 'pylib', 'testrange', 'autoturret/tools')
 
 

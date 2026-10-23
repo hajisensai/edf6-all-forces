@@ -249,6 +249,25 @@ int wmain(int argc,wchar_t** argv){
     Check(!SightZoomMounted(vehicle) && Fov()==originalFov,"free look yields the mounted optic to the seat camera");
     observing=false;Check(SightZoomMounted(vehicle),"releasing observation resumes the same mounted optic");
     gunnerSight=false;Check(!SightZoomMounted(vehicle),"first person off: 1x is the turret camera's again");
+    // The sight's field over the view (SightZoomScope, sightzoom.h ScopeField): what hud.cpp draws its eyepiece by and
+    // holds the stock crosshair back by (scope_hold.h; 2026-10-21 "进入瞄具状态的时候没隐藏准星"): from one snapshot, the
+    // soldier looking through it named, gone with the field.
+    {
+        SightScope s{};
+        Setup();Button(0);
+        Check(!SightZoomScope(&s) && !s.human && s.zoom==1.0f,"1x in third person: no field (the turret camera's view)");
+        Zoom();
+        Check(SightZoomScope(&s) && s.human==human && s.vehicle==vehicle && s.kind==sightzoom::Kind::optical && s.zoom==3.0f,
+              "magnified: the field, its soldier and power");
+        mapView=true;Check(!SightZoomScope(&s) && !s.human,"the map's view: no field");
+        mapView=false;Put<void*>(seats,kSeatRider,otherHuman);
+        Check(!SightZoomScope(&s) && !s.human,"another local player in the seat: not this soldier's field");
+        Setup();Button(0);gunnerSight=true;
+        Check(SightZoomScope(&s) && s.human==human && s.zoom==1.0f,"first person at 1x: the mounted optic's field");
+        Setup();opticPresent=false;gunnerSight=true;Button(0);
+        Check(!SightZoomScope(&s),"first person without an optic: the cockpit's eye, no field (its stock HUD is first person's)");
+        Setup();highActive=true;Button(0);Button(0x80);Check(!SightZoomScope(&s),"the overhead view has no field");
+    }
     Setup();opticPresent=false;gunnerSight=true;Button(0);
     Check(!SightZoomMounted(vehicle),"first person in a seat without an optic: no gunner's sight (the cockpit's eye)");
     originalWrites=false;ResetSightZoom();Fov();Check(std::memcmp(camera+kCamMatrix,thirdPerson,sizeof(thirdPerson))==0,"leaving restores untouched original world matrix");

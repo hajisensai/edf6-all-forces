@@ -14,6 +14,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'pylib')]
 import call_weapons
+import cockpit_fits
+import cockpits
 import calls
 import dsgo
 import make_tracked_combat as combat
@@ -84,7 +86,31 @@ class NativeAssetContractTests(unittest.TestCase):
         cls.addClassCleanup(setattr, wt_tracked, 'ENABLED', wt_tracked.ENABLED)
         wt_tracked.ENABLED = False
         cls.game = rootcpk.default()
-        cls.files = {kind: combat.build(cls.game.root, kind) for kind in combat.KINDS}
+        # The authored files: build() is these with the seats' cockpits grafted (test_build_grafts_each_seats_eye).
+        cls.files = {kind: combat.authored(cls.game.root, kind) for kind in combat.KINDS}
+
+    @unittest.skipUnless(cockpits.assets_present(), 'the cockpit assets (models/cockpits) are unavailable')
+    def test_build_grafts_each_seats_eye(self) -> None:
+        # The user, 2026-10-21: "bmpt和火神炮缺少第一人称". A seat has first person only where its model carries the eye
+        # marker (src/fp_vehicle.cpp VehicleEye: "no cockpit in this seat" otherwise): build() grafts every fitted seat's,
+        # on the bone its fit rides, and leaves the authored files otherwise as they are.
+        for kind in combat.KINDS:
+            with self.subTest(kind=kind):
+                model = combat.model_module(kind)
+                built = combat.build(self.game.root, kind)
+                rel = f'OBJECT/{model.OUT_ARC}'
+                self.assertEqual(set(built), set(self.files[kind]))
+                self.assertEqual({k: v for k, v in built.items() if k != rel},
+                                 {k: v for k, v in self.files[kind].items() if k != rel})
+                fits = cockpit_fits.FITS[model.OUT_ARC.rsplit('.', 1)[0]]
+                arc = mdb.rab_read(built[rel])
+                md = mdb.mdb_read(next(f for f in arc.files if f.name.lower() == model.HOST_MDB).data)
+                for fit in fits:
+                    eye = md.bone_index(f'vc_eye_{fit.seat}')
+                    self.assertGreaterEqual(eye, 0, f'{kind}: seat {fit.seat} has no eye')
+                    self.assertEqual(md.name_of(md.bones[md.bones[eye].parent].name), fit.bone)
+                    world = mdb.bind_world(md)[eye]
+                    self.assertTrue(all(abs(a - b) < 1e-4 for a, b in zip(world[12:15], fit.eye)))
 
     def test_authored_geometry_native_skeleton_and_weapon_muzzles(self) -> None:
         for kind, files in self.files.items():

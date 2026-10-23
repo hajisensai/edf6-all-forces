@@ -198,6 +198,14 @@ float sceneZoom=1.0f;
 float SightZoomNow(const void*) noexcept { return sceneZoom; }
 sightzoom::Kind sceneSight=sightzoom::Kind::optical;
 sightzoom::Kind SightZoomView(const void*) noexcept { return sceneSight; }
+// The soldier looking through the scenes' sight (sightzoom.cpp SightZoomScope): the field as the plugin answers it.
+const int sceneScopeSoldier=0;
+bool SightZoomScope(SightScope* o) noexcept {
+    *o=SightScope{};
+    if(!sightzoom::ScopeField(sceneSight,sceneZoom,hasMountedOptic))return false;
+    o->human=&sceneScopeSoldier;o->kind=sceneSight;o->zoom=sceneZoom;
+    return true;
+}
 // A soldier's open scope (infantryscope.cpp): on in the infantry_scope scenes.
 bool hasInfantry=false;InfantryScopeCue sceneInfantry{};
 bool InfantryScopeNow(InfantryScopeCue* o) noexcept { if(hasInfantry && o)*o=sceneInfantry;return hasInfantry; }
@@ -1312,10 +1320,15 @@ int SightStyleScenes(const std::wstring& dir,const float* ground) {
             }
         const bool owned=SightGun(sceneStock,false)==0;
         const bool scope=zoomed ? scopePieces==scopeview::kSides : scopePieces==0;
-        const bool ok=words && apart && owned && scope;
+        // The stock crosshair (HudPlayer_CrossHair) gives way to the field drawn, for its soldier only (scope_hold.h; the
+        // user, 2026-10-21: "进入瞄具状态的时候没隐藏准星"); at 1x it stays.
+        const int otherSoldier=0;
+        const bool crosshair=HudScopeHoldsCrosshair(&sceneScopeSoldier)==(zoomed!=0) && !HudScopeHoldsCrosshair(&otherSoldier) &&
+                             !HudScopeHoldsCrosshair(nullptr);
+        const bool ok=words && apart && owned && scope && crosshair;
         failed+=!ok;
-        std::printf("%s  %ls: its words %d, no text overlapping %d, sight gun %d, scope quads %d\n",ok ? "ok  " : "FAIL",name.c_str(),words,apart,
-                    owned,scopePieces);
+        std::printf("%s  %ls: its words %d, no text overlapping %d, sight gun %d, scope quads %d, stock crosshair held back %d\n",
+                    ok ? "ok  " : "FAIL",name.c_str(),words,apart,owned,scopePieces,HudScopeHoldsCrosshair(&sceneScopeSoldier));
     }
     // A flamethrower, a grenade launcher: no gun sight (their impact marks only).
     StockTank(ground);
