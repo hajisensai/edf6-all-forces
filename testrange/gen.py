@@ -91,7 +91,7 @@ OWN_VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_pjet_fighter_mission', '玩家战斗机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_pjet_strike_mission', '玩家攻击机（自己驾驶，空着停放；测试场生成）'),
     (SAZABI_JET, '沙扎比 MSN-04（自己驾驶，空着停放；要有沙扎比模型目录）'),
-    (DREADNOUGHT_JET, '无畏舰（自己驾驶，空着停放，全长 200 米，放在最远的点；要有无畏舰模型目录）'),
+    (DREADNOUGHT_JET, '无畏舰（自己驾驶，空着停放，全长 500 米，放在最远的点；要有无畏舰模型目录）'),
     # The NPC kinds parked for the player (BOARDABLE_PARKED): each one's parked twin (vcobjects Jet.parked: the whole
     # plane is solid, its boarding point at its side on the ground, every class may fly it).
     (parked_name('edf6tr_jet_fighter_mission'), '制空战斗机·停放（自己驾驶；测试场生成）'),
@@ -171,7 +171,7 @@ DERIVED: dict[str, str] = {
     'edf6tr_vehicle401_striker_mission': 'VEHICLE401_STRIKER',
     'edf6tr_vehicle502_groundrobo_mission': 'VEHICLE502_GROUNDROBO',
 }
-# Vehicles too big for a spot by the player (the 1664 m submarine, the 200 m Dreadnought): they take the farthest free points.
+# Vehicles too big for a spot by the player (the 1664 m submarine, the 500 m Dreadnought): they take the farthest free points.
 BIG = frozenset({'edf6tr_sub_carrier_mission', DREADNOUGHT_JET})
 # The range's own vehicles the M map's 「摆放」 makes (empty, for the player to drive: testrange/catalog.py category 'ours'):
 # install writes every one of them whether the plan places it or not (placeable_derived). Not an NPC kind of jet (empty,

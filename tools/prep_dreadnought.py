@@ -11,7 +11,7 @@ game files into the model folder the installer builds them from (pylib/dreadnoug
     <models>/dreadnought/SOURCE.txt           where it came from
 
 The source is the folder CUE4Parse wrote the game's meshes and textures into (glb + png, every path as in the game's
-paks; D:\\APP\\edf6-assets\\tools\\dnexport, EGame UE4_13 parses its 4.14 packages): each ship a skeletal mesh of one
+paks; a developer's own CUE4Parse exporter, EGame UE4_13 parses its 4.14 packages): each ship a skeletal mesh of one
 real bone (root), +Y up, +X the bow, metres / 100 of the game's world.
 
 Size: the Dreadnought's world is scaled down (a dreadnought 19.4 of its metres, its fighters 0.68): the user wants
@@ -59,7 +59,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import obj_model  # noqa: E402
 
-DEFAULT_EXPORT = r'D:\APP\edf6-assets\export'
 GENERIC = 'DreadGame/Content/Generic'
 SHIP_LENGTH = 500.0        # metres, the dreadnought's bow to stern: its fighters a fighter's size (see Size above)
 TEX = 1024                 # every texture's size
@@ -672,20 +671,42 @@ def write_model(name: str, parts: tuple[Part, ...], export: str, scale: float, o
             'materials': materials, 'extent': extent, 'tris': np.concatenate(tris_out)}
 
 
-SOURCE = """Ships from "Dreadnought" (Yager Development / Six Foot, 2017-2023), extracted from its game files
-(DreadGame/Content/Generic/Ships, .../Abilities/Dreadnought/Hangar) for the free EDF6VehicleCrew mod.
-Not part of the mod's repository; the installer builds the vehicles from this folder on the player's machine.
-Made by tools/prep_dreadnought.py (scale: the dreadnought {length:.0f} m bow to stern).
+# The model folder's record of where its assets came from (as models/sazabi/LICENSE.txt and models/cockpits/CREDITS_*.txt
+# record theirs): it goes with the folder into the release (tools/build_release.py RELEASE_MODELS).
+SOURCE = """Dreadnought model used by EDF6VehicleCrew (free, non-commercial mod).
+
+Source: the game "Dreadnought" (Yager Development / Six Foot, 2017-2023), extracted from its game files with CUE4Parse:
+  DreadGame/Content/Generic/Ships/Dreadnought/Heavy (the Jupiter Arms heavy dreadnought, its default paint),
+  DreadGame/Content/Generic/Abilities/Dreadnought/Hangar (the "Fighters" hangar module, four of them),
+  DreadGame/Content/Generic/Weapons/Dreadnought/SecShort, SecMid, SecLong (the secondary turrets),
+  DreadGame/Content/Generic/Ships/RespawnJet (fighter, defender, bomber, interceptor).
+Changes: scaled to {length:.0f} m bow to stern, split into rigid parts per bone, its paint baked into the colour textures,
+converted to the game's model format; marker bones and collision added by the mod.
+The assets remain the property of their owners and carry no open licence; they ship with the mod by the decision of its
+repository owner. This is an unofficial fan work, not affiliated with or endorsed by the game's developer or publisher.
+Made by tools/prep_dreadnought.py.
 """
+
+
+def write_source(out: str) -> None:
+    """The folder's SOURCE.txt (SOURCE)."""
+    with open(os.path.join(out, 'SOURCE.txt'), 'w', encoding='utf-8', newline='\n') as h:
+        h.write(SOURCE.format(length=SHIP_LENGTH))
 
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument('export', nargs='?', default=DEFAULT_EXPORT)
+    ap.add_argument('export', nargs='?', help="the folder CUE4Parse exported the game's packages into")
     ap.add_argument('--out', default=os.path.join(obj_model.DEV_MODELS, 'dreadnought'))
     ap.add_argument('--paint', default=PAINT, help='another paint (VanityItems/..._DA, exported) to compare')
+    ap.add_argument('--source-only', action='store_true', help="only (re)write the folder's SOURCE.txt")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
+    if a.source_only:
+        write_source(a.out)
+        return 0
+    if not a.export:
+        ap.error('the export folder is required')
     ship = read_glb(os.path.join(a.export, *GENERIC.split('/'), *MODELS[SCALE_FROM][0].glb.split('/')))
     scale = SHIP_LENGTH / float(np.ptp(ship.pos[:, 0]))
     manifest = {'scale': scale, 'models': {}}
@@ -705,8 +726,7 @@ def main(argv: list[str]) -> int:
         print(name, 'size', [round(h - l, 1) for l, h in zip(e['min'], e['max'])], 'bones', list(e['bones']))
     with open(os.path.join(a.out, 'dreadnought.json'), 'w', encoding='utf-8', newline='\n') as h:
         json.dump(manifest, h, indent=1)
-    with open(os.path.join(a.out, 'SOURCE.txt'), 'w', encoding='utf-8', newline='\n') as h:
-        h.write(SOURCE.format(length=SHIP_LENGTH))
+    write_source(a.out)
     return 0
 
 

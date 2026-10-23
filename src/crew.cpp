@@ -679,10 +679,11 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepGravity, kStepPvp, kStepThermal, kStepEnemyControl, kStepUltimate, kStepMapQueue, kStepCount };
-const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepGravity, kStepPvp, kStepThermal, kStepEnemyControl, kStepUltimate, kStepMapQueue, kStepDreadnought, kStepCount };
+const char* const kStepNames[]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","gravity","pvp","thermal","enemy control","ultimate","map queue"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","gravity","pvp","thermal","enemy control","ultimate","map queue","dreadnought"};
+static_assert(sizeof(kStepNames)/sizeof(kStepNames[0])==kStepCount,"a name for every step, in the enum's order");
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -863,7 +864,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     // The NPC soldiers in its gunner seats aim and fire, before the stock input reads the seats (npcai.cpp).
     Guarded(kStepNpcGunners,&NpcGunnersInput,static_cast<unsigned char*>(vehicle)); // also releases our last inputs when disabled
     // A Dreadnought's local rider's aim stick as the observation reads it, before the stock input (dreadnought_turrets.inc).
-    if(Cfg().enabled)Guarded(kStepSazabi,&DreadnoughtInput,static_cast<unsigned char*>(vehicle));
+    if(Cfg().enabled)Guarded(kStepDreadnought,&DreadnoughtInput,static_cast<unsigned char*>(vehicle));
     nextInput[I](vehicle,hasInput,a3,a4);
     QueryPerformanceCounter(&t1);
     ReloadConfigIfChanged();   // before the Enabled test: Enabled=0 must be able to come back on
@@ -891,7 +892,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHeliReap,&HeliReapStep,v);
     Guarded(kStepPlayerJet,&PlayerJetFrame,v);
     Guarded(kStepSazabi,&SazabiFrame,v);
-    Guarded(kStepSazabi,&DreadnoughtFrame,v);
+    Guarded(kStepDreadnought,&DreadnoughtFrame,v);
     Guarded(kStepSub,&SubStep,v);
     Guarded(kStepHeli,&HeliStep,v);
     Guarded(kStepHeli,&HeliCueStep,v);

@@ -1,17 +1,19 @@
 # 无畏舰（Dreadnought）：计划与实现记录
 
 用户原话（2026-10-21）：
-- 「"D:\QuarkCloudDrive\无畏战舰\Dreadnought.zip" 我想把里面的无畏舰拿出来放到edf里面。那艘可以放飞船的无畏舰。飞船可以玩家上去的那种。并且玩家也可以操纵无畏舰」
+- （附原作游戏文件的压缩包，本机路径略）「我想把里面的无畏舰拿出来放到edf里面。那艘可以放飞船的无畏舰。飞船可以玩家上去的那种。并且玩家也可以操纵无畏舰」
 - 选型：「重型无畏舰+机库」；尺寸「原作多大他就多大」；舰载机「Bomber / Interceptor, Defender Fighter, Fighter」全要。
 - 「船的炮塔是可以上人的」
 
+用户原话的完整记录（含两次试玩反馈）：`docs/feedback-2026-10-21-dreadnought.md`。
+
 可信度：**H** = 代码 / 数据直接确认；**M** = 有旁证的推断；**L** = 猜测，必须进游戏验证。
 
-## 1. 资产来源（开发者机器，H）
+## 1. 资产来源（H）
 
 - 游戏：Yager / Six Foot《Dreadnought》，UE 4.14（包文件版本 505，licensee 6）。30 个 `custompakchunk*.pak`，V3，索引未加密。
 - 解包：CUE4Parse 1.2.2（.NET 10），**必须用 `EGame.GAME_UE4_13`**：以 4.14 解析时 `FSkeletalMaterial` 读到 `FMeshUVChannelInfo`（4.16 才有），`Invalid bool value (-2)`。
-  工具在 `D:\APP\edf6-assets\tools\dnexport`（不入库），导出到 `D:\APP\edf6-assets\export`。
+  导出工具 `dnexport` 是开发者本机的 CUE4Parse 小程序（不入库）；`tools/prep_dreadnought.py` 读它的导出目录（命令行参数）。
 - 选用的网格（`DreadGame/Content/Generic/...`）：
   - 舰体 `Ships/Dreadnought/Heavy/VH_DreadH_SK`（Jupiter Arms 重型无畏舰，1.57 万顶点，两个材质）；
   - 机库 `Abilities/Dreadnought/Hangar/AB_DN_Pri_Hangar_SK`（「Fighters」主技能模块，6 根骨骼：两部升降机、上下舱门各两扇），装 4 个；
@@ -33,7 +35,12 @@
   `_SEAT_CAMERA`、`src/dreadnought.cpp` `kLength`（`kReach` = 0.44 kLength、`kBeam` = 0.2 kLength）、`dreadnought_hangar.inc` `kSize`
   （机库进近距离按 200 m 时的数等比放大）与 `kOverDeck`（舰载机 SGO `heli_rigid_body[0][1]`）；selftest `dreadnought_agrees`、
   `make_dreadnought.check` 钉住 keel（标记贴碰撞顶的容差按该高度半精度浮点的步长：79 m 处 0.0625 m）。
-- 素材授权：用户 2026-10 起的规则「选3D素材不管授权来源」。模型目录和生成物不进仓库（`D:\APP\edf6-models\dreadnought`，发布包 `models/dreadnought`）。
+- 素材来源记录（与沙扎比 `models/sazabi/LICENSE.txt`、驾驶舱 `models/cockpits/CREDITS_*.txt` 同一做法：随模型目录走的文本文件）：
+  `prep_dreadnought.py` 在模型目录写 `SOURCE.txt`，写明出处（Yager Development / Six Foot《Dreadnought》，2017–2023）、
+  取了哪些资产（舰体、4 个机库模块、8 座副炮、4 种舰载机，`DreadGame/Content/Generic/...`）、做了什么改动（缩放到 500 m、重新绑骨、
+  涂装烘进贴图、转成 EDF 格式），以及「非官方同人作品，与原作版权方无关，模型版权归原作者」。原作资产没有开放授权；
+  随发布包分发（`tools/build_release.py RELEASE_MODELS` 含 `dreadnought`）由仓库所有者决定（2026-10-24 已同意）。
+  模型目录和生成物不进仓库，开发者本机的模型目录由 `pylib/obj_model.py DEV_MODELS` 给出，发布包里是 `models/dreadnought`。
 
 ## 2. 管线（H，离线验证）
 
@@ -47,7 +54,7 @@
 
 没有模型目录时：`EDF6VC_DREADNOUGHT.SGO` 写原版 V506_HELI，请求叫来普通 N9 Eros，不写舰载机（与沙扎比同一套退回逻辑，已泛化为 `MODEL_VEHICLES`）。
 
-## 3. 插件（2026-10-21 第二轮按用户反馈重写，`docs/feedback-dreadnought.md`）
+## 3. 插件（2026-10-21 第二轮按用户反馈重写，`docs/feedback-2026-10-21-dreadnought.md`）
 
 - 标记：无畏舰 7601–7699（`PluginBody::dreadnought`）；舰载机 7041–7044（`Body::dnFighter..dnInterceptor`，`BodyRow::crewless`）。
 - `src/dreadnought.cpp` 舰桥驾驶（座位 0，原作手感）：W/S（左摇杆前后）推拉油门、停在推到的位置（可倒车到 -35%）；A/D 转向（转向有惯性、
@@ -66,9 +73,9 @@
     等游戏删掉它（`JetHangarStow`），再在开口显示副本、滑回；
   - 舰桥按机库键（H / Y）：护航编队（有的每种一架）或召回；
   - 前甲板待命机（`dn_ready`）：下一种战机自动出库停在前甲板；玩家走过去登机 → 从舰首弹射（1.6 s 加速到舰速 +90 m/s，
-    `playerjet.cpp PlayerJetLaunched` 接手）；开着舰载机在 1500 m 内按机库键 → 自动降落到前甲板，玩家被放到旁边（`dn_ready_side`），
+    `playerjet.cpp PlayerJetLaunched` 接手）；开着舰载机在 1500 m 内按机库键 → 自动降落到前甲板，玩家被放到舰桥（`dn_bridge`），
     这架就是新的待命机；
-  - 下舰站舰桥 `dn_bridge`、返舰后放到 `dn_ready_side`（都在标记上方 `kPutOver` 1.5 m 放下，落到碰撞格顶上；§8）。
+  - 下舰站舰桥 `dn_bridge`、返舰后也放到舰桥 `dn_bridge`（`dn_ready_side` 标记仍生成，插件不用）（都在标记上方 `kPutOver` 1.5 m 放下，落到碰撞格顶上；§8）。
 - 碰撞体：`body506.cpp MakeAirframe` 用 SGO 成员 `edf6vc_airframe`（`pylib/vcobjects.py AIRFRAME_MEMBER`）认出插件生成的网格复合体；
   原来的 shape userData 标记在游戏加载紧凑 SHKT 时会丢失（实测 +0x28 一直是 0），历史日志里这条路一次都没生效过，所有插件飞机都是包围盒。
   目前只给无畏舰和它的 4 种舰载机打了这个成员（其他飞机的改动需要另外实机验证）。
@@ -79,9 +86,14 @@
 2. 舱门在右舷外侧地面（`move_door`）；舰体 500 m，玩家要走到右舷中段。
 3. 炮手座：410 门炮手姿势套在 506 机体上，所有炮手座共用驾驶座的定位点；炮塔骨骼局部矩阵每帧写入后引擎是否按它画（沙扎比同法，H for sazabi）。
 4. 炮塔开火的瞄准点取屏幕中心射线；`kOnAim` 2° 内才开火。
-5. 出击：离座后玩家处于步行（下落）状态，`BoardingRequest` 能否在空中把人送进刚放出的战机（登机枪路径有距离 / 速度豁免，M）。
-6. 返舰：`DreadnoughtTakesBack` 拦掉跳伞和接机；`HandBack` 把无人机交回自飞（M）。
+5. 出击：走到前甲板的待命机旁登机（登机枪 / 上车键），舰首弹射 1.6 s 后交给 `PlayerJetLaunched`（M，未实机）。
+6. 返舰与下机：`DreadnoughtTakesBack` 只在战机被本机机库托在前甲板待命位上（距待命位 ≤ 3 m、相对母舰 ≤ 4 m/s，`src/dreadnought_deck.h`）时
+   拦掉跳伞和接机；其余任何位置（舰体包围盒内飞过、舰首弹射途中、联机非机库机器）都照常弹射跳伞（2026-10-24 审查：原先只看舰体包围盒，
+   飞过舰体上空下机会无伞掉下去）。返舰降落、待命位下机未实机（M）。
 7. 模型左右是否镜像：CUE4Parse glTF 的手性按 UE 左手系 → glTF 右手系推断（M），舰体基本对称，看不出差别。
+8. 预载：只要装了模型，每关 `PreloadJets` 都预载 4 种舰载机；另外按标记预载**所有**已预载插件喷气机的武器 SGO（15 个，§6 第 4 项），
+   对所有插件喷气机生效。没法只在「本关可能出现无畏舰」时预载：能叫来无畏舰的是玩家装备的载具请求，预载发生在任务开始时，
+   本地玩家的装备可在任务预载时从 GameStatus 读到（`loadout.cpp`、`docs/loadout-re.md`），但机库跑在无畏舰的联机权威那台机器上（是否总是叫来它的那名玩家未实测），测试场又不经武器直接放一艘（`testrange/gen.py`），只看本地装备会漏；按需预载要先实机确认这两点，本轮不改。插件自己生成的其它机体（潜水母舰 `subcarrier.cpp PreloadSub`、插件喷气机）也是「文件在就预载」。内存增量未实测（`LogMemory("mission start")` 可量）。
 
 ## 4.1 标记骨骼（H，离线；`prep_dreadnought.ship_markers`，`make_dreadnought.check_markers` 检查）
 
@@ -140,7 +152,7 @@
 1. 上船后无输入直冲到 189 m：`Floor` 把垂直速度直接设成 (30−5)×1.5 = 37.7 m/s，`Approach` 只能按 4 m/s² 刹。改为不超过 √(2ad)，并把高度保持并入目标速度。
 2. 悬停每秒掉 0.15 m：写入的速度在求解器积分时被扣一帧重力。改为松杆时锁定高度（锁在按当前速度刹停的位置）闭环保持。
 3. 落地后一直以 −6 m/s 压地面：用 506 的接触位（+0x1580 bit 2），着地即不再下压。
-4. 第一次按机库卡 1.9 s（轰炸机 1.6 s）：喷气机 SGO 预载不含其武器 SGO，挂架武器在第一次生成时同步加载。`PreloadJets` 现在按标记预载已预载机体的武器（stores.inc `kJetWeapons`，15 个），对所有插件喷气机都生效。
+4. 第一次按机库卡 1.9 s（轰炸机 1.6 s）：喷气机 SGO 预载不含其武器 SGO，挂架武器在第一次生成时同步加载。`PreloadJets` 现在按标记预载已预载机体的武器（stores.inc `kJetWeapons`，15 个），对所有插件喷气机都生效（内存影响未实测，见 §4 第 8 项）。
 
 第三轮复测：离地爬到地板 30 m 只过冲 0.5 m；松开上升在 64 m 停住无回弹；悬停高度不变；前进 45 m/s 加速 4 m/s²；机库一次放 4 架无卡顿；空中下船直接换乘战机（出击）；无人时降到地面后停住。
 
@@ -168,7 +180,7 @@
 - 舰体看起来偏白：舰体材质约一半是裸金属（原作配色 `m_baseMetalic` 1），在 EDF 明亮的天空下像镜子；舰的金属度已减半（`SHIP_METAL`），
   仍偏银白，待用户看。
 
-## 8. 第三轮（2026-10-21 晚，用户第二次试玩反馈 `docs/feedback-dreadnought.md` 第二段）
+## 8. 第三轮（2026-10-21 晚，用户第二次试玩反馈 `docs/feedback-2026-10-21-dreadnought.md` 第二段）
 
 - **加农炮打到自己**：舰的 ragdoll 部件刚体的对象不是舰本身，原版子弹收集器只按指针排除开火者，所以炮塔炮弹在炮口（就在舰体复合体的格子里）
   打中自己的舰体。`jet_hooks.cpp` 的子弹候选钩子加了「舰体」表（`HullBodies`：每艘无畏舰的飞行刚体 + ragdoll 部件 id，每帧发布）：舰本身

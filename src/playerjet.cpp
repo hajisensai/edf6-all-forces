@@ -1549,7 +1549,8 @@ void ChuteForget() noexcept {
 // eject too, high enough"). In the air over kEjectFrom (`clear`: now, or the last frame's for a jet gone) they are
 // thrown up and come down under the parachute (EjectTick). `alive`: the jet still there to write back to.
 void Leave(PJet& j,unsigned char* v,float clear,bool alive,const char* how) noexcept {
-    // ...save a Dreadnought fighter's pilot near its dreadnought: they go back aboard it (dreadnought_hangar.inc), no parachute
+    // ...save a Dreadnought fighter's pilot getting out where they stand on their ship (its fighter held on its foredeck spot:
+    // dreadnought.cpp DreadnoughtTakesBack, dreadnought_deck.h): no parachute. Anywhere else, near or over it too, they eject.
     const bool home=alive && !v[kDead] && DreadnoughtTakesBack(v);
     const bool eject=!home && j.phase==Phase::air && (clear==kNoGround || clear>kEjectFrom);
     if(eject)EjectStart(j,v,alive);

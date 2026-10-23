@@ -1,4 +1,4 @@
-// The Dreadnought (docs/dreadnought-plan.md, docs/feedback-dreadnought.md): the Dreadnought game's heavy dreadnought the
+// The Dreadnought (docs/dreadnought-plan.md, docs/feedback-2026-10-21-dreadnought.md): the Dreadnought game's heavy dreadnought the
 // player commands, on the V506 heli body like the Sazabi (sazabi.cpp), told apart by its mark (body506.cpp kMarks:
 // 7601-7699; tools/make_dreadnought.py writes EDF6VC_DREADNOUGHT.SGO). The plugin never crews it (crew.cpp Crew) and never
 // flies it as a heli (heli.cpp); it flies it in two stages a frame:
@@ -26,6 +26,7 @@
 // Water is no hazard: the 506's ditching message is taken whole (map rays see the seabed under the sea).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "body506.h"
+#include "dreadnought_deck.h"
 #include "dreadnought_net.h"
 #include "drill_net.h"
 #include "firstperson.h"
@@ -110,18 +111,6 @@ Ship* Find(const unsigned char* v) noexcept {
     for(auto& s:ships)if(s.vehicle==v && s.ref.Is(v))return &s;
     return nullptr;
 }
-Ship* Make(unsigned char* v) noexcept {
-    for(auto& s:ships) {
-        if(s.vehicle && Live(s))continue;
-        s=Ship{};s.ref=ObjRef::Of(v);s.vehicle=v;
-        return &s;
-    }
-    static const void* refused=nullptr;
-    if(refused!=v)Log("DREADNOUGHT v=%p: %d already known: not flown",v,kMaxShips);
-    refused=v;
-    return nullptr;
-}
-
 bool KeyDown(int vk) noexcept {   // playerjet.cpp KeyDown
     if(vk<=0 || MapHoldsKeys())return false;
     DWORD pid=0;
@@ -323,17 +312,34 @@ void Report(Ship& s,const unsigned char* v,const Controls& c,ULONGLONG ms) noexc
 #include "dreadnought_turrets.inc"
 #include "dreadnought_hangar.inc"
 
-// A ship taken on (Make), its slot's turrets and hangar new with it: a slot's last ship's are none of this one's.
+// Slot `i` new: everything kept per ship (its Ship, its turrets' rigs, remote gunners and network gate, its hangar's
+// rig, bays, foredeck and escorts, its hull's bodies in the bullets' hook) goes together. Reused for another ship, a slot
+// had kept the last one's turrets and hangar (review 2026-10-24: the rigs' `bones==... && ok` would take the dead
+// ship's bone records); every array indexed by slot is reset here alone (tests/dreadnought_slot_guard.py).
+void ResetSlot(int i) noexcept {
+    ships[i]=Ship{};
+    turrets[i]=Turrets{};
+    hangars[i]=Hangar{};
+    HullBodies(i,nullptr);
+}
+
+// A ship taken on: the first slot free (never used, or its ship gone), new (ResetSlot).
 Ship* Take(unsigned char* v) noexcept {
-    Ship* const s=Make(v);
-    if(s) {
-        turrets[s-ships]=Turrets{};hangars[s-ships]=Hangar{};
+    for(int i=0;i<kMaxShips;++i) {
+        if(ships[i].vehicle && Live(ships[i]))continue;
+        ResetSlot(i);
+        Ship* const s=&ships[i];
+        s->ref=ObjRef::Of(v);s->vehicle=v;
         // Held from its first frame (Settle: on the ground under it): its body is its mesh compound (body506.cpp
         // MakeAirframe), which, delivered a little into the ground, fell 270 m through the map left to the stock step
         // (range 2026-10-21); the box it had been had been pushed out.
         s->everDriven=true;
+        return s;
     }
-    return s;
+    static const void* refused=nullptr;
+    if(refused!=v)Log("DREADNOUGHT v=%p: %d already known: not flown",v,kMaxShips);
+    refused=v;
+    return nullptr;
 }
 
 void Drive(Ship& s,unsigned char* v,ULONGLONG ms) noexcept {
@@ -462,10 +468,7 @@ bool InstallDreadnought() noexcept {
 }
 
 void ResetDreadnought() noexcept {
-    for(auto& s:ships)s=Ship{};
-    for(int i=0;i<kMaxShips;++i)HullBodies(i,nullptr);
-    for(auto& r:turrets)r=Turrets{};
-    for(auto& h:hangars)h=Hangar{};
+    for(int i=0;i<kMaxShips;++i)ResetSlot(i);
     ResetBridge();
     AcquireSRWLockExclusive(&viewLock);view=View{};ReleaseSRWLockExclusive(&viewLock);
     sightFrame=0;cueFrame=0;aimIn=AimIn{};
@@ -488,9 +491,30 @@ bool DreadnoughtParked(const void* fighter) noexcept {
     return false;
 }
 
+// Whether the pilot getting out of `fighter` now stands on its ship (no parachute, no catch: playerjet.cpp Leave,
+// playerjet_board.inc Left). Only a fighter a hangar running here holds on its foredeck spot, on it and moving with the
+// ship (dreadnought_deck.h StandsAboard); anywhere else, over the hull's box too, they eject as from any jet.
 bool DreadnoughtTakesBack(const unsigned char* fighter) noexcept {
-    if(!installed || !Cfg().enabled || !Cfg().dreadnought || !IsDnFighter(fighter))return false;
-    return DeckUnder(reinterpret_cast<const float*>(fighter+kPosition))!=nullptr;
+    if(!installed || !Cfg().enabled || !Cfg().dreadnought || !IsDnFighter(fighter) || fighter[kDead])return false;
+    for(auto& s:ships) {
+        if(!s.vehicle || !Live(s))continue;
+        const Hangar& h=HangarOf(s);
+        int bay=-1;
+        if(h.parked.Is(fighter))bay=h.parkedBay;
+        else if(h.home.Is(fighter) && h.homeLow)bay=h.homeBay;
+        if(bay<0 || !h.ok)continue;
+        float spot[3];
+        DeckSpot(s.vehicle,h,KindOfBay(bay),spot);
+        const float* p=reinterpret_cast<const float*>(fighter+kPosition);
+        const float d[3]={spot[0]-p[0],spot[1]-p[1],spot[2]-p[2]};
+        auto* const f=const_cast<unsigned char*>(fighter);
+        const float rel=Relative(f,s.measured);
+        const bool aboard=dreadnought::StandsAboard(h.authority,true,vec::Len(d),rel);
+        Log("DREADNOUGHT v=%p: its pilot gets out of its %s %.1f m from its foredeck spot, %.1f m/s over the ship's: %s",
+            s.vehicle,kKindNames[KindOfBay(bay)],vec::Len(d),rel,aboard ? "aboard (no parachute)" : "not on it (ejects)");
+        return aboard;
+    }
+    return false;
 }
 
 // The local player's sight aboard, fresh this frame (hud.cpp GunnerMarks).

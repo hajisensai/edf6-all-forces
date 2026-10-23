@@ -765,6 +765,9 @@ add_test(NAME seat_net COMMAND seat_net_test)
 add_executable(dreadnought_net_test tests/dreadnought_net_test.cpp)
 target_compile_options(dreadnought_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME dreadnought_net COMMAND dreadnought_net_test)
+add_executable(dreadnought_deck_test tests/dreadnought_deck_test.cpp)
+target_compile_options(dreadnought_deck_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME dreadnought_deck COMMAND dreadnought_deck_test)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 # The installer's support menu (tools/support_config.py) against the plugin's keys and weapons, and its ini edits.
 add_test(NAME cockpit_build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_build_test.py")
@@ -870,6 +873,9 @@ set_tests_properties(doll_follow_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=u
 # The plugin's launched drones fly with no one aboard; crewed aircraft never launched empty (src/jet_internal.h Unmanned).
 add_test(NAME unmanned_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/unmanned_launch_guard.py")
 set_tests_properties(unmanned_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The Dreadnought: every per-ship slot array reset together, its pilots ejected unless on its foredeck spot, its own fault step.
+add_test(NAME dreadnought_slot_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/dreadnought_slot_guard.py")
+set_tests_properties(dreadnought_slot_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME npc_car_aim_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_car_aim_guard.py")
 set_tests_properties(npc_car_aim_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # Proportional navigation (src/pn.h) against the stock pure pursuit at the same turn limit.
@@ -1067,7 +1073,7 @@ target_link_libraries(drill_sync_test PRIVATE edf6common user32)
 target_include_directories(drill_sync_test PRIVATE src common)
 target_compile_options(drill_sync_test PRIVATE /W4 /WX /utf-8 /permissive- /Gy)
 target_link_options(drill_sync_test PRIVATE /OPT:REF)
-add_dependencies(offline_checks drill_net_test drill_sync_test seat_net_test dreadnought_net_test)
+add_dependencies(offline_checks drill_net_test drill_sync_test seat_net_test dreadnought_net_test dreadnought_deck_test)
 add_test(NAME drill_sync COMMAND drill_sync_test)
 add_executable(drill_launch_test EXCLUDE_FROM_ALL tests/drill_launch_test.cpp)
 target_link_libraries(drill_launch_test PRIVATE edf6common user32)

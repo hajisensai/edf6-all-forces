@@ -2577,7 +2577,7 @@ def spawn_catalog_covers_every_registry() -> None:
     assert {r.sgo for r in catalog.edf5dlc_rows()} <= set(by) and catalog.edf5dlc_rows(), 'EDF5 DLC objects'
     assert set(gen.PLACEABLE_DERIVED) <= set(by), sorted(set(gen.PLACEABLE_DERIVED) - set(by))
     assert all(by[s].category == 'ours' and by[s].source == 'range' for s in gen.PLACEABLE_DERIVED)
-    # not the requests' copies, nor the BIG ones (the 200 m Dreadnought: the plan places it at the farthest points)
+    # not the requests' copies, nor the BIG ones (the 500 m Dreadnought: the plan places it at the farthest points)
     want_jets = {s for s, j in vc.JETS.items() if (j.player or j.parked) and s in gen.DERIVED and s not in gen.BIG}
     assert want_jets <= set(gen.PLACEABLE_DERIVED), f'a jet the player flies is not placeable: {sorted(want_jets - set(gen.PLACEABLE_DERIVED))}'
     installer_rows = {s for s, _, _ in catalog.INSTALLER_VEHICLES}

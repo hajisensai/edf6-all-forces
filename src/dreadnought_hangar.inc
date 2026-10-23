@@ -22,8 +22,9 @@
 //    BoardableNow: a held one is boarded where it stands) is launched off the bow with it (kDeckRunSec, to kLaunchSpeed),
 //    flying it from there (playerjet.cpp PlayerJetLaunched).
 //  - Home for a player: their fighter's hangar key within kReturnRange: the hangar flies it onto the foredeck (the ready
-//    spot, free: nothing else is parked there while a player's fighter is out of it), puts them out beside it
-//    (dn_ready_side), and parks it there as the ready fighter again.
+//    spot, free: nothing else is parked there while a player's fighter is out of it), puts them out onto its bridge
+//    (dn_bridge, as getting out of its seats does: the user, 2026-10-21 「下船应在舰桥」), and parks it there as the
+//    ready fighter again. Only a pilot getting out on that spot goes without a parachute (DreadnoughtTakesBack).
 //  - The bridge: a local player getting out of any of its seats stands on its bridge (dn_bridge), not at the door on the
 //    ground.
 // Online: the plugin's aircraft are each machine's own (docs/online-re.md, "插件飞机 / 无人机的网络身份：没做"): the
@@ -73,8 +74,8 @@ struct Hangar {
     const void* bones=nullptr;
     bool ok=false,said=false,keyHeld=false;
     Bay bay[kBays]{};
-    unsigned char* deck=nullptr;  // dn_ready, dn_ready_side
-    unsigned char* deckSide=nullptr;
+    unsigned char* deck=nullptr;  // dn_ready
+    unsigned char* deckSide=nullptr;   // dn_bridge: where a pilot put out of the foredeck's fighter stands
     ObjRef parked;                // the fighter on its foredeck (the ready one, or a player's brought home)
     int parkedBay=-1;             // ...its bay
     const void* run=nullptr;      // ...boarded: its run off the bow began at runAt
@@ -259,7 +260,7 @@ bool SendOut(Hangar& h,unsigned char* v,int i,bool ready) noexcept {
     return true;
 }
 
-// The pilot of `f` (a player in its seat 0) put out: on the deck beside its foredeck spot (this machine's own player).
+// The pilot of `f` (a player in its seat 0) put out: onto its bridge (this machine's own player).
 void PutOut(Hangar& h,unsigned char* v,unsigned char* f) noexcept {
     if(!Flown(f))return;
     unsigned char* const me=PlayerHuman();
@@ -270,7 +271,7 @@ void PutOut(Hangar& h,unsigned char* v,unsigned char* f) noexcept {
     const float* side=BoneAt(h.deckSide);
     for(int i=0;i<3;++i)bridge.at[i]=side[i]+Axis3(v,1)[i]*kPutOver;
     bridge.putAt=GameMs();bridge.ship=ObjRef::Of(v);bridge.pending=true;bridge.tries=0;
-    Log("DREADNOUGHT v=%p hangar: its pilot put out on its foredeck",v);
+    Log("DREADNOUGHT v=%p hangar: its pilot put out onto its bridge",v);
 }
 
 // One bay's frame (its ship `v` moving at `ship`).
