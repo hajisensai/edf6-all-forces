@@ -48,6 +48,11 @@ bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1.0f; }
 bool mountedOptic=false;
 bool SightZoomMounted(const void*) noexcept{return mountedOptic;}
+// The optic present on seat 0 (sightzoom.cpp SightZoomCanMount) and first person on (FirstPersonGunnerSight): with both,
+// the gunner's sight is up and the free-look key is not the turret camera's (TurretCamFreeLook).
+bool canMount=false,gunnerSight=false;
+bool SightZoomCanMount(const void*,unsigned) noexcept{return canMount;}
+bool FirstPersonGunnerSight() noexcept{return gunnerSight;}
 bool highOn=true;
 bool HighCamOn(const void*) noexcept { return highOn; }
 int cameraReads=0;
@@ -309,6 +314,14 @@ void Run() {
         resumed=resumed && game.hasAim && shared.normalRay && !shared.resume && std::fabs(shared.yaw)<.01f;
     }
     Check(resumed && cameraReads==0,"returning third-person control uses its own request while old FP render rays remain left");
+    // The free-look key's owner (2026-10-21: "鼠标中键的时候应该是绕着车转…战雷一样的那个圆的鼠标指示点怎么没了"): in third
+    // person the turret camera's own look (its rig orbit, TurretMark's held circle), never vehicle_look.cpp's in-place turn.
+    Check(TurretCamFreeLook(vehicle,0) && !TurretCamFreeLook(vehicle,1) && !TurretCamFreeLook(nullptr,0),
+          "third person on the turret it places: the free look is the turret camera's, seat 0 only");
+    firstPersonVehicle=vehicle;Check(!TurretCamFreeLook(vehicle,0),"first person: the cockpit eye's own head turn");
+    firstPersonVehicle=nullptr;canMount=true;gunnerSight=true;Check(!TurretCamFreeLook(vehicle,0),"the gunner's sight up: the optic's observation");
+    gunnerSight=false;Check(TurretCamFreeLook(vehicle,0),"an optic at 1x in third person is not up: still the turret camera's");
+    canMount=false;mapView=true;Check(!TurretCamFreeLook(vehicle,0),"the map's view: nobody's free look");mapView=false;
     for(int ownerKind=0;ownerKind<3;++ownerKind) {
         mapKeys=ownerKind==0;mapView=ownerKind==1;observation=ownerKind==2;
         game.hasAim=game.steer.hasWant=true;shared.free=shared.returning=shared.steering=true;

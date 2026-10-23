@@ -105,6 +105,14 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # station came in off the roof 0.74, 0.75, 0.23, 1.27, 1.52, 0.58): lower, at the guns' height, their breeches'
     # angular backs filled the sight; from up here the view runs ahead between them.
     'EDF6VC_ARTILLERY': (Fit(0, 'cannon_main', (0.0, 2.65, -0.3), 'tank_gunner'),),
+    # The BMPT (tools/make_bmpt.py, pylib/bmpt_model.py; the Kepler's class: one seat, its driver lays the guns): the
+    # Terminator's weapon module is unmanned, its crew in the hull see it through the gunner's sight. The seat sees that
+    # sight's picture (remote_display), the eye at the gunner sight's glass (bmpt_model gunner_optics_glass, its front
+    # face at z 0.54) on the turret's yaw bone, over the twin 30 mm guns.
+    'EDF6VC_BMPT': (Fit(0, 'cannon_main', (-0.38, 2.43, 0.56), 'remote_display'),),
+    # The M163 (tools/make_vulcan.py, pylib/vulcan_model.py): its operator sits in the open-topped turret right of the
+    # M61 (the basket's seat at x -0.37), his head over the basket's rails, the gun's cradle and barrels on his left.
+    'EDF6VC_VULCAN': (Fit(0, 'cannon_main', (-0.30, 2.78, -0.25), 'open_rider'),),
     # The drill tank: from inside its turret the drill and its mount fill every view ahead (the imported model is
     # modelled inside; a tank_gunner station's sight looked at the mount's back wall from every place tried), so its
     # one seat sees a camera's monitor (remote_display): the camera on the turret's right flank beside the drill,
