@@ -356,8 +356,9 @@ void Run() {
         Put<int>(primary.data,edf::kWeaponAmmoAlive,launcher ? 1500 : 1200);Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         unsigned char camera[0x700]{};Put<float>(camera,0x528,.1f);
         Put<float>(camera,kCamEye+4,5);Put<float>(camera,kCamEye+8,-20);Put<float>(camera,kCamLook+4,2);
-        bool stable=true,realFocus=true,inputUnchanged=true;
+        bool stable=true,realFocus=true,inputUnchanged=true,onHull=true,still=true;
         const float wantPitch=-std::atan2(45.f,35.f);
+        float settledEye[3]{};
         for(int frameIndex=0;frameIndex<90;++frameIndex) {
             const float quietInput[2]{};float output[2]{};Aim(seat,quietInput,output); // native input/aim stage
             inputUnchanged=inputUnchanged && output[0]==0 && output[1]==0;
@@ -369,7 +370,16 @@ void Run() {
             const float delta[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
             const float pitch=vec::Len(delta)<1e-6f ? 0 : tcam::PitchOf(delta);
             if(frameIndex>20)stable=stable && std::fabs(pitch-wantPitch)<1e-4f;
+            // 2026-10-23: the view is on the hull, and the gun rocking (its muzzle moved every frame from frame 40,
+            // the real shot's endpoint with it) moves nothing.
+            if(frameIndex>20)onHull=onHull && std::hypot(look[0]-hull[0],look[2]-hull[2])<0.5f;
+            if(frameIndex==40)std::memcpy(settledEye,eye,12);
+            if(frameIndex>40)still=still && vec::Dist(eye,settledEye)<1e-3f;
+            if(frameIndex>=40)Matrix(primary.bone+edf::kBoneRows,-4,8+static_cast<float>(frameIndex%5),10+static_cast<float>(frameIndex%7));
         }
+        Matrix(primary.bone+edf::kBoneRows,-4,8,10);
+        Check(onHull,"the high view looks at the vehicle, not the shot's endpoint");
+        Check(still,"the gun rocking does not move the high view");
         Check(inputUnchanged,"high camera closed loop never generates native gun input from observation");
         Check(realFocus,"collision pivot must not change the real ballistic terrain focus");
         Check(stable,launcher ? "Katyusha high camera remains stable after native surface collision" : "twin artillery high camera remains stable after native surface collision");
