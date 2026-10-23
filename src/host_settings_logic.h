@@ -32,9 +32,13 @@ enum : std::uint32_t {
     kFeatBikeGunner=8u,        // the 408's sidecar gunner seat (edf41bike.cpp, #219)
     kFeatOutfit41Colours=16u,  // the EDF4.1 outfit keeps its own colours, in the member record too (#226)
     kFeatNoClimb41=32u,        // EDF4.1 friends do not enter EDF6's climb (#225)
+    kFeatBikeGrounded=64u,     // the 408's gun is an animated part, not a keyframed body pinning the chassis in the air;
+                               // its fall-out seats are its own (the object SGO's data, docs/edf41-bike-re.md 「悬空」)
+    kFeatBikeGunMount=128u,    // the 408's seat-1 gun is built at all (edf41bike.cpp's gate over 0x65B15A): without it a
+                               // build's gunner seat had no weapon and an unturnable Aim; the seat opens only with both
 };
 inline constexpr std::uint32_t kFeatures=kFeatHostSettings|kFeatCreditReload41|kFeatBikeCarDrive|kFeatBikeGunner|
-                                         kFeatOutfit41Colours|kFeatNoClimb41;
+                                         kFeatOutfit41Colours|kFeatNoClimb41|kFeatBikeGrounded|kFeatBikeGunMount;
 inline constexpr std::size_t kVersionMost=24;
 
 struct Word {
@@ -120,7 +124,9 @@ constexpr bool EveryoneHas(std::uint32_t features,std::uint32_t want) noexcept {
 inline constexpr bool kBikeGunnerLocal=true;
 // At an online mission's sync: the room's say (offline: this machine's).
 constexpr bool BikeGunnerAtSync(bool inRoom,bool surveyed,std::uint32_t silent,std::uint32_t common) noexcept {
-    return !inRoom ? kBikeGunnerLocal : surveyed && silent==0 && EveryoneHas(common,kFeatBikeGunner);
+    // Both bits (2026-10-21): a member with the seat but not the built gun would play a weaponless seat while the others
+    // fire, so such a room keeps the stock Car everywhere, as a room with an older build.
+    return !inRoom ? kBikeGunnerLocal : surveyed && silent==0 && EveryoneHas(common,kFeatBikeGunner|kFeatBikeGunMount);
 }
 // At the room / HQ frame's read (no mission decided there): out of a room, this machine's; in one, as the last sync
 // decided (the next sync decides again).

@@ -74,6 +74,30 @@ def native(path: Path) -> int:
     require(relative(data,0x664292)==0x6ED480,'explicit kinematic mode write differs')
     require(relative(data,0x6642A2)==0x6E94E0,'simulation row 0 restore-default path differs')
     require(data[0x6E972A:0x6E9730].hex()=='8b8ec8000000','row 0 must restore constructor default')
+    # The hover (2026-10-21): CarBase adds every proxy constraint once all are dynamic (0x6E4126 -> 0x6E4A70 ->
+    # 0x11C11A0). Row 0 removes the proxy's joint to its parent (0x6E9725 -> 0x6EC840 -> 0x11C1180), recursively over
+    # its children (r8b 1 at 0x664299); row 1 only makes it keyframed (0x6ED50E motion type 1) and keeps the joint,
+    # which then holds the dynamic body to a body of infinite mass (pylib/edf41bike.py pinned).
+    require(relative(data,0x6E4126)==0x6E4A70 and relative(data,0x6E4B1C)==0x11C11A0,'CarBase must add every proxy constraint')
+    require(data[0x664299:0x66429C].hex()=='41b001','row 0 must restore the whole subtree')
+    require(relative(data,0x6E9725)==0x6EC840 and relative(data,0x6EC85D)==0x11C1180,'row 0 must remove the joint to the parent')
+    require(data[0x6ED50E:0x6ED513].hex()=='ba01000000' and relative(data,0x6ED513)==0x11B1960,'mode 2 must be keyframed')
+    # The gun gate (2026-10-21): Car setup builds guns only when seat 0 owns one (0x65B14B loads the seat array,
+    # 0x65B152 seat 0's holder count +0xD8, 0x65B15A jbe past the loop to 0x65B3EF); the loop's only SetWeaponObject is
+    # 0x65B37E with seat 0's Aim. Both the script / placement path (0x633280) and the mission path (0x926A7) reach
+    # it through slot 46, so a seat-1 gun was never built anywhere.
+    require(0x65B15A+6+struct.unpack_from('<i',data,0x65B15C)[0]==0x65B3EF,'the gate skips the whole gun loop')
+    require(data[0x65B366:0x65B374].hex()=='498b97080600004881c2e0000000' and relative(data,0x65B37E)==0x633330,
+            'the gated loop builds with seat 0 Aim')
+    # In the loop (over vehicle_weapon_setting, 0x65B1B2 its name) a row's seat [1] in ebx is tested at 0x65B31B: another
+    # seat jumps to the next row (0x65B3A6) before the build; seat 0 builds at 0x65B37E.
+    require(data[0x65B1B9+0x118286F:0x65B1B9+0x118286F+44].decode('utf-16le')=='vehicle_weapon_setting','the loop walks vehicle_weapon_setting')
+    require(data[0x65B31B:0x65B323].hex()=='85db0f8583000000' and 0x65B323+0x83==0x65B3A6,'a row of another seat is skipped')
+    require(table(0x17E01B0,46)==0x65A910 and data[0x6332BE:0x6332C4].hex()=='ff9070010000'
+            and data[0x926B8:0x926BE].hex()=='ff9070010000','every spawn path runs Car setup slot 46')
+    # car_base_fall_out's seats index the seat array unchecked (0x673F41: seat * 0x340 + [v+0x608], then +0x268).
+    require(data[0x673F41:0x673F55].hex()=='496316488bcf4869f2400300004803b708060000'
+            and data[0x673F5A:0x673F61].hex()=='488b9668020000','fall-out seats are not bounds-checked')
     # Vehicle_Car requests BodyRecoil variant 0, unlike the old bike AimRecoil.
     # There is no null guard between that lookup and the recoil payload call.
     require(relative(data,0x65A750)==0x62EA10,'Car base FireRecoil path differs')
