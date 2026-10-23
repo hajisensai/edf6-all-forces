@@ -241,6 +241,8 @@ void Validate(Config& n) noexcept {
     n.playerJetBoostKey=static_cast<int>(FixInt("PlayerJetBoostKey",n.playerJetBoostKey,0,254));
     n.playerJetBrakeKey=static_cast<int>(FixInt("PlayerJetBrakeKey",n.playerJetBrakeKey,0,254));
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
+    n.vehicleSecondarySwitchKey=static_cast<int>(FixInt("VehicleSecondarySwitchKey",n.vehicleSecondarySwitchKey,0,254));
+    n.vehicleSecondarySwitchButton=static_cast<int>(FixInt("VehicleSecondarySwitchButton",n.vehicleSecondarySwitchButton,0,0xFFFF));
     n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
     n.playerJetHailKey=static_cast<int>(FixInt("PlayerJetHailKey",n.playerJetHailKey,0,254));
@@ -540,6 +542,8 @@ void LoadConfig() noexcept {
     n.playerJetBoostKey=ReadInt(L"PlayerJetBoostKey",static_cast<DWORD>(n.playerJetBoostKey));
     n.playerJetBrakeKey=ReadInt(L"PlayerJetBrakeKey",static_cast<DWORD>(n.playerJetBrakeKey));
     n.playerJetSwitchKey=ReadInt(L"PlayerJetSwitchKey",static_cast<DWORD>(n.playerJetSwitchKey));
+    n.vehicleSecondarySwitchKey=ReadInt(L"VehicleSecondarySwitchKey",static_cast<DWORD>(n.vehicleSecondarySwitchKey));
+    n.vehicleSecondarySwitchButton=ReadInt(L"VehicleSecondarySwitchButton",static_cast<DWORD>(n.vehicleSecondarySwitchButton));
     n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
     n.playerJetFlareKey=ReadInt(L"PlayerJetFlareKey",static_cast<DWORD>(n.playerJetFlareKey));
     n.playerJetAll=ReadBool(L"PlayerJetAll",n.playerJetAll);
@@ -937,6 +941,8 @@ void LoadConfig() noexcept {
         n.fpScale,n.fpNear,n.fpAimSnap,n.fpMotion);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
+    Log("CONFIG vehicle secondary switch key=0x%X button=0x%X (the primary's rounds: PlayerJetSwitchKey / LB)",
+        n.vehicleSecondarySwitchKey,n.vehicleSecondarySwitchButton);
     Log("CONFIG ViewDistance=%.0f (%s)",n.viewDistance,n.viewDistance<0.0f ? "unlimited" : n.viewDistance==0.0f ? "the mission's own" : "m");
     Log("CONFIG damageStats=%d key=0x%X",n.damageStats,n.damageStatsKey);
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,

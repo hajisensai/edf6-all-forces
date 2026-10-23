@@ -3190,6 +3190,27 @@ void AimSelectedGunner(unsigned char* v,unsigned index,const void* target,unsign
         Put<float>(seat,0x2E0,At<float>(seat,0x2E4));Put<float>(seat,0x2E4,0.0f);
     }
 }
+// Independent mounted weapons share this turret, but retain their own native lock,
+// geometry and safety decision. Never copy the cannon's accepted intent to a missile.
+// When a primary remains usable it owns the turret axes; otherwise the secondary can
+// turn toward targets beyond the cannon's reach. Both fire results stay independent.
+void AimIndependentSecondary(unsigned char* v,unsigned index,const void* target,float distance,bool airborne,bool primaryAim) {
+    const auto weapon=NpcSecondarySelect(v,index,distance,airborne);
+    if(!weapon || HoldFire(v,target,Pos(v),At<float>(weapon,0x894)*60.0f,At<float>(weapon,0x8E0)*14.7f))return;
+    const auto seat=SeatAt(v,index);
+    const float saved[4]={At<float>(seat,0x2D0),At<float>(seat,0x2D4),At<float>(seat,0x2E4),At<float>(seat,0x2E0)};
+    float secondary=0.0f;
+    __try {
+        Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
+        AimSelectedGunner(v,index,target,weapon,PayloadFire::secondary);
+        secondary=At<float>(seat,0x2E0);
+    } __finally {
+        if(primaryAim){Put<float>(seat,0x2D0,saved[0]);Put<float>(seat,0x2D4,saved[1]);}
+        Put<float>(seat,0x2E4,saved[2]);Put<float>(seat,0x2E0,saved[3]);
+    }
+    Put<float>(seat,0x2E0,secondary);
+    FireIndependentSecondary(v,index,weapon);
+}
 bool GunnerAirTarget(const void* target) noexcept {
     if(!Readable(target,kPosition+12))return false;
     const auto p=reinterpret_cast<const float*>(static_cast<const unsigned char*>(target)+kPosition);
@@ -3253,7 +3274,11 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
             native(v,0,target); // keep native tracking/idle behavior, but no unavailable shot
             Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
         }
-        if(target)NpcCoaxFire(v,0,target,&FriendInLine);   // the coaxial gun alongside whatever the crew chose (payload.cpp)
+        if(target) {
+            AimIndependentSecondary(v,0,target,npc::Dist(Pos(v),Pos(static_cast<const unsigned char*>(target))),
+                                    GunnerAirTarget(target),weapon!=nullptr);
+            NpcCoaxFire(v,0,target,&FriendInLine);   // the coaxial gun alongside whatever the crew chose (payload.cpp)
+        }
         RememberDriverPayload(v);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         // The selected-list helper restores its temporary pointer in __finally.
@@ -3316,10 +3341,11 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         if(p.best) {
             if(Cfg().stockStores || NativePayloadControl(v,i)) {
                 PayloadFire fire=PayloadFire::other;
-                const auto w=NpcPayloadSelect(v,i,p.bestD,GunnerAirTarget(p.best),&fire);
-                if(!w)continue;
-                if(HoldFire(v,p.best,Pos(v),At<float>(w,0x894)*60.0f,At<float>(w,0x8E0)*14.7f))continue;
-                AimSelectedGunner(v,i,p.best,w,fire);
+                const bool airborne=GunnerAirTarget(p.best);
+                auto w=NpcPayloadSelect(v,i,p.bestD,airborne,&fire);
+                if(w && HoldFire(v,p.best,Pos(v),At<float>(w,0x894)*60.0f,At<float>(w,0x8E0)*14.7f))w=nullptr;
+                if(w)AimSelectedGunner(v,i,p.best,w,fire);
+                AimIndependentSecondary(v,i,p.best,p.bestD,airborne,w!=nullptr);
                 NpcCoaxFire(v,i,p.best,&FriendInLine);
             } else reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
             RememberGunnerInputs(v,i,seat);
