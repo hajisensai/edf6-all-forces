@@ -64,7 +64,7 @@ KINDS = {
     'gdf005': Emplacement('Oerlikon GDF-005 35 mm', '', '', 1.0, 1400.0, 'emp_gdf005'),
     'laser': Emplacement('Laser air-defence turret', '', '', 1.0, 1600.0, 'emp_laser'),
     'railgun': Emplacement('Railgun turret', '', '', 1.0, 2400.0, 'emp_railgun'),
-    'patriot': Emplacement('MIM-104 Patriot launcher', '', '', 1.0, 2000.0, 'emp_patriot', (0.0, 5.7, -4.0)),
+    'patriot': Emplacement('MIM-104 Patriot launcher', '', '', 1.0, 2000.0, 'emp_patriot', (0.0, 5.9, -4.0)),
 }
 EYE_UP, EYE_BACK = 0.8, 0.6           # m: a gunner's sight over the guns' top, behind their trunnions
 # A box's 12 triangles, outward, over its corners numbered by bits (x 1, y 2, z 4: set = the high side).

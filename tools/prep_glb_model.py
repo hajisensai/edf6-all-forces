@@ -102,9 +102,14 @@ MODELS: dict[str, Model] = {
                      rules=[(r'/(UVN|Cannon)_', 'gun'), (r'/Base_', 'base'), (r'/GLTF_created_0_rootJoint/', 'base'), (r'/', 'turret')],
                      skinned=True, height=4.5, ring_node='UGN_17', trunnion_node='UVN_1', muzzle_x=(0.0, 0.0)),
     'patriot': Model(kind='patriot', folder='emp_patriot', title='MIM-104 Patriot launcher', rules=[], yaw=-90.0, length=10.5,
-                     boxes=[('base', (-9.0, -9.0, 2.3), (9.0, 9.0, 9.0)), ('gun', (-9.0, 1.9, -9.0), (9.0, 9.0, 2.3)),
+                     boxes=[('turret', (1.0, 1.8, -3.95), (1.3, 6.5, -3.55)),        # the antenna mast stays upright
+                            ('turret', (-0.95, 1.9, -2.8), (-0.55, 2.3, -2.1)),     # the elevating struts' feet
+                            ('turret', (0.55, 1.9, -2.8), (0.95, 2.3, -2.1)),
+                            ('drop', (-0.9, 3.8, -1.1), (-0.6, 4.1, -0.8)),         # their rods (no retraction)
+                            ('drop', (0.6, 3.8, -1.1), (0.9, 4.1, -0.8)),
+                            ('base', (-9.0, -9.0, 2.3), (9.0, 9.0, 9.0)), ('gun', (-9.0, 1.9, -9.0), (9.0, 9.0, 2.3)),
                             ('turret', (-9.0, 1.25, -5.3), (9.0, 9.0, -1.2))],
-                     trunnion=(1.9, -4.3), lower=45.4, tubes=True),
+                     trunnion=(1.9, -4.3), lower=33.7, tubes=True),
     'ciws_phalanx': Model(
         kind='ciws_phalanx', folder='emp_phalanx', title='Phalanx CIWS Mk 15',
         rules=[(r'/Gun/', 'rotor'), (r'/Gun_Part/', 'rotor'), (r'/Rotate_x/', 'gun'), (r'/Rotate_Z/', 'turret'),

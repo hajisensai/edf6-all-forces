@@ -69,7 +69,9 @@ class WtAssetTests(unittest.TestCase):
         # The authored files (make_tracked_combat.authored): the model these tests check is the War Thunder geometry on
         # the native skeleton, without the seats' cockpits build() grafts onto it (its extra bones and materials:
         # test_grafted_eyes_sit_on_the_war_thunder_geometry).
-        cls.files = {kind: combat.authored(cls.game.root, kind) for kind in combat.KINDS}
+        # The emplacements (pylib/emplacement_model.py: a Dreadnought turret or a prepared glTF folder on a built base,
+        # their wheels hidden boxes) are tests/test_emplacement.py's.
+        cls.files = {kind: combat.authored(cls.game.root, kind) for kind in combat.KINDS if kind not in combat.EMPLACEMENTS}
 
     def model(self, kind: str):  # noqa: ANN201
         import mdb

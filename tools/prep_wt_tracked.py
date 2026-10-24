@@ -409,10 +409,12 @@ def instances(src: Source, name: str) -> list[np.ndarray]:
 
 def corner_normals(P: np.ndarray, tv: np.ndarray) -> np.ndarray:
     """(normals, (t, 3) corner -> normal row): around each position the area-weighted face normals, grouped greedily
-    (a face joins the first group whose first face is within AUTO_SMOOTH of it)."""
+    (a face joins the first group whose first face is within AUTO_SMOOTH of it). A zero-area face (the sources have
+    some) seeds no group: it joins the position's first, or stands up (+y) where the position has no other face."""
     fn = np.cross(P[tv[:, 1]] - P[tv[:, 0]], P[tv[:, 2]] - P[tv[:, 0]])
     area = np.linalg.norm(fn, axis=1)
     unit = fn / np.maximum(area, 1e-20)[:, None]
+    flat = area <= 1e-20
     cos_lim = math.cos(math.radians(AUTO_SMOOTH))
     corners = tv.reshape(-1)
     order = np.argsort(corners, kind='stable')
@@ -422,9 +424,15 @@ def corner_normals(P: np.ndarray, tv: np.ndarray) -> np.ndarray:
     normals: list[np.ndarray] = []
     for s, e in zip(starts, ends):
         members = order[s:e]
+        members = members[np.argsort(flat[members // 3], kind='stable')]   # the zero-area faces last
         faces = members // 3
         groups: list[tuple[np.ndarray, np.ndarray, list[int]]] = []    # (accumulated normal, seed unit, members)
         for c, f in zip(members, faces):
+            if flat[f]:
+                if not groups:
+                    groups.append((np.array((0.0, 1.0, 0.0)), np.array((0.0, 1.0, 0.0)), []))
+                groups[0][2].append(c)
+                continue
             for acc, seed, mem in groups:
                 if float(seed @ unit[f]) >= cos_lim:
                     acc += fn[f]
