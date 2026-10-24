@@ -41,6 +41,10 @@ class Model:
     digest: str
     lenses: tuple[Lens, ...]
     cockpits: tuple[cockpits.Fit, ...] = ()   # the seats' first-person cockpits (pylib/cockpit_fits.py)
+    # Where the stock archive is: OBJECT/<stem>.MRAB for the vehicles; a stock gold weapon model (pylib/goldcoat.py
+    # STOCK_WEAPONS) is WEAPON/<stem>.RAB. Its built copy is a private file of its own folder (output()).
+    folder: str = 'OBJECT'
+    ext: str = '.MRAB'
 
 
 MODELS = (
@@ -73,7 +77,10 @@ MODELS = (
 # generated model's stem (the plugin's own vehicles) has no digest: its generator grafts it (cockpits.graft_files).
 MODELS = tuple(replace(m, cockpits=cockpit_fits.FITS.get(m.stem, ())) for m in MODELS) + tuple(
     Model(stem, cockpit_fits.DIGESTS[stem], (), fits) for stem, fits in sorted(cockpit_fits.FITS.items())
-    if stem not in {m.stem for m in MODELS} and stem in cockpit_fits.DIGESTS)
+    if stem not in {m.stem for m in MODELS} and stem in cockpit_fits.DIGESTS) + tuple(
+    # The stock gold weapons (the Depth Crawler gold's arm cannons and gatling): only their gold coat converted, in a
+    # private archive their SGOs are redirected to like the vehicles' (new files; no stock file overwritten).
+    Model(stem, digest, (), (), folder, ext) for (folder, stem, ext), digest in sorted(goldcoat.STOCK_WEAPONS.items()))
 
 
 def ready(spec: Model) -> bool:
@@ -85,7 +92,17 @@ def ready(spec: Model) -> bool:
 
 
 def output(spec: Model) -> str:
-    return 'EDF6VC_OPTIC_' + spec.stem + '.MRAB'
+    return ('EDF6VC_OPTIC_' if spec.folder == 'OBJECT' else 'EDF6VC_GOLD_') + spec.stem + spec.ext
+
+
+def rel(spec: Model) -> str:
+    """The built archive's Mods path, e.g. OBJECT/EDF6VC_OPTIC_V505_TANK.MRAB, WEAPON/EDF6VC_GOLD_<stem>.RAB."""
+    return spec.folder + '/' + output(spec)
+
+
+def app_path(spec: Model, built: bool) -> str:
+    """The archive as an SGO names it (lower case): the stock one, or the built one."""
+    return f'app:/{spec.folder.lower()}/{(output(spec) if built else spec.stem + spec.ext).lower()}'
 
 
 def unit(v):
@@ -253,10 +270,10 @@ def mark_model(md: Mdb, spec: Model, sgo_data: bytes) -> Mdb:
 
 def build_model(game, spec: Model) -> bytes:
     """Preserve loose texture changes only when the model geometry contract matches."""
-    name = spec.stem + '.MRAB'
+    name = spec.stem + spec.ext
     print(f'    {name}：读取模型资源……', flush=True)
-    loose = Path(game.root, 'Mods', 'OBJECT', name)
-    arc = rab_read(loose.read_bytes() if loose.is_file() else game.read('OBJECT', name))
+    loose = Path(game.root, 'Mods', spec.folder, name)
+    arc = rab_read(loose.read_bytes() if loose.is_file() else game.read(spec.folder, name))
     model = next(f for f in arc.files if f.name.lower() == spec.stem.lower()+'.mdb')
     raw = model.data
     if hashlib.sha256(raw).hexdigest() != spec.digest:
@@ -310,12 +327,11 @@ def redirect(data: bytes) -> tuple[bytes, tuple[str, ...]]:
     if ref is None:
         return data, ()
     for spec in MODELS:
-        if not ready(spec) and ref[0].lower() != f'app:/object/{output(spec).lower()}':
+        if not ready(spec) and ref[0].lower() != app_path(spec, True):
             continue
-        if (ref[0].lower() in (f'app:/object/{spec.stem.lower()}.mrab', f'app:/object/{output(spec).lower()}')
-                and ref[1].lower() == spec.stem.lower()+'.mdb'):
-            ref[0] = 'app:/object/' + output(spec).lower()
-            return (dsgo.write(doc) if doc else sgo.write(version, m)), ('OBJECT/'+output(spec),)
+        if ref[0].lower() in (app_path(spec, False), app_path(spec, True)) and ref[1].lower() == spec.stem.lower()+'.mdb':
+            ref[0] = app_path(spec, True)
+            return (dsgo.write(doc) if doc else sgo.write(version, m)), (rel(spec),)
     return data, ()
 
 
@@ -335,10 +351,10 @@ def model_path(data: bytes) -> str | None:
 def restore_path(data: bytes, path: str | None = None) -> bytes:
     """Undo only our model redirect; preserve every current non-model field."""
     current = model_path(data)
-    spec = next((s for s in MODELS if current and current.lower() == 'app:/object/'+output(s).lower()), None)
+    spec = next((s for s in MODELS if current and current.lower() == app_path(s, True)), None)
     if spec is None:
         return data
-    path = path or 'app:/object/'+spec.stem.lower()+'.mrab'
+    path = path or app_path(spec, False)
     if data[:4] == b'DSGO':
         doc = dsgo.parse(data)
         _model_reference(doc.root.get('animation_model'))[0] = path

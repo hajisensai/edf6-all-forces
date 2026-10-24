@@ -86,7 +86,7 @@ class Transactions(unittest.TestCase):
                      stem.lower()+'.mdb'], 'retained.cas', b'MAB'], 'custom_setting': 987}) for name,stem in models.items()}
         class Source:
             def __init__(self, root): self.root = root
-            def names(self, _folder): return list(payloads)
+            def names(self, folder): return list(payloads) if folder == 'OBJECT' else []
             def read(self, _folder, name): return payloads[name]
         with patch.object(make_optics.rootcpk, 'Game', Source), patch.object(optics, 'ready', return_value=True):
             made = make_optics.build_stock_redirects(self.root)
@@ -287,7 +287,7 @@ class RealModels(unittest.TestCase):
         real_game = self.game
         class Source:
             def __init__(self, root): self.root = root
-            def names(self, folder): return [n+'.SGO' for n in names]
+            def names(self, folder): return [n+'.SGO' for n in names] if folder == 'OBJECT' else []
             def read(self, folder, name): return real_game.read(folder, name)
         with tempfile.TemporaryDirectory(prefix='edf-optic-writers-') as tmp:
             directory = Path(tmp, 'Mods', 'OBJECT')
