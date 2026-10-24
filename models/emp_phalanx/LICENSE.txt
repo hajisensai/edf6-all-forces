@@ -1,0 +1,11 @@
+Model Information:
+* title:	Phalanx CIWS
+* source:	https://sketchfab.com/3d-models/phalanx-ciws-b811949a2ba543aab5fde70ecdf0bf6d
+* author:	Lemper_Studio (https://sketchfab.com/Lemper_Studio)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Phalanx CIWS" (https://sketchfab.com/3d-models/phalanx-ciws-b811949a2ba543aab5fde70ecdf0bf6d) by Lemper_Studio (https://sketchfab.com/Lemper_Studio) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

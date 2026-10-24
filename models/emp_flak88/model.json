@@ -1,0 +1,114 @@
+{
+ "format": 1,
+ "kind": "flak88",
+ "title": "8.8 cm Flak 18/36",
+ "prepared_from": "model.glb",
+ "scale": 2.360626100988775,
+ "yaw": -90.0,
+ "materials": [
+  {
+   "name": "edf6vc_flak88_1",
+   "template": "v603_body",
+   "albedo": "textures/flak88_1.png",
+   "source": "Mat_pied_detail"
+  },
+  {
+   "name": "edf6vc_flak88_2",
+   "template": "v603_body",
+   "albedo": "textures/flak88_2.png",
+   "source": "Mat_pied"
+  },
+  {
+   "name": "edf6vc_flak88_3",
+   "template": "v603_body",
+   "albedo": "textures/flak88_3.png",
+   "source": "mat_sous_haut"
+  },
+  {
+   "name": "edf6vc_flak88_0",
+   "template": "v603_body",
+   "albedo": "textures/flak88_0.png",
+   "source": "Mat_haut"
+  }
+ ],
+ "parts": [
+  {
+   "name": "base.edf6vc_flak88_1",
+   "role": "base",
+   "material": 0,
+   "triangles": 10079,
+   "vertices": 12241
+  },
+  {
+   "name": "base.edf6vc_flak88_2",
+   "role": "base",
+   "material": 1,
+   "triangles": 11874,
+   "vertices": 6936
+  },
+  {
+   "name": "base.edf6vc_flak88_3",
+   "role": "base",
+   "material": 2,
+   "triangles": 4404,
+   "vertices": 2565
+  },
+  {
+   "name": "turret.edf6vc_flak88_0",
+   "role": "turret",
+   "material": 3,
+   "triangles": 592,
+   "vertices": 506
+  },
+  {
+   "name": "turret.edf6vc_flak88_3",
+   "role": "turret",
+   "material": 2,
+   "triangles": 14397,
+   "vertices": 9144
+  },
+  {
+   "name": "gun.edf6vc_flak88_0",
+   "role": "gun",
+   "material": 3,
+   "triangles": 3836,
+   "vertices": 3991
+  },
+  {
+   "name": "gun.edf6vc_flak88_3",
+   "role": "gun",
+   "material": 2,
+   "triangles": 798,
+   "vertices": 920
+  }
+ ],
+ "pivots": {
+  "ring": [
+   -0.2219325602054596,
+   -0.7036800980567932
+  ],
+  "trunnion": [
+   2.35,
+   -1.3
+  ],
+  "muzzles": {
+   "left": [
+    -1.7881393432617188e-07,
+    2.5935004630891405,
+    5.324477672576904
+   ],
+   "right": [
+    -1.7881393432617188e-07,
+    2.5935004630891405,
+    5.324477672576904
+   ]
+  }
+ },
+ "triangles": 45980,
+ "size": [
+  7.6,
+  3.560623191307204,
+  10.648954933680947
+ ],
+ "source": "https://sketchfab.com/3d-models/flak-18-36-88mm-anti-aircraft-cannon-95b1335520714a78b83f67a1c04a75da"
+}

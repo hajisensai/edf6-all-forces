@@ -240,7 +240,7 @@ void __fastcall PreloadPlayerHook(int slot) { Apply(*(uint8_t**)(base + kGameSta
 行号不要跨 `SetMode` 缓存，每次在 hook 里重新查。
 
 GS 的武器记录只有 `0x800` 条（`0xDF130`/`0xDF720`/`0xDF600` 的循环上限；GS 块 `+0x6E68` 长 `0xDCE8`，正好止于 `GS+0x14B50`），
-`RowCount > 0x800` 时超出部分不能写。
+`RowCount > 0x800` 时超出部分不能写。插件装上 8.8 的搬家后，记录在 `GS+0x150A8`、共 `0x2000` 条，插件代码一律经 `WeaponRecord(gs,id)` 取地址。
 
 ### 8.2 游戏自己是怎么“给”武器的 [确认]
 
@@ -408,3 +408,30 @@ void __fastcall UnlockDlcHook(unsigned char* gs) {
 | `0xD92B0` | `HasContent(GS, content)`：查 `GS+0xE0` 内容包集合 |
 | `0x8B4280` | `HUiHQWeaponSelect` 列表构建：拷 GS 快照、只列 bit0、算 NEW/UP 状态 |
 | `0xDF130 / 0xDF720 / 0xDF6C0` | 清全部 flags / unlock_weapon_one 单步 / unlock_weapon_index |
+
+### 8.8 武器记录超过 2048（`src/weapon_records*`，2026-10-24，静态 H / **未实机**）
+
+问题：记录只有 `0x800` 条（8.1），而 `0xDC170`/`0xDC550`/`0xD7930`/`0xDC9E0`/`unlock_weapon` 等按 `RowCount` 循环，`ApplyResult`/`SetUsedWeapon`/造武器/MissionSync 按行号直接索引，全都不查上界：表超过 `0x800` 行就写进 `GS+0x14B50` 之后的成员。安装器因此一直拒绝超过 `0x800` 行的表。
+
+做法（移植并改写 MIT 插件 EDF6 WeaponLimit v1.0 的“整表搬家”，许可见 `third_party/EDF6WeaponLimit/LICENSE`）：
+
+- **搬家**：记录整体搬到 `GS+0x150A8`（对象原长 `0x150A0` 之后第一个 12 的倍数；折叠形式 `(id+K)*12` 要求偏移能被 12 整除），容量 `wrec::kSlots = 0x2000`。`src/weapon_records_sites.inc` 是 101 条**整条指令**（逐条带全部字节，安装前全部核对、全部写或全部回滚）：GS 基址 `0xEB50/0xEB54/0xEB44`、块基址 `0x7CE8/0x7CEC/0x7CF4`、折叠常量 `0x139C`(7)/`0xA69`(10)、辅助函数的条数 `0x800/0x7FF`(9)、GS 单例的 12 处 `mov ecx,0x150A0`（分配）。`tests/weapon_records_native_audit.py` 对整个 `.text` 线性反汇编，确认除清单与 10 条已知无关指令外没有别的指令用这些偏移。比参考插件多出：`0xAECFB`（`[rcx+rax+0xEB44]`，循环指针落后一条）、`0x8DAD92`（无 .pdata 的叶函数）。
+- **不改 `0xDEDA0`**（块初始化）：它也初始化栈上模板（`0xDB920`）、状态记录与选武器界面的快照。GS 构造里那一次调用（`0xD6468`）改调到 `BlockInitHook`：原函数后把搬家后的整表清零。
+- **两份表的同步**：存档块 `GS+0x6E68`（MAIN.GST）里的旧表保留为 0..0x7FF 行的存档副本。
+  - 块被拷出之前（旧表 ← 新表 0..0x7FF）：四个状态记录构造的 memcpy `0x70AF25/0x70B079/0x70B61C/0x70B79C`（并按记录数据指针记下 0x800 以后的行）、MAIN.GST 存档请求 `0x7C2F66 → 0x7BCD40`（第 6 个参数是块；按旧表的 FNV-1a 哈希记下 0x800 以后的行，`0x7BCE7C` 的 outfit41 钩子只改颜色块，不影响哈希）。
+  - 块被拷入之后（新表 0..0x7FF ← 旧表）：三个记录恢复 `0x70B23A/0x70B421/0x70B956`（0x800 以后的行取该记录当时记下的；找不到就不动并记日志）、新档模板 `0xDB96D`（0x800 以后清零）、读档作业最后一次拷贝 `0x7C1AD1`（存档线程；目标是 GS 块且长度 `0xDCE8` 时，0x800 以后的行读 sidecar）。
+  - 选武器界面（`0x8B4280`，构造函数）：快照拷贝 `0x8B49B1` 改调到 `UiSnapHook`，把新表（来源不是 GS 块时取来源旧表、其余清零）拷进插件的 `uiTable`；快照里读表的只有 `0x8B4F70`（只列 bit0）与 `0x8B51A0`（NEW/UP 状态）两条，各改成 `jmp` 到读 `uiTable` 的小段代码。CFG 核过：两处只能经过 `0x8B49B1` 到达。写回 `0x8BD7FE` 是 `memcpy(目标 ?: GS+0x6E68, 界面+0x800, 0xDCE8)`：整个存档块（含旧表）从快照写回（2026-10-24 反汇编核对，此前这里误写成「只写回旧表」）。它不碰新表；快照里的表只有上面两条读、没有写，块里的旧表此后在每次往外拷块前都会由 `MirrorToBlock` 从新表重写，所以不需要钩。参考插件的“扩大拷贝 + 平移 265 处成员”因此不需要。
+- **sidecar** `MAIN.GST.edf6vc`（与 MAIN.GST 同目录，路径就是游戏自己的：`0x7B90CD`（读）/`0x7B9C28`（写）两处 `call [CreateFileW]` 改为直呼插件包装、按线程记下路径）：
+  - 写：存档作业 `0x7C228B → 0x7B9990`，路径是 `…\MAIN.GST`。`0x7B9990` 把 desc 的各段依次拼接写盘（循环 `0x7B9CB0..0x7B9E0E`：`desc+8` 指向 `{data, size}` 各 16 字节的段数组，`desc+0x18` 是段数，2026-10-24 反汇编核对）；取唯一一段长 `0xDCE8` 的作为存档块，找不到或不唯一就记日志、不写 sidecar（不再静默）。按块里旧表的哈希找存档请求时记下的行，取**最新**一条（`weapon_records_logic.h PickSave`），同哈希更早的几条删掉，最新这条留给它自己的写盘。2026-10-25 审查改：原来取最早一条，但存档作业在写盘前出错会直接跳到 `0x7C2318`（`0x7C212F jne`，不调 `0x7B9990`），那条请求永远不被消掉；之后表的 0..0x7FF 行不变（只在 0x800 以后拿到新武器）时，每次存档都拿到上一次请求的行，一直落后一次。哈希相同即 0..0x7FF 行相同，取最新只会让排在前面的那次写盘带上更新的 0x800 以后的行，最后一次写盘总是自己的。desc 的存档块段就是作业的 `+0x90/+0x98`（`0x7C225F..0x7C227B`），以后若要按作业精确配对可从这里入手（需与 outfit41 在 `0x7BCE7C` 的钩子协调）。原子写（`.tmp` + `MoveFileExW`）；0x800 以后全空就删掉 sidecar。
+  - 读：见上 `0x7C1AD1`，整个文件读入；没有文件 = 没有 0x800 以后的行。文件坏了、读不全、或来自保留更多行的版本：改名为 `MAIN.GST.edf6vc.unread` 留底（后者本版能放下的行照常拥有），再按常规存档；改名也失败、或文件在但打不开（被扫描器占着等）：本会话 **hold**——之后的存档既不删也不覆盖它（否则这些行就永久丢了），直到下一次读档或新游戏。
+  - 删：`0x7B69F1`/`0x7B7FEB` 两处 `call [DeleteFileW]`：删的是 `…\MAIN.GST` 时一并删 sidecar。
+  - 格式：`"EDF6VCWR"`、版本 1、首行 `0x800`、行数、FNV-1a-32、行×12 字节（`weapon_records_logic.h`）。
+- **插件自己的写入**：`airstrike.cpp GrantCalls`、`loadout.cpp` 改走 `WeaponRecord(gs,id)` / `WeaponRecordCapacity()`；`GrantCalls` 发现 `RowCount` 超过容量时日志 + 提示一次（`WeaponRecordsCheckRows`）。
+- **安装条件**（任一不满足就 `WEAPONREC REFUSED`，什么都不改，记录仍是原生 0x800 条）：`edf6_weaponlimit.dll` 未加载；GS 尚未分配（`[EDF+0x20B2890]` 为空，EML6_Load 时）；101 条指令、两处界面读取、四处导入调用字节全部吻合；13 处被改调的 call 仍指向原函数。包装函数在 `active` 置位前都是原样直通。
+- **联机**：房间检查查的是内容号（8.5），成员记录的武器是 int32 行号、星级随记录按值发送（`0x78E9A0` 读的是新表，已在清单里），远端玩家建人用记录里的星级（`0x5A4374`），不读本机表。所以搬家不改协议；房间里各人武器表一致这个老要求不变。
+- 安装器：`tools/call_weapons.py SAVE_WEAPONS = 0x2000`（与 `kSlots` 一致，selftest `weapon_table_fits_the_save` 校验两者相等）。
+  只有插件的搬家装得上时才用这个上限（`record_room`：游戏目录的 EDF.dll 是 `0x678CCB46`、`Mods/Plugins` 里没有 `edf6_weaponlimit.dll`），否则上限是原生的 `0x800`，超过就拒绝安装、一个字节都不写：搬家不生效时，每多一行游戏就越界写一条记录（GS+0x14B50 起是击杀计数的 map）。
+  卸载插件时表也必须回到 `0x800` 以内（`past_room`）：0x800 以后的行（都是我们的，在表尾）一律删除，删前要求玩家在每个存档里卸下这些武器；0x800 以后有别的 mod 的行就拒绝卸载；「只删插件」和「跳过武器表」在表超过 `0x800` 时都拒绝。
+  仍然防不住的：装好以后 Steam 更新换了 EDF.dll（插件整个拒绝运行），或之后再装上 `edf6_weaponlimit.dll`。这两种情况下游戏照样越界写，插件只能在它还在运行时记日志并提示一次。
+
+未实机 / 未解决：读档、存档、删档、新档、状态记录恢复、选武器界面都只做了静态核对与离线测试；`0x7B77C0`（另一个 CreateFileW+WriteFile，推测是 BACKUP 目录的备份）不带 sidecar，从游戏备份恢复的存档 0x800 以后的行会是 sidecar 里较新的状态或没有；`0x7C3080`/`0x7C36B0` 两个按参数算长度的存档调用是否也写 GS 主块未核（若是，它们的 0x800 以后的行不会进 sidecar：WriteHook 找不到对应请求时只记日志、不改 sidecar）；`0x70AF00`/`0x70B1C0`/`0x70B3A0`/`0x70B8F0` 这组状态记录的脚本名字没查（语义按拷贝方向处理）。

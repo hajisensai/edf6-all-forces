@@ -482,6 +482,35 @@ STORES: dict[str, Store] = {
     'VULCAN_AP': Store('20 mm M61 AP', 'gun', 0.0, 0.0,
                        Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
                        _local('20 mm M61 AP', '20mm M61 徹甲弾', '20mm M61 穿甲彈', '20mm M61 穿甲弹', '20mm M61 철갑탄'), native_control=True),
+    # The quad Vulcan's AP belt (tools/make_tracked_combat.py QUADVULCAN_AP_BELT): its HE is the native pair, this the
+    # second loadout on the same four guns (group 4, its two columns the native holders' barrels).
+    # The 2S6's 9M311 (tools/make_tracked_combat.py, models/wt_tunguska): a SACLOS anti-air missile, here locking air
+    # targets, on the V603's otherwise unread secondary as the BMPT's Ataka (independent_secondary). 2.56 m.
+    'TUNGUSKA_SAM': Store('9M311', 'air', 0.0, 0.0,
+                          Missile('9M311', Look('bullet_rpg', 2.56), burn=3.0, top=900.0, accel=350.0, max_g=35.0,
+                                  nav=4.0, life=14.0, damage=500.0, blast=9.0, lock_range=2500.0, lock_cone=0.5,
+                                  lock_time=15.0),
+                          _local('9M311', '9M311', '9M311', '9M311', '9M311'), independent_secondary=True),
+    # The Apocalypse's anti-air missiles (its pods beside the turret; Red Alert 2's own were anti-air), on the V603's
+    # otherwise unread secondary as the BMPT's Ataka.
+    'APOC_SAM': Store('Apocalypse SAM', 'air', 0.0, 0.0,
+                      Missile('Apocalypse SAM', Look('bullet_mediummissile01', 3.0), burn=4.0, top=1000.0, accel=320.0,
+                              max_g=35.0, nav=4.0, life=15.0, damage=700.0, blast=12.0, lock_range=2600.0,
+                              lock_cone=0.6, lock_time=15.0),
+                      _local('Anti-air missile', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), independent_secondary=True),
+    # The Patriot's PAC-3 (tools/make_patriot.py, models/emp_patriot): a hit-to-kill anti-air missile from the pack's
+    # four tubes, on the V603's otherwise unread secondary as the BMPT's Ataka.
+    'PATRIOT_SAM': Store('PAC-3', 'air', 0.0, 0.0,
+                         Missile('PAC-3', Look('bullet_mediummissile01', 5.2), burn=4.0, top=1400.0, accel=450.0,
+                                 max_g=50.0, nav=4.5, life=16.0, damage=2500.0, blast=14.0, lock_range=3500.0,
+                                 lock_cone=0.6, lock_time=20.0),
+                         _local('PAC-3', 'PAC-3', 'PAC-3', 'PAC-3', 'PAC-3'), independent_secondary=True),
+    'QVULCAN_AP': Store('Quad M61 AP', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
+                        _local('Quad M61 AP', '4連装 M61 徹甲弾', '四聯 M61 穿甲彈', '四联 M61 穿甲弹', '4연장 M61 철갑탄'),
+                        group=4, barrel=0),
+    'QVULCAN_AP_R': Store('Quad M61 AP', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_R.SGO', 'SolidBullet01', 'ap'),
+                          _local('Quad M61 AP', '4連装 M61 徹甲弾', '四聯 M61 穿甲彈', '四联 M61 穿甲弹', '4연장 M61 철갑탄'),
+                          group=4, barrel=1),
     'BMPT_ATGM': Store('9M120 Ataka', 'ground', 0.0, 0.0,
                        Missile('9M120 Ataka', Look('bullet_icbm01', 1.83), burn=12.0, top=550.0, accel=180.0,
                                max_g=20.0, nav=3.0, life=12.0, damage=1200.0, blast=6.0,
@@ -810,6 +839,66 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
                           # the native guns' sides, the missile tubes, the second belt's sides on the same moving
                           # barrels, the thermobaric missile on the same tubes; the 2A42 pair fires in turn (2026-10-21)
                           slots=('left', 'right', 'missiles', 'left', 'right', 'missiles'), alternate=True),
+    # The quad Vulcan (tools/make_quadvulcan.py, pylib/quadvulcan_model.py; the user, 2026-10-24: 「火神炮做一个四管的」
+    # 「我说的四管是4联装转轮机枪」): the M163 upgraded to four M61s on its one cradle. Its HE is the native pair (each
+    # holder a column of two guns), its AP the second loadout on the same columns; both columns fire every frame.
+    'quadvulcan': GroundVehicle('EDF6VC_QUADVULCAN', 'V603_FLAK', 'AWEAPON346',
+                                ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                                ('app:/weapon/edf6vc_quadvulcan_l.sgo', 'app:/weapon/edf6vc_quadvulcan_r.sgo',
+                                 'app:/weapon/edf6vc_qvulcan_ap_1000.sgo', 'app:/weapon/edf6vc_qvulcan_ap_r_1000.sgo'),
+                                1100.0, 'make_quadvulcan', slots=('left', 'right', 'left', 'right')),
+    # The fixed emplacements (tools/make_emp_*.py, pylib/emplacement_model.py; the user, 2026-10-24: 「再做一类在地图上
+    # 固定的炮台。这个炮台使用无畏舰上面那几个」): the Dreadnought's secondary turrets, each on a base, the Kepler's class
+    # (its turret and guns laid natively) that the plugin never lets drive (src/emplacement.cpp). Requested like the
+    # Kepler; each twin gun's barrels fire in turn.
+    **{kind: GroundVehicle(f'EDF6VC_{kind.upper()}', 'V603_FLAK', 'AWEAPON346',
+                           ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                           (f'app:/weapon/edf6vc_{kind}_l.sgo', f'app:/weapon/edf6vc_{kind}_r.sgo'), durability,
+                           f'make_{kind}', slots=('left', 'right'), alternate=True)
+       for kind, durability in (('emp_mid', 3000.0), ('emp_short', 3600.0), ('emp_long', 3300.0),
+                                ('ciws_phalanx', 1800.0), ('flak88', 1500.0), ('laser', 1600.0),
+                                ('railgun', 2400.0))},
+    # The Patriot (tools/make_patriot.py, models/emp_patriot): PAC-2 salvoes from the native pair, in turn, and the
+    # PAC-3 from the same tubes (the BMPT's missile holder on the turret).
+    'patriot': GroundVehicle('EDF6VC_PATRIOT', 'V603_FLAK', 'AWEAPON346',
+                             ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                             ('app:/weapon/edf6vc_patriot_l.sgo', 'app:/weapon/edf6vc_patriot_r.sgo',
+                              'app:/weapon/edf6vc_patriot_sam_8.sgo'), 2000.0, 'make_patriot',
+                             slots=('left', 'right', 'missiles'), alternate=True),
+    # The GDF-005: its two guns together (not in turn).
+    'gdf005': GroundVehicle('EDF6VC_GDF005', 'V603_FLAK', 'AWEAPON346',
+                            ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                            ('app:/weapon/edf6vc_gdf005_l.sgo', 'app:/weapon/edf6vc_gdf005_r.sgo'), 1400.0,
+                            'make_gdf005', slots=('left', 'right')),
+    # The 2S6 Tunguska (tools/make_tunguska.py; its War Thunder model, models/wt_tunguska): two twin 30 mm guns (the
+    # native pair, firing together) and the 9M311 missiles beside them (the BMPT's missile holder on the turret).
+    'tunguska': GroundVehicle('EDF6VC_TUNGUSKA', 'V603_FLAK', 'AWEAPON346',
+                              ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                              ('app:/weapon/edf6vc_tunguska_l.sgo', 'app:/weapon/edf6vc_tunguska_r.sgo',
+                               'app:/weapon/edf6vc_tunguska_sam_4.sgo'), 1300.0, 'make_tunguska',
+                              slots=('left', 'right', 'missiles')),
+    # The PzH 2000 and the Sturmtiger (tools/make_pzh2000.py / make_sturmtiger.py; their War Thunder models): one gun
+    # each, both native holders on it, in turn (tools/make_tracked_combat.py GUNS).
+    'pzh2000': GroundVehicle('EDF6VC_PZH2000', 'V603_FLAK', 'AWEAPON346',
+                             ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                             ('app:/weapon/edf6vc_pzh2000_l.sgo', 'app:/weapon/edf6vc_pzh2000_r.sgo'), 1500.0, 'make_pzh2000',
+                             slots=('left', 'right'), alternate=True),
+    'sturmtiger': GroundVehicle('EDF6VC_STURMTIGER', 'V603_FLAK', 'AWEAPON346',
+                                ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                                ('app:/weapon/edf6vc_sturmtiger_l.sgo', 'app:/weapon/edf6vc_sturmtiger_r.sgo'), 2200.0,
+                                'make_sturmtiger', slots=('left', 'right'), alternate=True),
+    # The Apocalypse (tools/make_apocalypse.py; ska-ara's Red Alert 2 model, models/wt_apocalypse): twin heavy guns firing
+    # in turn (the native pair), the anti-air missiles of its pods (the BMPT's missile holder on the turret).
+    'apocalypse': GroundVehicle('EDF6VC_APOCALYPSE', 'V603_FLAK', 'AWEAPON346',
+                                ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                                ('app:/weapon/edf6vc_apocalypse_l.sgo', 'app:/weapon/edf6vc_apocalypse_r.sgo',
+                                 'app:/weapon/edf6vc_apoc_sam_4.sgo'), 4500.0, 'make_apocalypse',
+                                slots=('left', 'right', 'missiles'), alternate=True),
+    # The TOS-1 (tools/make_tos1.py; models/wt_tos1): both native holders on its launcher pack, salvoes in turn.
+    'tos1': GroundVehicle('EDF6VC_TOS1', 'V603_FLAK', 'AWEAPON346',
+                          ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                          ('app:/weapon/edf6vc_tos1_l.sgo', 'app:/weapon/edf6vc_tos1_r.sgo'), 1600.0, 'make_tos1',
+                          slots=('left', 'right'), alternate=True),
     # The drill tank (tools/make_drill.py, src/drill.cpp): the Blacker's class (Vehicle505_Tank, tracks, one weapon
     # holder) in EDF: Iron Rain's drill tank, requested like the Blacker E series; its one weapon fires nothing (the
     # drill is the plugin's: it spins it and bites with DRILL_CHARGE_FILE).
@@ -824,6 +913,16 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
                              ('AWEAPON338', 'AWEAPON339', 'AWEAPON341', 'AWEAPON343', 'AWEAPON345'),
                              ('app:/weapon/v_503_bike_gun_l.sgo', 'app:/weapon/v_503_bike_gun_r.sgo',
                               'app:/weapon/v_fuel01.sgo'), 300.0, 'make_sidecar'),
+}
+# The ground vehicles tools/make_tracked_combat.py builds on the V603 (each its make_<kind> tool, its own ledger owner and
+# build group): the War Thunder M163 / BMPT, the quad Vulcan, the fixed emplacements; with what the test range calls
+# each (testrange/gen.py: edf6tr_<kind>_mission).
+TRACKED: dict[str, str] = {
+    'vulcan': 'M163 火神炮车', 'bmpt': 'BMPT 火力支援车', 'quadvulcan': '四联装火神防空车',
+    'emp_mid': '无畏舰副炮炮台·中型', 'emp_short': '无畏舰副炮炮台·短管', 'emp_long': '无畏舰副炮炮台·长管',
+    'tunguska': '2S6 通古斯卡防空车', 'pzh2000': 'PzH 2000 自行榴弹炮', 'sturmtiger': '突击虎',
+    'ciws_phalanx': '密集阵近防炮', 'flak88': '88 毫米高射炮', 'apocalypse': '天启坦克', 'gdf005': 'GDF-005 双联高炮',
+    'laser': '激光防空炮台', 'railgun': '电磁炮炮台', 'tos1': 'TOS-1 喷火兵火箭炮', 'patriot': '爱国者防空导弹'
 }
 # The drill tank's bite (src/jet_bay.cpp kDrillChargeFile, DrillCharge): an impact charge (tools/make_jets.py
 # impact_charge) with a blast of DRILL_CHARGE_RADIUS m (3 m or more: the stock path that lets a blast break buildings,

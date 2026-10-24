@@ -1,0 +1,1177 @@
+{
+ "format": 1,
+ "kind": "pzh2000",
+ "title": "PzH 2000 (War Thunder)",
+ "source": "https://sketchfab.com/3d-models/pzh-2000-war-thunder-remodel-3391b53c325c45f6a9aa769ba8c511ab",
+ "prepared_from": "PzH_2000.obj",
+ "winding_flipped": false,
+ "auto_smooth_deg": 50.0,
+ "materials": [
+  {
+   "name": "wt_pzh_2000_body_c_ger_camo_bronzegruen",
+   "template": "v603_body",
+   "albedo": "textures/pzh_2000_body_c_ger_camo_bronzegruen.jpg",
+   "normal": "textures/pzh_2000_body_n_n.jpg",
+   "occlusion": "textures/pzh_2000_body_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_pzh_2000_turret_c_ger_camo_bronzegruen",
+   "template": "v603_body",
+   "albedo": "textures/pzh_2000_turret_c_ger_camo_bronzegruen.jpg",
+   "normal": "textures/pzh_2000_turret_n_n.jpg",
+   "occlusion": "textures/pzh_2000_turret_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_net_f_c",
+   "template": "v603_body",
+   "albedo": "textures/net_f_c.jpg",
+   "normal": "textures/net_f_n_n.jpg",
+   "occlusion": "textures/net_f_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_side_glass_c",
+   "template": "v603_body",
+   "albedo": "textures/side_glass_c.jpg",
+   "normal": "textures/side_glass_n_n.jpg"
+  },
+  {
+   "name": "wt_pzh_2000_gun_c_ger_camo_bronzegruen",
+   "template": "v603_body",
+   "albedo": "textures/pzh_2000_gun_c_ger_camo_bronzegruen.jpg",
+   "normal": "textures/pzh_2000_gun_n_n.jpg",
+   "occlusion": "textures/pzh_2000_gun_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_rifled_barrel_b_c",
+   "template": "v603_body",
+   "albedo": "textures/rifled_barrel_b_c.jpg",
+   "normal": "textures/rifled_barrel_b_n_n.jpg",
+   "occlusion": "textures/rifled_barrel_b_n_ao_occ.png"
+  },
+  {
+   "name": "wt_mg_mount_leopard_2a7v_c_ger_camo_bronzegruen",
+   "template": "v603_body",
+   "albedo": "textures/mg_mount_leopard_2a7v_c_ger_camo_bronzegruen.jpg",
+   "normal": "textures/mg_mount_leopard_2a7v_n_n.jpg",
+   "occlusion": "textures/mg_mount_leopard_2a7v_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_mg_mg_42_c",
+   "template": "v603_body",
+   "albedo": "textures/mg_mg_42_c.jpg",
+   "normal": "textures/mg_mg_42_n_n.jpg",
+   "occlusion": "textures/mg_mg_42_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_pzh_2000_turret_c",
+   "template": "v603_body",
+   "albedo": "textures/pzh_2000_turret_c.jpg",
+   "normal": "textures/pzh_2000_turret_n_n.jpg",
+   "occlusion": "textures/pzh_2000_turret_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_pzh_2000_add_c",
+   "template": "v603_body",
+   "albedo": "textures/pzh_2000_add_c.jpg",
+   "normal": "textures/pzh_2000_add_n_n.jpg",
+   "occlusion": "textures/pzh_2000_add_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_schutzenpanzer_puma_igelpanzerung_c",
+   "template": "v603_body",
+   "albedo": "textures/schutzenpanzer_puma_igelpanzerung_c.jpg",
+   "normal": "textures/schutzenpanzer_puma_igelpanzerung_n_n.jpg",
+   "occlusion": "textures/schutzenpanzer_puma_igelpanzerung_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_schutzenpanzer_puma_igelpanzerunga_cap_c",
+   "template": "v603_body",
+   "albedo": "textures/schutzenpanzer_puma_igelpanzerunga_cap_c.jpg",
+   "normal": "textures/schutzenpanzer_puma_igelpanzerunga_cap_n_n.jpg",
+   "occlusion": "textures/schutzenpanzer_puma_igelpanzerunga_cap_ao_ao_occ.png"
+  },
+  {
+   "name": "v603_kyata_R",
+   "template": "v603_kyata_R",
+   "albedo": "textures/ger_pzh_2000_track_c.jpg",
+   "normal": "textures/ger_pzh_2000_track_n_n.jpg",
+   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png"
+  },
+  {
+   "name": "v603_kyata_L",
+   "template": "v603_kyata_L",
+   "albedo": "textures/ger_pzh_2000_track_c.jpg",
+   "normal": "textures/ger_pzh_2000_track_n_n.jpg",
+   "occlusion": "textures/ger_pzh_2000_track_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_headlight_glass_c",
+   "template": "v603_body",
+   "albedo": "textures/headlight_glass_c.jpg",
+   "normal": "textures/headlight_glass_n_n.jpg",
+   "occlusion": "textures/headlight_glass_n_ao_occ.png"
+  },
+  {
+   "name": "wt_headlight_glass_c_15",
+   "template": "v603_body",
+   "albedo": "textures/headlight_glass_c.jpg",
+   "normal": "textures/headlight_glass_n_n.jpg"
+  },
+  {
+   "name": "wt_ger_pzh_2000_phys_track_c",
+   "template": "v603_body",
+   "albedo": "textures/ger_pzh_2000_phys_track_c.jpg",
+   "normal": "textures/ger_pzh_2000_phys_track_n_n.jpg",
+   "occlusion": "textures/ger_pzh_2000_phys_track_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_chain_a_c",
+   "template": "v603_body",
+   "albedo": "textures/chain_a_c.jpg",
+   "normal": "textures/chain_a_n_n.jpg",
+   "occlusion": "textures/_white_ao_ao_occ.png"
+  },
+  {
+   "name": "wt_mg_browning_m2hb_ammo_c",
+   "template": "v603_body",
+   "albedo": "textures/mg_browning_m2hb_ammo_c.jpg",
+   "normal": "textures/mg_browning_m2hb_ammo_n_n.jpg",
+   "occlusion": "textures/mg_browning_m2hb_ammo_ao_ao_occ.png"
+  }
+ ],
+ "parts": [
+  {
+   "name": "body.wt_pzh_2000_body_c_ger_camo_bronzegruen",
+   "bone": "body",
+   "material": 0,
+   "triangles": 116850,
+   "vertices": 164563
+  },
+  {
+   "name": "body.wt_pzh_2000_turret_c_ger_camo_bronzegruen",
+   "bone": "body",
+   "material": 1,
+   "triangles": 538,
+   "vertices": 600
+  },
+  {
+   "name": "body.wt_net_f_c",
+   "bone": "body",
+   "material": 2,
+   "triangles": 34,
+   "vertices": 41
+  },
+  {
+   "name": "body.wt_pzh_2000_gun_c_ger_camo_bronzegruen",
+   "bone": "body",
+   "material": 4,
+   "triangles": 1232,
+   "vertices": 774
+  },
+  {
+   "name": "body.wt_pzh_2000_turret_c",
+   "bone": "body",
+   "material": 8,
+   "triangles": 224,
+   "vertices": 165
+  },
+  {
+   "name": "body.wt_pzh_2000_add_c",
+   "bone": "body",
+   "material": 9,
+   "triangles": 3242,
+   "vertices": 5594
+  },
+  {
+   "name": "body.wt_schutzenpanzer_puma_igelpanzerung_c",
+   "bone": "body",
+   "material": 10,
+   "triangles": 6982,
+   "vertices": 13950
+  },
+  {
+   "name": "body.wt_schutzenpanzer_puma_igelpanzerunga_cap_c",
+   "bone": "body",
+   "material": 11,
+   "triangles": 778,
+   "vertices": 863
+  },
+  {
+   "name": "body.wt_headlight_glass_c",
+   "bone": "body",
+   "material": 14,
+   "triangles": 216,
+   "vertices": 154
+  },
+  {
+   "name": "body.wt_headlight_glass_c_15",
+   "bone": "body",
+   "material": 15,
+   "triangles": 104,
+   "vertices": 66
+  },
+  {
+   "name": "body.wt_ger_pzh_2000_phys_track_c",
+   "bone": "body",
+   "material": 16,
+   "triangles": 498,
+   "vertices": 756
+  },
+  {
+   "name": "body.wt_chain_a_c",
+   "bone": "body",
+   "material": 17,
+   "triangles": 106,
+   "vertices": 212
+  },
+  {
+   "name": "cannon_l.wt_pzh_2000_gun_c_ger_camo_bronzegruen",
+   "bone": "cannon_l",
+   "material": 4,
+   "triangles": 1172,
+   "vertices": 1480
+  },
+  {
+   "name": "cannon_main.wt_pzh_2000_turret_c_ger_camo_bronzegruen",
+   "bone": "cannon_main",
+   "material": 1,
+   "triangles": 36399,
+   "vertices": 52933
+  },
+  {
+   "name": "cannon_main.wt_net_f_c",
+   "bone": "cannon_main",
+   "material": 2,
+   "triangles": 14,
+   "vertices": 18
+  },
+  {
+   "name": "cannon_main.wt_side_glass_c",
+   "bone": "cannon_main",
+   "material": 3,
+   "triangles": 14,
+   "vertices": 20
+  },
+  {
+   "name": "cannon_main.wt_pzh_2000_gun_c_ger_camo_bronzegruen",
+   "bone": "cannon_main",
+   "material": 4,
+   "triangles": 2322,
+   "vertices": 2868
+  },
+  {
+   "name": "cannon_main.wt_mg_mount_leopard_2a7v_c_ger_camo_bronzegruen",
+   "bone": "cannon_main",
+   "material": 6,
+   "triangles": 2458,
+   "vertices": 3161
+  },
+  {
+   "name": "cannon_main.wt_mg_mg_42_c",
+   "bone": "cannon_main",
+   "material": 7,
+   "triangles": 4058,
+   "vertices": 4484
+  },
+  {
+   "name": "cannon_main.wt_pzh_2000_turret_c",
+   "bone": "cannon_main",
+   "material": 8,
+   "triangles": 224,
+   "vertices": 165
+  },
+  {
+   "name": "cannon_main.wt_pzh_2000_add_c",
+   "bone": "cannon_main",
+   "material": 9,
+   "triangles": 4868,
+   "vertices": 8234
+  },
+  {
+   "name": "cannon_main.wt_schutzenpanzer_puma_igelpanzerung_c",
+   "bone": "cannon_main",
+   "material": 10,
+   "triangles": 10430,
+   "vertices": 20860
+  },
+  {
+   "name": "cannon_main.wt_schutzenpanzer_puma_igelpanzerunga_cap_c",
+   "bone": "cannon_main",
+   "material": 11,
+   "triangles": 1186,
+   "vertices": 1258
+  },
+  {
+   "name": "cannon_main.wt_mg_browning_m2hb_ammo_c",
+   "bone": "cannon_main",
+   "material": 18,
+   "triangles": 828,
+   "vertices": 1368
+  },
+  {
+   "name": "cannon_slide_l.wt_pzh_2000_gun_c_ger_camo_bronzegruen",
+   "bone": "cannon_slide_l",
+   "material": 4,
+   "triangles": 4358,
+   "vertices": 4319
+  },
+  {
+   "name": "cannon_slide_l.wt_rifled_barrel_b_c",
+   "bone": "cannon_slide_l",
+   "material": 5,
+   "triangles": 154,
+   "vertices": 112
+  },
+  {
+   "name": "catapi_body.v603_kyata_R",
+   "bone": "catapi_body",
+   "material": 12,
+   "triangles": 5468,
+   "vertices": 5740
+  },
+  {
+   "name": "catapi_body.v603_kyata_L",
+   "bone": "catapi_body",
+   "material": 13,
+   "triangles": 5468,
+   "vertices": 5740
+  },
+  {
+   "name": "doppler_radar.wt_pzh_2000_turret_c_ger_camo_bronzegruen",
+   "bone": "doppler_radar",
+   "material": 1,
+   "triangles": 1110,
+   "vertices": 1110
+  },
+  {
+   "name": "doppler_radar.wt_side_glass_c",
+   "bone": "doppler_radar",
+   "material": 3,
+   "triangles": 18,
+   "vertices": 20
+  },
+  {
+   "name": "wheel_A_l",
+   "bone": "tire_moveA_l",
+   "material": 0,
+   "triangles": 2680,
+   "vertices": 2902
+  },
+  {
+   "name": "wheel_A_r",
+   "bone": "tire_moveA_r",
+   "material": 0,
+   "triangles": 2680,
+   "vertices": 2902
+  },
+  {
+   "name": "wheel_B_l",
+   "bone": "tire_moveB_l",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_B_r",
+   "bone": "tire_moveB_r",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_C_l",
+   "bone": "tire_moveC_l",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_C_r",
+   "bone": "tire_moveC_r",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_D_l",
+   "bone": "tire_moveD_l",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_D_r",
+   "bone": "tire_moveD_r",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_E_l",
+   "bone": "tire_moveE_l",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_E_r",
+   "bone": "tire_moveE_r",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_F_l",
+   "bone": "tire_moveF_l",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_F_r",
+   "bone": "tire_moveF_r",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_G_l",
+   "bone": "tire_moveG_l",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_G_r",
+   "bone": "tire_moveG_r",
+   "material": 0,
+   "triangles": 1124,
+   "vertices": 1205
+  },
+  {
+   "name": "wheel_H_l",
+   "bone": "tire_moveH_l",
+   "material": 0,
+   "triangles": 1318,
+   "vertices": 1822
+  },
+  {
+   "name": "wheel_H_r",
+   "bone": "tire_moveH_r",
+   "material": 0,
+   "triangles": 1318,
+   "vertices": 1822
+  },
+  {
+   "name": "tracking_radar.wt_mg_mount_leopard_2a7v_c_ger_camo_bronzegruen",
+   "bone": "tracking_radar",
+   "material": 6,
+   "triangles": 985,
+   "vertices": 1104
+  }
+ ],
+ "origins": {
+  "cannon_main": [
+   0.0,
+   1.84,
+   -2.3
+  ],
+  "cannon_l": [
+   4.999999999991123e-06,
+   2.45,
+   -0.9
+  ],
+  "cannon_slide_l": [
+   4.999999999991123e-06,
+   2.453179,
+   7.031989
+  ],
+  "cannon_r": [
+   4.999999999991123e-06,
+   2.45,
+   -0.9
+  ],
+  "cannon_slide_r": [
+   4.999999999991123e-06,
+   2.453179,
+   7.031989
+  ],
+  "tire_moveA_l": [
+   1.4138709999999999,
+   0.890676,
+   3.05407
+  ],
+  "tire_moveA_r": [
+   -1.413843,
+   0.890677,
+   3.05407
+  ],
+  "tire_moveB_l": [
+   1.413111,
+   0.42464,
+   2.295778
+  ],
+  "catapiB_l": [
+   1.413111,
+   0.42464,
+   2.295778
+  ],
+  "tire_moveB_r": [
+   -1.413078,
+   0.424642,
+   2.137193
+  ],
+  "catapiB_r": [
+   -1.413078,
+   0.424642,
+   2.137193
+  ],
+  "tire_moveC_l": [
+   1.413111,
+   0.42464,
+   1.501931
+  ],
+  "catapiC_l": [
+   1.413111,
+   0.42464,
+   1.501931
+  ],
+  "tire_moveC_r": [
+   -1.413078,
+   0.424642,
+   1.343347
+  ],
+  "catapiC_r": [
+   -1.413078,
+   0.424642,
+   1.343347
+  ],
+  "tire_moveD_l": [
+   1.413111,
+   0.424639,
+   0.7137610000000001
+  ],
+  "catapiD_l": [
+   1.413111,
+   0.424639,
+   0.7137610000000001
+  ],
+  "tire_moveD_r": [
+   -1.413078,
+   0.424642,
+   0.555177
+  ],
+  "catapiD_r": [
+   -1.413078,
+   0.424642,
+   0.555177
+  ],
+  "tire_moveE_l": [
+   1.413111,
+   0.424639,
+   -0.069684
+  ],
+  "catapiE_l": [
+   1.413111,
+   0.424639,
+   -0.069684
+  ],
+  "tire_moveE_r": [
+   -1.413078,
+   0.424642,
+   -0.228268
+  ],
+  "catapiE_r": [
+   -1.413078,
+   0.424642,
+   -0.228268
+  ],
+  "tire_moveF_l": [
+   1.413111,
+   0.424639,
+   -1.045187
+  ],
+  "catapiF_l": [
+   1.413111,
+   0.424639,
+   -1.045187
+  ],
+  "tire_moveF_r": [
+   -1.413078,
+   0.424642,
+   -1.203772
+  ],
+  "catapiF_r": [
+   -1.413078,
+   0.424642,
+   -1.203772
+  ],
+  "tire_moveG_l": [
+   1.413111,
+   0.424639,
+   -1.81074
+  ],
+  "catapiG_l": [
+   1.413111,
+   0.424639,
+   -1.81074
+  ],
+  "tire_moveG_r": [
+   -1.413078,
+   0.424642,
+   -1.9693239999999999
+  ],
+  "catapiG_r": [
+   -1.413078,
+   0.424642,
+   -1.9693239999999999
+  ],
+  "tire_moveH_l": [
+   1.410016,
+   0.887249,
+   -3.465623
+  ],
+  "tire_moveH_r": [
+   -1.409983,
+   0.88725,
+   -3.465623
+  ],
+  "doppler_radar": [
+   -0.592305,
+   3.234343,
+   -2.4155379999999997
+  ],
+  "tracking_radar": [
+   1.1840169999999999,
+   3.276724,
+   -2.254095
+  ]
+ },
+ "visual_bones": [],
+ "wheels": {
+  "tire_moveA_l": {
+   "centre": [
+    1.4138709999999999,
+    0.890676,
+    3.05407
+   ],
+   "radius": 0.33981
+  },
+  "tire_moveA_r": {
+   "centre": [
+    -1.413843,
+    0.890677,
+    3.05407
+   ],
+   "radius": 0.33981000000000006
+  },
+  "tire_moveB_l": {
+   "centre": [
+    1.413111,
+    0.42464,
+    2.295778
+   ],
+   "radius": 0.35153999999999996
+  },
+  "tire_moveB_r": {
+   "centre": [
+    -1.413078,
+    0.424642,
+    2.137193
+   ],
+   "radius": 0.35153999999999996
+  },
+  "tire_moveC_l": {
+   "centre": [
+    1.413111,
+    0.42464,
+    1.501931
+   ],
+   "radius": 0.35153999999999996
+  },
+  "tire_moveC_r": {
+   "centre": [
+    -1.413078,
+    0.424642,
+    1.343347
+   ],
+   "radius": 0.35154
+  },
+  "tire_moveD_l": {
+   "centre": [
+    1.413111,
+    0.424639,
+    0.7137610000000001
+   ],
+   "radius": 0.35153999999999996
+  },
+  "tire_moveD_r": {
+   "centre": [
+    -1.413078,
+    0.424642,
+    0.555177
+   ],
+   "radius": 0.35153999999999996
+  },
+  "tire_moveE_l": {
+   "centre": [
+    1.413111,
+    0.424639,
+    -0.069684
+   ],
+   "radius": 0.35153999999999996
+  },
+  "tire_moveE_r": {
+   "centre": [
+    -1.413078,
+    0.424642,
+    -0.228268
+   ],
+   "radius": 0.35154
+  },
+  "tire_moveF_l": {
+   "centre": [
+    1.413111,
+    0.424639,
+    -1.045187
+   ],
+   "radius": 0.35153999999999996
+  },
+  "tire_moveF_r": {
+   "centre": [
+    -1.413078,
+    0.424642,
+    -1.203772
+   ],
+   "radius": 0.35154
+  },
+  "tire_moveG_l": {
+   "centre": [
+    1.413111,
+    0.424639,
+    -1.81074
+   ],
+   "radius": 0.35153999999999996
+  },
+  "tire_moveG_r": {
+   "centre": [
+    -1.413078,
+    0.424642,
+    -1.9693239999999999
+   ],
+   "radius": 0.35153999999999985
+  },
+  "tire_moveH_l": {
+   "centre": [
+    1.410016,
+    0.887249,
+    -3.465623
+   ],
+   "radius": 0.26803
+  },
+  "tire_moveH_r": {
+   "centre": [
+    -1.409983,
+    0.88725,
+    -3.465623
+   ],
+   "radius": 0.26803
+  }
+ },
+ "muzzles": {
+  "left": [
+   {
+    "bone": "cannon_slide_l",
+    "point": [
+     4.999999999991123e-06,
+     2.453179,
+     7.031989
+    ]
+   }
+  ],
+  "right": [
+   {
+    "bone": "cannon_slide_r",
+    "point": [
+     4.999999999991123e-06,
+     2.453179,
+     7.031989
+    ]
+   }
+  ],
+  "missiles": []
+ },
+ "ejections": {
+  "left": {
+   "bone": "cannon_slide_l",
+   "point": [
+    0.200005,
+    2.453179,
+    -1.945841
+   ]
+  },
+  "right": {
+   "bone": "cannon_slide_r",
+   "point": [
+    -0.19999500000000003,
+    2.453179,
+    -1.945841
+   ]
+  }
+ },
+ "collision": {
+  "body": {
+   "target": [
+    [
+     -1.875003,
+     0.073099,
+     -4.555002
+    ],
+    [
+     1.889346,
+     2.66351,
+     3.677057
+    ]
+   ],
+   "source_triangles": 130804,
+   "hull_triangles": 4968
+  },
+  "cannon_main": {
+   "target": [
+    [
+     -1.58674,
+     0.816585,
+     -4.61465
+    ],
+    [
+     1.58675,
+     4.84028,
+     0.489341
+    ]
+   ],
+   "source_triangles": 62801,
+   "hull_triangles": 4710
+  },
+  "cannon_l": {
+   "target": [
+    [
+     -0.33028,
+     1.988528,
+     -1.945841
+    ],
+    [
+     0.33029,
+     2.982488,
+     7.031989
+    ]
+   ],
+   "source_triangles": 5684,
+   "hull_triangles": 2808
+  },
+  "cannon_r": {
+   "target": [
+    [
+     -0.33028,
+     1.988528,
+     -1.606635
+    ],
+    [
+     0.33029,
+     2.982488,
+     0.459485
+    ]
+   ],
+   "source_triangles": 1172,
+   "hull_triangles": 1210
+  },
+  "doppler_radar": {
+   "target": [
+    [
+     -0.702722,
+     3.106831,
+     -2.525858
+    ],
+    [
+     -0.481888,
+     3.361855,
+     -2.305218
+    ]
+   ],
+   "source_triangles": 1128,
+   "hull_triangles": 764
+  },
+  "tracking_radar": {
+   "target": [
+    [
+     1.029907,
+     3.170599,
+     -2.372665
+    ],
+    [
+     1.338127,
+     3.382849,
+     -2.135525
+    ]
+   ],
+   "source_triangles": 985,
+   "hull_triangles": 634
+  },
+  "tire_moveA_l": {
+   "target": [
+    [
+     1.148091,
+     0.550866,
+     2.714215
+    ],
+    [
+     1.679651,
+     1.230486,
+     3.393925
+    ]
+   ],
+   "source_triangles": 2680,
+   "hull_triangles": 1266
+  },
+  "tire_moveA_r": {
+   "target": [
+    [
+     -1.679618,
+     0.550867,
+     2.714215
+    ],
+    [
+     -1.148068,
+     1.230487,
+     3.393925
+    ]
+   ],
+   "source_triangles": 2680,
+   "hull_triangles": 1308
+  },
+  "tire_moveB_l": {
+   "target": [
+    [
+     1.238571,
+     0.0731,
+     1.944238
+    ],
+    [
+     1.587651,
+     0.77618,
+     2.647318
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveB_r": {
+   "target": [
+    [
+     -1.587618,
+     0.073102,
+     1.785653
+    ],
+    [
+     -1.238538,
+     0.776182,
+     2.488733
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveC_l": {
+   "target": [
+    [
+     1.238571,
+     0.0731,
+     1.150391
+    ],
+    [
+     1.587651,
+     0.77618,
+     1.853471
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveC_r": {
+   "target": [
+    [
+     -1.587618,
+     0.073102,
+     0.991807
+    ],
+    [
+     -1.238538,
+     0.776182,
+     1.694887
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveD_l": {
+   "target": [
+    [
+     1.238571,
+     0.073099,
+     0.362221
+    ],
+    [
+     1.587651,
+     0.776179,
+     1.065301
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveD_r": {
+   "target": [
+    [
+     -1.587618,
+     0.073102,
+     0.203637
+    ],
+    [
+     -1.238538,
+     0.776182,
+     0.906717
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveE_l": {
+   "target": [
+    [
+     1.238571,
+     0.073099,
+     -0.421224
+    ],
+    [
+     1.587651,
+     0.776179,
+     0.281856
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveE_r": {
+   "target": [
+    [
+     -1.587618,
+     0.073102,
+     -0.579808
+    ],
+    [
+     -1.238538,
+     0.776182,
+     0.123272
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveF_l": {
+   "target": [
+    [
+     1.238571,
+     0.073099,
+     -1.396727
+    ],
+    [
+     1.587651,
+     0.776179,
+     -0.693647
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveF_r": {
+   "target": [
+    [
+     -1.587618,
+     0.073102,
+     -1.555312
+    ],
+    [
+     -1.238538,
+     0.776182,
+     -0.852232
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveG_l": {
+   "target": [
+    [
+     1.238571,
+     0.073099,
+     -2.16228
+    ],
+    [
+     1.587651,
+     0.776179,
+     -1.4592
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveG_r": {
+   "target": [
+    [
+     -1.587618,
+     0.073102,
+     -2.320864
+    ],
+    [
+     -1.238538,
+     0.776182,
+     -1.617784
+    ]
+   ],
+   "source_triangles": 1124,
+   "hull_triangles": 790
+  },
+  "tire_moveH_l": {
+   "target": [
+    [
+     1.239831,
+     0.619169,
+     -3.733653
+    ],
+    [
+     1.580201,
+     1.155329,
+     -3.197593
+    ]
+   ],
+   "source_triangles": 1318,
+   "hull_triangles": 750
+  },
+  "tire_moveH_r": {
+   "target": [
+    [
+     -1.580168,
+     0.61917,
+     -3.733653
+    ],
+    [
+     -1.239798,
+     1.15533,
+     -3.197593
+    ]
+   ],
+   "source_triangles": 1318,
+   "hull_triangles": 730
+  }
+ },
+ "triangles": 233822
+}
