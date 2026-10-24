@@ -24,7 +24,7 @@ KIND = 'quadvulcan'
 OUT_ARC = 'EDF6VC_QUADVULCAN.MRAB'
 OUT_CAS = 'EDF6VC_QUADVULCAN.CAS'
 SOURCE_ROTOR = 'edf6vc_m61_rotor'
-ROTORS = (SOURCE_ROTOR, 'edf6vc_m61_rotor_2', 'edf6vc_m61_rotor_3', 'edf6vc_m61_rotor_4')   # src/vulcan_rotor.h kBones
+ROTORS = (SOURCE_ROTOR, 'edf6vc_m61_rot2', 'edf6vc_m61_rot3', 'edf6vc_m61_rot4')   # src/vulcan_rotor.h kBones: apart in 16 characters
 # m between the four guns' axes (x and y): the M61's barrel ring is 0.18 m across, its clamps a little more; at 0.30 m
 # the four clusters clear each other and stay inside the M163 cradle's face (0.81 x 0.52 m).
 CLUSTER_STEP = 0.30

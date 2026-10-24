@@ -10,8 +10,19 @@ void ResetVulcanRotors() noexcept;
 namespace vulcanrotor {
 constexpr wchar_t kBone[]=L"edf6vc_m61_rotor";
 // Every rotor a vehicle may have: the M163's one (kBone), the quad Vulcan's three more (pylib/quadvulcan_model.py ROTORS).
-constexpr const wchar_t* kBones[]={kBone,L"edf6vc_m61_rotor_2",L"edf6vc_m61_rotor_3",L"edf6vc_m61_rotor_4"};
+// The game's bone lookup (body506.cpp BoneRecord506) compares the first 16 characters only, and kBone is 16 long: the
+// others differ within those 16 ("edf6vc_m61_rotor_2" found the M163's rotor, so three of the quad's four never spun).
+constexpr const wchar_t* kBones[]={kBone,L"edf6vc_m61_rot2",L"edf6vc_m61_rot3",L"edf6vc_m61_rot4"};
 constexpr int kMostBones=sizeof(kBones)/sizeof(kBones[0]);
+constexpr bool SameFirst16(const wchar_t* a,const wchar_t* b) noexcept {
+    for(int i=0;i<16;++i){if(a[i]!=b[i])return false;if(!a[i])return true;}
+    return true;
+}
+constexpr bool Apart16() noexcept {
+    for(int i=0;i<kMostBones;++i)for(int k=i+1;k<kMostBones;++k)if(SameFirst16(kBones[i],kBones[k]))return false;
+    return true;
+}
+static_assert(Apart16(),"every rotor bone is told apart within the 16 characters BoneRecord506 compares");
 // The M61s' weapon files (tools/make_tracked_combat.py: the M163's two belts, the quad's HE pair and AP pair, the
 // Phalanx's pair, EDF6VC_CIWS_PHALANX_*): one
 // of their holders shooting spins every rotor.

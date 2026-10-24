@@ -280,12 +280,45 @@ def plan_rows(ids: list[str]) -> Plan:
     return Plan(at, appended)
 
 
-def check_room(rows: int) -> None:
-    """Refuses (SystemExit, before anything is built or written) a table longer than the game keeps weapon records for."""
-    if rows > SAVE_WEAPONS:
-        raise SystemExit(f'the weapon table would have {rows} rows, but the game keeps {SAVE_WEAPONS} weapon records '
-                         f"(with the plugin's relocation), one per row, and writes past them for every row beyond: "
-                         f"{rows - SAVE_WEAPONS} too many. Remove another mod's weapon rows first; nothing was written.")
+NATIVE_WEAPONS = 0x800   # the game's own records (docs/loadout-re.md 8.1), without the plugin's relocation
+EDF_STAMP = 0x678CCB46   # the EDF.dll the relocation is made for (src/plugin.cpp IdentifyImage: any other refuses it)
+OTHER_RELOCATION = 'edf6_weaponlimit.dll'   # relocates the same records: the plugin then refuses its own (8.8)
+
+
+def edf_stamp(game_root: str) -> int | None:
+    """EDF.dll's PE TimeDateStamp, None when it is not there or not a PE."""
+    try:
+        with open(os.path.join(game_root, 'EDF.dll'), 'rb') as f:
+            head = f.read(0x1000)
+        pe = int.from_bytes(head[0x3C:0x40], 'little')
+        return int.from_bytes(head[pe + 8:pe + 12], 'little') if head[pe:pe + 4] == b'PE\0\0' else None
+    except (OSError, ValueError):
+        return None
+
+
+def record_room(game_root: str) -> tuple[int, str | None]:
+    """How many weapon records the game will keep, and why not more: SAVE_WEAPONS when the plugin's relocation can
+    install (this EDF.dll, no other mod relocating them), else the game's own NATIVE_WEAPONS. Past them the game writes
+    over the game status for every row beyond (2026-10-24 review of #246): the table must never be longer."""
+    plugins = os.path.join(game_root, 'Mods', 'Plugins')
+    if os.path.isdir(plugins) and any(n.lower() == OTHER_RELOCATION for n in os.listdir(plugins)):
+        return NATIVE_WEAPONS, f'Mods/Plugins/{OTHER_RELOCATION} is installed (it and the plugin relocate the same records)'
+    stamp = edf_stamp(game_root)
+    if stamp != EDF_STAMP:
+        return NATIVE_WEAPONS, ('EDF.dll is not the Steam build the plugin supports' if stamp is not None
+                                else 'no EDF.dll in the game directory')
+    return SAVE_WEAPONS, None
+
+
+def check_room(rows: int, room: tuple[int, str | None] = (SAVE_WEAPONS, None)) -> None:
+    """Refuses (SystemExit, before anything is built or written) a table longer than the game keeps weapon records for
+    (`room`: record_room)."""
+    most, why = room
+    if rows > most:
+        relocation = f"(with the plugin's relocation)" if why is None else f'(the plugin cannot relocate them: {why})'
+        raise SystemExit(f'the weapon table would have {rows} rows, but the game keeps {most} weapon records '
+                         f'{relocation}, one per row, and writes past them for every row beyond: '
+                         f"{rows - most} too many. Remove another mod's weapon rows first; nothing was written.")
 
 
 def tail_start(ids: list[str]) -> int:
@@ -322,14 +355,26 @@ _VEHICLE_SWAP = {
 # find the builders model_missing imports.
 MODEL_VEHICLES = {'edf6tr_sazabi_mission': 'sazabi_model', 'edf6tr_dreadnought_mission': 'dreadnought_model'}
 assert set(MODEL_VEHICLES) == {vc.SAZABI_JET, vc.DREADNOUGHT_JET}, MODEL_VEHICLES
+# The ground vehicles made from that folder too: the Dreadnought's secondary turrets as emplacements
+# (pylib/emplacement_model.py, its kinds with no folder of their own). Without it tools/make_tracked_combat.py writes the
+# stock V603_FLAK.SGO under the emplacement's name, and its request keeps its template's stock flak guns.
+MODEL_GROUND = ('emp_mid', 'emp_short', 'emp_long')
 
 
 def model_missing(call: Call) -> bool:
-    """A model vehicle's request (MODEL_VEHICLES) whose model folder is not there."""
+    """A model vehicle's request (MODEL_VEHICLES, MODEL_GROUND) whose model folder is not there."""
+    if call.ground in MODEL_GROUND:
+        import emplacement_model
+        return emplacement_model.source_folder(call.ground) is None
     if call.jet not in MODEL_VEHICLES:
         return False
     import importlib
     return importlib.import_module(MODEL_VEHICLES[call.jet]).model_dir() is None
+
+
+def model_vehicle(call: Call) -> bool:
+    """A request that may have been built as its stock fallback (model_missing when it was built)."""
+    return call.jet in MODEL_VEHICLES or call.ground in MODEL_GROUND
 
 
 def vehicle_weapons(call: Call) -> tuple[str, ...]:
@@ -342,11 +387,11 @@ def vehicle_needs(call: Call, request: bytes | None = None) -> list[str]:
     tool): the vehicle SGO and its weapons of ours (EDF6VC_*). A stock weapon it keeps (the sidecar bike's guns and
     fuel tank) is the game's own, in Root.cpk: nothing to install."""
     weapons = vehicle_weapons(call)
-    if call.jet in MODEL_VEHICLES and request is not None:
+    if model_vehicle(call) and request is not None:
         # Follow the prepared/installed request, not today's model directory: the model may have been
-        # added or removed since these bytes were built. The stock-Eros fallback has only stock weapons.
+        # added or removed since these bytes were built. The stock fallback has only stock weapons.
         setup = dsgo.parse(request).root.get('Ammo_CustomParameter').items[4].items[3]
-        weapons = tuple(w.items[0] for w in setup.items[3].items)
+        weapons = tuple(w.items[0] for w in setup.items[len(setup.items) - 1 if call.ground else 3].items)
     ours = [w for w in weapons if w.split('/')[-1].upper().startswith('EDF6VC_')]
     return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in ours]
 
@@ -408,10 +453,11 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
     stock_vehicle = req.items[2]
     req.items[2] = _object_path(call)
     if fallback:
-        # make_sazabi / make_dreadnought write an unchanged V506_HELI under this stable alias. Keep the Eros request's
-        # mark, holder count, weapons and multipliers too; its setup overrides the object's on spawn.
-        if call.jet not in MODEL_VEHICLES:
-            raise ValueError('only a model vehicle (MODEL_VEHICLES) has a stock vehicle fallback')
+        # make_sazabi / make_dreadnought write an unchanged V506_HELI under this stable alias (make_tracked_combat the
+        # V603_FLAK, for an emplacement: MODEL_GROUND). Keep the template request's mark, holder count, weapons and
+        # multipliers too; its setup overrides the object's on spawn.
+        if not model_vehicle(call):
+            raise ValueError('only a model vehicle (MODEL_VEHICLES, MODEL_GROUND) has a stock vehicle fallback')
         res = r.get('resource')
         res.items = [_object_path(call) if x.lower() == stock_vehicle.lower() else x for x in res.items]
         for lang in LANGS:
@@ -822,7 +868,7 @@ def stack(game_root: str) -> dict[str, bytes]:
     s = load_shared(game_root)
     before = s.ids
     plan = plan_rows(before)
-    check_room(len(before) + len(plan.appended))
+    check_room(len(before) + len(plan.appended), record_room(game_root))
     ports, left_out = pw.build(game_root, lambda rel: stock(game_root, rel))
     if left_out:
         reasons = sorted(set(left_out.values()))
@@ -859,10 +905,12 @@ def stack(game_root: str) -> dict[str, bytes]:
     durability = {c.id: vehicle_durability(game_root, c) if c.brings == 'vehicle' else None for c in CALLS}
     if fallback:
         import sgo
-        hp = float(sgo.load(data=stock(game_root, 'OBJECT/V506_HELI.SGO'))['game_object_durability'])
-        mult = dsgo.parse(template_sgo[VEHICLE_TEMPLATE]).root.get('Ammo_CustomParameter').items[4].items[3].items[0].items[0]
         for c in CALLS:
             if c.id in fallback:
+                # the stock object the fallback writes under the vehicle's name, times its template request's multiplier
+                body = 'OBJECT/V603_FLAK.SGO' if c.ground else 'OBJECT/V506_HELI.SGO'
+                hp = float(sgo.load(data=stock(game_root, body))['game_object_durability'])
+                mult = dsgo.parse(template_sgo[template_of(c)]).root.get('Ammo_CustomParameter').items[4].items[3].items[0].items[0]
                 durability[c.id] = hp * float(mult)
     stats = {c.id: gun_stats(template_sgo[template_of(c)]) for c in CALLS if c.brings == 'gun'}
     for lang, rel in zip(LANGS, TEXTS):
@@ -906,14 +954,34 @@ def verify(game_root: str, out: dict[str, bytes], plan: Plan, want: dict[str, st
                 raise ValueError(f'{rel}: row {i} is not ours and changed')
 
 
+def past_room(ids: list[str], most: int = NATIVE_WEAPONS) -> int:
+    """Where retire cuts a table of `ids` so the game keeps a record for every row without the plugin (`most` of them):
+    the rows past `most` deleted, all of them ours (they end the table); len(ids) when it is short enough. SystemExit
+    when another mod's row is past `most`: deleting ours would move it, keeping it has the game write past its records."""
+    if len(ids) <= most:
+        return len(ids)
+    if tail_start(ids) > most:
+        raise SystemExit(f"the weapon table has {len(ids)} rows and another mod's rows are past row {most}: without the "
+                         f"plugin the game keeps {most} weapon records and writes past them for every row beyond. Remove "
+                         f"that mod's rows first (or keep the plugin installed); nothing was changed.")
+    return most
+
+
+def past_room_rows(game_root: str) -> list[str]:
+    """The rows uninstall deletes whatever it is asked (past_room: those past the game's own records), in order."""
+    ids = row_ids(base(game_root, TABLE))
+    return ids[past_room(ids):]
+
+
 def retire(game_root: str, delete_rows: bool) -> tuple[dict[str, bytes], list[str]]:
     """The shared table + texts with every row of ours a placeholder, or (delete_rows) deleted when it is in the
-    run of ours that ends the table. Returns (files, the ids whose rows are deleted)."""
+    run of ours that ends the table; the rows past the game's own NATIVE_WEAPONS records always deleted (past_room:
+    without the plugin the game writes past its records for each). Returns (files, the ids whose rows are deleted)."""
     s = load_shared(game_root)
     ids = s.ids
     plan = plan_rows(ids)
     present = {c: i for c, i in plan.at.items() if i < len(ids)}
-    cut = tail_start(ids) if delete_rows else len(ids)
+    cut = min(tail_start(ids) if delete_rows else len(ids), past_room(ids))
     deleted = sorted((c for c, i in present.items() if i >= cut), key=lambda c: present[c])
     by_id = {c.id: c for c in CALLS}
     tpl = {c: _template_index(ids, template_of(by_id[c]) if c in by_id else pw.BY_ID[c].template) for c in present}

@@ -377,7 +377,15 @@ def retire_weapons(game: str) -> bool:
     objects. False: cancelled, nothing changed."""
     import call_weapons
     try:
-        call_weapons.uninstall(game)
+        # Rows past the game's own 0x800 weapon records go (call_weapons.past_room): without the plugin the game would
+        # write past its records for each. A save with one of them equipped crashes once its row is gone.
+        past = call_weapons.past_room_rows(game)
+        if past:
+            print(f'武器表有 {call_weapons.NATIVE_WEAPONS + len(past)} 行，没有插件时游戏只能记录 {call_weapons.NATIVE_WEAPONS} 把武器：'
+                  f'卸载要删掉最后 {len(past)} 行（{", ".join(past[:6])}{" ……" if len(past) > 6 else ""}），否则游戏会写坏内存。')
+            if ask('请先在每个存档里卸下这些武器（装备着的存档在删行后会闪退）。已卸下输入 y 继续；其它 = 取消：').lower() != 'y':
+                return False
+        call_weapons.uninstall(game, unequipped=bool(past))
         return True
     except call_weapons.Misaligned as e:
         repairable = misaligned(game, e)
@@ -389,6 +397,11 @@ def retire_weapons(game: str) -> bool:
     if choice == 'y' and repairable:
         repair_weapons(game)
         return True
+    if choice == 's':
+        rows = len(call_weapons.row_ids(call_weapons.base(game, call_weapons.TABLE)))
+        if rows > call_weapons.NATIVE_WEAPONS:   # the table left as it is, without the plugin: the game writes past
+            print(f'不能跳过：武器表有 {rows} 行，没有插件时游戏只能记录 {call_weapons.NATIVE_WEAPONS} 把武器，会写坏内存。')
+            return False
     return choice == 's'
 
 
@@ -794,6 +807,13 @@ def uninstall(game: str) -> None:
     if make_edf5_campaign.removal_blocked(game):
         print('已取消卸载：EDF5 战役的模式表（CONFIG.SGO）或旧版任务列表被其他工具改过，不能安全撤回；保留任务文件和插件以免读档崩溃。')
         return
+    if choice == '2':
+        import call_weapons
+        rows = len(call_weapons.row_ids(call_weapons.base(game, call_weapons.TABLE)))
+        if rows > call_weapons.NATIVE_WEAPONS:
+            print(f'已取消：武器表有 {rows} 行，超过游戏自身能记录的 {call_weapons.NATIVE_WEAPONS} 把武器，只有插件在时才安全；'
+                  '只删插件会让游戏写坏内存。请选 1（删掉超出的行）。')
+            return
     if choice == '1':   # the call weapons point at the generated SGOs: those go only with the rows
         if not retire_weapons(game):
             print('已取消，没有删除任何文件。')

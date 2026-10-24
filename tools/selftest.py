@@ -1313,6 +1313,56 @@ def install_keeps_rows() -> None:
 
 
 @test
+def weapon_rows_never_past_the_records_the_game_keeps() -> None:
+    """The table is never longer than the records the game will keep (2026-10-24 review of #246: past them it writes
+    over the game status for every row beyond): install allows the plugin's 0x2000 only with the EDF.dll it relocates
+    them on and without edf6_weaponlimit.dll (call_weapons.record_room), else the game's own 0x800; uninstall, when the
+    plugin goes, always deletes the rows past 0x800 (ours: they end the table) and refuses when another mod's are there
+    (past_room)."""
+    with tempfile.TemporaryDirectory() as game:
+        assert cw.record_room(game)[0] == cw.NATIVE_WEAPONS, "no EDF.dll: the game's own records only"
+        pe = bytearray(0x200)
+        pe[0:2] = b'MZ'
+        pe[0x3C:0x40] = (0x80).to_bytes(4, 'little')
+        pe[0x80:0x84] = b'PE\0\0'
+        for stamp, room in ((cw.EDF_STAMP, cw.SAVE_WEAPONS), (cw.EDF_STAMP + 1, cw.NATIVE_WEAPONS)):
+            pe[0x88:0x8C] = stamp.to_bytes(4, 'little')
+            with open(os.path.join(game, 'EDF.dll'), 'wb') as f:
+                f.write(pe)
+            assert cw.record_room(game)[0] == room, (hex(stamp), cw.record_room(game))
+        pe[0x88:0x8C] = cw.EDF_STAMP.to_bytes(4, 'little')
+        with open(os.path.join(game, 'EDF.dll'), 'wb') as f:
+            f.write(pe)
+        os.makedirs(os.path.join(game, 'Mods', 'Plugins'))
+        open(os.path.join(game, 'Mods', 'Plugins', 'EDF6_WeaponLimit.dll'), 'wb').close()
+        room = cw.record_room(game)
+        assert room[0] == cw.NATIVE_WEAPONS and cw.OTHER_RELOCATION in room[1], room
+    for rows, room, refused in ((cw.SAVE_WEAPONS, (cw.SAVE_WEAPONS, None), False),
+                                (cw.NATIVE_WEAPONS + 1, (cw.NATIVE_WEAPONS, 'no EDF.dll'), True),
+                                (cw.SAVE_WEAPONS + 1, (cw.SAVE_WEAPONS, None), True)):
+        try:
+            cw.check_room(rows, room)
+        except SystemExit:
+            assert refused, (rows, room)
+        else:
+            assert not refused, (rows, room)
+    import ported_weapons as pw
+    stock_ids = [f'stock{i}' for i in range(cw.NATIVE_WEAPONS - 10)]
+    ours = list(calls.IDS) + list(pw.IDS)
+    assert len(stock_ids) + len(ours) > cw.NATIVE_WEAPONS
+    ids = stock_ids + ours
+    assert cw.past_room(ids) == cw.NATIVE_WEAPONS and all(cw.slot_of(x) for x in ids[cw.NATIVE_WEAPONS:])
+    assert cw.past_room(ids[:cw.NATIVE_WEAPONS]) == cw.NATIVE_WEAPONS
+    foreign = stock_ids + ours[:20] + ['another_mods_row'] + ours[20:]
+    try:
+        cw.past_room(foreign)
+    except SystemExit:
+        pass
+    else:
+        raise AssertionError("another mod's row past 0x800 was left for the game to write past")
+
+
+@test
 def placeholders_keep_rows() -> None:
     table = STOCK + [calls.retired_id(x) for x in calls.IDS[:19]] + OTHER
     plan = cw.plan_rows(table)
@@ -4197,6 +4247,19 @@ def _sazabi_request_template() -> bytes:
     return dsgo.write(dsgo.Document(root, []))
 
 
+def _flak_request_template() -> bytes:
+    """A stock flak-tank request (a ground request: [multipliers, vehicle params, weapons]) for an emplacement's
+    no-model fallback (call_weapons.MODEL_GROUND)."""
+    n = dsgo.Node
+    weapons = n([n([f'app:/weapon/v603_flak_gun01_{side}.sgo', n([0.01, 0.1])]) for side in ('l', 'r')])
+    setup = n([n([1.3, 1.4]), n([0.5, 0.5]), weapons])
+    vehicle = 'app:/object/v603_flak.sgo'
+    root = n([n([5.0]), n([0.0, 0.0, 0.0, 0.0, n(['transport', 'box', vehicle, setup, 'voice'])]),
+              n([vehicle] + [w.items[0] for w in weapons.items]), 'Flak'],
+             {0: 'ReloadTime', 1: 'Ammo_CustomParameter', 2: 'resource', 3: 'name.en'})
+    return dsgo.write(dsgo.Document(root, []))
+
+
 def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     """What call_weapons.stack would give (shape only), and the jets the vehicle requests need."""
     for c in calls.CALLS:
@@ -4209,7 +4272,36 @@ def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     for c in calls.CALLS:
         if c.jet in cw.MODEL_VEHICLES:   # their install reads the request's own setup (call_weapons.vehicle_needs)
             files[cw.sgo_file(c)] = cw.vehicle_sgo(_sazabi_request_template(), c, (2.0, 3.0))
+        elif c.ground in cw.MODEL_GROUND:
+            files[cw.sgo_file(c)] = cw.vehicle_sgo(_flak_request_template(), c, (2.0, 3.0), fallback=True)
     return files
+
+
+@test
+def emplacement_fallback_without_the_dreadnought() -> None:
+    """Without the Dreadnought's model folder its three secondary-turret emplacements are the stock flak tank under
+    their names (make_tracked_combat.model_missing), their requests keep the template's stock guns and need only that
+    SGO (call_weapons.MODEL_GROUND): the installer no longer stops at them. The emplacements with folders of their own
+    are not affected."""
+    from unittest.mock import patch
+    import make_tracked_combat as mtc
+    import obj_model
+    with tempfile.TemporaryDirectory() as empty, patch.object(obj_model, 'model_roots', lambda: [empty]):
+        for c in calls.CALLS:
+            if c.ground in cw.MODEL_GROUND:
+                assert cw.model_missing(c) and mtc.model_missing(c.ground), c.id
+                request = cw.vehicle_sgo(_flak_request_template(), c, (2.0, 3.0), fallback=True)
+                assert cw.vehicle_needs(c, request) == [cw.vehicle_file(c)], (c.id, cw.vehicle_needs(c, request))
+                r = dsgo.parse(request).root
+                assert r.get('Ammo_CustomParameter').items[4].items[2] == f'app:/object/{c.vehicle.lower()}.sgo'
+    import emplacement_model
+    assert {k for k, e in emplacement_model.KINDS.items() if not e.folder} == set(cw.MODEL_GROUND), cw.MODEL_GROUND
+    try:
+        mtc.check({f'OBJECT/{vc.GROUND_VEHICLES["emp_mid"].sgo}.SGO': _flak_request_template()}, 'emp_mid')
+    except ValueError:
+        pass   # the stand-in is not a V603: refused, as a wrong fallback must be
+    else:
+        raise AssertionError('a fallback that is not the stock V603 was accepted')
 
 
 @test
@@ -7765,8 +7857,12 @@ def edf5_weapons_stack_real() -> None:
     after = cw.row_ids(refused_out[cw.TABLE])
     assert all(after[with_edf5.index(p.id)] == (p.id if p.source == 'edf6' else pw.retired_id(p.id)) for p in pw.PORTS), \
         'a weapon the conversion refuses kept the row an earlier install gave it'
+    # Retired: a placeholder each, but the rows past the game's own records go (call_weapons.past_room: without the
+    # plugin the game would write past its records for them); the table ends at them.
     have = cw.row_ids(retired[cw.TABLE])
-    assert all(have[with_edf5.index(p.id)] == pw.retired_id(p.id) for p in pw.PORTS)
+    assert len(have) == min(len(with_edf5), cw.NATIVE_WEAPONS), (len(have), len(with_edf5))
+    assert all(have[with_edf5.index(p.id)] == pw.retired_id(p.id) for p in pw.PORTS
+               if with_edf5.index(p.id) < cw.NATIVE_WEAPONS)
 
 
 @test

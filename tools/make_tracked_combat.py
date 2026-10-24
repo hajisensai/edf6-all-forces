@@ -492,8 +492,22 @@ def _points(model, game: vc.Game) -> dict[str, list[tuple[str, tuple[float, floa
     return points
 
 
+def model_missing(kind: str) -> bool:
+    """An emplacement whose model folder (the Dreadnought's, for its secondary turrets) is not there: build() writes
+    the stock V603_FLAK.SGO under its name, as make_dreadnought writes the stock V506 (call_weapons.MODEL_GROUND)."""
+    return kind in EMPLACEMENTS and emplacement_model.source_folder(kind) is None
+
+
 def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> None:
     vehicle = vc.GROUND_VEHICLES[kind]
+    if set(files) == {f'OBJECT/{vehicle.sgo}.SGO'} and kind in EMPLACEMENTS:
+        # the no-model fallback (model_missing): the stock flak tank under the emplacement's name, nothing else
+        r = dsgo.parse(files[f'OBJECT/{vehicle.sgo}.SGO']).root
+        if 'xgs_scene_object_class' not in r.names.values() or r.get('xgs_scene_object_class') != 'Vehicle603_Flak':
+            raise ValueError(f'{kind}: the no-model fallback is not the stock V603')
+        if game is not None and files[f'OBJECT/{vehicle.sgo}.SGO'] != game.read('OBJECT', STOCK_VEHICLE):
+            raise ValueError(f'{kind}: the no-model fallback differs from the stock {STOCK_VEHICLE}')
+        return
     model = model_module(kind)
     expected = {f'OBJECT/{vehicle.sgo}.SGO', f'OBJECT/{model.OUT_ARC}', collision_path(kind), animation_path(kind),
                 *(f'WEAPON/{path.rsplit("/", 1)[1].upper()}' for path in vehicle.weapons)}
@@ -587,6 +601,13 @@ def build(root: str, kind: str) -> dict[str, bytes]:
     into the model (pylib/cockpits.py; the fits are pylib/cockpit_fits_plugin.py's, by the model's stem), as every
     generated vehicle's are: without a `vc_eye_<seat>` marker in the model a seat has no first person
     (src/fp_vehicle.cpp VehicleEye)."""
+    if model_missing(kind):
+        print(f'未找到无畏舰模型（{emplacement_model.MODEL_SUBDIR}，可用环境变量 EDF6VC_MODELS 指定模型目录）：'
+              f'{LABELS[kind]}先叫来普通的防空车；放好模型后重新安装即可。', flush=True)
+        game = vc.Game(root)
+        files = {f'OBJECT/{vc.GROUND_VEHICLES[kind].sgo}.SGO': game.read('OBJECT', STOCK_VEHICLE)}
+        check(files, kind, game)
+        return files
     return cockpits.graft_files(vc.Game(root), authored(root, kind))
 
 

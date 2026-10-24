@@ -16,6 +16,8 @@
 //      job's final copy of a decoded file (0x7C1AD1, on the save thread; rows 0x800.. from the sidecar);
 //      the weapon select screen's snapshot (0x8B49B1): its two reads of the snapshot's table (0x8B4F70, 0x8B51A0, both
 //      reached only after that copy in the same call) are redirected to a copy of the relocated table made there.
+//    The one such copy left as it is: the screen's write-back 0x8BD7FE (the whole block from its snapshot): it touches
+//    the old table only, which nothing reads before MirrorToBlock rewrites it (docs/loadout-re.md 8.8).
 //  - The sidecar (MAIN.GST.edf6vc next to MAIN.GST): written when the save job's write of MAIN.GST succeeds (0x7C228B
 //    -> 0x7B9990), read when the load job copies MAIN.GST into the block, deleted with MAIN.GST (the two DeleteFileW
 //    calls 0x7B69F1, 0x7B7FEB). The paths are the game's own: its CreateFileW calls in the read (0x7B90CD) and the
@@ -52,7 +54,9 @@ constexpr unsigned kReadOpen=0x7B90CD,kWriteOpen=0x7B9C28;   // call [CreateFile
 constexpr unsigned kDeleteCalls[]={0x7B69F1,0x7B7FEB};    // call [DeleteFileW] in 0x7B61B0 / 0x7B7EC0
 constexpr unsigned kUiOwned=0x8B4F70,kUiStatus=0x8B51A0;  // the screen's two reads of its snapshot's table
 constexpr std::size_t kSaveSourceArg=5;                   // 0x7BCD40's sixth argument: the block it saves
-constexpr std::size_t kWriteDesc=8,kDescData=0x10,kDescSize=0x18;   // 0x7B9990(path, desc): desc+8 -> {.., .., data, size}
+// 0x7B9990(path, desc) writes desc's parts one after another (its loop 0x7B9CB0..0x7B9E0E): desc+8 -> {data, size}
+// a part (16 bytes), desc+0x18 their count.
+constexpr std::size_t kDescParts=8,kDescCount=0x18,kPartBytes=16,kMostParts=64;
 constexpr wchar_t kMainSave[]=L"MAIN.GST";
 constexpr wchar_t kSidecarSuffix[]=L".edf6vc";
 
@@ -82,8 +86,10 @@ using SaveFn=std::uintptr_t(__fastcall*)(std::uintptr_t,std::uintptr_t,std::uint
 using WriteFn=int(__fastcall*)(void*,void*);
 using CreateFn=HANDLE(WINAPI*)(LPCWSTR,DWORD,DWORD,LPSECURITY_ATTRIBUTES,DWORD,DWORD,HANDLE);
 using DeleteFn=BOOL(WINAPI*)(LPCWSTR);
-CreateFn gameCreate=nullptr;   // what the game's import slot held (EDF Mod Loader may redirect file APIs there)
-DeleteFn gameDelete=nullptr;
+// What the game's import slots held (EDF Mod Loader may redirect file APIs there): set by RedirectImportCall before it
+// makes the call sites reach the hooks that call through them.
+void* gameCreate=nullptr;
+void* gameDelete=nullptr;
 
 thread_local wchar_t readPath[MAX_PATH];
 thread_local wchar_t writePath[MAX_PATH];
@@ -108,9 +114,19 @@ bool SidecarOf(const wchar_t* save,wchar_t* out) noexcept {
 }
 
 // --- the sidecar file ---
+// A sidecar the last load could not use whole (unreadable, damaged, or from a build keeping more rows) is moved
+// aside to <sidecar>.unread before the save block is filled; when even that fails it is held: no save of this session
+// deletes or overwrites it (its rows would be lost for good) until a load reads one or a new game starts.
+constexpr wchar_t kUnreadSuffix[]=L".unread";
+bool held=false;   // under the lock
+
 bool WriteSidecar(const wchar_t* save,const std::uint8_t* ext) noexcept {
     wchar_t path[MAX_PATH],temp[MAX_PATH];
     if(!SidecarOf(save,path) || wcscpy_s(temp,path) || wcscat_s(temp,L".tmp"))return false;
+    if(held) {
+        Log("WEAPONREC save %ls: the sidecar the load could not read is kept as it is (rows past 0x800 of this session not saved)",save);
+        return false;
+    }
     const std::uint32_t rows=UsedRows(ext);
     if(!rows) {   // nothing past 0x800: no file (and none left over from an earlier save)
         if(DeleteFileW(path)){Log("WEAPONREC save %ls: no rows past 0x800, sidecar removed",save);return true;}
@@ -131,27 +147,52 @@ bool WriteSidecar(const wchar_t* save,const std::uint8_t* ext) noexcept {
     Log("WEAPONREC save %ls: %u rows past 0x800 in the sidecar",save,rows);
     return true;
 }
+// The sidecar the load could not use whole: moved aside (<sidecar>.unread, an earlier one replaced), else held.
+// `owned`: what of it this session has (all of it unusable: none).
+void SetAside(const wchar_t* save,const wchar_t* path,const char* why,const char* owned) noexcept {
+    wchar_t aside[MAX_PATH];
+    if(!wcscpy_s(aside,path) && !wcscat_s(aside,kUnreadSuffix) && MoveFileExW(path,aside,MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)) {
+        Log("WEAPONREC load %ls: the sidecar %s: %s; the file is kept as %ls",save,why,owned,aside);
+        return;
+    }
+    held=true;
+    Log("WEAPONREC load %ls: the sidecar %s and cannot be moved aside (%lu): %s; no save until the next load deletes or "
+        "overwrites it",save,why,GetLastError(),owned);
+}
 void ReadSidecar(const wchar_t* save,std::uint8_t* ext) noexcept {
     std::memset(ext,0,kExtBytes);
+    held=false;
     wchar_t path[MAX_PATH];
     if(!SidecarOf(save,path))return;
     HANDLE h=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(h==INVALID_HANDLE_VALUE) {
         const DWORD e=GetLastError();
         if(e==ERROR_FILE_NOT_FOUND)Log("WEAPONREC load %ls: no sidecar (no rows past 0x800)",save);
-        else Log("WEAPONREC load %ls: cannot open the sidecar (%lu): rows past 0x800 not owned",save,e);
+        else {   // there but not readable now (a scanner holding it, its rights): never take it for "no rows"
+            held=true;
+            Log("WEAPONREC load %ls: cannot open the sidecar (%lu): rows past 0x800 not owned; no save until the next load "
+                "deletes or overwrites it",save,e);
+        }
         return;
     }
-    static std::uint8_t file[kSidecarSize+1];
+    // The whole file: one from a build keeping more rows is longer than ours.
+    LARGE_INTEGER size{};
+    std::vector<std::uint8_t> file;
     DWORD read=0;
-    const BOOL ok=ReadFile(h,file,sizeof(file),&read,nullptr);
+    bool ok=GetFileSizeEx(h,&size) && size.QuadPart>=0 && size.QuadPart<=0x4000000;
+    try { if(ok)file.resize(static_cast<std::size_t>(size.QuadPart)); } catch(...) { ok=false; }
+    ok=ok && (file.empty() || ReadFile(h,file.data(),static_cast<DWORD>(file.size()),&read,nullptr)) && read==file.size();
     CloseHandle(h);
-    const Parse p=ok ? Deserialize(file,read,ext) : Parse::kShort;
-    const std::uint32_t rows=p==Parse::kOk ? SidecarRows(file,read) : 0;
-    if(p!=Parse::kOk)Log("WEAPONREC load %ls: the sidecar is unusable (%s): rows past 0x800 not owned; the file is kept",save,ParseName(p));
-    else if(rows>kSlots-kNativeSlots)Log("WEAPONREC load %ls: the sidecar has %u rows past 0x800, this build keeps %u: the next save drops the rest",
-                                          save,rows,kSlots-kNativeSlots);
-    else Log("WEAPONREC load %ls: %u rows past 0x800 from the sidecar",save,rows);
+    const Parse p=ok ? Deserialize(file.data(),file.size(),ext) : Parse::kShort;
+    const std::uint32_t rows=p==Parse::kOk ? SidecarRows(file.data(),file.size()) : 0;
+    char why[96];
+    if(p!=Parse::kOk) {
+        std::snprintf(why,sizeof(why),"is unusable (%s)",ok ? ParseName(p) : "not read whole");
+        SetAside(save,path,why,"rows past 0x800 not owned");
+    } else if(rows>kSlots-kNativeSlots) {   // this build keeps fewer: saving over it would drop the rest for good
+        std::snprintf(why,sizeof(why),"has %u rows past 0x800, this build keeps %u",rows,kSlots-kNativeSlots);
+        SetAside(save,path,why,"the rows this build keeps are owned");
+    } else Log("WEAPONREC load %ls: %u rows past 0x800 from the sidecar",save,rows);
 }
 
 void Keep(std::vector<Kept>& list,std::size_t most,const void* record,std::uint64_t hash,const std::uint8_t* ext) noexcept {
@@ -164,14 +205,23 @@ void Keep(std::vector<Kept>& list,std::size_t most,const void* record,std::uint6
         list.push_back(std::move(k));
     } catch(...) { Log("WEAPONREC out of memory keeping rows past 0x800"); }
 }
-// What the save job is writing, when it is a whole save block (0x7B9990's desc; nullptr otherwise).
-const unsigned char* SavedBlock(void* desc) noexcept {
+// The save block among what the save job writes (0x7B9990's desc): its one part of kBlockSize bytes, nullptr when
+// there is not exactly one (`count`: the parts, -1 when the desc is not readable).
+const unsigned char* SavedBlock(void* desc,long long* count) noexcept {
+    *count=-1;
     __try {
-        auto* const parts=At<unsigned char*>(desc,kWriteDesc);
-        if(!parts || !Readable(parts,kDescSize+8))return nullptr;
-        auto* const data=At<const unsigned char*>(parts,kDescData);
-        if(!data || At<std::uint64_t>(parts,kDescSize)!=kBlockSize || !Readable(data,kBlockSize))return nullptr;
-        return data;
+        if(!Readable(desc,kDescCount+8))return nullptr;
+        auto* const parts=At<unsigned char*>(desc,kDescParts);
+        const auto n=At<std::uint64_t>(desc,kDescCount);
+        if(!parts || n==0 || n>kMostParts || !Readable(parts,static_cast<std::size_t>(n)*kPartBytes))return nullptr;
+        *count=static_cast<long long>(n);
+        const unsigned char* found=nullptr;
+        for(std::uint64_t i=0;i<n;++i) {
+            if(At<std::uint64_t>(parts,i*kPartBytes+8)!=kBlockSize)continue;
+            if(found)return nullptr;   // two of that size: which one MAIN.GST's block is cannot be told
+            found=At<const unsigned char*>(parts,i*kPartBytes);
+        }
+        return found && Readable(found,kBlockSize) ? found : nullptr;
     } __except(EXCEPTION_EXECUTE_HANDLER) { return nullptr; }
 }
 
@@ -215,6 +265,8 @@ void* __cdecl NewGameCopyHook(void* dst,const void* src,std::size_t n) {
     if(active.load(std::memory_order_acquire) && LiveBlock(dst,n)) {
         ReadFromBlock(gs);
         std::memset(Ext(gs),0,kExtBytes);
+        Locked l;
+        held=false;   // a new game's first save replaces MAIN.GST, as the game's own
     }
     return dst;
 }
@@ -251,31 +303,40 @@ void* __fastcall BlockInitHook(unsigned char* block) {
 // --- the files ---
 int __fastcall WriteHook(void* path,void* desc) {
     const int r=reinterpret_cast<WriteFn>(image+kWrite)(path,desc);
-    if(r<0 || !active.load(std::memory_order_acquire) || !IsMainSave(writePath))return r;
-    const unsigned char* const data=SavedBlock(desc);
-    if(!data)return r;
+    if(!active.load(std::memory_order_acquire) || !IsMainSave(writePath))return r;
+    long long parts=0;
+    const unsigned char* const data=SavedBlock(desc,&parts);
+    if(!data) {   // never silent: without it no save of this session writes the sidecar
+        Log("WEAPONREC save %ls: no single 0x%zX-byte save block among the %lld parts written: the sidecar is NOT written",
+            writePath,kBlockSize,parts);
+        return r;
+    }
     const std::uint64_t hash=Hash(data+kOldInBlock,kNativeBytes);
     Locked l;
-    for(auto it=saves.end();it!=saves.begin();) {   // the latest request with this table
-        --it;
+    // The oldest request with this table: the save jobs write in the order they were requested, and two queued with
+    // the same rows 0..0x7FF (only rows past 0x800 changed between them) would else each get the other's. Its entry
+    // goes whether the write succeeded or not (a failed one's would be taken by the next save of the same table).
+    for(auto it=saves.begin();it!=saves.end();++it) {
         if(it->hash!=hash)continue;
-        WriteSidecar(writePath,it->ext.data());
+        if(r>=0)WriteSidecar(writePath,it->ext.data());
+        else Log("WEAPONREC save %ls failed (%d): the sidecar is left as it was",writePath,r);
         saves.erase(it);
         return r;
     }
+    if(r<0)return r;
     Log("WEAPONREC save %ls: written without a request this session saw: the sidecar is left as it was",writePath);
     return r;
 }
 HANDLE WINAPI ReadOpenHook(LPCWSTR path,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES sa,DWORD disposition,DWORD flags,HANDLE tmpl) {
     Remember(readPath,path);
-    return gameCreate(path,access,share,sa,disposition,flags,tmpl);
+    return reinterpret_cast<CreateFn>(gameCreate)(path,access,share,sa,disposition,flags,tmpl);
 }
 HANDLE WINAPI WriteOpenHook(LPCWSTR path,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES sa,DWORD disposition,DWORD flags,HANDLE tmpl) {
     Remember(writePath,path);
-    return gameCreate(path,access,share,sa,disposition,flags,tmpl);
+    return reinterpret_cast<CreateFn>(gameCreate)(path,access,share,sa,disposition,flags,tmpl);
 }
 BOOL WINAPI DeleteHook(LPCWSTR path) {
-    const BOOL ok=gameDelete(path);
+    const BOOL ok=reinterpret_cast<DeleteFn>(gameDelete)(path);
     if(ok && path && IsMainSave(path)) {
         wchar_t sidecar[MAX_PATH];
         if(SidecarOf(path,sidecar) && DeleteFileW(sidecar))Log("WEAPONREC %ls deleted: its sidecar too",path);
@@ -284,7 +345,7 @@ BOOL WINAPI DeleteHook(LPCWSTR path) {
 }
 
 // An import call (FF 15 rel32, 6 bytes) made a direct call to `hook` (E8 rel32 to a near thunk, then a nop).
-// `*slotValue`: what the import slot held (the hook calls through it).
+// `*slotValue`: what the import slot held (the hook calls through it), set before the site is patched.
 bool RedirectImportCall(unsigned rva,const unsigned char* sig,void* hook,void** slotValue) noexcept {
     unsigned char* const site=image+rva;
     std::int32_t rel=0;
@@ -380,13 +441,10 @@ bool InstallWeaponRecords() noexcept {
     hooks=Redirect(kBlockInitCall,kBlockInit,reinterpret_cast<void*>(&BlockInitHook)) && hooks;
     hooks=Redirect(kSaveCall,kSave,reinterpret_cast<void*>(&SaveHook)) && hooks;
     hooks=Redirect(kWriteCall,kWrite,reinterpret_cast<void*>(&WriteHook)) && hooks;
-    void* create=nullptr;void* remove=nullptr;
-    bool files=RedirectImportCall(kReadOpen,kReadOpenSig,reinterpret_cast<void*>(&ReadOpenHook),&create);
-    gameCreate=reinterpret_cast<CreateFn>(create);   // before the second site: either may run at once
-    files=files && RedirectImportCall(kWriteOpen,kWriteOpenSig,reinterpret_cast<void*>(&WriteOpenHook),&create);
-    files=files && RedirectImportCall(kDeleteCalls[0],kDeleteSigs[0],reinterpret_cast<void*>(&DeleteHook),&remove);
-    gameDelete=reinterpret_cast<DeleteFn>(remove);
-    files=files && RedirectImportCall(kDeleteCalls[1],kDeleteSigs[1],reinterpret_cast<void*>(&DeleteHook),&remove);
+    bool files=RedirectImportCall(kReadOpen,kReadOpenSig,reinterpret_cast<void*>(&ReadOpenHook),&gameCreate);
+    files=files && RedirectImportCall(kWriteOpen,kWriteOpenSig,reinterpret_cast<void*>(&WriteOpenHook),&gameCreate);
+    files=files && RedirectImportCall(kDeleteCalls[0],kDeleteSigs[0],reinterpret_cast<void*>(&DeleteHook),&gameDelete);
+    files=files && RedirectImportCall(kDeleteCalls[1],kDeleteSigs[1],reinterpret_cast<void*>(&DeleteHook),&gameDelete);
     if(!hooks || !files) {
         Log("WEAPONREC REFUSED: block copies hooked=%d save files hooked=%d; the records stay where the game keeps them (0x800)",hooks,files);
         return false;
@@ -417,12 +475,24 @@ bool InstallWeaponRecords() noexcept {
     const bool owned=constants && edf::PatchCode(image+kUiOwned,kUiOwnedSig,ownedJump,8);
     const bool status=owned && edf::PatchCode(image+kUiStatus,kUiStatusSig,statusJump,8);
     if(!status) {   // back to the game's code: a half-moved table is worse than none
+        std::size_t stuck=0;
         for(std::size_t i=0;i<applied;++i) {
             unsigned char patched[12];
             Patched(kSites[i],patched);
-            edf::PatchCode(image+kSites[i].rva,patched,kSites[i].code,kSites[i].size);
+            if(!edf::PatchCode(image+kSites[i].rva,patched,kSites[i].code,kSites[i].size)) {
+                ++stuck;
+                Log("WEAPONREC putting back EDF+0x%X failed",kSites[i].rva);
+            }
         }
-        if(owned)edf::PatchCode(image+kUiOwned,ownedJump,kUiOwnedSig,8);
+        if(owned && !edf::PatchCode(image+kUiOwned,ownedJump,kUiOwnedSig,8)){++stuck;Log("WEAPONREC putting back EDF+0x%X failed",kUiOwned);}
+        if(stuck) {   // part of the table's code moved and part not: no save is safe; say so where the player sees it
+            Log("WEAPONREC REFUSED: writing the code failed at %s and %zu sites could not be put back: the game's weapon records are "
+                "inconsistent this session",constants ? "the weapon select screen" : "a constant",stuck);
+            notice::Post("weapon-records-stuck",L"全军出击：武器记录补丁回滚失败",
+                         L"扩展武器记录的补丁写入失败，而且没能完全撤回。请不要存档，立即退出游戏，并把 EDF6VehicleCrew.log 发给作者。",
+                         notice::kOnce);
+            return false;
+        }
         Log("WEAPONREC REFUSED: writing the code failed at %s; everything put back",
             constants ? "the weapon select screen" : "a constant");
         return false;
