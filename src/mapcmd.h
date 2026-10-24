@@ -5,6 +5,7 @@
 // place it picks what it works round (its anchor / post / leader), reusing its own flight, targeting and fight.
 // Included by crew.h.
 #pragma once
+#include "march_pace.h"
 #include <Windows.h>
 #include "mapcmd_logic.h"
 #include "npc_command.h"
@@ -131,7 +132,19 @@ void MapCommandQueueTick() noexcept;
 // `give`: how the order is given when it is (the network's executor, npcai.cpp NpcMapCommandForRequester).
 using MapCommandGive=NpcCommandResult(*)(const ObjRef&,const mapcmd::Command&,const ObjRef&,const ObjRef&) noexcept;
 NpcCommandResult MapCommandAuthority(const ObjRef& unit,const mapcmd::Command& c,const ObjRef& requester,const ObjRef& focus,
-                                     bool queued,MapCommandGive give) noexcept;
+                                     bool queued,MapCommandGive give,std::uint32_t paceGroup=0) noexcept;
+// The paced march (march_pace.h; P on the map, ini MapMarchPace): `paceGroup` (MapPaceGroup, 0 none) the march a
+// move / attack-move given now puts the unit in. MapPaceScale: the share of its own full speed unit `unit` (a vehicle,
+// a squad's top, a transport carrying a marching squad) goes at now, 1 in no march; the modules driving it scale their
+// throttle by it (npcai.cpp Pursue, heli.cpp Arrive, ground.cpp Drive, npcpost.cpp NpcPostInput). A transport carrying
+// squads of a march goes at the least of their shares. Game thread.
+std::uint32_t MapPaceGroup() noexcept;
+inline float MapPaceScale(const void* unit) noexcept {
+    float least=1.0f;
+    if(!unit)return least;
+    for(const auto& s:pace::shares)if(s.obj==unit && ObjRef{s.obj,s.ctrl}.Is(unit) && s.scale<least)least=s.scale;
+    return least;
+}
 
 // What the draw shows (hud.cpp MapScreen): the commandable units, the selection, the pointer and its box, the point,
 // the last word.

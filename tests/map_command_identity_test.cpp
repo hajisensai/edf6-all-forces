@@ -91,6 +91,7 @@ int NpcGuardShape(const void*) noexcept {return -2;}
 int SetMarchFormation(int) noexcept {return -2;}
 ObjRef successorOld{},successorNew{};
 ULONGLONG GameFrame() noexcept {return 1;}
+ULONGLONG GameMs() noexcept {return 16;}   // the paced march's clock (mapcmd.cpp Pace)
 bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept {
     if(!successorOld.obj || old.obj!=successorOld.obj || old.ctrl!=successorOld.ctrl)return false;
     *now=successorNew;return true;
@@ -121,6 +122,7 @@ int GroundCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int TankCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int TransportLinks(TransportLink*,int) noexcept { return 0; }
 const void* TransportRiderOf(const void*) noexcept { return nullptr; }
+const void* TransportTripTo(const void*,const float*,float) noexcept { return nullptr; }
 int SquadCommandUnits(CommandUnit*,int) noexcept { return 0; }
 int SquadRows(SquadRow*,int,SquadTally* tally) noexcept { if(tally)*tally=SquadTally{};return 0; }
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept { return false; }

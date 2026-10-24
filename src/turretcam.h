@@ -80,17 +80,18 @@ inline Rig High(float height,float back,float pitchDeg) noexcept {
 
 constexpr float kPitchMost=80.0f*kPi/180.0f,kViewMost=85.0f*kPi/180.0f;
 
-// Observe the actual projectile endpoint, keeping its exact position even at point-blank range, beyond the old
-// ground cursor's range limit, or above/below the hull. The eye orbits the endpoint, so distant shots do not lift the
-// camera hundreds of metres above the vehicle. Free look only orbits this point; it never commands the gun.
-inline void ImpactPlace(const float* origin,const float* point,float fallbackYaw,float height,float back,
-                        float orbitYaw,float orbitPitch,float* eye,float* look) noexcept {
-    const float delta[3]={point[0]-origin[0],0.0f,point[2]-origin[2]};
-    const float yaw=(vec::Dot(delta,delta)>1e-6f ? YawOf(delta) : fallbackYaw)+orbitYaw;
+// The high view's placement (the user, 2026-10-23: "俯瞰视角太小了，而且俯瞰视角会随着炮塔上下摇晃。需要改成俯瞰视角是以车辆
+// 为中心的，不会因为炮塔摇动而动视角"): the eye looks down onto the vehicle's own origin from `height` m over it and `back`
+// m behind it along the world-held heading `yaw` (the camera keeps it; the turret and the hull turning do not turn it),
+// free look adding `orbitYaw` / `orbitPitch`. Before, the eye orbited the shot's predicted endpoint: every degree the
+// gun rocked moved that point tens of metres and the whole view with it. The shot's endpoint is still drawn (the HUD's
+// cross); the view no longer depends on it.
+inline void HullPlace(const float* origin,float yaw,float height,float back,float orbitYaw,float orbitPitch,
+                      float* eye,float* look) noexcept {
     const float radius=std::fmax(1.0f,std::sqrt(height*height+back*back));
     const float pitch=vec::Clamp(std::atan2(height,back)+orbitPitch,15.0f*kPi/180.0f,kViewMost);
-    float d[3];Dir(yaw,-pitch,d);
-    for(int i=0;i<3;++i){look[i]=point[i];eye[i]=point[i]-d[i]*radius;}
+    float d[3];Dir(yaw+orbitYaw,-pitch,d);
+    for(int i=0;i<3;++i){look[i]=origin[i];eye[i]=origin[i]-d[i]*radius;}
 }
 
 // The point the high view observes (the user, 2026-10-09: "这个俯瞰视角有问题，计算明显不对，稍微远就跳到了指数级别的

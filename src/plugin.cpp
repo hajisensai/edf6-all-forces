@@ -758,6 +758,7 @@ void LoadConfig() noexcept {
     n.mapKey=ReadInt(L"MapKey",static_cast<DWORD>(n.mapKey));
     n.mapButton=ReadInt(L"MapButton",static_cast<DWORD>(n.mapButton));
     n.mapViewDistance=ReadFloat(L"MapViewDistance",n.mapViewDistance);
+    n.mapMarchPace=ReadBool(L"MapMarchPace",n.mapMarchPace);
     n.damageStats=ReadBool(L"DamageStats",n.damageStats);
     n.damageStatsKey=ReadInt(L"DamageStatsKey",static_cast<DWORD>(n.damageStatsKey));
     n.debugSpawn=ReadBool(L"DebugSpawn",n.debugSpawn);   // off unless the ini says 1 (an old ini without it: off)
@@ -940,7 +941,7 @@ void LoadConfig() noexcept {
         n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpViewHeightEase,n.fpGripX,n.fpGripY,n.fpGripZ,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
         n.fpScale,n.fpNear,n.fpAimSnap,n.fpMotion);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
-    Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
+    Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f marchPace=%d",n.map,n.mapKey,n.mapButton,n.mapViewDistance,n.mapMarchPace);
     Log("CONFIG vehicle secondary switch key=0x%X button=0x%X (the primary's rounds: PlayerJetSwitchKey / LB)",
         n.vehicleSecondarySwitchKey,n.vehicleSecondarySwitchButton);
     Log("CONFIG ViewDistance=%.0f (%s)",n.viewDistance,n.viewDistance<0.0f ? "unlimited" : n.viewDistance==0.0f ? "the mission's own" : "m");

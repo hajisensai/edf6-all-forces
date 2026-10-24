@@ -5276,7 +5276,8 @@ def edf41_mother_parts_default_migrates() -> None:
     ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
     assert re.search(r'^Edf41MotherParts=31$', ini, re.M) and 'int edf41MotherParts=31;' in crew
     assert installer.NEW_DEFAULTS_1017[installer.SECTION] == {'Edf41MotherParts': ('15', '31')}
-    assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017]
+    assert [m for m, _ in installer.DEFAULTS_STEPS] == [installer.DEFAULTS_MARK, installer.DEFAULTS_MARK_1017,
+                                                         installer.DEFAULTS_MARK_1024]
     assert installer.DEFAULTS_MARK.split('：', 1)[0] != installer.DEFAULTS_MARK_1017.split('：', 1)[0]
     old = f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\nEnabled=1\nHeliLandMs=0\nEdf41MotherParts=15\n'
     text, flipped = installer.apply_new_defaults(old)
@@ -5296,6 +5297,36 @@ def edf41_mother_parts_default_migrates() -> None:
     # the install path goes through it (merge_ini keeps the player's 15, the step moves it)
     planned = installer.planned_ini(old, ini)
     assert re.search(r'^Edf41MotherParts=31$', planned[0], re.M) and 'Edf41MotherParts' in planned[3]
+
+
+@test
+def high_cam_default_migrates() -> None:
+    """The high view's eye went from 45 m over / 35 m behind to 90 / 55 (the user, 2026-10-23: "俯瞰视角太小了"; PR #241):
+    the shipped ini and the plugin's own defaults agree, and an old ini still at the old 45 / 35 is moved once by the
+    installer's 10-24 defaults step (merge_ini alone keeps them: the player would never see the farther view); a value the
+    player chose is kept, and a later install changes nothing."""
+    import installer
+    ini, crew = src('EDF6VehicleCrew.ini'), src('src/crew.h')
+    assert re.search(r'^HighCamHeight=90$', ini, re.M) and re.search(r'^HighCamBack=55$', ini, re.M)
+    assert 'float highCamHeight=90.0f;' in crew and 'float highCamBack=55.0f;' in crew
+    assert installer.NEW_DEFAULTS_1024[installer.SECTION] == {'HighCamHeight': ('45', '90'), 'HighCamBack': ('35', '55')}
+    marks = [m.split('：', 1)[0] for m, _ in installer.DEFAULTS_STEPS]
+    assert len(set(marks)) == len(marks), marks
+    done = (f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\n{installer.DEFAULTS_MARK_1017}\n'
+            'Enabled=1\nHighCamHeight=45\nHighCamBack=35\n')
+    text, flipped = installer.apply_new_defaults(done)
+    assert sorted(flipped) == ['HighCamBack', 'HighCamHeight'], flipped
+    assert 'HighCamHeight=90' in text and 'HighCamBack=55' in text and text.count(installer.DEFAULTS_MARK_1024) == 1
+    again = text.replace('HighCamHeight=90', 'HighCamHeight=45')
+    assert installer.apply_new_defaults(again) == (again, []), 'a later install undid the player\'s own 45'
+    mine = (f'[VehicleCrew]\n{installer.DEFAULTS_MARK}\n{installer.DEFAULTS_MARK_1017}\n'
+            'HighCamHeight=60 ; mine\nHighCamBack=35\n')
+    text, flipped = installer.apply_new_defaults(mine)
+    assert flipped == ['HighCamBack'] and 'HighCamHeight=60 ; mine' in text and 'HighCamBack=55' in text, flipped
+    # the install path: merge_ini keeps the old 45 / 35, the step moves them
+    planned = installer.planned_ini(done, ini)
+    assert re.search(r'^HighCamHeight=90$', planned[0], re.M) and re.search(r'^HighCamBack=55$', planned[0], re.M)
+    assert 'HighCamHeight' in planned[3] and 'HighCamBack' in planned[3]
 
 
 def make_stock_stores_wanted(text: str) -> bool:
@@ -7169,6 +7200,7 @@ def ported_content_unlock_keys() -> None:
     for key in ('PortedMissionsUnlocked', 'PortedWeaponsUnlocked'):
         assert re.search(rf'^{key}=0$', shipped, re.M), f'{key} must ship as 0'
         assert key not in installer.NEW_DEFAULTS[installer.SECTION] and key not in installer.NEW_DEFAULTS_1017[installer.SECTION]
+        assert key not in installer.NEW_DEFAULTS_1024[installer.SECTION]
         text, added, _ = installer.merge_ini('[VehicleCrew]\r\nEnabled=1\r\nEDF41Content=7\r\n', shipped)
         assert key in added and f'\r\n{key}=0\r\n' in text, (key, added)
         assert installer.merge_ini(text, shipped)[1] == [], 'merge is not idempotent'

@@ -468,12 +468,16 @@ void NpcPostInput(unsigned char* v) noexcept {
     p->active=s.active;
     if(!s.active){TakeBack(v,f,*p);return;}
     float c0=npc::SteerStick(s),c1=npc::ThrottleStick(s);
+    // The paced march (mapcmd.cpp MapPaceScale): the throttle a share of full, to keep with the slowest (the turn as
+    // it is: it still faces its way while it waits).
+    const float pace=MapPaceScale(v);
     if(f==Family::barga) {   // the stock walk's own turn and pace (it stops inside the hold itself)
         alignas(16) float block[8]{};
         alignas(16) const float point[4]={p->at[0],p->at[1],p->at[2],1.0f};
         reinterpret_cast<BargaWalkFn>(image+kBargaWalk)(v,block,point,1.0f,arrival);
         c0=block[kBargaTurn/4];c1=block[kBargaForward/4];
     }
+    c1*=pace;
     Write(v,f,*p,c0,c1);
     if(Cfg().debug && ms-p->loggedAt>kLogMs) {
         p->loggedAt=ms;

@@ -410,9 +410,9 @@ void MapCamera(const MapReadout& m,float width,float height,float* vp) {
     for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*A;vp[i*4+3]=f[i];}
     vp[12]=-dot(eye,r)*fx;vp[13]=-dot(eye,u)*fy;vp[14]=-dot(eye,f)*A+B;vp[15]=-dot(eye,f);
 }
-// The production overhead placement with synthetic impact inputs; not a game screenshot.
+// The production overhead placement (hull-centred) with synthetic inputs; not a game screenshot.
 void ImpactCamera(const float* origin,const float* impact,float width,float height,float* vp) {
-    float eye[3],look[3];tcam::ImpactPlace(origin,impact,0,45,35,0,0,eye,look);
+    (void)impact;float eye[3],look[3];tcam::HullPlace(origin,0,90,55,0,0,eye,look);
     float f[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};vec::Normalize(f);
     float r[3]={-f[2],0,f[0]};vec::Normalize(r);float u[3];vec::Cross(r,f,u);
     const float fy=1/std::tan(0.5f*sceneFov*kDeg),fx=fy/(width/height),a=20000.0f/19999.0f;

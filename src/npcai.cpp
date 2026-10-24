@@ -624,7 +624,8 @@ void RouteStart(const float* pos,float* from) noexcept {
 // Both ends on the floor under them (RouteStart): a route is the ground's. A goal left in the air (a flying top followed,
 // a Wing Diver held where she hovers) is never reached from the floor: every search ran out its nodes, failed, and
 // began again a second later, for each such soldier, out of the budget all of them share.
-void MoveTo(unsigned char* h,const float* pos,const float* to,float stop) noexcept {
+// `pace`: the share of its full walk (the paced march: mapcmd.cpp MapPaceScale), 0 it stands.
+void MoveTo(unsigned char* h,const float* pos,const float* to,float stop,float pace=1.0f) noexcept {
     const ULONGLONG ms=GameMs();
     Soldier* const soldier=Entry(h,ms);
     float waypoint[3],dir[3],from[3],goal[3];
@@ -632,7 +633,8 @@ void MoveTo(unsigned char* h,const float* pos,const float* to,float stop) noexce
     if(!soldier || GroundNavigate(soldier->navigation,from,goal,stop,ms,waypoint,SoldierRoute())!=npc::navigation::Result::moving ||
        !npc::HorizDir(pos,waypoint,dir)){Stand(h);return;}
     const float d=npc::Horiz(pos,waypoint);
-    Move(h,dir,d/6.0f+0.3f);
+    if(!(pace>0.0f)){Stand(h);return;}
+    Move(h,dir,(d/6.0f+0.3f)*(pace<1.0f ? pace : 1.0f));
 }
 void Look(unsigned char* h,const float* dir) noexcept {
     // The native action may freeze look even while the script's control mask permits it.
@@ -1048,12 +1050,14 @@ constexpr float kPointFollow=30.0f,kTopKeep=5.0f;
 bool Pursue(Soldier& s,unsigned char* h,const float* pos,Squad* q,const unsigned char* root,ULONGLONG ms,const char** move) noexcept {
     float left=0.0f;
     const auto* top=static_cast<const unsigned char*>(q->top.obj);
+    // The paced march (mapcmd.cpp MapPaceScale): the whole squad at its top's share, so its members keep with it.
+    const float pace=MapPaceScale(q->top.obj);
     if(!q->top.Is(h) && top && !top[kDead] && HumanOnFoot(top) && npc::Horiz(Pos(top),q->cmd.at)>kPointFollow) {
         left=npc::Horiz(pos,q->cmd.at);
-        MoveTo(h,pos,Pos(top),kTopKeep);
+        MoveTo(h,pos,Pos(top),kTopKeep,pace);
     } else if(!FormationMove(s,h,pos,q,root,ms,move,&left)) {
         left=npc::Horiz(pos,q->cmd.at);
-        MoveTo(h,pos,q->cmd.at,Cfg().npcGuardRadius*0.5f);
+        MoveTo(h,pos,q->cmd.at,Cfg().npcGuardRadius*0.5f,pace);
     }
     *move=q->cmd.order==Order::move ? "move order" : "attack-move";
     if(q->top.Is(h)) {
@@ -2188,7 +2192,7 @@ bool FormationMove(Soldier& s,unsigned char* h,const float* pos,const Squad* q,c
     const float top[3]={slot[0],slot[1]+0.55f,slot[2]},bottom[3]={slot[0],slot[1]-2.0f,slot[2]};
     float floor[3];
     if(MapFloorRay(top,bottom,floor)>=0.0f && std::isfinite(floor[1])) {
-        slot[1]=floor[1];MoveTo(h,pos,slot,kArrive);
+        slot[1]=floor[1];MoveTo(h,pos,slot,kArrive,q && !marching ? MapPaceScale(q->top.obj) : 1.0f);
     } else Stand(h);
     *move=marching ? "formation" : "guard formation";
     return true;
