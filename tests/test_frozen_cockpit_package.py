@@ -48,6 +48,31 @@ class FrozenCockpitPackageTests(unittest.TestCase):
                 build_release.build_exe('test')
         self.assertEqual(len(calls), 2)
 
+    def test_collision_gate_runs_the_actual_consumer(self) -> None:
+        import importlib.util
+        import frozen_collision_probe
+        import tracked_collision
+        spec = importlib.util.spec_from_file_location('shkt_cli_probe', ROOT / 'tools/check_shkt.py')
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        with patch.object(tracked_collision, 'sc', cli):
+            with self.assertRaisesRegex(AttributeError, "shkt_cli_probe' has no attribute"):
+                frozen_collision_probe.check()
+        frozen_collision_probe.check()
+
+    def test_both_freezers_refuse_duplicate_project_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ('tools', 'pylib', 'testrange', 'autoturret/tools'):
+                (root / name).mkdir(parents=True)
+            for name in ('tools/collision_probe.py', 'pylib/collision_probe.py'):
+                (root / name).write_text('pass\n', encoding='utf-8')
+            with patch.object(build_release, 'ROOT', folder), \
+                    patch.object(build_release.subprocess, 'run', side_effect=AssertionError('freezing entered')):
+                for freeze in (build_release.generator_cmd, lambda: build_release.build_exe('test')):
+                    with self.subTest(freeze=freeze), self.assertRaisesRegex(ValueError, 'collision_probe'):
+                        freeze()
+
     def test_each_family_change_invalidates_cached_optics_recipe(self) -> None:
         # Use the actual registry sources with the public recipe scanner. Before
         # the fix __import__ hid these dependencies from both freezing and caching.
@@ -61,7 +86,18 @@ class FrozenCockpitPackageTests(unittest.TestCase):
             for name in ('cockpit_fits', 'cockpit_kits'):
                 for path in (ROOT / 'pylib').glob(name + '*.py'):
                     (root / 'pylib' / path.name).write_bytes(path.read_bytes())
+            for name in ('cockpits', 'cockpit_shell'):
+                (root / 'pylib' / (name+'.py')).write_bytes((ROOT/'pylib'/(name+'.py')).read_bytes())
+            shell=root/'pylib'/'cockpit_shell.py'
+            retrofit=root/'pylib'/'cockpit_retrofit.py'
+            retrofit.write_bytes((ROOT/'pylib'/'cockpit_retrofit.py').read_bytes())
             before = buildcache.source_recipes(folder)
+            raw_shell=shell.read_bytes();shell.write_bytes(raw_shell+b'\n# changed native shell selection\n')
+            self.assertNotEqual(before['optics'],buildcache.source_recipes(folder)['optics'])
+            shell.write_bytes(raw_shell)
+            raw=retrofit.read_bytes();retrofit.write_bytes(raw+b'\n# changed instrument surfaces\n')
+            self.assertNotEqual(before['optics'],buildcache.source_recipes(folder)['optics'])
+            retrofit.write_bytes(raw)
             for kind in ('fits', 'kits'):
                 for family in ('ground', 'air', 'mech', 'plugin'):
                     path = root / 'pylib' / f'cockpit_{kind}_{family}.py'

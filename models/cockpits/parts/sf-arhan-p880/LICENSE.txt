@@ -1,0 +1,7 @@
+ARHAN P880 6x6 by Mayess, CC BY 4.0
+Source: https://sketchfab.com/3d-models/arhan-p880-6x6-a85231fbbfac482ea0bb3fc7e2758cd8 (downloaded through the Sketchfab API; its API page saved as license.json in the developer's asset
+folder)
+Licence: Creative Commons Attribution 4.0 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+Changes: only the cab round the driver's seat is kept (cropped), turned into the seat's eye frame and scaled to metres;
+glass and every part the seated driver cannot see are removed; faces are turned toward the driver; textures are resized
+to at most 1024 px. The EDF6 plugin's cockpit builder (pylib/cockpit_kits_ground.py) places it in the vehicle.

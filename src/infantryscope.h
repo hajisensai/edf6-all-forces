@@ -6,6 +6,7 @@
 // player's soldier, on foot, has a scope open:
 //  - the stock crosshair's draw (HudPlayer_CrossHair, vtable 0x17F6B98 slot 3, 0x8039F0) is held back for that
 //    soldier: the call returns as the function's own no-draw paths do (its HUD switch off), nothing else of it skipped;
+//    the same for the soldier looking through a vehicle sight's field hud.cpp drew (scope_hold.h, 2026-10-21);
 //  - hud.cpp InfantryScope draws a real optic: the eyepiece (scopeview.h), and the reticle by what the weapon is
 //    (scopereticle.h): a marksman's mil-dot duplex, a quick-firing rifle's combat optic (chevron, drop bars), a rocket
 //    launcher's chevrons and stadiametric rangefinder; every mark sized from the live projection, as the glass is.

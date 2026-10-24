@@ -18,13 +18,14 @@
 #include "crew.h"
 #include "heli.h"
 #include "memory.h"
+#include "scene_object.h"
 #include <cstring>
 #include <cwchar>
 
 namespace crew {
 bool ApplySupportVehicleSetup(unsigned char* vehicle) noexcept;   // support_spawn.cpp
 namespace {
-constexpr unsigned kCreateObject=0x11945E0,kConfigure=0x5E8B40,kRelease=0x5E84D0,kVehicleCall=0x5E8FDC,kPreload=0x7A3780;
+constexpr unsigned kCreateObject=scene::kCreateObject,kConfigure=0x5E8B40,kRelease=0x5E84D0,kVehicleCall=0x5E8FDC,kPreload=0x7A3780;
 constexpr unsigned kContainerParamVtable=0x17D7818,kContainerVtable=0x17D7CB8;
 constexpr std::size_t kObjectMgr=0x20B2958,kPreloadMgr=0x20B29A8;
 constexpr std::size_t kContainerVehicleSgo=0xB80;   // the configured SGO path (a std::wstring; 0x5E8BC7)
@@ -38,7 +39,7 @@ const unsigned char kReleaseSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,
                                    0x40,0x0B,0x00,0x00};
 const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48};
 
-using CreateFn=unsigned char*(*)(void*,const float*,const wchar_t*,void*);
+using CreateFn=scene::CreateFn;
 using ConfigureFn=void(*)(unsigned char*,const airdrop::SharedRef*,const wchar_t*,const airdrop::VehicleSetup*,float);
 using ReleaseFn=void(*)(unsigned char*);
 
@@ -171,9 +172,8 @@ bool AirdropBegin(const void* carrier,SupportVehicleKind kind,const float* targe
         airdrop::ContainerInitParam param{};
         param.vtable=image+kContainerParamVtable;
         param.counter=airdrop::kNoCounter;   // the helicopter has no derived-id counter: unset, as an offline stock carrier
-        const auto mgr=At<void*>(image,kObjectMgr);
-        if(!mgr){HeliFerry(carrier,nullptr,false);return false;}
-        box=reinterpret_cast<CreateFn>(image+kCreateObject)(mgr,m,kContainerSgo,&param);
+        if(!scene::ObjectManager()){HeliFerry(carrier,nullptr,false);return false;}
+        box=scene::CreateWith(m,kContainerSgo,&param);
         if(!box || At<const void*>(box,0)!=image+kContainerVtable) {
             Log("AIRDROP container not made (%p)",box);
             HeliFerry(carrier,nullptr,false);

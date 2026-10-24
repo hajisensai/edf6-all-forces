@@ -19,6 +19,17 @@ void Expect(bool ok,const char* what) {
 }
 bool Near(float a,float b,float e=1e-4f) { return std::fabs(a-b)<=e; }
 
+bool SameModName(const wchar_t* a,const wchar_t* b) {
+    if(!a || !b)return false;
+    for(;*a && *b;++a,++b) {
+        wchar_t x=*a==L'\\' ? L'/' : *a,y=*b==L'\\' ? L'/' : *b;
+        if(x>=L'a' && x<=L'z')x-=L'a'-L'A';
+        if(y>=L'a' && y<=L'z')y-=L'a'-L'A';
+        if(x!=y)return false;
+    }
+    return *a==*b;
+}
+
 void Catalog() {
     int total=0;
     for(int c=0;c<kCategoryCount;++c) {
@@ -32,22 +43,49 @@ void Catalog() {
         Expect(RowOf(static_cast<Category>(c),n)==-1,"RowOf past the category: none");
     }
     Expect(total==kEntryCount,"every row in one category");
+    const wchar_t* unsafe[]={nullptr,L"",L"../X.SGO",L"OBJECT/../X.SGO",L"WEAPON/../../X.SGO",
+        L"C:\\X.SGO",L"/X.SGO",L"\\server\\X.SGO",L"OBJECT/A//B.SGO",L"WEAPON/A:stream",
+        L"OBJECT/.hidden",L"OBJECT/A..B",L"OBJECT/A.",L"OBJECT/A/B ",L"OBJECT/A/..\\B.SGO"};
+    for(const auto* path:unsafe)Expect(!ParseModFile(path),"unsafe Mods paths are rejected");
     for(int i=0;i<kEntryCount;++i) {
         const Entry& e=kEntries[i];
-        const bool native=e.how==How::stockVehicle || e.how==How::enemy;
+        const bool native=e.how==How::vehicle || e.how==How::enemy;
         Expect(native==(e.sgo!=nullptr),"a native row names its SGO, a plugin row none");
         if(e.sgo)Expect(std::wcsncmp(e.sgo,L"app:/object/",12)==0,"the SGO is an app:/object/ path");
         Expect(e.name && e.name[0] && e.id && e.id[0],"a name and a log id");
-        Expect(std::isfinite(e.lift) && e.lift>=0.0f && e.lift<=200.0f,"a sane lift");
+        // A ship is made at its height (the EDF6 mothership 900 m up, as the grand battle raises its point).
+        Expect(std::isfinite(e.lift) && e.lift>=0.0f && e.lift<=1000.0f,"a sane lift");
         // The category says which kind of spawn it is (the faction and placement follow it).
-        if(e.how==How::stockVehicle)Expect(e.category==Category::vehicle,"stock vehicles are vehicles");
-        if(e.how==How::enemy)Expect(e.category==Category::enemy,"enemies are enemies");
+        if(e.how==How::vehicle)Expect(e.category==Category::vehicle || e.category==Category::ours,"vehicles are vehicles");
+        if(e.how==How::enemy)Expect(e.category==Category::enemy || e.category==Category::enemy41,"enemies are enemies");
+        // Where its file is (testrange/catalog.py source): our vehicles and EDF4.1's enemies are Mods files, made only when
+        // there; only those may be left out of the preload by default (a heavy model of their own).
+        if(e.category==Category::ours || e.category==Category::enemy41)Expect(e.mod,"a Mods row checks its file");
+        if(!e.sgo)Expect(!e.mod && e.preload,"a plugin row has no file");
+        // A Mods row's files (catalog.files_of) are names under Mods\OBJECT\ and hold its own SGO's.
+        if(e.files) {
+            bool own=false;
+            int n=0;
+            wchar_t sgo[260]{};   // its app:/object/ path's rest, a folder's slash a backslash (as the list names it)
+            for(int k=0;e.sgo && e.sgo[12+k] && k<259;++k)sgo[k]=e.sgo[12+k]==L'/' ? L'\\' : e.sgo[12+k];
+            for(const wchar_t* f=e.files;*f;f+=std::wcslen(f)+1,++n) {
+                const auto ref=ParseModFile(f);
+                Expect(static_cast<bool>(ref),"a Mods file is a safe relative OBJECT/WEAPON resource");
+                own=own || (ref.directory==ModDirectory::object && SameModName(ref.name,sgo));
+            }
+            Expect(n>0 && own,"a Mods row lists its own SGO among its files");
+        }
+        if(!e.preload)Expect((e.category==Category::enemy41 || e.category==Category::enemy) && e.how==How::enemy,
+                             "only enemy rows load when first placed (vehicles are preloaded: the player boards them at once)");
+        if(e.mod && e.category==Category::vehicle)Expect(e.preload,"every installed EDF4.1 vehicle is placeable by default");
+        if(e.category==Category::ours)Expect(std::wcsncmp(e.sgo,L"app:/object/EDF6TR_",19)==0 || std::wcsncmp(e.sgo,L"app:/object/EDF6VC_",19)==0,
+                                            "our vehicles are the range's (EDF6TR_) or the installer's (EDF6VC_)");
         if(e.how==How::supportCall || e.how==How::drone)Expect(e.category==Category::aircraft,"the plugin's aircraft");
         if(e.category==Category::aircraft)Expect(e.how==How::supportCall || e.how==How::drone,
                                                  "a crewed aircraft only as a support call (its real crew), the drone alone launched");
         if(e.how==How::soldier)Expect(e.category==Category::soldier,"soldiers");
         if(e.how==How::supportCall)Expect(e.arg>=0 && e.arg<kSupportCallCount,"a kSupportCalls index");
-        if(e.how==How::soldier)Expect(e.arg>=0 && e.arg<5,"a SupportWeapon (5 weapons, support_call.h)");
+        if(e.how==How::soldier)Expect(e.arg>=0 && e.arg<14,"a SupportWeapon (14 kinds, support_call.h)");
         for(int k=0;k<i;++k)Expect(std::strcmp(kEntries[k].id,e.id)!=0,"log ids are unique");
     }
 }
@@ -66,11 +104,11 @@ void MenuSteps() {
     Step(m,Only(false,false,true,false,false));Step(m,Only(false,false,true,false,false));
     Expect(m.pick[0]==2 && Picked(m)==RowOf(Category::vehicle,2),"two nexts: the third vehicle");
     Expect(Step(m,Only(false,false,false,true,false))==Act::moved && m.category==1,"the category key: the next category");
-    Expect(m.pick[1]==0 && Picked(m)==RowOf(Category::aircraft,0),"a category starts at its first row");
+    Expect(m.pick[1]==0 && Picked(m)==RowOf(Category::ours,0),"a category starts at its first row");
     Step(m,Only(false,false,true,false,false));
     for(int i=0;i<kCategoryCount;++i)Step(m,Only(false,false,false,true,false));   // all the way round
     Expect(m.category==1 && m.pick[1]==1 && m.pick[0]==2,"round the categories: each kept its pick");
-    Step(m,Only(false,false,false,true,false));Step(m,Only(false,false,false,true,false));Step(m,Only(false,false,false,true,false));
+    for(int i=1;i<kCategoryCount;++i)Step(m,Only(false,false,false,true,false));
     Expect(m.category==0 && Picked(m)==RowOf(Category::vehicle,2),"back on vehicles, the third still picked");
     Expect(Step(m,Only(false,true,true,true,true))==Act::spawn && m.pick[0]==2 && m.category==0,
            "spawn asks for the picked row and moves nothing, whatever else is pressed");
@@ -128,7 +166,8 @@ int main() {
     Catalog();
     MenuSteps();
     Placement();
-    std::printf("debug_spawn_test: %d checks, %d failed (%d rows: %d vehicles, %d aircraft, %d enemies, %d soldiers)\n",checks,failures,
-                kEntryCount,CountIn(Category::vehicle),CountIn(Category::aircraft),CountIn(Category::enemy),CountIn(Category::soldier));
+    std::printf("debug_spawn_test: %d checks, %d failed (%d rows: %d vehicles, %d ours, %d aircraft, %d enemies, %d EDF4.1 enemies, "
+                "%d soldiers)\n",checks,failures,kEntryCount,CountIn(Category::vehicle),CountIn(Category::ours),CountIn(Category::aircraft),
+                CountIn(Category::enemy),CountIn(Category::enemy41),CountIn(Category::soldier));
     return failures ? 1 : 0;
 }

@@ -1,7 +1,7 @@
 #include "mission_watch.h"
+#include "crash_dump.h"
 #include "crew.h"
 #include <Windows.h>
-#include <DbgHelp.h>
 #include <atomic>
 #include <cwchar>
 #include <iterator>
@@ -17,11 +17,10 @@ INIT_ONCE watchOnce=INIT_ONCE_STATIC_INIT;
 ULONGLONG stuckMs=kMissionPhaseStuckMs,dumpMs=kMissionPhaseDumpMs;
 DWORD pollMs=1000;
 
-using WriteFn=BOOL(WINAPI*)(HANDLE,DWORD,HANDLE,MINIDUMP_TYPE,PMINIDUMP_EXCEPTION_INFORMATION,
-                            PMINIDUMP_USER_STREAM_INFORMATION,PMINIDUMP_CALLBACK_INFORMATION);
 // Resolved when the watchdog starts, nothing stuck yet: a game thread stuck holding the loader lock would otherwise
-// stop the watchdog in LoadLibrary before it wrote anything.
-WriteFn writeDump=nullptr;
+// stop the watchdog in LoadLibrary before it wrote anything. This is crash_dump.cpp's serialized service, not the
+// raw dbghelp pointer: a hang and a crash must never execute MiniDumpWriteDump concurrently.
+MiniDumpWriteDumpFn writeDump=nullptr;
 wchar_t dumpPath[MAX_PATH]{};
 
 // <this DLL's folder>\EDF6VehicleCrew.hang.dmp: Mods\Plugins, where the installer's "send the logs" looks.
@@ -39,9 +38,7 @@ void WriteHangDump(const char* stuck) noexcept {
     if(!writeDump || !dumpPath[0]){Log("MISSION stuck dump: not written (no dbghelp MiniDumpWriteDump or no path)");return;}
     const HANDLE file=CreateFileW(dumpPath,GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(file==INVALID_HANDLE_VALUE){Log("MISSION stuck dump: %ls not written (error %lu)",dumpPath,GetLastError());return;}
-    const auto type=static_cast<MINIDUMP_TYPE>(MiniDumpNormal|MiniDumpWithThreadInfo|MiniDumpWithUnloadedModules|
-                                               MiniDumpWithIndirectlyReferencedMemory|MiniDumpWithProcessThreadData);
-    const BOOL ok=writeDump(GetCurrentProcess(),GetCurrentProcessId(),file,type,nullptr,nullptr,nullptr);
+    const BOOL ok=writeDump(GetCurrentProcess(),GetCurrentProcessId(),file,kDumpType,nullptr,nullptr,nullptr);
     const DWORD error=ok ? 0 : GetLastError();
     LARGE_INTEGER size{};
     GetFileSizeEx(file,&size);
@@ -79,7 +76,7 @@ DWORD WINAPI Watch(void*) noexcept {
 }
 
 BOOL CALLBACK StartWatch(PINIT_ONCE,void*,void**) noexcept {
-    if(const HMODULE dbghelp=LoadLibraryW(L"dbghelp.dll"))writeDump=reinterpret_cast<WriteFn>(GetProcAddress(dbghelp,"MiniDumpWriteDump"));
+    writeDump=MiniDumpWriter();
     if(!DumpPath(dumpPath,std::size(dumpPath)))dumpPath[0]=0;
     const HANDLE t=CreateThread(nullptr,0,&Watch,nullptr,0,nullptr);
     if(t)CloseHandle(t);

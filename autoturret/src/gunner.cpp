@@ -190,6 +190,8 @@ bool ReadGun(const unsigned char* vehicle,const unsigned char* seat,unsigned s,f
     const auto ctrl=At<const unsigned char*>(gun.trigger,kTriggerCtrl);
     if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,edf::kCtrlUses)==0)return false;
     gun.weapon=At<const unsigned char*>(gun.trigger,kTriggerWeapon);
+    const unsigned char* actual=nullptr;
+    if(ActualWeapon(vehicle,s,gun.weapon,&actual))gun.weapon=actual;
     if(!Readable(gun.weapon,kAmmoGravity+4) || !Readable(gun.weapon+kWeaponMatrix,0x40) || !Barrel(vehicle,gun.weapon,gun.pos,gun.dir))return false;
     gun.shot=Shot{};
     gun.shot.speed=At<float>(gun.weapon,kAmmoSpeed);
@@ -344,18 +346,18 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
         && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
     if(drag && !track.dragging && track.target){track.dropped=track.target;track.droppedUntil=now+cfg.dragDropMs;}
     track.dragging=drag;
-    if(drag){track.target=nullptr;track.at=now;PublishAim(vehicle,true,nullptr,nullptr,gun.pos,gun.dir,&gun.shot,nullptr,life);return;}
+    if(drag){track.target=nullptr;track.at=now;PublishAim(vehicle,true,nullptr,nullptr,gun.pos,gun.dir,&gun.shot,nullptr,life,gun.weapon);return;}
     const void* dropped=now<track.droppedUntil ? track.dropped : nullptr;
     float world[3],aimAt[3];
     const auto target=PickGunTarget(vehicle,gun,aim,nearby,designated ? designated : track.target,dropped,only,world);
     if(!target) {
         track.target=nullptr;track.firing=false;track.at=now;
-        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,gun.pos,gun.dir,&gun.shot,nullptr,life);
+        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,gun.pos,gun.dir,&gun.shot,nullptr,life,gun.weapon);
         return;
     }
     LeadGun(vehicle,gun,track,target,world,aimAt);
     track.at=now;
-    if(pilot)PublishAim(vehicle,true,target,world,gun.pos,gun.dir,&gun.shot,track.vel,life);
+    if(pilot)PublishAim(vehicle,true,target,world,gun.pos,gun.dir,&gun.shot,track.vel,life,gun.weapon);
     if(!rule.steer)return;
     float want[2],error[2],axis[2],time,distance;
     if(!Solve(vehicle,gun,aimAt,want,time,distance) || !AxisTargets(aim,want,error,axis)){track.firing=false;return;}

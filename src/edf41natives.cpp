@@ -136,7 +136,7 @@ bool InstallEdf41Natives() noexcept {
         return false;
     }
     std::memcpy(slot,&offset,4);
-    VirtualProtect(slot,4,old,&old);
+    edf::RestoreProtection(slot,4,old);
     FlushInstructionCache(GetCurrentProcess(),slot,4);
     ready=true;
     Log("EDF41NATIVES table 1 id %u = SetEncountReportRadius (EDF+%zX), stub at EDF+%X",

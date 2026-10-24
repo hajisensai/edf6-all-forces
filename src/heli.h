@@ -12,6 +12,7 @@ void PressBoardButton(unsigned char* human) noexcept;
 void PressBoardButtonBumping(unsigned char* human) noexcept;
 // Whether the board button and the seats' riding points can be used (their code checked, CheckHeliProfile).
 bool BoardButtonReady() noexcept;
+bool BoardButtonBlocked(const unsigned char* human) noexcept;   // the button's gates (+0x128 bit 0, +0x5D0 bit 2, +0x39C)
 // Whether `human` rides no vehicle (its vehicle weak_ptr +0x1550 empty or expired).
 bool HumanOnFoot(const unsigned char* human) noexcept;
 // Seat `seat`'s riding point (world) and the stock reach round it a human must be within to board it (CanRideSeat);
@@ -34,6 +35,12 @@ bool CheckHeliProfile() noexcept;
 bool InstallDoorGuns() noexcept;   // after CheckHeliProfile: the 410's door guns (their weapon-user hook)
 // Shared with jet.cpp: map ray (metres a->b to terrain/buildings, -1 with none; `hit` gets the point).
 float MapRay(const float* a,const float* b,float* hit) noexcept;
+// Whether map rays can distinguish an unobstructed line from an unavailable native query.
+// Game thread: checked EDF.dll ray profile and a live physics world.
+bool MapRayReady() noexcept;
+// map.cpp's eye: the same ray past the hits on moving bodies (map_floor.h Fixed: the scene objects' ragdolls on the map
+// layers, an Earth Eater's parts over the field), so only the fixed world (terrain, buildings, cave rock) is found.
+float MapFixedRay(const float* a,const float* b,float* hit) noexcept;
 // The map's ground in caves and indoors (map_floor.h): the first floor along a->b (a cave roof seen from above skipped;
 // metres, -1 with none), and of the floors over / under (x, z) the height nearest `y` (`standable`: only those with
 // room to stand over them). LearnMapNormals(a point the player stands on) settles which side a hit's normal faces (map.cpp
@@ -45,6 +52,9 @@ void LearnMapNormals(const float* standing) noexcept;
 float BuildingRay(const float* a,const float* b,float* hit) noexcept;
 // hitpredict.cpp: the nearest object body along a->b (the bullets' object layer 11), metres or -1; `body` its id.
 float ObjectRay(const float* a,const float* b,float* hit,std::uint32_t* body) noexcept;
+// gravity.cpp: the same on another collision layer's filter (`filter`: the layer number, docs/raycast-re.md §3; layer 15 meets
+// the ragdolls, vehicles, containers and debris, docs/gravity-re.md §4), metres or -1; `body` its id.
+float LayerRay(const float* a,const float* b,std::uint32_t filter,float* hit,std::uint32_t* body) noexcept;
 // Whether there is water at (x, z) (docs/water-re.md): the game's own water areas; `surface` gets the
 // highest surface there. unknown: the probe is off (EDF.dll differs) or the map's areas are not there.
 enum class Sea { unknown, land, water };

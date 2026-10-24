@@ -10,11 +10,27 @@
 // the cached loader 0x7AA440(out, wstring path, type, 1, byte) (0x5466DF), adds one to the set. A bank's type is only ever
 // compared by that lookup (0x7AEBBF; the others store it for re-creation, 0x7A92A4 / 0x7A9BB1), so our bank gets a type no
 // caller asks for: the stock lookups never see it, and EDF6's own cues always answer first. The lookup is then wrapped: when
-// it finds nothing for type 0 and our bank is loaded, the name is tried on our bank alone (0x7A9F80) and `out` filled the way
-// the lookup does (bank pointer, then the index dword). The lookup has nine callers, all calls (0x7B2984 ... 0x7B46B5): each
+// it finds nothing for type 0 and our bank is loaded, the same native lookup is asked for our private type. It performs
+// the wide-to-narrow cue conversion and answers the actual Bank pointer and index. The lookup has nine callers, all calls (0x7B2984 ... 0x7B46B5): each
 // is redirected, rather than patching the function's entry, because RedirectCall verifies the target it replaces and needs no
 // prologue copy. The bank loads right after EDF6's own SE bank (the call at 0x7B09C6, whose callee we run first): the sound
-// system has just loaded a bank through the same cache (0x7B095C), so it exists. The handle is kept for the process.
+// system has just loaded a bank through the same cache (0x7B095C), so it exists. The handle is kept until the game shuts down.
+// Without that optional bank (or if loading fails), reviewed source cues fall back to finite cues in EDF6's resident
+// SE bank. The generated table never substitutes an unbounded cue into a caller with no automatic-stop owner.
+//
+// Shutdown (the exit crash of 2026-10-15/16, docs/edf41-classes.md 12). The loader's reference is a counted one into EDF's static
+// bank cache (EDF+0x20B38A0: std::map of 0xA0-byte nodes, the count at node+0x98, the bank at node+0x48 with its "registered with
+// the sound system" byte at +8). Every stock owner gives its reference back inside the application destructor 0x7021F0, before
+// that destructor deletes the sound system and nulls *(EDF+0x20B2948) (0x702493): measured at its entry 12 to 19 nodes, at the atexit 0 (with ours given back).
+// A reference still held after that keeps its node until EDF.dll's atexit 0x1750870 (the "SoundBank::Release error ref count"
+// report, then the cache's destructor 0x7A9850 -> node 0x7A99D0 -> bank 0x7AABC0), which unregisters the still-registered bank
+// from the null sound system: 0x7ADCE0 reads [0+0x40], EDF+0x7ADCFB, EDF6Coop's handler turns it into FAST_FAIL. Our node was
+// the only one left (the report names EDF41_WEAPON_SE.ACB, the dumps' rbx is our node+0x48). It did not crash every run only
+// because the exit often ends earlier: an EDF.dll static destructor that runs before that atexit (0x111822C's object, releasing
+// its D3D11 objects, 0x175714) can make d3d11/dxcore end the process with STATUS_THREAD_IS_TERMINATING (NtTerminateProcess
+// 0xC000004B) -- seen on plain M019 runs; runs with the emitters went on to the cache, which is why the crash looked tied to them.
+// So the reference is given back the stock way (0x7AAC80, the BankRef release: lock the cache, count down, erase at zero)
+// from edf41c::AtGameShutdown, right before the application destructor runs, while the sound system is alive.
 //
 // Voices. The script's voice key plays from the first bank of the SeManager's list (*(EDF+0x20B2950), list at +0xE0) that has
 // it (0x7AA150): banks load by 0x7B2500(mgr, wchar path ending .awb, flag), which reads <base>.AWB and <base>_LIST.AWE (an AWE
@@ -43,6 +59,8 @@
 // load still fail, the empty node 0x7B2500 appended is taken out again the way 0x7B2CD0 removes one.
 #include "crew.h"
 #include "memory.h"
+#include "edf41classes.h"
+#include "edf41_sound_fallback.h"
 
 #include <atomic>
 #include <cstdint>
@@ -55,9 +73,10 @@ constexpr std::size_t kSystemGlobal=0x20B2948;      // *(EDF+this): the sound sy
 constexpr std::size_t kLanguageIndex=0x20B2B34;     // dword: 0 ja, 1 en, 2 kr, 3 cn, 4 sc (the table below)
 constexpr std::size_t kLanguageTable=0x1F56208;     // wchar_t* [5]: L"ja", L"en", L"kr", L"cn", L"sc"
 constexpr std::size_t kSeManagerGlobal=0x20B2950;   // *(EDF+this): the SeManager (voice banks, list at +0xE0)
-constexpr std::size_t kBankLoad=0x7AA440;           // (out{Bank*,ctrl}, wstring* path, type, flag 1, byte) -> bool
+constexpr std::size_t kBankLoad=0x7AA440;           // (out{cacheNode*,cacheGlobal*}, wstring* path, type, flag 1, byte) -> bool
+constexpr std::size_t kBankRelease=0x7AAC80;        // (BankRef*): the cache reference given back (erased at count 0), control cleared
 constexpr std::size_t kLookup=0x7AEAE0;             // (system, out{Bank*,int}, type, const wchar_t* name) -> bool
-constexpr std::size_t kBankFind=0x7A9F80;           // (Bank*, wchar_t* name) -> cue index or -1
+constexpr std::size_t kBankInNode=0x48;            // the actual Bank is embedded in the cache tree node
 constexpr std::size_t kSeBankLoad=0x7B2190;         // EDF6's own SE bank, called at kSeBankLoadSite
 constexpr std::size_t kSeBankLoadSite=0x7B09C6;
 constexpr std::size_t kVoiceLoad=0x7B2500;          // (SeManager, wchar_t* path .awb, flag)
@@ -78,9 +97,9 @@ struct GameString {
     std::uint64_t size;
     std::uint64_t capacity;
 };
-struct BankRef {              // 0x7AA440's out: the bank and its control block (a counted reference, kept for good)
-    void* bank;
-    void* control;
+struct BankRef {              // 0x7AA440's counted cache handle; neither member is a Bank pointer
+    void* node;
+    void* cache;
 };
 struct CueRef {               // 0x7AEAE0's out
     void* bank;
@@ -91,11 +110,10 @@ using BankLoadFn=bool(__fastcall*)(BankRef* out,const GameString* path,int type,
 // name: the cue's characters (0x7AEAE0 copies them into a local std::wstring with assign(const wchar_t*), 0x7AEB39;
 // the callers pass c_str() values, e.g. 0x7B3D3E's DSGO string at the 0x7B3E83 site)
 using LookupFn=bool(__fastcall*)(void* system,CueRef* out,int type,const wchar_t* name);
-using FindFn=int(__fastcall*)(void* bank,const wchar_t* name);
 using SeLoadFn=std::uint64_t(__fastcall*)(void*,const void*,std::uint64_t,std::uint64_t,std::uint64_t,std::uint64_t);
 using VoiceLoadFn=std::uint64_t(__fastcall*)(void* manager,const wchar_t* path,std::uint64_t flag);
 
-BankRef weaponBank{};                                // process lifetime
+BankRef weaponBank{};                                // given back at the game's shutdown (ReleaseWeaponBank)
 std::atomic<void*> weaponBankPtr{nullptr};           // set once the bank is loaded
 std::atomic<void*> weaponSystem{nullptr};            // the sound system it was loaded into
 std::atomic<long> fallbackHits{0};
@@ -119,19 +137,32 @@ void LoadWeaponBank() noexcept {
     weaponSystem.store(system);
     weaponBankPtr.store(nullptr);
     if(!ModsFileThere(kWeaponFile)) {
-        Log("EDF41SOUND weapon bank Mods\\SOUND\\PC\\%ls not installed: 4.1's weapon sounds are off",kWeaponFile);
+        Log("EDF41SOUND weapon bank Mods\\SOUND\\PC\\%ls not installed: using finite resident cue fallbacks",kWeaponFile);
         return;
     }
     const GameString path{kWeaponPath,0,wcslen(kWeaponPath),wcslen(kWeaponPath)};
     BankRef ref{};
     const bool ok=reinterpret_cast<BankLoadFn>(image+kBankLoad)(&ref,&path,kOurType,1,false);
-    if(!ok || !ref.bank) {
-        Log("EDF41SOUND weapon bank %ls failed to load (ok=%d bank=%p)",kWeaponPath,ok ? 1 : 0,ref.bank);
+    if(!ok || !ref.node || !ref.cache) {
+        Log("EDF41SOUND weapon bank %ls failed to load (ok=%d node=%p cache=%p)",kWeaponPath,ok ? 1 : 0,ref.node,ref.cache);
         return;
     }
-    weaponBank=ref;                 // the reference stays: the bank lives as long as the process
-    weaponBankPtr.store(ref.bank);
-    Log("EDF41SOUND weapon bank loaded: bank=%p control=%p type=0x%X system=%p",ref.bank,ref.control,kOurType,system);
+    weaponBank=ref;                 // the reference stays until the game shuts down (ReleaseWeaponBank)
+    void* const bank=static_cast<unsigned char*>(ref.node)+kBankInNode;
+    weaponBankPtr.store(bank);
+    Log("EDF41SOUND weapon bank loaded: bank=%p node=%p cache=%p type=0x%X system=%p",bank,ref.node,ref.cache,kOurType,system);
+}
+
+// Right before the application destructor (edf41c::AtGameShutdown): the bank's cache reference given back while the sound system
+// still exists, as every stock owner does in that destructor (see the top of this file). The lookups stop answering from it first.
+void ReleaseWeaponBank() noexcept {
+    static const unsigned char print[10]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0x51,0x08};
+    weaponBankPtr.store(nullptr);
+    weaponSystem.store(nullptr);
+    if(!weaponBank.cache)return;
+    if(!Readable(image+kBankRelease,sizeof(print)) || std::memcmp(image+kBankRelease,print,sizeof(print))!=0)return;
+    reinterpret_cast<void(__fastcall*)(BankRef*)>(image+kBankRelease)(&weaponBank);
+    weaponBank=BankRef{};
 }
 
 // EDF6's own SE bank loaded (the original runs first): the sound system exists and has its stock banks.
@@ -141,19 +172,26 @@ std::uint64_t __fastcall SeBankLoadHook(void* self,const void* a,std::uint64_t b
     return result;
 }
 
-// The stock lookup first; only a miss for type 0 asks our bank.
+// Stock first, imported source bank second, finite resident fallback last; type 1 voices stay native.
 bool __fastcall LookupHook(void* system,CueRef* out,int type,const wchar_t* name) {
-    if(reinterpret_cast<LookupFn>(image+kLookup)(system,out,type,name))return true;
-    void* bank=weaponBankPtr.load();
-    if(type!=0 || !bank || system!=weaponSystem.load())return false;
-    const wchar_t* cue=name;
-    const int index=reinterpret_cast<FindFn>(image+kBankFind)(bank,cue);
-    if(index==-1)return false;
-    out->bank=bank;
-    out->index=index;
-    const long hits=++fallbackHits;
-    if(hits<=8 || (hits&(hits-1))==0)Log("EDF41SOUND weapon cue '%ls' answered by 4.1's bank (index 0x%X, hit %ld)",cue,index,hits);
-    return true;
+    auto stock=[&](const wchar_t* cue) {
+        return reinterpret_cast<LookupFn>(image+kLookup)(system,out,type,cue);
+    };
+    if(type!=0)return stock(name);
+    auto imported=[&](const wchar_t* cue) {
+        void* bank=weaponBankPtr.load();
+        if(!bank || system!=weaponSystem.load())return false;
+        CueRef found{nullptr,-1};
+        if(!reinterpret_cast<LookupFn>(image+kLookup)(system,&found,kOurType,cue) || found.bank!=bank || found.index==-1)return false;
+        *out=found;
+        const long hits=++fallbackHits;
+        if(hits<=8 || (hits&(hits-1))==0)Log("EDF41SOUND weapon cue '%ls' answered by 4.1's bank (index 0x%X, hit %ld)",cue,found.index,hits);
+        return true;
+    };
+    // Missing files and failed bank loads are normal for the standalone installer.
+    // The generated targets all belong to the stock resident SE bank and have a
+    // finite lifetime, including when the caller has no automatic-stop owner.
+    return edf41sound::LookupCue(name,stock,imported);
 }
 
 // How many banks the SeManager holds (the std::list's size).
@@ -161,7 +199,7 @@ std::uint64_t BankCount(const void* manager) noexcept {
     return *reinterpret_cast<const std::uint64_t*>(static_cast<const char*>(manager)+kBankListSize);
 }
 
-// The SeManager's bank list: std::list nodes {next, prev, value}, value a shared_ptr {Bank*, control} (0x7B2CF6 reads it so).
+// The SeManager's list nodes {next, prev, value}; value is the same {cacheNode*,cacheGlobal*} handle.
 struct BankNode {
     BankNode* next;
     BankNode* prev;
@@ -182,7 +220,7 @@ using AweCheckFn=bool(__fastcall*)(const void* awe,int arg);
 using AwbTocFn=void*(__fastcall*)(void* binder,const char* path,void* work,std::uint64_t size);
 using CueInBankFn=int(__fastcall*)(const BankRef* bank,const char* key);
 
-std::atomic<void*> voiceBankPtr{nullptr};            // the bank our last load put in the list (null when it failed)
+std::atomic<void*> voiceBankPtr{nullptr};            // the cache node our last load put in the list (null when it failed)
 std::atomic<long> voiceHits{0};
 
 // What SoundBank::Initialize did with OUR files (recorded only while LoadVoiceBank's call runs, on that thread), so a
@@ -218,9 +256,9 @@ std::atomic<long> probeLookups{0};
 int __fastcall CueInBankHook(const BankRef* bank,const char* key) {
     const int cue=reinterpret_cast<CueInBankFn>(image+kCueInBank)(bank,key);
     if(Cfg().edf41VoiceProbe && ++probeLookups<=3000)
-        Log("EDF41SOUND probe lookup '%s' in bank %p -> %d",key ? key : "?",bank ? bank->bank : nullptr,cue);
+        Log("EDF41SOUND probe lookup '%s' in cache node %p -> %d",key ? key : "?",bank ? bank->node : nullptr,cue);
     void* ours=voiceBankPtr.load();
-    if(cue!=-1 && ours && bank && bank->bank==ours) {
+    if(cue!=-1 && ours && bank && bank->node==ours) {
         const long hits=++voiceHits;
         if(hits<=8 || (hits&(hits-1))==0)Log("EDF41SOUND voice cue '%s' answered by 4.1's voice bank %p (cue 0x%X, hit %ld)",key ? key : "?",ours,cue,hits);
     }
@@ -264,9 +302,9 @@ using PlayBFn=bool(__fastcall*)(const BankRef*,const int*,void*,void*);
 std::atomic<long> probePlays{0};
 void LogPlay(const char* which,const BankRef* bank,const int* cue,bool started) noexcept {
     void* ours=voiceBankPtr.load();
-    const bool ourBank=bank && ours && bank->bank==ours;
+    const bool ourBank=bank && ours && bank->node==ours;
     if(++probePlays<=3000 && (ourBank || !started))
-        Log("EDF41SOUND probe play %s bank %p%s cue %d -> started %d",which,bank ? bank->bank : nullptr,ourBank ? " (4.1 voice)" : "",
+        Log("EDF41SOUND probe play %s cache node %p%s cue %d -> started %d",which,bank ? bank->node : nullptr,ourBank ? " (4.1 voice)" : "",
             cue ? *cue : -1,started ? 1 : 0);
 }
 bool __fastcall PlayAHook(const BankRef* bank,const int* cue,void* a,void* b,void* c) {
@@ -301,7 +339,7 @@ BankNode* ListHead(void* manager) noexcept {
 // removes it (0x7B2CD0 keeps what 0x7AA5C0 refuses), so take it out the way 0x7B2CD0 removes one: unlink, size - 1, the
 // game's own delete of the 0x20-byte node. With both members NULL there is no reference to drop (0x7B2D23 / 0x7B2D2C).
 bool DropEmptyNode(void* manager,BankNode* node) noexcept {
-    if(node->value.bank || node->value.control)return false;
+    if(node->value.node || node->value.cache)return false;
     node->prev->next=node->next;
     node->next->prev=node->prev;
     --*reinterpret_cast<std::uint64_t*>(static_cast<char*>(manager)+kBankListSize);
@@ -343,10 +381,10 @@ void LoadVoiceFile(void* manager,const wchar_t* name,const wchar_t* language) no
         return;
     }
     BankNode* node=ListHead(manager)->prev;            // 0x7B2500 appends: the last node is the one it just added
-    if(node->value.bank) {
-        voiceBankPtr.store(node->value.bank);
+    if(node->value.node) {
+        voiceBankPtr.store(node->value.node);
         Log("EDF41SOUND voice bank %ls loaded for language %ls (manager=%p, banks %llu -> %llu, bank %p, toc %p)",path,language,manager,
-            static_cast<unsigned long long>(before),static_cast<unsigned long long>(after),node->value.bank,trace.toc);
+            static_cast<unsigned long long>(before),static_cast<unsigned long long>(after),node->value.node,trace.toc);
         return;
     }
     const bool dropped=DropEmptyNode(manager,node);
@@ -411,6 +449,7 @@ bool InstallEdf41Sound() noexcept {
         Log("EDF41SOUND probe on: play calls %d/%d",playA ? 1 : 0,playB ? 1 : 0);
         Log("EDF41SOUND probe on: caption sites %d/3, row lookup %d",captions,rows ? 1 : 0);
     }
+    edf41c::AtGameShutdown(&ReleaseWeaponBank);   // the bank's reference given back before the sound system goes (the exit crash)
     Log("EDF41SOUND hooked: se bank load=%d lookups=%d/%d voice load=%d (awe check=%d awb toc=%d voice cue=%d/2)",ok ? 1 : 0,lookups,
         static_cast<int>(sizeof(kLookupSites)/sizeof(kLookupSites[0])),voice ? 1 : 0,aweProbe ? 1 : 0,tocProbe ? 1 : 0,cueProbes);
     return ok && voice && lookups>0;

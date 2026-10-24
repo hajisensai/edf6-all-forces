@@ -422,3 +422,10 @@ NET v=<载具> host=<0/1> auth=<0x630DF0(v,0,0,0,1)> op=<0x630F90(v,1,1)：0 无
 - 放 NPC 乘员一律走 `SeatNpcRider`；让 NPC 下车（`SeatKick`）也只在 `OnlineMaySeatNpc(vehicle)` 的机器上做。
 - 区分「NPC 士兵 / 玩家」用 `IsAnyPlayer`：`IsPlayer` 现在只认本机玩家，p7 `npcai.cpp` 里 `!IsPlayer(o)` 当作「是 NPC」的几处（553、802、813、816 行）合并前要改成 `!IsAnyPlayer(o)`，否则房主会把客机玩家当成可招募的 NPC。
 - 标记键（Q）、地图命令：本机输入。小队由房主决定时，客机玩家的标记 / 命令要么只在单机生效，要么需要一条新的联机消息，现在没有。
+
+
+## 会话查询的启动与销毁边界（2026-10-19）
+
+`0x7748F0` 不使用参数；它直接读取 `EDF+0x20B2890` 的 GameDataMgr，再按当前 mode 读取在线标志。这个 singleton 在 EDFModLoader 同步加载插件时尚未创建。网络桥安装只注册回调，首次游戏线程 transport 更新才发布状态。
+
+公共 `InSession` 按完整原生 43 字节 profile 核对只读链，在每次查询中重新解析 manager、mode 容器、当前条目和带符号的相对数据；未知、未创建、已销毁及不可读状态返回 false，不缓存首次缺失。正常有效数据的零/非零判据与原生一致。诊断 NetProbe 也走同一公共查询，离线或未初始化时不调用房主判定。详见 [启动崩溃反馈](feedback-2026-10-19-startup-session-manager.md)。

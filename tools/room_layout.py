@@ -6,6 +6,11 @@ online room's and the offline HQ's stock layouts with the menu's elements added,
   Mods/UI/EDF6VC_WHITE.DDS        a plain white 8 x 8 texture the plugin binds to the panel and the chips and tints
                                   (Root.cpk has no plain one; the format is UI/CHATSHORTCUT_CURSOR.DDS's: 32-bit BGRA)
 
+A vcLoad Button definition inherits the screen's original menu button. It is deliberately absent from layout_tree;
+src/room_ui.cpp creates it under the real native button group with HUiLayout::AddByName only after validation.
+Without the plugin there is no instance and no extra focus stop. Mouse, keyboard and pad activation are the native
+Button Click event, with a native weak screen callback whose lifetime ends with the screen.
+
 Every stock member is kept as it is (the values read back unchanged, the file written in the stock files' own layout:
 pylib/sgo.py write_depth_first reproduces both stock files byte for byte); the menu's members are added (names starting
 `vc`, none in the stock files) and one subtree is appended as BaseFrame's last child (drawn last: over the screen).
@@ -21,14 +26,15 @@ The elements (docs/room-ui-re.md §5: [type, skin, pos, area, flags, hcoord, vco
   vcRoot                 the whole menu, a transparent layout over the screen: the plugin shows / hides it (+0x1F8)
     vcBack               the panel (HUDIconTexture_skin: GLOBAL; the plugin binds WHITE and tints it)
     vcHead               the title line
-    vcU00..vcU13         the unit column (TextField)
-    vcR00..vcR13         the row column, each a transparent layout holding
+    vcU00..vcU11         the unit column (TextField)
+    vcR00..vcR11         the row column, each a transparent layout holding
       vcR00T             its text (TextField)
       vcR00A / vcR00B    the primary / secondary colour chips (HUDIconTexture_skin: WHITE tinted the colour)
       vcR00I             the weapon / store icon (HUDIconTexture_skin: the plugin sets the icon's texture)
       vcR00N             the field / rounds note (TextField)
     vcS0..vcS3           the status lines (generation, room sync, the client's note)
-    vcHint               the key hint line
+    vcHint / vcHelp2 / vcHelp3  three contextual help lines (separate from status)
+    vcEntry              the visible closed-page entry (actual toggle key / pad combination)
 src/room_ui_logic.h names them the same way (tests/room_layout_test.py checks the two agree).
 
 The installer writes both at install (`install`, owner `roomui` in the ledger, released at uninstall); `loadout-generate`
@@ -54,7 +60,7 @@ OWNER = 'roomui'   # pylib/ledger.py OWNERS
 LAYOUTS = ('LYT_HUIONLINEROOM.SGO', 'LYT_HUIHQMAIN.SGO')   # Root.cpk UI/<name> -> Mods/UI/<name>
 NOT_OURS = ('LYT_MAINFRAME.SGO',)                          # EDF6Coop's: never written here
 
-ROWS = 14            # rows a column shows (src/room_ui_logic.h kRows)
+ROWS = 12            # rows a column shows (src/room_ui_logic.h kRows)
 STATUS_LINES = 4     # src/room_ui_logic.h kStatusLines
 PREFIX = 'vc'        # every member this tool adds
 MENU_RIGHT = 1128    # the panel's right edge (1920 x 1080 layout units): the 3D view's side stays clear
@@ -69,8 +75,9 @@ PANEL_X, PANEL_Y, PANEL_W, PANEL_H = 48.0, 96.0, MENU_RIGHT - 48.0, 912.0
 ROW_Y, ROW_STEP, ROW_H = 168.0, 46.0, 40.0
 UNIT_X, UNIT_W = 80.0, 380.0
 ROWS_X = 480.0
-STATUS_Y, STATUS_STEP = 820.0, 36.0
-HINT_Y = 966.0
+STATUS_Y, STATUS_STEP = 736.0, 36.0
+HINT_Y, HELP_STEP = 896.0, 36.0
+ENTRY_Y = 974.0
 
 
 def _layout(skin: str, x: float, y: float, w: float, h: float) -> list:
@@ -97,6 +104,8 @@ def status_name(i: int) -> str:
 
 
 ROOT, BACK, HEAD, HINT = PREFIX + 'Root', PREFIX + 'Back', PREFIX + 'Head', PREFIX + 'Hint'
+HELP2, HELP3, ENTRY = PREFIX + 'Help2', PREFIX + 'Help3', PREFIX + 'Entry'
+NATIVE_ENTRY = PREFIX + 'Load'  # a definition only: instantiated by the native AddByName after the plugin validates
 ROW_PARTS = ('T', 'A', 'B', 'I', 'N')   # text, primary chip, secondary chip, icon, note
 
 
@@ -107,6 +116,9 @@ def elements() -> dict[str, list]:
         BACK: _layout(ICON, PANEL_X, PANEL_Y, PANEL_W, PANEL_H),
         HEAD: _text(UNIT_X, 112.0, 1000.0, 40.0, 28),
         HINT: _text(UNIT_X, HINT_Y, 1000.0, 34.0, 18),
+        HELP2: _text(UNIT_X, HINT_Y + HELP_STEP, 1000.0, 34.0, 18),
+        HELP3: _text(UNIT_X, HINT_Y + 2 * HELP_STEP, 1000.0, 34.0, 18),
+        ENTRY: _text(UNIT_X, ENTRY_Y, 1000.0, 34.0, 22),
     }
     for i in range(ROWS):
         y = ROW_Y + i * ROW_STEP
@@ -120,6 +132,19 @@ def elements() -> dict[str, list]:
     for i in range(STATUS_LINES):
         e[status_name(i)] = _text(UNIT_X, STATUS_Y + i * STATUS_STEP, 1000.0, 34.0, 20)
     return e
+
+
+def native_entry(room: bool) -> list:
+    """A native Button definition, deliberately not in the initial tree.
+
+    The online room has eight 48px menu buttons at 58px intervals and chat starts at y=747. The new final row uses
+    its stock 440px width/skin with a 2px leading gap and 34px height, ending at 744 instead of entering the chat area.
+    HQ has sufficient height for the unchanged 42px/28px original button template, including split-screen menus.
+    """
+    props: list = [['text_dr', '']]
+    if room:
+        props += [['pos', [0.0, 2.0, 0.0]], ['area', [0.0, 0.0, 440.0, 34.0]], ['font_size', [22, 22]]]
+    return [[0, 'Button03Base' if room else 'Button02Base'], props]
 
 
 def white_dds() -> bytes:
@@ -153,7 +178,7 @@ def subtree() -> list:
         kids += [[row_name(i)], [x for part in ROW_PARTS for x in ([row_name(i, part)], 0)]]
     for i in range(STATUS_LINES):
         kids += [[status_name(i)], 0]
-    kids += [[HINT], 0]
+    kids += [[HINT], 0, [HELP2], 0, [HELP3], 0, [ENTRY], 0]
     return [[ROOT], kids]
 
 
@@ -178,6 +203,9 @@ def patch(stock: bytes) -> bytes:
     out = dict(members)
     out['layout_tree'] = tree
     out.update(ours)
+    # The game's own HQ creates its normal menu buttons this way too (0x8456D0). A member outside layout_tree is
+    # inert without the plugin: no drawing, no empty focus stop, and no callback can point into an absent DLL.
+    out[NATIVE_ENTRY] = native_entry(members['xgs_ui_object_class'] == 'HUiRoom')
     data = sgo.write_depth_first(version, out)
     if strip(data) != stock:
         raise AssertionError('补丁后去掉新增部分不等于原版文件')

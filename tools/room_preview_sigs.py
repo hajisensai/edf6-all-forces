@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import TYPE_CHECKING
 
-import pefile
+if TYPE_CHECKING:
+    import pefile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
@@ -55,6 +57,7 @@ SLOTS: tuple[tuple[int, int, int], ...] = (
 
 
 def image(path: str) -> tuple[pefile.PE, bytes]:
+    import pefile   # here, not at import: the audits' source checks use this module's tables without the game (CI has no pefile)
     pe = pefile.PE(path, fast_load=True)
     if pe.FILE_HEADER.TimeDateStamp != TIMESTAMP:
         raise ValueError(f'EDF.dll TimeDateStamp {pe.FILE_HEADER.TimeDateStamp:#x}, not {TIMESTAMP:#x}')

@@ -1,0 +1,4 @@
+Sikorsky UH-60M Blackhawk by Muhamad Mirza Arrafi, CC BY 4.0
+Source: https://sketchfab.com/3d-models/sikorsky-uh-60m-blackhawk-12b4e525676a49678ac3006b360c8750 (via Sketchfab)
+Licence: CC BY 4.0, http://creativecommons.org/licenses/by/4.0/
+Changes: cut down to a UH-60M's pilot station (the right seat) (crew figures, glass and everything the seated eye cannot see left out), turned, scaled to metres and re-exported with its base colour textures resized to at most 1024 px (tools/prep_cockpit_air.py); the EDF6 plugin's cockpit builder (pylib/cockpit_kits_air.py) scales it to the vehicle and places it there.

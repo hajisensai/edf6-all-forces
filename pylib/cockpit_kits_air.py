@@ -182,8 +182,8 @@ REAL: dict[str, RealCockpit] = {
     # War Thunder's AH-64A (tools/prep_cockpit_air.py WT_ASSETS), its displays measured by casting rays from the eye.
     'heli_gunship': RealCockpit(
         'parts/wt-ah64a-cpg/cockpit.glb',
-        (('weapons', (0.041, -0.305, 0.40), (0.0, 0.373, -0.928), 0.16, 0.10),
-         ('status', (0.031, -0.445, 0.397), (0.0, 0.639, -0.769), 0.10, 0.05),
+        (('weapons', (0.044, -0.323, 0.4005), (0.0, 0.373, -0.928), 0.140, 0.070),
+         ('status', (0.0331, -0.4463, 0.3956), (0.0, 0.639, -0.769), 0.080, 0.029),
          ('flight', (0.40, -0.575, 0.755), (0.0, -0.075, -0.997), 0.18, 0.14)),
         {'left': 0.25, 'right': 0.25, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, helmet_hud=True, sill=-43.0),
     'heli_gunship_pilot': RealCockpit(
@@ -197,7 +197,9 @@ REAL: dict[str, RealCockpit] = {
         (('flight', (-0.0952, -0.389, 0.6856), (0.036, 0.0, -0.999), 0.19, 0.115),
          ('map', (0.1846, -0.3954, 0.7005), (0.036, 0.0, -0.999), 0.19, 0.125),
          ('status', (0.6874, -0.3895, 0.7004), (-0.035, 0.0, -0.999), 0.19, 0.125)),
-        {'left': 0.3, 'right': 0.2, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, sill=-40.0),
+        # No combiner in the UH-60M's cockpit: a helmet's display, as the Apache's (every pilot's station shows the
+        # attitude on the line of sight, docs/feedback-2026-10-21-attitude-indicator.md).
+        {'left': 0.3, 'right': 0.2, 'up': 0.2, 'down': 0.5, 'ahead': 0.6, 'back': 0.15}, helmet_hud=True, sill=-40.0),
 }
 SCALED_BY = ('left', 'right', 'up', 'down')   # the sides a real cockpit is scaled to fit; ahead and back it is cut
 
@@ -272,8 +274,11 @@ def _real(cabin: Cabin, name: str) -> Kit:
         windows = tuple(tuple(tuple(map(float, c)) for c in t) for t in glass * k)
         parts.append(tub(lo, hi, spec.sill, glass * k))
         mats['tub'] = KitMaterial(TEX.format(TUB_TEXTURE))
-    return Kit(parts, mats, screens=tuple(screens), sill=spec.sill, windows=windows,
-               conform=frozenset({'tub'}) if spec.sill is not None else frozenset())
+    kit=Kit(parts, mats, screens=tuple(screens), sill=spec.sill, windows=windows,
+            conform=frozenset({'tub'}) if spec.sill is not None else frozenset())
+    import cockpit_retrofit as retrofit
+    return retrofit.apply(kit,retrofit.HELI[name],lambda p:np.asarray(p)*k,limits=(lo,hi),
+                          ranges={retrofit.ci.SPEED:400,retrofit.ci.ALT:3000})
 
 
 def heli_gunship(cabin: Cabin) -> Kit:

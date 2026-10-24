@@ -175,12 +175,12 @@ Wing Diver 能量（PaleWing slot 5 `0x5808B0`，M）：当前 `+0x308`、上限
 
 | 需要 | 读法 | 置信 |
 |---|---|---|
-| 本帧开火 | 每发 `0x696FD0` 末尾 `w+0xBD4 = 1`、`w+0xBD8 = FireRecoil`（`0x6982A5`）；`0x6934F0` 下一次更新改回 0/2/3/4。**更稳：`w+0xBD0`（射击计数，本机开火路径以 `&+0xBD0` 传给 `0x696FD0`，计数模式同步也以它为准）帧间差** | H 写 / M 语义 |
+| 本帧开火 | 每发 `0x696FD0` 末尾 `w+0xBD4 = 1`、`w+0xBD8 = FireRecoil`（`0x6982A5`）；`0x6934F0` 下一次更新改回 0/2/3/4。之前建议用 `w+0xBD0` 帧间差，**已被 2026-10-16 实机推翻**：M1 连发时相机帧观测 `counter 0 events 1`。第一人称后座现从实际枪口创建事件取触发，计数轮询仅为补充，不能单独作为射击事件源。 | H 写 / 事件覆盖已实测 |
 | 开火钩子 | `0x696FD0(weapon, muzzleIdx, …)` 每发一次；远端重放也走它，用 `w+0x120`（拥有者）== 本机玩家过滤 | H |
 | 后坐 / 强度参数 | `FireRecoil +0x37C`、`FireInterval +0x36C`、`FireCount +0x368`、`FireBurstCount/Interval +0x370/+0x374`、`FireAccuracy +0x378`、`AmmoDamage +0x89C`、`AmmoExplosion +0x8B0`、`AmmoSpeed +0x894` | H（加载器 `0x68CDF2..0x68D7FF`） |
 | 弹匣 | 剩余 `w+0xBE8`、容量 `AmmoCount → +0x248` | H 字段 / M 语义 |
 | 换弹 | `ReloadType +0x208`、`ReloadTime +0x20C`（帧，<0 = 不换弹）；`w+0xBD4`：3 = 换弹动画开始（`0x693DB5`，同时请求 `ReloadAnimation +0xEB8`）、4 = 收尾（`0x693D0E`，请求 `+0xEBC`） | H 写 / M 语义 |
-| 换弹进度 | 未定位到可直接用的剩余计数（`+0xE68/+0xE74` 参与，未核）；**建议**：进入 `+0xBD4==3` 起计帧 / `ReloadTime` | L |
+| 换弹进度 | `w+0xE68` = 换弹剩余帧数：`0x693BAF-0x693DB5` 中 `+0xE68>0` 且 `+0xE6F` 置位时，状态 ≤2 请求 ReloadAnimation 并写 3，状态 3 按 `+0xE74` 阈值请求 `_finish` 写 4（2026-10-18 静态复核；`payload.cpp` 换弹条早已按 `1-E68/ReloadTime` 用）。第一人称换弹姿势现按 `BD4∈{3,4} && E68>0` 每帧判（`firstperson.cpp` Hand）。旁证：第三方 EDF6VehicleFPS 0.1.66 只认 4、漏了 3 | H 字段 / M 语义（姿势待实机） |
 | 武器动画请求块 | `w+0xEC4`（=0x101 有请求）、`+0xEC8`、`+0xECC`、`+0xED0` 速度、`+0xED4` 动画 ID（与 `ChangeAnimation +0xEB0`、`ReloadAnimation +0xEB8`、`_finish +0xEBC` 比较）；该块经掩码 `0x40` 复制 | H |
 | 换枪 | 选中序号 `set+0x38` 变化；进行中：`h+0x1A30 > 0`、目标武器 `h+0x1A28`（`0x592396` 读法）；请求时 `h+0x1588 |= 0x80`；`0x590A90(h, idx)` 是选择函数 | M |
 | 持枪姿势分类 | `AimAnimation → w+0xEC0`（士兵用来选持枪动画的 ID，最贴近「持握姿势」）；类别用武器 vtable 的 RTTI 名（`Weapon_BasicShoot` 等，`tools/edfre.py vt_owner`）；同步表 `w+0x153C`（0x10 = 实弹/光束连发类） | H 字段 / M 用途 |

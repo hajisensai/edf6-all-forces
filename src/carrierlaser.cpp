@@ -37,8 +37,10 @@
 // (CarrierLaserFrame); with no carrier left, from a 508's AI (ShipAiHook), so it winds down (Interrupt: the sight
 // deleted) when the last carrier is gone, though nothing of the carriers runs any more.
 #include "crew.h"
+#include "enemy_control_native.h"
 #include "memory.h"
 #include "online_authority.h"
+#include "scene_object.h"
 #include "subcarrier.h"
 #include "vecmath.h"
 #include <cmath>
@@ -53,8 +55,10 @@ constexpr std::size_t kShipAiSlot=7;
 constexpr std::size_t kYawRate=0xB54,kMoveState=0xDF0,kRoute=0x4A8;
 constexpr unsigned kDemoVtable=0x17D4B20,kDemoUpdate=0x5B5C50;
 constexpr std::size_t kDemoUpdateSlot=5,kDemoIfc=0x170;
-constexpr unsigned kPreload=0x7A3780,kCreateObject=0x11945E0,kDelete=0x118A1B0,kInitParamVtable=0x1762068;
+constexpr unsigned kPreload=0x7A3780,kCreateObject=scene::kCreateObject,kDelete=0x118A1B0,kInitParamVtable=scene::kInitParamBaseVtable;
 constexpr std::size_t kPreloadMgr=0x20B29A8,kObjectMgr=0x20B2958;
+constexpr std::size_t kTeams=0x20B2978,kTeamRows=0x38,kTeamStride=0x38,kTeamRelation=0x18;
+constexpr int kMaxTeams=64,kEnemyRelation=2;
 constexpr unsigned kIfcOwner=0x2B8390,kIfcDamage=0x2B82E0,kIfcStepFromPoint=0x2B970D,kIfcStepStart=0x2B9756;
 constexpr std::size_t kIfcAim=0x20,kIfcFromPoint=0x2F9,kIfcStart=0x300;
 constexpr std::size_t kHpMax=0x2F4,kHp=0x2F8,kObjFlags=0x18;
@@ -108,10 +112,8 @@ const unsigned char kFlyToWishSig[]={0x48,0x8D,0xBB,0x40,0x0B,0x00,0x00};
 const unsigned char kUpdateStateSig[]={0x8B,0x87,0xF0,0x0D,0x00,0x00,0x85,0xC0};
 const unsigned char kUpdateWishSig[]={0x0F,0x10,0x87,0x40,0x0B,0x00,0x00,0x0F,0x11,0x87,0xD0,0x05,0x00,0x00};
 
-struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
 struct Weak { const void* object; const void* ctrl; };
 using PreloadFn=void(*)(void*,const wchar_t*,std::int32_t,std::int32_t);
-using CreateObjectFn=unsigned char*(*)(void*,const float*,const wchar_t*,InitParam*);
 using DeleteFn=void(*)(void*);
 using OwnerFn=void(*)(void*,const Weak*);
 using DamageFn=void(*)(void*,float);
@@ -164,18 +166,46 @@ void Under(const unsigned char* s,float below,float* out) noexcept {
     for(int i=0;i<3;++i)out[i]=p[i]-up[i]*below;
 }
 
-// Fallback target: the player within kPlayerRange of `from`, else the carrier deck nearest to it. Read only.
-bool Target(const float* from,float* out,bool* atPlayer) noexcept {
+// Native directed enemy relation, read afresh: a carrier may change sides during an active laser charge.
+bool ShipEnemy(const unsigned char* ship,int otherTeam) noexcept {
+    if(!Readable(ship,kTeam+4))return false;
+    const int own=At<int>(ship,kTeam);
+    if(own<0 || own>=kMaxTeams || otherTeam<0 || otherTeam>=kMaxTeams || own==otherTeam)return false;
+    const auto* manager=At<const unsigned char*>(image,kTeams);
+    if(!Readable(manager,kTeamRows+8))return false;
+    const auto* rows=At<const unsigned char*>(manager,kTeamRows);
+    if(!Readable(rows+own*kTeamStride,kTeamStride))return false;
+    const auto* relations=At<const int*>(rows+own*kTeamStride,kTeamRelation);
+    return Readable(relations+otherTeam,sizeof(int)) && relations[otherTeam]==kEnemyRelation;
+}
+bool EnemyCarrier(const unsigned char* ship,const ObjRef& carrier) noexcept {
+    SubView list[kMaxCarriers]{};
+    const int count=SubCarriers(list,kMaxCarriers);
+    for(int i=0;i<count;++i)if(list[i].ref.obj==carrier.obj && list[i].ref.ctrl==carrier.ctrl)
+        return ShipEnemy(ship,list[i].team);
+    return false;
+}
+// Fallback target: an enemy player within range, else the nearest enemy carrier's real deck.
+bool Target(const unsigned char* ship,const float* from,float* out,bool* atPlayer) noexcept {
     const unsigned char* human=PlayerHuman();
-    if(human) {
+    if(human && Readable(human,kDead+1) && !human[kDead] && ShipEnemy(ship,At<int>(human,kTeam))) {
         const float* p=reinterpret_cast<const float*>(human+kPosition);
         const float chest[3]={p[0],p[1]+1.2f,p[2]};
         if(std::isfinite(chest[0]) && std::isfinite(chest[1]) && std::isfinite(chest[2]) && Dist(chest,from)<=kPlayerRange) {
             std::memcpy(out,chest,12);*atPlayer=true;return true;
         }
     }
-    *atPlayer=false;
-    return SubDeck(from,out);
+    SubView list[kMaxCarriers]{};
+    const int count=SubCarriers(list,kMaxCarriers);
+    bool found=false;float best=0.0f;
+    for(int i=0;i<count;++i) {
+        if(!ShipEnemy(ship,list[i].team))continue;
+        float deck[3];if(!SubDeckFor(list[i].ref,from,deck))continue;
+        const float distance=Dist(from,deck);
+        if(!std::isfinite(distance) || (found && distance>=best))continue;
+        best=distance;std::memcpy(out,deck,12);found=true;
+    }
+    *atPlayer=false;return found;
 }
 
 bool ObjectLive(const unsigned char* o,const void* ctrl,unsigned vtable) noexcept {
@@ -197,7 +227,7 @@ void Fly(unsigned char* o,Ship& s,ULONGLONG ms) noexcept {
     const Carriers live=Live();
     const SubView* c=Find(live,s.carrier);
     float spot[3];
-    if(!c || !SubSpot(s.carrier,s.spotZ,kOverDeck,spot))return;
+    if(!c || !ShipEnemy(o,c->team) || !SubSpot(s.carrier,s.spotZ,kOverDeck,spot))return;
     const float* pos=reinterpret_cast<const float*>(o+kPosition);
     alignas(16) float to[4]={spot[0],spot[1],spot[2],1.0f};
     // The carrier's motion in m/frame (its velocity is m/s; the ship's speed is m/frame, 0x4F74D0).
@@ -233,6 +263,19 @@ void __fastcall ShipAiHook(void* object,const void* context) {
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("LASER fault flying a ship: the flight is off until the game restarts");flyOk=false;}
 }
 
+// Controlled AI suppresses stock route decisions but retains the shared
+// laser maintenance. A clone no longer matches ObjectLive's original vtable,
+// so its old autonomous charge is interrupted rather than steering the player.
+bool OwnsControlledShipAi(const void* slot) noexcept {
+    return slot==reinterpret_cast<const void*>(&ShipAiHook) &&
+        nextShipAi==reinterpret_cast<ShipAiFn>(image+kShipAi);
+}
+std::uint64_t __fastcall ControlledShipAi(void* object,void*) {
+    SeeFrame(object);
+    Step();
+    return 0;
+}
+
 int MakeFault(const EXCEPTION_POINTERS* e) noexcept {
     const auto r=e->ExceptionRecord;
     Log("LASER the game faulted building a beam (%08lX at EDF+%llX): the laser is off until the game restarts",r->ExceptionCode,
@@ -241,8 +284,7 @@ int MakeFault(const EXCEPTION_POINTERS* e) noexcept {
     return EXCEPTION_EXECUTE_HANDLER;
 }
 unsigned char* Create(const wchar_t* sgo,const float* m) noexcept {
-    InitParam param{image+kInitParamVtable,{}};
-    __try { return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,sgo,&param); }
+    __try { return scene::CreateSceneObject(m,sgo); }
     __except(MakeFault(GetExceptionInformation())) { return nullptr; }
 }
 
@@ -324,6 +366,7 @@ Ship* Slot(const unsigned char* o,ULONGLONG ms) noexcept {
 // The beams' start and end this frame: the core and straight under it on the deck, or (fallback) the hatch and
 // the target, followed until kLockMs before the shot.
 bool Line(Ship& s,ULONGLONG ms,float* start) noexcept {
+    if(!EnemyCarrier(s.ship,s.carrier))return false;
     if(s.down) {
         Under(s.ship,kCoreBelow,start);
         s.atPlayer=false;
@@ -332,7 +375,7 @@ bool Line(Ship& s,ULONGLONG ms,float* start) noexcept {
     Under(s.ship,kHatchBelow,start);
     if(s.phase==Phase::charging && ms-s.phaseAt>=kChargeMs-kLockMs)return true;
     float aim[3];bool atPlayer=false;
-    if(!Target(start,aim,&atPlayer))return s.phase==Phase::charging;
+    if(!Target(s.ship,start,aim,&atPlayer))return s.phase==Phase::charging;
     std::memcpy(s.aim,aim,12);s.atPlayer=atPlayer;
     return true;
 }
@@ -404,6 +447,7 @@ bool Start(Ship& s,const Carriers& live,ULONGLONG ms) noexcept {
     const float* pos=reinterpret_cast<const float*>(s.ship+kPosition);
     int best=-1;float bestD=kShipRange;
     for(int i=0;i<live.n;++i) {
+        if(!ShipEnemy(s.ship,live.list[i].team))continue;
         const float d=Dist(pos,live.list[i].pos);
         if(d<=bestD){bestD=d;best=i;}
     }
@@ -429,8 +473,11 @@ void Tick() noexcept {
     const ULONGLONG ms=GameMs();
     const Carriers live=Live();
     Seen seen{{},0};
-    // The carriers are all on the player's team: one visit sees every ship.
-    if(live.n)VisitEnemiesOf(live.list[0].team,&SeeShip,&seen);
+    // Collect each distinct carrier side; SeeShip de-duplicates ships seen from both teams.
+    for(int i=0;i<live.n;++i) {
+        bool already=false;for(int j=0;j<i;++j)already=already || live.list[j].team==live.list[i].team;
+        if(!already)VisitEnemiesOf(live.list[i].team,&SeeShip,&seen);
+    }
     bool busy=false;
     for(int i=0;i<seen.n;++i) {
         Ship* s=Slot(seen.list[i],ms);
@@ -444,7 +491,7 @@ void Tick() noexcept {
             s=Ship{};
             continue;
         }
-        if(!live.n && s.phase!=Phase::idle)Interrupt(s,ms,"no carrier left");
+        if(s.phase!=Phase::idle && !EnemyCarrier(s.ship,s.carrier))Interrupt(s,ms,"carrier gone or no longer hostile");
         else if(s.phase==Phase::moving)Moving(s,ms);
         else if(s.phase==Phase::charging)Charging(s,ms);
         busy=busy || s.phase!=Phase::idle;
@@ -506,7 +553,12 @@ bool InstallFlight() noexcept {
     void* const current=*slot;
     if(current!=image+kShipAi)Log("LASER 508 AI: chaining onto %p (another plugin)",current);
     nextShipAi=reinterpret_cast<ShipAiFn>(current);
-    return PatchVtableSlot(slot,current,reinterpret_cast<void*>(&ShipAiHook));
+    const bool hooked=PatchVtableSlot(slot,current,reinterpret_cast<void*>(&ShipAiHook));
+    const bool controlled=hooked && current==image+kShipAi &&
+        enemy_native::RegisterControlledAiExtension(static_cast<std::uint32_t>(kShipVtable),static_cast<std::uint32_t>(kShipAi),
+            &OwnsControlledShipAi,&ControlledShipAi);
+    Log("LASER controlled lifecycle=%d",controlled ? 1 : 0);
+    return hooked;
 }
 
 bool InstallLaser() noexcept {

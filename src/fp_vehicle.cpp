@@ -6,6 +6,7 @@
 // installed, or another mod's model) keeps the stock camera: no first person sitting in the air.
 #include "crew.h"
 #include "firstperson.h"
+#include "fp_view.h"
 #include "vhud.h"
 #include "memory.h"
 #include "edf/seat.h"
@@ -44,6 +45,7 @@ int SeatOf(unsigned char* v,const unsigned char* human) noexcept {
 
 int VehicleScreens(const unsigned char* v,int seat,const float* eye,CockpitScreens* out) noexcept {
     out->n=0;
+    out->physical=false;
     const unsigned char* inst=v+kVehicleModel;
     if(!Readable(inst,kInstCount+4))return 0;
     const auto bones=At<const unsigned char*>(inst,kInstBones);
@@ -52,10 +54,11 @@ int VehicleScreens(const unsigned char* v,int seat,const float* eye,CockpitScree
     wchar_t prefix[24];
     const int len=std::swprintf(prefix,24,L"vc_scr_%d_",seat);
     static const wchar_t* const kinds[]={L"flight",L"weapons",L"status",L"hud",L"map",L"sensor"};
-    for(std::int32_t i=0;i<n && out->n<kMostScreens;++i) {
+    for(std::int32_t i=0;i<n;++i) {
         const unsigned char* rec=bones+static_cast<std::size_t>(i)*kBoneStride;
         const auto name=At<const wchar_t*>(rec,0);
-        if(!name || std::wcsncmp(name,prefix,static_cast<std::size_t>(len))!=0)continue;
+        if(name && std::wcsncmp(name,L"vc_i_",5)==0)out->physical=true;
+        if(!name || out->n>=kMostScreens || std::wcsncmp(name,prefix,static_cast<std::size_t>(len))!=0)continue;
         const wchar_t* rest=name+len;
         int kind=-1;
         for(int k=0;k<6;++k) {
@@ -89,7 +92,11 @@ bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept {
     std::swprintf(marker,16,L"vc_eye_%d",out->seat);
     const unsigned char* rec=Bone(v+kVehicleModel,marker);
     if(!rec)return false;
-    std::memcpy(eye,rec+kBoneWorld+48,12);
+    fpview::M4 world,frame;
+    std::memcpy(world.m,rec+kBoneWorld,64);
+    if(!fpview::Orthonormal(world,&frame) || !fpview::Finite(frame))return false;
+    std::memcpy(out->frame,frame.m,64);
+    std::memcpy(eye,frame.m+12,12);
     out->station=true;
     return std::isfinite(eye[0]+eye[1]+eye[2]);
 }

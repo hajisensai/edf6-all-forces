@@ -236,6 +236,32 @@ def states(cas: bytes) -> dict[str, set[str]]:
     return {_name(cas, at): {_name(cas, m.at) for m in ms} for at, ms in lt.tree.anmgroups}
 
 
+def state_clips(cas: bytes) -> dict[str, dict[str, list[str]]]:
+    """{player: {state: the CANM clip names it plays, in order}} of an EDF6 CAS: the clips of the tcontrol its play data
+    command (command 0, type 2: +0x10 the tcontrol index) names, else the mcanm's own (+0x20); [] when neither."""
+    import cas_pose
+    lt = cl.cas_layout(cas)
+    pose = cas_pose.CasPose(cas)
+    out: dict[str, dict[str, list[str]]] = {}
+    for at, ms in lt.tree.anmgroups:
+        states: dict[str, list[str]] = {}
+        for m in ms:
+            idx = None
+            for d in _data_of(m):
+                op, = struct.unpack_from('<I', cas, d)
+                if op == 0 and struct.unpack_from('<I', cas, d + 0x14)[0] == 2:
+                    idx, = struct.unpack_from('<I', cas, d + 0x10)
+                    break
+            if idx is None:
+                idx, = struct.unpack_from('<I', cas, m.at + 0x20)
+            names = []
+            if idx != NO_TCONTROL and idx < len(lt.tree.tcontrols):
+                names = [pose.clips[struct.unpack_from('<I', cas, w)[0]].name for w in lt.tree.tcontrols[idx][1]]
+            states[_name(cas, m.at)] = names
+        out[_name(cas, at)] = states
+    return out
+
+
 def alias_states(cas: bytes, aliases: dict[str, list[tuple[str, str]]]) -> bytes:
     """`cas` (EDF6 0x204) with states added to its players as copies of states it has: {player: [(new, existing)]}.
 

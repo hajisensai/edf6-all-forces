@@ -15,8 +15,8 @@ layers: the L layers' texture slices and tiling (Layer); see layer_table for how
 Shading: EDF6's terrain pixel shader (MAP_FIELD_RENDER*_14_*, in EDF6's DX11.cpk) takes the layer weights from the
 mass grid: one 0x50 record per cell = the list index (u32) + four corners' 16 weight bytes (slot 0..15 = the layers
 of the leaf's list, 0xFF = unused slot); the four corners are (i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1) with i
-the column (x). A leaf's mesh record says how many slots its list has and how many texture slices its layers use
-(+0x24, +0x28: both counted in stock files from the lists, see mesh_flags).
+the column (x). A leaf's mesh record says how many slots its list has (+0x24, mesh_flags) and which record of the
+file's shader table (header +0x20, shader_table) draws it (+0x28, shader_index).
 """
 from __future__ import annotations
 
@@ -37,13 +37,15 @@ LAYER_SIZE = 0x50
 ORI_SIZE = 0x20
 SPLAT_SIZE = 0x50
 SLOTS = 16
-MAX_LAYERS = 5   # layers per leaf: the most any stock leaf lists (the shader variants MAP_FIELD_RENDER<n>_<m>_14_* go to m = 7)
+SHADER_AT = 0x28   # mesh record: the shader table record of the leaf (shader_index)
+MAX_LAYERS = 15  # shipped MAP_FIELD_RENDER<n>_1_14_{0,1,2}; the mass list has 16 byte slots
 
 
 @dataclass(frozen=True)
 class Layer:
     """One terrain layer: slice `color` of the map's colour array tiled every `tile_color` metres, multiplied by
-    slice `multip` (-1: none) tiled every `tile_multip` metres, shaded with normal slice `normal`."""
+    valid slice `multip` tiled every `tile_multip` metres, shaded with normal slice `normal`.
+    A source without a multiplier must explicitly reference a neutral texture: the FMB shader has no skip flag."""
     color: int
     multip: int
     tile_color: float
@@ -88,7 +90,21 @@ def _lzss_items(data: bytes, tries: int = 24) -> list[fmb.Item]:
 
 def cmpl_fast(data: bytes) -> bytes:
     """A CMPL stream (the game's LZSS, docs/fmb-format.md) of `data`: greedy matches, not Okumura's choice; it
-    decodes to exactly `data` with the game's decoder (fmb.cmpl_decode, mdb.cmpl_decompress: checked by selftest)."""
+    decodes to exactly `data` with the game's decoder (fmb.cmpl_decode, mdb.cmpl_decompress: checked by selftest).
+    cmpl_fast_py's bytes, natively when native/lzss_greedy.cpp's DLL is there (pylib/edf6native.py)."""
+    import edf6native
+    lib = edf6native.lib()
+    if lib is None:
+        return cmpl_fast_py(data)
+    import ctypes
+    data = bytes(data)
+    out = ctypes.create_string_buffer(lib.edf6_lzss_greedy_bound(len(data)))
+    size = lib.edf6_lzss_greedy(data, len(data), 24, out)   # 24: _lzss_items' tries
+    return out.raw[:size]
+
+
+def cmpl_fast_py(data: bytes) -> bytes:
+    """cmpl_fast's reference."""
     return b'CMPL' + struct.pack('>I', len(data)) + fmb._emit(data, _lzss_items(data))
 
 
@@ -115,15 +131,22 @@ def _corner_weights(w: np.ndarray, used: list[int]) -> np.ndarray:
     return out.astype(np.uint8)
 
 
-def mesh_flags(used: list[int], layers: list[Layer]) -> tuple[int, int]:
-    """The two dwords at mesh +0x24 / +0x28 (the dword at +0 is the leaf's layer count): (layers in the mesh << 8) |
-    (slots of its longest list), and the number of distinct texture slices (colour and multiplier) its layers use.
-    Read off every stock leaf: haikyo (1 layer, 2 slices) = 0x101, 2; IG_HEIGEN601's ring pieces (2, 4), (3, 5), (4, 6)
-    whose layers 0 / 2 / 4 / 5 use colour 0 / 2 / 4 / 5 and multiplier 1 / 3 / 1 / 1. One list per leaf here, so
-    both counts are the layers used."""
-    slices = ({layers[k].color for k in used} | {layers[k].multip for k in used}) - {-1}
+def mesh_flags(used: list[int]) -> int:
+    """The dword at mesh +0x24 (the dword at +0 is the leaf's layer count): (layers in the mesh << 8) | (slots of its
+    longest list); one list per leaf here, so both are the layers used. The dword after it (+0x28) is the leaf's
+    shader: shader_index."""
     n = len(used)
-    return n * 0x100 + n, len(slices)
+    return n * 0x100 + n
+
+
+def shader_index(counts: list[int], n: int) -> int:
+    """Mesh +0x28: the index into the file's shader table (shader_table(counts), header +0x20) of the record
+    (n, 1, pass 0, 0) - the pass-0 draw of an n-layer leaf. Every one of the 9753 meshes of EDF6's 46 stock FMBs points
+    at the record (layers << 8 of its +0x24, mode, pass 0, flag 0) of its own file's table; none at a flag 6 record or
+    another pass. (This was once read as the number of texture slices the leaf's layers use, which happened to fit the
+    two stock files it was read off; the SK pieces built that way pointed at flag 6 records or other layer counts.)"""
+    cs = sorted(set(counts))
+    return len(cs) + 1 + cs.index(n)
 
 
 def leaf_blob(heights: np.ndarray, normals: np.ndarray, weights: np.ndarray, x0: float, z0: float, step: float,
@@ -133,9 +156,13 @@ def leaf_blob(heights: np.ndarray, normals: np.ndarray, weights: np.ndarray, x0:
     h = heights[r0:r0 + nr + 1, c0:c0 + nc + 1]
     n = normals[r0:r0 + nr + 1, c0:c0 + nc + 1]
     w = weights[r0:r0 + nr + 1, c0:c0 + nc + 1]
+    if not list_ids or not np.isfinite(w).all() or (w < 0).any():
+        raise ValueError('terrain weights need a layer list and finite nonnegative values')
     total = w.reshape(-1, w.shape[2]).sum(0)
-    ranked = sorted((k for k in list_ids if w[:, :, k].max() > 1.0 / 510.0), key=lambda k: -total[k])
-    used = sorted(ranked[:MAX_LAYERS]) or [list_ids[int(total.argmax())]]
+    used = sorted(k for k in list_ids if (w[:, :, k] > 0).any())
+    if len(used) > MAX_LAYERS:
+        raise ValueError(f'terrain leaf ({r0}, {c0}) uses {len(used)} layers; shipped shaders support at most {MAX_LAYERS}')
+    used = used or [max(list_ids, key=lambda k: total[k])]
     rows, cols = h.shape
     xs = x0 + (c0 + np.arange(cols)) * step
     zs = z0 + (r0 + np.arange(rows)) * step
@@ -163,7 +190,7 @@ def leaf_blob(heights: np.ndarray, normals: np.ndarray, weights: np.ndarray, x0:
     rec[:, :, 4] = corner[1:, 1:]
     splat = rec.reshape(-1, 5 * 16)
     layermap = bytes(used + [0xFF] * (SLOTS - len(used)))
-    flags = mesh_flags(used, layers)
+    flags = mesh_flags(used)
     mn = verts[:, :3].min(0)
     mx = verts[:, :3].max(0)
     box = fmb.aabb_from_minmax([float(v) for v in mn], [float(v) for v in mx])
@@ -175,7 +202,7 @@ def leaf_blob(heights: np.ndarray, normals: np.ndarray, weights: np.ndarray, x0:
     out = bytearray()
     out += struct.pack('<I6fIIiIi', 1, *box, ntri, len(verts), v_at, 1, base)
     mesh = struct.pack('<IIi2f2I2f2I2I2i', len(used), len(idx), idx_at - base, step, step, nc, nr,
-                       x0 + c0 * step, z0 + r0 * step, flags[0], flags[1], nr * nc, 1, w_at - base, lm_at - base)
+                       x0 + c0 * step, z0 + r0 * step, flags, 0, nr * nc, 1, w_at - base, lm_at - base)
     assert len(mesh) == MESH_SIZE, len(mesh)
     out += mesh
     out += idx.tobytes()
@@ -201,6 +228,11 @@ def layer_table(layers: list[Layer]) -> tuple[bytes, list[float]]:
     dwords), three unused axis pairs -1, paint mode 0, colour slice, -1, -1, multiplier slice, -1, -1, normal slice,
     -1, -1, the 6.0 every stock layer has, 1.0 x 3 (as the single layer pieces). An orientation: rotation 90 degrees
     about x (the xz plane), the tile size in metres on all axes, no offset."""
+    for layer in layers:
+        if layer.color < 0 or layer.multip < 0 or layer.normal < 0:
+            raise ValueError('FMB primary colour, multiplier slice and normal slice must be nonnegative')
+        if not all(math.isfinite(tile) and tile > 0 for tile in (layer.tile_color, layer.tile_multip)):
+            raise ValueError('FMB texture tile sizes must be positive and finite')
     tiles: list[float] = []
     for l in layers:
         for t in (l.tile_color, l.tile_multip if l.multip >= 0 else l.tile_color):
@@ -287,6 +319,11 @@ def build(donor: bytes, heights: np.ndarray, weights: np.ndarray, x0: float, z0:
 
     emit(0, ny, 0, nx)
     count = len(chunks)
+    counts = [len(b[1]) for b in blobs.values()]
+    for key, (blob, used, lo) in blobs.items():      # each leaf's shader record (mesh +0x28), now that all are known
+        b = bytearray(blob)
+        struct.pack_into('<I', b, 0x30 + SHADER_AT, shader_index(counts, len(used)))
+        blobs[key] = (bytes(b), used, lo)
     streams = {key: cmpl_fast(b[0]) for key, b in blobs.items()}
     pieces: list[bytes] = []
     for kind, key, ls, rs, mn, mx in chunks:
@@ -308,7 +345,6 @@ def build(donor: bytes, heights: np.ndarray, weights: np.ndarray, x0: float, z0:
         body += bytes(_aligned(len(body)) - len(body))
     tail = pos + len(body)
     t1, _ = layer_table(layers)
-    counts = [len(b[1]) for b in blobs.values()]
     t4 = shader_table(counts)
     t2 = donor[struct.unpack_from('<I', donor, 0x14)[0]:struct.unpack_from('<I', donor, 0x18)[0]]
     t3 = donor[struct.unpack_from('<I', donor, 0x18)[0]:struct.unpack_from('<I', donor, 0x20)[0]]

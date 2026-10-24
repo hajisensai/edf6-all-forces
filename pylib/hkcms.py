@@ -26,13 +26,13 @@ inner lane's box is the union of its child node's lanes (data = child node), a l
 """
 from __future__ import annotations
 
-import math
 import struct
 from dataclasses import dataclass
 from typing import Callable
 
 import numpy as np
 
+import hkshape
 from hktag import Tag
 
 Q21 = (1 << 21) - 1
@@ -61,32 +61,9 @@ def _put_aabb(b: bytearray, at: int, box: np.ndarray) -> None:
     struct.pack_into('<8f', b, at, lo[0], lo[1], lo[2], w_lo, hi[0], hi[1], hi[2], w_hi)
 
 
-def decode_box(parent: np.ndarray, xyz: bytes) -> np.ndarray:
-    ext = parent[1] - parent[0]
-    a = np.array([c >> 4 for c in xyz], dtype=np.float64)
-    c = np.array([c & 15 for c in xyz], dtype=np.float64)
-    return np.array([parent[0] + a * a / 226.0 * ext, parent[1] - c * c / 226.0 * ext])
-
-
-def encode_box(parent: np.ndarray, box: np.ndarray, margin: float = 1e-3) -> bytes:
-    """The tightest code whose decoded box still contains `box` grown by `margin` (never smaller)."""
-    box = np.array([box[0] - margin, box[1] + margin])
-    out = []
-    ext = parent[1] - parent[0]
-    for k in range(3):
-        if ext[k] <= 0:
-            out.append(0)
-            continue
-        lo = max(0.0, (box[0][k] - parent[0][k]) / ext[k] * 226.0)
-        hi = max(0.0, (parent[1][k] - box[1][k]) / ext[k] * 226.0)
-        a = min(15, int(math.floor(math.sqrt(lo))))
-        c = min(15, int(math.floor(math.sqrt(hi))))
-        while a and parent[0][k] + a * a / 226.0 * ext[k] > box[0][k]:
-            a -= 1
-        while c and parent[1][k] - c * c / 226.0 * ext[k] < box[1][k]:
-            c -= 1
-        out.append(a << 4 | c)
-    return bytes(out)
+# the 4-byte AABB codec: one implementation, pylib/hkshape.py's
+decode_box = hkshape.decode_box
+encode_box = hkshape.encode_box
 
 
 @dataclass

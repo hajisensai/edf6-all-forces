@@ -282,6 +282,36 @@ void NamesAndTokens() {
         else std::printf("  accepted bad token %s\n",s);
     }
     Expect(refused==static_cast<int>(std::size(badTokens)),"every malformed token is refused");
+
+    // Backpack weapons (npc_pack_table.h; docs/npc-backpack-re.md): a soldier's pack in its name and its token.
+    int packs=0,fits=0;
+    for(int k=0;k<kSupportWeaponCount;++k)for(const auto& p:kPackWeapons)for(int leader=0;leader<2;++leader) {
+        SupportLook look;look.pack=p.code;if(leader)look.primary=0x1E3A8A;
+        VariantRef r;r.sub=static_cast<std::uint8_t>(k);r.leader=leader!=0;r.bits=LookVariant(look);
+        wchar_t file[96];VariantRef back;VariantRef fromToken;
+        const bool fit=PackFits(p.code,SupportSoldierClass(static_cast<SupportWeapon>(k)));
+        fits+=fit;
+        const bool named=VariantFileOf(r,file,96)>0;
+        if(fit==(named && ParseVariantFile(file,&back) && back==r && TokenOf(r,t,sizeof(t)) && ParseToken(t,std::strlen(t),&fromToken) &&
+                 fromToken==r))++packs;
+        else std::printf("  pack round trip wrong: kind %d pack %d\n",k,p.code);
+    }
+    Expect(packs==kSupportWeaponCount*kPackWeaponCount*2 && fits==(5*45+5*29)*2,
+           "a pack its class carries round-trips name and token; one it cannot carry names no file");
+    SupportLook grenade;grenade.pack=1;
+    VariantRef g;g.sub=static_cast<std::uint8_t>(SupportWeapon::rifle);g.bits=LookVariant(grenade);
+    TokenOf(g,t,sizeof(t));
+    Expect(!std::strcmp(t,"aXX+01") && Name(g)==L"EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO","doc example: a rifle with an MG11");
+    const wchar_t* badPackNames[]={L"EDF6VC_NPC_RIFLE_X_X_AWEAPON261.SGO",L"EDF6VC_NPC_RIFLE_X_X_PWEAPON216.SGO",
+        L"EDF6VC_NPC_CANNON_X_X_AHANDGRENADE01.SGO",L"EDF6VC_NPC_RIFLE_X_X_.SGO",L"EDF6VC_NPC_RIFLE_X_X_ahandgrenade01.SGO",
+        L"EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01_AHANDGRENADE01.SGO"};
+    refused=0;
+    for(const wchar_t* n:badPackNames)if(!ParseVariantFile(n,nullptr))++refused;
+    Expect(refused==static_cast<int>(std::size(badPackNames)),"a pack its kind cannot carry, a left-out one, a malformed one: refused");
+    const char* badPackTokens[]={"aXX+00","aXX+4B","aXX+3B","aXX+1","aXX+011","aXX-01","KXX+01","aXX+0g"};
+    refused=0;
+    for(const char* s:badPackTokens)if(!ParseToken(s,std::strlen(s),nullptr))++refused;
+    Expect(refused==static_cast<int>(std::size(badPackTokens)),"a token with no / an unknown / a misfit pack: refused");
 }
 
 VariantSet BigSet(int soldiers) {
@@ -464,8 +494,37 @@ void Rooms() {
     Expect(lobby.member[1].values.empty(),"the client's keys withdrawn");
     lobby.current=0;host.engine.Leave(&kFakeApi);
     Expect(lobby.member[0].values.empty(),"the host's keys withdrawn");
-    Expect(keysSeen.size()<=5,"at most five extension keys (Coop allows 16 published a process)");
+    Expect(keysSeen.size()<=kListParts+2,"the list, readiness and pack marker fit Coop's 16-key limit");
     Expect(lobby.refused==0,"Coop never refused a key or value");
+}
+
+void BackpackCompatibility() {
+    ResetLobby(3);
+    static Machine host,client;host=Machine{};client=Machine{};
+    const std::wstring complete=L"EDF6VC_NPC_RIFLE_1E3A8A_X_AHANDGRENADE01.SGO",
+                       compatible=L"EDF6VC_NPC_RIFLE_1E3A8A_X.SGO";
+    host.config={complete,compatible,L"EDF6VC_LO_TANK_4000000000000C81.SGO"};host.files=host.config;
+    Tick(host,0,1000);Tick(client,1,1000);
+    const char* list=ValueOf(0,kKeyList);
+    Expect(ValueOf(0,kKeyPacks) && ValueOf(1,kKeyPacks) && list && !std::strchr(list,'+'),
+           "an older member without the pack marker: every published token uses the old grammar");
+    Expect(client.pending==std::vector<std::wstring>({compatible,L"EDF6VC_LO_TANK_4000000000000C81.SGO"}),
+           "the compatible list still generates the soldier's colours and the vehicle");
+    client.Finish();client.pending.clear();Tick(client,1,2000);
+    Expect(client.engine.HasHostList() && client.engine.HostList().count==2 && client.engine.Now().own==Ready::ready,
+           "after generation clears pending, the validated compatible host list retains mission preloads");
+    lobby.member[2].present=false;
+    Tick(host,0,3000);Tick(client,1,3000);
+    list=ValueOf(0,kKeyList);
+    Expect(list && std::strchr(list,'+') && host.engine.Target().count==3 && client.engine.HostList().count==3,
+           "every remaining member reads packs: the full list adds the backpack resource");
+    Expect(client.pending==std::vector<std::wstring>({complete}),"only the newly usable pack needs generating");
+    client.Finish();Tick(client,1,9000);
+    lobby.member[2].present=true;Tick(host,0,10000);Tick(client,1,10000);
+    Expect(!std::strchr(ValueOf(0,kKeyList),'+') && client.engine.HostList().count==2 && client.engine.Now().own==Ready::ready,
+           "an older member joins: downgrade to its readable list without losing the generated colours");
+    lobby.current=0;host.engine.Leave(&kFakeApi);
+    Expect(!ValueOf(0,kKeyPacks),"leaving withdraws the pack capability marker too");
 }
 
 void LongList() {
@@ -671,6 +730,7 @@ int main() {
     ListCoding();
     HaveAndPlan();
     Rooms();
+    BackpackCompatibility();
     LongList();
     MissionList();
     Budget();

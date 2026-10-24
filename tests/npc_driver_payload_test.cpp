@@ -6,17 +6,25 @@ namespace crew {
 namespace {
 int fired=0,lastSeat=-1;
 const void* aimedWeapon=nullptr;
-unsigned char weapon[0x1600]{},holder[0x80]{};
-unsigned char* holders[1]={holder};
+unsigned char weapon[0x1600]{},holder[0x80]{},secondaryWeapon[0x1600]{},secondaryHolder[0x80]{};
+unsigned char* holders[2]={holder,secondaryHolder};
+bool primaryNativeFire=true,secondaryNativeFire=true;
+int primaryCalls=0,secondaryCalls=0;
 void __fastcall GunFireRec(void* v,int seat,const void*) {
     ++fired;lastSeat=seat;
     auto* s=SeatAt(static_cast<unsigned char*>(v),static_cast<unsigned>(seat));
     const auto current=At<unsigned char**>(s,kSeatWeapons);
     aimedWeapon=current ? At<void*>(current[0],kHolderWeapon) : nullptr;
-    Put<float>(s,0x2D0,0.25f);Put<float>(s,0x2D4,-0.5f);Put<float>(s,0x2E4,1.0f);
+    const bool secondary=aimedWeapon==secondaryWeapon;
+    if(secondary)++secondaryCalls;else ++primaryCalls;
+    Put<float>(s,0x2D0,secondary ? 0.75f : 0.25f);Put<float>(s,0x2D4,secondary ? -0.9f : -0.5f);
+    // The real native function writes 1 only on success. Failure leaves the old
+    // latch untouched, so an independent evaluation must begin with a zero intent.
+    if(secondary ? secondaryNativeFire : primaryNativeFire)Put<float>(s,0x2E4,1.0f);
 }
 void SetupGunner(bool dummy,bool remote=false) {
     Reset();fired=0;lastSeat=-1;chosenGunnerWeapon=nullptr;chosenGunnerFire=PayloadFire::primary;
+    chosenSecondaryWeapon=nullptr;lastIndependentWeapon=nullptr;independentPulls=0;primaryCalls=secondaryCalls=0;primaryNativeFire=secondaryNativeFire=true;
     sessionOn=true;host=true;
     Put<void*>(vehicle,0,image+0x1000);
     Put<void*>(image+0x1000,kSlotSeatFire*8,image+kSeatFire);
@@ -40,12 +48,17 @@ void __fastcall DriverRec(void* v,int seat,const void* target) {
     ++driverCalls;driverTarget=target;GunFireRec(v,seat,target);
 }
 void SetupDriver() {
-    SetupGunner(false);ResetDriverPayload();driverCalls=0;driverTarget=nullptr;suppressGunnerChoice=false;
+    SetupGunner(false);ResetDriverPayload();nativePayloadFixture=false;driverCalls=0;driverTarget=nullptr;suppressGunnerChoice=false;
     auto from=SeatAt(vehicle,1),to=SeatAt(vehicle,0);
     std::memcpy(to,from,edf::kSeatStride);std::memset(from,0,edf::kSeatStride);
     Put<float>(human,0x2F8,100);Put<float>(other,kPosition+8,20);
     Put<float>(to,0x2C0,0.4f);Put<float>(to,0x2C4,-0.8f);
     driverPayloadReady=true;
+}
+void AttachIndependentSecondary() {
+    Put<void*>(secondaryHolder,kHolderWeapon,secondaryWeapon);
+    Put<std::uint64_t>(SeatAt(vehicle,0),kSeatWeaponCount,2);
+    chosenSecondaryWeapon=secondaryWeapon;
 }
 }
 int main() {
@@ -89,6 +102,39 @@ int main() {
     Expect(driverCalls==1 && At<float>(SeatAt(vehicle,0),0x2E0)==0,"remote driver copy cannot choose or redirect locally");
     SetupDriver();Put<void*>(SeatAt(vehicle,0),kSeatRiderCtrl,nullptr);hooked(vehicle,0,other);
     Expect(driverCalls==1 && driverWrites.empty(),"ordinary empty vehicle remains original dispatch with no fabricated crew state");
+    SetupDriver();config.stockStores=false;nativePayloadFixture=true;chosenGunnerFire=PayloadFire::secondary;hooked(vehicle,0,other);
+    Expect(driverCalls==1 && At<float>(SeatAt(vehicle,0),0x2E4)==0 && At<float>(SeatAt(vehicle,0),0x2E0)==1 && !driverWrites.empty(),
+           "native alternate ammunition still plans and steers its chosen belt with optional stores disabled");
+    SetupDriver();config.stockStores=false;chosenGunnerFire=PayloadFire::secondary;hooked(vehicle,0,other);
+    Expect(driverCalls==1 && At<float>(SeatAt(vehicle,0),0x2E4)==1 && At<float>(SeatAt(vehicle,0),0x2E0)==0 && driverWrites.empty(),
+           "ordinary native weapons keep original dispatch when optional stores are disabled");
+    SetupDriver();AttachIndependentSecondary();hooked(vehicle,0,other);
+    Expect(driverCalls==2 && primaryCalls==1 && secondaryCalls==1 && independentPulls==1 && lastIndependentWeapon==secondaryWeapon &&
+           At<float>(SeatAt(vehicle,0),0x2E4)==1 && At<float>(SeatAt(vehicle,0),0x2E0)==1,
+           "independent missile receives its own native lock/safety evaluation while both fire intents remain held");
+    Expect(At<float>(SeatAt(vehicle,0),0x2D0)==0.25f && At<float>(SeatAt(vehicle,0),0x2D4)==-0.5f &&
+           At<void*>(SeatAt(vehicle,0),kSeatWeapons)==holders,
+           "two native evaluations restore the real holder array and keep the usable cannon's turret axes");
+    SetupDriver();AttachIndependentSecondary();secondaryNativeFire=false;hooked(vehicle,0,other);
+    Expect(primaryCalls==1 && secondaryCalls==1 && independentPulls==0 && At<float>(SeatAt(vehicle,0),0x2E4)==1 &&
+           At<float>(SeatAt(vehicle,0),0x2E0)==0,"unlocked or unsafe missile never borrows the cannon's successful fire intent");
+    SetupDriver();AttachIndependentSecondary();primaryNativeFire=false;hooked(vehicle,0,other);
+    Expect(independentPulls==1 && At<float>(SeatAt(vehicle,0),0x2E4)==0 && At<float>(SeatAt(vehicle,0),0x2E0)==1,
+           "native missile approval cannot turn on a cannon whose separate native safety gate refused fire");
+    SetupDriver();AttachIndependentSecondary();suppressGunnerChoice=true;hooked(vehicle,0,other);
+    Expect(primaryCalls==1 && secondaryCalls==1 && independentPulls==1 && At<float>(SeatAt(vehicle,0),0x2E4)==0 &&
+           At<float>(SeatAt(vehicle,0),0x2E0)==1 && At<float>(SeatAt(vehicle,0),0x2D0)==0.75f &&
+           At<float>(SeatAt(vehicle,0),0x2D4)==-0.9f,"missile still aims and fires when no cannon is loaded or within reach");
+    SetupDriver();AttachIndependentSecondary();hooked(vehicle,0,other);hooked(vehicle,0,nullptr);
+    Expect(primaryCalls==2 && secondaryCalls==1 && independentPulls==1 && At<float>(SeatAt(vehicle,0),0x2E4)==0 &&
+           At<float>(SeatAt(vehicle,0),0x2E0)==0,"target loss clears both intents without evaluating or pulling the old missile again");
+    SetupDriver();AttachIndependentSecondary();config.stockStores=false;nativePayloadFixture=true;hooked(vehicle,0,other);
+    Expect(secondaryCalls==1 && independentPulls==1 && At<float>(SeatAt(vehicle,0),0x2E4)==1,
+           "intrinsic independent secondary and cannon both work with optional stock stores disabled");
+    SetupDriver();AttachIndependentSecondary();Put<std::uint16_t>(human,0x128,1);hooked(vehicle,0,other);
+    Expect(driverCalls==1 && secondaryCalls==0 && independentPulls==0,"remote driver's native dispatch never evaluates or fires the local independent missile");
+    SetupDriver();AttachIndependentSecondary();human[edf::kHumanPlayer]=1;Put<void*>(human,edf::kHumanPad,human);hooked(vehicle,0,other);
+    Expect(driverCalls==1 && secondaryCalls==0 && independentPulls==0,"player takeover never receives the NPC independent missile decision");
     ResetDriverPayload();VirtualFree(image,0,MEM_RELEASE);
     std::printf("npc driver payload: %d failures\n",failures);return failures?1:0;
 }

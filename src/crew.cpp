@@ -20,6 +20,11 @@
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
 #include "crew.h"
+#include "pvp.h"
+#include "enemy_control.h"
+#include "enemy_control_net.h"
+#include "thermal.h"
+#include "vehicle_look.h"
 #include "aim_line_want.h"
 #include "boarding_entrance.h"
 #include "mission_crew.h"
@@ -27,6 +32,9 @@
 #include "body506.h"
 #include "game_clock.h"
 #include "game_frame.h"
+#include "gravity.h"
+#include "gravity_net.h"
+#include "floatgun.h"
 #include "edf/host.h"
 #include "heli.h"
 #include "layout.h"
@@ -151,6 +159,7 @@ struct State {
     ULONGLONG emptySince,playerAt,bumpedAt,crewedAt,loggedAt,seen;
     std::int32_t ownTeam;   // the vehicle's team before we crewed it (valid when crewedAt != 0)
     HiddenLine lines[kLinesPerVehicle];
+    bool linesFullLogged;   // SetLine found no room once for this vehicle: said once, not every frame
 };
 // Every live vehicle runs its input every frame (seen); one not seen for kStaleMs is gone.
 constexpr int kMaxStates=128;
@@ -267,14 +276,22 @@ bool EnsurePoints(unsigned char* line,std::int32_t segments,const float* at) noe
 // What a seat's lines get this frame: aim_line_want.h Want.
 using aimline::LineWant;
 
-// Hides the line (its count kept in the vehicle's state; with no room left the line stays as it is), or gives back
-// what was taken (its point buffer first: EnsurePoints).
+// Hides the line (its count kept in the vehicle's state; with no room left the line stays as it is, said once per
+// vehicle: AimLines walks up to 16 seats x 16 weapons, more than kLinesPerVehicle), or gives back what was taken (its
+// point buffer first: EnsurePoints). A line is only ever zeroed with its count kept, so none is lost for good.
 void SetLine(State& st,unsigned char* line,LineWant want,const float* at) noexcept {
     const auto segments=At<std::int32_t>(line,kAimLineSegments);
     HiddenLine* h=HiddenOf(st,line);
     if(want==LineWant::hide && segments>0) {
         if(!h)h=HiddenOf(st,nullptr);
-        if(!h)return;
+        if(!h) {
+            if(!st.linesFullLogged) {
+                st.linesFullLogged=true;
+                Log("AIMLINE v=%p: %d lines already hidden, the room for this vehicle; line=%p and further ones left showing",
+                    st.ref.obj,kLinesPerVehicle,line);
+            }
+            return;
+        }
         *h=HiddenLine{line,segments};
         Put<std::int32_t>(line,kAimLineSegments,0);
     } else if(want==LineWant::show && h) {
@@ -437,6 +454,13 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
     const FindSeatFn originalFindSeat=cls>=0 && originalFindSeat_[cls] ? originalFindSeat_[cls] : reinterpret_cast<FindSeatFn>(image+kFindSeat);
     // The boarding gun's press (boarding.cpp): the vehicle its round hit, no other the visitor comes to first.
     if(const void* only=BoardingOnly(); only && only!=vehicle)return nullptr;
+    // A Dreadnought's hangars (dreadnought_hangar.inc HangarBoard): the local player standing over a fitted one takes a
+    // fighter of it out through its bay, no seat of the ship's (the user's choice, 2026-10-24).
+    if(Cfg().enabled) {
+        bool hangar=false;
+        __try { hangar=DreadnoughtHangarBoard(static_cast<unsigned char*>(vehicle),static_cast<unsigned char*>(human)); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        if(hangar)return nullptr;
+    }
     // The sidecar motorcycle's sidecar (sidecar.cpp): the player standing nearer it than the saddle takes it, no seat.
     if(Cfg().enabled) {
         bool sidecar=false;
@@ -536,18 +560,52 @@ float Distance2(const unsigned char* vehicle,const float* pos) noexcept {
 
 // TestBoardVehicle (tests only, tests/autopilot): kTestBoardMs after the first vehicle of that class is seen (the player
 // has landed), the player on foot is put into it once a mission, as the boarding gun puts them (BoardingRequest).
+// A request is made only while the board button can act (not BoardButtonBlocked) and none is underway; one that ends
+// with the player still on foot is made again, up to kTestBoardTries. Until 2026-10-21 it was made once, whenever the
+// time came: in the test range the soldier is busy (+0x5D0 bit 2, act 0x29E) for 10 s at a time, the boarding's
+// kTryMs of presses ran out inside it ("no seat of 1 taken in 90 presses ... +0x5D0=0000029e") and two background runs
+// in three never boarded (docs/feedback-2026-10-21-attitude-indicator.md).
 constexpr ULONGLONG kTestBoardMs=6000;
+constexpr int kTestBoardTries=8;
 bool testBoarded=false;
+int testBoardTries=0;
 ULONGLONG testBoardSeen=0;
+bool TestBoardMatches(const unsigned char* vehicle,int cls,const char* want) noexcept {
+    // Several unrelated models (stock heli, fighters, Sazabi) share 506_Helicopter. An optional @bone filter makes
+    // a background acceptance run select the intended model instead of whichever object updates first.
+    const char* separator=std::strchr(want,'@');
+    if(!separator)return std::strstr(kClasses[cls].name,want)!=nullptr;
+    char className[32]{};
+    const auto length=static_cast<std::size_t>(separator-want);
+    if(!length || length>=sizeof(className) || !separator[1])return false;
+    std::memcpy(className,want,length);
+    if(!std::strstr(kClasses[cls].name,className))return false;
+    const auto inst=vehicle+0xEE0;
+    if(!Readable(inst,0x24))return false;
+    const auto n=At<std::int32_t>(inst,0x20);
+    const auto bones=At<const unsigned char*>(inst,0x10);
+    if(n<=0 || n>256 || !Readable(bones,static_cast<std::size_t>(n)*0x110))return false;
+    wchar_t wanted[32]{};
+    std::size_t size=0;
+    for(const char* p=separator+1;*p && size<31;++p)wanted[size++]=static_cast<unsigned char>(*p);
+    for(int i=0;i<n;++i) {
+        const auto name=At<const wchar_t*>(bones+static_cast<std::size_t>(i)*0x110,0);
+        if(name && Readable(name,(size+1)*sizeof(wchar_t)) && std::wcscmp(name,wanted)==0)return true;
+    }
+    return false;
+}
 void TestBoard(unsigned char* vehicle,int cls) noexcept {
     const char* want=Cfg().testBoardVehicle;
-    if(!want[0] || testBoarded || !std::strstr(kClasses[cls].name,want))return;
+    if(!want[0] || testBoarded || !TestBoardMatches(vehicle,cls,want))return;
     const ULONGLONG ms=GameMs();
     if(!testBoardSeen)testBoardSeen=ms;
     unsigned char* const human=PlayerHuman();
-    if(ms-testBoardSeen<kTestBoardMs || !human || !HumanOnFoot(human))return;
-    testBoarded=true;
-    Log("TESTBOARD v=%p %s: the player put into it",vehicle,kClasses[cls].name);
+    if(ms-testBoardSeen<kTestBoardMs || !human)return;
+    if(!HumanOnFoot(human)){testBoarded=true;Log("TESTBOARD: the player is aboard (request %d)",testBoardTries);return;}
+    if(BoardingUnderway() || BoardButtonBlocked(human))return;
+    if(testBoardTries>=kTestBoardTries){testBoarded=true;Log("TESTBOARD: not aboard after %d requests, given up",testBoardTries);return;}
+    ++testBoardTries;
+    Log("TESTBOARD v=%p %s: the player put into it (request %d)",vehicle,kClasses[cls].name,testBoardTries);
     BoardingRequest(vehicle);
 }
 
@@ -584,7 +642,7 @@ void Crew(unsigned char* vehicle,int cls) noexcept {
     // A player jet waits for the player, and so does one of the plugin's aircraft the player holds (playerjet.cpp).
     // A sidecar passenger does not grant driver authority; an existing real driver is assigned separately.
     if(driver || !Cfg().autoCrew || IsPlayerJet(vehicle) || PlayerJetHolds(vehicle) || SidecarHoldsPlayer(vehicle) || IsPrimerVehicle(vehicle) ||
-       JetFliesItself(vehicle)){st.emptySince=0;return;}   // a drone of the plugin's: no one is ever seated in it
+       JetFliesItself(vehicle) || IsDreadnought(vehicle)){st.emptySince=0;return;}   // a drone of the plugin's: no one is ever seated in it; the Dreadnought waits for the player
     // Online, the host coordinates recruitment for registered vehicles. Real soldiers keep their native
     // network identities and announce boarding; each vehicle copy follows the resulting native authority.
     if(!OnlineMaySeatNpc(vehicle)){st.emptySince=0;return;}
@@ -628,10 +686,11 @@ void SlowLog(int cls,const void* v,LONGLONG stock,LONGLONG plugin) noexcept {
 // with how many so far) skips that step for that vehicle this frame, not every step after it.
 enum Step { kStepCrew, kStepAimLines, kStepJetReap, kStepHeliReap, kStepPlayerJet, kStepSub, kStepHeli, kStepGround, kStepHud,
             kStepJetSound, kStepLockSound, kStepRescue, kStepHudPublish, kStepJetSoundTick, kStepUnderground, kStepShield, kStepView, kStepDrill,
-            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepCount };
-const char* const kStepNames[kStepCount]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
+            kStepLauncher, kStepHeliSight, kStepNet, kStepHighCam, kStepStockHud, kStepWarn, kStepSeats, kStepPayload, kStepSidecar, kStepTurretCam, kStepRam, kStepStab, kStepVehicleSound, kStepEmc, kStepProteus, kStepBoarding, kStepNpcPost, kStepNpcGunners, kStepSazabi, kStepSightZoom, kStepDebugSpawn, kStepGravity, kStepPvp, kStepThermal, kStepEnemyControl, kStepUltimate, kStepMapQueue, kStepDreadnought, kStepCount };
+const char* const kStepNames[]={"crew","aim lines","jet reap","heli reap","player jet","carrier","heli","ground","hud see",
                                           "jet sound","lock sound","rescue","hud publish","jet sound tick","underground","shield","view","drill",
-                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn"};
+                                          "launcher","heli sight","net probe","high cam","stock hud","warn","seat switch","payload","sidecar","turret cam","ram","stabilizer","vehicle sound","emc","proteus","boarding","npc post","npc gunners","sazabi","sight zoom","debug spawn","gravity","pvp","thermal","enemy control","ultimate","map queue","dreadnought"};
+static_assert(sizeof(kStepNames)/sizeof(kStepNames[0])==kStepCount,"a name for every step, in the enum's order");
 constexpr ULONGLONG kFaultLogMs=10000;
 struct Faults { unsigned count; ULONGLONG loggedAt; } faults[kStepCount]{};
 
@@ -771,9 +830,11 @@ void PerfTick() noexcept {
     perf.at=t;perf.worst=perf.sum=0.0;perf.frames=perf.slow=0;
 }
 
-void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); }
+void ThermalTick() noexcept { const auto& c=Cfg();thermal::Tick(c.enabled && c.thermal,static_cast<unsigned>(c.thermalKey)); }
+void DebugSpawnTick() noexcept { DebugSpawnFrame(PlayerHuman()); Edf41Mother401DevTick(); }   // (the 401's dev enemy shooter: edf41mother401.cpp)
+void GravityTick() noexcept { gravity::Frame(); GravityGunTick(); gravity::net::Frame(); FloatGunTick(); }
 
-void FrameTick() noexcept {
+void SharedFrameTick() noexcept {
     if(tickFrame==GameFrame())return;
     tickFrame=GameFrame();
     PerfTick();
@@ -781,6 +842,10 @@ void FrameTick() noexcept {
     GuardedTick(kStepUnderground,&ExitGroundTick);   // off a vehicle: on the floor, not in it (exit_ground.h)
     GuardedTick(kStepRescue,&RescueTick);
     GuardedTick(kStepWarn,&WarnTick);   // before the HUD's publish: it carries what this decides
+    GuardedTick(kStepThermal,&ThermalTick);
+    GuardedTick(kStepPvp,&PvpFrame);
+    GuardedTick(kStepEnemyControl,&EnemyControlFrame);
+    GuardedTick(kStepEnemyControl,&EnemyControlNetworkFrame);
     GuardedTick(kStepHudPublish,&HudPublish);
     GuardedTick(kStepUnderground,&BigWorldProbe);
     GuardedTick(kStepUnderground,&PlayAreaTick);   // the walls where the map's ground ends (playarea.cpp)
@@ -789,10 +854,14 @@ void FrameTick() noexcept {
     GuardedTick(kStepView,&ViewTick);
     GuardedTick(kStepBoarding,&BoardingTick);
     GuardedTick(kStepDebugSpawn,&DebugSpawnTick);   // riding: the player's own frame may not come (off by default)
+    GuardedTick(kStepUltimate,&UltimateTick);       // the ultimate strike's show (ultimate.cpp), on with the plugin off too
+    GuardedTick(kStepGravity,&GravityTick);         // what is thrown: its impacts and contacts (gravity.cpp)
+    GuardedTick(kStepMapQueue,&MapCommandQueueTick);  // the Shift-queued points of this machine's units (mapcmd.cpp)
 }
 
 template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,void* a3,void* a4) {
     LARGE_INTEGER t0,t1,t2;QueryPerformanceCounter(&t0);
+    VehicleLookInput observation(static_cast<unsigned char*>(vehicle));
     // The drill tank's trigger is its drill's: taken off the seat before the stock input reads it (drill.cpp).
     if(Cfg().enabled)Guarded(kStepDrill,&DrillInput,static_cast<unsigned char*>(vehicle));
     // The EMC's trigger is its charge's (emc.cpp): the same, the stock burst never starts.
@@ -801,6 +870,8 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     if(Cfg().enabled)Guarded(kStepNpcPost,&NpcPostInput,static_cast<unsigned char*>(vehicle));
     // The NPC soldiers in its gunner seats aim and fire, before the stock input reads the seats (npcai.cpp).
     Guarded(kStepNpcGunners,&NpcGunnersInput,static_cast<unsigned char*>(vehicle)); // also releases our last inputs when disabled
+    // A Dreadnought's local rider's aim stick as the observation reads it, before the stock input (dreadnought_turrets.inc).
+    if(Cfg().enabled)Guarded(kStepDreadnought,&DreadnoughtInput,static_cast<unsigned char*>(vehicle));
     nextInput[I](vehicle,hasInput,a3,a4);
     QueryPerformanceCounter(&t1);
     ReloadConfigIfChanged();   // before the Enabled test: Enabled=0 must be able to come back on
@@ -828,6 +899,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHeliReap,&HeliReapStep,v);
     Guarded(kStepPlayerJet,&PlayerJetFrame,v);
     Guarded(kStepSazabi,&SazabiFrame,v);
+    Guarded(kStepDreadnought,&DreadnoughtFrame,v);
     Guarded(kStepSub,&SubStep,v);
     Guarded(kStepHeli,&HeliStep,v);
     Guarded(kStepHeli,&HeliCueStep,v);
@@ -838,6 +910,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepLauncher,&LauncherFrame,v);
     Guarded(kStepPayload,&PayloadFrame,v);       // before the sight: it marks the store the secondary fires
+    Guarded(kStepPayload,&TwinBarrelFrame,v);    // after every pull of this frame (stock, store, NPC): twin barrels in turn
     Guarded(kStepHeliSight,&HeliSightFrame,v);   // after AimLines: the sight reads which lines are hidden
     Guarded(kStepStockHud,&StockHudFrame,v);
     Guarded(kStepJetSound,&JetSound,v);
@@ -867,6 +940,10 @@ void InstallInputs() noexcept {
     Log("HOOK inputs=%d",hooked);
 }
 }  // namespace
+
+// Both the local Soldier pre-update and vehicle inputs use this one scene-clock boundary. In a mission with no
+// vehicles, the local player still advances PVP, thermal cleanup, HUD publication and support; repeated actors do not.
+void FrameTick() noexcept { SharedFrameTick(); }
 
 // Not at load: another plugin (EDF6AutoTurret hooks 403/404/603) may patch the same input slots after us, and
 // ours must chain onto theirs. Once, from the first of the mission's start (mission.cpp), the on-foot prompt
@@ -986,7 +1063,7 @@ void ResetCrew() noexcept {
     for(auto& s:states)s=State{};
     fullLoggedAt=0;
     for(auto& p:doorLogged)p=nullptr;
-    testBoarded=false;testBoardSeen=0;
+    testBoarded=false;testBoardSeen=0;testBoardTries=0;
 }
 int VehicleClassOf(const void* object) noexcept { return ClassOf(object); }
 }  // namespace crew

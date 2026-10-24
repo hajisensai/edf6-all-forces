@@ -78,7 +78,7 @@ EDF5 武器 SGO 是 v0x102、类型化数值；EDF6 是 DSGO（数值全为 doub
 - 4.1 没有星级系统，伤害、弹数等都是普通数值；EDF6 同样接受（它自己 1833 个 `AmmoCount` 里 1066 个是标量，H），原样保留。
 - `name`（`[日, 英, 日]` 一个列表）拆成 `name.<lang>`；`Range` 去掉：827 把全部等于 `AmmoSpeed × AmmoAlive`（H），EDF5 起就由这两个字段算射程。
 - 补 EDF6 每把武器都有的 `AmmoDamageReduce [1, 1]`（无距离衰减，4.1 本来就没有；EDF6 1564 把里 1350 把是这个值）和 `ExtPrams [1]`（1486 把）。
-- `EnergyChargeRequire`：4.1 是一个数，EDF6 每把武器都是 `[曲线, 数值]`。写成 `[v, v]`：EDF6 包里有 5 把开发商自己转换的 4.1 武器（`HHELLSTORM01`、`HWEAPON112/118/123/127`），字段集合与 `weapon41` 的输出完全一致，`-1` 写成 `[-1, -1]`（H，`edf41_weapons_match_developers`）；飞翔兵武器 4.1 的数等于 EDF5 同名武器的曲线基值和数值（レイピア 25 / `[[25, …], 25]`）；曲线位置放普通数值即不随星级变化，和 EDF6 自己大量的标量曲线字段一样（M：飞翔兵能量的实际效果待实机）。
+- `EnergyChargeRequire`：4.1 是一个数，EDF6 每把武器都是 `[曲线, 数值]`。写成 `[v, v]`：EDF6 包里有 5 把开发商自己转换的 4.1 武器（`HHELLSTORM01`、`HWEAPON112/118/123/127`），字段集合与 `weapon41` 的输出完全一致，`-1` 写成 `[-1, -1]`（H，`edf41_weapons_match_developers`）；飞翔兵武器 4.1 的数等于 EDF5 同名武器的曲线基值和数值（レイピア 25 / `[[25, …], 25]`）；曲线位置放普通数值即不随星级变化，和 EDF6 自己大量的标量曲线字段一样。飞翔兵能量：EDF.dll 扣能量按 `EnergyChargeRequire[1] >= 0.0011` 决定、扣 `[0]`（标量直接取值），`[v, v]` 与原生同一路径（H，静态，`docs/stock-payload-re.md` §3「充能扣能量」；`edf41_wing_diver_energy` 核对 4.1 文本的消費エネルギー 与数值一致、`0.001` 的只有自带发电机的）；实机 A/B（`tests/autopilot/loadouts/wingdiver_e41_energy.ini` / `wingdiver_stock_energy.ini` + `--cmd "probe wdenergy"`）实测（2026-10-18）4.1 激光长枪与原生雷光蔓Ｙ３同样经飞翼 slot 31 扣能量（20 / 30.2，地面回充抵掉约一半，见该节表格，H）。
 - 那 5 把不用 EDF6 自带的文件：开发商给它们加了星级、改了数值，与 4.1 说明里的属性对不上；从 4.1 转换保证菜单数字与武器一致。
 - MAB 块、空副射击参数、`Weapon_Sub`、`AmmoDamageAttribute` 同 P1。
 
@@ -114,7 +114,7 @@ EDF5 武器 SGO 是 v0x102、类型化数值；EDF6 是 DSGO（数值全为 doub
 |---|---|---|
 | 一：EDF6 还有原类 | 蚁巢 AntHill301（14）、迪洛伊 Deiroi401 系列 5 个（25）、外星运输车 AlienTrailer401 系列 5 个（17）、欧米伽队士兵 AiArmySoldier_OMG（+队长，各 5）、巴尔姆 Vehicle501_FortressRobo（+_AI，各 1） | 4.1 的文件原样搬过来，只做格式转换：**本节，已完成转换** |
 | 二：类没了、有可借的壳 | 赫克托 Hector 全系（几十关）、UFO301/401（33）、运输船 Carrier301/401（30）、4.1 坦克 Vehicle301_tank_ai（13）、四足要塞（4）、巨龙（2） | 借 EDF6 相近类（UfoSmall507、UfoCarrier508、EDF6_Berserker_Large …）+ 模型补骨骼 / CAS 补契约 / 插件补行为：待做 |
-| 三：没有可借的壳 | 母舰 UfoMother301、地球吞噬者 UfoMother401 系列、UfoRobo | 要重写原生逻辑，暂不做 |
+| 三：没有可借的壳 | 母舰 UfoMother301、地球吞噬者 UfoMother401 系列、UfoRobo | 插件原生类（`src/edf41classes` 的工厂 + 克隆虚表，`docs/edf41-classes.md`），2026-10-15 都已做：UfoMother301（`src/edf41mother.cpp`，`docs/edf41-ufomother301.md`，M016 M110 M123 M130 M210 M603 + 任务包１ M993）；UfoMother401 船体 + 11 个部件类（`src/edf41mother401.cpp`，`docs/edf41-ufomother401.md`，15 个故事变体 + 任务包２ M809 / MP503，17 关）；UfoRobo（`src/edf41robo.cpp`，`docs/edf41-uforobo.md`，M007 M411 + M415 M416 M010） |
 
 **第一层的转换**：每个对象沿 SGO 里的 `app:/` 路径（含它引用的子 SGO）收集 EDF6 没有的文件；EDF6 有同路径文件的用 EDF6 的（所有档案都算：Root.cpk、ChunkNN、DX11）；4.1 自己也没有的不需要（4.1 引用的 `*_LIGHT.MRAB` 在它的任何档案里都没有，游戏照样跑）；没有扩展名的是目录前缀。各类文件：
 

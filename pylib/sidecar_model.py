@@ -34,11 +34,12 @@ of its own (a bone the vehicle's animation does not know is never posed on scree
 The collision (build_collision): the bike's chassis is the ragdoll's RagDollProxys.body compound (14 convex hulls, the
 proxy frame = the model frame less the body bone's bind, BODY_PROXY). One hull, FLOOR_HULL (the rear seat's top cover,
 overlapped by the hulls round it), is moved and scaled onto FLOOR, the slab of the tub's plan from its bottom up to
-its inner floor; the compound's bounding tree and box follow. The hull is turned half round its long axis on the way
+its inner floor (pylib/hkshape.py: the hull built again with its own mass properties); the compound's bounding tree,
+box and mass properties follow. The hull is turned half round its long axis on the way
 (x and y negated: a rotation, not a mirror): its flat bottom face becomes the slab's top, the floor the gunner stands
 on. The tub's walls are drawn only (one convex hull cannot hold a hollow; a wall a soldier stands between would
 squeeze their capsule, and the plugin holds them in the tub anyway: docs/sidecar-re.md §2). Nothing else in the file
-changes (sizes, items, the mass distributions: the bike weighs and balances as before).
+changes (the other hulls, the bodies, their mass distributions: the bike weighs and balances as before).
 """
 from __future__ import annotations
 
@@ -162,36 +163,10 @@ def half_width(z: float, inset: float = 0.0) -> float:
 
 # ------------------------------------------------------------------------------------------ primitives
 
-def _flip_outward(part: pm.Part, start: int, ref, outward: bool = True) -> None:  # noqa: ANN001 - point -> point
-    """Turn the triangles added since `start` so that most face away from (outward) or toward `ref(centroid)`: the
-    winding the stock meshes use (cross(b - a, c - a) along the face's normal, out of the solid)."""
-    P = np.array(part.pos)
-    T = np.array(part.tris[start:], dtype=np.int64)
-    if not len(T):
-        return
-    a, b, c = P[T[:, 0]], P[T[:, 1]], P[T[:, 2]]
-    n = np.cross(b - a, c - a)
-    cen = (a + b + c) / 3.0
-    away = cen - np.array([ref(x) for x in cen])
-    score = float(np.sign(np.einsum('ij,ij->i', n, away)).sum())
-    if (score < 0) == outward:
-        part.tris[start:] = [(t[0], t[2], t[1]) for t in part.tris[start:]]
-
-
-def _facing(part: pm.Part, tris: list[int], want: np.ndarray) -> None:
-    """Turn each of the triangles `tris` (indices into part.tris) so that its normal goes along `want`."""
-    for i in tris:
-        a, b, c = (np.asarray(part.pos[k]) for k in part.tris[i])
-        if float(np.dot(np.cross(b - a, c - a), want)) < 0.0:
-            t = part.tris[i]
-            part.tris[i] = (t[0], t[2], t[1])
-
-
-def _cap_ends(part: pm.Part, start: int, centres: tuple[int, int], ends: tuple[np.ndarray, np.ndarray]) -> None:
-    """The end caps among the triangles since `start` (those fanned round the cap centres `centres`) turned to face
-    out of the ends: along `ends` (the way out of the first end, the way out of the last)."""
-    for m, want in zip(centres, ends):
-        _facing(part, [i for i in range(start, len(part.tris)) if m in part.tris[i]], want)
+_flip_outward = pm.flip_outward
+_facing = pm.facing
+_cap_ends = pm.cap_ends
+_path_ref = pm.path_ref
 
 
 def _axis_ref(c: np.ndarray) -> np.ndarray:
@@ -199,42 +174,14 @@ def _axis_ref(c: np.ndarray) -> np.ndarray:
     return np.array([TUB_X, c[1], min(max(c[2], TUB_TAIL + 0.45), TUB_NOSE - 0.45)])
 
 
-def _path_ref(path: list[Vec3]):  # noqa: ANN202
-    """The nearest point of the polyline `path`."""
-    pts = [np.array(p, dtype=np.float64) for p in path]
-
-    def ref(c: np.ndarray) -> np.ndarray:
-        best, bd = pts[0], math.inf
-        for a, b in zip(pts, pts[1:]):
-            d = b - a
-            t = min(1.0, max(0.0, float(np.dot(c - a, d) / max(np.dot(d, d), 1e-12))))
-            q = a + d * t
-            dd = float(np.dot(c - q, c - q))
-            if dd < bd:
-                best, bd = q, dd
-        return best
-    return ref
-
-
 def hexahedron(part: pm.Part, corners: list[Vec3], skin: pm.Skin) -> None:
-    """A six-faced solid of 8 corners (0-3 the bottom ring, 4-7 the top ring over them), each face flat (its own 4
-    vertices), wound out of the solid."""
-    C = [np.array(p, dtype=np.float64) for p in corners]
-    centre = sum(C) / 8.0
-    for f in ((0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)):
-        start = len(part.tris)
-        q = [part.add(C[i], skin, uv) for i, uv in zip(f, ((0, 0), (1, 0), (1, 1), (0, 1)))]
-        part.tris += [(q[0], q[1], q[2]), (q[0], q[2], q[3])]
-        _flip_outward(part, start, lambda _c: centre)
+    """A six-faced solid of 8 corners, each face flat (its own 4 vertices), wound out of it (procmesh.flat_hexahedron)."""
+    pm.flat_hexahedron(part, corners, skin)
 
 
 def tube(part: pm.Part, path: list[Vec3], radius: float, skin: pm.Skin, segs: int = 10) -> None:
-    """procmesh.tube (capped) along `path`, wound out of it."""
-    start = len(part.tris)
-    pm.tube(part, path, [radius] * len(path), [skin] * len(path), segs)
-    _flip_outward(part, start, _path_ref(path))
-    P = [np.array(p, dtype=np.float64) for p in path]
-    _cap_ends(part, start, (len(part.pos) - 2, len(part.pos) - 1), (P[0] - P[1], P[-1] - P[-2]))
+    """procmesh.tube (capped) along `path`, wound out of it (procmesh.closed_tube)."""
+    pm.closed_tube(part, path, radius, skin, segs)
 
 
 # ------------------------------------------------------------------------------------------ the sidecar's parts
@@ -722,80 +669,89 @@ def check(arc: bytes, host_bones: list[str] | None = None, reach: float | None =
 # ------------------------------------------------------------------------------------------ the collision
 
 class _Shkt:
-    """The bike's ragdoll tagfile, the parts this edit reads and writes (offsets from pylib/hktag.py's type table)."""
+    """One body's compound of convex hulls in a ragdoll tagfile (pylib/hkfile.py's graph): read and written through
+    the blocks, bytes() writes the file."""
 
-    def __init__(self, data: bytes) -> None:
-        from hkcms import bodies
-        from hktag import Tag
-        self.buf = bytearray(data)
-        self.tag = t = Tag(bytes(data))
-        self.body = bodies(t)['RagDollProxys.body']
-        C = 'hknpCompoundShape'
-        typ, self.at, _ = t.item(self.body)
-        _req(typ == C, f'RagDollProxys.body is a {typ}')
-        _, self.inst_at, self.inst_n = t.item(t.u32(self.at + t.offset(C, 'instances')))
-        self.isize = t.size('hknpShapeInstance')
-        bvd = self.at + t.offset(C, 'boundingVolumeData')
-        self.simd = t.u32(bvd + t.offset('hknpCompoundShapeData', 'simdTree') + t.offset('hkcdSimdTree', 'nodes'))
-        _req(self.buf[bvd + t.offset('hknpCompoundShapeData', 'type')] == 2, 'the compound has no simd tree')
-        self.aabb_at = self.at + t.offset(C, 'aabb')
-        self.radius_at = self.at + t.offset(C, 'boundingRadius')
+    def __init__(self, data: bytes, body_name: str = 'RagDollProxys.body') -> None:
+        import hkfile
+        import hkshape
+        self.physics = hkfile.Physics.read(bytes(data))
+        self.compound = self.physics.body(body_name).shape
+        _req(self.compound is not None and self.compound.type.full_name == 'hknpCompoundShape',
+             f'{body_name} is a {self.compound}')
+        self.inst = hkshape.instance_array(self.compound)
+        self.inst_n = self.inst.count
+        _req(self.compound.value['boundingVolumeData']['type'].int() == 2, 'the compound has no simd tree')
+        self.simd = self.compound.value['boundingVolumeData']['simdTree']['nodes'].target
 
-    def instance(self, k: int) -> tuple[int, int]:
-        """(instance offset, its convex shape's offset)."""
-        t = self.tag
-        ia = self.inst_at + k * self.isize
-        typ, sat, _ = t.item(t.u32(ia + t.offset('hknpShapeInstance', 'shape')))
-        _req(typ == 'hknpConvexShape', f'instance {k} is a {typ}')
-        return ia, sat
+    def instance(self, k: int):  # noqa: ANN201 - (hkfile.Value, hkfile.Block)
+        """(the instance, its convex shape)."""
+        e = self.inst[k]
+        shape = e['shape'].target
+        _req(shape is not None and shape.type.full_name == 'hknpConvexShape', f'instance {k} is a {shape}')
+        return e, shape
 
     def identity(self, k: int) -> bool:
-        ia, _ = self.instance(k)
-        return struct.unpack_from('<7f', self.buf, ia) == (0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0) and \
-            struct.unpack_from('<3f', self.buf, ia + 32) == (1.0, 1.0, 1.0)
+        e, _ = self.instance(k)
+        return e['rotation'].vec(4) == (0.0, 0.0, 0.0, 1.0) and e['translation'].vec(3) == (0.0, 0.0, 0.0) and \
+            e['scale'].vec(3) == (1.0, 1.0, 1.0)
 
-    def hull(self, k: int) -> tuple[float, list[int], list[int]]:
-        """(convex radius, the vertices' and the planes' offsets)."""
-        t = self.tag
-        _, sat = self.instance(k)
-        H = sat + t.offset('hknpConvexShape', 'hull')
-        _, va, vn = t.item(t.u32(H + t.offset('hknpConvexHull', 'vertices')))
-        _, pa, pn = t.item(t.u32(H + t.offset('hknpConvexHull', 'planes')))
-        r = struct.unpack_from('<f', self.buf, sat + t.offset('hknpConvexShape', 'convexRadius'))[0]
-        return r, [va + 12 * j for j in range(vn)], [pa + 16 * j for j in range(pn)]
+    def radius(self, k: int) -> float:
+        return self.instance(k)[1].value['convexRadius'].f32()
+
+    def _hull(self, k: int, what: str):  # noqa: ANN202 - hkfile.Block
+        return self.instance(k)[1].value['hull'][what].target
 
     def vertices(self, k: int) -> list[Vec3]:
-        _, vs, _ = self.hull(k)
-        return [struct.unpack_from('<3f', self.buf, a) for a in vs]
+        v = self._hull(k, 'vertices')
+        return [struct.unpack_from('<3f', v.data, 12 * j) for j in range(v.count)]
 
     def planes(self, k: int) -> list[tuple[float, float, float, float]]:
-        _, _, ps = self.hull(k)
-        return [struct.unpack_from('<4f', self.buf, a) for a in ps]
+        p = self._hull(k, 'planes')
+        return [struct.unpack_from('<4f', p.data, 16 * j) for j in range(p.count)]
 
     def box(self, k: int) -> tuple[list[float], list[float]]:
-        """The instance's box as its tree leaf holds it: its hull's vertices' box grown by its convex radius."""
-        r = self.hull(k)[0]
-        V = self.vertices(k)
-        return [min(v[c] for v in V) - r for c in range(3)], [max(v[c] for v in V) + r for c in range(3)]
+        """The instance's box as its tree leaf holds it: its placed vertices' box grown by its convex radius
+        (pylib/hkshape.py instance_box)."""
+        import hkshape
+        lo, hi = hkshape.instance_box(hkshape.instances(self.compound)[k])      # type: ignore[misc]
+        return list(lo), list(hi)
+
+    def replace(self, k: int, matrix, offset, radius: float | None = None) -> None:  # noqa: ANN001
+        """Instance k's convex shape mapped p -> matrix p + offset (pylib/hkshape.py affine_convex: the hull built
+        again with its own mass properties; `radius` its convex radius, None: scaled with it)."""
+        import hkshape
+        e, shape = self.instance(k)
+        e['shape'].set_target(hkshape.affine_convex(self.physics.tf, shape, matrix, offset, radius=radius))
+
+    def refresh(self) -> None:
+        """The compound's derived data from its instances (aabb, bounding radius, simd tree) and its mass properties
+        their combination (pylib/hkshape.py)."""
+        import hkshape
+        parts = [(hkshape.read_mass(hkshape.mass_properties(sh)), q, t) for q, t, _, sh in
+                 hkshape.instances(self.compound)]
+        hkshape.write_mass(self.physics.tf, self.compound, hkshape.combine(parts), keep=self.compound)
+        hkshape.refresh_compound(self.physics.tf, self.compound)
+        self.simd = self.compound.value['boundingVolumeData']['simdTree']['nodes'].target
+
+    @property
+    def aabb(self) -> tuple[float, ...]:
+        """The compound's aabb as stored: min (4 floats), max (4 floats)."""
+        a = self.compound.value['aabb']
+        return a['min'].vec(4) + a['max'].vec(4)
+
+    @property
+    def bounding_radius(self) -> float:
+        return self.compound.value['boundingRadius'].f32()
 
     def leaves(self) -> dict[int, tuple[list[float], list[float]]]:
         """Every leaf lane of the simd tree: instance -> its box as stored."""
-        t = self.tag
-        _, at, n = t.item(self.simd)
-        N = 'hkcdSimdTree::Node'
-        size, o_data, o_leaf = t.size(N), t.offset(N, 'data'), t.offset(N, 'isLeaf')
-        out = {}
-        for k in range(n):
-            if not self.buf[at + size * k + o_leaf]:
-                continue
-            f = struct.unpack_from('<24f', self.buf, at + size * k)
-            data = struct.unpack_from('<4I', self.buf, at + size * k + o_data)
-            for lane in range(4):
-                lo = [f[0 + lane], f[8 + lane], f[16 + lane]]
-                hi = [f[4 + lane], f[12 + lane], f[20 + lane]]
-                if lo[0] <= hi[0]:
-                    out[data[lane]] = (lo, hi)
-        return out
+        import hkshape
+        return {data: (list(lo), list(hi)) for leaf, lanes in hkshape.simd_lanes(self.simd) if leaf
+                for lo, hi, data in lanes}
+
+    def bytes(self) -> bytes:
+        return self.physics.write()
 
 
 def floor_box() -> tuple[Vec3, Vec3]:
@@ -819,69 +775,23 @@ def hull_map(V: list[Vec3], radius: float) -> tuple[Vec3, Vec3]:
 
 def build_collision(game) -> tuple[bytes, dict]:  # noqa: ANN001 - rootcpk.Game
     """The bike's ragdoll with its body compound's FLOOR_HULL moved onto the floor slab (see the module doc): its
-    vertices mapped p -> p * scale + offset (a positive determinant: a turn and a stretch, no mirror), each plane
-    (n, d) of n.p + d = 0 rewritten exactly for the map (n' = n / scale, renormalised with d'), its tree leaf, the
-    tree's inner boxes, the compound's box and bounding radius grown to hold it."""
+    vertices mapped p -> p * scale + offset (a positive determinant: a turn and a stretch, no mirror), the hull built
+    again over them (pylib/hkshape.py: planes, faces, its own mass properties), its convex radius kept; the
+    compound's box, bounding radius, simd tree and mass properties follow from its instances."""
     s = _Shkt(game.read('OBJECT', HOST_RAGDOLL))
     _req(s.inst_n == 14, f'RagDollProxys.body has {s.inst_n} hulls')
     _req(all(s.identity(k) for k in range(s.inst_n)), 'a body hull with a transform of its own')
     stored = s.leaves()
     _req(sorted(stored) == list(range(s.inst_n)), f'tree leaves {sorted(stored)}')
-    radius, vs, ps = s.hull(FLOOR_HULL)
+    radius = s.radius(FLOOR_HULL)
     V = s.vertices(FLOOR_HULL)
     scale, off = hull_map(V, radius)
     _req(scale[0] * scale[1] * scale[2] > 0.0, 'the map mirrors the hull')
-    for a, v in zip(vs, V):
-        struct.pack_into('<3f', s.buf, a, *(v[c] * scale[c] + off[c] for c in range(3)))
-    for a in ps:
-        n0, n1, n2, d = struct.unpack_from('<4f', s.buf, a)
-        n = [n0 / scale[0], n1 / scale[1], n2 / scale[2]]
-        L = math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2])
-        d2 = d - (n[0] * off[0] + n[1] * off[1] + n[2] * off[2])
-        struct.pack_into('<4f', s.buf, a, n[0] / L, n[1] / L, n[2] / L, d2 / L)
-    _refresh_tree(s, FLOOR_HULL)
+    s.replace(FLOOR_HULL, [[scale[0], 0.0, 0.0], [0.0, scale[1], 0.0], [0.0, 0.0, scale[2]]], off, radius=radius)
+    s.refresh()
     lo, hi = s.box(FLOOR_HULL)
-    box = struct.unpack_from('<8f', s.buf, s.aabb_at)
-    struct.pack_into('<8f', s.buf, s.aabb_at, min(box[0], lo[0]), min(box[1], lo[1]), min(box[2], lo[2]), box[3],
-                     max(box[4], hi[0]), max(box[5], hi[1]), max(box[6], hi[2]), box[7])
-    far = max(math.sqrt(sum(c * c for c in v)) for v in s.vertices(FLOOR_HULL)) + radius
-    old = struct.unpack_from('<f', s.buf, s.radius_at)[0]
-    struct.pack_into('<f', s.buf, s.radius_at, max(old, far))
-    return bytes(s.buf), {'hull': FLOOR_HULL, 'scale': scale, 'offset': off, 'box': (lo, hi), 'bounding radius': max(old, far)}
-
-
-def _refresh_tree(s: _Shkt, k: int) -> None:
-    """The simd tree's leaf lane of instance `k` := its box (Shkt.box), every inner lane := the union of its child
-    node's lanes; the other leaves keep what they hold."""
-    t = s.tag
-    _, at, n = t.item(s.simd)
-    N = 'hkcdSimdTree::Node'
-    size, o_data, o_leaf = t.size(N), t.offset(N, 'data'), t.offset(N, 'isLeaf')
-
-    def node(i: int) -> tuple[list[float], list[float]]:
-        base = at + size * i
-        f = list(struct.unpack_from('<24f', s.buf, base))
-        data = struct.unpack_from('<4I', s.buf, base + o_data)
-        leaf = s.buf[base + o_leaf]
-        lo_all, hi_all = [math.inf] * 3, [-math.inf] * 3
-        for lane in range(4):
-            if f[lane] > f[4 + lane]:
-                continue       # an empty lane (+FLT_MAX / -FLT_MAX)
-            if leaf:
-                if data[lane] == k:
-                    lo, hi = s.box(k)
-                else:
-                    lo, hi = [f[lane], f[8 + lane], f[16 + lane]], [f[4 + lane], f[12 + lane], f[20 + lane]]
-            else:
-                lo, hi = node(data[lane])
-            f[lane], f[8 + lane], f[16 + lane] = lo
-            f[4 + lane], f[12 + lane], f[20 + lane] = hi
-            lo_all = [min(a, b) for a, b in zip(lo_all, lo)]
-            hi_all = [max(a, b) for a, b in zip(hi_all, hi)]
-        struct.pack_into('<24f', s.buf, base, *f)
-        return lo_all, hi_all
-    _req(n >= 2, 'an empty simd tree')
-    node(1)
+    return s.bytes(), {'hull': FLOOR_HULL, 'scale': scale, 'offset': off, 'box': (lo, hi),
+                       'bounding radius': s.bounding_radius}
 
 
 def check_collision(data: bytes, stock: bytes | None = None) -> dict:
@@ -891,7 +801,7 @@ def check_collision(data: bytes, stock: bytes | None = None) -> dict:
     inner lane the union under it; the compound's box holds every hull. With `stock`: nothing but the floor hull's
     vertices and planes, the tree's boxes, the compound's box and bounding radius differs. Returns what it measured."""
     s = _Shkt(data)
-    radius = s.hull(FLOOR_HULL)[0]
+    radius = s.radius(FLOOR_HULL)
     V = s.vertices(FLOOR_HULL)
     lo, hi = floor_box()
     vlo = [min(v[c] for v in V) for c in range(3)]
@@ -907,33 +817,36 @@ def check_collision(data: bytes, stock: bytes | None = None) -> dict:
         _req(max(dist) < 1e-4, f'plane {p}: a vertex {max(dist):.5f} m outside it')
         _req(sum(1 for d in dist if abs(d) < 1e-4) >= 3, f'plane {p}: fewer than three vertices on it')
     leaves = s.leaves()
+    _req(sorted(leaves) == list(range(s.inst_n)), 'a tree leaf for every hull')
     for k in range(s.inst_n):
         blo, bhi = s.box(k)
         llo, lhi = leaves[k]
         _req(all(llo[c] <= blo[c] + 1e-5 and lhi[c] >= bhi[c] - 1e-5 for c in range(3)), f'tree leaf {k} misses its hull')
-    box = struct.unpack_from('<8f', s.buf, s.aabb_at)
+    box = s.aabb
     for k in range(s.inst_n):
         blo, bhi = s.box(k)
         _req(all(box[c] <= blo[c] + 1e-5 and box[4 + c] >= bhi[c] - 1e-5 for c in range(3)), f'the compound box misses hull {k}')
     if stock is not None:
+        import hkfile
         st = _Shkt(stock)
-        _req(len(st.buf) == len(s.buf), 'the file changed size')
-        _, vs, ps = s.hull(FLOOR_HULL)
-        allowed = set()
-        for a in vs:
-            allowed |= set(range(a, a + 12))
-        for a in ps:
-            allowed |= set(range(a, a + 16))
-        _, tat, tn = s.tag.item(s.simd)
-        size = s.tag.size('hkcdSimdTree::Node')
-        for i in range(tn):
-            allowed |= set(range(tat + size * i, tat + size * i + 96))
-        allowed |= set(range(s.aabb_at, s.aabb_at + 32)) | set(range(s.radius_at, s.radius_at + 4))
-        diff = [i for i in range(len(s.buf)) if s.buf[i] != st.buf[i] and i not in allowed]
-        _req(not diff, f'{len(diff)} bytes changed outside the floor edit (first at {diff[:4]})')
+        _req(s.inst_n == st.inst_n, 'the compound changed its hull count')
         for k in range(s.inst_n):
+            e, shape = s.instance(k)
+            e0, shape0 = st.instance(k)
+            _req(bytes(e.raw) [:48] == bytes(e0.raw)[:48], f'instance {k} moved')
             if k != FLOOR_HULL:
-                _req(s.vertices(k) == st.vertices(k) and s.planes(k) == st.planes(k), f'hull {k} changed')
-                _req(leaves[k] == st.leaves()[k], f'tree leaf {k} changed')
+                _req(hkfile.content_equal(shape, shape0), f'hull {k} changed')
+        bodies, bodies0 = s.physics.bodies(), st.physics.bodies()
+        _req([b.name for b in bodies] == [b.name for b in bodies0], 'the bodies changed')
+        for b, b0 in zip(bodies, bodies0):
+            _req(b.position == b0.position and b.orientation == b0.orientation and b.mass == b0.mass and
+                 hkfile.content_equal(b.mass_distribution, b0.mass_distribution), f'body {b.name} changed')
+            if b.name != 'RagDollProxys.body':
+                _req(hkfile.content_equal(b.shape, b0.shape), f'the shape of {b.name} changed')
+        # The bike keeps its stock massDistribution on purpose (its tuned centre of mass and inertia: the floor slab
+        # is collision only, src/sidecar.cpp holds the outfit level): the one body pylib/shkt_check.py may flag.
+        import shkt_check
+        kept = [p.where for p in shkt_check.stale_mass_distributions(data, stock)]
+        _req(kept == ["body 'RagDollProxys.body'"], f'mass distributions kept from the bike: {kept}')
     return {'hull box': (vlo, vhi), 'top y (model)': vhi[1] + BODY_PROXY[1] + radius, 'floor m2': round(floor, 3),
             'radius': radius}

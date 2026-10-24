@@ -56,7 +56,7 @@ CROPS = {
 
 
 def default_out() -> str:
-    return os.path.join(om.DEV_MODELS, 'cockpits')   # where make_cockpit_textures.py writes (not a worktree's models/)
+    return os.path.join(om.REPO_MODELS, 'cockpits')   # where make_cockpit_textures.py writes (the tracked models/cockpits/)
 
 
 def main() -> int:

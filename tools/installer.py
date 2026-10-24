@@ -55,6 +55,7 @@ for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'te
            os.path.join(HERE, '..', 'autoturret', 'tools')):
     sys.path.insert(0, os.path.normpath(_p))
 
+import edf41src  # noqa: E402
 import gamedir  # noqa: E402
 import modfiles  # noqa: E402
 
@@ -87,6 +88,26 @@ NEW_DEFAULTS: dict[str, dict[str, tuple[str, str]]] = {
 }
 DEFAULTS_MARK = '; edf6vc-defaults-2026-10-07：安装器已把仍是旧默认值 0 的 HeliLandMs、RescueAutoBoard、SeatSwitchOnline、' \
                 'StockVehicleStores 改成开启（想关就改回，之后安装不会再改）'
+# Later steps, each with its own mark (an ini that took the 10-07 step still takes these, once). Edf41MotherParts shipped 15
+# (no 301 panels) from 2026-10-14 in the nightlies; the panels' release ships 31, and merge_ini keeps the player's old 15.
+NEW_DEFAULTS_1017: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'Edf41MotherParts': ('15', '31')},
+}
+DEFAULTS_MARK_1017 = '; edf6vc-defaults-2026-10-17：安装器已把仍是旧出厂值 15 的 Edf41MotherParts 改成 31' \
+                     '（4.1 母舰的板甲也建出来；想改就改，之后安装不会再改）'
+# The high view (the user, 2026-10-23: "俯瞰视角太小了"): its eye from 45 m over / 35 m behind to 90 / 55 (src/crew.h
+# highCamHeight / highCamBack); merge_ini keeps an old ini's 45 / 35, so it never saw the farther view.
+NEW_DEFAULTS_1024: dict[str, dict[str, tuple[str, str]]] = {
+    SECTION: {'HighCamHeight': ('45', '90'), 'HighCamBack': ('35', '55')},
+}
+DEFAULTS_MARK_1024 = '; edf6vc-defaults-2026-10-24：安装器已把仍是旧出厂值的高视角 HighCamHeight 45 / HighCamBack 35 ' \
+                     '改成 90 / 55（想改就改，之后安装不会再改）'
+# Every step in order: (its mark, its flips). A step whose mark the ini has is done.
+DEFAULTS_STEPS: tuple[tuple[str, dict[str, dict[str, tuple[str, str]]]], ...] = (
+    (DEFAULTS_MARK, NEW_DEFAULTS),
+    (DEFAULTS_MARK_1017, NEW_DEFAULTS_1017),
+    (DEFAULTS_MARK_1024, NEW_DEFAULTS_1024),
+)
 
 
 def bundle_dir() -> str:
@@ -195,10 +216,20 @@ def merge_ini(user: str, shipped: str, section: str = SECTION) -> tuple[str, lis
 
 
 def apply_new_defaults(text: str, section: str = SECTION) -> tuple[str, list[str]]:
-    """`text` (an ini) with each NEW_DEFAULTS key of [section] that still holds its old default given the new one, and
-    DEFAULTS_MARK after the section's head; nothing when the mark is there already. Returns (text, keys changed)."""
-    flips = NEW_DEFAULTS.get(section, {})
-    if not flips or DEFAULTS_MARK.split('：', 1)[0] in text:
+    """`text` (an ini) through every DEFAULTS_STEPS step not taken yet: each key of [section] that still holds its old
+    default gets the new one, and the step's mark goes after the section's head; a step whose mark is there already is
+    skipped. Returns (text, keys changed)."""
+    changed: list[str] = []
+    for mark, defaults in DEFAULTS_STEPS:
+        text, flipped = _apply_defaults_step(text, section, mark, defaults)
+        changed += flipped
+    return text, changed
+
+
+def _apply_defaults_step(text: str, section: str, mark: str,
+                         defaults: dict[str, dict[str, tuple[str, str]]]) -> tuple[str, list[str]]:
+    flips = defaults.get(section, {})
+    if not flips or mark.split('：', 1)[0] in text:
         return text, []
     nl = '\r\n' if '\r\n' in text else '\n'
     lines = text.splitlines()
@@ -217,12 +248,12 @@ def apply_new_defaults(text: str, section: str = SECTION) -> tuple[str, list[str
     head = next((i for i, x in enumerate(lines) if (m := _SECTION.match(x)) and m.group(1).strip().lower() == section.lower()), None)
     if head is None:
         return text, []
-    lines.insert(head + 1, DEFAULTS_MARK)
+    lines.insert(head + 1, mark)
     return nl.join(lines) + nl, changed
 
 
 def planned_ini(user: str, shipped: str, section: str = SECTION) -> tuple[str, list[str], list[str], list[str]]:
-    """The player's ini as install_plugin writes it: merge_ini, then apply_new_defaults. (text, added, gone, turned on)."""
+    """The player's ini as install_plugin writes it: merge_ini, then apply_new_defaults. (text, added, gone, moved to a new default)."""
     text, added, gone = merge_ini(user, shipped, section)
     text, flipped = apply_new_defaults(text, section)
     return text, added, gone, flipped
@@ -239,6 +270,23 @@ def player_ini_text(game: str, shipped_ini: bytes) -> str:
         raw = f.read()
     raw = raw[3:] if raw.startswith(b'\xef\xbb\xbf') else raw
     return planned_ini(raw.decode('utf-8', errors='replace'), shipped)[0]
+
+
+def material_compat_wanted(ini_text: str) -> bool:
+    """Install-time EDF4.1 material conversion; absent/invalid keeps the shipped default on.
+
+    Read the same effective (first) key and case-insensitive section used by the INI merger. An explicit zero in the
+    player's planned INI restores EDF6's unmodified same-name shaders on the next installation.
+    """
+    lines = ini_text.lstrip('\ufeff').splitlines()
+    at = _keys(lines).get('edf41materialcompatibility')
+    if at is None:
+        return True
+    value = lines[at].partition('=')[2].partition(';')[0].strip()
+    try:
+        return int(value, 0) != 0
+    except ValueError:
+        return True
 
 
 def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN, section: str = SECTION) -> None:
@@ -266,7 +314,7 @@ def install_plugin(game: str, dll: bytes, shipped_ini: bytes, name: str = PLUGIN
     elif not flipped:
         print(f'保留你的 {ini}（没有需要补的新设置）')
     if flipped:
-        print(f'  这些设置的默认值已改为开启，你的 ini 里还是旧默认值，已改成开启：{", ".join(flipped)}（想关就改回，之后安装不会再改）')
+        print(f'  这些设置的出厂默认值已更新，你的 ini 里还是旧默认值，已改成新默认值：{", ".join(flipped)}（想改就改回，之后安装不会再改）')
     if gone:
         print(f'  其中 {", ".join(gone)} 新版本已不再使用，可以手动删掉')
 
@@ -394,10 +442,11 @@ def remove_autoturret(game: str) -> None:
     at_build.uninstall(mods, force=False)
 
 
-def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None) -> Any:
-    """Only regenerate an asset group when its recipe, inputs or installed outputs changed."""
+def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None, settings: dict | None = None) -> Any:
+    """Only regenerate an asset group when its recipe, inputs, `settings` (the ini's choices it is built by) or
+    installed outputs changed."""
     started = time.perf_counter()
-    if cache.current(module.OWNER):
+    if cache.current(module.OWNER, settings):
         print(f'{label}：校验通过，复用已有资源（{time.perf_counter() - started:.1f} 秒）', flush=True)
         return None
     print(f'{label}：生成中（首次安装或输入/输出发生变化）……', flush=True)
@@ -407,8 +456,9 @@ def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None)
 
 
 def find_edf41(game: str) -> str | None:
-    """The player's EDF4.1, looked up once per install (its maps and the EDF4.1 story pack need it)."""
-    return gamedir.find_other(gamedir.EDF41, near=game)
+    """Where EDF4.1 is read from, looked up once per install (its maps, sounds and the EDF4.1 story pack need it): the
+    player's EDF4.1, else the EDF4.1 asset pack next to the installer (pylib/edf41src.py find)."""
+    return edf41src.find(near=game)
 
 
 def build_packs(game: str, campaign: bool, root41: str | None = None,
@@ -445,24 +495,33 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_drill
     import make_edf5_campaign
     import make_emc
+    import make_ultimate
+    import make_vulcan
+    import make_bmpt
     import make_chute
     import make_jets
     import edf41_objects
+    import edf41_outfits
     import edf41_maps
+    import edf41_menu_bg
     import edf41_sounds
     import edf5_dlc
     import make_katyusha
     import make_sazabi
+    import make_dreadnought
     import make_proteus
     import make_optics
     import make_stock_stores
     import make_sidecar
+    import make_sedan
     import make_sub
     import rootcpk
     rootcpk.use(game)
     check_loader(game)
     plugins = plugin_files()
-    stock_stores = make_stock_stores.wanted(player_ini_text(game, plugins[PLUGIN][1]))
+    planned = player_ini_text(game, plugins[PLUGIN][1])
+    stock_stores = make_stock_stores.wanted(planned)
+    material_compat = material_compat_wanted(planned)
     if call_weapons.recover(game):
         print('上次运行没有完成：已把武器表相关文件恢复到那次运行之前。')
     print('检查武器表并生成呼叫武器（只读 Root.cpk 与现有武器表）……')
@@ -484,6 +543,9 @@ def install(game: str, campaign_requested: bool = False) -> None:
     chute = build_asset(cache, make_chute, '降落伞')
     drill = build_asset(cache, make_drill, '钻头战车')
     emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
+    ult = build_asset(cache, make_ultimate, '终极支援「天罚」特效')
+    vulcan = build_asset(cache, make_vulcan, 'M163 火神炮车（HE / AP 双弹链）')
+    bmpt = build_asset(cache, make_bmpt, 'BMPT（双 30 mm 机炮与反坦克导弹）')
     stock = None
     if stock_stores:
         print('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……')
@@ -493,7 +555,14 @@ def install(game: str, campaign_requested: bool = False) -> None:
         turret = ({**turret[0], **handed}, turret[1])
         stock = files, skipped
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
+    sedan = build_asset(cache, make_sedan, '民用轿车')
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
+    # its hangar modules: the ini's (DreadnoughtHangarLeftFore .. RightAft), built into its model and collision
+    hangars = make_dreadnought.dm.hangars_wanted(planned)
+    dreadnought = build_asset(cache, make_dreadnought,
+                              f'无畏舰与舰载机（机库模块：{make_dreadnought.fitting_text(hangars)}；模型生成约 3 分钟）',
+                              lambda g: make_dreadnought.build(g, hangars),
+                              {'hangars': make_dreadnought.dm.hangars_text(hangars)})
     proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     root41 = find_edf41(game)
@@ -515,8 +584,13 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_chute.install(game, chute) if chute is not None else []) + \
             (make_drill.install(game, drill) if drill is not None else []) + \
             (make_emc.install(game, emc) if emc is not None else []) + \
+            (make_ultimate.install(game, ult) if ult is not None else []) + \
+            (make_vulcan.install(game, vulcan) if vulcan is not None else []) + \
+            (make_bmpt.install(game, bmpt) if bmpt is not None else []) + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
+            (make_sedan.install(game, sedan) if sedan is not None else []) + \
             (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
+            (make_dreadnought.install(game, dreadnought) if dreadnought is not None else []) + \
             (make_proteus.install(game, proteus) if proteus is not None else []):
         print('写入', path)
     if stock is not None:   # after make_jets: the stores' weapon files are its
@@ -533,15 +607,20 @@ def install(game: str, campaign_requested: bool = False) -> None:
     # After the weapons: a model both ship (EDF5's Blacker No.4.1, the 4.1 AI tank's look) is shared only once the
     # weapons' install has recorded it in the ledger; built before, a first upgrade from a version whose weapons
     # recorded it in their own manifest only would leave the 4.1 tank out (2026-10-12, real install).
-    objects41, skipped41 = edf41_objects.build(game)
+    objects41, skipped41 = edf41_objects.build(game, material_compat=material_compat)
     print(f'写入 EDF4.1 的敌人与 NPC（EDF6 没有、4.1 任务要用的 {len(edf41_objects.registry()["objects"])} 种，'
           '预先转换好，不需要装 4.1；用 4.1 原来的文件名）……')
     for obj, why in skipped41:
         print('  跳过', obj, why)
     edf41_objects.install(game, objects41)
-    if edf41_objects.dev_enabled():
-        print('开发开关：EDF41_MOTHER_DEV=1，已把 edf41port_dev 里的 UfoMother301 原型并入（仅开发用，发布版没有）。')
-    edf41_objects.set_dev_flag(game, edf41_objects.dev_enabled())   # ini Edf41MotherDev: 1 only with the variable and the folder
+    outfits41, skipped_outfits = edf41_outfits.build(game, material_compat=material_compat)
+    print('写入 EDF4.1 外观（游骑兵、空降兵、飞翼、剑兵各一套，作为新增外观；预先转换好，不需要装 4.1；'
+          f'不替换任何原版文件，在战前外观菜单里选「{edf41_outfits.ITEM_ZH}」才使用；'
+          'EDF4.1 任务包里外观为「配合任务」或外观更改未解锁时默认使用）……')
+    for cls, why in skipped_outfits:
+        print('  跳过', cls, why)
+    for path in edf41_outfits.install(game, outfits41):
+        print('写入', path)
     # EDF5 Mission Pack 1's two maps and DLC fortress (pre-generated, the members EDF6 ships read from it): what the
     # campaign plan offered DM015 / DM018 / DM019 / DM020 on (make_edf5_campaign.plan asks edf5_dlc.offered)
     files5, skipped5 = edf5_dlc.build(game)
@@ -550,10 +629,10 @@ def install(game: str, campaign_requested: bool = False) -> None:
         print('  跳过', group, why)
     for path in edf5_dlc.install(game, files5):
         print('写入', path)
-    print('转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从已安装的 EDF4.1 转换，城市地图每张约 3–8 分钟，'
-          '山地 / 平原（SK_*）地图每张约 1–2 分钟，已转换且未变的跳过）……' if root41
-          else '没有找到 EDF4.1：跳过 4.1 地图（4.1 本篇任务包需要它）。')
-    written41, skipped_maps = edf41_maps.install(game, root41)
+    print(f'转换 EDF4.1 的任务地图（4.1 本篇任务包要用；从{edf41src.describe(root41)}转换，16 张地图按空闲内存'
+          '分几个进程同时转换，共约 0.5–2 分钟，已转换且未变的跳过）……' if root41
+          else f'{edf41src.describe(root41)}：跳过 4.1 地图（4.1 本篇任务包需要它）。')
+    written41, skipped_maps = edf41_maps.install(game, root41, material_compat=material_compat)
     for name, why in skipped_maps:
         print('  跳过', name, why)
     # The pack's rows may name only what is on disk now: objects and maps left out (a shared file's owner only known
@@ -562,13 +641,20 @@ def install(game: str, campaign_requested: bool = False) -> None:
     if campaign is not None and root41 and left_out41.keys() != skip41.keys():
         print('  4.1 的地图或敌人没有装全，重新生成 4.1 本篇任务包（不含用到它们的任务）……')
         campaign = build_packs(game, want_campaign, root41, left_out41)
-    print('转换 EDF4.1 的武器音效、语音和字幕（4.1 的武器与任务无线电要用；从已安装的 EDF4.1 转换，语音约 1.6 GB，'
-          '已转换且未变的跳过）……' if root41 else '没有找到 EDF4.1：跳过 4.1 的音效和语音。')
+    print(f'转换 EDF4.1 的武器音效、语音和字幕（4.1 的武器与任务无线电要用；从{edf41src.describe(root41)}转换，'
+          '语音约 1.6 GB，已转换且未变的跳过）……' if root41 else f'{edf41src.describe(root41)}：跳过 4.1 的音效和语音。')
     written_sound, skipped_sound = edf41_sounds.install(game, root41)
     for path in written_sound:
         print('写入', path)
     for group, why in skipped_sound:
         print('  跳过', group, why)
+    print(f'转换 EDF4.1 的本部（出击界面）背景（只在 4.1 的三个任务包显示；从{edf41src.describe(root41)}转换）……' if root41
+          else f'{edf41src.describe(root41)}：跳过 4.1 的本部背景。')
+    written_bg, skipped_bg = edf41_menu_bg.install(game, root41)
+    for path in written_bg:
+        print('写入', path)
+    for why in skipped_bg:
+        print('  跳过 4.1 本部背景', why)
     install_autoturret(game, *turret)
     # Mutable stock SGOs are read after every primary writer, outside the expensive model cache.
     # AutoTurret's SGOs were redirected before its own manifest write; never layer another hash over them.
@@ -599,7 +685,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('sidecar', sidecar), ('sazabi', sazabi), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('vulcan', vulcan), ('bmpt', bmpt), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -672,18 +758,25 @@ def uninstall(game: str) -> None:
     import make_bigmap
     import make_drill
     import make_emc
+    import make_ultimate
+    import make_vulcan
+    import make_bmpt
     import make_chute
     import make_jets
     import edf41_objects
+    import edf41_outfits
     import edf41_maps
+    import edf41_menu_bg
     import edf41_sounds
     import edf5_dlc
     import make_katyusha
     import make_sazabi
+    import make_dreadnought
     import make_proteus
     import make_optics
     import make_stock_stores
     import make_sidecar
+    import make_sedan
     import make_sub
     import buildcache
     import rootcpk
@@ -709,7 +802,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_sidecar.remove, make_emc.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_maps.remove, edf41_sounds.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, make_vulcan.remove, make_bmpt.remove, make_emc.remove, make_ultimate.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -817,8 +910,27 @@ def check(game: str) -> bool:
     import make_edf5_campaign
     print()
     ok &= make_edf5_campaign.check(game)
+    ok &= check_edf41_source(game)
     print('\n检查结果：' + ('全部是本安装包的，完整。' if ok else '有缺失或不一致（见上），退出游戏后运行安装器选 1 即可修复。'))
     return ok
+
+
+def check_edf41_source(game: str) -> bool:
+    """Where an install would read EDF4.1 from (find_edf41) and, for an asset pack, whether it is whole by the manifest
+    (sizes; the contents are hashed when a part is converted from it). False only for a pack with a fault: its maps and
+    sounds would be left out."""
+    root41 = find_edf41(game)
+    print()
+    print(f'EDF4.1 来源：{edf41src.describe(root41)}')
+    if not edf41src.is_pack(root41):
+        return True
+    faults = edf41src.check(root41)
+    print(f'  素材包：{len(faults)} 个问题' if faults else '  素材包：清单里的文件齐全，大小一致')
+    for why in faults[:20]:
+        print('   ', why)
+    if len(faults) > 20:
+        print(f'    ……另有 {len(faults) - 20} 个')
+    return not faults
 
 
 def build_name() -> str:
@@ -1133,6 +1245,33 @@ def check_package() -> int:
         assert all(cockpit_fits.DIGESTS[key] == value for key, value in fits.DIGESTS.items())
         assert all(cockpit_kits.KITS[key] is value for key, value in kits.KITS.items())
     assert make_optics.optics.MODELS
+    import make_sedan
+    import ledger
+    import cockpit_instruments
+    import cockpit_retrofit
+    import cockpit_shell
+    assert 'heli_gunship' in cockpit_shell.REPLACEMENTS and cockpit_shell.PREFIX == 'vc_shell_'
+    assert len(cockpit_instruments.LABELS['AMMO']) == 4
+    assert cockpit_instruments.GLYPHS['弹']
+    assert len(cockpit_retrofit.HELI)==3 and len(cockpit_retrofit.GROUND)==4
+    assert all(ch in cockpit_instruments.GLYPHS for key in ('VERT','PITCH','POWER')
+               for text in cockpit_instruments.LABELS[key] for ch in text)
+    assert make_sedan.FIT == cockpit_fits.FITS['EDF6VC_SEDAN']
+    assert make_sedan.OWNER in ledger.OWNERS
+    import buildcache
+    import make_tracked_combat
+    import frozen_collision_probe
+    frozen_collision_probe.check()
+    for kind in ('vulcan', 'bmpt'):
+        builder = importlib.import_module('make_' + kind)
+        model = make_tracked_combat.model_module(kind)
+        assert builder.OWNER == kind and kind in ledger.OWNERS and kind in buildcache.GROUPS
+        assert callable(builder.build) and callable(builder.install) and callable(builder.remove)
+        assert callable(model.build) and callable(model.check) and model.OUT_ARC.startswith('EDF6VC_')
+    materials = importlib.import_module('edf41_materials')
+    importlib.import_module('edf41materials')
+    assert callable(materials.apply)
+    importlib.import_module('PIL.DdsImagePlugin')   # the city sedan's BC7 glass decoder
     import texfile
     import texfile_accel
     importlib.import_module('PIL.Image')
@@ -1142,7 +1281,7 @@ def check_package() -> int:
     assert mdb.native_cmpl(), 'edf6cmpl.dll not bundled: models would use the pure Python CMPL encoder'
     probe = bytes(range(256)) * 40 + b'EDF6' * 300
     assert mdb.cmpl_compress(probe) == mdb.cmpl_compress_py(probe)
-    print('EDF6VC_PACKAGE_OK cockpit families=4')
+    print('EDF6VC_PACKAGE_OK cockpit families=4 tracked_collision=1')
     return 0
 
 

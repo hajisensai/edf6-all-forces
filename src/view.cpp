@@ -13,6 +13,8 @@
 #include "crew.h"
 #include "memory.h"
 #include "view_clip.h"
+#include "decal_depth.h"
+#include <atomic>
 
 // The cameras themselves too (2026-10-05, the user: "a little farther and it is gone", with VIEW logging 1000 -> 3000
 // every mission): the copy from the env into the cameras (0x1230A0, at 0x1232B5) has two callers, a setup (0x9D700)
@@ -23,58 +25,18 @@ namespace crew {
 namespace {
 constexpr unsigned kEnvHolder=0x20B2990,kCameraMgr=0x20B2958;
 constexpr std::size_t kEnv=0x258,kFarClip=0x1A0,kDistantNear=0x1A4,kDistantFar=0x1A8;
-constexpr std::size_t kCameras=0x4D8,kCameraStride=0x188,kCamFar=0x2C,kCamDistantFar=0x34;   // (+0x30: the far pass's start, view_clip.h)
+constexpr std::size_t kCameras=0x4D8,kCameraStride=0x188,kCamFar=0x2C,kCamDistantFar=0x34,kCamNear=0x28;
 constexpr int kCameraCount=4;
 const void* loggedEnv=nullptr;
 const void* loggedCam[kCameraCount]{};
-
-// One clip set (far, the far pass's start and end: three floats from `farClip`) raised to `want` (view_clip.h: never
-// lowered, the far pass's start untouched); true when it changed.
-bool Raise(unsigned char* at,std::size_t farClip,float want) noexcept {
-    viewclip::Clip c{At<float>(at,farClip),At<float>(at,farClip+4),At<float>(at,farClip+8)};
-    if(!viewclip::Raise(c,want))return false;
-    Put<float>(at,farClip,c.farClip);
-    Put<float>(at,farClip+8,c.distantFar);
-    return true;
-}
-
-void RaiseCameras(float want) noexcept {
-    const auto mgr=At<unsigned char*>(image,kCameraMgr);
-    if(!mgr || !Readable(mgr+kCameras+kCameraCount*kCameraStride,8))return;
-    for(int i=0;i<kCameraCount;++i) {
-        const auto cam=At<unsigned char*>(mgr,kCameras+static_cast<std::size_t>(i)*kCameraStride);
-        if(!cam || !Readable(cam+kCamDistantFar,4,true))continue;
-        const float was=At<float>(cam,kCamFar);
-        if(Raise(cam,kCamFar,want) && cam!=loggedCam[i]) {
-            loggedCam[i]=cam;
-            Log("VIEW camera %d far clip %.0f -> %.0f m",i,was,want);
-        }
-    }
-}
-}  // namespace
-
-// The map view (map.cpp; docs/camera-re.md §8): looking down from up to 3 km the near camera's 1000-3000 m far clip
-// cuts the ground the view is on (the far pass draws only far-render nodes: the ground and the big buildings, no
-// vehicles or enemies). While the map is open its far clip is raised to `farClip` on the four cameras (and the env, so
-// a camera the env is copied into afresh agrees) and the near clip, 0.1 m stock (camera +0x28, written only by the
-// camera's construction 0x118AFC0), to `nearClip`: the depth range of a view whose nearest ground is 200 m away. What
-// the map changed is kept and put back when it closes (a far clip raised only for the map must not stay raised).
-namespace {
-constexpr std::size_t kCamNear=0x28;
-struct Saved { unsigned char* at; float values[4]; };   // far, far pass start, far pass end, near (cameras)
-struct MapClip { bool on; Saved env; Saved cam[kCameraCount]; };
+struct Saved { unsigned char* at;float values[4]; };
+struct MapClip { bool on;Saved env;Saved cam[kCameraCount]; };
 MapClip mapClip{};
+// One lease owns only the fields this module actually wrote. Its baseline is captured before the first write,
+// including before ViewDistance raises it; a native overwrite becomes the new baseline on the next plugin write.
+struct ClipLease { unsigned char* at;float baseline[4],last[4];bool wrote[4]; };
+ClipLease envLease{},cameraLease[kCameraCount]{};
 
-void SaveClip(Saved& s,unsigned char* at,std::size_t farClip,bool camera) noexcept {
-    s.at=at;
-    for(int i=0;i<3;++i)s.values[i]=At<float>(at,farClip+static_cast<std::size_t>(i)*4);
-    s.values[3]=camera ? At<float>(at,kCamNear) : 0.0f;
-}
-void PutBack(const Saved& s,std::size_t farClip,bool camera) noexcept {
-    if(!s.at || !Readable(s.at,farClip+12,true))return;
-    for(int i=0;i<3;++i)Put<float>(s.at,farClip+static_cast<std::size_t>(i)*4,s.values[i]);
-    if(camera)Put<float>(s.at,kCamNear,s.values[3]);
-}
 unsigned char* EnvNow() noexcept {
     const auto holder=At<const unsigned char*>(image,kEnvHolder);
     if(!holder || !Readable(holder+kEnv,8))return nullptr;
@@ -87,51 +49,164 @@ unsigned char* CameraNow(int i) noexcept {
     const auto cam=At<unsigned char*>(mgr,kCameras+static_cast<std::size_t>(i)*kCameraStride);
     return cam && Readable(cam+kCamDistantFar,4,true) ? cam : nullptr;
 }
-}  // namespace
+std::size_t Field(std::size_t farClip,int i) noexcept { return i==3 ? kCamNear : farClip+static_cast<std::size_t>(i)*4; }
+ClipLease* LeaseFor(unsigned char* at,bool camera) noexcept {
+    ClipLease* out=nullptr;
+    if(!camera)out=&envLease;
+    else for(int i=0;i<kCameraCount;++i)if(CameraNow(i)==at){out=&cameraLease[i];break;}
+    if(out && out->at!=at){*out=ClipLease{};out->at=at;}
+    return out;
+}
+void WriteClip(unsigned char* at,std::size_t farClip,int field,float value,bool camera) noexcept {
+    ClipLease* const lease=LeaseFor(at,camera);
+    if(!lease)return;
+    const float current=At<float>(at,Field(farClip,field));
+    if(!lease->wrote[field] || current!=lease->last[field])lease->baseline[field]=current;
+    if(current==value)return;
+    lease->last[field]=value;lease->wrote[field]=value!=lease->baseline[field];
+    Put<float>(at,Field(farClip,field),value);
+}
+bool Raise(unsigned char* at,std::size_t farClip,float want,bool camera) noexcept {
+    viewclip::Clip c{At<float>(at,farClip),At<float>(at,farClip+4),At<float>(at,farClip+8)};
+    if(!viewclip::Raise(c,want))return false;
+    WriteClip(at,farClip,0,c.farClip,camera);WriteClip(at,farClip,2,c.distantFar,camera);return true;
+}
+void SaveClip(Saved& s,unsigned char* at,std::size_t farClip,bool camera) noexcept {
+    s.at=at;
+    for(int i=0;i<3;++i)s.values[i]=At<float>(at,Field(farClip,i));
+    s.values[3]=camera ? At<float>(at,kCamNear) : 0.0f;
+}
+void PutBack(const Saved& s,std::size_t farClip,bool camera) noexcept {
+    if(!s.at || !Readable(s.at,farClip+12,true))return;
+    const ClipLease* const lease=LeaseFor(s.at,camera);
+    if(!lease)return;
+    for(int i=0;i<(camera ? 4 : 3);++i)
+        if(i!=1 && lease->wrote[i] && At<float>(s.at,Field(farClip,i))==lease->last[i])
+            WriteClip(s.at,farClip,i,s.values[i],camera);
+}
+void RestoreMap() noexcept {
+    if(!mapClip.on)return;
+    if(mapClip.env.at==EnvNow())PutBack(mapClip.env,kFarClip,false);
+    for(int i=0;i<kCameraCount;++i)if(mapClip.cam[i].at && mapClip.cam[i].at==CameraNow(i))PutBack(mapClip.cam[i],kCamFar,true);
+    mapClip=MapClip{};
+}
+void RestoreLease(ClipLease& lease,unsigned char* current,std::size_t farClip,bool camera) noexcept {
+    if(lease.at && lease.at==current && Readable(current,farClip+12,true))
+        for(int i=0;i<(camera ? 4 : 3);++i)
+            if(lease.wrote[i] && At<float>(current,Field(farClip,i))==lease.last[i])
+                Put<float>(current,Field(farClip,i),lease.baseline[i]);
+    lease=ClipLease{};
+}
+void RestoreAllClips() noexcept {
+    // Map snapshots may contain the normal view-distance extension. Return the map's lease first, then the
+    // original native leases, so a lost shader never leaves an old unlimited far clip in either env or camera.
+    RestoreMap();RestoreLease(envLease,EnvNow(),kFarClip,false);
+    for(int i=0;i<kCameraCount;++i)RestoreLease(cameraLease[i],CameraNow(i),kCamFar,true);
+}
+} // namespace
 
+void ViewWriteNear(void* camera,float value) noexcept {
+    auto cam=static_cast<unsigned char*>(camera);
+    if(!cam || !Readable(cam+kCamNear,4,true))return;
+    // Callers gate new overrides on readiness, but may return a lease after readiness was revoked.
+    WriteClip(cam,kCamFar,3,value,true);
+}
 void ViewMapClip(bool on,float farClip,float nearClip) noexcept {
+    if(!ViewDepthReady()){RestoreAllClips();return;}
     if(!on) {
-        if(!mapClip.on)return;
-        // The values from before the map, on the objects they came from (the near clip only where the map changed it).
-        if(mapClip.env.at==EnvNow())PutBack(mapClip.env,kFarClip,false);
-        for(int i=0;i<kCameraCount;++i)if(mapClip.cam[i].at && mapClip.cam[i].at==CameraNow(i))PutBack(mapClip.cam[i],kCamFar,true);
-        mapClip=MapClip{};
-        Log("VIEW map closed: the clip planes as they were");
+        if(mapClip.on){RestoreMap();Log("VIEW map closed: the clip planes as they were");}
         return;
     }
-    if(!mapClip.on) {   // the first frame: what is there now, to put back
+    if(!mapClip.on) {
         mapClip.on=true;
         if(auto env=EnvNow())SaveClip(mapClip.env,env,kFarClip,false);
         for(int i=0;i<kCameraCount;++i)if(auto cam=CameraNow(i))SaveClip(mapClip.cam[i],cam,kCamFar,true);
         Log("VIEW map open: far clip %.0f m, near %.2f m",farClip,nearClip);
     }
     if(farClip>0.0f) {
-        if(auto env=EnvNow())Raise(env,kFarClip,farClip);
-        for(int i=0;i<kCameraCount;++i)if(auto cam=CameraNow(i))Raise(cam,kCamFar,farClip);
+        if(auto env=EnvNow())Raise(env,kFarClip,farClip,false);
+        for(int i=0;i<kCameraCount;++i)if(auto cam=CameraNow(i))Raise(cam,kCamFar,farClip,true);
     }
-    // The near clip only on the cameras the map saw at its start (a camera made since has no saved value to go back to)
-    // and only up from the stock sub-metre one (a camera with its own larger near clip is left alone).
     for(int i=0;i<kCameraCount;++i) {
         Saved& s=mapClip.cam[i];
         if(!s.at || s.at!=CameraNow(i) || !(s.values[3]>0.0f) || s.values[3]>=1.0f)continue;
-        Put<float>(s.at,kCamNear,nearClip>s.values[3] ? nearClip : s.values[3]);
+        WriteClip(s.at,kCamFar,3,nearClip>s.values[3] ? nearClip : s.values[3],true);
     }
 }
 
 void ViewTick() noexcept {
+    if(!ViewDepthReady()){RestoreAllClips();return;}
     float want=ViewDistanceWanted();
     if(want<=0.0f)return;
-    const auto holder=At<const unsigned char*>(image,kEnvHolder);
-    unsigned char* env=holder && Readable(holder+kEnv,8) ? At<unsigned char*>(holder,kEnv) : nullptr;
-    if(env && !Readable(env+kDistantFar,4,true))env=nullptr;
-    // Unlimited (-1): no nearer than the mission's own far pass end (a map's 35000 m one too), past which nothing draws.
+    auto env=EnvNow();
     if(Cfg().viewDistance<0.0f && env && At<float>(env,kDistantFar)>want)want=At<float>(env,kDistantFar);
-    RaiseCameras(want);
+    for(int i=0;i<kCameraCount;++i)if(auto cam=CameraNow(i)) {
+        const float was=At<float>(cam,kCamFar);
+        if(Raise(cam,kCamFar,want,true) && cam!=loggedCam[i]) {
+            loggedCam[i]=cam;Log("VIEW camera %d far clip %.0f -> %.0f m",i,was,want);
+        }
+    }
     if(!env)return;
     const float was=At<float>(env,kFarClip);
-    if(Raise(env,kFarClip,want) && env!=loggedEnv) {
-        loggedEnv=env;
-        Log("VIEW far clip %.0f -> %.0f m (far camera from %.0f m)",was,want,At<float>(env,kDistantNear));
+    if(Raise(env,kFarClip,want,false) && env!=loggedEnv) {
+        loggedEnv=env;Log("VIEW far clip %.0f -> %.0f m (far camera from %.0f m)",was,want,At<float>(env,kDistantNear));
     }
 }
-}  // namespace crew
+} // namespace crew
+// Blood, splashes and bullet/explosion marks all go through DecalManager. Its embedded compute shader used
+// stock near/far constants while FirstPerson, the map and ViewDistance changed the world's projection. The
+// existing per-draw inverse view-projection already supplies the right depth coefficients, including split views.
+namespace crew {
+namespace {
+constexpr unsigned kDecalShaderCall=0x2D17B6,kComputeCreate=0x11614D0,kDecalShaderBlob=0x1F68FF0;
+using ComputeCreateFn=bool(__fastcall*)(void*,void*,const void*,std::size_t,void*);
+std::vector<unsigned char> decalShader;
+bool decalDepthInstalled=false;
+std::atomic<bool> decalDepthReady{false},decalDepthFailureLogged{false};
+void DepthFailed(const char* reason) noexcept {
+    decalDepthReady.store(false,std::memory_order_release);
+    if(!decalDepthFailureLogged.exchange(true,std::memory_order_relaxed))
+        Log("VIEW depth disabled: %s; retaining native near/far clip planes",reason);
+}
+
+bool NativeDepthContract() noexcept {
+    // The constructor's argument setup, native CreateComputeShader ABI, and the exact per-draw inverse-VP
+    // builder/upload layout. Refuse a changed CPU contract as well as a changed shader blob.
+    struct Span { unsigned rva,size;std::uint64_t fingerprint; };
+    constexpr Span spans[]={{0x2D1796,0x25,0xD3E96EDC77F8C94Cull},
+                            {0x116153F,0x28,0x21DADB6CAAACF2B1ull},
+                            {0x2D2D88,0x29E,0xCF1CAE2B03DF316Eull}};
+    for(const Span& span:spans) {
+        if(!Readable(image+span.rva,span.size))return false;
+        std::uint64_t hash=14695981039346656037ull;
+        for(unsigned i=0;i<span.size;++i)hash=(hash^image[span.rva+i])*1099511628211ull;
+        if(hash!=span.fingerprint)return false;
+    }
+    return true;
+}
+bool __fastcall DecalShaderCreateHook(void* shader,void* context,const void* bytes,std::size_t size,void* linkage) {
+    const bool rewritten=bytes==image+kDecalShaderBlob && size==decaldepth::kNativeSize && !decalShader.empty();
+    decalDepthReady.store(false,std::memory_order_release);
+    if(rewritten){bytes=decalShader.data();size=decalShader.size();}
+    const bool created=reinterpret_cast<ComputeCreateFn>(image+kComputeCreate)(shader,context,bytes,size,linkage);
+    if(rewritten && created)decalDepthReady.store(true,std::memory_order_release);
+    else DepthFailed(rewritten ? "modified compute shader creation failed" : "unknown decal shader at creation");
+    return created;
+}
+} // namespace
+
+bool ViewDepthReady() noexcept { return decalDepthReady.load(std::memory_order_acquire); }
+
+bool InstallViewDepth() noexcept {
+    if(decalDepthInstalled)return true;
+    if(!NativeDepthContract() || !Readable(image+kDecalShaderBlob,decaldepth::kNativeSize) ||
+       !decaldepth::Rewrite(image+kDecalShaderBlob,decaldepth::kNativeSize,&decalShader)) {
+        DepthFailed("native shader/CPU contract mismatch");return false;
+    }
+    bool changed=false;
+    decalDepthInstalled=RedirectCall(image+kDecalShaderCall,image+kComputeCreate,reinterpret_cast<void*>(&DecalShaderCreateHook),changed);
+    if(!decalDepthInstalled)DepthFailed("compute shader creation hook unavailable");
+    Log("HOOK decal depth=%d (awaiting native compute creation)",decalDepthInstalled);
+    return decalDepthInstalled;
+}
+} // namespace crew

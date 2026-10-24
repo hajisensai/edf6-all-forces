@@ -2,12 +2,14 @@
 // Link payload.cpp, stores.cpp, rounds.cpp, launcher.cpp, edf6common and user32 (/Gy /OPT:REF).
 #include "../src/turretcam.cpp"
 #include "../src/stores.h"
+#include "seat_net_fake.inc"
 #include <cstdio>
 #include <cstdlib>
 #include <cwchar>
 #include <vector>
 
 namespace crew {
+bool VehicleLookActive(const void*) noexcept { return false; }
 unsigned char* image=nullptr;
 Config config{};
 unsigned char* currentHuman=nullptr;
@@ -17,10 +19,14 @@ ULONGLONG GameMs() noexcept { return clockMs; }
 unsigned char* PlayerHuman() noexcept { return currentHuman; }
 void Log(const char*,...) noexcept {}
 bool MapHoldsKeys() noexcept { return false; }
+bool MapPadState(std::uint16_t* b,std::uint8_t* lt,std::uint8_t* rt) noexcept { *b=0;*lt=*rt=0;return false; }   // no pad here
+bool MapOwnsView() noexcept { return false; }
+bool FirstPersonVehicleView(const void*,unsigned) noexcept { return false; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
 bool IsPlayerJet(const void*) noexcept { return false; }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
 bool GunshipGunnerCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
+bool DreadnoughtCamera(const unsigned char*,float*,float*) noexcept {return false;}
 bool IsHelicopter(const void*) noexcept { return false; }
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
 bool IsFuelTank(const unsigned char*) noexcept { return false; }
@@ -35,6 +41,8 @@ bool AutoTurretReadout(edf::aimlink::TurretReadoutV1*) noexcept { return false; 
 bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1; }
 bool SightZoomMounted(const void*) noexcept{return false;}
+bool SightZoomCanMount(const void*,unsigned) noexcept{return false;}
+bool FirstPersonGunnerSight() noexcept{return false;}
 bool highMode=false;
 bool HighCamOn(const void*) noexcept { return highMode; }
 int cameraReads=0,loftCalls=0;

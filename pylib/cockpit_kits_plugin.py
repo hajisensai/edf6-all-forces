@@ -215,8 +215,13 @@ def _model_kit(cabin: Cabin, name: str, model: Model) -> Kit:
         c = np.array(s.centre) * k + SCREEN_PROUD * f
         if (c >= lo).all() and (c <= hi).all():
             screens.append(Screen(s.kind, tuple(map(float, c)), tuple(map(float, f)), s.width * k, s.height * k))
-    return Kit(parts, mats, screens=tuple(screens), sill=model.sill,
-               conform=frozenset({'tub'}) if model.sill is not None else frozenset())
+    kit=Kit(parts, mats, screens=tuple(screens), sill=model.sill,
+            conform=frozenset({'tub'}) if model.sill is not None else frozenset())
+    import cockpit_retrofit as retrofit
+    blocks=retrofit.F16 if model.slug=='plugin_wt_f16a' else retrofit.C130 if model.slug=='plugin_c130_deck' else ()
+    return retrofit.apply(kit,blocks,lambda p:np.asarray(p)*k,limits=(lo,hi),
+                          ranges={retrofit.ci.SPEED:2000 if model.slug=='plugin_wt_f16a' else 700,
+                                  retrofit.ci.ALT:10000}) if blocks else kit
 
 
 def _kit(name: str, model: Model, doc: str) -> KitFn:
@@ -257,15 +262,20 @@ F16_NARROW = replace(F16, want={**FIGHTER_WANT, 'left': 0.25, 'right': 0.25, 'up
 # Its displays: the pilot's PFD, the engine display, the two displays right of it (nav, the copilot's).
 DECK_SILL = -25.0
 DECK_SCREENS = (
-    ScreenAt('flight', (0.022, -0.475, 0.854), (0.0, 0.0, -1.0), 0.17, 0.14),
-    ScreenAt('status', (-0.483, -0.530, 0.851), (0.0, 0.0, -1.0), 0.17, 0.23),
-    ScreenAt('map', (-0.727, -0.531, 0.851), (0.0, 0.0, -1.0), 0.2, 0.25),
+    ScreenAt('flight', (0.022, -0.533, 0.854), (0.0, 0.0, -1.0), 0.19, 0.26),
+    ScreenAt('status', (-0.483, -0.533, 0.851), (0.0, 0.0, -1.0), 0.19, 0.26),
+    ScreenAt('map', (-0.727, -0.533, 0.851), (0.0, 0.0, -1.0), 0.19, 0.26),
+    ScreenAt('weapons', (-0.961, -0.533, 0.851), (0.0, 0.0, -1.0), 0.19, 0.26),
+    ScreenAt('flight', (-1.217, -0.533, 0.851), (0.0, 0.0, -1.0), 0.19, 0.26),
+    # The pilot's HUD where the model's slab was (tools/prep_cockpit_plugin.py C130_DECK: right on the line of sight
+    # 0.4 m ahead, left out of the cut), a combiner of the C-130J HUD's 30 x 24 degree field: the plugin draws its
+    # symbols on it (hud.cpp HeadUpGlass; docs/feedback-2026-10-21-attitude-indicator.md).
+    ScreenAt('hud', (0.0, 0.0, 0.4), (0.0, 0.0, -1.0), 0.214, 0.170),
 )
 DECK = Model('plugin_c130_deck', {'left': 1.4, 'right': 3.2, 'up': 1.2, 'down': 1.3, 'ahead': 2.3, 'back': 1.4},
              {'left': 0.3, 'right': 0.5, 'up': 0.2, 'down': 0.5, 'ahead': 0.7, 'back': 0.3},
              {'left': 1.2, 'up': 1.0, 'down': 1.1, 'ahead': 1.4}, DECK_SCREENS, least_scale=0.5, sill=DECK_SILL)
-DECK_GUN = replace(DECK, screens=DECK_SCREENS + (
-    ScreenAt('weapons', (-1.018, -0.577, 0.856), (0.0, 0.0, -1.0), 0.22, 0.28),))
+DECK_GUN = DECK
 
 # The C-130J's hold (C130_HOLD) in the stock bomber's hull at HOLD_SCALE (its section there is 2.5 m high: a real
 # hold's 3 m does not fit; from the seat it looks the same): the walls where the hull closes round the first

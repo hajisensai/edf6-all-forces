@@ -75,6 +75,14 @@ addHit `0xD93980`：若 `hit.fraction < this->earlyOut`，就把 `0x70` 字节�
 | `+0x8C` | u32 | 命中 shape 的 tag / filter | M（`0x11A9BEA`） |
 | `+0x9C` | u32 | 标志。`NpObjectCreatePosCollector` 只接受 `& 2` 的命中 | H（字段）/ L（含义） |
 
+### 2.3 命中刚体是不是静态（H，2026-10-17，`docs/feedback-2026-10-17-mapview-sky-platform.md`）
+
+- hknpWorld = `*(g+0x68)+0x20`（虚表 `0x18BC9C0`）。第 16 槽 `0xDAB170`：`bodies = *(world+0x18)`，刚体 = `bodies + (id & 0xFFFFFF) * 0xB0`；
+  `world+0x20` 是刚体数。刚体 `+0x50` id，`+0x54` 标志；第 13 槽 `0xDAC200` 以 `flags & 3 != 0` 且 `+0x50 == id` 判有效。
+- `0x11B1960`（EDF 刚体包装的运动类型）：`flags & 1` → 0 静态，`flags & 4` → 1，否则 2。
+- 地图射线的层 17 不只有建筑：EventAnimationObject 构造 `0x5B5FB0` 把 ragdoll 刚体放在 17（`0x5B6401`），MovingFortress `0x4CBAC0` 也是。
+  要只要「地图」就看静态位（`MapFixedRay`）。
+
 可选：`0x1082E0(const void* result /* = collector+0x30 */)` 返回命中面的地表类型（u8），内部用 `g+0x10` 查材质表。直升机命中后会调用它（`0x654711`），避障用不到。
 
 ## 3. 碰撞层（H，数据来自 `CollisionFilter` 构造函数 `0x105510`）

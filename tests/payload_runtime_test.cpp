@@ -1,4 +1,5 @@
 #include "../src/payload.cpp"
+#include "seat_net_fake.inc"
 #include <cstdio>
 #include <initializer_list>
 namespace crew {
@@ -12,7 +13,8 @@ unsigned char* PlayerHuman() noexcept { return trackedHuman; }
 Config& MutableConfig() { return cfg; }
 const Config& Cfg() noexcept { return cfg; }
 ULONGLONG GameMs() noexcept { return now; }
-bool MapHoldsKeys() noexcept { return false; }
+bool mapHeld=false;
+bool MapHoldsKeys() noexcept { return mapHeld; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
 bool AiGunner(const unsigned char*,const unsigned char* s) noexcept { return authority && SeatRider(s)==Rider::other; }
 void Log(const char*,...) noexcept {}
@@ -20,10 +22,18 @@ bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 bool IsStoreWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
 const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG", StoreRole::ground,0,0},gunSpec{L"HP", "HP", StoreRole::gun,0,0},
-                coaxSpec{L"MG", "MG", StoreRole::coax,0,0};
+                coaxSpec{L"MG", "MG", StoreRole::coax,0,0},
+                npcPairedLeft{L"PAIR_L", "pair", StoreRole::gun,0,0,1,0},npcPairedRight{L"PAIR_R", "pair", StoreRole::gun,0,0,1,1},
+                npcNativeHE{L"NATIVE_HE", "HE", StoreRole::gun,0,0,0,0,true},npcNativeAP{L"NATIVE_AP", "AP", StoreRole::gun,0,0,0,0,true},
+                bmptMissile{L"BMPT_ATGM", "Ataka", StoreRole::ground,0,0,0,0,false,StoreShell::native,true},
+                bmptApLeft{L"BMPT_AP", "APDS", StoreRole::gun,0,0,3,0},bmptApRight{L"BMPT_AP_R", "APDS", StoreRole::gun,0,0,3,1},
+                bmptThermobaric{L"BMPT_ATGMF", "Ataka F", StoreRole::ground,0,0,0,0,false,StoreShell::native,true};
 const StoreSpec* StoreOf(const unsigned char* w) noexcept {
-    return w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : w[0x101]==5 ? &coaxSpec : nullptr;
+    return w[0x101]==10 ? &bmptMissile : w[0x101]==11 ? &bmptApLeft : w[0x101]==12 ? &bmptApRight : w[0x101]==13 ? &bmptThermobaric : w[0x101]==8 ? &npcNativeHE : w[0x101]==9 ? &npcNativeAP : w[0x101]==6 ? &npcPairedLeft : w[0x101]==7 ? &npcPairedRight : w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : w[0x101]==5 ? &coaxSpec : nullptr;
 }
+unsigned TwinPairOf(const unsigned char* w) noexcept { return w[0x103]; }   // stores.cpp's, by kTwinBarrels
+std::uint16_t padButtons=0;   // the XInput pad's buttons (map.cpp MapPadState): the own secondary's switch on a pad
+bool MapPadState(std::uint16_t* b,std::uint8_t* lt,std::uint8_t* rt) noexcept { *b=padButtons;*lt=*rt=0;return true; }
 int fileQueries=0;
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
     ++fileQueries;const auto file=At<const wchar_t*>(w,0x08);*n=file ? std::wcslen(file) : 0;return file;
@@ -32,7 +42,7 @@ void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
 bool ReadRound(const unsigned char* w,RoundModel* m) noexcept {
     // 3: a catalogued gun round of the grenade class (the flak's HE proximity), 4: a stock grenade round
-    *m={};m->kind=w[0x101]==1 || w[0x101]==2 ? RoundKind::homing : RoundKind::arc;m->lobbed=w[0x101]==3 || w[0x101]==4;m->speed=2;m->alive=300;return true;
+    *m={};m->kind=w[0x101]==1 || w[0x101]==2 || w[0x101]==10 || w[0x101]==13 ? RoundKind::homing : RoundKind::arc;m->lobbed=w[0x101]==3 || w[0x101]==4;m->speed=2;m->alive=300;return true;
 }
 namespace audio { void LockTone(int,float) noexcept {} }
 }
@@ -62,7 +72,7 @@ int main() {
     auto check=[&](bool ok,const char* msg){++checks;if(!ok){++fail;std::printf("FAIL: %s\n",msg);}};
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     unsigned char vehicles[2][0x2400]{},seats[2][edf::kSeatStride*2]{},ctrl[2][16]{},riders[2][0x2000]{};
-    unsigned char weapons[2][3][0x1600]{},holders[2][3][0x80]{};
+    unsigned char weapons[2][3][0x1600]{},holders[2][3][kHolderStride]{};
     unsigned char* seatHolders[2][3]{};
     cfg.enabled=cfg.stockStores=cfg.npcGunners=true;pullOk=true;
     for(int j=0;j<2;++j) {
@@ -246,6 +256,398 @@ int main() {
         reinterpret_cast<FiredFn>(reinterpret_cast<void**>(image+kMotionClasses[1].vtable)[kSlotFired])(veh,coaxHolder);
         check(stockFiredRuns==0 && vehicleFiredRuns==1,"the 601's coax too");
         VirtualProtect(image,0x2200000,old,&old);
+    }
+    // NPC driver uses the same paired-barrel redirect as the player, not two pulls on the selected leader.
+    {
+        ResetPayload();now+=1000;trackedHuman=nullptr;
+        static unsigned char v[0x2400]{},s[edf::kSeatStride]{},vc[16]{},rider[0x2000]{},rc[16]{},
+                             w[4][0x1600]{},h[4][kHolderStride]{},hc[4][16]{};
+        unsigned char* list[4]{};
+        Put<void*>(v,0,image+kVt603);Put<void*>(v,kSelfCtrl,vc);Put<int>(vc,8,1);
+        Put<void*>(v,kSeats,s);Put<std::uint64_t>(v,kSeatCount,1);Put<void*>(v,kHolders,h);Put<std::uint64_t>(v,kHolderCount,4);
+        Put<void*>(s,kSeatRider,rider);Put<void*>(s,kSeatRiderCtrl,rc);Put<int>(rc,8,1);
+        for(int i=0;i<4;++i) {
+            list[i]=h[i];Put<void*>(h[i],kHolderWeapon,w[i]);Put<void*>(h[i],kHolderCtrl,hc[i]);Put<int>(hc[i],8,1);
+            Put<int>(w[i],kWeaponAmmo,i<2 ? 0 : 10);Put<int>(w[i],kWeaponCapacity,10);Put<int>(w[i],kWeaponReloadTime,-1);
+            Put<float>(w[i],0x224,1000);Put<float>(w[i],0x89C,10);Put<float>(w[i],0x8B0,i<2 ? 0.0f : 4.0f);
+            Put<const wchar_t*>(w[i],kWeaponName,L"flak");Put<const wchar_t*>(w[i],8,L"V603_FLAK_GUNH01_DLC_L.SGO");
+            if(i>=2){w[i][0x100]=2;w[i][0x101]=static_cast<unsigned char>(i+4);}
+        }
+        Put<void*>(s,kSeatWeapons,list);Put<std::uint64_t>(s,kSeatWeaponCount,4);
+        check(NpcPayloadSelect(v,0,400,true)==w[2],"NPC chooses the real linked flak loadout for an aircraft");
+        PullHook(h[0]);check(w[2][kWeaponTrigger] && !w[3][kWeaponTrigger],"NPC left source fires linked left only");
+        w[2][kWeaponTrigger]=0;PullHook(h[1]);check(!w[2][kWeaponTrigger] && w[3][kWeaponTrigger],"NPC right source fires linked right only");
+        w[3][kWeaponTrigger]=0;Put<int>(w[2],kWeaponAmmo,0);
+        check(NpcPayloadSelect(v,0,400,true)==w[3],"NPC can choose the remaining right barrel when the linked leader is spent");
+        PullHook(h[0]);PullHook(h[1]);check(!w[2][kWeaponTrigger] && w[3][kWeaponTrigger],"NPC cannot redirect both native sources into the surviving single barrel");
+        w[3][kWeaponTrigger]=0;Put<std::uint64_t>(s,kSeatWeaponCount,2);
+        w[0][0x100]=w[1][0x100]=2;w[0][0x101]=8;w[1][0x101]=9;Put<int>(w[1],kWeaponAmmo,10);
+        check(NpcPayloadSelect(v,0,400,true)==w[1],"NPC selects AP native belt when HE is empty");
+        PullHook(h[0]);w[1][kWeaponTrigger]=0;PullHook(h[1]);
+        check(!w[0][kWeaponTrigger] && !w[1][kWeaponTrigger],"NPC second native source cannot repeat the selected AP shot");
+        Put<int>(w[0],kWeaponAmmo,10);Put<float>(w[0],0x8B0,4);
+        check(NpcPayloadSelect(v,0,400,false)==w[0],"NPC switches from AP back to HE against a ground target");
+        PullHook(h[1]);check(!w[0][kWeaponTrigger] && !w[1][kWeaponTrigger],"NPC unselected native AP stays silent after changing back");
+        PullHook(h[0]);check(w[0][kWeaponTrigger] && !w[1][kWeaponTrigger],"NPC native HE receives exactly its selected source");
+        w[0][kWeaponTrigger]=0;cfg.stockStores=false;Put<int>(w[0],kWeaponAmmo,0);
+        check(NpcPayloadSelect(v,0,400,true)==w[1],"NPC keeps native alternate ammunition selection when optional stores are off");
+        PullHook(h[1]);check(!w[1][kWeaponTrigger],"optional stores off still suppresses NPC's redundant second native pull");
+        PullHook(h[0]);check(w[1][kWeaponTrigger] && !w[0][kWeaponTrigger],"optional stores off preserves NPC single-belt firing");cfg.stockStores=true;
+    }
+    // Online (seat_net.h Pick): a seat's pick goes to the vehicle's copies; there the seat's pulls land on it too.
+    {
+        using seat_net::Pick;
+        ResetPayload();now+=1000;cfg.stockStores=true;
+        auto v=vehicles[0];auto seat=SeatAt(v,0);
+        // The vehicle's holder array at the real stride (veh +0x638): a pick names its weapon by the holder's index there.
+        alignas(16) static unsigned char array[3*kHolderStride]{};
+        unsigned char* const* const oldList=At<unsigned char* const*>(seat,kSeatWeapons);
+        static unsigned char* list[3]{};
+        for(int i=0;i<3;++i){list[i]=array+i*kHolderStride;Put<void*>(list[i],kHolderWeapon,weapons[0][i]);Put<void*>(list[i],kHolderCtrl,ctrl[0]);}
+        Put<void*>(v,kHolders,array);Put<void*>(seat,kSeatWeapons,list);
+        unsigned char* holders0[3]={list[0],list[1],list[2]};
+        Put<void*>(v,0,image+kVt403);Put<std::uint64_t>(seat,kSeatWeaponCount,3);Put<std::uint64_t>(v,kHolderCount,3);
+        for(int i=0;i<3;++i){Put<int>(weapons[0][i],kWeaponAmmo,10);weapons[0][i][kWeaponTrigger]=0;weapons[0][i][0x102]=0;
+                             Put<float>(weapons[0][i],0x89C,10);}
+        weapons[0][1][0x101]=1;Put<const wchar_t*>(weapons[0][1],0x08,L"EDF6VC_AAM_S_2.SGO");
+        pickNetOk=seat_net::Register(seat_net::kPickMagic,&PickReceived);   // InstallPayload's, past its native pull patch
+        check(pickNetOk && seat_net::fakeMagic==seat_net::kPickMagic && seat_net::fakeHandler,"the pick kind has its receiver");
+        // This machine's player in the gunner seat, on a pad: LB picks the next weapon; the pick goes out at once.
+        riders[0][edf::kHumanPlayer]=1;Put<void*>(riders[0],edf::kHumanPad,riders[0]);riders[0][edf::kRiderNet+edf::kNetFlags]=0;
+        trackedHuman=riders[0];authority=true;
+        seat[kSeatPad]=1;Put<std::uint16_t>(seat,kSeatButtons,0);
+        fakeSession=true;Put<std::uint16_t>(v,0x128,2);
+        int from=seat_net::fakeSends;
+        now+=16;PayloadFrame(v);
+        Pick sent{};
+        check(seat_net::LastPick(from,&sent) && sent.seat==0 && sent.holder==0 && !(sent.flags&seat_net::kNpc),
+              "boarding: the seat's pick (the main gun, holder 0) goes to the copies");
+        from=seat_net::fakeSends;now+=16;PayloadFrame(v);
+        check(seat_net::fakeSends==from,"unchanged within the refresh: nothing sent");
+        Put<std::uint16_t>(seat,kSeatButtons,0x10);now+=16;PayloadFrame(v);Put<std::uint16_t>(seat,kSeatButtons,0);
+        check(seat_net::LastPick(from,&sent) && sent.holder==1,"LB: the new pick (holder 1) at once");
+        from=seat_net::fakeSends;now+=seat_net::kPickRefreshMs;PayloadFrame(v);
+        check(seat_net::LastPick(from,&sent) && sent.holder==1,"refreshed every kPickRefreshMs");
+        fakeSession=false;from=seat_net::fakeSends;now+=seat_net::kPickRefreshMs;PayloadFrame(v);
+        check(seat_net::fakeSends==from,"offline: no pick goes out");
+        // Another machine's copy of that vehicle: the seat's rider is that machine's player (its network flag), this
+        // machine runs no one there. Before any pick its pulls are the stock gun's.
+        ResetPayload();fakeSession=true;authority=false;trackedHuman=nullptr;
+        riders[0][edf::kRiderNet+edf::kNetFlags]=1;Put<void*>(riders[0],edf::kHumanPad,nullptr);
+        check(SeatRider(seat)==Rider::other && IsAnyPlayer(riders[0]),"fixture: another machine's player in the seat");
+        for(int i=0;i<3;++i)weapons[0][i][kWeaponTrigger]=0;
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"no pick heard: the stock pull is the gun's");
+        weapons[0][0][kWeaponTrigger]=0;
+        sent.head.sender=0x77;sent.head.sequence=5;sent.head.controller=-1;
+        seat_net::fakeHandler(v,&sent,sizeof(sent));
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"the remote player's pick: this copy's pull lands on it too");
+        check(!PayloadPicked(v),"a remote pick is no pick of this machine's player (its HUD, its sight)");
+        Pick back=sent;back.holder=0;back.head.sequence=4;
+        seat_net::fakeHandler(v,&back,sizeof(back));
+        weapons[0][1][kWeaponTrigger]=0;now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1,"an older message from that sender cannot undo the pick");
+        Pick epoch=sent;epoch.holder=0;epoch.head.sequence=9;epoch.head.controller=42;
+        seat_net::fakeHandler(v,&epoch,sizeof(epoch));
+        weapons[0][1][kWeaponTrigger]=0;now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1,"a message of another control epoch (a rider who left) is refused");
+        Pick bad=sent;bad.reserved=1;bad.head.sequence=10;bad.holder=0;
+        seat_net::fakeHandler(v,&bad,sizeof(bad));seat_net::fakeHandler(v,&bad,sizeof(bad)-4);
+        weapons[0][1][kWeaponTrigger]=0;now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1,"a malformed block is ignored");
+        weapons[0][1][kWeaponTrigger]=0;now+=seat_net::kPickStaleMs+1;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"a pick not refreshed goes stale: stock again");
+        weapons[0][0][kWeaponTrigger]=0;
+        // The record went with it, the sender's watermark did not (2026-10-20 review: it lived in the record): a delayed
+        // older pick is still refused, a newer one taken; another room's members start the watermarks over.
+        Pick late=sent;late.head.sequence=3;
+        seat_net::fakeHandler(v,&late,sizeof(late));
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"a delayed older pick after the record expired: still refused");
+        weapons[0][0][kWeaponTrigger]=0;
+        Pick newer=sent;newer.head.sequence=6;
+        seat_net::fakeHandler(v,&newer,sizeof(newer));
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"a newer pick of that sender: taken");
+        weapons[0][1][kWeaponTrigger]=0;
+        seat_net::fakeHandler(v,&late,sizeof(late));
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1,"...and the old one after it refused");
+        weapons[0][1][kWeaponTrigger]=0;
+        Pick gun=sent;gun.holder=0;gun.head.sequence=7;
+        seat_net::fakeHandler(v,&gun,sizeof(gun));
+        ++plugin_net::fakeRoomGeneration;
+        seat_net::fakeHandler(v,&late,sizeof(late));   // sequence 3, the store: below 7, but the room is another now
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"another room's members: the watermarks start over");
+        weapons[0][1][kWeaponTrigger]=0;
+        now+=seat_net::kPickStaleMs+1;PayloadFrame(v);
+        // This machine's own player takes the seat: a pick heard for it never applies (it runs the seat itself).
+        sent.head.sequence=20;seat_net::fakeHandler(v,&sent,sizeof(sent));
+        riders[0][edf::kRiderNet+edf::kNetFlags]=0;Put<void*>(riders[0],edf::kHumanPad,riders[0]);trackedHuman=riders[0];
+        sent.head.sequence=21;seat_net::fakeHandler(v,&sent,sizeof(sent));
+        Put<std::uint16_t>(seat,kSeatButtons,0);now+=16;PayloadFrame(v);
+        PayloadReadout local{};
+        check(PlayerPayload(&local) && local.picked==0,"the local player's own pick (the gun), not the remote one");
+        // An NPC gunner: the machine that runs it (AiGunner) sends its pick, flagged; a copy lands its pulls the same way.
+        ResetPayload();trackedHuman=nullptr;riders[0][edf::kHumanPlayer]=0;Put<void*>(riders[0],edf::kHumanPad,nullptr);
+        riders[0][edf::kRiderNet+edf::kNetFlags]=0;authority=true;
+        from=seat_net::fakeSends;
+        check(NpcPayloadSelect(v,0,400,true)==weapons[0][1],"the NPC picks the AA store against an aircraft");
+        check(seat_net::LastPick(from,&sent) && sent.holder==1 && (sent.flags&seat_net::kNpc),"...and sends it, flagged as an NPC's");
+        ResetPayload();authority=false;   // the copy: this machine does not run that NPC
+        sent.head.sender=0x99;seat_net::fakeHandler(v,&sent,sizeof(sent));
+        for(int i=0;i<3;++i)weapons[0][i][kWeaponTrigger]=0;
+        now+=16;PayloadFrame(v);PullHook(holders0[0]);
+        check(weapons[0][1][kWeaponTrigger]==1 && !weapons[0][0][kWeaponTrigger],"the host's NPC pick: the copy's pull lands on the store");
+        fakeSession=false;now+=16;PayloadFrame(v);weapons[0][1][kWeaponTrigger]=0;PullHook(holders0[0]);
+        check(weapons[0][0][kWeaponTrigger]==1 && !weapons[0][1][kWeaponTrigger],"the session left: remote picks dropped");
+        seat[kSeatPad]=0;Put<std::uint16_t>(v,0x128,0);authority=true;
+        Put<void*>(v,kHolders,holders[0]);Put<void*>(seat,kSeatWeapons,const_cast<unsigned char**>(oldList));
+        for(int i=0;i<3;++i)weapons[0][i][kWeaponTrigger]=0;
+    }
+    // BMPT: the authored V603 has two native cannon sources and one independent missile holder.
+    // Both real seat triggers may be held together; R/LB must never turn them into alternate ammunition.
+    {
+        ResetPayload();now+=1000;
+        auto* v=vehicles[1];auto* s=SeatAt(v,0);
+        Put<void*>(v,0,image+kVt603);Put<std::uint64_t>(v,kSeatCount,1);
+        Put<std::uint64_t>(s,kSeatWeaponCount,3);
+        trackedHuman=riders[1];riders[1][edf::kHumanPlayer]=1;Put<void*>(riders[1],edf::kHumanPad,riders[1]);
+        cfg.stockStores=true;
+        for(int i=0;i<3;++i) {
+            auto* w=weapons[1][i];w[0x100]=i==2 ? 2 : 0;w[0x101]=i==2 ? 10 : 0;
+            Put<int>(w,kWeaponAmmo,10);Put<int>(w,kWeaponReloadTime,-1);w[kWeaponTrigger]=0;
+            Put<float>(w,0x224,1800);Put<float>(w,0x6D0,1800);Put<float>(w,0x8B0,i==2 ? 6.0f : 1.2f);
+        }
+        Put<float>(s,0x2E4,0);Put<float>(s,0x2E0,0);PayloadFrame(v);
+        PayloadReadout r{};
+        check(PlayerPayload(&r) && r.count==3 && r.entry[0].fire==PayloadFire::primary && r.entry[1].fire==PayloadFire::primary &&
+              r.entry[2].fire==PayloadFire::secondary,"BMPT: both cannons are primary, the missile is independent secondary");
+        check(!r.choices && !r.entry[0].selectable && !r.entry[1].selectable && !r.entry[2].selectable && !PayloadPicked(v) &&
+              !r.selectionToken && !RequestPayloadSelection(r.selectionToken,r.seat,2),
+              "BMPT: no weapon is an R/LB alternate and no missile redirect exists");
+        Put<unsigned char>(s,kSeatPad,1);Put<std::uint16_t>(s,kSeatButtons,kButtonLB);now+=16;PayloadFrame(v);
+        check(PlayerPayload(&r) && !r.choices && !weapons[1][2][kWeaponTrigger],"LB cannot select or launch a BMPT missile");
+        Put<float>(s,0x2E4,1);now+=16;PayloadFrame(v);PullHook(holders[1][0]);PullHook(holders[1][1]);
+        check(weapons[1][0][kWeaponTrigger] && weapons[1][1][kWeaponTrigger] && !weapons[1][2][kWeaponTrigger],
+              "primary pulls both cannons and never the missile");
+        weapons[1][0][kWeaponTrigger]=weapons[1][1][kWeaponTrigger]=0;
+        Put<float>(s,0x2E0,1);now+=16;PayloadFrame(v);PullHook(holders[1][0]);PullHook(holders[1][1]);
+        check(weapons[1][0][kWeaponTrigger] && weapons[1][1][kWeaponTrigger] && weapons[1][2][kWeaponTrigger],
+              "holding both actual seat triggers fires both cannons and the independent missile together");
+        check(PayloadSightPicked(v,0)==weapons[1][2],"secondary trigger edge selects the missile optic without changing cannon firing");
+        unsigned char* all[kMostPayload]{};
+        check(PayloadTriggerWeapons(v,0,all,kMostPayload)==3 && all[0]==weapons[1][0] && all[1]==weapons[1][1] && all[2]==weapons[1][2],
+              "HUD enumerates the simultaneous cannon and missile controls");
+        const unsigned char* aimed=nullptr;
+        check(PayloadAimWeapon(v,0,weapons[1][0],&aimed) && aimed==weapons[1][0] &&
+              PayloadAimWeapon(v,0,weapons[1][2],&aimed) && aimed==weapons[1][2],"aim API keeps the native cannon and missile groups distinct");
+        cfg.stockStores=false;weapons[1][2][kWeaponTrigger]=0;now+=16;PayloadFrame(v);
+        check(weapons[1][2][kWeaponTrigger] && NativePayloadControl(v,0),"BMPT intrinsic missile remains available when optional stores are disabled");
+        weapons[1][2][kWeaponTrigger]=0;Put<float>(s,0x2E0,0);now+=16;PayloadFrame(v);
+        check(!weapons[1][2][kWeaponTrigger],"releasing secondary stops further missile pulls");
+        Put<float>(s,0x2E0,1);mapHeld=true;now+=16;PayloadFrame(v);
+        check(!weapons[1][2][kWeaponTrigger],"map-owned local controls never launch the missile");mapHeld=false;
+        Put<int>(weapons[1][2],kWeaponAmmo,0);now+=16;PayloadFrame(v);
+        weapons[1][0][kWeaponTrigger]=weapons[1][1][kWeaponTrigger]=0;PullHook(holders[1][0]);PullHook(holders[1][1]);
+        check(!weapons[1][2][kWeaponTrigger] && weapons[1][0][kWeaponTrigger] && weapons[1][1][kWeaponTrigger],
+              "an empty missile cannot consume or suppress either cannon");
+        Put<int>(weapons[1][2],kWeaponAmmo,4);riders[1][edf::kHumanPlayer]=0;trackedHuman=nullptr;
+        PayloadFire fire=PayloadFire::other;
+        check(NpcPayloadSelect(v,0,400,false,&fire)==weapons[1][0] && fire==PayloadFire::primary &&
+              NpcSecondarySelect(v,0,400,false)==weapons[1][2],"NPC plans main cannon and guided secondary independently");
+        check(NpcSecondarySelect(v,0,1000,false)==weapons[1][2] && !NpcPayloadSelect(v,0,1000,false,&fire),
+              "missile remains usable beyond cannon lifetime reach without inventing a cannon shot");
+        check(PayloadAimWeapon(v,0,weapons[1][0],&aimed) && !aimed &&
+              PayloadAimWeapon(v,0,weapons[1][2],&aimed) && aimed==weapons[1][2],
+              "NPC out-of-range main plan is authoritative empty while the independent missile keeps its own aim group");
+        check(!NpcSecondarySelect(v,0,400,true) && !NpcSecondarySelect(v,0,1801,false),"ground missile respects role and actual native lock reach");
+        weapons[1][0][kWeaponTrigger]=weapons[1][1][kWeaponTrigger]=weapons[1][2][kWeaponTrigger]=0;
+        NpcPayloadSelect(v,0,400,false,&fire);Put<float>(s,0x2E0,1);
+        check(!FireIndependentSecondary(v,0,weapons[1][0]) && !weapons[1][2][kWeaponTrigger],
+              "NPC cannot pull a missile using another weapon's native approval");
+        check(FireIndependentSecondary(v,0,weapons[1][2]),"authoritative NPC secondary intent pulls only its approved intrinsic missile");
+        PullHook(holders[1][0]);PullHook(holders[1][1]);
+        check(weapons[1][0][kWeaponTrigger] && weapons[1][1][kWeaponTrigger] && weapons[1][2][kWeaponTrigger],
+              "NPC missile pull never redirects or suppresses either main cannon");
+        check(!NpcPayloadSelect(v,0,0.0f,false,&fire) && PayloadAimWeapon(v,0,weapons[1][0],&aimed) && !aimed,
+              "NPC target loss stays authoritative empty for the primary with optional stores disabled");
+        weapons[1][2][kWeaponTrigger]=0;authority=false;
+        check(!NpcSecondarySelect(v,0,400,false) && !FireIndependentSecondary(v,0),"remote or lost NPC authority cannot plan or fire a second copy");authority=true;
+        Put<int>(ctrl[1],8,0);
+        check(!NpcSecondarySelect(v,0,400,false) && !FireIndependentSecondary(v,0),"expired live holders cannot plan or launch stale missiles");Put<int>(ctrl[1],8,1);
+        cfg.stockStores=true;
+    }
+    // BMPT as built (2026-10-21, docs/feedback-2026-10-21-bmpt-fire.md): six holders, the native HE guns L/R (primary),
+    // the Ataka, the APDS belt L/R (group 3) and the 9M120F. The user: 「bmpt应该是双炮管轮流开火的……没办法机炮和导弹
+    // 一块开火」: the cannons on the primary, either missile on the secondary, both at once; the barrels in turn.
+    {
+        ResetPayload();now+=1000;cfg.stockStores=true;twinOk=true;
+        auto* v=vehicles[1];auto* s=SeatAt(v,0);
+        alignas(16) static unsigned char array[6*kHolderStride]{};
+        static unsigned char w6[6][0x1600]{};
+        static unsigned char* list[6]{};
+        const wchar_t* const files[6]={L"EDF6VC_BMPT_L.SGO",L"EDF6VC_BMPT_R.SGO",L"EDF6VC_BMPT_ATGM_4.SGO",
+                                       L"EDF6VC_BMPT_AP_150.SGO",L"EDF6VC_BMPT_AP_R_150.SGO",L"EDF6VC_BMPT_ATGMF_4.SGO"};
+        const unsigned char kinds[6]={0,0,10,11,12,13},pairs[6]={1,1,0,2,2,0};
+        for(int i=0;i<6;++i) {
+            auto* w=w6[i];list[i]=array+i*kHolderStride;
+            Put<void*>(list[i],kHolderWeapon,w);Put<void*>(list[i],kHolderCtrl,ctrl[1]);
+            w[0x100]=i<2 ? 0 : 2;w[0x101]=kinds[i];w[0x102]=0;w[0x103]=pairs[i];Put<const wchar_t*>(w,0x08,files[i]);
+            Put<int>(w,kWeaponAmmo,10);Put<int>(w,kWeaponReloadTime,-1);w[kWeaponTrigger]=0;
+            Put<float>(w,0x224,1800);Put<float>(w,0x6D0,1800);Put<float>(w,0x8B0,kinds[i]==10 || kinds[i]==13 ? 6.0f : 1.2f);
+            Put<float>(w,0x89C,10);Put<std::int32_t>(w,kWeaponInterval,12);Put<float>(w,kWeaponCooldown,0.0f);
+            Put<float>(w,kWeaponCooldownStep,1.0f);
+        }
+        unsigned char** const oldList=At<unsigned char**>(s,kSeatWeapons);
+        void* const oldHolders=At<void*>(v,kHolders);
+        Put<void*>(v,0,image+kVt603);Put<std::uint64_t>(v,kSeatCount,1);Put<void*>(v,kHolders,array);Put<std::uint64_t>(v,kHolderCount,6);
+        Put<void*>(s,kSeatWeapons,list);Put<std::uint64_t>(s,kSeatWeaponCount,6);
+        trackedHuman=riders[1];riders[1][edf::kHumanPlayer]=1;Put<void*>(riders[1],edf::kHumanPad,riders[1]);
+        Put<unsigned char>(s,kSeatPad,1);Put<std::uint16_t>(s,kSeatButtons,0);
+        const auto latches=[&]() {unsigned m=0;for(int i=0;i<6;++i)if(w6[i][kWeaponTrigger])m|=1u<<i;return m;};
+        const auto clear=[&]() {for(auto& w:w6)w[kWeaponTrigger]=0;};
+        // One frame: the seat's triggers, the stock 603 input's two pulls on the primary, the frame's twin cadence.
+        const auto frame=[&](bool primaryHeld,bool secondaryHeld) {
+            clear();Put<float>(s,0x2E4,primaryHeld ? 1.0f : 0.0f);Put<float>(s,0x2E0,secondaryHeld ? 1.0f : 0.0f);
+            now+=16;PayloadFrame(v);
+            if(primaryHeld){PullHook(list[0]);PullHook(list[1]);}
+            TwinBarrelFrame(v);
+            return latches();
+        };
+        frame(false,false);
+        PayloadReadout r{};
+        check(PlayerPayload(&r) && r.count==6 && r.entry[0].fire==PayloadFire::primary && r.entry[1].fire==PayloadFire::primary &&
+              r.entry[2].fire==PayloadFire::secondary && r.entry[5].fire==PayloadFire::secondary &&
+              r.entry[3].fire==PayloadFire::store && r.entry[4].fire==PayloadFire::store,
+              "BMPT x6: the guns and their APDS belt on the primary, both Ataka rounds on the secondary");
+        check(r.entry[0].selectable && r.entry[3].selectable && r.entry[2].selectable && r.entry[5].selectable && r.choices==2 &&
+              r.entry[0].picked && r.entry[2].picked && !r.entry[5].picked,
+              "BMPT x6: two cycles (HE / APDS, Ataka / 9M120F), the native belt and the Ataka picked first");
+        // The two controls at once: both guns' pulls stay theirs, the Ataka's latch rides the secondary.
+        unsigned m=frame(true,true);
+        check((m&1u) && (m&4u) && !(m&2u) && !(m&0x38u),
+              "both triggers: the left gun and the Ataka fire together; the right barrel waits its turn (twin cadence)");
+        Put<float>(w6[0],kWeaponCooldown,12.0f);Put<int>(w6[0],kWeaponAmmo,9);   // the left barrel's shot
+        m=frame(true,true);
+        check((m&1u) && !(m&2u) && (m&4u),"the left just fired (its pull on a cooling gun): the right is held while the left is in its first half interval");
+        Put<float>(w6[0],kWeaponCooldown,7.0f);m=frame(true,true);   // 6 after this frame's countdown: half its 12
+        check((m&2u) && (m&1u) && (m&4u),"half an interval on: the right barrel fires (the left's own cooldown keeps it from firing)");
+        Put<float>(w6[1],kWeaponCooldown,12.0f);Put<int>(w6[1],kWeaponAmmo,9);Put<float>(w6[0],kWeaponCooldown,0.0f);
+        m=frame(true,false);
+        check(!(m&1u) && !(m&4u),"the right just fired: the left waits; secondary released, no missile");
+        Put<float>(w6[1],kWeaponCooldown,7.0f);m=frame(true,false);
+        check((m&1u),"...and fires half an interval after the right: left, right, left");
+        // A partner that cannot fire is none: the left alone fires at its own rate.
+        Put<float>(w6[1],kWeaponCooldown,12.0f);Put<int>(w6[1],kWeaponAmmo,0);m=frame(true,false);
+        check((m&1u),"a barrel out of rounds holds nothing back");
+        Put<int>(w6[1],kWeaponAmmo,9);Put<float>(w6[1],kWeaponCooldown,0.0f);Put<float>(w6[0],kWeaponCooldown,0.0f);
+        Put<int>(w6[0],kWeaponAmmo,9);
+        m=frame(true,false);
+        check((m&1u) && !(m&2u),"both ready, the same rounds: the left first");
+        Put<int>(w6[0],kWeaponAmmo,8);m=frame(true,false);
+        check((m&2u) && !(m&1u),"both ready: the barrel with more rounds left first (the belts stay even)");
+        twinOk=false;m=frame(true,false);
+        check((m&1u) && (m&2u),"cadence off (EDF.dll not the one read): the stock pair fires together");twinOk=true;
+        // R / LB with the primary in use: the APDS belt, both barrels, still in turn.
+        frame(true,false);
+        Put<std::uint16_t>(s,kSeatButtons,kButtonLB);frame(false,false);Put<std::uint16_t>(s,kSeatButtons,0);
+        check(PlayerPayload(&r) && r.entry[3].picked && r.entry[4].picked && r.entry[2].picked && !r.entry[5].picked,
+              "LB after a primary edge: the gun belt moves to APDS, the missile pick is left alone");
+        for(auto& w:w6){Put<float>(w,kWeaponCooldown,0.0f);Put<int>(w,kWeaponAmmo,9);}
+        m=frame(true,true);
+        check((m&8u) && !(m&16u) && (m&4u) && !(m&3u),"APDS picked: the pulls land on the APDS barrels, in turn; the Ataka beside them");
+        // A secondary edge, then R / LB: the missile cycle moves, the cannons keep APDS.
+        // Each switch its own control, whatever was fired last (the user, 2026-10-21: 「学学战雷」): LB after a
+        // secondary edge still the gun's rounds; the d-pad right (VehicleSecondarySwitchButton) the missile, after a
+        // primary edge too.
+        frame(false,false);frame(false,true);frame(false,false);   // a secondary edge of its own (released first)
+        Put<std::uint16_t>(s,kSeatButtons,kButtonLB);frame(false,false);Put<std::uint16_t>(s,kSeatButtons,0);
+        check(PlayerPayload(&r) && r.entry[0].picked && !r.entry[3].picked && r.entry[2].picked && !r.entry[5].picked,
+              "LB after a secondary edge: the gun's rounds (APDS -> HE), never the missile");
+        frame(false,false);Put<std::uint16_t>(s,kSeatButtons,kButtonLB);frame(false,false);Put<std::uint16_t>(s,kSeatButtons,0);
+        check(PlayerPayload(&r) && r.entry[3].picked && r.entry[2].picked,"LB again: APDS, the missile still the Ataka");
+        frame(true,false);frame(false,false);   // a primary edge
+        padButtons=0x0008;frame(false,false);padButtons=0;
+        check(PlayerPayload(&r) && r.entry[5].picked && !r.entry[2].picked && r.entry[3].picked && r.ownPicked==5 &&
+              r.ownChoices==2 && r.picked==3 && r.choices==2 && r.ownSwitchButton==cfg.vehicleSecondarySwitchButton,
+              "d-pad right after a primary edge: the 9M120F picked, the APDS belt kept; the readout names both cycles");
+        padButtons=0x0008;frame(false,false);
+        check(PlayerPayload(&r) && r.entry[5].picked,"the switch held: one press, one step");padButtons=0;
+        Put<unsigned char>(s,kSeatPad,0);mapHeld=true;frame(false,false);mapHeld=false;Put<unsigned char>(s,kSeatPad,1);
+        check(PlayerPayload(&r) && r.entry[5].picked,"a pad seat ignores the keyboard key; the map holding keys switches nothing");
+        m=frame(true,true);
+        check((m&32u) && !(m&4u) && (m&8u),"secondary pulls the 9M120F only; the primary still the APDS belt");
+        unsigned char* all[kMostPayload]{};
+        check(PayloadTriggerWeapons(v,0,all,kMostPayload)==3 && all[0]==w6[3] && all[1]==w6[4] && all[2]==w6[5],
+              "the HUD's trigger weapons: the APDS pair, then only the missile the secondary fires");
+        frame(false,false);frame(false,true);
+        check(PayloadSightPicked(v,0)==w6[5],"the secondary in use: the sight follows the picked missile");
+        // The 9M120F spent for good: the secondary moves to the Ataka by itself.
+        Put<int>(w6[5],kWeaponAmmo,0);frame(false,false);
+        check(PlayerPayload(&r) && r.entry[2].picked && !r.entry[5].selectable,"a spent own round: the next one with rounds");
+        Put<int>(w6[5],kWeaponAmmo,4);
+        // Optional stores off: the guns' APDS belt is a store and goes, the own missiles stay (the vehicle's own).
+        cfg.stockStores=false;m=frame(true,true);
+        check((m&1u) && (m&4u) && !(m&8u),"StockVehicleStores=0: HE guns and the Ataka still fire together");
+        cfg.stockStores=true;
+        // NPC: the cannons and a missile planned apart, the missile pick remembered for its aim.
+        trackedHuman=nullptr;riders[1][edf::kHumanPlayer]=0;Put<void*>(riders[1],edf::kHumanPad,nullptr);
+        PayloadFire fire=PayloadFire::other;
+        unsigned char* const npcGun=NpcPayloadSelect(v,0,400,false,&fire);
+        check((npcGun==w6[0] || npcGun==w6[3]) && fire==PayloadFire::primary,"NPC: a belt of the gun pair on the primary, never a missile");
+        unsigned char* const npcMissile=NpcSecondarySelect(v,0,400,false);
+        check(npcMissile==w6[2] || npcMissile==w6[5],"NPC: one of the own missiles on the secondary");
+        clear();Put<float>(s,0x2E0,1.0f);
+        check(FireIndependentSecondary(v,0,npcMissile) && npcMissile[kWeaponTrigger] && latches()==(npcMissile==w6[2] ? 4u : 32u),
+              "NPC: only the approved missile is pulled");
+        Put<float>(s,0x2E4,1.0f);PullHook(list[0]);PullHook(list[1]);TwinBarrelFrame(v);
+        {const unsigned g=latches()&0x1Bu;check(g && !(g&(g-1)),"NPC: its guns fire in turn too (one barrel of the picked belt)");}
+        const unsigned char* aimed=nullptr;
+        check(PayloadAimWeapon(v,0,w6[5],&aimed) && aimed==w6[5],"an own missile aims as itself");
+        // A copy of a remote player's BMPT: the copy's own pulls (its input) in turn as well; no missile pulled here.
+        riders[1][edf::kRiderNet+edf::kNetFlags]=1;authority=false;
+        clear();Put<float>(s,0x2E0,1.0f);PayloadFrame(v);
+        check(!(latches()&36u),"a copy never pulls a remote seat's missile (its shot comes from the shooter's machine)");
+        PullHook(list[0]);PullHook(list[1]);TwinBarrelFrame(v);
+        check((latches()&3u)==1u || (latches()&3u)==2u,"a copy's pulls of the guns: in turn");
+        // ...and that copy hearing the seat's pick (2026-10-24 review: the remote HE pick was redirected because the seat
+        // has an intrinsic secondary, the left pull mapped to itself and the right one to no target: latches L=1 R=0).
+        // A pick lands the copy's pulls as the shooter's own machine does (Switch): HE leaves the stock pair theirs,
+        // APDS moves both onto its barrels; the cadence comes after (TwinBarrelFrame), so both pulls are seen first.
+        {
+            ResetPayload();fakeSession=true;Put<std::uint16_t>(v,0x128,2);Put<float>(s,0x2E0,0.0f);
+            pickNetOk=seat_net::Register(seat_net::kPickMagic,&PickReceived);
+            seat_net::Pick heard{};heard.head.sender=0x77;heard.head.controller=-1;
+            std::uint32_t sequence=0;
+            const auto hear=[&](std::int32_t holder,bool npc) {
+                heard.seat=0;heard.holder=holder;heard.flags=npc ? seat_net::kNpc : 0;heard.head.sequence=++sequence;
+                seat_net::fakeHandler(v,&heard,sizeof(heard));
+                clear();now+=16;PayloadFrame(v);PullHook(list[0]);PullHook(list[1]);
+                return latches();
+            };
+            for(const bool npc:{false,true}) {
+                riders[1][edf::kHumanPlayer]=npc ? 0 : 1;Put<void*>(riders[1],edf::kHumanPad,nullptr);
+                check(npc ? !AiGunner(v,s) : SeatRider(s)==Rider::other && IsAnyPlayer(riders[1]),
+                      npc ? "fixture: another machine's NPC gunner in the BMPT" : "fixture: another machine's player in the BMPT");
+                m=hear(0,npc);
+                check(m==3u,npc ? "remote NPC picks HE: both stock pulls latch their own barrel (L and R)"
+                                : "remote player picks HE: both stock pulls latch their own barrel (L and R)");
+                m=hear(3,npc);
+                check(m==24u,npc ? "remote NPC picks APDS: both pulls land on the APDS pair, none on HE"
+                                 : "remote player picks APDS: both pulls land on the APDS pair, none on HE");
+                m=hear(0,npc);
+                check(m==3u,"back to HE: the stock pair again, both barrels");
+                ResetPayload();
+            }
+            riders[1][edf::kHumanPlayer]=0;fakeSession=false;Put<std::uint16_t>(v,0x128,0);
+        }
+        riders[1][edf::kRiderNet+edf::kNetFlags]=0;authority=true;
+        Put<void*>(v,kHolders,oldHolders);Put<std::uint64_t>(v,kHolderCount,3);
+        Put<void*>(s,kSeatWeapons,oldList);Put<std::uint64_t>(s,kSeatWeaponCount,3);
+        Put<float>(s,0x2E4,0);Put<float>(s,0x2E0,0);Put<unsigned char>(s,kSeatPad,0);twinOk=false;
     }
     ResetPayload();check(!PayloadPicked(vehicles[0]),"mission reset clears choices");
     VirtualFree(image,0,MEM_RELEASE);std::printf("payload runtime: %d checks, %d failures\n",checks,fail);return fail ? 1 : 0;

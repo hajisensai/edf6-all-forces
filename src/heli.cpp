@@ -55,6 +55,7 @@
 #include "rescue_logic.h"
 #include "helipad.h"
 #include "log_once.h"
+#include "profile_sigs.h"
 #include <cmath>
 #include <cstdarg>
 
@@ -270,14 +271,8 @@ const HeliType* TypeOf(const void* vehicle) noexcept {
 // Two references to one object (both taken from it while it lived).
 bool Same(const ObjRef& a,const ObjRef& b) noexcept { return a.obj==b.obj && a.ctrl==b.ctrl; }
 
-struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
-const Signature kHeliSignatures[]={
-    {0x6543A0,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x68,0x10,0x48,0x89,0x70,0x18,0x48},16},   // base input
-    {0x61B8F0,{0x48,0x89,0x5C,0x24,0x18,0x48,0x89,0x6C,0x24,0x20,0x56,0x48,0x83,0xEC,0x20,0x48},16},   // 506 input
-    {0x65451A,{0x4C,0x89,0xB7,0x40,0x15,0x00,0x00,0x44,0x89,0xB7,0x48,0x15,0x00,0x00,0x48,0xC7},16},   // input block reset
-    {0x61B71E,{0x80,0xBB,0x20,0x20,0x00,0x00,0x00},7},                                                 // 506 gatlings read
-    {0x61B743,{0x80,0xBB,0x21,0x20,0x00,0x00,0x00},7},                                                 // 506 missile read
-};
+using sigs::Signature;
+using sigs::kHeliSignatures;   // profile_sigs.h
 bool profileOk=false;
 bool deleteOk=false;   // HeliReap may delete with the game's Delete (CheckHeliProfile)
 
@@ -308,9 +303,10 @@ struct alignas(16) RayHits { unsigned char raw[0xA0]; };
 // `filter`: the ray's collision filter (its layer; kMapLayer the game's map ray).
 constexpr std::uint32_t kMapLayer=0x16;
 constexpr std::uint32_t kObjectLayer=0x0B;   // the bullets' object layer (ObjectRay)
-// `normal`: the hit's normal (collector +0x40; whose side it faces: map_floor.h Learn).
+// `normal`: the hit's normal (collector +0x40; whose side it faces: map_floor.h Learn). `body`: the hit body's id
+// (collector +0x78, docs/raycast-re.md §2.2).
 float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,std::uint32_t* flags=nullptr,
-              std::uint32_t filter=kMapLayer,float* normal=nullptr) noexcept {
+              std::uint32_t filter=kMapLayer,float* normal=nullptr,std::uint32_t* body=nullptr) noexcept {
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
@@ -325,8 +321,39 @@ float CastRay(const float* a,const float* b,float* hit=nullptr,bool any=false,st
     if(hit)std::memcpy(hit,col.raw+0x30,12);
     if(flags)std::memcpy(flags,col.raw+0x9C,4);
     if(normal)std::memcpy(normal,col.raw+0x40,12);
+    if(body)std::memcpy(body,col.raw+0x78,4);
     const float d[3]={b[0]-a[0],b[1]-a[1],b[2]-a[2]};
     return f*std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+}
+
+// What a hit body is (map_floor.h Body): its flags read from hknpWorld's body array. The world is *(g+0x68)+0x20
+// (docs/raycast-re.md §1), checked by its vtable (hknpWorld 0x18BC9C0) whose slot 16 must still be the body getter
+// 0xDAB170 (kBodySignatures); the body must be live (flags & 3) and carry the id asked for (slot 13 0xDAC200's test).
+// Anything else is unknown (map_floor.h Fixed takes it as the map, the old answer).
+constexpr std::size_t kWorldVtbl=0x18BC9C0,kWorldGetBody=0xDAB170,kBodyMotionType=0x11B19AD;
+constexpr std::size_t kWorldBodies=0x18,kWorldBodyCount=0x20,kBodySize=0xB0,kBodyId=0x50,kBodyFlags=0x54;
+const Signature kBodySignatures[]={
+    // mov eax,edx; and eax,0xFFFFFF; imul rax,rax,0xB0; add rax,[rcx+0x18] (ret)
+    {kWorldGetBody,{0x8B,0xC2,0x25,0xFF,0xFF,0xFF,0x00,0x48,0x69,0xC0,0xB0,0x00,0x00,0x00,0x48,0x03},16},
+    {kWorldGetBody+16,{0x41,0x18,0xC3},3},
+    // 0x11B1960 (a body's motion type): mov ecx,[rax+0x54]; test cl,1; je +4; xor eax,eax (static: 0)
+    {kBodyMotionType,{0x8B,0x48,0x54,0xF6,0xC1,0x01,0x74,0x04,0x33,0xC0},10},
+};
+bool bodyOk=false;
+mapfloor::Body BodyKind(std::uint32_t id) noexcept {
+    if(!bodyOk)return mapfloor::Body::unknown;
+    const auto g=At<unsigned char*>(image,kHavokGlobal);
+    if(!Readable(g,0x70))return mapfloor::Body::unknown;
+    const auto holder=At<unsigned char*>(g,0x68);
+    if(!holder || !Readable(holder+0x20,kWorldBodyCount+4))return mapfloor::Body::unknown;
+    const unsigned char* world=holder+0x20;
+    if(At<const unsigned char*>(world,0)!=image+kWorldVtbl)return mapfloor::Body::unknown;
+    const std::uint32_t index=id&0xFFFFFFu;
+    const auto bodies=At<const unsigned char*>(world,kWorldBodies);
+    if(index==0xFFFFFFu || index>=At<std::uint32_t>(world,kWorldBodyCount) || !bodies)return mapfloor::Body::unknown;
+    const unsigned char* b=bodies+static_cast<std::size_t>(index)*kBodySize;
+    if(!Readable(b+kBodyId,8) || (At<std::uint32_t>(b,kBodyId)&0xFFFFFFu)!=index)return mapfloor::Body::unknown;
+    return mapfloor::BodyOf(At<std::uint32_t>(b,kBodyFlags));
 }
 
 // Water (docs/water-re.md): not map geometry (a layer-22 ray over the sea finds the seabed) but trigger
@@ -920,7 +947,9 @@ void Arrive(const Heli& h,const float* pos,const float* goal,const float* goalVe
     const float settle=len*kMoveGain/kBrakeGain;
     float want=std::sqrt(2.0f*h.stopDecel*left);
     if(want>settle)want=settle;
-    if(want>h.top)want=h.top;
+    // The paced march (mapcmd.cpp MapPaceScale): its top speed a share of its own, to keep with the slowest.
+    const float top=h.top*MapPaceScale(h.ref.obj);
+    if(want>top)want=top;
     out[0]+=e[0]/len*want;out[2]+=e[2]/len*want;
 }
 
@@ -1317,9 +1346,8 @@ Avoidance Avoid(const float* pos,const float* vel,float* want,float* height,bool
 // error not closing for kStuckMs flips its sign too.
 constexpr std::size_t kDoorBlock=0x2030,kDoorStride=0x20,kDoorPull=0x10;
 // The seat aim's axes (kSeatAim, kAimAxes, ...): common/edf/layout.h.
-constexpr std::size_t kMuzzles=0x1D0,kMuzzleCount=0x1E0,kMuzzleStride=0xF0,kMuzzleLocal=0x10,kBoneRows=0xB0;
-constexpr std::size_t kMuzzleMode=0xE0,kWeaponRows=0x150;
-constexpr std::int32_t kModeWeaponRows=0;
+// The muzzles: common/edf/weapon.h (MuzzleWorld, MuzzleFrame, MeanMuzzle). kBoneRows: a bone record's world rows.
+constexpr std::size_t kBoneRows=0xB0;
 constexpr float kMuzzleReach=30.0f;   // m: a muzzle farther than this from the vehicle is garbage
 constexpr float kAxisMargin=0.03f;    // rad past a stop still counted as reachable
 constexpr float kTurnPerInput=1.1f/60.0f,kTurnMin=0.2f/60.0f,kTurnMax=6.0f/60.0f,kSettleFrames=6.0f;
@@ -1344,36 +1372,9 @@ void Angles(const float* local,float* geo) noexcept {
     geo[1]=std::atan2(local[1],std::sqrt(local[0]*local[0]+local[2]*local[2]));
 }
 
-// One muzzle's world position and direction as fire (0x6969A0) builds them: the position is row 3 of
-// local x bone, the direction row 2 of the matrix its mode picks.
-bool MuzzleFrame(const unsigned char* weapon,const unsigned char* muzzle,float* pos,float* dir) noexcept {
-    const auto bone=At<const unsigned char*>(muzzle,0);
-    if(!Readable(bone,kBoneRows+0x40))return false;
-    float b[4][4],l[4][4];
-    std::memcpy(b,bone+kBoneRows,sizeof(b));std::memcpy(l,muzzle+kMuzzleLocal,sizeof(l));
-    for(int c=0;c<3;++c) {
-        dir[c]=l[2][0]*b[0][c]+l[2][1]*b[1][c]+l[2][2]*b[2][c];
-        pos[c]=l[3][0]*b[0][c]+l[3][1]*b[1][c]+l[3][2]*b[2][c]+l[3][3]*b[3][c];
-    }
-    if(At<std::int32_t>(muzzle,kMuzzleMode)==kModeWeaponRows)std::memcpy(dir,weapon+kWeaponRows+0x20,12);
-    const float length=std::sqrt(Dot3(dir,dir));
-    return std::isfinite(pos[0]+pos[1]+pos[2]) && std::isfinite(length) && length>0.5f && length<2.0f;
-}
-
-// The barrel: the mean of the gun's muzzles.
+// The barrel: the mean of the gun's muzzles (edf::MeanMuzzle, at most eight), within reach of the vehicle.
 bool Barrel(const unsigned char* v,const unsigned char* weapon,float* pos,float* dir) noexcept {
-    const auto muzzles=At<const unsigned char*>(weapon,kMuzzles);
-    const auto count=At<std::uint64_t>(weapon,kMuzzleCount);
-    if(count==0 || count>8 || !Readable(muzzles,count*kMuzzleStride))return false;
-    std::memset(pos,0,12);std::memset(dir,0,12);
-    for(std::uint64_t i=0;i<count;++i) {
-        float p[3],f[3];
-        if(!MuzzleFrame(weapon,muzzles+i*kMuzzleStride,p,f))return false;
-        for(int c=0;c<3;++c){pos[c]+=p[c];dir[c]+=f[c];}
-    }
-    const float length=std::sqrt(Dot3(dir,dir));
-    if(!(length>0.1f))return false;
-    for(int c=0;c<3;++c){pos[c]/=static_cast<float>(count);dir[c]/=length;}
+    if(!edf::MeanMuzzle(weapon,8,pos,dir))return false;
     const float* at=reinterpret_cast<const float*>(v+kPosition);
     const float d[3]={pos[0]-at[0],pos[1]-at[1],pos[2]-at[2]};
     return Dot3(d,d)<kMuzzleReach*kMuzzleReach;
@@ -2423,7 +2424,7 @@ void Tune(Heli& h,const unsigned char* v) noexcept {
 }  // namespace
 
 bool HeliCrewed(const void* vehicle) noexcept {
-    if(IsJet(vehicle) || IsSub(vehicle) || IsSazabi(vehicle))return false;   // flown by jet.cpp / subcarrier.cpp / sazabi.cpp
+    if(IsJet(vehicle) || IsSub(vehicle) || IsSazabi(vehicle) || IsDreadnought(vehicle))return false;   // flown by jet.cpp / subcarrier.cpp / sazabi.cpp / dreadnought.cpp
     const HeliType* const type=TypeOf(vehicle);
     if(!type)return false;
     const ULONGLONG ms=GameMs();
@@ -2985,7 +2986,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     for(auto& r:rescues)if(r.phase!=RescuePhase::none && r.ref.Is(vehicle))r.seenFrame=GameFrame();   // RescueHeliAlive
     if(call.phase==CallPhase::assigned && call.ref.Is(vehicle))call.seenFrame=GameFrame();   // a peer's copy too (Replay)
     if(!profileOk || vehicle[kDead])return;
-    const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && TypeOf(vehicle);
+    const bool stockHeli=!IsJet(vehicle) && !IsSub(vehicle) && !IsPlayerJet(vehicle) && !IsSazabi(vehicle) && !IsDreadnought(vehicle) && TypeOf(vehicle);
     if(stockHeli)NoteParked(vehicle);
     // NPC gunners have their own firing authority. A remote player pilot must not suppress host/local NPC door
     // gunners; the native weapon messages replicate their shots. NPC pilots already call DoorGun through Fly.
@@ -3018,6 +3019,7 @@ void HeliFrame(unsigned char* vehicle) noexcept {
     if(IsSub(vehicle))return;   // the submarine carrier: driven from the input hook (crew.cpp SubStep)
     if(IsPlayerJet(vehicle))return;   // a player jet an NPC sat in (a stock squadmate): not flown as a heli
     if(IsSazabi(vehicle))return;      // the Sazabi (sazabi.cpp): never flown as a heli
+    if(IsDreadnought(vehicle))return; // the Dreadnought (dreadnought.cpp): the same
     if(!Cfg().heliPilot)return;
     Heli* h=Find(vehicle);
     if(!h){if(!HeliCrewed(vehicle))return;h=Find(vehicle);}   // a mission-spawned NPC heli (CreateFriend): fly it too
@@ -3576,6 +3578,10 @@ bool PlayerRescueCue(RescueCue* out) noexcept {
 void PressBoardButton(unsigned char* human) noexcept { PressBoard(human); }
 void PressBoardButtonBumping(unsigned char* human) noexcept { PressBoard(human,true); }
 bool BoardButtonReady() noexcept { return profileOk && boardOk; }
+// The board button's own gates (0x56D700, see kBoardButton): it does nothing while one is set (the soldier busy).
+bool BoardButtonBlocked(const unsigned char* human) noexcept {
+    return (At<unsigned char>(human,0x128)&1u)!=0 || (At<std::uint32_t>(human,0x5D0)&4u)!=0 || At<std::int32_t>(human,0x39C)!=0;
+}
 bool HumanOnFoot(const unsigned char* human) noexcept { return OnFoot(human); }
 
 bool SeatPoint(const unsigned char* v,unsigned seat,float* at,float* reach) noexcept {
@@ -3642,15 +3648,34 @@ bool InstallDoorGuns() noexcept {
     return doorOk;
 }
 
+bool MapRayReady() noexcept {
+    if(!rayOk)return false;
+    const auto world=At<const unsigned char*>(image,kHavokGlobal);
+    return Readable(world,0x70) && At<const void*>(world,0x68)!=nullptr;
+}
 float MapRay(const float* a,const float* b,float* hit) noexcept { return CastRay(a,b,hit); }
+float MapFixedRay(const float* a,const float* b,float* hit) noexcept {
+    return mapfloor::Fixed(a,b,
+        [](const float* from,const float* to,float* p,std::uint32_t* body){ return CastRay(from,to,p,false,nullptr,kMapLayer,nullptr,body); },
+        [](std::uint32_t body){
+            const mapfloor::Body kind=BodyKind(body);
+            // The first few bodies passed in a run, for a report (game thread only: the map's frame).
+            static int said=0;
+            if(kind==mapfloor::Body::moving && said<8){++said;Log("MAP fixed ray: passed moving body %06X",body&0xFFFFFFu);}
+            return kind;
+        },hit);
+}
 // The nearest object body along a->b: layer 11, the one the bullets' object query filters with (docs/bullet-pass-re.md
 // §2 step 1b), with the plain nearest-hit collector (kHitVtbl: every hit, not the ground filter's). Metres to it, -1 with
 // none; `hit` the point, `body` its id (collector +0x78, 24 bits; docs/raycast-re.md §2.2).
 float ObjectRay(const float* a,const float* b,float* hit,std::uint32_t* body) noexcept {
+    return LayerRay(a,b,kObjectLayer,hit,body);
+}
+float LayerRay(const float* a,const float* b,std::uint32_t filter,float* hit,std::uint32_t* body) noexcept {
     if(!rayOk)return -1.0f;
     const auto g=At<unsigned char*>(image,kHavokGlobal);
     if(!Readable(g,0x70) || !At<const void*>(g,0x68))return -1.0f;
-    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},kObjectLayer,0,0};
+    const RayInput in{{a[0],a[1],a[2],1.0f},{b[0],b[1],b[2],1.0f},filter,0,0};
     RayHits col{};
     *reinterpret_cast<const void**>(col.raw)=image+kHitVtbl;
     reinterpret_cast<void(*)(void*)>(image+kHitReset)(&col);
@@ -3773,6 +3798,10 @@ bool CheckHeliProfile() noexcept {
               At<const unsigned char*>(image,kGroundVtbl+0x20)==image+kGroundAdd;
         for(const auto& s:kRaySignatures)rayOk=rayOk && Matches(s.rva,s.bytes,s.size);
         Log("HELI ray=%d (obstacle avoidance %s)",rayOk,rayOk ? "on" : "off: unexpected EDF.dll code");
+        bodyOk=rayOk && Readable(image+kWorldVtbl,0x88) && At<const unsigned char*>(image,kWorldVtbl+16*8)==image+kWorldGetBody;
+        for(const auto& s:kBodySignatures)bodyOk=bodyOk && Matches(s.rva,s.bytes,s.size);
+        Log("MAP ray bodies=%d%s",bodyOk,bodyOk ? " (the map view's eye passes moving bodies)" :
+            " (unexpected EDF.dll code: the map view's eye stays over every map-layer hit)");
         visitOk=Matches(kVisitFriends,kVisitFriendsSig,sizeof(kVisitFriendsSig));
         Log("HELI friends walk=%d%s",visitOk,visitOk ? "" : " (unexpected EDF.dll code: medic helis aim at nobody)");
         waterOk=true;

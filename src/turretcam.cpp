@@ -16,7 +16,7 @@
 //    turn it). The seat's aim (VehicleWeaponAimAddSe, vtable 0x17D8A90 slot 2 0x5FCD80) gets the rider's stick each
 //    frame; the hook turns the view by the rider's own stick (seat+0x2D0, docs/camera-re.md §4: -1..1 a frame, the
 //    mouse's excess carried over by 0x56DBC0, handed to the aim as (-x, y)) and hands the aim the input that turns the
-//    turret onto the point under the screen's centre (CameraRay + MapRay, else kAimFar along it) at the stock rates
+//    turret onto the normal rig request's centre (seat/take-owned ray + MapRay, else kAimFar) at the stock rates
 //    (turretcam.h AxisCommand): the round's low ballistic arc through a real map hit, the bore line through it in
 //    EDF6AutoTurret's lead-circle mode (the circle already solved the arc) and through the made-up point of a view that
 //    hits nothing (turretcam.h BallisticAim). EDF6AutoTurret turns this turret only onto the player's lock in its
@@ -27,8 +27,10 @@
 //    over again.
 //  - The rig (docs/camera-re.md §5): the stock locators' (A) or the vehicle's game_object_camera_setting (B, +0x170 /
 //    +0x180, the authored third-person framing the riding camera never reads), whichever puts the eye farther back; the
-//    eye never under the rig's own height over its point. The high view orbits the selected weapon's actual impact
-//    (or flight endpoint) at HighCamHeight / HighCamBack, scaled up for a big vehicle; native input controls the gun.
+//    eye never under the rig's own height over its point. The high view looks down on the vehicle itself from
+//    HighCamHeight / HighCamBack (scaled up for a big vehicle) along a world-held heading (tcam::HullPlace): the turret
+//    rocking or turning does not move it; free look turns it round the vehicle; native input controls the gun, the
+//    shot's real endpoint is drawn by the HUD.
 // A vehicle qualifies when the player drives it from seat 0, its seat camera is Type 1 (seat+0x200), its seat holds a
 // weapon and its yaw axis turns (more than kMinTraverse): a turret, or the gun is indirect fire (a fixed one: the
 // howitzer). Helicopters and the plugin's jets do not. The view is
@@ -37,6 +39,9 @@
 // then holds the gun), for every seat it holds, the player's or not; a gun it holds is steered from where it holds it
 // (Steer: stab.cpp StabHeld). All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "seat_switch_logic.h"
+#include "vehicle_look.h"
+#include "firstperson.h"
 #include "heli.h"
 #include "layout.h"
 #include "memory.h"
@@ -103,6 +108,10 @@ struct Shared {
     bool physicalOnly=true;
     bool free,returning;       // free look held / swinging back
     bool view;                 // yaw / pitch hold the plugin's view
+    bool resume;               // no normal source since an owner/seat change: native input until Camera publishes one
+    bool normalRay;            // the normal rig request, never the last HUD/render camera
+    unsigned rayTake;
+    float normalEye[3],normalDir[3];
     bool steering;             // the aim's last step had the camera's command (not the stick's, not another plugin's)
     bool highView;             // the aim hook is observing the projectile, with native gun input
     bool observing;            // camera still showing the shot or blending away from it (camera thread publishes)
@@ -121,7 +130,9 @@ struct CamSide {
     tcam::Rig rig;
     float offset;              // the view's pitch over the player's, eased (the high view looks further down)
     float eye[3],look[3];      // the last placement
-    bool point;                // that placement was the high view's projectile endpoint (tcam::ImpactPlace)
+    bool point;                // that placement was the high view's (tcam::HullPlace)
+    bool highSet;              // highYaw / highY hold this high view's
+    float highYaw,highY;       // the high view's world-held heading (taken from the view it starts from), the hull's eased height
     float carry;               // a switch between the two placements: the share of the old one's offset still carried
     float carryEye[3],carryLook[3];
 };
@@ -262,12 +273,43 @@ void AxesDir(const unsigned char* v,const unsigned char* seat,float* d) noexcept
     vec::Normalize(d);
 }
 
-// The point under the screen's centre: the first map hit along it (`*hit` true), else kAimFar out. False with no camera
-// yet.
-bool AimPoint(float* p,bool* hit) noexcept {
-    float eye[3],dir[3],at[3];
+bool FreeHeld(const unsigned char* seat) noexcept;
+void Publish(const TurretCamReadout& r) noexcept;
+
+// A camera request with an explicit seat/take owner. A rendered FP, map, optic or previous vehicle's ray cannot
+// become a command to the same bones that produced it, even when rendering lags several simulation frames.
+bool ExternalView(const void* v,bool high) noexcept {
+    return MapHoldsKeys() || MapOwnsView() || (!high &&
+        (SightZoomMounted(v) || FirstPersonVehicleView(v,0) || VehicleLookActive(v)));
+}
+void SuspendView(const unsigned char* seat) noexcept {
+    AcquireSRWLockExclusive(&lock);
+    if(shared.seat==seat) {
+        shared.normalRay=false;shared.resume=true;shared.view=false;shared.decoupled=false;
+        shared.free=false;shared.returning=false;shared.steering=false;shared.highView=false;shared.observing=false;
+    }
+    ReleaseSRWLockExclusive(&lock);
+    game.hasAim=false;game.aimHit=false;game.holdHit=false;game.steer=tcam::SteerState{};
+    std::memset(game.aim,0,sizeof(game.aim));std::memset(game.holdAt,0,sizeof(game.holdAt));
+    game.held=FreeHeld(seat);game.foreign=false;
+    Publish(TurretCamReadout{});
+}
+void PublishNormalRay(const unsigned char* seat,unsigned take,const float* eye,const float* look) noexcept {
+    float dir[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
+    const bool valid=std::isfinite(eye[0]+eye[1]+eye[2]) && vec::Normalize(dir);
+    AcquireSRWLockExclusive(&lock);
+    if(shared.seat==seat && shared.take==take && !shared.high && !shared.observing) {
+        shared.normalRay=valid;shared.resume=!valid;shared.rayTake=take;
+        if(valid){std::memcpy(shared.normalEye,eye,12);std::memcpy(shared.normalDir,dir,12);}
+    }
+    ReleaseSRWLockExclusive(&lock);
+}
+// The normal rig's centre: first real map hit, else kAimFar along this owned request. The rendered HUD cache has
+// neither the source nor the take of its camera and is intentionally never a control input here.
+bool AimPoint(const Shared& s,float* p,bool* hit) noexcept {
+    float at[3];const float* eye=s.normalEye;const float* dir=s.normalDir;
     *hit=false;
-    if(!CameraRay(eye,dir))return false;
+    if(!s.normalRay || s.resume || s.rayTake!=s.take)return false;
     const float end[3]={eye[0]+dir[0]*kSightFar,eye[1]+dir[1]*kSightFar,eye[2]+dir[2]*kSightFar};
     if(MapRay(eye,end,at)>=0.0f && vec::Dist(eye,at)<=kSightFar){std::memcpy(p,at,12);*hit=true;return true;}
     for(int i=0;i<3;++i)p[i]=eye[i]+dir[i]*kAimFar;
@@ -285,7 +327,9 @@ bool LeadCircleOn() noexcept {
 bool FreeHeld(const unsigned char* seat) noexcept {
     const Config& c=Cfg();
     if(At<unsigned char>(seat,kSeatPad)==0)return KeyHeld(c.freeLookKey);
-    return c.freeLookButton>0 && (At<std::uint16_t>(seat,kSeatButtons)&static_cast<std::uint16_t>(c.freeLookButton))!=0;
+    const std::uint16_t buttons=At<std::uint16_t>(seat,kSeatButtons);
+    return c.freeLookButton>0 && (buttons&static_cast<std::uint16_t>(c.freeLookButton))!=0 &&
+        !seatsw::ChordOwns(buttons,static_cast<unsigned>(c.thermalButton),static_cast<unsigned>(c.freeLookButton));   // the thermal chord's
 }
 
 void Publish(const TurretCamReadout& r) noexcept {
@@ -403,20 +447,11 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     ReleaseSRWLockExclusive(&lock);
     if(seat!=s.seat || !s.v)return;
     s.aimMs=GameMs();
-    if(!s.high && SightZoomMounted(s.v)) {
-        // The sightzoom camera follows the actual barrel. Feeding its own last-frame ray back into the
-        // decoupled controller pins the view or creates a feedback loop. Keep the native/stabilizer input.
-        cmd[0]=in[0];cmd[1]=in[1];
-        game.hasAim=false;game.aimHit=false;game.steer.hasWant=false;game.held=FreeHeld(seat);
-        s.view=false;s.decoupled=false;s.free=false;s.returning=false;s.steering=false;s.highView=false;s.observing=false;
-        ShotFocus(s);
-        AcquireSRWLockExclusive(&lock);
-        if(shared.seat==seat) {
-            shared.aimMs=s.aimMs;shared.view=false;shared.decoupled=false;shared.free=false;shared.returning=false;
-            shared.steering=false;shared.highView=false;shared.observing=false;
-        }
-        ReleaseSRWLockExclusive(&lock);
-        if(s.focusValid)Readout(seat,s,s.focusHit,s.focus,false);
+    const float stockBase=rigInfo.v==s.v ? rigInfo.stockBase : 0.0f;
+    if(ExternalView(s.v,s.high)) {
+        // Native input (and StabStep after us) keeps its exact ownership. A cockpit/optic is attached to the
+        // controlled mount; its view must never be reinterpreted as a new world target for that mount.
+        cmd[0]=in[0];cmd[1]=in[1];SuspendView(seat);
         return;
     }
     const bool held=FreeHeld(seat);
@@ -433,7 +468,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
             const float rate=c.turretCamRate*kPi/180.0f/60.0f;
             s.orbitYaw=tcam::Wrap(s.orbitYaw-stick[0]*rate);
             s.orbitPitch=vec::Clamp(s.orbitPitch+stick[1]*rate,-tcam::kPitchMost,tcam::kPitchMost);
-        } else {s.orbitYaw*=1.0f-kReturnRate;s.orbitPitch*=1.0f-kReturnRate;}
+        }   // let go: the view stays where free look turned it (a world-held heading, nothing to swing back onto)
         // The stock axis step (and stabilizer) owns gun motion. Looking round must not feed the observation back.
         cmd[0]=held && !foreign ? 0.0f : in[0];cmd[1]=held && !foreign ? 0.0f : in[1];
         AcquireSRWLockExclusive(&lock);
@@ -449,7 +484,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
         // Throughout the actual camera blend, follow the native axes and leave gun motion native. A frame of stick
         // must not cancel this isolation and let the remaining overhead ray become a new turret target.
         float dir[3];AxesDir(s.v,seat,dir);
-        s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir)+rigInfo.stockBase;
+        s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir)+stockBase;
         s.highView=false;s.view=true;s.free=held;s.returning=false;s.steering=false;
         game.hasAim=false;game.aimHit=false;game.steer.hasWant=false;
         // Re-arm free look after the blend: its normal entry must capture a fresh, normal-camera aim point.
@@ -465,19 +500,27 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
         ReleaseSRWLockExclusive(&lock);
         return;
     }
-    if(!s.view) {   // the view's start: the screen's centre as it is
-        float eye[3],dir[3];
-        if(!CameraRay(eye,dir))AxesDir(s.v,seat,dir);
-        s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir);s.view=true;
-        s.highView=false;
+    if(s.resume || !s.view) {
+        float dir[3];
+        if(!s.resume && s.normalRay && s.rayTake==s.take)std::memcpy(dir,s.normalDir,12);
+        else AxesDir(s.v,seat,dir);
+        s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir)+(s.resume ? stockBase : 0.0f);
+        s.view=true;s.highView=false;
+        if(s.resume) {
+            game.hasAim=false;game.aimHit=false;game.steer.hasWant=false;game.held=held;
+            cmd[0]=in[0];cmd[1]=in[1];
+            AcquireSRWLockExclusive(&lock);
+            if(shared.seat==seat){shared.aimMs=s.aimMs;shared.view=true;shared.yaw=s.yaw;shared.pitch=s.pitch;shared.steering=false;}
+            ReleaseSRWLockExclusive(&lock);
+            return;
+        }
     }
     if(press) {
         std::memcpy(game.holdAt,game.aim,12);game.holdHit=game.aimHit;
         if(!game.hasAim){float d[3];AxesDir(s.v,seat,d);const float* p=reinterpret_cast<const float*>(s.v+kMatrix)+12;for(int i=0;i<3;++i)game.holdAt[i]=p[i]+d[i]*kAimFar;game.holdHit=false;}
         game.backYaw=s.yaw;game.backPitch=s.pitch;
         if(!s.decoupled && !s.highView) {   // coupled: the view starts where the screen's centre is
-            float eye[3],dir[3];
-            if(CameraRay(eye,dir)){s.yaw=tcam::YawOf(dir);s.pitch=tcam::PitchOf(dir);}
+            if(s.normalRay && s.rayTake==s.take){s.yaw=tcam::YawOf(s.normalDir);s.pitch=tcam::PitchOf(s.normalDir);}
         }
         s.free=true;s.returning=false;
         if(c.debug)Log("TURRETCAM free look on (%s)",s.decoupled ? "decoupled" : "coupled");
@@ -498,7 +541,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     }
     if(s.returning) {
         float to[2]={game.backYaw,game.backPitch};
-        if(!s.decoupled){float d[3];AxesDir(s.v,seat,d);to[0]=tcam::YawOf(d);to[1]=tcam::PitchOf(d)+rigInfo.stockBase;}
+        if(!s.decoupled){float d[3];AxesDir(s.v,seat,d);to[0]=tcam::YawOf(d);to[1]=tcam::PitchOf(d)+stockBase;}
         const float dy=tcam::Wrap(to[0]-s.yaw),dp=to[1]-s.pitch;
         s.yaw=tcam::Wrap(s.yaw+dy*kReturnRate);s.pitch+=dp*kReturnRate;
         if(std::fabs(dy)<kReturnDone && std::fabs(dp)<kReturnDone) {
@@ -623,7 +666,6 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     const bool viewed=aimed && (s.decoupled || s.free || s.returning);
     const bool own=live && (viewed || s.high);
     if(!live){camSide=CamSide{};PublishObservation(seat,false);return;}
-    if(!s.high && SightZoomMounted(s.v)){camSide=CamSide{};PublishObservation(seat,false);return;}
     // Another take (the player left the seat and came back, Drop between: this hook does not run while nobody is
     // served, so it never saw them go): its camera starts from the stock one again, easing in.
     if(camSide.owned && camSide.take!=s.take)camSide=CamSide{};
@@ -640,17 +682,27 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     else if(a){normal=rigA;base=baseA;}
     else{camSide=CamSide{};PublishObservation(seat,false);return;}
     rigInfo=RigInfo{a ? baseA : 0.0f,normal.radius,normal,s.v};
-    if(!own || (s.high && !s.focusValid)) {
+    if(ExternalView(s.v,s.high)) {
+        // Keep the measured rig/classification (the high view still needs it), but no hidden third-person
+        // placement or return blend may survive under an external camera owner.
+        camSide=CamSide{};
+        AcquireSRWLockExclusive(&lock);
+        if(shared.seat==seat){shared.normalRay=false;shared.resume=true;shared.observing=false;}
+        ReleaseSRWLockExclusive(&lock);
+        return;
+    }
+    if(!own) {
         Leave(seat,lookTarget,cam);
         PublishObservation(seat,camSide.owned && (camSide.point || camSide.carry>0.0f));
+        if(!s.high && !camSide.owned)PublishNormalRay(seat,s.take,stockEye,stockLook);
         return;
     }
     const float scale=std::fmax(1.0f,normal.radius/20.0f);
     tcam::Rig high=tcam::High(c.highCamHeight*scale,c.highCamBack*scale,c.highCamPitch);
     std::memcpy(high.fixed,normal.fixed,sizeof(high.fixed));
     const float highBase=-c.highCamPitch*kPi/180.0f;
-    // Both coupled and decoupled high cameras observe the same real shot endpoint.
-    const bool point=s.high && s.focusValid;
+    // Both coupled and decoupled high cameras look down on the vehicle.
+    const bool point=s.high;
     const tcam::Rig& want=s.high && !viewed ? high : normal;
     const float* m=reinterpret_cast<const float*>(s.v+kMatrix);
     // The view: the plugin's (decoupled, free look), else the aim's at the rig's base pitch (coupled high view).
@@ -669,9 +721,19 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     tcam::Ease(camSide.rig,want,kRigEase);
     camSide.offset+=(offset-camSide.offset)*kRigEase;
     float eye[3],look[3];
-    if(point)tcam::ImpactPlace(m+12,s.focus,s.yaw,c.highCamHeight*scale,c.highCamBack*scale,
-                              s.orbitYaw,s.orbitPitch,eye,look);
-    else {
+    if(point) {
+        if(!camSide.highSet) {   // entering it: the heading the camera faces now, held from here on in the world
+            const float d[3]={camSide.look[0]-camSide.eye[0],0.0f,camSide.look[2]-camSide.eye[2]};
+            float a3[3];AxesDir(s.v,seat,a3);
+            camSide.highYaw=d[0]*d[0]+d[2]*d[2]>1e-6f ? tcam::YawOf(d) : tcam::YawOf(a3);
+            camSide.highY=m[13];camSide.highSet=true;
+        }
+        // The hull's bounce over the ground eased out; its travel across the ground followed exactly.
+        camSide.highY+=(m[13]-camSide.highY)*kRigEase;
+        const float centre[3]={m[12],camSide.highY,m[14]};
+        tcam::HullPlace(centre,camSide.highYaw,c.highCamHeight*scale,c.highCamBack*scale,s.orbitYaw,s.orbitPitch,eye,look);
+    } else {
+        camSide.highSet=false;
         float yaw,pitch;
         if(viewed){yaw=s.yaw;pitch=s.pitch+camSide.offset;}
         else {
@@ -702,6 +764,7 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     PublishObservation(seat,point || camSide.carry>0.0f);
     std::memcpy(camSide.eye,eye,12);std::memcpy(camSide.look,look,12);
     Place(lookTarget,lookTarget+16,cam,eye,look,point);   // lookTarget+16 floats = out+0x70: the eye's target
+    if(!s.high && !point && camSide.carry==0.0f)PublishNormalRay(seat,s.take,eye,look);
 }
 
 float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) {
@@ -718,6 +781,8 @@ float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) 
             Place(lookOut+12,lookOut+28,cam,eye,look);
         else if(GunshipGunnerCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+28,lookOut+12,eye,look))
             Place(lookOut+12,lookOut+28,cam,eye,look);   // the gunship's gun seat: the rider's own view (playerjet_crew.inc)
+        else if(DreadnoughtCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,eye,look))
+            Place(lookOut+12,lookOut+28,cam,eye,look);   // a Dreadnought turret's gunner: theirs (dreadnought_turrets.inc)
         else if(shared.seat && static_cast<const unsigned char*>(point)==shared.seat+kSeatCamLook)
             Camera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,cam);
         // A seat it does not place: a deployed Proteus raises the stock targets (proteus.cpp), the game eases onto them.
@@ -774,7 +839,7 @@ void TurretCamFrame(unsigned char* v) noexcept {
     if(!mine || !shared.ref.Is(v)) {
         if(shared.v)Drop("another vehicle");
         AcquireSRWLockExclusive(&lock);
-        shared=Shared{};shared.ref=ObjRef::Of(v);shared.v=v;shared.seat=seat;shared.take=++takes;
+        shared=Shared{};shared.ref=ObjRef::Of(v);shared.v=v;shared.seat=seat;shared.take=++takes;shared.resume=true;
         ReleaseSRWLockExclusive(&lock);
         game=GameSide{};game.held=FreeHeld(seat);   // a key held while boarding is no press
         Log("TURRETCAM v=%p: a turret the player drives (decoupled=%d, free look key 0x%X / button 0x%X, aim hook %d)",v,
@@ -786,8 +851,12 @@ void TurretCamFrame(unsigned char* v) noexcept {
     AcquireSRWLockShared(&lock);
     const bool observing=shared.highView || shared.observing;
     ReleaseSRWLockShared(&lock);
-    const bool mounted=!high && SightZoomMounted(v);
-    game.hasAim=!high && !observing && !mounted && AimPoint(game.aim,&game.aimHit);
+    const bool external=ExternalView(v,high);
+    if(external)SuspendView(seat);
+    AcquireSRWLockShared(&lock);
+    const Shared normalSource=shared;
+    ReleaseSRWLockShared(&lock);
+    game.hasAim=!high && !observing && !external && AimPoint(normalSource,game.aim,&game.aimHit);
     // The one player turret aim (aimlink.h V4, turretaim.cpp): asked every frame so its bindings and lock stay current
     // through the high view and the optic too; in AUTO with a lock the turret goes to where the round meets the target,
     // through the same arc solve (Wants) as the screen's centre, the view staying the player's.
@@ -797,7 +866,8 @@ void TurretCamFrame(unsigned char* v) noexcept {
     AcquireSRWLockExclusive(&lock);
     shared.seat=seat;shared.seenMs=GameMs();
     shared.physicalOnly=!(freedom.known && freedom.yaw && freedom.pitch);
-    shared.decoupled=c.decoupledTurretCam && nextAim && !shared.physicalOnly && !mounted;
+    shared.decoupled=c.decoupledTurretCam && nextAim && !shared.physicalOnly && !external;
+    if(high){shared.normalRay=false;shared.resume=true;}
     shared.high=high;shared.focusValid=shot.focusValid;shared.focusHit=shot.focusHit;
     std::memcpy(shared.focus,shot.focus,sizeof(shared.focus));
     if(!shared.decoupled && !shared.free && !shared.returning)shared.view=false;
@@ -836,7 +906,21 @@ bool TurretCamTurret(const void* vehicle,unsigned seat) noexcept {
     AcquireSRWLockShared(&lock);
     const Shared s=shared;
     ReleaseSRWLockShared(&lock);
-    return Cfg().enabled && s.v==vehicle && s.decoupled && GameMs()-s.seenMs<=kFreshMs && s.ref.Is(vehicle);
+    return Cfg().enabled && s.v==vehicle && s.decoupled && !s.resume && s.normalRay && s.rayTake==s.take &&
+        !s.highView && !s.observing && !ExternalView(vehicle,s.high) &&
+        GameMs()-s.seenMs<=kFreshMs && s.ref.Is(vehicle);
+}
+
+bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept {
+    if(!lookOk || seat!=0 || !vehicle || !Cfg().enabled)return false;
+    AcquireSRWLockShared(&lock);
+    const Shared s=shared;
+    ReleaseSRWLockShared(&lock);
+    if(s.v!=vehicle || !s.ref.Is(vehicle) || GameMs()-s.seenMs>kFreshMs)return false;
+    // The same owners ExternalView yields to, but the free look itself (vehicle_look.cpp asks this to know whether it
+    // is its look at all): the map, first person's cockpit eye, the optic up (magnified, or the gunner sight at 1x).
+    if(MapHoldsKeys() || MapOwnsView() || HighCamOn(vehicle) || FirstPersonVehicleView(vehicle,0))return false;
+    return !(SightZoomCanMount(vehicle,0) && (SightZoomNow(vehicle)>1.0f || FirstPersonGunnerSight()));
 }
 
 bool TurretCamSteers(const void* vehicle) noexcept {

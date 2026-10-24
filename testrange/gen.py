@@ -21,13 +21,16 @@ import jet_models  # noqa: E402
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
 import make_edf5_campaign as packs  # noqa: E402
+sys.path.insert(0, HERE)
+import catalog  # noqa: E402
 import recoil  # noqa: E402
 import rmpa  # noqa: E402
+import dreadnought_model  # noqa: E402
 import sazabi_model  # noqa: E402
 import sgo  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
-from vcobjects import (DEFAULT_GAME, SAZABI_JET, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
-                       as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
+from vcobjects import (DEFAULT_GAME, DREADNOUGHT_JET, DREADNOUGHT_TURRETS, SAZABI_JET, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
+                       GROUND_VEHICLES, as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
 
 OWNER = 'testrange'   # pylib/ledger.py: the files the range writes or uses
 MARKER = 'EDF6TestRange.txt'
@@ -67,7 +70,9 @@ def site_of(source: str) -> Site:
 # (see DERIVED): the call-in SGO with `vehicle_setup` renamed to `mission_setup` (same layout).
 # Four heli bodies: V506 Eros (and its DLC No. 6 body), VEHICLE409 Nereid, VEHICLE410 Brute, V602 Heron
 # (a DSGO; class Vehicle506_Helicopter like the Eros, two nose gatlings and a missile).
-VEHICLES: list[tuple[str, str]] = [
+# OWN_VEHICLES: the range's own (made into Mods/OBJECT by install, DERIVED) with their launcher labels; the stock ones, the
+# installer's and EDF4.1's follow from testrange/catalog.py (VEHICLES below).
+OWN_VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_v506_heli_mission', '直升机 506 Eros（测试场生成）'),
     ('edf6tr_v506_heli_edf6benefits_mission', '直升机 Eros No.6（测试场生成）'),
     ('edf6tr_vehicle409_heli_mission', '直升机 409 Nereid（测试场生成）'),
@@ -86,6 +91,7 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_pjet_fighter_mission', '玩家战斗机（自己驾驶，空着停放；测试场生成）'),
     ('edf6tr_pjet_strike_mission', '玩家攻击机（自己驾驶，空着停放；测试场生成）'),
     (SAZABI_JET, '沙扎比 MSN-04（自己驾驶，空着停放；要有沙扎比模型目录）'),
+    (DREADNOUGHT_JET, '无畏舰（自己驾驶，空着停放，全长 500 米，放在最远的点；要有无畏舰模型目录）'),
     # The NPC kinds parked for the player (BOARDABLE_PARKED): each one's parked twin (vcobjects Jet.parked: the whole
     # plane is solid, its boarding point at its side on the ground, every class may fly it).
     (parked_name('edf6tr_jet_fighter_mission'), '制空战斗机·停放（自己驾驶；测试场生成）'),
@@ -98,25 +104,31 @@ VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_vehicle401_striker_mission', '装甲车 Grape 401（NPC 搭乘原版 AI；测试场生成）'),
     ('edf6tr_katyusha_mission', '喀秋莎火箭炮车（自己驾驶；测试场生成）'),
     ('edf6tr_artillery_mission', '自行榴弹炮（自己驾驶；测试场生成）'),
+    ('edf6tr_vulcan_mission', 'M163 火神炮车（自己驾驶；测试场生成）'),
+    ('edf6tr_bmpt_mission', 'BMPT 火力支援车（自己驾驶；测试场生成）'),
     ('edf6tr_drill_mission', '钻头战车（自己驾驶；测试场生成）'),
     ('edf6tr_sidecar_mission', '边三轮摩托（自己驾驶或坐边车；测试场生成）'),
     ('edf6tr_vehicle502_groundrobo_mission', '多足机 Depth Crawler 502（插件驾驶；测试场生成）'),
-    ('vehicle403_tank_mission', '坦克 403（AutoTurret 副炮）'),
-    ('vehicle404_bigtank', '大型坦克 404（AutoTurret 副炮）'),
-    ('v505_tank_mission', '坦克 505'),
-    ('v603_flak_mission', '高射炮车 603（AutoTurret）'),
-    ('v510_maser_mission', 'EMC 510'),
-    ('v605_barga_cannon_mission', '巴尔加炮 605'),
-    ('v504_begaruta_mission', '机甲 Begaruta 504'),
-    ('vehicle407_bigbegaruta_mission', '大型机甲 407'),
-    ('v612_nix_g_mission', '机甲 Nix G 612'),
-    ('v614_proteus_mk2_mission', '机甲 Proteus 614'),
-    ('v608_oldrobot_g_mission', '旧型机甲 608'),
-    ('v515_retrobalam_mission', '巨型机甲 Balam 515（VehicleImpact）'),
-    ('v503_bike', '摩托 503'),
-    ('v613_bike', '摩托 613'),
-    ('v512_keitruck', '轻卡车 512'),
 ]
+# What the launcher says after a stock vehicle's name (catalog.STOCK_VEHICLES has the names).
+STOCK_NOTES = {'vehicle403_tank_mission': '（AutoTurret 副炮）', 'vehicle404_bigtank': '（AutoTurret 副炮）',
+               'v603_flak_mission': '（AutoTurret）', 'v515_retrobalam_mission': '（VehicleImpact）'}
+# Every vehicle the range places: its own, the stock ones, the installer's (catalog.INSTALLER_VEHICLES: the civilian
+# sedan) and EDF4.1's (catalog.edf41_rows: in Mods once the installer has put them there; install leaves out one whose
+# files are not there: catalog.available, OPTIONAL_SOURCES).
+VEHICLES: list[tuple[str, str]] = (
+    OWN_VEHICLES
+    + [(s, label + STOCK_NOTES.get(s, '')) for s, label in catalog.STOCK_VEHICLES]
+    + [(s, label + '（安装器生成）') for s, label, _ in catalog.INSTALLER_VEHICLES]
+    + [(r.sgo, r.label + '（EDF4.1 移植，安装器装的）') for r in catalog.edf41_rows() if r.category == 'vehicle']
+)
+# The vehicles whose files the installer (not the range) writes: (sgo -> its catalog row).
+OPTIONAL_VEHICLES: dict[str, catalog.Row] = {
+    **{s: catalog.Row(s, label, 'ours', 'installer') for s, label, _ in catalog.INSTALLER_VEHICLES},
+    **{r.sgo: r for r in catalog.edf41_rows() if r.category == 'vehicle'},
+    # Old saved plans used the NPC twin before the empty 4.1 tank was available.
+    # Keep direct plan callers optional/readable too; the current panel shows the empty tank.
+    'vehicle301_tank_ai': catalog.Row('vehicle301_tank_ai', '4.1 坦克（旧配置）', 'vehicle', 'edf41')}
 
 # Vehicles the range generates into Mods/OBJECT (name -> stock SGO it is made from). The DERIVED_PREFIX
 # marks them as ours: install/uninstall only ever touch files with it.
@@ -131,6 +143,8 @@ DERIVED: dict[str, str] = {
     **{private: source.upper() for source, private in {**PROTEUS_MISSION, **OPTIC_MISSION}.items()},
     'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
     'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
+    'edf6tr_vulcan_mission': GROUND_VEHICLES['vulcan'].sgo,
+    'edf6tr_bmpt_mission': GROUND_VEHICLES['bmpt'].sgo,
     'edf6tr_drill_mission': 'EDF6VC_DRILL',
     'edf6tr_sidecar_mission': 'EDF6VC_SIDECAR',
     'edf6tr_v506_heli_mission': 'V506_HELI',
@@ -151,36 +165,48 @@ DERIVED: dict[str, str] = {
     'edf6tr_pjet_fighter_mission': 'V506_HELI',
     'edf6tr_pjet_strike_mission': 'V506_HELI',
     SAZABI_JET: 'V506_HELI',   # the Sazabi: its own model on the V506 body (vcobjects JETS)
+    DREADNOUGHT_JET: 'V506_HELI',   # the Dreadnought: the same (tools/make_dreadnought.py)
     **{parked_name(k): 'V506_HELI' for k in PARKED_KINDS},
     # Ground vehicles with no stock `_mission` SGO: the call-in one, vehicle_setup renamed (same layout).
     'edf6tr_vehicle401_striker_mission': 'VEHICLE401_STRIKER',
     'edf6tr_vehicle502_groundrobo_mission': 'VEHICLE502_GROUNDROBO',
 }
-# Vehicles too big for a spot by the player (the 1664 m submarine): they take the farthest free points.
-BIG = frozenset({'edf6tr_sub_carrier_mission'})
+# Vehicles too big for a spot by the player (the 1664 m submarine, the 500 m Dreadnought): they take the farthest free points.
+BIG = frozenset({'edf6tr_sub_carrier_mission', DREADNOUGHT_JET})
+# The range's own vehicles the M map's 「摆放」 makes (empty, for the player to drive: testrange/catalog.py category 'ours'):
+# install writes every one of them whether the plan places it or not (placeable_derived). Not an NPC kind of jet (empty,
+# it is its parked twin's place), not the enemy's jets, not the submarine carrier (1664 m, BIG).
+PLACEABLE_DERIVED: tuple[str, ...] = tuple(
+    s for s, _ in OWN_VEHICLES if s in DERIVED and s not in BIG and not (s in JETS and not (JETS[s].player or JETS[s].parked)))
+
+
+def placeable_derived() -> set[str]:
+    """PLACEABLE_DERIVED that this machine can make: the Sazabi only with its model folder (tools/make_sazabi.py)."""
+    return {s for s in PLACEABLE_DERIVED if s != SAZABI_JET or sazabi_model.model_dir()}
 
 
 # The Primer creatures (see PRIMER_FILES): what the range places, at most how many a wave, in all, and how far
 # over the ground spot it comes out (the centipede crawls: just over it; the dragonfly flies).
 PRIMER_KINDS: dict[str, tuple[int, int, float]] = {'edf6vc_centipede': (16, 64, 4.0), 'edf6vc_dragonfly': (4, 16, 40.0)}
-# (sgo, label, flying)
-ENEMIES: list[tuple[str, str, bool]] = [
-    ('giantant01', '巨蚁', False),
-    ('e650_giantant01', '巨蚁（EDF6）', False),
-    ('giantspider01', '巨蜘蛛', False),
-    ('giantantqueen', '母体（女王巨蚁）', False),
-    ('e651_spider01_light', '蜘蛛（轻）', False),
-    ('e503_frog_af_leader', '青蛙兵', False),
-    ('e503_armorfrog_af', '装甲青蛙', False),
-    ('e601_martian_gs', '火星人', False),
-    ('giantbee01charge', '巨蜂（飞）', True),
-    ('e507_goldufo', '金色 UFO（飞）', True),
-    ('e515_imperialufo', '帝国 UFO（飞）', True),
-    ('dragonsmall401', '小龙（飞）', True),
-    ('shootingtarget', '训练靶子（地面 + 空中，不动）', False),
-    ('edf6vc_centipede', '星导者·百足龙虫（插件；会合体成长龙）', False),
-    ('edf6vc_dragonfly', '星导者·蜻蜓空优机（插件，飞）', True),
-]
+# The waves' enemies (sgo, label, flying): the stock ones, EDF5's DLC fortress and EDF4.1's (testrange/catalog.py; install
+# refuses one whose files are not in Mods: catalog.available), and the Primer creatures (placed like a jet, below). The
+# ships (made hundreds of metres up: catalog lift WAVE_LIFT_MOST and more) are no wave, whose groups come out on the
+# ground points; the M map's 「摆放」 makes them at their height.
+WAVE_LIFT_MOST = 100.0
+ENEMIES: list[tuple[str, str, bool]] = (
+    [(s, label if s != 'shootingtarget' else '训练靶子（地面 + 空中，不动）', flying)
+     for s, label, flying, lift, _ in catalog.STOCK_ENEMIES if lift < WAVE_LIFT_MOST]
+    + [('edf6vc_centipede', '星导者·百足龙虫（插件；会合体成长龙）', False),
+       ('edf6vc_dragonfly', '星导者·蜻蜓空优机（插件，飞）', True)]
+    + [(r.sgo, r.label + '（安装器装的）', r.flying) for r in (*catalog.edf5dlc_rows(), *catalog.edf41_rows())
+       if r.category in ('enemy', 'enemy41') and r.lift < WAVE_LIFT_MOST]
+)
+
+
+def enemy_row(sgo_name: str) -> catalog.Row | None:
+    """A waves' enemy whose files the installer writes (EDF5's fortress, EDF4.1's): its catalog row; None: a stock one
+    or the Primers'."""
+    return next((r for r in (*catalog.edf5dlc_rows(), *catalog.edf41_rows()) if r.sgo == sgo_name), None)
 # The Primer creatures (src/primer.cpp, docs/primer-plan.md) are placed like a jet (CreateFriend; the plugin turns
 # them to the enemy's side). Their SGOs are the installer's (tools/make_jets.py), which the range only uses
 # (PRIMER_FILES). per_wave of them (at most PRIMER_KINDS' first) come once no enemy is left, at most its second
@@ -327,6 +353,14 @@ def grand_battle(plan: Plan) -> Plan:
 # The stock vehicles the plugin reworks while the player rides them: the EMC's charged beam (src/emc.cpp), the Nix's
 # torso (src/nix.cpp), the Proteus's two seats and modes (src/proteus.cpp).
 RANGE_REWORKED = ('v510_maser_mission', 'v612_nix_g_mission', 'v614_proteus_mk2_mission')
+# What came in since (the user, 2026-10-17: 「测试场的东西该更新了」): the stock rescue APC 507 (its `_AI` SGO has the
+# mission_setup a script needs), the installer's civilian sedan and EDF4.1's tank (in Mods once the installer has run:
+# install leaves out one that is not, without_missing), plus the authored M163/BMPT, generated here with all model and
+# weapon dependencies. The real plain has room for all 36 placements and 8 safe target spots, with no footprint
+# overlap (tests/test_tracked_range.py); the player's four fighters and three strike jets still fit. 4.1's Balam (VEHICLE501_FORTRESSROBO) is not here: a giant whose
+# footprint the range does not know; the M map's 「摆放」 places it, and every 4.1 enemy, mothership and UFO robot.
+RANGE_NEW = ('v507_rescuetank_ai', 'edf6vc_sedan', 'vehicle301_tank',
+             'edf6tr_vulcan_mission', 'edf6tr_bmpt_mission')
 RANGE_FRIENDS = {'edf6tr_jet_fighter_mission': 1}
 RANGE_WAVES = Waves(enabled=True, enemy=TARGET, per_wave=4, max_alive=24, first_delay=5.0, interval=5.0)
 
@@ -335,7 +369,7 @@ def target_range(plan: Plan) -> Plan:
     """The installer's range (see RANGE_REWORKED): targets only, every vehicle we added."""
     fleet = grand_battle(Plan())
     plan.vehicles = {**{s: n if s in JETS else min(n, 1) for s, n in fleet.vehicles.items()},
-                     **{s: 1 for s in RANGE_REWORKED}}
+                     **{s: 1 for s in RANGE_REWORKED}, **{s: 1 for s in RANGE_NEW}}
     plan.friends = dict(RANGE_FRIENDS)
     plan.waves = replace(RANGE_WAVES)
     plan.air = AirWaves(enabled=False)
@@ -362,6 +396,9 @@ def placements(plan: Plan) -> list[tuple[str, bool]]:
 
 def mission_vehicle(name: str) -> str:
     """Actual script resource, independent of the stable plan/spacing identity."""
+    row = OPTIONAL_VEHICLES.get(name)
+    if row and row.spawn_sgo:
+        return row.spawn_sgo
     return PROTEUS_MISSION.get(name, OPTIC_MISSION.get(name, name))
 
 
@@ -385,8 +422,15 @@ def load_plan(path: str) -> Plan:
         return Plan()
     plan = Plan()
     known = {sgo for sgo, _ in VEHICLES}
-    plan.vehicles = {k: int(v) for k, v in data.get('vehicles', plan.vehicles).items() if k in known}
-    plan.friends = {k: int(v) for k, v in data.get('friends', {}).items() if k in known}
+    def vehicles(values: dict) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for name, count in values.items():
+            name = 'vehicle301_tank' if name == 'vehicle301_tank_ai' else name
+            if name in known:
+                out[name] = out.get(name, 0) + int(count)
+        return out
+    plan.vehicles = vehicles(data.get('vehicles', plan.vehicles))
+    plan.friends = vehicles(data.get('friends', {}))
     plan.vehicle_level = float(data.get('vehicle_level', plan.vehicle_level))
     plan.waves = Waves(**{k: v for k, v in data.get('waves', {}).items() if k in Waves.__dataclass_fields__})
     plan.air = AirWaves(**{k: v for k, v in data.get('air', {}).items() if k in AirWaves.__dataclass_fields__})
@@ -843,8 +887,31 @@ def grand_threads(plan: Plan, lay: Layout) -> list[str]:
 # Our ground vehicles made placeable (the user, 2026-10-05: every vehicle we added on the map, to drive): the call-in
 # SGO their own tool makes (tools/make_katyusha.py, make_artillery.py: its model and weapons are what that tool, and
 # the installer, write) turned into a mission one (as_mission_sgo).
+# These authored tracked vehicles are also buildable by a standalone range. Their
+# call-in SGOs are not mission resources: keep private mission twins, and retain
+# every generated model/weapon under the range's ledger owner as well.
+TRACKED_MISSION = {DERIVED_PREFIX + kind + '_mission': GROUND_VEHICLES[kind] for kind in ('vulcan', 'bmpt')}
 GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery',
-                                  'edf6tr_drill_mission': 'make_drill', 'edf6tr_sidecar_mission': 'make_sidecar'}
+                                  'edf6tr_drill_mission': 'make_drill', 'edf6tr_sidecar_mission': 'make_sidecar',
+                                  'edf6tr_vulcan_mission': 'make_vulcan', 'edf6tr_bmpt_mission': 'make_bmpt'}
+
+
+def range_files(sgo_name: str) -> tuple[str, ...]:
+    """The generated Mods files a range row needs (also the M-map availability contract).
+
+    The tracked builders emit one authored MRAB and their complete native weapon
+    set and fitted collision; Root.cpk still supplies the native CAS dependency.
+    A call-in SGO is not used by the range and must not be claimed on its behalf.
+    """
+    own = f'OBJECT/{sgo_name.upper()}.SGO'
+    vehicle = TRACKED_MISSION.get(sgo_name)
+    if vehicle is None:
+        return (own,)
+    from make_tracked_combat import animation_path, collision_path
+    kind = sgo_name.removeprefix(DERIVED_PREFIX).removesuffix('_mission')
+    return (own, f'OBJECT/{vehicle.sgo}.MRAB', collision_path(kind), animation_path(kind),
+            *(path.removeprefix('app:/').upper() for path in vehicle.weapons))
+
 
 
 # The stock ground vehicles the range makes placeable from their call-in SGO (DERIVED), and the player call whose gun
@@ -913,8 +980,20 @@ def _with_player_heli_motion(game: Game, sgo_name: str, data: bytes) -> bytes:
 
 def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -> bytes:
     """The SGO bytes the mission will load for this vehicle (generated ones are made here)."""
+    if sgo_name == DREADNOUGHT_JET:   # with its turrets' gunner seats (tools/make_dreadnought.py)
+        import make_jets
+        return make_jets.with_passenger_seats(jet_sgo(game, sgo_name, jet_model), 0, DREADNOUGHT_TURRETS,
+                                              game.read('OBJECT', make_jets.GUNNER_STOCK))
     if sgo_name in JETS:
         return jet_sgo(game, sgo_name, jet_model)
+    row = OPTIONAL_VEHICLES.get(sgo_name) or next(
+        (item for item in OPTIONAL_VEHICLES.values() if item.spawn_sgo == sgo_name), None)
+    if row:   # a private configured twin when present; the call-in prototype stays untouched
+        path = os.path.join(game.root, 'Mods', *row.rel.split('/'))
+        if not os.path.isfile(path):
+            raise KeyError(row.rel)
+        with open(path, 'rb') as f:
+            return f.read()
     if sgo_name in PROTEUS_MISSION.values() or sgo_name in OPTIC_MISSION.values():
         return game.read('OBJECT', DERIVED[sgo_name] + '.SGO')   # the stock model (the Proteus's shield is a round of its own)
     if sgo_name in GROUND_MISSION:
@@ -939,6 +1018,43 @@ def has_mission_setup(game: Game, sgo_name: str) -> bool:
     return isinstance(values, dict) and 'mission_setup' in values
 
 
+def _with_material_dependencies(led: ledger.Ledger, uses: tuple[str, ...]) -> tuple[str, ...]:
+    """Close actual installed EDF4.1 shader aliases before recording range needs.
+
+    Registry hashes describe the original model; material aliases are derived at
+    install time. Read the installed model, so switching compatibility off also
+    releases obsolete range shader references on its next generation.
+    """
+    import edf41_objects
+    import edf41materials
+    import mdb
+    reg = edf41_objects.registry()
+    private = set(reg['files']) - set(reg.get('shared', {}))
+    aliases = set()
+    for rel in uses:
+        if ledger.key(rel) not in private:
+            continue
+        ext = os.path.splitext(rel)[1].upper()
+        if ext not in ('.MDB', '.RAB', '.MRAB'):
+            continue
+        with open(led.disk(rel), 'rb') as file:
+            data = file.read()
+        if ext == '.MDB':
+            models = [mdb.cmpl_decompress(data)]
+        else:
+            models = [member.data for member in mdb.rab_read(data).files if member.name.lower().endswith('.mdb')]
+        for raw in models:
+            for material in mdb.mdb_read(raw).materials:
+                if material.shader.upper().startswith(edf41materials.PREFIX):
+                    name = edf41materials.source_name(material.shader)
+                    if name is not None:
+                        aliases.add(edf41materials.shader_path(name))
+    for rel in sorted(aliases):
+        if not os.path.isfile(led.disk(rel)):
+            raise RuntimeError(f'4.1 模型依赖的材质文件不在 Mods 里：{rel}；先重新运行安装器')
+    return tuple(dict.fromkeys((*uses, *sorted(aliases))))
+
+
 def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str, ...] = ()) -> None:
     """Makes Mods/OBJECT hold exactly the generated vehicles in `wanted` (files with our prefix only), with the
     models and guns they use, and records in the ledger (pylib/ledger.py) every file the range now needs:
@@ -948,7 +1064,7 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
     before = set(led.owned_by(OWNER))
     jets = wanted & JETS.keys()
     held = {ledger.key(f'OBJECT/{name.upper()}.SGO') for name in wanted}
-    for rel in uses:
+    for rel in _with_material_dependencies(led, uses):
         led.need(OWNER, rel)
         held.add(ledger.key(rel))
     for f in sorted({JETS[n].file for n in jets if JETS[n].file}):
@@ -961,6 +1077,14 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
         for name, data in jet_guns(game).items():
             led.put(OWNER, f'WEAPON/{name}', data)
             held.add(ledger.key(f'WEAPON/{name}'))
+    if DREADNOUGHT_JET in jets:
+        # Its fighters (the hangar launches them) and every model's airframe: tools/make_dreadnought.py's files, its own
+        # SGO aside (the range's is EDF6TR_DREADNOUGHT_MISSION.SGO: vehicle_sgo).
+        import make_dreadnought
+        for rel, data in make_dreadnought.build(game.root).items():
+            if rel != f'OBJECT/{make_dreadnought.SGO_FILE}':
+                led.put(OWNER, rel, data)
+                held.add(ledger.key(rel))
     if SAZABI_JET in jets:
         from vcobjects import sazabi_weapons, sazabi_rounds
         # A standalone range needs both the mounted weapons and plugin-fired beams. Register these
@@ -983,10 +1107,21 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
     for name in sorted(jets):
         key = aircraft_collision.model_key(JETS[name], JET_ELEVON_MODEL if elevons else None)
         if key is not False:
-            rel = f'OBJECT/{aircraft_collision.FILES[key]}'
+            rel = f'OBJECT/{aircraft_collision.file_of(key)}'
             # Rebuild from the same Root.cpk/model recipe, never reuse a stale
             # loose shape with a different mesh or a previous collision version.
             led.put(OWNER, rel, aircraft_collision.build(game, key))
+            held.add(ledger.key(rel))
+    for name in sorted(wanted & TRACKED_MISSION.keys()):
+        import importlib
+        vehicle = TRACKED_MISSION[name]
+        files = importlib.import_module(GROUND_MISSION[name]).build(game.root)
+        dependencies = {rel: data for rel, data in files.items() if rel != f'OBJECT/{vehicle.sgo}.SGO'}
+        expected = set(range_files(name)[1:])
+        if set(dependencies) != expected:
+            raise ValueError(f'{name}: builder dependencies differ from the range catalog')
+        for rel, data in dependencies.items():
+            led.put(OWNER, rel, data)
             held.add(ledger.key(rel))
     for name in sorted(wanted):
         rel = f'OBJECT/{name.upper()}.SGO'
@@ -1049,6 +1184,11 @@ def _need_model(led: ledger.Ledger, game: Game, file: str) -> str:
         if folder is None:
             raise RuntimeError('没有沙扎比模型目录（models/sazabi）：测试场放不了沙扎比')
         led.put(OWNER, rel, sazabi_model.build_archive(game, folder)[0])
+    elif file in jet_models.DN_FILES:   # tools/make_dreadnought.py's, else made from its model folder
+        folder = dreadnought_model.model_dir()
+        if folder is None:
+            raise RuntimeError('没有无畏舰模型目录（models/dreadnought）：测试场放不了无畏舰')
+        led.put(OWNER, rel, dreadnought_model.build_archive(game, folder, jet_models.DN_FILES[file])[0])
     elif file in jet_models.GENERATED_FILES:
         led.put(OWNER, rel, jet_models.generated(game, file))
     else:
@@ -1124,9 +1264,19 @@ def install(game_root: str, plan: Plan) -> list[str]:
     if os.path.isdir(out) and os.listdir(out) and not ours(game_root, RANGE_MISSION):
         raise RuntimeError(f'{out} 已有别的 mod 的文件，不覆盖。请先手动处理。')
     game = Game(game_root)
-    for sgo_name in spawned(plan) & (DERIVED.keys() | JETS.keys() | {x for x, _ in placements(plan)}):
+    plan, skipped = without_missing(game_root, plan)
+    wave = enemy_row(plan.waves.enemy) if plan.waves.enabled else None
+    if wave and not catalog.available(game_root, wave):
+        raise RuntimeError(f'敌人「{wave.label}」的文件不在 Mods 里（{wave.rel}）：先运行 EDF6VehicleCrew 安装器选「安装」，'
+                           '或换一种敌人')
+    own = placeable_derived()
+    for sgo_name in (spawned(plan) & (DERIVED.keys() | JETS.keys() | {mission_vehicle(x) for x, _ in placements(plan)})) | own:
         if not has_mission_setup(game, sgo_name):
             raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
+    # The installer's files the range's script names (its placed sedan / 4.1 vehicles, a 4.1 wave): needed by the range too
+    # (pylib/ledger.py), so taking the installer's part away leaves them while the range uses them.
+    uses = sorted({rel for s, _ in placements(plan) if s in OPTIONAL_VEHICLES for rel in catalog.files_of(OPTIONAL_VEHICLES[s])}
+                  | (set(catalog.files_of(wave)) if wave else set()))
     points_file = game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')
     lay = layout(rmpa.points(points_file), small_count(plan), far_reserved(plan))
     text = script(plan, lay)
@@ -1145,8 +1295,9 @@ def install(game_root: str, plan: Plan) -> list[str]:
     for mission in LEGACY_SLOTS:   # the story's missions back first, whether or not the pack can be registered
         _remove(game_root, mission)
     os.makedirs(out, exist_ok=True)
-    _write_derived(game_root, game, {x for x in spawned(plan) if x in DERIVED},
-                   PRIMER_FILES if primer else ())
+    # Every vehicle of ours the M map's 「摆放」 makes (PLACEABLE_DERIVED), whether this plan places it or not.
+    _write_derived(game_root, game, {x for x in spawned(plan) if x in DERIVED} | own,
+                   (PRIMER_FILES if primer else ()) + tuple(uses))
     # A stock mission folder's three files: the script, the site's points, and the site's MISSION.JSON (no EDF.dll
     # string names it; a new folder has no stock one under it, as RM015's had).
     with open(os.path.join(out, 'MISSION.JSON'), 'wb') as f:
@@ -1158,7 +1309,21 @@ def install(game_root: str, plan: Plan) -> list[str]:
     with open(os.path.join(out, MARKER), 'w', encoding='utf-8') as f:
         f.write('EDF6 测试场（EDF6VehicleCrew/testrange）：「测试场」任务包的关卡。删除本目录即删除测试场关卡。\n')
     register_pack(game_root)
-    return [f'{p.name}: {s}{"（NPC 驾驶）" if npc else ""}' for s, npc, p in placed]
+    return [f'{p.name}: {s}{"（NPC 驾驶）" if npc else ""}' for s, npc, p in placed] + skipped
+
+
+def without_missing(game_root: str, plan: Plan) -> tuple[Plan, list[str]]:
+    """`plan` without the vehicles whose files the installer writes and this game's Mods does not have (the sedan when
+    its build failed, EDF4.1's objects before the installer has run: catalog.available), and what was left out, said so.
+    Nothing else changes: a range without them is the same range."""
+    gone = sorted(s for s in {*plan.vehicles, *plan.friends}
+                  if s in OPTIONAL_VEHICLES and not catalog.available(game_root, OPTIONAL_VEHICLES[s]))
+    if not gone:
+        return plan, []
+    kept = replace(plan, vehicles={s: n for s, n in plan.vehicles.items() if s not in gone},
+                   friends={s: n for s, n in plan.friends.items() if s not in gone})
+    return kept, [f'跳过 {OPTIONAL_VEHICLES[s].label}：它的文件不在 Mods 里（{OPTIONAL_VEHICLES[s].rel}，先运行安装器）'
+                  for s in gone]
 
 
 def uninstall(game_root: str, unregister: bool = True) -> bool:

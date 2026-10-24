@@ -88,12 +88,15 @@ void NpcGear(unsigned char*,float,float) noexcept {}
 // No barrels in the stand-in world (the weapons' muzzles are the game's): nothing ever has its barrel on a line.
 bool GunBarrel(const unsigned char*,const unsigned char*,float*,float*) noexcept { return false; }
 bool JetBodyStep(unsigned char*,float*,float*) noexcept { return false; }
+bool JetHeldStep(unsigned char*,float*,float*) noexcept { return false; }
 bool SubBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool PlayerJetBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool SazabiBodyStep(unsigned char*,float*,float*) noexcept { return false; }
+bool DreadnoughtBodyStep(unsigned char*,float*,float*) noexcept { return false; }
 bool SubMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
 bool PlayerJetMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
 bool SazabiMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
+bool DreadnoughtMessage(unsigned char*,std::uint32_t,void*,MessageRestore*) noexcept { return false; }
 }  // namespace crew
 
 using namespace crew;

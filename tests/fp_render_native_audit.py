@@ -1,0 +1,88 @@
+"""Compare the first-person render hooks with the supported native binary, including instruction prefixes."""
+from pathlib import Path
+import argparse
+import re
+import struct
+import sys
+
+ap=argparse.ArgumentParser()
+ap.add_argument('--dll',default='')
+args=ap.parse_args()
+if not args.dll or not Path(args.dll).is_file():
+    print('SKIP: EDF6_NATIVE_DLL required')
+    raise SystemExit(77)
+import pefile
+pe=pefile.PE(args.dll,fast_load=True)
+assert pe.FILE_HEADER.TimeDateStamp==0x678CCB46
+binary=pe.get_memory_mapped_image()
+source=(Path(__file__).resolve().parents[1]/'src/firstperson.cpp').read_text(encoding='utf-8')
+value=lambda name:int(re.search(r'\b'+name+r'=0x([0-9A-Fa-f]+)',source).group(1),16)
+for name,signature in (('kMeshDraw','kMeshDrawCode'),('kLaserDraw','kLaserDrawCode'),('kModelDraw','kModelDrawCode')):
+    block=re.search(r'\b'+signature+r'\[\]=\{([^}]+)\}',source).group(1)
+    expected=bytes(int(x,16) for x in re.findall(r'0x([0-9A-Fa-f]+)',block))
+    rva=value(name)
+    assert binary[rva:rva+len(expected)]==expected,(name,hex(rva))
+# Main Umbra camera submission: rdx = camera+0x220, rcx = camera+0x70.
+site=value('kCameraSubmitCall')
+assert binary[site]==0xE8 and site+5+struct.unpack_from('<i',binary,site+1)[0]==value('kCameraSubmit')
+assert binary[site-11:site]==bytes.fromhex('498d9620020000498d4e70')
+print('native main-camera submission and camera ownership offsets passed')
+call=value('kMeshCall')
+assert binary[call]==0xE8 and call+5+struct.unpack_from('<i',binary,call+1)[0]==value('kMeshDraw')
+for site,target in ((0x10FF4F7,'kMeshPrepare'),(0x10FF59C,'kMeshPass'),(0x10FF5AF,'kFlushDrawState')):
+    assert binary[site]==0xE8 and site+5+struct.unpack_from('<i',binary,site+1)[0]==value(target),(hex(site),target)
+assert binary[0x10FF559:0x10FF55C]==b'\xff\x50\x60'
+assert binary[0x10FF5C4:0x10FF5C7]==b'\xff\x50\x60'
+vt=value('kLaserDrawVtable')
+assert struct.unpack_from('<Q',binary,vt+8)[0]-pe.OPTIONAL_HEADER.ImageBase==value('kLaserDraw')
+locator=struct.unpack_from('<Q',binary,vt-8)[0]-pe.OPTIONAL_HEADER.ImageBase
+assert struct.unpack_from('<I',binary,locator+4)[0]==0x10,'laser draw this is its umbra subobject'
+print('native render call, signatures, laser draw slot and owner adjustment passed')
+# The laser's start (firstperson.cpp LaserMuzzle): slot 2 0x6890A0 reads [weapon+0x1D0]'s +0x90 (the first muzzle entry's
+# local x bone) less kLaserBelow of its up row; slot 3 copies it to the draw's +0x120 (the main object's +0x130).
+assert binary[0x6890DB:0x6890EE]==bytes.fromhex('488b41084c8b80d0010000410f108090000000'),'laser start from the first muzzle entry'
+assert value('kMuzzles')==0x1D0 and value('kMuzzleCount')==0x1E0 and value('kMuzzleLocal')==0x10 and value('kLaserStart')==0x120
+assert binary[0x68910E:0x689111]==bytes.fromhex('0f5915')
+assert 0x689115+struct.unpack_from('<i',binary,0x689111)[0]==0x17AA990
+below=float(re.search(r'kLaserBelow=([0-9.]+)f',source).group(1))
+assert all(abs(x-below)<1e-7 for x in struct.unpack_from('<4f',binary,0x17AA990)),'the start sits kLaserBelow under the muzzle'
+assert binary[0x688B98:0x688BA6]==bytes.fromhex('0f1087900000000f118730010000'),'slot 3 copies the start to the draw field'
+# 0x6969A0 (the muzzle entry's matrices): +0x90 = local (+0x10) x the bone record [+0] +0xB0..
+assert binary[0x696A03:0x696A06]==bytes.fromhex('488b11'),'the entry +0 is its bone record'
+assert binary[0x696A2F:0x696A36]==bytes.fromhex('0f10b2b0000000'),'the bone record +0xB0 world matrix'
+print('laser start source (muzzle entry, 0.02 below, slot 3 copy) passed')
+# Every flash class uses MuzzleFlashBase's +0x120 borrowed matrix. Check the two destructor routes before
+# trusting a matrix until destruction (secondary Umbra thunks jump directly to the primary body).
+assert binary[0x2BA563:0x2BA56E]==bytes.fromhex('488b433848898720010000')
+classes=re.search(r'FlashClass flashClasses\[\]=\{(.*?)\n\};',source,re.S).group(1)
+entries=re.findall(r'\{(0x[0-9A-F]+),(0x[0-9A-F]+),(0x[0-9A-F]+|0),(0x[0-9A-F]+|0)\}',classes)
+assert len(entries)==10
+for values in entries:
+    primary,dtor,secondary,thunk=(int(x,0) for x in values)
+    assert struct.unpack_from('<Q',binary,primary+8)[0]-pe.OPTIONAL_HEADER.ImageBase==dtor,(hex(primary),'primary destructor')
+    if secondary:
+        assert struct.unpack_from('<Q',binary,secondary)[0]-pe.OPTIONAL_HEADER.ImageBase==thunk
+        assert binary[thunk:thunk+7]==bytes.fromhex('4881e930010000')
+        at=thunk+7
+        assert binary[at]==0xE9 and at+5+struct.unpack_from('<i',binary,at+1)[0]==dtor,(hex(thunk),'secondary destructor')
+print('native muzzle matrix ownership and 10 flash classes destructor routes passed')
+
+game=Path(args.dll).resolve().parent
+if (game/'Root.cpk').is_file():
+    sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'pylib'))
+    import rootcpk
+    from mdb import rab_read,mdb_read
+    stock=rootcpk.Game(str(game))
+    for stem in ('P505_RANGER','P506_WINGDIVER','P507_FENCER','P508_AIRRADER'):
+        models=[(f.name,mdb_read(f.data)) for f in rab_read(stock.read('OBJECT',stem+'.MRAB')).files if f.name.lower().endswith('.mdb')]
+        base=next(m for name,m in models if name.lower()==stem.lower()+'.mdb')
+        for name,m in models:
+            names=[m.name_of(b.name) for b in m.bones]
+            assert len(names)<=256 and 'te_r' in names and 'te_l' in names
+            for obj in m.objects:
+                for mesh in obj.meshes:
+                    weights=next(e for e in mesh.elems if e.name.lower()=='blendweight')
+                    indices=next(e for e in mesh.elems if e.name.lower()=='blendindices')
+                    assert mesh.vsize in (60,64) and weights.fmt==1 and weights.offset==mesh.vsize-20
+                    assert indices.fmt==21 and indices.offset==mesh.vsize-4
+        print(stem,'base/LOD arm bones and skin declarations passed (each draw uses its own palette ordering)')

@@ -1,5 +1,8 @@
 """Model grafting helpers over pylib/mdb.py (EDF6 MDB0 + RAB/MRAB), pure Python (math, lists, tuples; no numpy),
-so the mod installer (PyInstaller, pure-Python pylib) can build grafted models from the player's own Root.cpk.
+so that the slim loadout generator (tools/loadout_generator.py: tools/build_release.py builds it without numpy,
+procmesh or jet_models) can build grafted models from the player's own Root.cpk. The full installer bundles numpy
+(build_release BUNDLED): the procedural models' builder pylib/procmesh.py uses it; the pure-Python mesh code that
+the slim generator reaches (pylib/obj_model.py's Part, pylib/jet_skids.py's Shape) stays numpy free.
 
 Conventions (same as pylib/mdb.py): every bone matrix is a row-major 4x4 list of 16 floats in row-vector convention
 (p' = p * M, row 3 = translation); skinned meshes store model-space bind positions; `inv_bind` is the inverse of the

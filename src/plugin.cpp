@@ -9,14 +9,23 @@
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <iterator>
 #include <new>
 #pragma warning(push)
 #pragma warning(disable:4201)
 #include "PluginAPI.h"
 #pragma warning(pop)
+#include "crash_dump.h"
+#include "log_buffer.h"
 #include "crew.h"
+#include "gravity.h"
+#include "floatgun.h"
 #include "firstperson.h"
+#include "thermal.h"
+#include "pvp.h"
+#include "edf41bike.h"
 #include "mod_room.h"
+#include "outfit41.h"
 #include "room_ui.h"
 #include "support_soldier.h"
 #include "airdrop.h"
@@ -28,8 +37,19 @@
 #include "gunnerrecoil.h"
 #include "memory.h"
 #include "subcarrier.h"
+#include "enemy_control.h"
+#include "enemy_control_net.h"
+#include "enemy_control_legacy.h"
+#include "enemy_control_weapon_aim.h"
+#include "enemy_control_radar.h"
+#include "pvp_controlled_spawn.h"
+#include "enemy_control_pvp_native.h"
+#include "vulcan_rotor.h"
 #include "edf/host.h"
 #include "version.h"
+#include "build_id.h"
+#include "pack_notice.h"
+#include "profile_sigs.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -51,22 +71,7 @@ wchar_t logPath[MAX_PATH]{},logOldPath[MAX_PATH+2]{};
 wchar_t iniPath[MAX_PATH]{};
 edf::IniWatch ini;
 
-struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
-// The code the plugin calls or relies on; any mismatch and it stays off.
-const Signature kSignatures[]={
-    {kCanRideSeat,{0x40,0x57,0x48,0x83,0xEC,0x30,0x8B,0x81,0x14,0x03,0x00,0x00,0x48,0x8B,0xFA,0x39},16},
-    {kCanRide,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48},16},
-    {kSeatRide,{0x40,0x53,0x41,0x54,0x41,0x56,0x41,0x57,0x48,0x83,0xEC,0x38,0x45,0x33,0xD2,0x45},16},
-    {kSeatClear,{0x48,0x85,0xD2,0x0F,0x84,0x94,0x00,0x00,0x00,0x48,0x89,0x5C,0x24,0x08,0x57,0x48},16},
-    {kSeatKick,{0x48,0x85,0xD2,0x0F,0x84,0x98,0x01,0x00,0x00,0x48,0x89,0x5C,0x24,0x08,0x48,0x89},16},
-    {kFindSeat,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x57},16},
-    {kRideAi,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x55,0x57,0x41,0x56,0x48,0x8D},16},
-    {kPromptVisit,{0x40,0x53,0x48,0x83,0xEC,0x30,0x48,0x8B,0x41,0x08,0x48,0x8B,0xD9,0x4C,0x8B,0xD2},16},
-    {0x5E3B50,{0x8B,0xC2,0x2D,0x15,0x00,0x00,0x10,0x74,0x09,0x83,0xF8,0x01,0x0F,0x85,0xCE,0x69},16},   // dummy rider: get-off -> dies
-    {0x634710,{0x49,0x8B,0x80,0x68,0x02,0x00,0x00,0x48,0x85,0xC0,0x74,0x0A,0x83,0x78,0x08,0x00},16},   // seat+0x268 occupancy
-    {0x62DD32,{0x48,0x8B,0x87,0x38,0x02,0x00,0x00,0x48,0x85,0xC0,0x74,0x06,0x83,0x78,0x08,0x00},16},   // same, prompt check
-    {0x572EFF,{0x44,0x38,0xAE,0x54,0x03,0x00,0x00},7},                                                 // human+0x354 player
-};
+using sigs::kSignatures;   // profile_sigs.h
 
 bool CheckProfile() noexcept {
     __try {
@@ -79,9 +84,9 @@ float ReadFloat(const wchar_t* key,float fallback) noexcept {
     wchar_t text[64]{};
     GetPrivateProfileStringW(L"VehicleCrew",key,L"",text,64,iniPath);
     if(!text[0])return fallback;
-    wchar_t* end=nullptr;
-    const float v=std::wcstof(text,&end);
-    return end!=text && std::isfinite(v) ? v : fallback;
+    float v=fallback;
+    if(!edf::ParseFloat(text,&v))Log("CONFIG %ls=%ls is not a number: %g used",key,text,fallback);
+    return v;
 }
 // HudLanguage: auto / en / zh-CN / zh-TW / ja (hudtext.h ParseSetting); anything else is logged and auto used.
 int ReadLanguage(int fallback) noexcept {
@@ -107,6 +112,89 @@ int ReadInt(const wchar_t* key,DWORD fallback) noexcept {
 void Fix(const char* key,float& v,float lo,float hi) noexcept {
     const float c=v<lo ? lo : v>hi ? hi : v;
     if(c!=v){Log("CONFIG %s=%g out of range [%g, %g]: %g used",key,v,lo,hi,c);v=c;}
+}
+// A mission pack run's ini id (EDF5CampaignContent, TestRangeContent, EDF41Content): 0 or the run's fixed id
+// (mission_packs.h). An older installer's id (one that depended on the mods installed: 3..9 for most) is logged and
+// taken as 0, and the player told once a session. Its packs cannot be owned under the new ids: that installer's
+// CONFIG.SGO has them at the old ids (a room would publish an id no newer machine has), its lists left out a missing
+// mission's row (a row would name another mission than on a newer machine), and it wrote no EDF6VehicleCrew.packs.ini
+// (no identity to publish or check, no save layout). Only the installer can write those; the next install does.
+int PackContent(const char* key,int v,int fixed) noexcept {
+    if(v==0 || v==fixed)return v;
+    Log("CONFIG %s=%d is an older installer's mission pack id (now fixed %d): its packs are not owned until the "
+        "installer runs again",key,v,fixed);
+    wchar_t text[400]{};
+    swprintf_s(text,L"EDF6VehicleCrew.ini 里的 %hs=%d 是旧版安装器写的任务包编号（现在固定为 %d）。\n\n"
+        L"新版全军出击的任务包需要新版安装器重新生成（编号、关卡列表和任务包身份都变了），在重新运行安装器之前，"
+        L"EDF5 / 测试场 / EDF4.1 任务包会显示为「尚未购买」。\n\n请退出游戏，运行新版全军出击安装器选「安装」。",key,v,fixed);
+    notice::Post("ini-old-pack-ids",L"全军出击：请重新运行安装器",text,notice::kOnce);
+    return 0;
+}
+// EDF6VehicleCrew.packs.ini beside the ini (tools/make_edf5_campaign.py PACKS_FILE): [Pack<id>] Tag, Digest, Rows,
+// Missing, Layout, StableRows, and the older save layouts' maps (Legacy, Older + From<layout>) for each installed pack.
+// A section that does not parse is left out (its pack not owned) and logged.
+void LoadMissionPacks(packs::Table& table) noexcept {
+    table=packs::Table{};
+    wchar_t path[MAX_PATH]{};
+    wcscpy_s(path,iniPath);
+    wchar_t* dot=wcsrchr(path,L'.');
+    if(!dot || wcscpy_s(dot,MAX_PATH-(dot-path),L".packs.ini"))return;
+    // ASCII values (the installer writes nothing else): read wide, so a game path in any code page works.
+    const auto narrow=[](const wchar_t* w,char* out,std::size_t size){
+        std::size_t i=0;
+        for(;w[i] && i+1<size;++i)out[i]=w[i]<0x80 ? static_cast<char>(w[i]) : '?';
+        out[i]=0;
+    };
+    static wchar_t longText[packs::kMaxRows*5+16];   // "<n>:" and up to 512 rows of "-1," / "511,"
+    static char longValue[sizeof(longText)/sizeof(wchar_t)];
+    int found=0;
+    for(int id=packs::kBase;id<packs::kBase+packs::kCount;++id) {
+        wchar_t section[16]{},value[packs::kMaxRows/4+2]{};
+        char tag[32]{},digest[32]{},mask[packs::kMaxRows/4+2]{},layout[32]{},older[packs::kMaxFrom*9+8]{};
+        swprintf_s(section,L"Pack%d",id);
+        GetPrivateProfileStringW(section,L"Tag",L"",value,static_cast<DWORD>(std::size(value)),path);
+        narrow(value,tag,sizeof(tag));
+        if(!tag[0])continue;
+        GetPrivateProfileStringW(section,L"Digest",L"",value,static_cast<DWORD>(std::size(value)),path);
+        narrow(value,digest,sizeof(digest));
+        GetPrivateProfileStringW(section,L"Missing",L"",value,static_cast<DWORD>(std::size(value)),path);
+        narrow(value,mask,sizeof(mask));
+        GetPrivateProfileStringW(section,L"Layout",L"",value,static_cast<DWORD>(std::size(value)),path);
+        narrow(value,layout,sizeof(layout));
+        GetPrivateProfileStringW(section,L"Older",L"",value,static_cast<DWORD>(std::size(value)),path);
+        narrow(value,older,sizeof(older));
+        const int rows=static_cast<int>(GetPrivateProfileIntW(section,L"Rows",0,path));
+        const int stable=static_cast<int>(GetPrivateProfileIntW(section,L"StableRows",static_cast<UINT>(-1),path));
+        packs::Pack& pack=table.packs[id-packs::kBase];
+        bool ok=packs::Make(id,tag,digest,rows,mask,pack) && packs::SetLayout(pack,layout,stable);
+        GetPrivateProfileStringW(section,L"Legacy",L"",longText,static_cast<DWORD>(std::size(longText)),path);
+        narrow(longText,longValue,sizeof(longValue));
+        ok=ok && packs::AddFrom(pack,0,longValue);
+        // Older=<layout>,<layout>,...: each one's map in From<layout>
+        for(char* at=older;ok && *at;) {
+            char* comma=std::strchr(at,',');
+            if(comma)*comma=0;
+            std::uint32_t from=0;
+            wchar_t key[16]{};
+            ok=packs::ParseLayout(at,from);
+            if(ok) {
+                swprintf_s(key,L"From%hs",at);
+                GetPrivateProfileStringW(section,key,L"",longText,static_cast<DWORD>(std::size(longText)),path);
+                narrow(longText,longValue,sizeof(longValue));
+                ok=longValue[0] && packs::AddFrom(pack,from,longValue);
+            }
+            at=comma ? comma+1 : at+std::strlen(at);
+        }
+        if(ok)++found;
+        else {
+            pack=packs::Pack{};
+            Log("CONFIG EDF6VehicleCrew.packs.ini [Pack%d] malformed (Tag=%s Rows=%d Layout=%s Older=%s): that pack is not owned",
+                id,tag,rows,layout,older);
+        }
+    }
+    static int logged=-1;
+    if(found!=logged)Log("CONFIG mission packs: %d installed (EDF6VehicleCrew.packs.ini)",found);
+    logged=found;
 }
 DWORD FixInt(const char* key,int v,int lo,int hi) noexcept {
     const int c=v<lo ? lo : v>hi ? hi : v;
@@ -144,9 +232,17 @@ void Validate(Config& n) noexcept {
     n.vehicleHudCount=static_cast<int>(FixInt("VehicleHudCount",n.vehicleHudCount,0,12));
     Fix("PlayerJetRamDamage",n.playerJetRamDamage,0.0f,100.0f);
     Fix("VehicleRamDamage",n.vehicleRamDamage,0.0f,100.0f);
+    Fix("GravityDamage",n.gravityDamage,0.0f,1000.0f);
+    Fix("GravityThrowSpeed",n.gravityThrowSpeed,5.0f,90.0f);
+    n.floatGuns=static_cast<int>(FixInt("FloatGuns",n.floatGuns,0,2));
+    n.floatGunMost=static_cast<int>(FixInt("FloatGunMost",n.floatGunMost,1,8));
+    Fix("FloatGunSec",n.floatGunSec,0.0f,3600.0f);
+    Fix("FloatGunReach",n.floatGunReach,1.0f,200.0f);
     n.playerJetBoostKey=static_cast<int>(FixInt("PlayerJetBoostKey",n.playerJetBoostKey,0,254));
     n.playerJetBrakeKey=static_cast<int>(FixInt("PlayerJetBrakeKey",n.playerJetBrakeKey,0,254));
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
+    n.vehicleSecondarySwitchKey=static_cast<int>(FixInt("VehicleSecondarySwitchKey",n.vehicleSecondarySwitchKey,0,254));
+    n.vehicleSecondarySwitchButton=static_cast<int>(FixInt("VehicleSecondarySwitchButton",n.vehicleSecondarySwitchButton,0,0xFFFF));
     n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
     n.playerJetHailKey=static_cast<int>(FixInt("PlayerJetHailKey",n.playerJetHailKey,0,254));
@@ -186,6 +282,21 @@ void Validate(Config& n) noexcept {
     Fix("SazabiAxeDamage",n.sazabiAxeDamage,0.0f,1000000.0f);
     Fix("SazabiCannonDamage",n.sazabiCannonDamage,0.0f,100000.0f);
     Fix("SazabiFunnelDamage",n.sazabiFunnelDamage,0.0f,100000.0f);
+    Fix("DreadnoughtSpeed",n.dreadnoughtSpeed,1.0f,200.0f);
+    Fix("DreadnoughtBoost",n.dreadnoughtBoost,1.0f,4.0f);
+    Fix("DreadnoughtAccel",n.dreadnoughtAccel,0.5f,40.0f);
+    Fix("DreadnoughtClimb",n.dreadnoughtClimb,1.0f,100.0f);
+    Fix("DreadnoughtTurn",n.dreadnoughtTurn,1.0f,90.0f);
+    Fix("DreadnoughtFloor",n.dreadnoughtFloor,0.0f,500.0f);
+    n.dreadnoughtBoostKey=static_cast<int>(FixInt("DreadnoughtBoostKey",n.dreadnoughtBoostKey,0,254));
+    n.dreadnoughtDescendKey=static_cast<int>(FixInt("DreadnoughtDescendKey",n.dreadnoughtDescendKey,0,254));
+    n.dreadnoughtStrafeLeftKey=static_cast<int>(FixInt("DreadnoughtStrafeLeftKey",n.dreadnoughtStrafeLeftKey,0,254));
+    n.dreadnoughtStrafeRightKey=static_cast<int>(FixInt("DreadnoughtStrafeRightKey",n.dreadnoughtStrafeRightKey,0,254));
+    n.dreadnoughtBoostButton=static_cast<int>(FixInt("DreadnoughtBoostButton",n.dreadnoughtBoostButton,0,255));
+    n.dreadnoughtDescendButton=static_cast<int>(FixInt("DreadnoughtDescendButton",n.dreadnoughtDescendButton,0,255));
+    n.dreadnoughtSeatButton=static_cast<int>(FixInt("DreadnoughtSeatButton",n.dreadnoughtSeatButton,0,255));
+    n.dreadnoughtHangarKey=static_cast<int>(FixInt("DreadnoughtHangarKey",n.dreadnoughtHangarKey,0,254));
+    n.dreadnoughtHangarButton=static_cast<int>(FixInt("DreadnoughtHangarButton",n.dreadnoughtHangarButton,0,255));
     Fix("PlayerJetRollScale",n.playerJetRollScale,0.5f,2.0f);
     Fix("PlayerJetAimGain",n.playerJetAimGain,0.5f,2.0f);
     Fix("PlayerRotorLift",n.playerRotorLift,0.0f,4.0f);
@@ -243,10 +354,14 @@ void Validate(Config& n) noexcept {
     n.sightRangeDownKey=static_cast<int>(FixInt("SightRangeDownKey",n.sightRangeDownKey,0,254));
     n.sightRangeStep=static_cast<int>(FixInt("SightRangeStep",n.sightRangeStep,0,1000));
     n.mapKey=static_cast<int>(FixInt("MapKey",n.mapKey,0,254));
+    n.thermalKey=static_cast<int>(FixInt("VehicleThermalKey",n.thermalKey,0,254));
+    n.thermalButton=static_cast<int>(FixInt("VehicleThermalButton",n.thermalButton,0,255));
     n.firstPersonKey=static_cast<int>(FixInt("FirstPersonKey",n.firstPersonKey,0,254));
     Fix("FirstPersonEyeUp",n.fpEyeUp,-0.5f,0.5f);
     Fix("FirstPersonEyeAhead",n.fpEyeAhead,-0.5f,0.5f);
     Fix("FirstPersonViewHeightEase",n.fpViewHeightEase,0.02f,1.0f);
+    Fix("FirstPersonCenter",n.fpCenter,0.0f,0.5f);
+    Fix("FirstPersonSway",n.fpSway,0.0f,1.0f);
     Fix("FirstPersonGripX",n.fpGripX,-1.0f,1.0f);
     Fix("FirstPersonGripY",n.fpGripY,-1.0f,1.0f);
     Fix("FirstPersonGripZ",n.fpGripZ,-1.0f,2.0f);
@@ -420,6 +535,7 @@ void LoadConfig() noexcept {
     n.vehicleWelding=ReadBool(L"VehicleWelding",n.vehicleWelding);
     n.giantContactCap=ReadBool(L"GiantContactCap",n.giantContactCap);
     n.splitMissileSurface=ReadBool(L"SplitMissileSurface",n.splitMissileSurface);
+    n.supportUnitOnAllies=ReadBool(L"SupportUnitOnAllies",n.supportUnitOnAllies);
     n.routeGuidePath=ReadBool(L"RouteGuidePath",n.routeGuidePath);
     n.stockMissilePN=ReadBool(L"StockMissilePN",n.stockMissilePN);
     n.stockMissileNav=ReadFloat(L"StockMissileNav",n.stockMissileNav);
@@ -441,6 +557,8 @@ void LoadConfig() noexcept {
     n.playerJetBoostKey=ReadInt(L"PlayerJetBoostKey",static_cast<DWORD>(n.playerJetBoostKey));
     n.playerJetBrakeKey=ReadInt(L"PlayerJetBrakeKey",static_cast<DWORD>(n.playerJetBrakeKey));
     n.playerJetSwitchKey=ReadInt(L"PlayerJetSwitchKey",static_cast<DWORD>(n.playerJetSwitchKey));
+    n.vehicleSecondarySwitchKey=ReadInt(L"VehicleSecondarySwitchKey",static_cast<DWORD>(n.vehicleSecondarySwitchKey));
+    n.vehicleSecondarySwitchButton=ReadInt(L"VehicleSecondarySwitchButton",static_cast<DWORD>(n.vehicleSecondarySwitchButton));
     n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
     n.playerJetFlareKey=ReadInt(L"PlayerJetFlareKey",static_cast<DWORD>(n.playerJetFlareKey));
     n.playerJetAll=ReadBool(L"PlayerJetAll",n.playerJetAll);
@@ -490,6 +608,29 @@ void LoadConfig() noexcept {
     n.sazabiCannonDamage=ReadFloat(L"SazabiCannonDamage",n.sazabiCannonDamage);
     n.sazabiFunnelDamage=ReadFloat(L"SazabiFunnelDamage",n.sazabiFunnelDamage);
     n.sazabiTestBoard=ReadBool(L"SazabiTestBoard",n.sazabiTestBoard);
+    n.dreadnought=ReadBool(L"Dreadnought",n.dreadnought);
+    n.dreadnoughtSpeed=ReadFloat(L"DreadnoughtSpeed",n.dreadnoughtSpeed);
+    n.dreadnoughtBoost=ReadFloat(L"DreadnoughtBoost",n.dreadnoughtBoost);
+    n.dreadnoughtAccel=ReadFloat(L"DreadnoughtAccel",n.dreadnoughtAccel);
+    n.dreadnoughtClimb=ReadFloat(L"DreadnoughtClimb",n.dreadnoughtClimb);
+    n.dreadnoughtTurn=ReadFloat(L"DreadnoughtTurn",n.dreadnoughtTurn);
+    n.dreadnoughtFloor=ReadFloat(L"DreadnoughtFloor",n.dreadnoughtFloor);
+    n.dreadnoughtBoostKey=static_cast<int>(ReadInt(L"DreadnoughtBoostKey",static_cast<DWORD>(n.dreadnoughtBoostKey)));
+    n.dreadnoughtDescendKey=static_cast<int>(ReadInt(L"DreadnoughtDescendKey",static_cast<DWORD>(n.dreadnoughtDescendKey)));
+    n.dreadnoughtStrafeLeftKey=static_cast<int>(ReadInt(L"DreadnoughtStrafeLeftKey",static_cast<DWORD>(n.dreadnoughtStrafeLeftKey)));
+    n.dreadnoughtStrafeRightKey=static_cast<int>(ReadInt(L"DreadnoughtStrafeRightKey",static_cast<DWORD>(n.dreadnoughtStrafeRightKey)));
+    n.dreadnoughtBoostButton=static_cast<int>(ReadInt(L"DreadnoughtBoostButton",static_cast<DWORD>(n.dreadnoughtBoostButton)));
+    n.dreadnoughtDescendButton=static_cast<int>(ReadInt(L"DreadnoughtDescendButton",static_cast<DWORD>(n.dreadnoughtDescendButton)));
+    n.dreadnoughtSeatButton=static_cast<int>(ReadInt(L"DreadnoughtSeatButton",static_cast<DWORD>(n.dreadnoughtSeatButton)));
+    n.dreadnoughtHangarKey=static_cast<int>(ReadInt(L"DreadnoughtHangarKey",static_cast<DWORD>(n.dreadnoughtHangarKey)));
+    n.dreadnoughtHangarButton=static_cast<int>(ReadInt(L"DreadnoughtHangarButton",static_cast<DWORD>(n.dreadnoughtHangarButton)));
+    {   // its hangar modules (dreadnought_deck.h module m): the installer builds the model by these same keys
+        static const wchar_t* const kHangarKeys[]={L"DreadnoughtHangarLeftFore",L"DreadnoughtHangarLeftAft",L"DreadnoughtHangarRightFore",
+                                                   L"DreadnoughtHangarRightAft"};
+        unsigned fitted=0;
+        for(unsigned m=0;m<4;++m)if(ReadBool(kHangarKeys[m],((n.dreadnoughtHangars>>m)&1u)!=0))fitted|=1u<<m;
+        n.dreadnoughtHangars=fitted;
+    }
     {
         wchar_t text[32]{};
         GetPrivateProfileStringW(L"VehicleCrew",L"TestBoardVehicle",L"",text,32,iniPath);
@@ -529,19 +670,47 @@ void LoadConfig() noexcept {
     n.edf41Sound=ReadBool(L"Edf41Sound",n.edf41Sound);
     n.edf41VoiceProbe=ReadBool(L"Edf41VoiceProbe",n.edf41VoiceProbe);
     n.edf41Ai=ReadBool(L"Edf41Ai",n.edf41Ai);
-    n.edf41MotherDev=ReadBool(L"Edf41MotherDev",n.edf41MotherDev);
+    n.edf41Mother=ReadBool(L"Edf41Mother",n.edf41Mother);
+    n.edf41Robo=ReadBool(L"Edf41Robo",n.edf41Robo);
+    n.edf41RoboLevel=ReadFloat(L"Edf41RoboLevel",n.edf41RoboLevel);
+    n.edf41RoboGunEvery=static_cast<int>(FixInt("Edf41RoboGunEvery",ReadInt(L"Edf41RoboGunEvery",n.edf41RoboGunEvery),0,100000));
+    n.edf41RoboAttack=static_cast<int>(FixInt("Edf41RoboAttack",ReadInt(L"Edf41RoboAttack",n.edf41RoboAttack),-1,15));
+    n.edf41RoboPlace=ReadFloat(L"Edf41RoboPlace",n.edf41RoboPlace);
+    n.edf41RoboTransformAfter=ReadFloat(L"Edf41RoboTransformAfter",n.edf41RoboTransformAfter);
+    n.edf41DevShoot=static_cast<int>(FixInt("Edf41DevShoot",ReadInt(L"Edf41DevShoot",n.edf41DevShoot),0,100000));
+    n.edf41DevShootDamage=ReadFloat(L"Edf41DevShootDamage",n.edf41DevShootDamage);
+    n.edf41DevShootBlast=ReadFloat(L"Edf41DevShootBlast",n.edf41DevShootBlast);
+    n.edf41MotherForce=static_cast<int>(FixInt("Edf41MotherForce",ReadInt(L"Edf41MotherForce",n.edf41MotherForce),0,4095));
     n.edf41MotherPlace=ReadFloat(L"Edf41MotherPlace",n.edf41MotherPlace);
-    n.edf41MotherBulletProbe=ReadBool(L"Edf41MotherBulletProbe",n.edf41MotherBulletProbe);
     n.edf41MotherParts=static_cast<int>(FixInt("Edf41MotherParts",ReadInt(L"Edf41MotherParts",n.edf41MotherParts),0,31));
-    n.edf5CampaignContent=FixInt("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),0,65535);
-    n.testRangeContent=FixInt("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),0,65535);
-    n.edf41Content=FixInt("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),0,65535);
+    n.edf41Mother401=ReadBool(L"Edf41Mother401",n.edf41Mother401);
+    n.edf41Mother401Dev=static_cast<int>(FixInt("Edf41Mother401Dev",ReadInt(L"Edf41Mother401Dev",n.edf41Mother401Dev),0,8388607));
+    n.edf41Mother401DevKill=ReadFloat(L"Edf41Mother401DevKill",n.edf41Mother401DevKill);
+    n.edf41Mother401DevAction=static_cast<int>(FixInt("Edf41Mother401DevAction",ReadInt(L"Edf41Mother401DevAction",n.edf41Mother401DevAction),0,63));
+    n.edf41Mother401Place=ReadFloat(L"Edf41Mother401Place",n.edf41Mother401Place);
+    n.edf41Net=ReadBool(L"Edf41Net",n.edf41Net);                     // the 4.1 classes online (edf41net.cpp)
+    n.edf41NetMirror=ReadBool(L"Edf41NetMirror",n.edf41NetMirror);
+    n.edf5CampaignContent=PackContent("EDF5CampaignContent",ReadInt(L"EDF5CampaignContent",n.edf5CampaignContent),packs::kEdf5);
+    n.testRangeContent=PackContent("TestRangeContent",ReadInt(L"TestRangeContent",n.testRangeContent),packs::kRange);
+    n.edf41Content=PackContent("EDF41Content",ReadInt(L"EDF41Content",n.edf41Content),packs::kEdf41);
+    LoadMissionPacks(n.missionPacks);
+    n.portedMissionsUnlocked=ReadBool(L"PortedMissionsUnlocked",n.portedMissionsUnlocked);
+    n.portedWeaponsUnlocked=ReadBool(L"PortedWeaponsUnlocked",n.portedWeaponsUnlocked);
     n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
     n.airSoftTurns=ReadFloat(L"AirSoftTurns",n.airSoftTurns);
     n.airSoftCeil=ReadFloat(L"AirSoftCeil",n.airSoftCeil);
     n.heliSoftEdge=ReadFloat(L"HeliSoftEdge",n.heliSoftEdge);
     n.vehicleRam=ReadBool(L"VehicleRam",n.vehicleRam);
     n.vehicleRamDamage=ReadFloat(L"VehicleRamDamage",n.vehicleRamDamage);
+    n.gravityDamage=ReadFloat(L"GravityDamage",n.gravityDamage);
+    n.gravityGun=ReadBool(L"GravityGun",n.gravityGun);
+    n.gravityThrowSpeed=ReadFloat(L"GravityThrowSpeed",n.gravityThrowSpeed);
+    n.gravityAutoTest=ReadBool(L"GravityAutoTest",n.gravityAutoTest);
+    n.gravityGrabPlayers=ReadBool(L"GravityGrabPlayers",n.gravityGrabPlayers);
+    n.floatGuns=ReadInt(L"FloatGuns",n.floatGuns);
+    n.floatGunMost=ReadInt(L"FloatGunMost",n.floatGunMost);
+    n.floatGunSec=ReadFloat(L"FloatGunSec",n.floatGunSec);
+    n.floatGunReach=ReadFloat(L"FloatGunReach",n.floatGunReach);
     n.drill=ReadBool(L"Drill",n.drill);
     n.drillMaxRpm=ReadFloat(L"DrillMaxRpm",n.drillMaxRpm);
     n.drillSpinUpSec=ReadFloat(L"DrillSpinUpSec",n.drillSpinUpSec);
@@ -591,11 +760,17 @@ void LoadConfig() noexcept {
     n.firstPerson=ReadBool(L"FirstPerson",n.firstPerson);
     n.fpVehicle=ReadBool(L"FirstPersonVehicle",n.fpVehicle);
     n.fpHideStockHud=ReadBool(L"FirstPersonHideStockHud",n.fpHideStockHud);
+    n.enemyControl=ReadBool(L"EnemyControl",n.enemyControl);
+    n.thermal=ReadBool(L"VehicleThermal",n.thermal);
+    n.thermalKey=ReadInt(L"VehicleThermalKey",static_cast<DWORD>(n.thermalKey));
+    n.thermalButton=ReadInt(L"VehicleThermalButton",static_cast<DWORD>(n.thermalButton));
     n.firstPersonKey=ReadInt(L"FirstPersonKey",static_cast<DWORD>(n.firstPersonKey));
     n.firstPersonStart=ReadBool(L"FirstPersonStart",n.firstPersonStart);
     n.fpEyeUp=ReadFloat(L"FirstPersonEyeUp",n.fpEyeUp);
     n.fpEyeAhead=ReadFloat(L"FirstPersonEyeAhead",n.fpEyeAhead);
     n.fpViewHeightEase=ReadFloat(L"FirstPersonViewHeightEase",n.fpViewHeightEase);
+    n.fpCenter=ReadFloat(L"FirstPersonCenter",n.fpCenter);
+    n.fpSway=ReadFloat(L"FirstPersonSway",n.fpSway);
     n.fpGripX=ReadFloat(L"FirstPersonGripX",n.fpGripX);
     n.fpGripY=ReadFloat(L"FirstPersonGripY",n.fpGripY);
     n.fpGripZ=ReadFloat(L"FirstPersonGripZ",n.fpGripZ);
@@ -611,6 +786,7 @@ void LoadConfig() noexcept {
     n.fpMotion=ReadBool(L"FirstPersonMotion",n.fpMotion);
     n.fpCulling=ReadBool(L"FirstPersonCulling",n.fpCulling);
     n.fpFit=ReadBool(L"FirstPersonFit",n.fpFit);
+    n.fpNativeElbow=ReadBool(L"FirstPersonNativeElbow",n.fpNativeElbow);
     n.fpArmIk=ReadBool(L"FirstPersonArmIk",n.fpArmIk);
     n.fpHoldArc=ReadFloat(L"FirstPersonHoldArc",n.fpHoldArc);
     n.fpWristMax=ReadFloat(L"FirstPersonWristMax",n.fpWristMax);
@@ -620,6 +796,7 @@ void LoadConfig() noexcept {
     n.mapKey=ReadInt(L"MapKey",static_cast<DWORD>(n.mapKey));
     n.mapButton=ReadInt(L"MapButton",static_cast<DWORD>(n.mapButton));
     n.mapViewDistance=ReadFloat(L"MapViewDistance",n.mapViewDistance);
+    n.mapMarchPace=ReadBool(L"MapMarchPace",n.mapMarchPace);
     n.damageStats=ReadBool(L"DamageStats",n.damageStats);
     n.damageStatsKey=ReadInt(L"DamageStatsKey",static_cast<DWORD>(n.damageStatsKey));
     n.debugSpawn=ReadBool(L"DebugSpawn",n.debugSpawn);   // off unless the ini says 1 (an old ini without it: off)
@@ -630,12 +807,15 @@ void LoadConfig() noexcept {
     n.debugSpawnSpawnKey=ReadInt(L"DebugSpawnSpawnKey",static_cast<DWORD>(n.debugSpawnSpawnKey));
     n.debugSpawnRange=ReadFloat(L"DebugSpawnRange",n.debugSpawnRange);
     n.debugSpawnDistance=ReadFloat(L"DebugSpawnDistance",n.debugSpawnDistance);
+    n.rangePlace=ReadBool(L"RangePlace",n.rangePlace);
+    n.rangePlaceAll=ReadBool(L"RangePlaceAll",n.rangePlaceAll);
     n.roomLoadout=ReadBool(L"RoomLoadout",n.roomLoadout);
     n.roomPreSync=ReadBool(L"RoomPreSync",n.roomPreSync);
     n.roomLoadoutKey=ReadInt(L"RoomLoadoutKey",static_cast<DWORD>(n.roomLoadoutKey));
     n.roomLoadoutButton=ReadInt(L"RoomLoadoutButton",static_cast<DWORD>(n.roomLoadoutButton));
     // StockVehicleStores, or the older StockHeliStores (the helicopters alone before 2026-10-07) still set to 1
     n.stockStores=ReadBool(L"StockVehicleStores",n.stockStores) || ReadBool(L"StockHeliStores",false);
+    n.allClassesRide=ReadBool(L"AllClassesRide",n.allClassesRide);
     n.seatSwitch=ReadBool(L"SeatSwitch",n.seatSwitch);
     n.seatNextKey=ReadInt(L"SeatNextKey",static_cast<DWORD>(n.seatNextKey));
     n.seatNumberKeys=ReadBool(L"SeatNumberKeys",n.seatNumberKeys);
@@ -690,6 +870,7 @@ void LoadConfig() noexcept {
     n.npcLaneLength=ReadFloat(L"NpcLaneLength",n.npcLaneLength);
     n.npcFlankDeg=ReadFloat(L"NpcFlankDeg",n.npcFlankDeg);
     n.npcWeaponSwitch=ReadBool(L"NpcWeaponSwitch",n.npcWeaponSwitch);
+    n.npcBackpack=ReadBool(L"NpcBackpack",n.npcBackpack);
     n.npcEngageShare=ReadFloat(L"NpcEngageShare",n.npcEngageShare);
     n.npcEvade=ReadBool(L"NpcEvade",n.npcEvade);
     n.npcDangerRange=ReadFloat(L"NpcDangerRange",n.npcDangerRange);
@@ -721,6 +902,7 @@ void LoadConfig() noexcept {
     n.npcFreeRange=ReadFloat(L"NpcFreeRange",n.npcFreeRange);
     n.npcRecruitCooldownSec=ReadFloat(L"NpcRecruitCooldownSec",n.npcRecruitCooldownSec);
     n.vanillaRecruit=ReadBool(L"VanillaRecruit",n.vanillaRecruit);
+    n.npcFreeSquadCover=ReadBool(L"NpcFreeSquadCover",n.npcFreeSquadCover);
     n.scriptNpcRecruit=ReadBool(L"ScriptNpcRecruit",n.scriptNpcRecruit);
     n.scriptNpcSettleSec=ReadFloat(L"ScriptNpcSettleSec",n.scriptNpcSettleSec);
     n.tankReturnToPost=ReadBool(L"TankReturnToPost",n.tankReturnToPost);
@@ -746,6 +928,12 @@ void LoadConfig() noexcept {
         n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiFunnelKey,
         n.sazabiFunnelButton,n.sazabiCannonKey,n.sazabiCannonButton,n.sazabiMeleeKey,n.sazabiMeleeButton,n.sazabiGuardKey,n.sazabiGuardButton,n.sazabiGuardShare,
         n.sazabiAxeDamage,n.sazabiCannonDamage,n.sazabiFunnelDamage,n.sazabiTestBoard);
+    Log("CONFIG dreadnought=%d speed=%.0f boost=%.1f accel=%.1f climb=%.0f turn=%.1f floor=%.0f boost=0x%X/0x%X descend=0x%X/0x%X strafe=0x%X/0x%X hangar=0x%X/0x%X hangars=%c%c%c%c (left fore, left aft, right fore, right aft; the installer's)",
+        n.dreadnought,n.dreadnoughtSpeed,n.dreadnoughtBoost,n.dreadnoughtAccel,n.dreadnoughtClimb,n.dreadnoughtTurn,
+        n.dreadnoughtFloor,n.dreadnoughtBoostKey,n.dreadnoughtBoostButton,n.dreadnoughtDescendKey,n.dreadnoughtDescendButton,
+        n.dreadnoughtStrafeLeftKey,n.dreadnoughtStrafeRightKey,n.dreadnoughtHangarKey,n.dreadnoughtHangarButton,
+        n.dreadnoughtHangars&1u ? '1' : '0',n.dreadnoughtHangars&2u ? '1' : '0',n.dreadnoughtHangars&4u ? '1' : '0',
+        n.dreadnoughtHangars&8u ? '1' : '0');
     Log("CONFIG sazabi assist=%d cone=%.1f range=%.0f pull=%.1f mousePull=%d lock=0x%X/0x%X",n.sazabiAimAssist,n.sazabiAssistCone,
         n.sazabiAssistRange,n.sazabiAssistPull,n.sazabiAssistMousePull,n.sazabiLockKey,n.sazabiLockButton);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f rotorLift=%.2f jetSound=%d volume=%.2f",
@@ -767,12 +955,13 @@ void LoadConfig() noexcept {
         n.customNpcAi,n.npcFireLane,n.npcLaneWidth,n.npcLaneLength,n.npcFlankDeg,n.npcWeaponSwitch,n.npcEngageShare,n.npcEvade,
         n.npcDangerRange,n.npcGrabRange,n.npcCrowd,n.npcRollSec,n.npcRetreatHp,n.npcLeash);
     Log("CONFIG npcSquadSuccession=%d min=%d max=%d joinRange=%.0f",n.npcSquadSuccession,n.npcSquadMin,n.npcSquadMax,n.npcSquadJoinRange);
+    Log("CONFIG npcBackpack=%d",n.npcBackpack);
     Log("CONFIG npc markKey=0x%X markCone=%.0f boarding=%d gunners=%d",n.npcMarkKey,n.npcMarkCone,n.npcBoarding,n.npcGunners);
     Log("CONFIG qmark pointSec=%.0f volume=%.2f vanillaSpot=%d",n.qmarkPointSec,n.qmarkVolume,n.vanillaSpot);
     Log("CONFIG npc formation=%d key=0x%X spacing=%.1f guard=%d",n.npcFormation,n.npcFormationKey,n.npcFormationSpacing,n.npcGuardFormation);
     Log("CONFIG npc pickup key=0x%X range=%.0f sec=%.0f health=%d",n.npcPickupKey,n.npcPickupRange,n.npcPickupSec,n.npcPickupHealth);
-    Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs vanillaRecruit=%d",n.npcGuardRadius,n.npcFreeRange,
-        n.npcRecruitCooldownSec,n.vanillaRecruit);
+    Log("CONFIG npc guardRadius=%.0f freeRange=%.0f recruitCooldown=%.0fs vanillaRecruit=%d freeSquadCover=%d",
+        n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec,n.vanillaRecruit,n.npcFreeSquadCover);
     Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
@@ -783,6 +972,9 @@ void LoadConfig() noexcept {
     Log("CONFIG drillLaunch=%d key=0x%02X button=0x%02X range=%.0fm speed=%.0fm/s damage=%.0f heat=%.0f%%",n.drillLaunch,
         n.drillLaunchKey,n.drillLaunchButton,n.drillLaunchRange,n.drillLaunchSpeed,n.drillLaunchDamage,n.drillLaunchHeat*100.0f);
     Log("CONFIG vehicleRam=%d damage=%.2f",n.vehicleRam,n.vehicleRamDamage);
+    Log("CONFIG gravity damage=%.2f gun=%d throw=%.0fm/s autoTest=%d grabPlayers=%d floatGuns=%d most=%d sec=%.0f reach=%.1fm",
+        n.gravityDamage,n.gravityGun,n.gravityThrowSpeed,n.gravityAutoTest,n.gravityGrabPlayers,n.floatGuns,n.floatGunMost,
+        n.floatGunSec,n.floatGunReach);
     Log("CONFIG emcBeam=%d charge=%.1fs beam=%.1fs blast=%.0fm x%.2f break=%.0f/s",n.emcBeam,n.emcChargeSec,n.emcBeamSec,n.emcBlastRadius,
         n.emcBlastShare,n.emcBreak);
     Log("CONFIG sidecar=%d npcGunner=%d npcRange=%.0f",n.sidecar,n.sidecarNpcGunner,n.sidecarNpcRange);
@@ -793,13 +985,18 @@ void LoadConfig() noexcept {
         n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpViewHeightEase,n.fpGripX,n.fpGripY,n.fpGripZ,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
         n.fpScale,n.fpNear,n.fpAimSnap,n.fpMotion);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
-    Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f",n.map,n.mapKey,n.mapButton,n.mapViewDistance);
+    Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f marchPace=%d",n.map,n.mapKey,n.mapButton,n.mapViewDistance,n.mapMarchPace);
+    Log("CONFIG vehicle secondary switch key=0x%X button=0x%X (the primary's rounds: PlayerJetSwitchKey / LB)",
+        n.vehicleSecondarySwitchKey,n.vehicleSecondarySwitchButton);
     Log("CONFIG ViewDistance=%.0f (%s)",n.viewDistance,n.viewDistance<0.0f ? "unlimited" : n.viewDistance==0.0f ? "the mission's own" : "m");
     Log("CONFIG damageStats=%d key=0x%X",n.damageStats,n.damageStatsKey);
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
         n.debugSpawnKey,n.debugSpawnPrevKey,n.debugSpawnNextKey,n.debugSpawnCategoryKey,n.debugSpawnSpawnKey,n.debugSpawnRange,
         n.debugSpawnDistance);
+    Log("CONFIG enemyControl=%d",n.enemyControl);
+    Log("CONFIG rangePlace=%d all=%d",n.rangePlace,n.rangePlaceAll);
     Log("CONFIG roomLoadout=%d preSync=%d key=0x%X button=0x%X",n.roomLoadout,n.roomPreSync,n.roomLoadoutKey,n.roomLoadoutButton);
+    Log("CONFIG allClassesRide=%d",n.allClassesRide);
     Log("CONFIG stockStores=%d seatSwitch=%d nextKey=0x%X numberKeys=%d button=0x%X pilot=%d online=%d list=%d",n.stockStores,n.seatSwitch,
         n.seatNextKey,n.seatNumberKeys,n.seatButton,n.seatPilot,n.seatSwitchOnline,n.seatList);
     Log("CONFIG proteus=%d keys mode=0x%X/0x%X shield=0x%X/0x%X launcher=0x%X twoSeats=%d walk x%.2f turn x%.2f step %.1fm shieldSlow %.2f",
@@ -818,8 +1015,10 @@ void LoadConfig() noexcept {
     Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d stockMissilePN=%d nav=%.1f playerLockByView=%d tempestTv=%d (mouse %.1f, boost x%.1f)",
         n.vehicleWelding,n.giantContactCap,n.splitMissileSurface,n.stockMissilePN,n.stockMissileNav,n.playerLockByView,
         n.tempestTv,n.tempestTvMouseSpeed,n.tempestTvBoost);
+    Log("CONFIG supportUnitOnAllies=%d",n.supportUnitOnAllies);
     Config* const fresh=new(std::nothrow) Config(n);
     if(fresh)published.store(fresh,std::memory_order_release);
+    SetSupportUnitOnAllies(n.supportUnitOnAllies);   // the code cave's byte (supportunit.cpp): live
     LoadSupportConfig(iniPath);   // support_config.h: callable units and their crews' weapons, validated
 }
 
@@ -838,13 +1037,9 @@ namespace {
 constexpr LONGLONG kLogMax=32ll<<20;
 constexpr std::size_t kLogBuffer=1u<<20;
 constexpr DWORD kFlushMs=50;
-SRWLOCK logLock=SRWLOCK_INIT;        // the buffers
-char logBuffer[2][kLogBuffer];
-std::size_t logUsed=0;               // in logBuffer[logActive]
-int logActive=0;
-unsigned logDropped=0;
+logging::Buffer<kLogBuffer> logBuffer;
 INIT_ONCE logWriterOnce=INIT_ONCE_STATIC_INIT;
-HANDLE logFile=nullptr;              // the writer's alone
+HANDLE logFile=nullptr;              // under logBuffer.fileLock
 LONGLONG logSize=0;
 
 HANDLE OpenLog() noexcept {
@@ -875,26 +1070,25 @@ void RotateLog() noexcept {
     if(n>0)WriteLog(line,static_cast<std::size_t>(n));
 }
 
+// Called with the file lock and an immutable buffer snapshot, by the writer or an explicit best-effort flush.
+void WritePendingLog(const char* text,std::size_t n,unsigned dropped) noexcept {
+    if(!n && !dropped)return;
+    if(!logFile)logFile=OpenLog();
+    if(!logFile)return;
+    if(logSize+static_cast<LONGLONG>(n)>kLogMax)RotateLog();
+    WriteLog(text,n);
+    if(dropped) {
+        char line[120];
+        const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"(%u log lines dropped: more than %zu KB in %lu ms)\r\n",dropped,
+                                kLogBuffer>>10,kFlushMs);
+        if(k>0)WriteLog(line,static_cast<std::size_t>(k));
+    }
+}
+
 DWORD WINAPI LogWriter(void*) {
     for(;;) {
         Sleep(kFlushMs);
-        AcquireSRWLockExclusive(&logLock);
-        const int full=logActive;
-        const std::size_t n=logUsed;
-        const unsigned dropped=logDropped;
-        logActive^=1;logUsed=0;logDropped=0;
-        ReleaseSRWLockExclusive(&logLock);
-        if(!n && !dropped)continue;
-        if(!logFile)logFile=OpenLog();
-        if(!logFile)continue;
-        if(logSize+static_cast<LONGLONG>(n)>kLogMax)RotateLog();
-        WriteLog(logBuffer[full],n);
-        if(dropped) {
-            char line[120];
-            const int k=_snprintf_s(line,sizeof(line),_TRUNCATE,"(%u log lines dropped: more than %zu KB in %lu ms)\r\n",dropped,
-                                    kLogBuffer>>10,kFlushMs);
-            if(k>0)WriteLog(line,static_cast<std::size_t>(k));
-        }
+        logBuffer.Drain(&WritePendingLog);
     }
 }
 
@@ -913,12 +1107,17 @@ void Log(const char* format,...) noexcept {
     const int n=_snprintf_s(line,sizeof(line),_TRUNCATE,"[%02u:%02u:%02u.%03u] %s\r\n",t.wHour,t.wMinute,t.wSecond,t.wMilliseconds,text);
     if(n<=0)return;
     InitOnceExecuteOnce(&logWriterOnce,&StartLogWriter,nullptr,nullptr);
-    AcquireSRWLockExclusive(&logLock);
-    if(logUsed+static_cast<std::size_t>(n)<=kLogBuffer) {
-        std::memcpy(logBuffer[logActive]+logUsed,line,static_cast<std::size_t>(n));
-        logUsed+=static_cast<std::size_t>(n);
-    } else ++logDropped;
-    ReleaseSRWLockExclusive(&logLock);
+    logBuffer.Append(line,static_cast<std::size_t>(n));
+}
+
+// A best-effort snapshot: both locks are acquired once, without waiting. Crash diagnostics use their own raw append
+// below instead: neither ordinary formatting nor a flush of older lines is a prerequisite for producing the dump.
+void FlushLog() noexcept {
+    if(logPath[0])logBuffer.Drain(&WritePendingLog,true);
+}
+
+void CrashLog(const char* text,std::size_t size) noexcept {
+    logging::AppendCrashLine(logPath,text,size);
 }
 
 void ReloadConfigIfChanged() noexcept {
@@ -997,7 +1196,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     dot=wcsrchr(logPath,L'.');wcscpy_s(dot,MAX_PATH-(dot-logPath),L".log");
     swprintf_s(logOldPath,L"%ls.1",logPath);
     info->infoVersion=PluginInfo::MaxInfoVer;info->name="EDF6 Vehicle Crew";info->version=PLUG_VER(EDF6VC_VERSION_MAJOR,EDF6VC_VERSION_MINOR,EDF6VC_VERSION_PATCH,0);
-    Log("EDF6VehicleCrew %s loading",EDF6VC_VERSION);
+    char file[96];
+    edf::DescribeModuleFile(module,file,sizeof(file));
+    Log("EDF6VehicleCrew %s loading (build %s, %s)",EDF6VC_VERSION,EDF6_BUILD_ID,file);
     ini.Start(iniPath);
     LoadConfig();
     image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
@@ -1011,6 +1212,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     CheckPauseFlag();       // the game's pause flag (the game clock and the HUD stop with it): read only
     // Then the installs, in dependency order. From the first patch on the plugin stays loaded whatever fails
     // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
+    // The crash dump first (its filter and handlers point into this DLL): a crash in any install below is dumped.
+    InstallCrashDump();
+    InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     Log("ROOM isolation=%d",InstallModRoom());
     Log("SUPPORT soldiers=%d",InstallSupportSoldiers());
     InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
@@ -1024,7 +1228,10 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("AIRDROP container step watched=%d",InstallAirdrop());   // the transport planes' container airdrops
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallSazabi();        // the same: the 506 physics hook and the vehicles' own input
+    InstallDreadnought();   // the same
     InstallVehicleRam();    // the ground vehicles' ram (its charges are the jets' impact charges: jet_bay.cpp)
+    gravity::Install();     // the gravity operations (their impacts are the jets' impact charges too); the gravity gun's on them
+    InstallFloatGuns();     // M099's dropped guns that float round the player and fire (the dropped gun's update hook)
     InstallDrill();         // the drill tank (its charges are the jets' shells: jet_bay.cpp, so with the heli profile)
     InstallEmc();           // the EMC's charged beam (its rounds are the jets' shells too: jet_bay.cpp)
     InstallKatyusha();      // the Katyusha's launcher pose: the arc onto the camera's ground point, the telescopic ram
@@ -1033,7 +1240,12 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallSpotRay();       // the stock spot (Q): off for this machine's players (VanillaSpot=0), else along the drawn camera
     InstallStabilizer();    // the gun stabilizer, after the aim steps the turret camera chains (it runs from its hook)
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
+    thermal::Install();    // mesh heat/depth passes, inert in optical mode
+    InstallViewDepth();    // shared decal reconstruction follows the actual inverse projection
     InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)
+    Log("ENEMY CONTROL native hooks=%d",InstallEnemyControl());
+    Log("ENEMY CONTROL legacy adapters=%d",InstallEnemyControlLegacy());
+    Log("ENEMY CONTROL network bridge=%d",InstallEnemyControlNetwork());
     InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
@@ -1044,22 +1256,31 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallGauge();         // the follower gauge's draw (subcarrier.cpp): the carriers' gauges and the vehicle HUD
     InstallHud();
     InstallDamageStats();   // the damage function's head and the rounds' spawn (damagestats.cpp): the statistics' page over the map
+    InstallKillCounters();  // the battle record's rows: the EDF4.1 port's kill counters after the stock ones (killcount.cpp)
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
+    Log("OUTFIT41 installed=%d",InstallOutfit41());   // the EDF4.1 outfit: the HQ popup's sixth item, the model paths
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallEdf5Campaign();  // the EDF5 campaign's mission packs owned (edf5campaign.cpp)
+    InstallPortedMissions(); // ...and with PortedMissionsUnlocked every mission of the ported packs open (edf5campaign.cpp)
+    InstallEdf41MenuBg();    // the EDF4.1 packs' HQ shows 4.1's background when the installer added it (edf5campaign.cpp)
     InstallEdf5Online();    // ...and their missions online: the BVM player natives' online half (edf5online.cpp)
     InstallJetSound();
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
     InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
+    InstallSupportUnitOnAllies();   // support units stick to allies (ini SupportUnitOnAllies, live)
     InstallRouteGuide();    // the stock route guide strip along the navmesh route's corners
     InstallGuidance();      // the stock homing rounds by proportional navigation
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
+    Log("EDF41 original sidecar hooks=%d",InstallEdf41Bike());
+    Log("M163 visual rotor=%d",InstallVulcanRotor());
     InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked
+    Log("PVP native hooks=%d",InstallPvp());
     InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
+    InstallAllClassesRide();   // every class in every seat: before any mission makes a vehicle (the seat build is in its constructor)
     InstallBigWorld();
     Log("LEGACYMAP collision migration hooked=%d",InstallLegacyMap());   // EDF4.1 maps (plan P6)
     InstallEdf41Ai();        // the converted EDF4.1 Hectors' arm gate and back-off cycle (edf41ai.cpp)
@@ -1069,13 +1290,22 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEdf41SmallDragon();  // the DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (edf41smalldragon.cpp)
     InstallEdf41Natives();   // EDF4.1 script natives the BVM executor lacks: SetEncountReportRadius (edf41natives.cpp)
     InstallEdf41Sound();     // EDF4.1's weapon SE bank and voice banks (edf41sound.cpp)
-    InstallEdf41Mother();    // UfoMother301 prototype, development only (ini Edf41MotherDev=1; edf41mother.cpp)
+    InstallEdf41Mother();    // EDF4.1's UfoMother301 (ini Edf41Mother; edf41mother.cpp)
+    InstallEdf41Robo();      // EDF4.1's UfoRobo (ini Edf41Robo; edf41robo.cpp)
+    InstallEdf41Deiroi();    // a stock crash 4.1's M412 reaches (edf41deiroi.cpp)
+    InstallEdf41Mother401(); // EDF4.1's UfoMother401 (ini Edf41Mother401; edf41mother401.cpp)
+    Log("ENEMY CONTROL radar=%d",InstallEnemyControlRadar());
+    Log("ENEMY CONTROL spawn ownership=%d",InstallControlledPvpSpawnBridge());
+    Log("ENEMY CONTROL native PVP ownership=%d",EnemyControlNativePvpInstall());
+    Log("ENEMY CONTROL weapon aiming=%d",InstallEnemyControlWeaponAim());
     InstallTerrainShare();   // before any map loads: the pieces of one terrain decoded once
     InstallMission();       // the mission's start (Reset*, the preloads) and a trigger of the per-frame hooks
     InstallLoadout(iniPath);
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");
     StartCallPicker();
+    Log("LOAD complete (build %s)",EDF6_BUILD_ID);
+    if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
     return true;
 }
 

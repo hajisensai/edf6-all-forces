@@ -9,6 +9,8 @@
 //       kind      one of kSupportKindNames (the 14 stock AI templates: 5 Ranger, 5 Wing Diver, 4 Fencer weapons)
 //       @RRGGBB   its primary colour (soldier_color change_color0); @RRGGBB:RRGGBB primary and secondary (change_color1);
 //                 X a colour left stock (@X:FFFFFF). No @: the stock look.
+//       +PACK     its backpack weapon (npc_pack_table.h kPackWeapons: the WEAPONTABLE name, e.g. +aHandGrenade01,
+//                 +pWeapon216), one of its class's; none: no backpack (docs/npc-backpack-re.md)
 //       *n        n soldiers of that spec (1-12)
 //   SupportVehicle_<KEY>=...                            the vehicle's pylons, before the battle (kVehicleKeys):
 //       a tank (TANK_CREWED / TANK_DELIVERY): its main gun HE or AP, then the rounds it carries besides, each a pylon:
@@ -24,6 +26,7 @@
 // variant (support_net.h Unit::variant, sent in the unit message's unused `challenge`) and each peer's hello (an
 // extension word and a Bloom filter of the files it has, in the hello's unused unit fields): support_protocol.h.
 #pragma once
+#include "npc_pack_table.h"
 #include "support_call.h"
 #include <cstddef>
 #include <cstdint>
@@ -51,12 +54,18 @@ constexpr const wchar_t* SupportKindIniName(SupportWeapon kind) noexcept {
     return i>=0 && i<kSupportWeaponCount ? kSupportKindNames[i].name : L"rifle";
 }
 
-// A soldier's colours, 0xRRGGBB each; kStockColour keeps the template's.
+// A soldier's colours, 0xRRGGBB each; kStockColour keeps the template's. `pack`: its backpack weapon (npc_pack_table.h
+// code, 0 none): a soldier generated from its template like its colours (tools/support_loadout.py soldier_file). A crew
+// never carries one (CrewColour: colours only).
 inline constexpr std::int32_t kStockColour=-1;
 struct SupportLook {
     std::int32_t primary=kStockColour,secondary=kStockColour;
-    constexpr bool On() const noexcept { return primary!=kStockColour || secondary!=kStockColour; }
-    constexpr bool operator==(const SupportLook& o) const noexcept { return primary==o.primary && secondary==o.secondary; }
+    std::uint8_t pack=0;
+    constexpr bool Coloured() const noexcept { return primary!=kStockColour || secondary!=kStockColour; }
+    constexpr bool On() const noexcept { return Coloured() || pack!=0; }
+    constexpr bool operator==(const SupportLook& o) const noexcept {
+        return primary==o.primary && secondary==o.secondary && pack==o.pack;
+    }
 };
 struct SupportPreset {
     int count=0;   // 0: none (the entry's own load)
@@ -131,15 +140,26 @@ inline bool ParseSupportPreset(const wchar_t* text,int seatCount,SupportPreset* 
     if(why && whyCapacity)why[0]=0;
     bool parsed=Tokens(text,[&](const wchar_t* a,const wchar_t* b) noexcept {
         const wchar_t* star=Find(a,b,L'*');
-        const wchar_t* at=Find(a,star,L'@');
+        const wchar_t* plus=Find(a,star,L'+');
+        const wchar_t* at=Find(a,plus,L'@');
         SupportWeapon kind;
         if(!ParseSupportKind(a,at,&kind)){Say(why,whyCapacity,L"未知兵种：",a,at);return false;}
         SupportLook look;
-        if(at<star) {
-            const wchar_t* colon=Find(at+1,star,L':');
-            if(!Colour(at+1,colon,&look.primary) || (colon<star && !Colour(colon+1,star,&look.secondary))) {
-                Say(why,whyCapacity,L"颜色应为 @RRGGBB 或 @RRGGBB:RRGGBB（X = 原色）：",at,star);return false;
+        if(at<plus) {
+            const wchar_t* colon=Find(at+1,plus,L':');
+            if(!Colour(at+1,colon,&look.primary) || (colon<plus && !Colour(colon+1,plus,&look.secondary))) {
+                Say(why,whyCapacity,L"颜色应为 @RRGGBB 或 @RRGGBB:RRGGBB（X = 原色）：",at,plus);return false;
             }
+        }
+        if(plus<star) {
+            const wchar_t *pa=plus+1,*pb=star;Trim(pa,pb);
+            const PackWeapon* pack=PackNamed(pa,pb);
+            if(!pack){Say(why,whyCapacity,L"未知或不支持的背包武器：",pa,pb);return false;}
+            if(!PackFits(pack->code,SupportSoldierClass(kind))) {
+                Say(why,whyCapacity,SupportSoldierClass(kind)==2 ? L"重装兵没有背包武器：" : L"背包武器与兵种不符：",pa,pb);
+                return false;
+            }
+            look.pack=pack->code;
         }
         int n=1;
         if(star<b && !Count(star+1,b,kSupportLoadoutMost,&n)){Say(why,whyCapacity,L"人数应为 *1 到 *12：",star,b);return false;}
@@ -335,7 +355,8 @@ inline bool ParseVehicleLoadout(const wchar_t* text,VehicleBody body,VehicleLoad
 // --- The 64-bit variant of a plan unit (support_net.h Unit::variant) ---
 // Bit 63: applied (the unit is made from the variant's file; clear: the host only tells what it wanted, the unit is
 // stock, a peer without the file writes it to its pending list). Bit 62: a vehicle loadout (else a soldier look).
-// A look: bit 0 primary set, bit 1 secondary set, bits 2-25 primary, 26-49 secondary. A loadout: bits 0-2 pylons,
+// A look: bit 0 primary set, bit 1 secondary set, bits 2-25 primary, 26-49 secondary, 50-57 the backpack weapon
+// (npc_pack_table.h code; sent only to peers that announced kExtBackpack, support_protocol.h). A loadout: bits 0-2 pylons,
 // bit 3 the tank's AP gun, bits 4-59 a pylon a byte (store code, then the round code in the high nibble).
 inline constexpr std::uint64_t kVariantApplied=1ull<<63,kVariantVehicle=1ull<<62;
 constexpr std::uint64_t LookVariant(const SupportLook& l) noexcept {
@@ -343,12 +364,15 @@ constexpr std::uint64_t LookVariant(const SupportLook& l) noexcept {
     std::uint64_t v=0;
     if(l.primary!=kStockColour)v|=1ull|(static_cast<std::uint64_t>(l.primary&0xFFFFFF)<<2);
     if(l.secondary!=kStockColour)v|=2ull|(static_cast<std::uint64_t>(l.secondary&0xFFFFFF)<<26);
+    if(l.pack)v|=static_cast<std::uint64_t>(l.pack)<<50;
     return v;
 }
 constexpr bool LookOfVariant(std::uint64_t v,SupportLook* out) noexcept {
     const std::uint64_t bits=v&~kVariantApplied;
-    if(!bits || (bits&kVariantVehicle) || (bits>>50))return false;
+    if(!bits || (bits&kVariantVehicle) || (bits>>58))return false;
     SupportLook l;
+    l.pack=static_cast<std::uint8_t>((bits>>50)&0xFFu);
+    if(l.pack && !PackOf(l.pack))return false;
     if(bits&1ull)l.primary=static_cast<std::int32_t>((bits>>2)&0xFFFFFF);
     else if((bits>>2)&0xFFFFFF)return false;
     if(bits&2ull)l.secondary=static_cast<std::int32_t>((bits>>26)&0xFFFFFF);
@@ -403,18 +427,42 @@ struct Name {
     }
 };
 }  // namespace loadout_detail
-// EDF6VC_NPC_<KIND>[_L]_<PRIMARY|X>_<SECONDARY|X>.SGO, e.g. EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO: the stock template of that
-// kind (its _LEADER for a leader) with its soldier_color entries recoloured. `path`: the CreateObject spelling instead
-// (app:/object/<lower case>). Returns the length, 0 when it does not fit.
+// EDF6VC_NPC_<KIND>[_L]_<PRIMARY|X>_<SECONDARY|X>[_<PACK>].SGO, e.g. EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO: the stock template
+// of that kind (its _LEADER for a leader) with its soldier_color entries recoloured; with a backpack weapon its upper-case
+// WEAPONTABLE name last (EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO): the template carrying that weapon in a sub weapon slot.
+// `path`: the CreateObject spelling instead (app:/object/<lower case>). Returns the length, 0 when it does not fit or
+// the pack is not one of the kind's class (npc_pack_table.h PackFits).
 inline std::size_t SupportLookFile(SupportWeapon kind,bool leader,const SupportLook& look,wchar_t* out,std::size_t capacity,
                                    bool path=false) noexcept {
+    if(!PackFits(look.pack,SupportSoldierClass(kind))){if(out && capacity)out[0]=0;return 0;}
     loadout_detail::Name n;
     const auto colour=[&](std::int32_t v) noexcept {if(v==kStockColour)n.Put(L'X');else n.HexOf(static_cast<std::uint64_t>(v),6);};
     n.Puts(L"EDF6VC_NPC_");
     for(const wchar_t* s=SupportKindIniName(kind);*s;++s)n.Put(static_cast<wchar_t>(std::towupper(*s)));
     if(leader)n.Puts(L"_L");
-    n.Put(L'_');colour(look.primary);n.Put(L'_');colour(look.secondary);n.Puts(L".SGO");
+    n.Put(L'_');colour(look.primary);n.Put(L'_');colour(look.secondary);
+    if(const PackWeapon* pack=look.pack ? PackOf(look.pack) : nullptr) {
+        n.Put(L'_');
+        for(const wchar_t* s=pack->sgo;*s;++s)n.Put(static_cast<wchar_t>(std::towupper(*s)));
+    }
+    n.Puts(L".SGO");
     return n.Out(out,capacity,path);
+}
+// Every file a preset can ask for: its full look and, when a backpack accompanies colours, the colours alone for an
+// older peer. Both room pre-sync and mission preload use this enumeration, including after pending is cleared.
+template<class Each>
+inline int ForEachPresetVariant(const SupportPreset& preset,Each&& each) noexcept {
+    int count=0;
+    for(int i=0;i<preset.count && i<kSupportLoadoutMost;++i) {
+        const auto give=[&](const SupportLook& look) noexcept {
+            wchar_t file[96];
+            if(look.On() && SupportLookFile(preset.kind[i],i%4==0,look,file,96)){each(file);++count;}
+        };
+        const SupportLook& full=preset.look[i];
+        give(full);
+        if(full.pack && full.Coloured()){SupportLook compatible=full;compatible.pack=0;give(compatible);}
+    }
+    return count;
 }
 // EDF6VC_LO_<BODY>_<the variant in 16 hex digits, applied bit clear>.SGO: the body's base SGO with these pylons.
 inline std::size_t VehicleVariantFile(const VehicleLoadout& l,wchar_t* out,std::size_t capacity,bool path=false) noexcept {

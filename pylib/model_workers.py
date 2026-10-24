@@ -1,6 +1,7 @@
 """Bounded, read-only model jobs, with a spawn-safe frozen installer entry."""
 from __future__ import annotations
 
+from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import contextlib
 import ctypes
@@ -8,30 +9,33 @@ import multiprocessing
 import os
 import sys
 import time
-from typing import Any, Callable, TextIO
+from typing import Any, Callable, Iterator, TextIO
 
 Job = tuple[Callable[..., bytes], tuple[Any, ...], str]
 
 
-def workers_for(cpus: int, available: int | None) -> int:
+def workers_for(cpus: int, available: int | None, cap: int = 2, per_worker: int = 2 * 1024**3) -> int:
     cpu_limit = max(1, cpus // 2)
-    # Reserve 2 GiB for the desktop/parent and budget 2 GiB per model worker.
-    memory_limit = max(1, (available - 2 * 1024**3) // (2 * 1024**3)) if available is not None else 1
-    return min(2, cpu_limit, memory_limit)
+    # Reserve 2 GiB for the desktop/parent and budget `per_worker` (2 GiB) per model worker.
+    memory_limit = max(1, (available - 2 * 1024**3) // per_worker) if available is not None else 1
+    return min(cap, cpu_limit, memory_limit)
+
+
+def available_memory() -> int | None:
+    """Physical memory free now (bytes), None when it cannot be told."""
+    if os.name != 'nt':
+        return None
+    class MemoryStatus(ctypes.Structure):
+        _fields_ = [('length', ctypes.c_ulong), ('load', ctypes.c_ulong)] + [
+            (name, ctypes.c_ulonglong) for name in
+            ('total', 'available', 'total_page', 'available_page', 'total_virtual', 'available_virtual', 'extended')]
+    status = MemoryStatus()
+    status.length = ctypes.sizeof(status)
+    return status.available if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)) else None
 
 
 def worker_count() -> int:
-    available = None
-    if os.name == 'nt':
-        class MemoryStatus(ctypes.Structure):
-            _fields_ = [('length', ctypes.c_ulong), ('load', ctypes.c_ulong)] + [
-                (name, ctypes.c_ulonglong) for name in
-                ('total', 'available', 'total_page', 'available_page', 'total_virtual', 'available_virtual', 'extended')]
-        status = MemoryStatus()
-        status.length = ctypes.sizeof(status)
-        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-            available = status.available
-    return workers_for(os.cpu_count() or 1, available)
+    return workers_for(os.cpu_count() or 1, available_memory())
 
 
 def utf8_pipes() -> None:
@@ -73,29 +77,61 @@ def _run(job: Job) -> bytes:
     return result
 
 
-def run_jobs(jobs: list[Job], workers: int | None = None) -> list[bytes]:
-    count = min(len(jobs), worker_count() if workers is None else workers)
-    if count <= 1:
-        return [_run(job) for job in jobs]
-    print(f'  使用 {count} 个生成进程（共 {len(jobs)} 个模型任务）', flush=True)
+@contextlib.contextmanager
+def _one_blas_thread() -> Iterator[None]:
     names = ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS')
     saved = {name: os.environ.get(name) for name in names}
     try:
         # Set before spawning/importing NumPy; avoid a BLAS thread pool per child.
         for name in names:
             os.environ[name] = '1'
-        with ProcessPoolExecutor(max_workers=count, mp_context=multiprocessing.get_context('spawn')) as pool:
-            results = [b''] * len(jobs)
-            pending = {pool.submit(_run, job): i for i, job in enumerate(jobs)}
-            for future in as_completed(pending):
-                results[pending[future]] = future.result()
-            return results
+        yield
     finally:
         for name, value in saved.items():
             if value is None:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+def ordered_jobs(jobs: list[Job], workers: int) -> Iterator[Any]:
+    """Each job's result in the jobs' order, as soon as it and those before it are done: at most `workers` jobs run or
+    wait to be taken at a time, so no more than that many results are held (a map's files are hundreds of MB). One
+    worker (or one job): the jobs run here, one by one, as the results are taken. A job's error is raised when its
+    result is taken; the jobs after it are not waited for."""
+    count = min(len(jobs), workers)
+    if count <= 1:
+        for job in jobs:
+            yield _run(job)
+        return
+    print(f'  使用 {count} 个转换进程（共 {len(jobs)} 个任务）', flush=True)
+    with _one_blas_thread(), ProcessPoolExecutor(max_workers=count, mp_context=multiprocessing.get_context('spawn')) as pool:
+        waiting: deque = deque()
+        queue = iter(jobs)
+        try:
+            for job in queue:
+                waiting.append(pool.submit(_run, job))
+                if len(waiting) < count:
+                    continue
+                yield waiting.popleft().result()
+            while waiting:
+                yield waiting.popleft().result()
+        finally:
+            for future in waiting:
+                future.cancel()
+
+
+def run_jobs(jobs: list[Job], workers: int | None = None) -> list[bytes]:
+    count = min(len(jobs), worker_count() if workers is None else workers)
+    if count <= 1:
+        return [_run(job) for job in jobs]
+    print(f'  使用 {count} 个生成进程（共 {len(jobs)} 个模型任务）', flush=True)
+    with _one_blas_thread(), ProcessPoolExecutor(max_workers=count, mp_context=multiprocessing.get_context('spawn')) as pool:
+        results = [b''] * len(jobs)
+        pending = {pool.submit(_run, job): i for i, job in enumerate(jobs)}
+        for future in as_completed(pending):
+            results[pending[future]] = future.result()
+        return results
 
 
 def _process_identity() -> bytes:

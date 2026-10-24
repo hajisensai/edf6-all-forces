@@ -28,6 +28,7 @@
 #include "exhaust_pose.h"
 #include "jet_internal.h"   // FaultLog, BoosterSweep
 #include "memory.h"
+#include "smoke_trail.h"
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -449,8 +450,10 @@ namespace {
 //   (+0x2D0): stopped, the smoke laid fades over its life and the object goes by itself.
 //   The texture: the missiles' smoke, L"噴射煙_01.dds" (0x17A1CC8), got from EffectGenUtil (0x20B2980) by 0x2E8510
 //   (a name it cannot find is dereferenced as null: the name's bytes are checked), copied (0xF5E10), freed (0x1120820).
-// Its look in a mission is unconfirmed (M): the factory's one stock caller is a debug scene. A jet's arrival makes a
-// new object for each exhaust (one stopped and restarted would join its old tail to the new start).
+// The object is drawn through its own matrix (the factory's InitParam+0x08) and its nodes are laid in the world: it is
+// made with the identity (smoke_trail.h: made with the nozzle's matrix, every node was drawn turned and moved by where the
+// nozzle was when the trail began, the smoke far off its jet, 2026-10-21). A jet's arrival makes a new object for each
+// exhaust (one stopped and restarted would join its old tail to the new start).
 constexpr unsigned kTrailMake=0x842E0,kTrailParams=0x2F4490,kTrailTex=0x2E8510,kTexCopy=0xF5E10,kTexFree=0x1120820;
 constexpr unsigned kTrailUpdate=0x2F64F0,kTrailEmit=0x2F6110,kTrailVtable=0x17A8930,kTrailParamVtable=0x1762138,kSmokeName=0x17A1CC8;
 constexpr std::size_t kEffectGen=0x20B2980,kTrailCore=0x190,kTrailParamAt=0x30,kTrailParamSize=0x180,kTrailSize=0x3D0;
@@ -475,7 +478,10 @@ const unsigned char kTexFreeSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,
 const unsigned char kSmokeNameBytes[]={0x74,0x56,0x04,0x5C,0x59,0x71,0x5F,0x00,0x30,0x00,0x31,0x00};
 bool smokeOk=false;
 
-struct Trail { unsigned char* obj; void* ctrl; };
+// The emitter's node ring (core +0x128 the nodes, 0x70 bytes each, their position at +0x00; +0x138 how many it holds,
+// +0x140 how many are alive, +0x148 the oldest's index: 0x2F4C10 lays at (+0x148 + +0x140) mod +0x138).
+constexpr std::size_t kTrailNodes=0x128,kTrailCap=0x138,kTrailAlive=0x140,kTrailOldest=0x148,kTrailNode=0x70;
+struct Trail { unsigned char* obj; void* ctrl; bool checked; float wrote[3]; };
 struct SmokeSet { const unsigned char* v; const void* ctrl; ULONGLONG seen; Trail t[kSmokeTrails]; };
 SmokeSet smokeSets[kSmokeSets];
 
@@ -505,16 +511,44 @@ void TrailMake(Trail& t,const float* m) noexcept {
     Put<int>(e,0x00,kSmokeLife);Put<int>(e,0x04,kSmokeLife*9/10);Put<int>(e,0x08,kSmokeLife*11/10);Put<int>(e,0x0C,1);
     Put<float>(e,0x20,0.0f);Put<float>(e,0x24,kSmokeRise);Put<float>(e,0x28,0.0f);
     e[0x40]=1;
-    const float at[4]={m[12],m[13],m[14],1.0f},back[4]={-m[8],-m[9],-m[10],0.0f};
-    std::memcpy(e+0x50,at,16);std::memcpy(e+0x60,back,16);
+    alignas(16) float at[4],way[4];
+    smoke::Emitter(m,at,way);
+    std::memcpy(e+0x50,at,16);std::memcpy(e+0x60,way,16);
     Put<float>(e,0x80,0.0f);Put<float>(e,0x84,0.2f);Put<float>(e,0x88,0.0f);Put<float>(e,0x8C,0.0f);   // laid, not blown
     Put<int>(e,0x90,0);Put<float>(e,0x94,kSmokeWidth*0.6f);Put<float>(e,0x98,kSmokeWidth);Put<float>(e,0x9C,kSmokeGrow);
     std::memcpy(e+0xA0,kSmokeFrom,16);std::memcpy(e+0xB0,kSmokeTo,16);
     e[0xC0]=1;e[0xC1]=1;Put<float>(e,0x10C,0.5f);Put<float>(e,0x114,0.3f);
-    reinterpret_cast<void*(*)(void*,void**,const float*,void*)>(image+kTrailMake)(mgr,out,m,p);
+    reinterpret_cast<void*(*)(void*,void**,const float*,void*)>(image+kTrailMake)(mgr,out,smoke::kObjectFrame,p);
     reinterpret_cast<void(*)(void*)>(image+kTexFree)(e+0xD0);   // the parameters' copy (the stock's 0x268EFC)
-    t.obj=static_cast<unsigned char*>(out[0]);t.ctrl=out[1];
+    t.obj=static_cast<unsigned char*>(out[0]);t.ctrl=out[1];t.checked=false;
+    std::memcpy(t.wrote,at,12);
     if(!TrailLive(t))TrailStop(t);
+}
+
+float Dist(const float* a,const float* b) noexcept {
+    return std::sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])+(a[2]-b[2])*(a[2]-b[2]));
+}
+
+// Where the smoke is drawn against its nozzle (Debug, once a trail, the first frame it has a node of its own): the newest
+// node as the renderer draws it (through the object's matrix, obj+0x60) against the nozzle this frame and against where
+// the emitter was put last frame (the node it laid since: 0 m, laid from that position; the flight of one frame between
+// the two is the emitter's update running after this input step), and the object's matrix (its origin, how far its rows
+// are from the identity's).
+void TrailCheck(Trail& t,const unsigned char* v,int i,const float* nozzle) noexcept {
+    const auto nodes=At<const unsigned char*>(t.obj,kTrailCore+kTrailNodes);
+    const auto cap=At<std::size_t>(t.obj,kTrailCore+kTrailCap),alive=At<std::size_t>(t.obj,kTrailCore+kTrailAlive);
+    const auto oldest=At<std::size_t>(t.obj,kTrailCore+kTrailOldest);
+    if(!nodes || !cap || !alive || alive>cap || oldest>=cap || !Readable(nodes,cap*kTrailNode))return;
+    t.checked=true;
+    const float* const node=reinterpret_cast<const float*>(nodes+((oldest+alive-1)%cap)*kTrailNode);
+    const float* const frame=reinterpret_cast<const float*>(t.obj+0x60);
+    float drawn[3];
+    smoke::Drawn(frame,node,drawn);
+    float turn=0.0f;
+    for(int r=0;r<3;++r)for(int c=0;c<3;++c)turn=std::fmax(turn,std::fabs(frame[r*4+c]-smoke::kObjectFrame[r*4+c]));
+    Log("SMOKE v=%p exhaust %d: %zu nodes; the newest drawn %.2f m from the nozzle (laid %.2f m from where the emitter was put "
+        "last frame); the object's frame at (%.1f,%.1f,%.1f), its rows %.3f off the identity's",v,i,alive,Dist(drawn,nozzle+12),
+        Dist(node,t.wrote),frame[12],frame[13],frame[14],turn);
 }
 
 SmokeSet* SmokeSetOf(const unsigned char* v,bool make,ULONGLONG ms) noexcept {
@@ -550,8 +584,11 @@ void SmokeFrame(const unsigned char* v,bool on,ULONGLONG ms) noexcept {
             continue;
         }
         if(!TrailLive(t))continue;   // gone with the mission's objects: none again for this arrival
-        const float at[4]={m[12],m[13],m[14],1.0f},back[4]={m[8],m[9],m[10],0.0f};   // m's z: the flame's, rearward
-        std::memcpy(t.obj+kTrailCore+0x50,at,16);std::memcpy(t.obj+kTrailCore+0x60,back,16);
+        if(Cfg().debug && !t.checked)TrailCheck(t,v,i,m);
+        alignas(16) float at[4],way[4];
+        smoke::Emitter(m,at,way);
+        std::memcpy(t.obj+kTrailCore+0x50,at,16);std::memcpy(t.obj+kTrailCore+0x60,way,16);
+        std::memcpy(t.wrote,at,12);
     }
 }
 

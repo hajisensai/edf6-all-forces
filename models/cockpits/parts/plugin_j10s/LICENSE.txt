@@ -1,0 +1,6 @@
+"Chengdu J-10S" by Muhamad Mirza Arrafi, CC BY 4.0
+Source: https://sketchfab.com/3d-models/chengdu-j-10s-aa7c517fbded47439a526cafb78b4618 (via Sketchfab)
+Licence: Creative Commons Attribution 4.0 (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+Changes: the front seat's cockpit only; the canopy and the HUD's glass left out; turned into the seat's eye frame and scaled to metres, triangles facing away from the eye left out;
+textures resized and re-saved as PNG. The EDF6 plugin's cockpit builder (pylib/cockpit_kits_plugin.py) cuts it to each
+vehicle's room.

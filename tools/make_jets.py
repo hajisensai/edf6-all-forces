@@ -321,6 +321,7 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{TRANSPORT_PLANE_FILE}'] = plane
     for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET), TRANSPORT_PLANE_FILE, TRANSPORT_HELI_FILE):
         check_own_model(out, name)
+    check_weapon_bones(out, game)
     return cockpits.graft_files(game, out)   # its seats' first-person cockpits (pylib/cockpits.py)
 
 
@@ -427,6 +428,29 @@ def check_own_model(files: dict[str, bytes], name: str) -> None:
         raise ValueError(f'{name}: 模型 {path} 不是本工具写的')
     if not any(f.name.lower() == member.lower() for f in rab_read(files[rel]).files):
         raise ValueError(f'{name}: {rel} 里没有 {member}')
+
+
+def check_weapon_bones(files: dict[str, bytes], game: vc.Game) -> None:
+    """Every vehicle SGO of `files` (build) hangs its weapons on bones its model has (vehicle_weapon_setting: the game
+    looks each up among the model's MDB bones, 0x629450 -> 0x11001F0, and skips a holder it does not find, leaving it
+    without a node: docs/jet-model-re.md). The model is the one `files` writes, else the game's own. A jet's hardpoint
+    bones (pylib/jet_hardpoints.py) are only on the models vcobjects.HARDPOINT_FILES names: a jet SGO made for one
+    model and put on another (with_model) is caught here."""
+    import sgo
+    from mdb import mdb_read, rab_read
+    for path, data in files.items():
+        if not (path.startswith('OBJECT/') and path.upper().endswith('.SGO')):
+            continue
+        m = sgo.read(data)[1]
+        rows, model = m.get('vehicle_weapon_setting'), m.get('animation_model')
+        if not rows or not model:
+            continue
+        file, member = vc.model_file(model[0]), str(model[0][1]).lower()
+        raw = files.get(f'OBJECT/{file}') or game.read('OBJECT', file)
+        md = mdb_read(next(f for f in rab_read(raw).files if f.name.lower() == member).data)
+        missing = {str(r[0]) for r in rows} - {md.name_of(b.name) for b in md.bones}
+        if missing:
+            raise ValueError(f'{path}: 武器挂点骨骼 {sorted(missing)} 不在模型 {file} 里')
 
 
 def heli_transport_model(game: vc.Game) -> bytes:

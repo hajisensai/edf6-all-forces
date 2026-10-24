@@ -4,6 +4,7 @@
   kCallRows    every row tools/call_weapons.py installs (vehicle requests too): its id, its weapon SGO under
                Mods/WEAPON and the object SGO a vehicle request brings under Mods/OBJECT (nullptr: none)
   kThrows      the thrown drones (Robot Bombs, brings 'throw'): the marker's float bits, the drone, its fuel
+  kUltimates   the ultimate strikes (satellite calls, brings 'ultimate'): the marker, its name in the log
 
   python tools/gen_calls.py            write it
   python tools/gen_calls.py --check    exit 1 when the committed file is not what this would write (CI)
@@ -42,6 +43,10 @@ def _throw(c: calls.Call) -> str:
     return f'    {{0x{calls.mark_bits(c):08X}u,ThrownDrone::{c.drone},{c.fuel_sec},"{c.log}",{_wstr(c.id)}}},'
 
 
+def _ultimate(c: calls.Call) -> str:
+    return f'    {{{_float(c.mark)},"{c.log}",{_wstr(c.id)}}},'
+
+
 def _row(c: calls.Call) -> str:
     weapon = _wstr(f'{c.id.upper()}.SGO')
     obj = _wstr(f'{c.vehicle.upper()}.SGO') if c.vehicle else 'nullptr'
@@ -72,6 +77,10 @@ def render() -> str:
         '// The thrown drones: their weapons\' AmmoHitSizeAdjust bits (weapon +0x8C4), in tools/calls.py CALLS order.',
         'const Throw kThrows[]={',
         *[_throw(c) for c in calls.CALLS if c.brings == 'throw'],
+        '};',
+        '// The ultimate strikes: their weapons\' AmmoHitSizeAdjust (weapon +0x8C4), in tools/calls.py CALLS order.',
+        'const Ultimate kUltimates[]={',
+        *[_ultimate(c) for c in calls.CALLS if c.brings == 'ultimate'],
         '};',
         '',
     ]

@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(EDF6AutoTurret VERSION 0.3.0 LANGUAGES CXX)
+# Every exe / DLL this file builds carries a version resource (cmake/versioninfo.cmake: antivirus false positives).
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/versioninfo.cmake")
+edf6_version_info_at_end()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(EDF6AutoTurret SHARED src/plugin.cpp src/gunner.cpp src/designate.cpp)
@@ -9,4 +12,8 @@ target_include_directories(EDF6AutoTurret PRIVATE ${CMAKE_SOURCE_DIR}/third_part
 target_compile_options(EDF6AutoTurret PRIVATE /W4 /WX /utf-8 /permissive-)
 target_link_options(EDF6AutoTurret PRIVATE /DYNAMICBASE /NXCOMPAT /PDBALTPATH:EDF6AutoTurret.pdb)
 set_target_properties(EDF6AutoTurret PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/Mods/Plugins")
+# The version is the one project(VERSION) above (src/version.h.in), the commit generated/build_id.h (CMakeLists.txt).
+configure_file(src/version.h.in "${CMAKE_BINARY_DIR}/generated/autoturret_version.h" @ONLY)
+target_include_directories(EDF6AutoTurret PRIVATE "${CMAKE_BINARY_DIR}/generated")
+add_dependencies(EDF6AutoTurret edf6_build_id)
 configure_file(EDF6AutoTurret.ini "${CMAKE_BINARY_DIR}/Mods/Plugins/EDF6AutoTurret.ini" COPYONLY)

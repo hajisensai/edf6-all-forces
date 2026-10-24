@@ -12,15 +12,29 @@ namespace crew {
 // coax: a tank's / an IFV's coaxial machine gun, fired by its own (secondary) trigger, never one of the switch's choices
 // (payload.cpp).
 enum class StoreRole { air, ground, bomb, rocket, gun, drone, charge, coax };
+// The round a gun store's sight names when its numbers alone would name it wrong (tools/gen_stores.py SHELLS): `native`
+// the sight's own reading (reticle.h ShellOf), `heat` a shaped charge (it bursts, but is no HE), `canister` a cloud of
+// balls (vhud.cpp Arm).
+enum class StoreShell : std::uint8_t { native, heat, canister };
 struct StoreSpec {
     const wchar_t* prefix;   // its weapon files' names: prefix + rounds + ".SGO" (vcobjects.store_file)
     const char* name;        // shown in the cockpit
     StoreRole role;
     float mass;              // kg a round
     float drag;              // a round's share of the clean jet's parasitic drag
+    unsigned group=0;        // nonzero: one selectable loadout spanning its native barrel holders
+    unsigned barrel=0;       // original native holder index for that linked barrel
+    bool nativeControl=false; // a native trigger source, independently selectable (alternate ammunition)
+    StoreShell shell=StoreShell::native;
+    bool independentSecondary=false; // intrinsic weapon on the seat's otherwise unread secondary (the BMPT's missiles): concurrent
+                                     // with the primary; its own switch (T / the d-pad right, payload.cpp Switch)
+                                     // cycles it only among the other weapons of its kind, never R / LB
 };
 // A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
 struct JetMass { float mark,mass,durability; };
+// A barrel that fires in turn with the other of its pair (pylib/vcobjects.py GroundVehicle.alternate, twin_barrels;
+// src/twin_cadence.h): its weapon file (exact, any case) and its pair (from 1: one per belt of a twin gun).
+struct TwinBarrel { const wchar_t* file; unsigned pair; };
 
 // One holder of seat 0 that holds a store, as its weapon is now.
 struct Store {
@@ -42,10 +56,16 @@ struct Burden { float mass,drag; };
 Burden BurdenOf(float mark,const Store* stores,int count) noexcept;
 // The kind of mark `mark` (pylib/vcobjects.py JET_MASSES: every jet's), or nullptr.
 const JetMass* JetMassOf(float mark) noexcept;
+// The `i`th of the NPC jets' weapon SGOs (stores.inc kJetWeapons): its jet's mark and its path (app:/weapon/...); nullptr
+// past the last.
+struct JetWeaponRow { float mark; const wchar_t* sgo; };
+const JetWeaponRow* JetWeapon(int i) noexcept;
 // Whether weapon `w` is one of the stores' (its SGO one of kStores'): the cockpit marks and sounds their locks itself.
 bool IsStoreWeapon(const unsigned char* w) noexcept;
 // The store weapon `w` is (its SGO one of kStores'), else nullptr.
 const StoreSpec* StoreOf(const unsigned char* w) noexcept;
+// The twin-barrel pair weapon `w` fires in turn within (its SGO one of kTwinBarrels'), else 0.
+unsigned TwinPairOf(const unsigned char* w) noexcept;
 // The file name of weapon `w`'s SGO (after the last separator of its resource key, upper case), `length` characters;
 // nullptr when it cannot be read. Not zero-terminated where the key goes on.
 const wchar_t* WeaponFile(const unsigned char* w,std::size_t* length) noexcept;

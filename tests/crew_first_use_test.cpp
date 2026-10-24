@@ -4,8 +4,12 @@
 #include <cstdlib>
 #include <initializer_list>
 namespace crew {
+VehicleLookInput::VehicleLookInput(unsigned char*) noexcept {}
+VehicleLookInput::~VehicleLookInput() noexcept {}
 void MissionCrewVehicleFrame(unsigned char*) noexcept {}
 void BoardingRequest(unsigned char*) noexcept {}   // TestBoardVehicle (off here)
+bool BoardingUnderway() noexcept { return false; }
+bool BoardButtonBlocked(const unsigned char*) noexcept { return false; }
 bool HumanOnFoot(const unsigned char*) noexcept { return true; }
 void SupportDispatchTick() noexcept {}
 void ResetMissionCrew() noexcept {}
@@ -55,7 +59,11 @@ void Log(const char*,...) noexcept{}
 void SeePlayer(const float* p,std::int32_t team) noexcept{std::memcpy(player.pos,p,12);player.team=team;player.at=GameMs();}
 bool IsPlayerJet(const void*) noexcept{return false;}
 bool IsSazabi(const void*) noexcept{return false;}
+bool IsDreadnought(const void*) noexcept{return false;}
 void SazabiFrame(unsigned char*) noexcept{}
+void DreadnoughtFrame(unsigned char*) noexcept{}
+void DreadnoughtInput(unsigned char*) noexcept{}
+bool DreadnoughtHangarBoard(unsigned char*,unsigned char*) noexcept{return false;}
 bool PlayerJetHolds(const void*) noexcept{return false;}
 bool SidecarHoldsPlayer(const void*) noexcept{return false;}
 bool IsPrimerVehicle(const void*) noexcept{return false;}
@@ -82,8 +90,14 @@ void NpcPostInput(unsigned char*) noexcept{}
 void NpcGunnersInput(unsigned char*) noexcept{}
 // Unrelated production hooks are linked but must never run in this fixture.
 void (*volatile unexpectedHook)()=&std::abort;
+int pvpFrameTicks=0,thermalFrameTicks=0,enemyFrameTicks=0,enemyNetworkTicks=0;
+void NoopGlobalTick() {}
 bool BumpSuppressed(void) noexcept{unexpectedHook();return {};}
 void ViewTick(void) noexcept{unexpectedHook();return;}
+void PvpFrame(void) noexcept{unexpectedHook();++pvpFrameTicks;return;}
+void EnemyControlFrame() noexcept{unexpectedHook();++enemyFrameTicks;}
+void EnemyControlNetworkFrame() noexcept{unexpectedHook();++enemyNetworkTicks;}
+namespace thermal { void Tick(bool,unsigned) noexcept{unexpectedHook();++thermalFrameTicks;return;} }
 void BigWorldProbe(void) noexcept{unexpectedHook();return;}
 void JetSound(unsigned char *) noexcept{unexpectedHook();return;}
 void JetSoundTick(void) noexcept{unexpectedHook();return;}
@@ -113,6 +127,12 @@ bool GunshipCrewSeats(void const *) noexcept{unexpectedHook();return {};}
 unsigned int GunshipBoardSeat(void) noexcept{unexpectedHook();return {};}
 void BoardingTick(void) noexcept{unexpectedHook();return;}
 void DebugSpawnFrame(unsigned char *) noexcept{}
+void Edf41Mother401DevTick() noexcept{}   // crew.cpp's DebugSpawnTick calls it (edf41mother401.cpp, not linked here)
+void UltimateTick() noexcept{}   // crew.cpp's SharedFrameTick plays the ultimate's show (ultimate.cpp, not linked here)
+namespace gravity { void Frame() noexcept{} namespace net { void Frame() noexcept{} } }   // crew.cpp's GravityTick calls these (gravity.cpp, gravitygun.cpp, floatgun.cpp, not linked here)
+void GravityGunTick() noexcept{}
+void MapCommandQueueTick() noexcept{}   // crew.cpp's SharedFrameTick advances the map's queues (mapcmd.cpp, not linked here)
+void FloatGunTick() noexcept{}
 void const * BoardingOnly(void) noexcept{unexpectedHook();return {};}
 void PlayerJetFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void LauncherFrame(unsigned char *) noexcept{unexpectedHook();return;}
@@ -125,7 +145,7 @@ bool IsGroundRobo(void const *) noexcept{unexpectedHook();return {};}
 void GroundFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void HeliCueStep(unsigned char *) noexcept{unexpectedHook();return;}
 void HeliFrame(unsigned char *) noexcept{unexpectedHook();return;}
-float MapRay(float const *,float const *,float *) noexcept{unexpectedHook();return {};}
+float MapRay(float const *,float const *,float *) noexcept{unexpectedHook();return -1.0f;}
 void HeliReap(void const *) noexcept{unexpectedHook();return;}
 void RescueTick(void) noexcept{unexpectedHook();return;}
 void HudSee(unsigned char *) noexcept{unexpectedHook();return;}
@@ -134,6 +154,7 @@ bool PlayerStockOwnSight(void const *) noexcept{unexpectedHook();return {};}
 void StockHudFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void PlayAreaTick(void) noexcept{unexpectedHook();return;}
 void PayloadFrame(unsigned char *) noexcept{unexpectedHook();return;}
+void TwinBarrelFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void SeatSwitchFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void ProteusFrame(unsigned char *) noexcept{unexpectedHook();return;}
 float GroundClearance(float const *) noexcept{unexpectedHook();return {};}
@@ -143,6 +164,14 @@ int main(){
     using namespace crew;
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2200000,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
     if(!image)return 2;
+    unsigned char modelBones[0x110]{};
+    Put<void*>(testVehicle+0xEE0,0x10,modelBones);Put<int>(testVehicle+0xEE0,0x20,1);
+    Put<const wchar_t*>(modelBones,0,L"bomber501");
+    int heliClass=0;while(std::strcmp(kClasses[heliClass].name,"506_Helicopter")!=0)++heliClass;
+    Check(TestBoardMatches(testVehicle,heliClass,"506_Helicopter@bomber501"),"background boarding can target a fighter's model bone");
+    Put<const wchar_t*>(modelBones,0,L"body");
+    Check(!TestBoardMatches(testVehicle,heliClass,"506_Helicopter@bomber501"),"another model sharing the helicopter class is excluded");
+    Check(TestBoardMatches(testVehicle,heliClass,"506_Helicopter"),"the existing class-only boarding filter stays compatible");
     Setup();Crew(testVehicle,0);Time(10000);Crew(testVehicle,0);
     Check(calls==0,"unused parked ground vehicle stays empty after crew delay");
     Occupy(1,testHuman);Time(11000);Crew(testVehicle,0);Occupy(1,nullptr);Time(20000);Crew(testVehicle,0);
@@ -265,6 +294,21 @@ int main(){
         const auto before=GameFrame();tickFrame=before;ResetCrew();
         Check(GameFrame()>before && tickFrame==0,"mission reset invalidates frame consumers and native baseline");
         frameClockOk=false;Put<void*>(image,kSystem,nullptr);
+    }
+    {
+        // Invoke the production shared scene anchor directly; no vehicle InputHook runs in this fixture.
+        Setup();frameClockOk=false;frameClock.Reset();tickFrame=0;
+        unexpectedHook=&NoopGlobalTick;pvpFrameTicks=thermalFrameTicks=enemyFrameTicks=enemyNetworkTicks=0;
+        FrameTick();
+        Check(pvpFrameTicks==1 && thermalFrameTicks==1 && enemyFrameTicks==1 && enemyNetworkTicks==1,"local-player shared anchor updates PVP/thermal/enemy control with zero vehicle inputs");
+        FrameTick();
+        Check(pvpFrameTicks==1 && thermalFrameTicks==1 && enemyFrameTicks==1 && enemyNetworkTicks==1,"several actors in one scene step do not duplicate PVP/thermal/enemy control");
+        frameClock.Observe(testHuman,testHuman,1);FrameTick();
+        Check(pvpFrameTicks==2 && thermalFrameTicks==2 && enemyFrameTicks==2 && enemyNetworkTicks==2,"next native scene step continues the shared tick without a vehicle");
+        std::memset(testVehicle,0,sizeof(testVehicle)); // every former vehicle is gone; the player still supplies native steps
+        frameClock.Observe(testHuman,testHuman,2);FrameTick();
+        Check(pvpFrameTicks==3 && thermalFrameTicks==3 && enemyFrameTicks==3 && enemyNetworkTicks==3,"destroying the last vehicle does not stop PVP, thermal or enemy-control cleanup");
+        unexpectedHook=&std::abort;
     }
     std::printf("crew_first_use_test: %d checks, %d failed\n",checks,failures);
     VirtualFree(image,0,MEM_RELEASE);return failures ? 1 : 0;

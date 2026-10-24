@@ -38,7 +38,7 @@ class LoadoutTableTests(unittest.TestCase):
                 kinds = [kind_of(w) for m in stores.LOADOUTS[stem] for w in m.options()]
                 roles = {vc.STORES[k].role for k in kinds}
                 self.assertEqual(len(kinds), len(set(kinds)), 'one kind once')
-                for need in stores.REQUIRED[category]:
+                for need in stores.REQUIRED[category] + stores.PROTOTYPE.get(stem, ()):
                     if need.startswith('role:'):
                         self.assertIn(need[5:], roles)
                     else:
@@ -58,6 +58,32 @@ class LoadoutTableTests(unittest.TestCase):
                 self.assertEqual(vc.STORES['HE'].weapon.kind, 'he')
                 self.assertEqual(vc.STORES['GLM'].role, 'ground')
                 self.assertEqual(vc.STORES['GLM'].weapon.muzzle, 'V_505TANK_CANNON01.SGO', 'from the tank gun muzzle')
+                # The user, 2026-10-19: HEAT-MP (M830 / JM12A1: both prototypes fire it), its own choice on the main gun;
+                # the canister (M1028) on the Blacker (an Abrams class tank) alone.
+                self.assertEqual(load['HEAT'].like, 0)
+                self.assertIsNone(load['HEAT'].other)
+                self.assertEqual('CANISTER' in load, stem.startswith('V505_TANK'))
+                if 'CANISTER' in load:
+                    self.assertEqual(load['CANISTER'].like, 0)
+
+    def test_heat_and_canister_are_their_kinds(self) -> None:
+        heat, can = vc.STORES['HEAT'].weapon, vc.STORES['CANISTER'].weapon
+        ap = dict(vc.STORES['AP'].weapon.extra)
+        self.assertEqual((heat.kind, can.kind), ('heat', 'canister'))
+        h, c = dict(heat.extra), dict(can.extra)
+        self.assertEqual(h['AmmoIsPenetration'], 0.0, 'a shaped charge stops on what it hits')
+        self.assertTrue(0.0 < h['AmmoExplosion'] < 8.0, 'a burst smaller than the howitzer round')
+        self.assertGreater(h['AmmoDamage'], 350.0, 'more than the stock rounds on its one target')
+        self.assertTrue(10.0 <= h['AmmoSpeed'] < 18.0, 'fast and flat, slower than the APFSDS (18 m a frame)')
+        self.assertLessEqual(h['AmmoGravityFactor'], 0.2)
+        self.assertNotIn('AmmoExplosion', c)
+        self.assertGreater(c['FireCount'], 1.0)
+        self.assertLessEqual(c['AmmoSpeed'] * c['AmmoAlive'], 600.0, 'a canister reaches ~500 m')
+        self.assertEqual(ap, {})
+        # The HUD names these two itself (src/stores.h StoreShell): the generator writes it from the kind.
+        inc = (ROOT / 'src' / 'stores.inc').read_text(encoding='utf-8')
+        self.assertRegex(inc, r'L"EDF6VC_HEAT_".*StoreShell::heat')
+        self.assertRegex(inc, r'L"EDF6VC_CANISTER_".*StoreShell::canister')
 
     def test_a_round_pair_carries_the_kind_the_stock_gun_is_not(self) -> None:
         # The user, 2026-10-10: 「这个he和原本的弹药重复了吧」.
@@ -68,7 +94,7 @@ class LoadoutTableTests(unittest.TestCase):
         self.assertEqual(kind_of(stores.pick(pair, beside('smoothbore.sgo'), kinds)), 'HE')
         self.assertEqual(kind_of(stores.pick(pair, beside('unknown.sgo'), kinds)), 'AP', 'not known: AP')
         self.assertEqual(kind_of(stores.pick(pair, 0.0, kinds)), 'AP', 'an empty stock holder')
-        glm = stores.LOADOUTS['V505_TANK'][1]
+        glm = next(m for m in stores.LOADOUTS['V505_TANK'] if kind_of(m.weapon) == 'GLM')
         self.assertEqual(stores.pick(glm, beside('smoothbore.sgo'), kinds), glm.weapon, 'a single store: itself')
 
     def test_rounds_are_catalogued_and_typed(self) -> None:
@@ -82,7 +108,7 @@ class LoadoutTableTests(unittest.TestCase):
                 self.assertIn(store.role, roles)
                 if isinstance(store.weapon, vc.Shell):
                     self.assertEqual(store.role, 'coax' if store.weapon.kind == 'mg' else 'gun')
-                    self.assertIn(store.weapon.kind, ('ap', 'he', 'mg'))
+                    self.assertIn(store.weapon.kind, vc.ROUND_KINDS)
                     self.assertTrue(store.weapon.template.upper().endswith('.SGO'))
                     if store.weapon.kind == 'ap':
                         self.assertIn('SolidBullet01', store.weapon.ammo_class)
@@ -92,10 +118,28 @@ class LoadoutTableTests(unittest.TestCase):
                     self.assertNotEqual(store.role, 'gun')
 
     def test_switch_holds_every_choice(self) -> None:
-        # The seat's stock weapons (at most 3 on one seat of these classes, with the fuel tank left out) and its stores.
+        # The seat's stock weapons (with the fuel tank left out: the tanks, the Grape and the Naegling one on the seat
+        # the stores hang on, the flak two, the Titan's driver two; else at most 4) and its stores.
+        seat = {'mbt': 1, 'ifv': 1, 'launcher': 1, 'flak': 2, 'superheavy': 2}
         for stem, load in stores.LOADOUTS.items():
             with self.subTest(stem=stem):
-                self.assertLessEqual(len(load) + 4, most_payload())
+                native = seat.get(stores.CATEGORIES[stem], 4)
+                self.assertLessEqual(len(load) + native, most_payload())
+
+    def test_flak_ap_and_proximity_are_paired_native_barrels(self) -> None:
+        load = {kind_of(m.weapon): m for m in stores.LOADOUTS['V603_FLAK']}
+        for left, right, ammo in (('FLAK_AP', 'FLAK_AP_R', 'ap'), ('FLAK_HE', 'FLAK_HE_R', 'he')):
+            a, b = vc.STORES[left], vc.STORES[right]
+            self.assertGreater(a.group, 0)
+            self.assertEqual(a.group, b.group, 'one R/LB choice for both barrels')
+            self.assertEqual((a.barrel, b.barrel), (0, 1))
+            self.assertEqual((load[left].like, load[right].like), (0, 1), 'mounted to the matching native holder')
+            self.assertEqual((a.weapon.kind, b.weapon.kind), (ammo, ammo))
+            self.assertTrue(a.weapon.template.endswith('_L.SGO') and b.weapon.template.endswith('_R.SGO'))
+        self.assertNotEqual(vc.STORES['FLAK_AP'].group, vc.STORES['FLAK_HE'].group)
+        for kind in ('VULCAN_HE', 'VULCAN_AP'):
+            self.assertTrue(vc.STORES[kind].native_control, 'M61 belts are exclusive native choices')
+            self.assertEqual(vc.STORES[kind].group, 0)
 
     def test_coaxial_guns_are_real_7_62_mm_coaxes(self) -> None:
         # The user, 2026-10-11: 「这个坦克的同轴机枪做的什么玩意，找现实的模型来做」: each tank's coax is the real gun of its
@@ -216,8 +260,31 @@ class WithGameTests(unittest.TestCase):
                     self.assertEqual((got['AmmoExplosion'], got['AmmoIsPenetration']), (0.0, 1.0))
                 elif store.weapon.kind == 'mg':
                     self.assertEqual(got['AmmoExplosion'], 0.0)
+                elif store.weapon.kind == 'canister':
+                    self.assertEqual(got['AmmoExplosion'], 0.0)
+                    self.assertGreater(got['FireCount'], 1.0)
+                    self.assertEqual(got['AmmoIsPenetration'], 1.0)
                 else:
                     self.assertGreater(got['AmmoExplosion'], 0.0)
+                    if store.weapon.kind == 'heat':
+                        self.assertEqual((got['AmmoIsPenetration'], got['FireCount']), (0.0, 1.0))
+                        self.assertGreater(got['AmmoDamage'], stock['AmmoDamage'])
+                        self.assertLess(got['AmmoExplosion'], stock['AmmoExplosion'])
+                        self.assertGreater(got['AmmoSpeed'], stock['AmmoSpeed'])
+
+    def test_flak_templates_preserve_native_fuse_and_penetration(self) -> None:
+        rows = stores._read_any(self.game.read('OBJECT', 'V603_FLAK.SGO'))['vehicle_weapon_setting']
+        for kind in ('FLAK_AP', 'FLAK_AP_R', 'FLAK_HE', 'FLAK_HE_R'):
+            spec = vc.STORES[kind]
+            generated = dsgo.to_py(dsgo.parse(vc.store_sgo(self.game, vc.store_file(kind, 500))).root)
+            self.assertEqual(rows[spec.barrel][0], 'cannon_slide_l' if spec.barrel == 0 else 'cannon_slide_r')
+            if spec.weapon.kind == 'ap':
+                self.assertEqual((generated['AmmoExplosion'], generated['AmmoIsPenetration']), (0.0, 1.0))
+                self.assertEqual(generated['AmmoSpeed'] * 60.0, 960.0)
+            else:
+                self.assertEqual(generated['AmmoClass'], 'GrenadeBullet01_MapNoDamage')
+                self.assertEqual(generated['AmmoExplosion'], 4.0)
+                self.assertEqual(generated['AmmoSize'] * generated['AmmoHitSizeAdjust'], 4.0)
 
     def test_coaxial_gun_lays_with_the_main_gun_from_its_own_muzzle(self) -> None:
         # The user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」. Its holder hangs on the bone that elevates the main gun

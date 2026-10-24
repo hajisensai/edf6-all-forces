@@ -24,6 +24,7 @@ const Enemy* World(int* count) noexcept{*count=0;return nullptr;}
 const std::int32_t* Relations(std::int32_t) noexcept{return nullptr;}
 }
 namespace crew {
+bool PayloadAimWeapon(const void*,unsigned,const void*,const unsigned char** out) noexcept{if(out)*out=nullptr;return false;}
 unsigned char* image=nullptr;Config testConfig{};unsigned char* human=nullptr;
 bool observer=false,transition=false,mounted=false,lens=true;
 sightzoom::Kind testKind=sightzoom::Kind::optical;

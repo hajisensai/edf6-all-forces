@@ -64,7 +64,7 @@ struct StockArm {
     float reload;                // 0..1 share reloaded while it reloads (ammo 0); 1 not reloading
     float reloadSec;             // seconds left of it, < 0 unknown
     bool canReload;              // ReloadTime >= 0: it reloads once empty (else EMPTY is the end)
-    float side=0.0f;             // m its first muzzle is left of the vehicle's middle across the camera's view (- right; 0 unknown)
+    float side=0.0f;             // m its first muzzle is left of the vehicle's middle across its own bore (- right; 0 unknown)
     float cycle=1.0f;            // 0..1 share of the round loaded since the last shot (rounds left, a gun laid shot by shot)
     float cycleSec=-1.0f;        // seconds until it can fire again, < 0 ready (or a quick gun: no loading to show)
     RoundKind kind;
@@ -75,6 +75,7 @@ struct StockArm {
     float bore[3],at[3],lead[3],range,flight;   // first real barrel path; at/range/flight never replaced by target selection
     bool physicalOnly=true,coFired=false; // fixed/partial/unknown mount; this weapon shares the active trigger
     bool armed=false;            // on one of the seat's triggers now (payload.cpp PayloadTriggerWeapons): its marks are drawn too
+    bool ownPick=false;          // the own secondary's pick (payload.cpp PayloadOwnSecondaryPicked: the BMPT's missile now)
     float targetRange=0;         // optional articulated-gun lead cue, never replaces physical path data above
     int paths=0;
     roundaim::Impact path[roundaim::kSightPaths]{};
@@ -112,6 +113,24 @@ bool HudReady() noexcept;   // hud.cpp: its quads can be drawn (InstallHud): no 
 void StockHudFrame(unsigned char* vehicle) noexcept;   // every vehicle's input (crew.cpp InputHook), after AimLines
 bool PlayerStockHud(StockHudReadout* out) noexcept;    // the last frame's, false with none (hud.cpp HudPublish)
 void ResetStockHud() noexcept;                         // mission.cpp MissionStart
+
+// --- Optical target recognition: live hostile lock points, never a thermal image ---
+// Gather on the game thread (HudPublish), publish the value with its existing Snapshot. The draw thread
+// must only project these world points; no game objects, registry walks or map rays cross the boundary.
+enum class VehicleSensorKind : std::uint8_t { none, optical };
+constexpr int kVehicleContacts=16;
+struct VehicleContact { float at[3],range; };
+struct VehicleSensorReadout {
+    VehicleSensorKind kind=VehicleSensorKind::none;
+    bool gunship=false;
+    int count=0;
+    float range=0.0f;
+    VehicleContact contact[kVehicleContacts]{};
+};
+// The local player's eligible vehicle optic (tank/IFV, AA, attack helicopter or gunship gunner).
+// Returns false on foot, in the map, without a live local seat/camera, or when native LOS queries are unavailable.
+// At most 32 terrain/building rays per frame. Contacts are hostile, alive and currently lockable in the native registry.
+bool PlayerVehicleContacts(VehicleSensorReadout* out) noexcept;
 
 // --- stockgauge.cpp: the stock weapon gauges and the fuel tank (docs/hud-re.md §9) ---
 // At load: the stock vehicle weapon gauge's update (HUiHudWeapon slot 1) chained, the FuelTank reads checked; each part

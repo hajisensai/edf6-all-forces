@@ -16,6 +16,12 @@
 //    are redirected) every weapon table row named EDF6VC_CALL_* gets the owned bit, as that step gives a
 //    DLC weapon its: NEW and 0 stars the first time, stars left alone after. Before it, so its "equipped
 //    but not owned: back to the default weapon" pass keeps them on the soldiers that carry them.
+//    The script's entry alone also marks / moves the mission pack's save (edf5campaign.cpp MigrateMissionPackSave):
+//    MAINSCRIPT calls UnlockDownloadContents only after SetMode and a LoadSaveData_ModeSelect that succeeded
+//    (MAINSCRIPT.AS 363, 852, 1691, 1801, 1851, 1889, 1913), so GS+0x57A4 is the new mode's save (read whole by
+//    0x7BE970, or the reset template when it has no file yet) and GS+0x38 that mode. The call at 0xDC348 is the
+//    reset's (0xDB580 bit 8, via 0xDB920 -> 0xDC170), which runs after bit 4 has put the template in GS+0x57A4 and,
+//    inside SetMode (0xDC4B8), before 0xDC4C5 sets GS+0x38: the old mode then, a save that is not its.
 //  - The thrown drones (tools/call_weapons.py: EDF6VC_CALL_THROW_*, Patroller clones in the Robot Bomb list, told
 //    apart by their AmmoHitSizeAdjust's bits, kThrows): the Weapon_Sub's shot (its vtable slot 17, called with the
 //    bullet it just made, 0x697DDD) of one of ours, a BombBullet01, is kept (bombs[]); at that bomb's update
@@ -38,6 +44,7 @@
 #include "jet_internal.h"   // FaultLog
 #include "memory.h"
 #include "online_authority.h"
+#include "unlock_ported.h"
 #include <atomic>
 #include <cmath>
 #include <cwchar>
@@ -83,7 +90,7 @@ using DeleteFn=void(*)(void*);
 // ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of fuel
 // (fuelSec) or badly damaged each leaves.
 // What a call brings: jets (`role`), helis (`body`; both made by the support deployment) or the submarine carrier
-// (SubLaunch); the field of what it does not bring is empty.
+// (a planned hull plus its real pilot); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
 struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
               bool follow; const char* name; const wchar_t* id; };
@@ -93,6 +100,8 @@ struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* ob
 // A thrown drone's weapon (tools/calls.py brings 'throw'): its AmmoHitSizeAdjust's bits (calls.throw_mark), the
 // drone its bomb releases and that drone's fuel.
 struct Throw { std::uint32_t markBits; ThrownDrone drone; DWORD fuelSec; const char* name; const wchar_t* id; };
+// An ultimate strike's weapon (tools/calls.py brings 'ultimate'): its AmmoHitSizeAdjust (an integer, as kCalls').
+struct Ultimate { float mark; const char* name; const wchar_t* id; };
 #include "calls.inc"
 // The in-mission pick (CallPick, overlay.cpp's keys): -1 = each weapon's own call; otherwise only local players'
 // call weapons bring kCalls[picked]. This UI preference is not carried in the native radio-call message.
@@ -246,18 +255,7 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
         const auto owner=At<const unsigned char*>(params,0);   // params+0: owner weak pointer (docs/airstrike-re.md section 2)
         const Call* const c=CallOf(ifc,owner);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
-        if(c && c->brings==Brings::sub && std::isfinite(target[0]+target[1]+target[2])) {
-            // The carrier surfaces on every machine the call is replayed on, each its own copy owned by the caller's
-            // machine (as before #88, which sent it to the support planner: refused there for want of an aircraft).
-            const online::CopyOwner was=SetSpawnOwner(CopyOwnerOfCaller(owner));
-            const bool local=!InSession() || IsPlayer(owner);
-            const float* from=owner && Readable(owner+kPosition,12) ? reinterpret_cast<const float*>(owner+kPosition) : nullptr;
-            wchar_t note[128]{};
-            const bool surfaced=SupportSubCallAt(target,from,local,note,_countof(note));
-            SetSpawnOwner(was);
-            Put<std::int32_t>(ifc,kIfcPlanes,0);   // no stock bombers in its place
-            Log("AIRSTRIKE submarine call: local=%d surfaced=%d",local,surfaced);
-        } else if(c && std::isfinite(target[0]+target[1]+target[2])) {
+        if(c && std::isfinite(target[0]+target[1]+target[2])) {
             const online::CopyOwner was=SetSpawnOwner(CopyOwnerOfCaller(owner));   // its copies are the caller's (online_authority.h)
             wchar_t note[128]{};
             // The radio callback is replayed for remote players too. Only the actual caller submits
@@ -429,11 +427,121 @@ bool InstallThrows() noexcept {
     return PatchVtableSlot(reinterpret_cast<void**>(image+kSubShotSlot),shot,reinterpret_cast<void*>(&SubShotHook));
 }
 
+// --- The ultimate strike (ultimate.cpp, docs/plan-2026-10-19-ultimate.md) ---
+// Weapon_LaserMarkerCallFire's fire state with CP[3] = 0 (0x6A59F0; docs/tvguide-re.md §1.3) loads its IndirectFireUnit
+// (weapon+0x18A0) on entering: 0x6A5A22 add rcx,0x18A0; 0x6A5A29 call 0x2B8090 (the shots of its spec into the unit's
+// +0x2F0), then every frame waits for 0x2B7B90 (no shot left, every round dead) to go back to idle. At that call (redirected:
+// SatFireHook) one of ours has its shots set to 0 after the load when a show plays instead, so the stock beam never fires
+// and the weapon goes back to idle on its next frame; the show starts at the laser's smoothed point (+0x1D60, which follows
+// the laser's hit +0x1780). The weapon's damage +0x89C (its AmmoDamage with its stars, read by the satellite at 0x6A1A62) is
+// the show's.
+// Whose call (the weapon's owner +0x120):
+//  - this machine's player's: the show (UltimateStart); the shots cleared only once it started (B: before 2026-10-20 they
+//    were cleared first, and a call the show refused spent its points on nothing): refused, the stock beam fires;
+//  - another machine's player's (online; every machine runs the call on its copy of the weapon: 推测 from the shots it saw
+//    cleared, docs/plan-2026-10-19-ultimate.md 待确认 6): that player's machine plays the show and tells this one
+//    (ultimate_net_protocol.h), which plays it too. Its stock beam is held back only when the show was heard (A: before
+//    2026-10-20 it was cleared here whatever the caller's build, and a peer of an older one, or one whose show did not
+//    start, left this machine with neither): heard before this call, at once; heard within kUltimateStockWaitMs after it,
+//    while the stock round is not out yet (the unit's first-shot wait, M), then (UltimateStockHoldBack). Never heard: the
+//    stock beam is this machine's sight of the call;
+//  - a soldier's: the stock beam.
+constexpr unsigned kSatFire=0x6A5A22,kSatFireCall=0x6A5A29,kUnitLoad=0x2B8090,kLaserMarkerVtable=0x17E4750;
+constexpr std::size_t kSatUnit=0x18A0,kSatAim=0x1D60,kSatLaser=0x1780,kWeaponDamage=0x89C,kUnitShots=0x2F0;
+constexpr std::size_t kUnitRounds=0x468;   // the unit's list of rounds made (+0x460): its size (docs/tvguide-re.md §1.1, +0x1D08)
+const unsigned char kSatFireSig[]={0x48,0x81,0xC1,0xA0,0x18,0x00,0x00,0xE8,0x62,0x26,0xC1,0xFF};
+using UnitLoadFn=void(__fastcall*)(unsigned char*);
+
+// The ultimate weapon `w` is (its mark), or nullptr.
+const Ultimate* UltimateOf(const unsigned char* w) noexcept {
+    if(!Readable(w+kWeaponHitSize,4))return nullptr;
+    const float mark=At<float>(w,kWeaponHitSize);
+    for(const auto& u:kUltimates)if(std::fabs(mark-u.mark)<0.5f)return &u;
+    return nullptr;
+}
+
+// Another machine's player's calls whose show was not heard yet: the weapon (checked by its class and owner when the show
+// comes: a weapon is no scene object with a weak-this), its owner, when.
+struct StockCall { unsigned char* weapon; const unsigned char* owner; ULONGLONG at; };
+StockCall stockCalls[8]{};
+int stockNext=0;
+
+void __fastcall SatFireHook(unsigned char* unit) {
+    reinterpret_cast<UnitLoadFn>(image+kUnitLoad)(unit);
+    if(!Cfg().enabled)return;
+    __try {
+        unsigned char* const w=unit-kSatUnit;
+        const Ultimate* const u=UltimateOf(w);
+        if(!u)return;
+        const auto owner=At<const unsigned char*>(w,kWeaponOwner);
+        if(IsPlayer(owner)) {
+            const float* aim=reinterpret_cast<const float*>(w+kSatAim);
+            if(!std::isfinite(aim[0]+aim[1]+aim[2]))aim=reinterpret_cast<const float*>(w+kSatLaser);
+            const std::uint64_t seed=GetTickCount64()*0x9E3779B97F4A7C15ull^reinterpret_cast<std::uintptr_t>(w);
+            if(UltimateStart(owner,aim,At<float>(w,kWeaponDamage),seed))Put<std::int32_t>(unit,kUnitShots,0);   // the show instead
+            else Log("ULTIMATE %s: no show: the stock satellite beam fires instead",u->name);
+            return;
+        }
+        if(InSession() && IsAnyPlayer(owner)) {
+            if(UltimateHeardFrom(owner)) {
+                Put<std::int32_t>(unit,kUnitShots,0);
+                Log("ULTIMATE %s: another machine's call, its show heard already: no stock beam here",u->name);
+                return;
+            }
+            stockCalls[stockNext]=StockCall{w,owner,GetTickCount64()};
+            stockNext=(stockNext+1)%static_cast<int>(sizeof(stockCalls)/sizeof(stockCalls[0]));
+            Log("ULTIMATE %s: another machine's call, no show of its caller's heard yet: the stock beam stays unless the show's "
+                "start comes before it fires",u->name);
+            return;
+        }
+        Log("ULTIMATE %s: a soldier's call: the stock satellite beam",u->name);
+    } __except(FaultLog("ULTIMATE call (the stock beam)",GetExceptionInformation())) {}
+}
+
+}  // namespace
+
+bool UltimateStockHoldBack(const unsigned char* caller) noexcept {
+    bool any=false;
+    const ULONGLONG now=GetTickCount64();
+    for(StockCall& c:stockCalls) {
+        if(!c.weapon || c.owner!=caller)continue;
+        const StockCall was=c;
+        c=StockCall{};
+        if(now-was.at>kUltimateStockWaitMs)continue;
+        int held=0;   // 1 held back, 2 already out, 0 the weapon gone
+        __try {
+            unsigned char* const w=was.weapon;
+            if(Readable(w,kSatUnit+kUnitRounds+8) && At<const void*>(w,0)==image+kLaserMarkerVtable &&
+               At<const unsigned char*>(w,kWeaponOwner)==caller) {
+                unsigned char* const unit=w+kSatUnit;
+                if(At<std::int32_t>(unit,kUnitShots)>0 && At<std::uint64_t>(unit,kUnitRounds)==0){Put<std::int32_t>(unit,kUnitShots,0);held=1;}
+                else held=2;
+            }
+        } __except(FaultLog("ULTIMATE stock beam hold-back",GetExceptionInformation())){held=0;}
+        Log("ULTIMATE another machine's call: its show came %llu ms after it: %s",static_cast<unsigned long long>(now-was.at),
+            held==1 ? "its stock beam held back" : held==2 ? "its stock beam was out already (both seen here)" : "its weapon is gone");
+        any=any || held==1;
+    }
+    return any;
+}
+void UltimateStockReset() noexcept { for(StockCall& c:stockCalls)c=StockCall{}; stockNext=0; }
+
+namespace {
+bool InstallUltimate() noexcept {
+    if(!Matches(kSatFire,kSatFireSig,sizeof(kSatFireSig))) {
+        Log("ULTIMATE satellite fire state: profile mismatch (the ultimate stays a stock satellite call)");
+        return false;
+    }
+    bool changed=false;
+    const bool ok=RedirectCall(image+kSatFireCall,image+kUnitLoad,reinterpret_cast<void*>(&SatFireHook),changed);
+    if(!ok)Log("ULTIMATE satellite fire state %s",changed ? "half patched" : "not patched");
+    return ok;
+}
+
 using UnlockFn=void(__fastcall*)(unsigned char*);
 using RowCountFn=std::uint32_t(__fastcall*)(void*);
 using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
 
-// Every EDF6VC_CALL_* row owned (see the file comment); how many were not yet.
 // Whether a weapon table row's name is one of ours (kCallRows): exactly, so a retired row (EDF6VC_RETIRED_*,
 // an uninstall's placeholder) or another mod's row is never made owned.
 bool IsCallRow(const wchar_t* name) noexcept {
@@ -444,50 +552,69 @@ bool IsCallRow(const wchar_t* name) noexcept {
     return false;
 }
 
-int GrantCalls(unsigned char* gs) noexcept {
-    if(!gs || !Readable(gs+kFlags,kMaxRecords*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return -1;
+// Every EDF6VC_CALL_* row owned (see the file comment), and with PortedWeaponsUnlocked every ported weapon's row
+// (unlock_ported.h PortedWeapon: EDF6VC_E5_*, EDF6VC_E41_*) as well; how many of each were not yet (-1: no table).
+// Only ever sets bits: switching the key off takes nothing back (a weapon a save has equipped must stay owned, and
+// the weapons are in MAIN.GST, which every mode shares); EDF6's own rows are never touched.
+struct Granted { int calls=-1,ported=0; };
+Granted GrantCalls(unsigned char* gs,bool ported) noexcept {
+    Granted out;
+    if(!gs || !Readable(gs+kFlags,kMaxRecords*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return out;
     void* const table=gs+kCfg;
-    if(!At<void*>(table,kTableRef))return -1;             // no weapon table yet
+    if(!At<void*>(table,kTableRef))return out;             // no weapon table yet
     std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
     if(n>kMaxRecords)n=kMaxRecords;
     alignas(8) unsigned char row[0x100];
-    int granted=0;
+    out.calls=0;
     for(std::uint32_t id=0;id<n;++id) {
         reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,id);
         const auto name=At<const wchar_t*>(row,0);
-        if(!name || !IsCallRow(name))continue;
-        auto& flags=*reinterpret_cast<std::uint32_t*>(gs+kFlags+id*kRecord);
-        if(!(flags&1)) {
-            flags|=4;
-            std::memset(gs+kStars+id*kRecord,0,8);
-            ++granted;
+        if(!name)continue;
+        if(IsCallRow(name)) {
+            if(ported::Own(gs+kFlags+id*kRecord))++out.calls;
+        } else if(ported && Readable(name,ported::kLongestPrefix*sizeof(wchar_t)) && ported::PortedWeapon(name)) {
+            if(ported::Own(gs+kFlags+id*kRecord))++out.ported;
         }
-        flags|=1;
     }
-    return granted;
+    return out;
 }
 
-void __fastcall UnlockDlcHook(unsigned char* gs) {
+void Grant(unsigned char* gs) noexcept {
     __try {
-        const int granted=GrantCalls(gs);
-        if(granted>0)Log("CALLS %d call weapons owned now",granted);
+        const bool ported=Cfg().portedWeaponsUnlocked;
+        const Granted granted=GrantCalls(gs,ported);
+        if(granted.calls>0)Log("CALLS %d call weapons owned now",granted.calls);
+        if(ported)Log("PORTED weapons unlocked: %d owned now%s",granted.ported,granted.calls<0 ? " (no weapon table yet)" : "");
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("CALLS granting failed");}
+}
+// 0xDC348: the reset's (see the file comment): the call weapons only.
+void __fastcall UnlockDlcHook(unsigned char* gs) {
+    Grant(gs);
+    reinterpret_cast<UnlockFn>(image+kUnlockDlc)(gs);
+}
+// 0x70FF87: the script's UnlockDownloadContents, right after a mode's save was loaded: that save first.
+void __fastcall ScriptUnlockDlcHook(unsigned char* gs) {
+    __try { MigrateMissionPackSave(gs); } __except(EXCEPTION_EXECUTE_HANDLER){Log("PACK save: moving the rows failed");}
+    Grant(gs);
     reinterpret_cast<UnlockFn>(image+kUnlockDlc)(gs);
 }
 
-// Both entries of 0xDC550 redirected to UnlockDlcHook; whether both are.
-bool InstallOwnership() noexcept {
+// Both entries of 0xDC550 redirected (0xDC348 to UnlockDlcHook, 0x70FF87 to ScriptUnlockDlcHook); whether both are.
+// `script`: whether the script's is (the mission packs' save hook).
+bool InstallOwnership(bool& script) noexcept {
+    script=false;
     if(!Matches(kUnlockDlc,kUnlockDlcSig,sizeof(kUnlockDlcSig)) || !Matches(kUnlockDlcJump-7,kUnlockThunkSig,sizeof(kUnlockThunkSig))) {
         Log("CALLS ownership: profile mismatch");
         return false;
     }
     bool ok=true;
     const unsigned sites[]={kUnlockDlcCall,kUnlockDlcJump};
-    for(const unsigned site:sites) {
+    void* const hooks[]={reinterpret_cast<void*>(&UnlockDlcHook),reinterpret_cast<void*>(&ScriptUnlockDlcHook)};
+    for(unsigned i=0;i<2;++i) {
         bool changed=false;
-        if(RedirectCall(image+site,image+kUnlockDlc,reinterpret_cast<void*>(&UnlockDlcHook),changed))continue;
+        if(RedirectCall(image+sites[i],image+kUnlockDlc,hooks[i],changed)){script=script || sites[i]==kUnlockDlcJump;continue;}
         ok=false;
-        Log("CALLS ownership: %s at %X",changed ? "half patched" : "not patched",site);
+        Log("CALLS ownership: %s at %X",changed ? "half patched" : "not patched",sites[i]);
     }
     return ok;
 }
@@ -598,7 +725,9 @@ bool InstallAirstrikes() noexcept {
     CheckCallTable();
     __try {
         bool calls=false;
-        const bool owned=InstallOwnership();
+        bool script=false;
+        const bool owned=InstallOwnership(script);
+        SetMissionPackSaveHook(script);   // a mission pack is owned only while its saves are marked (edf5campaign.cpp Ours)
         if(Matches(kIfcStart,kIfcStartSig,sizeof(kIfcStartSig)) && Matches(kRadioCall,kRadioCallSig,sizeof(kRadioCallSig))) {
             bool changed=false;
             calls=RedirectCall(image+kRadioCall,image+kIfcStart,reinterpret_cast<void*>(&RadioStartHook),changed);
@@ -608,8 +737,10 @@ bool InstallAirstrikes() noexcept {
         // update vtable untouched so their original payload/timeline cannot be suppressed.
         const bool throws=InstallThrows();
         const bool pickSend=calls && InstallPickSend();
-        Log("HOOK airstrikes calls=%d owned=%d stockBombers=native throws=%d pickSend=%d",calls,owned,throws,pickSend);
-        return calls || throws;
+        const bool ultimate=InstallUltimate();
+        Log("HOOK airstrikes calls=%d owned=%d packSaves=%d stockBombers=native throws=%d pickSend=%d ultimate=%d",calls,owned,script,
+            throws,pickSend,ultimate);
+        return calls || throws || ultimate;
     } __except(FaultLog("AIRSTRIKE install",GetExceptionInformation())){return false;}
 }
 // A new mission (mission.cpp MissionStart): the thrown bombs were the last mission's (their

@@ -267,21 +267,22 @@ HUDTEXT(selectedSome,L"SELECTED %d / %d",L"已选 %d / %d",L"已選 %d / %d",L"�
 HUDTEXT(npcOfflineOnly,L"NPC COMMANDS: OFFLINE ONLY",L"NPC 指挥：仅限离线",L"NPC 指揮：僅限離線",L"NPC 指揮：オフライン専用")
 HUDTEXT(npcNone,L"NPC COMMANDS: no NPC unit (squads, helis, jets, crawlers, tanks)",L"NPC 指挥：没有 NPC 单位（小队、直升机、喷气机、爬行者、坦克）",
         L"NPC 指揮：沒有 NPC 單位（小隊、直升機、噴射機、爬行者、坦克）",L"NPC 指揮：ユニットなし（分隊・ヘリ・ジェット・クロウラー・戦車）")
-HUDTEXT(npcPadKeys,L"%ls   X select (ALL last)   Y guard crosshair   RB follow me   LB release",
-        L"%ls   X 选择（最后为全部）   Y 守准星处   RB 跟随我   LB 解除",L"%ls   X 選擇（最後為全部）   Y 守準星處   RB 跟隨我   LB 解除",
-        L"%ls   X 選択（最後は全員）   Y 照準点を防衛   RB 自分に追従   LB 解除")
-HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack   Z attack-move   G guard   V follow   X release",
-        L"%ls   右键 移动 / 攻击   Z 攻击移动   G 守点   V 跟随我   X 解除",
-        L"%ls   右鍵 移動 / 攻擊   Z 攻擊移動   G 守點   V 跟隨我   X 解除",
-        L"%ls   右クリック 移動 / 攻撃   Z 攻撃移動   G 防衛   V 追従   X 解除")
+HUDTEXT(npcPadKeys,L"%ls   X select   Y attack-move (hold: HOLD)   RB follow me   LB stop   D-pad groups 1-4 (hold: keep)",
+        L"%ls   X 选择   Y 攻击移动（按住：原地坚守）   RB 跟随我   LB 停止   十字键 编队 1-4（按住：编入）",
+        L"%ls   X 選擇   Y 攻擊移動（按住：原地堅守）   RB 跟隨我   LB 停止   十字鍵 編隊 1-4（按住：編入）",
+        L"%ls   X 選択   Y 攻撃移動（長押し：その場で死守）   RB 自分に追従   LB 停止   十字キー グループ 1-4（長押し：登録）")
+HUDTEXT(npcMouseKeys,L"%ls   RIGHT-CLICK move / attack (Shift: queue)   Z attack-move   H hold   V follow   X stop   Ctrl+1-9 group",
+        L"%ls   右键 移动 / 攻击（Shift 排队）   Z 攻击移动   H 原地坚守   V 跟随我   X 停止   Ctrl+1-9 编队",
+        L"%ls   右鍵 移動 / 攻擊（Shift 排隊）   Z 攻擊移動   H 原地堅守   V 跟隨我   X 停止   Ctrl+1-9 編隊",
+        L"%ls   右クリック 移動 / 攻撃（Shift で予約）   Z 攻撃移動   H 死守   V 追従   X 停止   Ctrl+1-9 グループ")
 HUDTEXT(mapTitle,L"MAP   height %ls   grid %ls%ls",L"地图   高度 %ls   网格 %ls%ls",L"地圖   高度 %ls   網格 %ls%ls",L"マップ   高度 %ls   グリッド %ls%ls")
 HUDTEXT(mapPadKeys,L"L stick pan   R stick turn / tilt   RT / LT zoom   A centre   B / map button close",
         L"左摇杆 平移   右摇杆 旋转 / 俯仰   RT / LT 缩放   A 居中   B / 地图键 关闭",L"左搖桿 平移   右搖桿 旋轉 / 俯仰   RT / LT 縮放   A 置中   B / 地圖鍵 關閉",
         L"左スティック 移動   右スティック 回転 / 傾き   RT / LT ズーム   A 中央へ   B / マップボタン 閉じる")
-HUDTEXT(mapMouseKeys,L"LMB drag / WASD pan   RMB drag / Q E turn   R F tilt   wheel / + - zoom   Space centre   %ls / Esc close",
-        L"左键拖动 / WASD 平移   右键拖动 / Q E 旋转   R F 俯仰   滚轮 / + - 缩放   空格 居中   %ls / Esc 关闭",
-        L"左鍵拖曳 / WASD 平移   右鍵拖曳 / Q E 旋轉   R F 俯仰   滾輪 / + - 縮放   空白鍵 置中   %ls / Esc 關閉",
-        L"左ドラッグ / WASD 移動   右ドラッグ / Q E 回転   R F 傾き   ホイール / + - ズーム   スペース 中央へ   %ls / Esc 閉じる")
+HUDTEXT(mapMouseKeys,L"WASD / middle drag pan (LMB drag with no unit)   RMB drag / Q E turn   R F tilt   wheel / + - zoom   Space centre   %ls / Esc close",
+        L"WASD / 中键拖动 平移（没有单位时左键拖动）   右键拖动 / Q E 旋转   R F 俯仰   滚轮 / + - 缩放   空格 居中   %ls / Esc 关闭",
+        L"WASD / 中鍵拖曳 平移（沒有單位時左鍵拖曳）   右鍵拖曳 / Q E 旋轉   R F 俯仰   滾輪 / + - 縮放   空白鍵 置中   %ls / Esc 關閉",
+        L"WASD / 中ドラッグ 移動（ユニットなしは左ドラッグ）   右ドラッグ / Q E 回転   R F 傾き   ホイール / + - ズーム   スペース 中央へ   %ls / Esc 閉じる")
 HUDTEXT(legendYou,L"YOU",L"你",L"你",L"自分")
 HUDTEXT(legendSquad,L"SQUAD",L"小队",L"小隊",L"分隊")
 HUDTEXT(legendFriendly,L"FRIENDLY",L"友军",L"友軍",L"味方")
@@ -300,7 +301,7 @@ HUDTEXT(legendNearestEnemy,L"NEAREST ENEMY",L"最近的敌人",L"最近的敵人
 HUDTEXT(cmdOfflineOnly,L"COMMANDS: OFFLINE ONLY",L"指挥：仅限离线",L"指揮：僅限離線",L"指揮：オフライン専用")
 HUDTEXT(cmdSelectFirst,L"SELECT UNITS FIRST (%ls)",L"请先选择单位（%ls）",L"請先選擇單位（%ls）",L"先にユニットを選択（%ls）")
 HUDTEXT(cmdNoUnit,L"NO UNIT TO COMMAND",L"没有可指挥的单位",L"沒有可指揮的單位",L"指揮できるユニットなし")
-HUDTEXT(cmdSelectHowMouse,L"CTRL+DRAG / CLICK / TAB",L"Ctrl+拖动 / 点击 / Tab",L"Ctrl+拖曳 / 點擊 / Tab",L"Ctrl+ドラッグ / クリック / Tab")
+HUDTEXT(cmdSelectHowMouse,L"DRAG / CLICK / 1-9 / TAB",L"拖动框选 / 点击 / 1-9 / Tab",L"拖曳框選 / 點擊 / 1-9 / Tab",L"ドラッグ / クリック / 1-9 / Tab")
 HUDTEXT(cmdNoGround,L"NO GROUND THERE",L"那里没有地面",L"那裡沒有地面",L"そこに地面がない")
 HUDTEXT(cmdGuardOne,L"%ls (%.0f, %.0f): %d UNIT",L"%ls（%.0f, %.0f）：%d 个单位",L"%ls（%.0f, %.0f）：%d 個單位",L"%ls（%.0f, %.0f）：%d ユニット")
 HUDTEXT(cmdGuardMany,L"%ls (%.0f, %.0f): %d UNITS",L"%ls（%.0f, %.0f）：%d 个单位",L"%ls（%.0f, %.0f）：%d 個單位",L"%ls（%.0f, %.0f）：%d ユニット")
@@ -356,6 +357,9 @@ HUDTEXT(boardingHailing,L"CALLED: LANDING  %d m",L"已呼叫：正在降落  %d 
 // Contextual aircraft weapon controls (physical bindings supplied by the flight / payload readout).
 HUDTEXT(controlUnbound,L"unbound",L"未绑定",L"未綁定",L"未割当")
 HUDTEXT(controlStores,L"[%ls] stores",L"[%ls] 切换挂载",L"[%ls] 切換掛載",L"[%ls] 兵装切替")
+// A vehicle with its own secondary (the BMPT): each control's round now and the key that switches it (hud.cpp PayloadControls).
+HUDTEXT(controlPrimaryRounds,L"[%ls] gun: %ls",L"[%ls] 主武器：%ls",L"[%ls] 主武器：%ls",L"[%ls] 主兵装：%ls")
+HUDTEXT(controlOwnSecondary,L"[%ls] missile: %ls",L"[%ls] 副武器：%ls",L"[%ls] 副武器：%ls",L"[%ls] 副兵装：%ls")
 HUDTEXT(controlTarget,L"[%ls] next target",L"[%ls] 切换目标",L"[%ls] 切換目標",L"[%ls] 目標切替")
 HUDTEXT(controlGuns,L"[%ls] switch gun",L"[%ls] 切换火炮",L"[%ls] 切換火砲",L"[%ls] 火砲切替")
 HUDTEXT(controlGatlingHold,L"[%ls] hold: gatling",L"[%ls] 按住：加特林机枪",L"[%ls] 按住：加特林機槍",L"[%ls] 長押し：ガトリング")
@@ -394,15 +398,16 @@ HUDTEXT(cmdNpcRiding,L"This squad is aboard a vehicle: command its vehicle (or o
 HUDTEXT(npcRiding,L"RIDING",L"乘车中",L"乘車中",L"搭乗中")
 // The command card's tooltips and its hint with nothing selected (hud.cpp MapButtons).
 HUDTEXT(tipKey,L"%ls   key %ls",L"%ls   按键 %ls",L"%ls   按鍵 %ls",L"%ls   キー %ls")
-HUDTEXT(tipRightClick,L"%ls   RIGHT-CLICK THE MAP (an enemy: attack it)",L"%ls   右键点击地图（点敌人：攻击它）",L"%ls   右鍵點擊地圖（點敵人：攻擊它）",
-        L"%ls   マップを右クリック（敵なら攻撃）")
+HUDTEXT(tipRightClick,L"%ls   RIGHT-CLICK THE MAP (an enemy: attack it; you: follow; Shift: queue)",L"%ls   右键点击地图（点敌人：攻击；点你自己：跟随；Shift：排队）",
+        L"%ls   右鍵點擊地圖（點敵人：攻擊；點你自己：跟隨；Shift：排隊）",L"%ls   マップを右クリック（敵：攻撃、自分：追従、Shift：予約）")
 HUDTEXT(tipArms,L"%ls   key %ls; the button: then left-click the map",L"%ls   按键 %ls；点按钮后左键点击地图",L"%ls   按鍵 %ls；點按鈕後左鍵點擊地圖",
         L"%ls   キー %ls、ボタンの後マップを左クリック")
 HUDTEXT(btnFormationShort,L"FORMATION",L"编队",L"編隊",L"隊形")
 HUDTEXT(btnHealth,L"HEALTH BOXES",L"回复箱",L"回復箱",L"回復箱")
-HUDTEXT(cmdHintSelect,L"LEFT-CLICK A UNIT, CTRL+DRAG A BOX OR TAB; THEN RIGHT-CLICK TO MOVE OR ATTACK",
-        L"左键点选单位、Ctrl+拖动框选或 Tab 轮换；然后右键移动或攻击",L"左鍵點選單位、Ctrl+拖曳框選或 Tab 輪換；然後右鍵移動或攻擊",
-        L"左クリックで選択、Ctrl+ドラッグで範囲選択、Tab で切替。右クリックで移動・攻撃")
+HUDTEXT(cmdHintSelect,L"DRAG A BOX OR CLICK A UNIT (TWICE: ITS KIND); CTRL+1-9 KEEPS A GROUP; THEN RIGHT-CLICK TO MOVE OR ATTACK",
+        L"左键拖动框选或点选单位（双击：同类全选）；Ctrl+1-9 编队；然后右键移动或攻击",
+        L"左鍵拖曳框選或點選單位（雙擊：同類全選）；Ctrl+1-9 編隊；然後右鍵移動或攻擊",
+        L"ドラッグで範囲選択、クリックで選択（ダブルクリック：同種全選択）、Ctrl+1-9 でグループ。右クリックで移動・攻撃")
 // The support bar (hud.cpp MapSupportBar): its title, the dispatcher's state, a row's tooltip.
 HUDTEXT(supportTitle,L"SUPPORT",L"支援",L"支援",L"支援")
 HUDTEXT(supportPlanning,L"PLANNING",L"调度中",L"調度中",L"手配中")
@@ -423,11 +428,9 @@ HUDTEXT(cmdCannot,L", %d CANNOT",L"，%d 个无法执行",L"，%d 個無法執�
 HUDTEXT(cmdGuardResult,L"%ls (%.0f, %.0f): %d UNIT(S)%ls",L"%ls（%.0f, %.0f）：%d 个单位%ls",L"%ls（%.0f, %.0f）：%d 個單位%ls",L"%ls（%.0f, %.0f）：%d ユニット%ls")
 HUDTEXT(cmdOrderResult,L"%ls: %d UNIT(S)%ls",L"%ls：%d 个单位%ls",L"%ls：%d 個單位%ls",L"%ls：%d ユニット%ls")
 HUDTEXT(squadTitle,L"SQUADS",L"小队",L"小隊",L"分隊")
-HUDTEXT(squadTitleKeys,L"SQUADS (1-9 pick, Shift add)",L"小队（1-9 选择，Shift 追加）",L"小隊（1-9 選擇，Shift 追加）",L"分隊（1-9 選択、Shift 追加）")
+HUDTEXT(squadTitleKeys,L"SQUADS (click pick, Shift add; [n] group)",L"小队（点击选择，Shift 追加；[n] 编队号）",L"小隊（點擊選擇，Shift 追加；[n] 編隊號）",L"分隊（クリックで選択、Shift 追加、[n] グループ）")
 // The map's command buttons (hud.cpp MapButtons; map_buttons.h).
 HUDTEXT(btnFormation,L"FORMATION: %ls",L"编队：%ls",L"編隊：%ls",L"隊形：%ls")
-HUDTEXT(btnSplit,L"SPLIT",L"分组",L"分組",L"分割")
-HUDTEXT(btnMerge,L"JOIN",L"合并",L"合併",L"合流")
 HUDTEXT(btnSweep,L"FETCH BOXES",L"拾取箱子",L"拾取箱子",L"アイテム回収")
 HUDTEXT(btnSweepStop,L"CALL BACK",L"召回",L"召回",L"呼び戻し")
 HUDTEXT(btnHealthOff,L"HEALTH BOXES: FOR THE PLAYER",L"回复箱：留给玩家",L"回復箱：留給玩家",L"回復箱：プレイヤー用")
@@ -437,8 +440,18 @@ HUDTEXT(cmdSweepOn,L"FETCHING BOXES (%d SELECTED SQUADS; 0: YOUR SQUADS)",L"拾�
 HUDTEXT(cmdSweepOff,L"CALLED BACK",L"已召回",L"已召回",L"呼び戻し")
 HUDTEXT(cmdSweepUnavailable,L"BOX SWEEP UNAVAILABLE (SEE THE LOG)",L"拾取不可用（见日志）",L"拾取不可用（見日誌）",L"回収は使用不可（ログ参照）")
 HUDTEXT(cmdHealthOnline,L" (NOT ONLINE)",L"（联机时不捡）",L"（連線時不撿）",L"（オンラインでは無効）")
-HUDTEXT(cmdSplitResult,L"SPLIT: %d SQUAD(S), %d TOO SMALL",L"分组：%d 个小队，%d 个人数不够",L"分組：%d 個小隊，%d 個人數不夠",L"分割：%d 分隊、%d 分隊は人数不足")
-HUDTEXT(cmdMergeResult,L"JOINED: %d SQUAD(S), %d CANNOT",L"合并：%d 个小队，%d 个无法合并",L"合併：%d 個小隊，%d 個無法合併",L"合流：%d 分隊、%d 分隊は不可")
+HUDTEXT(orderHold,L"HOLD",L"原地坚守",L"原地堅守",L"死守")
+// The RTS groups and the Shift queue (mapcmd.cpp GroupAct, Issue).
+HUDTEXT(cmdGroupSet,L"GROUP %d: %d UNIT(S)",L"编队 %d：%d 个单位",L"編隊 %d：%d 個單位",L"グループ %d：%d ユニット")
+HUDTEXT(cmdGroupCleared,L"GROUP %d CLEARED (%d)",L"编队 %d 已清空（%d）",L"編隊 %d 已清空（%d）",L"グループ %d を解除（%d）")
+HUDTEXT(cmdGroupEmpty,L"GROUP %d IS EMPTY (CTRL+%d KEEPS THE SELECTION)",L"编队 %d 是空的（Ctrl+%d 把当前选择编入）",
+        L"編隊 %d 是空的（Ctrl+%d 把目前選擇編入）",L"グループ %d は空（Ctrl+%d で選択中を登録）")
+HUDTEXT(cmdGroupPicked,L"GROUP %d: %d UNIT(S) SELECTED",L"编队 %d：已选 %d 个单位",L"編隊 %d：已選 %d 個單位",L"グループ %d：%d ユニット選択")
+HUDTEXT(cmdSelectedAll,L"SELECTED ALL: %d",L"已全选：%d",L"已全選：%d",L"全選択：%d")
+HUDTEXT(cmdPaceSlowest,L"MARCH: AT THE SLOWEST UNIT'S PACE [P]",L"配速：以最慢单位为基准 [P]",L"配速：以最慢單位為基準 [P]",L"行軍：最も遅い部隊に合わせる [P]")
+HUDTEXT(cmdPaceFull,L"MARCH: EACH AT FULL SPEED [P]",L"配速：各自全速 [P]",L"配速：各自全速 [P]",L"行軍：各自全速 [P]")
+HUDTEXT(cmdQueued,L"%ls QUEUED (%.0f, %.0f): %d UNIT(S)%ls",L"%ls 已排队（%.0f, %.0f）：%d 个单位%ls",L"%ls 已排隊（%.0f, %.0f）：%d 個單位%ls",
+        L"%ls 予約（%.0f, %.0f）：%d ユニット%ls")
 // The squads' formations (formation.h Shape, in its order; npcai.cpp, mapcmd.cpp FormationText).
 HUDTEXT(formStock,L"DEFAULT",L"默认",L"預設",L"標準")
 HUDTEXT(formColumn,L"COLUMN",L"纵队",L"縱隊",L"縦隊")
@@ -578,6 +591,32 @@ HUDTEXT(versionFeatLoadout,L"support loadout settings (defaults used)",L"支援�
 HUDTEXT(versionFeatTransport,L"transports",L"运输与空降",L"運輸與空降",L"輸送・空挺")
 HUDTEXT(versionFeatCompose,L"choosing who goes aboard",L"自选载员",L"自選載員",L"搭乗兵の選択")
 HUDTEXT(versionFeatVariants,L"coloured / armed support variants",L"支援外观与挂载",L"支援外觀與掛載",L"支援の外見・兵装")
+HUDTEXT(versionFeatOutfit41,L"the EDF4.1 outfit (others see the stock one)",L"4.1外观（其他人看到原版外观）",L"4.1外觀（其他人看到原版外觀）",L"4.1の外見（他の人には標準の外見）")
+HUDTEXT(versionFeatBvmPlayers,L"players 5+ in EDF5/4.1 missions (four created)",L"EDF5/4.1任务第5人起的角色（只建4人）",L"EDF5/4.1任務第5人起的角色（只建4人）",L"EDF5/4.1ミッションの5人目以降（4人のみ）")
+HUDTEXT(versionFeatBackpack,L"support soldiers' backpack weapons",L"支援士兵的背包武器",L"支援士兵的背包武器",L"支援兵のバックパック武器")
+HUDTEXT(versionFeatGravity,L"gravity gun grabs and throws",L"重力枪抓取与投掷同步",L"重力槍抓取與投擲同步",L"グラビティガンの掴み・投げの同期")
+HUDTEXT(versionFeatFloatGun,L"float guns",L"悬浮炮同步",L"懸浮炮同步",L"浮遊砲の同期")
+HUDTEXT(versionFeatUltimate,L"the ultimate strike (others see the stock beam)",L"终极支援天罚（其他人看到原版光束）",L"終極支援天罰（其他人看到原版光束）",L"究極支援「天罰」（他の人には標準のビーム）")
+// The ultimate strike's caller online (ultimate.cpp SayOldPeers): a peer without its channel sees the stock satellite beam.
+HUDTEXT(ultimateOldPeers,L"Some teammates run an older version: they may see the stock satellite beam",L"部分队员版本旧，可能看到原版光束",L"部分隊員版本舊，可能看到原版光束",L"一部の隊員は旧版のため、標準の衛星ビームが見えることがあります")
+// --- The room's host settings and builds (host_settings.cpp; the room menu's status lines) ---
+HUDTEXT(hostSettingsHost,L"Host's settings: walk-up recruit %ls, free squad cover %ls",L"按房主设置：原版走近招募 %ls，自由小队掩护 %ls",L"按房主設定：原版走近招募 %ls，自由小隊掩護 %ls",L"ホストの設定：近づいて合流 %ls・自由小隊の援護 %ls")
+HUDTEXT(hostSettingsSilent,L"The host's All Forces is older: recruit / cover by this machine's ini",L"房主的全军出击较旧：招募 / 掩护按本机 ini",L"房主的全軍出擊較舊：招募 / 掩護按本機 ini",L"ホストの全軍出撃が古い：合流 / 援護はこの機の ini")
+HUDTEXT(hostSettingsOn,L"on",L"开",L"開",L"オン")
+HUDTEXT(hostSettingsOff,L"off",L"关",L"關",L"オフ")
+HUDTEXT(buildsDiffer,L"%u member(s) run another All Forces build; may differ: %ls",L"%u 名成员的全军出击版本与本机不同，可能不一致：%ls",L"%u 名成員的全軍出擊版本與本機不同，可能不一致：%ls",L"%u 人の全軍出撃が別の版：食い違う恐れ：%ls")
+HUDTEXT(featHostSettings,L"recruit / cover",L"招募 / 掩护",L"招募 / 掩護",L"合流 / 援護")
+HUDTEXT(featCreditReload41,L"4.1 calls' score reload",L"4.1 呼叫积分装填",L"4.1 呼叫積分裝填",L"4.1 要請のポイント補充")
+HUDTEXT(featBikeCarDrive,L"the 408's drive",L"408 驾驶参数",L"408 駕駛參數",L"408 の走行設定")
+HUDTEXT(featBikeGunner,L"the 408's gunner (closed)",L"408 边三轮炮手（已关闭）",L"408 邊三輪砲手（已關閉）",L"408 の銃手席（閉鎖）")
+HUDTEXT(featOutfit41Colours,L"4.1 outfit colours",L"4.1 外观颜色",L"4.1 外觀顏色",L"4.1 外見の色")
+HUDTEXT(featNoClimb41,L"4.1 friends' climbing",L"4.1 友军翻越",L"4.1 友軍翻越",L"4.1 友軍の乗り越え")
+HUDTEXT(featBikeGunMount,L"the 408's gunner gun (closed)",L"408 炮手机枪（已关闭）",L"408 砲手機槍（已關閉）",L"408 の銃手機銃（閉鎖）")
+HUDTEXT(featBikeGrounded,L"the 408 landing (not hovering)",L"408 落地（不悬空）",L"408 落地（不懸空）",L"408 の着地（宙に浮かない）")
+// The HQ outfit popup's fifth outfit (outfit41.cpp): EDF4.1's subtitle. English and Japanese as the game is titled in both
+// (「地球防衛軍4.1 THE SHADOW OF NEW DESPAIR」: the Japanese title keeps the English subtitle); Chinese as the user names it
+// (2026-10-18: 「绝望阴影再袭」, the name Chinese media give the game; no Chinese edition was released), Traditional alike.
+HUDTEXT(outfit41Item,L"The Shadow of New Despair",L"绝望阴影再袭",L"絕望陰影再襲",L"THE SHADOW OF NEW DESPAIR")
 HUDTEXT(versionFeatCommand,L"map order sync",L"地图指挥（M 地图对 NPC 下令）同步",L"地圖指揮（M 地圖對 NPC 下令）同步",L"マップ指揮（NPC への命令）の同期")
 HUDTEXT(versionFeatSome,L"some newer features",L"部分新功能",L"部分新功能",L"一部の新機能")
 HUDTEXT(versionListSep,L", ",L"、",L"、",L"、")
@@ -616,6 +655,73 @@ HUDTEXT(debugSpawnOnline,L"OFFLINE ONLY: %ls",L"联机中不能用调试召唤�
 HUDTEXT(debugSpawnNoPlace,L"NO PLACE FOR %ls",L"召唤失败：找不到放置点（%ls）",L"召喚失敗：找不到放置點（%ls）",L"召喚失敗：置き場所なし（%ls）")
 HUDTEXT(debugSpawnRequested,L"SUPPORT CALLED: %ls  %ls",L"已呼叫支援：%ls  %ls",L"已呼叫支援：%ls  %ls",L"支援要請：%ls  %ls")
 HUDTEXT(debugSpawnRefused,L"SUPPORT REFUSED: %ls  %ls",L"支援未受理：%ls  %ls",L"支援未受理：%ls  %ls",L"支援要請不可：%ls  %ls")
+HUDTEXT(debugSpawnOurs,L"OUR VEHICLES",L"插件载具",L"插件載具",L"プラグインのビークル")
+HUDTEXT(debugSpawnEnemies41,L"EDF4.1 ENEMIES",L"EDF4.1 敌人",L"EDF4.1 敵人",L"EDF4.1 の敵")
+
+// --- The test range's 「摆放」 panel on the M map (hud.cpp MapPlacePanel; range_place.h, mapcmd.cpp; ini RangePlace) ---
+HUDTEXT(placeTitle,L"PLACE",L"摆放",L"擺放",L"配置")
+HUDTEXT(placeTabTip,L"Place vehicles, enemies and soldiers. Keys: , . pick   / category   Enter: at the pointer   Backspace: close",
+        L"摆放载具、敌人和士兵。键盘：, . 选择   / 换分类   Enter 放在指针处   Backspace 收起",
+        L"擺放載具、敵人和士兵。鍵盤：, . 選擇   / 換分類   Enter 放在指標處   Backspace 收起",
+        L"ビークル・敵・兵士を配置。キー：, . 選択   / 分類   Enter ポインター位置   Backspace 閉じる")
+HUDTEXT(placeHintMouse,L"Click a row, then the map (one a click)   Right click: stop   Wheel: scroll",
+        L"点一行再点地图（每点一次放一个）  右键取消  滚轮翻动",L"點一行再點地圖（每點一次放一個）  右鍵取消  滾輪翻動",
+        L"行をクリック→マップ（1 回 1 体）  右クリック：中止  ホイール：スクロール")
+HUDTEXT(placeOpenMouse,L"click to open",L"点击展开",L"點擊展開",L"クリックで開く")
+HUDTEXT(placeOpenPad,L"D-pad: open",L"十字键展开",L"十字鍵展開",L"十字キーで開く")
+HUDTEXT(placePage,L"page %d / %d",L"第 %d / %d 页",L"第 %d / %d 頁",L"%d / %d ページ")
+HUDTEXT(placePageUpTip,L"Previous page (the wheel scrolls too)",L"上一页（滚轮也可翻动）",L"上一頁（滾輪也可翻動）",L"前のページ（ホイールでもスクロール）")
+HUDTEXT(placePageDownTip,L"Next page (the wheel scrolls too)",L"下一页（滚轮也可翻动）",L"下一頁（滾輪也可翻動）",L"次のページ（ホイールでもスクロール）")
+
+HUDTEXT(placeHintPad,L"D-pad: pick / category   A: place at the centre   B: close",L"十字键 选择 / 换分类   A 放在屏幕中心   B 收起",
+        L"十字鍵 選擇 / 換分類   A 放在畫面中心   B 收起",L"十字キー 選択 / 分類   A 画面中央に配置   B 閉じる")
+HUDTEXT(placeOnline,L"Only enemy spawns sync online; other categories are unavailable",
+        L"仅敌人支持联机同步生成；其它类别暂不可用",L"僅敵人支援連線同步生成；其它類別暫不可用",
+        L"オンライン同期は敵の配置のみ対応。他のカテゴリは現在使用できません")
+HUDTEXT(placeOnlineRow,L" (offline category)",L"（此类暂不支持联机）",L"（此類暫不支援連線）",L"（この種類はオンライン未対応）")
+HUDTEXT(placeMissing,L" (not installed)",L"（未安装）",L"（未安裝）",L"（未インストール）")
+HUDTEXT(placeNotPreloaded,L" (loads when placed)",L"（放置时加载）",L"（放置時載入）",L"（配置時に読み込み）")
+HUDTEXT(placeLoading,L" (loading...)",L"（加载中…）",L"（載入中…）",L"（読み込み中…）")
+HUDTEXT(placeLoadingNote,L"%ls: loading, placed there as soon as it is loaded",L"%ls：正在加载，加载完成后自动放在点选处",
+        L"%ls：正在載入，載入完成後自動放在點選處",L"%ls：読み込み中、完了したら指定位置に配置")
+HUDTEXT(placeBroken,L" (faulted: off)",L"（出错，已停用）",L"（出錯，已停用）",L"（エラー：停止中）")
+HUDTEXT(placeArmed,L"%ls: click the map (right click: stop)",L"摆放 %ls：在地图上点击放下（右键取消）",
+        L"擺放 %ls：在地圖上點擊放下（右鍵取消）",L"%ls：マップをクリックして配置（右クリックで中止）")
+HUDTEXT(placeStopped,L"Placing stopped",L"已取消摆放",L"已取消擺放",L"配置を中止しました")
+HUDTEXT(placeDone,L"Placed: %ls",L"已放下：%ls",L"已放下：%ls",L"配置しました：%ls")
+HUDTEXT(placeFailed,L"Not placed: %ls (see DEBUGSPAWN in the log)",L"摆放失败：%ls（原因见日志 DEBUGSPAWN）",
+        L"擺放失敗：%ls（原因見日誌 DEBUGSPAWN）",L"配置失敗：%ls（理由はログの DEBUGSPAWN）")
+HUDTEXT(placeNoGround,L"No ground under the pointer",L"指针下没有地面",L"指標下沒有地面",L"ポインターの下に地面がありません")
+
+// --- PVP controls on the M map (hud.cpp MapPvpPanel; pvp.h) ---
+HUDTEXT(pvpTitleState,L"PVP: %ls  TEAM %d",L"对战：%ls  阵营 %d",L"對戰：%ls  陣營 %d",L"対戦：%ls  チーム %d")
+HUDTEXT(pvpOn,L"ON",L"开",L"開",L"有効")
+HUDTEXT(pvpOff,L"OFF",L"关",L"關",L"無効")
+HUDTEXT(pvpExpand,L"Click to expand",L"点击展开",L"點擊展開",L"クリックで開く")
+HUDTEXT(pvpFocusPad,L"R3: PVP",L"R3 对战",L"R3 對戰",L"R3 対戦")
+HUDTEXT(pvpEnable,L"Enable PVP (host)",L"开启对战（仅房主）",L"開啟對戰（僅房主）",L"対戦を有効にする（ホスト）")
+HUDTEXT(pvpDisable,L"Disable PVP (host)",L"关闭对战（仅房主）",L"關閉對戰（僅房主）",L"対戦を無効にする（ホスト）")
+HUDTEXT(pvpTeam1,L"Join team 1",L"加入阵营 1",L"加入陣營 1",L"チーム 1 に参加")
+HUDTEXT(pvpTeam2,L"Join team 2",L"加入阵营 2",L"加入陣營 2",L"チーム 2 に参加")
+HUDTEXT(pvpHostOnly,L"Only the host can change PVP mode",L"仅房主可切换对战模式",L"僅房主可切換對戰模式",L"対戦モードを変更できるのはホストのみ")
+HUDTEXT(pvpMouseHint,L"Click the title to open / fold; click a row to change your team",L"点击标题展开 / 收起；点击条目更改自己的阵营",L"點擊標題展開 / 收起；點擊項目更改自己的陣營",L"タイトルをクリックで開閉、行をクリックで自分のチームを変更")
+HUDTEXT(pvpPadHint,L"R3: PVP / Up-Down: select / A: confirm / B: back",L"R3 聚焦对战 / ↑↓ 选择 / A 确认 / B 返回",
+        L"R3 聚焦對戰 / ↑↓ 選擇 / A 確認 / B 返回",L"R3 対戦操作 / ↑↓ 選択 / A 決定 / B 戻る")
+HUDTEXT(pvpReady,L"Host sets the mode; each player chooses their own team",L"房主设置模式；每位玩家选择自己的阵营",L"房主設定模式；每位玩家選擇自己的陣營",L"ホストがモードを設定し、各プレイヤーが自分のチームを選択")
+HUDTEXT(pvpPending,L"Waiting for every peer to confirm",L"等待全员确认，请暂勿交战",L"等待全員確認，請暫勿交戰",L"全員の確認待ち。まだ交戦しないでください")
+HUDTEXT(pvpComplete,L"Team settings confirmed by every peer",L"全员已确认阵营设置",L"全員已確認陣營設定",L"全員がチーム設定を確認しました")
+HUDTEXT(pvpNotReady,L"Needs a shared online mission and PVP support on every peer",L"需进入同一联机任务，且全员版本支持对战",L"需進入同一連線任務，且全員版本支援對戰",L"同じオンラインミッションと全員の対戦対応版が必要です")
+HUDTEXT(pvpBusy,L"The previous team change is still pending",L"上一项阵营更改仍在等待确认",L"上一項陣營更改仍在等待確認",L"前のチーム変更はまだ確認待ちです")
+HUDTEXT(pvpInvalid,L"Only the host changes mode; choose team 1 or 2",L"仅房主可切换模式；阵营只能选 1 或 2",L"僅房主可切換模式；陣營只能選 1 或 2",L"モード変更はホストのみ。チームは 1 または 2 を選択")
+HUDTEXT(pvpRoster,L"PVP supports at most 8 online members",L"对战最多支持 8 名联机成员",L"對戰最多支援 8 名連線成員",L"対戦のオンライン人数は最大 8 人です")
+HUDTEXT(pvpChanged,L"Mission or team state changed; select again",L"任务或阵营信息已变化，请重新选择",L"任務或陣營資訊已變化，請重新選擇",L"ミッションかチーム情報が変化しました。再選択してください")
+HUDTEXT(pvpPrepareFailed,L"Check failed: players must be loaded; no rival teams in one vehicle",L"检查未通过：玩家须已加载，同车玩家不能敌对",L"檢查未通過：玩家須已載入，同車玩家不能敵對",L"確認失敗：全員のロード完了と同乗者のチーム一致が必要です")
+HUDTEXT(pvpApplyFailed,L"Team update failed; restoring the previous settings",L"阵营应用失败，正在恢复此前设置",L"陣營套用失敗，正在恢復先前設定",L"チーム変更に失敗。変更前の設定に戻しています")
+HUDTEXT(pvpSendFailed,L"Team message failed to send; change is unconfirmed",L"阵营消息发送失败，更改尚未确认",L"陣營訊息傳送失敗，更改尚未確認",L"チーム情報の送信に失敗。変更は未確認です")
+HUDTEXT(pvpTimedOut,L"Team confirmation timed out; change stopped",L"阵营确认超时，已停止本次更改",L"陣營確認逾時，已停止本次更改",L"チーム確認がタイムアウトし、変更を中止しました")
+HUDTEXT(pvpAborted,L"Host cancelled the change; previous settings restored",L"房主取消了更改，已恢复此前设置",L"房主取消了更改，已恢復先前設定",L"ホストが変更を中止し、変更前の設定に戻しました")
+HUDTEXT(pvpSessionLost,L"Mission or connection changed; stock teams restored",L"任务或联机状态已变化，已恢复原版阵营",L"任務或連線狀態已變化，已恢復原版陣營",L"ミッションか接続が変化し、元のチームに戻しました")
+HUDTEXT(pvpFaulted,L"Player or vehicle state changed; PVP is disabled",L"玩家或载具状态已变化，对战已关闭",L"玩家或載具狀態已變化，對戰已關閉",L"プレイヤーかビークルの状態が変化し、対戦を無効にしました")
 
 // --- The damage statistics page (hud_stats.inc, over the map) ---
 HUDTEXT(statsTitle,L"DAMAGE STATS",L"伤害统计",L"傷害統計",L"ダメージ統計")
@@ -758,6 +864,8 @@ HUDTEXT(roomNumberedLeader,L"%d. [Leader] %ls",L"%d. [队长] %ls",L"%d. [隊長
 HUDTEXT(roomFieldKind,L"< Class >",L"< 兵种 >",L"< 兵種 >",L"< 兵科 >")
 HUDTEXT(roomFieldPrimary,L"< Colour 1 >",L"< 主色 >",L"< 主色 >",L"< カラー1 >")
 HUDTEXT(roomFieldSecondary,L"< Colour 2 >",L"< 副色 >",L"< 副色 >",L"< カラー2 >")
+HUDTEXT(roomFieldPack,L"< Backpack >",L"< 背包武器 >",L"< 背包武器 >",L"< バックパック >")
+HUDTEXT(roomPackNone,L"no backpack",L"无背包",L"無背包",L"バックパックなし")
 HUDTEXT(roomFieldStore,L"< Store >",L"< 挂载 >",L"< 掛載 >",L"< 搭載 >")
 HUDTEXT(roomStockColour,L"Stock colours",L"原色",L"原色",L"標準色")
 // The crews' colours (阶段 5: SupportCrewColour[_<KEY>|_MISSION]; room_ui_logic.h UnitLabel / RowLine / NoteLine)
@@ -779,3 +887,131 @@ HUDTEXT(roomHint,L"Arrows/D-pad: select, change   Enter/A: open   Esc/B: back   
         L"方向键/十字键 选择、修改   Enter/A 确认   Esc/B 返回   Ins/X 添加   Del/Y 删除   Home/Back 恢复原版   %ls 关闭",
         L"方向鍵/十字鍵 選擇、修改   Enter/A 確認   Esc/B 返回   Ins/X 新增   Del/Y 刪除   Home/Back 恢復原版   %ls 關閉",
         L"方向キー/十字キー 選択・変更   Enter/A 決定   Esc/B 戻る   Ins/X 追加   Del/Y 削除   Home/Back 標準に戻す   %ls 閉じる")
+
+HUDTEXT(vehicleLookHold,L"Hold [%ls] + look: free look",L"按住 [%ls] + 转动视角：自由观察",L"按住 [%ls] + 轉動視角：自由觀察",L"[%ls]を押しながら視点移動：見回す")
+// Context-specific room/HQ controls are kept on separate rows by room_ui_logic.h.
+HUDTEXT(roomEntry,L"Vehicle & NPC loadouts: %ls",L"载具与 NPC 配装：%ls",L"載具與 NPC 配裝：%ls",L"車両・NPCの装備：%ls")
+HUDTEXT(roomHintNavigate,L"Arrows / D-pad: select    Enter / A: edit    Esc / B: back",L"↑↓ / 十字键：选择    Enter / A：编辑    Esc / B：返回",L"↑↓ / 十字鍵：選擇    Enter / A：編輯    Esc / B：返回",L"方向キー：選択    Enter / A：編集    Esc / B：戻る")
+HUDTEXT(roomHintFields,L"Up / Down: select field    Left / Right: change",L"↑↓ / 十字键：选择字段    ←→ / 十字键：修改",L"↑↓ / 十字鍵：選擇欄位    ←→ / 十字鍵：修改",L"上下：項目を選択    左右：変更")
+HUDTEXT(roomHintTools,L"Ins / X: add    Del / Y: remove    Home / Back: reset unit",L"Ins / X：增加    Del / Y：删除    Home / Back：还原此单位",L"Ins / X：新增    Del / Y：刪除    Home / Back：還原此單位",L"Ins / X：追加    Del / Y：削除    Home / Back：部隊を初期化")
+HUDTEXT(roomHintFinish,L"Enter / A: done    Esc / B: back    Home / Back: reset unit",L"Enter / A：完成    Esc / B：返回    Home / Back：还原此单位",L"Enter / A：完成    Esc / B：返回    Home / Back：還原此單位",L"Enter / A：完了    Esc / B：戻る    Home / Back：部隊を初期化")
+HUDTEXT(roomHintClose,L"%ls: close and discard unsaved changes",L"%ls：关闭并放弃未保存的修改",L"%ls：關閉並放棄未儲存的修改",L"%ls：閉じて未保存の変更を破棄")
+HUDTEXT(roomHintSave,L"Choose Save to apply for the next sortie",L"选择「保存」应用配置；用于下一次出击",L"選擇「儲存」套用配置；用於下一次出擊",L"「保存」で設定を次の出撃に適用")
+// The menu as the game's own dialogs (src/room_dialog_logic.h): buttons, page titles, value names.
+HUDTEXT(roomDlgBack,L"Back",L"返回",L"返回",L"戻る")
+HUDTEXT(roomDlgPrev,L"< Previous page",L"< 上一页",L"< 上一頁",L"< 前のページ")
+HUDTEXT(roomDlgNext,L"Next page >",L"下一页 >",L"下一頁 >",L"次のページ >")
+HUDTEXT(roomDlgClose,L"Close",L"关闭",L"關閉",L"閉じる")
+HUDTEXT(roomDlgCloseDiscard,L"Close (unsaved changes)",L"关闭（有未保存的修改）",L"關閉（有未儲存的修改）",L"閉じる（未保存の変更あり）")
+HUDTEXT(roomDlgDiscardTitle,L"There are unsaved changes.",L"有未保存的修改。",L"有未儲存的修改。",L"保存していない変更があります。")
+HUDTEXT(roomDlgDiscard,L"Discard the changes and close",L"放弃修改并关闭",L"放棄修改並關閉",L"変更を破棄して閉じる")
+HUDTEXT(roomDlgKeepEditing,L"Keep editing",L"继续编辑",L"繼續編輯",L"編集を続ける")
+HUDTEXT(roomDlgAddSoldier,L"Add a soldier (%d / %d)",L"添加士兵（%d / %d）",L"新增士兵（%d / %d）",L"隊員を追加（%d / %d）")
+HUDTEXT(roomDlgCopySoldier,L"Add a copy of this soldier",L"在后面复制一名",L"在後面複製一名",L"この隊員を複製して追加")
+HUDTEXT(roomDlgRemoveSoldier,L"Remove this soldier",L"删除这名士兵",L"刪除這名士兵",L"この隊員を外す")
+HUDTEXT(roomDlgResetSquad,L"Back to the unit's own soldiers",L"恢复本单位原配",L"恢復本單位原配",L"既定の編成に戻す")
+HUDTEXT(roomDlgResetVehicle,L"Back to the stock load",L"恢复原版挂载",L"恢復原版掛載",L"標準搭載に戻す")
+HUDTEXT(roomDlgResetCrew,L"Back to the default colours",L"恢复默认颜色",L"恢復預設顏色",L"既定の色に戻す")
+HUDTEXT(roomDlgCustomise,L"Stock load: customise it",L"原版挂载：自定义",L"原版掛載：自訂",L"標準搭載：カスタムする")
+HUDTEXT(roomDlgKind,L"Class: %ls",L"兵种：%ls",L"兵種：%ls",L"兵科：%ls")
+HUDTEXT(roomDlgPrimary,L"Colour 1: %ls",L"主色：%ls",L"主色：%ls",L"カラー1：%ls")
+HUDTEXT(roomDlgSecondary,L"Colour 2: %ls",L"副色：%ls",L"副色：%ls",L"カラー2：%ls")
+HUDTEXT(roomDlgPack,L"Backpack: %ls",L"背包武器：%ls",L"背包武器：%ls",L"バックパック：%ls")
+HUDTEXT(roomDlgPylon,L"Pylon %d: %ls x%d",L"挂点 %d：%ls ×%d",L"掛點 %d：%ls ×%d",L"パイロン %d：%ls ×%d")
+HUDTEXT(roomDlgAddPylon,L"Add a pylon (%d / %d)",L"添加挂点（%d / %d）",L"新增掛點（%d / %d）",L"パイロンを追加（%d / %d）")
+HUDTEXT(roomDlgRemovePylon,L"Remove this pylon",L"删除这个挂点",L"刪除這個掛點",L"このパイロンを外す")
+HUDTEXT(roomDlgStore,L"Store: %ls",L"挂载：%ls",L"掛載：%ls",L"搭載：%ls")
+HUDTEXT(roomDlgRounds,L"Rounds: %d",L"弹数：%d",L"彈數：%d",L"弾数：%d")
+HUDTEXT(roomDlgCrew,L"Crew colours",L"乘员颜色",L"乘員顏色",L"乗員の色")
+HUDTEXT(roomDlgColourN,L"Colour %d (#%06X)",L"颜色 %d（#%06X）",L"顏色 %d（#%06X）",L"カラー %d（#%06X）")
+HUDTEXT(roomDlgSoldier,L"Soldier",L"士兵",L"士兵",L"隊員")
+HUDTEXT(roomDlgPylonTitle,L"Pylon %d",L"挂点 %d",L"掛點 %d",L"パイロン %d")
+HUDTEXT(roomDlgPickKind,L"Choose the class",L"选择兵种",L"選擇兵種",L"兵科を選択")
+HUDTEXT(roomDlgPickPrimary,L"Choose colour 1",L"选择主色",L"選擇主色",L"カラー1を選択")
+HUDTEXT(roomDlgPickSecondary,L"Choose colour 2",L"选择副色",L"選擇副色",L"カラー2を選択")
+HUDTEXT(roomDlgPickPack,L"Choose the backpack weapon",L"选择背包武器",L"選擇背包武器",L"バックパックを選択")
+HUDTEXT(roomDlgPickStore,L"Choose the store",L"选择挂载",L"選擇掛載",L"搭載を選択")
+HUDTEXT(roomDlgPickRounds,L"Choose the rounds",L"选择弹数",L"選擇彈數",L"弾数を選択")
+HUDTEXT(roomDlgPickGun,L"Choose the main gun's shell",L"选择主炮弹种",L"選擇主砲彈種",L"主砲の弾種を選択")
+HUDTEXT(vehicleSensorOptical,L"EO  %d contacts  %d m",L"光电识别  %d 个目标  %d m",L"光電識別  %d 個目標  %d m",L"光学識別  %d目標  %d m")
+
+// Effective thermal image state, with the configured keyboard binding (thermal.h).
+HUDTEXT(vehicleSensorContacts,L"%ls  %d contacts  %d m",L"%ls  %d 个目标  %d m",L"%ls  %d 個目標  %d m",L"%ls  %d目標  %d m")
+HUDTEXT(thermalOptical,L"OPTICAL",L"光学",L"光學",L"光学")
+HUDTEXT(thermalWhiteHot,L"WHITE HOT",L"白热",L"白熱",L"ホワイトホット")
+HUDTEXT(thermalBlackHot,L"BLACK HOT",L"黑热",L"黑熱",L"ブラックホット")
+HUDTEXT(thermalControl,L"[%ls] image mode: %ls",L"[%ls] 切换成像：%ls",L"[%ls] 切換成像：%ls",L"[%ls] 映像切替：%ls")
+HUDTEXT(thermalUnsupportedSeat,L"Thermal is unavailable in this seat",L"此座位不支持热像",L"此座位不支援熱像",L"この座席は熱映像に対応していません")
+HUDTEXT(thermalEnterSight,L"applies in the sight view",L"进入观瞄视角后生效",L"進入觀瞄視角後生效",L"照準視点で有効になります")
+HUDTEXT(thermalFallback,L"Thermal unavailable; using optical",L"热像不可用，已回退光学",L"熱像不可用，已回退光學",L"熱映像を使用できず、光学に戻しました")
+HUDTEXT(thermalWaiting,L"Thermal preparing; currently optical",L"热像准备中，当前使用光学",L"熱像準備中，目前使用光學",L"熱映像の準備中。現在は光学です")
+
+// Enemy possession keeps native skills and their real status visible on the map.
+HUDTEXT(enemyControlTitle,L"Enemy control",L"敌方单位操控",L"敵方單位操控",L"敵ユニット操作")
+HUDTEXT(enemyControlEmpty,L"No target: click an enemy on the map",L"未选目标：在地图上左键点击敌人",L"未選目標：在地圖上左鍵點擊敵人",L"目標なし：マップ上の敵を左クリック")
+HUDTEXT(enemyControlBegin,L"Control this unit",L"操控此单位",L"操控此單位",L"このユニットを操作")
+HUDTEXT(enemyControlReturn,L"Return to your soldier",L"返回原玩家",L"返回原玩家",L"元の兵士に戻る")
+HUDTEXT(enemyControlPage,L"Skills %u-%u / %u",L"技能 %u-%u / %u",L"技能 %u-%u / %u",L"スキル %u-%u / %u")
+HUDTEXT(enemyControlMouseHint,L"Each attack has its own key [ ]; hold a row here to use it too",L"每种攻击各有一个键 [ ]，关图直接按；在此按住一行也可发动",L"每種攻擊各有一個鍵 [ ]，關圖直接按；在此按住一列也可發動",L"攻撃ごとに専用キー [ ]。ここで行を長押ししても使用")
+HUDTEXT(enemyControlPadHint,L"Each attack has its own button [ ]  L3: card  hold A on a row: use",L"每种攻击各有一个键 [ ]  L3 进卡  在行上按住 A 发动",L"每種攻擊各有一個鍵 [ ]  L3 進卡  在列上按住 A 發動",L"攻撃ごとに専用ボタン [ ]  L3:カード  行でA長押し:使用")
+HUDTEXT(enemyControlPlayHint,L"Press an attack's key to use it  M: all attacks / return",L"按对应的键直接发动攻击；M 查看全部攻击或返回",L"按對應的鍵直接發動攻擊；M 查看全部攻擊或返回",L"対応キーで攻撃  M:全攻撃/兵士へ戻る")
+HUDTEXT(enemyControlPending,L"Waiting for authoritative control result",L"等待操控权限与原生接管结果",L"等待操控權限與原生接管結果",L"操作権限とネイティブ制御の結果を待機中")
+HUDTEXT(enemyControlRestoring,L"Restoring original soldier",L"正在恢复原玩家",L"正在恢復原玩家",L"元の兵士を復元中")
+HUDTEXT(enemyControlActive,L"Controlling: %ls",L"操控中：%ls",L"操控中：%ls",L"操作中：%ls")
+HUDTEXT(enemyControlStale,L"Unit or control state changed; select again",L"单位或操控状态已变化，请重新选择",L"單位或操控狀態已變更，請重新選擇",L"ユニットまたは操作状態が変わりました。再選択してください")
+HUDTEXT(enemyControlReady,L"Ready",L"就绪",L"就緒",L"使用可能")
+HUDTEXT(enemyControlRunning,L"Active",L"进行中",L"進行中",L"動作中")
+HUDTEXT(enemyControlCooldown,L"Cooldown %.1f s",L"冷却 %.1f 秒",L"冷卻 %.1f 秒",L"再使用 %.1f 秒")
+HUDTEXT(enemyControlUnavailable,L"Unavailable in current native state",L"当前原生状态不可用",L"目前原生狀態不可用",L"現在のネイティブ状態では使用不可")
+HUDTEXT(enemyControlNativeState,L"Native state: %ls",L"原生状态：%ls",L"原生狀態：%ls",L"ネイティブ状態：%ls")
+HUDTEXT(enemyControlToggle,L"L3 / click",L"L3 / 单击",L"L3 / 按一下",L"L3 / クリック")
+HUDTEXT(enemyControlNativeReady,L"Native action rules",L"由原生动作规则判定",L"由原生動作規則判定",L"ネイティブ動作条件に従う")
+HUDTEXT(enemyControlSourceSafe,L"Your soldier is paused and protected while controlling",L"操控期间原角色暂停并受到保护",L"操控期間原角色暫停並受到保護",L"操作中は元の兵士が停止し、保護されます")
+HUDTEXT(enemyControlTeamOriginal,L"Team %d: original enemy side",L"阵营 %d：保留原敌方阵营",L"陣營 %d：保留原敵方陣營",L"陣営 %d：元の敵側を維持")
+HUDTEXT(enemyControlTeamOwner,L"Team %d: follows your PVP team",L"阵营 %d：跟随玩家对战阵营",L"陣營 %d：跟隨玩家對戰陣營",L"陣営 %d：プレイヤーの対戦陣営に従う")
+HUDTEXT(enemyControlHealth,L"Controlled HP %.0f / %.0f",L"受控单位生命值 %.0f / %.0f",L"受控單位生命值 %.0f / %.0f",L"操作ユニットのHP %.0f / %.0f")
+HUDTEXT(enemyControlHealthUnavailable,L"Controlled HP unavailable",L"受控单位生命值不可用",L"受控單位生命值無法取得",L"操作ユニットのHPを取得できません")
+HUDTEXT(enemyControlRowTip,L"Hold to use this attack",L"按住发动此攻击",L"按住發動此攻擊",L"長押しでこの攻撃を使用")
+HUDTEXT(enemyControlNoKeys,L"No attack of its own",L"该单位没有可发动的攻击",L"該單位沒有可發動的攻擊",L"使える攻撃はありません")
+HUDTEXT(enemyControlMoreOnCard,L"+%u more: hold them on the M card",L"另有 %u 种：在 M 地图卡上按住发动",L"另有 %u 種：在 M 地圖卡上按住發動",L"ほか %u 種：M カードで長押し")
+HUDTEXT(enemyControlAttacks,L"Attacks: key / pad",L"攻击：键盘 / 手柄",L"攻擊：鍵盤 / 手把",L"攻撃：キー / パッド")
+HUDTEXT(enemyControlAllOnCard,L"%u attacks: open M to see and use them",L"%u 种攻击：按 M 查看并发动",L"%u 種攻擊：按 M 查看並發動",L"攻撃 %u 種：M で確認・使用")
+HUDTEXT(enemyKeyCardOnly,L"M card",L"M 卡",L"M 卡",L"M カード")
+HUDTEXT(enemyKeyMouseLeft,L"LMB",L"左键",L"左鍵",L"左クリック")
+HUDTEXT(enemyKeyMouseRight,L"RMB",L"右键",L"右鍵",L"右クリック")
+HUDTEXT(enemyKeyMouse4,L"Mouse 4",L"侧键1",L"側鍵1",L"サイド1")
+HUDTEXT(enemyKeyMouse5,L"Mouse 5",L"侧键2",L"側鍵2",L"サイド2")
+HUDTEXT(enemyKeyDpadUp,L"D-pad up",L"十字上",L"十字上",L"十字上")
+HUDTEXT(enemyKeyDpadRight,L"D-pad right",L"十字右",L"十字右",L"十字右")
+HUDTEXT(enemyKeyDpadDown,L"D-pad down",L"十字下",L"十字下",L"十字下")
+HUDTEXT(enemyKeyDpadLeft,L"D-pad left",L"十字左",L"十字左",L"十字左")
+HUDTEXT(enemyControlFoldOpen,L"click: fold",L"单击收起",L"按一下收起",L"クリックで閉じる")
+HUDTEXT(enemyControlFoldClosed,L"click / L3: open",L"单击 / L3 展开",L"按一下 / L3 展開",L"クリック / L3 で開く")
+HUDTEXT(enemyControlCycleTip,L"Previous / next controllable enemy (nearest first)",L"上一个 / 下一个可操控的敌人（由近到远）",L"上一個 / 下一個可操控的敵人（由近到遠）",L"前 / 次の操作可能な敵（近い順）")
+HUDTEXT(enemyControlPickHint,L"Left-click an enemy on the map, or < > for the nearest",L"左键点击地图上的敌人选中，或用 < > 切换最近的敌人",L"左鍵點擊地圖上的敵人選取，或用 < > 切換最近的敵人",L"マップ上の敵を左クリック、または < > で近い敵へ")
+HUDTEXT(enemyControlPadPickHint,L"L3: enemy at centre  Left/Right: next  A: control  B: back",L"L3 选中屏幕中心的敌人  左右切换  A 操控  B 退卡",L"L3 選取畫面中心的敵人  左右切換  A 操控  B 退卡",L"L3:中央の敵  左右:切替  A:操作  B:戻る")
+HUDTEXT(enemyControlTargetMark,L"CONTROL TARGET",L"操控目标",L"操控目標",L"操作対象")
+HUDTEXT(enemyControlPicked,L"Enemy picked: see the Enemy control card",L"已选中敌方单位，右侧“敌方单位操控”卡可操控",L"已選取敵方單位，右側「敵方單位操控」卡可操控",L"敵を選択しました：右の「敵ユニット操作」カードへ")
+HUDTEXT(enemyControlNoTarget,L"No controllable enemy in this mission now",L"当前没有可操控的敌方单位",L"目前沒有可操控的敵方單位",L"現在操作できる敵はいません")
+
+HUDTEXT(enemyControlCapacity,L"Enemy control requires the paired EDF Coop update for every player",L"敌方操控需要配套新版 EDF Coop，请所有玩家更新",L"敵方操控需要配套新版 EDF Coop，請所有玩家更新",L"敵ユニットの操作には対応版 EDF Coop が必要です。全員で更新してください")
+// The Dreadnought's panel (hud.cpp DreadnoughtHud; dreadnought.cpp)
+HUDTEXT(dnTitle,L"DREADNOUGHT",L"无畏舰",L"無畏艦",L"ドレッドノート")
+HUDTEXT(dnSeatBridge,L"BRIDGE",L"舰桥",L"艦橋",L"艦橋")
+HUDTEXT(dnSeatTurret,L"TURRET %d",L"炮塔 %d",L"砲塔 %d",L"砲塔 %d")
+HUDTEXT(dnSpeed,L"SPEED %d km/h",L"航速 %d km/h",L"航速 %d km/h",L"速力 %d km/h")
+HUDTEXT(dnThrottle,L"THROTTLE %d%%",L"油门 %d%%",L"油門 %d%%",L"スロットル %d%%")
+HUDTEXT(dnAstern,L"ASTERN %d%%",L"倒车 %d%%",L"倒車 %d%%",L"後進 %d%%")
+HUDTEXT(dnAltitude,L"ALT %d m  %+.0f m/s",L"离地 %d m  %+.0f m/s",L"離地 %d m  %+.0f m/s",L"高度 %d m  %+.0f m/s")
+HUDTEXT(dnHeading,L"HDG %03d",L"航向 %03d",L"航向 %03d",L"方位 %03d")
+HUDTEXT(dnHull,L"HULL %d%%",L"舰体 %d%%",L"艦體 %d%%",L"船体 %d%%")
+HUDTEXT(dnBoost,L"BOOST",L"加速",L"加速",L"ブースト")
+HUDTEXT(dnTurrets,L"TURRETS",L"炮塔",L"砲塔",L"砲塔")
+HUDTEXT(dnHangar,L"HANGAR  %d aboard  %d out",L"机库  舱内 %d  在外 %d",L"機庫  艙內 %d  在外 %d",L"格納庫  艦内 %d  出撃中 %d")
+HUDTEXT(dnHangarLift,L"  lifts working",L"  升降机运转中",L"  升降機運轉中",L"  エレベーター作動中")
+HUDTEXT(dnHangarWait,L"  next flight %.0f s",L"  下一编队 %.0f 秒",L"  下一編隊 %.0f 秒",L"  次の編隊 %.0f 秒")
+HUDTEXT(dnLegend,L"green yours  blue other players  amber the bridge's",L"绿 你的  蓝 其他玩家  橙 舰桥指挥",L"綠 你的  藍 其他玩家  橙 艦橋指揮",L"緑 自分  青 他のプレイヤー  橙 艦橋の指揮")
+HUDTEXT(dnKeysFly,L"W/S throttle  A/D turn  Q/E strafe  Space/%ls up/down  %ls boost",L"W/S 油门  A/D 转向  Q/E 横移  空格/%ls 升降  %ls 加速",L"W/S 油門  A/D 轉向  Q/E 橫移  空白/%ls 升降  %ls 加速",L"W/S スロットル  A/D 旋回  Q/E 横移動  Space/%ls 上昇/下降  %ls ブースト")
+HUDTEXT(dnPadFly,L"LS throttle/turn  LT/%ls up/down  %ls boost  RS view",L"左摇杆 油门/转向  LT/%ls 升降  %ls 加速  右摇杆 视角",L"左搖桿 油門/轉向  LT/%ls 升降  %ls 加速  右搖桿 視角",L"Lスティック スロットル/旋回  LT/%ls 上昇/下降  %ls ブースト  Rスティック 視点")
+HUDTEXT(dnKeysBridge,L"fire: every free turret at the sight  %ls hangar  %ls seats  %ls first person",L"开火：所有空炮塔打准星  %ls 机库  %ls 换座  %ls 第一人称",L"開火：所有空砲塔打準星  %ls 機庫  %ls 換座  %ls 第一人稱",L"射撃：空いている全砲塔が照準へ  %ls 格納庫  %ls 座席  %ls 一人称")
+HUDTEXT(dnKeysGun,L"fire: this turret  %ls seats  %ls first person",L"开火：本炮塔  %ls 换座  %ls 第一人称",L"開火：本砲塔  %ls 換座  %ls 第一人稱",L"射撃：この砲塔  %ls 座席  %ls 一人称")

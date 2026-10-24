@@ -9,6 +9,10 @@
 #include "jet_internal.h"
 #include "online_authority.h"
 #include "support_aircraft.h"
+#include "pvp.h"
+#include "support_drone.h"
+#include "support_net.h"
+#include "support_soldier.h"
 #include "real_driver_native.h"
 #include <cstdio>
 #include <cwchar>
@@ -125,15 +129,19 @@ unsigned char* CreateJet(Body b,const float* m,InitParam* param,const wchar_t* s
 }
 }  // namespace
 
-bool ModFileThere(const wchar_t* file) noexcept {
+namespace {
+bool ModFileIn(const wchar_t* dir,const wchar_t* file) noexcept {
     wchar_t path[MAX_PATH];
     const DWORD n=GetModuleFileNameW(nullptr,path,MAX_PATH);
     wchar_t* slash=n && n<MAX_PATH ? wcsrchr(path,L'\\') : nullptr;
     if(!slash)return false;
     *slash=0;
-    if(wcscat_s(path,L"\\Mods\\OBJECT\\")!=0 || wcscat_s(path,file)!=0)return false;
+    if(wcscat_s(path,L"\\Mods\\")!=0 || wcscat_s(path,dir)!=0 || wcscat_s(path,L"\\")!=0 || wcscat_s(path,file)!=0)
+        return false;
     return GetFileAttributesW(path)!=INVALID_FILE_ATTRIBUTES;
 }
+}  // namespace
+bool ModFileThere(const wchar_t* file) noexcept { return ModFileIn(L"OBJECT",file); }
 
 bool Preloaded(Body b) noexcept { return preloaded[static_cast<int>(b)]; }
 unsigned NewFlight() noexcept { return nextFlight++; }
@@ -165,12 +173,13 @@ unsigned char* SpawnJet(Body b,const float* m,std::int32_t team) noexcept {
     // A copy this machine just made: never registered, so its own here (online_authority.h). A drone gets the native
     // init alone (mission_setup, its weapons): no one is seated in it, JetFrame flies it (Unmanned); a crewed body asks
     // the soldiers near it to walk aboard (SeatNpcRider).
-    if(!Unmanned(row.role))SeatNpcRider(v,true);
+    if(!Unmanned(row))SeatNpcRider(v,true);
     else if(OnlineMaySeatNpc(v))PrepareNpcVehicle(v,true);
     const bool jet=row.mark>0.0f;
     Role role=Role::fighter;
     if(jet ? IsJetVehicle(v,&role,nullptr) && role==row.role : IsHelicopter(v) && !IsJetVehicle(v,nullptr,nullptr))return v;
     Log("JET launch: %p (%ls) is no %s (mark %.0f): deleted",v,row.file,row.name,BodyMark(v));
+    PvpForgetSupportObject(ObjRef::Of(v));
     reinterpret_cast<DeleteFn>(image+kDelete)(v);
     return nullptr;
 }
@@ -180,7 +189,7 @@ Jet* Launch(Body b,const float* from,const float* heading,const float* target,DW
     if(!spawnOk || !Cfg().jetPilot || !Preloaded(b) || !At<void*>(image,kObjectMgr) || !SlotFree())return nullptr;
     // Made in the air with no one in it, only a drone flies (Unmanned): a crewed body would be an empty hull falling.
     // Crewed aircraft come through the support deployment with their real crew (support_dispatch.cpp).
-    if(!Unmanned(Row(b).role)){Log("JET launch: %ls is crewed: not launched without its crew (support calls bring it)",Row(b).file);return nullptr;}
+    if(!Unmanned(Row(b))){Log("JET launch: %ls is crewed: not launched without its crew (support calls bring it)",Row(b).file);return nullptr;}
     const ULONGLONG ms=GameMs();
     float start[3]={from[0],from[1],from[2]};
     ClearGround(start,clear);
@@ -189,8 +198,13 @@ Jet* Launch(Body b,const float* from,const float* heading,const float* target,DW
     unsigned char* const v=SpawnJet(b,m);
     if(!v)return nullptr;
     NoteLocalCopy(v,source);   // whose its damage is online: its carrier's owner, else the call's (online_authority.h)
+    const ObjRef child=ObjRef::Of(v);
+    if(!PvpInheritSupport(ObjRef::Of(source),&child,1)) {
+        PvpForgetSupportObject(child);
+        reinterpret_cast<DeleteFn>(image+kDelete)(v);return nullptr;
+    }
     Jet* const j=NewEntry(v,ms);
-    if(!j){reinterpret_cast<DeleteFn>(image+kDelete)(v);return nullptr;}
+    if(!j){PvpForgetSupportObject(child);reinterpret_cast<DeleteFn>(image+kDelete)(v);return nullptr;}
     j->launched=true;j->mode=Mode::patrol;
     std::memcpy(j->anchor,target,12);j->fuelMs=static_cast<ULONGLONG>(fuelSec)*1000;
     JoinFlight(*j,FlightFor(source,ms));
@@ -262,6 +276,8 @@ using namespace jet;
 
 namespace {
 ObjRef supportAircraft[32]{};
+struct SupportDroneRecord { ObjRef ref{},parent{};unsigned slot=0;std::uint64_t token=0; };
+SupportDroneRecord supportDrones[support_net::kMaxTransactions]{};
 // Made off the map (support_entry.h AirRoute), each one's arrival (SupportAircraftFrame): the move-area clamp held off
 // from its creation (`stockInset` its own inset, put back once inside: a helicopter; a jet keeps none, JetFrame), its far
 // rendering asked for until it is on (or off for good).
@@ -301,12 +317,13 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* m
     if(bodyPartOk)FixBodyPart506(vehicle,"SUPPORT");
     SetJetTeam(vehicle,kTeamFriend);LevelVehicle(vehicle);
     if(!PrepareNpcVehicle(vehicle,true)) {
+        PvpForgetSupportObject(ObjRef::Of(vehicle));
         reinterpret_cast<DeleteFn>(image+kDelete)(vehicle);return nullptr;
     }
     const BodyRow& row=Row(body);Role role{};
     const bool valid=row.mark>0 ? IsJetVehicle(vehicle,&role,nullptr) && role==row.role :
         IsHelicopter(vehicle) && !IsJetVehicle(vehicle,nullptr,nullptr);
-    if(!valid){reinterpret_cast<DeleteFn>(image+kDelete)(vehicle);return nullptr;}
+    if(!valid){PvpForgetSupportObject(ObjRef::Of(vehicle));reinterpret_cast<DeleteFn>(image+kDelete)(vehicle);return nullptr;}
     *slot=ObjRef::Of(vehicle);
     NoteLocalCopy(vehicle,nullptr);
     // Off the map it is made: the move-area clamp off before its first step (see Arrival), here as on every machine.
@@ -315,6 +332,133 @@ unsigned char* PrepareSupportAircraft(const SupportAircraft& spec,const float* m
     Put<float>(vehicle,kAreaInset,kNoInset);
     a.farDone=FarRenderOn(vehicle,"SUPPORT")!=Far::later;
     return vehicle;
+}
+
+namespace {
+Body DroneBody(SupportDroneKind kind) noexcept {
+    return kind==SupportDroneKind::blast ? Body::blast : kind==SupportDroneKind::doll ? Body::doll : Body::drone;
+}
+}
+bool SupportDroneReady() noexcept {return SupportDroneReady(SupportDroneKind::gun);}
+bool SupportDroneReady(SupportDroneKind kind) noexcept {
+    return static_cast<unsigned>(kind)<=static_cast<unsigned>(SupportDroneKind::doll) &&
+        image && HooksOk() && Cfg().jetPilot && spawnOk && Preloaded(DroneBody(kind)) &&
+        (kind!=SupportDroneKind::doll || DollReady()) && At<void*>(image,kObjectMgr);
+}
+bool CarrierSupportDroneReady(const ObjRef& parent,SupportDroneKind kind,unsigned slot) noexcept {
+    __try {
+        if(slot>=kCarrierDrones || !SupportDroneReady(kind) || !Alive(parent))return false;
+        const auto* v=static_cast<const unsigned char*>(parent.obj);
+        Role role{},drones{};unsigned char nativeId[32]{};
+        if(v[kDead] || !IsJetVehicle(v,&role,&drones) || KindOf(role).weapon!=Weapon::drones ||
+           !ReadNativeObjectId(v,nativeId))return false;
+        return kind==SupportDroneKind::gun || (kind==SupportDroneKind::blast && drones==Role::blast) ||
+            (kind==SupportDroneKind::doll && drones==Role::doll);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+static unsigned char* PrepareDrone(const float* exactMatrix,const float* anchor,const void* parent,SupportDroneKind kind) noexcept {
+    __try {
+        if(!exactMatrix || !anchor || !SupportDroneReady(kind) || !SlotFree())return nullptr;
+        for(unsigned i=0;i<16;++i)if(!std::isfinite(exactMatrix[i]))return nullptr;
+        for(unsigned i=0;i<3;++i)if(!std::isfinite(anchor[i]))return nullptr;
+        SupportDroneRecord* slot=nullptr;
+        for(auto& item:supportDrones)if(!item.ref){slot=&item;break;}
+        if(!slot)return nullptr;
+        // Consume the host's exact transform; terrain adjustment belongs to planning alone.
+        unsigned char* const v=SpawnJet(DroneBody(kind),exactMatrix);
+        if(!v)return nullptr;
+        v[kFireGun]=0;v[kFireMissile]=0;
+        const ObjRef child=ObjRef::Of(v);
+        NoteLocalCopy(v,parent);
+        if(!PvpInheritSupport(ObjRef::Of(parent),&child,1)) {
+            PvpForgetSupportObject(child);
+            reinterpret_cast<DeleteFn>(image+kDelete)(v);return nullptr;
+        }
+        Jet* const j=NewEntry(v,GameMs());
+        if(!j){PvpForgetSupportObject(child);reinterpret_cast<DeleteFn>(image+kDelete)(v);return nullptr;}
+        j->supportDrone=true;j->supportPending=true;j->launched=true;j->mode=Mode::patrol;
+        std::memcpy(j->anchor,anchor,12);j->fuelMs=static_cast<ULONGLONG>(Cfg().jetFuelSec)*1000;
+        const float speed=KindOf(Row(DroneBody(kind)).role).cruise;
+        for(unsigned i=0;i<3;++i)j->m.vel[i]=exactMatrix[8+i]*speed;
+        JoinFlight(*j,FlightFor(parent,GameMs()));
+        Put<float>(v,kAreaInset,kNoInset);
+        slot->ref=child;HoldRef(child);
+        return v;
+    } __except(FaultLog("SUPPORT drone prepare",GetExceptionInformation())){return nullptr;}
+}
+unsigned char* PrepareSupportDrone(const float* exactMatrix,const float* anchor,const void* parent) noexcept {
+    return PrepareDrone(exactMatrix,anchor,parent,SupportDroneKind::gun);
+}
+unsigned char* PrepareCarrierSupportDrone(const float* exactMatrix,const float* anchor,const ObjRef& parent,
+    SupportDroneKind kind,unsigned slot,std::uint64_t token,bool ordered) noexcept {
+    if(!CarrierSupportDroneReady(parent,kind,slot) || !ReserveCarrierSupportDrone(parent,slot,token))return nullptr;
+    auto* const v=PrepareDrone(exactMatrix,anchor,parent.obj,kind);
+    if(!v){CancelCarrierSupportDrone(parent,slot,token);return nullptr;}
+    __try {
+        Jet* const child=FindJet(v);Jet* const mother=FindJet(static_cast<const unsigned char*>(parent.obj));
+        if(!child || !mother || mother->ref.ctrl!=parent.ctrl) {
+            DeleteSupportDrone(ObjRef::Of(v));CancelCarrierSupportDrone(parent,slot,token);return nullptr;
+        }
+        for(auto& item:supportDrones)if(item.ref.obj==v && item.ref.ctrl==child->ref.ctrl) {
+            item.parent=parent;HoldRef(parent);item.slot=slot;item.token=token;break;
+        }
+        auto& intent=mother->carrier.transaction[slot];intent.ordered=ordered;
+        if(ordered)std::memcpy(intent.order,anchor,12);
+        child->drone.mother=parent.ctrl;child->drone.carried=true;child->drone.slot=static_cast<int>(slot);child->drone.token=token;
+        JoinFlight(*child,mother->flight);
+        const float least=KindOf(*child).minSpeed,wanted=Len(mother->m.vel)+20.0f;
+        const float speed=wanted>least ? wanted : least;
+        for(unsigned i=0;i<3;++i)child->m.vel[i]=exactMatrix[8+i]*speed;
+        return v;
+    } __except(FaultLog("SUPPORT carrier drone prepare",GetExceptionInformation())) {
+        DeleteSupportDrone(ObjRef::Of(v));CancelCarrierSupportDrone(parent,slot,token);return nullptr;
+    }
+}
+bool ActivateSupportDrone(const ObjRef& drone) noexcept {
+    __try {
+        bool owned=false;
+        for(const auto& item:supportDrones)owned=owned || (item.ref.obj==drone.obj && item.ref.ctrl==drone.ctrl && item.ref.obj);
+        if(!owned || !Alive(drone))return false;
+        Jet* const j=FindJet(static_cast<const unsigned char*>(drone.obj));
+        if(!j || !j->supportDrone || j->ref.ctrl!=drone.ctrl || j->reap)return false;
+        if(!j->supportPending)return true;
+        // Registered child ID selects the same doll resource on every peer, before any combat/publication.
+        if(KindOf(*j).doll && !DollMake(IndexOf(*j),j->Vehicle(),Cfg().jetFuelSec))return false;
+        j->supportPending=false;j->bornAt=j->modeAt=j->seen=GameMs();j->lastStep=0;
+        Publish(true);return true;
+    } __except(FaultLog("SUPPORT drone activate",GetExceptionInformation())){return false;}
+}
+bool SupportDroneLeft(const ObjRef& drone) noexcept {
+    __try {
+        for(const auto& item:supportDrones)if(item.ref.obj==drone.obj && item.ref.ctrl==drone.ctrl && item.ref.obj) {
+            if(!Alive(item.ref))return true;
+            const Jet* const j=FindJet(static_cast<const unsigned char*>(item.ref.obj));
+            return !j || j->ref.ctrl!=drone.ctrl || j->reap || j->Vehicle()[kDead];
+        }
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool DeleteSupportDrone(const ObjRef& drone) noexcept {
+    __try {
+        for(auto& item:supportDrones)if(item.ref.obj && item.ref.obj==drone.obj && item.ref.ctrl==drone.ctrl) {
+            auto& ref=item.ref;
+            if(Alive(ref)) {
+                auto* const v=static_cast<unsigned char*>(const_cast<void*>(ref.obj));
+                for(unsigned s=0;s<SeatCount(v);++s)if(AnyPlayerIn(SeatAt(v,s)))return false;
+                PvpForgetSupportObject(ref);
+                reinterpret_cast<DeleteFn>(image+kDelete)(v);
+            } else PvpForgetSupportObject(ref);
+            if(item.parent)CancelCarrierSupportDrone(item.parent,item.slot,item.token);
+            for(auto& j:jets)if(j.ref.obj==ref.obj && j.ref.ctrl==ref.ctrl){ReleaseEntry(j);break;}
+            DropRef(ref);if(item.parent)DropRef(item.parent);item={};Publish(true);return true;
+        }
+        return false;
+    } __except(FaultLog("SUPPORT drone delete",GetExceptionInformation())){return false;}
+}
+void jet::ResetSupportDrones() noexcept {
+    for(auto& item:supportDrones)if(item.ref) {
+        PvpForgetSupportObject(item.ref);DropRef(item.ref);if(item.parent)DropRef(item.parent);item={};
+    }
 }
 
 bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,const float* target,bool airborne) noexcept {
@@ -327,7 +471,7 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
     Jet* entry=FindJet(vehicle);
     if(!entry)entry=NewEntry(vehicle,GameMs());
     if(!entry)return false;
-    entry->launched=true;entry->mode=airborne ? Mode::patrol : Mode::takeoff;entry->escort=spec.follow;
+    entry->supportMetadata=false;entry->launched=true;entry->mode=airborne ? Mode::patrol : Mode::takeoff;entry->escort=spec.follow;
     if(airborne) {   // Launch's start: already flying along its nose at its kind's cruise (never a stall, never a drop)
         const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
         const float cruise=KindOf(Row(SupportBody(spec)).role).cruise;
@@ -371,6 +515,7 @@ bool DeleteSupportAircraft(const ObjRef& ref) noexcept {
         if(Alive(own)) {
             auto* vehicle=static_cast<unsigned char*>(const_cast<void*>(own.obj));
             for(unsigned seat=0;seat<SeatCount(vehicle);++seat)if(AnyPlayerIn(SeatAt(vehicle,seat)))return false;
+            PvpForgetSupportObject(own);
             reinterpret_cast<DeleteFn>(image+kDelete)(vehicle);
         }
         own={};return true;
@@ -401,7 +546,7 @@ void PreloadJets() noexcept {
     __try {
         const auto mgr=At<void*>(image,kPreloadMgr);
         if(!mgr)return;
-        char line[512];
+        char line[768];
         int at=0;
         for(int k=0;k<kBodyCount;++k) {
             // The hostile bodies only come from a mission, which preloads them itself (docs/primer-plan.md): the Primer
@@ -417,10 +562,30 @@ void PreloadJets() noexcept {
         }
         // The doll drones' dolls (as the Recruiter's weapon SGO has its doll preloaded, its `resource`).
         const bool dolls=PreloadDolls(mgr,Preloaded(Body::doll));
-        Log("JET preload %s (dolls %d)",line,dolls);
+        // The preloaded jets' weapons (guns and stores, stores.inc kJetWeapons), each once: a jet's SGO preloaded leaves
+        // them to its first build, and a strike load built at a launch stalled that frame 1.6 s (a Dreadnought's hangar,
+        // range 2026-10-21).
+        int weapons=0,missing=0;
+        constexpr std::size_t kWeaponDir=12;   // L"app:/weapon/"
+        const auto wanted=[](float mark) noexcept {
+            for(int k=0;k<kBodyCount;++k)if(preloaded[k] && kBodies[k].mark==mark)return true;
+            return false;
+        };
+        for(int i=0;JetWeapon(i);++i) {
+            const JetWeaponRow& w=*JetWeapon(i);
+            bool again=false;   // an earlier row of a preloaded jet had it
+            for(int e=0;e<i && !again;++e)again=wcscmp(JetWeapon(e)->sgo,w.sgo)==0 && wanted(JetWeapon(e)->mark);
+            if(again || !wanted(w.mark))continue;
+            if(wcslen(w.sgo)<=kWeaponDir || !ModFileIn(L"WEAPON",w.sgo+kWeaponDir)){++missing;continue;}
+            reinterpret_cast<PreloadFn>(image+kPreload)(mgr,w.sgo,2,-1);
+            ++weapons;
+        }
+        Log("JET preload %s (dolls %d) weapons %d (%d not installed)",line,dolls,weapons,missing);
         // The gunship's shells (GunshipFire), with its body; the impact charges; the EMC / Sazabi rounds and the Proteus's
         // shield whenever their files are installed (a Proteus may be called any time, ProteusRework switched on mid-mission).
-        PreloadShells(mgr,Preloaded(Body::gunship));
+        // ...and with the Dreadnought, whose turrets fire the cannon's round (jet_bay.cpp TurretRound)
+        PreloadShells(mgr,Preloaded(Body::gunship) || ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));
+        PreloadUltimate(mgr);   // the ultimate strike's magic circles (ultimate.cpp)
     } __except(FaultLog("JET preload (nothing preloaded)",GetExceptionInformation())) {
         for(auto& p:preloaded)p=false;
         ResetShells();
@@ -457,6 +622,23 @@ unsigned char* JetLaunchDrone(const float* from,const float* heading,const float
     }
     __except(FaultLog("JET drone launch",GetExceptionInformation())){return nullptr;}
 }
+
+// A Dreadnought fighter (kind 0..3: Body::dnFighter + kind, crewless) off its hangar (dreadnought_hangar.inc): its role's
+// least speed and kDnLaunchOver on top, so it flies off the deck at once.
+constexpr float kDnLaunchOver=25.0f;
+unsigned char* JetLaunchDreadnoughtFighter(int kind,const float* from,const float* heading,const float* target,DWORD fuelSec,
+                                           const void* source,bool escort) noexcept {
+    if(kind<0 || kind>=kDnFighterKinds)return nullptr;
+    __try {
+        const Body b=static_cast<Body>(static_cast<int>(Body::dnFighter)+kind);
+        Jet* const j=Launch(b,from,heading,target,fuelSec,KindOf(Row(b).role).minSpeed+kDnLaunchOver,source,0.0f);
+        if(!j)return nullptr;
+        j->escort=escort;
+        return j->Vehicle();
+    }
+    __except(FaultLog("JET dreadnought fighter launch",GetExceptionInformation())){return nullptr;}
+}
+static_assert(static_cast<int>(Body::dnInterceptor)-static_cast<int>(Body::dnFighter)+1==kDnFighterKinds,"the Dreadnought fighters' bodies");
 
 namespace {
 // Thrown drones (JetLaunchThrown): a rotor drone starts kThrownRotorClear over its bomb's spot, drifting off at

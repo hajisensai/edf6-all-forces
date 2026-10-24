@@ -1,6 +1,7 @@
 // Optional read-only EDF.dll validation. Map it WITHOUT its entry point, resolve only CRT memcpy imports, and run
 // the real stream codec and unknown-tag receiver on this process's stand-ins. Never attach to the game or write files.
 #include "../src/drill_net.cpp"
+#include "../src/seat_net.cpp"
 #include "edf/host.h"
 #include <cstdio>
 #include <initializer_list>
@@ -45,18 +46,19 @@ bool RuntimeImports(HMODULE module) {
     return true;
 }
 void Reader(const void* written,void* reader) {
-    crew::Fn<void(__fastcall*)(void*,const void*,std::size_t)>(0x12B4530)(reader,
+    crew::seat_transport::Fn<void(__fastcall*)(void*,const void*,std::size_t)>(0x12B4530)(reader,
         static_cast<const unsigned char*>(written)+0x10,crew::At<std::size_t>(written,0x5F0));
 }
 bool __fastcall Send(void* net,void* written) {
     alignas(16) unsigned char reader[0x600]{};
     Reader(written,reader);
-    crew::Receive(static_cast<unsigned char*>(net),reader);
+    crew::seat_transport::Receive(static_cast<unsigned char*>(net),reader);
     return true;
 }
 }
 int main(int argc,char** argv) {
     using namespace crew;
+    using namespace crew::seat_transport;
     if(argc<2 || GetFileAttributesA(argv[1])==INVALID_FILE_ATTRIBUTES) {
         std::puts("SKIP: pass the supported EDF.dll path for native transport checks");return 77;
     }
@@ -84,8 +86,9 @@ int main(int argc,char** argv) {
         s.sender=1;s.sequence=1;
         Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(kWriteBlock)(written.bytes,&s,sizeof(s));
         alignas(16) unsigned char reader[0x600]{};Reader(written.bytes,reader);
-        drill_net::State out;bool valid=false;
-        Check(Peek(reader,out,valid)==(tag==15) && At<std::int64_t>(reader,8)==0,"peek restores stream, reserves only tag 15");
+        std::uint32_t magic=0;Block block;
+        Check(Peek(reader,&magic,&block)==(tag==15) && (tag!=15 || (magic==drill_net::kMagic && block.size==sizeof(s))) &&
+              At<std::int64_t>(reader,8)==0,"peek restores stream, reads only tag 15 (its kind by the magic)");
         const int before=received;
         if(tag!=15) {
             Receive(vehicle+0x120,reader);
@@ -133,5 +136,25 @@ int main(int argc,char** argv) {
     Put<LONG>(control,8,0);
     Check(DrillNetController(vehicle)==-1 && At<LONG>(control,0xC)==2,"expired last driver uses host fallback without a reference call");
     Put<void*>(image,0x20B2AC0,originalWorld);
+    // A seat pick (seat_net.h Pick) through the same native codec: its own kind, beside the drill's on one class.
+    {
+        static int picks=0;static seat_net::Pick heard{};
+        Check(seat_net::Register(seat_net::kPickMagic,[](unsigned char*,const void* b,std::size_t n) noexcept {
+            if(seat_net::Decode(b,n,heard))++picks;
+        }),"the pick kind registers beside the drill's");
+        Put<void*>(seat,kSeatRider,nullptr);Put<void*>(seat,kSeatRider+8,nullptr);
+        seat_net::Pick m;m.seat=0;m.holder=2;m.flags=seat_net::kNpc;m.head.controller=seat_net::SeatController(vehicle,0);
+        const int drills=received;
+        Check(seat_net::Stamp(&m,sizeof(m)) && seat_net::Valid(m) && seat_net::Send(vehicle,&m,sizeof(m)),"a pick goes through +0x80");
+        Check(picks==1 && heard.holder==2 && heard.flags==seat_net::kNpc && heard.head.controller==-1 && received==drills,
+              "the native reader hands it to the pick kind, not the drill's");
+        Stream written;Fn<bool(__fastcall*)(void*,std::int8_t)>(kWriteSmall)(written.bytes,seat_net::kTag);
+        Fn<bool(__fastcall*)(void*,const void*,std::size_t)>(kWriteBlock)(written.bytes,&m,sizeof(m));
+        alignas(16) unsigned char reader[0x600]{};Reader(written.bytes,reader);
+        unsigned char saved[sizeof(vehicle)];std::memcpy(saved,vehicle,sizeof(vehicle));
+        Fn<ReceiveFn>(kReceive)(vehicle+0x120,reader);
+        Check(!std::memcmp(saved,vehicle,sizeof(vehicle)) && At<std::int64_t>(reader,8)==1,
+              "an older peer's stock receiver ignores the pick kind without touching the vehicle");
+    }
     std::printf("drill_net_native_test: %d checks passed\n",checks);
 }

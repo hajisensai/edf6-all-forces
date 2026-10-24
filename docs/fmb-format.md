@@ -24,11 +24,11 @@ Confidence in brackets: H = proven by code + byte-exact round trip, M = consiste
 0x08 u32 count            chunk count (255 in the HEIGEN601 ENKEI pieces, 935 in HEIGEN507_2)
 0x0C u32 0x2C             offset of the chunk offset table (u32[count], absolute)
 0x10 u32 off              trailing layer table  (== end of the last chunk)
-0x14 u32 off              trailing table 2 (small)
-0x18 u32 off              trailing table 3 (0x100 records of 16 bytes: random-looking floats, grass jitter?) (L)
+0x14 u32 off              trailing table 2: the plants grown on the piece (pylib/fmex.py; 8 bytes {0, 8} when none)
+0x18 u32 off              trailing table 3: 0x100 jitter records {angle, x, z in the cell, size factor} for the plants (H)
 0x1C u32 0x100            its count
-0x20 u32 off              trailing table 4 (0x15 small-int records) (L)
-0x24 u32 0x15             its count
+0x20 u32 off              trailing table 4: shader records (count, mode, pass, flag, 0, 0, 0); the plants' strings follow them
+0x24 u32 0x15             its record count
 0x28 u32 max decompressed leaf size (buffer size hint)
 0x2C u32 table[count]
 ...  chunks, in table order, each starting 4-byte aligned, gaps zero-padded
@@ -82,7 +82,9 @@ Mesh record (offsets relative to the record):
 +0x0C f32 cell_x, cell_z (1.0)    splat grid: cell size,
 +0x14 u32 cols, rows (126x125)    dimensions,
 +0x1C f32 origin_x, origin_z      origin (e.g. 1624, 1500),
-+0x24 u32 0x202, u32 4            format / layer count (M)
++0x24 u32 0x202                    (layers << 8) | slots of the layer list
++0x28 u32 4                        the mesh's shader: index of its (layers, mode, pass 0, flag 0) record in table 4 (H: all
+                                   9753 meshes of the 46 stock files)
 +0x2C u32 nweight  (= cols*rows),  +0x34 i32 rel -> splat records, stride 0x50 (structured buffer)
 +0x30 u32 nlayermap (1),           +0x38 i32 rel -> 16-byte records: global layer index per slot, 0xFF = unused
 ```

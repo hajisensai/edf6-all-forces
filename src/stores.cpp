@@ -14,6 +14,7 @@
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
+#include <iterator>
 
 namespace crew {
 namespace {
@@ -79,6 +80,14 @@ const StoreSpec* StoreOf(const unsigned char* w) noexcept {
 }
 
 bool IsStoreWeapon(const unsigned char* w) noexcept { return StoreOf(w)!=nullptr; }
+
+unsigned TwinPairOf(const unsigned char* w) noexcept {
+    std::size_t length=0;
+    const wchar_t* name=WeaponFile(w,&length);
+    if(!name)return 0;
+    for(const auto& t:kTwinBarrels)if(std::wcslen(t.file)==length && _wcsnicmp(name,t.file,length)==0)return t.pair;
+    return 0;
+}
 
 namespace {
 void __fastcall MarkDrawHook(unsigned char* slot,void* ctx,void* camera) {
@@ -264,6 +273,10 @@ void TriggerStore(const Store& s) noexcept {
 const JetMass* JetMassOf(float mark) noexcept {
     for(const auto& m:kJetMasses)if(m.mark==mark)return &m;
     return nullptr;
+}
+
+const JetWeaponRow* JetWeapon(int i) noexcept {
+    return i>=0 && i<static_cast<int>(std::size(kJetWeapons)) ? &kJetWeapons[i] : nullptr;
 }
 
 Burden BurdenOf(float mark,const Store* stores,int count) noexcept {

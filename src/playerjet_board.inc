@@ -91,6 +91,9 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
         return;
     }
     if(j.phase!=Phase::air){j.keep=true;Log("PJET v=%p left on the ground: it waits there for the player",v);return;}
+    // put out at its own bay's mouth by its ship's hangar, onto the bridge (Leave asked the same: no ejection); the hangar
+    // takes it in
+    if(!eject && DreadnoughtTakesBack(v)){HandBack(j,v,"its pilot put aboard their dreadnought at its bay");return;}
     if(eject && j.board->frame==pjet::Airframe::wing && Cfg().playerJetCatch && CrewedPilot(v)) {
         // The jet itself comes back for them (Catch: it steers in under the parachute, presses the board button).
         const float* pos=reinterpret_cast<const float*>(v+kPosition);

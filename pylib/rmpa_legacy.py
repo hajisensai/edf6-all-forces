@@ -535,21 +535,84 @@ def _empty6(name: str = '', namelen: int = 0) -> Node:
     return {'i0': -1, 'namelen': namelen, 'name': name, 'items': []}
 
 
-def _routes6(secs: list[Node], dropped: list[tuple[str, int, int]]) -> list[Node]:
+Cables = tuple[list[tuple[float, float, float, int]], list[tuple[int, int]]]   # map_legacy.cable_graph
+
+
+def _pos_key(xyz: tuple[float, float, float]) -> tuple[int, int, int]:
+    """A position to the centimetre (the wire points and the waypoints they copy agree to float rounding)."""
+    return tuple(int(round(v * 100.0)) for v in xyz)
+
+
+def _wp_xyz(wp: Node) -> tuple[float, float, float]:
+    return tuple(struct.unpack('>f', c)[0] for c in wp['pos'][:3])
+
+
+def _link_targets(sec: Node, cables: Cables | None) -> dict[tuple[int, int, int], list[int]]:
+    """Position -> section-wide indices of the waypoints there (for cross-route wire links)."""
+    out: dict[tuple[int, int, int], list[int]] = {}
+    if cables is None:
+        return out
+    base = 0
+    for st in sec['sets']:
+        for k, wp in enumerate(st['items']):
+            out.setdefault(_pos_key(_wp_xyz(wp)), []).append(base + k)
+        base += len(st['items'])
+    return out
+
+
+def _routes6(secs: list[Node], dropped: list[tuple[str, int, int]], cables: Cables | None = None,
+             remapped: list[tuple[str, int, int, int]] | None = None) -> list[Node]:
     """EDF5 numbers waypoints and links per route; EDF6 numbers them across the section (route k's waypoints
-    follow route k-1's). A link >= the route's own waypoint count (only map.rmpa's cable_elec_wire_* /
-    grass_* routes have them) names a waypoint of another route by a numbering the file does not record, so
-    it is dropped and listed in `dropped` (route name, waypoint index, link)."""
+    follow route k-1's). The wire routes of a map.rmpa (cable_elec_wire_* / cable_SoudenTettou_*) also link to other
+    routes' waypoints, and such a link holds the index of the target in the map's wire point list (the mapb's 0x7C
+    block, `cables` = map_legacy.cable_graph), not a route index: every link >= the route's waypoint count of the
+    three 4.1 maps that have them (41 of 41, 22 of 22, 43 of 44) is a wire point whose position is a waypoint the
+    block pairs with the linking one, and so are links below the count that do not join two points the block pairs
+    while the wire point of that number does (HILLYCITY 115, SINSUIKOUEN 97, EDF5's NW_DANTI01 28: the reverse
+    direction of the cross links, which the old reading turned into links to unrelated waypoints of the same route;
+    EDF6's re-export of NW_DANTI01 has 56 cross-route wire links, 28 + 28, and so does this conversion of EDF5's
+    file). With `cables` such a link is resolved by the wire point's position to the
+    waypoint there (`remapped`: route, waypoint, link, section index); a link that is neither a route index nor a
+    paired wire point is dropped and listed in `dropped` (route name, waypoint index, link). Without `cables`
+    (mission RMPAs have no wires) every link >= the count is dropped as before."""
     if not secs:
         return [{'i0': -1, 'namelen': 0, 'name': '', 'routes': [], 'wps': []}]
+    pts, pairs = cables if cables is not None else ([], [])
+    at_pt: dict[tuple[int, int, int], list[int]] = {}
+    for i, p in enumerate(pts):
+        at_pt.setdefault(_pos_key(p[:3]), []).append(i)
+    edges = {frozenset(p) for p in pairs}
+
+    def paired(a: tuple[float, float, float], pt: int) -> bool:
+        return any(frozenset((s, pt)) in edges for s in at_pt.get(_pos_key(a), []))
+
+    def joined(a: tuple[float, float, float], b: tuple[float, float, float]) -> bool:
+        return any(paired(a, t) for t in at_pt.get(_pos_key(b), []))
+
     out = []
     for sec in secs:
         routes, wps = [], []
+        at_wp = _link_targets(sec, cables)
         for st in sec['sets']:
             base, n = len(wps), len(st['items'])
             for wp in st['items']:
-                dropped += [(st['name'], wp['index'], x) for x in wp['links'] if not 0 <= x < n]
-                links = [base + x for x in wp['links'] if 0 <= x < n]
+                me = _wp_xyz(wp) if cables is not None else (0.0, 0.0, 0.0)
+                links = []
+                for x in wp['links']:
+                    local = 0 <= x < n
+                    wire = cables is not None and 0 <= x < len(pts) and paired(me, x)
+                    if local and (not wire or joined(me, _wp_xyz(st['items'][x]))):
+                        links.append(base + x)      # a route index (both readings join: the route's own wins)
+                        continue
+                    target = at_wp.get(_pos_key(pts[x][:3]), []) if wire else []
+                    if len(target) == 1:
+                        links.append(target[0])
+                        if remapped is not None:
+                            remapped.append((st['name'], wp['index'], x, target[0]))
+                    elif local:
+                        links.append(base + x)
+                    else:
+                        dropped.append((st['name'], wp['index'], x))
                 wps.append({'index': base + wp['index'], 'links': links, 'id': wp['id'],
                             'namelen': wp['namelen'], 'name': wp['name'], 'pos': wp['pos'],
                             'props': {'items': _sgo_props(wp['sgo'])}})
@@ -607,16 +670,19 @@ def _cameras6(secs: list[Node]) -> list[Node]:
     return out
 
 
-def tree_from_legacy(t5: Node) -> Node:
-    """decode5's tree as an EDF6 tree (encode6's input)."""
+def tree_from_legacy(t5: Node, cables: Cables | None = None) -> Node:
+    """decode5's tree as an EDF6 tree (encode6's input). `cables`: the map's wires (map_legacy.cable_graph of its
+    mapb) for a MAC's map.rmpa, so the wire routes' cross-route links are kept (_routes6)."""
     dropped: list[tuple[str, int, int]] = []
+    remapped: list[tuple[str, int, int, int]] = []
     return {
         'version': t5['version'],
-        'routes': {'list': _routes6(t5['routes']['list'], dropped)},
+        'routes': {'list': _routes6(t5['routes']['list'], dropped, cables, remapped)},
         'shapes': {'list': _shapes6(t5['shapes']['list'])},
         'cameras': {'list': _cameras6(t5['cameras']['list'])},
         'points': {'list': _points6(t5['points']['list'])},
         'dropped_links': dropped,
+        'remapped_links': remapped,
     }
 
 
@@ -638,13 +704,14 @@ def is_legacy(data: bytes) -> bool:
     return not r.unread_nonzero()
 
 
-def rmpa_from_legacy(old: bytes) -> bytes:
+def rmpa_from_legacy(old: bytes, cables: Cables | None = None) -> bytes:
     """An EDF5 / EDF4.1 RMPA (MISSION.RMPA or a MAC's map.rmpa) in EDF6's format. An RMPA that already is
-    EDF6's is returned unchanged (no file of either game decodes cleanly as both: rmpa_legacy_real)."""
+    EDF6's is returned unchanged (no file of either game decodes cleanly as both: rmpa_legacy_real). For a map.rmpa
+    pass the map's wires (map_legacy.cable_graph of the same MAC's mapb): see _routes6."""
     if not is_legacy(old) and is_edf6(old):
         return old
     t5, r = decode5(old)
     rest = r.unread_nonzero()
     if rest:
         raise ValueError(f'EDF5 RMPA has bytes the decoder does not know: {rest[:4]}')
-    return encode6(tree_from_legacy(t5))
+    return encode6(tree_from_legacy(t5, cables))

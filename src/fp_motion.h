@@ -33,6 +33,7 @@ struct Cue {
     bool reloading;
     bool switched;              // the weapon in hand changed this frame
     Move move;
+    float sway=0.20f;           // turn-only motion strength; zero disables sway, other motion is retained
 };
 
 // The viewmodel's offset and turn now.
@@ -48,6 +49,7 @@ inline void Step(Spring& s,float want,float k,float d) noexcept {
 
 struct State {
     Spring x,y,z,pitch,yaw,roll;
+    Spring recoilZ,recoilPitch; // separate shot response: immediate kick, then return, independent of idle/sprint smoothing
     float phase;                // the bob's phase, rad
     int switchFrames;           // frames left of the lower-and-raise
 };
@@ -56,7 +58,8 @@ constexpr float kSwayGain=0.6f,kSwayMost=0.08f;     // rad of turn per rad looke
 constexpr float kBobStride=1.4f;                     // m a full figure eight
 constexpr float kBobSide=0.012f,kBobUp=0.008f,kBobRun=0.15f;   // m at walking pace; the pace the bob is full at, m/frame
 constexpr float kLandGain=0.25f,kLandMost=0.06f;    // m of dip per m/frame of fall, at most
-constexpr float kRecoilBack=0.035f,kRecoilUp=0.05f; // m back and rad up a shot at full recoil
+constexpr float kRecoilBack=0.07f,kRecoilUp=0.10f; // m back and rad up a shot at full recoil
+constexpr float kRecoilMostBack=0.12f,kRecoilMostUp=0.18f,kRecoilReturn=0.18f,kRecoilDamping=0.75f;
 constexpr int kSwitchFrames=24;                      // the lower-and-raise, frames (half down, half up)
 constexpr float kK=0.18f,kD=0.45f;                   // the springs (about a fifth of a second to settle)
 
@@ -65,9 +68,11 @@ inline float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : v>hi
 inline Pose Advance(State& s,const Cue& c) noexcept {
     // Wanted rest of each channel this frame.
     float wx=0.0f,wy=0.0f,wz=0.0f,wp=0.0f,wyaw=0.0f,wr=0.0f;
-    // Sway: a kick against the look, the spring brings it back.
-    s.yaw.vel+=Clamp(-c.lookYaw*kSwayGain,-kSwayMost,kSwayMost);
-    s.pitch.vel+=Clamp(-c.lookPitch*kSwayGain,-kSwayMost,kSwayMost);
+    // Sway is a bounded target, not accumulated velocity: rapid repeated turns
+    // must never wind the weapon up into a large swing. Recoil has its own channels.
+    const float sway=Clamp(c.sway,0,1);
+    wyaw+=Clamp(-c.lookYaw*kSwayGain,-kSwayMost,kSwayMost)*sway;
+    wp+=Clamp(-c.lookPitch*kSwayGain,-kSwayMost,kSwayMost)*sway;
     // Bob: along the distance walked.
     const float pace=c.grounded ? Clamp(c.speed/kBobRun,0.0f,1.0f) : 0.0f;
     s.phase=std::fmod(s.phase+c.speed/kBobStride*6.2831853f,6.2831853f);
@@ -75,11 +80,14 @@ inline Pose Advance(State& s,const Cue& c) noexcept {
     wy+=-std::fabs(std::cos(s.phase))*kBobUp*pace;
     // Land: a push down at once.
     if(c.fallSpeed>0.0f)s.y.vel-=Clamp(c.fallSpeed*kLandGain,0.0f,kLandMost);
-    // Recoil: each shot a push back and up.
+    // A shot must be visible in its first rendered frame, not absorbed as a small velocity into the shared movement
+    // spring. Recover the prior kick first, then add the new kick. Limits keep automatic fire bounded.
+    if(c.switched){s.recoilZ=Spring{};s.recoilPitch=Spring{};}
+    Step(s.recoilZ,0,kRecoilReturn,kRecoilDamping);Step(s.recoilPitch,0,kRecoilReturn,kRecoilDamping);
     if(c.shots>0) {
         const float r=Clamp(c.recoil,0.0f,1.0f)*static_cast<float>(c.shots<3 ? c.shots : 3);
-        s.z.vel-=kRecoilBack*r;
-        s.pitch.vel+=kRecoilUp*r;
+        s.recoilZ.at=Clamp(s.recoilZ.at-kRecoilBack*r,-kRecoilMostBack,0);
+        s.recoilPitch.at=Clamp(s.recoilPitch.at+kRecoilUp*r,0,kRecoilMostUp);
     }
     // Reload: on its side, a little up and toward the middle, while it lasts.
     if(c.reloading){wx-=0.03f;wy+=0.02f;wp+=0.10f;wr+=0.45f;}
@@ -95,7 +103,7 @@ inline Pose Advance(State& s,const Cue& c) noexcept {
     if(c.move==Move::roll){wy-=0.15f;wp-=0.5f;}
     Step(s.x,wx,kK,kD);Step(s.y,wy,kK,kD);Step(s.z,wz,kK,kD);
     Step(s.pitch,wp,kK,kD);Step(s.yaw,wyaw,kK,kD);Step(s.roll,wr,kK,kD);
-    return Pose{s.x.at,s.y.at,s.z.at,s.pitch.at,s.yaw.at,s.roll.at};
+    return Pose{s.x.at,s.y.at,s.z.at+s.recoilZ.at,s.pitch.at+s.recoilPitch.at,s.yaw.at,s.roll.at};
 }
 }  // namespace fpmotion
 }  // namespace crew

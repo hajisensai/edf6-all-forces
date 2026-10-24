@@ -6,6 +6,7 @@
 #include "vehicleram.h"
 #include "gunmuzzle.h"
 #include "ifc_model.h"
+#include "scene_object.h"
 #include <malloc.h>
 #include <cstdio>
 #include <cwchar>
@@ -162,9 +163,17 @@ const EmcFile kEmcFiles[]={
     {L"app:/object/edf6vc_sz_charge.sgo",L"EDF6VC_SZ_CHARGE.SGO","Sazabi charge"},
     {L"app:/object/edf6vc_sz_funnel.sgo",L"EDF6VC_SZ_FUNNEL.SGO","Sazabi funnel beam"},
     {L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO","Proteus shield",true},   // tools/make_proteus.py
+    // the ultimate strike's (ultimate.cpp; pylib/vcobjects.py ULT_FILES, tools/make_ultimate.py)
+    {L"app:/object/edf6vc_ult_sight.sgo",L"EDF6VC_ULT_SIGHT.SGO","ultimate aim beam"},
+    {L"app:/object/edf6vc_ult_bolt.sgo",L"EDF6VC_ULT_BOLT.SGO","ultimate bolt"},
+    {L"app:/object/edf6vc_ult_spark.sgo",L"EDF6VC_ULT_SPARK.SGO","ultimate spark"},
+    {L"app:/object/edf6vc_ult_beam.sgo",L"EDF6VC_ULT_BEAM.SGO","ultimate beam"},
+    {L"app:/object/edf6vc_ult_core.sgo",L"EDF6VC_ULT_CORE.SGO","ultimate core"},
+    {L"app:/object/edf6vc_ult_blast.sgo",L"EDF6VC_ULT_BLAST.SGO","ultimate blast"},
+    {L"app:/object/edf6vc_ult_gather.sgo",L"EDF6VC_ULT_GATHER.SGO","ultimate gather pulse"},
 };
 constexpr int kEmcCount=static_cast<int>(sizeof(kEmcFiles)/sizeof(kEmcFiles[0]));
-static_assert(kEmcCount==static_cast<int>(EmcRound::proteusShield)+1,"kEmcFiles is indexed by EmcRound");
+static_assert(kEmcCount==static_cast<int>(EmcRound::ultGather)+1,"kEmcFiles is indexed by EmcRound");
 bool emcReady[kEmcCount]{};               // preloaded this mission (PreloadShells)
 // The IFC's own copy of the round's AmmoSize (#7) and AmmoExplosion (#9), as its config 0x2B5F40 writes them (r14 = the
 // IFC: 0x2B6A15 movss [r14+0x100],xmm0; 0x2B68C5 movss [r14+0xF0],xmm0; docs/carrier-laser-re.md §3): a round takes its
@@ -234,8 +243,7 @@ Body BodyOfBomber(JetBody b) noexcept {
 }
 
 unsigned char* ShellCreate(const wchar_t* sgo,const float* m,bool& ok) noexcept {
-    InitParam param{image+kInitParamVtable,{}};
-    __try { return reinterpret_cast<CreateObjectFn>(image+kCreateObject)(At<void*>(image,kObjectMgr),m,sgo,&param); }
+    __try { return scene::CreateSceneObject(m,sgo); }
     __except(FaultLog("JET shell create (off for this mission)",GetExceptionInformation())) {
         ok=false;
         return nullptr;
@@ -553,6 +561,15 @@ bool PlayerSideGun(unsigned char* v,SideGun g,const float* at,ULONGLONG ms) noex
     return j && GunShot(*j,g,v,reinterpret_cast<const float*>(v+kPosition),at,ms,"the player",online::Shooter::localPlayer);
 }
 
+// A Dreadnought turret's round (dreadnought_turrets.inc: its gunner keeps its gap and its aim): the cannon's, from its muzzle
+// `from` at `at`, kTurretDamage times the cannon's damage at the ship's tier, the local player's.
+constexpr float kTurretDamage=1.5f;
+bool TurretRound(unsigned char* owner,const float* from,const float* at,bool real) noexcept {
+    SideGunSpec& gun=GunOf(SideGun::cannon);
+    return gun.ready && Shell(gun.sgo,gun.ready,owner,from,at,real ? gun.damage*kTurretDamage*Tier(owner) : 0.0f,true,
+                              real ? "dreadnought turret" : "dreadnought turret (remote)",online::Shooter::localPlayer);
+}
+
 // The NPC at the gun under a player pilot (playerjet_crew.inc CrewGunner): GunshipFire's target, picked round the
 // gunship itself within the longer gun's reach (PickTarget; the entry's target is its own again when it is handed back:
 // ResumeNpc); the side guns at it (led: the cannon, the gatling within its shorter reach) and a shell when it is within
@@ -656,6 +673,10 @@ void ResetShells() noexcept {
     for(auto& e:emcReady)e=false;
 }
 }  // namespace jet
+
+bool DreadnoughtRound(unsigned char* owner,const float* from,const float* at,bool real) noexcept {
+    return jet::TurretRound(owner,from,at,real);
+}
 
 using namespace jet;
 

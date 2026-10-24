@@ -19,11 +19,23 @@
 #include "gunnerrecoil.h"
 #include "heli.h"
 #include "memory.h"
+#include <atomic>
 #include <cmath>
+#include <cstring>
 
 namespace crew {
 namespace {
 constexpr unsigned kOnline=0x7748F0,kIsHost=0x784210,kSeatLocal=0x630DF0,kOperator=0x630F90;
+constexpr unsigned kGameStatus=0x20B2890;
+constexpr std::size_t kModeTable=0x20,kModeCount=0x30,kCurrentMode=0x38,kModeRaw=0x10,kRawRelative=8,kRawOnline=0x68;
+// Complete side-effect-free native session predicate, including its RIP-relative singleton load.
+// GameDataMgr is published after construction and absent before startup / after teardown. The native
+// function assumes it exists; plugin initialization and picker-thread queries do not have that contract.
+constexpr unsigned char kOnlineCode[]={
+    0x48,0x8B,0x05,0x99,0xDF,0x93,0x01,0x8B,0x48,0x38,0x83,0xF9,0xFF,0x75,0x03,0x32,
+    0xC0,0xC3,0x48,0x8B,0x40,0x20,0x48,0x8B,0x0C,0xC8,0x48,0x8B,0x51,0x10,0x48,0x63,
+    0x42,0x08,0x83,0x7C,0x10,0x68,0x00,0x0F,0x95,0xC0,0xC3
+};
 constexpr std::size_t kNetFlagsWord=0x128;
 constexpr std::size_t kRxPos=0x1D60,kRxBlend=0x1D70,kRxSettled=0x1D74,kRxFrames=0x1D78,kTxThrottle=0x1D80,kTxFast=0x1D90;
 constexpr ULONGLONG kLogMs=1000;
@@ -38,7 +50,6 @@ const Sig kSigs[]={
     {kSeatLocal,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x48,0x89,0x7C,0x24,0x18,0x41}},
     {kOperator,{0x48,0x89,0x5C,0x24,0x20,0x44,0x88,0x44,0x24,0x18,0x88,0x54,0x24,0x10,0x55,0x56}},
 };
-using OnlineFn=bool(__fastcall*)(const void*);
 using IsHostFn=bool(__fastcall*)(const void*);
 using SeatLocalFn=bool(__fastcall*)(void*,int,int,int,bool);
 using OperatorFn=int(__fastcall*)(void*,bool,bool);
@@ -53,6 +64,40 @@ bool SigsMatch() noexcept {
         for(const auto& s:kSigs)if(!edf::Matches(image,s.rva,s.bytes,sizeof(s.bytes)))return false;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+int SessionReadFault(DWORD code) noexcept {
+    // Explicit lifecycle/readability checks below are the normal path. Only a concurrent free
+    // between a successful check and its read reaches this boundary; unrelated faults propagate.
+    return code==EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER : EXCEPTION_CONTINUE_SEARCH;
+}
+bool SessionCodeKnown(const unsigned char* base) noexcept {
+    if(!base)return false;
+    // Cache the immutable code identity, never the singleton's presence or a session result.
+    static std::atomic<const unsigned char*> ready{nullptr},reported{nullptr};
+    if(ready.load(std::memory_order_acquire)==base)return true;
+    bool valid=false;
+    __try {
+        if(edf::Matches(base,kOnline,kOnlineCode,sizeof(kOnlineCode))) {
+            const auto displacement=At<std::int32_t>(base+kOnline,3);
+            valid=static_cast<std::int64_t>(kOnline)+7+displacement==kGameStatus;
+        }
+    } __except(SessionReadFault(GetExceptionCode())) {valid=false;}
+    if(valid)ready.store(base,std::memory_order_release);
+    else if(reported.exchange(base,std::memory_order_relaxed)!=base)
+        Log("NET session check off: EDF+%#x does not match the checked session lifecycle profile",kOnline);
+    return valid;
+}
+const unsigned char* SessionAddress(const void* pointer,std::int64_t offset) noexcept {
+    const auto at=reinterpret_cast<std::uintptr_t>(pointer);
+    if(!at)return nullptr;
+    if(offset>=0) {
+        const auto forward=static_cast<std::uint64_t>(offset);
+        if(forward>UINTPTR_MAX-at)return nullptr;
+        return reinterpret_cast<const unsigned char*>(at+forward);
+    }
+    const auto back=static_cast<std::uint64_t>(-(offset+1))+1;
+    return back<=at ? reinterpret_cast<const unsigned char*>(at-back) : nullptr;
 }
 
 bool Due(const void* v,ULONGLONG now) noexcept {
@@ -87,29 +132,57 @@ void Report(unsigned char* v,bool host) noexcept {
 // the plugin then does what it does offline, as it did before the online gates (AutoCrew, its damage, its pilots); an
 // unknown session state never switches them off for a player who is not online at all.
 bool InSession() noexcept {
-    // Both the picker and game thread call this: C++ initializes the signature once, with synchronization.
-    static const bool sig=[]() noexcept {
-        bool ok=false;
-        __try { ok=edf::Matches(image,kOnline,kSigs[0].bytes,sizeof(kSigs[0].bytes)); } __except(EXCEPTION_EXECUTE_HANDLER) { ok=false; }
-        if(!ok)Log("NET session check off: EDF+%#x does not match docs/online-re.md, the plugin acts as offline",kOnline);
-        return ok;
-    }();
-    return sig && reinterpret_cast<OnlineFn>(image+kOnline)(nullptr);
+    const auto* base=image;
+    if(!SessionCodeKnown(base))return false;
+    __try {
+        if(!Readable(base+kGameStatus,sizeof(void*)))return false;
+        const auto* manager=At<const unsigned char*>(base,kGameStatus);
+        if(!manager || !Readable(manager,kCurrentMode+sizeof(std::int32_t)))return false;
+        const auto current=At<std::int32_t>(manager,kCurrentMode);
+        const auto count=At<std::uint64_t>(manager,kModeCount);
+        if(current<0 || static_cast<std::uint64_t>(current)>=count || count>UINTPTR_MAX/sizeof(void*))return false;
+        const auto* table=At<const unsigned char*>(manager,kModeTable);
+        const auto* entry=SessionAddress(table,static_cast<std::int64_t>(current)*static_cast<std::int64_t>(sizeof(void*)));
+        if(!entry || !Readable(entry,sizeof(void*)))return false;
+        const auto* mode=At<const unsigned char*>(entry,0);
+        if(!mode || !Readable(mode,kModeRaw+sizeof(void*)))return false;
+        const auto* raw=At<const unsigned char*>(mode,kModeRaw);
+        if(!raw || !Readable(raw,kRawRelative+sizeof(std::int32_t)))return false;
+        const auto relative=At<std::int32_t>(raw,kRawRelative);
+        const auto* flag=SessionAddress(raw,static_cast<std::int64_t>(relative)+static_cast<std::int64_t>(kRawOnline));
+        if(!flag || !Readable(flag,sizeof(std::int32_t)))return false;
+        const auto online=At<std::int32_t>(flag,0)!=0;
+        // A replaced or dismantled graph is unknown. Recheck the same borrowed identities without
+        // invoking the native function, which would load the singleton a second time unchecked.
+        if(image!=base || At<const void*>(base,kGameStatus)!=manager ||
+           At<std::int32_t>(manager,kCurrentMode)!=current || At<std::uint64_t>(manager,kModeCount)!=count ||
+           At<const void*>(manager,kModeTable)!=table || At<const void*>(entry,0)!=mode ||
+           At<const void*>(mode,kModeRaw)!=raw || At<std::int32_t>(raw,kRawRelative)!=relative)return false;
+        return online;
+    } __except(SessionReadFault(GetExceptionCode())) {return false;}
 }
 
 void NetProbe(unsigned char* v) noexcept {
     if(!Cfg().debug || !IsHelicopter(v))return;
+    const bool online=InSession();
+    if(!online) {
+        if(lastOnline!=0){lastOnline=0;Log("NET session off");}
+        return; // no room manager exists to ask whether this machine owns it
+    }
     if(!checked) {
         checked=SigsMatch() ? 1 : -1;
         if(checked<0)Log("NET probe off: the session functions do not match docs/online-re.md");
     }
     if(checked<0)return;
-    const bool online=reinterpret_cast<OnlineFn>(image+kOnline)(nullptr);
-    const bool host=reinterpret_cast<IsHostFn>(image+kIsHost)(nullptr);
-    if(static_cast<int>(online)!=lastOnline) {
-        lastOnline=online;
-        Log("NET session %s, this machine %s the host",online ? "on" : "off",host ? "is" : "is not");
-    }
-    if(online && Due(v,GetTickCount64()) && Readable(v+kTxFast,1))Report(v,host);
+    const bool due=Due(v,GetTickCount64());
+    if(lastOnline==1 && !due)return;
+    __try {
+        // A room may close after the public query. This narrow read-only diagnostic boundary covers
+        // that release window; startup/offline never enters the room's host / operator functions.
+        const bool host=reinterpret_cast<IsHostFn>(image+kIsHost)(nullptr);
+        if(!InSession())return;
+        if(lastOnline!=1){lastOnline=1;Log("NET session on, this machine %s the host",host ? "is" : "is not");}
+        if(due && Readable(v+kTxFast,1))Report(v,host);
+    } __except(SessionReadFault(GetExceptionCode())) {}
 }
 }  // namespace crew

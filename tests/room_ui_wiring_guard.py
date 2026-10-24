@@ -66,8 +66,17 @@ follow = body(src, 'void Follow(unsigned char* self,bool room) noexcept')
 check(follow.find('followedGone.exchange(false)') < follow.find('if(self==st.self)return;'),
       'a followed screen whose destructor ran is forgotten before the pointer is compared')
 check('followed.store(self);' in follow, 'the followed screen published for the destructor hooks')
-check('void NoteGone(unsigned char* self) noexcept' in src and 'followed.load()==self)followedGone.store(true)' in src,
-      'the destructor hook marks the followed screen gone, nothing else')
+gone = body(src, 'void NoteGone(unsigned char* self) noexcept')
+check('followed.load()!=self)return;' in gone and 'followedGone.store(true);' in gone,
+      'the destructor hook marks the followed screen gone')
+# 2026-10-20 (#218 review): the dialog hangs on the global UI, so the destructor closes it at once, but only on the UI
+# thread (the menu's state is that thread's) and nothing else of the menu (preview, room sync: the next frame's Forget)
+check(gone.find('GetCurrentThreadId()!=uiThread.load())return;') < gone.find('nativedialog::CloseDialog(st.dialog);') and
+      'nativedialog::CloseDialog(st.dialog);' in gone, 'on the UI thread the destructor closes the dialog over the screen')
+check('HidePreview' not in gone and 'Forget(' not in gone and 'LeaveRoomSync' not in gone,
+      'the destructor touches nothing else of the menu')
+check('uiThread.store(GetCurrentThreadId());' in body(src, 'std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept'),
+      'the UI thread is the screens\' frames\' thread')
 chain = body(src, 'bool Chain(Screen& s,void* hook,void* goneHook) noexcept')
 check(chain.find('ChainGone(s,goneHook)') < chain.find('PatchVtableSlot'), 'the destructor chained before the OnUpdate')
 check('&RoomGoneHook' in install and '&HqGoneHook' in install, 'both destructors chained')

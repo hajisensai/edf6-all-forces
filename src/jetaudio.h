@@ -68,6 +68,12 @@ int OpenLoop(int clip) noexcept;          // a looping voice of `clip`, silent u
 void SetLoop(int loop,const Heard& h) noexcept;
 void CloseLoop(int loop) noexcept;
 void PlayOnce(int clip,const Heard& h) noexcept;   // a one-shot (dropped with every one-shot voice busy)
+// The ultimate strike's sounds (ultimate.cpp): only the player's recordings, <dll name>_ult_<kUltClipName>.wav next to the
+// DLL (tools/sound_pack.py builds them from a sound archive), read with the vehicles' clips; a clip with no recording is not
+// there (UltClipThere false) and the show plays the game's own cue for it instead.
+enum UltClip : int { kUltCharge, kUltCircle, kUltThunder, kUltGather, kUltBeam, kUltBlast, kUltShock, kUltClipCount };
+bool UltClipThere(int clip) noexcept;     // ClipsReady and its recording read
+void PlayUlt(int clip,const Heard& h) noexcept;
 // Once a game frame: the game runs. With no beat for kQuietMs (paused, loading, a menu) the watchdog silences
 // everything until the next beat, at `volume` (the game's master and effect volume; each sound's own share is its
 // caller's: the engines' JetSoundVolume in their Mix, the cockpit's Cfg().warnVolume here).

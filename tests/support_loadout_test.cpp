@@ -88,7 +88,11 @@ int main() {
     Check(lv && !(lv&kVariantApplied) && LookOfVariant(lv|kVariantApplied,&back) && back==look,"a look round-trips, applied or not");
     Check(LookOfVariant(LookVariant(SupportLook{0,0xFFFFFF}),&back) && back.primary==0 && back.secondary==0xFFFFFF,"black is a colour");
     Check(!LookVariant(SupportLook{}) && !LookOfVariant(0,&back) && !LookOfVariant(lv|kVariantVehicle,&back) &&
-          !LookOfVariant(lv|(1ull<<55),&back) && !LookOfVariant(1ull<<2,&back),"no look, a vehicle's, stray bits: refused");
+          !LookOfVariant(lv|(1ull<<58),&back) && !LookOfVariant(1ull<<2,&back),"no look, a vehicle's, stray bits: refused");
+    // A backpack weapon (npc_pack_table.h; docs/npc-backpack-re.md): bits 50-57 its code, an unknown code refused.
+    SupportLook packed=look;packed.pack=59;
+    Check(LookOfVariant(LookVariant(packed),&back) && back==packed && ((LookVariant(packed)>>50)&0xFF)==59,"a look with a pack round-trips");
+    Check(!LookOfVariant(lv|(75ull<<50),&back) && !(LookVariant(look)>>50),"an unknown pack code refused; none: no pack bits");
     l=Load(L"HE,AP:25,GLM:4",VehicleBody::tank,&ok);
     const auto vv=LoadoutVariant(l);
     VehicleLoadout got;

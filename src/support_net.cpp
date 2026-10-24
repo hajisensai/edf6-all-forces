@@ -6,8 +6,23 @@
 #include "mission_participants.h"
 #include "command_net.h"
 #include "command_protocol.h"
+#include "debug_spawn_net.h"
+#include "pvp.h"
+#include "enemy_control_net.h"
+#include "sub_support_state.h"
+#include "carrier_drone_net.h"
+#include "floatgun.h"
+#include "gravity_net.h"
+#include "ultimate_net.h"
+#include "support_submarine.h"
+#include "support_soldier.h"
+#include "command_identity.h"
 #include "version_notice.h"
 #include "hudtext.h"
+#include "plugin_net.h"
+#include "qmark.h"
+#include "qmark_protocol.h"
+#include "enemy_control_protocol.h"
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
@@ -18,6 +33,7 @@ namespace {
 support_net::Session session;
 support_net::Hooks hooks;
 EDF6CoopExtensionApi api{};
+EDF6CoopTrySendExtensionFn trySendExtension=nullptr;
 EDF6CoopSnapshot snapshot{};
 EDF6CoopPeer peers[support_net::kMaxPeers+1]{};
 HMODULE module=nullptr;
@@ -114,12 +130,69 @@ bool SendCommand(std::uint32_t peer,const void* bytes,std::size_t count) noexcep
         count<=EDF6COOP_EXTENSION_MAX_PAYLOAD && api.send &&
         api.send(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(count))!=0;
 }
-void CommandContext(ULONGLONG now) noexcept {
-    UpdateCommandNetwork({running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
-        snapshot.peerCount,snapshot.local.id,&SendCommand},now);
+std::uint32_t TrySendCommand(std::uint32_t peer,const void* bytes,std::size_t count,std::uint32_t byteLimit,std::uint32_t packetLimit) noexcept {
+    if(!running || !peer || peer>snapshot.peerCount || !bytes || !count ||
+       count>EDF6COOP_EXTENSION_MAX_PAYLOAD || !trySendExtension)return EDF6COOP_EXTENSION_SEND_UNAVAILABLE;
+    return trySendExtension(snapshot.generation,&peers[peer],bytes,static_cast<std::uint32_t>(count),byteLimit,packetLimit);
 }
-// The Q marks (qmark.cpp) go peer to peer over the same transport, with no host step: only the room has to be up.
-void QMarkContext(ULONGLONG now) noexcept { UpdateQMarkNetwork(running,snapshot.peerCount,&SendCommand,now); }
+const char* PeerPuid(std::uint32_t peer) noexcept {
+    return peer<=snapshot.peerCount && peer<=support_net::kMaxPeers ? peers[peer].id : nullptr;
+}
+std::uint32_t HeardExtension(std::uint32_t peer) noexcept { return session.PeerExtension(peer); }
+std::uint32_t OwnExtension() noexcept {
+    std::uint32_t ext=0;unsigned char bloom[32]{};
+    if(hooks.variants)hooks.variants(&ext,bloom);
+    return ext|support_net::kExtBuilt;
+}
+// Every plugin channel's frame (plugin_net.h: the registry, the roster, the joins). The Q marks go peer to peer with no
+// host step: the context's `linked` (the transport alone) is theirs.
+void CommandContext(ULONGLONG now) noexcept {
+    plugin_net::Room room;
+    room.context=CommandNetworkContext{running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
+        snapshot.peerCount,snapshot.local.id,&SendCommand,&TrySendCommand,running};
+    room.puid=&PeerPuid;room.heard=&HeardExtension;room.ownExt=OwnExtension();
+    plugin_net::Update(room,now);
+}
+void QMarkUpdate(const CommandNetworkContext& c,std::uint64_t now) noexcept { UpdateQMarkNetwork(c.linked,c.peerCount,c.send,now); }
+bool PvpOwns(const void* bytes,std::size_t size) noexcept {
+    const auto* b=static_cast<const unsigned char*>(bytes);
+    return bytes && size>=4 && b[0]=='A' && b[1]=='F' && b[2]=='P' && b[3]=='V';
+}
+// The channels, in the old chain's order (qmark, command, PvP, enemy control, the submarine's and the carrier's drones,
+// then the gravity operations, the float guns and the ultimate strike). The older ones read their own versions (version 0) and are read by
+// every build that has them (no feature bit); the newer ones are only sent to the peers that announced theirs.
+void RegisterPluginChannels() noexcept {
+    static bool registered=false;
+    if(registered)return;
+    registered=true;
+    using plugin_net::Channel;
+    Channel c;
+    c=Channel{};c.name="qmark";c.magic=qmark_net::kMagic;c.receive=&ReceiveQMarkNetwork;c.update=&QMarkUpdate;c.reset=&ResetQMarkNetwork;
+    plugin_net::RegisterChannel(c);
+    c=Channel{};c.name="command";c.magic=command_net::kMagic;c.receive=&ReceiveCommandNetwork;c.update=&UpdateCommandNetwork;
+    c.reset=&ResetCommandNetwork;plugin_net::RegisterChannel(c);
+    c=Channel{};c.name="pvp";c.owns=&PvpOwns;c.receive=&ReceivePvpNetwork;c.update=&UpdatePvpNetwork;c.reset=&ResetPvpNetwork;
+    plugin_net::RegisterChannel(c);
+    c=Channel{};c.name="enemy control";c.magic=enemy_control_protocol::kMagic;c.receive=&ReceiveEnemyControlNetwork;
+    c.update=&UpdateEnemyControlNetwork;c.reset=&ResetEnemyControlNetwork;plugin_net::RegisterChannel(c);
+    c=Channel{};c.name="submarine drones";c.magic=sub_support::kMagic;c.receive=&ReceiveSubSupportNetwork;
+    c.update=&UpdateSubSupportNetwork;c.reset=&ResetSubSupportNetwork;plugin_net::RegisterChannel(c);
+    c=Channel{};c.name="carrier drones";c.magic=carrier_drone_net::kMagic;c.receive=&ReceiveCarrierDroneNetwork;
+    c.update=&UpdateCarrierDroneNetwork;c.reset=&ResetCarrierDroneNetwork;plugin_net::RegisterChannel(c);
+    plugin_net::RegisterChannel(GravityNetChannel());
+    plugin_net::RegisterChannel(FloatGunNetChannel());
+    plugin_net::RegisterChannel(UltimateNetChannel());
+}
+// A message no channel and not the support protocol owns (a newer build's channel this one does not have): dropped,
+// said once a magic (a few magics), never once a message.
+void NoteUnknown(std::uint32_t peer,const unsigned char* bytes,std::uint32_t count) noexcept {
+    static std::uint32_t seen[8]{};static unsigned seenCount=0;
+    std::uint32_t magic=0;if(count>=4)std::memcpy(&magic,bytes,4);
+    for(unsigned i=0;i<seenCount;++i)if(seen[i]==magic)return;
+    if(seenCount>=_countof(seen))return;
+    seen[seenCount++]=magic;
+    Log("SUPPORT NET peer %u sends messages of a channel this build does not have (magic 0x%08X, %u bytes): ignored",peer,magic,count);
+}
 bool PeerValid(const EDF6CoopPeer& peer) noexcept {
     return peer.id[0] && std::memchr(peer.id,0,sizeof(peer.id));
 }
@@ -130,7 +203,7 @@ bool Resolve(ULONGLONG now) noexcept {
         if(!gate)NoteTransport("EDF6Coop mission admission gate not ready");
         return gate;
     }
-    api={};module=nullptr;transportAdmissionReady=nullptr;
+    api={};module=nullptr;transportAdmissionReady=nullptr;trySendExtension=nullptr;
     if(now<nextResolve)return false;nextResolve=now+1000;
     if(!current){NoteTransport("no EDF6Coop.dll loaded (map support online needs the companion EDF6Coop on every player)");return false;}
     const auto get=reinterpret_cast<EDF6CoopGetExtensionApiFn>(GetProcAddress(current,"EDF6CoopGetExtensionApi"));
@@ -141,6 +214,7 @@ bool Resolve(ULONGLONG now) noexcept {
         NoteTransport("EDF6Coop present but without a ready af-support extension (older EDF6Coop, or its admission gate is off)");
         api={};return false;
     }
+    trySendExtension=reinterpret_cast<EDF6CoopTrySendExtensionFn>(GetProcAddress(current,"EDF6CoopTrySendExtension"));
     module=current;return true;
 }
 bool Start(const EDF6CoopSnapshot& next,ULONGLONG now) noexcept {
@@ -170,7 +244,7 @@ void NoteForeignVersion(std::uint32_t peer,const unsigned char* bytes,std::uint3
     if(!peer || peer>support_net::kMaxPeers || count<8)return;
     std::uint32_t magic=0,version=0;std::memcpy(&magic,bytes,4);std::memcpy(&version,bytes+4,4);
     if(magic!=command_net::kMagic)return;
-    const std::uint32_t seen=version==command_net::kVersion ? 0u : version;
+    const std::uint32_t seen=command_net::Compatible(version) ? 0u : version;   // v6 and v7 negotiate (command_protocol.h)
     if(commandVersionOf[peer]!=seen && seen)
         Log("SUPPORT NET peer %u sends map commands of protocol v%u (this build: v%u): its map orders are not synchronised",peer,version,
             command_net::kVersion);
@@ -182,6 +256,12 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
     out[0]=0;
     const struct { std::uint32_t bit; Tx text; } kNames[]={{FeatureExt(support_net::kExtSeaRescue),Tx::versionFeatRescue},
         {FeatureExt(support_net::kExtRescueChannel),Tx::versionFeatRescueChannel},
+        {FeatureExt(support_net::kExtOutfit41),Tx::versionFeatOutfit41},
+        {FeatureExt(support_net::kExtBvmPlayers),Tx::versionFeatBvmPlayers},
+        {FeatureExt(support_net::kExtBackpack),Tx::versionFeatBackpack},
+        {FeatureExt(support_net::kExtGravity),Tx::versionFeatGravity},
+        {FeatureExt(support_net::kExtFloatGun),Tx::versionFeatFloatGun},
+        {FeatureExt(support_net::kExtUltimate),Tx::versionFeatUltimate},
         {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapTransports,Tx::versionFeatTransport},
         {support_net::kCapLoadout,Tx::versionFeatCompose},{FeatureExt(support_net::kExtVariants),Tx::versionFeatVariants},
         {support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
@@ -240,22 +320,94 @@ void VersionTick(bool online) noexcept {
     ReleaseSRWLockExclusive(&versionLock);
 }
 }
+namespace {
+bool PlanRequester(std::uint32_t peer,unsigned char* out,ObjRef* outActor=nullptr) noexcept {
+    if(!out || !running || peer>snapshot.peerCount)return false;
+    const char* authenticated=peers[peer].id;
+    AcquireSRWLockShared(&worldLock);const bool sealed=worldFrozen && world.ready;ReleaseSRWLockShared(&worldLock);
+    if(!sealed)return false;
+    const HMODULE coop=GetModuleHandleW(L"EDF6Coop.dll");
+    const auto resolve=coop ? reinterpret_cast<EDF6CoopResolveMissionPlayerPuidFn>(GetProcAddress(coop,"EDF6Coop_ResolveMissionPlayerPuid")) : nullptr;
+    if(!resolve)return false;
+    for(std::uint32_t i=0;i<support_net::kMaxPeers;++i) {
+        AcquireSRWLockShared(&worldLock);const ObjRef actor=worldCreated[i];ReleaseSRWLockShared(&worldLock);
+        if(!actor.obj)continue;
+        EDF6CoopPeer who{};
+        if(!resolve(static_cast<std::int32_t>(i),&who) || !PeerValid(who) || std::strcmp(who.id,authenticated))continue;
+        __try {
+            unsigned char candidate[32]{};MarkIdentities identities{};
+            if(ReadNativeObjectId(static_cast<const unsigned char*>(actor.obj),candidate) &&
+               ResolveMarkIdentities(candidate,nullptr,&identities) && identities.player.obj==actor.obj &&
+               identities.player.ctrl==actor.ctrl && SupportCommandRequesterMatches(identities.puid,authenticated)) {
+                std::memcpy(out,candidate,32);if(outActor)*outActor=actor;return true;
+            }
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
+    }
+    return false;
+}
+support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalog,const float* target,
+                                         std::uint64_t loadout,support_net::Plan* out) noexcept {
+    if(catalog==debugspawn::kNetworkCatalog)return PlanRangeEnemy(catalog,target,loadout,out);
+    if(!out || !running || peer>snapshot.peerCount)return support_net::PlanResult::refused;
+    const int team=PvpSupportTeam(peers[peer].id);
+    if(team<0)return support_net::PlanResult::refused; // an unconfirmed transition must not silently create stock-team support
+    const bool ownership=session.PeersHaveDetails(support_net::kDetailPvpSupport);
+    if(team && !ownership)return support_net::PlanResult::refused;
+    const auto result=hooks.planForRequester ? hooks.planForRequester(peer,catalog,target,loadout,out) :
+        hooks.plan ? hooks.plan(catalog,target,loadout,out) : support_net::PlanResult::refused;
+    if(result!=support_net::PlanResult::ready)return result;
+    if(ownership) {
+        if(!PlanRequester(peer,out->requester))return support_net::PlanResult::refused;
+        out->team=static_cast<std::uint32_t>(team);
+    }
+    return PvpValidateSupportPlan(*out) ? result : support_net::PlanResult::refused;
+}
+}
+bool SupportAuthenticatedRequester(std::uint32_t peer,ObjRef* out) noexcept {
+    if(!out)return false;
+    *out={};unsigned char identity[32]{};
+    return PlanRequester(peer,identity,out);
+}
 void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
     ResetSupportNet();hooks=configured;
-    session.Configure({nullptr,&Send,&Nonce,hooks});
+    auto combined=hooks;
+    combined.plan=[](std::uint32_t catalog,const float* target,std::uint64_t loadout,support_net::Plan* out) noexcept {
+        if(catalog==debugspawn::kNetworkCatalog)return PlanRangeEnemy(catalog,target,loadout,out);
+        return hooks.plan ? hooks.plan(catalog,target,loadout,out) : support_net::PlanResult::refused;
+    };
+    combined.planForRequester=&PlanForRequester;
+    combined.prepare=[](const support_net::Plan& plan) noexcept {   // the range's rows load before READY (debug_spawn.cpp)
+        return plan.catalogId==debugspawn::kNetworkCatalog ? PrepareRangeEnemy(plan) :
+            hooks.prepare ? hooks.prepare(plan) : support_net::PlanResult::ready;
+    };
+    combined.validate=[](const support_net::Plan& plan) noexcept {
+        return plan.catalogId==debugspawn::kNetworkCatalog ? ValidateRangeEnemy(plan) :
+            PvpValidateSupportPlan(plan) && hooks.validate && hooks.validate(plan);
+    };
+    combined.spawn=[](std::uint64_t token,const support_net::Plan& plan,bool remote) noexcept {
+        return plan.catalogId==debugspawn::kNetworkCatalog ? SpawnRangeEnemy(token,plan,remote) : hooks.spawn && hooks.spawn(token,plan,remote);
+    };
+    combined.destroy=[](std::uint64_t token) noexcept {
+        DestroyRangeEnemy(token);
+        if(hooks.destroy)hooks.destroy(token);
+    };
+    combined.notice=[](std::uint32_t request,support_net::RequestStatus status) noexcept {
+        if(!RangeEnemyRequestNotice(request,status) && hooks.notice)hooks.notice(request,status);
+    };
+    session.Configure({nullptr,&Send,&Nonce,combined});
 }
 void ResetSupportNet() noexcept {
-    session.Stop();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
+    session.Stop();ResetRangeEnemyNetwork();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
     for(auto& v:commandVersionOf)v=0;
     versionShown={};AcquireSRWLockExclusive(&versionLock);versionAt=0;ReleaseSRWLockExclusive(&versionLock);
-    commandHostPeer=0;ResetCommandNetwork();ResetQMarkNetwork();
+    commandHostPeer=0;RegisterPluginChannels();plugin_net::Reset();
 }
 void SuspendSupportNet() noexcept {
     session.Suspend();running=false;blockedUntilMission=true;
-    CommandContext(GetTickCount64());QMarkContext(GetTickCount64());
+    CommandContext(GetTickCount64());
     Log("SUPPORT NET suspended: existing actors retained; mission participant resynchronization required");
 }
-void SupportNetTick() noexcept {
+void RunSupportNetTick() noexcept {
     const ULONGLONG now=GetTickCount64();
     if(lastTick==now)return;lastTick=now;
     if(InSession())WorldTick(now);
@@ -275,10 +427,9 @@ void SupportNetTick() noexcept {
     if(!running && !Start(next,now)){NoteTransport("EDF6Coop snapshot rejected (peer list / host identity)");return;}
     NoteTransport(next.isHost ? "ready (host)" : "ready (client)");
     CommandContext(now);
-    QMarkContext(now);
     // Never spawn on the DirectNet worker. The map/crew game-thread frame owns
     // both deserialization and the native create/register/destroy callbacks.
-    for(unsigned received=0;received<128;++received) {
+    for(unsigned received=0;received<512;++received) {
         EDF6CoopPeer sender{};unsigned char bytes[EDF6COOP_EXTENSION_MAX_PAYLOAD]{};std::uint32_t count=0;
         if(!api.poll(snapshot.generation,&sender,bytes,sizeof(bytes),&count))break;
         if(!PeerValid(sender))continue;
@@ -287,23 +438,33 @@ void SupportNetTick() noexcept {
         if(peer) {
             NoteForeignVersion(peer,bytes,count);
             CommandContext(now);
-            if(ReceiveQMarkNetwork(peer,sender.id,bytes,count,now))continue;   // before the support parser, as the commands
-            if(ReceiveCommandNetwork(peer,sender.id,bytes,count,now))continue;
+            if(plugin_net::Receive(peer,sender.id,bytes,count,now))continue;   // a channel's (plugin_net.h), before the support parser
             support_net::Message message;
             if(support_net::Decode(bytes,count,message)) {
                 const auto pending=session.PendingHandshakes();
                 session.Receive(peer,message,now);
                 if(session.PendingHandshakes()!=pending)Log("SUPPORT NET handshake: kind=%u peer=%u pending=%u ready=%d",
                     static_cast<unsigned>(message.kind),peer,session.PendingHandshakes(),session.Ready());
-            } else Log("SUPPORT NET malformed application packet: peer=%u bytes=%u",peer,count);
+            } else if(count>=4 && wire::HeadWord(bytes,count,0)==support_net::kMagic) {
+                Log("SUPPORT NET malformed application packet: peer=%u bytes=%u",peer,count);
+            } else NoteUnknown(peer,bytes,count);
         }
     }
     session.SetRescueCooldown(static_cast<std::uint64_t>(Cfg().seaRescueCooldownSec)*1000);   // the host's own setting decides
     session.Tick(now);
+    RangeEnemyNetworkTick();
     VersionTick(running);
     CommandContext(now);
-    QMarkContext(now);
     if(session.Suspended())SuspendSupportNet();
+}
+void SupportNetTick() noexcept {
+    // An authenticated carrier request may enqueue a prepared Session plan from inside this sole poll.
+    // Do not recursively poll/advance the Session when SubmitPreparedSupportPlan asks for a current context.
+    static bool ticking=false; // game thread only, just like the native spawn/owner callbacks
+    if(ticking)return;
+    ticking=true;
+    __try {RunSupportNetTick();}
+    __finally {ticking=false;}
 }
 bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
     SupportNetTick();
@@ -330,6 +491,7 @@ void ReportSupportFailure(std::uint64_t transaction) noexcept {
     }
 }
 bool SupportTransactionActive(std::uint64_t transaction) noexcept { return session.IsActive(transaction); }
+bool SupportPeersHaveDetails(std::uint32_t details) noexcept { return !InSession() || (running && session.PeersHaveDetails(details)); }
 bool SupportPeersAcceptVariants() noexcept { return !running || session.PeersHave(support_net::kCapSoldierVariants); }
 bool SupportPeersAcceptAirborne() noexcept { return !running || session.PeersHave(support_net::kCapAirborneAir); }
 bool SupportPeersAcceptTransports() noexcept { return !running || session.PeersHave(support_net::kCapTransports); }
@@ -338,6 +500,7 @@ bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept {
     return !running || session.PeersHaveVariant(support_net::kExtVariants,hash);
 }
 bool SupportPeersApplyVariants() noexcept { return !running || session.PeersHaveVariant(support_net::kExtVariants,0); }
+bool SupportPeersApplyBackpacks() noexcept { return !running || session.PeersHaveExtension(support_net::kExtBackpack); }
 bool SupportPeersAcceptRescue() noexcept { return !running || session.PeersHaveExtension(support_net::kExtSeaRescue); }
 bool SupportVersionCue(wchar_t* out,std::size_t capacity) noexcept {
     constexpr ULONGLONG kShowMs=12000;
@@ -434,6 +597,7 @@ void NoteSupportMissionPlayerCreated(int index,const ObjRef& object) noexcept {
 }
 void SupportMissionReturnedToLobby() noexcept {
     SuspendSupportNet();
+    ResetPvp(); // verified native scene release, unlike a transient transport readiness loss
     AcquireSRWLockExclusive(&worldLock);
     world={};world.size=sizeof(world);worldPhase=1;worldFrozen=false;worldCreationSeen=false;
     if(worldSerial!=UINT64_MAX)world.worldEpoch=++worldSerial;
@@ -461,7 +625,11 @@ std::uint32_t GetMissionAdmissionState(std::uint32_t version,std::uint32_t size,
 }
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept {
     SupportNetTick();
-    return running && OnlineHostOnly() ? session.SubmitPrepared(plan,GetTickCount64()) : 0;
+    if(!running || !OnlineHostOnly())return 0;
+    const bool dynamicDrone=plan.catalogId==support_net::kPreparedDroneCatalog && plan.count==1 &&
+        (plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(plan.units[0].resourceId));
+    return session.SubmitPrepared(plan,GetTickCount64(),dynamicDrone ? support_net::PreparedKind::dynamicDrone :
+        support_net::PreparedKind::missionCrew);
 }
 } // namespace crew
 

@@ -24,6 +24,13 @@ constexpr Mask MaskOf(Kind k) noexcept {
     return k==Kind::optical || k==Kind::missile || k==Kind::rocket ? Mask::round :
         k==Kind::sensor ? Mask::sensor : Mask::none;
 }
+// The sight's field is over the view (hud.cpp ScopeShade and its reticle): a seat whose fire-control surface has a field
+// (MaskOf) magnified, or its mounted optic up at 1x (`mountedUp`: a vehicle's first person, War Thunder's gunner sight).
+// The same answer holds the stock crosshair back for the soldier looking through it (infantryscope.cpp CrossDrawHook,
+// hud.cpp HudScopeHoldsCrosshair: the user, 2026-10-21, "进入瞄具状态的时候没隐藏准星"): the field's reticle is the aim.
+constexpr bool ScopeField(Kind k,float zoom,bool mountedUp) noexcept {
+    return MaskOf(k)!=Mask::none && (zoom>1.0f || mountedUp);
+}
 constexpr float kSteps[]={1.0f,3.0f,6.0f};
 constexpr int kStepCount=static_cast<int>(sizeof(kSteps)/sizeof(kSteps[0]));
 constexpr float kBaseFov=0.785398163f;   // the stock camera's (the constant at 0x1765A20, pi/4)
@@ -122,5 +129,8 @@ inline void Lowered(const float* dir,float angle,float* out) noexcept {
 
 static_assert(Next(0)==1 && Next(1)==2 && Next(kStepCount-1)==0 && Next(-3)==0,"1x -> 3x -> 6x -> 1x");
 static_assert(At(0)==1.0f && At(kStepCount)==1.0f,"out of range is 1x");
+static_assert(ScopeField(Kind::optical,3.0f,false) && ScopeField(Kind::optical,1.0f,true) && ScopeField(Kind::sensor,1.0f,true) &&
+              !ScopeField(Kind::optical,1.0f,false) && !ScopeField(Kind::indirect,3.0f,true) && !ScopeField(Kind::flight,3.0f,true) &&
+              !ScopeField(Kind::none,6.0f,true),"a field over the view: magnified or the optic up, never an overhead / flight view");
 }  // namespace sightzoom
 }  // namespace crew

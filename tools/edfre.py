@@ -155,18 +155,24 @@ def find_disp(value: int, mnem: tuple = (), must: str = '') -> list[tuple[int, s
 
 
 def script_impl(decl: str) -> list[int]:
-    """Native function registered for an AngelScript declaration (lea rdx,fn ... lea r8,decl ... call)."""
-    res = []
+    """Executable RVAs registered for an exact AngelScript declaration; unknown layouts return [].
+
+    Decode from the enclosing .pdata function start, never from an arbitrary byte boundary. EDF6's inline
+    asSFuncPtr layout uses rcx / [rsp+40h] and rdx for the declaration; matching the last rdx LEA can return
+    the declaration's data address or an unrelated function. See pylib/as_registration.py.
+    """
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pylib'))
+    from as_registration import registration_impl
+
+    res = set()
     for s in strs(decl):
         for x in xrefs(s):
-            ins_list = list(md.disasm(img[x - 0x60:x], x - 0x60))
-            # take the last 'lea rdx, [rip ...]' that precedes a 'call' building the func ptr
-            cand = None
-            for ins in ins_list:
-                if ins.mnemonic == 'lea' and ins.op_str.startswith('rdx, [rip'):
-                    m = re.search(r'rip ([+-]) (0x[0-9a-f]+)', ins.op_str)
-                    d = int(m.group(2), 16) * (1 if m.group(1) == '+' else -1)
-                    cand = ins.address + ins.size + d
-            if cand is not None:
-                res.append(cand)
-    return sorted(set(res))
+            begin = func_start(x)
+            if begin < 0:
+                continue
+            # Registrations are straight-line blocks; the first call after the declaration closes this one.
+            end = min(len(img), x + 0x200)
+            instructions = md.disasm(img[begin:end], begin)
+            res.update(registration_impl(instructions, x, lambda rva: TVA <= rva < TVA + TSZ))
+    return sorted(res)

@@ -7,12 +7,16 @@
 //   EDF6X_VCVARIANTS  the host's list: "1;<hash>;<listed>;<parts>;<tokens>"
 //   EDF6X_VCVAR1..3   its further parts when the tokens do not fit one value: "<hash>;<tokens>"
 //   EDF6X_VCHAVE      every member's readiness: "1;<hash>;<missing>;<state>"
+//   EDF6X_VCPACKS     "1" when this member can read backpack tokens in the host's list
 // <hash> is 16 upper-case hex digits: FNV-1a 64 of the listed tokens joined by ',' (ListHash), so a reader knows the parts
 // belong together and that a member's readiness is about the list the host has now. <tokens> are ','-separated, sorted,
 // unique, each one generated variant file in short form, never its name:
 //   a soldier   one letter, the kind (support_call.h SupportWeapon: a = rifle ... n = fshotgun; upper case = the leader's
 //               template), then the primary and the secondary colour, each 6 upper-case hex digits or X (stock):
-//               "a1E3A8AX" = EDF6VC_NPC_RIFLE_1E3A8A_X.SGO
+//               "a1E3A8AX" = EDF6VC_NPC_RIFLE_1E3A8A_X.SGO; a backpack weapon (npc_pack_table.h) adds '+' and its code in
+//               2 upper-case hex digits: "aXX+01" = EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO. Only listed when every
+//               room member publishes EDF6X_VCPACKS=1: an older build cannot parse these tokens. Otherwise the host
+//               lists the colours without the pack, exactly as its mission planner downgrades that soldier.
 //   a vehicle   one digit, the body (support_loadout.h VehicleBody 1 tank ... 5 multirole), then the loadout's 64-bit
 //               variant (LoadoutVariant, applied bit clear) in 16 upper-case hex digits:
 //               "14000000000000C81" = EDF6VC_LO_TANK_4000000000000C81.SGO
@@ -47,9 +51,10 @@ namespace crew::roomsync {
 
 inline constexpr char kKeyList[]="EDF6X_VCVARIANTS";
 inline constexpr char kKeyHave[]="EDF6X_VCHAVE";
+inline constexpr char kKeyPacks[]="EDF6X_VCPACKS";     // "1": this member reads backpack tokens
 inline constexpr int kListParts=4;                    // EDF6X_VCVARIANTS + EDF6X_VCVAR1..3
 inline constexpr std::size_t kValueMost=EDF6COOP_MEMBER_ATTRIBUTE_MAX_VALUE;
-inline constexpr int kSetMost=512;                    // 37 catalog entries x 12 soldiers, the vehicles
+inline constexpr int kSetMost=512;                    // the bounded list, including compatible looks; excess is said
 static_assert(kSetMost<=kHostVariantsMost,"the mission preload holds a whole host list (support_variants.h)");
 // A client generates at most this many files a room (each one a name the host's validated list gave): a host cannot make
 // a member write more than this per room, whatever it lists or how often it changes its list. The rest come stock.
@@ -61,7 +66,7 @@ inline constexpr int kAttemptsMost=2;                 // per missing set
 inline constexpr int kLinesMost=8;
 inline constexpr std::size_t kHaveMost=40;            // "1;<16 hex>;<up to 4 digits>;<c>": 24 bytes, with room
 inline constexpr std::size_t kListBudget=3800;        // all list values together (header bytes included)
-static_assert(kListBudget+kHaveMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,"the list and the readiness fit Coop's budget");
+static_assert(kListBudget+kHaveMost+1<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,"the list, readiness and pack marker fit Coop's budget");
 
 // The part key i (0 = kKeyList).
 inline void PartKey(int i,char* out,std::size_t capacity) noexcept {
@@ -149,6 +154,13 @@ inline bool ParseVariantFile(const wchar_t* name,VariantRef* out) noexcept {
             if(!HexOf(s,6,&v))return false;
             *colour=static_cast<std::int32_t>(v);s+=6;
         }
+        if(*s==L'_') {   // the backpack weapon's WEAPONTABLE name
+            const wchar_t* a=++s;
+            while((*s>=L'A' && *s<=L'Z') || (*s>=L'0' && *s<=L'9'))++s;
+            const PackWeapon* pack=PackNamed(a,s);
+            if(!pack)return false;
+            look.pack=pack->code;
+        }
         if(std::wcscmp(s,L".SGO") || !look.On())return false;
         r.bits=LookVariant(look);
     } else if(!std::wcsncmp(name,L"EDF6VC_LO_",10)) {
@@ -187,6 +199,7 @@ inline std::size_t TokenOf(const VariantRef& r,char* out,std::size_t capacity) n
             if(colour==kStockColour){t[n++]='X';continue;}
             for(int s=20;s>=0;s-=4)t[n++]=hex[(static_cast<std::uint32_t>(colour)>>s)&0xF];
         }
+        if(look.pack){t[n++]='+';t[n++]=hex[look.pack>>4];t[n++]=hex[look.pack&0xF];}
     }
     t[n]=0;
     if(static_cast<std::size_t>(n)+1>capacity){out[0]=0;return 0;}
@@ -211,6 +224,12 @@ inline bool ParseToken(const char* s,std::size_t n,VariantRef* out) noexcept {
             std::int32_t v=0;
             for(int k=0;k<6;++k){const int d=hex(s[i+k]);if(d<0)return false;v=(v<<4)|d;}
             *colour=v;i+=6;
+        }
+        if(i+3==n && s[i]=='+') {
+            const int hi=hex(s[i+1]),lo=hex(s[i+2]);
+            if(hi<0 || lo<0)return false;
+            look.pack=static_cast<std::uint8_t>(hi*16+lo);i+=3;
+            if(!PackOf(look.pack))return false;
         }
         if(i!=n || !look.On())return false;
         r.bits=LookVariant(look);
@@ -562,6 +581,7 @@ public:
             return;
         }
         s.isHost=room.isHost!=0;s.members=static_cast<int>(room.memberCount);
+        Publish(api,kKeyPacks,"1",packsPublished_,env);
         if(s.isHost)HostList(api,env);
         else ReadHostList(api);
         s.list=list_;s.listed=target_.count;s.leftOut=leftOut_;
@@ -577,6 +597,7 @@ public:
         if(api) {
             for(int p=0;p<kListParts;++p)if(listPublished_[p][0]){char key[33];PartKey(p,key,sizeof(key));api->clear(key);}
             if(havePublished_[0])api->clear(kKeyHave);
+            if(packsPublished_[0])api->clear(kKeyPacks);
         }
         Reset();
     }
@@ -604,7 +625,7 @@ private:
         own_.count=0;decoded_.count=0;target_.count=0;noted_.count=0;
         plan_=GenPlan{};
         for(auto& v:listPublished_)v[0]=0;
-        havePublished_[0]=0;genMessage_[0]=0;
+        havePublished_[0]=0;packsPublished_[0]=0;genMessage_[0]=0;
     }
     void Log(const Env& env,const char* text) noexcept { if(env.log)env.log(env.context,text); }
     // Coop keeps a value published before its lobby glue runs and sends it later (1); 0 is a refusal (lastError says
@@ -635,9 +656,21 @@ private:
         auto* self=static_cast<Engine*>(context);
         VariantRef r;
         if(!ParseVariantFile(file,&r)){++self->unnamed_;return;}
+        SupportLook look;
+        if(!self->allowPacks_ && !r.vehicle && LookOfVariant(r.bits,&look) && look.pack)return;
         if(!self->own_.Add(r))++self->full_;
     }
+    struct PackMembers { int count=0;bool all=true; };
+    static void TakePackMember(void* context,const EDF6CoopMemberValue* m) noexcept {
+        auto* p=static_cast<PackMembers*>(context);
+        if(!m)return;
+        ++p->count;
+        if(!m->isSelf && (!m->hasValue || !m->value || std::strcmp(m->value,"1")))p->all=false;
+    }
     void HostList(const EDF6CoopMemberAttributeApi* api,const Env& env) noexcept {
+        PackMembers members;
+        allowPacks_=api->snapshot(kKeyPacks,&Engine::TakePackMember,&members,nullptr) &&
+                    members.count==situation_.members && members.all;
         own_.count=0;unnamed_=0;full_=0;
         if(env.configured)env.configured(env.context,&Engine::AddConfigured,this);
         EncodeList(own_,&values_);
@@ -751,6 +784,7 @@ private:
     }
 
     bool ticked_=false,anyPublished_=false;
+    bool allowPacks_=false;
     std::uint64_t lastTick_=0,listHash_=0,loggedHash_=0;
     ListState list_=ListState::none;
     int leftOut_=0,unnamed_=0,full_=0,cappedLogged_=0;
@@ -764,6 +798,7 @@ private:
     GenPlan plan_;
     char listPublished_[kListParts][kValueMost+1]{};
     char havePublished_[kValueMost+1]{};
+    char packsPublished_[kValueMost+1]{};
     wchar_t genMessage_[200]{};
     Situation situation_;
     LineSpec line_[kLinesMost];

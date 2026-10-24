@@ -30,6 +30,7 @@
 #include "memory.h"
 #include "online_authority.h"
 #include "crawl_logic.h"
+#include "profile_sigs.h"
 #include <cmath>
 #include <cstring>
 
@@ -59,14 +60,8 @@ constexpr ULONGLONG kStuckMs=1000;     // aim held at a stop this long without c
 constexpr ULONGLONG kPlayerFixMs=10000;
 constexpr float kNoElev=-100.0f;       // no barrel elevation seen last frame
 
-struct Signature { std::size_t rva; unsigned char bytes[16]; std::size_t size; };
-const Signature kGroundSignatures[]={
-    {0x612D20,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48},16},   // slot 4
-    {0x612D85,{0xF3,0x0F,0x10,0x82,0xC0,0x02,0x00,0x00,0xF3,0x0F,0x59,0x05,0x37,0x3C,0x62,0x01},16},   // move.x = -LX
-    {0x61468B,{0x0F,0x10,0x93,0xF0,0x15,0x00,0x00,0xF3,0x0F,0x10,0x9B,0xE8,0x17,0x00,0x00,0x0F},16},   // move read
-    {0x614862,{0x48,0x8D,0xB3,0x11,0x16,0x00,0x00},7},                                                 // triggers
-    {0x614D0E,{0xF3,0x0F,0x10,0x83,0x00,0x16,0x00,0x00,0xF3,0x0F,0x59,0x05,0xDA,0x43,0x15,0x01},16},   // pitch
-};
+using sigs::Signature;
+using sigs::kGroundSignatures;   // profile_sigs.h
 bool profileOk=false;
 
 struct Gun { unsigned char* weapon; float reach,pos[3],dir[3]; bool barrel; };
@@ -263,6 +258,9 @@ void Drive(Robo& r,unsigned char* v,ULONGLONG ms) noexcept {
     const Goal g=GoalOf(pos,leader,p.best,p.aim,reach);
     float move[2];
     MoveStick(r,v,g,move);
+    // The paced march (mapcmd.cpp MapPaceScale): its stick a share of full, to keep with the slowest.
+    const float pace=MapPaceScale(v);
+    move[0]*=pace;move[1]*=pace;
     float face[3]{};
     const float* want=nullptr;
     // Faced in 3D: Turn takes it onto the surface the crawler clings to.

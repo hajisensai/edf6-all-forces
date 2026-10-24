@@ -21,7 +21,8 @@
 //  - the Barga (501_FortressRobo): its AI (slot 7, 0x60A520) fills the vehicle's own block +0x1610 and slot 4 0x60AEC0
 //    copies that block when the vehicle is on the AI table, seat 0's sticks otherwise. Driven by the stock walk
 //    0x604400(vehicle, block, point, speed, radius) (its signs its own: turn +0x14 = +-1, forward +8 = speed), into the
-//    block and, mapped as the copy maps them, into seat 0 (forward = -LY, turn = -RX).
+//    block and, mapped as the copy maps them, into seat 0 (forward = -LY, turn = -RX). A mission's own AI Barga
+//    (mission_crew.h MissionAiVehicle) keeps no post until the player gives it one: its stock walk is the script's.
 // What the plugin wrote last is remembered: a stick still holding it is the plugin's, not the stock AI driving (a
 // frame without the AI pass clears nothing), and it is taken back when the drive ends.
 #include "crew.h"
@@ -29,8 +30,10 @@
 #include "layout.h"
 #include "online_authority.h"
 #include "memory.h"
+#include "mission_crew.h"
 #include "npc_logic.h"
 #include "npc_mark.h"
+#include "ifc_model.h"
 #include <cmath>
 #include <cstring>
 #include <cwchar>
@@ -243,6 +246,125 @@ unsigned char* BoneRecordNamed(unsigned char* v,const wchar_t* name) noexcept {
     return nullptr;
 }
 
+// Slot 6 also resolves begaruta_aiming_shape into a vector of {MAB locator, current bone} pairs.
+// Nix's spine uses the model's authored bone axes, not the vehicle's forward/up axes. Its SGO locator
+// supplies the rotation that the stock fire solver expects. Falling back to spine despite a declared
+// locator turns a target straight ahead into a vertical target and drives the pilot's pitch to a stop.
+constexpr std::size_t kMechAimShapes=0x2010;
+constexpr unsigned kMechFindLocator=0x6BADD0,kMechResizeShapes=0x648D00;
+const unsigned char kMechFindLocatorSig[]={0x40,0x53,0x55,0x56,0x57,0x41,0x56,0x41,0x57};
+const unsigned char kMechResizeShapesSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x41,0x08,0x4C,0x8B,0xC9,0x4C,0x8B,0x11};
+struct MechShape { const void* definition;unsigned char* bone; };
+static_assert(sizeof(MechShape)==16,"native locator pair");
+struct MechVariant { unsigned char value[16]{};std::uint16_t tag=ifcmodel::kValueless;unsigned char pad[6]{}; };
+struct MechVariantTable { unsigned table;unsigned functions[3]; };
+constexpr MechVariantTable kMechVariantTables[]={
+    {0x179EBA8,{0x238F90,0x238DF0,0x239060}}, // find named member
+    {0x179EAF0,{0x238FE0,0x238E50,0x2390D0}}, // get member / array entry
+    {0x17A1CE0,{0x267870,0x267850,0x267880}}, // semantic type (3 = array)
+    {0x179EEF0,{0x240AE0,0x240AD0,0x240AF0}}, // array count
+    {0x179EAD8,{0x238FC0,0x238E00,0x239090}}, // string pointer
+    {0x1765220,{0x89930,0x89920,0x89940}},   // release each native variant alternative
+};
+bool MechShapeNativeOk() noexcept {
+    if(!Matches(kMechFindLocator,kMechFindLocatorSig,sizeof(kMechFindLocatorSig)) ||
+       !Matches(kMechResizeShapes,kMechResizeShapesSig,sizeof(kMechResizeShapesSig)))return false;
+    for(const auto& table:kMechVariantTables) {
+        if(!Readable(image+table.table,sizeof(void*)*3))return false;
+        for(unsigned i=0;i<3;++i)
+            if(At<const void*>(image+table.table,i*8)!=image+table.functions[i])return false;
+    }
+    return true;
+}
+void ReleaseMechVariant(MechVariant& value) noexcept {
+    if(value.tag<ifcmodel::kVariantAlternatives) {
+        unsigned char ignored=0;
+        ifcmodel::Visitor(image,0x1765220,value.tag)(&value,&ignored);
+        value.tag=ifcmodel::kValueless;
+    }
+}
+bool CurrentMechBone(const unsigned char* v,const void* bone) noexcept {
+    const auto* inst=v+kModelInst506;
+    const auto bones=At<unsigned char*>(inst,kInstBones506);
+    const auto count=At<std::int32_t>(inst,kInstBoneCount);
+    if(!bones || count<=0 || count>256 || !Readable(bones,static_cast<std::size_t>(count)*kBoneStride))return false;
+    const auto begin=reinterpret_cast<std::uintptr_t>(bones),at=reinterpret_cast<std::uintptr_t>(bone);
+    return at>=begin && at-begin<static_cast<std::size_t>(count)*kBoneStride && (at-begin)%kBoneStride==0;
+}
+bool MechShapeVector(unsigned char* v,MechShape** data,std::size_t* count) noexcept {
+    if(!Readable(v+kMechAimShapes,24,true))return false;
+    const auto begin=At<std::uintptr_t>(v,kMechAimShapes),end=At<std::uintptr_t>(v,kMechAimShapes+8),cap=At<std::uintptr_t>(v,kMechAimShapes+16);
+    if(!begin) {if(end || cap)return false;*data=nullptr;*count=0;return true;}
+    if(end<begin || cap<end || (end-begin)%sizeof(MechShape) || (cap-begin)%sizeof(MechShape) ||
+       (cap-begin)/sizeof(MechShape)>256 || !Readable(reinterpret_cast<void*>(begin),cap-begin,true))return false;
+    *data=reinterpret_cast<MechShape*>(begin);*count=(end-begin)/sizeof(MechShape);return true;
+}
+bool ResolveMechShape(unsigned char* v,const MechVariant& value,MechShape* out) noexcept {
+    if(value.tag>=ifcmodel::kVariantAlternatives)return false;
+    unsigned char type=0;
+    ifcmodel::Visitor(image,0x17A1CE0,value.tag)(&value,&type);
+    if(type!=1)return false; // a declared, malformed value must not silently become the spine fallback
+    const wchar_t* name=nullptr;
+    ifcmodel::Visitor(image,0x179EAD8,value.tag)(&value,&name);
+    if(!name)return false;
+    unsigned length=0;
+    for(;length<256;++length) {if(!Readable(name+length,sizeof(wchar_t)))return false;if(!name[length])break;}
+    if(!length || length==256)return false;
+    using FindLocatorFn=bool(__fastcall*)(void*,MechShape*,int,const wchar_t*);
+    *out={};
+    return reinterpret_cast<FindLocatorFn>(image+kMechFindLocator)(v+0xE40,out,0,name) &&
+        Readable(out->definition,0x20) && CurrentMechBone(v,out->bone);
+}
+bool EnsureMechAimShapes(unsigned char* v) noexcept {
+    if(!Readable(v+0x100,sizeof(MechVariant)))return false;
+    const auto root=ifcmodel::AlternativeOf(v+0x100);
+    const auto absent=[v]() noexcept {
+        MechShape* data=nullptr;std::size_t count=0;
+        // No declaration can authenticate an old nonempty locator table after a model/SGO change.
+        // Preserve an actually empty native fallback; never consume or reset an unproven old pair.
+        return MechShapeVector(v,&data,&count) && count==0;
+    };
+    if(root>=ifcmodel::kVariantAlternatives || !MechShapeNativeOk())return false;
+    MechVariant value{},child{};
+    bool ready=false;
+    __try {
+      __try {
+        ifcmodel::Find find{L"begaruta_aiming_shape",-1};
+        ifcmodel::Visitor(image,ifcmodel::kVariantFind,root)(v+0x100,&find);
+        if(find.index<0)return absent(); // an older Begaruta really has no locator declaration
+        ifcmodel::Get get{&value,find.index};
+        ifcmodel::Visitor(image,ifcmodel::kVariantGet,root)(v+0x100,&get);
+        if(value.tag>=ifcmodel::kVariantAlternatives)return false;
+        unsigned char type=0;
+        ifcmodel::Visitor(image,0x17A1CE0,value.tag)(&value,&type);
+        std::int32_t count=1;
+        if(type==3)ifcmodel::Visitor(image,0x179EEF0,value.tag)(&value,&count);
+        if(count<=0 || count>static_cast<std::int32_t>(edf::kMaxSeats))return false;
+        MechShape staged[edf::kMaxSeats]{};
+        for(std::int32_t i=0;i<count;++i) {
+            const MechVariant* entry=&value;
+            if(type==3) {
+                ReleaseMechVariant(child);
+                ifcmodel::Get pick{&child,i};
+                ifcmodel::Visitor(image,ifcmodel::kVariantGet,value.tag)(&value,&pick);
+                entry=&child;
+            }
+            if(!ResolveMechShape(v,*entry,staged+i))return false;
+        }
+        MechShape* data=nullptr;std::size_t previous=0;
+        if(!MechShapeVector(v,&data,&previous))return false;
+        if(previous==static_cast<std::size_t>(count) && !std::memcmp(data,staged,sizeof(MechShape)*count))return true;
+        if(previous!=static_cast<std::size_t>(count)) {
+            using ResizeFn=void(__fastcall*)(void*,std::size_t);
+            reinterpret_cast<ResizeFn>(image+kMechResizeShapes)(v+kMechAimShapes,static_cast<std::size_t>(count));
+            if(!MechShapeVector(v,&data,&previous) || previous!=static_cast<std::size_t>(count))return false;
+        }
+        std::memcpy(data,staged,sizeof(MechShape)*count);ready=true;
+      } __finally {ReleaseMechVariant(child);ReleaseMechVariant(value);}
+    } __except(EXCEPTION_EXECUTE_HANDLER) {ready=false;}
+    return ready;
+}
+
 bool EnsureMechAiSetup(unsigned char* v) noexcept {
     if(!Readable(v,kAimOrigin+8) || !AttackTableOk())return false;
     const auto* inst=v+kModelInst506;
@@ -259,6 +381,7 @@ bool EnsureMechAiSetup(unsigned char* v) noexcept {
         Put<unsigned char*>(v,kAimOrigin,origin);
         if(!origin)return false;
     }
+    if(!EnsureMechAimShapes(v))return false;
     if(At<std::uint64_t>(v,kAttackSize))return true;
     AttackRow rows[kAttackRows];
     const std::uint64_t count=AttackRows(v,rows);
@@ -279,12 +402,25 @@ bool EnsureMechAiSetup(unsigned char* v) noexcept {
         v,static_cast<unsigned long long>(count),rows[0].seat,rows[count-1].seat,rows[0].maxRange);
     return true;
 }
+// A rejected AI preparation must not leave its previous frame's held trigger or aiming stick alive.
+// Match native 0x62C120 only for seats this machine currently owns; human/remote/empty seats are untouched.
+void NeutralNpcMechInputs(unsigned char* v) noexcept {
+    const auto& c=Cfg();
+    if(!c.enabled || !c.customNpcAi || v[kDead] || FamilyOf(v)!=Family::mech || !NpcDriver(v) || !IsOnlineAuthority(v))return;
+    for(unsigned i=0;i<SeatCount(v);++i) {
+        auto* seat=SeatAt(v,i);
+        if(AnyPlayerIn(seat) || (i!=0 && !AiGunner(v,seat)) || !Readable(seat+0x2C0,0x2A,true))continue;
+        std::memset(seat+0x2C0,0,0x2A);
+        Put<float>(seat,0x2CC,1.0f);Put<float>(seat,0x2DC,1.0f);
+    }
+}
 }  // namespace
 
 void NpcPostInput(unsigned char* v) noexcept {
     if(!Cfg().customNpcAi || v[kDead])return;
     const Family f=FamilyOf(v);
-    if(f==Family::mech && NpcDriver(v) && IsOnlineAuthority(v))EnsureMechAiSetup(v);   // before the stock AI fires
+    if(f==Family::mech && NpcDriver(v) && IsOnlineAuthority(v) && !EnsureMechAiSetup(v))
+        NeutralNpcMechInputs(v); // navigation may still supply its legitimate left-stick command below
     if(f==Family::none || (f==Family::barga && !BargaWalkOk()))return;
     if(!NpcDriver(v)) {
         // Not NPC-driven (the player took the wheel, or nobody): its post is forgotten; an NPC later starts from where it is.
@@ -304,6 +440,12 @@ void NpcPostInput(unsigned char* v) noexcept {
         p->cmd=Command{Order::guard,{request.at[0],request.at[1],request.at[2]}};
         request=PendingPost{};break;
     }
+    // A mission's own AI Barga (RideAi by its script or its transporter formation: mission_crew.h MissionAiVehicle) walks
+    // after its targets as the script means it to (EDF4.1 MP004 drops a dozen Balams to fight the Erginus herd). The
+    // leash below is for the player's side: kept here, it took a landed Balam's walk over once 40 m off the point where
+    // its crew first sat, and walked it back there with its back to the Erginus (the player 2026-10-17). It keeps a post
+    // only when the player gives it one on the map.
+    if(f==Family::barga && !p->commanded && !p->routeArrival && MissionAiVehicle(v)){p->active=false;TakeBack(v,f,*p);return;}
     if(!Cfg().tankReturnToPost && !p->commanded && !p->routeArrival){TakeBack(v,f,*p);return;}
     const bool reads=f!=Family::carBase || (At<std::uint32_t>(v,kDriveMode)&1);   // a CarBase's slot 55 reads the stick
     // The Barga's stock AI walks after its target (the tanks' and the mechs' only turn): an NPC-driven Barga fights where
@@ -326,12 +468,16 @@ void NpcPostInput(unsigned char* v) noexcept {
     p->active=s.active;
     if(!s.active){TakeBack(v,f,*p);return;}
     float c0=npc::SteerStick(s),c1=npc::ThrottleStick(s);
+    // The paced march (mapcmd.cpp MapPaceScale): the throttle a share of full, to keep with the slowest (the turn as
+    // it is: it still faces its way while it waits).
+    const float pace=MapPaceScale(v);
     if(f==Family::barga) {   // the stock walk's own turn and pace (it stops inside the hold itself)
         alignas(16) float block[8]{};
         alignas(16) const float point[4]={p->at[0],p->at[1],p->at[2],1.0f};
         reinterpret_cast<BargaWalkFn>(image+kBargaWalk)(v,block,point,1.0f,arrival);
         c0=block[kBargaTurn/4];c1=block[kBargaForward/4];
     }
+    c1*=pace;
     Write(v,f,*p,c0,c1);
     if(Cfg().debug && ms-p->loggedAt>kLogMs) {
         p->loggedAt=ms;
@@ -407,7 +553,7 @@ bool TankCommand(const void* v,const Command& c,const ObjRef& focus) noexcept {
 bool PrepareNpcVehicleAi(unsigned char* v) noexcept {
     const Family family=FamilyOf(v);
     if(family==Family::none || !NpcDriver(v) || !IsOnlineAuthority(v))return false;
-    if(family==Family::mech && !EnsureMechAiSetup(v))return false;
+    if(family==Family::mech && !EnsureMechAiSetup(v)){NeutralNpcMechInputs(v);return false;}
     for(auto& p:posts)if(p.ref.Is(v) && p.focus) {
         FocusCheck checked{p.focus};
         if(!npcmark::Alive(p.focus) || !VisitEnemies(v,&SeePostFocus,&checked) || !checked.seen) {

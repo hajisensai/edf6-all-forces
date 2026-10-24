@@ -148,6 +148,41 @@ class IncrementalTests(unittest.TestCase):
             model.unlink()
             self.assertFalse(buildcache.Cache(str(self.game)).current('drill'))
 
+    def test_unreadable_foreign_texture_path_is_absent_not_fatal(self) -> None:
+        """An MTL map_Kd naming another machine's drive that exists here but cannot be read (WinError 1117) must
+        not abort the install: it is recorded as absent and obj_model falls back to the same-named texture."""
+        import obj_model
+        foreign = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(foreign, ignore_errors=True))
+        bad = os.path.abspath(str(foreign / 'Vehicle504_tankdf02.dds'))
+
+        def broken(real):
+            def wrapper(path, *args, **kwargs):
+                if os.path.abspath(os.fspath(path)) == bad:
+                    raise OSError(1117, 'The request could not be performed because of an I/O device error', bad)
+                return real(path, *args, **kwargs)
+            return wrapper
+
+        folder = self.game / 'models/drill_tank'
+        folder.mkdir(parents=True)
+        (folder / 'drill_tank.obj').write_text('mtllib drill_tank.mtl\n')
+        (folder / 'drill_tank.mtl').write_text(f'newmtl body\nmap_Kd {bad}\n')
+        (folder / 'vehicle504_tankdf02.dds').write_bytes(b'dds')
+        real_resolve = Path.resolve
+
+        def resolve(self_path, *args, **kwargs):
+            if os.path.abspath(str(self_path)) == bad:
+                raise OSError(1117, 'I/O device error', bad)
+            return real_resolve(self_path, *args, **kwargs)
+
+        with patch.object(os, 'stat', broken(os.stat)), patch.object(Path, 'resolve', resolve),                 patch.object(os.path, 'realpath', broken(os.path.realpath)):
+            external = buildcache.model_external_inputs(str(folder))
+            self.assertIn(bad, external)
+            self.assertIsNone(external[bad])
+            obj = obj_model.read_obj(str(folder / 'drill_tank.obj'))
+            self.assertEqual(os.path.normcase(obj_model.texture_path(obj, 'body')),
+                             os.path.normcase(str(folder / 'vehicle504_tankdf02.dds')))
+
     def test_second_install_never_builds_or_rewrites_cached_assets(self) -> None:
         import call_weapons
         import gen
@@ -157,6 +192,7 @@ class IncrementalTests(unittest.TestCase):
             plugins = {name: (b'dll', f'[{section}]\nBigWorld=0\n'.encode()) for name, section in installer.PLUGINS}
             for name, replacement in {'check_loader': lambda g: None,
                                       'find_edf41': lambda g: None,   # a stand-in game: no EDF4.1 next to it
+                                      'material_compat_wanted': lambda g: False,  # no native shader archive in this fixture
                                       'plugin_files': lambda: plugins,
                                       'stack_weapons': lambda g: {},
                                       'build_autoturret': lambda g: ({}, False),

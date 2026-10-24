@@ -25,6 +25,7 @@ struct MapDot { float pos[3]; std::uint8_t flags; };   // kMapFlying, kMapNeares
 // The map as the game thread last published it, for the draw: the view (its focus on the ground, heading, pitch down,
 // height), the player and what the map marks.
 struct MapReadout {
+    std::uintptr_t ownerHumanKey=0; // opaque match to the HUD pass owner, never dereferenced by the draw
     bool pad;                  // the last input was a pad's (the help line shows its buttons)
     bool follow;               // the focus follows the player (until panned; Space / A again)
     float focus[3],yaw,pitch,height;
@@ -41,6 +42,8 @@ void ResetMap() noexcept;      // mission.cpp MissionStart: the map closed
 bool PlayerMap(MapReadout* out) noexcept;
 // The map holds the player's input (every key the plugin reads gives way: KeyHeld helpers test this).
 bool MapHoldsKeys() noexcept;
+// Published map/TV input ownership for this exact soldier, including closing-key drain.
+bool MapHoldsHumanKeys(const unsigned char* human) noexcept;
 // The camera is the map's this frame (open, or easing back): the HUD keeps its last game view for the aim (CameraRay).
 bool MapOwnsView() noexcept;
 // The map holds this camera's stock HUD off in the current mission: only its follower gauge bars give way too.

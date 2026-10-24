@@ -6,12 +6,14 @@
 //    stock third-person camera turns in), eye the camera's eye in R, C the camera's world matrix. Arms and weapon share
 //    T, so the hand stays on the grip; hold moves the pair in the aim frame; s shrinks it about the eye (the picture is
 //    the same at any s, only nearer: walls in front do not cut it).
-//  - The weapon-anchored transform (the classes with one weapon in hand): T = W⁻¹ · Tr(grip) · S(s) · C with W the held
+//  - The firearm-anchored transform: T = W⁻¹ · Tr(grip) · S(s) · C with W the held
 //    weapon's root (its grip, the hand's mount) made orthonormal: the weapon sits at `grip` in the camera's frame,
 //    pointing straight ahead, whatever the third-person pose holds it at; the arms follow it, the hands' own animation
 //    (a reload's) on it kept.
-//  - The collapse: a matrix that sends every vertex it weighs to one point (rows 0..2 zero): the body's bones that are
-//    not the arms', so the body draws nothing but its arms (the triangles of the rest are degenerate, no pixel).
+//  - Melee weapons and shields instead use NativeGripTransform: position the grip, preserving the authored rotation
+//    relative to the aim frame. Cancelling W's rotation every frame cancels their animated swing too.
+//  - The collapse: a matrix that sends a rigid instrument glyph's vertices to one point (rows 0..2 zero). The
+//    first-person body no longer uses it: mixed skinning faces must be excluded by topology (fp_skin.h).
 //  - The eye (Call of Duty's: a view height over the body's own axis): on the yaw-only body frame's up axis, `ahead` in
 //    front of it, at the head bone's height eased (the user, 2026-10-14: the Fencer's view shook: its head's sway in the
 //    walk and the dash, followed by a quarter a frame, went into the camera).
@@ -27,6 +29,33 @@ inline M4 Identity() noexcept {
     M4 r{};
     r.m[0]=r.m[5]=r.m[10]=r.m[15]=1.0f;
     return r;
+}
+
+// A controller-owned camera frame. Heading/pitch are input state, not a decorative model bone or last
+// rendered view; +X is the native camera's left, +Y up, +Z ahead. Eye placement is an independent physical anchor.
+inline M4 HeadingFrame(float yaw,float pitch,const float* eye) noexcept {
+    const float sy=std::sin(yaw),cy=std::cos(yaw),sp=std::sin(pitch),cp=std::cos(pitch);
+    M4 out{};
+    out.m[0]=cy;out.m[2]=-sy;
+    out.m[4]=-sy*sp;out.m[5]=cp;out.m[6]=-cy*sp;
+    out.m[8]=sy*cp;out.m[9]=sp;out.m[10]=cy*cp;
+    std::memcpy(out.m+12,eye,12);out.m[15]=1.0f;
+    return out;
+}
+
+// Camera edits own rotation and eye separately. A later owner may move the eye without replacing our rotation,
+// or replace the rotation while leaving the eye. Requiring all 64 bytes to match leaks an old rotation into the
+// next native step; restoring all 64 bytes overwrites unrelated newer writes. Neither is a valid transaction.
+struct CameraWrite { M4 before{},written{};bool axes=false,eye=false; };
+inline CameraWrite CameraWriteOf(const M4& before,const M4& written) noexcept {
+    CameraWrite out;out.before=before;out.written=written;
+    out.axes=std::memcmp(before.m,written.m,48)!=0;
+    out.eye=std::memcmp(before.m+12,written.m+12,16)!=0;
+    return out;
+}
+inline void ReturnCameraWrite(M4* current,const CameraWrite& edit) noexcept {
+    if(edit.axes && std::memcmp(current->m,edit.written.m,48)==0)std::memcpy(current->m,edit.before.m,48);
+    if(edit.eye && std::memcmp(current->m+12,edit.written.m+12,16)==0)std::memcpy(current->m+12,edit.before.m+12,16);
 }
 
 // a·b (row vectors: p·(a·b) = (p·a)·b).
@@ -48,6 +77,11 @@ inline M4 Scale(float s) noexcept {
     M4 r=Identity();
     r.m[0]=r.m[5]=r.m[10]=s;
     return r;
+}
+
+// Move a signed lateral grip inward without crossing the centre line.
+inline float CenteredGrip(float lateral,float inward) noexcept {
+    return std::copysign(std::fmax(0.0f,std::fabs(lateral)-inward),lateral);
 }
 
 // The inverse of an affine matrix (the 3x3 part inverted in full: a scaled frame inverts too). False when singular.
@@ -74,6 +108,15 @@ inline void Point(const M4& a,const float* p,float* out) noexcept {
 inline bool Finite(const M4& a) noexcept {
     for(float v:a.m)if(!std::isfinite(v))return false;
     return true;
+}
+
+inline bool LookFrame(const float* eye,const float* look,M4* out) noexcept {
+    float d[3];
+    for(int i=0;i<3;++i){if(!std::isfinite(eye[i]) || !std::isfinite(look[i]))return false;d[i]=look[i]-eye[i];}
+    const float flat=std::sqrt(d[0]*d[0]+d[2]*d[2]);
+    if(!(flat*flat+d[1]*d[1]>1e-8f))return false;
+    *out=HeadingFrame(std::atan2(d[0],d[2]),std::atan2(d[1],flat),eye);
+    return Finite(*out);
 }
 
 // The procedural motion (fp_motion.h) as a matrix in the camera's frame (x right, y up, z ahead): turned about `pivot`
@@ -129,6 +172,90 @@ inline bool AnchoredTransform(const M4& weapon,const M4& camera,const float* gri
     return true;
 }
 
+// A melee weapon / shield has an authored holding angle and animated swing, not a gun bore to straighten. Anchor
+// the idle grip's position but keep authored translation from `rest` and rotation relative to the soldier's aim frame. The same T goes through
+// its arm, palm and fingers, so the contact is retained while the blade swings.
+inline bool NativeGripTransform(const M4& weapon,const M4& aim,const M4& camera,const float* grip,float scale,M4* out,
+                                const M4& motion=Identity(),const float* rest=nullptr) noexcept {
+    M4 inv;
+    if(!InverseAffine(aim,&inv))return false;
+    float local[3];Point(inv,weapon.m+12,local);
+    if(rest)std::memcpy(local,rest,12);
+    const M4 t=Mul(Mul(Mul(Mul(inv,Translate(grip[0]-local[0],grip[1]-local[1],grip[2]-local[2])),motion),Scale(scale)),camera);
+    if(!Finite(t))return false;
+    *out=t;
+    return true;
+}
+
+// EDF's render view flips X/Z after world-to-camera (native 0x678CCB46; measured main-view parameters).
+inline bool NativeView(const M4& camera,M4* out) noexcept {
+    M4 inverse;if(!InverseAffine(camera,&inverse))return false;
+    for(int row=0;row<4;++row){inverse.m[row*4]*=-1;inverse.m[row*4+2]*=-1;}
+    *out=inverse;return true;
+}
+
+// --- A weapon's size, in its own frame (docs/fp-render-re.md §17) ---
+// A skeleton instance keeps each bone's bounds in its bone record: a flag (+0x09), half sizes along the bone's own
+// axes (+0xF0, at least 0.001) and a centre in the bone's frame (+0x100). The model's Umbra box (instance +0x70 =
+// model+0x110) made of them by 0x11005E0 is, for a model of several meshes or a skinned one (every Ranger rifle and
+// shotgun), the WORLD-axis box round them: its "right" half size is the weapon's width facing one way and its length
+// facing 90 degrees off, and every frame of the walk's sway changes it. The size a hold is fitted to must be taken
+// along the weapon's own axes instead: the same bone boxes, measured in the weapon root's frame.
+struct BoneBox { M4 world; float half[3],centre[3]; };
+
+// The box round `boxes` along the axes of `root` (rows: half axes along root's right, up, ahead, scaled by root's own
+// axes; row 3 the centre in root's frame, w 1). False: no box, or root singular.
+inline bool FrameBounds(const M4& root,const BoneBox* boxes,int n,M4* out) noexcept {
+    M4 inv;
+    if(n<=0 || !InverseAffine(root,&inv))return false;
+    float lo[3]={1e30f,1e30f,1e30f},hi[3]={-1e30f,-1e30f,-1e30f};
+    for(int b=0;b<n;++b) {
+        const M4 local=Mul(boxes[b].world,inv);   // the bone in the root's frame
+        float c[3];Point(local,boxes[b].centre,c);
+        for(int j=0;j<3;++j) {
+            float e=0.0f;
+            for(int k=0;k<3;++k)e+=std::fabs(local.m[k*4+j])*std::fmax(boxes[b].half[k],0.001f);
+            lo[j]=std::fmin(lo[j],c[j]-e);hi[j]=std::fmax(hi[j],c[j]+e);
+        }
+    }
+    M4 r{};
+    for(int j=0;j<3;++j){r.m[j*4+j]=0.5f*(hi[j]-lo[j]);r.m[12+j]=0.5f*(hi[j]+lo[j]);}
+    r.m[15]=1.0f;
+    if(!Finite(r))return false;
+    *out=r;
+    return true;
+}
+
+// The game's own box of the same bones (0x11005E0's path for several meshes, H): along the world's axes. Kept for the
+// offline check that shows what it did to the hold.
+inline M4 WorldBounds(const BoneBox* boxes,int n) noexcept {
+    M4 r=Identity();
+    FrameBounds(Identity(),boxes,n,&r);
+    return r;
+}
+
+// The half sizes of a box (rows 0..2).
+inline void HalfSizes(const M4& box,float* half) noexcept {
+    for(int r=0;r<3;++r)half[r]=std::sqrt(box.m[r*4]*box.m[r*4]+box.m[r*4+1]*box.m[r*4+1]+box.m[r*4+2]*box.m[r*4+2]);
+}
+
+// A bulky or long weapon held further off, a shield out to the side (the hold's offset, camera frame, `out` the camera
+// x of "away from the middle"): from the weapon's half sizes along its own right, up, ahead. False: not a sane size
+// (nothing moved).
+inline bool FitGrip(const float* half,bool dual,bool flip,float out,float* grip) noexcept {
+    if(!std::isfinite(half[0]+half[1]+half[2]) || half[0]>3.0f || half[1]>3.0f || half[2]>3.0f)return false;
+    float x=0.0f,y=0.0f,z=0.0f;
+    if(!dual) {
+        const float girth=std::fmax(half[0],half[1]);
+        z=0.8f*std::fmax(0.0f,girth-0.12f)+0.3f*std::fmax(0.0f,half[2]-0.5f);
+        x=0.6f*std::fmax(0.0f,half[0]-0.08f);
+        y=-0.4f*std::fmax(0.0f,half[1]-0.12f);
+    }
+    if(flip){x+=0.22f;z+=0.15f;}
+    grip[0]+=out*x;grip[1]+=y;grip[2]+=z;
+    return true;
+}
+
 // Every vertex weighed by it lands on `at`.
 inline M4 Collapse(const float* at) noexcept {
     M4 r{};
@@ -152,19 +279,8 @@ inline void EyeWorld(const M4& body,const float* local,float* out) noexcept {
 }
 
 // --- The arms posed for the first person ---
-// The third-person arm, moved with its weapon to the bottom of the view, reaches back up into it (its shoulder far in
-// front of the eye). The moves that bring it out at the view's edge:
-//  - the hand on its own weapon (the trigger hand): the forearm, the hand and its fingers roll together about the axis
-//    of that weapon (TurnAbout, RollAngle) until the elbow is out and down: the hand keeps its hold and the wrist its
-//    stock angle;
-//  - the free hand on the other hand's weapon (the Ranger's on the rifle's guard, the Wing Diver's): rolled about the
-//    weapon's axis it slid round the gun (the user, 2026-10-13, with a screenshot: the Wing Diver's left hand "left
-//    below the gun, not on it"), so it is held instead: pulled in to the weapon's body when the animation left it
-//    off it (SnapToBox, never pushed out: a box counts a magazine and a sight), slid round the axis only within
-//    `arc` of straight below (ClampedRoll), and what the elbow still wants is taken by the forearm alone, turned about
-//    the wrist by at most `wristMax` (the forearm alone, unbounded, broke the wrist: the same day's screenshot;
-//    forearm and hand turned about the wrist took the Wing Diver's hand off the gun's side, measured);
-//  - the upper arm turns from the elbow toward a place beside and below the eye (ReachShoulder, SegmentMap).
+// ArmChainTo preserves limb lengths while solving one connected elbow for a specified wrist; ArmChain keeps the
+// animated wrist unchanged. A displaced support hand and its forearm always move together; reloads keep the native wrist.
 
 inline void Sub(const float* a,const float* b,float* o) noexcept { for(int i=0;i<3;++i)o[i]=a[i]-b[i]; }
 inline float Dot3(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
@@ -241,6 +357,115 @@ inline bool SegmentMap(const float* a0,const float* b0,const float* a1,const flo
 }
 
 inline float Clamp(float v,float lo,float hi) noexcept { return v<lo ? lo : (v>hi ? hi : v); }
+
+// A connected two-bone arm with its animated wrist held fixed on the gun. Move the shoulder only as far as the
+// two measured bone lengths permit, then solve the elbow on their intersection circle. The pole is projected
+// perpendicular to the reach, so no angle wrapping or independently rolled wrist can flip the support hand.
+inline bool ArmChainTo(const float* s0,const float* e0,const float* w0,const float* wrist,const float* shoulderWant,
+                       const float* pole,M4* upperMove,M4* foreMove) noexcept {
+    float v[3];Sub(e0,s0,v);const float a=Length(v);
+    Sub(w0,e0,v);const float b=Length(v);
+    if(!(a>1e-5f) || !(b>1e-5f))return false;
+    float axis[3];Sub(shoulderWant,wrist,axis);
+    const float wanted=Length(axis);
+    if(!Unit(axis))return false;
+    const float reach=Clamp(wanted,std::fabs(a-b)+1e-5f,a+b-1e-5f);
+    float s1[3];for(int i=0;i<3;++i)s1[i]=wrist[i]+axis[i]*reach;
+    // Distance from the wrist along wrist->shoulder to the elbow circle's centre.
+    const float along=(b*b+reach*reach-a*a)/(2.0f*reach);
+    const float radius=std::sqrt(std::fmax(0.0f,b*b-along*along));
+    float bend[3];
+    const float axial=Dot3(pole,axis);
+    for(int i=0;i<3;++i)bend[i]=pole[i]-axis[i]*axial;
+    if(!Unit(bend)) { // A straight-on pole: use the animated elbow, never an arbitrary sign-changing cross product.
+        Sub(e0,wrist,bend);const float d=Dot3(bend,axis);
+        for(int i=0;i<3;++i)bend[i]-=axis[i]*d;
+        if(!Unit(bend))return false;
+    }
+    float e1[3];for(int i=0;i<3;++i)e1[i]=wrist[i]+axis[i]*along+bend[i]*radius;
+    return SegmentMap(s0,e0,s1,e1,upperMove) && SegmentMap(e0,w0,e1,wrist,foreMove);
+}
+
+inline bool ArmChain(const float* s0,const float* e0,const float* wrist,const float* shoulderWant,
+                     const float* pole,M4* upperMove,M4* foreMove) noexcept {
+    return ArmChainTo(s0,e0,wrist,wrist,shoulderWant,pole,upperMove,foreMove);
+}
+
+// --- The free (support) hand's arm (docs/fp-render-re.md §17.4) ---
+// The view's frustum: the camera's axes in the world (right on screen, up, ahead), its eye, the projection's x and y
+// scales (1/tan of the half angles) and its near clip.
+struct Frustum { float right[3],up[3],ahead[3],eye[3],xs,ys,nearClip; };
+
+// Whether a ball of radius `r` at `p` reaches into the view (a side plane's signed distance under r, ahead of the near
+// clip).
+inline bool Seen(const Frustum& f,const float* p,float r) noexcept {
+    float d[3];Sub(p,f.eye,d);
+    const float x=Dot3(d,f.right),y=Dot3(d,f.up),z=Dot3(d,f.ahead);
+    if(z+r<f.nearClip)return false;
+    const float kx=std::sqrt(f.xs*f.xs+1.0f),ky=std::sqrt(f.ys*f.ys+1.0f);
+    if((x*f.xs-z)/kx>r || (-x*f.xs-z)/kx>r)return false;
+    if((y*f.ys-z)/ky>r || (-y*f.ys-z)/ky>r)return false;
+    return true;
+}
+
+// The support hand's arm: the hand moved to `wrist` (its own turn on the gun kept) takes its forearm with it, turned
+// about the wrist toward the shoulder by at most `wristMost` (the wrist bends at most that much more than the
+// animation bends it); the upper arm turns about the elbow toward the shoulder
+// `shoulderWant` (the soldier's own, seen from the eye), both bones their measured length. Its open shoulder end must
+// stay out of the view (a ball of `sleeve` radius): when the shoulder's way would show it, the upper arm takes the
+// hidden way nearest it (a sleeve coming in from the edge, never a cut sleeve on screen). The upper arm's move and the
+// forearm's (a translation: the hand's) out. False: degenerate bones, or the elbow so deep in the view that no way
+// hides the end (the caller then uses the two-bone chain).
+inline bool SupportArm(const float* s0,const float* e0,const float* h0,const float* wrist,const float* shoulderWant,
+                       const Frustum& view,float sleeve,float wristMost,M4* upperMove,M4* foreMove) noexcept {
+    float v[3];Sub(e0,s0,v);
+    const float a=Length(v);
+    if(!(a>1e-5f))return false;
+    // The forearm: the animation's, turned about the wrist toward the shoulder by at most `wristMost` (rad), so the arm
+    // reaches back toward its body as far as a wrist bends without folding.
+    float f[3],g[3];Sub(e0,h0,f);
+    const float b=Length(f);
+    if(!Unit(f))return false;
+    Sub(shoulderWant,wrist,g);
+    float e1[3];
+    if(Unit(g) && wristMost>0.0f) {
+        float k[3];Cross3(f,g,k);
+        const float between=std::atan2(Length(k),Dot3(f,g));
+        if(Unit(k)) {
+            const float turn=std::fmin(between,wristMost);
+            const M4 r=Rotation(k,std::cos(turn),std::sin(turn));
+            float t[3];Point(r,f,t);std::memcpy(f,t,12);
+        }
+    }
+    for(int i=0;i<3;++i)e1[i]=wrist[i]+f[i]*b;
+    float u[3];Sub(shoulderWant,e1,u);
+    if(!Unit(u))return false;
+    // The shoulder's own way when its end is hidden; else the hidden way nearest it (5-degree steps over the sphere
+    // of ways, the nearest first).
+    float s1[3];
+    for(int i=0;i<3;++i)s1[i]=e1[i]+u[i]*a;
+    bool found=!Seen(view,s1,sleeve);
+    if(!found) {
+        float best=-2.0f,bestWay[3]={0,0,0};
+        for(int el=-17;el<=17;++el) {
+            const float phi=el*0.0872664626f,cp=std::cos(phi),sp=std::sin(phi);
+            const int around=static_cast<int>(72.0f*cp)+1;
+            for(int az=0;az<around;++az) {
+                const float th=az*6.2831853f/around;
+                float w[3];
+                for(int i=0;i<3;++i)w[i]=view.up[i]*sp+cp*(view.right[i]*std::cos(th)+view.ahead[i]*std::sin(th));
+                const float closeness=Dot3(w,u);
+                if(closeness<=best)continue;
+                float p[3];for(int i=0;i<3;++i)p[i]=e1[i]+w[i]*a;
+                if(Seen(view,p,sleeve))continue;
+                best=closeness;std::memcpy(bestWay,w,12);
+            }
+        }
+        if(best>-2.0f){for(int i=0;i<3;++i)s1[i]=e1[i]+bestWay[i]*a;found=true;}
+    }
+    if(!found)return false;
+    return SegmentMap(e0,h0,e1,wrist,foreMove) && SegmentMap(s0,e0,s1,e1,upperMove);
+}
 
 // The move that takes a hand whose wrist is at `wrist` onto the weapon whose bounds are `box` (rows: half axes right,
 // up, ahead; row 3 the centre, all through T): when the wrist lies further from the box's axis than the box's

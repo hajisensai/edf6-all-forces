@@ -40,7 +40,9 @@ jobs:
         shell: pwsh
         # numpy: the big map's seams (pylib/seams.py, hkcms.py; tools/make_bigmap.py) and their self-tests; pillow:
         # the procedural models' textures (pylib/procmesh.py). The installer exe bundles both (build_release BUNDLED).
-        run: python -m pip install --disable-pip-version-check numpy pillow
+        # scipy: the War Thunder models' prep tool (tools/prep_wt_tracked.py collision_hulls: connected parts, convex
+        # hulls), whose rules tests/test_wt_tracked.py checks; a developer's tool, the installer neither has nor needs it.
+        run: python -m pip install --disable-pip-version-check numpy pillow scipy
 
       - name: Build plugins
         shell: cmd
@@ -48,6 +50,8 @@ jobs:
 
       - name: Native regression tests
         shell: cmd
+        env:
+          PYTHONIOENCODING: utf-8
         run: |
           call tools\msvc-x64-env.cmd
           if errorlevel 1 exit /b 1
@@ -75,6 +79,10 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           git diff --exit-code -- src/stores.inc
           if ($LASTEXITCODE) { Write-Error 'src/stores.inc is stale: run python tools/gen_stores.py and commit it'; exit 1 }
+          python tools/gen_cockpit_fields.py --check
+          if ($LASTEXITCODE) { Write-Error 'src/cockpit_fields.inc is stale: run python tools/gen_cockpit_fields.py and commit it'; exit 1 }
+          python tools/gen_spawn_catalog.py --check
+          if ($LASTEXITCODE) { Write-Error 'src/spawn_catalog.inc / src/spawn_catalog_archives.h is stale: run python tools/gen_spawn_catalog.py (--archives with the game when the catalog changed) and commit it'; exit 1 }
           # src/nozzles_gen.h is measured on the game's models (no Root.cpk here): checked against its own record of
           # what it was made from (tools/gen_nozzles.py --check).
           python tools/gen_nozzles.py --check

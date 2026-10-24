@@ -4,3 +4,11 @@ edf41port/objects/**/*.members.json -text
 edf5port/dlc/blobs/** binary
 edf5port/dlc/registry.json -text
 edf5port/dlc/**/*.members.json -text
+edf41port/outfits/_members/** binary
+edf41port/outfits.json -text
+edf41port/outfits/**/*.members.json -text
+
+# Byte-exact generated proof manifests and their hashed native-profile input.
+src/enemy_control_ported_spawn_profiles.inc text eol=lf
+src/enemy_control_pvp_spawn_profiles.inc text eol=lf
+src/enemy_control_native_profiles.inc -text

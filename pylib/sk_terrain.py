@@ -14,7 +14,7 @@ embedded at 0x9C6030 say what the arrays are) and checked against the placed obj
           index into the layer list, 33 x 33 each)
     0x3C / 0x40   layer parameter structs (count 6, 0x14 each: 2 texture settings of 0x30 + an SGO)
     0x44 / 0x48   u32 offsets (count 8) to the names of the layers' materials (UTF-16, in the string pool)
-    0x4C          vegetation table (0x14 header, entries of 0x28, 256 colour jitters of 0x10)
+    0x4C          vegetation table (0x14 header, entries of 0x28, cells, 256 jitters of 0x10: vegetation())
     0x50          W x H x (u16 height, u16 material): the height is an IEEE half float in metres (the shader
                   does f16tof32 on the low half: heights -10.2266 .. 47.25 in SK_HEIGEN02 are the header's
                   0x30 / 0x34 exactly), the material is the layer 0..5 of the vertex
@@ -29,6 +29,8 @@ import struct
 from dataclasses import dataclass, field
 
 import numpy as np
+
+import map_legacy  # its SGO extent walker
 
 MAGIC = b'MAPB'
 VERSION = 3
@@ -151,6 +153,63 @@ def _blend(b: bytes, w: int, h: int, blocks: tuple[int, int], cells: tuple[int, 
                 if weight[p] > 0 and slot[p] < n1:
                     out[r0 + i, c0 + j, used[slot[p]]] += weight[p]
     return out
+
+
+@dataclass(frozen=True)
+class VegType:
+    """One kind of plant of the field's vegetation table (a 0x28 entry): kind 1 = a grass / flower card drawn with
+    the texture `name` (`sk_grassleaf01_1.dds`, one of the map's grass.merge.sgo names), 2 = a model (`.trb` tree,
+    `.mlb` small objects); its size (x, y, z) and the random extra on it (the second triple; 0 for the models and the
+    flowers); the SGO of its parameters (`colors`, `uv`), bytes as stored, or None."""
+    kind: int
+    name: str
+    size: tuple[float, float, float]
+    extra: tuple[float, float, float]
+    params: bytes | None
+
+
+@dataclass
+class Vegetation:
+    """The field's vegetation table (header 0x4C): `kind` (N x N, row = z, column = x like the heights) the plant type of
+    each cell (0xFF none), `jitter` its index into the 256 random records `jitters` (16 bytes each: an angle, the
+    offset in x and z within the cell in [0, 1), a size factor in [0, 1)), cells of `cell` metres from the field's
+    origin over its whole extent (SK_HEIGEN02 2000 x 2000 of 1 m, SK_VALLEY01 1000 x 1000 of 2 m)."""
+    types: list[VegType]
+    kind: np.ndarray
+    jitter: np.ndarray
+    jitters: bytes
+    cell: float
+
+
+def vegetation(b: bytes, extent: float) -> Vegetation:
+    """The vegetation table of a .shfb (sk_terrain.parse's file; `extent` the field's size in metres). Layout, from the
+    seven SK maps (selftest edf41_sk_grass_real): header {u32 resolution (2: 1 m cells, 1: 2 m), i32 types (0x14),
+    u32 type count, i32 cells, i32 jitters} with offsets from the header; a type is {u32 kind, i32 name (from the
+    entry, UTF-16), u32 0, f32 size[3], f32 extra[3], i32 params SGO (from the entry, wrapping modulo 2^32: the SGOs
+    sit at the start of the file)}; the cells are (type, jitter) byte pairs, row major; 256 jitter records of 0x10."""
+    vt = struct.unpack_from('<I', b, 0x4C)[0]
+    _res, toff, nt, coff, joff = struct.unpack_from('<IiIii', b, vt)
+    types = []
+    for k in range(nt):
+        t = vt + toff + 0x28 * k
+        kind, name_rel, _z = struct.unpack_from('<iiI', b, t)
+        size = struct.unpack_from('<3f', b, t + 0x0C)
+        extra = struct.unpack_from('<3f', b, t + 0x18)
+        rel = struct.unpack_from('<i', b, t + 0x24)[0]
+        params = None
+        if rel:
+            at = (t + rel) & 0xFFFFFFFF
+            if b[at:at + 4] != b'SGO\0':
+                raise ValueError(f'vegetation type {k}: no SGO at {at:#x}')
+            params = bytes(b[at:map_legacy.sgo_extent(b, at)])
+        types.append(VegType(kind, _utf16z(b, t + name_rel), size, extra, params))
+    n_cells = (joff - coff) // 2
+    side = int(round(n_cells ** 0.5))
+    if side * side != n_cells or joff - coff != 2 * n_cells:
+        raise ValueError(f'vegetation cells: {joff - coff} bytes are not a square of byte pairs')
+    cells = np.frombuffer(b, dtype=np.uint8, count=2 * n_cells, offset=vt + coff).reshape(side, side, 2)
+    return Vegetation(types, cells[:, :, 0].copy(), cells[:, :, 1].copy(), bytes(b[vt + joff:vt + joff + 0x1000]),
+                      extent / side)
 
 
 STEP_SAMPLES = 2   # the EDF6 terrain's vertex lattice: every 2nd sample = 4 m (tools/edf41_maps.py says why)

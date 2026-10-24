@@ -12,6 +12,8 @@
 #include "sightzoom.h"
 #include "stores.h"
 #include "edf/seat.h"
+#include "mission_packs.h"
+#include "sound_place.h"
 
 namespace crew {
 extern unsigned char* image;
@@ -84,6 +86,7 @@ struct Config {
     float tempestTvBoost=3.0f;     // ...fire boosts it to this many times its top speed (once, for good)// a stock lock-on weapon the player holds locks the target nearest the screen's centre first (lockon.cpp)
     bool routeGuidePath=true;  // the stock route guide strip along the navmesh route's corners, not through walls (route_guide.cpp)
     bool splitMissileSurface=true;// split missiles (Blood Storm) measure their split distance to the target's surface (splitmissile.cpp)
+    bool supportUnitOnAllies=true;// support units (life vendors, power posts...) stick to allies, not through them (supportunit.cpp)
     bool vehicleHud=true;      // HP / ammo / fuel over the nearest NPC-driven friendly vehicles, the carriers' panel (hud.cpp)
     int vehicleHudCount=6;     // ...over at most this many of them (nearest first)
     float vehicleHudRange=500.0f;// ...within this many metres of the player
@@ -94,6 +97,11 @@ struct Config {
     int playerJetBoostKey=0x10;     // ...on the keyboard and mouse: the boost key (a Windows virtual-key code; VK_SHIFT)
     int playerJetBrakeKey=0x11;     // ...and the brake key (VK_CONTROL)
     int playerJetSwitchKey=0x52;    // ...and the key that switches stores ('R'; on a pad LB)
+    // A stock-class vehicle's own secondary weapon (the BMPT's missiles, payload.cpp IndependentSecondary): the key that
+    // switches its round ('T'), and the pad buttons (XInput bits as MapButton's: 8 the d-pad right). The primary's rounds
+    // stay on PlayerJetSwitchKey / LB: each switch one control, whatever was fired last (the user, 2026-10-21: 「学学战雷」).
+    int vehicleSecondarySwitchKey=0x54;
+    int vehicleSecondarySwitchButton=0x08;
     bool playerJetCatch=true;       // ...and after ejecting, another of the same jet catches the player in the air
     int playerJetFlareKey=0x58;     // the key that drops a pair of flares ('X'; missile.cpp FlareDrop)
     int playerJetFlares=8;          // the pairs a player jet carries
@@ -142,7 +150,29 @@ struct Config {
     float sazabiCannonDamage=300.0f;   // a mega particle beam's round at full charge (90 rounds a beam, 5 beams)
     float sazabiFunnelDamage=500.0f;   // a funnel beam's round (6 rounds a shot)
     bool sazabiTestBoard=false;     // tests (testrange/run_test.py): the player put into the first empty Sazabi seen
-    char testBoardVehicle[32]{};    // tests (tests/autopilot): the player put once a mission into the first vehicle whose class name has this
+    // The Dreadnought (dreadnought.cpp, docs/dreadnought-plan.md): flown by the plugin with the player in it.
+    bool dreadnought=true;
+    float dreadnoughtSpeed=45.0f;      // m/s at its throttle full ahead
+    float dreadnoughtBoost=1.8f;       // ...times that, and its acceleration, with the boost on
+    float dreadnoughtAccel=5.0f;       // m/s^2 its velocity changes at most
+    float dreadnoughtClimb=18.0f;      // m/s up (or down) at the full ascend (descend)
+    float dreadnoughtTurn=10.0f;       // deg/s at the full left stick across (A / D)
+    float dreadnoughtFloor=30.0f;      // m: the least its keel flies over the ground
+    int dreadnoughtBoostKey=0x10;      // ...on the keyboard: the boost (VK_SHIFT)
+    int dreadnoughtDescendKey=0x11;    // ...on the keyboard: down (VK_CONTROL)
+    int dreadnoughtStrafeLeftKey=0x51;   // ...on the keyboard: sideways to its left ('Q'; 0 none)
+    int dreadnoughtStrafeRightKey=0x45;  // ...and to its right ('E'; 0 none)
+    // ...on a pad: the seat's button bits (docs/stores-re.md §4): the boost (0x01 A), down (0x10 LB); 0 none
+    int dreadnoughtBoostButton=0x01;
+    int dreadnoughtDescendButton=0x10;
+    int dreadnoughtSeatButton=0x20;      // ...its seats round on a pad (RB: its B gets out of it; SeatNextKey on the keyboard)
+    int dreadnoughtHangarKey=0x48;     // the commander launches an escort flight from its hangar (H; 0 none)
+    int dreadnoughtHangarButton=0x08;  // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x08 Y; 0 none)
+    // Its hangar modules fitted (bit m: dreadnought_deck.h module m, ini DreadnoughtHangarLeftFore / LeftAft / RightFore /
+    // RightAft). The installer builds its model and collision by them; the plugin runs the hangars its model has and only
+    // says when these differ (installed before they were changed).
+    unsigned dreadnoughtHangars=0xF;
+    char testBoardVehicle[32]{};    // tests: class substring, optionally @exactModelBone to distinguish models sharing 506
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
                                     // once a mission near the player, then the player put into what it brings
     bool npcCrewTest=false;         // tests (tests/autopilot): auto-crew also for empty vehicles no player has driven yet
@@ -169,6 +199,17 @@ struct Config {
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
     bool vehicleRam=true;           // a driven ground vehicle's parts (hull, feet, fists) hit what they drive into (vehicleram.cpp)
     float vehicleRamDamage=20.0f;   // ...their kinetic energy's damage (the jets' formula) times this (0: none; 20: a ground vehicle is 5-10x slower than a jet, so 1 would leave the ram unnoticeable)
+    // The gravity operations (gravity.cpp) and their users: the gravity gun (gravitygun.cpp, the Air Raider's EDF6VC_CALL_GRAVITY_GUN)
+    // and the M099 float guns (floatgun.cpp).
+    float gravityDamage=20.0f;      // what a thrown thing deals: 1/2 m dv^2 at 287 kJ a point (the rams' formula) times this (0: none)
+    bool gravityGun=true;           // the gravity gun grabs, carries and throws (off: it is the stock Laser Guide Kit it was cloned from)
+    float gravityThrowSpeed=40.0f;  // m/s a 2 t thing leaves the gun at (lighter faster, heavier slower: gravity_logic.h ThrowSpeed)
+    bool gravityAutoTest=false;     // a test: every few seconds the nearest enemy is grabbed, held over the player and slammed down (gravitygun.cpp)
+    bool gravityGrabPlayers=false;  // the gravity gun may grab players (any machine's) and vehicles a player rides (off: it passes them by)
+    int floatGuns=1;                // dropped guns that float round their finder and fire (floatgun.cpp): 0 off, 1 EDF5's last mission (M099) only, 2 every mission
+    int floatGunMost=4;             // ...at most this many round one player (a fifth replaces the oldest)
+    float floatGunSec=90.0f;        // ...each fights this long once picked up (0: until the mission ends)
+    float floatGunReach=3.5f;       // ...picked up by walking this near it (m across; 3 m up or down)
     bool vehicleSound=true;         // the ground vehicles' engines, turrets, loaders and main guns heard as the plugin makes them (vehsound.cpp)
     float vehicleEngineVolume=1.0f; // ...each group's volume, times the game's own; 0: that group's stock sound kept
     float vehicleTurretVolume=1.0f;
@@ -208,8 +249,8 @@ struct Config {
     int highCamClass=2;             // ...offered in: 1 indirect-fire vehicles, 2 + big ones, 3 every turret turretcam.cpp serves
     int highCamKey=0x43;            // ...its key ('C'; a Windows virtual-key code, 0: none)
     int highCamButton=0x80;         // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
-    float highCamHeight=45.0f;      // ...the high eye: m over the vehicle's origin
-    float highCamBack=35.0f;        // ...m behind it
+    float highCamHeight=90.0f;      // ...the high eye: m over the vehicle's origin
+    float highCamBack=55.0f;        // ...m behind it
     float highCamPitch=40.0f;       // ...looking down this many degrees ahead
     bool nixTorsoTwist=true;        // the Nix's torso keeps its world yaw while A/D turn the legs; only the mouse turns it (nix.cpp)
     bool decoupledTurretCam=true;   // turretcam.cpp: the mouse turns the camera, the turret follows at its own rate
@@ -224,6 +265,9 @@ struct Config {
     int sightRangeStep=0;           // ...its step, m (0: graduated, 25 m to 300, 50 m to 1000, 100 m beyond: sightzoom.h)
     bool sightRangePad=true;        // ...and on a pad the d-pad up / down
     bool infantryScope=true;        // a soldier's scoped weapon zoomed: a real optic's eyepiece and reticle (infantryscope.cpp)
+    bool thermal=true;           // eligible vehicle optics: true mesh thermal imagery, optical by default
+    int thermalKey=0x4E;         // N cycles optical / white hot / black hot
+    int thermalButton=0xC0;      // ...and a pad seat's chord (seat button bits, all held: 0xC0 L3 + R3; seat_switch_logic.h ChordHeld)
     bool firstPerson=true;          // first person on foot: the key switches it (firstperson.cpp)
     bool fpVehicle=true;            // ...in a vehicle as well: each seat's eye at its station (fp_vehicle.cpp)
     bool fpHideStockHud=true;       // ...and the stock HUD off there (its information on the cockpit's panels)
@@ -243,18 +287,23 @@ struct Config {
     float fpHoldZ=0.0f;             // ...ahead
     float fpScale=0.5f;             // ...shrunk about the eye this much (the same picture, nearer: walls do not cut it)
     float fpNear=0.03f;             // ...the camera's near clip, m (0: the stock 0.1)
+    float fpCenter=0.07f;          // ...move each grip toward the centre, m; added separately so existing ini defaults upgrade
+    float fpSway=0.20f;            // ...look-induced weapon sway, 0 none..1 full; recoil/bob unchanged
     bool fpAimSnap=true;            // ...the aim follows the mouse at once (this machine's look smoothing off)
     bool fpArmIk=true;              // ...the arms posed for the first person: shoulders beside and below the eye
     float fpHoldArc=60.0f;          // ...a free hand on the other hand's weapon slides round it this far from below, deg
     float fpWristMax=30.0f;         // ...and its forearm turns about the wrist at most this much, deg
+    bool fpNativeElbow=true;        // ...the elbow bends toward where the animation has it (0: out and down, the old pole)
     bool fpFit=true;                // ...a bulky or long weapon held further off, a shield out to the side
     bool fpCulling=true;            // ...the arms and weapon handed to Umbra around the eye (never culled)
     bool fpMotion=true;             // ...the arms and weapon sway, bob, kick, dip at a reload, a switch, a sprint, a roll
     bool gunStabilizer=true;        // stab.cpp: the guns that should have one hold their world line on the move
     float viewDistance=-1.0f;       // the near camera's far clip, m (view.cpp; stock 1000; 0: as the mission has it; -1: unlimited)
+    bool enemyControl=true;         // native enemy player mode, entered from the map; disabling releases control
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
+    bool mapMarchPace=false;        // ...a move / attack-move given together keeps to the slowest unit's pace (P toggles; march_pace.h)
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
     bool damageStats=true;          // the damage statistics (damagestats.cpp): every hit booked, its page over the map
     int damageStatsKey=0x49;        // ...the page's key ('I': the map opened on it; a Windows virtual-key code, 0: none)
@@ -267,6 +316,12 @@ struct Config {
     int debugSpawnSpawnKey=0x78;    // ...spawn the row picked (F9)
     float debugSpawnRange=500.0f;   // ...the crosshair's ground point counts within this, m
     float debugSpawnDistance=30.0f; // ...else (sky, too far, at the player's feet) this far ahead of the player, m
+    // The M map's 「摆放」 panel in the test range's mission (range_place.h; the debug spawn tool's catalog and making,
+    // whatever DebugSpawn says): on by default; enemies use the host-authoritative online transaction. RangePlaceAll: every
+    // row preloaded at the mission's start (Entry::preload false: a model archive of its own); off: those load the first
+    // time they are placed (debug_spawn.cpp RequestLoad).
+    bool rangePlace=true;
+    bool rangePlaceAll=false;
     bool roomLoadout=true;          // the room / HQ support loadout menu (room_ui.cpp; 0 at load: nothing installed, both
                                     // screens untouched; turned 0 later: both screens passed through, nothing read or drawn)
     bool roomPreSync=true;          // ...and the room pre-sync with it (room_sync.h: generate what the host lists; 0: none)
@@ -274,6 +329,8 @@ struct Config {
     int roomLoadoutButton=0xC0;     // ...and pad combination (XInput button bits, all held: 0xC0 L3 + R3; 0 none)
     bool stockStores=true;          // the stock vehicles' requests carry the stores they should (the installer,
                                     // tools/make_stock_stores.py) and the switch goes round them (payload.cpp)
+    bool allClassesRide=true;       // every class may take every seat a class may take (allclass.cpp: each seat's class
+                                    // mask widened as the vehicle is made, a bench pose for a rider whose CAS lacks the seat's)
     bool seatSwitch=true;           // the player moves to another seat of the vehicle they are in (seatswitch.cpp)
     int seatNextKey=0x46;           // ...the next free seat ('F'; a Windows virtual-key code, 0: none)
     bool seatNumberKeys=true;       // ...the number keys 1-9 pick that seat (an NPC in it changes places with the player)
@@ -319,15 +376,43 @@ struct Config {
     float proteusPriorityRadius=100.0f;// ...within this of it (m)
     bool edf41Ai=true;              // EDF4.1 Hector's weapon gating and back-off cycle on the converted Hectors (edf41ai.cpp)
     float edf41MotherPlace=0.0f;    // development only: the mothership held this many m in front of the camera each frame (0 = its route), to see it
-    bool edf41MotherBulletProbe=false;   // development only: log every bullet class the game spawns and the head of its creation info (edf41mother.cpp)
-    int edf41MotherParts=15;        // development only: which part groups the mothership builds as real objects (bit 1 hatches, 2 covers, 4 cannons, 8 main cannon, 16 panels); 0 = none
-    bool edf41MotherDev=false;      // development only: EDF4.1's UfoMother301 prototype (edf41mother.cpp); off in every release
+    int edf41MotherParts=31;        // which part groups the mothership builds as real objects (bit 1 hatches, 2 covers, 4 cannons, 8 main cannon, 16 panels); 0 = none
+    int edf41MotherForce=0;         // development only: force the mothership's actions / part deaths the autopilot cannot cause (edf41mother.cpp Force)
+    bool edf41Mother=true;          // EDF4.1's UfoMother301 and its part classes (edf41mother.cpp)
+    bool edf41Robo=true;            // EDF4.1's UfoRobo, the transforming ship / robot (edf41robo.cpp)
+    float edf41RoboLevel=0.0f;      // development only: the robot's level for its guns' numbers (0 = the object's own)
+    int edf41RoboGunEvery=0;        // development only: the ship's volleys in turn every n frames, the robot's knee / shoulder guns every n (0 = 4.1's timers)
+    int edf41RoboAttack=-1;         // development only: the robot's attack every 10 s, always robo_attack_table entry n (-1 = 4.1's choice)
+    float edf41RoboPlace=0.0f;      // development only: the robot put this many m in front of the camera when it appears (0 = where the script puts it)
+    int edf41DevShoot=0;            // development only: the edf41 classes' objects shot by the local player's bullets every n frames each (edf41classes DevShoot; 0 off)
+    float edf41DevShootDamage=200.0f;   // ...the damage of each
+    float edf41DevShootBlast=0.0f;      // ...> 0: each an explosion of this radius (the area-damage path rockets and missiles take only), 0 a plain hit
+    float edf41RoboTransformAfter=0.0f;   // development only: transform this many s after it appears, as ObjectAction 0 (0 = when the script says)
+    bool edf41Mother401=true;       // EDF4.1's UfoMother401 (the Earth Eater) and its eleven part classes (edf41mother401.cpp)
+    int edf41Mother401Dev=0;        // development only (bits): 1 attack always allowed, 2 short attack waits, 4 panels in place at once,
+                                    // 8 the Core destroyed / 16 a weak panel destroyed after edf41Mother401DevKill seconds, 32 the
+                                    // ObjectAction edf41Mother401DevAction then, 64 Edf41DevShoot shoots the generators' wave enemies too,
+                                    // 128 the player's armor kept full, 256 the DevShoot only after edf41Mother401DevKill seconds
+                                    // 1024 no light flashes, 2048 no bullet hit sounds, 4194304 no charge glows
+    float edf41Mother401DevKill=60.0f;
+    int edf41Mother401DevAction=0;  // development only (bit 32 of edf41Mother401Dev): the ObjectAction run at edf41Mother401DevKill seconds
+    float edf41Mother401Place=0.0f; // development only: the 401 hull held this many m above the player (0 = where the script put it)
     bool edf41Sound=true;           // EDF4.1's weapon sound effects and voices added to EDF6's banks (edf41sound.cpp), from the game's start
     bool edf41VoiceProbe=false;     // development only: log each voice key the game looks up in each bank and each caption it finds (edf41sound.cpp)
+    // ---- the EDF4.1 classes online (edf41net.cpp; docs/edf41-classes.md 联机) ----
+    bool edf41Net=true;             // the 4.1 classes' parts / spawns get the game's child identity, the host's decisions travel to the guests
+    bool edf41NetMirror=false;      // development only, offline: a second UfoRobo follows the first through the game's own stream code (a guest copy)
     bool terrainShare=true;         // every placement of one terrain piece drawn from one decode (fieldshare.cpp), from the game's start
-    int edf5CampaignContent=0;       // the EDF5 mission packs' first content id (edf5campaign.cpp; 0 = none installed): owned like a DLC
-    int testRangeContent=0;          // the test range mission pack's content id (offline and online modes; 0 = not installed): owned the same way
-    int edf41Content=0;              // the first of the EDF4.1 packs' content ids (the story; its Mission Pack 1 and 2 are +1, +2; offline and online modes; 0 = not installed): owned the same way
+    // The mission packs' content ids are fixed (mission_packs.h kEdf5 / kRange / kEdf41, tools/make_edf5_campaign.py
+    // CONTENT); the ini says which are installed. Any other value is an older installer's (an id that depended on the
+    // mods installed, 2026-10-15): logged and taken as 0 until the installer runs again (plugin.cpp LoadConfig).
+    int edf5CampaignContent=0;       // the EDF5 mission packs' first content id, 65 (edf5campaign.cpp; 0 = none installed): owned like a DLC
+    int testRangeContent=0;          // the test range mission pack's content id, 68 (offline and online modes; 0 = not installed): owned the same way
+    int edf41Content=0;              // the first of the EDF4.1 packs' content ids, 69 (the story; its Mission Pack 1 and 2 are +1, +2; offline and online modes; 0 = not installed): owned the same way
+    packs::Table missionPacks;       // EDF6VehicleCrew.packs.ini: each installed pack's identity and placeholder rows (mission_packs.h)
+    // The ported content unlocked (unlock_ported.h; both off by default: a shared package keeps everyone's progress):
+    bool portedMissionsUnlocked=false;  // every mission of the EDF5 / EDF4.1 packs selectable (edf5campaign.cpp InstallPortedMissions), live
+    bool portedWeaponsUnlocked=false;   // every ported weapon owned at the next save load (airstrike.cpp UnlockDlcHook); never taken back
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
     // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
@@ -350,6 +435,7 @@ struct Config {
     float npcLaneLength=150.0f;     // ...m along it (shorter where it meets the map)
     float npcFlankDeg=45.0f;        // ...their combat spot this many degrees off the player's own line to the target
     bool npcWeaponSwitch=true;      // ...they switch weapons for the target's range and kind
+    bool npcBackpack=true;          // ...a support soldier made with a backpack weapon uses it (npc_backpack.h, docs/npc-backpack-re.md)
     float npcEngageShare=0.85f;     // ...they fight at this share of their longest weapon's true reach (the stock: half, at least 25 m)
     bool npcEvade=true;             // ...crowded, they back off, side-step and roll
     float npcDangerRange=15.0f;     // ...m: enemies this near press on them
@@ -384,6 +470,9 @@ struct Config {
     float npcRecruitCooldownSec=60.0f;// ...a dismissed squad may be recruited again after this many s
     bool vanillaRecruit=false;      // the stock walk-up recruit (原版率领: a free NPC joins a player within 10 m): false = off,
                                     // the map's FOLLOW / RECRUIT the only way in (npcai.cpp ThinkHook; needs CustomNpcAi)
+    bool npcFreeSquadCover=false;   // the stock's cover of a squad with +0x540 (seen at 1/3 the range; for a while damage
+                                    // taken x0.01, dealt x0.1; npcai.cpp CoverRoot): false = no squad has it (the user
+                                    // 2026-10-19: "暂时取消这个掩护设定吧"), true = kept by its top NPC before and after recruiting
     bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
     float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
@@ -496,8 +585,6 @@ bool InstallLegacyMap() noexcept;
 bool InstallEdf41Sound() noexcept;
 // edf41ai.cpp: the converted EDF4.1 Hectors attack as 4.1's do (per-arm range gate, back-off cycle).
 bool InstallEdf41Ai() noexcept;
-// edf41mother.cpp: UfoMother301 (EDF4.1's mothership), phase 1 prototype, only with ini Edf41MotherDev=1.
-bool InstallEdf41Mother() noexcept;
 // edf41fortress.cpp: the converted EDF4.1 four-legged fortress stands from the start and drops through its core hatch.
 bool InstallEdf41Fortress() noexcept;
 // edf41dragon.cpp: the converted EDF4.1 giant dragon breathes 4.1's flame stream and keeps 4.1's ranges and glide pass.
@@ -508,10 +595,29 @@ bool InstallEdf41SmallDragon() noexcept;
 bool InstallEdf41Insects() noexcept;
 // edf41natives.cpp: EDF4.1 script natives EDF6's BVM executor lacks (SetEncountReportRadius as table 1 id 3003).
 bool InstallEdf41Natives() noexcept;
+// edf41mother.cpp: UfoMother301 (EDF4.1's mothership) and its part classes, registered in the game's own factory table.
+bool InstallEdf41Mother() noexcept;
+bool InstallEdf41Robo() noexcept;      // edf41robo.cpp: EDF4.1's UfoRobo (ini Edf41Robo)
+bool InstallEdf41Mother401() noexcept;   // edf41mother401.cpp
+// edf41deiroi.cpp: a falling Deiroi's landing ray, cast by EDF6 against a null Havok world (crash in EDF4.1's M412), goes through the map ray.
+bool InstallEdf41Deiroi() noexcept;
+// allclass.cpp: every class in every seat (ini AllClassesRide): the seat build's class mask widened, the ride pose's fallback.
+bool InstallAllClassesRide() noexcept;
+// fsbudget.cpp: CRI File System's loader pool (num_loaders: 130 as the game builds it, 0x60 + its caller's 0x22) raised
+// by the model archives the spawn catalog can keep open (src/spawn_catalog_archives.h) before the library starts, so the
+// test range's place panel catalog does not run it out. The other pools do not grow with open archives (fsbudget.cpp).
+bool InstallFsLoaderBudget() noexcept;
+// killcount.cpp: the battle record (戦績) also lists the EDF4.1 port's own kill counters (edf41_*KillCount, the
+// installer's Mods/ETC/ACHIEVEMENT.SGO; docs/kill-counter-re.md): its row table moved to the plugin's, rows added.
+bool InstallKillCounters() noexcept;
 // The plugin's missiles guided by proportional navigation with a proximity fuse (missile.cpp).
 bool InstallMissiles() noexcept;
 // The stock split missiles (MissileBullet02) split short of a big target's surface (splitmissile.cpp).
 bool InstallSplitMissiles() noexcept;
+// Support units (SupportUnitBullet01) stick to allies (supportunit.cpp): the ctor's pass-through-allies byte cleared
+// while the ini's SupportUnitOnAllies is on (set by every config load).
+bool InstallSupportUnitOnAllies() noexcept;
+void SetSupportUnitOnAllies(bool on) noexcept;
 // The stock route guide strip (RouteGuide) drawn along the navmesh route's corners (route_guide.cpp).
 bool InstallRouteGuide() noexcept;
 bool InstallGuidance() noexcept;   // guidance.cpp: the stock homing rounds' steering calls
@@ -521,6 +627,13 @@ bool InstallJetSound() noexcept;
 // The game's glyph cache under one lock (glyphs.cpp): its threads lost glyphs and showed one character as another.
 bool InstallGlyphLock() noexcept;
 bool InstallEdf5Campaign() noexcept;
+bool InstallPortedMissions() noexcept;   // PortedMissionsUnlocked: the packs' mission select (edf5campaign.cpp)
+void SetMissionPackSaveHook(bool ready) noexcept;   // the save-load hook is in (airstrike.cpp): packs with Legacy rows owned
+void MigrateMissionPackSave(unsigned char* gs) noexcept;   // a pack's loaded save moved to the rows now, once (edf5campaign.cpp)
+bool InstallEdf41MenuBg() noexcept;      // EDF4.1's HQ background in the 4.1 packs (edf5campaign.cpp)
+// The current mode's content id (0..2 EDF6's, then the installed packs': Cfg().edf5CampaignContent, edf41Content ...), -1
+// when there is none to read (edf5campaign.cpp, as the mission select reads it). Any thread: only reads.
+int GameContentId() noexcept;
 // EDF5's compiled mission scripts online: the BVM executor's PreloadPlayerResource and CreatePlayer given their online
 // half (edf5online.cpp). Edf5BvmOnlinePlayers: the patched creation loop's count.
 bool InstallEdf5Online() noexcept;
@@ -529,16 +642,22 @@ std::uint32_t Edf5BvmOnlinePlayers() noexcept;
 bool Edf5BvmOnlinePlayerArgs(int index,int* pad,int* split) noexcept;
 void Edf5BvmOnlinePlayerMade(int index,const void* made) noexcept;
 void ResetEdf5Online() noexcept;
+// More than the BVM loop's four online (edf5online_room.cpp, edf5online_room.h): EDF6Coop's BvmPlayerTableHooks in
+// place here; every one of the mission's `count` players' machines said it creates them too (EDF6Coop member attribute
+// EDF6X_BVMPLAYERS; false with the reason in `why`); this machine's own word told and the others' watched (the room's
+// frame, room_ui.cpp).
+bool Edf5CoopBvmTableHooked() noexcept;
+bool Edf5RoomAllowsBvmPlayers(std::uint32_t count,char* why,std::size_t size) noexcept;
+void Edf5OnlineRoomTick() noexcept;
 void JetSound(unsigned char* vehicle) noexcept;
 void JetSoundTick() noexcept;
 float GameEffectVolume() noexcept;   // jetsound.cpp: the game's master volume times its effect volume (0..1)
 // The lock-on beeps of a vehicle's weapons: kept for a local player's seat, silenced for every other (jetsound.cpp).
 void LockSound(unsigned char* vehicle) noexcept;
-// Where a sound is heard from the camera (jetsound.cpp, the sound system's listener 0, as the jets' engines are placed):
-// its gain in each ear (equal power, the spread kept), its distance (m), the Doppler ratio between it and the camera,
-// the unit line from it to the camera.
-struct SoundPlace { float left,right,distance,doppler; float toCamera[3]; };
-bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;   // false: no listener this frame
+// Where a sound at `pos` moving `vel` (m/s) is heard from the camera (jetsound.cpp, the sound system's listener 0, as the
+// jets' engines are placed; SoundPlace and the arithmetic: sound_place.h). `vel` may be nullptr: a still sound. False: no
+// listener this frame.
+bool SoundAt(const float* pos,const float* vel,SoundPlace* out) noexcept;
 bool SoundListening() noexcept;   // the listener is placed this frame (JetSoundTick ran for the jets or the vehicles)
 // The ground vehicles' sounds (vehsound.cpp, ini VehicleSound): checked at load; every vehicle's input, the plugin off
 // too (then it gives the stock sounds back); a new mission.
@@ -600,6 +719,8 @@ struct ObjRef {
 
 // The plugin's log (EDF6VehicleCrew.log; over kLogMax it is renamed to .log.1 and a new one begun).
 void Log(const char* format,...) noexcept;
+// Preformatted crash diagnostics: direct append, without the ordinary logger's locks or CRT formatting.
+void CrashLog(const char* text,std::size_t size) noexcept;
 void ReloadConfigIfChanged() noexcept;
 // The ini read again now (the loadout menu saved it: loadout_store.cpp), and its path (Mods/Plugins/EDF6VehicleCrew.ini).
 void ReloadConfigNow() noexcept;
@@ -623,6 +744,8 @@ void SeePlayer(const float* pos,std::int32_t team) noexcept;
 // A new mission (MissionStart): the last mission's fix and player human are forgotten. GameMs counts the load
 // as one frame, so without this they would pass for fresh at the new mission's start.
 void ResetPlayer() noexcept;
+// Shared game-thread scene tick, called by the local Soldier and by vehicle inputs; de-duplicated by GameFrame.
+void FrameTick() noexcept;
 
 // The core modules' own declarations (crew, heli, ground, hud, mission, loadout, overlay) are in their
 // headers, included at the end of this file.
@@ -670,6 +793,31 @@ bool JetLaunch(JetRole role,const float* from,const float* heading,const float* 
 // jet does (fuel, damage, ammo). The vehicle, or nullptr (not preloaded this mission, kMaxJets flying).
 unsigned char* JetLaunchDrone(const float* from,const float* heading,const float* target,DWORD fuelSec,const void* source,
                               bool escort) noexcept;
+// A Dreadnought fighter off its hangar (dreadnought_hangar.inc): kind 0 fighter, 1 defender, 2 bomber, 3 interceptor (its
+// crewless NPC body, jet_internal.h Body::dn*), launched as JetLaunchDrone launches a drone. The vehicle, or nullptr.
+constexpr int kDnFighterKinds=4;
+unsigned char* JetLaunchDreadnoughtFighter(int kind,const float* from,const float* heading,const float* target,DWORD fuelSec,
+                                           const void* source,bool escort) noexcept;
+// Whether the local player leaving `fighter` is put aboard its dreadnought (dreadnought_hangar.inc: its own bay's hangar,
+// running here, has it at that bay's mouth putting its pilot out onto the bridge): no parachute, no catch
+// (playerjet.cpp Leave / Left), the fighter handed back. Anywhere else, false: they eject.
+bool DreadnoughtTakesBack(const unsigned char* fighter) noexcept;
+// A board press of `human` on foot that visits Dreadnought `vehicle` (crew.cpp FindSeatHook): true when the local player
+// stands over one of its fitted hangars and the press is taken for it (a fighter of that hangar out to its bay's mouth
+// for them: dreadnought_hangar.inc HangarBoard), no seat of the ship's.
+bool DreadnoughtHangarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
+// A Dreadnought's hangar and its fighters (dreadnought_hangar.inc; jet.cpp): the hangar holds one (on a lift, landing,
+// launched off the deck): this frame's velocity and spin are its motion, a player aboard or not (false: none of the
+// plugin's jets); lets it go (it flies on from that motion: its own flight as an escort, or the player's); takes it in
+// (deleted, out of sight down its lift). JetLeaving: it is withdrawing or recovering (fuel, hull, stores).
+bool JetHangarHold(unsigned char* v,const float* vel,const float* omega) noexcept;
+void JetHangarRelease(unsigned char* v) noexcept;
+void JetHangarStow(unsigned char* v) noexcept;
+bool JetLeaving(const void* vehicle) noexcept;
+bool JetMotion(const void* vehicle,float* vel) noexcept;   // its velocity as its flight (or hangar) last sent it
+// The player's jet `v` launched off a Dreadnought's bay (dreadnought_hangar.inc): its flight takes over at the motion its launch gave
+// it (jet.cpp's entry), in the air, full throttle.
+void PlayerJetLaunched(unsigned char* v) noexcept;
 // A drone a thrown Robot Bomb releases where it landed (airstrike.cpp kThrows; tools/calls.py brings 'throw'): the
 // blast or doll drone (rotor, a few metres over `at`) or the gun drone (fixed wing, taking off from ~20 m over it),
 // with no carrier, working round `at` within a short reach and leaving (a charge: blowing up there) out of fuel
@@ -713,20 +861,26 @@ JetBody BomberBody(const unsigned char* inst) noexcept;
 // from its SGO's mark (veh+0x162C, kMark* in body506.cpp, the one table of them); the 506's physics step
 // (slot 57) is hooked once, there, and hands each body to its owner's step, which returns the velocity and
 // spin to set (false: leave the stock step's).
-enum class PluginBody { none, jet, sub, playerJet, sazabi };
+enum class PluginBody { none, jet, sub, playerJet, sazabi, dreadnought };
 PluginBody BodyOf(const void* vehicle) noexcept;
 float BodyMark(const void* vehicle) noexcept;      // the mark of a 506 body, 0 for anything else
 bool InstallBody506() noexcept;                    // before InstallJets / InstallSub / InstallPlayerJets
 bool Body506Ok() noexcept;                         // the physics hook is in
 bool Body506ReadsSolver() noexcept;                // ...and it reads the solver's velocity before the stock step (GroundContact)
 bool JetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet.cpp
+bool JetHeldStep(unsigned char* v,float* lin,float* ang) noexcept;        // jet_hooks.cpp: a hangar's (JetHangarHold)
 bool SubBodyStep(unsigned char* v,float* lin,float* ang) noexcept;        // subcarrier.cpp
 bool PlayerJetBodyStep(unsigned char* v,float* lin,float* ang) noexcept;  // playerjet.cpp
 bool SazabiBodyStep(unsigned char* v,float* lin,float* ang) noexcept;     // sazabi.cpp
+bool DreadnoughtBodyStep(unsigned char* v,float* lin,float* ang) noexcept;   // dreadnought.cpp
 // sazabi.cpp: the Sazabi (docs/gundam-plan.md), a 506 body with the Sazabi mark (7401-7499): never crewed, never flown
 // as a heli; with the player in seat 0 it walks and flies; its bones are posed every frame.
 bool IsSazabi(const void* vehicle) noexcept;
+// dreadnought.cpp: the Dreadnought (docs/dreadnought-plan.md), a 506 body with its mark (7601-7699): never crewed, never
+// flown as a heli; with the player in seat 0 the plugin flies it, empty after that it settles on the ground.
+bool IsDreadnought(const void* vehicle) noexcept;
 void BoardingRequest(unsigned char* vehicle) noexcept;   // boarding.cpp: the player into it (the boarding gun's path)
+bool BoardingUnderway() noexcept;                        // boarding.cpp: a boarding is still pressing the button
 // The local player's Sazabi as the HUD shows it (sazabi.cpp publishes it each frame on the game thread; hud.cpp reads it,
 // fresh for kSazabiCueMs). False with none (not riding one).
 struct SazabiCue {
@@ -765,6 +919,10 @@ bool PlayerSazabiCue(SazabiCue* out) noexcept;
 // seat is no player's Sazabi's (the stock camera then).
 bool SazabiCamera(const unsigned char* seat,const float* wasEye,const float* wasLook,float* eye,float* look) noexcept;
 void SazabiFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
+void DreadnoughtFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
+void DreadnoughtInput(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, before it: the local rider's aim stick
+bool InstallDreadnought() noexcept;                   // after InstallBody506
+void ResetDreadnought() noexcept;                     // a new mission
 bool InstallSazabi() noexcept;                        // after InstallBody506
 void ResetSazabi() noexcept;                          // a new mission
 // An impact `by` a vehicle (a crash, jet.cpp / playerjet.cpp; a ground vehicle's ram, vehicleram.cpp) at `at`: `damage`
@@ -800,7 +958,8 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // The Sazabi's beams are made and fired the same way (sazabi.cpp; pylib/vcobjects.py SAZABI_ROUND_FILES): the mega
 // particle cannon's beam, its charge's glow at the chest, a funnel's burst. The Proteus's shield is raised the same way
 // (proteus_shield.inc; tools/make_proteus.py): one BarrierBullet01, the stock Air Raider's electromagnetic barrier.
-enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield };
+enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,
+                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;
@@ -809,6 +968,26 @@ bool RoundSize(const RoundObj& r,float size) noexcept;       // its next rounds'
 bool RoundBlast(const RoundObj& r,float radius) noexcept;    // its next rounds' blast radius (AmmoExplosion)
 void RoundDrop(RoundObj& r) noexcept;                        // deleted while it is there; forgotten
 bool EmcIfcOk() noexcept;                                    // RoundSize / RoundBlast's IFC fields are where they write
+
+// ultimate.cpp: the ultimate strike (docs/plan-2026-10-19-ultimate.md, src/ultimate_plan.h): the satellite call's fire
+// (airstrike.cpp) starts its show at `at` by `caller` with the weapon's `damage`; UltimateTick plays it a frame at a time
+// (SharedFrameTick); ResetUltimate at a new mission forgets it, nothing touched (its objects were the last mission's).
+// False: no show (its rounds not preloaded, every show slot taken): the stock satellite beam fires instead.
+// Several play at once; online every machine plays each machine's player's shows (ultimate_net_protocol.h).
+bool UltimateStart(const unsigned char* caller,const float* at,float damage,std::uint64_t seed) noexcept;
+void UltimateTick() noexcept;
+void ResetUltimate() noexcept;
+void PreloadUltimate(void* mgr) noexcept;   // the magic circles, with the shells (jet_spawn.cpp)
+// Online, another machine's player's call here (airstrike.cpp SatFireHook): its stock beam is held back only for a show of
+// its caller's heard here (UltimateHeardFrom: began lately, not matched to a call yet), or one whose start comes before the
+// stock beam fires (UltimateStockHoldBack, from ultimate.cpp, true when one was held back). An older build's call (no
+// show heard) keeps its stock beam. Within kUltimateStockWaitMs of each other.
+constexpr ULONGLONG kUltimateStockWaitMs=4000;
+bool UltimateHeardFrom(const unsigned char* caller) noexcept;
+bool UltimateStockHoldBack(const unsigned char* caller) noexcept;
+void UltimateStockReset() noexcept;
+// The caller's HUD line (hud.cpp): peers of an older build in the room see the stock beam.
+bool PlayerUltimateCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // emc.cpp: the EMC's charged beam (docs/emc-re.md, README EMC 蓄力光束): the player's trigger in a Vehicle510_Maser charges,
 // and one thick beam carries the stock burst's damage through every enemy and building on its line, a blast at its end.
@@ -842,6 +1021,9 @@ bool SidecarBulletPass(const void* owner,const void* target,const void* ownerCtr
 bool WarpHuman(unsigned char* human,const float* pos) noexcept;
 int SidecarPassengers() noexcept;     // passengers riding now (the bullets' hook's quick "nothing to pass" test)
 bool SidecarBulletHooked() noexcept;  // jet_hooks.cpp: the bullets' candidate hook is in (InstallBulletPass)
+// jet_hooks.cpp: Dreadnought `v`'s hull bodies in slot `slot` (0..3, dreadnought.cpp's ships; nullptr: none), its own and its
+// riders' rounds pass through them.
+void HullBodies(int slot,const unsigned char* v) noexcept;
 void SidecarLevel(const void* body,float* w) noexcept;
 void ResetSidecars() noexcept;
 // physics.cpp: the car step's final setAngVel (0x6746C6) goes through the plugin (SidecarLevel), redirected at load.
@@ -877,6 +1059,11 @@ bool SightZoomCanMount(const void* vehicle,unsigned seat) noexcept; // game-thre
 bool SightZoomMounted(const void* vehicle=nullptr) noexcept; // active physical optic; turret input stays native
 // Current validated seat/weapon fire-control surface; none when unavailable or another camera owns the view.
 sightzoom::Kind SightZoomView(const void* vehicle=nullptr) noexcept;
+// The sight's field over the view now (sightzoom.h ScopeField, from one snapshot of the seat's cue): the vehicle, the
+// soldier looking through it, its fire-control surface and magnification; false (all empty) with none, or while another
+// camera owns the view. hud.cpp draws the field by it, and so holds the stock crosshair back for that soldier.
+struct SightScope { const void* vehicle=nullptr; const void* human=nullptr; sightzoom::Kind kind=sightzoom::Kind::none; float zoom=1.0f; };
+bool SightZoomScope(SightScope* out) noexcept;
 // The sight's range setting (sightzoom.h kZeroStep..; 0 the bore line) and the superelevation, rad, it lays the line of
 // sight under the bore for the weapon looked through now; any thread, 0 with no magnified optic.
 int SightZoomRange(const void* vehicle=nullptr,float* angle=nullptr) noexcept;
@@ -889,6 +1076,8 @@ void ResetSightZoom() noexcept;
 // swallowed and counted, up +; the count since the last call), and the first XInput pad's buttons now (false: none).
 int TakeScopeWheel(bool hold) noexcept;
 bool MapPadButtons(std::uint16_t* buttons) noexcept;
+// The same pad with its analog triggers (0..255), for the controlled enemy's attack keys.
+bool MapPadState(std::uint16_t* buttons,std::uint8_t* leftTrigger,std::uint8_t* rightTrigger) noexcept;
 
 // turretcam.cpp: the turret camera (README 炮塔镜头, docs/camera-re.md §3b, §5). InstallTurretCam at load (the riding
 // camera's look-at fetch, the seat aim's step); TurretCamFrame from every vehicle's input, the plugin off too (it lets
@@ -903,6 +1092,11 @@ bool TurretCamLarge(const void* vehicle) noexcept;
 // turned that seat's aim itself in its last step (not another plugin's hand): nix.cpp then leaves the torso's yaw to it.
 bool TurretCamTurret(const void* vehicle,unsigned seat) noexcept;
 bool TurretCamSteers(const void* vehicle) noexcept;
+// TurretCamFreeLook: the free-look key in `vehicle`'s seat `seat` is the turret camera's own (War Thunder's: the view
+// swings round the vehicle on the rig, the turret holds the point it was on and the HUD keeps that point's circle,
+// TurretMark): seat 0 of the turret it places, in third person, the optic not up. vehicle_look.cpp yields to it there
+// (the user, 2026-10-21: "鼠标中键的时候应该是绕着车转…战雷一样的那个圆的鼠标指示点怎么没了").
+bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept;
 void ResetTurretCam() noexcept;
 // The player's turret against their view (hud.cpp's marker; any HUD may draw it), fresh within 200 ms while the camera
 // is decoupled or looking round: `aim` the point the turret is sent to (under the screen's centre, or the one it holds
@@ -1003,6 +1197,28 @@ bool PlayerGunnerHud(GunnerReadout* out) noexcept;
 // The gunship gunner's seat camera (playerjet_crew.inc GunnerLook): from turretcam.cpp's native Type-1 seat camera hook,
 // the eye and look-at for the local player at the gun; false for any other seat (the stock camera stays).
 bool GunshipGunnerCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept;
+// The Dreadnought aboard (dreadnought_turrets.inc): the local player's camera on its bridge or at a turret (turretcam.cpp
+// LookHook), their sight (hud.cpp GunnerMarks), and a round of a turret (jet_bay.cpp: the gunship's cannon round, from
+// `from` at `at`; false: not fired).
+bool DreadnoughtCamera(const unsigned char* seat,float* eye,float* look) noexcept;
+bool DreadnoughtGunnerHud(GunnerReadout* out) noexcept;
+// The ship's readout for the local player in any of its seats (hud.cpp DreadnoughtHud): `seat` 0 its bridge, 1 + n turret
+// n; its way (m/s), climb (m/s), throttle (-0.35 .. 1), boost left (0 .. 1), keel over the ground (m, -1 none seen),
+// heading (deg, 0 north, clockwise), hull; its turrets by bit (trained by this player, by other players, by the commander
+// for the guns nobody mans, on their aim now); its hangar (fighters stowed, out, on the lifts' way up or down; s till the
+// next flight may go); keyboard or pad; first person.
+struct DreadnoughtCue {
+    int seat,turrets;
+    float speed,climb,throttle,boost,keel,heading,hp,hpMax;
+    bool boosting;
+    std::uint8_t mine,others,commanded,onAim;
+    int stowed,out,lifting;
+    float flightWait;
+    bool keys,firstPerson;
+};
+bool PlayerDreadnoughtCue(DreadnoughtCue* out) noexcept;
+// `real`: the gunner's own round (its damage); false: a remote gunner's, seen here (no damage: theirs is theirs).
+bool DreadnoughtRound(unsigned char* owner,const float* from,const float* at,bool real) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;
 // The boarding gun (boarding.cpp): a real friendly hit suppresses damage and asks the game thread to board the
@@ -1195,6 +1411,7 @@ unsigned char* PlayerHuman() noexcept;
 // friendly soldiers out of thin air where the crosshair points. No hook of its own: PreloadDebugSpawn from the mission's
 // start (mission.cpp), DebugSpawnFrame from the player's frame (map.cpp MapHumanFrame, crew.cpp FrameTick; once a game
 // frame whichever comes first), the menu drawn from the HUD pass (hud.cpp) through DebugSpawnReadout.
+void Edf41Mother401DevTick() noexcept;   // development (Edf41Mother401Dev bit 32768): Edf41DevShoot at the mission's ordinary enemies, once a frame
 void PreloadDebugSpawn() noexcept;
 void DebugSpawnFrame(unsigned char* human) noexcept;
 struct DebugSpawnCue {
@@ -1208,8 +1425,10 @@ struct DebugSpawnCue {
     wchar_t note[96];         // ...a support call's own answer (support_dispatch.cpp SupportCallAt), else empty
     int keys[5];              // the ini's keys: toggle, prev, next, category, spawn
 };
+// kDebugSpawnLoading: the row was not loaded this mission; its load is queued (debug_spawn.cpp RequestLoad) and the
+// spawn is made at the same place as soon as the game reports its resources complete.
 enum DebugSpawnStatus : int { kDebugSpawnNone, kDebugSpawnDone, kDebugSpawnFailed, kDebugSpawnOnline, kDebugSpawnNoPlace,
-                                   kDebugSpawnRequested, kDebugSpawnRefused };
+                                   kDebugSpawnRequested, kDebugSpawnRefused, kDebugSpawnLoading };
 bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: nothing to show
 }  // namespace crew
 
@@ -1229,3 +1448,5 @@ bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: not
 #include "npcai.h"
 #include "qmark.h"
 #include "infantryscope.h"
+
+namespace crew { bool InstallViewDepth() noexcept; bool ViewDepthReady() noexcept; void ViewWriteNear(void* camera,float value) noexcept; }

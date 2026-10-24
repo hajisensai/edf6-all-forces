@@ -13,6 +13,9 @@ constexpr int kMostPayload=8;
 // button bit 0x20, fire byte +0x2021; the Titan's left trigger +0x2E0), `store` one of the stores the secondary fires
 // when it is the one picked (any of the plugin's weapons hung on the seat: they ride the seat's secondary when a stock
 // weapon is on it, else its primary), `other` a control the plugin has not read for this class (a mech's arms).
+// The BMPT's intrinsic missiles (the Ataka, the 9M120F) use the V603's otherwise unused secondary input: their own
+// cycle on VehicleSecondarySwitchKey (T) / VehicleSecondarySwitchButton (the d-pad right) (payload.cpp Switch), never a
+// choice of the primary's, whose cycle alone is R / LB.
 // A coaxial gun (StoreRole::coax, tools/make_stock_stores.py COAX) is `secondary` for the player on a class whose stock
 // input reads no second control (the Blacker 505, the Varius 601, the Grape): payload.cpp pulls it on that trigger.
 enum class PayloadFire : std::uint8_t { other, primary, secondary, store };
@@ -23,9 +26,10 @@ struct PayloadEntry {
     float ready;               // 0..1: its reload as the stock weapon gauge reckons it (1: loaded, rounds left)
     float reloadSec;           // seconds of reload left (0: loaded, or none coming: its rounds are spent for good)
     PayloadFire fire;
-    bool picked;               // the one the secondary fires now (a seat whose secondary has stores to switch)
+    bool picked;               // selected loadout (every linked barrel is marked; r.picked remains its leader)
     bool homing;               // it locks on (LockonType 1)
-    bool selectable;           // a live choice in the R/LB cycle; independent primary guns remain read-only
+    bool selectable;           // a live choice in its cycle (R / LB the primary's, T / the d-pad right the own
+                               // secondary's); independent primary guns remain read-only
     bool coax;                 // a coaxial machine gun (StoreRole::coax): its own secondary trigger, never cycled
 };
 // The local player's seat on a stock vehicle (a plugin aircraft has the cockpit readout, PlayerJetHud, instead).
@@ -36,6 +40,9 @@ struct PayloadReadout {
     int picked;                // the entry the secondary fires, -1 when the seat has no stores to switch between
     int choices;               // how many the switch goes round (>= 2 when `picked` >= 0)
     int switchButton;          // EDF seat-button mask used by Switch (read-only HUD binding)
+    // The own secondary's cycle (the BMPT's missiles: their own switch, VehicleSecondarySwitchKey / -Button): the entry it
+    // fires (-1 none), how many it goes round (>= 2 when it switches), its pad buttons (XInput bits).
+    int ownPicked,ownChoices,ownSwitchButton;
     bool keys;                 // the player is on the keyboard and mouse (else a pad): which switch to name
     PayloadEntry entry[kMostPayload];
 };
@@ -60,7 +67,9 @@ void PumpAircraftPayloadUi(unsigned char* vehicle) noexcept; // playerjet.cpp br
 // The weapon the secondary fires now on `vehicle` when its seat's stores are switched (helisight.cpp's mark follows
 // it), else nullptr: the stock weapon stands.
 unsigned char* PayloadPicked(const void* vehicle) noexcept;
-// Independent fire-control target: default native primary, most recent trigger edge, or explicit R/LB payload choice.
+// The own secondary's pick on the player's seat of `vehicle` (the missile the BMPT's secondary fires), else nullptr.
+unsigned char* PayloadOwnSecondaryPicked(const void* vehicle) noexcept;
+// Independent fire-control target: default native primary, most recent trigger edge, or an explicit switch choice.
 // Read-only, validates live holders; retains a reloading weapon but safely falls back from a spent/removed one.
 unsigned char* PayloadSightPicked(const void* vehicle,unsigned seat) noexcept;
 // The same fire-control view, including all known native weapons fired by that control.
@@ -71,6 +80,12 @@ int PayloadSightWeapons(const void* vehicle,unsigned seat,unsigned char** out,in
 // the Titan's hull gatling), store redirects applied, deduplicated; whichever is the fire-control pick. The HUD marks each
 // (the user, 2026-10-12: 「应该两个准星都同时显示才对」). Same contract as PayloadSightWeapons otherwise.
 int PayloadTriggerWeapons(const void* vehicle,unsigned seat,unsigned char** out,int capacity) noexcept;
+// Resolve a live source holder's trigger group to its actual usable weapon. Optional cross-plugin aiming adapter:
+// true + null is an authoritative empty group; false leaves an unsupported/non-authoritative caller native.
+// Uses the same fresh from/to mapping as PullHook, including surviving linked barrels and preceding-frame NPC picks.
+bool PayloadAimWeapon(const void* vehicle,unsigned seat,const void* source,const unsigned char** out) noexcept;
+// Intrinsic alternate ammunition and independent secondary weapons remain managed with optional stores disabled.
+bool NativePayloadControl(const void* vehicle,unsigned seat) noexcept;
 // Authoritative NPC seat: choose an existing, loaded, reachable weapon for this target.
 // Call before native seat aiming/firing; writes no trigger. nullptr means none is usable.
 // `fire` reports the native trigger control to use (primary or secondary).
@@ -82,6 +97,14 @@ unsigned char* NpcPayloadSelect(unsigned char* vehicle,unsigned seat,float dista
 // locked: whether a burst from -> to would pass a friend (heli.h FriendInLine); nullptr none checked.
 using LineBlocked=bool(*)(const float* from,const float* to,const void* self) noexcept;
 bool NpcCoaxFire(unsigned char* vehicle,unsigned seat,const void* target,LineBlocked blocked=nullptr) noexcept;
+// Intrinsic secondary weapon: plan separately from the primary; the NPC caller must run native seat aim/lock/safety.
+unsigned char* NpcSecondarySelect(unsigned char* vehicle,unsigned seat,float distance,bool airborne) noexcept;
+// Pull the live intrinsic secondary from its real seat input; local player or authoritative NPC only.
+// NPCs pass the exact weapon whose native lock/safety evaluation approved this intent.
+bool FireIndependentSecondary(unsigned char* vehicle,unsigned seat,const unsigned char* expectedWeapon=nullptr) noexcept;
+// Every vehicle's input, after the stock step and PayloadFrame: the twin barrels' pulls held back to fire them in turn
+// (twin_cadence.h; GroundVehicle.alternate: the BMPT). Clears only latches this frame set; any rider, any machine's copy.
+void TwinBarrelFrame(unsigned char* vehicle) noexcept;
 void ResetPayload() noexcept;
 bool InstallPayload() noexcept;                       // at load: the holder pull 0x62C000 taken over (checked)
 

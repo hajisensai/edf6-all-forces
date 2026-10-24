@@ -329,7 +329,7 @@
      "assault_reload1",
      1.0,
      900.0,
-     1.0,
+     2.0,
      {
       "items": [
        0.0
@@ -824,7 +824,7 @@
      "assault_reload1",
      1.0,
      200.0,
-     1.0,
+     2.0,
      {
       "items": [
        0.0
@@ -1319,7 +1319,7 @@
      "assault_reload1",
      1.0,
      900.0,
-     1.0,
+     2.0,
      {
       "items": [
        0.0
@@ -1814,7 +1814,7 @@
      "assault_reload1",
      1.0,
      200.0,
-     1.0,
+     2.0,
      {
       "items": [
        0.0
@@ -2309,7 +2309,7 @@
      "assault_reload1",
      1.0,
      900.0,
-     1.0,
+     2.0,
      {
       "items": [
        0.0
@@ -2804,7 +2804,7 @@
      "assault_reload1",
      1.0,
      600.0,
-     1.0,
+     2.0,
      {
       "items": [
        0.0
@@ -3299,7 +3299,7 @@
      "assault_reload1",
      1.0,
      200.0,
-     1.0,
+     2.0,
      {
       "items": [
        0.0
@@ -3794,7 +3794,7 @@
      "assault_reload1",
      1.0,
      900.0,
-     1.0,
+     2.0,
      {
       "items": [
        0.0
@@ -4141,7 +4141,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      5400.0,
      0.0,
@@ -4657,7 +4657,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      2400.0,
      0.0,
@@ -5170,7 +5170,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      5400.0,
      0.0,
@@ -5686,7 +5686,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      5400.0,
      0.0,
@@ -6202,7 +6202,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      2200.0,
      0.0,
@@ -6715,7 +6715,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      5400.0,
      0.0,
@@ -7231,7 +7231,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      7200.0,
      0.0,
@@ -7747,7 +7747,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      5400.0,
      0.0,
@@ -8263,7 +8263,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      5400.0,
      0.0,
@@ -8779,7 +8779,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      1800.0,
      0.0,
@@ -9292,7 +9292,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      5400.0,
      0.0,
@@ -9773,7 +9773,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -9874,7 +9874,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -10066,7 +10066,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon418",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -10214,7 +10214,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -10315,7 +10315,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -10507,7 +10507,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon418",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -10655,7 +10655,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.0,
      3500.0,
      0.0,
@@ -10756,22 +10756,22 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta_gold.sgo",
+         "app:/Object/vehicle406_begaruta_gold.sgo",
          {
           "items": [
            {
             "items": [
              1.0,
-             1.2000000476837158
+             1.2
             ],
             "names": {}
            },
            {
             "items": [
              5.5,
-             0.004999999888241291,
+             0.005,
              20.0,
-             0.05999999865889549
+             0.06
             ],
             "names": {}
            },
@@ -10781,7 +10781,7 @@
              1.5,
              45.0,
              240.0,
-             0.2800000011920929,
+             0.28,
              50.0
             ],
             "names": {}
@@ -10791,8 +10791,8 @@
              {
               "items": [
                20.0,
-               0.05000000074505806,
-               0.10000000149011612
+               0.05,
+               0.1
               ],
               "names": {}
              }
@@ -10803,7 +10803,7 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_504begaruta_flamethrower01.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -10816,7 +10816,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_flamethrower01.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -10836,32 +10836,6 @@
              {
               "items": [
                0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_grenade_pod01_r.sgo",
-               {
-                "items": [
-                 0.0,
-                 0.0
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_grenade_pod01_l.sgo",
-               {
-                "items": [
-                 0.0,
-                 0.0
-                ],
-                "names": {}
-               }
               ],
               "names": {}
              },
@@ -10882,8 +10856,8 @@
            },
            {
             "items": [
-             0.019999999552965164,
-             0.10000000149011612
+             0.02,
+             0.1
             ],
             "names": {}
            }
@@ -11035,7 +11009,7 @@
    "call": {
     "kind": "vehicle",
     "template": "DLC_Vehicle_v504_begaruta_gold",
-    "vehicle": "v504_begaruta_gold.sgo"
+    "vehicle": "vehicle406_begaruta_gold.sgo"
    }
   },
   {
@@ -11183,7 +11157,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.0,
      3500.0,
      0.0,
@@ -11284,33 +11258,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta.sgo",
+         "app:/Object/vehicle406_begaruta.sgo",
          {
           "items": [
            {
             "items": [
-             1.850000023841858,
-             1.899999976158142
+             0.8,
+             1.2
             ],
             "names": {}
            },
            {
             "items": [
-             4.0,
-             0.004999999888241291,
-             10.0,
-             0.009999999776482582
+             5.5,
+             0.005,
+             20.0,
+             0.06
             ],
             "names": {}
            },
            {
             "items": [
-             10.0,
-             1.0,
-             25.0,
-             480.0,
-             0.3400000035762787,
-             30.0
+             20.0,
+             1.5,
+             45.0,
+             240.0,
+             0.28,
+             50.0
             ],
             "names": {}
            },
@@ -11318,9 +11292,9 @@
             "items": [
              {
               "items": [
-               10.0,
-               0.009999999776482582,
-               0.019999999552965164
+               20.0,
+               0.05,
+               0.1
               ],
               "names": {}
              }
@@ -11343,7 +11317,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_cannon02Solid_r.sgo",
+               "app:/weapon/v_406begaruta_gatling01.sgo",
                {
                 "items": [
                  0.0,
@@ -11356,37 +11330,11 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_cannon02Solid_l.sgo",
+               "app:/weapon/v_406begaruta_cannon01.sgo",
                {
                 "items": [
                  0.0,
                  0.0
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_longCannon01_r.sgo",
-               {
-                "items": [
-                 25.0,
-                 0.02500000037252903
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_longCannon01_l.sgo",
-               {
-                "items": [
-                 25.0,
-                 0.02500000037252903
                 ],
                 "names": {}
                }
@@ -11410,8 +11358,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.02,
+             0.1
             ],
             "names": {}
            }
@@ -11563,7 +11511,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon362",
-    "vehicle": "v504_begaruta.sgo"
+    "vehicle": "vehicle406_begaruta.sgo"
    }
   },
   {
@@ -11711,7 +11659,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2000.0,
      0.0,
@@ -12190,7 +12138,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      4000.0,
      0.0,
@@ -12291,25 +12239,25 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v506_heli.sgo",
+         "app:/Object/vehicle302_heli.sgo",
          {
           "items": [
            {
             "items": [
-             1.2999999523162842,
-             1.2999999523162842
+             1.3,
+             1.3
             ],
             "names": {}
            },
            {
             "items": [
              80.0,
-             0.0003000000142492354,
+             0.0003,
              15.0,
-             0.003000000026077032,
-             2.5,
+             0.003,
+             1.25,
              35.0,
-             0.004999999888241291
+             0.005
             ],
             "names": {}
            },
@@ -12324,7 +12272,7 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_506heli_gatling01_l.sgo",
+               "app:/weapon/edf41_v_302heli_gatling01_l.sgo",
                {
                 "items": [
                  0.0,
@@ -12337,7 +12285,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_gatling01_r.sgo",
+               "app:/weapon/edf41_v_302heli_gatling01_r.sgo",
                {
                 "items": [
                  0.0,
@@ -12350,7 +12298,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_missile01.sgo",
+               "app:/weapon/edf41_v_302heli_missile01.sgo",
                {
                 "items": [
                  0.0,
@@ -12518,7 +12466,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon394",
-    "vehicle": "v506_heli.sgo"
+    "vehicle": "vehicle302_heli.sgo"
    }
   },
   {
@@ -12666,7 +12614,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      3500.0,
      0.0,
@@ -13107,7 +13055,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -13208,7 +13156,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -13400,7 +13348,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon419",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -13548,7 +13496,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -13649,7 +13597,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank_bulletgirls.sgo",
          {
           "items": [
            {
@@ -13841,7 +13789,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon419",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank_bulletgirls.sgo"
    }
   },
   {
@@ -13989,7 +13937,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -14090,7 +14038,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank_dczero.sgo",
          {
           "items": [
            {
@@ -14282,7 +14230,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon419",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank_dczero.sgo"
    }
   },
   {
@@ -14430,7 +14378,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -14531,7 +14479,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank_dc55.sgo",
          {
           "items": [
            {
@@ -14723,7 +14671,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon419",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank_dc55.sgo"
    }
   },
   {
@@ -14871,7 +14819,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -14972,7 +14920,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank_edf2pv2.sgo",
          {
           "items": [
            {
@@ -15164,7 +15112,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon419",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank_edf2pv2.sgo"
    }
   },
   {
@@ -15312,7 +15260,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -15413,7 +15361,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank_natsuiro.sgo",
          {
           "items": [
            {
@@ -15605,7 +15553,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon419",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank_natsuiro.sgo"
    }
   },
   {
@@ -15753,7 +15701,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      1000.0,
      0.0,
@@ -15854,83 +15802,48 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v503_bike.sgo",
+         "app:/Object/vehicle408_motorbike.sgo",
          {
           "items": [
            {
             "items": [
-             2.200000047683716,
-             1.100000023841858
+             1.5,
+             1.5
             ],
             "names": {}
            },
            {
             "items": [
-             {
-              "items": [
-               0.6499999761581421,
-               0.6000000238418579,
-               0.800000011920929
-              ],
-              "names": {}
-             },
+             0.8,
              30.0,
-             0.05999999865889549,
-             2.0,
-             0.05999999865889549
+             0.0075,
+             0.7,
+             0.075,
+             0.3,
+             0.6
             ],
             "names": {}
            },
            {
             "items": [
-             20000.0,
-             1.6660000085830688
-            ],
-            "names": {}
-           },
-           {
-            "items": [
              {
               "items": [
-               "app:/weapon/v_503_bike_gun_l.sgo",
+               "app:/weapon/edf41_v_408motorbike_gun.sgo",
                {
                 "items": [
-                 "BodyRecoil",
-                 {
-                  "items": [
-                   0.0,
-                   0.0
-                  ],
-                  "names": {}
-                 }
+                 0.0,
+                 0.0
+                ],
+                "names": {}
+               },
+               {
+                "items": [
+                 90.0,
+                 0.015,
+                 0.1
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_503_bike_gun_r.sgo",
-               {
-                "items": [
-                 "BodyRecoil",
-                 {
-                  "items": [
-                   0.0,
-                   0.0
-                  ],
-                  "names": {}
-                 }
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_fuel01.sgo"
               ],
               "names": {}
              }
@@ -16085,7 +15998,7 @@
    "call": {
     "kind": "vehicle",
     "template": "aWeapon338",
-    "vehicle": "v503_bike.sgo"
+    "vehicle": "vehicle408_motorbike.sgo"
    }
   },
   {
@@ -16233,7 +16146,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      3000.0,
      0.0,
@@ -16736,7 +16649,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.0,
      3500.0,
      0.0,
@@ -16837,33 +16750,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta.sgo",
+         "app:/Object/vehicle406_begaruta_green.sgo",
          {
           "items": [
            {
             "items": [
-             1.850000023841858,
-             1.899999976158142
+             1.3,
+             1.55
             ],
             "names": {}
            },
            {
             "items": [
-             4.0,
-             0.004999999888241291,
-             10.0,
-             0.009999999776482582
+             6.0,
+             0.015,
+             20.0,
+             0.06
             ],
             "names": {}
            },
            {
             "items": [
-             10.0,
-             1.0,
-             25.0,
-             480.0,
-             0.3400000035762787,
-             30.0
+             20.0,
+             3.0,
+             50.0,
+             240.0,
+             0.54,
+             70.0
             ],
             "names": {}
            },
@@ -16871,9 +16784,9 @@
             "items": [
              {
               "items": [
-               10.0,
-               0.009999999776482582,
-               0.019999999552965164
+               60.0,
+               0.1,
+               0.1
               ],
               "names": {}
              }
@@ -16884,19 +16797,7 @@
             "items": [
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_cannon02Solid_r.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -16909,7 +16810,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_cannon02Solid_l.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -16922,11 +16823,23 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon01_r.sgo",
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_longSpreadCannon01_r.sgo",
                {
                 "items": [
                  25.0,
-                 0.02500000037252903
+                 0.025
                 ],
                 "names": {}
                }
@@ -16935,26 +16848,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon01_l.sgo",
+               "app:/weapon/v_406begaruta_longSpreadCannon01_l.sgo",
                {
                 "items": [
                  25.0,
-                 0.02500000037252903
+                 0.025
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              }
@@ -16963,8 +16864,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.05,
+             0.2
             ],
             "names": {}
            }
@@ -17116,7 +17017,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon362",
-    "vehicle": "v504_begaruta.sgo"
+    "vehicle": "vehicle406_begaruta_green.sgo"
    }
   },
   {
@@ -17264,7 +17165,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      7500.0,
      0.0,
@@ -17791,7 +17692,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -17892,7 +17793,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -18084,7 +17985,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon421",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -18232,7 +18133,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.0,
      3500.0,
      0.0,
@@ -18333,33 +18234,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta.sgo",
+         "app:/Object/vehicle406_begaruta.sgo",
          {
           "items": [
            {
             "items": [
-             1.850000023841858,
-             1.899999976158142
+             1.55,
+             1.7
             ],
             "names": {}
            },
            {
             "items": [
-             4.0,
-             0.004999999888241291,
-             10.0,
-             0.009999999776482582
+             5.5,
+             0.005,
+             20.0,
+             0.06
             ],
             "names": {}
            },
            {
             "items": [
-             10.0,
-             1.0,
-             25.0,
-             480.0,
-             0.3400000035762787,
-             30.0
+             20.0,
+             1.5,
+             45.0,
+             240.0,
+             0.28,
+             50.0
             ],
             "names": {}
            },
@@ -18367,9 +18268,9 @@
             "items": [
              {
               "items": [
-               10.0,
-               0.009999999776482582,
-               0.019999999552965164
+               20.0,
+               0.05,
+               0.1
               ],
               "names": {}
              }
@@ -18392,7 +18293,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_cannon02Solid_r.sgo",
+               "app:/weapon/v_406begaruta_gatling01.sgo",
                {
                 "items": [
                  0.0,
@@ -18405,37 +18306,11 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_cannon02Solid_l.sgo",
+               "app:/weapon/v_406begaruta_cannon01.sgo",
                {
                 "items": [
                  0.0,
                  0.0
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_longCannon01_r.sgo",
-               {
-                "items": [
-                 25.0,
-                 0.02500000037252903
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_longCannon01_l.sgo",
-               {
-                "items": [
-                 25.0,
-                 0.02500000037252903
                 ],
                 "names": {}
                }
@@ -18459,8 +18334,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.02,
+             0.1
             ],
             "names": {}
            }
@@ -18612,7 +18487,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon362",
-    "vehicle": "v504_begaruta.sgo"
+    "vehicle": "vehicle406_begaruta.sgo"
    }
   },
   {
@@ -18760,7 +18635,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      1000.0,
      0.0,
@@ -18861,13 +18736,25 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v503_bike.sgo",
+         "app:/Object/vehicle408_motorbike.sgo",
          {
           "items": [
            {
             "items": [
-             3.5999999046325684,
-             1.7999999523162842
+             1.8,
+             1.8
+            ],
+            "names": {}
+           },
+           {
+            "items": [
+             0.8,
+             30.0,
+             0.0075,
+             0.7,
+             0.075,
+             0.3,
+             0.6
             ],
             "names": {}
            },
@@ -18875,69 +18762,22 @@
             "items": [
              {
               "items": [
-               0.6000000238418579,
-               0.4000000059604645,
-               0.800000011920929
-              ],
-              "names": {}
-             },
-             50.0,
-             0.11999999731779099,
-             2.0,
-             0.05999999865889549
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             20000.0,
-             2.0999999046325684
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             {
-              "items": [
-               "app:/weapon/v_503_bike_gun_l.sgo",
+               "app:/weapon/edf41_v_408motorbike_gun.sgo",
                {
                 "items": [
-                 "BodyRecoil",
-                 {
-                  "items": [
-                   0.0,
-                   0.0
-                  ],
-                  "names": {}
-                 }
+                 0.0,
+                 0.0
+                ],
+                "names": {}
+               },
+               {
+                "items": [
+                 90.0,
+                 0.015,
+                 0.1
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_503_bike_gun_r.sgo",
-               {
-                "items": [
-                 "BodyRecoil",
-                 {
-                  "items": [
-                   0.0,
-                   0.0
-                  ],
-                  "names": {}
-                 }
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_fuel01.sgo"
               ],
               "names": {}
              }
@@ -19092,7 +18932,7 @@
    "call": {
     "kind": "vehicle",
     "template": "aWeapon340",
-    "vehicle": "v503_bike.sgo"
+    "vehicle": "vehicle408_motorbike.sgo"
    }
   },
   {
@@ -19240,7 +19080,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      3000.0,
      0.0,
@@ -19743,7 +19583,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      8000.0,
      0.0,
@@ -20168,7 +20008,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.0,
      3500.0,
      0.0,
@@ -20269,33 +20109,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta_red.sgo",
+         "app:/Object/vehicle406_begaruta_red.sgo",
          {
           "items": [
            {
             "items": [
-             1.2999999523162842,
-             1.5499999523162842
+             1.85,
+             1.9
             ],
             "names": {}
            },
            {
             "items": [
-             6.0,
-             0.014999999664723873,
-             20.0,
-             0.05999999865889549
+             4.0,
+             0.005,
+             10.0,
+             0.01
             ],
             "names": {}
            },
            {
             "items": [
-             20.0,
-             3.0,
-             50.0,
-             240.0,
-             0.5400000214576721,
-             70.0
+             10.0,
+             1.0,
+             25.0,
+             480.0,
+             0.34,
+             30.0
             ],
             "names": {}
            },
@@ -20303,9 +20143,9 @@
             "items": [
              {
               "items": [
-               60.0,
-               0.10000000149011612,
-               0.10000000149011612
+               10.0,
+               0.01,
+               0.02
               ],
               "names": {}
              }
@@ -20316,7 +20156,19 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_504begaruta_flamethrower01.sgo",
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_cannon02Solid.sgo",
                {
                 "items": [
                  0.0,
@@ -20329,7 +20181,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504_h_machinegun01.sgo",
+               "app:/weapon/v_406begaruta_cannon02Solid.sgo",
                {
                 "items": [
                  0.0,
@@ -20342,23 +20194,11 @@
              },
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_longSpreadCannon01_r.sgo",
+               "app:/weapon/v_406begaruta_longCannon01_r.sgo",
                {
                 "items": [
                  25.0,
-                 0.02500000037252903
+                 0.025
                 ],
                 "names": {}
                }
@@ -20367,26 +20207,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longSpreadCannon01_l.sgo",
+               "app:/weapon/v_406begaruta_longCannon01_l.sgo",
                {
                 "items": [
                  25.0,
-                 0.02500000037252903
+                 0.025
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              }
@@ -20395,8 +20223,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.05,
+             0.2
             ],
             "names": {}
            }
@@ -20548,7 +20376,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon359",
-    "vehicle": "v504_begaruta_red.sgo"
+    "vehicle": "vehicle406_begaruta_red.sgo"
    }
   },
   {
@@ -20696,7 +20524,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      3500.0,
      0.0,
@@ -21137,7 +20965,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -21238,7 +21066,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -21430,7 +21258,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon424",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -21578,7 +21406,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      2700.0,
      0.0,
@@ -21679,7 +21507,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -21871,7 +21699,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon425",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -22019,7 +21847,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      4000.0,
      0.0,
@@ -22120,25 +21948,25 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v506_heli.sgo",
+         "app:/Object/vehicle302_heli.sgo",
          {
           "items": [
            {
             "items": [
-             2.700000047683716,
-             2.700000047683716
+             3.0,
+             3.0
             ],
             "names": {}
            },
            {
             "items": [
              60.0,
-             0.0012000000569969416,
+             0.0012,
              14.0,
-             0.0020000000949949026,
-             2.5,
+             0.002,
+             1.25,
              35.0,
-             0.004999999888241291
+             0.005
             ],
             "names": {}
            },
@@ -22153,7 +21981,7 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_506heli_LaserCannon01_l.sgo",
+               "app:/weapon/edf41_v_302heli_lasercannon01_l.sgo",
                {
                 "items": [
                  0.0,
@@ -22166,7 +21994,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_LaserCannon01_r.sgo",
+               "app:/weapon/edf41_v_302heli_lasercannon01_r.sgo",
                {
                 "items": [
                  0.0,
@@ -22179,7 +22007,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_missile01.sgo",
+               "app:/weapon/edf41_v_302heli_missile01.sgo",
                {
                 "items": [
                  0.0,
@@ -22347,7 +22175,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon395",
-    "vehicle": "v506_heli.sgo"
+    "vehicle": "vehicle302_heli.sgo"
    }
   },
   {
@@ -22495,7 +22323,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.0,
      3500.0,
      0.0,
@@ -22596,33 +22424,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta.sgo",
+         "app:/Object/vehicle406_begaruta.sgo",
          {
           "items": [
            {
             "items": [
-             1.850000023841858,
-             1.899999976158142
+             3.3,
+             3.3
             ],
             "names": {}
            },
            {
             "items": [
-             4.0,
-             0.004999999888241291,
-             10.0,
-             0.009999999776482582
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             10.0,
-             1.0,
+             6.5,
+             0.005,
              25.0,
-             480.0,
-             0.3400000035762787,
-             30.0
+             0.06
+            ],
+            "names": {}
+           },
+           {
+            "items": [
+             20.0,
+             1.5,
+             45.0,
+             240.0,
+             0.28,
+             50.0
             ],
             "names": {}
            },
@@ -22630,9 +22458,9 @@
             "items": [
              {
               "items": [
-               10.0,
-               0.009999999776482582,
-               0.019999999552965164
+               30.0,
+               0.05,
+               0.1
               ],
               "names": {}
              }
@@ -22655,7 +22483,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_cannon02Solid_r.sgo",
+               "app:/weapon/v_406begaruta_gatling01.sgo",
                {
                 "items": [
                  0.0,
@@ -22668,7 +22496,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_cannon02Solid_l.sgo",
+               "app:/weapon/v_406begaruta_cannon01.sgo",
                {
                 "items": [
                  0.0,
@@ -22681,33 +22509,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon01_r.sgo",
+               "app:/weapon/v_406begaruta_missile01_r.sgo",
                {
                 "items": [
-                 25.0,
-                 0.02500000037252903
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_longCannon01_l.sgo",
-               {
-                "items": [
-                 25.0,
-                 0.02500000037252903
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              },
@@ -22722,8 +22531,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.05,
+             0.2
             ],
             "names": {}
            }
@@ -22875,7 +22684,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon362",
-    "vehicle": "v504_begaruta.sgo"
+    "vehicle": "vehicle406_begaruta.sgo"
    }
   },
   {
@@ -23023,7 +22832,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.75,
      3000.0,
      0.0,
@@ -23526,7 +23335,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.2199999988079071,
      3500.0,
      0.0,
@@ -23627,33 +23436,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta_red.sgo",
+         "app:/Object/vehicle406_begaruta_red.sgo",
          {
           "items": [
            {
             "items": [
-             11.0,
-             6.0
+             4.3,
+             4.3
             ],
             "names": {}
            },
            {
             "items": [
-             7.5,
-             0.014999999664723873,
-             30.0,
-             0.05999999865889549
-            ],
-            "names": {}
-           },
-           {
-            "items": [
+             5.5,
+             0.005,
              20.0,
-             3.0,
-             60.0,
+             0.06
+            ],
+            "names": {}
+           },
+           {
+            "items": [
+             15.0,
+             1.5,
+             30.0,
              240.0,
-             0.5400000214576721,
-             60.0
+             0.28,
+             50.0
             ],
             "names": {}
            },
@@ -23661,9 +23470,9 @@
             "items": [
              {
               "items": [
-               70.0,
-               0.10000000149011612,
-               0.10000000149011612
+               45.0,
+               0.1,
+               0.1
               ],
               "names": {}
              }
@@ -23674,7 +23483,19 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_504begaruta_flamethrower01.sgo",
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_gatling01.sgo",
                {
                 "items": [
                  0.0,
@@ -23687,7 +23508,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_flamethrower01.sgo",
+               "app:/weapon/v_406begaruta_gatling01.sgo",
                {
                 "items": [
                  0.0,
@@ -23700,23 +23521,11 @@
              },
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_longSpreadCannon01_r.sgo",
+               "app:/weapon/v_406begaruta_missile01_r.sgo",
                {
                 "items": [
-                 25.0,
-                 0.02500000037252903
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                }
@@ -23725,26 +23534,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longSpreadCannon01_l.sgo",
+               "app:/weapon/v_406begaruta_missile01_l.sgo",
                {
                 "items": [
-                 25.0,
-                 0.02500000037252903
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              }
@@ -23753,8 +23550,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.02,
+             0.1
             ],
             "names": {}
            }
@@ -23906,7 +23703,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon368",
-    "vehicle": "v504_begaruta_red.sgo"
+    "vehicle": "vehicle406_begaruta_red.sgo"
    }
   },
   {
@@ -24054,7 +23851,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.75,
      2700.0,
      0.0,
@@ -24155,7 +23952,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -24347,7 +24144,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon427",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -24495,7 +24292,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      7500.0,
      0.0,
@@ -25022,7 +24819,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      8000.0,
      0.0,
@@ -25447,7 +25244,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      1500.0,
      0.0,
@@ -25548,13 +25345,25 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v503_bike.sgo",
+         "app:/Object/vehicle408_motorbike.sgo",
          {
           "items": [
            {
             "items": [
-             3.5999999046325684,
-             1.7999999523162842
+             5.0,
+             5.0
+            ],
+            "names": {}
+           },
+           {
+            "items": [
+             0.8,
+             30.0,
+             0.0075,
+             0.7,
+             0.075,
+             0.3,
+             0.6
             ],
             "names": {}
            },
@@ -25562,69 +25371,22 @@
             "items": [
              {
               "items": [
-               0.6000000238418579,
-               0.4000000059604645,
-               0.800000011920929
-              ],
-              "names": {}
-             },
-             50.0,
-             0.11999999731779099,
-             2.0,
-             0.05999999865889549
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             20000.0,
-             2.0999999046325684
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             {
-              "items": [
-               "app:/weapon/v_503_bike_gun_l.sgo",
+               "app:/weapon/edf41_v_408motorbike_gun.sgo",
                {
                 "items": [
-                 "BodyRecoil",
-                 {
-                  "items": [
-                   0.0,
-                   0.0
-                  ],
-                  "names": {}
-                 }
+                 0.0,
+                 0.0
+                ],
+                "names": {}
+               },
+               {
+                "items": [
+                 90.0,
+                 0.015,
+                 0.1
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_503_bike_gun_r.sgo",
-               {
-                "items": [
-                 "BodyRecoil",
-                 {
-                  "items": [
-                   0.0,
-                   0.0
-                  ],
-                  "names": {}
-                 }
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_fuel01.sgo"
               ],
               "names": {}
              }
@@ -25779,7 +25541,7 @@
    "call": {
     "kind": "vehicle",
     "template": "aWeapon340",
-    "vehicle": "v503_bike.sgo"
+    "vehicle": "vehicle408_motorbike.sgo"
    }
   },
   {
@@ -25927,7 +25689,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.2199999988079071,
      3500.0,
      0.0,
@@ -26028,32 +25790,32 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta.sgo",
+         "app:/Object/vehicle406_begaruta.sgo",
          {
           "items": [
            {
             "items": [
-             6.199999809265137,
-             4.300000190734863
+             5.3,
+             5.3
             ],
             "names": {}
            },
            {
             "items": [
-             5.5,
-             0.004999999888241291,
+             6.5,
+             0.005,
+             25.0,
+             0.06
+            ],
+            "names": {}
+           },
+           {
+            "items": [
              20.0,
-             0.05999999865889549
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             15.0,
              1.5,
-             30.0,
-             240.0,
-             0.2800000011920929,
+             45.0,
+             420.0,
+             0.35,
              50.0
             ],
             "names": {}
@@ -26062,9 +25824,9 @@
             "items": [
              {
               "items": [
-               45.0,
-               0.10000000149011612,
-               0.10000000149011612
+               30.0,
+               0.05,
+               0.1
               ],
               "names": {}
              }
@@ -26087,7 +25849,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_gatling01_r.sgo",
+               "app:/weapon/v_406begaruta_gatling01.sgo",
                {
                 "items": [
                  0.0,
@@ -26100,7 +25862,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_gatling01_l.sgo",
+               "app:/weapon/v_406begaruta_cannon01.sgo",
                {
                 "items": [
                  0.0,
@@ -26113,7 +25875,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_missile01_r.sgo",
+               "app:/weapon/v_406begaruta_missile01_r.sgo",
                {
                 "items": [
                  0.0,
@@ -26121,25 +25883,6 @@
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_missile01_l.sgo",
-               {
-                "items": [
-                 0.0,
-                 0.0
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              },
@@ -26154,8 +25897,8 @@
            },
            {
             "items": [
-             0.019999999552965164,
-             0.10000000149011612
+             0.05,
+             0.2
             ],
             "names": {}
            }
@@ -26307,7 +26050,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon364",
-    "vehicle": "v504_begaruta.sgo"
+    "vehicle": "vehicle406_begaruta.sgo"
    }
   },
   {
@@ -26455,7 +26198,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      3000.0,
      0.0,
@@ -26958,7 +26701,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      4000.0,
      0.0,
@@ -27059,25 +26802,25 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v506_heli.sgo",
+         "app:/Object/vehicle302_heli.sgo",
          {
           "items": [
            {
             "items": [
-             5.0,
-             5.0
+             5.7,
+             5.7
             ],
             "names": {}
            },
            {
             "items": [
              55.0,
-             0.0017999999690800905,
+             0.0018,
              13.0,
-             0.003000000026077032,
-             4.0,
+             0.003,
+             2.0,
              40.0,
-             0.00800000037997961
+             0.008
             ],
             "names": {}
            },
@@ -27092,7 +26835,7 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_506heli_gatling01_l.sgo",
+               "app:/weapon/edf41_v_302heli_gatling01_l.sgo",
                {
                 "items": [
                  0.0,
@@ -27105,7 +26848,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_gatling01_r.sgo",
+               "app:/weapon/edf41_v_302heli_gatling01_r.sgo",
                {
                 "items": [
                  0.0,
@@ -27118,7 +26861,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_napalm01.sgo",
+               "app:/weapon/edf41_v_302heli_napalm01.sgo",
                {
                 "items": [
                  0.0,
@@ -27286,7 +27029,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon396",
-    "vehicle": "v506_heli.sgo"
+    "vehicle": "vehicle302_heli.sgo"
    }
   },
   {
@@ -27434,7 +27177,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      3500.0,
      0.0,
@@ -27875,7 +27618,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.36000001430511475,
      3500.0,
      0.0,
@@ -27976,33 +27719,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta.sgo",
+         "app:/Object/vehicle406_begaruta_green.sgo",
          {
           "items": [
            {
             "items": [
-             16.799999237060547,
-             8.0
+             4.2,
+             6.0
             ],
             "names": {}
            },
            {
             "items": [
-             4.5,
-             0.004999999888241291,
-             10.0,
-             0.009999999776482582
+             7.5,
+             0.015,
+             30.0,
+             0.06
             ],
             "names": {}
            },
            {
             "items": [
-             10.0,
-             1.0,
-             25.0,
-             580.0,
-             0.3400000035762787,
-             40.0
+             20.0,
+             3.0,
+             60.0,
+             240.0,
+             0.54,
+             60.0
             ],
             "names": {}
            },
@@ -28010,9 +27753,9 @@
             "items": [
              {
               "items": [
-               25.0,
-               0.009999999776482582,
-               0.019999999552965164
+               70.0,
+               0.1,
+               0.1
               ],
               "names": {}
              }
@@ -28023,19 +27766,7 @@
             "items": [
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_rocket01_r.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -28048,7 +27779,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_rocket01_l.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -28061,11 +27792,23 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon02_r.sgo",
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_longSpreadCannon01_r.sgo",
                {
                 "items": [
-                 15.0,
-                 0.006000000052154064
+                 25.0,
+                 0.025
                 ],
                 "names": {}
                }
@@ -28074,26 +27817,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon02_l.sgo",
+               "app:/weapon/v_406begaruta_longSpreadCannon01_l.sgo",
                {
                 "items": [
-                 15.0,
-                 0.006000000052154064
+                 25.0,
+                 0.025
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              }
@@ -28102,8 +27833,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.05,
+             0.2
             ],
             "names": {}
            }
@@ -28255,7 +27986,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon369",
-    "vehicle": "v504_begaruta.sgo"
+    "vehicle": "vehicle406_begaruta_green.sgo"
    }
   },
   {
@@ -28403,7 +28134,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.75,
      2700.0,
      0.0,
@@ -28504,7 +28235,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -28696,7 +28427,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon428",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -28844,7 +28575,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.2199999988079071,
      3500.0,
      0.0,
@@ -28945,33 +28676,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta_red.sgo",
+         "app:/Object/vehicle406_begaruta_red.sgo",
          {
           "items": [
            {
             "items": [
-             11.0,
-             6.0
+             8.0,
+             8.0
             ],
             "names": {}
            },
            {
             "items": [
-             7.5,
-             0.014999999664723873,
-             30.0,
-             0.05999999865889549
+             4.5,
+             0.005,
+             10.0,
+             0.01
             ],
             "names": {}
            },
            {
             "items": [
-             20.0,
-             3.0,
-             60.0,
-             240.0,
-             0.5400000214576721,
-             60.0
+             10.0,
+             1.0,
+             25.0,
+             580.0,
+             0.34,
+             40.0
             ],
             "names": {}
            },
@@ -28979,9 +28710,9 @@
             "items": [
              {
               "items": [
-               70.0,
-               0.10000000149011612,
-               0.10000000149011612
+               25.0,
+               0.01,
+               0.02
               ],
               "names": {}
              }
@@ -28992,7 +28723,19 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_504begaruta_flamethrower01.sgo",
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_rocket01.sgo",
                {
                 "items": [
                  0.0,
@@ -29005,7 +28748,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_flamethrower01.sgo",
+               "app:/weapon/v_406begaruta_rocket01.sgo",
                {
                 "items": [
                  0.0,
@@ -29018,23 +28761,11 @@
              },
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_longSpreadCannon01_r.sgo",
+               "app:/weapon/v_406begaruta_longCannon02_r.sgo",
                {
                 "items": [
-                 25.0,
-                 0.02500000037252903
+                 15.0,
+                 0.006
                 ],
                 "names": {}
                }
@@ -29043,26 +28774,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longSpreadCannon01_l.sgo",
+               "app:/weapon/v_406begaruta_longCannon02_l.sgo",
                {
                 "items": [
-                 25.0,
-                 0.02500000037252903
+                 15.0,
+                 0.006
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              }
@@ -29071,8 +28790,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.05,
+             0.2
             ],
             "names": {}
            }
@@ -29224,7 +28943,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon368",
-    "vehicle": "v504_begaruta_red.sgo"
+    "vehicle": "vehicle406_begaruta_red.sgo"
    }
   },
   {
@@ -29372,7 +29091,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      2700.0,
      0.0,
@@ -29473,7 +29192,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -29665,7 +29384,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon429",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -29813,7 +29532,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      3000.0,
      0.0,
@@ -30316,7 +30035,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.36000001430511475,
      3500.0,
      0.0,
@@ -30417,33 +30136,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta.sgo",
+         "app:/Object/vehicle406_begaruta.sgo",
          {
           "items": [
            {
             "items": [
-             16.799999237060547,
-             8.0
+             10.0,
+             10.0
             ],
             "names": {}
            },
            {
             "items": [
-             4.5,
-             0.004999999888241291,
-             10.0,
-             0.009999999776482582
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             10.0,
-             1.0,
+             6.5,
+             0.005,
              25.0,
-             580.0,
-             0.3400000035762787,
-             40.0
+             0.06
+            ],
+            "names": {}
+           },
+           {
+            "items": [
+             20.0,
+             1.5,
+             45.0,
+             420.0,
+             0.42,
+             50.0
             ],
             "names": {}
            },
@@ -30451,9 +30170,9 @@
             "items": [
              {
               "items": [
-               25.0,
-               0.009999999776482582,
-               0.019999999552965164
+               40.0,
+               0.05,
+               0.1
               ],
               "names": {}
              }
@@ -30470,13 +30189,7 @@
              },
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_rocket01_r.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -30489,7 +30202,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_rocket01_l.sgo",
+               "app:/weapon/v_406begaruta_gatling01.sgo",
                {
                 "items": [
                  0.0,
@@ -30502,11 +30215,17 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon02_r.sgo",
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_longCannon01_r.sgo",
                {
                 "items": [
-                 15.0,
-                 0.006000000052154064
+                 20.0,
+                 0.025
                 ],
                 "names": {}
                }
@@ -30515,26 +30234,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon02_l.sgo",
+               "app:/weapon/v_406begaruta_missile01_l.sgo",
                {
                 "items": [
-                 15.0,
-                 0.006000000052154064
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              }
@@ -30543,8 +30250,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.02,
+             0.1
             ],
             "names": {}
            }
@@ -30696,7 +30403,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon369",
-    "vehicle": "v504_begaruta.sgo"
+    "vehicle": "vehicle406_begaruta.sgo"
    }
   },
   {
@@ -30844,7 +30551,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      8000.0,
      0.0,
@@ -31269,7 +30976,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      2000.0,
      0.0,
@@ -31370,13 +31077,25 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v503_bike.sgo",
+         "app:/Object/vehicle408_motorbike.sgo",
          {
           "items": [
            {
             "items": [
-             3.5999999046325684,
-             1.7999999523162842
+             10.5,
+             10.5
+            ],
+            "names": {}
+           },
+           {
+            "items": [
+             0.8,
+             30.0,
+             0.0075,
+             0.7,
+             0.075,
+             0.3,
+             0.6
             ],
             "names": {}
            },
@@ -31384,69 +31103,22 @@
             "items": [
              {
               "items": [
-               0.6000000238418579,
-               0.4000000059604645,
-               0.800000011920929
-              ],
-              "names": {}
-             },
-             50.0,
-             0.11999999731779099,
-             2.0,
-             0.05999999865889549
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             20000.0,
-             2.0999999046325684
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             {
-              "items": [
-               "app:/weapon/v_503_bike_gun_l.sgo",
+               "app:/weapon/edf41_v_408motorbike_gun.sgo",
                {
                 "items": [
-                 "BodyRecoil",
-                 {
-                  "items": [
-                   0.0,
-                   0.0
-                  ],
-                  "names": {}
-                 }
+                 0.0,
+                 0.0
+                ],
+                "names": {}
+               },
+               {
+                "items": [
+                 90.0,
+                 0.015,
+                 0.1
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_503_bike_gun_r.sgo",
-               {
-                "items": [
-                 "BodyRecoil",
-                 {
-                  "items": [
-                   0.0,
-                   0.0
-                  ],
-                  "names": {}
-                 }
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_fuel01.sgo"
               ],
               "names": {}
              }
@@ -31601,7 +31273,7 @@
    "call": {
     "kind": "vehicle",
     "template": "aWeapon340",
-    "vehicle": "v503_bike.sgo"
+    "vehicle": "vehicle408_motorbike.sgo"
    }
   },
   {
@@ -31749,7 +31421,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      2700.0,
      0.0,
@@ -31850,7 +31522,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -32042,7 +31714,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon431",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -32190,7 +31862,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.36000001430511475,
      3500.0,
      0.0,
@@ -32291,33 +31963,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta_red.sgo",
+         "app:/Object/vehicle406_begaruta_red.sgo",
          {
           "items": [
            {
             "items": [
-             32.0,
-             15.0
+             12.0,
+             12.0
             ],
             "names": {}
            },
            {
             "items": [
-             7.5,
-             0.014999999664723873,
-             35.0,
-             0.05999999865889549
+             5.5,
+             0.005,
+             20.0,
+             0.06
             ],
             "names": {}
            },
            {
             "items": [
+             15.0,
+             1.5,
              30.0,
-             3.0,
-             60.0,
              240.0,
-             0.5400000214576721,
-             80.0
+             0.28,
+             50.0
             ],
             "names": {}
            },
@@ -32326,8 +31998,8 @@
              {
               "items": [
                70.0,
-               0.10000000149011612,
-               0.10000000149011612
+               0.1,
+               0.1
               ],
               "names": {}
              }
@@ -32338,7 +32010,19 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_504begaruta_flamethrower01.sgo",
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_gatling02.sgo",
                {
                 "items": [
                  0.0,
@@ -32351,7 +32035,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504_h_machinegun01.sgo",
+               "app:/weapon/v_406begaruta_gatling02.sgo",
                {
                 "items": [
                  0.0,
@@ -32364,23 +32048,11 @@
              },
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_longSpreadCannon01_r.sgo",
+               "app:/weapon/v_406begaruta_missile01_r.sgo",
                {
                 "items": [
-                 25.0,
-                 0.02500000037252903
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                }
@@ -32389,26 +32061,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longSpreadCannon01_l.sgo",
+               "app:/weapon/v_406begaruta_missile01_l.sgo",
                {
                 "items": [
-                 25.0,
-                 0.02500000037252903
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              }
@@ -32417,8 +32077,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.02,
+             0.1
             ],
             "names": {}
            }
@@ -32570,7 +32230,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon372",
-    "vehicle": "v504_begaruta_red.sgo"
+    "vehicle": "vehicle406_begaruta_red.sgo"
    }
   },
   {
@@ -32718,7 +32378,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      3500.0,
      0.0,
@@ -33159,7 +32819,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      4000.0,
      0.0,
@@ -33260,7 +32920,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v506_heli.sgo",
+         "app:/Object/vehicle302_heli.sgo",
          {
           "items": [
            {
@@ -33273,12 +32933,12 @@
            {
             "items": [
              50.0,
-             0.0020000000949949026,
+             0.002,
              12.0,
-             0.004000000189989805,
-             4.0,
+             0.004,
+             2.0,
              40.0,
-             0.009999999776482582
+             0.01
             ],
             "names": {}
            },
@@ -33293,7 +32953,7 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_506heli_LaserCannon01_l.sgo",
+               "app:/weapon/edf41_v_302heli_lasercannon01_l.sgo",
                {
                 "items": [
                  0.0,
@@ -33306,7 +32966,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_LaserCannon01_r.sgo",
+               "app:/weapon/edf41_v_302heli_lasercannon01_r.sgo",
                {
                 "items": [
                  0.0,
@@ -33319,7 +32979,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_missile01.sgo",
+               "app:/weapon/edf41_v_302heli_missile01.sgo",
                {
                 "items": [
                  0.0,
@@ -33487,7 +33147,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon397",
-    "vehicle": "v506_heli.sgo"
+    "vehicle": "vehicle302_heli.sgo"
    }
   },
   {
@@ -33635,7 +33295,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.36000001430511475,
      3500.0,
      0.0,
@@ -33736,33 +33396,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta.sgo",
+         "app:/Object/vehicle406_begaruta_green.sgo",
          {
           "items": [
            {
             "items": [
-             30.299999237060547,
-             12.0
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             5.5,
-             0.004999999888241291,
-             20.0,
-             0.05999999865889549
-            ],
-            "names": {}
-           },
-           {
-            "items": [
              15.0,
-             1.5,
+             15.0
+            ],
+            "names": {}
+           },
+           {
+            "items": [
+             7.5,
+             0.015,
+             35.0,
+             0.06
+            ],
+            "names": {}
+           },
+           {
+            "items": [
              30.0,
+             3.0,
+             60.0,
              240.0,
-             0.2800000011920929,
-             50.0
+             0.54,
+             80.0
             ],
             "names": {}
            },
@@ -33771,8 +33431,8 @@
              {
               "items": [
                70.0,
-               0.10000000149011612,
-               0.10000000149011612
+               0.1,
+               0.1
               ],
               "names": {}
              }
@@ -33783,19 +33443,7 @@
             "items": [
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_gatling02_r.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -33808,33 +33456,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_gatling02_l.sgo",
-               {
-                "items": [
-                 0.0,
-                 0.0
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_missile01_r.sgo",
-               {
-                "items": [
-                 0.0,
-                 0.0
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_missile01_l.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -33854,6 +33476,32 @@
              {
               "items": [
                0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_longSpreadCannon01_r.sgo",
+               {
+                "items": [
+                 25.0,
+                 0.025
+                ],
+                "names": {}
+               }
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_longSpreadCannon01_l.sgo",
+               {
+                "items": [
+                 25.0,
+                 0.025
+                ],
+                "names": {}
+               }
               ],
               "names": {}
              }
@@ -33862,8 +33510,8 @@
            },
            {
             "items": [
-             0.019999999552965164,
-             0.10000000149011612
+             0.05,
+             0.2
             ],
             "names": {}
            }
@@ -34015,7 +33663,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon371",
-    "vehicle": "v504_begaruta.sgo"
+    "vehicle": "vehicle406_begaruta_green.sgo"
    }
   },
   {
@@ -34163,7 +33811,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      3000.0,
      0.0,
@@ -34666,7 +34314,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      2700.0,
      0.0,
@@ -34767,7 +34415,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -34959,7 +34607,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon432",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -35107,7 +34755,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.46000000834465027,
      3500.0,
      0.0,
@@ -35208,33 +34856,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta_red.sgo",
+         "app:/Object/vehicle406_begaruta_red.sgo",
          {
           "items": [
            {
             "items": [
-             64.0,
-             25.0
+             21.0,
+             21.0
             ],
             "names": {}
            },
            {
             "items": [
-             9.0,
-             0.014999999664723873,
-             45.0,
-             0.05999999865889549
+             5.5,
+             0.005,
+             10.0,
+             0.01
             ],
             "names": {}
            },
            {
             "items": [
-             40.0,
-             3.0,
-             60.0,
-             240.0,
-             0.5400000214576721,
-             80.0
+             10.0,
+             1.0,
+             25.0,
+             760.0,
+             0.34,
+             40.0
             ],
             "names": {}
            },
@@ -35242,9 +34890,9 @@
             "items": [
              {
               "items": [
-               90.0,
-               0.10000000149011612,
-               0.10000000149011612
+               45.0,
+               0.01,
+               0.02
               ],
               "names": {}
              }
@@ -35255,7 +34903,19 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_504begaruta_flamethrower01.sgo",
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_rocket01.sgo",
                {
                 "items": [
                  0.0,
@@ -35268,7 +34928,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_flamethrower01.sgo",
+               "app:/weapon/v_406begaruta_rocket01.sgo",
                {
                 "items": [
                  0.0,
@@ -35281,23 +34941,11 @@
              },
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_longSpreadCannon01_r.sgo",
+               "app:/weapon/v_406begaruta_longCannon02_r.sgo",
                {
                 "items": [
-                 25.0,
-                 0.02500000037252903
+                 15.0,
+                 0.006
                 ],
                 "names": {}
                }
@@ -35306,26 +34954,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longSpreadCannon01_l.sgo",
+               "app:/weapon/v_406begaruta_longCannon02_l.sgo",
                {
                 "items": [
-                 25.0,
-                 0.02500000037252903
+                 15.0,
+                 0.006
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              }
@@ -35334,8 +34970,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.05,
+             0.2
             ],
             "names": {}
            }
@@ -35487,7 +35123,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon375",
-    "vehicle": "v504_begaruta_red.sgo"
+    "vehicle": "vehicle406_begaruta_red.sgo"
    }
   },
   {
@@ -35635,7 +35271,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      2000.0,
      0.0,
@@ -35736,13 +35372,25 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v503_bike.sgo",
+         "app:/Object/vehicle408_motorbike.sgo",
          {
           "items": [
            {
             "items": [
-             3.5999999046325684,
-             1.7999999523162842
+             22.0,
+             22.0
+            ],
+            "names": {}
+           },
+           {
+            "items": [
+             0.8,
+             30.0,
+             0.0075,
+             0.7,
+             0.075,
+             0.3,
+             0.6
             ],
             "names": {}
            },
@@ -35750,69 +35398,22 @@
             "items": [
              {
               "items": [
-               0.6000000238418579,
-               0.4000000059604645,
-               0.800000011920929
-              ],
-              "names": {}
-             },
-             50.0,
-             0.11999999731779099,
-             2.0,
-             0.05999999865889549
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             20000.0,
-             2.0999999046325684
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             {
-              "items": [
-               "app:/weapon/v_503_bike_gun_l.sgo",
+               "app:/weapon/edf41_v_408motorbike_gun.sgo",
                {
                 "items": [
-                 "BodyRecoil",
-                 {
-                  "items": [
-                   0.0,
-                   0.0
-                  ],
-                  "names": {}
-                 }
+                 0.0,
+                 0.0
+                ],
+                "names": {}
+               },
+               {
+                "items": [
+                 90.0,
+                 0.015,
+                 0.1
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_503_bike_gun_r.sgo",
-               {
-                "items": [
-                 "BodyRecoil",
-                 {
-                  "items": [
-                   0.0,
-                   0.0
-                  ],
-                  "names": {}
-                 }
-                ],
-                "names": {}
-               }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_fuel01.sgo"
               ],
               "names": {}
              }
@@ -35967,7 +35568,7 @@
    "call": {
     "kind": "vehicle",
     "template": "aWeapon340",
-    "vehicle": "v503_bike.sgo"
+    "vehicle": "vehicle408_motorbike.sgo"
    }
   },
   {
@@ -36115,7 +35716,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      2700.0,
      0.0,
@@ -36216,7 +35817,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -36408,7 +36009,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon433",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -36556,7 +36157,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      4000.0,
      0.0,
@@ -36657,7 +36258,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v506_heli.sgo",
+         "app:/Object/vehicle302_heli.sgo",
          {
           "items": [
            {
@@ -36670,12 +36271,12 @@
            {
             "items": [
              50.0,
-             0.0024999999441206455,
+             0.0025,
              10.0,
-             0.004999999888241291,
-             6.0,
+             0.005,
+             3.0,
              45.0,
-             0.009999999776482582
+             0.01
             ],
             "names": {}
            },
@@ -36690,7 +36291,7 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_506heli_LaserCannon01_l.sgo",
+               "app:/weapon/edf41_v_302heli_lasercannon01_l.sgo",
                {
                 "items": [
                  0.0,
@@ -36703,7 +36304,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_LaserCannon01_r.sgo",
+               "app:/weapon/edf41_v_302heli_lasercannon01_r.sgo",
                {
                 "items": [
                  0.0,
@@ -36716,7 +36317,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_napalm01.sgo",
+               "app:/weapon/edf41_v_302heli_napalm01.sgo",
                {
                 "items": [
                  0.0,
@@ -36884,7 +36485,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon398",
-    "vehicle": "v506_heli.sgo"
+    "vehicle": "vehicle302_heli.sgo"
    }
   },
   {
@@ -37032,7 +36633,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      3500.0,
      0.0,
@@ -37473,7 +37074,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.46000000834465027,
      3500.0,
      0.0,
@@ -37574,33 +37175,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta.sgo",
+         "app:/Object/vehicle406_begaruta_green.sgo",
          {
           "items": [
            {
             "items": [
-             63.0,
-             21.0
+             17.5,
+             25.0
             ],
             "names": {}
            },
            {
             "items": [
-             5.5,
-             0.004999999888241291,
-             10.0,
-             0.009999999776482582
+             9.0,
+             0.015,
+             45.0,
+             0.06
             ],
             "names": {}
            },
            {
             "items": [
-             10.0,
-             1.0,
-             25.0,
-             760.0,
-             0.3400000035762787,
-             40.0
+             40.0,
+             3.0,
+             60.0,
+             240.0,
+             0.54,
+             80.0
             ],
             "names": {}
            },
@@ -37608,9 +37209,9 @@
             "items": [
              {
               "items": [
-               45.0,
-               0.009999999776482582,
-               0.019999999552965164
+               90.0,
+               0.1,
+               0.1
               ],
               "names": {}
              }
@@ -37621,19 +37222,7 @@
             "items": [
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_rocket01_r.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -37646,7 +37235,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_rocket01_l.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -37659,11 +37248,23 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon02_r.sgo",
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_longSpreadCannon01_r.sgo",
                {
                 "items": [
-                 15.0,
-                 0.006000000052154064
+                 25.0,
+                 0.025
                 ],
                 "names": {}
                }
@@ -37672,26 +37273,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon02_l.sgo",
+               "app:/weapon/v_406begaruta_longSpreadCannon01_l.sgo",
                {
                 "items": [
-                 15.0,
-                 0.006000000052154064
+                 25.0,
+                 0.025
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              }
@@ -37700,8 +37289,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.05,
+             0.2
             ],
             "names": {}
            }
@@ -37853,7 +37442,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon374",
-    "vehicle": "v504_begaruta.sgo"
+    "vehicle": "vehicle406_begaruta_green.sgo"
    }
   },
   {
@@ -38001,7 +37590,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      7500.0,
      0.0,
@@ -38528,7 +38117,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.46000000834465027,
      3500.0,
      0.0,
@@ -38629,33 +38218,33 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v504_begaruta.sgo",
+         "app:/Object/vehicle406_begaruta.sgo",
          {
           "items": [
            {
             "items": [
-             63.0,
-             21.0
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             5.5,
-             0.004999999888241291,
-             10.0,
-             0.009999999776482582
-            ],
-            "names": {}
-           },
-           {
-            "items": [
-             10.0,
-             1.0,
              25.0,
-             760.0,
-             0.3400000035762787,
-             40.0
+             25.0
+            ],
+            "names": {}
+           },
+           {
+            "items": [
+             7.5,
+             0.005,
+             35.0,
+             0.06
+            ],
+            "names": {}
+           },
+           {
+            "items": [
+             20.0,
+             1.5,
+             45.0,
+             540.0,
+             0.42,
+             50.0
             ],
             "names": {}
            },
@@ -38663,9 +38252,9 @@
             "items": [
              {
               "items": [
-               45.0,
-               0.009999999776482582,
-               0.019999999552965164
+               60.0,
+               0.05,
+               0.1
               ],
               "names": {}
              }
@@ -38682,13 +38271,7 @@
              },
              {
               "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               "app:/weapon/v_504begaruta_rocket01_r.sgo",
+               "app:/weapon/v_406begaruta_flamethrower01.sgo",
                {
                 "items": [
                  0.0,
@@ -38701,7 +38284,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_rocket01_l.sgo",
+               "app:/weapon/v_406begaruta_gatling01.sgo",
                {
                 "items": [
                  0.0,
@@ -38714,11 +38297,17 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon02_r.sgo",
+               0.0
+              ],
+              "names": {}
+             },
+             {
+              "items": [
+               "app:/weapon/v_406begaruta_longCannon015_r.sgo",
                {
                 "items": [
-                 15.0,
-                 0.006000000052154064
+                 20.0,
+                 0.025
                 ],
                 "names": {}
                }
@@ -38727,26 +38316,14 @@
              },
              {
               "items": [
-               "app:/weapon/v_504begaruta_longCannon02_l.sgo",
+               "app:/weapon/v_406begaruta_missile01_l.sgo",
                {
                 "items": [
-                 15.0,
-                 0.006000000052154064
+                 0.0,
+                 0.0
                 ],
                 "names": {}
                }
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
-              ],
-              "names": {}
-             },
-             {
-              "items": [
-               0.0
               ],
               "names": {}
              }
@@ -38755,8 +38332,8 @@
            },
            {
             "items": [
-             0.05000000074505806,
-             0.20000000298023224
+             0.02,
+             0.1
             ],
             "names": {}
            }
@@ -38908,7 +38485,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon374",
-    "vehicle": "v504_begaruta.sgo"
+    "vehicle": "vehicle406_begaruta.sgo"
    }
   },
   {
@@ -39056,7 +38633,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      3000.0,
      0.0,
@@ -39559,7 +39136,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      4000.0,
      0.0,
@@ -39660,7 +39237,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v506_heli.sgo",
+         "app:/Object/vehicle302_heli.sgo",
          {
           "items": [
            {
@@ -39673,12 +39250,12 @@
            {
             "items": [
              60.0,
-             0.0024999999441206455,
+             0.0025,
              10.0,
-             0.004999999888241291,
-             8.0,
+             0.005,
+             4.0,
              45.0,
-             0.014999999664723873
+             0.015
             ],
             "names": {}
            },
@@ -39693,7 +39270,7 @@
             "items": [
              {
               "items": [
-               "app:/weapon/v_506heli_gatling01_l.sgo",
+               "app:/weapon/edf41_v_302heli_gatling01_l.sgo",
                {
                 "items": [
                  0.0,
@@ -39706,7 +39283,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_gatling01_r.sgo",
+               "app:/weapon/edf41_v_302heli_gatling01_r.sgo",
                {
                 "items": [
                  0.0,
@@ -39719,7 +39296,7 @@
              },
              {
               "items": [
-               "app:/weapon/v_506heli_missile01.sgo",
+               "app:/weapon/edf41_v_302heli_missile01.sgo",
                {
                 "items": [
                  0.0,
@@ -39887,7 +39464,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon399",
-    "vehicle": "v506_heli.sgo"
+    "vehicle": "vehicle302_heli.sgo"
    }
   },
   {
@@ -40035,7 +39612,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      1.0,
      2700.0,
      0.0,
@@ -40136,7 +39713,7 @@
         "items": [
          "app:/Object/v508_transport.sgo",
          "app:/object/v509_transportbox.sgo",
-         "app:/Object/v505_tank.sgo",
+         "app:/Object/vehicle301_tank.sgo",
          {
           "items": [
            {
@@ -40328,7 +39905,7 @@
    "call": {
     "kind": "vehicle",
     "template": "eWeapon436",
-    "vehicle": "v505_tank.sgo"
+    "vehicle": "vehicle301_tank.sgo"
    }
   },
   {
@@ -40476,7 +40053,7 @@
       ],
       "names": {}
      },
-     1.0,
+     2.0,
      0.5,
      8000.0,
      0.0,

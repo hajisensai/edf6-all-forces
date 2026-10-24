@@ -198,8 +198,10 @@ void __fastcall HitDamageHook(void* damage,const void* target,void* info) {
 
 void BoardingTick() noexcept {
     if(!ready)return;
-    unsigned char* const human=Cfg().boardingGun ? PlayerHuman() : nullptr;
-    shooter.store(human,std::memory_order_relaxed);
+    // The gun's rounds are its owner's only with the gun on; a request of the plugin's own (BoardingRequest: the
+    // Dreadnought's hangars, the tests) presses on whatever the gun's setting.
+    unsigned char* const human=PlayerHuman();
+    shooter.store(Cfg().boardingGun ? human : nullptr,std::memory_order_relaxed);
     AcquireSRWLockExclusive(&askLock);
     const Ask a=ask;
     ask=Ask{};
@@ -209,7 +211,7 @@ void BoardingTick() noexcept {
         if(boarding.ref.obj)EndBoarding(const_cast<unsigned char*>(static_cast<const unsigned char*>(boarding.ref.obj)),false);
         return;
     }
-    if(a.vehicle && GetTickCount64()-a.at<=kAskMs && a.vehicle!=boarding.ref.obj) {
+    if(Cfg().boardingGun && a.vehicle && GetTickCount64()-a.at<=kAskMs && a.vehicle!=boarding.ref.obj) {
         const ObjRef ref{a.vehicle,a.ctrl};
         auto v=const_cast<unsigned char*>(static_cast<const unsigned char*>(a.vehicle));
         if(ref.Is(v))StartBoarding(human,v,ms);
@@ -219,8 +221,10 @@ void BoardingTick() noexcept {
 }
 
 const void* BoardingOnly() noexcept { return only; }
+bool BoardingUnderway() noexcept { return boarding.ref.obj!=nullptr; }
 
-// A board request of the plugin's own (sazabi.cpp's SazabiTestBoard): the player into `v` as a boarding gun round at it
+// A board request of the plugin's own (the Dreadnought's hangars, dreadnought_hangar.inc; sazabi.cpp's SazabiTestBoard,
+// crew.cpp's TestBoardVehicle): the player into `v` as a boarding gun round at it
 // would put them (StartBoarding; BoardingTick presses on until they are in or kTryMs is out).
 void BoardingRequest(unsigned char* v) noexcept {
     unsigned char* const human=ready ? PlayerHuman() : nullptr;

@@ -10,8 +10,18 @@ pack's files get a folder of their own in Mods:
     mp01:/Object/GiantAnt04.sgo  ->  OBJECT/EDF41MP01/GIANTANT04.SGO   (a Mods path, as make_edf41_objects.rel_of)
                                  ->  app:/Object/EDF41MP01/GiantAnt04.sgo   (what scripts and SGOs then name)
 
+The story has the same collision with EDF6's own objects at the same path (EDF6 reused 4.1's names for EDF5's
+remakes: app:/Object/DragonSmall401.sgo, RedSmallDragon.sgo, YerrowSmallDragon.sgo are EDF5's frog dragons there, which
+EDF6's own missions spawn, so the stock files stay): those dragons get an EDF41_ prefix at the OBJECT/ root, while
+their model archives and CAS stay isolated under STORY_FOLDER (EDF41/):
+
+    app:/Object/DragonSmall401.sgo  ->  OBJECT/EDF41_DRAGONSMALL401.SGO  ->  app:/Object/EDF41_DRAGONSMALL401.SGO
+
+Already converted app:/Object/EDF41/DragonSmall401.sgo references map to the same root path. The other shadowed
+story objects (4.1's soldiers) stay in STORY_FOLDER.
+
 This module is the one place that says so: the object converter (tools/make_edf41_objects.py) and the mission
-converter (tools/make_edf41_missions.py) both map through it.
+converter (tools/make_edf41_missions.py, story and packs) both map through it (rewrite).
 """
 from __future__ import annotations
 
@@ -21,10 +31,19 @@ import re
 
 import cpk
 import crilayla
+import edf41friends
 
 # mount -> (Steam app id, the folder name its files get in Mods)
 PACKS: dict[str, tuple[int, str]] = {'mp01': (410780, 'EDF41MP01'), 'mp02': (411380, 'EDF41MP02')}
 MOUNT = re.compile(r'(?i)^(mp0\d):/(.*)$')
+# 4.1's shadowed story assets keep their own models and CAS in this folder. Soldiers' SGOs also stay here; the small
+# dragons' SGOs have an EDF41_ prefix at the OBJECT/ root so object lists expose their distinct names.
+STORY_FOLDER = edf41friends.LOOK_FOLDER
+STORY_DRAGONS: dict[str, str] = {name: 'EDF41_' + name for name in
+                                 ('DRAGONSMALL401.SGO', 'REDSMALLDRAGON.SGO', 'YERROWSMALLDRAGON.SGO')}
+# Original story filenames whose app:/ paths EDF6 holds as other objects: the dragons and 4.1's soldiers.
+STORY_SHADOWED: tuple[str, ...] = (*STORY_DRAGONS, *(r.split('/', 1)[1] for r in edf41friends.LOOKS))
+_STORY = re.compile(r'(?i)^app:/(object)/(' + re.escape(STORY_FOLDER) + r'/)?([^/\\]+)$')
 
 
 def is_mounted(path: str) -> bool:
@@ -55,9 +74,27 @@ def mods_rel(path: str) -> str:
     return app_path(path).split(':/', 1)[1].upper()
 
 
+def story_path(path: str) -> str | None:
+    """A shadowed story object's canonical app:/ path, None for any other path. Dragons' original and old EDF41/
+    paths converge on the same EDF41_ root name; soldiers keep their EDF41/ path and spelling as app_path does."""
+    m = _STORY.match(path.strip())
+    if not m:
+        return None
+    name = m.group(3)
+    dragon = STORY_DRAGONS.get(name.upper())
+    if dragon:
+        return f'app:/Object/{dragon}'
+    if not m.group(2) and name.upper() in STORY_DRAGONS.values():
+        return f'app:/Object/{name.upper()}'
+    if not m.group(2) and name.upper() in STORY_SHADOWED:
+        return f'app:/{m.group(1)}/{STORY_FOLDER}/{name}'
+    return None
+
+
 def rewrite(text: str) -> str:
-    """Every mounted path in a string (a ';'-separated list too) as the app:/ path it is installed at."""
-    return ';'.join(app_path(p) if is_mounted(p) else p for p in text.split(';'))
+    """Every mounted path in a string (a ';'-separated list too) as the app:/ path it is installed at, and every story
+    object EDF6 holds as another (STORY_SHADOWED) as the path 4.1's is installed at (story_path)."""
+    return ';'.join(app_path(p) if is_mounted(p) else story_path(p) or p for p in text.split(';'))
 
 
 class Dlc:

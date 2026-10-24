@@ -70,6 +70,7 @@ _B401_HOLD = (-1.0, 1.7, 2.6)
 _410_CABIN = (-0.15, 1.9, 0.3)
 
 FITS: dict[str, tuple[Fit, ...]] = {
+    'EDF6VC_SEDAN': (Fit(0, 'body', (-.35, 1.19, .12), 'sedan_cab'),),
     # The player's and the NPC interceptors and the enemy fighter (BOMBER501's mesh at 0.65): the front seat of the
     # painted tandem canopy (room 0.77, 0.77, 0.35, 0.77, 3.15, 14.46). Every fighter sits in War Thunder's F-16A
     # Block 15 cockpit (cockpit_kits_plugin jet_f16; the user, 2026-10-14: "座舱和模型干脆直接也搬战雷的吧").
@@ -104,6 +105,20 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # station came in off the roof 0.74, 0.75, 0.23, 1.27, 1.52, 0.58): lower, at the guns' height, their breeches'
     # angular backs filled the sight; from up here the view runs ahead between them.
     'EDF6VC_ARTILLERY': (Fit(0, 'cannon_main', (0.0, 2.65, -0.3), 'tank_gunner'),),
+    # The BMPT (tools/make_bmpt.py; its War Thunder model, pylib/wt_tracked.py, models/wt_bmpt; the Kepler's class: one
+    # seat, its driver lays the guns): the Terminator's weapon module is unmanned, its crew in the hull see it through
+    # the gunner's sight. The seat sees that sight's picture (remote_display), the eye at the gunner sight's window on
+    # the weapon module's left (model.json part cannon_main.wt_optic_glass_c, x 0.34..0.55, y 1.96..2.16, its face at
+    # z -0.04), brought out past the front edge of the sight's hood (its walls at x 0.30..0.35 / 0.55..0.60 reach
+    # z 0.15; from inside it they framed the view), on the turret's yaw bone, the twin 30 mm guns (x +-0.17, y 2.47) up
+    # on its right. Measured with tools/cockpit_preview.py on the War Thunder geometry (2026-10-24); the procedural
+    # fallback model (models/wt_bmpt missing) is not what this eye was fitted to.
+    'EDF6VC_BMPT': (Fit(0, 'cannon_main', (0.445, 2.06, 0.17), 'remote_display'),),
+    # The M163 (tools/make_vulcan.py; its War Thunder model, models/wt_m163): its operator sits in the open-topped
+    # turret's well behind the M61 (the model's seat right below the eye, the gun's receiver ahead of it topping out at
+    # y 2.76, the turret structure on the left from x 0.3 and the range radar on the right at x -0.8..-1.4), his head
+    # above the receiver, the barrels straight ahead, the radar's housing on his right. Measured as the BMPT's.
+    'EDF6VC_VULCAN': (Fit(0, 'cannon_main', (0.05, 2.95, -0.65), 'open_rider'),),
     # The drill tank: from inside its turret the drill and its mount fill every view ahead (the imported model is
     # modelled inside; a tank_gunner station's sight looked at the mount's back wall from every place tried), so its
     # one seat sees a camera's monitor (remote_display): the camera on the turret's right flank beside the drill,

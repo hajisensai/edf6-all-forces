@@ -20,8 +20,8 @@ namespace {
 constexpr unsigned kPreload=0x7A3780;
 constexpr std::size_t kPreloadMgr=0x20B29A8;
 const unsigned char kPreloadSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48};
-static_assert(kConfiguredVariantsMost==kSupportConfigUnits*(kSupportLoadoutMost+2)+2,
-              "ForEachConfiguredVariant's bound: a look per seat, a crew and a loadout per entry, the mission crews' two");
+static_assert(kConfiguredVariantsMost==kSupportConfigUnits*(kSupportLoadoutMost*2+2)+2,
+              "ForEachConfiguredVariant's bound: two looks per seat, a crew and a loadout per entry, the mission crews' two");
 variants::MissionSet wanted;     // what this mission's plans can ask for (MissionVariants)
 variants::MissionSet ready;      // ...of those, preloaded here
 variants::HostSet hostList;      // the room's host list this mission came from (empty: none)
@@ -152,8 +152,7 @@ int ForEachConfiguredVariant(EachVariant each,void* context) noexcept {
     int given=0;
     wchar_t file[96];
     for(int i=0;i<units;++i) {
-        const SupportPreset& p=cfg.preset[i];
-        for(int s=0;s<p.count && s<kSupportLoadoutMost;++s)given+=GiveLook(p.kind[s],s%4==0,p.look[s],each,context);
+        given+=ForEachPresetVariant(cfg.preset[i],[&](const wchar_t* name) noexcept {each(context,name);});
         given+=GiveCrew(cfg,i,each,context);
         const VehicleLoadout& l=cfg.vehicle[i];
         if(l.On() && l.body==VehicleBodyOfKey(SupportCallKey(i)) && VehicleVariantFile(l,file,std::size(file))){each(context,file);++given;}

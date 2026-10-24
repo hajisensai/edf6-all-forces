@@ -136,3 +136,76 @@ def retarget(data: bytes, source: Mdb, target: Mdb, absolute: set[str], free: se
         base = pose.unpack('<3f', at)
         struct.pack_into('<3f', out, at, *(base[c] + shift[c] for c in range(3)))
     return bytes(out)
+
+
+def rotation(pose: CasPose, channel: int, frame: int = 0) -> tuple[float, float, float, float]:
+    """A stored rotation key (xyzw) of a CANM 0x300 channel: kind 2 static (the base), kind 3 one f32 xyzw per key
+    (clamped at its last key); cas_legacy's module docstring has the layout."""
+    if not 0 <= channel < pose.channel_count:
+        raise ValueError('CANM rotation index outside its table')
+    at = pose.points + channel * 48
+    *values, offset, kind, count, _reserved = pose.unpack('<8f4i', at)
+    if kind == 2:
+        return tuple(values[:4])
+    if kind != 3 or count <= 0:
+        raise ValueError('not a quaternion CANM channel')
+    return pose.unpack('<4f', at + offset + min(max(frame, 0), count - 1) * 16)
+
+
+def clip_info(pose: CasPose, clip: Clip) -> tuple[float, float, int]:
+    """(duration, step, frames) of a clip (CANM clip header +8 / +0xC / +0x10)."""
+    _loop, _name, duration, step, frames = pose.unpack('<IiffI', clip.at)
+    return duration, step, frames
+
+
+def root_motion(pose: CasPose, clip: Clip, bone: str) -> list[tuple[float, float, float]] | None:
+    """The bone's ground motion over the clip, one (x, z, yaw) per key, relative to its first key: x / z the
+    translation in the clip's start frame, yaw = atan2(forward x, forward z) of the bone's +Z turned by its rotation
+    (radians, the angle from the start). None when the clip has no track for the bone or the bone does not move."""
+    import math
+    track = next((t for t in clip.tracks if t.name == bone), None)
+    if track is None:
+        return None
+    _duration, _step, frames = clip_info(pose, clip)
+    out = []
+    for k in range(max(frames, 1)):
+        x, _y, z = pose.translation(track.translation, k) if track.translation >= 0 else (0.0, 0.0, 0.0)
+        if track.rotation >= 0:
+            qx, qy, qz, qw = rotation(pose, track.rotation, k)
+            fx, fz = 2.0 * (qx * qz + qw * qy), 1.0 - 2.0 * (qx * qx + qy * qy)   # +Z turned by q
+            yaw = math.atan2(fx, fz)
+        else:
+            yaw = 0.0
+        out.append((x, z, yaw))
+    x0, z0, y0 = out[0]
+    out = [(x - x0, z - z0, y - y0) for x, z, y in out]
+    # yaw unwrapped (a 180 degree turn passes +-pi)
+    for i in range(1, len(out)):
+        x, z, y = out[i]
+        while y - out[i - 1][2] > math.pi:
+            y -= 2.0 * math.pi
+        while y - out[i - 1][2] < -math.pi:
+            y += 2.0 * math.pi
+        out[i] = (x, z, y)
+    if max(max(abs(x), abs(z), abs(y)) for x, z, y in out) < 1e-4:
+        return None
+    return out
+
+
+def strip_bone(data: bytes, clips: set[str], bone: str) -> bytes:
+    """`data` with the bone's translation and rotation tracks of the named clips dropped (their channel indices -1: the
+    bone keeps its bind pose there); every other byte as it was. Why: the clips' root motion is played by the plugin
+    moving the object (edf41robo.cpp), so the model must not move it a second time."""
+    pose = CasPose(data)
+    out = bytearray(data)
+    done = set()
+    for clip in pose.clips:
+        if clip.name not in clips:
+            continue
+        for t in clip.tracks:
+            if t.name == bone:
+                struct.pack_into('<hh', out, t.at + 2, -1, -1)
+                done.add(clip.name)
+    if done != clips:
+        raise ValueError(f'CAS clips without a {bone} track: {sorted(clips - done)}')
+    return bytes(out)

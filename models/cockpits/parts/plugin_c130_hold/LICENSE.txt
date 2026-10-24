@@ -1,0 +1,6 @@
+"Lockheed Martin C130J "Super Hercules"" by KOG_THORNS, CC BY 4.0
+Source: https://sketchfab.com/3d-models/lockheed-martin-c130jsuper-hercules-reupload-223b4ff4abb945038fe35726bedd0db1 (via Sketchfab)
+Licence: Creative Commons Attribution 4.0 (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/
+Changes: the cargo hold only; turned into the seat's eye frame and scaled to metres, triangles facing away from the eye left out;
+textures resized and re-saved as PNG. The EDF6 plugin's cockpit builder (pylib/cockpit_kits_plugin.py) cuts it to each
+vehicle's room.

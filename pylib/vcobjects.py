@@ -32,7 +32,8 @@ class Jet:
     body: str = 'bomber501'
     anchor: str = 'mdl'
     rigid: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
-    # The bone each weapon hangs on (vehicle_weapon_setting), in `weapons` order; empty: all on `anchor`.
+    # The bone each weapon hangs on (vehicle_weapon_setting), in `weapons` order; empty: jet_weapon_bones (its guns and
+    # stores on its model's hardpoints, HARDPOINT_FILES; the rest, or all on a model without them, on `anchor`).
     weapon_bones: tuple[str, ...] = ()
     # A player jet (src/playerjet.cpp): the player flies it. Its SGO keeps `vehicle_setup` beside
     # `mission_setup` (the Air Raider's call weapon brings it like a stock heli, tools/call_weapons.py), and
@@ -209,6 +210,9 @@ class Bomb:
                 'FireBurstCount': 1.0, 'FireInterval': self.interval, 'LockonType': 0.0, 'LockonRange': 0.0}
 
 
+ROUND_KINDS = ('ap', 'he', 'mg', 'heat', 'canister')
+
+
 @dataclass(frozen=True)
 class Shell:
     """A gun's round for a stock vehicle (the user, 2026-10-09: 「坦克应该有ap和he」「机炮车 AP/HE」「防空车高爆近炸」): a
@@ -218,7 +222,11 @@ class Shell:
     the kind of round is the template's, not a guess."""
     template: str           # Root.cpk WEAPON file
     ammo_class: str         # its AmmoClass
-    kind: str               # 'ap' (no blast, penetrating), 'he' (a blast radius) or 'mg' (a machine gun's ball: no blast)
+    # 'ap' (no blast, penetrating), 'he' (a blast radius), 'mg' (a machine gun's ball: no blast), 'heat' (a shaped
+    # charge: the bursting template made a fast, flat, contact-fused round that stops on what it hits, a small
+    # blast, more damage on that one target) or 'canister' (a cloud of balls: the penetrating template firing
+    # FireCount pellets in a wide cone, short reach). ROUND_KINDS; _shell_sgo checks the template and the result.
+    kind: str
     extra: tuple[tuple[str, float], ...] = ()
     # A coaxial gun's muzzle: (the template's single muzzle where it is, where it goes) in the frame of the holder bone
     # it hangs on (make_stock_stores COAX: the gun mantlet's elevating bone, measured on each tank's model). None: the
@@ -248,6 +256,11 @@ class Store:
     drag: float             # a round's share of the clean jet's drag
     weapon: Missile | Bomb | Shell
     names: tuple[tuple[str, str], ...] = ()
+    group: int = 0          # nonzero: the barrels of one selectable loadout (not separate R/LB choices)
+    barrel: int = 0         # original native holder index this linked barrel replaces
+    native_control: bool = False  # original native holder, selectable independently (two belts, one gun)
+    independent_secondary: bool = False  # intrinsic weapon on an unused native secondary input (concurrent with the
+                                         # primary; cycled only among its own kind, never a gun belt)
 
 
 def _local(en: str, ja: str, cn: str, sc: str, kr: str) -> tuple[tuple[str, str], ...]:
@@ -405,6 +418,35 @@ STORES: dict[str, Store] = {
     # its top speed, full gravity, an 8 m blast, 350): the stock E series.
     'HE': Store('HE', 'gun', 0.0, 0.0, Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'he'),
                 _local('HE', 'HE（榴弾）', 'HE（高爆彈）', 'HE（高爆弹）', 'HE（고폭탄）')),
+    # --- rounds the tanks' real prototypes fire and the stock game lacks (the user, 2026-10-19: 「坦克好像还有串联破甲弹
+    # 或者破甲弹之类的弹种。你看看各种载具缺什么都补一下」; only a round the vehicle's prototype really carries:
+    # docs/feedback-2026-10-19-vehicle-ammo.md). Both from the Blacker's own gun files (their muzzle (0, 0, 2.8) is the
+    # 505's and the 601's main gun's), so they leave the barrel the stock rounds leave.
+    # HEAT-MP: the multi-purpose shaped-charge round of a 120 mm smooth-bore (the Abrams' M830 / M830A1, the Type 10's
+    # JM12A1). The Blacker E's bursting round (RocketBullet01) made one: a shaped charge's jet stops on the one thing
+    # it hits (no penetration through a line of enemies as the APFSDS), so it puts more on that target (450 to the
+    # stock rounds' 350) with a small fragmentation burst (3 m to the howitzer's 8-18); it leaves at 780 m/s (M830
+    # 1140 against M829's 1575: 0.72 of the APFSDS' 18 m a frame), flat (gravity 0.15 against the howitzer's 1),
+    # reaching as far as the APFSDS (140 frames: 1820 m); a contact sphere of 0.8 m (the HE's 1.6); orange-red.
+    'HEAT': Store('HEAT-MP', 'gun', 0.0, 0.0,
+                  Shell('V_505TANK_CANNON01.SGO', 'RocketBullet01', 'heat',
+                        (('AmmoSpeed', 13.0), ('AmmoGravityFactor', 0.15), ('AmmoAlive', 140.0), ('AmmoDamage', 450.0),
+                         ('AmmoExplosion', 3.0), ('AmmoIsPenetration', 0.0), ('AmmoHitSizeAdjust', 0.5)),
+                        colour=(3.2, 1.3, 0.5, 1.0)),
+                  _local('HEAT-MP', 'HEAT-MP（多目的対戦車榴弾）', 'HEAT-MP（多用途破甲彈）', 'HEAT-MP（多用途破甲弹）',
+                         'HEAT-MP（다목적 대전차고폭탄）')),
+    # Canister (the Abrams' M1028: about 1100 tungsten balls, against infantry in the open at up to ~500 m): the
+    # Blacker A's penetrating round made a cloud: 12 pellets a shot in a 0.07 cone, 40 each (480 on a big target at
+    # close range), 840 m/s, gone after 36 frames (~500 m), penetrating soft targets as the template does; no blast.
+    # Only the Blacker's: the Type 10 (the 601's prototype) has no canister round.
+    'CANISTER': Store('Canister', 'gun', 0.0, 0.0,
+                      Shell('V_505TANK_CANNON01S.SGO', 'SolidBullet01Rail', 'canister',
+                            (('FireCount', 12.0), ('FireAccuracy', 0.07), ('AmmoSpeed', 14.0), ('AmmoAlive', 36.0),
+                             ('AmmoDamage', 40.0), ('AmmoGravityFactor', 0.5), ('AmmoSize', 0.5),
+                             ('AmmoHitSizeAdjust', 0.6)),
+                            colour=(2.6, 2.2, 1.4, 1.0)),
+                      _local('Canister (M1028)', 'キャニスター弾（M1028）', '霰彈（M1028）', '霰弹（M1028）',
+                             '캐니스터탄（M1028）')),
     # A gun-launched anti-tank missile (LAHAT class: 105/120 mm, 0.975 m, 13 kg, semi-active laser, subsonic, about
     # 8 km): from the tank's own barrel, kicked out at 120 m/s, its motor to 300 m/s. Its warhead a tandem HEAT smaller
     # than the Hellfire's (800 here): 600, a 6 m blast; its lock as the Hellfire's. 0.975 m of the tail-finned icbm01:
@@ -425,8 +467,47 @@ STORES: dict[str, Store] = {
     # (V603_FLAK_GLGUN01_DLC_L: GrenadeBullet01_MapNoDamage, 300 m/s, a 4 m blast, 9). Its contact sphere is 4 m
     # (AmmoSize 4 x AmmoHitSizeAdjust 1, docs/carrier-laser-re.md §3): passing within 4 m of an aircraft sets it off, a
     # proximity fuse in effect; it does not harm the map.
+    'FLAK_AP': Store('AP', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
+                     _local('AP belt', '徹甲弾帯', '穿甲彈鏈', '穿甲弹链', '철갑 탄띠'), group=1, barrel=0),
+    'FLAK_AP_R': Store('AP', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_R.SGO', 'SolidBullet01', 'ap'),
+                     _local('AP belt', '徹甲弾帯', '穿甲彈鏈', '穿甲弹链', '철갑 탄띠'), group=1, barrel=1),
     'FLAK_HE': Store('HE-PROX', 'gun', 0.0, 0.0, Shell('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
-                     _local('HE proximity', '近接信管榴弾', '近炸引信高爆彈', '近炸引信高爆弹', '근접신관 고폭탄')),
+                     _local('HE proximity', '近接信管榴弾', '近炸引信高爆彈', '近炸引信高爆弹', '근접신관 고폭탄'), group=2, barrel=0),
+    'FLAK_HE_R': Store('HE-PROX', 'gun', 0.0, 0.0, Shell('V603_FLAK_GLGUN01_DLC_R.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
+                     _local('HE proximity', '近接信管榴弾', '近炸引信高爆彈', '近炸引信高爆弹', '근접신관 고폭탄'), group=2, barrel=1),
+    # Two native 603 holders represent alternate ammunition for the same M61 barrel cluster.
+    'VULCAN_HE': Store('20 mm M61 HE', 'gun', 0.0, 0.0,
+                       Shell('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
+                       _local('20 mm M61 HE', '20mm M61 榴弾', '20mm M61 高爆彈', '20mm M61 高爆弹', '20mm M61 고폭탄'), native_control=True),
+    'VULCAN_AP': Store('20 mm M61 AP', 'gun', 0.0, 0.0,
+                       Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
+                       _local('20 mm M61 AP', '20mm M61 徹甲弾', '20mm M61 穿甲彈', '20mm M61 穿甲弹', '20mm M61 철갑탄'), native_control=True),
+    'BMPT_ATGM': Store('9M120 Ataka', 'ground', 0.0, 0.0,
+                       Missile('9M120 Ataka', Look('bullet_icbm01', 1.83), burn=12.0, top=550.0, accel=180.0,
+                               max_g=20.0, nav=3.0, life=12.0, damage=1200.0, blast=6.0,
+                               lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
+                       _local('9M120 Ataka', '9M120 アターカ', '9M120 阿塔卡', '9M120 阿塔卡', '9M120 아타카'),
+                       independent_secondary=True),
+    # The BMPT's second belt: its 2A42s are dual-feed guns, HE-FRAG-T (the native belt, tools/make_tracked_combat GUNS)
+    # and the 3UBR8 APDS-T the gunner switches to against armour. Two barrels, one choice (group 3, as the flak's);
+    # its numbers are make_tracked_combat's (the native gun's own file and muzzles, BMPT_AP_BELT), this template only
+    # names the round's family.
+    'BMPT_AP': Store('30 mm APDS', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
+                     _local('30 mm APDS (3UBR8)', '30mm APDS（3UBR8）', '30mm 脫殼穿甲彈（3UBR8）', '30mm 脱壳穿甲弹（3UBR8）',
+                            '30mm 분리철갑탄（3UBR8）'), group=3, barrel=0),
+    'BMPT_AP_R': Store('30 mm APDS', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_R.SGO', 'SolidBullet01', 'ap'),
+                       _local('30 mm APDS (3UBR8)', '30mm APDS（3UBR8）', '30mm 脫殼穿甲彈（3UBR8）', '30mm 脱壳穿甲弹（3UBR8）',
+                              '30mm 분리철갑탄（3UBR8）'), group=3, barrel=1),
+    # The Ataka's thermobaric round (9M120F: the same tube and flight, a thermobaric warhead against infantry and
+    # cover): half the tandem warhead's damage on one target, more than twice its blast. Its own look (the rounds one
+    # control cycles never look alike: tools/selftest.py store_looks).
+    'BMPT_ATGMF': Store('9M120F Ataka', 'ground', 0.0, 0.0,
+                        Missile('9M120F Ataka', Look('airtortoise_missile', 1.83), burn=12.0, top=550.0, accel=180.0,
+                                max_g=20.0, nav=3.0, life=12.0, damage=600.0, blast=14.0,
+                                lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
+                        _local('9M120F Ataka (thermobaric)', '9M120F アターカ（サーモバリック）', '9M120F 阿塔卡（溫壓）',
+                               '9M120F 阿塔卡（温压）', '9M120F 아타카（열압력）'),
+                        independent_secondary=True),
     # A tank's / an IFV's coaxial machine gun (COAX_MOUNTS above): fired on its own trigger (src/payload.cpp: the
     # secondary trigger, the main gun staying loaded). The stock Epsilon gunner's machine gun (V_403TANK_MACHINEGUN:
     # SolidBullet01, 6 a round: the lightest round of any stock vehicle gun, a rifle round's; its own tank machine gun
@@ -514,7 +595,10 @@ _BLAST = tuple('app:/weapon/' + f.lower() for f in JET_BLAST_FILES)
 JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0, 7005.0: 120000.0, 7006.0: 2200.0,
               7007.0: 2200.0, 7008.0: 2200.0, 7009.0: 120000.0, 7010.0: 120000.0, 7011.0: 70000.0, 7020.0: 16000.0,
               7030.0: 12000.0, 7201.0: 16000.0, 7202.0: 22000.0,
-              7401.0: 71200.0}   # the Sazabi: its canonical full weight (30.5 t empty)
+              7401.0: 71200.0,   # the Sazabi: its canonical full weight (30.5 t empty)
+              # the Dreadnought's fighters (a light fighter's, the bomber a strike jet's), and the Dreadnought: a
+              # supercarrier's displacement (~100 kt)
+              7041.0: 14000.0, 7042.0: 15000.0, 7043.0: 22000.0, 7044.0: 13000.0, 7601.0: 1.0e8}
 # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
 # round (name -> damage, frames between rounds, m a frame, frames of life, round size, blast radius, colour, spread,
 # the share of the world's gravity it falls at). Damage is per round against the player (the stock gatling's is 10,
@@ -556,13 +640,19 @@ _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
 # The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
 # does not hold makes the game's preset empty (0x7B16F0 returns false, its cue none) and playing it does nothing
 # (0x7B4510); the plugin plays the engine instead (src/jetsound.cpp).
-PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15   # jet_sgo: the seat of an aircraft the player boards
+# jet_sgo: the seat of an aircraft the player boards. vehicle_riding_position[i][3] is not a pose: it is the seat's
+# name key in the text table (0x7A3500; 505_TANK_DRIVER and 506_HELI_DRIVER both read "Pilot Seat"); the rider's pose
+# is the seat locator's own MAB parameters (Animation / DispCharacter, 0x62B62D), the 506's: rider hidden
+# (docs/all-classes-ride-re.md). Every class also takes every stock seat at run time (src/allclass.cpp).
+PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15
 # The marks of the plugin's aircraft the player boards (src/playerjet_kinds.h kBoardable, its bodies' marks in
 # src/jet_internal.h kBodies; tools/selftest.py boardable_seats_take_every_class holds them together): every SGO of one
 # takes every class into its seat, the NPC body's too (the user, 2026-10-07: the carrier an NPC called took Rangers and Air
 # Raiders only), whatever brings it: the NPC jet, its parked and requested twins, the airstrike bombers and the gunship
-# made from the strike jet (7001). The enemy's, the Primer creatures' and the submarine carrier keep the 506's seat.
-BOARDABLE_MARKS = frozenset({7001.0, 7002.0, 7003.0, 7004.0, 7005.0, 7006.0, 7007.0, 7008.0, 7009.0, 7010.0, 7011.0})
+# made from the strike jet (7001), and the Dreadnought's fighters (7041-7044). The enemy's, the Primer creatures' and the
+# submarine carrier keep the 506's seat.
+BOARDABLE_MARKS = frozenset({7001.0, 7002.0, 7003.0, 7004.0, 7005.0, 7006.0, 7007.0, 7008.0, 7009.0, 7010.0, 7011.0,
+                             7041.0, 7042.0, 7043.0, 7044.0})
 
 
 @dataclass(frozen=True)
@@ -578,6 +668,13 @@ class GroundVehicle:
     weapons: tuple[str, ...]
     durability: float
     tool: str             # the tool that writes it (tools/<tool>.py)
+    setup: tuple[float, ...] | None = None  # native vehicle params when its request template is another vehicle class
+    # What each of `weapons` fires from ('left' / 'right': a gun barrel, the holder on that side's moving barrel bone;
+    # 'missiles': the launcher), in order; empty: the generator's own layout (tools/make_tracked_combat.py slot).
+    slots: tuple[str, ...] = ()
+    # The left / right barrels fire in turn, not together (src/twin_cadence.h): each 'left' weapon is paired with the
+    # 'right' one of the same belt (the k-th left with the k-th right in `weapons`); tools/gen_stores.py kTwinBarrels.
+    alternate: bool = False
 
 
 # A ground vehicle's own camera (game_object_camera_setting, docs/camera-re.md): [0] the point it looks at, [1] the
@@ -588,6 +685,28 @@ class GroundVehicle:
 # ARTILLERY_VIEW_GROUND m ahead of the origin. The plugin's high view (src/highcam.cpp) is the second mode over these.
 ARTILLERY_VIEW_DOWN = (8.0, 20.0)
 ARTILLERY_VIEW_GROUND = (15.0, 45.0)
+
+
+def twin_barrels() -> list[tuple[str, int]]:
+    """The weapon files whose barrels fire in turn (GroundVehicle.alternate) with their pair number (from 1, one per
+    belt): a vehicle's k-th 'left' slot paired with its k-th 'right' (src/twin_cadence.h, tools/gen_stores.py)."""
+    out: list[tuple[str, int]] = []
+    pair = 0
+    for vehicle in GROUND_VEHICLES.values():
+        if not vehicle.alternate:
+            continue
+        if len(vehicle.slots) != len(vehicle.weapons):
+            raise ValueError(f'{vehicle.sgo}: alternate barrels need a slot for every weapon')
+        sides = {side: [w.rsplit('/', 1)[1].upper() for w, s in zip(vehicle.weapons, vehicle.slots) if s == side]
+                 for side in ('left', 'right')}
+        if not sides['left'] or len(sides['left']) != len(sides['right']):
+            raise ValueError(f'{vehicle.sgo}: alternate barrels need a right for every left')
+        for left, right in zip(sides['left'], sides['right']):
+            pair += 1
+            out += [(left, pair), (right, pair)]
+    if len({name for name, _ in out}) != len(out):
+        raise ValueError('a weapon file is in two alternating pairs')
+    return out
 
 
 def camera_view(camera: tuple[list[float], list[float]]) -> dict[str, float]:
@@ -625,12 +744,47 @@ SAZABI_CAMERA = (0.0, 26.0, -48.0)                 # over the 25.6 m mech's shou
 # simulated riding view, tools/sazabi_pose_view.py cam, 2026-10-07), the ground ahead above it.
 SAZABI_SEAT_CAMERA = ((-8.0, 28.0, -52.0), (0.0, 13.0, 10.0))
 
+# The Dreadnought (JETS[DREADNOUGHT_JET], src/dreadnought.cpp, docs/dreadnought-plan.md): the Dreadnought game's Jupiter
+# Arms heavy dreadnought, 500 m bow to stern, the player pilots; its archives are pylib/dreadnought_model.py's (built
+# from the model folder by tools/make_dreadnought.py, which checks these names). Its bow gun on its prow's muzzle bone,
+# its missiles in their cells amidships (dreadnought_model.SHIP_MUZZLES). Marks 7601-7699 are its own (src/body506.cpp).
+DREADNOUGHT_JET = 'edf6tr_dreadnought_mission'
+DREADNOUGHT_MARK = 7601.0
+DREADNOUGHT_DURABILITY = 60000.0
+_DREADNOUGHT_ARC, _DREADNOUGHT_MDB = 'EDF6VC_DN_DREADNOUGHT.MRAB', 'edf6vc_dn_dreadnought.mdb'
+DREADNOUGHT_WEAPON_BONES = ('dn_muzzle', 'dn_muzzle', 'dn_missile')
+# Its turrets (the user, 2026-10-21: 「船的炮塔是可以上人的」): a gunner seat each after the pilot's (seat 1 + n: turret n,
+# its bones dn_turret_<n> / _gun / _muzzle, tools/prep_dreadnought.py), the plugin turning it and firing from its muzzle.
+DREADNOUGHT_TURRETS = 8
+# Its collision box's centre over its keel (heli_rigid_body[0][1]: the model's whole box, the model standing on its keel):
+# the vehicle's position is that centre (src/dreadnought.cpp kKeel; tools/make_dreadnought.py check holds the SGO to it).
+DREADNOUGHT_KEEL = 55.25
+DREADNOUGHT_CAMERA = (0.0, 160.0, -640.0)            # behind and over a 500 m ship, all of it in view
+# Riding: over its stern, looking along its deck at the horizon ahead (model frame: x left, y up, z forward).
+DREADNOUGHT_SEAT_CAMERA = ((0.0, 190.0, -560.0), (0.0, 80.0, 200.0))
+# Its hangar's fighters (src/dreadnought_hangar.cpp; src/jet_internal.h kBodies Body::dn*): NPC jets in the Dreadnought
+# game's fighters' models, crewless (its hangar launches them), boardable (src/playerjet_kinds.h kBoardable).
+# kind -> (JETS name, mark, durability, arms); each one's SGO is EDF6VC_DN_<KIND>.SGO, its model EDF6VC_DN_<KIND>.MRAB.
+DREADNOUGHT_FIGHTERS: dict[str, tuple[str, float, float, tuple[str, ...]]] = {
+    'fighter': ('edf6tr_dn_fighter_mission', 7041.0, 1100.0, _FIGHTER),
+    'defender': ('edf6tr_dn_defender_mission', 7042.0, 1300.0, _FIGHTER),
+    'bomber': ('edf6tr_dn_bomber_mission', 7043.0, 1600.0, _STRIKE),
+    'interceptor': ('edf6tr_dn_interceptor_mission', 7044.0, 900.0, _INTERCEPTOR),
+}
+
+
+def dn_file(kind: str, ext: str) -> str:
+    """A Dreadnought model's file: its archive (MRAB, pylib/dreadnought_model.py archive_name) or SGO."""
+    return f'EDF6VC_DN_{kind.upper()}.{ext}'
+
 
 # The Katyusha (tools/make_katyusha.py): a rocket truck on the Naegling's class (Vehicle402_Rocket: its turret, its
 # wheels), the V607 truck under the Naegling's rack; its rockets are lobbed on the high arc and the EDF6AutoTurret
 # plugin aims them (LockonTargetType kMarkLofted); EDF6VehicleCrew shows its rider where they land.
 KATYUSHA_ROCKETS = 'EDF6VC_KATYUSHA_ROCKETS.SGO'
 GROUND_VEHICLES: dict[str, GroundVehicle] = {
+    'sedan': GroundVehicle('EDF6VC_SEDAN', 'V512_KEITRUCK', 'EWEAPON401',
+                           ('EWEAPON401',), (), 300., 'make_sedan', (.8, 30., .0075, .7, .075, .3, .6)),
     'katyusha': GroundVehicle('EDF6VC_KATYUSHA', 'VEHICLE402_ROCKET', 'EWEAPON401',
                               ('EWEAPON401', 'EWEAPON405', 'EWEAPON409', 'EWEAPON412', 'EWEAPON417'),
                               ('app:/weapon/' + KATYUSHA_ROCKETS.lower(),), 350.0, 'make_katyusha'),
@@ -641,6 +795,21 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
                                ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
                                ('app:/weapon/edf6vc_howitzer_l.sgo', 'app:/weapon/edf6vc_howitzer_r.sgo'), 600.0,
                                'make_artillery'),
+    'vulcan': GroundVehicle('EDF6VC_VULCAN', 'V603_FLAK', 'AWEAPON346',
+                            ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                            ('app:/weapon/edf6vc_vulcan_he_2000.sgo', 'app:/weapon/edf6vc_vulcan_ap_2000.sgo'),
+                            800.0, 'make_vulcan'),
+    'bmpt': GroundVehicle('EDF6VC_BMPT', 'V603_FLAK', 'AWEAPON346',
+                          ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                          ('app:/weapon/edf6vc_bmpt_l.sgo', 'app:/weapon/edf6vc_bmpt_r.sgo',
+                           'app:/weapon/edf6vc_bmpt_atgm_4.sgo',
+                           # its dual-feed guns' APDS belt (one choice for both barrels) and the Ataka's thermobaric
+                           # round (2026-10-19; tools/make_tracked_combat.py BMPT_AP_BELT, STORES BMPT_AP / BMPT_ATGMF)
+                           'app:/weapon/edf6vc_bmpt_ap_150.sgo', 'app:/weapon/edf6vc_bmpt_ap_r_150.sgo',
+                           'app:/weapon/edf6vc_bmpt_atgmf_4.sgo'), 1600.0, 'make_bmpt',
+                          # the native guns' sides, the missile tubes, the second belt's sides on the same moving
+                          # barrels, the thermobaric missile on the same tubes; the 2A42 pair fires in turn (2026-10-21)
+                          slots=('left', 'right', 'missiles', 'left', 'right', 'missiles'), alternate=True),
     # The drill tank (tools/make_drill.py, src/drill.cpp): the Blacker's class (Vehicle505_Tank, tracks, one weapon
     # holder) in EDF: Iron Rain's drill tank, requested like the Blacker E series; its one weapon fires nothing (the
     # drill is the plugin's: it spins it and bites with DRILL_CHARGE_FILE).
@@ -734,6 +903,15 @@ JETS: dict[str, Jet] = {
     SAZABI_JET: Jet(SAZABI_MARK, SAZABI_DURABILITY, SAZABI_WEAPONS, (f'app:/object/{_SAZABI_ARC.lower()}', _SAZABI_MDB),
                     _SAZABI_ARC, 'body', 'body', weapon_bones=SAZABI_WEAPON_BONES, player=True,
                     camera=SAZABI_CAMERA, seat_camera=SAZABI_SEAT_CAMERA, locators_on_origin=True),
+    # The Dreadnought (src/dreadnought.cpp): a 500 m ship the player pilots, on the V506 body, flown by the plugin.
+    DREADNOUGHT_JET: Jet(DREADNOUGHT_MARK, DREADNOUGHT_DURABILITY, _SHIP,
+                         (f'app:/object/{_DREADNOUGHT_ARC.lower()}', _DREADNOUGHT_MDB), _DREADNOUGHT_ARC, 'body', 'body',
+                         weapon_bones=DREADNOUGHT_WEAPON_BONES, player=True, camera=DREADNOUGHT_CAMERA,
+                         seat_camera=DREADNOUGHT_SEAT_CAMERA, locators_on_origin=True),
+    # Its fighters: NPC jets (the hangar launches them crewless) the player boards.
+    **{name: Jet(mark, hp, arms, (f'app:/object/{dn_file(k, "MRAB").lower()}', f'edf6vc_dn_{k}.mdb'), dn_file(k, 'MRAB'),
+                 'body', 'body')
+       for k, (name, mark, hp, arms) in DREADNOUGHT_FIGHTERS.items()},
 }
 # The NPC kinds the test range parks for the player (testrange/gen.py BOARDABLE_PARKED): each one's parked twin
 # (Jet.parked), named after it: edf6tr_jet_<kind>_parked_mission. Same mark, model and arms: the plugin tells them
@@ -864,6 +1042,73 @@ def walkup_box(game: Game, file: str | None, box: tuple) -> tuple:
 
 class DoorError(Exception):
     """A jet's boarding point is not where move_door puts it (check_door)."""
+
+
+# The jets' hardpoints (pylib/jet_hardpoints.py; the user, 2026-10-19: 「在地面停着的飞机射导弹，会在地底生成」): the model
+# files that carry the bones HP_GUN / HP_STORE (jet_models makes them), and which of a jet's weapons hangs on which.
+# Without them every weapon hung on `mdl`, the model's origin (the wheels' contact): the stock 506 muzzles, all under
+# their holder bone, then stood 0.24-0.67 m in the ground under a parked jet. Every other weapon (the blast drones'
+# charges, the Primers' guns) and the fuel tank stay on the anchor.
+HARDPOINT_FILES = frozenset({JET_ELEVON_FILE, 'EDF6VC_INTERCEPTOR.MRAB', 'EDF6VC_MULTIROLE.MRAB', 'EDF6VC_DRONE.MRAB',
+                             'EDF6VC_CARRIER.MRAB', GUNSHIP_MODEL_FILE})
+
+
+def model_file(model) -> str:  # noqa: ANN001 - [archive path, member]
+    """The archive file name (upper case) of a vehicle SGO's animation_model[0] ([path, member])."""
+    return str(model[0]).replace('\\', '/').rsplit('/', 1)[-1].upper()
+
+
+def hardpoint_of(weapon: str) -> str | None:
+    """The hardpoint bone weapon path `weapon` hangs on (jet_hardpoints.HP_GUN / HP_STORE), or None (the anchor)."""
+    from jet_hardpoints import HP_GUN, HP_STORE
+    if weapon.lower() in _GUNS:
+        return HP_GUN
+    kind = store_of(weapon)
+    if kind and STORES[kind[0]].role in ('air', 'ground', 'bomb', 'rocket') and isinstance(STORES[kind[0]].weapon, (Missile, Bomb)):
+        return HP_STORE
+    return None
+
+
+def _muzzle_stock(weapon: str) -> str:
+    """The stock weapon whose muzzle list weapon path `weapon` (one hardpoint_of hangs) fires from."""
+    name = weapon.rsplit('/', 1)[-1].upper()
+    if name in JET_GUN_FILES:
+        return JET_GUN_FILES[name]
+    w = STORES[store_of(weapon)[0]].weapon
+    if isinstance(w, Bomb):
+        return JET_BOMB_STOCK
+    return w.muzzle or JET_MISSILE_STOCK
+
+
+@lru_cache(maxsize=None)
+def _stock_muzzles(game: Game, stock: str) -> tuple[tuple[float, float, float], ...]:
+    block = dsgo.parse(game.read('WEAPON', stock)).root.get('animation_model').items[2].data
+    return tuple(tuple(round(v, 6) for v in struct.unpack_from('<3f', block, at)) for _n, _node, at in mab_muzzles(block))
+
+
+def hardpoint_muzzles(game: Game) -> dict[str, tuple[tuple[float, float, float], ...]]:
+    """{bone: every muzzle (from its holder bone) any weapon hung on it may fire from}: the guns' (JET_GUN_FILES) on
+    HP_GUN; on HP_STORE every jet store's (STORE_FILES: a carrier's own load or any a loadout puts on its pylons,
+    tools/support_loadout.py) and both templates' (the missile pods, the bomb racks). Read off the stock weapons they fire
+    from (_muzzle_stock): what jet_hardpoints places, the same on every model."""
+    from jet_hardpoints import HP_GUN, HP_STORE
+    out: dict[str, set[tuple[float, float, float]]] = {HP_GUN: set(), HP_STORE: set()}
+    for stock in JET_GUN_FILES.values():
+        out[HP_GUN].update(_stock_muzzles(game, stock))
+    stocks = {JET_MISSILE_STOCK, JET_BOMB_STOCK} | {_muzzle_stock(_weapon(f)) for f in STORE_FILES if hardpoint_of(_weapon(f))}
+    for stock in sorted(stocks):
+        out[HP_STORE].update(_stock_muzzles(game, stock))
+    return {k: tuple(sorted(v)) for k, v in out.items()}
+
+
+def jet_weapon_bones(jet: 'Jet', model, anchor: str) -> list[str]:  # noqa: ANN001 - [archive path, member]
+    """The bone each of `jet`'s weapons hangs on (vehicle_weapon_setting, without the fuel tank) when it wears `model`:
+    Jet.weapon_bones; on a model with hardpoints (HARDPOINT_FILES) its guns and stores on theirs; else `anchor`."""
+    if jet.weapon_bones:
+        return list(jet.weapon_bones)
+    if model_file(model) in HARDPOINT_FILES:
+        return [hardpoint_of(w) or anchor for w in jet.weapons]
+    return [anchor] * len(jet.weapons)
 
 
 def mab_locator(mab: bytes, name: str) -> tuple[int, int]:
@@ -1197,6 +1442,10 @@ def _jet_ragdoll(blob: bytes, body: str = JET_BODY_BONE, centre: list[float] | t
     return sgo.write(version, inner)
 
 
+# The SGO member that marks a body built on its ragdoll's mesh compound (src/body506.cpp kAirframeMember).
+AIRFRAME_MEMBER = 'edf6vc_airframe'
+
+
 def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = JET_BODY_BONE,
             rigid: list[list[float]] | None = None, airborne: bool = False) -> bytes:
     """`model`: the model archive and file (default JET_MODEL, the stock bomber); `body`: its mesh bone, which
@@ -1241,8 +1490,8 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['mission_setup'] = setup
     if jet.player or jet.mark in BOARDABLE_MARKS:
         # Every class flies it (the user, 2026-10-05: Wing Divers and Fencers too): the seat's class mask (R 1, WD 2,
-        # F 4, AR 8; the 506's 9) to 15, and a driver's pose every class has (the stock gives 15 only to seats like
-        # the tanks' drivers; 506_HELI_DRIVER only ever comes with 9). An NPC body's pilot is the stock RideAi's dummy
+        # F 4, AR 8; the 506's 9) to 15, and the seat's name key 505_TANK_DRIVER (the same "Pilot Seat" text as
+        # 506_HELI_DRIVER: [3] names the seat, it is no pose; PLAYER_SEAT_POSE). An NPC body's pilot is the stock RideAi's dummy
         # rider (online_authority.cpp SeatNpcRider), the same one a requested twin gets in this seat when the player
         # leaves it in the air (playerjet_board.inc). No soldier comes in by the mask: crew.cpp Crew seats that dummy
         # too, npcai.cpp BoardSquad fills seats from 1 on.
@@ -1266,13 +1515,18 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
     m['animation_model'] = [list(JET_MODEL if model_ref is None else model_ref), cas, mab]
     m['animation_model_bone_mapping'] = [root, body]
     bones = {'body', 'rotor', 'tailRotor'}
-    m['vehicle_weapon_setting'] = with_fuel([[b, 0] for b in (jet.weapon_bones or (anchor,) * len(jet.weapons))], [anchor, -1])
+    m['vehicle_weapon_setting'] = with_fuel([[b, 0] for b in jet_weapon_bones(jet, m['animation_model'][0], anchor)], [anchor, -1])
     # Without the plugin the 506 builds weapons for its first four holders only (src/stores.cpp): fewer would read an
     # entry that is not there; the plugin builds them all, one an entry, so the two lists must agree. The fuel tank is
     # among the four (with_fuel): built either way.
     if len(m['vehicle_weapon_setting']) < 4 or len(m['vehicle_weapon_setting']) != len(setup[3]):
         raise ValueError(f'{name}: {len(setup[3])} weapons for {len(m["vehicle_weapon_setting"])} holders (at least 4)')
     m['vehicle_dead_effect'] = _dead_effect(_rebone(m['vehicle_dead_effect'], bones, anchor))
+    if airframe in aircraft_collision.DN_FILES:
+        # Its body is its ragdoll's mesh compound (src/body506.cpp MakeAirframe), told by this member: the game keeps
+        # no shape userData of a compact SHKT (aircraft_collision.MAGIC read 0 at shape +0x28 in every vehicle, range
+        # 2026-10-21: the Dreadnought flew as its whole box, its deck 12 m over its hull).
+        m[AIRFRAME_MEMBER] = 1
     m['roter_contact_damage_scale'] = 0.0
     m['heli_contact_damage_scale'] = 0.0005
     rb = m['heli_rigid_body']
@@ -1294,7 +1548,7 @@ def jet_sgo(game: Game, name: str, model: list[str] | None = None, body: str = J
         else:
             place_seat_camera(m, box, jet.seat_camera, mdl_at(jet))
     rag = m['ragdoll']
-    m['ragdoll'] = [rag[0] if airframe is False else 'app:/object/' + aircraft_collision.FILES[airframe].lower(),
+    m['ragdoll'] = [rag[0] if airframe is False else 'app:/object/' + aircraft_collision.file_of(airframe).lower(),
                     _jet_ragdoll(rag[1], body, box[0] if door or airframe is not False else None)]
     se = m.get('heli_se_table')
     if not isinstance(se, list) or len(se) <= max(JET_ROTOR_SE_ROWS):
@@ -1473,6 +1727,27 @@ def _named(r, name: str | Store) -> None:
             r.set(key, local.get(key[5:].lower(), plain))
 
 
+def _check_round(shell: Shell, r: dsgo.Node, made: bool) -> None:
+    """Shell `shell`'s round is of its kind: its template's family (`made` False: the game's own round of that family,
+    not a guess) and, once its `extra` is in (`made` True), what the kind means (ValueError otherwise)."""
+    blast, pierce, count = r.get('AmmoExplosion'), r.get('AmmoIsPenetration'), r.get('FireCount')
+    where = f'{shell.template}{"（改后）" if made else ""}'
+    if shell.kind not in ROUND_KINDS:
+        raise ValueError(f'{shell.template}: 未知弹种 {shell.kind}')
+    if shell.kind in ('mg', 'canister') and blast:
+        raise ValueError(f'{where}: {shell.kind} 弹不应有爆炸半径')
+    if shell.kind == 'ap' and (blast or pierce != 1.0):
+        raise ValueError(f'{where}: ap 弹应穿透且无爆炸')
+    if shell.kind in ('he', 'heat') and not blast:
+        raise ValueError(f'{where}: {shell.kind} 弹应有爆炸半径')
+    if not made:
+        return
+    if shell.kind == 'heat' and (pierce != 0.0 or count != 1.0):
+        raise ValueError(f'{where}: 破甲弹一发一弹、不穿透（聚能射流止于所中之物）')
+    if shell.kind == 'canister' and not (isinstance(count, float) and count > 1.0):
+        raise ValueError(f'{where}: 霰弹一发应有多枚弹丸（FireCount > 1）')
+
+
 def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
     """A stock vehicle's round (Shell): its template as it is, but its load and `extra`, and its name."""
     shell = store.weapon
@@ -1480,16 +1755,12 @@ def _shell_sgo(game: Game, store: Store, rounds: int) -> bytes:
     r = doc.root
     if r.get('AmmoClass') != shell.ammo_class:
         raise ValueError(f'{shell.template} 的弹类是 {r.get("AmmoClass")}，不是 {shell.ammo_class}')
-    blast = r.get('AmmoExplosion')
-    if shell.kind == 'mg':
-        if blast:
-            raise ValueError(f'{shell.template}: 机枪弹不应有爆炸半径')
-    elif (shell.kind == 'ap') != (not blast) or (shell.kind == 'ap' and r.get('AmmoIsPenetration') != 1.0):
-        raise ValueError(f'{shell.template}: {shell.kind} 弹应{"穿透且无爆炸" if shell.kind == "ap" else "有爆炸半径"}')
+    _check_round(shell, r, made=False)
     for key, value in shell.params(rounds).items():
         if r.get(key) is None:
             raise ValueError(f'{shell.template} 缺少 {key}')
         r.set(key, value)
+    _check_round(shell, r, made=True)
     if shell.colour is not None:
         colour = r.get('AmmoColor')
         if not isinstance(colour, dsgo.Node) or len(colour.items) != 4:
@@ -1882,6 +2153,97 @@ def check_emc(files: dict[str, bytes], game: Game | None = None) -> None:
     if game is not None:
         stock = emc_stock(game)
         assert abs(stock['reach'] - EMC_BEAM_RANGE) < 1e-3, stock
+
+
+# ------------------------------------------------------------------------------------------ the ultimate strike
+# The ultimate strike's rounds (src/ultimate.cpp, src/ultimate_plan.h, docs/plan-2026-10-19-ultimate.md; the user,
+# 2026-10-19: 「特效拉满 昏天暗地」): DemoIndirectFire SGOs the plugin owns, aims and grows as the EMC's (jet_bay.cpp kEmcFiles,
+# after the Sazabi's and the Proteus's), the satellite laser (PORTAL_LASER_STOCK) remade for each part of the show, and the
+# EMC's impact charge for the blasts. Every damage 0 in the SGO: the plugin writes it (IFC +0xDC) from the weapon's.
+#   ULT_SIGHT_FILE  the charge's aim beams: thin crimson, a round a frame for the whole charge, silent (the plugin grows them)
+#   ULT_BOLT_FILE   a lightning bolt: a blue-white flash ULT_BOLT_ROUNDS frames long, its crack once
+#   ULT_SPARK_FILE  the burst where a bolt lands (ULT_SPARK_RADIUS m)
+#   ULT_BEAM_FILE   the main beam: the satellite's thickest, violet, a round a frame for the whole cannon phase, a deep shot
+#   ULT_CORE_FILE   its white-hot core, silent
+#   ULT_BLAST_FILE  a ring's blast (ULT_BLAST_RADIUS m: src/ultimate_plan.h kRingBlast)
+#   ULT_GATHER_FILE the gather's pulse: a short gold-white laser, exactly ULT_GATHER_REACH m (src/ultimate_plan.h
+#                   kGatherReach: fired from a point that far short of the beam's start, it ends on it), silent
+ULT_SIGHT_FILE = 'EDF6VC_ULT_SIGHT.SGO'
+ULT_BOLT_FILE = 'EDF6VC_ULT_BOLT.SGO'
+ULT_SPARK_FILE = 'EDF6VC_ULT_SPARK.SGO'
+ULT_BEAM_FILE = 'EDF6VC_ULT_BEAM.SGO'
+ULT_CORE_FILE = 'EDF6VC_ULT_CORE.SGO'
+ULT_BLAST_FILE = 'EDF6VC_ULT_BLAST.SGO'
+ULT_GATHER_FILE = 'EDF6VC_ULT_GATHER.SGO'
+ULT_FILES = (ULT_SIGHT_FILE, ULT_BOLT_FILE, ULT_SPARK_FILE, ULT_BEAM_FILE, ULT_CORE_FILE, ULT_BLAST_FILE,
+             ULT_GATHER_FILE)   # EmcRound's order
+ULT_BOLT_ROUNDS = 8                     # src/ultimate_plan.h kBoltFrames
+ULT_SPARK_RADIUS, ULT_BLAST_RADIUS = 40.0, 55.0
+# (rounds, size, colour, speed m a frame, life frames, shot volume, shot pitch): reach = speed x life, past the farthest
+# start: the aims' ring (900 m up, 520 m out) to the area's far edge, a bolt's 700 m (plus its lean), the beam's 1300 m.
+ULT_BEAMS: dict[str, tuple[int, float, tuple[float, ...], float, int, float, float]] = {
+    ULT_SIGHT_FILE: (760, 0.8, (3.0, 0.2, 0.45, 1.0), 140.0, 10, 0.0, 1.0),
+    ULT_BOLT_FILE: (ULT_BOLT_ROUNDS, 2.5, (1.8, 2.4, 3.0, 1.0), 160.0, 6, 0.7, 1.7),
+    ULT_BEAM_FILE: (500, 48.0, (2.8, 0.45, 3.0, 1.0), 150.0, 10, 1.0, 0.6),
+    ULT_CORE_FILE: (500, 18.0, (3.0, 2.6, 3.0, 1.0), 150.0, 10, 0.0, 1.0),
+    ULT_GATHER_FILE: (200, 0.6, (3.0, 2.4, 1.4, 1.0), 12.0, 10, 0.0, 1.0),
+}
+ULT_GATHER_REACH = 120.0
+ULT_REACH = {ULT_SIGHT_FILE: 1300.0, ULT_BOLT_FILE: 760.0, ULT_BEAM_FILE: 1300.0, ULT_CORE_FILE: 1300.0,
+             ULT_GATHER_FILE: ULT_GATHER_REACH}
+ULT_CHARGE_COLOUR = (2.2, 0.6, 3.0, 1.0)
+
+
+def _ult_beam(game: Game, rounds: int, size: float, colour: tuple[float, ...], speed: float, life: int, volume: float,
+              pitch: float) -> bytes:
+    """The satellite laser (PORTAL_LASER_STOCK) made one of the ultimate's beams (see ULT_BEAMS)."""
+    version, m = sgo.read(game.read('OBJECT', PORTAL_LASER_STOCK))
+    p = m['indirect_fire_param']
+    if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+            or p[4] != 'LaserBullet02' or p[11] != 1 or not isinstance(p[17], list) or len(p[17]) != 6
+            or not isinstance(p[18], list) or len(p[18]) != 6):
+        raise ValueError(f'{PORTAL_LASER_STOCK} 不是预期的卫星激光')
+    p[0] = [0.0, 0.0]
+    p[2], p[3], p[5], p[7], p[9], p[10] = rounds, 0, speed, size, 0.0, life
+    p[12] = list(colour)
+    p[14], p[15], p[16] = 0, 0, 0
+    p[17][0] = 1.0                      # its shot sound once for all its rounds
+    p[17][2] = volume
+    p[17][3] = pitch
+    p[18][2] = 0.0                      # no hit sound: a round a frame would play it 60 times a second
+    m['indirect_fire_damage'] = 0.0     # the plugin sets the damage (IFC +0xDC)
+    return sgo.write(version, m)
+
+
+def ult_rounds(game: Game) -> dict[str, bytes]:
+    """The ultimate's DemoIndirectFire SGOs (ULT_FILES), {Mods/OBJECT file: bytes}."""
+    out = {name: _ult_beam(game, *spec) for name, spec in ULT_BEAMS.items()}
+    for name, radius in ((ULT_SPARK_FILE, ULT_SPARK_RADIUS), (ULT_BLAST_FILE, ULT_BLAST_RADIUS)):
+        version, m = sgo.read(_emc_charge(game, radius, EMC_BLAST_SPEED, EMC_BLAST_LIFE))
+        m['indirect_fire_param'][12] = list(ULT_CHARGE_COLOUR)
+        out[name] = sgo.write(version, m)
+    return {name: out[name] for name in ULT_FILES}
+
+
+def check_ult(files: dict[str, bytes]) -> None:
+    """The ultimate's SGOs as src/ultimate.cpp fires them: the beams LaserBullet02, penetrating, no blast, a round a frame,
+    reaching past their farthest start, enough rounds for their phase; the charges SolidBullet01, one round, their blast
+    radius ULT_*_RADIUS; every damage 0 (the plugin's)."""
+    assert list(files) == list(ULT_FILES), list(files)
+    for name, (rounds, size, _, speed, life, volume, _) in ULT_BEAMS.items():
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'LaserBullet02' and p[11] == 1, name
+        assert p[2] == rounds and p[3] == 0 and p[9] == 0.0 and p[15] == 0 and m['indirect_fire_damage'] == 0.0, (name, p)
+        assert p[5] * p[10] >= ULT_REACH[name], (name, p[5], p[10])
+        assert name != ULT_GATHER_FILE or p[5] * p[10] == ULT_GATHER_REACH, (name, p[5], p[10])   # never past the beam's start
+        assert p[17][0] == 1.0 and p[18][2] == 0.0 and p[17][2] == volume, name
+    assert ULT_BEAMS[ULT_SIGHT_FILE][0] >= 12 * 60 and ULT_BEAMS[ULT_BEAM_FILE][0] >= 8 * 60, 'rounds for the whole phase'
+    for name, radius in ((ULT_SPARK_FILE, ULT_SPARK_RADIUS), (ULT_BLAST_FILE, ULT_BLAST_RADIUS)):
+        m = sgo.load(data=files[name])
+        p = m['indirect_fire_param']
+        assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'SolidBullet01', name
+        assert p[2] == 1 and p[11] == 0 and p[9] == radius and m['indirect_fire_damage'] == 0.0, (name, p)
 
 
 # ------------------------------------------------------------------------------------------ the Sazabi's arms

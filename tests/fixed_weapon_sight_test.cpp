@@ -38,6 +38,9 @@ bool HudReady() noexcept{return true;}
 bool FuelGauge(const void*,FuelReading*) noexcept{return false;}
 bool IsFuelTank(const unsigned char*) noexcept{return false;}
 unsigned char* PayloadPicked(const void*) noexcept{return nullptr;}
+unsigned char* PayloadOwnSecondaryPicked(const void*) noexcept{return nullptr;}
+const StoreSpec* sightStore=nullptr;
+const StoreSpec* StoreOf(const unsigned char*) noexcept{return sightStore;}
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept{return nullptr;}
 int PayloadSightWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}
 int PayloadTriggerWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}
@@ -106,6 +109,16 @@ void Run(){
     terrain=false;StockArm sky{};Arm(f.weapon,true,sky);
     Check(sky.paths==2&&!sky.hit&&!sky.path[1].hit&&sky.flight==5,"no terrain keeps explicit finite lifetime endpoints");
     Check(sky.path[0].at[0]<0&&sky.path[1].at[0]>0&&sky.at[2]>500,"no-hit path still follows actual barrels");
+    {   // The loadout strip's left-to-right order (SideOf -> hud_cue.h SideOrder) is read across the weapon's own bore, never
+        // across a view the free-look key turns round the vehicle (2026-10-21: "鼠标中键移动视角的时候，底下的挂载会变化").
+        const float centre[3]={0,5,0},ahead[3]={0,0,1},behind[3]={0,0,-1},across[3]={1,0,0};
+        float pos[3],dir[3];
+        Check(edf::MuzzleFrame(f.weapon,f.muzzle,pos,dir),"fixture muzzle frame");
+        const float want=(pos[0]-centre[0])*dir[2]-(pos[2]-centre[2])*dir[0];
+        const float s0=SideOf(f.weapon,centre,ahead),s1=SideOf(f.weapon,centre,behind),s2=SideOf(f.weapon,centre,across);
+        Check(want<-1.0f && std::fabs(s0-want)<1e-4f,"a gun right of the middle reads right across its bore");
+        Check(s0==s1 && s0==s2,"whatever way the view looks, the weapon's side stays");
+    }
     Put<float>(f.weapon,edf::kWeaponAmmoOwnerMove,1);Put<float>(f.weapon,edf::kWeaponOwnerVel,12);StockArm moving{};Arm(f.weapon,true,moving);
     Check(moving.at[0]>sky.at[0]+50,"physical path retains inherited vehicle velocity");
     Put<std::uint64_t>(f.weapon,edf::kMuzzleCount,0);StockArm absent{};Arm(f.weapon,true,absent);Check(!absent.aimed&&!absent.paths,"missing muzzle has no fictitious point");
@@ -135,6 +148,20 @@ void Run(){
     Put<void*>(f.weapon,0,nullptr);StockArm ordinary{};ordinary.physicalOnly=false;Arm(f.weapon,true,ordinary);
     Check(ordinary.style==WeaponStyle::projectile && !std::strcmp(ordinary.label,"GUN") && ordinary.ladder.ticks>0,
           "ordinary SolidBullet gun retains its genuine gun semantics and range ladder");
+    // A catalogued round the numbers misname (2026-10-19): a HEAT store bursts but its sight says HEAT, not HE; a
+    // canister is a penetrating body but says CAN; an uncatalogued weapon keeps the sight's own reading.
+    Put<float>(f.weapon,kBlast,3.0f);StockArm burst{};burst.physicalOnly=false;Arm(f.weapon,true,burst);
+    Check(burst.shell==reticle::Shell::he,"a bursting gun round without a store reads HE");
+    const StoreSpec heat{L"EDF6VC_HEAT_","HEAT-MP",StoreRole::gun,0,0,0,0,false,StoreShell::heat},
+                    can{L"EDF6VC_CANISTER_","Canister",StoreRole::gun,0,0,0,0,false,StoreShell::canister},
+                    plain{L"EDF6VC_HE_","HE",StoreRole::gun,0,0};
+    sightStore=&heat;StockArm heatArm{};heatArm.physicalOnly=false;Arm(f.weapon,true,heatArm);
+    Check(heatArm.shell==reticle::Shell::heat && !std::wcscmp(reticle::ShellTag(heatArm.shell),L"HEAT"),"a HEAT store reads HEAT");
+    sightStore=&plain;StockArm heArm{};heArm.physicalOnly=false;Arm(f.weapon,true,heArm);
+    Check(heArm.shell==reticle::Shell::he,"a native-tagged store keeps the sight's reading");
+    Put<float>(f.weapon,kBlast,0.0f);sightStore=&can;StockArm canArm{};canArm.physicalOnly=false;Arm(f.weapon,true,canArm);
+    Check(canArm.shell==reticle::Shell::canister && !std::wcscmp(reticle::ShellTag(canArm.shell),L"CAN"),"a canister store reads CAN");
+    sightStore=nullptr;
     // The production HUD consumer lists the stock mounts a Proteus seat borrows, though native seat 0 holds none.
     unsigned char human[0x400]{},riderCtrl[16]{},hudSeats[2*kSeatStride]{};
     human[edf::kHumanPlayer]=1;Put<void*>(human,edf::kHumanPad,human);Put<int>(riderCtrl,8,1);hudHuman=human;

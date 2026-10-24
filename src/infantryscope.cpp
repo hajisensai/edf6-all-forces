@@ -1,5 +1,6 @@
 // A soldier's scoped weapon looked through (src/infantryscope.h).
 #include "crew.h"
+#include "enemy_control.h"
 #include "infantryscope.h"
 #include "layout.h"
 #include "memory.h"
@@ -54,12 +55,19 @@ const unsigned char* OpenScope(const unsigned char* human) noexcept {
     return nullptr;
 }
 
-// Slot 3 of the stock crosshair: not drawn for the soldier whose scope this plugin draws (the function's own early
-// returns leave exactly as much undone: docs in infantryscope.h).
+// Slot 3 of the stock crosshair: not drawn for the soldier whose scope this plugin draws, on foot (InfantryScopeNow) or
+// through a vehicle's sight (hud.cpp HudScopeHoldsCrosshair, scope_hold.h), nor for one whose player controls an enemy
+// (the user, 2026-10-21: 「操控怪物的时候没隐藏武器准星」; its weapon is not the one in use, and the enemy's own HUD
+// replaces the player's: docs/hud-re.md §9.3.1). The function's own early returns leave exactly as much undone (docs in
+// infantryscope.h).
 void __fastcall CrossDrawHook(void* self,void* a,void* b) {
     __try {
-        InfantryScopeCue c;
-        if(InfantryScopeNow(&c) && Readable(self,kCrossHuman+8) && At<const void*>(self,kCrossHuman)==c.human)return;
+        if(Readable(self,kCrossHuman+8)) {
+            const void* const soldier=At<const void*>(self,kCrossHuman);
+            InfantryScopeCue c;
+            if(soldier && ((InfantryScopeNow(&c) && soldier==c.human) || HudScopeHoldsCrosshair(soldier)))return;
+            if(EnemyControlReplacesPlayerHud(soldier))return;
+        }
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
     nextCrossDraw(self,a,b);
 }

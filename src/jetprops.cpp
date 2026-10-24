@@ -11,8 +11,11 @@
 namespace crew {
 namespace {
 constexpr unsigned kPropsAdd=0xE15190;        // (library, u16* outId, const props*): 0xFFFF in outId when full
-constexpr unsigned kSetMotionProps=0xE50720;  // world interface slot 32: (iface, u32 bodyId, u16 propsId)
-constexpr std::size_t kSetPropsSlot=32;
+// The write interface's vtable is 0x18BC740 (hknpWorld ctor 0xDA3140 puts it at +0x18; 0x18BC720 is the world's own, at
+// +0): 0xE50720 is its slot 28 (+0xE0), slot 32 is 0xE4FBF0. The gate below once read slot 32, never matched, and no
+// jet body ever got its own properties (docs/jet-model-re.md, 2026-10-20).
+constexpr unsigned kSetMotionProps=0xE50720;  // world interface slot 28: (iface, u32 bodyId, u16 propsId)
+constexpr std::size_t kSetPropsSlot=28;
 // Body wrapper: +0x60 its props copy, +0xF0 body id, +0xF6 props id, +0x100 world wrapper (+0x58 hknpWorld).
 constexpr std::size_t kBodyProps=0x60,kBodyId=0xF0,kBodyPropsId=0xF6,kBodyWorld=0x100,kWorldOf=0x58;
 // hknpWorld: +0x18 the write interface, +0x928 the motion-properties library (+0x40 entries, +0x48 count).

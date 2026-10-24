@@ -18,6 +18,9 @@ const void* TransportOf(const void* top) noexcept;
 // Whether `vehicle` carries a paired squad aboard now: the first such squad's top (the map's order to the vehicle goes to
 // its trip), else nullptr.
 const void* TransportRiderOf(const void* vehicle) noexcept;
+// The paced march (mapcmd.cpp PaceTick): whether `unit` (a squad's top, or a vehicle) is on a trip taking a squad to a
+// point order at `at` (level, within `within` m): the trip's vehicle (driven there by its own driver), else nullptr.
+const void* TransportTripTo(const void* unit,const float* at,float within) noexcept;
 // A point order for a paired squad (npcai.cpp NpcSquadCommandForRequester): true when its transport takes it (a trip begun
 // or joined; the squad's own order is held until it gets off), false when it walks (not paired, on foot, its vehicle
 // busy elsewhere or gone).

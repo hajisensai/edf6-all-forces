@@ -8,8 +8,10 @@
 //    one, its window is made off screen and never activates;
 //  - every second, and when the keys change, a row in <dll>.log: the game's committed memory (and its peak), its RAM,
 //    and the machine's free RAM and commit, so a mission's load shows as a curve;
-//  - commands in <dll>.cmd (one at a time, cleared once run): "mem", "quit" (the game's own ExitApp way), and, written
-//    before the launch, "mission <row|RM015|M001|range> [difficulty 0-4]": straight into that offline mission, no menu
+//  - commands in <dll>.cmd (one at a time, cleared once run): "mem", "quit" (the game's own ExitApp way), "crash av|abort|
+//    terminate [game]" (a crash on purpose: EDF6VehicleCrew's crash dump checked in the real game), and, written
+//    before the launch, "mission <row|RM015|M001|range> [difficulty 0-4] [hq]": straight into that offline mission, no menu
+//    (with "hq": that pack's mode and row made current and the HQ menu shown instead, for its pictures)
 //    ("range": the test range's own mission pack, row 0 of the offline mode whose content id is the TestRangeContent
 //    the installer wrote into the EDF6VehicleCrew.ini next to this DLL; RM015 is the stock mission again). The
 //    menus are MAINSCRIPT.AS's routines, each run by name through createCoRoutine(const string &in) (0x12946F0, registered at
@@ -23,6 +25,7 @@
 #include <intrin.h>
 #include <cstdio>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -33,6 +36,9 @@
 #include "edf/memory.h"
 #include "edf/patch.h"
 #include "airdrop_probe.h"
+#include "wdenergy_probe.h"
+#include "hector_probe.h"
+#include "players_probe.h"
 
 namespace {
 HMODULE self=nullptr;
@@ -55,6 +61,7 @@ const unsigned char kCoRoutineSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x4
 using CoRoutineFn=void*(__fastcall*)(void*,const std::wstring*);
 CoRoutineFn realCoRoutine=nullptr;
 volatile LONG missionRow=-1,missionDifficulty=1;
+volatile LONG stayInHq=0;   // "mission ... hq": the pack's mode and row made current, then the HQ menu itself (its pictures)
 volatile LONG rangeContent=-1;   // "mission range": the test range's content id read from the ini (-1: not asked)
 
 // The game's mode list: count at GS+0x30, mode pointers at GS+0x20 (0x8C4CE3 walks them). A mode's ModeList item
@@ -113,7 +120,12 @@ void* PatchImport(HMODULE module,const char* dll,const char* function,void* hook
 
 // The keyboard (and mouse buttons) the game sees: only the autopilot's held keys, never the desktop's. The game believes
 // it is the foreground window (Foreground), so with the real state the user's typing and clicks elsewhere would play it.
+volatile LONG crashOnGameThread=0;   // "crash av game": the next keyboard read (the game thread's, every frame) faults
 BOOL WINAPI KeyboardState(PBYTE keys) {
+    if(crashOnGameThread && InterlockedExchange(&crashOnGameThread,0)) {
+        Log("CMD crash: an access violation on the game thread %lu (inside EDF.dll's keyboard read)",GetCurrentThreadId());
+        *reinterpret_cast<volatile int*>(static_cast<std::uintptr_t>(0x10))=1;
+    }
     if(!keys)return FALSE;
     for(int vk=0;vk<kKeyCodes;++vk)keys[vk]=held[vk] ? 0x80 : 0;
     return TRUE;
@@ -580,6 +592,12 @@ void* __fastcall CoRoutine(void* out,const std::wstring* decl) {
                 Log("SCRIPT HQMain: the pack's mode not entered, the menu as is");
                 return realCoRoutine(out,decl);
             }
+            if(gs && InterlockedExchange(&stayInHq,0)) {
+                *reinterpret_cast<int*>(gs+kMissionRow)=row;
+                *reinterpret_cast<int*>(gs+kDifficulty)=missionDifficulty;
+                Log("SCRIPT HQMain stays: row %ld, the HQ menu shown",row);
+                return realCoRoutine(out,decl);
+            }
             if(gs) {
                 *reinterpret_cast<int*>(gs+kMissionRow)=row;
                 *reinterpret_cast<int*>(gs+kDifficulty)=missionDifficulty;
@@ -637,27 +655,51 @@ LONG ReadPackContent(const wchar_t* key) noexcept {
 // "mission <row|RM015|M001|range|edf41:ROW> [difficulty]": the offline list's row (0-based: RM015 is 13, M001 is 1),
 // difficulty 0-4. RM015 is the stock mission again (the test range left it for its own pack); "range" is that pack's
 // row 0; "edf41:ROW" row ROW of the EDF4.1 story pack (EDF41Content), "edf41mp01:ROW" / "edf41mp02:ROW" of its
-// Mission Pack 1 / 2 (EDF41Content + 1 / + 2: the plugin's run of the three 4.1 packs).
+// Mission Pack 1 / 2 (EDF41Content + 1 / + 2: the plugin's run of the three 4.1 packs); "edf5:ROW" row ROW of the EDF5
+// campaign's main pack (EDF5CampaignContent: its last mission M099 is row 109).
 void AskMission(const char* text) noexcept {
-    char name[32]{};int difficulty=1;
-    if(sscanf_s(text,"%*s %31s %d",name,static_cast<unsigned>(sizeof(name)),&difficulty)<1)return;
+    char name[32]{},mode[8]{};int difficulty=1;
+    if(sscanf_s(text,"%*s %31s %d %7s",name,static_cast<unsigned>(sizeof(name)),&difficulty,mode,
+                static_cast<unsigned>(sizeof(mode)))<1)return;
+    stayInHq=!_stricmp(mode,"hq") ? 1 : 0;
     const bool range=!_stricmp(name,"range");
     // which of the 4.1 packs: -1 none, 0 the story, 1 / 2 its mission packs
     const int pack41=!_strnicmp(name,"edf41:",6) ? 0 : !_strnicmp(name,"edf41mp01:",10) ? 1
                     : !_strnicmp(name,"edf41mp02:",10) ? 2 : -1;
     const bool edf41=pack41>=0;
-    const char* rowText=pack41==0 ? name+6 : name+10;
-    const int row=range ? 0 : edf41 ? std::atoi(rowText) : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1
+    const bool edf5=!_strnicmp(name,"edf5:",5);
+    const char* rowText=edf5 ? name+5 : pack41==0 ? name+6 : name+10;
+    const int row=range ? 0 : edf41 || edf5 ? std::atoi(rowText) : !_stricmp(name,"RM015") ? 13 : !_stricmp(name,"M001") ? 1
                                                                                                     : std::atoi(name);
     missionDifficulty=difficulty<0 || difficulty>4 ? 1 : difficulty;
     const long first41=edf41 ? ReadPackContent(L"EDF41Content") : -1;
-    rangeContent=range ? ReadPackContent(L"TestRangeContent") : edf41 ? (first41>0 ? first41+pack41 : first41) : -1;
+    rangeContent=range ? ReadPackContent(L"TestRangeContent") : edf41 ? (first41>0 ? first41+pack41 : first41)
+                 : edf5 ? ReadPackContent(L"EDF5CampaignContent") : -1;
     missionRow=row;
     Log("MISSION asked: %s row %d, difficulty %ld (applied when the script starts its title)",
-        range ? "the test range pack's" : pack41==0 ? "the EDF4.1 story pack's" : pack41==1 ? "the EDF4.1 Mission Pack 1's"
-        : pack41==2 ? "the EDF4.1 Mission Pack 2's" : "offline",row,missionDifficulty);
-    if(range || edf41)Log("MISSION the pack's content id %ld (EDF6VehicleCrew.ini %s)",rangeContent,
-                          range ? "TestRangeContent" : "EDF41Content");
+        range ? "the test range pack's" : edf5 ? "the EDF5 campaign's" : pack41==0 ? "the EDF4.1 story pack's"
+        : pack41==1 ? "the EDF4.1 Mission Pack 1's" : pack41==2 ? "the EDF4.1 Mission Pack 2's" : "offline",row,missionDifficulty);
+    if(range || edf41 || edf5)Log("MISSION the pack's content id %ld (EDF6VehicleCrew.ini %s)",rangeContent,
+                                  range ? "TestRangeContent" : edf5 ? "EDF5CampaignContent" : "EDF41Content");
+}
+
+// "crash av|abort|terminate [game]": a crash on purpose, for EDF6VehicleCrew's crash dump (src/crash_dump.cpp) in the
+// real game: an access violation, or ucrtbase's abort() / terminate() (the game's CRT). On this thread (the command
+// loop's); "av game": on the game thread, at its next keyboard read (KeyboardState, under EDF.dll's frames).
+void Crash(const char* text) noexcept {
+    char how[16]{},where[16]{};
+    sscanf_s(text,"%*s %15s %15s",how,static_cast<unsigned>(sizeof(how)),where,static_cast<unsigned>(sizeof(where)));
+    LogMemory("crash");
+    if(!std::strcmp(how,"av") && !std::strcmp(where,"game")){InterlockedExchange(&crashOnGameThread,1);return;}
+    using VoidFn=void(__cdecl*)();
+    const HMODULE ucrt=GetModuleHandleW(L"ucrtbase.dll");
+    if(!std::strcmp(how,"abort") || !std::strcmp(how,"terminate")) {
+        if(const auto f=ucrt ? reinterpret_cast<VoidFn>(GetProcAddress(ucrt,how)) : nullptr)f();
+        Log("CMD crash %s: ucrtbase.dll has no %s",how,how);
+        return;
+    }
+    if(!std::strcmp(how,"av"))*reinterpret_cast<volatile int*>(static_cast<std::uintptr_t>(0x10))=1;
+    else Log("CMD crash: unknown kind %s (av, abort, terminate)",how);
 }
 
 // One command from <dll>.cmd (the driver writes it, this clears it once done).
@@ -670,10 +712,18 @@ void RunCommand(const char* text) noexcept {
     else if(!std::strcmp(word,"mission"))AskMission(text);
     else if(!std::strcmp(word,"probe")) {
         char what[32]{};
-        if(sscanf_s(text,"%*s %31s",what,static_cast<unsigned>(sizeof(what)))==1 && !std::strcmp(what,"airdrop"))
+        const bool named=sscanf_s(text,"%*s %31s",what,static_cast<unsigned>(sizeof(what)))==1;
+        if(named && !std::strcmp(what,"airdrop"))
             Log("PROBE airdrop installed=%d",autopilot::InstallAirdropProbe(image,&Log,&HoldKey));
+        else if(named && !std::strcmp(what,"wdenergy"))
+            Log("PROBE wdenergy installed=%d",autopilot::InstallWdEnergyProbe(image,&Log));
+        else if(named && !std::strcmp(what,"hector"))
+            Log("PROBE hector installed=%d",autopilot::InstallHectorProbe(image,&Log));
+        else if(named && !std::strcmp(what,"players"))
+            Log("PROBE players installed=%d",autopilot::InstallPlayersProbe(image,&Log));
         else Log("CMD probe: unknown probe %s",what);
     }
+    else if(!std::strcmp(word,"crash"))Crash(text);
     else Log("CMD unknown: %s",word);
 }
 
@@ -731,6 +781,9 @@ DWORD WINAPI Loop(void*) {
         if(!padIn)InstallPad();
         PluginInputTick();
         autopilot::AirdropProbeTick();
+        autopilot::WdEnergyProbeTick();
+        autopilot::HectorProbeTick();
+        autopilot::PlayersProbeTick();
         Sleep(15);
     }
 }

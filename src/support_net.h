@@ -20,6 +20,9 @@ struct Plan {
     std::uint32_t catalogId=0,count=0;
     float target[3]{};
     Unit units[kMaxUnits]{};
+    // Canonical native player identity; team 0 preserves stock behaviour while retaining ownership.
+    unsigned char requester[32]{};
+    std::uint32_t team=0; // 0 stock, 1/2 the host-authorized PvP side
 };
 enum class PlanResult { pending,ready,refused };
 enum class RequestStatus : std::uint32_t { accepted,active,refused,timeout,cancelled,interrupted };
@@ -40,6 +43,13 @@ struct Hooks {
     void (*variants)(std::uint32_t* ext,unsigned char* bloom32) noexcept=nullptr;
     // Whether `catalog` is the sea rescue (support_dispatch.cpp IsRescue): its own channel and cooldown on the host.
     bool (*ownChannel)(std::uint32_t) noexcept=nullptr;
+    // Host only: requesterPeer comes from the authenticated transport, 0 for this machine.
+    PlanResult (*planForRequester)(std::uint32_t requesterPeer,std::uint32_t catalog,const float* target,
+                                  std::uint64_t loadout,Plan*) noexcept=nullptr;
+    // Optional, a peer's PREPARE (support_protocol.cpp): what `plan` needs is loaded here (ready), being loaded (pending:
+    // its READY waits, the transaction's own deadline still running), or cannot be (refused). Null: ready. The test
+    // range's rows not preloaded this mission (debug_spawn.cpp PrepareRangeEnemy) load on every peer before any is made.
+    PlanResult (*prepare)(const Plan&) noexcept=nullptr;
 };
 bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net
@@ -66,6 +76,10 @@ bool SupportPeersAcceptLoadout() noexcept;
 bool SupportPeersHaveVariantFile(std::uint64_t hash) noexcept;
 // Host: whether every peer applies unit variants at all (an older build's do not); offline / no peer: true.
 bool SupportPeersApplyVariants() noexcept;
+// Host: whether every peer reads a soldier's backpack weapon (support_protocol.h kExtBackpack); offline / no peer: true.
+bool SupportPeersApplyBackpacks() noexcept;
+// Host: every participant supports the independent detail bits (support_protocol.h kDetailPvpSupport).
+bool SupportPeersHaveDetails(std::uint32_t details) noexcept;
 // Whether every peer has the sea rescue catalog entry (support_protocol.h kExtSeaRescue); true offline / with no session. Without it the
 // host refuses the rescue with a reason (the swimmer's machine is told, and logs it).
 bool SupportPeersAcceptRescue() noexcept;
@@ -77,6 +91,8 @@ bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept;
 // Requester ownership: native EOS PUID must equal the authenticated transport
 // sender and belong to the sealed current-world participant set.
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;
+// Host planner: resolve a transport-authenticated peer to its sealed current-world native player.
+bool SupportAuthenticatedRequester(std::uint32_t peer,ObjRef* out) noexcept;
 // Called before native player construction once this world has sealed its
 // actual participant PUIDs. A newly joined lobby member waits for the next world.
 bool SupportParticipantAllowed(void* puid) noexcept;

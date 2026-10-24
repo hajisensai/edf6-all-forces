@@ -81,7 +81,21 @@ void Rotation() {
 }
 }  // namespace
 
+void Chord() {
+    using namespace crew::seatsw;
+    constexpr unsigned kL3=0x40,kR3=0x80,kChord=kL3|kR3;
+    Expect(!ChordHeld(kL3,kChord) && ChordHeld(kL3|kR3,kChord) && ChordHeld(kL3|kR3|0x10,kChord),"a chord: all its buttons held");
+    Expect(!ChordHeld(0xFF,0),"no buttons: never held");
+    bool held=false;
+    Expect(!Press(held,ChordHeld(kL3,kChord)) && Press(held,ChordHeld(kL3|kR3,kChord)) && !Press(held,ChordHeld(kL3|kR3,kChord)),
+           "L3 held, then R3: one thermal press");
+    Expect(ChordOwns(kL3|kR3,kChord,kR3) && ChordOwns(kL3|kR3,kChord,kL3),"while held, R3's zoom and L3's look give way");
+    Expect(!ChordOwns(kR3,kChord,kR3) && !ChordOwns(kL3|kR3,kChord,0x10),"R3 alone keeps its zoom; LB is no part of it");
+    Expect(!ChordOwns(kR3,kR3,kR3),"a single-button setting owns nothing");
+}
+
 int main() {
+    Chord();
     HeldAcrossTheMove();
     CarriedInput();
     Rotation();

@@ -10,6 +10,13 @@ Files from before the ledger: one that a tool needs gets the owner LEGACY beside
 releasing the need never deletes it); the tool that writes it takes it over when it writes it again (put) or
 releases it as its own (release with writer=True), and a file the ledger does not know at all belongs to the
 writer that releases it, as it did before the ledger.
+A shared file installed over another mod's may carry `restore`: the SHA-256 of that pre-install original, kept under
+Mods/.edf6vc_files_backup (defer_restore); the last release puts it back unless the file was changed since.
+`writers` separately records each writer's committed hash. Releasing its need does not erase that provenance while
+consumers remain; `need` never grants it. A writer can also remember a root's dependency closure, tied to that root's
+committed hash, so an upgrade replaces consumer references instead of accumulating obsolete dependencies.
+An in-progress dependency replacement retains `previous` paths before any root write; they are cleared only after
+all consumer additions and releases succeed, allowing a restarted installer to finish the same reference transfer.
 
 Every write is atomic (pylib/modfiles.py atomic_write): a failed or interrupted write leaves the old file whole.
 
@@ -28,13 +35,27 @@ import os
 from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_files.json'
-OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls', 'katyusha', 'bigmap', 'artillery', 'chute', 'drill', 'stockstores', 'sidecar', 'emc', 'sazabi', 'proteus', 'optics', 'loadout', 'edf41', 'menu_preview', 'roomui', 'edf41maps', 'edf41sound', 'edf5dlc')
+BACKUP = '.edf6vc_files_backup'
+OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls', 'katyusha', 'bigmap', 'artillery', 'chute', 'drill', 'stockstores', 'sidecar', 'sedan', 'emc', 'ultimate', 'vulcan', 'bmpt', 'sazabi', 'dreadnought', 'proteus', 'optics', 'loadout', 'edf41', 'menu_preview', 'roomui', 'edf41maps', 'edf41sound', 'edf5dlc', 'edf41menubg', 'edf41outfit')
 LEGACY = 'legacy'   # a file from before the ledger that a tool needs: its writer is not recorded
 
 
 def key(rel: str) -> str:
     """The ledger's name for a path under Mods (Windows paths are case-insensitive)."""
     return rel.replace('\\', '/').strip('/').upper()
+
+
+def _merge_mapping(base: dict, mine: dict, disk: dict) -> dict:
+    """Apply only this object's per-key edits, preserving another writer's metadata."""
+    out = copy.deepcopy(disk)
+    for name in set(base) | set(mine):
+        if base.get(name) == mine.get(name):
+            continue
+        if name in mine:
+            out[name] = copy.deepcopy(mine[name])
+        else:
+            out.pop(name, None)
+    return out
 
 
 def _merge_entry(base: dict | None, mine: dict | None, disk: dict | None) -> dict | None:
@@ -51,9 +72,21 @@ def _merge_entry(base: dict | None, mine: dict | None, disk: dict | None) -> dic
     sha = (mine or {}).get('sha') if mine is not None and (mine or {}).get('sha') != (base or {}).get('sha') else \
         (disk or {}).get('sha', (mine or {}).get('sha'))
     entry = dict(disk or mine or {})
+    if (mine or {}).get('restore') != (base or {}).get('restore'):
+        if mine and 'restore' in mine:
+            entry['restore'] = mine['restore']
+        else:
+            entry.pop('restore', None)
     entry['owners'] = owners
     if sha is not None:
         entry['sha'] = sha
+    for field in ('writers', 'dependencies'):
+        merged = _merge_mapping((base or {}).get(field, {}), (mine or {}).get(field, {}),
+                                (disk or {}).get(field, {}))
+        if merged:
+            entry[field] = merged
+        else:
+            entry.pop(field, None)
     return entry
 
 
@@ -127,8 +160,115 @@ class Ledger:
         if owner not in entry['owners']:
             entry['owners'].append(owner)
         entry['sha'] = sha256(data)
+        entry.setdefault('writers', {})[owner] = entry['sha']
         self._save()
         return path
+
+    def record(self, owner: str, rel: str, sha: str) -> None:
+        """Records a writer after its own transaction committed the file, without writing it a second time.
+        The caller's committed hash must still match; a legacy dependency becomes a known writer's file."""
+        assert owner in OWNERS, owner
+        if sha256_file(self.disk(rel)) != sha:
+            raise ValueError(f'{key(rel)}: not the committed file')
+        self._refresh()
+        entry = self.files.setdefault(key(rel), {'owners': []})
+        entry['owners'] = [o for o in entry['owners'] if o != LEGACY]
+        if owner not in entry['owners']:
+            entry['owners'].append(owner)
+        entry['sha'] = sha
+        entry.setdefault('writers', {})[owner] = sha
+        self._save()
+
+    def written_by(self, owner: str, rel: str) -> bool:
+        """Exact committed writer proof, including after that writer's owner was released."""
+        entry = self.files.get(key(rel), {})
+        digest = entry.get('writers', {}).get(owner)
+        return digest is not None and digest == entry.get('sha') and sha256_file(self.disk(rel)) == digest
+
+    def dependency_closure(self, owner: str, rel: str) -> set[str] | None:
+        """The last committed root's schema; a user edit conservatively retains its previous dependencies."""
+        entry = self.files.get(key(rel), {})
+        closure = entry.get('dependencies', {}).get(owner)
+        if not isinstance(closure, dict) or closure.get('sha') != entry.get('sha'):
+            return None
+        return {key(path) for path in closure['files']}
+
+    def remember_dependencies(self, owner: str, rel: str, files: list[str]) -> None:
+        """Record a writer's complete root closure; a consumer cannot create writer provenance."""
+        self._refresh()
+        if not self.written_by(owner, rel):
+            raise ValueError(f'{key(rel)}: not {owner}\'s committed root')
+        entry = self.files[key(rel)]
+        closure = {'sha': entry['sha'], 'files': sorted({key(path) for path in files})}
+        previous = entry.get('dependencies', {}).get(owner, {}).get('previous')
+        if previous:
+            closure['previous'] = previous
+        if entry.get('dependencies', {}).get(owner) != closure:
+            entry.setdefault('dependencies', {})[owner] = closure
+            self._save()
+
+    def pending_dependencies(self, owner: str, rel: str) -> set[str]:
+        """Previous consumer references retained until their replacement has fully committed."""
+        entry = self.files.get(key(rel), {})
+        return set(entry.get('dependencies', {}).get(owner, {}).get('previous', ()))
+
+    def stage_dependencies(self, owner: str, rel: str, files: list[str]) -> None:
+        """Checkpoint the old graph before any root bytes change, so interruption cannot lose references."""
+        self._refresh()
+        if not self.written_by(owner, rel):
+            raise ValueError(f'{key(rel)}: not {owner}\'s committed root')
+        entry = self.files[key(rel)]
+        closure = entry.setdefault('dependencies', {}).setdefault(owner, {'sha': entry['sha'], 'files': []})
+        closure['previous'] = sorted(set(closure.get('previous', ())) | {key(path) for path in files})
+        self._save()
+
+    def complete_dependencies(self, owner: str, rel: str) -> None:
+        """Forget the old graph only after every consumer need/release succeeded."""
+        self._refresh()
+        closure = self.files.get(key(rel), {}).get('dependencies', {}).get(owner, {})
+        if closure.pop('previous', None) is not None:
+            self._save()
+
+    def defer_restore(self, rel: str, data: bytes) -> None:
+        """Keeps the pre-install bytes until the last consumer releases a shared file.
+        Its writer may remove its own transaction backups before the remaining consumers are uninstalled.
+        Bytes equal to what our tools registered for it are not a pre-install original (a writer that backed up a file
+        another of our tools had already written): nothing is kept, and the last release deletes the file."""
+        self._refresh()
+        entry = self.files[key(rel)]
+        if 'restore' in entry or sha256(data) == entry.get('sha'):
+            return
+        atomic_write(self._backup(key(rel)), data)
+        entry['restore'] = sha256(data)
+        self._save()
+
+    def restores(self, rel: str) -> bool:
+        """The ledger keeps the file's pre-install original: its last release puts that back (writers leave the file
+        to it rather than deleting it themselves)."""
+        return 'restore' in self.files.get(key(rel), {})
+
+    def ours(self, rel: str) -> bool:
+        """The file on disk is what one of our tools registered for it (a known owner, not only LEGACY, and the
+        registered bytes): not a pre-install original to back up."""
+        entry = self.files.get(key(rel))
+        return bool(entry) and bool(set(entry.get('owners', [])) - {LEGACY}) and \
+            sha256_file(self.disk(rel)) == entry.get('sha')
+
+    def _backup(self, k: str) -> str:
+        return os.path.join(self.mods, BACKUP, *k.split('/'))
+
+    def _drop_backup(self, k: str) -> None:
+        """Removes a kept original and the directories left empty under BACKUP (BACKUP itself too)."""
+        path = self._backup(k)
+        if os.path.isfile(path):
+            os.remove(path)
+        root = os.path.join(self.mods, BACKUP)
+        d = os.path.dirname(path)
+        while os.path.isdir(d) and not os.listdir(d):
+            os.rmdir(d)
+            if os.path.normcase(d) == os.path.normcase(root):
+                break
+            d = os.path.dirname(d)
 
     def put_new(self, owner: str, rel: str, data: bytes) -> str | None:
         """Writes `data` only when nothing is at `rel` yet: into a temporary file beside it, then renamed onto the free
@@ -159,6 +299,7 @@ class Ledger:
         if owner not in entry['owners']:
             entry['owners'].append(owner)
         entry['sha'] = sha256(data)
+        entry.setdefault('writers', {})[owner] = entry['sha']
         self._save()
         return path
 
@@ -198,9 +339,32 @@ class Ledger:
             if entry['owners']:
                 continue
             del self.files[k]
+            restore = entry.get('restore')
             if not os.path.isfile(path):
+                if restore:
+                    self._drop_backup(k)   # removed by someone else since: nothing of ours left to put the original over
                 continue
             if sha256_file(path) != entry.get('sha'):
+                kept.append(path)   # someone else changed it since: theirs now, the original is not put over it
+                if restore:
+                    self._drop_backup(k)
+                continue
+            if restore:
+                original = None
+                if os.path.isfile(self._backup(k)):
+                    with open(self._backup(k), 'rb') as f:
+                        original = f.read()
+                if original is None or sha256(original) != restore:
+                    # Checked before anything is written: the loop goes on and the ledger is saved; our file stays
+                    # rather than leaving neither it nor the original.
+                    print(f'WARNING: {k}: the kept original ({self._backup(k)}) is '
+                          f'{"missing" if original is None else "not what was kept"}; left the installed file as it is')
+                    kept.append(path)
+                    if original is None:
+                        self._drop_backup(k)   # its directories, left empty
+                    continue
+                atomic_write(path, original)
+                self._drop_backup(k)
                 kept.append(path)
                 continue
             os.remove(path)

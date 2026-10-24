@@ -142,7 +142,7 @@ void __fastcall PreloadPlayerHook(int slot) { Apply(*(uint8_t**)(base + kGameSta
 
 - **离线建人路径不检查拥有**：`0x595C80`/`0x5A3F90`/`0x58F360` 里没有读 `flags bit0`。[确认（就这条路径而言）]
 - 未拥有的武器星级字节多半是 0（从没拾取过），所以按 0 星属性造出来 [推断]；要固定属性可同时写 `GS+0xEB54+id*12` 的 8 个字节（上限见 `unlock_weapon` 里 `min(arg,10)`）。这会进存档，记得还原。
-- UI 才是限制拥有的地方（列表只列已拥有）；联机还有额外限制：加入房间时 `0xD92B0` 内容拥有检查（`Lobby_WarnWeaponEquip`），以及按难度的护甲/武器等级上限（`UnlockArmorWeaponLimit` 解除，`GS+0x6E58`）。联机不在本次范围内。
+- UI 才是限制拥有的地方（列表只列已拥有）；联机还有额外限制：加入房间时 `0xD92B0` 内容拥有检查（`Lobby_WarnWeaponEquip`），以及按难度的护甲/武器等级上限。联机不在本次范围内。（更正，2026-10-17：上限值来自当前模式 ModeList 成员 7 的数据，`GS+0x6E58` 只是把房间的限制开关锁成开，不是上限本身；见 [weapon-level-cap-re.md](weapon-level-cap-re.md)。）
 - `SetUsedWeapon` 会给强制装备的武器置 bit1（“用过”），进存档；无害但会留痕。
 
 ### 3.4 载具 / 支援
@@ -154,7 +154,7 @@ void __fastcall PreloadPlayerHook(int slot) { Apply(*(uint8_t**)(base + kGameSta
 
 ### 3.5 联机（仅备注）
 
-联机时每个玩家从 `GS+0x14C78+index*0xD4` 的记录建人（`0x591130`），记录由 `0x78E9A0` 在 `MissionSync("Sync")` 时从 GS 打包：记录 `+0 class, +4 外观, +8..+0x1C 武器[6], +0x20 护甲数, +0xA4+i*8 星级`[推断]。要在联机下强制，需在 `0x78E9A0` 之前改 GS，所有人看到的都是改后的装备。
+联机时每个玩家从 `GS+0x14C78+index*0xD4` 的记录建人（`0x591130`），记录由 `0x78E9A0` 在 `MissionSync("Sync")` 时从 GS 打包（2026-10-20 核实：唯一调用者是 AngelScript 绑定 `int MissionSync_Begin(int)` 的实现 `0x7920E0`，`0x7920EA call 0x78E9A0(edx)`；绑定登记在 `0x794076..0x79409E`，名字串 `0x17EF1A8`；插件在这里先做 4.1 颜色交换、读房主设置、关房间菜单的对话框，`src/mission.cpp MissionSyncHook`）：记录 `+0 class, +4 外观, +8..+0x1C 武器[6], +0x20 护甲数, +0xA4+i*8 星级`[推断]。要在联机下强制，需在 `0x78E9A0` 之前改 GS，所有人看到的都是改后的装备。
 
 ---
 
@@ -325,7 +325,7 @@ bit2 不会一直挂着：脚本 `SetUsedWeapon()`（`0x70FAF0`，每次出击�
 12 行由 `tools/call_weapons.py` 从 `eWeapon051` 深拷贝，col8 = 0（与 1328 把本体武器相同）、acquire = 0，
 所以置拥有对这条检查**没有影响**，不会被判成 DLC 或报警。联机真正的风险与拥有位无关：
 房间里别人没装同样的 WeaponTable 行时，`MissionSync` 发过去的武器行号对他们无效（加行本身的问题）；
-按难度的武器等级上限（`UnlockArmorWeaponLimit`、`GS+0x6E58`）照常生效，等级高于上限的呼叫武器在低难度房间里仍不可选。
+按难度的武器等级上限照常生效，等级高于上限的呼叫武器在低难度房间里仍不可选（上限的来源见 [weapon-level-cap-re.md](weapon-level-cap-re.md)；测试场任务包的联机模式没有武器等级上限）。
 
 ### 8.6 推荐实现（伪代码）
 
@@ -380,6 +380,11 @@ void __fastcall UnlockDlcHook(unsigned char* gs) {
   存档里仍装备着它们会在主菜单崩溃（行号越界，见 `tools/call_weapons.py` 头注释），而 `0xDC550` 的“未拥有就换默认”保护**只看 bit0、不看行号是否越界**，
   拥有位反而让它跳过替换——卸载流程必须先确认没装备（`uninstall --unequipped`）。以后别的 mod 若在同一行号追加新行，会继承这些记录的拥有位。
 - 成就计数 `WeaponCount`/`WeaponGetRatio` 会把这 12 把算进去（8.2）。
+
+### 8.6.1 移植武器全给（ini `PortedWeaponsUnlocked`，2026-10-17）
+
+同一个钩子（`src/airstrike.cpp` `UnlockDlcHook`，`0xDC550` 的两个入口）里，ini 开着时把名字以 `EDF6VC_E5_` / `EDF6VC_E41_` 开头的行（`tools/ported_weapons.py` 的 4 个登记表，装全 432 行；占位行是 `EDF6VC_RETIRED_*`，不算）按 8.2 的 DLC 授予方式置拥有：首次 `flags |= 4`、星级 0，之后只 `flags |= 1`。只置位不清位，EDF6 原有的行不碰。
+武器记录在 main 块（`MAIN.GST`），所有模式共用，所以拥有位是全局的：在 EDF6 本篇的装备界面也能选这些武器；关掉 ini 不收回（收回会让存档里装备着它们的兵种在主菜单闪退）。读档时生效（主菜单进入模式），不是热改即时生效。
 
 ### 8.7 本节地址表
 

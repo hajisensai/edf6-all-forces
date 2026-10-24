@@ -32,6 +32,7 @@
 #include "../src/hud.cpp"
 #include "../src/player_name.h"
 #include "../src/map_cam.h"
+#include <array>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -40,6 +41,7 @@
 #include <vector>
 
 namespace crew {
+bool VehicleLookHint(bool*) noexcept { return false; }
 unsigned char* image=nullptr;
 PlayerFix player{};
 namespace {
@@ -114,6 +116,7 @@ std::set<std::pair<wchar_t,int>> glyphs;
 struct PanelBox { float x0,y0,x1,y1; };
 std::vector<PanelBox> panels;   // the scene's panels (the HUD's kPanel rects) while `recording`
 bool recording=false;
+bool keepHud=false;std::vector<std::array<float,8>> hudQuads;   // the HUD-green quads drawn while keepHud (the glass scene)
 bool probeIntent=false;float intentX=0,intentY=0;int intentQuads=0;
 void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_t,const float* v,std::int32_t n,void*) {
     if(rgba==kScopeDark)++scopePieces;
@@ -126,6 +129,7 @@ void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_
     if(recording && n==4 && std::memcmp(rgba,kPanel,16)==0 && p[0][1]==p[1][1] && p[0][0]==p[2][0])
         panels.push_back(PanelBox{p[0][0],p[0][1],p[3][0],p[3][1]});
     if(boxing){++drawn;for(int i=0;i<n && i<4;++i)Grow(p[i][0],p[i][1]);}
+    if(keepHud && n==4 && rgba==kHud)hudQuads.push_back({p[0][0],p[0][1],p[1][0],p[1][1],p[2][0],p[2][1],p[3][0],p[3][1]});
     if(!out)return;
     for(int i=0;i+2<n && i<2;++i)
         std::fprintf(out,"T %.1f %.1f %.1f %.1f %.1f %.1f %.3f %.3f %.3f %.3f\n",p[i][0],p[i][1],p[i+1][0],p[i+1][1],p[i+2][0],p[i+2][1],
@@ -174,7 +178,10 @@ bool PlayerNixTorso(NixTorso* o) noexcept { if(hasNix)*o=sceneNix;return hasNix;
 bool PlayerProteus(ProteusReadout* o) noexcept { if(hasProteus)*o=sceneProteus;return hasProteus; }
 bool PlayerSazabiCue(SazabiCue* o) noexcept { if(hasSazabi)*o=sceneSazabi;return hasSazabi; }
 bool hasScreens=false;CockpitScreens sceneScreens{};   // a vehicle's first person: its cockpit's screens
-bool FirstPersonScreens(CockpitScreens* o) noexcept { if(hasScreens)*o=sceneScreens;return hasScreens; }
+unsigned char* PlayerHuman() noexcept { return nullptr; }
+bool FirstPersonScreens(CockpitScreens* o,const unsigned char*) noexcept { if(hasScreens)*o=sceneScreens;return hasScreens; }
+instruments::Readings deliveredInstruments{};
+void FirstPersonInstrumentReadings(const instruments::Readings& r,const unsigned char*) noexcept { deliveredInstruments=r; }
 bool PlayerTurretCam(TurretCamReadout* value) noexcept { if(hasMouseIntent)*value=sceneMouseIntent;return hasMouseIntent; }
 bool SightZoomMounted(const void*) noexcept { return hasMountedOptic; }
 bool PlayerTurretBinding(edf::aimlink::ModeBindingV1* value) noexcept { if(hasModeBinding)*value=sceneModeBinding;return hasModeBinding; }
@@ -191,15 +198,29 @@ float sceneZoom=1.0f;
 float SightZoomNow(const void*) noexcept { return sceneZoom; }
 sightzoom::Kind sceneSight=sightzoom::Kind::optical;
 sightzoom::Kind SightZoomView(const void*) noexcept { return sceneSight; }
+// The soldier looking through the scenes' sight (sightzoom.cpp SightZoomScope): the field as the plugin answers it.
+const int sceneScopeSoldier=0;
+bool SightZoomScope(SightScope* o) noexcept {
+    *o=SightScope{};
+    if(!sightzoom::ScopeField(sceneSight,sceneZoom,hasMountedOptic))return false;
+    o->human=&sceneScopeSoldier;o->kind=sceneSight;o->zoom=sceneZoom;
+    return true;
+}
 // A soldier's open scope (infantryscope.cpp): on in the infantry_scope scenes.
 bool hasInfantry=false;InfantryScopeCue sceneInfantry{};
 bool InfantryScopeNow(InfantryScopeCue* o) noexcept { if(hasInfantry && o)*o=sceneInfantry;return hasInfantry; }
 bool hasGunner=false;GunnerReadout sceneGunner{};
 bool PlayerGunnerHud(GunnerReadout* o) noexcept { if(hasGunner)*o=sceneGunner;return hasGunner; }
+bool DreadnoughtGunnerHud(GunnerReadout*) noexcept { return false; }
+bool PlayerDreadnoughtCue(DreadnoughtCue*) noexcept { return false; }
 bool hasHighView=false;
 bool PlayerHighCam(bool* on,bool* keys) noexcept {*on=hasHighView;*keys=true;return hasHighView;}
 bool PlayerMap(MapReadout* o) noexcept { if(hasMap)*o=sceneMap;return hasMap; }
 bool MapOwnsView() noexcept { return hasMap || mapEasing; }
+const void* sceneMapHiddenCamera=nullptr;
+bool MapHidesStockHud(const void* camera) noexcept {
+    return (hasMap || mapEasing) && (!sceneMapHiddenCamera || camera==sceneMapHiddenCamera);
+}
 MapCommandReadout sceneCmd{};
 bool PlayerMapCommands(MapCommandReadout* o) noexcept { if(hasMap)*o=sceneCmd;return hasMap; }
 // The damage statistics (damagestats.cpp): on in every map scene (the map's STATS tab), the page shown in StatsScenes.
@@ -242,18 +263,67 @@ bool SupportVersionCue(wchar_t* line,std::size_t capacity) noexcept {
     if(sceneVersionOn)_snwprintf_s(line,capacity,_TRUNCATE,L"%ls",sceneVersion);
     return sceneVersionOn;
 }
+// The ultimate strike's caller line (ultimate.cpp PlayerUltimateCue): not drawn in any scene.
+bool PlayerUltimateCue(wchar_t*,std::size_t) noexcept { return false; }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
 bool DebugSpawnReadout(DebugSpawnCue* o) noexcept { if(sceneDebugSpawnOn)*o=sceneDebugSpawn;return sceneDebugSpawnOn; }
-void MapCommandView(const float*,float,float) noexcept {}
+unsigned sceneMapViewWrites=0;
+void MapCommandView(const float*,float,float) noexcept { ++sceneMapViewWrites; }
+// Enemy-control readers and button publication are external seams in the real HUD.
+// They return immutable stand-ins here; the native renderer and owner gates below
+// are still the production code included above.
+MapEnemyControlReadout sceneEnemy{};bool hasEnemyPanel=false,hasEnemyControl=false;
+enemy_control::Snapshot sceneEnemyHitSnapshot{};
+bool sceneEnemyVisible=false;int sceneEnemyCount=0,sceneEnemyCodes[kMapEnemyItems]{};
+float sceneEnemyRects[kMapEnemyItems][4]{};
+namespace enemy_control { const wchar_t* ReasonText(Reason) noexcept { return L"Fixture native unavailable"; } }
+bool ReadMapEnemyControl(MapEnemyControlReadout* value) noexcept {
+    if(!value || !hasEnemyPanel)return false;*value=sceneEnemy;return true;
+}
+bool EnemyControlReadSnapshotForView(std::uintptr_t key,enemy_control::Snapshot* value) noexcept {
+    if(!hasEnemyControl || !value || !key || key!=sceneEnemy.snapshot.ownerHumanKey)return false;
+    *value=sceneEnemy.snapshot;return true;
+}
+// The controlled body's published catalogue: the readout's page stands for its first attacks.
+unsigned EnemyControlAbilities(const enemy_control::Snapshot& snapshot,unsigned first,enemy_control::Ability* abilities,unsigned capacity) noexcept {
+    if(!abilities || snapshot.revision!=sceneEnemy.snapshot.revision)return 0;
+    unsigned n=0;
+    for(unsigned i=first;i<static_cast<unsigned>(sceneEnemy.count) && n<capacity;++i)abilities[n++]=sceneEnemy.ability[i];
+    return n;
+}
+void MapCommandEnemyButtons(const float* rects,const int* codes,int n,const enemy_control::Snapshot* snapshot) noexcept {
+    sceneEnemyVisible=snapshot!=nullptr;sceneEnemyHitSnapshot=snapshot ? *snapshot : enemy_control::Snapshot{};
+    sceneEnemyCount=rects && codes && snapshot ? (std::max)(0,(std::min)(n,kMapEnemyItems)) : 0;
+    for(int i=0;i<sceneEnemyCount;++i){std::memcpy(sceneEnemyRects[i],rects+i*4,16);sceneEnemyCodes[i]=codes[i];}
+}
+// Stand-in PVP state and hit ledger let offline fixtures exercise the production panel.
+PvpStatus scenePvp{},scenePvpSnapshot{};bool scenePvpVisible=false;
+int scenePvpPadPick=-1,scenePvpCount=0,scenePvpCodes[kMapPvpItems]{};float scenePvpRects[kMapPvpItems][4]{};
+bool ReadPvpStatus(PvpStatus* value) noexcept { if(value)*value=scenePvp;return value!=nullptr; }
+void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpStatus* snapshot) noexcept {
+    scenePvpVisible=snapshot!=nullptr;scenePvpSnapshot=snapshot ? *snapshot : PvpStatus{};scenePvpCount=n;
+    for(int i=0;i<n;++i){std::memcpy(scenePvpRects[i],rects+i*4,16);scenePvpCodes[i]=codes[i];}
+}
+int MapPvpPadSelection() noexcept { return scenePvpPadPick; }
+bool scenePvpOpen=false;   // the PVP panel unfolded by a click on its title (mapcmd.cpp MapPvpOpen)
+bool MapPvpOpen() noexcept { return scenePvpOpen; }
+// The legend at the dock's foot (hud.cpp MapLegend): unfolded or not, its title row as drawn.
+bool sceneLegendOpen=false,sceneLegendOn=false;float sceneLegendRow[4]{};
+bool MapLegendOpen() noexcept { return sceneLegendOpen; }
+void MapCommandLegendButton(const float* r) noexcept { sceneLegendOn=r!=nullptr;if(r)std::memcpy(sceneLegendRow,r,16); }
+thermal::Status sceneThermal{};
+namespace thermal { Status GetStatus(const void*) noexcept { return sceneThermal; } }
+VehicleSensorReadout sceneSensor{};bool sceneSensorOn=false;
+bool PlayerVehicleContacts(VehicleSensorReadout* value) noexcept { if(value)*value=sceneSensor;return value && sceneSensorOn; }
 // The map's buttons as drawn (hud.cpp MapButtons): the scene's check reads them.
 int sceneButtons=0;float sceneButton[mapbtn::kCount][4]{};int sceneButtonId[mapbtn::kCount]{};
 void MapCommandButtons(const float* r,const int* ids,int n) noexcept {
     sceneButtons=n;
     for(int i=0;i<n;++i){for(int k=0;k<4;++k)sceneButton[i][k]=r[i*4+k];sceneButtonId[i]=ids[i];}
 }
-float sceneUiPanels[16][4]{};int sceneUiCount=0;
+float sceneUiPanels[kMapUiPanels][4]{};int sceneUiCount=0;
 float sceneSquadButtons[16][4]{};int sceneSquadButtonCount=0;
 float sceneSquadFold[4]{};bool sceneSquadFoldOn=false;
 float scenePayloadButtons[kMostPayload][4]{};int scenePayloadButtonCount=0;
@@ -280,6 +350,12 @@ void MapCommandSupportButtons(const float* r,const int* entries,int n) noexcept 
 float sceneComposeHits[mapbtn::kComposeItems][4]{};int sceneComposeCode[mapbtn::kComposeItems]{},sceneComposeHitCount=0;
 void MapCommandComposeButtons(const float* r,const int* codes,int n) noexcept {
     sceneComposeHitCount=n;for(int i=0;i<n;++i){std::memcpy(sceneComposeHits[i],r+i*4,16);sceneComposeCode[i]=codes[i];}
+}
+// The test range's 「摆放」 panel's click targets as drawn (hud.cpp MapPlacePanel).
+float scenePlaceHits[kMapPlaceItems][4]{};int scenePlaceCode[kMapPlaceItems]{},scenePlaceHitCount=0,scenePlaceWindow=0;
+void MapCommandPlaceButtons(const float* r,const int* codes,int n,int window) noexcept {
+    if(!r || !codes)n=0;
+    scenePlaceHitCount=n;scenePlaceWindow=window;for(int i=0;i<n;++i){std::memcpy(scenePlaceHits[i],r+i*4,16);scenePlaceCode[i]=codes[i];}
 }
 bool GearHudLatest(GearHud* g) noexcept {
     if(!hasJet || sceneJet.rotor)return false;
@@ -336,9 +412,9 @@ void MapCamera(const MapReadout& m,float width,float height,float* vp) {
     for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*A;vp[i*4+3]=f[i];}
     vp[12]=-dot(eye,r)*fx;vp[13]=-dot(eye,u)*fy;vp[14]=-dot(eye,f)*A+B;vp[15]=-dot(eye,f);
 }
-// The production overhead placement with synthetic impact inputs; not a game screenshot.
+// The production overhead placement (hull-centred) with synthetic inputs; not a game screenshot.
 void ImpactCamera(const float* origin,const float* impact,float width,float height,float* vp) {
-    float eye[3],look[3];tcam::ImpactPlace(origin,impact,0,45,35,0,0,eye,look);
+    (void)impact;float eye[3],look[3];tcam::HullPlace(origin,0,90,55,0,0,eye,look);
     float f[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};vec::Normalize(f);
     float r[3]={-f[2],0,f[0]};vec::Normalize(r);float u[3];vec::Cross(r,f,u);
     const float fy=1/std::tan(0.5f*sceneFov*kDeg),fx=fy/(width/height),a=20000.0f/19999.0f;
@@ -422,13 +498,15 @@ void Dot(float x,float y,float z,std::uint8_t flags) {
 }
 // The map at `height` m, looking `pitchDeg` down along heading `yawDeg`, round a player at the origin with the squad,
 // two tanks, a heli, a jet, a carrier, a spread of enemies (some airborne) and two objective markers.
-void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920,float uiScale=1.0f,bool payload=false,bool vehicleOnly=false,bool online=false) {
+// `place`: the test range's 「摆放」 panel (mapcmd.h MapCommandReadout place*): 0 none (another mission), 1 shut (its tab),
+// 2 open on EDF4.1's enemies with a row armed and rows not installed / not preloaded, 3 the same online (every row dim).
+void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pitchDeg,float yawDeg,bool pad,int squadCount=4,int width=1920,float uiScale=1.0f,bool payload=false,bool vehicleOnly=false,bool online=false,int place=0) {
     const float previousScale=config.hudScale;config.hudScale=uiScale;
     hasMapPayload=payload;sceneMapPayload=PayloadReadout{};
     if(payload){sceneMapPayload.count=kMostPayload;sceneMapPayload.selectionToken=111;sceneMapPayload.seat=1;
         for(int i=0;i<kMostPayload;++i){auto& e=sceneMapPayload.entry[i];e.selectable=i>0 && i!=5;e.picked=i==2;e.rounds=12-i;e.capacity=12;
             _snwprintf_s(e.name,_countof(e.name),_TRUNCATE,L"%ls %ls %ls %d",Tr(Tx::wordWeapon),Tr(Tx::wordWeapon),Tr(Tx::wordWeapon),i+1);}}
-    sceneMap=MapReadout{};
+    sceneMap=MapReadout{};sceneMap.ownerHumanKey=passPlayerRefKey ? passPlayerRefKey : passPlayerSoldierKey;
     sceneMap.pad=pad;sceneMap.follow=true;
     sceneMap.yaw=yawDeg*kDeg;sceneMap.pitch=pitchDeg*kDeg;sceneMap.height=height;
     sceneMap.meDir[0]=std::sin(0.5f);sceneMap.meDir[2]=std::cos(0.5f);
@@ -458,6 +536,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     // 30 m apart; the heli guarding the same point (helis share its orbit); the jet following the player; a box being
     // dragged (Ctrl + left drag) round the crawlers to the pointer; the last command's word.
     sceneCmd=MapCommandReadout{};
+    sceneCmd.squadGroups[0]=0x5;sceneCmd.squadGroups[1]=0x100;   // groups 1 and 3, group 9 (the panel's [13], [9])
     sceneCmd.allowed=true;sceneCmd.allowedOrders=(1u<<(static_cast<unsigned>(mapcmd::kLastOrder)+1))-1;sceneCmd.selectedSquads=1;sceneCmd.squadToolsAllowed=!online;sceneCmd.pointOk=true;sceneCmd.pointer=!pad;
     sceneCmd.px=1250.0f;sceneCmd.py=560.0f;sceneCmd.boxing=!pad;sceneCmd.bx=820.0f;sceneCmd.by=360.0f;
     auto cmdUnit=[](const float* pos,bool air,const char* name,Order order,const float* at,bool selected){
@@ -476,6 +555,12 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     cmdUnit(robo1,false,"CRAWLER",Order::guard,guard,true);
     cmdUnit(robo2,false,"CRAWLER",Order::guard,slot1,true);
     sceneCmd.unit[sceneCmd.count-1].owner=sceneCmd.unit[sceneCmd.count-2].owner=kCmdOwnerGround;
+    // The crawlers kept as group 1 (Ctrl+1), the second also in group 2, with two Shift-queued points after its guard.
+    {
+        CmdMark& a=sceneCmd.unit[sceneCmd.count-2];CmdMark& b=sceneCmd.unit[sceneCmd.count-1];
+        a.groups=0x1;b.groups=0x3;b.ways=2;
+        const float w1[3]={200.0f,0.0f,520.0f},w2[3]={320.0f,0.0f,600.0f};std::memcpy(b.way[0],w1,12);std::memcpy(b.way[1],w2,12);
+    }
     // The squads (npcai.cpp, docs/npc-ai-design.md §6.1): a recruited one guarding, a free one, a script's (locked, grey),
     // one dismissed waiting out its cooldown; their panel on the right.
     const float sq1[3]={-30.0f,0.0f,150.0f},sq2[3]={200.0f,0.0f,250.0f},sq3[3]={-250.0f,0.0f,500.0f};
@@ -546,6 +631,12 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     sceneCmd.squadTally=SquadTally{};sceneCmd.squadTally.total=sceneCmd.squads;
     for(int i=0;i<sceneCmd.squads;++i)sceneCmd.squadTally.scripted+=sceneCmd.squad[i].rank==3;
     sceneCmd.noteFresh=true;
+    sceneCmd.placeOn=place>0;sceneCmd.placeOpen=place>=2;sceneCmd.placeOnline=place==3;
+    sceneCmd.placeCategory=static_cast<int>(debugspawn::Category::enemy41);sceneCmd.placePick=14;
+    sceneCmd.placeArmed=place>=2 && !pad ? debugspawn::RowOf(debugspawn::Category::enemy41,14) : -1;
+    for(int i=0;i<debugspawn::kEntryCount;++i)
+        sceneCmd.placeState[i]=place==3 ? debugspawn::RowState::online : !debugspawn::kEntries[i].preload ? debugspawn::RowState::notPreloaded :
+                               i%7==3 ? debugspawn::RowState::missing : debugspawn::RowState::ready;
     hasMap=true;
     const std::wstring path=dir+L"\\"+name+L".txt";
     if(_wfopen_s(&out,path.c_str(),L"w") || !out){hasMap=false;return;}
@@ -624,6 +715,55 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
             if(own!=1){++textFailed;std::printf("FAIL map button %d: %d labels in it\n",sceneButtonId[i],own);}
         }
     }
+    // The 「摆放」 panel: clickable with the mouse alone (its tab shut; open, its title, six tabs, the rows of the window
+    // and an arrow or two), on the screen, clear of the command card, the support bar and the payload panel's rows.
+    if(place>0) {
+        // Open: at least three rows fit (a shorter screen, the payload panel above it: fewer rows), the window at most.
+        const int least=pad ? 0 : place==1 ? 1 : 1+debugspawn::kCategoryCount+3,want=pad ? 0 : place==1 ? 1 : 1+debugspawn::kCategoryCount+rangeplace::kWindow+2;
+        if(pad ? scenePlaceHitCount!=0 : scenePlaceHitCount<least || scenePlaceHitCount>want)
+            {++textFailed;std::printf("FAIL place panel clicks: %d (want about %d)\n",scenePlaceHitCount,want);}
+        for(int i=0;i<scenePlaceHitCount;++i) {
+            const float* b=scenePlaceHits[i];
+            if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL place hit %d off the screen\n",i);}
+            auto under=[&](const float* q,const char* what,int k){
+                if(b[0]<q[2] && q[0]<b[2] && b[1]<q[3] && q[1]<b[3]){++textFailed;std::printf("FAIL place panel over %s %d\n",what,k);}
+            };
+            for(int k=0;k<sceneButtons;++k)under(sceneButton[k],"button",k);
+            for(int k=0;k<sceneSupportHitCount;++k)under(sceneSupportHits[k],"the support bar",k);
+            for(int k=0;k<scenePayloadButtonCount;++k)under(scenePayloadButtons[k],"the payload panel",k);
+        }
+    } else if(scenePlaceHitCount){++textFailed;std::printf("FAIL place panel in a mission without it: %d\n",scenePlaceHitCount);}
+    // The legend (the user, 2026-10-19: 「操作区域和图例冲突了」): its title row at the dock's foot, clickable with the
+    // mouse, clear of the command card, the support bar, the payload panel, PVP and every 「摆放」 target; open, none of
+    // its words under any of those targets either.
+    if(pad ? sceneLegendOn : !sceneLegendOn){++textFailed;std::printf("FAIL legend title clickable %d with pad %d\n",sceneLegendOn,pad);}
+    {
+        std::vector<std::array<float,4>> targets;
+        for(int k=0;k<sceneButtons;++k)targets.push_back({sceneButton[k][0],sceneButton[k][1],sceneButton[k][2],sceneButton[k][3]});
+        for(int k=0;k<sceneSupportHitCount;++k)targets.push_back({sceneSupportHits[k][0],sceneSupportHits[k][1],sceneSupportHits[k][2],sceneSupportHits[k][3]});
+        for(int k=0;k<scenePayloadButtonCount;++k)targets.push_back({scenePayloadButtons[k][0],scenePayloadButtons[k][1],scenePayloadButtons[k][2],scenePayloadButtons[k][3]});
+        for(int k=0;k<scenePlaceHitCount;++k)targets.push_back({scenePlaceHits[k][0],scenePlaceHits[k][1],scenePlaceHits[k][2],scenePlaceHits[k][3]});
+        for(int k=0;k<scenePvpCount;++k)targets.push_back({scenePvpRects[k][0],scenePvpRects[k][1],scenePvpRects[k][2],scenePvpRects[k][3]});
+        for(int k=0;k<sceneComposeHitCount;++k)targets.push_back({sceneComposeHits[k][0],sceneComposeHits[k][1],sceneComposeHits[k][2],sceneComposeHits[k][3]});
+        for(int k=0;k<sceneSquadButtonCount;++k)targets.push_back({sceneSquadButtons[k][0],sceneSquadButtons[k][1],sceneSquadButtons[k][2],sceneSquadButtons[k][3]});
+        auto hits=[](const float* a,const std::array<float,4>& q){ return a[0]<q[2] && q[0]<a[2] && a[1]<q[3] && q[1]<a[3]; };
+        if(sceneLegendOn) {
+            const float* b=sceneLegendRow;
+            if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::puts("FAIL legend off the screen");}
+            for(const auto& q:targets)if(hits(b,q)){++textFailed;std::puts("FAIL legend title under another target");break;}
+        }
+        static const Tx kLegendWords[]={Tx::legendYou,Tx::legendSquad,Tx::legendFriendly,Tx::legendVehicle,Tx::legendAircraft,
+            Tx::legendHelicopter,Tx::legendEmpty,Tx::legendCarrier,Tx::legendLargeEnemy,Tx::legendLargeEnemyAir,Tx::legendObjective,
+            Tx::legendEnemy,Tx::legendEnemyFlying,Tx::legendLock,Tx::legendNearestEnemy};
+        int words=0;
+        for(const Drew& d:drew)for(const Tx w:kLegendWords)if(d.text==Tr(w)) {
+            ++words;
+            const float a[4]={d.x0,d.y0,d.x1,d.y1};
+            for(const auto& q:targets)if(hits(a,q)){++textFailed;std::printf("FAIL legend word %s under a target\n",Narrow(d.text).c_str());break;}
+        }
+        if(sceneLegendOpen && !pad && words!=static_cast<int>(sizeof(kLegendWords)/sizeof(kLegendWords[0])))
+            {++textFailed;std::printf("FAIL open legend: %d words drawn\n",words);}
+    }
     // The squad panel (the user, 2026-10-09: "小队太多了…看不过来"): folded, the rows on foot that take orders, the rest
     // (a script's) in the summary row that opens it; open, every row and the row that folds it.
     int ranks[16];
@@ -634,7 +774,8 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
     for(int i=0;i<sceneCmd.squads;++i) {
         const SquadRow& r=sceneCmd.squad[i];wchar_t kind[32],status[32];
         hudtext::WordTo(r.name,kind,_countof(kind));MapSquadStatus(r,status,_countof(status));
-        Line expected{};Format(expected,L"%d  %ls x%d   %ls   %ls",i+1,kind,r.alive,status,MapOrderWord(r.now.order));
+        wchar_t groups[16];MapGroupDigits(sceneCmd.squadGroups[i],groups,_countof(groups));   // its RTS groups ([13]), none: spaces
+        Line expected{};Format(expected,L"%ls  %ls x%d   %ls   %ls",groups,kind,r.alive,status,MapOrderWord(r.now.order));
         if(i<listedRows)shown(expected.text);
         else for(const Drew& d:drew)if(d.text==expected.text){++textFailed;std::printf("FAIL folded squad row shown: %s\n",Narrow(d.text).c_str());}
     }
@@ -649,7 +790,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         bool board=false;
         for(int i=0;i<sceneButtons;++i) {
             board=board || sceneButtonId[i]==static_cast<int>(mapbtn::Id::board);
-            if(sceneButtonId[i]>=static_cast<int>(mapbtn::Id::formation) && sceneButtonId[i]<=static_cast<int>(mapbtn::Id::merge)) {
+            if(sceneButtonId[i]==static_cast<int>(mapbtn::Id::formation)) {
                 ++textFailed;std::puts("FAIL unsupported online squad editor is clickable");
             }
         }
@@ -746,7 +887,7 @@ int StatsScene(const std::wstring& dir,const wchar_t* name,dmgstat::Tab tab,dmgs
     else if(pickName){for(int i=0;i<sceneBook.sources;++i)if(dmgstat::SameName(sceneBook.source[i].name,pickName))pick=i;}
     sceneStatsView=dmgstat::View{};
     sceneStatsView.open=true;sceneStatsView.tab=tab;sceneStatsView.scope=scope;sceneStatsView.pick=pick;
-    sceneMap=MapReadout{};
+    sceneMap=MapReadout{};sceneMap.ownerHumanKey=passPlayerRefKey ? passPlayerRefKey : passPlayerSoldierKey;
     sceneMap.yaw=0.0f;sceneMap.pitch=60.0f*kDeg;sceneMap.height=700.0f;sceneMap.mapKey=0x4D;sceneMap.mapButton=0x20;
     sceneCmd=MapCommandReadout{};
     sceneCmd.pointer=px>=0.0f;sceneCmd.px=px;sceneCmd.py=py;
@@ -1181,10 +1322,15 @@ int SightStyleScenes(const std::wstring& dir,const float* ground) {
             }
         const bool owned=SightGun(sceneStock,false)==0;
         const bool scope=zoomed ? scopePieces==scopeview::kSides : scopePieces==0;
-        const bool ok=words && apart && owned && scope;
+        // The stock crosshair (HudPlayer_CrossHair) gives way to the field drawn, for its soldier only (scope_hold.h; the
+        // user, 2026-10-21: "进入瞄具状态的时候没隐藏准星"); at 1x it stays.
+        const int otherSoldier=0;
+        const bool crosshair=HudScopeHoldsCrosshair(&sceneScopeSoldier)==(zoomed!=0) && !HudScopeHoldsCrosshair(&otherSoldier) &&
+                             !HudScopeHoldsCrosshair(nullptr);
+        const bool ok=words && apart && owned && scope && crosshair;
         failed+=!ok;
-        std::printf("%s  %ls: its words %d, no text overlapping %d, sight gun %d, scope quads %d\n",ok ? "ok  " : "FAIL",name.c_str(),words,apart,
-                    owned,scopePieces);
+        std::printf("%s  %ls: its words %d, no text overlapping %d, sight gun %d, scope quads %d, stock crosshair held back %d\n",
+                    ok ? "ok  " : "FAIL",name.c_str(),words,apart,owned,scopePieces,HudScopeHoldsCrosshair(&sceneScopeSoldier));
     }
     // A flamethrower, a grenade launcher: no gun sight (their impact marks only).
     StockTank(ground);
@@ -1709,6 +1855,55 @@ int ScreensDrawn(const wchar_t* name,const float* pos,const float* fwd,int width
     return failed;
 }
 
+// A physical cockpit's head-up glass (cockpit_screens.inc HeadUpGlass; docs/feedback-2026-10-21-attitude-indicator.md):
+// a heli flown nose 3 degrees up and banked 20 degrees right, its glass (an F-16 combiner's size, 0.14 x 0.15 m, 0.8 m
+// ahead along the nose) turned with the body; the scene's camera is level. Through the glass the drawn horizon must lie
+// on the world's: on the view it is level and on the view's middle row (a level camera's horizon), though the glass is
+// turned 20 degrees; the glass's other symbols (the boxes' numbers) are drawn too; a model's own screens (physical)
+// get no canvas of their own.
+int HeadUpGlassScene(const std::wstring& dir,const float* pos) {
+    int failed=0;
+    const float p=3.0f*kDeg,b=20.0f*kDeg;
+    const float nose[3]={0.0f,std::sin(p),std::cos(p)},level[3]={-1.0f,0.0f,0.0f},u0[3]={0.0f,std::cos(p),-std::sin(p)};
+    std::memcpy(sceneHeli.sym.nose,nose,12);
+    CockpitScreen g{};
+    g.kind=ScreenKind::hud;g.w=0.14f;g.h=0.15f;
+    for(int k=0;k<3;++k) {
+        g.right[k]=std::cos(b)*level[k]-std::sin(b)*u0[k];g.up[k]=std::sin(b)*level[k]+std::cos(b)*u0[k];g.off[k]=nose[k]*0.8f;
+    }
+    sceneScreens=CockpitScreens{};
+    sceneScreens.s[sceneScreens.n++]=g;
+    sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::flight,nose,-0.13f);
+    sceneScreens.physical=true;
+    for(int k=0;k<3;++k){sceneScreens.frame[k]=-g.right[k];sceneScreens.frame[4+k]=g.up[k];sceneScreens.frame[8+k]=nose[k];}
+    sceneScreens.frame[15]=1.0f;
+    hudQuads.clear();keepHud=true;
+    Prime(pos);Scene(dir,L"cockpit_hud_glass",pos);
+    keepHud=false;
+    // The ladder's pieces: the HUD quads at least 30 px long that lie level on the view (a Seg: corners a0 b0 a1 b1,
+    // its long edges a0-b0 and a1-b1). The horizon is the one on the view's middle row; the glass-fixed symbols (the
+    // tape, the boxes, the bank scale) are turned 20 degrees with the glass and are not among them.
+    int pieces=0;float cy=1e9f;
+    for(const auto& q:hudQuads) {
+        const float len=std::hypot(q[2]-q[0],q[3]-q[1]);
+        if(len<30.0f || std::fabs(q[3]-q[1])>0.02f*len)continue;
+        ++pieces;
+        const float row=(q[1]+q[3]+q[5]+q[7])*0.25f;
+        if(std::fabs(row-540.0f)<std::fabs(cy-540.0f))cy=row;
+    }
+    if(pieces<2 || std::fabs(cy-540.0f)>3.0f) {
+        ++failed;
+        std::printf("FAIL cockpit_hud_glass: the drawn horizon is not the world's (%d level pieces, the nearest at row %.1f)\n",pieces,cy);
+    }
+    int numbers=0;
+    for(const Drew& d:drew)numbers+=!d.text.empty() && (d.text==L"151" || d.text==L"85");
+    if(numbers<2){++failed;std::printf("FAIL cockpit_hud_glass: the speed and height boxes show %d of 2\n",numbers);}
+    if(!failed)std::printf("ok  cockpit_hud_glass: the horizon level on the world's (row %.1f, %d level pieces), speed and height on the glass\n",cy,pieces);
+    sceneScreens=CockpitScreens{};
+    sceneHeli.sym.nose[0]=sceneHeli.sym.nose[1]=0.0f;sceneHeli.sym.nose[2]=1.0f;
+    return failed;
+}
+
 int CockpitScenes(const std::wstring& dir,const float* ground,const float* pos) {
     int failed=0;
     hasJet=hasHeli=hasWarn=hasSazabi=hasDrill=hasNix=hasProteus=false;hasStock=true;
@@ -1730,6 +1925,7 @@ int CockpitScenes(const std::wstring& dir,const float* ground,const float* pos) 
     sceneScreens.s[sceneScreens.n++]=ScreenAt(ScreenKind::map,sceneHeli.sym.nose,0.13f);
     Prime(pos);Scene(dir,L"cockpit_heli_pilot",pos);
     failed+=ScreensDrawn(L"cockpit_heli_pilot",pos,sceneHeli.sym.nose,1920);
+    failed+=HeadUpGlassScene(dir,pos);
     // An unmanned gun's station (remote_display): its monitor over the whole view, its title, bearing, elevation, weapon.
     hasHeli=false;hasStock=true;
     StockTank(ground);
@@ -2291,6 +2487,19 @@ int Scenes(const std::wstring& dir) {
     MapScene(dir,L"map_clickable_payload_4x3",700.0f,60.0f,20.0f,false,9,1440,2.0f,true);
     MapScene(dir,L"map_vehicle_only_controls",700.0f,60.0f,20.0f,false,9,1440,1.5f,true,true);
     MapScene(dir,L"map_online_controls",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,true);
+    // The test range's 「摆放」 panel (range_place.h): shut, open (mouse, a pad, a narrow screen, the payload panel up),
+    // online.
+    MapScene(dir,L"map_place_shut",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,false,1);
+    MapScene(dir,L"map_place",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,false,2);
+    MapScene(dir,L"map_place_pad",700.0f,60.0f,20.0f,true,4,1920,1.0f,false,false,false,2);
+    MapScene(dir,L"map_place_narrow",700.0f,60.0f,20.0f,false,9,1280,1.0f,false,false,false,2);
+    MapScene(dir,L"map_place_payload",700.0f,60.0f,20.0f,false,9,1920,1.0f,true,false,false,2);
+    MapScene(dir,L"map_place_online",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,true,3);
+    // The legend unfolded at the dock's foot under the open 「摆放」 (the user, 2026-10-19: 「操作区域和图例冲突了」).
+    sceneLegendOpen=true;
+    MapScene(dir,L"map_place_legend",700.0f,60.0f,20.0f,false,4,1920,1.0f,false,false,false,2);
+    MapScene(dir,L"map_place_legend_narrow",700.0f,60.0f,20.0f,false,9,1280,1.0f,true,false,false,2);
+    sceneLegendOpen=false;
     StatsScenes(dir);
     StockTank(ground);
     failed+=!MapDrawsMapAlone(ground,sceneStock.hull);
@@ -2338,7 +2547,44 @@ int Scenes(const std::wstring& dir) {
 }
 }  // namespace
 
+int PhysicalInstrumentFeedChecks() {
+    int failed=0;
+    const auto check=[&](bool ok,const char* text){if(!ok){++failed;std::printf("FAIL cockpit feed: %s\n",text);}};
+    Snapshot s{};s.stock=true;s.stockHud.hp=900;s.stockHud.hpMax=1000;
+    s.armor=true;s.armorRo.armor.hp=10;s.armorRo.armor.most=200;
+    s.armorRo.hasHull=true;s.armorRo.hull.hp=900;s.armorRo.hull.most=1000;
+    config.hudLanguage=2;PublishInstruments(s);
+    check(deliveredInstruments.value[instruments::hp]==900 && std::fabs(deliveredInstruments.share[instruments::hp]-.9f)<1e-6f,
+          "vehicle diagram uses vehicle durability, not rider armor");
+    check(deliveredInstruments.language==1,"physical language uses the same HUD resolver");
+    s.armorRo.armor.hp=1;PublishInstruments(s);
+    check(deliveredInstruments.value[instruments::hp]==900,"injuring the rider cannot change vehicle health");
+    s.stockHud.hp=100;s.armorRo.armor.hp=200;PublishInstruments(s);
+    check(std::fabs(deliveredInstruments.share[instruments::hp]-.1f)<1e-6f,"vehicle damage changes its own diagram even with healthy rider");
+    check(FeedOf(s).hp==200,"legacy armor readout retains its rider meaning");
+    s.stock=false;s.cockpit=true;s.jet.hp=2000;s.jet.hpMax=10000;PublishInstruments(s);
+    check(std::fabs(deliveredInstruments.share[instruments::hp]-.2f)<1e-6f,"aircraft health does not inherit stale rider/vehicle gauge values");
+    s.jet.speed=100;s.jet.climb=-5;s.jet.throttle=.65f;
+    s.jet.sym.nose[1]=.5f;s.jet.sym.nose[2]=.8660254f;PublishInstruments(s);
+    check(deliveredInstruments.flight && deliveredInstruments.value[instruments::speed]==360
+          && deliveredInstruments.value[instruments::climb]==-5,"physical gauges receive speed and negative vertical speed");
+    check(std::fabs(deliveredInstruments.value[instruments::pitch]-30)<.001f
+          && std::fabs(deliveredInstruments.value[instruments::power]-65)<.001f,"physical gauges use degrees and actual throttle percent");
+    s.jet.rotor=true;s.jet.heli.power=.42f;PublishInstruments(s);
+    check(std::fabs(deliveredInstruments.value[instruments::power]-42)<.001f,"plugin rotor craft use measured rotor power");
+    s.cockpit=false;PublishInstruments(s);
+    check(deliveredInstruments.value[instruments::hp]<0,"armor-only snapshot cannot invent vehicle durability");
+    check(!deliveredInstruments.flight && deliveredInstruments.value[instruments::power]<0,
+          "leaving the aircraft invalidates flight-only readings and power");
+    s.heliFly=true;s.heliHud.f.climb=-2;s.heliHud.f.power=.35f;s.heliHud.sym.nose[2]=1;PublishInstruments(s);
+    check(deliveredInstruments.flight && deliveredInstruments.value[instruments::climb]==-2
+          && std::fabs(deliveredInstruments.value[instruments::power]-35)<.001f,"stock helicopters publish their own live climb and power");
+    config=Config{};
+    std::printf("cockpit feed: %d failures\n",failed);return failed;
+}
+
 int wmain(int argc,wchar_t** argv) {
+    if(argc==2 && !wcscmp(argv[1],L"--check-feed"))return PhysicalInstrumentFeedChecks();
     wchar_t temp[MAX_PATH]{};
     GetTempPathW(MAX_PATH,temp);
     std::wstring dir=std::wstring(temp)+L"edf6_hud_view";
@@ -2360,7 +2606,7 @@ int wmain(int argc,wchar_t** argv) {
     *reinterpret_cast<void**>(uiHolder+kUiScreenObj)=uiScreen;
     SetScreen(1920,1080);
     quadOk=textOk=uiOk=true;
-    int failed=0;
+    int failed=PhysicalInstrumentFeedChecks();
     for(int l=0;l<hudtext::kLangs;++l) {   // English first: the others are compared with it
         const hudtext::Lang lang=static_cast<hudtext::Lang>(l);
         if(only>1 && only!=l+1 && lang!=hudtext::Lang::en)continue;

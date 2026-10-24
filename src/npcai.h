@@ -53,10 +53,16 @@ int CycleGuardFormation(const void* leader) noexcept;
 int SetGuardFormation(const void* leader,int shape) noexcept;
 int NpcGuardShape(const void* leader) noexcept;
 int SetMarchFormation(int shape) noexcept;
-// Fireteams (the map's P and L): split a squad in two (the soldiers moved to the new one, -1 when it cannot be), put
-// squad `from` under squad `into`'s top (false when either takes no orders or the two are more than a squad holds).
-int SplitSquad(const void* leader) noexcept;
-bool MergeSquads(const void* into,const void* from) noexcept;
+// The squad a squad's top `old` handed over to (its leader died: §5.3 Succeed): the new top, or the top of the squad the
+// remnant joined; false when `old` handed over to none lately. The map's selection and its RTS groups follow a squad
+// through its leader's death with it (they hold the top's identity). Game thread.
+bool NpcSquadSuccessor(const ObjRef& old,ObjRef* now) noexcept;
+// A squad's members by identity, its top among them (mapcmd_logic.h UnitRef: the map's groups, selection and queues
+// find a squad again through any member alive), at most `most`; how many. The top of a living member's squad now (the
+// native follow tree: on a guest too, where the host's hand-over is not recorded); false for a member dead or gone.
+// Game thread.
+int NpcSquadMembers(const void* top,ObjRef* out,int most) noexcept;
+bool NpcSquadTopOf(const ObjRef& member,ObjRef* top) noexcept;
 int CycleMarchFormation() noexcept;
 struct FormationCue { int shape; int key; };
 bool PlayerFormationCue(FormationCue* out) noexcept;
@@ -103,6 +109,26 @@ int NpcSquadDismount(const void* top) noexcept;
 bool NpcSquadSetOrder(const void* top,const mapcmd::Command& c,bool keepBoarding) noexcept;
 const void* NpcSquadTopOf(const void* human) noexcept;
 bool NpcSoldierFlies(const void* human) noexcept;
+
+// npc_backpack.cpp: an NPC soldier's backpack weapon (its sub weapon slots; docs/npc-backpack-re.md). Game thread.
+//  - InstallNpcBackpack: the code it rests on as read (from InstallNpcAi); false: no NPC uses one;
+//  - NpcPackSlots: its sub slots holding a Weapon_Sub of npc_pack_table.h's (slot 0 first; `index` into +0x1950);
+//  - NpcPackIndex: whether weapon list entry `index` is a sub slot's (never one of its WeaponSets' to pick or fire);
+//  - NpcPackBusy: WeaponSet 0 is using a sub weapon (the throw / swing in hand);
+//  - NpcPackCanUse: read the same native gates as Use before the AI takes the main weapon's look / trigger;
+//  - NpcPackUse: the use the game makes of a backpack tap (and every peer of its message 0x10), its gates first; true
+//    when it began. Online the soldier's registered copy sends that message, as a player's does;
+//  - NpcPackReload: the long press's reload (+0x13B) for a weapon reloaded by hand (+0x690 set).
+struct PackWeapon;
+struct NpcPackSlot { unsigned char* weapon; const PackWeapon* row; int slot; int index; };
+bool InstallNpcBackpack() noexcept;
+bool NpcBackpackReady() noexcept;
+int NpcPackSlots(const unsigned char* h,NpcPackSlot* out,int most) noexcept;
+bool NpcPackIndex(const unsigned char* h,int index) noexcept;
+bool NpcPackBusy(const unsigned char* h) noexcept;
+bool NpcPackCanUse(unsigned char* h,int slot) noexcept; // the same native gates as Use, before taking aim / the main trigger
+bool NpcPackUse(unsigned char* h,int slot) noexcept;
+bool NpcPackReload(unsigned char* weapon) noexcept;
 
 // npcpost.cpp: NPC tanks back to their post (docs/npc-ai-design.md §8). Each vehicle's input, before the stock input
 // reads seat 0's stick (crew.cpp InputHook).

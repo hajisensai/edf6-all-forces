@@ -5,7 +5,8 @@ src/payload.cpp, src/stores.cpp, docs/stock-payload-re.md §4). The user, 2026-1
 inventory of every vehicle and why each gets what it gets: docs/feedback-2026-10-09-loadcamp.md):
 
   main battle tanks (Blacker 505, Varius 601)      the round the stock gun is not (APFSDS beside a howitzer, HE beside
-                                                   a smooth-bore) and a gun-launched LAHAT, from the main gun
+                                                   a smooth-bore), HEAT-MP (both prototypes fire it), the Blacker's M1028
+                                                   canister, and a gun-launched LAHAT, from the main gun
   the Grape 401 (an infantry fighting vehicle)     the belt its stock cannon is not (AP or HE) and AGM-114s
   Epsilon railgun 403                              AGM-114s from the railgun (a railgun fires slugs only: no HE round;
                                                    its two gunners keep their machine guns)
@@ -124,6 +125,15 @@ NO_RECOIL = [0.0, 0.0]
 # gets the one round its stock gun is not (_rounds): 22 of the 28 tank requests bring a howitzer (an HE gun already,
 # the HE store's template is one of them), 5 the A series' smooth-bore (AP), one the heat gun.
 _MBT = (_rounds('AP', 'HE', 20, 0), _store('GLM', 4, 0))
+# The rounds of each tank's real prototype that the stock game lacks (the user, 2026-10-19: 「坦克好像还有串联破甲弹或者
+# 破甲弹之类的弹种」, then: only what the prototype really fires; docs/feedback-2026-10-19-vehicle-ammo.md): the Blacker
+# (an M1 Abrams class tank) the M830-class HEAT-MP and the M1028 canister; the Varius (a Type 10 class tank) the JM12A1
+# HEAT-MP (no canister: Japan fields none). Neither fires a tandem HEAT gun round: their tandem warhead is the LAHAT's.
+# On the main gun's holder, each its own choice of the switch.
+_HEAT = _store('HEAT', 15, 0)
+_CANISTER = _store('CANISTER', 10, 0)
+_BLACKER = (*_MBT[:1], _HEAT, _CANISTER, *_MBT[1:])
+_VARIUS = (*_MBT[:1], _HEAT, *_MBT[1:])
 _IFV = (_rounds('AC_AP', 'AC_HE', 150, 0), _store('AGM_L', 4, 0))
 # The coaxial machine guns (the user, 2026-10-11: 「应该有同轴机枪的坦克增加同轴机枪」, 「这个坦克的同轴机枪做的什么玩意，
 # 找现实的模型来做」; vcobjects COAX_MOUNTS / STORES 'MG<tank>'): the real 7.62 mm coax of each class, its ready belt,
@@ -138,7 +148,9 @@ COAX: dict[str, Mount] = {
     **{s: Mount(vc.store_file('MG401', vc.COAX_MOUNTS['401'].belt), 0)
        for s in ('VEHICLE401_STRIKER', 'VEHICLE401_STRIKER_MPACK2')},
 }
-_FLAK = (_store('FLAK_HE', 500, 0), _store('AAM_S', 2, 0), _store('AAM_M', 4, 0))
+_FLAK = (_store('FLAK_AP', 500, 0), _store('FLAK_AP_R', 500, 1),
+         _store('FLAK_HE', 500, 0), _store('FLAK_HE_R', 500, 1),
+         _store('AAM_S', 2, 0), _store('AAM_M', 4, 0))
 _LAUNCHER = (_store('AAM_M', 4, 0), _store('AGM', 2, 0), _store('RKT', 19, 0))
 _BIKE = (_store('RKT', 19, 0),)
 _HELI = (_store('RKT', 19, 2), _store('AGM_L', 4, 2), _store('AAM_S', 2, 2))   # beside the 506's missile (holder 2)
@@ -157,20 +169,31 @@ _BY_CATEGORY: dict[str, tuple[Mount, ...]] = {
     'railgun': (_store('AGM_L', 4, 0),),
     'superheavy': (_store('AGM_L', 4, 3),),   # the driver's front gatling (holder 3): his second control
 }
-LOADOUTS: dict[str, tuple[Mount, ...]] = {stem: _BY_CATEGORY[c] + ((COAX[stem],) if stem in COAX else ())
+# The prototype each tank follows (its own rounds: _BLACKER / _VARIUS above); the other categories' by category.
+_BY_STEM: dict[str, tuple[Mount, ...]] = {
+    **{s: _BLACKER for s in ('V505_TANK', 'V505_TANK_EDF4', 'V505_TANK_EDF5', 'V505_TANK_EDF6BENEFITS',
+                             'V505_TANK_MPACK2')},
+    'V601_TANK': _VARIUS,
+}
+LOADOUTS: dict[str, tuple[Mount, ...]] = {stem: _BY_STEM.get(stem, _BY_CATEGORY[c]) + ((COAX[stem],) if stem in COAX else ())
                                           for stem, c in CATEGORIES.items()}
 LOADOUTS['VEHICLE409_HELI'] = (_store('RKT', 19, 1), _store('AGM_L', 4, 1), _store('AAM_S', 2, 1))   # its missile: holder 1
 # What each category must carry (tests/test_stock_store_loadouts.py): store kinds, or roles ('role:<role>').
 REQUIRED: dict[str, tuple[str, ...]] = {
-    'mbt': ('AP', 'HE', 'GLM', 'role:coax'),             # AP or HE (whichever the stock gun is not), the gun-launched missile,
-                                                         # the coaxial machine gun
+    'mbt': ('AP', 'HE', 'HEAT', 'GLM', 'role:coax'),     # AP or HE (whichever the stock gun is not), HEAT-MP, the gun-launched
+                                                         # missile, the coaxial machine gun (the Blacker's canister: PROTOTYPE)
     'ifv': ('AC_AP', 'AC_HE', 'role:ground', 'role:coax'),   # the autocannon's other belt, an anti-tank missile, the coax
-    'flak': ('FLAK_HE', 'role:air'),                     # HE proximity rounds, surface-to-air missiles
+    'flak': ('FLAK_AP', 'FLAK_AP_R', 'FLAK_HE', 'FLAK_HE_R', 'role:air'),                     # HE proximity rounds, surface-to-air missiles
     'launcher': ('role:air', 'role:ground', 'role:rocket'),
     'heli': ('role:rocket', 'role:ground', 'role:air'),
     'bike': ('role:rocket',),
     'railgun': ('role:ground',),
     'superheavy': ('role:ground',),
+}
+# What one vehicle's prototype adds to its category's (tests/test_stock_store_loadouts.py).
+PROTOTYPE: dict[str, tuple[str, ...]] = {
+    **{s: ('CANISTER',) for s in ('V505_TANK', 'V505_TANK_EDF4', 'V505_TANK_EDF5', 'V505_TANK_EDF6BENEFITS',
+                                  'V505_TANK_MPACK2')},
 }
 # Every other vehicle a stock request brings, and why it gets no stores (tests/test_stock_store_loadouts.py, with the
 # game: every vehicle is in LOADOUTS or here).

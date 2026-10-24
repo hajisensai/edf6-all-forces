@@ -225,6 +225,8 @@ const Enemy* World(int* count) noexcept;
 bool Same(const void* obj,const void* ctrl) noexcept;
 // The seat's own gun: the weapon in its first holder (the one its aim turns), or nullptr.
 const unsigned char* SeatGun(const unsigned char* seat) noexcept;
+// Optional Crew payload ownership: true + null is a validated empty group, false requests native fallback.
+bool ActualWeapon(const unsigned char* vehicle,unsigned seat,const unsigned char* source,const unsigned char** out) noexcept;
 // Once a frame for the seat this machine's player is at, in a vehicle whose aim this plugin runs: its bindings (the
 // mode, the lock) and its lock kept up. `muzzle` / `bore`: the seat's gun (null: none read; the lock then looks along
 // the camera, else the vehicle's nose), `range` the lock range when the ini gives none (the gun's, m).
@@ -254,7 +256,7 @@ float PriorityWeight(const Enemy& e) noexcept;
 // gun is the plugin's; `target` what the gun works on (null: nothing) at `world`, led from `muzzle` along `bore` with
 // `shot` against the target's velocity `vel` (m/frame); `life` the round's frames (0: unknown).
 void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,const float* world,const float* muzzle,const float* bore,
-                const Shot* shot,const float* vel,float life) noexcept;
+                const Shot* shot,const float* vel,float life,const void* gun=nullptr) noexcept;
 
 // gunner.cpp: hooks the Titan's and the gunner-seat tanks' input and weapon-user slots; the number of
 // slots it patched (0: it left them stock).

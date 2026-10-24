@@ -41,9 +41,9 @@ GENERATOR_NAME = os.path.splitext(installer.GENERATOR)[0]   # EDF6VehicleCrew.ge
 # vcobjects / mdb import the jets' model builders (numpy, Pillow) in functions the generator never calls (measured: a
 # soldier, a tank, every jet body and every pylon store built from Root.cpk import only cpk, crilayla, dsgo, gamedir,
 # graft_pure, ledger, mdb, mdb_jet, modfiles, rootcpk, sgo, support_loadout, vcobjects).
-GENERATOR_EXCLUDES = ('numpy', 'PIL', 'tkinter', 'matplotlib', 'pandas', 'installer', 'testhub', 'procmesh', 'jet_models',
+GENERATOR_EXCLUDES = ('numpy', 'PIL', 'scipy', 'tkinter', 'matplotlib', 'pandas', 'installer', 'testhub', 'procmesh', 'jet_models',
                       'aircraft_collision', 'support_config', 'gamelease', 'urllib3', 'requests')
-RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'cockpits')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model.MODEL_SUBDIR, cockpits.ASSET_DIR
+RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'dreadnought', 'cockpits', 'wt_m163', 'wt_bmpt')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model / dreadnought_model.MODEL_SUBDIR, cockpits.ASSET_DIR, wt_tracked.FOLDERS
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 
@@ -55,7 +55,7 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
     泰坦和炮手座坦克的副炮自瞄，炮塔镜头下的锁定；
   - AutoTurret 的车辆数据：防空车（KG6 克卜勒系）改高射炮、玻尔斯对地、关卡里的 NPC 防空车、NPC 泰坦的副炮，
     以及这几辆车的武器说明行；
-  - 呼叫武器、战机 / 直升机 / 无人机、潜水母舰、喀秋莎、自行榴弹炮、钻头战车、边三轮、降落伞、EMC 光束、
+  - 呼叫武器、战机 / 直升机 / 无人机、潜水母舰、喀秋莎、自行榴弹炮、钻头战车、边三轮、M163 火神炮车、BMPT、降落伞、EMC 光束、
     大地图和测试场「大混战」关卡（都在你机器上现场生成，见下）。
 
 安装 / 更新：
@@ -72,6 +72,8 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
   首次使用支持增量更新的安装器仍需生成一次，之后更新可复用。每一步会显示生成或复用及耗时。
   自行榴弹炮的外形来自压缩包里的 models 文件夹（双管坦克模型），请和 exe 放在一起解压；
   没有这个文件夹时自行榴弹炮用 Kepler 原版外形。
+  EDF4.1 的任务地图和 4.1 的音效 / 语音 / 字幕在安装时从已安装的 EDF4.1 转换；没装 EDF4.1 时改用和 exe
+  放在一起的 edf41 文件夹（EDF4.1 素材包，约 3.5 GB，分享包附带）；两样都没有就跳过这部分并说明。
   安装器还会写入：
     - 大地图：测试场那张平原拼成 3 x 3 块（无缝），只影响测试场那一关；
     - 测试场关卡：没有敌人，只有靶子（地面和空中各一半，打掉了会重新出现）；地上停着本插件新加 / 改造的
@@ -81,6 +83,17 @@ README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 联机一起玩：
   所有玩家还需安装配套新版 EDF Coop；缺少兼容接口时会提示并停止创建/加入联机房间，单机可用。
   全军出击房间对原版公开搜索隐藏，邀请和直连同样检查兼容性，避免原版客户端载入 MOD 对象崩溃。
+  载具观察：按住鼠标中键／手柄 L3，再移动鼠标／右摇杆，只转视角，武器保持原操纵方向；松开回正。
+  新增空袭兵呼叫「民用轿车」（无武器、单驾驶席），V 切第一人称；手柄 LT 加速、左摇杆转向、LB 倒车。
+  本包补齐原版蓝色尼克斯等换色型号的座舱安装，以及加农炮型巴尔加的座舱。
+  离线基地 HQ / 联机待机房间选择「载具与 NPC 配装」，也可按 F2 / 手柄 L3+R3。
+  M 地图指向敌人后，在右侧「敌方单位操控」卡选择接管；接管后关闭 M 移动和战斗，
+  再打开 M 可翻页选择全部实际技能，按住发动，或选择返回原玩家。手柄 L3 聚焦此卡。
+  原玩家暂停并保护；普通模式保留敌方阵营，对战模式跟随操作者阵营。建筑式特殊母体可排除。
+  多人敌方操控还需所有玩家安装本轮配套 EDF6Coop 2.6.0-feedback1019 更新；
+  旧版会提示更新并拒绝接管，普通支援不受此限制。
+  座舱仪表随游戏语言／HudLanguage 切换；耐久改为载具轮廓缩略图、百分比与状态色。
+
   房间里每个人都要装同一个版本（同一个安装包），地图、关卡和载具才一致。
   测试场关卡不限制兵种和武器，各自选自己的。
   武器表只动本插件自己的行（已有的行原地更新，新的追加在末尾），别的 MOD 的行原样保留，
@@ -116,6 +129,18 @@ def cmake_version() -> str:
     return m.group(1)
 
 
+def notices() -> str:
+    """THIRD-PARTY-NOTICES.txt of the release zip: the licences of the third-party code the installer carries
+    (pylib/LICENSE.*: edf6-cpk; EDF6 SHKT Editor, ported to pylib/hkfile.py, hkshape.py, model_pieces.py and the
+    rules of shkt_check.py / vehicle_check.py)."""
+    folder = os.path.join(ROOT, 'pylib')
+    parts = []
+    for name in sorted(f for f in os.listdir(folder) if f.startswith('LICENSE.')):
+        with open(os.path.join(folder, name), encoding='utf-8') as h:
+            parts.append(f'{"=" * 78}\n{name[len("LICENSE."):]}\n{"=" * 78}\n\n{h.read().strip()}\n')
+    return 'EDF6VehicleCrew - third-party notices\n\n' + '\n'.join(parts)
+
+
 def plugin_data() -> list[str]:
     """The build/Mods/Plugins files the exe bundles: each plugin installer.PLUGINS installs, its dll and its ini."""
     return [name + ext for name, _ in installer.PLUGINS for ext in installer.PLUGIN_FILES]
@@ -137,7 +162,8 @@ def check_bundled() -> None:
 
 
 # native/cmpl.cpp built by build.cmd: mdb.cmpl_compress's encoder, 70 times the pure Python one (which spent most of an
-# install's model generation: 35 of a 40-second cockpit model, measured 2026-10-14). Both exes load it from _MEIPASS.
+# install's model generation: 35 of a 40-second cockpit model, measured 2026-10-14), and the other native helpers of
+# pylib/edf6native.py (CRILAYLA, the SK maps' LZSS and collision trees). Both exes load it from _MEIPASS.
 CMPL_DLL = os.path.join(ROOT, 'build', 'pylib', 'edf6cmpl.dll')
 
 
@@ -149,13 +175,20 @@ def cmpl_binary() -> list[str]:
     return ['--add-binary', f'{CMPL_DLL}{os.pathsep}.']
 
 
+def project_paths() -> list[str]:
+    """One unambiguous module namespace for both freezers and cached recipes."""
+    import buildcache
+    buildcache.source_modules(ROOT)
+    return [os.path.normpath(os.path.join(ROOT, p)) for p in buildcache.MODULE_FOLDERS]
+
+
 def generator_cmd() -> list[str]:
     """The PyInstaller command of the slim generator (tools/loadout_generator.py alone, onefile, console: the plugin starts
     it with CREATE_NO_WINDOW)."""
     cmd = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--console',
            '--name', GENERATOR_NAME, '--distpath', os.path.join(WORK, 'gen-dist'),
            '--workpath', os.path.join(WORK, 'gen-work'), '--specpath', WORK]
-    for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib')):
+    for p in project_paths()[:2]:
         cmd += ['--paths', p]
     for mod in GENERATOR_EXCLUDES:
         cmd += ['--exclude-module', mod]
@@ -174,6 +207,7 @@ def build_generator() -> str:
 def build_exe(name: str, generator: str | None = None) -> str:
     """name: the zip's name without .zip, bundled as plugin/build_info.json (the installer shows it, and its
     menu 3 compares it with the test site's newest build)."""
+    paths = project_paths()
     check_bundled()
     seps = os.pathsep
     os.makedirs(WORK, exist_ok=True)
@@ -188,18 +222,19 @@ def build_exe(name: str, generator: str | None = None) -> str:
     cmd = [sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile', '--console',
            '--name', EXE_NAME, '--distpath', os.path.join(WORK, 'dist'), '--workpath', os.path.join(WORK, 'work'),
            '--specpath', WORK]
-    for p in (os.path.join(ROOT, 'tools'), os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'testrange'),
-              os.path.join(ROOT, 'autoturret', 'tools')):
+    for p in paths:
         cmd += ['--paths', p]
-    for mod in ('call_weapons', 'edf41_objects', 'edf41_maps', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model',
-                'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'sk_map', 'sk_terrain', 'gen', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
-                'testhub', 'make_emc', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
+    for mod in ('call_weapons', 'edf41_objects', 'edf41_outfits', 'edf41_maps', 'edf41_menu_bg', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model', 'make_sedan',
+                'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'hkfile', 'hkshape', 'hk2014', 'shkt_check', 'vehicle_check', 'model_pieces', 'sk_map', 'sk_terrain', 'gen', 'catalog', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
+                'testhub', 'make_emc', 'make_ultimate', 'magic_circle', 'make_vulcan', 'make_bmpt', 'make_tracked_combat', 'tracked_combat_model', 'tracked_collision', 'frozen_collision_probe', 'vulcan_model', 'bmpt_model',
+                'edf41_materials', 'edf41materials', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'texfile_accel', 'model_workers', 'mdb',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'make_dreadnought', 'dreadnought_model', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'mdb', 'edf6native', 'crilayla',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]
-    for mod in ('matplotlib', 'pandas', 'tkinter'):  # Pillow builds procedural textures; numpy builds map seams
+    # Pillow builds procedural textures; numpy builds map seams; scipy is only the model prep tools' (tools/prep_*.py)
+    for mod in ('matplotlib', 'pandas', 'tkinter', 'scipy'):
         cmd += ['--exclude-module', mod]
     for name in plugin_data():
         cmd += ['--add-data', f'{os.path.join(PLUGINS, name)}{seps}plugin']
@@ -212,6 +247,8 @@ def build_exe(name: str, generator: str | None = None) -> str:
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "missions.json")}{seps}edf5campaign']
     # and EDF5's own thumbnails of those missions (make_edf5_campaign.THUMBS, next to the text)
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "thumbnails.rab")}{seps}edf5campaign']
+    # and every save layout the mission packs had (make_edf5_campaign.LAYOUTS: the saves' row maps)
+    cmd += ['--add-data', f'{os.path.join(ROOT, "edf5campaign", "pack_layouts.json")}{seps}edf5campaign']
     # the earlier games' weapon registries (ported_weapons.DATA is the bundle when frozen)
     # the converted models the EDF5 weapons need (ported_weapons.bundled), so the frozen installer needs no EDF5
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf5port", "assets")}{seps}edf5port/assets']
@@ -220,6 +257,9 @@ def build_exe(name: str, generator: str | None = None) -> str:
     # EDF4.1's objects converted ahead of time (tools/edf41_objects.py), so the installer needs no EDF4.1
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "objects")}{seps}edf41port/objects']
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "objects.json")}{seps}edf41port']
+    # EDF4.1's player soldiers as extra outfits, converted ahead of time (tools/edf41_outfits.py)
+    cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "outfits")}{seps}edf41port/outfits']
+    cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "outfits.json")}{seps}edf41port']
     # EDF4.1's story pack (tools/make_edf5_campaign.py PACK41): its scripts, titles and pictures
     cmd += ['--add-data', f'{os.path.join(ROOT, "edf41port", "missions")}{seps}edf41port/missions']
     for name in ('missions.json', 'missions_thumbnails.rab'):
@@ -256,9 +296,13 @@ def release_models() -> list[tuple[str, str]]:
         if folder is None:
             print(f'note: model {name} not found ({", ".join(obj_model.model_roots())}): the release goes without it')
             continue
-        for f in sorted(os.listdir(folder)):
-            if os.path.isfile(os.path.join(folder, f)):
-                out.append((os.path.join(folder, f), f'models/{name}/{f}'))
+        # Every file under it, its subfolders too: the cockpits' cut interiors are models/cockpits/parts/<vehicle>/ and
+        # textures/ (a first install without them fails); the other models are flat.
+        for dirpath, dirnames, files in os.walk(folder):
+            dirnames.sort()
+            for f in sorted(files):
+                rel = os.path.relpath(os.path.join(dirpath, f), folder).replace(os.sep, '/')
+                out.append((os.path.join(dirpath, f), f'models/{name}/{rel}'))
     return out
 
 
@@ -281,6 +325,7 @@ def main(argv: list[str]) -> int:
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED) as z:
         z.write(exe, EXE_NAME + '.exe')
         z.writestr('说明.txt', README.format(version=version).replace('\n', '\r\n').encode('utf-8-sig'))
+        z.writestr('THIRD-PARTY-NOTICES.txt', notices().replace('\n', '\r\n').encode('utf-8'))
         for src, arc in release_models():
             z.write(src, arc)
     shutil.copy2(exe, os.path.join(OUT, EXE_NAME + '.exe'))

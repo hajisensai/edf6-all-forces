@@ -500,9 +500,12 @@ constexpr float kClipPeak[kClipCount]={0.8f,0.8f,0.8f,0.8f,0.7f,0.6f,0.7f,0.98f,
                                        0.95f,0.6f,0.8f,0.9f,0.95f,0.9f,0.8f,0.8f,0.8f,0.95f,0.98f,0.8f,0.85f,0.8f,0.95f,0.98f,
                                        0.9f,0.8f,0.7f,0.7f,0.98f,0.95f,0.98f,0.95f,0.98f,0.95f,0.95f,0.9f,0.75f,0.7f,0.9f,0.9f,0.8f,
                                        0.8f,0.85f,0.8f,0.8f,0.85f,0.75f,0.7f,0.7f,0.6f,0.6f,0.9f};
+// The ultimate's (jetaudio.h UltClip): <dll name>_ult_<name>.wav, the player's recordings only.
+const wchar_t* const kUltClipName[kUltClipCount]={L"charge",L"circle",L"thunder",L"gather",L"beam",L"blast",L"shock"};
 constexpr int kLoops=96,kShots=64;   // the Sazabi's funnels fire six at once, a Katyusha ripples its rockets: room for them
 struct ClipPcm { std::vector<std::int16_t> pcm; WAVEFORMATEX format; };
 ClipPcm clips[kClipCount]{};       // written by MakeClips' thread before clipsReady (release), read after it (acquire)
+ClipPcm ultClips[kUltClipCount]{};  // the same; an empty one: no recording
 std::atomic<bool> clipsReady{false};
 bool clipsAsked=false;
 struct LoopVoice { IXAudio2SourceVoice* v; bool used; };
@@ -587,8 +590,17 @@ void MakeClipsNow() {
         else{rate=kRate;clips[c].pcm=Pcm16(MadeClip(c),kClipPeak[c]);}
         clips[c].format=Mono16(rate);
     }
+    int ult=0;
+    for(int c=0;c<kUltClipCount;++c) {
+        wchar_t path[MAX_PATH],suffix[64];
+        UINT32 rate=kRate;
+        swprintf_s(suffix,L"_ult_%ls.wav",kUltClipName[c]);
+        if(BesideDll(suffix,path) && ReadWav(path,ultClips[c].pcm,rate)){++ult;ultClips[c].format=Mono16(rate);}
+        else ultClips[c].pcm.clear();
+    }
     clipsReady.store(true,std::memory_order_release);
-    Log("SOUND vehicles: %d clip(s) made in the plugin, %d the player's",kClipCount-own,own);
+    Log("SOUND vehicles: %d clip(s) made in the plugin, %d the player's; the ultimate's: %d of %d recorded",kClipCount-own,own,
+        ult,kUltClipCount);
 }
 DWORD WINAPI MakeClips(void*) {
     __try { MakeClipsNow(); }
@@ -792,9 +804,18 @@ void CloseLoop(int i) noexcept {
     loops[i]=LoopVoice{};
 }
 
+void PlayPcm(const ClipPcm& c,const Heard& h) noexcept;
 void PlayOnce(int clip,const Heard& h) noexcept {
     if(clip<0 || clip>=kClipCount || kClipLoops[clip] || !ClipsReady())return;
-    const ClipPcm& c=clips[clip];
+    PlayPcm(clips[clip],h);
+}
+bool UltClipThere(int clip) noexcept {
+    return clip>=0 && clip<kUltClipCount && ClipsReady() && !ultClips[clip].pcm.empty();
+}
+void PlayUlt(int clip,const Heard& h) noexcept {
+    if(UltClipThere(clip))PlayPcm(ultClips[clip],h);
+}
+void PlayPcm(const ClipPcm& c,const Heard& h) noexcept {
     const UINT32 rate=c.format.nSamplesPerSec;
     // An idle voice already at this clip's rate, else any idle one (remade at it); none idle: dropped (a burst past kShots).
     ShotVoice* pick=nullptr;

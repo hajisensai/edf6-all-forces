@@ -1,6 +1,6 @@
 // The map's NPC commands (src/mapcmd_logic.h) checked offline: the screen and the ground (the centre's ray meets the
 // ground at the focus for every map view; a unit projected onto the screen and the ray under that screen point find it
-// again), the floor in a cave (src/map_floor.h: the roof seen from above passed through, a lower level kept), the selection (Ctrl + drag box, Shift adding; a click picking one, Shift toggling, empty ground clearing; the
+// again), the floor in a cave (src/map_floor.h: the roof seen from above passed through, a lower level kept), the selection (a drag's box, Shift adding; a click picking one, Shift toggling, empty ground clearing; the
 // Tab / pad X cycle through one unit at a time and ALL; units gone dropped), what each key press comes to (a command to
 // the selection, or the refusal: no unit, no point, online), and the guard formation (slots apart, the first on the point).
 //   cmake --build build --target map_cmd_check && build\map_cmd_check.exe      (exit code 1 on a failure)
@@ -350,6 +350,72 @@ int main() {
         Check(!mapfloor::Near(top,bottom,0.0f,Normals::own,empty,&h),"ground: none (off the world)");
     }
 
+    // --- The map view's eye over the fixed world only (map_floor.h Fixed / BodyOf; the user, 2026-10-17: with a sky
+    // platform up, the M view stayed over it and could not go below). Horizontal faces, each on a body of its own.
+    {
+        using mapfloor::Body;
+        Check(mapfloor::BodyOf(0x1u)==Body::fixed,"body flags: static");
+        Check(mapfloor::BodyOf(0x9u)==Body::fixed,"body flags: static, active bit too");
+        Check(mapfloor::BodyOf(0x2u)==Body::moving && mapfloor::BodyOf(0x6u)==Body::moving && mapfloor::BodyOf(0xAu)==Body::moving,
+              "body flags: dynamic / keyframed / active dynamic");
+        Check(mapfloor::BodyOf(0x0u)==Body::unknown && mapfloor::BodyOf(0x8u)==Body::unknown,"body flags: no live body");
+        struct Slab { float y; std::uint32_t body; };
+        struct World {
+            const Slab* slab; int n;
+            float operator()(const float* a,const float* b,float* hit,std::uint32_t* body) const {
+                float best=2.0f;int k=-1;
+                for(int i=0;i<n;++i) {
+                    const float dy=b[1]-a[1];
+                    if(std::fabs(dy)<1e-6f)continue;
+                    const float t=(slab[i].y-a[1])/dy;
+                    if(t>=0.0f && t<=1.0f && t<best){best=t;k=i;}
+                }
+                if(k<0)return -1.0f;
+                float len=0.0f;
+                for(int i=0;i<3;++i){hit[i]=a[i]+(b[i]-a[i])*best;len+=(b[i]-a[i])*(b[i]-a[i]);}
+                *body=slab[k].body;
+                return best*std::sqrt(len);
+            }
+        };
+        // Bodies 0 terrain, 1 a building's roof, 2 / 3 a sky platform's top and underside (an Earth Eater's part), 4 one
+        // of unknown kind.
+        const Body kinds[]={Body::fixed,Body::fixed,Body::moving,Body::moving,Body::unknown};
+        auto kind=[&](std::uint32_t b){ return b<5u ? kinds[b] : Body::unknown; };
+        const float top[3]={0.0f,4200.0f,0.0f},bottom[3]={0.0f,-3800.0f,0.0f};
+        float hit[3];
+        const Slab sky[]={{420.0f,2u},{380.0f,3u},{0.0f,0u}};
+        const World platform{sky,3};
+        float m=mapfloor::Fixed(top,bottom,platform,kind,hit);
+        Check(m>0.0f && Near(hit[1],0.0f,0.01f),"eye floor: through a sky platform's top and underside to the terrain",hit[1]);
+        Check(Near(m,4200.0f,0.5f),"eye floor: metres from the top of the ray",m);
+        // The eye kept kEyeClear (map.cpp: 40 m) over it: a view 250 m up under a platform at 380..420 m stays at 250.
+        const float clear=40.0f,eye=250.0f;
+        Check(eye>=hit[1]+clear,"eye under the platform is not lifted over it",eye,hit[1]+clear);
+        // What stays: a building's roof (fixed) holds the eye over it, so does a fixed slab over a cave (its rock).
+        const Slab roofed[]={{420.0f,2u},{380.0f,3u},{60.0f,1u},{0.0f,0u}};
+        const World town{roofed,4};
+        m=mapfloor::Fixed(top,bottom,town,kind,hit);
+        Check(m>0.0f && Near(hit[1],60.0f,0.01f),"eye floor: a building's roof under the platform still counts",hit[1]);
+        const Slab rock[]={{300.0f,0u},{12.0f,0u},{0.0f,0u}};
+        const World cave{rock,3};
+        m=mapfloor::Fixed(top,bottom,cave,kind,hit);
+        Check(m>0.0f && Near(hit[1],300.0f,0.01f),"eye floor: a cave's rock top, as before",hit[1]);
+        // A body of unknown kind (no body table: the old answer) stops the ray as before.
+        const Slab odd[]={{420.0f,4u},{0.0f,0u}};
+        const World unknown{odd,2};
+        m=mapfloor::Fixed(top,bottom,unknown,kind,hit);
+        Check(m>0.0f && Near(hit[1],420.0f,0.01f),"eye floor: an unknown body stops it, the old first hit",hit[1]);
+        // Only moving bodies under it: nothing found (map.cpp TopAt falls back to the focus's level).
+        const Slab only[]={{420.0f,2u},{380.0f,3u}};
+        const World air{only,2};
+        Check(mapfloor::Fixed(top,bottom,air,kind,hit)<0.0f,"eye floor: none when only moving bodies are on the ray");
+        // A stack of moving bodies longer than the hits looked at: none (not the last moving one).
+        Slab many[mapfloor::kMaxHitsDown+1];
+        for(int i=0;i<=mapfloor::kMaxHitsDown;++i)many[i]=Slab{1000.0f-10.0f*static_cast<float>(i),2u};
+        const World pile{many,mapfloor::kMaxHitsDown+1};
+        Check(mapfloor::Fixed(top,bottom,pile,kind,hit)<0.0f,"eye floor: gives up past kMaxHitsDown moving hits");
+    }
+
     // --- The RTS orders (the user, 2026-10-09): move and attack-move take the pointer's point as guard does; the right
     // button's order; what a move does over the soldiers' own fight (Pursuit) and that it ends as a guard of its point.
     {
@@ -364,9 +430,9 @@ int main() {
         Check(VehicleOrder(Order::move) && VehicleOrder(Order::attackMove) && VehicleCommandOf(Order::move)==Order::guard &&
               VehicleCommandOf(Order::attackMove)==Order::guard && VehicleCommandOf(Order::follow)==Order::follow,
               "a vehicle takes a move / attack-move as its post's guard");
-        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::dismountAll) && static_cast<int>(Order::recruit)==8 &&
+        Check(static_cast<int>(kLastOrder)==static_cast<int>(Order::formation) && static_cast<int>(Order::recruit)==8 &&
               static_cast<int>(Order::attackMove)==10 && static_cast<int>(Order::withdraw)==11 && static_cast<int>(Order::dismountAll)==12,
-              "the wire's order values: recruit stays 8, the new ones after it (move, attack-move, withdraw, dismount all)");
+              "the wire's order values: recruit stays 8, the new ones after it (move, attack-move, withdraw, dismount all, hold)");
         Check(!VehicleOrder(Order::withdraw) && !AirOrder(Order::withdraw) && !PointOrder(Order::withdraw),
               "withdraw: a squad's transport order, no vehicle's own and no point");
         // The command's priority over the soldier's own fight.
@@ -412,6 +478,113 @@ int main() {
         Check(mark[1]==20.0f,"an aircraft's on it");
         const float pinTop=mapcam::PinHeight(800.0f,mapcam::kStartPitch);
         Check(kBodyLift<pinTop*0.1f,"the body point far below where the pin's icon stood",pinTop);
+    }
+
+    // --- The RTS groups, the pad's held buttons, the Shift queue, a double click's kind, HOLD (2026-10-19) ---
+    {
+        Check(GroupKey(true,false,false)==GroupAct::assign && GroupKey(true,true,false)==GroupAct::append &&
+              GroupKey(false,true,true)==GroupAct::add && GroupKey(false,false,false)==GroupAct::recall &&
+              GroupKey(false,false,true)==GroupAct::centre,"Ctrl+N keeps, Ctrl+Shift+N adds to, Shift+N adds, N selects, NN centres");
+        Tap t{};
+        Check(!DoubleTap(t,1,1000) && DoubleTap(t,1,1200) && !DoubleTap(t,1,1300),"the same key twice in time: a double tap; a third starts over");
+        Check(!DoubleTap(t,2,5000) && !DoubleTap(t,3,5100) && !DoubleTap(t,3,5100+kDoubleTapMs+1),"another key, or too late: none");
+        Held h{};
+        Check(StepHeld(h,true,0,600)==TapHold::none && StepHeld(h,true,300,600)==TapHold::none && StepHeld(h,false,350,600)==TapHold::tap,
+              "a pad button let go before its hold: a tap on the release");
+        Check(StepHeld(h,true,1000,600)==TapHold::none && StepHeld(h,true,1600,600)==TapHold::hold && StepHeld(h,true,2000,600)==TapHold::none &&
+              StepHeld(h,false,2100,600)==TapHold::none,"held: its hold once, no tap after it");
+        Held swallowed{};swallowed.down=swallowed.fired=true;
+        Check(StepHeld(swallowed,false,10,600)==TapHold::none,"a press a side panel took: its release is no tap");
+        Check(PadGroup(0)==0 && PadGroup(3)==3 && PadGroup(4)==-1,"the D-pad: groups 1-4");
+        Check(SameKind("RANGER x4","RANGER x2") && !SameKind("RANGER x4","FENCER x4") && SameKind("TANK","TANK") &&
+              !SameKind("TANK","TANKS"),"a kind: the name up to its count");
+        Mark ms[3]={{reinterpret_cast<const void*>(1),10,10,true},{reinterpret_cast<const void*>(2),20,20,true},
+                    {reinterpret_cast<const void*>(3),30,30,false}};
+        const char* kinds[3]={"RANGER x4","RANGER x1","RANGER x3"};const int owners[3]={3,3,3};
+        Selection kindSel;
+        Check(SelectKind(kindSel,ms,kinds,owners,3,0,false)==2 && kindSel.n==2,"a double click: its kind on the screen (not one off it)");
+        // The queue.
+        const float there[3]={100,0,0},far2[3]={300,0,0},far3[3]={500,0,0},start[3]={0,0,0};
+        Waypoints w{};
+        const Command idle{Order::none,{0,0,0}},go{Order::move,{100,0,0}},second{Order::move,{300,0,0}},third{Order::attackMove,{500,0,0}};
+        Check(Enqueue(w,idle,start,20,go) && w.active && w.n==0,"Shift with nothing on the way: given at once");
+        Check(!Enqueue(w,go,start,20,second) && !Enqueue(w,go,start,20,third) && w.n==2,"Shift while on the way: queued");
+        Command next{};
+        Check(Advance(w,go,start,20,&next)==QueueStep::wait,"not there: waits");
+        Check(Advance(w,Command{Order::guard,{100,0,0}},there,20,&next)==QueueStep::give && next.at[0]==300 && w.n==1,
+              "there (its move turned guard on arrival): the next one");
+        Check(Advance(w,second,far2,20,&next)==QueueStep::give && next.order==Order::attackMove && w.n==0,"the last one");
+        Check(Advance(w,third,far3,20,&next)==QueueStep::done && !w.active,"the last reached: done");
+        Waypoints taken{};
+        Check(!Enqueue(taken,go,start,20,second) && taken.issued.at[0]==100,"Shift while a plain move is on its way: it stays first");
+        Check(Advance(taken,Command{Order::follow,{0,0,0}},start,20,&next)==QueueStep::dropped && !taken.active,
+              "another order now: the queue dropped");
+        Waypoints full{};
+        Enqueue(full,idle,start,20,go);
+        for(int i=0;i<kWaypointsMost+3;++i)Enqueue(full,go,start,20,second);
+        Check(full.n==kWaypointsMost,"a full queue keeps its first points");
+        Replace(full,Command{Order::follow,{0,0,0}});
+        Check(!full.active && !full.n,"a plain order replaces the queue");
+        // B3: a plain point order registers nothing (no unit in the table for an order with nothing after it); a later
+        // Shift still goes after it, found on its way by its order now.
+        Waypoints plain{};
+        Replace(plain,go);
+        Check(!plain.active && !plain.n,"a plain move: nothing registered");
+        Check(!Enqueue(plain,go,start,20,second) && plain.active && plain.issued.at[0]==100 && plain.n==1,
+              "Shift after a plain move: queued after it, from its order now");
+        // HOLD: an order of its own (wire value appended), a vehicle's guard of its spot, no point of the pointer's.
+        Check(static_cast<int>(Order::hold)==13 && PlaceOrder(Order::hold) && !PointOrder(Order::hold) &&
+              VehicleOrder(Order::hold) && VehicleCommandOf(Order::hold)==Order::guard,"HOLD: the vehicles' guard of their spot");
+        Press holdPress{};holdPress.hold=true;
+        const Step hs=Decide(2,holdPress,true,point,false);
+        Check(hs.issue && hs.cmd.order==Order::hold,"H needs no point under the pointer");
+        Check(RightClickOrder(1,false,true,true).order==Order::follow && RightClickOrder(1,true,true,true).order==Order::focus,
+              "the right button on the player: follow (an enemy over it still first)");
+        // The formation order (v7): appended (14), no point, no vehicle's; its parameter's two bytes.
+        Check(static_cast<int>(Order::formation)==14 && kLastOrder==Order::formation && !PointOrder(Order::formation) &&
+              !PlaceOrder(Order::formation) && !VehicleOrder(Order::formation) && !AirOrder(Order::formation),
+              "FORMATION: appended, no point, a squad's alone");
+        const std::uint32_t cycle=FormationParam(-2,7),set=FormationParam(3,-1),march=FormationParam(-1,5);
+        Check(FormationCycles(cycle) && FormationGuardShape(cycle)==-1 && FormationMarchShape(cycle)==7 && FormationParamValid(cycle),
+              "T: the defence cycled, the march set");
+        Check(!FormationCycles(set) && FormationGuardShape(set)==3 && FormationMarchShape(set)==-1 && FormationParamValid(set),
+              "a defence from the menu");
+        Check(FormationGuardShape(march)==-1 && FormationMarchShape(march)==5 && FormationParamValid(march),"a march from the menu");
+        Check(!FormationParamValid(0) && !FormationParamValid(0x10000u|set) && !FormationParamValid(0xFF00u),
+              "nothing said, a third byte, or a march 'cycled': not a formation order");
+        Check(Command{}.param==0 && Command{Order::guard,{1,2,3}}.param==0,"every other order's param is 0");
+        // UnitRef (B2): a squad found again through any member alive; its top's identity written back.
+        const UnitKey top{reinterpret_cast<const void*>(0x100),reinterpret_cast<const void*>(0x101)},
+                      m1{reinterpret_cast<const void*>(0x200),reinterpret_cast<const void*>(0x201)},
+                      m2{reinterpret_cast<const void*>(0x300),reinterpret_cast<const void*>(0x301)},
+                      other{reinterpret_cast<const void*>(0x400),reinterpret_cast<const void*>(0x401)};
+        UnitRef ref{};const UnitKey ms2[2]={m1,m2};Remember(ref,top,ms2,2);
+        Check(ref.n==2 && Names(ref,top) && Names(ref,m2) && !Names(ref,other),"a squad's ref: its top and members");
+        const UnitKey listed[2]={other,top};
+        struct World { bool topAlive,m1Alive,m2Alive; UnitKey m2Top; } wd{true,true,true,top};
+        const auto topOf=[&](const UnitKey& k,UnitKey* t){
+            if(SameKey(k,top)){if(!wd.topAlive)return false;*t=top;return true;}
+            if(SameKey(k,m1)){if(!wd.m1Alive)return false;*t=top;return true;}
+            if(SameKey(k,m2)){if(!wd.m2Alive)return false;*t=wd.m2Top;return true;}
+            if(SameKey(k,other)){*t=other;return true;}
+            return false;
+        };
+        bool alive=false;
+        Check(ResolveUnit(ref,listed,2,topOf,&alive)==1 && alive,"its top listed: that one");
+        wd.topAlive=false;wd.m1Alive=false;wd.m2Top=other;
+        const UnitKey listedNew[1]={other};
+        Check(ResolveUnit(ref,listedNew,1,topOf,&alive)==0 && alive && SameKey(ref.top,other),
+              "its top dead: the top of its living member (a guest's view: no hand-over record)");
+        wd.m2Alive=false;UnitRef lost{};lost.top=m1;lost.n=1;lost.member[0]=m2;
+        Check(ResolveUnit(lost,listedNew,1,topOf,&alive)==-1 && !alive,"none of it alive: gone");
+        wd.m2Alive=true;wd.m2Top=m2;UnitRef apart{};apart.top=m1;apart.n=1;apart.member[0]=m2;
+        Check(ResolveUnit(apart,listedNew,1,topOf,&alive)==-1 && alive,"alive but not listed (out of the update a while): kept");
+        UnitKey many[kUnitMembers+4];
+        for(int i=0;i<kUnitMembers+4;++i)many[i]=UnitKey{reinterpret_cast<const void*>(static_cast<std::uintptr_t>(0x1000+16*i)),nullptr};
+        UnitRef big{};Remember(big,top,many,kUnitMembers+4);
+        Check(big.n==kUnitMembers,"members bounded (kUnitMembers)");
+        UnitRef grown=ref;const UnitKey now1[1]={m2};Remember(grown,top,now1,1);
+        Check(grown.n==2 && SameKey(grown.member[0],m2) && Names(grown,m1),"members taken in again: the ones now first, the old kept");
     }
 
     std::printf("map_cmd_check: %d cases, %d failures\n",cases,failures);

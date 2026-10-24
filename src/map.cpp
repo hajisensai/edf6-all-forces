@@ -27,6 +27,8 @@
 //    of record [human+0xD40], before its /24); a pad is read through XInput (the hold clears the game's own pad input).
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "enemy_control.h"
+#include "pvp.h"
 #include "firstperson.h"
 #include "transport.h"
 #include "airdrop.h"
@@ -128,6 +130,7 @@ Pose pose{};
 MapReadout readout{};
 ULONGLONG readoutAt=0;
 SRWLOCK lock=SRWLOCK_INIT;
+ObjRef inputOwner{}; // published identity only, under lock; retained through closing-key drain
 std::atomic<bool> holds{false};
 mapcam::CameraSession cameraSession;
 std::atomic<int> wheel{0};   // WM_MOUSEWHEEL's delta since the game thread last took it
@@ -260,6 +263,7 @@ const float* PosOf(const void* o) noexcept { return reinterpret_cast<const float
 
 // What `human` stands for on the map: the vehicle they ride (alive), else themselves.
 const unsigned char* Body(const unsigned char* human) noexcept {
+    if(const auto controlled=EnemyControlBodyForMap(human))return controlled;
     const auto ctrl=At<const unsigned char*>(human,kHumanVehicleCtrl);
     if(!ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,edf::kCtrlUses)==0)return human;
     const auto v=At<const unsigned char*>(human,kHumanVehicle);
@@ -279,11 +283,13 @@ mapcam::Bounds ViewBounds(const float* me) noexcept {
     const float out=a.ground ? area::kVoidMargin : 0.0f;
     return mapcam::Around(mapcam::Bounds{{a.lo[0]-out,a.lo[1]-out},{a.hi[0]+out,a.hi[1]+out}},me);
 }
-// The top of everything under (x, z) (the camera stays over it, a cave's roof too), else `fallback`.
+// The top of the fixed world under (x, z) (the camera stays over it: a ridge, a building's roof, a bridge, a cave's roof
+// too), else `fallback`. Not the moving bodies on the map layers (heli.h MapFixedRay; the user, 2026-10-17: "有天空的
+// 那种平台怪的时候，按m视角只能在平台上面，下不去"): an Earth Eater's parts over the field held the eye 40 m over them.
 float TopAt(float x,float z,float fallback) noexcept {
     const float top[3]={x,fallback+4000.0f,z},bottom[3]={x,fallback-4000.0f,z};
     float hit[3];
-    return MapRay(top,bottom,hit)>=0.0f && std::isfinite(hit[1]) ? hit[1] : fallback;
+    return MapFixedRay(top,bottom,hit)>=0.0f && std::isfinite(hit[1]) ? hit[1] : fallback;
 }
 
 // --- The marks ---
@@ -496,6 +502,7 @@ void Publish(const Game& g,const unsigned char* human,const float* eye,const flo
     AcquireSRWLockExclusive(&lock);
     pose=Pose{g.open,human,{eye[0],eye[1],eye[2]},{look[0],look[1],look[2]},GetTickCount64()};
     MapReadout& r=readout;
+    r.ownerHumanKey=reinterpret_cast<std::uintptr_t>(human);
     r.pad=g.pad;r.follow=g.follow;
     std::memcpy(r.focus,g.view.focus,12);r.yaw=g.view.yaw;r.pitch=g.view.pitch;r.height=g.view.height;
     std::memcpy(r.me,PosOf(body),12);
@@ -531,13 +538,15 @@ void Open(const unsigned char* human) noexcept {
     const float* p=PosOf(body);
     game.view.focus[0]=p[0];game.view.focus[2]=p[2];game.view.focus[1]=GroundAt(p[0],p[2],p[1]);
     float eye[3],dir[3];
-    if(CameraRay(eye,dir) && dir[0]*dir[0]+dir[2]*dir[2]>1e-4f)game.view.yaw=std::atan2(dir[0],dir[2]);
+    if(CameraRayOf(human,eye,dir) && dir[0]*dir[0]+dir[2]*dir[2]>1e-4f)game.view.yaw=std::atan2(dir[0],dir[2]);
     else {
         const float* m=reinterpret_cast<const float*>(body+kMatrix);
         game.view.yaw=std::atan2(m[8],m[10]);
     }
     game.view.pitch=mapcam::kStartPitch;game.view.height=mapcam::kStartHeight;
     game.open=true;game.follow=true;game.gatherAt=0;game.loggedMouse=false;
+    const ObjRef owner=ObjRef::Of(human);
+    AcquireSRWLockExclusive(&lock);inputOwner=owner;ReleaseSRWLockExclusive(&lock);
     holds.store(true);
     Subclass();
     wheel.store(0);
@@ -570,8 +579,10 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         return;
     }
     if(front) {
-        ahead=static_cast<float>((Down('W') || Down(VK_UP))-(Down('S') || Down(VK_DOWN)));
-        right=static_cast<float>((Down('D') || Down(VK_RIGHT))-(Down('A') || Down(VK_LEFT)));
+        // With Ctrl held the letters are the commands' (Ctrl+A every unit, mapcmd.cpp): the arrows still pan.
+        const bool letters=!Down(VK_CONTROL);
+        ahead=static_cast<float>(((letters && Down('W')) || Down(VK_UP))-((letters && Down('S')) || Down(VK_DOWN)));
+        right=static_cast<float>(((letters && Down('D')) || Down(VK_RIGHT))-((letters && Down('A')) || Down(VK_LEFT)));
         const bool turnRight=Down('E') && !(eat && Cfg().npcMarkKey=='E'),turnLeft=Down('Q') && !(eat && Cfg().npcMarkKey=='Q');
         turn=static_cast<float>(static_cast<int>(turnRight)-static_cast<int>(turnLeft))*mapcam::kTurnRate*dt;
         tilt=static_cast<float>(Down('R')-Down('F'))*mapcam::kTurnRate*0.5f*dt;
@@ -580,13 +591,15 @@ void Steer(const unsigned char* human,float dt,bool front,const XINPUT_STATE* pa
         float dx=0.0f,dy=0.0f;
         if(MouseDelta(human,&dx,&dy) && (dx!=0.0f || dy!=0.0f)) {
             if(!game.loggedMouse && Cfg().debug){game.loggedMouse=true;Log("MAP mouse delta (%.1f,%.1f) a frame",dx,dy);}
-            // Ctrl + left drag is the NPC commands' selection box (mapcmd.cpp), not a pan.
-            if(Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured()){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
+            // A left drag that is the NPC commands' selection box (mapcmd.cpp: whenever there is a unit to box, or Ctrl
+            // held) is not a pan; the middle button's drag always is (RTS).
+            if(Down(VK_MBUTTON) || (Down(VK_LBUTTON) && !Down(VK_CONTROL) && !MapCommandBoxing() && !MapCommandPointerCaptured())){mapcam::Drag(v,dx,dy);game.follow=false;keys=true;}
             else if(Down(VK_RBUTTON) && !MapCommandPointerCaptured()){mapcam::Turn(v,dx*mapcam::kDragTurn,dy*mapcam::kDragTurn);keys=true;}
         }
     }
     const int notches=wheel.exchange(0);
-    if(notches){mapcam::Zoom(v,static_cast<float>(notches)/static_cast<float>(WHEEL_DELTA));keys=true;}
+    // Over the 「摆放」 list the wheel scrolls it (mapcmd.cpp), elsewhere it zooms.
+    if(notches && !MapCommandWheel(notches)){mapcam::Zoom(v,static_cast<float>(notches)/static_cast<float>(WHEEL_DELTA));keys=true;}
     if(pad) {
         const XINPUT_GAMEPAD& p=pad->Gamepad;
         const float lx=Stick(p.sThumbLX),ly=Stick(p.sThumbLY),rx=Stick(p.sThumbRX),ry=Stick(p.sThumbRY);
@@ -611,8 +624,10 @@ Keys ReadToggles(bool front,const XINPUT_STATE* pad) noexcept {
     if(pad) {
         const WORD b=pad->Gamepad.wButtons;
         k.padMap=c.mapButton>0 && (b&static_cast<WORD>(c.mapButton))==static_cast<WORD>(c.mapButton);
-        k.padClose=(b&XINPUT_GAMEPAD_B)!=0;
-        k.padCentre=(b&XINPUT_GAMEPAD_A)!=0;
+        // The test range's 「摆放」 panel open (mapcmd.cpp): its A places, its B shuts it; the map's own wait.
+        const bool place=MapPlaceHoldsPad() || (b&(XINPUT_GAMEPAD_RIGHT_THUMB|XINPUT_GAMEPAD_LEFT_THUMB))!=0;
+        k.padClose=(b&XINPUT_GAMEPAD_B)!=0 && !place;
+        k.padCentre=(b&XINPUT_GAMEPAD_A)!=0 && !place;
     }
     return k;
 }
@@ -721,14 +736,21 @@ TvInput TvRead(const unsigned char* human) noexcept {
 bool __fastcall MapHumanFrame(unsigned char* human) noexcept {
     __try {
         SupportActorFrame(human);
+        // The Shift-queued points of this machine's units (mapcmd.cpp): from every soldier's pre-update, once a frame,
+        // so they go on with every map shut, the player dead or watching (a vehicle's input ticks it too: crew.cpp).
+        MapCommandQueueTick();
         if(!human || !human[kHumanPlayer] || !IsPlayer(human))return false;
+        FrameTick();       // shared scene-clock anchor, including missions with no surviving vehicle
         TransportTick();   // the squads' transports (transport.cpp), after the deliveries that start them
         AirdropTick();     // the transport planes' containers (airdrop.cpp): held under them, let go over their points
         const bool open=Frame(human);
         NpcMarkFrame(human,open && game.open);
         DebugSpawnFrame(human);   // the debug spawn tool (off by default: returns before reading a key)
+        Edf41Mother401DevTick();   // development only (Edf41Mother401Dev bit 32768); once a frame (the tick keeps its own frame check)
         InfantryScopeFrame(human);   // a scoped weapon open: the real optic's cue (infantryscope.cpp)
-        return TvFrame(human,open && game.open,TvRead(human)) || open;
+        const bool tv=TvFrame(human,open && game.open,TvRead(human));
+        const bool enemy=EnemyControlSuppressHuman(human);
+        return tv || open || enemy;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -819,6 +841,7 @@ void __fastcall CamStepHook(void* cam,void* step) {
     nextCamStep(cam,step);
     __try { Camera(static_cast<unsigned char*>(cam),generation); }
     __except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};cameraSession.Publish(generation,false);}
+    FirstPersonCameraOverride(cam,camSide.shown && camSide.cam==cam && cameraSession.Current(generation));
     StockHud(static_cast<unsigned char*>(cam),generation);
 }
 
@@ -927,7 +950,7 @@ void ResetMap() noexcept {
     cellsUsed=0;
     AcquireSRWLockExclusive(&lock);
     cameraSession.Reset();   // the camera hook drops its old matrix on its own thread, before restoring it
-    pose=Pose{};readoutAt=0;
+    pose=Pose{};inputOwner=ObjRef{};readoutAt=0;
     ReleaseSRWLockExclusive(&lock);
 }
 
@@ -940,6 +963,14 @@ bool PlayerMap(MapReadout* out) noexcept {
 }
 
 bool MapHoldsKeys() noexcept { return holds.load(std::memory_order_relaxed) || TvHoldsKeys(); }
+bool MapHoldsHumanKeys(const unsigned char* human) noexcept {
+    if(!human)return false;
+    AcquireSRWLockShared(&lock);
+    const ObjRef owner=inputOwner;const bool held=holds.load(std::memory_order_relaxed);
+    ReleaseSRWLockShared(&lock);
+    __try {return (held && owner.Is(human)) || TvHoldsHumanKeys(human);}
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
 bool MapOwnsView() noexcept { return cameraSession.Owns(); }
 bool MapHidesStockHud(const void* camera) noexcept {
     AcquireSRWLockShared(&hudLock);
@@ -963,6 +994,12 @@ bool MapPadButtons(std::uint16_t* buttons) noexcept {
     XINPUT_STATE s{};
     if(!PadState(&s))return false;
     *buttons=s.Gamepad.wButtons;
+    return true;
+}
+bool MapPadState(std::uint16_t* buttons,std::uint8_t* leftTrigger,std::uint8_t* rightTrigger) noexcept {
+    XINPUT_STATE s{};
+    if(!PadState(&s))return false;
+    *buttons=s.Gamepad.wButtons;*leftTrigger=s.Gamepad.bLeftTrigger;*rightTrigger=s.Gamepad.bRightTrigger;
     return true;
 }
 }  // namespace crew

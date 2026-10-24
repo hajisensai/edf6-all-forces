@@ -105,6 +105,140 @@ def tube(part: Part, path, radii, skins, segs: int = 12, squash: float = 1.0, ca
                 part.tris.append((m, row[i], row[(i + 1) % len(row)]))
 
 
+# ------------------------------------------------------------------------------------------ wound primitives
+# Solids wound out of themselves (cross(b - a, c - a) along the face's normal, out of the solid: the stock meshes'
+# winding), once the sidecar's and the tracked vehicles' own (pylib/sidecar_model.py, pylib/tracked_combat_model.py),
+# moved here as they were (their models are byte for byte the same).
+
+Vec3 = tuple[float, float, float]
+
+
+def flip_outward(part: Part, start: int, ref, outward: bool = True) -> None:  # noqa: ANN001 - point -> point
+    """Turn the triangles added since `start` so that most face away from (outward) or toward `ref(centroid)`: the
+    winding the stock meshes use (cross(b - a, c - a) along the face's normal, out of the solid)."""
+    P = np.array(part.pos)
+    T = np.array(part.tris[start:], dtype=np.int64)
+    if not len(T):
+        return
+    a, b, c = P[T[:, 0]], P[T[:, 1]], P[T[:, 2]]
+    n = np.cross(b - a, c - a)
+    cen = (a + b + c) / 3.0
+    away = cen - np.array([ref(x) for x in cen])
+    score = float(np.sign(np.einsum('ij,ij->i', n, away)).sum())
+    if (score < 0) == outward:
+        part.tris[start:] = [(t[0], t[2], t[1]) for t in part.tris[start:]]
+
+
+def facing(part: Part, tris: list[int], want: np.ndarray) -> None:
+    """Turn each of the triangles `tris` (indices into part.tris) so that its normal goes along `want`."""
+    for i in tris:
+        a, b, c = (np.asarray(part.pos[k]) for k in part.tris[i])
+        if float(np.dot(np.cross(b - a, c - a), want)) < 0.0:
+            t = part.tris[i]
+            part.tris[i] = (t[0], t[2], t[1])
+
+
+def cap_ends(part: Part, start: int, centres: tuple[int, int], ends: tuple[np.ndarray, np.ndarray]) -> None:
+    """The end caps among the triangles since `start` (those fanned round the cap centres `centres`) turned to face
+    out of the ends: along `ends` (the way out of the first end, the way out of the last)."""
+    for m, want in zip(centres, ends):
+        facing(part, [i for i in range(start, len(part.tris)) if m in part.tris[i]], want)
+
+
+def path_ref(path: list[Vec3]):  # noqa: ANN202
+    """The nearest point of the polyline `path`."""
+    pts = [np.array(p, dtype=np.float64) for p in path]
+
+    def ref(c: np.ndarray) -> np.ndarray:
+        best, bd = pts[0], math.inf
+        for a, b in zip(pts, pts[1:]):
+            d = b - a
+            t = min(1.0, max(0.0, float(np.dot(c - a, d) / max(np.dot(d, d), 1e-12))))
+            q = a + d * t
+            dd = float(np.dot(c - q, c - q))
+            if dd < bd:
+                best, bd = q, dd
+        return best
+    return ref
+
+
+def flat_hexahedron(part: Part, corners: list[Vec3], skin: Skin) -> None:
+    """A six-faced solid of 8 corners (0-3 the bottom ring, 4-7 the top ring over them), each face flat (its own 4
+    vertices), wound out of the solid."""
+    C = [np.array(p, dtype=np.float64) for p in corners]
+    centre = sum(C) / 8.0
+    for f in ((0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)):
+        start = len(part.tris)
+        q = [part.add(C[i], skin, uv) for i, uv in zip(f, ((0, 0), (1, 0), (1, 1), (0, 1)))]
+        part.tris += [(q[0], q[1], q[2]), (q[0], q[2], q[3])]
+        flip_outward(part, start, lambda _c: centre)
+
+
+def closed_tube(part: Part, path: list[Vec3], radius: float, skin: Skin, segs: int = 10) -> None:
+    """tube (capped) along `path`, wound out of it, its caps facing out of its ends."""
+    start = len(part.tris)
+    tube(part, path, [radius] * len(path), [skin] * len(path), segs)
+    flip_outward(part, start, path_ref(path))
+    P = [np.array(p, dtype=np.float64) for p in path]
+    cap_ends(part, start, (len(part.pos) - 2, len(part.pos) - 1), (P[0] - P[1], P[-1] - P[-2]))
+
+
+def hard_polygon(part: Part, points, outward, skin: Skin) -> None:
+    """A planar convex polygon, isolated vertices for hard armour edges."""
+    start = len(part.pos)
+    centre = np.mean(points, axis=0)
+    normal = np.cross(np.asarray(points[1]) - points[0], np.asarray(points[2]) - points[0])
+    order = list(range(len(points)))
+    if np.dot(normal, outward) < 0:
+        order.reverse()
+    for k in order:
+        p = points[k]
+        part.add(p, skin, (0.5 + 0.1 * (p[0] - centre[0]), 0.5 + 0.1 * (p[2] - centre[2])))
+    part.tris.extend((start, start + i, start + i + 1) for i in range(1, len(points) - 1))
+
+
+def hard_hexahedron(part: Part, lower, upper, skin: Skin) -> None:
+    """Four corners at each height, ordered cyclically in XZ; outward hard faces."""
+    points = list(lower) + list(upper)
+    centre = np.mean(points, axis=0)
+    faces = ((0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7))
+    for face in faces:
+        p = [np.asarray(points[k], dtype=float) for k in face]
+        hard_polygon(part, p, np.mean(p, axis=0) - centre, skin)
+
+
+def hard_box(part: Part, centre, half, skin: Skin) -> None:
+    x, y, z = centre
+    a, b, c = half
+    hard_hexahedron(part, [(x-a, y-b, z-c), (x+a, y-b, z-c), (x+a, y-b, z+c), (x-a, y-b, z+c)],
+                    [(x-a, y+b, z-c), (x+a, y+b, z-c), (x+a, y+b, z+c), (x-a, y+b, z+c)], skin)
+
+
+def hard_cylinder(part: Part, start, end, radius: float, skin: Skin, segments: int = 16,
+                  end_radius: float | None = None, cap: bool = True) -> None:
+    """Tube with correct outward winding and flat caps; arbitrary axis."""
+    a, b = np.asarray(start, dtype=float), np.asarray(end, dtype=float)
+    axis = b - a
+    if not np.linalg.norm(axis) > 1e-6:
+        raise ValueError('zero-length cylinder')
+    axis /= np.linalg.norm(axis)
+    ref = np.array((0., 1., 0.)) if abs(axis[1]) < .9 else np.array((1., 0., 0.))
+    u = np.cross(axis, ref)
+    u /= np.linalg.norm(u)
+    v = np.cross(axis, u)
+    r1 = radius if end_radius is None else end_radius
+    rows = []
+    for centre, r, t in ((a, radius, 0.), (b, r1, 1.)):
+        rows.append([part.add(centre + r * (u*math.cos(k*math.tau/segments) + v*math.sin(k*math.tau/segments)),
+                              skin, (k / segments, t)) for k in range(segments)])
+    for k in range(segments):
+        j = (k+1) % segments
+        part.tris.extend(((rows[0][k], rows[0][j], rows[1][j]), (rows[0][k], rows[1][j], rows[1][k])))
+    if cap:
+        for centre, row, wanted in ((a, rows[0], -axis), (b, rows[1], axis)):
+            hard_polygon(part, [part.pos[i] for i in row], wanted, skin)
+
+
 PATCH, MIN_LIGHT, CANDIDATES = 0.03, 45.0, 600
 
 

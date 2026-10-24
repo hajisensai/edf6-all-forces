@@ -81,6 +81,11 @@ command_net::Message Dispatch(const command_net::Message& request) {
 }
 namespace crew {
 void SupportNetTick() noexcept {}
+// mapcmd.cpp's authority entry (its queue: tools/map_command_runtime_check.cpp): a plain order given by the executor.
+NpcCommandResult MapCommandAuthority(const ObjRef& unit,const mapcmd::Command& c,const ObjRef& requester,const ObjRef& focus,
+                                     bool,MapCommandGive give,std::uint32_t) noexcept {
+    return give(unit,c,requester,focus);
+}
 bool MapGroundNear(float,float,float,float* out,bool) noexcept { *out=0;return rpc_fixture::projectionOk; }
 bool SupportCommandRequesterMatches(void* puid,const char* sender) noexcept {
     return puid==rpc_fixture::users[1] && !std::strcmp(sender,rpc_fixture::authClient);
@@ -133,6 +138,25 @@ int main() {
     completeRide=true;Board(*soldier,human,Pos(human),now);
     Check(rides==1 && announcedBoards==1 && At<void*>(seats,kSeatRider)==other && At<void*>(seats+edf::kSeatStride,kSeatRider)==human,
         "accepted remote board order walks through real Board/native Ride and seat announcement");
+    // A guest's T on its own recruited squad (command protocol v7 Order::formation): the host runs that squad, so the
+    // march round the guest is kept here, apart from the host player's own (2026-10-20: no "unsupported" any more).
+    Setup();Put<void*>(human,kLeader,other);SeeSquad(human,human,0,npc::Control::recruited,now);
+    const auto hostShape=MarchShape();
+    auto marchReq=Request(Order::formation);marchReq.request.command.at[0]=0;
+    marchReq.request.command.param=mapcmd::FormationParam(-1,static_cast<int>(npc::formation::Shape::wedge));
+    reply=Dispatch(marchReq);
+    const March* guestMarch=MarchOf(other,false);
+    Check(reply.results[0].reason==0 && guestMarch && guestMarch->shape==npc::formation::Shape::wedge && MarchShape()==hostShape,
+          "a guest's march formation is set for its own squads on the host, the host player's march untouched");
+    {   // its roster: the guest's squad, round the guest, not in the host player's march
+        March* const gm=MarchOf(other,false);++frame;world.frame=frame;
+        MarchRoster(now,*gm,other);MarchRoster(now);
+        Check(gm->n>=1 && gm->member[0]==human && !march.n,"the guest's march takes its own squad's soldiers; the host's has none of them");
+    }
+    rpc_fixture::wall+=1000;marchReq.sequence=2;marchReq.request.command.param=mapcmd::FormationParam(-1,200);
+    reply=Dispatch(marchReq);
+    Check(reply.rpc==command_net::Rpc::none && reply.results[0].reason==static_cast<unsigned>(NpcCommandReason::unsupported),
+          "no such march: refused");
     const auto vehicleRequest=[&] {
         Setup();tankCommands=0;drivableVehicle=true;
         SetActor(3,vehicle,false,0);Put<void*>(vehicle,0,image+0x1000);

@@ -278,7 +278,7 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
   （`ownGun`、预瞄圈模式、有解）时，座位第一件武器（瞄准轴转的那门）的准星 / 弹着圈不画，只剩预瞄圈和炮膛十字。
 - 钻头战车：`DrillPanel` 只在这套 HUD 不画时出现；HUD 开着时转速 / 热量是块里的一行，过热进告警行。
 - Nix：`PlayerNixTorso`（`nix.cpp`）的腿朝向 / 躯干方向代替车头 / 炮口画进圆环，扭腰极限画成环外两个刻度，信息行加 TWIST。
-- 红线：`StockVehicleHud=1` 且 HUD 能画（`HudReady`）时，玩家座位的原版瞄准线按 `docs/aim-line-re.md` 第 7 条隐藏；原版准星（屏幕中心的图标）没有动。
+- 红线：`StockVehicleHud=1` 且 HUD 能画（`HudReady`）时，玩家座位的原版瞄准线按 `docs/aim-line-re.md` 第 7 条隐藏；原版准星（屏幕中心的图标）没有动——例外：插件画出车载瞄具视场（放大，或第一人称 1 倍的炮手瞄准镜）时，看瞄具那名士兵的原版准星不画（2026-10-21，`src/scope_hold.h`，见 `docs/feedback-2026-10-21-bmpt-vulcan-fp.md`）。
 
 ### 7.5 需实机确认
 
@@ -350,6 +350,21 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 插件 HUD 代显（2026-10-09 追加，用户：「让护甲显示在咱们的hud不就行了」）：仪表自己的数据源是拥有者士兵 `+0x2F8` / `+0x2F4`（更新 `0x827126` 求比值写 `+0xAEC`；布局 `0x826A83` / `0x826A9C` 取整显示），载具耐久是载具 `+0x2F8` / `+0x2F4`（布局 `0x8277B0`），低护甲：`0x827723` 比值 ≤ `0x1765A14` 处的 0.25 时置 `+0xB01`（H）。`ArmorHook` 只在按住隐藏时把这几个数发布给 `hud.cpp`（`armorhud::Publish`，`PlayerStockArmor`）：`StockBlock` 车体条下一行 ARMOR；没有车体耐久行的飞行 HUD / 沙扎比在左上画 `ArmorPanel`（HULL + ARMOR）。只对插件 HUD 的玩家（`PlayerHuman`）隐藏与代显。
 
 **需实机确认**：坐车时左上角护甲 + 耐久条整块消失、下车恢复；`HideStockGauges=0` 时保留；地图打开 / 过场（镜头 `+0x200`）与本隐藏叠加后关地图仍按坐车状态。
+
+### 9.3.1 操控敌人时：玩家的护甲条和武器栏换成受控敌人的 HUD（2026-10-19）
+
+用户：「操控怪物的时候玩家hud没有改成怪物的hud，记得改一下」。
+
+| 项 | 内容 | 可信度 |
+|---|---|---|
+| 武器栏的根节点 | `HUiHudWeapon` 的构造 `0x82D070`：`0x82D0B9` 写虚表 `0x17FD150`，`0x82D372` 调 HUiHud 基类 `0x816080`（按名字 `Guage_Root` 找节点，存到 `+0x788`，控制块 `+0x790`）。Root.cpk 里 `UI/LYT_HUDWEAPONGUAGEL / R / SUBWEAPONGUAGER / ENERGYGUAGE_R / VEHICLE` 这几个武器栏布局都有 `Guage_Root` | H |
+| 隐藏方式 | 和护甲条一样：在已经串接的更新槽 1（`UpdateHook` / `ArmorHook`）跑完之后，用 `stock_armor_hud.h` 的记录把根节点 `+0x1F8` 压成 0；租约结束那一帧写回原值（原本隐藏的仍然隐藏）。不跳过任何绘制调用 | H（代码）/ 未实机 |
+| 谁算「在操控」 | `EnemyControlReplacesPlayerHud`：这个仪表的 owner（`+0x778`）或它转成的 SoldierBase，在已发布的会话中有 `phase == active` 的租约。会话在等待、恢复期间照常显示玩家自己的 HUD | H（代码） |
+| 不隐藏的 | 雷达（已经跟随受控体）、伤害标记、`CenterReloadIcon`（在 `Guage_Root` 之外，只在换弹时出现） | 设计 |
+| 准星（2026-10-21 起隐藏） | 用户：「操控怪物的时候没隐藏武器准星」。`HudPlayer_CrossHair` 第 3 槽 `0x8039F0` 已由 `infantryscope.cpp CrossDrawHook` 串接；它的士兵 `+0x580` 满足 `EnemyControlReplacesPlayerHud` 时直接返回（与原函数自己的不画路径一样），租约结束下一帧照常画。守卫 `tests/enemy_control_crosshair_guard.py` | H（代码）/ 未实机 |
+| 替代显示 | `hud.cpp EnemyControlHud`：左上角是名字、HP 条和数值、阵营、原角色保护说明；右下角是「键 / 手柄 → 攻击」，每行带原生状态（冷却、不可用、进行中），放不下的进 M 卡 | 设计 |
+
+签名 `kWeaponRootSigs`（任何一项不符都只关掉这一项）：`0x82D0B9`、`0x82D372`、`0x8160C7`、`0x816101`、`0x7E999C`。离线检查：`tools/armor_hud_check.cpp EnemyWeaponGauges`（五个仪表同时压住，再逐个按原值还原），以及 `tests/enemy_hud_layout_test.cpp HudCase`（四种语言、六种视口）。
 
 ### 9.4 油箱（FuelTank）
 

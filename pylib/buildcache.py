@@ -20,16 +20,37 @@ from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_builds.json'
 RECIPES = 'asset_recipes.json'
-GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'sidecar', 'bigmap', 'sazabi', 'proteus', 'optics')
-MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi'}
+GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'ultimate', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'bigmap', 'sazabi', 'dreadnought', 'proteus', 'optics')
+MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi', 'dreadnought': 'dreadnought', 'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt'}
 # The groups whose models carry first-person cockpits (pylib/cockpits.py): the cockpits' asset folder is an input.
-COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sazabi', 'optics')
+COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'sazabi', 'optics')
+MODULE_FOLDERS = ('tools', 'pylib', 'testrange', 'autoturret/tools')
+
+
+def source_modules(root: str) -> dict[str, Path]:
+    """Unique local modules from the runtime/frozen search set; reject Windows stem aliases.
+
+    Choosing either duplicate silently would fingerprint or freeze a different implementation from the one
+    normal source imports execute. CLI wrappers must have their own module names.
+    """
+    base = Path(root).resolve()
+    modules: dict[str, Path] = {}
+    names: dict[str, Path] = {}
+    for folder in MODULE_FOLDERS:
+        for path in sorted((base / folder).glob('*.py')):
+            if not path.is_file():
+                continue
+            identity = path.stem.casefold()
+            if identity in names:
+                raise ValueError(f'duplicate local module {identity!r}: {names[identity]} and {path}')
+            names[identity] = path
+            modules[path.stem] = path
+    return modules
 
 
 def source_recipes(root: str) -> dict[str, str]:
     """Fingerprint each generator's dependency closure, without importing or executing it."""
-    modules = {p.stem: p for folder in ('pylib', 'tools', 'testrange')
-               for p in (Path(root) / folder).glob('*.py')}
+    modules = source_modules(root)
     dependencies: dict[str, set[str]] = {}
     digests: dict[str, str] = {}
     for name, path in modules.items():
@@ -78,6 +99,10 @@ def inputs(game: str, group: str) -> dict[str, Any]:
     archive = Path(game) / ('Chunk02.cpk' if group == 'bigmap' else 'Root.cpk')
     st = archive.stat()
     result: dict[str, Any] = {'archive': [str(archive.resolve()), st.st_size, st.st_mtime_ns, st.st_ctime_ns]}
+    if group == 'sedan':
+        city = Path(game) / 'Chunk02.cpk'
+        stamp = city.stat()
+        result['city_archive'] = [str(city.resolve()), stamp.st_size, stamp.st_mtime_ns, stamp.st_ctime_ns]
     if group == 'optics':
         import vehicle_optics
         result['loose_models'] = {spec.stem: sha256_file(str(Path(game, 'Mods', 'OBJECT', spec.stem+'.MRAB')))
@@ -107,12 +132,17 @@ def model_external_inputs(folder: str) -> dict[str, str | None]:
     """
     import obj_model
     root = Path(folder).resolve()
+    root_prefix = os.path.normcase(str(root)).rstrip('\\/') + os.sep
     external: dict[str, str | None] = {}
 
-    def record(path: Path) -> None:
-        path = path.resolve()
-        if not path.is_relative_to(root):
-            external[str(path)] = sha256_file(str(path))
+    def record(path: str) -> None:
+        # Pure string normalisation: these paths may belong to another machine (a drive that exists here but
+        # cannot be read), so resolve() or any other filesystem access could raise OSError. Existence uses the
+        # same criterion as obj_model; absent/unreadable is recorded as None.
+        normal = os.path.abspath(path)
+        if os.path.normcase(normal).startswith(root_prefix):
+            return
+        external[normal] = sha256_file(normal) if obj_model.path_present(normal) else None
 
     for obj in root.rglob('*.obj'):
         with obj.open(encoding='utf-8', errors='replace') as f:
@@ -121,11 +151,11 @@ def model_external_inputs(folder: str) -> dict[str, str | None]:
                 if not parts or parts[0] != 'mtllib':
                     continue
                 library = obj.parent / ' '.join(parts[1:])
-                record(library)
-                if library.is_file():
+                record(str(library))
+                if obj_model.path_present(str(library)) and os.path.isfile(library):
                     for material in obj_model.read_mtl(str(library)).values():
                         if material.diffuse_map:
-                            record(Path(material.diffuse_map))
+                            record(material.diffuse_map)
     return external
 
 
@@ -144,8 +174,12 @@ class Cache:
         except (OSError, ValueError):
             pass  # absent/corrupt cache is always a rebuild, never an install failure
 
-    def current(self, group: str) -> bool:
+    def current(self, group: str, settings: dict[str, Any] | None = None) -> bool:
+        """Whether `group`'s installed outputs are the ones its recipe, inputs and `settings` (the ini's choices its
+        generator builds by: the Dreadnought's hangar modules) make."""
         signature = {'recipe': self.recipes[group], 'inputs': inputs(self.game, group)}
+        if settings is not None:
+            signature['settings'] = settings
         self.signatures[group] = signature
         entry = self.entries.get(group)
         if not isinstance(entry, dict) or entry.get('signature') != signature:

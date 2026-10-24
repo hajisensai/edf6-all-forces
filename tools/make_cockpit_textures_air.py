@@ -60,7 +60,7 @@ TEXTURES = {
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--out', default=os.path.join(om.DEV_MODELS, 'cockpits', 'textures'))
+    ap.add_argument('--out', default=os.path.join(om.REPO_MODELS, 'cockpits', 'textures'))
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     for name, make in TEXTURES.items():

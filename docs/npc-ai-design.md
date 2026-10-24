@@ -103,6 +103,8 @@ friends = 每帧快照：玩家 + 友军士兵 + 友军载具（队伍遍历 0x5
 - `PickArm` 按目标距离与类型打分（追踪 / 对空打飞行目标、爆炸打大目标与成群小怪、近距高 DPS），自身爆炸半径内的距离不用爆炸武器，友军靠近目标时不用爆炸武器；现用武器不差于最佳 25% 就不换（防抖）。
 - 换枪写 d82+i（M）。下一帧核对当前武器（WeaponSet `h+0x1970` 第 0 组 `+0x40` 解两次指针）是否就是选中的那把；连续 30 帧不一致就**对这名士兵关闭换枪并记日志**（RE 的 M 项被证伪时停用，而不是重试）。
 - 交战距离 = `NpcEngageShare` × 最长真实射程（`EngageRange`），代替原版的 max(25, 0.5 × 射程)。
+- 背包位武器（2026-10-18，`docs/npc-backpack-re.md`）：副武器槽（`h+0x19F8`）里的武器不在任何 WeaponSet，`ArmsOf` 不把它算进
+  可选武器；由 `Backpack`（`npc_backpack.h`）在主武器瞄准之后判断投掷 / 挥砍，经原版背包使用（`npc_backpack.cpp`）出手（`NpcBackpack`）。
 
 ### 3.6 机动（B4、B5）
 
@@ -176,8 +178,21 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 - 插件在 `ThinkHook` 里、调原版 Think **之前**把没有队长的非玩家士兵的 `+0x540` 清 0，原版 Think 返回后立即放回原值（`HideWalkUp`）。不改代码字节、不改距离常量（`0x1765A44` 被 913 处共用），`+0x540` 在 Think 之外保持脚本给的值，所以解除招募 / 冷却 / `ScriptNpcRecruit` / 关掉 AI 时的归还逻辑都不用改；`0x59B4CF`（vslot 5）读到的也仍是原值。
 - 只在 `CustomNpcAi=1` 且 `SetFollow` 签名核对通过时生效：否则面板不能招募，原版率领是唯一入口，保留。
 - 任务里等玩家去率领的小队（例如 `FixAiPosition` 待命 = HOLD）原版能走近带走，面板却因「脚本控制」拒绝一切指令。为不让这类任务卡住：`NativeJoinable`（没有队长且 `+0x540 != 0`，即原版会放行的条件）的脚本小队在面板上不置灰，只接受「招募」/「跟随」（`CommandUnit::joinOnly`，执行入口同样只放行这两个指令），其余指令仍回 `scripted`。入队后它的脚本状态和原版走近入队后一样。
-- 联机：走近入队发生在运行该士兵 Think 的机器上，每台机器按自己的 ini 处理；房主和客机都需更新且设同值。顺带消除了 §2.3 的「`+0x540` 不复制，一台机器解除、另一台走近又招回」。
+- 联机：走近入队发生在运行该士兵 Think 的机器上。2026-10-20 起 `VanillaRecruit` 以**房主**为准（`src/host_settings.h`：每个成员经 EDF6Coop 成员属性 `EDF6X_AF_ROOM` 发布自己的值与版本摘要，客机用房主的值；房主是旧版、没发布时客机用本机 ini 并在房间菜单里说明）。顺带消除了 §2.3 的「`+0x540` 不复制，一台机器解除、另一台走近又招回」。
 - `VanillaRecruit=1` 恢复原版行为（脚本小队重新置灰，靠走近入队）。
+- **头顶的「合流」标记**（2026-10-19 用户：「删除npc顶上的未招募红标（因为已经改成m里面招募了）」）：原版 HUD 对象（构造 `0xF5200` / 内联于 `0xF4C59`，vtable `0x1768BC8`，贴图 `合流マーク.dds`，见 `0xF52E2` 的字符串）逐个士兵调它的第 1 槽 `0xF7280`：`+0x540 != 0` 且 `+0x548 == 0` 时把 `+0x90` 位置（y + 2.25 m，常量 `0x1768DC4`）推进位置表（`+0x10` 数据 / `+0x18` 容量 / `+0x20` 数量），再在这些位置画标记。(H：分支与写入；「画的就是用户说的红标」M，贴图名吻合、未实机截图对照）。它是原版走近入队的邀请，所以跟着走近入队一起：`WalkUpOff` 时插件换掉的槽（`JoinMarkHook`）直接返回，`VanillaRecruit=1` / 关 AI 时照原版。早先 `feedback-2026-10-09-map.md` 只在 HUD 区 `0x7C0000..0x900000` 找读 `+0x540` 的代码，漏了这一处。
+- **自由小队的掩护**（2026-10-19 用户：「删除玩家招募npc以后npc的减伤消失问题」）：士兵 vslot 5 `0x59ABB0` 每帧沿 `+0x548` 走到链尾（`0x59B4B4..0x59B4CD`），链尾 `+0x540 != 0` 且在 AI 表（`+0x1A` bit 3）时：
+  - `+0x478 = 3.0`（`0x59B4DE`，否则 `1.0`，`0x59B524`）。基类 slot 15 `0x54A330`（观察者 `+0x470` 视距 ÷ 目标 `+0x478`，比平方距离）读它：被发现的距离只剩三分之一。(H：读写点；「敌人的索敌走这一槽」M：EAO / 运兵船等敌人 vtable 的 slot 15 也是 `0x54A330`)
+  - 预算 `+0x1D40`（出生 `0x596ADD` 写 1800 帧；换队长 `0x596D91` / `0x59D42D` 截到 ≤ 600）大于 0 时每帧减 1，并且受到伤害倍率 `+0x384 ×= 0.01`（`0x59B51A`，常量 `0x1765A00`；伤害函数 `0x548134` 乘的 `+0x394` 由它每帧结算而来，`0x54BED5`）、本人武器伤害系数 `+0x788 = +0x1CF0 × 0.1 × +0x398`（`0x59B502`，常量 `0x1765A0C`）。
+  - 招募后链尾是玩家（`+0x540 = 0`）：原版走近入队与地图招募（同一个 `SetFollow`）都让掩护当场消失——这就是用户看到的「招募后减伤消失」，是原版规则，不是插件写坏了什么。
+  - 修法：开着自制 AI 时把这 27 字节的链尾查找换成 `mov rcx,rbx; call CoverRoot; mov rcx,rax`（`InstallFreeSquadCover`），之后原版照常读返回对象的 `+0x540` / `+0x1A`。`CoverRoot` 按 ini `NpcFreeSquadCover`（热加载）：
+    - `0`（默认；2026-10-19 用户：「暂时取消这个掩护设定吧」）：返回一个全零的替身 `kNoCover`（`+0x540` = 0），原版跳到 `0x59B524` 写 `+0x478 = 1`，预算不消耗、伤害倍率不动——所有小队都没有掩护，招募前后一致；
+    - `1`：走到玩家之下就停（小队自己的队长 NPC），招募前后都按队长判定、都有掩护。
+    
+    关掉 AI 时结果与原版逐字相同；`1` 下没有玩家的链也与原版相同。补丁之后 `0x59ABB0` 余下代码读到的寄存器要么非易失、要么先写后读（`rax` `0x59B4E8`、`rdx` `0x59B53E`、`xmm1` `0x59B4FA` / `0x59B52E`），补丁处 `rsp` 16 字节对齐（7 次 push + `sub rsp,260h`）。离线：`npc_core_check` 在镜像替身上装补丁并实际执行这段代码。
+  - 影响面：默认 `0` 比原版更「硬核」：原版里未招募小队（以及任务开头等你率领的小队）出生后的 30 秒近乎无敌、长期只在三分之一距离被发现，现在都没有了。`1` 时判定只看小队队长 NPC 的 `+0x540`：开局就跟着玩家、队长带 `+0x540` 的小队与支援士兵（出生时插件写 `+0x540 = 1`，`support_soldier.cpp`）也有掩护（原版没有）；预算仍是原版那一份，招募不重置也不延长。
+  - 联机：每台机器按自己的对象算，与原版同一处；队长由 vslot 39 同步，`+0x540` 不同步（§2.3）。2026-10-20 起 `NpcFreeSquadCover` 与 `VanillaRecruit` 一样以**房主**为准（`host_settings.h`，同上），各机按同一个值算，`0` 时各机都没有掩护，`1` 时都按小队队长判定。
+  - 伤害结算端（2026-10-20 核实，H：静态反汇编）：ApplyDamage `0x547C30` 在会话中（`0x7748F0` 为真，`0x547E1D`）先问对象的 slot 35（`+0x118`，`0x547E38`，结果存 `+0x59C`），否则（攻击者还在时，`0x547E5A`）问对象的 slot 34（`+0x110`，`0x547E95`，参数含攻击者的标志与 GDI `+0x60` 的强制位）；两者都说「不是本机的」时（`0x547ED6` `test r14b,r14b`），只给攻击者发命中通知 `0x10000007`（`0x547F97..0x547FD0`）后在 `0x548625` 返回，**HP 不变**。`0x548134` 起的扣血（`hp − dmg × [+0x394] × …`，`+0x394` 由掩护写的 `+0x384` 每帧结算而来）只在对象的权威端执行。所以掩护的减伤只在一台机器上生效；这台机器对友军 NPC 是谁（推测：注册拥有者，一般是房主，见 `docs/online-re.md` §3）未单独核实。被看见距离 `+0x478` 在每台运行该敌人 AI 的机器上读。正因为结算只在一台机器上、而那台机器读它自己的 ini，客机改 ini 原先不起作用、房主的才算数——现在客机也按房主的值，两边一致。
 
 ### 5.3 队长阵亡（B8，P3）
 
@@ -250,12 +265,12 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 
 ### 6.4.1 编组（2026-10-08 用户：「支持编组」）
 
-- 火力组就是一个独立的小队（原版跟随树，§5.1）：`SplitSquad` 按 `Members` 顺序单双号对半，奇数位的第一人当新组长、跟原小队队长的上级（招募的跟玩家、自由的没有），其余奇数位跟新组长，偶数位跟原队长——每人都显式重新 `Follow`，不会把某人的下级连带拖走；`MergeSquads` 把另一个小队的队长挂到这个队长下面（合计 ≤ `kMaxSquad` 16）。之后两组各是普通小队：面板各一行、各自的指令和编队。
-- 地图键：P 分组（选中的每个小队）、L 合并（并到第一个选中的）；联机拒绝（同 §9 地图指令）。离线 `npc_core_check` 用假的跟随树核对重挂关系。
+- ~~火力组（`SplitSquad` / `MergeSquads`，地图键 P / L）~~：2026-10-19 删除，改为地图的 RTS 控制组（`mapcmd_logic.h` `GroupKey`，Ctrl+1~9 存、1~9 选，只是选择的快捷方式，不改原版跟随树）。删除理由见 `docs/feedback-2026-10-19-rts-groups.md`：跟随玩家的小队本来就共用一个行军队形（`MarchRoster`），拆 / 并对它们没有可见效果；合并目标是内存地址最小的选中小队，可能是自由小队，并入后不再跟玩家；拆出的半队不继承原命令。
+- 队长阵亡的交接（§5.3 `Succeed`）记在 `handovers`（`NpcSquadSuccessor`）：地图的选择和控制组按队长身份记小队，队长死后转到接任的新队长 / 并入的那支小队。
 
 ### 6.4.2 地图按钮（2026-10-08 用户：「这个要在m里面设置。还有事m里面进行操作要支持。最好能直接点击hud那种」）
 
-- `src/map_buttons.h`（离线 `tools/map_buttons_check.cpp`）：按钮 `Id`（9 个指令 + 编队、分组、合并、拾取、回复箱开关）、`Flow` 按标签宽度排成居中的行（放不下换行，向上叠）、`Hit` 点中哪个。
+- `src/map_buttons.h`（离线 `tools/map_buttons_check.cpp`）：按钮 `Id`（指令 + 阵形、拾取、回复箱开关；2026-10-19 删分组 / 合并，加原地坚守）、`Flow` 按标签宽度排成居中的行（放不下换行，向上叠）、`Hit` 点中哪个。
 - `hud.cpp` `MapButtons` 按实际画出的标签量宽度排版、画出，把矩形交给 `mapcmd.cpp` `MapCommandButtons`；`Pointer` 在松开左键时先测按钮（点中按钮不算点单位），警戒按钮先「上膛」（`guardArmed`），下一次点地面就是警戒点。按钮与键共用同一套动作（`Press`、`Formation`、`Teams`、`Sweep`、`Health`）。离线 `map_command_runtime_check` `ButtonClicks` 用真实的 `MapCommandFrame` 走一遍点击。
 - 回复箱开关是运行时状态（`npcai.cpp` `healthPick`：-1 = 用 ini 的 `NpcPickupHealth`），地图里切换后整局有效；地图里拾取可以只派选中的小队（`Sweep::top`）。
 
@@ -294,6 +309,16 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 - 偏离 > `TankPostHold` 米、且原版本帧写入的 `seat0+0x2C0/+0x2C4` 都为 0 → `ReturnToPost`：近且在身后（> 126°）倒车，否则掉头开；按原版符号写座位摇杆。原版转向 / 油门非零时完整保留，避免用目标距离猜测驾驶所有权。地图列表与下令都重新检查对象身份、死亡、座位、路线、开关、离线状态和记录新鲜度。
 - 只在房主（§2.4）。开关 `TankReturnToPost`。
 
+### 8.2.1 NPC 接管机甲的瞄准坐标准备（2026-10-19）
+
+呼叫版机甲不经过加入原生 AI 列表时的完整 slot 6。NPC 接管之前，除了攻击表与备用骨骼，还必须按本车 `begaruta_aiming_shape` 声明准备每座的 MAB 定位器表。Nix 与旧型机器人的声明是单个字符串，普罗透斯 MK2 是按座位排列的数组；504 贝加鲁塔与 407 普罗透斯原版没有此声明，保持原生骨骼回退。
+
+实际 Nix 的骨骼坐标没有以车辆正前为前向。MAB「照準」定位器自带旋转校正；漏建时，原生瞄准将世界正前转换成局部正下方，持续写入向下俯仰。此准备读取真实 SGO 与当前模型，不用型号专用旋转值替代。
+
+构造先在本地完成全部借用的 `{MAB 定义, 当前骨骼记录}` 对，确认成功后通过原生向量分配器一次提交。已有匹配表不改写；模型更换重新解析；声明损坏、元数据不可读或旧表来源不明时拒绝本次 AI 准备，不发布半张表。玩家与非拥有端不执行准备。保留原生逐武器弹道、锁定、分组触发与移动决策。准备失败时，按原生中立输入布局清除本端真实 NPC 席位遗留的扳机和瞄准输入，避免上一帧动作持续；玩家、远端和空座不改，导航仍可继续。
+
+玩家版 V607 三轴卡车另缺少 `v607_aim_info`。安装时由现有 optics stock SGO writer 对照四个官方 AI 变体，核对完整 MAB、控制骨、武器挂点及实际 MDB 后补缺失表。武器本身不属于这份坐标合同，保留玩家改枪；已有自定义表不覆盖。无外置座舱素材也执行此步骤。字段写集随安装事务保存，模型或挂点失效时撤回仍未被用户改动的自加表，卸载同样只按值撤回。详见 [反馈与覆盖记录](feedback-2026-10-19-npc-mech-aim.md)。
+
 ### 8.3 原版坦克 AI action 0x661440 的逐条笔记（上一阶段留下，部分已由 §8.1 更正）
 
 1. `0x609650(veh+0x608)`：0 号座**有任何活乘员**才执行（不是「AI 乘员」，H，更正）。
@@ -329,7 +354,7 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 联机里直接决定客人的小队会不会被拉向房主。远端玩家的镜头读不到：撤退的「身后」改为那位玩家背对最近威胁的一侧；
 枪线回避（§3.4）只对本机玩家有，远端玩家本人仍在友军射线检查里。
 
-ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`VanillaRecruit`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
+ini（`[VehicleCrew]`，热加载）：`CustomNpcAi`（总开关）、`NpcFireLane`、`NpcLaneWidth`、`NpcLaneLength`、`NpcFlankDeg`、`NpcWeaponSwitch`、`NpcBackpack`、`NpcEngageShare`、`NpcEvade`、`NpcDangerRange`、`NpcGrabRange`、`NpcCrowd`、`NpcRollSec`、`NpcRetreatHp`、`NpcLeash`、`NpcSquadSuccession`、`NpcSquadMin`、`NpcSquadMax`、`NpcSquadJoinRange`、`NpcRecruitCooldownSec`、`VanillaRecruit`、`NpcMarkKey`、`NpcMarkCone`、`NpcFreeRange`、`NpcGuardRadius`、`NpcBoarding`、`ScriptNpcRecruit`、`ScriptNpcSettleSec`、`TankReturnToPost`、`TankPostHold`、`TankReverseMax`。每项范围检查同其他 ini 项。
 
 ## 10. 分阶段计划与顺序
 

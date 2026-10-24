@@ -5,12 +5,13 @@
     parse(data) -> Program, build(prog) -> bytes   the container; parse + build reproduces every 4.1 and EDF5 BVM byte
                                                for byte (270 base-game files, 55 DLC files)
     convert(prog, rewrite=None, notes=None) -> Program   the 4.1 -> EDF5 step on the parsed form
+    rewritten(data, rewrite) -> bytes          a BVM as it is with its string constants mapped (the same bytes if none is)
 
 Format (all little-endian; offsets are file offsets)
   0x00 'BVM '   0x04 0x50 (header size)   0x08 0, 0   0x10 0x01150138   0x14 2
   0x18 global count      0x1C global table (0x50; u32 name offset each)
   0x20 function count    0x24 function table (after the globals; 16 bytes each: code offset from [0x34], name offset,
-                         parameter type bytes offset, parameter count)
+                         parameter type bytes offset, packed signature: low byte parameter count, upper bytes flags)
   0x28 0x200, 0x2C 0x200 (stacks)
   0x30 code start (after the function table)      0x34 function code base (the initialiser ends here)
   0x38 string pool start (right after the code)   0x3C script name offset ('Mission', 'Before', ...: the file stem)
@@ -85,6 +86,18 @@ class Function:
     types: bytes
     code: list[Ins]          # epilogue (pushl 0; fp+ N; ret), then the body
     entry: int = 3           # the body's first instruction
+    signature_flags: int = 0  # the table's +0x0D..0x0F bytes, preserved even when not understood
+
+    @property
+    def results(self) -> int:
+        # EDF6's function starters read only the signed byte at table+0x0C for the parameter count
+        # (0x10ACB0B/37, 0x10ACC28/64). The shipped 0x100 signatures (_SetupBarrier, CruiseAndRespawn)
+        # leave one value below the return address; their callers pop/store it. Other flag values are unproved.
+        if len(self.types) >= 0x80:
+            raise ValueError(f'BVM: {self.name}: unsupported signed parameter count {len(self.types)}')
+        if self.signature_flags not in (0, 0x100):
+            raise ValueError(f'BVM: {self.name}: unknown function signature flags {self.signature_flags:#x}')
+        return self.signature_flags >> 8
 
 
 @dataclass
@@ -96,10 +109,12 @@ class Program:
 
 
 def _wstr(data: bytes, off: int) -> str:
-    end = off
-    while data[end:end + 2] != b'\0\0':
-        end += 2
-    return data[off:end].decode('utf-16le')
+    if off < 0 or off + 2 > len(data):
+        raise ValueError(f'BVM: string offset {off:#x} outside file')
+    for end in range(off, len(data) - 1, 2):
+        if data[end:end + 2] == b'\0\0':
+            return data[off:end].decode('utf-16le')
+    raise ValueError(f'BVM: unterminated string at {off:#x}')
 
 
 def _decode(data: bytes, start: int, end: int) -> list[tuple[int, int, int, int, int | None]]:
@@ -111,6 +126,8 @@ def _decode(data: bytes, start: int, end: int) -> list[tuple[int, int, int, int,
         op, n = c & 0x3F, SIZES[c >> 6]
         if op > 0x38:
             raise ValueError(f'BVM: bad opcode {c:#x} at {o:#x}')
+        if o + 1 + n + (op in TYPED) > end:
+            raise ValueError(f'BVM: truncated instruction at {o:#x}')
         v = int.from_bytes(data[o + 1:o + 1 + n], 'little', signed=op in SIGNED) if n else 0
         t = data[o + 1 + n] if op in TYPED else None
         out.append((o, op, n, v, t))
@@ -128,15 +145,19 @@ def parse(data: bytes) -> Program:
     if h[1] != HEADER_SIZE or h[4] != VERSION:
         raise ValueError(f'BVM: unknown version {h[4]:#x}')
     ng, og, nf, of, code0, fbase, pool = h[6], h[7], h[8], h[9], h[12], h[13], h[14]
+    if not HEADER_SIZE <= og <= og + 4 * ng <= of <= of + 16 * nf <= code0 <= fbase <= pool <= len(data):
+        raise ValueError('BVM: tables or code outside file or out of order')
     gnames = [_wstr(data, struct.unpack_from('<I', data, og + 4 * i)[0]) for i in range(ng)]
     rows = [struct.unpack_from('<4I', data, of + 16 * i) for i in range(nf)]
     ins = _decode(data, code0, pool)
     at = {o: i for i, (o, *_) in enumerate(ins)}
     stubs, bodies = [], []
     for c, _, _, _ in rows:
-        s = at[fbase + c]
+        s = at.get(fbase + c)
+        if s is None:
+            raise ValueError(f'BVM: function call stub {fbase + c:#x} is not an instruction')
         o, op, n, v, t = ins[s]
-        if op != OP_CALL or ins[s + 1][1] != OP_END or o + v not in at:
+        if op != OP_CALL or s + 1 >= len(ins) or ins[s + 1][1] != OP_END or o + v not in at:
             raise ValueError(f'BVM: no call stub at {o:#x}')
         stubs.append(s)
         bodies.append(at[o + v])
@@ -145,6 +166,8 @@ def parse(data: bytes) -> Program:
     if bodies != sorted(bodies) or any(b < 3 for b in bodies):
         raise ValueError('BVM: function bodies out of table order')
     starts = [b - 3 for b in bodies] + [stubs[0] if stubs else len(ins)]
+    if fbase not in at and fbase != pool:
+        raise ValueError(f'BVM: function code base {fbase:#x} is not an instruction')
     init_end = at.get(fbase, len(ins))
     if nf and starts[0] != init_end:
         raise ValueError('BVM: code between the initialiser and the first function')
@@ -172,10 +195,13 @@ def parse(data: bytes) -> Program:
 
     prog = Program(_wstr(data, h[15]), gnames, convert_code(0, init_end))
     for i, (c, name, tp, k) in enumerate(rows):
+        count = k & 0xFF
+        if count and not pool <= tp <= tp + count <= len(data):
+            raise ValueError(f'BVM: function {i} parameter types outside string pool')
         code = convert_code(starts[i], starts[i + 1])
         if [x.op for x in code[:3]] != [OP_PUSHL, OP_FPADD, OP_RET]:
             raise ValueError(f'BVM: function {i} has no epilogue')
-        prog.funcs.append(Function(_wstr(data, name), data[tp:tp + k], code))
+        prog.funcs.append(Function(_wstr(data, name), data[tp:tp + count], code, signature_flags=k & ~0xFF))
     return prog
 
 
@@ -281,7 +307,9 @@ def build(prog: Program) -> bytes:
                        0x200, 0x200, code0, fbase, pool_at, name_at, 0, end4, 0, end16)
     table = struct.pack(f'<{ng}I', *gptr)
     for i, f in enumerate(prog.funcs):
-        table += struct.pack('<4I', addr[stub0 + 2 * i] - fbase, nptr[i], tptr[i], len(f.types))
+        if len(f.types) > 0xFF or f.signature_flags & 0xFF or not 0 <= f.signature_flags <= 0xFFFFFF00:
+            raise ValueError(f'BVM: {f.name}: invalid function signature')
+        table += struct.pack('<4I', addr[stub0 + 2 * i] - fbase, nptr[i], tptr[i], len(f.types) | f.signature_flags)
     data = head + table + bytes(code) + bytes(blob)
     return data + bytes([PAD]) * (end16 - len(data))
 
@@ -497,7 +525,7 @@ NET41: dict[tuple[int, int], int] = {(0x2C, 1): -1, (0x2C, 2): -2, (0x2C, 3): -1
 # argument); 1/3003 is the plugin's (src/edf41natives.cpp: pops the handle and the radius).
 NET6: dict[tuple[int, int], int] = {(0x2C, 1): -1, (0x2C, 2): -3, (0x2C, 3): -1, (0x2C, 5): 0, (0x2C, 9): -1,
     (0x2C, 10): 0, (0x2C, 11): 0, (0x2C, 12): 0, (0x2C, 13): -2, (0x2C, 14): -3, (0x2C, 16): 0, (0x2C, 17): -1,
-    (0x2C, 18): -4, (0x2C, 20): -1, (0x2C, 21): 1, (0x2C, 30): 0, (0x2C, 31): -1, (0x2C, 33): -1, (0x2C, 38): -2,
+    (0x2C, 18): -4, (0x2C, 20): -1, (0x2C, 21): 1, (0x2C, 22): 0, (0x2C, 30): 0, (0x2C, 31): -1, (0x2C, 33): -1, (0x2C, 38): -2,
     (0x2C, 39): 0, (0x2C, 50): -3, (0x2C, 51): -1, (0x2C, 52): -1, (0x2C, 100): -2, (0x2C, 102): -1, (0x2C, 103): -1,
     (0x2C, 104): -1, (0x2C, 110): -1, (0x2C, 200): -1, (0x2C, 201): -1, (0x2C, 300): -1, (0x2C, 301): -1,
     (0x2C, 302): -2, (0x2C, 350): -1, (0x2C, 351): -2, (0x2C, 401): -1, (0x2C, 410): 0, (0x2C, 420): -6,
@@ -524,6 +552,7 @@ def stack_check(prog: Program, effects: dict[tuple[int, int], int] | None = None
     effects = NET6 if effects is None else effects
     out = []
     for f in prog.funcs:
+        results = f.results
         depth = {f.entry: 1 + len(f.types)}
         work = [f.entry]
         while work:
@@ -535,7 +564,7 @@ def stack_check(prog: Program, effects: dict[tuple[int, int], int] | None = None
                     out.append(f'{f.name}: native {x.op - OP_NAT0}/{x.v} of unknown stack effect')
                     continue
             elif x.op == OP_CALL:
-                e = -len(prog.funcs[x.v].types)
+                e = -len(prog.funcs[x.v].types) + prog.funcs[x.v].results
             else:
                 e = STACK.get(x.op, 0)
             d = depth[i] + e
@@ -543,8 +572,8 @@ def stack_check(prog: Program, effects: dict[tuple[int, int], int] | None = None
                 else [i + 1]
             for j in succ:
                 if j == 0:
-                    if d != 0:
-                        out.append(f'{f.name}: {d} values left at the epilogue (from {i})')
+                    if d != results:
+                        out.append(f'{f.name}: {d} values left at the epilogue (expected {results}; from {i})')
                 elif j >= len(f.code):
                     out.append(f'{f.name}: runs off its end at {i}')
                 elif j not in depth:
@@ -558,11 +587,12 @@ def stack_check(prog: Program, effects: dict[tuple[int, int], int] | None = None
 # what EDF6's executor reads for each native's arguments, bottom to top, and how many values it leaves: p a pointer (a
 # string), f a float, i an int (a number, an object handle, a bool), ? not read in the emulated path. Measured by
 # emulating the dispatcher 0x20FF70 (the instruction reading each argument slot); 1/3003 is the plugin's; 0/20 copies
-# its argument's 32 bits as they are (0x210DB5: into the executor's +0x46C), so takes either.
+# its argument's 32 bits as they are (0x210DB5: into the executor's +0x46C), so takes either. 0/22 only writes
+# GS+0x44 (0x210E10); it consumes no value and must not terminate a walk as an unknown native.
 SIG6: dict[tuple[int, int], tuple[str, int]] = {(0x2C, 1): ('?', 0), (0x2C, 2): ('pfi', 0), (0x2C, 3): ('i', 0),
     (0x2C, 5): ('', 0), (0x2C, 9): ('f', 0), (0x2C, 10): ('', 0), (0x2C, 11): ('', 0), (0x2C, 12): ('', 0),
     (0x2C, 13): ('pi', 0), (0x2C, 14): ('ppi', 0), (0x2C, 16): ('', 0), (0x2C, 17): ('i', 0), (0x2C, 18): ('????', 0),
-    (0x2C, 20): ('?', 0), (0x2C, 21): ('', 1), (0x2C, 30): ('p', 1), (0x2C, 31): ('i', 0), (0x2C, 33): ('i', 0),
+    (0x2C, 20): ('?', 0), (0x2C, 21): ('', 1), (0x2C, 22): ('', 0), (0x2C, 30): ('p', 1), (0x2C, 31): ('i', 0), (0x2C, 33): ('i', 0),
     (0x2C, 38): ('ppi', 1), (0x2C, 39): ('p', 1), (0x2C, 50): ('iif', 0), (0x2C, 51): ('i', 0), (0x2C, 52): ('i', 0),
     (0x2C, 100): ('pp', 0), (0x2C, 102): ('p', 0), (0x2C, 103): ('p', 0), (0x2C, 104): ('p', 0), (0x2C, 110): ('p', 0),
     (0x2C, 200): ('f', 0), (0x2C, 201): ('i', 0), (0x2C, 300): ('p', 0), (0x2C, 301): ('f', 0), (0x2C, 302): ('pf', 0),
@@ -611,40 +641,76 @@ def _typed_result(x: Ins) -> str:
 _ACCEPTS = {'p': 's?', 'f': 'f?', 'i': 'i?', '?': 'sfi?'}
 
 
-def type_check(prog: Program, sigs: dict[tuple[int, int], tuple[str, int]] | None = None) -> list[str]:
-    """Each native call whose arguments, as the script pushes them, are not of the types EDF6's handler reads (SIG6):
-    a string literal where a number is read, a float where an int is, and so on. A value whose type the script does not
-    show (a variable, a native's result) fits anything."""
-    sigs = SIG6 if sigs is None else sigs
-    out = []
+@dataclass(frozen=True)
+class Arg:
+    """A stack value's conservative type and exact string, when every path agrees. `literals` retains every
+    possible literal across control-flow joins; `alternatives` also keeps their types so a bad predecessor is not
+    hidden by an unknown value. These finite sets come only from instructions in the input program."""
+    t: str
+    s: str | None = None
+    alternatives: frozenset[tuple[str, str | None]] = field(default_factory=frozenset)
+
+    @property
+    def values(self) -> frozenset[tuple[str, str | None]]:
+        return self.alternatives or frozenset({(self.t, self.s)})
+
+    @property
+    def literals(self) -> frozenset[str]:
+        return frozenset(s for t, s in self.values if t == 's' and s is not None)
+
+
+def _join_arg(a: Arg, b: Arg) -> Arg:
+    values = a.values | b.values
+    if len(values) == 1:
+        return Arg(*next(iter(values)))
+    types = {t for t, _ in values}
+    return Arg(next(iter(types)) if len(types) == 1 else '?', None, values)
+
+
+_UNKNOWN = Arg('?')
+
+
+def _walk(prog: Program, sigs: dict[tuple[int, int], tuple[str, int]],
+          visit: Callable[[Function, int, Ins, list[Arg] | None], None]) -> None:
+    """Every reachable native call once, after merging all its predecessors to a fixed point. Ambiguous values
+    retain their alternatives instead of choosing the first path. An unknown native or too few native arguments
+    stops that path and visits it with None; inconsistent stack depths and non-native underflow are rejected."""
     for f in prog.funcs:
-        stacks: dict[int, list[str]] = {f.entry: ['?'] * (1 + len(f.types))}
+        _ = f.results  # do not analyse an unknown signature as if it were void
+        stacks: dict[int, list[Arg]] = {f.entry: [_UNKNOWN] * (1 + len(f.types))}
+        calls: dict[int, list[Arg] | None] = {}
         work = [f.entry]
         while work:
             i = work.pop()
             st = list(stacks[i])
             x = f.code[i]
+
+            def require(n: int) -> None:
+                if len(st) < n:
+                    raise ValueError(f'BVM: {f.name} {i}: stack underflow ({len(st)} values, needs {n})')
+
             if x.op in OP_NATIVE:
                 sig = sigs.get((x.op, x.v))
                 if sig is None:
-                    out.append(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v} has no signature')
+                    calls[i] = None
                     continue
                 want, results = sig
-                got = st[len(st) - len(want):] if want else []
-                if len(got) < len(want):
-                    out.append(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v} with too few values on the stack')
+                if len(st) < len(want):
+                    calls[i] = None
                     continue
-                for k, (w, g) in enumerate(zip(want, got)):
-                    if g not in _ACCEPTS[w]:
-                        out.append(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v} argument {k + 1} of {len(want)}: '
-                                   f'reads {w}, the script passes {g}')
+                calls[i] = st[len(st) - len(want):] if want else []
                 del st[len(st) - len(want):]
-                st += ['?'] * results
+                st += [_UNKNOWN] * results
             elif x.op == OP_CALL:
-                del st[len(st) - len(prog.funcs[x.v].types):]
+                n = len(prog.funcs[x.v].types)
+                require(n)
+                del st[len(st) - n:]
+                st += [_UNKNOWN] * prog.funcs[x.v].results
             elif x.op == 0x03:
+                require(1)
                 st.append(st[-1])
             elif x.op == OP_STOREI:
+                require(2)
                 st[-2:] = [st[-1]]
             else:
                 e = STACK.get(x.op, 0)
@@ -657,16 +723,69 @@ def type_check(prog: Program, sigs: dict[tuple[int, int], tuple[str, int]] | Non
                 elif x.op in (OP_FPADD, OP_FPSUB, OP_JMP, OP_END):
                     pops = 0
                 if pops:
+                    require(pops)
                     del st[len(st) - pops:]
                 if e + pops > 0:
-                    st.append(_typed_result(x))
+                    st.append(Arg(_typed_result(x), x.v if x.op == OP_PUSHS and isinstance(x.v, str) else None))
             succ = [x.v] if x.op == OP_JMP else [x.v, i + 1] if x.op in JUMPS else [] if x.op in (OP_RET, OP_END) \
                 else [i + 1]
             for j in succ:
-                if 0 < j < len(f.code) and j not in stacks:
-                    stacks[j] = st
+                if not 0 < j < len(f.code):
+                    continue
+                if j not in stacks:
+                    stacks[j] = list(st)
                     work.append(j)
+                    continue
+                previous = stacks[j]
+                if len(previous) != len(st):
+                    raise ValueError(f'BVM: {f.name} {j}: reached at stack depths {len(previous)} and {len(st)}')
+                merged = [_join_arg(a, b) for a, b in zip(previous, st)]
+                if merged != previous:
+                    stacks[j] = merged
+                    work.append(j)
+        for i in sorted(calls):
+            visit(f, i, f.code[i], calls[i])
+
+
+def type_check(prog: Program, sigs: dict[tuple[int, int], tuple[str, int]] | None = None) -> list[str]:
+    """Each native call whose arguments, as the script pushes them, are not of the types EDF6's handler reads (SIG6):
+    a string literal where a number is read, a float where an int is, and so on. A value whose type the script does not
+    show (a variable, a native's result) fits anything."""
+    sigs = SIG6 if sigs is None else sigs
+    out: list[str] = []
+
+    def visit(f: Function, i: int, x: Ins, got: list[Arg] | None) -> None:
+        if got is None:
+            why = 'has no signature' if (x.op, x.v) not in sigs else 'with too few values on the stack'
+            out.append(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v} {why}')
+            return
+        want = sigs[(x.op, x.v)][0]
+        for k, (w, g) in enumerate(zip(want, got)):
+            for passed in sorted({t for t, _ in g.values} - set(_ACCEPTS[w])):
+                out.append(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v} argument {k + 1} of {len(want)}: '
+                           f'reads {w}, the script passes {passed}')
+    _walk(prog, sigs, visit)
     return out
+
+
+def native_calls(prog: Program, wanted: set[tuple[int, int]],
+                 sigs: dict[tuple[int, int], tuple[str, int]] | None = None) -> list[tuple[str, int, Ins, list[Arg]]]:
+    """(function name, index, instruction, arguments) of every call of a native in `wanted` ((op, id) pairs), each once,
+    with the values the script passes it (Arg.s: an exact literal only when all paths agree; Arg.literals: every
+    possible literal on those paths). A wanted native
+    without a signature in `sigs` (SIG6), or reached with too few values on the stack, raises ValueError: the caller
+    asked for arguments this walk cannot give."""
+    sigs = SIG6 if sigs is None else sigs
+    out: dict[tuple[str, int], tuple[str, int, Ins, list[Arg]]] = {}
+
+    def visit(f: Function, i: int, x: Ins, got: list[Arg] | None) -> None:
+        if (x.op, x.v) not in wanted:
+            return
+        if got is None:
+            raise ValueError(f'{f.name} {i}: native {x.op - OP_NAT0}/{x.v}: no arguments to read (signature / stack)')
+        out.setdefault((f.name, i), (f.name, i, x, list(got)))
+    _walk(prog, sigs, visit)
+    return [out[k] for k in sorted(out, key=lambda k: ([g.name for g in prog.funcs].index(k[0]), k[1]))]
 
 
 SERGENT = ('g_sergent', 'g_sergent_follower1', 'g_sergent_follower2', 'g_sergent_follower3')
@@ -946,7 +1065,7 @@ def convert(src: Program, rewrite: Callable[[str], str] | None = None, notes: li
                     e.emit(Ins(OP_PUSHS, text(s)), Ins(OP_PUSH, -1, 1), Ins(OP_NAT0, NAT_PRELOAD, 1))
         if not preloaded:
             note('Main never calls native 10 (the result screens are not preloaded)')
-        funcs5.append(Function(rename(f.name), f.types, e.done(len(code))))
+        funcs5.append(Function(rename(f.name), f.types, e.done(len(code)), signature_flags=f.signature_flags))
     for op, nid in sorted(unknown):
         note(f'native {op:#x}/{nid} of unknown stack effect follows a constant that may be a global index')
     return Program(src.name, globals5, init, funcs5)
@@ -958,3 +1077,19 @@ def to_edf5(bvm41: bytes, rewrite: Callable[[str], str] | None = None) -> bytes:
     EDF6 has; the string pool and every offset into it are rebuilt. Raises UnsupportedNative for a script calling a
     native EDF5 / EDF6 has no counterpart for (TABLE1)."""
     return build(convert(parse(bvm41), rewrite))
+
+
+def rewritten(data: bytes, rewrite: Callable[[str], str]) -> bytes:
+    """A BVM (4.1's or EDF5's form, as it is: no conversion) with every string constant it pushes mapped by rewrite; the
+    string pool and every offset into it are rebuilt. The same bytes when rewrite changes none (parse + build gives
+    every 4.1 and EDF5 script back byte for byte). For EDF5's recompiles of the story (tools/make_edf41_missions.py),
+    whose story objects EDF6 holds as other objects (pylib/edf41dlc.py STORY_SHADOWED)."""
+    prog = parse(data)
+    changed = False
+    for code in [prog.init] + [f.code for f in prog.funcs]:
+        for x in code:
+            if x.op == OP_PUSHS:
+                new = rewrite(x.v)
+                if new != x.v:
+                    x.v, changed = new, True
+    return build(prog) if changed else data

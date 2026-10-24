@@ -9,7 +9,7 @@ background"). For measurements, e.g. the big map's memory against the stock test
                                                      left stick, look_*: its right stick)
   python tests/autopilot/drive.py shot FILE.png      the game window's picture (PrintWindow, never the screen)
   python tests/autopilot/drive.py mem [N]            the plugin's last N MEM rows
-  python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range|edf41:ROW|edf41mp01:ROW|edf41mp02:ROW [0-4]
+  python tests/autopilot/drive.py cmd TEXT           one command to the plugin: mem, quit, mission ROW|RM015|M001|range|edf41:ROW|edf41mp01:ROW|edf41mp02:ROW|edf5:ROW [0-4]
   python tests/autopilot/drive.py run [MISSION] [DIFFICULTY] [SECONDS] [LOG]
         one go: install, ask the mission (default range: the test range's own mission pack, by the content id in the
         installed EDF6VehicleCrew.ini; RM015, M001 or a row: the stock offline list), launch in the background, stay
@@ -18,16 +18,25 @@ background"). For measurements, e.g. the big map's memory against the stock test
         options (after the positional ones):
           --cmd TEXT       one more plugin command handed with the mission's (repeatable), e.g. --cmd "probe airdrop"
                            (the stock air delivery probe: tests/autopilot/airdrop_probe.cpp)
+                           or --cmd "probe wdenergy" (the Wing Diver's energy and her weapons' charge every 250 ms:
+                           tests/autopilot/wdenergy_probe.cpp)
+                           or --cmd "probe hector" (each EDF4.1 Hector's position, facing, walk vector, velocity
+                           and main CAS state from its own frame: tests/autopilot/hector_probe.cpp)
+                           or --cmd "probe players" (each local soldier's pad +0x338 and class key record +0xD40
+                           every second: tests/autopilot/players_probe.cpp)
           --loadout FILE   the run's forced loadout: FILE copied as <plugins>/EDF6TestRange.loadout.ini (read by the
                            installed EDF6VehicleCrew at the player's creation; the file must not exist already, and
                            is removed again afterwards), e.g. tests/autopilot/loadouts/airraider_grape.ini
           --shots DIR      the game window's picture into DIR every 15 s of the mission (PrintWindow)
+          --every SECONDS  ...every SECONDS instead (e.g. 1.5 to follow an effect)
           --key SPEC@S[:MS] hold SPEC (as `key` takes it) S seconds into the mission for MS ms (default 1000),
                            with a picture just before and after when --shots is given (repeatable)
           --place SRC=DEST  SRC put at <game>/Mods/DEST for the run (e.g. a build's EDF6VehicleCrew.dll over the
                            installed one, or an SGO the build needs); the original bytes are kept and put back
                            byte for byte afterwards (repeatable)
           --ini KEY=VALUE  KEY set in EDF6VehicleCrew.ini [VehicleCrew] for the run, the ini put back afterwards
+          --hq             the mission's pack and row made current, then the HQ (sortie) menu itself instead of the
+                           mission: SECONDS there (its pictures with --shots), quit the same way
         Every run also watches the desktop (DesktopWatch): the foreground window's process, the cursor clip and the
         cursor every 20 ms, and once in the mission the real cursor moved 40 px to see that nothing pulls it back;
         the counts are printed at the end (all must be 0).
@@ -620,7 +629,8 @@ def commit_of(row: str) -> float:
 
 def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None, *,
         extra: tuple[str, ...] = (), loadout: str | None = None, shots: str | None = None,
-        keys: tuple[tuple[str, float, int], ...] = (), place: tuple[str, ...] = (), ini: tuple[str, ...] = ()) -> int:
+        keys: tuple[tuple[str, float, int], ...] = (), place: tuple[str, ...] = (), ini: tuple[str, ...] = (),
+        hq: bool = False, every: float = 15.0) -> int:
     install(game)
     placed: tuple[str, bytes] | None = None
     placements: list[Placement] = []
@@ -634,15 +644,15 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
                 placements.append(Placement(game, dest, f.read()))
         if ini:
             placements.append(Placement(game, 'Plugins/EDF6VehicleCrew.ini', ini_with(game, ini)))
-        command(game, '\n'.join([f'mission {mission} {difficulty}', *extra]))
+        command(game, '\n'.join([f'mission {mission} {difficulty}' + (' hq' if hq else ''), *extra]))
         launch()
-        if not wait_for(game, 'PlayMission_Offline', 240):
-            print('the mission never started (see the log)')
+        if not wait_for(game, 'SCRIPT HQMain stays' if hq else 'PlayMission_Offline', 240):
+            print('the HQ menu never came (see the log)' if hq else 'the mission never started (see the log)')
             return 1
-        print('mission started; staying', seconds, 's')
+        print('the HQ menu shown' if hq else 'mission started', '; staying', seconds, 's')
         start = time.time()
         end = start + seconds
-        next_shot = start + 15
+        next_shot = start + every
         nudge_at = start + min(20, seconds / 2)
         pending = sorted(keys, key=lambda k: k[1])
         while (now := time.time()) < end:
@@ -655,14 +665,14 @@ def run(game: str, mission: str, difficulty: int, seconds: int, keep: str | None
             if shots and now >= next_shot:
                 os.makedirs(shots, exist_ok=True)
                 try:
-                    shot(os.path.join(shots, f'{int(now - start):04d}s.png'))
+                    shot(os.path.join(shots, f'{now - start:06.1f}s.png'))
                 except (RuntimeError, AssertionError) as e:
                     print('no picture:', e)
-                next_shot += 15
+                next_shot += every
             while pending and now >= start + pending[0][1]:
                 spec, at, ms = pending.pop(0)
                 hold_keys(game, spec, ms, shots, f'{int(at):04d}s-{spec.replace("+", "_")}')
-            time.sleep(1)
+            time.sleep(min(1.0, every / 2))
         if not game_pids():
             print('the game exited before quit was requested')
             return 1
@@ -734,10 +744,14 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
     keys: list[tuple[str, float, int]] = []
     place: list[str] = []
     ini: list[str] = []
-    options: dict = {'extra': (), 'loadout': None, 'shots': None, 'keys': (), 'place': (), 'ini': ()}
+    options: dict = {'extra': (), 'loadout': None, 'shots': None, 'keys': (), 'place': (), 'ini': (), 'hq': False, 'every': 15.0}
     i = 0
     while i < len(argv):
-        if argv[i] in ('--cmd', '--loadout', '--shots', '--key', '--place', '--ini'):
+        if argv[i] == '--hq':
+            options['hq'] = True
+            i += 1
+            continue
+        if argv[i] in ('--cmd', '--loadout', '--shots', '--key', '--place', '--ini', '--every'):
             if i + 1 >= len(argv):
                 raise SystemExit(argv[i] + ' needs a value')
             if argv[i] == '--cmd':
@@ -748,6 +762,10 @@ def run_options(argv: list[str]) -> tuple[list[str], dict]:
                 if '=' not in argv[i + 1]:
                     raise SystemExit('--place wants SOURCE=DEST (DEST under Mods, e.g. Plugins/EDF6VehicleCrew.dll)')
                 place.append(argv[i + 1])
+            elif argv[i] == '--every':
+                options['every'] = float(argv[i + 1])
+                if not options['every'] > 0:
+                    raise SystemExit('--every wants a number of seconds over 0')
             elif argv[i] == '--ini':
                 if '=' not in argv[i + 1]:
                     raise SystemExit('--ini wants KEY=VALUE')

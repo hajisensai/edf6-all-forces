@@ -52,7 +52,7 @@ frame, triangles facing away from the eye left out; textures re-saved as PNG. Th
 
 
 def default_out() -> str:
-    return os.path.join(om.DEV_MODELS, 'cockpits')
+    return os.path.join(om.REPO_MODELS, 'cockpits')
 
 
 def to_eye(p: np.ndarray, origin: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> np.ndarray:

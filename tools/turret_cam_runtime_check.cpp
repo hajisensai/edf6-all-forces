@@ -1,7 +1,9 @@
 // Production turret aim, muzzle transforms, round prediction and launcher frame on stand-in native memory.
 // No game process or installed assets. Link src/rounds.cpp, src/launcher.cpp, edf6common and user32.
 #include "../src/crew.h"
-namespace crew { bool TurretTestRound(const unsigned char*,RoundModel*) noexcept; }
+namespace crew {
+bool observation=false;
+bool VehicleLookActive(const void*) noexcept { return observation; } bool TurretTestRound(const unsigned char*,RoundModel*) noexcept; }
 #define ReadRound TurretTestRound
 #include "../src/turretcam.cpp"
 #undef ReadRound
@@ -23,7 +25,11 @@ Config config{};
 const Config& Cfg() noexcept { return config; }
 ULONGLONG GameMs() noexcept { return 1000; }
 void Log(const char*,...) noexcept {}
-bool MapHoldsKeys() noexcept { return false; }
+bool mapKeys=false,mapView=false;
+bool MapHoldsKeys() noexcept { return mapKeys; }
+bool MapOwnsView() noexcept { return mapView; }
+const void* firstPersonVehicle=nullptr;unsigned firstPersonSeat=0;
+bool FirstPersonVehicleView(const void* vehicle,unsigned seat) noexcept { return vehicle==firstPersonVehicle && seat==firstPersonSeat; }
 unsigned char* selectedGun=nullptr;
 unsigned char* localHuman=nullptr;
 unsigned char* PlayerHuman() noexcept{return localHuman;}
@@ -42,12 +48,17 @@ bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1.0f; }
 bool mountedOptic=false;
 bool SightZoomMounted(const void*) noexcept{return mountedOptic;}
+// The optic present on seat 0 (sightzoom.cpp SightZoomCanMount) and first person on (FirstPersonGunnerSight): with both,
+// the gunner's sight is up and the free-look key is not the turret camera's (TurretCamFreeLook).
+bool canMount=false,gunnerSight=false;
+bool SightZoomCanMount(const void*,unsigned) noexcept{return canMount;}
+bool FirstPersonGunnerSight() noexcept{return gunnerSight;}
 bool highOn=true;
 bool HighCamOn(const void*) noexcept { return highOn; }
 int cameraReads=0;
 bool CameraRay(float* eye,float* dir) noexcept {
     ++cameraReads;
-    eye[0]=999;eye[1]=500;eye[2]=-999;dir[0]=0;dir[1]=-1;dir[2]=0;
+    eye[0]=999;eye[1]=500;eye[2]=-999;dir[0]=1;dir[1]=0;dir[2]=0;
     return true;
 }
 bool terrain=true;
@@ -64,6 +75,7 @@ bool LauncherLoft(const void*,LoftReadout*) noexcept { return false; }
 void Unexpected() noexcept { static volatile bool fail=true;if(fail)std::abort(); }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { Unexpected();return false; }
 bool GunshipGunnerCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { return false; }
+bool DreadnoughtCamera(const unsigned char*,float*,float*) noexcept { return false; }
 bool SazabiCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { Unexpected();return false; }
 bool indirectFixture=false;
 bool IndirectFireSeat(const unsigned char*) noexcept { if(!indirectFixture)Unexpected();return true; }
@@ -111,11 +123,16 @@ void Run() {
     config.debug=false;
     std::vector<unsigned char> module(0x20B2960);
     image=module.data();unsigned char world[0x80]{},physics[0x30]{};
+    unsigned char pointJump[14]={0xff,0x25,0,0,0,0};const auto pointFn=reinterpret_cast<std::uintptr_t>(&CameraPoint);
+    std::memcpy(pointJump+6,&pointFn,8);DWORD protection=0;VirtualProtect(image+kPoint,14,PAGE_EXECUTE_READWRITE,&protection);
+    std::memcpy(image+kPoint,pointJump,14);FlushInstructionCache(GetCurrentProcess(),image+kPoint,14);
     void* gravityVtable[]={reinterpret_cast<void*>(&Gravity)};
     Put<void*>(image,0x20B2958,world);Put<void*>(world,0x68,physics);Put<void*>(physics,0x20,gravityVtable);
     unsigned char vehicle[0x1100]{},vehicleBones[0x220]{},axisMap[2][0x38]{},seat[kSeatStride]{},human[0x360]{},control[0x10]{};
     localHuman=human;
     Matrix(vehicle+kMatrix);Put<void*>(vehicle,kSeats,seat);Put<std::uint64_t>(vehicle,kSeatCount,1);
+    Put<float>(vehicle,kObjCamLook+4,2);Put<float>(vehicle,kObjCamEye+4,5);Put<float>(vehicle,kObjCamEye+8,-20);
+    const float normalEye[3]={0,5,-20},normalLook[3]={0,2,100};
     Put<void*>(seat,kSeatRider,human);Put<void*>(seat,kSeatRiderCtrl,control);Put<int>(control,edf::kCtrlUses,1);
     human[kHumanPlayer]=1;Put<void*>(human,kHumanPad,control);
     seat[kSeatPad]=1;Put<float>(seat,kSeatAim+kAimAxes,-tcam::kPi);Put<float>(seat,kSeatAim+kAimAxes+4,tcam::kPi);
@@ -232,8 +249,8 @@ void Run() {
         Put<std::uint16_t>(seat,kSeatButtons,0);Aim(seat,input,cmd);
         Check(cameraReads==0 && cmd[0]==input[0] && cmd[1]==input[1] && !shared.returning,
               "free-look release during the blend returns directly to native input");
-        PublishObservation(seat,false);TurretCamFrame(vehicle);
-        Check(cameraReads==1 && game.hasAim,"normal frame resumes screen sampling only after observation ends");
+        PublishObservation(seat,false);PublishNormalRay(seat,shared.take,normalEye,normalLook);TurretCamFrame(vehicle);
+        Check(cameraReads==0 && game.hasAim,"normal frame samples only the owned normal request after observation ends");
         Aim(seat,input,cmd);
         Check(shared.steering==decoupled,"normal camera ownership resumes after the return blend");
     }
@@ -260,12 +277,88 @@ void Run() {
     Camera(seat,opticTarget,opticCamera);Check(!camSide.owned,"mounted optic bypasses third-person camera placement and blend");
     TurretCamFrame(vehicle);Check(cameraReads==0&&!shared.decoupled,"frame sampler stays off the mounted optic ray");
     mountedOptic=false;owner=0;TurretCamFrame(vehicle);Aim(seat,input,command);
-    Check(cameraReads>0 && shared.view,"leaving optic reinitializes the regular view from current camera state");
+    Check(cameraReads==0 && shared.view && shared.resume && !game.hasAim,
+          "leaving optic seeds native axes and cannot sample the stale rendered optic");
+    Camera(seat,opticTarget,opticCamera);TurretCamFrame(vehicle);
+    Check(cameraReads==0 && !shared.resume && game.hasAim,
+          "normal camera request restores control independently of the rendered optic cache");
+    // A body/neck-mounted cockpit can look left of the requested gun direction, and the renderer may keep that
+    // camera cached for arbitrarily many simulation steps. Neither condition is an aim input.
+    ResetTurretCam();lookOk=true;nextAim=&UnexpectedAim;selectedGun=primary.data;
+    config.decoupledTurretCam=true;highOn=false;cameraReads=0;firstPersonVehicle=vehicle;
+    Put<float>(seat,kSeatStick,0);Put<float>(seat,kSeatStick+4,0);
+    Put<float>(seat,kSeatAim+kAimAxes,-tcam::kPi);Put<float>(seat,kSeatAim+kAimAxes+4,tcam::kPi);
+    Put<float>(seat,kSeatAim+kAimAxes+8,0);Put<float>(seat,kSeatAim+kAimAxes+kAxisStride+8,0);
+    unsigned char normalCamera[0x700]{};float normalTargets[20]{};
+    const float noInput[2]{};float noCommand[2]{};
+    bool quiet=true;
+    for(int frameIndex=0;frameIndex<40;++frameIndex) {
+        TurretCamFrame(vehicle);Aim(seat,noInput,noCommand);Camera(seat,normalTargets,normalCamera);
+        quiet=quiet && noCommand[0]==0 && noCommand[1]==0 && !game.hasAim && !shared.steering && !camSide.owned;
+    }
+    Check(quiet && cameraReads==0,"first-person body/neck view cannot drive its own mount left at zero input");
+    Check(TurretCamServes(vehicle) && rigInfo.v==vehicle && rigInfo.normalRadius>0,
+          "first person preserves seat identity and the measured rig needed by the high view");
+    shared.decoupled=shared.steering=true;shared.resume=false;
+    Check(!TurretCamTurret(vehicle,0) && !TurretCamSteers(vehicle),"external first-person owner cannot publish stale camera steering");
+    Aim(seat,input,command);
+    Check(command[0]==input[0] && command[1]==input[1] && !shared.decoupled,
+          "first person preserves the native driver's full turn input");
+    firstPersonVehicle=nullptr;
+    TurretCamFrame(vehicle);Aim(seat,noInput,noCommand);
+    Check(!game.hasAim && shared.resume && noCommand[0]==0 && noCommand[1]==0,
+          "FP to third person starts from native axes before a normal camera request exists");
+    Camera(seat,normalTargets,normalCamera);
+    bool resumed=true;
+    for(int frameIndex=0;frameIndex<8;++frameIndex) {
+        TurretCamFrame(vehicle);Aim(seat,noInput,noCommand);Camera(seat,normalTargets,normalCamera);
+        resumed=resumed && game.hasAim && shared.normalRay && !shared.resume && std::fabs(shared.yaw)<.01f;
+    }
+    Check(resumed && cameraReads==0,"returning third-person control uses its own request while old FP render rays remain left");
+    // The free-look key's owner (2026-10-21: "鼠标中键的时候应该是绕着车转…战雷一样的那个圆的鼠标指示点怎么没了"): in third
+    // person the turret camera's own look (its rig orbit, TurretMark's held circle), never vehicle_look.cpp's in-place turn.
+    Check(TurretCamFreeLook(vehicle,0) && !TurretCamFreeLook(vehicle,1) && !TurretCamFreeLook(nullptr,0),
+          "third person on the turret it places: the free look is the turret camera's, seat 0 only");
+    firstPersonVehicle=vehicle;Check(!TurretCamFreeLook(vehicle,0),"first person: the cockpit eye's own head turn");
+    firstPersonVehicle=nullptr;canMount=true;gunnerSight=true;Check(!TurretCamFreeLook(vehicle,0),"the gunner's sight up: the optic's observation");
+    gunnerSight=false;Check(TurretCamFreeLook(vehicle,0),"an optic at 1x in third person is not up: still the turret camera's");
+    canMount=false;mapView=true;Check(!TurretCamFreeLook(vehicle,0),"the map's view: nobody's free look");mapView=false;
+    for(int ownerKind=0;ownerKind<3;++ownerKind) {
+        mapKeys=ownerKind==0;mapView=ownerKind==1;observation=ownerKind==2;
+        game.hasAim=game.steer.hasWant=true;shared.free=shared.returning=shared.steering=true;
+        TurretCamFrame(vehicle);Aim(seat,input,command);Camera(seat,normalTargets,normalCamera);
+        Check(!game.hasAim && !game.steer.hasWant && !shared.normalRay && !shared.steering && !camSide.owned &&
+              command[0]==input[0] && command[1]==input[1],"map keys, map return blend and vehicle look each revoke the old aim source");
+        mapKeys=mapView=observation=false;
+        TurretCamFrame(vehicle);Aim(seat,noInput,noCommand);
+        Check(shared.resume && !game.hasAim,"return from another owner waits for an identified normal source");
+        Camera(seat,normalTargets,normalCamera);TurretCamFrame(vehicle);
+        Check(game.hasAim && !shared.resume && cameraReads==0,"map/observation return ignores stale rendered view and uses normal request");
+    }
+    const unsigned sourceTake=shared.take;
+    shared.rayTake=sourceTake-1;shared.normalRay=true;shared.resume=false;
+    TurretCamFrame(vehicle);
+    Check(!game.hasAim && !TurretCamTurret(vehicle,0),"a normal ray from another seat take cannot become the current aim or camera owner");
+    PublishNormalRay(seat,sourceTake-1,normalEye,normalLook);
+    Check(shared.rayTake!=sourceTake,"late previous-seat camera publication cannot replace this take's source");
+    Put<void*>(seat,kSeatRider,nullptr);TurretCamFrame(vehicle);
+    Put<void*>(seat,kSeatRider,human);TurretCamFrame(vehicle);
+    Check(shared.take!=sourceTake && shared.resume && !shared.normalRay && !game.hasAim,
+          "leaving and returning to the driver seat starts a new source identity");
+    Put<void*>(otherSeat,kSeatRider,human);localHuman=human;TurretCamFrame(otherVehicle);
+    Check(shared.v==otherVehicle && shared.resume && !shared.normalRay && !game.hasAim,
+          "switching vehicles cannot reuse the previous cockpit or normal source");
+    TurretCamFrame(vehicle);
+    firstPersonVehicle=vehicle;highOn=true;TurretCamFrame(vehicle);Aim(seat,noInput,noCommand);
+    Camera(seat,normalTargets,normalCamera);
+    Check(shared.high && shared.focusValid && camSide.owned && !shared.normalRay && !shared.steering,
+          "high view takes priority over the ordinary cockpit without camera-driven gun input");
+    highOn=false;TurretCamFrame(vehicle);Aim(seat,noInput,noCommand);Camera(seat,normalTargets,normalCamera);
+    Check(!camSide.owned && !shared.observing && !shared.highView && !shared.normalRay,
+          "high view returns directly to the cockpit without retaining its observation blend");
+    firstPersonVehicle=nullptr;cameraReads=0;
     // Full input -> sampled real projectile -> launcher -> camera target -> native collision order.
     // Only the original camera-locator accessor and the collision query outcomes are stand-ins.
-    unsigned char pointJump[14]={0xff,0x25,0,0,0,0};const auto pointFn=reinterpret_cast<std::uintptr_t>(&CameraPoint);
-    std::memcpy(pointJump+6,&pointFn,8);DWORD protection=0;VirtualProtect(image+kPoint,14,PAGE_EXECUTE_READWRITE,&protection);
-    std::memcpy(image+kPoint,pointJump,14);FlushInstructionCache(GetCurrentProcess(),image+kPoint,14);
     mountedOptic=false;localHuman=human;lookOk=true;nextAim=&UnexpectedAim;highOn=true;terrain=true;floorY=0;
     config.highCamHeight=45;config.highCamBack=35;config.highCamPitch=40;
     Put<float>(seat,kSeatAim+kAimAxes,-tcam::kPi);Put<float>(seat,kSeatAim+kAimAxes+4,tcam::kPi);
@@ -277,8 +370,9 @@ void Run() {
         Put<int>(primary.data,edf::kWeaponAmmoAlive,launcher ? 1500 : 1200);Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         unsigned char camera[0x700]{};Put<float>(camera,0x528,.1f);
         Put<float>(camera,kCamEye+4,5);Put<float>(camera,kCamEye+8,-20);Put<float>(camera,kCamLook+4,2);
-        bool stable=true,realFocus=true,inputUnchanged=true;
+        bool stable=true,realFocus=true,inputUnchanged=true,onHull=true,still=true;
         const float wantPitch=-std::atan2(45.f,35.f);
+        float settledEye[3]{};
         for(int frameIndex=0;frameIndex<90;++frameIndex) {
             const float quietInput[2]{};float output[2]{};Aim(seat,quietInput,output); // native input/aim stage
             inputUnchanged=inputUnchanged && output[0]==0 && output[1]==0;
@@ -290,7 +384,16 @@ void Run() {
             const float delta[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
             const float pitch=vec::Len(delta)<1e-6f ? 0 : tcam::PitchOf(delta);
             if(frameIndex>20)stable=stable && std::fabs(pitch-wantPitch)<1e-4f;
+            // 2026-10-23: the view is on the hull, and the gun rocking (its muzzle moved every frame from frame 40,
+            // the real shot's endpoint with it) moves nothing.
+            if(frameIndex>20)onHull=onHull && std::hypot(look[0]-hull[0],look[2]-hull[2])<0.5f;
+            if(frameIndex==40)std::memcpy(settledEye,eye,12);
+            if(frameIndex>40)still=still && vec::Dist(eye,settledEye)<1e-3f;
+            if(frameIndex>=40)Matrix(primary.bone+edf::kBoneRows,-4,8+static_cast<float>(frameIndex%5),10+static_cast<float>(frameIndex%7));
         }
+        Matrix(primary.bone+edf::kBoneRows,-4,8,10);
+        Check(onHull,"the high view looks at the vehicle, not the shot's endpoint");
+        Check(still,"the gun rocking does not move the high view");
         Check(inputUnchanged,"high camera closed loop never generates native gun input from observation");
         Check(realFocus,"collision pivot must not change the real ballistic terrain focus");
         Check(stable,launcher ? "Katyusha high camera remains stable after native surface collision" : "twin artillery high camera remains stable after native surface collision");
@@ -329,7 +432,7 @@ void Run() {
         Put<void*>(seat,kSeatWeapons,three);Put<std::uint64_t>(seat,kSeatWeaponCount,3);
         // The lock's lead replaces the screen's centre (aimlink.h V4); asked every frame, also through the high view.
         selectedGun=primary.data;leadOn=true;leadPoint[0]=12;leadPoint[1]=3;leadPoint[2]=400;
-        TurretCamFrame(vehicle);
+        PublishNormalRay(seat,shared.take,normalEye,normalLook);TurretCamFrame(vehicle);
         Check(game.hasAim && game.aimHit && game.aim[0]==12 && game.aim[2]==400,"AUTO with a lock: the turret goes to the lead point");
         leadOn=false;TurretCamFrame(vehicle);
         Check(game.hasAim && !(game.aim[0]==12 && game.aim[2]==400),"no lock: the screen's centre again");

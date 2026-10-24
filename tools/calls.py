@@ -30,7 +30,8 @@ class Call:
     reload: float        # ReloadTime[0], the base of the star curve (a thrown one's: frames, 60 a second)
     level: float         # WEAPONTABLE column 4, same units as docs/weapons.csv level_raw
     brings: str          # 'jets' / 'helis' (the support deployment), 'sub' (SubLaunch), 'vehicle' (a vehicle request),
-                         # 'throw' (a Robot Bomb whose bomb releases a drone where it lands: JetLaunchThrown)
+                         # 'throw' (a Robot Bomb whose bomb releases a drone where it lands: JetLaunchThrown),
+                         # 'ultimate' (a satellite call whose fire becomes the plugin's show: src/ultimate.cpp)
     log: str = ''        # its name in the plugin's log
     fuel_sec: int = 0    # the plugin's fuel limit for what it brings (0: none)
     role: str = ''       # brings 'jets': the JetRole (src/crew.h)
@@ -54,6 +55,9 @@ class Call:
     # whose rounds put the player into the vehicle they hit (src/boarding.cpp);
     # `mark` is then its bullets' tag (call_weapons.gun_sgo), `reload` 0 (the template's own).
     gun: str = ''
+    # ...or (brings 'gravity') the gravity gun (src/gravitygun.cpp on src/gravity.h): this stock weapon row (its SGO, row and
+    # texts) under its own name, `mark` its AmmoHitSizeAdjust (throw_mark: the plugin tells it by the float's bits).
+    weapon: str = ''
 
     @property
     def flown(self) -> bool:
@@ -171,6 +175,23 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_BOARDING_GUN_WING', 7302, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='pWeapon127'),
     Call('EDF6VC_CALL_BOARDING_GUN_RAIDER', 7303, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='eWeapon120'),
     Call('EDF6VC_CALL_BOARDING_GUN_FENCER', 7304, 'boarding_gun', False, 0, 0, 0.26, 'gun', gun='hCannon01'),
+    Call('EDF6VC_CALL_SEDAN', 0, 'sedan', False, 0, 1500, .1, 'vehicle', vehicle='EDF6VC_SEDAN', ground='sedan'),
+    # Appended 2026-10-18: authored M163 / BMPT models, native tracked vehicle contracts.
+    Call('EDF6VC_CALL_VULCAN', 0, 'vulcan', False, 0, 6500, 1.0, 'vehicle', vehicle='EDF6VC_VULCAN', ground='vulcan'),
+    Call('EDF6VC_CALL_BMPT', 0, 'bmpt', False, 0, 7500, 1.2, 'vehicle', vehicle='EDF6VC_BMPT', ground='bmpt'),
+    # Appended 2026-10-19: the ultimate strike (src/ultimate.cpp, docs/plan-2026-10-19-ultimate.md; the user: 「特效拉满
+    # 昏天暗地」「清一片区域的终极技能 pt要求很高」): a stock satellite call (call_weapons.ULTIMATE_TEMPLATE: the laser
+    # marker, its countdown and voice) whose fire the plugin turns into its show. 15000 pt: the stock satellites ask 2400-5400.
+    Call('EDF6VC_CALL_ULTIMATE', 7501, 'ultimate', False, 0, 15000, 2.4, 'ultimate', 'ultimate strike'),
+    # Appended 2026-10-20 (the user: 「看看这里面的重力枪，咱们也做一个……根据速度和质量造成伤害」): the gravity gun, the Air Raider's
+    # Laser Guide Kit (eLockonMarkerL01: its beam held while the trigger is, no round of its own) that grabs, carries and
+    # throws what its beam is on (src/gravitygun.cpp, src/gravity.h).
+    Call('EDF6VC_CALL_GRAVITY_GUN', throw_mark(0xE01), 'gravity_gun', False, 0, 0, 0.5, 'gravity', weapon='eLockonMarkerL01'),
+    # Appended 2026-10-21 (the user: 「无畏舰拿出来放到edf里面……可以放飞船……玩家也可以操纵无畏舰」): the Dreadnought
+    # (src/dreadnought.cpp, tools/make_dreadnought.py), a 500 m ship the player pilots, its hangar's fighters the player
+    # boards; requested empty like the Sazabi; `mark` its body's (pylib/vcobjects.py DREADNOUGHT_MARK).
+    Call('EDF6VC_CALL_DREADNOUGHT', 7601, 'dreadnought', False, 0, 30000, 3.2, 'vehicle', vehicle='EDF6VC_DREADNOUGHT',
+         jet='edf6tr_dreadnought_mission'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -193,6 +214,11 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'medic helis (2026-10-06)': IDS[:39],
     'Sazabi (2026-10-07)': IDS[:40],
     'all-class boarding rifles (2026-10-08)': IDS[:43],
+    'civilian sedan (2026-10-16)': IDS[:44],
+    'M163 Vulcan and BMPT (2026-10-19)': IDS[:46],
+    'ultimate strike (2026-10-19)': IDS[:47],
+    'gravity gun (2026-10-20)': IDS[:48],
+    'Dreadnought (2026-10-21)': IDS[:49],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -218,6 +244,44 @@ def slot_of(row_id: str) -> str | None:
 
 # Per kind: name and what it does, per language (KR reuses EN).
 KINDS: dict[str, dict[str, tuple[str, str]]] = {
+    'gravity_gun': {
+        'SC': ('重力枪', '按住扳机：光束照到的东西被抓起，悬在准星前方随视线移动——敌人、尸体、车辆、集装箱、碎片都行（60 吨以内；'
+                      '越重拖得越慢，太重的抓不动）。松开扳机：把它朝准星方向甩出去，越轻飞得越快，越重飞得越慢但更有力。'
+                      '被甩出的东西撞到地面、墙壁或敌人时，按自身质量和撞击速度造成伤害（½·质量·速度²），被抓的敌人自己摔下也受伤；'
+                      '飞过敌人身边会撞伤它。只伤敌人，不伤友军。射程 150 米。'),
+        'CN': ('重力槍', '按住扳機：光束照到的東西被抓起，懸在準星前方隨視線移動——敵人、屍體、車輛、貨櫃、碎片都行（60 噸以內；'
+                      '越重拖得越慢，太重的抓不動）。放開扳機：把它朝準星方向甩出去，越輕飛得越快，越重飛得越慢但更有力。'
+                      '被甩出的東西撞到地面、牆壁或敵人時，按自身質量和撞擊速度造成傷害（½·質量·速度²），被抓的敵人自己摔下也受傷；'
+                      '飛過敵人身邊會撞傷它。只傷敵人，不傷友軍。射程 150 公尺。'),
+        'JA': ('グラビティガン', '引き金を引き続けると、ビームが当たったもの（敵・死体・ビークル・コンテナ・破片。60 t まで、重いほどゆっくり、'
+                            'それ以上は動かない）をつかみ、照準の先に浮かべて視線に合わせて動かす。離すと照準の方向へ投げる。軽いほど速く、'
+                            '重いほど遅いが強い。投げたものが地面・壁・敵にぶつかると、その質量と衝突速度に応じたダメージ（½·質量·速度²）を与え、'
+                            'つかまれた敵は自分が叩きつけられてもダメージを受ける。そばを通過した敵にも当たる。味方には当たらない。射程 150 m。'),
+        'EN': ('Gravity Gun', 'Hold the trigger: what the beam is on is picked up and held in front of the sight, following your '
+                              'aim (enemies, corpses, vehicles, containers, debris; up to 60 t, the heavier the slower, heavier '
+                              'than that does not move). Release: it is thrown where the sight points, the lighter the faster, '
+                              'the heavier the slower but harder. What is thrown deals damage by its own mass and impact speed '
+                              '(1/2 mass speed^2) when it hits the ground, a wall or an enemy (a thrown enemy is hurt by its own '
+                              'fall too), and hits the enemies it flies past. Enemies only, never friends. Range 150 m.'),
+    },
+    'vulcan': {
+        'SC': ('M163 火神防空车', '请求一辆 M163 火神防空车：M113 底盘和六管 20mm M61 机炮。高爆与穿甲弹在载具挂载菜单或 R / 手柄 LB 间切换，一次只发射选中的弹种。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),
+        'CN': ('M163 火神防空車', '請求一輛 M163 火神防空車：M113 底盤和六管 20mm M61 機砲。高爆與穿甲彈在載具掛載選單或 R / 手把 LB 間切換，一次只發射選中的彈種。外觀為 KojfDiscord 分享的戰雷（War Thunder）模型（CC BY 4.0）。'),
+        'JA': ('M163 バルカン対空車両', 'M113 車体に 20mm 六砲身 M61 機関砲を搭載する M163 を要請する。搭載メニューまたは R / LB で榴弾・徹甲弾を切り替える。外観は KojfDiscord が公開した War Thunder のモデル（CC BY 4.0）。'),
+        'EN': ('M163 Vulcan', 'Requests an M163 with an M113 hull and six-barrel 20 mm M61 cannon. Select HE or AP in the payload menu or with R / LB; only the selected belt fires. Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
+    },
+    'bmpt': {
+        'SC': ('BMPT 坦克支援车', '请求一辆 BMPT：双 30mm 双路供弹机炮（高爆 / APDS 穿甲弹链，左右炮管轮流射击）为主攻击，9M120 阿塔卡导弹（串联破甲 / 9M120F 温压）为副攻击，可同时开火，导弹需要锁定。R / 手柄 LB 切换机炮弹链，T / 手柄十字键右切换导弹，各管各的；载具挂载菜单两路都可选。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),
+        'CN': ('BMPT 戰車支援車', '請求一輛 BMPT：雙 30mm 雙路供彈機砲（高爆 / APDS 穿甲彈鏈，左右砲管輪流射擊）為主攻擊，9M120 阿塔卡飛彈（串聯破甲 / 9M120F 溫壓）為副攻擊，可同時開火，飛彈需要鎖定。R / 手把 LB 切換機砲彈鏈，T / 手把十字鍵右切換飛彈，各管各的；載具掛載選單兩路皆可選。外觀為 KojfDiscord 分享的戰雷（War Thunder）模型（CC BY 4.0）。'),
+        'JA': ('BMPT 戦車支援戦闘車', '30mm 連装機関砲（二系統給弾：榴弾 / APDS、左右交互射撃）を主攻撃、9M120 アターカ（タンデム HEAT / 9M120F サーモバリック）を副攻撃で同時に撃てる BMPT を要請する。ミサイルはロックオンが必要。R / LB で機関砲の弾帯、T / 十字キー右でミサイルを切り替える（それぞれ独立）。搭載メニューでは両方を選べる。外観は KojfDiscord が公開した War Thunder のモデル（CC BY 4.0）。'),
+        'EN': ('BMPT Tank Support Vehicle', 'Requests a BMPT: twin dual-feed 30 mm autocannons (HE or APDS belt, the barrels firing in turn) on the primary attack and 9M120 Ataka missiles (tandem HEAT or 9M120F thermobaric) on the secondary attack, both at once. Missiles require lock-on. R / LB switches the cannon belt, T / D-pad right the missile, each its own; the payload menu sets either. Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
+    },
+    'sedan': {
+        'SC': ('民用轿车', '请求一辆没有武器的民用轿车，单驾驶席。按通常的上车键驾驶，V 切换第一人称，按住鼠标中键或手柄 L3 转动视角自由观察。'),
+        'CN': ('民用轎車', '請求一輛沒有武器的民用轎車，單駕駛席。按通常的上車鍵駕駛，V 切換第一人稱，按住滑鼠中鍵或手柄 L3 轉動視角自由觀察。'),
+        'JA': ('民間セダン', '非武装のセダンを要請する。運転席は一つ。通常の搭乗キーで運転、V で一人称切替。マウス中ボタンまたは L3 を押しながら見回す。'),
+        'EN': ('Civilian Sedan', 'Requests an unarmed sedan with one driver seat. Board normally, press V for first person, hold middle mouse or L3 and look to observe.'),
+    },
     'fly_interceptor': {
         'SC': ('截击机（自驾）', '请求一架由你自己驾驶的截击机，空着送到信号弹处：机炮和 4 远距、2 中距、2 近距空空导'
                                  '弹，飞得最快最高。操作同玩家战斗机。'),
@@ -464,6 +528,27 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                                   'flare. It walks and runs, dashes and flies on its thrusters; beam shot rifle, beam '
                                   'tomahawk, shield (with missiles), funnels, and the chest mega particle cannon.'),
     },
+    'dreadnought': {
+        'SC': ('无畏舰', '请求一艘由你自己驾驶的无畏舰（游戏《Dreadnought》的重型无畏舰，全长 500 米），空着送到信号弹处。'
+                       '8 座炮塔都能上人操纵（舰桥指挥空炮塔）；两舷装几个机库模块就有几个机库（ini 可选，默认 4 个），'
+                       '舰载机（战斗机、防御战斗机、轰炸机、截击机）从各自机库口飞出随舰作战、飞回入库；'
+                       '站到机库上方按上车键，就从这个机库驾驶一架出击，返舰时飞回原机库。'),
+        'CN': ('無畏艦', '請求一艘由你自己駕駛的無畏艦（遊戲《Dreadnought》的重型無畏艦，全長 500 公尺），空著送到信號彈處。'
+                       '8 座砲塔都能上人操縱（艦橋指揮空砲塔）；兩舷裝幾個機庫模組就有幾個機庫（ini 可選，預設 4 個），'
+                       '艦載機（戰鬥機、防禦戰鬥機、轟炸機、攔截機）從各自機庫口飛出隨艦作戰、飛回入庫；'
+                       '站到機庫上方按上車鍵，就從這個機庫駕駛一架出擊，返艦時飛回原機庫。'),
+        'JA': ('ドレッドノート', '自分で操縦するドレッドノート（ゲーム『Dreadnought』の重ドレッドノート、全長 500 m）を'
+                            '信号弾の位置へ要請する。8 基の砲塔すべてに搭乗して操作でき（艦橋は空いた砲塔を指揮）、両舷に積んだ格納庫'
+                            'モジュールの数だけ格納庫があり（ini で選択、既定 4 基）、艦載機（戦闘機、防衛戦闘機、爆撃機、迎撃機）が'
+                            'それぞれの格納庫口から発艦して随伴・帰還する。格納庫の上で搭乗キーを押すとその格納庫から1機で出撃し、'
+                            '帰艦時は元の格納庫に戻る。'),
+        'EN': ('Dreadnought', 'Requests a Dreadnought you pilot yourself (the heavy dreadnought of the game "Dreadnought", '
+                              '500 m long), delivered empty to the flare. All 8 turrets can be manned (the bridge commands the '
+                              'free ones); it has a hangar for each hangar module fitted on its broadsides (chosen in the ini, '
+                              '4 by default), launching and taking back fighters (fighter, defender, bomber, interceptor) '
+                              'through their own openings; stand over a hangar and press board to sortie from it in one, '
+                              'and it flies you back into that hangar.'),
+    },
     'pjet_fighter': {
         'SC': ('玩家战斗机', '请求一架由你自己驾驶的战斗机，空着送到信号弹处：两门机炮和导弹，轻快，转弯最急。'
                          '前推左摇杆或按上升键加油门，后拉减油门；右摇杆或鼠标转弯和俯仰。'),
@@ -548,6 +633,22 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Medic Helis', 'Calls medic helicopters whose door guns fire healing rounds: a friend they hit gets health '
                               'back. Their gunners aim at hurt friends (you included) on their own and never at enemies.'),
     },
+    'ultimate': {
+        'SC': ('天罚', '终极支援：用激光指示一点，倒计时后天色骤暗、雾气压近，标记点上空展开魔法阵，数道光束从高空会聚；'
+                  '随后半径 220 米内雷暴连劈约 6 秒，最后一道巨型光柱贯下，爆炸由中心一圈圈推到边缘，余火燃烧。'
+                  '整场约 25 秒，范围内敌我不分。'),
+        'CN': ('天罰', '終極支援：用雷射指示一點，倒數後天色驟暗、霧氣壓近，標記點上空展開魔法陣，數道光束從高空會聚；'
+                  '隨後半徑 220 公尺內雷暴連劈約 6 秒，最後一道巨型光柱貫下，爆炸由中心一圈圈推到邊緣，餘火燃燒。'
+                  '整場約 25 秒，範圍內敵我不分。'),
+        'JA': ('天罰', '最終支援。レーザーで地点を指示すると、カウントダウンの後に空が暗転し霧が迫り、魔法陣が展開して上空から'
+                  '光線が収束する。続いて半径 220m に約 6 秒間雷が降り注ぎ、最後に巨大な光柱が貫いて、爆発が中心から'
+                  '外縁へ輪になって広がる。全体で約 25 秒。範囲内は敵味方を区別しない。'),
+        'EN': ('Divine Judgment', 'The ultimate support. Mark a point with the laser: after the countdown the sky goes dark, '
+                              'fog closes in, magic circles open over the mark and beams converge on it from high above; '
+                              'then a lightning storm strikes everything within 220 m for six seconds, a colossal beam '
+                              'comes down and rings of blasts roll out from the centre to the edge, leaving fires. About '
+                              '25 seconds in all; it hits friend and foe alike inside the area.'),
+    },
     'heli': {
         'SC': ('武装直升机', '呼叫武装直升机，攻击附近的敌人。'),
         'CN': ('武裝直升機', '呼叫武裝直升機，攻擊附近的敵人。'),
@@ -578,6 +679,14 @@ VEHICLE_NOTES: dict[str, str] = {
 }
 # A plugin vehicle request whose files need more than tools/make_jets.py: its notes in place of VEHICLE_NOTES.
 VEHICLE_NOTES_BY_KIND: dict[str, dict[str, str]] = {
+    'dreadnought': {
+        'SC': '需要 EDF6VehicleCrew 插件，以及安装器用无畏舰模型（models/dreadnought）生成的文件；没有模型时请求来的是普通的 N9 Eros 直升机。',
+        'CN': '需要 EDF6VehicleCrew 插件，以及安裝器用無畏艦模型（models/dreadnought）產生的檔案；沒有模型時請求來的是普通的 N9 Eros 直升機。',
+        'JA': 'EDF6VehicleCrew プラグインと、インストーラーがドレッドノートのモデル（models/dreadnought）から書き出すファイルが必要。'
+              'モデルがない場合は通常の N9 エロス ヘリが来る。',
+        'EN': 'Needs the EDF6VehicleCrew plugin and the files the installer makes from the Dreadnought model '
+              '(models/dreadnought); without the model the request brings a plain N9 Eros heli.',
+    },
     'sazabi': {
         'SC': '需要 EDF6VehicleCrew 插件，以及安装器用沙扎比模型（models/sazabi）生成的文件；没有模型时请求来的是普通的 N9 Eros 直升机。',
         'CN': '需要 EDF6VehicleCrew 插件，以及安裝器用沙薩比模型（models/sazabi）產生的檔案；沒有模型時請求來的是普通的 N9 Eros 直升機。',
@@ -601,13 +710,28 @@ PLUGIN_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew プラグイン、およびインストーラーが書き出す車両ファイルが必要。',
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
-GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES}
+GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES}
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',
     'JA': 'EDF6VehicleCrew と EDF6AutoTurret のプラグイン、およびインストーラーが書き出す車両ファイルが必要。',
     'EN': 'Needs the EDF6VehicleCrew and EDF6AutoTurret plugins and the vehicle files the installer writes.',
 }
+ULTIMATE_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件和安装器生成的特效文件；未安装插件时为普通的卫星激光呼叫。',
+    'CN': '需要 EDF6VehicleCrew 插件和安裝器產生的特效檔案；未安裝插件時為普通的衛星雷射呼叫。',
+    'JA': 'EDF6VehicleCrew プラグインとインストーラーが書き出すエフェクトのファイルが必要。未導入時は通常の衛星レーザー要請になる。',
+    'EN': 'Needs the EDF6VehicleCrew plugin and the effect files the installer writes; without the plugin this is a plain '
+          'satellite laser call.',
+}
+GRAVITY_NOTES: dict[str, str] = {
+    'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通的激光导引装置。联机可用：房间里每台机器都要装同一版本插件（旧版本玩家看不到抓取与投掷）。',
+    'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通的雷射導引裝置。連線可用：房間裡每台機器都要裝同一版本外掛（舊版本玩家看不到抓取與投擲）。',
+    'JA': 'EDF6VehicleCrew プラグインが必要。未導入時は通常のレーザー誘導装置になる。オンライン対応：部屋の全員が同じ版のプラグインを入れていること（古い版の人には掴み・投げが見えない）。',
+    'EN': 'Needs the EDF6VehicleCrew plugin; without it this is a plain Laser Guide Kit. Works online when every player has this plugin version (an older one does not see the grabs and throws).',
+}
+
+
 GUN_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 插件；未安装时为普通的 ＫＦＦ５０ＬＳ 狙击枪。',
     'CN': '需要 EDF6VehicleCrew 插件；未安裝時為普通的 ＫＦＦ５０ＬＳ 狙擊槍。',
@@ -646,6 +770,10 @@ def call_description(call: Call, lang: str) -> str:
         return KINDS[call.kind][lang][1] + '\n\n' + THROW_NOTES[lang]
     if call.brings == 'gun':
         return KINDS[call.kind][lang][1] + '\n\n' + GUN_NOTES[lang]
+    if call.brings == 'ultimate':
+        return KINDS[call.kind][lang][1] + '\n\n' + ULTIMATE_NOTES[lang]
+    if call.brings == 'gravity':
+        return KINDS[call.kind][lang][1] + '\n\n' + GRAVITY_NOTES[lang]
     if not call.modal:
         return KINDS[call.kind][lang][1] + '\n\n' + NOTES[lang]
     sep = ' ' if lang == 'EN' else ''

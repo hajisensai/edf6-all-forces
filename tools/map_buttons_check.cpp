@@ -22,9 +22,9 @@ void Check(bool ok,const char* what,double a=0.0,double b=0.0) {
 void Layouts() {
     const float screens[][2]={{1920.0f,1080.0f},{2520.0f,1080.0f},{1440.0f,1080.0f},{960.0f,1080.0f},{640.0f,1080.0f}};
     const float widths[][kCount]={
-        {80,110,90,90,90,110,90,100,90,90,120,160,90,80,80,150,190,120},     // English-ish
-        {70,90,70,70,70,70,70,70,70,70,90,90,80,70,70,120,170,100},         // Chinese-ish
-        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
+        {80,110,90,90,90,110,90,100,90,90,120,160,90,80,150,190,120},     // English-ish
+        {70,90,70,70,70,70,70,70,70,70,90,90,80,70,120,170,100},         // Chinese-ish
+        {300,40,40,40,40,40,40,40,40,40,40,40,40,40,700,150,150},        // odd ones: one very long
     };
     for(const auto& sc:screens)for(const auto& w:widths) {
         Rect r[kCount];
@@ -74,14 +74,17 @@ void Card() {
     Check(Arms(Id::move) && Arms(Id::attackMove) && Arms(Id::guard) && !Arms(Id::follow) && !Arms(Id::release) && !Arms(Id::sweep),
           "the point orders' buttons arm a click on the map, the others act at once");
     const std::uint32_t vehicle=(1u<<static_cast<unsigned>(Order::none))|(1u<<static_cast<unsigned>(Order::guard))|
-                                (1u<<static_cast<unsigned>(Order::move))|(1u<<static_cast<unsigned>(Order::attackMove));
+                                (1u<<static_cast<unsigned>(Order::move))|(1u<<static_cast<unsigned>(Order::attackMove))|
+                                (1u<<static_cast<unsigned>(Order::hold));
     int shown=0,squadOnly=0;
     for(int i=0;i<kCount;++i) {
         const Id b=static_cast<Id>(i);
         shown+=Shown(b,vehicle,false);
-        squadOnly+=Shown(b,vehicle,false) && (b==Id::recruit || b==Id::board || b==Id::formation || b==Id::split);
+        squadOnly+=Shown(b,vehicle,false) && (b==Id::recruit || b==Id::board || b==Id::formation);
     }
-    Check(shown==5 && !squadOnly,"a vehicle selected: move, attack-move, stop, the sweep and its switch; no squad order or tool",shown);
+    Check(shown==6 && !squadOnly,"a vehicle selected: move, attack-move, hold, stop, the sweep and its switch; no squad order or tool",shown);
+    // HOLD (H, 2026-10-19): an order button that acts at once (each unit's own spot, no click on the map).
+    Check(OrderOf(Id::hold)==Order::hold && !Arms(Id::hold) && OnCard(Id::hold),"HOLD: its button, acting at once");
     // The card cut down (the user, 2026-10-09: "看看还有什么指令能砍一砍…感觉还是有点复杂了"): GUARD, ENGAGE AT WILL and
     // FOCUS FIRE have no button whatever the selection takes (G / the right button / H give them); ALL OUT has one.
     const std::uint32_t every=0xFFFFFFFFu;
@@ -95,7 +98,7 @@ void Card() {
     int idle=0;
     for(int i=0;i<kCount;++i)idle+=Shown(static_cast<Id>(i),0u,false);
     Check(idle==2 && Shown(Id::sweep,0u,false) && Shown(Id::health,0u,false),"nothing selected: the sweep and its switch alone",idle);
-    Check(Shown(Id::formation,0u,true) && Shown(Id::merge,0u,true),"squads selected: their tools");
+    Check(Shown(Id::formation,0u,true) && !Shown(Id::formation,0u,false),"squads selected: their formation tool");
 }
 
 // The support bar: the catalog's names grouped by what is before their "·" (support_dispatch.cpp SupportCallName order),

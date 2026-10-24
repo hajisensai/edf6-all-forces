@@ -42,7 +42,7 @@ import gltf  # noqa: E402
 import obj_model as om  # noqa: E402
 
 SRC = r'D:\APP\edf6-cockpit-assets\sketchfab'
-MAX_TEX = 1024
+MAX_TEX = 4096
 CUBE = 2048            # pixels a cube face's side has in the visibility pass (0.044 degrees a pixel)
 SLIVER = 0.01          # a triangle covering no pixel is kept if its centre is this close (share of depth) to the front
 
@@ -302,7 +302,7 @@ def photos_in_use() -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--src', default=SRC)
-    ap.add_argument('--out', default=os.path.join(om.DEV_MODELS, 'cockpits'))
+    ap.add_argument('--out', default=os.path.join(om.REPO_MODELS, 'cockpits'))
     ap.add_argument('--only', default='', help='comma-separated asset slugs (default: all)')
     args = ap.parse_args()
     want = [s for s in args.only.split(',') if s] or list(ASSETS)

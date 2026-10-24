@@ -37,7 +37,7 @@ import obj_model as om  # noqa: E402
 
 Vec3 = tuple[float, float, float]
 Box = tuple[Vec3, Vec3]   # eye frame: (lowest x, y, z), (highest x, y, z): x left, y up, z ahead
-MAX_TEX = 1024
+MAX_TEX = 4096
 AXES = {'+x': (1, 0, 0), '-x': (-1, 0, 0), '+y': (0, 1, 0), '-y': (0, -1, 0), '+z': (0, 0, 1), '-z': (0, 0, -1)}
 
 
@@ -132,7 +132,7 @@ Changes: {what}; turned into the seat's eye frame and scaled to metres, triangle
 
 
 def default_out() -> str:
-    return os.path.join(om.DEV_MODELS, 'cockpits')
+    return os.path.join(om.REPO_MODELS, 'cockpits')
 
 
 def basis(a: Asset) -> np.ndarray:

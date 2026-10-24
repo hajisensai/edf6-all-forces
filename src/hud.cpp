@@ -22,6 +22,7 @@
 #include "crew.h"
 #include "cockpit_canvas.h"
 #include "firstperson.h"
+#include "vehicle_look.h"
 #include "formation.h"
 #include "map_buttons.h"
 #include "scopeview.h"
@@ -38,11 +39,16 @@
 #include "layout.h"
 #include "memory.h"
 #include "player_view.h"
+#include "scope_hold.h"
 #include "sight.h"
 #include "turretaim.h"
 #include "vecmath.h"
 #include "warn.h"
 #include "support_net.h"
+#include "pvp.h"
+#include "thermal.h"
+#include "map_enemy_ui.h"
+#include "enemy_control_bindings.h"
 #include <atomic>
 #include <cmath>
 #include <cstdarg>
@@ -139,17 +145,21 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool mountedOptic,turretBinding; edf::aimlink::ModeBindingV1 binding;
                   bool stock; StockHudReadout stockHud;
                   bool payload; PayloadReadout payloadHud;
+                  bool sensor; VehicleSensorReadout sensorHud;
                   bool warned; Warnings warn;
                   bool seats; SeatPrompt seatPrompt;
+                    bool lookHint,lookKeys;
                   bool entrance; BoardingEntrance boardingEntrance;
                   bool turretCamOk; TurretCamReadout turretCam;
                   bool nix; NixTorso nixTorso;
                   bool proteus; ProteusReadout proteusRo;
                   bool sazabi; SazabiCue sazabiCue;
+                  bool dreadnought; DreadnoughtCue dnCue;
                   bool armor; armorhud::Readout armorRo;
                   bool screens; CockpitScreens scr; };   // a vehicle's first person: its cockpit's screens (cockpit_screens.inc)
 constexpr unsigned kFresh=4;
 Snapshot snaps[3]{};
+void PublishInstruments(const Snapshot& snap) noexcept;
 std::atomic<unsigned> middle{1};
 unsigned back=0;    // game thread
 unsigned front=2;   // draw thread
@@ -297,7 +307,7 @@ float DepthScale(float depth,float readTo) noexcept {
 
 // A line of text to draw once the quads are down: where, its size (measured), its scale and colour.
 struct Line { wchar_t text[128]; float x,y,w,h,scale; const float* rgba; };
-constexpr int kMaxLines=160;   // the map's panels, card, support bar and tooltip on top of its grid labels
+constexpr int kMaxLines=192;   // the map's panels, card, support bar, the test range's place panel and tooltip on top of its grid labels
 
 void Format(Line& l,const wchar_t* format,...) noexcept {
     va_list args;va_start(args,format);
@@ -559,6 +569,17 @@ void SeatButtonName(int mask,wchar_t* out,int size) noexcept {
         wcscat_s(out,size,names[i]);
     }
 }
+// A chord of seat buttons, all held at once (seat_switch_logic.h ChordHeld): "L3+R3".
+void SeatChordName(int mask,wchar_t* out,int size) noexcept {
+    static const wchar_t* names[]={L"A",L"B",L"X",L"Y",L"LB",L"RB",L"L3",L"R3"};
+    out[0]=0;
+    if(mask<=0){wcsncpy_s(out,size,Tr(Tx::controlUnbound),_TRUNCATE);return;}
+    if(mask&~0xFF){std::swprintf(out,size,Tr(Tx::padButton),mask);return;}
+    for(int i=0;i<8;++i)if(mask&(1<<i)) {
+        if(out[0])wcscat_s(out,size,L"+");
+        wcscat_s(out,size,names[i]);
+    }
+}
 void AircraftControls(Line& line,bool keys,int choices,int storeButton,int targetButton,bool target,bool flares) noexcept {
     Format(line,L"");
     auto add=[&](Tx text,const wchar_t* key){if(line.text[0])Append(line,L"   ");Append(line,Tr(text),key);};
@@ -574,6 +595,27 @@ void AircraftControls(Line& line,bool keys,int choices,int storeButton,int targe
     if(flares) {
         KeyName(Cfg().playerJetFlareKey,key,32);
         add(keys ? Tx::controlFlares : Tx::controlFlaresKeyboard,key); // the flight path currently has no pad flare binding
+    }
+}
+// A seat with its own secondary (the BMPT): each control's round now with the one key that switches it, the primary's
+// (PlayerJetSwitchKey / LB) and the own secondary's (VehicleSecondarySwitchKey / -Button, XInput bits); a control with
+// one choice shows none. Never "the last used": each key switches its own control (payload.cpp Switch).
+void PayloadControls(Line& line,const PayloadReadout& p) noexcept {
+    Format(line,L"");
+    auto add=[&](Tx text,const wchar_t* key,const wchar_t* name){if(line.text[0])Append(line,L"   ");Append(line,Tr(text),key,name);};
+    wchar_t key[32];
+    if(p.choices>1 && p.picked>=0 && p.picked<p.count) {
+        if(p.keys)KeyName(Cfg().playerJetSwitchKey,key,32);else SeatButtonName(p.switchButton,key,32);
+        add(Tx::controlPrimaryRounds,key,p.entry[p.picked].name);
+    }
+    if(p.ownChoices>1 && p.ownPicked>=0 && p.ownPicked<p.count) {
+        const int mask=p.ownSwitchButton;
+        if(p.keys)KeyName(Cfg().vehicleSecondarySwitchKey,key,32);
+        else wcsncpy_s(key,mask==0x0008 ? Tr(Tx::enemyKeyDpadRight) : mask==0x0004 ? Tr(Tx::enemyKeyDpadLeft) :
+                           mask==0x0001 ? Tr(Tx::enemyKeyDpadUp) : mask==0x0002 ? Tr(Tx::enemyKeyDpadDown) :
+                           mask<=0 ? Tr(Tx::controlUnbound) : L"?",_TRUNCATE);
+        if(!p.keys && mask>0 && (mask&~0x000F))std::swprintf(key,32,Tr(Tx::padButton),mask);
+        add(Tx::controlOwnSecondary,key,p.entry[p.ownPicked].name);
     }
 }
 void JetControls(Line& line,const PlayerJetReadout& j) noexcept {
@@ -824,6 +866,74 @@ void GunnerMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     keys.x=sx-keys.w*0.5f;keys.y=line.y+24.0f*s;
 }
 
+const wchar_t* ThermalModeWord(thermal::Mode mode) noexcept {
+    return Tr(mode==thermal::Mode::whiteHot ? Tx::thermalWhiteHot : mode==thermal::Mode::blackHot ? Tx::thermalBlackHot : Tx::thermalOptical);
+}
+const wchar_t* ThermalReasonWord(thermal::Reason reason) noexcept {
+    switch(reason) {
+    case thermal::Reason::unsupportedSeat: return Tr(Tx::thermalUnsupportedSeat);
+    case thermal::Reason::notInSight: return Tr(Tx::thermalEnterSight);
+    case thermal::Reason::hooksUnavailable:
+    case thermal::Reason::unsupportedSurface: return Tr(Tx::thermalFallback);
+    case thermal::Reason::waitingFrame: return Tr(Tx::thermalWaiting);
+    case thermal::Reason::optical:
+    case thermal::Reason::active: return L"";
+    }
+    return L"";
+}
+// The mode the player chose (the key's answer at once, in or out of the sight), then why it is not drawn yet when it is not.
+// A press on a seat without the equipment is answered too (status.rejected), never silently dropped.
+void ThermalControlText(Line& line,const thermal::Status& status) noexcept {
+    // A pad seat's toggle is its seat-button chord (ini VehicleThermalButton), a keyboard seat's the key.
+    wchar_t key[32];
+    if(status.pad)SeatChordName(Cfg().thermalButton,key,_countof(key));else KeyName(Cfg().thermalKey,key,_countof(key));
+    if(!status.eligible){Format(line,Tr(Tx::thermalControl),key,Tr(Tx::thermalUnsupportedSeat));return;}
+    // A failed render (no hooks, unsupported surface) shows what is on screen, optical, with the fallback; a mode that
+    // only waits (for the sight, for the first composite) shows the choice the key made.
+    const bool failed=status.reason==thermal::Reason::unsupportedSurface || status.reason==thermal::Reason::hooksUnavailable;
+    Format(line,Tr(Tx::thermalControl),key,ThermalModeWord(failed ? status.effective : status.requested));
+    const wchar_t* reason=ThermalReasonWord(status.reason);
+    const bool idle=status.requested==thermal::Mode::optical && status.reason==thermal::Reason::notInSight;   // nothing waits
+    if(reason[0] && !idle)Append(line,L" / %ls",reason);
+}
+void ThermalControlHint(Text* text,float width,float height,float s,const thermal::Status& status,Line* lines,int* at) noexcept {
+    if((!status.eligible && !status.rejected) || *at>=kMaxLines)return;
+    Line& line=lines[(*at)++];ThermalControlText(line,status);
+    line.scale=kLineScale*0.65f;line.rgba=!status.eligible || status.reason==thermal::Reason::unsupportedSurface ||
+        status.reason==thermal::Reason::hooksUnavailable ? kAmber : kCyan;line.w=line.h=0.0f;
+    if(text) {
+        MeasureAll(*text,&line,1);
+        const float most=std::fmin(720.0f*s,width-36.0f*s);
+        if(line.w>most){line.scale*=most/line.w;MeasureAll(*text,&line,1);}
+    }
+    line.x=18.0f*s;line.y=height*0.3f+26.0f*s;
+}
+
+// Optical contacts are sampled on the game thread; drawing only projects the immutable HUD snapshot.
+// Recognition remains native LOS-based; the image label reports the thermal compositor's effective mode.
+void VehicleContacts(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
+                     const VehicleSensorReadout& sensor,const thermal::Status& thermalStatus,Line* lines,int* at) noexcept {
+    if(sensor.kind!=VehicleSensorKind::optical)return;
+    const float r=(sensor.gunship ? 14.0f : 11.0f)*s,t=std::fmax(1.0f,1.4f*s),arm=5.0f*s;
+    for(int i=0;i<sensor.count && i<kVehicleContacts;++i) {
+        const auto& contact=sensor.contact[i];
+        float x,y,depth;
+        if(!std::isfinite(contact.range) || contact.range<=0.0f ||
+           !Project(vp,contact.at,width,height,&x,&y,&depth) ||
+           x<r || x>width-r || y<r || y>height-r)continue;
+        if(sensor.gunship) {
+            float hx,hy;scopeview::RectHalf(width,height,&hx,&hy);
+            if(x-r<width*0.5f-hx || x+r>width*0.5f+hx || y-r<height*0.5f-hy || y+r>height*0.5f+hy)continue;
+        }
+        for(int side=-1;side<=1;side+=2)for(int up=-1;up<=1;up+=2) {
+            const float bx=x+static_cast<float>(side)*r,by=y+static_cast<float>(up)*r;
+            Rect(drawer,ctx,side<0 ? bx : bx-arm,by-t*0.5f,side<0 ? bx+arm : bx,by+t*0.5f,kCyan);
+            Rect(drawer,ctx,bx-t*0.5f,up<0 ? by : by-arm,bx+t*0.5f,up<0 ? by+arm : by,kCyan);
+        }
+    }
+    Label(text,lines,at,18.0f*s,height*0.3f,0,kLineScale*0.65f,kCyan,
+          Tr(Tx::vehicleSensorContacts),ThermalModeWord(thermalStatus.effective),sensor.count,static_cast<int>(std::lround(sensor.range)));
+}
 // A lock (stores.h StoreLock: `lock` 2 locked, 1 locking at `progress`, on the lock point `p`): locking, a yellow
 // square closing in as it locks; locked, a red diamond on the target. False off the screen (`sx`, `sy`: its point).
 bool LockAt(void* drawer,void* ctx,const float* vp,float width,float height,float s,int lock,const float* p,float progress,float* sx,
@@ -1263,13 +1373,17 @@ void LoadoutBanner(void* drawer,void* ctx,Text* text,float width,float bottom,fl
 }
 
 // The plugin aircraft's stores as cells: each one's picture (hud_cue.h StoreIconOf), its name and rounds; out of rounds
-// dim; the picked one cyan.
+// dim; the picked one cyan. In the seat's order and with its pick (hud_cue.h JetSeatArms); the gun has its own line
+// (StoresText), not a cell, so a cell's index is its store's.
 int JetCells(const PlayerJetReadout& j,LoadCell* cells) noexcept {
+    const hudcue::SeatArms a=hudcue::JetSeatArms(j.stores<kMostStores ? j.stores : kMostStores,j.store,j.guns>0);
     int n=0;
-    for(int i=0;i<j.stores && i<kMostStores;++i) {
+    for(int k=0;k<a.n;++k) {
+        if(a.rows[k].source!=hudcue::ArmSource::store)continue;
+        const int i=a.rows[k].index;
         LoadCell& c=cells[n++];
         c.icon=hudcue::StoreIconOf(j.storeName[i],j.storeRole[i]);
-        c.picked=i==j.store;
+        c.picked=k==a.picked;
         _snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%hs %d",j.storeName[i] ? j.storeName[i] : "?",j.storeRounds[i]);
         c.rgba=j.storeRounds[i]<=0 ? kHudDim : c.picked ? kCyan : kHud;
     }
@@ -2395,6 +2509,90 @@ void SazabiHud(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     SazabiPanel(drawer,ctx,text,width,height,s,c,lines,at);
 }
 
+// The Dreadnought's own HUD (dreadnought.cpp DreadnoughtCue; the user, 2026-10-21: 「独立的hud显示呢？」), for the local
+// player in any of its seats: a panel at the screen's left (the ship and the seat they hold, its way and throttle, its
+// keel's height and climb, its heading, its hull and boost, its turrets by who trains them, its hangar), and the keys
+// low in the middle. The stock gauges give way to it (HudPublish).
+constexpr float kDnLeft=24.0f,kDnWidth=430.0f,kDnRow=26.0f,kDnBar=180.0f,kDnBarH=11.0f;
+alignas(16) const float kDnGold[4]={0.95f,0.78f,0.35f,1.0f};
+alignas(16) const float kDnIdle[4]={0.6f,0.65f,0.7f,0.55f};
+void DnThrottle(void* drawer,void* ctx,float x,float y,float w,float h,float throttle,bool boosting,float s) noexcept {
+    constexpr float kAstern=0.35f;   // dreadnought.cpp kReverse
+    const float zero=x+w*kAstern/(1.0f+kAstern);
+    const float e=s>0.5f ? s : 0.5f;
+    Rect(drawer,ctx,x-e,y-e,x+w+e,y+h+e,kBarEdge);
+    Rect(drawer,ctx,x,y,x+w,y+h,kBarBack);
+    const float at=zero+(throttle>=0.0f ? (x+w-zero)*Unit(throttle) : -(zero-x)*Unit(-throttle/kAstern));
+    Rect(drawer,ctx,std::fmin(zero,at),y,std::fmax(zero,at),y+h,throttle<0.0f ? kAmber : boosting ? kCyan : kGreen);
+    Rect(drawer,ctx,zero-e,y-2.0f*s,zero+e,y+h+2.0f*s,kWhite);
+}
+void DreadnoughtHud(void* drawer,void* ctx,Text* text,float width,float height,float s,const DreadnoughtCue& c,Line* lines,
+                    int* at) noexcept {
+    const float pad=12.0f*s,row=kDnRow*s,barW=kDnBar*s,barH=kDnBarH*s;
+    const int rows=8;
+    const float w=kDnWidth*s,h=2.0f*pad+row*(rows+0.4f);
+    const float x0=kDnLeft*s,y0=height*0.80f-h;
+    Rect(drawer,ctx,x0,y0,x0+w,y0+h,kPanel);
+    Rect(drawer,ctx,x0,y0,x0+w,y0+2.0f*s,kDnGold);
+    Rect(drawer,ctx,x0,y0,x0+3.0f*s,y0+h,kDnGold);
+    const float tx=x0+pad,bx=x0+w-pad-barW;
+    float y=y0+pad+row*0.5f;
+    wchar_t seat[32];
+    if(c.seat==0)wcscpy_s(seat,Tr(Tx::dnSeatBridge));
+    else std::swprintf(seat,32,Tr(Tx::dnSeatTurret),c.seat);
+    Label(text,lines,at,tx,y,0,kTitleScale,kDnGold,L"%ls",Tr(Tx::dnTitle));
+    Label(text,lines,at,x0+w-pad,y,2,kLineScale,kWhite,L"%ls",seat);
+    y+=row*1.2f;
+    Label(text,lines,at,tx,y,0,kLineScale,kWhite,Tr(Tx::dnSpeed),static_cast<int>(std::lround(c.speed*3.6f)));
+    DnThrottle(drawer,ctx,bx,y-barH*0.5f,barW,barH,c.throttle,c.boosting,s);
+    y+=row;
+    const int pct=static_cast<int>(std::lround(std::fabs(c.throttle)*(c.throttle<0.0f ? 100.0f/0.35f : 100.0f)));
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,c.throttle<0.0f ? kAmber : kWhite,Tr(c.throttle<0.0f ? Tx::dnAstern : Tx::dnThrottle),pct);
+    Label(text,lines,at,x0+w-pad,y,2,kLineScale*0.9f,kWhite,Tr(Tx::dnHeading),static_cast<int>(std::lround(c.heading))%360);
+    y+=row;
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,kWhite,Tr(Tx::dnAltitude),c.keel>=0.0f ? static_cast<int>(std::lround(c.keel)) : 0,c.climb);
+    y+=row;
+    const float hull=c.hpMax>0.0f ? Unit(c.hp/c.hpMax) : 0.0f;
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,kWhite,Tr(Tx::dnHull),static_cast<int>(std::lround(hull*100.0f)));
+    Bar(drawer,ctx,bx,y-barH*0.5f,barW,barH,hull,hull,HullColour(hull),s);
+    y+=row;
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,c.boosting ? kCyan : kWhite,L"%ls",Tr(Tx::dnBoost));
+    Bar(drawer,ctx,bx,y-barH*0.5f,barW,barH,c.boost,c.boost,c.boost>0.25f ? kCyan : kAmber,s);
+    y+=row;
+    // the turrets: a box each, filled by who trains it, outlined bright when on its aim
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,kWhite,L"%ls",Tr(Tx::dnTurrets));
+    const int n=c.turrets>0 && c.turrets<=8 ? c.turrets : 8;
+    const float box=16.0f*s,gap=(barW-box*static_cast<float>(n))/static_cast<float>(n>1 ? n-1 : 1);
+    for(int i=0;i<n;++i) {
+        const unsigned bit=1u<<i;
+        const float* fill=(c.mine&bit) ? kGreen : (c.others&bit) ? kCyan : (c.commanded&bit) ? kAmber : kDnIdle;
+        const float bx0=bx+static_cast<float>(i)*(box+gap),by0=y-box*0.5f;
+        Rect(drawer,ctx,bx0,by0,bx0+box,by0+box,(c.onAim&bit) ? kWhite : kBarEdge);
+        Rect(drawer,ctx,bx0+2.0f*s,by0+2.0f*s,bx0+box-2.0f*s,by0+box-2.0f*s,fill);
+        if(c.seat==1+i)Rect(drawer,ctx,bx0,by0+box+2.0f*s,bx0+box,by0+box+4.0f*s,kGreen);
+    }
+    y+=row;
+    wchar_t hangar[96];
+    std::swprintf(hangar,96,Tr(Tx::dnHangar),c.stowed,c.out);
+    if(c.lifting>0)wcscat_s(hangar,Tr(Tx::dnHangarLift));
+    else if(c.flightWait>0.5f){const std::size_t k=wcslen(hangar);std::swprintf(hangar+k,96-k,Tr(Tx::dnHangarWait),c.flightWait);}
+    Label(text,lines,at,tx,y,0,kLineScale*0.9f,kWhite,L"%ls",hangar);
+    y+=row;
+    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kDnIdle,L"%ls",Tr(Tx::dnLegend));
+    // the keys, low in the middle
+    const Config& k=Cfg();
+    wchar_t seats[32],view[32],hangarKey[32],descend[32],boost[32];
+    if(c.keys){KeyName(k.seatNextKey,seats,32);KeyName(k.firstPersonKey,view,32);KeyName(k.dreadnoughtHangarKey,hangarKey,32);
+               KeyName(k.dreadnoughtDescendKey,descend,32);KeyName(k.dreadnoughtBoostKey,boost,32);}
+    else{SeatButtonName(k.dreadnoughtSeatButton,seats,32);wcscpy_s(view,L"V");SeatButtonName(k.dreadnoughtHangarButton,hangarKey,32);
+         SeatButtonName(k.dreadnoughtDescendButton,descend,32);SeatButtonName(k.dreadnoughtBoostButton,boost,32);}
+    if(c.seat==0) {
+        if(c.keys)Label(text,lines,at,width*0.5f,height*0.905f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysFly),descend,boost);
+        else Label(text,lines,at,width*0.5f,height*0.905f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnPadFly),descend,boost);
+        Label(text,lines,at,width*0.5f,height*0.935f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysBridge),hangarKey,seats,view);
+    } else Label(text,lines,at,width*0.5f,height*0.935f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysGun),seats,view);
+}
+
 // A carrier's world bars (see the top): the hull's over its tower, each deck part's over its place.
 constexpr float kCarrierFar=1500.0f,kPartFar=600.0f;
 void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const CarrierPanel& p,
@@ -2648,6 +2846,16 @@ void ScopeArm(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
 // The optic the player looks through this frame (HudDraw sets it before the vehicle's marks: ScopeShade's field).
 struct ScopeNow { bool on; scope::Field field; float zoom; int zero; };
 ScopeNow scopeNow{};
+// Whose sight field HudDraw drew last, and when (scope_hold.h): the stock crosshair's draw (infantryscope.cpp) reads it
+// from its own pass, so it is published under a lock.
+scopehold::Drawn scopeDrawn{};
+SRWLOCK scopeDrawnLock=SRWLOCK_INIT;
+void PublishScopeDrawn(const void* soldier) noexcept {
+    const scopehold::Drawn d{soldier,soldier ? GetTickCount64() : 0};
+    AcquireSRWLockExclusive(&scopeDrawnLock);
+    scopeDrawn=d;
+    ReleaseSRWLockExclusive(&scopeDrawnLock);
+}
 
 // `reticle`: this gun's sight is GunReticle (the seat's sight gun: StockMarks), its pipper unlabelled (the reticle
 // reads its range).
@@ -3114,26 +3322,31 @@ void StockVehicleHud(void* drawer,void* ctx,Text* text,const float* vp,float wid
     }
 }
 
-// A stock heli's stores for the helicopter HUD's loadout strip (HeliStrip): each weapon's picture by its round
-// (hud_cue.h ArmIconOf), its rounds and its reload (ArmLine's text and colour); the picked one cyan. Laid out as the
-// weapons stand on the vehicle, left to right (hud_cue.h SideOrder); `picked` (if given): the cell of r.selected, or -1.
-int StockCells(const StockHudReadout& r,LoadCell* cells,int* picked=nullptr) noexcept {
-    int n=0;
+// A stock vehicle's (a heli's too) weapons in the seat's order and with its pick (hud_cue.h StockSeatArms: the
+// fire-control's selected arm, else the sight's, else the first), as the cockpit's weapons screen lists them.
+hudcue::SeatArms StockSeatArmsOf(const StockHudReadout& r) noexcept {
     const int arms=r.arms<kStockArms ? r.arms : kStockArms;
-    float side[kStockArms];int order[kStockArms];
+    float side[kStockArms];
     for(int i=0;i<arms;++i)side[i]=r.arm[i].side;
-    hudcue::SideOrder(side,arms,order);
-    if(picked)*picked=-1;
-    for(int k=0;k<arms;++k) {
-        const int i=order[k];
-        if(picked && i==r.selected)*picked=n;
+    return hudcue::StockSeatArms(side,arms,r.selected,r.sight);
+}
+
+// A stock vehicle's stores for the loadout strips (HeliStrip, StockDockHud): each weapon's picture by its round
+// (hud_cue.h ArmIconOf), its rounds and its reload (ArmLine's text and colour); the picked one cyan. In StockSeatArmsOf's
+// order and pick; `picked` (if given): the picked one's cell, or -1.
+int StockCells(const StockHudReadout& r,LoadCell* cells,int* picked=nullptr) noexcept {
+    const hudcue::SeatArms a=StockSeatArmsOf(r);
+    if(picked)*picked=a.picked;
+    int n=0;
+    for(int k=0;k<a.n;++k) {
+        const int i=a.rows[k].index;
         Line l{};
         ArmLine(l,r.arm[i],false);
         LoadCell& c=cells[n++];
         const reticle::Style sight=r.arm[i].reticle;
         c.icon=hudcue::ArmIconOf(static_cast<int>(r.arm[i].kind),r.arm[i].lobbed,static_cast<int>(r.arm[i].style),
                                  sight==reticle::Style::cannon || sight==reticle::Style::precision);
-        c.picked=i==r.selected;
+        c.picked=k==a.picked || r.arm[i].ownPick;   // the primary's round and the own secondary's missile, both lit
         c.load=hudcue::CellLoad(r.arm[i].ammo,r.arm[i].reload,r.arm[i].cycleSec,r.arm[i].cycle);
         if(r.arm[i].name[0]) {
             if(r.arm[i].ammo<=0 && r.arm[i].canReload)_snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%ls  %ls",r.arm[i].name,l.text);
@@ -3148,13 +3361,28 @@ int StockCells(const StockHudReadout& r,LoadCell* cells,int* picked=nullptr) noe
     return n;
 }
 
+// The weapons of the player's seat as every read-out lists them (hud_cue.h SeatArms): a plugin aircraft's, else a stock
+// vehicle's (a heli's too); none.
+hudcue::SeatArms SeatArmList(const Snapshot& snap) noexcept {
+    if(snap.cockpit)return hudcue::JetSeatArms(snap.jet.stores<kMostStores ? snap.jet.stores : kMostStores,snap.jet.store,snap.jet.guns>0);
+    if(snap.stock)return StockSeatArmsOf(snap.stockHud);
+    return hudcue::SeatArms{};
+}
+// The picked weapon as one number (a switch's banner watches it): its arm or store, the gun kGunPick, none -1.
+constexpr int kGunPick=1000;
+int SeatArmPick(const hudcue::SeatArms& a) noexcept {
+    if(a.picked<0 || a.picked>=a.n)return -1;
+    return a.rows[a.picked].source==hudcue::ArmSource::gun ? kGunPick : a.rows[a.picked].index;
+}
+
 void StockDockHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
                   const StockHudReadout& r,const StockExtras& x,const PayloadReadout* payload,bool switched,Line* lines,int* at) noexcept {
     LoadCell cells[kStockArms];
     int pickedCell=-1;
     const int n=StockCells(r,cells,&pickedCell);
     Line controls{};
-    if(payload)AircraftControls(controls,payload->keys,payload->choices,payload->switchButton,0,false,false);
+    if(payload && payload->ownChoices>1)PayloadControls(controls,*payload);
+    else if(payload)AircraftControls(controls,payload->keys,payload->choices,payload->switchButton,0,false,false);
     const LoadoutDock dock=LoadoutDockOf(text,width,height,s,cells,n,controls.text[0] ? 1 : 0);
     StockVehicleHud(drawer,ctx,text,vp,width,height,s,r,x,lines,at,&dock);
     HudRegionText region(text,s,dock.scale,lines,at);
@@ -3285,7 +3513,8 @@ void HudPublish() noexcept {
     s.emc=PlayerEmcCue(&s.emcCue);
     s.launcher=PlayerLauncher(&s.launch);
     s.heliSight=PlayerHeliSight(&s.heliAim);
-    s.gunner=PlayerGunnerHud(&s.gun);
+    s.gunner=PlayerGunnerHud(&s.gun) || DreadnoughtGunnerHud(&s.gun);   // the gunship's gun or a Dreadnought turret
+    s.sensor=PlayerVehicleContacts(&s.sensorHud);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
     s.turret=PlayerTurretAim(&s.turretAim);
     s.mountedOptic=SightZoomMounted(nullptr);s.turretBinding=PlayerTurretBinding(&s.binding);
@@ -3293,20 +3522,26 @@ void HudPublish() noexcept {
     s.stock=PlayerStockHud(&s.stockHud);   // the stock vehicles' HUD (StockVehicleHud; a heli's stores)
     s.warned=WarnLatest(&s.warn);   // the aircraft's warnings (warn.cpp WarnTick, this frame's: it runs first)
     s.seats=PlayerSeatPrompt(&s.seatPrompt);
+    s.lookHint=VehicleLookHint(&s.lookKeys);
     s.entrance=PlayerBoardingEntrance(&s.boardingEntrance);
     s.turretCamOk=PlayerTurretCam(&s.turretCam);   // the turret camera (turretcam.cpp): the gun's mark, free look
     s.nix=PlayerNixTorso(&s.nixTorso);   // the Nix's legs and torso (nix.cpp): the stock HUD's hull / turret ring
     s.sazabi=PlayerSazabiCue(&s.sazabiCue);   // the Sazabi's thrusters, weapons, flight, aim and lock (sazabi.cpp; SazabiHud)
+    // The Dreadnought's own HUD (DreadnoughtHud): the stock heli's readouts are none of its (its guns and missiles never
+    // fire, it is no heli): theirs give way.
+    s.dreadnought=PlayerDreadnoughtCue(&s.dnCue);
+    if(s.dreadnought){s.stock=false;s.heliFly=false;s.heli=false;s.heliSight=false;}
     // The stock weapon gauge gives way (stockgauge.cpp, HideStockGauges) where HudDraw lists the vehicle's weapons and
     // their rounds: a plugin aircraft's stores line (CockpitStrip, the old Cockpit, HeliStrip), StockBlock, a stock heli's
     // HeliStrip (HeliFlightHud), the Sazabi's own HUD (SazabiPanel / SazabiSpecial: its rifle, missiles, cannon, funnels;
     // the stock gauge listed its seat's beam rifles and shield missiles and the 506 body's FUEL). Its text must draw: the
     // lists are text.
     const bool heliLists=s.stock && s.stockHud.heli && s.heliFly && !s.cockpit && Cfg().heliFlightHud;
-    SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists || (s.sazabi && !s.cockpit)));
+    SetStockGaugeCover(textOk && (s.cockpit || (s.stock && !s.cockpit && !s.stockHud.heli) || heliLists || (s.sazabi && !s.cockpit) || s.dreadnought));
     s.armor=PlayerStockArmor(&s.armorRo);   // the stock armor gauge's numbers while that cover hides it (stockgauge.cpp)
     s.proteus=PlayerProteus(&s.proteusRo);   // the Proteus's stance, shield, field, launcher (proteus.cpp)
-    s.screens=FirstPersonScreens(&s.scr);    // the cockpit's screens in a vehicle's first person (firstperson.cpp)
+    s.screens=FirstPersonScreens(&s.scr,PlayerHuman());    // the cockpit's screens in a vehicle's first person (firstperson.cpp)
+    if(s.screens && s.scr.physical)PublishInstruments(s);
     if(Cfg().vehicleHud)
         for(const auto& w:work)if(w.ref && ms-w.seen<=kFreshMs)s.d[s.count++]=w.d;
     back=middle.exchange(back|kFresh,std::memory_order_acq_rel)&3u;
@@ -3328,14 +3563,18 @@ pview::Store playerViews{};   // under viewLock
 
 // The camera of the HUD pass GaugeHook is about to draw (its player's: split screen), for HudDraw's per-player marks.
 static const void* passCamera=nullptr;
+static std::uintptr_t passPlayerRefKey=0,passPlayerSoldierKey=0;
 void KeepPlayerViewProj(const void* camera,const float* viewProj) noexcept {
     passCamera=camera;
-    if(!camera || !viewProj || MapOwnsView())return;   // as KeepViewProj: the map's camera is not the aim's view
+    passPlayerRefKey=passPlayerSoldierKey=0;
+    if(!camera || !viewProj)return;   // as KeepViewProj: the map's camera is not the aim's view
     const void* ref=nullptr;const void* soldier=nullptr;
     __try {
         if(!Readable(camera,0x368))return;
         ref=At<const void*>(camera,0x350);soldier=At<const void*>(camera,0x360);   // map.cpp kCamTargetRef / kCamTarget
     } __except(EXCEPTION_EXECUTE_HANDLER){return;}
+    passPlayerRefKey=reinterpret_cast<std::uintptr_t>(ref);passPlayerSoldierKey=reinterpret_cast<std::uintptr_t>(soldier);
+    if(MapOwnsView())return; // aim views stay native while owner identity still follows each HUD pass
     AcquireSRWLockExclusive(&viewLock);
     playerViews.Keep(ref,soldier,viewProj,GetTickCount64());
     ReleaseSRWLockExclusive(&viewLock);
@@ -3711,11 +3950,11 @@ void HideLinesUnder(Line* lines,int prior,float x0,float y0,float x1,float y1) n
 }
 
 // Map panels share a viewport-fitted scale and publish the exact opaque UI regions.
-float mapUiPanels[16*4]{};int mapUiPanelCount=0;
+float mapUiPanels[kMapUiPanels*4]{};int mapUiPanelCount=0;
 void MapUiBox(void* drawer,void* ctx,float x0,float y0,float x1,float y1,Line* lines,int prior) noexcept {
     HideLinesUnder(lines,prior,x0,y0,x1,y1);
     Rect(drawer,ctx,x0,y0,x1,y1,kMapBand);
-    if(mapUiPanelCount<16) {
+    if(mapUiPanelCount<kMapUiPanels) {
         auto* r=mapUiPanels+4*mapUiPanelCount++;r[0]=x0;r[1]=y0;r[2]=x1;r[3]=y1;
     }
 }
@@ -3754,6 +3993,8 @@ const wchar_t* MapOrderWord(Order o) noexcept {
     case Order::move: return Tr(Tx::orderMove);
     case Order::attackMove: return Tr(Tx::orderAttackMove);
     case Order::dismountAll: return Tr(Tx::orderDismountAll);
+    case Order::hold: return Tr(Tx::orderHold);
+    case Order::formation: return Tr(Tx::btnFormationShort);
     case Order::none: break;
     }
     return L"-";
@@ -3771,8 +4012,15 @@ void MapSquadStatus(const SquadRow& r,wchar_t* out,std::size_t size) noexcept {
     if(std::strncmp(r.status,"WAIT ",5)==0)_snwprintf_s(out,size,_TRUNCATE,Tr(Tx::squadWait),r.cooldown);
     else hudtext::WordTo(r.status,out,size);
 }
+// A unit's RTS groups as their digits in brackets ("[13]": groups 1 and 3), nothing (three spaces) in none.
+void MapGroupDigits(std::uint16_t groups,wchar_t* out,std::size_t size) noexcept {
+    if(!groups){_snwprintf_s(out,size,_TRUNCATE,L"   ");return;}
+    wchar_t digits[mapcmd::kGroups+1]{};int n=0;
+    for(int g=0;g<mapcmd::kGroups;++g)if(groups&(1u<<g))digits[n++]=static_cast<wchar_t>(L'1'+g);
+    _snwprintf_s(out,size,_TRUNCATE,L"[%ls]",digits);
+}
 // The panel's rows (the user, 2026-10-09: "小队太多了吧，怎么处理合适，感觉看不过来"): sorted by SquadRank (the player's,
-// the free ones, riding, a script's), folded to the ones on foot that take orders (at most 9: the number keys), the rest
+// the free ones, riding, a script's), folded to the ones on foot that take orders (at most 9), the rest
 // summed in a row that opens it (mapcmd_logic.h SquadRowsShown). Its bottom (px), for what goes under it; `top` none.
 float MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,const MapCommandReadout& c,Line* lines,int* at) noexcept {
     const float x0=16.0f*s,rowH=22.0f*s,top=56.0f*s;
@@ -3792,8 +4040,9 @@ float MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool p
     for(int i=0;i<rows;++i) {
         const SquadRow& r=c.squad[i];
         const float* tint=r.locked ? kMapLocked : c.squadSelected[i] ? kWhite : kMapOrder;
-        wchar_t key[4]=L" ";
-        if(i<mapcmd::kSquadRowsFolded)_snwprintf_s(key,_countof(key),_TRUNCATE,L"%d",i+1);
+        // Its RTS groups (Ctrl+1-9; the number keys select a group now, not a row).
+        wchar_t key[16]=L"   ";
+        MapGroupDigits(c.squadGroups[i],key,_countof(key));
         wchar_t name[32],status[32];hudtext::WordTo(r.name,name,_countof(name));MapSquadStatus(r,status,_countof(status));
         Line& row=lines[(*at)++];Format(row,L"%ls  %ls x%d   %ls   %ls",key,name,r.alive,status,MapOrderWord(r.now.order));row.rgba=tint;
     }
@@ -3833,13 +4082,23 @@ float MapSquadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool p
     return bottom;
 }
 
-// A map-only interactive loadout keeps left-click firing and camera aim untouched outside M.
-void MapPayloadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,
-                     const MapCommandReadout& commands,Line* lines,int* at) noexcept {
+// The map's right-hand dock (the user, 2026-10-19: 「m地图里面右边的操作太难受了」「操作区域和图例冲突了」): one column at
+// the right edge under the compass and the scale, from top to bottom the payload panel, the enemy control, PVP and the
+// test range's 「摆放」, with the legend folded at its foot. Each panel has its own band of it: nothing opens over
+// another, nothing grows or shrinks under the pointer (every fold is a click), so a click lands where it was aimed.
+struct MapDock { float x0,x1; };
+MapDock MapDockAt(float width,float s) noexcept {
+    const float x1=width-12.0f*s;
+    return {x1-std::fmin(420.0f*s,width*0.32f),x1};
+}
+// A map-only interactive loadout keeps left-click firing and camera aim untouched outside M. Its bottom (px), 0 none.
+float MapPayloadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool pad,
+                      const MapCommandReadout& commands,Line* lines,int* at) noexcept {
     PayloadReadout r{};
-    if(!PlayerSelectablePayload(&r) || r.count<=0){MapCommandPayloadButtons(nullptr,0,0,nullptr,0);return;}
+    if(!PlayerSelectablePayload(&r) || r.count<=0){MapCommandPayloadButtons(nullptr,0,0,nullptr,0);return 0.0f;}
     const int count=r.count<kMostPayload ? r.count : kMostPayload;
-    const float right=width-16.0f*s,left=right-std::fmin(460.0f*s,width*0.46f-32.0f*s),top=216.0f*s,rowH=30.0f*s;
+    const MapDock dock=MapDockAt(width,s);   // the dock's width, as every panel under it
+    const float right=dock.x1-8.0f*s,left=dock.x0+8.0f*s,top=216.0f*s,rowH=30.0f*s;
     MapUiBox(drawer,ctx,left-8.0f*s,top-14.0f*s,right+8.0f*s,top+rowH*static_cast<float>(count+1),lines,*at);
     Label(text,lines,at,left,top,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::mapPayloadTitle));
     if(*at)MapFitLabel(text,lines[*at-1],left,right);
@@ -3856,6 +4115,7 @@ void MapPayloadPanel(void* drawer,void* ctx,Text* text,float width,float s,bool 
         }
     }
     MapCommandPayloadButtons(rects,r.selectionToken,r.seat,entries,hits);
+    return top+rowH*static_cast<float>(count+1);
 }
 
 // The map's tooltip (the user, 2026-10-09: "m里面显示太复杂了"): a button's full word and its key are not on the
@@ -3901,6 +4161,10 @@ void MapOrderIcon(void* d,void* c,mapbtn::Id id,float x,float y,float h,float s,
     case Id::guard:         // a shield
         Seg(d,c,x-r*0.75f,y-r*0.8f,x+r*0.75f,y-r*0.8f,t,rgba);Seg(d,c,x-r*0.75f,y-r*0.8f,x-r*0.75f,y,t,rgba);
         Seg(d,c,x+r*0.75f,y-r*0.8f,x+r*0.75f,y,t,rgba);Seg(d,c,x-r*0.75f,y,x,y+r*0.9f,t,rgba);Seg(d,c,x+r*0.75f,y,x,y+r*0.9f,t,rgba);break;
+    case Id::hold:          // a shield with a dot in it (each where it stands)
+        Seg(d,c,x-r*0.75f,y-r*0.8f,x+r*0.75f,y-r*0.8f,t,rgba);Seg(d,c,x-r*0.75f,y-r*0.8f,x-r*0.75f,y,t,rgba);
+        Seg(d,c,x+r*0.75f,y-r*0.8f,x+r*0.75f,y,t,rgba);Seg(d,c,x-r*0.75f,y,x,y+r*0.9f,t,rgba);Seg(d,c,x+r*0.75f,y,x,y+r*0.9f,t,rgba);
+        Rect(d,c,x-r*0.22f,y-r*0.3f,x+r*0.22f,y+r*0.14f,rgba);break;
     case Id::follow:        // two chevrons towards a dot (the player)
         for(const float o:kIconChevrons){Seg(d,c,x+o*r,y-r*0.6f,x+(o+0.4f)*r,y,t,rgba);Seg(d,c,x+(o+0.4f)*r,y,x+o*r,y+r*0.6f,t,rgba);}
         Rect(d,c,x+r*0.45f,y-r*0.25f,x+r*0.95f,y+r*0.25f,rgba);break;
@@ -3941,10 +4205,6 @@ void MapOrderIcon(void* d,void* c,mapbtn::Id id,float x,float y,float h,float s,
         }
         break;
     }
-    case Id::split:         // a fork
-        Seg(d,c,x,y+r*0.9f,x,y,t,rgba);Seg(d,c,x,y,x-r*0.7f,y-r*0.8f,t,rgba);Seg(d,c,x,y,x+r*0.7f,y-r*0.8f,t,rgba);break;
-    case Id::merge:         // two lines joining
-        Seg(d,c,x-r*0.7f,y+r*0.8f,x,y,t,rgba);Seg(d,c,x+r*0.7f,y+r*0.8f,x,y,t,rgba);Seg(d,c,x,y,x,y-r*0.9f,t,rgba);break;
     case Id::sweep:         // a crate
         Seg(d,c,x-r*0.8f,y-r*0.6f,x+r*0.8f,y-r*0.6f,t,rgba);Seg(d,c,x+r*0.8f,y-r*0.6f,x+r*0.8f,y+r*0.7f,t,rgba);
         Seg(d,c,x+r*0.8f,y+r*0.7f,x-r*0.8f,y+r*0.7f,t,rgba);Seg(d,c,x-r*0.8f,y+r*0.7f,x-r*0.8f,y-r*0.6f,t,rgba);
@@ -4066,16 +4326,18 @@ void MapFormationMenu(void* drawer,void* ctx,Text* text,float width,float height
     MapCommandFormationButtons(rects,entries,placed);
 }
 
+// The command card as drawn this frame (MapButtons), for its formation menu (MapCommands draws it over every panel).
+float mapCardRects[mapbtn::kCount*4]{};int mapCardIds[mapbtn::kCount]{};int mapCardCount=0;
 int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float s,bool pad,const MapCommandReadout& c,Line* lines,
                int* at) noexcept {
     using mapbtn::Id;
+    mapCardCount=0;
     if(pad){MapCommandButtons(nullptr,nullptr,0);MapCommandFormationButtons(nullptr,nullptr,0);return 0;}
     constexpr int n=mapbtn::kCount;
     static const Tx kWord[n]={Tx::orderMove,Tx::orderAttackMove,Tx::orderGuard,Tx::orderFollow,Tx::orderRelease,Tx::orderEngage,
                               Tx::orderFocus,Tx::orderBoard,Tx::orderDismount,Tx::orderDismiss,Tx::orderRecruit,Tx::orderWithdraw,
-                              Tx::orderDismountAll,Tx::btnFormationShort,Tx::btnSplit,Tx::btnMerge,Tx::btnSweep,Tx::btnHealth};
-    const wchar_t* const kKey[n]={L"",L"Z / G",L"G",L"V",L"X",L"J",L"H",L"B",L"N",L"K",L"U",L"",Tr(Tx::keyDismountAll),L"T",L"P",L"L",L"Y",
-                                  L"O"};
+                              Tx::orderDismountAll,Tx::orderHold,Tx::btnFormationShort,Tx::btnSweep,Tx::btnHealth};
+    const wchar_t* const kKey[n]={L"",L"Z",L"-",L"V",L"X",L"J",L"-",L"B",L"N",L"K",L"U",L"",Tr(Tx::keyDismountAll),L"H",L"T",L"Y",L"O"};
     const std::uint32_t orders=c.allowed && c.selected>0 ? c.allowedOrders : 0u;
     const bool tools=c.allowed && c.squadToolsAllowed && c.selectedSquads>0;
     const float scale=kLineScale*0.7f;
@@ -4120,7 +4382,9 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
         rects[placed*4]=q.x0;rects[placed*4+1]=q.y0;rects[placed*4+2]=q.x1;rects[placed*4+3]=q.y1;ids[placed++]=shownIds[k];
     }
     MapCommandButtons(rects,ids,placed);
-    MapFormationMenu(drawer,ctx,text,width,height,s,c,rects,ids,placed,lines,at);
+    std::memcpy(mapCardRects,rects,sizeof(float)*4*static_cast<std::size_t>(placed));
+    std::memcpy(mapCardIds,ids,sizeof(int)*static_cast<std::size_t>(placed));
+    mapCardCount=placed;
     return rows;
 }
 
@@ -4276,27 +4540,494 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
     MapComposePanel(drawer,ctx,text,s,c,base,x1+6.0f*s,row[composeRow].y0,top,bottom,lines,at);
 }
 
+const Tx* DebugSpawnCategoryWords() noexcept;
+
+const wchar_t* EnemyAbilityState(const enemy_control::Ability& ability,wchar_t* out,std::size_t size) noexcept {
+    using State=enemy_control::AbilityState;
+    if(ability.state==State::cooldown && ability.cooldownKnown) {
+        _snwprintf_s(out,size,_TRUNCATE,Tr(Tx::enemyControlCooldown),static_cast<double>(ability.cooldownSeconds));return out;
+    }
+    return Tr(ability.state==State::active ? Tx::enemyControlRunning : ability.state==State::unavailable ?
+        Tx::enemyControlUnavailable : Tx::enemyControlNativeReady);
+}
+const wchar_t* EnemyHealthText(const enemy_control::Snapshot& snapshot,wchar_t* out,std::size_t size) noexcept {
+    if(!enemyui::HealthAvailable(snapshot.healthKnown,snapshot.health,snapshot.maxHealth))return Tr(Tx::enemyControlHealthUnavailable);
+    _snwprintf_s(out,size,_TRUNCATE,Tr(Tx::enemyControlHealth),static_cast<double>(snapshot.health),static_cast<double>(snapshot.maxHealth));
+    return out;
+}
+// The key of the controlled enemy's attack `index` (enemy_control_bindings.h): the pad's
+// button with a pad, else the keyboard/mouse key; past the last key the M card's row only.
+const wchar_t* EnemyKeyLabel(unsigned index,bool pad,wchar_t* out,std::size_t size) noexcept {
+    const auto* binding=enemy_control::BindingOf(index);
+    if(!binding || (pad && !binding->pad))return Tr(Tx::enemyKeyCardOnly);
+    if(pad) {
+        struct Name { std::uint32_t bit;const wchar_t* text; };
+        static constexpr Name names[]={{enemy_control::kPadRightTrigger,L"RT"},{enemy_control::kPadLeftTrigger,L"LT"},{0x0200,L"RB"},
+            {0x0100,L"LB"},{0x1000,L"A"},{0x2000,L"B"},{0x4000,L"X"},{0x8000,L"Y"}};
+        for(const auto& n:names)if(n.bit==binding->pad)return n.text;
+        if(binding->pad==0x0001)return Tr(Tx::enemyKeyDpadUp);
+        if(binding->pad==0x0008)return Tr(Tx::enemyKeyDpadRight);
+        if(binding->pad==0x0002)return Tr(Tx::enemyKeyDpadDown);
+        if(binding->pad==0x0004)return Tr(Tx::enemyKeyDpadLeft);
+        return Tr(Tx::enemyKeyCardOnly);
+    }
+    switch(binding->vk) {
+        case 0x01:return Tr(Tx::enemyKeyMouseLeft);
+        case 0x02:return Tr(Tx::enemyKeyMouseRight);
+        case 0x05:return Tr(Tx::enemyKeyMouse4);
+        case 0x06:return Tr(Tx::enemyKeyMouse5);
+        default:_snwprintf_s(out,size,_TRUNCATE,L"%lc",static_cast<wchar_t>(binding->vk));return out;
+    }
+}
+float MapEnemyPanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,
+                    const MapCommandReadout& c,Line* lines,int* at) noexcept {
+    MapEnemyControlReadout read{};
+    if(!ReadMapEnemyControl(&read) || !read.visible || *at+18>kMaxLines) {
+        MapCommandEnemyButtons(nullptr,nullptr,0,nullptr);return top;
+    }
+    const auto& snapshot=read.snapshot;
+    using Phase=enemy_control::Phase;
+    const bool active=snapshot.phase==Phase::active,pending=snapshot.phase==Phase::pending || snapshot.phase==Phase::restoring;
+    const bool candidate=snapshot.name[0]!=L'\0';
+    const float x1=width-12.0f*s,x0=x1-std::fmin(420.0f*s,width*0.32f);
+    // Folded or unfolded only by the user (its title, a pick, L3): a hover never changes the
+    // card under the pointer on its way to a button.
+    const bool engaged=active || pending;
+    const bool open=engaged || read.focused || read.expanded;
+    const int rows=active ? read.count : 0;
+    const float natural=active ? (snapshot.sourceProtected ? 176.0f : 158.0f)+24.0f*static_cast<float>(rows) : open ? 108.0f : 28.0f;
+    if(bottom-(engaged ? 54.0f*s : top)<(open ? 90.0f : 28.0f)*s) {
+        MapCommandEnemyButtons(nullptr,nullptr,0,nullptr);return top;
+    }
+    // Active control takes precedence over lower-priority map panels. Move the
+    // complete card up when necessary, then fit measured and final text together.
+    if(engaged)top=std::fmax(54.0f*s,std::fmin(top,bottom-natural*s));
+    const float z=std::fmin(s,(bottom-top)/natural);
+    HudRegionText region(text,s,z,lines,at);text=region.text;
+    const float titleH=26.0f*z,rowH=24.0f*z,left=x0+8.0f*z,right=x1-8.0f*z;
+    const float panelBottom=top+natural*z;
+    MapUiBox(drawer,ctx,x0,top,x1,panelBottom,lines,*at);
+    float rects[kMapEnemyItems*4]{};int codes[kMapEnemyItems]{};int hits=0;
+    const auto hitbox=[&](float a,float b,float c0,float d,int code) {
+        if(hits<kMapEnemyItems){float* q=rects+4*hits;q[0]=a;q[1]=b;q[2]=c0;q[3]=d;codes[hits++]=code;}
+    };
+    // The title folds/unfolds the card while nothing is controlled (engaged cards stay open).
+    if(!engaged) {
+        const bool overTitle=!pad && c.pointer && c.px>=x0 && c.px<x1 && c.py>=top && c.py<top+titleH;
+        if(overTitle)Rect(drawer,ctx,x0,top,x1,top+titleH,kMapBoxFill);
+        hitbox(x0,top,x1,top+titleH,enemyui::kFold);
+    }
+    Label(text,lines,at,left,top+titleH*0.5f,0,kLineScale*0.68f,kCyan,L"%ls",Tr(Tx::enemyControlTitle));
+    if(*at>0)MapFitLabel(text,lines[*at-1],left,right-110.0f*z);
+    Label(text,lines,at,right,top+titleH*0.5f,2,kLineScale*0.5f,kMapOrderDim,L"%ls",
+        Tr(engaged ? Tx::enemyControlToggle : open ? Tx::enemyControlFoldOpen : Tx::enemyControlFoldClosed));
+    if(!open) {
+        MapTipSet(c,x0,top,x1,panelBottom,L"%ls",candidate ? snapshot.name : Tr(Tx::enemyControlEmpty));
+        MapCommandEnemyButtons(rects,codes,hits,&snapshot);return panelBottom;
+    }
+    float y=top+titleH;
+    if(!engaged) {
+        // The target row: < name > steps through the nearest controllable enemies.
+        const float arrow=30.0f*z;
+        for(int direction:{-1,1}) {
+            const float a=direction<0 ? left : right-arrow,b=a+arrow;
+            const bool over=!pad && c.pointer && c.px>=a && c.px<b && c.py>=y && c.py<y+20.0f*z;
+            Rect(drawer,ctx,a,y,b,y+20.0f*z,over ? kBtnLit : kBtnFill);
+            Label(text,lines,at,(a+b)*0.5f,y+10.0f*z,1,kLineScale*0.55f,kWhite,L"%ls",direction<0 ? L"<" : L">");
+            hitbox(a,y,b,y+20.0f*z,direction<0 ? enemyui::kTargetPrev : enemyui::kTargetNext);
+            MapTipSet(c,a,y,b,y+20.0f*z,L"%ls",Tr(Tx::enemyControlCycleTip));
+        }
+        Label(text,lines,at,(left+right)*0.5f,y+10.0f*z,1,kLineScale*0.6f,candidate ? kWhite : kAmber,L"%ls",candidate ? snapshot.name : Tr(Tx::enemyControlEmpty));
+        if(*at>0) {
+            Line& row=lines[*at-1];MapFitLabel(text,row,left+arrow+4.0f*z,right-arrow-4.0f*z);
+            row.x=(left+right-row.w)*0.5f;
+        }
+    } else {
+        Label(text,lines,at,left,y+10.0f*z,0,kLineScale*0.6f,active ? kWhite : kAmber,L"%ls",candidate ? snapshot.name : Tr(Tx::enemyControlEmpty));
+        if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    }
+    y+=22.0f*z;
+    if(active) {
+        wchar_t health[128]{};
+        Label(text,lines,at,left,y+10.0f*z,0,kLineScale*0.6f,kWhite,L"%ls",EnemyHealthText(snapshot,health,_countof(health)));
+        if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+        y+=22.0f*z;
+    }
+    const auto button=[&](int code,int row,const wchar_t* label,bool allowed,bool selected) {
+        const bool hover=!pad && c.pointer && c.px>=left && c.px<right && c.py>=y && c.py<y+rowH-2.0f*z;
+        const bool focus=pad && read.focused && read.padRow==row;
+        Rect(drawer,ctx,left,y,right,y+rowH-2.0f*z,focus || (hover && allowed) ? kBtnLit : kBtnFill);
+        if(selected)Rect(drawer,ctx,left,y+4.0f*z,left+3.0f*z,y+rowH-6.0f*z,kMapOrder);
+        Label(text,lines,at,left+8.0f*z,y+rowH*0.46f,0,kLineScale*0.6f,allowed ? kWhite : kMapOrderDim,L"%ls",label);
+        if(*at>0)MapFitLabel(text,lines[*at-1],left+8.0f*z,right-4.0f*z);
+        if(allowed)hitbox(left,y,right,y+rowH-2.0f*z,code);
+        y+=rowH;
+    };
+    if(active) {
+        // Key -> attack: each attack's own key (enemy_control_bindings.h); holding a row uses it too.
+        for(int i=0;i<rows;++i) {
+            const auto& ability=read.ability[i];wchar_t state[96]{},label[224]{},key[32]{};
+            _snwprintf_s(label,_countof(label),_TRUNCATE,L"[%ls]  %ls  /  %ls",EnemyKeyLabel(static_cast<unsigned>(read.first+i),pad,key,_countof(key)),
+                ability.name,EnemyAbilityState(ability,state,_countof(state)));
+            button(read.first+i,i,label,true,false);
+            MapTipSet(c,left,y-rowH,right,y,L"%ls\n%ls",ability.name,Tr(Tx::enemyControlRowTip));
+        }
+        const float half=(left+right)*0.5f;
+        Label(text,lines,at,half,y+10.0f*z,1,kLineScale*0.5f,kTeal,Tr(Tx::enemyControlPage),
+            static_cast<unsigned>(read.first+1),static_cast<unsigned>(read.first+rows),snapshot.abilityCount);
+        const float pageWidth=36.0f*z;
+        for(int direction:{-1,1}) {
+            const float a=direction<0 ? left : right-pageWidth,b=a+pageWidth;
+            Rect(drawer,ctx,a,y,b,y+20.0f*z,kBtnFill);
+            Label(text,lines,at,(a+b)*0.5f,y+10.0f*z,1,kLineScale*0.55f,kWhite,L"%ls",direction<0 ? L"<" : L">");
+            if(snapshot.abilityCount>enemyui::kPageRows)hitbox(a,y,b,y+20.0f*z,direction<0 ? enemyui::kPrev : enemyui::kNext);
+        }
+        y+=22.0f*z;
+        button(enemyui::kExit,rows,Tr(Tx::enemyControlReturn),true,false);
+    } else {
+        const wchar_t* reason=pending ? Tr(snapshot.phase==Phase::restoring ? Tx::enemyControlRestoring : Tx::enemyControlPending) :
+            candidate ? (snapshot.reason==enemy_control::Reason::networkCapacity ? Tr(Tx::enemyControlCapacity) : enemy_control::ReasonText(snapshot.reason)) : Tr(Tx::enemyControlEmpty);
+        Label(text,lines,at,left,y+9.0f*z,0,kLineScale*0.52f,kAmber,L"%ls",reason);
+        if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+        MapTipSet(c,left,y,right,y+20.0f*z,L"%ls",reason);y+=20.0f*z;
+        button(pending ? enemyui::kExit : enemyui::kBegin,0,Tr(pending ? Tx::enemyControlReturn : Tx::enemyControlBegin),
+            pending || (candidate && snapshot.reason==enemy_control::Reason::none),false);
+    }
+    if(active) {
+        Label(text,lines,at,left,panelBottom-(snapshot.sourceProtected ? 46.0f : 28.0f)*z,0,kLineScale*0.5f,kAmber,
+            Tr(snapshot.followsOwnerTeam ? Tx::enemyControlTeamOwner : Tx::enemyControlTeamOriginal),snapshot.controlledTeam);
+        if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    }
+    if(active && snapshot.sourceProtected) {
+        Label(text,lines,at,left,panelBottom-28.0f*z,0,kLineScale*0.5f,kCyan,L"%ls",Tr(Tx::enemyControlSourceSafe));
+        if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    }
+    Label(text,lines,at,left,panelBottom-10.0f*z,0,kLineScale*0.48f,kTeal,L"%ls",
+        Tr(active ? (pad ? Tx::enemyControlPadHint : Tx::enemyControlMouseHint) : pad ? Tx::enemyControlPadPickHint : Tx::enemyControlPickHint));
+    if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    MapCommandEnemyButtons(rects,codes,hits,&snapshot);
+    return panelBottom;
+}
+
+// PVP shares the right-hand stack with loadout and placement. Hover or R3 focus expands its tab.
+// Hitboxes carry the same status snapshot, so a click cannot target a replacement world/revision.
+Tx MapPvpResult(pvp_protocol::Result result) noexcept {
+    using R=pvp_protocol::Result;
+    switch(result) {
+    case R::Idle: return Tx::pvpReady;
+    case R::Pending: return Tx::pvpPending;
+    case R::Complete: return Tx::pvpComplete;
+    case R::NotReady: return Tx::pvpNotReady;
+    case R::Busy: return Tx::pvpBusy;
+    case R::InvalidArgument: return Tx::pvpInvalid;
+    case R::UnsupportedRoster: return Tx::pvpRoster;
+    case R::ProtocolError: return Tx::pvpChanged;
+    case R::PrepareFailed: return Tx::pvpPrepareFailed;
+    case R::ApplyFailed: return Tx::pvpApplyFailed;
+    case R::SendFailed: return Tx::pvpSendFailed;
+    case R::TimedOut: return Tx::pvpTimedOut;
+    case R::Aborted: return Tx::pvpAborted;
+    case R::SessionLost: return Tx::pvpSessionLost;
+    case R::Faulted: return Tx::pvpFaulted;
+    }
+    return Tx::pvpNotReady;
+}
+float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,
+                  const MapCommandReadout& c,Line* lines,int* at) noexcept {
+    PvpStatus status{};ReadPvpStatus(&status);
+    if(*at+7>kMaxLines || top+28.0f*s>bottom){MapCommandPvpButtons(nullptr,nullptr,0,nullptr);return top;}
+    const float x1=width-12.0f*s,x0=x1-std::fmin(420.0f*s,width*0.32f),titleH=28.0f*s,rowH=24.0f*s,footH=19.0f*s;
+    const float expandedBottom=top+titleH+3.0f*rowH+2.0f*footH+8.0f*s;
+    const int padPick=pad ? MapPvpPadSelection() : -1;
+    const bool pointer=!pad && c.pointer;
+    const bool overTitle=pointer && c.px>=x0 && c.px<x1 && c.py>=top && c.py<top+titleH;
+    // Opened and folded by a click on its title (kPvpFold) or R3's focus, never by the pointer passing over it: the
+    // panels under it in the dock stay where they are while the pointer moves (MapDock).
+    const bool open=(MapPvpOpen() || padPick>=0) && expandedBottom<=bottom;
+    const float panelBottom=open ? expandedBottom : top+titleH;
+    MapUiBox(drawer,ctx,x0,top,x1,panelBottom,lines,*at);
+    Rect(drawer,ctx,x0,top,x1,top+titleH,overTitle ? kBtnLit : kBtnFill);
+    const float* stateTint=!status.ready || status.pending ? kAmber : status.enabled ? kWhite : kMapOrderDim;
+    Label(text,lines,at,x0+8.0f*s,top+titleH*0.5f,0,kLineScale*0.7f,stateTint,
+          Tr(Tx::pvpTitleState),Tr(status.enabled ? Tx::pvpOn : Tx::pvpOff),status.localTeam);
+    const float hintLeft=x1-108.0f*s;
+    if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,hintLeft-8.0f*s);
+    Label(text,lines,at,x1-22.0f*s,top+titleH*0.5f,2,kLineScale*0.55f,kMapOrderDim,L"%ls",
+          Tr(pad ? Tx::pvpFocusPad : Tx::pvpExpand));
+    if(*at>0)MapFitLabel(text,lines[*at-1],hintLeft,x1-22.0f*s);
+    Tri(drawer,ctx,x1-11.0f*s,top+titleH*0.5f+(open ? 3.0f : -3.0f)*s,
+        x1-11.0f*s,top+titleH*0.5f+(open ? -4.0f : 4.0f)*s,4.0f*s,kMapOrder);
+    MapTipSet(c,x0,top,x1,top+titleH,L"%ls",Tr(Tx::pvpMouseHint));
+    float rects[kMapPvpItems*4]{};int codes[kMapPvpItems]{};int hits=0;
+    if(pointer){float* q=rects;q[0]=x0;q[1]=top;q[2]=x1;q[3]=top+titleH;codes[hits++]=kPvpFold;}
+    if(!open){MapCommandPvpButtons(rects,codes,hits,&status);return panelBottom;}
+    const int choices[]={kPvpModeToggle,kPvpTeam1,kPvpTeam2};
+    const Tx words[]={status.enabled ? Tx::pvpDisable : Tx::pvpEnable,Tx::pvpTeam1,Tx::pvpTeam2};
+    const float left=x0+8.0f*s,right=x1-8.0f*s;
+    float y=top+titleH;
+    for(int i=0;i<3;++i) {
+        const int code=choices[i];
+        const bool allowed=status.ready && !status.pending && (code!=kPvpModeToggle || status.host);
+        const bool selected=code==kPvpModeToggle ? status.enabled : status.localTeam==code;
+        const bool hover=pointer && c.px>=left && c.px<right && c.py>=y && c.py<y+rowH-3.0f*s;
+        const bool focus=padPick==code;
+        Rect(drawer,ctx,left,y,right,y+rowH-3.0f*s,(allowed && hover) || focus ? kBtnLit : kBtnFill);
+        if(selected)Rect(drawer,ctx,left,y+4.0f*s,left+3.0f*s,y+rowH-7.0f*s,kMapOrder);
+        Label(text,lines,at,left+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,
+              allowed ? kWhite : kMapOrderDim,L"%ls",Tr(words[i]));
+        if(*at>0)MapFitLabel(text,lines[*at-1],left+10.0f*s,right-4.0f*s);
+        if(code==kPvpModeToggle)MapTipSet(c,left,y,right,y+rowH,L"%ls",Tr(Tx::pvpHostOnly));
+        if(allowed){float* q=rects+4*hits;q[0]=left;q[1]=y;q[2]=right;q[3]=y+rowH-3.0f*s;codes[hits++]=code;}
+        y+=rowH;
+    }
+    const Tx result=status.pending ? Tx::pvpPending : !status.ready ? Tx::pvpNotReady : MapPvpResult(status.result);
+    Label(text,lines,at,left,y+footH*0.5f,0,kLineScale*0.56f,stateTint,L"%ls",Tr(result));
+    if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    const wchar_t* details=hudtext::InUse()==hudtext::Lang::zhCN && status.note[0] ? status.note : Tr(result);
+    MapTipSet(c,left,y,right,y+footH,L"%ls",details);
+    y+=footH;
+    Label(text,lines,at,left,y+footH*0.5f,0,kLineScale*0.55f,kTeal,L"%ls",Tr(pad ? Tx::pvpPadHint : Tx::pvpMouseHint));
+    if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
+    MapCommandPvpButtons(rects,codes,hits,&status);
+    return panelBottom;
+}
+
+// A framed button's edge (the card's look).
+void MapFrame(void* drawer,void* ctx,float x0,float y0,float x1,float y1,float s,const float* edge) noexcept {
+    const float t=1.2f*s;
+    Seg(drawer,ctx,x0,y0,x1,y0,t,edge);Seg(drawer,ctx,x1,y0,x1,y1,t,edge);
+    Seg(drawer,ctx,x1,y1,x0,y1,t,edge);Seg(drawer,ctx,x0,y1,x0,y0,t,edge);
+}
+
+// The legend at the dock's foot: its title row (a click opens / folds it; never the pointer passing over it), the whole
+// legend in two columns while open, beside the dock over the map (its bottom level with the title's), so opening it
+// neither covers nor squeezes the dock's controls. The title's top: the dock's other panels end above it.
+float MapLegend(void* drawer,void* ctx,Text* text,float width,float s,float bottom,bool pad,const MapCommandReadout& c,
+                Line* lines,int* at) noexcept {
+    struct Entry { MapKind kind; std::uint8_t flags; Tx name; };
+    static const Entry kLegend[]={{MapKind::squad,0,Tx::legendSquad},{MapKind::ally,0,Tx::legendFriendly},{MapKind::vehicle,0,Tx::legendVehicle},
+                                  {MapKind::air,0,Tx::legendAircraft},{MapKind::air,kMapRotor,Tx::legendHelicopter},
+                                  {MapKind::vehicle,kMapEmpty,Tx::legendEmpty},{MapKind::carrier,0,Tx::legendCarrier},
+                                  {MapKind::enemy,kMapLarge,Tx::legendLargeEnemy},{MapKind::enemyAir,kMapLarge,Tx::legendLargeEnemyAir},
+                                  {MapKind::marker,0,Tx::legendObjective}};
+    constexpr int kItems=static_cast<int>(sizeof(kLegend)/sizeof(kLegend[0]))+5;   // the player, the dots, the brackets
+    constexpr int kRows=(kItems+1)/2;
+    const MapDock dock=MapDockAt(width,s);
+    const float titleH=28.0f*s,rowH=22.0f*s,y1=bottom,y0=y1-titleH;
+    if(y0<60.0f*s || *at+kItems+2>kMaxLines){MapCommandLegendButton(nullptr);return bottom;}
+    const bool open=MapLegendOpen();
+    const float listW=std::fmin(360.0f*s,dock.x0-24.0f*s),lx1=dock.x0-8.0f*s,lx0=lx1-listW;
+    const float listH=static_cast<float>(kRows)*rowH+10.0f*s;
+    // Level with the title, or as low over it as clears every panel drawn so far (the support composition, the payload
+    // panel): it covers the map only.
+    float listBottom=y1;
+    for(int tries=0;tries<kMapUiPanels;++tries) {
+        int blocker=-1;
+        for(int i=0;i<mapUiPanelCount && blocker<0;++i) {
+            const float* r=mapUiPanels+4*i;
+            if(r[0]<lx1 && lx0<r[2] && r[1]<listBottom && listBottom-listH<r[3])blocker=i;
+        }
+        if(blocker<0)break;
+        listBottom=mapUiPanels[4*blocker+1]-6.0f*s;
+        if(listBottom-listH<60.0f*s){listBottom=y1;break;}   // nowhere clear: over the title after all
+    }
+    const float listTop=listBottom-listH;
+    const bool shown=open && listTop>60.0f*s && listW>200.0f*s;
+    MapUiBox(drawer,ctx,dock.x0,y0,dock.x1,y1,lines,*at);
+    const bool hover=!pad && c.pointer && c.px>=dock.x0 && c.px<dock.x1 && c.py>=y0 && c.py<y1;
+    Rect(drawer,ctx,dock.x0,y0,dock.x1,y1,hover ? kBtnLit : kBtnFill);
+    MapFrame(drawer,ctx,dock.x0,y0,dock.x1,y1,s,kMapOrderDim);
+    const float mid=(y0+y1)*0.5f;
+    Label(text,lines,at,dock.x0+10.0f*s,mid,0,kLineScale*0.7f,open ? kWhite : kMapOrder,L"%ls",Tr(Tx::legendTitle));
+    Tri(drawer,ctx,dock.x1-15.0f*s,mid+(open ? 3.0f : -3.0f)*s,dock.x1-15.0f*s,mid+(open ? -4.0f : 4.0f)*s,4.5f*s,open ? kWhite : kMapOrder);
+    if(!pad){const float hit[4]={dock.x0,y0,dock.x1,y1};MapCommandLegendButton(hit);}
+    else MapCommandLegendButton(nullptr);
+    if(!shown)return y0;
+    MapUiBox(drawer,ctx,lx0,listTop,lx1,listBottom,lines,*at);
+    MapFrame(drawer,ctx,lx0,listTop,lx1,listBottom,s,kMapOrderDim);
+    const int first=*at;
+    const float colW=(lx1-lx0)*0.5f;
+    int item=0;
+    float ix=0.0f,tx=0.0f,y=0.0f;
+    auto slot=[&]{
+        const int col=item/kRows,row=item%kRows;++item;
+        ix=lx0+colW*static_cast<float>(col)+16.0f*s;tx=ix+20.0f*s;y=listTop+5.0f*s+rowH*(static_cast<float>(row)+0.5f);
+    };
+    slot();Arc(drawer,ctx,ix,y,7.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
+    Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendYou));
+    for(const Entry& e:kLegend) {
+        slot();MapIcon(drawer,ctx,ix,y,s*0.9f,e.kind,e.flags,0.0f,0.0f,-1.0f,1.0f);
+        Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(e.name));
+    }
+    slot();MapDot1(drawer,ctx,ix,y,s,0,kMapEnemy);
+    Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendEnemy));
+    slot();MapDot1(drawer,ctx,ix,y,s,kMapFlying,kMapEnemy);
+    Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendEnemyFlying));
+    slot();MapBrackets(drawer,ctx,ix,y,8.0f*s,2.0f*s,kMapEnemy);
+    Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendLock));
+    slot();MapBrackets(drawer,ctx,ix,y,8.0f*s,2.0f*s,kAmber);
+    Label(text,lines,at,tx,y,0,kLineScale*0.65f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
+    for(int i=first;i<*at;++i) {
+        Line& row=lines[i];
+        MapFitLabel(text,row,row.x,row.x<lx0+colW ? lx0+colW-4.0f*s : lx1-6.0f*s);
+    }
+    return y0;
+}
+
+// The test range's 「摆放」 panel (range_place.h, mapcmd.cpp; ini RangePlace) in the dock, from `top` down to `bottom`.
+// Shut: its title row alone (a click, , . / or the D-pad opens it). Open: the title (a click shuts it), the categories
+// as tabs with their counts (two rows of three), the list (as many rows as fit, its own scroll: the wheel over it, the
+// arrows a page; the armed row lit, the picked one marked, one that cannot be made now dimmed with why at its right),
+// the page line between the arrows and one line of what to press. A pad uses its D-pad, A and B instead of the pointer.
+void MapPlacePanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,const MapCommandReadout& c,
+                   Line* lines,int* at) noexcept {
+    if(!c.placeOn || *at+2*rangeplace::kWindow+16>kMaxLines){MapCommandPlaceButtons(nullptr,nullptr,0,0);return;}
+    const MapDock dock=MapDockAt(width,s);
+    const float x0=dock.x0,x1=dock.x1,rowH=30.0f*s,titleH=32.0f*s,tabH=32.0f*s,arrowH=30.0f*s,footH=22.0f*s,pad6=6.0f*s;
+    float rects[kMapPlaceItems*4];int codes[kMapPlaceItems];int hits=0;
+    auto hit=[&](float a,float b,float r,float d,int code){
+        if(pad || hits>=kMapPlaceItems)return;
+        float* q=rects+4*hits;q[0]=a;q[1]=b;q[2]=r;q[3]=d;codes[hits++]=code;
+    };
+    auto over=[&](float a,float b,float r,float d){ return !pad && c.pointer && c.px>=a && c.px<r && c.py>=b && c.py<d; };
+    const Tx* const words=DebugSpawnCategoryWords();
+    using debugspawn::RowState;
+    const int cat=c.placeCategory>=0 && c.placeCategory<debugspawn::kCategoryCount ? c.placeCategory : 0;
+    const debugspawn::Category category=static_cast<debugspawn::Category>(cat);
+    const int count=debugspawn::CountIn(category);
+    const int pick=c.placePick>=0 && c.placePick<count ? c.placePick : 0;
+    // The title row: 「摆放」, the category and the pick (shut: how to open it), the fold arrow. The whole row is the click.
+    auto title=[&](bool open) {
+        Rect(drawer,ctx,x0,top,x1,top+titleH,over(x0,top,x1,top+titleH) ? kBtnLit : kBtnFill);
+        MapFrame(drawer,ctx,x0,top,x1,top+titleH,s,kMapOrder);
+        const float mid=top+titleH*0.5f;
+        Label(text,lines,at,x0+10.0f*s,mid,0,kLineScale*0.78f,kWhite,L"%ls",Tr(Tx::placeTitle));
+        const float titleRight=*at>0 ? lines[*at-1].x+lines[*at-1].w+12.0f*s : x0+90.0f*s;
+        if(open)Label(text,lines,at,x1-30.0f*s,mid,2,kLineScale*0.62f,kMapOrderDim,L"%ls  %d/%d",Tr(words[cat]),count ? pick+1 : 0,count);
+        else Label(text,lines,at,x1-30.0f*s,mid,2,kLineScale*0.58f,kMapOrderDim,L"%ls",Tr(pad ? Tx::placeOpenPad : Tx::placeOpenMouse));
+        if(*at>0)MapFitLabel(text,lines[*at-1],titleRight,x1-30.0f*s);
+        Tri(drawer,ctx,x1-15.0f*s,mid+(open ? 4.0f : -4.0f)*s,x1-15.0f*s,mid+(open ? -4.0f : 4.0f)*s,5.0f*s,kMapOrder);
+        MapTipSet(c,x0,top,x1,top+titleH,L"%ls",Tr(Tx::placeTabTip));
+        hit(x0,top,x1,top+titleH,kPlaceToggle);
+    };
+    if(top+titleH>bottom){MapCommandPlaceButtons(nullptr,nullptr,0,0);return;}
+    if(!c.placeOpen) {
+        MapUiBox(drawer,ctx,x0,top,x1,top+titleH,lines,*at);
+        title(false);
+        MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits,0);
+        return;
+    }
+    const int tabRows=(debugspawn::kCategoryCount+2)/3;
+    const float fixed=titleH+(c.placeOnline ? footH : 0.0f)+static_cast<float>(tabRows)*tabH+pad6+arrowH+footH+pad6;
+    int window=static_cast<int>((bottom-top-fixed)/rowH);
+    if(window>rangeplace::kWindow)window=rangeplace::kWindow;
+    if(window<1) {   // no room for a row: the title alone (it still shuts the panel)
+        MapUiBox(drawer,ctx,x0,top,x1,top+titleH,lines,*at);
+        title(true);
+        MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits,0);
+        return;
+    }
+    const int first=rangeplace::ViewFirst(c.placeTop,pick,count,window),shown=count-first<window ? count-first : window;
+    const float y1=top+fixed+static_cast<float>(window)*rowH;   // the panel keeps its height while paging
+    MapUiBox(drawer,ctx,x0,top,x1,y1,lines,*at);
+    title(true);
+    float y=top+titleH;
+    if(c.placeOnline) {
+        Label(text,lines,at,x0+8.0f*s,y+footH*0.5f,0,kLineScale*0.58f,kAmber,L"%ls",Tr(Tx::placeOnline));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,x1-6.0f*s);
+        y+=footH;
+    }
+    // The tabs, three a row, each with its count.
+    const float tabW=(x1-x0-8.0f*s)/3.0f;
+    for(int k=0;k<debugspawn::kCategoryCount;++k) {
+        const float a=x0+4.0f*s+tabW*static_cast<float>(k%3),b=y+3.0f*s+tabH*static_cast<float>(k/3),r=a+tabW-4.0f*s,d=b+tabH-4.0f*s;
+        const bool lit=k==cat;
+        Rect(drawer,ctx,a,b,r,d,lit ? kBtnLit : over(a,b,r,d) ? kMapBoxFill : kBtnFill);
+        MapFrame(drawer,ctx,a,b,r,d,s,lit ? kWhite : kMapOrderDim);
+        Label(text,lines,at,(a+r)*0.5f,(b+d)*0.5f,1,kLineScale*0.6f,lit ? kWhite : kMapOrder,L"%ls %d",Tr(words[k]),
+              debugspawn::CountIn(static_cast<debugspawn::Category>(k)));
+        if(*at>0)MapFitLabel(text,lines[*at-1],a+3.0f*s,r-3.0f*s);
+        hit(a,b,r,d,kPlaceTab+k);
+    }
+    y+=tabH*static_cast<float>(tabRows)+pad6;
+    // The rows.
+    for(int i=0;i<shown;++i) {
+        const int row=debugspawn::RowOf(category,first+i);
+        if(row<0)break;
+        const float b=y+rowH*static_cast<float>(i),d=b+rowH-2.0f*s;
+        const RowState st=c.placeState[row];
+        const bool armed=c.placeArmed==row,picked=first+i==pick,ready=st==RowState::ready;
+        const bool usable=ready || st==RowState::notPreloaded || st==RowState::loading;   // the first placing loads it
+        if(armed)Rect(drawer,ctx,x0+4.0f*s,b,x1-4.0f*s,d,kBtnLit);
+        else if(over(x0,b,x1,d) || (picked && pad))Rect(drawer,ctx,x0+4.0f*s,b,x1-4.0f*s,d,kMapBoxFill);
+        else if(i%2)Rect(drawer,ctx,x0+4.0f*s,b,x1-4.0f*s,d,kBtnFill);
+        const float mid=(b+d)*0.5f;
+        float right=x1-10.0f*s;
+        if(!ready) {   // why at the row's right, the name fitted left of it
+            const wchar_t* why=st==RowState::online ? Tr(Tx::placeOnlineRow) : st==RowState::missing ? Tr(Tx::placeMissing) :
+                st==RowState::notPreloaded ? Tr(Tx::placeNotPreloaded) : st==RowState::loading ? Tr(Tx::placeLoading) :
+                st==RowState::broken ? Tr(Tx::placeBroken) : Tr(Tx::debugSpawnUnavailable);
+            Label(text,lines,at,right,mid,2,kLineScale*0.56f,st==RowState::broken ? kAmber : st==RowState::loading ? kGreen : kMapOrderDim,
+                  L"%ls",why);
+            if(*at>0){Line& w=lines[*at-1];MapFitLabel(text,w,x1-160.0f*s,right);w.x=right-w.w;right=w.x-6.0f*s;}
+        }
+        Label(text,lines,at,x0+20.0f*s,mid,0,kLineScale*0.68f,armed || usable ? kWhite : kMapOrderDim,L"%ls",debugspawn::kEntries[row].name);
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0+20.0f*s,right);
+        if(picked)Tri(drawer,ctx,x0+6.0f*s,mid,x0+14.0f*s,mid,4.5f*s,armed ? kWhite : kMapOrder);
+        hit(x0,b,x1,d,row);
+    }
+    y+=rowH*static_cast<float>(window);
+    // The page line: ▲ (a page up), the page we are on, ▼ (a page down); an arrow dim when there is nothing that way.
+    const int pages=rangeplace::Pages(count,window),page=rangeplace::PageOf(first,count,window);
+    const float aw=std::fmin(110.0f*s,(x1-x0)*0.3f);
+    const float ua=x0+4.0f*s,ur=ua+aw,da=x1-4.0f*s-aw,dr=x1-4.0f*s,ab=y+2.0f*s,ad=y+arrowH-2.0f*s,amid=(ab+ad)*0.5f;
+    const bool up=first>0,down=first+shown<count;
+    Rect(drawer,ctx,ua,ab,ur,ad,up && over(ua,ab,ur,ad) ? kBtnLit : kBtnFill);MapFrame(drawer,ctx,ua,ab,ur,ad,s,up ? kMapOrder : kMapOrderDim);
+    Tri(drawer,ctx,(ua+ur)*0.5f,amid+5.0f*s,(ua+ur)*0.5f,amid-5.0f*s,7.0f*s,up ? kWhite : kMapOrderDim);
+    Rect(drawer,ctx,da,ab,dr,ad,down && over(da,ab,dr,ad) ? kBtnLit : kBtnFill);MapFrame(drawer,ctx,da,ab,dr,ad,s,down ? kMapOrder : kMapOrderDim);
+    Tri(drawer,ctx,(da+dr)*0.5f,amid-5.0f*s,(da+dr)*0.5f,amid+5.0f*s,7.0f*s,down ? kWhite : kMapOrderDim);
+    Label(text,lines,at,(x0+x1)*0.5f,amid,1,kLineScale*0.6f,kMapOrder,Tr(Tx::placePage),page,pages);
+    if(*at>0)MapFitLabel(text,lines[*at-1],ur+4.0f*s,da-4.0f*s);
+    if(up){hit(ua,ab,ur,ad,kPlacePageUp);MapTipSet(c,ua,ab,ur,ad,L"%ls",Tr(Tx::placePageUpTip));}
+    if(down){hit(da,ab,dr,ad,kPlacePageDown);MapTipSet(c,da,ab,dr,ad,L"%ls",Tr(Tx::placePageDownTip));}
+    y+=arrowH;
+    // One line of what to press (the keyboard's keys in the title's tooltip).
+    Label(text,lines,at,x0+8.0f*s,y+footH*0.5f,0,kLineScale*0.56f,kTeal,L"%ls",Tr(pad ? Tx::placeHintPad : Tx::placeHintMouse));
+    if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,x1-6.0f*s);
+    MapCommandPlaceButtons(pad ? nullptr : rects,codes,hits,window);
+}
+
 void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     static MapCommandReadout c;   // the draw thread's (too big for its stack)
     if(!PlayerMapCommands(&c)){
         MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
         MapCommandFormationButtons(nullptr,nullptr,0);
-        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);return;
+        MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandPlaceButtons(nullptr,nullptr,0,0);
+        MapCommandPvpButtons(nullptr,nullptr,0,nullptr);MapCommandEnemyButtons(nullptr,nullptr,0,nullptr);
+        MapLegend(drawer,ctx,text,width,s,height-(kBtnBottom+40.0f)*s,m.pad,c,lines,at);return;
     }
     const float* tint=c.allowed && c.pickable ? kMapOrder : kMapOrderDim;
     // Where a point order goes: the pointer (a ring and a cross), or with a pad the crosshair at the centre; an armed
     // point order or support call in its colour.
-    const float* aim=c.armedOrder ? (c.armed==Order::attackMove ? kAmber : kWhite) : c.supportArmed>=0 ? kGreen : tint;
+    const float* aim=c.armedOrder ? (c.armed==Order::attackMove ? kAmber : kWhite) : c.supportArmed>=0 || c.placeArmed>=0 ? kGreen : tint;
     const float cx=c.pointer ? c.px : width*0.5f,cy=c.pointer ? c.py : height*0.5f;
     Seg(drawer,ctx,cx-16.0f*s,cy,cx-5.0f*s,cy,2.0f*s,aim);Seg(drawer,ctx,cx+5.0f*s,cy,cx+16.0f*s,cy,2.0f*s,aim);
     Seg(drawer,ctx,cx,cy-16.0f*s,cx,cy-5.0f*s,2.0f*s,aim);Seg(drawer,ctx,cx,cy+5.0f*s,cx,cy+16.0f*s,2.0f*s,aim);
-    if(c.pointer)Arc(drawer,ctx,cx,cy,9.0f*s,0.0f,kTurn,1.5f*s,16,c.armedOrder || c.supportArmed>=0 ? aim : kWhite);
+    if(c.pointer)Arc(drawer,ctx,cx,cy,9.0f*s,0.0f,kTurn,1.5f*s,16,c.armedOrder || c.supportArmed>=0 || c.placeArmed>=0 ? aim : kWhite);
     // The box being dragged.
     if(c.boxing) {
         const float x0=c.bx<c.px ? c.bx : c.px,x1=c.bx<c.px ? c.px : c.bx,y0=c.by<c.py ? c.by : c.py,y1=c.by<c.py ? c.py : c.by;
         Rect(drawer,ctx,x0,y0,x1,y1,kMapBoxFill);
         Seg(drawer,ctx,x0,y0,x1,y0,1.5f*s,kMapOrder);Seg(drawer,ctx,x1,y0,x1,y1,1.5f*s,kMapOrder);
         Seg(drawer,ctx,x1,y1,x0,y1,1.5f*s,kMapOrder);Seg(drawer,ctx,x0,y1,x0,y0,1.5f*s,kMapOrder);
+    }
+    // The enemy-control target picked (a click on its mark, L3, the card's arrows): cyan brackets on it.
+    {
+        MapEnemyControlReadout picked{};float tx,ty,td;
+        if(ReadMapEnemyControl(&picked) && picked.visible && picked.marked && Project(vp,picked.markAt,width,height,&tx,&ty,&td)) {
+            MapBrackets(drawer,ctx,tx,ty,26.0f*s,2.5f*s,kCyan);
+            Label(text,lines,at,tx,ty+34.0f*s,1,kLineScale*0.6f,kCyan,L"%ls",Tr(Tx::enemyControlTargetMark));
+        }
     }
     // The enemy under the pointer: amber brackets on it, what the right button (or H) and Q do with it.
     float hx,hy,hd;
@@ -4331,10 +5062,23 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
             }
             float gx,gy,depth;
             if(shown && Project(vp,u.now.at,width,height,&gx,&gy,&depth))Seg(drawer,ctx,ux,uy,gx,gy,1.5f*s,u.now.order==Order::guard ? kMapOrderDim : order);
+            // Its Shift-queued points after that one (mapcmd_logic.h Waypoints): a line on through them, a small ring each.
+            const float* from=u.now.at;
+            for(int w=0;w<u.ways && w<mapcmd::kWaypointsMost;++w) {
+                const float a[3]={from[0],from[1]+1.0f,from[2]},b[3]={u.way[w][0],u.way[w][1]+1.0f,u.way[w][2]};
+                MapLine(drawer,ctx,vp,width,height,a,b,1.5f*s,kMapOrderDim);
+                float wx,wy,wd;
+                if(Project(vp,b,width,height,&wx,&wy,&wd))Arc(drawer,ctx,wx,wy,5.0f*s,0.0f,kTurn,1.5f*s,12,kMapOrder);
+                from=u.way[w];
+            }
         }
         if(!shown)continue;
         Arc(drawer,ctx,ux,uy,13.0f*s,0.0f,kTurn,1.5f*s,20,u.selected ? kWhite : u.locked ? kMapLocked : kMapOrderDim);
         if(u.selected)MapBrackets(drawer,ctx,ux,uy,20.0f*s,2.5f*s,kWhite);
+        if(u.groups) {   // its RTS groups by its mark (Ctrl+1-9)
+            wchar_t digits[16];MapGroupDigits(u.groups,digits,_countof(digits));
+            Label(text,lines,at,ux+15.0f*s,uy-15.0f*s,0,kLineScale*0.55f,u.selected ? kWhite : kMapOrder,L"%ls",digits);
+        }
         if(u.now.order==Order::follow)Label(text,lines,at,ux,uy+22.0f*s,1,kLineScale*0.6f,kMapOrder,L"%ls",Tr(Tx::orderFollow));
         if(u.selected && c.selected==1) {
             wchar_t kind[48];
@@ -4346,12 +5090,31 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
         }
     }
     const float panelBottom=MapSquadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
-    MapPayloadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
+    MapEnemyControlReadout enemyState{};
+    const bool controlling=ReadMapEnemyControl(&enemyState) &&
+        (enemyState.snapshot.phase==enemy_control::Phase::active || enemyState.snapshot.phase==enemy_control::Phase::pending ||
+         enemyState.snapshot.phase==enemy_control::Phase::restoring);
+    float payloadBottom=0.0f;
+    if(controlling)MapCommandPayloadButtons(nullptr,0,0,nullptr,0);
+    else payloadBottom=MapPayloadPanel(drawer,ctx,text,width,s,m.pad,c,lines,at);
     const int buttonRows=MapButtons(drawer,ctx,text,width,height,s,m.pad,c,lines,at);
     // The support bar under the squad panel (its rows and the gap under them), down to the command card.
     const float barTop=c.squads>0 ? panelBottom+10.0f*s : panelBottom;
     const float barBottom=height-(kBtnBottom+static_cast<float>(buttonRows)*(kBtnRowH+kBtnGap)+40.0f)*s;
     MapSupportBar(drawer,ctx,text,width,s,barTop,barBottom,m.pad,c,lines,at);
+    // The right-hand dock (MapDock): under the scale / compass and the payload panel, the enemy control, PVP and the
+    // range's 「摆放」 down to the legend folded at its foot, each in its own band. A band changes only by the user's own
+    // click on its panel's title (or L3 / R3 into it): a pick, a hover or a selection never folds or unfolds one
+    // (mapcmd.cpp SetEnemyCandidate), so the panels under it never move on their own (the user, 2026-10-19: 「这个展开和
+    // 收起会自动变，我不好点」). A folded panel keeps only its title's height: the 「摆放」 list keeps its rows.
+    const float dockTop=std::fmax(206.0f*s,payloadBottom+10.0f*s);
+    const float dockBottom=MapLegend(drawer,ctx,text,width,s,barBottom,m.pad,c,lines,at)-8.0f*s;
+    const float enemyBottom=MapEnemyPanel(drawer,ctx,text,width,s,dockTop,dockBottom,m.pad,c,lines,at);
+    const float pvpBottom=MapPvpPanel(drawer,ctx,text,width,s,enemyBottom+8.0f*s,dockBottom,m.pad,c,lines,at);
+    MapPlacePanel(drawer,ctx,text,width,s,pvpBottom+8.0f*s,dockBottom,m.pad,c,lines,at);
+    // The formation button's menu over all of them (its box empties the text under it; its rows take the clicks first).
+    if(m.pad)MapCommandFormationButtons(nullptr,nullptr,0);
+    else MapFormationMenu(drawer,ctx,text,width,height,s,c,mapCardRects,mapCardIds,mapCardCount,lines,at);
     // The band over the map's keys: what is selected and what to do with it (one line; the keys are in the tooltips).
     Rect(drawer,ctx,0.0f,height-104.0f*s,width,height-46.0f*s,kMapBand);
     const float y=height-75.0f*s;
@@ -4370,48 +5133,6 @@ void MapCommands(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
 }
 
-// The legend: a small tab over the right end of the command card ("图例"), the whole legend over it while the pointer
-// is on the tab or on the legend (the user, 2026-10-09: "m里面显示太复杂了": it no longer takes the left edge for good).
-void MapLegend(void* drawer,void* ctx,Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
-    MapCommandReadout c{};
-    const bool pointer=PlayerMapCommands(&c) && c.pointer;
-    struct Entry { MapKind kind; std::uint8_t flags; Tx name; };
-    static const Entry kLegend[]={{MapKind::squad,0,Tx::legendSquad},{MapKind::ally,0,Tx::legendFriendly},{MapKind::vehicle,0,Tx::legendVehicle},
-                                  {MapKind::air,0,Tx::legendAircraft},{MapKind::air,kMapRotor,Tx::legendHelicopter},
-                                  {MapKind::vehicle,kMapEmpty,Tx::legendEmpty},{MapKind::carrier,0,Tx::legendCarrier},
-                                  {MapKind::enemy,kMapLarge,Tx::legendLargeEnemy},{MapKind::enemyAir,kMapLarge,Tx::legendLargeEnemyAir},
-                                  {MapKind::marker,0,Tx::legendObjective}};
-    constexpr int kRows=static_cast<int>(sizeof(kLegend)/sizeof(kLegend[0]))+5;   // the player, the dots, the brackets
-    const float tabW=110.0f*s,tabH=24.0f*s,x1=width-12.0f*s,x0=x1-tabW,tabY1=height-110.0f*s,tabY0=tabY1-tabH;
-    const float listW=std::fmin(300.0f*s,width*0.4f),lx0=x1-listW,ly1=tabY0-2.0f*s,ly0=ly1-(static_cast<float>(kRows)*22.0f+12.0f)*s;
-    const bool open=pointer && ((c.px>=x0 && c.px<x1 && c.py>=tabY0 && c.py<tabY1) || (c.px>=lx0 && c.px<x1 && c.py>=ly0 && c.py<ly1));
-    MapUiBox(drawer,ctx,x0,tabY0,x1,tabY1,lines,*at);
-    const float mid=(tabY0+tabY1)*0.5f,arrow=x1-12.0f*s;
-    Label(text,lines,at,(x0+arrow)*0.5f-4.0f*s,mid,1,kLineScale*0.7f,open ? kWhite : kMapOrder,L"%ls",Tr(Tx::legendTitle));
-    Tri(drawer,ctx,arrow,mid+(open ? 3.0f : -3.0f)*s,arrow,mid+(open ? -4.0f : 4.0f)*s,4.0f*s,open ? kWhite : kMapOrder);
-    if(!open)return;
-    MapUiBox(drawer,ctx,lx0,ly0,x1,ly1,lines,*at);
-    const int first=*at;
-    const float ix=lx0+24.0f*s,tx=lx0+44.0f*s;
-    float y=ly0+17.0f*s;
-    Arc(drawer,ctx,ix,y,8.0f*s,0.0f,kTurn,2.0f*s,16,kWhite);
-    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendYou));
-    for(const Entry& e:kLegend) {
-        y+=22.0f*s;
-        MapIcon(drawer,ctx,ix,y,s,e.kind,e.flags,0.0f,0.0f,-1.0f,1.0f);
-        Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(e.name));
-    }
-    y+=22.0f*s;MapDot1(drawer,ctx,ix,y,s,0,kMapEnemy);
-    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendEnemy));
-    y+=22.0f*s;MapDot1(drawer,ctx,ix,y,s,kMapFlying,kMapEnemy);
-    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendEnemyFlying));
-    y+=22.0f*s;MapBrackets(drawer,ctx,ix,y,9.0f*s,2.0f*s,kMapEnemy);
-    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendLock));
-    y+=22.0f*s;MapBrackets(drawer,ctx,ix,y,9.0f*s,2.0f*s,kAmber);
-    Label(text,lines,at,tx,y,0,kLineScale*0.75f,kWhite,L"%ls",Tr(Tx::legendNearestEnemy));
-    for(int i=first;i<*at;++i)MapFitLabel(text,lines[i],tx,x1-8.0f*s);
-}
-
 // The title and the keys (top and bottom bands).
 void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,const MapReadout& m,Line* lines,int* at) noexcept {
     MapUiBox(drawer,ctx,0,0,width,46.0f*s,lines,*at);
@@ -4428,7 +5149,6 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
         Label(text,lines,at,width*0.5f,height-23.0f*s,1,kLineScale*0.8f,kWhite,Tr(Tx::mapMouseKeys),key);
     }
     for(int i=bandsFirst;i<*at;++i)MapFitLabel(text,lines[i],16.0f*s,width-16.0f*s);
-    MapLegend(drawer,ctx,text,width,height,s,lines,at);
 }
 
 void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
@@ -4440,6 +5160,8 @@ void MapTargetsNone() noexcept {
     MapCommandButtons(nullptr,nullptr,0);MapCommandSquadButtons(nullptr,nullptr,0);MapCommandSquadFold(nullptr);
     MapCommandFormationButtons(nullptr,nullptr,0);MapCommandComposeButtons(nullptr,nullptr,0);
     MapCommandPayloadButtons(nullptr,0,0,nullptr,0);MapCommandSupportButtons(nullptr,nullptr,0);MapCommandUiPanels(nullptr,0);
+    MapCommandPlaceButtons(nullptr,nullptr,0,0);MapCommandPvpButtons(nullptr,nullptr,0,nullptr);MapCommandEnemyButtons(nullptr,nullptr,0,nullptr);
+    MapCommandLegendButton(nullptr);
 }
 
 // The map view open: its marks drawn (true), nothing else of the HUD; the damage statistics' page in their place while it
@@ -4448,6 +5170,7 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     static MapReadout m;   // the draw thread's (too big for its stack)
     static dmgstat::Book book;   // the last copy of the statistics (copied again only when they moved)
     if(!PlayerMap(&m)){MapTargetsNone();DamageStatsUi(nullptr,nullptr,0,0,0);return false;}
+    if(m.ownerHumanKey!=passPlayerRefKey && m.ownerHumanKey!=passPlayerSoldierKey)return false;
     s=hudscale::FitMap(s,width,height);
     if(text)text->s=s;
     mapUiPanelCount=0;mapTip.on=false;
@@ -4574,6 +5297,13 @@ void VersionBanner(Text* text,float width,float height,float s,Line* lines,int* 
     Label(text,lines,at,width*0.5f,height*0.5f+286.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
     if(second && *second)Label(text,lines,at,width*0.5f,height*0.5f+314.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",second);
 }
+// The ultimate strike's caller online (ultimate.cpp): peers of an older build see the stock beam; a moment, under the
+// version banner.
+void UltimateBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    wchar_t line[160];
+    if(!PlayerUltimateCue(line,_countof(line)))return;
+    Label(text,lines,at,width*0.5f,height*0.5f+342.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
+}
 // The mark key with no enemy near the aim (npcai.cpp SendToPoint): what came of it under the point for a moment (the
 // selected units sent there, how many; none selected; online); the point's own ring is the Q mark's (QMarkHud). An
 // enemy near the aim but not on it: a ring there and the word to aim at it.
@@ -4591,6 +5321,13 @@ void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
                Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy : Tx::npcPingNoUnit));
 }
 
+// The catalog's categories in the HUD's words (debug_spawn.h Category, in its order): the debug spawn tool's menu and the
+// test range's 「摆放」 panel.
+const Tx* DebugSpawnCategoryWords() noexcept {
+    static const Tx kNames[debugspawn::kCategoryCount]={Tx::debugSpawnVehicles,Tx::debugSpawnOurs,Tx::debugSpawnAircraft,
+                                                        Tx::debugSpawnEnemies,Tx::debugSpawnEnemies41,Tx::debugSpawnSoldiers};
+    return kNames;
+}
 // The result line (a spawn's, for a moment): its words, the row's name.
 void DebugSpawnStatusLine(Text* text,Line* lines,int* at,float x,float y,int align,float scale,const DebugSpawnCue& c) noexcept {
     if(c.status==kDebugSpawnNone || c.statusRow<0 || c.statusRow>=debugspawn::kEntryCount)return;
@@ -4601,8 +5338,9 @@ void DebugSpawnStatusLine(Text* text,Line* lines,int* at,float x,float y,int ali
         return;
     }
     const Tx words=c.status==kDebugSpawnDone ? Tx::debugSpawnDone : c.status==kDebugSpawnOnline ? Tx::debugSpawnOnline :
-                   c.status==kDebugSpawnNoPlace ? Tx::debugSpawnNoPlace : Tx::debugSpawnFailed;
-    Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnDone ? kGreen : kAmber,Tr(words),name);
+                   c.status==kDebugSpawnNoPlace ? Tx::debugSpawnNoPlace : c.status==kDebugSpawnLoading ? Tx::placeLoadingNote :
+                   Tx::debugSpawnFailed;
+    Label(text,lines,at,x,y,align,scale,c.status==kDebugSpawnDone || c.status==kDebugSpawnLoading ? kGreen : kAmber,Tr(words),name);
 }
 // The debug spawn tool's menu (debug_spawn.cpp; ini DebugSpawn, off by default): a panel at the left, its category, a
 // window of its rows round the one picked (an arrow at it; dim when it cannot be made now), the keys, and a spawn's
@@ -4616,10 +5354,9 @@ void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,fl
     if(*at+kWindow+5>kMaxLines)return;
     using debugspawn::Category;
     const Category cat=static_cast<Category>(c.category>=0 && c.category<debugspawn::kCategoryCount ? c.category : 0);
-    static const Tx kNames[debugspawn::kCategoryCount]={Tx::debugSpawnVehicles,Tx::debugSpawnAircraft,Tx::debugSpawnEnemies,
-                                                        Tx::debugSpawnSoldiers};
-    static const Tx kHints[debugspawn::kCategoryCount]={Tx::debugSpawnHintVehicle,Tx::debugSpawnHintAircraft,Tx::debugSpawnHintEnemy,
-                                                        Tx::debugSpawnHintSoldier};
+    const Tx* const kNames=DebugSpawnCategoryWords();
+    static const Tx kHints[debugspawn::kCategoryCount]={Tx::debugSpawnHintVehicle,Tx::debugSpawnHintVehicle,Tx::debugSpawnHintAircraft,
+                                                        Tx::debugSpawnHintEnemy,Tx::debugSpawnHintEnemy,Tx::debugSpawnHintSoldier};
     const int first=c.count<=kWindow ? 0 : (c.pick-kWindow/2<0 ? 0 : (c.pick-kWindow/2+kWindow>c.count ? c.count-kWindow : c.pick-kWindow/2));
     const int shown=c.count<kWindow ? c.count : kWindow;
     const int firstLine=*at;
@@ -4715,6 +5452,117 @@ static void InfantryScope(void* drawer,void* ctx,Text* text,const float* vp,floa
 
 #include "cockpit_screens.inc"
 
+namespace {
+// The controlled enemy's HUD in the player's place (the user, 2026-10-19: "操控怪物的时候玩家hud没有改成怪物的hud"):
+// stockgauge.cpp hides the player's armor gauge and weapon gauges for the lease; here, where they were, the enemy's
+// own: its name and HP bar top left (the armor gauge's corner, ArmorPanel's), and bottom right (the weapon gauges'
+// corner) each attack with its own key and pad button and its native state. Radar, crosshair and damage marks stay.
+constexpr int kEnemyHudRows=10;   // attack rows at most (the rest: the M card)
+void EnemyControlHud(void* drawer,void* ctx,Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    enemy_control::Snapshot snapshot{};
+    if(!EnemyControlReadSnapshotForView(passPlayerRefKey,&snapshot) &&
+       !EnemyControlReadSnapshotForView(passPlayerSoldierKey,&snapshot))return;
+    using Phase=enemy_control::Phase;
+    if(snapshot.phase!=Phase::active && snapshot.phase!=Phase::pending && snapshot.phase!=Phase::restoring)return;
+    const bool active=snapshot.phase==Phase::active;
+    if(*at+6>kMaxLines)return;
+    // --- Top left: who, its HP, its side ---
+    const float x=kArmorPanelX*s,top=kArmorPanelY*s,right=x+std::fmin(380.0f*s,width*0.38f),barW=right-x-16.0f*s;
+    const bool hp=active && enemyui::HealthAvailable(snapshot.healthKnown,snapshot.health,snapshot.maxHealth);
+    const float statusH=active ? (snapshot.sourceProtected ? 104.0f : 84.0f)+(hp ? 12.0f : 0.0f) : 52.0f;
+    Rect(drawer,ctx,x-8.0f*s,top-8.0f*s,right,top+statusH*s,kMapBand);
+    Rect(drawer,ctx,x-8.0f*s,top-8.0f*s,x-5.0f*s,top+statusH*s,kCyan);
+    Label(text,lines,at,x,top+8.0f*s,0,kLineScale*0.72f,kCyan,Tr(Tx::enemyControlActive),snapshot.name);
+    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    float y=top+24.0f*s;
+    if(!active) {
+        Label(text,lines,at,x,y+12.0f*s,0,kLineScale*0.58f,kAmber,L"%ls",
+            Tr(snapshot.phase==Phase::restoring ? Tx::enemyControlRestoring : Tx::enemyControlPending));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+        return;
+    }
+    if(hp) {
+        const float share=snapshot.health/snapshot.maxHealth;
+        Bar(drawer,ctx,x,y,barW,10.0f*s,share,share,HpColour(share>1.0f ? 1.0f : share),s);
+        y+=12.0f*s;
+    }
+    wchar_t health[128]{};
+    Label(text,lines,at,x,y+10.0f*s,0,kLineScale*0.6f,kWhite,L"%ls",EnemyHealthText(snapshot,health,_countof(health)));
+    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    y+=22.0f*s;
+    Label(text,lines,at,x,y+10.0f*s,0,kLineScale*0.52f,kAmber,
+        Tr(snapshot.followsOwnerTeam ? Tx::enemyControlTeamOwner : Tx::enemyControlTeamOriginal),snapshot.controlledTeam);
+    if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    y+=20.0f*s;
+    if(snapshot.sourceProtected) {
+        Label(text,lines,at,x,y+10.0f*s,0,kLineScale*0.52f,kTeal,L"%ls",Tr(Tx::enemyControlSourceSafe));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x,right-8.0f*s);
+    }
+    const float statusBottom=top+statusH*s;
+    // --- Bottom right: key -> attack ---
+    enemy_control::Ability list[kEnemyHudRows]{};
+    const unsigned keyed=(std::min)(static_cast<unsigned>(kEnemyHudRows),enemy_control::kBindingCount);
+    unsigned shown=EnemyControlAbilities(snapshot,0,list,keyed);
+    const float rowH=26.0f*s,x1=width-kArmorPanelX*s,x0=x1-std::fmin(470.0f*s,width*0.44f),bottom=height-kArmorPanelY*s;
+    // Rows that fit (a short split view): up to the status block when the two share columns, else the top margin;
+    // the title, the rest's line and the hint always kept.
+    const float ceiling=x0-8.0f*s<right ? statusBottom+8.0f*s : top-8.0f*s;
+    const float room=bottom-ceiling-(26.0f+22.0f+22.0f+8.0f)*s;
+    const unsigned fit=room>0.0f ? static_cast<unsigned>(room/rowH) : 0u;
+    if(shown>fit)shown=fit;
+    if(*at+3*static_cast<int>(shown)+4>kMaxLines)shown=static_cast<unsigned>((std::max)(0,(kMaxLines-*at-4)/3));
+    const bool more=snapshot.abilityCount>shown;
+    const float blockH=(26.0f+static_cast<float>(shown)*26.0f+(more || !shown ? 22.0f : 0.0f)+22.0f+8.0f)*s;
+    float ry=bottom-blockH;
+    Rect(drawer,ctx,x0-8.0f*s,ry,x1+8.0f*s,bottom,kMapBand);
+    Rect(drawer,ctx,x1+5.0f*s,ry,x1+8.0f*s,bottom,kCyan);
+    Label(text,lines,at,x0,ry+13.0f*s,0,kLineScale*0.6f,kCyan,L"%ls",Tr(Tx::enemyControlAttacks));
+    if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+    ry+=26.0f*s;
+    const float chip=std::fmin(130.0f*s,(x1-x0)*0.34f);
+    for(unsigned i=0;i<shown;++i) {
+        const auto& ability=list[i];
+        wchar_t key[32]{},pad[32]{},chipText[64]{},state[96]{};
+        const auto* binding=enemy_control::BindingOf(i);
+        const wchar_t* keyName=EnemyKeyLabel(i,false,key,_countof(key));
+        if(binding && binding->pad)_snwprintf_s(chipText,_countof(chipText),_TRUNCATE,L"%ls / %ls",keyName,EnemyKeyLabel(i,true,pad,_countof(pad)));
+        else _snwprintf_s(chipText,_countof(chipText),_TRUNCATE,L"%ls",keyName);
+        const bool unavailable=ability.state==enemy_control::AbilityState::unavailable;
+        const bool cooling=ability.state==enemy_control::AbilityState::cooldown;
+        const bool running=ability.state==enemy_control::AbilityState::active;
+        Rect(drawer,ctx,x0,ry+2.0f*s,x0+chip,ry+rowH-3.0f*s,running ? kBtnLit : kBtnFill);
+        Label(text,lines,at,x0+chip*0.5f,ry+rowH*0.47f,1,kLineScale*0.52f,unavailable ? kMapOrderDim : kWhite,L"%ls",chipText);
+        if(*at>0) {
+            Line& l=lines[*at-1];MapFitLabel(text,l,x0+3.0f*s,x0+chip-3.0f*s);l.x=x0+(chip-l.w)*0.5f;
+        }
+        const float nameLeft=x0+chip+8.0f*s;
+        float nameRight=x1;
+        if(cooling || unavailable || running) {
+            Label(text,lines,at,x1,ry+rowH*0.47f,2,kLineScale*0.48f,cooling ? kAmber : running ? kCyan : kMapOrderDim,L"%ls",
+                EnemyAbilityState(ability,state,_countof(state)));
+            if(*at>0) {
+                Line& l=lines[*at-1];MapFitLabel(text,l,nameLeft+(x1-nameLeft)*0.5f,x1);nameRight=l.x-6.0f*s;
+            }
+        }
+        Label(text,lines,at,nameLeft,ry+rowH*0.47f,0,kLineScale*0.6f,unavailable ? kMapOrderDim : kWhite,L"%ls",ability.name);
+        if(*at>0)MapFitLabel(text,lines[*at-1],nameLeft,nameRight);
+        ry+=rowH;
+    }
+    if(more) {
+        Label(text,lines,at,x0,ry+11.0f*s,0,kLineScale*0.5f,kTeal,Tr(shown ? Tx::enemyControlMoreOnCard : Tx::enemyControlAllOnCard),
+            static_cast<unsigned>(snapshot.abilityCount-shown));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+        ry+=22.0f*s;
+    } else if(!shown) {
+        Label(text,lines,at,x0,ry+11.0f*s,0,kLineScale*0.5f,kAmber,L"%ls",Tr(Tx::enemyControlNoKeys));
+        if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+        ry+=22.0f*s;
+    }
+    Label(text,lines,at,x0,ry+11.0f*s,0,kLineScale*0.5f,kTeal,L"%ls",Tr(Tx::enemyControlPlayHint));
+    if(*at>0)MapFitLabel(text,lines[*at-1],x0,x1);
+}
+} // namespace
+
 void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierPanel* panels,int count) noexcept {
     // The aim's view (CameraRay) stays the game's while the map's camera shows: the turret, the launcher and the sights
     // hold where the player left them.
@@ -4745,17 +5593,22 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // The map's camera easing back to the player (map.cpp Camera, kEaseOut frames): its readout is gone and the view is
         // still the map's, so the world marks (the impact rings, the turret's box, the vehicle HUD) would land on a
         // view they were not made for. Nothing, like the stock HUD (its switch held until the camera is back).
-        if(MapOwnsView()){FreeText(text);return;}
+        if(MapOwnsView() && MapHidesStockHud(passCamera)){FreeText(text);return;}
+        EnemyControlHud(drawer,ctx,t,width,height,s,lines,&at);
         const ULONGLONG now=GetTickCount64();
         const sightzoom::Kind sightKind=SightZoomView();
-        const float sightMagnification=SightZoomNow(nullptr);
-        const sightzoom::Mask sightMask=sightzoom::MaskOf(sightKind);
-        // Magnified, or the mounted optic up at 1x in a vehicle's first person (War Thunder's gunner sight).
-        const bool scopeOverlay=(sightMagnification>1.0f || SightZoomMounted(nullptr)) && sightMask!=sightzoom::Mask::none;
+        // Magnified, or the mounted optic up at 1x in a vehicle's first person (War Thunder's gunner sight): one snapshot
+        // of the seat's sight (sightzoom.h ScopeField), the same answer the stock crosshair is held back by.
+        SightScope sight{};
+        const bool scopeOverlay=SightZoomScope(&sight);
+        const float sightMagnification=scopeOverlay ? sight.zoom : 1.0f;
+        const sightzoom::Mask sightMask=sightzoom::MaskOf(sight.kind);
         scopeNow=ScopeNow{};
         {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
-            if(scopeOverlay && now-z.tick<=kFreshMs) {
+            const bool drawn=scopeOverlay && now-z.tick<=kFreshMs;
+            PublishScopeDrawn(drawn ? sight.human : nullptr);   // the stock crosshair gives way to it (scope_hold.h)
+            if(drawn) {
                 ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask==sightzoom::Mask::sensor,lines,&at);
                 // The optic's reticle goes with the weapon's marks (StockMark: ScopeArm), etched across this field.
                 if(sightMask==sightzoom::Mask::round)
@@ -4772,13 +5625,13 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         static hudcue::Change storePick{},aimMode{};
         const bool fresh=now-snap.tick<=kFreshMs,storesShown=fresh && (snap.cockpit || snap.heliFly || snap.stock);
         if(!storesShown)storePick.seen=false;
-        const int picked=snap.cockpit ? snap.jet.store : snap.stock ? snap.stockHud.selected : -1;
+        const int picked=SeatArmPick(SeatArmList(snap));
         const bool storeSwitched=storesShown && hudcue::Changed(storePick,picked,now,kSwitchMs);
         const bool aimFlipped=fresh && snap.turret && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
         const bool rotorHud=snap.cockpit && snap.jet.rotor && Cfg().heliFlightHud;   // a rotor craft: the helicopter HUD
         // A vehicle's first person: the read-outs are on its cockpit's screens (DrawCockpitScreens below); the HUD's own panels
         // (strips, annunciator, blocks, tapes) give way, its aim marks and head-up symbols stay on the view.
-        const bool screensOn=fresh && snap.screens,headUp=!screensOn || HudGlass(snap.scr);
+        const bool screensOn=fresh && snap.screens,headUp=!screensOn || (!snap.scr.physical && HudGlass(snap.scr));
         const ULONGLONG launchAt=snap.warned ? snap.warn.launchAt : 0;
         if(now-snap.tick<=kFreshMs && snap.cockpit) {
             if(snap.jet.aiming)AimMarks(drawer,ctx,viewProj,width,height,s,snap.jet);
@@ -4815,7 +5668,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             int pickedCell=-1;
             const int n=own ? StockCells(snap.stockHud,cells,&pickedCell) : 0;
             Line controls{};
-            if(snap.payload)AircraftControls(controls,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
+            if(snap.payload && snap.payloadHud.ownChoices>1)PayloadControls(controls,snap.payloadHud);
+            else if(snap.payload)AircraftControls(controls,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
             if(!screensOn)HeliStrip(drawer,ctx,t,width,height,s,snap.heliHud.f,snap.heliHud.fuel,nullptr,cells,n,own ? pickedCell : -1,
                       storeSwitched,lines,&at,&controls);
             if(snap.warned && !screensOn)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
@@ -4828,6 +5682,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(now-snap.tick<=kSazabiCueMs && snap.sazabi && !snap.cockpit) {   // the Sazabi's own HUD (it is no stock vehicle)
             SazabiHud(drawer,ctx,t,viewProj,width,height,s,snap.sazabiCue,lines,&at);
         }
+        if(now-snap.tick<=kFreshMs && snap.dreadnought && !snap.cockpit && !screensOn)
+            DreadnoughtHud(drawer,ctx,t,width,height,s,snap.dnCue,lines,&at);
         const bool gunnerSight=fresh && snap.gunner && !snap.cockpit;
         const bool mechSight=fresh && snap.sazabi && !snap.cockpit;
         const bool overhead=fresh && ((snap.highCam && snap.highCamOn) || sightKind==sightzoom::Kind::indirect);
@@ -4839,17 +5695,26 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             HeliGunSight(drawer,ctx,t,viewProj,width,height,s,snap.heliAim,lines,&at);
         if(fresh && snap.launcher && launcherSight)LauncherMarks(drawer,ctx,t,viewProj,width,height,s,snap.launch,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.highCam && !snap.cockpit)HighCamHint(t,width,height,s,snap.highCamOn,snap.highCamKeys,lines,&at);
+        if(now-snap.tick<=kFreshMs && snap.lookHint) {
+            wchar_t key[32];
+            if(snap.lookKeys)KeyName(Cfg().freeLookKey,key,32);else SeatButtonName(Cfg().freeLookButton,key,32);
+            Label(t,lines,&at,width*0.5f,height*0.86f,1,kLineScale*0.85f*s,kWhite,Tr(Tx::vehicleLookHold),key);
+        }
         if(now-snap.tick<=kFreshMs && snap.seats)SeatLine(t,width,height,snap.seatPrompt,lines,&at);
         if(now-snap.tick<=kFreshMs && snap.entrance)EntranceMark(drawer,ctx,t,viewProj,width,height,s,snap.boardingEntrance,lines,&at);
         if(fresh && snap.turretCamOk && !mountedOptic && !snap.cockpit && !launcherSight && !overhead && !gunnerSight && !mechSight)
             TurretMark(drawer,ctx,viewProj,width,height,s,snap.turretCam,!stockHud);
         if(gunnerSight)GunnerMarks(drawer,ctx,t,viewProj,width,height,s,snap.gun,lines,&at);
+        const auto thermalStatus=thermal::GetStatus();
+        if(fresh && !overhead)ThermalControlHint(t,width,height,s,thermalStatus,lines,&at);
+        if(fresh && snap.sensor && !overhead)VehicleContacts(drawer,ctx,t,viewProj,width,height,s,snap.sensorHud,thermalStatus,lines,&at);
         const bool showTurretOverlay=fresh && snap.turret && !mountedOptic && !snap.cockpit && !(physicalSight && snap.turretAim.ownGun) && (!stockHud || hudcue::TurretOverlayOwned(stockPick,snap.stockHud.turret)) && !launcherSight && !overhead && !gunnerSight && !mechSight;
         if(showTurretOverlay) {
             float controlsBottom=-1.0f;
             if(stockHud) {
                 LoadCell cells[kStockArms];const int n=StockCells(snap.stockHud,cells);Line keys{};
-                if(snap.payload)AircraftControls(keys,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
+                if(snap.payload && snap.payloadHud.ownChoices>1)PayloadControls(keys,snap.payloadHud);
+                else if(snap.payload)AircraftControls(keys,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
                 const auto dock=LoadoutDockOf(t,width,height,s,cells,n,keys.text[0] ? 1 : 0);
                 controlsBottom=dock.top-20.0f*s;
             }
@@ -4872,6 +5737,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         SweepBanner(t,width,height,s,lines,&at);
         RescueCueBanner(t,width,height,s,lines,&at);
         VersionBanner(t,width,height,s,lines,&at);
+        UltimateBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {
@@ -4879,14 +5745,34 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             float top=height*0.28f;
             for(int i=0;i<count && i<3;++i)top=Panel(drawer,ctx,t,panels[i],i,count,width,top,s,lines,&at)+10.0f*s;
         }
+        // A vehicle's first person: the weapons screen names a weapon by its picture and its round's tag (model geometry
+        // has no game font); a switch shows the picked one's own name over the view for a moment, as the loadout strip's
+        // banner does in third person (the strip itself gives way to the screen).
+        if(screensOn && storeSwitched) {
+            LoadCell cells[kStockArms>kMostStores ? kStockArms : kMostStores];
+            int n=0,pickedCell=-1;
+            if(snap.cockpit) {   // the cell of the picked store (a picked gun has no cell: no banner)
+                n=JetCells(snap.jet,cells);
+                for(int i=0;i<n;++i)if(cells[i].picked)pickedCell=i;
+            }
+            else if(snap.stock)n=StockCells(snap.stockHud,cells,&pickedCell);
+            if(pickedCell>=0 && pickedCell<n)LoadoutBanner(drawer,ctx,t,width,height*0.8f,s,cells[pickedCell],lines,&at);
+        }
         if(screensOn)DrawCockpitScreens(drawer,ctx,t,viewProj,width,height,s,snap,lines,&at);
         if(t && textOk)DrawAll(*t,lines,at);
         FreeText(text);
         DrawLog(shown,count,lines,at,w,h);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
+bool HudScopeHoldsCrosshair(const void* soldier) noexcept {
+    AcquireSRWLockShared(&scopeDrawnLock);
+    const scopehold::Drawn d=scopeDrawn;
+    ReleaseSRWLockShared(&scopeDrawnLock);
+    return scopehold::Holds(d,soldier,GetTickCount64());
+}
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone; the next publish is empty.
 void ResetHud() noexcept {
+    PublishScopeDrawn(nullptr);
     for(auto& w:work)w=Work{};
 }
 }  // namespace crew

@@ -1,0 +1,539 @@
+{
+ "source": "EDF4.1 Root.cpk player soldiers on EDF6 player SGOs; tools/make_edf41_outfits.py",
+ "classes": [
+  {
+   "class": "ranger",
+   "soldier_class": 0,
+   "battle": "OBJECT/EDF41_P_RANGER.SGO",
+   "menu": "MENUOBJECT/EDF41_P_RANGER.SGO",
+   "files": [
+    "MENUOBJECT/EDF41_P_RANGER.SGO",
+    "OBJECT/EDF41_P_RANGER.MRAB",
+    "OBJECT/EDF41_P_RANGER.SGO"
+   ],
+   "report": {
+    "class": "ranger",
+    "edf41": [
+     "OBJECT/ARMYANDENGINEER.MRAB",
+     "ArmySoldier.mdb",
+     "ArmySoldier_Lod1.mdb",
+     "ArmySoldier_Lod2.mdb"
+    ],
+    "base": "OBJECT/P505_RANGER.SGO",
+    "pairs": {
+     "ashi_l": "ashi_l",
+     "ashi_r": "ashi_r",
+     "hara0": "hara0",
+     "hara1": "hara1",
+     "hara2": "hara2",
+     "index0_l": "index0_l",
+     "index0_r": "index0_r",
+     "index1_l": "index1_l",
+     "index1_r": "index1_r",
+     "index2_l": "index2_l",
+     "index2_r": "index2_r",
+     "jowan0_l": "jowan0_l",
+     "jowan0_r": "jowan0_r",
+     "jowan1_l": "jowan1_l",
+     "jowan1_r": "jowan1_r",
+     "jowan2_l": "jowan2_l",
+     "jowan2_r": "jowan2_r",
+     "kata_l": "kata_l",
+     "kata_r": "kata_r",
+     "kawan0_l": "kawan0_l",
+     "kawan0_r": "kawan0_r",
+     "kawan1_l": "kawan1_l",
+     "kawan1_r": "kawan1_r",
+     "kawan2_l": "kawan2_l",
+     "kawan2_r": "kawan2_r",
+     "koshi": "koshi",
+     "kubi": "head",
+     "momo_l": "momo_l",
+     "momo_r": "momo_r",
+     "mune": "mune",
+     "otherFinger0_l": "middle0_l",
+     "otherFinger0_r": "middle0_r",
+     "otherFinger1_l": "middle1_l",
+     "otherFinger1_r": "middle1_r",
+     "otherFinger2_l": "middle2_l",
+     "otherFinger2_r": "middle2_r",
+     "sune_l": "sune_l",
+     "sune_r": "sune_r",
+     "te_l": "te_l",
+     "te_r": "te_r",
+     "thumb0_l": "thumb0_l",
+     "thumb0_r": "thumb0_r",
+     "thumb1_l": "thumb1_l",
+     "thumb1_r": "thumb1_r",
+     "toe_l": "toe_l",
+     "toe_r": "toe_r"
+    },
+    "added": {
+     "armArmor0_l": "jowan0_l",
+     "armArmor1_l": "armArmor0_l",
+     "armArmor0_r": "jowan0_r",
+     "armArmor1_r": "armArmor0_r",
+     "footArmor_r": "sune_r",
+     "footArmor_l": "sune_l",
+     "waistPorch_r": "koshi",
+     "waistPorch_l": "koshi"
+    },
+    "folded": {},
+    "bones": 91,
+    "turned": {
+     "otherFinger0_l": 10.3,
+     "otherFinger1_l": 3.3,
+     "otherFinger0_r": 10.3,
+     "otherFinger1_r": 3.3
+    },
+    "joint_error_max": 0.03222332497368918,
+    "joint_error_worst": [
+     [
+      0.032,
+      "otherFinger2_r"
+     ],
+     [
+      0.032,
+      "otherFinger2_l"
+     ],
+     [
+      0.028,
+      "otherFinger1_r"
+     ],
+     [
+      0.028,
+      "otherFinger1_l"
+     ],
+     [
+      0.026,
+      "otherFinger0_r"
+     ],
+     [
+      0.026,
+      "otherFinger0_l"
+     ]
+    ],
+    "vertices": [
+     13968,
+     7258,
+     4213
+    ]
+   }
+  },
+  {
+   "class": "wingdiver",
+   "soldier_class": 1,
+   "battle": "OBJECT/EDF41_P_WINGDIVER.SGO",
+   "menu": "MENUOBJECT/EDF41_P_WINGDIVER.SGO",
+   "files": [
+    "MENUOBJECT/EDF41_P_WINGDIVER.SGO",
+    "OBJECT/EDF41_P_WINGDIVER.MRAB",
+    "OBJECT/EDF41_P_WINGDIVER.SGO"
+   ],
+   "report": {
+    "class": "wingdiver",
+    "edf41": [
+     "OBJECT/PALEWING.MRAB",
+     "PaleWing.mdb",
+     "PaleWing_Lod1.mdb",
+     "PaleWing_Lod2.mdb"
+    ],
+    "base": "OBJECT/P506_WINGDIVER.SGO",
+    "pairs": {
+     "ashi_l": "ashi_l",
+     "ashi_r": "ashi_r",
+     "aux_leg_l": "aux_leg_l",
+     "aux_leg_r": "aux_leg_r",
+     "hair_front_l": "hair_front_l",
+     "hair_front_r": "hair_front_r",
+     "hair_rear0": "hair_rear0",
+     "hair_rear1": "hair_rear1",
+     "hara0": "hara0",
+     "hara1": "hara1",
+     "hara2": "hara2",
+     "hip_l": "hip_l",
+     "hip_r": "hip_r",
+     "index0_l": "index0_l",
+     "index0_r": "index0_r",
+     "index1_l": "index1_l",
+     "index1_r": "index1_r",
+     "index2_l": "index2_l",
+     "index2_r": "index2_r",
+     "jowan0_l": "jowan0_l",
+     "jowan0_r": "jowan0_r",
+     "jowan1_l": "jowan1_l",
+     "jowan1_r": "jowan1_r",
+     "jowan2_l": "jowan2_l",
+     "jowan2_r": "jowan2_r",
+     "kata_l": "kata_l",
+     "kata_r": "kata_r",
+     "kawan0_l": "kawan0_l",
+     "kawan0_r": "kawan0_r",
+     "kawan1_l": "kawan1_l",
+     "kawan1_r": "kawan1_r",
+     "kawan2_l": "kawan2_l",
+     "kawan2_r": "kawan2_r",
+     "koshi": "koshi",
+     "kubi": "head",
+     "momo_l": "momo_l",
+     "momo_r": "momo_r",
+     "mune": "mune",
+     "otherFinger0_l": "middle0_l",
+     "otherFinger0_r": "middle0_r",
+     "otherFinger1_l": "middle1_l",
+     "otherFinger1_r": "middle1_r",
+     "otherFinger2_l": "middle2_l",
+     "otherFinger2_r": "middle2_r",
+     "sune_l": "sune_l",
+     "sune_r": "sune_r",
+     "te_l": "te_l",
+     "te_r": "te_r",
+     "thumb0_l": "thumb0_l",
+     "thumb0_r": "thumb0_r",
+     "thumb1_l": "thumb1_l",
+     "thumb1_r": "thumb1_r"
+    },
+    "added": {},
+    "folded": {
+     "armArmor_l": "kawan2_l",
+     "armArmor_r": "kawan2_r",
+     "aux_arm_l": "jowan0_l",
+     "aux_arm_r": "jowan0_r",
+     "booster_center": "mune",
+     "booster_core": "mune",
+     "booster_joint0_l": "mune",
+     "booster_joint0_r": "mune",
+     "booster_joint1_l": "mune",
+     "booster_joint1_r": "mune",
+     "booster_joint2_l": "mune",
+     "booster_joint2_r": "mune",
+     "booster_nozzleB_l": "mune",
+     "booster_nozzleB_r": "mune",
+     "booster_nozzleT_l": "mune",
+     "booster_nozzleT_r": "mune",
+     "booster_wingMain_l": "mune",
+     "booster_wingMain_r": "mune",
+     "booster_wingTailB_l": "mune",
+     "booster_wingTailB_r": "mune",
+     "booster_wingTailT_l": "mune",
+     "booster_wingTailT_r": "mune",
+     "breast_l": "mune",
+     "breast_r": "mune",
+     "footJoint_l": "ashi_l",
+     "footJoint_r": "ashi_r",
+     "footPanel_l": "ashi_l",
+     "footPanel_r": "ashi_r",
+     "shoulderArmor_l": "jowan0_l",
+     "shoulderArmor_r": "jowan0_r",
+     "skirt_b": "koshi",
+     "skirt_f": "koshi",
+     "skirt_l": "koshi",
+     "skirt_r": "koshi"
+    },
+    "bones": 99,
+    "turned": {
+     "jowan0_r": 20.5,
+     "kawan0_r": 3.7,
+     "te_r": 22.0,
+     "otherFinger0_r": 26.3,
+     "otherFinger1_r": 3.1,
+     "jowan0_l": 20.5,
+     "kawan0_l": 3.7,
+     "te_l": 22.0,
+     "otherFinger0_l": 26.3,
+     "otherFinger1_l": 3.1
+    },
+    "joint_error_max": 0.05967978898432584,
+    "joint_error_worst": [
+     [
+      0.06,
+      "kawan0_r"
+     ],
+     [
+      0.06,
+      "kawan0_l"
+     ],
+     [
+      0.048,
+      "jowan2_r"
+     ],
+     [
+      0.048,
+      "jowan2_l"
+     ],
+     [
+      0.047,
+      "kawan1_r"
+     ],
+     [
+      0.047,
+      "kawan1_l"
+     ]
+    ],
+    "vertices": [
+     16570,
+     7109,
+     6248
+    ]
+   }
+  },
+  {
+   "class": "airraider",
+   "soldier_class": 2,
+   "battle": "OBJECT/EDF41_P_AIRRAIDER.SGO",
+   "menu": "MENUOBJECT/EDF41_P_AIRRAIDER.SGO",
+   "files": [
+    "MENUOBJECT/EDF41_P_AIRRAIDER.SGO",
+    "OBJECT/EDF41_P_AIRRAIDER.MRAB",
+    "OBJECT/EDF41_P_AIRRAIDER.SGO"
+   ],
+   "report": {
+    "class": "airraider",
+    "edf41": [
+     "OBJECT/ARMYANDENGINEER.MRAB",
+     "Engineer.mdb",
+     "Engineer_Lod1.mdb",
+     "Engineer_Lod2.mdb"
+    ],
+    "base": "OBJECT/P508_AIRRADER.SGO",
+    "pairs": {
+     "ashi_l": "ashi_l",
+     "ashi_r": "ashi_r",
+     "hara0": "hara0",
+     "hara1": "hara1",
+     "hara2": "hara2",
+     "index0_l": "index0_l",
+     "index0_r": "index0_r",
+     "index1_l": "index1_l",
+     "index1_r": "index1_r",
+     "index2_l": "index2_l",
+     "index2_r": "index2_r",
+     "jowan0_l": "jowan0_l",
+     "jowan0_r": "jowan0_r",
+     "jowan1_l": "jowan1_l",
+     "jowan1_r": "jowan1_r",
+     "jowan2_l": "jowan2_l",
+     "jowan2_r": "jowan2_r",
+     "kata_l": "kata_l",
+     "kata_r": "kata_r",
+     "kawan0_l": "kawan0_l",
+     "kawan0_r": "kawan0_r",
+     "kawan1_l": "kawan1_l",
+     "kawan1_r": "kawan1_r",
+     "kawan2_l": "kawan2_l",
+     "kawan2_r": "kawan2_r",
+     "koshi": "koshi",
+     "kubi": "head",
+     "momo_l": "momo_l",
+     "momo_r": "momo_r",
+     "mune": "mune",
+     "otherFinger0_l": "middle0_l",
+     "otherFinger0_r": "middle0_r",
+     "otherFinger1_l": "middle1_l",
+     "otherFinger1_r": "middle1_r",
+     "otherFinger2_l": "middle2_l",
+     "otherFinger2_r": "middle2_r",
+     "sune_l": "sune_l",
+     "sune_r": "sune_r",
+     "te_l": "te_l",
+     "te_r": "te_r",
+     "thumb0_l": "thumb0_l",
+     "thumb0_r": "thumb0_r",
+     "thumb1_l": "thumb1_l",
+     "thumb1_r": "thumb1_r",
+     "toe_l": "toe_l",
+     "toe_r": "toe_r"
+    },
+    "added": {
+     "armArmor0_l": "jowan0_l",
+     "armArmor1_l": "armArmor0_l",
+     "armArmor0_r": "jowan0_r",
+     "armArmor1_r": "armArmor0_r",
+     "radar0": "mune",
+     "radar1": "radar0",
+     "radar2": "radar1",
+     "radarTop": "radar2",
+     "backslide": "mune",
+     "neckCover": "mune"
+    },
+    "folded": {},
+    "bones": 85,
+    "turned": {
+     "otherFinger0_l": 10.3,
+     "otherFinger1_l": 3.3,
+     "otherFinger0_r": 10.3,
+     "otherFinger1_r": 3.3
+    },
+    "joint_error_max": 0.03222332497368918,
+    "joint_error_worst": [
+     [
+      0.032,
+      "otherFinger2_r"
+     ],
+     [
+      0.032,
+      "otherFinger2_l"
+     ],
+     [
+      0.028,
+      "otherFinger1_r"
+     ],
+     [
+      0.028,
+      "otherFinger1_l"
+     ],
+     [
+      0.026,
+      "otherFinger0_r"
+     ],
+     [
+      0.026,
+      "otherFinger0_l"
+     ]
+    ],
+    "vertices": [
+     13672,
+     6090,
+     2485
+    ]
+   }
+  },
+  {
+   "class": "fencer",
+   "soldier_class": 3,
+   "battle": "OBJECT/EDF41_P_FENCER.SGO",
+   "menu": "MENUOBJECT/EDF41_P_FENCER.SGO",
+   "files": [
+    "MENUOBJECT/EDF41_P_FENCER.SGO",
+    "OBJECT/EDF41_P_FENCER.MRAB",
+    "OBJECT/EDF41_P_FENCER.SGO"
+   ],
+   "report": {
+    "class": "fencer",
+    "edf41": [
+     "OBJECT/HEAVYARMOR.MRAB",
+     "HeavyArmor.mdb",
+     "HeavyArmo_Lod1.mdb",
+     "HeavyArmo_Lod2.mdb"
+    ],
+    "base": "OBJECT/P507_FENCER.SGO",
+    "pairs": {
+     "ashi_l": "ashi_l",
+     "ashi_r": "ashi_r",
+     "backWeaponJoint_l": "backWeaponJoint_r",
+     "backWeaponJoint_r": "backWeaponJoint_l",
+     "backWeapon_l": "backWeapon_r",
+     "backWeapon_r": "backWeapon_l",
+     "hara0": "hara0",
+     "hara1": "hara1",
+     "hara2": "hara2",
+     "index0_l": "index0_l",
+     "index0_r": "index0_r",
+     "index1_l": "index1_l",
+     "index1_r": "index1_r",
+     "index2_l": "index2_l",
+     "index2_r": "index2_r",
+     "jowan0_l": "jowan0_l",
+     "jowan0_r": "jowan0_r",
+     "jowan1_l": "jowan1_l",
+     "jowan1_r": "jowan1_r",
+     "jowan2_l": "jowan2_l",
+     "jowan2_r": "jowan2_r",
+     "kata_l": "kata_l",
+     "kata_r": "kata_r",
+     "kawan0_l": "kawan0_l",
+     "kawan0_r": "kawan0_r",
+     "koshi": "koshi",
+     "kubi": "head",
+     "momo_l": "momo_l",
+     "momo_r": "momo_r",
+     "mune": "mune",
+     "otherFinger0_l": "middle0_l",
+     "otherFinger0_r": "middle0_r",
+     "otherFinger1_l": "middle1_l",
+     "otherFinger1_r": "middle1_r",
+     "otherFinger2_l": "middle2_l",
+     "otherFinger2_r": "middle2_r",
+     "sune_l": "sune_l",
+     "sune_r": "sune_r",
+     "te_l": "te_l",
+     "te_r": "te_r",
+     "thumb0_l": "thumb0_l",
+     "thumb0_r": "thumb0_r",
+     "thumb1_l": "thumb1_l",
+     "thumb1_r": "thumb1_r"
+    },
+    "added": {
+     "frontArmor_over": "mune",
+     "armArmor0_l": "jowan2_l",
+     "armArmor0_r": "jowan2_r",
+     "bCoverT": "mune",
+     "bCoverU": "mune",
+     "booster": "mune",
+     "frontArmor_under": "hara0",
+     "skirt_r": "koshi",
+     "skirt_l": "koshi"
+    },
+    "folded": {},
+    "bones": 110,
+    "turned": {
+     "jowan0_l": 4.2,
+     "kawan0_l": 4.0,
+     "te_l": 12.5,
+     "thumb0_l": 14.8,
+     "jowan0_r": 4.2,
+     "kawan0_r": 4.0,
+     "te_r": 12.5,
+     "thumb0_r": 14.8
+    },
+    "joint_error_max": 0.05069550967881823,
+    "joint_error_worst": [
+     [
+      0.051,
+      "thumb0_r"
+     ],
+     [
+      0.051,
+      "thumb0_l"
+     ],
+     [
+      0.05,
+      "thumb1_r"
+     ],
+     [
+      0.05,
+      "thumb1_l"
+     ],
+     [
+      0.033,
+      "index0_r"
+     ],
+     [
+      0.033,
+      "index0_l"
+     ]
+    ],
+    "vertices": [
+     15354,
+     9589,
+     4542
+    ]
+   }
+  }
+ ],
+ "skipped": [],
+ "files": {
+  "MENUOBJECT/EDF41_P_AIRRAIDER.SGO": "6b854d05a3abb176ecec7352acaeb892733368c557592c78751ef81a83fc6715",
+  "MENUOBJECT/EDF41_P_FENCER.SGO": "049ed35d5a585a5c7de6b04939be9c0160b4ff0b3ffcc40018bace11638255c7",
+  "MENUOBJECT/EDF41_P_RANGER.SGO": "b0fd5fa778f19ed8c78f517e7ad8af2e01929262a7b6cf727530eb913b518e2c",
+  "MENUOBJECT/EDF41_P_WINGDIVER.SGO": "435f500948def4a67dfebbdca9b43027a441dd1b8b24046ffc91e9a8356854ae",
+  "OBJECT/EDF41_P_AIRRAIDER.MRAB": "137050ce8daa7f3e871fd40ce108062c58e390ac7d441c0c91ac1bf80895474c",
+  "OBJECT/EDF41_P_AIRRAIDER.SGO": "446fb86836f7b2675ac0f59394ce475df6f9337a853962bcede263d92a90ac1a",
+  "OBJECT/EDF41_P_FENCER.MRAB": "4c2c247451315dd7600985bc2f6aa1ab8e6c4e242169225d568240b5164a378f",
+  "OBJECT/EDF41_P_FENCER.SGO": "8af082484432b945b2ae6f8e4d6bf3ac34b8c907399a48f1ad5f557e679a71fe",
+  "OBJECT/EDF41_P_RANGER.MRAB": "3f7a5dd7dccb937bdab88244a2f163a12d4c25fbeabe53ff6e4ff7ccf09329a4",
+  "OBJECT/EDF41_P_RANGER.SGO": "c315193d26412194cfdccf956bfdb4722f722644e0c9bf8a1d7fb4c9b9b83b26",
+  "OBJECT/EDF41_P_WINGDIVER.MRAB": "a6b32ed1279483dd6b9e3f92d5a33261f79566e1ad0128f40689ae64b87bb83c",
+  "OBJECT/EDF41_P_WINGDIVER.SGO": "404172c97cf58947e257e0eff4dc177e2c05c5f2f6bb9ba77c182df8f388295a"
+ }
+}

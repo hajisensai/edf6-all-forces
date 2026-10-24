@@ -236,7 +236,7 @@ void Publish(unsigned char* v,const unsigned char* human,bool keys,bool locked,c
     for(unsigned i=0;i<count && i<static_cast<unsigned>(kMostSeatsShown);++i) {
         const unsigned char* s=SeatAt(v,i);
         p.holder[i]=HolderOf(s,human);
-        p.gun[i]=HasGun(s);
+        p.gun[i]=HasGun(s) || (i>0 && IsDreadnought(v));   // its turrets' seats: the plugin's guns, no holder of theirs
     }
     latest=p;latestMs=ms;
     const ULONGLONG until=Cfg().seatList ? ms+kFreshMs : r.promptUntil>r.refusedUntil ? r.promptUntil : r.refusedUntil;
@@ -261,7 +261,9 @@ bool Frame(unsigned char* v,unsigned char* human,unsigned at,ULONGLONG ms) noexc
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
     // Each key's edge on the key itself, every frame; which of them counts goes by the seat's input mode.
     const bool keyDown=KeyDown(Cfg().seatNextKey);
-    const bool padDown=Cfg().seatButton>0 && (At<std::uint16_t>(seat,kSeatButtons)&Cfg().seatButton)!=0;
+    // the Dreadnought's own (its pad's B gets out of it, range 2026-10-21: DreadnoughtSeatButton)
+    const int button=IsDreadnought(v) ? Cfg().dreadnoughtSeatButton : Cfg().seatButton;
+    const bool padDown=button>0 && (At<std::uint16_t>(seat,kSeatButtons)&button)!=0;
     const bool keyPress=seatsw::Press(r->nextKeyHeld,keyDown),padPress=seatsw::Press(r->nextPadHeld,padDown);
     const bool nextDown=keys ? keyDown : padDown;
     const bool next=keys ? keyPress : padPress;
@@ -298,7 +300,9 @@ void SeatSwitchFrame(unsigned char* v) noexcept {
     if(v[kDead])return;
     const unsigned count=SeatCount(v);
     if(count<2)return;
-    if(BodyOf(v)!=PluginBody::none && !GunshipCrewSeats(v))return;   // the plugin's other aircraft: one seat, or its own
+    // the plugin's other aircraft: one seat, or their own (the Dreadnought's bridge and turrets move as any vehicle's: the
+    // user, 2026-10-21: 「换座位键在哪呢？」)
+    if(BodyOf(v)!=PluginBody::none && !GunshipCrewSeats(v) && !IsDreadnought(v))return;
     const ULONGLONG ms=GameMs();
     for(unsigned i=0;i<count;++i) {
         unsigned char* const seat=SeatAt(v,i);

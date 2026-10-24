@@ -85,9 +85,39 @@ def sources(root: str) -> list[str]:
     return sorted(out)
 
 
+def native_bridge_code(rel: str, code: str) -> str:
+    """Remove exact stock ABI replay sites, never a file-wide authority exemption.
+
+    Native retarget and accepted-action hooks must execute the displaced stock
+    gate. These are not independent plugin authority decisions. Their original
+    bytes/arguments are also covered by the corresponding native audits.
+    """
+    code = re.sub(r"\{0x7748F0,\{[0-9A-Fa-fxX,\s]+\}\}", "{STOCK_SESSION_SIGNATURE,{}}", code)
+    if rel == 'src/enemy_control_deiroi_net.cpp':
+        native = body(code, 'bool __fastcall MainNetwork(')
+        expected = 'return Fn<NetActiveFn>(0x7748F0)(netObject);'
+        if 'NativeActionRole(root,&authority)' in native and expected in native:
+            code = code.replace(native, native.replace(expected, 'return STOCK_NETWORK_GATE(netObject);'), 1)
+        # The original-call table is data paired with MainNetwork's one detour.
+        code = re.sub(r'(constexpr unsigned targets\[\]=\{[^}]*),0x7748F0(\};)', r'\1,STOCK_NETWORK_GATE\2', code)
+    elif rel == 'src/enemy_control_target.cpp':
+        native = body(code, 'void Notify(')
+        expected = 'reinterpret_cast<bool(__fastcall*)(void*)>(image+kOnline)(bytes+0x120)'
+        if native.count(expected) == 1 and '(bytes[0x128]&1)' in native and 'network[14]' in native and 'vtable[37]' in native:
+            code = code.replace(native, native.replace(expected, 'STOCK_NETWORK_GATE(bytes+0x120)'), 1)
+            if 'image+kOnline' not in code:
+                code = code.replace('kOnline=0x7748F0;', 'kOnline=STOCK_NETWORK_GATE;', 1)
+    elif rel == 'src/enemy_control_weapon_aim.cpp':
+        native = body(code, 'bool InstallMeteor(')
+        expected = 'Address(b,image+0x7748F0);'
+        if native.count(expected) == 1 and 'constexpr unsigned at=0x443A93;' in native and 'Jump(b,image+0x443AA1)' in native and 'BossMeteorPoint' in native:
+            code = code.replace(native, native.replace(expected, 'Address(b,STOCK_NETWORK_GATE);'), 1)
+    return code
+
+
 def check_rvas(root: str, files: list[str]) -> None:
     for rel in files:
-        code = code_only(read(root, rel)).upper()
+        code = native_bridge_code(rel, code_only(read(root, rel))).upper()
         for rva in DECISION_RVAS:
             if rva.upper() in code and rel not in ALLOWED_RVA_FILES:
                 fail(f'{rel}: calls {rva} itself; ask src/online_authority.h (InSession / OnlineHostOnly / IsOnlineAuthority)')
@@ -198,11 +228,12 @@ def check_calls(root: str) -> None:
     rescue = body(dispatch, 'bool RescueRequest(')
     if 'RescueRequest(' not in body(dispatch, 'bool SupportRescueAt(') or             not before(rescue, 'InSession() && !LocalAuthority()', 'SubmitSupportRequest('):
         fail('src/support_dispatch.cpp SupportRescueAt: an online rescue does not go through the host-planned protocol')
-    if not before(request, 'else if(InSession() && !LocalAuthority())', 'SubmitSupportRequest(') or             not before(request, 'SubmitSupportRequest(', 'else if(offlinePending)'):
-        fail('online support must go through the reliable host-planned deployment protocol')
-    # The only local deployment in a session: the host of a world with no other participant (no peer to replicate to).
-    if 'bool LocalAuthority() noexcept {return !InSession() || SupportSoloHostWorld();}' not in dispatch:
-        fail('a local support deployment in a session must be limited to the host of a one-participant world')
+    if not before(request, 'else if(InSession())', 'SubmitSupportRequest(') or             not before(request, 'SubmitSupportRequest(', 'else if(offlinePending)'):
+        fail('all online support must go through the reliable host-planned deployment protocol')
+    # Even a one-participant online world uses Session tokens/native IDs. A
+    # separate local counter can collide when a dynamic child is created later.
+    if 'bool LocalAuthority() noexcept {return !InSession();}' not in dispatch:
+        fail('local support deployment must remain strictly offline, including one-participant online worlds')
     spawn = body(dispatch, 'bool SpawnDeployment(')
     if 'unit.matrix' not in spawn or 'PlanAirSupport(' in spawn or 'player.pos' in spawn:
         fail('peers must apply explicit support matrices, never recalculate entry against their own player')
@@ -218,8 +249,8 @@ def check_calls(root: str) -> None:
 
 def check_session(root: str) -> None:
     session = body(code_only(read(root, 'src/netprobe.cpp')), 'bool InSession()')
-    if 'return sig && ' not in session:
-        fail('src/netprobe.cpp InSession: unknown session code counts as online (offline play would lose the gated features)')
+    if not before(session, 'if(!SessionCodeKnown(base))return false;', 'At<const unsigned char*>(base,kGameStatus)'):
+        fail('src/netprobe.cpp InSession: reject an unknown native profile before reading session state')
 
 
 # "A player is aboard, leave it to them" asks for a player of any machine (AnyPlayerIn); "this machine's player" (its
