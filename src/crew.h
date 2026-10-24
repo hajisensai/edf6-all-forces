@@ -516,6 +516,7 @@ void ResetAirstrikes() noexcept;  // airstrike.cpp
 void ResetBoosters() noexcept;    // booster.cpp
 void ResetShields() noexcept;     // shield.cpp
 void ViewTick() noexcept;         // view.cpp: once a frame, the view distance raised
+void ViewDiagTick() noexcept;     // viewdiag.cpp: once a frame, logs (VIEWDIAG) when the view's eye leaves the map or the near pass's clip breaks
 // view.cpp: while the map view is open (map.cpp, game thread, each frame) the cameras' far clip raised to `farClip` and
 // their near clip to `nearClip` (the depth range for a view from up to 3 km); off: the values from before put back.
 void ViewMapClip(bool on,float farClip,float nearClip) noexcept;
@@ -595,6 +596,8 @@ bool InstallEdf41SmallDragon() noexcept;
 bool InstallEdf41Insects() noexcept;
 // edf41natives.cpp: EDF4.1 script natives EDF6's BVM executor lacks (SetEncountReportRadius as table 1 id 3003).
 bool InstallEdf41Natives() noexcept;
+// edf41before.cpp: EDF4.1's pre-mission scenes (BEFORE.BVM) play with the menu's UIs (its black fade) closed, as in 4.1.
+bool InstallEdf41Before() noexcept;
 // edf41mother.cpp: UfoMother301 (EDF4.1's mothership) and its part classes, registered in the game's own factory table.
 bool InstallEdf41Mother() noexcept;
 bool InstallEdf41Robo() noexcept;      // edf41robo.cpp: EDF4.1's UfoRobo (ini Edf41Robo)

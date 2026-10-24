@@ -81,6 +81,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/splitmissile.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/supportunit.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/route_guide.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41natives.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41before.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/viewdiag.cpp)
 # The DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (src/edf41smalldragon.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/edf41smalldragon.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41insects.cpp)
@@ -1072,6 +1074,9 @@ add_test(NAME net_session_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE
 set_tests_properties(net_session_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 add_test(NAME item_pickup_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/item_pickup_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
+# EDF4.1's pre-mission scenes (src/edf41before.cpp): the patched call in Before(), _DeleteAllMenuUi, the fade screen name.
+add_test(NAME edf41_before_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_before_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(edf41_before_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 # The stock join mark (hidden while the map recruits) and the free-squad cover a recruited squad keeps (src/npcai.cpp
 # InstallFreeSquadCover): the patched bytes and the original visit run on stand-ins against the real EDF.dll.
 add_test(NAME npc_cover_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_cover_native_audit.py" "${EDF6_NATIVE_DLL}")
