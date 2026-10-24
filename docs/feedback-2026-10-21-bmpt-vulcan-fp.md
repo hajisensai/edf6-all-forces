@@ -38,6 +38,8 @@ BMPT（`EDF6VC_BMPT.MRAB`）和 M163（`EDF6VC_VULCAN.MRAB`）三条都没有：
 
 注意：另一个任务在改两车模型。外形变了，这两行眼点要按新几何重新量（`tools/cockpit_preview.py`）。
 
+2026-10-24（随 #233 战雷模型合入）已重新量：BMPT `(0.445, 2.06, 0.17)`，炮手瞄准镜窗（模型部件 `cannon_main.wt_optic_glass_c`，武器模块左侧）正前方、遮光罩前沿之外，双炮在右上方；M163 `(0.05, 2.95, -0.65)`，M61 后方炮塔井里的座椅正上方，头高过机匣，六管炮正前方、雷达罩在右手边。`tests/test_wt_tracked.py` `test_grafted_eyes_sit_on_the_war_thunder_geometry` 守住这两个位置。缺 `models/wt_*` 退回自建几何时眼点不是按那套几何量的。
+
 ## 2. 进瞄具时原版准星没隐藏
 
 ### 根因（代码路径已核对，未实机）

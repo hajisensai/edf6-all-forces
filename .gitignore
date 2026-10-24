@@ -17,6 +17,10 @@ testrange/runs/
 # data the installer grafts, tracked so that CI's release carries the same ones the code that reads them was made for
 models/*
 !models/cockpits/
+# The M163's and the BMPT's War Thunder models (tools/prep_wt_tracked.py from the Sketchfab uploads, published there as
+# CC BY 4.0: each folder's LICENSE.txt): tracked for the same reason, pylib/wt_tracked.py builds the two vehicles from them
+!models/wt_m163/
+!models/wt_bmpt/
 
 # Development-only data (tools/make_edf41_objects.py --mother-dev): never committed, never in a release
 edf41port_dev/

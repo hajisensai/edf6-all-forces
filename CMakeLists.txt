@@ -1894,6 +1894,8 @@ add_test(NAME npc_action_look COMMAND npc_action_look_test)
 add_test(NAME npc_action_look_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_action_look_native.py")
 
 add_test(NAME tracked_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_collision.py")
+# The M163 / BMPT from their War Thunder model folders (pylib/wt_tracked.py): prep rules always, the assets with the game.
+add_test(NAME wt_tracked COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_wt_tracked.py")
 # The Havok tagfile graph and its writer (pylib/hkfile.py), the SHKT / SGO binding checks (pylib/shkt_check.py): the
 # portable parts always, the stock files' round trips and mutations with the game.
 add_test(NAME hkfile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_hkfile.py")
