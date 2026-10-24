@@ -91,8 +91,9 @@ void Left(PJet& j,unsigned char* v,float clear,bool alive,bool eject) noexcept {
         return;
     }
     if(j.phase!=Phase::air){j.keep=true;Log("PJET v=%p left on the ground: it waits there for the player",v);return;}
-    // got out on its ship's foredeck (Leave asked the same: no ejection); the hangar keeps it parked there
-    if(!eject && DreadnoughtTakesBack(v)){HandBack(j,v,"its pilot got out on their dreadnought's foredeck");return;}
+    // put out at its own bay's mouth by its ship's hangar, onto the bridge (Leave asked the same: no ejection); the hangar
+    // takes it in
+    if(!eject && DreadnoughtTakesBack(v)){HandBack(j,v,"its pilot put aboard their dreadnought at its bay");return;}
     if(eject && j.board->frame==pjet::Airframe::wing && Cfg().playerJetCatch && CrewedPilot(v)) {
         // The jet itself comes back for them (Catch: it steers in under the parachute, presses the board button).
         const float* pos=reinterpret_cast<const float*>(v+kPosition);
@@ -821,8 +822,6 @@ bool BoardableNow(const unsigned char* v) noexcept {
     // jet's catch is: the low-and-slow gate below is for one standing by, and turned the catch's every board press
     // down (no seat for them: "not aboard yet" under the parachute for 45 s, then handed back to its NPC).
     if(bail.state==Eject::chute && bail.caught.Is(v) && catchFlight.v==v)return true;
-    // Parked on a Dreadnought's foredeck (dreadnought_hangar.inc): boarded where it stands, however high the ship flies.
-    if(DreadnoughtParked(v))return true;
     const float* pos=reinterpret_cast<const float*>(v+kPosition);
     const float clear=GroundClearance(pos);
     if(clear==kNoGround || clear>kBoardClear)return false;

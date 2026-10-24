@@ -28,8 +28,9 @@ its lift and its upper and lower door. Bay i (left01 0, 1, left03 2, 3, right01 
 the fighter of kind i % 4 (BAY_KINDS) docked on its raised lift, nose outboard: bone bay_<i> (its origin the fighter's
 box centre, as the plugin's jet's; its frame rows left, up, ahead = outboard), with bay_<i>_out the same pose straight
 outboard where that fighter's box (BAY_MARGIN m larger) is clear of the ship's collision (the plugin slides the copy
-out, hides it there and makes the real jet in its place; bay_markers). The foredeck the first guess had put a module on
-is free: `ready`, where a fighter stands ready on it (nose ahead), and `ready_side` beside it (ready_markers).
+out, hides it there and makes the real jet in its place; bay_markers). Every module is in the folder; which are fitted
+is the installer's (the user, 2026-10-24: each socket's module fitted or not: pylib/dreadnought_model.py HANGAR_KEYS).
+The foredeck's ready-fighter markers (`ready`, `ready_side`) are no longer made: a player boards from a hangar (2026-10-24).
 Its turrets (the user, 2026-10-21: 「船的炮塔是可以上人的」): the dreadnoughts' secondary guns (Weapons/Dreadnought/Sec*)
 on the hull's turret mounts (turret_mounts: its round seats, found as pieces of their own), each with a yaw bone, its
 guns' pitch bone and its muzzle (turret_<n>, turret_<n>_gun, turret_<n>_muzzle), so the plugin turns them and a
@@ -348,38 +349,6 @@ def bay_markers(bones: dict, extent: dict, cells) -> dict[str, dict]:  # noqa: A
         out[f'bay_{i}'] = {'parent': SCALE_FROM, 'pivot': centre, 'frame': rows}
         out[f'bay_{i}_out'] = {'parent': SCALE_FROM, 'pivot': centre + slide * ahead, 'frame': rows}
     return out
-
-
-# The ready spot (ready_markers): on the foredeck's centre line (where the first guess had its hangar), the footprint
-# of the largest fighter nose ahead (its span across, its length along) on collision cells READY_FLAT m level at most,
-# the levellest from READY_FROM to READY_TO (game z, unshifted), the nearest to FOREDECK on a tie; `ready` on their top.
-# `ready_side`: READY_SIDE m off the largest span's wingtip to port, on the collision there.
-READY_FLAT, READY_FROM, READY_TO, READY_STEP, READY_SIDE = 0.5, 0.0, 70.0, 0.25, 3.0
-
-
-def ready_markers(extent: dict, cells, tris: np.ndarray, scale: float) -> dict[str, dict]:  # noqa: ANN001
-    sizes = [extent[f'bay_{i}'][1] - extent[f'bay_{i}'][0] for i in range(len(BAY_KINDS))]   # bays face across
-    half = np.array([max(sz[2] for sz in sizes) / 2.0, 0.0, max(sz[0] for sz in sizes) / 2.0])   # span, length
-    best = None
-    for z in np.arange(READY_FROM, READY_TO, READY_STEP):
-        at = np.array([0.0, 0.0, z])
-        hit = _hits(cells, at - half - [0, 1e4, 0], at + half + [0, 1e4, 0])
-        if not hit.any():
-            continue
-        tops = cells[1][hit, 1]
-        spread = float(tops.max() - tops.min())
-        key = (round(spread, 2), abs(z - FOREDECK[0] * scale))
-        if spread <= READY_FLAT and (best is None or key < best[0]):
-            best = (key, z, float(tops.max()))
-    assert best is not None, 'no level spot on the foredeck for a ready fighter'
-    _key, z, top = best
-    side = np.array([half[0] + READY_SIDE, 0.0, z])
-    hit = _hits(cells, side - [0.01, 1e4, 0.01], side + [0.01, 1e4, 0.01])
-    assert hit.any(), 'nothing under the ready spot\'s side'
-    ident = frame_of((0.0, 0.0, 1.0))
-    return {'ready': {'parent': SCALE_FROM, 'pivot': np.array([0.0, top, z]), 'frame': ident},
-            'ready_side': {'parent': SCALE_FROM, 'pivot': np.array([side[0], float(cells[1][hit, 1].max()), z]),
-                           'frame': ident}}
 
 
 # ------------------------------------------------------------------------------------------ the source's glb
@@ -722,7 +691,6 @@ def main(argv: list[str]) -> int:
             e['bones'].update(ship_markers(ship, e['bones'], extent, scale))
             cells = _cells(tris)
             e['bones'].update(_rounded(bay_markers(e['bones'], extent, cells)))
-            e['bones'].update(_rounded(ready_markers(extent, cells, tris, scale)))
         print(name, 'size', [round(h - l, 1) for l, h in zip(e['min'], e['max'])], 'bones', list(e['bones']))
     with open(os.path.join(a.out, 'dreadnought.json'), 'w', encoding='utf-8', newline='\n') as h:
         json.dump(manifest, h, indent=1)

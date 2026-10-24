@@ -442,10 +442,11 @@ def remove_autoturret(game: str) -> None:
     at_build.uninstall(mods, force=False)
 
 
-def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None) -> Any:
-    """Only regenerate an asset group when its recipe, inputs or installed outputs changed."""
+def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None, settings: dict | None = None) -> Any:
+    """Only regenerate an asset group when its recipe, inputs, `settings` (the ini's choices it is built by) or
+    installed outputs changed."""
     started = time.perf_counter()
-    if cache.current(module.OWNER):
+    if cache.current(module.OWNER, settings):
         print(f'{label}：校验通过，复用已有资源（{time.perf_counter() - started:.1f} 秒）', flush=True)
         return None
     print(f'{label}：生成中（首次安装或输入/输出发生变化）……', flush=True)
@@ -556,7 +557,12 @@ def install(game: str, campaign_requested: bool = False) -> None:
     sidecar = build_asset(cache, make_sidecar, '边三轮摩托')
     sedan = build_asset(cache, make_sedan, '民用轿车')
     sazabi = build_asset(cache, make_sazabi, '沙扎比（模型生成约 1.5 分钟）')
-    dreadnought = build_asset(cache, make_dreadnought, '无畏舰与舰载机（模型生成约 3 分钟）')
+    # its hangar modules: the ini's (DreadnoughtHangarLeftFore .. RightAft), built into its model and collision
+    hangars = make_dreadnought.dm.hangars_wanted(planned)
+    dreadnought = build_asset(cache, make_dreadnought,
+                              f'无畏舰与舰载机（机库模块：{make_dreadnought.fitting_text(hangars)}；模型生成约 3 分钟）',
+                              lambda g: make_dreadnought.build(g, hangars),
+                              {'hangars': make_dreadnought.dm.hangars_text(hangars)})
     proteus = build_asset(cache, make_proteus, '普罗透斯护盾（原版空袭兵电磁碉堡墙；同时撤销旧版生成的模型）')
     bigmap = build_asset(cache, make_bigmap, '大地图（3 x 3 无缝平原，只读 Chunk02.cpk）')
     root41 = find_edf41(game)

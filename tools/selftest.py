@@ -1382,6 +1382,24 @@ def dreadnought_agrees() -> None:
     assert [(k.lower(), f'edf6vc_dn_{k.lower()}.sgo', vc.dn_file(k, 'SGO'), m) for k, (_, m, *_r) in
             vc.DREADNOUGHT_FIGHTERS.items()] == [(a.lower(), b, c, float(d)) for a, b, c, d in rows], rows
     assert f'{{{vc.DREADNOUGHT_MARK:.1f}f,' in src('src/body506.cpp').replace(' ', ''), 'src/body506.cpp kMarks'
+    # its hangar modules (the user, 2026-10-24): the board reach src/dreadnought_deck.h OverHangar uses is
+    # dreadnought_model.HANGAR_REACH (tools/make_dreadnought.py holds the model's modules to it); their four ini keys, in
+    # module order, are the ones src/plugin.cpp reads into Config::dreadnoughtHangars and the shipped ini carries (all 1)
+    import dreadnought_model as dm
+    deck = src('src/dreadnought_deck.h')
+    for name, key in (('Across', 'across'), ('Along', 'along'), ('Below', 'below'), ('Above', 'above')):
+        assert f'constexpr float kHangar{name}={dm.HANGAR_REACH[key]}f;' in deck, f'src/dreadnought_deck.h kHangar{name}'
+    assert f'constexpr int kHangars={dm.HANGARS};' in deck and dm.BAYS == 2 * dm.HANGARS
+    plugin = src('src/plugin.cpp')
+    keys = re.search(r'kHangarKeys\[\]=\{([^}]*)\}', plugin)
+    assert keys and re.findall(r'L"(\w+)"', keys.group(1)) == list(dm.HANGAR_KEYS), 'src/plugin.cpp kHangarKeys'
+    shipped = src('EDF6VehicleCrew.ini')
+    assert dm.hangars_wanted(shipped) == dm.ALL_HANGARS and all(f'\n{k}=1\n' in shipped for k in dm.HANGAR_KEYS)
+    for text, want in (('[VehicleCrew]\nDreadnoughtHangarLeftAft=0\ndreadnoughthangarrightfore = 0 ; off\n', (True, False, False, True)),
+                       ('[VehicleCrew]\nDreadnoughtHangarLeftFore=0\nDreadnoughtHangarLeftFore=1\n', (False, True, True, True)),
+                       ('[Other]\nDreadnoughtHangarLeftFore=0\n', dm.ALL_HANGARS),
+                       ('[VehicleCrew]\nDreadnoughtHangarRightAft=no\n', (True, True, True, False))):
+        assert dm.hangars_wanted(text) == want, (text, dm.hangars_wanted(text))
 
 
 @test
@@ -4487,7 +4505,7 @@ def pack_install_upgrade_uninstall() -> None:
             for group in buildcache.GROUPS:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
                     {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
-                enter(patched(importlib.import_module('make_' + group), build=lambda game, made=made: made))
+                enter(patched(importlib.import_module('make_' + group), build=lambda game, *_choices, made=made: made))   # make_dreadnought.build(game, hangars)
             # Geometry/SGO parsing are generator boundaries; scoped optic journals/install/remove stay real.
             import make_optics
             enter(patched(make_optics, build_models=lambda game: {'OBJECT/EDF6VC_OPTIC_FAKE.MRAB': b'optic'},

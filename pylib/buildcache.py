@@ -174,8 +174,12 @@ class Cache:
         except (OSError, ValueError):
             pass  # absent/corrupt cache is always a rebuild, never an install failure
 
-    def current(self, group: str) -> bool:
+    def current(self, group: str, settings: dict[str, Any] | None = None) -> bool:
+        """Whether `group`'s installed outputs are the ones its recipe, inputs and `settings` (the ini's choices its
+        generator builds by: the Dreadnought's hangar modules) make."""
         signature = {'recipe': self.recipes[group], 'inputs': inputs(self.game, group)}
+        if settings is not None:
+            signature['settings'] = settings
         self.signatures[group] = signature
         entry = self.entries.get(group)
         if not isinstance(entry, dict) or entry.get('signature') != signature:

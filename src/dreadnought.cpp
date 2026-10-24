@@ -312,8 +312,8 @@ void Report(Ship& s,const unsigned char* v,const Controls& c,ULONGLONG ms) noexc
 #include "dreadnought_turrets.inc"
 #include "dreadnought_hangar.inc"
 
-// Slot `i` new: everything kept per ship (its Ship, its turrets' rigs, remote gunners and network gate, its hangar's
-// rig, bays, foredeck and escorts, its hull's bodies in the bullets' hook) goes together. Reused for another ship, a slot
+// Slot `i` new: everything kept per ship (its Ship, its turrets' rigs, remote gunners and network gate, its hangars'
+// rig, fitting, bays, escorts and sorties, its hull's bodies in the bullets' hook) goes together. Reused for another ship, a slot
 // had kept the last one's turrets and hangar (review 2026-10-24: the rigs' `bones==... && ok` would take the dead
 // ship's bone records); every array indexed by slot is reset here alone (tests/dreadnought_slot_guard.py).
 void ResetSlot(int i) noexcept {
@@ -411,7 +411,7 @@ void DreadnoughtFrame(unsigned char* v) noexcept {
     HullBodies(static_cast<int>(s-ships),v);   // its turrets' rounds through its own hull (jet_hooks.cpp)
     Drive(*s,v,GameMs());
     Publish(*s,v);           // the local player's panel, in any of its seats
-    WatchPlayer(GameMs());   // once a frame: the local player getting out onto its bridge, or off a fighter onto its deck
+    WatchPlayer(GameMs());   // once a frame: the local player getting out onto its bridge (of its seats, or of a fighter brought home)
 }
 
 void DreadnoughtInput(unsigned char* v) noexcept {
@@ -484,35 +484,42 @@ bool DreadnoughtCamera(const unsigned char* seat,float* eye,float* look) noexcep
     return ViewPlace(w,eye,look);
 }
 
-// Whether `fighter` is parked on one of its foredecks (boarded where it stands: playerjet_board.inc BoardableNow).
-bool DreadnoughtParked(const void* fighter) noexcept {
-    if(!installed || !Cfg().enabled || !Cfg().dreadnought || !fighter)return false;
-    for(const auto& h:hangars)if(h.authority && h.parked && h.parked.Is(fighter))return true;
-    return false;
+// A board press of `human` on foot visiting Dreadnought `v` (crew.cpp FindSeatHook): the local player standing over one of
+// its fitted hangars has a fighter of that hangar brought out to its bay's mouth for them (dreadnought_hangar.inc
+// HangarBoard). True: the press was over one of its hangars (no seat of the ship's for it).
+bool DreadnoughtHangarBoard(unsigned char* v,unsigned char* human) noexcept {
+    if(!installed || !Cfg().enabled || !Cfg().dreadnought || !v || !human || !IsDreadnought(v) || v[kDead] ||
+       human!=PlayerHuman() || human[kDead] || !HumanOnFoot(human))return false;
+    Ship* const s=Find(v);
+    if(!s || !Live(*s))return false;
+    return HangarBoard(*s,v,human);
 }
 
 // Whether the pilot getting out of `fighter` now stands on its ship (no parachute, no catch: playerjet.cpp Leave,
-// playerjet_board.inc Left). Only a fighter a hangar running here holds on its foredeck spot, on it and moving with the
-// ship (dreadnought_deck.h StandsAboard); anywhere else, over the hull's box too, they eject as from any jet.
+// playerjet_board.inc Left). Only a fighter a hangar running here holds at its own bay's mouth while it puts its pilot
+// out onto the bridge (BayJob::alight: brought home), on the spot and moving with the ship (dreadnought_deck.h
+// StandsAboard); anywhere else, over the hull's box too, they eject as from any jet.
 bool DreadnoughtTakesBack(const unsigned char* fighter) noexcept {
     if(!installed || !Cfg().enabled || !Cfg().dreadnought || !IsDnFighter(fighter) || fighter[kDead])return false;
     for(auto& s:ships) {
         if(!s.vehicle || !Live(s))continue;
         const Hangar& h=HangarOf(s);
-        int bay=-1;
-        if(h.parked.Is(fighter))bay=h.parkedBay;
-        else if(h.home.Is(fighter) && h.homeLow)bay=h.homeBay;
-        if(bay<0 || !h.ok)continue;
-        float spot[3];
-        DeckSpot(s.vehicle,h,KindOfBay(bay),spot);
-        const float* p=reinterpret_cast<const float*>(fighter+kPosition);
-        const float d[3]={spot[0]-p[0],spot[1]-p[1],spot[2]-p[2]};
-        auto* const f=const_cast<unsigned char*>(fighter);
-        const float rel=Relative(f,s.measured);
-        const bool aboard=dreadnought::StandsAboard(h.authority,true,vec::Len(d),rel);
-        Log("DREADNOUGHT v=%p: its pilot gets out of its %s %.1f m from its foredeck spot, %.1f m/s over the ship's: %s",
-            s.vehicle,kKindNames[KindOfBay(bay)],vec::Len(d),rel,aboard ? "aboard (no parachute)" : "not on it (ejects)");
-        return aboard;
+        if(!h.ok)continue;
+        for(int i=0;i<kBays;++i) {
+            const Bay& b=h.bay[i];
+            if(!b.fitted || !b.jet.Is(fighter))continue;
+            const float* mouth=BoneAt(b.mouth);
+            const float* p=reinterpret_cast<const float*>(fighter+kPosition);
+            const float d[3]={mouth[0]-p[0],mouth[1]-p[1],mouth[2]-p[2]};
+            auto* const f=const_cast<unsigned char*>(fighter);
+            const float rel=Relative(f,s.measured);
+            const bool alighting=b.job==BayJob::alight && kStandsOnHull;
+            const bool aboard=dreadnought::StandsAboard(h.authority,alighting,vec::Len(d),rel);
+            Log("DREADNOUGHT v=%p: its pilot gets out of bay %d's %s (%s), %.1f m from its mouth, %.1f m/s over the ship's: %s",
+                s.vehicle,i,kKindNames[KindOfBay(i)],alighting ? "brought home" : "not being taken in",vec::Len(d),rel,
+                aboard ? "aboard (no parachute)" : "not put aboard (ejects)");
+            return aboard;
+        }
     }
     return false;
 }

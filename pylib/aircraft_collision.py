@@ -151,8 +151,12 @@ def _pieces(tf, tris, magic=0):
 @lru_cache(maxsize=32)
 def build(game, key, mode=None):
     """Return one complete .SHKT; all points relative to the unchanged full-model centre."""
-    md = jet_models._model_of(game, key)
-    centre = jet_models.model_box(game, key)[0]
+    return airframe(game, jet_models._model_of(game, key), jet_models.model_box(game, key)[0], mode)
+
+
+def airframe(game, md, centre, mode=None):
+    """One complete .SHKT of model `md`, its points relative to `centre` (the vehicle's position: its SGO's box centre).
+    tools/make_dreadnought.py measures the dreadnought as fitted (its hangar modules) about its whole model's centre."""
     model_tris = list(triangles(md))
     boxes = [(tuple(lo[k]-centre[k] for k in range(3)), tuple(hi[k]-centre[k] for k in range(3)))
              for lo, hi in mesh_cells(model_tris)]

@@ -454,6 +454,13 @@ unsigned char* __fastcall FindSeatHook(void* vehicle,void* human) {
     const FindSeatFn originalFindSeat=cls>=0 && originalFindSeat_[cls] ? originalFindSeat_[cls] : reinterpret_cast<FindSeatFn>(image+kFindSeat);
     // The boarding gun's press (boarding.cpp): the vehicle its round hit, no other the visitor comes to first.
     if(const void* only=BoardingOnly(); only && only!=vehicle)return nullptr;
+    // A Dreadnought's hangars (dreadnought_hangar.inc HangarBoard): the local player standing over a fitted one takes a
+    // fighter of it out through its bay, no seat of the ship's (the user's choice, 2026-10-24).
+    if(Cfg().enabled) {
+        bool hangar=false;
+        __try { hangar=DreadnoughtHangarBoard(static_cast<unsigned char*>(vehicle),static_cast<unsigned char*>(human)); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        if(hangar)return nullptr;
+    }
     // The sidecar motorcycle's sidecar (sidecar.cpp): the player standing nearer it than the saddle takes it, no seat.
     if(Cfg().enabled) {
         bool sidecar=false;
