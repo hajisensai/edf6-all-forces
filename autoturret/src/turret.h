@@ -59,11 +59,9 @@ struct Config {
     float gunnerMinDistance=15.0f;  // metres from the muzzle; the AI holds fire on anything closer
     float gunnerYawSign=1.0f;  // side-gun axis angle change per radian of geometric turn
     float gunnerPitchSign=-1.0f;
-    // The player's turret (designate.cpp): the mode it starts in (0 auto-aim, 1 lead circle) and the bindings that flip
-    // it and lock the target nearest the view (virtual-key codes, pad button bits; 0 = none), the lock's cone (deg off
-    // the view) and range (m, 0 = the gun's), how long a held lock binding takes to let the lock go.
-    int aimMode=0;
-    int modeKey=0x56,modeButton=0;      // V; no pad button (L3 is EDF6VehicleCrew's FreeLookButton in the same seats)
+    // The player's turret (designate.cpp): the bindings that lock the target nearest the view (virtual-key code, pad
+    // button bits; 0 = none), the lock's cone (deg off the view) and range (m, 0 = the gun's), how long a held lock
+    // binding takes to let the lock go.
     int lockKey=0x51,lockButton=0x04;   // Q, X (the jets' next-target bindings)
     float lockCone=20.0f;
     float lockRange=0.0f;
@@ -181,6 +179,8 @@ struct Track {
     float geo[2];
     float geoSign[2];      // 0 = not yet set
     bool geoValid;
+    float parentAxis[2];   // seat 0's (the main turret's) yaw / pitch angle last frame: the sign is learned only while
+                           // they hold still (gunner.cpp ReadAim)
     bool firing;           // the AI held the trigger last frame
     unsigned pulls;        // trigger pulls since the last log line
     unsigned stale;        // ... of which the previous pull was still unread (the gun is not updating)
@@ -209,6 +209,18 @@ inline float Wrap(float a) noexcept {
     return a;
 }
 
+// A gunner seat's axis sign (gunner.cpp ReadAim): the axis turned `moved`, the barrel `turned` (in the hull's frame) since
+// the last frame. A ratio near +-1 pulls the sign a fifth of the way toward it; nothing is learned from a frame the main
+// turret (seat 0) turned (`parentStill` false): a gun hung on it turns with it in the hull's frame while its own axis
+// does not, and that ratio is no measure of the axis' sign.
+constexpr float kParentStill=1e-4f;   // rad a frame: seat 0's axes this still count as not turning
+inline float LearnSign(float sign,float moved,float turned,bool parentStill) noexcept {
+    if(!parentStill || !(std::fabs(moved)>0.002f))return sign;
+    const float ratio=turned/moved;
+    if(!(std::fabs(ratio)>0.3f && std::fabs(ratio)<3.0f))return sign;
+    return sign+0.2f*((ratio>0.0f ? 1.0f : -1.0f)-sign);
+}
+
 void Log(const char* format,...) noexcept;
 bool Finite(const unsigned char* base,std::size_t offset,float* out) noexcept;
 float Down(const unsigned char* vehicle) noexcept;
@@ -227,14 +239,12 @@ bool Same(const void* obj,const void* ctrl) noexcept;
 const unsigned char* SeatGun(const unsigned char* seat) noexcept;
 // Optional Crew payload ownership: true + null is a validated empty group, false requests native fallback.
 bool ActualWeapon(const unsigned char* vehicle,unsigned seat,const unsigned char* source,const unsigned char** out) noexcept;
-// Once a frame for the seat this machine's player is at, in a vehicle whose aim this plugin runs: its bindings (the
-// mode, the lock) and its lock kept up. `muzzle` / `bore`: the seat's gun (null: none read; the lock then looks along
+// Once a frame for the seat this machine's player is at, in a vehicle whose aim this plugin runs: its lock binding and
+// its lock kept up. `muzzle` / `bore`: the seat's gun (null: none read; the lock then looks along
 // the camera, else the vehicle's nose), `range` the lock range when the ini gives none (the gun's, m).
 void PilotFrame(const unsigned char* vehicle,unsigned seatIndex,const unsigned char* seat,const float* muzzle,const float* bore,float range) noexcept;
 // The player's lock in `vehicle` (the object; `world` its first lock point), or nullptr: none, or the player is elsewhere.
 const void* Designated(const unsigned char* vehicle,float* world) noexcept;
-// The lead-circle mode: the player's own turret is not steered, the HUD shows where to aim.
-bool LeadCircle() noexcept;
 // EDF6VehicleCrew's turret camera turns `vehicle`'s seat `seat` after the player's view (common/edf/aimlink.h
 // CameraTurret); false without that plugin (or an older one): the player's gun is this plugin's as in V1.
 bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept;
@@ -242,7 +252,7 @@ bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept;
 // plugin then never turns that seat itself, and a tank driver's lock is their own gun's (not only the gunners').
 bool CrewAims(const unsigned char* vehicle,unsigned seat) noexcept;
 bool ObservesTurret(const unsigned char* vehicle,unsigned seat) noexcept;
-edf::aimlink::PlayerGun PlayerControlRule(const unsigned char* vehicle,unsigned seat,bool lead,bool locked) noexcept;
+edf::aimlink::PlayerGun PlayerControlRule(const unsigned char* vehicle,unsigned seat,bool locked) noexcept;
 // EDF6VehicleCrew's gun stabilizer holds `vehicle`'s seat `seat` (common/edf/aimlink.h V3): `held` the axes it holds the
 // gun at this frame with no input (steer from these), `hull` the hull's part of that since the last frame (AxisInput's).
 // False (the plugin absent, older, or the seat not held): `held` = `axes` (the axes as they are), `hull` 0.
@@ -253,10 +263,8 @@ bool Stabilized(const unsigned char* vehicle,unsigned seat,const float* axes,flo
 // through) in a turret's choice of a new target: its distance times this. 1: no zone (or no EDF6VehicleCrew, or an older one).
 float PriorityWeight(const Enemy& e) noexcept;
 // The readout for EDF6VehicleCrew's HUD (common/edf/aimlink.h), from the player's seat this frame: `ownGun` the seat's
-// gun is the plugin's; `target` what the gun works on (null: nothing) at `world`, led from `muzzle` along `bore` with
-// `shot` against the target's velocity `vel` (m/frame); `life` the round's frames (0: unknown).
-void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,const float* world,const float* muzzle,const float* bore,
-                const Shot* shot,const float* vel,float life,const void* gun=nullptr) noexcept;
+// gun is the plugin's; `target` what the gun works on (null: nothing) at `world`; `gun` the weapon it is for.
+void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,const float* world,const void* gun=nullptr) noexcept;
 
 // gunner.cpp: hooks the Titan's and the gunner-seat tanks' input and weapon-user slots; the number of
 // slots it patched (0: it left them stock).

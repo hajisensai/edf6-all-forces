@@ -16,14 +16,13 @@ float AxisInput(Track&,int,float,float,float,bool,float,float) noexcept{return 0
 void ReloadConfigIfChanged() noexcept{}
 void PilotFrame(const unsigned char*,unsigned,const unsigned char*,const float*,const float*,float) noexcept{}
 const void* Designated(const unsigned char*,float*) noexcept{return nullptr;}
-bool LeadCircle() noexcept{return false;}
 bool CameraTurret(const unsigned char*,unsigned) noexcept{return false;}
 bool CrewAims(const unsigned char*,unsigned) noexcept{return false;}
-edf::aimlink::PlayerGun PlayerControlRule(const unsigned char*,unsigned,bool lead,bool locked) noexcept{return edf::aimlink::PlayerGunRule(false,lead,locked);}
+edf::aimlink::PlayerGun PlayerControlRule(const unsigned char*,unsigned,bool locked) noexcept{return edf::aimlink::PlayerGunRule(false,locked);}
 bool Stabilized(const unsigned char*,unsigned,const float*,float*,float*) noexcept{return false;}
 float PriorityWeight(const Enemy&) noexcept{return 1;}
 bool ActualWeapon(const unsigned char*,unsigned,const unsigned char*,const unsigned char** out) noexcept{if(out)*out=nullptr;return false;}
-void PublishAim(const unsigned char*,bool,const void*,const float*,const float*,const float*,const Shot*,const float*,float,const void*) noexcept{}
+void PublishAim(const unsigned char*,bool,const void*,const float*,const void*) noexcept{}
 const unsigned char* SeatGun(const unsigned char*) noexcept{return weapon;}
 void __fastcall LocalRec(void* aim){called=aim;static_cast<unsigned char*>(aim)[kAimNetwork]=0;}
 }
@@ -46,6 +45,20 @@ int main(){
     pass=pass && AxisTargets(aim,want,error,axis) && std::fabs(Wrap(axis[0]-want[0]))<1e-5f && error[0]>0 && error[0]<0.03f;
     aim.min[0]=-1;aim.max[0]=1;aim.angle[0]=aim.barrel[0]=0;
     pass=pass && !AxisTargets(aim,want,error,axis);
-    std::printf("gunner_aim_object_test: embedded handoff, vtable preservation and full-circle rear-target reach %s\n",pass?"passed":"FAILED");
+    // 2026-10-25 ("坦克的炮管会360度动"): the side gun's barrel is measured in the hull's frame. The main turret slewing at
+    // 0.02 rad a frame against the gun's own 0.01 gave the old rule a ratio of -1 and flipped the sign in four frames;
+    // the gun then drove away from its target round its whole circle. Frames the main turret turns teach nothing.
+    float sign=1.0f;
+    for(int i=0;i<120;++i)sign=LearnSign(sign,0.01f,0.01f-0.02f,false);
+    bool learn=sign==1.0f;
+    float old1=1.0f;
+    for(int i=0;i<4;++i)old1=LearnSign(old1,0.01f,0.01f-0.02f,true);   // the same frames counted (the old rule): flipped
+    learn=learn && old1<0.0f;
+    float back=-1.0f;
+    for(int i=0;i<8;++i)back=LearnSign(back,0.01f,0.01f,true);         // the gun turning alone still teaches its sign
+    learn=learn && back>0.0f && LearnSign(1.0f,0.0005f,-0.0005f,true)==1.0f;
+    if(!learn)std::printf("FAIL side gun sign learned from the main turret's turn\n");
+    pass=pass && learn;
+    std::printf("gunner_aim_object_test: embedded handoff, vtable preservation, full-circle rear-target reach and sign learning %s\n",pass?"passed":"FAILED");
     VirtualFree(vtable,0,MEM_RELEASE);VirtualFree(image,0,MEM_RELEASE);return pass?0:1;
 }

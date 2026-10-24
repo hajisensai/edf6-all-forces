@@ -42,18 +42,17 @@ Why: the stock Keplers deal a third to a half of the damage per second of same-l
 helicopters, with under half their durability, and the shortest range of any of them. The Bohr
 already out-damages the same-level Barrias TZ4 but has well under half its durability.
 
-## Your own turret: auto-aim or a lead circle, lock what you look at
+## Your own turret: auto-aim, lock what you look at
 
 In a gun position the plugin aims (the Kepler, Bohr and howitzer turrets; the Titan's and the Ranger tanks' gunner
 seats; driving those tanks you get the lock too):
 
-- **Two modes**, switched with **V** (pad: none by default, since L3 is EDF6VehicleCrew's free look; ini `AimModeKey` / `AimModeButton`, the starting one `AimMode`):
-  - **Auto-aim** (default, as before): the turret turns itself onto the target, leading it on the round's arc.
-  - **Lead circle**: the turret is yours alone; the HUD draws a green **lead circle**: put the gun's line through its
-    centre and the round meets the target where the target will be (the gun's real round speed and drop, the target's
-    tracked velocity: the auto-aim's own solve). A white cross shows where the gun's line points now at that range:
-    the cross in the circle hits. Range and flight time under it; dim with `OUT OF RANGE` when the round's life falls
-    short. The flak's time fuse still bursts at the target's range.
+- **One auto-aim**: the turret turns itself onto the target, leading it on the round's arc (with EDF6VehicleCrew's
+  turret camera: onto your lock only, below). The lead-circle mode switched with **V** and its ini keys `AimMode` /
+  `AimModeKey` / `AimModeButton` were removed on 2026-10-25 (the user: "is this auto-aim one version too many? remove
+  one"): its "where to aim" duplicated EDF6VehicleCrew's own vehicle HUD lead mark, "the turret is yours" was what the
+  turret camera already does without a lock, and its switch put "auto-aim on" and "[V] auto-aim off" on the screen
+  together. Those three keys in an old ini are no longer read. The flak's time fuse still bursts at the target's range.
 - **Lock by look**: **Q** (pad: X, the jets' next-target button; ini `LockKey` / `LockButton`) locks the enemy **nearest
   the screen's centre**: within `LockCone` (20 deg) of the view, within `LockRange` (0 = the gun's range), not behind
   terrain or a building (while EDF6VehicleCrew's map is open, Q turns the map: this plugin reads none of its keys then).
@@ -62,18 +61,16 @@ seats; driving those tanks you get the lock too):
   it used to count on from the old lock). The lock range counts from the vehicle (it counted from the camera, 37 m
   behind a Titan), and a tank driver's is the main gun's range (it was the gunners' 300 m). **Hold**
   it (`LockClearMs`, 0.6 s) to let the lock go. Locked: a yellow square closing in while it settles (~0.4 s), then the
-  jets' red diamond; auto-aim fights **that target only** (it waits when the gun cannot reach it); the lead circle is on
-  it; the AI gunners of the same vehicle take it first when they can reach it. It goes when the target dies or stops
+  jets' red diamond; auto-aim fights **that target only** (it waits when the gun cannot reach it); the AI gunners of the same vehicle take it first when they can reach it. It goes when the target dies or stops
   being lockable, gets 1.5x the lock range away, or you leave the seat. Unlocked, the auto-aim picks its own targets as
-  before and the lead circle shows on its pick.
-- Two lines low on the screen (EDF6VehicleCrew's `TurretAimHud=1`): whether auto-aim is on or off (green `AUTO-AIM ON`; amber `AUTO-AIM OFF (LEAD CIRCLE)`), and under it the switch key (`[V] auto-aim off` / `on`; on a pad with no `AimModeButton` set, a hint to set one) and the lock key (red while locked). Pressing the switch key shows the new state in large letters over the screen's middle for about 1.5 s.
+  before.
+- One line low on the screen (EDF6VehicleCrew's `TurretAimHud=1`): `AUTO-AIM  [Q] lock (hold: clear)` (`next` and red while locked); `GUNNERS: AUTO-AIM` in a Titan's / Ranger tank's driver seat whose lock the gunners fight.
 - **With EDF6VehicleCrew's turret camera** (its `DecoupledTurretCam=1`, the default: the mouse / right stick turns the
   camera and your turret follows the screen's centre), the gun you sit at is the camera's by default: this plugin never
-  turns it onto a target of its own picking. In auto-aim it turns it onto **your lock** only (lock with Q / X); the
-  camera stays yours meanwhile, and when the lock goes the turret follows the view again. In the lead-circle mode it
-  never turns it. The stick is the camera's there, so it is never read as you dragging the gun (`DragDeadzone` does
+  turns it onto a target of its own picking. It turns it onto **your lock** only (lock with Q / X); the
+  camera stays yours meanwhile, and when the lock goes the turret follows the view again. The stick is the camera's there, so it is never read as you dragging the gun (`DragDeadzone` does
   not apply to that seat). Since 2026-10-09 this holds for the driver's seat of **every ground vehicle** (`common/edf/aimlink.h` V4): the flak,
-  the Titan's / Ranger tanks' driver and every other tank share one V, one Q, one lock rule and one lead (this
+  the Titan's / Ranger tanks' driver and every other tank share one Q, one lock rule and one lead (this
   plugin's `designate.cpp`), and EDF6VehicleCrew's turret camera turns the turret onto the lead point; a tank
   driver's main gun is auto-aimed too (it used to hand the lock to the gunners only). The flak differs only by its
   mark's row in `common/edf/weapon.h` `kGunRoles` (air targets first) and its fuses. The two plugins tell each other
@@ -163,4 +160,4 @@ in `pylib/` at the repository root, `cpk.py` / `crilayla.py` (CPK / CRILAYLA rea
 momotori01, public domain, `pylib/LICENSE.edf6-cpk`).
 
 
-With current VehicleCrew, Z belongs to a valid vehicle sight. A legacy colliding AimModeKey=Z uses V for auto-aim without rewriting the ini; the HUD shows the effective key and SIGHT/AUTO conflict hint. A conflicting pad mode button is left unbound. In overhead observation, its return blend, and an active physical scope, AutoTurret does not turn the player's gun (locked or unlocked). Entering/exiting a scope does not change the selected auto-aim mode. NPC gunner behavior is unchanged.
+Z is VehicleCrew's vehicle sight key (the auto-aim mode key that used to collide with it went with the lead circle). In overhead observation, its return blend, and an active physical scope, AutoTurret does not turn the player's gun (locked or unlocked). NPC gunner behavior is unchanged.

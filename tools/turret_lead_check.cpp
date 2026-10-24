@@ -1,5 +1,5 @@
 // The player's turret aim math (autoturret/src/aimmath.h), checked without the game:
-//  - LeadSolve: a round fired along the direction it gives (the lead circle's), stepped as the game steps it (a frame:
+//  - LeadSolve: a round fired along the direction it gives (the lead onto a lock), stepped as the game steps it (a frame:
 //    v += drop along the vehicle's down, p += v; autoturret/docs/re-notes.md "Rounds in flight"), against a target
 //    moving at a constant velocity, passes within kHit of the target. The KG6 flak (8 m/frame, gravity factor 1) at an
 //    air target crossing, closing and climbing, the Titan's side cannon (4 m/frame, gravity factor 2) at a ground target
@@ -11,8 +11,8 @@
 //    ground roles differ from an unmarked tank gun.
 //  - OffView: the angle off the view and the distance.
 //  - The player's gun's owner (common/edf/aimlink.h PlayerGunRule, the user 2026-10-06): with EDF6VehicleCrew's turret
-//    camera on the seat the gun follows the view and the plugin turns it only onto a lock in AUTO, never reading the
-//    stick as a drag; without the camera, V1: the auto-aim and the drag in AUTO, neither in the lead circle.
+//    camera on the seat the gun follows the view and the plugin turns it only onto a lock, never reading the stick as a
+//    drag; without the camera, V1: the auto-aim and the drag (the lead-circle mode is gone, 2026-10-25).
 // Exit code 1 on a failure. Built on request only:
 // cmake --build build --target turret_lead_check && build\turret_lead_check.exe
 #include "../autoturret/src/aimmath.h"
@@ -117,14 +117,12 @@ int main() {
     }
     {
         using edf::aimlink::PlayerGunRule;
-        // With the turret camera: AUTO + lock steers; AUTO without a lock, and the lead circle, leave the gun to the view.
-        Check(PlayerGunRule(true,false,true).steer && !PlayerGunRule(true,false,true).drag,"camera turret, AUTO, locked: the lock steers, no drag");
-        Check(!PlayerGunRule(true,false,false).steer && !PlayerGunRule(true,false,false).drag,"camera turret, AUTO, no lock: the view steers");
-        Check(!PlayerGunRule(true,true,true).steer && !PlayerGunRule(true,true,false).steer,"camera turret, lead circle: never steered");
+        // With the turret camera: a lock steers; without a lock the gun is the view's.
+        Check(PlayerGunRule(true,true).steer && !PlayerGunRule(true,true).drag,"camera turret, locked: the lock steers, no drag");
+        Check(!PlayerGunRule(true,false).steer && !PlayerGunRule(true,false).drag,"camera turret, no lock: the view steers");
         // Without it (EDF6VehicleCrew absent, DecoupledTurretCam=0, a seat it does not serve): V1 unchanged.
-        Check(PlayerGunRule(false,false,false).steer && PlayerGunRule(false,false,false).drag,"no camera, AUTO: auto-aim, the stick drags");
-        Check(PlayerGunRule(false,false,true).steer && PlayerGunRule(false,false,true).drag,"no camera, AUTO, locked: as V1");
-        Check(!PlayerGunRule(false,true,false).steer && !PlayerGunRule(false,true,true).drag,"no camera, lead circle: the player's");
+        Check(PlayerGunRule(false,false).steer && PlayerGunRule(false,false).drag,"no camera: auto-aim, the stick drags");
+        Check(PlayerGunRule(false,true).steer && PlayerGunRule(false,true).drag,"no camera, locked: as V1");
     }
     std::printf("%s\n",failures ? "FAILED" : "all passed");
     return failures ? 1 : 0;

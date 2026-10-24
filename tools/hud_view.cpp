@@ -50,7 +50,7 @@ Config config{};
 bool hasTurret=false;
 edf::aimlink::TurretReadoutV1 sceneTurret{};
 TurretCamReadout sceneMouseIntent{};bool hasMouseIntent=false,hasMountedOptic=false;
-edf::aimlink::ModeBindingV1 sceneModeBinding{};bool hasModeBinding=false;
+
 bool hasJet=false,hasHeli=false,hasWarn=false,hasStock=false,hasDrill=false,hasNix=false,hasMap=false,hasEmc=false,hasProteus=false,
      hasSazabi=false;
 bool paused=false;   // the game's pause flag (crew.cpp GamePaused)
@@ -184,7 +184,6 @@ instruments::Readings deliveredInstruments{};
 void FirstPersonInstrumentReadings(const instruments::Readings& r,const unsigned char*) noexcept { deliveredInstruments=r; }
 bool PlayerTurretCam(TurretCamReadout* value) noexcept { if(hasMouseIntent)*value=sceneMouseIntent;return hasMouseIntent; }
 bool SightZoomMounted(const void*) noexcept { return hasMountedOptic; }
-bool PlayerTurretBinding(edf::aimlink::ModeBindingV1* value) noexcept { if(hasModeBinding)*value=sceneModeBinding;return hasModeBinding; }
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* o) noexcept { if(hasTurret)*o=sceneTurret;return hasTurret; }
 bool PlayerSeatPrompt(SeatPrompt*) noexcept { return false; }
 bool PlayerBoardingEntrance(BoardingEntrance*) noexcept { return false; }
@@ -412,9 +411,10 @@ void MapCamera(const MapReadout& m,float width,float height,float* vp) {
     for(int i=0;i<3;++i){vp[i*4]=r[i]*fx;vp[i*4+1]=u[i]*fy;vp[i*4+2]=f[i]*A;vp[i*4+3]=f[i];}
     vp[12]=-dot(eye,r)*fx;vp[13]=-dot(eye,u)*fy;vp[14]=-dot(eye,f)*A+B;vp[15]=-dot(eye,f);
 }
-// The production overhead placement (hull-centred) with synthetic inputs; not a game screenshot.
+// The production overhead placement (centred on the shot's landing, heading from the hull to it) with synthetic inputs;
+// not a game screenshot.
 void ImpactCamera(const float* origin,const float* impact,float width,float height,float* vp) {
-    (void)impact;float eye[3],look[3];tcam::HullPlace(origin,0,90,55,0,0,eye,look);
+    float eye[3],look[3];tcam::OrbitPlace(impact,tcam::ShotHeading(origin,impact,0),90,55,0,0,eye,look);
     float f[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};vec::Normalize(f);
     float r[3]={-f[2],0,f[0]};vec::Normalize(r);float u[3];vec::Cross(r,f,u);
     const float fy=1/std::tan(0.5f*sceneFov*kDeg),fx=fy/(width/height),a=20000.0f/19999.0f;
@@ -1062,7 +1062,7 @@ bool StockLayoutApart(int width,const ProteusReadout* proteus=nullptr) {
     y.threats=sceneStock.threats;
     for(int i=0;i<y.threats;++i){std::memcpy(y.threatAt[i],sceneStock.threatAt[i],12);y.threatKind[i]=sceneStock.threatKind[i];}
     const Box rwr=Measured([&](Text* t,Line* l,int* at){RwrScope(drawer,ctx,t,w,h,s,y,0,GetTickCount64(),1.0f,l,at);});
-    const StockExtras x{nullptr,proteus ? nullptr : &sceneDrill,false,proteus ? nullptr : &sceneEmc,proteus};   // the drill's
+    const StockExtras x{nullptr,proteus ? nullptr : &sceneDrill,proteus ? nullptr : &sceneEmc,proteus};   // the drill's
     // line and the EMC's (the tallest block), or the Proteus's
     const Box block=Measured([&](Text* t,Line* l,int* at){StockBlock(drawer,ctx,t,w,h,s,sceneStock,x,l,at);});
     const bool apart=rwr.x1<block.x0 || block.x1<rwr.x0 || rwr.y1<block.y0 || block.y1<rwr.y0;
@@ -1118,8 +1118,9 @@ bool MapDrawsMapAlone(const float* pos,const float* fwd) {
     return ok;
 }
 
-// EDF6AutoTurret's mode lines (TurretAimMarks: the state, the keys; the longest: the lead circle, a lock) at `width` x
-// 1080: apart from the stock HUD's block and its RWR scope, on the screen, and saying plainly on or off.
+// EDF6AutoTurret's line (TurretAimMarks: the one auto-aim and its lock key, locked) at `width` x 1080: apart from the
+// stock HUD's block and its RWR scope, on the screen; one auto-aim line, never an on / off pair (2026-10-25: "这个自动瞄准
+// 是不是多余了一个版本，删掉一个").
 bool TurretLayoutApart(int width) {
     const float w=static_cast<float>(width),h=1080.0f,s=1.0f;
     void* const drawer=At<void*>(image,kQuadDrawer);
@@ -1127,29 +1128,26 @@ bool TurretLayoutApart(int width) {
     float vp[16];
     Camera(sceneStock.pos,sceneStock.hull,w,h,vp);
     edf::aimlink::TurretReadoutV1 r=sceneTurret;
-    r.lock=edf::aimlink::Lock::locked;r.mode=edf::aimlink::Mode::leadCircle;r.lead=false;
-    std::memset(r.at,0,12);r.at[2]=-1000.0f;   // behind the camera: no lock box, the lines alone
-    bool off=false,on=false;
+    r.lock=edf::aimlink::Lock::locked;
+    std::memset(r.at,0,12);r.at[2]=-1000.0f;   // behind the camera: no lock box, the line alone
+    int aims=0,count=0;
     const Box lines=Measured([&](Text* t,Line* l,int* at){
-        TurretAimMarks(drawer,ctx,t,vp,w,h,s,r,false,l,at);
-        for(int i=0;i<*at;++i)off=off || wcsstr(l[i].text,Tr(Tx::autoAimOffCircle))!=nullptr;
+        TurretAimMarks(drawer,ctx,t,vp,w,h,s,r,l,at);
+        count=*at;
+        for(int i=0;i<*at;++i)aims+=wcsstr(l[i].text,Tr(Tx::autoAim))!=nullptr;
     });
-    r.mode=edf::aimlink::Mode::autoAim;
-    Measured([&](Text* t,Line* l,int* at){
-        TurretAimMarks(drawer,ctx,t,vp,w,h,s,r,false,l,at);
-        for(int i=0;i<*at;++i)on=on || (wcsstr(l[i].text,Tr(Tx::autoAimOn))!=nullptr) ;
-    });
+    const bool on=aims==1 && count==1;
     PlayerJetSymbols y{};
     std::memcpy(y.pos,sceneStock.pos,12);std::memcpy(y.nose,sceneStock.hull,12);
     y.threats=sceneStock.threats;
     for(int i=0;i<y.threats;++i){std::memcpy(y.threatAt[i],sceneStock.threatAt[i],12);y.threatKind[i]=sceneStock.threatKind[i];}
     const Box rwr=Measured([&](Text* t,Line* l,int* at){RwrScope(drawer,ctx,t,w,h,s,y,0,GetTickCount64(),1.0f,l,at);});
-    const StockExtras x{nullptr,&sceneDrill,false,&sceneEmc,nullptr};
+    const StockExtras x{nullptr,&sceneDrill,&sceneEmc,nullptr};
     const Box block=Measured([&](Text* t,Line* l,int* at){StockBlock(drawer,ctx,t,w,h,s,sceneStock,x,l,at);});
     auto apart=[](const Box& a,const Box& b){return a.x1<b.x0 || b.x1<a.x0 || a.y1<b.y0 || b.y1<a.y0;};
-    const bool ok=lines.any && apart(lines,rwr) && apart(lines,block) && lines.x0>=0.0f && lines.x1<=w && lines.y1<=h && on && off;
-    std::printf("%s  %dx1080: aim-mode lines (%.0f,%.0f)-(%.0f,%.0f), ON %d OFF %d; block (%.0f,%.0f)-(%.0f,%.0f), RWR (%.0f,%.0f)-(%.0f,%.0f)\n",
-                ok ? "ok  " : "FAIL",width,lines.x0,lines.y0,lines.x1,lines.y1,on,off,block.x0,block.y0,block.x1,block.y1,rwr.x0,rwr.y0,rwr.x1,rwr.y1);
+    const bool ok=lines.any && apart(lines,rwr) && apart(lines,block) && lines.x0>=0.0f && lines.x1<=w && lines.y1<=h && on;
+    std::printf("%s  %dx1080: auto-aim line (%.0f,%.0f)-(%.0f,%.0f), %d line(s) naming it of %d; block (%.0f,%.0f)-(%.0f,%.0f), RWR (%.0f,%.0f)-(%.0f,%.0f)\n",
+                ok ? "ok  " : "FAIL",width,lines.x0,lines.y0,lines.x1,lines.y1,aims,count,block.x0,block.y0,block.x1,block.y1,rwr.x0,rwr.y0,rwr.x1,rwr.y1);
     return ok;
 }
 
@@ -1320,7 +1318,7 @@ int SightStyleScenes(const std::wstring& dir,const float* ground) {
                 if(p.text.empty() || q.text.empty())continue;
                 if(p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1){apart=false;std::printf("      overlap: %ls / %ls\n",p.text.c_str(),q.text.c_str());}
             }
-        const bool owned=SightGun(sceneStock,false)==0;
+        const bool owned=SightGun(sceneStock)==0;
         const bool scope=zoomed ? scopePieces==scopeview::kSides : scopePieces==0;
         // The stock crosshair (HudPlayer_CrossHair) gives way to the field drawn, for its soldier only (scope_hold.h; the
         // user, 2026-10-21: "进入瞄具状态的时候没隐藏准星"); at 1x it stays.
@@ -1335,7 +1333,7 @@ int SightStyleScenes(const std::wstring& dir,const float* ground) {
     // A flamethrower, a grenade launcher: no gun sight (their impact marks only).
     StockTank(ground);
     sceneStock.arm[0].reticle=reticle::Style::none;sceneStock.arm[0].aimed=true;sceneStock.arm[0].ladder.ticks=1;
-    const bool none=SightGun(sceneStock,false)==-1;
+    const bool none=SightGun(sceneStock)==-1;
     failed+=!none;
     std::printf("%s  a weapon without a sight (flamethrower, grenades) gets no gun reticle\n",none ? "ok  " : "FAIL");
     sceneFov=55.0f;sceneZoom=1.0f;sceneStock.zoom=1.0f;hasMountedOptic=false;
@@ -1492,7 +1490,7 @@ int FireControlScenes(const std::wstring& dir,const float* ground) {
         scopePieces=0;Scene(dir,names[i],ground);
         // A gun-launched missile / rocket on the seat is looked at through the same optic (2026-10-11): its round field.
         const int want=i<=2 ? scopeview::kSides : 0;
-        const bool right=scopePieces==want && (i==0 ? SightGun(sceneStock,false)==0 : SightGun(sceneStock,false)==-1);
+        const bool right=scopePieces==want && (i==0 ? SightGun(sceneStock)==0 : SightGun(sceneStock)==-1);
         failed+=!right;
         std::printf("%s fire-control owner %ls: scope quads %d/%d, no fallback optical reticle\n",right ? "ok" : "FAIL",names[i],scopePieces,want);
     }
@@ -1604,7 +1602,7 @@ Drawn DrawnAt(int uiW,int uiH,int viewW,int viewH,float s) {
     std::memcpy(y.pos,sceneStock.pos,12);std::memcpy(y.nose,sceneStock.hull,12);
     y.threats=sceneStock.threats;
     for(int i=0;i<y.threats;++i){std::memcpy(y.threatAt[i],sceneStock.threatAt[i],12);y.threatKind[i]=sceneStock.threatKind[i];}
-    const StockExtras x{nullptr,nullptr,false,nullptr,nullptr};
+    const StockExtras x{nullptr,nullptr,nullptr,nullptr};
     d.block=Design(Measured([&](Text* t,Line* l,int* at){StockBlock(drawer,ctx,t,w,h,s,sceneStock,x,l,at);},s),w,h,s);
     d.rwr=Design(Measured([&](Text* t,Line* l,int* at){RwrScope(drawer,ctx,t,w,h,s,y,0,GetTickCount64(),1.0f,l,at);},s),w,h,s);
     return d;
@@ -2121,7 +2119,7 @@ int MouseIntentChecks() {
 
 int Scenes(const std::wstring& dir) {
     int failed=AircraftBindingChecks()+MouseIntentChecks();
-    hasMouseIntent=hasMountedOptic=hasModeBinding=false;
+    hasMouseIntent=hasMountedOptic=false;
     failed+=FullLoadoutScenes(dir);
     hasTurret=hasJet=hasHeli=hasWarn=hasStock=hasDrill=hasNix=hasMap=hasEmc=hasProteus=hasSazabi=false;   // as the first run began
     sceneMarkOn=false;
@@ -2253,7 +2251,7 @@ int Scenes(const std::wstring& dir) {
     sceneStock.arm[0].reticle=reticle::Style::energy;sceneStock.arm[0].shell=reticle::Shell::beam;
     sceneStock.arm[0].ranged=false;sceneStock.arm[0].physicalOnly=false;sceneStock.sight=0;
     sceneStock.arm[0].aimed=true;sceneStock.arm[0].bore[2]=1.0f;sceneStock.arm[0].hit=true;sceneStock.arm[0].range=90.0f;
-    failed+=SightGun(sceneStock,false)!=0; // energy reticle does not need a bogus ballistic ladder to exist
+    failed+=SightGun(sceneStock)!=0; // energy reticle does not need a bogus ballistic ladder to exist
     LoadCell energyCells[kStockArms];StockCells(sceneStock,energyCells);
     failed+=energyCells[0].icon!=hudcue::StoreIcon::energy;
     Scene(dir,L"nix_energy_weapon",ground);
@@ -2281,9 +2279,9 @@ int Scenes(const std::wstring& dir) {
         // with the machine gun picked (hud.cpp OtherTriggerSight), the machine gun fired with it none of its own.
         {   // a copy with the cannon's ladder (this scene's has none: no gun sight to keep, picked or not)
             StockHudReadout probe=sceneStock;probe.arm[0].ladder.ticks=3;
-            failed+=!OtherTriggerSight(probe,0,false) || OtherTriggerSight(probe,1,false) || OtherTriggerSight(sceneStock,0,false);
+            failed+=!OtherTriggerSight(probe,0) || OtherTriggerSight(probe,1) || OtherTriggerSight(sceneStock,0);
             probe.arm[1].kind=RoundKind::homing;   // a missile picked: no gun reticle under its marks
-            failed+=OtherTriggerSight(probe,0,false);
+            failed+=OtherTriggerSight(probe,0);
         }
         Scene(dir,L"stock_tank_loading_two_triggers",ground);
         sceneStock.arms=2;sceneStock.selected=0;
@@ -2313,18 +2311,16 @@ int Scenes(const std::wstring& dir) {
     failed+=!StockLayoutApart(1920);
     failed+=!StockLayoutApart(2520);
     failed+=!PausedDrawsNothing(ground,sceneStock.hull);
-    // EDF6AutoTurret's turret (the tank's gun the player is at): auto-aim on, then flipped to the lead circle (its banner).
+    // EDF6AutoTurret's turret (the tank's gun the player is at): the one auto-aim and its lock key.
     hasTurret=true;
     sceneTurret=edf::aimlink::TurretReadoutV1{};
     sceneTurret.mode=edf::aimlink::Mode::autoAim;sceneTurret.keys=true;sceneTurret.ownGun=true;
-    sceneTurret.modeKey=0x56;sceneTurret.lockKey=0x51;sceneTurret.modeButton=0;sceneTurret.lockButton=0x04;
+    sceneTurret.lockKey=0x51;sceneTurret.lockButton=0x04;
     Prime(ground);
     Scene(dir,L"stock_turret_auto",ground);
-    sceneTurret.mode=edf::aimlink::Mode::leadCircle;
-    Scene(dir,L"stock_turret_lead_switch",ground);
     failed+=!TurretLayoutApart(1920);
     failed+=!TurretLayoutApart(2520);
-    hasMouseIntent=hasModeBinding=true;sceneModeBinding={true,true,'Z','V'};
+    hasMouseIntent=true;
     sceneMouseIntent=TurretCamReadout{};sceneMouseIntent.decoupled=sceneMouseIntent.aimValid=true;sceneMouseIntent.physicalOnly=false;
     sceneMouseIntent.aim[0]=80;sceneMouseIntent.aim[1]=10;sceneMouseIntent.aim[2]=500;
     sceneMouseIntent.gun[0]=-140;sceneMouseIntent.gun[1]=10;sceneMouseIntent.gun[2]=500;
@@ -2332,8 +2328,7 @@ int Scenes(const std::wstring& dir) {
     sight::ToScreen(cursorVp,sceneMouseIntent.aim,1,1920,1080,&intentX,&intentY);
     probeIntent=true;intentQuads=0;Scene(dir,L"mouse_command_circle",ground);failed+=intentQuads!=28;
     hasMountedOptic=true;intentQuads=0;Scene(dir,L"mounted_scope_no_auto_overlay",ground);failed+=intentQuads!=0;
-    for(const auto& line:drew)failed+=line.text.find(Tr(Tx::autoAimOffCircle))!=std::wstring::npos;
-    probeIntent=false;hasMouseIntent=hasMountedOptic=hasModeBinding=false;
+    probeIntent=false;hasMouseIntent=hasMountedOptic=false;
     hasTurret=false;
     hasDrill=false;
     // The EMC charging (62%) and firing (1.4 s of its beam left).
@@ -2536,8 +2531,8 @@ int Scenes(const std::wstring& dir) {
     failed+=SazabiScenes(dir,ground);
     failed+=ArmorScenes(dir,ground,pos);
     failed+=CockpitScenes(dir,ground,pos);
-    // The next language's run begins as this one did: EDF6AutoTurret's mode last seen as auto-aim, and seen long enough
-    // ago that no switch's banner (hud_cue.h Changed, a wall-clock kSwitchMs) carries over into its turret scenes.
+    // The next language's run begins as this one did: seen long enough ago that no switch's banner (hud_cue.h Changed, a
+    // wall-clock kSwitchMs) carries over into its scenes.
     hasStock=hasTurret=true;
     sceneTurret.mode=edf::aimlink::Mode::autoAim;
     Prime(ground);

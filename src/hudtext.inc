@@ -197,18 +197,10 @@ HUDTEXT(drillLaunched,L"LAUNCHED",L"发射中",L"發射中",L"射出中")
 HUDTEXT(drillReturning,L"RETURNING",L"回收中",L"回收中",L"回収中")
 HUDTEXT(drillLaunchHint,L"[%ls] LAUNCH",L"[%ls] 发射",L"[%ls] 發射",L"[%ls] 射出")
 HUDTEXT(gunnersAuto,L"GUNNERS: AUTO-AIM",L"炮手：自动瞄准",L"砲手：自動瞄準",L"砲手：自動照準")
-HUDTEXT(autoAimOffCircle,L"AUTO-AIM OFF  (LEAD CIRCLE)",L"自动瞄准 关  （预瞄圈）",L"自動瞄準 關  （預瞄圈）",L"自動照準 オフ  （偏差円）")
-HUDTEXT(autoAimOn,L"AUTO-AIM ON",L"自动瞄准 开",L"自動瞄準 開",L"自動照準 オン")
-HUDTEXT(autoAimToggle,L"[%ls] auto-aim %ls",L"[%ls] 自动瞄准 %ls",L"[%ls] 自動瞄準 %ls",L"[%ls] 自動照準 %ls")
-HUDTEXT(wordOn,L"on",L"开",L"開",L"オン")
-HUDTEXT(wordOff,L"off",L"关",L"關",L"オフ")
-HUDTEXT(aimModeKeyUnset,L"(no AimModeKey set)",L"（未设置 AimModeKey）",L"（未設定 AimModeKey）",L"（AimModeKey 未設定）")
-HUDTEXT(aimModeButtonUnset,L"(pad: set AimModeButton in EDF6AutoTurret.ini)",L"（手柄：在 EDF6AutoTurret.ini 设置 AimModeButton）",
-        L"（手把：在 EDF6AutoTurret.ini 設定 AimModeButton）",L"（パッド：EDF6AutoTurret.ini で AimModeButton を設定）")
+HUDTEXT(autoAim,L"AUTO-AIM",L"自动瞄准",L"自動瞄準",L"自動照準")
 HUDTEXT(lockKey,L"%ls[%ls] %ls (hold: clear)",L"%ls[%ls] %ls（长按：清除）",L"%ls[%ls] %ls（長按：清除）",L"%ls[%ls] %ls（長押し：解除）")
 HUDTEXT(lockWord,L"lock",L"锁定",L"鎖定",L"ロック")
 HUDTEXT(nextWord,L"next",L"下一个",L"下一個",L"次")
-HUDTEXT(autoAimOffBanner,L"AUTO-AIM OFF  -  LEAD CIRCLE",L"自动瞄准 关  -  预瞄圈",L"自動瞄準 關  -  預瞄圈",L"自動照準 オフ  -  偏差円")
 HUDTEXT(hullMark,L"HULL",L"车体",L"車體",L"車体")
 HUDTEXT(mouseLeft,L"LMB",L"左键",L"左鍵",L"左クリック")
 HUDTEXT(mouseRight,L"RMB",L"右键",L"右鍵",L"右クリック")
@@ -627,7 +619,6 @@ HUDTEXT(mapPayloadTitle,L"LOADOUT - click bright rows to select",L"挂载：点�
 HUDTEXT(predictedGround,L"GROUND %.0f m  %.1f s",L"预测地形落点 %.0f 米  %.1f 秒",L"預測地形落點 %.0f 公尺  %.1f 秒",L"予測地形着弾 %.0f m  %.1f 秒")
 HUDTEXT(noGroundHit,L"NO TERRAIN HIT  %.0f m  %.1f s",L"无地形命中  %.0f 米  %.1f 秒",L"無地形命中  %.0f 公尺  %.1f 秒",L"地形着弾なし  %.0f m  %.1f 秒")
 
-HUDTEXT(aimSightBinding,L"  SIGHT %ls / AUTO %ls",L"  瞄具 %ls / 自瞄 %ls",L"  瞄具 %ls / 自瞄 %ls",L"  照準器 %ls / 自動 %ls")
 
 // --- The debug spawn tool's menu (hud.cpp DebugSpawnHud; debug_spawn.cpp, ini DebugSpawn). Its rows' names are the
 // catalog's own (src/debug_spawn.h, Chinese: a debug tool). ---

@@ -17,20 +17,21 @@
 //    frame; the hook turns the view by the rider's own stick (seat+0x2D0, docs/camera-re.md §4: -1..1 a frame, the
 //    mouse's excess carried over by 0x56DBC0, handed to the aim as (-x, y)) and hands the aim the input that turns the
 //    turret onto the normal rig request's centre (seat/take-owned ray + MapRay, else kAimFar) at the stock rates
-//    (turretcam.h AxisCommand): the round's low ballistic arc through a real map hit, the bore line through it in
-//    EDF6AutoTurret's lead-circle mode (the circle already solved the arc) and through the made-up point of a view that
-//    hits nothing (turretcam.h BallisticAim). EDF6AutoTurret turns this turret only onto the player's lock in its
-//    auto-aim mode and says so (common/edf/aimlink.h V2 Steers): that frame the turret is its, the view the rider's; an
+//    (turretcam.h AxisCommand): the round's low ballistic arc through a real map hit, the bore line through the made-up
+//    point of a view that hits nothing (turretcam.h BallisticAim). EDF6AutoTurret turns this turret only onto the
+//    player's lock and says so (common/edf/aimlink.h V2 Steers): that frame the turret is its, the view the rider's; an
 //    EDF6AutoTurret without the V2 link is told apart by its input being off the stick (turretcam.h Foreign).
 //  - Free look (FreeLookKey / FreeLookButton held): the view turns, the turret holds the point it was on (decoupled) or
 //    stands still (coupled); let go, the view swings back to where it was (coupled: onto the stock camera's) and hands
 //    over again.
 //  - The rig (docs/camera-re.md §5): the stock locators' (A) or the vehicle's game_object_camera_setting (B, +0x170 /
 //    +0x180, the authored third-person framing the riding camera never reads), whichever puts the eye farther back; the
-//    eye never under the rig's own height over its point. The high view looks down on the vehicle itself from
-//    HighCamHeight / HighCamBack (scaled up for a big vehicle) along a world-held heading (tcam::HullPlace): the turret
-//    rocking or turning does not move it; free look turns it round the vehicle; native input controls the gun, the
-//    shot's real endpoint is drawn by the HUD.
+//    eye never under the rig's own height over its point. The high view looks down on the shot's predicted landing
+//    (ShotFocus) from HighCamHeight / HighCamBack (scaled up for a big vehicle), along the line from the hull to it
+//    (tcam::OrbitPlace, tcam::ShotHeading): the landing and its surroundings in the screen's middle, where the HUD draws
+//    its mark; the gun's elevation moves it along that line only, and the view follows it eased (kRigEase). With no
+//    landing to show (no readable gun) it looks down on the hull. Free look turns it round its centre; native input
+//    controls the gun.
 // A vehicle qualifies when the player drives it from seat 0, its seat camera is Type 1 (seat+0x200), its seat holds a
 // weapon and its yaw axis turns (more than kMinTraverse): a turret, or the gun is indirect fire (a fixed one: the
 // howitzer). Helicopters and the plugin's jets do not. The view is
@@ -112,6 +113,7 @@ struct Shared {
     bool normalRay;            // the normal rig request, never the last HUD/render camera
     unsigned rayTake;
     float normalEye[3],normalDir[3];
+    float normalReach;         // m from normalEye to the rig's point O along normalDir (tcam::ViewRayStart)
     bool steering;             // the aim's last step had the camera's command (not the stick's, not another plugin's)
     bool highView;             // the aim hook is observing the projectile, with native gun input
     bool observing;            // camera still showing the shot or blending away from it (camera thread publishes)
@@ -130,9 +132,10 @@ struct CamSide {
     tcam::Rig rig;
     float offset;              // the view's pitch over the player's, eased (the high view looks further down)
     float eye[3],look[3];      // the last placement
-    bool point;                // that placement was the high view's (tcam::HullPlace)
-    bool highSet;              // highYaw / highY hold this high view's
-    float highYaw,highY;       // the high view's world-held heading (taken from the view it starts from), the hull's eased height
+    bool point;                // that placement was the high view's (tcam::OrbitPlace)
+    bool highSet;              // highYaw / highCentre hold this high view's
+    float highYaw;             // the high view's heading (tcam::ShotHeading; on entry the view's own)
+    float highCentre[3];       // what it looks at, eased: the shot's landing, else the hull's origin
     float carry;               // a switch between the two placements: the share of the old one's offset still carried
     float carryEye[3],carryLook[3];
 };
@@ -300,28 +303,25 @@ void PublishNormalRay(const unsigned char* seat,unsigned take,const float* eye,c
     AcquireSRWLockExclusive(&lock);
     if(shared.seat==seat && shared.take==take && !shared.high && !shared.observing) {
         shared.normalRay=valid;shared.resume=!valid;shared.rayTake=take;
-        if(valid){std::memcpy(shared.normalEye,eye,12);std::memcpy(shared.normalDir,dir,12);}
+        if(valid){std::memcpy(shared.normalEye,eye,12);std::memcpy(shared.normalDir,dir,12);shared.normalReach=vec::Dist(eye,look);}
     }
     ReleaseSRWLockExclusive(&lock);
 }
-// The normal rig's centre: first real map hit, else kAimFar along this owned request. The rendered HUD cache has
-// neither the source nor the take of its camera and is intentionally never a control input here.
-bool AimPoint(const Shared& s,float* p,bool* hit) noexcept {
+// The normal rig's centre: first real map hit ahead of the turret (tcam::ViewRayStart: never the stretch between the
+// requested eye and the rig's point, which lies behind the turret), else kAimFar along this owned request. The rendered
+// HUD cache has neither the source nor the take of its camera and is intentionally never a control input here.
+// `pivot`: the turret's yaw centre (TurretPivot), or null.
+bool AimPoint(const Shared& s,const float* pivot,float* p,bool* hit) noexcept {
     float at[3];const float* eye=s.normalEye;const float* dir=s.normalDir;
     *hit=false;
     if(!s.normalRay || s.resume || s.rayTake!=s.take)return false;
+    const float start=tcam::ViewRayStart(eye,dir,s.normalReach,pivot);
+    const float from[3]={eye[0]+dir[0]*start,eye[1]+dir[1]*start,eye[2]+dir[2]*start};
     const float end[3]={eye[0]+dir[0]*kSightFar,eye[1]+dir[1]*kSightFar,eye[2]+dir[2]*kSightFar};
-    if(MapRay(eye,end,at)>=0.0f && vec::Dist(eye,at)<=kSightFar){std::memcpy(p,at,12);*hit=true;return true;}
-    for(int i=0;i<3;++i)p[i]=eye[i]+dir[i]*kAimFar;
+    if(start<kSightFar && MapRay(from,end,at)>=0.0f && vec::Dist(eye,at)<=kSightFar){std::memcpy(p,at,12);*hit=true;return true;}
+    const float fallback=std::fmax(kAimFar,start);
+    for(int i=0;i<3;++i)p[i]=eye[i]+dir[i]*fallback;
     return true;
-}
-
-// EDF6AutoTurret's lead-circle mode on the player's own gun (its readout: common/edf/aimlink.h).
-bool LeadCircleOn() noexcept {
-    edf::aimlink::TurretReadoutV1 r{};
-    // Only while a circle is there (a target and its solve): with none, the screen's centre takes the arc as in AUTO (a
-    // tank's driver seat is the player's own gun since aimlink.h V4 and must not lose its drop compensation to a mode).
-    return AutoTurretReadout(&r) && r.ownGun && r.mode==edf::aimlink::Mode::leadCircle && r.target && r.lead;
 }
 
 bool FreeHeld(const unsigned char* seat) noexcept {
@@ -555,7 +555,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     // The free look's held point, otherwise the current normal camera's screen centre.
     const bool hold=s.free || s.returning;
     const float* target=hold ? game.holdAt : game.aim;
-    const bool ballistic=tcam::BallisticAim(hold ? game.holdHit : game.aimHit,LeadCircleOn());
+    const bool ballistic=tcam::BallisticAim(hold ? game.holdHit : game.aimHit);
     const bool steer=s.decoupled && !foreign && (game.hasAim || hold);
     s.steering=false;
     Steering st{};
@@ -722,16 +722,23 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     camSide.offset+=(offset-camSide.offset)*kRigEase;
     float eye[3],look[3];
     if(point) {
-        if(!camSide.highSet) {   // entering it: the heading the camera faces now, held from here on in the world
+        // The user, 2026-10-25: "俯瞰视角目的是为了看落点位置的信息，不是把视角单单放在车更高的地方，改一下。现在完全没办法看瞄准
+        // 位置". Centred on the hull (2026-10-23), a landing a few hundred metres out was off the top of the screen. The
+        // view looks at the shot's predicted landing (ShotFocus: the same prediction the HUD's mark is drawn from), from
+        // behind it along the line the shot flies; with no landing to show, at the hull. Eased (kRigEase a frame, as the
+        // rig's own moves): the landing of a gun rocked over the ground runs up and down that line (the 2026-10-23
+        // complaint "会随着炮塔上下摇晃"), and the view follows it without jerking; the HUD's mark stays exact.
+        const float hull[3]={m[12],m[13],m[14]};
+        const float* landing=s.focusValid ? s.focus : hull;
+        if(!camSide.highSet) {   // entering it: on the landing at once, the heading the camera faces now until it has one
             const float d[3]={camSide.look[0]-camSide.eye[0],0.0f,camSide.look[2]-camSide.eye[2]};
             float a3[3];AxesDir(s.v,seat,a3);
             camSide.highYaw=d[0]*d[0]+d[2]*d[2]>1e-6f ? tcam::YawOf(d) : tcam::YawOf(a3);
-            camSide.highY=m[13];camSide.highSet=true;
+            std::memcpy(camSide.highCentre,landing,12);camSide.highSet=true;
         }
-        // The hull's bounce over the ground eased out; its travel across the ground followed exactly.
-        camSide.highY+=(m[13]-camSide.highY)*kRigEase;
-        const float centre[3]={m[12],camSide.highY,m[14]};
-        tcam::HullPlace(centre,camSide.highYaw,c.highCamHeight*scale,c.highCamBack*scale,s.orbitYaw,s.orbitPitch,eye,look);
+        for(int i=0;i<3;++i)camSide.highCentre[i]+=(landing[i]-camSide.highCentre[i])*kRigEase;
+        camSide.highYaw=tcam::ShotHeading(hull,camSide.highCentre,camSide.highYaw);
+        tcam::OrbitPlace(camSide.highCentre,camSide.highYaw,c.highCamHeight*scale,c.highCamBack*scale,s.orbitYaw,s.orbitPitch,eye,look);
     } else {
         camSide.highSet=false;
         float yaw,pitch;
@@ -856,7 +863,14 @@ void TurretCamFrame(unsigned char* v) noexcept {
     AcquireSRWLockShared(&lock);
     const Shared normalSource=shared;
     ReleaseSRWLockShared(&lock);
-    game.hasAim=!high && !observing && !external && AimPoint(normalSource,game.aim,&game.aimHit);
+    // The turret's yaw centre for the aim point's search (AimPoint): the bore's point nearest the look-at bone.
+    float pivot[3];bool pivotOk=false;
+    {
+        const unsigned char* gun=TurretGun(v,seat);
+        float muzzle[3],dir[3];
+        if(gun && edf::MeanMuzzle(gun,16,muzzle,dir))pivotOk=TurretPivot(seat,muzzle,pivot);
+    }
+    game.hasAim=!high && !observing && !external && AimPoint(normalSource,pivotOk ? pivot : nullptr,game.aim,&game.aimHit);
     // The one player turret aim (aimlink.h V4, turretaim.cpp): asked every frame so its bindings and lock stay current
     // through the high view and the optic too; in AUTO with a lock the turret goes to where the round meets the target,
     // through the same arc solve (Wants) as the screen's centre, the view staying the player's.

@@ -142,7 +142,7 @@ struct Snapshot { ULONGLONG tick; float me[3]; int count; Data d[kEntries]; bool
                   bool launcher; LauncherReadout launch; bool heliSight; HeliSightReadout heliAim;
                   bool gunner; GunnerReadout gun; bool highCam,highCamOn,highCamKeys; bool heliFly; PlayerHeliReadout heliHud;
                   bool turret; edf::aimlink::TurretReadoutV1 turretAim;
-                  bool mountedOptic,turretBinding; edf::aimlink::ModeBindingV1 binding;
+                  bool mountedOptic;
                   bool stock; StockHudReadout stockHud;
                   bool payload; PayloadReadout payloadHud;
                   bool sensor; VehicleSensorReadout sensorHud;
@@ -1208,7 +1208,7 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
 // (StoreGlyph: a silhouette from quads, hud_cue.h; the HUD has no texture of the game's to draw), its name and rounds
 // under it, the picked one on a panel in a cyan frame; on a switch the picked store large over it for kSwitchMs
 // (LoadoutBanner). For the plugin's jets and rotor craft (PlayerJetReadout) and a stock heli (StockHudReadout). ---
-constexpr unsigned long long kSwitchMs=1500;   // a switch's banner (the store's, EDF6AutoTurret's aim mode's)
+constexpr unsigned long long kSwitchMs=1500;   // a switch's banner (the store's)
 constexpr float kCellW=112.0f,kCellH=48.0f;   // px at 1080 lines: a strip's cell
 constexpr float kRows3[]={-4.0f,0.0f,4.0f};   // a glyph's three rows (the pod's rockets, the gun's rounds)
 struct LoadCell { hudcue::StoreIcon icon; wchar_t text[64]; const float* rgba; bool picked; float load=-1.0f; };   // load: hud_cue.h CellLoad
@@ -2635,13 +2635,11 @@ void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,f
     }
 }
 
-// EDF6AutoTurret's turret the player is at (turretaim.cpp, common/edf/aimlink.h; the user, 2026-10-06: "auto-aim
-// switchable to a lead circle, a lock box on the target I pick"). The lock as the jets' (LockAt: a yellow square closing
-// in while its track settles, then the red diamond). In the lead-circle mode the lead circle (预瞄圈: a ring with a dot
-// where the gun's line must pass for the round to meet the target on its arc) and the gun's bore cross (where its line
-// passes now, at the same range): the cross in the ring, the round meets the target; dim when the round's life does
-// not reach. Under the ring the range and the flight time. Low on the screen the mode and its bindings.
-constexpr float kLeadCircle=22.0f;   // px at 1080 lines
+// EDF6AutoTurret's turret the player is at (turretaim.cpp, common/edf/aimlink.h; the user, 2026-10-06: "a lock box on
+// the target I pick"). The lock as the jets' (LockAt: a yellow square closing in while its track settles, then the red
+// diamond). Low on the screen one line: the auto-aim and its lock binding. One auto-aim since 2026-10-25 (the user:
+// "这个自动瞄准是不是多余了一个版本，删掉一个"): the lead-circle mode, its circle, its bore cross and its two lines
+// ("自动瞄准 开" over "[Z] 自动瞄准 关", read as two auto-aims) went; StockMarks' own lead mark shows where to aim.
 void ButtonName(int bits,wchar_t* out,int size) noexcept {
     static const wchar_t* const kNames[]={L"A",L"B",L"X",L"Y",L"LB",L"RB",L"L3",L"R3"};
     for(int i=0;i<8;++i)if(bits==(1<<i)){wcscpy_s(out,static_cast<rsize_t>(size),kNames[i]);return;}
@@ -2652,63 +2650,22 @@ void Binding(bool keys,int key,int button,wchar_t* out,int size) noexcept {
     else ButtonName(button,out,size);
 }
 void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
-                    const edf::aimlink::TurretReadoutV1& r,bool flipped,Line* lines,int* at,const edf::aimlink::ModeBindingV1* binding=nullptr,float controlsBottom=-1.0f) noexcept {
+                    const edf::aimlink::TurretReadoutV1& r,Line* lines,int* at,float controlsBottom=-1.0f) noexcept {
     namespace link=edf::aimlink;
     float x,y;
     if(r.lock!=link::Lock::none)LockAt(drawer,ctx,vp,width,height,s,r.lock==link::Lock::locked ? 2 : 1,r.at,r.lockProgress,&x,&y);
-    const bool circle=r.ownGun && r.mode==link::Mode::leadCircle;
-    if(circle && r.lead) {
-        const float t=2.0f*s,* c=r.inReach ? kHud : kHudDim;
-        float bx,by;
-        if(sight::ToScreen(vp,r.boreAt,1.0f,width,height,&bx,&by)) {   // the bore cross, its centre open
-            const float b=9.0f*s,g=3.0f*s;
-            Seg(drawer,ctx,bx-b,by,bx-g,by,t,kWhite);Seg(drawer,ctx,bx+g,by,bx+b,by,t,kWhite);
-            Seg(drawer,ctx,bx,by-b,bx,by-g,t,kWhite);Seg(drawer,ctx,bx,by+g,bx,by+b,t,kWhite);
-        }
-        if(sight::ToScreen(vp,r.leadAt,1.0f,width,height,&x,&y)) {
-            Arc(drawer,ctx,x,y,kLeadCircle*s,0.0f,kTurn,t,20,c);
-            Rect(drawer,ctx,x-1.5f*s,y-1.5f*s,x+1.5f*s,y+1.5f*s,c);
-            wchar_t reach[32]=L"";
-            if(!r.inReach)std::swprintf(reach,32,L"  %ls",Tr(Tx::outOfRange));
-            Label(text,lines,at,x,y+(kLeadCircle+12.0f)*s,1,kLineScale*0.85f,c,L"%d m  %.1f s%ls",static_cast<int>(std::lround(r.range)),
-                  r.flight,reach);
-        }
+    // AUTO-AIM (green; a tank driver's whose lock its gunners fight: GUNNERS: AUTO-AIM, white) and the lock's binding on
+    // the same line, red while locked.
+    wchar_t text1[160];
+    wcscpy_s(text1,Tr(r.ownGun ? Tx::autoAim : Tx::gunnersAuto));
+    if(r.keys ? r.lockKey>0 : r.lockButton>0) {
+        wchar_t lock[32];
+        Binding(r.keys,r.lockKey,r.lockButton,lock,32);
+        const std::size_t n=wcslen(text1);
+        std::swprintf(text1+n,160-n,Tr(Tx::lockKey),L"   ",lock,Tr(r.lock==link::Lock::none ? Tx::lockWord : Tx::nextWord));
     }
-    // The mode as plainly on or off (the user, 2026-10-06: "怎么切换自动瞄准和关闭，看不出来"): AUTO-AIM ON (green, the
-    // turret aims itself) or AUTO-AIM OFF (amber, the lead circle: the turret is the player's), the key that flips it on
-    // the line under it (a pad with no AimModeButton: where to set one); for kSwitchMs after a flip (`flipped`) the new
-    // state large over the screen's middle on a panel.
-    wchar_t mode[32],lock[32];
-    Binding(r.keys,r.modeKey,r.modeButton,mode,32);
-    Binding(r.keys,r.lockKey,r.lockButton,lock,32);
-    const bool hasMode=r.keys ? r.modeKey>0 : r.modeButton>0,hasLock=r.keys ? r.lockKey>0 : r.lockButton>0;
-    const wchar_t* const state=Tr(!r.ownGun ? Tx::gunnersAuto : circle ? Tx::autoAimOffCircle : Tx::autoAimOn);
-    const float* const colour=!r.ownGun ? kWhite : circle ? kAmber : kGreen;
-    wchar_t keys[128]=L"";
-    if(r.ownGun && hasMode)std::swprintf(keys,128,Tr(Tx::autoAimToggle),mode,Tr(circle ? Tx::wordOn : Tx::wordOff));
-    else if(r.ownGun)wcscpy_s(keys,Tr(r.keys ? Tx::aimModeKeyUnset : Tx::aimModeButtonUnset));
-    if(hasLock) {
-        const std::size_t n=wcslen(keys);
-        std::swprintf(keys+n,128-n,Tr(Tx::lockKey),n ? L"   " : L"",lock,Tr(r.lock==link::Lock::none ? Tx::lockWord : Tx::nextWord));
-    }
-    if(binding && binding->conflict) {
-        wchar_t requested[32],effective[32];
-        Binding(binding->keys,binding->requested,binding->requested,requested,32);
-        if(binding->effective>0)Binding(binding->keys,binding->effective,binding->effective,effective,32);
-        else wcscpy_s(effective,L"--");
-        const std::size_t n=wcslen(keys);
-        std::swprintf(keys+n,128-n,Tr(Tx::aimSightBinding),requested,effective);
-    }
-    const float keysY=controlsBottom>=0.0f ? controlsBottom : height*0.905f;
-    const float stateY=controlsBottom>=0.0f ? controlsBottom-32.0f*s : height*0.875f;
-    Label(text,lines,at,width*0.5f,stateY,1,kLineScale,colour,L"%ls",state);
-    Label(text,lines,at,width*0.5f,keysY,1,kLineScale*0.85f,r.lock==link::Lock::locked ? kRed : kWhite,L"%ls",keys);
-    if(!flipped || !r.ownGun)return;
-    const float by=height*0.30f;
-    Label(text,lines,at,width*0.5f,by,1,kTitleScale,colour,L"%ls",Tr(circle ? Tx::autoAimOffBanner : Tx::autoAimOn));
-    const float w=(*at>0 && lines[*at-1].w>0.0f ? lines[*at-1].w : 420.0f*s)+40.0f*s,h=48.0f*s;
-    Rect(drawer,ctx,(width-w)*0.5f,by-h*0.5f,(width+w)*0.5f,by+h*0.5f,kPanel);
-    Rect(drawer,ctx,(width-w)*0.5f,by-h*0.5f,(width+w)*0.5f,by-h*0.5f+3.0f*s,colour);
+    const float* const colour=r.lock==link::Lock::locked ? kRed : r.ownGun ? kGreen : kWhite;
+    Label(text,lines,at,width*0.5f,controlsBottom>=0.0f ? controlsBottom : height*0.905f,1,kLineScale,colour,L"%ls",text1);
 }
 
 // --- The stock vehicles' HUD (vhud.cpp gathers it; ini StockVehicleHud; docs/hud-re.md §7): for the stock vehicle the
@@ -2892,9 +2849,7 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
 
 // What the stock vehicles' HUD takes from the other readouts: the Nix's legs and torso (its ring), the drill tank's drill
 // (a line in the block instead of DrillPanel), the EMC's charged beam (a line and its bar: emc.cpp), and whether
-// EDF6AutoTurret's lead circle is on the seat's own gun (the
-// seat's first weapon, the one its aim turns: then the circle and its bore cross are that gun's marks, not a pipper).
-struct StockExtras { const NixTorso* nix; const DrillCue* drill; bool leadGun; const EmcCue* emc; const ProteusReadout* proteus; bool high=false;
+struct StockExtras { const NixTorso* nix; const DrillCue* drill; const EmcCue* emc; const ProteusReadout* proteus; bool high=false;
                      const armorhud::Readout* armor=nullptr; };   // the hidden stock armor gauge's numbers (ArmorRows)
 // --- The Proteus (proteus.cpp; README 普罗透斯): its part of the stock vehicle HUD. In the block (StockBlock) up to four
 // lines with a bar under some: the stance (and the stagger's progress), the shield (its state, HP and deployed its heat;
@@ -2983,26 +2938,25 @@ void ProteusMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,
 
 // The marks of every aimed weapon but the Katyusha's (launcher.cpp's), those landing on another's drawn once.
 // The seat's sight gun (GunReticle's): the picked weapon when its style is a gun sight (reticle.h GunStyle: not a
-// flamethrower's, a grenade's, a missile's) with a ladder (a beam needs none); -1 for none. Not the gun EDF6AutoTurret's lead circle is on
-// (`leadGun`: arm 0 has its marks).
-// Whether arm `i` can carry a gun sight of its own (the style, the ladder; not the lead circle's gun).
-bool SightCapable(const StockHudReadout& r,int i,bool leadGun) noexcept {
+// flamethrower's, a grenade's, a missile's) with a ladder (a beam needs none); -1 for none.
+// Whether arm `i` can carry a gun sight of its own (the style, the ladder).
+bool SightCapable(const StockHudReadout& r,int i) noexcept {
     if(i<0 || i>=r.arms || i>=kStockArms)return false;
     const StockArm& a=r.arm[i];
     return a.aimed && !a.physicalOnly && !a.lofted && !a.lobbed && a.kind==RoundKind::arc && reticle::GunStyle(a.reticle) &&
-           (a.shell==reticle::Shell::beam || a.ladder.ticks>0) && !(i==0 && leadGun);
+           (a.shell==reticle::Shell::beam || a.ladder.ticks>0);
 }
-int SightGun(const StockHudReadout& r,bool leadGun) noexcept {
-    return SightCapable(r,r.sight,leadGun) ? r.sight : -1;
+int SightGun(const StockHudReadout& r) noexcept {
+    return SightCapable(r,r.sight) ? r.sight : -1;
 }
 // A gun on the seat's other trigger keeps its own full sight (the user, 2026-10-14: 「切换武器的时候会把瞄具取消到。比如泰坦
 // 用机枪的时候，镇魂炮的瞄具就没了」): which trigger was pulled last only says which one is picked (its name bracketed,
 // the magnified scope's field), not which gun may be aimed. One fired with the pick (coFired) is the pick's marks.
 // A missile / rocket picked keeps the screen to its own marks (StockMarks' rule): the other gun only its bore cross then.
-bool OtherTriggerSight(const StockHudReadout& r,int i,bool leadGun) noexcept {
+bool OtherTriggerSight(const StockHudReadout& r,int i) noexcept {
     const bool pickIsGun=r.sight<0 || r.sight>=r.arms || r.sight>=kStockArms || r.arm[r.sight].kind==RoundKind::arc;
     return pickIsGun && i!=r.sight && i>=0 && i<r.arms && i<kStockArms && r.arm[i].armed && !r.arm[i].coFired &&
-           SightCapable(r,i,leadGun);
+           SightCapable(r,i);
 }
 
 // The bore cross of a gun on the seat's other trigger (StockMarks), dimmer than the pick's, its name under it.
@@ -3020,7 +2974,7 @@ void OtherTriggerMark(void* drawer,void* ctx,Text* text,const float* vp,float wi
 
 void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockHudReadout& r,
                 const StockExtras& x,Line* lines,int* at) noexcept {
-    const int sightGun=x.high ? -1 : SightGun(r,x.leadGun);
+    const int sightGun=x.high ? -1 : SightGun(r);
     // One selected weapon owns the fire-control marks. A missile/rocket selection must not leave the main gun's
     // optical reticle underneath it; lofted launchers have their dedicated impact/spread marks.
     const int selected=r.sight>=0 && r.sight<r.arms && r.sight<kStockArms ? r.sight : -1;
@@ -3032,7 +2986,7 @@ void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
             // A gun on the other trigger (the main gun while the coaxial gun is picked, and the other way round): its own
             // bore cross, moving with its barrel, named, as well as where it lands (the user, 2026-10-12: 「泰坦的炮口准星
             // 不会随着炮管动 ... 应该两个准星都同时显示才对」). Not in a magnified scope (that field is the pick's).
-            if(!x.high && !scopeNow.on && OtherTriggerSight(r,i,x.leadGun)) {
+            if(!x.high && !scopeNow.on && OtherTriggerSight(r,i)) {
                 wchar_t name[32];
                 ArmName(a,false,name,_countof(name));
                 StockMark(drawer,ctx,text,vp,width,height,s,a,name,true,lines,at);   // its own sight, unbracketed
@@ -3042,7 +2996,6 @@ void StockMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
             PhysicalPaths(drawer,ctx,text,vp,width,height,s,a.path,a.paths,i==selected,lines,at);
             continue;
         }
-        if(i==0 && x.leadGun && !a.physicalOnly && a.kind!=RoundKind::homing)continue;
         wchar_t name[32];
         ArmName(a,i==r.selected,name,_countof(name));
         StockMark(drawer,ctx,text,vp,width,height,s,a,name,i==sightGun,lines,at);
@@ -3517,7 +3470,7 @@ void HudPublish() noexcept {
     s.sensor=PlayerVehicleContacts(&s.sensorHud);
     s.highCam=PlayerHighCam(&s.highCamOn,&s.highCamKeys);
     s.turret=PlayerTurretAim(&s.turretAim);
-    s.mountedOptic=SightZoomMounted(nullptr);s.turretBinding=PlayerTurretBinding(&s.binding);
+    s.mountedOptic=SightZoomMounted(nullptr);
     s.payload=PlayerPayload(&s.payloadHud);
     s.stock=PlayerStockHud(&s.stockHud);   // the stock vehicles' HUD (StockVehicleHud; a heli's stores)
     s.warned=WarnLatest(&s.warn);   // the aircraft's warnings (warn.cpp WarnTick, this frame's: it runs first)
@@ -5621,13 +5574,12 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         const Snapshot& snap=Latest();
         const bool mountedOptic=snap.mountedOptic || scopeOverlay; // also cover the first paint before next HUD publication
         // A switch the player makes shows for a moment (hud_cue.h Change, kSwitchMs): the picked store (forgotten while no
-        // aircraft's stores show, so boarding shows none) and EDF6AutoTurret's aim mode.
-        static hudcue::Change storePick{},aimMode{};
+        // aircraft's stores show, so boarding shows none).
+        static hudcue::Change storePick{};
         const bool fresh=now-snap.tick<=kFreshMs,storesShown=fresh && (snap.cockpit || snap.heliFly || snap.stock);
         if(!storesShown)storePick.seen=false;
         const int picked=SeatArmPick(SeatArmList(snap));
         const bool storeSwitched=storesShown && hudcue::Changed(storePick,picked,now,kSwitchMs);
-        const bool aimFlipped=fresh && snap.turret && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
         const bool rotorHud=snap.cockpit && snap.jet.rotor && Cfg().heliFlightHud;   // a rotor craft: the helicopter HUD
         // A vehicle's first person: the read-outs are on its cockpit's screens (DrawCockpitScreens below); the HUD's own panels
         // (strips, annunciator, blocks, tapes) give way, its aim marks and head-up symbols stay on the view.
@@ -5718,12 +5670,10 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                 const auto dock=LoadoutDockOf(t,width,height,s,cells,n,keys.text[0] ? 1 : 0);
                 controlsBottom=dock.top-20.0f*s;
             }
-            TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at,
-                           snap.turretBinding ? &snap.binding : nullptr,controlsBottom);
+            TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,lines,&at,controlsBottom);
         }
         if(stockHud) {
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
-                                showTurretOverlay && !physicalSight && snap.turretAim.ownGun && snap.turretAim.mode==edf::aimlink::Mode::leadCircle && snap.turretAim.lead,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
                                 fresh && snap.proteus ? &snap.proteusRo : nullptr,overhead,snap.armor ? &snap.armorRo : nullptr};
             if(screensOn)StockAimOnly(drawer,ctx,t,viewProj,width,height,s,snap.stockHud,x,lines,&at);

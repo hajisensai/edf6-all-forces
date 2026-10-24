@@ -35,15 +35,17 @@ bool SightZoomCanMount(const void*,unsigned) noexcept{return lens;}
 bool SightZoomMounted(const void*) noexcept{return mounted;}
 bool HighCamOn(const void*) noexcept{return observer;}
 bool TurretCamHighTransition(const void*) noexcept{return transition;}
-bool TurretCamTurret(const void*,unsigned) noexcept{return true;}
+bool camTurret=true,firstPerson=false;
+bool TurretCamTurret(const void*,unsigned) noexcept{return camTurret;}
+bool FirstPersonVehicleView(const void*,unsigned) noexcept{return firstPerson;}
 bool CameraRay(float*,float*) noexcept{return false;}
 bool MapOwnsView() noexcept{return false;}
 bool CameraRayOf(const void*,float*,float*) noexcept{return false;}
 void Log(const char*,...) noexcept{}
 float MapRay(const float*,const float*,float*) noexcept{return -1;}
 }
-extern "C" bool __cdecl EDF6VehicleCrew_SightBindingV1(const void*,unsigned,bool,int);
 extern "C" bool __cdecl EDF6VehicleCrew_TurretObserverV1(const void*,unsigned);
+extern "C" bool __cdecl EDF6VehicleCrew_CameraTurretV2(const void*,unsigned);
 int main(){
     using namespace autoturret;int checked=0,failed=0;
     edf::SetInputSource(&bindingkeys::Key,&bindingkeys::Window);   // the plugins' key source (edf/input_source.h)
@@ -53,48 +55,43 @@ int main(){
     edf::Put<void*>(v,edf::kSelfCtrl,ctrl);edf::Put<void*>(v,edf::kSeats,seats);edf::Put<std::uint64_t>(v,edf::kSeatCount,2);
     edf::Put<void*>(seats,edf::kSeatRider,h);edf::Put<void*>(seats,edf::kSeatRiderCtrl,ctrl);edf::Put<int>(ctrl,8,1);
     h[edf::kHumanPlayer]=1;edf::Put<void*>(h,edf::kHumanPad,h);
-    sightBinding=&EDF6VehicleCrew_SightBindingV1;turretObserver=&EDF6VehicleCrew_TurretObserverV1;
+    turretObserver=&EDF6VehicleCrew_TurretObserverV1;
     cameraTurret=[](const void*,unsigned)->bool{return true;};
-    expect(Reserved(v,0,true,'Z') && !Reserved(v,0,true,'V'),"real current seat reserves configured sight key before first zoom press");
-    expect(!Reserved(v,1,true,'Z'),"another seat cannot reserve this player's mode binding");
-    cfg.modeKey='Z';cfg.aimMode=0;PilotFrame(v,0,seats,nullptr,nullptr,500);
-    bindingkeys::down['Z']=true;PilotFrame(v,0,seats,nullptr,nullptr,500);
-    expect(!LeadCircle(),"legacy Z press cannot also toggle automatic aim");
-    bindingkeys::down['Z']=false;bindingkeys::down['V']=true;PilotFrame(v,0,seats,nullptr,nullptr,500);
-    expect(LeadCircle(),"legacy conflict resolves to V and V toggles the actual mode");
-    PilotFrame(v,0,seats,nullptr,nullptr,500);expect(LeadCircle(),"held effective V creates one edge only");
-    PublishAim(v,true,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,0);
-    edf::aimlink::TurretReadoutV1 r{};edf::aimlink::ModeBindingV1 binding{};
-    expect(EDF6AutoTurret_TurretReadoutV1(&r) && r.modeKey=='V',"unchanged V1 readout advertises actual effective V");
-    expect(EDF6AutoTurret_ModeBindingV1(&binding) && binding.conflict && binding.requested=='Z' && binding.effective=='V',"optional binding status explains old Z ownership conflict");
-    crew::testKind=crew::sightzoom::Kind::none;crew::lens=false;bindingkeys::down['Z']=true;bindingkeys::down['V']=false;
-    PilotFrame(v,0,seats,nullptr,nullptr,500);expect(LeadCircle(),"capability/binding change drains a held key instead of making a phantom press");
-    bindingkeys::down['Z']=false;PilotFrame(v,0,seats,nullptr,nullptr,500);bindingkeys::down['Z']=true;PilotFrame(v,0,seats,nullptr,nullptr,500);
-    expect(!LeadCircle(),"without a real sight capability the configured legacy Z remains usable");
-    crew::testKind=crew::sightzoom::Kind::optical;crew::lens=true;cfg.modeButton=128;
-    expect(EffectiveModeBinding(v,0,false)==0,"colliding pad binding is disabled instead of silently stealing R3");
-    cfg.modeKey='B';expect(EffectiveModeBinding(v,0,true)=='B',"noncolliding user binding is preserved");
-    crew::observer=true;auto rule=PlayerControlRule(v,0,false,true);
+    // One auto-aim (2026-10-25, "这个自动瞄准是不是多余了一个版本，删掉一个"): no mode key is read and the readout always says
+    // auto-aim with its lock binding alone; the old V and the legacy Z are no keys of this plugin's (Z is the optic's).
+    cfg.lockKey='Q';cfg.lockButton=4;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    bindingkeys::down['V']=bindingkeys::down['Z']=true;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    bindingkeys::down['V']=bindingkeys::down['Z']=false;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    PublishAim(v,true,nullptr,nullptr);
+    edf::aimlink::TurretReadoutV1 r{};
+    expect(EDF6AutoTurret_TurretReadoutV1(&r) && r.mode==edf::aimlink::Mode::autoAim && r.modeKey==0 && r.modeButton==0 &&
+           r.lockKey=='Q' && r.lockButton==4 && !r.lead,"the readout is the one auto-aim and its lock binding, V / Z pressed or not");
+    crew::observer=true;auto rule=PlayerControlRule(v,0,true);
     expect(!rule.steer&&!rule.drag,"C observation cannot restore V1 auto steering even with an existing lock");
-    crew::observer=false;crew::transition=true;rule=PlayerControlRule(v,0,false,true);
+    crew::observer=false;crew::transition=true;rule=PlayerControlRule(v,0,true);
     expect(!rule.steer&&!rule.drag,"camera return blend retains observation ownership");
-    crew::transition=false;rule=PlayerControlRule(v,0,false,true);
+    crew::transition=false;rule=PlayerControlRule(v,0,true);
     expect(rule.steer&&!rule.drag,"normal decoupled view still allows explicit locked auto aim");
-    rule=PlayerControlRule(v,0,false,false);expect(!rule.steer&&!rule.drag,"normal mouse intention remains owner without an explicit lock");
+    rule=PlayerControlRule(v,0,false);expect(!rule.steer&&!rule.drag,"normal mouse intention remains owner without an explicit lock");
     // Entering the mounted optic makes CameraTurret yield. That false must not restore
     // V1 autonomous auto-aim; the scope's native player inputs own the axes instead.
     cameraTurret=[](const void*,unsigned)->bool{return false;};
-    const bool previousMode=LeadCircle();crew::mounted=true;
-    rule=PlayerControlRule(v,0,false,false);expect(!rule.steer&&!rule.drag,"scope entry blocks unlocked AUTO even after CameraTurret yields");
-    rule=PlayerControlRule(v,0,false,true);expect(!rule.steer&&!rule.drag,"scope entry also blocks locked AUTO from stealing native optic axes");
-    expect(LeadCircle()==previousMode,"entering physical scope does not change AutoTurret mode");
-    crew::mounted=false;rule=PlayerControlRule(v,0,false,false);
-    expect(rule.steer&&rule.drag&&LeadCircle()==previousMode,"scope exit restores original legacy control rule without changing mode");
-    mode=edf::aimlink::Mode::leadCircle;crew::mounted=true;
-    rule=PlayerControlRule(v,0,LeadCircle(),false);crew::mounted=false;rule=PlayerControlRule(v,0,LeadCircle(),false);
-    expect(!rule.steer&&!rule.drag&&LeadCircle(),"enter/exit cannot restart AUTO when user had selected manual lead mode");
-    crew::lens=false;expect(!Reserved(v,0,true,'Z'),"a zoom-kind tag without a real mounted lens does not reserve Z");crew::lens=true;
-    sightBinding=nullptr;bindingTried=GetTickCount64();cfg.modeKey='Z';
-    expect(EffectiveModeBinding(v,0,true)=='Z',"missing optional peer export preserves legacy standalone key behavior");
+    crew::mounted=true;
+    rule=PlayerControlRule(v,0,false);expect(!rule.steer&&!rule.drag,"scope entry blocks unlocked auto-aim even after CameraTurret yields");
+    rule=PlayerControlRule(v,0,true);expect(!rule.steer&&!rule.drag,"scope entry also blocks locked auto-aim from stealing native optic axes");
+    crew::mounted=false;rule=PlayerControlRule(v,0,false);
+    expect(rule.steer&&rule.drag,"scope exit restores original legacy control rule");
+    // 2026-10-25 ("M163火神防空车(BMPT一样)在第一人称时会自动看向一个特定方向 并且人工转向其他方向仍然会回转到那个方向"): first
+    // person yields the turret camera; the real CameraTurretV2 producer still says the player's view turns the seat, so
+    // the flak is not taken back for V1 (its own pick every frame, a mouse never past DragDeadzone).
+    cameraTurret=&EDF6VehicleCrew_CameraTurretV2;crew::camTurret=false;crew::firstPerson=false;
+    rule=PlayerControlRule(v,0,false);
+    expect(rule.steer&&rule.drag,"negative control: without the turret camera or first person, V1 auto-aim as before");
+    crew::firstPerson=true;rule=PlayerControlRule(v,0,false);
+    expect(!rule.steer&&!rule.drag,"first person, no lock: the mouse turns the turret, auto-aim never pulls it back");
+    rule=PlayerControlRule(v,0,true);
+    expect(rule.steer&&!rule.drag,"first person with a lock: auto-aim onto the lock only");
+    expect(!EDF6VehicleCrew_CameraTurretV2(v,1),"first person of another seat's rider is not this player's view");
+    crew::firstPerson=false;crew::camTurret=true;
     std::printf("autoturret binding: %d checks, %d failures\n",checked,failed);return failed?1:0;
 }
