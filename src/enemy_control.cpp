@@ -11,6 +11,8 @@
 #include "enemy_control_adapter.h"
 #include "enemy_control_camera.h"
 #include "enemy_control_bindings.h"
+#include "enemy_control_binding_order.h"
+#include "enemy_control_pad.h"
 #include "enemy_control_native_net.h"
 #include "enemy_control_core_pose.h"
 #include "enemy_control_native_pose.h"
@@ -173,6 +175,13 @@ bool ReadCatalogue(const ObjRef& target,Catalogue& result) {
         if(native.action)for(const wchar_t* text=native.action;*text;++text)Hash32(hash,static_cast<std::uint32_t>(*text));
     }
     result.hash=hash ? hash : 1;
+    // The keys go in this order (enemy_control_binding_order.h): the primary attack first, the
+    // movement actions last. Each entry keeps its native channel; the hash and ids above are
+    // the native order's, so the wire and a peer's catalogue are unchanged.
+    std::stable_sort(result.abilities.begin(),result.abilities.end(),[&result](const Ability& a,const Ability& b) noexcept {
+        return enemy_native::AbilityBindingRank(*result.profile,result.native[a.channel])<
+            enemy_native::AbilityBindingRank(*result.profile,result.native[b.channel]);
+    });
     return true;
 }
 const Ability* FindAbility(const Catalogue& catalogue,std::uint32_t id) noexcept {
@@ -495,7 +504,8 @@ bool RefreshAdapterCatalogue(Session& session) {
     if(!session.catalogue.adapter) {
         if(!session.nativeOwned)return true;
         for(unsigned i=0;i<session.catalogue.abilities.size();++i)
-            if(!enemy_native::ReadAbilityState(session.native,session.catalogue.native[i],&session.catalogue.abilities[i]))return false;
+            if(!enemy_native::ReadAbilityState(session.native,session.catalogue.native[session.catalogue.abilities[i].channel],
+                &session.catalogue.abilities[i]))return false;
         return true;
     }
     const auto* adapter=session.catalogue.adapter;
@@ -516,31 +526,38 @@ bool InputAllowed() noexcept {
     return pid==GetCurrentProcessId();
 }
 float Axis(float value) noexcept { return !std::isfinite(value) ? 0.0f : (std::max)(-1.0f,(std::min)(1.0f,value)); }
+// The game's own pad-path flag (0x1183D70's byte), read where its code says it is.
+bool PadFlag() noexcept {
+    if(!image || !Readable(image+kPadFlagCode,8))return false;
+    const auto* flag=PadFlagAddress(image+kPadFlagCode);
+    return flag && Readable(flag,1) && *flag!=0;
+}
 bool Held(int key) noexcept { return (edf::AsyncKey(key)&0x8000)!=0; }
 void Sample(Session& session,Input& sample) noexcept {
     const auto* human=static_cast<const unsigned char*>(session.owner.obj);
     const auto* pad=At<const unsigned char*>(human,kHumanPad);
-    const int index=At<int>(human,0xD40);
-    const auto* record=pad && index>=0 && index<4 ? pad+static_cast<std::size_t>(index)*0xA80 : nullptr;
+    // The soldier class's key record (Ranger 0 .. Fencer 3) and the local pad bound to this player
+    // (enemy_control_pad.h): two different things.
+    const int classRecord=At<int>(human,kHumanClassRecord);
+    const bool firstLocal=FirstLocalPad(At<int>(human,kHumanLocalPad));
+    const auto* record=pad && classRecord>=0 && classRecord<static_cast<int>(kPadRecords) ? pad+static_cast<std::size_t>(classRecord)*kPadRecordStride : nullptr;
     bool physical=false,keys=false;
     std::uint16_t buttons=0;std::uint8_t leftTrigger=0,rightTrigger=0;bool padRead=false;
-    if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,0x688)) {
+    if(InputAllowed() && !MapHoldsHumanKeys(human) && Readable(record,kRecordBytes) && Readable(pad,kPadPathField+sizeof(int))) {
         keys=true;
-        sample.move[0]=Axis(At<float>(record,0x0C));sample.move[2]=Axis(StickForward(At<float>(record,0x24)));
-        sample.look[0]=Axis(At<float>(record,0x3C));sample.look[1]=Axis(At<float>(record,0x54));
+        // Movement and look exactly as the soldier itself reads this controller (enemy_control_pad.h):
+        // the pad's sticks on the pad path, this record's movement keys and mouse motion on the
+        // keyboard path -- so they follow the player's own key configuration, and a second local
+        // player's record is its own.
+        const PadSticks sticks=ReadPadSticks(pad,record,At<int>(pad,kPadPathField)!=0 || PadFlag());
+        sample.move[0]=Axis(sticks.right);sample.move[2]=Axis(sticks.forward);
+        sample.look[0]=Axis(sticks.lookRight);sample.look[1]=Axis(sticks.lookDown);
         physical=record[0xD0]!=0;
-        // Keyboard/mouse are the first local input record only. A second local
-        // player consumes its own native record and never inherits P1's keys.
-        if(index==0) {
-            const float right=(Held('D') ? 1.0f : 0.0f)-(Held('A') ? 1.0f : 0.0f);
-            const float forward=(Held('W') ? 1.0f : 0.0f)-(Held('S') ? 1.0f : 0.0f);
-            if(right || forward){sample.move[0]=right;sample.move[2]=forward;}
+        // The attack keys (and the plugin's own XInput) are the first local player's (pad 0) only,
+        // whatever its class. A second local player uses its own native record and never inherits P1's keys.
+        if(firstLocal) {
             if(session.catalogue.adapter || (session.catalogue.profile->axes&8))
                 sample.move[1]=(Held(VK_SPACE) ? 1.0f : 0.0f)-(Held(VK_CONTROL) ? 1.0f : 0.0f);
-            const float dx=At<float>(record,0x66C),dy=At<float>(record,0x684);
-            if(std::isfinite(dx) && std::isfinite(dy) && std::fabs(dx)<4000 && std::fabs(dy)<4000) {
-                sample.look[0]=Axis(sample.look[0]+dx/24.0f);sample.look[1]=Axis(sample.look[1]+dy/24.0f);
-            }
             padRead=MapPadState(&buttons,&leftTrigger,&rightTrigger);
         }
     }
@@ -561,7 +578,7 @@ void Sample(Session& session,Input& sample) noexcept {
     for(unsigned i=0;i<bound;++i) {
         const auto& binding=kBindings[i];
         bool down=keys && i==0 && physical;
-        if(keys && index==0)down=down || Held(binding.vk) || (padRead && PadDown(binding.pad,buttons,leftTrigger,rightTrigger));
+        if(keys && firstLocal)down=down || Held(binding.vk) || (padRead && PadDown(binding.pad,buttons,leftTrigger,rightTrigger));
         use(session.catalogue.abilities[i],down,session.keyWas[i]);
     }
     for(unsigned i=bound;i<kBindingCount;++i)session.keyWas[i]=false;

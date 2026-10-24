@@ -27,8 +27,10 @@
 //    over again.
 //  - The rig (docs/camera-re.md §5): the stock locators' (A) or the vehicle's game_object_camera_setting (B, +0x170 /
 //    +0x180, the authored third-person framing the riding camera never reads), whichever puts the eye farther back; the
-//    eye never under the rig's own height over its point. The high view orbits the selected weapon's actual impact
-//    (or flight endpoint) at HighCamHeight / HighCamBack, scaled up for a big vehicle; native input controls the gun.
+//    eye never under the rig's own height over its point. The high view looks down on the vehicle itself from
+//    HighCamHeight / HighCamBack (scaled up for a big vehicle) along a world-held heading (tcam::HullPlace): the turret
+//    rocking or turning does not move it; free look turns it round the vehicle; native input controls the gun, the
+//    shot's real endpoint is drawn by the HUD.
 // A vehicle qualifies when the player drives it from seat 0, its seat camera is Type 1 (seat+0x200), its seat holds a
 // weapon and its yaw axis turns (more than kMinTraverse): a turret, or the gun is indirect fire (a fixed one: the
 // howitzer). Helicopters and the plugin's jets do not. The view is
@@ -128,7 +130,9 @@ struct CamSide {
     tcam::Rig rig;
     float offset;              // the view's pitch over the player's, eased (the high view looks further down)
     float eye[3],look[3];      // the last placement
-    bool point;                // that placement was the high view's projectile endpoint (tcam::ImpactPlace)
+    bool point;                // that placement was the high view's (tcam::HullPlace)
+    bool highSet;              // highYaw / highY hold this high view's
+    float highYaw,highY;       // the high view's world-held heading (taken from the view it starts from), the hull's eased height
     float carry;               // a switch between the two placements: the share of the old one's offset still carried
     float carryEye[3],carryLook[3];
 };
@@ -464,7 +468,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
             const float rate=c.turretCamRate*kPi/180.0f/60.0f;
             s.orbitYaw=tcam::Wrap(s.orbitYaw-stick[0]*rate);
             s.orbitPitch=vec::Clamp(s.orbitPitch+stick[1]*rate,-tcam::kPitchMost,tcam::kPitchMost);
-        } else {s.orbitYaw*=1.0f-kReturnRate;s.orbitPitch*=1.0f-kReturnRate;}
+        }   // let go: the view stays where free look turned it (a world-held heading, nothing to swing back onto)
         // The stock axis step (and stabilizer) owns gun motion. Looking round must not feed the observation back.
         cmd[0]=held && !foreign ? 0.0f : in[0];cmd[1]=held && !foreign ? 0.0f : in[1];
         AcquireSRWLockExclusive(&lock);
@@ -687,7 +691,7 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
         ReleaseSRWLockExclusive(&lock);
         return;
     }
-    if(!own || (s.high && !s.focusValid)) {
+    if(!own) {
         Leave(seat,lookTarget,cam);
         PublishObservation(seat,camSide.owned && (camSide.point || camSide.carry>0.0f));
         if(!s.high && !camSide.owned)PublishNormalRay(seat,s.take,stockEye,stockLook);
@@ -697,8 +701,8 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     tcam::Rig high=tcam::High(c.highCamHeight*scale,c.highCamBack*scale,c.highCamPitch);
     std::memcpy(high.fixed,normal.fixed,sizeof(high.fixed));
     const float highBase=-c.highCamPitch*kPi/180.0f;
-    // Both coupled and decoupled high cameras observe the same real shot endpoint.
-    const bool point=s.high && s.focusValid;
+    // Both coupled and decoupled high cameras look down on the vehicle.
+    const bool point=s.high;
     const tcam::Rig& want=s.high && !viewed ? high : normal;
     const float* m=reinterpret_cast<const float*>(s.v+kMatrix);
     // The view: the plugin's (decoupled, free look), else the aim's at the rig's base pitch (coupled high view).
@@ -717,9 +721,19 @@ void Camera(const unsigned char* seat,float* lookTarget,unsigned char* cam) noex
     tcam::Ease(camSide.rig,want,kRigEase);
     camSide.offset+=(offset-camSide.offset)*kRigEase;
     float eye[3],look[3];
-    if(point)tcam::ImpactPlace(m+12,s.focus,s.yaw,c.highCamHeight*scale,c.highCamBack*scale,
-                              s.orbitYaw,s.orbitPitch,eye,look);
-    else {
+    if(point) {
+        if(!camSide.highSet) {   // entering it: the heading the camera faces now, held from here on in the world
+            const float d[3]={camSide.look[0]-camSide.eye[0],0.0f,camSide.look[2]-camSide.eye[2]};
+            float a3[3];AxesDir(s.v,seat,a3);
+            camSide.highYaw=d[0]*d[0]+d[2]*d[2]>1e-6f ? tcam::YawOf(d) : tcam::YawOf(a3);
+            camSide.highY=m[13];camSide.highSet=true;
+        }
+        // The hull's bounce over the ground eased out; its travel across the ground followed exactly.
+        camSide.highY+=(m[13]-camSide.highY)*kRigEase;
+        const float centre[3]={m[12],camSide.highY,m[14]};
+        tcam::HullPlace(centre,camSide.highYaw,c.highCamHeight*scale,c.highCamBack*scale,s.orbitYaw,s.orbitPitch,eye,look);
+    } else {
+        camSide.highSet=false;
         float yaw,pitch;
         if(viewed){yaw=s.yaw;pitch=s.pitch+camSide.offset;}
         else {

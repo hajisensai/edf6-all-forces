@@ -40,8 +40,13 @@ class PackedMassTests(unittest.TestCase):
 
 
 class NativeAssetTests(unittest.TestCase):
+    """The procedural models' contracts (tests/test_wt_tracked.py: the War Thunder models')."""
     @classmethod
     def setUpClass(cls):
+        import wt_tracked
+        cls.wt_enabled=wt_tracked.ENABLED
+        wt_tracked.ENABLED=False
+        cls.addClassCleanup(setattr,wt_tracked,'ENABLED',cls.wt_enabled)
         import rootcpk
         import tracked_combat_model as t
         import vulcan_model

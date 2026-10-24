@@ -947,7 +947,9 @@ void Arrive(const Heli& h,const float* pos,const float* goal,const float* goalVe
     const float settle=len*kMoveGain/kBrakeGain;
     float want=std::sqrt(2.0f*h.stopDecel*left);
     if(want>settle)want=settle;
-    if(want>h.top)want=h.top;
+    // The paced march (mapcmd.cpp MapPaceScale): its top speed a share of its own, to keep with the slowest.
+    const float top=h.top*MapPaceScale(h.ref.obj);
+    if(want>top)want=top;
     out[0]+=e[0]/len*want;out[2]+=e[2]/len*want;
 }
 

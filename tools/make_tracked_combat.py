@@ -217,7 +217,8 @@ def _assets(game: vc.Game, kind: str):
         arc, md, _info = model.build_with_info(game)
         assembly = tracked.Assembly(md)
         model.parts(assembly)
-        shkt, binding, overrides, report = tracked_collision.build(game, kind, md, assembly.parts)
+        shkt, binding, overrides, report = tracked_collision.build(game, kind, md, assembly.parts,
+                                                                   layout=model.collision_layout())
         cache[kind] = arc, md, shkt, binding, overrides, report
     return cache[kind]
 

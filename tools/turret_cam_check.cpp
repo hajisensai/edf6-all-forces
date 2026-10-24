@@ -173,25 +173,29 @@ void Owners() {
     Expect(!tcam::BallisticAim(false,false) && !tcam::BallisticAim(false,true),"no hit (the made-up far point): the bore line");
 }
 
-// Observation stays on the actual shot, independently of distance, terrain height and free look.
+// The high view looks down on the vehicle (2026-10-23): its centre is the hull's, never the shot's, at the same distance
+// whatever the heading, terrain height and free look; the heading is the one it is given (world-held), not the gun's.
 void HighView() {
-    const float origin[3]={120.0f,6.0f,-40.0f};
     int cases=0;
-    for(float range:{0.0f,2.0f,20.0f,600.0f,2400.0f})
+    for(float hill:{-80.0f,0.0f,300.0f})
         for(float yaw:{-2.5f,0.0f,1.1f})
-            for(float hill:{-80.0f,0.0f,300.0f})
-                for(float orbit:{-1.0f,0.0f,1.0f}) {
-                    float forward[3],right[3],eye[3],look[3];
-                    tcam::Flat(yaw,forward,right);
-                    const float point[3]={origin[0]+forward[0]*range,origin[1]+hill,origin[2]+forward[2]*range};
-                    tcam::ImpactPlace(origin,point,yaw,45.0f,35.0f,orbit,orbit,eye,look);
-                    Expect(vec::Dist(look,point)<1e-4f,"shot endpoint never clamped or flattened");
-                    Expect(std::fabs(vec::Dist(eye,point)-std::sqrt(45.0f*45.0f+35.0f*35.0f))<0.001f,
-                           "observation distance does not grow with shot range");
-                    Expect(eye[1]>point[1],"free look remains above the real shot endpoint");
-                    ++cases;
-                }
-    std::printf("high view: %d real endpoint/free-look placements\n",cases);
+            for(float orbit:{-1.0f,0.0f,1.0f}) {
+                const float origin[3]={120.0f,6.0f+hill,-40.0f};
+                float eye[3],look[3];
+                tcam::HullPlace(origin,yaw,90.0f,55.0f,orbit,orbit,eye,look);
+                Expect(vec::Dist(look,origin)<1e-4f,"the high view looks at the vehicle itself");
+                Expect(std::fabs(vec::Dist(eye,origin)-std::sqrt(90.0f*90.0f+55.0f*55.0f))<0.001f,"the high view's distance is fixed");
+                Expect(eye[1]>origin[1],"the eye stays above the vehicle");
+                const float d[3]={look[0]-eye[0],0.0f,look[2]-eye[2]};
+                Expect(std::fabs(tcam::Wrap(tcam::YawOf(d)-(yaw+orbit)))<1e-4f,"the heading is the held one plus free look");
+                ++cases;
+            }
+    // The gun's elevation / the shot's endpoint is no input at all: two placements with the same hull are the same.
+    const float origin[3]={0.0f,0.0f,0.0f};
+    float e1[3],l1[3],e2[3],l2[3];
+    tcam::HullPlace(origin,0.3f,90.0f,55.0f,0.0f,0.0f,e1,l1);tcam::HullPlace(origin,0.3f,90.0f,55.0f,0.0f,0.0f,e2,l2);
+    Expect(vec::Dist(e1,e2)==0.0f && vec::Dist(l1,l2)==0.0f,"the placement depends on the hull and the held heading only");
+    std::printf("high view: %d hull-centred placements\n",cases);
 }
 
 // --- the high view's observed point (tcam::HighFocus) ---

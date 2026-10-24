@@ -245,8 +245,8 @@ struct Config {
     int highCamClass=2;             // ...offered in: 1 indirect-fire vehicles, 2 + big ones, 3 every turret turretcam.cpp serves
     int highCamKey=0x43;            // ...its key ('C'; a Windows virtual-key code, 0: none)
     int highCamButton=0x80;         // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x80 R3; 0 none)
-    float highCamHeight=45.0f;      // ...the high eye: m over the vehicle's origin
-    float highCamBack=35.0f;        // ...m behind it
+    float highCamHeight=90.0f;      // ...the high eye: m over the vehicle's origin
+    float highCamBack=55.0f;        // ...m behind it
     float highCamPitch=40.0f;       // ...looking down this many degrees ahead
     bool nixTorsoTwist=true;        // the Nix's torso keeps its world yaw while A/D turn the legs; only the mouse turns it (nix.cpp)
     bool decoupledTurretCam=true;   // turretcam.cpp: the mouse turns the camera, the turret follows at its own rate
@@ -299,6 +299,7 @@ struct Config {
     bool map=true;                  // the map view (map.cpp): an overhead camera over the real world, the player held
     int mapKey=0x4D;                // ...its key ('M'; a Windows virtual-key code, 0: none)
     int mapButton=0x20;             // ...and pad button (XInput button bits: 0x20 Back / View; 0 none)
+    bool mapMarchPace=false;        // ...a move / attack-move given together keeps to the slowest unit's pace (P toggles; march_pace.h)
     float mapViewDistance=6000.0f;  // ...the near camera's far clip while it is open, m (view.cpp; 0: as it is)
     bool damageStats=true;          // the damage statistics (damagestats.cpp): every hit booked, its page over the map
     int damageStatsKey=0x49;        // ...the page's key ('I': the map opened on it; a Windows virtual-key code, 0: none)

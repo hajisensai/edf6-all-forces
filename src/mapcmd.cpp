@@ -54,6 +54,7 @@
 #include <cstdarg>
 #include "map_pvp_input.h"
 #include "map_enemy_ui.h"
+#include "march_pace.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -72,10 +73,10 @@ constexpr float kPadPickRadius=90.0f;    // px (at 1080 lines) round the screen 
 
 enum class Owner : std::uint8_t { heli, jet, ground, squad, tank };
 struct Entry { CommandUnit u; Owner owner; ObjRef id{}; };   // id: its identity when listed (the module had it live)
-struct DispatchFlags { bool queue=false; };                  // Dispatch: Shift (a point after the ones before it)
+struct DispatchFlags { bool queue=false,paced=false; };      // Dispatch: Shift (a point after the ones before it); the paced march (P)
 
 struct Keys { bool tab,shift,ctrl,follow,release,left,right,middle,padNext,padGuard,padFollow,padRelease,
-             engage,hold,board,dismount,dismiss,recruit,attackMove,mark,formation,sweep,health,all,digit[9],supportPrev,supportNext,supportCall,
+             engage,hold,board,dismount,dismiss,recruit,attackMove,mark,formation,sweep,health,pace,all,digit[9],supportPrev,supportNext,supportCall,
              // The test range's 「摆放」 panel (range_place.h): , . / Enter Backspace; the pad's D-pad, A, B.
              placePrev,placeNext,placeCategory,placeEnter,placeClose,padUp,padDown,padLeft,padRight,padA,padB,padPvp,padEnemy; };
 
@@ -102,6 +103,7 @@ struct Game {
     int composeEntry=-1;SupportLoadout compose{};
     bool armedClick=false;
     int supportPick;
+    int marchPace=-1;           // the paced march (P): 1 the slowest unit's pace, 0 each at full speed, -1 MapMarchPace's
     bool panelOpen=false;       // the squad panel opened past its commandable rows (mapcmd_logic.h SquadRowsShown)
     bool formationMenu=false;   // the formation button's menu open (map_buttons.h MenuEntry)
     bool rpressing=false,rOnUi=false;float rmoved=0.0f; // a right press (a click unless it moves kClickMove), begun on UI
@@ -344,6 +346,7 @@ Keys ReadKeys(const MapCmdInput& in,bool placeKeys) noexcept {
         // The squads' orders (§6.1): keys the map's own camera does not use (WASD QE RF are its pan / turn / tilt; A and S
         // stay its pan, so RTS's A-move is Z and its hold is H). Ctrl+A: every unit (the map does not pan with Ctrl held).
         k.engage=Down('J');k.hold=Down('H');k.board=Down('B');k.dismount=Down('N');k.dismiss=Down('K');k.recruit=Down('U');k.formation=Down('T');k.sweep=Down('Y');k.health=Down('O');
+        k.pace=Down('P');   // the paced march (march_pace.h): P was SPLIT's, gone with the RTS groups
         k.attackMove=Down('Z');k.all=k.ctrl && Down('A');
         k.mark=Cfg().npcMarkKey>0 && Down(Cfg().npcMarkKey);
         for(int d=0;d<9;++d)k.digit[d]=Down('1'+d);
@@ -911,7 +914,79 @@ float Reach(const Entry& e) noexcept {
     default: return 30.0f;
     }
 }
+
+// --- The paced march (march_pace.h), the authority's ---
+// The units this machine is the authority for that took one move / attack-move with the pace on, by march (`group`):
+// each one's way and its share of its own full speed now (MapPaceScale, read by the modules that drive them). By the
+// unit's UnitRef (a squad goes on under its next top, as its Shift queue does). A unit leaves its march at its point
+// (Reach), on another order (its order now not this point, nor a trip of its transport taking it there), and when it is
+// not listed here any more (dead, gone, no driver, another machine's: what it does then is not this machine's to read,
+// and its progress frozen where it was last seen would hold the rest of the march as its slowest); a jet does not march
+// (it cannot fly slower than it does). A unit carried there by its transport (transport.cpp: a squad aboard, its vehicle
+// driven by its own driver) gives that vehicle its share too. Game thread.
+struct PacedUnit { mapcmd::UnitRef unit; std::uint32_t group; float at[3]; pace::Member m; ObjRef carrier; };
+PacedUnit paced[kCmdUnits]{};
+std::uint32_t paceGroups=0;
+constexpr float kPaceOnPoint=2.0f;   // m: an order's point still the march's (a squad's move turned into a guard of it there)
+
+float Across(const float* a,const float* b) noexcept { return std::hypot(b[0]-a[0],b[2]-a[2]); }
+static_assert(pace::kShares==2*kCmdUnits,"a share for every unit that can march and for its transport");
+// The shares the driving modules read (march_pace.h MapPaceScale): the marching units' and their transports', no one else's.
+void PublishShares() noexcept {
+    for(int i=0;i<kCmdUnits;++i) {
+        const PacedUnit& p=paced[i];
+        pace::shares[2*i]=p.m.active ? pace::Share{p.unit.top.obj,p.unit.top.ctrl,p.m.scale} : pace::Share{};
+        pace::shares[2*i+1]=p.m.active && p.carrier ? pace::Share{p.carrier.obj,p.carrier.ctrl,p.m.scale} : pace::Share{};
+    }
+}
+void Unpace(const ObjRef& id) noexcept {
+    for(auto& p:paced)if(p.m.active && mapcmd::SameKey(p.unit.top,Key(id)))p=PacedUnit{};
+    PublishShares();
+}
+// Unit `e` given `c` (accepted, given now): in march `group` (0 none) from here, out of any it was in.
+void Pace(const Entry& e,const Command& c,std::uint32_t group) noexcept {
+    Unpace(e.id);
+    if(!group || e.owner==Owner::jet || (c.order!=Order::move && c.order!=Order::attackMove))return;
+    for(auto& p:paced)if(!p.m.active) {
+        p=PacedUnit{Capture(e),group,{c.at[0],c.at[1],c.at[2]},{},ObjRef{}};
+        pace::Begin(p.m,Across(e.u.pos,c.at),GameMs());
+        PublishShares();
+        return;
+    }
+    Log("MAPCMD the paced march's table full (%d): %p goes at its own speed",kCmdUnits,e.u.v);
+}
+// Every march on: each unit's way left from where it is now, and its share of full speed.
+void PaceTick(const Entry* list,int count) noexcept {
+    const ULONGLONG now=GameMs();
+    for(auto& p:paced) {
+        if(!p.m.active)continue;
+        const int k=Resolve(p.unit,list,count,nullptr);
+        if(k<0 || !IsOnlineAuthority(list[k].u.v)){p=PacedUnit{};continue;}   // not listed here now: out of its march
+        const Entry& e=list[k];
+        Refresh(p.unit,e);
+        const float left=Across(e.u.pos,p.at);
+        // Its order now: still this point, or its transport's trip there (the squad's own order is held till it is off)?
+        const void* carrier=TransportTripTo(e.u.v,p.at,kPaceOnPoint);
+        const bool onIt=carrier || (mapcmd::PointOrder(e.u.now.order) && Across(e.u.now.at,p.at)<=kPaceOnPoint);
+        if(!onIt || left<=Reach(e)){p=PacedUnit{};continue;}
+        p.carrier=carrier && carrier!=e.u.v ? ObjRef::Of(carrier) : ObjRef{};
+        pace::Update(p.m,left,now);
+    }
+    for(auto& p:paced)if(p.m.active && p.group) {
+        bool first=true;   // each march once: at its first unit in the table
+        for(const auto& o:paced){if(&o==&p)break;if(o.m.active && o.group==p.group){first=false;break;}}
+        if(!first)continue;
+        pace::Member m[kCmdUnits];int idx[kCmdUnits];int n=0;
+        for(int i=0;i<kCmdUnits;++i)if(paced[i].m.active && paced[i].group==p.group){m[n]=paced[i].m;idx[n++]=i;}
+        float scale[kCmdUnits];
+        pace::Scales(m,n,scale);
+        for(int i=0;i<n;++i)paced[idx[i]].m=m[i];
+    }
+    PublishShares();
+}
 }  // namespace
+
+std::uint32_t MapPaceGroup() noexcept { if(!++paceGroups)++paceGroups;return paceGroups; }
 
 // --- The Shift queues: the authority's (mapcmd_logic.h Waypoints) ---
 // Kept where the unit's AI runs, whoever gave the points: this machine's map for its own units, a client's through the
@@ -967,6 +1042,8 @@ template<class GiveFn> NpcCommandResult Authority(const Entry& e,const Command& 
 // one request (command_net SubmitMapCommand, the same flag).
 int Dispatch(Game& g,const Command& cmd,int* skipped,DispatchFlags flags) noexcept {
     const bool queue=flags.queue && mapcmd::PointOrder(cmd.order);
+    const bool marching=flags.paced && !queue && (cmd.order==Order::move || cmd.order==Order::attackMove);
+    const std::uint32_t group=marching ? MapPaceGroup() : 0;
     int k=0;
     g.failure=NpcCommandReason::none;g.affected=0;
     g.skipScript=g.skipRiding=g.skipCannot=g.skipRemote=g.skipFailed=0;
@@ -1036,6 +1113,7 @@ int Dispatch(Game& g,const Command& cmd,int* skipped,DispatchFlags flags) noexce
         }
         g.affected+=result.affected;
         e.u.now=c;
+        Pace(e,c,group);
         ++given;
     }
     return given;
@@ -1518,6 +1596,12 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     const bool formation=k.formation && !g.was.formation,sweep=(k.sweep && !g.was.sweep) || clicked(Id::sweep),
                health=(k.health && !g.was.health) || clicked(Id::health);
     const bool markPress=k.mark && !g.was.mark;
+    if(g.marchPace<0)g.marchPace=Cfg().mapMarchPace ? 1 : 0;
+    if(k.pace && !g.was.pace) {
+        g.marchPace=g.marchPace ? 0 : 1;
+        Note(g,L"%ls",hudtext::Tr(g.marchPace ? hudtext::Tx::cmdPaceSlowest : hudtext::Tx::cmdPaceFull));
+        Log("MAPCMD the march's pace: %s",g.marchPace ? "the slowest unit's" : "each at full speed");
+    }
     if(supportAt<0 && k.supportCall && !g.was.supportCall) {   // C: the picked call at the pointer (its composition if open)
         supportAt=g.supportPick;
         if(g.composeEntry==supportAt)load=g.compose;
@@ -1548,7 +1632,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
     if(s.issue) {
         int skipped=0;
         const bool queued=queue && (s.cmd.order==Order::move || s.cmd.order==Order::attackMove);
-        const int given=Dispatch(g,s.cmd,&skipped,{queued});
+        const int given=Dispatch(g,s.cmd,&skipped,{queued,g.marchPace==1});
         wchar_t tail[40]{};
         if(skipped)_snwprintf_s(tail,_countof(tail),_TRUNCATE,Tr(Tx::cmdCannot),skipped);
         if(g.networkQueued)Note(g,Tr(Tx::cmdNpcNetworkQueued),OrderText(s.cmd.order),g.networkQueued,given);
@@ -1579,6 +1663,8 @@ void ResetMapCommands() noexcept {
     // A new mission (map.cpp ResetMap from MissionStart): no group, selection or queue outlives the world its
     // identities were taken in (an address of the last mission may be another object of this one).
     for(auto& q:unitQueues)q=UnitQueue{};
+    for(auto& p:paced)p=PacedUnit{};
+    PublishShares();
     npcmark::Assign(game.hover,{});npcmark::Assign(game.eatHover,{});
     EnemyControlHoldAbility(game.enemy.snapshot,0);
     npcmark::Assign(game.enemyCandidate,{});
@@ -1760,7 +1846,7 @@ int MapCommandGuardAt(const float* at) noexcept {
 }
 
 NpcCommandResult MapCommandAuthority(const ObjRef& unit,const Command& c,const ObjRef& requester,const ObjRef& focus,
-                                     bool queued,MapCommandGive executor) noexcept {
+                                     bool queued,MapCommandGive executor,std::uint32_t paceGroup) noexcept {
     const int count=ListUnits(authorityList);
     const Entry* e=nullptr;
     for(int i=0;i<count && !e;++i)if(authorityList[i].id.obj==unit.obj && authorityList[i].id.ctrl==unit.ctrl)e=&authorityList[i];
@@ -1774,6 +1860,7 @@ NpcCommandResult MapCommandAuthority(const ObjRef& unit,const Command& c,const O
     }
     bool stored=false;
     const auto result=Authority(*e,c,requester,queued,&stored,give);
+    if(!stored && result.Accepted())Pace(*e,c,queued ? 0 : paceGroup);
     if(stored)Log("MAPCMD queued for %p by a network request: %s (%.0f,%.0f,%.0f)",unit.obj,OrderName(c.order),c.at[0],c.at[1],c.at[2]);
     return result;
 }
@@ -1795,10 +1882,12 @@ void MapCommandQueueTick() noexcept {
     const ULONGLONG f=GameFrame();
     if(f==frame)return;
     frame=f;
-    bool any=false;
+    bool any=false,marching=false;
     for(const auto& q:unitQueues)any=any || q.w.active;
-    if(!any){ShareQueues();return;}   // none left: any still on the clients' maps cleared
+    for(const auto& p:paced)marching=marching || p.m.active;
+    if(!any && !marching){ShareQueues();return;}   // none left: any still on the clients' maps cleared
     const int count=ListUnits(authorityList);
+    PaceTick(authorityList,count);
     for(auto& q:unitQueues) {
         if(!q.w.active)continue;
         bool alive=false;
@@ -1815,6 +1904,7 @@ void MapCommandQueueTick() noexcept {
         if(step==mapcmd::QueueStep::dropped)Log("MAPCMD queue of %p dropped: its order changed",q.unit.top.obj);
         if(step!=mapcmd::QueueStep::give)continue;
         const auto result=GiveUnit(e,next,q.requester,ObjRef{},authorityList,count,nullptr);
+        Unpace(e.id);   // the next point of its queue: no march's
         if(result.Accepted())e.u.now=next;
         else q.w=mapcmd::Waypoints{};
         Log("MAPCMD queue of %p: %s (%.0f,%.0f,%.0f)%s, %d more",q.unit.top.obj,OrderName(next.order),next.at[0],next.at[1],next.at[2],

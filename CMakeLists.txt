@@ -785,6 +785,8 @@ add_test(NAME cockpit_retrofit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_D
 add_test(NAME cockpit_shell COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_shell_test.py")
 add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gltf_glb_test.py")
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
+# The stock crosshair hidden while its player controls an enemy (tests/enemy_control_crosshair_guard.py).
+add_test(NAME enemy_control_crosshair_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_crosshair_guard.py")
 add_test(NAME support_config_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_config_ini_test.py")
 # The menu prints Chinese: UTF-8 like the workflow's other Python steps, not the runner's cp1252 console.
 set_tests_properties(support_config_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1252,7 +1254,7 @@ add_test(NAME npc_gunners_online COMMAND npc_gunners_online_test)
 # tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
 # cmake --build build --target EDF6Autopilot
 add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp tests/autopilot/airdrop_probe.cpp
-            tests/autopilot/wdenergy_probe.cpp tests/autopilot/hector_probe.cpp)
+            tests/autopilot/wdenergy_probe.cpp tests/autopilot/hector_probe.cpp tests/autopilot/players_probe.cpp)
 target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
 target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
 target_include_directories(EDF6Autopilot PRIVATE common)
@@ -1756,6 +1758,10 @@ add_test(NAME thermal_gpu COMMAND thermal_gpu_test)
 set_tests_properties(thermal_gpu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
 add_test(NAME thermal_models_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/thermal_model_native_audit.py" --dll "${EDF6_NATIVE_DLL}")
 set_tests_properties(thermal_models_native PROPERTIES SKIP_RETURN_CODE 77)
+add_executable(march_pace_test EXCLUDE_FROM_ALL tests/march_pace_test.cpp)
+target_compile_options(march_pace_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks march_pace_test)
+add_test(NAME march_pace COMMAND march_pace_test)
 add_executable(map_pvp_input_test EXCLUDE_FROM_ALL tests/map_pvp_input_test.cpp)
 target_include_directories(map_pvp_input_test PRIVATE src common)
 target_compile_options(map_pvp_input_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -1898,6 +1904,8 @@ add_test(NAME npc_action_look COMMAND npc_action_look_test)
 add_test(NAME npc_action_look_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_action_look_native.py")
 
 add_test(NAME tracked_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_collision.py")
+# The M163 / BMPT from their War Thunder model folders (pylib/wt_tracked.py): prep rules always, the assets with the game.
+add_test(NAME wt_tracked COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_wt_tracked.py")
 # The Havok tagfile graph and its writer (pylib/hkfile.py), the SHKT / SGO binding checks (pylib/shkt_check.py): the
 # portable parts always, the stock files' round trips and mutations with the game.
 add_test(NAME hkfile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_hkfile.py")

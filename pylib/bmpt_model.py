@@ -1,7 +1,8 @@
-"""Newly authored low-poly BMPT with a T-72 chassis and Terminator weapon module.
+"""The BMPT "Terminator" (T-72 chassis, twin 2A42 and four Ataka tubes).
 
-Original procedural exterior: no downloaded mesh and no stock hull relabelled
-BMPT. Proportions/configuration follow US Army ARMOR, Summer 2022, Grau and
+When the War Thunder model folder is there (models/wt_bmpt: pylib/wt_tracked.py, docs/wt-tracked-models.md) every
+function below builds from it; else the original procedural exterior that follows: no downloaded mesh and no stock hull
+relabelled BMPT. Proportions/configuration follow US Army ARMOR, Summer 2022, Grau and
 Bartles: 6.7 x 3.8 x 3.4 m, twin 30 mm cannon and four Ataka missile tubes.
 The original V603 physical bone binds are retained; a private CAS fixes only
 the optic bones' four int16 T/R references (eight bytes) at bind, so their real
@@ -15,6 +16,7 @@ from __future__ import annotations
 import os
 
 import tracked_combat_model as t
+import wt_tracked as wt
 from tracked_combat_model import HOST_ARC, HOST_MDB, HOST_CAS, TrackedCombatCheckError
 
 OUT_ARC = 'EDF6VC_BMPT.MRAB'
@@ -33,6 +35,8 @@ EJECTIONS = {'left': ('cannon_slide_l', (.882215, 2.248, -.20)),
 
 
 def parts(a: t.Assembly) -> None:
+    if wt.available('bmpt'):
+        return wt.parts(a, 'bmpt')
     t.chassis(a, 'BCDEFG', *DIMENSIONS[:2], 1.43, False)
     turret = a.part('bmpt_turntable_and_low_turret', 'cannon_main')
     t.cylinder(turret, (0, 1.43, .30), (0, 1.70, .30), 1.05, 24)
@@ -99,6 +103,8 @@ def _weapon_muzzles(a) -> dict:
 
 
 def muzzle_local(game) -> dict:
+    if wt.available('bmpt'):
+        return wt.muzzle_local(game, 'bmpt')
     host, _rab = t.stock(game)
     a = t.Assembly(host)
     parts(a)
@@ -106,6 +112,8 @@ def muzzle_local(game) -> dict:
 
 
 def ejection_local(game) -> dict:
+    if wt.available('bmpt'):
+        return wt.ejection_local(game, 'bmpt')
     host, _rab = t.stock(game)
     a = t.Assembly(host)
     for key, (bone, position) in EJECTIONS.items():
@@ -114,6 +122,10 @@ def ejection_local(game) -> dict:
 
 
 def build_with_info(game):
+    if wt.available('bmpt'):
+        arc, md, info = wt.build_with_info(game, 'bmpt')
+        info.update(visible_barrels=2, road_wheels_per_side=6, missile_tubes=4)
+        return arc, md, info
     arc, md, info = t.build_with_info(game, parts, 'BMPT Terminator (procedural exterior)',
                                     DIMENSIONS, CAMERA, DRIVE_SCALE)
     a = t.Assembly(md)
@@ -131,6 +143,10 @@ def build(game) -> bytes:
 
 
 def check(arc: bytes, host=None) -> dict:
+    if wt.available('bmpt'):
+        result = wt.check(arc, 'bmpt', host)
+        result.update(visible_barrels=2, road_wheels_per_side=6, missile_tubes=4)
+        return result
     result = t.check(arc, parts, host)
     result['visible_barrels'] = 2
     result['road_wheels_per_side'] = 6
@@ -139,7 +155,15 @@ def check(arc: bytes, host=None) -> dict:
 
 
 def animation(game, md=None) -> bytes:
+    if wt.available('bmpt'):
+        return wt.animation(game, 'bmpt', md)
     return t.animation(game, md)
+
+
+def collision_layout() -> dict | None:
+    """What tracked_collision fits each physics proxy to: the model folder's collision groups, None for the
+    procedural model (tracked_collision's own named-part rules)."""
+    return wt.collision_layout('bmpt') if wt.available('bmpt') else None
 
 
 def main(argv: list[str]) -> int:

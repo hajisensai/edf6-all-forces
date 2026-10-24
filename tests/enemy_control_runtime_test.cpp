@@ -94,7 +94,10 @@ bool Restore(NativeLease& lease) noexcept {if(fixtureTargetRestoreFails)return f
 namespace edf41c {bool AimPoint(const void*,float*) noexcept {return false;}}
 namespace enemy_native {
 const NativeProfile fixtureProfile{"FixtureNative",1,1,1,123,45,0x10,Kind::insect,7,4};
-const NativeProfile* Profile(const void*) noexcept {return &fixtureProfile;}
+// A soldier family (enemy_control_binding_order.h): its catalogue lists 跳跃 / 掩体 before its attacks.
+const NativeProfile fixtureSoldier{"Humanoid_Basic",2,2,2,321,45,0x1F9,Kind::humanoid,7,4};
+const NativeProfile* fixtureActive=&fixtureProfile;
+const NativeProfile* Profile(const void*) noexcept {return fixtureActive;}
 bool InstallDeiroiControl() noexcept {return true;}
 bool InstallHumanoidControl() noexcept {return true;}
 bool InstallWalkingControl() noexcept {return true;}
@@ -125,7 +128,7 @@ bool WorldMoveToPad(const NativeLease&,const float*,float,Input*) noexcept {retu
 bool AimToPad(const NativeLease&,float,float,Input*) noexcept {return true;}
 bool RunControlledAiExtension(const NativeLease&,void*,std::uint64_t*) noexcept {return false;}
 bool Capture(void* object,NativeLease* out) noexcept {
-    *out={};out->object=static_cast<unsigned char*>(object);out->profile=&fixtureProfile;out->control=At<const void*>(object,0x30);return true;
+    *out={};out->object=static_cast<unsigned char*>(object);out->profile=fixtureActive;out->control=At<const void*>(object,0x30);return true;
 }
 bool Restore(NativeLease* lease) noexcept {if(fixtureRestoreFails)return false;*lease={};return true;}
 bool RunInput(NativeLease& lease,const Input& input,InputFn original,void* dt,std::uint64_t* out) noexcept {
@@ -138,6 +141,14 @@ bool RunHumanoidInput(NativeLease& lease,const Input& input,InputFn original,voi
 }
 bool ReadAbilityState(const NativeLease&,const NativeAbility&,enemy_control::Ability*) noexcept {return true;}
 unsigned Abilities(const NativeLease&,NativeAbility* out,unsigned cap) noexcept {
+    if(fixtureActive==&fixtureSoldier) {   // the native order: pad buttons 0, 3, 4, 5, 6, then a weapon
+        const NativeAbility soldier[]={
+            {"native_action_0",L"跳跃",0x1,0x1},{"native_action_3",L"进入／退出掩体",0x8,0x8},
+            {"native_action_4",L"举枪瞄准",0x10,0x10},{"native_action_5",L"装备武器齐射",0x30,0x20},
+            {"native_action_6",L"翻滚回避",0x40,0x40},{"fixture_gun",L"武器",0x30,0x30,AbilityKind::humanoidWeapon,nullptr,0}
+        };
+        for(unsigned i=0;out && i<cap && i<6;++i)out[i]=soldier[i];return 6;
+    }
     const NativeAbility list[]={
         {"fixture_pad",L"原生持续攻击",0x10,0x10},
         {"fixture_command",L"原生独立技能",0,0,AbilityKind::objectAction,nullptr,7}
@@ -153,13 +164,16 @@ namespace {
 int checks=0,failures=0;
 void Check(bool pass,const char* label){++checks;if(!pass){++failures;std::printf("FAIL %s\n",label);}}
 void* originalTable[46]{};
-unsigned char owner1[0x3000]{},owner2[0x3000]{},ownerCtrl1[32]{},ownerCtrl2[32]{},pad[4*0xA80]{};
+unsigned char owner1[0x3000]{},owner2[0x3000]{},ownerCtrl1[32]{},ownerCtrl2[32]{};
+// Controller objects (human+0x340): four 0xA80 records, the pad-path flag at +0x2D68 (enemy_control_pad.h).
+alignas(16) unsigned char pad[0x2E00]{},pad2[0x2E00]{};
 std::uint64_t __fastcall NativeUpdate(void*,void*) {++crew::fixtureUpdates;return 77;}
-void Human(unsigned char* object,unsigned char* control,int record) {
+// `localPad` the pad bound to the player (+0x338: P1 0, P2 1), `record` its class's key record (+0xD40: Ranger 0 .. Fencer 3).
+void Human(unsigned char* object,unsigned char* control,int localPad,int record,unsigned char* controller=pad) {
     std::memset(object,0,0x3000);std::memset(control,0,32);
     crew::Put<const void*>(object,0x30,control);crew::Put<LONG>(control,8,1);crew::Put<LONG>(control,12,1);
-    object[0x20]=static_cast<unsigned char>(record+1);
-    object[crew::kHumanPlayer]=1;crew::Put<const void*>(object,crew::kHumanPad,pad);crew::Put<int>(object,0xD40,record);
+    object[0x20]=static_cast<unsigned char>(localPad+1);
+    object[crew::kHumanPlayer]=1;crew::Put<const void*>(object,crew::kHumanPad,controller);crew::Put<int>(object,0xD40,record);crew::Put<int>(object,0x338,localPad);
 }
 void Enemy(unsigned char* object,unsigned char* control) {
     std::memset(object,0,0x3000);std::memset(control,0,32);
@@ -186,12 +200,40 @@ bool PendingStop(const crew::enemy_control::Snapshot& snapshot) noexcept {
     ++crew::fixturePendingCancels;crew::fixturePendingPhase=enemy_control_protocol::Phase::restoring;return true;
 }
 }
+// The user (2026-10-21): 「我怎么左键往右走，右键往后走」. The left button was the catalogue's first entry, a
+// soldier's 跳跃; the right one 进入／退出掩体. The keys now follow the player's: fire, then aim, then the
+// other attacks, the movement actions last.
+void SoldierKeys() {
+    using namespace crew;using namespace crew::enemy_control;
+    auto* owner=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+    auto* target=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
+    unsigned char ownerControl[32]{},targetControl[32]{};Human(owner,ownerControl,0,0);Enemy(target,targetControl);
+    enemy_native::fixtureActive=&enemy_native::fixtureSoldier;
+    Catalogue soldier{};Check(ReadCatalogue(ObjRef::Of(target),soldier) && soldier.abilities.size()==6,"soldier catalogue read");
+    const wchar_t* order[]={L"装备武器齐射",L"举枪瞄准",L"武器",L"跳跃",L"进入／退出掩体",L"翻滚回避"};
+    bool ordered=soldier.abilities.size()==6;
+    for(unsigned i=0;ordered && i<6;++i)ordered=!std::wcscmp(soldier.abilities[i].name,order[i]) &&
+        !std::wcscmp(soldier.native[soldier.abilities[i].channel].name,order[i]);
+    Check(ordered,"keys: fire, aim, the weapon, then jump, cover, roll; each keeps its native channel");
+    Check(EnemyControlBegin(ObjRef::Of(owner),ObjRef::Of(target),soldier.hash,95001,true) && EnemyControlActivate(95001),"soldier lease");
+    HWND window=CreateWindowExW(0,L"STATIC",L"enemy-control soldier keys",0,0,0,0,0,HWND_MESSAGE,nullptr,GetModuleHandleW(nullptr),nullptr);
+    fixtureInputWindow=window;edf::SetInputSource(&FixtureKeys,&FixtureWindow);
+    fixtureHeldKey=VK_LBUTTON;Input lmb{};Sample(*ByLease(95001),lmb);
+    Check(lmb.active[0].id==soldier.abilities[0].id && !std::wcscmp(soldier.abilities[0].name,L"装备武器齐射") && !lmb.active[1].id,
+          "the left mouse button fires (not 跳跃)");
+    fixtureHeldKey=VK_RBUTTON;Input rmb{};Sample(*ByLease(95001),rmb);
+    Check(rmb.active[0].id==soldier.abilities[1].id && !std::wcscmp(soldier.abilities[1].name,L"举枪瞄准"),"the right mouse button aims (not 掩体)");
+    fixtureHeldKey=0;edf::SetInputSource(nullptr,nullptr);DestroyWindow(window);fixtureInputWindow=nullptr;std::memset(pad,0,sizeof(pad));
+    Check(EnemyControlRestore(95001),"soldier lease returned");
+    enemy_native::fixtureActive=&enemy_native::fixtureProfile;
+    VirtualFree(owner,0,MEM_RELEASE);VirtualFree(target,0,MEM_RELEASE);
+}
 void UnreadableSourceRestoration() {
     using namespace crew;using namespace crew::enemy_control;
     auto* owner=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     auto* target=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     auto* ownerControl=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x1000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
-    unsigned char targetControl[32]{};Human(owner,ownerControl,0);Enemy(target,targetControl);
+    unsigned char targetControl[32]{};Human(owner,ownerControl,0,0);Enemy(target,targetControl);
     Put<unsigned>(owner,0x380,0x2840u);
     Catalogue catalogue{};Check(ReadCatalogue(ObjRef::Of(target),catalogue),"unreadable source fixture reads its native catalogue");
     Check(EnemyControlBegin(ObjRef::Of(owner),ObjRef::Of(target),catalogue.hash,90001,true),"unreadable source fixture acquires a real controller lease");
@@ -223,7 +265,7 @@ int main() {
     Check(!ValidInput(relative),"skill input without an absolute view cannot bypass the wire validator");
     originalTable[5]=originalTable[6]=reinterpret_cast<void*>(&NativeUpdate);
     originalTable[8]=reinterpret_cast<void*>(&NativeUpdate);
-    Human(owner1,ownerCtrl1,0);Human(owner2,ownerCtrl2,1);
+    Human(owner1,ownerCtrl1,0,0);Human(owner2,ownerCtrl2,1,1,pad2);
     auto* target1=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     auto* target2=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x3000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     unsigned char targetCtrl1[32]{},targetCtrl2[32]{};
@@ -294,17 +336,41 @@ int main() {
     fixtureInputWindow=CreateWindowExW(0,L"STATIC",L"enemy-control input fixture",0,0,0,0,0,HWND_MESSAGE,nullptr,GetModuleHandleW(nullptr),nullptr);
     Check(fixtureInputWindow!=nullptr,"input fixture owns a hidden message-only window without taking desktop focus");
     edf::SetInputSource(&FixtureKeys,&FixtureWindow);
+    // The pad path (enemy_control_pad.h): each controller's own sticks at its base, whatever the record index.
+    Put<int>(pad,0x2D68,1);Put<int>(pad2,0x2D68,1);
     Put<float>(pad,0x0C,0.75f);Put<float>(pad,0x24,0.5f);pad[0xD0]=1;
-    Put<float>(pad+0xA80,0x0C,-0.5f);Put<float>(pad+0xA80,0x24,0.25f);Put<float>(pad+0xA80,0x3C,0.5f);pad[0xA80+0xD0]=1;
+    Put<float>(pad2,0x0C,-0.5f);Put<float>(pad2,0x24,0.25f);Put<float>(pad2,0x3C,0.5f);pad2[0xA80+0xD0]=1;
     fixtureMapOwner=owner1;Input p1Map{},p2Pad{};Sample(*ByLease(124),p1Map);Sample(*ByLease(secondActive.lease),p2Pad);
     Check(p1Map.move[0]==0 && p1Map.move[2]==0 && !p1Map.active[0].id,"the map owner consumes its own movement and physical trigger");
     Check(p2Pad.move[0]==-0.5f && p2Pad.move[2]==-0.25f && p2Pad.look[0]==0.5f && p2Pad.active[0].id,"P1 map and closing drain cannot swallow P2 native movement look or fire");
     fixtureMapOwner=owner2;Input p1Pad{},p2Map{};Sample(*ByLease(124),p1Pad);Sample(*ByLease(secondActive.lease),p2Map);
     Check(p1Pad.move[0]==0.75f && p1Pad.active[0].id && p2Map.move[0]==0 && !p2Map.active[0].id,"owner-aware input holds also isolate P2 map from P1 controls");
     {
+        // The keyboard path (the user, 2026-10-21: 「我怎么左键往右走，右键往后走，wasd没反应」): the soldier walks with its
+        // record's movement keys and looks with its mouse motion; the pad floats are not its sticks there.
+        fixtureMapOwner=nullptr;Put<int>(pad,0x2D68,0);Put<int>(pad2,0x2D68,0);pad[0xD0]=0;pad2[0xA80+0xD0]=0;
+        Put<float>(pad,0x0C,1.0f);Put<float>(pad,0x24,1.0f);Put<float>(pad,0x3C,1.0f);
+        Input idle{};Sample(*ByLease(124),idle);
+        Check(idle.move[0]==0 && idle.move[2]==0 && idle.look[0]==0,"keyboard path: the pad floats a mouse button sets move and turn nothing");
+        pad[0x610]=1;Input forward{};Sample(*ByLease(124),forward);
+        Check(forward.move[2]==1.0f && forward.move[0]==0,"keyboard path: the forward key (W) walks forward");
+        pad[0x610]=0;pad[0x640]=1;pad[0x658]=1;Input backRight{};Sample(*ByLease(124),backRight);
+        Check(backRight.move[2]==-1.0f && backRight.move[0]==1.0f,"keyboard path: back (S) and right (D) as the soldier reads them");
+        pad[0x640]=pad[0x658]=0;pad[0x628]=1;Put<float>(pad,0x66C,12.0f);Put<float>(pad,0x684,-6.0f);Input left{};Sample(*ByLease(124),left);
+        Check(left.move[0]==-1.0f && left.look[0]==0.5f && left.look[1]==-0.25f,"keyboard path: left (A), and the mouse motion over 24 turns the camera");
+        pad[0x628]=0;Put<float>(pad,0x66C,0.0f);Put<float>(pad,0x684,0.0f);
+        pad2[0xA80+0x628]=1;Input p1Keys{},p2Keys{};Sample(*ByLease(124),p1Keys);Sample(*ByLease(secondActive.lease),p2Keys);
+        Check(p2Keys.move[0]==-1.0f && p1Keys.move[0]==0,"keyboard path: each local player's own record, P1's keys never P2's");
+        pad2[0xA80+0x628]=0;std::memset(pad,0,sizeof(pad));
+        // The game's own flag (0x1183D70: movzx eax, byte [rip+rel]; ret) is found from its code.
+        unsigned char code[16]{0x0F,0xB6,0x05,0,0,0,0,0xC3};const int rel=8-7;std::memcpy(code+3,&rel,4);
+        Check(PadFlagAddress(code)==code+8,"the pad-path flag is the byte the function returns");
+        code[7]=0x90;Check(!PadFlagAddress(code),"other code there yields no flag");
+    }
+    {
         // Each attack has its own key: the second attack's key (right mouse button) uses it
         // directly, with no selection and without the first attack.
-        fixtureMapOwner=nullptr;pad[0xD0]=0;pad[0xA80+0xD0]=0;fixtureHeldKey=VK_RBUTTON;
+        fixtureMapOwner=nullptr;pad[0xD0]=0;pad2[0xA80+0xD0]=0;fixtureHeldKey=VK_RBUTTON;
         Snapshot p1{};EnemyControlReadSnapshot(ObjRef::Of(owner1),&p1);
         Ability own[2]{};Check(EnemyControlAbilities(p1,0,own,2)==2,"controlled catalogue readable");
         Input first{},again{};Sample(*ByLease(124),first);Sample(*ByLease(124),again);
@@ -312,11 +378,20 @@ int main() {
         Check(first.active[0].id==own[1].id && first.active[0].phase==(held ? 1u : 2u) && !first.active[1].id,"the second attack's own key uses that attack and nothing else");
         Check(held ? again.active[0].id==own[1].id : !again.active[0].id,"an edge attack is pressed once per key press, a held one stays held");
         fixtureHeldKey=0;Input up{};Sample(*ByLease(124),up);Check(!up.active[0].id,"releasing the key releases the attack");
+        // +0xD40 is the soldier class's key record, not the player (enemy_control_pad.h): P1 as an Air Raider
+        // (record 2) walks with that record's keys and keeps the attack keys; P2 with the Ranger's record 0
+        // (pad 1) still never reads P1's keys.
+        Put<int>(owner1,0xD40,2);Put<int>(owner2,0xD40,0);pad[2*0xA80+0x610]=1;fixtureHeldKey=VK_RBUTTON;
+        Input raider{},p2Ranger{};Sample(*ByLease(124),raider);Sample(*ByLease(secondActive.lease),p2Ranger);
+        Check(raider.move[2]==1.0f && raider.active[0].id==own[1].id,"P1 as an Air Raider (record 2): its record's W and the attack keys");
+        Check(!p2Ranger.active[0].id && p2Ranger.move[2]==0,"P2 with the Ranger's record 0 still never reads P1's keys");
+        fixtureHeldKey=0;pad[2*0xA80+0x610]=0;Input released{};Sample(*ByLease(124),released);Sample(*ByLease(secondActive.lease),p2Ranger);
+        Put<int>(owner1,0xD40,0);Put<int>(owner2,0xD40,1);
         Check(EnemyControlHoldAbility(p1,own[0].id),"the M card holds an attack directly");
         Input card{};Sample(*ByLease(124),card);Check(card.active[0].id==own[0].id,"the card's held row uses its attack");
         Check(EnemyControlHoldAbility(p1,0),"the card lets go");Input none{};Sample(*ByLease(124),none);Check(!none.active[0].id,"no attack after the card lets go");
     }
-    fixtureMapOwner=nullptr;edf::SetInputSource(nullptr,nullptr);DestroyWindow(fixtureInputWindow);fixtureInputWindow=nullptr;std::memset(pad,0,sizeof(pad));
+    fixtureMapOwner=nullptr;edf::SetInputSource(nullptr,nullptr);DestroyWindow(fixtureInputWindow);fixtureInputWindow=nullptr;std::memset(pad,0,sizeof(pad));std::memset(pad2,0,sizeof(pad2));
     Snapshot wrong=secondActive;wrong.ownerHumanKey=reinterpret_cast<std::uintptr_t>(owner1);
     Check(!EnemyControlExit(wrong),"P1 cannot exit P2's lease with a changed UI owner key");
     Check(!EnemyControlSetAbilityHeld(wrong,false),"P1 cannot release P2's UI skill with a mismatched owner card");
@@ -437,5 +512,6 @@ int main() {
     Check(At<LONG>(ownerCtrl1,12)==1 && At<LONG>(ownerCtrl2,12)==1 && At<LONG>(targetCtrl1,12)==1 && At<LONG>(targetCtrl2,12)==1,"all source/target weak references are released exactly once");
     VirtualFree(target1,0,MEM_RELEASE);VirtualFree(target2,0,MEM_RELEASE);
     UnreadableSourceRestoration();
+    SoldierKeys();
     std::printf("enemy control runtime: %d checks, %d failures\n",checks,failures);return failures ? 1 : 0;
 }

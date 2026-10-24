@@ -448,6 +448,8 @@ HUDTEXT(cmdGroupEmpty,L"GROUP %d IS EMPTY (CTRL+%d KEEPS THE SELECTION)",L"编�
         L"編隊 %d 是空的（Ctrl+%d 把目前選擇編入）",L"グループ %d は空（Ctrl+%d で選択中を登録）")
 HUDTEXT(cmdGroupPicked,L"GROUP %d: %d UNIT(S) SELECTED",L"编队 %d：已选 %d 个单位",L"編隊 %d：已選 %d 個單位",L"グループ %d：%d ユニット選択")
 HUDTEXT(cmdSelectedAll,L"SELECTED ALL: %d",L"已全选：%d",L"已全選：%d",L"全選択：%d")
+HUDTEXT(cmdPaceSlowest,L"MARCH: AT THE SLOWEST UNIT'S PACE [P]",L"配速：以最慢单位为基准 [P]",L"配速：以最慢單位為基準 [P]",L"行軍：最も遅い部隊に合わせる [P]")
+HUDTEXT(cmdPaceFull,L"MARCH: EACH AT FULL SPEED [P]",L"配速：各自全速 [P]",L"配速：各自全速 [P]",L"行軍：各自全速 [P]")
 HUDTEXT(cmdQueued,L"%ls QUEUED (%.0f, %.0f): %d UNIT(S)%ls",L"%ls 已排队（%.0f, %.0f）：%d 个单位%ls",L"%ls 已排隊（%.0f, %.0f）：%d 個單位%ls",
         L"%ls 予約（%.0f, %.0f）：%d ユニット%ls")
 // The squads' formations (formation.h Shape, in its order; npcai.cpp, mapcmd.cpp FormationText).

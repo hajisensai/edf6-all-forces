@@ -10,6 +10,7 @@ unsigned char* image=nullptr;
 namespace {
 Config config{};
 int checks=0,failures=0,drawn=0;
+const void* controlling=nullptr;   // EnemyControlReplacesPlayerHud's answer: the soldier controlling an enemy
 const void* scopeSoldier=nullptr;   // HudScopeHoldsCrosshair's answer: the soldier HudDraw drew the field for
 void Check(bool ok,const char* name){++checks;if(!ok){++failures;std::printf("FAIL %s\n",name);}}
 void __fastcall Original(void*,void*,void*){++drawn;}
@@ -29,6 +30,7 @@ unsigned char* PlayerHuman() noexcept{return soldier;}
 bool HumanOnFoot(const unsigned char*) noexcept{return true;}
 bool ReadRound(const unsigned char*,RoundModel* r) noexcept{*r=RoundModel{};return false;}
 bool HudScopeHoldsCrosshair(const void* who) noexcept{return who && who==scopeSoldier;}
+bool EnemyControlReplacesPlayerHud(const void* who) noexcept{return who && who==controlling;}
 }
 bool Matches(unsigned,const unsigned char*,std::size_t) noexcept{return false;}
 
@@ -42,6 +44,11 @@ int wmain() {
     Check(Draws(nullptr),"a crosshair for no soldier is the stock draw's own business");
     scopeSoldier=nullptr;
     Check(Draws(soldier),"the field gone: the crosshair is back");
+    // Controlling an enemy (the user, 2026-10-21: the weapon crosshair stayed): held back for that soldier only.
+    controlling=soldier;
+    Check(!Draws(soldier) && Draws(other),"controlling an enemy: its own soldier's crosshair held back, 2P's stays");
+    controlling=nullptr;
+    Check(Draws(soldier),"control ended: the crosshair is back");
     // A soldier's own open scope (InfantryScopeNow) still holds it back, as before.
     config.enabled=config.infantryScope=true;
     Publish(Published{ObjRef::Of(soldier),InfantryScopeCue{soldier,4.0f,scope::Look::marksman},GetTickCount64()});
