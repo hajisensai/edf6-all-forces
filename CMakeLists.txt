@@ -80,6 +80,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/supportunit.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/route_guide.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41natives.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41before.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/viewdiag.cpp)
 # The DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (src/edf41smalldragon.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/edf41smalldragon.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41insects.cpp)

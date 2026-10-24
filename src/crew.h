@@ -516,6 +516,7 @@ void ResetAirstrikes() noexcept;  // airstrike.cpp
 void ResetBoosters() noexcept;    // booster.cpp
 void ResetShields() noexcept;     // shield.cpp
 void ViewTick() noexcept;         // view.cpp: once a frame, the view distance raised
+void ViewDiagTick() noexcept;     // viewdiag.cpp: once a frame, logs (VIEWDIAG) when the view's eye leaves the map or the near pass's clip breaks
 // view.cpp: while the map view is open (map.cpp, game thread, each frame) the cameras' far clip raised to `farClip` and
 // their near clip to `nearClip` (the depth range for a view from up to 3 km); off: the values from before put back.
 void ViewMapClip(bool on,float farClip,float nearClip) noexcept;

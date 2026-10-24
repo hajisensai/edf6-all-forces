@@ -852,6 +852,7 @@ void SharedFrameTick() noexcept {
     GuardedTick(kStepRescue,&SupportDispatchTick);
     GuardedTick(kStepPlayerJet,&PlayerEjectTick);
     GuardedTick(kStepView,&ViewTick);
+    GuardedTick(kStepView,&ViewDiagTick);   // the grey-map diagnosis (viewdiag.cpp)
     GuardedTick(kStepBoarding,&BoardingTick);
     GuardedTick(kStepDebugSpawn,&DebugSpawnTick);   // riding: the player's own frame may not come (off by default)
     GuardedTick(kStepUltimate,&UltimateTick);       // the ultimate strike's show (ultimate.cpp), on with the plugin off too
