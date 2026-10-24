@@ -143,16 +143,72 @@ def body(name):
     end=min(ends) if ends else positions[fbase+struct.unpack_from('<I',blob,of)[0]]
     return instructions[start:end]
 
+def pushed(name):
+    return [bvm41._wstr(blob,pool+x[3]) for x in body(name) if x[1]==bvm41.OP_PUSHS]
+
+# The attacks the original boss actually uses: what its selectors (called by
+# AiAttack_Fire per phase) jump to. Other AiAttack_* bodies are never reached.
+start_of={at:fn for fn,at in functions}
+fire_calls={start_of.get(positions.get(x[0]+x[3])) for x in body('AiAttack_Fire') if x[1]==bvm41.OP_CALL}
+assert fire_calls=={'SelectAttack_Phase1','SelectAttack_Phase2','SelectAttack_Phase3'},fire_calls
+selected=set()
+for selector in ('SelectAttack_Phase1','SelectAttack_Phase2','SelectAttack_Phase3'):
+    selected|={s for s in pushed(selector) if s.startswith('AiAttack_')}
+    checks+=1
+assert selected=={'AiAttack_HandBeam','AiAttack_HandHoming','AiAttack_BathingKick','AiAttack_Dive','AiAttack_Meteor'},selected
+for fn in ('AiAttack_HandSpear','AiAttack_DestroyBeam','AiAttack_Genocide'):
+    assert all(fn not in pushed(other) for other,_at in functions if other!=fn),fn # no caller anywhere
+    checks+=1
+moves=(ROOT/'src/enemy_control_boss_moves.h').read_text(encoding='utf-8')
+hand_codes={int(v) for v in re.search(r'kHandBeam=(\d+),kHandHoming=(\d+);',moves).groups()}
 for fn,code in [('AiAttack_HandBeam',4),('AiAttack_HandHoming',5),('AiAttack_HandSpear',6)]:
     xs=body(fn)
     assert any(x[1]==bvm41.OP_PUSH and x[3]==code and xs[i+1][1:4:2]==(bvm41.OP_NAT1,230) for i,x in enumerate(xs[:-1])),fn
-    checks+=1
+    assert (code in hand_codes)==(fn in selected),fn
+    checks+=2
 for fn,state,native in [('AiAttack_DestroyBeam','attack_rollingLazer',101),('AiAttack_BathingKick','attack_bathingKick',102),('AiAttack_Dive','attack_dive',102),('AiAttack_Genocide','attack_genocide',101),('AiAttack_Meteor','attack_meteorite',101)]:
     xs=body(fn)
-    assert state in [bvm41._wstr(blob,pool+x[3]) for x in xs if x[1]==bvm41.OP_PUSHS],fn
+    assert state in pushed(fn),fn
     assert any(x[1]==bvm41.OP_NAT1 and x[3]==native for x in xs),fn
-    assert f'L"{state}"' in source
-    checks+=3
+    assert (f'L"{state}"' in moves)==(fn in selected),(fn,'catalogue must list exactly the selected moves')
+    assert f'L"{state}"' not in source,'the catalogue takes its E516 moves from enemy_control_boss_moves.h only'
+    checks+=4
+# Why the rolling laser crashed: its one MAB animation event drives a part the
+# EDF6 boss does not have. MAB block 0x83 with an animation-event table (u16 +0x0E
+# entries of 0x10 at the records' end +0x18: event array, -, name, count; each
+# event 0x10: name, f32 frame, 0, SGO parameters, each relative to its own row).
+values=sgo.load(data=raw)
+part_names={row[0] for row in values['parts']}
+mab_at=raw.index(b'MAB\0')
+mab=raw[mab_at:]
+def mab_text(at):
+    end=at
+    while mab[end:end+2]!=b'\0\0':end+=2
+    return mab[at:end].decode('utf-16le')
+anim_events={}
+table=struct.unpack_from('<I',mab,0x18)[0]
+for i in range(struct.unpack_from('<H',mab,0xE)[0]):
+    e=table+i*0x10
+    events_at,_unused,name_at,count=struct.unpack_from('<iiiI',mab,e)
+    events=[]
+    for k in range(count):
+        v=e+events_at+k*0x10
+        event_name,frame,_zero,param_at=struct.unpack_from('<ifii',mab,v)
+        params=sgo.load(data=bytes(mab[v+param_at:v+param_at+0x400]))
+        events.append((mab_text(v+event_name),frame,params))
+    anim_events[mab_text(e+name_at)]=events
+assert [(n,round(f,1),p.get('name')) for n,f,p in anim_events['attack_rollingLazer']]==[('parts_action',113.2,'中心砲台')]
+assert '中心砲台' not in part_names,part_names # 中心砲台: the part lookup 4444B0 misses
+assert [n for n,_f,_p in anim_events['attack_genocide']]==['隕石群'] # 隕石群: a second meteor shower
+for state in ('attack_bathingKick','attack_dive'):
+    for n,_f,p in anim_events[state]:
+        if n in ('parts_action','パーツ稼働','パーツ停止'):assert p['name'] in part_names,(state,p)
+checks+=4
+call(0x443BB9,0x4444B0) # parts_action -> part by name
+assert ins(0x444600).op_str=='rbx, r15' and ins(0x444575).op_str=='r15, qword ptr [rdi + 0x17e8]' # a miss yields the list sentinel
+assert ins(0x444641).op_str=='rdx, qword ptr [rbx + 0x48]' # whose payload weak count is then incremented
+checks+=3
+print('E516 original moves',sorted(selected),'; rolling laser event drives a part E516 lacks')
 # ObjectAction4..6 actual dispatch to its weapon state machine.
 for code,site in [(4,0x444CAA),(5,0x444CDA),(6,0x444D07)]:
     assert struct.unpack_from('<I',img,0x444DC4+code*4)[0]==site
