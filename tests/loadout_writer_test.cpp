@@ -176,7 +176,8 @@ void StatusText() {
 }
 
 void WaitDone(VariantGenerator& g) {
-    for(int i=0;i<500 && g.Running();++i)Sleep(20);
+    // Up to a minute: a cmd.exe takes seconds to come and go on a loaded machine (ctest -j, a scanner); done, it stops.
+    for(int i=0;i<3000 && g.Running();++i)Sleep(20);
     Check(!g.Running(),"the stand-in finished");
 }
 
