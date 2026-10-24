@@ -259,6 +259,8 @@ class Store:
     group: int = 0          # nonzero: the barrels of one selectable loadout (not separate R/LB choices)
     barrel: int = 0         # original native holder index this linked barrel replaces
     native_control: bool = False  # original native holder, selectable independently (two belts, one gun)
+    independent_secondary: bool = False  # intrinsic weapon on an unused native secondary input (concurrent with the
+                                         # primary; cycled only among its own kind, never a gun belt)
 
 
 def _local(en: str, ja: str, cn: str, sc: str, kr: str) -> tuple[tuple[str, str], ...]:
@@ -484,7 +486,8 @@ STORES: dict[str, Store] = {
                        Missile('9M120 Ataka', Look('bullet_icbm01', 1.83), burn=12.0, top=550.0, accel=180.0,
                                max_g=20.0, nav=3.0, life=12.0, damage=1200.0, blast=6.0,
                                lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
-                       _local('9M120 Ataka', '9M120 アターカ', '9M120 阿塔卡', '9M120 阿塔卡', '9M120 아타카')),
+                       _local('9M120 Ataka', '9M120 アターカ', '9M120 阿塔卡', '9M120 阿塔卡', '9M120 아타카'),
+                       independent_secondary=True),
     # The BMPT's second belt: its 2A42s are dual-feed guns, HE-FRAG-T (the native belt, tools/make_tracked_combat GUNS)
     # and the 3UBR8 APDS-T the gunner switches to against armour. Two barrels, one choice (group 3, as the flak's);
     # its numbers are make_tracked_combat's (the native gun's own file and muzzles, BMPT_AP_BELT), this template only
@@ -503,7 +506,8 @@ STORES: dict[str, Store] = {
                                 max_g=20.0, nav=3.0, life=12.0, damage=600.0, blast=14.0,
                                 lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
                         _local('9M120F Ataka (thermobaric)', '9M120F アターカ（サーモバリック）', '9M120F 阿塔卡（溫壓）',
-                               '9M120F 阿塔卡（温压）', '9M120F 아타카（열압력）')),
+                               '9M120F 阿塔卡（温压）', '9M120F 아타카（열압력）'),
+                        independent_secondary=True),
     # A tank's / an IFV's coaxial machine gun (COAX_MOUNTS above): fired on its own trigger (src/payload.cpp: the
     # secondary trigger, the main gun staying loaded). The stock Epsilon gunner's machine gun (V_403TANK_MACHINEGUN:
     # SolidBullet01, 6 a round: the lightest round of any stock vehicle gun, a rifle round's; its own tank machine gun
@@ -660,6 +664,12 @@ class GroundVehicle:
     durability: float
     tool: str             # the tool that writes it (tools/<tool>.py)
     setup: tuple[float, ...] | None = None  # native vehicle params when its request template is another vehicle class
+    # What each of `weapons` fires from ('left' / 'right': a gun barrel, the holder on that side's moving barrel bone;
+    # 'missiles': the launcher), in order; empty: the generator's own layout (tools/make_tracked_combat.py slot).
+    slots: tuple[str, ...] = ()
+    # The left / right barrels fire in turn, not together (src/twin_cadence.h): each 'left' weapon is paired with the
+    # 'right' one of the same belt (the k-th left with the k-th right in `weapons`); tools/gen_stores.py kTwinBarrels.
+    alternate: bool = False
 
 
 # A ground vehicle's own camera (game_object_camera_setting, docs/camera-re.md): [0] the point it looks at, [1] the
@@ -670,6 +680,28 @@ class GroundVehicle:
 # ARTILLERY_VIEW_GROUND m ahead of the origin. The plugin's high view (src/highcam.cpp) is the second mode over these.
 ARTILLERY_VIEW_DOWN = (8.0, 20.0)
 ARTILLERY_VIEW_GROUND = (15.0, 45.0)
+
+
+def twin_barrels() -> list[tuple[str, int]]:
+    """The weapon files whose barrels fire in turn (GroundVehicle.alternate) with their pair number (from 1, one per
+    belt): a vehicle's k-th 'left' slot paired with its k-th 'right' (src/twin_cadence.h, tools/gen_stores.py)."""
+    out: list[tuple[str, int]] = []
+    pair = 0
+    for vehicle in GROUND_VEHICLES.values():
+        if not vehicle.alternate:
+            continue
+        if len(vehicle.slots) != len(vehicle.weapons):
+            raise ValueError(f'{vehicle.sgo}: alternate barrels need a slot for every weapon')
+        sides = {side: [w.rsplit('/', 1)[1].upper() for w, s in zip(vehicle.weapons, vehicle.slots) if s == side]
+                 for side in ('left', 'right')}
+        if not sides['left'] or len(sides['left']) != len(sides['right']):
+            raise ValueError(f'{vehicle.sgo}: alternate barrels need a right for every left')
+        for left, right in zip(sides['left'], sides['right']):
+            pair += 1
+            out += [(left, pair), (right, pair)]
+    if len({name for name, _ in out}) != len(out):
+        raise ValueError('a weapon file is in two alternating pairs')
+    return out
 
 
 def camera_view(camera: tuple[list[float], list[float]]) -> dict[str, float]:
@@ -736,7 +768,10 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
                            # its dual-feed guns' APDS belt (one choice for both barrels) and the Ataka's thermobaric
                            # round (2026-10-19; tools/make_tracked_combat.py BMPT_AP_BELT, STORES BMPT_AP / BMPT_ATGMF)
                            'app:/weapon/edf6vc_bmpt_ap_150.sgo', 'app:/weapon/edf6vc_bmpt_ap_r_150.sgo',
-                           'app:/weapon/edf6vc_bmpt_atgmf_4.sgo'), 1600.0, 'make_bmpt'),
+                           'app:/weapon/edf6vc_bmpt_atgmf_4.sgo'), 1600.0, 'make_bmpt',
+                          # the native guns' sides, the missile tubes, the second belt's sides on the same moving
+                          # barrels, the thermobaric missile on the same tubes; the 2A42 pair fires in turn (2026-10-21)
+                          slots=('left', 'right', 'missiles', 'left', 'right', 'missiles'), alternate=True),
     # The drill tank (tools/make_drill.py, src/drill.cpp): the Blacker's class (Vehicle505_Tank, tracks, one weapon
     # holder) in EDF: Iron Rain's drill tank, requested like the Blacker E series; its one weapon fires nothing (the
     # drill is the plugin's: it spins it and bites with DRILL_CHARGE_FILE).

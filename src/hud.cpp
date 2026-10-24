@@ -39,6 +39,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "player_view.h"
+#include "scope_hold.h"
 #include "sight.h"
 #include "turretaim.h"
 #include "vecmath.h"
@@ -593,6 +594,27 @@ void AircraftControls(Line& line,bool keys,int choices,int storeButton,int targe
     if(flares) {
         KeyName(Cfg().playerJetFlareKey,key,32);
         add(keys ? Tx::controlFlares : Tx::controlFlaresKeyboard,key); // the flight path currently has no pad flare binding
+    }
+}
+// A seat with its own secondary (the BMPT): each control's round now with the one key that switches it, the primary's
+// (PlayerJetSwitchKey / LB) and the own secondary's (VehicleSecondarySwitchKey / -Button, XInput bits); a control with
+// one choice shows none. Never "the last used": each key switches its own control (payload.cpp Switch).
+void PayloadControls(Line& line,const PayloadReadout& p) noexcept {
+    Format(line,L"");
+    auto add=[&](Tx text,const wchar_t* key,const wchar_t* name){if(line.text[0])Append(line,L"   ");Append(line,Tr(text),key,name);};
+    wchar_t key[32];
+    if(p.choices>1 && p.picked>=0 && p.picked<p.count) {
+        if(p.keys)KeyName(Cfg().playerJetSwitchKey,key,32);else SeatButtonName(p.switchButton,key,32);
+        add(Tx::controlPrimaryRounds,key,p.entry[p.picked].name);
+    }
+    if(p.ownChoices>1 && p.ownPicked>=0 && p.ownPicked<p.count) {
+        const int mask=p.ownSwitchButton;
+        if(p.keys)KeyName(Cfg().vehicleSecondarySwitchKey,key,32);
+        else wcsncpy_s(key,mask==0x0008 ? Tr(Tx::enemyKeyDpadRight) : mask==0x0004 ? Tr(Tx::enemyKeyDpadLeft) :
+                           mask==0x0001 ? Tr(Tx::enemyKeyDpadUp) : mask==0x0002 ? Tr(Tx::enemyKeyDpadDown) :
+                           mask<=0 ? Tr(Tx::controlUnbound) : L"?",_TRUNCATE);
+        if(!p.keys && mask>0 && (mask&~0x000F))std::swprintf(key,32,Tr(Tx::padButton),mask);
+        add(Tx::controlOwnSecondary,key,p.entry[p.ownPicked].name);
     }
 }
 void JetControls(Line& line,const PlayerJetReadout& j) noexcept {
@@ -2739,6 +2761,16 @@ void ScopeArm(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
 // The optic the player looks through this frame (HudDraw sets it before the vehicle's marks: ScopeShade's field).
 struct ScopeNow { bool on; scope::Field field; float zoom; int zero; };
 ScopeNow scopeNow{};
+// Whose sight field HudDraw drew last, and when (scope_hold.h): the stock crosshair's draw (infantryscope.cpp) reads it
+// from its own pass, so it is published under a lock.
+scopehold::Drawn scopeDrawn{};
+SRWLOCK scopeDrawnLock=SRWLOCK_INIT;
+void PublishScopeDrawn(const void* soldier) noexcept {
+    const scopehold::Drawn d{soldier,soldier ? GetTickCount64() : 0};
+    AcquireSRWLockExclusive(&scopeDrawnLock);
+    scopeDrawn=d;
+    ReleaseSRWLockExclusive(&scopeDrawnLock);
+}
 
 // `reticle`: this gun's sight is GunReticle (the seat's sight gun: StockMarks), its pipper unlabelled (the reticle
 // reads its range).
@@ -3229,7 +3261,7 @@ int StockCells(const StockHudReadout& r,LoadCell* cells,int* picked=nullptr) noe
         const reticle::Style sight=r.arm[i].reticle;
         c.icon=hudcue::ArmIconOf(static_cast<int>(r.arm[i].kind),r.arm[i].lobbed,static_cast<int>(r.arm[i].style),
                                  sight==reticle::Style::cannon || sight==reticle::Style::precision);
-        c.picked=k==a.picked;
+        c.picked=k==a.picked || r.arm[i].ownPick;   // the primary's round and the own secondary's missile, both lit
         c.load=hudcue::CellLoad(r.arm[i].ammo,r.arm[i].reload,r.arm[i].cycleSec,r.arm[i].cycle);
         if(r.arm[i].name[0]) {
             if(r.arm[i].ammo<=0 && r.arm[i].canReload)_snwprintf_s(c.text,_countof(c.text),_TRUNCATE,L"%ls  %ls",r.arm[i].name,l.text);
@@ -3264,7 +3296,8 @@ void StockDockHud(void* drawer,void* ctx,Text* text,const float* vp,float width,
     int pickedCell=-1;
     const int n=StockCells(r,cells,&pickedCell);
     Line controls{};
-    if(payload)AircraftControls(controls,payload->keys,payload->choices,payload->switchButton,0,false,false);
+    if(payload && payload->ownChoices>1)PayloadControls(controls,*payload);
+    else if(payload)AircraftControls(controls,payload->keys,payload->choices,payload->switchButton,0,false,false);
     const LoadoutDock dock=LoadoutDockOf(text,width,height,s,cells,n,controls.text[0] ? 1 : 0);
     StockVehicleHud(drawer,ctx,text,vp,width,height,s,r,x,lines,at,&dock);
     HudRegionText region(text,s,dock.scale,lines,at);
@@ -5475,14 +5508,18 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         EnemyControlHud(drawer,ctx,t,width,height,s,lines,&at);
         const ULONGLONG now=GetTickCount64();
         const sightzoom::Kind sightKind=SightZoomView();
-        const float sightMagnification=SightZoomNow(nullptr);
-        const sightzoom::Mask sightMask=sightzoom::MaskOf(sightKind);
-        // Magnified, or the mounted optic up at 1x in a vehicle's first person (War Thunder's gunner sight).
-        const bool scopeOverlay=(sightMagnification>1.0f || SightZoomMounted(nullptr)) && sightMask!=sightzoom::Mask::none;
+        // Magnified, or the mounted optic up at 1x in a vehicle's first person (War Thunder's gunner sight): one snapshot
+        // of the seat's sight (sightzoom.h ScopeField), the same answer the stock crosshair is held back by.
+        SightScope sight{};
+        const bool scopeOverlay=SightZoomScope(&sight);
+        const float sightMagnification=scopeOverlay ? sight.zoom : 1.0f;
+        const sightzoom::Mask sightMask=sightzoom::MaskOf(sight.kind);
         scopeNow=ScopeNow{};
         {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
-            if(scopeOverlay && now-z.tick<=kFreshMs) {
+            const bool drawn=scopeOverlay && now-z.tick<=kFreshMs;
+            PublishScopeDrawn(drawn ? sight.human : nullptr);   // the stock crosshair gives way to it (scope_hold.h)
+            if(drawn) {
                 ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask==sightzoom::Mask::sensor,lines,&at);
                 // The optic's reticle goes with the weapon's marks (StockMark: ScopeArm), etched across this field.
                 if(sightMask==sightzoom::Mask::round)
@@ -5542,7 +5579,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             int pickedCell=-1;
             const int n=own ? StockCells(snap.stockHud,cells,&pickedCell) : 0;
             Line controls{};
-            if(snap.payload)AircraftControls(controls,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
+            if(snap.payload && snap.payloadHud.ownChoices>1)PayloadControls(controls,snap.payloadHud);
+            else if(snap.payload)AircraftControls(controls,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
             if(!screensOn)HeliStrip(drawer,ctx,t,width,height,s,snap.heliHud.f,snap.heliHud.fuel,nullptr,cells,n,own ? pickedCell : -1,
                       storeSwitched,lines,&at,&controls);
             if(snap.warned && !screensOn)Annunciator(drawer,ctx,t,width,height,s,snap.warn,lines,&at);
@@ -5584,7 +5622,8 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             float controlsBottom=-1.0f;
             if(stockHud) {
                 LoadCell cells[kStockArms];const int n=StockCells(snap.stockHud,cells);Line keys{};
-                if(snap.payload)AircraftControls(keys,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
+                if(snap.payload && snap.payloadHud.ownChoices>1)PayloadControls(keys,snap.payloadHud);
+                else if(snap.payload)AircraftControls(keys,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
                 const auto dock=LoadoutDockOf(t,width,height,s,cells,n,keys.text[0] ? 1 : 0);
                 controlsBottom=dock.top-20.0f*s;
             }
@@ -5634,8 +5673,15 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         DrawLog(shown,count,lines,at,w,h);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
+bool HudScopeHoldsCrosshair(const void* soldier) noexcept {
+    AcquireSRWLockShared(&scopeDrawnLock);
+    const scopehold::Drawn d=scopeDrawn;
+    ReleaseSRWLockShared(&scopeDrawnLock);
+    return scopehold::Holds(d,soldier,GetTickCount64());
+}
 // A new mission (mission.cpp MissionStart): the last mission's vehicles are gone; the next publish is empty.
 void ResetHud() noexcept {
+    PublishScopeDrawn(nullptr);
     for(auto& w:work)w=Work{};
 }
 }  // namespace crew

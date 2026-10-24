@@ -357,6 +357,9 @@ HUDTEXT(boardingHailing,L"CALLED: LANDING  %d m",L"已呼叫：正在降落  %d 
 // Contextual aircraft weapon controls (physical bindings supplied by the flight / payload readout).
 HUDTEXT(controlUnbound,L"unbound",L"未绑定",L"未綁定",L"未割当")
 HUDTEXT(controlStores,L"[%ls] stores",L"[%ls] 切换挂载",L"[%ls] 切換掛載",L"[%ls] 兵装切替")
+// A vehicle with its own secondary (the BMPT): each control's round now and the key that switches it (hud.cpp PayloadControls).
+HUDTEXT(controlPrimaryRounds,L"[%ls] gun: %ls",L"[%ls] 主武器：%ls",L"[%ls] 主武器：%ls",L"[%ls] 主兵装：%ls")
+HUDTEXT(controlOwnSecondary,L"[%ls] missile: %ls",L"[%ls] 副武器：%ls",L"[%ls] 副武器：%ls",L"[%ls] 副兵装：%ls")
 HUDTEXT(controlTarget,L"[%ls] next target",L"[%ls] 切换目标",L"[%ls] 切換目標",L"[%ls] 目標切替")
 HUDTEXT(controlGuns,L"[%ls] switch gun",L"[%ls] 切换火炮",L"[%ls] 切換火砲",L"[%ls] 火砲切替")
 HUDTEXT(controlGatlingHold,L"[%ls] hold: gatling",L"[%ls] 按住：加特林机枪",L"[%ls] 按住：加特林機槍",L"[%ls] 長押し：ガトリング")

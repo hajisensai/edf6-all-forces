@@ -3,6 +3,7 @@
 // declared visual leaf. The original 40 physical bones and CAS stay native.
 #include "crew.h"
 #include "vulcan_rotor.h"
+#include "barrel_recoil.h"
 #include "body506.h"
 #include "layout.h"
 #include "memory.h"
@@ -134,6 +135,8 @@ void __fastcall Build(void* inst,const void* matrix) {
     if(inst && installed) {
         __try { Pose(static_cast<unsigned char*>(inst)-kModelInst506); }
         __except(EXCEPTION_EXECUTE_HANDLER) { Log("VULCAN rotor rejected unreadable native instance"); }
+        // The same last local step for the BMPT's barrels: each one's own recoil on its own shot (barrel_recoil.h).
+        BarrelRecoilPose(static_cast<unsigned char*>(inst)-kModelInst506);
     }
     reinterpret_cast<BuildFn>(image+kBuildWorld)(inst,matrix); // exactly once, for every native 603
 }

@@ -18,7 +18,7 @@ def main() -> int:
         failures.append("CrossDrawHook not found")
     else:
         body = hook.group(0)
-        guard = body.find("EnemyControlReplacesPlayerHud(human))return;")
+        guard = body.find("EnemyControlReplacesPlayerHud(soldier))return;")
         original = body.find("nextCrossDraw(self,a,b);")
         if guard < 0:
             failures.append("the crosshair's draw does not return for a player controlling an enemy")

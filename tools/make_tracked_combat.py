@@ -15,6 +15,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 
+import cockpits
 import dsgo
 import ledger
 import vcobjects as vc
@@ -176,8 +177,9 @@ def gun_sgo(game: vc.Game, kind: str, stock: str, side: str,
 
 
 # Each BMPT holder's part (vehicle weapons in order): the native guns' sides, the missile tubes, then the second belt's
-# sides (on the same moving barrels) and the thermobaric missile (the same tubes).
-BMPT_SLOTS = ('left', 'right', 'missiles', 'left', 'right', 'missiles')
+# sides (on the same moving barrels) and the thermobaric missile (the same tubes). The registry's (GroundVehicle.slots):
+# the plugin's twin-barrel cadence (vcobjects.twin_barrels) pairs the barrels from the same table.
+BMPT_SLOTS = vc.GROUND_VEHICLES['bmpt'].slots
 
 
 def slot(kind: str, index: int) -> str:
@@ -245,11 +247,14 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
     native = list(weapons.items)
     weapons.items = []
     for index, path in enumerate(vehicle.weapons):
-        entry = copy.deepcopy(native[min(index, 1)])
+        side = slot(kind, index)
+        entry = copy.deepcopy(native[1 if side == 'right' else 0 if side == 'left' else min(index, 1)])
         entry.items[0] = path
-        # Both classes require a BodyRecoil variant. A missile and small
-        # autocannons do not need the native heavy hull impulse.
-        entry.items[1] = _node([0.0, 0.0])
+        # Both classes require a BodyRecoil variant. The BMPT's barrels (either belt) keep the native gun mount's
+        # (its kick on every shot: the firing shake the request already has, call_weapons.vehicle_sgo; 2026-10-21
+        # 「开火动画没了」: the entity / test range copy had none); its missiles and the M163's one M61 none.
+        if kind != 'bmpt' or side not in ('left', 'right'):
+            entry.items[1] = _node([0.0, 0.0])
         weapons.items.append(entry)
     setting = r.get('vehicle_weapon_setting')
     if len(setting.items) != 2:
@@ -347,7 +352,10 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
                 raise ValueError(f'{kind}: muzzle left the authored barrel/launcher')
 
 
-def build(root: str, kind: str) -> dict[str, bytes]:
+def authored(root: str, kind: str) -> dict[str, bytes]:
+    """Every file build() writes, checked, before its seats' cockpits are grafted into the model: the authored
+    geometry's contracts (check) are made on this, and readers of the weapons alone (gen_spawn_catalog) need no
+    cockpit."""
     game = vc.Game(root)
     model = model_module(kind)
     vehicle = vc.GROUND_VEHICLES[kind]
@@ -366,6 +374,14 @@ def build(root: str, kind: str) -> dict[str, bytes]:
         files[f'WEAPON/{name(5)}'] = missile_sgo(game, points['missiles'], name(5))
     check(files, kind, game)
     return files
+
+
+def build(root: str, kind: str) -> dict[str, bytes]:
+    """Every file this tool writes, {path under Mods: bytes}: authored() with its seats' first-person cockpits grafted
+    into the model (pylib/cockpits.py; the fits are pylib/cockpit_fits_plugin.py's, by the model's stem), as every
+    generated vehicle's are: without a `vc_eye_<seat>` marker in the model a seat has no first person
+    (src/fp_vehicle.cpp VehicleEye)."""
+    return cockpits.graft_files(vc.Game(root), authored(root, kind))
 
 
 def install(root: str, files: dict[str, bytes], kind: str) -> list[str]:

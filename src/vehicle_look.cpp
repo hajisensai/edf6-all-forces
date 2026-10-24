@@ -49,7 +49,9 @@ bool Offered(const unsigned char* v,bool keys) noexcept {
     const int binding=keys ? c.freeLookKey : c.freeLookButton;
     return binding>0 && !(IsSazabi(v) && (keys ? binding==c.sazabiLockKey : (binding&c.sazabiLockButton)!=0));
 }
-unsigned char* Begin(unsigned char* v,float* saved) noexcept {
+// `turretLook`: the seat the player holds there has the turret camera's own free look (TurretCamFreeLook): this one
+// yields, takes no input and turns no camera (asked before lookLock: it reads the sight, whose Up asks VehicleLookActive).
+unsigned char* Begin(unsigned char* v,float* saved,int turretLook) noexcept {
     if(!cameraReady.load() || !Cfg().enabled) {look=Look{};return nullptr;}
     const auto human=PlayerHuman();
     if(!human || human[kDead] || HumanOnFoot(human) || At<const void*>(human,kHumanVehicle)!=v || v[kDead])return nullptr;
@@ -60,7 +62,7 @@ unsigned char* Begin(unsigned char* v,float* saved) noexcept {
         if(At<const void*>(seat,kSeatRider)!=human || !edf::IsPlayer(human))continue;
         if(!look.vehicle.Is(v) || !look.human.Is(human) || look.seat!=i)look=Look{};
         look.vehicle=ObjRef::Of(v);look.human=ObjRef::Of(human);look.seat=i;
-        look.keys=At<unsigned char>(seat,kPad)==0;look.offered=Offered(v,look.keys);look.seen=GameMs();
+        look.keys=At<unsigned char>(seat,kPad)==0;look.offered=Offered(v,look.keys) && turretLook!=static_cast<int>(i);look.seen=GameMs();
         if(!look.offered){look.yaw=look.pitch=0;look.held=false;return nullptr;}
         if(look.frame!=GameFrame()) {
             look.frame=GameFrame();
@@ -90,9 +92,11 @@ unsigned char* Begin(unsigned char* v,float* saved) noexcept {
 }  // namespace
 
 VehicleLookInput::VehicleLookInput(unsigned char* vehicle) noexcept {
+    int turretLook=-1;
+    __try { if(TurretCamFreeLook(vehicle,0))turretLook=0; } __except(EXCEPTION_EXECUTE_HANDLER){}
     AcquireSRWLockExclusive(&lookLock);
     __try {
-        seat_=Begin(vehicle,saved_);
+        seat_=Begin(vehicle,saved_,turretLook);
         if(seat_){vehicle_=vehicle;ctrl_=At<const void*>(vehicle,kSelfCtrl);}
     } __except(EXCEPTION_EXECUTE_HANDLER){look=Look{};seat_=nullptr;}
     ReleaseSRWLockExclusive(&lookLock);
@@ -108,14 +112,17 @@ bool VehicleLookActive(const void* vehicle) noexcept {
     __try { return Current(s,vehicle) && (s.held || s.yaw!=0 || s.pitch!=0); }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-bool VehicleLookCamera(const unsigned char* human,float* matrix) noexcept {
+bool VehicleLookCamera(const unsigned char* human,float* matrix,bool orbit) noexcept {
     const Look s=ReadLook();
     __try {
         if(human!=s.human.obj || !Current(s,s.vehicle.obj) || (!s.held && s.yaw==0 && s.pitch==0) || !InputAllowed())return false;
-        const float pivot[3]={0,0,0};
+        float pivot[3]={0,0,0};
+        // Third person swings round the vehicle (its origin, kPosition), not round the eye behind it.
+        if(orbit && !OrbitPivot(matrix,reinterpret_cast<const float*>(static_cast<const unsigned char*>(s.vehicle.obj)+kPosition),pivot))pivot[2]=0.0f;
         fpview::M4 base;std::memcpy(base.m,matrix,64);
         // Native camera rows point left, up, forward (firstperson.cpp). Local
-        // negative yaw looks right; retain the seat's pitch/roll and eye position.
+        // negative yaw looks right; retain the seat's pitch/roll. About `pivot` in the camera's frame: the eye itself in
+        // first person, the point ahead level with the vehicle in third person (the eye swings round it at its distance).
         const auto rotated=fpview::Mul(fpview::MotionMatrix(0,0,0,s.pitch,-s.yaw,0,pivot),base);
         if(!fpview::Finite(rotated))return false;
         std::memcpy(matrix,rotated.m,64);

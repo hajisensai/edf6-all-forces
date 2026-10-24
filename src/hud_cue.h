@@ -94,7 +94,8 @@ constexpr float CellLoad(int ammo,float reload,float cycleSec,float cycle) noexc
 
 // The order the loadout strip lays a seat's weapons out in, left to right on the screen (the user, 2026-10-12, a Nix:
 // 「左侧武器放在右边右侧武器放在左边」: the seat lists its right arm's gun first, and the strip drew the list's order). `side`
-// is each weapon's muzzle off the vehicle's middle across the camera's view, m (+ its left: vhud.cpp SideOf; 0 unknown).
+// is each weapon's muzzle off the vehicle's middle across its own bore, m (+ its left: vhud.cpp SideOf; 0 unknown): not
+// across the view, which the free-look key turns round the vehicle (2026-10-21: the strip reordered while looking round).
 // Those more than kSideApart to the left first, then those about the middle, then those to the right, each group in the
 // seat's own order (stable: a turret's stores on one gun keep their R order, and a seat with no muzzle read is as listed).
 constexpr float kSideApart=0.5f;

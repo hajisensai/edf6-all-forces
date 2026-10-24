@@ -14,6 +14,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'pylib')]
 import call_weapons
+import cockpit_fits
+import cockpits
 import calls
 import dsgo
 import make_tracked_combat as combat
@@ -52,6 +54,27 @@ class CatalogContractTests(unittest.TestCase):
         self.assertNotEqual(vc.STORES['BMPT_ATGMF'].weapon.look.model, vc.STORES['BMPT_ATGM'].weapon.look.model,
                             'the rounds one control cycles never look alike')
         self.assertEqual(combat.BMPT_SLOTS, ('left', 'right', 'missiles', 'left', 'right', 'missiles'))
+        # 2026-10-21: both Ataka rounds ride the V603's otherwise unread secondary, alongside the cannons (src/payload.cpp).
+        self.assertEqual([kind for kind, store in vc.STORES.items() if store.independent_secondary], ['BMPT_ATGM', 'BMPT_ATGMF'])
+        self.assertFalse(any(vc.STORES[k].native_control or vc.STORES[k].group for k in ('BMPT_ATGM', 'BMPT_ATGMF')),
+                         'a missile is not alternate cannon ammunition')
+
+    def test_bmpt_barrels_fire_in_turn_by_belt(self) -> None:
+        # 2026-10-21 (「bmpt应该是双炮管轮流开火的」): each belt's left / right barrels are one pair (src/twin_cadence.h),
+        # from the registry's slots, never across belts, never a missile; the M163's one M61 is no twin.
+        self.assertTrue(vc.GROUND_VEHICLES['bmpt'].alternate)
+        self.assertFalse(vc.GROUND_VEHICLES['vulcan'].alternate)
+        self.assertEqual(vc.twin_barrels(), [('EDF6VC_BMPT_L.SGO', 1), ('EDF6VC_BMPT_R.SGO', 1),
+                                             ('EDF6VC_BMPT_AP_150.SGO', 2), ('EDF6VC_BMPT_AP_R_150.SGO', 2)])
+        for name, _pair in vc.twin_barrels():
+            path = next(w for w in vc.GROUND_VEHICLES['bmpt'].weapons if w.rsplit('/', 1)[1].upper() == name)
+            store = vc.store_of(path)
+            self.assertFalse(store and vc.STORES[store[0]].independent_secondary, name)
+        # The C++ table is the registry's (tools/gen_stores.py --check keeps it current).
+        import gen_stores
+        table = gen_stores.render()
+        for name, pair in vc.twin_barrels():
+            self.assertIn(f'{{L"{name}",{pair}}},', table)
 
 
 @unittest.skipUnless((Path(rootcpk.DEFAULT_GAME) / 'Root.cpk').is_file(), 'EDF6 Root.cpk is unavailable')
@@ -59,7 +82,31 @@ class NativeAssetContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.game = rootcpk.default()
-        cls.files = {kind: combat.build(cls.game.root, kind) for kind in combat.KINDS}
+        # The authored files: build() is these with the seats' cockpits grafted (test_build_grafts_each_seats_eye).
+        cls.files = {kind: combat.authored(cls.game.root, kind) for kind in combat.KINDS}
+
+    @unittest.skipUnless(cockpits.assets_present(), 'the cockpit assets (models/cockpits) are unavailable')
+    def test_build_grafts_each_seats_eye(self) -> None:
+        # The user, 2026-10-21: "bmpt和火神炮缺少第一人称". A seat has first person only where its model carries the eye
+        # marker (src/fp_vehicle.cpp VehicleEye: "no cockpit in this seat" otherwise): build() grafts every fitted seat's,
+        # on the bone its fit rides, and leaves the authored files otherwise as they are.
+        for kind in combat.KINDS:
+            with self.subTest(kind=kind):
+                model = combat.model_module(kind)
+                built = combat.build(self.game.root, kind)
+                rel = f'OBJECT/{model.OUT_ARC}'
+                self.assertEqual(set(built), set(self.files[kind]))
+                self.assertEqual({k: v for k, v in built.items() if k != rel},
+                                 {k: v for k, v in self.files[kind].items() if k != rel})
+                fits = cockpit_fits.FITS[model.OUT_ARC.rsplit('.', 1)[0]]
+                arc = mdb.rab_read(built[rel])
+                md = mdb.mdb_read(next(f for f in arc.files if f.name.lower() == model.HOST_MDB).data)
+                for fit in fits:
+                    eye = md.bone_index(f'vc_eye_{fit.seat}')
+                    self.assertGreaterEqual(eye, 0, f'{kind}: seat {fit.seat} has no eye')
+                    self.assertEqual(md.name_of(md.bones[md.bones[eye].parent].name), fit.bone)
+                    world = mdb.bind_world(md)[eye]
+                    self.assertTrue(all(abs(a - b) < 1e-4 for a, b in zip(world[12:15], fit.eye)))
 
     def test_authored_geometry_native_skeleton_and_weapon_muzzles(self) -> None:
         for kind, files in self.files.items():
@@ -151,9 +198,19 @@ class NativeAssetContractTests(unittest.TestCase):
                 model = dsgo.parse(self.files[kind][f'OBJECT/{vc.GROUND_VEHICLES[kind].sgo}.SGO']).root
                 self.assertEqual(len(setup[-1]), len(model.get('vehicle_weapon_setting').items))
                 if kind == 'bmpt':
+                    self.assertEqual(dsgo.to_py(model.get('vehicle_riding_position'))[0][6], 1.0, 'native configurable attack input row is preserved')
                     self.assertEqual(setup[-1][2][1], [0.0, 0.0])
                     self.assertEqual(len(setup[-1][2]), 2, 'missile store has no turret-motor parameters')
                     self.assertEqual(len(dsgo.to_py(model.get('vehicle_setup'))[-1][2]), 2)
+                    # 2026-10-21: every barrel holder (both belts) kicks as the native gun mount does, in the request and
+                    # in the entity alike; the missiles never (the entity/range copy had no firing shake at all).
+                    stock = dsgo.to_py(dsgo.parse(self.game.read('OBJECT', combat.STOCK_VEHICLE)).root.get('vehicle_setup'))[-1]
+                    entity = dsgo.to_py(model.get('vehicle_setup'))[-1]
+                    for index, side in enumerate(vc.GROUND_VEHICLES['bmpt'].slots):
+                        want = stock[1 if side == 'right' else 0][1] if side in ('left', 'right') else [0.0, 0.0]
+                        self.assertEqual(setup[-1][index][1], want, f'request holder {index} ({side})')
+                        self.assertEqual(entity[index][1], want, f'entity holder {index} ({side})')
+                    self.assertNotEqual(stock[0][1], [0.0, 0.0], 'the native gun mount has a kick to keep')
 
     def test_m163_alternate_belts_share_the_visible_moving_barrel(self) -> None:
         vehicle = vc.GROUND_VEHICLES['vulcan']

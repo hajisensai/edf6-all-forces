@@ -278,7 +278,7 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
   （`ownGun`、预瞄圈模式、有解）时，座位第一件武器（瞄准轴转的那门）的准星 / 弹着圈不画，只剩预瞄圈和炮膛十字。
 - 钻头战车：`DrillPanel` 只在这套 HUD 不画时出现；HUD 开着时转速 / 热量是块里的一行，过热进告警行。
 - Nix：`PlayerNixTorso`（`nix.cpp`）的腿朝向 / 躯干方向代替车头 / 炮口画进圆环，扭腰极限画成环外两个刻度，信息行加 TWIST。
-- 红线：`StockVehicleHud=1` 且 HUD 能画（`HudReady`）时，玩家座位的原版瞄准线按 `docs/aim-line-re.md` 第 7 条隐藏；原版准星（屏幕中心的图标）没有动。
+- 红线：`StockVehicleHud=1` 且 HUD 能画（`HudReady`）时，玩家座位的原版瞄准线按 `docs/aim-line-re.md` 第 7 条隐藏；原版准星（屏幕中心的图标）没有动——例外：插件画出车载瞄具视场（放大，或第一人称 1 倍的炮手瞄准镜）时，看瞄具那名士兵的原版准星不画（2026-10-21，`src/scope_hold.h`，见 `docs/feedback-2026-10-21-bmpt-vulcan-fp.md`）。
 
 ### 7.5 需实机确认
 

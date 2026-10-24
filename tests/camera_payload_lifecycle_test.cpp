@@ -19,6 +19,7 @@ ULONGLONG GameMs() noexcept { return clockMs; }
 unsigned char* PlayerHuman() noexcept { return currentHuman; }
 void Log(const char*,...) noexcept {}
 bool MapHoldsKeys() noexcept { return false; }
+bool MapPadState(std::uint16_t* b,std::uint8_t* lt,std::uint8_t* rt) noexcept { *b=0;*lt=*rt=0;return false; }   // no pad here
 bool MapOwnsView() noexcept { return false; }
 bool FirstPersonVehicleView(const void*,unsigned) noexcept { return false; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
@@ -39,6 +40,8 @@ bool AutoTurretReadout(edf::aimlink::TurretReadoutV1*) noexcept { return false; 
 bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1; }
 bool SightZoomMounted(const void*) noexcept{return false;}
+bool SightZoomCanMount(const void*,unsigned) noexcept{return false;}
+bool FirstPersonGunnerSight() noexcept{return false;}
 bool highMode=false;
 bool HighCamOn(const void*) noexcept { return highMode; }
 int cameraReads=0,loftCalls=0;

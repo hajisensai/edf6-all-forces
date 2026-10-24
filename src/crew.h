@@ -97,6 +97,11 @@ struct Config {
     int playerJetBoostKey=0x10;     // ...on the keyboard and mouse: the boost key (a Windows virtual-key code; VK_SHIFT)
     int playerJetBrakeKey=0x11;     // ...and the brake key (VK_CONTROL)
     int playerJetSwitchKey=0x52;    // ...and the key that switches stores ('R'; on a pad LB)
+    // A stock-class vehicle's own secondary weapon (the BMPT's missiles, payload.cpp IndependentSecondary): the key that
+    // switches its round ('T'), and the pad buttons (XInput bits as MapButton's: 8 the d-pad right). The primary's rounds
+    // stay on PlayerJetSwitchKey / LB: each switch one control, whatever was fired last (the user, 2026-10-21: 「学学战雷」).
+    int vehicleSecondarySwitchKey=0x54;
+    int vehicleSecondarySwitchButton=0x08;
     bool playerJetCatch=true;       // ...and after ejecting, another of the same jet catches the player in the air
     int playerJetFlareKey=0x58;     // the key that drops a pair of flares ('X'; missile.cpp FlareDrop)
     int playerJetFlares=8;          // the pairs a player jet carries
@@ -994,6 +999,11 @@ bool SightZoomCanMount(const void* vehicle,unsigned seat) noexcept; // game-thre
 bool SightZoomMounted(const void* vehicle=nullptr) noexcept; // active physical optic; turret input stays native
 // Current validated seat/weapon fire-control surface; none when unavailable or another camera owns the view.
 sightzoom::Kind SightZoomView(const void* vehicle=nullptr) noexcept;
+// The sight's field over the view now (sightzoom.h ScopeField, from one snapshot of the seat's cue): the vehicle, the
+// soldier looking through it, its fire-control surface and magnification; false (all empty) with none, or while another
+// camera owns the view. hud.cpp draws the field by it, and so holds the stock crosshair back for that soldier.
+struct SightScope { const void* vehicle=nullptr; const void* human=nullptr; sightzoom::Kind kind=sightzoom::Kind::none; float zoom=1.0f; };
+bool SightZoomScope(SightScope* out) noexcept;
 // The sight's range setting (sightzoom.h kZeroStep..; 0 the bore line) and the superelevation, rad, it lays the line of
 // sight under the bore for the weapon looked through now; any thread, 0 with no magnified optic.
 int SightZoomRange(const void* vehicle=nullptr,float* angle=nullptr) noexcept;
@@ -1022,6 +1032,11 @@ bool TurretCamLarge(const void* vehicle) noexcept;
 // turned that seat's aim itself in its last step (not another plugin's hand): nix.cpp then leaves the torso's yaw to it.
 bool TurretCamTurret(const void* vehicle,unsigned seat) noexcept;
 bool TurretCamSteers(const void* vehicle) noexcept;
+// TurretCamFreeLook: the free-look key in `vehicle`'s seat `seat` is the turret camera's own (War Thunder's: the view
+// swings round the vehicle on the rig, the turret holds the point it was on and the HUD keeps that point's circle,
+// TurretMark): seat 0 of the turret it places, in third person, the optic not up. vehicle_look.cpp yields to it there
+// (the user, 2026-10-21: "鼠标中键的时候应该是绕着车转…战雷一样的那个圆的鼠标指示点怎么没了").
+bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept;
 void ResetTurretCam() noexcept;
 // The player's turret against their view (hud.cpp's marker; any HUD may draw it), fresh within 200 ms while the camera
 // is decoupled or looking round: `aim` the point the turret is sent to (under the screen's centre, or the one it holds
