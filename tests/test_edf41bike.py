@@ -218,6 +218,24 @@ class Native(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'lacks vehicle503_bike_driver'):
             bike.pose_fit(self.games, (9 | 2, 15))
 
+    def test_sdl1_models_are_4_1s_own_requests(self) -> None:
+        # Every 4.1 request that drops the 408 is one of SDL1_MODELS, with that request's own armour and VehicleBike block.
+        table = sgo.read(self.games.read4('WEAPON/_WEAPONTABLE.SGO'))[1]['table']
+        found = {}
+        for row in sgo.plain(table):
+            name = str(row[1]).replace('\\', '/').rsplit('/', 1)[-1].upper()
+            if not name.endswith('.SGO') or 'WEAPON/' + name not in self.games.in4:
+                continue
+            members = sgo.read(self.games.read4('WEAPON/' + name))[1]
+            acp = sgo.plain(members.get('Ammo_CustomParameter'))
+            if (isinstance(acp, list) and len(acp) > 4 and isinstance(acp[4], list) and len(acp[4]) > 3
+                    and str(acp[4][2]).lower().endswith('vehicle408_motorbike.sgo')):
+                found[name] = (acp[4][3][0], acp[4][3][1])
+        self.assertEqual(found, {k: (v[1], v[2]) for k, v in bike.SDL1_MODELS.items()})
+        drives = [bike.car_drive(v[2]) for v in bike.SDL1_MODELS.values()]
+        self.assertEqual(drives[0], bike.CAR_DRIVE)
+        self.assertEqual(len({tuple(d) for d in drives}), 5)   # every model drives differently
+
     def test_shipped_object_is_this_generator_output(self) -> None:
         # The installer ships edf41port/objects, not a fresh build: the 2026-10-21 fixes (gun row 0, fall-out [1])
         # were in the generator but never regenerated into the shipped SGO, which kept the hovering, pinned 408.

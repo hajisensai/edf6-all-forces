@@ -35,6 +35,42 @@ CAR_TEMPLATE = 'OBJECT/V512_KEITRUCK.SGO'
 # (four numbers, [2.0, 0.9, 30, 100] in the first request): given to the Car the gear table was scaled by 0.9 / 30
 # instead of 30 / 0.0075, the steering rates became 100 / 0 and the traction factors 0 (2026-10-19 static review).
 CAR_DRIVE = [0.8, 30.0, 0.0075, 0.7, 0.075, 0.3, 0.6]
+# The SDL1 models (2026-10-25: 「没做完的根本性做完」). In 4.1 every SDL1 request drops the same VEHICLE408_MOTORBIKE.SGO
+# and the model is only the request's own setup: [0] armour, [1] VehicleBike's four numbers, [2] the gun. VehicleBike
+# (vtable 0xAA0670 slot 29 0x2F55D0 -> 0x2D06E0 -> 0x2D07E0, EDF41.exe) is Havok's vehicle kit: [1][0] -> every gripping
+# wheel's friction (hkpVehicleData wheel +0x0C, maxFriction +0x14 = 2x; a 0 wheel, the sidecar's, is left 0), [1][1]
+# -> its slip angle (+0x18), [1][2] -> the top speed (0x2D19F0: +0x1190, and the primary transmission ratio from it,
+# 0x660640 = maxRPM / (speed x k / radius) / top gear: wheel torque ~ 1 / speed), [1][3] -> the engine's max torque
+# (engine +0x1C). The models, by their 4.1 request file (armour, block; checked against 4.1 by tests/test_edf41bike.py):
+SDL1_MODELS: dict[str, tuple[str, list[float], list[float]]] = {
+    'WEAPON688.SGO': ('SDL1', [1.5, 1.5], [2.0, 0.9, 30.0, 100.0]),
+    'WEAPON700.SGO': ('SDL1 Bad Custom', [1.8, 1.8], [0.25, 0.9, 30.0, 100.0]),
+    'WEAPON721.SGO': ('SDL1 Type R', [5.0, 5.0], [2.0, 1.25, 30.0, 225.0]),
+    'WEAPON739.SGO': ('SDL1 Type Z', [10.5, 10.5], [2.0, 1.2, 50.0, 250.0]),
+    'WEAPON753.SGO': ('SDL1 Burst Turbo', [22.0, 22.0], [2.0, 1.2, 60.0, 400.0]),
+}
+BASE41 = SDL1_MODELS['WEAPON688.SGO'][2]   # the plain SDL1: the model CAR_DRIVE stands for
+
+
+def car_drive(block41: object) -> list[float]:
+    """The Car drive block (CAR_DRIVE's seven numbers) of a 4.1 SDL1 request's VehicleBike block, relative to the plain
+    SDL1 (BASE41 -> CAR_DRIVE, the block every 408 drove with until now): [0] grip scales EDF6's friction ([0] scales
+    car_base_brake_and_friction [2..4], 0x66EEC0 over +0x17B0..+0x17B8; the brakes [0..1] stay), the top speed
+    scales [1] (the gear table's speeds, 0x66E1A0), and the wheel force [2] (the gears' drive, independent of [1] in
+    EDF6) by torque / top speed as 4.1's transmission makes it. The slip angle [1][1] has no Car counterpart that was
+    found and is not mapped; steering and traction stay the chassis'."""
+    b = sgo.plain(block41)
+    if (not isinstance(b, list) or len(b) != 4 or not all(isinstance(x, (int, float)) for x in b)
+            or min(b[0], b[2], b[3]) <= 0):
+        raise ValueError(f'not a 4.1 VehicleBike drive block: {b!r}')
+    grip, _slip, speed, torque = (float(x) for x in b)
+    out = list(CAR_DRIVE)
+    out[0] = CAR_DRIVE[0] * grip / BASE41[0]
+    out[1] = CAR_DRIVE[1] * speed / BASE41[2]
+    out[2] = CAR_DRIVE[2] * (torque / BASE41[3]) * (BASE41[2] / speed)
+    return [round(x, 6) for x in out]
+
+
 # The rider's pose per seat: the seat locator's MAB Animation, played by name on the rider's own CAS (HumanBase
 # 0x57AE8E -> 0x116C2D0, docs/all-classes-ride-re.md §3). The driver straddles the bike as on EDF6's own motorbike
 # (V503 Freed's seat: vehicle503_bike_driver, in the Ranger's and the Air Raider's CAS, the classes 4.1's driver seat

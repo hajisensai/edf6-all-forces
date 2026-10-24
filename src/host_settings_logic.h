@@ -37,7 +37,8 @@ enum : std::uint32_t {
     kFeatBikeGunMount=128u,    // the 408's seat-1 gun is built at all (edf41bike.cpp's gate over 0x65B15A): without it a
                                // build's gunner seat had no weapon and an unturnable Aim; the seat opens only with both
     kFeatBikeRide=256u,        // the 408 as its 4.1 rows say: rear-wheel drive with a free sidecar wheel, the driver on
-                               // EDF6's bike pose; and the shipped SGO is the generator's, so the 64 bit's data is in it
+                               // EDF6's bike pose, each SDL1 model's request with its own grip / top speed / torque
+                               // (edf41bike.car_drive); and the shipped SGO is the generator's, so the 64 bit's data is in it
                                // (builds 64 / 128 shipped the keyframed gun still: docs/edf41-bike-re.md 2026-10-25)
 };
 inline constexpr std::uint32_t kFeatures=kFeatHostSettings|kFeatCreditReload41|kFeatBikeCarDrive|kFeatBikeGunner|
