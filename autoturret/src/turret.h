@@ -181,6 +181,8 @@ struct Track {
     float geo[2];
     float geoSign[2];      // 0 = not yet set
     bool geoValid;
+    float parentAxis[2];   // seat 0's (the main turret's) yaw / pitch angle last frame: the sign is learned only while
+                           // they hold still (gunner.cpp ReadAim)
     bool firing;           // the AI held the trigger last frame
     unsigned pulls;        // trigger pulls since the last log line
     unsigned stale;        // ... of which the previous pull was still unread (the gun is not updating)
@@ -207,6 +209,18 @@ inline float Wrap(float a) noexcept {
     while(a>kPi)a-=2*kPi;
     while(a<-kPi)a+=2*kPi;
     return a;
+}
+
+// A gunner seat's axis sign (gunner.cpp ReadAim): the axis turned `moved`, the barrel `turned` (in the hull's frame) since
+// the last frame. A ratio near +-1 pulls the sign a fifth of the way toward it; nothing is learned from a frame the main
+// turret (seat 0) turned (`parentStill` false): a gun hung on it turns with it in the hull's frame while its own axis
+// does not, and that ratio is no measure of the axis' sign.
+constexpr float kParentStill=1e-4f;   // rad a frame: seat 0's axes this still count as not turning
+inline float LearnSign(float sign,float moved,float turned,bool parentStill) noexcept {
+    if(!parentStill || !(std::fabs(moved)>0.002f))return sign;
+    const float ratio=turned/moved;
+    if(!(std::fabs(ratio)>0.3f && std::fabs(ratio)<3.0f))return sign;
+    return sign+0.2f*((ratio>0.0f ? 1.0f : -1.0f)-sign);
 }
 
 void Log(const char* format,...) noexcept;

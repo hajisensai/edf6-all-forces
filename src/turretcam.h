@@ -152,6 +152,24 @@ inline bool Foreign(int steers,const float* in,const float* stick,float tol) noe
     if(steers>=0)return steers!=0;
     return std::fabs(in[0]-stick[0])>tol || std::fabs(in[1]-stick[1])>tol;
 }
+// Where along the screen centre's line (from `eye`, unit `dir`) the turret's aim point is looked for (the user,
+// 2026-10-25: "坦克的炮管会360度动"). The line starts at the camera's requested eye, which sits `reach` m behind the rig's
+// point O (the look-at, over the turret's yaw axis) and is placed before the game's own camera collision (0xF6760) pulls
+// it in front of what stands between: a wall, a slope or a building behind the vehicle meets that stretch first. Taken
+// as the aim point, it lies behind the turret, so the turret's want is the view's heading + 180 deg; as the view turns
+// the hit slides along the obstacle a few metres from the yaw axis and the want sweeps round, the turret chasing it in
+// full circles. What the line can mean as a target is only what lies ahead of the turret: from O, or from the point of
+// the line nearest the turret's pivot (`pivot`, may be null) when that is farther. Never behind the eye (0 at least).
+inline float ViewRayStart(const float* eye,const float* dir,float reach,const float* pivot) noexcept {
+    float t=std::isfinite(reach) && reach>0.0f ? reach : 0.0f;
+    if(pivot) {
+        const float d[3]={pivot[0]-eye[0],pivot[1]-eye[1],pivot[2]-eye[2]};
+        const float along=vec::Dot(d,dir);
+        if(std::isfinite(along) && along>t)t=along;
+    }
+    return t;
+}
+
 // Whether the gun's round (its low arc) goes through the view point, else the gun's bore line: only for a real hit
 // (ground, a building, a target under the screen's centre) outside the lead-circle mode. The lead circle already solved
 // the arc (the bore line must pass through it: raising the gun again for the drop drops nothing twice), and a view

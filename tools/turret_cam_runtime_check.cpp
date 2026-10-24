@@ -63,9 +63,15 @@ bool CameraRay(float* eye,float* dir) noexcept {
 }
 bool terrain=true;
 float floorY=-25.0f;
+bool wall=false;float wallZ=0.0f;   // a wall across the world at z = wallZ (a building behind the vehicle)
 float MapRay(const float* from,const float* to,float* hit) noexcept {
-    if(!terrain || from[1]<floorY || to[1]>floorY || from[1]==to[1])return -1.0f;
-    const float t=(floorY-from[1])/(to[1]-from[1]);
+    float t=2.0f;
+    if(terrain && from[1]>=floorY && to[1]<=floorY && from[1]!=to[1])t=(floorY-from[1])/(to[1]-from[1]);
+    if(wall && from[2]!=to[2]) {
+        const float w=(wallZ-from[2])/(to[2]-from[2]);
+        if(w>=0.0f && w<t)t=w;
+    }
+    if(t>1.0f)return -1.0f;
     for(int i=0;i<3;++i)hit[i]=from[i]+t*(to[i]-from[i]);
     return vec::Dist(from,hit);
 }
@@ -436,6 +442,23 @@ void Run() {
         Check(game.hasAim && game.aimHit && game.aim[0]==12 && game.aim[2]==400,"AUTO with a lock: the turret goes to the lead point");
         leadOn=false;TurretCamFrame(vehicle);
         Check(game.hasAim && !(game.aim[0]==12 && game.aim[2]==400),"no lock: the screen's centre again");
+        // 2026-10-25 ("坦克的炮管会360度动"): the requested eye is placed before the game's camera collision, so a wall
+        // between it and the rig's point (here 10 m behind the turret, the eye 20 m back) is met first along the screen
+        // centre's line. That point is behind the turret: its want is the view's heading + 180 deg and the turret turns
+        // round to it. The aim point is looked for ahead of the rig's point only.
+        {
+            const float wallEye[3]={0,5,-20},wallLook[3]={0,4,0};
+            wall=true;wallZ=-10.0f;
+            PublishNormalRay(seat,shared.take,wallEye,wallLook);TurretCamFrame(vehicle);
+            Check(game.hasAim && game.aimHit && game.aim[2]>0.0f && std::fabs(game.aim[1]-floorY)<1e-3f,
+                  "a wall between the requested eye and the turret is never the turret's aim point");
+            float yawWant[2];const float level[9]={1,0,0,0,1,0,0,0,1};
+            Check(Wants(seat,level,game.aim,false,yawWant) && std::fabs(yawWant[0])<0.1f,
+                  "with a wall behind the vehicle the turret's yaw want stays on the view's heading (no 180 deg turn)");
+            wallZ=50.0f;PublishNormalRay(seat,shared.take,wallEye,wallLook);TurretCamFrame(vehicle);
+            Check(game.hasAim && game.aimHit && std::fabs(game.aim[2]-50.0f)<1e-3f,"a wall ahead of the turret is still a real target");
+            wall=false;
+        }
         const int asked=leadAsks;highOn=true;TurretCamFrame(vehicle);
         Check(leadAsks==asked+1 && !game.hasAim,"the high view still asks (the lock is kept) but steers nothing");
         highOn=false;Put<void*>(seat,kSeatWeapons,holders);Put<std::uint64_t>(seat,kSeatWeaponCount,2);

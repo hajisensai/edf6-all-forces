@@ -232,19 +232,29 @@ bool ReadAim(const unsigned char* vehicle,const unsigned char* seat,const Gun& g
     float local[3];ToFrame(Frame(vehicle),gun.dir,local);
     Angles(local,aim.barrel);
     if(!AllFinite(aim.angle,2) || !AllFinite(aim.min,2) || !AllFinite(aim.max,2) || !AllFinite(aim.barrel,2))return false;
+    // The main turret's (seat 0's) axes: a side gun hung on it (under cannon_main) turns in the hull's frame with it.
+    float parent[2]={0.0f,0.0f};
+    const unsigned char* const main=edf::SeatAt(const_cast<unsigned char*>(vehicle),0);
+    if(main && main!=seat && Readable(main+kSeatAim+kAimAxes,kAxisStride+kAxisAngle+4))
+        for(int a=0;a<2;++a)parent[a]=At<float>(main+kSeatAim+kAimAxes+a*kAxisStride,kAxisAngle);
+    if(!AllFinite(parent,2))parent[0]=parent[1]=0.0f;
     // Learn each axis' sign from the barrel's own motion: the pivot geometry is the model's, and a
-    // wrong guess would drive the gun into its stop and keep it there.
+    // wrong guess would drive the gun into its stop and keep it there. The barrel is measured in the hull's frame, so a
+    // frame the main turret turned is no measurement of this axis: its turn is in `turned` and not in `moved` (the user,
+    // 2026-10-25, "坦克的炮管会360度动": the main turret slewing one way while the side gun turns the other gave a ratio
+    // of (m - s) / m < 0, the sign flipped within four frames and the gun drove away from its target round its whole
+    // circle, the error growing, while the main turret kept turning). Learned only on frames it held still.
+    const bool parentStill=track.geoValid && std::fabs(Wrap(parent[0]-track.parentAxis[0]))<kParentStill &&
+                           std::fabs(parent[1]-track.parentAxis[1])<kParentStill;
     const float initial[2]={cfg.gunnerYawSign,cfg.gunnerPitchSign};
     for(int a=0;a<2;++a) {
         if(track.geoSign[a]==0.0f)track.geoSign[a]=initial[a]>=0.0f ? 1.0f : -1.0f;
-        const float moved=aim.angle[a]-track.geoAxis[a];
-        const float turned=a==0 ? Wrap(aim.barrel[a]-track.geo[a]) : aim.barrel[a]-track.geo[a];
-        const float ratio=std::fabs(moved)>0.002f ? turned/moved : 0.0f;
-        if(track.geoValid && std::fabs(ratio)>0.3f && std::fabs(ratio)<3.0f)
-            track.geoSign[a]+=0.2f*((ratio>0.0f ? 1.0f : -1.0f)-track.geoSign[a]);
+        track.geoSign[a]=LearnSign(track.geoSign[a],aim.angle[a]-track.geoAxis[a],
+                                   a==0 ? Wrap(aim.barrel[a]-track.geo[a]) : aim.barrel[a]-track.geo[a],parentStill);
         track.geoAxis[a]=aim.angle[a];track.geo[a]=aim.barrel[a];
         aim.sign[a]=track.geoSign[a]>=0.0f ? 1.0f : -1.0f;
     }
+    track.parentAxis[0]=parent[0];track.parentAxis[1]=parent[1];
     track.geoValid=true;
     return true;
 }

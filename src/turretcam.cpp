@@ -112,6 +112,7 @@ struct Shared {
     bool normalRay;            // the normal rig request, never the last HUD/render camera
     unsigned rayTake;
     float normalEye[3],normalDir[3];
+    float normalReach;         // m from normalEye to the rig's point O along normalDir (tcam::ViewRayStart)
     bool steering;             // the aim's last step had the camera's command (not the stick's, not another plugin's)
     bool highView;             // the aim hook is observing the projectile, with native gun input
     bool observing;            // camera still showing the shot or blending away from it (camera thread publishes)
@@ -300,19 +301,24 @@ void PublishNormalRay(const unsigned char* seat,unsigned take,const float* eye,c
     AcquireSRWLockExclusive(&lock);
     if(shared.seat==seat && shared.take==take && !shared.high && !shared.observing) {
         shared.normalRay=valid;shared.resume=!valid;shared.rayTake=take;
-        if(valid){std::memcpy(shared.normalEye,eye,12);std::memcpy(shared.normalDir,dir,12);}
+        if(valid){std::memcpy(shared.normalEye,eye,12);std::memcpy(shared.normalDir,dir,12);shared.normalReach=vec::Dist(eye,look);}
     }
     ReleaseSRWLockExclusive(&lock);
 }
-// The normal rig's centre: first real map hit, else kAimFar along this owned request. The rendered HUD cache has
-// neither the source nor the take of its camera and is intentionally never a control input here.
-bool AimPoint(const Shared& s,float* p,bool* hit) noexcept {
+// The normal rig's centre: first real map hit ahead of the turret (tcam::ViewRayStart: never the stretch between the
+// requested eye and the rig's point, which lies behind the turret), else kAimFar along this owned request. The rendered
+// HUD cache has neither the source nor the take of its camera and is intentionally never a control input here.
+// `pivot`: the turret's yaw centre (TurretPivot), or null.
+bool AimPoint(const Shared& s,const float* pivot,float* p,bool* hit) noexcept {
     float at[3];const float* eye=s.normalEye;const float* dir=s.normalDir;
     *hit=false;
     if(!s.normalRay || s.resume || s.rayTake!=s.take)return false;
+    const float start=tcam::ViewRayStart(eye,dir,s.normalReach,pivot);
+    const float from[3]={eye[0]+dir[0]*start,eye[1]+dir[1]*start,eye[2]+dir[2]*start};
     const float end[3]={eye[0]+dir[0]*kSightFar,eye[1]+dir[1]*kSightFar,eye[2]+dir[2]*kSightFar};
-    if(MapRay(eye,end,at)>=0.0f && vec::Dist(eye,at)<=kSightFar){std::memcpy(p,at,12);*hit=true;return true;}
-    for(int i=0;i<3;++i)p[i]=eye[i]+dir[i]*kAimFar;
+    if(start<kSightFar && MapRay(from,end,at)>=0.0f && vec::Dist(eye,at)<=kSightFar){std::memcpy(p,at,12);*hit=true;return true;}
+    const float fallback=std::fmax(kAimFar,start);
+    for(int i=0;i<3;++i)p[i]=eye[i]+dir[i]*fallback;
     return true;
 }
 
@@ -856,7 +862,14 @@ void TurretCamFrame(unsigned char* v) noexcept {
     AcquireSRWLockShared(&lock);
     const Shared normalSource=shared;
     ReleaseSRWLockShared(&lock);
-    game.hasAim=!high && !observing && !external && AimPoint(normalSource,game.aim,&game.aimHit);
+    // The turret's yaw centre for the aim point's search (AimPoint): the bore's point nearest the look-at bone.
+    float pivot[3];bool pivotOk=false;
+    {
+        const unsigned char* gun=TurretGun(v,seat);
+        float muzzle[3],dir[3];
+        if(gun && edf::MeanMuzzle(gun,16,muzzle,dir))pivotOk=TurretPivot(seat,muzzle,pivot);
+    }
+    game.hasAim=!high && !observing && !external && AimPoint(normalSource,pivotOk ? pivot : nullptr,game.aim,&game.aimHit);
     // The one player turret aim (aimlink.h V4, turretaim.cpp): asked every frame so its bindings and lock stay current
     // through the high view and the optic too; in AUTO with a lock the turret goes to where the round meets the target,
     // through the same arc solve (Wants) as the screen's centre, the view staying the player's.
