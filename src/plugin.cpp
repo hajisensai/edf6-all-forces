@@ -40,6 +40,7 @@
 #include "memory.h"
 #include "subcarrier.h"
 #include "enemy_control.h"
+#include "greyboss_parts.h"
 #include "enemy_control_net.h"
 #include "enemy_control_legacy.h"
 #include "enemy_control_weapon_aim.h"
@@ -1252,7 +1253,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("ENEMY CONTROL native hooks=%d",InstallEnemyControl());
     Log("ENEMY CONTROL legacy adapters=%d",InstallEnemyControlLegacy());
     Log("ENEMY CONTROL network bridge=%d",InstallEnemyControlNetwork());
-    InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
+    // E516's part events: a name the boss has no part for acts on none (the stock lookup reads past its map's end)
+    Log("GREYBOSS part events by name checked=%d",InstallGreyBossParts());
+    InstallMap();          // the map view (the player's camera overhead, their input held while it is open)
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
