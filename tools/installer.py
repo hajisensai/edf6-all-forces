@@ -42,6 +42,8 @@ plugin (GENERATOR) hidden, and that makes only the variant files not there yet, 
 from __future__ import annotations
 
 import contextlib
+import functools
+import importlib
 import os
 import re
 import sys
@@ -375,7 +377,15 @@ def retire_weapons(game: str) -> bool:
     objects. False: cancelled, nothing changed."""
     import call_weapons
     try:
-        call_weapons.uninstall(game)
+        # Rows past the game's own 0x800 weapon records go (call_weapons.past_room): without the plugin the game would
+        # write past its records for each. A save with one of them equipped crashes once its row is gone.
+        past = call_weapons.past_room_rows(game)
+        if past:
+            print(f'武器表有 {call_weapons.NATIVE_WEAPONS + len(past)} 行，没有插件时游戏只能记录 {call_weapons.NATIVE_WEAPONS} 把武器：'
+                  f'卸载要删掉最后 {len(past)} 行（{", ".join(past[:6])}{" ……" if len(past) > 6 else ""}），否则游戏会写坏内存。')
+            if ask('请先在每个存档里卸下这些武器（装备着的存档在删行后会闪退）。已卸下输入 y 继续；其它 = 取消：').lower() != 'y':
+                return False
+        call_weapons.uninstall(game, unequipped=bool(past))
         return True
     except call_weapons.Misaligned as e:
         repairable = misaligned(game, e)
@@ -387,6 +397,11 @@ def retire_weapons(game: str) -> bool:
     if choice == 'y' and repairable:
         repair_weapons(game)
         return True
+    if choice == 's':
+        rows = len(call_weapons.row_ids(call_weapons.base(game, call_weapons.TABLE)))
+        if rows > call_weapons.NATIVE_WEAPONS:   # the table left as it is, without the plugin: the game writes past
+            print(f'不能跳过：武器表有 {rows} 行，没有插件时游戏只能记录 {call_weapons.NATIVE_WEAPONS} 把武器，会写坏内存。')
+            return False
     return choice == 's'
 
 
@@ -496,8 +511,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_edf5_campaign
     import make_emc
     import make_ultimate
-    import make_vulcan
-    import make_bmpt
+    import make_tracked_combat
     import make_chute
     import make_jets
     import edf41_objects
@@ -544,8 +558,9 @@ def install(game: str, campaign_requested: bool = False) -> None:
     drill = build_asset(cache, make_drill, '钻头战车')
     emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
     ult = build_asset(cache, make_ultimate, '终极支援「天罚」特效')
-    vulcan = build_asset(cache, make_vulcan, 'M163 火神炮车（HE / AP 双弹链）')
-    bmpt = build_asset(cache, make_bmpt, 'BMPT（双 30 mm 机炮与反坦克导弹）')
+    # The vehicles and emplacements on the V603 (tools/make_tracked_combat.py LABELS), each by its make_<kind> tool.
+    tracked = {kind: build_asset(cache, importlib.import_module('make_' + kind), label)
+               for kind, label in make_tracked_combat.LABELS.items()}
     stock = None
     if stock_stores:
         print('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……')
@@ -585,8 +600,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_drill.install(game, drill) if drill is not None else []) + \
             (make_emc.install(game, emc) if emc is not None else []) + \
             (make_ultimate.install(game, ult) if ult is not None else []) + \
-            (make_vulcan.install(game, vulcan) if vulcan is not None else []) + \
-            (make_bmpt.install(game, bmpt) if bmpt is not None else []) + \
+            [path for kind, files in tracked.items() if files is not None
+             for path in make_tracked_combat.install(game, files, kind)] + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
             (make_sedan.install(game, sedan) if sedan is not None else []) + \
             (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
@@ -685,7 +700,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('vulcan', vulcan), ('bmpt', bmpt), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), *tracked.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -759,8 +774,7 @@ def uninstall(game: str) -> None:
     import make_drill
     import make_emc
     import make_ultimate
-    import make_vulcan
-    import make_bmpt
+    import make_tracked_combat
     import make_chute
     import make_jets
     import edf41_objects
@@ -793,6 +807,13 @@ def uninstall(game: str) -> None:
     if make_edf5_campaign.removal_blocked(game):
         print('已取消卸载：EDF5 战役的模式表（CONFIG.SGO）或旧版任务列表被其他工具改过，不能安全撤回；保留任务文件和插件以免读档崩溃。')
         return
+    if choice == '2':
+        import call_weapons
+        rows = len(call_weapons.row_ids(call_weapons.base(game, call_weapons.TABLE)))
+        if rows > call_weapons.NATIVE_WEAPONS:
+            print(f'已取消：武器表有 {rows} 行，超过游戏自身能记录的 {call_weapons.NATIVE_WEAPONS} 把武器，只有插件在时才安全；'
+                  '只删插件会让游戏写坏内存。请选 1（删掉超出的行）。')
+            return
     if choice == '1':   # the call weapons point at the generated SGOs: those go only with the rows
         if not retire_weapons(game):
             print('已取消，没有删除任何文件。')
@@ -802,7 +823,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, make_vulcan.remove, make_bmpt.remove, make_emc.remove, make_ultimate.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), make_emc.remove, make_ultimate.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -1262,7 +1283,7 @@ def check_package() -> int:
     import make_tracked_combat
     import frozen_collision_probe
     frozen_collision_probe.check()
-    for kind in ('vulcan', 'bmpt'):
+    for kind in make_tracked_combat.KINDS:
         builder = importlib.import_module('make_' + kind)
         model = make_tracked_combat.model_module(kind)
         assert builder.OWNER == kind and kind in ledger.OWNERS and kind in buildcache.GROUPS

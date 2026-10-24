@@ -119,6 +119,39 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # y 2.76, the turret structure on the left from x 0.3 and the range radar on the right at x -0.8..-1.4), his head
     # above the receiver, the barrels straight ahead, the radar's housing on his right. Measured as the BMPT's.
     'EDF6VC_VULCAN': (Fit(0, 'cannon_main', (0.05, 2.95, -0.65), 'open_rider'),),
+    # The quad Vulcan (pylib/quadvulcan_model.py): the M163's turret and seat, its four guns in a block round the one
+    # gun's axis (their tops y 2.62, under this eye): the M163's operator's eye.
+    'EDF6VC_QUADVULCAN': (Fit(0, 'cannon_main', (0.05, 2.95, -0.65), 'open_rider'),),
+    # The fixed emplacements (pylib/emplacement_model.py: the Dreadnought's turrets, no crew space in them): the gunner
+    # sees a camera's picture (remote_display) on the turret, over its guns and behind their trunnions (the spec's
+    # 'eye', tests/test_emplacement.py holds these to it).
+    'EDF6VC_EMP_MID': (Fit(0, 'cannon_main', (0.0, 9.07, -0.113), 'remote_display'),),
+    'EDF6VC_EMP_SHORT': (Fit(0, 'cannon_main', (0.0, 8.173, -1.534), 'remote_display'),),
+    'EDF6VC_EMP_LONG': (Fit(0, 'cannon_main', (0.0, 8.854, -3.728), 'remote_display'),),
+    # The Phalanx: the camera on top of the radome (its top y 6.0, x -0.41..0.41), clear of it looking up at the sky.
+    'EDF6VC_CIWS_PHALANX': (Fit(0, 'cannon_main', (0.0, 6.35, 0.3), 'remote_display'),),
+    'EDF6VC_FLAK88': (Fit(0, 'cannon_main', (-0.222, 5.661, -4.502), 'remote_display'),),
+    'EDF6VC_GDF005': (Fit(0, 'cannon_main', (0.0, 4.336, -0.326), 'remote_display'),),
+    'EDF6VC_LASER': (Fit(0, 'cannon_main', (0.0, 5.3, -2.119), 'remote_display'),),
+    'EDF6VC_RAILGUN': (Fit(0, 'cannon_main', (0.0, 6.6, -3.889), 'remote_display'),),
+    # The Patriot (models/emp_patriot): a camera over the canister pack's back end (its top y 5.48 there, the pack's
+    # trunnion at z -4.3 below), looking along the pack; beside it the pack filled half the view (2026-10-24 preview).
+    'EDF6VC_PATRIOT': (Fit(0, 'cannon_main', (0.0, 5.9, -4.0), 'remote_display'),),
+    # The 2S6 (tools/make_tunguska.py; its War Thunder model, models/wt_tunguska): the gunner's sight's picture
+    # (remote_display), the eye at the front of its sight head on the turret roof (node optic_turret_05: x 0.17..0.64,
+    # y 2.99..3.55, its face at z 0.83), the guns down on both sides, the tracking radar ahead.
+    'EDF6VC_TUNGUSKA': (Fit(0, 'cannon_main', (0.40, 3.30, 0.90), 'remote_display'),),
+    # The PzH 2000 and the Sturmtiger (their War Thunder models): the gunner's sight's picture over the gun, on what
+    # lays it: the PzH's turret roof ahead of its hatches (the roof y 3.15, its front z -0.2), the Sturmtiger's
+    # casemate roof over its ball mount (the roof y 2.81, the face z 1.2; the mount turns +-10 deg with this eye).
+    'EDF6VC_PZH2000': (Fit(0, 'cannon_main', (0.55, 3.35, -0.45), 'remote_display'),),
+    'EDF6VC_STURMTIGER': (Fit(0, 'cannon_main', (0.30, 3.00, 0.95), 'remote_display'),),
+    # The Apocalypse (models/wt_apocalypse): the sight's picture from its turret roof's front over the twin guns (the
+    # roof y 3.4 there, the guns' axis y 2.76 below and ahead, the missile pods either side).
+    'EDF6VC_APOCALYPSE': (Fit(0, 'cannon_main', (0.0, 3.75, 2.6), 'remote_display'),),
+    # The TOS-1 (models/wt_tos1): a camera over the launcher pack's back end (its top y 3.08, its trunnion at z -2.70),
+    # looking along the pack; beside it the pack's flank filled a third of the view (2026-10-24 preview).
+    'EDF6VC_TOS1': (Fit(0, 'cannon_main', (0.0, 3.5, -2.4), 'remote_display'),),
     # The drill tank: from inside its turret the drill and its mount fill every view ahead (the imported model is
     # modelled inside; a tank_gunner station's sight looked at the mount's back wall from every place tried), so its
     # one seat sees a camera's monitor (remote_display): the camera on the turret's right flank beside the drill,

@@ -43,6 +43,10 @@ bool JetLaunch(JetRole,const float*,const float*,const float*,DWORD,const void*,
 void HeliCalled(unsigned char*,bool,const float*,DWORD) noexcept {}
 void SetMissionPackSaveHook(bool) noexcept {}             // edf5campaign.cpp: the packs' save rows (not this test's)
 void MigrateMissionPackSave(unsigned char*) noexcept {}
+// weapon_records.cpp (not linked here): the native layout, 0x800 records at GS+0xEB50.
+std::uint32_t WeaponRecordCapacity() noexcept { return 0x800; }
+unsigned char* WeaponRecord(unsigned char* gs,std::uint32_t id) noexcept { return gs && id<0x800 ? gs+0xEB50+std::size_t{id}*12 : nullptr; }
+void WeaponRecordsCheckRows(std::uint32_t) noexcept {}
 unsigned char* SubLaunch(const float*,const float*) noexcept { return nullptr; }
 bool JetLaunchBomber(const float*,const float*,const float*,const BombLoad&,DWORD,const void*,JetBody,const void*) noexcept {
     return false;

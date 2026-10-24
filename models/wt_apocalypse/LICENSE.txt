@@ -1,0 +1,11 @@
+Model Information:
+* title:	Red Alert 2 - Soviet Apocalypse Tank V2
+* source:	https://sketchfab.com/3d-models/red-alert-2-soviet-apocalypse-tank-v2-bfc38d9673b348c4aa258442d049b620
+* author:	ska-ara (https://sketchfab.com/ska-ara)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Red Alert 2 - Soviet Apocalypse Tank V2" (https://sketchfab.com/3d-models/red-alert-2-soviet-apocalypse-tank-v2-bfc38d9673b348c4aa258442d049b620) by ska-ara (https://sketchfab.com/ska-ara) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

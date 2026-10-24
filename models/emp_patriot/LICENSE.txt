@@ -1,0 +1,11 @@
+Model Information:
+* title:	MIM-104 Patriot Air Defense System
+* source:	https://sketchfab.com/3d-models/mim-104-patriot-air-defense-system-95e1e402426f4ddcb543af7a0455cf05
+* author:	MirzaArrafiERV_45 (https://sketchfab.com/MirzaArrafiERV_45)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "MIM-104 Patriot Air Defense System" (https://sketchfab.com/3d-models/mim-104-patriot-air-defense-system-95e1e402426f4ddcb543af7a0455cf05) by MirzaArrafiERV_45 (https://sketchfab.com/MirzaArrafiERV_45) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

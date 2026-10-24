@@ -1,0 +1,68 @@
+{
+ "format": 1,
+ "kind": "gdf005",
+ "title": "Oerlikon GDF-005 35 mm",
+ "prepared_from": "_dca_oerlikon_gdf_005_35mm.obj",
+ "scale": 0.415057302322856,
+ "yaw": 0.0,
+ "materials": [
+  {
+   "name": "edf6vc_gdf005_0",
+   "template": "v603_body",
+   "albedo": "textures/gdf005_0.png",
+   "source": "afb7896f-0aab-4619-be91-faa6ff040210"
+  }
+ ],
+ "parts": [
+  {
+   "name": "base.edf6vc_gdf005_0",
+   "role": "base",
+   "material": 0,
+   "triangles": 13286,
+   "vertices": 15169
+  },
+  {
+   "name": "turret.edf6vc_gdf005_0",
+   "role": "turret",
+   "material": 0,
+   "triangles": 8057,
+   "vertices": 9151
+  },
+  {
+   "name": "gun.edf6vc_gdf005_0",
+   "role": "gun",
+   "material": 0,
+   "triangles": 1678,
+   "vertices": 1951
+  }
+ ],
+ "pivots": {
+  "ring": [
+   0.0,
+   -0.4158044159412384
+  ],
+  "trunnion": [
+   1.38,
+   0.3
+  ],
+  "muzzles": {
+   "left": [
+    0.133702062536031,
+    1.3618016646754356,
+    4.25
+   ],
+   "right": [
+    -0.13039255655474133,
+    1.3618016646754356,
+    4.25
+   ]
+  }
+ },
+ "triangles": 23021,
+ "size": [
+  4.024644637703806,
+  2.2362457334550836,
+  8.5
+ ],
+ "source": "https://sketchfab.com/3d-models/dca-oerlikon-gdf-005-35mm-warno-70f66b41ff4e41238a84a6981d11d6f5"
+}

@@ -23,10 +23,12 @@ import model_pieces
 from mdb import bind_world
 import ragdoll_fit as rf
 import sgo
+import vcobjects
 import shkt_check as sc
 
 HOST = 'Ragdoll_v603_flak.shkt'
-KINDS = ('vulcan', 'bmpt')
+KINDS = tuple(vcobjects.TRACKED)
+M113 = ('vulcan', 'quadvulcan')   # the M163's chassis (five road wheels, the split rear idler) and open M61 turret
 
 
 class CollisionError(ValueError):
@@ -152,7 +154,7 @@ def _targets(md,parts,kind):
         if owner is None and ancestry[0]=='body':owner='body'
         if owner is not None:groups.setdefault(owner,[]).extend(p.pos)
     out={n:_bbox(P) for n,P in groups.items()}
-    if kind=='vulcan':
+    if kind in M113:
         # A real solid box inscribed in the closed turntable cylinder; the open
         # operator well must stay empty, even though the source turret was solid.
         base=_named_box(parts,['m163_turntable_and_turret_well'])
@@ -183,7 +185,7 @@ def _targets(md,parts,kind):
     for side in 'lr':
         for letter in ('A','B','C','D','E','F','G','H'):
             key=f'tire_move{letter}_{side}'
-            if kind=='vulcan' and letter in 'GH':continue
+            if kind in M113 and letter in 'GH':continue
             out[key]=_named_box(parts,[f'wheel_{letter}_{side}'])
     return out
 
@@ -200,7 +202,7 @@ def _proxy_parts(md,parts,kind):
         owner=next((n for n in ancestry if n in ('cannon_l','cannon_r') or n.startswith('tire_move')),None)
         if owner is None and ancestry[0]=='body':owner='body'
         if owner is not None:groups.setdefault(owner,[]).append(name)
-    if kind=='vulcan':
+    if kind in M113:
         groups['cannon_main']=['m163_turntable_and_turret_well']
         groups['cannon_l']=['six_m61_barrels','m61_barrel_clamps']
         groups['cannon_r']=['m61_elevation_cradle','m61_receiver']
@@ -214,7 +216,7 @@ def _proxy_parts(md,parts,kind):
         groups['tracking_radar']=['bmpt_gunner_sight','gunner_optics_glass']
     for side in 'lr':
         for letter in ('A','B','C','D','E','F','G','H'):
-            if kind=='vulcan' and letter in 'GH':continue
+            if kind in M113 and letter in 'GH':continue
             groups[f'tire_move{letter}_{side}']=[f'wheel_{letter}_{side}']
     return groups
 
@@ -249,7 +251,7 @@ def _fitted_shape(edit, shape, names, parts, body, target, mass):
 
 
 def _wheel_overrides(stock,parts,kind):
-    roads='BCDEF' if kind=='vulcan' else 'BCDEFG'
+    roads='BCDEF' if kind in M113 else 'BCDEFG'
     active=[f'tire_move{letter}_{side}' for letter in roads for side in 'lr']
     source={row[0]:row for row in stock['car_base_wheel']}
     wheels=[]
@@ -269,7 +271,7 @@ def _wheel_overrides(stock,parts,kind):
         row=copy.deepcopy(next(row for row in stock['car_base_draw_wheel_info'] if row[0][1]==name))
         row[0][0]=i
         draw.append(row)
-    idlers='AG' if kind=='vulcan' else 'AH'
+    idlers='AG' if kind in M113 else 'AH'
     for letter in idlers:
         for side in 'lr':
             b=_named_box(parts,[f'wheel_{letter}_{side}'])
@@ -304,7 +306,7 @@ def _reframe(md,raw,blob,targets,kind):
     world=bind_world(md)
     moved={}
     replacements={n:n for n in ('doppler_radar','tracking_radar')}
-    if kind=='vulcan':replacements.update({f'tire_moveH_{s}':f'tire_moveG_{s}' for s in 'lr'})
+    if kind in M113:replacements.update({f'tire_moveH_{s}':f'tire_moveG_{s}' for s in 'lr'})
     for proxy,bone in replacements.items():
         name='ragdoll_'+proxy
         b=rs.bodies[rs.index[name]]
@@ -396,11 +398,11 @@ def build(game,kind,md,parts,fitted=None,layout=None):
             'wheel_radii':radii,'mass_model':'hulls: their own (hkshape.from_hull); meshes: the stock solid-domain box rule (x1.5)',
             'collision_model':('convex pieces of the authored parts, cut to each proxy box' if fitted else
                                'affine-fitted source convex partitions; conservative contact approximation'),
-            'open_basket':'solid turntable interior only' if kind=='vulcan' else None,
+            'open_basket':'solid turntable interior only' if kind in M113 else None,
             'sibling_filter':'same-group siblings do collide (D93250); split gun volumes and split idler axial halves',
             'simulation_contract':'6640A9 resets all to mode4; explicit value0 restores mode1 via 6E94E0/6E96C0; AFR owner retained',
-            'gun_split_gap_m':.20 if kind=='vulcan' else None,
-            'idler_split_gap_m':.04 if kind=='vulcan' else None,
+            'gun_split_gap_m':.20 if kind in M113 else None,
+            'idler_split_gap_m':.04 if kind in M113 else None,
             'body_count':len(reader.systems[0].bodies),'joint_count':len(reader.systems[0].joints)}
     check(out,binding,md,overrides,report)
     return out,binding,overrides,report
@@ -519,7 +521,7 @@ def _sweep(report):
     1 cm contact skin on both proxies and 15 cm of relative recoil allowance.
     Idler halves split along the rotation axis, independent of wheel angle.
     """
-    if report['kind']!='vulcan':return
+    if report['kind'] not in M113:return
     boxes={row['proxy']:np.asarray(row['target_world']) for row in report['proxies']}
     left,right=boxes['ragdoll_cannon_l'],boxes['ragdoll_cannon_r']
     _req(left[0,2]-right[1,2]>.02+.15,'M61 sibling collision gap is too small')

@@ -68,6 +68,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/sazabi.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/dreadnought.cpp)
+# The fixed emplacements: never driven (src/emplacement.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/emplacement.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/sazabi_sound.cpp)
 # What a blocked jet ran into, logged (src/impact.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
@@ -109,6 +111,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/debug_spawn.cpp)
 # The in-game loadout menu's saving: the ini writer, the background variant generator (src/loadout_store.h).
 target_sources(EDF6VehicleCrew PRIVATE src/loadout_store.cpp src/loadout_file.cpp src/room_preview.cpp src/room_sync.cpp src/room_ui.cpp src/room_dialog.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/outfit41.cpp)
+# The weapon records past 0x800 (src/weapon_records_logic.h, docs/loadout-re.md 8.8).
+target_sources(EDF6VehicleCrew PRIVATE src/weapon_records.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/coop_attr.cpp src/host_settings.cpp)
 # More than four players in an EDF5 / EDF4.1 script mission online: EDF6Coop's BvmPlayerTableHooks and every member's
 # word (src/edf5online_room.h; the creation and the table: src/edf5online.cpp).
@@ -655,6 +659,12 @@ add_executable(outfit41_test tests/outfit41_test.cpp)
 target_include_directories(outfit41_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_compile_options(outfit41_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME outfit41 COMMAND outfit41_test)
+# The weapon records' pure part (src/weapon_records_logic.h): the site list's own consistency, the relocated constants,
+# the sidecar's format, the mirror between the block's table and the relocated one.
+add_executable(weapon_records_test tests/weapon_records_test.cpp)
+target_include_directories(weapon_records_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(weapon_records_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME weapon_records COMMAND weapon_records_test)
 # The room / HQ loadout screen's pure side: element names, keyboard / pad mapping, the input gate, row looks, texts,
 # catalog units, preview and save pairing (src/room_ui_logic.h; src/room_ui.cpp draws with it).
 # The menu as the game's own dialogs: pages, buttons, paging, cancel, the edits and saves they make
@@ -808,6 +818,10 @@ set_tests_properties(room_preview_native PROPERTIES ENVIRONMENT PYTHONIOENCODING
 # registry and the plugin's paths (read only; the EDF.dll / Root.cpk parts skipped without the game).
 add_test(NAME outfit41_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/outfit41_native_audit.py")
 set_tests_properties(outfit41_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The weapon records' sites against the game's EDF.dll (read only; skipped without the game): every row is the
+# instruction there, no other instruction addresses the records, every wrapped call calls what the plugin expects.
+add_test(NAME weapon_records_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/weapon_records_native_audit.py")
+set_tests_properties(weapon_records_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The slim generator install copies for the menu and the room pre-sync (tools/loadout_generator.py, build_release.py).
 add_test(NAME slim_generator COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/slim_generator_test.py")
 set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -959,7 +973,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test room_ui_test room_dialog_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test weapon_records_test room_ui_test room_dialog_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)
@@ -1910,6 +1924,8 @@ add_test(NAME npc_action_look_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SO
 add_test(NAME tracked_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_collision.py")
 # The M163 / BMPT from their War Thunder model folders (pylib/wt_tracked.py): prep rules always, the assets with the game.
 add_test(NAME wt_tracked COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_wt_tracked.py")
+# The fixed emplacements (pylib/emplacement_model.py, src/emplacement.cpp): registry anywhere, assets with the game.
+add_test(NAME emplacement COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_emplacement.py")
 # The Havok tagfile graph and its writer (pylib/hkfile.py), the SHKT / SGO binding checks (pylib/shkt_check.py): the
 # portable parts always, the stock files' round trips and mutations with the game.
 add_test(NAME hkfile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_hkfile.py")

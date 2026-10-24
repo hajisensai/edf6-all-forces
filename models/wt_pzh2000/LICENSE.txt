@@ -1,0 +1,11 @@
+Model Information:
+* title:	PzH 2000 (War Thunder) Remodel
+* source:	https://sketchfab.com/3d-models/pzh-2000-war-thunder-remodel-3391b53c325c45f6a9aa769ba8c511ab
+* author:	KojfDiscord (https://sketchfab.com/KojfDiscord)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "PzH 2000 (War Thunder) Remodel" (https://sketchfab.com/3d-models/pzh-2000-war-thunder-remodel-3391b53c325c45f6a9aa769ba8c511ab) by KojfDiscord (https://sketchfab.com/KojfDiscord) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
