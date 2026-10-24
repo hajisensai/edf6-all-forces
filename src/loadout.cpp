@@ -9,6 +9,7 @@
 // per-soldier call), which makes an Air Raider's vehicles callable without earning points first.
 #include "crew.h"
 #include "memory.h"
+#include "weapon_records.h"
 #include <cwchar>
 #include <iterator>
 
@@ -21,11 +22,10 @@ constexpr unsigned kReloadAll=0x5A1060;   // (SoldierBase*): reload-complete on 
 constexpr std::size_t kWeaponList=0x1950,kWeaponCount=0x1960;
 constexpr unsigned kCreateCalls[]={0xA153A,0xA1879,0x1DC539,0x22AE3D,0x5A51C5};
 // GameStatus: per local player (stride 0x3E60) the class, then 6 weapon ids per class;
-// per weapon id (stride 12) a flags word and 8 star bytes.
+// per weapon id a record of a flags word and 8 star bytes (weapon_records.h WeaponRecord: relocated past 0x800).
 constexpr std::size_t kSlotStride=0x3E60,kClass=0x6E90,kWeapons=0x6E98,kClassStride=0x18;
-constexpr std::size_t kStars=0xEB54,kRecordStride=12,kStarCount=8;
+constexpr std::size_t kStars=4,kStarCount=8;   // in a weapon record
 constexpr int kSlotsPerClass[4]={4,4,5,6};
-constexpr int kMaxWeapon=0x800;   // GameStatus has room for this many weapon records
 
 wchar_t loadoutPath[MAX_PATH]{};
 Fn createOrig=nullptr;
@@ -51,7 +51,7 @@ bool ReadLoadout(Loadout& l) noexcept {
     for(int i=0;i<kSlotsPerClass[l.cls];++i) {
         wchar_t key[8];swprintf_s(key,L"Slot%d",i);
         const int id=static_cast<int>(GetPrivateProfileIntW(L"Loadout",key,static_cast<UINT>(-1),loadoutPath));
-        l.weapon[i]=id>=0 && id<kMaxWeapon ? id : -1;   // -1: leave the slot as the save has it
+        l.weapon[i]=id>=0 && static_cast<std::uint32_t>(id)<WeaponRecordCapacity() ? id : -1;   // -1: leave the slot as the save has it
     }
     l.stars=static_cast<int>(GetPrivateProfileIntW(L"Loadout",L"Stars",static_cast<UINT>(-1),loadoutPath));
     if(l.stars>10)l.stars=10;
@@ -63,7 +63,7 @@ bool Apply(std::uintptr_t slotArg,Undo& u,const char* where) noexcept {
     Loadout l;
     if(!ReadLoadout(l))return false;
     auto gs=At<unsigned char*>(image,kGameStatus);
-    if(!Readable(gs,kStars+kMaxWeapon*kRecordStride,true))return false;
+    if(!gs || !Readable(gs,kWeapons+4*kClassStride,true))return false;
     auto p=gs;   // slot 0
     u.player=p;u.gs=gs;u.target=l.cls;
     u.cls=At<std::int32_t>(p,kClass);
@@ -73,7 +73,9 @@ bool Apply(std::uintptr_t slotArg,Undo& u,const char* where) noexcept {
         if(l.weapon[i]<0)continue;
         Put<std::int32_t>(p,kWeapons+l.cls*kClassStride+i*4,l.weapon[i]);
         if(l.stars<0)continue;
-        auto stars=gs+kStars+l.weapon[i]*kRecordStride;
+        unsigned char* const record=WeaponRecord(gs,static_cast<std::uint32_t>(l.weapon[i]));
+        if(!record || !Readable(record+kStars,kStarCount,true))continue;
+        auto stars=record+kStars;
         u.starIds[i]=l.weapon[i];
         std::memcpy(u.stars[i],stars,kStarCount);
         std::memset(stars,l.stars,kStarCount);
@@ -84,8 +86,10 @@ bool Apply(std::uintptr_t slotArg,Undo& u,const char* where) noexcept {
 }
 
 void Restore(const Undo& u) noexcept {
-    for(int i=5;i>=0;--i)   // reverse: a weapon listed twice gets its first saved stars back
-        if(u.starIds[i]>=0)std::memcpy(u.gs+kStars+u.starIds[i]*kRecordStride,u.stars[i],kStarCount);
+    for(int i=5;i>=0;--i) {   // reverse: a weapon listed twice gets its first saved stars back
+        unsigned char* const record=u.starIds[i]>=0 ? WeaponRecord(u.gs,static_cast<std::uint32_t>(u.starIds[i])) : nullptr;
+        if(record)std::memcpy(record+kStars,u.stars[i],kStarCount);
+    }
     for(int i=0;i<6;++i)Put<std::int32_t>(u.player,kWeapons+u.target*kClassStride+i*4,u.weapon[i]);
     Put<std::int32_t>(u.player,kClass,u.cls);
 }

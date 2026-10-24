@@ -7580,10 +7580,15 @@ def edf5_found_by_gamedir() -> None:
 
 @test
 def weapon_table_fits_the_save() -> None:
-    """stack refuses, before building anything, a table its rows would take past the 0x800 weapons a save keeps (the
-    game writes past the save's block for every row beyond); a table exactly full is fine."""
+    """stack refuses, before building anything, a table its rows would take past the weapon records the game keeps
+    (0x800 natively, the plugin's relocation src/weapon_records_logic.h kSlots: the game writes past them for every row
+    beyond); a table exactly full is fine. The installer's bound is the plugin's."""
     import types
     import ported_weapons as pw
+    with open(os.path.join(ROOT, 'src', 'weapon_records_logic.h'), encoding='utf-8') as f:
+        slots = re.search(r'constexpr std::uint32_t kSlots=(0x[0-9A-Fa-f]+);', f.read())
+    assert slots and int(slots.group(1), 16) == cw.SAVE_WEAPONS, (slots and slots.group(1), cw.SAVE_WEAPONS)
+    assert cw.SAVE_WEAPONS > 0x800
     ours = len(cw.plan_rows([]).appended)
     full = [f'OTHER{i}' for i in range(cw.SAVE_WEAPONS - ours + 1)]
 

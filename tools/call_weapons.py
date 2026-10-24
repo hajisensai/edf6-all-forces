@@ -113,10 +113,11 @@ TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
 SHARED = [TABLE] + TEXTS
 BACKUP = '.edf6vc_backup'
 MANIFEST = '.edf6vc_calls.json'
-# A save keeps 0x800 weapon records, one per table row (docs/loadout-re.md 8.1: GS+0x6E68 ends at GS+0x14B50), and the
-# game loops over every row of the table when it grants weapons or clamps their stars: a row past them is written past
-# the save's block.
-SAVE_WEAPONS = 0x800
+# The game keeps one weapon record per table row and loops over every row when it grants weapons or clamps their stars.
+# Natively 0x800 of them (docs/loadout-re.md 8.1: the save block GS+0x6E68 ends at GS+0x14B50); the plugin relocates
+# them to room for src/weapon_records_logic.h kSlots (docs/loadout-re.md 8.8; rows 0x800.. saved next to MAIN.GST).
+# A row past that is written past the game status: refused. Keep equal to kSlots (selftest weapon_table_fits_the_save).
+SAVE_WEAPONS = 0x2000
 JOURNAL = '.edf6vc_calls.txn.json'
 ACQUIRE = 0.0   # WEAPONTABLE column 5: 0 normal (the plugin makes EDF6VC_CALL_* owned at every save load)
 PROCESS = modfiles.PROCESS
@@ -280,11 +281,11 @@ def plan_rows(ids: list[str]) -> Plan:
 
 
 def check_room(rows: int) -> None:
-    """Refuses (SystemExit, before anything is built or written) a table longer than a save keeps weapons for."""
+    """Refuses (SystemExit, before anything is built or written) a table longer than the game keeps weapon records for."""
     if rows > SAVE_WEAPONS:
-        raise SystemExit(f'the weapon table would have {rows} rows, but a save keeps {SAVE_WEAPONS} weapons, one per '
-                         f'row, and the game writes past them for every row beyond: {rows - SAVE_WEAPONS} too many. '
-                         'Remove another mod\'s weapon rows first; nothing was written.')
+        raise SystemExit(f'the weapon table would have {rows} rows, but the game keeps {SAVE_WEAPONS} weapon records '
+                         f"(with the plugin's relocation), one per row, and writes past them for every row beyond: "
+                         f"{rows - SAVE_WEAPONS} too many. Remove another mod's weapon rows first; nothing was written.")
 
 
 def tail_start(ids: list[str]) -> int:
