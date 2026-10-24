@@ -59,12 +59,12 @@ KINDS = {
     # The real guns (tools/prep_glb_model.py's folders from Sketchfab models; the user, 2026-10-24: 「还有各种现实的炮台、
     # 近防炮」), at their own size.
     # The Phalanx's eye beside its radome (the radar over the gun fills the view from above it), at the gun's height.
-    'ciws_phalanx': Emplacement('Phalanx CIWS Mk 15', '', '', 1.0, 1800.0, 'emp_phalanx', (0.75, 4.65, 0.0)),
+    'ciws_phalanx': Emplacement('Phalanx CIWS Mk 15', '', '', 1.0, 1800.0, 'emp_phalanx', (0.0, 6.35, 0.3)),
     'flak88': Emplacement('8.8 cm Flak 18/36', '', '', 1.0, 1500.0, 'emp_flak88'),
     'gdf005': Emplacement('Oerlikon GDF-005 35 mm', '', '', 1.0, 1400.0, 'emp_gdf005'),
     'laser': Emplacement('Laser air-defence turret', '', '', 1.0, 1600.0, 'emp_laser'),
     'railgun': Emplacement('Railgun turret', '', '', 1.0, 2400.0, 'emp_railgun'),
-    'patriot': Emplacement('MIM-104 Patriot launcher', '', '', 1.0, 2000.0, 'emp_patriot', (1.5, 3.6, -2.0)),
+    'patriot': Emplacement('MIM-104 Patriot launcher', '', '', 1.0, 2000.0, 'emp_patriot', (0.0, 5.7, -4.0)),
 }
 EYE_UP, EYE_BACK = 0.8, 0.6           # m: a gunner's sight over the guns' top, behind their trunnions
 # A box's 12 triangles, outward, over its corners numbered by bits (x 1, y 2, z 4: set = the high side).

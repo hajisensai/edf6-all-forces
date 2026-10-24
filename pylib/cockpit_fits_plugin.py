@@ -128,13 +128,15 @@ FITS: dict[str, tuple[Fit, ...]] = {
     'EDF6VC_EMP_MID': (Fit(0, 'cannon_main', (0.0, 9.07, -0.113), 'remote_display'),),
     'EDF6VC_EMP_SHORT': (Fit(0, 'cannon_main', (0.0, 8.173, -1.534), 'remote_display'),),
     'EDF6VC_EMP_LONG': (Fit(0, 'cannon_main', (0.0, 8.854, -3.728), 'remote_display'),),
-    'EDF6VC_CIWS_PHALANX': (Fit(0, 'cannon_main', (0.75, 4.65, 0.0), 'remote_display'),),
+    # The Phalanx: the camera on top of the radome (its top y 6.0, x -0.41..0.41), clear of it looking up at the sky.
+    'EDF6VC_CIWS_PHALANX': (Fit(0, 'cannon_main', (0.0, 6.35, 0.3), 'remote_display'),),
     'EDF6VC_FLAK88': (Fit(0, 'cannon_main', (-0.222, 5.661, -4.502), 'remote_display'),),
     'EDF6VC_GDF005': (Fit(0, 'cannon_main', (0.0, 4.336, -0.326), 'remote_display'),),
     'EDF6VC_LASER': (Fit(0, 'cannon_main', (0.0, 5.3, -2.119), 'remote_display'),),
     'EDF6VC_RAILGUN': (Fit(0, 'cannon_main', (0.0, 6.6, -3.889), 'remote_display'),),
-    # The Patriot (models/emp_patriot): a camera on the turntable, beside the canister pack (x 1.28 its side).
-    'EDF6VC_PATRIOT': (Fit(0, 'cannon_main', (1.5, 3.6, -2.0), 'remote_display'),),
+    # The Patriot (models/emp_patriot): a camera over the canister pack's back end (its top y 5.3 there, the pack's
+    # trunnion at z -4.3 below), looking along the pack; beside it the pack filled half the view (2026-10-24 preview).
+    'EDF6VC_PATRIOT': (Fit(0, 'cannon_main', (0.0, 5.7, -4.0), 'remote_display'),),
     # The 2S6 (tools/make_tunguska.py; its War Thunder model, models/wt_tunguska): the gunner's sight's picture
     # (remote_display), the eye at the front of its sight head on the turret roof (node optic_turret_05: x 0.17..0.64,
     # y 2.99..3.55, its face at z 0.83), the guns down on both sides, the tracking radar ahead.
@@ -147,8 +149,9 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # The Apocalypse (models/wt_apocalypse): the sight's picture from its turret roof's front over the twin guns (the
     # roof y 3.4 there, the guns' axis y 2.76 below and ahead, the missile pods either side).
     'EDF6VC_APOCALYPSE': (Fit(0, 'cannon_main', (0.0, 3.75, 2.6), 'remote_display'),),
-    # The TOS-1 (models/wt_tos1): a camera on the turntable's front, beside the launcher pack (x 1.11 its side).
-    'EDF6VC_TOS1': (Fit(0, 'cannon_main', (1.35, 2.2, 1.2), 'remote_display'),),
+    # The TOS-1 (models/wt_tos1): a camera over the launcher pack's back end (its top y 3.08, its trunnion at z -2.70),
+    # looking along the pack; beside it the pack's flank filled a third of the view (2026-10-24 preview).
+    'EDF6VC_TOS1': (Fit(0, 'cannon_main', (0.0, 3.5, -2.4), 'remote_display'),),
     # The drill tank: from inside its turret the drill and its mount fill every view ahead (the imported model is
     # modelled inside; a tank_gunner station's sight looked at the mount's back wall from every place tried), so its
     # one seat sees a camera's monitor (remote_display): the camera on the turret's right flank beside the drill,
