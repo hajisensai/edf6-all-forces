@@ -2261,7 +2261,7 @@ def check_emc(files: dict[str, bytes], game: Game | None = None) -> None:
 # EMC's impact charge for the blasts. Every damage 0 in the SGO: the plugin writes it (IFC +0xDC) from the weapon's.
 #   ULT_SIGHT_FILE  the charge's aim beams: thin crimson, a round a frame for the whole charge, silent (the plugin grows them)
 #   ULT_BOLT_FILE   a lightning bolt: a blue-white flash ULT_BOLT_ROUNDS frames long, its crack once
-#   ULT_SPARK_FILE  the burst where a bolt lands (ULT_SPARK_RADIUS m)
+#   ULT_SPARK_FILE  the burst where a bolt lands and along a shock wave's front (ULT_SPARK_RADIUS m: src/ultimate_plan.h kSparkRadius)
 #   ULT_BEAM_FILE   the main beam: the satellite's thickest, violet, a round a frame for the whole cannon phase, a deep shot
 #   ULT_CORE_FILE   its white-hot core, silent
 #   ULT_BLAST_FILE  a ring's blast (ULT_BLAST_RADIUS m: src/ultimate_plan.h kRingBlast)

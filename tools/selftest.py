@@ -1666,7 +1666,7 @@ def ultimate_copies_agree() -> None:
     radii = re.search(r'kModelRadius\[kModelCount\]=\{([^}]*)\}', plan)
     assert radii and [float(x.strip().rstrip('f')) for x in radii.group(1).split(',')] ==         [magic_circle.LAYERS[k].radius for k in magic_circle.LAYERS], radii
     assert 'PreloadUltimate(mgr);' in src('src/jet_spawn.cpp')
-    for name, value in (('kRadius', cw.ULTIMATE_RADIUS), ('kRingBlast', vc.ULT_BLAST_RADIUS)):
+    for name, value in (('kRadius', cw.ULTIMATE_RADIUS), ('kRingBlast', vc.ULT_BLAST_RADIUS), ('kSparkRadius', vc.ULT_SPARK_RADIUS)):
         m = re.search(rf'\b{name}=([\d.]+)f', plan)
         assert m and float(m.group(1)) == value, (name, m and m.group(1), value)
     m = re.search(r'\bkGatherReach=([\d.]+)f', plan)
