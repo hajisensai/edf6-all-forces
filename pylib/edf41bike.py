@@ -35,11 +35,19 @@ CAR_TEMPLATE = 'OBJECT/V512_KEITRUCK.SGO'
 # (four numbers, [2.0, 0.9, 30, 100] in the first request): given to the Car the gear table was scaled by 0.9 / 30
 # instead of 30 / 0.0075, the steering rates became 100 / 0 and the traction factors 0 (2026-10-19 static review).
 CAR_DRIVE = [0.8, 30.0, 0.0075, 0.7, 0.075, 0.3, 0.6]
-POSE_STATE = 'vehicle_striker_rear'  # all four native classes have this visible seated pose
-RIDER_CLASSES = (('ARMYSOLDIER', 'EDF6ARMYSOLDIER', 'P505_RANGER'),
-                 ('ENGINEER', 'EDF6ENGINEER', 'P508_AIRRADER'),
-                 ('PALEWING', 'EDF6_WINGDIVER', 'P506_WINGDIVER'),
-                 ('HEAVYARMOR', 'EDF6HEAVYARMOR', 'P507_FENCER'))
+# The rider's pose per seat: the seat locator's MAB Animation, played by name on the rider's own CAS (HumanBase
+# 0x57AE8E -> 0x116C2D0, docs/all-classes-ride-re.md §3). The driver straddles the bike as on EDF6's own motorbike
+# (V503 Freed's seat: vehicle503_bike_driver, in the Ranger's and the Air Raider's CAS, the classes 4.1's driver seat
+# admits, mask 9); until 2026-10-25 it sat on the bench pose vehicle_striker_rear, legs forward through the tank and no
+# hands on the bars (feedback 「4.1摩托SDL1会出现驾驶姿势问题」). A class without the bike pose (Wing Diver, Fencer:
+# only through AllClassesRide) gets allclass.cpp RideState's bench fallback, as on the stock bikes. The sidecar
+# gunner sits on the bench pose, which all four classes have.
+SEAT_STATES = ('vehicle503_bike_driver', 'vehicle_striker_rear')
+SOURCE_STATES = ('vehicle_bike_driver', 'vehicle_bike_gunner')   # 4.1's own two seated states
+RIDER_CLASSES = (('ARMYSOLDIER', 'EDF6ARMYSOLDIER', 'P505_RANGER', 1),
+                 ('ENGINEER', 'EDF6ENGINEER', 'P508_AIRRADER', 8),
+                 ('PALEWING', 'EDF6_WINGDIVER', 'P506_WINGDIVER', 2),
+                 ('HEAVYARMOR', 'EDF6HEAVYARMOR', 'P507_FENCER', 4))   # (4.1 CAS, EDF6 CAS, EDF6 model, class bit)
 WHEELS = ('front_tire', 'rear_tire', 'side_tire')
 PROXIES = frozenset(('body', 'handle', 'front_sus', 'front_tire', 'rear_sus', 'rear_tire', 'side_tire', 'gun'))
 
@@ -73,33 +81,46 @@ def _state_root(cas: bytes, state: str) -> tuple[float, float, float]:
     return keys[0]
 
 
-def pose_fit(games) -> tuple[list[list[float]], list[list]]:
-    """Fit shared visible seat locators to all four original pelvis positions.
+def pose_fit(games, masks: tuple[int, int]) -> tuple[list[list[float]], list[list]]:
+    """Fit each seat locator so its native pose (SEAT_STATES) puts the pelvis where 4.1's own seated state had it.
 
-    A 503 driver pose is absent for wing diver/fencer; its automatic rear-seat
-    fallback would put their pelvis 0.6 m too low.  Both seats therefore use the
-    native rear-seat pose.  A least-squares shared translation keeps every class
-    within 8 cm of its own 4.1 pelvis, without replacing global soldier CAS files.
+    `masks`: the two seats' class masks as 4.1 authored them (vehicle_riding_position [4]: the driver 9, Ranger and
+    Air Raider; the gunner 15). Every class a seat admits must have that seat's native state and land within 8 cm of
+    its own 4.1 pelvis under one shared translation, without replacing global soldier CAS files. A class the seat does
+    not admit and whose CAS lacks the state (Wing Diver / Fencer on the driver's seat, reachable only by
+    AllClassesRide) rides on allclass.cpp's bench fallback as on EDF6's own bikes: no fit, error None.
+    Rows: [4.1 class, [4.1 driver, gunner pelvis], [native pelvis per seat or None], [error per seat or None]].
     """
     cached = getattr(games, '_edf41bike_pose_fit', None)
-    if cached is not None:
-        return copy.deepcopy(cached)
+    if cached is not None and cached[0] == list(masks):
+        return copy.deepcopy(cached[1])
     rows = []
-    for source, native, _model in RIDER_CLASSES:
+    for source, native, _model, bit in RIDER_CLASSES:
         old = cas_legacy.cas_from_legacy(games.read4(f'OBJECT/{source}.CAS'))
         new = games.read6(f'OBJECT/{native}.CAS')
-        driver, gunner = (_state_root(old, s) for s in ('vehicle_bike_driver', 'vehicle_bike_gunner'))
-        seated = _state_root(new, POSE_STATE)
-        rows.append([source, list(driver), list(gunner), list(seated)])
-    offsets = [[sum(row[seat + 1][c] - row[3][c] for row in rows) / len(rows) for c in range(3)]
-               for seat in range(2)]
+        states = cas_graft.state_clips(new).get('main', {})
+        posed = []
+        for seat, state in enumerate(SEAT_STATES):
+            if state in states:
+                posed.append(list(_state_root(new, state)))
+            elif masks[seat] & bit:
+                raise ValueError(f'408 seat {seat} admits {source} but its CAS lacks {state}')
+            else:
+                posed.append(None)
+        rows.append([source, [list(_state_root(old, s)) for s in SOURCE_STATES], posed])
+    offsets = []
+    for seat in range(2):
+        fitted = [row for row in rows if row[2][seat] is not None]
+        offsets.append([sum(row[1][seat][c] - row[2][seat][c] for row in fitted) / len(fitted) for c in range(3)])
     for row in rows:
-        errors = [math.dist([row[3][c] + offsets[seat][c] for c in range(3)], row[seat + 1]) for seat in range(2)]
-        if max(errors) > 0.08:
-            raise ValueError(f'408 {row[0]} shared seat pose differs by {max(errors):.3f} m')
+        errors = [None if row[2][seat] is None else
+                  math.dist([row[2][seat][c] + offsets[seat][c] for c in range(3)], row[1][seat]) for seat in range(2)]
+        worst = max(e for e in errors if e is not None)
+        if worst > 0.08:
+            raise ValueError(f'408 {row[0]} shared seat pose differs by {worst:.3f} m')
         row.append(errors)
     result = offsets, rows
-    games._edf41bike_pose_fit = copy.deepcopy(result)
+    games._edf41bike_pose_fit = copy.deepcopy([list(masks), result])
     return result
 
 
@@ -127,9 +148,9 @@ def seat_mab(block: bytes, offsets: list[list[float]]) -> bytes:
     vecs = struct.unpack_from('<I', block, 0x1C)[0]
     vec_end = vecs + nvec * 16
     grow_vecs = 32
-    for _name in wanted:
+    for state in SEAT_STATES:
         params_at.append(layout.strings_at + grow_vecs + len(extra))
-        extra += sgo.write_depth_first(0x102, {'Animation': POSE_STATE, 'DispCharacter': 1})
+        extra += sgo.write_depth_first(0x102, {'Animation': state, 'DispCharacter': 1})
     grow = len(extra)
     new_vecs = b''.join(struct.pack('<4f', *p, 1.0) for p in offsets)
     out = bytearray(block[:vec_end]) + new_vecs + block[vec_end:layout.strings_at] + extra + block[layout.strings_at:]
@@ -166,6 +187,25 @@ def native_gun_rows(rows: object) -> list:
     out = copy.deepcopy(rows)
     out[0][1] = [0.0, 0.0]
     return out
+
+
+def wheel_flags(tire: list) -> list:
+    """car_base_wheel [10:13] of one 4.1 vehicle_tire row: [driven, steering slot or -1, steering factor].
+
+    EDF6's Car reads them at 0x679CFC..0x67A004: [10] != 0 -> wheel +0x64 (driven: the stock bikes V503 / V613 drive
+    the rear wheel only, V512 its rear axle), [11] != -1 -> +0x65 (steered) and then +0x70[[11]] = [12]. 4.1's
+    VehicleBike reads its tire row at EDF41.exe 0x2CC7AD..0x2CC803 (record defaults at 0x2CBDA7..0x2CBDFC): [8] ->
+    +0x64 (preset to 1 for the first two tires, a car's front axle, at 0x2CBF2A: steered), [9] -> +0xA8 (default 1)
+    and [10] -> +0x68 (default 0.25), read here as the drive flag and the wheel's share of the drive (every tank road
+    wheel 1 / 0.1, the Striker's rear axles 1, the 408's rear wheel alone 1 / 1.0). The 408's own rows: front steered,
+    share 0; rear driven; the sidecar wheel neither (flag 0, share 0, and no grip: [2..4] 0), i.e. rear-wheel drive
+    as EDF6's own bikes. The flags were set by position until 2026-10-25, which also drove the sidecar wheel: a pushed
+    wheel 1 m out on the left side of a 300 kg bike."""
+    tire = sgo.plain(tire)
+    if not isinstance(tire, list) or len(tire) < 11:
+        raise ValueError(f'408 tire row lacks its steer / drive columns: {tire!r}')
+    steer, drive = bool(tire[8]), bool(tire[9]) and float(tire[10]) > 0.0
+    return [1 if drive else 0, 1 if steer else -1, 1 if steer else 0]
 
 
 def joints(physics: bytes) -> list[tuple[str, str]]:
@@ -291,7 +331,11 @@ def build(games, root: str) -> dict[str, bytes]:
     mdb.insert_bone(md, MARKER, 'body')
     member.stored = mdb.cmpl_compress(mdb.mdb_write(md)) if member.stored[:4] == b'CMPL' else mdb.mdb_write(md)
     files = {archive_rel: mdb.rab_write(rab)}
-    offsets, pose_rows = pose_fit(games)
+    seats41 = source['vehicle_riding_position']
+    masks = tuple(int(sgo.plain(seat[4])) for seat in seats41)
+    if len(masks) != 2:
+        raise ValueError('408 source does not have its two seats')
+    offsets, pose_rows = pose_fit(games, masks)
     members['animation_model'] = [entry, 0, seat_mab(am[2], offsets)]
     members['ragdoll'] = copy.deepcopy(source['ragdoll'])
     shkt_rel = rel(members['ragdoll'][0])
@@ -314,7 +358,7 @@ def build(games, root: str) -> dict[str, bytes]:
             raise ValueError('408 source wheel order changed')
         row = [old[0], *copy.deepcopy(wheel[1:])]
         row[8] = old[5]  # the original three tire radii (0.3 m)
-        row[10:13] = [0 if i == 0 else 1, 1 if i == 0 else -1, 0 if i == 2 else 1]
+        row[10:13] = wheel_flags(old)
         members['car_base_wheel'].append(row)
     members['car_base_draw_wheel_info'] = [[[i, n], [-1, -1, -1, 0.0, 1 if i == 0 else 0]]
                                            for i, n in enumerate(WHEELS)]
@@ -331,9 +375,11 @@ def build(games, root: str) -> dict[str, bytes]:
                                        copy.deepcopy(source['spotlight'][3])]]
     for key in ('game_object_camera_setting', 'game_object_durability', 'game_sound', 'vehicle_damage_effect'):
         members[key] = copy.deepcopy(source[key])
+    # [4] is the seat's class mask (docs/all-classes-ride-re.md §1): 4.1's own, as EDF6's bikes (V503 / V613: 9) —
+    # the driver Ranger and Air Raider, whose CAS have the bike pose; AllClassesRide widens it at run time.
     members['vehicle_riding_position'] = [
-        [*copy.deepcopy(source['vehicle_riding_position'][0][:3]), '512_KEITRUCK_DRIVER', 15, 5.0, 0],
-        [*copy.deepcopy(source['vehicle_riding_position'][1][:3]), '401_STRIKER_SHEET1', 15, 0.0, 6]]
+        [*copy.deepcopy(seats41[0][:3]), '512_KEITRUCK_DRIVER', masks[0], 5.0, 0],
+        [*copy.deepcopy(seats41[1][:3]), '401_STRIKER_SHEET1', masks[1], 0.0, 6]]
     members['vehicle_weapon_setting'] = [['gun', 1]]
     # car_base_fall_out [4]: the seats thrown off at a hard impact. The template's are V512's own [1, 2, 3, 4] (its
     # bed); 0x673F41 indexes the seat array with them unchecked (seat * 0x340 + 0x268), so on the two-seat 408 the
@@ -348,7 +394,10 @@ def build(games, root: str) -> dict[str, bytes]:
     members['vehicle_setup'][2] = gun_rows
     members['mission_setup'] = copy.deepcopy(members['vehicle_setup'])
     members['edf41_bike'] = [1, ['body', 'handle', 'gun'], copy.deepcopy(source['bike_gun_ctrl']), 1]
-    members['edf41_bike_pose'] = [offsets, pose_rows]
+    # A record of the fit (nothing reads it at run time); a seat a class has no pose for (None) is written as [].
+    members['edf41_bike_pose'] = [offsets, [[name, roots, [p if p is not None else [] for p in posed],
+                                             [e if e is not None else [] for e in errors]]
+                                            for name, roots, posed, errors in pose_rows]]
     # This particular 4.1 vehicle gun is a big-endian SGO; read() handles both
     # byte orders, while legacy_sgo.convert deliberately accepts only LE files.
     old_gun = sgo.read(games.read4('WEAPON/V_408MOTORBIKE_GUN.SGO'))[1]

@@ -35,6 +35,55 @@ def locator_params(block: bytes, name: str) -> dict:
     raise ValueError(f'no locator {name}')
 
 
+SHIPPED = os.path.join(ROOT, 'edf41port', 'objects')
+
+
+class Shipped(unittest.TestCase):
+    """What the installer ships (edf41port/objects), checked without any game: the contracts the generator's check()
+    holds, on the committed bytes. The 2026-10-21 fixes lived only in the generator; the shipped SGO kept the
+    keyframed gun (row 1) that pins the chassis, so W only crept the bike along and round to the left (2026-10-25
+    feedback 「按W键不会前进 只是缓缓向左」), plus V512's fall-out seats past the 408's two."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        with open(os.path.join(SHIPPED, 'OBJECT', 'VEHICLE408_MOTORBIKE.SGO'), 'rb') as f:
+            cls.members = sgo.read(f.read())[1]
+        with open(os.path.join(SHIPPED, 'OBJECT', 'VEHICLE408_MOTORBIKE.SHKT'), 'rb') as f:
+            cls.physics = f.read()
+        with open(os.path.join(SHIPPED, 'OBJECT', 'EDF41_RANGE_VEHICLE408_MOTORBIKE.SGO'), 'rb') as f:
+            cls.spawn = sgo.read(f.read())[1]
+
+    def test_no_keyframed_proxy_pins_the_chassis(self) -> None:
+        for members in (self.members, self.spawn):
+            rows = sgo.plain(members['car_base_simulation_node'])
+            self.assertEqual([r for r in rows if r[0] == 'gun'], [['gun', 0]])
+            self.assertEqual(bike.pinned({'car_base_simulation_node': rows}, self.physics), [])
+            self.assertNotIn('gun', {r[0] for r in sgo.plain(members['car_base_rigid_body'])})
+
+    def test_fall_out_seats_exist(self) -> None:
+        for members in (self.members, self.spawn):
+            seats = len(members['vehicle_riding_position'])
+            self.assertEqual(sgo.plain(members['car_base_fall_out'][4]), list(range(1, seats)))
+
+    def test_rear_wheel_drive_front_steering_free_sidecar_wheel(self) -> None:
+        for members in (self.members, self.spawn):
+            rows = sgo.plain(members['car_base_wheel'])
+            self.assertEqual({r[0]: r[10:13] for r in rows},
+                             {'front_tire': [0, 1, 1], 'rear_tire': [1, -1, 0], 'side_tire': [0, -1, 0]})
+
+    def test_driver_rides_the_bike_pose(self) -> None:
+        for members in (self.members, self.spawn):
+            block = members['animation_model'][2]
+            self.assertEqual([locator_params(block, n)['Animation'] for n in ('座席１', '座席２')],
+                             list(bike.SEAT_STATES))
+            self.assertEqual([r[4] for r in sgo.plain(members['vehicle_riding_position'])], [9, 15])
+
+    def test_call_drive_block(self) -> None:
+        for members in (self.members, self.spawn):
+            for key in ('vehicle_setup', 'mission_setup'):
+                self.assertEqual([round(float(x), 6) for x in sgo.plain(members[key][1])], bike.CAR_DRIVE)
+
+
 @unittest.skipUnless(all(os.path.isfile(os.path.join(p, 'Root.cpk')) for p in (GAME4, GAME6)),
                      'requires EDF4.1 and EDF6 native resources')
 class Native(unittest.TestCase):
@@ -100,7 +149,12 @@ class Native(unittest.TestCase):
         rows = self.members['car_base_wheel']
         self.assertEqual([r[0] for r in rows], list(bike.WHEELS))
         self.assertEqual([r[8] for r in rows], [r[5] for r in self.source['vehicle_tire']])
-        self.assertEqual([r[-1] for r in rows], [1, 1, 0])
+        # Driven / steered as 4.1's own rows say (bike.wheel_flags): rear-wheel drive, front steering, the sidecar
+        # wheel free. The flags were by position before: the sidecar wheel was driven too.
+        self.assertEqual([r[10:13] for r in rows], [bike.wheel_flags(t) for t in self.source['vehicle_tire']])
+        self.assertEqual([r[10:13] for r in rows], [[0, 1, 1], [1, -1, 0], [0, -1, 0]])
+        with self.assertRaisesRegex(ValueError, 'steer / drive'):
+            bike.wheel_flags(self.source['vehicle_tire'][0][:9])
         self.assertEqual([r[1][-1] for r in self.members['car_base_draw_wheel_info']], [1, 0, 0])
         self.assertEqual({r[0] for r in self.members['car_base_breaking_parts'][1]}, bike.PROXIES - {'body'})
 
@@ -109,9 +163,14 @@ class Native(unittest.TestCase):
         actual = {x.name: x for _, x in mab_legacy.mab_locators(self.members['animation_model'][2])}
         for name in ('搭乗口１', '搭乗口２', 'カメラ１', 'カメラ２'):
             self.assertEqual(actual[name], original[name])
-        for name in ('座席１', '座席２'):
+        for name, state in zip(('座席１', '座席２'), bike.SEAT_STATES):
             params = locator_params(self.members['animation_model'][2], name)
-            self.assertEqual(params, {'Animation': bike.POSE_STATE, 'DispCharacter': 1})
+            self.assertEqual(params, {'Animation': state, 'DispCharacter': 1})
+        # The driver rides EDF6's own motorbike pose, the gunner the bench; the masks are 4.1's (driver R + AR).
+        self.assertEqual(bike.SEAT_STATES, ('vehicle503_bike_driver', 'vehicle_striker_rear'))
+        self.assertEqual([r[4] for r in self.members['vehicle_riding_position']],
+                         [r[4] for r in self.source['vehicle_riding_position']])
+        self.assertEqual([r[4] for r in self.members['vehicle_riding_position']], [9, 15])
         self.assertEqual(len(self.members['vehicle_riding_position']), 2)
         self.assertEqual(self.members['vehicle_weapon_setting'], [['gun', 1]])
 
@@ -129,27 +188,46 @@ class Native(unittest.TestCase):
         for key in ('vehicle_setup', 'mission_setup'):
             self.assertEqual(sgo.plain(self.members[key][2][0][1]), [0.0, 0.0])
 
-    def test_four_class_pelvis_fit_and_posed_mesh_bounds(self) -> None:
-        offsets, rows = bike.pose_fit(self.games)
+    def test_seat_pelvis_fit_and_posed_mesh_bounds(self) -> None:
+        masks = (9, 15)
+        offsets, rows = bike.pose_fit(self.games, masks)
         self.assertEqual(len(rows), 4)
-        for (source_class, native_cas, native_model), row in zip(bike.RIDER_CLASSES, rows):
+        fitted = [[row[0] for row in rows if row[3][seat] is not None] for seat in range(2)]
+        # The bike pose for the two classes the driver's seat admits (the stock bikes' pair); the bench for all four.
+        self.assertEqual(fitted, [['ARMYSOLDIER', 'ENGINEER'], ['ARMYSOLDIER', 'ENGINEER', 'PALEWING', 'HEAVYARMOR']])
+        for (source_class, native_cas, native_model, _bit), row in zip(bike.RIDER_CLASSES, rows):
             self.assertEqual(source_class, row[0])
             cas = self.games.read6(f'OBJECT/{native_cas}.CAS')
-            clip = cas_graft.state_clips(cas)['main'][bike.POSE_STATE][0]
             obj = sgo.load(data=self.games.read6(f'OBJECT/{native_model}.SGO'))
             entry = obj['animation_model'][0]
             md = bike.model(self.games.read6(bike.rel(entry[0])), entry[1])
-            locals_ = outfit41.clip_locals(cas, clip, 0, md)
-            positions = outfit41.skinned_positions(md, locals_)
-            for seat in range(2):
+            for seat, state in enumerate(bike.SEAT_STATES):
+                if row[3][seat] is None:
+                    continue
+                clip = cas_graft.state_clips(cas)['main'][state][0]
+                positions = outfit41.skinned_positions(md, outfit41.clip_locals(cas, clip, 0, md))
                 moved = positions + offsets[seat]
                 lo, hi = moved.min(axis=0), moved.max(axis=0)
                 self.assertTrue(all(math.isfinite(float(v)) for v in (*lo, *hi)))
                 self.assertTrue(all(0.15 < float(v) < 5.0 for v in hi - lo))
-                self.assertLess(row[4][seat], 0.08)
+                self.assertLess(row[3][seat], 0.08)
                 # Open motorcycle seats are above the wheel contact plane;
                 # a driver-pose fallback at the unshifted origin fails this.
                 self.assertGreater(float(hi[1]), 1.0)
+        # A seat that admits a class whose CAS lacks the seat's pose is refused (the driver's opened to Wing Divers).
+        with self.assertRaisesRegex(ValueError, 'lacks vehicle503_bike_driver'):
+            bike.pose_fit(self.games, (9 | 2, 15))
+
+    def test_shipped_object_is_this_generator_output(self) -> None:
+        # The installer ships edf41port/objects, not a fresh build: the 2026-10-21 fixes (gun row 0, fall-out [1])
+        # were in the generator but never regenerated into the shipped SGO, which kept the hovering, pinned 408.
+        for rel in ('OBJECT/VEHICLE408_MOTORBIKE.SGO', 'OBJECT/VEHICLE408_MOTORBIKE.SHKT'):
+            with open(os.path.join(SHIPPED, *rel.split('/')), 'rb') as f:
+                self.assertEqual(f.read(), self.files[rel], f'{rel} is stale: run tools/make_edf41_objects.py')
+        with open(os.path.join(SHIPPED, 'OBJECT', 'EDF41_RANGE_VEHICLE408_MOTORBIKE.SGO'), 'rb') as f:
+            spawn = sgo.read(f.read())[1]
+        self.assertEqual({k: v for k, v in spawn.items() if k != 'mission_setup'},
+                         {k: v for k, v in self.members.items() if k != 'mission_setup'})
 
     def test_dynamic_gun_and_missing_body_fail_closed(self) -> None:
         members = copy.deepcopy(self.members)

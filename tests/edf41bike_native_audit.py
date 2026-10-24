@@ -98,6 +98,14 @@ def native(path: Path) -> int:
     # car_base_fall_out's seats index the seat array unchecked (0x673F41: seat * 0x340 + [v+0x608], then +0x268).
     require(data[0x673F41:0x673F55].hex()=='496316488bcf4869f2400300004803b708060000'
             and data[0x673F5A:0x673F61].hex()=='488b9668020000','fall-out seats are not bounds-checked')
+    # car_base_wheel's driven / steered columns (2026-10-25, pylib/edf41bike.py wheel_flags): [10] != 0 is the wheel's
+    # +0x64, [11] != -1 its +0x65, and [12] is read (into +0x70[[11]]) only when +0x65 is set.
+    require(data[0x679CFC:0x679D06].hex()=='c785d00000000a000000' and data[0x679D6F:0x679D77].hex()=='85c00f95c0884664',
+            'wheel [10] must be the +0x64 flag')
+    require(data[0x679DB6:0x679DC0].hex()=='c785e00000000b000000' and data[0x679E29:0x679E32].hex()=='83f8ff0f95c0884665',
+            'wheel [11] != -1 must be the +0x65 flag')
+    require(data[0x679E85:0x679E8F].hex()=='807e65000f84a3010000' and data[0x679F74:0x679F7E].hex()=='c785000100000c000000'
+            and data[0x67A004:0x67A00A].hex()=='f30f11448670','wheel [12] is read only for a steered wheel')
     # Vehicle_Car requests BodyRecoil variant 0, unlike the old bike AimRecoil.
     # There is no null guard between that lookup and the recoil payload call.
     require(relative(data,0x65A750)==0x62EA10,'Car base FireRecoil path differs')
@@ -119,6 +127,14 @@ def original(path: Path) -> None:
     require(relative(data,0x2CA5F3)==0x334410,'source dynamic physics-to-bones call differs')
     require(relative(data,0x2CA680)==0x50AED0,'source bone-world build differs')
     require(relative(data,0x2CA68C)==0x334580,'source animation-to-physical-body sync differs')
+    # VehicleBike's vehicle_tire row (2026-10-25, wheel_flags): [8] -> +0x64 (preset 1 for the first two tires),
+    # [9] -> +0xA8 (default 1), [10] -> +0x68 (default 0.25).
+    require(data[0x2CBDA7:0x2CBDAE].hex()=='c681a800000001' and data[0x2CBDF8:0x2CBE03].hex()=='c6416401c741680000803e',
+            'source tire record defaults differ')
+    require(data[0x2CBF24:0x2CBF31].hex()=='4883f9027307c644106401eb05','source preset of the first two tires differs')
+    require(data[0x2CC7B1:0x2CC7BD].hex()=='44396408680f95c088443764' and
+            data[0x2CC7D5:0x2CC7E4].hex()=='44396408740f95c0888437a8000000' and
+            data[0x2CC7FC:0x2CC807].hex()=='8b8c0880000000894c3768','source tire [8] [9] [10] reads differ')
     print('EDF4.1 original 408 single-bone pose and real physics synchronization passed')
 
 

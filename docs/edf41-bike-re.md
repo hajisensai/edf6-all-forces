@@ -175,3 +175,31 @@ EDF6 读 `ReloadType`（武器 `+0x208`）在 `0x693E8D`：0 / 3 手动换弹；
 - `tests/edf41bike_native_audit.py`：两道门、`vehicle_weapon_setting` 名字、行跳转目标、三条出车路径都经过 slot 46。
 - `tests/coop_attr_test.cpp`：缺 `kFeatBikeGunMount` 的成员让炮手座关闭；`tests/coop_attr_guard.py`：四处按任务门控。
 - 变异：`BuildsGun` 恒 false → `FAIL: the 408 with its one seat-1 holder: its gun is built`；桩里原版跳转偏移改错 → `FAIL: a gun on seat 0 keeps the stock loop first`；门控只要 `kFeatBikeGunner` → `FAIL the gunner seat needs every member's built gun as well`。
+
+## 2026-10-25 反馈「SDL1 驾驶姿势不对、按 W 不前进只缓缓向左」
+
+用户原话：「4.1摩托SDL1会出现驾驶姿势问题 以及按W键不会前进 只是缓缓向左（图中为SDL1 Z型）」。截图：SDL1 Z型，HUD「CAR 速度 1 km/h」，坐席「1 驾驶席 你 / 2 炮手席」。所有 SDL1 型号（SDL1、Z 型、R 型、坏改装、爆裂涡轮）的请求都投同一个 `VEHICLE408_MOTORBIKE.SGO`（`edf41calls.vehicle_call`，[1] 统一换成 `CAR_DRIVE`），所以三处都在这一个对象上统一修，不逐个型号改。
+
+### 根因 1：安装包里的 408 一直是 10-19 的旧数据（W 不前进、缓慢偏转）
+
+安装器发的是仓库里提交的 `edf41port/objects/OBJECT/VEHICLE408_MOTORBIKE.SGO`（`tools/build_release.py` 打包 `edf41port/objects`），不是现场生成。10-21 的「悬空」修复（gun 行值 0、`car_base_fall_out [1]`）只改了生成器 `pylib/edf41bike.py`，提交 `8cdd3276` 没有重新生成这份 SGO；`git log -- edf41port/objects/OBJECT/VEHICLE408_MOTORBIKE.SGO` 最后一次是 `c12b9a88`（10-19）。修前提交的 SGO：`car_base_simulation_node [..., ['gun', 1]]`、`car_base_fall_out [..., [1, 2, 3, 4]]`，正是上文「悬空」的根因数据：运动学 gun 经保留的 `hkpRagdollConstraintData` 关节把动态底盘钉在上一帧的位置，油门只能让车一点点挪；gun 在车的左侧（边斗，`+x`），底盘绕它转，于是「缓缓向左」（这一联系是推测，运动学钉住本身由 10-21 实机证实）。10-21 实机 run 9「安装着的旧数据又一次悬空」就是这份文件。同一份数据还带着 V512 的跌落座位 `[1,2,3,4]`（`0x673F41` 越界读，10-21 的崩溃）。
+
+### 根因 2：边斗轮被当成驱动轮
+
+生成器按位置写 `car_base_wheel [10:13]`（前 `[0,1,1]`、后 `[1,-1,1]`、边 `[1,-1,0]`），边斗轮也是驱动轮。EDF6 Car 在 `0x679CFC..0x67A004` 读这三列：[10] 非 0 → 轮 `+0x64`（驱动；原版两款摩托 V503 / V613 只有后轮为 1，V512 后轴为 1），[11] ≠ -1 → `+0x65`（转向），再 `+0x70[[11]] = [12]`（[12] 只在转向时读）。4.1 `VehicleBike` 在 `EDF41.exe 0x2CC7AD..0x2CC803` 读自己的 `vehicle_tire`：[8] → `+0x64`（`0x2CBF2A` 给前两只轮预设 1：转向），[9] → `+0xA8`（默认 1），[10] → `+0x68`（默认 0.25）。408 的三行：前 `[8]=1,[9]=1,[10]=0.0`，后 `0,1,1.0`，边 `0,0,0.0`（且 [2..4] 抓地参数全 0）。按「[9] 驱动且 [10] 份额 > 0」读，4.1 的 408 是后轮驱动、前轮转向、边斗轮自由，与 EDF6 原版摩托一致。[9] / [10] 的语义是按全部 4.1 车辆的取值分布与读入默认值推断的（坦克全轮 1 / 0.1、Striker 后两轴 1），没有跟到 4.1 运行时读者。现由 `edf41bike.wheel_flags` 从源行推出：前 `[0,1,1]`、后 `[1,-1,0]`、边 `[0,-1,0]`。
+
+### 根因 3：驾驶座用的是长凳坐姿
+
+`seat_mab` 给两座都写 `Animation=vehicle_striker_rear`（卡车 / 救援车长凳），驾驶员腿向前伸、手不在车把上。座位动画是座位定位点 MAB 参数，按名字在乘员自己的 CAS 上播（`docs/all-classes-ride-re.md` §3）。EDF6 原版摩托（V503 / V613）驾驶座是 `vehicle503_bike_driver` / `vehicle613_bike_driver`，只有游骑兵、空降兵的 CAS 有；4.1 的 408 驾驶座掩码本来也是 9（游骑兵 + 空降兵），生成器却写成 15。
+
+修复：驾驶座改播 `vehicle503_bike_driver`，两座掩码取 4.1 原值（9 / 15）。`pose_fit(games, masks)` 只对「有该姿势」的职业拟合座位定位点，座位允许的职业缺姿势就拒绝生成。游骑兵 / 空降兵骨盆：4.1 `vehicle_bike_driver` (0, 0.926, -0.079)，EDF6 `vehicle503_bike_driver` (0, 1.016, -0.091)，驾驶座定位点因此从长凳时的 (0.018, 0.604, 0.345) 改为 (0, -0.090, 0.012)，两职业骨盆误差 0（生成时校验 ≤ 8 cm）。炮手座仍是长凳姿势（四职业都有）。飞翼 / 剑兵只能经 `AllClassesRide` 放宽后开 408，与原版摩托一样落到 `allclass.cpp RideState` 的长凳回退，骨盆比车座低约 0.6 m（与他们骑 V503 时相同的已知观感问题，见 `docs/all-classes-ride-re.md` §8）。
+
+### 防止再发：发的文件必须是生成器的产物
+
+- `tests/test_edf41bike.py` `Shipped`（不需要游戏文件，ctest `edf41_bike_models`）：对提交的 SGO / 测试场副本 / SHKT 直接核 gun 行值 0、`pinned()` 为空、跌落座位、三轮的驱动 / 转向列、两座动画与掩码、`CAR_DRIVE`。修前提交的数据在这里 4 项红。
+- `Native.test_shipped_object_is_this_generator_output`（有游戏文件时）：提交的 SGO / SHKT 与 `build()` 逐字节一致，测试场副本除 `mission_setup` 外一致。
+- 联机：新功能位 `kFeatBikeRide`（`src/host_settings_logic.h`）。功能位 64 / 128 的构建实际发的仍是旧数据，所以另起一位；缺它的成员在房间状态行列为「408 驱动轮与骑姿」可能不一致（数据，只提示，不按任务关闭）。
+
+### 尚待实机
+
+未开游戏。需实测：SDL1 各型号按 W / 油门能正常起步、直行不偏、转向正常；游骑兵 / 空降兵驾驶姿势手在车把上、腿不穿模（503 的姿势套在 408 的车把位置上，手位只按骨盆对齐，未核）；飞翼 / 剑兵开车时长凳回退的观感；炮手座、开火、落地不悬空在新数据上回归。

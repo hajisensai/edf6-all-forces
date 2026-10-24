@@ -129,7 +129,7 @@ void WordAndRoom() {
     hostcfg::Word w;
     strcpy_s(w.version,"0.8.0");w.features=kFeatures;w.vanillaRecruit=true;w.npcFreeSquadCover=false;
     char text[kWordMost];
-    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"1;v=0.8.0;f=FF;r=1;c=0"),"the word");
+    Expect(FormatWord(w,text,sizeof(text)) && !std::strcmp(text,"1;v=0.8.0;f=1FF;r=1;c=0"),"the word");
     hostcfg::Word back;
     Expect(ParseWord(text,back) && !std::strcmp(back.version,"0.8.0") && back.features==kFeatures && back.vanillaRecruit &&
            !back.npcFreeSquadCover,"parsed back");
@@ -165,6 +165,11 @@ void WordAndRoom() {
     Count(h,true,true,&same,"0.8.0");Count(h,false,true,&hover,"0.8.0");
     Expect(h.members==2 && h.differing==1 && h.missing==kFeatBikeGrounded && (kFeatures&kFeatBikeGrounded),
            "a member whose 408 still hovers: named in the notice");
+    // 2026-10-25: a build that shipped the keyframed gun / the driven sidecar wheel / the bench driver is named too.
+    Builds r;hostcfg::Word ride;strcpy_s(ride.version,"0.8.0");ride.features=kFeatures&~kFeatBikeRide;
+    Count(r,true,true,&same,"0.8.0");Count(r,false,true,&ride,"0.8.0");
+    Expect(r.members==2 && r.differing==1 && r.missing==kFeatBikeRide && (kFeatures&kFeatBikeRide),
+           "a member whose shipped 408 still creeps (pinned, sidecar wheel driven): named in the notice");
     // 2026-10-21: a member with the gunner seat but not its built gun (the #219 / #234-first builds) closes the seat.
     Expect(!BikeGunnerAtSync(true,true,0,kFeatures&~kFeatBikeGunMount) && BikeGunnerAtSync(true,true,0,kFeatures),
            "the gunner seat needs every member's built gun as well");
