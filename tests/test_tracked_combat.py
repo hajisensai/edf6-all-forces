@@ -53,7 +53,7 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(vc.STORES['BMPT_ATGMF'].role, 'ground')
         self.assertNotEqual(vc.STORES['BMPT_ATGMF'].weapon.look.model, vc.STORES['BMPT_ATGM'].weapon.look.model,
                             'the rounds one control cycles never look alike')
-        self.assertEqual(combat.BMPT_SLOTS, ('left', 'right', 'missiles', 'left', 'right', 'missiles'))
+        self.assertEqual(tuple(combat.slot('bmpt', i) for i in range(6)), ('left', 'right', 'missiles', 'left', 'right', 'missiles'))
         # 2026-10-21: both Ataka rounds ride the V603's otherwise unread secondary, alongside the cannons (src/payload.cpp).
         self.assertEqual([kind for kind, store in vc.STORES.items() if store.independent_secondary], ['BMPT_ATGM', 'BMPT_ATGMF'])
         self.assertFalse(any(vc.STORES[k].native_control or vc.STORES[k].group for k in ('BMPT_ATGM', 'BMPT_ATGMF')),
@@ -87,14 +87,14 @@ class NativeAssetContractTests(unittest.TestCase):
         wt_tracked.ENABLED = False
         cls.game = rootcpk.default()
         # The authored files: build() is these with the seats' cockpits grafted (test_build_grafts_each_seats_eye).
-        cls.files = {kind: combat.authored(cls.game.root, kind) for kind in combat.KINDS}
+        cls.files = {kind: combat.authored(cls.game.root, kind) for kind in combat.PROCEDURAL}
 
     @unittest.skipUnless(cockpits.assets_present(), 'the cockpit assets (models/cockpits) are unavailable')
     def test_build_grafts_each_seats_eye(self) -> None:
         # The user, 2026-10-21: "bmpt和火神炮缺少第一人称". A seat has first person only where its model carries the eye
         # marker (src/fp_vehicle.cpp VehicleEye: "no cockpit in this seat" otherwise): build() grafts every fitted seat's,
         # on the bone its fit rides, and leaves the authored files otherwise as they are.
-        for kind in combat.KINDS:
+        for kind in self.files:
             with self.subTest(kind=kind):
                 model = combat.model_module(kind)
                 built = combat.build(self.game.root, kind)
@@ -189,7 +189,7 @@ class NativeAssetContractTests(unittest.TestCase):
             tracked.check_skeleton(bad,model.VISUAL_BONES)
 
     def test_request_default_setup_has_every_real_holder(self) -> None:
-        for kind in combat.KINDS:
+        for kind in self.files:
             with self.subTest(kind=kind):
                 call = next(c for c in calls.CALLS if c.ground == kind)
                 template = self.game.read('WEAPON', call_weapons.template_of(call) + '.SGO')
@@ -256,7 +256,7 @@ class NativeAssetContractTests(unittest.TestCase):
         self.assertLess(f.get('AmmoDamage'), t.get('AmmoDamage'))
 
     def test_cases_leave_authored_receiver_with_cartridge_scale(self) -> None:
-        for kind in combat.KINDS:
+        for kind in self.files:
             model = combat.model_module(kind)
             expected = model.ejection_local(self.game)
             for side, path in zip(('left', 'right'), vc.GROUND_VEHICLES[kind].weapons[:2]):

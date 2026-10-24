@@ -30,7 +30,7 @@ import sazabi_model  # noqa: E402
 import sgo  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
 from vcobjects import (DEFAULT_GAME, DREADNOUGHT_JET, DREADNOUGHT_TURRETS, SAZABI_JET, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
-                       GROUND_VEHICLES, as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
+                       GROUND_VEHICLES, TRACKED, as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
 
 OWNER = 'testrange'   # pylib/ledger.py: the files the range writes or uses
 MARKER = 'EDF6TestRange.txt'
@@ -104,8 +104,7 @@ OWN_VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_vehicle401_striker_mission', '装甲车 Grape 401（NPC 搭乘原版 AI；测试场生成）'),
     ('edf6tr_katyusha_mission', '喀秋莎火箭炮车（自己驾驶；测试场生成）'),
     ('edf6tr_artillery_mission', '自行榴弹炮（自己驾驶；测试场生成）'),
-    ('edf6tr_vulcan_mission', 'M163 火神炮车（自己驾驶；测试场生成）'),
-    ('edf6tr_bmpt_mission', 'BMPT 火力支援车（自己驾驶；测试场生成）'),
+    *((f'edf6tr_{kind}_mission', f'{name}（自己驾驶；测试场生成）') for kind, name in TRACKED.items()),
     ('edf6tr_drill_mission', '钻头战车（自己驾驶；测试场生成）'),
     ('edf6tr_sidecar_mission', '边三轮摩托（自己驾驶或坐边车；测试场生成）'),
     ('edf6tr_vehicle502_groundrobo_mission', '多足机 Depth Crawler 502（插件驾驶；测试场生成）'),
@@ -143,8 +142,7 @@ DERIVED: dict[str, str] = {
     **{private: source.upper() for source, private in {**PROTEUS_MISSION, **OPTIC_MISSION}.items()},
     'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
     'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
-    'edf6tr_vulcan_mission': GROUND_VEHICLES['vulcan'].sgo,
-    'edf6tr_bmpt_mission': GROUND_VEHICLES['bmpt'].sgo,
+    **{f'edf6tr_{kind}_mission': GROUND_VEHICLES[kind].sgo for kind in TRACKED},
     'edf6tr_drill_mission': 'EDF6VC_DRILL',
     'edf6tr_sidecar_mission': 'EDF6VC_SIDECAR',
     'edf6tr_v506_heli_mission': 'V506_HELI',
@@ -361,6 +359,10 @@ RANGE_REWORKED = ('v510_maser_mission', 'v612_nix_g_mission', 'v614_proteus_mk2_
 # footprint the range does not know; the M map's 「摆放」 places it, and every 4.1 enemy, mothership and UFO robot.
 RANGE_NEW = ('v507_rescuetank_ai', 'edf6vc_sedan', 'vehicle301_tank',
              'edf6tr_vulcan_mission', 'edf6tr_bmpt_mission')
+# The V603 kinds added 2026-10-24 (the quad Vulcan, the emplacements, the 2S6, the PzH 2000, the Sturmtiger and the
+# real guns: vcobjects.TRACKED past the M163 / BMPT): the plain's 36 spots are all taken, so the installer's range does
+# not place them; the M map's 「摆放」 does (their spawn catalog rows), and a range plan may hold them (GROUND_MISSION).
+CATALOG_ONLY = tuple(f'edf6tr_{kind}_mission' for kind in TRACKED if kind not in ('vulcan', 'bmpt'))
 RANGE_FRIENDS = {'edf6tr_jet_fighter_mission': 1}
 RANGE_WAVES = Waves(enabled=True, enemy=TARGET, per_wave=4, max_alive=24, first_delay=5.0, interval=5.0)
 
@@ -890,10 +892,19 @@ def grand_threads(plan: Plan, lay: Layout) -> list[str]:
 # These authored tracked vehicles are also buildable by a standalone range. Their
 # call-in SGOs are not mission resources: keep private mission twins, and retain
 # every generated model/weapon under the range's ledger owner as well.
-TRACKED_MISSION = {DERIVED_PREFIX + kind + '_mission': GROUND_VEHICLES[kind] for kind in ('vulcan', 'bmpt')}
+TRACKED_MISSION = {DERIVED_PREFIX + kind + '_mission': GROUND_VEHICLES[kind] for kind in TRACKED}
 GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery',
                                   'edf6tr_drill_mission': 'make_drill', 'edf6tr_sidecar_mission': 'make_sidecar',
-                                  'edf6tr_vulcan_mission': 'make_vulcan', 'edf6tr_bmpt_mission': 'make_bmpt'}
+                                  # every vcobjects.TRACKED kind (tools/selftest.py holds them together); a literal: the
+                                  # build cache reads the tools it names (pylib/buildcache.py source_recipes)
+                                  'edf6tr_vulcan_mission': 'make_vulcan', 'edf6tr_bmpt_mission': 'make_bmpt',
+                                  'edf6tr_quadvulcan_mission': 'make_quadvulcan',
+                                  'edf6tr_emp_mid_mission': 'make_emp_mid',
+                                  'edf6tr_emp_short_mission': 'make_emp_short',
+                                  'edf6tr_emp_long_mission': 'make_emp_long',
+                                  'edf6tr_tunguska_mission': 'make_tunguska',
+                                  'edf6tr_pzh2000_mission': 'make_pzh2000',
+                                  'edf6tr_sturmtiger_mission': 'make_sturmtiger', 'edf6tr_ciws_phalanx_mission': 'make_ciws_phalanx', 'edf6tr_flak88_mission': 'make_flak88', 'edf6tr_apocalypse_mission': 'make_apocalypse', 'edf6tr_gdf005_mission': 'make_gdf005', 'edf6tr_laser_mission': 'make_laser', 'edf6tr_railgun_mission': 'make_railgun', 'edf6tr_tos1_mission': 'make_tos1'}
 
 
 def range_files(sgo_name: str) -> tuple[str, ...]:

@@ -538,8 +538,34 @@
    "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],
+  "edf6tr_ciws_phalanx_mission": [
+   "OBJECT/EDF6VC_CIWS_PHALANX.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
   "edf6tr_drill_mission": [
    "OBJECT/EDF6VC_DRILL.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_emp_long_mission": [
+   "OBJECT/EDF6VC_EMP_LONG.MRAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_emp_mid_mission": [
+   "OBJECT/EDF6VC_EMP_MID.MRAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_emp_short_mission": [
+   "OBJECT/EDF6VC_EMP_SHORT.MRAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_flak88_mission": [
+   "OBJECT/EDF6VC_FLAK88.MRAB",
+   "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],
   "edf6tr_jet_blast_carrier_parked_mission": [
@@ -609,6 +635,18 @@
    "WEAPON/BULLET_RPG.RAB",
    "WEAPON/V_NULL.RAB"
   ],
+  "edf6tr_pzh2000_mission": [
+   "OBJECT/EDF6VC_PZH2000.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_quadvulcan_mission": [
+   "OBJECT/EDF6VC_QUADVULCAN.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
   "edf6tr_sazabi_mission": [
    "OBJECT/EDF6VC_SAZABI.MRAB",
    "WEAPON/BULLET_MISSILE.RAB",
@@ -616,6 +654,18 @@
   ],
   "edf6tr_sidecar_mission": [
    "OBJECT/EDF6VC_SIDECAR.MRAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_sturmtiger_mission": [
+   "OBJECT/EDF6VC_STURMTIGER.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_tunguska_mission": [
+   "OBJECT/EDF6VC_TUNGUSKA.MRAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],
   "edf6tr_v506_heli_edf6benefits_mission": [

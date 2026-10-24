@@ -972,7 +972,7 @@ def _synthetic_call_sgo(c: calls.Call) -> bytes:
     elif k == 'vehicle':
         entry, fuel = ['app:/weapon/v_506heli_gatling01_l.sgo', [1.0, 0.0]], ['app:/weapon/v_fueltank.sgo', [1.0]]
         if c.ground:
-            n = 2 if c.ground == 'bmpt' else len(cw.vehicle_weapons(c))
+            n = 2 if len(vc.GROUND_VEHICLES[c.ground].slots) > 2 else len(cw.vehicle_weapons(c))
             setup = [[1.0, 1.0], [0.0, 1.0], [[f'app:/weapon/stock_{i}.sgo', [1.0, [0.0, 0.0]]] for i in range(n)]]
         else:
             setup = [[1.0, 1.0], [0.0, 1.0, 2.0], [100.0], [entry, fuel]]
@@ -2463,7 +2463,8 @@ def installer_range_has_targets_and_no_enemy() -> None:
     # Ours, the player's to drive (README: the player's jets, every boardable kind parked, the ground vehicles our tools
     # make, the helicopters the range makes placeable, the Depth Crawler, the tanks and the flak EDF6AutoTurret arms,
     # and the stock vehicles the plugin reworks: EMC, Nix, Proteus).
-    ours = ({'edf6tr_pjet_fighter_mission', 'edf6tr_pjet_strike_mission'} | set(gen.BOARDABLE_PARKED) | set(gen.GROUND_MISSION)
+    ours = ({'edf6tr_pjet_fighter_mission', 'edf6tr_pjet_strike_mission'} | set(gen.BOARDABLE_PARKED)
+            | (set(gen.GROUND_MISSION) - set(gen.CATALOG_ONLY))
             | {'edf6tr_v506_heli_mission', 'edf6tr_vehicle409_heli_mission', 'edf6tr_vehicle410_heli_mission',
                'edf6tr_v602_heli_mission', 'edf6tr_vehicle502_groundrobo_mission', 'vehicle403_tank_mission',
                'vehicle404_bigtank', 'v603_flak_mission', 'v510_maser_mission', 'v612_nix_g_mission',
@@ -2611,7 +2612,7 @@ def spawn_catalog_covers_every_registry() -> None:
     assert {s for s, _, _ in gen.ENEMIES if s not in gen.PRIMER_KINDS} <= set(by), 'a wave enemy is no row'
     assert all(by[s].lift < gen.WAVE_LIFT_MOST for s, _, _ in gen.ENEMIES if s in by), 'a ship among the waves'
     wanted = {'ufomother301', 'ufomother401', 'uforobo401', 'edf6vc_sedan', 'v507_rescuetank_ai', 'vehicle301_tank',
-              'edf6tr_vulcan_mission', 'edf6tr_bmpt_mission'}
+              'edf6tr_vulcan_mission', 'edf6tr_bmpt_mission', 'edf6tr_quadvulcan_mission'}
     assert wanted <= set(by), sorted(wanted - set(by))
     # The panel's tabs (src/debug_spawn.h Category) are the catalog's, in its order.
     header = src('src/debug_spawn.h')

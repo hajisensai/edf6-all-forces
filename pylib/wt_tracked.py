@@ -31,7 +31,20 @@ import obj_model as om
 import tracked_combat_model as t
 from mdb import Mdb, Mesh, bind_world, cmpl_compress, cmpl_decompress, mdb_read, mdb_write, rab_read, rab_write
 
-FOLDERS = {'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt'}
+FOLDERS = {'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'tunguska': 'wt_tunguska', 'pzh2000': 'wt_pzh2000',
+           'sturmtiger': 'wt_sturmtiger', 'apocalypse': 'wt_apocalypse', 'tos1': 'wt_tos1'}
+# A kind made from another kind's folder: its module's derive(spec) turns that kind's spec into its own (the quad M61:
+# the M163's model with its one gun made four, pylib/quadvulcan_model.py); with no base kind, its module's spec(kind)
+# makes it from its own folder (folder(): the Dreadnought's turrets on their bases, pylib/emplacement_model.py).
+DERIVED = {'quadvulcan': ('vulcan', 'quadvulcan_model')}
+
+
+def _derived(kind: str) -> tuple[str | None, str] | None:
+    """(base kind or None, module) of a derived kind: DERIVED's, or an emplacement's (pylib/emplacement_model.py)."""
+    if kind in DERIVED:
+        return DERIVED[kind]
+    import emplacement_model
+    return (None, 'emplacement_model') if kind in emplacement_model.KINDS else None
 ENABLED = True            # False: the procedural models (their own tests switch it off)
 FORMAT = 1                # tools/prep_wt_tracked.py FORMAT
 PLAIN_RMO = (140, 90)     # roughness, metalness (~ the V603 / E551 body maps' mean); occlusion from the model
@@ -72,7 +85,13 @@ class Piece:
 
 
 def folder(kind: str) -> str | None:
-    """The model folder (obj_model.model_dir), None when it is not there or the WT models are switched off."""
+    """The model folder (obj_model.model_dir; a derived kind's: its base's), None when it is not there or the WT models
+    are switched off."""
+    derived = _derived(kind)
+    if derived and derived[0] is None:
+        import emplacement_model
+        return emplacement_model.source_folder(kind) if ENABLED else None
+    kind = derived[0] if derived else kind
     if not ENABLED or kind not in FOLDERS:
         return None
     d = om.model_dir(FOLDERS[kind])
@@ -88,6 +107,15 @@ _CACHE: dict[tuple, Spec] = {}
 
 
 def load(kind: str) -> Spec:
+    derived = _derived(kind)
+    if derived:
+        base, _module = derived
+        if base is None:
+            import emplacement_model
+            _req(ENABLED, f'{kind}: the model folders are switched off')
+            return emplacement_model.spec(kind)
+        import quadvulcan_model
+        return quadvulcan_model.derive(load(base))
     d = folder(kind)
     _req(d is not None, f'{kind}: model folder {FOLDERS.get(kind)} not found ({", ".join(om.model_roots())})')
     stamp = tuple((f, os.stat(os.path.join(d, f)).st_mtime_ns) for f in ('model.json', 'model.npz'))  # type: ignore[arg-type]
@@ -461,3 +489,44 @@ def check(arc: bytes, kind: str, host: Mdb | None = None) -> dict:
         _req(np.allclose(w[a.bone(bone)][13:15], centre[1:], atol=1e-5), f'{bone}: the bone is not at its wheel')
     return {'bones': len(md.bones), 'meshes': len(md.objects[0].meshes), 'triangles': drawn,
             'stock_meshes_retained': 0, 'muzzles': a.muzzles}
+
+
+class Model:
+    """A kind built from its model folder alone (no procedural fallback), as make_tracked_combat.model_module hands the
+    vehicles' modules (vulcan_model's API): the 2S6, the PzH 2000, the Sturmtiger, the emplacements (CAMERA: the
+    vehicle SGO's camera, game_object_camera_setting)."""
+
+    def __init__(self, kind: str, camera: dict) -> None:
+        self.kind = kind
+        self.__name__ = f'wt_tracked.Model[{kind}]'
+        self.OUT_ARC = f'EDF6VC_{kind.upper()}.MRAB'
+        self.OUT_CAS = f'EDF6VC_{kind.upper()}.CAS'
+        self.HOST_MDB = t.HOST_MDB
+        self.CAMERA = camera
+
+    def available(self) -> bool:
+        return available(self.kind)
+
+    def parts(self, a: t.Assembly) -> None:
+        parts(a, self.kind)
+
+    def muzzle_local(self, game) -> dict:  # noqa: ANN001 - rootcpk.Game
+        return muzzle_local(game, self.kind)
+
+    def ejection_local(self, game) -> dict:  # noqa: ANN001
+        return ejection_local(game, self.kind)
+
+    def build_with_info(self, game):  # noqa: ANN001, ANN201
+        return build_with_info(game, self.kind)
+
+    def build(self, game) -> bytes:  # noqa: ANN001
+        return self.build_with_info(game)[0]
+
+    def check(self, arc: bytes, host=None) -> dict:  # noqa: ANN001
+        return check(arc, self.kind, host)
+
+    def animation(self, game, md=None) -> bytes:  # noqa: ANN001
+        return animation(game, self.kind, md)
+
+    def collision_layout(self) -> dict:
+        return collision_layout(self.kind)

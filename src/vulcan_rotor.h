@@ -1,5 +1,5 @@
-// M163's visual rotor. Native firing state is a shot activity source, not a
-// keyboard latch: empty belts/reload/remote operators must not invent firing.
+// M163's visual rotor (the quad Vulcan's four: pylib/quadvulcan_model.py ROTORS). Native firing state is a shot
+// activity source, not a keyboard latch: empty belts/reload/remote operators must not invent firing.
 #pragma once
 #include <cmath>
 #include <cstdint>
@@ -9,6 +9,14 @@ bool InstallVulcanRotor() noexcept;
 void ResetVulcanRotors() noexcept;
 namespace vulcanrotor {
 constexpr wchar_t kBone[]=L"edf6vc_m61_rotor";
+// Every rotor a vehicle may have: the M163's one (kBone), the quad Vulcan's three more (pylib/quadvulcan_model.py ROTORS).
+constexpr const wchar_t* kBones[]={kBone,L"edf6vc_m61_rotor_2",L"edf6vc_m61_rotor_3",L"edf6vc_m61_rotor_4"};
+constexpr int kMostBones=sizeof(kBones)/sizeof(kBones[0]);
+// The M61s' weapon files (tools/make_tracked_combat.py: the M163's two belts, the quad's HE pair and AP pair, the
+// Phalanx's pair, EDF6VC_CIWS_PHALANX_*): one
+// of their holders shooting spins every rotor.
+constexpr const wchar_t* kGunPrefixes[]={L"EDF6VC_VULCAN_",L"EDF6VC_QUADVULCAN_",L"EDF6VC_QVULCAN_",L"EDF6VC_CIWS_"};
+constexpr int kMostHolders=8;
 constexpr float kPi=3.14159265358979323846f,kTau=2*kPi;
 // M163's 3000 rounds/min cyclic mode / six barrels = 500 rotor rpm.
 // At a 60 Hz update this is 50 degrees, not a symmetry-aliasing 60 degrees.

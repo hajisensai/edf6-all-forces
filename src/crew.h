@@ -920,6 +920,10 @@ bool PlayerSazabiCue(SazabiCue* out) noexcept;
 bool SazabiCamera(const unsigned char* seat,const float* wasEye,const float* wasLook,float* eye,float* look) noexcept;
 void SazabiFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
 void DreadnoughtFrame(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, after the stock input
+// The fixed emplacements (emplacement.cpp): one (a V603 with the marker bone), and its driver's drive stick cleared
+// (crew.cpp InputHook, just before the stock input).
+bool IsEmplacement(const unsigned char* vehicle) noexcept;
+void EmplacementInput(unsigned char* vehicle) noexcept;
 void DreadnoughtInput(unsigned char* vehicle) noexcept;   // crew.cpp InputHook, before it: the local rider's aim stick
 bool InstallDreadnought() noexcept;                   // after InstallBody506
 void ResetDreadnought() noexcept;                     // a new mission

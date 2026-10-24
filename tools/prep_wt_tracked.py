@@ -70,6 +70,11 @@ class Vehicle:
     split_idler: str | None = None        # the wheel bone whose outer half goes on tire_moveH (M113: no H station)
     collision: dict[str, list[str]] = field(default_factory=dict)   # proxy -> node regexes (default: by bone)
     clip: dict[str, tuple[int, str, float]] = field(default_factory=dict)  # proxy -> (axis, 'min'/'max', value)
+    hull: str = 'x_root'                  # the hull's node (winding_flipped measures its signed volume)
+    missiles_keep: int = 0                # missile tubes the launcher's muzzles take (the outermost, half a side); 0: all
+    # The turret's room (min, max corners): a node no rule names whose box lies inside it rides the turret (its armour,
+    # hatches and fittings, too many to name), not the hull.
+    turret_box: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
 
 
 M163 = Vehicle(
@@ -97,6 +102,9 @@ M163 = Vehicle(
     # 0.20 m gap through 0.15 m of recoil and a 1 cm skin on each).
     clip={'cannon_l': (2, 'min', 0.75), 'cannon_r': (2, 'max', 0.55)},
 )
+
+# A rule's bone DROP leaves the node out (a variant's parts exported over the base model's: the 2S6M1's radar and sights).
+DROP = 'drop'
 
 BMPT = Vehicle(
     kind='bmpt', folder='wt_bmpt', title='BMPT "Terminator" (War Thunder)',
@@ -128,7 +136,126 @@ BMPT = Vehicle(
                                r'9m120_rocket|bone_gun|ex_decor_01|bone_mg_gun_twin)$']},
 )
 
-VEHICLES = {'m163': M163, 'bmpt': BMPT}
+# The 2S6 Tunguska (2026-10-24: the user's 「各种现实的炮台、近防炮……出名、独特的载具」: guns and missiles in one mount, what
+# the M163 has not): two twin 30 mm 2A38M and eight 9M311 missiles beside them, the T-72-like running gear (the idler
+# in front, six road wheels, the sprocket at the back: the BMPT's stations). The export carries the 2S6M1's search
+# radar, sight and turret fittings over the 2S6's own (the m1_turret texture): those are dropped.
+TUNGUSKA = Vehicle(
+    kind='tunguska', folder='wt_tunguska', title='2S6 Tunguska (War Thunder)',
+    source_url='https://sketchfab.com/3d-models/2s6-tunguska-war-thunder-dd5c6c0b5497401daf222c57a22f6c23',
+    rules=[
+        (r'^(antenna_target_location_01|antenna_target_location_mount_01|optic_turret_06|turret_add_01)$', DROP),
+        (r'^wheel_([lr])_front$', 'tire_moveA_{0}'),
+        (r'^wheel_([lr])_0([1-6])$', 'tire_move{B}_{0}'),
+        (r'^wheel_([lr])_drive$', 'tire_moveH_{0}'),
+        (r'^track_([lr])$', 'catapi_body'),
+        (r'^gun_barrel_0[25]$', 'cannon_slide_l'),               # +x: the left 2A38M's two barrels
+        (r'^gun_barrel_0[16]$', 'cannon_slide_r'),
+        (r'^gun_02$', 'cannon_l'),                               # each gun's housing elevates on its own side
+        (r'^gun_01$', 'cannon_r'),
+        (r'^antenna_target_location$', 'doppler_radar'),         # the search radar on the turret's back
+        (r'^antenna_target_tagging$', 'tracking_radar'),         # the tracking radar in front
+        (r'^(bone_turret|ex_armor_[lr]_.*|hatch_(0[789]|10)|ex_lantern_01|ex_mount_lantern|optic_turret_05|roll_.*|'
+         r'turret_add|antenna_0[12]|antenna_target_.*_mount|bone_commander_sight_h|9m311_rocket)$', 'cannon_main'),
+    ],
+    turret=(0.0, 1.88, 0.90),        # ring circle fit at y 1.85..2.0: centre z ~0.94, r ~1.19; the hull roof 1.88
+    trunnion={'cannon_l': (2.59, -0.15), 'cannon_r': (2.59, -0.15)},   # the barrels' axis through the housings' middle
+    barrels={'left': 'gun_barrel_02', 'right': 'gun_barrel_01'},
+    missiles='9m311_rocket', missiles_keep=4, hull='root',
+    collision={'cannon_l': [r'^(gun_02|gun_barrel_0[25])$'], 'cannon_r': [r'^(gun_01|gun_barrel_0[16])$']},
+)
+
+# The PzH 2000 (2026-10-24: an upgrade of the self-propelled howitzer, 「升级版（定位相近但是数值高）」: its turret turns,
+# the plugin's twin-gun one's does not): one 155 mm L52 (both native holders on its barrel, in turn), seven road wheels
+# a side, the sprocket in front and the idler behind: A the sprocket, B..G road wheels 1..6, H the idler; the seventh
+# road wheel stays on the hull (the V603 has eight stations). The turret (far back) takes every fitting over the roof.
+PZH2000 = Vehicle(
+    kind='pzh2000', folder='wt_pzh2000', title='PzH 2000 (War Thunder)',
+    source_url='https://sketchfab.com/3d-models/pzh-2000-war-thunder-remodel-3391b53c325c45f6a9aa769ba8c511ab',
+    rules=[
+        (r'^wheel_([lr])_drive$', 'tire_moveA_{0}'),
+        (r'^wheel_([lr])_0([1-6])$', 'tire_move{B}_{0}'),
+        (r'^wheel_([lr])_back$', 'tire_moveH_{0}'),
+        (r'^track_([lr])$', 'catapi_body'),
+        (r'^gun_barrel$', 'cannon_slide_l'),
+        (r'^bone_gun$', 'cannon_l'),
+        (r'^bone_commander_sight_h$', 'doppler_radar'),          # the commander's sight head
+        (r'^mg_aa_mount_h$', 'tracking_radar'),                  # the roof machine gun's ring
+        (r'^(bone_turret|bone_turret_01|antenna_0[12]|bone_mg_aa_v|mg_aa_mount_v|ammo)$', 'cannon_main'),
+    ],
+    turret=(0.0, 1.84, -2.30),       # ring circle fit at y 0.82: centre z -2.15, r 0.9 (the basket); outer at y 1.9: -2.45
+    trunnion={'cannon_l': (2.45, -0.90), 'cannon_r': (2.45, -0.90)},   # the barrel's axis behind the mantlet
+    barrels={'left': 'gun_barrel', 'right': 'gun_barrel'},
+    turret_box=((-1.7, 1.95, -4.7), (1.7, 5.0, 0.6)),
+    collision={'cannon_l': [r'^(gun_barrel|bone_gun)$'], 'cannon_r': [r'^bone_gun$']},
+)
+
+# The Sturmtiger (WT: 38 cm Sturmmorser): no turret, a 380 mm rocket mortar in the casemate's ball mount, which the
+# V603's turret hinge turns a little (make_tracked_combat TURRET_LIMITS: +-10 deg). The Tiger's interleaved road wheels:
+# A the sprocket in front, B..G road wheels 1..6, H the idler behind; 7 and 8 stay on the hull.
+STURMTIGER = Vehicle(
+    kind='sturmtiger', folder='wt_sturmtiger', title='Sturmtiger (War Thunder: 38 cm Sturmmorser)',
+    source_url='https://sketchfab.com/3d-models/38-cm-sturmmorser-war-thunder-31033223348b4d0982ed4ee27b4f5afd',
+    rules=[
+        (r'^wheel_([lr])_drive$', 'tire_moveA_{0}'),
+        (r'^wheel_([lr])_0([1-6])$', 'tire_move{B}_{0}'),
+        (r'^wheel_([lr])_front$', 'tire_moveH_{0}'),             # WT calls the rear idler "front"
+        (r'^track_([lr])$', 'catapi_body'),
+        (r'^(gun_barrel|380mm_spgr_4581)$', 'cannon_slide_l'),   # the mortar and the round in it
+        (r'^bone_gun$', 'cannon_l'),
+        (r'^hatch_01$', 'doppler_radar'),                        # the commander's hatch
+        (r'^hatch_02$', 'tracking_radar'),                       # the loading hatch
+    ],
+    turret=(-0.285, 2.10, 1.0),      # the ball mount's centre: the mortar's axis (its box) behind the casemate's face
+    trunnion={'cannon_l': (2.10, 1.10), 'cannon_r': (2.10, 1.10)},
+    barrels={'left': 'gun_barrel', 'right': 'gun_barrel'},
+    collision={'cannon_main': [r'^bone_gun$'], 'cannon_l': [r'^(gun_barrel|380mm_spgr_4581)$'], 'cannon_r': [r'^bone_gun$']},
+)
+
+# The Apocalypse (Command & Conquer: Red Alert 2's, ska-ara's Sketchfab model; the user, 2026-10-24: 「再做个冷战那种
+# 天启」): tools/glb_to_wt_obj.py names its pieces in War Thunder's way (its source is a .glb: apocalypse.obj there). Twin
+# guns, a missile pod either side of the turret (its outermost tubes launch), two track units a side: A / H the front
+# and rear end wheels, B..G six of its eight road wheels (glb_to_wt_obj.stations).
+APOCALYPSE = Vehicle(
+    kind='apocalypse', folder='wt_apocalypse', title='Apocalypse tank (Red Alert 2)',
+    source_url='https://sketchfab.com/3d-models/red-alert-2-soviet-apocalypse-tank-v2-bfc38d9673b348c4aa258442d049b620',
+    rules=[
+        (r'^wheel_([lr])_([A-H])$', 'tire_move{1}_{0}'),
+        (r'^track_([lr])$', 'catapi_body'),
+        (r'^gun_barrel_l$', 'cannon_slide_l'),
+        (r'^gun_barrel_r$', 'cannon_slide_r'),
+        (r'^antenna_l$', 'doppler_radar'),
+        (r'^antenna_r$', 'tracking_radar'),
+        (r'^(turret|rocket|missile_pod)$', 'cannon_main'),
+    ],
+    turret=(0.0, 2.20, 1.10),        # ring circle fit at y 2.0..2.5: centre z 1.0..1.16, r 1.85..2.1; the hull roof 2.2
+    trunnion={'cannon_l': (2.75, 2.50), 'cannon_r': (2.75, 2.50)},     # the barrels' axis inside the turret's face
+    barrels={'left': 'gun_barrel_l', 'right': 'gun_barrel_r'},
+    missiles='rocket', missiles_keep=4,
+)
+
+# The TOS-1 (lm9241221's low-poly Sketchfab model through tools/glb_to_wt_obj.py; the user, 2026-10-24: 「升级版」 of
+# the Katyusha): a T-72 hull, its 30-tube thermobaric launcher pack on a turntable (both native holders on the pack, in
+# turn); the idler in front (A), six road wheels, the sprocket behind (H).
+TOS1 = Vehicle(
+    kind='tos1', folder='wt_tos1', title='TOS-1 Buratino',
+    source_url='https://sketchfab.com/3d-models/tos-1-buratino-low-poly-255fba6ba6c44b97aaea91d0225d0c75',
+    rules=[
+        (r'^wheel_([lr])_([A-H])$', 'tire_move{1}_{0}'),
+        (r'^track_([lr])$', 'catapi_body'),
+        (r'^launcher$', 'cannon_slide_l'),
+        (r'^antenna_l$', 'doppler_radar'),
+        (r'^antenna_r$', 'tracking_radar'),
+        (r'^turret$', 'cannon_main'),
+    ],
+    turret=(0.0, 1.45, -0.98),       # the turntable's middle (its box: x -1.12..1.22, z -2.8..0.85), on the hull roof
+    trunnion={'cannon_l': (1.60, -2.70), 'cannon_r': (1.60, -2.70)},   # the pack's back end (z -2.83), at its foot
+    barrels={'left': 'launcher', 'right': 'launcher'},
+    collision={'cannon_l': [r'^launcher$'], 'cannon_r': [r'^launcher$']},
+)
+
+VEHICLES = {'m163': M163, 'bmpt': BMPT, 'tunguska': TUNGUSKA, 'pzh2000': PZH2000, 'sturmtiger': STURMTIGER,
+            'apocalypse': APOCALYPSE, 'tos1': TOS1}
 LETTERS = 'ABCDEFGH'
 
 
@@ -227,6 +354,16 @@ def bone_of(v: Vehicle, name: str) -> str:
 def triangle_bones(v: Vehicle, src: Source) -> np.ndarray:
     """Each triangle's bone; the split idler's outer half (x beyond its middle) on tire_moveH."""
     by_obj = [bone_of(v, node(o)) for o in src.objects]
+    if v.turret_box:
+        lo, hi = (np.asarray(c) for c in v.turret_box)
+        for k, o in enumerate(by_obj):
+            if o != 'body' or any(re.match(p, node(src.objects[k])) for p, _b in v.rules):
+                continue
+            sel = src.tri_obj == k
+            if sel.any():
+                P = src.positions[np.unique(src.tri_v[sel])]
+                if (P.min(0) >= lo).all() and (P.max(0) <= hi).all():
+                    by_obj[k] = 'cannon_main'
     bones = np.asarray(by_obj, dtype=object)[src.tri_obj]
     if v.split_idler:
         for side, sign in (('l', 1.0), ('r', -1.0)):
@@ -238,6 +375,14 @@ def triangle_bones(v: Vehicle, src: Source) -> np.ndarray:
             outer = np.where(sel)[0][P[..., 0].mean(axis=1) * sign > mid * sign]
             bones[outer] = f'tire_moveH_{side}'
     return bones
+
+
+def drop(v: Vehicle, src: Source) -> None:
+    """Leave out the triangles of every node a rule sends to DROP."""
+    gone = np.asarray([bone_of(v, node(o)) == DROP for o in src.objects])[src.tri_obj]
+    if gone.any():
+        keep = ~gone
+        src.tri_v, src.tri_t, src.tri_obj, src.tri_mat = (a[keep] for a in (src.tri_v, src.tri_t, src.tri_obj, src.tri_mat))
 
 
 def box(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -294,9 +439,9 @@ def corner_normals(P: np.ndarray, tv: np.ndarray) -> np.ndarray:
     return np.asarray(normals), normal_of.reshape(-1, 3)
 
 
-def winding_flipped(src: Source) -> bool:
+def winding_flipped(src: Source, hull: str = 'x_root') -> bool:
     """Whether the triangles are clockwise seen from outside: the hull's (x_root) signed volume is negative."""
-    sel = np.asarray([node(o) == 'x_root' for o in src.objects])[src.tri_obj]
+    sel = np.asarray([node(o) == hull for o in src.objects])[src.tri_obj]
     T = src.positions[src.tri_v[sel]]
     c = T.reshape(-1, 3).mean(axis=0)
     vol = np.einsum('ij,ij->i', T[:, 0] - c, np.cross(T[:, 1] - c, T[:, 2] - c)).sum() / 6
@@ -384,7 +529,8 @@ def occlusion_png(src_file: str, out_file: str) -> None:
 # ------------------------------------------------------------------------------------------ build
 
 def prepare(v: Vehicle, src: Source, out: str) -> dict:
-    if winding_flipped(src):
+    drop(v, src)
+    if winding_flipped(src, v.hull):
         src.tri_v = src.tri_v[:, ::-1].copy()
         src.tri_t = src.tri_t[:, ::-1].copy()
         flipped = True
@@ -490,6 +636,9 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
         for P in instances(src, v.missiles):
             lo, hi = box(P)
             tubes.append([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, hi[2]])
+        if v.missiles_keep:     # the outermost, half on each side, the higher first where they stand level
+            tubes = [p for sign in (1, -1) for p in sorted((p for p in tubes if p[0] * sign > 0),
+                                                           key=lambda p: (-round(abs(p[0]), 1), -p[1]))[:v.missiles_keep // 2]]
         tubes.sort(key=lambda p: (-round(p[0], 1), p[1]))     # left low, left high, right low, right high
     muzzles['missiles'] = [{'bone': 'cannon_main', 'point': p} for p in tubes]
     ejections = {}

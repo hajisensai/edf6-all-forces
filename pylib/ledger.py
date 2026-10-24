@@ -36,7 +36,7 @@ from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_files.json'
 BACKUP = '.edf6vc_files_backup'
-OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls', 'katyusha', 'bigmap', 'artillery', 'chute', 'drill', 'stockstores', 'sidecar', 'sedan', 'emc', 'ultimate', 'vulcan', 'bmpt', 'sazabi', 'dreadnought', 'proteus', 'optics', 'loadout', 'edf41', 'menu_preview', 'roomui', 'edf41maps', 'edf41sound', 'edf5dlc', 'edf41menubg', 'edf41outfit')
+OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls', 'katyusha', 'bigmap', 'artillery', 'chute', 'drill', 'stockstores', 'sidecar', 'sedan', 'emc', 'ultimate', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'sazabi', 'dreadnought', 'proteus', 'optics', 'loadout', 'edf41', 'menu_preview', 'roomui', 'edf41maps', 'edf41sound', 'edf5dlc', 'edf41menubg', 'edf41outfit')
 LEGACY = 'legacy'   # a file from before the ledger that a tool needs: its writer is not recorded
 
 

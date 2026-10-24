@@ -1,0 +1,68 @@
+{
+ "format": 1,
+ "kind": "railgun",
+ "title": "Railgun turret",
+ "prepared_from": "model.glb",
+ "scale": 0.6886203070311427,
+ "yaw": 0.0,
+ "materials": [
+  {
+   "name": "edf6vc_railgun_0",
+   "template": "v603_body",
+   "albedo": "textures/railgun_0.png",
+   "source": "Material.001"
+  }
+ ],
+ "parts": [
+  {
+   "name": "base.edf6vc_railgun_0",
+   "role": "base",
+   "material": 0,
+   "triangles": 1856,
+   "vertices": 2664
+  },
+  {
+   "name": "turret.edf6vc_railgun_0",
+   "role": "turret",
+   "material": 0,
+   "triangles": 15267,
+   "vertices": 15496
+  },
+  {
+   "name": "gun.edf6vc_railgun_0",
+   "role": "gun",
+   "material": 0,
+   "triangles": 1464,
+   "vertices": 1596
+  }
+ ],
+ "pivots": {
+  "ring": [
+   -0.0001976725696719875,
+   -3.2580767263452306
+  ],
+  "trunnion": [
+   1.8300029445660608,
+   -1.9549005271076982
+  ],
+  "muzzles": {
+   "left": [
+    0.0,
+    2.1364240664773004,
+    7.820335865020752
+   ],
+   "right": [
+    0.0,
+    2.1364240664773004,
+    7.820335865020752
+   ]
+  }
+ },
+ "triangles": 18587,
+ "size": [
+  6.806172605093796,
+  4.5,
+  15.640671984945364
+ ],
+ "source": "https://sketchfab.com/3d-models/railgun-turret-dec38c449d5c45b68201c7e7c4d14bb4"
+}

@@ -42,6 +42,8 @@ plugin (GENERATOR) hidden, and that makes only the variant files not there yet, 
 from __future__ import annotations
 
 import contextlib
+import functools
+import importlib
 import os
 import re
 import sys
@@ -496,8 +498,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_edf5_campaign
     import make_emc
     import make_ultimate
-    import make_vulcan
-    import make_bmpt
+    import make_tracked_combat
     import make_chute
     import make_jets
     import edf41_objects
@@ -544,8 +545,9 @@ def install(game: str, campaign_requested: bool = False) -> None:
     drill = build_asset(cache, make_drill, '钻头战车')
     emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
     ult = build_asset(cache, make_ultimate, '终极支援「天罚」特效')
-    vulcan = build_asset(cache, make_vulcan, 'M163 火神炮车（HE / AP 双弹链）')
-    bmpt = build_asset(cache, make_bmpt, 'BMPT（双 30 mm 机炮与反坦克导弹）')
+    # The vehicles and emplacements on the V603 (tools/make_tracked_combat.py LABELS), each by its make_<kind> tool.
+    tracked = {kind: build_asset(cache, importlib.import_module('make_' + kind), label)
+               for kind, label in make_tracked_combat.LABELS.items()}
     stock = None
     if stock_stores:
         print('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……')
@@ -585,8 +587,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_drill.install(game, drill) if drill is not None else []) + \
             (make_emc.install(game, emc) if emc is not None else []) + \
             (make_ultimate.install(game, ult) if ult is not None else []) + \
-            (make_vulcan.install(game, vulcan) if vulcan is not None else []) + \
-            (make_bmpt.install(game, bmpt) if bmpt is not None else []) + \
+            [path for kind, files in tracked.items() if files is not None
+             for path in make_tracked_combat.install(game, files, kind)] + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
             (make_sedan.install(game, sedan) if sedan is not None else []) + \
             (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
@@ -685,7 +687,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('vulcan', vulcan), ('bmpt', bmpt), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), *tracked.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -759,8 +761,7 @@ def uninstall(game: str) -> None:
     import make_drill
     import make_emc
     import make_ultimate
-    import make_vulcan
-    import make_bmpt
+    import make_tracked_combat
     import make_chute
     import make_jets
     import edf41_objects
@@ -802,7 +803,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, make_vulcan.remove, make_bmpt.remove, make_emc.remove, make_ultimate.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), make_emc.remove, make_ultimate.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -1262,7 +1263,7 @@ def check_package() -> int:
     import make_tracked_combat
     import frozen_collision_probe
     frozen_collision_probe.check()
-    for kind in ('vulcan', 'bmpt'):
+    for kind in make_tracked_combat.KINDS:
         builder = importlib.import_module('make_' + kind)
         model = make_tracked_combat.model_module(kind)
         assert builder.OWNER == kind and kind in ledger.OWNERS and kind in buildcache.GROUPS

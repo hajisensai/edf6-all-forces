@@ -68,6 +68,8 @@ target_sources(EDF6VehicleCrew PRIVATE src/boarding.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/primer.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/sazabi.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/dreadnought.cpp)
+# The fixed emplacements: never driven (src/emplacement.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/emplacement.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/sazabi_sound.cpp)
 # What a blocked jet ran into, logged (src/impact.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/impact.cpp)
@@ -1910,6 +1912,8 @@ add_test(NAME npc_action_look_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SO
 add_test(NAME tracked_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_collision.py")
 # The M163 / BMPT from their War Thunder model folders (pylib/wt_tracked.py): prep rules always, the assets with the game.
 add_test(NAME wt_tracked COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_wt_tracked.py")
+# The fixed emplacements (pylib/emplacement_model.py, src/emplacement.cpp): registry anywhere, assets with the game.
+add_test(NAME emplacement COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_emplacement.py")
 # The Havok tagfile graph and its writer (pylib/hkfile.py), the SHKT / SGO binding checks (pylib/shkt_check.py): the
 # portable parts always, the stock files' round trips and mutations with the game.
 add_test(NAME hkfile COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_hkfile.py")

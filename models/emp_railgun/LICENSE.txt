@@ -1,0 +1,11 @@
+Model Information:
+* title:	Railgun turret
+* source:	https://sketchfab.com/3d-models/railgun-turret-dec38c449d5c45b68201c7e7c4d14bb4
+* author:	Obi-Wanya (https://sketchfab.com/Obi-Wanya)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Railgun turret" (https://sketchfab.com/3d-models/railgun-turret-dec38c449d5c45b68201c7e7c4d14bb4) by Obi-Wanya (https://sketchfab.com/Obi-Wanya) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

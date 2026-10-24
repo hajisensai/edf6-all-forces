@@ -437,12 +437,12 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
             setup.items = [dsgo.Node([float(tier[0]), float(tier[1])]), dsgo.Node(list(ground.setup)), dsgo.Node([])]
             weapons = []
         native_weapons = weapons
-        if call.ground == 'bmpt':
-            # BMPT keeps the V603's native paired cannon and adds its stores: the four-tube missile, the guns' APDS
-            # belt (two barrels) and the thermobaric missile. An explicit 2 -> 6 holder contract with
-            # make_tracked_combat.vehicle_sgo (BMPT_SLOTS); other ground requests stay strict.
-            if len(weapons) != 2 or len(jet_weapons) != 6:
-                raise ValueError('BMPT request requires two native cannon mounts and four added stores')
+        if ground.slots and len(ground.slots) > 2:
+            # The BMPT and the quad Vulcan keep the V603's native paired cannon and add their stores (the BMPT's
+            # four-tube missile, APDS belt and thermobaric missile; the quad's AP belt): an explicit 2 -> n holder
+            # contract with make_tracked_combat.vehicle_sgo (GroundVehicle.slots); other ground requests stay strict.
+            if len(weapons) != 2 or len(jet_weapons) != len(ground.slots):
+                raise ValueError(f'{call.ground} request requires two native cannon mounts and its added stores')
             # Each added holder after its slot (GroundVehicle.slots): the APDS barrels the native gun mount of their
             # side (its BodyRecoil kick, as the HE belt's: one firing shake whichever belt fires), a missile no hull
             # impulse (still a BodyRecoil variant). The same rule as make_tracked_combat.vehicle_sgo's entity.
@@ -453,7 +453,7 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
                 elif side != 'right':
                     entry.items[1] = Node([0.0, 0.0])
                 return entry
-            weapons = [*weapons, *(extra(side) for side in vc.GROUND_VEHICLES['bmpt'].slots[2:])]
+            weapons = [*weapons, *(extra(side) for side in ground.slots[2:])]
         if len(weapons) != len(jet_weapons):
             raise ValueError(f'{template_of(call)}: {len(weapons)} weapons in its setup, {call.ground} has {len(jet_weapons)}')
         swap.update({str(w.items[0]).lower(): new for w, new in zip(native_weapons, jet_weapons)})

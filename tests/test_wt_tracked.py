@@ -205,7 +205,7 @@ class WtAssetTests(unittest.TestCase):
                 self.assertEqual(rf.problems(md, shkt, r.get('ragdoll').items[1].data), [])
                 radii = {row[0]: row[8] for row in dsgo.to_py(r.get('car_base_wheel'))}
                 wheels = wt.load(kind).info['wheels']
-                self.assertEqual(len(radii), 10 if kind == 'vulcan' else 12)
+                self.assertEqual(len(radii), 10 if kind in ('vulcan', 'quadvulcan') else 12)
                 for bone, radius in radii.items():
                     self.assertAlmostEqual(radius, wheels[bone]['radius'], places=5)
 
@@ -231,6 +231,46 @@ class WtAssetTests(unittest.TestCase):
                 self.assertEqual(len(uv), len(pos))
                 self.assertTrue(np.allclose(np.linalg.norm(nrm, axis=1), 1, atol=1e-3))
                 self.assertLess(int(tris.max()), len(pos))
+
+    def test_quad_vulcan_is_four_m61s_on_the_m163_cradle(self) -> None:
+        # The user, 2026-10-24: 「火神炮做一个四管的」「我说的四管是4联装转轮机枪」: four six-barrel rotors, not one.
+        import dsgo
+        import mdb
+        import quadvulcan_model as q
+        import vcobjects as vc
+        base, spec = wt.load('vulcan'), wt.load('quadvulcan')
+        md, _rab = self.model('quadvulcan')
+        world = mdb.bind_world(md)
+        (one,) = [p for p in base.info['parts'] if p['bone'] == q.SOURCE_ROTOR]
+        (axis,) = [b['origin'] for b in base.info['visual_bones'] if b['name'] == q.SOURCE_ROTOR]
+        for bone, (dx, dy) in zip(q.ROTORS, q.OFFSETS):
+            with self.subTest(rotor=bone):
+                i = md.bone_index(bone)
+                self.assertGreaterEqual(i, 0)
+                self.assertEqual(md.name_of(md.bones[md.bones[i].parent].name), 'cannon_slide_l')
+                np.testing.assert_allclose(world[i][12:15], (axis[0] + dx, axis[1] + dy, axis[2]), atol=1e-5)
+                (k,) = [k for k, p in enumerate(spec.info['parts']) if p['bone'] == bone]
+                self.assertEqual(spec.info['parts'][k]['triangles'], one['triangles'])
+                P = spec.part(k)[0]
+                np.testing.assert_allclose((P[:, 0].min() + P[:, 0].max()) / 2 - dx,
+                                           (base.part(base.info['parts'].index(one))[0][:, 0].min()
+                                            + base.part(base.info['parts'].index(one))[0][:, 0].max()) / 2, atol=1e-5)
+        # The clusters clear each other: the barrels' ring (and clamps) is narrower than the step between axes.
+        k0 = base.info['parts'].index(one)
+        P = base.part(k0)[0]
+        self.assertLess(float(P[:, 0].max() - P[:, 0].min()), q.CLUSTER_STEP)
+        # Every holder on the one cradle; the HE pair native, the AP pair the second loadout, two rounds a shot.
+        vehicle = vc.GROUND_VEHICLES['quadvulcan']
+        r = dsgo.parse(self.files['quadvulcan'][f'OBJECT/{vehicle.sgo}.SGO']).root
+        self.assertEqual({s[0] for s in dsgo.to_py(r.get('vehicle_weapon_setting'))}, {'cannon_slide_l'})
+        self.assertEqual([vc.store_of(w) for w in vehicle.weapons], [None, None, ('QVULCAN_AP', 1000), ('QVULCAN_AP_R', 1000)])
+        self.assertEqual({(vc.STORES[k].group, vc.STORES[k].barrel) for k in ('QVULCAN_AP', 'QVULCAN_AP_R')}, {(4, 0), (4, 1)})
+        for path in vehicle.weapons:
+            gun = dsgo.parse(self.files['quadvulcan'][f'WEAPON/{path.rsplit("/", 1)[1].upper()}']).root
+            ap = vc.store_of(path) is not None
+            self.assertEqual((gun.get('FireCount'), gun.get('FireInterval')), (2.0, 1.0))
+            self.assertEqual((gun.get('AmmoIsPenetration'), gun.get('AmmoExplosion')), (1.0, 0.0) if ap else (0.0, 0.6))
+        self.assertFalse(vehicle.alternate, 'both columns fire every frame')
 
 
 if __name__ == '__main__':
