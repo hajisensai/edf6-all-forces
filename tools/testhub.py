@@ -276,7 +276,10 @@ def dump_times(path: str) -> tuple[int | None, int | None]:
 
 # The plugins' first line of a run (src/plugin.cpp EML6_Load, autoturret/src/plugin.cpp): time of day only, the date
 # is the log's. Both logs are appended to across runs, so the last such line is where the run the logs end with began.
-_LOADING = re.compile(rb'\[(\d\d):(\d\d):(\d\d)(?:\.\d{3})?\] EDF6(?:VehicleCrew|AutoTurret) [^\r\n]* loading\r?$', re.M)
+# Since the build id went into it the line ends `loading (build <id>, <file>)`; older builds end it at `loading`.
+# Report #22 (2026-10-22): matching the bare form only dated the run by an old build's line and refused its own dumps.
+_LOADING = re.compile(rb'\[(\d\d):(\d\d):(\d\d)(?:\.\d{3})?\] EDF6(?:VehicleCrew|AutoTurret) [^\r\n]* loading'
+                      rb'(?: \(build [^\r\n]*\))?\r?$', re.M)
 SESSION_LOGS = ('EDF6VehicleCrew.log', 'EDF6VehicleCrew.log.1', 'EDF6AutoTurret.log', 'EDF6AutoTurret.log.1')
 SESSION_EARLY = 120   # a run's process starts at most this long before its plugins log `loading` (seconds; 0-1 s
                       # measured 2026-10-18: EDF6.exe.51968 started 03:51:57, its log's loading 03:51:58)
