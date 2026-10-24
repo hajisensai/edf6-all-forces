@@ -8,6 +8,7 @@
 #include "../src/turretaim.cpp"
 namespace crew {
 bool TurretCamTurret(const void*,unsigned) noexcept{return false;}
+bool FirstPersonVehicleView(const void*,unsigned) noexcept{return false;}
 bool CameraRay(float*,float*) noexcept{return false;}
 bool CameraRayOf(const void*,float*,float*) noexcept{return false;}
 bool MapOwnsView() noexcept{return false;}

@@ -232,19 +232,29 @@ bool ReadAim(const unsigned char* vehicle,const unsigned char* seat,const Gun& g
     float local[3];ToFrame(Frame(vehicle),gun.dir,local);
     Angles(local,aim.barrel);
     if(!AllFinite(aim.angle,2) || !AllFinite(aim.min,2) || !AllFinite(aim.max,2) || !AllFinite(aim.barrel,2))return false;
+    // The main turret's (seat 0's) axes: a side gun hung on it (under cannon_main) turns in the hull's frame with it.
+    float parent[2]={0.0f,0.0f};
+    const unsigned char* const main=edf::SeatAt(const_cast<unsigned char*>(vehicle),0);
+    if(main && main!=seat && Readable(main+kSeatAim+kAimAxes,kAxisStride+kAxisAngle+4))
+        for(int a=0;a<2;++a)parent[a]=At<float>(main+kSeatAim+kAimAxes+a*kAxisStride,kAxisAngle);
+    if(!AllFinite(parent,2))parent[0]=parent[1]=0.0f;
     // Learn each axis' sign from the barrel's own motion: the pivot geometry is the model's, and a
-    // wrong guess would drive the gun into its stop and keep it there.
+    // wrong guess would drive the gun into its stop and keep it there. The barrel is measured in the hull's frame, so a
+    // frame the main turret turned is no measurement of this axis: its turn is in `turned` and not in `moved` (the user,
+    // 2026-10-25, "坦克的炮管会360度动": the main turret slewing one way while the side gun turns the other gave a ratio
+    // of (m - s) / m < 0, the sign flipped within four frames and the gun drove away from its target round its whole
+    // circle, the error growing, while the main turret kept turning). Learned only on frames it held still.
+    const bool parentStill=track.geoValid && std::fabs(Wrap(parent[0]-track.parentAxis[0]))<kParentStill &&
+                           std::fabs(parent[1]-track.parentAxis[1])<kParentStill;
     const float initial[2]={cfg.gunnerYawSign,cfg.gunnerPitchSign};
     for(int a=0;a<2;++a) {
         if(track.geoSign[a]==0.0f)track.geoSign[a]=initial[a]>=0.0f ? 1.0f : -1.0f;
-        const float moved=aim.angle[a]-track.geoAxis[a];
-        const float turned=a==0 ? Wrap(aim.barrel[a]-track.geo[a]) : aim.barrel[a]-track.geo[a];
-        const float ratio=std::fabs(moved)>0.002f ? turned/moved : 0.0f;
-        if(track.geoValid && std::fabs(ratio)>0.3f && std::fabs(ratio)<3.0f)
-            track.geoSign[a]+=0.2f*((ratio>0.0f ? 1.0f : -1.0f)-track.geoSign[a]);
+        track.geoSign[a]=LearnSign(track.geoSign[a],aim.angle[a]-track.geoAxis[a],
+                                   a==0 ? Wrap(aim.barrel[a]-track.geo[a]) : aim.barrel[a]-track.geo[a],parentStill);
         track.geoAxis[a]=aim.angle[a];track.geo[a]=aim.barrel[a];
         aim.sign[a]=track.geoSign[a]>=0.0f ? 1.0f : -1.0f;
     }
+    track.parentAxis[0]=parent[0];track.parentAxis[1]=parent[1];
     track.geoValid=true;
     return true;
 }
@@ -322,8 +332,8 @@ bool OnTarget(const Gun& gun,const float* error,float distance,float widen) noex
 }
 
 // A gunner seat's aim. The player in it (this machine's): their bindings and lock (designate.cpp) and the HUD's
-// readout; their lock is the only target while it lasts, and in the lead-circle mode the gun is theirs (tracked for the
-// circle, never turned). An AI seat takes the lock of the player aboard first when its gun reaches it.
+// readout; their lock is the only target while it lasts (aimlink.h PlayerGunRule: under the turret camera the gun turns
+// only onto it). An AI seat takes the lock of the player aboard first when its gun reaches it.
 void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Nearby& nearby,Track& track) noexcept {
     const auto seat=edf::SeatAt(vehicle,s);
     Gun gun{};Aim aim{};
@@ -331,14 +341,13 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
     const auto now=GetTickCount64();
     if(!ReadAim(vehicle,seat,gun,track,aim))return;
     const bool pilot=crew==Crew::player;
-    const float life=static_cast<float>(At<std::int32_t>(gun.weapon,kAmmoAlive));
     if(pilot)PilotFrame(vehicle,s,seat,gun.pos,gun.dir,gun.range);
     const void* designated=Designated(vehicle,nullptr);
     const void* only=pilot ? designated : nullptr;
     // Who turns the gun (common/edf/aimlink.h PlayerGunRule): an AI seat's this plugin; the player's as the flak's
     // (plugin.cpp Steer). A player holding the stick (no turret camera on the seat) aims by hand; letting go hands the
     // gun back, never to the target it was dragged away from.
-    edf::aimlink::PlayerGun rule=pilot ? PlayerControlRule(vehicle,s,LeadCircle(),only!=nullptr)
+    edf::aimlink::PlayerGun rule=pilot ? PlayerControlRule(vehicle,s,only!=nullptr)
                                              : edf::aimlink::PlayerGun{true,false};
     if(pilot && !rule.steer)track.steered=0; // observation camera cannot drive this gun
     const float stick[2]={At<float>(seat,kStick),At<float>(seat,kStick+4)};
@@ -346,18 +355,18 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
         && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
     if(drag && !track.dragging && track.target){track.dropped=track.target;track.droppedUntil=now+cfg.dragDropMs;}
     track.dragging=drag;
-    if(drag){track.target=nullptr;track.at=now;PublishAim(vehicle,true,nullptr,nullptr,gun.pos,gun.dir,&gun.shot,nullptr,life,gun.weapon);return;}
+    if(drag){track.target=nullptr;track.at=now;PublishAim(vehicle,true,nullptr,nullptr,gun.weapon);return;}
     const void* dropped=now<track.droppedUntil ? track.dropped : nullptr;
     float world[3],aimAt[3];
     const auto target=PickGunTarget(vehicle,gun,aim,nearby,designated ? designated : track.target,dropped,only,world);
     if(!target) {
         track.target=nullptr;track.firing=false;track.at=now;
-        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,gun.pos,gun.dir,&gun.shot,nullptr,life,gun.weapon);
+        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,gun.weapon);
         return;
     }
     LeadGun(vehicle,gun,track,target,world,aimAt);
     track.at=now;
-    if(pilot)PublishAim(vehicle,true,target,world,gun.pos,gun.dir,&gun.shot,track.vel,life,gun.weapon);
+    if(pilot)PublishAim(vehicle,true,target,world,gun.weapon);
     if(!rule.steer)return;
     float want[2],error[2],axis[2],time,distance;
     if(!Solve(vehicle,gun,aimAt,want,time,distance) || !AxisTargets(aim,want,error,axis)){track.firing=false;return;}
@@ -455,7 +464,7 @@ void DriverFrame(unsigned char* vehicle) noexcept {
     if(CrewAims(vehicle,0))return;
     float world[3];
     const void* locked=Designated(vehicle,world);
-    PublishAim(vehicle,false,locked,locked ? world : nullptr,nullptr,nullptr,nullptr,nullptr,0.0f);
+    PublishAim(vehicle,false,locked,locked ? world : nullptr);
 }
 
 bool Wanted(Crew c) noexcept { return c==Crew::player ? cfg.gunnerAssist : c==Crew::ai && cfg.gunnerAi; }
@@ -505,7 +514,7 @@ void Gunners(unsigned char* vehicle) noexcept {
     }
     if(!crewed){LogSkip(vehicle,"nobody aboard");return;}   // a parked tank stays quiet
     // The player driving (seat 0, the main cannon, which is theirs): their lock is what the gunners fight; the
-    // readout shows it (no mode: their gun is not the plugin's).
+    // readout shows it (ownGun false: their gun is not the plugin's).
     if(crew[0]==Crew::player)DriverFrame(vehicle);
     if(!any)return;
     Nearby nearby;

@@ -18,7 +18,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，地址均为 RVA（ImageBase `0x180000000`�
 - 离线建人路径 `CreatePlayer` → `0x1DC450` → `0x591410` → `0x595C80`（从 GS 抄装备）→ `0x5A3F90`（造人+造武器），**全程没有“是否拥有”检查**。资源预加载 `PreloadPlayerResource` → `0x59DE50` 也读同一块 GS。
 - Air Raider 的载具槽（slot 4）、支援槽（slot 3），Ranger 的“支援/载具”槽（slot 3）都在同一个 int 数组里，和武器同一种 ID。
 - 最实用的强制方式：插件在任务脚本 `PreloadPlayerResource()` 之前把 GS 这几个 int 改掉（可在 `0x59DE50` 入口 hook），任务结束 / 存档前还原。
-- 存档（`%LOCALAPPDATA%\EarthDefenceForce6\SAVE_DATA\<SteamID64>\saveslotNN\MAIN.GST`）是加密/压缩后的二进制（熵 ≈ 8.0），有校验，且走 Steam Cloud；本轮没拿到密钥，**不建议**走改档路线。
+- 存档（`%LOCALAPPDATA%\EarthDefenceForce6\SAVE_DATA\<SteamID64>\saveslotNN\MAIN.GST`）是加密/压缩后的二进制（熵 ≈ 8.0），有校验，且走 Steam Cloud；格式见下文 2026-10-25 补；仍走 Steam Cloud，改档要注意云端冲突。
 
 ---
 
@@ -162,6 +162,10 @@ void __fastcall PreloadPlayerHook(int slot) { Apply(*(uint8_t**)(base + kGameSta
 
 - 位置：`C:\Users\<user>\AppData\Local\EarthDefenceForce6\SAVE_DATA\<SteamID64>\saveslot00..03\`：`MAIN.GST`（56 KB，即 GameStatus）、`COMMON.CFG`、`DEFP_*.MST`（各模式任务进度）、`TROPHY.DAT`；`SYSTEM\` 下是系统设置；`BACKUP\saveslotNN_<时间戳>` 是游戏自动备份；每个目录都有 `steam_autocloud.vdf`（Steam Cloud 同步）。
 - 格式：`MAIN.GST` 头 48 字节无 magic，整文件熵 7.997 bit/byte → **加密（或压缩+加密）**。EDF.dll 里有 AES S-box（`0x18DA810`），导入 `CryptAcquireContextW/CryptGenRandom`；存档任务 `JobSaveData`（vtable `0x17F1098`，run `0x7C1670` / `0x7C1CB0`），校验函数 `0x7C1270`（hasher 对象，返回 `~crc` 形式的 32 位值）。密钥/算法本轮**没追到**。
+- **2026-10-25 补：格式已追到**（静态反汇编确认，按此写回的存档离线解析与校验通过，未进游戏验证）。存档目录里的 MAIN.GST / COMMON.CFG / DEFP_*.MST / TROPHY.DAT 是同一套：
+  - AES-256-CTR（Crypto++，RTTI `CTR_ModePolicy<Rijndael>`、`MD5`；派生代码 `0x7B9291`、`0xD3580`、`0xD31A0`），整文件加密、不压缩。key = `MD5(UTF-16LE("edf6"+文件名+".sav"))` ‖ 16 字节常量 `"Edf5.*_Steam_Ver"`；IV = `MD5(UTF-16LE("edf6"+文件名+".stm"))`。key/IV 固定，所以各备份密文大量字节相同。
+  - 明文：`+0` `'MDB0'`，`+4` 版本 3，`+8` 正文长度，`+0xC` `~CRC32C(正文)`（加载时 `0x7C19B3..0x7C1A8A` 检查），`+0x10` 标签（MAIN.GST 为 0x69），`+0x14` 起正文 = GameStatus `+0x6E68..+0x14B50`。
+  - 护甲存的是道具数（总数 `0x6E68`、1P 使用数 `0x6F88`、2P 使用数 `0xADE8`，三处同写），护甲 = base + step × n（`0xDE250`，base/step 来自 CONFIG.SGO）。武器每把 12 字节：4 字节标志（bit0 已拥有，bit2 新获得）+ 8 个星级字节（上限 = 武器表行第 7 列，`0xD7930` 钳制）。
 - 结论：可行性低、风险高（校验、Steam Cloud 覆盖、版本差异），而且存档本身就是 GS 的镜像，内存路线能做的它都能做。**不推荐**。若一定要做：先用插件在内存里设好装备，再让游戏自己存档，相当于“用游戏当存档编辑器”。
 
 ---

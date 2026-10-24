@@ -32,7 +32,8 @@ def apply(files: dict[str, bytes], root6: str, enabled: bool = True) -> dict[str
         return dict(files)
     names = needed_names(files)
     if not names:
-        return dict(files)
+        # no aliased shader, but a gold coat (pylib/goldcoat.py) still converts: it needs no shader of ours
+        return {rel: edf41materials.transform_models(rel, data) for rel, data in files.items()}
     shaders = edf41materials.build_shaders(root6, names)
     led = ledger.Ledger(root6)
     for rel, data in shaders.items():

@@ -112,8 +112,8 @@ Capability SeatCapability(const unsigned char* v,unsigned index) noexcept {
                                     At<const unsigned char*>(holders[i],kHolderWeapon)==picked){found=of(picked);break;}
     // The fire-control pick without an optic of its own (the Titan's hull gatling on the right trigger, 2026-10-09: "按了右
     // 键使用机枪以后，自瞄和瞄具等都无法使用了"): the seat's sight is still there; the first live weapon of the same seat
-    // whose model carries a mounted optic owns the scope, so the scope, and the sight key reserved for it
-    // (turretaim.cpp EDF6VehicleCrew_SightBindingV1), do not come and go with the trigger last pulled.
+    // whose model carries a mounted optic owns the scope, so the scope and its key do not come and go with the trigger
+    // last pulled.
     if(!observing && found.kind!=Kind::none && !found.mounted && sightzoom::Magnifies(found.kind))
         for(std::uint64_t i=0;i<n;++i) {
             const unsigned char* const weapon=live(i);

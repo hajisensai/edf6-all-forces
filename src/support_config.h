@@ -30,6 +30,7 @@ struct SupportConfig {
     std::uint8_t aircraft[kSupportConfigUnits]{};   // 0: the call's own count
     SupportPreset preset[kSupportConfigUnits]{};    // SupportPreset_<key>; count 0: the entry's own load
     VehicleLoadout vehicle[kSupportConfigUnits]{};  // SupportVehicle_<key>; body none: the vehicle as it always came
+    VehicleLoadout playerVehicle[kPlayerVehicleCount]{};   // SupportVehicle_OWN_*: what this player's own summons carry
     CrewColour crew[kSupportConfigUnits]{};         // SupportCrewColour_<key>; not set: crewDefault
     CrewColour crewDefault{},crewMission{};         // SupportCrewColour; SupportCrewColour_MISSION
     wchar_t problems[256]{};                   // the invalid settings, for the HUD and the log; empty: none

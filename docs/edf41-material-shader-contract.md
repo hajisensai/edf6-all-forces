@@ -109,3 +109,21 @@ mad o0.xyz, r0.wwww, r1.yzwy, r2.xyzx
 5. `tools/edf41_maps.py` 当前借用 EDF6 donor 的 MAE、环境反射纹理和天气。这是独立的已知观感差异；只改模型材质也不会还原 EDF4.1 全场光照。应在相同灯光、曝光与环境贴图条件下比较，再决定每个 shader 的适配。
 
 原始只读审计脚本保护的是“格式转换没有无依据改坏原始材质”和“三代实际 shader 契约仍与此次调查一致”；新回归测试检查专属 shader 的窄修与目标 ABI。**尚未验收游戏内画面，也未实施完整旧版反射重建。**
+
+## 金色涂装：改用 EDF6 原版金色涂装的金属金材质（2026-10-25）
+
+用户反馈「金色一定要有金色」：BM03 维加泰金色涂装是平涂黄色、像塑料；深渊爬行战车金色涂装是米白色。两者都写在 EDF5 时代的 reflect 着色器上（`snd_Mech_Light` / `snd_Mech`），金色本来靠旧反射：
+
+- 爬行战车金色是 **EDF6 原版自带**的 `VEHICLE502_GROUNDROBOGOLD.MRAB`（材质 `groundrobo`，`snd_Mech`），不经过 EDF41_ 别名。EDF6 的 `o0 = b + f(1-b)`，reflect.R 约 0.63、fall-off 50/2/0.5 使 f 几乎处处等于 reflect.R：基色 (0.25, 0.13, 0) 被抬到约 (0.72, 0.68, 0.63)，即截图里的米白。
+- BM03 金色（EDF4.1 `Vehicle406_begarutagold.mdb` / `Material1`）已由别名去掉抬白，但 `specular_pow=10` 经 EDF6 公式 `(1 - spec·pow/150)^(2f+3)` 得到粗糙度约 0.75，镜面反射被糊成漫反射；基色是贴图乘 (1, 0.698, 0) 的饱和黄：平涂塑料感。
+
+EDF6 自己的金色涂装（`V504_BEGARUTA_GOLD.MRAB` / `v504_begaruta`）是 `snd_BRDF_Common_Basic`：棕金基色（面板 123,93,57）、metallic 0.9、roughness 0.1、specular_color 0.4、blend 0.5；EDF.dll 的 combine 以 metallic² 为权重叠加被基色染色的环境反射，这才是金属金。`pylib/goldcoat.py` 把登记的金色涂装材质统一换成 EDF6 原版同输入的 `snd_BRDF_Common_SeparateOcc` / `snd_BRDF_Common_Light_SeparateOcc`（顶点输入、technique 与旧着色器逐项相同，遮蔽仍取第二套 UV），生成两张新贴图（`<原名>_goldcoat.dds`）：基色按色相识别涂装像素、按各像素亮度 / 涂装中位亮度重着参考金色（保留明暗细节），其它像素保留原色；参数图 R 粗糙度、G 金属度（涂装处 0.1 / 0.9，其它处为 EDF6 原先对该像素的计算值），B 为旧灯光遮罩。源贴图 sha256 不符（别的 mod 的贴图）时原样保留。
+
+接入：EDF4.1 的 BM03 在 `edf41materials.transform_models`（`Edf41MaterialCompatibility=1`）里先于别名转换；原版爬行战车在 `vehicle_optics.build_model` 里转换，`ready()` 对登记了金色涂装的原版模型恒为真（没有座舱素材也重定向到转换后的模型）。所有名称含 金色 / ゴールド / Gold 的呼叫载具必须登记在 `goldcoat.GOLD_VEHICLES`（尼克斯金色号用的 `v504_begaruta_gold` 本来就是参考材质）。验证：`tests/test_goldcoat.py`（离线 + 有游戏时对真实资源转换：中位色等于参考金、亮度逐像素相关 >0.95、金属度 / 粗糙度、贴图能绑定、幂等）。**未实机验收**：游戏内金属反射观感、灯光发光颜色。
+
+### 补全：巴尔加金色、爬行战车金色武器、自动发现（同日）
+
+- `V515_RETROBALAM_GOLD`（`metal1` / `metal2`，`snd_Mech`，reflect.R≈0.97，原版几乎全白）登记进 `COATS`，经 `vehicle_optics.build_model` 转成 `snd_BRDF_Common_SeparateOcc`；两个材质共用一张涂装贴图，生成的贴图只存一份，旧贴图无人使用时移出归档。两材质原 diffuse 色调不同（淡金 / 深金），现在都按参考金色重着。
+- 爬行战车金色武器 `VEHICLE502_GROUNDROBOGOLD_CANNON_L/R`、`_GATLING`（`snd_Common_Basic`，遮蔽在 reflect 贴图 B）转成 `snd_BRDF_Common_Basic`（`param_r_m_occ_hr`：R 粗糙度、G 金属度、B 原遮蔽、A=1）。不覆盖原版文件：`vehicle_optics.MODELS` 新增 `folder='WEAPON'` 的模型，生成私有 `WEAPON/EDF6VC_GOLD_<原名>.RAB`；`make_optics.build_stock_redirects` 同样扫描 WEAPON（先按字节找模型名再解析），把 `V_502_GROUNDROBOGOLD_*.SGO` 的模型路径重定向过去，卸载按原清单 / 备份恢复。机枪涂装本身是半亮度的暗金（33,24,0），按 `PAINT_LUMINANCE`（EDF5 金漆 66,48,0 的亮度）定标，保持暗一半，不被拉成车身亮度。
+- 自动发现：`goldcoat.discover()` 扫描 EDF6 所有名字含 GOLD 的 OBJECT / WEAPON 归档，以及 edf41port 登记的含 GOLD 归档（需 EDF4.1），找出所有「会抬白的着色器（`edf41materials.SUPPORTED` 与 `goldcoat.LEGACY`）上、基色贴图 ≥15% 为金色色相」的材质；`tests/test_goldcoat.py` 要求发现集合与 `COATS` 完全一致，`tools/goldcoat_scan.py` 打印未登记项的现成登记行。当前本机发现 7 个，全部登记。金色敌人（金蚁、金色 UFO 等）原版已是 BRDF，不在其中。
+- 无座舱素材：`ready()` 对金色模型恒真，此时 `build_model` 里 `cockpits.graft` 抛 `CockpitAssetsMissing` 被捕获，模型不含 `vc_eye_*`；插件 `fp_vehicle.cpp` 的 `VehicleEye` 找不到标记即返回 false，`firstperson.cpp` 的 `VehicleYields` 给出 "no cockpit in this seat"，座位用原版镜头。测试同时检查生成模型的骨骼名与原版一致、无标记，以及这两段源码。

@@ -30,6 +30,7 @@
 #include "room_ui.h"
 #include "support_soldier.h"
 #include "airdrop.h"
+#include "player_vehicle.h"
 #include "support_config.h"
 #include "lockon.h"
 #include "turretaim.h"
@@ -39,6 +40,7 @@
 #include "memory.h"
 #include "subcarrier.h"
 #include "enemy_control.h"
+#include "greyboss_parts.h"
 #include "enemy_control_net.h"
 #include "enemy_control_legacy.h"
 #include "enemy_control_weapon_aim.h"
@@ -1230,6 +1232,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
     InstallBoarding();      // after the heli profile's board button check
     Log("AIRDROP container step watched=%d",InstallAirdrop());   // the transport planes' container airdrops
+    Log("PLAYERVEH loaded requested jets=%d",InstallPlayerVehicles());   // after the airdrop: its vehicle step swaps the path
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallSazabi();        // the same: the 506 physics hook and the vehicles' own input
     InstallDreadnought();   // the same
@@ -1250,7 +1253,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("ENEMY CONTROL native hooks=%d",InstallEnemyControl());
     Log("ENEMY CONTROL legacy adapters=%d",InstallEnemyControlLegacy());
     Log("ENEMY CONTROL network bridge=%d",InstallEnemyControlNetwork());
-    InstallMap();           // the map view (the player's camera overhead, their input held while it is open)
+    // E516's part events: a name the boss has no part for acts on none (the stock lookup reads past its map's end)
+    Log("GREYBOSS part events by name checked=%d",InstallGreyBossParts());
+    InstallMap();          // the map view (the player's camera overhead, their input held while it is open)
     InstallSightZoom();     // a vehicle gun's sight magnified (the same camera step, chained after the map's)
     InstallInfantryScope(); // a soldier's zoomed scope drawn as a real optic (the stock crosshair's draw chained)
     InstallPhysics();       // vehicle chassis welding and the giants' contact cap (physics.cpp), the sidecar's level hook
@@ -1293,6 +1298,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallEdf41Insects();   // the DLC's EDF4.1 queen bee and Nephilas: needle speed, thread scatter (edf41insects.cpp)
     InstallEdf41SmallDragon();  // the DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (edf41smalldragon.cpp)
     InstallEdf41Natives();   // EDF4.1 script natives the BVM executor lacks: SetEncountReportRadius (edf41natives.cpp)
+    InstallEdf41Before();    // EDF4.1's pre-mission scenes without the menu's black fade over them (edf41before.cpp)
     InstallEdf41Sound();     // EDF4.1's weapon SE bank and voice banks (edf41sound.cpp)
     InstallEdf41Mother();    // EDF4.1's UfoMother301 (ini Edf41Mother; edf41mother.cpp)
     InstallEdf41Robo();      // EDF4.1's UfoRobo (ini Edf41Robo; edf41robo.cpp)

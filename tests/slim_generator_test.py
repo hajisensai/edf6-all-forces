@@ -95,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix='edf6vc-slim-') as root:
         os.makedirs(os.path.dirname(os.path.join(root, 'Mods', rel)), exist_ok=True)
         open(os.path.join(root, 'Mods', rel), 'wb').close()
     os.makedirs(os.path.join(root, 'Mods', 'UI'))
-    for name in room_layout.LAYOUTS:   # the menu screen's layouts already there (the empty Root.cpk cannot make them)
+    for name in [*room_layout.LAYOUTS, os.path.basename(room_layout.LOADOUT_BOX)]:   # the menu's layouts already there (the empty Root.cpk cannot make them)
         open(os.path.join(root, 'Mods', 'UI', name), 'wb').close()
     out = io.StringIO()
     with contextlib.redirect_stdout(out):

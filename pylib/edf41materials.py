@@ -4,6 +4,8 @@ Only the proved ``base + reflect * (1-base)`` MAD multiplier becomes zero.
 All other PBR calculations, shader stages, signatures, techniques and metadata
 stay byte-identical. Alpha shaders restore the original diffuse RGBA together.
 No game files are written here; callers must pass only EDF4.1-owned models.
+A registered gold coat (pylib/goldcoat.py, the BM03 Vegalta gold) is converted to EDF6's
+own metal-gold BRDF material instead, in the same pass (transform_models, archives only).
 """
 from __future__ import annotations
 
@@ -13,6 +15,7 @@ import math
 import os
 import struct
 
+import goldcoat
 import mdb
 import rootcpk
 import sgo
@@ -261,7 +264,8 @@ def _transform_mdb(raw: bytes) -> bytes:
 
 
 def transform_models(rel: str, data: bytes) -> bytes:
-    """Alias reviewed materials in an EDF4.1-owned model/archive, or return data."""
+    """Alias reviewed materials in an EDF4.1-owned model/archive (an archive's gold coats converted first, see
+    pylib/goldcoat.py), or return data."""
     ext = os.path.splitext(rel)[1].upper()
     if ext == '.MDB':
         raw = mdb.cmpl_decompress(data)
@@ -273,10 +277,21 @@ def transform_models(rel: str, data: bytes) -> bytes:
     if mdb.rab_write(archive) != data:
         raise ValueError(f'{rel}: archive does not round-trip unchanged')
     changed = False
-    for member in archive.files:
+    for member in list(archive.files):
         if member.name.lower().endswith('.mdb'):
             raw = member.data
-            result = _transform_mdb(raw)
+            result = raw
+            if goldcoat.coats_of(member.name):
+                # A gold coat (pylib/goldcoat.py) goes to EDF6's own metal-gold BRDF material first: its textures
+                # join the archive, and the material leaves the aliased legacy shader family.
+                model = mdb.mdb_read(raw)
+                if mdb.mdb_write(model) != raw:
+                    raise ValueError(f'{rel}/{member.name}: model does not round-trip unchanged')
+                model, notes = goldcoat.apply(archive, model, member.name)
+                for note in notes:
+                    print('  ' + note)
+                result = mdb.mdb_write(model)
+            result = _transform_mdb(result)
             if result != raw:
                 changed = True
                 member.stored = mdb.cmpl_compress(result) if member.stored[:4] == b'CMPL' else result

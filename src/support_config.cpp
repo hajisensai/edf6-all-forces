@@ -154,6 +154,16 @@ SupportConfig ParseSupportConfig(SupportIniRead read,void* context,SupportKeyOf 
             Problem(c,key,text,fallback);
         }
     }
+    // SupportVehicle_OWN_* (support_loadout.h kPlayerVehicles): the jets this player summons with a vehicle request.
+    for(int i=0;i<kPlayerVehicleCount;++i) {
+        wchar_t key[96],why[160];
+        _snwprintf_s(key,_TRUNCATE,L"SupportVehicle_%ls",kPlayerVehicles[i].key);
+        if(!read(context,key,text,std::size(text)))continue;
+        if(!ParseVehicleLoadout(text,kPlayerVehicles[i].body,&c.playerVehicle[i],why,std::size(why))) {
+            wchar_t fallback[192];_snwprintf_s(fallback,_TRUNCATE,L"原版挂载（%ls）",why);
+            Problem(c,key,text,fallback);
+        }
+    }
     // SupportCrewColour[_<key>|_MISSION] (support_loadout.h CrewColour): a crew's colours; a bad one: the default's.
     const auto readCrew=[&](const wchar_t* key,CrewColour& out,bool crewless) noexcept {
         if(!read(context,key,text,std::size(text)))return;

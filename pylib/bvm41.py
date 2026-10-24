@@ -1093,3 +1093,26 @@ def rewritten(data: bytes, rewrite: Callable[[str], str]) -> bytes:
                 if new != x.v:
                     x.v, changed = new, True
     return build(prog) if changed else data
+
+
+# UI classes a 4.1 script creates by name (table 0 native 30, CreateUi) that EDF5 and EDF6 register under another name.
+# EDF41.exe has 'ui_fade_screen_test' (its fade screen; UTF-16 at file offset 0xAA5CB0) and no 'ui_fade_screen_simple';
+# EDF5.exe and EDF.dll have only 'ui_fade_screen_simple' (EDF.dll's class name getter 0x7FBDF0), neither the 4.1 name.
+# EDF6's CreateUi looks the name up in the UI manager's registry (0x21DE30 -> 0x119CB90) and makes nothing for an unknown
+# one: the handle is -1, and the fade natives after it (50 FadeUiControl, 51 WaitFadeUiComplete) find no UI and return at
+# once (0x211DFD, 0x211E2B). EDF5's recompile of the story moved its common functions to 'ui_fade_screen_simple' but kept
+# the 4.1 name in the scripts' own code: the closing fade of four pre-mission scenes (M015, M016, M190, M192 BEFORE.BVM:
+# CreateUi; FadeUiControl(ui, 3 = in to out, 3 s); WaitFadeUiComplete) is that one, so they cut to the mission unfaded.
+# The arguments mean the same (4.1's natives 38 / 39 are EDF5's 50 / 51, NATIVES; EDF5's and EDF6's MissionClear_Common
+# call 50 with 3 on 'ui_fade_screen_simple').
+UI_NAMES: dict[str, str] = {'ui_fade_screen_test': 'ui_fade_screen_simple'}
+
+
+def edf6_strings(rewrite: Callable[[str], str] | None = None) -> Callable[[str], str]:
+    """The string mapping a 4.1 script (or EDF5's recompile of one) takes on its way to EDF6: rewrite (the object paths,
+    pylib/edf41dlc.py), then the UI names EDF6 registers under another name (UI_NAMES). Not part of convert(): EDF5's
+    recompiles keep the 4.1 UI names, and convert() reproduces those byte for byte."""
+    def text(s: str) -> str:
+        s = rewrite(s) if rewrite else s
+        return UI_NAMES.get(s, s)
+    return text

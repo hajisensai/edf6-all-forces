@@ -138,3 +138,20 @@
   模板时测试直接失败。三种回归（去掉两个 `return`、去掉 `flat_curve`）已逐一验证会被抓到。
 - `every_call_kind_builds_real`：有游戏时用真实模板与菜单行跑全部 calls（同 `stack` 的参数），并核对卫星伤害曲线仍是 0 星 0.2 倍
   的形状；无游戏跳过。
+
+## 2026-10-25：特效与伤害同一组落点（用户：「天罚的伤害和实际落点是不是不一样啊，感觉外面的闪电爆炸没伤害」）
+
+- 核对（代码，H）：雷暴的火花弹与 `Explosion` 特效同点（雷落点），主炮每圈的爆炸弹与 `BigExplosion` 同点；但二者在
+  `StormFrame` / `CannonFrame` 里分开写，弹没造出来（某种弹没预载、对象没造成）时特效照画、伤害没有。开演只检查主光柱一种弹
+  （`EmcRoundReady(ultBeam)`），火花 / 爆炸弹缺了照样开演。**地面冲击波**（光柱落地、最后一圈及其回波）沿波前每 5 帧 16 处
+  扬尘，最远到 1.6 R = 352 m，**完全没有伤害**，且大部分在 220 m 的伤害区外——这就是「外面的爆炸没伤害」最直接的代码对应。
+- 修复：`ultimate_plan.h BurstsAt` 是每帧地面爆炸的唯一清单：雷落点（就是 `BoltsAt` 的同一组数）、每圈爆炸、地面冲击波波前
+  （`kWaveBursts` 处、每 `kWaveEvery` 帧、到 `kWaveBurstReach`）。`ultimate.cpp BurstsFrame` 对每一处：在同一点、以与该弹 SGO
+  爆炸半径相同的半径（火花 40 m = `kSparkRadius`，圈爆 55 m = `kRingBlast`）发伤害弹，特效（`Explosion` / `BigExplosion` 按
+  半径×0.5，波前再加扬尘）只在弹造出来时画；发起者还在而弹造不出来的计数，演出结束日志写出。开演（本机与远端）要求七种弹全部
+  预载（`ShowRoundsReady`）。波前每处伤害 `kWaveShare` = 0.05（600，**未调**）。
+- 联机：清单是种子与帧的纯函数，各机同一组落点；伤害仍只在发起者机器结算（`ShellMake` 的 `OnlineShotCounts`），其他机器的弹
+  伤害为 0、特效照画；发起者离开后只播特效（原设计）。
+- 离线：`ultimate_check` `BurstChecks`（雷落点一一对应、圈爆在圈上、波前只在地面波前且不超 1.6 R、每处都有伤害且半径等于
+  弹的爆炸半径、同种子重放一致、单帧不超上限）；`selftest` 核对 `kSparkRadius == ULT_SPARK_RADIUS`。
+- 未实机：火花 / 爆炸弹在游戏里是否确实造出并结算（日志 `N bursts, M not shown for want of their round` 可看）；波前伤害手感。

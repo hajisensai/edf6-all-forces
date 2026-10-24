@@ -97,7 +97,7 @@ def recording_rename(src: str, dst: str) -> None:
 
 
 saved = (builtins.input, sl._build_one, modfiles.game_running, os.rename, sl.rootcpk.Game, room_layout.build)
-LAYOUTS = {'UI/LYT_HUIONLINEROOM.SGO': b'room layout', 'UI/LYT_HUIHQMAIN.SGO': b'hq layout'}
+LAYOUTS = {'UI/LYT_HUIONLINEROOM.SGO': b'room layout', 'UI/LYT_HUIHQMAIN.SGO': b'hq layout', 'UI/EDF6VC_LOADOUTBOX.SGO': b'loadout box'}
 room_layout.build = lambda root: dict(LAYOUTS)   # the fake game's Root.cpk is no archive (the real one: room_layout_test)
 builtins.input = no_prompt
 sl._build_one = fake_build_one

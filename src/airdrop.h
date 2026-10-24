@@ -20,4 +20,6 @@ bool AirdropBegin(const void* carrier,SupportVehicleKind kind,const float* targe
 void AirdropTick() noexcept;
 void ResetAirdrops() noexcept;   // mission.cpp: a new mission (the last one's containers went with its objects)
 bool InstallAirdrop() noexcept;  // plugin.cpp: the profile checked, the container's vehicle step watched
+// The container's vehicle step (0x5E8FDC) watched: player_vehicle.cpp swaps a requested jet's path there.
+bool AirdropWatching() noexcept;
 }  // namespace crew

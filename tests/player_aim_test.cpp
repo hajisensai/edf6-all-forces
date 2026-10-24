@@ -104,19 +104,18 @@ int main() {
     relation[1]=kEnemyRelation;
     viewRay=&View;turretObserver=&Observer;
     const ULONGLONG now=GetTickCount64();
-    mapTried=heldTried=bindingTried=stabTried=cameraTried=zoneTried=now;
-    cfg.enabled=true;cfg.lockCone=20.0f;cfg.lockRange=0.0f;cfg.lockClearMs=600;cfg.modeKey=0x56;cfg.lockKey=0x51;cfg.aimMode=0;
+    mapTried=heldTried=stabTried=cameraTried=zoneTried=now;
+    cfg.enabled=true;cfg.lockCone=20.0f;cfg.lockRange=0.0f;cfg.lockClearMs=600;cfg.lockKey=0x51;
     Ride tank;Gun cannon(0);
     // A 505-class tank: its class has no hook of this plugin; the export is its only clock and key reader.
     auto a=Ask(tank,cannon);
     Check(seenOnce>0,"the export steps the clock for a vehicle no own hook sees");
-    Check(a.mode==edf::aimlink::Mode::autoAim && !a.steer,"AUTO without a lock: the view steers");
+    Check(a.mode==edf::aimlink::Mode::autoAim && !a.steer,"no lock: the view steers");
     edf::aimlink::TurretReadoutV1 shown{};
-    Check(EDF6AutoTurret_TurretReadoutV1(&shown) && shown.ownGun && shown.modeKey==0x56,"the HUD reads the player's own gun, V shown");
+    Check(EDF6AutoTurret_TurretReadoutV1(&shown) && shown.ownGun && shown.lockKey==0x51 && shown.modeKey==0,"the HUD reads the player's own gun, its lock key alone");
     Press(tank,cannon,0x56);
-    Check(LeadCircle(),"V reaches the mode through the export (fb #1)");
-    Press(tank,cannon,0x56);
-    Check(!LeadCircle(),"V again: AUTO back, symmetric");
+    a=Ask(tank,cannon);
+    Check(a.mode==edf::aimlink::Mode::autoAim && !a.steer,"V is no key of the one auto-aim (2026-10-25: the lead-circle mode is gone)");
     // Three enemies 200 m out; the crosshair on A.
     enemyCount=3;SetEnemy(0,0,0,200);SetEnemy(1,30,0,200);SetEnemy(2,70,0,200);   // from B: A nearer than C, so the old rule (the one after A) took C
     Look(0,0,200);Press(tank,cannon,0x51);
@@ -135,8 +134,8 @@ int main() {
     for(int f=0;f<20;++f){enemies[3].pos[0]+=0.5f;lead=Ask(tank,cannon);}
     const float ahead=lead.point[0]-enemies[3].pos[0];
     Check(lead.steer && ahead>12.0f && ahead<20.0f,"AUTO + lock: the turret is sent where the round meets the crossing target");
-    Check(EDF6AutoTurret_TurretReadoutV1(&shown) && shown.lock!=edf::aimlink::Lock::none && shown.lead && shown.ownGun,
-          "the readout carries the lock and its lead for the HUD");
+    Check(EDF6AutoTurret_TurretReadoutV1(&shown) && shown.lock!=edf::aimlink::Lock::none && shown.ownGun && !shown.lead,
+          "the readout carries the lock for the HUD (no lead circle since 2026-10-25)");
     // The flak's marked gun in a flak: the same export, the same code, the same answer for the same round.
     Ride flak;Gun flakGun(edf::kMarkAir);
     std::memcpy(flak.v+kMatrix,tank.v+kMatrix,64);
@@ -145,8 +144,7 @@ int main() {
     const float flakAhead=lead.point[0]-enemies[3].pos[0];
     Check(lead.steer && std::fabs(flakAhead-ahead)<0.5f,"the flak's auto-aim is the tanks': same key, same lock, same lead");
     Press(flak,flakGun,0x56);
-    Check(!Ask(flak,flakGun).steer,"the lead circle: the turret is the player's");
-    Press(flak,flakGun,0x56);
+    Check(Ask(flak,flakGun).steer,"V is no mode key any more: the lock still steers (one auto-aim, 2026-10-25)");
     observing=true;Check(!Ask(flak,flakGun).steer,"the overhead view / optic: no steering");
     observing=false;Check(Ask(flak,flakGun).steer,"back: steering again");
     // No player in the seat: no answer.

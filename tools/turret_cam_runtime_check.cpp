@@ -63,9 +63,15 @@ bool CameraRay(float* eye,float* dir) noexcept {
 }
 bool terrain=true;
 float floorY=-25.0f;
+bool wall=false;float wallZ=0.0f;   // a wall across the world at z = wallZ (a building behind the vehicle)
 float MapRay(const float* from,const float* to,float* hit) noexcept {
-    if(!terrain || from[1]<floorY || to[1]>floorY || from[1]==to[1])return -1.0f;
-    const float t=(floorY-from[1])/(to[1]-from[1]);
+    float t=2.0f;
+    if(terrain && from[1]>=floorY && to[1]<=floorY && from[1]!=to[1])t=(floorY-from[1])/(to[1]-from[1]);
+    if(wall && from[2]!=to[2]) {
+        const float w=(wallZ-from[2])/(to[2]-from[2]);
+        if(w>=0.0f && w<t)t=w;
+    }
+    if(t>1.0f)return -1.0f;
     for(int i=0;i<3;++i)hit[i]=from[i]+t*(to[i]-from[i]);
     return vec::Dist(from,hit);
 }
@@ -370,10 +376,10 @@ void Run() {
         Put<int>(primary.data,edf::kWeaponAmmoAlive,launcher ? 1500 : 1200);Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         unsigned char camera[0x700]{};Put<float>(camera,0x528,.1f);
         Put<float>(camera,kCamEye+4,5);Put<float>(camera,kCamEye+8,-20);Put<float>(camera,kCamLook+4,2);
-        bool stable=true,realFocus=true,inputUnchanged=true,onHull=true,still=true;
+        bool stable=true,realFocus=true,inputUnchanged=true,onFocus=true,still=true,eased=true,back=true;
         const float wantPitch=-std::atan2(45.f,35.f);
-        float settledEye[3]{};
-        for(int frameIndex=0;frameIndex<90;++frameIndex) {
+        float settledEye[3]{},lastLook[3]{};
+        for(int frameIndex=0;frameIndex<120;++frameIndex) {
             const float quietInput[2]{};float output[2]{};Aim(seat,quietInput,output); // native input/aim stage
             inputUnchanged=inputUnchanged && output[0]==0 && output[1]==0;
             TurretCamFrame(vehicle);if(launcher)LauncherFrame(vehicle);
@@ -384,16 +390,24 @@ void Run() {
             const float delta[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
             const float pitch=vec::Len(delta)<1e-6f ? 0 : tcam::PitchOf(delta);
             if(frameIndex>20)stable=stable && std::fabs(pitch-wantPitch)<1e-4f;
-            // 2026-10-23: the view is on the hull, and the gun rocking (its muzzle moved every frame from frame 40,
-            // the real shot's endpoint with it) moves nothing.
-            if(frameIndex>20)onHull=onHull && std::hypot(look[0]-hull[0],look[2]-hull[2])<0.5f;
-            if(frameIndex==40)std::memcpy(settledEye,eye,12);
-            if(frameIndex>40)still=still && vec::Dist(eye,settledEye)<1e-3f;
-            if(frameIndex>=40)Matrix(primary.bone+edf::kBoneRows,-4,8+static_cast<float>(frameIndex%5),10+static_cast<float>(frameIndex%7));
+            // 2026-10-25 ("俯瞰视角目的是为了看落点位置的信息"): with the gun steady the view settles on the real shot's
+            // landing (the screen's middle, where the HUD's mark is) and holds still there. From frame 40 the gun rocks
+            // (its muzzle moved every frame, the landing with it): the view follows eased, never a jump to each new
+            // landing; once the gun is steady again (frame 70) it settles back on the landing.
+            if(frameIndex>20 && frameIndex<=40)onFocus=onFocus && std::hypot(look[0]-shared.focus[0],look[2]-shared.focus[2])<0.5f;
+            if(frameIndex==30)std::memcpy(settledEye,eye,12);
+            if(frameIndex>30 && frameIndex<=40)still=still && vec::Dist(eye,settledEye)<1e-2f;
+            if(frameIndex>40 && frameIndex<70)eased=eased && std::hypot(look[0]-lastLook[0],look[2]-lastLook[2])<12.0f;
+            if(frameIndex>110)back=back && std::hypot(look[0]-shared.focus[0],look[2]-shared.focus[2])<0.5f;
+            std::memcpy(lastLook,look,12);
+            if(frameIndex>=40 && frameIndex<70)Matrix(primary.bone+edf::kBoneRows,-4,8+static_cast<float>(frameIndex%5),10+static_cast<float>(frameIndex%7));
+            if(frameIndex==70)Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         }
         Matrix(primary.bone+edf::kBoneRows,-4,8,10);
-        Check(onHull,"the high view looks at the vehicle, not the shot's endpoint");
-        Check(still,"the gun rocking does not move the high view");
+        Check(onFocus,"the high view looks at the shot's landing, not the vehicle");
+        Check(still,"a steady gun holds the high view still");
+        Check(eased,"a rocking gun's landing is followed eased, without jumps");
+        Check(back,"the high view settles back on the landing");
         Check(inputUnchanged,"high camera closed loop never generates native gun input from observation");
         Check(realFocus,"collision pivot must not change the real ballistic terrain focus");
         Check(stable,launcher ? "Katyusha high camera remains stable after native surface collision" : "twin artillery high camera remains stable after native surface collision");
@@ -436,6 +450,23 @@ void Run() {
         Check(game.hasAim && game.aimHit && game.aim[0]==12 && game.aim[2]==400,"AUTO with a lock: the turret goes to the lead point");
         leadOn=false;TurretCamFrame(vehicle);
         Check(game.hasAim && !(game.aim[0]==12 && game.aim[2]==400),"no lock: the screen's centre again");
+        // 2026-10-25 ("坦克的炮管会360度动"): the requested eye is placed before the game's camera collision, so a wall
+        // between it and the rig's point (here 10 m behind the turret, the eye 20 m back) is met first along the screen
+        // centre's line. That point is behind the turret: its want is the view's heading + 180 deg and the turret turns
+        // round to it. The aim point is looked for ahead of the rig's point only.
+        {
+            const float wallEye[3]={0,5,-20},wallLook[3]={0,4,0};
+            wall=true;wallZ=-10.0f;
+            PublishNormalRay(seat,shared.take,wallEye,wallLook);TurretCamFrame(vehicle);
+            Check(game.hasAim && game.aimHit && game.aim[2]>0.0f && std::fabs(game.aim[1]-floorY)<1e-3f,
+                  "a wall between the requested eye and the turret is never the turret's aim point");
+            float yawWant[2];const float level[9]={1,0,0,0,1,0,0,0,1};
+            Check(Wants(seat,level,game.aim,false,yawWant) && std::fabs(yawWant[0])<0.1f,
+                  "with a wall behind the vehicle the turret's yaw want stays on the view's heading (no 180 deg turn)");
+            wallZ=50.0f;PublishNormalRay(seat,shared.take,wallEye,wallLook);TurretCamFrame(vehicle);
+            Check(game.hasAim && game.aimHit && std::fabs(game.aim[2]-50.0f)<1e-3f,"a wall ahead of the turret is still a real target");
+            wall=false;
+        }
         const int asked=leadAsks;highOn=true;TurretCamFrame(vehicle);
         Check(leadAsks==asked+1 && !game.hasAim,"the high view still asks (the lock is kept) but steers nothing");
         highOn=false;Put<void*>(seat,kSeatWeapons,holders);Put<std::uint64_t>(seat,kSeatWeaponCount,2);

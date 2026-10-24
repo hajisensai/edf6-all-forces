@@ -1666,7 +1666,7 @@ def ultimate_copies_agree() -> None:
     radii = re.search(r'kModelRadius\[kModelCount\]=\{([^}]*)\}', plan)
     assert radii and [float(x.strip().rstrip('f')) for x in radii.group(1).split(',')] ==         [magic_circle.LAYERS[k].radius for k in magic_circle.LAYERS], radii
     assert 'PreloadUltimate(mgr);' in src('src/jet_spawn.cpp')
-    for name, value in (('kRadius', cw.ULTIMATE_RADIUS), ('kRingBlast', vc.ULT_BLAST_RADIUS)):
+    for name, value in (('kRadius', cw.ULTIMATE_RADIUS), ('kRingBlast', vc.ULT_BLAST_RADIUS), ('kSparkRadius', vc.ULT_SPARK_RADIUS)):
         m = re.search(rf'\b{name}=([\d.]+)f', plan)
         assert m and float(m.group(1)) == value, (name, m and m.group(1), value)
     m = re.search(r'\bkGatherReach=([\d.]+)f', plan)
@@ -2152,29 +2152,33 @@ def katyusha_pose_agrees() -> None:
 @test
 def turret_aim_wired() -> None:
     """The player's turret (autoturret/src/designate.cpp): its ini keys are read, shipped and documented in both READMEs;
-    the ownership rule (aimlink.h PlayerGunRule: the lead circle and, with the turret camera, AUTO without a lock) returns
+    the ownership rule (aimlink.h PlayerGunRule: with the turret camera, no lock) returns
     before the turn input is written (the flak's Steer, the gunners' SteerSeat), and each write is reported for the V2
     Steers; the two plugins' link (common/edf/aimlink.h) exports exactly the names each looks up; EDF6VehicleCrew's two
     keys are read, shipped and documented; the jets' pick scores by the view only with PlayerJetLockByView."""
     at, ini = src('autoturret/src/plugin.cpp'), src('autoturret/EDF6AutoTurret.ini')
     zh, en = src('autoturret/README.zh-CN.md'), src('autoturret/README.md')
-    for key in ('AimMode', 'AimModeKey', 'AimModeButton', 'LockKey', 'LockButton', 'LockCone', 'LockRange', 'LockClearMs'):
+    for key in ('LockKey', 'LockButton', 'LockCone', 'LockRange', 'LockClearMs'):
         assert f'L"{key}"' in at and re.search(rf'^{key}=', ini, re.M) and key in zh and key in en, key
+    # One player turret aim (2026-10-25, "这个自动瞄准是不是多余了一个版本，删掉一个"): the lead-circle mode, its keys and
+    # its HUD lines are gone from both plugins and the ini (the READMEs name them only as removed).
+    for key in ('AimMode', 'AimModeKey', 'AimModeButton'):
+        assert f'L"{key}"' not in at and not re.search(rf'^{key}=', ini, re.M), key
     unread = [k for k in re.findall(r'^([A-Za-z]\w*)=', ini, re.M) if f'L"{k}"' not in at]
     assert not unread, f'EDF6AutoTurret.ini keys autoturret/src/plugin.cpp never reads: {unread}'
     steer = at.split('float Steer(', 1)[1].split('\n}\n', 1)[0]
     put = steer.find('Put<float>(vehicle,kTurn')
     assert 0 <= steer.find('if(!rule.steer)return flight;') < put < steer.find('track->steered=Frame();'), 'Steer: the rule gates the turn'
-    assert 'PlayerControlRule(vehicle,0,LeadCircle(),only!=nullptr)' in steer
+    assert 'PlayerControlRule(vehicle,0,only!=nullptr)' in steer
     gunner = src('autoturret/src/gunner.cpp')
     seat = gunner.split('void SteerSeat(', 1)[1].split('\n}\n', 1)[0]
     put = seat.find('Put<float>(vehicle,kTurn')
     assert 0 <= seat.find('if(!rule.steer)return;') < put < seat.find('track.steered=autoturret::Frame();'), 'SteerSeat: the rule gates the turn'
-    assert 'PlayerControlRule(vehicle,s,LeadCircle(),only!=nullptr)' in seat
+    assert 'PlayerControlRule(vehicle,s,only!=nullptr)' in seat
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
     assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
-                          'kInputHeld', 'kSightBinding', 'kTurretObserver', 'kModeBinding', 'kPlayerAim', 'kAimsTurret', 'kPayloadAim'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+                          'kInputHeld', 'kTurretObserver', 'kPlayerAim', 'kAimsTurret', 'kPayloadAim'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
     # V4, the one player turret aim (2026-10-09): EDF6AutoTurret answers it, EDF6VehicleCrew's turret camera asks it every
     # frame and says it steers; the flak's own Steer and the tank driver's frame then leave the turret to the camera.
@@ -2188,9 +2192,9 @@ def turret_aim_wired() -> None:
     assert 'if(CrewAims(vehicle,0))return;' in gunner.split('void DriverFrame(', 1)[1].split('\n}\n', 1)[0], 'DriverFrame: V4 publishes'
     assert names['kStabilizer'].endswith('V3') and names['kStabilizerAware'].endswith('V3'), names
     assert f'bool __cdecl {names["kStabilizer"]}(' in src('src/stab.cpp') and f'bool __cdecl {names["kStabilizerAware"]}(' in at
-    # The rule itself: with the camera, only a lock in AUTO steers and the stick never drags; without, V1.
+    # The rule itself: with the camera, only a lock steers and the stick never drags; without, V1.
     rule = link.split('inline PlayerGun PlayerGunRule(', 1)[1].split('\n}', 1)[0]
-    assert 'if(!cameraTurret)return PlayerGun{!lead,!lead};' in rule and 'return PlayerGun{!lead && locked,false};' in rule
+    assert 'if(!cameraTurret)return PlayerGun{true,true};' in rule and 'return PlayerGun{locked,false};' in rule
     assert f'bool __cdecl {names["kTurretReadout"]}(' in src('autoturret/src/designate.cpp')
     assert f'bool __cdecl {names["kSteers"]}(' in at
     crew = src('src/turretaim.cpp')
@@ -5929,11 +5933,16 @@ def hud_switch_cues_wired() -> None:
     and the mode line were, and their offline checks run (tools/hud_cue_check.cpp, hud_view's TurretLayoutApart)."""
     hud, cmake, view = src('src/hud.cpp'), src('CMakeLists.txt'), src('tools/hud_view.cpp')
     for call in ('CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,', 'JetCells(snap.jet,cells)',
-                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at,'):
+                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,lines,&at,controlsBottom'):
         assert call in hud, call
-    assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'Tx::autoAimOn' in hud and 'Tx::autoAimOffCircle' in hud
+    # One auto-aim (2026-10-25, "这个自动瞄准是不是多余了一个版本，删掉一个"): one line naming it, no on / off pair, no
+    # lead-circle mode, its banner or its key's text.
+    assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'Tx::autoAim' in hud
     table = src('src/hudtext.inc')
-    assert 'HUDTEXT(autoAimOn,L"AUTO-AIM ON",' in table and 'HUDTEXT(autoAimOffCircle,L"AUTO-AIM OFF' in table
+    assert 'HUDTEXT(autoAim,L"AUTO-AIM",L"自动瞄准",' in table
+    for gone in ('autoAimOn', 'autoAimOffCircle', 'autoAimToggle', 'autoAimOffBanner', 'aimModeKeyUnset', 'aimModeButtonUnset', 'aimSightBinding'):
+        assert f'HUDTEXT({gone},' not in table and f'Tx::{gone}' not in hud, gone
+    assert 'Mode::leadCircle' not in hud and 'Mode::leadCircle' not in src('src/turretcam.cpp')
     assert 'hudcue::StoreIconOf(j.storeName[i],j.storeRole[i])' in hud
     assert 'r.storeRole[i]=j.storeRole[i];' in src('src/playerjet.cpp')
     assert 'EXCLUDE_FROM_ALL tools/hud_cue_check.cpp' in cmake and 'hud_cue_check' in cmake.split('set(EDF6_OFFLINE_CHECKS', 1)[1]
@@ -14022,6 +14031,38 @@ def plugin_crash_dump_is_collected() -> None:
                 stream.write('[12:00:00.000] EDF6VehicleCrew 0.9.0 loading\nCRASH unhandled exception: exception C0000005 at EDF.dll+0x4C3A30\n' + status + '\n')
             note = testhub.plugin_crash_note(scratch)
             assert status in note, (status, note)
+
+
+@test
+def edf41_ui_names() -> None:
+    """4.1's UI names EDF6 registers under another name (pylib/bvm41.py UI_NAMES) never reach a committed 4.1 script
+    (no game): edf6_strings maps them after the object rewrite and leaves everything else; no BVM of the story or the DLC
+    packs pushes a 4.1 name; the pre-mission scenes that fade out at their end (M015, M016, M190, M192) create EDF6's fade
+    screen, which src/edf41before.cpp's scenes then show (tests/edf41_before_native_audit.py: the name is EDF.dll's)."""
+    import bvm41
+    import edf41dlc
+    text = bvm41.edf6_strings(edf41dlc.rewrite)
+    assert text('ui_fade_screen_test') == 'ui_fade_screen_simple'
+    assert text('ui_fade_screen_simple') == 'ui_fade_screen_simple' and text('Jingle_MissionCleared') == 'Jingle_MissionCleared'
+    assert text('app:/Object/DragonSmall401.sgo') == edf41dlc.rewrite('app:/Object/DragonSmall401.sgo')
+    assert bvm41.edf6_strings()('ui_fade_screen_test') == 'ui_fade_screen_simple'
+    fades: dict[str, int] = {}
+    seen = 0
+    for base, _dirs, files in os.walk(os.path.join(ROOT, 'edf41port')):
+        for name in files:
+            if not name.upper().endswith('.BVM'):
+                continue
+            with open(os.path.join(base, name), 'rb') as f:
+                prog = bvm41.parse(f.read())
+            seen += 1
+            pushed = [x.v for code in [prog.init] + [g.code for g in prog.funcs] for x in code if x.op == bvm41.OP_PUSHS]
+            assert not set(pushed) & set(bvm41.UI_NAMES), (base, name)
+            if name.upper() == 'BEFORE.BVM':
+                main_code = next(g.code for g in prog.funcs if g.name == 'Main')
+                fades[os.path.basename(base)] = sum(1 for x in main_code if x.op == bvm41.OP_PUSHS
+                                                    and x.v == 'ui_fade_screen_simple')
+    assert seen > 89, seen
+    assert {k for k, n in fades.items() if n} == {'M015', 'M016', 'M190', 'M192'}, fades
 
 
 def main() -> int:
