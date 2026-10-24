@@ -12,6 +12,8 @@ void ForgetAircraftPayload(const void*) noexcept { if(payloadScenario)++payloadF
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
 bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && SeatRider(SeatAt(const_cast<unsigned char*>(v),0))==Rider::other; }
 bool JetFliesItself(const void*) noexcept { return false; }   // the recovered aircraft are crewed ones, no launched drone
+bool DreadnoughtTakesBack(const unsigned char*) noexcept { return false; }   // no dreadnought in these scenes
+bool DreadnoughtParked(const void*) noexcept { return false; }
 
 bool ReadRound(const unsigned char*,RoundModel*) noexcept {return false;}
 bool RoundLands(const unsigned char*,const RoundModel&,const float*,const float*,float,float*,float*) noexcept {return false;}

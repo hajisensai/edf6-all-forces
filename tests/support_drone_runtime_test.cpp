@@ -46,6 +46,7 @@ void Jump(unsigned rva,const void* target) {
 }
 }
 namespace crew {
+const JetWeaponRow* JetWeapon(int) noexcept {return nullptr;}   // stores.cpp (not linked here): no jet weapons to preload
 unsigned char* image=nullptr;
 const Config& Cfg() noexcept {return fixture::config;}
 void Log(const char*,...) noexcept {}

@@ -2,7 +2,9 @@
 exit 1 on a failure. Since the real crews (2026-10-08, docs/real-npc-crew.md) no soldier is made inside a vehicle and none
 can walk aboard one made in the air; the plugin's launches waited for a pilot that never came, and fell (2026-10-09 log:
 six doll drones driver=0, seats=[-], under the ground and on down from 40 km). What it holds in place:
-  - jet_internal.h Unmanned is the drones' roles (drone, blast, doll) and nothing crewed; FliesItself = launched && Unmanned;
+  - jet_internal.h Unmanned is the drones' roles (drone, blast, doll) and nothing crewed; a body row is unmanned by its role
+    or its own `crewless` (the Dreadnought's fighters, its hangar launches them: BodyRow::crewless, set on just those);
+    FliesItself = launched && (Unmanned(role) || crewless);
   - jet_spawn.cpp Launch refuses a crewed body before it makes anything (crewed aircraft come through the support
     deployment, made with their real crew inside: support_dispatch.cpp BoardAirborne);
   - jet_spawn.cpp SpawnJet asks soldiers aboard (SeatNpcRider) only for a crewed body; a drone gets the native init alone;
@@ -65,16 +67,27 @@ def main() -> int:
     roles = set(re.findall(r'Role::(\w+)', m.group(1))) if m else set()
     if roles != {'drone', 'blast', 'doll'}:
         fail(f'jet_internal.h Unmanned: roles {sorted(roles)}, want blast, doll, drone')
-    if not re.search(r'FliesItself\s*\(\s*const\s+Jet&\s*j\s*\)\s*noexcept\s*\{\s*return\s+j\.launched\s*&&\s*Unmanned\s*\(\s*j\.role\s*\)', internal):
-        fail('jet_internal.h FliesItself: not launched && Unmanned(role)')
+    if not re.search(r'constexpr\s+bool\s+Unmanned\s*\(\s*const\s+BodyRow&\s*b\s*\)\s*noexcept\s*\{\s*return\s+Unmanned\s*\(\s*b\.role\s*\)'
+                     r'\s*\|\|\s*b\.crewless\s*;', internal):
+        fail('jet_internal.h Unmanned(BodyRow): not Unmanned(role) || crewless')
+    if not re.search(r'FliesItself\s*\(\s*const\s+Jet&\s*j\s*\)\s*noexcept\s*\{\s*return\s+j\.launched\s*&&\s*\(\s*Unmanned\s*\(\s*j\.role\s*\)'
+                     r'\s*\|\|\s*j\.crewless\s*\)', internal):
+        fail('jet_internal.h FliesItself: not launched && (Unmanned(role) || crewless)')
+    rows = internal.split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
+    crewless = re.findall(r'\{Body::(\w+),[^{}]*?,\s*(?:true|false)\s*,\s*true\s*\}', rows)
+    if crewless != ['dnFighter', 'dnDefender', 'dnBomber', 'dnInterceptor']:
+        fail(f'jet_internal.h kBodies: crewless rows {crewless}, want the Dreadnought fighters alone')
+    spawn_new = read(root, 'src/jet.cpp')
+    if not re.search(r'j->crewless\s*=\s*CrewlessJet\s*\(\s*v\s*\)', spawn_new):
+        fail('jet.cpp NewEntry: the entry does not take its body row\'s crewless')
 
     spawn = read(root, 'src/jet_spawn.cpp')
     launch = body(spawn, r'Jet\*\s+Launch\s*\(\s*Body\s+b')
-    before(launch, r'if\s*\(\s*!\s*Unmanned\s*\(\s*Row\s*\(\s*b\s*\)\s*\.role\s*\)\s*\)\s*\{[^}]*return\s+nullptr', r'\bSpawnJet\s*\(',
+    before(launch, r'if\s*\(\s*!\s*Unmanned\s*\(\s*Row\s*\(\s*b\s*\)\s*\)\s*\)\s*\{[^}]*return\s+nullptr', r'\bSpawnJet\s*\(',
            'jet_spawn.cpp Launch (a crewed body refused before it is made)')
     make = body(spawn, r'unsigned\s+char\*\s+SpawnJet\s*\(')
-    if not re.search(r'if\s*\(\s*!\s*Unmanned\s*\(\s*row\.role\s*\)\s*\)\s*SeatNpcRider\s*\(\s*v\s*,\s*true\s*\)', make):
-        fail('jet_spawn.cpp SpawnJet: SeatNpcRider not under !Unmanned(row.role)')
+    if not re.search(r'if\s*\(\s*!\s*Unmanned\s*\(\s*row\s*\)\s*\)\s*SeatNpcRider\s*\(\s*v\s*,\s*true\s*\)', make):
+        fail('jet_spawn.cpp SpawnJet: SeatNpcRider not under !Unmanned(row)')
     if len(re.findall(r'\bSeatNpcRider\s*\(', make)) != 1:
         fail('jet_spawn.cpp SpawnJet: SeatNpcRider called other than once (under !Unmanned)')
     if not re.search(r'\bPrepareNpcVehicle\s*\(\s*v\s*,\s*true\s*\)', make):

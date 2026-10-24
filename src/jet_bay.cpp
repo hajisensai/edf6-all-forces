@@ -561,6 +561,15 @@ bool PlayerSideGun(unsigned char* v,SideGun g,const float* at,ULONGLONG ms) noex
     return j && GunShot(*j,g,v,reinterpret_cast<const float*>(v+kPosition),at,ms,"the player",online::Shooter::localPlayer);
 }
 
+// A Dreadnought turret's round (dreadnought_turrets.inc: its gunner keeps its gap and its aim): the cannon's, from its muzzle
+// `from` at `at`, kTurretDamage times the cannon's damage at the ship's tier, the local player's.
+constexpr float kTurretDamage=1.5f;
+bool TurretRound(unsigned char* owner,const float* from,const float* at,bool real) noexcept {
+    SideGunSpec& gun=GunOf(SideGun::cannon);
+    return gun.ready && Shell(gun.sgo,gun.ready,owner,from,at,real ? gun.damage*kTurretDamage*Tier(owner) : 0.0f,true,
+                              real ? "dreadnought turret" : "dreadnought turret (remote)",online::Shooter::localPlayer);
+}
+
 // The NPC at the gun under a player pilot (playerjet_crew.inc CrewGunner): GunshipFire's target, picked round the
 // gunship itself within the longer gun's reach (PickTarget; the entry's target is its own again when it is handed back:
 // ResumeNpc); the side guns at it (led: the cannon, the gatling within its shorter reach) and a shell when it is within
@@ -664,6 +673,10 @@ void ResetShells() noexcept {
     for(auto& e:emcReady)e=false;
 }
 }  // namespace jet
+
+bool DreadnoughtRound(unsigned char* owner,const float* from,const float* at,bool real) noexcept {
+    return jet::TurretRound(owner,from,at,real);
+}
 
 using namespace jet;
 

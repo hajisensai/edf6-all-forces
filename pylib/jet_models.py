@@ -487,6 +487,8 @@ def model_bounds(game, file: str | None) -> tuple[tuple[float, float, float], tu
 
 HELI_ARCHIVE, HELI_MODEL = 'V506_HELI.MRAB', 'v506_heli.mdb'
 SAZABI_FILE = 'EDF6VC_SAZABI.MRAB'   # pylib/sazabi_model.py OUT_ARC   # the stock heli every jet SGO is made from
+# The Dreadnought's ships (pylib/dreadnought_model.py FILES, archive -> model): made from the user's model folder too.
+DN_FILES = {f'EDF6VC_DN_{m.upper()}.MRAB': m for m in ('dreadnought', 'fighter', 'defender', 'bomber', 'interceptor')}
 
 
 def heli_bounds(game) -> tuple[tuple[float, float, float], tuple[float, float, float]]:  # noqa: ANN001 - rootcpk.Game
@@ -518,6 +520,12 @@ def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Gam
         if folder is None:
             raise FileNotFoundError(f'no {sazabi_model.MODEL_SUBDIR} model folder')
         return sazabi_model.build_model(game, folder)[0]
+    if file in DN_FILES:     # made from the user's model folder (pylib/dreadnought_model.py)
+        import dreadnought_model
+        folder = dreadnought_model.model_dir()
+        if folder is None:
+            raise FileNotFoundError(f'no {dreadnought_model.MODEL_SUBDIR} model folder')
+        return dreadnought_model.build_model(game, folder, DN_FILES[file])[0]
     if file in STOCK_BOMBERS:
         arc, mdl = STOCK_BOMBERS[file]
         return mdb_read(next(f for f in rab_read(game.read('OBJECT', arc)).files if f.name.lower() == mdl).data)

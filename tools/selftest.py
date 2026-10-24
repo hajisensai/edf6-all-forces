@@ -1364,6 +1364,27 @@ def sazabi_bones_agree() -> None:
 
 
 @test
+def dreadnought_agrees() -> None:
+    """src/dreadnought.cpp's hand copies of pylib/vcobjects.py: its mark (and body506.cpp's range), its keel, its turrets
+    (dreadnought_turrets.inc kTurrets and their bone names), its fighters' first mark; the fighters' bodies in
+    src/jet_internal.h kBodies are vcobjects.DREADNOUGHT_FIGHTERS', in order, mark for mark."""
+    code = src('src/dreadnought.cpp')
+    assert f'kDreadnoughtMark={vc.DREADNOUGHT_MARK:.1f}f' in code
+    assert f'kKeel={vc.DREADNOUGHT_KEEL}f' in code, 'src/dreadnought.cpp kKeel != vcobjects.DREADNOUGHT_KEEL'
+    turrets = src('src/dreadnought_turrets.inc')
+    assert f'constexpr int kTurrets={vc.DREADNOUGHT_TURRETS};' in turrets
+    for n in range(vc.DREADNOUGHT_TURRETS):
+        assert f'{{L"dn_turret_{n}",L"dn_turret_{n}_gun",L"dn_turret_{n}_muzzle"}}' in turrets, n
+    marks = [m for _, m, *_ in vc.DREADNOUGHT_FIGHTERS.values()]
+    assert f'kDnFighterMark={marks[0]:.1f}f' in code and marks == [marks[0] + k for k in range(len(marks))], marks
+    table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
+    rows = re.findall(r'\{Body::dn(\w+),L"app:/object/(edf6vc_dn_\w+\.sgo)",L"(EDF6VC_DN_\w+\.SGO)",(\d+)\.0f', table)
+    assert [(k.lower(), f'edf6vc_dn_{k.lower()}.sgo', vc.dn_file(k, 'SGO'), m) for k, (_, m, *_r) in
+            vc.DREADNOUGHT_FIGHTERS.items()] == [(a.lower(), b, c, float(d)) for a, b, c, d in rows], rows
+    assert f'{{{vc.DREADNOUGHT_MARK:.1f}f,' in src('src/body506.cpp').replace(' ', ''), 'src/body506.cpp kMarks'
+
+
+@test
 def sazabi_rifle_files() -> None:
     """The model folder's rifle (tools/prep_sazabi_rifle.py, pylib/sazabi_arms.py): neither file -> the rifle of boxes and
     RIFLE_MUZZLE; both -> the OBJ on the right hand and sz_muzzle from the JSON; one without the other -> an error."""
@@ -1402,6 +1423,12 @@ def hand_copies_agree() -> None:
             import make_sazabi
             assert jet.mark == c.mark == vc.SAZABI_MARK and make_sazabi.SGO_FILE == f'{c.vehicle}.SGO', c.id
             continue
+        if c.jet == vc.DREADNOUGHT_JET:   # the Dreadnought: tools/make_dreadnought.py writes it, src/dreadnought.cpp knows its mark
+            import make_dreadnought
+            assert jet.mark == c.mark == vc.DREADNOUGHT_MARK and make_dreadnought.SGO_FILE == f'{c.vehicle}.SGO', c.id
+            assert f'kDreadnoughtMark={vc.DREADNOUGHT_MARK:.1f}f' in src('src/dreadnought.cpp'), 'src/dreadnought.cpp kDreadnoughtMark'
+            assert f'{{{vc.DREADNOUGHT_MARK:.1f}f,' in src('src/body506.cpp').replace(' ', ''), 'src/body506.cpp kMarks lacks the Dreadnought'
+            continue
         assert jet.mark == c.mark and make_jets.FILES[f'{c.vehicle}.SGO'] == c.jet, c.id
         if jet.player:   # a player jet: its mark src/playerjet.cpp kKinds'
             assert float(pjet[c.kind.removeprefix('pjet_')]) == c.mark, f'src/playerjet.cpp kKinds disagrees on {c.id}'
@@ -1420,8 +1447,11 @@ def hand_copies_agree() -> None:
     # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py; the
     # Proteus's shield: tools/make_proteus.py; the ultimate strike's rounds: tools/make_ultimate.py
     import make_proteus
+    # ...and the Dreadnought's fighters: tools/make_dreadnought.py
+    import make_dreadnought
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
-               | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES))
+               | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES)
+               | set(make_dreadnought.FIGHTER_SGOS.values()))
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -2198,6 +2228,8 @@ def every_boardable_aircraft_requested() -> None:
         'bomber501_2': 'the airstrike bombers the strike jets take over (stock bombers, not ours to bring)',
         'blast': 'its one weapon is the charge that destroys it: the thrown blast drone brings that charge',
         'doll': 'its one weapon is the charge that destroys it: the thrown doll drone brings that charge',
+        **{b: "the Dreadnought's hangar launches it (src/dreadnought_hangar.inc): its model is the user's model folder's"
+           for b in ('dnFighter', 'dnDefender', 'dnBomber', 'dnInterceptor')},
     }
     table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
     marks = {body: float(mark) for body, mark in
@@ -2305,8 +2337,11 @@ def range_parks_every_boardable_aircraft_apart() -> None:
              re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,', re.sub(r'\s+', ' ', table))}
     boardable = {marks[b] for b in re.findall(r'\{Body::(\w+),Airframe::', src('src/playerjet_kinds.h'))}
     assert len(boardable) >= 10, f'read {len(boardable)} boardable marks'
+    # the Dreadnought's fighters come from its hangar alone (their models are the user's model folder's: no range copy)
+    hangar = {name for name, *_ in vc.DREADNOUGHT_FIGHTERS.values()}
     kinds = {name for name, jet in JETS.items()
-             if int(jet.mark) in boardable and name.endswith('_mission') and not jet.parked and not jet.player}
+             if int(jet.mark) in boardable and name.endswith('_mission') and not jet.parked and not jet.player
+             and name not in hangar}
     want = {vc.parked_name(k) for k in kinds}
     assert set(gen.BOARDABLE_PARKED) == want, f'BOARDABLE_PARKED {sorted(gen.BOARDABLE_PARKED)}, boardable {sorted(want)}'
     # Each the parked twin of its kind: the same mark, model and arms, parked (the whole plane's box, every class).
@@ -2545,7 +2580,8 @@ def spawn_catalog_covers_every_registry() -> None:
     assert {r.sgo for r in catalog.edf5dlc_rows()} <= set(by) and catalog.edf5dlc_rows(), 'EDF5 DLC objects'
     assert set(gen.PLACEABLE_DERIVED) <= set(by), sorted(set(gen.PLACEABLE_DERIVED) - set(by))
     assert all(by[s].category == 'ours' and by[s].source == 'range' for s in gen.PLACEABLE_DERIVED)
-    want_jets = {s for s, j in vc.JETS.items() if (j.player or j.parked) and s in gen.DERIVED}   # not the requests' copies
+    # not the requests' copies, nor the BIG ones (the 500 m Dreadnought: the plan places it at the farthest points)
+    want_jets = {s for s, j in vc.JETS.items() if (j.player or j.parked) and s in gen.DERIVED and s not in gen.BIG}
     assert want_jets <= set(gen.PLACEABLE_DERIVED), f'a jet the player flies is not placeable: {sorted(want_jets - set(gen.PLACEABLE_DERIVED))}'
     installer_rows = {s for s, _, _ in catalog.INSTALLER_VEHICLES}
     for kind, v in vc.GROUND_VEHICLES.items():
@@ -3109,7 +3145,7 @@ def proteus_wired() -> None:
     bay = src('src/jet_bay.cpp')
     assert 'L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO"' in bay
     assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::ultGather)+1' in bay   # the Proteus's before the ultimate's
-    assert 'PreloadShells(mgr,Preloaded(Body::gunship));' in src('src/jet_spawn.cpp')
+    assert 'PreloadShells(mgr,Preloaded(Body::gunship) || ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));' in src('src/jet_spawn.cpp')
     assert 'EmcFire(EmcRound::proteusShield,v,p,at,1.0f)' in shield
     assert "SHIELD_FILE = 'OBJECT/EDF6VC_PROTEUS_SHIELD.SGO'" in src('tools/make_proteus.py')
     assert 'ProteusViewLift(' in src('src/turretcam.cpp')
@@ -4152,7 +4188,7 @@ def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     files.update({rel: _sgo_table('text_table', table_ids) for rel in cw.TEXTS})
     files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS})
     for c in calls.CALLS:
-        if c.jet == vc.SAZABI_JET:
+        if c.jet in cw.MODEL_VEHICLES:   # their install reads the request's own setup (call_weapons.vehicle_needs)
             files[cw.sgo_file(c)] = cw.vehicle_sgo(_sazabi_request_template(), c, (2.0, 3.0))
     return files
 
@@ -5637,7 +5673,7 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'edf::AsyncKey(' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'sightzoom.cpp',
+                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'dreadnought.cpp', 'sightzoom.cpp',
                                       'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     fp = src('src/firstperson.cpp')

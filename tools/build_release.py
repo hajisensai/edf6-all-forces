@@ -43,7 +43,7 @@ GENERATOR_NAME = os.path.splitext(installer.GENERATOR)[0]   # EDF6VehicleCrew.ge
 # graft_pure, ledger, mdb, mdb_jet, modfiles, rootcpk, sgo, support_loadout, vcobjects).
 GENERATOR_EXCLUDES = ('numpy', 'PIL', 'scipy', 'tkinter', 'matplotlib', 'pandas', 'installer', 'testhub', 'procmesh', 'jet_models',
                       'aircraft_collision', 'support_config', 'gamelease', 'urllib3', 'requests')
-RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'cockpits', 'wt_m163', 'wt_bmpt')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model.MODEL_SUBDIR, cockpits.ASSET_DIR, wt_tracked.FOLDERS
+RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'dreadnought', 'cockpits', 'wt_m163', 'wt_bmpt')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model / dreadnought_model.MODEL_SUBDIR, cockpits.ASSET_DIR, wt_tracked.FOLDERS
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 
@@ -229,7 +229,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
                 'testhub', 'make_emc', 'make_ultimate', 'magic_circle', 'make_vulcan', 'make_bmpt', 'make_tracked_combat', 'tracked_combat_model', 'tracked_collision', 'frozen_collision_probe', 'vulcan_model', 'bmpt_model',
                 'edf41_materials', 'edf41materials', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',
                 'cas_pose', 'aircraft_collision', 'support_config', 'support_loadout', 'room_layout', 'menu_preview',
-                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'mdb', 'edf6native', 'crilayla',
+                'make_sazabi', 'sazabi_model', 'sazabi_arms', 'make_dreadnought', 'dreadnought_model', 'procmesh', 'make_edf5_campaign', 'ported_weapons', 'edf5port', 'mab_legacy', 'acb', 'legacy_assets', 'rabpool', 'mdb_legacy', 'cas_legacy', 'make_proteus', 'proteus_describe', 'make_optics', 'vehicle_optics', 'cockpit_instruments', 'cockpit_label_glyphs', 'cockpit_retrofit', 'cockpit_shell', 'texfile_accel', 'model_workers', 'mdb', 'edf6native', 'crilayla',
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]

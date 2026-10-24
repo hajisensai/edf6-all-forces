@@ -33,11 +33,19 @@ SKIN = 0.03
 FILES = {None: 'EDF6VC_AIRFRAME_BOMBER.SHKT',
          **{k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.MODELS},
          **{k: f'EDF6VC_AIRFRAME_{k.upper()}.SHKT' for k in jet_models.STOCK_BOMBERS}}
+# The Dreadnought's ships (pylib/dreadnought_model.py): made from the user's model folder, so tools/make_dreadnought.py
+# writes these (assets_of), not tools/make_jets.py (assets: FILES).
+DN_FILES = {k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.DN_FILES}
+
+
+def file_of(key) -> str:
+    """The airframe file of a model_key."""
+    return FILES[key] if key in FILES else DN_FILES[key]
 
 
 def model_key(jet, model):
     """Supported rendered model, or False for aircraft built elsewhere (Primer/sub)."""
-    if jet.file in jet_models.MODELS:
+    if jet.file in jet_models.MODELS or jet.file in DN_FILES:
         return jet.file
     if jet.box_model in jet_models.STOCK_BOMBERS:
         return jet.box_model
@@ -153,12 +161,20 @@ def build(game, key, mode=None):
     body = _pieces(physics.tf, tris, MAGIC) if (mode or MODE) == 'pieces' else _compound(physics.tf, boxes, MAGIC)
     # Retain all stock proxy names and constraints for the 506's animation/death
     # code, but its helicopter blades must no longer collide outside the aircraft.
+    # The stand-ins' tiny box is a convex, not a compound: the airframe is the ragdoll's one compound, which is how the
+    # plugin finds it (src/body506.cpp AirframeShape; a compound stand-in, shared by seven parts, had been taken for it
+    # and the Dreadnought flew as a 1 cm box, through the ground: range 2026-10-21).
     lo, hi = max(boxes, key=lambda b: math.prod(b[1][k]-b[0][k] for k in range(3)))
     point = [(lo[k]+hi[k])/2 for k in range(3)]
-    tiny = _compound(physics.tf, [(tuple(p-0.005 for p in point), tuple(p+0.005 for p in point))])
+    tiny = hkshape.write_convex(physics.tf, hkshape.convex_data(
+        [(point[0]+x, point[1]+y, point[2]+z) for x in (-0.005, 0.005) for y in (-0.005, 0.005) for z in (-0.005, 0.005)]))
     for b in physics.bodies():
         if b.name == 'RagDollProxys.body':
             b.set_shape(body)
+            # Its points are the model's, about its centre (the vehicle's position): the stock body's own place over the
+            # 506's origin (0, 1.637, 0) would lift the airframe that far over the model (the Dreadnought's deck 1.6 m
+            # over the drawn one: a soldier put on it stood inside its cells and fell through, range 2026-10-21).
+            b.set_position((0.0, 0.0, 0.0))
             # The helicopter's centre of mass and inertia do not belong to the airframe: without a massDistribution
             # the game derives them from the new shape's (SHKT Editor manual 2.7, confirmed in game there).
             b.value['massDistribution'].set_target(None)
@@ -176,7 +192,11 @@ def build(game, key, mode=None):
 
 
 def assets(game):
-    return {name: build(game, key) for key, name in FILES.items()}
+    return assets_of(game, FILES)
+
+
+def assets_of(game, files: dict) -> dict:
+    return {name: build(game, key) for key, name in files.items()}
 
 
 # The carrier's nacelles (src/nacelle_reach.h, jet_flight.cpp Thrusters): the collision is the grounded bind pose, its

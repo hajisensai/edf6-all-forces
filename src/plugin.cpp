@@ -282,6 +282,21 @@ void Validate(Config& n) noexcept {
     Fix("SazabiAxeDamage",n.sazabiAxeDamage,0.0f,1000000.0f);
     Fix("SazabiCannonDamage",n.sazabiCannonDamage,0.0f,100000.0f);
     Fix("SazabiFunnelDamage",n.sazabiFunnelDamage,0.0f,100000.0f);
+    Fix("DreadnoughtSpeed",n.dreadnoughtSpeed,1.0f,200.0f);
+    Fix("DreadnoughtBoost",n.dreadnoughtBoost,1.0f,4.0f);
+    Fix("DreadnoughtAccel",n.dreadnoughtAccel,0.5f,40.0f);
+    Fix("DreadnoughtClimb",n.dreadnoughtClimb,1.0f,100.0f);
+    Fix("DreadnoughtTurn",n.dreadnoughtTurn,1.0f,90.0f);
+    Fix("DreadnoughtFloor",n.dreadnoughtFloor,0.0f,500.0f);
+    n.dreadnoughtBoostKey=static_cast<int>(FixInt("DreadnoughtBoostKey",n.dreadnoughtBoostKey,0,254));
+    n.dreadnoughtDescendKey=static_cast<int>(FixInt("DreadnoughtDescendKey",n.dreadnoughtDescendKey,0,254));
+    n.dreadnoughtStrafeLeftKey=static_cast<int>(FixInt("DreadnoughtStrafeLeftKey",n.dreadnoughtStrafeLeftKey,0,254));
+    n.dreadnoughtStrafeRightKey=static_cast<int>(FixInt("DreadnoughtStrafeRightKey",n.dreadnoughtStrafeRightKey,0,254));
+    n.dreadnoughtBoostButton=static_cast<int>(FixInt("DreadnoughtBoostButton",n.dreadnoughtBoostButton,0,255));
+    n.dreadnoughtDescendButton=static_cast<int>(FixInt("DreadnoughtDescendButton",n.dreadnoughtDescendButton,0,255));
+    n.dreadnoughtSeatButton=static_cast<int>(FixInt("DreadnoughtSeatButton",n.dreadnoughtSeatButton,0,255));
+    n.dreadnoughtHangarKey=static_cast<int>(FixInt("DreadnoughtHangarKey",n.dreadnoughtHangarKey,0,254));
+    n.dreadnoughtHangarButton=static_cast<int>(FixInt("DreadnoughtHangarButton",n.dreadnoughtHangarButton,0,255));
     Fix("PlayerJetRollScale",n.playerJetRollScale,0.5f,2.0f);
     Fix("PlayerJetAimGain",n.playerJetAimGain,0.5f,2.0f);
     Fix("PlayerRotorLift",n.playerRotorLift,0.0f,4.0f);
@@ -593,6 +608,22 @@ void LoadConfig() noexcept {
     n.sazabiCannonDamage=ReadFloat(L"SazabiCannonDamage",n.sazabiCannonDamage);
     n.sazabiFunnelDamage=ReadFloat(L"SazabiFunnelDamage",n.sazabiFunnelDamage);
     n.sazabiTestBoard=ReadBool(L"SazabiTestBoard",n.sazabiTestBoard);
+    n.dreadnought=ReadBool(L"Dreadnought",n.dreadnought);
+    n.dreadnoughtSpeed=ReadFloat(L"DreadnoughtSpeed",n.dreadnoughtSpeed);
+    n.dreadnoughtBoost=ReadFloat(L"DreadnoughtBoost",n.dreadnoughtBoost);
+    n.dreadnoughtAccel=ReadFloat(L"DreadnoughtAccel",n.dreadnoughtAccel);
+    n.dreadnoughtClimb=ReadFloat(L"DreadnoughtClimb",n.dreadnoughtClimb);
+    n.dreadnoughtTurn=ReadFloat(L"DreadnoughtTurn",n.dreadnoughtTurn);
+    n.dreadnoughtFloor=ReadFloat(L"DreadnoughtFloor",n.dreadnoughtFloor);
+    n.dreadnoughtBoostKey=static_cast<int>(ReadInt(L"DreadnoughtBoostKey",static_cast<DWORD>(n.dreadnoughtBoostKey)));
+    n.dreadnoughtDescendKey=static_cast<int>(ReadInt(L"DreadnoughtDescendKey",static_cast<DWORD>(n.dreadnoughtDescendKey)));
+    n.dreadnoughtStrafeLeftKey=static_cast<int>(ReadInt(L"DreadnoughtStrafeLeftKey",static_cast<DWORD>(n.dreadnoughtStrafeLeftKey)));
+    n.dreadnoughtStrafeRightKey=static_cast<int>(ReadInt(L"DreadnoughtStrafeRightKey",static_cast<DWORD>(n.dreadnoughtStrafeRightKey)));
+    n.dreadnoughtBoostButton=static_cast<int>(ReadInt(L"DreadnoughtBoostButton",static_cast<DWORD>(n.dreadnoughtBoostButton)));
+    n.dreadnoughtDescendButton=static_cast<int>(ReadInt(L"DreadnoughtDescendButton",static_cast<DWORD>(n.dreadnoughtDescendButton)));
+    n.dreadnoughtSeatButton=static_cast<int>(ReadInt(L"DreadnoughtSeatButton",static_cast<DWORD>(n.dreadnoughtSeatButton)));
+    n.dreadnoughtHangarKey=static_cast<int>(ReadInt(L"DreadnoughtHangarKey",static_cast<DWORD>(n.dreadnoughtHangarKey)));
+    n.dreadnoughtHangarButton=static_cast<int>(ReadInt(L"DreadnoughtHangarButton",static_cast<DWORD>(n.dreadnoughtHangarButton)));
     {
         wchar_t text[32]{};
         GetPrivateProfileStringW(L"VehicleCrew",L"TestBoardVehicle",L"",text,32,iniPath);
@@ -890,6 +921,10 @@ void LoadConfig() noexcept {
         n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiFunnelKey,
         n.sazabiFunnelButton,n.sazabiCannonKey,n.sazabiCannonButton,n.sazabiMeleeKey,n.sazabiMeleeButton,n.sazabiGuardKey,n.sazabiGuardButton,n.sazabiGuardShare,
         n.sazabiAxeDamage,n.sazabiCannonDamage,n.sazabiFunnelDamage,n.sazabiTestBoard);
+    Log("CONFIG dreadnought=%d speed=%.0f boost=%.1f accel=%.1f climb=%.0f turn=%.1f floor=%.0f boost=0x%X/0x%X descend=0x%X/0x%X strafe=0x%X/0x%X hangar=0x%X/0x%X",
+        n.dreadnought,n.dreadnoughtSpeed,n.dreadnoughtBoost,n.dreadnoughtAccel,n.dreadnoughtClimb,n.dreadnoughtTurn,
+        n.dreadnoughtFloor,n.dreadnoughtBoostKey,n.dreadnoughtBoostButton,n.dreadnoughtDescendKey,n.dreadnoughtDescendButton,
+        n.dreadnoughtStrafeLeftKey,n.dreadnoughtStrafeRightKey,n.dreadnoughtHangarKey,n.dreadnoughtHangarButton);
     Log("CONFIG sazabi assist=%d cone=%.1f range=%.0f pull=%.1f mousePull=%d lock=0x%X/0x%X",n.sazabiAimAssist,n.sazabiAssistCone,
         n.sazabiAssistRange,n.sazabiAssistPull,n.sazabiAssistMousePull,n.sazabiLockKey,n.sazabiLockButton);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f rotorLift=%.2f jetSound=%d volume=%.2f",
@@ -1184,6 +1219,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("AIRDROP container step watched=%d",InstallAirdrop());   // the transport planes' container airdrops
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallSazabi();        // the same: the 506 physics hook and the vehicles' own input
+    InstallDreadnought();   // the same
     InstallVehicleRam();    // the ground vehicles' ram (its charges are the jets' impact charges: jet_bay.cpp)
     gravity::Install();     // the gravity operations (their impacts are the jets' impact charges too); the gravity gun's on them
     InstallFloatGuns();     // M099's dropped guns that float round the player and fire (the dropped gun's update hook)

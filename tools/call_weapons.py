@@ -315,6 +315,22 @@ _VEHICLE_SWAP = {
 }
 
 
+# The plugin vehicles made from a user-supplied model folder (vcobjects JETS name -> its builder module): without the
+# folder their tool writes the stock V506_HELI under the vehicle's name (tools/make_sazabi.py, tools/make_dreadnought.py),
+# and their request is the stock Eros's (vehicle_sgo fallback). Literal keys: pylib/buildcache.py reads this table to
+# find the builders model_missing imports.
+MODEL_VEHICLES = {'edf6tr_sazabi_mission': 'sazabi_model', 'edf6tr_dreadnought_mission': 'dreadnought_model'}
+assert set(MODEL_VEHICLES) == {vc.SAZABI_JET, vc.DREADNOUGHT_JET}, MODEL_VEHICLES
+
+
+def model_missing(call: Call) -> bool:
+    """A model vehicle's request (MODEL_VEHICLES) whose model folder is not there."""
+    if call.jet not in MODEL_VEHICLES:
+        return False
+    import importlib
+    return importlib.import_module(MODEL_VEHICLES[call.jet]).model_dir() is None
+
+
 def vehicle_weapons(call: Call) -> tuple[str, ...]:
     """The weapons a vehicle request's setup carries: the player jet's (vcobjects.JETS) or the ground vehicle's."""
     return vc.GROUND_VEHICLES[call.ground].weapons if call.ground else vc.JETS[call.jet].weapons
@@ -325,7 +341,7 @@ def vehicle_needs(call: Call, request: bytes | None = None) -> list[str]:
     tool): the vehicle SGO and its weapons of ours (EDF6VC_*). A stock weapon it keeps (the sidecar bike's guns and
     fuel tank) is the game's own, in Root.cpk: nothing to install."""
     weapons = vehicle_weapons(call)
-    if call.jet == vc.SAZABI_JET and request is not None:
+    if call.jet in MODEL_VEHICLES and request is not None:
         # Follow the prepared/installed request, not today's model directory: the model may have been
         # added or removed since these bytes were built. The stock-Eros fallback has only stock weapons.
         setup = dsgo.parse(request).root.get('Ammo_CustomParameter').items[4].items[3]
@@ -391,10 +407,10 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
     stock_vehicle = req.items[2]
     req.items[2] = _object_path(call)
     if fallback:
-        # make_sazabi writes an unchanged V506_HELI under this stable alias. Keep the Eros request's
+        # make_sazabi / make_dreadnought write an unchanged V506_HELI under this stable alias. Keep the Eros request's
         # mark, holder count, weapons and multipliers too; its setup overrides the object's on spawn.
-        if call.jet != vc.SAZABI_JET:
-            raise ValueError('only the Sazabi has a stock vehicle fallback')
+        if call.jet not in MODEL_VEHICLES:
+            raise ValueError('only a model vehicle (MODEL_VEHICLES) has a stock vehicle fallback')
         res = r.get('resource')
         res.items = [_object_path(call) if x.lower() == stock_vehicle.lower() else x for x in res.items]
         for lang in LANGS:
@@ -814,10 +830,9 @@ def stack(game_root: str) -> dict[str, bytes]:
     tpl = {t: _template_index(before, t) for t in templates()}
     template_sgo = {t: stock(game_root, f'WEAPON/{t.upper()}.SGO') for t in tpl}
     curves = {request_family(c): request_curve(game_root, request_family(c)) for c in CALLS if c.brings == 'vehicle'}
-    import sazabi_model
-    fallback = sazabi_model.model_dir() is None
+    fallback = {c.id for c in CALLS if model_missing(c)}
     out: dict[str, bytes] = {sgo_file(c): weapon_sgo(template_sgo[template_of(c)], c, curves.get(request_family(c)),
-                                                fallback=fallback and c.jet == vc.SAZABI_JET)
+                                                fallback=c.id in fallback)
                              for c in CALLS}
     order = sorted(CALLS, key=lambda c: plan.at[c.id])   # appended rows in their order
     # A ported weapon this run cannot build for want of its game keeps the row an earlier install gave it (all its files
@@ -846,7 +861,7 @@ def stack(game_root: str) -> dict[str, bytes]:
         hp = float(sgo.load(data=stock(game_root, 'OBJECT/V506_HELI.SGO'))['game_object_durability'])
         mult = dsgo.parse(template_sgo[VEHICLE_TEMPLATE]).root.get('Ammo_CustomParameter').items[4].items[3].items[0].items[0]
         for c in CALLS:
-            if c.jet == vc.SAZABI_JET:
+            if c.id in fallback:
                 durability[c.id] = hp * float(mult)
     stats = {c.id: gun_stats(template_sgo[template_of(c)]) for c in CALLS if c.brings == 'gun'}
     for lang, rel in zip(LANGS, TEXTS):
