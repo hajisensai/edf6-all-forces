@@ -5,7 +5,8 @@
 //
 // What it catches, from any thread of the game:
 //  - an exception nobody handles (the top-level filter): an access violation, a C++ exception no catch took, a stack
-//    overflow (written by a thread of its own: the crashed thread has a page of stack left). One-chance exceptions a
+//    overflow (written by a thread of its own, which then also calls the filter behind ours: the overflowed thread has
+//    only the little stack Windows leaves it, and only waits). One-chance exceptions a
 //    __try / catch handles never reach it, so the game's and the CRT's handled ones (_com_error, ...) write nothing;
 //  - abort() and std::terminate() of the game's CRT (ucrtbase.dll: its SIGABRT handler) and of this plugin's own
 //    static CRT;

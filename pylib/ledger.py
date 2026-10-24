@@ -28,7 +28,6 @@ process saved never writes that process's entries back out.
 """
 from __future__ import annotations
 
-import copy
 import json
 import os
 
@@ -40,6 +39,16 @@ OWNERS = ('jets', 'sub', 'testrange', 'testrange_sub', 'calls', 'katyusha', 'big
 LEGACY = 'legacy'   # a file from before the ledger that a tool needs: its writer is not recorded
 
 
+def _copy(value):
+    """A deep copy of the ledger's JSON data (dicts, lists, strings, numbers): copy.deepcopy's memo and dispatch made
+    the per-file saves of an install (one per put) its slowest step; the ledger holds no shared or cyclic parts."""
+    if isinstance(value, dict):
+        return {k: _copy(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_copy(v) for v in value]
+    return value
+
+
 def key(rel: str) -> str:
     """The ledger's name for a path under Mods (Windows paths are case-insensitive)."""
     return rel.replace('\\', '/').strip('/').upper()
@@ -47,12 +56,12 @@ def key(rel: str) -> str:
 
 def _merge_mapping(base: dict, mine: dict, disk: dict) -> dict:
     """Apply only this object's per-key edits, preserving another writer's metadata."""
-    out = copy.deepcopy(disk)
+    out = _copy(disk)
     for name in set(base) | set(mine):
         if base.get(name) == mine.get(name):
             continue
         if name in mine:
-            out[name] = copy.deepcopy(mine[name])
+            out[name] = _copy(mine[name])
         else:
             out.pop(name, None)
     return out
@@ -93,7 +102,7 @@ def _merge_entry(base: dict | None, mine: dict | None, disk: dict | None) -> dic
 def merge_files(base: dict[str, dict], mine: dict[str, dict], disk: dict[str, dict]) -> dict[str, dict]:
     """The ledger to write: `disk` (read just now) with every entry this object changed since `base` (what it last read)
     merged in (_merge_entry); entries it did not touch are disk's as they are."""
-    out = copy.deepcopy(disk)
+    out = _copy(disk)
     for k in set(base) | set(mine):
         if base.get(k) == mine.get(k):
             continue
@@ -112,7 +121,7 @@ class Ledger:
         self.mods = os.path.join(game_root, 'Mods')
         self.path = os.path.join(self.mods, MANIFEST)
         self.files: dict[str, dict] = self._read()
-        self._base: dict[str, dict] = copy.deepcopy(self.files)
+        self._base: dict[str, dict] = _copy(self.files)
 
     def _read(self) -> dict[str, dict]:
         if not os.path.isfile(self.path):
@@ -130,12 +139,13 @@ class Ledger:
         """Re-read, merge this object's changes into it, write (atomically) or remove the file when nothing is left."""
         merged = merge_files(self._base, self.files, self._read())
         if merged:
-            data = json.dumps({'version': 1, 'files': merged}, indent=1, sort_keys=True).encode('utf-8')
+            # One line: json's C encoder runs only without indent, and an install saves this once per file it puts.
+            data = json.dumps({'version': 1, 'files': merged}, sort_keys=True).encode('utf-8')
             atomic_write(self.path, data)
         elif os.path.isfile(self.path):
             os.remove(self.path)
         self.files = merged
-        self._base = copy.deepcopy(merged)
+        self._base = _copy(merged)
 
     def disk(self, rel: str) -> str:
         return os.path.join(self.mods, *key(rel).split('/'))
