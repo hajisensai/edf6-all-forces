@@ -26,6 +26,9 @@
 //    it with 0x6899F0(line, &start, &velocity, &gravity) from its muzzle (the call at 0x6888D9); the call is redirected and,
 //    for a line that starts at the player in first person, its start is moved through T (the viewmodel's muzzle); the
 //    arc keeps its own velocity and gravity. Only the picture moves: the round flies from the real muzzle as before.
+//  - The laser sight (H slot 2 / call, fp-render-re.md §5): its beam is drawn from the viewmodel's muzzle along the
+//    viewmodel's bore, and its dot is cast (0x11A70B0 at 0x68934C) along that same bore: gun, beam and dot one pose, the
+//    viewmodel's recoil included (LaserCastHook). Only the laser's picture: shots, muzzle entries and the network are native.
 //  - The culling (H setter, measured): Umbra culls a model by its bounds box (model+0x110, handed over by 0x11B30C0).
 //    The real weapon and arms go below the view in a reload's third-person animation and were culled with the viewmodel
 //    in front of the camera (the whole player, shadow too, for half a second). The real box through T was not enough
@@ -2092,8 +2095,8 @@ void* nextLaserDraw=nullptr;
 // another: moving or jumping, the line left the gun (the user, 2026-10-19: 「跳或者移动的时候红外瞄准的线没有实时跟随」).
 // The start is rebuilt here from the very pose array the weapon is drawn with: local x pose[bone], then for the first
 // person through that draw's own T (DrawTransforms), the one the viewmodel is drawn with.
-constexpr std::size_t kLaserStart=0x120;
-constexpr float kLaserBelow=0.02f;
+constexpr std::size_t kLaserStart=0x120,kLaserEnd=0x130;
+constexpr float kLaserBelow=0.02f,kLaserBeam=10.0f;
 // The muzzle's matrix in the weapon's draw pose and the skeleton instance holding its bone; false: not readable as one.
 bool LaserMuzzle(const unsigned char* weapon,unsigned char** inst,M4* out) noexcept {
     if(!Readable(weapon,kWeaponModel+kBaseLod+kLodInst+8))return false;
@@ -2123,36 +2126,56 @@ bool LaserMuzzle(const unsigned char* weapon,unsigned char** inst,M4* out) noexc
 void LaserStartOf(const M4& m,float* out) noexcept {
     for(int j=0;j<3;++j)out[j]=m.m[12+j]-kLaserBelow*m.m[4+j];
 }
+// The drawn beam's far end (slot 3 0x688970, H: +0x130 = the start plus kLaserBeam m along the unit ray, 0x688BA6..0x688BF3)
+// for a muzzle matrix `m`: its start (LaserStartOf) plus kLaserBeam along its forward row. False: no direction.
+bool LaserEndOf(const M4& m,const float* from,float* out) noexcept {
+    const float len=std::sqrt(m.m[8]*m.m[8]+m.m[9]*m.m[9]+m.m[10]*m.m[10]);
+    if(!(len>1e-6f))return false;
+    for(int j=0;j<3;++j)out[j]=from[j]+kLaserBeam*m.m[8+j]/len;
+    return true;
+}
+bool FinitePoint(const float* p) noexcept { return std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]); }
 void LaserDrawSelected(void* object,void* ctx,int pass,void* view) {
     auto draw=static_cast<unsigned char*>(object);
-    float savedStart[4]{};bool moved=false;
+    float savedStart[4]{},savedEnd[4]{};bool moved=false,movedEnd=false;
     __try {
         // object is the attachment's umbra base (+0x10); attachment+8 owns the weapon. The render-only endpoints
-        // are object+0x120/+0x130. The world raycast's origin, direction and hit point remain untouched.
+        // are object+0x120 (the beam's start) and +0x130 (kLaserBeam m on along it); the dot is at the hit (+0x150).
+        // In first person the whole drawn beam is the viewmodel's: its start at the drawn muzzle and its far end along the
+        // drawn bore, the bore the hit itself was cast along (LaserCastHook): beam, dot and gun share one pose, the
+        // viewmodel's recoil included (the user, 2026-10-25: 「后坐力的红点会动，但是模型不会动」).
         const auto weapon=At<const unsigned char*>(draw-0x10,8);
         const DrawSnap& d=Snap();
         const int hand=d.on && !d.riding && weapon ? SnapHand(d,weapon+kWeaponModel) : -1;
         unsigned char* inst=nullptr;M4 muzzle;
         const bool posed=weapon && LaserMuzzle(weapon,&inst,&muzzle);
-        float from[3];bool have=false;
+        float from[3],to[3];bool have=false,haveEnd=false;
         if(hand>=0 && d.viewOk[hand]) {
             M4 t[2];
             if(posed && DrawTransforms(inst,Part::inHand,hand,DrawCamera(view),t)) {
-                LaserStartOf(fpview::Mul(muzzle,t[0]),from);have=true;
+                const M4 drawn=fpview::Mul(muzzle,t[0]);
+                LaserStartOf(drawn,from);have=true;
+                haveEnd=LaserEndOf(drawn,from,to);
             } else {
-                // No drawn pose to place it by: the camera step's T on the native start (the viewmodel's own fallback).
+                // No drawn pose to place it by: the camera step's T on the native beam (the viewmodel's own fallback).
                 float native[4];std::memcpy(native,draw+kLaserStart,16);fpview::Point(d.view[hand],native,from);have=true;
+                std::memcpy(native,draw+kLaserEnd,16);fpview::Point(d.view[hand],native,to);haveEnd=true;
             }
         } else if(posed) {
             LaserStartOf(muzzle,from);have=true;   // third person, any soldier's: the gun as it is drawn
         }
-        if(have && std::isfinite(from[0]) && std::isfinite(from[1]) && std::isfinite(from[2])) {
+        if(have && FinitePoint(from)) {
             std::memcpy(savedStart,draw+kLaserStart,16);
             std::memcpy(draw+kLaserStart,from,12);moved=true;
+            if(haveEnd && FinitePoint(to)) {
+                std::memcpy(savedEnd,draw+kLaserEnd,16);
+                std::memcpy(draw+kLaserEnd,to,12);movedEnd=true;
+            }
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){}
     reinterpret_cast<DrawFn>(nextLaserDraw)(object,ctx,pass,view);
     if(moved)std::memcpy(draw+kLaserStart,savedStart,16);
+    if(movedEnd)std::memcpy(draw+kLaserEnd,savedEnd,16);
 }
 
 void __fastcall LaserDrawHook(void* object,void* ctx,int pass,void* view) {
@@ -2164,6 +2187,84 @@ void __fastcall LaserDrawHook(void* object,void* ctx,int pass,void* view) {
     DrawSnap snap;
     if(!TakeSnapshot(&snap)){LaserDrawSelected(object,ctx,pass,view);return;}
     SnapScope taken(&snap);LaserDrawSelected(object,ctx,pass,view);
+}
+
+// --- The laser's ray (the red dot) ---
+// The dot is not drawn from the start above: the attachment's update (slot 2 0x6890A0, H) casts a ray from the real muzzle
+// entry's start along its forward row (0x6891xx: start = entry +0xC0 - 0.02 x +0xA0, the ray = +0xB0 x range +0xB4) with
+// 0x11A70B0(query, world+0x10, &start, &end, ...) at 0x68934C, then a second query 0x11A7480 from the same two locals
+// (0x68935E), writes the hit to +0xC0 (+0xB8 its kind) and puts the dot object [+0xD0] there (0x689514). In first person
+// that ray was the third-person body's gun (its bone records), the gun drawn the viewmodel straightened in front of the
+// camera with its own recoil (fp_motion.h): whatever moved the real bore moved the dot and not the gun, and the gun's kick
+// never reached the dot (the user, 2026-10-25: 「后坐力的红点会动，但是模型不会动」). One pose now: for the player's own
+// weapon in hand in first person the cast's two locals are replaced, before 0x11A70B0 reads them, by the same start and
+// bore through the viewmodel's placement (placeWeapon x the camera it was built on, the T the gun is drawn by), the
+// range kept. Only the cast's inputs on slot 2's own stack change: the attachment's +0x90 / +0xA0, the muzzle entry, the
+// shots and the network are untouched, and every other soldier's laser (and this one in third person) is native.
+constexpr unsigned kLaserRayVtable=0x17E2458,kLaserRay=0x6890A0,kLaserCastCall=0x68934C,kLaserCast=0x11A70B0;
+constexpr std::size_t kLaserRaySlot=2,kLaserRayWeapon=0x8;
+const unsigned char kLaserRayCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x10,0x48,0x89,0x78,0x18,0x55};
+using LaserRayFn=void(__fastcall*)(void*,void*);
+using LaserCastFn=void*(__fastcall*)(void*,void*,float*,float*,void*);
+void* nextLaserRay=nullptr;     // slot 2 as it was (ChainVtableSlot writes it before the slot)
+LaserCastFn nextLaserCast=nullptr;
+thread_local const unsigned char* castLaser=nullptr;   // the attachment whose slot 2 runs on this thread
+
+// The published views (the update may run off the camera step's thread): this thread's own last whole copies.
+bool TakeRayView(int index,DrawSnap* out) noexcept {
+    thread_local DrawSnap last[kLocalViews]{};
+    thread_local bool lastOk[kLocalViews]{};
+    Published& p=published[index];
+    return SeqTake(&p.seq,&p.snap,out,&last[index],&lastOk[index]);
+}
+
+// The viewmodel's muzzle of `weapon` in the world, from the shot's own muzzle (its bone record, what the native ray
+// started from) through the placement the gun is drawn with: one local view's weapon in hand in first person (two views
+// holding it would be no single pose: false).
+bool ViewmodelMuzzle(const unsigned char* weapon,M4* out) noexcept {
+    const unsigned char* const model=weapon+kWeaponModel;
+    int found=0;M4 placed=fpview::Identity();
+    for(int i=0;i<kLocalViews;++i) {
+        DrawSnap d;
+        if(!TakeRayView(i,&d) || !d.on || d.riding)continue;
+        const int hand=SnapHand(d,model);
+        if(hand<0 || !d.viewOk[hand] || !d.placeWeaponOk[hand])continue;
+        placed=fpview::Mul(d.placeWeapon[hand],d.camera);++found;
+    }
+    if(found!=1)return false;
+    const unsigned char* const muzzle=edf::MuzzleAt(weapon,0);
+    M4 world,root,inverse;
+    if(!muzzle || !edf::MuzzleWorld(muzzle,nullptr,world.m) || !ShotRoot(model,&root) || !fpview::InverseAffine(root,&inverse))return false;
+    *out=fpview::Mul(fpview::Mul(world,inverse),placed);
+    return fpview::Finite(*out);
+}
+
+// The cast's start and end (x, y, z, w) moved onto the viewmodel's bore, its length kept. False: left as they are.
+bool ViewmodelRay(const unsigned char* weapon,float* start,float* end) noexcept {
+    M4 drawn;
+    if(!ViewmodelMuzzle(weapon,&drawn))return false;
+    const float d[3]={end[0]-start[0],end[1]-start[1],end[2]-start[2]};
+    const float range=std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+    float from[3],ahead[3];
+    LaserStartOf(drawn,from);
+    if(!(range>0.0f) || !std::isfinite(range) || !LaserEndOf(drawn,from,ahead) || !FinitePoint(from) || !FinitePoint(ahead))return false;
+    for(int j=0;j<3;++j){end[j]=from[j]+(ahead[j]-from[j])*(range/kLaserBeam);start[j]=from[j];}
+    return true;
+}
+
+void* __fastcall LaserCastHook(void* query,void* world,float* start,float* end,void* filter) {
+    __try {
+        const unsigned char* const laser=castLaser;
+        const auto weapon=laser && Cfg().enabled && start && end ? At<const unsigned char*>(laser,kLaserRayWeapon) : nullptr;
+        if(weapon)ViewmodelRay(weapon,start,end);
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return nextLaserCast(query,world,start,end,filter);
+}
+void __fastcall LaserRayHook(void* laser,void* ctx) {
+    const unsigned char* const before=castLaser;
+    castLaser=static_cast<const unsigned char*>(laser);
+    reinterpret_cast<LaserRayFn>(nextLaserRay)(laser,ctx);
+    castLaser=before;
 }
 
 bool HookDrawOf(void** vt) noexcept {
@@ -2323,6 +2424,11 @@ bool InstallFirstPerson() noexcept {
     drawOk=drawOk && skinOk;
     const bool laserOk=Matches(kLaserDraw,kLaserDrawCode,sizeof(kLaserDrawCode)) &&
         edf::ChainVtableSlot(reinterpret_cast<void**>(image+kLaserDrawVtable)+1,reinterpret_cast<void*>(&LaserDrawHook),&nextLaserDraw);
+    // The dot's ray (LaserCastHook): the cast's call redirected first (a passthrough until the slot names the attachment).
+    nextLaserCast=reinterpret_cast<LaserCastFn>(image+kLaserCast);
+    const bool rayOk=Matches(kLaserRay,kLaserRayCode,sizeof(kLaserRayCode)) &&
+        RedirectCall(image+kLaserCastCall,image+kLaserCast,reinterpret_cast<void*>(&LaserCastHook),changed) &&
+        edf::ChainVtableSlot(reinterpret_cast<void**>(image+kLaserRayVtable)+kLaserRaySlot,reinterpret_cast<void*>(&LaserRayHook),&nextLaserRay);
     const bool flashOk=RedirectCall(image+kFlashCall,image+kEffectCreate,reinterpret_cast<void*>(&FlashCreateHook),changed);
     placeOk=Matches(kUmbraPlace,kUmbraPlaceCode,sizeof(kUmbraPlaceCode));
     const bool lineOk=RedirectCall(image+kAimLineCall,image+kAimLineBuild,reinterpret_cast<void*>(&AimLineHook),changed);
@@ -2330,7 +2436,7 @@ bool InstallFirstPerson() noexcept {
     const bool passOk=placeOk && RedirectCall(image+kPassEndCall,image+kPassEnd,reinterpret_cast<void*>(&PassEndHook),changed);
     toggled=Cfg().firstPersonStart;
     Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled.load());
-    Log("FP skin=%d laser=%d",skinOk,laserOk);
+    Log("FP skin=%d laser=%d laser ray=%d",skinOk,laserOk,rayOk);
     return drawOk;
 }
 }  // namespace crew

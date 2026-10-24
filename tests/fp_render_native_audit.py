@@ -15,7 +15,9 @@ import pefile
 pe=pefile.PE(args.dll,fast_load=True)
 assert pe.FILE_HEADER.TimeDateStamp==0x678CCB46
 binary=pe.get_memory_mapped_image()
-source=(Path(__file__).resolve().parents[1]/'src/firstperson.cpp').read_text(encoding='utf-8')
+root=Path(__file__).resolve().parents[1]
+# firstperson.cpp and the muzzle layout it reads through common/edf/weapon.h (MuzzleAt / MuzzleWorld)
+source=(root/'src/firstperson.cpp').read_text(encoding='utf-8')+(root/'common/edf/weapon.h').read_text(encoding='utf-8')
 value=lambda name:int(re.search(r'\b'+name+r'=0x([0-9A-Fa-f]+)',source).group(1),16)
 for name,signature in (('kMeshDraw','kMeshDrawCode'),('kLaserDraw','kLaserDrawCode'),('kModelDraw','kModelDrawCode')):
     block=re.search(r'\b'+signature+r'\[\]=\{([^}]+)\}',source).group(1)
@@ -51,6 +53,23 @@ assert binary[0x688B98:0x688BA6]==bytes.fromhex('0f1087900000000f118730010000'),
 assert binary[0x696A03:0x696A06]==bytes.fromhex('488b11'),'the entry +0 is its bone record'
 assert binary[0x696A2F:0x696A36]==bytes.fromhex('0f10b2b0000000'),'the bone record +0xB0 world matrix'
 print('laser start source (muzzle entry, 0.02 below, slot 3 copy) passed')
+# The dot's ray (firstperson.cpp LaserCastHook / LaserRayHook): slot 2 of the attachment's main vtable is 0x6890A0, whose
+# cast 0x11A70B0 at 0x68934C takes the start [rsp+0x50] and end [rsp+0x40] (r8 / r9), the same two locals the second query
+# reads (0x68935E); the hit goes to +0xC0 and the dot object [+0xD0] (0x689514); slot 3 draws the beam kLaserBeam m on.
+rvt=value('kLaserRayVtable')
+assert struct.unpack_from('<Q',binary,rvt+8*2)[0]-pe.OPTIONAL_HEADER.ImageBase==value('kLaserRay'),'the laser ray is slot 2'
+block=re.search(r'\bkLaserRayCode\[\]=\{([^}]+)\}',source).group(1)
+code=bytes(int(x,16) for x in re.findall(r'0x([0-9A-Fa-f]+)',block))
+assert binary[value('kLaserRay'):value('kLaserRay')+len(code)]==code,'the laser ray prologue'
+cast=value('kLaserCastCall')
+assert binary[cast]==0xE8 and cast+5+struct.unpack_from('<i',binary,cast+1)[0]==value('kLaserCast'),'the laser cast call'
+assert binary[cast-14:cast]==bytes.fromhex('4c8d4c24404c8d442450488d4d40'),'r9 = &end [rsp+0x40], r8 = &start [rsp+0x50]'
+assert binary[0x68935E:0x689374]==bytes.fromhex('0f28442450660f7f4424600f284c2440660f7f4c2470'),'the second query reads the same locals'
+assert binary[0x6890DB:0x6890DF]==bytes.fromhex('488b4108'),'slot 2 reads its weapon at +8 (kLaserRayWeapon)'
+assert value('kLaserRayWeapon')==8 and value('kLaserEnd')==0x130
+assert binary[0x68950D:0x689518]==bytes.fromhex('0f1083c00000000f114010'),'the dot object at the hit'
+assert binary[0x688B83:0x688B87]==bytes.fromhex('f30f100d') and struct.unpack_from('<f',binary,0x688B8B+struct.unpack_from('<i',binary,0x688B87)[0])[0]==float(re.search(r'kLaserBeam=([0-9.]+)f',source).group(1))
+print('laser dot ray (slot 2, the cast and its locals, the beam length) passed')
 # Every flash class uses MuzzleFlashBase's +0x120 borrowed matrix. Check the two destructor routes before
 # trusting a matrix until destruction (secondary Umbra thunks jump directly to the primary body).
 assert binary[0x2BA563:0x2BA56E]==bytes.fromhex('488b433848898720010000')

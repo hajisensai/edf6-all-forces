@@ -4,7 +4,10 @@
 //  - rounds: the plugin's DemoIndirectFire SGOs (jet_bay.cpp EmcFire, kEmcFiles ult*; tools/make_ultimate.py), owned by the
 //    caller (its kills; friends inside the area are hit too: the user's 「误伤也没关系」 — the rounds' team filter is the
 //    game's, as every other round of the caller's);
-//  - effects without damage: EffectGenUtil's explosions, fires, smoke and camera quake, StencilLight flashes (edf41classes.h);
+//  - the bursts on the ground (ultimate_plan.h BurstsAt: the bolts' landings, the rings' blasts, the ground shock waves'
+//    fronts): each one a round and the explosion drawn with it, one point and one radius (BurstsFrame; the user, 2026-10-25:
+//    「天罚的伤害和实际落点是不是不一样啊，感觉外面的闪电爆炸没伤害」);
+//  - effects without damage, none of them an explosion: the after's fires and smoke, camera quake, StencilLight flashes;
 //  - the sky: the game's own light fade manager, what the missions' EventLightTool_EnvFadeAnimation calls (EnvFade below),
 //    faded into the dark at the start and back to what it was (a snapshot of the renderer's values) at the end;
 //  - the circles and shock waves: flat disc objects of the plugin's (far_object.h, pylib/magic_circle.py);
@@ -199,6 +202,7 @@ struct Show {
     ULONGLONG keptAt=0;      // this machine's: when its last keep went out (GetTickCount64)
     ULONGLONG begunMs=0;     // GetTickCount64 when it began here
     bool stockMatched=false; // another machine's: a call of its caller's weapon here was matched to it (airstrike.cpp)
+    int bursts=0,burstsLost=0;   // BurstsFrame: played, and of them not shown for want of their round (the caller there)
 };
 Show shows[kMaxShows];
 Table table;
@@ -312,9 +316,6 @@ void CirclesFrame(Show& s,int frame) noexcept {
     }
 }
 
-// The damage's shares: a bolt (all its rounds), a ring's blast, the main beam's round (a frame, penetrating), a spark.
-constexpr float kBoltShare=0.25f,kSparkShare=0.25f,kBlastShare=1.0f,kBeamShare=0.03f,kCoreShare=0.03f;
-
 // The ground under (x, z) near the centre's height (the show's rounds land on it), else the centre's height.
 float GroundAt(float x,float y,float z) noexcept {
     const float from[3]={x,y+400.0f,z},to[3]={x,y-400.0f,z};
@@ -427,11 +428,8 @@ void StormFrame(Show& s,int f) noexcept {
         const float x=s.at[0]+bolts[k].at[0],z=s.at[2]+bolts[k].at[1];
         const float to[3]={x,GroundAt(s,x,z),z};
         const float from[3]={s.at[0]+bolts[k].from[0],lift,s.at[2]+bolts[k].from[1]};
-        Fire(s,EmcRound::ultBolt,from,to,s.damage*kBoltShare/kBoltFrames);
-        const float above[3]={to[0],to[1]+2.0f,to[2]};
-        Fire(s,EmcRound::ultSpark,above,to,s.damage*kSparkShare);
+        Fire(s,EmcRound::ultBolt,from,to,s.damage*kBoltShare/kBoltFrames);   // its burst where it lands: BurstsFrame
         edf41c::StencilLight(to,kBoltLight,110.0f,8);
-        edf41c::Explosion(to,kUp,20.0f);   // the spark's size (ULT_SPARK_RADIUS 40): the storm fills the circle
         if(k==0 && f-s.thunder>=9) {       // a thunder now and then, never on top of the last
             s.thunder=f;
             Rng g=FrameRng(s.seed^0x7A0Dull,f);
@@ -472,16 +470,7 @@ void CannonFrame(Show& s,int f) noexcept {
     }
     if(f%10==0)edf41c::StencilLight(s.at,kViolet,kRadius,14);
     const int k=RingAt(f);
-    if(k>=0) {
-        const Ring r=RingOf(k,s.seed);
-        for(int i=0;i<r.count;++i) {
-            const float a=r.phase+2.0f*kPi*static_cast<float>(i)/r.count;
-            const float x=s.at[0]+r.radius*std::cos(a),z=s.at[2]+r.radius*std::sin(a);
-            const float to[3]={x,GroundAt(s,x,z),z};
-            const float above[3]={x,to[1]+3.0f,z};
-            Fire(s,EmcRound::ultBlast,above,to,s.damage*kBlastShare);
-            edf41c::BigExplosion(to,kUp,kRingBlast*0.5f,1.0f);
-        }
+    if(k>=0) {   // its blasts: BurstsFrame
         Sound(s,audio::kUltBlast,s.at,1.0f-0.02f*static_cast<float>(k));
         edf41c::Quake(s.at,1.2f,kRadius*4.0f);
         if(k%3==0) {   // the flash of every third ring
@@ -490,8 +479,8 @@ void CannonFrame(Show& s,int f) noexcept {
     }
 }
 
-// The shock waves on show frame `frame`: each disc run out; a ground wave sounds as it starts and throws up dust at its
-// front while that is still near the area; the great one shakes the world and flashes.
+// The shock waves on show frame `frame`: each disc run out; a ground wave sounds as it starts (its front's bursts:
+// BurstsFrame); the great one shakes the world and flashes.
 void WavesFrame(Show& s,int frame) noexcept {
     for(int w=0;w<kWaveCount;++w) {
         const WaveSpec& ws=kWaves[w];
@@ -507,13 +496,31 @@ void WavesFrame(Show& s,int frame) noexcept {
             }
         }
         if(frame==ws.at+8 && w==kGreatWave)FlashBack(1.5f);
-        if(!p.shown || ws.sky || (frame-ws.at)%5 || p.radius>kRadius*1.6f)continue;
-        for(int k=0;k<16;++k) {
-            const float a=2.0f*kPi*(static_cast<float>(k)+0.5f*static_cast<float>((frame-ws.at)/5%2))/16.0f;
-            const float x=s.at[0]+p.radius*std::cos(a),z=s.at[2]+p.radius*std::sin(a);
-            const float pt[3]={x,GroundAt(s,x,z),z};
-            edf41c::Smoke(pt,w==kGreatWave ? 40.0f : 25.0f);
-        }
+    }
+}
+
+// The bursts of show frame `frame` (ultimate_plan.h BurstsAt): each one's damage round and its look from one point and one
+// radius. The round is the caller's charge whose blast radius is the burst's (the spark SGO's kSparkRadius, the blast SGO's
+// kRingBlast: its own blast is the explosion seen), dropped from kBurstDrop m over the ground under the point; the look added
+// to it (the stock explosion helpers at kLookOfRadius of that radius, a wave's dust) only where that round is: a burst whose
+// round could not be made while the caller is there shows nothing (counted, said at the show's end), so nothing seen is
+// without its damage. A show whose caller is gone fires no rounds and plays its looks out (Fire, CheckCaller).
+constexpr float kBurstDrop=3.0f;      // m: the charges fly 3 m a frame (EMC_BLAST_SPEED): on the ground the next frame
+constexpr float kLookOfRadius=0.5f;   // the explosion helpers' size per metre of blast (the stock look the storm and rings had)
+void BurstsFrame(Show& s,int frame) noexcept {
+    Burst bursts[kMaxBurstsAFrame];
+    const int n=BurstsAt(s.seed,frame,bursts,kMaxBurstsAFrame);
+    for(int k=0;k<n;++k) {
+        const Burst& b=bursts[k];
+        const float x=s.at[0]+b.at[0],z=s.at[2]+b.at[1];
+        const float to[3]={x,GroundAt(s,x,z),z};
+        const float above[3]={x,to[1]+kBurstDrop,z};
+        const EmcRound round=b.kind==BurstKind::blast ? EmcRound::ultBlast : EmcRound::ultSpark;
+        ++s.bursts;
+        if(s.live && !Fire(s,round,above,to,s.damage*b.share).obj){++s.burstsLost;continue;}
+        if(b.kind==BurstKind::blast)edf41c::BigExplosion(to,kUp,b.radius*kLookOfRadius,1.0f);
+        else edf41c::Explosion(to,kUp,b.radius*kLookOfRadius);
+        if(b.kind==BurstKind::wave)edf41c::Smoke(to,b.great ? 40.0f : 25.0f);
     }
 }
 
@@ -526,6 +533,15 @@ void AfterFrame(Show& s,int f) noexcept {
         edf41c::Blazing(p,kUp,6.0f);
         if(f%12==0)edf41c::Smoke(p,25.0f);
     }
+}
+
+// Every round the show fires preloaded this mission: a show is the bursts' rounds as much as its beams (a show begun
+// with the beam's alone drew its storm and its rings with no damage under them).
+constexpr EmcRound kShowRounds[]={EmcRound::ultSight,EmcRound::ultBolt,EmcRound::ultSpark,EmcRound::ultBeam,EmcRound::ultCore,
+                                  EmcRound::ultBlast,EmcRound::ultGather};
+bool ShowRoundsReady() noexcept {
+    for(const EmcRound r:kShowRounds)if(!EmcRoundReady(r))return false;
+    return true;
 }
 
 // ---- online (ultimate_net_protocol.h) ----
@@ -583,7 +599,8 @@ void Finish(int i,const char* why) noexcept {
         s.skyHeld=false;
         if(sky.refs.Release(GameFrame(),static_cast<std::uint64_t>(kSkyBackSec*kFps)))SkyBack(kSkyBackSec);
     }
-    Log("ULTIMATE %s show %08X:%u over (%s)",s.remote ? "a peer's" : "this machine's",s.key.origin,s.key.serial,why);
+    Log("ULTIMATE %s show %08X:%u over (%s): %d bursts, %d not shown for want of their round",s.remote ? "a peer's" : "this machine's",
+        s.key.origin,s.key.serial,why,s.bursts,s.burstsLost);
     table.Release(i);
     Clear(s);
 }
@@ -606,6 +623,7 @@ void Play(Show& s,int f) noexcept {
     if(f<kAfterEnd) {
         CirclesFrame(s,f);
         WavesFrame(s,f);
+        BurstsFrame(s,f);
     }
     switch(PhaseAt(f)) {
         case Phase::charge: ChargeFrame(s,f); break;
@@ -666,8 +684,8 @@ Show& Begin(int i,bool remote,const Key& k,const unsigned char* caller,const flo
 }  // namespace
 
 bool UltimateStart(const unsigned char* caller,const float* at,float damage,std::uint64_t seed) noexcept {
-    if(!caller || !at || !std::isfinite(at[0]+at[1]+at[2]) || !EmcRoundReady(EmcRound::ultBeam)) {
-        Log("ULTIMATE not started: %s",!EmcRoundReady(EmcRound::ultBeam) ? "its rounds were not preloaded this mission "
+    if(!caller || !at || !std::isfinite(at[0]+at[1]+at[2]) || !ShowRoundsReady()) {
+        Log("ULTIMATE not started: %s",!ShowRoundsReady() ? "its rounds were not preloaded this mission "
             "(python tools/make_ultimate.py, or the installer)" : "no caller / target");
         return false;
     }
@@ -788,7 +806,7 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
     switch(table.Receive(k,m.kind==ultimate_net::Kind::end)) {
     case Act::none: break;
     case Act::begin: {
-        if(!EmcRoundReady(EmcRound::ultBeam)) {
+        if(!ShowRoundsReady()) {
             if(netLogs++<16)Log("ULTIMATE NET peer %u's show %08X:%u: this machine's rounds are not preloaded: the stock beam stays",
                                 peer,m.origin,m.serial);
             break;

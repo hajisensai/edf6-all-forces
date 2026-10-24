@@ -103,6 +103,12 @@ void __fastcall RecordLaser(void* object,void*,int,void*) {
     const auto p=static_cast<const unsigned char*>(object);
     std::memcpy(laserStart,p+0x120,16);std::memcpy(laserEnd,p+0x130,16);
 }
+// The laser's slot 2 (0x6890A0) as the cast sees it: its own two stack locals handed to 0x11A70B0 (LaserCastHook).
+float castStart[4]{},castEnd[4]{},castSeenStart[4]{},castSeenEnd[4]{};
+void* __fastcall RecordCast(void*,void*,float* start,float* end,void*) {
+    std::memcpy(castSeenStart,start,16);std::memcpy(castSeenEnd,end,16);return nullptr;
+}
+void __fastcall SlotTwoCasts(void*,void*) { LaserCastHook(nullptr,nullptr,castStart,castEnd,nullptr); }
 }
 
 int main() {
@@ -246,16 +252,17 @@ int main() {
           "a nested foreign/NPC model sees no local body skin mask and restores the enclosing body's exact gate");
     hookedCount=0;Put<void*>(model,kBaseLod+kLodInst,nullptr);reset();Current().viewOk[0]=true;
     unsigned char laser[0x190]{};Put<void*>(laser,8,weapon);
-    const float from[4]={1,2,3,1},hit[4]={20,30,40,1};
-    std::memcpy(laser+0x130,from,16);std::memcpy(laser+0x140,hit,16);
+    // The draw's fields: +0x120 the beam's start, +0x130 kLaserBeam m on along it (slot 3: main +0x130 / +0x140).
+    const float from[4]={1,2,3,1},beamEnd[4]={20,30,40,1};
+    std::memcpy(laser+0x130,from,16);std::memcpy(laser+0x140,beamEnd,16);
     unsigned char originalLaser[sizeof(laser)];std::memcpy(originalLaser,laser,sizeof(laser));
     Current().view[0]=fpview::Translate(3,4,5);nextLaserDraw=reinterpret_cast<void*>(&RecordLaser);
     Publish();LaserDrawHook(laser+0x10,nullptr,2,nullptr);
-    check(laserStart[0]==4 && laserStart[1]==6 && laserStart[2]==8 && std::memcmp(laserEnd,hit,16)==0,
-          "the owning weapon's visible laser start follows its viewmodel while the hit endpoint stays in the world");
+    check(laserStart[0]==4 && laserStart[1]==6 && laserStart[2]==8 && laserEnd[0]==23 && laserEnd[1]==34 && laserEnd[2]==45,
+          "no drawn pose: the owning weapon's whole beam (start and far end) goes through its viewmodel's T");
     check(std::memcmp(laser,originalLaser,sizeof(laser))==0,"all laser attachment state is restored after native drawing");
     Put<void*>(laser,8,human);LaserDrawHook(laser+0x10,nullptr,2,nullptr);
-    check(std::memcmp(laserStart,from,16)==0,"another owner's laser is not relocated even when nearby");
+    check(std::memcmp(laserStart,from,16)==0 && std::memcmp(laserEnd,beamEnd,16)==0,"another owner's laser is not relocated even when nearby");
     {
         // The start rebuilt from the weapon's drawn pose (the muzzle entry's local x its bone's pose), not the
         // update-time start the attachment holds: through the draw's own T in first person, as drawn in third.
@@ -270,11 +277,37 @@ int main() {
         Current().placeWeaponOk[0]=true;Current().placeWeapon[0]=fpview::Translate(0,0,0.5f);Publish();
         LaserDrawHook(laser+0x10,nullptr,2,nullptr);
         const auto at=[](const float* a,float x,float y,float z){return std::fabs(a[0]-x)<1e-4f && std::fabs(a[1]-y)<1e-4f && std::fabs(a[2]-z)<1e-4f;};
-        check(at(laserStart,0,0.98f,1.5f) && std::memcmp(laserEnd,hit,16)==0,
-              "first person: the laser starts at the viewmodel's muzzle as this draw places the weapon, the hit stays in the world");
-        check(std::memcmp(laser+0x130,from,16)==0,"the update-time start is restored after the draw");
+        check(at(laserStart,0,0.98f,1.5f) && at(laserEnd,0,0.98f,1.5f+kLaserBeam),
+              "first person: the beam starts at the viewmodel's muzzle as this draw places the weapon and runs along its bore");
+        check(std::memcmp(laser+0x130,from,16)==0 && std::memcmp(laser+0x140,beamEnd,16)==0,"the update-time beam is restored after the draw");
+        // The dot: slot 2's cast from the same muzzle through the placement the gun is drawn with (placeWeapon x the
+        // camera it was built on), its range kept. The muzzle's bone record and the shot's root: the bones' world rows.
+        std::memcpy(bones+kBoneWorld,root.m,64);std::memcpy(bones+kBoneStride+kBoneWorld,boneAt.m,64);
+        Current().built=fpview::Translate(0,0,0);Current().builtReady=true;Publish();
+        nextLaserCast=&RecordCast;nextLaserRay=reinterpret_cast<void*>(&SlotTwoCasts);
+        const float nativeStart[4]={5,5,5,1},nativeEnd[4]={5,5,105,1};
+        const auto cast=[&](){std::memcpy(castStart,nativeStart,16);std::memcpy(castEnd,nativeEnd,16);LaserRayHook(laser,nullptr);};
+        cast();
+        check(at(castSeenStart,0,0.98f,1.5f) && at(castSeenEnd,0,0.98f,101.5f) && castSeenStart[3]==1 && castSeenEnd[3]==1,
+              "first person: the dot is cast from the viewmodel's muzzle along its bore, the native range kept");
+        Current().placeWeapon[0]=fpview::Mul(Current().placeWeapon[0],fpview::MotionMatrix(0,0,0,.1f,0,0,kPivot));Publish();
+        cast();
+        const float kick=castSeenEnd[1]-castSeenStart[1];
+        check(kick>5.0f && kick<15.0f,
+              "the viewmodel's recoil turn (its placement) lifts the dot with the gun: one pose for both");
+        Current().placeWeapon[0]=fpview::Translate(0,0,0.5f);Publish();
+        std::memcpy(castStart,nativeStart,16);std::memcpy(castEnd,nativeEnd,16);LaserCastHook(nullptr,nullptr,castStart,castEnd,nullptr);
+        check(std::memcmp(castSeenStart,nativeStart,16)==0 && std::memcmp(castSeenEnd,nativeEnd,16)==0,
+              "the cast call outside the laser's slot 2 is passed through untouched");
+        Put<void*>(laser,8,human);cast();
+        check(std::memcmp(castSeenStart,nativeStart,16)==0 && std::memcmp(castSeenEnd,nativeEnd,16)==0,"another owner's dot is native");
+        Put<void*>(laser,8,weapon);
         Current().inHandCount=0;Publish();LaserDrawHook(laser+0x10,nullptr,2,nullptr);
-        check(at(laserStart,10,0.98f,1),"third person: the laser starts at the muzzle of the gun as drawn, not where an earlier step left it");
+        check(at(laserStart,10,0.98f,1) && std::memcmp(laserEnd,beamEnd,16)==0,
+              "third person: the laser starts at the muzzle of the gun as drawn, not where an earlier step left it");
+        cast();
+        check(std::memcmp(castSeenStart,nativeStart,16)==0 && std::memcmp(castSeenEnd,nativeEnd,16)==0,"third person: the dot is native");
+        std::memset(bones,0,sizeof(bones));Current().builtReady=false;nextLaserCast=nullptr;nextLaserRay=nullptr;
         Put<void*>(weapon,edf::kMuzzles,nullptr);Put<std::uint64_t>(weapon,edf::kMuzzleCount,0);Put<void*>(model,kBaseLod+kLodInst,nullptr);
         Current().inHandCount=1;Current().placeWeaponOk[0]=false;Publish();
     }
