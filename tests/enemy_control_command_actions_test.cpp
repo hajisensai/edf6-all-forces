@@ -41,7 +41,7 @@ struct Fixture {
    Put<const void*>(actor,0xA70,actor+0x3000);Put<int>(actor,0xEB0,1);actor[0x1090]=1;Put<float>(actor,0x2F8,100);
    for(unsigned which=0;which<2;++which) {
     const unsigned machineOffset=which ? 0x17B0u : 0xE50u,contextOffset=which ? 0x16F0u : 0xD90u;
-    auto* machine=actor+machineOffset;auto* context=actor+contextOffset;auto* table=rows+(which ? 0x600u : 0u);const unsigned n=which ? 3u : 1u;
+    auto* machine=actor+machineOffset;auto* context=actor+contextOffset;auto* table=rows+(which ? 0x600u : 0u);const unsigned n=which ? 2u : 1u;
     Put<const void*>(machine,0,image+(which ? 0x17BEC50u : 0x17C29A8u));Put<const void*>(machine,8,context);Put<const void*>(machine,0x28,actor);
     Put<const void*>(context,0x10,table);Put<std::size_t>(context,0x20,n);
     for(unsigned i=0;i<n;++i) {auto* node=rows+(which ? 0x700u : 0x200u)+i*0x40;Put<const void*>(table+i*16,0,node);Put<const void*>(table+i*16,8,weak);
@@ -91,7 +91,7 @@ void __fastcall NamedNative(void* value,const NamedAction* action) {
 void __fastcall NamedReplay(void* m,const Descriptor* d,const NamedAction* a){PoolEnter(m,d,a);}
 void __fastcall HandReplay(void* m,const Descriptor* d,const void*){PoolEnter(m,d,nullptr);}
 bool __fastcall BossMessage(void* value,unsigned message,void* argument) {
- auto* a=static_cast<unsigned char*>(value);const auto key=static_cast<unsigned>(*static_cast<int*>(argument));CHECK(message==0x1000000D && key>=4 && key<=6);
+ auto* a=static_cast<unsigned char*>(value);const auto key=static_cast<unsigned>(*static_cast<int*>(argument));CHECK(message==0x1000000D && key>=4 && key<=5);
  if(!bossBusy && !handsBusy && At<float>(a,0x2F8)>0 && !(a[0xEAC]&0x20)){const Descriptor d{image+HandCallback(key)};PoolEnter(a+0x17B0,&d,nullptr);}return false; // original base AL is unrelated to acceptance
 }
 bool __fastcall CarrierMessage(void* value,unsigned message,void* argument) {
@@ -163,20 +163,28 @@ void TestSameInputAbilities() {
 NativeAbility BossAbility(unsigned key,bool hand=false){return {"boss_fixture",L"Boss",0,0,hand ? AbilityKind::objectAction : AbilityKind::namedAction,hand ? nullptr : kBossNames[key],hand ? static_cast<int>(key) : 0};}
 void TestBossAndCarrier() {
  Fixture host(2,true),guest(2,false);SetRole(0,&host);SetRole(1,&guest);host.Bind();guest.Bind();bool handled=false;
- const auto started=bossNamedEntries;for(unsigned i=0;i<5;++i)CHECK(ExecuteAcceptedCommand(host.l,BossAbility(i),10000+i,100+i,&handled) && handled);
+ const auto started=bossNamedEntries;for(unsigned i=0;i<kBossNamedCount;++i)CHECK(ExecuteAcceptedCommand(host.l,BossAbility(i),10000+i,100+i,&handled) && handled);
  unsigned char bytes[512]{};std::size_t used=0;CHECK(Capture(host.l,bytes,sizeof(bytes),&used));
- bossBusy=true;Put<unsigned>(guest.actor,0x10F0,5);guest.actor[0x11F2]=1;CHECK(Apply(guest.l,bytes,used)==Result::applied);CHECK(bossNamedEntries==started+10);
- CHECK(!guest.actor[0x11BC] && NamedString(guest.l,kBossNames[4]));const auto committed=bossNamedEntries;CHECK(Apply(guest.l,bytes,used)==Result::applied && bossNamedEntries==committed);
- bossBusy=false;Put<int>(host.actor,0x11B0,2);CHECK(!ExecuteAcceptedCommand(host.l,BossAbility(4),10005,105,&handled));CHECK(Empty(host.l) && bossNamedEntries==committed);
- Put<int>(host.actor,0x11B0,1);Put<float>(host.actor,0x11B4,0.1f);CHECK(ExecuteAcceptedCommand(host.l,BossAbility(4),10006,106,&handled));CHECK(bossNamedEntries==committed+1);
+ bossBusy=true;Put<unsigned>(guest.actor,0x10F0,5);guest.actor[0x11F2]=1;CHECK(Apply(guest.l,bytes,used)==Result::applied);CHECK(bossNamedEntries==started+2*kBossNamedCount);
+ CHECK(!guest.actor[0x11BC] && NamedString(guest.l,kBossNames[kBossNamedCount-1]));const auto committed=bossNamedEntries;CHECK(Apply(guest.l,bytes,used)==Result::applied && bossNamedEntries==committed);
+ bossBusy=false;Put<int>(host.actor,0x11B0,2);CHECK(!ExecuteAcceptedCommand(host.l,BossAbility(kBossNamedCount-1),10005,105,&handled));CHECK(Empty(host.l) && bossNamedEntries==committed);
+ Put<int>(host.actor,0x11B0,1);Put<float>(host.actor,0x11B4,0.1f);CHECK(ExecuteAcceptedCommand(host.l,BossAbility(kBossNamedCount-1),10006,106,&handled));CHECK(bossNamedEntries==committed+1);
  CHECK(Capture(host.l,bytes,sizeof(bytes),&used));CHECK(Apply(guest.l,bytes,used)==Result::applied);CHECK(bossNamedEntries==committed+2);
- for(unsigned i=4;i<=6;++i){Put<unsigned>(host.actor,0x26C8,0x70000000u+i);CHECK(ExecuteAcceptedCommand(host.l,BossAbility(i,true),10100+i,800+i,&handled));CHECK(observedMode==0x70000000u+i);}
+ for(unsigned i=4;i<=5;++i){Put<unsigned>(host.actor,0x26C8,0x70000000u+i);CHECK(ExecuteAcceptedCommand(host.l,BossAbility(i,true),10100+i,800+i,&handled));CHECK(observedMode==0x70000000u+i);}
+ {// Not E516's moves: the rolling laser (its 中心砲台 part is absent: the crash), genocide, the spear.
+  const auto named=bossNamedEntries,hands=bossHandEntries;const auto queued=Find(host.l)->count;
+  for(const wchar_t* dead:{L"attack_rollingLazer",L"attack_genocide"}){const NativeAbility a{"boss_fixture",L"Boss",0,0,AbilityKind::namedAction,dead,0};
+   CHECK(!ExecuteAcceptedCommand(host.l,a,10200,900,&handled) && handled);}
+  CHECK(!ExecuteAcceptedCommand(host.l,BossAbility(6,true),10201,901,&handled) && handled);
+  CHECK(bossNamedEntries==named && bossHandEntries==hands && Find(host.l)->count==queued && !Find(host.l)->faulted);
+  Event forged{};forged.operation=Operation::bossNamed;forged.key=kBossNamedCount;forged.serial=forged.input=forged.definition=1;CHECK(!Valid(forged));
+  forged.operation=Operation::bossHand;forged.key=6;CHECK(!Valid(forged));}
  CHECK(Capture(host.l,bytes,sizeof(bytes),&used));
  {Event malformed[kBatch]{};unsigned n=0;CHECK(Decode(bytes,used,malformed,&n));malformed[0].mode=0x80000000u;std::size_t ignored=0;CHECK(!Encode(malformed,n,bytes,sizeof(bytes),&ignored));
   const unsigned offset=kHeader+49;unsigned char saved[4]{};std::memcpy(saved,bytes+offset,4);const std::uint32_t illegal=0x80000000u;std::memcpy(bytes+offset,&illegal,4);
   const auto nativeBefore=bossHandEntries;CHECK(!Decode(bytes,used,malformed,&n));CHECK(Apply(guest.l,bytes,used)==Result::failed && bossHandEntries==nativeBefore);std::memcpy(bytes+offset,saved,4);}
  Put<unsigned>(guest.actor,0x26C8,77);handsBusy=true;bossBusy=true;
- CHECK(Apply(guest.l,bytes,used)==Result::applied);CHECK(observedMode==0x70000006u && At<unsigned>(guest.actor,0x26C8)==77);CHECK(bossHandEntries>=6);
+ CHECK(Apply(guest.l,bytes,used)==Result::applied);CHECK(observedMode==0x70000005u && At<unsigned>(guest.actor,0x26C8)==77);CHECK(bossHandEntries>=4);
  handsBusy=bossBusy=false;CHECK(Restore(host.l));CHECK(Restore(guest.l));SetRole(0,nullptr);SetRole(1,nullptr);
  {Fixture carrier(3,true),remote(3,false);SetRole(0,&carrier);SetRole(1,&remote);carrier.Bind();remote.Bind();NativeAbility a{"carrier_fixture",L"Carrier",0,0,AbilityKind::objectAction,nullptr,64};
   const auto first=carrierEntries;CHECK(ExecuteAcceptedCommand(carrier.l,a,11000,1,&handled));CHECK(ExecuteAcceptedCommand(carrier.l,a,11001,2,&handled));CHECK(At<int>(carrier.actor,0xD88)==1);
