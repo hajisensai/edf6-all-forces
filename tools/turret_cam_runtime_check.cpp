@@ -376,10 +376,10 @@ void Run() {
         Put<int>(primary.data,edf::kWeaponAmmoAlive,launcher ? 1500 : 1200);Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         unsigned char camera[0x700]{};Put<float>(camera,0x528,.1f);
         Put<float>(camera,kCamEye+4,5);Put<float>(camera,kCamEye+8,-20);Put<float>(camera,kCamLook+4,2);
-        bool stable=true,realFocus=true,inputUnchanged=true,onHull=true,still=true;
+        bool stable=true,realFocus=true,inputUnchanged=true,onFocus=true,still=true,eased=true,back=true;
         const float wantPitch=-std::atan2(45.f,35.f);
-        float settledEye[3]{};
-        for(int frameIndex=0;frameIndex<90;++frameIndex) {
+        float settledEye[3]{},lastLook[3]{};
+        for(int frameIndex=0;frameIndex<120;++frameIndex) {
             const float quietInput[2]{};float output[2]{};Aim(seat,quietInput,output); // native input/aim stage
             inputUnchanged=inputUnchanged && output[0]==0 && output[1]==0;
             TurretCamFrame(vehicle);if(launcher)LauncherFrame(vehicle);
@@ -390,16 +390,24 @@ void Run() {
             const float delta[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
             const float pitch=vec::Len(delta)<1e-6f ? 0 : tcam::PitchOf(delta);
             if(frameIndex>20)stable=stable && std::fabs(pitch-wantPitch)<1e-4f;
-            // 2026-10-23: the view is on the hull, and the gun rocking (its muzzle moved every frame from frame 40,
-            // the real shot's endpoint with it) moves nothing.
-            if(frameIndex>20)onHull=onHull && std::hypot(look[0]-hull[0],look[2]-hull[2])<0.5f;
-            if(frameIndex==40)std::memcpy(settledEye,eye,12);
-            if(frameIndex>40)still=still && vec::Dist(eye,settledEye)<1e-3f;
-            if(frameIndex>=40)Matrix(primary.bone+edf::kBoneRows,-4,8+static_cast<float>(frameIndex%5),10+static_cast<float>(frameIndex%7));
+            // 2026-10-25 ("俯瞰视角目的是为了看落点位置的信息"): with the gun steady the view settles on the real shot's
+            // landing (the screen's middle, where the HUD's mark is) and holds still there. From frame 40 the gun rocks
+            // (its muzzle moved every frame, the landing with it): the view follows eased, never a jump to each new
+            // landing; once the gun is steady again (frame 70) it settles back on the landing.
+            if(frameIndex>20 && frameIndex<=40)onFocus=onFocus && std::hypot(look[0]-shared.focus[0],look[2]-shared.focus[2])<0.5f;
+            if(frameIndex==30)std::memcpy(settledEye,eye,12);
+            if(frameIndex>30 && frameIndex<=40)still=still && vec::Dist(eye,settledEye)<1e-2f;
+            if(frameIndex>40 && frameIndex<70)eased=eased && std::hypot(look[0]-lastLook[0],look[2]-lastLook[2])<12.0f;
+            if(frameIndex>110)back=back && std::hypot(look[0]-shared.focus[0],look[2]-shared.focus[2])<0.5f;
+            std::memcpy(lastLook,look,12);
+            if(frameIndex>=40 && frameIndex<70)Matrix(primary.bone+edf::kBoneRows,-4,8+static_cast<float>(frameIndex%5),10+static_cast<float>(frameIndex%7));
+            if(frameIndex==70)Matrix(primary.bone+edf::kBoneRows,-4,8,10);
         }
         Matrix(primary.bone+edf::kBoneRows,-4,8,10);
-        Check(onHull,"the high view looks at the vehicle, not the shot's endpoint");
-        Check(still,"the gun rocking does not move the high view");
+        Check(onFocus,"the high view looks at the shot's landing, not the vehicle");
+        Check(still,"a steady gun holds the high view still");
+        Check(eased,"a rocking gun's landing is followed eased, without jumps");
+        Check(back,"the high view settles back on the landing");
         Check(inputUnchanged,"high camera closed loop never generates native gun input from observation");
         Check(realFocus,"collision pivot must not change the real ballistic terrain focus");
         Check(stable,launcher ? "Katyusha high camera remains stable after native surface collision" : "twin artillery high camera remains stable after native surface collision");

@@ -173,29 +173,44 @@ void Owners() {
     Expect(!tcam::BallisticAim(false,false) && !tcam::BallisticAim(false,true),"no hit (the made-up far point): the bore line");
 }
 
-// The high view looks down on the vehicle (2026-10-23): its centre is the hull's, never the shot's, at the same distance
-// whatever the heading, terrain height and free look; the heading is the one it is given (world-held), not the gun's.
+// The high view's placement (tcam::OrbitPlace) looks at the centre it is given at the same distance whatever the heading,
+// terrain height and free look; its heading over the landing (tcam::ShotHeading, 2026-10-25: the view is for the landing)
+// is the line from the hull to it, so the gun's elevation (the landing moving along that line) never turns it, and a
+// landing at the hull keeps the held heading.
 void HighView() {
     int cases=0;
     for(float hill:{-80.0f,0.0f,300.0f})
         for(float yaw:{-2.5f,0.0f,1.1f})
             for(float orbit:{-1.0f,0.0f,1.0f}) {
-                const float origin[3]={120.0f,6.0f+hill,-40.0f};
+                const float centre[3]={120.0f,6.0f+hill,-40.0f};
                 float eye[3],look[3];
-                tcam::HullPlace(origin,yaw,90.0f,55.0f,orbit,orbit,eye,look);
-                Expect(vec::Dist(look,origin)<1e-4f,"the high view looks at the vehicle itself");
-                Expect(std::fabs(vec::Dist(eye,origin)-std::sqrt(90.0f*90.0f+55.0f*55.0f))<0.001f,"the high view's distance is fixed");
-                Expect(eye[1]>origin[1],"the eye stays above the vehicle");
+                tcam::OrbitPlace(centre,yaw,90.0f,55.0f,orbit,orbit,eye,look);
+                Expect(vec::Dist(look,centre)<1e-4f,"the high view looks at its centre");
+                Expect(std::fabs(vec::Dist(eye,centre)-std::sqrt(90.0f*90.0f+55.0f*55.0f))<0.001f,"the high view's distance is fixed");
+                Expect(eye[1]>centre[1],"the eye stays above its centre");
                 const float d[3]={look[0]-eye[0],0.0f,look[2]-eye[2]};
-                Expect(std::fabs(tcam::Wrap(tcam::YawOf(d)-(yaw+orbit)))<1e-4f,"the heading is the held one plus free look");
+                Expect(std::fabs(tcam::Wrap(tcam::YawOf(d)-(yaw+orbit)))<1e-4f,"the heading is the given one plus free look");
                 ++cases;
             }
-    // The gun's elevation / the shot's endpoint is no input at all: two placements with the same hull are the same.
-    const float origin[3]={0.0f,0.0f,0.0f};
-    float e1[3],l1[3],e2[3],l2[3];
-    tcam::HullPlace(origin,0.3f,90.0f,55.0f,0.0f,0.0f,e1,l1);tcam::HullPlace(origin,0.3f,90.0f,55.0f,0.0f,0.0f,e2,l2);
-    Expect(vec::Dist(e1,e2)==0.0f && vec::Dist(l1,l2)==0.0f,"the placement depends on the hull and the held heading only");
-    std::printf("high view: %d hull-centred placements\n",cases);
+    const float hull[3]={10.0f,3.0f,-20.0f};
+    for(float bearing:{-3.0f,-1.2f,0.0f,0.7f,2.9f}) {
+        float dir[3];tcam::Dir(bearing,0.0f,dir);
+        float first=0.0f;
+        for(float range:{40.0f,300.0f,2900.0f}) {   // the gun raised: the landing farther along the same line
+            const float at[3]={hull[0]+dir[0]*range,-15.0f,hull[2]+dir[2]*range};
+            const float h=tcam::ShotHeading(hull,at,9.0f);
+            if(range==40.0f)first=h;
+            Expect(std::fabs(tcam::Wrap(h-bearing))<1e-4f,"the heading is the hull-to-landing line");
+            Expect(std::fabs(tcam::Wrap(h-first))<1e-4f,"the gun's elevation does not turn the high view");
+            float eye[3],look[3];tcam::OrbitPlace(at,h,90.0f,55.0f,0.0f,0.0f,eye,look);
+            const float back[3]={eye[0]-hull[0],0.0f,eye[2]-hull[2]};
+            Expect(vec::Dot(back,dir)<range,"the eye is behind the landing as the shot flies (the landing ahead on screen)");
+            ++cases;
+        }
+    }
+    const float under[3]={hull[0]+1.0f,0.0f,hull[2]-1.0f};
+    Expect(tcam::ShotHeading(hull,under,0.4f)==0.4f,"a landing at the hull keeps the held heading");
+    std::printf("high view: %d placements\n",cases);
 }
 
 // --- the high view's observed point (tcam::HighFocus) ---
