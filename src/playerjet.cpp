@@ -1549,8 +1549,9 @@ void ChuteForget() noexcept {
 // eject too, high enough"). In the air over kEjectFrom (`clear`: now, or the last frame's for a jet gone) they are
 // thrown up and come down under the parachute (EjectTick). `alive`: the jet still there to write back to.
 void Leave(PJet& j,unsigned char* v,float clear,bool alive,const char* how) noexcept {
-    // ...save a Dreadnought fighter's pilot getting out where they stand on their ship (its fighter held on its foredeck spot:
-    // dreadnought.cpp DreadnoughtTakesBack, dreadnought_deck.h): no parachute. Anywhere else, near or over it too, they eject.
+    // ...save a Dreadnought fighter's pilot put aboard their ship (its fighter held at its own bay's mouth by the hangar
+    // putting them out onto the bridge: dreadnought.cpp DreadnoughtTakesBack, dreadnought_deck.h): no parachute. Anywhere
+    // else, near or over it too, they eject.
     const bool home=alive && !v[kDead] && DreadnoughtTakesBack(v);
     const bool eject=!home && j.phase==Phase::air && (clear==kNoGround || clear>kEjectFrom);
     if(eject)EjectStart(j,v,alive);
@@ -1683,7 +1684,7 @@ void Fly(PJet& j,unsigned char* v,ULONGLONG ms) noexcept {
     Put<float>(v,kInLateral,0.0f);Put<float>(v,kInForward,0.0f);Put<float>(v,kInYaw,0.0f);
     Put<float>(v,kInThrottle,0.0f);Put<float>(v,kInW,1.0f);
     Put<float>(v,kAreaInset,kNoInset);
-    // Held by a Dreadnought's hangar (dreadnought_hangar.inc: parked on its deck, run off its bow, brought home): its
+    // Held by a Dreadnought's hangar (dreadnought_hangar.inc: at its bay's mouth, thrown off it, brought home): its
     // motion is the hangar's whole (jet.cpp JetHangarHold, body506.cpp JetHeldStep): no flight of its own, no crash test
     // against a motion it did not ask for, nothing mirrored back over the hangar's; its own flight takes over from that
     // motion when let go (PlayerJetLaunched).

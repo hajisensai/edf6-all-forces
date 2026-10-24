@@ -1,105 +1,107 @@
 // Included by dreadnought.cpp in its file namespace: its hangars' fighters and its bridge (the user, 2026-10-21: 「那艘可以
 // 放飞船的无畏舰。飞船可以玩家上去的那种」, then 「无畏舰下船应该在舰桥才对。不是直接变到飞机上。飞机应该往机库停进去和飞
-// 出来，不能凭空出现和消失」).
-// Its four hangars are the Dreadnought game's, where it carries them: in its broadsides (the hull's AB_primary sockets,
-// tools/prep_dreadnought.py), each two bays opening outboard; its eight bays hold the game's four fighters, two of each
-// (jet_internal.h Body::dnFighter .. dnInterceptor: crewless NPC jets, playerjet_kinds.h kBoardable; bay i holds kind
-// i % 4). A fighter in its bay is the ship's own model (the bone dn_bay_<i>, its fighter's mesh, nose outboard: a live jet
-// cannot be in the hull's collision); it goes out and comes in through its bay's opening:
+// 出来，不能凭空出现和消失」; 2026-10-24: 「模块能装啥，肯定是装了模块才能有对应的功能啊，比如两个机库模块，就应该两个机库，
+// 而不是统一在一个位置」).
+// Its hangars are the Dreadnought game's modules on its broadsides' four AB_primary sockets (dreadnought_deck.h: module m,
+// its bays 2m and 2m + 1), each fitted or not as the installer built its model (ini DreadnoughtHangarLeftFore ..
+// RightAft, pylib/dreadnought_model.py): a hangar is one its model has (the bone dn_hangar_<m>: RigHangar), with its two
+// bays, their fighters and openings; a module not fitted has none of them (nor its mesh, nor its collision). Bay i holds
+// a fighter of kind i % 4 (jet_internal.h Body::dnFighter .. dnInterceptor: crewless NPC jets, playerjet_kinds.h
+// kBoardable). A fighter in its bay is the ship's own model (the bone dn_bay_<i>, its fighter's mesh, nose outboard: a
+// live jet cannot be in the hull's collision); it goes out and comes in through its own bay's opening, nowhere else:
 //  - out: the bay's fighter slides out to its opening's mouth (dn_bay_<i>_out, clear of the hull) over kSlideSec; there
 //    the bone is hidden (scaled to nothing) and the live jet made in its very place and motion, held by the hangar
-//    (jet.cpp JetHangarHold: its motion is the hangar's, whoever sits in it) until it is off: an escort thrown on outboard
-//    and up (kLaunchSec, to kLaunchSpeed over the ship's) and let go (jet.cpp JetHangarRelease), the ready fighter flown
-//    up onto its foredeck (dn_ready) and parked there;
+//    (jet.cpp JetHangarHold: its motion is the hangar's, whoever sits in it) until it is off: thrown on outboard and up
+//    (kLaunchSec, to kLaunchSpeed over the ship's) and let go (jet.cpp JetHangarRelease);
 //  - in: one on its way out (its fuel, hull or stores gone: JetLeaving) or called home is flown by the hangar to its own
 //    bay's mouth (Recover: kApproachOut outboard of it first, turned nose outboard there as its bay holds it, backing in),
 //    held there until the game has deleted it (JetHangarStow), and its bay's fighter shown at the mouth and slid back in.
 //    A fighter lost leaves its bay empty.
 //  - Escort flight: the commander's hangar key (DreadnoughtHangarKey / DreadnoughtHangarButton) on its bridge sends one of
-//    each kind it has out, one after another; pressed with its escorts out, it calls them home.
-//  - The ready fighter: while it has fighters and nothing is parked on its foredeck, the next kind in turn
-//    (Hangar::nextKind) comes out and parks there (dn_ready). A player who walks up and boards it (playerjet_board.inc
-//    BoardableNow: a held one is boarded where it stands) is launched off the bow with it (kDeckRunSec, to kLaunchSpeed),
-//    flying it from there (playerjet.cpp PlayerJetLaunched).
-//  - Home for a player: their fighter's hangar key within kReturnRange: the hangar flies it onto the foredeck (the ready
-//    spot, free: nothing else is parked there while a player's fighter is out of it), puts them out onto its bridge
-//    (dn_bridge, as getting out of its seats does: the user, 2026-10-21 「下船应在舰桥」), and parks it there as the
-//    ready fighter again. Only a pilot getting out on that spot goes without a parachute (DreadnoughtTakesBack).
+//    each kind its fitted hangars have docked out (dreadnought_deck.h EscortKinds), one after another; pressed with its
+//    escorts out, it calls them home.
+//  - A player's sortie (the user's choice, 2026-10-24: stand over a hangar and press the key): a local player on foot
+//    over a fitted hangar (dreadnought_deck.h OverHangar) presses the board button (crew.cpp FindSeatHook ->
+//    DreadnoughtHangarBoard): that hangar's first bay with a fighter docked (BoardBay) slides it out to its mouth, the
+//    player is put into it there (boarding.cpp BoardingRequest, the boarding gun's path) and thrown off outboard with it
+//    (BayJob::run, as an escort is), flying it from there (playerjet.cpp PlayerJetLaunched).
+//  - Home for a player: their fighter's hangar key within kReturnRange: the hangar flies it to its own bay's mouth as it
+//    brings an escort in, puts them out onto its bridge there (dn_bridge, as getting out of its seats does: the user,
+//    2026-10-21 「下船应在舰桥」) and takes the fighter in. Only a pilot put out at its own bay's mouth by the hangar running
+//    here goes without a parachute (BayJob::alight: DreadnoughtTakesBack, dreadnought_deck.h StandsAboard); getting out
+//    anywhere else (flying, on the way home, thrown off) they eject.
 //  - The bridge: a local player getting out of any of its seats stands on its bridge (dn_bridge), not at the door on the
 //    ground.
 // Online: the plugin's aircraft are each machine's own (docs/online-re.md, "插件飞机 / 无人机的网络身份：没做"): the
-// hangars run on the machine that flies the ship (their fighters are that machine's); the bays' poses on the others stay
-// docked; the bridge on every machine for its own player.
-constexpr int kBays=8;
+// hangars run on the machine that flies the ship (their fighters are that machine's, a sortie its own player's); the
+// bays' poses on the others stay docked; the bridge on every machine for its own player. Each machine draws and collides
+// with the modules its own install fitted (nothing of it is sent: it is the install's, not the ship's state).
+using dreadnought::kBays;
+using dreadnought::kHangars;
+static_assert(dreadnought::kKinds==kDnFighterKinds,"dreadnought_deck.h's kinds are crew.h's");
 constexpr float kSlideSec=2.5f;              // s a fighter slides between its bay and its mouth
-constexpr float kLaunchSec=2.0f,kLaunchSpeed=90.0f;   // an escort thrown off its mouth: s, m/s over the ship's
+constexpr float kLaunchSec=2.0f,kLaunchSpeed=90.0f;   // a fighter thrown off its mouth: s, m/s over the ship's
 constexpr float kLaunchClimb=12.0f;          // ...m/s up at the end of it
-constexpr float kDeckRunSec=1.6f;            // s the ready fighter's run off the bow
 constexpr float kReturnRange=1500.0f;        // m from its ship a player's fighter may be called home
 // The distances round its hull as its fighters' size goes (set on a 200 m ship, its fighters 7-12 m: kSize 1).
 constexpr float kSize=kLength/200.0f;
 constexpr float kApproachOut=60.0f*kSize,kApproachUp=8.0f*kSize;   // m outboard of its mouth and over it a fighter comes in from
-constexpr float kDeckOver=25.0f*kSize;       // m over the foredeck the ready fighter is brought in from
-constexpr float kSideClear=kBeam*1.15f+18.0f*kSize;   // m from its centre line a fighter is clear of its hull (half its
-                                             // width 1.15 kBeam, a fighter's wing and a margin)
 constexpr float kApproachSpeed=70.0f,kFinalSpeed=12.0f;  // m/s over the ship's: closing, the last stretch
 constexpr float kFarSpeed=160.0f,kFarOff=500.0f;   // ...and from farther out than kFarOff (escorts 1.5-2 km out took 30 s)
 constexpr float kRecoverAccel=22.0f;         // m/s^2 a held fighter's velocity changes at most
 constexpr float kTouch=1.5f;                 // m from its spot (and as slow, kFinalSpeed / 3): there
+static_assert(kTouch<=dreadnought::kOnSpot && kFinalSpeed/3.0f<=dreadnought::kOnSpotSpeed,"a touch at its mouth is on its spot");
 constexpr float kLined=6.0f*kSize;           // m off its mouth's line outboard it may be to come straight in
 constexpr float kHoldGainJet=1.2f,kHoldMostJet=1.5f;   // a held fighter's attitude (BodyAttitude): 1/s, rad/s
-constexpr float kPinGain=8.0f;               // 1/s a parked fighter is pulled onto its spot
+constexpr float kPinGain=8.0f;               // 1/s a held fighter is pulled onto its spot
 constexpr ULONGLONG kEscortGapMs=1200;       // ms between an escort flight's fighters going out
-constexpr ULONGLONG kReadyGapMs=4000;        // ms after the foredeck is cleared the next ready fighter comes out
-// A fighter's origin (its SGO box's centre, heli_rigid_body[0][1] at a 500 m ship) over the surface it stands on, by kind
-// (tools/prep_dreadnought.py).
-constexpr float kOverDeck[kDnFighterKinds]={2.93f,2.90f,5.15f,5.47f};
+constexpr ULONGLONG kBoardWaitMs=5000;       // ms a fighter out for a player waits at its mouth for them (boarding.cpp presses
+                                             // for 1.5 s a request), then goes back in
+constexpr ULONGLONG kAskMs=500;              // ms between its boarding requests for its player
+constexpr ULONGLONG kAlightMs=1000;          // ms a fighter that brought its player home stays at its mouth after they are put
+                                             // out (their leave, playerjet.cpp Leave / Left, asks DreadnoughtTakesBack then)
+constexpr ULONGLONG kPressMs=500;            // ms: board presses over a hangar closer than this are one (held, the button's
+                                             // walk visits it each frame)
 constexpr std::size_t kHumanVehicle=0x1548;  // the vehicle a human rides (weak_ptr object)
 const char* const kKindNames[kDnFighterKinds]={"fighter","defender","bomber","interceptor"};
+// dn_hangar_<m>: the sockets left01, left03, right01, right03 (tools/prep_dreadnought.py HANGAR_SOCKETS)
+const char* const kHangarNames[kHangars]={"left fore","left aft","right fore","right aft"};
 
 // What a bay's fighter is doing.
-enum class BayJob { docked, out, launch, toDeck, away, recover, deleting, in, empty };
+enum class BayJob { docked, out, board, launch, run, away, recover, alight, deleting, in, empty };
 struct Bay {
+    bool fitted=false;            // its hangar module is in the ship's model
     unsigned char* rec=nullptr;   // dn_bay_<i>: its fighter's mesh
     unsigned char* mouth=nullptr; // dn_bay_<i>_out
     float bind[16]{},mouthBind[16]{};
     BayJob job=BayJob::docked;
     float t=0.0f;                 // 0 in its bay .. 1 at its mouth
     ObjRef jet;                   // its live fighter (out of its bay)
-    ULONGLONG at=0;
-    bool ready=false;             // out to be the ready fighter
-    bool low=false;               // brought onto its foredeck: over its spot, coming down
+    ULONGLONG at=0,askedAt=0;
+    bool player=false;            // out for a player's sortie (out, board, run)
+    bool home=false;              // its player's fighter called home to it (recover, alight)
 };
 struct Hangar {
     const void* bones=nullptr;
-    bool ok=false,said=false,keyHeld=false;
+    bool ok=false,said=false,keyHeld=false,told=false;
+    unsigned fitted=0;            // its hangar modules (bit m: dn_hangar_<m> in its model)
+    unsigned char* module[kHangars]{};   // dn_hangar_<m>: the centre of its roof
     Bay bay[kBays]{};
-    unsigned char* deck=nullptr;  // dn_ready
-    unsigned char* deckSide=nullptr;   // dn_bridge: where a pilot put out of the foredeck's fighter stands
-    ObjRef parked;                // the fighter on its foredeck (the ready one, or a player's brought home)
-    int parkedBay=-1;             // ...its bay
-    const void* run=nullptr;      // ...boarded: its run off the bow began at runAt
-    ULONGLONG runAt=0;
-    ObjRef home;                  // a player's fighter being brought onto the foredeck
-    int homeBay=-1;
-    bool homeLow=false;           // ...over its spot: coming down
-    ObjRef flown;                 // a player's fighter off its foredeck (none comes out to it while this flies)
-    int flownBay=-1;
-    ULONGLONG clearedAt=0;        // when its foredeck was last cleared
+    unsigned char* stand=nullptr; // dn_bridge: where a pilot put out of a fighter brought home stands
     int queue=0;                  // escort kinds still to go out (bits, one per kind)
     ULONGLONG queueAt=0;
     bool recall=false;            // its escorts called home
-    int nextKind=0;               // the ready fighter's kind next
     bool failed[kDnFighterKinds]{};   // a kind its bays could not make this mission (not preloaded, too many jets)
     bool authority=false;         // this machine runs it
+    ULONGLONG pressAt=0;          // the last board press over one of its hangars
     ULONGLONG loggedAt=0;
 };
 Hangar hangars[kMaxShips]{};
 Hangar& HangarOf(const Ship& s) noexcept { return hangars[&s-ships]; }
 
-// Where the local player is put (see the top): the frame after they got out of one of its seats, on its bridge; put out
-// beside its foredeck's fighter, there. (Off from the first range runs until 2026-10-21 evening: a soldier put on its
-// deck fell through it, the ship hovering under a player's flight; standing on its deck held in the user's own play.)
+// Where the local player is put (see the top): the frame after they got out of one of its seats, or out of a fighter
+// brought home, on its bridge. (Off from the first range runs until 2026-10-21 evening: a soldier put on its deck fell
+// through it, the ship hovering under a player's flight; standing on its deck held in the user's own play.)
 bool kStandsOnHull=true;   // (a variable: the code under it kept compiled and checked)
 constexpr float kPutOver=1.5f;   // m over a stand marker a soldier is put (WatchPlayer, PutOut): onto its cell, not in it
 struct Bridge { bool pending=false; ObjRef ship; float at[3]{}; ULONGLONG putAt=0; int tries=0; } bridge{};
@@ -109,8 +111,10 @@ bool IsDnFighter(const void* v) noexcept {
     const float k=BodyMark(v);
     return k>=kDnFighterMark && k<kDnFighterMark+static_cast<float>(kDnFighterKinds);
 }
-int KindOfBay(int i) noexcept { return i%kDnFighterKinds; }
+int KindOfBay(int i) noexcept { return dreadnought::KindOfBay(i); }
+int Count(unsigned bits) noexcept { int n=0;for(;bits;bits&=bits-1u)++n;return n; }
 
+// Its hangars as its model has them (the installer fitted them: see the top), their bays' bones, its bridge's.
 bool RigHangar(Hangar& h,unsigned char* v) noexcept {
     const unsigned char* inst=v+kModelInst506;
     const void* bones=At<const void*>(inst,kInstBones506);
@@ -121,23 +125,48 @@ bool RigHangar(Hangar& h,unsigned char* v) noexcept {
         if(!rec && !h.said){Log("DREADNOUGHT v=%p: its model lacks bone %ls: no hangar",v,name);h.said=true;}
         return rec;
     };
+    h.fitted=0;
+    for(int m=0;m<kHangars;++m) {
+        wchar_t name[32];
+        swprintf_s(name,L"dn_hangar_%d",m);
+        h.module[m]=BoneRecord506(inst,name);
+        if(h.module[m])h.fitted|=1u<<m;
+    }
     for(int i=0;i<kBays;++i) {
+        Bay& b=h.bay[i];
+        b.fitted=((h.fitted>>dreadnought::HangarOfBay(i))&1u)!=0;
+        if(!b.fitted){b.rec=b.mouth=nullptr;continue;}
         wchar_t name[32];
         swprintf_s(name,L"dn_bay_%d",i);
-        Bay& b=h.bay[i];
         if((b.rec=need(name))==nullptr)return false;
         swprintf_s(name,L"dn_bay_%d_out",i);
         if((b.mouth=need(name))==nullptr)return false;
         std::memcpy(b.bind,b.rec+kBoneLocal506,64);
         std::memcpy(b.mouthBind,b.mouth+kBoneLocal506,64);
     }
-    if((h.deck=need(L"dn_ready"))==nullptr || (h.deckSide=need(L"dn_bridge"))==nullptr)return false;
+    if((h.stand=need(L"dn_bridge"))==nullptr)return false;
+    if(!h.told) {
+        h.told=true;
+        char names[96]="";
+        for(int m=0;m<kHangars;++m) {
+            if(!((h.fitted>>m)&1u))continue;
+            if(*names)strcat_s(names,", ");
+            strcat_s(names,kHangarNames[m]);
+        }
+        Log("DREADNOUGHT v=%p: %d hangars fitted (%s), %d bays",v,Count(h.fitted),*names ? names : "none",
+            Count(dreadnought::FittedBays(h.fitted)));
+        // The ini's fitting is the installer's (it built this model by it): one changed since means nothing until reinstalled.
+        if(h.fitted!=Cfg().dreadnoughtHangars)
+            Log("DREADNOUGHT v=%p: the ini fits hangars 0x%X, its installed model 0x%X: run the installer again for the ini's",v,
+                Cfg().dreadnoughtHangars,h.fitted);
+    }
     h.ok=true;
     return true;
 }
 
 // A bay's fighter where its job has it: from its bay toward its mouth (`t`), shown or hidden (scaled to nothing).
 void PoseBay(Bay& b) noexcept {
+    if(!b.fitted || !b.rec)return;
     float m[16];
     std::memcpy(m,b.bind,64);
     for(int i=12;i<15;++i)m[i]=b.bind[i]+(b.mouthBind[i]-b.bind[i])*b.t;
@@ -161,13 +190,25 @@ unsigned char* JetOf(const ObjRef& r) noexcept {
 }
 bool Flown(unsigned char* f) noexcept { return f && SeatCount(f)>0 && SeatRider(SeatAt(f,0))==Rider::player; }
 
-int Stowed(const Hangar& h) noexcept { int n=0;for(const auto& b:h.bay)n+=b.job==BayJob::docked ? 1 : 0;return n; }
-// Its escorts out (launched, away, coming home): not its foredeck's fighter, nor a player's off it or brought home.
-bool Escort(const Hangar& h,const Bay& b) noexcept {
-    return (b.job==BayJob::away || b.job==BayJob::launch || b.job==BayJob::recover) && !b.jet.Is(h.parked.obj) &&
-           !b.jet.Is(h.flown.obj) && !b.jet.Is(h.home.obj);
+int Stowed(const Hangar& h) noexcept { int n=0;for(const auto& b:h.bay)n+=b.fitted && b.job==BayJob::docked ? 1 : 0;return n; }
+// The bays with a fighter docked (bit i), the kinds that could not be made (bit k).
+unsigned DockedBays(const Hangar& h) noexcept {
+    unsigned out=0;
+    for(int i=0;i<kBays;++i)if(h.bay[i].fitted && h.bay[i].job==BayJob::docked)out|=1u<<i;
+    return out;
 }
-int Out(const Hangar& h) noexcept { int n=0;for(const auto& b:h.bay)n+=Escort(h,b) ? 1 : 0;return n; }
+unsigned FailedKinds(const Hangar& h) noexcept {
+    unsigned out=0;
+    for(int k=0;k<kDnFighterKinds;++k)if(h.failed[k])out|=1u<<k;
+    return out;
+}
+// An escort of its out (launched, away, coming home): not a player's sortie flown, nor one called home for its player.
+bool Escort(const Bay& b) noexcept {
+    if(!b.fitted || b.home || !(b.job==BayJob::away || b.job==BayJob::launch || b.job==BayJob::recover))return false;
+    unsigned char* const f=JetOf(b.jet);
+    return !(f && Flown(f));
+}
+int Out(const Hangar& h) noexcept { int n=0;for(const auto& b:h.bay)n+=Escort(b) ? 1 : 0;return n; }
 
 // Fighter `f` held this frame: velocity `vel`, its nose and up turned to `nose` / `up`.
 void HoldJet(unsigned char* f,const float* vel,const float* nose,const float* up) noexcept {
@@ -196,6 +237,20 @@ void Pin(unsigned char* f,const float* at,const float* ship,const float* nose,co
     for(int i=0;i<3;++i)vel[i]=ship[i]+(at[i]-p[i])*kPinGain;
     HoldJet(f,vel,nose,up);
 }
+// A level heading along `d` (else the ship's), into `out`.
+void Level(const unsigned char* v,const float* d,float* out) noexcept {
+    out[0]=d[0];out[1]=0.0f;out[2]=d[2];
+    if(!vec::Normalize(out)){const float* n=Axis3(v,2);out[0]=n[0];out[1]=0.0f;out[2]=n[2];vec::Normalize(out);}
+}
+// Fighter `f` held thrown off its mouth: outboard and up, `k` (0 .. 1) of the way to its full speed.
+void Throw(unsigned char* f,const unsigned char* v,const float* ship,const float* outboard,float k) noexcept {
+    const float wup[3]={0.0f,1.0f,0.0f};
+    float flat[3];
+    Level(v,outboard,flat);
+    float vel[3];
+    for(int c=0;c<3;++c)vel[c]=ship[c]+flat[c]*kLaunchSpeed*k+(c==1 ? kLaunchClimb*k : 0.0f);
+    HoldJet(f,vel,flat,wup);
+}
 // Its velocity relative to the ship's.
 float Relative(unsigned char* f,const float* ship) noexcept {
     float vel[3];
@@ -203,60 +258,21 @@ float Relative(unsigned char* f,const float* ship) noexcept {
     const float d[3]={vel[0]-ship[0],vel[1]-ship[1],vel[2]-ship[2]};
     return vec::Len(d);
 }
-// A level heading along `d` (else the ship's), into `out`.
-void Level(const unsigned char* v,const float* d,float* out) noexcept {
-    out[0]=d[0];out[1]=0.0f;out[2]=d[2];
-    if(!vec::Normalize(out)){const float* n=Axis3(v,2);out[0]=n[0];out[1]=0.0f;out[2]=n[2];vec::Normalize(out);}
+
+// The local player, on foot and alive, else null.
+unsigned char* PlayerOnFoot() noexcept {
+    unsigned char* const me=PlayerHuman();
+    return me && !me[kDead] && HumanOnFoot(me) ? me : nullptr;
 }
 
-// The ready spot for kind `kind` (its origin over the foredeck), world.
-void DeckSpot(const unsigned char* v,const Hangar& h,int kind,float* at) noexcept {
-    const float* p=BoneAt(h.deck);
-    const float* up=Axis3(v,1);
-    for(int i=0;i<3;++i)at[i]=p[i]+up[i]*kOverDeck[kind];
-}
-
-// Fighter `f` brought onto its foredeck's spot `spot`: under the spot's height and beside the hull (within kSideClear of
-// its centre line), out to kSideClear first; then up; then over the spot; then down onto it (`low`). Up beside the hull
-// at once, a ready fighter out of its bay rose into the hull's overhang and, held, pushed the whole ship down 15 m
-// (range 2026-10-21). Its distance to where it is going.
-float ToDeck(unsigned char* f,const unsigned char* v,const float* spot,const float* ship,bool& low,float dt) noexcept {
-    const float* up=Axis3(v,1);
-    const float* nose=Axis3(v,2);
-    const float wup[3]={0.0f,1.0f,0.0f};
-    const float* p=reinterpret_cast<const float*>(f+kPosition);
-    float over[3];
-    for(int c=0;c<3;++c)over[c]=spot[c]+up[c]*kDeckOver;
-    const float to[3]={over[0]-p[0],over[1]-p[1],over[2]-p[2]};
-    if(vec::Len(to)<8.0f)low=true;
-    float face[3];
-    if(low) {
-        Level(v,nose,face);
-        return FlyTo(f,spot,ship,face,up,kFinalSpeed,dt);
-    }
-    const float rise=to[0]*up[0]+to[1]*up[1]+to[2]*up[2];   // how far under the spot's height over the deck it is
-    const float* c0=reinterpret_cast<const float*>(v+kPosition);
-    const float* left=Axis3(v,0);
-    const float rel[3]={p[0]-c0[0],p[1]-c0[1],p[2]-c0[2]};
-    const float side=rel[0]*left[0]+rel[1]*left[1]+rel[2]*left[2];   // left of its centre line
-    float aim[3];
-    if(rise>3.0f && std::fabs(side)<kSideClear-2.0f)   // out from the hull first, at its height
-        for(int c=0;c<3;++c)aim[c]=p[c]+left[c]*((side<0.0f ? -kSideClear : kSideClear)-side);
-    else if(rise>3.0f)for(int c=0;c<3;++c)aim[c]=p[c]+up[c]*rise;   // then up, where it is
-    else std::memcpy(aim,over,12);
-    const float flat[3]={over[0]-p[0],0.0f,over[2]-p[2]};
-    Level(v,vec::Len(flat)>40.0f ? flat : nose,face);
-    FlyTo(f,aim,ship,face,wup,kApproachSpeed,dt);
-    return vec::Len(to);
-}
-
-// Bay `i`'s fighter out of its bay: it slides to its mouth (BayFrame), then flies.
-bool SendOut(Hangar& h,unsigned char* v,int i,bool ready) noexcept {
+// Bay `i`'s fighter out of its bay: it slides to its mouth (BayFrame), then flies (an escort), or waits there for its
+// player (`sortie`).
+bool SendOut(Hangar& h,unsigned char* v,int i,bool sortie) noexcept {
     Bay& b=h.bay[i];
-    if(b.job!=BayJob::docked)return false;
-    b.job=BayJob::out;b.at=GameMs();b.ready=ready;
-    Log("DREADNOUGHT v=%p hangar: bay %d's %s out (%s), %d docked",v,i,kKindNames[KindOfBay(i)],ready ? "to its foredeck" : "an escort",
-        Stowed(h)-1);
+    if(!b.fitted || b.job!=BayJob::docked)return false;
+    b.job=BayJob::out;b.at=GameMs();b.player=sortie;b.home=false;b.askedAt=0;
+    Log("DREADNOUGHT v=%p hangar %s: bay %d's %s out (%s), %d docked",v,kHangarNames[dreadnought::HangarOfBay(i)],i,
+        kKindNames[KindOfBay(i)],sortie ? "a player's sortie" : "an escort",Stowed(h)-1);
     return true;
 }
 
@@ -268,10 +284,16 @@ void PutOut(Hangar& h,unsigned char* v,unsigned char* f) noexcept {
     reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kSeatKick)(f,SeatAt(f,0));
     if(!kStandsOnHull)return;
     if(!mine)return;
-    const float* side=BoneAt(h.deckSide);
+    const float* side=BoneAt(h.stand);
     for(int i=0;i<3;++i)bridge.at[i]=side[i]+Axis3(v,1)[i]*kPutOver;
     bridge.putAt=GameMs();bridge.ship=ObjRef::Of(v);bridge.pending=true;bridge.tries=0;
     Log("DREADNOUGHT v=%p hangar: its pilot put out onto its bridge",v);
+}
+
+// Back in: its fighter given to the game to delete at its mouth (then its own shown there and slid in).
+void Stow(Bay& b,unsigned char* f,ULONGLONG ms) noexcept {
+    JetHangarStow(f);
+    b.job=BayJob::deleting;b.at=ms;b.player=false;b.home=false;
 }
 
 // One bay's frame (its ship `v` moving at `ship`).
@@ -284,62 +306,70 @@ void BayFrame(Hangar& h,int i,unsigned char* v,const float* ship,float dt,ULONGL
     const float* const outboard=reinterpret_cast<const float*>(b.mouth+kBoneWorld506)+8;   // the mouth's ahead: outboard
     const float wup[3]={0.0f,1.0f,0.0f};
     const float slide=dt/kSlideSec;
+    const auto lost=[&]{ b.job=BayJob::empty;b.player=false;b.home=false;Log("DREADNOUGHT v=%p hangar: bay %d's %s lost",v,i,kKindNames[kind]); };
     switch(b.job) {
         case BayJob::docked:case BayJob::empty:
             break;
         case BayJob::out:   // sliding out; at its mouth the live fighter takes its place, in its motion
             b.t=std::fmin(1.0f,b.t+slide);
             if(b.t<1.0f)break;
+            if(b.player && !PlayerOnFoot()) {   // its player went (into something else, or died) meanwhile
+                Log("DREADNOUGHT v=%p hangar: bay %d's %s: its player is not on foot any more: back in",v,i,kKindNames[kind]);
+                b.player=false;b.job=BayJob::in;break;
+            }
             {
                 unsigned char* const made=JetLaunchDreadnoughtFighter(kind,mouth,outboard,reinterpret_cast<const float*>(v+kPosition),
                                                                      Cfg().jetFuelSec,v,true);
                 if(!made) {
                     Log("DREADNOUGHT v=%p hangar: no %s made at bay %d's mouth (not preloaded this mission, or too many jets): back in, "
                         "not sent out again this mission",v,kKindNames[kind],i);
-                    h.failed[kind]=true;h.clearedAt=ms;
-                    b.job=BayJob::in;break;
+                    h.failed[kind]=true;
+                    b.player=false;b.job=BayJob::in;break;
                 }
-                b.jet=ObjRef::Of(made);b.job=b.ready ? BayJob::toDeck : BayJob::launch;b.at=ms;
+                b.jet=ObjRef::Of(made);b.job=b.player ? BayJob::board : BayJob::launch;b.at=ms;b.askedAt=0;
                 const float sp=SlideLength(b)/kSlideSec;
                 float vel[3];
                 for(int c=0;c<3;++c)vel[c]=ship[c]+outboard[c]*sp;
                 HoldJet(made,vel,outboard,up);
             }
             break;
-        case BayJob::launch: {   // thrown outboard and up, then let go: an escort
-            if(!f){b.job=BayJob::empty;break;}
-            if(Flown(f)){JetHangarRelease(f);b.job=BayJob::away;break;}   // a player took it (the boarding gun): theirs
+        case BayJob::board:   // at its mouth for its player: held there until they are in it, then off with them
+            if(!f){lost();break;}
+            if(Flown(f)) {
+                b.job=BayJob::run;b.at=ms;
+                Log("DREADNOUGHT v=%p hangar: its player in bay %d's %s: off its mouth",v,i,kKindNames[kind]);
+                break;
+            }
+            Pin(f,mouth,ship,outboard,up);
+            if(ms-b.at>=kBoardWaitMs || !PlayerOnFoot()) {
+                Log("DREADNOUGHT v=%p hangar: bay %d's %s: its player not in it after %.1f s: back in",v,i,kKindNames[kind],
+                    static_cast<float>(ms-b.at)/1000.0f);
+                Stow(b,f,ms);
+                break;
+            }
+            if(!BoardingUnderway() && ms-b.askedAt>=kAskMs){b.askedAt=ms;BoardingRequest(f);}   // the boarding gun's way in
+            break;
+        case BayJob::launch:   // thrown outboard and up, then let go: an escort
+        case BayJob::run: {    // ...or its player's sortie, theirs from there
+            if(!f){lost();break;}
+            if(b.job==BayJob::launch && Flown(f)){JetHangarRelease(f);b.job=BayJob::away;break;}   // a player took it (the boarding gun)
             const float k=Clamp(static_cast<float>(ms-b.at)/1000.0f/kLaunchSec,0.0f,1.0f);
-            float flat[3];
-            Level(v,outboard,flat);
-            float vel[3];
-            for(int c=0;c<3;++c)vel[c]=ship[c]+flat[c]*kLaunchSpeed*k+(c==1 ? kLaunchClimb*k : 0.0f);
-            HoldJet(f,vel,flat,wup);
+            Throw(f,v,ship,outboard,k);
             if(k>=1.0f) {
                 JetHangarRelease(f);
+                const bool theirs=b.job==BayJob::run && Flown(f);
+                if(theirs)PlayerJetLaunched(f);
                 b.job=BayJob::away;
-                Log("DREADNOUGHT v=%p hangar: bay %d's %s away",v,i,kKindNames[kind]);
+                Log("DREADNOUGHT v=%p hangar: bay %d's %s away%s",v,i,kKindNames[kind],theirs ? ", its player flying it" : "");
             }
             break;
         }
-        case BayJob::toDeck: {   // up over the foredeck, then down onto its spot, parked
-            if(!f){b.job=BayJob::empty;break;}
-            if(Flown(f)){JetHangarRelease(f);b.job=BayJob::away;b.low=false;break;}   // a player took it on the way
-            float spot[3];
-            DeckSpot(v,h,kind,spot);
-            const float d=ToDeck(f,v,spot,ship,b.low,dt);
-            if(b.low && d<kTouch && Relative(f,ship)<kFinalSpeed/3.0f) {
-                b.job=BayJob::away;b.low=false;h.parked=b.jet;h.parkedBay=i;
-                Log("DREADNOUGHT v=%p hangar: bay %d's %s parked on its foredeck",v,i,kKindNames[kind]);
-            }
-            break;
-        }
-        case BayJob::away:   // out of its bay (flying, parked, a player's): its live fighter's own
-            if(!f){b.job=BayJob::empty;Log("DREADNOUGHT v=%p hangar: bay %d's %s lost",v,i,kKindNames[kind]);}
+        case BayJob::away:   // out of its bay (flying, a player's): its live fighter's own
+            if(!f)lost();
             break;
         case BayJob::recover: {   // to its mouth: outboard of it first, then backing straight in, nose outboard
-            if(!f){b.job=BayJob::empty;break;}
-            if(Flown(f)){JetHangarRelease(f);b.job=BayJob::away;break;}   // a player took it (the boarding gun): theirs
+            if(!f){lost();break;}
+            if(!b.home && Flown(f)){JetHangarRelease(f);b.job=BayJob::away;break;}   // a player took it (the boarding gun): theirs
             const float* p=reinterpret_cast<const float*>(f+kPosition);
             const float* c0=reinterpret_cast<const float*>(v+kPosition);
             const float to[3]={mouth[0]-p[0],mouth[1]-p[1],mouth[2]-p[2]};
@@ -361,77 +391,61 @@ void BayFrame(Hangar& h,int i,unsigned char* v,const float* ship,float dt,ULONGL
             else{const float d[3]={aim[0]-p[0],0.0f,aim[2]-p[2]};Level(v,d,face);}
             const float d=FlyTo(f,aim,ship,face,close ? up : wup,lined ? kFinalSpeed : vec::Len(to)>kFarOff ? kFarSpeed : kApproachSpeed,dt);
             if(lined && d<kTouch && Relative(f,ship)<kFinalSpeed/3.0f) {
-                JetHangarStow(f);
-                b.job=BayJob::deleting;b.at=ms;
-                Log("DREADNOUGHT v=%p hangar: bay %d's %s at its mouth: in",v,i,kKindNames[kind]);
+                if(b.home && Flown(f)) {   // its player brought home: put out onto the bridge here, then in
+                    b.job=BayJob::alight;b.at=ms;
+                    Log("DREADNOUGHT v=%p hangar: bay %d's %s at its mouth with its pilot: out onto its bridge",v,i,kKindNames[kind]);
+                    PutOut(h,v,f);
+                } else {
+                    Stow(b,f,ms);
+                    Log("DREADNOUGHT v=%p hangar: bay %d's %s at its mouth: in",v,i,kKindNames[kind]);
+                }
             }
             break;
         }
+        case BayJob::alight:   // its player's, brought home: held at its mouth while they are put out, then in
+            if(!f){lost();break;}
+            Pin(f,mouth,ship,outboard,up);
+            if(ms-b.at<kAlightMs)break;   // their leave asks DreadnoughtTakesBack meanwhile
+            if(Flown(f)) {   // still in it: the get-off did not take; it is theirs again, as it was
+                JetHangarRelease(f);b.job=BayJob::away;b.home=false;
+                Log("DREADNOUGHT v=%p hangar: bay %d's %s: its pilot still in it at its mouth: theirs again",v,i,kKindNames[kind]);
+                break;
+            }
+            Stow(b,f,ms);
+            Log("DREADNOUGHT v=%p hangar: bay %d's %s in, its pilot on its bridge",v,i,kKindNames[kind]);
+            break;
         case BayJob::deleting:   // held at its mouth until the game has deleted it, then the bay's own shown there
             if(f){Pin(f,mouth,ship,outboard,up);break;}
             b.jet=ObjRef{};b.t=1.0f;b.job=BayJob::in;
             break;
         case BayJob::in:   // sliding back in
             b.t=std::fmax(0.0f,b.t-slide);
-            if(b.t<=0.0f){b.job=BayJob::docked;Log("DREADNOUGHT v=%p hangar: bay %d's %s docked (%d docked)",v,i,kKindNames[kind],Stowed(h));}
+            if(b.t<=0.0f) {
+                b.job=BayJob::docked;b.player=false;b.home=false;
+                Log("DREADNOUGHT v=%p hangar: bay %d's %s docked (%d docked)",v,i,kKindNames[kind],Stowed(h));
+            }
             break;
     }
     PoseBay(b);
 }
 
-// Bay `i`'s fighter (flying) called home to its bay.
+// Bay `i`'s escort (flying) called home to its bay.
 void CallHome(Hangar& h,unsigned char* v,int i) noexcept {
     Bay& b=h.bay[i];
-    if(b.job!=BayJob::away)return;
+    if(!b.fitted || b.job!=BayJob::away)return;
     b.job=BayJob::recover;b.at=GameMs();
     Log("DREADNOUGHT v=%p hangar: bay %d's %s called home",v,i,kKindNames[KindOfBay(i)]);
 }
 
-// Its foredeck's fighter (parked, a player's brought home, a player's off it).
-void DeckFrame(Hangar& h,unsigned char* v,const float* ship,float dt,ULONGLONG ms) noexcept {
-    const float* nose=Axis3(v,2);
-    const float* up=Axis3(v,1);
-    const float wup[3]={0.0f,1.0f,0.0f};
-    if(unsigned char* const f=JetOf(h.parked)) {
-        float spot[3];
-        DeckSpot(v,h,KindOfBay(h.parkedBay),spot);
-        if(Flown(f)) {   // boarded: its run off the bow
-            if(h.run!=f){h.run=f;h.runAt=ms;Log("DREADNOUGHT v=%p hangar: a player boards its foredeck's %s: off the bow",v,kKindNames[KindOfBay(h.parkedBay)]);}
-            const float k=Clamp(static_cast<float>(ms-h.runAt)/1000.0f/kDeckRunSec,0.0f,1.0f);
-            float flat[3];
-            Level(v,nose,flat);
-            float vel[3];
-            for(int c=0;c<3;++c)vel[c]=ship[c]+flat[c]*kLaunchSpeed*k+(c==1 ? kLaunchClimb*k*k : 0.0f);
-            HoldJet(f,vel,flat,wup);
-            if(k>=1.0f) {
-                JetHangarRelease(f);
-                PlayerJetLaunched(f);
-                h.flown=h.parked;h.flownBay=h.parkedBay;h.parked=ObjRef{};h.parkedBay=-1;h.clearedAt=ms;h.run=nullptr;
-            }
-        } else{h.run=nullptr;Pin(f,spot,ship,nose,up);}
-    } else if(h.parked){h.parked=ObjRef{};h.parkedBay=-1;h.clearedAt=ms;h.run=nullptr;}   // lost on its deck
-    if(unsigned char* const f=JetOf(h.home)) {   // a player's fighter brought onto its foredeck: over it, then down
-        float spot[3];
-        DeckSpot(v,h,KindOfBay(h.homeBay),spot);
-        const float d=ToDeck(f,v,spot,ship,h.homeLow,dt);
-        if(h.homeLow && d<kTouch && Relative(f,ship)<kFinalSpeed/3.0f) {
-            PutOut(h,v,f);
-            h.parked=h.home;h.parkedBay=h.homeBay;h.home=ObjRef{};h.homeBay=-1;h.homeLow=false;
-            Log("DREADNOUGHT v=%p hangar: a player's fighter down on its foredeck",v);
-        }
-    } else if(h.home){h.home=ObjRef{};h.homeBay=-1;h.homeLow=false;h.clearedAt=ms;}
-    if(h.flown && !JetOf(h.flown)){h.flown=ObjRef{};h.flownBay=-1;h.clearedAt=ms;}
-}
-
-// Every frame on the machine that flies it: its bays, its escort flight going out, its fighters coming home, its
-// foredeck. On the others its bays as they are (docked).
+// Every frame on the machine that flies it: its bays (their escorts going out and coming home, its players' sorties).
+// On the others its bays as they are (docked).
 void HangarFrame(Ship& s,unsigned char* v,float dt,ULONGLONG ms) noexcept {
     Hangar& h=HangarOf(s);
     h.authority=!drill_net::Replicated(InSession(),At<std::uint16_t>(v,0x128)) || IsOnlineAuthority(v);
     if(!RigHangar(h,v))return;
     if(!h.authority){for(auto& b:h.bay)PoseBay(b);return;}
     const float* const ship=s.measured;
-    // the escort flight: one kind a kEscortGapMs, from the first bay of it docked
+    // the escort flight: one kind a kEscortGapMs, from the first fitted bay of it docked
     if(h.queue && ms-h.queueAt>=kEscortGapMs) {
         for(int k=0;k<kDnFighterKinds && h.queue;++k) {
             if(!(h.queue&(1<<k)))continue;
@@ -445,57 +459,47 @@ void HangarFrame(Ship& s,unsigned char* v,float dt,ULONGLONG ms) noexcept {
     for(int i=0;i<kBays;++i) {
         Bay& b=h.bay[i];
         unsigned char* const f=JetOf(b.jet);
-        if(b.job!=BayJob::away || !f || Flown(f) || !Escort(h,b))continue;
+        if(b.job!=BayJob::away || !f || !Escort(b))continue;
         if(h.recall || JetLeaving(f))CallHome(h,v,i);
     }
     if(h.recall && !Out(h))h.recall=false;
-    // the ready fighter: its foredeck free, no player's fighter out of it
-    if(!h.parked && !h.home && !h.flown && ms-h.clearedAt>=kReadyGapMs) {
-        bool busy=false;
-        for(const auto& b:h.bay)busy=busy || (b.job==BayJob::out && b.ready) || b.job==BayJob::toDeck;
-        for(int n=0;n<kDnFighterKinds && !busy;++n) {
-            const int k=(h.nextKind+n)%kDnFighterKinds;
-            if(h.failed[k])continue;
-            for(int i=k;i<kBays && !busy;i+=kDnFighterKinds)
-                if(SendOut(h,v,i,true)){busy=true;h.nextKind=(k+1)%kDnFighterKinds;}
-        }
-    }
-    for(int i=0;i<kBays;++i)BayFrame(h,i,v,ship,dt,ms);
-    DeckFrame(h,v,ship,dt,ms);
+    for(int i=0;i<kBays;++i)if(h.bay[i].fitted)BayFrame(h,i,v,ship,dt,ms);
     if(Cfg().debug && ms-h.loggedAt>=1000) {
         h.loggedAt=ms;
-        static const char* const kJobs[]={"docked","out","launch","toDeck","away","recover","deleting","in","empty"};
+        static const char* const kJobs[]={"docked","out","board","launch","run","away","recover","alight","deleting","in","empty"};
+        static_assert(sizeof(kJobs)/sizeof(*kJobs)==static_cast<std::size_t>(BayJob::empty)+1,"a name a job");
         const float* c0=reinterpret_cast<const float*>(v+kPosition);
         for(int i=0;i<kBays;++i) {
             const Bay& b=h.bay[i];
-            if(b.job==BayJob::docked || b.job==BayJob::empty || b.job==BayJob::away)continue;
+            if(!b.fitted || b.job==BayJob::docked || b.job==BayJob::empty || b.job==BayJob::away)continue;
             unsigned char* const f=JetOf(b.jet);
-            float rel[3]{},local[3]{},vel[3]{};
-            if(f){const float* p=reinterpret_cast<const float*>(f+kPosition);for(int c=0;c<3;++c)rel[c]=p[c]-c0[c];ToShip(v,rel,local);JetMotion(f,vel);}
-            Log("DREADNOUGHT v=%p bay %d %s t %.2f%s jet at ship (%.1f,%.1f,%.1f) %.1f m/s over the ship's",v,i,kJobs[static_cast<int>(b.job)],
-                b.t,b.low ? " low" : "",local[0],local[1],local[2],f ? Relative(f,ship) : 0.0f);
-            (void)vel;
+            float rel[3]{},local[3]{};
+            if(f){const float* p=reinterpret_cast<const float*>(f+kPosition);for(int c=0;c<3;++c)rel[c]=p[c]-c0[c];ToShip(v,rel,local);}
+            Log("DREADNOUGHT v=%p bay %d %s t %.2f%s%s jet at ship (%.1f,%.1f,%.1f) %.1f m/s over the ship's",v,i,
+                kJobs[static_cast<int>(b.job)],b.t,b.player ? " player" : "",b.home ? " home" : "",local[0],local[1],local[2],
+                f ? Relative(f,ship) : 0.0f);
         }
     }
 }
 
-// The commander's hangar key: an escort flight out (one of each kind it has docked), or, its escorts out, home.
+// The commander's hangar key: an escort flight out (one of each kind its fitted hangars have docked), or, its escorts
+// out, home.
 void HangarKey(Ship& s,unsigned char* v,const unsigned char* seat) noexcept {
     Hangar& h=HangarOf(s);
     const bool down=Pad(seat) ? Button(seat,Cfg().dreadnoughtHangarButton) : KeyDown(Cfg().dreadnoughtHangarKey);
     const bool pressed=down && !h.keyHeld;
     h.keyHeld=down;
-    if(!pressed || !h.authority)return;
+    if(!pressed || !h.authority || !h.ok)return;
     const int escorts=Out(h);
     if(escorts>0 && !h.queue) {
         h.recall=true;
         Log("DREADNOUGHT v=%p hangar: its %d escorts called home",v,escorts);
         return;
     }
-    h.queue=0;h.recall=false;
-    for(int i=0;i<kBays;++i)if(h.bay[i].job==BayJob::docked && !h.failed[KindOfBay(i)])h.queue|=1<<KindOfBay(i);
+    h.recall=false;
+    h.queue=static_cast<int>(dreadnought::EscortKinds(h.fitted,DockedBays(h),FailedKinds(h)));
     h.queueAt=0;
-    Log("DREADNOUGHT v=%p hangar: an escort flight asked (%d docked)",v,Stowed(h));
+    Log("DREADNOUGHT v=%p hangar: an escort flight asked (kinds 0x%X, %d docked)",v,h.queue,Stowed(h));
 }
 
 // The hangar's part of the panel (DreadnoughtCue).
@@ -503,8 +507,51 @@ void HangarCue(const Hangar& h,DreadnoughtCue& c) noexcept {
     c.stowed=Stowed(h);
     c.out=Out(h);
     c.lifting=0;
-    for(const auto& b:h.bay)c.lifting+=b.job==BayJob::out || b.job==BayJob::in || b.job==BayJob::recover || b.job==BayJob::deleting ? 1 : 0;
+    for(const auto& b:h.bay)
+        c.lifting+=b.fitted && (b.job==BayJob::out || b.job==BayJob::in || b.job==BayJob::recover || b.job==BayJob::deleting ||
+                                b.job==BayJob::board || b.job==BayJob::alight) ? 1 : 0;
     c.flightWait=0.0f;
+}
+
+// The fitted hangar local player `human` stands over (dreadnought_deck.h OverHangar), -1 none.
+int HangarUnder(const unsigned char* v,const Hangar& h,const float* at) noexcept {
+    for(int m=0;m<kHangars;++m) {
+        if(!((h.fitted>>m)&1u) || !h.module[m])continue;
+        const float* o=BoneAt(h.module[m]);
+        const float d[3]={at[0]-o[0],at[1]-o[1],at[2]-o[2]};
+        float local[3];
+        ToShip(v,d,local);   // its left, up, ahead
+        if(dreadnought::OverHangar(local[0],local[1],local[2]))return m;
+    }
+    return -1;
+}
+
+// A board press of the local player on foot (`human`) over one of its fitted hangars: a fighter of that hangar out to its
+// mouth for them (SendOut, BayJob::board). True: the press was over a hangar of it (taken, no seat of the ship's).
+bool HangarBoard(Ship& s,unsigned char* v,const unsigned char* human) noexcept {
+    Hangar& h=HangarOf(s);
+    if(!h.ok)return false;
+    const int m=HangarUnder(v,h,reinterpret_cast<const float*>(human+kPosition));
+    if(m<0)return false;
+    const ULONGLONG ms=GameMs();
+    const bool again=h.pressAt && ms-h.pressAt<kPressMs;
+    h.pressAt=ms;
+    if(again)return true;   // the same press, held
+    if(!h.authority) {
+        Log("DREADNOUGHT v=%p hangar %s: a board press, but another machine flies the ship (its hangars are that machine's)",v,kHangarNames[m]);
+        return true;
+    }
+    for(int i=0;i<kBays;++i) {
+        const Bay& b=h.bay[i];
+        if(b.fitted && b.player && (b.job==BayJob::out || b.job==BayJob::board || b.job==BayJob::run)) {
+            Log("DREADNOUGHT v=%p hangar %s: a board press, bay %d already out for its player",v,kHangarNames[m],i);
+            return true;
+        }
+    }
+    const int i=dreadnought::BoardBay(h.fitted,DockedBays(h),FailedKinds(h),m);
+    if(i<0){Log("DREADNOUGHT v=%p hangar %s: a board press, no fighter docked in it",v,kHangarNames[m]);return true;}
+    SendOut(h,v,i,true);
+    return true;
 }
 
 // The ship whose hull `at` is over or in (within its box), or null.
@@ -541,20 +588,28 @@ bool BridgeAt(unsigned char* v,float* at) noexcept {
     return true;
 }
 
-// A local player's fighter `f`: its hangar key calls it home onto the foredeck of the ship it came off (within
+// A local player's fighter `f`: its hangar key calls it home to its own bay of the ship it came out of (within
 // kReturnRange).
 void CallPlayerHome(unsigned char* f) noexcept {
     const float* p=reinterpret_cast<const float*>(f+kPosition);
     for(auto& s:ships) {
         if(!s.vehicle || !Live(s))continue;
         Hangar& h=HangarOf(s);
-        if(!h.authority || !h.flown.Is(f) || h.home)continue;
-        const float* q=reinterpret_cast<const float*>(s.vehicle+kPosition);
-        const float d[3]={p[0]-q[0],p[1]-q[1],p[2]-q[2]};
-        if(vec::Len(d)>kReturnRange){Log("DREADNOUGHT v=%p hangar: its pilot calls home %.0f m out (%.0f at most)",s.vehicle,vec::Len(d),kReturnRange);return;}
-        h.home=h.flown;h.homeBay=h.flownBay;h.flown=ObjRef{};h.flownBay=-1;h.homeLow=false;
-        Log("DREADNOUGHT v=%p hangar: its pilot calls home, %.0f m out: onto its foredeck",s.vehicle,vec::Len(d));
-        return;
+        if(!h.authority || !h.ok)continue;
+        for(int i=0;i<kBays;++i) {
+            Bay& b=h.bay[i];
+            if(!b.fitted || !b.jet.Is(f) || b.job!=BayJob::away || b.home)continue;
+            const float* q=reinterpret_cast<const float*>(s.vehicle+kPosition);
+            const float d[3]={p[0]-q[0],p[1]-q[1],p[2]-q[2]};
+            if(vec::Len(d)>kReturnRange) {
+                Log("DREADNOUGHT v=%p hangar: bay %d's pilot calls home %.0f m out (%.0f at most)",s.vehicle,i,vec::Len(d),kReturnRange);
+                return;
+            }
+            b.job=BayJob::recover;b.home=true;b.at=GameMs();
+            Log("DREADNOUGHT v=%p hangar %s: bay %d's %s: its pilot calls home, %.0f m out: to its bay",s.vehicle,
+                kHangarNames[dreadnought::HangarOfBay(i)],i,kKindNames[KindOfBay(i)],vec::Len(d));
+            return;
+        }
     }
 }
 

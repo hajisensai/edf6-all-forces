@@ -22,7 +22,8 @@
 - 挂点：模块在原作里按能力的 `m_meshSocketTag` 挂到舰体骨架（`VH_DreadH_SKEL`，`dnexport -json`）上同标签的插座：
   - 机库：能力 `AB_DN_Pri_Jet_Fighter_Ability_BP` 的标签 `AB_primary` → 两舷各两个插座 `WP_broadside_left01/03`、`right01/03`
     （UE −176.5 / −550, ±270, 120.5 cm，右舷 yaw 180），每个插座一个模块（`prep_dreadnought.HANGAR_SOCKETS`），开口朝舷外（H）。
-    2026-10-21 之前的版本没找到插座，把一个模块放在前甲板中线（`HANGAR_AT`），开口正对舰体中脊，已改掉；前甲板改放待命战机（`dn_ready`）。
+    2026-10-21 之前的版本没找到插座，把一个模块放在前甲板中线（`HANGAR_AT`），开口正对舰体中脊，已改掉；之后前甲板放过一架待命战机
+    （`dn_ready`），2026-10-24 按用户决定去掉（§9）。每个插座装不装模块由 ini 选（§9）。
   - 炮塔装在舰体自带的炮座上：舰体里 88 个三角形的独立圆顶 / 平台（`prep_dreadnought.turret_mounts`），只取上甲板、不在前甲板中脊
     （`FOREDECK`，即旧机库位置）的 8 个。
 - 材质：`_D` 是以 0.5 为中性的细节叠加图，颜色来自材质参数（`_MC` 的 R/G/B 选 `CustomColor01/02/03`，否则 `BaseColor`），
@@ -49,7 +50,7 @@
 | 导出 → 模型目录（OBJ/MTL、每材质 `_df/_nm/_rml.png`、`dreadnought.json` 骨骼、枢轴与转过的骨骼的 `frame`；标记骨骼按碰撞格算） | `tools/prep_dreadnought.py` |
 | 模型目录 → 5 个 MRAB（V505 车身材质；有灯的材质用复古巴拉姆 light 材质） | `pylib/dreadnought_model.py` |
 | MRAB → 网格复合碰撞体（24×32 凸格高度场，甲板可站人） | `pylib/aircraft_collision.py DN_FILES` |
-| SGO（V506 机体壳）、炮手座 ×8、舰载机 NPC 机体 ×4；检查标记骨骼（舰桥、眼位、机库位、待命位） | `tools/make_dreadnought.py`、`pylib/vcobjects.py` |
+| SGO（V506 机体壳）、炮手座 ×8、舰载机 NPC 机体 ×4；按 ini 装的机库模块生成模型与碰撞；检查标记骨骼（舰桥、眼位、已装机库的机库位）与装配 | `tools/make_dreadnought.py`、`pylib/vcobjects.py`、`pylib/dreadnought_model.py` |
 | 呼叫行 `EDF6VC_CALL_DREADNOUGHT`（第 49 行，空袭兵载具请求） | `tools/calls.py`、`tools/call_weapons.py MODEL_VEHICLES` |
 
 没有模型目录时：`EDF6VC_DREADNOUGHT.SGO` 写原版 V506_HELI，请求叫来普通 N9 Eros，不写舰载机（与沙扎比同一套退回逻辑，已泛化为 `MODEL_VEHICLES`）。
@@ -66,30 +67,34 @@
   放行无畏舰）。每个本机玩家的视角（`View`）：舰桥和炮手座都在舰后 2.2×kReach、舰上方绕整艘船（炮塔附近的镜头试过座位后 18 m、瞄具点
   上方 2–8 m 后方 5–22 m，都落在舰体几何里面）；车辆第一人称（V）从 `vc_eye_<seat>`（舰桥窗口 / 炮塔瞄具）看（未实机验证）。HUD：`hud.cpp DreadnoughtHud`（航速、油门、离地、航向、舰体、加速能量、8 座炮塔谁在操纵、
   机库）+ 按键提示；原版仪表让位。
-- `src/dreadnought_hangar.inc`：两舷 4 个机库、8 个机库位（位 i 停 i % 4 种战机的静态副本 `dn_bay_<i>`）：
+- `src/dreadnought_hangar.inc`：两舷最多 4 个机库（装了哪几个模块看模型里有哪些 `dn_hangar_<m>`，§9）、每个 2 个机库位（位 i 停 i % 4 种战机的静态副本 `dn_bay_<i>`）：
   - 出：副本沿机头（舷外）滑到 `dn_bay_<i>_out`（2.5 s），在那里缩成 0、同一位姿生成真正的战机，由机库托住（`jet.cpp JetHangarHold`：
     速度与角速度由机库写，`body506.cpp JetHeldStep` 排在玩家与 NPC 飞行之前）再放出；
   - 回：护航机燃料 / 血量 / 弹药不足（`JetLeaving`）或被召回时，机库把它飞到自己机库位的开口外 60 m、对正后机头朝外倒进开口，
     等游戏删掉它（`JetHangarStow`），再在开口显示副本、滑回；
-  - 舰桥按机库键（H / Y）：护航编队（有的每种一架）或召回；
-  - 前甲板待命机（`dn_ready`）：下一种战机自动出库停在前甲板；玩家走过去登机 → 从舰首弹射（1.6 s 加速到舰速 +90 m/s，
-    `playerjet.cpp PlayerJetLaunched` 接手）；开着舰载机在 1500 m 内按机库键 → 自动降落到前甲板，玩家被放到舰桥（`dn_bridge`），
-    这架就是新的待命机；
-  - 下舰站舰桥 `dn_bridge`、返舰后也放到舰桥 `dn_bridge`（`dn_ready_side` 标记仍生成，插件不用）（都在标记上方 `kPutOver` 1.5 m 放下，落到碰撞格顶上；§8）。
+  - 舰桥按机库键（H / Y）：护航编队（已装机库里有的每种一架）或召回；
+  - 驾机出击（§9）：玩家站在某个已装机库上方按上车键 → 这个机库的一个机库位把战机滑到开口、把玩家放进去（登机枪那条路径），
+    从这个开口往舷外弹射（2 s 加速到舰速 +90 m/s，`playerjet.cpp PlayerJetLaunched` 接手）；开着它在 1500 m 内按机库键 → 飞回原机库位的开口，
+    在那里把玩家放到舰桥（`dn_bridge`）再入库；
+  - 下舰站舰桥 `dn_bridge`、返舰后也放到舰桥 `dn_bridge`（都在标记上方 `kPutOver` 1.5 m 放下，落到碰撞格顶上；§8）。
 - 碰撞体：`body506.cpp MakeAirframe` 用 SGO 成员 `edf6vc_airframe`（`pylib/vcobjects.py AIRFRAME_MEMBER`）认出插件生成的网格复合体；
   原来的 shape userData 标记在游戏加载紧凑 SHKT 时会丢失（实测 +0x28 一直是 0），历史日志里这条路一次都没生效过，所有插件飞机都是包围盒。
   目前只给无畏舰和它的 4 种舰载机打了这个成员（其他飞机的改动需要另外实机验证）。
 
 ## 4. 未验证 / 风险（L，需实机）
 
-1. 500 m 的复合碰撞体（640 个凸格，4 个两舷机库计在内）在 Havok 里的表现：站人、降落时压到建筑、被写速度时甲板上的人是否被带走（同潜水母舰 §6 第 1 项）。
+1. 500 m 的复合碰撞体（640 个凸格，已装的两舷机库计在内）在 Havok 里的表现：站人、降落时压到建筑、被写速度时甲板上的人是否被带走（同潜水母舰 §6 第 1 项）。
 2. 舱门在右舷外侧地面（`move_door`）；舰体 500 m，玩家要走到右舷中段。
 3. 炮手座：410 门炮手姿势套在 506 机体上，所有炮手座共用驾驶座的定位点；炮塔骨骼局部矩阵每帧写入后引擎是否按它画（沙扎比同法，H for sazabi）。
 4. 炮塔开火的瞄准点取屏幕中心射线；`kOnAim` 2° 内才开火。
-5. 出击：走到前甲板的待命机旁登机（登机枪 / 上车键），舰首弹射 1.6 s 后交给 `PlayerJetLaunched`（M，未实机）。
-6. 返舰与下机：`DreadnoughtTakesBack` 只在战机被本机机库托在前甲板待命位上（距待命位 ≤ 3 m、相对母舰 ≤ 4 m/s，`src/dreadnought_deck.h`）时
-   拦掉跳伞和接机；其余任何位置（舰体包围盒内飞过、舰首弹射途中、联机非机库机器）都照常弹射跳伞（2026-10-24 审查：原先只看舰体包围盒，
-   飞过舰体上空下机会无伞掉下去）。返舰降落、待命位下机未实机（M）。
+5. 出击：站在已装机库上方按上车键（`crew.cpp FindSeatHook` 对无畏舰本身的那次调用转给 `DreadnoughtHangarBoard`），战机滑到开口后用
+   `BoardingRequest`（登机枪的路径，按住期间每帧按一次上车键）把玩家放进去，再从开口弹射 2 s 后交给 `PlayerJetLaunched`（M，未实机）。
+   上车键的「访问」不看距离（边三轮摩托同一路径，`sidecar.cpp`），所以站位只按 `OverHangar` 判（模块原点为中心，横向 ±28 m、纵向 ±48 m、
+   原点下 3 m 到上 15 m）。
+6. 返舰与下机：`DreadnoughtTakesBack` 只在战机被本机机库托在它自己机库位的开口、正在放驾驶员上舰桥（`BayJob::alight`，距开口 ≤ 3 m、
+   相对母舰 ≤ 4 m/s，`src/dreadnought_deck.h`）时拦掉跳伞和接机；其余任何位置（舰体包围盒内飞过、返舰途中、刚从开口弹射、联机非机库机器）
+   都照常弹射跳伞（2026-10-24 审查：原先只看舰体包围盒，飞过舰体上空下机会无伞掉下去）。放人发生在开口（舷外半空）：踢出座位后
+   `WatchPlayer` 在 1.5 s 内把人放到舰桥（与下舰站舰桥同一套）；开口处下机到放上舰桥之间的几帧未实机（M）。
 7. 模型左右是否镜像：CUE4Parse glTF 的手性按 UE 左手系 → glTF 右手系推断（M），舰体基本对称，看不出差别。
 8. 预载：只要装了模型，每关 `PreloadJets` 都预载 4 种舰载机；另外按标记预载**所有**已预载插件喷气机的武器 SGO（15 个，§6 第 4 项），
    对所有插件喷气机生效。没法只在「本关可能出现无畏舰」时预载：能叫来无畏舰的是玩家装备的载具请求，预载发生在任务开始时，
@@ -109,8 +114,9 @@
   该战机 SGO 碰撞盒中心（插件的载具位置），机底贴在升起的升降机顶面上；转过的坐标系，前 = 舷外（0–3 号 +x，4–7 号 −x），左 = 上 × 前。
   检查：骨骼包围盒 = 该机型模型的盒（误差 0.05 m），中心在原点。
 - `dn_bay_<i>_out`（父 `dn_hull`，无几何，同一朝向、同高）：沿舷外方向第一个让该机型的盒（四周再加 1 m）不碰任何碰撞格的点（0.25 m 步长）。
-- `dn_ready`（父 `dn_hull`，水平，机头朝前）：前甲板中线上，最大的机型（翼展 12.05 m、长 12.08 m）占地下的碰撞格最平（≤ 0.5 m）的点，
-  **在碰撞顶面上**（插件自己加机型的原点高度）；`dn_ready_side`：最大翼尖外 3 m（左舷），该处碰撞顶面上，放下机的驾驶员。
+- `dn_ready` / `dn_ready_side`（前甲板待命机的位置）：2026-10-24 起不再生成；旧的模型目录里有也不进模型（`dreadnought_model.LEGACY_MARKERS`）。
+- 没装的机库模块（§9）：`dn_hangar_<m>` 和它两个机库位的 `dn_lift_*`、`dn_door_*`、`dn_bay_*`、`dn_bay_*_out` 都不在模型里
+  （`make_dreadnought.check_fitting` 检查；插件按 `dn_hangar_<m>` 在不在认机库）。
 - 机型原点（碰撞盒中心）离脚下面的高度（SGO `heli_rigid_body[0][1]`）：0 战斗机 1.171、1 防御战斗机 1.161、2 轰炸机 2.059、3 截击机 2.189 m。
 
 ## 4.2 原作机库（H，资产直接读出；已照此放置）
@@ -118,7 +124,8 @@
 - **机库不是舰体自带的**：重型无畏舰的两套原作预设配装（`Loadouts/Precast/T4|T5/VH_DreadnoughtHeavy_T*_PrecastLoadout_BP`，`dnexport -json`）
   主技能都是舷侧炮（T5 `AB_DN_Pri_BS_Scatter_Ability_BP`，T4 `AB_DN_Pri_BS_Plasma_Ability_T3_BP`），主炮 `WP_DreadnoughtHPri01`，副炮
   SecShort / SecMid；舰体网格没有机库。机库是可换装的主技能「Fighters」（`AB_DN_Pri_Jet_Fighter_Ability_BP`），装上后游戏把机库模块挂在同一组
-  `AB_primary` 插座上。用户 2026-10-21 问「这机库不是额外的机库模块吗…自带的话没关系不是的话修一下」：如实答复是额外模块（原作就这样挂），等用户定。
+  `AB_primary` 插座上。用户 2026-10-21 问「这机库不是额外的机库模块吗…自带的话没关系不是的话修一下」：如实答复是额外模块（原作就这样挂）；
+  2026-10-24 用户定了：每个插座单独选装不装（§9）。
 
 - 安装位置：机库能力 `AB_DN_Pri_Jet_Fighter_Ability_BP` 的 `m_meshSocketTag` = `AB_primary`，重型舰骨架上带这个标签的插座是
   **两舷各两个** `WP_broadside_left01/03`、`right01/03`（UE −176.5 / −550, ±270, 120.5 cm；右舷的 yaw 180），
@@ -141,7 +148,10 @@
   远端只画无伤害的炮弹，伤害由那台机器结算一次。未两机实测。
 - 换座、下舰站舰桥、HUD、视角：各自在自己的机器上。
 - 机库与舰载机：插件飞机没有网络身份（`docs/online-re.md`「插件飞机 / 无人机的网络身份：没做」），机库只在驾驶无畏舰（联机权威）的机器上运行，
-  舰载机是那台机器的；其他机器上的机库位副本一直显示停着。下一步：舰载机走 `SubmitCarrierSupportDrone` 那条已有的联机放飞路径。
+  舰载机是那台机器的；其他机器上的机库位副本一直显示停着。驾机出击也只对那台机器上的玩家有效（别的机器上的玩家站在机库上按上车键只记一行日志）。
+  下一步：舰载机走 `SubmitCarrierSupportDrone` 那条已有的联机放飞路径。
+- 装哪几个机库模块（§9）是安装时的设置，不同步：每台机器按自己安装的模型画模块、算碰撞（碰撞是安装时烘焙的，运行中无法按别人的设置改）。
+  没有新增要同步的状态。
 
 ## 6. 实机记录（2026-10-21，测试场 M045，drive.py 后台 + 虚拟手柄）
 
@@ -202,3 +212,32 @@
 - **鼠标转炮塔**：视角改用原版输入之前的瞄准摇杆快照（`DreadnoughtInput`，与观察键读的同一时刻）；Debug 日志每秒打出「之前 / 之后」两个值。
   后台驱动只能当手柄（游戏不从可拦截的键盘接口读按键），键鼠下未实机验证。
 - **尺寸**：改回 500 m（§1）。**机库**：原作预设配装里没有，是可换装的主技能模块（§4.2），等用户定。
+
+## 9. 机库按插座装配、从机库出击（2026-10-24 用户决定，`docs/feedback-2026-10-21-dreadnought.md` 末段）
+
+用户原话：「模块能装啥，肯定是装了模块才能有对应的功能啊，比如两个机库模块，就应该两个机库，而不是统一在一个位置」；选定每个插座单独开关、
+站到机库上方按键出击、回原机库。
+
+- **装配是安装时决定的**（理由）：碰撞体是 24×32 凸格高度场，整艘船一个复合体，安装时从模型量出来烘焙进 `*_AIRFRAME.SHKT`。离线对比真模型：
+  去掉一个模块会改掉 22–28 个格子（舷侧那几列的顶从模块顶 31.6 m 降到舰体的高度，有的列整列消失）。运行时只能隐藏网格骨骼，碰撞体里的
+  格子去不掉（要逆向 Havok 复合体子形状的开关，且无法离线验证），模块不在却还撞得到、站得上去，正是用户说的「没装就不该有」的反面。
+  所以安装器读插件 ini 的同一组键（`DreadnoughtHangarLeftFore` / `LeftAft` / `RightFore` / `RightAft`，`dreadnought_model.hangars_wanted`
+  与插件的 `GetPrivateProfileInt` 同样解析），只把装上的模块、它们的机库位副本和标记放进模型，碰撞体从这个模型量（`aircraft_collision.airframe`，
+  仍以整舰包围盒中心为原点，和 SGO 的盒一致）；安装缓存按装配加键（`buildcache.Cache.current(settings=...)`），改了键再装就会重建。
+- **运行时以模型为准**：插件看模型里有哪些 `dn_hangar_<m>` 骨骼来认机库（`RigHangar`），不看 ini——ini 改了没重装时，模型、碰撞和机库仍然
+  一致，只在日志里提示「ini 与已安装的不一致，要重新运行安装器」。插件的 `Config::dreadnoughtHangars` 只用来做这条提示和 CONFIG 日志。
+- 模块 m 的机库位是 2m、2m+1，种类 i % 4 不变（前面的模块：战斗机、防御战斗机；后面的：轰炸机、截击机）。
+- 驾机出击：上车键 → `crew.cpp FindSeatHook` 在访问无畏舰本身时先问 `DreadnoughtHangarBoard`：本机玩家步行、站在某个已装模块上方
+  （`dreadnought_deck.h OverHangar`）→ 这个模块第一个停着战机的机库位（`BoardBay`）出库，按住键的重复访问 0.5 s 内算同一次；
+  战机滑到开口生成后由机库托住（`BayJob::board`），每 0.5 s 发一次 `BoardingRequest` 直到玩家坐进去，5 s 内没坐进去就收回入库；坐进去后
+  从这个开口弹射（`BayJob::run`）。`BoardingRequest` 之前在 ini `BoardingGun=0` 时会被 `BoardingTick` 直接取消（它把「玩家」和登机枪开关绑在一起），
+  已改为只有登机枪的子弹看这个开关。
+- 返舰：`CallPlayerHome` 找到这架战机所属的机库位，按护航机入库的同一条进近路线飞回它自己的开口（`BayJob::recover` + `home`），到位后
+  `BayJob::alight`：托在开口、踢出座位、放上舰桥，1 s 后入库；人若还在机内（踢出失败）就把战机交还给玩家，不硬收。
+- 前甲板待命机整套去掉：`dn_ready`、`Hangar::nextKind` 轮换、舰首滑跑 `kDeckRunSec`、`DreadnoughtParked`（登机许可）、`DeckSpot` / `ToDeck`。
+- 测试：`tests/dreadnought_deck_test.cpp`（装配 → 机库位、护航种类、出击机库位只来自所站的机库、站位判定、不跳伞的契约）、
+  `tests/dreadnought_fitting_test.py`（没装的模块不在骨架、几何和量出的碰撞格里）、`tests/dreadnought_slot_guard.py`（不跳伞只看 alight、
+  出击 / 返舰绑定自己的机库位、待命机的残留不复存在）、`tools/selftest.py dreadnought_agrees`（站位常量、ini 键与插件一致）、
+  `make_dreadnought.check_fitting`（真模型：装配与骨骼一致、每个模块的网格在站位范围内）。
+- 未实机：少装后的模型与碰撞、站在机库上方按上车键出击（含 `FindSeat` 访问顺序：附近若有别的可上的载具，上车键可能先上了它，此时机库送出的战机
+  在开口等 5 s 后收回）、开口处放人到舰桥的那几帧、返舰原机库位入库。

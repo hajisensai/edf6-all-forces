@@ -9,12 +9,17 @@ colour (<material>_df.png), normal map (_nm) and R roughness / G metal / B light
 The skeleton (SKELETONS, preorder; every bone bound level, as the Sazabi's: sazabi_model.py):
   mdl (root: the V506 MAB's locators hang on it, vcobjects.JET_MAB_ROOT) -> <model> (the skinned object's bone),
   globalSRT -> body (the V506's anchor, at BODY_AT where the V506 CAS's `default` clip puts it; no geometry) -> the
-  ship's own bones (dn_hull, and the dreadnought's hangar and its doors and lifts, which the plugin poses), and the
+  ship's own bones (dn_hull, and the dreadnought's fitted hangars and their doors and lifts, which the plugin poses), and the
   dreadnought's marker bones (no geometry; tools/prep_dreadnought.py ship_markers): dn_bridge, where its pilot stands on
   leaving it, and every seat's first-person eye vc_eye_<seat> (MARKERS; src/fp_vehicle.cpp VehicleEye reads it by name).
 The model stands on its lowest point (origin y = 0: the game sets a vehicle down on its origin), centred on x and z.
 Materials: one a source material, in Retro-Balam's `light` material (snd_BRDF_Common_Light_NoOcc) where its map has
 lights (the dreadnought's windows and engines glow in their master's LightColor), else the Blacker's hull material.
+
+Its hangar modules (the user, 2026-10-24: 「模块能装啥，肯定是装了模块才能有对应的功能啊」): the dreadnought is built with the
+modules its ini fits (HANGAR_KEYS, read by the installer: hangars_wanted) and no others: a module not fitted, its bays'
+lifts, doors and fighters, and their markers are left out of its model, so of its collision too (pylib/aircraft_collision.py
+measures the model); the plugin runs the hangars the model has (src/dreadnought_hangar.inc RigHangar).
 
     python pylib/dreadnought_model.py [OUT_DIR]     build every archive from the model folder and the game, check, write
 """
@@ -52,23 +57,92 @@ HULL = 'dn_hull'
 # The hangars (tools/prep_dreadnought.py HANGAR_SOCKETS: on the broadsides, left01, left03, right01, right03): module m
 # dn_hangar_<m>; its bays 2m, 2m + 1, each bay i its lift dn_lift_<i>, upper and lower doors dn_door_u_<i> / dn_door_l_<i>,
 # its fighter's copy dn_bay_<i> (kind BAY_KINDS[i % 4]: a mesh bone, turned: nose out of the bay) and dn_bay_<i>_out
-# (no geometry: where the copy is out of the ship); the ready fighter's spot on the foredeck dn_ready, dn_ready_side.
+# (no geometry: where the copy is out of the ship).
 HANGARS, BAYS = 4, 8
 BAY_KINDS = ('fighter', 'defender', 'bomber', 'interceptor')
-READY, READY_SIDE = 'dn_ready', 'dn_ready_side'
+# Which are fitted (src/dreadnought_deck.h module m): the plugin's ini keys, in module order (left01, left03, right01,
+# right03), each 1 (fitted, the default: as the original game shows it) or 0; ALL_HANGARS all of them.
+HANGAR_KEYS = ('DreadnoughtHangarLeftFore', 'DreadnoughtHangarLeftAft', 'DreadnoughtHangarRightFore',
+               'DreadnoughtHangarRightAft')
+ALL_HANGARS = (True,) * HANGARS
+INI_SECTION = 'VehicleCrew'
+# Where a player stands to board from a module (src/dreadnought_deck.h OverHangar; tools/selftest.py dreadnought_agrees):
+# m across the ship and along it either side of dn_hangar_<m>, under and over it. tools/make_dreadnought.py holds every
+# fitted module's mesh inside it (across, along) and its roof within (below, above).
+HANGAR_REACH = {'across': 28.0, 'along': 48.0, 'below': 3.0, 'above': 15.0}
+# The markers the prep tool once made for the foredeck's ready fighter (before 2026-10-24, when a player boarded there):
+# left out of the model, so a folder made before then builds as one made after.
+LEGACY_MARKERS = ('ready', 'ready_side')
+
+
+def hangar_parts(m: int) -> set[str]:
+    """Module m's bones as the prep tool names them: hangar_<m>, and its bays' lifts, doors, fighters and mouths."""
+    bays = range(2 * m, 2 * m + 2)
+    return {f'hangar_{m}'} | {f'{p}_{i}' for i in bays for p in ('lift', 'door_u', 'door_l', 'bay')} | \
+        {f'bay_{i}_out' for i in bays}
+
+
+def left_out(hangars: tuple[bool, ...]) -> set[str]:
+    """The prep tool's bones not in the dreadnought fitted with `hangars` (module m: hangars[m]), and the legacy
+    markers."""
+    _req(len(hangars) == HANGARS, f'{len(hangars)} hangar choices, not {HANGARS}')
+    out = set(LEGACY_MARKERS)
+    for m, fitted in enumerate(hangars):
+        if not fitted:
+            out |= hangar_parts(m)
+    return out
+
+
+def fitted_parts(model: str, parts: list, hangars: tuple[bool, ...]) -> list:
+    """The model's OBJ objects (obj_model parts, one a bone: `.name`) it is built of: the dreadnought's without its
+    modules not fitted (left_out); a fighter's all."""
+    skip = left_out(hangars) if model == SHIP else set()
+    return [p for p in parts if p.name not in skip]
+
+
+def hangars_wanted(ini_text: str) -> tuple[bool, ...]:
+    """HANGAR_KEYS of the ini's text (the plugin's, as the installer will leave it) as the plugin reads them
+    (src/plugin.cpp: GetPrivateProfileInt in [VehicleCrew], the first of a key, any case): a key missing is fitted, a
+    number is fitted unless 0, anything else is not."""
+    import re
+    section, seen = '', {}
+    for line in ini_text.lstrip('\ufeff').splitlines():
+        t = line.strip()
+        if t.startswith('[') and t.endswith(']'):
+            section = t[1:-1].strip()
+            continue
+        m = re.match(r'([^=;\s][^=]*?)\s*=(.*)$', t)
+        if m and section.lower() == INI_SECTION.lower():
+            seen.setdefault(m.group(1).strip().lower(), m.group(2).strip())
+    out = []
+    for key in HANGAR_KEYS:
+        value = seen.get(key.lower())
+        if value is None:
+            out.append(True)
+            continue
+        n = re.match(r'[+-]?\d+', value)
+        out.append(bool(n) and int(n.group(0)) != 0)
+    return tuple(out)
+
+
+def hangars_text(hangars: tuple[bool, ...]) -> str:
+    """'1111': module m fitted at m (the installer's cache keys the dreadnought by it)."""
+    return ''.join('1' if h else '0' for h in hangars)
 
 
 def _ours(model: str, bone: str) -> str:
     return HULL if bone == model else bone if bone.startswith('vc_') else 'dn_' + bone
 
 
-def skeleton(model: str, manifest: dict) -> list[tuple[str, str | None]]:
-    """(bone, parent) in preorder: the V506's frame, then the hull and every bone of the model under its parent."""
+def skeleton(model: str, manifest: dict, hangars: tuple[bool, ...] = ALL_HANGARS) -> list[tuple[str, str | None]]:
+    """(bone, parent) in preorder: the V506's frame, then the hull and every bone of the model under its parent (the
+    dreadnought's: of its fitted hangars only, left_out)."""
     out: list[tuple[str, str | None]] = [('mdl', None), (model, 'mdl'), ('globalSRT', 'mdl'), ('body', 'globalSRT')]
     bones = manifest['models'][model]['bones']
+    skip = left_out(hangars) if model == SHIP else set()
     kids: dict[str, list[str]] = {}
     for b, e in bones.items():
-        if e['parent']:
+        if e['parent'] and b not in skip:
             kids.setdefault(e['parent'], []).append(b)
 
     def walk(b: str, parent: str) -> None:
@@ -191,19 +265,25 @@ def _with_frames(md: Mdb, frames: dict, pivots: dict, posed: list, names: list[s
     return replace(md, bones=bones)
 
 
-def build_model(game, folder: str, model: str) -> tuple[Mdb, dict[str, bytes], dict]:  # noqa: ANN001 - rootcpk.Game
-    """(model, its textures {file: DDS}, info)."""
+def build_model(game, folder: str, model: str,  # noqa: ANN001 - rootcpk.Game
+                hangars: tuple[bool, ...] = ALL_HANGARS) -> tuple[Mdb, dict[str, bytes], dict]:
+    """(model, its textures {file: DDS}, info); the dreadnought with the hangar modules `hangars` fits, the others not
+    in it (left_out)."""
     import numpy as np
     import procmesh
     manifest = read_manifest(folder)
     entry = manifest['models'][model]
-    bones = skeleton(model, manifest)
+    bones = skeleton(model, manifest, hangars)
     names = [n for n, _ in bones]
+    skip = left_out(hangars) if model == SHIP else set()
     obj = om.read_obj(os.path.join(folder, f'{model}.obj'))
-    parts = om.obj_parts(obj, om.Conversion())
-    lo = min(v.pos[1] for p in parts for v in p.verts)
-    xs = [v.pos[0] for p in parts for v in p.verts]
-    zs = [v.pos[2] for p in parts for v in p.verts]
+    # placed (stood on its lowest point, centred) as the whole model is, whatever is fitted: its SGO's box is the whole
+    # one's (vcobjects.jet_sgo), its airframe measured about that box's centre (pylib/aircraft_collision.py airframe)
+    whole = om.obj_parts(obj, om.Conversion())
+    parts = fitted_parts(model, whole, hangars)
+    lo = min(v.pos[1] for p in whole for v in p.verts)
+    xs = [v.pos[0] for p in whole for v in p.verts]
+    zs = [v.pos[2] for p in whole for v in p.verts]
     shift = (-(min(xs) + max(xs)) / 2.0, -lo, -(min(zs) + max(zs)) / 2.0)   # stand it on its lowest point, centred
 
     def moved(p):  # noqa: ANN001, ANN202 - om.Part
@@ -215,7 +295,8 @@ def build_model(game, folder: str, model: str) -> tuple[Mdb, dict[str, bytes], d
         pieces.append((moved(p), names.index(b)))
     pivots = {'mdl': (0.0, 0.0, 0.0), model: (0.0, 0.0, 0.0), 'globalSRT': (0.0, 0.0, 0.0), 'body': BODY_AT}
     for b, e in entry['bones'].items():
-        pivots[_ours(model, b)] = tuple(e['pivot'][k] + shift[k] for k in range(3))
+        if b not in skip:
+            pivots[_ours(model, b)] = tuple(e['pivot'][k] + shift[k] for k in range(3))
     pivots[HULL] = (0.0, 0.0, 0.0)
     if model == SHIP:
         pts = np.array([v.pos for p, _ in pieces for v in p.verts])
@@ -244,18 +325,21 @@ def build_model(game, folder: str, model: str) -> tuple[Mdb, dict[str, bytes], d
     skel = procmesh.bones(joints, model, posed, 1.0)
     all_names = list(md.names) + [model] if model not in md.names else list(md.names)
     md = replace(md, names=all_names, bones=skel, objects=[Object(all_names.index(model), names.index(model), meshes)])
-    md = _with_frames(md, {_ours(model, b): e['frame'] for b, e in entry['bones'].items() if 'frame' in e}, pivots,
-                      posed, names)
+    md = _with_frames(md, {_ours(model, b): e['frame'] for b, e in entry['bones'].items() if 'frame' in e and b not in skip},
+                      pivots, posed, names)
     tris = sum(len(me.indices) // 6 for me in meshes)
     _req(tris >= MIN_TRIANGLES[model], f'{model}: {tris} triangles: the model folder is not tools/prep_dreadnought.py\'s')
     info = {'triangles': tris, 'meshes': len(meshes), 'materials': len(md.materials), 'bones': len(skel),
             'size': [round(float(x), 1) for x in np.ptp(np.vstack([q for q, _ in posed]), axis=0)]}
+    if model == SHIP:
+        info['hangars'] = hangars_text(hangars)
     return md, tex, info
 
 
-def build_archive(game, folder: str, model: str) -> tuple[bytes, dict]:  # noqa: ANN001 - rootcpk.Game
-    """EDF6VC_DN_<MODEL>.MRAB (the model and its textures, the stock archives' folder layout), info."""
-    md, tex, info = build_model(game, folder, model)
+def build_archive(game, folder: str, model: str,  # noqa: ANN001 - rootcpk.Game
+                  hangars: tuple[bool, ...] = ALL_HANGARS) -> tuple[bytes, dict, Mdb]:
+    """EDF6VC_DN_<MODEL>.MRAB (the model and its textures, the stock archives' folder layout), info, the model."""
+    md, tex, info = build_model(game, folder, model, hangars)
     data = mdb_write(md)
     _req(mdb_write(mdb_read(data)) == data, f'{model}: the model does not round-trip')
     template = rab_read(game.read('OBJECT', LIGHT_HOST[0]))
@@ -265,7 +349,7 @@ def build_archive(game, folder: str, model: str) -> tuple[bytes, dict]:  # noqa:
         om.add_texture(rab, name, dds)
     out = rab_write(rab)
     check_archive(out, model)
-    return out, info
+    return out, info, md
 
 
 def check_archive(arc: bytes, model: str) -> None:
@@ -311,7 +395,7 @@ def main(argv: list[str]) -> int:
     os.makedirs(out, exist_ok=True)
     game = mdb._game()
     for model in MODELS:
-        arc, info = build_archive(game, folder, model)
+        arc, info, _md = build_archive(game, folder, model)
         with open(os.path.join(out, archive_name(model)), 'wb') as h:
             h.write(arc)
         print(model, json.dumps(info), f'{len(arc) / 1e6:.1f} MB')

@@ -624,6 +624,13 @@ void LoadConfig() noexcept {
     n.dreadnoughtSeatButton=static_cast<int>(ReadInt(L"DreadnoughtSeatButton",static_cast<DWORD>(n.dreadnoughtSeatButton)));
     n.dreadnoughtHangarKey=static_cast<int>(ReadInt(L"DreadnoughtHangarKey",static_cast<DWORD>(n.dreadnoughtHangarKey)));
     n.dreadnoughtHangarButton=static_cast<int>(ReadInt(L"DreadnoughtHangarButton",static_cast<DWORD>(n.dreadnoughtHangarButton)));
+    {   // its hangar modules (dreadnought_deck.h module m): the installer builds the model by these same keys
+        static const wchar_t* const kHangarKeys[]={L"DreadnoughtHangarLeftFore",L"DreadnoughtHangarLeftAft",L"DreadnoughtHangarRightFore",
+                                                   L"DreadnoughtHangarRightAft"};
+        unsigned fitted=0;
+        for(unsigned m=0;m<4;++m)if(ReadBool(kHangarKeys[m],((n.dreadnoughtHangars>>m)&1u)!=0))fitted|=1u<<m;
+        n.dreadnoughtHangars=fitted;
+    }
     {
         wchar_t text[32]{};
         GetPrivateProfileStringW(L"VehicleCrew",L"TestBoardVehicle",L"",text,32,iniPath);
@@ -921,10 +928,12 @@ void LoadConfig() noexcept {
         n.sazabiThrusterSec,n.sazabiThrusterRegen,n.sazabiInvertAim,n.sazabiDashKey,n.sazabiDescendKey,n.sazabiFunnelKey,
         n.sazabiFunnelButton,n.sazabiCannonKey,n.sazabiCannonButton,n.sazabiMeleeKey,n.sazabiMeleeButton,n.sazabiGuardKey,n.sazabiGuardButton,n.sazabiGuardShare,
         n.sazabiAxeDamage,n.sazabiCannonDamage,n.sazabiFunnelDamage,n.sazabiTestBoard);
-    Log("CONFIG dreadnought=%d speed=%.0f boost=%.1f accel=%.1f climb=%.0f turn=%.1f floor=%.0f boost=0x%X/0x%X descend=0x%X/0x%X strafe=0x%X/0x%X hangar=0x%X/0x%X",
+    Log("CONFIG dreadnought=%d speed=%.0f boost=%.1f accel=%.1f climb=%.0f turn=%.1f floor=%.0f boost=0x%X/0x%X descend=0x%X/0x%X strafe=0x%X/0x%X hangar=0x%X/0x%X hangars=%c%c%c%c (left fore, left aft, right fore, right aft; the installer's)",
         n.dreadnought,n.dreadnoughtSpeed,n.dreadnoughtBoost,n.dreadnoughtAccel,n.dreadnoughtClimb,n.dreadnoughtTurn,
         n.dreadnoughtFloor,n.dreadnoughtBoostKey,n.dreadnoughtBoostButton,n.dreadnoughtDescendKey,n.dreadnoughtDescendButton,
-        n.dreadnoughtStrafeLeftKey,n.dreadnoughtStrafeRightKey,n.dreadnoughtHangarKey,n.dreadnoughtHangarButton);
+        n.dreadnoughtStrafeLeftKey,n.dreadnoughtStrafeRightKey,n.dreadnoughtHangarKey,n.dreadnoughtHangarButton,
+        n.dreadnoughtHangars&1u ? '1' : '0',n.dreadnoughtHangars&2u ? '1' : '0',n.dreadnoughtHangars&4u ? '1' : '0',
+        n.dreadnoughtHangars&8u ? '1' : '0');
     Log("CONFIG sazabi assist=%d cone=%.1f range=%.0f pull=%.1f mousePull=%d lock=0x%X/0x%X",n.sazabiAimAssist,n.sazabiAssistCone,
         n.sazabiAssistRange,n.sazabiAssistPull,n.sazabiAssistMousePull,n.sazabiLockKey,n.sazabiLockButton);
     Log("CONFIG playerJet=%d invertPitch=%d ramDamage=%.2f boostKey=0x%X brakeKey=0x%X switchKey=0x%X mouse=%.2f rotorLift=%.2f jetSound=%d volume=%.2f",

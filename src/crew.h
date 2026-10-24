@@ -168,6 +168,10 @@ struct Config {
     int dreadnoughtSeatButton=0x20;      // ...its seats round on a pad (RB: its B gets out of it; SeatNextKey on the keyboard)
     int dreadnoughtHangarKey=0x48;     // the commander launches an escort flight from its hangar (H; 0 none)
     int dreadnoughtHangarButton=0x08;  // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x08 Y; 0 none)
+    // Its hangar modules fitted (bit m: dreadnought_deck.h module m, ini DreadnoughtHangarLeftFore / LeftAft / RightFore /
+    // RightAft). The installer builds its model and collision by them; the plugin runs the hangars its model has and only
+    // says when these differ (installed before they were changed).
+    unsigned dreadnoughtHangars=0xF;
     char testBoardVehicle[32]{};    // tests: class substring, optionally @exactModelBone to distinguish models sharing 506
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
                                     // once a mission near the player, then the player put into what it brings
@@ -794,9 +798,14 @@ unsigned char* JetLaunchDrone(const float* from,const float* heading,const float
 constexpr int kDnFighterKinds=4;
 unsigned char* JetLaunchDreadnoughtFighter(int kind,const float* from,const float* heading,const float* target,DWORD fuelSec,
                                            const void* source,bool escort) noexcept;
-// Whether the local player leaving `fighter` goes back aboard a dreadnought near it (dreadnought_hangar.inc: one of its
-// fighters within its return range): no parachute, no catch (playerjet.cpp Leave / Left), the fighter handed back.
+// Whether the local player leaving `fighter` is put aboard its dreadnought (dreadnought_hangar.inc: its own bay's hangar,
+// running here, has it at that bay's mouth putting its pilot out onto the bridge): no parachute, no catch
+// (playerjet.cpp Leave / Left), the fighter handed back. Anywhere else, false: they eject.
 bool DreadnoughtTakesBack(const unsigned char* fighter) noexcept;
+// A board press of `human` on foot that visits Dreadnought `vehicle` (crew.cpp FindSeatHook): true when the local player
+// stands over one of its fitted hangars and the press is taken for it (a fighter of that hangar out to its bay's mouth
+// for them: dreadnought_hangar.inc HangarBoard), no seat of the ship's.
+bool DreadnoughtHangarBoard(unsigned char* vehicle,unsigned char* human) noexcept;
 // A Dreadnought's hangar and its fighters (dreadnought_hangar.inc; jet.cpp): the hangar holds one (on a lift, landing,
 // launched off the deck): this frame's velocity and spin are its motion, a player aboard or not (false: none of the
 // plugin's jets); lets it go (it flies on from that motion: its own flight as an escort, or the player's); takes it in
@@ -806,9 +815,7 @@ void JetHangarRelease(unsigned char* v) noexcept;
 void JetHangarStow(unsigned char* v) noexcept;
 bool JetLeaving(const void* vehicle) noexcept;
 bool JetMotion(const void* vehicle,float* vel) noexcept;   // its velocity as its flight (or hangar) last sent it
-// Whether `fighter` is the one parked on a Dreadnought's foredeck (dreadnought_hangar.inc): boarded where it stands.
-bool DreadnoughtParked(const void* fighter) noexcept;
-// The player's jet `v` launched off a deck (dreadnought_hangar.inc): its flight takes over at the motion its launch gave
+// The player's jet `v` launched off a Dreadnought's bay (dreadnought_hangar.inc): its flight takes over at the motion its launch gave
 // it (jet.cpp's entry), in the air, full throttle.
 void PlayerJetLaunched(unsigned char* v) noexcept;
 // A drone a thrown Robot Bomb releases where it landed (airstrike.cpp kThrows; tools/calls.py brings 'throw'): the

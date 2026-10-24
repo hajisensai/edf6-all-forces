@@ -882,9 +882,13 @@ set_tests_properties(doll_follow_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=u
 # The plugin's launched drones fly with no one aboard; crewed aircraft never launched empty (src/jet_internal.h Unmanned).
 add_test(NAME unmanned_launch_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/unmanned_launch_guard.py")
 set_tests_properties(unmanned_launch_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
-# The Dreadnought: every per-ship slot array reset together, its pilots ejected unless on its foredeck spot, its own fault step.
+# The Dreadnought: every per-ship slot array reset together, its pilots ejected unless put aboard at their own bay's mouth,
+# its hangars per fitted socket (sorties out of and home to their own bay), its own fault step.
 add_test(NAME dreadnought_slot_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/dreadnought_slot_guard.py")
 set_tests_properties(dreadnought_slot_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# ...its hangar modules fitted per socket: one not fitted in neither its model nor its collision (pylib/dreadnought_model.py).
+add_test(NAME dreadnought_fitting COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/dreadnought_fitting_test.py")
+set_tests_properties(dreadnought_fitting PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME npc_car_aim_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_car_aim_guard.py")
 set_tests_properties(npc_car_aim_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # Proportional navigation (src/pn.h) against the stock pure pursuit at the same turn limit.

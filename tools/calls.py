@@ -530,18 +530,24 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
     },
     'dreadnought': {
         'SC': ('无畏舰', '请求一艘由你自己驾驶的无畏舰（游戏《Dreadnought》的重型无畏舰，全长 500 米），空着送到信号弹处。'
-                       '8 座炮塔都能上人操纵（舰桥指挥空炮塔）；两舷机库的舰载机（战斗机、防御战斗机、轰炸机、截击机）'
-                       '从舱口飞出随舰作战、飞回入库，前甲板停着的待命机可以登机驾驶。'),
+                       '8 座炮塔都能上人操纵（舰桥指挥空炮塔）；两舷装几个机库模块就有几个机库（ini 可选，默认 4 个），'
+                       '舰载机（战斗机、防御战斗机、轰炸机、截击机）从各自机库口飞出随舰作战、飞回入库；'
+                       '站到机库上方按上车键，就从这个机库驾驶一架出击，返舰时飞回原机库。'),
         'CN': ('無畏艦', '請求一艘由你自己駕駛的無畏艦（遊戲《Dreadnought》的重型無畏艦，全長 500 公尺），空著送到信號彈處。'
-                       '8 座砲塔都能上人操縱（艦橋指揮空砲塔）；兩舷機庫的艦載機（戰鬥機、防禦戰鬥機、轟炸機、攔截機）'
-                       '從艙口飛出隨艦作戰、飛回入庫，前甲板停著的待命機可以登機駕駛。'),
+                       '8 座砲塔都能上人操縱（艦橋指揮空砲塔）；兩舷裝幾個機庫模組就有幾個機庫（ini 可選，預設 4 個），'
+                       '艦載機（戰鬥機、防禦戰鬥機、轟炸機、攔截機）從各自機庫口飛出隨艦作戰、飛回入庫；'
+                       '站到機庫上方按上車鍵，就從這個機庫駕駛一架出擊，返艦時飛回原機庫。'),
         'JA': ('ドレッドノート', '自分で操縦するドレッドノート（ゲーム『Dreadnought』の重ドレッドノート、全長 500 m）を'
-                            '信号弾の位置へ要請する。8 基の砲塔すべてに搭乗して操作でき（艦橋は空いた砲塔を指揮）、両舷の格納庫から'
-                            '艦載機（戦闘機、防衛戦闘機、爆撃機、迎撃機）が発艦して随伴・帰還し、前甲板の待機機には乗り込んで操縦できる。'),
+                            '信号弾の位置へ要請する。8 基の砲塔すべてに搭乗して操作でき（艦橋は空いた砲塔を指揮）、両舷に積んだ格納庫'
+                            'モジュールの数だけ格納庫があり（ini で選択、既定 4 基）、艦載機（戦闘機、防衛戦闘機、爆撃機、迎撃機）が'
+                            'それぞれの格納庫口から発艦して随伴・帰還する。格納庫の上で搭乗キーを押すとその格納庫から1機で出撃し、'
+                            '帰艦時は元の格納庫に戻る。'),
         'EN': ('Dreadnought', 'Requests a Dreadnought you pilot yourself (the heavy dreadnought of the game "Dreadnought", '
                               '500 m long), delivered empty to the flare. All 8 turrets can be manned (the bridge commands the '
-                              'free ones); its broadside hangars launch and take back fighters (fighter, defender, bomber, '
-                              'interceptor) that fight beside it, and you can board the one waiting on its foredeck.'),
+                              'free ones); it has a hangar for each hangar module fitted on its broadsides (chosen in the ini, '
+                              '4 by default), launching and taking back fighters (fighter, defender, bomber, interceptor) '
+                              'through their own openings; stand over a hangar and press board to sortie from it in one, '
+                              'and it flies you back into that hangar.'),
     },
     'pjet_fighter': {
         'SC': ('玩家战斗机', '请求一架由你自己驾驶的战斗机，空着送到信号弹处：两门机炮和导弹，轻快，转弯最急。'
