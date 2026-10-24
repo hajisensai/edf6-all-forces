@@ -6,6 +6,7 @@
 #include "enemy_control_monster_net.h"
 #include "enemy_control_merman_net.h"
 #include "enemy_control_boss_gun_net.h"
+#include "enemy_control_boss_moves.h"
 #include "crew.h"
 #include "memory.h"
 #include <cmath>
@@ -39,7 +40,10 @@ struct Stream {
     Receipt receipts[kQueued]{};Request requests[kQueued]{};
 };
 struct Descriptor {const void* callback;std::int32_t adjustor=0,padding=0;};
-constexpr const wchar_t* kBossNames[]={L"attack_rollingLazer",L"attack_bathingKick",L"attack_dive",L"attack_genocide",L"attack_meteorite"};
+// E516's own named actions, wire key = index (enemy_control_boss_moves.h): never its AI-dead rolling
+// laser (a missing part, the crash) or genocide, not even when a peer asks for them.
+constexpr const auto& kBossNames=boss_moves::kNamed;
+constexpr unsigned kBossNamedCount=boss_moves::kNamedCount;
 struct NativeWide {const wchar_t* text=nullptr;std::uint64_t unused=0;std::size_t length=0,capacity=0;};
 struct NamedAction {NativeWide name{};std::int32_t priority=1;float blend=0.1f,speed=1;bool turnTarget=false;unsigned char reserved[3]{};};
 static_assert(sizeof(NativeWide)==0x20 && sizeof(NamedAction)==0x30 && offsetof(NamedAction,turnTarget)==0x2C,"supported native named descriptor");
@@ -166,8 +170,7 @@ bool KeyFor(const NativeAbility& a,Operation operation,unsigned* key) noexcept {
     if(!key)return false;
     if(operation==Operation::bossNamed) {
         if(!a.action)return false;
-        for(unsigned i=0;i<5;++i)if(!std::wcscmp(a.action,kBossNames[i])){*key=i;return true;}
-        return false;
+        return boss_moves::NamedKey(a.action,key);
     }
     *key=static_cast<unsigned>(a.argument);return true;
 }
@@ -202,8 +205,8 @@ bool Row(const NativeLease& l,Operation operation,unsigned key,Definition* out) 
         if(!std::isfinite(rate) || rate<=0 || rate>=1000000.0)return false;out->scale=static_cast<float>(rate);
         out->digest=HashBytes(out->digest,&out->scale,4);
     } else if((operation==Operation::bossNamed || operation==Operation::bossHand) && l.profile->vtableRva==0x17BEC68 && Readable(l.object,0x26CC,true)) {
-        if(operation==Operation::bossNamed) {if(key>=5 || !BossState(l,kBossNames[key]))return false;out->name=kBossNames[key];}
-        else {if(key<4 || key>6)return false;out->mode=At<unsigned>(l.object,0x26C8);if(out->mode>0x7FFFFFFEu)return false;}
+        if(operation==Operation::bossNamed) {if(key>=kBossNamedCount || !BossState(l,kBossNames[key]))return false;out->name=kBossNames[key];}
+        else {if(!boss_moves::HandCode(key))return false;out->mode=At<unsigned>(l.object,0x26C8);if(out->mode>0x7FFFFFFEu)return false;}
         out->digest=Number(Number(1469598103934665603ull,static_cast<unsigned>(operation),1),key,4);
         if(operation==Operation::bossNamed)return NameHash(out->name,&out->digest) && out->digest;
         return out->digest!=0;
@@ -227,7 +230,8 @@ bool PoolReady(const NativeLease& l,Operation operation) noexcept {
     }
     return true;
 }
-unsigned HandCallback(unsigned key) noexcept {return key==4 ? 0x447DA0u : key==5 ? 0x447F00u : 0x447FD0u;}
+// The hand muzzles' states of ObjectAction 4 / 5 (444CAA / 444CDA). Its spear (6, 447FD0) is no move of E516.
+unsigned HandCallback(unsigned key) noexcept {return key==4 ? 0x447DA0u : key==5 ? 0x447F00u : 0u;}
 bool RoleLease(void* actor,unsigned vtable,NativeLease* out=nullptr) noexcept {
     bool authority=false;if(!actor || !Readable(actor,0x38) || !NativeActionRole(actor,&authority))return false;
     const auto* table=At<const void* const*>(actor,0);
@@ -418,8 +422,8 @@ bool Valid(const Event& e) noexcept {
     if(!e.serial || !e.input || !e.definition || !Scale(e.scale))return false;
     if(e.operation==Operation::monster)return e.key<kMaxRows && !e.mode && !e.flags;
     if(e.operation==Operation::merman)return e.key<kMaxRows && e.mode<=4 && e.flags<=1;
-    if(e.operation==Operation::bossNamed)return e.key<5 && !e.mode && !e.flags && e.scale==1;
-    if(e.operation==Operation::bossHand)return e.key>=4 && e.key<=6 && e.mode<=0x7FFFFFFEu && !e.flags && e.scale==1;
+    if(e.operation==Operation::bossNamed)return e.key<kBossNamedCount && !e.mode && !e.flags && e.scale==1;
+    if(e.operation==Operation::bossHand)return boss_moves::HandCode(e.key) && e.mode<=0x7FFFFFFEu && !e.flags && e.scale==1;
     return e.operation==Operation::carrier && e.key==64 && !e.mode && !e.flags && e.scale==1;
 }
 void Write(unsigned char*& p,const Event& e) noexcept {

@@ -176,6 +176,70 @@ void WaveChecks() {
     const WaveSpec& g=kWaves[kGreatWave];
     Check(g.at==kLastRing && g.reach>kRadius+kRingBlast,"the great shock wave goes with the last ring, out past the area's edge");
 }
+// The bursts (BurstsAt): the one list of every blast the show puts on the ground, as seen and as dealt (the user,
+// 2026-10-25: 「天罚的伤害和实际落点是不是不一样啊，感觉外面的闪电爆炸没伤害」).
+void BurstChecks() {
+    bool bolts=true,rings=true,waves=true,dealt=true,fits=true,replay=true;
+    int most=0,seen=0;
+    for(std::uint64_t seed=1;seed<=8;++seed)
+        for(int f=0;f<kAfterEnd;++f) {
+            Burst b[kMaxBurstsAFrame+16],again[kMaxBurstsAFrame+16];
+            const int n=BurstsAt(seed,f,b,kMaxBurstsAFrame+16);
+            fits=fits && n<=kMaxBurstsAFrame;
+            if(n>most)most=n;
+            seen+=n;
+            replay=replay && BurstsAt(seed,f,again,kMaxBurstsAFrame+16)==n;
+            for(int k=0;k<n;++k) {
+                // every burst deals damage over exactly the radius its round's charge bursts with
+                dealt=dealt && b[k].share>0.0f && b[k].radius==BurstRadius(b[k].kind) && b[k].radius>0.0f;
+                replay=replay && again[k].at[0]==b[k].at[0] && again[k].at[1]==b[k].at[1];
+            }
+            // the storm's bursts are its bolts' landings, one for one, at the same point
+            Bolt bolt[kMaxBoltsAFrame];
+            const int nb=PhaseAt(f)==Phase::storm ? BoltsAt(seed,f-kChargeEnd,bolt) : 0;
+            int sparks=0;
+            for(int k=0;k<n;++k)if(b[k].kind==BurstKind::spark) {
+                bolts=bolts && sparks<nb && b[k].at[0]==bolt[sparks].at[0] && b[k].at[1]==bolt[sparks].at[1];
+                ++sparks;
+            }
+            bolts=bolts && sparks==nb;
+            // a ring's bursts are its blasts round it
+            const int ring=PhaseAt(f)==Phase::cannon ? RingAt(f-kStormEnd) : -1;
+            int blasts=0;
+            for(int k=0;k<n;++k)if(b[k].kind==BurstKind::blast) {
+                ++blasts;
+                rings=rings && ring>=0 && std::fabs(std::hypot(b[k].at[0],b[k].at[1])-RingOf(ring,seed).radius)<1e-2f;
+            }
+            rings=rings && blasts==(ring>=0 ? RingOf(ring,seed).count : 0);
+            // a wave's bursts are on a ground wave's front, never past kWaveBurstReach
+            for(int k=0;k<n;++k)if(b[k].kind==BurstKind::wave) {
+                const float r=std::hypot(b[k].at[0],b[k].at[1]);
+                bool on=false;
+                for(int w=0;w<kWaveCount;++w) {
+                    const WavePose p=WaveAt(w,f);
+                    on=on || (p.shown && !kWaves[w].sky && std::fabs(p.radius-r)<1e-2f);
+                }
+                waves=waves && on && r<=kWaveBurstReach+1e-3f;
+            }
+        }
+    // each ground wave's front bursts on every kWaveEvery-th frame until kWaveBurstReach: no front seen without its bursts
+    bool fronts=true;
+    for(int w=0;w<kWaveCount;++w) {
+        if(kWaves[w].sky)continue;
+        for(int f=kWaves[w].at;f<kWaves[w].at+WaveFrames(w);f+=kWaveEvery) {
+            float r;
+            fronts=fronts && (WaveBursts(w,f,&r) || WaveAt(w,f).radius>kWaveBurstReach);
+        }
+    }
+    char line[200];
+    std::snprintf(line,sizeof(line),"every burst fits the frame's list (at most %d a frame, %d over 8 shows)",most,seen);
+    Check(fits,line);
+    Check(dealt,"every burst seen deals damage over its round's own blast radius");
+    Check(bolts,"the storm's bursts are its bolts' landings, one for one, at the same points");
+    Check(rings,"the cannon's bursts are each ring's blasts, round its radius");
+    Check(waves && fronts,"the ground shock waves burst along their fronts out to kWaveBurstReach, and only there");
+    Check(replay,"one seed, the same bursts on every machine");
+}
 void CircleChecks() {
     bool inCharge=true,gone=true,bounded=true,smooth=true,shownWhole=true;
     for(int i=0;i<kCircleCount;++i) {
@@ -210,6 +274,7 @@ int main() {
     AimChecks();
     GatherChecks();
     WaveChecks();
+    BurstChecks();
     CircleChecks();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n",failures);
     return failures ? 1 : 0;

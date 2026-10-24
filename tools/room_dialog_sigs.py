@@ -49,13 +49,26 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0x12D85B0, 0x10, 'operator new'),
     (0x83E4F0, 0x10, 'weak_ptr::lock (out, weak)'),
     (0x810D10, 0x1E, 'HUiDialogBox::OnUpdate(this, ctx) (vtable 0x17F7260 slot 1): chained, it closes ours on request'),
+    # The description dialog (HUiDescriptionDialog, 2026-10-25): the focused button's text beside the list.
+    (0x80AF5F, 0x17, 'HUiDescriptionDialog ctor: this+0x7E0 a copy (0x80E190) of the InitParam function at +0x170'),
+    (0x80E700, 0x2A, 'the focus moved: index = button +0x110; [this+0x818]->_Do_call(out wstring, &index) (vtable +0x10)'),
+    (0x80E787, 0x17, '...the text it returned SetText (0x863690) into the description field'),
+    (0x8BF4E3, 0x07, 'the stock builder 0x8BEE40: its InitParam +0x170 the function (lambda 0x1806B20)'),
+    (0x8BF830, 0x25, 'that lambda _Do_call(this, std::wstring* out, const int* index): out = its vector[index]'),
+    (0x8C33E0, 0x68, 'InitParam@HUiDescriptionDialog dtor: the function +0x170, the items, the texts, the base'),
+    (0x8C3620, 0x34, 'its scalar deleting dtor (vtable 0x1806FD8 slot 0): 0x1C0 bytes'),
+    (0x8088C0, 0x31, 'HUiDescriptionDialog::OnUpdate (vtable 0x17F6F70 slot 1): the focus tracker, then jmp 0x810D10'),
     # Data.
     (0x17F7190, 0x3A, 'L"APP:/UI/LYT_HUIDIALOGBOX.SGO"'),
+    (0x17F7210, 0x42, 'L"APP:/UI/LYT_HUIDESCDIALOGBOX.SGO"'),
     (0x1765B30, 0x10, 'the 16 bytes the builder puts at +0x130'),
 )
 LAYOUT_NAME_POINTER, LAYOUT_NAME = 0x1F77810, 0x17F7190
 PARAM_VTABLE, LAMBDA_VTABLE = 0x17621F8, 0x1805CF0
 DIALOG_VTABLE, DIALOG_UPDATE = 0x17F7260, 0x810D10
+DESC_LAYOUT_NAME_POINTER, DESC_LAYOUT_NAME = 0x1F77808, 0x17F7210
+DESC_PARAM_VTABLE, DESC_PARAM_DELETE = 0x1806FD8, 0x8C3620
+DESC_DIALOG_VTABLE, DESC_DIALOG_UPDATE = 0x17F6F70, 0x8088C0
 
 
 def render(img: bytes) -> str:

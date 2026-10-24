@@ -23,7 +23,8 @@ constexpr NativeProfile fixtureProfiles[]={
     {"EDF6_Berserker_TypeA",0,0,0,11,79,0x31,Kind::walking,7,4},
     {"EDF6_Berserker_TypeGrapple",0,0,0,12,79,0x31,Kind::walking,7,4},
     {"Deiroi",0,0,0,13,45,0x30,Kind::deiroi,7,4},
-    {"EDF6_TimeShip",0x17B93C0,0x3EE300,0x3EDE70,14,55,0xB,Kind::flying,15,4}
+    {"EDF6_TimeShip",0x17B93C0,0x3EE300,0x3EDE70,14,55,0xB,Kind::flying,15,4},
+    {"Humanoid_BigGreyBoss",0x17BEC68,0x444E90,0x46EFF0,15,86,0x1F9,Kind::humanoid,7,5}
 };
 const NativeProfile* Profiles(std::size_t* count) noexcept { if(count)*count=std::size(fixtureProfiles);return fixtureProfiles; }
 unsigned fixtureHumanoidGuns=0;bool fixtureHumanoidMissing=false,fixtureHumanoidRosterValid=true;
@@ -204,6 +205,30 @@ int main() {
     for(unsigned i=0;i<128;++i)Put<const wchar_t*>(table,static_cast<std::size_t>(i)*0x38,L"attack_spark");
     NativeAbility complete[160]{};Check(Abilities(lease,complete,160)==130,"synthetic complete 128-action table is never truncated to 96");
     Check(ExecuteAbility(lease,complete[129],10,49) && lastArgument==127 && nativeCalls==3,"command after index96 is validated against the entire count-query-sized catalogue");
+    {   // 银之人 (E516): its own five attacks and its locomotion, nothing of an armed soldier, no dead moves.
+        for(const auto& p:kExtraPrints)std::memcpy(image+p.at,p.bytes,sizeof(p.bytes));
+        constexpr unsigned char stateFound[]={0x31,0xC0,0xC3};   // after the print's trailing REX.W: xor rax,rax; ret -> CAS state index 0
+        std::memcpy(image+0x11664F0+16,stateFound,sizeof(stateFound));FlushInstructionCache(GetCurrentProcess(),image,0x1200000);
+        lease=Lease(14);alignas(16) static unsigned char model[0x400]{},parts[16]{};
+        Put<const void*>(object,0xA70,model);Put<int>(object,0xEB0,1);Put<const void*>(object,0x17E8,parts);
+        const unsigned count=Abilities(lease,list,96);unsigned pads=0,named=0,hands=0;bool soldier=false,dead=false;
+        for(unsigned i=0;i<count;++i) {
+            const auto& a=list[i];
+            if(a.kind==AbilityKind::pad){++pads;soldier=soldier || (a.held&~static_cast<unsigned>((1u<<0)|(1u<<6)|(1u<<7)))!=0 || (a.pressed&((1u<<3)|(1u<<4)|(1u<<5)|(1u<<8)))!=0;}
+            else if(a.kind==AbilityKind::namedAction){++named;dead=dead || !std::wcscmp(a.action,L"attack_rollingLazer") || !std::wcscmp(a.action,L"attack_genocide");}
+            else if(a.kind==AbilityKind::objectAction){++hands;dead=dead || (a.argument!=4 && a.argument!=5);}
+            else soldier=true;
+            soldier=soldier || !std::wcscmp(a.name,L"举枪瞄准") || !std::wcscmp(a.name,L"装备武器齐射") || !std::wcscmp(a.name,L"进入／退出掩体") || !std::wcscmp(a.name,L"蹲伏");
+        }
+        Check(count==8 && pads==3 && named==3 && hands==2,"E516 lists jump / roll / its own dodge and its five original attacks");
+        Check(!soldier,"E516 has no soldier aim, volley, cover or crouch");
+        Check(!dead,"E516 never lists the rolling laser (missing centre-cannon part), genocide or spear");
+        const auto calls=nativeCalls;
+        for(const auto& forgedBoss:{NativeAbility{"boss_rolling_laser",L"回旋激光",0,0,AbilityKind::namedAction,L"attack_rollingLazer",0},
+                                    NativeAbility{"boss_genocide",L"灭绝光炮",0,0,AbilityKind::namedAction,L"attack_genocide",0},
+                                    NativeAbility{"boss_hand_spear",L"光枪齐射",0,0,AbilityKind::objectAction,nullptr,6}})
+            Check(!ExecuteAbility(lease,forgedBoss,11,50) && nativeCalls==calls,"a dead E516 move cannot reach the native named / object action entry");
+    }
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     NativeProfile fake=*lease.profile;lease.profile=&fake;Check(Abilities(lease,list,96)==0,"a copied profile cannot impersonate an admitted native profile");
     std::printf("enemy control catalogue: %d checks, %d failures\n",checks,failed);return failed ? 1 : 0;

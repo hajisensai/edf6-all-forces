@@ -1,4 +1,5 @@
 #include "enemy_control_catalog.h"
+#include "enemy_control_boss_moves.h"
 #include "enemy_control_deiroi.h"
 #include "enemy_control_humanoid.h"
 #include "enemy_control_timeship.h"
@@ -137,16 +138,9 @@ const wchar_t* AttackName(const wchar_t* native) noexcept {
     return native;
 }
 constexpr NativeAbility kCarrier{"carrier_hold_drop",L"保持开舱投送",0,0,AbilityKind::objectAction,nullptr,64};
-constexpr NativeAbility kBoss[]={
-    {"boss_hand_beam",L"手部光束",0,0,AbilityKind::objectAction,nullptr,4},
-    {"boss_hand_homing",L"追踪光束",0,0,AbilityKind::objectAction,nullptr,5},
-    {"boss_hand_spear",L"光枪齐射",0,0,AbilityKind::objectAction,nullptr,6},
-    {"boss_rolling_laser",L"回旋激光",0,0,AbilityKind::namedAction,L"attack_rollingLazer",0},
-    {"boss_bathing_kick",L"飞踢",0,0,AbilityKind::namedAction,L"attack_bathingKick",0},
-    {"boss_dive",L"俯冲攻击",0,0,AbilityKind::namedAction,L"attack_dive",0},
-    {"boss_genocide",L"灭绝光炮",0,0,AbilityKind::namedAction,L"attack_genocide",0},
-    {"boss_meteor",L"陨石攻击",0,0,AbilityKind::namedAction,L"attack_meteorite",0}
-};
+// E516's own moves only (enemy_control_boss_moves.h has the evidence). Not its stock-AI-dead
+// bodies: 回旋激光 drives a 中心砲台 part E516 does not have (crash), 灭绝光炮 / 光枪齐射 it never uses.
+constexpr const auto& kBoss=boss_moves::kAbilities;
 struct Print { std::uint32_t at;unsigned char bytes[16]; };
 constexpr Print kExtraPrints[]={
     {0x475BE0,{0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x57,0x48,0x83,0xEC,0x30,0x80,0xB9,0xE8,0x02}},
@@ -263,6 +257,9 @@ bool PadAllowed(const NativeLease& lease,unsigned i) noexcept {
     // entry (including King variants' shorter tables).
     if(lease.profile->kind==Kind::monster)return i==4 || i==8;
     if(Same(lease.profile->name,"EDF6_Merman"))return false;
+    // The base Humanoid mask is an armed soldier's; E516 keeps only its locomotion (no aim / volley /
+    // cover / crouch: it has no weapon and its AI never issues them).
+    if(IsBoss(lease))return boss_moves::PadAllowed(i);
     if(Same(lease.profile->name,"Nephila"))return i==4;
     if(Same(lease.profile->name,"EDF6_TimeShip"))return false; // canonical commands replace local-camera pad rays
     const char* family=lease.profile->name;

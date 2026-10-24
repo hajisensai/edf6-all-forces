@@ -80,9 +80,12 @@ void PutBack(const Saved& s,std::size_t farClip,bool camera) noexcept {
     if(!s.at || !Readable(s.at,farClip+12,true))return;
     const ClipLease* const lease=LeaseFor(s.at,camera);
     if(!lease)return;
+    // The near plane goes back to the lease's native baseline, not the map's snapshot: the snapshot is whatever the
+    // camera held when the map opened, first person's .03 among them. First person re-applies its own every camera
+    // step while it is still on; one that left while the map was open must not have its value resurrected.
     for(int i=0;i<(camera ? 4 : 3);++i)
         if(i!=1 && lease->wrote[i] && At<float>(s.at,Field(farClip,i))==lease->last[i])
-            WriteClip(s.at,farClip,i,s.values[i],camera);
+            WriteClip(s.at,farClip,i,i==3 ? lease->baseline[i] : s.values[i],camera);
 }
 void RestoreMap() noexcept {
     if(!mapClip.on)return;
@@ -110,6 +113,13 @@ void ViewWriteNear(void* camera,float value) noexcept {
     if(!cam || !Readable(cam+kCamNear,4,true))return;
     // Callers gate new overrides on readiness, but may return a lease after readiness was revoked.
     WriteClip(cam,kCamFar,3,value,true);
+}
+void ViewReturnNear(void* camera,float written) noexcept {
+    auto cam=static_cast<unsigned char*>(camera);
+    if(!cam || !Readable(cam+kCamNear,4,true) || At<float>(cam,kCamNear)!=written)return;
+    ClipLease* const lease=LeaseFor(cam,true);
+    if(!lease || !lease->wrote[3] || lease->last[3]!=written)return;
+    WriteClip(cam,kCamFar,3,lease->baseline[3],true);
 }
 void ViewMapClip(bool on,float farClip,float nearClip) noexcept {
     if(!ViewDepthReady()){RestoreAllClips();return;}

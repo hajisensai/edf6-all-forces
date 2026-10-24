@@ -246,18 +246,20 @@ constexpr SupportLook CrewLookOf(const CrewColour& own,const CrewColour& fallbac
 // (a jet fires its missiles, rockets and bombs itself, src/jet_combat.cpp; a tank's rounds and its gun-launched missile
 // ride its main gun's control, src/payload.cpp).
 enum class LoadRole : std::uint8_t { air, ground, bomb, rocket, gun };
-struct LoadStore { std::uint8_t code; const wchar_t* name; const wchar_t* label; LoadRole role; bool jet,tank; };
+// `massKg`: what one round weighs, the very number the jets' flight model weighs it by (pylib/vcobjects.py STORES mass,
+// src/stores.inc kStores; tests/support_loadout_ini_test.py keeps the three equal). The tank's rounds have none there.
+struct LoadStore { std::uint8_t code; const wchar_t* name; const wchar_t* label; LoadRole role; bool jet,tank; int massKg; };
 inline constexpr LoadStore kLoadStores[]={
-    {1,L"AAM_S",L"AIM-9X 近程空空导弹",LoadRole::air,true,false},
-    {2,L"AAM_M",L"AIM-120 中程空空导弹",LoadRole::air,true,false},
-    {3,L"AAM_L",L"AIM-54 远程空空导弹",LoadRole::air,true,false},
-    {4,L"AGM",L"AGM-65 空地导弹",LoadRole::ground,true,false},
-    {5,L"AGM_L",L"AGM-114 轻型空地导弹",LoadRole::ground,true,false},
-    {6,L"MK82",L"Mk 82 炸弹",LoadRole::bomb,true,false},
-    {7,L"RKT",L"Hydra 70 火箭巢",LoadRole::rocket,true,false},
-    {8,L"AP",L"APFSDS 穿甲弹",LoadRole::gun,false,true},
-    {9,L"HE",L"HE 榴弹",LoadRole::gun,false,true},
-    {10,L"GLM",L"LAHAT 炮射导弹",LoadRole::ground,false,true},
+    {1,L"AAM_S",L"AIM-9X 近程空空导弹",LoadRole::air,true,false,85},
+    {2,L"AAM_M",L"AIM-120 中程空空导弹",LoadRole::air,true,false,152},
+    {3,L"AAM_L",L"AIM-54 远程空空导弹",LoadRole::air,true,false,450},
+    {4,L"AGM",L"AGM-65 空地导弹",LoadRole::ground,true,false,300},
+    {5,L"AGM_L",L"AGM-114 轻型空地导弹",LoadRole::ground,true,false,50},
+    {6,L"MK82",L"Mk 82 炸弹",LoadRole::bomb,true,false,230},
+    {7,L"RKT",L"Hydra 70 火箭巢",LoadRole::rocket,true,false,32},
+    {8,L"AP",L"APFSDS 穿甲弹",LoadRole::gun,false,true,0},
+    {9,L"HE",L"HE 榴弹",LoadRole::gun,false,true,0},
+    {10,L"GLM",L"LAHAT 炮射导弹",LoadRole::ground,false,true,0},
 };
 inline constexpr int kLoadStoreCount=static_cast<int>(sizeof(kLoadStores)/sizeof(kLoadStores[0]));
 // The round counts a pylon may hold, a 4-bit code each (the store file is EDF6VC_<NAME>_<count>.SGO).
@@ -275,16 +277,37 @@ constexpr const LoadStore* LoadStoreOf(int code) noexcept {
 // V505_TANK_MISSION, src/support_spawn.h; the plugin builds its holders past the stock one, src/stores.cpp) and the
 // plugin's jets (tools/make_jets.py: the guns L / R, the stores, the fuel tank fourth). The helicopters are not offered:
 // their NPC pilot fires only the stock holders (src/heli.cpp kStoreHolder), pylons past those would never fire.
-enum class VehicleBody : std::uint8_t { none, tank, strike, fighter, interceptor, multirole };
+// The last five (2026-10-25, the user: "换载具要能换自己召唤的啊，不只是npc的载具"): the jets a player summons
+// with a vehicle request (tools/calls.py: the player fighter / strike jet, the requested twins of the fighter, the
+// interceptor and the multirole jet), the twin the request brings their base (player_vehicle_logic.h).
+enum class VehicleBody : std::uint8_t { none, tank, strike, fighter, interceptor, multirole,
+                                        pfighter, pstrike, rfighter, rinterceptor, rmultirole };
+inline constexpr int kVehicleBodyLast=static_cast<int>(VehicleBody::rmultirole);
 // `most` pylons: a tank's stock gun and 4 (src/payload.h kMostPayload 8 a seat), a jet's 5 (its guns L / R, the fuel tank
 // and 5 make 8 holders: src/jet_combat.cpp ReadArms reads at most 8, src/stores.h kMostStores 7 stores).
-struct VehicleBodyRow { VehicleBody body; const wchar_t* name; const wchar_t* base; int most; bool tank; };
+// `payloadKg`: the most its pylons may weigh (the stores' massKg x rounds), 0 = not weighed (2026-10-25, the user: "支援
+// 战前配置是合理的改，不是完全随心所欲"; before, five pylons of 40 AIM-54 each, 90 t, were accepted). A jet's is
+// kPayloadSharePercent of its clean mass, the mass its flight model weighs the stores against (pylib/vcobjects.py JET_MASSES,
+// src/stores.inc kJetMasses: strike 7001 22 t, fighter 7002 16 t, interceptor 7003 20 t, multirole 7004 18 t): a real
+// multirole fighter's external stores in a combat configuration (an F-16C's twelve Mk 82, 2.8 t, sit well inside its
+// 6.4 t). Every stock loadout fits (the strike jet's 4566 kg the heaviest); all bombs, all missiles or guns alone stay
+// possible (the user, 2026-10-09: "我飞机可以全带炸弹，或者全带导弹，或者带机炮"). tests/support_loadout_ini_test.py derives
+// the four numbers from vcobjects. The tank is not weighed: its rounds carry no mass in kStores; its limits stay its
+// 4 pylons of AP / HE / GLM.
+inline constexpr int kPayloadSharePercent=40;   // 40 % of the clean mass
+struct VehicleBodyRow { VehicleBody body; const wchar_t* name; const wchar_t* base; int most; bool tank; int payloadKg; };
 inline constexpr VehicleBodyRow kVehicleBodies[]={
-    {VehicleBody::tank,L"TANK",L"V505_TANK_MISSION.SGO",4,true},
-    {VehicleBody::strike,L"STRIKE",L"EDF6VC_JET_STRIKE.SGO",5,false},
-    {VehicleBody::fighter,L"FIGHTER",L"EDF6VC_JET_FIGHTER.SGO",5,false},
-    {VehicleBody::interceptor,L"INTERCEPTOR",L"EDF6VC_JET_INTERCEPTOR.SGO",5,false},
-    {VehicleBody::multirole,L"MULTIROLE",L"EDF6VC_JET_MULTIROLE.SGO",5,false},
+    {VehicleBody::tank,L"TANK",L"V505_TANK_MISSION.SGO",4,true,0},
+    {VehicleBody::strike,L"STRIKE",L"EDF6VC_JET_STRIKE.SGO",5,false,22000*kPayloadSharePercent/100},
+    {VehicleBody::fighter,L"FIGHTER",L"EDF6VC_JET_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
+    {VehicleBody::interceptor,L"INTERCEPTOR",L"EDF6VC_JET_INTERCEPTOR.SGO",5,false,20000*kPayloadSharePercent/100},
+    {VehicleBody::multirole,L"MULTIROLE",L"EDF6VC_JET_MULTIROLE.SGO",5,false,18000*kPayloadSharePercent/100},
+    // A player's own (their clean masses: pylib/vcobjects.py JET_MASSES of marks 7201 / 7202 / 7002 / 7003 / 7004).
+    {VehicleBody::pfighter,L"PFIGHTER",L"EDF6VC_PJET_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
+    {VehicleBody::pstrike,L"PSTRIKE",L"EDF6VC_PJET_STRIKE.SGO",5,false,22000*kPayloadSharePercent/100},
+    {VehicleBody::rfighter,L"RFIGHTER",L"EDF6VC_FLY_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
+    {VehicleBody::rinterceptor,L"RINTERCEPTOR",L"EDF6VC_FLY_INTERCEPTOR.SGO",5,false,20000*kPayloadSharePercent/100},
+    {VehicleBody::rmultirole,L"RMULTIROLE",L"EDF6VC_FLY_MULTIROLE.SGO",5,false,18000*kPayloadSharePercent/100},
 };
 constexpr const VehicleBodyRow* VehicleBodyOf(VehicleBody b) noexcept {
     for(const auto& r:kVehicleBodies)if(r.body==b)return &r;
@@ -298,7 +321,35 @@ inline constexpr VehicleKey kVehicleKeys[]={
     {L"FIGHTER",VehicleBody::fighter},{L"FIGHTER_F",VehicleBody::fighter},
     {L"INTERCEPTOR",VehicleBody::interceptor},{L"INTERCEPTOR_F",VehicleBody::interceptor},
     {L"MULTIROLE",VehicleBody::multirole},{L"MULTIROLE_F",VehicleBody::multirole},
+    // A player's own summons (kPlayerVehicles): SupportVehicle_OWN_<...>, the same grammar and weight.
+    {L"OWN_PFIGHTER",VehicleBody::pfighter},{L"OWN_PSTRIKE",VehicleBody::pstrike},{L"OWN_FIGHTER",VehicleBody::rfighter},
+    {L"OWN_INTERCEPTOR",VehicleBody::rinterceptor},{L"OWN_MULTIROLE",VehicleBody::rmultirole},
 };
+// The vehicles a player summons with a vehicle request and may load before the battle: the key of its
+// SupportVehicle_<KEY>, its body, the twin the request's container makes (its CreateObject path's file name: tools/calls.py
+// `vehicle`, written by tools/make_jets.py). Not support catalog entries: never in a host's support list.
+struct PlayerVehicle { const wchar_t* key; VehicleBody body; const wchar_t* twin; };
+inline constexpr PlayerVehicle kPlayerVehicles[]={
+    {L"OWN_PFIGHTER",VehicleBody::pfighter,L"EDF6VC_PJET_FIGHTER.SGO"},
+    {L"OWN_PSTRIKE",VehicleBody::pstrike,L"EDF6VC_PJET_STRIKE.SGO"},
+    {L"OWN_FIGHTER",VehicleBody::rfighter,L"EDF6VC_FLY_FIGHTER.SGO"},
+    {L"OWN_INTERCEPTOR",VehicleBody::rinterceptor,L"EDF6VC_FLY_INTERCEPTOR.SGO"},
+    {L"OWN_MULTIROLE",VehicleBody::rmultirole,L"EDF6VC_FLY_MULTIROLE.SGO"},
+};
+inline constexpr int kPlayerVehicleCount=static_cast<int>(sizeof(kPlayerVehicles)/sizeof(kPlayerVehicles[0]));
+// The player vehicle `key` names, or -1.
+inline int PlayerVehicleOfKey(const wchar_t* key) noexcept {
+    for(int i=0;key && i<kPlayerVehicleCount;++i)if(!_wcsicmp(kPlayerVehicles[i].key,key))return i;
+    return -1;
+}
+inline int PlayerVehicleOfBody(VehicleBody body) noexcept {
+    for(int i=0;i<kPlayerVehicleCount;++i)if(kPlayerVehicles[i].body==body)return i;
+    return -1;
+}
+constexpr bool IsPlayerBody(VehicleBody b) noexcept {
+    return b==VehicleBody::pfighter || b==VehicleBody::pstrike || b==VehicleBody::rfighter || b==VehicleBody::rinterceptor ||
+           b==VehicleBody::rmultirole;
+}
 inline VehicleBody VehicleBodyOfKey(const wchar_t* key) noexcept {
     if(!key)return VehicleBody::none;
     for(const auto& k:kVehicleKeys)if(!_wcsicmp(k.key,key))return k.body;
@@ -314,6 +365,23 @@ struct VehicleLoadout {
     std::uint8_t rounds[kPylonsMost]{};   // kRoundCounts code
     constexpr bool On() const noexcept { return body!=VehicleBody::none; }
 };
+// What `l`'s pylons weigh (kg): each store's massKg x its rounds.
+constexpr int LoadoutMassKg(const VehicleLoadout& l) noexcept {
+    int kg=0;
+    for(int i=0;i<l.count && i<kPylonsMost;++i)
+        if(const LoadStore* s=LoadStoreOf(l.store[i]))kg+=s->massKg*kRoundCounts[l.rounds[i]&0xF];
+    return kg;
+}
+// The most `body`'s pylons may weigh (kg); 0: not weighed (the tank).
+constexpr int PayloadBudgetKg(VehicleBody body) noexcept {
+    const VehicleBodyRow* row=VehicleBodyOf(body);
+    return row ? row->payloadKg : 0;
+}
+// Whether `l` is within its body's budget (a body not weighed: always).
+constexpr bool WithinPayload(const VehicleLoadout& l) noexcept {
+    const int budget=PayloadBudgetKg(l.body);
+    return budget<=0 || LoadoutMassKg(l)<=budget;
+}
 // `text` (one SupportVehicle_<KEY> value) for `body`. Empty: true, no loadout. False: *out none, `why` says why.
 inline bool ParseVehicleLoadout(const wchar_t* text,VehicleBody body,VehicleLoadout* out,wchar_t* why,std::size_t whyCapacity) noexcept {
     using namespace loadout_detail;
@@ -348,6 +416,10 @@ inline bool ParseVehicleLoadout(const wchar_t* text,VehicleBody body,VehicleLoad
     });
     if(parsed && tokens && row && row->tank && !gun){parsed=false;Say(why,whyCapacity,L"坦克的第一项是主炮 HE 或 AP");}
     if(parsed && tokens)l.body=body;
+    if(parsed && tokens && !WithinPayload(l)) {
+        parsed=false;
+        if(why && whyCapacity)std::swprintf(why,whyCapacity,L"挂载共重 %d kg，超过该机可挂的 %d kg",LoadoutMassKg(l),PayloadBudgetKg(body));
+    }
     if(out)*out=parsed ? l : VehicleLoadout{};
     return parsed;
 }
@@ -402,6 +474,7 @@ inline bool LoadoutOfVariant(std::uint64_t v,VehicleBody body,VehicleLoadout* ou
         if(!s || !(row->tank ? s->tank : s->jet))return false;
         l.store[i]=byte&0xF;l.rounds[i]=byte>>4;
     }
+    if(!WithinPayload(l))return false;   // a peer's / a host list's loadout over its body's weight: not a loadout
     if(out)*out=l;
     return true;
 }

@@ -80,18 +80,26 @@ inline Rig High(float height,float back,float pitchDeg) noexcept {
 
 constexpr float kPitchMost=80.0f*kPi/180.0f,kViewMost=85.0f*kPi/180.0f;
 
-// The high view's placement (the user, 2026-10-23: "俯瞰视角太小了，而且俯瞰视角会随着炮塔上下摇晃。需要改成俯瞰视角是以车辆
-// 为中心的，不会因为炮塔摇动而动视角"): the eye looks down onto the vehicle's own origin from `height` m over it and `back`
-// m behind it along the world-held heading `yaw` (the camera keeps it; the turret and the hull turning do not turn it),
-// free look adding `orbitYaw` / `orbitPitch`. Before, the eye orbited the shot's predicted endpoint: every degree the
-// gun rocked moved that point tens of metres and the whole view with it. The shot's endpoint is still drawn (the HUD's
-// cross); the view no longer depends on it.
-inline void HullPlace(const float* origin,float yaw,float height,float back,float orbitYaw,float orbitPitch,
-                      float* eye,float* look) noexcept {
+// The high view's placement: the eye looks down onto `centre` from `height` m over it and `back` m behind it along the
+// heading `yaw`, free look adding `orbitYaw` / `orbitPitch`. What it is centred on is turretcam.cpp's (Camera): the
+// shot's landing (the user, 2026-10-25: "俯瞰视角目的是为了看落点位置的信息，不是把视角单单放在车更高的地方，改一下。现在完全
+// 没办法看瞄准位置"), the hull only while there is no landing to show.
+inline void OrbitPlace(const float* centre,float yaw,float height,float back,float orbitYaw,float orbitPitch,
+                       float* eye,float* look) noexcept {
     const float radius=std::fmax(1.0f,std::sqrt(height*height+back*back));
     const float pitch=vec::Clamp(std::atan2(height,back)+orbitPitch,15.0f*kPi/180.0f,kViewMost);
     float d[3];Dir(yaw+orbitYaw,-pitch,d);
-    for(int i=0;i<3;++i){look[i]=origin[i];eye[i]=origin[i]-d[i]*radius;}
+    for(int i=0;i<3;++i){look[i]=centre[i];eye[i]=centre[i]-d[i]*radius;}
+}
+
+// The high view's heading over the landing `at`: from the hull's origin toward it (the line the shot flies, seen from
+// behind the vehicle: the hull and the landing on one screen line, the landing ahead), `held` while the landing is under
+// kHeadingNear m of the hull across the ground (no direction to speak of there). The gun's elevation moves the landing
+// along this line, not across it: rocking up and down never turns the view; the turret's traverse turns it with the shot.
+constexpr float kHeadingNear=2.0f;
+inline float ShotHeading(const float* hull,const float* at,float held) noexcept {
+    const float d[3]={at[0]-hull[0],0.0f,at[2]-hull[2]};
+    return d[0]*d[0]+d[2]*d[2]>kHeadingNear*kHeadingNear ? YawOf(d) : held;
 }
 
 // The point the high view observes (the user, 2026-10-09: "这个俯瞰视角有问题，计算明显不对，稍微远就跳到了指数级别的
@@ -152,11 +160,28 @@ inline bool Foreign(int steers,const float* in,const float* stick,float tol) noe
     if(steers>=0)return steers!=0;
     return std::fabs(in[0]-stick[0])>tol || std::fabs(in[1]-stick[1])>tol;
 }
+// Where along the screen centre's line (from `eye`, unit `dir`) the turret's aim point is looked for (the user,
+// 2026-10-25: "坦克的炮管会360度动"). The line starts at the camera's requested eye, which sits `reach` m behind the rig's
+// point O (the look-at, over the turret's yaw axis) and is placed before the game's own camera collision (0xF6760) pulls
+// it in front of what stands between: a wall, a slope or a building behind the vehicle meets that stretch first. Taken
+// as the aim point, it lies behind the turret, so the turret's want is the view's heading + 180 deg; as the view turns
+// the hit slides along the obstacle a few metres from the yaw axis and the want sweeps round, the turret chasing it in
+// full circles. What the line can mean as a target is only what lies ahead of the turret: from O, or from the point of
+// the line nearest the turret's pivot (`pivot`, may be null) when that is farther. Never behind the eye (0 at least).
+inline float ViewRayStart(const float* eye,const float* dir,float reach,const float* pivot) noexcept {
+    float t=std::isfinite(reach) && reach>0.0f ? reach : 0.0f;
+    if(pivot) {
+        const float d[3]={pivot[0]-eye[0],pivot[1]-eye[1],pivot[2]-eye[2]};
+        const float along=vec::Dot(d,dir);
+        if(std::isfinite(along) && along>t)t=along;
+    }
+    return t;
+}
+
 // Whether the gun's round (its low arc) goes through the view point, else the gun's bore line: only for a real hit
-// (ground, a building, a target under the screen's centre) outside the lead-circle mode. The lead circle already solved
-// the arc (the bore line must pass through it: raising the gun again for the drop drops nothing twice), and a view
-// that hits nothing gives a made-up point kAimFar out whose range means nothing.
-inline bool BallisticAim(bool viewHit,bool leadCircle) noexcept { return viewHit && !leadCircle; }
+// (ground, a building, a target under the screen's centre); a view that hits nothing gives a made-up point kAimFar out
+// whose range means nothing.
+inline bool BallisticAim(bool viewHit) noexcept { return viewHit; }
 
 // Each rig parameter `a` eased toward `b` by `k` (0..1).
 inline void Ease(Rig& a,const Rig& b,float k) noexcept {

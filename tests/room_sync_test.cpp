@@ -142,6 +142,7 @@ const char* ValueOf(int member,const char* key) {
 // --- A fake machine: its Mods/OBJECT, pending list, generator and configuration ---
 struct Machine {
     std::vector<std::wstring> files,pending,config;
+    std::string ownPlayer;   // its EDF6X_VCPVEH value (player_vehicle_logic.h OwnValue); empty: none
     bool generatorInstalled=true,generatorFails=false;
     Gen state=Gen::idle;
     int starts=0;
@@ -175,10 +176,16 @@ void Configured(void* c,void (*each)(void*,const wchar_t*),void* set) noexcept {
     for(const auto& f:static_cast<Machine*>(c)->config)each(set,f.c_str());
 }
 void LogLine(void* c,const char* text) noexcept { static_cast<Machine*>(c)->log.push_back(text); }
+bool OwnPlayer(void* c,char* value,std::size_t capacity) noexcept {
+    const auto* m=static_cast<Machine*>(c);
+    if(m->ownPlayer.empty())return false;
+    std::snprintf(value,capacity,"%s",m->ownPlayer.c_str());
+    return true;
+}
 Env EnvOf(Machine& m) {
     Env e;
     e.context=&m;e.fileThere=FileThere;e.noteMissing=NoteMissing;e.startGeneration=StartGeneration;e.generation=Generation;
-    e.configured=Configured;e.log=LogLine;
+    e.configured=Configured;e.log=LogLine;e.ownPlayer=OwnPlayer;
     return e;
 }
 void Tick(Machine& m,int member,std::uint64_t now,const EDF6CoopMemberAttributeApi* api=&kFakeApi) {
@@ -494,7 +501,7 @@ void Rooms() {
     Expect(lobby.member[1].values.empty(),"the client's keys withdrawn");
     lobby.current=0;host.engine.Leave(&kFakeApi);
     Expect(lobby.member[0].values.empty(),"the host's keys withdrawn");
-    Expect(keysSeen.size()<=kListParts+2,"the list, readiness and pack marker fit Coop's 16-key limit");
+    Expect(keysSeen.size()<=kListParts+3,"the list, readiness, pack marker and player loadouts fit Coop's 16-key limit");
     Expect(lobby.refused==0,"Coop never refused a key or value");
 }
 
@@ -723,6 +730,52 @@ void NoCoop() {
     Tick(out,0,5000);
     Expect(lobby.member[0].values.empty(),"the room gone: its keys withdrawn");
 }
+// Every member's own player loadouts (EDF6X_VCPVEH, player_vehicle_logic.h): published by each, read and validated by
+// the others, their files generated like the host list's (the host too: they are not in its ini), kept for the mission.
+void PlayerLoadouts() {
+    ResetLobby(3);
+    static Machine host,client,third;host=Machine{};client=Machine{};third=Machine{};
+    VehicleLoadout own[kPlayerVehicleCount]{};
+    wchar_t why[160];
+    ParseVehicleLoadout(L"MK82:12,AAM_S:2",VehicleBody::pfighter,&own[0],why,160);
+    char value[playerveh::kValueMost+1];
+    Expect(playerveh::OwnValue(own,kPlayerVehicleCount,value,sizeof(value)),"the client's own value");
+    client.ownPlayer=value;
+    VariantRef mine;mine.vehicle=true;mine.sub=static_cast<std::uint8_t>(VehicleBody::pfighter);mine.bits=LoadoutVariant(own[0]);
+    const std::wstring file=Name(mine);
+    Expect(file.rfind(L"EDF6VC_LO_PFIGHTER_",0)==0,"its file: a loaded player fighter");
+    client.files={file};   // its own (its ini names it: its generator made it)
+    third.ownPlayer="1;6zzzz";   // junk from a member: ignored whole
+    std::uint64_t now=500000;
+    Tick(host,0,now);Tick(client,1,now+1);Tick(third,2,now+2);
+    Expect(ValueOf(1,playerveh::kKey) && std::string(ValueOf(1,playerveh::kKey))==value,"the client publishes its value");
+    Expect(!ValueOf(0,playerveh::kKey),"the host has none: publishes none");
+    Tick(host,0,now+1000);
+    Expect(host.engine.MemberPlayerVehicles().count==1 && host.engine.MemberPlayerVehicles().Has(mine),
+           "the host reads the client's loaded jet (the junk member's skipped)");
+    Expect(host.pending==std::vector<std::wstring>({file}) && host.starts==1,"the host notes the file and generates it (no ini of its own names it)");
+    Expect(ValueOf(0,kKeyHave) && std::strstr(ValueOf(0,kKeyHave),";0;r"),"its readiness for the host list is not changed by it");
+    bool logged=false;for(const auto& l:host.log)logged|=l.find("player loadouts do not read")!=std::string::npos;
+    Expect(logged,"the bad value is logged once");
+    Tick(client,1,now+1001);
+    Expect(client.pending.empty() && client.engine.MemberPlayerVehicles().count==0,"the client does not note its own");
+    host.Finish();
+    Tick(host,0,now+2000);
+    Expect(host.starts==1 && host.Has(file),"made, not generated again");
+    // Kept for the mission once the room is left; the key withdrawn.
+    lobby.current=1;client.engine.Leave(&kFakeApi);
+    Expect(!ValueOf(1,playerveh::kKey),"the client's value withdrawn when it leaves");
+    lobby.current=0;host.engine.Leave(&kFakeApi);
+    Expect(host.engine.MemberPlayerVehicles().count==1,"the host keeps the room's player loadouts for the mission");
+    // A member's loadout removed: withdrawn, the others stop listing it.
+    ResetLobby(2);
+    client.ownPlayer=value;
+    Tick(client,1,now+5000);Tick(host,0,now+5001);
+    Expect(host.engine.MemberPlayerVehicles().count==1,"listed again in a new room");
+    client.ownPlayer.clear();
+    Tick(client,1,now+7000);Tick(host,0,now+7001);
+    Expect(!ValueOf(1,playerveh::kKey) && host.engine.MemberPlayerVehicles().count==0,"none any more: withdrawn, no longer listed");
+}
 }  // namespace
 
 int main() {
@@ -737,6 +790,7 @@ int main() {
     Hostile();
     Migration();
     NoCoop();
+    PlayerLoadouts();
     std::printf("room_sync: %d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;
 }

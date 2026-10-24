@@ -317,6 +317,65 @@ inline WavePose WaveAt(int w,int frame) noexcept {
     return p;
 }
 
+// ---- the bursts: every blast the show puts on the ground, as seen and as dealt ----
+// The user, 2026-10-25: 「天罚的伤害和实际落点是不是不一样啊，感觉外面的闪电爆炸没伤害」. Before, each phase fired its damage
+// round and drew its explosion separately (the storm's spark, a ring's blast), and the ground shock waves threw up bursts
+// along their fronts out to 1.6 R with no damage at all: blasts seen outside the area the rounds covered. One list a frame now
+// (BurstsAt) is both: src/ultimate.cpp fires each one's damage round (the charge whose blast radius is the burst's: kSparkRadius
+// the spark SGO's, kRingBlast the blast SGO's, pylib/vcobjects.py ULT_*_RADIUS) at the burst's point and draws its look from
+// that same point and radius, and only when the round is there (a show whose caller is gone plays its effects out alone).
+// The bolts' landings are the storm's bursts (BoltsAt, the same numbers), the rings' blasts the cannon's, and every
+// kWaveEvery frames each ground shock wave's front kWaveBursts round its circle while it is within kWaveBurstReach.
+enum class BurstKind : unsigned char { spark, blast, wave };   // a bolt's landing, a ring's blast, a shock wave's front
+struct Burst { float at[2]; BurstKind kind; float radius,share; bool great; };   // great: the great shock wave's
+constexpr float kSparkRadius=40.0f;            // m: the spark SGO's blast (ULT_SPARK_RADIUS); a wave's bursts are sparks too
+constexpr float kBoltShare=0.25f,kSparkShare=0.25f,kBlastShare=1.0f,kBeamShare=0.03f,kCoreShare=0.03f;
+constexpr float kWaveShare=0.05f;              // a wave front's burst (未调: a front crosses a point in a few of them)
+constexpr int kWaveEvery=5,kWaveBursts=16;
+constexpr float kWaveBurstReach=1.6f*kRadius;  // m: how far out a ground wave's front bursts (its disc runs on, light only)
+constexpr int kMaxBurstsAFrame=64;
+inline float BurstRadius(BurstKind k) noexcept { return k==BurstKind::blast ? kRingBlast : kSparkRadius; }
+// Ground wave `w`'s front on show frame `frame`: whether it bursts then, and its radius.
+inline bool WaveBursts(int w,int frame,float* radius) noexcept {
+    const WaveSpec& s=kWaves[w];
+    const WavePose p=WaveAt(w,frame);
+    if(!p.shown || s.sky || (frame-s.at)%kWaveEvery || p.radius>kWaveBurstReach)return false;
+    *radius=p.radius;
+    return true;
+}
+// The bursts of show frame `frame` (at most `most`): how many. The same seed and frame give every machine the same.
+inline int BurstsAt(std::uint64_t seed,int frame,Burst* out,int most) noexcept {
+    int n=0;
+    const auto add=[&](float x,float z,BurstKind kind,float share,bool great){
+        if(n<most)out[n++]=Burst{{x,z},kind,BurstRadius(kind),share,great};
+    };
+    if(PhaseAt(frame)==Phase::storm) {
+        Bolt bolts[kMaxBoltsAFrame];
+        const int b=BoltsAt(seed,frame-kChargeEnd,bolts);
+        for(int k=0;k<b;++k)add(bolts[k].at[0],bolts[k].at[1],BurstKind::spark,kSparkShare,false);
+    }
+    if(PhaseAt(frame)==Phase::cannon) {
+        const int k=RingAt(frame-kStormEnd);
+        if(k>=0) {
+            const Ring r=RingOf(k,seed);
+            for(int i=0;i<r.count;++i) {
+                const float a=r.phase+2.0f*kPi*static_cast<float>(i)/r.count;
+                add(r.radius*std::cos(a),r.radius*std::sin(a),BurstKind::blast,kBlastShare,false);
+            }
+        }
+    }
+    for(int w=0;w<kWaveCount;++w) {
+        float radius;
+        if(!WaveBursts(w,frame,&radius))continue;
+        const int step=(frame-kWaves[w].at)/kWaveEvery;
+        for(int k=0;k<kWaveBursts;++k) {
+            const float a=2.0f*kPi*(static_cast<float>(k)+0.5f*static_cast<float>(step%2))/kWaveBursts;
+            add(radius*std::cos(a),radius*std::sin(a),BurstKind::wave,kWaveShare,w==kGreatWave);
+        }
+    }
+    return n;
+}
+
 // The after's fires: on after frame `frame`, whether one starts and where (an offset in the area).
 inline bool FireAt(std::uint64_t seed,int frame,float* at) noexcept {
     if(frame<0 || frame>=4*kFps || frame%4)return false;

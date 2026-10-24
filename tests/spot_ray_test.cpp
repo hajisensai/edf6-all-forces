@@ -28,6 +28,7 @@ bool SightZoomMounted(const void*) noexcept { return false; }
 bool HighCamOn(const void*) noexcept { return false; }
 bool TurretCamHighTransition(const void*) noexcept { return false; }
 bool TurretCamTurret(const void*,unsigned) noexcept { return false; }
+bool FirstPersonVehicleView(const void*,unsigned) noexcept { return false; }
 bool MapOwnsView() noexcept { return mapView; }
 bool CameraRay(float*,float*) noexcept { return false; }   // the last pass drawn: never the spot's source
 bool CameraRayOf(const void* who,float* eye,float* dir) noexcept {

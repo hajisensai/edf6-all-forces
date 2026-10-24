@@ -8,6 +8,8 @@
 //   EDF6X_VCVAR1..3   its further parts when the tokens do not fit one value: "<hash>;<tokens>"
 //   EDF6X_VCHAVE      every member's readiness: "1;<hash>;<missing>;<state>"
 //   EDF6X_VCPACKS     "1" when this member can read backpack tokens in the host's list
+//   EDF6X_VCPVEH      every member's own player loadouts (player_vehicle_logic.h: the jets it summons itself), "1;<tokens>":
+//                     every other member generates their files like the host's list's, and preloads them for the mission
 // <hash> is 16 upper-case hex digits: FNV-1a 64 of the listed tokens joined by ',' (ListHash), so a reader knows the parts
 // belong together and that a member's readiness is about the list the host has now. <tokens> are ','-separated, sorted,
 // unique, each one generated variant file in short form, never its name:
@@ -17,7 +19,8 @@
 //               2 upper-case hex digits: "aXX+01" = EDF6VC_NPC_RIFLE_X_X_AHANDGRENADE01.SGO. Only listed when every
 //               room member publishes EDF6X_VCPACKS=1: an older build cannot parse these tokens. Otherwise the host
 //               lists the colours without the pack, exactly as its mission planner downgrades that soldier.
-//   a vehicle   one digit, the body (support_loadout.h VehicleBody 1 tank ... 5 multirole), then the loadout's 64-bit
+//   a vehicle   one character, '0' + the body (support_loadout.h VehicleBody 1 tank ... 5 multirole; 6 .. 10, ':', a
+//               player's own summons, only in EDF6X_VCPVEH below), then the loadout's 64-bit
 //               variant (LoadoutVariant, applied bit clear) in 16 upper-case hex digits:
 //               "14000000000000C81" = EDF6VC_LO_TANK_4000000000000C81.SGO
 // A reader turns a token into a VariantRef, the VariantRef into its file name through support_loadout.h's own naming
@@ -38,6 +41,7 @@
 #pragma once
 #include "coop_member_attribute_api.h"
 #include "hudtext.h"
+#include "player_vehicle_logic.h"
 #include "room_sync.h"
 #include "support_loadout.h"
 #include "support_variants.h"
@@ -66,7 +70,10 @@ inline constexpr int kAttemptsMost=2;                 // per missing set
 inline constexpr int kLinesMost=8;
 inline constexpr std::size_t kHaveMost=40;            // "1;<16 hex>;<up to 4 digits>;<c>": 24 bytes, with room
 inline constexpr std::size_t kListBudget=3800;        // all list values together (header bytes included)
-static_assert(kListBudget+kHaveMost+1<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,"the list, readiness and pack marker fit Coop's budget");
+static_assert(kListBudget+kHaveMost+1+playerveh::kValueMost<=EDF6COOP_MEMBER_ATTRIBUTE_MAX_TOTAL_VALUE,
+              "the list, readiness, pack marker and own player loadouts fit Coop's budget");
+inline constexpr int kPlayerSetMost=kMembersMost*kPlayerVehicleCount;   // every other member's player loadouts
+static_assert(kPlayerSetMost<=kSetMost,"a VariantSet holds them");
 
 // The part key i (0 = kKeyList).
 inline void PartKey(int i,char* out,std::size_t capacity) noexcept {
@@ -211,7 +218,7 @@ inline bool ParseToken(const char* s,std::size_t n,VariantRef* out) noexcept {
     if(!s || !n || n>20)return false;
     VariantRef r;
     const auto hex=[](char c) noexcept { return c>='0' && c<='9' ? c-'0' : c>='A' && c<='F' ? c-'A'+10 : -1; };
-    if(s[0]>='1' && s[0]<='5') {
+    if(s[0]>='1' && s[0]<='0'+kVehicleBodyLast) {   // '1' tank .. '5' multirole, '6'..':' a player's own (support_loadout.h)
         if(n!=17)return false;
         r.vehicle=true;r.sub=static_cast<std::uint8_t>(s[0]-'0');
         for(std::size_t i=1;i<17;++i){const int d=hex(s[i]);if(d<0)return false;r.bits=(r.bits<<4)|static_cast<unsigned>(d);}
@@ -560,6 +567,8 @@ struct Env {
     GenStatus (*generation)(void* context)=nullptr;
     // The host's own list: every file the current configuration can need (support_variants.h ForEachConfiguredVariant).
     void (*configured)(void* context,void (*each)(void* set,const wchar_t* file),void* set)=nullptr;
+    // This machine's own player loadouts as its EDF6X_VCPVEH value (player_vehicle_logic.h OwnValue); false: none.
+    bool (*ownPlayer)(void* context,char* value,std::size_t capacity)=nullptr;
     void (*log)(void* context,const char* text)=nullptr;
 };
 
@@ -582,6 +591,7 @@ public:
         }
         s.isHost=room.isHost!=0;s.members=static_cast<int>(room.memberCount);
         Publish(api,kKeyPacks,"1",packsPublished_,env);
+        PlayerLoadouts(api,env);
         if(s.isHost)HostList(api,env);
         else ReadHostList(api);
         s.list=list_;s.listed=target_.count;s.leftOut=leftOut_;
@@ -598,6 +608,7 @@ public:
             for(int p=0;p<kListParts;++p)if(listPublished_[p][0]){char key[33];PartKey(p,key,sizeof(key));api->clear(key);}
             if(havePublished_[0])api->clear(kKeyHave);
             if(packsPublished_[0])api->clear(kKeyPacks);
+            if(playerPublished_[0])api->clear(playerveh::kKey);
         }
         Reset();
     }
@@ -616,6 +627,9 @@ public:
         return n;
     }
     const Situation& Now() const noexcept { return situation_; }
+    // Every other member's player loadouts the last room published (validated; kept when the room is left, as HostList):
+    // the mission preloads their files (player_vehicle.cpp).
+    const VariantSet& MemberPlayerVehicles() const noexcept { return memberPlayers_; }
     const VariantSet& Target() const noexcept { return target_; }
 private:
     // Everything a room leaves behind, but the tick clock and the situation the caller is filling.
@@ -625,7 +639,7 @@ private:
         own_.count=0;decoded_.count=0;target_.count=0;noted_.count=0;
         plan_=GenPlan{};
         for(auto& v:listPublished_)v[0]=0;
-        havePublished_[0]=0;packsPublished_[0]=0;genMessage_[0]=0;
+        havePublished_[0]=0;packsPublished_[0]=0;genMessage_[0]=0;playerPublished_[0]=0;players_.count=0;
     }
     void Log(const Env& env,const char* text) noexcept { if(env.log)env.log(env.context,text); }
     // Coop keeps a value published before its lobby glue runs and sends it later (1); 0 is a refusal (lastError says
@@ -691,6 +705,28 @@ private:
             Log(env,text);
         }
     }
+    // This machine's own player loadouts published (withdrawn when there are none); every other member's read and
+    // validated (a member's bad value is skipped whole, never half-read) into players_.
+    static void TakePlayer(void* context,const EDF6CoopMemberValue* m) noexcept {
+        auto* self=static_cast<Engine*>(context);
+        if(!m || m->isSelf || !m->hasValue || !m->value || m->valueBytes>playerveh::kValueMost)return;
+        playerveh::Variant v[kPlayerVehicleCount];int n=0;
+        if(!playerveh::ParseValue(m->value,v,&n)){++self->playersBad_;return;}
+        for(int i=0;i<n;++i){VariantRef r;r.vehicle=true;r.sub=static_cast<std::uint8_t>(v[i].body);r.bits=v[i].bits;self->players_.Add(r);}
+    }
+    void PlayerLoadouts(const EDF6CoopMemberAttributeApi* api,const Env& env) noexcept {
+        char value[playerveh::kValueMost+1]{};
+        if(env.ownPlayer && env.ownPlayer(env.context,value,sizeof(value)))Publish(api,playerveh::kKey,value,playerPublished_,env);
+        else if(playerPublished_[0] && api->clear(playerveh::kKey))playerPublished_[0]=0;
+        players_.count=0;playersBad_=0;
+        api->snapshot(playerveh::kKey,&Engine::TakePlayer,this,nullptr);
+        memberPlayers_=players_;
+        if(playersBad_ && !playersBadLogged_) {
+            playersBadLogged_=true;
+            char text[96];std::snprintf(text,sizeof(text),"ROOMSYNC %d member(s)' player loadouts do not read: ignored",playersBad_);
+            Log(env,text);
+        }
+    }
     struct HostValue { char value[kValueMost+1]; bool has; };
     static void TakeHost(void* context,const EDF6CoopMemberValue* m) noexcept {
         auto* out=static_cast<HostValue*>(context);
@@ -732,19 +768,26 @@ private:
             // `fixable`: the missing files the generator can make (the host's own ini names its own; a client's are the
             // ones on its pending list: at most kNotesPerRoom a room); the rest (`capped`) stay missing, stock.
             int missing=0,capped=0;std::uint64_t missingHash=kFnvBasis;
-            for(int i=0;i<target_.count;++i) {
+            // The host's list, then every other member's player loadouts (EDF6X_VCPVEH): their files are generated
+            // the same way (pending list, kNotesPerRoom), but only the host list's count in this machine's readiness.
+            int listMissing=0;
+            for(int i=0;i<target_.count+players_.count;++i) {
+                const VariantRef& ref=i<target_.count ? target_.ref[i] : players_.ref[i-target_.count];
+                if(i>=target_.count && target_.Has(ref))continue;
                 wchar_t file[96];
-                if(!VariantFileOf(target_.ref[i],file,96))continue;
+                if(!VariantFileOf(ref,file,96))continue;
                 if(env.fileThere && env.fileThere(env.context,file))continue;
                 ++missing;
+                if(i<target_.count)++listMissing;
                 // The host's own list is its own ini: the generator reads that. A client's goes on the pending list
-                // (the generator reads it too, and the installer's menus as before), never more than kNotesPerRoom.
-                if(!s.isHost && !noted_.Has(target_.ref[i])) {
+                // (the generator reads it too, and the installer's menus as before), never more than kNotesPerRoom;
+                // another member's player loadout likewise, on the host too.
+                if((!s.isHost || i>=target_.count) && !noted_.Has(ref)) {
                     if(noted_.count>=kNotesPerRoom){++capped;continue;}
-                    noted_.Add(target_.ref[i]);
+                    noted_.Add(ref);
                     if(env.noteMissing)env.noteMissing(env.context,file);
                 }
-                char t[24];missingHash=Fnv(Fnv(missingHash,",",1),t,TokenOf(target_.ref[i],t,sizeof(t)));
+                char t[24];missingHash=Fnv(Fnv(missingHash,",",1),t,TokenOf(ref,t,sizeof(t)));
             }
             if(capped && capped!=cappedLogged_) {
                 cappedLogged_=capped;
@@ -763,8 +806,8 @@ private:
                 Log(env,text);
             }
             const GenStatus after=env.generation ? env.generation(env.context) : gen;
-            have.hash=listHash_;have.missing=missing;
-            have.state=fixable>0 || !missing ? OwnReady(plan_,missingHash,fixable,after.state) : Ready::failed;
+            have.hash=listHash_;have.missing=listMissing;
+            have.state=!listMissing ? Ready::ready : fixable>0 ? OwnReady(plan_,missingHash,fixable,after.state) : Ready::failed;
             s.ownCapped=capped;
             std::memcpy(genMessage_,after.message,sizeof(genMessage_));
             genMessage_[sizeof(genMessage_)/sizeof(genMessage_[0])-1]=0;
@@ -792,6 +835,9 @@ private:
     std::uint32_t refusedCode_=0;
     VariantSet own_,decoded_,target_,noted_;
     VariantSet hostList_;               // HostList(): not cleared by Reset (a mission start leaves the room)
+    VariantSet players_,memberPlayers_; // the other members' player loadouts: this tick's, and the last room's (kept)
+    int playersBad_=0;bool playersBadLogged_=false;
+    char playerPublished_[playerveh::kValueMost+1]{};
     std::uint64_t hostListHash_=0;
     bool hostListOk_=false;
     ListValues values_;

@@ -5,6 +5,7 @@
 // other works as before.
 #include "crew.h"
 #include "turretaim.h"
+#include "firstperson.h"
 #include "memory.h"
 #include "spot_ray.h"
 #include "npc_mark.h"
@@ -16,9 +17,7 @@ namespace {
 edf::aimlink::TurretReadoutFn turretReadout=nullptr;
 edf::aimlink::SeatQueryFn turretSteers=nullptr;
 edf::aimlink::AwareFn turretAware=nullptr;
-edf::aimlink::ModeBindingFn turretBinding=nullptr;
 edf::aimlink::PlayerAimFn playerAim=nullptr;
-ULONGLONG bindingTried=0;
 ULONGLONG turretTried=0,steersTried=0,awareTried=0,playerAimTried=0;
 }  // namespace
 
@@ -106,12 +105,6 @@ bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* out) noexcept {
     return Cfg().enabled && Cfg().turretAimHud && AutoTurretReadout(out);
 }
 
-bool PlayerTurretBinding(edf::aimlink::ModeBindingV1* out) noexcept {
-    namespace link=edf::aimlink;
-    const auto fn=link::Resolve(link::kTurretDll,link::kModeBinding,turretBinding,bindingTried);
-    return Cfg().enabled && Cfg().turretAimHud && fn && fn(out);
-}
-
 bool CurrentTurretPlayer(const void* object,unsigned index) noexcept {
     const auto v=static_cast<unsigned char*>(const_cast<void*>(object));
     if(!Readable(v,kSeatCount+8) || v[kDead] || index>=SeatCount(v))return false;
@@ -147,9 +140,16 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_ViewRayV1(float* e
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
-// EDF6AutoTurret asks whether the turret camera turns `vehicle`'s seat `seat` after the view (aimlink.h CameraTurret).
+// EDF6AutoTurret asks whether the player's own view turns `vehicle`'s seat `seat` (aimlink.h CameraTurret): the turret
+// camera, decoupled, turns it after the view; or the player looks out of that seat in first person, where the mouse is
+// the seat's own (native) turn input and the eye rides the mount it turns. The user, 2026-10-25: "M163火神防空车(BMPT一样)
+// 在第一人称时会自动看向一个特定方向 并且人工转向其他方向仍然会回转到那个方向". First person yields the turret camera
+// (turretcam.cpp ExternalView), so this used to answer false there: EDF6AutoTurret then took the seat for V1 (it turns the
+// flak onto its own pick every frame and reads only a stick past DragDeadzone as the player's), and a mouse's small
+// per-frame input never got past it: the view, on the turret, swung back to that target after every manual turn. Now the
+// gun is the player's there as under the turret camera: turned onto their lock only, the stick never a drag.
 extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_CameraTurretV2(const void* vehicle,unsigned seat) {
-    __try { return crew::TurretCamTurret(vehicle,seat); }
+    __try { return crew::TurretCamTurret(vehicle,seat) || (crew::CurrentTurretPlayer(vehicle,seat) && crew::FirstPersonVehicleView(vehicle,seat)); }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -166,15 +166,6 @@ extern "C" __declspec(dllexport) float __cdecl EDF6VehicleCrew_MapRayV1(const fl
     __except(EXCEPTION_EXECUTE_HANDLER){return -1.0f;}
 }
 
-// Reserve a configured sight binding before the first press, not only while zoomed.
-extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_SightBindingV1(const void* vehicle,unsigned seat,bool keys,int binding) {
-    using namespace crew;
-    __try {
-        if(!Cfg().enabled || !Cfg().sightZoom || binding<=0 || !CurrentTurretPlayer(vehicle,seat))return false;
-        if(binding!=(keys ? Cfg().sightZoomKey : Cfg().sightZoomButton))return false;
-        return SightZoomCanMount(vehicle,seat);
-    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
-}
 extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_TurretObserverV1(const void* vehicle,unsigned seat) {
     using namespace crew;
     __try {return Cfg().enabled && CurrentTurretPlayer(vehicle,seat) && (HighCamOn(vehicle) || TurretCamHighTransition(vehicle) || SightZoomMounted(vehicle));}

@@ -15,14 +15,13 @@ float AxisInput(Track&,int,float,float,float,bool,float,float) noexcept{return 0
 void ReloadConfigIfChanged() noexcept{}
 void PilotFrame(const unsigned char*,unsigned,const unsigned char*,const float*,const float*,float) noexcept{}
 const void* Designated(const unsigned char*,float*) noexcept{return nullptr;}
-bool LeadCircle() noexcept{return false;}
 bool CameraTurret(const unsigned char*,unsigned) noexcept{return false;}
 bool CrewAims(const unsigned char*,unsigned) noexcept{return false;}
-edf::aimlink::PlayerGun PlayerControlRule(const unsigned char*,unsigned,bool lead,bool locked) noexcept{return edf::aimlink::PlayerGunRule(false,lead,locked);}
+edf::aimlink::PlayerGun PlayerControlRule(const unsigned char*,unsigned,bool locked) noexcept{return edf::aimlink::PlayerGunRule(false,locked);}
 bool Stabilized(const unsigned char*,unsigned,const float*,float*,float*) noexcept{return false;}
 float PriorityWeight(const Enemy&) noexcept{return 1;}
 bool ActualWeapon(const unsigned char*,unsigned,const unsigned char*,const unsigned char** out) noexcept{if(out)*out=nullptr;return false;}
-void PublishAim(const unsigned char*,bool,const void*,const float*,const float*,const float*,const Shot*,const float*,float,const void*) noexcept{}
+void PublishAim(const unsigned char*,bool,const void*,const float*,const void*) noexcept{}
 const unsigned char* SeatGun(const unsigned char* s) noexcept {
     const auto list=At<const unsigned char* const*>(s,kSeatWeapons);
     return list && At<std::uint64_t>(s,kSeatWeaponCount) ? At<const unsigned char*>(list[0],kHolderWeapon) : nullptr;

@@ -111,6 +111,33 @@ def audit_code(img: bytes, base: int) -> None:
     col = struct.unpack_from('<Q', img, sigs.DIALOG_VTABLE - 8)[0] - base
     td = struct.unpack_from('<I', img, col + 12)[0]
     check(img[td + 0x10:td + 0x10 + 32].split(b'\0')[0] == b'.?AVHUiDialogBox@ui@@', 'vtable 0x17F7260 is HUiDialogBox')
+    # The description dialog (2026-10-25): HUiDescriptionDialog, its InitParam, its function +0x170, its layout name.
+    def rtti(vtable: int) -> bytes:
+        c = struct.unpack_from('<Q', img, vtable - 8)[0] - base
+        t = struct.unpack_from('<I', img, c + 12)[0]
+        return img[t + 0x10:t + 0x10 + 48].split(b'\0')[0]
+    check(rtti(sigs.DESC_DIALOG_VTABLE) == b'.?AVHUiDescriptionDialog@ui@@', 'vtable 0x17F6F70 is HUiDescriptionDialog')
+    check(struct.unpack_from('<Q', img, sigs.DESC_DIALOG_VTABLE + 8)[0] - base == sigs.DESC_DIALOG_UPDATE,
+          'its slot 1 is its own OnUpdate 0x8088C0')
+    check(img[0x8088EC] == 0xE9 and 0x8088F1 + struct.unpack_from('<i', img, 0x8088ED)[0] == sigs.DIALOG_UPDATE,
+          'which jumps to HUiDialogBox::OnUpdate itself (past the base slot: chained apart)')
+    check(rtti(sigs.DESC_PARAM_VTABLE) == b'.?AUInitParam@HUiDescriptionDialog@ui@@', 'vtable 0x1806FD8 is its InitParam')
+    check(struct.unpack_from('<Q', img, sigs.DESC_PARAM_VTABLE)[0] - base == sigs.DESC_PARAM_DELETE and
+          img[0x8C3639:0x8C363E] == bytes.fromhex('bac0010000') and calls(img, 0x8C362F, 0x8C33E0),
+          'its scalar deleting dtor frees 0x1C0 bytes (the param room_dialog.cpp builds) after 0x8C33E0')
+    check(img[0x8C33ED:0x8C33F4] == bytes.fromhex('488db970010000') and calls(img, 0x8C3418, 0xA9460) and img[0x8C3443] == 0xE9,
+          '0x8C33E0 destroys the function at +0x170, the items 0xA9460, then the base')
+    check(img[0x80AF6A:0x80AF71] == bytes.fromhex('498d9770010000') and calls(img, 0x80AF71, 0x80E190),
+          'the dialog copies the param function +0x170 (0x80E190)')
+    check(img[0x80E700:0x80E706] == bytes.fromhex('8b8110010000') and img[0x80E70C:0x80E713] == bytes.fromhex('488b8818080000') and
+          img[0x80E727:0x80E72A] == bytes.fromhex('ff5010') and calls(img, 0x80E799, 0x863690),
+          'on focus: index = button +0x110, _Do_call(out, &index), the text to SetText 0x863690')
+    check(struct.unpack_from('<Q', img, sigs.DESC_LAYOUT_NAME_POINTER)[0] - base == sigs.DESC_LAYOUT_NAME and
+          img[sigs.DESC_LAYOUT_NAME:sigs.DESC_LAYOUT_NAME + 66].decode('utf-16le') == 'APP:/UI/LYT_HUIDESCDIALOGBOX.SGO\0',
+          '[0x1F77808] points at the description dialog layout name')
+    # The lambda whose _Delete_this the description function borrows: in place (rdx 0) it does nothing.
+    delete = struct.unpack_from('<Q', img, sigs.LAMBDA_VTABLE + 4 * 8)[0] - base
+    check(img[delete:delete + 4] == bytes.fromhex('84d2740a'), "the borrowed _Delete_this frees only when told to (not in place)")
     # The item handed to the stock lambda's call: rdx -> [rdx] the dialog, closed by 0x7E2EB0 (0x8AD560 .. 0x8AD5B0)
     check(img[0x8AD560:0x8AD563] == bytes.fromhex('4c8b02') and img[0x8AD5AD:0x8AD5B0] == bytes.fromhex('498bc8') and
           img[0x8AD5B0] == 0xE9 and 0x8AD5B5 + struct.unpack_from('<i', img, 0x8AD5B1)[0] == 0x7E2EB0,
@@ -124,6 +151,10 @@ def audit_layout(game) -> None:
     check('HUiMessageBoxDialogText' in m and 'HUiMessageBoxDialogButtonGrp' in m and '_HUiButton' in m,
           'its message text, its button group and its button template')
     check(m.get('default_cancel_action') is not None, 'its own cancel (the plugin learns it from the dialog ending unpicked)')
+    _v, d = sgo.read(game.read('UI', 'LYT_HUIDESCDIALOGBOX.SGO'))
+    check(d.get('xgs_ui_object_class') == 'HUiDescriptionDialog' and 'Description' in d and 'description' in d and
+          '_HUiButton' in d and d.get('default_cancel_action') is not None,
+          'LYT_HUIDESCDIALOGBOX: an HUiDescriptionDialog with its Description field, buttons and cancel')
 
 
 def main() -> int:

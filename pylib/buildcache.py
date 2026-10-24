@@ -108,7 +108,7 @@ def inputs(game: str, group: str) -> dict[str, Any]:
         result['city_archive'] = [str(city.resolve()), stamp.st_size, stamp.st_mtime_ns, stamp.st_ctime_ns]
     if group == 'optics':
         import vehicle_optics
-        result['loose_models'] = {spec.stem: sha256_file(str(Path(game, 'Mods', 'OBJECT', spec.stem+'.MRAB')))
+        result['loose_models'] = {spec.stem: sha256_file(str(Path(game, 'Mods', spec.folder, spec.stem+spec.ext)))
                                   for spec in vehicle_optics.MODELS}
     if group in COCKPIT_GROUPS:
         import cockpits

@@ -10,7 +10,8 @@ MISSION/EDF5_OLD_SCRIPT), so those are the ones taken.
 Per mission, in 4.1's story order (MISSION/MISSIONLIST.SGO):
   missions/<id>/MISSION.BVM, BEFORE.BVM   EDF5's, with the story objects EDF6 holds as other objects named where 4.1's
                                           are installed (pylib/edf41dlc.py: dragons as app:/Object/EDF41_<name>.SGO,
-                                          soldiers under app:/Object/EDF41/)
+                                          soldiers under app:/Object/EDF41/) and 4.1's UI names as EDF6 registers them
+                                          (pylib/bvm41.py UI_NAMES: the pre-mission scenes' closing fade)
   missions/<id>/MISSION.RMPA, BEFORE.RMPA  EDF5's, in EDF6's format (pylib/rmpa_legacy.py; the old one crashes EDF6's
                                           reader, EDF+0x6F3D25)
   missions.json: id, files, title / brief per EDF6 language from 4.1's MISSIONTEXT.SGO (rows [JA title, JA brief,
@@ -96,7 +97,7 @@ def build(edf5: str, edf41: str, zh: str) -> tuple[dict, dict[str, bytes], bytes
             if name.endswith('.RMPA'):
                 data = rmpa_legacy.rmpa_from_legacy(data)
             else:   # the story objects EDF6 holds as other objects, at the path 4.1's are installed at (edf41dlc)
-                data = bvm41.rewritten(data, edf41dlc.rewrite)
+                data = bvm41.rewritten(data, bvm41.edf6_strings(edf41dlc.rewrite))
             files[f'{mid}/{name}'] = data
             names.append(name)
         if 'MISSION.BVM' not in names:
@@ -144,7 +145,7 @@ def build_dlc(dlc: 'edf41dlc.Dlc', zh: str) -> tuple[dict, dict[str, bytes], byt
                 if name.endswith('.RMPA'):
                     data = rmpa_legacy.rmpa_from_legacy(data)
                 else:
-                    data = bvm41.to_edf5(data, rewrite=edf41dlc.rewrite)
+                    data = bvm41.to_edf5(data, rewrite=bvm41.edf6_strings(edf41dlc.rewrite))
                 mine[f'{mid}/{name}'] = data
                 names.append(name)
         except bvm41.UnsupportedNative as e:   # not shipped; missions.json says why (the planner reports it)
