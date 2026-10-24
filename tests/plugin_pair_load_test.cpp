@@ -36,21 +36,21 @@ const char* const kCrewExports[]={
     "EDF6AF_SupportProtocolVersion","EDF6AF_GetMissionParticipants","EDF6AF_AllowMissionPlayer",
     "EDF6AF_MissionPlayerCreated","EDF6AF_GetMissionAdmissionState",           // src/support_net.cpp
     "EDF6VehicleCrew_ViewRayV1","EDF6VehicleCrew_CameraTurretV2","EDF6VehicleCrew_AimsTurretV4",
-    "EDF6VehicleCrew_MapRayV1","EDF6VehicleCrew_SightBindingV1","EDF6VehicleCrew_TurretObserverV1",
+    "EDF6VehicleCrew_MapRayV1","EDF6VehicleCrew_TurretObserverV1",
     "EDF6VehicleCrew_PayloadAimV1",                                             // src/turretaim.cpp
 };
 const char* const kTurretExports[]={
     "EML6_Load","EDF6AutoTurret_SetInputSourceV1","EDF6AutoTurret_SteersV2","EDF6AutoTurret_StabilizerAwareV3",   // plugin.cpp
-    "EDF6AutoTurret_TurretReadoutV1","EDF6AutoTurret_ModeBindingV1","EDF6AutoTurret_PlayerAimV4",                // designate.cpp
+    "EDF6AutoTurret_TurretReadoutV1","EDF6AutoTurret_PlayerAimV4",                // designate.cpp
 };
 
 // The aimlink.h contract: each name, and the DLL that exports it.
 struct Link { const char* name; bool crew; };
 const Link kLinks[]={
-    {aimlink::kViewRay,true},{aimlink::kMapRay,true},{aimlink::kCameraTurret,true},{aimlink::kSightBinding,true},
+    {aimlink::kViewRay,true},{aimlink::kMapRay,true},{aimlink::kCameraTurret,true},
     {aimlink::kTurretObserver,true},{aimlink::kStabilizer,true},{aimlink::kPriorityZone,true},{aimlink::kInputHeld,true},
     {aimlink::kAimsTurret,true},{aimlink::kPayloadAim,true},
-    {aimlink::kTurretReadout,false},{aimlink::kSteers,false},{aimlink::kModeBinding,false},{aimlink::kStabilizerAware,false},
+    {aimlink::kTurretReadout,false},{aimlink::kSteers,false},{aimlink::kStabilizerAware,false},
     {aimlink::kPlayerAim,false},
 };
 using AnyFn=void(__cdecl*)();

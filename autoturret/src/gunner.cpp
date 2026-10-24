@@ -332,8 +332,8 @@ bool OnTarget(const Gun& gun,const float* error,float distance,float widen) noex
 }
 
 // A gunner seat's aim. The player in it (this machine's): their bindings and lock (designate.cpp) and the HUD's
-// readout; their lock is the only target while it lasts, and in the lead-circle mode the gun is theirs (tracked for the
-// circle, never turned). An AI seat takes the lock of the player aboard first when its gun reaches it.
+// readout; their lock is the only target while it lasts (aimlink.h PlayerGunRule: under the turret camera the gun turns
+// only onto it). An AI seat takes the lock of the player aboard first when its gun reaches it.
 void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Nearby& nearby,Track& track) noexcept {
     const auto seat=edf::SeatAt(vehicle,s);
     Gun gun{};Aim aim{};
@@ -341,14 +341,13 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
     const auto now=GetTickCount64();
     if(!ReadAim(vehicle,seat,gun,track,aim))return;
     const bool pilot=crew==Crew::player;
-    const float life=static_cast<float>(At<std::int32_t>(gun.weapon,kAmmoAlive));
     if(pilot)PilotFrame(vehicle,s,seat,gun.pos,gun.dir,gun.range);
     const void* designated=Designated(vehicle,nullptr);
     const void* only=pilot ? designated : nullptr;
     // Who turns the gun (common/edf/aimlink.h PlayerGunRule): an AI seat's this plugin; the player's as the flak's
     // (plugin.cpp Steer). A player holding the stick (no turret camera on the seat) aims by hand; letting go hands the
     // gun back, never to the target it was dragged away from.
-    edf::aimlink::PlayerGun rule=pilot ? PlayerControlRule(vehicle,s,LeadCircle(),only!=nullptr)
+    edf::aimlink::PlayerGun rule=pilot ? PlayerControlRule(vehicle,s,only!=nullptr)
                                              : edf::aimlink::PlayerGun{true,false};
     if(pilot && !rule.steer)track.steered=0; // observation camera cannot drive this gun
     const float stick[2]={At<float>(seat,kStick),At<float>(seat,kStick+4)};
@@ -356,18 +355,18 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
         && (std::fabs(stick[0])>cfg.dragDeadzone || std::fabs(stick[1])>cfg.dragDeadzone);
     if(drag && !track.dragging && track.target){track.dropped=track.target;track.droppedUntil=now+cfg.dragDropMs;}
     track.dragging=drag;
-    if(drag){track.target=nullptr;track.at=now;PublishAim(vehicle,true,nullptr,nullptr,gun.pos,gun.dir,&gun.shot,nullptr,life,gun.weapon);return;}
+    if(drag){track.target=nullptr;track.at=now;PublishAim(vehicle,true,nullptr,nullptr,gun.weapon);return;}
     const void* dropped=now<track.droppedUntil ? track.dropped : nullptr;
     float world[3],aimAt[3];
     const auto target=PickGunTarget(vehicle,gun,aim,nearby,designated ? designated : track.target,dropped,only,world);
     if(!target) {
         track.target=nullptr;track.firing=false;track.at=now;
-        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,gun.pos,gun.dir,&gun.shot,nullptr,life,gun.weapon);
+        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,gun.weapon);
         return;
     }
     LeadGun(vehicle,gun,track,target,world,aimAt);
     track.at=now;
-    if(pilot)PublishAim(vehicle,true,target,world,gun.pos,gun.dir,&gun.shot,track.vel,life,gun.weapon);
+    if(pilot)PublishAim(vehicle,true,target,world,gun.weapon);
     if(!rule.steer)return;
     float want[2],error[2],axis[2],time,distance;
     if(!Solve(vehicle,gun,aimAt,want,time,distance) || !AxisTargets(aim,want,error,axis)){track.firing=false;return;}
@@ -465,7 +464,7 @@ void DriverFrame(unsigned char* vehicle) noexcept {
     if(CrewAims(vehicle,0))return;
     float world[3];
     const void* locked=Designated(vehicle,world);
-    PublishAim(vehicle,false,locked,locked ? world : nullptr,nullptr,nullptr,nullptr,nullptr,0.0f);
+    PublishAim(vehicle,false,locked,locked ? world : nullptr);
 }
 
 bool Wanted(Crew c) noexcept { return c==Crew::player ? cfg.gunnerAssist : c==Crew::ai && cfg.gunnerAi; }
@@ -515,7 +514,7 @@ void Gunners(unsigned char* vehicle) noexcept {
     }
     if(!crewed){LogSkip(vehicle,"nobody aboard");return;}   // a parked tank stays quiet
     // The player driving (seat 0, the main cannon, which is theirs): their lock is what the gunners fight; the
-    // readout shows it (no mode: their gun is not the plugin's).
+    // readout shows it (ownGun false: their gun is not the plugin's).
     if(crew[0]==Crew::player)DriverFrame(vehicle);
     if(!any)return;
     Nearby nearby;

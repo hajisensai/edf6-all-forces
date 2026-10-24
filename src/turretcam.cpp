@@ -17,10 +17,9 @@
 //    frame; the hook turns the view by the rider's own stick (seat+0x2D0, docs/camera-re.md §4: -1..1 a frame, the
 //    mouse's excess carried over by 0x56DBC0, handed to the aim as (-x, y)) and hands the aim the input that turns the
 //    turret onto the normal rig request's centre (seat/take-owned ray + MapRay, else kAimFar) at the stock rates
-//    (turretcam.h AxisCommand): the round's low ballistic arc through a real map hit, the bore line through it in
-//    EDF6AutoTurret's lead-circle mode (the circle already solved the arc) and through the made-up point of a view that
-//    hits nothing (turretcam.h BallisticAim). EDF6AutoTurret turns this turret only onto the player's lock in its
-//    auto-aim mode and says so (common/edf/aimlink.h V2 Steers): that frame the turret is its, the view the rider's; an
+//    (turretcam.h AxisCommand): the round's low ballistic arc through a real map hit, the bore line through the made-up
+//    point of a view that hits nothing (turretcam.h BallisticAim). EDF6AutoTurret turns this turret only onto the
+//    player's lock and says so (common/edf/aimlink.h V2 Steers): that frame the turret is its, the view the rider's; an
 //    EDF6AutoTurret without the V2 link is told apart by its input being off the stick (turretcam.h Foreign).
 //  - Free look (FreeLookKey / FreeLookButton held): the view turns, the turret holds the point it was on (decoupled) or
 //    stands still (coupled); let go, the view swings back to where it was (coupled: onto the stock camera's) and hands
@@ -325,14 +324,6 @@ bool AimPoint(const Shared& s,const float* pivot,float* p,bool* hit) noexcept {
     return true;
 }
 
-// EDF6AutoTurret's lead-circle mode on the player's own gun (its readout: common/edf/aimlink.h).
-bool LeadCircleOn() noexcept {
-    edf::aimlink::TurretReadoutV1 r{};
-    // Only while a circle is there (a target and its solve): with none, the screen's centre takes the arc as in AUTO (a
-    // tank's driver seat is the player's own gun since aimlink.h V4 and must not lose its drop compensation to a mode).
-    return AutoTurretReadout(&r) && r.ownGun && r.mode==edf::aimlink::Mode::leadCircle && r.target && r.lead;
-}
-
 bool FreeHeld(const unsigned char* seat) noexcept {
     const Config& c=Cfg();
     if(At<unsigned char>(seat,kSeatPad)==0)return KeyHeld(c.freeLookKey);
@@ -564,7 +555,7 @@ void Aim(unsigned char* seat,const float* in,float* cmd) noexcept {
     // The free look's held point, otherwise the current normal camera's screen centre.
     const bool hold=s.free || s.returning;
     const float* target=hold ? game.holdAt : game.aim;
-    const bool ballistic=tcam::BallisticAim(hold ? game.holdHit : game.aimHit,LeadCircleOn());
+    const bool ballistic=tcam::BallisticAim(hold ? game.holdHit : game.aimHit);
     const bool steer=s.decoupled && !foreign && (game.hasAim || hold);
     s.steering=false;
     Steering st{};

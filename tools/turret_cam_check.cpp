@@ -8,8 +8,7 @@
 //    an authored pair (game_object_camera_setting) placed at its own pitch puts the eye where it says; the high view at
 //    its pitch puts the eye `height` up and `back` behind; headings grow turning right;
 //  - who turns the turret (Foreign: EDF6AutoTurret's V2 answer decides, else V1's guess off the stick) and whether the
-//    round's arc or the bore line goes through the view point (BallisticAim: the arc only for a real hit outside the
-//    lead-circle mode);
+//    round's arc or the bore line goes through the view point (BallisticAim: the arc only for a real hit);
 //  - the high view's observed point (tcam::HighFocus, as turretcam.cpp ShotFocus feeds it: the round flown by
 //    rounds::FirstHit over flat ground, the ground found under a point that is not the landing) over the gun's whole
 //    elevation range, for the Katyusha, the howitzer and a flat gun: never in the air, never farther than the round's
@@ -168,9 +167,8 @@ void Owners() {
     Expect(!tcam::Foreign(0,off,stick,0.02f),"V2: it does not steer, an input off the stick is not taken as its");
     // No answer (an older EDF6AutoTurret, or none): V1's guess.
     Expect(!tcam::Foreign(-1,close,stick,0.02f) && tcam::Foreign(-1,off,stick,0.02f),"V1: the input off the stick by more than the tolerance");
-    Expect(tcam::BallisticAim(true,false),"a real hit, AUTO / no auto-turret: the round's arc");
-    Expect(!tcam::BallisticAim(true,true),"lead circle: the bore line (the circle solved the arc)");
-    Expect(!tcam::BallisticAim(false,false) && !tcam::BallisticAim(false,true),"no hit (the made-up far point): the bore line");
+    Expect(tcam::BallisticAim(true),"a real hit: the round's arc");
+    Expect(!tcam::BallisticAim(false),"no hit (the made-up far point): the bore line");
 }
 
 // The high view's placement (tcam::OrbitPlace) looks at the centre it is given at the same distance whatever the heading,

@@ -179,10 +179,9 @@ inline float ViewRayStart(const float* eye,const float* dir,float reach,const fl
 }
 
 // Whether the gun's round (its low arc) goes through the view point, else the gun's bore line: only for a real hit
-// (ground, a building, a target under the screen's centre) outside the lead-circle mode. The lead circle already solved
-// the arc (the bore line must pass through it: raising the gun again for the drop drops nothing twice), and a view
-// that hits nothing gives a made-up point kAimFar out whose range means nothing.
-inline bool BallisticAim(bool viewHit,bool leadCircle) noexcept { return viewHit && !leadCircle; }
+// (ground, a building, a target under the screen's centre); a view that hits nothing gives a made-up point kAimFar out
+// whose range means nothing.
+inline bool BallisticAim(bool viewHit) noexcept { return viewHit; }
 
 // Each rig parameter `a` eased toward `b` by `k` (0..1).
 inline void Ease(Rig& a,const Rig& b,float k) noexcept {

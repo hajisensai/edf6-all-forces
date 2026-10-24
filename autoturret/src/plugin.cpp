@@ -660,8 +660,8 @@ Barrel SeatBarrel(const unsigned char* vehicle,const unsigned char* seat) noexce
 
 // Aims the ridden flak's turret (seat 0); returns the flight time (frames) to the aim point, the time fuse
 // its rounds get, or -1 (no target, aimed by hand, out of reach: the rounds burst at max range). For this machine's
-// player it keeps their bindings and lock (designate.cpp) and publishes the HUD's readout; in the lead-circle mode it
-// tracks and fuses as ever but leaves the turret to them.
+// player it keeps their lock binding and lock (designate.cpp) and publishes the HUD's readout; with EDF6VehicleCrew's
+// turret camera it tracks and fuses as ever but turns the turret only onto their lock (aimlink.h PlayerGunRule).
 float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     if(PlayerLofted(seat)){diag.stop="player-lofted";return -1.0f;}
     Track* track=TrackFor(vehicle,0,true);   // the flak is aimed only for its rider (hasInput)
@@ -675,12 +675,12 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     const float* bore=barrel.ok ? barrel.dir : nullptr;
     if(pilot)PilotFrame(vehicle,0,seat,muzzle,bore,range);
     const void* only=pilot ? Designated(vehicle,nullptr) : nullptr;
-    // Who turns the gun (common/edf/aimlink.h PlayerGunRule): an NPC's always this plugin; the player's, with
-    // EDF6VehicleCrew's turret camera turning it after the view, only onto their lock in AUTO; without that camera, as
-    // ever (the auto-aim, the lead circle the player's own). Holding the aim stick then aims by hand (the stock input
-    // already turned it); letting go hands the turret back at once, to a target near where it was dragged, never the
-    // one dragged away from. With the camera the stick turns the view: no drag.
-    edf::aimlink::PlayerGun rule=pilot ? PlayerControlRule(vehicle,0,LeadCircle(),only!=nullptr)
+    // Who turns the gun (common/edf/aimlink.h PlayerGunRule): an NPC's always this plugin; the player's, while their own
+    // view turns it (EDF6VehicleCrew's turret camera, or its first person in this seat), only onto their lock, the stick
+    // never a drag; otherwise as ever (the auto-aim). Holding the aim stick then aims by hand (the stock input already
+    // turned it); letting go hands the turret back at once, to a target near where it was dragged, never the one
+    // dragged away from.
+    edf::aimlink::PlayerGun rule=pilot ? PlayerControlRule(vehicle,0,only!=nullptr)
                                              : edf::aimlink::PlayerGun{true,true};
     // EDF6VehicleCrew's turret camera is the one hand on the player's flak (aimlink.h V4): it steers onto the lead
     // PlayerAimV4 gives, the same as every other ground vehicle's; here the turret is only tracked (the fuse, the readout).
@@ -695,13 +695,13 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     const auto target=drag ? nullptr : PickTarget(vehicle,seat,track->target,dropped,only,shot,range,world);
     if(!target) {
         diag.stop=drag ? "manual" : "no-target";track->at=now;track->target=nullptr;
-        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,muzzle,bore,&shot,nullptr,barrel.life,barrel.weapon);
+        if(pilot)PublishAim(vehicle,true,nullptr,nullptr,barrel.weapon);
         return -1.0f;
     }
     diag.stop=rule.steer ? "aiming" : "tracking";
     Lead(vehicle,*track,target,world,local,shot);
     track->at=now;
-    if(pilot)PublishAim(vehicle,true,target,world,muzzle,bore,&shot,track->vel,barrel.life,barrel.weapon);
+    if(pilot)PublishAim(vehicle,true,target,world,barrel.weapon);
     float wantYaw,wantPitch,flight;
     if(!AimAngles(local,shot,wantYaw,wantPitch,flight)){diag.stop="out-of-reach";return -1.0f;}
     if(!rule.steer)return flight;   // the time fuse still bursts the flak at the target's range
@@ -858,9 +858,6 @@ void LoadConfig() noexcept {
     next.gunnerMinDistance=Clamp(ReadFloat(L"GunnerMinDistance",next.gunnerMinDistance),0.0f,500.0f);
     next.gunnerYawSign=ReadFloat(L"GunnerYawSign",next.gunnerYawSign)>=0.0f ? 1.0f : -1.0f;
     next.gunnerPitchSign=ReadFloat(L"GunnerPitchSign",next.gunnerPitchSign)>=0.0f ? 1.0f : -1.0f;
-    next.aimMode=GetPrivateProfileIntW(L"AutoTurret",L"AimMode",next.aimMode,iniPath)!=0 ? 1 : 0;
-    next.modeKey=ReadInt(L"AimModeKey",next.modeKey,0,0xFE);
-    next.modeButton=ReadInt(L"AimModeButton",next.modeButton,0,0xFFFF);
     next.lockKey=ReadInt(L"LockKey",next.lockKey,0,0xFE);
     next.lockButton=ReadInt(L"LockButton",next.lockButton,0,0xFFFF);
     next.lockCone=Clamp(ReadFloat(L"LockCone",next.lockCone),1.0f,90.0f);
@@ -872,8 +869,8 @@ void LoadConfig() noexcept {
         cfg.airHeight,cfg.lead,cfg.trackRange,cfg.feedForward,cfg.slewWeight,cfg.dragDeadzone,cfg.dragDropMs,cfg.fuse,cfg.fuseBias,cfg.fuseMin,cfg.proximity,cfg.contact);
     Log("CONFIG gunners ai=%d assist=%d range=%.0f cone=%.3f min=%.0f sign=(%+.0f,%+.0f)",
         cfg.gunnerAi,cfg.gunnerAssist,cfg.gunnerRange,cfg.gunnerCone,cfg.gunnerMinDistance,cfg.gunnerYawSign,cfg.gunnerPitchSign);
-    Log("CONFIG player mode=%s key=0x%X button=0x%X lock key=0x%X button=0x%X cone=%.0fdeg range=%.0fm clear=%lums",
-        cfg.aimMode ? "lead" : "auto",cfg.modeKey,cfg.modeButton,cfg.lockKey,cfg.lockButton,cfg.lockCone,cfg.lockRange,cfg.lockClearMs);
+    Log("CONFIG player lock key=0x%X button=0x%X cone=%.0fdeg range=%.0fm clear=%lums",
+        cfg.lockKey,cfg.lockButton,cfg.lockCone,cfg.lockRange,cfg.lockClearMs);
 }
 
 // Edits to the ini apply within a second; no game restart needed.

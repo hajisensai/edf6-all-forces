@@ -202,7 +202,7 @@ Rocketcannon_main, 0.25) following the lifted bone rather than holding the axis'
 pass rewriting the prop (it is a `car_base_simulation_node`, as the wheels are); the pose hook not fighting
 another plugin's (the bytes are checked, a mismatch leaves the stock pose and logs `KATYUSHA pose call ... changed`).
 
-## The player's turret: the mode, the lock, the lead circle (2026-10-06, static)
+## The player's turret: the lock and its lead (2026-10-06, static; the lead-circle mode removed 2026-10-25)
 
 `src/designate.cpp`; the math in `src/aimmath.h`, checked offline by `tools/turret_lead_check.cpp`.
 
@@ -219,15 +219,16 @@ another plugin's (the bytes are checked, a mismatch leaves the stock pose and lo
   view). A lock press acts on its release; held `LockClearMs` it lets the lock go instead.
 - The lock and the aim: `PickTarget` / `PickGunTarget` take the lock as `only`: kept while reachable, nothing else
   while it is not. An AI gunner seat of the player's vehicle takes it as its `keep` (first when reachable).
-- The lead circle: the target's velocity is the aim's own (`Track::vel`, smoothed per frame); the solve
-  (`aim::LeadSolve`) is `edf::BallisticArc` from the gun's real muzzle (`edf::MeanMuzzle`) in the vehicle's frame, the
-  flight time taken to the lead point itself until it moves under 1 cm. The circle sits on the required direction at
-  the lead point's range, the bore cross on the barrel's: both at the same distance, so the cross in the circle is the
-  barrel on the required direction whatever the camera's offset from the gun. In the lead-circle mode the input
-  (`vehicle+0x2AA0`) is not written at all; the flak's fuse stamp still uses the flight time.
+- The lead onto the lock (V4 `PlayerAim`, the turret camera steering to it): the target's velocity is the lock's own
+  (`TrackLock`, smoothed per frame); the solve (`aim::LeadSolve`) is `edf::BallisticArc` from the gun's real muzzle
+  (`edf::MeanMuzzle`) in the vehicle's frame, the flight time taken to the lead point itself until it moves under 1 cm.
+- The lead-circle mode (`AimMode` / `AimModeKey` / `AimModeButton`: the turret the player's, a circle and a bore cross
+  drawn from the same solve) was removed on 2026-10-25 (the user: "这个自动瞄准是不是多余了一个版本，删掉一个"): the
+  stock vehicle HUD of EDF6VehicleCrew draws its own lead mark for the gun the player aims (its `docs/hud-re.md` §7.3),
+  and under its turret camera an unlocked turret already follows the view. `TurretReadoutV1` keeps its layout; the
+  fields only that mode filled are sent empty (`common/edf/aimlink.h`).
 - Needs an in-game check: the bindings reaching `+0x2E8` in a flak / tank seat (the `PILOT` and `LOCK` log lines say
-  each press), the lock picking what is under the crosshair (the camera ray is the HUD's last frame), the lead circle
-  on a crossing air target with the flak (the cross in the circle should burst the shell at it).
+  each press), the lock picking what is under the crosshair (the camera ray is the HUD's last frame).
 
 ## GrenadeBullet01 (the flak round)
 

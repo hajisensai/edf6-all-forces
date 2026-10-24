@@ -274,8 +274,8 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 - 威胁：战斗机的雷达告警圆盘（`RwrScope`，受 `PlayerJetThreatHud` 控制）镜像到中线右侧（`RwrCentre` 的 `side` = +1）：在左侧时它的框
   （中心 W/2−486s、0.80H−96s，半径 86s）正好压在车体 / 炮塔块上（圆环中心 W/2−460s）。离线核对：`tools/hud_view` 的
   `StockLayoutApart` 在 1920×1080 与 2520×1080 下分别画圆盘和整块（含钻头那行），两者外框不相交（旧位置时两种宽度都相交）。
-- 一门炮的标记只留一组：`TurretMark`（炮塔镜头）的白方框在这套 HUD 开着时不画；EDF6AutoTurret 的预瞄圈画在玩家自己这门炮
-  （`ownGun`、预瞄圈模式、有解）时，座位第一件武器（瞄准轴转的那门）的准星 / 弹着圈不画，只剩预瞄圈和炮膛十字。
+- 一门炮的标记只留一组：`TurretMark`（炮塔镜头）的白方框在这套 HUD 开着时不画。（EDF6AutoTurret 的预瞄圈 2026-10-25 删除：
+  它和这里的提前量标记是同一件事的两份，见下「自瞄开关提示」。）
 - 钻头战车：`DrillPanel` 只在这套 HUD 不画时出现；HUD 开着时转速 / 热量是块里的一行，过热进告警行。
 - Nix：`PlayerNixTorso`（`nix.cpp`）的腿朝向 / 躯干方向代替车头 / 炮口画进圆环，扭腰极限画成环外两个刻度，信息行加 TWIST。
 - 红线：`StockVehicleHud=1` 且 HUD 能画（`HudReady`）时，玩家座位的原版瞄准线按 `docs/aim-line-re.md` 第 7 条隐藏；原版准星（屏幕中心的图标）没有动——例外：插件画出车载瞄具视场（放大，或第一人称 1 倍的炮手瞄准镜）时，看瞄具那名士兵的原版准星不画（2026-10-21，`src/scope_hold.h`，见 `docs/feedback-2026-10-21-bmpt-vulcan-fp.md`）。
@@ -393,8 +393,15 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
   `AUTO-AIM   [Z] lead circle`：模式名后面紧跟着另一种模式的名字，读不出现在是哪种，也没有「关」这个词，切换时只是这行字变了。
   现在 `TurretAimMarks` 分两行：`AUTO-AIM ON`（绿）/ `AUTO-AIM OFF (LEAD CIRCLE)`（橙），下一行 `[Z] auto-aim off/on` 和锁定键；
   模式一变（读数 `TurretReadoutV1::mode`）屏幕中上方出现 1.5 秒的横幅。手柄默认没绑 `AimModeButton`，这时提示去 ini 设。
-- 离线：`tools/hud_cue_check.cpp`（切换判定、图标归类），`tools/hud_view.cpp` 的 `jet_switch` / `heli_stores` / `stock_turret_auto` /
-  `stock_turret_lead_switch` 场景，以及模式两行与原版载具块、RWR 不重叠、写明 ON / OFF 的检查（`TurretLayoutApart`）。
+- 2026-10-25 用户：「这个自动瞄准是不是多余了一个版本，删掉一个」（截图：底部「自动瞄准 开 / [Z] 自动瞄准 关 [Q] 锁定」，另一张
+  「自动瞄准 关（预瞄圈）」）。代码里只有一处画（`TurretAimMarks`，唯一调用点 `HudDraw`）、一处实现（EDF6AutoTurret
+  `designate.cpp`），「两个版本」是同一自瞄的两种模式：状态行「开」和按键行「[Z] 自动瞄准 关」同屏，读成两套；切到预瞄圈又是另一套
+  圈 + 十字，而它的「往哪打」与本节 §7.3 的提前量标记重复，炮塔镜头下「炮塔归玩家」与不锁定时炮塔跟镜头走相同。删掉预瞄圈模式：
+  `AimMode` / `AimModeKey` / `AimModeButton`、开 / 关两行与切换横幅、`EDF6AutoTurret_ModeBindingV1` / `EDF6VehicleCrew_SightBindingV1`
+  （旧 Z 与瞄具的冲突迁移）、`StockExtras::leadGun`。现在下方一行 `自动瞄准  [Q] 锁定（长按：清除）`。`TurretReadoutV1` 布局不变（字段
+  置空），见 `common/edf/aimlink.h`。
+- 离线：`tools/hud_cue_check.cpp`（切换判定、图标归类），`tools/hud_view.cpp` 的 `jet_switch` / `heli_stores` / `stock_turret_auto`
+  场景，以及自瞄一行与原版载具块、RWR 不重叠、只有一行写自动瞄准的检查（`TurretLayoutApart`）。
 
 ## 10. 暂停菜单（2026-10-06，`src/game_clock.h`、`crew.cpp GamePaused`、`hud.cpp HudDraw`）
 
