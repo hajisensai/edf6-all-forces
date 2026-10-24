@@ -207,6 +207,57 @@ void Vehicle() {
     Expect(Find(d,Do::set,kStockColour)<0,"the default's own: not set is stock (no second stock)");
 }
 
+// A jet's weight (support_loadout.h WithinPayload): its pages say it, offer only what keeps it, and a store whose rounds
+// would not fit takes as many as do.
+void JetWeight() {
+    rm::Menu m=Fresh();Nav nav;Begin(m,nav);
+    const int jet=UnitOf(m,L"FIGHTER",rm::UnitKind::vehicle);   // 6400 kg
+    Pick(m,nav,Do::open,jet);
+    Pick(m,nav,Do::customise);
+    Pick(m,nav,Do::add);   // AIM-9X x2: its pylon page
+    Dialog d=Build(m,nav,Context{});
+    Expect(std::wcsstr(d.title,L"170 / 6400 kg")!=nullptr,"the pylon page says the weight and the budget");
+    Pick(m,nav,Do::field,FieldArg(Page::store));
+    Pick(m,nav,Do::set,3);   // AIM-54
+    Pick(m,nav,Do::field,FieldArg(Page::rounds));
+    Pick(m,nav,Do::set,RoundCode(12));   // 5400 kg
+    Expect(rm::UnitMassKg(m.unit[jet])==5400,"AIM-54 x12");
+    Pick(m,nav,Do::back);
+    Pick(m,nav,Do::add);     // 1000 kg left: the new pylon fits (AIM-9X x2)
+    Expect(m.unit[jet].vehicle.count==2 && WithinPayload(m.unit[jet].vehicle),"a second pylon within the weight");
+    Pick(m,nav,Do::field,FieldArg(Page::rounds));
+    d=Build(m,nav,Context{});
+    int listed=0;
+    for(int turn=0;turn<4;++turn) {
+        for(int i=0;i<d.count;++i)
+            if(d.item[i].choice.what==Do::set) {
+                ++listed;
+                Expect(rm::PylonFits(m.unit[jet],1,m.unit[jet].vehicle.store[1],static_cast<std::uint8_t>(d.item[i].choice.arg)),
+                       "every round count offered fits the weight");
+            }
+        const int next=Find(d,Do::next);
+        if(next<0)break;
+        Apply(m,nav,d.item[next].choice);d=Build(m,nav,Context{});
+    }
+    Expect(listed==8,"AIM-9X: up to 11 of them fit the 1000 kg left (the 8 counts 1..10)");
+    nav.first=0;
+    Pick(m,nav,Do::set,RoundCode(10));   // 850 kg
+    Pick(m,nav,Do::field,FieldArg(Page::store));
+    Pick(m,nav,Do::set,6);
+    Expect(m.unit[jet].vehicle.store[1]==6 && kRoundCounts[m.unit[jet].vehicle.rounds[1]]==4 && WithinPayload(m.unit[jet].vehicle),
+           "Mk 82 x10 would not fit: it takes as many as do, 4 (920 kg)");
+    Pick(m,nav,Do::back);
+    Pick(m,nav,Do::add);     // 80 kg left: no AIM-9X pair; the first store of which one fits, one AGM-114 (50 kg)
+    Expect(m.unit[jet].vehicle.count==3 && m.unit[jet].vehicle.store[2]==5 && kRoundCounts[m.unit[jet].vehicle.rounds[2]]==1,
+           "the third pylon: what still fits");
+    Pick(m,nav,Do::field,FieldArg(Page::store));
+    d=Build(m,nav,Context{});
+    Expect(Find(d,Do::set,5)>=0 && Find(d,Do::set,7)>=0 && Find(d,Do::set,1)<0 && Find(d,Do::set,3)<0 && d.count==3,
+           "with 80 kg left only AGM-114 and Hydra 70 are offered");
+    rm::SaveSet set;
+    Expect(rm::CollectSave(m,&set),"what the pages made saves");
+}
+
 // Thousands of random picks / cancels: never out of range, every page fits, every save reads back.
 void Walk() {
     rm::Menu m=Fresh();Nav nav;Begin(m,nav);
@@ -227,6 +278,7 @@ void Walk() {
             rm::MarkSaved(m);m.open=true;++saves;
         }
         Expect(nav.unit>=0 && nav.unit<m.unitCount,"the unit in range");
+        Expect(!m.unit[nav.unit].vehicle.On() || WithinPayload(m.unit[nav.unit].vehicle),"no step leaves a vehicle over its weight");
         if(nav.page!=Page::units && nav.page!=Page::discard) {
             const rm::Unit& u=m.unit[nav.unit];
             if(nav.page==Page::soldier || nav.page==Page::kind || nav.page==Page::primary || nav.page==Page::secondary || nav.page==Page::pack)
@@ -244,6 +296,7 @@ int main() {
     UnitsPage();
     Squad();
     Vehicle();
+    JetWeight();
     Walk();
     std::printf(failures ? "room_dialog_test: %d of %d FAILED\n" : "room_dialog_test: %d checks passed\n",failures ? failures : checks,checks);
     return failures ? 1 : 0;

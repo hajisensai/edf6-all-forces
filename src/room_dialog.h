@@ -21,8 +21,10 @@ struct Handle {
 // At load (room_ui.cpp InstallRoomUi): every address checked; false (logged) leaves the menu without dialogs.
 bool InstallNativeDialog() noexcept;
 bool NativeDialogReady() noexcept;
-// Opens one; `cursor` the button focused first. False when the game refused (nothing open then, nothing held).
-bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out) noexcept;
+// Opens one; `cursor` the button focused first. `layout`: the layout the game builds it from (an HUiDialogBox layout:
+// room_ui_logic.h kLoadoutBoxLayout, the menu's wide copy), nullptr the game's own LYT_HUIDIALOGBOX. False when the
+// game refused (nothing open then, nothing held).
+bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out,const wchar_t* layout) noexcept;
 // The game still holds it (open or still closing).
 bool DialogAlive(const Handle& h) noexcept;
 // The button picked in this dialog (its id), once: false while none was.

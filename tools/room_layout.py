@@ -5,6 +5,17 @@ online room's and the offline HQ's stock layouts with the menu's elements added,
   Mods/UI/LYT_HUIHQMAIN.SGO       HUiHQMain's layout (Root.cpk UI/LYT_HUIHQMAIN.SGO) + the same subtree
   Mods/UI/EDF6VC_WHITE.DDS        a plain white 8 x 8 texture the plugin binds to the panel and the chips and tints
                                   (Root.cpk has no plain one; the format is UI/CHATSHORTCUT_CURSOR.DDS's: 32-bit BGRA)
+  Mods/UI/EDF6VC_LOADOUTBOX.SGO   the menu's own copy of the game's dialog box (Root.cpk UI/LYT_HUIDIALOGBOX.SGO, the
+                                  same class HUiDialogBox), only its sizes changed: a wide window left of the 3D view
+                                  (loadout_box). A new name: the game's own dialogs keep the stock file.
+
+The loadout box (2026-10-25, the user: "支援战前配置显示好小，弄成选择兵种武器那样多好"): the menu's pages are the game's own
+dialog box (src/room_dialog.cpp), which sizes itself from its layout's base_min_size, button_size_min / _max and its
+template button (0x80ED80 reads them by name: they are data, not code). The stock values make a 400 px window of 180-300
+px buttons. The copy keeps every member and the class and changes only those numbers and the window's horizontal anchor:
+centred on x = BOX_CENTER_X (hcoord 1: the element's centre at its pos, as the weapon select's full-screen panel at
+(960, 540)) instead of the screen's middle (flag 1), so the soldier preview on the right stays visible as on the stock
+equipment screens. The plugin opens its pages with this file when it is installed, else with the stock one.
 
 A vcLoad Button definition inherits the screen's original menu button. It is deliberately absent from layout_tree;
 src/room_ui.cpp creates it under the real native button group with HUiLayout::AddByName only after validation.
@@ -34,10 +45,16 @@ The elements (docs/room-ui-re.md §5: [type, skin, pos, area, flags, hcoord, vco
       vcR00N             the field / rounds note (TextField)
     vcS0..vcS3           the status lines (generation, room sync, the client's note)
     vcHint / vcHelp2 / vcHelp3  three contextual help lines (separate from status)
-    vcEntry              the visible closed-page entry (actual toggle key / pad combination)
+There is no closed-page entry text any more (2026-10-25, the user: "hud重叠了，这个hud都换成原版那样的不行吗"): the
+old vcEntry line sat at y = 974, inside HUiMainFrame's own bottom guide band (LYT_MAINFRAME ControlGuideText /
+GuideTextSetting at y = 970 / 994, where EDF6Coop's MSLabel is too) and was drawn over Coop's label. The entry is the
+native vcLoad button below, and its focus writes the shortcut into the screen's own MenuDescText window (the game's
+description box), exactly as the stock menu items describe themselves. The overlay itself stays between HUiMainFrame's
+title band and its guide band (FRAME_TOP / FRAME_BOTTOM, read back from Root.cpk's LYT_MAINFRAME by
+tests/room_layout_test.py): the main frame is drawn over every screen, so nothing of ours may sit in its bands.
 src/room_ui_logic.h names them the same way (tests/room_layout_test.py checks the two agree).
 
-The installer writes both at install (`install`, owner `roomui` in the ledger, released at uninstall); `loadout-generate`
+The installer writes them all at install (`install`, owner `roomui` in the ledger, released at uninstall); `loadout-generate`
 writes a missing one as a new file only (`install_missing`: never replaces a file, so a running game sees none or all).
 A layout already there that the ledger does not record as ours is another mod's: left alone, and said.
 
@@ -71,13 +88,17 @@ SILENT_SKINS = (TRANSPARENT, ICON)          # every skin this tool uses: none dr
 WHITE = 'UI/EDF6VC_WHITE.DDS'               # under Mods; the plugin's kWhiteTexture (app:/UI/EDF6VC_WHITE.dds)
 WHITE_SIZE = 8
 
-PANEL_X, PANEL_Y, PANEL_W, PANEL_H = 48.0, 96.0, MENU_RIGHT - 48.0, 912.0
+# HUiMainFrame (LYT_MAINFRAME, drawn over every screen, EDF6Coop's MSLabel included) owns two bands of the 1920 x 1080
+# layout: its title (CurrentUIDispMain / Sub, down to y = 102) and its control guide (ControlGuideText /
+# GuideTextSetting, from y = 970). The overlay lives strictly between them (tests/room_layout_test.py reads the stock
+# LYT_MAINFRAME back and checks every element).
+FRAME_TOP, FRAME_BOTTOM = 104.0, 960.0
+PANEL_X, PANEL_Y, PANEL_W, PANEL_H = 48.0, 112.0, MENU_RIGHT - 48.0, 840.0
 ROW_Y, ROW_STEP, ROW_H = 168.0, 46.0, 40.0
 UNIT_X, UNIT_W = 80.0, 380.0
 ROWS_X = 480.0
-STATUS_Y, STATUS_STEP = 736.0, 36.0
-HINT_Y, HELP_STEP = 896.0, 36.0
-ENTRY_Y = 974.0
+STATUS_Y, STATUS_STEP, STATUS_H = 722.0, 34.0, 32.0
+HINT_Y, HELP_STEP, HELP_H = 862.0, 30.0, 28.0
 
 
 def _layout(skin: str, x: float, y: float, w: float, h: float) -> list:
@@ -104,7 +125,7 @@ def status_name(i: int) -> str:
 
 
 ROOT, BACK, HEAD, HINT = PREFIX + 'Root', PREFIX + 'Back', PREFIX + 'Head', PREFIX + 'Hint'
-HELP2, HELP3, ENTRY = PREFIX + 'Help2', PREFIX + 'Help3', PREFIX + 'Entry'
+HELP2, HELP3 = PREFIX + 'Help2', PREFIX + 'Help3'
 NATIVE_ENTRY = PREFIX + 'Load'  # a definition only: instantiated by the native AddByName after the plugin validates
 ROW_PARTS = ('T', 'A', 'B', 'I', 'N')   # text, primary chip, secondary chip, icon, note
 
@@ -114,11 +135,10 @@ def elements() -> dict[str, list]:
     e: dict[str, list] = {
         ROOT: _layout(TRANSPARENT, 0.0, 0.0, 1920.0, 1080.0),
         BACK: _layout(ICON, PANEL_X, PANEL_Y, PANEL_W, PANEL_H),
-        HEAD: _text(UNIT_X, 112.0, 1000.0, 40.0, 28),
-        HINT: _text(UNIT_X, HINT_Y, 1000.0, 34.0, 18),
-        HELP2: _text(UNIT_X, HINT_Y + HELP_STEP, 1000.0, 34.0, 18),
-        HELP3: _text(UNIT_X, HINT_Y + 2 * HELP_STEP, 1000.0, 34.0, 18),
-        ENTRY: _text(UNIT_X, ENTRY_Y, 1000.0, 34.0, 22),
+        HEAD: _text(UNIT_X, 120.0, 1000.0, 40.0, 28),
+        HINT: _text(UNIT_X, HINT_Y, 1000.0, HELP_H, 18),
+        HELP2: _text(UNIT_X, HINT_Y + HELP_STEP, 1000.0, HELP_H, 18),
+        HELP3: _text(UNIT_X, HINT_Y + 2 * HELP_STEP, 1000.0, HELP_H, 18),
     }
     for i in range(ROWS):
         y = ROW_Y + i * ROW_STEP
@@ -130,7 +150,7 @@ def elements() -> dict[str, list]:
         e[row_name(i, 'I')] = _layout(ICON, 428.0, 0.0, 80.0, ROW_H)
         e[row_name(i, 'N')] = _text(512.0, 0.0, 108.0, ROW_H, 20)
     for i in range(STATUS_LINES):
-        e[status_name(i)] = _text(UNIT_X, STATUS_Y + i * STATUS_STEP, 1000.0, 34.0, 20)
+        e[status_name(i)] = _text(UNIT_X, STATUS_Y + i * STATUS_STEP, 1000.0, STATUS_H, 20)
     return e
 
 
@@ -145,6 +165,53 @@ def native_entry(room: bool) -> list:
     if room:
         props += [['pos', [0.0, 2.0, 0.0]], ['area', [0.0, 0.0, 440.0, 34.0]], ['font_size', [22, 22]]]
     return [[0, 'Button03Base' if room else 'Button02Base'], props]
+
+
+LOADOUT_BOX = 'UI/EDF6VC_LOADOUTBOX.SGO'   # src/room_ui_logic.h kLoadoutBoxLayout / kLoadoutBoxFile
+DIALOG_STOCK = 'LYT_HUIDIALOGBOX.SGO'      # Root.cpk UI/: the game's dialog box, the copy's source
+BOX_CENTER_X = 700.0                       # the window's centre (layout units): 150..1250 at its minimum width
+BOX_MIN_SIZE = (1100.0, 560.0)             # base_min_size (stock 400 x 36)
+BOX_BUTTON_W = 600.0                       # button_size_min = _max: every button this wide (stock 180..300)
+BOX_BUTTON_FONT = 26                       # the template button's font (stock 24); its height stays the stock 42
+BOX_TEXT_W = 1000.0                        # the message's width (stock 800); its font stays the stock 32
+BOX_CHANGED = ('HUiMessageBoxDialogBase', 'HUiMessageBoxDialogText', '_HUiButton', 'base_min_size', 'button_size_min',
+               'button_size_max')
+
+
+def _with_prop(props: list, name: str, value: object) -> list:
+    out = [list(p) for p in props]
+    for p in out:
+        if p and p[0] == name:
+            p[1] = value
+            return out
+    raise ValueError(f'模板里没有 {name}')
+
+
+def loadout_box(stock: bytes) -> bytes:
+    """The game's dialog box layout (`stock`, Root.cpk UI/LYT_HUIDIALOGBOX.SGO) with the menu's sizes (BOX_CHANGED only)."""
+    version, members = sgo.read(stock)
+    if members.get('xgs_ui_object_class') != 'HUiDialogBox':
+        raise ValueError('不是 HUiDialogBox 的布局')
+    out = dict(members)
+    base = list(members['HUiMessageBoxDialogBase'])
+    if base[0] != 'Layout' or [int(f) for f in base[4]] != [1, 2] or base[5] != 1:
+        raise ValueError(f'对话框窗口不是预期的居中布局：{sgo.plain(base)}')
+    base[2] = [BOX_CENTER_X, 0.0, 0.0]
+    base[4] = [2]                     # vertically centred still; horizontally its pos (hcoord 1: its centre there)
+    out['HUiMessageBoxDialogBase'] = base
+    text = list(members['HUiMessageBoxDialogText'])
+    text[3] = [0.0, 0.0, BOX_TEXT_W, sgo.plain(text[3])[3]]
+    out['HUiMessageBoxDialogText'] = text
+    button = list(members['_HUiButton'])
+    if button[0] != 'Button':
+        raise ValueError('按钮模板不是 Button')
+    button[3] = [0.0, 0.0, BOX_BUTTON_W, sgo.plain(button[3])[3]]
+    button[7] = _with_prop(button[7], 'font_size', [BOX_BUTTON_FONT, BOX_BUTTON_FONT])
+    out['_HUiButton'] = button
+    out['base_min_size'] = [BOX_MIN_SIZE[0], BOX_MIN_SIZE[1]]
+    out['button_size_min'] = BOX_BUTTON_W
+    out['button_size_max'] = BOX_BUTTON_W
+    return sgo.write_depth_first(version, out)
 
 
 def white_dds() -> bytes:
@@ -178,7 +245,7 @@ def subtree() -> list:
         kids += [[row_name(i)], [x for part in ROW_PARTS for x in ([row_name(i, part)], 0)]]
     for i in range(STATUS_LINES):
         kids += [[status_name(i)], 0]
-    kids += [[HINT], 0, [HELP2], 0, [HELP3], 0, [ENTRY], 0]
+    kids += [[HINT], 0, [HELP2], 0, [HELP3], 0]
     return [[ROOT], kids]
 
 
@@ -226,9 +293,11 @@ def strip(patched: bytes) -> bytes:
 
 
 def build(root: str) -> dict[str, bytes]:
-    """{path under Mods: bytes} for both screens, from the game's Root.cpk (only read)."""
+    """{path under Mods: bytes} for both screens and the loadout box, from the game's Root.cpk (only read)."""
     game = rootcpk.Game(root)
-    return {f'UI/{name}': patch(game.read('UI', name)) for name in LAYOUTS}
+    out = {f'UI/{name}': patch(game.read('UI', name)) for name in LAYOUTS}
+    out[LOADOUT_BOX] = loadout_box(game.read('UI', DIALOG_STOCK))
+    return out
 
 
 def _ours(led: ledger.Ledger, rel: str) -> bool:
@@ -259,7 +328,7 @@ def install_missing(root: str) -> list[str]:
         path = led.put_new(OWNER, WHITE, white_dds())
         if path:
             out.append(path)
-    if all(os.path.exists(led.disk(f'UI/{name}')) for name in LAYOUTS):
+    if all(os.path.exists(led.disk(rel)) for rel in [*(f'UI/{name}' for name in LAYOUTS), LOADOUT_BOX]):
         return out
     for rel, data in build(root).items():
         path = led.put_new(OWNER, rel, data)

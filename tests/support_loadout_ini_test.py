@@ -55,13 +55,45 @@ check([(n, label) for _, n, label in kinds] == [(n, label) for n, label, _ in sl
 check([n for _, n, _ in kinds][:5] == [n for n, _ in sc.WEAPONS], 'the Rangers\' kind names are the ini weapons\'')
 bodies = re.findall(r'L"app:/object/(\w+)\.sgo",L"app:/object/(\w+)\.sgo"', read('src/support_soldier.cpp'))
 check([(t, t + '_LEADER') for _, _, t in sl.KINDS] == bodies, 'each kind\'s template (and its _LEADER) is the plugin\'s')
-stores = re.findall(r'\{(\d+),L"(\w+)",L"([^"]+)",LoadRole::(\w+),(true|false),(true|false)\}', header)
-check([(int(c), n, label, role, j == 'true', t == 'true') for c, n, label, role, j, t in stores] == list(sl.LOAD_STORES),
+stores = re.findall(r'\{(\d+),L"(\w+)",L"([^"]+)",LoadRole::(\w+),(true|false),(true|false),(\d+)\}', header)
+check([(int(c), n, label, role, j == 'true', t == 'true') for c, n, label, role, j, t, _ in stores] == list(sl.LOAD_STORES),
       'pylon stores equal the plugin\'s')
 check(re.search(r'kRoundCounts\[16\]=\{([^}]*)\}', header).group(1).split(',') == [str(n) for n in sl.ROUND_COUNTS],
       'round counts equal')
-rows = re.findall(r'\{VehicleBody::\w+,L"(\w+)",L"([\w.]+)",(\d+),(true|false)\}', header)
-check({n: (b, int(m), t == 'true') for n, b, m, t in rows} == sl.BODIES, 'vehicle bodies equal')
+rows = re.findall(r'\{VehicleBody::\w+,L"(\w+)",L"([\w.]+)",(\d+),(true|false),([^}]*)\}', header)
+check({n: (b, int(m), t == 'true') for n, b, m, t, _ in rows} == sl.BODIES, 'vehicle bodies equal')
+# The weight a jet may carry (2026-10-25, "合理的改，不是完全随心所欲"): the plugin's, the editor's and the flight model's
+# numbers are the same ones. A round's mass: kLoadStores massKg == STORE_MASS_KG == vcobjects STORES (what the flight model
+# weighs, src/stores.inc). A body's budget: kPayloadSharePercent of its NPC jet's clean mass (vcobjects JET_MASSES).
+import vcobjects as vc  # noqa: E402
+check({n: int(kg) for _, n, _, _, _, _, kg in stores} == sl.STORE_MASS_KG, 'round masses: the plugin\'s == the editor\'s')
+check(all(sl.STORE_MASS_KG[n] == (vc.STORES[n].mass if n not in ('AP', 'HE', 'GLM') else 0) for n in sl.STORE_MASS_KG) and
+      all(vc.STORES[n].mass == 0 for n in ('AP', 'HE', 'GLM')), 'round masses are the flight model\'s (the tank\'s weigh nothing)')
+share = int(re.search(r'kPayloadSharePercent=(\d+);', header).group(1))
+check(share == sl.PAYLOAD_SHARE_PERCENT, 'payload share equal')
+budget = {}
+for n, _, _, _, expr in rows:
+    m = re.fullmatch(r'(\d+)\*kPayloadSharePercent/100', expr.strip())
+    budget[n] = int(m.group(1)) * share // 100 if m else int(expr)
+check(budget == sl.PAYLOAD_KG, f'payload budgets: the plugin\'s {budget} == the editor\'s {sl.PAYLOAD_KG}')
+for body in ('STRIKE', 'FIGHTER', 'INTERCEPTOR', 'MULTIROLE'):
+    jet = vc.JETS[f'edf6tr_jet_{body.lower()}_mission']
+    check(sl.PAYLOAD_KG[body] == int(vc.JET_MASSES[jet.mark]) * share // 100, f'{body}: its budget is {share} % of its clean mass')
+    # Its stock arms (the loadout it always came with) fit.
+    pylons = []
+    for w in jet.weapons:
+        m = re.fullmatch(r'app:/weapon/edf6vc_([a-z_]+?)_(\d+)\.sgo', w)
+        if m and m.group(1).upper() in sl.STORE_CODE:
+            pylons.append((m.group(1).upper(), int(m.group(2))))
+    check(pylons and sl.within_payload(sl.Loadout(body, False, pylons)), f'{body}: its stock arms {pylons} fit its budget')
+check(sl.PAYLOAD_KG['TANK'] == 0, 'the tank is not weighed')
+check(refused(sl.parse_vehicle, 'AAM_L:40,AAM_L:40,AAM_L:40,AAM_L:40,AAM_L:40', 'INTERCEPTOR') and
+      refused(sl.parse_vehicle, 'MK82:40', 'STRIKE') and sl.parse_vehicle('MK82:19,MK82:19', 'STRIKE') is not None and
+      sl.parse_vehicle('MK82:6,MK82:6,MK82:4', 'FIGHTER') is not None,
+      'over the weight refused, all bombs within it kept (the user\'s own examples)')
+over = sl.Loadout('INTERCEPTOR', False, [('AAM_L', 40)])
+check(sl.of_variant(sl.variant(over), 'INTERCEPTOR') is None and sl.decode_name(sl.vehicle_file(over)) is None,
+      'a peer\'s / a host list\'s over-weight loadout is no loadout: never generated')
 check(dict(re.findall(r'\{L"(\w+)",VehicleBody::(\w+)\}', header)) == {k: b.lower() for k, b in sl.VEHICLE_KEYS.items()},
       'vehicle keys equal')
 check(set(sl.VEHICLE_KEYS) <= set(sc.UNIT_KEYS), 'vehicle keys are catalog keys')

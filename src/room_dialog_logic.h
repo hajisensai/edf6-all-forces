@@ -171,15 +171,19 @@ template<class Put> int Entries(const rm::Menu& m,const Nav& nav,Put put) noexce
         for(int i=0;i<count;++i)emit({Do::set,list[i]},PackName(list[i]));
         break;
     }
-    case Page::store: {
-        if(!u)break;
+    case Page::store: {   // the body's stores of which at least one round still fits its weight (rm::PylonFits)
+        if(!u || nav.row<1 || nav.row>u->vehicle.count)break;
         std::uint8_t allowed[kLoadStoreCount];
         const int count=rm::AllowedStores(*u,allowed);
-        for(int i=0;i<count;++i)emit({Do::set,allowed[i]},StoreName(allowed[i]));
+        for(int i=0;i<count;++i)if(rm::MostRoundsFitting(*u,nav.row-1,allowed[i])>=0)emit({Do::set,allowed[i]},StoreName(allowed[i]));
         break;
     }
-    case Page::rounds:
-        for(int r=0;r<16;++r){detail::Put(text,kTextMost,L"×%d",kRoundCounts[r]);emit({Do::set,r},text);}
+    case Page::rounds:    // the counts this pylon's store may hold within the weight
+        if(!u || nav.row<1 || nav.row>u->vehicle.count)break;
+        for(int r=0;r<16;++r) {
+            if(!rm::PylonFits(*u,nav.row-1,u->vehicle.store[nav.row-1],static_cast<std::uint8_t>(r)))continue;
+            detail::Put(text,kTextMost,L"×%d",kRoundCounts[r]);emit({Do::set,r},text);
+        }
         break;
     case Page::gun:
         emit({Do::set,0},hudtext::Tr(Tx::roomGunHe));
@@ -228,7 +232,7 @@ inline void Actions(Dialog& d,const rm::Menu& m,const Nav& nav) noexcept {
     case Page::unit:
         if(!u)break;
         if(rm::IsSquad(*u) && u->squad.count<u->seats)AddF(d,{Do::add,0},hudtext::Tr(Tx::roomDlgAddSoldier),u->squad.count,u->seats);
-        if(u->kind==rm::UnitKind::vehicle && u->vehicle.On() && u->vehicle.count<rm::MostRows(*u))
+        if(u->kind==rm::UnitKind::vehicle && u->vehicle.On() && rm::CanAddPylon(*u))
             AddF(d,{Do::add,0},hudtext::Tr(Tx::roomDlgAddPylon),u->vehicle.count,rm::MostRows(*u));
         if(rm::IsCrewUnit(*u)) {
             CrewPrimaryName(m.palette,u->crew,OwnDefault(*u),name,kTextMost);
@@ -275,7 +279,21 @@ inline void Actions(Dialog& d,const rm::Menu& m,const Nav& nav) noexcept {
     default: break;
     }
 }
+// A weighed vehicle's pages say what its pylons weigh against what it may carry (rm::UnitMassKg / UnitBudgetKg): the
+// choices the store / rounds pages offer are the ones that keep it within.
+inline void PayloadLine(Dialog& d,const rm::Menu& m,const Nav& nav) noexcept {
+    const rm::Unit* u=nav.unit>=0 && nav.unit<m.unitCount ? &m.unit[nav.unit] : nullptr;
+    const bool vehiclePage=nav.page==Page::unit || nav.page==Page::pylon || nav.page==Page::store || nav.page==Page::rounds;
+    if(!u || !vehiclePage || u->kind!=rm::UnitKind::vehicle || !u->vehicle.On() || rm::UnitBudgetKg(*u)<=0)return;
+    const std::size_t used=std::wcslen(d.title);
+    if(used+1<kTitleMost)Put(d.title+used,kTitleMost-used,hudtext::Tr(Tx::roomDlgPayload),rm::UnitMassKg(*u),rm::UnitBudgetKg(*u));
+}
+inline void TitleText(Dialog& d,const rm::Menu& m,const Nav& nav,const Context& c) noexcept;
 inline void Title(Dialog& d,const rm::Menu& m,const Nav& nav,const Context& c) noexcept {
+    TitleText(d,m,nav,c);
+    PayloadLine(d,m,nav);
+}
+inline void TitleText(Dialog& d,const rm::Menu& m,const Nav& nav,const Context& c) noexcept {
     const rm::Unit* u=nav.unit>=0 && nav.unit<m.unitCount ? &m.unit[nav.unit] : nullptr;
     wchar_t name[kTextMost];
     switch(nav.page) {
@@ -412,14 +430,25 @@ inline void Set(rm::Menu& m,const Nav& nav,std::int32_t v) noexcept {
             u.squad.look[nav.row].pack=static_cast<std::uint8_t>(v);
         return;
     case Page::gun: if(u.vehicle.On())u.vehicle.apGun=v!=0; return;
-    case Page::store: {
+    case Page::store: {   // a store whose rounds would not fit the weight takes as many as do
         if(nav.row<1 || nav.row>u.vehicle.count)return;
         std::uint8_t allowed[kLoadStoreCount];
         const int n=rm::AllowedStores(u,allowed);
-        for(int i=0;i<n;++i)if(allowed[i]==v)u.vehicle.store[nav.row-1]=static_cast<std::uint8_t>(v);
+        for(int i=0;i<n;++i) {
+            if(allowed[i]!=v)continue;
+            const int most=rm::MostRoundsFitting(u,nav.row-1,allowed[i]);
+            if(most<0)return;
+            const int at=nav.row-1;
+            if(!rm::PylonFits(u,at,allowed[i],u.vehicle.rounds[at]))u.vehicle.rounds[at]=static_cast<std::uint8_t>(most);
+            u.vehicle.store[at]=allowed[i];
+        }
         return;
     }
-    case Page::rounds: if(nav.row>=1 && nav.row<=u.vehicle.count && v>=0 && v<16)u.vehicle.rounds[nav.row-1]=static_cast<std::uint8_t>(v); return;
+    case Page::rounds:
+        if(nav.row>=1 && nav.row<=u.vehicle.count && v>=0 && v<16 &&
+           rm::PylonFits(u,nav.row-1,u.vehicle.store[nav.row-1],static_cast<std::uint8_t>(v)))
+            u.vehicle.rounds[nav.row-1]=static_cast<std::uint8_t>(v);
+        return;
     case Page::crewPrimary:
         if(v==-2){u.crew=CrewColour{};return;}
         if(!u.crew.set){u.crew.set=true;u.crew.look=SupportLook{};}

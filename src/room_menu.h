@@ -325,10 +325,48 @@ inline int AllowedStores(const Unit& u,std::uint8_t* out) noexcept {
     for(const auto& s:kLoadStores)if(IsTank(u) ? s.tank : s.jet)out[n++]=s.code;
     return n;
 }
-// A new pylon's store and rounds: a tank 20 APFSDS (the stock extra rounds, make_stock_stores), a jet 2 AAM_S.
-inline void NewPylon(const Unit& u,std::uint8_t* store,std::uint8_t* rounds) noexcept {
+// --- The weight a jet may carry (support_loadout.h WithinPayload: kPayloadSharePercent of its clean mass): every edit keeps it, so the
+// menu never shows a loadout its parser would refuse (2026-10-25, the user: "合理的改，不是完全随心所欲") ---
+// Whether pylon `i` (count: a new one after the last) holding `rounds` (a kRoundCounts code) of `store` keeps the
+// vehicle within its weight.
+inline bool PylonFits(const Unit& u,int i,std::uint8_t store,std::uint8_t rounds) noexcept {
+    VehicleLoadout l=u.vehicle;
+    if(!l.On()){l=VehicleLoadout{};l.body=u.body;}
+    if(i<0 || i>l.count || i>=kPylonsMost || rounds>15)return false;
+    l.store[i]=store;l.rounds[i]=rounds;
+    if(i==l.count)++l.count;
+    return WithinPayload(l);
+}
+// The most rounds (a kRoundCounts code) pylon `i` may hold of `store` within the weight; -1: not even one.
+inline int MostRoundsFitting(const Unit& u,int i,std::uint8_t store) noexcept {
+    for(int r=15;r>=0;--r)if(PylonFits(u,i,store,static_cast<std::uint8_t>(r)))return r;
+    return -1;
+}
+// What the vehicle's pylons weigh now and may weigh (kg; budget 0: not weighed).
+inline int UnitMassKg(const Unit& u) noexcept { return u.vehicle.On() ? LoadoutMassKg(u.vehicle) : 0; }
+inline int UnitBudgetKg(const Unit& u) noexcept { return PayloadBudgetKg(u.body); }
+// A new pylon's store and rounds: a tank 20 APFSDS (the stock extra rounds, make_stock_stores), a jet 2 AAM_S, or (that
+// over the jet's weight) the first store in kLoadStores order that fits, as many as fit up to 2. False: nothing fits.
+inline bool NewPylon(const Unit& u,std::uint8_t* store,std::uint8_t* rounds) noexcept {
     *store=IsTank(u) ? 8 : 1;
     *rounds=static_cast<std::uint8_t>(RoundCode(IsTank(u) ? 20 : 2));
+    const int at=u.vehicle.On() ? u.vehicle.count : 0;
+    if(PylonFits(u,at,*store,*rounds))return true;
+    std::uint8_t allowed[kLoadStoreCount];
+    const int n=AllowedStores(u,allowed);
+    for(int k=0;k<n;++k) {
+        const int most=MostRoundsFitting(u,at,allowed[k]);
+        if(most<0)continue;
+        *store=allowed[k];
+        *rounds=static_cast<std::uint8_t>(most<RoundCode(2) ? most : RoundCode(2));
+        return true;
+    }
+    return false;
+}
+// Whether one more pylon may go on: a free one, and something that fits the weight.
+inline bool CanAddPylon(const Unit& u) noexcept {
+    std::uint8_t store=0,rounds=0;
+    return (u.vehicle.On() ? u.vehicle.count : 0)<MostRows(u) && NewPylon(u,&store,&rounds);
 }
 
 // --- Editing (each keeps the unit a value its parser accepts) ---
@@ -354,7 +392,9 @@ inline Act AddPylon(Menu& m,Unit& u) noexcept {
     Materialise(u);
     VehicleLoadout& l=u.vehicle;
     if(l.count>=MostRows(u))return Act::refused;
-    NewPylon(u,&l.store[l.count],&l.rounds[l.count]);
+    std::uint8_t store=0,rounds=0;
+    if(!NewPylon(u,&store,&rounds))return Act::refused;   // the jet's weight is all taken
+    l.store[l.count]=store;l.rounds[l.count]=rounds;
     ++l.count;m.rowAt=l.count;
     return Act::changed;
 }
@@ -388,14 +428,30 @@ inline void ChangeSoldier(Menu& m,Unit& u,int step) noexcept {
     else if(m.fieldAt==2)l.secondary=CycleColour(m.palette,l.secondary,step);
     else l.pack=static_cast<std::uint8_t>(CyclePack(l.pack,SupportSoldierClass(u.squad.kind[i]),step));
 }
+// Rounds and stores step over the values that keep the vehicle within its weight (PylonFits); a store whose current
+// rounds would not fit takes as many as do (MostRoundsFitting). Nothing else fits: unchanged.
 inline void ChangePylon(Menu& m,Unit& u,int step) noexcept {
     const int i=m.rowAt-1;
-    if(m.fieldAt==1){u.vehicle.rounds[i]=static_cast<std::uint8_t>(Wrap(u.vehicle.rounds[i],step,16));return;}
+    if(m.fieldAt==1) {
+        int r=u.vehicle.rounds[i]&0xF;
+        for(int tries=0;tries<16;++tries) {
+            r=Wrap(r,step,16);
+            if(PylonFits(u,i,u.vehicle.store[i],static_cast<std::uint8_t>(r))){u.vehicle.rounds[i]=static_cast<std::uint8_t>(r);return;}
+        }
+        return;
+    }
     std::uint8_t allowed[kLoadStoreCount];
     const int n=AllowedStores(u,allowed);
     int at=0;
     for(int k=0;k<n;++k)if(allowed[k]==u.vehicle.store[i])at=k;
-    u.vehicle.store[i]=allowed[Wrap(at,step,n)];
+    for(int tries=0;tries<n;++tries) {
+        at=Wrap(at,step,n);
+        const int most=MostRoundsFitting(u,i,allowed[at]);
+        if(most<0)continue;
+        u.vehicle.store[i]=allowed[at];
+        if(!PylonFits(u,i,allowed[at],u.vehicle.rounds[i]))u.vehicle.rounds[i]=static_cast<std::uint8_t>(most);
+        return;
+    }
 }
 // A crew's primary cycles default (not set) -> X -> the palette (a hand-written colour counts as X's place); its
 // secondary stock -> the palette (changing it on a crew not set sets it, primary X).

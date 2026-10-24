@@ -32,7 +32,7 @@ void Names() {
         Expect(seen.insert(s).second,"every name unique");
         Expect(s[0]==L'v' && s[1]==L'c',"every name starts vc");
     };
-    for(const wchar_t* s:{kRootName,kBackName,kHeadName,kHintName,kHelp2Name,kHelp3Name,kEntryName})add(s);
+    for(const wchar_t* s:{kRootName,kBackName,kHeadName,kHintName,kHelp2Name,kHelp3Name})add(s);
     for(int i=0;i<kRows;++i) {
         Expect(UnitName(i,n),"unit name");add(n);
         for(Part p:{Part::box,Part::text,Part::primary,Part::secondary,Part::icon,Part::note}){Expect(RowName(i,p,n),"row name");add(n);}
@@ -43,7 +43,7 @@ void Names() {
     Expect(RowName(0,Part::box,n) && Same(n,L"vcR00"),"vcR00");
     Expect(StatusName(2,n) && Same(n,L"vcS2"),"vcS2");
     Expect(!UnitName(kRows,n) && !RowName(kRows,Part::text,n) && !StatusName(kStatusLines,n),"no name past the layout");
-    Expect(seen.size()==7u+static_cast<std::size_t>(kRows)*7u+kStatusLines,"element count");
+    Expect(seen.size()==6u+static_cast<std::size_t>(kRows)*7u+kStatusLines,"element count");
 }
 
 void NativeButton() {
@@ -161,17 +161,13 @@ void GateAndPlan() {
     Expect(!TakeInput(g,false,false),"released: the room reads again");
     Expect(!TakeInput(g,false,true),"a later press after release: the room's");
     Plan p=PlanFrame(true,true);
-    Expect(p.step && p.show && !p.entry,"input, open: stepped and shown, no closed-page entry");
+    Expect(p.step && p.show,"input, open: stepped and shown");
     p=PlanFrame(false,true);
-    Expect(!p.step && !p.show && !p.entry,"covered: hidden and frozen, no entry");
+    Expect(!p.step && !p.show,"covered: hidden and frozen");
     p=PlanFrame(true,false);
-    Expect(p.step && !p.show && p.entry,"shut: stepped (the toggle), entry visible before the player knows the key");
-    p=PlanFrame(true,false,false);
-    Expect(!p.entry,"unbound toggle: no unavailable entry advertised");
-    p=PlanFrame(true,false,true,false);
-    Expect(!p.entry,"closing key held: entry waits for the input gate to release");
+    Expect(p.step && !p.show,"shut: stepped (the toggle), nothing of ours drawn (the entry is the native button)");
     p=PlanFrame(false,false);
-    Expect(!p.entry,"covered closed page: no entry over a native sub-window");
+    Expect(!p.step && !p.show,"covered closed page: nothing stepped, nothing drawn");
     // A whole close sequence through the menu: Esc on the unit list closes, the room gets nothing while Esc is held.
     roommenu::Menu m;Gate gate;Keys held{};
     Raw r;r.foreground=true;r.toggleKey=true;

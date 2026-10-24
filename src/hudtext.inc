@@ -919,6 +919,7 @@ HUDTEXT(roomDlgSecondary,L"Colour 2: %ls",L"副色：%ls",L"副色：%ls",L"カ�
 HUDTEXT(roomDlgPack,L"Backpack: %ls",L"背包武器：%ls",L"背包武器：%ls",L"バックパック：%ls")
 HUDTEXT(roomDlgPylon,L"Pylon %d: %ls x%d",L"挂点 %d：%ls ×%d",L"掛點 %d：%ls ×%d",L"パイロン %d：%ls ×%d")
 HUDTEXT(roomDlgAddPylon,L"Add a pylon (%d / %d)",L"添加挂点（%d / %d）",L"新增掛點（%d / %d）",L"パイロンを追加（%d / %d）")
+HUDTEXT(roomDlgPayload,L"\nStores weight %d / %d kg",L"\n挂载重量 %d / %d kg",L"\n掛載重量 %d / %d kg",L"\n搭載重量 %d / %d kg")
 HUDTEXT(roomDlgRemovePylon,L"Remove this pylon",L"删除这个挂点",L"刪除這個掛點",L"このパイロンを外す")
 HUDTEXT(roomDlgStore,L"Store: %ls",L"挂载：%ls",L"掛載：%ls",L"搭載：%ls")
 HUDTEXT(roomDlgRounds,L"Rounds: %d",L"弹数：%d",L"彈數：%d",L"弾数：%d")

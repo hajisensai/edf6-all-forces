@@ -8,7 +8,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，RVA；2026-10-19。证据为本机原版二
 
 调研结论：游戏里「选一项」的原生窗口是 `HUiDialogBox`（`APP:/UI/LYT_HUIDIALOGBOX.SGO`：`Window_Test01_skin` 框体、`HUiMessageBoxDialogText` 说明文字、`HUiMessageBoxDialogButtonGrp` 按钮组、`_HUiButton` = `Button05_skin` 按钮、`default_cancel_action` = `set_exit_code 255`）。士兵画面的「更换士兵模型」弹窗（本仓库 4.1 外观已在其中追加过一项，10-18 截图已见）就是它。它的焦点移动、鼠标点选、确认 / 取消键、音效与开合动画全部由游戏处理。所以菜单整体改为一串这种对话框；插件只决定每页的说明文字和按钮，以及按钮按下后的效果（沿用 `room_menu.h` 的同一数据模型、同一存盘与生成链）。
 
-自绘覆盖层仍在两份布局里：关闭状态下的入口提示照旧；对话框代码签名不符时（`NativeDialogReady` 为假）整个菜单退回原覆盖层，不会无菜单。
+自绘覆盖层仍在两份布局里：关闭状态下不画任何东西（2026-10-25 去掉了入口提示行，见 [feature-2026-10-25-room-menu-review.md](feature-2026-10-25-room-menu-review.md)）；对话框代码签名不符时（`NativeDialogReady` 为假）整个菜单退回原覆盖层，不会无菜单。
 
 ## 构造方式（逐条照抄 `0x8AB310` 的弹窗构造）
 

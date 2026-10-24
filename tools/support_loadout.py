@@ -203,6 +203,15 @@ STORE_CODE = {s[1]: s[0] for s in LOAD_STORES}
 STORE_BY_CODE = {s[0]: s for s in LOAD_STORES}
 ROUND_COUNTS = (1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 19, 20, 25, 30, 38, 40)   # kRoundCounts
 PYLONS_MOST = 7                                                            # kPylonsMost
+# kLoadStores massKg: kg a round (pylib/vcobjects.py STORES mass; the tank's rounds weigh nothing there).
+STORE_MASS_KG = {'AAM_S': 85, 'AAM_M': 152, 'AAM_L': 450, 'AGM': 300, 'AGM_L': 50, 'MK82': 230, 'RKT': 32,
+                 'AP': 0, 'HE': 0, 'GLM': 0}
+# kVehicleBodies payloadKg: the most a body's pylons may weigh, kPayloadSharePercent of the jet's clean mass
+# (pylib/vcobjects.py JET_MASSES of its NPC mark); 0 = not weighed (the tank). tests/support_loadout_ini_test.py
+# derives them from vcobjects and the C++ table.
+PAYLOAD_SHARE_PERCENT = 40
+PAYLOAD_KG = {'TANK': 0, 'STRIKE': 22000 * PAYLOAD_SHARE_PERCENT // 100, 'FIGHTER': 16000 * PAYLOAD_SHARE_PERCENT // 100,
+              'INTERCEPTOR': 20000 * PAYLOAD_SHARE_PERCENT // 100, 'MULTIROLE': 18000 * PAYLOAD_SHARE_PERCENT // 100}
 # src/support_loadout.h kVehicleBodies: name -> (base file, most pylons, tank).
 BODIES: dict[str, tuple[str, int, bool]] = {
     'TANK': ('V505_TANK_MISSION.SGO', 4, True),
@@ -431,7 +440,19 @@ def parse_vehicle(text: str, body: str) -> Loadout | None:
         if len(out.pylons) >= most:
             raise Invalid('坦克最多 4 个挂点' if tank else '飞机最多 5 个挂点')
         out.pylons.append((name, int(t)))
+    if not within_payload(out):
+        raise Invalid(f'挂载共重 {mass_kg(out)} kg，超过该机可挂的 {PAYLOAD_KG[body]} kg')
     return out
+
+
+def mass_kg(l: Loadout) -> int:
+    """support_loadout.h LoadoutMassKg: each pylon's store mass x its rounds."""
+    return sum(STORE_MASS_KG[name] * rounds for name, rounds in l.pylons)
+
+
+def within_payload(l: Loadout) -> bool:
+    """support_loadout.h WithinPayload: a jet at most PAYLOAD_KG; the tank is not weighed."""
+    return PAYLOAD_KG.get(l.body, 0) <= 0 or mass_kg(l) <= PAYLOAD_KG[l.body]
 
 
 def format_vehicle(l: Loadout) -> str:
@@ -467,7 +488,7 @@ def of_variant(v: int, body: str) -> Loadout | None:
         if store is None or not (store[5] if tank else store[4]):
             return None
         out.pylons.append((store[1], ROUND_COUNTS[byte >> 4]))
-    return out
+    return out if within_payload(out) else None
 
 
 def vehicle_file(l: Loadout) -> str:
@@ -1074,10 +1095,11 @@ def edit_vehicle(text: str, key: str, ask: Callable[[str], str]) -> str:
                 if not rounds.isdigit() or int(rounds) not in ROUND_COUNTS:
                     raise Invalid(f'数量“{rounds}”不在可选范围内')
                 pylon = (name, int(rounds))
-                if pick == 'a':
-                    l.pylons.append(pylon)
-                else:
-                    l.pylons[int(pick) - 1] = pylon
+                pylons = l.pylons + [pylon] if pick == 'a' else [pylon if i == int(pick) - 1 else p for i, p in enumerate(l.pylons)]
+                candidate = Loadout(body, l.ap_gun, pylons)
+                if not within_payload(candidate):   # the plugin would refuse it: over the jet's weight
+                    raise Invalid(f'挂载共重 {mass_kg(candidate)} kg，超过该机可挂的 {PAYLOAD_KG[body]} kg')
+                l.pylons = pylons
                 changed = True
                 continue
             raise Invalid(f'不认识“{pick}”')

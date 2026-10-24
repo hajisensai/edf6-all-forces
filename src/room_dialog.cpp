@@ -194,7 +194,7 @@ bool InstallNativeDialog() noexcept {
 }
 bool NativeDialogReady() noexcept { return ready; }
 
-bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out) noexcept {
+bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out,const wchar_t* layout) noexcept {
     if(out){Unregister(*out);*out=Handle{};}
     if(!ready || !buttons || count<=0 || !out)return false;
     void* system=gd::Field<void*>(image,kSystem);
@@ -230,7 +230,9 @@ bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,
         gd::SetField<std::int32_t>(param,kParamFocus,1);
         if(title)edf::wstr::Assign(image,param+kParamTitle,title);
         if(made>0) {
-            reinterpret_cast<ShowFn>(image+kShow)(system,&weak,gd::Field<const wchar_t*>(image,kLayoutName),param);
+            // The layout by name, as the game passes its own (0x119C600 copies the name: 0x119C690..0x119C6A2).
+            const wchar_t* name=layout && *layout ? layout : gd::Field<const wchar_t*>(image,kLayoutName);
+            reinterpret_cast<ShowFn>(image+kShow)(system,&weak,name,param);
             shown=weak.control!=nullptr;
         }
         reinterpret_cast<Fn1>(image+kItemsDtor)(param+kParamItems);
@@ -247,7 +249,7 @@ bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,
         Log("ROOMDIALOG opening the dialog faulted: no dialog%s",weak.control ? " (the one shown closed)" : "");
         return false;
     }
-    if(!shown){Log("ROOMDIALOG the game opened no dialog (%d buttons)",count);return false;}
+    if(!shown){Log("ROOMDIALOG the game opened no dialog (%d buttons, layout %ls)",count,layout && *layout ? layout : L"stock");return false;}
     *out=Handle{weak.object,weak.control,serial,0,false};
     Register(out);
     return true;

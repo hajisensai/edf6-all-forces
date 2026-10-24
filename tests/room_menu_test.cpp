@@ -116,6 +116,8 @@ void ExhaustiveRoundTrip() {
             for(int i=0;i<a.count;++i){a.store[i]=store.code;a.rounds[i]=static_cast<std::uint8_t>(r);}
             wchar_t out[kValueMost],why[8];VehicleLoadout back;
             SerialiseVehicle(a,out,kValueMost);
+            // Over the jet's weight (WithinPayload) the menu cannot make it, and the parser refuses it.
+            if(!WithinPayload(a)){bad+=ParseVehicleLoadout(out,body.body,&back,why,8) ? 1 : 0;continue;}
             bad+=!(ParseVehicleLoadout(out,body.body,&back,why,8) && SameVehicle(a,back));
         }
     Expect(bad==0,"every kind / colour / store / round count the menu can make reads back as itself");
@@ -300,6 +302,48 @@ void VehicleLimits() {
     Expect(m.unit[m.unitAt].vehicle.count==0 && Snapshot(m).rows.row[0].text==RowText::guns,"all removed: the guns alone");
     SaveSet s;
     Expect(CollectSave(m,&s) && SaysValue(s,L"SupportVehicle_FIGHTER",L"GUNS"),"guns alone is written GUNS");
+}
+
+// The weight a jet may carry (support_loadout.h WithinPayload): the menu never makes a loadout its parser refuses.
+void VehicleWeight() {
+    Ini ini;
+    Menu m;
+    OpenAt(m,ini,L"INTERCEPTOR",false);   // 8000 kg
+    Tap(m,&Keys::confirm);                 // guns alone
+    Unit& u=m.unit[m.unitAt];
+    Expect(Tap(m,&Keys::add)==Act::changed && u.vehicle.store[0]==1 && kRoundCounts[u.vehicle.rounds[0]]==2,"a new pylon: 2 AIM-9X");
+    // Pylon 1's rounds stepped right as far as they go: AIM-9X x40 (3400 kg) fits; then AIM-54 keeps what fits of them.
+    Tap(m,&Keys::confirm);Tap(m,&Keys::down);   // its rounds field
+    TapN(m,&Keys::right,40);
+    Expect(WithinPayload(u.vehicle) && LoadoutMassKg(u.vehicle)<=PayloadBudgetKg(VehicleBody::interceptor),"rounds only within the weight");
+    Tap(m,&Keys::up);   // the store field
+    for(int i=0;i<20;++i) {
+        Tap(m,&Keys::right);
+        Expect(WithinPayload(u.vehicle),"every store stepped to keeps the weight (its rounds cut to fit)");
+    }
+    Tap(m,&Keys::cancel);
+    // Fill it up with AIM-54 x12 (5.4 t) pylons by hand: a second does not fit 12, adding offers what still fits.
+    u.vehicle.count=1;u.vehicle.store[0]=3;u.vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(12));
+    Expect(Tap(m,&Keys::add)==Act::changed && WithinPayload(u.vehicle) && u.vehicle.count==2,"a pylon added within the weight");
+    u.vehicle.count=1;u.vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(15));   // 6750 kg: 1250 kg left
+    for(int i=0;i<4;++i)Tap(m,&Keys::add);
+    Expect(WithinPayload(u.vehicle),"as many pylons as fit, each within the weight");
+    u.vehicle.count=1;u.vehicle.store[0]=7;u.vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(40));   // RKT x40 1280 kg
+    VehicleLoadout full=u.vehicle;full.body=VehicleBody::fighter;
+    Unit fighter=u;fighter.body=VehicleBody::fighter;fighter.vehicle=full;
+    fighter.vehicle.count=5;for(int i=0;i<5;++i){fighter.vehicle.store[i]=7;fighter.vehicle.rounds[i]=static_cast<std::uint8_t>(RoundCode(40));}
+    Expect(WithinPayload(fighter.vehicle) && !CanAddPylon(fighter),"five full pylons: nothing more (no sixth anyway)");
+    // 5400 + 920 + 50 = 6370 of 6400 kg: two pylons free, but not one round of anything (Hydra 70 32 kg) fits.
+    fighter.vehicle.count=3;
+    fighter.vehicle.store[0]=3;fighter.vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(12));
+    fighter.vehicle.store[1]=6;fighter.vehicle.rounds[1]=static_cast<std::uint8_t>(RoundCode(4));
+    fighter.vehicle.store[2]=5;fighter.vehicle.rounds[2]=static_cast<std::uint8_t>(RoundCode(1));
+    Expect(WithinPayload(fighter.vehicle) && LoadoutMassKg(fighter.vehicle)==6370 && !CanAddPylon(fighter),
+           "free pylons but no weight left: no pylon offered");
+    fighter.vehicle.count=2;
+    Expect(CanAddPylon(fighter),"weight left: a pylon offered");
+    SaveSet s;
+    Expect(CollectSave(m,&s),"what the menu made saves: every value reads back (CollectSave checks with the parser)");
 }
 
 void ResetAndCancel() {
@@ -541,6 +585,7 @@ int main() {
     Backpacks();
     SquadLimits();
     VehicleLimits();
+    VehicleWeight();
     ResetAndCancel();
     CrewColours();
     RandomPresses();

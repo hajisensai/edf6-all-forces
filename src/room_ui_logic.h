@@ -44,7 +44,11 @@ inline constexpr const wchar_t* kHeadName=L"vcHead";
 inline constexpr const wchar_t* kHintName=L"vcHint";
 inline constexpr const wchar_t* kHelp2Name=L"vcHelp2";
 inline constexpr const wchar_t* kHelp3Name=L"vcHelp3";
-inline constexpr const wchar_t* kEntryName=L"vcEntry";
+// The menu's own copy of the game's dialog box (tools/room_layout.py LOADOUT_BOX / loadout_box: LYT_HUIDIALOGBOX with
+// wide buttons and a wide window left of the 3D view; 2026-10-25, the user: "显示好小，弄成选择兵种武器那样"): the path
+// the game opens it by, and where the installer puts it under Mods. Not there (an older install): the stock dialog box.
+inline constexpr const wchar_t* kLoadoutBoxLayout=L"APP:/UI/EDF6VC_LOADOUTBOX.SGO";
+inline constexpr const wchar_t* kLoadoutBoxFile=L"UI\\EDF6VC_LOADOUTBOX.SGO";
 // The plain white texture the panel and the chips show, tinted (tools/room_layout.py WHITE: written to Mods/UI by the
 // installer; Root.cpk has no plain one). Without the plugin nothing binds it: the skins draw nothing.
 inline constexpr const wchar_t* kWhiteTexture=L"app:/UI/EDF6VC_WHITE.dds";
@@ -171,11 +175,11 @@ inline bool TakeInput(Gate& g,bool open,bool anyDown) noexcept {
 // --- One frame's plan ---
 // `hasInput`: the screen would read input this frame (0x8DAD00 with the real ctx: not covered by a sub-screen, a dialog
 // or a transition). Covered, the menu is hidden and frozen (no key steps it: not even the toggle), its edits kept.
-struct Plan { bool step,show,entry; };
-// The closed page advertises its real toggle without stealing focus. A covered page, an unavailable binding, or the
-// closing key still held hides the entry: the prompt must never promise an action that the page cannot take now.
-inline Plan PlanFrame(bool hasInput,bool open,bool canToggle=true,bool inputReleased=true) noexcept {
-    return Plan{hasInput,hasInput && open,hasInput && !open && canToggle && inputReleased};
+// The closed page draws nothing of ours (2026-10-25: the old entry line sat in HUiMainFrame's guide band, over EDF6Coop's
+// label): the entry is the native menu button (vcLoad), its shortcut written into the screen's own MenuDescText on focus.
+struct Plan { bool step,show; };
+inline Plan PlanFrame(bool hasInput,bool open) noexcept {
+    return Plan{hasInput,hasInput && open};
 }
 
 // --- The switches over one screen frame: Enabled && RoomLoadout (`on`) and RoomPreSync ---
