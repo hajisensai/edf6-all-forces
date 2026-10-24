@@ -36,7 +36,7 @@
 ## 验证
 
 - 离线（不需要游戏），推送前至少跑：
-  - `cmake --build build --target offline_checks` 后 `ctest --test-dir build --output-on-failure`
+  - `cmake --build build --target offline_checks` 后 `ctest --test-dir build --output-on-failure -j 8`（用例互不共享输出，可并行；新用例别写固定的共享路径，也别按墙钟判时效）
   - `python tools/selftest.py`（安装链自测：calls.inc 一致性、武器表事务、归属账本、ini 合并、每个插件都进了安装包）
 - 单个离线检查：`cmake --build build --target <x>_check && build\<x>_check.exe`。
 - 需要游戏文件的 native 审计测试靠缓存变量 `EDF6_NATIVE_DLL` / `EDF6_GAME_DIR`，不设就跳过。
@@ -56,6 +56,12 @@
 
 - `tools/testhub.py`（只用标准库，会被打进安装器）：`pull` 拉反馈、`reply` / `status` 回复与改状态、`case` 管测试用例、`publish ZIP --channel` 发包。认证用环境变量 `EDF6_TESTHUB_AUTH=user:password`。
 - 合 PR、写更新说明前，对照 `docs/feedback-*` 里的用户原话核对意图，不要照抄 PR 标题。
+
+## 合并后自动打分享包
+
+- 往 `main` 合并 PR（一批合并的，在最后一个合并之后）后，**不用再问**，直接按 `D:\APP\edf6-share\CLAUDE.md` 打分享包（推荐包）：等这次 main 推送的 CI 跑完、`nightly` 换成该 commit 的安装器，复制上一版 `.work/recommend-<sha7>/` 改 sha / 日期 / 更新说明后打包。
+- 打包用的源码 worktree 放 `D:\APP\edf6-wt-<MMDD>-share`（detached 在该 main commit）。CI 拿不到的模型（`twin_tank` / `drill_tank` / `sazabi` / `dreadnought`，即 `tools/build_release.py` 的 `RELEASE_MODELS` 里没入库的那些）要从 `D:\APP\edf6-models` 补进包；`RELEASE_MODELS` 新增未入库的文件夹时同步改 `run_export.py` 的 `EXTERNAL_MODELS`。
+- 安装到本机游戏仍守「实机测试」铁律：游戏开着就只打包不装，装要经 `gamequeue.py`。回报 zip 路径、sha256 与校验结果。
 
 ## 版本与发版
 

@@ -1325,12 +1325,15 @@ int SightStyleScenes(const std::wstring& dir,const float* ground) {
         // The stock crosshair (HudPlayer_CrossHair) gives way to the field drawn, for its soldier only (scope_hold.h; the
         // user, 2026-10-21: "进入瞄具状态的时候没隐藏准星"); at 1x it stays.
         const int otherSoldier=0;
-        const bool crosshair=HudScopeHoldsCrosshair(&sceneScopeSoldier)==(zoomed!=0) && !HudScopeHoldsCrosshair(&otherSoldier) &&
-                             !HudScopeHoldsCrosshair(nullptr);
+        // Read at the time the scene drew it: the 250 ms freshness is tests/scope_hold_test.cpp's, and a loaded machine
+        // (ctest -j) can take longer than that between this scene's draw and here.
+        const scopehold::Drawn published=scopeDrawn;
+        const auto held=[&](const void* soldier){return scopehold::Holds(published,soldier,published.at);};
+        const bool crosshair=held(&sceneScopeSoldier)==(zoomed!=0) && !held(&otherSoldier) && !held(nullptr);
         const bool ok=words && apart && owned && scope && crosshair;
         failed+=!ok;
         std::printf("%s  %ls: its words %d, no text overlapping %d, sight gun %d, scope quads %d, stock crosshair held back %d\n",
-                    ok ? "ok  " : "FAIL",name.c_str(),words,apart,owned,scopePieces,HudScopeHoldsCrosshair(&sceneScopeSoldier));
+                    ok ? "ok  " : "FAIL",name.c_str(),words,apart,owned,scopePieces,held(&sceneScopeSoldier));
     }
     // A flamethrower, a grenade launcher: no gun sight (their impact marks only).
     StockTank(ground);
