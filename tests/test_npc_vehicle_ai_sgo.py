@@ -54,7 +54,7 @@ class StockAimInstallTests(unittest.TestCase):
 
         class Game:
             def names(self, folder):
-                return [OBJECT]
+                return [OBJECT] if folder == 'OBJECT' else []
 
             def read(self, folder, name):
                 if name.upper() == 'V607_ROBOTRUCK.MRAB':
@@ -337,7 +337,7 @@ class NativeRootDonorTests(unittest.TestCase):
         native = rootcpk.Game(rootcpk.DEFAULT_GAME)
         class Source:
             def names(self, folder):
-                return [OBJECT]
+                return [OBJECT] if folder == 'OBJECT' else []   # make_optics also scans WEAPON (the gold weapons)
             def read(self, folder, name):
                 return native.read(folder, name)
         source = Source()

@@ -25,6 +25,7 @@ OWNER = 'optics'
 MANIFEST = '.edf6vc_optics.json'
 BACKUP = '.edf6vc_optics_backup'
 redirect = optics.redirect
+FOLDERS = ('OBJECT', 'WEAPON')   # where stock SGOs name a model of optics.MODELS (WEAPON: the gold weapons)
 AI_REL = 'OBJECT/V607_ROBOTRUCK.SGO'
 AI_KEY = 'v607_aim_info'
 AI_DONORS = ('V607_ROBOTRUCK_AI.SGO', 'V607_ROBOTRUCK_F_AI.SGO',
@@ -177,7 +178,7 @@ def build_models(root: str) -> dict[str, bytes]:
     models = [s for s in optics.MODELS if optics.ready(s)]
     jobs = [(_build_one, (root, spec), f'{index}/{len(models)} {spec.stem}')
             for index, spec in enumerate(models, 1)]
-    return {'OBJECT/'+optics.output(spec): data for spec, data in zip(models, run_jobs(jobs))}
+    return {optics.rel(spec): data for spec, data in zip(models, run_jobs(jobs))}
 
 
 def build_stock_redirects(root: str) -> dict[str, bytes]:
@@ -185,16 +186,24 @@ def build_stock_redirects(root: str) -> dict[str, bytes]:
     game = rootcpk.Game(root)
     state = _load(root)
     files = {}
-    for name in game.names('OBJECT'):
-        if not name.upper().endswith('.SGO'):
-            continue
-        loose = Path(root, 'Mods', 'OBJECT', name)
-        source = loose.read_bytes() if loose.is_file() else game.read('OBJECT', name)
-        rel = 'OBJECT/'+name.upper()
-        entry = state['files'].get(rel) if loose.is_file() else None
-        made, needs, _added, keep = _prepare_stock(root, rel, source, entry, game)
-        if keep:
-            files[rel] = made
+    for folder in FOLDERS:
+        # Outside OBJECT only a stock SGO that names one of that folder's models can be redirected (the gold
+        # weapons): the bytes are searched before anything is parsed (thousands of weapon SGOs).
+        needles = None if folder == 'OBJECT' else [
+            n for spec in optics.MODELS if spec.folder == folder
+            for n in (spec.stem.lower().encode(), spec.stem.lower().encode('utf-16le'))]
+        for name in game.names(folder):
+            if not name.upper().endswith('.SGO'):
+                continue
+            loose = Path(root, 'Mods', folder, name)
+            source = loose.read_bytes() if loose.is_file() else game.read(folder, name)
+            if needles is not None and not any(n in source.lower() for n in needles):
+                continue
+            rel = folder + '/' + name.upper()
+            entry = state['files'].get(rel) if loose.is_file() else None
+            made, needs, _added, keep = _prepare_stock(root, rel, source, entry, game)
+            if keep:
+                files[rel] = made
     return files
 
 
@@ -221,10 +230,11 @@ def _backup(root: str, rel: str) -> str:
 def install(root: str, files: dict[str, bytes], scope: str = 'all') -> list[str]:
     led, state = ledger.Ledger(root), _load(root)
     outputs = {ledger.key(rel): data for rel, data in files.items()}
-    if any(not rel.startswith('OBJECT/') or '..' in rel.split('/') for rel in outputs):
-        raise ValueError('optic outputs must be relative OBJECT paths')
+    if any(rel.split('/')[0] not in FOLDERS or '..' in rel.split('/') for rel in outputs):
+        raise ValueError('optic outputs must be relative OBJECT / WEAPON paths')
     if scope not in ('all', 'models', 'stock') or any(
-            (scope == 'models' and not r.endswith('.MRAB')) or (scope == 'stock' and not r.endswith('.SGO')) for r in outputs):
+            (scope == 'models' and not r.endswith(('.MRAB', '.RAB'))) or (scope == 'stock' and not r.endswith('.SGO'))
+            for r in outputs):
         raise ValueError('optic install scope does not match its outputs')
     paths, accepted = [], set()
     for rel in sorted(outputs, key=lambda r: (r.endswith('.SGO'), r)):
@@ -234,10 +244,11 @@ def install(root: str, files: dict[str, bytes], scope: str = 'all') -> list[str]
             _restore(root, led, state, rel)
             entry = state['files'].get(rel)
         current = modfiles.sha256_file(path)
-        if not entry and rel.endswith('.MRAB') and current is not None and current != modfiles.sha256(data):
+        model = not rel.endswith('.SGO')
+        if not entry and model and current is not None and current != modfiles.sha256(data):
             raise RuntimeError(f'瞄具资源路径已有不匹配模型，已保留：{rel}')
         changed = entry and current not in (entry.get('written'), entry.get('pending'), entry.get('original'))
-        if changed and rel.endswith('.MRAB'):
+        if changed and model:
             raise RuntimeError(f'瞄具模型被其他程序修改，已保留：{rel}')
         added = None
         if rel.endswith('.SGO'):
@@ -357,15 +368,15 @@ def _restore_consumer(root: str, led: ledger.Ledger, state: dict, rel: str) -> b
 
 def _references(root: str) -> set[str]:
     kept = set()
-    for path in Path(root, 'Mods', 'OBJECT').glob('*'):
-        if path.suffix.upper() != '.SGO':
-            continue
-        raw = path.read_bytes().lower()
-        for spec in optics.MODELS:
-            name = optics.output(spec)
-            needle = 'app:/object/' + name.lower()
-            if needle.encode('utf-16le') in raw or needle.encode() in raw:
-                kept.add('OBJECT/'+name)
+    for folder in FOLDERS:
+        for path in Path(root, 'Mods', folder).glob('*'):
+            if path.suffix.upper() != '.SGO':
+                continue
+            raw = path.read_bytes().lower()
+            for spec in optics.MODELS:
+                needle = optics.app_path(spec, True)
+                if needle.encode('utf-16le') in raw or needle.encode() in raw:
+                    kept.add(optics.rel(spec))
     return kept
 
 
@@ -391,7 +402,7 @@ def range_vehicle(led: ledger.Ledger, game, data: bytes, owner: str = 'testrange
     """Redirect a generated SGO and own its dependencies without altering stock SGOs."""
     made, needs = redirect(data)
     for rel in needs:
-        spec = next(s for s in optics.MODELS if rel == 'OBJECT/'+optics.output(s))
+        spec = next(s for s in optics.MODELS if rel == optics.rel(s))
         if not os.path.isfile(led.disk(rel)):
             led.put(owner, rel, optics.build_model(game, spec))
         # A resource edited by somebody else cannot become a back door to using
