@@ -16,6 +16,7 @@ import cockpit_fits
 import cockpit_kits
 import cockpits
 import dsgo
+import goldcoat
 import sgo
 from mdb import Bone, Mdb, bind_world, ident, inverse_affine, mdb_read, mdb_write, mmul, rab_read, rab_write, read_elem, cmpl_compress
 from mdb_jet import link
@@ -77,9 +78,10 @@ MODELS = tuple(replace(m, cockpits=cockpit_fits.FITS.get(m.stem, ())) for m in M
 
 def ready(spec: Model) -> bool:
     """Whether `spec`'s model is built and its SGOs redirected now: it has optics, or its cockpits' assets are there
-    (without them a cockpit-only model would be the stock one under another name). MODELS stays whole for undoing
-    the redirects an earlier install made."""
-    return bool(spec.lenses) or (bool(spec.cockpits) and cockpits.assets_present())
+    (without them a cockpit-only model would be the stock one under another name), or it has a gold coat to convert
+    (pylib/goldcoat.py: a stock gold vehicle EDF6 renders off-white is gold with or without its cockpits). MODELS
+    stays whole for undoing the redirects an earlier install made."""
+    return bool(spec.lenses) or goldcoat.covers(spec.stem) or (bool(spec.cockpits) and cockpits.assets_present())
 
 
 def output(spec: Model) -> str:
@@ -269,6 +271,11 @@ def build_model(game, spec: Model) -> bytes:
             marked, textures = cockpits.graft(marked, spec.cockpits, cockpit_kits.KITS, game, preorder)
         except cockpits.CockpitAssetsMissing as e:   # the optics still; the seats keep the stock camera
             print(f'{name}: no cockpits ({e})')
+    if goldcoat.covers(spec.stem):
+        print(f'    {name}：金色涂装转为 EDF6 金属金材质……', flush=True)
+        marked, notes = goldcoat.apply(arc, marked, model.name)
+        for note in notes:
+            print(f'    {note}')
     print(f'    {name}：压缩模型与打包贴图……', flush=True)
     model.stored = cmpl_compress(mdb_write(marked))
     cockpits.add_textures(arc, textures)
