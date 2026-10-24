@@ -32,6 +32,9 @@ struct Request {
     const char* kind=nullptr;
     EXCEPTION_POINTERS* ep=nullptr;
     DWORD thread=0;
+    // A stack overflow's filter behind, called by the dumping thread after the dump (taken by whichever thread runs it).
+    std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> chain{nullptr};
+    LONG chained=EXCEPTION_CONTINUE_SEARCH;
 };
 Request request;
 std::atomic<DWORD> owner{0};
@@ -63,6 +66,13 @@ std::atomic<bool> installed{false};
 std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> behind{nullptr};
 std::atomic<DWORD> chaining{0};   // the thread calling the filter behind: a filter there that calls ours again ends
 bool redirected=false;
+
+LONG CallBehind(LPTOP_LEVEL_EXCEPTION_FILTER next,EXCEPTION_POINTERS* ep) noexcept {
+    chaining.store(GetCurrentThreadId());
+    const LONG result=next(ep);
+    chaining.store(0);
+    return result;
+}
 
 constexpr DWORD kStatusFatalAppExit=0x40000015;              // what abort() reports (STATUS_FATAL_APP_EXIT)
 constexpr DWORD kStatusInvalidCrtParameter=0xC0000417;       // STATUS_INVALID_CRUNTIME_PARAMETER
@@ -159,6 +169,7 @@ DWORD WINAPI Dumper(void*) noexcept {
         const DWORD event=WaitForMultipleObjects(2,pending,FALSE,INFINITE);
         if(event==WAIT_OBJECT_0) {
             Write();
+            if(const LPTOP_LEVEL_EXCEPTION_FILTER next=request.chain.exchange(nullptr))request.chained=CallBehind(next,request.ep);
             SetEvent(done);
         } else if(event==WAIT_OBJECT_0+1) {
             hangRequest.result=SerializedWrite(hangRequest.process,hangRequest.pid,hangRequest.file,hangRequest.type,
@@ -204,32 +215,38 @@ BOOL WINAPI SerializedWrite(HANDLE process,DWORD pid,HANDLE file,MINIDUMP_TYPE t
 }
 
 // Small on the crashed thread's stack (a stack overflow leaves it a page): the dump is written by the dumping thread.
-void Capture(const char* kind,EXCEPTION_POINTERS* ep) noexcept {
+// `chain` (a stack overflow's filter behind) is called there too, after the dump: on the overflowed thread its first
+// frames can fault again with no guard page left, and the process ends with 0xC0000005 instead of that filter's
+// verdict. True when it ran there, its verdict in `*chained`.
+bool Capture(const char* kind,EXCEPTION_POINTERS* ep,LPTOP_LEVEL_EXCEPTION_FILTER chain=nullptr,LONG* chained=nullptr) noexcept {
     const DWORD me=GetCurrentThreadId();
-    if(me==dumperId)return;                  // the dumping thread itself crashed
+    if(me==dumperId)return false;            // the dumping thread itself crashed
     DWORD expected=0;
     if(!owner.compare_exchange_strong(expected,me)) {
         if(expected!=me && done)WaitForSingleObject(done,kDumpWaitMs);
-        return;
+        return false;
     }
     request.kind=kind;request.ep=ep;request.thread=me;
+    request.chained=EXCEPTION_CONTINUE_SEARCH;
+    request.chain.store(chain && chained ? chain : nullptr);
     if(go && SetEvent(go))WaitForSingleObject(done,kDumpWaitMs);
     else {
         Write();
         if(done)SetEvent(done);
     }
+    if(request.chain.exchange(nullptr) || !chain || !chained)return false;   // not taken: the caller calls it
+    *chained=request.chained;
+    return true;
 }
 
 LONG WINAPI Filter(EXCEPTION_POINTERS* ep) noexcept {
-    const DWORD me=GetCurrentThreadId();
-    if(chaining.load()==me)return EXCEPTION_CONTINUE_SEARCH;   // the filter behind called ours again
-    Capture("unhandled exception",ep);
-    const LPTOP_LEVEL_EXCEPTION_FILTER next=behind.load();
-    if(!next || next==&Filter)return EXCEPTION_CONTINUE_SEARCH;
-    chaining.store(me);
-    const LONG result=next(ep);
-    chaining.store(0);
-    return result;
+    if(chaining.load()==GetCurrentThreadId())return EXCEPTION_CONTINUE_SEARCH;   // the filter behind called ours again
+    LPTOP_LEVEL_EXCEPTION_FILTER next=behind.load();
+    if(next==&Filter)next=nullptr;
+    const bool overflow=ep && ep->ExceptionRecord && ep->ExceptionRecord->ExceptionCode==EXCEPTION_STACK_OVERFLOW;
+    LONG result=EXCEPTION_CONTINUE_SEARCH;
+    if(Capture("unhandled exception",ep,overflow ? next : nullptr,&result) || !next)return result;
+    return CallBehind(next,ep);
 }
 
 // kernelbase!SetUnhandledExceptionFilter redirected here: a filter set after ours goes behind it, and its caller gets
