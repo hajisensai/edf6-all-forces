@@ -5,5 +5,5 @@
 #pragma once
 
 namespace crew::debugspawn {
-inline constexpr int kCatalogModelArchives=215;
+inline constexpr int kCatalogModelArchives=220;
 }  // namespace crew::debugspawn

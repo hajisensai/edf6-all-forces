@@ -86,7 +86,7 @@ class AssetTests(unittest.TestCase):
                 self.assertAlmostEqual(float(on('cannon_main', 'cannon_slide_l', em.ROTOR)[:, 1].min()), em.BASE_TOP,
                                        delta=1e-4 if kind in self.combat.DREADNOUGHT_GUNS else 5.0)
                 self.assertGreaterEqual(float(turret[:, 1].min()), em.BASE_TOP - 1e-3)
-                self.assertGreater(ring[1], em.BASE_TOP)
+                self.assertGreaterEqual(ring[1], em.BASE_TOP - 1e-3)   # the laser turns on its foot, at the base's top
                 self.assertTrue(turret[:, 0].min() < ring[0] < turret[:, 0].max() and turret[:, 2].min() < ring[2] < turret[:, 2].max())
                 if kind in self.combat.DREADNOUGHT_GUNS:
                     self.assertEqual((ring[0], ring[2]), (0.0, 0.0))

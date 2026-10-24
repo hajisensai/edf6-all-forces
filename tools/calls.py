@@ -192,6 +192,44 @@ CALLS: tuple[Call, ...] = (
     # boards; requested empty like the Sazabi; `mark` its body's (pylib/vcobjects.py DREADNOUGHT_MARK).
     Call('EDF6VC_CALL_DREADNOUGHT', 7601, 'dreadnought', False, 0, 30000, 3.2, 'vehicle', vehicle='EDF6VC_DREADNOUGHT',
          jet='edf6tr_dreadnought_mission'),
+    # Appended 2026-10-24: the quad Vulcan, the M163 with four M61s (tools/make_quadvulcan.py, pylib/quadvulcan_model.py), its upgrade (the user, 2026-10-24: 「火神炮做一个四管的」「我说的四管是4联装转轮机枪」).
+    Call('EDF6VC_CALL_QUADVULCAN', 0, 'quadvulcan', False, 0, 10000, 1.4, 'vehicle', vehicle='EDF6VC_QUADVULCAN', ground='quadvulcan'),
+    # Appended 2026-10-24: the Dreadnought's SecMid turret as a fixed emplacement (tools/make_emp_mid.py, pylib/emplacement_model.py; the user, 2026-10-24: 「再做一类在地图上固定的炮台。这个炮台使用无畏舰上面那几个」).
+    Call('EDF6VC_CALL_EMP_MID', 0, 'emp_mid', False, 0, 9000, 1.4, 'vehicle', vehicle='EDF6VC_EMP_MID', ground='emp_mid'),
+    # Appended 2026-10-24: the Dreadnought's SecShort turret as a fixed emplacement (tools/make_emp_short.py).
+    Call('EDF6VC_CALL_EMP_SHORT', 0, 'emp_short', False, 0, 12000, 1.8, 'vehicle', vehicle='EDF6VC_EMP_SHORT', ground='emp_short'),
+    # Appended 2026-10-24: the Dreadnought's SecLong turret as a fixed emplacement (tools/make_emp_long.py).
+    Call('EDF6VC_CALL_EMP_LONG', 0, 'emp_long', False, 0, 12000, 1.8, 'vehicle', vehicle='EDF6VC_EMP_LONG', ground='emp_long'),
+    # Appended 2026-10-24 (the user: 「各种现实的炮台、近防炮……做一堆出名、独特的载具」): the 2S6 Tunguska, guns and
+    # missiles in one mount (tools/make_tunguska.py; its War Thunder model, models/wt_tunguska).
+    Call('EDF6VC_CALL_TUNGUSKA', 0, 'tunguska', False, 0, 9500, 1.4, 'vehicle', vehicle='EDF6VC_TUNGUSKA', ground='tunguska'),
+    # Appended 2026-10-24 (the user: 「重复定位的就不要加了，除非是升级版（指的是定位相近但是数值高）」): the PzH 2000,
+    # the self-propelled howitzer's upgrade (tools/make_pzh2000.py; its War Thunder model, models/wt_pzh2000).
+    Call('EDF6VC_CALL_PZH2000', 0, 'pzh2000', False, 0, 11000, 1.6, 'vehicle', vehicle='EDF6VC_PZH2000', ground='pzh2000'),
+    # Appended 2026-10-24 (the user: 「做一堆出名、独特的载具」): the Sturmtiger, a 380 mm rocket mortar for breaking
+    # strongpoints (tools/make_sturmtiger.py; its War Thunder model, models/wt_sturmtiger).
+    Call('EDF6VC_CALL_STURMTIGER', 0, 'sturmtiger', False, 0, 10000, 1.5, 'vehicle', vehicle='EDF6VC_STURMTIGER', ground='sturmtiger'),
+    # Appended 2026-10-24 (the user: 「升级版（定位相近但是数值高）」): the TOS-1, the Katyusha's upgrade, thermobaric rockets in
+    # salvoes (tools/make_tos1.py; lm9241221's Sketchfab model, models/wt_tos1).
+    Call('EDF6VC_CALL_TOS1', 0, 'tos1', False, 0, 12000, 1.7, 'vehicle', vehicle='EDF6VC_TOS1', ground='tos1'),
+    # Appended 2026-10-24 (the user: 「再做个冷战那种天启」): Red Alert 2's Apocalypse tank, a superheavy twin-gun tank with
+    # anti-air missile pods (tools/make_apocalypse.py; ska-ara's Sketchfab model, models/wt_apocalypse).
+    Call('EDF6VC_CALL_APOCALYPSE', 0, 'apocalypse', False, 0, 16000, 2.2, 'vehicle', vehicle='EDF6VC_APOCALYPSE', ground='apocalypse'),
+    # Appended 2026-10-24 (the user: 「还有各种现实的炮台、近防炮」): the Phalanx CIWS, a fixed emplacement (tools/make_ciws_phalanx.py,
+    # its Sketchfab model in models/emp_phalanx; its six barrels spin as the M163's).
+    Call('EDF6VC_CALL_CIWS_PHALANX', 0, 'ciws_phalanx', False, 0, 8000, 1.3, 'vehicle', vehicle='EDF6VC_CIWS_PHALANX', ground='ciws_phalanx'),
+    # Appended 2026-10-24 (the user: 「还有各种现实的炮台」): the 8.8 cm Flak 18/36, a fixed emplacement (tools/make_flak88.py,
+    # its Sketchfab model in models/emp_flak88).
+    Call('EDF6VC_CALL_FLAK88', 0, 'flak88', False, 0, 7000, 1.2, 'vehicle', vehicle='EDF6VC_FLAK88', ground='flak88'),
+    # Appended 2026-10-24 (the user: 「还有各种现实的炮台」): the Oerlikon GDF-005 twin 35 mm, a fixed emplacement with air-burst
+    # rounds, in place of the Millennium gun no usable model of which exists (tools/make_gdf005.py; models/emp_gdf005).
+    Call('EDF6VC_CALL_GDF005', 0, 'gdf005', False, 0, 7500, 1.2, 'vehicle', vehicle='EDF6VC_GDF005', ground='gdf005'),
+    # Appended 2026-10-24 (the user: 「还有各种现实的炮台」; Iron Beam / LaWS have no usable model): a laser air-defence turret,
+    # a fixed emplacement (tools/make_laser.py; Planetrix23's Sketchfab model in models/emp_laser).
+    Call('EDF6VC_CALL_LASER', 0, 'laser', False, 0, 9000, 1.4, 'vehicle', vehicle='EDF6VC_LASER', ground='laser'),
+    # Appended 2026-10-24 (the user: 「做一堆出名、独特的载具/固定炮台」): a railgun turret, a fixed emplacement firing a near-instant
+    # slug through everything in its path (tools/make_railgun.py; Obi-Wanya's Sketchfab model in models/emp_railgun).
+    Call('EDF6VC_CALL_RAILGUN', 0, 'railgun', False, 0, 14000, 2.0, 'vehicle', vehicle='EDF6VC_RAILGUN', ground='railgun'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -219,6 +257,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'ultimate strike (2026-10-19)': IDS[:47],
     'gravity gun (2026-10-20)': IDS[:48],
     'Dreadnought (2026-10-21)': IDS[:49],
+    'new vehicles and emplacements (2026-10-24)': IDS[:63],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -275,6 +314,90 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'CN': ('BMPT 戰車支援車', '請求一輛 BMPT：雙 30mm 雙路供彈機砲（高爆 / APDS 穿甲彈鏈，左右砲管輪流射擊）為主攻擊，9M120 阿塔卡飛彈（串聯破甲 / 9M120F 溫壓）為副攻擊，可同時開火，飛彈需要鎖定。R / 手把 LB 切換機砲彈鏈，T / 手把十字鍵右切換飛彈，各管各的；載具掛載選單兩路皆可選。外觀為 KojfDiscord 分享的戰雷（War Thunder）模型（CC BY 4.0）。'),
         'JA': ('BMPT 戦車支援戦闘車', '30mm 連装機関砲（二系統給弾：榴弾 / APDS、左右交互射撃）を主攻撃、9M120 アターカ（タンデム HEAT / 9M120F サーモバリック）を副攻撃で同時に撃てる BMPT を要請する。ミサイルはロックオンが必要。R / LB で機関砲の弾帯、T / 十字キー右でミサイルを切り替える（それぞれ独立）。搭載メニューでは両方を選べる。外観は KojfDiscord が公開した War Thunder のモデル（CC BY 4.0）。'),
         'EN': ('BMPT Tank Support Vehicle', 'Requests a BMPT: twin dual-feed 30 mm autocannons (HE or APDS belt, the barrels firing in turn) on the primary attack and 9M120 Ataka missiles (tandem HEAT or 9M120F thermobaric) on the secondary attack, both at once. Missiles require lock-on. R / LB switches the cannon belt, T / D-pad right the missile, each its own; the payload menu sets either. Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
+    },
+    'quadvulcan': {
+        'SC': ('四联装火神防空车', '请求一辆四联装火神防空车：M163 的升级版，同一摇架上并排四门六管 20mm M61，四门一起射击，弹量与射速都是 M163 的数倍。高爆与穿甲弹在载具挂载菜单或 R / 手柄 LB 间切换，一次只发射选中的弹种。车体为 KojfDiscord 分享的战雷（War Thunder）M163 模型（CC BY 4.0）。'),
+        'CN': ('四聯裝火神防空車', '請求一輛四聯裝火神防空車：M163 的升級版，同一搖架上並排四門六管 20mm M61，四門一起射擊，彈量與射速都是 M163 的數倍。高爆與穿甲彈在載具掛載選單或 R / 手把 LB 間切換，一次只發射選中的彈種。車體為 KojfDiscord 分享的戰雷（War Thunder）M163 模型（CC BY 4.0）。'),
+        'JA': ('4連装バルカン対空車両', 'M163 の強化型。一つの砲架に 20mm 六砲身 M61 を 4 門並べ、4 門同時に撃つ。弾数と発射速度は M163 の数倍。搭載メニューまたは R / LB で榴弾・徹甲弾を切り替える。車体は KojfDiscord が公開した War Thunder の M163 モデル（CC BY 4.0）。'),
+        'EN': ('Quad Vulcan', 'Requests the M163 upgraded with four six-barrel 20 mm M61 cannon side by side on its one cradle, all four firing together: several times the M163 rounds and rate of fire. Select HE or AP in the payload menu or with R / LB; only the selected belt fires. Hull: the War Thunder M163 model shared by KojfDiscord (CC BY 4.0).'),
+    },
+    'emp_mid': {
+        'SC': ('无畏舰副炮炮台·中型', '请求一座中型双联速射炮台：两门炮轮流射击，射速快、爆炸范围中等，适合对付成群的敌人。外形为游戏《Dreadnought》无畏舰的副炮，装在加固底座上。固定炮台，落地后不能移动，只能转动炮塔射击；可以让 NPC 上去操作。'),
+        'CN': ('無畏艦副砲砲台·中型', '請求一座中型雙聯速射砲台：兩門砲輪流射擊，射速快、爆炸範圍中等，適合對付成群的敵人。外形為遊戲《Dreadnought》無畏艦的副砲，裝在加固底座上。固定砲台，落地後不能移動，只能轉動砲塔射擊；可以讓 NPC 上去操作。'),
+        'JA': ('弩級艦副砲砲台・中型', '中型連装速射砲台を要請する。2 門が交互に撃ち、連射が速く爆発範囲は中程度。群れる敵向け。外観はゲーム『Dreadnought』の弩級艦の副砲を補強台座に載せたもの。固定砲台：着地後は移動できず、砲塔を旋回させて撃つ。NPC も操作できる。'),
+        'EN': ('Dreadnought Turret: SecMid', "Requests a medium twin quick-firing gun emplacement: its two guns fire in turn, fast, with a medium blast; for swarms. Its look is a secondary turret of the Dreadnought game's ships on a fortified base. A fixed emplacement: once down it cannot move, only turn and fire; NPCs can man it."),
+    },
+    'emp_short': {
+        'SC': ('无畏舰副炮炮台·短管', '请求一座短管双联重炮炮台：射速慢，单发威力和爆炸范围都很大，弹道下坠明显。外形为游戏《Dreadnought》无畏舰的副炮，装在加固底座上。固定炮台，落地后不能移动，只能转动炮塔射击；可以让 NPC 上去操作。'),
+        'CN': ('無畏艦副砲砲台·短管', '請求一座短管雙聯重砲砲台：射速慢，單發威力和爆炸範圍都很大，彈道下墜明顯。外形為遊戲《Dreadnought》無畏艦的副砲，裝在加固底座上。固定砲台，落地後不能移動，只能轉動砲塔射擊；可以讓 NPC 上去操作。'),
+        'JA': ('弩級艦副砲砲台・短砲身', '短砲身の連装重砲台を要請する。発射は遅いが一発の威力と爆発範囲が大きい。弾道は大きく落ちる。外観はゲーム『Dreadnought』の弩級艦の副砲を補強台座に載せたもの。固定砲台：着地後は移動できず、砲塔を旋回させて撃つ。NPC も操作できる。'),
+        'EN': ('Dreadnought Turret: SecShort', "Requests a short-barrelled twin heavy gun emplacement: slow, each shell very hard-hitting with a wide blast, on a dropping arc. Its look is a secondary turret of the Dreadnought game's ships on a fortified base. A fixed emplacement: once down it cannot move, only turn and fire; NPCs can man it."),
+    },
+    'emp_long': {
+        'SC': ('无畏舰副炮炮台·长管', '请求一座长管双联远程炮炮台：炮弹快、弹道平直、射程远，适合远距离精确打击。外形为游戏《Dreadnought》无畏舰的副炮，装在加固底座上。固定炮台，落地后不能移动，只能转动炮塔射击；可以让 NPC 上去操作。'),
+        'CN': ('無畏艦副砲砲台·長管', '請求一座長管雙聯遠程砲砲台：砲彈快、彈道平直、射程遠，適合遠距離精確打擊。外形為遊戲《Dreadnought》無畏艦的副砲，裝在加固底座上。固定砲台，落地後不能移動，只能轉動砲塔射擊；可以讓 NPC 上去操作。'),
+        'JA': ('弩級艦副砲砲台・長砲身', '長砲身の連装遠距離砲台を要請する。弾が速く弾道が平らで射程が長い。遠距離の精密射撃向け。外観はゲーム『Dreadnought』の弩級艦の副砲を補強台座に載せたもの。固定砲台：着地後は移動できず、砲塔を旋回させて撃つ。NPC も操作できる。'),
+        'EN': ('Dreadnought Turret: SecLong', "Requests a long-barrelled twin long-range gun emplacement: fast flat shells that reach far; for precise fire at range. Its look is a secondary turret of the Dreadnought game's ships on a fortified base. A fixed emplacement: once down it cannot move, only turn and fire; NPCs can man it."),
+    },
+    'tunguska': {
+        'SC': ('2S6 通古斯卡防空车', '请求一辆 2S6 通古斯卡：两门双管 30mm 2A38M 机炮为主攻击（两门同时射击），9M311 防空导弹为副攻击（需要锁定空中目标），两者可以同时开火；T / 手柄十字键右切换导弹。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),
+        'CN': ('2S6 通古斯卡防空車', '請求一輛 2S6 通古斯卡：兩門雙管 30mm 2A38M 機砲為主攻擊（兩門同時射擊），9M311 防空飛彈為副攻擊（需要鎖定空中目標），兩者可以同時開火；T / 手把十字鍵右切換飛彈。外觀為 KojfDiscord 分享的戰雷（War Thunder）模型（CC BY 4.0）。'),
+        'JA': ('2S6 ツングースカ', '2 門の連装 30mm 2A38M 機関砲（同時射撃）を主攻撃、9M311 対空ミサイル（空中目標へのロックオンが必要）を副攻撃で同時に撃てる 2S6 を要請する。T / 十字キー右でミサイルを切り替える。外観は KojfDiscord が公開した War Thunder のモデル（CC BY 4.0）。'),
+        'EN': ('2S6 Tunguska', 'Requests a 2S6 Tunguska: two twin-barrel 30 mm 2A38M cannon (firing together) on the primary attack and 9M311 anti-air missiles (lock on to air targets) on the secondary, both at once; T / D-pad right switches the missile. Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
+    },
+    'pzh2000': {
+        'SC': ('PzH 2000 自行榴弹炮', '请求一辆 PzH 2000：自行榴弹炮的升级版，炮塔可以转动，155mm 长身管榴弹炮，射速、射程和单发威力都更高。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),
+        'CN': ('PzH 2000 自走榴彈砲', '請求一輛 PzH 2000：自走榴彈砲的升級版，砲塔可以轉動，155mm 長身管榴彈砲，射速、射程和單發威力都更高。外觀為 KojfDiscord 分享的戰雷（War Thunder）模型（CC BY 4.0）。'),
+        'JA': ('PzH 2000 自走榴弾砲', '自走榴弾砲の強化型 PzH 2000 を要請する。砲塔が旋回し、155mm 長砲身榴弾砲は発射速度・射程・一発の威力がいずれも上。外観は KojfDiscord が公開した War Thunder のモデル（CC BY 4.0）。'),
+        'EN': ('PzH 2000', 'Requests a PzH 2000, the self-propelled howitzer upgraded: its turret turns, and its long 155 mm gun fires faster, further and harder. Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
+    },
+    'sturmtiger': {
+        'SC': ('突击虎', '请求一辆突击虎：虎式底盘上的 380mm 火箭臼炮，没有炮塔，炮只能左右各转 10 度，转向靠车身。装填很慢，一发的爆炸范围极大，用来拔除据点。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),
+        'CN': ('突擊虎', '請求一輛突擊虎：虎式底盤上的 380mm 火箭臼砲，沒有砲塔，砲只能左右各轉 10 度，轉向靠車身。裝填很慢，一發的爆炸範圍極大，用來拔除據點。外觀為 KojfDiscord 分享的戰雷（War Thunder）模型（CC BY 4.0）。'),
+        'JA': ('シュトゥルムティーガー', 'ティーガーの車体に 380mm ロケット臼砲を載せたシュトゥルムティーガーを要請する。砲塔はなく砲は左右 10 度ずつしか向かない。装填は遅いが一発の爆発範囲は非常に大きい。拠点破壊用。外観は KojfDiscord が公開した War Thunder のモデル（CC BY 4.0）。'),
+        'EN': ('Sturmtiger', 'Requests a Sturmtiger: a 380 mm rocket mortar on a Tiger hull, no turret (the mortar turns 10 degrees either way; the hull does the rest). Slow to reload, its every round a huge blast, for breaking strongpoints. Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
+    },
+    'tos1': {
+        'SC': ('TOS-1 喷火兵火箭炮', '请求一辆 TOS-1：喀秋莎的升级版，T-72 底盘上的温压火箭发射箱，炮塔可转，一次齐射十几发，每发爆炸范围很大，装填很慢。外观为 lm9241221 在 Sketchfab 分享的低模（CC BY 4.0）。'),
+        'CN': ('TOS-1 噴火兵火箭砲', '請求一輛 TOS-1：喀秋莎的升級版，T-72 底盤上的溫壓火箭發射箱，砲塔可轉，一次齊射十幾發，每發爆炸範圍很大，裝填很慢。外觀為 lm9241221 在 Sketchfab 分享的低模（CC BY 4.0）。'),
+        'JA': ('TOS-1 ブラチーノ', 'カチューシャの強化型 TOS-1 を要請する。T-72 車体にサーモバリック・ロケットの発射機を載せ、旋回でき、一度に十数発を斉射する。一発ごとの爆発範囲は大きいが装填は遅い。外観は lm9241221 が Sketchfab で公開したローポリモデル（CC BY 4.0）。'),
+        'EN': ('TOS-1 Buratino', "Requests a TOS-1, the Katyusha upgraded: a thermobaric rocket launcher on a T-72 hull, its launcher turning, a dozen rockets a salvo, each bursting wide, slow to reload. Model: lm9241221's low-poly model on Sketchfab (CC BY 4.0)."),
+    },
+    'apocalypse': {
+        'SC': ('天启坦克', '请求一辆《红色警戒 2》的天启坦克：超重型坦克，双管重炮轮流射击为主攻击，炮塔两侧导弹巢的防空导弹为副攻击（需要锁定空中目标），两者可以同时开火；装甲极厚。T / 手柄十字键右切换导弹。外观为 ska-ara 在 Sketchfab 分享的模型（CC BY 4.0）。'),
+        'CN': ('天啟坦克', '請求一輛《紅色警戒 2》的天啟坦克：超重型坦克，雙管重砲輪流射擊為主攻擊，砲塔兩側飛彈巢的防空飛彈為副攻擊（需要鎖定空中目標），兩者可以同時開火；裝甲極厚。T / 手把十字鍵右切換飛彈。外觀為 ska-ara 在 Sketchfab 分享的模型（CC BY 4.0）。'),
+        'JA': ('アポカリプス戦車', '『レッドアラート 2』のアポカリプス戦車を要請する。超重戦車で、連装重砲（交互射撃）を主攻撃、砲塔両脇のミサイルポッドの対空ミサイル（空中目標へのロックオンが必要）を副攻撃で同時に撃てる。装甲は非常に厚い。T / 十字キー右でミサイルを切り替える。外観は ska-ara が Sketchfab で公開したモデル（CC BY 4.0）。'),
+        'EN': ('Apocalypse Tank', "Requests Red Alert 2's Apocalypse tank: a superheavy tank, its twin heavy guns firing in turn on the primary attack and the anti-air missiles of the pods beside its turret (lock on to air targets) on the secondary, both at once; very heavy armour. T / D-pad right switches the missile. Model: shared on Sketchfab by ska-ara (CC BY 4.0)."),
+    },
+    'ciws_phalanx': {
+        'SC': ('密集阵近防炮', '请求一座密集阵近防炮台：M61A1 六管 20mm 机炮，射速极高，专打空中目标和成群的小型敌人，炮管旋转。外观为 Lemper_Studio 在 Sketchfab 分享的模型（CC BY 4.0）。固定炮台，落地后不能移动，只能转动炮塔射击；可以让 NPC 上去操作。'),
+        'CN': ('密集陣近防砲', '請求一座密集陣近防砲台：M61A1 六管 20mm 機砲，射速極高，專打空中目標和成群的小型敵人，砲管旋轉。外觀為 Lemper_Studio 在 Sketchfab 分享的模型（CC BY 4.0）。固定砲台，落地後不能移動，只能轉動砲塔射擊；可以讓 NPC 上去操作。'),
+        'JA': ('ファランクス CIWS', 'M61A1 六砲身 20mm 機関砲のファランクス砲台を要請する。発射速度が非常に高く、空中目標と群れる小型の敵向け。砲身が回転する。外観は Lemper_Studio が Sketchfab で公開したモデル（CC BY 4.0）。固定砲台：着地後は移動できず、砲塔を旋回させて撃つ。NPC も操作できる。'),
+        'EN': ('Phalanx CIWS', 'Requests a Phalanx CIWS emplacement: a six-barrel 20 mm M61A1 at a very high rate, for air targets and swarms; its barrels spin. Model: shared on Sketchfab by Lemper_Studio (CC BY 4.0). A fixed emplacement: once down it cannot move, only turn and fire; NPCs can man it.'),
+    },
+    'flak88': {
+        'SC': ('88 毫米高射炮', '请求一座 88 毫米高射炮（Flak 18/36）：二战名炮，对空对地两用，高爆弹爆炸范围大，射速中等。外观为 bear17 在 Sketchfab 分享的模型（CC BY 4.0）。固定炮台，落地后不能移动，只能转动炮塔射击；可以让 NPC 上去操作。'),
+        'CN': ('88 毫米高射砲', '請求一座 88 毫米高射砲（Flak 18/36）：二戰名砲，對空對地兩用，高爆彈爆炸範圍大，射速中等。外觀為 bear17 在 Sketchfab 分享的模型（CC BY 4.0）。固定砲台，落地後不能移動，只能轉動砲塔射擊；可以讓 NPC 上去操作。'),
+        'JA': ('8.8cm 高射砲', '8.8cm 高射砲（Flak 18/36）を要請する。対空・対地両用の第二次大戦の名砲で、榴弾の爆発範囲が大きく発射速度は中程度。外観は bear17 が Sketchfab で公開したモデル（CC BY 4.0）。固定砲台：着地後は移動できず、砲塔を旋回させて撃つ。NPC も操作できる。'),
+        'EN': ('8.8 cm Flak', 'Requests an 8.8 cm Flak 18/36: the famous WWII dual-purpose gun, its HE shell bursting wide, at a moderate rate. Model: shared on Sketchfab by bear17 (CC BY 4.0). A fixed emplacement: once down it cannot move, only turn and fire; NPCs can man it.'),
+    },
+    'gdf005': {
+        'SC': ('GDF-005 双联高炮', '请求一座厄利孔 GDF-005 双联 35mm 高炮：两门炮同时射击，可编程空爆弹在目标附近炸开，专打空中目标。外观为 KojfDiscord 在 Sketchfab 分享的模型（CC BY 4.0）。固定炮台，落地后不能移动，只能转动炮塔射击；可以让 NPC 上去操作。'),
+        'CN': ('GDF-005 雙聯高砲', '請求一座厄利孔 GDF-005 雙聯 35mm 高砲：兩門砲同時射擊，可程式化空爆彈在目標附近炸開，專打空中目標。外觀為 KojfDiscord 在 Sketchfab 分享的模型（CC BY 4.0）。固定砲台，落地後不能移動，只能轉動砲塔射擊；可以讓 NPC 上去操作。'),
+        'JA': ('GDF-005 連装高射機関砲', 'エリコン GDF-005 連装 35mm 高射機関砲を要請する。2 門同時に撃ち、プログラム式空中炸裂弾が目標の近くで炸裂する。空中目標向け。外観は KojfDiscord が Sketchfab で公開したモデル（CC BY 4.0）。固定砲台：着地後は移動できず、砲塔を旋回させて撃つ。NPC も操作できる。'),
+        'EN': ('GDF-005 Twin 35 mm', 'Requests an Oerlikon GDF-005 twin 35 mm emplacement: both guns firing together, programmable air-burst rounds bursting near the target; for air targets. Model: shared on Sketchfab by KojfDiscord (CC BY 4.0). A fixed emplacement: once down it cannot move, only turn and fire; NPCs can man it.'),
+    },
+    'laser': {
+        'SC': ('激光防空炮台', '请求一座激光防空炮台：激光几乎瞬间到达、不受重力影响、可以穿透目标，两管轮流照射，专打空中目标。现实中的铁束、LaWS 没有可用模型，外观为 Planetrix23 在 Sketchfab 分享的反无人机炮塔模型（CC BY 4.0）。固定炮台，落地后不能移动，只能转动炮塔射击；可以让 NPC 上去操作。'),
+        'CN': ('雷射防空砲台', '請求一座雷射防空砲台：雷射幾乎瞬間到達、不受重力影響、可以穿透目標，兩管輪流照射，專打空中目標。現實中的鐵束、LaWS 沒有可用模型，外觀為 Planetrix23 在 Sketchfab 分享的反無人機砲塔模型（CC BY 4.0）。固定砲台，落地後不能移動，只能轉動砲塔射擊；可以讓 NPC 上去操作。'),
+        'JA': ('レーザー防空砲台', 'レーザー防空砲台を要請する。レーザーはほぼ瞬時に届き重力の影響を受けず目標を貫通する。2 本が交互に照射する空中目標向け。実在のアイアンビーム / LaWS には使えるモデルがなく、外観は Planetrix23 が Sketchfab で公開した対ドローン砲塔のモデル（CC BY 4.0）。固定砲台：着地後は移動できず、砲塔を旋回させて撃つ。NPC も操作できる。'),
+        'EN': ('Laser Air-Defence Turret', 'Requests a laser air-defence emplacement: its beam arrives almost at once, never drops and goes through its target, the two projectors firing in turn; for air targets. Iron Beam and LaWS have no usable model: this is the anti-drone turret Planetrix23 shared on Sketchfab (CC BY 4.0). A fixed emplacement: once down it cannot move, only turn and fire; NPCs can man it.'),
+    },
+    'railgun': {
+        'SC': ('电磁炮炮台', '请求一座电磁炮炮台：弹丸几乎瞬间到达、弹道笔直，贯穿路径上的所有目标，单发威力极大，装填慢。外观为 Obi-Wanya 在 Sketchfab 分享的模型（CC BY 4.0）。固定炮台，落地后不能移动，只能转动炮塔射击；可以让 NPC 上去操作。'),
+        'CN': ('電磁砲砲台', '請求一座電磁砲砲台：彈丸幾乎瞬間到達、彈道筆直，貫穿路徑上的所有目標，單發威力極大，裝填慢。外觀為 Obi-Wanya 在 Sketchfab 分享的模型（CC BY 4.0）。固定砲台，落地後不能移動，只能轉動砲塔射擊；可以讓 NPC 上去操作。'),
+        'JA': ('レールガン砲台', 'レールガン砲台を要請する。弾体はほぼ瞬時に届き弾道はまっすぐで、射線上のすべてを貫通する。一発の威力は非常に大きく装填は遅い。外観は Obi-Wanya が Sketchfab で公開したモデル（CC BY 4.0）。固定砲台：着地後は移動できず、砲塔を旋回させて撃つ。NPC も操作できる。'),
+        'EN': ('Railgun Turret', 'Requests a railgun emplacement: its slug arrives almost at once on a dead-straight path and goes through everything on it, each shot very hard-hitting, slow to reload. Model: shared on Sketchfab by Obi-Wanya (CC BY 4.0). A fixed emplacement: once down it cannot move, only turn and fire; NPCs can man it.'),
     },
     'sedan': {
         'SC': ('民用轿车', '请求一辆没有武器的民用轿车，单驾驶席。按通常的上车键驾驶，V 切换第一人称，按住鼠标中键或手柄 L3 转动视角自由观察。'),
@@ -710,7 +833,7 @@ PLUGIN_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew プラグイン、およびインストーラーが書き出す車両ファイルが必要。',
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
-GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES}
+GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES, 'quadvulcan': PLUGIN_NOTES, 'emp_mid': PLUGIN_NOTES, 'emp_short': PLUGIN_NOTES, 'emp_long': PLUGIN_NOTES, 'tunguska': PLUGIN_NOTES, 'pzh2000': PLUGIN_NOTES, 'sturmtiger': PLUGIN_NOTES, 'tos1': PLUGIN_NOTES, 'apocalypse': PLUGIN_NOTES, 'ciws_phalanx': PLUGIN_NOTES, 'flak88': PLUGIN_NOTES, 'gdf005': PLUGIN_NOTES, 'laser': PLUGIN_NOTES, 'railgun': PLUGIN_NOTES}
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',

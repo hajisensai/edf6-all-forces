@@ -55,7 +55,9 @@ class CatalogContractTests(unittest.TestCase):
                             'the rounds one control cycles never look alike')
         self.assertEqual(tuple(combat.slot('bmpt', i) for i in range(6)), ('left', 'right', 'missiles', 'left', 'right', 'missiles'))
         # 2026-10-21: both Ataka rounds ride the V603's otherwise unread secondary, alongside the cannons (src/payload.cpp).
-        self.assertEqual([kind for kind, store in vc.STORES.items() if store.independent_secondary], ['BMPT_ATGM', 'BMPT_ATGMF'])
+        # 2026-10-24: the Tunguska's and the Apocalypse's missiles ride it too.
+        self.assertEqual([kind for kind, store in vc.STORES.items() if store.independent_secondary],
+                         ['TUNGUSKA_SAM', 'APOC_SAM', 'BMPT_ATGM', 'BMPT_ATGMF'])
         self.assertFalse(any(vc.STORES[k].native_control or vc.STORES[k].group for k in ('BMPT_ATGM', 'BMPT_ATGMF')),
                          'a missile is not alternate cannon ammunition')
 
@@ -64,9 +66,11 @@ class CatalogContractTests(unittest.TestCase):
         # from the registry's slots, never across belts, never a missile; the M163's one M61 is no twin.
         self.assertTrue(vc.GROUND_VEHICLES['bmpt'].alternate)
         self.assertFalse(vc.GROUND_VEHICLES['vulcan'].alternate)
-        self.assertEqual(vc.twin_barrels(), [('EDF6VC_BMPT_L.SGO', 1), ('EDF6VC_BMPT_R.SGO', 1),
-                                             ('EDF6VC_BMPT_AP_150.SGO', 2), ('EDF6VC_BMPT_AP_R_150.SGO', 2)])
-        for name, _pair in vc.twin_barrels():
+        bmpt = [t for t in vc.twin_barrels() if t[0].startswith('EDF6VC_BMPT_')]
+        self.assertEqual(len({pair for _name, pair in vc.twin_barrels()}) * 2, len(vc.twin_barrels()), 'each pair twice')
+        self.assertEqual(bmpt, [('EDF6VC_BMPT_L.SGO', 1), ('EDF6VC_BMPT_R.SGO', 1),
+                                ('EDF6VC_BMPT_AP_150.SGO', 2), ('EDF6VC_BMPT_AP_R_150.SGO', 2)])
+        for name, _pair in bmpt:
             path = next(w for w in vc.GROUND_VEHICLES['bmpt'].weapons if w.rsplit('/', 1)[1].upper() == name)
             store = vc.store_of(path)
             self.assertFalse(store and vc.STORES[store[0]].independent_secondary, name)
