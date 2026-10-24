@@ -202,6 +202,14 @@ def _main() -> int:
         write_log(game, ['[00:00:01.000] something else'], now)
         expect(testhub.session_start(game) is None, 'a log without a loading line has no session')
         expect(collected(game)[0] == [], 'without a session no dump is sent')
+        # Report #22: the current builds end the line with their build id; an older build's bare line before it.
+        build = 'loading (build 48bbd4685a, 23123456 bytes, written 2026-10-21 17:29:57 UTC)'
+        write_log(game, [f'{tod(run - 7200)} EDF6VehicleCrew 0.8.0 loading', f'{tod(run - 7100)} SUPPORT older run',
+                         f'{tod(run)} EDF6VehicleCrew 0.8.0 {build}', f'{tod(run + 30)} HELI this run'], now - 5)
+        start = testhub.session_start(game)
+        expect(start is not None and abs(start - run) < 1, 'a loading line with the build id starts the session')
+        expect(testhub.dump_in_session(this, start) == '', "this run's dump matches the run its build-id line began")
+        expect(collected(game)[0] == ['crash/EDF6.exe.7100.dmp'], "this run's dump is sent after a build-id line")
         write_log(game, [f'{tod(run)} EDF6VehicleCrew 0.8.0 loading'], now - 5)
 
         # Another game folder (another copy of the game on the same machine).
