@@ -15,7 +15,7 @@ textures/), read from wherever it was unpacked:
     python tools/prep_wt_tracked.py m163 <unpacked>/M163.obj [--out <models>/wt_m163]
     python tools/prep_wt_tracked.py bmpt <unpacked>/BMPT.obj [--out <models>/wt_bmpt]
 
-It needs numpy and Pillow (the installer only reads the result). The source is treated as data: nothing in it runs.
+It needs numpy, Pillow and scipy (the installer only reads the result). The source is treated as data: nothing in it runs.
 
 What the source is (measured 2026-10-21, docs/wt-tracked-models.md): War Thunder's own node names survive as OBJ
 objects (`vehicle#bone_turret_59_0`: node, then the exporter's object and material numbers), one material each; +Y up,

@@ -40,7 +40,9 @@ jobs:
         shell: pwsh
         # numpy: the big map's seams (pylib/seams.py, hkcms.py; tools/make_bigmap.py) and their self-tests; pillow:
         # the procedural models' textures (pylib/procmesh.py). The installer exe bundles both (build_release BUNDLED).
-        run: python -m pip install --disable-pip-version-check numpy pillow
+        # scipy: the War Thunder models' prep tool (tools/prep_wt_tracked.py collision_hulls: connected parts, convex
+        # hulls), whose rules tests/test_wt_tracked.py checks; a developer's tool, the installer neither has nor needs it.
+        run: python -m pip install --disable-pip-version-check numpy pillow scipy
 
       - name: Build plugins
         shell: cmd

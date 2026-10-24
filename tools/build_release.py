@@ -41,7 +41,7 @@ GENERATOR_NAME = os.path.splitext(installer.GENERATOR)[0]   # EDF6VehicleCrew.ge
 # vcobjects / mdb import the jets' model builders (numpy, Pillow) in functions the generator never calls (measured: a
 # soldier, a tank, every jet body and every pylon store built from Root.cpk import only cpk, crilayla, dsgo, gamedir,
 # graft_pure, ledger, mdb, mdb_jet, modfiles, rootcpk, sgo, support_loadout, vcobjects).
-GENERATOR_EXCLUDES = ('numpy', 'PIL', 'tkinter', 'matplotlib', 'pandas', 'installer', 'testhub', 'procmesh', 'jet_models',
+GENERATOR_EXCLUDES = ('numpy', 'PIL', 'scipy', 'tkinter', 'matplotlib', 'pandas', 'installer', 'testhub', 'procmesh', 'jet_models',
                       'aircraft_collision', 'support_config', 'gamelease', 'urllib3', 'requests')
 RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'cockpits', 'wt_m163', 'wt_bmpt')   # pylib/artillery_model.py MODEL, drill_model / sazabi_model.MODEL_SUBDIR, cockpits.ASSET_DIR, wt_tracked.FOLDERS
 
@@ -233,7 +233,8 @@ def build_exe(name: str, generator: str | None = None) -> str:
                 'gamelease', 'build'):   # every module installer.py imports in a function (selftest release_imports); build is
         # autoturret/tools/build.py (--paths above comes before site-packages, where pip's own `build` may be)
         cmd += ['--hidden-import', mod]
-    for mod in ('matplotlib', 'pandas', 'tkinter'):  # Pillow builds procedural textures; numpy builds map seams
+    # Pillow builds procedural textures; numpy builds map seams; scipy is only the model prep tools' (tools/prep_*.py)
+    for mod in ('matplotlib', 'pandas', 'tkinter', 'scipy'):
         cmd += ['--exclude-module', mod]
     for name in plugin_data():
         cmd += ['--add-data', f'{os.path.join(PLUGINS, name)}{seps}plugin']
