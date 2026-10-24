@@ -1,0 +1,134 @@
+{
+ "format": 1,
+ "kind": "laser",
+ "title": "Laser air-defence turret",
+ "prepared_from": "model.glb",
+ "scale": 0.5587340292954847,
+ "yaw": 90.0,
+ "materials": [
+  {
+   "name": "edf6vc_laser_0",
+   "template": "v603_body",
+   "albedo": "textures/laser_0.png",
+   "source": "phong3"
+  },
+  {
+   "name": "edf6vc_laser_1",
+   "template": "v603_body",
+   "albedo": "textures/laser_1.png",
+   "source": "phong2"
+  },
+  {
+   "name": "edf6vc_laser_2",
+   "template": "v603_body",
+   "albedo": "textures/laser_2.png",
+   "source": "phong1"
+  },
+  {
+   "name": "edf6vc_laser_3",
+   "template": "v603_body",
+   "albedo": "textures/laser_3.png",
+   "source": "lambert1"
+  },
+  {
+   "name": "edf6vc_laser_4",
+   "template": "v603_body",
+   "albedo": "textures/laser_4.png",
+   "source": "phong4"
+  }
+ ],
+ "parts": [
+  {
+   "name": "base.edf6vc_laser_0",
+   "role": "base",
+   "material": 0,
+   "triangles": 80,
+   "vertices": 84
+  },
+  {
+   "name": "turret.edf6vc_laser_0",
+   "role": "turret",
+   "material": 0,
+   "triangles": 422,
+   "vertices": 342
+  },
+  {
+   "name": "turret.edf6vc_laser_1",
+   "role": "turret",
+   "material": 1,
+   "triangles": 938,
+   "vertices": 766
+  },
+  {
+   "name": "turret.edf6vc_laser_2",
+   "role": "turret",
+   "material": 2,
+   "triangles": 416,
+   "vertices": 434
+  },
+  {
+   "name": "gun.edf6vc_laser_0",
+   "role": "gun",
+   "material": 0,
+   "triangles": 2500,
+   "vertices": 2811
+  },
+  {
+   "name": "gun.edf6vc_laser_1",
+   "role": "gun",
+   "material": 1,
+   "triangles": 328,
+   "vertices": 413
+  },
+  {
+   "name": "gun.edf6vc_laser_2",
+   "role": "gun",
+   "material": 2,
+   "triangles": 906,
+   "vertices": 1083
+  },
+  {
+   "name": "gun.edf6vc_laser_3",
+   "role": "gun",
+   "material": 3,
+   "triangles": 4,
+   "vertices": 8
+  },
+  {
+   "name": "gun.edf6vc_laser_4",
+   "role": "gun",
+   "material": 4,
+   "triangles": 40,
+   "vertices": 42
+  }
+ ],
+ "pivots": {
+  "ring": [
+   -5.960464477539063e-08,
+   -0.16595780849456787
+  ],
+  "trunnion": [
+   2.1849836111068726,
+   0.05813688039779663
+  ],
+  "muzzles": {
+   "left": [
+    2.682209014892578e-07,
+    2.017070484161377,
+    1.635345697402954
+   ],
+   "right": [
+    2.682209014892578e-07,
+    2.017070484161377,
+    1.635345697402954
+   ]
+  }
+ },
+ "triangles": 5634,
+ "size": [
+  2.93877628136038,
+  3.2,
+  3.270691450061114
+ ],
+ "source": "https://sketchfab.com/3d-models/m11-23a1-anti-drone-turret-41a8514d6f8f447083c6af1dbeb8144a"
+}

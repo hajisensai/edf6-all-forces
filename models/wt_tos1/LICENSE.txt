@@ -1,0 +1,11 @@
+Model Information:
+* title:	TOS-1 BURATINO (LOW POLY)
+* source:	https://sketchfab.com/3d-models/tos-1-buratino-low-poly-255fba6ba6c44b97aaea91d0225d0c75
+* author:	lm9241221 (https://sketchfab.com/lm9241221)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "TOS-1 BURATINO (LOW POLY)" (https://sketchfab.com/3d-models/tos-1-buratino-low-poly-255fba6ba6c44b97aaea91d0225d0c75) by lm9241221 (https://sketchfab.com/lm9241221) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

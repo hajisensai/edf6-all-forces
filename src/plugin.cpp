@@ -26,6 +26,7 @@
 #include "edf41bike.h"
 #include "mod_room.h"
 #include "outfit41.h"
+#include "weapon_records.h"
 #include "room_ui.h"
 #include "support_soldier.h"
 #include "airdrop.h"
@@ -1214,6 +1215,9 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // after (true below): the loader unloading the DLL would leave patched slots pointing at unloaded code.
     // The crash dump first (its filter and handlers point into this DLL): a crash in any install below is dumped.
     InstallCrashDump();
+    // The weapon records past 0x800 (weapon_records.cpp): before anything could make the game status, whose
+    // allocation it enlarges; before the airstrike's ownership grants, which write through WeaponRecord.
+    InstallWeaponRecords();
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
     Log("ROOM isolation=%d",InstallModRoom());
     Log("SUPPORT soldiers=%d",InstallSupportSoldiers());

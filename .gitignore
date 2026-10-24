@@ -21,6 +21,14 @@ models/*
 # CC BY 4.0: each folder's LICENSE.txt): tracked for the same reason, pylib/wt_tracked.py builds the two vehicles from them
 !models/wt_m163/
 !models/wt_bmpt/
+# 2026-10-24: the War Thunder 2S6, PzH 2000 and Sturmtiger (the same tool, the same uploader), and the emplacements'
+# Sketchfab models (tools/prep_glb_model.py; CC BY, each folder's LICENSE.txt)
+!models/wt_tunguska/
+!models/wt_pzh2000/
+!models/wt_sturmtiger/
+!models/wt_apocalypse/
+!models/wt_tos1/
+!models/emp_*/
 
 # Development-only data (tools/make_edf41_objects.py --mother-dev): never committed, never in a release
 edf41port_dev/

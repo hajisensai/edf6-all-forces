@@ -1,0 +1,11 @@
+Model Information:
+* title:	38 cm Sturmmörser (War Thunder)
+* source:	https://sketchfab.com/3d-models/38-cm-sturmmorser-war-thunder-31033223348b4d0982ed4ee27b4f5afd
+* author:	KojfDiscord (https://sketchfab.com/KojfDiscord)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "38 cm Sturmmörser (War Thunder)" (https://sketchfab.com/3d-models/38-cm-sturmmorser-war-thunder-31033223348b4d0982ed4ee27b4f5afd) by KojfDiscord (https://sketchfab.com/KojfDiscord) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

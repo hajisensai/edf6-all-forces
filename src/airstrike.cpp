@@ -45,6 +45,7 @@
 #include "memory.h"
 #include "online_authority.h"
 #include "unlock_ported.h"
+#include "weapon_records.h"
 #include <atomic>
 #include <cmath>
 #include <cwchar>
@@ -58,11 +59,10 @@ constexpr unsigned kDelete=0x118A1B0;
 constexpr float kAboveTarget=150.0f;
 // Ownership (docs/loadout-re.md 8): the game status, its weapon table (cfg = GS+0x130, the table loaded
 // once cfg+0x188 is set) and per row a record of 12 bytes, u32 flags (bit0 owned, bit2 NEW) and 8 star
-// bytes, 0x800 of them.
+// bytes: 0x800 of them at GS+0xEB50 natively, wrec::kSlots relocated (weapon_records.h WeaponRecord).
 constexpr unsigned kUnlockDlc=0xDC550,kUnlockDlcCall=0xDC348,kUnlockDlcJump=0x70FF87;
 constexpr unsigned kRowCount=0xE23F0,kGetRow=0xE1CF0;
-constexpr std::size_t kCfg=0x130,kTableRef=0x188,kFlags=0xEB50,kStars=0xEB54,kRecord=12;
-constexpr std::uint32_t kMaxRecords=0x800;
+constexpr std::size_t kCfg=0x130,kTableRef=0x188,kRecord=12;
 constexpr unsigned char kUnlockDlcSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,
                                          0x55,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
 constexpr unsigned char kUnlockThunkSig[]={0x48,0x8B,0x0D};   // 0x70FF80: mov rcx,[GS]; jmp 0xDC550
@@ -559,11 +559,14 @@ bool IsCallRow(const wchar_t* name) noexcept {
 struct Granted { int calls=-1,ported=0; };
 Granted GrantCalls(unsigned char* gs,bool ported) noexcept {
     Granted out;
-    if(!gs || !Readable(gs+kFlags,kMaxRecords*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return out;
+    const std::uint32_t most=WeaponRecordCapacity();
+    unsigned char* const first=WeaponRecord(gs,0);
+    if(!first || !Readable(first,std::size_t{most}*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return out;
     void* const table=gs+kCfg;
     if(!At<void*>(table,kTableRef))return out;             // no weapon table yet
     std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
-    if(n>kMaxRecords)n=kMaxRecords;
+    WeaponRecordsCheckRows(n);
+    if(n>most)n=most;
     alignas(8) unsigned char row[0x100];
     out.calls=0;
     for(std::uint32_t id=0;id<n;++id) {
@@ -571,9 +574,9 @@ Granted GrantCalls(unsigned char* gs,bool ported) noexcept {
         const auto name=At<const wchar_t*>(row,0);
         if(!name)continue;
         if(IsCallRow(name)) {
-            if(ported::Own(gs+kFlags+id*kRecord))++out.calls;
+            if(ported::Own(WeaponRecord(gs,id)))++out.calls;
         } else if(ported && Readable(name,ported::kLongestPrefix*sizeof(wchar_t)) && ported::PortedWeapon(name)) {
-            if(ported::Own(gs+kFlags+id*kRecord))++out.ported;
+            if(ported::Own(WeaponRecord(gs,id)))++out.ported;
         }
     }
     return out;

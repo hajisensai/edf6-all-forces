@@ -1,0 +1,11 @@
+Model Information:
+* title:	M11-23A1 Anti-Drone Turret
+* source:	https://sketchfab.com/3d-models/m11-23a1-anti-drone-turret-41a8514d6f8f447083c6af1dbeb8144a
+* author:	Planetrix23 (https://sketchfab.com/Planetrix23)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "M11-23A1 Anti-Drone Turret" (https://sketchfab.com/3d-models/m11-23a1-anti-drone-turret-41a8514d6f8f447083c6af1dbeb8144a) by Planetrix23 (https://sketchfab.com/Planetrix23) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

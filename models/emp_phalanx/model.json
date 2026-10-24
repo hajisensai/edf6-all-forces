@@ -1,0 +1,120 @@
+{
+ "format": 1,
+ "kind": "ciws_phalanx",
+ "title": "Phalanx CIWS Mk 15",
+ "prepared_from": "model.glb",
+ "scale": 1.2554764122798108,
+ "yaw": 0.0,
+ "materials": [
+  {
+   "name": "edf6vc_ciws_phalanx_0",
+   "template": "v603_body",
+   "albedo": "textures/ciws_phalanx_0.png",
+   "source": "Mat_CIWS"
+  },
+  {
+   "name": "edf6vc_ciws_phalanx_1",
+   "template": "v603_body",
+   "albedo": "textures/ciws_phalanx_1.png",
+   "source": "Mat_Dof_CIWS"
+  },
+  {
+   "name": "edf6vc_ciws_phalanx_2",
+   "template": "v603_body",
+   "albedo": "textures/ciws_phalanx_2.png",
+   "source": "Mat_Ammo"
+  }
+ ],
+ "parts": [
+  {
+   "name": "base.edf6vc_ciws_phalanx_0",
+   "role": "base",
+   "material": 0,
+   "triangles": 10422,
+   "vertices": 11905
+  },
+  {
+   "name": "turret.edf6vc_ciws_phalanx_0",
+   "role": "turret",
+   "material": 0,
+   "triangles": 6156,
+   "vertices": 7295
+  },
+  {
+   "name": "turret.edf6vc_ciws_phalanx_1",
+   "role": "turret",
+   "material": 1,
+   "triangles": 2000,
+   "vertices": 2200
+  },
+  {
+   "name": "gun.edf6vc_ciws_phalanx_0",
+   "role": "gun",
+   "material": 0,
+   "triangles": 5268,
+   "vertices": 6497
+  },
+  {
+   "name": "gun.edf6vc_ciws_phalanx_1",
+   "role": "gun",
+   "material": 1,
+   "triangles": 10198,
+   "vertices": 9844
+  },
+  {
+   "name": "gun.edf6vc_ciws_phalanx_2",
+   "role": "gun",
+   "material": 2,
+   "triangles": 4876,
+   "vertices": 6728
+  },
+  {
+   "name": "rotor.edf6vc_ciws_phalanx_0",
+   "role": "rotor",
+   "material": 0,
+   "triangles": 489,
+   "vertices": 588
+  },
+  {
+   "name": "rotor.edf6vc_ciws_phalanx_1",
+   "role": "rotor",
+   "material": 1,
+   "triangles": 3532,
+   "vertices": 3650
+  }
+ ],
+ "pivots": {
+  "ring": [
+   0.0,
+   -0.1257840244353895
+  ],
+  "trunnion": [
+   2.8521619085312637,
+   -0.12578422554966592
+  ],
+  "muzzles": {
+   "left": [
+    -4.470348358154297e-08,
+    2.7115026712417603,
+    1.9416930675506592
+   ],
+   "right": [
+    -4.470348358154297e-08,
+    2.7115026712417603,
+    1.9416930675506592
+   ]
+  },
+  "rotor": [
+   -4.470348358154297e-08,
+   2.7115026712417603,
+   -0.7428506016731262
+  ]
+ },
+ "triangles": 42941,
+ "size": [
+  2.57459458157786,
+  4.7,
+  3.883386235384795
+ ],
+ "source": "https://sketchfab.com/3d-models/phalanx-ciws-b811949a2ba543aab5fde70ecdf0bf6d"
+}

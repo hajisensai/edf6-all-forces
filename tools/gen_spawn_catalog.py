@@ -183,7 +183,7 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
     # recorded without requiring or writing files into the live game directory.
     import vcobjects
     tracked = {f'WEAPON/{path.rsplit("/", 1)[1].upper()}': kind
-               for kind in ('vulcan', 'bmpt') for path in vcobjects.GROUND_VEHICLES[kind].weapons}
+               for kind in vcobjects.TRACKED for path in vcobjects.GROUND_VEHICLES[kind].weapons}
     authored: dict[str, dict[str, bytes]] = {}
 
     def read(rel: str) -> bytes | None:
