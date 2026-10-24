@@ -191,7 +191,7 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
             kind = tracked[rel]
             if kind not in authored:
                 import make_tracked_combat
-                authored[kind] = make_tracked_combat.build(root, kind)
+                authored[kind] = make_tracked_combat.authored(root, kind)   # its weapons: no cockpit needed
             return authored[kind].get(rel)
         if rel in reg:
             return edf41_objects.read(rel)

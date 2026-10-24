@@ -369,6 +369,17 @@ float SightZoomNow(const void* vehicle) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER) {return 1.0f;}
 }
 
+bool SightZoomScope(SightScope* out) noexcept {
+    *out=SightScope{};
+    if(MapOwnsView())return false;
+    const Cue c=Snapshot();
+    __try {
+        if(!Current(c) || !sightzoom::ScopeField(c.sight.kind,c.zoom,c.sight.mounted && Up(c)))return false;
+        out->vehicle=c.vehicle.obj;out->human=c.human.obj;out->kind=c.sight.kind;out->zoom=c.zoom;
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){*out=SightScope{};return false;}
+}
+
 sightzoom::Kind SightZoomView(const void* vehicle) noexcept {
     if(MapOwnsView())return sightzoom::Kind::none;
     const Cue c=Snapshot();

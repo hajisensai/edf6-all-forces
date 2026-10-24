@@ -1747,7 +1747,10 @@ def sight_zoom_wired() -> None:
     hud = src('src/hud.cpp')
     draw = hud.split('void HudDraw(const float* viewProj,', 1)[1]
     assert draw.index('ScopeShade(') < draw.index('CarrierBars(')
-    assert 'sightzoom::MaskOf(sightKind)' in draw and 'SightZoomView()' in draw
+    # One snapshot of the seat's sight decides the field (SightZoomScope, sightzoom.h ScopeField) and whose stock
+    # crosshair gives way to it (scope_hold.h PublishScopeDrawn); SightZoomView still tells the overhead view.
+    assert 'SightZoomScope(&sight)' in draw and 'sightzoom::MaskOf(sight.kind)' in draw and 'SightZoomView()' in draw
+    assert 'PublishScopeDrawn(drawn ? sight.human : nullptr)' in draw and 'HudScopeHoldsCrosshair(soldier)' in src('src/infantryscope.cpp')
     assert 'SeatCapability(v,seat)' in code and 'HighCamOn(v) || TurretCamHighTransition(v)' in code
     assert 'LadderTicks(drawer,ctx,text,vp,width,height,s,h.ladder,' in hud and 'r.ladder=gunsight::Of(' in src('src/helisight.cpp')
     cmake = src('CMakeLists.txt')
