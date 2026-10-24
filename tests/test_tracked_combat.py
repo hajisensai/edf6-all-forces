@@ -55,9 +55,9 @@ class CatalogContractTests(unittest.TestCase):
                             'the rounds one control cycles never look alike')
         self.assertEqual(tuple(combat.slot('bmpt', i) for i in range(6)), ('left', 'right', 'missiles', 'left', 'right', 'missiles'))
         # 2026-10-21: both Ataka rounds ride the V603's otherwise unread secondary, alongside the cannons (src/payload.cpp).
-        # 2026-10-24: the Tunguska's and the Apocalypse's missiles ride it too.
+        # 2026-10-24: the Tunguska's, the Apocalypse's and the Patriot's missiles ride it too.
         self.assertEqual([kind for kind, store in vc.STORES.items() if store.independent_secondary],
-                         ['TUNGUSKA_SAM', 'APOC_SAM', 'BMPT_ATGM', 'BMPT_ATGMF'])
+                         ['TUNGUSKA_SAM', 'APOC_SAM', 'PATRIOT_SAM', 'BMPT_ATGM', 'BMPT_ATGMF'])
         self.assertFalse(any(vc.STORES[k].native_control or vc.STORES[k].group for k in ('BMPT_ATGM', 'BMPT_ATGMF')),
                          'a missile is not alternate cannon ammunition')
 

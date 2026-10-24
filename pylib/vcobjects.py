@@ -498,6 +498,13 @@ STORES: dict[str, Store] = {
                               max_g=35.0, nav=4.0, life=15.0, damage=700.0, blast=12.0, lock_range=2600.0,
                               lock_cone=0.6, lock_time=15.0),
                       _local('Anti-air missile', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), independent_secondary=True),
+    # The Patriot's PAC-3 (tools/make_patriot.py, models/emp_patriot): a hit-to-kill anti-air missile from the pack's
+    # four tubes, on the V603's otherwise unread secondary as the BMPT's Ataka.
+    'PATRIOT_SAM': Store('PAC-3', 'air', 0.0, 0.0,
+                         Missile('PAC-3', Look('bullet_mediummissile01', 5.2), burn=4.0, top=1400.0, accel=450.0,
+                                 max_g=50.0, nav=4.5, life=16.0, damage=2500.0, blast=14.0, lock_range=3500.0,
+                                 lock_cone=0.6, lock_time=20.0),
+                         _local('PAC-3', 'PAC-3', 'PAC-3', 'PAC-3', 'PAC-3'), independent_secondary=True),
     'QVULCAN_AP': Store('Quad M61 AP', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
                         _local('Quad M61 AP', '4連装 M61 徹甲弾', '四聯 M61 穿甲彈', '四联 M61 穿甲弹', '4연장 M61 철갑탄'),
                         group=4, barrel=0),
@@ -851,6 +858,13 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
        for kind, durability in (('emp_mid', 3000.0), ('emp_short', 3600.0), ('emp_long', 3300.0),
                                 ('ciws_phalanx', 1800.0), ('flak88', 1500.0), ('laser', 1600.0),
                                 ('railgun', 2400.0))},
+    # The Patriot (tools/make_patriot.py, models/emp_patriot): PAC-2 salvoes from the native pair, in turn, and the
+    # PAC-3 from the same tubes (the BMPT's missile holder on the turret).
+    'patriot': GroundVehicle('EDF6VC_PATRIOT', 'V603_FLAK', 'AWEAPON346',
+                             ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
+                             ('app:/weapon/edf6vc_patriot_l.sgo', 'app:/weapon/edf6vc_patriot_r.sgo',
+                              'app:/weapon/edf6vc_patriot_sam_8.sgo'), 2000.0, 'make_patriot',
+                             slots=('left', 'right', 'missiles'), alternate=True),
     # The GDF-005: its two guns together (not in turn).
     'gdf005': GroundVehicle('EDF6VC_GDF005', 'V603_FLAK', 'AWEAPON346',
                             ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
@@ -908,7 +922,7 @@ TRACKED: dict[str, str] = {
     'emp_mid': '无畏舰副炮炮台·中型', 'emp_short': '无畏舰副炮炮台·短管', 'emp_long': '无畏舰副炮炮台·长管',
     'tunguska': '2S6 通古斯卡防空车', 'pzh2000': 'PzH 2000 自行榴弹炮', 'sturmtiger': '突击虎',
     'ciws_phalanx': '密集阵近防炮', 'flak88': '88 毫米高射炮', 'apocalypse': '天启坦克', 'gdf005': 'GDF-005 双联高炮',
-    'laser': '激光防空炮台', 'railgun': '电磁炮炮台', 'tos1': 'TOS-1 喷火兵火箭炮',
+    'laser': '激光防空炮台', 'railgun': '电磁炮炮台', 'tos1': 'TOS-1 喷火兵火箭炮', 'patriot': '爱国者防空导弹'
 }
 # The drill tank's bite (src/jet_bay.cpp kDrillChargeFile, DrillCharge): an impact charge (tools/make_jets.py
 # impact_charge) with a blast of DRILL_CHARGE_RADIUS m (3 m or more: the stock path that lets a blast break buildings,

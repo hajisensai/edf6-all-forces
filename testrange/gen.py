@@ -904,7 +904,7 @@ GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'e
                                   'edf6tr_emp_long_mission': 'make_emp_long',
                                   'edf6tr_tunguska_mission': 'make_tunguska',
                                   'edf6tr_pzh2000_mission': 'make_pzh2000',
-                                  'edf6tr_sturmtiger_mission': 'make_sturmtiger', 'edf6tr_ciws_phalanx_mission': 'make_ciws_phalanx', 'edf6tr_flak88_mission': 'make_flak88', 'edf6tr_apocalypse_mission': 'make_apocalypse', 'edf6tr_gdf005_mission': 'make_gdf005', 'edf6tr_laser_mission': 'make_laser', 'edf6tr_railgun_mission': 'make_railgun', 'edf6tr_tos1_mission': 'make_tos1'}
+                                  'edf6tr_sturmtiger_mission': 'make_sturmtiger', 'edf6tr_ciws_phalanx_mission': 'make_ciws_phalanx', 'edf6tr_flak88_mission': 'make_flak88', 'edf6tr_apocalypse_mission': 'make_apocalypse', 'edf6tr_gdf005_mission': 'make_gdf005', 'edf6tr_laser_mission': 'make_laser', 'edf6tr_railgun_mission': 'make_railgun', 'edf6tr_tos1_mission': 'make_tos1', 'edf6tr_patriot_mission': 'make_patriot'}
 
 
 def range_files(sgo_name: str) -> tuple[str, ...]:

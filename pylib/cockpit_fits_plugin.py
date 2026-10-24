@@ -133,6 +133,8 @@ FITS: dict[str, tuple[Fit, ...]] = {
     'EDF6VC_GDF005': (Fit(0, 'cannon_main', (0.0, 4.336, -0.326), 'remote_display'),),
     'EDF6VC_LASER': (Fit(0, 'cannon_main', (0.0, 5.3, -2.119), 'remote_display'),),
     'EDF6VC_RAILGUN': (Fit(0, 'cannon_main', (0.0, 6.6, -3.889), 'remote_display'),),
+    # The Patriot (models/emp_patriot): a camera on the turntable, beside the canister pack (x 1.28 its side).
+    'EDF6VC_PATRIOT': (Fit(0, 'cannon_main', (1.5, 3.6, -2.0), 'remote_display'),),
     # The 2S6 (tools/make_tunguska.py; its War Thunder model, models/wt_tunguska): the gunner's sight's picture
     # (remote_display), the eye at the front of its sight head on the turret roof (node optic_turret_05: x 0.17..0.64,
     # y 2.99..3.55, its face at z 0.83), the guns down on both sides, the tracking radar ahead.

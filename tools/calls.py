@@ -230,6 +230,9 @@ CALLS: tuple[Call, ...] = (
     # Appended 2026-10-24 (the user: 「做一堆出名、独特的载具/固定炮台」): a railgun turret, a fixed emplacement firing a near-instant
     # slug through everything in its path (tools/make_railgun.py; Obi-Wanya's Sketchfab model in models/emp_railgun).
     Call('EDF6VC_CALL_RAILGUN', 0, 'railgun', False, 0, 14000, 2.0, 'vehicle', vehicle='EDF6VC_RAILGUN', ground='railgun'),
+    # Appended 2026-10-24 (the user: 「还有各种现实的炮台」): the MIM-104 Patriot's M901 launcher, a fixed SAM emplacement
+    # (tools/make_patriot.py; MirzaArrafiERV_45's Sketchfab model in models/emp_patriot).
+    Call('EDF6VC_CALL_PATRIOT', 0, 'patriot', False, 0, 15000, 2.0, 'vehicle', vehicle='EDF6VC_PATRIOT', ground='patriot'),
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
@@ -258,6 +261,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'gravity gun (2026-10-20)': IDS[:48],
     'Dreadnought (2026-10-21)': IDS[:49],
     'new vehicles and emplacements (2026-10-24)': IDS[:63],
+    'Patriot (2026-10-24)': IDS[:64],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -398,6 +402,12 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'CN': ('電磁砲砲台', '請求一座電磁砲砲台：彈丸幾乎瞬間到達、彈道筆直，貫穿路徑上的所有目標，單發威力極大，裝填慢。外觀為 Obi-Wanya 在 Sketchfab 分享的模型（CC BY 4.0）。固定砲台，落地後不能移動，只能轉動砲塔射擊；可以讓 NPC 上去操作。'),
         'JA': ('レールガン砲台', 'レールガン砲台を要請する。弾体はほぼ瞬時に届き弾道はまっすぐで、射線上のすべてを貫通する。一発の威力は非常に大きく装填は遅い。外観は Obi-Wanya が Sketchfab で公開したモデル（CC BY 4.0）。固定砲台：着地後は移動できず、砲塔を旋回させて撃つ。NPC も操作できる。'),
         'EN': ('Railgun Turret', 'Requests a railgun emplacement: its slug arrives almost at once on a dead-straight path and goes through everything on it, each shot very hard-hitting, slow to reload. Model: shared on Sketchfab by Obi-Wanya (CC BY 4.0). A fixed emplacement: once down it cannot move, only turn and fire; NPCs can man it.'),
+    },
+    'patriot': {
+        'SC': ('爱国者防空导弹', '请求一座 MIM-104 爱国者发射装置：主攻击为 PAC-2 导弹齐射（两个挂点轮流，每次两发），副攻击为 PAC-3 防空导弹（需要锁定空中目标），两者可以同时开火；T / 手柄十字键右切换导弹。射程远、威力大、装填慢，专打空中目标。外观为 MirzaArrafiERV_45 在 Sketchfab 分享的模型（CC BY 4.0）。固定炮台，落地后不能移动，只能转动发射架射击；可以让 NPC 上去操作。'),
+        'CN': ('愛國者防空飛彈', '請求一座 MIM-104 愛國者發射裝置：主攻擊為 PAC-2 飛彈齊射（兩個掛點輪流，每次兩發），副攻擊為 PAC-3 防空飛彈（需要鎖定空中目標），兩者可以同時開火；T / 手把十字鍵右切換飛彈。射程遠、威力大、裝填慢，專打空中目標。外觀為 MirzaArrafiERV_45 在 Sketchfab 分享的模型（CC BY 4.0）。固定砲台，落地後不能移動，只能轉動發射架射擊；可以讓 NPC 上去操作。'),
+        'JA': ('パトリオット対空ミサイル', 'MIM-104 パトリオットの発射機を要請する。主攻撃は PAC-2 ミサイルの斉射（2 つの発射口が交互に 2 発ずつ）、副攻撃は PAC-3 対空ミサイル（空中目標へのロックオンが必要）で、同時に撃てる。T / 十字キー右でミサイルを切り替える。射程が長く威力が大きいが装填は遅い、空中目標向け。外観は MirzaArrafiERV_45 が Sketchfab で公開したモデル（CC BY 4.0）。固定砲台：着地後は移動できず、発射機を旋回させて撃つ。NPC も操作できる。'),
+        'EN': ('MIM-104 Patriot', "Requests a MIM-104 Patriot launcher: PAC-2 salvoes on the primary attack (its two holders in turn, two a time) and PAC-3 anti-air missiles (lock on to air targets) on the secondary, both at once; T / D-pad right switches the missile. Long-ranged, hard-hitting, slow to reload; for air targets. Model: MirzaArrafiERV_45's model on Sketchfab (CC BY 4.0). A fixed emplacement: once down it cannot move, only turn its launcher and fire; NPCs can man it."),
     },
     'sedan': {
         'SC': ('民用轿车', '请求一辆没有武器的民用轿车，单驾驶席。按通常的上车键驾驶，V 切换第一人称，按住鼠标中键或手柄 L3 转动视角自由观察。'),
@@ -833,7 +843,7 @@ PLUGIN_NOTES: dict[str, str] = {
     'JA': 'EDF6VehicleCrew プラグイン、およびインストーラーが書き出す車両ファイルが必要。',
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
-GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES, 'quadvulcan': PLUGIN_NOTES, 'emp_mid': PLUGIN_NOTES, 'emp_short': PLUGIN_NOTES, 'emp_long': PLUGIN_NOTES, 'tunguska': PLUGIN_NOTES, 'pzh2000': PLUGIN_NOTES, 'sturmtiger': PLUGIN_NOTES, 'tos1': PLUGIN_NOTES, 'apocalypse': PLUGIN_NOTES, 'ciws_phalanx': PLUGIN_NOTES, 'flak88': PLUGIN_NOTES, 'gdf005': PLUGIN_NOTES, 'laser': PLUGIN_NOTES, 'railgun': PLUGIN_NOTES}
+GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES, 'quadvulcan': PLUGIN_NOTES, 'emp_mid': PLUGIN_NOTES, 'emp_short': PLUGIN_NOTES, 'emp_long': PLUGIN_NOTES, 'tunguska': PLUGIN_NOTES, 'pzh2000': PLUGIN_NOTES, 'sturmtiger': PLUGIN_NOTES, 'tos1': PLUGIN_NOTES, 'apocalypse': PLUGIN_NOTES, 'ciws_phalanx': PLUGIN_NOTES, 'flak88': PLUGIN_NOTES, 'gdf005': PLUGIN_NOTES, 'laser': PLUGIN_NOTES, 'railgun': PLUGIN_NOTES, 'patriot': PLUGIN_NOTES}
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',

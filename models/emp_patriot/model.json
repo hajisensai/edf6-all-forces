@@ -1,0 +1,103 @@
+{
+ "format": 1,
+ "kind": "patriot",
+ "title": "MIM-104 Patriot launcher",
+ "prepared_from": "model.glb",
+ "scale": 0.010277169708849966,
+ "yaw": -90.0,
+ "materials": [
+  {
+   "name": "edf6vc_patriot_0",
+   "template": "v603_body",
+   "albedo": "textures/patriot_0.png",
+   "source": "0d5d4022_dds"
+  },
+  {
+   "name": "edf6vc_patriot_1",
+   "template": "v603_body",
+   "albedo": "textures/patriot_1.png",
+   "source": "75aec434_dds"
+  }
+ ],
+ "parts": [
+  {
+   "name": "base.edf6vc_patriot_0",
+   "role": "base",
+   "material": 0,
+   "triangles": 1528,
+   "vertices": 1284
+  },
+  {
+   "name": "base.edf6vc_patriot_1",
+   "role": "base",
+   "material": 1,
+   "triangles": 6920,
+   "vertices": 8976
+  },
+  {
+   "name": "turret.edf6vc_patriot_1",
+   "role": "turret",
+   "material": 1,
+   "triangles": 376,
+   "vertices": 478
+  },
+  {
+   "name": "gun.edf6vc_patriot_1",
+   "role": "gun",
+   "material": 1,
+   "triangles": 2788,
+   "vertices": 4170
+  }
+ ],
+ "pivots": {
+  "ring": [
+   0.0007773041725158691,
+   -3.4790561199188232
+  ],
+  "trunnion": [
+   1.9,
+   -4.3
+  ],
+  "muzzles": {
+   "left": [
+    0.4750723877678747,
+    1.8047779992870663,
+    2.662341594696045
+   ],
+   "right": [
+    -0.561501479667166,
+    1.8047779992870663,
+    2.662341594696045
+   ]
+  },
+  "tubes": [
+   [
+    0.47474755541138025,
+    2.313322398973548,
+    2.662341594696045
+   ],
+   [
+    -0.5618272449659265,
+    2.312643154807713,
+    2.662341594696045
+   ],
+   [
+    0.4753972201243691,
+    1.2969139762546704,
+    2.662341594696045
+   ],
+   [
+    -0.5611757143684055,
+    1.296232467112334,
+    2.662341594696045
+   ]
+  ]
+ },
+ "triangles": 11612,
+ "size": [
+  5.764572944445085,
+  4.6362813922379695,
+  10.5
+ ],
+ "source": "https://sketchfab.com/3d-models/mim-104-patriot-air-defense-system-95e1e402426f4ddcb543af7a0455cf05"
+}

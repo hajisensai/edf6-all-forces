@@ -69,6 +69,12 @@ class Model:
     # left on the base go to the role of the first box (game space, after the scale) holding their box's centre;
     # 'drop' leaves them out. --pieces lists every piece's box to write these from.
     boxes: list[tuple[str, tuple[float, float, float], tuple[float, float, float]]] = field(default_factory=list)
+    # A launcher modelled raised: its guns brought down by this many degrees about the trunnion (which must be given)
+    # before anything is measured, so the rest pose is level and lifting it is the gunner's.
+    lower: float = 0.0
+    # A launcher's tube mouths: True puts the 2 x 2 grid of mouths at the guns' front in pivots['tubes'] (the
+    # emplacement's missile holder fires from them).
+    tubes: bool = False
 
 
 MODELS: dict[str, Model] = {
@@ -95,6 +101,10 @@ MODELS: dict[str, Model] = {
     'railgun': Model(kind='railgun', folder='emp_railgun', title='Railgun turret',
                      rules=[(r'/(UVN|Cannon)_', 'gun'), (r'/Base_', 'base'), (r'/GLTF_created_0_rootJoint/', 'base'), (r'/', 'turret')],
                      skinned=True, height=4.5, ring_node='UGN_17', trunnion_node='UVN_1', muzzle_x=(0.0, 0.0)),
+    'patriot': Model(kind='patriot', folder='emp_patriot', title='MIM-104 Patriot launcher', rules=[], yaw=-90.0, length=10.5,
+                     boxes=[('base', (-9.0, -9.0, 2.3), (9.0, 9.0, 9.0)), ('gun', (-9.0, 1.9, -9.0), (9.0, 9.0, 2.3)),
+                            ('turret', (-9.0, 1.25, -5.3), (9.0, 9.0, -1.2))],
+                     trunnion=(1.9, -4.3), lower=45.4, tubes=True),
     'ciws_phalanx': Model(
         kind='ciws_phalanx', folder='emp_phalanx', title='Phalanx CIWS Mk 15',
         rules=[(r'/Gun/', 'rotor'), (r'/Gun_Part/', 'rotor'), (r'/Rotate_x/', 'gun'), (r'/Rotate_Z/', 'turret'),
@@ -342,6 +352,17 @@ def prepare(m: Model, src: str, out: str) -> dict:
     P = (P - (centre[0], lo[1], centre[2])) * scale
     if m.boxes or LIST_PIECES:
         roles, keep = by_boxes(m, scene, P, roles, keep)
+    if m.lower:
+        if not m.trunnion:
+            raise ValueError(f'{m.kind}: lowering the guns needs their trunnion')
+        moved = np.unique(scene.triangles[keep & ((roles == 'gun') | (roles == 'rotor'))])
+        b = np.radians(m.lower)      # about +x, +z towards -y: the muzzle down onto the front
+        tilt = np.array([[1, 0, 0], [0, np.cos(b), -np.sin(b)], [0, np.sin(b), np.cos(b)]])
+        pivot = np.array((0.0, m.trunnion[0], m.trunnion[1]))
+        P[moved] = (P[moved] - pivot) @ tilt.T + pivot
+        if N is not None:
+            N = N.copy()
+            N[moved] = N[moved] @ tilt.T
     os.makedirs(os.path.join(out, 'textures'), exist_ok=True)
     plating(out)
     materials, mat_of = [], {}
@@ -406,6 +427,11 @@ def prepare(m: Model, src: str, out: str) -> dict:
     my = float(front[:, 1].mean())
     pivots = {'ring': [float(ring[0]), float(ring[1])], 'trunnion': [float(trunnion[0]), float(trunnion[1])],
               'muzzles': {'left': [float(xs[0]), my, float(ghi[2])], 'right': [float(xs[1]), my, float(ghi[2])]}}
+    if m.tubes:
+        mid_x, mid_y = (front[:, 0].min() + front[:, 0].max()) / 2, (front[:, 1].min() + front[:, 1].max()) / 2
+        pivots['tubes'] = [[float(front[sel][:, 0].mean()), float(front[sel][:, 1].mean()), float(ghi[2])]
+                           for sel in ((front[:, 0] > mid_x) & (front[:, 1] > mid_y), (front[:, 0] <= mid_x) & (front[:, 1] > mid_y),
+                                       (front[:, 0] > mid_x) & (front[:, 1] <= mid_y), (front[:, 0] <= mid_x) & (front[:, 1] <= mid_y))]
     if any(p['role'] == 'rotor' for p in parts):
         r = pts('rotor')
         ax = m.rotor_axis or ((r[:, 0].min() + r[:, 0].max()) / 2, (r[:, 1].min() + r[:, 1].max()) / 2)

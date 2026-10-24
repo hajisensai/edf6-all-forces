@@ -34,7 +34,7 @@ LABELS = {'vulcan': 'M163 火神炮车（HE / AP 双弹链）', 'bmpt': 'BMPT（
           'emp_long': '无畏舰副炮炮台·长管（双联远程炮）',
           'tunguska': '2S6 通古斯卡（双 30 mm 双管炮与 9M311 导弹）',
           'pzh2000': 'PzH 2000（155 mm 榴弹炮，炮塔可转）',
-          'sturmtiger': '突击虎（380 mm 火箭臼炮）', 'ciws_phalanx': '密集阵近防炮（M61A1 六管 20 mm）', 'flak88': '88 毫米高射炮（Flak 18/36）', 'apocalypse': '天启坦克（双管重炮与防空导弹）', 'gdf005': 'GDF-005 双联 35 mm 高炮（空爆弹）', 'laser': '激光防空炮台', 'railgun': '电磁炮炮台', 'tos1': 'TOS-1 喷火兵（温压火箭齐射）'
+          'sturmtiger': '突击虎（380 mm 火箭臼炮）', 'ciws_phalanx': '密集阵近防炮（M61A1 六管 20 mm）', 'flak88': '88 毫米高射炮（Flak 18/36）', 'apocalypse': '天启坦克（双管重炮与防空导弹）', 'gdf005': 'GDF-005 双联 35 mm 高炮（空爆弹）', 'laser': '激光防空炮台', 'railgun': '电磁炮炮台', 'tos1': 'TOS-1 喷火兵（温压火箭齐射）', 'patriot': 'MIM-104 爱国者（PAC-2 齐射与 PAC-3 导弹）'
 }
 # The kinds on the M163's one M61 cradle: every gun holder hangs on its left slide (the quad's four guns lift together).
 ONE_CRADLE = ('vulcan', 'quadvulcan') + EMPLACEMENTS
@@ -131,6 +131,14 @@ GUNS['tos1'] = {
     'AmmoOwnerMove': 0.0, 'FireInterval': 600.0, 'FireBurstCount': 12.0, 'FireBurstInterval': 4.0, 'FireRecoil': 0.0,
     'FireAccuracy': 0.03, 'LockonTargetType': 7303.0,
 }
+# The Patriot's native pair: PAC-2 salvoes, the Titan's side missile (its round, its lock-on) from the pack's tubes, two
+# a holder, the holders in turn; an anti-air mark. Its PAC-3 (vcobjects PATRIOT_SAM) rides the secondary.
+GUNS['patriot'] = {
+    'AmmoCount': 16.0, 'AmmoDamage': 1600.0, 'AmmoAlive': 900.0, 'AmmoSize': 2.0, 'AmmoHitSizeAdjust': 1.0,
+    'AmmoExplosion': 14.0, 'AmmoIsPenetration': 0.0, 'AmmoOwnerMove': 0.0, 'FireInterval': 300.0,
+    'FireBurstCount': 2.0, 'FireBurstInterval': 20.0, 'FireRecoil': 0.0, 'FireAccuracy': 0.02,
+    'LockonTargetType': 7301.0,
+}
 GUNS['tunguska'] = {
     'AmmoCount': 950.0, 'AmmoDamage': 14.0, 'AmmoSpeed': 16.0, 'AmmoAlive': 120.0, 'AmmoSize': 0.18,
     'AmmoHitSizeAdjust': 0.3, 'AmmoGravityFactor': 0.15, 'AmmoExplosion': 1.5, 'AmmoIsPenetration': 0.0,
@@ -162,8 +170,13 @@ EMPLACEMENT_SHELL = 'V_505TANK_CANNON01.SGO'
 DREADNOUGHT_GUNS = ('emp_mid', 'emp_short', 'emp_long')
 # The emplacements firing that shell (the Kepler gun's numbers are theirs: GUNS), with its sound, flash and a big case;
 # the laser turret the Brute heli's laser cannon's beam (its round, sound and flash).
-CANNON_SHELL = DREADNOUGHT_GUNS + ('flak88', 'apocalypse', 'laser', 'railgun', 'tos1')
-SHELL_OF = {'laser': 'V_506HELI_LASERCANNON01_L.SGO', 'railgun': 'V_506HELI_LASERCANNON01_L.SGO'}   # else EMPLACEMENT_SHELL
+CANNON_SHELL = DREADNOUGHT_GUNS + ('flak88', 'apocalypse', 'laser', 'railgun', 'tos1', 'patriot')
+SHELL_OF = {'laser': 'V_506HELI_LASERCANNON01_L.SGO', 'railgun': 'V_506HELI_LASERCANNON01_L.SGO',
+            'patriot': 'V_404BIGTANK_SIDEMISSILE_L.SGO'}   # else EMPLACEMENT_SHELL
+# A missile shell's own model, flight and lock-on, taken with SHELL_KEYS (the Titan's side missile locks on natively).
+MISSILE_SHELL_KEYS = ('AmmoModel', 'AmmoSpeed', 'AmmoGravityFactor', 'LockonType', 'LockonRange', 'LockonAngle',
+                      'LockonTime', 'LockonHoldTime')
+MISSILE_SHELL = ('patriot',)
 SHELL_KEYS = ('AmmoClass', 'Ammo_CustomParameter', 'AmmoColor', 'AmmoHitSe', 'AmmoHitImpulseAdjust', 'FireSe',
               'MuzzleFlash', 'MuzzleFlash_CustomParameter')
 # The BMPT's second belt (vcobjects STORES BMPT_AP / BMPT_AP_R): the 2A42 is a dual-feed gun, HE-FRAG-T (GUNS) or the
@@ -184,6 +197,7 @@ NAMES = {
     'flak88': ('8.8 cm Flak 18/36', '88mm 高射炮', '8.8cm 高射砲', '88mm 高射砲'),
     'railgun': ('Railgun', '电磁炮', 'レールガン', '電磁砲'),
     'laser': ('Laser Projector', '激光发射器', 'レーザー照射器', '雷射發射器'),
+    'patriot': ('MIM-104 PAC-2', 'MIM-104 PAC-2', 'MIM-104 PAC-2', 'MIM-104 PAC-2'),
     'gdf005': ('35 mm KDA AHEAD', '35mm KDA 空爆弹', '35mm KDA 空中炸裂弾', '35mm KDA 空爆彈'),
     'ciws_phalanx': ('M61A1 20 mm CIWS', 'M61A1 20mm 近防炮', 'M61A1 20mm 近接防御火器', 'M61A1 20mm 近防砲'),
     'tunguska': ('2A38M 30 mm', '2A38M 30mm 机炮', '2A38M 30mm 機関砲', '2A38M 30mm 機砲'),
@@ -323,6 +337,10 @@ def gun_sgo(game: vc.Game, kind: str, stock: str, side: str,
             source = SHELL_OF.get(kind, EMPLACEMENT_SHELL)
             shell = dsgo.parse(game.read('WEAPON', source)).root
             for key in SHELL_KEYS:
+                if shell.get(key) is None or doc.root.get(key) is None:
+                    raise ValueError(f'{source} / {stock}: missing {key}')
+                doc.root.set(key, copy.deepcopy(shell.get(key)))
+            for key in MISSILE_SHELL_KEYS if kind in MISSILE_SHELL else ():
                 if shell.get(key) is None or doc.root.get(key) is None:
                     raise ValueError(f'{source} / {stock}: missing {key}')
                 doc.root.set(key, copy.deepcopy(shell.get(key)))

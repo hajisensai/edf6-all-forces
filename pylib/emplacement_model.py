@@ -14,7 +14,7 @@ the plugin passes its driver no drive input (src/emplacement.cpp: the marker bon
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -64,6 +64,7 @@ KINDS = {
     'gdf005': Emplacement('Oerlikon GDF-005 35 mm', '', '', 1.0, 1400.0, 'emp_gdf005'),
     'laser': Emplacement('Laser air-defence turret', '', '', 1.0, 1600.0, 'emp_laser'),
     'railgun': Emplacement('Railgun turret', '', '', 1.0, 2400.0, 'emp_railgun'),
+    'patriot': Emplacement('MIM-104 Patriot launcher', '', '', 1.0, 2000.0, 'emp_patriot', (1.5, 3.6, -2.0)),
 }
 EYE_UP, EYE_BACK = 0.8, 0.6           # m: a gunner's sight over the guns' top, behind their trunnions
 # A box's 12 triangles, outward, over its corners numbered by bits (x 1, y 2, z 4: set = the high side).
@@ -210,8 +211,8 @@ def _muzzles(gun: np.ndarray, muzzle: np.ndarray) -> dict[str, np.ndarray]:
 class Source:
     """What an emplacement is made of, in game space and metres on the base's top: its pieces (name, bone, its
     material's index into `materials`, (positions, normals, uvs, triangles)), the turret's turning axis (`ring`), the
-    guns' trunnion (`cradle`), their mouths, a spinning barrel cluster's axis (`rotor`: its point at the back) and the
-    base's plating (`plating`: its texture files)."""
+    guns' trunnion (`cradle`), their mouths, a spinning barrel cluster's axis (`rotor`: its point at the back), the
+    base's plating (`plating`: its texture files) and a launcher's tube mouths (`tubes`: its missile holder's)."""
     folder: str
     title: str
     source: str
@@ -222,6 +223,7 @@ class Source:
     mouths: dict[str, np.ndarray]
     plating: dict
     rotor: np.ndarray | None = None
+    tubes: list[np.ndarray] = field(default_factory=list)
 
 
 def _dreadnought(kind: str, e: Emplacement) -> Source:
@@ -275,9 +277,10 @@ def _prepared(kind: str, e: Emplacement) -> Source:
     cradle = np.array((ring[0], v['trunnion'][0] * e.scale + BASE_TOP, v['trunnion'][1] * e.scale))
     mouths = {s: np.asarray(v['muzzles'][s]) * e.scale + up for s in ('left', 'right')}
     rotor = np.asarray(v['rotor']) * e.scale + up if 'rotor' in v else None
+    tubes = [np.asarray(p) * e.scale + up for p in v.get('tubes', [])]
     materials = [{**m, 'albedo': os.path.join(d, m['albedo'])} for m in info['materials']]  # type: ignore[arg-type]
     plating = {'albedo': os.path.join(d, 'textures', 'plating.png')}  # type: ignore[arg-type]
-    return Source(d, e.title, info.get('source', e.folder), materials, pieces, ring, cradle, mouths, plating, rotor)  # type: ignore[arg-type]
+    return Source(d, e.title, info.get('source', e.folder), materials, pieces, ring, cradle, mouths, plating, rotor, tubes)  # type: ignore[arg-type]
 
 
 def spec(kind: str) -> wt.Spec:
@@ -353,7 +356,8 @@ def spec(kind: str) -> wt.Spec:
     info = {'format': wt.FORMAT, 'kind': kind, 'title': src.title, 'source': src.source,
             'materials': materials, 'parts': parts, 'origins': origins, 'visual_bones': visual, 'wheels': {},
             'muzzles': {side: [{'bone': 'cannon_slide_l', 'point': np.asarray(p).tolist()}]
-                        for side, p in src.mouths.items()},
+                        for side, p in src.mouths.items()} | ({'missiles': [{'bone': 'cannon_main', 'point': np.asarray(p).tolist()}
+                                                                             for p in src.tubes]} if src.tubes else {}),
             'ejections': {side: {'bone': 'cannon_slide_l', 'point': cradle.tolist()} for side in ('left', 'right')},
             'collision': collision, 'triangles': int(sum(p['triangles'] for p in parts)),
             'eye': list(e.eye) if e.eye else [round(float(cradle[0]), 3), round(top + EYE_UP, 3),

@@ -30,9 +30,10 @@ class RegistryTests(unittest.TestCase):
                 vehicle = vc.GROUND_VEHICLES[kind]
                 self.assertEqual(vehicle.stock, 'V603_FLAK')
                 self.assertEqual(vehicle.alternate, kind != 'gdf005', 'two guns in turn, the GDF-005 both together')
-                self.assertEqual(vehicle.slots, ('left', 'right'))
+                # the Patriot's PAC-3 from its tubes as well (a missile holder, vcobjects PATRIOT_SAM)
+                self.assertEqual(vehicle.slots, ('left', 'right') + (('missiles',) if kind == 'patriot' else ()))
                 self.assertTrue((ROOT / 'tools' / f'{vehicle.tool}.py').is_file())
-                self.assertLessEqual(sum(c.ground == kind for c in calls.CALLS), 1)
+                self.assertEqual(sum(c.ground == kind for c in calls.CALLS), 1)
                 self.assertIn(f'EDF6VC_{kind.upper()}', cockpit_fits.FITS)
 
     def test_the_plugin_knows_the_marker(self) -> None:
@@ -131,6 +132,20 @@ class AssetTests(unittest.TestCase):
                     self.assertEqual(gun.get('FireInterval'), self.combat.GUNS[kind]['FireInterval'])
             names = {name for name, _pair in vc.twin_barrels()}
             self.assertTrue({w.rsplit('/', 1)[1].upper() for w in vehicle.weapons} <= names)
+
+    def test_the_patriot_fires_missiles_from_its_tubes(self) -> None:
+        # The native pair the Titan's side missile (its round and lock-on); the PAC-3 from the pack's four tubes.
+        import dsgo
+        vehicle = vc.GROUND_VEHICLES['patriot']
+        for path in vehicle.weapons[:2]:
+            gun = dsgo.parse(self.files['patriot'][f'WEAPON/{path.rsplit("/", 1)[1].upper()}']).root
+            self.assertEqual(gun.get('AmmoClass'), 'MissileBullet01')
+            self.assertEqual(gun.get('LockonType'), 1.0)
+            self.assertEqual(gun.get('LockonTargetType'), 7301.0)
+        self.assertEqual(vc.store_of(vehicle.weapons[2]), ('PATRIOT_SAM', 8))
+        tubes = em.spec('patriot').info['muzzles']['missiles']
+        self.assertEqual(len(tubes), 4)
+        self.assertEqual({t['bone'] for t in tubes}, {'cannon_main'})
 
 
 if __name__ == '__main__':
