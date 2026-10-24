@@ -157,9 +157,14 @@ def vehicle_call(members: dict, template: Node, vehicle: str) -> dsgo.Document:
                     or len(mine[2]) != 1):
                 raise edf5port.Unsupported('not the single-gun 408 setup')
             import edf41bike
-            # [1] is 4.1 VehicleBike's own four-number block; the object is a Vehicle_Car, whose setup reads seven
-            # (edf41bike.CAR_DRIVE). The request carries the object's: 4.1's armour [0] and gun [2] stay the call's.
-            mine[1] = list(edf41bike.CAR_DRIVE)
+            # [1] is 4.1 VehicleBike's own four-number block, the SDL1 model's grip / top speed / torque; the object is a
+            # Vehicle_Car, whose setup reads seven (edf41bike.CAR_DRIVE): the request carries this model's Car block
+            # (edf41bike.car_drive). 4.1's armour [0] and gun [2] stay the call's: each model drops the one 408 object
+            # with its own setup, as in 4.1.
+            try:
+                mine[1] = edf41bike.car_drive(mine[1])
+            except ValueError as e:
+                raise edf5port.Unsupported(str(e)) from e
             mine[2] = edf41bike.native_gun_rows(mine[2])
             drop.items[3] = edf5port.to_value(mine)
         elif leaf(vehicle) == 'vehicle302_heli.sgo':

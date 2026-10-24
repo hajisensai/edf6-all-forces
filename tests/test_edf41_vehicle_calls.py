@@ -56,7 +56,7 @@ class VehicleCalls(unittest.TestCase):
         self.assertEqual(len(setup[4]), 6)
 
     def test_408_keeps_one_gunner_gun_instead_of_503_two_guns_and_fuel(self):
-        source = [[1.7, 1.7], [0.1, 10, 0.02, 1, 0.2, 0.8],
+        source = [[1.7, 1.7], [2.0, 1.2, 50.0, 250.0],
                   [['app:/weapon/v_408motorbike_gun.sgo', ['AimRecoil', [.002618, .0062832]], [90, .015, .1]]]]
         donor = [[1, 1], [0.1] * 6, [4000, 1],
                  [['stock_l', [0, 0]], ['stock_r', [0, 0]], ['app:/weapon/v_fuel01.sgo']]]
@@ -64,8 +64,15 @@ class VehicleCalls(unittest.TestCase):
         converted = ec.vehicle_call(members, template(donor), 'vehicle408_motorbike.sgo').root
         setup = values(converted.get('Ammo_CustomParameter').items[4].items[3])
         self.assertEqual(setup[0], source[0])
-        # The object is a Vehicle_Car: its setup reads seven drive numbers, never 4.1 VehicleBike's own block.
-        self.assertEqual(setup[1], edf41bike.CAR_DRIVE)
+        # The object is a Vehicle_Car: its setup reads seven drive numbers, never 4.1 VehicleBike's own block; the
+        # model's grip / top speed / torque scale the chassis' block (edf41bike.car_drive).
+        self.assertEqual(setup[1], edf41bike.car_drive([2.0, 1.2, 50.0, 250.0]))
+        self.assertEqual(setup[1], [0.8, 50.0, 0.01125, 0.7, 0.075, 0.3, 0.6])
+        self.assertEqual(edf41bike.car_drive(edf41bike.BASE41), edf41bike.CAR_DRIVE)
+        bad = copy.deepcopy(members)
+        bad['Ammo_CustomParameter'][4][3][1] = [0.1, 10, 0.02, 1, 0.2, 0.8]   # not VehicleBike's four numbers
+        with self.assertRaises(edf5port.Unsupported):
+            ec.vehicle_call(bad, template(donor), 'vehicle408_motorbike.sgo')
         self.assertEqual(len(setup), 3)
         self.assertEqual(setup[2], [['app:/weapon/edf41_v_408motorbike_gun.sgo', [0.0, 0.0], [90, .015, .1]]])
 
@@ -78,6 +85,7 @@ class VehicleCalls(unittest.TestCase):
         roots = set(edf41tank.ROOTS + edf41heli.ROOTS + edf41mech.ROOTS + edf41bike.ROOTS)
         rows = json.loads((ROOT / 'edf41port/calls.json').read_text(encoding='utf8'))['weapons']
         checked = 0
+        sdl1: set[str] = set()
         for row in rows:
             call = row.get('call', {})
             if call.get('kind') != 'vehicle' or call['vehicle'].upper() not in roots:
@@ -94,12 +102,17 @@ class VehicleCalls(unittest.TestCase):
                     self.assertEqual(len(setup[2]), 1)
                     self.assertEqual(setup[2][0][0], 'app:/weapon/edf41_v_408motorbike_gun.sgo')
                     self.assertEqual(setup[2][0][1], [0.0, 0.0])
-                    self.assertEqual(setup[1], edf41bike.CAR_DRIVE)
+                    _model, armour, block = edf41bike.SDL1_MODELS[row['sgo'].upper()]
+                    self.assertEqual(setup[0], armour)
+                    self.assertEqual(setup[1], edf41bike.car_drive(block))
+                    sdl1.add(row['sgo'].upper())
                 if call['vehicle'].startswith('vehicle406_begaruta'):
                     self.assertEqual(len(setup[4]), 6)
                     self.assertTrue(all('v_406begaruta_' in gun[0] for gun in setup[4] if isinstance(gun[0], str)))
             checked += 1
         self.assertEqual(checked, 45)
+        # Every SDL1 model's request drops the one 408 with that model's own armour and drive block, as 4.1's do.
+        self.assertEqual(sdl1, set(edf41bike.SDL1_MODELS))
 
     def test_credit_reload_is_edf6s_credit_reload(self):
         # EDF+0x693E8D: EDF6's 1 counts down every frame ([自動]秒), its 2 spends the score (pt). 4.1's 1 is pt.
