@@ -49,6 +49,10 @@ Config config{};
 bool depthPatchReady=true;
 bool ViewDepthReady() noexcept { return depthPatchReady; }
 void ViewWriteNear(void* camera,float value) noexcept { Put<float>(camera,kCamNear,value); }
+// view.cpp's lease (tested against the shipped code in view_depth_lifecycle_test): a still-current value goes back
+// to the camera's native baseline, a newer value of another owner stays.
+float nativeNear=.1f;
+void ViewReturnNear(void* camera,float written) noexcept { if(At<float>(camera,kCamNear)==written)Put<float>(camera,kCamNear,nativeNear); }
 void VehicleLookSetReady(bool) noexcept {}
 bool enemyCamera=false;const unsigned char* enemyCameraHuman=nullptr;
 bool EnemyControlCamera(const unsigned char* human,const float*,const float*,float* eye,float* look) noexcept {
@@ -552,11 +556,11 @@ int main() {
     check(toggled,"a delayed second camera release cannot toggle the shared preference twice");
     cameraFrame(false);
 
-    a->savedNear=.1f;a->nearSet=true;a->writtenNear=.03f;Put<float>(c1,kCamNear,.03f);
+    a->nearSet=true;a->writtenNear=.03f;Put<float>(c1,kCamNear,.03f);
     depthPatchReady=false;++renderFrame;CamStepHook(c1,nullptr);
     check(std::fabs(At<float>(c1,kCamNear)-.1f)<1e-6f && !a->nearSet,
           "a failed/unavailable depth patch returns a previously modified first-person near plane to native");
-    a->nearSet=true;a->savedNear=.1f;a->writtenNear=.03f;Put<float>(c1,kCamNear,.8f);
+    a->nearSet=true;a->writtenNear=.03f;Put<float>(c1,kCamNear,.8f);
     {StateScope scope(a);ReturnNear(c1);}
     check(std::fabs(At<float>(c1,kCamNear)-.8f)<1e-6f && !a->nearSet,
           "returning first-person near ownership preserves a newer clip written by the outer map");
@@ -564,6 +568,36 @@ int main() {
     depthPatchReady=true;++renderFrame;CamStepHook(c1,nullptr);
     check(std::fabs(At<float>(c1,kCamNear)-config.fpNear)<1e-6f && a->nearSet,
           "a successfully created corrected depth shader enables the requested first-person near plane");
+    {
+        // Enemy control begun and ended from the open map (2026-10-25: after controlling a monster the player and the
+        // vehicles beside the camera were nearly gone). The map raises the near plane to 0.5..5 m every frame (view.cpp
+        // ViewMapClip); first person, left when control began, came back under the still-open map with its `overridden`
+        // dropped, wrote its own near, kept the map's 3.23 m as "native" and put it back when first person later ended.
+        constexpr float mapNear=3.23f;
+        const auto mapFrame=[&](){Put<float>(c1,kCamNear,mapNear);++renderFrame;CamStepHook(c1,nullptr);FirstPersonCameraOverride(c1,true);};
+        mapFrame();
+        check(a->on && a->overridden && std::fabs(At<float>(c1,kCamNear)-mapNear)<1e-6f,
+              "the map opened over first person owns the near plane");
+        enemyCamera=true;enemyCameraHuman=p1;mapFrame();mapFrame();
+        check(!a->on && a->overridden && std::fabs(At<float>(c1,kCamNear)-mapNear)<1e-6f,
+              "enemy control begun from the map retires first person without forgetting the map still draws this camera");
+        enemyCamera=false;enemyCameraHuman=nullptr;mapFrame();
+        check(a->on && a->overridden && !a->nearSet && std::fabs(At<float>(c1,kCamNear)-mapNear)<1e-6f,
+              "first person resuming under the open map after control claims no near plane of its own");
+        Put<float>(c1,kCamNear,nativeNear);   // the map closes: view.cpp PutBack returns the lease's native baseline
+        ++renderFrame;CamStepHook(c1,nullptr);FirstPersonCameraOverride(c1,false);
+        check(a->on && !a->overridden && a->nearSet && std::fabs(At<float>(c1,kCamNear)-config.fpNear)<1e-6f,
+              "with the map closed first person takes its own near plane back");
+        toggled=false;++renderFrame;CamStepHook(c1,nullptr);
+        check(!a->on && std::fabs(At<float>(c1,kCamNear)-nativeNear)<1e-6f,
+              "leaving first person after enemy control returns the native near plane, never the map's 3.23 m");
+        // The same with the map's value still current when first person ends (it was captured as a baseline before).
+        toggled=true;++renderFrame;CamStepHook(c1,nullptr);
+        Put<float>(c1,kCamNear,mapNear);{StateScope scope(a);ReturnNear(c1);}
+        check(std::fabs(At<float>(c1,kCamNear)-mapNear)<1e-6f && !a->nearSet,"a release leaves the map's newer value to the map");
+        Put<float>(c1,kCamNear,nativeNear);++renderFrame;CamStepHook(c1,nullptr);
+        check(a->on && std::fabs(At<float>(c1,kCamNear)-config.fpNear)<1e-6f,"first person resumes its own near after the regression sequence");
+    }
     const auto p1Motion=a->motion;a->reloadLeft=25;a->shotEvent[0].count=2;
     ++renderFrame;CamStepHook(c2,nullptr);
     check(a->reloadLeft==25 && a->shotEvent[0].count==2 && std::memcmp(&a->motion,&p1Motion,sizeof(p1Motion))==0,
