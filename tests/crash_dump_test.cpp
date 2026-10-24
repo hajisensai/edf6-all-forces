@@ -56,7 +56,15 @@ void CrashLog(const char* text,std::size_t size) noexcept {
 
 namespace {
 // ---- the child ----
-LONG WINAPI Last(EXCEPTION_POINTERS*) { TerminateProcess(GetCurrentProcess(),kChained); return EXCEPTION_CONTINUE_SEARCH; }
+// The exe's own filter needs a real stack, as the game's filters behind the plugin's do (TerminateProcess alone first
+// runs RtlReportSilentProcessExit, 2.7 KB): 64 KB here, more than a stack overflow ever leaves its thread. It notes
+// the thread that called it: the crashed one, but the dumping thread after a stack overflow.
+__declspec(noinline) void Chained() noexcept {
+    volatile char frame[64*1024];
+    frame[0]=1;frame[sizeof(frame)-1]=frame[0];
+    char t[64];_snprintf_s(t,sizeof(t),_TRUNCATE,"TEST chained on thread %lu",GetCurrentThreadId());Append(t);
+}
+LONG WINAPI Last(EXCEPTION_POINTERS*) { Chained(); TerminateProcess(GetCurrentProcess(),kChained); return EXCEPTION_CONTINUE_SEARCH; }
 LONG WINAPI Late(EXCEPTION_POINTERS*) { TerminateProcess(GetCurrentProcess(),kLate); return EXCEPTION_CONTINUE_SEARCH; }
 
 void Mark() noexcept { char t[64];_snprintf_s(t,sizeof(t),_TRUNCATE,"TEST crash thread %lu",GetCurrentThreadId());Append(t); }
@@ -307,6 +315,15 @@ void Crash(const wchar_t* self,const wchar_t* dir,const char* mode,DWORD exit,DW
     const std::vector<DWORD> marked=MarkedThreads(text);
     _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: the dump's thread %lu is a crashed one (%zu marked)",mode,d.thread,marked.size());
     Check(d.thread && std::find(marked.begin(),marked.end(),d.thread)!=marked.end(),what);
+    if(exit==kChained) {
+        const auto at=text.find("TEST chained on thread ");
+        const DWORD chained=at==std::string::npos ? 0 : std::strtoul(text.c_str()+at+23,nullptr,10);
+        const bool crashed=std::find(marked.begin(),marked.end(),chained)!=marked.end();
+        const bool overflow=code==EXCEPTION_STACK_OVERFLOW;
+        _snprintf_s(what,sizeof(what),_TRUNCATE,"%s: the filter behind ran on thread %lu, %s",mode,chained,
+                    overflow ? "the dumping thread (the overflowed one has no stack for it)" : "the crashed one");
+        Check(chained && crashed!=overflow,what);
+    }
     const auto line=text.find(std::string("CRASH ")+kind);
     const auto ready=text.find("DUMP_READY");
     const auto written=text.find("CRASH dump written");

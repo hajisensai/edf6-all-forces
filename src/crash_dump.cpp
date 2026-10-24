@@ -32,9 +32,6 @@ struct Request {
     const char* kind=nullptr;
     EXCEPTION_POINTERS* ep=nullptr;
     DWORD thread=0;
-    // A stack overflow's filter behind, called by the dumping thread after the dump (taken by whichever thread runs it).
-    std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> chain{nullptr};
-    LONG chained=EXCEPTION_CONTINUE_SEARCH;
 };
 Request request;
 std::atomic<DWORD> owner{0};
@@ -67,12 +64,27 @@ std::atomic<LPTOP_LEVEL_EXCEPTION_FILTER> behind{nullptr};
 std::atomic<DWORD> chaining{0};   // the thread calling the filter behind: a filter there that calls ours again ends
 bool redirected=false;
 
-LONG CallBehind(LPTOP_LEVEL_EXCEPTION_FILTER next,EXCEPTION_POINTERS* ep) noexcept {
-    chaining.store(GetCurrentThreadId());
-    const LONG result=next(ep);
-    chaining.store(0);
-    return result;
-}
+// A stack overflow's filter behind runs on the dumping thread. The overflowed thread has only what is left below the
+// guard region once Windows has pushed the exception frame (its CONTEXT, sized by the CPU's XSAVE area) and run
+// UnhandledExceptionFilter's own prologue: nothing guarantees more than that, and where the overflow lands inside the
+// last frame moves by up to a page from one run to the next (the stack's start is randomized). A filter behind ours
+// needs far more than our wait: even TerminateProcess(GetCurrentProcess()) first runs RtlReportSilentProcessExit
+// (2.7 KB of stack on Windows 11 26200), and the game's are the CRT's, Steam's or an overlay's. Running one there was
+// a second, undeliverable access violation: the process ended with 0xC0000005 and no filter behind ran.
+// The overflowed thread only waits (SetEvent + WaitForSingleObject: the same depth as its wait for the dump) and
+// returns what the filter behind returned; that filter sees the crashed thread's EXCEPTION_POINTERS, which stay valid
+// while the thread waits, but runs as the dumping thread.
+struct ChainRequest {
+    LPTOP_LEVEL_EXCEPTION_FILTER filter=nullptr;
+    EXCEPTION_POINTERS* ep=nullptr;
+    LONG result=EXCEPTION_CONTINUE_SEARCH;
+} chainRequest;
+HANDLE chainGo=nullptr,chainDone=nullptr;
+SRWLOCK chainLock=SRWLOCK_INIT;   // overflowed threads only: one request in the slot at a time
+// The slot's request: the dumping thread takes a pending one (running), or the overflowed thread takes it back
+// (cancelled) when the dumping thread did not get to it in kDumpWaitMs, and calls the filter behind itself.
+enum : int { kChainIdle, kChainPending, kChainRunning, kChainCancelled };
+std::atomic<int> chainState{kChainIdle};
 
 constexpr DWORD kStatusFatalAppExit=0x40000015;              // what abort() reports (STATUS_FATAL_APP_EXIT)
 constexpr DWORD kStatusInvalidCrtParameter=0xC0000417;       // STATUS_INVALID_CRUNTIME_PARAMETER
@@ -164,14 +176,22 @@ void Write() noexcept {
 }
 
 DWORD WINAPI Dumper(void*) noexcept {
-    const HANDLE pending[]={go,hangGo};   // a pending crash is serviced before the next hang
+    const HANDLE pending[]={go,chainGo,hangGo};   // a pending crash (its dump, then its chain) before the next hang
     for(;;) {
-        const DWORD event=WaitForMultipleObjects(2,pending,FALSE,INFINITE);
+        const DWORD event=WaitForMultipleObjects(3,pending,FALSE,INFINITE);
         if(event==WAIT_OBJECT_0) {
             Write();
-            if(const LPTOP_LEVEL_EXCEPTION_FILTER next=request.chain.exchange(nullptr))request.chained=CallBehind(next,request.ep);
             SetEvent(done);
         } else if(event==WAIT_OBJECT_0+1) {
+            int expected=kChainPending;
+            if(!chainState.compare_exchange_strong(expected,kChainRunning))continue;   // taken back by its thread
+            const DWORD me=GetCurrentThreadId();
+            chaining.store(me);
+            chainRequest.result=chainRequest.filter(chainRequest.ep);
+            chaining.store(0);
+            chainState.store(kChainIdle);
+            SetEvent(chainDone);
+        } else if(event==WAIT_OBJECT_0+2) {
             hangRequest.result=SerializedWrite(hangRequest.process,hangRequest.pid,hangRequest.file,hangRequest.type,
                                                 hangRequest.exception,hangRequest.streams,hangRequest.callback);
             hangRequest.error=hangRequest.result ? 0 : GetLastError();
@@ -186,11 +206,14 @@ BOOL CALLBACK StartService(PINIT_ONCE,void*,void**) noexcept {
     go=CreateEventW(nullptr,FALSE,FALSE,nullptr);
     hangDone=CreateEventW(nullptr,FALSE,FALSE,nullptr);
     hangGo=CreateEventW(nullptr,FALSE,FALSE,nullptr);
-    const HANDLE thread=go && done && hangGo && hangDone ? CreateThread(nullptr,0,&Dumper,nullptr,0,&dumperId) : nullptr;
+    chainGo=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+    chainDone=CreateEventW(nullptr,FALSE,FALSE,nullptr);
+    const HANDLE thread=go && done && hangGo && hangDone && chainGo && chainDone ?
+        CreateThread(nullptr,0,&Dumper,nullptr,0,&dumperId) : nullptr;
     if(thread)CloseHandle(thread);
     else {
-        for(const HANDLE event:{go,done,hangGo,hangDone})if(event)CloseHandle(event);
-        go=done=hangGo=hangDone=nullptr;
+        for(const HANDLE event:{go,done,hangGo,hangDone,chainGo,chainDone})if(event)CloseHandle(event);
+        go=done=hangGo=hangDone=chainGo=chainDone=nullptr;
         dumperId=0;
     }
     return TRUE;
@@ -214,39 +237,61 @@ BOOL WINAPI SerializedWrite(HANDLE process,DWORD pid,HANDLE file,MINIDUMP_TYPE t
     return result;
 }
 
-// Small on the crashed thread's stack (a stack overflow leaves it a page): the dump is written by the dumping thread.
-// `chain` (a stack overflow's filter behind) is called there too, after the dump: on the overflowed thread its first
-// frames can fault again with no guard page left, and the process ends with 0xC0000005 instead of that filter's
-// verdict. True when it ran there, its verdict in `*chained`.
-bool Capture(const char* kind,EXCEPTION_POINTERS* ep,LPTOP_LEVEL_EXCEPTION_FILTER chain=nullptr,LONG* chained=nullptr) noexcept {
+// Small on the crashed thread's stack (a stack overflow leaves it little): the dump is written by the dumping thread.
+void Capture(const char* kind,EXCEPTION_POINTERS* ep) noexcept {
     const DWORD me=GetCurrentThreadId();
-    if(me==dumperId)return false;            // the dumping thread itself crashed
+    if(me==dumperId)return;                  // the dumping thread itself crashed
     DWORD expected=0;
     if(!owner.compare_exchange_strong(expected,me)) {
         if(expected!=me && done)WaitForSingleObject(done,kDumpWaitMs);
-        return false;
+        return;
     }
     request.kind=kind;request.ep=ep;request.thread=me;
-    request.chained=EXCEPTION_CONTINUE_SEARCH;
-    request.chain.store(chain && chained ? chain : nullptr);
     if(go && SetEvent(go))WaitForSingleObject(done,kDumpWaitMs);
     else {
         Write();
         if(done)SetEvent(done);
     }
-    if(request.chain.exchange(nullptr) || !chain || !chained)return false;   // not taken: the caller calls it
-    *chained=request.chained;
-    return true;
+}
+
+LONG CallBehind(LPTOP_LEVEL_EXCEPTION_FILTER next,EXCEPTION_POINTERS* ep) noexcept {
+    const DWORD me=GetCurrentThreadId();
+    chaining.store(me);
+    const LONG result=next(ep);
+    chaining.store(0);
+    return result;
+}
+
+// A stack overflow: the filter behind called by the dumping thread (ChainRequest says why), the overflowed thread
+// waiting for its answer. Only a dumping thread that is still busy kDumpWaitMs later (a dump that never ends) leaves
+// the call to the overflowed thread, as before.
+LONG CallBehindElsewhere(LPTOP_LEVEL_EXCEPTION_FILTER next,EXCEPTION_POINTERS* ep) noexcept {
+    AcquireSRWLockExclusive(&chainLock);
+    chainRequest.filter=next;chainRequest.ep=ep;chainRequest.result=EXCEPTION_CONTINUE_SEARCH;
+    chainState.store(kChainPending);
+    bool ran=false;
+    if(SetEvent(chainGo)) {
+        if(WaitForSingleObject(chainDone,kDumpWaitMs)==WAIT_OBJECT_0)ran=true;
+        else {
+            int expected=kChainPending;
+            // Not taken back: the dumping thread is calling it now, as long as that filter takes.
+            if(!chainState.compare_exchange_strong(expected,kChainCancelled))ran=WaitForSingleObject(chainDone,INFINITE)==WAIT_OBJECT_0;
+        }
+    } else chainState.store(kChainCancelled);
+    const LONG result=ran ? chainRequest.result : CallBehind(next,ep);
+    ReleaseSRWLockExclusive(&chainLock);
+    return result;
 }
 
 LONG WINAPI Filter(EXCEPTION_POINTERS* ep) noexcept {
-    if(chaining.load()==GetCurrentThreadId())return EXCEPTION_CONTINUE_SEARCH;   // the filter behind called ours again
-    LPTOP_LEVEL_EXCEPTION_FILTER next=behind.load();
-    if(next==&Filter)next=nullptr;
+    const DWORD me=GetCurrentThreadId();
+    if(chaining.load()==me)return EXCEPTION_CONTINUE_SEARCH;   // the filter behind called ours again
+    Capture("unhandled exception",ep);
+    const LPTOP_LEVEL_EXCEPTION_FILTER next=behind.load();
+    if(!next || next==&Filter)return EXCEPTION_CONTINUE_SEARCH;
     const bool overflow=ep && ep->ExceptionRecord && ep->ExceptionRecord->ExceptionCode==EXCEPTION_STACK_OVERFLOW;
-    LONG result=EXCEPTION_CONTINUE_SEARCH;
-    if(Capture("unhandled exception",ep,overflow ? next : nullptr,&result) || !next)return result;
-    return CallBehind(next,ep);
+    if(overflow && chainGo && me!=dumperId)return CallBehindElsewhere(next,ep);
+    return CallBehind(next,ep);   // any other crash: the filter behind on the crashed thread itself
 }
 
 // kernelbase!SetUnhandledExceptionFilter redirected here: a filter set after ours goes behind it, and its caller gets
