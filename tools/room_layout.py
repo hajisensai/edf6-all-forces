@@ -5,12 +5,15 @@ online room's and the offline HQ's stock layouts with the menu's elements added,
   Mods/UI/LYT_HUIHQMAIN.SGO       HUiHQMain's layout (Root.cpk UI/LYT_HUIHQMAIN.SGO) + the same subtree
   Mods/UI/EDF6VC_WHITE.DDS        a plain white 8 x 8 texture the plugin binds to the panel and the chips and tints
                                   (Root.cpk has no plain one; the format is UI/CHATSHORTCUT_CURSOR.DDS's: 32-bit BGRA)
-  Mods/UI/EDF6VC_LOADOUTBOX.SGO   the menu's own copy of the game's dialog box (Root.cpk UI/LYT_HUIDIALOGBOX.SGO, the
-                                  same class HUiDialogBox), only its sizes changed: a wide window left of the 3D view
-                                  (loadout_box). A new name: the game's own dialogs keep the stock file.
+  Mods/UI/EDF6VC_LOADOUTBOX.SGO   the menu's own copy of the game's description dialog (Root.cpk
+                                  UI/LYT_HUIDESCDIALOGBOX.SGO, the same class HUiDescriptionDialog: the list with the
+                                  focused button's description beside it), only its sizes changed: a wide window left of
+                                  the 3D view (loadout_box). A new name: the game's own dialogs keep the stock file.
 
 The loadout box (2026-10-25, the user: "支援战前配置显示好小，弄成选择兵种武器那样多好"): the menu's pages are the game's own
-dialog box (src/room_dialog.cpp), which sizes itself from its layout's base_min_size, button_size_min / _max and its
+description dialog (src/room_dialog.cpp: HUiDescriptionDialog, an HUiDialogBox whose InitParam carries a function the
+dialog asks for the focused button's text, shown in its `Description` field beside the list: the left list and right
+detail of the stock selection screens), which sizes itself from its layout's base_min_size, button_size_min / _max and its
 template button (0x80ED80 reads them by name: they are data, not code). The stock values make a 400 px window of 180-300
 px buttons. The copy keeps every member and the class and changes only those numbers and the window's horizontal anchor:
 centred on x = BOX_CENTER_X (hcoord 1: the element's centre at its pos, as the weapon select's full-screen panel at
@@ -168,7 +171,8 @@ def native_entry(room: bool) -> list:
 
 
 LOADOUT_BOX = 'UI/EDF6VC_LOADOUTBOX.SGO'   # src/room_ui_logic.h kLoadoutBoxLayout / kLoadoutBoxFile
-DIALOG_STOCK = 'LYT_HUIDIALOGBOX.SGO'      # Root.cpk UI/: the game's dialog box, the copy's source
+DIALOG_STOCK = 'LYT_HUIDESCDIALOGBOX.SGO'  # Root.cpk UI/: the game's description dialog, the copy's source
+DIALOG_CLASS = 'HUiDescriptionDialog'
 BOX_CENTER_X = 700.0                       # the window's centre (layout units): 150..1250 at its minimum width
 BOX_MIN_SIZE = (1100.0, 560.0)             # base_min_size (stock 400 x 36)
 BOX_BUTTON_W = 600.0                       # button_size_min = _max: every button this wide (stock 180..300)
@@ -188,10 +192,11 @@ def _with_prop(props: list, name: str, value: object) -> list:
 
 
 def loadout_box(stock: bytes) -> bytes:
-    """The game's dialog box layout (`stock`, Root.cpk UI/LYT_HUIDIALOGBOX.SGO) with the menu's sizes (BOX_CHANGED only)."""
+    """The game's description dialog layout (`stock`, Root.cpk UI/LYT_HUIDESCDIALOGBOX.SGO) with the menu's sizes
+    (BOX_CHANGED only)."""
     version, members = sgo.read(stock)
-    if members.get('xgs_ui_object_class') != 'HUiDialogBox':
-        raise ValueError('不是 HUiDialogBox 的布局')
+    if members.get('xgs_ui_object_class') != DIALOG_CLASS or 'description' not in members:
+        raise ValueError('不是 HUiDescriptionDialog 的布局')
     out = dict(members)
     base = list(members['HUiMessageBoxDialogBase'])
     if base[0] != 'Layout' or [int(f) for f in base[4]] != [1, 2] or base[5] != 1:

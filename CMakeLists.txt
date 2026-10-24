@@ -54,6 +54,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/transport.cpp)
 # The container airdrops (src/airdrop.cpp, the stock container's data and the carrier's decisions in src/airdrop_logic.h;
 # tools/airdrop_check.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/airdrop.cpp)
+# The jets a player summons with a vehicle request, loaded before the battle (src/player_vehicle.cpp; the decision and the
+# wire in src/player_vehicle_logic.h; tests/player_vehicle_test.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/player_vehicle.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_policy.cpp)
 # Out-of-mission support configuration: callable units and their crews' stock weapons (src/support_config.h).
 target_sources(EDF6VehicleCrew PRIVATE src/support_config.cpp)
@@ -662,6 +665,11 @@ add_test(NAME outfit41 COMMAND outfit41_test)
 add_executable(room_dialog_test tests/room_dialog_test.cpp)
 target_compile_options(room_dialog_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_dialog COMMAND room_dialog_test)
+# The players' own loaded jets (src/player_vehicle_logic.h): the room value, the PVEH wire, and several machines' engines
+# against each other: every machine makes the same jet for a request, whatever arrives when.
+add_executable(player_vehicle_test tests/player_vehicle_test.cpp)
+target_compile_options(player_vehicle_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME player_vehicle COMMAND player_vehicle_test)
 # What the room menu's dialogs and the HQ outfit popup share (src/game_dialog.h: the items vector's growth, the
 # std::function vtable; common/edf/wstr.h: the game's std::wstring layout), over fakes of the game's functions.
 add_executable(game_dialog_test tests/game_dialog_test.cpp)
@@ -831,6 +839,9 @@ set_tests_properties(room_layout PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The native dialogs' code checks (src/room_dialog.cpp, tools/room_dialog_sigs.py) against EDF.dll (skipped without the game).
 add_test(NAME room_dialog_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_dialog_native_audit.py")
 set_tests_properties(room_dialog_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+# The players' own loaded jets: the wiring (src/player_vehicle.cpp) and the transporter / container code it rests on.
+add_test(NAME player_vehicle_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_vehicle_native_audit.py")
+set_tests_properties(player_vehicle_native PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # The room menu screen's code checks (src/room_ui.cpp) against EDF.dll read as a file (skipped without the game).
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
@@ -959,7 +970,7 @@ target_link_libraries(map_command_runtime_check PRIVATE edf6common user32)
 target_compile_options(map_command_runtime_check PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks map_command_runtime_check)
 add_dependencies(offline_checks support_dispatch_test)
-add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test room_ui_test room_dialog_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
+add_dependencies(offline_checks support_loadout_test support_config_test support_spawn_test room_menu_test room_preview_test outfit41_test room_ui_test room_dialog_test player_vehicle_test game_dialog_test ini_text_test coop_attr_test loadout_writer_test room_coop_capability_test room_sync_test)
 add_dependencies(offline_checks support_infantry_route_test)
 add_dependencies(offline_checks support_vehicle_route_test)
 add_dependencies(offline_checks support_policy_test)

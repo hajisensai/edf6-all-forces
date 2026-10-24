@@ -145,7 +145,7 @@ void LoadsTheIni() {
     Set(ini,L"SupportVehicle_FIGHTER",L"MK82:6,MK82:6");
     Set(ini,L"SupportVehicle_STRIKE",L"AP:4");   // a tank round on a jet: refused
     Menu m;Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
-    Expect(m.unitCount==26,"8 squads, 10 vehicles, 6 seated entries' crews, the default and the mission crews");
+    Expect(m.unitCount==26+kPlayerVehicleCount,"8 squads, 10 vehicles, 6 seated entries' crews, the player's 5 own summons, the default and the mission crews");
     const Unit& squad=m.unit[UnitIndex(m,L"SQUAD",true)];
     Expect(squad.squad.count==4 && squad.squad.kind[0]==SupportWeapon::wingLance && !squad.refused,"the squad's preset loaded");
     const Unit& apc=m.unit[UnitIndex(m,L"TRANSPORT_CREWED",true)];
@@ -510,14 +510,14 @@ void SnapshotAndScroll() {
     Tap(m,&Keys::toggle);Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
     TapN(m,&Keys::down,5);
     View v=Snapshot(m);
-    Expect(v.units.first==2 && v.units.count==4 && v.units.total==27 && v.units.row[3].cursor,"the unit window follows the cursor");
+    Expect(v.units.first==2 && v.units.count==4 && v.units.total==27+kPlayerVehicleCount && v.units.row[3].cursor,"the unit window follows the cursor");
     Tap(m,&Keys::up);Tap(m,&Keys::up);Tap(m,&Keys::up);
     Expect(Snapshot(m).units.first==2,"moving inside the window leaves it");
     Tap(m,&Keys::up);
     Expect(Snapshot(m).units.first==1,"past its top it scrolls one");
     TapN(m,&Keys::up,2);
     v=Snapshot(m);
-    Expect(m.unitAt==m.unitCount && v.units.first==23 && v.units.row[3].text==RowText::save && v.units.row[3].cursor,
+    Expect(m.unitAt==m.unitCount && v.units.first==23+kPlayerVehicleCount && v.units.row[3].text==RowText::save && v.units.row[3].cursor,
            "wrapped to the save row: the last page");
     // The squad: leaders every four, colours as RGBA, stock as 0.
     m.unitAt=UnitIndex(m,L"SQUAD",true);

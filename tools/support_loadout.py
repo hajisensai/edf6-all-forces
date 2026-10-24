@@ -211,7 +211,10 @@ STORE_MASS_KG = {'AAM_S': 85, 'AAM_M': 152, 'AAM_L': 450, 'AGM': 300, 'AGM_L': 5
 # derives them from vcobjects and the C++ table.
 PAYLOAD_SHARE_PERCENT = 40
 PAYLOAD_KG = {'TANK': 0, 'STRIKE': 22000 * PAYLOAD_SHARE_PERCENT // 100, 'FIGHTER': 16000 * PAYLOAD_SHARE_PERCENT // 100,
-              'INTERCEPTOR': 20000 * PAYLOAD_SHARE_PERCENT // 100, 'MULTIROLE': 18000 * PAYLOAD_SHARE_PERCENT // 100}
+              'INTERCEPTOR': 20000 * PAYLOAD_SHARE_PERCENT // 100, 'MULTIROLE': 18000 * PAYLOAD_SHARE_PERCENT // 100,
+              'PFIGHTER': 16000 * PAYLOAD_SHARE_PERCENT // 100, 'PSTRIKE': 22000 * PAYLOAD_SHARE_PERCENT // 100,
+              'RFIGHTER': 16000 * PAYLOAD_SHARE_PERCENT // 100, 'RINTERCEPTOR': 20000 * PAYLOAD_SHARE_PERCENT // 100,
+              'RMULTIROLE': 18000 * PAYLOAD_SHARE_PERCENT // 100}
 # src/support_loadout.h kVehicleBodies: name -> (base file, most pylons, tank).
 BODIES: dict[str, tuple[str, int, bool]] = {
     'TANK': ('V505_TANK_MISSION.SGO', 4, True),
@@ -219,17 +222,27 @@ BODIES: dict[str, tuple[str, int, bool]] = {
     'FIGHTER': ('EDF6VC_JET_FIGHTER.SGO', 5, False),
     'INTERCEPTOR': ('EDF6VC_JET_INTERCEPTOR.SGO', 5, False),
     'MULTIROLE': ('EDF6VC_JET_MULTIROLE.SGO', 5, False),
+    # A player's own summons (kPlayerVehicles): the request's twin is the base.
+    'PFIGHTER': ('EDF6VC_PJET_FIGHTER.SGO', 5, False),
+    'PSTRIKE': ('EDF6VC_PJET_STRIKE.SGO', 5, False),
+    'RFIGHTER': ('EDF6VC_FLY_FIGHTER.SGO', 5, False),
+    'RINTERCEPTOR': ('EDF6VC_FLY_INTERCEPTOR.SGO', 5, False),
+    'RMULTIROLE': ('EDF6VC_FLY_MULTIROLE.SGO', 5, False),
 }
 # kVehicleKeys: catalog key -> body.
 VEHICLE_KEYS: dict[str, str] = {
     'TANK_CREWED': 'TANK', 'TANK_DELIVERY': 'TANK', 'STRIKE': 'STRIKE', 'STRIKE_F': 'STRIKE', 'FIGHTER': 'FIGHTER',
     'FIGHTER_F': 'FIGHTER', 'INTERCEPTOR': 'INTERCEPTOR', 'INTERCEPTOR_F': 'INTERCEPTOR', 'MULTIROLE': 'MULTIROLE',
     'MULTIROLE_F': 'MULTIROLE',
+    'OWN_PFIGHTER': 'PFIGHTER', 'OWN_PSTRIKE': 'PSTRIKE', 'OWN_FIGHTER': 'RFIGHTER', 'OWN_INTERCEPTOR': 'RINTERCEPTOR',
+    'OWN_MULTIROLE': 'RMULTIROLE',
 }
+PLAYER_VEHICLE_KEYS = ('OWN_PFIGHTER', 'OWN_PSTRIKE', 'OWN_FIGHTER', 'OWN_INTERCEPTOR', 'OWN_MULTIROLE')   # kPlayerVehicles
 VEHICLE_LABELS = {'TANK_CREWED': '坦克·有人', 'TANK_DELIVERY': '坦克·空车交付', 'STRIKE': '对地攻击机·守点',
                   'STRIKE_F': '对地攻击机·跟随', 'FIGHTER': '制空战斗机·守点', 'FIGHTER_F': '制空战斗机·跟随',
                   'INTERCEPTOR': '截击机·守点', 'INTERCEPTOR_F': '截击机·跟随', 'MULTIROLE': '多用途机·守点',
-                  'MULTIROLE_F': '多用途机·跟随'}
+                  'MULTIROLE_F': '多用途机·跟随', 'OWN_PFIGHTER': '我召唤的·玩家战斗机', 'OWN_PSTRIKE': '我召唤的·玩家攻击机',
+                  'OWN_FIGHTER': '我召唤的·制空战斗机', 'OWN_INTERCEPTOR': '我召唤的·截击机', 'OWN_MULTIROLE': '我召唤的·多用途机'}
 APPLIED, VEHICLE = 1 << 63, 1 << 62   # kVariantApplied, kVariantVehicle
 AP_CALL = 'EWEAPON419.SGO'                      # the stock Blacker A1 request: the AP gun's mount
 AP_GUN = 'app:/weapon/v_505tank_cannon01s.sgo'

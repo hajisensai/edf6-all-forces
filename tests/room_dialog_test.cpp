@@ -258,6 +258,50 @@ void JetWeight() {
     Expect(rm::CollectSave(m,&set),"what the pages made saves");
 }
 
+// The description beside the list (the description dialog's right column): every button says what it is or does.
+void Descriptions() {
+    hudtext::Use(hudtext::Lang::zhCN);
+    rm::Menu m=Fresh();Nav nav;Begin(m,nav);
+    const int squad=UnitOf(m,L"SQUAD",rm::UnitKind::squad);
+    m.unit[squad].squad.count=2;m.unit[squad].squad.kind[1]=SupportWeapon::fencerCannon;
+    m.unit[squad].squad.look[0].primary=m.palette.rgb[0];
+    Dialog d=Build(m,nav,Context{});
+    for(int i=0;i<d.count;++i)Expect(d.item[i].desc[0]!=0,"every units-page button has a description");
+    Pick(m,nav,Do::open,squad);nav=Nav{};Begin(m,nav);
+    d=Build(m,nav,Context{});
+    const int at=Find(d,Do::open,squad);
+    Expect(at>=0 && std::wcsstr(d.item[at].desc,L"队员 2 / 12 座") && std::wcsstr(d.item[at].desc,KindName(static_cast<int>(SupportWeapon::fencerCannon))),
+           "a squad's: its soldiers, their classes");
+    // A jet's: each pylon with its weight, the weight against the budget.
+    const int jet=UnitOf(m,L"FIGHTER",rm::UnitKind::vehicle);
+    m.unit[jet].vehicle.body=VehicleBody::fighter;m.unit[jet].vehicle.count=1;m.unit[jet].vehicle.store[0]=6;
+    m.unit[jet].vehicle.rounds[0]=static_cast<std::uint8_t>(RoundCode(12));
+    d=Build(m,nav,Context{});
+    const int j=Find(d,Do::open,jet);
+    Expect(j<0 || (std::wcsstr(d.item[j].desc,L"2760 kg") && std::wcsstr(d.item[j].desc,L"2760 / 6400 kg")),
+           "a jet's: its pylon's weight and its weight against the budget (when on this page)");
+    Pick(m,nav,Do::open,jet);
+    Pick(m,nav,Do::row,1);
+    Pick(m,nav,Do::field,FieldArg(Page::store));
+    d=Build(m,nav,Context{});
+    const int bomb=Find(d,Do::set,6);
+    Expect(bomb>=0 && std::wcsstr(d.item[bomb].desc,L"每发 230 kg") && std::wcsstr(d.item[bomb].desc,L"最多装 25 发"),
+           "a store: its round's weight and how many fit this pylon (6400 kg: 25 Mk 82 of the counts)");
+    // A player's own summon: says where it applies.
+    const int mine=UnitOf(m,L"OWN_PFIGHTER",rm::UnitKind::vehicle);
+    Expect(mine>=0 && rm::IsPlayerVehicleUnit(m.unit[mine]),"the player's own summons are units of the menu");
+    nav=Nav{};Begin(m,nav);
+    for(int turn=0;turn<8;++turn) {
+        d=Build(m,nav,Context{});
+        const int k=Find(d,Do::open,mine);
+        if(k>=0){Expect(std::wcsstr(d.item[k].desc,hudtext::Tr(Tx::roomDescPlayerVehicle))!=nullptr,"its description says where it applies");break;}
+        const int next=Find(d,Do::next);
+        if(next<0)break;
+        Apply(m,nav,d.item[next].choice);
+    }
+    hudtext::Use(hudtext::Lang::en);
+}
+
 // Thousands of random picks / cancels: never out of range, every page fits, every save reads back.
 void Walk() {
     rm::Menu m=Fresh();Nav nav;Begin(m,nav);
@@ -268,6 +312,7 @@ void Walk() {
         if(!m.open){m=Fresh();Begin(m,nav);}
         const Dialog d=Build(m,nav,Context{});
         Expect(d.count>0 && d.count<=kItemsMost && d.cursor>=0 && d.cursor<d.count,"a page");
+        for(int i=0;i<d.count;++i)Expect(d.item[i].desc[0]!=0 && std::wcslen(d.item[i].desc)<kDescMost,"every button described, within its room");
         if(nav.unit<0 || nav.unit>=m.unitCount)Expect(nav.page==Page::units || nav.page==Page::discard,"a unit page has its unit");
         Result r;
         if(rnd(8)==0)r=Cancel(m,nav);
@@ -297,6 +342,7 @@ int main() {
     Squad();
     Vehicle();
     JetWeight();
+    Descriptions();
     Walk();
     std::printf(failures ? "room_dialog_test: %d of %d FAILED\n" : "room_dialog_test: %d checks passed\n",failures ? failures : checks,checks);
     return failures ? 1 : 0;

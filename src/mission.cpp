@@ -31,6 +31,7 @@
 #include "vulcan_rotor.h"
 #include "barrel_recoil.h"
 #include "support_variants.h"
+#include "player_vehicle.h"
 #include <iterator>
 
 namespace crew {
@@ -177,6 +178,8 @@ void MissionStart() noexcept {
     PreloadSupportSoldiers(); // original real NPC resources, before the game's preload wait
     WatchMissionPhase("support variants");
     PreloadSupportVariants(); // ...and the generated coloured soldiers / loaded vehicles there are (support_variants.h)
+    WatchMissionPhase("player vehicles");
+    PreloadPlayerVehicles();  // ...and the jets this player and the room's members summon, loaded (player_vehicle.h)
     WatchMissionPhase("debug spawn");
     PreloadDebugSpawn();      // the debug spawn tool's stock vehicles and enemies; nothing at all with DebugSpawn=0
     WatchMissionPhase("per-frame inputs");

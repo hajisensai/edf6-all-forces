@@ -17,6 +17,7 @@
 #include "airdrop_logic.h"
 #include "crew.h"
 #include "heli.h"
+#include "player_vehicle.h"
 #include "memory.h"
 #include "scene_object.h"
 #include <cstring>
@@ -121,7 +122,9 @@ void Frame(Drop& d,ULONGLONG ms) noexcept {
 // The container's vehicle step (0x5E8FDC): the stock CreateObject, then, for a container carried here, its vehicle's own
 // mission setup (the stock request hands its weapon's; this call has none).
 unsigned char* VehicleStep(void* mgr,const float* m,const wchar_t* sgo,void* param) {
-    unsigned char* const v=reinterpret_cast<CreateFn>(image+kCreateObject)(mgr,m,sgo,param);
+    // A player's request of a jet they load before the battle: the loaded jet's path, decided alike on every machine
+    // (player_vehicle.cpp); any other container's path as it is.
+    unsigned char* const v=reinterpret_cast<CreateFn>(image+kCreateObject)(mgr,m,PlayerVehicleStepPath(sgo),param);
     __try {
         for(auto& d:drops) {
             if(d.phase!=Phase::falling || sgo!=d.vehicleSgo || !Alive(d.box))continue;
@@ -215,6 +218,8 @@ void ResetAirdrops() noexcept {
     for(auto& d:drops)d=Drop{};
     testVehicle=ObjRef{};testVehicleAt=0;
 }
+
+bool AirdropWatching() noexcept { return watching; }
 
 bool InstallAirdrop() noexcept {
     profile=Matches(kCreateObject,kCreateSig,sizeof(kCreateSig)) && Matches(kConfigure,kConfigureSig,sizeof(kConfigureSig)) &&

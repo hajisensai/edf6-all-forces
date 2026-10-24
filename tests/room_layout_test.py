@@ -170,7 +170,7 @@ if game is not None:
     check(sgo.write_depth_first(vs, stock_members) == stock_box, 'the writer reproduces the stock dialog box byte for byte')
     changed = sorted(k for k in stock_members if sgo.plain(box_members[k]) != sgo.plain(stock_members[k]))
     check(changed == sorted(rl.BOX_CHANGED), f'loadout box: only the sizes and the window anchor changed: {changed}')
-    check(box_members['xgs_ui_object_class'] == 'HUiDialogBox' and
+    check(box_members['xgs_ui_object_class'] == 'HUiDescriptionDialog' and sgo.plain(box_members['description']) == sgo.plain(stock_members['description']) and
           sgo.plain(box_members['layout_tree']) == sgo.plain(stock_members['layout_tree']), 'loadout box: same class, same tree')
     window = sgo.plain(box_members['HUiMessageBoxDialogBase'])
     width, height = rl.BOX_MIN_SIZE

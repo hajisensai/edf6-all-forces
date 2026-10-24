@@ -30,18 +30,31 @@ EDF.dll TimeDateStamp `0x678CCB46`，RVA。证据为本机 EDF.dll 静态反汇�
 - 菜单不是 ImGui 也不是自绘：自 2026-10-19 起每一页是游戏自己的 `HUiDialogBox`（`APP:/UI/LYT_HUIDIALOGBOX.SGO`，`src/room_dialog.cpp` 照抄士兵画面换模型弹窗的构造），焦点、鼠标、手柄、确认 / 取消、音效都是原版的。
 - 「好小」的原因：`HUiDialogBox` 按布局里的数据自适应尺寸——`0x80ED80` 按名字读 `button_pos_internal`（0x80EE69）、`button_size_min`（0x80EE85）、`button_size_max`（0x80EEB8），`0x80FC50` 读 `base_min_size`（0x8105E6）。原版值：窗口最小 400 × 36、按钮宽 180..300、按钮字 24 号，所以是一个窄窗口。
 - 原版「选择兵种 / 武器」是整屏画面：`LYT_HUIHQSOLDIERSELECT`（`HUiHQSoldierSelect`）/ `LYT_HUIHQWEAPONSELECT`（`HUiHQWeaponSelect`：上窗 191..1378 × 147..449 的武器格、下窗说明、右侧 3D 士兵）。这两个类的数据源是游戏自己的兵种 / 武器表，复用它们来显示插件的配置需要逆向它们的数据接口，静态无法保证、也无法在不开游戏的前提下验证。
-- 游戏还有一个「列表 + 焦点项说明」的原生对话框 `HUiDescriptionDialog`（`LYT_HUIDESCDIALOGBOX.SGO`，有 `Description` 文本与 `description` 键；vtable 0x17F6F70，OnUpdate 0x8088C0 先更新 +0x7C0 的说明再转调 `HUiDialogBox::OnUpdate` 0x810D10；10 处原版代码经 `[0x1F77808]` 打开它，例如房间筛选 0x8F6710 经 0x8BED70 / 0x845250）。它是「左侧列表 + 右侧详情」最接近原版的现成机制，但每项说明怎么传进去（InitParam vtable 0x1806FE8 的额外字段）还没逆向完。
+- 游戏还有一个「列表 + 焦点项说明」的原生对话框 `HUiDescriptionDialog`（`LYT_HUIDESCDIALOGBOX.SGO`）：按钮列表加一块随焦点变化的说明文字，正是原版选择画面「左边列表、右边详情」的机制，原版 10 处代码经 `[0x1F77808]` 打开它（如房间筛选 0x8F6710、0x8BEE40 构造条目）。
 
-### 本次实现（尺寸，已实现，未实机）
+### 说明传参（逆向，H；`tests/room_dialog_native_audit.py` 逐条核 EDF.dll）
 
-- 安装器从 Root.cpk 的 `LYT_HUIDIALOGBOX.SGO` 生成插件自己的副本 `Mods/UI/EDF6VC_LOADOUTBOX.SGO`（`tools/room_layout.py loadout_box`；新文件名，不影响游戏自己的对话框）：同一个类、同一棵树，只改 6 个成员——窗口最小 1100 × 560、按钮宽固定 600、按钮字 26 号（高度保持原版 42）、说明文字宽 1000，窗口去掉水平居中标志、改为中心在 x = 700（`hcoord 1` = 元素中心在 pos，与武器选择画面整屏面板 (960, 540) 的用法相同），所以窗口落在 150..1250，右侧的 3D 预览露出来，接近原版装备画面「左边列表、右边模型」的版式。
-- `0x119C600` 的第三个参数就是布局名（`const wchar_t*`，进入后 `wcslen` + `0x3D450` 拷贝，0x119C690..0x119C6A2），插件把它从原版指针换成 `L"APP:/UI/EDF6VC_LOADOUTBOX.SGO"`；EDFModLoader 对 `app:/` 路径只看 Mods 下是否有文件（`docs/room-ui-re.md` §4，新文件名在 `Mods/OBJECT` 已实证）。菜单打开时检查 `Mods\UI\EDF6VC_LOADOUTBOX.SGO` 是否存在，不存在（旧安装）就用原版对话框，日志 `ROOMUI menu pages in ...` 写明用的哪一个。
-- 车辆页、挂点页、选弹种 / 数量页的说明文字加一行「挂载重量 X / Y kg」（第 3 节）。
+| 项 | 事实 |
+|---|---|
+| 类 | `HUiDescriptionDialog`（RTTI `.?AVHUiDescriptionDialog@ui@@`，vtable 0x17F6F70），派生自 `HUiDialogBox`；OnUpdate（槽 1）0x8088C0 先跑焦点跟踪（+0x7C0，0x812170），再直接 `jmp 0x810D10`（基类 OnUpdate，不经基类虚表槽） |
+| InitParam | `.?AUInitParam@HUiDescriptionDialog@ui@@`，vtable 0x1806FD8（槽 0 = 0x8C3620，释放 0x1C0 字节；析构体 0x8C33E0：先 +0x170 的函数，再条目 0xA9460、两段文字、基类 0x8E540） |
+| 说明函数 | InitParam +0x170 是 `std::function<std::wstring(int)>`（存储 0x38 字节，impl 指针在 +0x1A8）；对话框构造时拷到 this+0x7E0（0x80AF6A → 0x80E190） |
+| 调用 | 焦点移动时：`index = 焦点按钮 +0x110`，`[this+0x818]->_Do_call(out wstring, &index)`（vtable +0x10，0x80E700..0x80E72A），返回的文字原样 `SetText 0x863690` 到说明框（0x80E787..0x80E799）——是**字面文字**，不是文本键 |
+| 原版用法 | 0x8BEE40：条目照常进 +0x150，另把每项说明收进 `vector<wstring>`，包成 lambda（vtable 0x1806B20，`_Do_call` 0x8BF830 = 拷 vector[index]）放进 +0x170，+0x1B4 = 220.0；之后 0x845250 → 0x119C600 打开（与插件同一入口） |
 
-### 剩余（需要更大工作量）
+### 本次实现（分栏 + 尺寸，已实现，未实机）
 
-- **真正的分栏**（左侧分类列表、右侧随焦点变化的详情）：方案是改用 `HUiDescriptionDialog`（每个按钮带一段说明：该单位的全部队员 / 挂点、颜色、重量）。需要逆向 InitParam 0x1806FE8 的说明字段与 0x8BED70 的条目构造，并实机确认。另一条路是像原版装备画面那样自建整屏 HUi 画面，工作量与风险更大。
-- 窗口位置依赖「去掉标志 1 后 `HUiDialogBox` 不再改写水平位置」，这只从布局语义推断（`docs/room-ui-re.md` §5），代码里窗口尺寸 / 位置的计算（0x80FC50 之后）没有逐条核。
+- 每一页改为 `HUiDescriptionDialog`：InitParam 用 0x1806FD8 的 vtable，+0x170 放插件自己的函数实现（`{vtable, serial}` 16 字节就地存放，vtable 克隆自原版按钮 lambda 0x1805CF0，`_Do_call` 换成插件的：按 serial 找到这一页的说明表、记下焦点按钮下标、用游戏自己的 `0x3D450` 构造返回的 wstring），拆参数时调游戏的 0x8C33E0。说明表在打开前登记（对话框打开时会立刻问第一个焦点项）。焦点下标由游戏报告（`FocusedButton`）。
+- 右侧详情（`room_dialog_logic.h Describe`，每个按钮一段）：单位页的单位 = 该单位全部队员（兵种、队长）或每个挂点及其重量、总重 / 上限、玩家自己召唤的载具注明套用条件；士兵行 = 兵种、主副色；挂点 / 弹种 / 数量 = 每发重量、这个挂点最多能装几发、这个挂点的重量、全机重量；保存 / 返回 / 翻页 / 恢复原版各有说明。
+- 3D 预览跟随光标（`room_ui_logic.h FocusPreview`）：单位页焦点在哪名士兵就显示哪名；兵种 / 主色 / 副色 / 背包页显示该士兵换上焦点值后的样子（不改数据），与原版装备画面「模型跟着光标变」一致。
+- 宽版布局 `Mods/UI/EDF6VC_LOADOUTBOX.SGO` 改为从 `LYT_HUIDESCDIALOGBOX.SGO` 派生（同一个类、同一棵树、`description` 键不变），只改 6 个成员：窗口最小 1100 × 560、按钮宽固定 600、按钮字 26 号、说明文字宽 1000、窗口中心 x = 700（去掉水平居中标志，`hcoord 1` = 元素中心在 pos），右侧露出 3D 预览。没装宽版布局时用原版 `LYT_HUIDESCDIALOGBOX`（同样是分栏，只是小一些）；说明对话框的签名或帧钩子不成立时退回原来的普通对话框。
+- 关闭时机：说明对话框的 OnUpdate 槽（0x17F6F70 槽 1）单独链上（它不经基类槽），任务开始时照样由它自己的帧关闭。
+
+### 宽版布局的加载路径（为什么可靠）
+
+- 布局按名字经 `0x119C600` → 资源缓存 `0x84E80` 读取；游戏的文件读取都经 CRI 文件系统，`0x741C0` 是 `CriFsIoImplemnt`（RTTI `.?AVCriFsIoImplemnt@fs@sgs@@`，vtable 0x175F0F0 槽 1，全文件只有这一处引用）——EDFModLoader 挂的正是它（`docs/room-ui-re.md` §4），按「Mods 下有没有这个文件」重定向，不分目录、不看文件名是否新。
+- 实证：`Mods/UI` 的同名覆盖（`LYT_HUIONLINEROOM` / `LYT_HUIHQMAIN` 的补丁布局）在实机上生效过（10-19 用户截图里的自绘配装页就是这份补丁布局画的）；新文件名在 `Mods/OBJECT` 实证过。两者走同一个重定向点。仍未在 `Mods/UI` 实测过**新文件名**，列为实机确认项。
+- 插件只在文件确实在 `Mods\UI\` 时才用它（每次打开菜单检查），否则用原版说明对话框；日志 `ROOMUI menu pages in ...` 写明。
 
 ## 3. 配置约束
 
@@ -63,41 +76,53 @@ EDF.dll TimeDateStamp `0x678CCB46`，RVA。证据为本机 EDF.dll 静态反汇�
 - 一处规则，处处一致：`support_loadout.h WithinPayload`——`ParseVehicleLoadout`（ini 读入：超重整条作废、按原版挂载出动并在日志 / HUD 点名「挂载共重 X kg，超过该机可挂的 Y kg」）、`LoadoutOfVariant`（联机对端收到的计划、房主预同步清单里的载具 token：超重即不是合法挂载），Python 镜像 `tools/support_loadout.py parse_vehicle / of_variant / decode_name`（安装器菜单 8 与生成器：恶意或旧版房主的超重清单不会让客机生成文件）。
 - 菜单从源头不给不合法的选项（`room_menu.h PylonFits / MostRoundsFitting / NewPylon / CanAddPylon`）：数量页只列装得下的数量；弹种页只列至少能挂 1 发的弹种，换成装不下当前数量的弹种时自动降到装得下的最大数量；没有重量余量时不出现「添加挂点」；旧覆盖层菜单的左右切换同样跳过装不下的值。
 - 坦克不称重：它的弹药在 `kStores` 里没有质量数据，限制仍是 4 个挂点（有数据之前不编数）。
-- 选择 40% 是设计参数，不是逆向得到的原版规则（原版没有可配挂载的战机）：实机多用途战机作战构型的外挂约为净重的 0.4–0.6。若用户的意思只是第 1 节的读法，可以整体撤回。
+- **40% 是设计参数**（插件定的，不是逆向得到的原版规则：原版没有可配挂载的战机）：实机多用途战机作战构型的外挂约为净重的 0.4–0.6。用户 10-25 原话「合理的改，不是完全随心所欲」按「配置要受合理约束」执行；数值可调（`support_loadout.h kPayloadSharePercent` 与 `tools/support_loadout.py PAYLOAD_SHARE_PERCENT`，测试把两边与 `JET_MASSES` 钉在一起）。
 
 ### 联机
 
 - 新版房主只会发出合法挂载；旧版客机照常接收。
 - 旧版房主若在 ini 里写了超重挂载：新版客机按既有规则拒绝该计划 / 把预同步清单整份作废（与其它非法 token 同一策略），那名支援在该客机上不生成、预同步退回待生成清单。混版本房间本来就由 host settings 行提示版本不同。
 
-## 4. 换玩家自己召唤的载具（剩余，未实现）
+## 4. 换玩家自己召唤的载具（已实现，未实机）
 
 ### 现状（已验证）
 
-- 菜单能配置的载具是支援目录里的 `SupportVehicle_<KEY>`：`TANK_CREWED`、`TANK_DELIVERY`（空车交付给玩家开的坦克——这一项其实已经是「自己召唤、自己开」的）、4 种战机各守点 / 跟随。
-- 空降兵（及插件放开后的各职业）用载具请求武器召唤的载具（类别 308：玩家战斗机 / 攻击机、8 种自驾载具请求 `EDF6VC_CALL_FLY_*`、原版 Blacker 等）由原版运输机的集装箱按武器里写死的 SGO 路径生成：落地后 `0x5E8C00` → `CreateObject(+0xB80 的路径)`（调用点 0x5E8FDC，`docs/airdrop-vehicle-re.md` §1），会话中**每个成员各自**的集装箱都按同一路径生成同一台载具并注册同一个派生网络 ID（0x5E91D7）。插件没有任何地方让这些载具吃 `SupportVehicle_` 的挂载。
+- 菜单能配置的载具原来只有支援目录里的 `SupportVehicle_<KEY>`（`TANK_CREWED`、`TANK_DELIVERY`、4 种战机各守点 / 跟随）。
+- 玩家用载具请求武器召唤的载具（类别 308）由原版运输机的集装箱按武器里写死的 SGO 路径生成：运输机初始化 0x5E5070 在 **0x5E5687**（configure 0x5E8B40 唯一调用点）把请求者（rdx，shared_ptr）和路径（r8）交给集装箱（存到 +0xB70 / +0xB80）；集装箱落地后在 0x5E8FDC 用 +0xB80 的路径 `CreateObject`，并在会话中按它派生的网络 ID 注册——**房间里每台机器各自**跑这条链（`docs/airdrop-vehicle-re.md` §1）。
 
-### 设计（建议的完整做法）
+### 设计与实现
 
-1. 配置：新键族 `PlayerVehicle_<机种>=`（与 `SupportVehicle_` 同一语法与重量上限），菜单里加一组「我召唤的载具」单位。
-2. 文件：生成器以请求版机体（`EDF6VC_FLY_*` / `EDF6VC_PJET_*`，整机碰撞箱、所有职业可坐）为底生成挂载变体 `EDF6VC_LO_P<机种>_<variant>.SGO`（现有 `jet_sgo` 换底板）。
-3. 生成时替换：插件已经挂了集装箱出车调用点 0x5E8FDC（`src/airdrop.cpp`）；在那里按请求者（集装箱 +0xB70）找到召唤的玩家，若其配置了该机种挂载、且文件已预载，就把路径换成变体文件。
-4. 联机（必须）：因为每个成员各自生成，**所有成员必须做同一个替换**，否则同一个网络 ID 下各端的武器不同。需要：每个成员在房间阶段经 Coop 成员属性公布自己的玩家载具挂载 token（复用 `room_sync` 的 token 与校验），其他成员预生成；出车时用「请求者的 token + 全员都有该文件」决定是否替换（与 `DecideVariant` 同一原则），任何一端缺文件则全员都用原版。
-5. 实机：集装箱路径替换、预载时机、联机双机一致性都必须进游戏验证。
+| 部分 | 实现 |
+|---|---|
+| 配置 | `SupportVehicle_OWN_PFIGHTER / OWN_PSTRIKE / OWN_FIGHTER / OWN_INTERCEPTOR / OWN_MULTIROLE`（`support_loadout.h kPlayerVehicles`：玩家战斗机 / 攻击机、自驾制空战斗机 / 截击机 / 多用途机），与支援载具同一语法、同一重量规则（各自机体净重的 40%）；`support_config.cpp` 读入 `SupportConfig::playerVehicle`；菜单「我召唤的·…」五个单位（`CatalogUnits` / `kDefaultUnits`），安装器菜单 8 也能编辑（`VEHICLE_KEYS`）。不是支援目录项，永远不进房主的支援清单 |
+| 文件 | 新机体 `PFIGHTER / PSTRIKE / RFIGHTER / RINTERCEPTOR / RMULTIROLE`，底板就是请求带来的那架（`EDF6VC_PJET_*.SGO` / `EDF6VC_FLY_*.SGO`），生成器沿用 `jet_sgo`：`EDF6VC_LO_<BODY>_<variant>.SGO`（离线用本机 Root.cpk 与已装文件在内存里生成过 5 种并通过 `check_vehicle`） |
+| 房间 | 每个成员发布自己的 `EDF6X_VCPVEH = "1;<token>..."`（`player_vehicle_logic.h OwnValue / ParseValue`，token 与预同步同形：'0'+机体 + 16 位十六进制，机体 6..10）；其他成员读到后逐个校验（只收玩家机体、每机体一条、过重量规则），缺的文件记进待生成清单并启动生成器（与房主清单同一上限 `kNotesPerRoom`），不影响「全员就绪」的计数；离开房间后保留给下一关预载（`room_sync_logic.h MemberPlayerVehicles`，`room_sync.h ForEachRoomPlayerVehicle`）。Coop 额度：清单 3800 + 就绪 40 + 背包标记 1 + 本键 128 ≤ 4096（static_assert） |
+| 关卡开始 | `PreloadPlayerVehicles`（mission.cpp，紧跟支援变体）：自己的与房间里其他成员的、`Mods/OBJECT` 里有的文件预载；缺的记待生成清单 |
+| 召唤时 | `player_vehicle.cpp` 重定向 0x5E5687：原版 configure 先跑，然后若路径是五架请求机之一：**请求者本机**按 `Engine::Decide` 决定——自己的文件已预载、且房间里每个对端都宣告了 `kExtPlayerVehicle` 并在 `have` 消息里报了有这个文件，才用挂载版，否则原版；把决定连同「这名玩家这种机体的第几次请求」（seq）经 PVEH 频道广播。**其他机器**只为这名请求者计数（每台机器按同一顺序看到同一玩家的请求）|
+| 落地时 | `airdrop.cpp VehicleStep`（已有的 0x5E8FDC 重定向）在 `CreateObject` 前问 `PlayerVehicleStepPath`：按集装箱的路径指针找到记录，取（请求者、机体、seq）的决定；有挂载决定且本机预载过就换成 `app:/object/edf6vc_lo_….sgo`，否则原版 |
+| 频道 PVEH | `have`（本机预载的玩家挂载版，确切名单，不用 Bloom），`decide`（请求者 native ID、机体、seq、variant），`sync`（新加入的机器收到每个本机玩家的下一个 seq）；决定 / sync 只收发送者自己的玩家（`SenderIsPlayer`）；旧版本没有这个频道 → 请求者听不到它的 have → 全员原版 |
 
-工作量估计：生成器 + 配置 + 菜单约 1 天；出车替换 + 联机一致性约 2–3 天，外加双机实测。
+### 一致性与残余风险（离线测试覆盖，`tests/player_vehicle_test.cpp`）
+
+- 覆盖：全员都有 → 全员挂载版（决定先到 / 后到 configure 两种顺序）；任一台缺文件 / 旧版本 / have 还没到 / 请求者自己缺文件 → 全员原版；两名玩家、两种机体交错 300 次随机请求 → 每次全员一致且是请求者自己的配置；中途加入的机器经 sync 对齐计数；离线只看本机是否预载。
+- 残余（测试里明确列出、日志会写）：决定在某台机器的集装箱落地之后才到（请求到落地通常十几秒，频道可靠有序），或某台机器在集装箱飞行途中加入且未收到 sync——那台机器不知道决定，造出原版，日志 `PLAYERVEH ... landed with no decision heard`。不是静默不一致。
+- 依赖：集装箱落地钩子来自 `airdrop.cpp`（`AirdropWatching`）；它不成立时本机不发 `have`，所以别的玩家不会为本机选挂载版。
 
 ## 验证（离线）
 
-- `room_layout`（Python）：覆盖层元素都在 HUiMainFrame 两条带之间（从 Root.cpk 读回 `LYT_MAINFRAME` 算出）、没有入口行、宽版对话框只改了 6 个成员且类与树不变、写出器逐字节还原原版对话框、新文件名不遮蔽原版文件、插件打开的路径与安装器写的一致。
-- `room_ui`：`PlanFrame` 关闭时不画；元素表不含入口。
-- `support_loadout`：四种机体的重量上限、90 吨被拒并点名、38 枚 Mk 82 可、恰好等于上限可、坦克不称重、超重的变体解不出。
-- `support_loadout_ini`（Python）：插件 / 编辑器 / 飞行模型的每发质量相同、上限由 `JET_MASSES` × 40% 推出、各机原版挂载都在上限内、Python 解析 / 变体 / 文件名解码同样拒绝超重。
-- `room_menu`：数量 / 弹种循环只停在装得下的值、添加挂点在余量不足时拒绝、穷举往返中超重组合被解析器拒绝。
-- `room_dialog`：重量行、数量页只列装得下的、换弹种自动降数量、余量 80 kg 时只剩 AGM-114 与 Hydra 70、两万步随机操作后没有任何载具超重。
+- `room_layout`（Python）：覆盖层元素都在 HUiMainFrame 两条带之间（从 Root.cpk 读回 `LYT_MAINFRAME` 算出）、没有入口行；宽版布局是 `HUiDescriptionDialog`、只改 6 个成员、类 / 树 / `description` 不变，写出器逐字节还原原版，新文件名不遮蔽原版文件，插件打开的路径与安装器写的一致。
+- `room_dialog_native`（Python，读 EDF.dll）：新增说明对话框的 RTTI、OnUpdate 直接跳基类、InitParam vtable / 0x1C0 字节 / 析构顺序、构造时拷 +0x170、焦点时 `_Do_call(out,&index)` 与 SetText、布局名指针、借用的 `_Delete_this` 就地不释放；签名表重新生成（40 段）。
+- `room_dialog`：每页每个按钮都有说明且不越界（两万步随机）、单位说明列出队员 / 挂点重量、弹种说明给出每发重量与最多发数、「我召唤的」单位注明套用条件、重量行与可选值过滤。
+- `room_ui`：`FocusPreview`（单位页跟随焦点士兵、兵种 / 颜色页显示焦点值且不改数据）、目录含玩家的 5 个单位。
+- `support_loadout` / `support_loadout_ini`：重量上限（含 5 种玩家机体，按各自机型净重推出）、`kPlayerVehicles` 与 Python、`tools/calls.py` 的请求机一致、超重变体 / 文件名不解码。
+- `room_sync`：玩家挂载值的发布 / 校验 / 坏值整条忽略、房主也为他人的玩家挂载记待生成并启动生成器、不影响就绪计数、离开房间后保留、撤回。
+- `player_vehicle`（C++，1400+ 项）：值与报文编解码、拒绝项、多机模拟一致性（见 §4）。
+- `player_vehicle_native`（Python）：接线源码守卫 + EDF.dll 上 0x5E5687 的调用形状与唯一性、configure 存 +0xB70 / +0xB80、落地从 +0xB80 `CreateObject`。
 
 ## 未实机验证
 
-1. 宽版对话框：新文件名的 UI 布局能被加载（OBJECT 已实证、UI 没有）；去掉水平居中后窗口确实以 x = 700 为中心、宽按钮与 26 号字的排版；14 个按钮的页面高度不出屏。
-2. 原生按钮的说明框在房间与 HQ 都显示快捷键（10-19 已实现的部分，本次只是去掉了叠字的那一行）。
-3. 旧安装（没有 `EDF6VC_LOADOUTBOX.SGO`）回到原版对话框。
+1. 说明对话框：插件的说明函数被调用、文字出现在说明框；InitParam 换成说明对话框的类型后打开 / 关闭 / 任务开始时关闭都正常；焦点下标与按钮顺序一致；宽版布局（`Mods/UI` 新文件名）被加载、窗口在左侧、14 个按钮不出屏、说明框位置。
+2. 3D 预览跟随焦点：频繁换模型 / 换色的表现。
+3. 原生按钮的说明框在房间与 HQ 都显示快捷键（10-19 已实现的部分，本次只是去掉了叠字的那一行）。
+4. 玩家召唤：运输机初始化时请求者确实是召唤玩家的士兵对象（离线探针 2026-10-10 已抓到过，`docs/airdrop-vehicle-re.md` §2.1）；挂载版 SGO（以请求机为底）被集装箱生成后玩家能正常上机、挂载能用；联机双机：各端同一架飞机、`have` / `decide` 时序、加入中的机器。
+5. 旧安装（没有 `EDF6VC_LOADOUTBOX.SGO`）回到原版说明对话框。

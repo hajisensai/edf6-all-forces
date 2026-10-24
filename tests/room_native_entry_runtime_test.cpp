@@ -45,6 +45,8 @@ void TickPreview(bool) noexcept {UnexpectedRoomDependency();}
 namespace nativedialog {
 bool InstallNativeDialog() noexcept {UnexpectedRoomDependency();return false;}
 bool NativeDialogReady() noexcept {return false;}
+bool DescriptionDialogReady() noexcept {return false;}
+int FocusedButton(const Handle&) noexcept {return -1;}
 bool OpenDialog(const wchar_t*,const Button*,int,int,Handle*,const wchar_t*) noexcept {UnexpectedRoomDependency();return false;}
 bool DialogAlive(const Handle&) noexcept {UnexpectedRoomDependency();return false;}
 bool TakePicked(Handle&,std::uint64_t*) noexcept {UnexpectedRoomDependency();return false;}

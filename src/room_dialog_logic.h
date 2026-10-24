@@ -53,7 +53,9 @@ inline constexpr int kPerPage=10;            // entries a page shows before "pre
 inline constexpr int kItemsMost=kPerPage+4;  // + previous, next, an action, back
 inline constexpr std::size_t kTextMost=96;
 inline constexpr std::size_t kTitleMost=512;
-struct Item { wchar_t text[kTextMost]{}; Choice choice{}; };
+inline constexpr std::size_t kDescMost=400;
+// `desc`: what the description dialog shows beside the list while the button has the focus (Describe).
+struct Item { wchar_t text[kTextMost]{}; Choice choice{}; wchar_t desc[kDescMost]{}; };
 struct Dialog { wchar_t title[kTitleMost]{}; int count=0; Item item[kItemsMost]{}; int cursor=0; };
 
 // What the units page's title says under its name: the client's note, the last save, the generator, the room's sync
@@ -362,6 +364,7 @@ constexpr bool ValuePage(Page p) noexcept {
 }
 // The page to show: its title, the entries from nav.first (kPerPage of them), previous / next, its actions, back / close.
 // `cursor` the button the dialog opens on: a value page's current value, else `wantCursor` when it is on the page.
+inline void Describe(const rm::Menu& m,const Nav& nav,Choice c,wchar_t* out,std::size_t n) noexcept;
 inline Dialog Build(const rm::Menu& m,const Nav& nav,const Context& c,int wantCursor=0) noexcept {
     Dialog d;
     detail::Title(d,m,nav,c);
@@ -380,7 +383,143 @@ inline Dialog Build(const rm::Menu& m,const Nav& nav,const Context& c,int wantCu
     detail::Add(d,{nav.page==Page::units ? Do::close : Do::back,0},
                 hudtext::Tr(nav.page==Page::units ? (rm::Dirty(m) ? Tx::roomDlgCloseDiscard : Tx::roomDlgClose) : Tx::roomDlgBack));
     if(current<0 && wantCursor>=0 && wantCursor<d.count)d.cursor=wantCursor;
+    for(int i=0;i<d.count;++i) {
+        Describe(m,nav,d.item[i].choice,d.item[i].desc,kDescMost);
+        if(!d.item[i].desc[0])detail::Put(d.item[i].desc,kDescMost,L"%ls",d.item[i].text);   // nothing more to say: its own words
+    }
     return d;
+}
+
+// --- The description beside the list (the right column: HUiDescriptionDialog shows the focused button's) ---
+namespace detail {
+// Appends a formatted line ("\n" before it unless the text is empty).
+template<class... A> void Line(wchar_t* out,std::size_t n,const wchar_t* format,A... args) noexcept {
+    const std::size_t used=std::wcslen(out);
+    if(used+2>=n)return;
+    if(used){out[used]=L'\n';out[used+1]=0;}
+    const std::size_t at=std::wcslen(out);
+    Put(out+at,n-at,format,args...);
+}
+inline void ColoursLine(const rm::Palette& p,const SupportLook& l,wchar_t* out,std::size_t n) noexcept {
+    wchar_t a[kTextMost],b[kTextMost];
+    ColourName(p,l.primary,a,kTextMost);ColourName(p,l.secondary,b,kTextMost);
+    Line(out,n,hudtext::Tr(Tx::roomDescColour),a,b);
+}
+// A soldier: its line, its colours, its backpack.
+inline void SoldierDesc(const rm::Menu& m,const rm::Unit& u,int i,wchar_t* out,std::size_t n) noexcept {
+    if(i<0 || i>=u.squad.count)return;
+    wchar_t line[kTextMost];
+    SoldierLine(u,i,line,kTextMost);
+    Line(out,n,L"%ls",line);
+    ColoursLine(m.palette,u.squad.look[i],out,n);
+}
+// A vehicle's load: the gun (a tank), each pylon with its weight, the weight against what it may carry.
+inline void VehicleDesc(const rm::Unit& u,wchar_t* out,std::size_t n) noexcept {
+    if(!u.vehicle.On()){Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescStockVehicle));return;}
+    if(rm::IsTank(u))Line(out,n,L"%ls",hudtext::Tr(u.vehicle.apGun ? Tx::roomDescGunAp : Tx::roomDescGunHe));
+    if(!u.vehicle.count && !rm::IsTank(u))Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescGunsOnly));
+    for(int i=0;i<u.vehicle.count;++i) {
+        const LoadStore* st=LoadStoreOf(u.vehicle.store[i]);
+        const int rounds=kRoundCounts[u.vehicle.rounds[i]&0xF];
+        Line(out,n,hudtext::Tr(Tx::roomDescPylonMass),i+1,StoreName(u.vehicle.store[i]),rounds,st ? st->massKg*rounds : 0);
+    }
+    if(rm::UnitBudgetKg(u)>0)Line(out,n,hudtext::Tr(Tx::roomDlgPayload)+1,rm::UnitMassKg(u),rm::UnitBudgetKg(u));   // +1: its own "\n" skipped
+}
+// A whole unit (the units page): what it is now.
+inline void UnitDesc(const rm::Menu& m,const rm::Unit& u,wchar_t* out,std::size_t n) noexcept {
+    wchar_t name[kTextMost];
+    UnitLine(u,name,kTextMost);
+    Line(out,n,L"%ls",name);
+    if(rm::IsSquad(u)) {
+        if(!u.squad.count){Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescStockSquad));return;}
+        Line(out,n,hudtext::Tr(Tx::roomDescSoldiers),u.squad.count,u.seats);
+        for(int i=0;i<u.squad.count;++i){wchar_t line[kTextMost];SoldierLine(u,i,line,kTextMost);Line(out,n,L"%ls",line);}
+        return;
+    }
+    if(u.kind==rm::UnitKind::vehicle)VehicleDesc(u,out,n);
+    if(rm::IsPlayerVehicleUnit(u))Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescPlayerVehicle));
+    if(u.hasCrew || rm::IsCrewUnit(u)) {
+        wchar_t a[kTextMost];
+        CrewPrimaryName(m.palette,u.crew,OwnDefault(u),a,kTextMost);
+        Line(out,n,hudtext::Tr(Tx::roomDlgPrimary),a);
+    }
+}
+}  // namespace detail
+
+// What the description dialog shows beside the list while button `c` of page `nav` has the focus: what the button would
+// open, set or do, with what it is now (a unit's soldiers or load and weight; a value's weight on this pylon).
+inline void Describe(const rm::Menu& m,const Nav& nav,Choice c,wchar_t* out,std::size_t n) noexcept {
+    if(!out || !n)return;
+    out[0]=0;
+    const rm::Unit* u=nav.unit>=0 && nav.unit<m.unitCount ? &m.unit[nav.unit] : nullptr;
+    using detail::Line;
+    switch(c.what) {
+    case Do::open: if(c.arg>=0 && c.arg<m.unitCount)detail::UnitDesc(m,m.unit[c.arg],out,n); return;
+    case Do::save: Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescSave)); return;
+    case Do::close: case Do::discard: Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescClose)); return;
+    case Do::back: case Do::keep: Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescBack)); return;
+    case Do::prev: case Do::next: Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescPage)); return;
+    case Do::reset: Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescReset)); return;
+    case Do::customise: Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescCustomise)); return;
+    case Do::remove: Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescRemove)); return;
+    case Do::add: case Do::copy:
+        if(u && rm::IsSquad(*u))Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescAddSoldier));
+        else Line(out,n,L"%ls",hudtext::Tr(Tx::roomDescAddPylon));
+        if(u && u->kind==rm::UnitKind::vehicle)detail::VehicleDesc(*u,out,n);
+        return;
+    case Do::row:
+        if(!u)return;
+        if(rm::IsSquad(*u)){detail::SoldierDesc(m,*u,c.arg,out,n);return;}
+        if(c.arg==rm::CrewRow(*u)) {
+            wchar_t a[kTextMost];
+            CrewPrimaryName(m.palette,u->crew,OwnDefault(*u),a,kTextMost);
+            Line(out,n,L"%ls",hudtext::Tr(Tx::roomDlgCrew));
+            Line(out,n,hudtext::Tr(Tx::roomDlgPrimary),a);
+            return;
+        }
+        detail::VehicleDesc(*u,out,n);
+        return;
+    case Do::field:
+        if(!u)return;
+        if(c.arg==FieldArg(Page::crewPrimary) || c.arg==FieldArg(Page::crewSecondary)) {
+            wchar_t a[kTextMost],b[kTextMost];
+            CrewPrimaryName(m.palette,u->crew,OwnDefault(*u),a,kTextMost);
+            ColourName(m.palette,u->crew.set ? u->crew.look.secondary : kStockColour,b,kTextMost);
+            Line(out,n,L"%ls",hudtext::Tr(Tx::roomDlgCrew));
+            Line(out,n,hudtext::Tr(Tx::roomDescColour),a,b);
+        } else if(rm::IsSquad(*u))detail::SoldierDesc(m,*u,nav.row,out,n);
+        else if(u->kind==rm::UnitKind::vehicle)detail::VehicleDesc(*u,out,n);
+        return;
+    case Do::set:
+        if(!u)return;
+        switch(nav.page) {
+        case Page::kind: Line(out,n,L"%ls",KindName(c.arg)); return;
+        case Page::primary: case Page::secondary: case Page::crewPrimary: case Page::crewSecondary: {
+            wchar_t a[kTextMost];
+            if(c.arg==-2)Line(out,n,L"%ls",hudtext::Tr(OwnDefault(*u) ? Tx::roomStockColour : Tx::roomCrewDefault));
+            else {ColourName(m.palette,c.arg,a,kTextMost);Line(out,n,L"%ls",a);}
+            return;
+        }
+        case Page::pack: Line(out,n,L"%ls",PackName(c.arg)); return;
+        case Page::gun: Line(out,n,L"%ls",hudtext::Tr(c.arg ? Tx::roomDescGunAp : Tx::roomDescGunHe)); return;
+        case Page::store: {
+            const LoadStore* st=LoadStoreOf(c.arg);
+            const int most=nav.row>=1 ? rm::MostRoundsFitting(*u,nav.row-1,static_cast<std::uint8_t>(c.arg)) : -1;
+            if(st)Line(out,n,L"%ls",st->label);
+            if(st && most>=0)Line(out,n,hudtext::Tr(Tx::roomDescStoreFit),st->massKg,kRoundCounts[most]);
+            detail::VehicleDesc(*u,out,n);
+            return;
+        }
+        case Page::rounds: {
+            const LoadStore* st=nav.row>=1 && nav.row<=u->vehicle.count ? LoadStoreOf(u->vehicle.store[nav.row-1]) : nullptr;
+            if(st && c.arg>=0 && c.arg<16)Line(out,n,hudtext::Tr(Tx::roomDescRoundsMass),st->massKg*kRoundCounts[c.arg]);
+            detail::VehicleDesc(*u,out,n);
+            return;
+        }
+        default: return;
+        }
+    default: return;
+    }
 }
 
 // What the caller does after Apply / Cancel.

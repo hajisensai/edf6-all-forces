@@ -29,6 +29,7 @@
 #include "room_ui.h"
 #include "support_soldier.h"
 #include "airdrop.h"
+#include "player_vehicle.h"
 #include "support_config.h"
 #include "lockon.h"
 #include "turretaim.h"
@@ -1226,6 +1227,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     } else Log("JET / SUB off: they are flown from the heli pilot's frame, which is off");
     InstallBoarding();      // after the heli profile's board button check
     Log("AIRDROP container step watched=%d",InstallAirdrop());   // the transport planes' container airdrops
+    Log("PLAYERVEH loaded requested jets=%d",InstallPlayerVehicles());   // after the airdrop: its vehicle step swaps the path
     InstallPlayerJets();    // its frame is the vehicles' own input; it needs only the 506 physics hook
     InstallSazabi();        // the same: the 506 physics hook and the vehicles' own input
     InstallDreadnought();   // the same

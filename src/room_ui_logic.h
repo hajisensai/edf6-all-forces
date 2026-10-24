@@ -18,6 +18,7 @@
 #include "hudtext.h"
 #include "loadout_file.h"
 #include "loadout_ini.h"
+#include "room_dialog_logic.h"
 #include "room_menu.h"
 #include "room_preview.h"
 #include "room_sync.h"
@@ -44,9 +45,10 @@ inline constexpr const wchar_t* kHeadName=L"vcHead";
 inline constexpr const wchar_t* kHintName=L"vcHint";
 inline constexpr const wchar_t* kHelp2Name=L"vcHelp2";
 inline constexpr const wchar_t* kHelp3Name=L"vcHelp3";
-// The menu's own copy of the game's dialog box (tools/room_layout.py LOADOUT_BOX / loadout_box: LYT_HUIDIALOGBOX with
-// wide buttons and a wide window left of the 3D view; 2026-10-25, the user: "显示好小，弄成选择兵种武器那样"): the path
-// the game opens it by, and where the installer puts it under Mods. Not there (an older install): the stock dialog box.
+// The menu's own copy of the game's description dialog (tools/room_layout.py LOADOUT_BOX / loadout_box:
+// LYT_HUIDESCDIALOGBOX with wide buttons and a wide window left of the 3D view; 2026-10-25, the user: "显示好小，弄成
+// 选择兵种武器那样"): the path the game opens it by, and where the installer puts it under Mods. Not there (an older
+// install): the stock description dialog.
 inline constexpr const wchar_t* kLoadoutBoxLayout=L"APP:/UI/EDF6VC_LOADOUTBOX.SGO";
 inline constexpr const wchar_t* kLoadoutBoxFile=L"UI\\EDF6VC_LOADOUTBOX.SGO";
 // The plain white texture the panel and the chips show, tinted (tools/room_layout.py WHITE: written to Mods/UI by the
@@ -262,7 +264,9 @@ inline constexpr UnitText kUnitTexts[]={
     {L"TANK_CREWED",Tx::roomUnitTankCrewed},{L"TANK_DELIVERY",Tx::roomUnitTankDelivery},{L"STRIKE",Tx::roomUnitStrike},
     {L"STRIKE_F",Tx::roomUnitStrikeFollow},{L"FIGHTER",Tx::roomUnitFighter},{L"FIGHTER_F",Tx::roomUnitFighterFollow},
     {L"INTERCEPTOR",Tx::roomUnitInterceptor},{L"INTERCEPTOR_F",Tx::roomUnitInterceptorFollow},
-    {L"MULTIROLE",Tx::roomUnitMultirole},{L"MULTIROLE_F",Tx::roomUnitMultiroleFollow}};
+    {L"MULTIROLE",Tx::roomUnitMultirole},{L"MULTIROLE_F",Tx::roomUnitMultiroleFollow},
+    {L"OWN_PFIGHTER",Tx::roomUnitOwnPFighter},{L"OWN_PSTRIKE",Tx::roomUnitOwnPStrike},{L"OWN_FIGHTER",Tx::roomUnitOwnFighter},
+    {L"OWN_INTERCEPTOR",Tx::roomUnitOwnInterceptor},{L"OWN_MULTIROLE",Tx::roomUnitOwnMultirole}};
 // The unit's label: the table's in the HUD's language, else `fallback` (the catalog's own name).
 inline const wchar_t* UnitLabel(const wchar_t* key,const wchar_t* fallback) noexcept {
     if(key && !*key)return hudtext::Tr(Tx::roomUnitCrewDefault);     // SupportCrewColour
@@ -427,6 +431,9 @@ inline int CatalogUnits(int count,KeyOf keyOf,SeatsOf seatsOf,NameOf nameOf,room
         if(seats<=0 && VehicleBodyOfKey(key)==VehicleBody::none && !crew)continue;
         out[n++]=roommenu::UnitSpec{key,UnitLabel(key,nameOf ? nameOf(i) : key),seats>0 ? seats : 0,crew};
     }
+    // The vehicles this player summons with a vehicle request (support_loadout.h kPlayerVehicles): not catalog entries.
+    for(const auto& v:kPlayerVehicles)
+        if(n<capacity)out[n++]=roommenu::UnitSpec{v.key,UnitLabel(v.key,v.key),0,false};
     for(const wchar_t* key:{L"",kCrewMissionKey})
         if(n<capacity)out[n++]=roommenu::UnitSpec{key,UnitLabel(key,key),0,true};
     return n;
@@ -483,6 +490,39 @@ inline bool PreviewFor(const roommenu::Menu& m,roompreview::PreviewSpec* out,con
     if(!roommenu::IsSquad(u) || m.rowAt<0 || m.rowAt>=u.squad.count)return false;
     if(out)*out=roompreview::PreviewSpec{u.squad.kind[m.rowAt],m.rowAt%4==0,u.squad.look[m.rowAt]};
     return true;
+}
+// The soldier the 3D view shows while button `focused` of the description dialog has the focus (the game reports it:
+// room_dialog.h FocusedButton): on a squad's page the soldier the button opens; on a class / colour / backpack page the
+// page's soldier wearing the value the button would set (the stock equipment screen's way: the model follows the
+// cursor); anything else the page's own (PreviewFor). False: none.
+inline bool FocusPreview(const roommenu::Menu& m,const roomdialog::Nav& nav,roomdialog::Choice focused,
+                         roompreview::PreviewSpec* out,const CrewKinds& kinds=CrewKinds{}) noexcept {
+    using roomdialog::Do;using roomdialog::Page;
+    const roommenu::Unit* u=nav.unit>=0 && nav.unit<m.unitCount ? &m.unit[nav.unit] : nullptr;
+    if(m.open && u && roommenu::IsSquad(*u)) {
+        if(nav.page==Page::unit && focused.what==Do::row && focused.arg>=0 && focused.arg<u->squad.count) {
+            if(out)*out=roompreview::PreviewSpec{u->squad.kind[focused.arg],focused.arg%4==0,u->squad.look[focused.arg]};
+            return true;
+        }
+        const int row=nav.row;
+        if(focused.what==Do::set && row>=0 && row<u->squad.count) {
+            roompreview::PreviewSpec p{u->squad.kind[row],row%4==0,u->squad.look[row]};
+            switch(nav.page) {
+            case Page::kind:
+                if(focused.arg<0 || focused.arg>=kSupportWeaponCount)return PreviewFor(m,out,kinds);
+                p.kind=static_cast<SupportWeapon>(focused.arg);
+                if(!PackFits(p.look.pack,SupportSoldierClass(p.kind)))p.look.pack=0;
+                break;
+            case Page::primary: p.look.primary=focused.arg; break;
+            case Page::secondary: p.look.secondary=focused.arg; break;
+            case Page::pack: if(PackFits(focused.arg,SupportSoldierClass(p.kind)))p.look.pack=static_cast<std::uint8_t>(focused.arg); break;
+            default: return PreviewFor(m,out,kinds);
+            }
+            if(out)*out=p;
+            return true;
+        }
+    }
+    return PreviewFor(m,out,kinds);
 }
 inline bool SamePreview(const roompreview::PreviewSpec& a,const roompreview::PreviewSpec& b) noexcept {
     return a.kind==b.kind && a.leader==b.leader && a.look==b.look;

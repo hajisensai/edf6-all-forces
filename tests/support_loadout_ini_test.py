@@ -86,6 +86,11 @@ for body in ('STRIKE', 'FIGHTER', 'INTERCEPTOR', 'MULTIROLE'):
         if m and m.group(1).upper() in sl.STORE_CODE:
             pylons.append((m.group(1).upper(), int(m.group(2))))
     check(pylons and sl.within_payload(sl.Loadout(body, False, pylons)), f'{body}: its stock arms {pylons} fit its budget')
+for body, jet_name in (('PFIGHTER', 'edf6tr_pjet_fighter_mission'), ('PSTRIKE', 'edf6tr_pjet_strike_mission'),
+                       ('RFIGHTER', 'edf6tr_jet_fighter_mission'), ('RINTERCEPTOR', 'edf6tr_jet_interceptor_mission'),
+                       ('RMULTIROLE', 'edf6tr_jet_multirole_mission')):
+    jet = vc.JETS[jet_name]
+    check(sl.PAYLOAD_KG[body] == int(vc.JET_MASSES[jet.mark]) * share // 100, f"{body}: a player's own jet weighed as its kind")
 check(sl.PAYLOAD_KG['TANK'] == 0, 'the tank is not weighed')
 check(refused(sl.parse_vehicle, 'AAM_L:40,AAM_L:40,AAM_L:40,AAM_L:40,AAM_L:40', 'INTERCEPTOR') and
       refused(sl.parse_vehicle, 'MK82:40', 'STRIKE') and sl.parse_vehicle('MK82:19,MK82:19', 'STRIKE') is not None and
@@ -96,10 +101,17 @@ check(sl.of_variant(sl.variant(over), 'INTERCEPTOR') is None and sl.decode_name(
       'a peer\'s / a host list\'s over-weight loadout is no loadout: never generated')
 check(dict(re.findall(r'\{L"(\w+)",VehicleBody::(\w+)\}', header)) == {k: b.lower() for k, b in sl.VEHICLE_KEYS.items()},
       'vehicle keys equal')
-check(set(sl.VEHICLE_KEYS) <= set(sc.UNIT_KEYS), 'vehicle keys are catalog keys')
+check(set(sl.VEHICLE_KEYS) - set(sl.PLAYER_VEHICLE_KEYS) <= set(sc.UNIT_KEYS) and not set(sl.PLAYER_VEHICLE_KEYS) & set(sc.UNIT_KEYS),
+      "support vehicle keys are catalog keys, a player's own summons are not")
+players = re.findall(r'\{L"(OWN_\w+)",VehicleBody::(\w+),L"([\w.]+)"\}', header)
+check([k for k, _, _ in players] == list(sl.PLAYER_VEHICLE_KEYS) and
+      all(sl.VEHICLE_KEYS[k].lower() == b and sl.BODIES[sl.VEHICLE_KEYS[k]][0] == twin for k, b, twin in players),
+      "kPlayerVehicles == PLAYER_VEHICLE_KEYS: each key's body built on the twin its request makes")
+calls_src = read('tools/calls.py')
+check(all(f"vehicle='{twin[:-4]}'" in calls_src for _, _, twin in players), 'every twin is a vehicle request of tools/calls.py')
 check(f'L"{sl.BODIES["TANK"][0]}"' in header and f'L"app:/Object/{sl.BODIES["TANK"][0]}"' in read('src/support_spawn.h'),
       'the loaded tank is made from the support tank')
-check(all(f'L"{base}"' in read('src/jet_internal.h') for base, _, tank in sl.BODIES.values() if not tank),
+check(all(f'L"{base}"' in read('src/jet_internal.h') for name, (base, _, tank) in sl.BODIES.items() if not tank and name not in ('PFIGHTER', 'PSTRIKE', 'RFIGHTER', 'RINTERCEPTOR', 'RMULTIROLE')),
       'a loaded jet is made from the plugin\'s jet of that body')
 check('kVariantApplied=1ull<<63,kVariantVehicle=1ull<<62' in header and sl.APPLIED == 1 << 63 and sl.VEHICLE == 1 << 62, 'variant bits')
 check(f'L"Plugins\\\\{sl.PENDING}"' in read('src/support_variants.cpp'), 'the pending list is the one the plugin writes')

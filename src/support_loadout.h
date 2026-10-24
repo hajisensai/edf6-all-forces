@@ -277,7 +277,12 @@ constexpr const LoadStore* LoadStoreOf(int code) noexcept {
 // V505_TANK_MISSION, src/support_spawn.h; the plugin builds its holders past the stock one, src/stores.cpp) and the
 // plugin's jets (tools/make_jets.py: the guns L / R, the stores, the fuel tank fourth). The helicopters are not offered:
 // their NPC pilot fires only the stock holders (src/heli.cpp kStoreHolder), pylons past those would never fire.
-enum class VehicleBody : std::uint8_t { none, tank, strike, fighter, interceptor, multirole };
+// The last five (2026-10-25, the user: "换载具要能换自己召唤的啊，不只是npc的载具"): the jets a player summons
+// with a vehicle request (tools/calls.py: the player fighter / strike jet, the requested twins of the fighter, the
+// interceptor and the multirole jet), the twin the request brings their base (player_vehicle_logic.h).
+enum class VehicleBody : std::uint8_t { none, tank, strike, fighter, interceptor, multirole,
+                                        pfighter, pstrike, rfighter, rinterceptor, rmultirole };
+inline constexpr int kVehicleBodyLast=static_cast<int>(VehicleBody::rmultirole);
 // `most` pylons: a tank's stock gun and 4 (src/payload.h kMostPayload 8 a seat), a jet's 5 (its guns L / R, the fuel tank
 // and 5 make 8 holders: src/jet_combat.cpp ReadArms reads at most 8, src/stores.h kMostStores 7 stores).
 // `payloadKg`: the most its pylons may weigh (the stores' massKg x rounds), 0 = not weighed (2026-10-25, the user: "支援
@@ -297,6 +302,12 @@ inline constexpr VehicleBodyRow kVehicleBodies[]={
     {VehicleBody::fighter,L"FIGHTER",L"EDF6VC_JET_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
     {VehicleBody::interceptor,L"INTERCEPTOR",L"EDF6VC_JET_INTERCEPTOR.SGO",5,false,20000*kPayloadSharePercent/100},
     {VehicleBody::multirole,L"MULTIROLE",L"EDF6VC_JET_MULTIROLE.SGO",5,false,18000*kPayloadSharePercent/100},
+    // A player's own (their clean masses: pylib/vcobjects.py JET_MASSES of marks 7201 / 7202 / 7002 / 7003 / 7004).
+    {VehicleBody::pfighter,L"PFIGHTER",L"EDF6VC_PJET_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
+    {VehicleBody::pstrike,L"PSTRIKE",L"EDF6VC_PJET_STRIKE.SGO",5,false,22000*kPayloadSharePercent/100},
+    {VehicleBody::rfighter,L"RFIGHTER",L"EDF6VC_FLY_FIGHTER.SGO",5,false,16000*kPayloadSharePercent/100},
+    {VehicleBody::rinterceptor,L"RINTERCEPTOR",L"EDF6VC_FLY_INTERCEPTOR.SGO",5,false,20000*kPayloadSharePercent/100},
+    {VehicleBody::rmultirole,L"RMULTIROLE",L"EDF6VC_FLY_MULTIROLE.SGO",5,false,18000*kPayloadSharePercent/100},
 };
 constexpr const VehicleBodyRow* VehicleBodyOf(VehicleBody b) noexcept {
     for(const auto& r:kVehicleBodies)if(r.body==b)return &r;
@@ -310,7 +321,35 @@ inline constexpr VehicleKey kVehicleKeys[]={
     {L"FIGHTER",VehicleBody::fighter},{L"FIGHTER_F",VehicleBody::fighter},
     {L"INTERCEPTOR",VehicleBody::interceptor},{L"INTERCEPTOR_F",VehicleBody::interceptor},
     {L"MULTIROLE",VehicleBody::multirole},{L"MULTIROLE_F",VehicleBody::multirole},
+    // A player's own summons (kPlayerVehicles): SupportVehicle_OWN_<...>, the same grammar and weight.
+    {L"OWN_PFIGHTER",VehicleBody::pfighter},{L"OWN_PSTRIKE",VehicleBody::pstrike},{L"OWN_FIGHTER",VehicleBody::rfighter},
+    {L"OWN_INTERCEPTOR",VehicleBody::rinterceptor},{L"OWN_MULTIROLE",VehicleBody::rmultirole},
 };
+// The vehicles a player summons with a vehicle request and may load before the battle: the key of its
+// SupportVehicle_<KEY>, its body, the twin the request's container makes (its CreateObject path's file name: tools/calls.py
+// `vehicle`, written by tools/make_jets.py). Not support catalog entries: never in a host's support list.
+struct PlayerVehicle { const wchar_t* key; VehicleBody body; const wchar_t* twin; };
+inline constexpr PlayerVehicle kPlayerVehicles[]={
+    {L"OWN_PFIGHTER",VehicleBody::pfighter,L"EDF6VC_PJET_FIGHTER.SGO"},
+    {L"OWN_PSTRIKE",VehicleBody::pstrike,L"EDF6VC_PJET_STRIKE.SGO"},
+    {L"OWN_FIGHTER",VehicleBody::rfighter,L"EDF6VC_FLY_FIGHTER.SGO"},
+    {L"OWN_INTERCEPTOR",VehicleBody::rinterceptor,L"EDF6VC_FLY_INTERCEPTOR.SGO"},
+    {L"OWN_MULTIROLE",VehicleBody::rmultirole,L"EDF6VC_FLY_MULTIROLE.SGO"},
+};
+inline constexpr int kPlayerVehicleCount=static_cast<int>(sizeof(kPlayerVehicles)/sizeof(kPlayerVehicles[0]));
+// The player vehicle `key` names, or -1.
+inline int PlayerVehicleOfKey(const wchar_t* key) noexcept {
+    for(int i=0;key && i<kPlayerVehicleCount;++i)if(!_wcsicmp(kPlayerVehicles[i].key,key))return i;
+    return -1;
+}
+inline int PlayerVehicleOfBody(VehicleBody body) noexcept {
+    for(int i=0;i<kPlayerVehicleCount;++i)if(kPlayerVehicles[i].body==body)return i;
+    return -1;
+}
+constexpr bool IsPlayerBody(VehicleBody b) noexcept {
+    return b==VehicleBody::pfighter || b==VehicleBody::pstrike || b==VehicleBody::rfighter || b==VehicleBody::rinterceptor ||
+           b==VehicleBody::rmultirole;
+}
 inline VehicleBody VehicleBodyOfKey(const wchar_t* key) noexcept {
     if(!key)return VehicleBody::none;
     for(const auto& k:kVehicleKeys)if(!_wcsicmp(k.key,key))return k.body;

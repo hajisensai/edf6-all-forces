@@ -321,28 +321,36 @@ void Catalog() {
     hudtext::Use(hudtext::Lang::zhCN);
     roommenu::UnitSpec specs[roommenu::kMostUnits];
     const int n=CatalogUnits(10,KeyAt,SeatsAt,NameAt,specs,roommenu::kMostUnits);
-    Expect(n==12,"every entry with seats, a vehicle or a crew (10), then the default and the mission crews");
-    Expect(n==12 && Same(specs[0].key,L"STRIKE") && specs[0].seats==0 && specs[0].crew && Same(specs[0].label,L"对地攻击机·守点"),"jet entry: a crew");
-    Expect(n==12 && Same(specs[2].key,L"GUNSHIP") && specs[2].crew && Same(specs[2].label,L"名字"),"gunship: a crew, the catalog's name");
-    Expect(n==12 && Same(specs[3].key,L"SQUAD") && specs[3].seats==12 && !specs[3].crew,"squad entry: no crew (HasCrew)");
-    Expect(n==12 && !specs[4].crew,"platoon: no crew");
-    Expect(n==12 && Same(specs[7].key,L"TRANSPORT_CREWED") && specs[7].seats==4 && specs[7].crew,"crewed APC: riders and a crew");
-    Expect(n==12 && Same(specs[10].key,L"") && specs[10].crew && Same(specs[10].label,hudtext::Tr(Tx::roomUnitCrewDefault)),"the default crew");
-    Expect(n==12 && Same(specs[11].key,kCrewMissionKey) && specs[11].crew && Same(specs[11].label,hudtext::Tr(Tx::roomUnitCrewMission)),"the mission crews");
+    const int own=kPlayerVehicleCount;   // a player's own summons (support_loadout.h kPlayerVehicles), after the catalog's
+    Expect(n==12+own,"every entry with seats, a vehicle or a crew (10), the player's own summons, then the default and the mission crews");
+    for(int i=0;i<own;++i)
+        Expect(n==12+own && Same(specs[10+i].key,kPlayerVehicles[i].key) && !specs[10+i].crew && specs[10+i].seats==0 &&
+               VehicleBodyOfKey(specs[10+i].key)==kPlayerVehicles[i].body,"a player's own summon: a vehicle unit, no crew");
+    Expect(Same(specs[10].label,L"我召唤的·玩家战斗机"),"labelled as the player's own");
+    Expect(n==12+own && Same(specs[0].key,L"STRIKE") && specs[0].seats==0 && specs[0].crew && Same(specs[0].label,L"对地攻击机·守点"),"jet entry: a crew");
+    Expect(n==12+own && Same(specs[2].key,L"GUNSHIP") && specs[2].crew && Same(specs[2].label,L"名字"),"gunship: a crew, the catalog's name");
+    Expect(n==12+own && Same(specs[3].key,L"SQUAD") && specs[3].seats==12 && !specs[3].crew,"squad entry: no crew (HasCrew)");
+    Expect(n==12+own && !specs[4].crew,"platoon: no crew");
+    Expect(n==12+own && Same(specs[7].key,L"TRANSPORT_CREWED") && specs[7].seats==4 && specs[7].crew,"crewed APC: riders and a crew");
+    Expect(n==12+own && Same(specs[10+own].key,L"") && specs[10+own].crew && Same(specs[10+own].label,hudtext::Tr(Tx::roomUnitCrewDefault)),"the default crew");
+    Expect(n==12+own && Same(specs[11+own].key,kCrewMissionKey) && specs[11+own].crew && Same(specs[11+own].label,hudtext::Tr(Tx::roomUnitCrewMission)),"the mission crews");
     Expect(CatalogUnits(10,KeyAt,SeatsAt,NameAt,specs,3)==3,"capacity kept");
     roommenu::Menu m;
     roommenu::Load(m,specs,n,nullptr,nullptr);
-    Expect(m.unitCount==13,"units: 2 jets, gunship crew, 2 squads, 2 tanks, APC riders + APC crew, 2 crews, default, mission");
+    Expect(m.unitCount==13+own,"units: 2 jets, gunship crew, 2 squads, 2 tanks, APC riders + APC crew, 2 crews, the player's 5, default, mission");
     int crews=0,vehiclesWithCrew=0;
     for(int i=0;i<m.unitCount;++i){crews+=roommenu::IsCrewUnit(m.unit[i]);vehiclesWithCrew+=m.unit[i].kind==roommenu::UnitKind::vehicle && m.unit[i].hasCrew;}
-    Expect(crews==6 && vehiclesWithCrew==4,"6 crew units; every vehicle has its crew row");
+    int playerVehicles=0;
+    for(int i=0;i<m.unitCount;++i)playerVehicles+=roommenu::IsPlayerVehicleUnit(m.unit[i]) && !m.unit[i].hasCrew;
+    Expect(crews==6 && vehiclesWithCrew==4 && playerVehicles==own,"6 crew units; every support vehicle has its crew row, the player's own none");
     // Without a live catalog: room_menu.h's list, labelled in the HUD's language.
     hudtext::Use(hudtext::Lang::en);
     const int d=DefaultUnits(specs,roommenu::kMostUnits);
     Expect(d==roommenu::kDefaultUnitCount && Same(specs[0].label,L"Infantry squad") && Same(specs[d-2].label,L"All support crews (default)") &&
            Same(specs[d-1].label,L"Mission vehicles' support crews") && specs[d-1].crew,"the default list relabelled");
     // The real catalog's size fits the menu (support_dispatch.cpp: 37 entries, 2 crewless squads, 10 vehicles).
-    Expect(37+2<=roommenu::kMostUnits && 8+10+(37-2-10)+2<=roommenu::kMostUnits,"37 entries: specs and units fit kMostUnits");
+    Expect(37+kPlayerVehicleCount+2<=roommenu::kMostUnits && 8+10+(37-2-10)+kPlayerVehicleCount+2<=roommenu::kMostUnits,
+           "37 entries and the player's own: specs and units fit kMostUnits");
 }
 
 // A crew row: its kind from the crew settings, the default's colours shown when inheriting, its lines, chips and icon.
@@ -526,6 +534,31 @@ void Save() {
 }
 }  // namespace
 
+// The model follows the description dialog's cursor (FocusPreview).
+void Focus() {
+    roommenu::Menu m;m.open=true;
+    roommenu::Load(m,roommenu::kDefaultUnits,roommenu::kDefaultUnitCount,nullptr,nullptr);
+    int squad=-1;for(int i=0;i<m.unitCount;++i)if(roommenu::IsSquad(m.unit[i]) && squad<0)squad=i;
+    roommenu::Unit& u=m.unit[squad];
+    u.squad.count=2;u.squad.kind[0]=SupportWeapon::rifle;u.squad.kind[1]=SupportWeapon::wingLance;u.squad.look[1].primary=0x112233;
+    roomdialog::Nav nav;nav.page=roomdialog::Page::unit;nav.unit=squad;
+    m.level=roommenu::Level::rows;m.unitAt=squad;m.rowAt=0;
+    roompreview::PreviewSpec p{};
+    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::row,1},&p) && p.kind==SupportWeapon::wingLance && !p.leader &&
+           p.look.primary==0x112233,"the unit page: the soldier the focused button opens");
+    nav.page=roomdialog::Page::kind;nav.row=1;m.level=roommenu::Level::fields;m.rowAt=1;
+    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::set,static_cast<int>(SupportWeapon::fencerCannon)},&p) &&
+           p.kind==SupportWeapon::fencerCannon && p.look.primary==0x112233,"the class page: that soldier as the focused class");
+    nav.page=roomdialog::Page::primary;
+    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::set,0x445566},&p) && p.look.primary==0x445566 &&
+           p.kind==SupportWeapon::wingLance,"the colour page: wearing the focused colour");
+    Expect(u.squad.look[1].primary==0x112233 && u.squad.kind[1]==SupportWeapon::wingLance,"nothing edited by looking");
+    Expect(FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::back,0},&p) && p.kind==SupportWeapon::wingLance,
+           "another button: the page's own soldier");
+    m.open=false;
+    Expect(!FocusPreview(m,nav,roomdialog::Choice{roomdialog::Do::row,1},&p),"closed: none");
+}
+
 int main() {
     Names();
     NativeButton();
@@ -539,6 +572,7 @@ int main() {
     Catalog();
     Crews();
     Preview();
+    Focus();
     Save();
     std::printf("room_ui: %d checks, %d failed\n",checks,failures);
     return failures ? 1 : 0;

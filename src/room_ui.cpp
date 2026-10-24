@@ -322,9 +322,14 @@ void HidePreview() noexcept {
     roompreview::HidePreview();
     st.previewShown=false;
 }
+roomdialog::Dialog page;   // big: not on the stack; the dialog shown now (its buttons' descriptions live here)
 void FollowPreview(bool shown) noexcept {
     roompreview::PreviewSpec p{};
-    if(!shown || !PreviewFor(st.menu,&p,Kinds())){HidePreview();return;}
+    // The description dialog reports its focused button: the model follows the cursor (FocusPreview).
+    const int focused=st.dialog.control ? nativedialog::FocusedButton(st.dialog) : -1;
+    const bool found=shown && (focused>=0 && focused<page.count ? FocusPreview(st.menu,st.nav,page.item[focused].choice,&p,Kinds())
+                                                               : PreviewFor(st.menu,&p,Kinds()));
+    if(!found){HidePreview();return;}
     if(st.previewShown && SamePreview(p,st.preview))return;
     roompreview::ShowPreview(p);
     st.preview=p;st.previewShown=true;
@@ -736,7 +741,6 @@ Status MenuStatus() noexcept {
     if(st.room)syncCount+=roomsync::RoomSyncLines(sync+syncCount,kStatusLines-syncCount);
     return ComposeStatus(st.room && !OnlineHostOnly(),st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
 }
-roomdialog::Dialog page;   // big: not on the stack
 // Each frame while the menu is open: the dialog's pick taken; once the game has closed it (picked, or its own cancel),
 // the menu steps (Apply / Cancel) and the next page opens as a new dialog, when the screen is the input owner again.
 void DriveDialog(bool hasInput) noexcept {
@@ -763,7 +767,10 @@ void DriveDialog(bool hasInput) noexcept {
     for(int i=0;i<s.count && i<4;++i)ctx.status[ctx.statusCount++]=s.text[i];
     page=roomdialog::Build(st.menu,st.nav,ctx);
     nativedialog::Button buttons[roomdialog::kItemsMost];
-    for(int i=0;i<page.count;++i)buttons[i]=nativedialog::Button{page.item[i].text,roomdialog::Pack(page.item[i].choice)};
+    // Each button's description beside the list (the description dialog: HUiDescriptionDialog); `page` keeps the texts
+    // until this dialog is gone (the next page is built only after it closed).
+    for(int i=0;i<page.count;++i)buttons[i]=nativedialog::Button{page.item[i].text,roomdialog::Pack(page.item[i].choice),
+                                                                 page.item[i].desc[0] ? page.item[i].desc : nullptr};
     if(!nativedialog::OpenDialog(page.title,buttons,page.count,page.cursor,&st.dialog,st.dialogLayout)) {
         rm::Discard(st.menu);   // never a menu open with nothing on screen: closed, its edits dropped (logged)
         Log("ROOMUI the game opened no dialog: the menu closed, its edits dropped");

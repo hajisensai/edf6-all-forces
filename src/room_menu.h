@@ -83,11 +83,14 @@ inline constexpr UnitSpec kDefaultUnits[]={
     {L"STRIKE_F",L"对地攻击机·跟随",0,true},{L"FIGHTER",L"制空战斗机·守点",0,true},{L"FIGHTER_F",L"制空战斗机·跟随",0,true},
     {L"INTERCEPTOR",L"截击机·守点",0,true},{L"INTERCEPTOR_F",L"截击机·跟随",0,true},{L"MULTIROLE",L"多用途机·守点",0,true},
     {L"MULTIROLE_F",L"多用途机·跟随",0,true},
+    {L"OWN_PFIGHTER",L"我召唤的·玩家战斗机",0,false},{L"OWN_PSTRIKE",L"我召唤的·玩家攻击机",0,false},
+    {L"OWN_FIGHTER",L"我召唤的·制空战斗机",0,false},{L"OWN_INTERCEPTOR",L"我召唤的·截击机",0,false},
+    {L"OWN_MULTIROLE",L"我召唤的·多用途机",0,false},
     {L"",L"所有支援乘员（默认）",0,true},{kCrewMissionKey,L"任务载具的支援乘员",0,true},
 };
 inline constexpr int kDefaultUnitCount=static_cast<int>(sizeof(kDefaultUnits)/sizeof(kDefaultUnits[0]));
 
-inline constexpr int kMostUnits=48;
+inline constexpr int kMostUnits=56;   // the live catalog's 45 units, a player's 5 own summons, room to spare
 enum class UnitKind : std::uint8_t { squad, vehicle, crew };
 struct Unit {
     const wchar_t* key=nullptr;
@@ -104,6 +107,8 @@ struct Unit {
 };
 constexpr bool IsSquad(const Unit& u) noexcept { return u.kind==UnitKind::squad; }
 constexpr bool IsCrewUnit(const Unit& u) noexcept { return u.kind==UnitKind::crew; }
+// A vehicle the player summons with a vehicle request (support_loadout.h kPlayerVehicles), not a support unit.
+constexpr bool IsPlayerVehicleUnit(const Unit& u) noexcept { return u.kind==UnitKind::vehicle && IsPlayerBody(u.body); }
 
 // Reads one ini value (support_config.h SupportIniRead's shape: empty when absent); returns its length.
 using IniRead=std::size_t(*)(void* context,const wchar_t* key,wchar_t* out,std::size_t capacity) noexcept;
