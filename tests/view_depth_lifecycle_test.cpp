@@ -215,6 +215,31 @@ void FirstPersonMapLease(Fixture& fixture,bool mapCallFirst) {
     ViewMapClip(false,0,0);ViewTick();
     fixture.NativeAll("later map-close and frame ticks cannot resurrect the departed first-person .03 near plane");
 }
+void FirstPersonReleaseAroundMap(Fixture& fixture) {
+    // Enemy control is begun and ended from the open map; first person leaves and comes back under it. Every owner
+    // releases only its own still-current value, and what comes back is the native baseline, never a snapshot of a
+    // value another owner held at the time (the map's 0.5..5 m plane, or first person's departed .03).
+    fixture.Reset();fixture.Ready();
+    unsigned char* const camera=fixture.cameras[0];
+    ViewWriteNear(camera,0.03f);ViewMapClip(true,35000,0.8f);
+    ViewReturnNear(camera,0.03f);
+    Check(At<float>(camera,kCamNear)==0.8f,"first person leaving under the map leaves the map's near plane alone");
+    ViewMapClip(false,0,0);ViewTick();
+    Check(At<float>(camera,kCamNear)==kNear[0],"map-close after first person left returns native .1, not first person's departed .03");
+    ViewWriteNear(camera,0.03f);ViewMapClip(true,35000,0.8f);ViewMapClip(false,0,0);
+    Check(At<float>(camera,kCamNear)==kNear[0],"map-close over an active first person returns native .1 (first person re-applies its own)");
+    ViewWriteNear(camera,0.03f);ViewReturnNear(camera,0.03f);
+    Check(At<float>(camera,kCamNear)==kNear[0],"first person's release returns the lease's native baseline");
+    ViewMapClip(true,35000,3.23f);ViewWriteNear(camera,0.03f);ViewReturnNear(camera,0.03f);
+    Check(At<float>(camera,kCamNear)==kNear[0],"a first-person claim begun over the map's 3.23 m returns native .1, never 3.23");
+    ViewMapClip(false,0,0);ViewTick();
+    Check(At<float>(camera,kCamNear)==kNear[0],"the map closing after that release leaves native .1");
+    ViewWriteNear(camera,0.03f);Put<float>(camera,kCamNear,0.2f);ViewReturnNear(camera,0.03f);
+    Check(At<float>(camera,kCamNear)==0.2f,"a native near written after first person's claim is never replaced by its release");
+    bool others=true;
+    for(int i=1;i<kCameraCount;++i)others=others && At<float>(fixture.cameras[i],kCamNear)==kNear[i];
+    Check(others,"other cameras keep their native near planes through first person's releases on camera 0");
+}
 void NativeDistantStartWithMap(Fixture& fixture) {
     fixture.Reset();fixture.Ready();ViewTick();ViewMapClip(true,35000,1);
     Put<float>(fixture.env,kDistantNear,725);
@@ -251,7 +276,7 @@ int main() {
     NativeMissionOverwrite(fixture,false);NativeMissionOverwrite(fixture,true);
     CameraReplacement(fixture);EnvironmentReplacement(fixture);
     FirstPersonMapLease(fixture,false);FirstPersonMapLease(fixture,true);
-    NativeDistantStartWithMap(fixture);
+    FirstPersonReleaseAroundMap(fixture);NativeDistantStartWithMap(fixture);
     NativeNearFarWithMap(fixture,false);NativeNearFarWithMap(fixture,true);ContractFailure(fixture);
     std::printf("view_depth_lifecycle_test: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;

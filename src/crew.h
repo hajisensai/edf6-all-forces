@@ -1453,4 +1453,10 @@ bool DebugSpawnReadout(DebugSpawnCue* out) noexcept;   // any thread; false: not
 #include "qmark.h"
 #include "infantryscope.h"
 
-namespace crew { bool InstallViewDepth() noexcept; bool ViewDepthReady() noexcept; void ViewWriteNear(void* camera,float value) noexcept; }
+namespace crew {
+bool InstallViewDepth() noexcept; bool ViewDepthReady() noexcept; void ViewWriteNear(void* camera,float value) noexcept;
+// Release a near plane written through ViewWriteNear: while `written` is still the camera's value, the native baseline
+// the shared clip lease recorded before any plugin write comes back. A newer value of another owner (the map) is left.
+// Never a private snapshot of the camera: that may hold another layer's temporary value (the map's 0.5..5 m).
+void ViewReturnNear(void* camera,float written) noexcept;
+}

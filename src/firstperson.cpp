@@ -246,8 +246,8 @@ struct State {
     int inHandCount;
     float eyeLocal[3];          // the eased eye in the body frame
     bool fresh;                 // the eye taken as it is next frame
-    float savedNear,savedSmooth,stepNear,writtenNear;
-    bool nearSet,smoothSet,stepNearSet;
+    float savedSmooth,stepNear,writtenNear;
+    bool nearSet,smoothSet,stepNearSet;   // nearSet: writtenNear is this state's claim on the camera's near plane
     // The motion: last frame's readings and the springs.
     bool have;
     float pitch,yaw,pos[3],vy;
@@ -1149,10 +1149,13 @@ void Probe(const bool* anchored,const M4* anchor,const M4& camera) noexcept {
 }
 
 // Return only the near-plane value this camera still owns. The outer map/another camera feature may already
-// have written its own precision; its latest value must not be replaced by an older first-person baseline.
+// have written its own precision; its latest value must not be replaced. What comes back is the shared clip lease's
+// native baseline (view.cpp ViewReturnNear), never a value read off the camera when first person began: that read
+// could be the map's raised 0.5..5 m plane (first person re-entered under the open map after enemy control), which
+// a later return would then install in third person, cutting the player and the vehicles beside the camera away.
 void ReturnNear(unsigned char* cam) noexcept {
     if(!Current().nearSet)return;
-    if(At<float>(cam,kCamNear)==Current().writtenNear)ViewWriteNear(cam,Current().savedNear);
+    ViewReturnNear(cam,Current().writtenNear);
     Current().nearSet=false;
 }
 
@@ -1166,10 +1169,13 @@ void Leave() noexcept {
     // Keep the camera binding even when first person is off: its independent free-look restore still runs.
     // Its submitted views go with it: a draw still to come of a first-person frame is drawn stock, never routed to a
     // state with no viewmodel published (nor to another player's).
-    auto cam=Current().cam;const auto applied=Current().cameraApplied;const auto key=Current().key;
+    // `overridden` is the outer owner's (map / TV) fact about this camera, told by FirstPersonCameraOverride only when
+    // it changes: first person leaving does not end the map's view. Dropped here, a re-entry under the still-open map
+    // (enemy control ending from the map card) took the camera as its own: near plane, batches, Umbra boxes.
+    auto cam=Current().cam;const auto applied=Current().cameraApplied;const auto key=Current().key;const bool overridden=Current().overridden;
     Flash flashes[kFlashSlots];std::memcpy(flashes,Current().flashes,sizeof(flashes));const int flashNext=Current().flashNext;
     for(auto& f:flashes)f.model=nullptr;   // freeze detached effects; their destructor releases the borrowed matrix
-    Current()=State{};Current().cam=cam;Current().cameraApplied=applied;Current().key=key;
+    Current()=State{};Current().cam=cam;Current().cameraApplied=applied;Current().key=key;Current().overridden=overridden;
     ClearViews(static_cast<int>(selected-states));
     std::memcpy(Current().flashes,flashes,sizeof(flashes));Current().flashNext=flashNext;
 }
@@ -1459,7 +1465,7 @@ void Camera(unsigned char* cam) noexcept {
     if(!depthReady)ReturnNear(cam);
     if(depthReady && c.fpNear>0.0f && !Current().overridden){
         Current().stepNear=At<float>(cam,kCamNear);Current().stepNearSet=true;
-        if(!Current().nearSet){Current().savedNear=Current().stepNear;Current().nearSet=true;}
+        Current().nearSet=true;
         ViewWriteNear(cam,c.fpNear);Current().writtenNear=c.fpNear;
     }
     if(c.fpAimSnap){if(!Current().smoothSet){Current().savedSmooth=At<float>(h,kLookSmooth);Current().smoothSet=true;}Put<float>(h,kLookSmooth,1.0f);}
@@ -1567,7 +1573,7 @@ void CameraAfterNative(unsigned char* cam) noexcept {
                 VehicleLookCamera(CameraPlayer(cam),reinterpret_cast<float*>(cam+kCamMatrix),true);   // third person: round the vehicle
         }
     }
-    __except(EXCEPTION_EXECUTE_HANDLER){CancelToggle(nullptr);const auto key=Current().key;Current()=State{};Current().cam=cam;Current().key=key;ClearViews(static_cast<int>(selected-states));}
+    __except(EXCEPTION_EXECUTE_HANDLER){CancelToggle(nullptr);const auto key=Current().key;const bool overridden=Current().overridden;Current()=State{};Current().cam=cam;Current().key=key;Current().overridden=overridden;ClearViews(static_cast<int>(selected-states));}
     // One transaction for the final local view, irrespective of its owner. Rotation and eye are separate fields;
     // another layer moving only the eye must not leave our old rotation as next frame's native starting frame.
     Current().cameraApplied={cam,fpview::CameraWriteOf(native,MatrixAt(cam+kCamMatrix))};
@@ -2298,7 +2304,7 @@ void FirstPersonCameraOverride(const void* camera,bool overridden) noexcept {
         else if(!state->riding){
             Unbatch();
             if(ViewDepthReady() && Cfg().fpNear>0.0f){
-                if(!state->nearSet){state->savedNear=At<float>(camera,kCamNear);state->nearSet=true;}
+                state->nearSet=true;
                 ViewWriteNear(const_cast<void*>(camera),Cfg().fpNear);state->writtenNear=Cfg().fpNear;
             }
         }
