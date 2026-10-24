@@ -9,7 +9,9 @@
 
 namespace crew::nativedialog {
 
-struct Button { const wchar_t* text; std::uint64_t id; };
+// `desc`: what the description dialog shows beside the list while this button has the focus (nullptr: nothing); the
+// text must stay valid until the dialog is gone (CloseDialog / ForgetDialog).
+struct Button { const wchar_t* text; std::uint64_t id; const wchar_t* desc=nullptr; };
 // The dialog: a weak reference to the game's object (it ends when the game closes and frees it), and the button picked
 // in it (each dialog its own: a pick lands in the Handle of the dialog it was made for, and in no other). The caller
 // keeps the Handle where OpenDialog wrote it (its address is how a pick finds it) until CloseDialog / ForgetDialog.
@@ -21,8 +23,17 @@ struct Handle {
 // At load (room_ui.cpp InstallRoomUi): every address checked; false (logged) leaves the menu without dialogs.
 bool InstallNativeDialog() noexcept;
 bool NativeDialogReady() noexcept;
-// Opens one; `cursor` the button focused first. False when the game refused (nothing open then, nothing held).
-bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out) noexcept;
+// The description dialog (HUiDescriptionDialog: the list with the focused button's description beside it) is usable:
+// OpenDialog opens one when its buttons carry descriptions.
+bool DescriptionDialogReady() noexcept;
+// The index of the button the focus is on in this description dialog (the game reports it as the focus moves), -1 none
+// yet or a plain dialog.
+int FocusedButton(const Handle& h) noexcept;
+// Opens one; `cursor` the button focused first. Buttons with descriptions (and DescriptionDialogReady): an
+// HUiDescriptionDialog from `layout` (room_ui_logic.h kLoadoutBoxLayout, the menu's wide copy of the game's
+// LYT_HUIDESCDIALOGBOX; nullptr: that stock file); else the plain dialog box from the game's LYT_HUIDIALOGBOX (`layout`
+// ignored). False when the game refused (nothing open then, nothing held).
+bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out,const wchar_t* layout) noexcept;
 // The game still holds it (open or still closing).
 bool DialogAlive(const Handle& h) noexcept;
 // The button picked in this dialog (its id), once: false while none was.

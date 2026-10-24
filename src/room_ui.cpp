@@ -18,8 +18,9 @@
 // 2026-10-19 (the user: "房间界面f2太垃圾了，换成游戏自带的那种"): the menu itself is the game's own dialog box
 // (room_dialog.h: HUiDialogBox, the window the soldier screen's outfit popup is; room_dialog_logic.h the pages), so the
 // game draws it and moves through it with the mouse, the keyboard and the pad, with its own confirm / cancel and sounds.
-// The overlay above (the layout's elements) only draws the closed page's entry hint now, and the whole menu only when
-// the dialog's code did not check out (NativeDialogReady false: the menu as before, never no menu).
+// The overlay above (the layout's elements) draws the whole menu only when the dialog's code did not check out
+// (NativeDialogReady false: the menu as before, never no menu). The closed page draws nothing of ours (2026-10-25: the
+// entry line it used to draw sat in HUiMainFrame's guide band, over EDF6Coop's label): the entry is the native button.
 // Nothing is patched unless every address checks out (REFUSED in the log: both screens as they are). The slots are read
 // and chained, never assumed stock: EDF6Coop chains the room's too.
 #include "room_ui.h"
@@ -203,7 +204,7 @@ bool padOk=false;   // the game's pad table checked (else the keyboard alone)
 
 // What was last written into each element of the screen now (the calls reload a texture / re-lay a text: only when it
 // changes). Invalid when the screen object changes and when the menu opens: everything written afresh.
-enum Slot : int { kSlotRoot, kSlotHead, kSlotHint, kSlotHelp2, kSlotHelp3, kSlotEntry, kSlotUnit, kSlotBox=kSlotUnit+kRows, kSlotText=kSlotBox+kRows,
+enum Slot : int { kSlotRoot, kSlotHead, kSlotHint, kSlotHelp2, kSlotHelp3, kSlotUnit, kSlotBox=kSlotUnit+kRows, kSlotText=kSlotBox+kRows,
                   kSlotNote=kSlotText+kRows, kSlotStatus=kSlotNote+kRows, kSlotNativeDesc=kSlotStatus+kStatusLines, kSlotCount };
 enum class RootState : std::uint8_t { unknown, found, missing };
 // The texture-skinned elements: the panel, each row's two chips and its icon.
@@ -241,6 +242,7 @@ struct State {
     // The native dialogs (room_dialog.h): where the player is, the dialog shown, the button picked in it.
     roomdialog::Nav nav{};
     nativedialog::Handle dialog{};
+    const wchar_t* dialogLayout=nullptr;   // the pages' layout (LoadoutBoxLayout), chosen when the menu opens
     bool hasPick=false;
     roomdialog::Choice pick{};
 };
@@ -299,10 +301,6 @@ void ToggleName(wchar_t* out,int size) noexcept {
     if(pad[0]){const std::size_t used=std::wcslen(out);_snwprintf_s(out+used,static_cast<std::size_t>(size)-used,_TRUNCATE,L"%ls%ls",used ? L" / " : L"",pad);}
 }
 
-bool ToggleAvailable() noexcept {
-    return Cfg().roomLoadoutKey>0 || PadToggleAvailable(padOk,static_cast<std::uint16_t>(Cfg().roomLoadoutButton));
-}
-
 // --- Reading the ini (room_menu.h IniRead) ---
 std::size_t IniRead(void*,const wchar_t* key,wchar_t* out,std::size_t capacity) noexcept {
     const wchar_t* path=ConfigPath();
@@ -324,9 +322,14 @@ void HidePreview() noexcept {
     roompreview::HidePreview();
     st.previewShown=false;
 }
+roomdialog::Dialog page;   // big: not on the stack; the dialog shown now (its buttons' descriptions live here)
 void FollowPreview(bool shown) noexcept {
     roompreview::PreviewSpec p{};
-    if(!shown || !PreviewFor(st.menu,&p,Kinds())){HidePreview();return;}
+    // The description dialog reports its focused button: the model follows the cursor (FocusPreview).
+    const int focused=st.dialog.control ? nativedialog::FocusedButton(st.dialog) : -1;
+    const bool found=shown && (focused>=0 && focused<page.count ? FocusPreview(st.menu,st.nav,page.item[focused].choice,&p,Kinds())
+                                                               : PreviewFor(st.menu,&p,Kinds()));
+    if(!found){HidePreview();return;}
     if(st.previewShown && SamePreview(p,st.preview))return;
     roompreview::ShowPreview(p);
     st.preview=p;st.previewShown=true;
@@ -661,12 +664,11 @@ void ClearMenu(unsigned char* self) noexcept {
 }
 // The root's shown flag, and while the menu is not shown everything it set taken back; false when this screen's layout
 // has no menu elements (not looked up again until the screen object changes or the menu opens).
-bool Draw(unsigned char* self,bool shown,bool entry=false) noexcept {
+bool Draw(unsigned char* self,bool shown) noexcept {
     Validate();
-    const bool rootShown=shown || entry;
     if(st.written.root==RootState::missing)return false;
-    if(Changed(kSlotRoot,rootShown ? 1 : 2) || st.written.root==RootState::unknown) {
-        if(!SetShown(self,kRootName,rootShown)) {
+    if(Changed(kSlotRoot,shown ? 1 : 2) || st.written.root==RootState::unknown) {
+        if(!SetShown(self,kRootName,shown)) {
             if(!st.missingLogged)Log("ROOMUI the %s screen's layout has no menu elements (Mods/UI not installed by the installer, "
                                      "or another mod's layout): the menu is not drawn there",st.room ? "room" : "HQ");
             st.missingLogged=true;
@@ -676,7 +678,6 @@ bool Draw(unsigned char* self,bool shown,bool entry=false) noexcept {
         st.written.root=RootState::found;
     }
     if(!shown)ClearMenu(self);
-    if(!entry)SetText(self,kSlotEntry,kEntryName,nullptr);
     return true;
 }
 void DrawMenu(unsigned char* self) noexcept {
@@ -710,8 +711,23 @@ void DrawMenu(unsigned char* self) noexcept {
 
 // --- The menu as the game's dialogs (room_dialog_logic.h pages, room_dialog.h windows) ---
 bool Dialogs() noexcept { return nativedialog::NativeDialogReady(); }
+// The menu's wide dialog layout (tools/room_layout.py loadout_box) when the installer put it beside the game
+// (Mods\UI\, which EDFModLoader serves for app:/UI/: docs/room-ui-re.md §4), else nullptr: the stock dialog box.
+// Asked when the menu opens: a reinstall while the game runs takes effect the next time.
+const wchar_t* LoadoutBoxLayout() noexcept {
+    wchar_t path[MAX_PATH];
+    const DWORD n=GetModuleFileNameW(nullptr,path,static_cast<DWORD>(std::size(path)));
+    wchar_t* slash=n && n<std::size(path) ? wcsrchr(path,L'\\') : nullptr;
+    if(!slash)return nullptr;
+    *slash=0;
+    if(wcscat_s(path,L"\\Mods\\") || wcscat_s(path,kLoadoutBoxFile))return nullptr;
+    const DWORD a=GetFileAttributesW(path);
+    return a!=INVALID_FILE_ATTRIBUTES && !(a&FILE_ATTRIBUTE_DIRECTORY) ? kLoadoutBoxLayout : nullptr;
+}
 void OpenMenu() noexcept {
     st.menu.open=true;st.menu.level=rm::Level::units;
+    st.dialogLayout=LoadoutBoxLayout();
+    Log("ROOMUI menu pages in %ls",st.dialogLayout ? st.dialogLayout : L"the stock dialog box (Mods\\UI\\EDF6VC_LOADOUTBOX.SGO not installed)");
     Opened();
     roomdialog::Begin(st.menu,st.nav);
     st.hasPick=false;
@@ -725,7 +741,6 @@ Status MenuStatus() noexcept {
     if(st.room)syncCount+=roomsync::RoomSyncLines(sync+syncCount,kStatusLines-syncCount);
     return ComposeStatus(st.room && !OnlineHostOnly(),st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
 }
-roomdialog::Dialog page;   // big: not on the stack
 // Each frame while the menu is open: the dialog's pick taken; once the game has closed it (picked, or its own cancel),
 // the menu steps (Apply / Cancel) and the next page opens as a new dialog, when the screen is the input owner again.
 void DriveDialog(bool hasInput) noexcept {
@@ -752,8 +767,11 @@ void DriveDialog(bool hasInput) noexcept {
     for(int i=0;i<s.count && i<4;++i)ctx.status[ctx.statusCount++]=s.text[i];
     page=roomdialog::Build(st.menu,st.nav,ctx);
     nativedialog::Button buttons[roomdialog::kItemsMost];
-    for(int i=0;i<page.count;++i)buttons[i]=nativedialog::Button{page.item[i].text,roomdialog::Pack(page.item[i].choice)};
-    if(!nativedialog::OpenDialog(page.title,buttons,page.count,page.cursor,&st.dialog)) {
+    // Each button's description beside the list (the description dialog: HUiDescriptionDialog); `page` keeps the texts
+    // until this dialog is gone (the next page is built only after it closed).
+    for(int i=0;i<page.count;++i)buttons[i]=nativedialog::Button{page.item[i].text,roomdialog::Pack(page.item[i].choice),
+                                                                 page.item[i].desc[0] ? page.item[i].desc : nullptr};
+    if(!nativedialog::OpenDialog(page.title,buttons,page.count,page.cursor,&st.dialog,st.dialogLayout)) {
         rm::Discard(st.menu);   // never a menu open with nothing on screen: closed, its edits dropped (logged)
         Log("ROOMUI the game opened no dialog: the menu closed, its edits dropped");
     }
@@ -833,21 +851,16 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     }
     if(sw.tick)roomsync::TickRoomSync();
     if(dialogs && st.menu.open)DriveDialog(hasInput);
-    Plan display=PlanFrame(hasInput,st.menu.open,ToggleAvailable(),!st.gate.latched);
+    Plan display=PlanFrame(hasInput,st.menu.open);
     // The dialogs: the soldier being edited stays on the 3D view under them; the overlay shows nothing of the menu.
+    // Closed, nothing of ours is drawn on the screen: the entry is the native button (its description, MenuDescText,
+    // names the shortcut on focus), never a line of our own in HUiMainFrame's guide band (2026-10-25: it covered EDF6Coop's
+    // label there).
     const bool preview=dialogs ? st.menu.open : display.show;
     if(dialogs)display.show=false;
     FollowPreview(preview);
     roompreview::TickPreview(preview);
-    if(Draw(self,display.show,display.entry)) {
-        if(display.show)DrawMenu(self);
-        if(display.entry) {
-            wchar_t key[128],line[kLineMost];
-            ToggleName(key,128);EntryLine(key,line,kLineMost);
-            SetText(self,kSlotEntry,kEntryName,line);
-        }
-        if(display.show || display.entry)st.drew=true;
-    }
+    if(Draw(self,display.show) && display.show){DrawMenu(self);st.drew=true;}
     return result;
 }
 std::uint64_t __fastcall RoomHook(unsigned char* self,void* ctx) { return Frame(screens[0],self,ctx); }

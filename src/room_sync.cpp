@@ -8,6 +8,7 @@
 #include "coop_attr.h"
 #include "crew.h"
 #include "loadout_store.h"
+#include "support_config.h"
 #include "support_variants.h"
 #include <Windows.h>
 #include <cstddef>
@@ -29,6 +30,14 @@ void PublishHostList() noexcept {
     if(!hash)hostCopy.count=0;
     hostCopyHash=hash;
     ReleaseSRWLockExclusive(&hostLock);
+}
+// The other members' player loadouts the last room published (MemberPlayerVehicles), for the mission's start.
+SRWLOCK playersLock=SRWLOCK_INIT;
+VariantSet playersCopy;
+void PublishPlayers() noexcept {
+    AcquireSRWLockExclusive(&playersLock);
+    playersCopy=engine.MemberPlayerVehicles();
+    ReleaseSRWLockExclusive(&playersLock);
 }
 bool apiLogged=false;
 
@@ -78,16 +87,19 @@ GenStatus Generation(void*) noexcept {
 }
 void Configured(void*,void (*each)(void*,const wchar_t*),void* set) noexcept { ForEachConfiguredVariant(each,set); }
 void LogLine(void*,const char* text) noexcept { Log("%s",text); }
+bool OwnPlayer(void*,char* value,std::size_t capacity) noexcept {
+    return playerveh::OwnValue(SupportCfg().playerVehicle,kPlayerVehicleCount,value,capacity);
+}
 
 Env TheEnv() noexcept {
     Env env;
     env.fileThere=FileThere;env.noteMissing=NoteMissing;env.startGeneration=StartGeneration;env.generation=Generation;
-    env.configured=Configured;env.log=LogLine;
+    env.configured=Configured;env.log=LogLine;env.ownPlayer=OwnPlayer;
     return env;
 }
 }  // namespace
 
-void TickRoomSync() noexcept { engine.Tick(Api(),GetTickCount64(),TheEnv());PublishHostList(); }
+void TickRoomSync() noexcept { engine.Tick(Api(),GetTickCount64(),TheEnv());PublishHostList();PublishPlayers(); }
 void LeaveRoomSync() noexcept { engine.Leave(Api()); }
 void ForgetRoomHostList() noexcept { engine.ForgetHostList();PublishHostList(); }
 int ForEachRoomHostVariant(void (*each)(void* context,const wchar_t* file),void* context) noexcept {
@@ -99,6 +111,15 @@ int ForEachRoomHostVariant(void (*each)(void* context,const wchar_t* file),void*
         if(VariantFileOf(hostCopy.ref[i],file,96)){each(context,file);++given;}
     }
     ReleaseSRWLockShared(&hostLock);
+    return given;
+}
+int ForEachRoomPlayerVehicle(void (*each)(void* context,VehicleBody body,std::uint64_t bits),void* context) noexcept {
+    if(!each)return 0;
+    int given=0;
+    AcquireSRWLockShared(&playersLock);
+    for(int i=0;i<playersCopy.count;++i)
+        if(playersCopy.ref[i].vehicle){each(context,static_cast<VehicleBody>(playersCopy.ref[i].sub),playersCopy.ref[i].bits);++given;}
+    ReleaseSRWLockShared(&playersLock);
     return given;
 }
 SyncState RoomSyncState() noexcept { return engine.State(); }

@@ -40,6 +40,17 @@ constexpr std::size_t kLambdaVtable=0x1805CF0;   // the outfit popup's first ite
 // HUiDialogBox's vtable (RTTI .?AVHUiDialogBox@ui@@): slot 1 its OnUpdate(this, ctx) 0x810D10, as every HUi screen's.
 constexpr std::size_t kDialogVtable=0x17F7260,kDialogUpdate=0x810D10;
 constexpr int kDialogSlotUpdate=1;
+// The description dialog (2026-10-25, docs/feature-2026-10-25-room-menu-review.md §2): HUiDescriptionDialog
+// (vtable 0x17F6F70, RTTI .?AVHUiDescriptionDialog@ui@@, layout APP:/UI/LYT_HUIDESCDIALOGBOX.SGO) is an HUiDialogBox
+// with a text beside its buttons that names the focused one. Its InitParam (RTTI .?AUInitParam@HUiDescriptionDialog@ui@@,
+// vtable 0x1806FD8, 0x1C0 bytes) adds at +0x170 a std::function<std::wstring(int)>: the dialog copies it (ctor 0x80AF6A)
+// and, each time the focus moves, calls it with the focused button's index (its +0x110) and SetTexts the literal result
+// (0x80E700..0x80E799). The game's own builder 0x8BEE40 fills it the same way (lambda 0x1806B20). Its OnUpdate (slot 1,
+// 0x8088C0) runs the focus tracker, then jumps to HUiDialogBox::OnUpdate itself: chained apart from the base slot.
+constexpr std::size_t kDescParamVtable=0x1806FD8,kDescParamDtor=0x8C33E0,kDescParamDelete=0x8C3620;
+constexpr std::size_t kDescLayoutName=0x1F77808,kDescLayoutText=0x17F7210;   // a pointer to L"APP:/UI/LYT_HUIDESCDIALOGBOX.SGO"
+constexpr std::size_t kDescDialogVtable=0x17F6F70,kDescDialogUpdate=0x8088C0;
+constexpr std::size_t kParamDesc=0x170,kFuncImplAt=0x38;   // the std::function's storage, its impl pointer at +0x38
 
 // HUiDialogBox::InitParam (the builder's rbp+0xE0): its own fields after the base the ctor makes.
 constexpr std::size_t kParamSize=0x1C0;
@@ -58,9 +69,9 @@ using LockWeakFn=Shared*(__fastcall*)(Shared*,const Shared*);
 using Signature=CodeSignature;
 #include "room_dialog_signatures.inc"
 
-bool ready=false;
-gd::FuncVtable ourVtable{};
-UpdateFn nextUpdate=nullptr;
+bool ready=false,descReady=false;
+gd::FuncVtable ourVtable{},descVtable{};
+UpdateFn nextUpdate=nullptr,nextDescUpdate=nullptr;
 // The id space: the low 40 bits the caller's id, the high 24 the dialog's serial (a pick finds its dialog by it).
 constexpr std::uint64_t kIdMask=(1ull<<40)-1;
 std::uint32_t serial=0;
@@ -92,6 +103,25 @@ void Unregister(const Handle& h) noexcept {
     for(auto& o:open)if(o.handle==&h)o=Open{};
 }
 
+// The descriptions of the dialogs shown now, by serial (filled before the game shows the dialog: it asks for the first
+// focused button's text while it opens), and the index of the button the focus is on (the game's own report).
+constexpr int kDescsMost=kMostOpen,kDescButtonsMost=16;
+struct Descs { std::uint32_t serial=0; int count=0; const wchar_t* text[kDescButtonsMost]{}; int focused=-1; };
+Descs descs[kDescsMost];
+Descs* DescsOf(std::uint32_t s) noexcept {
+    if(!s)return nullptr;
+    for(auto& d:descs)if(d.serial==s)return &d;
+    return nullptr;
+}
+Descs* NewDescs(std::uint32_t s) noexcept {
+    Descs* slot=nullptr;
+    for(auto& d:descs)if(!d.serial){slot=&d;break;}
+    if(!slot)slot=&descs[s%kDescsMost];   // more than kDescsMost alive: the oldest serials' texts are reused
+    *slot=Descs{};slot->serial=s;
+    return slot;
+}
+void DropDescs(std::uint32_t s) noexcept { if(Descs* d=DescsOf(s))*d=Descs{}; }
+
 // --- Our std::function implementation: {&ourVtable[1], id}
 struct Impl { void* const* vtable; std::uint64_t id; };
 static_assert(sizeof(Impl)==16,"the stock lambda's size: its _Delete_this / _Get treat ours alike");
@@ -106,6 +136,28 @@ std::uintptr_t __fastcall FuncCall(Impl* self,void** arg) {
     if(Open* o=Find(static_cast<std::uint32_t>(id>>40)); o && !o->closing){o->handle->picked=id&kIdMask;o->handle->hasPicked=true;}
     reinterpret_cast<Fn1>(image+kClose)(arg ? *arg : nullptr);   // as the stock lambdas (0x8AD5AD: rcx = [rdx])
     return 0;
+}
+
+// The description function's implementation: {&descVtable[1], serial}; the game calls it with the focused button's index
+// and takes the text it returns (a std::wstring built here in the game's own representation: 0x3D450).
+struct DescImpl { void* const* vtable; std::uint64_t serial; };
+static_assert(sizeof(DescImpl)==16,"the same 16 bytes as the stock lambda the vtable is cloned from");
+void* __fastcall DescCopy(DescImpl* self,void* where) {
+    auto* made=static_cast<DescImpl*>(where);
+    made->vtable=&descVtable[1];made->serial=self->serial;
+    return made;
+}
+void* __fastcall DescMove(DescImpl* self,void* where) { return DescCopy(self,where); }
+void* __fastcall DescCall(DescImpl* self,void* out,const int* index) {
+    auto* s=static_cast<unsigned char*>(out);
+    edf::wstr::Init(s);
+    const wchar_t* text=L"";
+    if(Descs* d=DescsOf(static_cast<std::uint32_t>(self->serial)); d && index && *index>=0 && *index<d->count) {
+        d->focused=*index;
+        if(d->text[*index])text=d->text[*index];
+    }
+    edf::wstr::Assign(image,s,text);
+    return out;
 }
 
 // One item on the stack as 0x8AB669..0x8AB6F0 builds it; destroyed by the game's 0x8E170.
@@ -129,6 +181,17 @@ bool Check() noexcept {
     if(!CheckSignatures(kSignatures,"ROOMDIALOG"))return false;
     // The layout name is a pointer the loader relocates: checked where it points, not by its bytes.
     if(gd::Field<const void*>(image,kLayoutName)!=image+kLayoutText){Log("ROOMDIALOG REFUSED: EDF+0x%zX does not point at the dialog layout's name",kLayoutName);return false;}
+    return true;
+}
+// The description dialog's pieces (its own signatures are in the same table): its layout name's pointer and its
+// InitParam's vtable (slot 0 its scalar deleting destructor, which frees 0x1C0 bytes and calls kDescParamDtor).
+bool CheckDescription() noexcept {
+    if(gd::Field<const void*>(image,kDescLayoutName)!=image+kDescLayoutText) {
+        Log("ROOMDIALOG description dialog off: EDF+0x%zX does not point at its layout's name",kDescLayoutName);return false;
+    }
+    if(gd::Field<const void*>(image,kDescParamVtable)!=image+kDescParamDelete) {
+        Log("ROOMDIALOG description dialog off: its InitParam vtable EDF+0x%zX is not as expected",kDescParamVtable);return false;
+    }
     return true;
 }
 
@@ -161,17 +224,37 @@ void CloseNow(void* object,void* control) noexcept {
 // Every HUiDialogBox's frame (the game's own popups too: passed through). One of ours a close was asked for since it
 // opened: closed after its frame, as a picked stock item closes it inside the frame. The Handle stays the caller's: it
 // sees the dialog end (DialogAlive) and lets it go.
+void CloseAsked(void* self) noexcept;
 std::uintptr_t __fastcall DialogUpdateHook(void* self,void* ctx) {
     const std::uintptr_t result=nextUpdate(self,ctx);
+    CloseAsked(self);
+    return result;
+}
+// The description dialog's frame (its own slot: it jumps to HUiDialogBox::OnUpdate directly, past the base slot's hook).
+std::uintptr_t __fastcall DescDialogUpdateHook(void* self,void* ctx) {
+    const std::uintptr_t result=nextDescUpdate(self,ctx);
+    CloseAsked(self);
+    return result;
+}
+void CloseAsked(void* self) noexcept {
     const std::uint64_t upTo=closeUpTo.load(std::memory_order_acquire);
-    if(!upTo)return result;
+    if(!upTo)return;
     for(auto& o:open) {
         if(!o.handle || o.closing || o.order>upTo || o.handle->object!=self)continue;
         o.closing=true;   // a pick from it is not taken any more
         __try { reinterpret_cast<Fn1>(image+kClose)(self); } __except(EXCEPTION_EXECUTE_HANDLER) {}
         Log("ROOMDIALOG dialog %u closed by its own frame (a mission is starting)",o.handle->serial);
     }
-    return result;
+}
+// Chains one OnUpdate slot; the next one, or nullptr (logged).
+UpdateFn ChainUpdate(std::size_t vtable,std::size_t stock,void* hook,const char* what) noexcept {
+    auto slot=reinterpret_cast<void**>(image+vtable)+kDialogSlotUpdate;
+    void* const current=Readable(slot,8) ? *slot : nullptr;
+    if(current && current!=image+stock)Log("ROOMDIALOG %s::OnUpdate is %p, not the stock one: chained onto it",what,current);
+    void* next=nullptr;
+    if(current && edf::ChainVtableSlot(slot,hook,&next))return reinterpret_cast<UpdateFn>(next);
+    Log("ROOMDIALOG %s::OnUpdate could not be chained: a dialog open when a mission starts waits for the screen's next frame",what);
+    return nullptr;
 }
 }  // namespace
 
@@ -182,20 +265,30 @@ bool InstallNativeDialog() noexcept {
                         reinterpret_cast<void*>(&FuncMove),reinterpret_cast<void*>(&FuncCall));
     // The dialog's own frame closes ours when a mission starts; without it (another hook holds the slot oddly, logged)
     // only the screens' frames and destructors close them, as before.
-    auto slot=reinterpret_cast<void**>(image+kDialogVtable)+kDialogSlotUpdate;
-    void* const current=Readable(slot,8) ? *slot : nullptr;
-    if(current && current!=image+kDialogUpdate)Log("ROOMDIALOG HUiDialogBox::OnUpdate is %p, not the stock one: chained onto it",current);
-    void* next=nullptr;
-    if(current && edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&DialogUpdateHook),&next))nextUpdate=reinterpret_cast<UpdateFn>(next);
-    else Log("ROOMDIALOG HUiDialogBox::OnUpdate could not be chained: a dialog open when a mission starts waits for the screen's next frame");
+    nextUpdate=ChainUpdate(kDialogVtable,kDialogUpdate,reinterpret_cast<void*>(&DialogUpdateHook),"HUiDialogBox");
+    // The description dialog: every page then names its focused button beside the list. Only with its frame chained
+    // too (else a mission start could not close it): without, the plain dialog box as before.
+    if(CheckDescription()) {
+        gd::CloneFuncVtable(descVtable,reinterpret_cast<void* const*>(image+kLambdaVtable),reinterpret_cast<void*>(&DescCopy),
+                            reinterpret_cast<void*>(&DescMove),reinterpret_cast<void*>(&DescCall));
+        nextDescUpdate=ChainUpdate(kDescDialogVtable,kDescDialogUpdate,reinterpret_cast<void*>(&DescDialogUpdateHook),
+                                   "HUiDescriptionDialog");
+        descReady=nextDescUpdate!=nullptr;
+    }
     ready=true;
-    Log("ROOMDIALOG the game's dialog box ready (HUiDialogBox, LYT_HUIDIALOGBOX; its own frame closes ours: %d)",nextUpdate!=nullptr);
+    Log("ROOMDIALOG the game's dialog box ready (HUiDialogBox; its own frame closes ours: %d; the description dialog: %d)",
+        nextUpdate!=nullptr,descReady);
     return true;
 }
 bool NativeDialogReady() noexcept { return ready; }
+bool DescriptionDialogReady() noexcept { return descReady; }
+int FocusedButton(const Handle& h) noexcept {
+    const Descs* d=DescsOf(h.serial);
+    return d && h.control ? d->focused : -1;
+}
 
-bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out) noexcept {
-    if(out){Unregister(*out);*out=Handle{};}
+bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,Handle* out,const wchar_t* layout) noexcept {
+    if(out){Unregister(*out);DropDescs(out->serial);*out=Handle{};}
     if(!ready || !buttons || count<=0 || !out)return false;
     void* system=gd::Field<void*>(image,kSystem);
     if(!system)return false;
@@ -203,6 +296,19 @@ bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,
     serial=(serial+1)&0xFFFFFF;
     if(!serial)serial=1;
     const gd::ItemOps ops=gd::GameOps(image);
+    // Descriptions given and the description dialog ready: HUiDescriptionDialog with its InitParam, the texts kept by
+    // serial before it opens (it asks for the first focused button's at once). Else the plain dialog box, and only the
+    // stock layout (the menu's own layout is a description dialog's).
+    bool desc=false;
+    for(int i=0;descReady && i<count;++i)desc|=buttons[i].desc!=nullptr;
+    if(count>kDescButtonsMost)desc=false;
+    if(desc) {
+        Descs* d=NewDescs(serial);
+        d->count=count;
+        for(int i=0;i<count;++i)d->text[i]=buttons[i].desc;
+    }
+    const wchar_t* name=desc ? (layout && *layout ? layout : gd::Field<const wchar_t*>(image,kDescLayoutName))
+                             : gd::Field<const wchar_t*>(image,kLayoutName);
     alignas(16) unsigned char param[kParamSize];
     alignas(16) unsigned char item[gd::kItemSize];
     Shared weak{};
@@ -210,7 +316,7 @@ bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,
     __try {
         std::memset(param,0,sizeof(param));
         reinterpret_cast<Fn1>(image+kParamCtor)(param);
-        gd::SetField<const void*>(param,0,image+kParamVtable);
+        gd::SetField<const void*>(param,0,image+(desc ? kDescParamVtable : kParamVtable));
         edf::wstr::Init(param+kParamText0);
         edf::wstr::Init(param+kParamTitle);
         gd::SetField<std::uint64_t>(param,kParamFlags,0);
@@ -229,14 +335,22 @@ bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,
         gd::SetField<std::int32_t>(param,kParamCursor,cursor>=0 && cursor<made ? cursor : 0);
         gd::SetField<std::int32_t>(param,kParamFocus,1);
         if(title)edf::wstr::Assign(image,param+kParamTitle,title);
+        if(desc) {   // the std::function in place (16 bytes fit its storage), its impl pointer at +0x38, as 0x8BF900 leaves it
+            DescImpl local{&descVtable[1],serial};
+            gd::SetField<void*>(param,kParamDesc+kFuncImplAt,DescCopy(&local,param+kParamDesc));
+        }
         if(made>0) {
-            reinterpret_cast<ShowFn>(image+kShow)(system,&weak,gd::Field<const wchar_t*>(image,kLayoutName),param);
+            // The layout by name, as the game passes its own (0x119C600 copies the name: 0x119C690..0x119C6A2).
+            reinterpret_cast<ShowFn>(image+kShow)(system,&weak,name,param);
             shown=weak.control!=nullptr;
         }
-        reinterpret_cast<Fn1>(image+kItemsDtor)(param+kParamItems);
-        edf::wstr::Destroy(image,param+kParamTitle);
-        edf::wstr::Destroy(image,param+kParamText0);
-        reinterpret_cast<Fn1>(image+kParamBaseDtor)(param);
+        if(desc)reinterpret_cast<Fn1>(image+kDescParamDtor)(param);   // the function, the items, the texts, the base
+        else {
+            reinterpret_cast<Fn1>(image+kItemsDtor)(param+kParamItems);
+            edf::wstr::Destroy(image,param+kParamTitle);
+            edf::wstr::Destroy(image,param+kParamText0);
+            reinterpret_cast<Fn1>(image+kParamBaseDtor)(param);
+        }
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         faulted=true;
     }
@@ -245,9 +359,10 @@ bool OpenDialog(const wchar_t* title,const Button* buttons,int count,int cursor,
         // reference. Closed and released, never left open with no one to drive or close it.
         if(weak.control){CloseNow(weak.object,weak.control);ReleaseWeak(weak.control);}
         Log("ROOMDIALOG opening the dialog faulted: no dialog%s",weak.control ? " (the one shown closed)" : "");
+        DropDescs(serial);
         return false;
     }
-    if(!shown){Log("ROOMDIALOG the game opened no dialog (%d buttons)",count);return false;}
+    if(!shown){Log("ROOMDIALOG the game opened no dialog (%d buttons, layout %ls)",count,name ? name : L"?");DropDescs(serial);return false;}
     *out=Handle{weak.object,weak.control,serial,0,false};
     Register(out);
     return true;
@@ -268,6 +383,7 @@ bool TakePicked(Handle& h,std::uint64_t* id) noexcept {
 
 void ForgetDialog(Handle& h) noexcept {
     Unregister(h);
+    DropDescs(h.serial);
     void* const control=h.control;
     h=Handle{};
     ReleaseWeak(control);

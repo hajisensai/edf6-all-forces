@@ -4,7 +4,9 @@
 // Contract between the menu screen (src/room_ui.cpp, stage 4) and the sync (src/room_sync.cpp, stage 6).
 // Every call comes from the game's UI thread (the HUiRoom OnUpdate wrapper; offline HQ never calls it).
 #pragma once
+#include "support_loadout.h"
 #include <cstddef>
+#include <cstdint>
 
 namespace crew::roomsync {
 
@@ -25,5 +27,8 @@ void ForgetRoomHostList() noexcept;
 // when there was no valid list), the names support_loadout.h writes. Kept after the room is left (a mission starting
 // leaves it): what that mission's plans can ask of this machine (support_variants.h PreloadSupportVariants).
 int ForEachRoomHostVariant(void (*each)(void* context,const wchar_t* file),void* context) noexcept;
+// Any thread: every other member's player loadouts (the jets they summon themselves, EDF6X_VCPVEH) the last room
+// published, validated; kept after the room is left. The mission preloads their files (player_vehicle.cpp).
+int ForEachRoomPlayerVehicle(void (*each)(void* context,VehicleBody body,std::uint64_t bits),void* context) noexcept;
 
 }  // namespace crew::roomsync
