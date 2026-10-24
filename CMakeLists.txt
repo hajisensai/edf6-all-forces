@@ -687,6 +687,8 @@ add_test(NAME room_ui COMMAND room_ui_test)
 add_executable(loadout_writer_test tests/loadout_writer_test.cpp src/loadout_file.cpp)
 target_compile_options(loadout_writer_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME loadout_writer COMMAND loadout_writer_test)
+# Its stand-in children run below normal priority (VariantGenerator) and wait out a busy machine: the hang guard is here.
+set_tests_properties(loadout_writer PROPERTIES TIMEOUT 900)
 add_executable(room_coop_capability_test tests/room_coop_capability_test.cpp)
 target_compile_options(room_coop_capability_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME room_coop_capability COMMAND room_coop_capability_test)

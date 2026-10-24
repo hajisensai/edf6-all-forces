@@ -176,8 +176,11 @@ void StatusText() {
 }
 
 void WaitDone(VariantGenerator& g) {
-    // Up to a minute: a cmd.exe takes seconds to come and go on a loaded machine (ctest -j, a scanner); done, it stops.
-    for(int i=0;i<3000 && g.Running();++i)Sleep(20);
+    // Until it is done, however long: VariantGenerator starts its child BELOW_NORMAL_PRIORITY_CLASS (it must not take
+    // the game's CPU), so on a machine busy at normal priority (ctest -j) the stand-in cmd.exe waits for the CPU: 0.7 s
+    // alone, 90 s under 16 busy normal-priority processes (2026-10-25, the whole length of the load). No wall-clock
+    // bound here: a stand-in that never ends is the test's CTest TIMEOUT (CMakeLists.txt).
+    while(g.Running())Sleep(20);
     Check(!g.Running(),"the stand-in finished");
 }
 
