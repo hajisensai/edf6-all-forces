@@ -595,6 +595,8 @@ bool InstallEdf41SmallDragon() noexcept;
 bool InstallEdf41Insects() noexcept;
 // edf41natives.cpp: EDF4.1 script natives EDF6's BVM executor lacks (SetEncountReportRadius as table 1 id 3003).
 bool InstallEdf41Natives() noexcept;
+// edf41before.cpp: EDF4.1's pre-mission scenes (BEFORE.BVM) play with the menu's UIs (its black fade) closed, as in 4.1.
+bool InstallEdf41Before() noexcept;
 // edf41mother.cpp: UfoMother301 (EDF4.1's mothership) and its part classes, registered in the game's own factory table.
 bool InstallEdf41Mother() noexcept;
 bool InstallEdf41Robo() noexcept;      // edf41robo.cpp: EDF4.1's UfoRobo (ini Edf41Robo)

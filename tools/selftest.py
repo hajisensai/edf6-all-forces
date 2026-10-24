@@ -13922,6 +13922,38 @@ def plugin_crash_dump_is_collected() -> None:
             assert status in note, (status, note)
 
 
+@test
+def edf41_ui_names() -> None:
+    """4.1's UI names EDF6 registers under another name (pylib/bvm41.py UI_NAMES) never reach a committed 4.1 script
+    (no game): edf6_strings maps them after the object rewrite and leaves everything else; no BVM of the story or the DLC
+    packs pushes a 4.1 name; the pre-mission scenes that fade out at their end (M015, M016, M190, M192) create EDF6's fade
+    screen, which src/edf41before.cpp's scenes then show (tests/edf41_before_native_audit.py: the name is EDF.dll's)."""
+    import bvm41
+    import edf41dlc
+    text = bvm41.edf6_strings(edf41dlc.rewrite)
+    assert text('ui_fade_screen_test') == 'ui_fade_screen_simple'
+    assert text('ui_fade_screen_simple') == 'ui_fade_screen_simple' and text('Jingle_MissionCleared') == 'Jingle_MissionCleared'
+    assert text('app:/Object/DragonSmall401.sgo') == edf41dlc.rewrite('app:/Object/DragonSmall401.sgo')
+    assert bvm41.edf6_strings()('ui_fade_screen_test') == 'ui_fade_screen_simple'
+    fades: dict[str, int] = {}
+    seen = 0
+    for base, _dirs, files in os.walk(os.path.join(ROOT, 'edf41port')):
+        for name in files:
+            if not name.upper().endswith('.BVM'):
+                continue
+            with open(os.path.join(base, name), 'rb') as f:
+                prog = bvm41.parse(f.read())
+            seen += 1
+            pushed = [x.v for code in [prog.init] + [g.code for g in prog.funcs] for x in code if x.op == bvm41.OP_PUSHS]
+            assert not set(pushed) & set(bvm41.UI_NAMES), (base, name)
+            if name.upper() == 'BEFORE.BVM':
+                main_code = next(g.code for g in prog.funcs if g.name == 'Main')
+                fades[os.path.basename(base)] = sum(1 for x in main_code if x.op == bvm41.OP_PUSHS
+                                                    and x.v == 'ui_fade_screen_simple')
+    assert seen > 89, seen
+    assert {k for k, n in fades.items() if n} == {'M015', 'M016', 'M190', 'M192'}, fades
+
+
 def main() -> int:
     import rootcpk
     game = rootcpk.DEFAULT_GAME
