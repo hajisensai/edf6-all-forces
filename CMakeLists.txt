@@ -2062,6 +2062,13 @@ target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_timeship_pods_script.cp
 
 target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_timeship_script.cpp)
 
+# E516's part events by name (docs/greyboss-parts-re.md): the lookup over a synthetic parts map, the call sites
+# offline; greyboss_parts_native checks them and the stock miss path on a real EDF.dll.
+target_sources(EDF6VehicleCrew PRIVATE src/greyboss_parts.cpp)
+edf6_feedback_fixture(greyboss_parts_test greyboss_parts tests/greyboss_parts_test.cpp)
+add_test(NAME greyboss_parts_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/greyboss_parts_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(greyboss_parts_native PROPERTIES SKIP_RETURN_CODE 77)
+
 target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_walking_net.cpp)
 
 target_sources(EDF6VehicleCrew PRIVATE src/enemy_control_gun_factory.cpp)
