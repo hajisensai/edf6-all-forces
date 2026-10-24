@@ -85,6 +85,21 @@ inline std::uint64_t Hash(const void* data,std::size_t size) noexcept {
     return h;
 }
 
+// --- Which save request a write of MAIN.GST belongs to (src/weapon_records.cpp SaveHook / WriteHook) ---
+// A request remembers rows 0x800.. under the hash of the block's table it copied (rows 0..0x7FF); the write says only
+// that hash. Several requests can share one (only rows past 0x800 changed between them: a weapon past 0x800 picked up),
+// and a request may never be written: the save job 0x7C1CB0 leaves for 0x7C2318 on an error before its write 0x7C228B.
+// Taking the oldest request with the hash then pairs every later write with the request before its own, for as long
+// as the table keeps that hash (each save one request behind). The write takes the NEWEST request with its hash: same
+// hash, same rows 0..0x7FF, and rows 0x800.. from the latest request; the earlier ones with that hash are done (written
+// already, or never to be) and go, the newest stays for its own write still to come (it takes the same one).
+// `hashes`: the remembered requests' hashes, oldest first. Returns the index taken, `n` when none has `hash`.
+constexpr std::size_t PickSave(const std::uint64_t* hashes,std::size_t n,std::uint64_t hash) noexcept {
+    std::size_t at=n;
+    for(std::size_t i=0;i<n;++i)if(hashes[i]==hash)at=i;
+    return at;
+}
+
 // --- The sidecar: rows kNativeSlots.. of one save (MAIN.GST.edf6vc next to MAIN.GST) ---
 // "EDF6VCWR" | u32 version 1 | u32 first row (0x800) | u32 rows | u32 FNV-1a-32 of the records | rows*12 bytes.
 constexpr char kMagic[8]={'E','D','F','6','V','C','W','R'};

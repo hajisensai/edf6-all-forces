@@ -118,11 +118,25 @@ void Copies() {
 }
 }  // namespace
 
+void SavePairing() {
+    const std::uint64_t none[1]{};
+    Check(PickSave(none,0,7)==0,"no request: none taken");
+    const std::uint64_t one[]={7};
+    Check(PickSave(one,1,7)==0 && PickSave(one,1,8)==1,"the one request with the write's table, else none");
+    // A job that ended before its write (request 0), then a request with the same table (1): the write is request 1's.
+    const std::uint64_t stale[]={7,7};
+    Check(PickSave(stale,2,7)==1,"a request never written does not shadow a later one with the same table");
+    // Interleaved tables: each write takes the newest request with its own table.
+    const std::uint64_t mixed[]={7,9,7,9};
+    Check(PickSave(mixed,4,7)==2 && PickSave(mixed,4,9)==3,"the newest with the write's table");
+}
+
 int main() {
     Sites();
     Constants();
     Sidecar();
     Copies();
+    SavePairing();
     std::printf("weapon_records: %d checks, %d failures\n",checks,failures);
     return failures ? EXIT_FAILURE : EXIT_SUCCESS;
 }

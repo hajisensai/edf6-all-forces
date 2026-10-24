@@ -10,7 +10,8 @@
 //  - The block's own copies, wrapped where the game makes them (all calls of memcpy with 0xDCE8 bytes):
 //      out of the live block (rows 0..0x7FF mirrored into the block's old table first): the four status record
 //      builders (0x70AF25, 0x70B079, 0x70B61C, 0x70B79C; rows 0x800.. remembered per record), MAIN.GST's save request
-//      (0x7C2F66 -> 0x7BCD40, its job copies the block; rows 0x800.. remembered by the hash of the copied old table);
+//      (0x7C2F66 -> 0x7BCD40, its job copies the block; rows 0x800.. remembered by the hash of the copied old table,
+//      a write taking the newest request with its hash: weapon_records_logic.h PickSave);
 //      into it (rows 0..0x7FF read back from it): the three record restores (0x70B23A, 0x70B421, 0x70B956; rows
 //      0x800.. from what that record remembered), the new game's template (0xDB96D; rows 0x800.. zero) and the load
 //      job's final copy of a decoded file (0x7C1AD1, on the save thread; rows 0x800.. from the sidecar);
@@ -313,18 +314,20 @@ int __fastcall WriteHook(void* path,void* desc) {
     }
     const std::uint64_t hash=Hash(data+kOldInBlock,kNativeBytes);
     Locked l;
-    // The oldest request with this table: the save jobs write in the order they were requested, and two queued with
-    // the same rows 0..0x7FF (only rows past 0x800 changed between them) would else each get the other's. Its entry
-    // goes whether the write succeeded or not (a failed one's would be taken by the next save of the same table).
-    for(auto it=saves.begin();it!=saves.end();++it) {
-        if(it->hash!=hash)continue;
-        if(r>=0)WriteSidecar(writePath,it->ext.data());
-        else Log("WEAPONREC save %ls failed (%d): the sidecar is left as it was",writePath,r);
-        saves.erase(it);
+    // The newest request with this table (weapon_records_logic.h PickSave: a job that ended before its write, or two
+    // queued with the same rows 0..0x7FF, never pair a write with an older request's rows 0x800..). The earlier ones
+    // with this table go; the newest stays for its own write.
+    std::uint64_t hashes[kMostSaves]{};
+    const std::size_t n=saves.size()<kMostSaves ? saves.size() : kMostSaves;
+    for(std::size_t i=0;i<n;++i)hashes[i]=saves[i].hash;
+    const std::size_t at=PickSave(hashes,n,hash);
+    if(at==n) {
+        if(r>=0)Log("WEAPONREC save %ls: written without a request this session saw: the sidecar is left as it was",writePath);
         return r;
     }
-    if(r<0)return r;
-    Log("WEAPONREC save %ls: written without a request this session saw: the sidecar is left as it was",writePath);
+    if(r>=0)WriteSidecar(writePath,saves[at].ext.data());
+    else Log("WEAPONREC save %ls failed (%d): the sidecar is left as it was",writePath,r);
+    for(std::size_t i=at;i-->0;)if(saves[i].hash==hash)saves.erase(saves.begin()+static_cast<std::ptrdiff_t>(i));
     return r;
 }
 HANDLE WINAPI ReadOpenHook(LPCWSTR path,DWORD access,DWORD share,LPSECURITY_ATTRIBUTES sa,DWORD disposition,DWORD flags,HANDLE tmpl) {
