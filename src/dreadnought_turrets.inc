@@ -19,8 +19,9 @@
 //    tools/make_tracked_combat.py GUNS['emp_<kind>']): its two barrels in turn, each every kGuns[k].gapMs, the
 //    emplacement's round (jet_bay.cpp DreadnoughtRound: its speed, life, blast, tracer and damage) from that barrel's
 //    mouth, kGuns[k].barrel m to either side of the muzzle bone across its guns, at where the screen's centre meets the
-//    map (or kAimReach out along it), scattered in its emplacement's cone (kGuns[k].spread: its FireAccuracy, gunmuzzle.h
-//    Scatter); a map point past the gun's reach (kGuns[k].reach) it does not fire at (the sight says so), the sky it does
+//    map (or kAimReach out along it), scattered as its emplacement's native gun scatters (Spread: the polar angle off the
+//    line even in 0 .. kGuns[k].spread, its FireAccuracy times weapon+0xE14, docs/feedback-2026-10-25-missiles.md); a map
+//    point past the gun's reach (kGuns[k].reach) it does not fire at (the sight says so), the sky it does
 //    (its round goes as far as it goes). It had been the gunship's cannon round from the one muzzle, every turret alike.
 //  - The commander on the bridge trains every turret nobody mans on their aim, and the primary trigger fires them all
 //    (each as it comes on: its guns' own arc decides).
@@ -43,7 +44,8 @@ constexpr float kOnAim=2.0f*kDeg;            // its guns this near their aim: it
 // Its three kinds of secondary gun, each as its emplacement (pylib/vcobjects.py DREADNOUGHT_TURRET_GUNS, tools/selftest.py
 // dreadnought_agrees): the round (jet_bay.cpp kDnRounds), a barrel's gap (the emplacement's FireInterval frames), the
 // round's reach (its speed times its life), its barrels' half spacing (tools/make_dreadnought.py measures it on the
-// model's guns) and its scatter cone (rad: the emplacement's FireAccuracy). Turret n is kind kGunOf[n]
+// model's guns) and its scatter (rad: the cone's half angle, the emplacement's FireAccuracy times the native weapon+0xE14
+// scale, which a vehicle's Weapon_VehicleShoot has at 1: launcher.cpp's LAUNCHER log, the Katyusha's, x1.000). Turret n is kind kGunOf[n]
 // (tools/prep_dreadnought.py: 0 / 1 the SecMid, 2-5 the SecShort, 6 / 7 the SecLong, the emplacements' turret_0 / _2 / _6).
 struct Gun { int round; ULONGLONG gapMs; float reach,barrel,spread; };
 constexpr Gun kGuns[]={{0,200,1440.0f,2.46f,0.003f},{1,1000,2100.0f,4.07f,0.004f},{2,667,3840.0f,5.7f,0.0015f}};
@@ -263,6 +265,29 @@ bool AimPoint(float* aim,float* from,bool* ground) noexcept {
     return true;
 }
 
+// Where round `n` of a gun with the scatter `half` (rad) goes for `at`, fired from `from`, as `out`: the native fire's
+// cone (0x691B02 -> 0x4E820, launcher.cpp Cone): off the line by a polar angle even in 0 .. half, round it by any
+// azimuth. The plugin's rounds take no random state: the polar angle steps through kSpreadSteps even bands in a
+// scrambled order, the azimuth by the golden angle (the same burst lands the same).
+constexpr int kSpreadSteps=16;
+void Spread(const float* from,const float* at,float half,int n,float* out) noexcept {
+    std::memcpy(out,at,12);
+    const float d[3]={at[0]-from[0],at[1]-from[1],at[2]-from[2]};
+    const float len=vec::Len(d);
+    if(!(half>0.0f) || !(len>0.0f) || !std::isfinite(len))return;
+    const float dir[3]={d[0]/len,d[1]/len,d[2]/len};
+    const float side[3]={std::fabs(dir[1])<0.99f ? 0.0f : 1.0f,std::fabs(dir[1])<0.99f ? 1.0f : 0.0f,0.0f};
+    float u[3]={dir[1]*side[2]-dir[2]*side[1],dir[2]*side[0]-dir[0]*side[2],dir[0]*side[1]-dir[1]*side[0]};
+    const float ul=vec::Len(u);
+    for(float& x:u)x/=ul;
+    const float w[3]={dir[1]*u[2]-dir[2]*u[1],dir[2]*u[0]-dir[0]*u[2],dir[0]*u[1]-dir[1]*u[0]};
+    const unsigned k=static_cast<unsigned>(n)%static_cast<unsigned>(kSpreadSteps);
+    const float band=static_cast<float>((k*7u)%static_cast<unsigned>(kSpreadSteps));   // 7 is prime to 16: every band once
+    const float polar=half*(band+0.5f)/static_cast<float>(kSpreadSteps),azimuth=2.39996323f*static_cast<float>(n);
+    const float r=len*std::tan(polar),cs=std::cos(azimuth)*r,sn=std::sin(azimuth)*r;
+    for(int c=0;c<3;++c)out[c]=at[c]+u[c]*cs+w[c]*sn;
+}
+
 // The gap before turret `n`'s next round: its two barrels in turn, each kGuns[gun].gapMs.
 ULONGLONG GapOf(int n) noexcept { return kGuns[kGunOf[n]].gapMs/2; }
 
@@ -271,7 +296,7 @@ bool Fire(Turret& t,unsigned char* v,int n,const float* aim,bool real) noexcept 
     const int gun=kGunOf[n];
     float mouth[3],at[3];
     Mouth(t,gun,mouth);
-    gunmuzzle::Scatter(mouth,aim,kGuns[gun].spread,t.shots,at);
+    Spread(mouth,aim,kGuns[gun].spread,t.shots,at);
     if(!DreadnoughtRound(v,kGuns[gun].round,mouth,at,real))return false;
     ++t.shots;
     return true;

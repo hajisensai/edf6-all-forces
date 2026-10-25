@@ -646,6 +646,8 @@ void LoadConfig() noexcept {
         for(int i=0;i<31 && text[i];++i)n.testBoardVehicle[i]=text[i]<0x80 ? static_cast<char>(text[i]) : '?';
         if(n.testBoardVehicle[0])Log("CONFIG TestBoardVehicle=%s (tests only): the player put into the first such vehicle",n.testBoardVehicle);
     }
+    n.dreadnoughtStockMass=ReadBool(L"DreadnoughtStockMass",n.dreadnoughtStockMass);
+    if(n.dreadnoughtStockMass)Log("CONFIG DreadnoughtStockMass=1 (tests only): the Dreadnought's flight body left at the stock 1 kg");
     n.airdropTest=static_cast<int>(FixInt("AirdropTest",ReadInt(L"AirdropTest",static_cast<DWORD>(n.airdropTest)),0,3));
     if(n.airdropTest)Log("CONFIG AirdropTest=%d (tests only): a container airdrop asked once a mission",n.airdropTest);
     n.npcCrewTest=ReadBool(L"NpcCrewTest",n.npcCrewTest);

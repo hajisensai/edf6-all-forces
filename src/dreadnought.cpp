@@ -30,7 +30,6 @@
 #include "dreadnought_net.h"
 #include "drill_net.h"
 #include "firstperson.h"
-#include "gunmuzzle.h"
 #include "seat_net_transport.h"
 #include "seat_switch_logic.h"
 #include "heli.h"
@@ -330,7 +329,7 @@ const unsigned char kBodySetMassHead[]={0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x45,
 const unsigned char kBodySetMassTail[]={0x48,0xFF,0xA0,0xF8,0x00,0x00,0x00};   // at +0x1F: jmp [rax+0xF8] (slot 31)
 void HullMass(Ship& s,unsigned char* v) noexcept {
     unsigned char* const flight=At<unsigned char*>(v,kBody);
-    if(!flight || s.massStuck)return;
+    if(!flight || s.massStuck || Cfg().dreadnoughtStockMass)return;
     static int said=0;
     __try {
         const float mass=BodyMass(flight);

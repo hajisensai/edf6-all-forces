@@ -177,6 +177,7 @@ struct Config {
     // says when these differ (installed before they were changed).
     unsigned dreadnoughtHangars=0xF;
     char testBoardVehicle[32]{};    // tests: class substring, optionally @exactModelBone to distinguish models sharing 506
+    bool dreadnoughtStockMass=false;  // tests (tests/autopilot): the Dreadnought's flight body left at the 506's 1 kg (no HullMass)
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
                                     // once a mission near the player, then the player put into what it brings
     bool npcCrewTest=false;         // tests (tests/autopilot): auto-crew also for empty vehicles no player has driven yet
