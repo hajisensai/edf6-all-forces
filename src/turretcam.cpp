@@ -47,6 +47,7 @@
 #include "layout.h"
 #include "memory.h"
 #include "turretcam.h"
+#include "playarea.h"
 #include "weapon_mount.h"
 #include "stab.h"
 #include "sight.h"
@@ -226,8 +227,9 @@ const unsigned char* TurretGun(const unsigned char* vehicle,const unsigned char*
 // for out to kFocusSearch, twice that cap: the search is a 3D sphere checked a segment of frames at a time, so a round
 // leaving it in the air (a howitzer's shell crosses 3 km hundreds of metres up) is then past the cap across the ground
 // and the view stays at the cap, not stepping back by the round's height and the segment. Never a point in the
-// air: the ground's height there by a map ray straight down (kGroundProbe m above and below the hull), the hull's own
-// height with none.
+// air: the ground's height there by a map ray straight down (kGroundProbe m above and below the hull). Never over the
+// void past the map's ground either (tcam::GroundReach): a point not landed on comes back along the line to the last
+// ground under it, the hull's own height at the muzzle when there is none at all.
 void ShotFocus(Shared& s) noexcept {
     s.focusValid=false;s.focusHit=false;
     // The turret's gun (TurretGun), the one the turret is laid by: after the hull gatling's right trigger the overhead
@@ -249,10 +251,27 @@ void ShotFocus(Shared& s) noexcept {
     tcam::HighFocus(muzzle,dir,s.focusHit,end,most,origin[1],s.focus);
     if(!(s.focusHit && tcam::AcrossDistance(muzzle,end)<=most)) {
         s.focusHit=false;   // not the landing: no on-target claim for it
+        // Never over the void past the map's ground (tcam::GroundReach): the farthest point along the line with ground.
+        float r=tcam::AcrossDistance(muzzle,s.focus);
+        float h[2]={s.focus[0]-muzzle[0],s.focus[2]-muzzle[2]};
+        if(r>1e-3f){h[0]/=r;h[1]/=r;}else{h[0]=0.0f;h[1]=0.0f;}
+        float start=r;   // where the ground's edge is looked for from: the measured one on this line
+        const PlayArea a=MapPlayArea();
+        if(a.ground) {
+            const float lo[2]={a.lo[0]-area::kVoidMargin,a.lo[1]-area::kVoidMargin},hi[2]={a.hi[0]+area::kVoidMargin,a.hi[1]+area::kVoidMargin};
+            start=tcam::AreaReach(lo,hi,muzzle[0],muzzle[2],h[0],h[1],r);
+        }
         const float top=std::fmax(origin[1],muzzle[1])+kGroundProbe;
-        const float from[3]={s.focus[0],top,s.focus[2]},to[3]={s.focus[0],origin[1]-kGroundProbe,s.focus[2]};
-        float hit[3];
-        if(MapRay(from,to,hit)>=0.0f && std::isfinite(hit[1]))s.focus[1]=hit[1];
+        float y=origin[1];
+        r=tcam::GroundReach([&](float d,float* at) noexcept {
+            const float x=muzzle[0]+h[0]*d,z=muzzle[2]+h[1]*d;
+            const float from[3]={x,top,z},to[3]={x,origin[1]-kGroundProbe,z};
+            float hit[3];
+            if(!(MapRay(from,to,hit)>=0.0f) || !std::isfinite(hit[1]))return false;
+            *at=hit[1];
+            return true;
+        },r,start,&y);
+        s.focus[0]=muzzle[0]+h[0]*r;s.focus[1]=y;s.focus[2]=muzzle[2]+h[1]*r;
     }
     for(float v:s.focus)if(!std::isfinite(v))return;
     s.focusValid=true;

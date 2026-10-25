@@ -31,6 +31,7 @@
 #include "vulcan_rotor.h"
 #include "barrel_recoil.h"
 #include "support_variants.h"
+#include "support_aircraft.h"   // ResetSupportFollowUps
 #include "player_vehicle.h"
 #include <iterator>
 
@@ -114,6 +115,8 @@ void MissionStart() noexcept {
     ResetNpcPosts();
     ResetAirstrikes();
     ResetUltimate();
+    ResetBarrages();
+    ResetSupportFollowUps();
     ResetSupportDispatch();
     ResetTransports();
     ResetAirdrops();

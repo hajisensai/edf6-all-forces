@@ -3,6 +3,7 @@
 #include "enemy_control_radar.h"
 #include "enemy_control_types.h"
 #include "crew.h"
+#include "team_native_logic.h"
 #include "memory.h"
 #include <cmath>
 #include <cstring>
@@ -49,7 +50,7 @@ bool Finite(const float* values,unsigned count) noexcept {
     return true;
 }
 bool Build(const View& in,Row& out) noexcept {
-    if(!in.ownerObject || !in.ownerControl || in.team<0 || in.team>6 ||
+    if(!in.ownerObject || !in.ownerControl || in.team<0 || in.team>=crew::team_native::kTeamCapacity ||
        !Finite(in.center,3) || !Finite(in.side,3) || !Finite(in.forward,3))return false;
     const float horizontal=std::hypot(in.forward[0],in.forward[2]);
     const float pitch=-std::atan2(in.forward[1],horizontal);

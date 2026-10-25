@@ -1,3 +1,4 @@
+#include "pvp_match.h"
 #include "support_protocol.h"
 #include "support_loadout.h"
 #include "support_submarine.h"
@@ -20,14 +21,15 @@ bool CanonicalRequester(const unsigned char* id) noexcept {
     return true;
 }
 bool RequesterMetadata(const unsigned char* id,std::uint32_t team) noexcept {
-    return team<=2 && (ZeroId(id) ? team==0 : CanonicalRequester(id));
+    return (team==0 || crew::pvp_match::PvpTeam(static_cast<int>(team))) && (ZeroId(id) ? team==0 : CanonicalRequester(id));
 }
 bool BeginUnit(const Unit& unit) noexcept {
     // BEGIN has no unit transform/variant. Require byte-zero floats, including rejecting negative zero.
     const float zero[16]{};
     if(unit.variant || std::memcmp(unit.matrix,zero,sizeof(zero)))return false;
     if(!unit.resourceId)return !unit.role && ZeroId(unit.netId);
-    return unit.resourceId==kBeginRequesterMetadata && unit.role<=2 && CanonicalRequester(unit.netId);
+    return unit.resourceId==kBeginRequesterMetadata && (unit.role==0 || crew::pvp_match::PvpTeam(static_cast<int>(unit.role))) &&
+        CanonicalRequester(unit.netId);
 }
 bool HasRequester(const Plan& plan) noexcept { return !ZeroId(plan.requester); }
 constexpr unsigned char kExplicitCancelAck=2;

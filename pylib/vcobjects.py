@@ -167,6 +167,11 @@ class Missile:
     burst_gap: float = 10.0   # frames between them
     interval: float = 45.0    # frames from one shot (or salvo) to the next
     eject: float = 0.3    # m a frame it leaves the rail at, along the launcher's nose, over the launcher's velocity
+    # rad: FireAccuracy, the half angle of the cone a round leaves its rail in (fire 0x691B02 -> 0x4E820: polar angle
+    # uniform in [0, it]; src/launcher.cpp Cone). A rail sets the missile's line: none. The helicopter template's 0.3
+    # (17 deg) is a stock pursuit missile's spray; kept, it sent a ground launcher's missiles into the ground at its
+    # feet and its 12 m blast onto itself (the user, 2026-10-25: 「bmpt的飞弹怎么会往地里射？天启也会射到自己身上导弹」).
+    spread: float = 0.0
     guided: bool = True   # False: an unguided rocket (no lock: src/missile.cpp only burns its motor, it flies straight)
     # The stock weapon (Root.cpk WEAPON) whose muzzle list (animation_model[2], mab_muzzles) it fires from; None: the
     # helicopter missile's own four pod muzzles. Offsets are from the holder's bone: a gun-launched missile on a tank's
@@ -178,7 +183,7 @@ class Missile:
         return {'AmmoSpeed': self.eject, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 0.0, 'AmmoAlive': self.life * 60.0,
                 'AmmoDamage': self.damage, 'AmmoExplosion': self.blast, 'AmmoCount': float(rounds),
                 'FireBurstCount': self.burst, 'FireBurstInterval': self.burst_gap, 'FireInterval': self.interval,
-                'LockonRange': self.lock_range, 'LockonTime': self.lock_time,
+                'FireAccuracy': self.spread, 'LockonRange': self.lock_range, 'LockonTime': self.lock_time,
                 # A lock lives while its target stays in the cone (Lockon_AutoTimeOut 0: the hold timer restarts
                 # there) and LockonHoldTime frames once it leaves: the nose on another, it locks that one
                 # (docs/stores-re.md §7; stock: 600 frames whatever the nose does, no switching).
@@ -408,7 +413,7 @@ STORES: dict[str, Store] = {
     # the nose. A round's mass and drag carry its pod's share. About 1.4 m with its M151 warhead (the Mk 66 motor 1.06 m).
     'RKT': Store('Hydra 70', 'rocket', 32.0, 0.0015, Missile('Hydra 70', Look('bullet_rocket', 1.4), burn=1.1, top=740.0,
                  accel=650.0, max_g=1.0, nav=1.0, life=6.0, damage=250.0, blast=6.0, lock_range=0.0, lock_cone=0.3, lock_time=0.0,
-                 burst=4.0, burst_gap=4.0, interval=20.0, eject=0.6, guided=False)),
+                 burst=4.0, burst_gap=4.0, interval=20.0, eject=0.6, spread=0.006, guided=False)),
     # --- the stock vehicles' rounds (tools/make_stock_stores.py LOADOUTS; docs/feedback-2026-10-09-loadcamp.md) ---
     # A main battle tank's armour-piercing round: the Blacker A's 90 mm smooth-bore round (V_505TANK_CANNON01S:
     # SolidBullet01Rail, 18 m a frame = 1080 m/s, a tenth of gravity, penetrating, no blast, 350): the stock A series.
@@ -2350,6 +2355,58 @@ def check_ult(files: dict[str, bytes]) -> None:
         p = m['indirect_fire_param']
         assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'SolidBullet01', name
         assert p[2] == 1 and p[11] == 0 and p[9] == radius and m['indirect_fire_damage'] == 0.0, (name, p)
+
+
+# ------------------------------------------------------------------------------------------ the long-range barrages
+# The long-range barrages' rounds (src/barrage.cpp, src/barrage_plan.h, docs/plan-2026-10-25-strikes.md §1.1; written by
+# tools/make_barrage.py), fired through the EMC's table (src/jet_bay.cpp kEmcFiles: EmcRound::barrage, barrageBurst):
+#   BARRAGE_ROUND_FILE  one round: the missions' indirect fire rocket (BARRAGE_STOCK: DemoIndirectFire, a RocketBullet01 with
+#                       its smoke trail) with no gravity and a long life (the plugin flies it along its curve and writes its
+#                       size, blast and mark into the IFC before it fires), no wait, damage 0 (the plugin's)
+#   BARRAGE_BURST_FILE  a cluster's flash where its bomblets leave: the EMC's impact charge, BARRAGE_BURST_RADIUS m, no damage
+BARRAGE_STOCK = 'DEMOINDIRECTFIREE50.SGO'
+BARRAGE_ROUND_FILE = 'EDF6VC_BARRAGE_ROUND.SGO'
+BARRAGE_BURST_FILE = 'EDF6VC_BARRAGE_BURST.SGO'
+BARRAGE_FILES = (BARRAGE_ROUND_FILE, BARRAGE_BURST_FILE)   # EmcRound's order
+BARRAGE_SPEED = 5.0          # m a frame: its first frame's flight, before the plugin flies it
+BARRAGE_LIFE = 45 * 60       # frames: past the longest flight (the ballistic missile's 22 s, the creeping barrage's shells)
+BARRAGE_SIZE, BARRAGE_BLAST = 6.0, 12.0   # the SGO's own (the plugin writes each round's)
+BARRAGE_BURST_RADIUS = 20.0
+BARRAGE_BURST_COLOUR = (3.0, 1.6, 0.6, 1.0)
+
+
+def barrage_rounds(game: Game) -> dict[str, bytes]:
+    """The barrages' DemoIndirectFire SGOs (BARRAGE_FILES), {Mods/OBJECT file: bytes}."""
+    version, m = sgo.read(game.read('OBJECT', BARRAGE_STOCK))
+    p = m.get('indirect_fire_param')
+    if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+            or p[4] != 'RocketBullet01' or 'indirect_fire_damage' not in m):
+        raise ValueError(f'{BARRAGE_STOCK} 不是预期的任务火箭弹（DemoIndirectFire / RocketBullet01）')
+    for i, value in ((2, 1), (3, 0), (5, BARRAGE_SPEED), (6, 0), (7, BARRAGE_SIZE), (9, BARRAGE_BLAST), (10, BARRAGE_LIFE),
+                     (11, 0), (15, 0)):
+        p[i] = int(value) if isinstance(p[i], int) else float(value)   # each keeps its node type
+    p[0] = [0.0, 0.0]
+    m['indirect_fire_damage'] = 0.0
+    out = {BARRAGE_ROUND_FILE: sgo.write(version, m)}
+    version, m = sgo.read(_emc_charge(game, BARRAGE_BURST_RADIUS, EMC_BLAST_SPEED, EMC_BLAST_LIFE))
+    m['indirect_fire_param'][12] = list(BARRAGE_BURST_COLOUR)
+    out[BARRAGE_BURST_FILE] = sgo.write(version, m)
+    return {name: out[name] for name in BARRAGE_FILES}
+
+
+def check_barrage(files: dict[str, bytes]) -> None:
+    """The barrages' SGOs as src/barrage.cpp fires them: the round a RocketBullet01, one round, no gravity, no wait, not
+    penetrating, living past the longest flight; the flash a SolidBullet01 charge of BARRAGE_BURST_RADIUS m; damage 0."""
+    assert list(files) == list(BARRAGE_FILES), list(files)
+    m = sgo.load(data=files[BARRAGE_ROUND_FILE])
+    p = m['indirect_fire_param']
+    assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'RocketBullet01', p
+    assert p[2] == 1 and p[3] == 0 and p[6] == 0 and p[11] == 0 and p[15] == 0 and m['indirect_fire_damage'] == 0.0, p
+    assert p[10] >= 30 * 60 and p[5] == BARRAGE_SPEED, p
+    m = sgo.load(data=files[BARRAGE_BURST_FILE])
+    p = m['indirect_fire_param']
+    assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'SolidBullet01', p
+    assert p[2] == 1 and p[9] == BARRAGE_BURST_RADIUS and m['indirect_fire_damage'] == 0.0, p
 
 
 # ------------------------------------------------------------------------------------------ the Sazabi's arms

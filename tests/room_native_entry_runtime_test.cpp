@@ -18,6 +18,11 @@ __declspec(noinline) void UnexpectedRoomDependency() noexcept {
     if(nativeEntryUnexpected)std::abort();
 }
 void PvpRoomTick() noexcept {UnexpectedRoomDependency();}
+void RoomPvpTick() noexcept {UnexpectedRoomDependency();}
+roompvp::View RoomPvpView() noexcept {UnexpectedRoomDependency();return {};}
+void RoomPvpChange(const roompvp::Action&) noexcept {UnexpectedRoomDependency();}
+void RoomPvpSummary(wchar_t*,std::size_t) noexcept {UnexpectedRoomDependency();}
+bool RoomPvpWaitingLine(wchar_t*,std::size_t) noexcept {UnexpectedRoomDependency();return false;}
 void Outfit41RoomTick() noexcept {UnexpectedRoomDependency();}
 void Edf5OnlineRoomTick() noexcept {UnexpectedRoomDependency();}
 void HostSettingsRoomTick() noexcept {UnexpectedRoomDependency();}

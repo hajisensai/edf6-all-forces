@@ -169,6 +169,10 @@ void DestroyRangeEnemy(std::uint64_t token) noexcept {
 void RangeEnemyNetworkTick() noexcept { ++fixture::rangeTicks; }
 void ResetRangeEnemyNetwork() noexcept { ++fixture::rangeResets;fixture::rangeToken=0; }
 bool RangeEnemyRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept { ++fixture::rangeNotices;return false; }
+// A PvP member's unit (kPvpUnitCatalog) is planned by debug_spawn.cpp only for a committed member: refused here.
+support_net::PlanResult PlanPvpUnit(const char*,const float*,std::uint64_t,support_net::Plan*) noexcept {
+    return support_net::PlanResult::refused;
+}
 }
 namespace fixture {
 using namespace crew::support_net;

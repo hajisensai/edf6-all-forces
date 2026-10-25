@@ -31,6 +31,7 @@
 #define NOMINMAX
 #endif
 #include "crew.h"
+#include "team_native_logic.h"
 #include "edf41classes.h"
 #include "edf41net.h"
 #include "enemy_control_legacy_mother.h"
@@ -2084,7 +2085,7 @@ bool PvpCollect401(void*,const ObjRef& root,ObjRef* members,unsigned capacity,un
     if(At<const void*>(root.obj,0)!=&partClone.block[1])return false;
     if(!p || p->pvpIdentity.obj!=root.obj || p->pvpIdentity.ctrl!=root.ctrl ||
        !(p->kind==Kind::bigCannon || p->kind==Kind::finalCannon || p->kind==Kind::generator || p->kind==Kind::finalGenerator || IsBattery(p->kind)) ||
-       !p->mounts.empty() || p->team<-1 || p->team>=7)return false;
+       !p->mounts.empty() || p->team<-1 || p->team>=crew::team_native::kTeamCapacity)return false;
     for(const auto& entry:byObj)if(entry.second->obj!=root.obj && (entry.second->panel==p->id || entry.second->hull==p->id)) {
         const auto life=PvpIdentity401(entry.second->pvpIdentity);
         if(life!=controlled_pvp::Life::gone)return false; // live unknown child or ambiguous memory must never be silently omitted
@@ -2105,12 +2106,12 @@ controlled_pvp::Life PvpRead401(void*,const controlled_pvp::Emitter& emitter,int
     if(p->pvpIdentity.obj!=emitter.member.obj || p->pvpIdentity.ctrl!=emitter.member.ctrl)return Life::gone;
     if(emitter.object!=&p->team || At<const void*>(emitter.member.obj,0)!=&partClone.block[1] || !(p->kind==Kind::bigCannon || p->kind==Kind::finalCannon || p->kind==Kind::generator ||
        p->kind==Kind::finalGenerator || IsBattery(p->kind)))return Life::invalid;
-    if(p->team<-1 || p->team>=7)return Life::invalid;
+    if(p->team<-1 || p->team>=crew::team_native::kTeamCapacity)return Life::invalid;
     *team=p->team;return Life::live;
 }
 bool PvpWrite401(void*,const controlled_pvp::Emitter& emitter,int team) noexcept {
     std::lock_guard<std::recursive_mutex> hold(lock);int previous=0;
-    if(team<-1 || team>=7 || PvpRead401(nullptr,emitter,&previous)!=controlled_pvp::Life::live)return false;
+    if(team<-1 || team>=crew::team_native::kTeamCapacity || PvpRead401(nullptr,emitter,&previous)!=controlled_pvp::Life::live)return false;
     Part* p=Find(emitter.member.obj);p->team=team;return p->team==team;
 }
 bool PvpMemberBaseline401(void*,const ObjRef& root,const ObjRef& member,int,int,int* team,int* last) noexcept {

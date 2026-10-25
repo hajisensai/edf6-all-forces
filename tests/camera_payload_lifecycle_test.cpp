@@ -57,6 +57,7 @@ float MapRay(const float* from,const float* to,float* hit) noexcept {
     for(int i=0;i<3;++i)hit[i]=from[i]+t*(to[i]-from[i]);
     return vec::Dist(from,hit);
 }
+PlayArea MapPlayArea() noexcept { return PlayArea{{-2400.0f,-2400.0f},{2400.0f,2400.0f},false,0.0f,false}; }
 void SetLauncherLoft(const void* vehicle,bool aim,float) noexcept { ++loftCalls;loftOwner=vehicle;loftAim=aim; }
 bool LauncherLoft(const void*,LoftReadout*) noexcept { return false; }
 bool SazabiCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { UnexpectedBoundary();return false; }

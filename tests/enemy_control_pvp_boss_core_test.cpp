@@ -90,7 +90,12 @@ void ExactOwnedSelectorCloneThroughRealCore() {
     CHECK(!Probe(root.Ref(),Adapter()));selectorOwner=root.Ref();selectorTable=table;selectorFunction=image+0x9900;
     CHECK(Probe(root.Ref(),Adapter()));Lease lease{};ownerTeam=1;CHECK(Acquire(root.Ref(),"owner1",Adapter(),&lease));
     int applied=0;CHECK(At<int>(root.p,kTeam)==1 && ReadAppliedTeam(root.Ref(),&applied) && applied==1);ownerTeam=2;CHECK(Frame(lease));
-    CHECK(At<int>(root.p,kTeam)==2);CHECK(Restore(&lease));CHECK(lease.id==0 && At<int>(root.p,kTeam)==5);
+    CHECK(At<int>(root.p,kTeam)==2 && ReadAppliedTeam(root.Ref(),&applied) && applied==2);
+    for(const int faction:{7,10,11}) { // EDF 2, the Primers, the Foreigners (pvp_match.h): their own teams too
+        ownerTeam=faction;CHECK(!ReadAppliedTeam(root.Ref(),&applied));CHECK(Frame(lease));
+        CHECK(At<int>(root.p,kTeam)==faction && ReadAppliedTeam(root.Ref(),&applied) && applied==faction);
+    }
+    CHECK(Restore(&lease));CHECK(lease.id==0 && At<int>(root.p,kTeam)==5);
     Put<void*>(table,14*8,image+0x9910);CHECK(!Probe(root.Ref(),Adapter()));Put<void*>(table,14*8,const_cast<void*>(selectorFunction));
     std::memcpy(stale,clone,sizeof(stale));Put<void*>(root.p,0,stale+8);CHECK(!Probe(root.Ref(),Adapter()));
     Put<void*>(root.p,0,table);CHECK(Probe(root.Ref(),Adapter()));Put<void*>(root.p,0,image+boss_pvp_detail::kTypes[0].table);

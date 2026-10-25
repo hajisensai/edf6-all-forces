@@ -43,8 +43,9 @@ def main() -> int:
         body = cpp.split(caller, 1)[-1].split('\n}\n', 1)[0] if caller in cpp else ''
         if 'MakeRow(' not in body or any(x in body for x in ('SupportCallAt(', 'JetLaunchDrone(', 'SpawnEnemy(', 'SpawnVehicle(')):
             failures.append(f'debug_spawn.cpp {caller.split("(")[0]}: it makes its row only through MakeRow')
-    shipped = set(re.findall(r'L"EDF6VC_CALL_(\w+)"\}', calls))
-    brings = {key: what for what, key in re.findall(r'Brings::(\w+),[^\n]*L"EDF6VC_CALL_(\w+)"\}', calls)}
+    # A row ends with its id, or with a flown call's sortie fields after it (src/calls.inc kCalls).
+    shipped = set(re.findall(r'L"EDF6VC_CALL_(\w+)"[,}]', calls))
+    brings = {key: what for what, key in re.findall(r'Brings::(\w+),[^\n]*L"EDF6VC_CALL_(\w+)"[,}]', calls)}
     table = header.split('kSupportCalls[]={', 1)
     keys = re.findall(r'L"(\w+)"', table[1].split('};', 1)[0]) if len(table) == 2 else []
     if not keys:

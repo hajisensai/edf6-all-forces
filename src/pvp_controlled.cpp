@@ -1,4 +1,5 @@
 // Controlled enemy-only native team lease. No player identity, VehicleBase, seat, collision or bullet-filter writes.
+#include "pvp_match.h"
 #include "pvp_controlled.h"
 #include "pvp.h"
 #include "memory.h"
@@ -28,7 +29,7 @@ bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ct
 bool Same(const Emitter& a,const Emitter& b) noexcept {
     return a.kind==b.kind && Same(a.member,b.member) && a.object==b.object && a.incarnation==b.incarnation && Same(a.storage,b.storage);
 }
-bool TeamValid(int team) noexcept {return team>=-1 && team<7;}
+bool TeamValid(int team) noexcept {return team>=-1 && team<team_native::kTeamCapacity;}
 bool DynamicOwner(const Emitter& emitter) noexcept {
     return emitter.kind==EmitterKind::liveOwnerTeam || emitter.kind==EmitterKind::liveOwnerLastTeam;
 }
@@ -317,7 +318,7 @@ bool Apply(State& s,int team) noexcept {
 }
 bool ApplyAcceptedGroup(State& s,unsigned group) noexcept {
     const int team=PvpSupportTeam(s.puid);
-    if(team<0 || team>2)return false;
+    if(team<0 || (team && !pvp_match::PvpTeam(team)))return false;
     // The parent may be logically deleted but is still held by the accepted-action consumer.
     // Only this new, unpublished group can be tagged; never run AI or SetTeam on its dead parent.
     if(team) {
@@ -346,7 +347,7 @@ bool Step(State& s) noexcept {
     if(s.restoring){Publish(s,Result::restoring);return false;}
     const int team=PvpSupportTeam(s.puid);
     if(team<0){Publish(s,Result::pvpPending);return false;}
-    if(team>2)return Fault(s,Result::unsupported);
+    if(team && !pvp_match::PvpTeam(team))return Fault(s,Result::unsupported);
     CaptureModes(s);
     if(team==0) {
         if(!PrepareRestore(s))return Fault(s,Result::nativeFailure);
@@ -379,7 +380,7 @@ bool Acquire(const ObjRef& root,const char* authenticatedSourcePuid,const Hooks&
         if(!Sync(*state,collection)){Fault(*state,Result::capacity);Restore(out);return false;}
         const int team=PvpSupportTeam(authenticatedSourcePuid);
         if(team<0){Publish(*state,Result::pvpPending);return false;}
-        if(team>2 || (team && !Apply(*state,team))) {Fault(*state,Result::nativeFailure);Restore(out);return false;}
+        if((team && !pvp_match::PvpTeam(team)) || (team && !Apply(*state,team))) {Fault(*state,Result::nativeFailure);Restore(out);return false;}
         ReleaseModes(*state);Publish(*state,Result::ready,team!=0);return true;
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         if(State* s=Find(out->id)){s->restoring=true;Publish(*s,Result::restoring);Restore(out);}
@@ -432,7 +433,7 @@ bool ReadBaseline(const ObjRef& root,const ObjRef& member,int* team,int* lastTea
 bool ReadAppliedTeam(const ObjRef& member,int* team) noexcept {
     if(!team || !Live(member))return false;
     for(auto& s:leases)if(s.id && Member(s,member) && !s.restoring && s.tagged && s.status.result==Result::ready &&
-        s.status.followsOwnerTeam && (s.assigned==1 || s.assigned==2) && PvpSupportTeam(s.puid)==s.assigned) {
+        s.status.followsOwnerTeam && pvp_match::PvpTeam(s.assigned) && PvpSupportTeam(s.puid)==s.assigned) {
         *team=s.assigned;return true;
     }
     return false;
@@ -496,7 +497,7 @@ bool SpawnRoom(const State& s,const SpawnProof& proof,unsigned count) noexcept {
 bool CanPrepareSpawns(const ObjRef& parent,const SpawnProof& proof,unsigned count) noexcept {
     __try {
         State* s=OwnerOf(parent);if(!s)return false;const int team=PvpSupportTeam(s->puid);
-        return !s->restoring && Live(parent) && team>=0 && team<=2 && SpawnRoom(*s,proof,count);
+        return !s->restoring && Live(parent) && team>=0 && (team==0 || pvp_match::PvpTeam(team)) && SpawnRoom(*s,proof,count);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 bool PrepareSpawns(const ObjRef& parent,const SpawnProof& proof,unsigned count,std::uint64_t* token) noexcept {
@@ -515,7 +516,7 @@ bool CanPrepareAcceptedSpawns(const ObjRef& parent,const SpawnProof& proof,unsig
     __try {
         State* s=OwnerOf(parent);if(!s || s->restoring || !CurrentIdentity(parent) || !CurrentIdentity(s->root))return false;
         const auto* saved=Member(*s,parent);const int team=PvpSupportTeam(s->puid);
-        return saved && saved->baselineKnown && team>=0 && team<=2 && SpawnRoom(*s,proof,count);
+        return saved && saved->baselineKnown && team>=0 && (team==0 || pvp_match::PvpTeam(team)) && SpawnRoom(*s,proof,count);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 bool PrepareAcceptedSpawns(const ObjRef& parent,const SpawnProof& proof,unsigned count,std::uint64_t* token) noexcept {

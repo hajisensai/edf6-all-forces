@@ -48,6 +48,7 @@
 #include "drive_gear.h"
 #include "support_net.h"
 #include "pvp.h"
+#include "map_pvp_input.h"
 #include "thermal.h"
 #include "map_enemy_ui.h"
 #include "enemy_control_bindings.h"
@@ -4693,12 +4694,31 @@ Tx MapPvpResult(pvp_protocol::Result result) noexcept {
     }
     return Tx::pvpNotReady;
 }
+// A faction's and a preset's words, a faction's chip colour (pvp_match.h kFactions' ARGB).
+Tx PvpFactionName(int faction) noexcept {
+    constexpr Tx kNames[]={Tx::pvpFactionEdf,Tx::pvpFactionEdf2,Tx::pvpFactionEdf3,Tx::pvpFactionEdf4,
+                           Tx::pvpFactionMonster,Tx::pvpFactionPrimer,Tx::pvpFactionForeigner};
+    static_assert(sizeof(kNames)/sizeof(kNames[0])==pvp_match::kFactionCount,"a name a faction");
+    return pvp_match::FactionValid(faction) ? kNames[faction] : Tx::pvpFactionEdf;
+}
+Tx PvpPresetName(int preset) noexcept {
+    constexpr Tx kNames[]={Tx::pvpPresetFfa,Tx::pvpPresetHva,Tx::pvpPresetCivil,Tx::pvpPresetAliens,Tx::pvpPresetCustom};
+    static_assert(sizeof(kNames)/sizeof(kNames[0])==pvp_match::kPresetCount,"a name a preset");
+    return preset>=0 && preset<pvp_match::kPresetCount ? kNames[preset] : Tx::pvpPresetFfa;
+}
+void PvpFactionColor(int faction,float* rgba) noexcept {
+    const std::uint32_t argb=pvp_match::FactionValid(faction) ? pvp_match::kFactions[faction].color : 0xFFFFFFFFu;
+    rgba[0]=static_cast<float>((argb>>16)&0xFF)/255.0f;rgba[1]=static_cast<float>((argb>>8)&0xFF)/255.0f;
+    rgba[2]=static_cast<float>(argb&0xFF)/255.0f;rgba[3]=static_cast<float>(argb>>24)/255.0f;
+}
 float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,
                   const MapCommandReadout& c,Line* lines,int* at) noexcept {
     PvpStatus status{};ReadPvpStatus(&status);
-    if(*at+7>kMaxLines || top+28.0f*s>bottom){MapCommandPvpButtons(nullptr,nullptr,0,nullptr);return top;}
+    // The host's two rows full width, then the factions two to a row (the dock's panels below keep their room).
+    constexpr int kButtons=pvpmenu::kItems,kFactionRows=(pvp_match::kFactionCount+1)/2,kRows=pvpmenu::kFaction0+kFactionRows;
+    if(*at+kButtons+4>kMaxLines || top+28.0f*s>bottom){MapCommandPvpButtons(nullptr,nullptr,0,nullptr);return top;}
     const float x1=width-12.0f*s,x0=x1-std::fmin(420.0f*s,width*0.32f),titleH=28.0f*s,rowH=24.0f*s,footH=19.0f*s;
-    const float expandedBottom=top+titleH+3.0f*rowH+2.0f*footH+8.0f*s;
+    const float expandedBottom=top+titleH+static_cast<float>(kRows)*rowH+2.0f*footH+8.0f*s;
     const int padPick=pad ? MapPvpPadSelection() : -1;
     const bool pointer=!pad && c.pointer;
     const bool overTitle=pointer && c.px>=x0 && c.px<x1 && c.py>=top && c.py<top+titleH;
@@ -4710,7 +4730,7 @@ float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float to
     Rect(drawer,ctx,x0,top,x1,top+titleH,overTitle ? kBtnLit : kBtnFill);
     const float* stateTint=!status.ready || status.pending ? kAmber : status.enabled ? kWhite : kMapOrderDim;
     Label(text,lines,at,x0+8.0f*s,top+titleH*0.5f,0,kLineScale*0.7f,stateTint,
-          Tr(Tx::pvpTitleState),Tr(status.enabled ? Tx::pvpOn : Tx::pvpOff),status.localTeam);
+          Tr(Tx::pvpTitleState),Tr(status.enabled ? Tx::pvpOn : Tx::pvpOff),Tr(PvpFactionName(status.local.faction)));
     const float hintLeft=x1-108.0f*s;
     if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,hintLeft-8.0f*s);
     Label(text,lines,at,x1-22.0f*s,top+titleH*0.5f,2,kLineScale*0.55f,kMapOrderDim,L"%ls",
@@ -4722,25 +4742,39 @@ float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float to
     float rects[kMapPvpItems*4]{};int codes[kMapPvpItems]{};int hits=0;
     if(pointer){float* q=rects;q[0]=x0;q[1]=top;q[2]=x1;q[3]=top+titleH;codes[hits++]=kPvpFold;}
     if(!open){MapCommandPvpButtons(rects,codes,hits,&status);return panelBottom;}
-    const int choices[]={kPvpModeToggle,kPvpTeam1,kPvpTeam2};
-    const Tx words[]={status.enabled ? Tx::pvpDisable : Tx::pvpEnable,Tx::pvpTeam1,Tx::pvpTeam2};
-    const float left=x0+8.0f*s,right=x1-8.0f*s;
-    float y=top+titleH;
-    for(int i=0;i<3;++i) {
-        const int code=choices[i];
-        const bool allowed=status.ready && !status.pending && (code!=kPvpModeToggle || status.host);
-        const bool selected=code==kPvpModeToggle ? status.enabled : status.localTeam==code;
-        const bool hover=pointer && c.px>=left && c.px<right && c.py>=y && c.py<y+rowH-3.0f*s;
+    const float left=x0+8.0f*s,right=x1-8.0f*s,half=(right-left-4.0f*s)*0.5f;
+    const float rowsTop=top+titleH;
+    for(int code=0;code<kButtons;++code) {
+        const int faction=pvpmenu::CodeFaction(code);
+        // Its cell: a host row across the panel, a faction in its row's left or right half.
+        const int slot=faction<0 ? code : pvpmenu::kFaction0+faction/2;
+        const float y=rowsTop+static_cast<float>(slot)*rowH;
+        const float cellLeft=faction<0 || faction%2==0 ? left : left+half+4.0f*s;
+        const float cellRight=faction<0 ? right : faction%2==0 ? left+half : right;
+        const bool allowed=pvpmenu::Allowed(status,code);
+        const bool selected=code==kPvpModeToggle ? status.enabled : faction>=0 && status.local.faction==faction;
+        const bool hover=pointer && c.px>=cellLeft && c.px<cellRight && c.py>=y && c.py<y+rowH-3.0f*s;
         const bool focus=padPick==code;
-        Rect(drawer,ctx,left,y,right,y+rowH-3.0f*s,(allowed && hover) || focus ? kBtnLit : kBtnFill);
-        if(selected)Rect(drawer,ctx,left,y+4.0f*s,left+3.0f*s,y+rowH-7.0f*s,kMapOrder);
-        Label(text,lines,at,left+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,
-              allowed ? kWhite : kMapOrderDim,L"%ls",Tr(words[i]));
-        if(*at>0)MapFitLabel(text,lines[*at-1],left+10.0f*s,right-4.0f*s);
-        if(code==kPvpModeToggle)MapTipSet(c,left,y,right,y+rowH,L"%ls",Tr(Tx::pvpHostOnly));
-        if(allowed){float* q=rects+4*hits;q[0]=left;q[1]=y;q[2]=right;q[3]=y+rowH-3.0f*s;codes[hits++]=code;}
-        y+=rowH;
+        Rect(drawer,ctx,cellLeft,y,cellRight,y+rowH-3.0f*s,(allowed && hover) || focus ? kBtnLit : kBtnFill);
+        if(selected)Rect(drawer,ctx,cellLeft,y+4.0f*s,cellLeft+3.0f*s,y+rowH-7.0f*s,kMapOrder);
+        const float* tint=allowed ? kWhite : kMapOrderDim;
+        if(code==kPvpModeToggle)
+            Label(text,lines,at,left+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,tint,L"%ls",
+                  Tr(status.enabled ? Tx::pvpDisable : Tx::pvpEnable));
+        else if(code==kPvpPreset)
+            Label(text,lines,at,left+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,tint,Tr(Tx::pvpPresetRow),
+                  Tr(PvpPresetName(status.preset)));
+        else {
+            float chip[4];PvpFactionColor(faction,chip);
+            Rect(drawer,ctx,cellRight-14.0f*s,y+5.0f*s,cellRight-4.0f*s,y+rowH-8.0f*s,chip);
+            Label(text,lines,at,cellLeft+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,tint,L"%ls",Tr(PvpFactionName(faction)));
+            MapTipSet(c,cellLeft,y,cellRight,y+rowH,Tr(Tx::pvpJoinFaction),Tr(PvpFactionName(faction)));
+        }
+        if(*at>0)MapFitLabel(text,lines[*at-1],cellLeft+10.0f*s,cellRight-18.0f*s);
+        if(code==kPvpModeToggle || code==kPvpPreset)MapTipSet(c,left,y,right,y+rowH,L"%ls",Tr(Tx::pvpHostOnly));
+        if(allowed){float* q=rects+4*hits;q[0]=cellLeft;q[1]=y;q[2]=cellRight;q[3]=y+rowH-3.0f*s;codes[hits++]=code;}
     }
+    float y=rowsTop+static_cast<float>(kRows)*rowH;
     const Tx result=status.pending ? Tx::pvpPending : !status.ready ? Tx::pvpNotReady : MapPvpResult(status.result);
     Label(text,lines,at,left,y+footH*0.5f,0,kLineScale*0.56f,stateTint,L"%ls",Tr(result));
     if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
@@ -5265,6 +5299,13 @@ void UltimateBanner(Text* text,float width,float height,float s,Line* lines,int*
     if(!PlayerUltimateCue(line,_countof(line)))return;
     Label(text,lines,at,width*0.5f,height*0.5f+342.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
 }
+// The caller's strike calls (airstrike.cpp PlayerStrikeCue): a barrage that could not start, a sortie's second wave not
+// called; a moment, under the ultimate's banner.
+void StrikeBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    wchar_t line[200];
+    if(!PlayerStrikeCue(line,_countof(line)))return;
+    Label(text,lines,at,width*0.5f,height*0.5f+370.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
+}
 // The mark key with no enemy near the aim (npcai.cpp SendToPoint): what came of it under the point for a moment (the
 // selected units sent there, how many; none selected; online); the point's own ring is the Q mark's (QMarkHud). An
 // enemy near the aim but not on it: a ring there and the word to aim at it.
@@ -5696,6 +5737,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         RescueCueBanner(t,width,height,s,lines,&at);
         VersionBanner(t,width,height,s,lines,&at);
         UltimateBanner(t,width,height,s,lines,&at);
+        StrikeBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {

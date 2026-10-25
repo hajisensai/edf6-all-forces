@@ -113,7 +113,7 @@ int main() {
     EnemyControlRadarPublish(views,2);published.at=GetTickCount64()-kFreshMs-1;Native(invoke,first,source,nullptr);
     View invalid=views[0];invalid.center[0]=std::numeric_limits<float>::quiet_NaN();EnemyControlRadarPublish(&invalid,1);Native(invoke,first,source,nullptr);
     invalid=views[0];invalid.forward[0]=invalid.forward[1]=invalid.forward[2]=0;CHECK(!Build(invalid,pitched));
-    invalid=views[0];invalid.team=7;CHECK(!Build(invalid,pitched));
+    invalid=views[0];invalid.team=crew::team_native::kTeamCapacity;CHECK(!Build(invalid,pitched));
     View duplicate[2]={views[0],views[0]};EnemyControlRadarPublish(duplicate,2);Native(invoke,first,source,nullptr);
     EnemyControlRadarPublish(views,enemy_control::kMaxControllers+1);Native(invoke,first,source,nullptr);
     auto* nativeImage=image;image=nullptr;Native(invoke,first,source,nullptr);image=nativeImage;
