@@ -168,11 +168,16 @@ struct Config {
     int dreadnoughtSeatButton=0x20;      // ...its seats round on a pad (RB: its B gets out of it; SeatNextKey on the keyboard)
     int dreadnoughtHangarKey=0x48;     // the commander launches an escort flight from its hangar (H; 0 none)
     int dreadnoughtHangarButton=0x08;  // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x08 Y; 0 none)
+    // Held, any seat's view looks out ahead of its bow (dreadnought_turrets.inc: round the ship the hull fills the screen's
+    // middle; the user, 2026-10-25: 「整个身体挡面前看不到了，可以右键的时候往前看」): the right mouse button, L3 on a pad
+    int dreadnoughtAheadKey=0x02;      // VK_RBUTTON; 0 none
+    int dreadnoughtAheadButton=0x40;   // the seat's button bits: 0x40 L3; 0 none
     // Its hangar modules fitted (bit m: dreadnought_deck.h module m, ini DreadnoughtHangarLeftFore / LeftAft / RightFore /
     // RightAft). The installer builds its model and collision by them; the plugin runs the hangars its model has and only
     // says when these differ (installed before they were changed).
     unsigned dreadnoughtHangars=0xF;
     char testBoardVehicle[32]{};    // tests: class substring, optionally @exactModelBone to distinguish models sharing 506
+    bool dreadnoughtStockMass=false;  // tests (tests/autopilot): the Dreadnought's flight body left at the 506's 1 kg (no HullMass)
     int airdropTest=0;              // tests (tests/autopilot): 1-3 = a container airdrop of the tank / APC / truck asked
                                     // once a mission near the player, then the player put into what it brings
     bool npcCrewTest=false;         // tests (tests/autopilot): auto-crew also for empty vehicles no player has driven yet
@@ -1253,7 +1258,7 @@ struct DreadnoughtCue {
 };
 bool PlayerDreadnoughtCue(DreadnoughtCue* out) noexcept;
 // `real`: the gunner's own round (its damage); false: a remote gunner's, seen here (no damage: theirs is theirs).
-bool DreadnoughtRound(unsigned char* owner,const float* from,const float* at,bool real) noexcept;
+bool DreadnoughtRound(unsigned char* owner,int round,const float* from,const float* at,bool real) noexcept;
 // The vehicle class (crew.cpp kClasses) of an object by its vtable, -1 for anything else (a board-able vehicle or not).
 int VehicleClassOf(const void* object) noexcept;
 // The boarding gun (boarding.cpp): a real friendly hit suppresses damage and asks the game thread to board the

@@ -64,6 +64,7 @@
     {Category::ours,How::vehicle,"EDF6TR_PJET_FIGHTER_MISSION",L"玩家战斗机",L"app:/object/EDF6TR_PJET_FIGHTER_MISSION.sgo",0,0.5f,true,true,L"EDF6TR_PJET_FIGHTER_MISSION.SGO\0"},
     {Category::ours,How::vehicle,"EDF6TR_PJET_STRIKE_MISSION",L"玩家攻击机",L"app:/object/EDF6TR_PJET_STRIKE_MISSION.sgo",0,0.5f,true,true,L"EDF6TR_PJET_STRIKE_MISSION.SGO\0"},
     {Category::ours,How::vehicle,"EDF6TR_SAZABI_MISSION",L"沙扎比 MSN-04",L"app:/object/EDF6TR_SAZABI_MISSION.sgo",0,0.5f,true,true,L"EDF6TR_SAZABI_MISSION.SGO\0"},
+    {Category::ours,How::vehicle,"EDF6TR_DREADNOUGHT_MISSION",L"无畏舰",L"app:/object/EDF6TR_DREADNOUGHT_MISSION.sgo",0,0.5f,true,true,L"EDF6TR_DREADNOUGHT_MISSION.SGO\0"},
     {Category::ours,How::vehicle,"EDF6TR_JET_FIGHTER_PARKED_MISSION",L"制空战斗机·停放",L"app:/object/EDF6TR_JET_FIGHTER_PARKED_MISSION.sgo",0,0.5f,true,true,L"EDF6TR_JET_FIGHTER_PARKED_MISSION.SGO\0"},
     {Category::ours,How::vehicle,"EDF6TR_JET_INTERCEPTOR_PARKED_MISSION",L"截击机·停放",L"app:/object/EDF6TR_JET_INTERCEPTOR_PARKED_MISSION.sgo",0,0.5f,true,true,L"EDF6TR_JET_INTERCEPTOR_PARKED_MISSION.SGO\0"},
     {Category::ours,How::vehicle,"EDF6TR_JET_STRIKE_PARKED_MISSION",L"对地攻击机·停放",L"app:/object/EDF6TR_JET_STRIKE_PARKED_MISSION.sgo",0,0.5f,true,true,L"EDF6TR_JET_STRIKE_PARKED_MISSION.SGO\0"},

@@ -550,6 +550,11 @@
    "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],
+  "edf6tr_dreadnought_mission": [
+   "OBJECT/EDF6VC_DN_DREADNOUGHT.MRAB",
+   "WEAPON/BULLET_MEDIUMMISSILE01.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
   "edf6tr_drill_mission": [
    "OBJECT/EDF6VC_DRILL.MRAB",
    "WEAPON/V_NULL.RAB"

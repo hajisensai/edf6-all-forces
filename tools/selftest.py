@@ -1479,6 +1479,26 @@ def dreadnought_agrees() -> None:
     assert f'constexpr int kTurrets={vc.DREADNOUGHT_TURRETS};' in turrets
     for n in range(vc.DREADNOUGHT_TURRETS):
         assert f'{{L"dn_turret_{n}",L"dn_turret_{n}_gun",L"dn_turret_{n}_muzzle"}}' in turrets, n
+    # its turrets' guns, each its emplacement's (the user, 2026-10-25): dreadnought_turrets.inc kGuns (the round, a barrel's
+    # gap of the emplacement's FireInterval frames, the round's reach, the barrels' half spacing) and kGunOf, jet_bay.cpp
+    # kDnRounds (the file and the emplacement's damage), in make_tracked_combat.DREADNOUGHT_GUNS' order
+    import make_dreadnought
+    import make_tracked_combat as tc
+    kinds = list(make_dreadnought.TURRET_ROUNDS)
+    assert kinds == list(tc.DREADNOUGHT_GUNS) and len(vc.DREADNOUGHT_TURRET_GUNS) == vc.DREADNOUGHT_TURRETS
+    guns = re.findall(r'\{(\d+),(\d+),([\d.]+)f,([\d.]+)f,([\d.]+)f\}', turrets.split('kGuns[]={', 1)[1].split('};', 1)[0])
+    assert len(guns) == len(kinds), guns
+    for i, (kind, (rnd, gap, reach, barrel, spread)) in enumerate(zip(kinds, guns)):
+        g = tc.GUNS[kind]
+        assert int(rnd) == i and int(gap) == round(g['FireInterval'] * 1000 / 60), (kind, rnd, gap)
+        assert float(reach) == g['AmmoSpeed'] * g['AmmoAlive'] and float(barrel) == vc.DREADNOUGHT_BARRELS[kind], (kind, reach, barrel)
+        assert float(spread) == g['FireAccuracy'], (kind, spread, g['FireAccuracy'])
+    of = re.search(r'kGunOf\[kTurrets\]=\{([^}]*)\}', turrets)
+    assert of and [kinds[int(x)] for x in of.group(1).split(',')] == list(vc.DREADNOUGHT_TURRET_GUNS), 'kGunOf'
+    rounds = re.findall(r'\{L"app:/object/(\w+\.sgo)",L"(\w+\.SGO)","\w+",([\d.]+)f\}',
+                        src('src/jet_bay.cpp').split('kDnRounds[]={', 1)[1].split('};', 1)[0])
+    assert [(f.upper(), f2, float(d)) for f, f2, d in rounds] == \
+        [(make_dreadnought.TURRET_ROUNDS[k], make_dreadnought.TURRET_ROUNDS[k], tc.GUNS[k]['AmmoDamage']) for k in kinds], rounds
     marks = [m for _, m, *_ in vc.DREADNOUGHT_FIGHTERS.values()]
     assert f'kDnFighterMark={marks[0]:.1f}f' in code and marks == [marks[0] + k for k in range(len(marks))], marks
     table = src('src/jet_internal.h').split('kBodies[kBodyCount]={', 1)[1].split('};', 1)[0]
@@ -1569,12 +1589,12 @@ def hand_copies_agree() -> None:
     # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py; the
     # Proteus's shield: tools/make_proteus.py; the ultimate strike's rounds: tools/make_ultimate.py
     import make_proteus
-    # ...and the Dreadnought's fighters: tools/make_dreadnought.py
+    # ...and the Dreadnought's fighters and its turrets' rounds: tools/make_dreadnought.py
     import make_dreadnought
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
                | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES)
                | set(vc.BARRAGE_FILES)
-               | set(make_dreadnought.FIGHTER_SGOS.values()))
+               | set(make_dreadnought.FIGHTER_SGOS.values()) | set(make_dreadnought.TURRET_ROUNDS.values()))
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -2801,8 +2821,8 @@ def spawn_catalog_covers_every_registry() -> None:
     assert {r.sgo for r in catalog.edf5dlc_rows()} <= set(by) and catalog.edf5dlc_rows(), 'EDF5 DLC objects'
     assert set(gen.PLACEABLE_DERIVED) <= set(by), sorted(set(gen.PLACEABLE_DERIVED) - set(by))
     assert all(by[s].category == 'ours' and by[s].source == 'range' for s in gen.PLACEABLE_DERIVED)
-    # not the requests' copies, nor the BIG ones (the 500 m Dreadnought: the plan places it at the farthest points)
-    want_jets = {s for s, j in vc.JETS.items() if (j.player or j.parked) and s in gen.DERIVED and s not in gen.BIG}
+    # not the requests' copies, nor the submarine carrier (1664 m, NOT_PLACEABLE); the Dreadnought is (2026-10-25)
+    want_jets = {s for s, j in vc.JETS.items() if (j.player or j.parked) and s in gen.DERIVED and s not in gen.NOT_PLACEABLE}
     assert want_jets <= set(gen.PLACEABLE_DERIVED), f'a jet the player flies is not placeable: {sorted(want_jets - set(gen.PLACEABLE_DERIVED))}'
     installer_rows = {s for s, _, _ in catalog.INSTALLER_VEHICLES}
     for kind, v in vc.GROUND_VEHICLES.items():

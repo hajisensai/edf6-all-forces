@@ -790,6 +790,13 @@ DREADNOUGHT_WEAPON_BONES = ('dn_muzzle', 'dn_muzzle', 'dn_missile')
 # Its turrets (the user, 2026-10-21: 「船的炮塔是可以上人的」): a gunner seat each after the pilot's (seat 1 + n: turret n,
 # its bones dn_turret_<n> / _gun / _muzzle, tools/prep_dreadnought.py), the plugin turning it and firing from its muzzle.
 DREADNOUGHT_TURRETS = 8
+# Each turret's gun (tools/prep_dreadnought.py: turret_0 / 1 the SecMid, 2-5 the SecShort, 6 / 7 the SecLong), fired as the
+# fixed emplacement made of it fires (the user, 2026-10-25: 「无畏舰的炮塔攻击方式太抽象了，换成做好的固定炮台的那种吧」;
+# pylib/emplacement_model.py KINDS, tools/make_tracked_combat.py GUNS): its round (tools/make_dreadnought.py TURRET_ROUNDS),
+# its two barrels in turn; the barrels' half spacing in m (across its guns, either side of its muzzle bone), measured on the
+# model's guns (tools/make_dreadnought.py check_barrels). src/dreadnought_turrets.inc kGuns / kGunOf hold the same.
+DREADNOUGHT_TURRET_GUNS = ('emp_mid',) * 2 + ('emp_short',) * 4 + ('emp_long',) * 2
+DREADNOUGHT_BARRELS = {'emp_mid': 2.46, 'emp_short': 4.07, 'emp_long': 5.7}
 # Its collision box's centre over its keel (heli_rigid_body[0][1]: the model's whole box, the model standing on its keel):
 # the vehicle's position is that centre (src/dreadnought.cpp kKeel; tools/make_dreadnought.py check holds the SGO to it).
 DREADNOUGHT_KEEL = 55.25

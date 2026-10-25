@@ -285,9 +285,12 @@ int main() {
     ByLease(active.lease)->yaw=0.73f;ByLease(active.lease)->pitch=0.4f;
     float eye[3]{},look[3]{};
     Check(EnemyControlCamera(owner1,nullptr,nullptr,eye,look),"controlled camera uses the source player's own lease");
-    const float view[3]={look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]};
-    const float length=std::sqrt(view[0]*view[0]+view[1]*view[1]+view[2]*view[2]);
-    Check(std::fabs(view[1]/length-std::sin(0.4f))<0.00001f,"camera center ray exactly matches the absolute skill pitch");
+    // over its shoulder (2026-10-25): the centre looks at the skill's own aim ray (from the lock point at its yaw and
+    // pitch; no map hit: 300 m along it), the eye over the body rather than straight behind its lock point
+    const float aimDir[3]={std::sin(0.73f)*std::cos(0.4f),std::sin(0.4f),std::cos(0.73f)*std::cos(0.4f)};
+    bool onAim=true;for(unsigned i=0;i<3;++i)onAim=onAim && std::fabs(look[i]-((i==1 ? 2.0f : 0.0f)+aimDir[i]*300.0f))<0.001f;
+    Check(onAim,"camera centre looks at the absolute skill aim ray");
+    Check(eye[1]>2.0f-aimDir[1]*8.0f+1.0f,"camera eye rides over the controlled body, not behind its lock point");
     fixtureRayMode=1;Check(EnemyControlCamera(owner1,nullptr,nullptr,eye,look),"inclusive origin hit retains a usable enemy camera");
     const float pivot[3]={0,2,0};float retreat=0;for(unsigned i=0;i<3;++i)retreat+=(eye[i]-pivot[i])*(eye[i]-pivot[i]);
     Check(retreat>4,"zero-distance collision cannot collapse eye onto the controlled body");

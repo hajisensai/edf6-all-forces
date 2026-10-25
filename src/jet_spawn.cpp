@@ -592,7 +592,8 @@ void PreloadJets() noexcept {
         Log("JET preload %s (dolls %d) weapons %d (%d not installed)",line,dolls,weapons,missing);
         // The gunship's shells (GunshipFire), with its body; the impact charges; the EMC / Sazabi rounds and the Proteus's
         // shield whenever their files are installed (a Proteus may be called any time, ProteusRework switched on mid-mission).
-        // ...and with the Dreadnought, whose turrets fire the cannon's round (jet_bay.cpp TurretRound)
+        // ...and with the Dreadnought, whose turrets fire their emplacements' rounds (the cannon's on an install from before
+        // them: jet_bay.cpp TurretRound)
         PreloadShells(mgr,Preloaded(Body::gunship) || ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));
         PreloadUltimate(mgr);   // the ultimate strike's magic circles (ultimate.cpp)
     } __except(FaultLog("JET preload (nothing preloaded)",GetExceptionInformation())) {

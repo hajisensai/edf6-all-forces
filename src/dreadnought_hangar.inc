@@ -626,6 +626,16 @@ const unsigned char* WorldBody(const unsigned char* wrapper,std::uint32_t id) no
     using BodyFn=const unsigned char*(__fastcall*)(void*,std::uint32_t);
     return reinterpret_cast<BodyFn>((*reinterpret_cast<void***>(w))[0x80/8])(w,id);
 }
+// A wrapper's mass (docs/gravity-re.md §2: GetMass 0x11B13D0, 1 / the motion's inverse mass; 0 for static / keyframed),
+// -1 when its code is not as known.
+constexpr unsigned kBodyMass=0x11B13D0;
+const unsigned char kBodyMassHead[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x48,0x8B,0xD9};
+const unsigned char kBodyMassTail[]={0x0F,0x57,0xD2,0xF2,0x0F,0x10,0x40,0x40};   // at +0x4A
+float BodyMass(const unsigned char* wrapper) noexcept {
+    if(!wrapper || std::memcmp(image+kBodyMass,kBodyMassHead,sizeof(kBodyMassHead))!=0 ||
+       std::memcmp(image+kBodyMass+0x4A,kBodyMassTail,sizeof(kBodyMassTail))!=0)return -1.0f;
+    return reinterpret_cast<float(__fastcall*)(const void*)>(image+kBodyMass)(wrapper);
+}
 void StandReport(const unsigned char* v,const unsigned char* me,bool parts) noexcept {
     if(std::memcmp(image+kBodyInfo,kBodyInfoSig,sizeof(kBodyInfoSig))!=0 ||
        std::memcmp(image+kBodyInWorld,kBodyInWorldSig,sizeof(kBodyInWorldSig))!=0){Log("DREADNOUGHT stand report: code unexpected");return;}
@@ -635,7 +645,10 @@ void StandReport(const unsigned char* v,const unsigned char* me,bool parts) noex
         if(parts) {
             const auto count=At<std::size_t>(v,0x13A8);
             const auto* const base=At<const unsigned char*>(v,0x1398);
-            Log("DREADNOUGHT v=%p stand report: flight body id %u, %zu parts, hull shape %p",v,flight ? At<std::uint32_t>(flight,0xF0) : 0u,count,hull);
+            const unsigned char* const fhb=flight ? WorldBody(flight,At<std::uint32_t>(flight,0xF0)) : nullptr;
+            Log("DREADNOUGHT v=%p stand report: flight body id %u flags %08X info %08X mass %.6g kg, %zu parts, hull shape %p",v,
+                flight ? At<std::uint32_t>(flight,0xF0) : 0u,fhb ? At<std::uint32_t>(fhb,0x54) : 0u,fhb ? At<std::uint32_t>(fhb,0x8C) : 0u,
+                BodyMass(flight),count,hull);
             for(std::size_t i=0;i<count && i<16 && base;++i) {
                 const unsigned char* const p=base+i*0xC0;
                 const unsigned char* const b=At<const unsigned char*>(p,0x50);
@@ -644,9 +657,10 @@ void StandReport(const unsigned char* v,const unsigned char* me,bool parts) noex
                 const unsigned char* const hb=WorldBody(b,id);
                 const bool inWorld=reinterpret_cast<bool(__fastcall*)(const void*)>(image+kBodyInWorld)(b);
                 const float* pos=reinterpret_cast<const float*>(hb+0x30);
-                Log("DREADNOUGHT   part %zu id %u flags %08X word %04X info %08X world %d shape %p%s mode %d at (%.1f,%.1f,%.1f)",i,id,
+                Log("DREADNOUGHT   part %zu id %u flags %08X word %04X info %08X world %d shape %p%s mode %d mass %.6g at (%.1f,%.1f,%.1f)",i,id,
                     At<std::uint32_t>(hb,0x54),At<std::uint16_t>(hb,0x58),At<std::uint32_t>(hb,0x8C),inWorld ? 1 : 0,
-                    At<const void*>(hb,0x78),At<const void*>(hb,0x78)==hull ? " (the hull)" : "",At<std::int32_t>(p,0x9C),pos[0],pos[1],pos[2]);
+                    At<const void*>(hb,0x78),At<const void*>(hb,0x78)==hull ? " (the hull)" : "",At<std::int32_t>(p,0x9C),BodyMass(b),
+                    pos[0],pos[1],pos[2]);
             }
         }
         const unsigned char* const walk=me+0x680;
@@ -713,7 +727,9 @@ void WatchPlayer(ULONGLONG ms) noexcept {
             const float d[3]={p[0]-c0[0],p[1]-c0[1],p[2]-c0[2]};
             float local[3];
             ToShip(s->vehicle,d,local);
-            Log("DREADNOUGHT v=%p the player on foot at ship (%.1f,%.1f,%.1f), its keel at %.1f",s->vehicle,local[0],local[1],local[2],-kKeel);
+            Log("DREADNOUGHT v=%p the player on foot at ship (%.1f,%.1f,%.1f), its keel at %.1f; the ship asked (%.1f,%.1f,%.1f) moved (%.1f,%.1f,%.1f) m/s, its flight body %.6g kg",
+                s->vehicle,local[0],local[1],local[2],-kKeel,s->vel[0],s->vel[1],s->vel[2],s->measured[0],s->measured[1],s->measured[2],
+                BodyMass(At<const unsigned char*>(s->vehicle,kBody)));
             if(reporting)StandReport(s->vehicle,me,false);
         }
     }

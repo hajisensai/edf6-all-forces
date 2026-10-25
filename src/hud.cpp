@@ -2584,16 +2584,21 @@ void DreadnoughtHud(void* drawer,void* ctx,Text* text,float width,float height,f
     Label(text,lines,at,tx,y,0,kLineScale*0.75f,kDnIdle,L"%ls",Tr(Tx::dnLegend));
     // the keys, low in the middle
     const Config& k=Cfg();
-    wchar_t seats[32],view[32],hangarKey[32],descend[32],boost[32];
+    wchar_t seats[32],view[32],hangarKey[32],descend[32],boost[32],ahead[32];
     if(c.keys){KeyName(k.seatNextKey,seats,32);KeyName(k.firstPersonKey,view,32);KeyName(k.dreadnoughtHangarKey,hangarKey,32);
-               KeyName(k.dreadnoughtDescendKey,descend,32);KeyName(k.dreadnoughtBoostKey,boost,32);}
+               KeyName(k.dreadnoughtDescendKey,descend,32);KeyName(k.dreadnoughtBoostKey,boost,32);KeyName(k.dreadnoughtAheadKey,ahead,32);}
     else{SeatButtonName(k.dreadnoughtSeatButton,seats,32);wcscpy_s(view,L"V");SeatButtonName(k.dreadnoughtHangarButton,hangarKey,32);
-         SeatButtonName(k.dreadnoughtDescendButton,descend,32);SeatButtonName(k.dreadnoughtBoostButton,boost,32);}
+         SeatButtonName(k.dreadnoughtDescendButton,descend,32);SeatButtonName(k.dreadnoughtBoostButton,boost,32);
+         SeatButtonName(k.dreadnoughtAheadButton,ahead,32);}
+    // the look ahead only where it works: its key set, in the third person (first person looks from the seat's eye)
+    wchar_t aheadHint[48]{};
+    if(!c.firstPerson && (c.keys ? k.dreadnoughtAheadKey : k.dreadnoughtAheadButton)!=0)
+        std::swprintf(aheadHint,_countof(aheadHint),Tr(Tx::dnKeysAhead),ahead);
     if(c.seat==0) {
         if(c.keys)Label(text,lines,at,width*0.5f,height*0.905f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysFly),descend,boost);
         else Label(text,lines,at,width*0.5f,height*0.905f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnPadFly),descend,boost);
-        Label(text,lines,at,width*0.5f,height*0.935f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysBridge),hangarKey,seats,view);
-    } else Label(text,lines,at,width*0.5f,height*0.935f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysGun),seats,view);
+        Label(text,lines,at,width*0.5f,height*0.935f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysBridge),hangarKey,seats,view,aheadHint);
+    } else Label(text,lines,at,width*0.5f,height*0.935f,1,kLineScale*0.8f,kWhite,Tr(Tx::dnKeysGun),seats,view,aheadHint);
 }
 
 // A carrier's world bars (see the top): the hull's over its tower, each deck part's over its place.

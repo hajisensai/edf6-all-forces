@@ -1019,7 +1019,7 @@ int HiddenAimGuns(const unsigned char* seat,const unsigned char** out,int most) 
 bool KnownVehicle(const void* object) noexcept { return ClassOf(object)>=0; }
 
 bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
-    if(!out || !Cfg().enabled || !Cfg().playerJet)return false;
+    if(!out || !Cfg().enabled || !(Cfg().playerJet || Cfg().dreadnought))return false;
     __try {
         const auto* human=PlayerHuman();
         if(!human || human[kDead])return false;
@@ -1027,13 +1027,20 @@ bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
         if(riding && At<std::int32_t>(riding,8)>0)return false;
         const auto mask=At<std::uint32_t>(human,0x31C);
         const auto* pos=reinterpret_cast<const float*>(human+kPosition);
-        float best=120.0f*120.0f;
+        // m: a seat's entrance marked within this of the player; the 500 m Dreadnought's door (by its right side's
+        // middle, on the ground) within kShipEntrance: its other entrance, the bridge, is reached from that door (the
+        // user, 2026-10-25: 「缺少蓝色的入口提示」: it is no IsJet, so its door had never been marked)
+        constexpr float kEntrance=120.0f,kShipEntrance=400.0f;
+        float best=kShipEntrance*kShipEntrance;
         bool found=false;
         const ULONGLONG now=GameMs();
         for(const auto& st:states) {
             if(!st.ref || now-st.seen>300)continue;
             auto* v=static_cast<unsigned char*>(const_cast<void*>(st.ref.obj));
-            if(!Readable(v,kSeatCount+8) || !st.ref.Is(v) || !IsJet(v) || !PlayerJetBoardable(v))continue;
+            if(!Readable(v,kSeatCount+8) || !st.ref.Is(v))continue;
+            const bool ship=Cfg().dreadnought && IsDreadnought(v);
+            if(!ship && !(Cfg().playerJet && IsJet(v) && PlayerJetBoardable(v)))continue;
+            const float most=ship ? kShipEntrance : kEntrance;
             for(unsigned i=0;i<SeatCount(v);++i) {
                 const auto* seat=SeatAt(v,i);
                 const Rider rider=SeatRider(seat);
@@ -1043,7 +1050,7 @@ bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
                 if(!SeatPoint(v,i,point,&reach) || !std::isfinite(reach) || reach<=0.0f)continue;
                 const float dx=point[0]-pos[0],dy=point[1]-pos[1],dz=point[2]-pos[2];
                 const float d=dx*dx+dy*dy+dz*dz;
-                if(!std::isfinite(d) || d>=best)continue;
+                if(!std::isfinite(d) || d>=best || d>=most*most)continue;
                 best=d;found=true;
                 std::memcpy(out->at,point,12);out->reach=reach;out->distance=std::sqrt(d);out->inReach=d<=reach*reach;
                 out->hail=out->coming=false;
@@ -1053,7 +1060,7 @@ bool PlayerBoardingEntrance(BoardingEntrance* out) noexcept {
         // None to board near them: the one up in the air the hail key calls down (the user, 2026-10-07: "the carrier has
         // no boarding point": an NPC carrier holds 150 m up, boardable only once called down, and nothing said so).
         float at[3],distance=0.0f;bool coming=false;
-        if(!PlayerJetHailHint(pos,at,&distance,&coming))return false;
+        if(!Cfg().playerJet || !PlayerJetHailHint(pos,at,&distance,&coming))return false;
         std::memcpy(out->at,at,12);out->reach=0.0f;out->distance=distance;out->inReach=false;out->hail=true;out->coming=coming;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
