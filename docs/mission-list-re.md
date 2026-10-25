@@ -424,5 +424,6 @@ flags 别带 bit7/bit8（它们会改 `mgr+0x14FFC` 的剧情分支标志），�
   - 先把所有行设为状态 4（锁定），只有第 0 行为 1；逐行扫描，已通关的行把字段 3 的后继设为 1（或 2）；离线时遇到第一个「未通关且状态仍为 4」的行（`0x8a2330..0x8a2344` 记进 `edi`）就停（`0x8a2355..0x8a237e`）。
   - 停下之后的收尾（`0x8a23c1..0x8a241a`）把**整张表**里状态 0~3 的行都放进显示列表，所以靠「第 0 行的后继」追加的行打完第一关就会出现（未扫描到的行 `+4`、`+0xC` 为 0，与原版普通行的取值一样）。但这要给第 0 行加第二个后继（通关后不再自动进 M001），还得靠插件的行数上限保住结局和通关率。
   - 独立任务包的第 0 行开局就是状态 1，新存档也能进，存档自成一套，不需要这些。
+- 2026-10-25 起列表在第 0 行之后追加 7 行对战预制关（`EDF6/EDF6TR_PVP_*`，`tools/make_edf5_campaign.py` `PVP_PRESETS`，布置见 `testrange/gen.py` `PVP_PLANS`），行值同样抄 RM015，依次互为后继；第 0 行位置不变，存档按行号记的通关不受影响，新布局追加进 `edf5campaign/pack_layouts.json`。这几关都不会通关，所以插件在选关构建时总是打开测试场任务包的每一行（`src/edf5campaign.cpp` `OpenRows`：内容编号等于 `TestRangeContent` 就和 `PortedMissionsUnlocked` 一样走 `OpenAll`，不看该 ini 项），不写存档。**未实机**。
 - 关卡目录是新的（原版没有 `EDF6/EDF6TR_RANGE`）：放的是原版任务目录的三件 `MISSION.AC` / `MISSION.RMPA` / `MISSION.JSON`（后两件取自场地任务）。`EDF.dll` 里只按名字引用 `mission.bvm` 和 `.rmpa`，没有 `MISSION.JSON`；仍按原版目录的样子放齐（以前覆盖 RM015 时它从 Root.cpk 里落下来）。
 - 切到这个模式（`tests/autopilot` 的 `mission range`）：脚本的 `bool SetMode(int)` 原生实现 `0x70FAB0` 在 `modes[idx]` 非空时调用 `0xDC460(GS, idx)`；模式在 `GS+0x20`（数量 `GS+0x30`），每个模式的值在 `cfg + *(cfg+8)`（`cfg = *(mode+0x10)`）：`+0x68` 第 8 项、`+0x74` 第 9 项、`+0x80` 第 10 项（`0x8C4CA0` 按后两项找模式）。**未实测**：在 HQMain 协程开头调用是否安全。
