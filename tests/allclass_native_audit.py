@@ -48,19 +48,26 @@ arrays = {name: bytes(int(x, 16) for x in re.findall(r'0x([0-9A-Fa-f]{2})', body
           for name, body in re.findall(r'const unsigned char (k\w+Sig)\[\]=\{([^}]*)\};', source)}
 consts = {name: int(value, 16) for name, value in re.findall(r'constexpr std::size_t (k\w+)=0x([0-9A-Fa-f]+);', source)}
 where = {'kSeatBuildCallSig': consts['kSeatBuildCall'] - 3, 'kSeatBuildSig': consts['kSeatBuild'], 'kMaskStoreSig': 0x62B79C,
-         'kVectorSig': 0x62BD57, 'kAppendSig': 0x62BE33, 'kRideStateSig': 0x57AE5C, 'kSetCasStateSig': consts['kSetCasState']}
+         'kVectorSig': 0x62BD57, 'kAppendSig': 0x62BE33, 'kRideStateSig': 0x57AE5C, 'kSetCasStateSig': consts['kSetCasState'],
+         'kRiderPlaceSig': 0x5751D3}
 assert set(arrays) == set(where), sorted(set(arrays) ^ set(where))
 for name, rva in where.items():
     want = arrays[name]
     assert len(want) >= 6, name
     assert at(rva, len(want)) == want, f'{name} at {rva:#x}: {at(rva, len(want)).hex()} != {want.hex()}'
 # The Install reads them at the same addresses this audit does.
-for name, rva in (('kMaskStoreSig', 0x62B79C), ('kVectorSig', 0x62BD57), ('kAppendSig', 0x62BE33), ('kRideStateSig', 0x57AE5C)):
+for name, rva in (('kMaskStoreSig', 0x62B79C), ('kVectorSig', 0x62BD57), ('kAppendSig', 0x62BE33), ('kRideStateSig', 0x57AE5C),
+                  ('kRiderPlaceSig', 0x5751D3)):
     assert f'Matches({rva:#X},{name}'.replace('0X', '0x') in source, name
 
 assert rel32_target(consts['kSeatBuildCall']) == consts['kSeatBuild']
 assert rel32_target(consts['kRideStateCall']) == consts['kSetCasState']
 assert consts['kRideStateCall'] == 0x57AE5C + len(arrays['kRideStateSig']) - 5
+# The ride's per-frame copy of the seat's matrix (seat+0x270..+0x2AF) into the rider (+0x60..+0x9F), then the normalise
+# PlaceRider wraps (the one writer of the rider's position while riding: a write breakpoint on rider+0x94, 2026-10-25).
+assert rel32_target(consts['kRiderPlaceCall']) == consts['kNormalize']
+assert consts['kRiderPlaceCall'] == 0x5751D3 + len(arrays['kRiderPlaceSig']) - 5
+assert consts['kRiderSeat'] == 0x1540 and at(0x5751D3, 7) == bytes.fromhex('488b8640150000')
 # The only rel32 call of the seat build: every vehicle's seats come through the one site that is redirected.
 calls = [m.start() for m in re.finditer(b'\xE8', img[lo:hi - 5])]
 calls = [lo + p for p in calls if lo + p + 5 + struct.unpack_from('<i', img, lo + p + 1)[0] == consts['kSeatBuild']]
