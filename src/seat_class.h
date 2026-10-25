@@ -29,4 +29,38 @@ constexpr bool Admits(std::uint32_t human,std::uint32_t seatOn,std::uint32_t sea
 // other stock seat hides its rider (DispCharacter 0). A rider whose class lacks the seat's state sits as on a bench:
 // kFallbackRide, the one riding state all four classes have.
 constexpr wchar_t kFallbackRide[]=L"vehicle_striker_rear";
+
+// The bench fallback's lift (allclass.cpp PlaceRider). A seat locator is fitted for its own Animation: the rider's
+// pelvis lands where that state puts it (pylib/edf41bike.py pose_fit for the 408). A rider sitting the bench pose
+// instead has its pelvis that much lower and further back: the 408's / V503's / V613's bike seat, Wing Diver and Fencer
+// sank about 0.65 m into the bike (docs/edf41-bike-re.md). Each frame the ride copies the seat's matrix into the rider
+// (EDF+0x5751D3..0x57520B: seat+0x270..+0x2AF to rider+0x60..+0x9F, the one write of the rider's position while it
+// rides, found with a write breakpoint on rider+0x94, live 2026-10-25); the lift moves that copy, in the rider's own
+// axes, by the seat state's pelvis less the bench pose's: the pelvis where the seat was fitted to put it.
+// The pelvis (koshi, frame 0, every key the same) from the game's CAS (tests/allclass_bench_lift_audit.py recomputes
+// them from Root.cpk): vehicle503_bike_driver (0, 1.0158, -0.0913) and vehicle613_bike_driver (0, 1.0456, -0.0435) in
+// the Ranger's and the Air Raider's CAS (the same in both); vehicle_striker_rear (0.0052, 0.3602, -0.4715) in the Wing
+// Diver's, (0, 0.3569, -0.4317) in the Fencer's.
+struct BenchLift { const wchar_t* state; std::uint32_t cls; float d[3]; };
+inline constexpr BenchLift kBenchLifts[]={
+    {L"vehicle503_bike_driver",2,{-0.0052f,0.6556f,0.3802f}},
+    {L"vehicle503_bike_driver",4,{0.0f,0.6589f,0.3404f}},
+    {L"vehicle613_bike_driver",2,{-0.0052f,0.6854f,0.4280f}},
+    {L"vehicle613_bike_driver",4,{0.0f,0.6887f,0.3882f}},
+};
+// The lift for a rider of class mask `cls` (human+0x31C) put on the bench pose instead of `state`; null: none known.
+inline const BenchLift* BenchLiftFor(const wchar_t* state,std::uint32_t cls) noexcept {
+    if(!state)return nullptr;
+    for(const BenchLift& l:kBenchLifts) {
+        if(!(cls&l.cls))continue;
+        const wchar_t* a=state;const wchar_t* b=l.state;
+        while(*a && *a==*b){++a;++b;}
+        if(*a==*b)return &l;
+    }
+    return nullptr;
+}
+// `m`: the rider's matrix as the ride copies it (rows: x, y, z axes, then the position), moved by `d` in its own axes.
+inline void Lift(float* m,const float* d) noexcept {
+    for(int c=0;c<3;++c)m[12+c]+=d[0]*m[c]+d[1]*m[4+c]+d[2]*m[8+c];
+}
 }  // namespace seatclass
