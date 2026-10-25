@@ -6,6 +6,18 @@
 #include <new>
 namespace crew {
 bool EnemyControlRadarObserverTeam(const void*,int*) noexcept {return false;}
+// team_native.cpp is not linked: the manager is a recorder. The overlay a match writes and the clears are what the
+// fixture checks; the live row count is what PvpNativePrepare reads.
+unsigned teamStubSets=0,teamStubClears=0;
+int teamStubRows=team_native::kTeamCapacity;
+bool teamStubAccept=true;
+team_native::Overlay teamStubOverlay{};
+bool SetTeamOverlay(const team_native::Overlay& overlay) noexcept {
+    if(!teamStubAccept || !overlay.Valid())return false;
+    ++teamStubSets;teamStubOverlay=overlay;return true;
+}
+void ClearTeamOverlay() noexcept {++teamStubClears;}
+int NativeTeamRows() noexcept {return teamStubRows;}
 }
 
 namespace {
@@ -158,6 +170,36 @@ int main() {
     refuseTeamChange=false;CHECK(crew::PvpNativeApply(disabled));
     CHECK(edf::At<int>(human.bytes,edf::kTeam)==0);
     crew::ResetPvpNative();CHECK(edf::At<LONG>(human.control,12)==1);
+
+    // The team manager's relations follow the mode: a disabled state clears the overlay only once the native baseline
+    // is back (a refused restore leaves it, the next frame finishes both), and an enabled state is not written while
+    // its members cannot be collected (this fixture has no live mission to collect: Collect fails, nothing moved).
+    {
+        CHECK(crew::ApplyCollected(collection));refuseTeamChange=true;
+        const unsigned clears=crew::teamStubClears;
+        CHECK(!crew::PvpNativeApply(disabled));CHECK(crew::teamStubClears==clears);
+        refuseTeamChange=false;CHECK(crew::PvpNativeApply(disabled));CHECK(crew::teamStubClears==clears+1);
+        crew::ResetPvpNative();
+        pvp_protocol::State enabledState{};enabledState.enabled=true;enabledState.count=1;
+        std::memcpy(enabledState.entries[0].puid,"member",7);pvp_protocol::SetPick(enabledState.entries[0],{1,0,crew::pvp_match::kNoUnit});
+        crew::pvp_match::Relations humans;humans.FromPreset(crew::pvp_match::Preset::humansVsAliens);enabledState.relations=humans;
+        const unsigned sets=crew::teamStubSets;
+        CHECK(!crew::PvpNativeApply(enabledState));CHECK(crew::teamStubSets==sets);
+        CHECK(edf::At<int>(human.bytes,edf::kTeam)==0 && !crew::activeState.enabled);
+        // Prepare asks the manager for every faction row, and the relations to be valid, before anything else.
+        crew::teamStubRows=7;CHECK(!crew::PvpNativePrepare(enabledState));
+        crew::teamStubRows=0;CHECK(!crew::PvpNativePrepare(enabledState));
+        crew::teamStubRows=crew::team_native::kTeamCapacity;
+        auto bad=enabledState;bad.relations.rel[0][1]=crew::pvp_match::kEnemy;bad.relations.rel[1][0]=crew::pvp_match::kFriend;
+        CHECK(!crew::PvpNativePrepare(bad));
+        // A disabled state needs no rows.
+        crew::teamStubRows=7;CHECK(crew::PvpNativePrepare(disabled));crew::teamStubRows=crew::team_native::kTeamCapacity;
+        // The overlay a state writes is its relations' (the production call is SetTeamOverlay(TeamOverlay(relations))).
+        CHECK(crew::pvp_match::TeamOverlay(humans).Valid());
+        const unsigned resetClears=crew::teamStubClears;
+        CHECK(crew::ApplyCollected(collection));crew::ResetPvpNative();
+        CHECK(crew::teamStubClears==resetClears+1);   // a scene reset that restored everything puts the stock relations back
+    }
 
     FakeObject vehicle(false,5,false);
     crew::Collection riding{};riding.objectsCount=1;riding.objects[0]={crew::ObjRef::Of(vehicle.bytes),1,false,true};

@@ -16,6 +16,7 @@
 #include "airbound.h"
 #include "ferry_line.h"
 #include "air_chase.h"
+#include "sortie_plan.h"
 #include <cmath>
 
 namespace crew {
@@ -446,6 +447,19 @@ struct ShellState {
 constexpr Prefer LoadoutPrefer(Prefer kind,int airRounds,int groundRounds) noexcept {
     return airRounds>0 && groundRounds<=0 ? Prefer::air : groundRounds>0 && airRounds<=0 ? Prefer::ground : kind;
 }
+// A sortie call's jet (jet_sortie.cpp, docs/plan-2026-10-25-strikes.md §1.2): its pass, its line through the mark
+// (sortie_plan.h), how far it is (phase: the gun run's dive begun, the hit and run's climb), what it let go (fired, its
+// last bomb at bombAt; its last missile seen, missileSeen) and at whom (struck: each missile another target), a lap.
+struct Sortie {
+    SortiePass pass=SortiePass::none;
+    bool done=false;
+    sortie::Line line{};
+    ULONGLONG begun=0,phaseAt=0,bombAt=0,missileSeen=0;
+    int phase=0,fired=0;
+    const void* struck[8]{};
+    int struckCount=0;
+    sortie::Lap lap{};
+};
 struct Jet {
     ObjRef ref;              // the vehicle: address and weak-this control block, on which a weak reference is
                              // held while the entry is (HoldRef): the block outlives the object, so a destroyed
@@ -504,6 +518,7 @@ struct Jet {
     ULONGLONG heldFrame=0;
     support::PassLine ferryLine{};
     ferry::Pass ferryPass{};
+    Sortie sortie{};            // a sortie call's one pass (jet_sortie.cpp)
     unsigned char* Vehicle() const noexcept { return static_cast<unsigned char*>(const_cast<void*>(ref.obj)); }
 };
 constexpr int kMaxJets=64,kPatrolRings=6;
@@ -675,6 +690,20 @@ void Attack(Jet& j,const Arms& arms,const float* pos,const float* nose,const flo
 bool WeaponsFree(const Jet& j) noexcept;
 void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float* lead,bool gunsOk,bool missileOk,const Arms& a,
           ULONGLONG ms) noexcept;
+
+// --- jet_sortie.cpp ---
+// A sortie's start (ActivateSupportAircraft): its pass at `mark`, its line from where it is (`pos`) and the way it flies.
+void SortieBegin(Jet& j,SortiePass pass,const float* mark,const float* pos,const float* heading,ULONGLONG ms) noexcept;
+// Its guidance this frame (Guide, before its kind's): true when it set `want` / `speed` (and the fire gates); false: its
+// kind's own (the gunship's circle) or done.
+bool SortieGuide(Jet& j,const Kind& kind,const Arms& arms,const float* pos,const float* nose,const float* lead,float height,
+                 ULONGLONG ms,float* want,float* speed,bool* gunsOk,bool* missileOk) noexcept;
+// Its bombs (the carpet's, the hit and run's), after the fire step.
+void SortieFire(Jet& j,const unsigned char* v,const float* pos,const Arms& arms,ULONGLONG ms) noexcept;
+bool SortieStruck(const Jet& j,const void* object) noexcept;      // a target one of its missiles went at already
+bool SortieStoreFlyer(const Jet& j,bool flyer) noexcept;          // PickStore's: the missile rain's air-to-air stores
+ULONGLONG SortieLockMs(const Jet& j,ULONGLONG stock) noexcept;    // Fire's lock hold and missile gap for a sortie's pass
+ULONGLONG SortieMissileGapMs(const Jet& j,ULONGLONG stock) noexcept;
 void JetLog(const Jet& j,const unsigned char* v,const float* pos,const Arms& a,float speed,float clear,ULONGLONG ms) noexcept;
 bool JetBarrelLog(const unsigned char* v,const float* pos) noexcept;
 void ResetTargets() noexcept;

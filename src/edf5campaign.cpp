@@ -9,7 +9,8 @@
 // endings (none: MAINSCRIPT plays them for contents 0..2) and the story's statistics (content 0 only) are the
 // game's own handling of a mode. EDF5CampaignContent=0 (no packs installed): the native answer alone.
 // The test range (testrange/gen.py) is a mission pack of its own too, no longer laid over RM015: an offline and an
-// online mode sharing one content id, TestRangeContent (0: not installed), owned through the same hook. So is EDF4.1's
+// online mode sharing one content id, TestRangeContent (0: not installed), owned through the same hook; its rows (the
+// range, then the PvP presets) are all opened by the mission select's hook, as none of them ever ends. So is EDF4.1's
 // story (plan P6), slotted after the range so no installed pack's id moves, and its two DLC mission packs right after
 // it: EDF41Content .. +2 (0: not installed).
 // Since 2026-10-18 the ids are fixed (mission_packs.h: 65..71, whatever else the machine has installed: a room's DLC
@@ -236,7 +237,10 @@ void OpenRows(unsigned char* vec) noexcept {
     unsigned char* gs=nullptr;
     const int content=CurrentContent(gs);
     const packs::Pack* const pack=Installed(cfg,content);
-    const bool unlock=cfg.portedMissionsUnlocked && ported::StoryPack(content,cfg.edf5CampaignContent,cfg.edf41Content);
+    // The test range's pack always: its rows (the range, then the PvP presets, tools/make_edf5_campaign.py PVP_ROWS)
+    // never end, so none would ever open the next.
+    const bool unlock=(cfg.portedMissionsUnlocked && ported::StoryPack(content,cfg.edf5CampaignContent,cfg.edf41Content))
+        || (cfg.testRangeContent>0 && content==cfg.testRangeContent);
     const bool lock=pack && pack->MissingCount()>0;
     if(!unlock && !lock)return;
     auto* const begin=At<ported::ListRow*>(vec,0);
@@ -329,7 +333,8 @@ bool InstallPortedMissions() noexcept {
 // LoadSaveData_ModeSelect, then UnlockDownloadContents, MAINSCRIPT.AS 842..852): one of our packs' save, at
 // GS+0x57A4, marked with its layout and moved to the rows now once (mission_packs.h MigrateModeSave). Before the game
 // writes it again, so the next save has the new rows and the marker. A save whose layout cannot be told is left as it
-// is and the player told, once a session per pack.
+// is and not marked (nothing about its rows is known, so no stamp is safe): the same judgement runs at every load and
+// only the log says so (2026-10-25 user: the popup it used to raise each launch was removed).
 namespace { int lastMigration=-1,lastMigrationContent=-1; }
 void SetMissionPackSaveHook(bool ready) noexcept { saveHookReady=ready; }
 void MigrateMissionPackSave(unsigned char* gs) noexcept {
@@ -345,20 +350,8 @@ void MigrateMissionPackSave(unsigned char* gs) noexcept {
         Log("PACK save: content %d (%s) %s (marker %08x -> layout %08x, highest row %d, stable rows %d, older layouts %d)",
             content,pack->tag,packs::MigrationName(m),marker,pack->layout,high,pack->stableRows,pack->fromCount);
     lastMigration=static_cast<int>(m);lastMigrationContent=content;
-    if(m!=packs::Migration::kForeign && m!=packs::Migration::kUndetermined)return;
-    wchar_t text[640]{};
-    if(m==packs::Migration::kUndetermined)
-        std::swprintf(text,std::size(text),L"「%ls」的存档是 2026-10-18 以前的全军出击写的。那时缺资源的关会从列表里删掉，后面的关整体前移；"
-            L"这份存档用到了第 %d 关以后，而本机没有当时安装的任务列表记录（或记录与存档对不上），无法确定它当时缺了哪几关。\n\n"
-            L"存档没有被改动，也没有打上新布局的标记：第 %d 关以后的通关记录可能错位。如果当时安装器没有跳过这个任务包的任何关，记录是对的。",
-            packs::Name(content),pack->stableRows+1,pack->stableRows+1);
-    else
-        std::swprintf(text,std::size(text),L"「%ls」的存档是另一版本的全军出击写的（关卡布局 %08x，本版是 %08x），本版不知道怎样换算它的关号。\n\n"
-            L"存档没有被改动：通关记录可能与关卡对不上。请换回写这份存档的版本，或更新到最新版本的全军出击。",
-            packs::Name(content),marker,pack->layout);
-    char key[48]{};
-    std::snprintf(key,sizeof(key),"pack-save;%d;%s",content,packs::MigrationName(m));
-    notice::Post(key,L"全军出击：任务包存档",text,notice::kOnce);
+    // 2026-10-25 user: 「每次进4.1任务包的提示删掉，总是说任务与上次不符」: no popup. The save is left as it is (nothing
+    // is guessed), the Log line above says why; a layout this version cannot map means its clears may sit on other rows.
 }
 
 namespace {

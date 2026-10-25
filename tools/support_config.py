@@ -17,7 +17,9 @@ WEAPONS = (('rifle', '步枪'), ('flame', '火焰'), ('rocket', '火箭'), ('sho
 # rescue).
 AIR_KEYS = ('INTERCEPTOR', 'INTERCEPTOR_F', 'STRIKE', 'STRIKE_F', 'MULTIROLE', 'MULTIROLE_F', 'FIGHTER', 'FIGHTER_F',
             'CARRIER', 'CARRIER_F', 'HELI', 'HELI_F', 'BLAST_CARRIER', 'BLAST_CARRIER_F', 'DOLL_CARRIER', 'DOLL_CARRIER_F', 'SUB',
-            'GUNSHIP', 'GUNSHIP_F', 'MEDIC_HELI', 'MEDIC_HELI_F')
+            'GUNSHIP', 'GUNSHIP_F', 'MEDIC_HELI', 'MEDIC_HELI_F',
+            'SORTIE_HELI_STRAFE', 'SORTIE_HELI_HUNTER', 'SORTIE_HELI_CIRCLE', 'SORTIE_DIVE', 'SORTIE_MISSILE_PASS',
+            'SORTIE_CARPET', 'SORTIE_POPUP', 'SORTIE_MISSILE_RAIN', 'SORTIE_HAMMER', 'SORTIE_WOLFPACK', 'SORTIE_GUIDED')
 GROUND_KEYS = ('SQUAD', 'PLATOON', 'TANK_CREWED', 'TANK_DELIVERY', 'TRANSPORT_CREWED', 'TRANSPORT_DELIVERY', 'TRUCK_CREWED',
                'TRUCK_DELIVERY', 'SQUAD_HELI', 'PLATOON_HELI',
                'SQUAD_AIRDROP', 'PLATOON_AIRDROP', 'TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP', 'RESCUE')
@@ -26,7 +28,9 @@ LABELS = dict(zip(UNIT_KEYS, (
     '截击机·守点', '截击机·跟随', '对地攻击机·守点', '对地攻击机·跟随', '多用途机·守点', '多用途机·跟随', '制空战斗机·守点',
     '制空战斗机·跟随', '无人机母舰·守点', '无人机母舰·跟随', '直升机·守点', '直升机·跟随', '自爆无人机母舰·守点',
     '自爆无人机母舰·跟随', '人偶无人机母舰·守点', '人偶无人机母舰·跟随', '潜水母舰', '炮艇机·守点', '炮艇机·跟随',
-    '医疗直升机·守点', '医疗直升机·跟随', '步兵小队（4人）', '步兵大队（12人）', '坦克·有人', '坦克·空车交付',
+    '医疗直升机·守点', '医疗直升机·跟随',
+    '出击·直升机扫射', '出击·导弹猎手', '出击·死亡回旋', '出击·俯冲扫射', '出击·导弹掠过', '出击·地毯轰炸', '出击·打了就跑',
+    '出击·天顶导弹雨', '出击·锤与砧', '出击·狼群', '出击·引导打击', '步兵小队（4人）', '步兵大队（12人）', '坦克·有人', '坦克·空车交付',
     '装甲运兵车·有人', '装甲运兵车·空车交付', '民用轻卡·有人', '民用轻卡·空车交付',
     '直升机机降·小队（4人）', '直升机机降·大队（12人）', '运输机空降·小队（4人）', '运输机空降·大队（12人）',
     '直升机投送·坦克', '直升机投送·装甲运兵车', '直升机投送·民用轻卡', '海上救援直升机')))

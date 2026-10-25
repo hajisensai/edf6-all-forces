@@ -22,7 +22,7 @@ struct Plan {
     Unit units[kMaxUnits]{};
     // Canonical native player identity; team 0 preserves stock behaviour while retaining ownership.
     unsigned char requester[32]{};
-    std::uint32_t team=0; // 0 stock, 1/2 the host-authorized PvP side
+    std::uint32_t team=0; // 0 stock, else the host-authorized PvP faction team (pvp_match.h PvpTeam)
 };
 enum class PlanResult { pending,ready,refused };
 enum class RequestStatus : std::uint32_t { accepted,active,refused,timeout,cancelled,interrupted };
@@ -93,6 +93,8 @@ bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept;
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept;
 // Host planner: resolve a transport-authenticated peer to its sealed current-world native player.
 bool SupportAuthenticatedRequester(std::uint32_t peer,ObjRef* out) noexcept;
+// The plan's requester is this machine's own player (its native network ID). Game thread.
+bool SupportPlanRequesterIsLocal(const support_net::Plan& plan) noexcept;
 // Called before native player construction once this world has sealed its
 // actual participant PUIDs. A newly joined lobby member waits for the next world.
 bool SupportParticipantAllowed(void* puid) noexcept;

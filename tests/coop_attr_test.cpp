@@ -195,8 +195,22 @@ void GunnerSeat() {
 }
 }  // namespace
 
+// The room protocol's EDF6Coop: 2.7.0 and later (coop_attr.h kRoomCoop*).
+void RoomVersion() {
+    using crew::coopattr::CoopVersion;
+    int a=-1,b=-1,c=-1;
+    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.7.0",&a,&b,&c)==CoopVersion::ok && a==2 && b==7 && c==0,"2.7.0 is enough");
+    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.10.0",nullptr,nullptr,nullptr)==CoopVersion::ok,"2.10.0 is later than 2.7.0");
+    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=3.0.0",nullptr,nullptr,nullptr)==CoopVersion::ok,"3.0.0 too");
+    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.6.1",&a,&b,&c)==CoopVersion::old && a==2 && b==6 && c==1,"2.6.1 is too old, read back");
+    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.5.0",nullptr,nullptr,nullptr)==CoopVersion::old,"2.5.0 too old");
+    Expect(crew::coopattr::RoomCoopVersion(nullptr,nullptr,nullptr,nullptr)==CoopVersion::unreadable,"no marker: unreadable");
+    Expect(crew::coopattr::RoomCoopVersion("EDF6COOP_VERSION=2.7",nullptr,nullptr,nullptr)==CoopVersion::unreadable,"another shape: unreadable");
+}
+
 int main() {
     Usable();
+    RoomVersion();
     Publishing();
     Reading();
     WordAndRoom();

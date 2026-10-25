@@ -75,6 +75,9 @@ FARPROC ResolveDependency(const char* name) noexcept {
     if(!std::strcmp(name,"EDF6Coop_ResolveMissionPlayerPuid"))return dependencyMode==2 ? nullptr : reinterpret_cast<FARPROC>(&Identity);
     // The room check asks for the v1 table and refuses one it cannot use (coop_attr.h Usable): 6 none, 7 another version.
     if(!std::strcmp(name,"EDF6CoopGetMemberAttributeApi"))return dependencyMode==6 ? nullptr : reinterpret_cast<FARPROC>(&AttributeTable);
+    // The room protocol's EDF6Coop (coop_attr.h kRoomCoop*): 8 the 2.6.1 before it, 9 none that says its version.
+    static const char kOld[]="EDF6COOP_VERSION=2.6.1",kCurrent[]="EDF6COOP_VERSION=2.7.0";
+    if(!std::strcmp(name,"EDF6CoopVersion"))return dependencyMode==9 ? nullptr : reinterpret_cast<FARPROC>(reinterpret_cast<std::uintptr_t>(dependencyMode==8 ? kOld : kCurrent));
     return nullptr;
 }
 void RecordNotice(const wchar_t* text) noexcept {++notices;depNotice=text;}
@@ -346,7 +349,7 @@ int main(int argc,char** argv){
         Check(publish(nullptr,&options)==0 && writes.size()==2,"publish marker and native search field");
         const auto wire=writes.back().value;
         Check(wire==kAllForcesRoomPrefix+type && value.value==type,"outgoing type encoded without changing caller memory");
-        Check(writes.front().value==1 && !std::strcmp(writes.front().key,"AF_PROFILE"),"persistent profile marker");
+        Check(writes.front().value==kAllForcesRoomProtocol && !std::strcmp(writes.front().key,"AF_PROFILE"),"persistent profile marker");
         for(const auto pair:{std::pair<std::int64_t,std::int64_t>{0x91,0x94},{0x12,0x94}}){
             writes.clear();Data lo{1,"SEARCH_TYPE",pair.first,1},hi{1,"SEARCH_TYPE",pair.second,1};
             const Options low{1,&lo,3},high{1,&hi,2};
@@ -370,10 +373,13 @@ int main(int argc,char** argv){
                 Check(!(wire>=static_cast<std::uint32_t>(range) && wire<=static_cast<std::uint32_t>(range>>32)),"real vanilla search range excludes All Forces");}
         }
     }
+    value.value=kAllForcesRoomPrefix-0x100+0x93;const auto beforeOlder=joins;
+    enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
+    Check(joins==beforeOlder,"an older room protocol's room refused (no compatibility with older builds)");
     value.value=kAllForcesRoomPrefix+0x100+0x93;const auto before=joins;
     enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
     Check(joins==before,"unknown future profile refused");
-    Check(releases==17,"copied EOS attributes released on accept and refusal");
+    Check(releases==18,"copied EOS attributes released on accept and refusal");
     rawResult=4;const auto beforeReadFailure=joins;
     enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
     Check(joins==beforeReadFailure && result==10 && lastLog.find("reason=search-type-read-failed")!=std::string::npos
@@ -387,7 +393,7 @@ int main(int argc,char** argv){
     // Both native entry points must reject missing/old/incomplete/uninitialized
     // Coop while a matching bridge is usable in the menu (world still absent).
     const auto make=base ? reinterpret_cast<crew::Create>(*Slot("EOS_Lobby_CreateLobby")) : &CreateRoom;
-    for(int mode:{0,1,2,3,4,6,7}){   // 6: an EDF6Coop without the member attributes (the EDF4.1 outfits' sync), 7: of another version
+    for(int mode:{0,1,2,3,4,6,7,8,9}){   // 6: an EDF6Coop without the member attributes (the EDF4.1 outfits' sync), 7: of another version; 8, 9: older than 2.7.0
         dependencyMode=mode;Check(!EDF6AF_RoomIsolationReady(),"Coop virtual admission sees failed online prerequisites");
         const auto oldJoins=joins,oldNotices=notices;result=-999;
         make(nullptr,nullptr,reinterpret_cast<void*>(9),&RecordCallback);
@@ -397,6 +403,16 @@ int main(int argc,char** argv){
         Check(joins==oldJoins && result==10 && notices==oldNotices+2,"dependency failure refuses join with visible explanation");
         if(mode==6 || mode==7)Check(depNotice.find(L"成员属性接口")!=std::wstring::npos && depNotice.find(L"版本过旧")!=std::wstring::npos,
                          "an EDF6Coop without member attributes is named to the player as too old, not only in the log");
+        if(mode==8)Check(depNotice.find(L"EDF6Coop 2.6.1 版本过旧")!=std::wstring::npos && depNotice.find(L"升级到 2.7.0")!=std::wstring::npos,
+                         "an EDF6Coop older than the room protocol's is named with its version and the one to upgrade to");
+        if(mode==8 || mode==9) {   // EDF6Coop's own routes (REJOIN, its virtual rooms) are told too, once a minute
+            const int posted=packNotices;fakeNow+=60000;
+            Check(!EDF6AF_RoomIsolationReady() && packNotices==posted+1 && packNotice.find(L"升级到 2.7.0")!=std::wstring::npos,
+                  "EDF6Coop's own route tells the player to upgrade EDF6Coop");
+            Check(!EDF6AF_RoomIsolationReady() && packNotices==posted+1,"not again within the minute");
+        }
+        if(mode==9)Check(depNotice.find(L"读不出版本")!=std::wstring::npos && depNotice.find(L"升级到 2.7.0")!=std::wstring::npos,
+                         "an EDF6Coop that says no version is told to upgrade too");
         Check(crew::lastLog.find("matching EDF6Coop required")!=std::string::npos,"dependency failure logged explicitly");
     }
     dependencyMode=0;Check(!EDF6AF_RoomIsolationReady(),"AF loaded before Coop refuses until dependency appears");

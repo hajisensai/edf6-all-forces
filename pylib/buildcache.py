@@ -20,7 +20,7 @@ from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_builds.json'
 RECIPES = 'asset_recipes.json'
-GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'ultimate', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'bigmap', 'sazabi', 'dreadnought', 'proteus', 'optics')
+GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'chute', 'drill', 'emc', 'ultimate', 'barrage', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'bigmap', 'sazabi', 'dreadnought', 'proteus', 'optics')
 MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'sazabi', 'dreadnought': 'dreadnought', 'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'quadvulcan': 'wt_m163', 'tunguska': 'wt_tunguska',
                 'pzh2000': 'wt_pzh2000', 'sturmtiger': 'wt_sturmtiger',
                 **{kind: 'dreadnought' for kind in ('emp_mid', 'emp_short', 'emp_long')}, 'ciws_phalanx': 'emp_phalanx', 'flak88': 'emp_flak88', 'apocalypse': 'wt_apocalypse', 'tos1': 'wt_tos1',

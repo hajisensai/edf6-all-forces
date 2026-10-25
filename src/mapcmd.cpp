@@ -602,7 +602,10 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         bool accepted=false;
         if(pvpmenu::Allowed(snapshot,hit.entry)) {
             if(hit.entry==kPvpModeToggle)accepted=SetPvpEnabledAt(!snapshot.enabled,snapshot.epoch,snapshot.revision,snapshot.localPuid);
-            else accepted=SetPvpLocalTeamAt(hit.entry,snapshot.epoch,snapshot.revision,snapshot.localPuid);
+            else if(hit.entry==kPvpPreset)
+                accepted=SetPvpPresetAt(pvp_match::NextPreset(snapshot.preset),snapshot.epoch,snapshot.revision,snapshot.localPuid);
+            else accepted=SetPvpLocalPickAt(PvpPickForFaction(pvpmenu::CodeFaction(hit.entry),snapshot.local),
+                                            snapshot.epoch,snapshot.revision,snapshot.localPuid);
         }
         Note(g,L"%ls",hudtext::Tr(accepted ? hudtext::Tx::pvpPending : hudtext::Tx::pvpChanged));
         return;
@@ -1921,3 +1924,6 @@ bool PlayerMapCommands(MapCommandReadout* out) noexcept {
     return fresh;
 }
 }  // namespace crew
+static_assert(crew::kPvpModeToggle==crew::pvpmenu::kMode && crew::kPvpPreset==crew::pvpmenu::kPreset &&
+              crew::kPvpFaction0==crew::pvpmenu::kFaction0 && crew::kPvpFold==crew::pvpmenu::kItems,
+              "the M map's PvP rows are map_pvp_input.h's");

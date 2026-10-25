@@ -58,7 +58,7 @@ void Setup() {
     Put<int>(enemy,kTeam,1);Put<unsigned>(human,kHumanMask,1);Put<unsigned>(dead,kHumanMask,1);
     playerObj=ownerPlayer;sessionOn=true;host=true;flatFloor=true;config.npcEvade=false;
     SeeSquad(human,human,0,npc::Control::free,now);SeeSquad(dead,dead,0,npc::Control::free,now);
-    Put<void*>(image,kTeamsGlobal,manager);Put<void*>(manager,0x38,teams);
+    Put<void*>(image,kTeamsGlobal,manager);Put<void*>(manager,0x38,teams);Put<std::uint64_t>(manager,0x48,7);
     Put<void*>(image,kStatusGlobal,status);Put<unsigned>(status,0x14FF8,2);
     ConfigureNpcCommandNetwork(&Actual);
     UpdateCommandNetwork({true,true,99,0,1,authHost,&Send},wall);
@@ -98,6 +98,7 @@ int main() {
     std::memcpy(image+kAllTeams,enumSignature,sizeof(enumSignature));
     unsigned char thunk[]={0xC4,0,0x41,0x5E,0x5F,0x5E,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
     const auto walk=&Walk;std::memcpy(thunk+8,&walk,8);std::memcpy(image+kAllTeams+16,thunk,sizeof(thunk));
+    const unsigned char bound[]={0x48,0x81,0xFE,0x88,0x01,0x00,0x00};std::memcpy(image+0x5E0D28,bound,sizeof(bound)); // the walk's 7 rows
     Setup();auto recruit=Request(Order::recruit);auto reply=Dispatch(recruit);
     Check(reply.results[0].reason==0 && reply.results[0].affected==1 && follows==1 && At<void*>(human,kLeader)==other && PlayerHuman()!=other,
         "remote RPC recruits to actual authenticated requester, never host PlayerHuman");

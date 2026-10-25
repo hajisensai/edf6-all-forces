@@ -24,6 +24,7 @@ float BodyMark(const void*) noexcept {UnexpectedWorldCall();}
 bool IsHelicopter(const void*) noexcept {UnexpectedWorldCall();}
 float MapRay(const float*,const float*,float*) noexcept {UnexpectedWorldCall();}
 void HeliCalled(unsigned char*,bool,const float*,DWORD) noexcept {UnexpectedWorldCall();}
+void HeliSortie(unsigned char*,SortiePass,const float*) noexcept {UnexpectedWorldCall();}
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept {UnexpectedWorldCall();}
 bool HeliLeft(const void*) noexcept {UnexpectedWorldCall();}
 bool ProteusReady() noexcept {UnexpectedWorldCall();}
@@ -39,6 +40,7 @@ int FaultLog(const char*,const EXCEPTION_POINTERS*) noexcept {UnexpectedWorldCal
 bool PrepareNpcVehicle(unsigned char*,bool) noexcept {UnexpectedWorldCall();}
 void PreloadUltimate(void*) noexcept {UnexpectedWorldCall();}
 namespace jet {
+void SortieBegin(Jet&,SortiePass,const float*,const float*,const float*,ULONGLONG) noexcept {UnexpectedWorldCall();}
 Jet jets[kMaxJets]{};
 float FerryTurn(const Kind&) noexcept {UnexpectedWorldCall();}
 bool Alive(const ObjRef&) noexcept {UnexpectedWorldCall();}

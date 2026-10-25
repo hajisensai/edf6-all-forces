@@ -146,7 +146,9 @@ void VisitTarget(void* ctx,const void* object,const float* p) noexcept {
     const float f[3]={p[0]-k.pos[0],p[1]-k.pos[1],p[2]-k.pos[2]};
     float score=Len(f);
     if(object==k.j->t.target)score=score*kKeepScale-kKeepTarget;
-    const Prefer prefer=k.j->loadSet ? k.j->loadPrefer : KindOf(*k.j).prefer;   // its stores' (jet.cpp, LoadoutPrefer)
+    // A sortie strikes the ground (jet_sortie.cpp), each missile at another target (SortieStruck).
+    const Prefer prefer=k.j->sortie.pass!=SortiePass::none ? Prefer::ground : k.j->loadSet ? k.j->loadPrefer : KindOf(*k.j).prefer;
+    if(SortieStruck(*k.j,object))score+=4000.0f;
     if(prefer!=Prefer::any && flyer!=(prefer==Prefer::air))score+=2000.0f;   // the other kind: only with none of its own
     if(!k.best || score<k.score){k.best=object;k.score=score;std::memcpy(k.aim,p,12);k.flyer=flyer;}
 }
@@ -573,8 +575,8 @@ void Fire(Jet& j,unsigned char* v,const float* pos,const float* nose,const float
         const float tdist=Len(to),off=tdist>1.0f ? std::acos(Clamp(Dot(to,nose)/tdist,-1.0f,1.0f)) : 0.0f;
         if(!missileOk || off>kMissileCone)t.lockAt=0;
         else if(!t.lockAt)t.lockAt=ms;
-        missile=missileOk && a.missiles>0 && a.locked>0 && t.lockAt && ms-t.lockAt>=kLockMs && tdist>kMissileMin && tdist<MissileReach(k,a) &&
-                ms-t.missileAt>kMissileMs && !FriendInLine(pos,t.aim,v);
+        missile=missileOk && a.missiles>0 && a.locked>0 && t.lockAt && ms-t.lockAt>=SortieLockMs(j,kLockMs) && tdist>kMissileMin &&
+                tdist<MissileReach(k,a) && ms-t.missileAt>SortieMissileGapMs(j,kMissileMs) && !FriendInLine(pos,t.aim,v);
         if(missile && a.pick>=0)
             missile=!HoldFire(v,t.target,pos,At<float>(a.stores[a.pick].weapon,kWeaponSpeed)*60.0f,
                               At<float>(a.stores[a.pick].weapon,kWeaponGravity)*kGravity);

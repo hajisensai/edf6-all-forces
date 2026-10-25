@@ -117,6 +117,15 @@ class RecoveryTests(unittest.TestCase):
         names = ('MISSION.AC', 'MISSION.RMPA', 'MISSION.JSON', gen.MARKER)
         for name in names:
             modfiles.atomic_write(str(out / name), b'complete')
+        self.assertFalse(installer.check(str(self.game)))  # the PvP presets' folders are the pack's rows too
+        for folder in gen.PVP_MISSIONS:
+            for name in names:
+                modfiles.atomic_write(str(Path(gen.mission_dir(str(self.game), folder)) / name), b'complete')
+        self.assertTrue(installer.check(str(self.game)))
+        preset = Path(gen.mission_dir(str(self.game), gen.PVP_MISSIONS[-1])) / 'MISSION.AC'
+        preset.unlink()
+        self.assertFalse(installer.check(str(self.game)))
+        preset.write_bytes(b'complete')
         self.assertTrue(installer.check(str(self.game)))
         for name in names:
             with self.subTest(name=name):

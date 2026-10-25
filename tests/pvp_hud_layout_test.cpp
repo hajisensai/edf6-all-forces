@@ -12,7 +12,7 @@
 #undef wmain
 #include <cstdlib>
 namespace {
-int taskChecks=0;
+int taskChecks=0,openPanels=0;
 void TaskCheck(bool ok,const char* why) { ++taskChecks;if(!ok){std::printf("FAIL PVP HUD: %s\n",why);std::exit(1);} }
 bool Intersects(const float* a,const float* b) { return a[0]<b[2] && b[0]<a[2] && a[1]<b[3] && b[1]<a[3]; }
 void PvpCase(int width,int height,bool payload,int kind) {
@@ -21,9 +21,11 @@ void PvpCase(int width,int height,bool payload,int kind) {
     const float scale=hudscale::FitMap(hudscale::Of(width,height,width,height,1.5f),w,h);
     scenePvp=PvpStatus{};scenePvp.ready=kind!=4;scenePvp.host=kind!=3 && kind!=6;
     scenePvp.enabled=kind==6;scenePvp.pending=kind==2;scenePvp.epoch=987654321;scenePvp.revision=1357;
-    scenePvp.localTeam=kind==6 ? 1 : 2;strcpy_s(scenePvp.localPuid,kind==6 ? "guest8-puid" : "fixture-puid");
+    scenePvp.localTeam=kind==6 ? 1 : 2;
+    pvp_protocol::SetPick(scenePvp.local,kind==6 ? crew::pvp_match::Pick{4,2,3} : crew::pvp_match::Pick{0,0,crew::pvp_match::kNoUnit});
+    scenePvp.preset=static_cast<std::uint8_t>(kind==6 ? crew::pvp_match::Preset::humansVsAliens : crew::pvp_match::Preset::freeForAll);strcpy_s(scenePvp.localPuid,kind==6 ? "guest8-puid" : "fixture-puid");
     scenePvp.result=scenePvp.pending ? pvp_protocol::Result::Pending : pvp_protocol::Result::Idle;
-    const bool pad=kind==5;scenePvpPadPick=pad ? kPvpTeam1 : -1;
+    const bool pad=kind==5;scenePvpPadPick=pad ? kPvpFaction0 : -1;
     scenePvpOpen=kind!=0 && !pad;   // the title clicked open (kPvpFold); the pad's R3 focus opens it by itself
     MapCommandReadout command{};command.pointer=kind!=0 && !pad;
     command.placeOn=true;command.placeOpen=true;command.placeOnline=true;
@@ -51,18 +53,26 @@ void PvpCase(int width,int height,bool payload,int kind) {
             }
         }
     },scale);
-    const int rowsExpected=kind==0 || kind==2 || kind==4 ? 0 : kind==3 || kind==6 ? 2 : 3;
+    // The expanded panel: the host's two rows, then the factions two to a row (a guest's buttons are the factions' only);
+    // it fits only when the dock has the room, else it stays a title (MapPvpPanel).
+    constexpr int kRows=pvpmenu::kFaction0+(crew::pvp_match::kFactionCount+1)/2;
+    const float expandedH=(28.0f+static_cast<float>(kRows)*24.0f+2.0f*19.0f+8.0f)*scale;
+    const bool open=kind!=0 && pvpTop+expandedH<=bottom;
+    openPanels+=open ? 1 : 0;
+    const int rowsExpected=!open || kind==2 || kind==4 ? 0 : kind==3 || kind==6 ? crew::pvp_match::kFactionCount : pvpmenu::kItems;
     const int expected=rowsExpected+(command.pointer ? 1 : 0);   // with the pointer the title row folds it (kPvpFold)
     TaskCheck(scenePvpVisible && scenePvpCount==expected,"collapsed/not-ready/pending/host/guest expose the correct actions");
     int folds=0;for(int i=0;i<scenePvpCount;++i)folds+=scenePvpCodes[i]==kPvpFold;
     TaskCheck(folds==(command.pointer ? 1 : 0),"the title row (and only it) folds the panel, and only with the pointer");
     TaskCheck(scenePvpSnapshot.epoch==scenePvp.epoch && scenePvpSnapshot.revision==scenePvp.revision &&
               !std::strcmp(scenePvpSnapshot.localPuid,scenePvp.localPuid),"hit ledger keeps the displayed world, revision and member");
-    TaskCheck(std::fabs(pvpBottom-pvpTop-(kind==0 ? 28.0f : 146.0f)*scale)<0.1f,"a click or pad focus expands the tab without changing its anchor");
+    TaskCheck(std::fabs(pvpBottom-pvpTop-(open ? expandedH/scale : 28.0f)*scale)<0.1f,"a click or pad focus expands the tab without changing its anchor");
     for(int i=0;i<scenePvpCount;++i) {
         const auto* rect=scenePvpRects[i];
         TaskCheck(rect[1]>=pvpTop && rect[3]<=pvpBottom,"PVP hit lies inside its captured background");
-        if(!scenePvp.host)TaskCheck(scenePvpCodes[i]!=kPvpModeToggle,"guests cannot toggle mode");
+        if(!scenePvp.host)TaskCheck(scenePvpCodes[i]!=kPvpModeToggle && scenePvpCodes[i]!=kPvpPreset,"guests cannot toggle mode or set the preset");
+        TaskCheck(scenePvpCodes[i]==kPvpFold || (scenePvpCodes[i]>=kPvpModeToggle && scenePvpCodes[i]<kPvpFold),"every hit is a panel code or the fold");
+        TaskCheck(scenePvpCodes[i]!=kPvpFold || i==0,"the fold is the first hit");
         for(int j=0;j<scenePayloadButtonCount;++j)TaskCheck(!Intersects(rect,scenePayloadButtons[j]),"PVP never covers a payload action");
         for(int j=0;j<scenePlaceHitCount;++j)TaskCheck(!Intersects(rect,scenePlaceHits[j]),"PVP never covers a placement action");
     }
@@ -117,5 +127,6 @@ int main() {
             ThermalCases(size[0],size[1]);
         }
     }
+    TaskCheck(openPanels>0,"the expanded panel is exercised");
     std::printf("PVP/thermal HUD: %d checks passed\n",taskChecks);return 0;
 }

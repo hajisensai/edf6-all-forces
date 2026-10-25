@@ -133,6 +133,8 @@ void BoardingTick(void) noexcept{unexpectedHook();return;}
 void DebugSpawnFrame(unsigned char *) noexcept{}
 void Edf41Mother401DevTick() noexcept{}   // crew.cpp's DebugSpawnTick calls it (edf41mother401.cpp, not linked here)
 void UltimateTick() noexcept{}   // crew.cpp's SharedFrameTick plays the ultimate's show (ultimate.cpp, not linked here)
+void BarrageTick() noexcept{}   // ...and the barrages' rounds (barrage.cpp, not linked here)
+void SupportFollowUpTick() noexcept{}   // ...and the sorties' second waves (airstrike.cpp, not linked here)
 namespace gravity { void Frame() noexcept{} namespace net { void Frame() noexcept{} } }   // crew.cpp's GravityTick calls these (gravity.cpp, gravitygun.cpp, floatgun.cpp, not linked here)
 void GravityGunTick() noexcept{}
 void MapCommandQueueTick() noexcept{}   // crew.cpp's SharedFrameTick advances the map's queues (mapcmd.cpp, not linked here)

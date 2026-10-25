@@ -23,6 +23,8 @@
 #include "firstperson.h"
 #include "thermal.h"
 #include "pvp.h"
+#include "team_native.h"
+#include "room_pvp.h"
 #include "edf41bike.h"
 #include "mod_room.h"
 #include "outfit41.h"
@@ -699,6 +701,7 @@ void LoadConfig() noexcept {
     LoadMissionPacks(n.missionPacks);
     n.portedMissionsUnlocked=ReadBool(L"PortedMissionsUnlocked",n.portedMissionsUnlocked);
     n.portedWeaponsUnlocked=ReadBool(L"PortedWeaponsUnlocked",n.portedWeaponsUnlocked);
+    n.allWeaponsUnlocked=ReadBool(L"AllWeaponsUnlocked",n.allWeaponsUnlocked);
     n.airSoftEdge=ReadFloat(L"AirSoftEdge",n.airSoftEdge);
     n.airSoftTurns=ReadFloat(L"AirSoftTurns",n.airSoftTurns);
     n.airSoftCeil=ReadFloat(L"AirSoftCeil",n.airSoftCeil);
@@ -1223,6 +1226,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     // allocation it enlarges; before the airstrike's ownership grants, which write through WeaponRecord.
     InstallWeaponRecords();
     InstallFsLoaderBudget();   // before the application's init starts CRI File System (fsbudget.cpp)
+    InstallTeamCapacity();     // before the application's init builds the team manager (team_native.cpp): the PvP faction rows
     Log("ROOM isolation=%d",InstallModRoom());
     Log("SUPPORT soldiers=%d",InstallSupportSoldiers());
     InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
@@ -1281,6 +1285,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallJetSound();
     InstallVehicleSound();  // the ground vehicles' engines, turrets, loaders and main guns (vehsound.cpp)
     InstallMissiles();
+    InstallBarrages();      // the long-range barrages' rounds: RocketBullet01's update (barrage.cpp)
     InstallSplitMissiles(); // the stock split missiles' split distance to the target's surface
     InstallSupportUnitOnAllies();   // support units stick to allies (ini SupportUnitOnAllies, live)
     InstallRouteGuide();    // the stock route guide strip along the navmesh route's corners
@@ -1290,6 +1295,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("M163 visual rotor=%d",InstallVulcanRotor());
     InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked
     Log("PVP native hooks=%d",InstallPvp());
+    InstallRoomPvp();       // the room's start held until every member acknowledged the PvP lock (room_pvp.cpp)
     InstallLockon();        // every lock-on weapon's search order: the player's nearest the view first
     InstallSeatSwitch();    // the player moving between seats (the stock board button's steps, checked)
     InstallAllClassesRide();   // every class in every seat: before any mission makes a vehicle (the seat build is in its constructor)

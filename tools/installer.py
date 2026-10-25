@@ -60,6 +60,7 @@ for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'te
 import edf41src  # noqa: E402
 import gamedir  # noqa: E402
 import modfiles  # noqa: E402
+import modelpack  # noqa: E402
 
 PLUGIN = 'EDF6VehicleCrew'
 PROCESS = modfiles.PROCESS
@@ -502,6 +503,8 @@ def build_packs(game: str, campaign: bool, root41: str | None = None,
 
 
 def install(game: str, campaign_requested: bool = False) -> None:
+    if why := modelpack.problem(bundle_app_dir()):   # the split share package's models: every install path (menu 1 and 6)
+        raise SystemExit(why)
     import buildcache
     import call_weapons
     import gen
@@ -511,6 +514,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_edf5_campaign
     import make_emc
     import make_ultimate
+    import make_barrage
     import make_tracked_combat
     import make_chute
     import make_jets
@@ -558,6 +562,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     drill = build_asset(cache, make_drill, '钻头战车')
     emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
     ult = build_asset(cache, make_ultimate, '终极支援「天罚」特效')
+    barrage = build_asset(cache, make_barrage, '远程炮击弹药')
     # The vehicles and emplacements on the V603 (tools/make_tracked_combat.py LABELS), each by its make_<kind> tool.
     tracked = {kind: build_asset(cache, importlib.import_module('make_' + kind), label)
                for kind, label in make_tracked_combat.LABELS.items()}
@@ -600,6 +605,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_drill.install(game, drill) if drill is not None else []) + \
             (make_emc.install(game, emc) if emc is not None else []) + \
             (make_ultimate.install(game, ult) if ult is not None else []) + \
+            (make_barrage.install(game, barrage) if barrage is not None else []) + \
             [path for kind, files in tracked.items() if files is not None
              for path in make_tracked_combat.install(game, files, kind)] + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
@@ -700,7 +706,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), *tracked.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('barrage', barrage), *tracked.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -708,7 +714,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         cache.record('bigmap', {f'MAP/{make_bigmap.MAP_FILE}': mac,
                                 **{f'MAP/{name}': data for name, data in pieces.items()}})
     cache.save()  # assets succeeded: a later mission failure must not force expensive regeneration
-    print('写入测试场关卡（「EDF6VehicleCrew 测试场」任务包的唯一一关；只有靶子，没有敌人；联机时大家要有同样的关卡和物体）……')
+    print('写入测试场关卡（「EDF6VehicleCrew 测试场」任务包：测试场一关只有靶子、没有敌人，之后是几关对战预制关；联机时大家要有同样的关卡和物体）……')
     if make_edf5_campaign.range_installed(game):
         for line in gen.install(game, gen.target_range(gen.Plan())):
             print('  ', line)
@@ -774,6 +780,7 @@ def uninstall(game: str) -> None:
     import make_drill
     import make_emc
     import make_ultimate
+    import make_barrage
     import make_tracked_combat
     import make_chute
     import make_jets
@@ -823,7 +830,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), make_emc.remove, make_ultimate.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
@@ -876,9 +883,10 @@ def check_range(game: str) -> bool:
     played. A range still over a story mission it used to replace (gen.LEGACY_SLOTS) blocks the story there."""
     import gen
     import make_edf5_campaign
-    out = gen.mission_dir(game, gen.RANGE_MISSION)
-    missing = [name for name in ('MISSION.AC', 'MISSION.RMPA', 'MISSION.JSON', gen.MARKER)
-               if not modfiles.read(os.path.join(out, name))]
+    missing = [name if mission == gen.RANGE_MISSION else f'{mission}/{name}'
+               for mission in (gen.RANGE_MISSION, *gen.PVP_MISSIONS)
+               for name in ('MISSION.AC', 'MISSION.RMPA', 'MISSION.JSON', gen.MARKER)
+               if not modfiles.read(os.path.join(gen.mission_dir(game, mission), name))]
     if not make_edf5_campaign.range_installed(game):
         missing.append('任务包（模式表里没有测试场）')
     legacy = [m for m in gen.LEGACY_SLOTS if gen.ours(game, m)]
@@ -962,6 +970,12 @@ def build_name() -> str:
             return json.load(f).get('name', '')
     except (OSError, ValueError):
         return ''
+
+
+def bundle_app_dir() -> str:
+    """The folder of the installer exe (the repository root when run from source): where models/ and models-required.json are."""
+    return os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else \
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def download_latest() -> int:
