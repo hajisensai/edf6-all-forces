@@ -708,7 +708,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
         cache.record('bigmap', {f'MAP/{make_bigmap.MAP_FILE}': mac,
                                 **{f'MAP/{name}': data for name, data in pieces.items()}})
     cache.save()  # assets succeeded: a later mission failure must not force expensive regeneration
-    print('写入测试场关卡（「EDF6VehicleCrew 测试场」任务包的唯一一关；只有靶子，没有敌人；联机时大家要有同样的关卡和物体）……')
+    print('写入测试场关卡（「EDF6VehicleCrew 测试场」任务包：测试场一关只有靶子、没有敌人，之后是几关对战预制关；联机时大家要有同样的关卡和物体）……')
     if make_edf5_campaign.range_installed(game):
         for line in gen.install(game, gen.target_range(gen.Plan())):
             print('  ', line)
@@ -876,9 +876,10 @@ def check_range(game: str) -> bool:
     played. A range still over a story mission it used to replace (gen.LEGACY_SLOTS) blocks the story there."""
     import gen
     import make_edf5_campaign
-    out = gen.mission_dir(game, gen.RANGE_MISSION)
-    missing = [name for name in ('MISSION.AC', 'MISSION.RMPA', 'MISSION.JSON', gen.MARKER)
-               if not modfiles.read(os.path.join(out, name))]
+    missing = [name if mission == gen.RANGE_MISSION else f'{mission}/{name}'
+               for mission in (gen.RANGE_MISSION, *gen.PVP_MISSIONS)
+               for name in ('MISSION.AC', 'MISSION.RMPA', 'MISSION.JSON', gen.MARKER)
+               if not modfiles.read(os.path.join(gen.mission_dir(game, mission), name))]
     if not make_edf5_campaign.range_installed(game):
         missing.append('任务包（模式表里没有测试场）')
     legacy = [m for m in gen.LEGACY_SLOTS if gen.ours(game, m)]
