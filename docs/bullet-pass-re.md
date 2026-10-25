@@ -72,6 +72,12 @@ EDF.dll x64，TimeDateStamp `0x678CCB46`。下文地址都是 RVA；可信度 H/
 `0x235FA0` 中，条件是 `*(core+0xBE8)+0x28` 字节或之前算出的 `sil` 非 0。IFC 发出的弹会不会走到这两处没有确认（L）。插件因此不再依赖
 这一位：喷气机自己的弹由 `src/ownround.h`（`jet_hooks.cpp` 的 addBody 钩子）按对象指针和它自己的刚体编号一律排除。
 
+补充（2026-10-26，静态 H，载具导弹自伤排查，`docs/feedback-2026-10-25-missiles.md` 后续 2）：**车载武器发射的 MissileBullet01 不会置
+0x80**。init 把移动类型清 0（`0x231CE9 mov [rcx+0xAF0],edi`，edi=0），只走类型 0；`0x236662` 的门要 core+0xB04 ∉ {0,3}（init
+`0x231D13` 清 +0xB00）且 core+0x6D8 非空（只有 EfsBullet 工厂的 `0x239210` 写），导弹都追不到；InitParam+0x8B 由武器构造
+`0x682EA0` 清零、开火不改。全二进制另两处置位 `0x2612E3`（FlameBullet02）、`0x28E9AB`（SolidExpBullet01）。所以离线时载具导弹
+直击时一定按 owner（载具）排除，部件刚体的 key-0 对象就是载具（炮舰机诊断行「0 by a part's body id only」）。
+
 ### 3.3 子弹参数 → core 字段
 
 `0x22E9C0` 调用 `0x231CC0(core, matrix, InitParam*)`，后者用 `0x2307F0` 把参数复制到 `core+0x9A0`，所以 **core 偏移 = 0x9A0 + param 偏移**。武器开火 `0x696FD0` 把模板 `weapon+0x830` 复制到 `weapon+0xA10` 再发射，所以 **weapon 偏移 = 0x830 + param 偏移**。

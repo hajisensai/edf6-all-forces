@@ -487,9 +487,15 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
         # HE/AP are alternate belts in the same visible M61 (the quad's: its four on one cradle): the right holders
         # must follow the left slide too, throughout elevation and recoil.
         guns[1].items[0] = 'cannon_slide_l'
-    # A gun barrel's holder on its side's moving bone, the missiles' on the turret (slot).
+    # A gun barrel's holder on its side's moving bone, the missiles' on the bone their tubes ride (the muzzle contract's:
+    # the turret, or the BMPT's elevating weapon module, prep_wt_tracked Vehicle.missile_bone): the round leaves along
+    # that bone's forward row (muzzle mode 0), so on the module it leaves along the guns' line (slot).
     sides = [slot(kind, i) for i in range(len(vehicle.weapons))]
-    setting.items = [copy.deepcopy(guns[side == 'right']) if side != 'missiles' else _node(['cannon_main', 0.0])
+    tubes = {bone for bone, _ in _points(model, game).get('missiles', [])} if 'missiles' in sides else {'cannon_main'}
+    if len(tubes) != 1:
+        raise ValueError(f'{kind}: the missile tubes ride {sorted(tubes)}: one holder bone needs them on one')
+    (launcher,) = tubes
+    setting.items = [copy.deepcopy(guns[side == 'right']) if side != 'missiles' else _node([launcher, 0.0])
                      for side in sides]
     if kind in TURRET_LIMITS:
         import make_artillery
