@@ -35,6 +35,8 @@
 #include "npc_backpack.h"
 #include "ifc_model.h"
 #include "npc_mark.h"
+#include "qmark_ray.h"
+#include "turretaim.h"
 #include "online_authority.h"
 #include "real_driver_native.h"
 #include "seat_events.h"
@@ -251,6 +253,7 @@ void PlayerLane(World& w) noexcept {
 // far its order lets it move (npc::MarkInReach). This machine's alone (§2.3).
 struct MarkState { ObjRef obj; float at[3]; bool held; };
 MarkState mark{};
+const void* followedLock=nullptr;   // the turret lock the mark last followed (FollowTurretLock)
 struct MarkPub { bool on; float at[3]; ULONGLONG wall; NpcPing ping; };
 MarkPub markPub{};
 NpcPing ping{};
@@ -1945,7 +1948,7 @@ void ResetNpcAi() noexcept {
     for(auto& q:squads){npcmark::Assign(q.commandFocus,{});q=Squad{};}
     cooldowns=npc::Cooldowns<kMaxSquads>{};
     dismissedCount=0;
-    npcmark::Assign(mark.obj,{});mark=MarkState{};ping=NpcPing{};
+    npcmark::Assign(mark.obj,{});mark=MarkState{};ping=NpcPing{};followedLock=nullptr;
     AcquireSRWLockExclusive(&markLock);markPub=MarkPub{};ReleaseSRWLockExclusive(&markLock);
     world=World{};
     march.heading=npc::formation::Heading{};march.bound=npc::formation::Bound{};march.frame=0;march.n=0;
@@ -3357,6 +3360,16 @@ void NpcGunnersInput(unsigned char* v) noexcept {
     }
 }
 
+// The mark takes what the turret lock took (a new lock, a press cycling it on): the NPCs fight the boxed enemy.
+void FollowTurretLock(const void* lock) noexcept {
+    if(qmark::MarkLock(lock,followedLock,mark.obj.Is(lock)) && npcmark::Capture(lock)) {
+        Mark(lock,nullptr);   // its point: KeepMark, this frame
+        QMarkPlay(QMarkCue::own);
+        Log("NPCAI mark: the turret's lock marked");
+    }
+    followedLock=lock;
+}
+
 bool NpcMarked() noexcept { return npcmark::Enabled() && MarkAlive(); }
 
 bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept {
@@ -3381,10 +3394,16 @@ void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept {
     const bool down=c.npcMarkKey>0 && pid==GetCurrentProcessId() && (edf::AsyncKey(c.npcMarkKey)&0x8000)!=0;
     // Held is followed while the map holds the keys too: a press made in the map (mapcmd.cpp) and still down when it
     // closes is not a second press on foot.
-    // On foot and riding alike (the stock spot it replaces was both; EDF6AutoTurret's lock on the same key reads the key
-    // itself, so a turret seat still locks as well).
-    if(down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn())ToggleMark(human,At<std::int32_t>(human,kTeam));
+    // On foot and riding alike (the stock spot it replaces was both). At a turret of EDF6AutoTurret's with auto-aim on,
+    // the same key is its lock (qmark_ray.h KeyIsTurretLock): no pick of the mark's own, the mark follows the lock.
+    int lockKey=0;
+    const void* lock=nullptr;
+    const bool turretOwns=AutoTurretLock(&lockKey,&lock);   // first: it sets lockKey
+    const bool turretKey=qmark::KeyIsTurretLock(c.npcMarkKey,turretOwns,lockKey);
+    if(down && !mark.held && !turretKey && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn())ToggleMark(human,At<std::int32_t>(human,kTeam));
     mark.held=down;
+    if(turretKey && npcmark::MarkOn())FollowTurretLock(lock);
+    else followedLock=nullptr;
     KeepMark();
     QMarkFrame();
 }

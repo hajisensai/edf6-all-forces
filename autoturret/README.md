@@ -47,6 +47,14 @@ already out-damages the same-level Barrias TZ4 but has well under half its durab
 In a gun position the plugin aims (the Kepler, Bohr and howitzer turrets; the Titan's and the Ranger tanks' gunner
 seats; driving those tanks you get the lock too):
 
+- **Off by default, V turns it on** (2026-10-25, the user: "why did auto-aim switch itself on, with no hint? There
+  should be a HUD for the locked enemy... don't turn auto-aim on; once on, the targeted enemy should get a highlight
+  ring"): ini `AutoAim=0` is the state at the game's start, **V** (`AutoAimKey`; pad: `AutoAimButton`, none by default)
+  flips it while playing, an edit of `AutoAim` sets it at once. **Off**: this plugin never turns your gun (turret
+  camera or not, first person, a gunner seat), takes no lock and does not read Q (Q is then EDF6VehicleCrew's NPC mark
+  alone). The HUD line says `AUTO-AIM: OFF   [V] turn on`; a flip shows `AUTO-AIM ON` / `AUTO-AIM OFF` large for 1.5 s.
+  **On**: everything below; with nothing locked a green ring with four ticks marks the enemy the gun is turned onto,
+  or (under the turret camera) the one a Q press would lock now.
 - **One auto-aim**: the turret turns itself onto the target, leading it on the round's arc (with EDF6VehicleCrew's
   turret camera: onto your lock only, below). The lead-circle mode switched with **V** and its ini keys `AimMode` /
   `AimModeKey` / `AimModeButton` were removed on 2026-10-25 (the user: "is this auto-aim one version too many? remove
@@ -63,8 +71,10 @@ seats; driving those tanks you get the lock too):
   it (`LockClearMs`, 0.6 s) to let the lock go. Locked: a yellow square closing in while it settles (~0.4 s), then the
   jets' red diamond; auto-aim fights **that target only** (it waits when the gun cannot reach it); the AI gunners of the same vehicle take it first when they can reach it. It goes when the target dies or stops
   being lockable, gets 1.5x the lock range away, or you leave the seat. Unlocked, the auto-aim picks its own targets as
-  before.
-- One line low on the screen (EDF6VehicleCrew's `TurretAimHud=1`): `AUTO-AIM  [Q] lock (hold: clear)` (`next` and red while locked); `GUNNERS: AUTO-AIM` in a Titan's / Ranger tank's driver seat whose lock the gunners fight.
+  before. The lock is also EDF6VehicleCrew's NPC mark (one key, one pick): while auto-aim is on, its Q mark makes no
+  pick of its own at that seat (it used another ray and an 8 deg cone, and said "aim at the enemy to mark it" over an
+  enemy the 20 deg lock had just boxed) and marks for the NPCs whatever the lock takes.
+- One line low on the screen (EDF6VehicleCrew's `TurretAimHud=1`): `AUTO-AIM: ON   [V] turn off   [Q] lock (hold: clear)` (`next` and red while locked); `GUNNERS: AUTO-AIM` in a Titan's / Ranger tank's driver seat whose lock the gunners fight; `AUTO-AIM: OFF   [V] turn on` while off.
 - **With EDF6VehicleCrew's turret camera** (its `DecoupledTurretCam=1`, the default: the mouse / right stick turns the
   camera and your turret follows the screen's centre), the gun you sit at is the camera's by default: this plugin never
   turns it onto a target of its own picking. It turns it onto **your lock** only (lock with Q / X); the

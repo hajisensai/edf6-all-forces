@@ -128,6 +128,18 @@ void RayChecks() {
     const float c[3]={0,0,2},aim[3]={camEye[0],camEye[1],camEye[2]+0.5f};
     Check(qmark::AimRay(camEye,c,nullptr,dir) && dir[2]==1.0f,"AimRay: no aim, the centre normalized");
     Check(qmark::AimRay(camEye,c,aim,dir) && dir[2]==1.0f,"AimRay: an aim point under a metre off the eye, the centre");
+    // One key, one pick in a turret seat (2026-10-25: "载具上按q……提示对准敌人才能。但是我明明对准了"): with EDF6AutoTurret's
+    // auto-aim on there, the key is its lock's and the mark follows each new lock; off (or another key), the mark's own.
+    Check(qmark::KeyIsTurretLock(0x51,true,0x51),"auto-aim on, the same key: the turret lock's press");
+    Check(!qmark::KeyIsTurretLock(0x51,false,0),"auto-aim off (no TurretLockV1 answer): the mark's own press");
+    Check(!qmark::KeyIsTurretLock(0x51,true,0x45),"the lock on another key: Q stays the mark's");
+    Check(!qmark::KeyIsTurretLock(0,true,0),"the mark key off: never the lock's");
+    int a=0,b=0;
+    Check(qmark::MarkLock(&a,nullptr,false),"a new lock is marked");
+    Check(!qmark::MarkLock(&a,&a,false),"the lock already followed is not marked again (a map mark since stays)");
+    Check(qmark::MarkLock(&b,&a,false),"a press cycling the lock on: the new one is marked");
+    Check(!qmark::MarkLock(&b,&a,true),"already the mark: nothing (no cue twice)");
+    Check(!qmark::MarkLock(nullptr,&a,false),"the lock let go: the mark stays");
 }
 
 void WireChecks() {

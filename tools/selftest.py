@@ -2158,8 +2158,16 @@ def turret_aim_wired() -> None:
     keys are read, shipped and documented; the jets' pick scores by the view only with PlayerJetLockByView."""
     at, ini = src('autoturret/src/plugin.cpp'), src('autoturret/EDF6AutoTurret.ini')
     zh, en = src('autoturret/README.zh-CN.md'), src('autoturret/README.md')
-    for key in ('LockKey', 'LockButton', 'LockCone', 'LockRange', 'LockClearMs'):
+    for key in ('LockKey', 'LockButton', 'LockCone', 'LockRange', 'LockClearMs', 'AutoAim', 'AutoAimKey', 'AutoAimButton'):
         assert f'L"{key}"' in at and re.search(rf'^{key}=', ini, re.M) and key in zh and key in en, key
+    # Auto-aim off by default (2026-10-25, "自动瞄准不要开启"): the shipped ini and the code's own default agree, and with
+    # it off the ownership rule hands the player's gun back before any steering (no V1 pull, no drag).
+    assert re.search(r'^AutoAim=0\s*$', ini, re.M) and 'L"AutoAim",0,' in at
+    assert 'int autoAim=0;' in src('autoturret/src/turret.h')
+    des = src('autoturret/src/designate.cpp')
+    control = des.split('PlayerGun PlayerControlRule(', 1)[1].split('\n}\n', 1)[0]
+    assert control.find('if(!AutoAimOn())return {false,false};') < control.find('PlayerGunRule('), 'PlayerControlRule: off first'
+    assert 'r.mode=on ? link::Mode::autoAim : link::Mode::manual;' in des and 'r.modeKey=cfg.autoAimKey;' in des
     # One player turret aim (2026-10-25, "这个自动瞄准是不是多余了一个版本，删掉一个"): the lead-circle mode, its keys and
     # its HUD lines are gone from both plugins and the ini (the READMEs name them only as removed).
     for key in ('AimMode', 'AimModeKey', 'AimModeButton'):
@@ -2178,7 +2186,14 @@ def turret_aim_wired() -> None:
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
     assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
-                          'kInputHeld', 'kTurretObserver', 'kPlayerAim', 'kAimsTurret', 'kPayloadAim'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+                          'kInputHeld', 'kTurretObserver', 'kPlayerAim', 'kAimsTurret', 'kPayloadAim', 'kTurretLock'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+    # One key, one pick (2026-10-25, "载具上按q……提示对准敌人才能。但是我明明对准了"): EDF6AutoTurret exports its lock, and
+    # EDF6VehicleCrew's Q mark asks it before making a pick of its own.
+    assert names['kTurretLock'].endswith('V1') and f'bool __cdecl {names["kTurretLock"]}(' in src('autoturret/src/designate.cpp')
+    assert 'link::kTurretLock' in src('src/turretaim.cpp')
+    mark = src('src/npcai.cpp').split('void NpcMarkFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert 'const bool turretOwns=AutoTurretLock(&lockKey,&lock);' in mark and 'qmark::KeyIsTurretLock(c.npcMarkKey,turretOwns,lockKey)' in mark
+    assert '!turretKey' in mark.split('ToggleMark(', 1)[0] and 'FollowTurretLock(lock)' in mark
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
     # V4, the one player turret aim (2026-10-09): EDF6AutoTurret answers it, EDF6VehicleCrew's turret camera asks it every
     # frame and says it steers; the flak's own Steer and the tank driver's frame then leave the turret to the camera.
@@ -5933,13 +5948,18 @@ def hud_switch_cues_wired() -> None:
     and the mode line were, and their offline checks run (tools/hud_cue_check.cpp, hud_view's TurretLayoutApart)."""
     hud, cmake, view = src('src/hud.cpp'), src('CMakeLists.txt'), src('tools/hud_view.cpp')
     for call in ('CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,', 'JetCells(snap.jet,cells)',
-                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,lines,&at,controlsBottom'):
+                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at,controlsBottom'):
         assert call in hud, call
     # One auto-aim (2026-10-25, "这个自动瞄准是不是多余了一个版本，删掉一个"): one line naming it, no on / off pair, no
-    # lead-circle mode, its banner or its key's text.
-    assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'Tx::autoAim' in hud
+    # lead-circle mode, its banner or its key's text. Off by default since the same day ("怎么自动开启自动瞄准了，而且也没啥
+    # 提示欸"): the line says on or off with the key that flips it, a flip its banner, the target a ring.
+    assert 'StoresText(stores,_countof(stores),j,false);' in hud
     table = src('src/hudtext.inc')
-    assert 'HUDTEXT(autoAim,L"AUTO-AIM",L"自动瞄准",' in table
+    for word in ('autoAimStateOn', 'autoAimStateOff', 'autoAimTurnOn', 'autoAimTurnOff', 'autoAimPadUnset', 'autoAimBannerOn', 'autoAimBannerOff'):
+        assert f'HUDTEXT({word},' in table and f'Tx::{word}' in hud, word
+    assert 'HUDTEXT(autoAimStateOff,L"AUTO-AIM: OFF",L"自动瞄准：关",' in table
+    assert 'hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs)' in hud
+    assert 'else if(on && r.target)TargetRing(' in hud
     for gone in ('autoAimOn', 'autoAimOffCircle', 'autoAimToggle', 'autoAimOffBanner', 'aimModeKeyUnset', 'aimModeButtonUnset', 'aimSightBinding'):
         assert f'HUDTEXT({gone},' not in table and f'Tx::{gone}' not in hud, gone
     assert 'Mode::leadCircle' not in hud and 'Mode::leadCircle' not in src('src/turretcam.cpp')
@@ -6172,7 +6192,7 @@ def npc_ai_wired() -> None:
     # 取代原版 Q」): read on foot and riding alike, with or without the custom NPC AI (npcmark::MarkOn: the plugin on and the
     # key set; the NPCs' priority on it stays the AI's, npcmark::Enabled), drawn by the HUD; the focus order needs it.
     tick = code.split('void NpcMarkFrame(unsigned char* human,bool mapOpen)', 1)[1].split('\n}\n', 1)[0]
-    assert 'down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()' in tick
+    assert 'down && !mark.held && !turretKey && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()' in tick   # turretKey: the turret lock's press (turret_aim_wired)
     assert 'HumanOnFoot' not in tick and 'customNpcAi' not in tick, 'the custom Q marks riding too, without the NPC AI'
     assert 'KeepMark();' in tick and 'QMarkFrame();' in tick
     # A teammate's point mark is named (slot and name tag) as its enemy mark is: its marker is looked up for either.

@@ -28,14 +28,19 @@ constexpr wchar_t kCrewDll[]=L"EDF6VehicleCrew.dll";
 // stock vehicle HUD's own lead mark (EDF6VehicleCrew hud.cpp StockMarks / roundaim GunSight, docs/hud-re.md §7.3) and,
 // under the turret camera, the turret following the view; its toggle showed "auto-aim on" and "[key] auto-aim off" on one
 // HUD. It is gone: there is the lock (Q / pad X) and auto-aim onto it. The fields it used stay in the V1 / V4 layouts (a
-// changed struct would need a new export name; both DLLs ship together): `mode` is always autoAim, `lead` / `inReach`
-// false, `leadAt` / `boreAt` / `range` / `flight` 0, `modeKey` / `modeButton` 0.
-enum class Mode : std::uint8_t { autoAim=0, leadCircle=1 };   // leadCircle: never sent any more (an older EDF6AutoTurret)
+// changed struct would need a new export name; both DLLs ship together): `lead` / `inReach` false, `leadAt` / `boreAt`
+// / `range` / `flight` 0.
+// Auto-aim off by default since 2026-10-25 (the user: "怎么自动开启自动瞄准了，而且也没啥提示欸……自动瞄准不要开启，开启以后应该有
+// 被瞄准敌人的高亮圈之类的"): EDF6AutoTurret's ini AutoAim (0) is the state at the game's start, its AutoAimKey /
+// AutoAimButton flip it (`modeKey` / `modeButton` name them, as the old mode key's did). `mode` manual: auto-aim off, the
+// player's gun is the player's alone (never turned, no lock, the lock binding not read); autoAim: on.
+enum class Mode : std::uint8_t { autoAim=0, leadCircle=1, manual=2 };   // leadCircle: never sent any more
 enum class Lock : std::uint8_t { none=0, acquiring=1, locked=2 };
 struct TurretReadoutV1 {
-    Mode mode;               // autoAim (layout only, see above)
+    Mode mode;               // autoAim (on) or manual (auto-aim off: no lock, no target)
     Lock lock;               // the player's designated target (the lock key); acquiring: its track not settled yet
-    bool target;             // a target the gun works on (the designated one, else the turret's own pick): `at`
+    bool target;             // with no lock: the enemy the gun is turned onto (the turret's own pick), else the one a
+                             // press of the lock binding would lock now (the HUD's highlight ring): `at`
     bool lead;               // unused (false)
     bool inReach;            // unused (false)
     bool keys;               // the player is on the keyboard and mouse (else a pad): which binding the hint names
@@ -47,12 +52,22 @@ struct TurretReadoutV1 {
     float boreAt[3];         // unused (0)
     float range;             // unused (0)
     float flight;            // unused (0)
-    std::int32_t modeKey,lockKey,modeButton,lockButton;   // the lock's bindings (virtual-key code, pad button bits; 0 none);
-                                                          // modeKey / modeButton unused (0)
+    std::int32_t modeKey,lockKey,modeButton,lockButton;   // the bindings (virtual-key code, pad button bits; 0 none):
+                                                          // mode*: the auto-aim toggle, lock*: the lock
 };
 using TurretReadoutFn=bool(__cdecl*)(TurretReadoutV1* out);
 constexpr char kTurretReadout[]="EDF6AutoTurret_TurretReadoutV1";
 constexpr wchar_t kTurretDll[]=L"EDF6AutoTurret.dll";
+
+// V1, the local player's turret lock as EDF6VehicleCrew's Q mark needs it (2026-10-25, the user: "载具上按q……提示对准敌人
+// 才能。但是我明明对准了"): one key, one pick. True while this machine's player is at a turret of EDF6AutoTurret's with
+// auto-aim on (its lock binding then reads the lock): `lockKey` that binding's key, `target` the locked enemy object
+// (nullptr: none). EDF6VehicleCrew then leaves that key to the lock and marks for its NPCs what the lock took, instead of
+// a second pick of its own along another ray in another cone (NpcMarkCone 8 deg against LockCone 20, no line of sight)
+// that said "aim at the enemy" over a target the lock had just boxed. False: auto-aim off, no such seat, or the plugin off.
+struct TurretLockV1 { std::uint32_t size; const void* target; std::int32_t lockKey; };
+using TurretLockFn=bool(__cdecl*)(TurretLockV1* out);
+constexpr char kTurretLock[]="EDF6AutoTurret_TurretLockV1";
 
 // V2, who turns the turret of the seat the local player sits in (the user, 2026-10-06: "auto-aim changed, no fighting
 // over it any more"). EDF6VehicleCrew's turret camera (turretcam.cpp) turns that turret toward the screen's centre;
@@ -122,7 +137,8 @@ constexpr char kInputHeld[]="EDF6VehicleCrew_InputHeldV1";
 //    vehicle class (its own hooks see only the flak and the 403 / 404 tanks): it keeps that seat's bindings and lock up
 //    (once a frame, its own hook's frame or this call), publishes TurretReadoutV1 for it (the player's gun its own), and
 //    answers `steer` with `point`, the place the round of `gun` meets the locked target (aimmath.h LeadSolve), while the
-//    lock is there (PlayerGunRule's camera branch); `mode` always autoAim; false: no such seat, or the plugin is off.
+//    lock is there (PlayerGunRule's camera branch); `mode` autoAim, or manual with auto-aim off (never `steer`); false:
+//    no such seat, or the plugin is off.
 //  - AimsTurret (EDF6VehicleCrew): it steers `vehicle`'s seat `seat` onto PlayerAim's point (the turret camera serves it,
 //    decoupled). EDF6AutoTurret then never writes that seat's turn input itself (the camera is the one hand), and the
 //    driver's seat of a gunner tank is the player's own gun (TurretReadoutV1::ownGun).

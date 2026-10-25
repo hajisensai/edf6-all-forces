@@ -53,15 +53,18 @@ struct Config {
     float burstVisual=2.5f;    // burst effect size as a multiple of the stock one (AmmoExplosion/5)
     // Tank gunners (gunner.cpp): the side guns of the Titan and the Ranger's gunner-seat tanks
     bool gunnerAi=true;        // a real living NPC gunner aims and fires its own weapon
-    bool gunnerAssist=true;    // a player in a gunner seat gets the auto-aim (keeps the trigger)
+    bool gunnerAssist=true;    // a player in a gunner seat gets the auto-aim while it is on (keeps the trigger)
     float gunnerRange=300.0f;  // metres; never farther than the gun's own range
     float gunnerCone=0.02f;    // rad; the AI fires once the barrel is this close to the aim (or the target's size)
     float gunnerMinDistance=15.0f;  // metres from the muzzle; the AI holds fire on anything closer
     float gunnerYawSign=1.0f;  // side-gun axis angle change per radian of geometric turn
     float gunnerPitchSign=-1.0f;
-    // The player's turret (designate.cpp): the bindings that lock the target nearest the view (virtual-key code, pad
-    // button bits; 0 = none), the lock's cone (deg off the view) and range (m, 0 = the gun's), how long a held lock
-    // binding takes to let the lock go.
+    // The player's turret (designate.cpp): auto-aim at the game's start (0 off, the default: the user, 2026-10-25,
+    // "自动瞄准不要开启") and the bindings that flip it; the bindings that lock the target nearest the view (virtual-key
+    // code, pad button bits; 0 = none), the lock's cone (deg off the view) and range (m, 0 = the gun's), how long a held
+    // lock binding takes to let the lock go.
+    int autoAim=0;
+    int autoAimKey=0x56,autoAimButton=0;   // V; no pad button (L3 is EDF6VehicleCrew's FreeLookButton in the same seats)
     int lockKey=0x51,lockButton=0x04;   // Q, X (the jets' next-target bindings)
     float lockCone=20.0f;
     float lockRange=0.0f;
@@ -243,6 +246,9 @@ bool ActualWeapon(const unsigned char* vehicle,unsigned seat,const unsigned char
 // its lock kept up. `muzzle` / `bore`: the seat's gun (null: none read; the lock then looks along
 // the camera, else the vehicle's nose), `range` the lock range when the ini gives none (the gun's, m).
 void PilotFrame(const unsigned char* vehicle,unsigned seatIndex,const unsigned char* seat,const float* muzzle,const float* bore,float range) noexcept;
+// Auto-aim on for the player's own turret (designate.cpp): the ini's AutoAim at the start (an edit of it sets it at
+// once), flipped by AutoAimKey / AutoAimButton. Off: the player's gun is never turned, no lock is taken.
+bool AutoAimOn() noexcept;
 // The player's lock in `vehicle` (the object; `world` its first lock point), or nullptr: none, or the player is elsewhere.
 const void* Designated(const unsigned char* vehicle,float* world) noexcept;
 // EDF6VehicleCrew's turret camera turns `vehicle`'s seat `seat` after the player's view (common/edf/aimlink.h
@@ -263,7 +269,9 @@ bool Stabilized(const unsigned char* vehicle,unsigned seat,const float* axes,flo
 // through) in a turret's choice of a new target: its distance times this. 1: no zone (or no EDF6VehicleCrew, or an older one).
 float PriorityWeight(const Enemy& e) noexcept;
 // The readout for EDF6VehicleCrew's HUD (common/edf/aimlink.h), from the player's seat this frame: `ownGun` the seat's
-// gun is the plugin's; `target` what the gun works on (null: nothing) at `world`; `gun` the weapon it is for.
+// gun is the plugin's; `target` what the gun is turned onto (null: nothing; a target only tracked for the fuse is no
+// target here) at `world`; `gun` the weapon it is for. With neither a lock nor a target the HUD's ring is on the enemy a
+// lock press would take now (PilotFrame's preview); auto-aim off: no lock, no target, no ring.
 void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,const float* world,const void* gun=nullptr) noexcept;
 
 // gunner.cpp: hooks the Titan's and the gunner-seat tanks' input and weapon-user slots; the number of

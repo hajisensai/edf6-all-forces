@@ -18,7 +18,8 @@ edf::aimlink::TurretReadoutFn turretReadout=nullptr;
 edf::aimlink::SeatQueryFn turretSteers=nullptr;
 edf::aimlink::AwareFn turretAware=nullptr;
 edf::aimlink::PlayerAimFn playerAim=nullptr;
-ULONGLONG turretTried=0,steersTried=0,awareTried=0,playerAimTried=0;
+edf::aimlink::TurretLockFn turretLock=nullptr;
+ULONGLONG turretTried=0,steersTried=0,awareTried=0,playerAimTried=0,lockTried=0;
 }  // namespace
 
 // --- The stock spot (原版 Q 标记): off for the local players (VanillaSpot=0), else cast along the camera drawn (spot_ray.h) ---
@@ -99,6 +100,16 @@ bool AutoTurretReadout(edf::aimlink::TurretReadoutV1* out) noexcept {
     namespace link=edf::aimlink;
     const auto fn=link::Resolve(link::kTurretDll,link::kTurretReadout,turretReadout,turretTried);
     return fn && fn(out);
+}
+
+bool AutoTurretLock(int* key,const void** target) noexcept {
+    namespace link=edf::aimlink;
+    *key=0;*target=nullptr;
+    const auto fn=link::Resolve(link::kTurretDll,link::kTurretLock,turretLock,lockTried);
+    link::TurretLockV1 r{sizeof(link::TurretLockV1),nullptr,0};
+    if(!Cfg().enabled || !fn || !fn(&r))return false;
+    *key=r.lockKey;*target=r.target;
+    return true;
 }
 
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* out) noexcept {

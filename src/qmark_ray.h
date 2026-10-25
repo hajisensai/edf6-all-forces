@@ -26,4 +26,12 @@ inline bool AimRay(const float* eye,const float* centre,const float* aim,float* 
     for(int i=0;i<3;++i)dir[i]=c[i];
     return true;
 }
+
+// The custom Q in a turret seat of EDF6AutoTurret's with auto-aim on (aimlink.h TurretLockV1; the user, 2026-10-25: "载具
+// 上按q……提示对准敌人才能。但是我明明对准了"): one key, one pick. The press is the turret lock's when that plugin holds
+// the very key the mark is on (`turretOwns`, its `lockKey`); the mark then makes no pick of its own (another ray, its
+// NpcMarkCone against the lock's LockCone, no line of sight: "aim at the enemy" over the enemy the lock just boxed).
+inline bool KeyIsTurretLock(int markKey,bool turretOwns,int lockKey) noexcept { return markKey>0 && turretOwns && lockKey==markKey; }
+// ...and the mark follows the lock: a lock new since the one last followed (`followed`), not already the mark, is marked.
+inline bool MarkLock(const void* lock,const void* followed,bool marked) noexcept { return lock && lock!=followed && !marked; }
 }  // namespace crew::qmark
