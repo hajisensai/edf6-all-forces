@@ -84,7 +84,7 @@ int main() {
     Weapon he(5.0f,120,1.25f,0,-3,5,7,0,0.6f,0.8f);
     Put<void*>(holder,kHolderWeapon,native.bytes.data());
     payloadAim=&Payload;selected=ap.bytes.data();
-    cfg.enabled=true;cfg.lockKey=cfg.lockButton=0;
+    cfg.enabled=true;cfg.autoAim=1;cfg.lockKey=cfg.lockButton=0;   // auto-aim on (off by default since 2026-10-25)
     Shot shot{};float range=0.0f;
     check(GunMark(ap.bytes.data())==Mark::none && GunMark(he.bytes.data())==Mark::none,"AP/HE fixtures carry no AutoTurret marker");
     check(ReadShot(vehicle,seat,shot,range) && Close(shot.speed,16) && Close(range,1440),"marked native gun admits unmarked selected AP speed and lifetime");

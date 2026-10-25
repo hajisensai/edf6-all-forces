@@ -701,7 +701,7 @@ float Steer(unsigned char* vehicle,const unsigned char* seat) noexcept {
     diag.stop=rule.steer ? "aiming" : "tracking";
     Lead(vehicle,*track,target,world,local,shot);
     track->at=now;
-    if(pilot)PublishAim(vehicle,true,target,world,barrel.weapon);
+    if(pilot)PublishAim(vehicle,true,rule.steer ? target : nullptr,world,barrel.weapon);   // a fuse-only track rings nothing
     float wantYaw,wantPitch,flight;
     if(!AimAngles(local,shot,wantYaw,wantPitch,flight)){diag.stop="out-of-reach";return -1.0f;}
     if(!rule.steer)return flight;   // the time fuse still bursts the flak at the target's range
@@ -858,6 +858,9 @@ void LoadConfig() noexcept {
     next.gunnerMinDistance=Clamp(ReadFloat(L"GunnerMinDistance",next.gunnerMinDistance),0.0f,500.0f);
     next.gunnerYawSign=ReadFloat(L"GunnerYawSign",next.gunnerYawSign)>=0.0f ? 1.0f : -1.0f;
     next.gunnerPitchSign=ReadFloat(L"GunnerPitchSign",next.gunnerPitchSign)>=0.0f ? 1.0f : -1.0f;
+    next.autoAim=GetPrivateProfileIntW(L"AutoTurret",L"AutoAim",0,iniPath)!=0 ? 1 : 0;
+    next.autoAimKey=ReadInt(L"AutoAimKey",next.autoAimKey,0,0xFE);
+    next.autoAimButton=ReadInt(L"AutoAimButton",next.autoAimButton,0,0xFFFF);
     next.lockKey=ReadInt(L"LockKey",next.lockKey,0,0xFE);
     next.lockButton=ReadInt(L"LockButton",next.lockButton,0,0xFFFF);
     next.lockCone=Clamp(ReadFloat(L"LockCone",next.lockCone),1.0f,90.0f);
@@ -869,8 +872,8 @@ void LoadConfig() noexcept {
         cfg.airHeight,cfg.lead,cfg.trackRange,cfg.feedForward,cfg.slewWeight,cfg.dragDeadzone,cfg.dragDropMs,cfg.fuse,cfg.fuseBias,cfg.fuseMin,cfg.proximity,cfg.contact);
     Log("CONFIG gunners ai=%d assist=%d range=%.0f cone=%.3f min=%.0f sign=(%+.0f,%+.0f)",
         cfg.gunnerAi,cfg.gunnerAssist,cfg.gunnerRange,cfg.gunnerCone,cfg.gunnerMinDistance,cfg.gunnerYawSign,cfg.gunnerPitchSign);
-    Log("CONFIG player lock key=0x%X button=0x%X cone=%.0fdeg range=%.0fm clear=%lums",
-        cfg.lockKey,cfg.lockButton,cfg.lockCone,cfg.lockRange,cfg.lockClearMs);
+    Log("CONFIG player auto-aim=%d key=0x%X button=0x%X, lock key=0x%X button=0x%X cone=%.0fdeg range=%.0fm clear=%lums",
+        cfg.autoAim,cfg.autoAimKey,cfg.autoAimButton,cfg.lockKey,cfg.lockButton,cfg.lockCone,cfg.lockRange,cfg.lockClearMs);
 }
 
 // Edits to the ini apply within a second; no game restart needed.

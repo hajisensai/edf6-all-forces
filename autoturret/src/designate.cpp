@@ -6,6 +6,12 @@
 //    is gone: the stock vehicle HUD's own lead mark (EDF6VehicleCrew, docs/hud-re.md §7.3) shows that for the gun the
 //    player aims, and under EDF6VehicleCrew's turret camera the turret already follows the view; the toggle only put
 //    "auto-aim on" and "[key] auto-aim off" on one HUD. The turret aims itself (no turret camera) or goes onto the lock.
+//  - Off by default (the user, 2026-10-25: "怎么自动开启自动瞄准了，而且也没啥提示欸……自动瞄准不要开启，开启以后应该有被
+//    瞄准敌人的高亮圈之类的"). The ini's AutoAim (0) is the state at each mission's start (MissionResetV1); AutoAimKey / AutoAimButton flip it
+//    (J, no pad button; not V, EDF6VehicleCrew's first person key in every vehicle seat). Off: the player's gun is never turned by this plugin (with or without the turret camera, first
+//    person, a gunner seat), no lock is taken and the lock binding is not read (Q is then EDF6VehicleCrew's NPC mark
+//    alone); the HUD says "auto-aim off" and the key that turns it on, and a flip shows the new state large for a moment.
+//    On: the lock below, and the HUD rings the enemy the gun is turned onto, or the one a lock press would take now.
 //  - The lock (ini LockKey / LockButton): a press locks the enemy nearest the screen's centre (the angle off the
 //    camera's view ray, EDF6VehicleCrew's; without it the gun's barrel) within LockCone and the lock range, that the
 //    eye can see (EDF6VehicleCrew's map ray: terrain and buildings); pressed again, the next one out from the view, round
@@ -52,11 +58,16 @@ struct Pilot {
     float range;                // the lock range (m)
     bool keys;
     const void* spot;           // the enemy nearest the view at the last lock press (aim::LockPick's sameSpot)
+    const void* preview;        // the enemy a lock press would take now (this frame's, auto-aim on): the HUD's ring
+    float previewAt[3];
+    bool toggleHeld;            // the auto-aim binding as last read
     const void* velTarget;      // the lock whose motion lockVel is (m/frame, smoothed over the frames it is held)
     float lockLast[3],lockVel[3];
     int lockFrames;
 };
 Pilot pilot{};
+bool autoAimOn=false;            // the player's auto-aim (off at the start: ini AutoAim)
+int iniAutoAim=-1;               // AutoAim as last read: an edit of it in the ini sets the state, the binding flips it between
 
 SRWLOCK readoutLock=SRWLOCK_INIT;
 link::TurretReadoutV1 readout{};
@@ -94,6 +105,12 @@ bool Held(const unsigned char* seat,bool keys,int vk,int button) noexcept {
     return button>0 && (At<std::uint16_t>(seat,edf::kSeatButtons)&static_cast<std::uint16_t>(button))!=0;
 }
 
+void SyncIniAutoAim() noexcept {
+    if(cfg.autoAim==iniAutoAim)return;
+    iniAutoAim=cfg.autoAim;
+    autoAimOn=iniAutoAim!=0;
+}
+
 void Clear(const char* why) noexcept {
     if(pilot.target)Log("LOCK v=%p seat=%u: let go of t=%p (%s)",pilot.vehicle,pilot.seat,pilot.target,why);
     pilot.target=nullptr;pilot.targetCtrl=nullptr;
@@ -124,13 +141,13 @@ bool Sees(const float* eye,const float* p,float distance) noexcept {
     return d<0.0f || d>=distance-kSeeSlack;
 }
 
-// A lock press: the enemies in the cone round the view within the lock range, nearest the view first, those the eye
-// sees; the pick aim::LockPick makes among them (the crosshair's first). Nothing in sight: the lock stays as it is.
-void Cycle(const unsigned char* vehicle,const float* muzzle,const float* bore) noexcept {
-    float eye[3],dir[3];
-    View(vehicle,muzzle,bore,eye,dir);
+// The enemies in the cone round the view within the lock range, nearest the view first, those the eye sees (at most
+// `most`; `current` the index of the lock among them, -1: not there). False: no relations read.
+struct Seen { int candidates,visible,current; const void* object[kMostRays]; float pos[kMostRays][3]; };
+bool InSight(const unsigned char* vehicle,const float* eye,const float* dir,int most,Seen* out) noexcept {
+    out->candidates=out->visible=0;out->current=-1;
     const auto relation=Relations(At<std::int32_t>(vehicle,kTeam));
-    if(!relation)return;
+    if(!relation)return false;
     struct Candidate { const void* object; float angle,distance,pos[3]; };
     Candidate c[kMostCandidates];
     int n=0,count=0;
@@ -152,22 +169,47 @@ void Cycle(const unsigned char* vehicle,const float* muzzle,const float* bore) n
         if(n<kMostCandidates)c[n++]=Candidate{e.object,angle,distance,{e.pos[0],e.pos[1],e.pos[2]}};
     }
     for(int i=1;i<n;++i)for(int k=i;k>0 && c[k].angle<c[k-1].angle;--k){const Candidate t=c[k];c[k]=c[k-1];c[k-1]=t;}
-    const void* seen[kMostRays];
-    int visible=0,current=-1;
-    for(int i=0;i<n && visible<kMostRays;++i) {
+    out->candidates=n;
+    if(most>kMostRays)most=kMostRays;
+    for(int i=0;i<n && out->visible<most;++i) {
         if(!Sees(eye,c[i].pos,c[i].distance))continue;
-        if(c[i].object==pilot.target)current=visible;
-        seen[visible++]=c[i].object;
+        if(c[i].object==pilot.target)out->current=out->visible;
+        out->object[out->visible]=c[i].object;std::memcpy(out->pos[out->visible],c[i].pos,12);
+        ++out->visible;
     }
-    const int pick=aim::LockPick(visible,current,visible>0 && seen[0]==pilot.spot);
-    pilot.spot=visible>0 ? seen[0] : nullptr;
-    if(pick<0){Log("LOCK v=%p seat=%u: no enemy in sight (%d in the %.0f deg cone, %.0f m)",vehicle,pilot.seat,n,cfg.lockCone,pilot.range);return;}
-    if(seen[pick]==pilot.target)return;   // the only one in sight is the one locked
-    pilot.target=seen[pick];
+    return true;
+}
+
+// A lock press: of the enemies in sight (InSight), the pick aim::LockPick makes (the crosshair's first). Nothing in
+// sight: the lock stays as it is.
+void Cycle(const unsigned char* vehicle,const float* muzzle,const float* bore) noexcept {
+    float eye[3],dir[3];
+    View(vehicle,muzzle,bore,eye,dir);
+    Seen seen;
+    if(!InSight(vehicle,eye,dir,kMostRays,&seen))return;
+    const int visible=seen.visible;
+    const int pick=aim::LockPick(visible,seen.current,visible>0 && seen.object[0]==pilot.spot);
+    pilot.spot=visible>0 ? seen.object[0] : nullptr;
+    if(pick<0){Log("LOCK v=%p seat=%u: no enemy in sight (%d in the %.0f deg cone, %.0f m)",vehicle,pilot.seat,seen.candidates,cfg.lockCone,pilot.range);return;}
+    if(seen.object[pick]==pilot.target)return;   // the only one in sight is the one locked
+    pilot.target=seen.object[pick];
     pilot.targetCtrl=At<const void*>(pilot.target,kSelfCtrl);
     pilot.lockedAt=GetTickCount64();
     Log("LOCK v=%p seat=%u: t=%p, %d of %d in sight (%s view)",vehicle,pilot.seat,pilot.target,pick+1,visible,
         viewRay ? "camera" : muzzle ? "barrel" : "nose");
+}
+
+// The enemy a lock press would take now with no lock held (the first in sight: LockPick's pick with no lock), every
+// frame, auto-aim on or off: the HUD's ring while on with nothing locked, and EDF6VehicleCrew's Q mark's pick in this
+// seat either way (aimlink.h TurretLockV1).
+void Preview(const unsigned char* vehicle,const float* muzzle,const float* bore) noexcept {
+    pilot.preview=nullptr;
+    float eye[3],dir[3];
+    View(vehicle,muzzle,bore,eye,dir);
+    Seen seen;
+    if(!InSight(vehicle,eye,dir,1,&seen) || seen.visible<1)return;
+    pilot.preview=seen.object[0];
+    std::memcpy(pilot.previewAt,seen.pos[0],12);
 }
 
 // The lock is let go once its target is gone (dead, no longer lockable, another object at the address) or too far.
@@ -201,29 +243,44 @@ void TrackLock() noexcept {
 }  // namespace
 
 void PilotFrame(const unsigned char* vehicle,unsigned seatIndex,const unsigned char* seat,const float* muzzle,const float* bore,float range) noexcept {
+    SyncIniAutoAim();
     const auto now=GetTickCount64();
     const void* ctrl=At<const void*>(vehicle,kSelfCtrl);
     if(pilot.vehicle!=vehicle || pilot.ctrl!=ctrl || pilot.seat!=seatIndex || !Fresh()) {
         if(pilot.target)Clear("the player changed seats");
         pilot=Pilot{};
         pilot.vehicle=vehicle;pilot.ctrl=ctrl;pilot.seat=seatIndex;
-        pilot.lockHeld=pilot.lockLong=true;   // a binding held while boarding is no press
-        Log("PILOT v=%p seat=%u: lock %s / pad 0x%X",vehicle,seatIndex,cfg.lockKey ? "on" : "off",cfg.lockButton);
+        pilot.toggleHeld=pilot.lockHeld=pilot.lockLong=true;   // a binding held while boarding is no press
+        Log("PILOT v=%p seat=%u: auto-aim %s (key 0x%X / pad 0x%X), lock key 0x%X / pad 0x%X",vehicle,seatIndex,
+            autoAimOn ? "on" : "off",cfg.autoAimKey,cfg.autoAimButton,cfg.lockKey,cfg.lockButton);
     }
     pilot.seenFrame=Frame();
     pilot.range=cfg.lockRange>0.0f ? cfg.lockRange : range>0.0f ? range : kNoRange;
     pilot.keys=At<std::uint8_t>(seat,edf::kSeatPad)==0;
+    const bool toggleDown=Held(seat,pilot.keys,cfg.autoAimKey,cfg.autoAimButton);
+    if(toggleDown && !pilot.toggleHeld) {
+        autoAimOn=!autoAimOn;
+        Log("PILOT v=%p seat=%u: auto-aim %s (%s)",vehicle,seatIndex,autoAimOn ? "on" : "off",pilot.keys ? "key" : "pad button");
+        if(!autoAimOn)Clear("auto-aim off");
+    }
+    pilot.toggleHeld=toggleDown;
+    // The lock binding is the lock's only while auto-aim is on (off: EDF6VehicleCrew's Q mark alone acts on it). Its state
+    // is followed either way, so a press made while off is no lock once auto-aim is on.
     const bool lockDown=Held(seat,pilot.keys,cfg.lockKey,cfg.lockButton);
-    if(lockDown && !pilot.lockHeld){pilot.lockDownAt=now;pilot.lockLong=false;}
+    if(!autoAimOn)pilot.lockLong=true;
+    if(lockDown && !pilot.lockHeld){pilot.lockDownAt=now;pilot.lockLong=!autoAimOn;}
     if(lockDown && !pilot.lockLong && now-pilot.lockDownAt>=cfg.lockClearMs){pilot.lockLong=true;Clear("held");}
     if(!lockDown && pilot.lockHeld && !pilot.lockLong)Cycle(vehicle,muzzle,bore);   // a short press: on its release
     pilot.lockHeld=lockDown;
     Check(vehicle);
     TrackLock();
+    Preview(vehicle,muzzle,bore);
 }
 
+bool AutoAimOn() noexcept { SyncIniAutoAim();return autoAimOn; }
+
 const void* Designated(const unsigned char* vehicle,float* world) noexcept {
-    if(!Fresh() || pilot.vehicle!=vehicle || !pilot.target)return nullptr;
+    if(!AutoAimOn() || !Fresh() || pilot.vehicle!=vehicle || !pilot.target)return nullptr;
     if(At<const void*>(vehicle,kSelfCtrl)!=pilot.ctrl || !Same(pilot.target,pilot.targetCtrl))return nullptr;
     const Enemy* e=PointOf(pilot.target);
     if(!e)return nullptr;
@@ -257,6 +314,7 @@ bool CameraTurret(const unsigned char* vehicle,unsigned seat) noexcept {
 }
 
 edf::aimlink::PlayerGun PlayerControlRule(const unsigned char* vehicle,unsigned seat,bool locked) noexcept {
+    if(!AutoAimOn())return {false,false};   // auto-aim off: the player's gun is the player's, the stick no drag
     if(ObservesTurret(vehicle,seat))return {false,false};
     return link::PlayerGunRule(CameraTurret(vehicle,seat),locked);
 }
@@ -295,8 +353,11 @@ float PriorityWeight(const Enemy& e) noexcept {
 
 void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,const float* world,const void* gun) noexcept {
     link::TurretReadoutV1 r{};
-    r.mode=link::Mode::autoAim;r.keys=pilot.keys;r.ownGun=ownGun;
+    const bool on=AutoAimOn();
+    r.mode=on ? link::Mode::autoAim : link::Mode::manual;r.keys=pilot.keys;r.ownGun=ownGun;
+    r.modeKey=cfg.autoAimKey;r.modeButton=cfg.autoAimButton;
     r.lockKey=cfg.lockKey;r.lockButton=cfg.lockButton;
+    if(!on)target=nullptr;   // off: nothing ringed, nothing locked (a target the flak's fuse tracks is the fuse's)
     float locked[3];
     if(Designated(vehicle,locked)) {
         const ULONGLONG held=GetTickCount64()-pilot.lockedAt;
@@ -307,6 +368,8 @@ void PublishAim(const unsigned char* vehicle,bool ownGun,const void* target,cons
     if(target && world) {
         r.target=true;
         if(r.lock==link::Lock::none)std::memcpy(r.at,world,12);
+    } else if(on && r.lock==link::Lock::none && pilot.preview && Fresh() && pilot.vehicle==vehicle) {
+        r.target=true;std::memcpy(r.at,pilot.previewAt,12);
     }
     publishedFrame=Frame();publishedVehicle=vehicle;publishedGun=gun;
     AcquireSRWLockExclusive(&readoutLock);
@@ -330,6 +393,30 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_TurretReadoutV1(edf
     if(fresh)*out=readout;
     ReleaseSRWLockShared(&readoutLock);
     return fresh;
+}
+
+// EDF6VehicleCrew's Q mark asks it on its game thread, once a frame (common/edf/aimlink.h TurretLockV1).
+extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_TurretLockV1(edf::aimlink::TurretLockV1* out) {
+    using namespace autoturret;
+    if(!out || out->size!=sizeof(edf::aimlink::TurretLockV1))return false;
+    *out=edf::aimlink::TurretLockV1{sizeof(edf::aimlink::TurretLockV1),nullptr,0,false,false,nullptr,{}};
+    __try {
+        if(!image || !cfg.enabled || !Fresh())return false;
+        out->autoAim=AutoAimOn();out->keys=pilot.keys;
+        out->lockKey=cfg.lockKey;
+        out->target=out->autoAim && pilot.target && Same(pilot.target,pilot.targetCtrl) ? pilot.target : nullptr;
+        if(pilot.preview){out->pick=pilot.preview;std::memcpy(out->pickAt,pilot.previewAt,12);}
+        return true;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+// EDF6VehicleCrew's MissionStart (aimlink.h MissionResetV1), game thread: auto-aim back to the ini's, the lock let go.
+extern "C" __declspec(dllexport) void __cdecl EDF6AutoTurret_MissionResetV1() {
+    using namespace autoturret;
+    iniAutoAim=-1;SyncIniAutoAim();
+    if(pilot.target)Log("LOCK: let go of t=%p (a new mission)",pilot.target);
+    pilot=Pilot{};
+    Log("PILOT: a new mission: auto-aim %s (ini AutoAim)",autoAimOn ? "on" : "off");
 }
 
 namespace autoturret {
@@ -359,7 +446,7 @@ bool PlayerAim(const unsigned char* v,unsigned s,const unsigned char* gun,edf::a
     }
     if(!(pilot.vehicle==v && pilot.seat==s && pilot.ctrl==At<const void*>(v,kSelfCtrl) && pilot.seenFrame==Frame()))
         PilotFrame(v,s,seat,barrel ? muzzle : nullptr,barrel ? bore : nullptr,reach);
-    out->mode=link::Mode::autoAim;
+    out->mode=AutoAimOn() ? link::Mode::autoAim : link::Mode::manual;
     float world[3];
     const void* target=Designated(v,world);
     if(publishedFrame!=Frame() || publishedVehicle!=v || publishedGun!=gun)

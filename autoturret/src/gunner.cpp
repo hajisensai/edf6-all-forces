@@ -366,7 +366,7 @@ void SteerSeat(unsigned char* vehicle,unsigned s,Crew crew,float down,const Near
     }
     LeadGun(vehicle,gun,track,target,world,aimAt);
     track.at=now;
-    if(pilot)PublishAim(vehicle,true,target,world,gun.weapon);
+    if(pilot)PublishAim(vehicle,true,rule.steer ? target : nullptr,world,gun.weapon);
     if(!rule.steer)return;
     float want[2],error[2],axis[2],time,distance;
     if(!Solve(vehicle,gun,aimAt,want,time,distance) || !AxisTargets(aim,want,error,axis)){track.firing=false;return;}
