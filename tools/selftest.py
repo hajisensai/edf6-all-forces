@@ -6841,7 +6841,7 @@ def edf5_campaign_install_remove() -> None:
 def pvp_presets_agree() -> None:
     """The PvP presets (2026-10-25): the range pack's rows after the range (make_edf5_campaign PVP_ROWS) are the folders
     testrange/gen.py writes (PVP_PLANS), in the order of the last released layout (pack_layouts.json); each row's
-    thumbnail is its plan's site, each plan only parks empty vehicles (no enemy, no target, no NPC); uninstall and the
+    thumbnail is its plan's site, each plan only parks empty vehicles (no target, no NPC; enemies only placed once, known ones); uninstall and the
     installer's check know every folder; the plugin opens every row of the range's pack."""
     sys.path.insert(0, os.path.join(ROOT, 'testrange'))
     import gen
@@ -6854,6 +6854,7 @@ def pvp_presets_agree() -> None:
         assert set(row['title']) == set(row['brief']) == set(e5c.LANGS), mission
         assert not plan.waves.enabled and not plan.air.enabled and not plan.friends and not plan.squads, mission
         assert not plan.scenario and all(s in dict(gen.VEHICLES) for s in plan.vehicles), mission
+        assert all(e in {s for s, _, _ in gen.ENEMIES} for e in plan.enemies), mission
         assert all(not npc for _, npc in gen.placements(plan)), mission
     assert '(RANGE_MISSION, *PVP_MISSIONS, *LEGACY_SLOTS)' in src('testrange/gen.py')
     assert '(gen.RANGE_MISSION, *gen.PVP_MISSIONS)' in src('tools/installer.py')
@@ -6863,7 +6864,7 @@ def pvp_presets_agree() -> None:
 @test
 def pvp_presets_fit_their_sites() -> None:
     """Each PvP preset's vehicles fit its site's real points (Root.cpk) with no footprint overlap, and its script parks
-    them all and spawns nothing else."""
+    them all, puts its enemies apart off the vehicles' spots, and spawns nothing else."""
     import rootcpk
     import rmpa
     if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
@@ -6881,7 +6882,10 @@ def pvp_presets_fit_their_sites() -> None:
             others = [(q, gen.footprint(t)) for j, (t, _, q) in enumerate(placed) if j != i]
             assert gen.overlap(p, gen.footprint(s), others) == 0.0, (mission, s, p.name)
         assert text.count('CreateVehicle2(') == len(placed), mission
-        assert 'CreateEnemy' not in text and 'CreateFriend' not in text, mission
+        assert text.count('CreateEnemy(') == sum(plan.enemies.values()) and 'CreateFriend' not in text, mission
+        spots = [p for _, p in gen.enemy_spots(plan, lay)]
+        assert all(gen._apart(a, b) >= gen.PVP_ENEMY_GAP for i, a in enumerate(spots) for b in spots[i + 1:]), mission
+        assert not {p.name for p in spots} & ({p.name for _, _, p in placed} | {lay.player.name}), mission
 
 
 def edf5_campaign_range_pack() -> None:

@@ -261,6 +261,11 @@ PVP_PRESETS = (
     ('EDF6TR_PVP_BALAM', 'EDF6/M045', 'Balam Duel', '对战：巴尔加对决',
      'The plain: two Balam giant mechs by the start, for a giants\' brawl.',
      '平原，出生点旁站着 2 台巨型机甲巴尔加，巨人格斗。'),
+    ('EDF6TR_PVP_ERGINUS', 'EDF6/M045', 'Balam vs Erginus', '对战：巴尔加对艾尔基努斯',
+     'The plain: two Balams by the start, two Erginus out on the plain. Co-op: both of you in Balams against them. '
+     'PvP: one player picks side 1 (the monster side) and takes over an Erginus from the M map (Control this unit).',
+     '平原，出生点旁站着 2 台巴尔加，远处 2 只艾尔基努斯。合作：两人都开巴尔加打它们；'
+     '对战：一人选阵营 1（怪物一方），在 M 地图选中艾尔基努斯「操控此单位」，另一只由 AI 帮他。'),
     ('EDF6TR_PVP_INFANTRY', 'EDF6/RM016B', 'Infantry Duel', '对战：步兵对决',
      'Train City, no vehicles: pick your class and weapons before the sortie.',
      '列车城城区，不放载具，兵种和武器在出击前自选。'),
