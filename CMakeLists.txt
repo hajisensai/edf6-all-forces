@@ -474,7 +474,7 @@ add_executable(ultimate_check EXCLUDE_FROM_ALL tools/ultimate_check.cpp)
 target_compile_options(ultimate_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(ultimate_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # The long-range barrages offline (tools/barrage_check.cpp: src/barrage_plan.h's rounds, curves and replay).
-# cmake --build build --target barrage_check && buildarrage_check.exe
+# cmake --build build --target barrage_check && build\barrage_check.exe
 add_executable(barrage_check EXCLUDE_FROM_ALL tools/barrage_check.cpp)
 target_compile_options(barrage_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(barrage_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")

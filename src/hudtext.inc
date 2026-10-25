@@ -592,6 +592,14 @@ HUDTEXT(versionFeatPlayerVehicle,L"players' own loaded jets (stock for everyone 
 HUDTEXT(versionFeatUltimate,L"the ultimate strike (others see the stock beam)",L"终极支援天罚（其他人看到原版光束）",L"終極支援天罰（其他人看到原版光束）",L"究極支援「天罰」（他の人には標準のビーム）")
 // The ultimate strike's caller online (ultimate.cpp SayOldPeers): a peer without its channel sees the stock satellite beam.
 HUDTEXT(ultimateOldPeers,L"Some teammates run an older version: they may see the stock satellite beam",L"部分队员版本旧，可能看到原版光束",L"部分隊員版本舊，可能看到原版光束",L"一部の隊員は旧版のため、標準の衛星ビームが見えることがあります")
+// A barrage call that could not start (airstrike.cpp RadioStartHook, barrage.cpp BarrageResult): the stock bombers fly.
+HUDTEXT(barrageRefused,L"Barrage did not start (%ls): the stock bombers fly instead",L"炮击未能开始（%ls），改由原版轰炸机出动",L"砲擊未能開始（%ls），改由原版轟炸機出動",L"砲撃を開始できません（%ls）。代わりに通常の爆撃機が出撃します")
+HUDTEXT(barrageFull,L"too many barrages at once",L"同时进行的炮击已达上限",L"同時進行的砲擊已達上限",L"同時に行える砲撃の上限です")
+HUDTEXT(barrageNoHook,L"this EDF.dll's rockets cannot be steered",L"此版 EDF.dll 无法接管炮弹飞行",L"此版 EDF.dll 無法接管砲彈飛行",L"この EDF.dll では砲弾の弾道を制御できません")
+HUDTEXT(barrageNoTarget,L"no caller or target",L"呼叫者或目标无效",L"呼叫者或目標無效",L"呼び出し元または目標が無効です")
+HUDTEXT(barrageNoRounds,L"no round could be planned",L"未能规划任何炮弹",L"未能規劃任何砲彈",L"砲弾を計画できませんでした")
+// A sortie's second wave refused when due (airstrike.cpp SupportFollowUpTick): given up, with the dispatcher's reason.
+HUDTEXT(followUpRefused,L"Second wave not called: %ls",L"第二波未能呼叫：%ls",L"第二波未能呼叫：%ls",L"第二波を呼べませんでした：%ls")
 // --- The room's host settings and builds (host_settings.cpp; the room menu's status lines) ---
 HUDTEXT(hostSettingsHost,L"Host's settings: walk-up recruit %ls, free squad cover %ls",L"按房主设置：原版走近招募 %ls，自由小队掩护 %ls",L"按房主設定：原版走近招募 %ls，自由小隊掩護 %ls",L"ホストの設定：近づいて合流 %ls・自由小隊の援護 %ls")
 HUDTEXT(hostSettingsSilent,L"The host's All Forces is older: recruit / cover by this machine's ini",L"房主的全军出击较旧：招募 / 掩护按本机 ini",L"房主的全軍出擊較舊：招募 / 掩護按本機 ini",L"ホストの全軍出撃が古い：合流 / 援護はこの機の ini")

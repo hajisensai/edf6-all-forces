@@ -643,20 +643,20 @@ def ultimate_sgo(template: bytes, call: Call) -> bytes:
 
 
 def barrage_sgo(template: bytes, call: Call) -> bytes:
-    """The KM6 bomber call made a long-range barrage (src/barrage.cpp): the barrage's marker, its pt (calls.py reload) and each
-    round's damage (calls.py damage, the plugin's per round: weapon +0x89C) at every star count, its names; its radio lines
-    (CP[3]: the bombers' fire / after-fire lines; Ammo_EquipVoice) emptied: no bombers come. Without the plugin it is the
-    stock KM6 call it is made from."""
+    """The KM6 bomber call made a long-range barrage (src/barrage.cpp): the barrage's marker, its pt (calls.py reload) at every
+    star count, its names; its radio lines (CP[3]: the bombers' fire / after-fire lines; Ammo_EquipVoice) emptied. Its
+    AmmoDamage is left the KM6's: the stock bombers read it as each bomb's damage, and they fly whenever the plugin does not
+    take the call (the plugin off, a peer without it, a barrage that could not start: airstrike.cpp RadioStartHook). Each
+    round's damage (calls.py damage) is the plugin's own: src/calls.inc kBarrages (gen_calls.py), not the weapon's; the menu
+    row shows it (_barrage_stats)."""
     doc = dsgo.parse(template)
     r = doc.root
     if call.damage <= 0.0:
         raise ValueError(f'{call.id}: a barrage needs its damage a round')
     r.set('AmmoHitSizeAdjust', float(call.mark))
     flat_curve(r.get('ReloadTime'), call.reload)
-    flat_curve(r.get('AmmoDamage'), call.damage)
-    for key, want in (('ReloadTime', float(call.reload)), ('AmmoDamage', float(call.damage))):
-        if any(abs(star_value(r.get(key), stars) - want) > 1e-3 for stars in (0, 5, 10)):
-            raise ValueError(f'{TEMPLATE} 的 {key} 不是已知的星级曲线（{dsgo.to_py(r.get(key))}）')
+    if any(abs(star_value(r.get('ReloadTime'), stars) - call.reload) > 1e-3 for stars in (0, 5, 10)):
+        raise ValueError(f'{TEMPLATE} 的 ReloadTime 不是已知的星级曲线（{dsgo.to_py(r.get("ReloadTime"))}）')
     cp = r.get('Ammo_CustomParameter')
     for v in (cp.items[3], r.get('Ammo_EquipVoice')):
         if not isinstance(v, Node) or not all(isinstance(x, str) for x in v.items):

@@ -991,11 +991,15 @@ void BarrageBurst(const unsigned char* by,const float* at) noexcept;
 // barrage.cpp: the long-range barrages (docs/plan-2026-10-25-strikes.md §1.1, src/barrage_plan.h): a barrage call's radio
 // call (airstrike.cpp) starts kind `kind` (barrage::Kind) at `at` along `heading` by `caller` with `damage` a round, on every
 // machine; BarrageTick fires its rounds (SharedFrameTick); the rounds' flight is RocketBullet01's update wrapped
-// (InstallBarrages, at load). False: not started (no hook, every barrage slot taken).
-bool BarrageStart(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept;
+// (InstallBarrages, at load). Anything but started: not started, and why (the radio call lets the stock bombers fly then).
+enum class BarrageResult : int { started, noTarget, noHook, full, noCaller, noRounds };
+BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept;
 void BarrageTick() noexcept;
 void ResetBarrages() noexcept;
 bool InstallBarrages() noexcept;
+// airstrike.cpp: the caller's HUD line for its strike calls (hud.cpp StrikeBanner, the draw thread): a barrage that could
+// not start (the stock bombers fly instead), a sortie's second wave not called; a moment.
+bool PlayerStrikeCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // ultimate.cpp: the ultimate strike (docs/plan-2026-10-19-ultimate.md, src/ultimate_plan.h): the satellite call's fire
 // (airstrike.cpp) starts its show at `at` by `caller` with the weapon's `damage`; UltimateTick plays it a frame at a time

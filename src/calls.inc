@@ -172,15 +172,16 @@ const Throw kThrows[]={
 const Ultimate kUltimates[]={
     {7501.0f,"ultimate strike",L"EDF6VC_CALL_ULTIMATE"},
 };
-// The long-range barrages: their weapons' AmmoHitSizeAdjust (weapon +0x8C4) and kind (src/barrage_plan.h Kind).
+// The long-range barrages: their weapons' AmmoHitSizeAdjust (weapon +0x8C4), kind (src/barrage_plan.h Kind) and each
+// round's damage (tools/calls.py damage; the weapon's AmmoDamage stays the stock bombers', who fly without the plugin).
 const Barrage kBarrages[]={
-    {7701.0f,0,"rocket salvo",L"EDF6VC_CALL_BARRAGE_ROCKETS"},
-    {7702.0f,1,"precision rockets",L"EDF6VC_CALL_BARRAGE_GUIDED"},
-    {7703.0f,2,"thermobaric salvo",L"EDF6VC_CALL_BARRAGE_THERMO"},
-    {7704.0f,3,"cluster rockets",L"EDF6VC_CALL_BARRAGE_CLUSTER"},
-    {7705.0f,4,"creeping barrage",L"EDF6VC_CALL_BARRAGE_CREEPING"},
-    {7706.0f,5,"time-on-target fire",L"EDF6VC_CALL_BARRAGE_MRSI"},
-    {7707.0f,6,"heavy mortar",L"EDF6VC_CALL_BARRAGE_HEAVY"},
-    {7708.0f,7,"cruise missile",L"EDF6VC_CALL_BARRAGE_CRUISE"},
-    {7709.0f,8,"ballistic missile",L"EDF6VC_CALL_BARRAGE_BALLISTIC"},
+    {7701.0f,0,500.0f,"rocket salvo",L"EDF6VC_CALL_BARRAGE_ROCKETS"},
+    {7702.0f,1,2500.0f,"precision rockets",L"EDF6VC_CALL_BARRAGE_GUIDED"},
+    {7703.0f,2,1500.0f,"thermobaric salvo",L"EDF6VC_CALL_BARRAGE_THERMO"},
+    {7704.0f,3,800.0f,"cluster rockets",L"EDF6VC_CALL_BARRAGE_CLUSTER"},
+    {7705.0f,4,700.0f,"creeping barrage",L"EDF6VC_CALL_BARRAGE_CREEPING"},
+    {7706.0f,5,1500.0f,"time-on-target fire",L"EDF6VC_CALL_BARRAGE_MRSI"},
+    {7707.0f,6,8000.0f,"heavy mortar",L"EDF6VC_CALL_BARRAGE_HEAVY"},
+    {7708.0f,7,6000.0f,"cruise missile",L"EDF6VC_CALL_BARRAGE_CRUISE"},
+    {7709.0f,8,15000.0f,"ballistic missile",L"EDF6VC_CALL_BARRAGE_BALLISTIC"},
 };

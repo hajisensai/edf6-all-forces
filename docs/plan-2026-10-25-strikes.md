@@ -10,8 +10,13 @@
 ### 1.1 远程炮击（#12–#20）：插件弹 + 逐发导引
 
 - **呼叫武器**：`brings='barrage'`，模板仍是 KM6（`eWeapon051`，RadioContact）：瞄准态给目标点和航向，原有的
-  `airstrike.cpp RadioStartHook`（0x6A8DFB 的 IFC_Start）认出标记后把架数清 0，原版轰炸机不来。不进 `kCalls`，
-  不占支援目录号，M 地图不列。伤害 / pt 用 `flat_curve`（任何星级同值，同天罚）。无线电台词清空。
+  `airstrike.cpp RadioStartHook`（0x6A8DFB 的 IFC_Start）认出标记、炮击开始后才把架数清 0，原版轰炸机不来；炮击没能开始
+  （同时 6 场已满、飞行 hook 没装上、没有呼叫者 / 目标、一发都没规划出来）时架数不动，原版轰炸机照常出动，呼叫者 HUD 上提示原因
+  （`BarrageResult`，`StrikeBanner`）。不进 `kCalls`，不占支援目录号，M 地图不列。pt 用 `flat_curve`（任何星级同值，同天罚）。
+  **AmmoDamage 保持 KM6 原值**：原版轰炸机每颗炸弹的伤害就读它，插件关闭、房间里有人没装插件、炮击没能开始时出动的都是原版
+  轰炸机（2026-10-25 审查：曾把它改成每发弹伤害，满星 15000 的 KM6）。每发弹伤害只在插件自己的表里（`calls.py damage` →
+  `src/calls.inc kBarrages`），武器菜单那一行照样显示它（`_barrage_stats`）。无线电台词清空。
+  开始时日志写一行 `BARRAGE <kind> plan from: seed ... at ... ground ... heading ...`（联机时对比各机这一行是否一致）。
 - **弹**：一份 SGO `EDF6VC_BARRAGE_ROUND.SGO`，从原版 `DEMOINDIRECTFIREE50.SGO`（DemoIndirectFire，RocketBullet01，带尾烟）
   派生：重力 0、寿命 30 s、伤害 0（插件写）。粗细 / 爆炸半径每发运行时写 IFC（`RoundSize` / `RoundBlast`）。
   另有空爆用的冲击弹 `EDF6VC_BARRAGE_BURST.SGO`（`_emc_charge` 配方）。
@@ -68,8 +73,9 @@
 | 11 | 引导打击 | 炮艇机 ×1 → 对地攻击机 ×2 | gunshipLap（原有绕圈开炮，计满一圈撤），25 s 后第二波 #4 | |
 
 - 第二波（`then` / `then_after`）：第一波请求被本机受理后（武器呼叫或 M 地图都走 `SupportCallComposedAt`），由**呼叫者那台机器**
-  在 25 s 后对同一点再发一次支援请求（`airstrike.cpp SupportFollowUpQueue / Tick`）。被拒（单机时另一项支援还在核实路线）则每 3 s
-  重试，最多 10 次；联机时房主那边的拒绝不重试（日志 `SUPPORT second wave ... accepted=0`）。
+  在 25 s 后对同一点再发一次支援请求（`airstrike.cpp SupportFollowUpQueue / Tick`）。到点时单机上一项支援还在核实路线
+  （`SupportCallReadiness` 为 planning）就等它核实完再发；其它拒绝（ini 停用、任务规则禁止支援、插件关闭……）再发也一样被拒，
+  直接放弃并在 HUD 上提示原因；联机时房主那边的拒绝由房主的回执提示（日志 `SUPPORT second wave ... accepted=0`）。
 - 支援调度原有的 30 s 全局冷却已删除（用户 2026-10-25：「支援调度 30 秒的全局冷却 删掉不就好了，以后限制我用pt来做」）。
 
 - 与方案的出入：直升机（布鲁特 / Eros）没有火箭挂载，#1 用机炮和导弹；#10 用制空战斗机（支援部署不能带无人机：无人机没有座位，

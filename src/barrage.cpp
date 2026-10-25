@@ -189,26 +189,30 @@ void __fastcall UpdateHook(void* b,void* a2,void* a3,void* a4) noexcept {
 }
 }  // namespace
 
-bool BarrageStart(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept {
+BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept {
     if(kind<0 || kind>=barrage::kKinds || !caller || !at || !heading || !std::isfinite(at[0]+at[1]+at[2]+heading[0]+heading[2])) {
         Log("BARRAGE not started: no kind / caller / target");
-        return false;
+        return BarrageResult::noTarget;
     }
     if(!hooked) {
         Log("BARRAGE not started: the rockets' flight hook is not in (unexpected EDF.dll code)");
-        return false;
+        return BarrageResult::noHook;
     }
     int i=-1;
     for(int k=0;k<kMaxShows;++k)if(!shows[k].on){i=k;break;}
     if(i<0) {
         Log("BARRAGE not started: %d barrages fly already (the most at once)",kMaxShows);
-        return false;
+        return BarrageResult::full;
     }
     Show& s=shows[i];
     s=Show{};
     s.kind=static_cast<Kind>(kind);
     edf41c::WeakSet(s.caller,caller);
-    if(!edf41c::WeakAlive(s.caller)){edf41c::WeakReset(s.caller);return false;}
+    if(!edf41c::WeakAlive(s.caller)) {
+        edf41c::WeakReset(s.caller);
+        Log("BARRAGE not started: its caller is gone");
+        return BarrageResult::noCaller;
+    }
     s.by=caller;
     s.damage=std::isfinite(damage) && damage>0.0f ? damage : 0.0f;
     barrage::Setup setup;
@@ -217,11 +221,18 @@ bool BarrageStart(int kind,const unsigned char* caller,const float* at,const flo
     std::memcpy(setup.heading,heading,12);
     setup.seed=barrage::Seed(at,heading,kind);
     setup.worldHalf=HavokHalf()<WorldHalf() ? HavokHalf() : WorldHalf();
+    // What the plan is made from (online every machine plans its own copy from the call it heard: these must agree from
+    // machine to machine for the rounds to). The guided rockets' aims are each machine's own view of the enemies: each is
+    // logged below, and the round count in the line after the plan.
+    Log("BARRAGE %s plan from: seed %016llX at (%.3f, %.3f, %.3f) ground %.3f heading (%.4f, %.4f, %.4f) world half %.1f "
+        "damage %.1f",barrage::kKindNames[kind],static_cast<unsigned long long>(setup.seed),at[0],at[1],at[2],setup.target[1],
+        heading[0],heading[1],heading[2],setup.worldHalf,s.damage);
     Aims aims;
     if(s.kind==Kind::guided) {
         std::memcpy(aims.at,setup.target,12);
         __try { VisitEnemiesOf(At<std::int32_t>(caller,kTeam),&SeeAim,&aims); } __except(EXCEPTION_EXECUTE_HANDLER){aims.n=0;}
         setup.aims=aims.n;setup.aim=aims.pts;
+        for(int a=0;a<aims.n;++a)Log("BARRAGE guided aim %d: (%.1f, %.1f, %.1f)",a,aims.pts[a][0],aims.pts[a][1],aims.pts[a][2]);
     }
     s.n=barrage::Plan(s.kind,setup,[](float x,float z,float y){return Top(x,z,y);},s.rounds,kMaxRounds);
     // In launch order (the creeping barrage's and the MRSI's are planned by where they land).
@@ -235,7 +246,7 @@ bool BarrageStart(int kind,const unsigned char* caller,const float* at,const flo
     Log("BARRAGE %s at (%.0f, %.0f, %.0f): %d rounds over %.1f s, damage %.0f a round%s",barrage::kKindNames[kind],setup.target[0],
         setup.target[1],setup.target[2],s.n,static_cast<float>(s.end)/60.0f,s.damage,
         s.kind==Kind::guided ? (aims.n ? ", aimed at enemies" : ", no enemy near: round the mark") : "");
-    return s.on;
+    return s.on ? BarrageResult::started : BarrageResult::noRounds;
 }
 
 void BarrageTick() noexcept {

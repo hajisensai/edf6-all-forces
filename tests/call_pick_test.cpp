@@ -31,7 +31,8 @@ bool MapGroundNear(float x,float z,float,float* out,bool) noexcept {*out=Support
 int supportSubmitted=0,obsoleteSubCopies=0,lastSupportCatalog=-1;
 bool SupportCallAt(int catalog,const float*,wchar_t*,std::size_t) noexcept {++supportSubmitted;lastSupportCatalog=catalog;return true;}
 bool UltimateStart(const unsigned char*,const float*,float,std::uint64_t) noexcept { return false; }
-bool BarrageStart(int,const unsigned char*,const float*,const float*,float) noexcept { return false; }
+BarrageResult BarrageStart(int,const unsigned char*,const float*,const float*,float) noexcept { return BarrageResult::noHook; }
+SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }   // the second waves (airstrike.cpp SupportFollowUpTick)
 bool UltimateHeardFrom(const unsigned char*) noexcept { return false; }   // the ultimate online (ultimate.cpp, not linked here)
 bool SupportSubCallAt(const float*,const float*,bool,wchar_t*,std::size_t) noexcept {++obsoleteSubCopies;return false;}
 bool testOnline=true;

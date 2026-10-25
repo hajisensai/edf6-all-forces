@@ -1075,9 +1075,12 @@ def _check_call_outputs(c: calls.Call, out: object, row: object, lang: str, dura
         voices = (*r.get('Ammo_CustomParameter').items[5].items, *r.get('Ammo_EquipVoice').items)
         assert all(v == '' for v in voices), (c.id, 'its radio lines silenced', voices)
     elif k == 'barrage':
-        # Each round's damage and the pt at every star count (owned at 0 stars), the bombers' radio lines silenced.
+        # The pt at every star count (owned at 0 stars), the bombers' radio lines silenced. AmmoDamage left the KM6's: the
+        # stock bombers read it a bomb, and they fly whenever the plugin does not take the call (each round's damage is
+        # kBarrages', src/calls.inc).
+        assert dsgo.to_py(r.get('AmmoDamage')) == _KM6_DAMAGE, (c.id, "the stock bombers' damage changed",
+                                                               dsgo.to_py(r.get('AmmoDamage')))
         for stars in range(11):
-            assert cw.star_value(r.get('AmmoDamage'), stars) == c.damage, (c.id, stars, dsgo.to_py(r.get('AmmoDamage')))
             assert cw.star_value(r.get('ReloadTime'), stars) == c.reload, (c.id, stars, dsgo.to_py(r.get('ReloadTime')))
         voices = (*r.get('Ammo_CustomParameter').items[3].items, *r.get('Ammo_EquipVoice').items)
         assert all(v == '' for v in voices), (c.id, 'its radio lines silenced', voices)
@@ -1784,7 +1787,7 @@ def sortie_copies_agree() -> None:
     assert 'SortieStruck(*k.j,object)' in combat and 'SortieLockMs(j,kLockMs)' in combat
     assert 'out->sortie=c.sortie;' in air and 'void SupportFollowUpTick() noexcept' in air
     assert 'SupportFollowUpQueue(index,target);' in src('src/support_dispatch.cpp')
-    assert 'GuardedTick(kStepBarrage,&SupportFollowUpTick);' in src('src/crew.cpp') and 'ResetSupportFollowUps();' in src('src/mission.cpp')
+    assert 'GuardedTick(kStepFollowUp,&SupportFollowUpTick);' in src('src/crew.cpp') and 'ResetSupportFollowUps();' in src('src/mission.cpp')
     heli = src('src/heli.cpp')
     assert 'void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept' in heli and 'SortieFly(h,s,w)' in heli
     cmake = src('CMakeLists.txt')

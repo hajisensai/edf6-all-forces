@@ -838,8 +838,8 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
                                  'and missiles on the way, and fly straight off.'),
     },
     'sortie_heli_hunter': {
-        'SC': ('导弹猎手', '出击：一架 Eros 直升机在标记点外约 300 米处悬停，导弹逐发锁定附近不同的敌人连射，打完或 25 秒后离场。'),
-        'CN': ('飛彈獵手', '出擊：一架 Eros 直升機在標記點外約 300 公尺處懸停，飛彈逐發鎖定附近不同的敵人連射，打完或 25 秒後離場。'),
+        'SC': ('导弹猎手', '出击：一架 Eros 直升机在标记点外约 300 米处悬停，导弹逐发锁定附近不同的敌人连射，打完或 40 秒后离场。'),
+        'CN': ('飛彈獵手', '出擊：一架 Eros 直升機在標記點外約 300 公尺處懸停，飛彈逐發鎖定附近不同的敵人連射，打完或 40 秒後離場。'),
         'JA': ('ミサイルハンター', '出撃。エロス 1 機が指示地点から約 300m の位置でホバリングし、近くの別々の敵を 1 発ずつロックして'
                           'ミサイルを連射する。撃ち尽くすか 40 秒で離脱する。'),
         'EN': ('Missile Hunter', 'Sortie: an Eros hovers some 300 m off the mark and fires its missiles one by one, each at a '

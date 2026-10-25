@@ -38,6 +38,7 @@
 // of the sky with no plane to take over, and stay stock.
 #include "crew.h"
 #include "call_net.h"
+#include "hudtext.h"
 #include "support_call.h"
 #include "support_aircraft.h"
 #include "support_entry.h"
@@ -48,6 +49,7 @@
 #include "weapon_records.h"
 #include <atomic>
 #include <cmath>
+#include <cstdarg>
 #include <cwchar>
 #include <optional>
 
@@ -104,8 +106,10 @@ struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* ob
 struct Throw { std::uint32_t markBits; ThrownDrone drone; DWORD fuelSec; const char* name; const wchar_t* id; };
 // An ultimate strike's weapon (tools/calls.py brings 'ultimate'): its AmmoHitSizeAdjust (an integer, as kCalls').
 struct Ultimate { float mark; const char* name; const wchar_t* id; };
-// A long-range barrage's weapon (tools/calls.py brings 'barrage'): its AmmoHitSizeAdjust and its kind (barrage_plan.h Kind).
-struct Barrage { float mark; int kind; const char* name; const wchar_t* id; };
+// A long-range barrage's weapon (tools/calls.py brings 'barrage'): its AmmoHitSizeAdjust, its kind (barrage_plan.h Kind) and
+// each round's damage (the plugin's own: the weapon's AmmoDamage is the stock bombers', who fly when the plugin does not
+// take the call: tools/call_weapons.py barrage_sgo).
+struct Barrage { float mark; int kind; float damage; const char* name; const wchar_t* id; };
 #include "calls.inc"
 // The in-mission pick (CallPick, overlay.cpp's keys): -1 = each weapon's own call; otherwise only local players'
 // call weapons bring kCalls[picked]. This UI preference is not carried in the native radio-call message.
@@ -257,12 +261,34 @@ const Barrage* BarrageOf(const unsigned char* w) noexcept {
     for(const auto& b:kBarrages)if(std::fabs(mark-b.mark)<0.5f)return &b;
     return nullptr;
 }
-constexpr std::size_t kBarrageDamage=0x89C;   // the weapon's AmmoDamage with its stars (flat: tools/call_weapons.py barrage_sgo)
+
+// The caller's HUD line for its strike calls (PlayerStrikeCue; hud.cpp StrikeBanner reads it on the draw thread).
+SRWLOCK strikeCueLock=SRWLOCK_INIT;
+wchar_t strikeCueText[200]{};
+ULONGLONG strikeCueAt=0;
+void StrikeCue(const wchar_t* format,...) noexcept {
+    wchar_t text[200];
+    va_list a;va_start(a,format);_vsnwprintf_s(text,_countof(text),_TRUNCATE,format,a);va_end(a);
+    AcquireSRWLockExclusive(&strikeCueLock);
+    std::memcpy(strikeCueText,text,sizeof(text));strikeCueAt=GetTickCount64();
+    ReleaseSRWLockExclusive(&strikeCueLock);
+}
+const wchar_t* BarrageWhy(BarrageResult r) noexcept {
+    using hudtext::Tx;
+    switch(r) {
+    case BarrageResult::noHook: return hudtext::Tr(Tx::barrageNoHook);
+    case BarrageResult::full: return hudtext::Tr(Tx::barrageFull);
+    case BarrageResult::noRounds: return hudtext::Tr(Tx::barrageNoRounds);
+    default: return hudtext::Tr(Tx::barrageNoTarget);
+    }
+}
 
 // The Air Raider's bomber call (redirected call at kRadioCall): IFC_Start(ifc = weapon+0x1660, params).
 // A call weapon's: its jets or helis, and no bombers (when none could be launched the bombers fly).
 // A barrage weapon's: its barrage (barrage.cpp) on every machine, each on its copy of the call (the radio callback is
-// replayed for remote players too), and no bombers.
+// replayed for remote players too), and no bombers. A barrage that could not start (every barrage slot taken, no flight
+// hook, no caller or target, no round planned) leaves the stock bombers to fly (the weapon is the KM6 call with its stock
+// damage: tools/call_weapons.py barrage_sgo), and the caller is told on the HUD.
 std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
     const auto result=reinterpret_cast<IfcStartFn>(image+kIfcStart)(ifc,params);
     if(!Cfg().enabled)return result;
@@ -273,9 +299,11 @@ std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
             const auto p=static_cast<const unsigned char*>(params);
             const float* target=reinterpret_cast<const float*>(p+kStartTarget);
             const float* heading=reinterpret_cast<const float*>(p+kStartForward);
-            const bool started=BarrageStart(b->kind,owner,target,heading,At<float>(w,kBarrageDamage));
-            Put<std::int32_t>(ifc,kIfcPlanes,0);   // never the stock bombers instead
-            Log("AIRSTRIKE barrage call %s: started=%d",b->name,started);
+            const BarrageResult got=BarrageStart(b->kind,owner,target,heading,b->damage);
+            const bool started=got==BarrageResult::started;
+            if(started)Put<std::int32_t>(ifc,kIfcPlanes,0);   // the barrage instead of the stock bombers
+            else if(!InSession() || IsPlayer(owner))StrikeCue(hudtext::Tr(hudtext::Tx::barrageRefused),BarrageWhy(got));
+            Log("AIRSTRIKE barrage call %s: started=%d%s",b->name,started,started ? "" : " (the stock bombers fly instead)");
             return result;
         }
         if(!Cfg().jetAirRaider)return result;
@@ -693,12 +721,13 @@ bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept {
 
 // A sortie's second wave (Call::then): queued when this machine's request for the first was accepted (support_dispatch.cpp
 // SupportCallAt), called onto the same mark by this machine, the caller's, once due (SupportFollowUpTick: SharedFrameTick).
-// Refused here (another call still being planned), it is tried again every kFollowUpRetryMs for kFollowUpRetries. Online `accepted` is this machine's request queued for the host: a refusal
-// there is the host's to say (support_net), not retried.
+// Due while the call before it is still being planned offline (SupportCallReadiness planning: the dispatcher takes one
+// request at a time, often the first wave itself), it waits for that plan and is called the frame it is over. Any other
+// refusal (the entry disabled in the ini, the mission's support rules, the plugin off, ...) would refuse it again: it is
+// given up at once and the caller told why on the HUD. Online `accepted` is this machine's request queued for the host: a
+// refusal there is the host's to say (support_net).
 namespace {
-constexpr ULONGLONG kFollowUpRetryMs=3000;
-constexpr int kFollowUpRetries=10;
-struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; int tries=0; };
+struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; };
 FollowUp followUps[8]{};
 }  // namespace
 void SupportFollowUpQueue(int catalog,const float* target) noexcept {
@@ -714,15 +743,28 @@ void SupportFollowUpTick() noexcept {
     const ULONGLONG ms=GameMs();
     for(auto& f:followUps) {
         if(f.catalog<0 || ms<f.due)continue;
+        if(SupportCallReadiness().state==SupportReady::planning) {   // the call before it still planned: its turn comes
+            if(!f.waited)Log("SUPPORT second wave %s: waiting for the call being planned",kCalls[f.catalog].name);
+            f.waited=true;
+            continue;
+        }
         const FollowUp now=f;
         f=FollowUp{};
         wchar_t note[128]{};
         const bool ok=SupportCallAt(now.catalog,now.at,note,_countof(note));   // a second wave has no wave of its own
-        Log("SUPPORT second wave %s: accepted=%d (try %d)",kCalls[now.catalog].name,ok,now.tries+1);
-        if(!ok && now.tries+1<kFollowUpRetries){f=now;f.due=ms+kFollowUpRetryMs;++f.tries;}
+        Log("SUPPORT second wave %s: accepted=%d",kCalls[now.catalog].name,ok);
+        if(!ok)StrikeCue(hudtext::Tr(hudtext::Tx::followUpRefused),note[0] ? note : L"-");
     }
 }
 void ResetSupportFollowUps() noexcept { for(auto& f:followUps)f=FollowUp{}; }
+bool PlayerStrikeCue(wchar_t* out,std::size_t capacity) noexcept {
+    constexpr ULONGLONG kShowMs=8000;
+    AcquireSRWLockShared(&strikeCueLock);
+    const bool fresh=strikeCueAt && GetTickCount64()-strikeCueAt<=kShowMs && out && capacity;
+    if(fresh)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",strikeCueText);
+    ReleaseSRWLockShared(&strikeCueLock);
+    return fresh;
+}
 int SupportAirCallCount() noexcept { return kCallCount; }
 // The call's configuration key: its weapon row id without EDF6VC_CALL_ (INTERCEPTOR, HELI_F, ...).
 const wchar_t* SupportAirCallKey(int index) noexcept {

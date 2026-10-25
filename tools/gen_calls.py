@@ -6,7 +6,8 @@
                Mods/WEAPON and the object SGO a vehicle request brings under Mods/OBJECT (nullptr: none)
   kThrows      the thrown drones (Robot Bombs, brings 'throw'): the marker's float bits, the drone, its fuel
   kUltimates   the ultimate strikes (satellite calls, brings 'ultimate'): the marker, its name in the log
-  kBarrages    the long-range barrages (bomber calls, brings 'barrage'): the marker, its kind (src/barrage_plan.h), its log name
+  kBarrages    the long-range barrages (bomber calls, brings 'barrage'): the marker, its kind (src/barrage_plan.h), each
+               round's damage (the plugin's own: the weapon's AmmoDamage stays the stock bombers'), its log name
 
   python tools/gen_calls.py            write it
   python tools/gen_calls.py --check    exit 1 when the committed file is not what this would write (CI)
@@ -53,7 +54,7 @@ def _ultimate(c: calls.Call) -> str:
 
 
 def _barrage(c: calls.Call) -> str:
-    return f'    {{{_float(c.mark)},{calls.BARRAGE_KINDS.index(c.barrage)},"{c.log}",{_wstr(c.id)}}},'
+    return f'    {{{_float(c.mark)},{calls.BARRAGE_KINDS.index(c.barrage)},{_float(c.damage)},"{c.log}",{_wstr(c.id)}}},'
 
 
 def _row(c: calls.Call) -> str:
@@ -91,7 +92,8 @@ def render() -> str:
         'const Ultimate kUltimates[]={',
         *[_ultimate(c) for c in calls.CALLS if c.brings == 'ultimate'],
         '};',
-        '// The long-range barrages: their weapons\' AmmoHitSizeAdjust (weapon +0x8C4) and kind (src/barrage_plan.h Kind).',
+        '// The long-range barrages: their weapons\' AmmoHitSizeAdjust (weapon +0x8C4), kind (src/barrage_plan.h Kind) and each',
+        '// round\'s damage (tools/calls.py damage; the weapon\'s AmmoDamage stays the stock bombers\', who fly without the plugin).',
         'const Barrage kBarrages[]={',
         *[_barrage(c) for c in calls.CALLS if c.brings == 'barrage'],
         '};',
