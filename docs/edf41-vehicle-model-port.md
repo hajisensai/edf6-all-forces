@@ -49,3 +49,10 @@ EDF6 的 ragdoll loader 已内置旧 `hkpPhysicsData` 到 `hknpPhysicsSceneData`
 - 修复（`src/edf41mech_boost.cpp` / `.h`）：给这两处循环补上旧解析的约定——没建成的槽不是喷口，跳过对其发射器的写入。两段循环体各换成跳到近址桩，桩里执行原样指令、只把发射器写入放在 null 判断之后，再跳回循环步进；建成的槽（所有 EDF6 原版对象的每个槽）执行与原版逐字节相同的指令。406 仍按 4.1 的两组喷口显示。
 - 检查：`tests/edf41mech_boost_test.cpp`（ctest `edf41mech_boost`，真实执行两个桩：空槽不写不崩、建成槽写入值与原版相同；变异：去掉 null 判断即访问违规）、`tests/edf41mech_boost_native_audit.py`（ctest `edf41mech_boost_native`：三条解析的键与调用、旧解析两槽、两处循环四槽、本类代码中再无其它写发射器的指令）。
 - 实机（同一租约，修复后 DLL `8130a582…`，日志 `EDF41MECH boost: ... on`）：同样召唤 406、上车，起跳 / 空格 / 前推加推进共 8 轮，未崩，机体移动约 250 m（日志 `VEH ... Begaruta ... seats=[P] pos=(-407,6,-51)`）。原版 504 的跳跃本次未实机回归（其四槽全建成，走的仍是原版指令，单测覆盖）。
+
+## 2026-10-25：V301 的 CAS 必须保留 `cannon` 静态轨道（灰白地图）
+
+601 类每帧把座位 0 的俯仰角「就地」转到 `cannon` 的局部矩阵上（`0x661810` 读骨骼记录 `+0x70`、写回），靠 CAS 每帧先复位。
+旧的 `EDF41_V301_RECOIL.CAS` 只有 `cannon_slide`，瞄准后炮管每帧多转一次，约一秒矩阵越过 1e20，Umbra 的空间数据库随之报废，
+整张地图只剩天空（M190 实机）。`pylib/edf41tank.py CLASS_POSED` 现保留并重定位 V601 的 `cannon` 静态轨道。
+细节与对照实验见 `docs/feedback-2026-10-25-greymap.md`。

@@ -11,6 +11,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'pylib'), str(ROOT / 'tools')]
+import cas_pose
 import edf41calls
 import edf41_objects
 import edf41tank
@@ -102,6 +103,30 @@ class BundledV301(unittest.TestCase):
         broken['ragdoll'][1] = sgo.write_depth_first(version, binding)
         with self.assertRaisesRegex(ValueError, 'recoil readback'):
             edf41tank.check(broken, *rest)
+
+    def test_class_posed_bones_keep_a_static_rest_track(self):
+        # Vehicle601_Tank's pose turns these bones' locals by the aim's pitch in place every frame (0x661810 reads the
+        # record's +0x70 and writes it back turned): the CAS must rewrite them each frame, or the turn accumulates (the
+        # spinning barrel whose matrix reaches 1e20 and greys out the map, docs/feedback-2026-10-25-greymap.md).
+        self.assertEqual(edf41tank.CLASS_POSED, {'cannon'})
+        for root, (members, md, physics, cas) in self.samples.items():
+            with self.subTest(root=root):
+                pose = cas_pose.CasPose(cas)
+                for clip in pose.clips:
+                    tracks = {t.name: t for t in clip.tracks}
+                    self.assertLessEqual(edf41tank.CLASS_POSED, set(tracks))
+                    for name in edf41tank.CLASS_POSED:
+                        local = md.bones[mdb.bone_named(md, name)].local
+                        for frame in range(cas_pose.clip_info(pose, clip)[2]):
+                            at = pose.translation(tracks[name].translation, frame)
+                            self.assertLess(max(abs(a - b) for a, b in zip(at, local[12:15])), 1e-4)
+
+    def test_cas_without_the_cannon_rest_track_is_refused(self):
+        members, md, physics, cas = self.samples['VEHICLE301_TANK.SGO']
+        stripped = cas_pose.retarget(cas, md, md, set(), {'cannon'})   # the 2026-10-19 CAS: the recoil track alone
+        self.assertEqual({t.name for c in cas_pose.CasPose(stripped).clips for t in c.tracks}, {'cannon_slide'})
+        with self.assertRaisesRegex(ValueError, 'rest pose of'):
+            edf41tank.check(members, md, physics, stripped)
 
     def test_another_skeleton_wheel_is_refused(self):
         members, *rest = self.samples['VEHICLE301_TANK.SGO']

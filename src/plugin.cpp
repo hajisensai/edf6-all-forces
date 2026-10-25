@@ -1249,6 +1249,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallProteus();       // the Proteus rework: its weapon mounts, shield barrier, piles and field
     thermal::Install();    // mesh heat/depth passes, inert in optical mode
     InstallViewDepth();    // shared decal reconstruction follows the actual inverse projection
+    Log("VIEWDIAG umbra watch %s",InstallUmbraWatch() ? "on" : "NOT installed (EDF.dll's Umbra import is not as read)");
     InstallFirstPerson();   // first person on foot: the camera step chained inside the map's (its view wins while open)
     Log("ENEMY CONTROL native hooks=%d",InstallEnemyControl());
     Log("ENEMY CONTROL legacy adapters=%d",InstallEnemyControlLegacy());
