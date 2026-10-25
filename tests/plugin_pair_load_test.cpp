@@ -43,7 +43,7 @@ const char* const kCrewExports[]={
 };
 const char* const kTurretExports[]={
     "EML6_Load","EDF6AutoTurret_SetInputSourceV1","EDF6AutoTurret_SteersV2","EDF6AutoTurret_StabilizerAwareV3",   // plugin.cpp
-    "EDF6AutoTurret_TurretReadoutV1","EDF6AutoTurret_PlayerAimV4","EDF6AutoTurret_TurretLockV1",   // designate.cpp
+    "EDF6AutoTurret_TurretReadoutV1","EDF6AutoTurret_PlayerAimV4","EDF6AutoTurret_TurretLockV1","EDF6AutoTurret_MissionResetV1",   // designate.cpp
 };
 
 // The aimlink.h contract: each name, and the DLL that exports it.

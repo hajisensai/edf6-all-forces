@@ -6335,7 +6335,7 @@ def npc_ai_wired() -> None:
     # 取代原版 Q」): read on foot and riding alike, with or without the custom NPC AI (npcmark::MarkOn: the plugin on and the
     # key set; the NPCs' priority on it stays the AI's, npcmark::Enabled), drawn by the HUD; the focus order needs it.
     tick = code.split('void NpcMarkFrame(unsigned char* human,bool mapOpen)', 1)[1].split('\n}\n', 1)[0]
-    assert 'down && !mark.held && !turretKey && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()' in tick   # turretKey: the turret lock's press (turret_aim_wired)
+    assert 'down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()' in tick   # a turret seat's press: TurretMark (turret_aim_wired)
     assert 'HumanOnFoot' not in tick and 'customNpcAi' not in tick, 'the custom Q marks riding too, without the NPC AI'
     assert 'KeepMark();' in tick and 'QMarkFrame();' in tick
     # A teammate's point mark is named (slot and name tag) as its enemy mark is: its marker is looked up for either.
