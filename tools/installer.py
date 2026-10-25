@@ -60,6 +60,7 @@ for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'te
 import edf41src  # noqa: E402
 import gamedir  # noqa: E402
 import modfiles  # noqa: E402
+import modelpack  # noqa: E402
 
 PLUGIN = 'EDF6VehicleCrew'
 PROCESS = modfiles.PROCESS
@@ -964,6 +965,12 @@ def build_name() -> str:
         return ''
 
 
+def bundle_app_dir() -> str:
+    """The folder of the installer exe (the repository root when run from source): where models/ and models-required.json are."""
+    return os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else \
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def download_latest() -> int:
     """Menu 3: the newest build from the test site, unpacked next to this exe; offers to start its installer."""
     import testhub
@@ -1198,6 +1205,9 @@ def main(argv: list[str]) -> int:
         except testhub.HubError as e:
             print(f'\n没有完成：{e}')
             return 1
+    if mode == 'install' and (why := modelpack.problem(bundle_app_dir())):   # the split share package's models
+        print(f'\n{why}')
+        return 1
     if modfiles.game_running():
         print(f'{PROCESS} 正在运行。请先退出游戏再运行本程序（本程序不会替你关游戏）。')
         return 1
