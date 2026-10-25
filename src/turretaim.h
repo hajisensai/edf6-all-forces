@@ -8,10 +8,12 @@ namespace crew {
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* out) noexcept;
 // The same readout whatever TurretAimHud says (the map's marks: map.cpp).
 bool AutoTurretReadout(edf::aimlink::TurretReadoutV1* out) noexcept;
-// EDF6AutoTurret's lock holds the local player's lock key now (aimlink.h TurretLockV1: auto-aim on at one of its
-// turrets): `key` that key, `target` the locked enemy (nullptr: none). False: auto-aim off, no such seat, no peer.
-// Game thread (npcai.cpp NpcMarkFrame: the custom Q leaves that key to the lock and follows what it takes).
-bool AutoTurretLock(int* key,const void** target) noexcept;
+// The local player at one of EDF6AutoTurret's turrets (aimlink.h TurretLockV1): its lock rule's pick, auto-aim's state,
+// the lock key and the lock. False: no such seat, no peer. Game thread (npcai.cpp NpcMarkFrame: the custom Q picks by
+// it in that seat, and follows the lock while the keyboard's key is the lock's).
+bool AutoTurretSeat(edf::aimlink::TurretLockV1* out) noexcept;
+// A new mission for EDF6AutoTurret (aimlink.h MissionResetV1: auto-aim back to its ini's, the lock let go); mission.cpp.
+void AutoTurretMissionReset() noexcept;
 // EDF6AutoTurret's answer whether it turned `vehicle`'s seat `seat` this game frame (aimlink.h Steers): 1 yes, 0 no,
 // -1 no answer (the plugin absent or older than the V2 link).
 int AutoTurretSteers(const void* vehicle,unsigned seat) noexcept;

@@ -3370,6 +3370,28 @@ void FollowTurretLock(const void* lock) noexcept {
     followedLock=lock;
 }
 
+// A press of the key in a turret seat of EDF6AutoTurret's (qmark_ray.h TurretMarkPress): the lock rule's pick `t`
+// marked or let go, or with none in sight the ground point (and the selected squads sent); never the near-miss word.
+void TurretMark(const unsigned char* human,const edf::aimlink::TurretLockV1& t,bool lockOwns) noexcept {
+    switch(qmark::TurretMarkPress(lockOwns,t.pick!=nullptr)) {
+    case qmark::TurretPress::none: return;   // the lock takes it on the release; the mark follows (FollowTurretLock)
+    case qmark::TurretPress::point: {
+        float eye[3],dir[3];
+        if(QMarkRay(human,eye,dir))SendToPoint(eye,dir);
+        return;
+    }
+    case qmark::TurretPress::toggle: {
+        const bool same=mark.obj.Is(t.pick);
+        if(!same && !npcmark::Capture(t.pick))return;
+        if(same)npcmark::Assign(mark.obj,{});
+        else Mark(t.pick,t.pickAt);
+        QMarkPlay(same ? QMarkCue::off : QMarkCue::own);
+        Log("NPCAI mark: %s (the turret's pick)",same ? "let go" : "an enemy marked");
+        return;
+    }
+    }
+}
+
 bool NpcMarked() noexcept { return npcmark::Enabled() && MarkAlive(); }
 
 bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept {
@@ -3394,15 +3416,18 @@ void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept {
     const bool down=c.npcMarkKey>0 && pid==GetCurrentProcessId() && (edf::AsyncKey(c.npcMarkKey)&0x8000)!=0;
     // Held is followed while the map holds the keys too: a press made in the map (mapcmd.cpp) and still down when it
     // closes is not a second press on foot.
-    // On foot and riding alike (the stock spot it replaces was both). At a turret of EDF6AutoTurret's with auto-aim on,
-    // the same key is its lock (qmark_ray.h KeyIsTurretLock): no pick of the mark's own, the mark follows the lock.
-    int lockKey=0;
-    const void* lock=nullptr;
-    const bool turretOwns=AutoTurretLock(&lockKey,&lock);   // first: it sets lockKey
-    const bool turretKey=qmark::KeyIsTurretLock(c.npcMarkKey,turretOwns,lockKey);
-    if(down && !mark.held && !turretKey && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn())ToggleMark(human,At<std::int32_t>(human,kTeam));
+    // On foot and riding alike (the stock spot it replaces was both). At a turret of EDF6AutoTurret's the pick is its
+    // lock rule's, auto-aim on or off (TurretMark); with its auto-aim on and the keyboard, the same key is its lock
+    // (qmark_ray.h KeyIsTurretLock) and the mark follows the lock.
+    edf::aimlink::TurretLockV1 turret{};
+    const bool atTurret=AutoTurretSeat(&turret);
+    const bool turretKey=atTurret && qmark::KeyIsTurretLock(c.npcMarkKey,turret.autoAim && turret.keys,turret.lockKey);
+    if(down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()) {
+        if(atTurret)TurretMark(human,turret,turretKey);
+        else ToggleMark(human,At<std::int32_t>(human,kTeam));
+    }
     mark.held=down;
-    if(turretKey && npcmark::MarkOn())FollowTurretLock(lock);
+    if(turretKey && npcmark::MarkOn())FollowTurretLock(turret.target);
     else followedLock=nullptr;
     KeepMark();
     QMarkFrame();

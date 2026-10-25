@@ -2187,14 +2187,19 @@ def turret_aim_wired() -> None:
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
     assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
-                          'kInputHeld', 'kTurretObserver', 'kPlayerAim', 'kAimsTurret', 'kPayloadAim', 'kTurretLock'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+                          'kInputHeld', 'kTurretObserver', 'kPlayerAim', 'kAimsTurret', 'kPayloadAim', 'kTurretLock', 'kMissionReset'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
     # One key, one pick (2026-10-25, "载具上按q……提示对准敌人才能。但是我明明对准了"): EDF6AutoTurret exports its lock, and
     # EDF6VehicleCrew's Q mark asks it before making a pick of its own.
     assert names['kTurretLock'].endswith('V1') and f'bool __cdecl {names["kTurretLock"]}(' in src('autoturret/src/designate.cpp')
     assert 'link::kTurretLock' in src('src/turretaim.cpp')
     mark = src('src/npcai.cpp').split('void NpcMarkFrame(', 1)[1].split('\n}\n', 1)[0]
-    assert 'const bool turretOwns=AutoTurretLock(&lockKey,&lock);' in mark and 'qmark::KeyIsTurretLock(c.npcMarkKey,turretOwns,lockKey)' in mark
-    assert '!turretKey' in mark.split('ToggleMark(', 1)[0] and 'FollowTurretLock(lock)' in mark
+    assert 'const bool atTurret=AutoTurretSeat(&turret);' in mark and 'if(atTurret)TurretMark(human,turret,turretKey);' in mark
+    assert 'qmark::KeyIsTurretLock(c.npcMarkKey,turret.autoAim && turret.keys,turret.lockKey)' in mark and 'FollowTurretLock(turret.target)' in mark
+    # A new mission: auto-aim back to the ini's (off), through EDF6VehicleCrew's MissionStart.
+    assert names['kMissionReset'].endswith('V1') and f'void __cdecl {names["kMissionReset"]}(' in src('autoturret/src/designate.cpp')
+    assert 'AutoTurretMissionReset();' in src('src/mission.cpp').split('void MissionStart()', 1)[1]
+    # Not V (EDF6VehicleCrew's FirstPersonKey in every seat): J.
+    assert 'int autoAimKey=0x4A,' in src('autoturret/src/turret.h') and re.search(r'^AutoAimKey=0x4A\s*$', ini, re.M)
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
     # V4, the one player turret aim (2026-10-09): EDF6AutoTurret answers it, EDF6VehicleCrew's turret camera asks it every
     # frame and says it steers; the flak's own Steer and the tank driver's frame then leave the turret to the camera.
@@ -5954,7 +5959,7 @@ def hud_switch_cues_wired() -> None:
     and the mode line were, and their offline checks run (tools/hud_cue_check.cpp, hud_view's TurretLayoutApart)."""
     hud, cmake, view = src('src/hud.cpp'), src('CMakeLists.txt'), src('tools/hud_view.cpp')
     for call in ('CockpitStrip(drawer,ctx,t,width,height,s,snap.jet,storeSwitched,', 'JetCells(snap.jet,cells)',
-                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,aimFlipped,lines,&at,controlsBottom'):
+                 'StockCells(snap.stockHud,cells)', 'snap.turretAim,lines,&at,controlsBottom'):
         assert call in hud, call
     # One auto-aim (2026-10-25, "这个自动瞄准是不是多余了一个版本，删掉一个"): one line naming it, no on / off pair, no
     # lead-circle mode, its banner or its key's text. Off by default since the same day ("怎么自动开启自动瞄准了，而且也没啥
@@ -5965,6 +5970,11 @@ def hud_switch_cues_wired() -> None:
         assert f'HUDTEXT({word},' in table and f'Tx::{word}' in hud, word
     assert 'HUDTEXT(autoAimStateOff,L"AUTO-AIM: OFF",L"自动瞄准：关",' in table
     assert 'hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs)' in hud
+    # The banner is the flip's answer in every view (the optic, the overhead view, first person hide the line): it is
+    # drawn on the readout, outside the overlay's condition.
+    flip = hud.split('static hudcue::Change aimMode{};', 1)[1].split('if(aimFlipped)AutoAimBanner(', 1)[0]
+    assert 'const bool turretRead=fresh && snap.turret;' in flip and 'turretRead && hudcue::Changed(' in flip
+    assert 'if(showTurretOverlay) {' in flip and flip.rstrip().endswith('}')
     assert 'else if(on && r.target)TargetRing(' in hud
     for gone in ('autoAimOn', 'autoAimOffCircle', 'autoAimToggle', 'autoAimOffBanner', 'aimModeKeyUnset', 'aimModeButtonUnset', 'aimSightBinding'):
         assert f'HUDTEXT({gone},' not in table and f'Tx::{gone}' not in hud, gone

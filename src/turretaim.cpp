@@ -19,7 +19,8 @@ edf::aimlink::SeatQueryFn turretSteers=nullptr;
 edf::aimlink::AwareFn turretAware=nullptr;
 edf::aimlink::PlayerAimFn playerAim=nullptr;
 edf::aimlink::TurretLockFn turretLock=nullptr;
-ULONGLONG turretTried=0,steersTried=0,awareTried=0,playerAimTried=0,lockTried=0;
+edf::aimlink::MissionResetFn turretMissionReset=nullptr;
+ULONGLONG turretTried=0,steersTried=0,awareTried=0,playerAimTried=0,lockTried=0,resetTried=0;
 }  // namespace
 
 // --- The stock spot (原版 Q 标记): off for the local players (VanillaSpot=0), else cast along the camera drawn (spot_ray.h) ---
@@ -102,14 +103,19 @@ bool AutoTurretReadout(edf::aimlink::TurretReadoutV1* out) noexcept {
     return fn && fn(out);
 }
 
-bool AutoTurretLock(int* key,const void** target) noexcept {
+bool AutoTurretSeat(edf::aimlink::TurretLockV1* out) noexcept {
     namespace link=edf::aimlink;
-    *key=0;*target=nullptr;
+    *out=link::TurretLockV1{sizeof(link::TurretLockV1),nullptr,0,false,false,nullptr,{}};
     const auto fn=link::Resolve(link::kTurretDll,link::kTurretLock,turretLock,lockTried);
-    link::TurretLockV1 r{sizeof(link::TurretLockV1),nullptr,0};
-    if(!Cfg().enabled || !fn || !fn(&r))return false;
-    *key=r.lockKey;*target=r.target;
+    if(!Cfg().enabled || !fn || !fn(out))return false;
+    for(int i=0;i<3;++i)if(!std::isfinite(out->pickAt[i]))out->pick=nullptr;
     return true;
+}
+
+void AutoTurretMissionReset() noexcept {
+    namespace link=edf::aimlink;
+    resetTried=0;   // a mission start is rare: look again even if the last look was under a second ago
+    if(const auto fn=link::Resolve(link::kTurretDll,link::kMissionReset,turretMissionReset,resetTried))fn();
 }
 
 bool PlayerTurretAim(edf::aimlink::TurretReadoutV1* out) noexcept {

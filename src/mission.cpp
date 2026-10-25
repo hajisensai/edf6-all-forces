@@ -13,6 +13,7 @@
 #include "firstperson.h"
 #include "mission_watch.h"
 #include "transport.h"
+#include "turretaim.h"
 #include "airdrop.h"
 #include "gear.h"
 #include "memory.h"
@@ -111,6 +112,7 @@ void MissionStart() noexcept {
     ResetGround();
     ResetNpcAi();
     ResetQMarks();   // the Q marks, ours and the teammates' (qmark.cpp)
+    AutoTurretMissionReset();   // EDF6AutoTurret's auto-aim back to its ini's (off), its lock let go (turretaim.cpp)
     ResetNpcPosts();
     ResetAirstrikes();
     ResetUltimate();

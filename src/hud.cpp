@@ -2667,7 +2667,7 @@ void TargetRing(void* drawer,void* ctx,const float* vp,float width,float height,
     Seg(drawer,ctx,x,y-r-tick,x,y-r,t,kGreen);Seg(drawer,ctx,x,y+r,x,y+r+tick,t,kGreen);
 }
 void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
-                    const edf::aimlink::TurretReadoutV1& r,bool flipped,Line* lines,int* at,float controlsBottom=-1.0f) noexcept {
+                    const edf::aimlink::TurretReadoutV1& r,Line* lines,int* at,float controlsBottom=-1.0f) noexcept {
     namespace link=edf::aimlink;
     const bool on=r.mode!=link::Mode::manual;
     float x,y;
@@ -2693,7 +2693,11 @@ void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float widt
     }
     const float* const colour=!on ? kWhite : r.lock==link::Lock::locked ? kRed : r.ownGun ? kGreen : kWhite;
     Label(text,lines,at,width*0.5f,controlsBottom>=0.0f ? controlsBottom : height*0.905f,1,kLineScale,colour,L"%ls",text1);
-    if(!flipped)return;
+}
+// The new auto-aim state large over the screen's middle on a panel, for kSwitchMs after a flip: drawn whenever the
+// turret's readout is there, with the line above or without it (the optic, the overhead view, the gunner's sight, first
+// person: the flip's key works there too, and its only answer must not be hidden).
+void AutoAimBanner(void* drawer,void* ctx,Text* text,float width,float height,float s,bool on,Line* lines,int* at) noexcept {
     const float by=height*0.30f;
     const float* const banner=on ? kGreen : kWhite;
     Label(text,lines,at,width*0.5f,by,1,kTitleScale,banner,L"%ls",Tr(on ? Tx::autoAimBannerOn : Tx::autoAimBannerOff));
@@ -5696,11 +5700,13 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(fresh && !overhead)ThermalControlHint(t,width,height,s,thermalStatus,lines,&at);
         if(fresh && snap.sensor && !overhead)VehicleContacts(drawer,ctx,t,viewProj,width,height,s,snap.sensorHud,thermalStatus,lines,&at);
         const bool showTurretOverlay=fresh && snap.turret && !mountedOptic && !snap.cockpit && !(physicalSight && snap.turretAim.ownGun) && (!stockHud || hudcue::TurretOverlayOwned(stockPick,snap.stockHud.turret)) && !launcherSight && !overhead && !gunnerSight && !mechSight;
-        // A flip of EDF6AutoTurret's auto-aim (its readout's mode) while at its turret: the new state large for a moment.
-        // Forgotten while the readout is not shown, so boarding with the state it already had is no flip.
+        // A flip of EDF6AutoTurret's auto-aim (its readout's mode) while at its turret: the new state large for a moment,
+        // whatever view hides the line. Forgotten while there is no readout, so boarding with the state it already had
+        // is no flip.
         static hudcue::Change aimMode{};
-        if(!showTurretOverlay)aimMode.seen=false;
-        const bool aimFlipped=showTurretOverlay && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
+        const bool turretRead=fresh && snap.turret;
+        if(!turretRead)aimMode.seen=false;
+        const bool aimFlipped=turretRead && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
         if(showTurretOverlay) {
             float controlsBottom=-1.0f;
             if(stockHud) {
@@ -5710,8 +5716,9 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
                 const auto dock=LoadoutDockOf(t,width,height,s,cells,n,keys.text[0] ? 1 : 0);
                 controlsBottom=dock.top-20.0f*s;
             }
-            TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,aimFlipped,lines,&at,controlsBottom);
+            TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,lines,&at,controlsBottom);
         }
+        if(aimFlipped)AutoAimBanner(drawer,ctx,t,width,height,s,snap.turretAim.mode!=edf::aimlink::Mode::manual,lines,&at);
         if(stockHud) {
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,

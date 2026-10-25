@@ -225,9 +225,13 @@ int pointMarks=0,cueOwn=0,cueOff=0,qmarkFrames=0;
 void QMarkSetPoint(const float*) noexcept { ++pointMarks; }
 void QMarkPlay(QMarkCue c) noexcept { cueOwn+=c==QMarkCue::own;cueOff+=c==QMarkCue::off; }
 void QMarkFrame() noexcept { ++qmarkFrames; }
-// EDF6AutoTurret's lock (turretaim.cpp AutoTurretLock): on, the player is at its turret with auto-aim on and Q its lock.
-bool turretLockOn=false;const void* turretLockTarget=nullptr;
-bool AutoTurretLock(int* key,const void** target) noexcept { *key=turretLockOn ? 0x51 : 0;*target=turretLockTarget;return turretLockOn; }
+// EDF6AutoTurret's turret seat (turretaim.cpp AutoTurretSeat): the player at one, its auto-aim, keyboard, lock and the
+// lock rule's pick; its lock key Q.
+bool turretSeat=false,turretAuto=false,turretKeys=true;const void* turretLockTarget=nullptr;const void* turretPick=nullptr;
+bool AutoTurretSeat(edf::aimlink::TurretLockV1* t) noexcept {
+    *t=edf::aimlink::TurretLockV1{sizeof(*t),turretAuto ? turretLockTarget : nullptr,0x51,turretAuto,turretKeys,turretPick,{0,0,20}};
+    return turretSeat;
+}
 // The teammates' marked enemies (qmark.cpp QMarkTeamEnemies: live, found in this world).
 const void* teamMarks[4]{};int teamMarkCount=0;
 int QMarkTeamEnemies(const void** out,int max) noexcept {
@@ -917,24 +921,36 @@ int main() {
         Expect(pointOrders==1 && !NpcMarked(),"global disable prevents ground orders and hides the mark");
         ResetNpcAi();Expect(At<long>(foeCtrl,0xC)==1,"player-frame mark releases its identity on reset");
     }
-    // At a turret of EDF6AutoTurret's with auto-aim on, Q is its lock's (2026-10-25: "载具上按q……提示对准敌人才能。但是我明明
-    // 对准了"): the mark makes no pick of its own (no "aim at the enemy" word), it follows what the lock takes.
+    // In a turret seat of EDF6AutoTurret's the mark picks by the lock's rule (2026-10-25: "载具上按q……提示对准敌人才能。但是我
+    // 明明对准了"), auto-aim on or off: never the mark's own pick (markEnemy, 8 deg, no line of sight) nor its near-miss word.
     {
         Reset();mapHeld=false;rayOn=true;config.npcMarkKey=0x51;
         unsigned char foeCtrl[0x10]{};Put<void*>(other,kSelfCtrl,foeCtrl);Put<long>(foeCtrl,8,1);Put<long>(foeCtrl,0xC,1);
-        markEnemy=other;turretLockOn=true;turretLockTarget=nullptr;cueOwn=cueOff=pointMarks=0;
         Put<void*>(human,kHumanVehicleCtrl,foeCtrl);
-        markinput::down=true;NpcMarkFrame(human,false);
-        Expect(!NpcMarked() && cueOwn==0 && pointMarks==0,"auto-aim on at a turret: the Q press is the lock's, no pick of the mark's");
+        auto press=[&]{markinput::down=true;NpcMarkFrame(human,false);markinput::down=false;NpcMarkFrame(human,false);};
+        // Auto-aim off: the lock rule sees nobody (the enemy under the old 8 deg pick is behind a wall): the ground point.
+        markEnemy=other;turretSeat=true;turretAuto=false;turretPick=nullptr;cueOwn=cueOff=pointMarks=pointOrders=0;
+        press();
+        Expect(!NpcMarked() && pointMarks==1 && pointOrders==1,"turret seat, auto-aim off, none in the lock's sight: the ground point and squads, not the old pick");
+        // ...its pick marked, the same again let go (as on foot).
+        turretPick=other;press();
+        Expect(NpcMarked() && cueOwn==2,"auto-aim off: Q marks the lock rule's pick");
+        press();
+        Expect(!NpcMarked() && cueOff==1,"the same pick again: let go");
+        // Auto-aim on, keyboard: the press is the lock's; the mark follows the lock, once.
+        turretAuto=true;turretLockTarget=nullptr;cueOwn=cueOff=0;
+        press();
+        Expect(!NpcMarked() && cueOwn==0,"auto-aim on: the Q press is the lock's, no pick of the mark's");
         turretLockTarget=other;NpcMarkFrame(human,false);
         Expect(NpcMarked() && cueOwn==1,"the lock took an enemy: the mark follows it, the own cue once");
-        markinput::down=false;NpcMarkFrame(human,false);
+        NpcMarkFrame(human,false);
         Expect(NpcMarked() && cueOwn==1,"the same lock held: nothing more");
         turretLockTarget=nullptr;NpcMarkFrame(human,false);
         Expect(NpcMarked(),"the lock let go: the mark stays (until that enemy dies)");
-        turretLockOn=false;markinput::down=true;NpcMarkFrame(human,false);
-        Expect(!NpcMarked() && cueOff==1,"auto-aim off: Q is the mark's own again (the same enemy: let go)");
-        markinput::down=false;NpcMarkFrame(human,false);
+        // On a pad the lock is X: the keyboard's Q stays the mark's, by the same pick.
+        turretKeys=false;press();
+        Expect(!NpcMarked() && cueOff==1,"a pad's player: the keyboard's Q is the mark's (the pick again: let go)");
+        turretKeys=true;turretAuto=false;turretSeat=false;turretPick=nullptr;
         Put<void*>(human,kHumanVehicleCtrl,nullptr);markEnemy=nullptr;
         ResetNpcAi();
     }

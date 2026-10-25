@@ -59,15 +59,25 @@ using TurretReadoutFn=bool(__cdecl*)(TurretReadoutV1* out);
 constexpr char kTurretReadout[]="EDF6AutoTurret_TurretReadoutV1";
 constexpr wchar_t kTurretDll[]=L"EDF6AutoTurret.dll";
 
-// V1, the local player's turret lock as EDF6VehicleCrew's Q mark needs it (2026-10-25, the user: "载具上按q……提示对准敌人
-// 才能。但是我明明对准了"): one key, one pick. True while this machine's player is at a turret of EDF6AutoTurret's with
-// auto-aim on (its lock binding then reads the lock): `lockKey` that binding's key, `target` the locked enemy object
-// (nullptr: none). EDF6VehicleCrew then leaves that key to the lock and marks for its NPCs what the lock took, instead of
-// a second pick of its own along another ray in another cone (NpcMarkCone 8 deg against LockCone 20, no line of sight)
-// that said "aim at the enemy" over a target the lock had just boxed. False: auto-aim off, no such seat, or the plugin off.
-struct TurretLockV1 { std::uint32_t size; const void* target; std::int32_t lockKey; };
+// V1, the local player's turret seat as EDF6VehicleCrew's Q mark needs it (2026-10-25, the user: "载具上按q……提示对准敌人
+// 才能。但是我明明对准了"): one pick in a turret seat. The Q mark's own pick (the screen's centre, NpcMarkCone 8 deg to the
+// lock point, no line of sight, "aim at the enemy to mark it" from 8 to 24 deg) said "aim at the enemy" over an enemy the
+// lock (LockCone 20 deg, line of sight) had just boxed; in a turret seat the mark takes the lock's rule instead, auto-aim
+// on or off. True while this machine's player is at a turret of EDF6AutoTurret's:
+//  - `pick` the enemy a lock press would take now (the lock's rule: the first in sight within LockCone and the lock
+//    range; nullptr: none in sight) at `pickAt`, kept every frame whether auto-aim is on or not;
+//  - `autoAim` on, `keys` the player on the keyboard (else a pad): with both, the keyboard's `lockKey` is the lock's and
+//    `target` the locked enemy (nullptr: none); EDF6VehicleCrew's mark then follows the lock instead of acting on that
+//    key itself. A pad's lock is its button: the keyboard's Q stays the mark's (with this pick).
+// False: no such seat, or the plugin off.
+struct TurretLockV1 { std::uint32_t size; const void* target; std::int32_t lockKey; bool autoAim,keys; const void* pick; float pickAt[3]; };
 using TurretLockFn=bool(__cdecl*)(TurretLockV1* out);
 constexpr char kTurretLock[]="EDF6AutoTurret_TurretLockV1";
+
+// V1, a new mission (EDF6VehicleCrew's MissionStart calls it): the player's auto-aim goes back to the ini's AutoAim (off
+// by default) and any lock is let go. Without EDF6VehicleCrew nothing calls it: the state then lasts to the game's end.
+using MissionResetFn=void(__cdecl*)();
+constexpr char kMissionReset[]="EDF6AutoTurret_MissionResetV1";
 
 // V2, who turns the turret of the seat the local player sits in (the user, 2026-10-06: "auto-aim changed, no fighting
 // over it any more"). EDF6VehicleCrew's turret camera (turretcam.cpp) turns that turret toward the screen's centre;

@@ -64,7 +64,7 @@ struct Config {
     // code, pad button bits; 0 = none), the lock's cone (deg off the view) and range (m, 0 = the gun's), how long a held
     // lock binding takes to let the lock go.
     int autoAim=0;
-    int autoAimKey=0x56,autoAimButton=0;   // V; no pad button (L3 is EDF6VehicleCrew's FreeLookButton in the same seats)
+    int autoAimKey=0x4A,autoAimButton=0;   // J (free in every seat: V is EDF6VehicleCrew's FirstPersonKey there); no pad button
     int lockKey=0x51,lockButton=0x04;   // Q, X (the jets' next-target bindings)
     float lockCone=20.0f;
     float lockRange=0.0f;
@@ -246,8 +246,8 @@ bool ActualWeapon(const unsigned char* vehicle,unsigned seat,const unsigned char
 // its lock kept up. `muzzle` / `bore`: the seat's gun (null: none read; the lock then looks along
 // the camera, else the vehicle's nose), `range` the lock range when the ini gives none (the gun's, m).
 void PilotFrame(const unsigned char* vehicle,unsigned seatIndex,const unsigned char* seat,const float* muzzle,const float* bore,float range) noexcept;
-// Auto-aim on for the player's own turret (designate.cpp): the ini's AutoAim at the start (an edit of it sets it at
-// once), flipped by AutoAimKey / AutoAimButton. Off: the player's gun is never turned, no lock is taken.
+// Auto-aim on for the player's own turret (designate.cpp): the ini's AutoAim at each mission's start (an edit of it
+// sets it at once), flipped by AutoAimKey / AutoAimButton. Off: the player's gun is never turned, no lock is taken.
 bool AutoAimOn() noexcept;
 // The player's lock in `vehicle` (the object; `world` its first lock point), or nullptr: none, or the player is elsewhere.
 const void* Designated(const unsigned char* vehicle,float* world) noexcept;

@@ -7,8 +7,8 @@
 //    player aims, and under EDF6VehicleCrew's turret camera the turret already follows the view; the toggle only put
 //    "auto-aim on" and "[key] auto-aim off" on one HUD. The turret aims itself (no turret camera) or goes onto the lock.
 //  - Off by default (the user, 2026-10-25: "怎么自动开启自动瞄准了，而且也没啥提示欸……自动瞄准不要开启，开启以后应该有被
-//    瞄准敌人的高亮圈之类的"). The ini's AutoAim (0) is the state at the game's start; AutoAimKey / AutoAimButton flip it
-//    (V, no pad button). Off: the player's gun is never turned by this plugin (with or without the turret camera, first
+//    瞄准敌人的高亮圈之类的"). The ini's AutoAim (0) is the state at each mission's start (MissionResetV1); AutoAimKey / AutoAimButton flip it
+//    (J, no pad button; not V, EDF6VehicleCrew's first person key in every vehicle seat). Off: the player's gun is never turned by this plugin (with or without the turret camera, first
 //    person, a gunner seat), no lock is taken and the lock binding is not read (Q is then EDF6VehicleCrew's NPC mark
 //    alone); the HUD says "auto-aim off" and the key that turns it on, and a flip shows the new state large for a moment.
 //    On: the lock below, and the HUD rings the enemy the gun is turned onto, or the one a lock press would take now.
@@ -199,11 +199,11 @@ void Cycle(const unsigned char* vehicle,const float* muzzle,const float* bore) n
         viewRay ? "camera" : muzzle ? "barrel" : "nose");
 }
 
-// The enemy a lock press would take now with no lock held (the first in sight: LockPick's pick with no lock), for the
-// HUD's ring; none while locked (the lock box is the mark then) or with auto-aim off.
+// The enemy a lock press would take now with no lock held (the first in sight: LockPick's pick with no lock), every
+// frame, auto-aim on or off: the HUD's ring while on with nothing locked, and EDF6VehicleCrew's Q mark's pick in this
+// seat either way (aimlink.h TurretLockV1).
 void Preview(const unsigned char* vehicle,const float* muzzle,const float* bore) noexcept {
     pilot.preview=nullptr;
-    if(!autoAimOn || pilot.target)return;
     float eye[3],dir[3];
     View(vehicle,muzzle,bore,eye,dir);
     Seen seen;
@@ -399,13 +399,24 @@ extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_TurretReadoutV1(edf
 extern "C" __declspec(dllexport) bool __cdecl EDF6AutoTurret_TurretLockV1(edf::aimlink::TurretLockV1* out) {
     using namespace autoturret;
     if(!out || out->size!=sizeof(edf::aimlink::TurretLockV1))return false;
-    out->target=nullptr;out->lockKey=0;
+    *out=edf::aimlink::TurretLockV1{sizeof(edf::aimlink::TurretLockV1),nullptr,0,false,false,nullptr,{}};
     __try {
-        if(!image || !cfg.enabled || !AutoAimOn() || !Fresh())return false;
+        if(!image || !cfg.enabled || !Fresh())return false;
+        out->autoAim=AutoAimOn();out->keys=pilot.keys;
         out->lockKey=cfg.lockKey;
-        out->target=pilot.target && Same(pilot.target,pilot.targetCtrl) ? pilot.target : nullptr;
+        out->target=out->autoAim && pilot.target && Same(pilot.target,pilot.targetCtrl) ? pilot.target : nullptr;
+        if(pilot.preview){out->pick=pilot.preview;std::memcpy(out->pickAt,pilot.previewAt,12);}
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+// EDF6VehicleCrew's MissionStart (aimlink.h MissionResetV1), game thread: auto-aim back to the ini's, the lock let go.
+extern "C" __declspec(dllexport) void __cdecl EDF6AutoTurret_MissionResetV1() {
+    using namespace autoturret;
+    iniAutoAim=-1;SyncIniAutoAim();
+    if(pilot.target)Log("LOCK: let go of t=%p (a new mission)",pilot.target);
+    pilot=Pilot{};
+    Log("PILOT: a new mission: auto-aim %s (ini AutoAim)",autoAimOn ? "on" : "off");
 }
 
 namespace autoturret {

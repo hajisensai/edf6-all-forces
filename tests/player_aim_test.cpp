@@ -112,10 +112,10 @@ int main() {
     Check(seenOnce>0,"the export steps the clock for a vehicle no own hook sees");
     Check(a.mode==edf::aimlink::Mode::autoAim && !a.steer,"no lock: the view steers");
     edf::aimlink::TurretReadoutV1 shown{};
-    Check(EDF6AutoTurret_TurretReadoutV1(&shown) && shown.ownGun && shown.lockKey==0x51 && shown.modeKey==0x56,"the HUD reads the player's own gun, its toggle (V) and lock keys");
-    Press(tank,cannon,0x56);Press(tank,cannon,0x56);
+    Check(EDF6AutoTurret_TurretReadoutV1(&shown) && shown.ownGun && shown.lockKey==0x51 && shown.modeKey==0x4A,"the HUD reads the player's own gun, its toggle (J) and lock keys");
+    Press(tank,cannon,0x4A);Press(tank,cannon,0x4A);
     a=Ask(tank,cannon);
-    Check(a.mode==edf::aimlink::Mode::autoAim && !a.steer,"V twice: off and on again, still no lock (V flips auto-aim since 2026-10-25)");
+    Check(a.mode==edf::aimlink::Mode::autoAim && !a.steer,"J twice: off and on again, still no lock (J flips auto-aim since 2026-10-25)");
     // Three enemies 200 m out; the crosshair on A.
     enemyCount=3;SetEnemy(0,0,0,200);SetEnemy(1,30,0,200);SetEnemy(2,70,0,200);   // from B: A nearer than C, so the old rule (the one after A) took C
     Look(0,0,200);Press(tank,cannon,0x51);
@@ -143,14 +143,17 @@ int main() {
     for(int f=0;f<20;++f){enemies[3].pos[0]+=0.5f;lead=Ask(flak,flakGun);}
     const float flakAhead=lead.point[0]-enemies[3].pos[0];
     Check(lead.steer && std::fabs(flakAhead-ahead)<0.5f,"the flak's auto-aim is the tanks': same key, same lock, same lead");
-    // V flips auto-aim (off by default since 2026-10-25, "自动瞄准不要开启"): off lets the lock go and nothing steers.
+    // V is the first person key: no flip. J flips auto-aim (off by default since 2026-10-25, "自动瞄准不要开启"): off lets
+    // the lock go and nothing steers.
     Press(flak,flakGun,0x56);
+    Check(Ask(flak,flakGun).steer,"V is no auto-aim key (EDF6VehicleCrew's first person in every seat)");
+    Press(flak,flakGun,0x4A);
     lead=Ask(flak,flakGun);
-    Check(!lead.steer && lead.mode==edf::aimlink::Mode::manual && !Designated(flak.v,nullptr),"V turns auto-aim off: the lock goes, nothing steers");
+    Check(!lead.steer && lead.mode==edf::aimlink::Mode::manual && !Designated(flak.v,nullptr),"J turns auto-aim off: the lock goes, nothing steers");
     Press(flak,flakGun,0x51);
     Check(!Designated(flak.v,nullptr),"off: Q locks nothing");
-    Press(flak,flakGun,0x56);Press(flak,flakGun,0x51);
-    Check(Ask(flak,flakGun).steer,"V again: on, Q locks and the lock steers");
+    Press(flak,flakGun,0x4A);Press(flak,flakGun,0x51);
+    Check(Ask(flak,flakGun).steer,"J again: on, Q locks and the lock steers");
     observing=true;Check(!Ask(flak,flakGun).steer,"the overhead view / optic: no steering");
     observing=false;Check(Ask(flak,flakGun).steer,"back: steering again");
     // No player in the seat: no answer.
