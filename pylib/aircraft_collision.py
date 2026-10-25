@@ -36,6 +36,12 @@ FILES = {None: 'EDF6VC_AIRFRAME_BOMBER.SHKT',
 # The Dreadnought's ships (pylib/dreadnought_model.py): made from the user's model folder, so tools/make_dreadnought.py
 # writes these (assets_of), not tools/make_jets.py (assets: FILES).
 DN_FILES = {k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.DN_FILES}
+# The 500 m dreadnought's own grid (tools/make_dreadnought.py, tools/prep_dreadnought.py: its markers stand on and clear
+# these cells): a cell is its column's highest point, and at 24 x 32 (9.5 by 15.6 m) 39.5% of its hull's area had its
+# collision more than 1.5 m over the drawn deck (3.1 m on average, 57 m at the worst, by a 96 x 128 grid of the
+# installed model, 2026-10-25): soldiers stood on air by its turrets and superstructure (the user, 2026-10-25:
+# 「无畏舰…模型和实际不符」). 48 x 64 (4.75 by 7.8 m, 2451 cells) nests in it: 16.2%, 1.06 m on average.
+DN_GRID = (48, 64)
 
 
 def file_of(key) -> str:
@@ -154,12 +160,13 @@ def build(game, key, mode=None):
     return airframe(game, jet_models._model_of(game, key), jet_models.model_box(game, key)[0], mode)
 
 
-def airframe(game, md, centre, mode=None):
-    """One complete .SHKT of model `md`, its points relative to `centre` (the vehicle's position: its SGO's box centre).
-    tools/make_dreadnought.py measures the dreadnought as fitted (its hangar modules) about its whole model's centre."""
+def airframe(game, md, centre, mode=None, grid=(NX, NZ)):
+    """One complete .SHKT of model `md`, its points relative to `centre` (the vehicle's position: its SGO's box centre),
+    its cells `grid` (x, z). tools/make_dreadnought.py measures the dreadnought as fitted (its hangar modules) about its
+    whole model's centre, on DN_GRID."""
     model_tris = list(triangles(md))
     boxes = [(tuple(lo[k]-centre[k] for k in range(3)), tuple(hi[k]-centre[k] for k in range(3)))
-             for lo, hi in mesh_cells(model_tris)]
+             for lo, hi in mesh_cells(model_tris, *grid)]
     tris = [tuple(tuple(p[k]-centre[k] for k in range(3)) for p in tri) for tri in model_tris]
     physics = hkfile.Physics.read(game.read('OBJECT', STOCK))
     body = _pieces(physics.tf, tris, MAGIC) if (mode or MODE) == 'pieces' else _compound(physics.tf, boxes, MAGIC)

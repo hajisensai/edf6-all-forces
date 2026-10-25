@@ -181,9 +181,10 @@ GUN_BONES = ('b_barrel', 'b_barrel_01', 'b_barrel_02', 'b_recoil01', 'b_recoil02
 # the glb has it (+X the bow, +Y up, source units). Its roof is flat (2.005 units up from x -4.1 to -3.2, then falling
 # 2 cm a metre to its front at -2.95; about 11 x 3 m at 200 m), two rails along its back half (2.06, x -4.1 .. -3.5).
 # `bridge` STAND_UP m over the roof on its centre line at BRIDGE_STAND (source x), ahead of the rails: the collision
-# (pylib/aircraft_collision.py, a height field of the highest point in each of 24 x 32 cells of the whole model's box,
-# the same cells in source units at any SHIP_LENGTH) puts the cell with the rails 0.6 m over the roof; the cell from
-# x -3.26 to -2.65 is the roof's own height (tools/make_dreadnought.py check_markers holds it).
+# (pylib/aircraft_collision.py, a height field of the highest point in each cell of the whole model's box, the same
+# cells in source units at any SHIP_LENGTH) puts the cell with the rails 0.6 m over the roof; at 24 x 32 the cell from
+# x -3.26 to -2.65 was the roof's own height, and at DN_GRID (48 x 64, nested in it) the stand is on the roof's height
+# still (tools/make_dreadnought.py check_markers holds it).
 # The bridge's eye: EYE_DOWN m under the roof over the target, EYE_OUT m ahead of the bridge's front face there (the
 # face's farthest forward EYE_BAND m under the eye to the eye). A turret's: TURRET_EYE_UP m over its and its guns'
 # tops, TURRET_EYE_BACK m behind its guns' rear, on their centre line.
@@ -320,7 +321,7 @@ def _cells(tris: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """The ship's collision (pylib/aircraft_collision.py mesh_cells: what the game's player and jets meet): its cells'
     low and high corners, (n, 3) each, in the same frame as `tris` (the cells are the same in any frame shifted)."""
     import aircraft_collision
-    cells = aircraft_collision.mesh_cells([tuple(map(tuple, t)) for t in tris])
+    cells = aircraft_collision.mesh_cells([tuple(map(tuple, t)) for t in tris], *aircraft_collision.DN_GRID)
     return np.array([c[0] for c in cells]), np.array([c[1] for c in cells])
 
 

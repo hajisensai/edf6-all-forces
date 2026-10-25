@@ -175,6 +175,20 @@ const EmcFile kEmcFiles[]={
 constexpr int kEmcCount=static_cast<int>(sizeof(kEmcFiles)/sizeof(kEmcFiles[0]));
 static_assert(kEmcCount==static_cast<int>(EmcRound::ultGather)+1,"kEmcFiles is indexed by EmcRound");
 bool emcReady[kEmcCount]{};               // preloaded this mission (PreloadShells)
+// The Dreadnought's turrets' rounds (dreadnought_turrets.inc kGuns, DreadnoughtRound; tools/make_dreadnought.py
+// TURRET_ROUNDS): each kind of its secondary guns fires the round of the fixed emplacement made of that gun (tools/
+// make_tracked_combat.py GUNS['emp_<kind>']: its speed, life, blast and thickness, the E551 shell's tracer), the gunship
+// cannon's recipe (one SolidBullet01, straight, no wait); a round's damage the emplacement's (AmmoDamage) at the ship's
+// tier. An install from before them: the gunship cannon's round, at its damage (DreadnoughtRound says so once a mission).
+struct DnRound { const wchar_t* sgo; const wchar_t* file; const char* name; float damage; };
+const DnRound kDnRounds[]={
+    {L"app:/object/edf6vc_dn_round_mid.sgo",L"EDF6VC_DN_ROUND_MID.SGO","SecMid",120.0f},
+    {L"app:/object/edf6vc_dn_round_short.sgo",L"EDF6VC_DN_ROUND_SHORT.SGO","SecShort",700.0f},
+    {L"app:/object/edf6vc_dn_round_long.sgo",L"EDF6VC_DN_ROUND_LONG.SGO","SecLong",450.0f},
+};
+constexpr int kDnRoundCount=static_cast<int>(sizeof(kDnRounds)/sizeof(kDnRounds[0]));
+bool dnRoundReady[kDnRoundCount]{};       // preloaded this mission (PreloadShells)
+int dnRoundSaid=-1;                       // the mission (missionCount) a missing round was said in
 // The IFC's own copy of the round's AmmoSize (#7) and AmmoExplosion (#9), as its config 0x2B5F40 writes them (r14 = the
 // IFC: 0x2B6A15 movss [r14+0x100],xmm0; 0x2B68C5 movss [r14+0xF0],xmm0; docs/carrier-laser-re.md §3): a round takes its
 // InitParam (IFC +0x70 on) when it is fired, so a write here changes the rounds fired after it (RoundSize, RoundBlast).
@@ -562,12 +576,23 @@ bool PlayerSideGun(unsigned char* v,SideGun g,const float* at,ULONGLONG ms) noex
 }
 
 // A Dreadnought turret's round (dreadnought_turrets.inc: its gunner keeps its gap and its aim): the cannon's, from its muzzle
-// `from` at `at`, kTurretDamage times the cannon's damage at the ship's tier, the local player's.
+// `from` at `at`: its kind's emplacement round (kDnRounds[round]) at its damage times the ship's tier, the local
+// player's; an install without it, the cannon's round at kTurretDamage times the cannon's damage.
 constexpr float kTurretDamage=1.5f;
-bool TurretRound(unsigned char* owner,const float* from,const float* at,bool real) noexcept {
+bool TurretRound(unsigned char* owner,int round,const float* from,const float* at,bool real) noexcept {
+    const char* const what=real ? "dreadnought turret" : "dreadnought turret (remote)";
+    if(round>=0 && round<kDnRoundCount && dnRoundReady[round]) {
+        const DnRound& r=kDnRounds[round];
+        return Shell(r.sgo,dnRoundReady[round],owner,from,at,real ? r.damage*Tier(owner) : 0.0f,true,what,online::Shooter::localPlayer);
+    }
+    if(dnRoundSaid!=missionCount) {
+        dnRoundSaid=missionCount;
+        Log("JET dreadnought turret round %d not installed (%ls): the gunship cannon's round instead (python tools/make_dreadnought.py, or the installer)",
+            round,round>=0 && round<kDnRoundCount ? kDnRounds[round].file : L"?");
+    }
     SideGunSpec& gun=GunOf(SideGun::cannon);
-    return gun.ready && Shell(gun.sgo,gun.ready,owner,from,at,real ? gun.damage*kTurretDamage*Tier(owner) : 0.0f,true,
-                              real ? "dreadnought turret" : "dreadnought turret (remote)",online::Shooter::localPlayer);
+    return gun.ready && Shell(gun.sgo,gun.ready,owner,from,at,real ? gun.damage*kTurretDamage*Tier(owner) : 0.0f,true,what,
+                              online::Shooter::localPlayer);
 }
 
 // The NPC at the gun under a player pilot (playerjet_crew.inc CrewGunner): GunshipFire's target, picked round the
@@ -654,6 +679,10 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
         emcReady[i]=shellsOk && ModFileThere(kEmcFiles[i].file) && (!kEmcFiles[i].model || ifcModelOk);
         if(emcReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEmcFiles[i].sgo,2,-1);
     }
+    for(int i=0;i<kDnRoundCount;++i) {   // with the Dreadnought (gunship: jet_spawn.cpp asks for its cannon with it)
+        dnRoundReady[i]=gunshipReady && ModFileThere(kDnRounds[i].file);
+        if(dnRoundReady[i])reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kDnRounds[i].sgo,2,-1);
+    }
     char charges[64];
     int at=0;
     for(int i=0;i<kChargeCount;++i) {
@@ -661,8 +690,9 @@ void PreloadShells(void* mgr,bool gunship) noexcept {
         if(n>0)at+=n;
     }
     ++missionCount;
-    Log("JET preload gunship shells=%d cannon=%d gatling=%d (gunship %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d sazabi mega %d charge %d funnel %d proteus shield %d",gunshipReady,cannonReady,GunOf(SideGun::gatling).ready,gunship,charges,drillReady,
-        emcReady[0],emcReady[1],emcReady[2],emcReady[3],emcReady[4],emcReady[5],emcReady[6],emcReady[7]);
+    Log("JET preload gunship shells=%d cannon=%d gatling=%d (gunship %d) impact charges (m) %s drill charge %d emc beam %d sight %d break %d blast %d sazabi mega %d charge %d funnel %d proteus shield %d dreadnought rounds %d%d%d",gunshipReady,cannonReady,GunOf(SideGun::gatling).ready,gunship,charges,drillReady,
+        emcReady[0],emcReady[1],emcReady[2],emcReady[3],emcReady[4],emcReady[5],emcReady[6],emcReady[7],dnRoundReady[0],dnRoundReady[1],
+        dnRoundReady[2]);
 }
 
 void ResetShells() noexcept {
@@ -671,11 +701,12 @@ void ResetShells() noexcept {
     for(auto& c:chargeReady)c=false;
     drillReady=false;
     for(auto& e:emcReady)e=false;
+    for(auto& d:dnRoundReady)d=false;
 }
 }  // namespace jet
 
-bool DreadnoughtRound(unsigned char* owner,const float* from,const float* at,bool real) noexcept {
-    return jet::TurretRound(owner,from,at,real);
+bool DreadnoughtRound(unsigned char* owner,int round,const float* from,const float* at,bool real) noexcept {
+    return jet::TurretRound(owner,round,from,at,real);
 }
 
 using namespace jet;

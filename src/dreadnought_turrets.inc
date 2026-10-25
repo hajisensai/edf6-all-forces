@@ -10,10 +10,16 @@
 //    vehicles' first person on (firstperson.h FirstPersonVehicleView: the V key) from the seat's eye instead (the model's
 //    vc_eye_<seat> marker: its bridge's windows, each turret's sight). DreadnoughtCamera (turretcam.cpp LookHook) puts
 //    the camera there; the screen's centre is the aim.
+//  - The look ahead (Cfg dreadnoughtAheadKey / Button held, any seat): the view's pivot out past its bow, the eye on it
+//    (kAheadOut, kAheadUp): round the ship the hull fills the screen's middle (the user, 2026-10-25: 「无畏舰…整个身体挡
+//    面前看不到了，可以右键的时候往前看」). The aim is the screen's centre all the same.
 //  - A gunner's turret swings after their aim at kYawRate / kPitchRate within its elevations (kPitchLow .. kPitchHigh);
-//    their primary trigger fires its guns (jet_bay.cpp DreadnoughtRound: the gunship's cannon round, from its muzzle at
-//    where the screen's centre meets the map, or kAimReach out along it) every kGapMs once the turret is on its aim
-//    (kOnAim).
+//    their primary trigger fires its guns once the turret is on its aim (kOnAim) as the fixed emplacement made of that
+//    gun fires (the user, 2026-10-25: 「无畏舰的炮塔攻击方式太抽象了，换成做好的固定炮台的那种吧」; pylib/emplacement_model.py,
+//    tools/make_tracked_combat.py GUNS['emp_<kind>']): its two barrels in turn, each every kGuns[k].gapMs, the
+//    emplacement's round (jet_bay.cpp DreadnoughtRound: its speed, life, blast, tracer and damage) from that barrel's
+//    mouth, kGuns[k].barrel m to either side of the muzzle bone across its guns, at where the screen's centre meets the
+//    map (or kAimReach out along it). It had been the gunship's cannon round from the one muzzle, every turret alike.
 //  - The commander on the bridge trains every turret nobody mans on their aim, and the primary trigger fires them all
 //    (each as it comes on: its guns' own arc decides).
 //  - A turret nobody trains swings back to its rest (ahead, level).
@@ -32,11 +38,19 @@ const wchar_t* const kTurretBones[kTurrets][3]={
 constexpr float kYawRate=45.0f*kDeg,kPitchRate=30.0f*kDeg;   // rad/s a turret turns, its guns lift
 constexpr float kPitchLow=-8.0f*kDeg,kPitchHigh=75.0f*kDeg;  // its guns' elevations
 constexpr float kOnAim=2.0f*kDeg;            // its guns this near their aim: it fires
-constexpr ULONGLONG kGapMs=500;              // ms between a turret's rounds
+// Its three kinds of secondary gun, each as its emplacement (pylib/vcobjects.py DREADNOUGHT_TURRET_GUNS, tools/selftest.py
+// dreadnought_agrees): the round (jet_bay.cpp kDnRounds), a barrel's gap (the emplacement's FireInterval frames), the
+// round's reach (its speed times its life) and its barrels' half spacing (tools/make_dreadnought.py measures it on the
+// model's guns). Turret n is kind kGunOf[n] (tools/prep_dreadnought.py: 0 / 1 the SecMid, 2-5 the SecShort, 6 / 7 the
+// SecLong, the emplacements' turret_0 / _2 / _6).
+struct Gun { int round; ULONGLONG gapMs; float reach,barrel; };
+constexpr Gun kGuns[]={{0,200,1440.0f,2.46f},{1,1000,2100.0f,4.07f},{2,667,3840.0f,5.7f}};
+constexpr int kGunOf[kTurrets]={0,0,1,1,1,1,2,2};
 constexpr float kAimReach=3000.0f;           // m: the aim along the view with no map nearer
 constexpr float kBridgeUp=0.3f*kKeel+kKeel,kBridgeBack=2.2f*kReach;   // m: the commander's eye over the ship, behind it
 constexpr float kBridgePitch=-10.0f*kDeg;    // rad: the commander's view as they take the bridge
 constexpr float kEyeFloor=6.0f;              // m: a view's eye at least this over the ground under it
+constexpr float kAheadOut=0.5f*kLength+20.0f,kAheadUp=10.0f;   // m: the look ahead's eye past its centre, over it
 constexpr std::size_t kSeatAimStick=0x2D0;   // the rider's aim stick (the mouse's per-frame share), docs/camera-re.md §4
 constexpr std::size_t kSeatFire=0x2E4;       // the seat's primary trigger (docs/heli-input-re.md §3)
 constexpr float kSeatFireOn=0.8f;
@@ -49,7 +63,7 @@ struct Turret {
     float yaw=0.0f,pitch=0.0f;    // where it points now, in the ship's frame (rad: 0, 0 ahead and level)
     bool onAim=false;             // trained on its aim this frame
     ULONGLONG shotAt=0;
-    int shots=0;
+    int shots=0;                  // its rounds (the even ones its left barrel's)
 };
 // A turret's remote trainer, as their blocks tell it (ReceivedTurrets).
 struct Remote { float yaw=0.0f,pitch=0.0f; ULONGLONG at=0; bool fire=false; float aim[3]{}; };
@@ -138,6 +152,14 @@ bool Swing(Turret& t,float wantYaw,float wantPitch,float dt) noexcept {
 
 const float* BoneAt(const unsigned char* rec) noexcept { return reinterpret_cast<const float*>(rec+kBoneWorld506)+12; }
 
+// Turret `t`'s next round's barrel mouth (its kind `gun`'s): its muzzle bone's point kGuns[gun].barrel m along the bone's
+// left (its world matrix's first row: its guns' across, the model's bones level), the left barrel on even rounds.
+void Mouth(const Turret& t,int gun,float* out) noexcept {
+    const float* m=reinterpret_cast<const float*>(t.rec[2]+kBoneWorld506);
+    const float side=(t.shots%2==0 ? 1.0f : -1.0f)*kGuns[gun].barrel;
+    for(int i=0;i<3;++i)out[i]=m[12+i]+m[i]*side;
+}
+
 // A world direction in the ship's frame (its matrix's rows are its axes).
 void ToShip(const unsigned char* v,const float* d,float* out) noexcept {
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
@@ -156,6 +178,25 @@ bool ViewPlace(const View& w,float* eye,float* look) noexcept {
     if(!w.firstPerson && eye[1]<w.floorY){look[1]+=w.floorY-eye[1];eye[1]=w.floorY;}
     for(int i=0;i<3;++i)if(!std::isfinite(eye[i]+look[i]))return false;
     return true;
+}
+
+// Whether the local rider at `seat` holds the look ahead (Cfg dreadnoughtAheadKey, on a pad dreadnoughtAheadButton).
+bool LookAhead(const unsigned char* seat) noexcept {
+    return Pad(seat) ? Button(seat,Cfg().dreadnoughtAheadButton) : KeyDown(Cfg().dreadnoughtAheadKey);
+}
+
+// The view's pivot and its eye's distance behind and over it: round the whole ship (its centre, kBridgeBack behind it,
+// kBridgeUp over), or with the look ahead held out past its bow (kAheadOut along its heading, kAheadUp over), the eye on it.
+void ViewPivot(const unsigned char* v,const unsigned char* seat,float* pivot,float* back,float* up) noexcept {
+    const float* p=reinterpret_cast<const float*>(v+kPosition);
+    std::memcpy(pivot,p,12);
+    *back=kBridgeBack;*up=kBridgeUp;
+    if(!LookAhead(seat))return;
+    const float* f=reinterpret_cast<const float*>(v+kMatrix)+8;
+    const float flat=std::sqrt(f[0]*f[0]+f[2]*f[2]);
+    if(!(flat>1e-3f))return;
+    pivot[0]+=f[0]/flat*kAheadOut;pivot[2]+=f[2]/flat*kAheadOut;pivot[1]+=kAheadUp;
+    *back=0.0f;*up=0.0f;
 }
 
 // A frame of the local player's view at seat `index` of `v` (its pivot `pivot`, world): begun on the camera as it is
@@ -216,6 +257,19 @@ bool AimPoint(float* aim,float* from) noexcept {
 
 // Turret `n` trained on `aim` this frame (its trainer's trigger `fire`): swung toward it, a round when on it and ready.
 // True: a round left.
+// The gap before turret `n`'s next round: its two barrels in turn, each kGuns[gun].gapMs.
+ULONGLONG GapOf(int n) noexcept { return kGuns[kGunOf[n]].gapMs/2; }
+
+// Turret `n`'s next round at `aim` from its next barrel's mouth (`real`: the damage this machine's), its barrels turned.
+bool Fire(Turret& t,unsigned char* v,int n,const float* aim,bool real) noexcept {
+    const int gun=kGunOf[n];
+    float mouth[3];
+    Mouth(t,gun,mouth);
+    if(!DreadnoughtRound(v,kGuns[gun].round,mouth,aim,real))return false;
+    ++t.shots;
+    return true;
+}
+
 bool Train(Turrets& r,unsigned char* v,int n,const float* aim,bool fire,float dt,ULONGLONG ms) noexcept {
     Turret& t=r.t[n];
     const float* muzzle=BoneAt(t.rec[2]);
@@ -223,12 +277,13 @@ bool Train(Turrets& r,unsigned char* v,int n,const float* aim,bool fire,float dt
     float local[3];
     ToShip(v,to,local);
     t.onAim=Swing(t,std::atan2(local[0],local[2]),std::atan2(local[1],std::sqrt(local[0]*local[0]+local[2]*local[2])),dt);
-    if(!(t.onAim && fire && ms-t.shotAt>=kGapMs && DreadnoughtRound(v,muzzle,aim,true)))return false;
+    if(!(t.onAim && fire && ms-t.shotAt>=GapOf(n) && Fire(t,v,n,aim,true)))return false;
     t.shotAt=ms;
     r.out.fired|=static_cast<std::uint8_t>(1u<<n);
     std::memcpy(r.out.aim[n],aim,12);
-    if(Cfg().debug && t.shots++%10==0)
-        Log("DREADNOUGHT v=%p turret %d round #%d at (%.0f,%.0f,%.0f), %.0f m",v,n,t.shots,aim[0],aim[1],aim[2],vec::Len(to));
+    if(Cfg().debug && t.shots%10==1)
+        Log("DREADNOUGHT v=%p turret %d (gun %d) round #%d at (%.0f,%.0f,%.0f), %.0f m (reach %.0f)",v,n,kGunOf[n],t.shots,aim[0],
+            aim[1],aim[2],vec::Len(to),kGuns[kGunOf[n]].reach);
     return true;
 }
 
@@ -276,27 +331,16 @@ void TurretsFrame(Ship& s,unsigned char* v,float dt,ULONGLONG ms) noexcept {
         AcquireSRWLockShared(&viewLock);const bool mine=view.vehicle==v;ReleaseSRWLockShared(&viewLock);
         if(mine){AcquireSRWLockExclusive(&viewLock);view=View{};ReleaseSRWLockExclusive(&viewLock);}
     }
-    if(!Rig(r,v)) {
-        if(here==0) {   // no turrets: the bridge's view still
-            const float* p=reinterpret_cast<const float*>(v+kPosition);
-            const float pivot[3]={p[0],p[1],p[2]};
-            Look(v,SeatAt(v,0),0,pivot,kBridgeBack,kBridgeUp);
-        }
-        return;
+    const unsigned char* const seat=here>=0 ? SeatAt(v,static_cast<unsigned>(here)) : nullptr;
+    // a gunner's third person is the bridge's, round the whole ship (or the look ahead): near their turret the camera was
+    // inside the hull's geometry from every offset tried (its seat, its sight 2-8 m up and 5-22 m back: range 2026-10-21);
+    // their turret trains on the screen's centre all the same, and the first person (V) is its sight's
+    if(seat) {
+        float pivot[3],back,up;
+        ViewPivot(v,seat,pivot,&back,&up);
+        Look(v,seat,here,pivot,back,up);
     }
-    const unsigned char* const seat=here>=0 ? SeatAt(v,here) : nullptr;
-    if(here==0) {
-        const float* p=reinterpret_cast<const float*>(v+kPosition);
-        const float pivot[3]={p[0],p[1],p[2]};
-        Look(v,seat,0,pivot,kBridgeBack,kBridgeUp);
-    } else if(here>0) {
-        // a gunner's third person is the bridge's, round the whole ship: near their turret the camera was inside the hull's
-        // geometry from every offset tried (its seat, its sight 2-8 m up and 5-22 m back: range 2026-10-21); their turret
-        // trains on the screen's centre all the same, and the first person (V) is its sight's
-        const float* p=reinterpret_cast<const float*>(v+kPosition);
-        const float pivot[3]={p[0],p[1],p[2]};
-        Look(v,seat,here,pivot,kBridgeBack,kBridgeUp);
-    }
+    if(!Rig(r,v))return;   // no turrets: the view still
     float aim[3],eye[3];
     const bool aimed=here>=0 && AimPoint(aim,eye);
     const float trigger=seat ? At<float>(seat,kSeatFire) : 0.0f;
@@ -318,15 +362,15 @@ void TurretsFrame(Ship& s,unsigned char* v,float dt,ULONGLONG ms) noexcept {
                 Train(r,v,n,aim,fire,dt,ms);
                 ++trained;
                 if(t.onAim)++on;
-                const ULONGLONG since=ms-t.shotAt;
-                wait=std::fmin(wait,since>=kGapMs ? 0.0f : static_cast<float>(kGapMs-since)/1000.0f);
+                const ULONGLONG since=ms-t.shotAt,gap=GapOf(n);
+                wait=std::fmin(wait,since>=gap ? 0.0f : static_cast<float>(gap-since)/1000.0f);
             }
             (own ? r.mine : r.commanded)|=bit;
             r.out.manned|=bit;
             r.out.yaw[n]=t.yaw;r.out.pitch[n]=t.pitch;
         } else if(remote) {   // a remote player's: their aim, and their round of no damage
             Swing(t,rm.yaw,rm.pitch,dt);
-            if(rm.fire){rm.fire=false;DreadnoughtRound(v,BoneAt(t.rec[2]),rm.aim,false);}
+            if(rm.fire){rm.fire=false;Fire(t,v,n,rm.aim,false);}
             r.others|=bit;
         } else {
             Swing(t,0.0f,0.0f,dt);

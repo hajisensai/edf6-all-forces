@@ -12,6 +12,8 @@ in neither its model nor its collision. Changing them takes a run of the install
                                                 durability and arms (the submarine carrier's: tools/make_jets.py writes
                                                 them), its door beside it
   Mods/OBJECT/EDF6VC_DN_<FIGHTER>.SGO           the fighters, NPC jets (src/jet_internal.h kBodies Body::dn*)
+  Mods/OBJECT/EDF6VC_DN_ROUND_<GUN>.SGO         its turrets' rounds, their emplacements' (TURRET_ROUNDS, src/jet_bay.cpp
+                                                kDnRounds)
 
 Without the model folder (pylib/obj_model.py model_dir: $EDF6VC_MODELS, `models` next to the installer, the developer's
 folder) none of it can be built: the dreadnought's SGO is then the stock V506_HELI.SGO as it is, so its request
@@ -50,6 +52,44 @@ JET = vc.JETS[vc.DREADNOUGHT_JET]
 SGO_FILE = 'EDF6VC_DREADNOUGHT.SGO'
 STOCK_SGO = 'V506_HELI.SGO'
 FIGHTER_SGOS = {k: vc.dn_file(k, 'SGO') for k in vc.DREADNOUGHT_FIGHTERS}
+# Its turrets' rounds (src/jet_bay.cpp kDnRounds, in tools/make_tracked_combat.py DREADNOUGHT_GUNS' order; vcobjects
+# DREADNOUGHT_TURRET_GUNS): each gun's emplacement's round (GUNS['emp_<kind>']: its speed, life, blast, thickness) in its
+# shell's tracer colour (EMPLACEMENT_SHELL's AmmoColor), made as the gunship cannon's round is (make_jets.gun_round: one
+# SolidBullet01, fired straight, no wait; the plugin writes the damage, the emplacement's AmmoDamage).
+TURRET_ROUNDS = {kind: f'EDF6VC_DN_ROUND_{kind.removeprefix("emp_").upper()}.SGO' for kind in ('emp_mid', 'emp_short', 'emp_long')}
+BARREL_FIT = 0.05   # m: vcobjects.DREADNOUGHT_BARRELS against the model's guns
+
+
+def turret_round(game: vc.Game, kind: str) -> make_jets.GunRound:
+    """Gun `kind`'s round as its emplacement fires it (TURRET_ROUNDS)."""
+    import make_tracked_combat as tc
+    g = tc.GUNS[kind]
+    color = sgo.load(data=game.read('WEAPON', tc.EMPLACEMENT_SHELL))['AmmoColor']
+    life = int(g['AmmoAlive'])
+    return make_jets.GunRound(TURRET_ROUNDS[kind], float(g['AmmoExplosion']), float(g['AmmoSpeed']), life,
+                              float(g['AmmoSpeed']) * life, float(g['AmmoSize']), float(g['AmmoHitSizeAdjust']),
+                              tuple(float(c) for c in color))
+
+
+def check_barrels() -> None:
+    """vcobjects.DREADNOUGHT_BARRELS against the model folder's guns: each turret's two barrel mouths (pylib/
+    emplacement_model.py _muzzles, the emplacements' own) BARREL_FIT m of its gun's half spacing either side of its muzzle
+    bone, across its guns (x), level with it."""
+    import json
+    import numpy as np
+    import emplacement_model as em
+    folder = dm.model_dir()
+    with open(os.path.join(folder, 'dreadnought.json'), encoding='utf-8') as h:
+        bones = json.load(h)['models']['dreadnought']['bones']
+    guns = em._read(os.path.join(folder, em.SOURCE), {f'turret_{n}_gun' for n in range(vc.DREADNOUGHT_TURRETS)})
+    for n, kind in enumerate(vc.DREADNOUGHT_TURRET_GUNS):
+        muzzle = np.asarray(bones[f'turret_{n}_muzzle']['pivot'], dtype=np.float64)
+        mouths = em._muzzles(guns[f'turret_{n}_gun'][0], muzzle)
+        half = vc.DREADNOUGHT_BARRELS[kind]
+        for side, sign in (('left', 1.0), ('right', -1.0)):
+            off = mouths[side] - muzzle
+            assert abs(off[0] - sign * half) < BARREL_FIT and abs(off[1]) < BARREL_FIT and abs(off[2]) < BARREL_FIT, \
+                f'turret {n} ({kind}) {side} barrel {off.round(3)}: vcobjects.DREADNOUGHT_BARRELS says {sign * half}'
 
 
 def build(root: str, hangars: tuple[bool, ...] = dm.ALL_HANGARS) -> dict[str, bytes]:
@@ -70,14 +110,34 @@ def build(root: str, hangars: tuple[bool, ...] = dm.ALL_HANGARS) -> dict[str, by
             # its collision measured off it as built (the dreadnought: its fitted modules only), about its whole model's
             # box centre, the vehicle's position as its SGO has it (vcobjects.jet_sgo)
             files[f'OBJECT/{aircraft_collision.DN_FILES[name]}'] = aircraft_collision.airframe(
-                game, md, jet_models.model_box(game, name)[0])
+                game, md, jet_models.model_box(game, name)[0], grid=grid_of(model))
         # its turrets' gunner seats after the pilot's (vcobjects.DREADNOUGHT_TURRETS): the 410 door gunner's pose
         files[f'OBJECT/{SGO_FILE}'] = make_jets.with_passenger_seats(
             vc.jet_sgo(game, vc.DREADNOUGHT_JET), 0, vc.DREADNOUGHT_TURRETS, game.read('OBJECT', make_jets.GUNNER_STOCK))
         for kind, (name, *_rest) in vc.DREADNOUGHT_FIGHTERS.items():
             files[f'OBJECT/{FIGHTER_SGOS[kind]}'] = vc.jet_sgo(game, name)
+        for kind in TURRET_ROUNDS:
+            gun = turret_round(game, kind)
+            files[f'OBJECT/{gun.file}'] = make_jets.gun_round(game, gun)
+            make_jets.check_gun_round(files[f'OBJECT/{gun.file}'], gun)
+        check_barrels()
     check(files, hangars)
     return files
+
+
+def grid_of(model: str) -> tuple[int, int]:
+    """Model `model`'s collision grid: the dreadnought's own (aircraft_collision.DN_GRID), its fighters' the jets'."""
+    return aircraft_collision.DN_GRID if model == dm.SHIP else (aircraft_collision.NX, aircraft_collision.NZ)
+
+
+def made_files() -> list[str]:
+    """The paths under Mods `build` writes with the model folder, its own SGO aside (the test range has its own):
+    every model's archive and airframe, the fighters' SGOs."""
+    out = []
+    for model in dm.MODELS:
+        name = dm.archive_name(model)
+        out += [f'OBJECT/{name}', f'OBJECT/{aircraft_collision.DN_FILES[name]}']
+    return out + [f'OBJECT/{f}' for f in (*FIGHTER_SGOS.values(), *TURRET_ROUNDS.values())]
 
 
 def check(files: dict[str, bytes], hangars: tuple[bool, ...] = dm.ALL_HANGARS) -> None:
@@ -201,7 +261,7 @@ def check_markers(md, kinds: dict[str, bytes], hangars: tuple[bool, ...] = dm.AL
         assert {f'dn_lift_{i}', f'dn_door_u_{i}', f'dn_door_l_{i}'} <= set(bones), f'bay {i}: its lift or doors'
     assert dm.EYE.format(1 + vc.DREADNOUGHT_TURRETS) not in bones and f'dn_bay_{dm.BAYS}' not in bones
     tris = np.array(list(aircraft_collision.triangles(md)), float)
-    cells = aircraft_collision.mesh_cells([tuple(map(tuple, t)) for t in tris])
+    cells = aircraft_collision.mesh_cells([tuple(map(tuple, t)) for t in tris], *aircraft_collision.DN_GRID)
     c0, c1 = np.array([c[0] for c in cells]), np.array([c[1] for c in cells])
 
     def at(name: str) -> np.ndarray:

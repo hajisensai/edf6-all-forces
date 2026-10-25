@@ -1089,6 +1089,11 @@ bool EnemyControlSuppressHuman(const unsigned char* human) noexcept {
     for(const auto& s:sessions)if(s.local && s.snapshot.lease && s.sourceProtected && s.owner.obj==human && Live(s.owner) && CurrentObject(s.target))return true;
     return false;
 }
+// Over its shoulder: the eye kShoulderUp of the body's height over the line behind its lock point and kShoulderSide of it
+// to the screen's right, looking at where the aim ray (AimRay: from the lock point along the view, the attacks' line)
+// meets the map within kAimRange, or kLookFar along it, so the screen's centre stays on the aim. Straight behind the
+// lock point the body filled the screen's middle (the user, 2026-10-25: 「怪物操控整个身体挡面前看不到了」).
+constexpr float kShoulderUp=0.8f,kShoulderSide=0.5f,kAimRange=2000.0f,kLookFar=300.0f;
 bool EnemyControlCamera(const unsigned char* human,const float*,const float*,float* eye,float* look) noexcept {
     if(!On() || !human || !eye || !look)return false;
     for(const auto& s:sessions)if(s.local && s.snapshot.phase==Phase::active && s.owner.obj==human && Live(s.owner) && Live(s.target)) {
@@ -1101,19 +1106,33 @@ bool EnemyControlCamera(const unsigned char* human,const float*,const float*,flo
         const float height=(std::max)(2.0f,std::fabs(pivot[1]-position[1]));
         const float distance=(std::min)(120.0f,(std::max)(8.0f,height*2.5f));
         const float direction[3]={std::sin(s.yaw)*std::cos(s.pitch),std::sin(s.pitch),std::cos(s.yaw)*std::cos(s.pitch)};
-        for(unsigned i=0;i<3;++i){look[i]=pivot[i]+direction[i]*distance;eye[i]=pivot[i]-direction[i]*distance;}
+        float right[3];enemy_control::CameraRight(s.yaw,right);
+        // the eye's offset from the pivot: behind it, raised, to the right
+        float off[3];
+        for(unsigned i=0;i<3;++i)off[i]=-direction[i]*distance+right[i]*height*kShoulderSide+(i==1 ? height*kShoulderUp : 0.0f);
+        // what the screen's centre looks at: the aim ray's first map hit, else kLookFar along it
+        float target[3],reachEnd[3],start[3],hit[3];
+        for(unsigned i=0;i<3;++i){start[i]=pivot[i]+direction[i]*0.1f;reachEnd[i]=pivot[i]+direction[i]*kAimRange;target[i]=pivot[i]+direction[i]*kLookFar;}
+        const float met=MapRay(start,reachEnd,hit);
+        if(met>0.0001f && std::isfinite(hit[0]+hit[1]+hit[2])) {
+            float forward=0;for(unsigned i=0;i<3;++i)forward+=(hit[i]-pivot[i])*direction[i];
+            if(forward>1.0f)std::memcpy(target,hit,12);
+        }
+        for(unsigned i=0;i<3;++i){eye[i]=pivot[i]+off[i];look[i]=target[i];}
         // As in the native high camera, move only the collision-query pivot
         // a tiny amount toward the eye. The optical target stays unchanged.
-        float query[3];for(unsigned i=0;i<3;++i)query[i]=pivot[i]-direction[i]*(std::min)(0.1f,distance*0.5f);
-        float hit[3];const float obstruction=MapRay(query,eye,hit);
+        const float reach=std::sqrt(off[0]*off[0]+off[1]*off[1]+off[2]*off[2]);
+        float unit[3];for(unsigned i=0;i<3;++i)unit[i]=off[i]/reach;
+        float query[3];for(unsigned i=0;i<3;++i)query[i]=pivot[i]+unit[i]*(std::min)(0.1f,reach*0.5f);
+        const float obstruction=MapRay(query,eye,hit);
         // Inclusive start hits carry no usable exit distance. Keep the desired
         // rig rather than collapsing eye onto the target; positive near walls
         // still shorten the rig, without a minimum-distance wall bypass.
         if(obstruction>0.0001f) {
-            float along=0;for(unsigned i=0;i<3;++i)along+=(pivot[i]-hit[i])*direction[i];
-            if(std::isfinite(along) && along>0 && along<distance) {
+            float along=0;for(unsigned i=0;i<3;++i)along+=(hit[i]-pivot[i])*unit[i];
+            if(std::isfinite(along) && along>0 && along<reach) {
                 const float stop=(std::max)(0.01f,along-(std::min)(0.05f,along*0.5f));
-                for(unsigned i=0;i<3;++i)eye[i]=pivot[i]-direction[i]*stop;
+                for(unsigned i=0;i<3;++i)eye[i]=pivot[i]+unit[i]*stop;
             }
         }
         return true;

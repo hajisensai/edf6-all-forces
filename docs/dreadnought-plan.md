@@ -49,7 +49,7 @@
 |---|---|
 | 导出 → 模型目录（OBJ/MTL、每材质 `_df/_nm/_rml.png`、`dreadnought.json` 骨骼、枢轴与转过的骨骼的 `frame`；标记骨骼按碰撞格算） | `tools/prep_dreadnought.py` |
 | 模型目录 → 5 个 MRAB（V505 车身材质；有灯的材质用复古巴拉姆 light 材质） | `pylib/dreadnought_model.py` |
-| MRAB → 网格复合碰撞体（24×32 凸格高度场，甲板可站人） | `pylib/aircraft_collision.py DN_FILES` |
+| MRAB → 网格复合碰撞体（凸格高度场，甲板可站人；舰体 48×64 `DN_GRID`、舰载机 24×32，§10） | `pylib/aircraft_collision.py DN_FILES` |
 | SGO（V506 机体壳）、炮手座 ×8、舰载机 NPC 机体 ×4；按 ini 装的机库模块生成模型与碰撞；检查标记骨骼（舰桥、眼位、已装机库的机库位）与装配 | `tools/make_dreadnought.py`、`pylib/vcobjects.py`、`pylib/dreadnought_model.py` |
 | 呼叫行 `EDF6VC_CALL_DREADNOUGHT`（第 49 行，空袭兵载具请求） | `tools/calls.py`、`tools/call_weapons.py MODEL_VEHICLES` |
 
@@ -83,7 +83,7 @@
 
 ## 4. 未验证 / 风险（L，需实机）
 
-1. 500 m 的复合碰撞体（640 个凸格，已装的两舷机库计在内）在 Havok 里的表现：站人、降落时压到建筑、被写速度时甲板上的人是否被带走（同潜水母舰 §6 第 1 项）。
+1. 500 m 的复合碰撞体（2026-10-25 起 48×64 网格、约 2451 个凸格，已装的两舷机库计在内，§10）在 Havok 里的表现：站人、降落时压到建筑、被写速度时甲板上的人是否被带走（同潜水母舰 §6 第 1 项）。
 2. 舱门在右舷外侧地面（`move_door`）；舰体 500 m，玩家要走到右舷中段。
 3. 炮手座：410 门炮手姿势套在 506 机体上，所有炮手座共用驾驶座的定位点；炮塔骨骼局部矩阵每帧写入后引擎是否按它画（沙扎比同法，H for sazabi）。
 4. 炮塔开火的瞄准点取屏幕中心射线；`kOnAim` 2° 内才开火。
@@ -241,3 +241,41 @@
   `make_dreadnought.check_fitting`（真模型：装配与骨骼一致、每个模块的网格在站位范围内）。
 - 未实机：少装后的模型与碰撞、站在机库上方按上车键出击（含 `FindSeat` 访问顺序：附近若有别的可上的载具，上车键可能先上了它，此时机库送出的战机
   在开口等 5 s 后收回）、开口处放人到舰桥的那几帧、返舰原机库位入库。
+
+## 10. 2026-10-25 试玩反馈（`docs/feedback-2026-10-25-dreadnought.md`）
+
+- **摆放里找不到（H，已修）**：`8aa3a9f8`（10-21）为了让启动器方案把无畏舰放到最远点，把它加进 `testrange/gen.py BIG`；而 `PLACEABLE_DERIVED`
+  （M 图「摆放」的行，`testrange/catalog.py rows`、`src/spawn_catalog.inc`）也用 `BIG` 排除，结果它从摆放面板里一起没了。拆成两件事：`BIG` 只管
+  布局，`NOT_PLACEABLE` 只剩 1664 m 的潜舰；`placeable_derived()` 对沙扎比和无畏舰都要求模型目录（`MODEL_FOLDERS`）。测试场装无畏舰时，
+  安装器已经装好它的模型 / 碰撞 / 舰载机 / 炮弹（`make_dreadnought.made_files`）就直接引用（不再每次重建约 3 分钟，也不会用默认装配盖掉安装器
+  按 ini 装配的机库），否则按插件 ini 的装配现建。`catalog_archives.json` 由 `gen_spawn_catalog.py --archives` 重算。
+- **前视（M，未实机）**：舰桥和炮手座的第三人称都在舰后 2.2×kReach、舰上方绕整艘舰（§3），屏幕中间就是舰体（用户截图）。按住
+  `DreadnoughtAheadKey`（默认鼠标右键）/ `DreadnoughtAheadButton`（默认 L3）时，镜头的支点移到舰首前 `kAheadOut`（舰长一半 + 20 m）、
+  上 `kAheadUp` 10 m，眼睛就在支点上，朝视角方向看（`dreadnought_turrets.inc ViewPivot`）；准星仍是屏幕中心，炮塔照样打它。
+  鼠标右键在无畏舰上原来没有用处（炮艇的右键加特林只在炮艇炮位上读）。
+- **怪物操控的镜头（M，未实机）**：`enemy_control.cpp EnemyControlCamera` 原来把眼睛放在锁定点正后方、看向锁定点前方，大型怪物的身体就在屏幕中间。
+  改为越肩：眼睛在身后线上方身高的 0.8、往屏幕右侧 0.5 倍身高，看向技能瞄准线（`AimRay`：锁定点沿视角的 yaw / pitch，攻击用的同一条线）
+  与地图的交点（2000 m 内，没有就取 300 m 处），屏幕中心仍落在攻击方向上；镜头碰墙时沿眼睛的偏移方向缩短（原来的规则）。
+  `tests/enemy_control_runtime_test.cpp` 的契约从「中心线与技能俯仰平行」改成「中心看向技能瞄准线上的点、眼睛在身体上方」。
+  近处、不在地图上的目标（空中的敌人）会有视差：瞄准线没有命中地图时取 300 m 处，比 300 m 近得多的空中目标准星会略偏。
+- **被甲板上的玩家挤走（M，未实机）**：插件每帧给舰体写速度（`DreadnoughtBodyStep`），从不管它的位置；甲板上士兵的接触冲量在写完速度之后的
+  求解步里把舰推一点，下一帧插件照样只写速度，什么也没把它拉回来，于是一直漂。现在不推油门、不横移、不转向时（`Station`），舰慢到 0.5 m/s
+  以下就记下位置，之后横向速度按偏离量拉回（0.8/s，最多 4 m/s）；有任何横向操作就放开。没开过、停在地上的舰（`Settle`）也一样。
+  没查清的：`heli_rigid_body[2]`（0.305）在 `0x6571B9` 起被读成 hkHalf 写进刚体 cinfo（像是材质参数，不像质量），舰体复合体的质量由形状推出
+  （§3 碰撞体、`aircraft_collision.py` 去掉了 massDistribution），没有静态确认它相对士兵有多重——位置保持不依赖它。
+- **模型和碰撞不符（H 离线，未实机）**：碰撞是格子高度场，每格取格内最高点。用 96×128 的细格量本机已装的模型：24×32（每格 9.5×15.6 m）时
+  舰体 39.5% 的面积碰撞顶比画出来的表面高 1.5 m 以上（平均高 3.1 m，最差 57 m：炮塔、舰桥、上层建筑旁边站在空气上）。无畏舰本体改用
+  `aircraft_collision.DN_GRID` 48×64（4.75×7.8 m，2451 格，嵌套在 24×32 里）：16.2%、平均 1.06 m。舰载机仍是 24×32。标记（舰桥站点、
+  舰桥眼位、机库位出口）在 48×64 下 `check_markers` 全部通过（已装模型离线跑）；`prep_dreadnought.py` 以后放标记也用同一网格。
+  风险：2451 个凸子形状的复合体在 Havok 里的性能、子形状键宽度都没实机看过。
+- **蓝色入口提示（M，未实机）**：`crew.cpp PlayerBoardingEntrance`（hud.cpp `EntranceMark` 画的蓝圈 + 「登乘入口 N m」）只看 `IsJet` 的插件飞机，
+  无畏舰不是 `IsJet`，从来没有标记；而且 120 m 的搜索半径对 500 m 的舰也太小。现在无畏舰的座位入口（右舷舱门）在 400 m 内标出。
+  标记点是座位的上车点（`SeatPoint`），没实机确认它就是右舷那扇舱门的位置。
+- **炮塔改成固定炮台的打法（H 离线，未实机）**：原来 8 座炮塔都用炮艇侧炮的炮弹（一根细橙色曳光线），从一个炮口每 0.5 s 打一发。现在每座按同型
+  固定炮台（`pylib/emplacement_model.py`：turret_0/1 中型、2–5 短管、6/7 长管）：两根炮管轮流（`Mouth`：炮口骨骼沿炮的横向 ±2.46 / 4.07 / 5.7 m，
+  `make_dreadnought.check_barrels` 用固定炮台的 `_muzzles` 在模型上量），每管间隔 = 炮台的 FireInterval（12 / 60 / 40 帧），炮弹
+  `EDF6VC_DN_ROUND_MID/SHORT/LONG.SGO`（`make_dreadnought.TURRET_ROUNDS`，按 `make_tracked_combat.GUNS['emp_*']` 的弹速、寿命、爆炸半径、粗细，
+  E551 炮弹的曳光颜色，炮艇侧炮的做法：一发 SolidBullet01、直飞、无等待），伤害 = 炮台的 AmmoDamage（120 / 700 / 450）× 舰的等级倍率。
+  与固定炮台的差别（如实）：炮台是原生 V603 武器、炮弹 RocketBullet01 有下坠；这里是插件发的 DemoIndirectFire，直线飞向准星、没有下坠
+  （插件发弹只有直飞这条路实机验证过）。没装新炮弹的旧安装退回炮艇侧炮的炮弹（日志一行）。
+  `tools/selftest.py dreadnought_agrees` 钉住 `kGuns` / `kGunOf` / `kDnRounds` 与 Python 侧一致。
