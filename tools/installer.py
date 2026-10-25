@@ -503,6 +503,8 @@ def build_packs(game: str, campaign: bool, root41: str | None = None,
 
 
 def install(game: str, campaign_requested: bool = False) -> None:
+    if why := modelpack.problem(bundle_app_dir()):   # the split share package's models: every install path (menu 1 and 6)
+        raise SystemExit(why)
     import buildcache
     import call_weapons
     import gen
@@ -1205,9 +1207,6 @@ def main(argv: list[str]) -> int:
         except testhub.HubError as e:
             print(f'\n没有完成：{e}')
             return 1
-    if mode == 'install' and (why := modelpack.problem(bundle_app_dir())):   # the split share package's models
-        print(f'\n{why}')
-        return 1
     if modfiles.game_running():
         print(f'{PROCESS} 正在运行。请先退出游戏再运行本程序（本程序不会替你关游戏）。')
         return 1

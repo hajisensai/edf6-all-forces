@@ -12,3 +12,6 @@ edf41port/outfits/**/*.members.json -text
 src/enemy_control_ported_spawn_profiles.inc text eol=lf
 src/enemy_control_pvp_spawn_profiles.inc text eol=lf
 src/enemy_control_native_profiles.inc -text
+
+# Model pack files are hashed byte-exactly (pylib/modelpack.py): no autocrlf on a checkout of models/.
+models/** -text

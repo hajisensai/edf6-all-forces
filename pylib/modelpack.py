@@ -53,18 +53,21 @@ def problem(app_dir: str) -> str | None:
         return None
     except (ValueError, KeyError):
         return f'{REQUIRED} 损坏，请重新解压主包。'
-    models = os.path.join(app_dir, 'models')
+    models = os.environ.get('EDF6VC_MODELS') or os.path.join(app_dir, 'models')   # obj_model.model_roots() order
     try:
         with open(os.path.join(models, MANIFEST), encoding='utf-8-sig') as f:
             have = json.load(f)
     except (OSError, ValueError):
         return (f'这个安装器需要模型包 {want}，但安装器旁的 models 文件夹里没有它。'
                 f'请把“模型包”zip 解压到安装器所在文件夹（合并进 models）后重试。')
-    if have.get('version') != want:
-        return (f'这个安装器需要模型包 {want}，但 models 文件夹是 {have.get("version")}。'
+    if not isinstance(have, dict) or have.get('version') != want:
+        return (f'这个安装器需要模型包 {want}，但 models 文件夹是 {have.get("version") if isinstance(have, dict) else "?"}。'
                 f'请解压对应版本的“模型包”zip 覆盖进 models 后重试。')
-    for rel, size in have['files'].items():
-        p = os.path.join(models, *rel.split('/'))
+    files = have.get('files') if isinstance(have, dict) else None
+    if not isinstance(files, dict):
+        return f'模型包 {want} 的 {MANIFEST} 损坏，请重新解压“模型包”zip。'
+    for rel, size in files.items():
+        p = os.path.join(models, *str(rel).split('/'))
         if not os.path.isfile(p) or os.path.getsize(p) != size:
             return f'模型包 {want} 不完整（{rel} 缺失或大小不对）。请重新解压“模型包”zip。'
     return None
