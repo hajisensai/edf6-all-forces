@@ -864,6 +864,9 @@ set_tests_properties(player_vehicle_native PROPERTIES ENVIRONMENT PYTHONIOENCODI
 # The room menu screen's code checks (src/room_ui.cpp) against EDF.dll read as a file (skipped without the game).
 add_test(NAME room_ui_sigs COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_sig_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
+# The stock key configuration menu and binding store the key-binding plan builds on (docs/keyconfig-re.md).
+add_test(NAME keyconfig_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/keyconfig_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(keyconfig_native PROPERTIES SKIP_RETURN_CODE 77)
 # The installer side of the room menu's review fixes: the ledger merged on save, every Mods writer under the generator's
 # lock, the room layouts never stopping an install, stale generated variant files removed (a fake game directory).
 add_test(NAME installer_lock COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/installer_lock_test.py")

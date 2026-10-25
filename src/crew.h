@@ -271,7 +271,7 @@ struct Config {
     bool firstPerson=true;          // first person on foot: the key switches it (firstperson.cpp)
     bool fpVehicle=true;            // ...in a vehicle as well: each seat's eye at its station (fp_vehicle.cpp)
     bool fpHideStockHud=true;       // ...and the stock HUD off there (its information on the cockpit's panels)
-    int firstPersonKey=0x56;        // ...its key ('V'; on foot only: the vehicles' V keys are not on foot; 0 none)
+    int firstPersonKey=0x56;        // ...its key ('V'; on foot, and riding with FirstPersonVehicle; a vehicle's own V key takes it there (KeyTaken); 0 none)
     bool firstPersonStart=false;    // ...on from the start
     float fpEyeUp=0.05f;            // ...the eye this far over the head bone, m
     float fpEyeAhead=0.10f;         // ...and this far ahead of it, m
