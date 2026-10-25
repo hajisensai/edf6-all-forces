@@ -89,6 +89,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/viewdiag.cpp)
 # The DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (src/edf41smalldragon.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/edf41smalldragon.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41insects.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41mech_boost.cpp)
 # Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
 target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
 # The EDF4.1 classes online (src/edf41net.h, docs/edf41-classes.md 联机): child identities, the host's decisions as events.
@@ -1090,6 +1091,14 @@ set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
 # EDF4.1's pre-mission scenes (src/edf41before.cpp): the patched call in Before(), _DeleteAllMenuUi, the fade screen name.
 add_test(NAME edf41_before_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_before_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(edf41_before_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
+# The 406 Begaruta's jet group (src/edf41mech_boost.h): the stubs run on fake slots; the EDF.dll facts behind them.
+add_executable(edf41mech_boost_test tests/edf41mech_boost_test.cpp)
+target_include_directories(edf41mech_boost_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(edf41mech_boost_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41mech_boost COMMAND edf41mech_boost_test)
+add_dependencies(offline_checks edf41mech_boost_test)
+add_test(NAME edf41mech_boost_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41mech_boost_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(edf41mech_boost_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 # The stock join mark (hidden while the map recruits) and the free-squad cover a recruited squad keeps (src/npcai.cpp
 # InstallFreeSquadCover): the patched bytes and the original visit run on stand-ins against the real EDF.dll.
 add_test(NAME npc_cover_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_cover_native_audit.py" "${EDF6_NATIVE_DLL}")
