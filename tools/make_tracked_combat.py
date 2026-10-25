@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import os
 import struct
 import sys
 from pathlib import Path
@@ -400,23 +401,31 @@ def animation_path(kind: str) -> str:
     return f'OBJECT/{model_module(kind).OUT_CAS}'
 
 
+_ASSETS: dict[tuple, tuple] = {}
+
+
 def _assets(game: vc.Game, kind: str):
-    """Share one actual model/collision build within a complete asset transaction."""
+    """One actual model/collision build a kind, shared by every reader in the process: it reads only the game's archive
+    (vc.Game is rootcpk's: Root.cpk, read only) and the repository's model folders, so it is the same build for the
+    same archive (its path, size and time). Until 2026-10-25 it was shared by one Game object only: authored(),
+    vehicle_sgo() and testrange's gen each open their own, and a reader of every kind's SGOs (gen_spawn_catalog,
+    tools/selftest.py spawn_catalog_archives_recorded) built each kind four or five times (85 builds, ~15 min)."""
     import tracked_combat_model as tracked
     import tracked_collision
-    cache = getattr(game, '_tracked_combat_assets', None)
-    if cache is None:
-        cache = {}
-        game._tracked_combat_assets = cache
-    if kind not in cache:
+    import wt_tracked
+    st = os.stat(game.cpk.path)
+    # wt_tracked.ENABLED: the War Thunder models or the procedural ones (tests switch it off): another build.
+    key = (os.path.normcase(os.path.abspath(game.cpk.path)), st.st_size, st.st_mtime_ns, wt_tracked.ENABLED, kind)
+    cache = _ASSETS
+    if key not in cache:
         model = model_module(kind)
         arc, md, _info = model.build_with_info(game)
         assembly = tracked.Assembly(md)
         model.parts(assembly)
         shkt, binding, overrides, report = tracked_collision.build(game, kind, md, assembly.parts,
                                                                    layout=model.collision_layout())
-        cache[kind] = arc, md, shkt, binding, overrides, report
-    return cache[kind]
+        cache[key] = arc, md, shkt, binding, overrides, report
+    return cache[key]
 
 
 def vehicle_sgo(game: vc.Game, kind: str) -> bytes:

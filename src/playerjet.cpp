@@ -415,9 +415,13 @@ void Elevons(PJet& j,unsigned char* v,float stickPitch,float stickRoll,float dt)
 // > 0: nose up (stick back / mouse up: the right stick's Y is negative pushed up, as LY is for forward);
 // throttle: +1 forward stick or ascend, -1 back stick. turn: either stick sideways (the ground's nose wheel); in the
 // air yaw (the right stick: turn) and roll (the left stick's sideways: roll > 0 rolls right) are apart.
-// keys (the keyboard and mouse): pitch from W / ascend (+1) and S (-1), throttle from the ini's boost and brake keys,
-// no yaw: the mouse (aimX, aimY: the frame's movement, no dead zone; aimY > 0 up) moves the aim instead.
-struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; bool keys; float aimX,aimY; bool switchStore,nextTarget,flare; };
+// keys (the keyboard and mouse) are War Thunder's (the user, 2026-10-25: 「W/S 加减油门 空格和ctrl俯仰」): throttle from
+// W / the ini's boost key (+1) and S (-1), moving a lever that stays where they leave it (lever); pitch from ascend (SPACE,
+// +1) and the ini's brake key (-1); no yaw: the mouse (aimX, aimY: the frame's movement, no dead zone; aimY > 0 up) moves
+// the aim instead. boost: the ini's boost (+1) and brake (-1) keys as they read, a rotor craft's cruise and descend
+// (HoverStep: its W / S set its speed).
+struct Stick { float turn,pitch,throttle,yaw,roll; float lx,ly,rx,ry,ascend; bool keys; float aimX,aimY; bool switchStore,nextTarget,flare;
+               bool lever; float boost; };
 
 // Whether the virtual key `vk` is down while the game has the foreground (0: never).
 bool KeyDown(int vk) noexcept {
@@ -443,13 +447,16 @@ Stick ReadStick(const unsigned char* seat) noexcept {
     s.nextTarget=s.keys ? KeyDown(Cfg().playerJetTargetKey) : (At<std::uint16_t>(seat,kSeatButtons)&kButtonX)!=0;
     s.flare=KeyDown(Cfg().playerJetFlareKey);   // the keyboard's (a pad's buttons are the game's)
     if(s.keys) {
-        // The mouse steers only with ini PlayerJetMouseFlight; off, the keys fly the plane alone (W / ascend pull, S
-        // push, A / D roll, let go it levels) and the mouse is left to the camera (the user's ask, 2026-10-04).
+        // The mouse steers only with ini PlayerJetMouseFlight; off, the keys fly the plane alone (SPACE pull, the brake
+        // key push, A / D roll, let go it levels) and the mouse is left to the camera (the user's ask, 2026-10-04).
         if(!Cfg().playerJetMouseFlight)s.turn=s.lx;
         s.aimX=Raw(seat,kSeatRX);
         s.aimY=Cfg().playerJetInvertPitch ? Raw(seat,kSeatRY) : -Raw(seat,kSeatRY);
-        s.pitch=(s.ascend>0.5f || s.ly<-0.3f ? 1.0f : 0.0f)-(s.ly>0.3f ? 1.0f : 0.0f);
-        s.throttle=(KeyDown(Cfg().playerJetBoostKey) ? 1.0f : 0.0f)-(KeyDown(Cfg().playerJetBrakeKey) ? 1.0f : 0.0f);
+        const bool boost=KeyDown(Cfg().playerJetBoostKey),brake=KeyDown(Cfg().playerJetBrakeKey);
+        s.boost=(boost ? 1.0f : 0.0f)-(brake ? 1.0f : 0.0f);
+        s.pitch=(s.ascend>0.5f ? 1.0f : 0.0f)-(brake ? 1.0f : 0.0f);
+        s.throttle=(s.ly<-0.3f || boost ? 1.0f : 0.0f)-(s.ly>0.3f ? 1.0f : 0.0f);
+        s.lever=true;
         return s;
     }
     s.yaw=s.rx;
@@ -569,9 +576,10 @@ void Crash(PJet& j,unsigned char* v,float sink,float speed,float past,bool banke
     Put<float>(v,kHp,left);
 }
 
-// The throttle lever, moved by the stick.
+// The throttle lever, moved by the stick. On the keys (Stick::lever) it stays where W / S leave it, in the air too.
 void Lever(PJet& j,const unsigned char* v,const Stick& s,float dt) noexcept {
-    if(j.phase==Phase::air) {
+    if(s.lever)j.throttle=Clamp(j.throttle+s.throttle*(j.phase==Phase::air ? kAirThrottleRate : kThrottleRate)*dt,0.0f,1.0f);
+    else if(j.phase==Phase::air) {
         const float want=s.throttle>0.0f ? 1.0f : s.throttle<0.0f ? 0.0f : kCruiseThrottle;
         const float step=kAirThrottleRate*dt;
         j.throttle=j.throttle<want ? (j.throttle+step<want ? j.throttle+step : want) : (j.throttle-step>want ? j.throttle-step : want);
@@ -627,10 +635,11 @@ void Ground(PJet& j,const unsigned char* v,const Stick& s,float clear,float dt) 
 }
 
 // The transition to ground control: an uncommanded air cruise setting must not power the rollout. An explicit boost
-// remains a touch-and-go request. No air lift/aim/warning state survives a supported landing.
+// remains a touch-and-go request; the keys' lever (Stick::lever) is the player's own setting and stays where it is.
+// No air lift/aim/warning state survives a supported landing.
 void Landed(PJet& j) noexcept {
     j.phase=Phase::rolling;j.vel[1]=0.0f;
-    if(j.throttleIn<=0.0f)j.throttle=0.0f;
+    if(!j.keys && j.throttleIn<=0.0f)j.throttle=0.0f;
     j.hasUp=false;j.hasAim=false;j.mouseFlies=false;j.aoa=0.0f;
     j.stall=false;j.stallShare=0.0f;j.load=1.0f;j.gpws=Gpws::none;j.impactIn=-1.0f;
 }
@@ -853,7 +862,8 @@ void Air(PJet& j,unsigned char* v,const Stick& s,const float* pos,float clear,bo
     j.load=g;
     const float thrust=k.thrust*want*want/top2/mass;   // the engine's force over a heavier jet
     const float slow=k.corner/speed,drag=(k.thrust*speed*speed/top2*(1.0f+j.burden.drag+GearDragShare(v)))/mass+kInduced*g*g*slow*slow*mass;
-    const float airbrake=s.throttle<0.0f ? k.brake*speed*speed/top2 : 0.0f;
+    // On the keys' lever S brakes once the lever is closed (War Thunder's airbrake); else the stick held back does.
+    const float airbrake=s.throttle<0.0f && !(s.lever && j.throttle>0.0f) ? k.brake*speed*speed/top2 : 0.0f;
     speed+=(thrust-drag-airbrake-kG*next[1])*dt;
     speed=Clamp(speed,kStallFloor,kBodyTop);
     for(int i=0;i<3;++i)j.vel[i]=next[i]*speed;

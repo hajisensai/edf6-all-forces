@@ -29,6 +29,7 @@
 #include "vecmath.h"
 #include "edf/weapon.h"
 #include "weapon_mount.h"
+#include "drivegear.h"
 #include <cmath>
 #include <cstring>
 
@@ -311,6 +312,7 @@ void StockHudFrame(unsigned char* v) noexcept {
     r.lookOk=CameraRay(eye,r.look);
     r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);
     Speed(v,r,ms);
+    r.gear=r.seat==0 ? DriveGearOf(v) : kNoDriveGear;
     r.stab=StabState(v,r.seat);
     RangeTarget(v,r,eye,ms);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);

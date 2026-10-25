@@ -49,7 +49,7 @@ def main() -> int:
          'const float relative=playerVelocity[i]-bodyVelocity[i]-spin[i];',
          '(void)bodyVelocity;(void)dt;const float relative=playerVelocity[i]/dt;'),
         ('cruise-survives-touchdown', 'src/playerjet.cpp',
-         'if(j.throttleIn<=0.0f)j.throttle=0.0f;', '(void)j.throttleIn;'),
+         'if(!j.keys && j.throttleIn<=0.0f)j.throttle=0.0f;', '(void)j.throttleIn;'),
         ('idle-flare-takeoff', 'src/playerjet.cpp',
          'if(!belly && j.throttle>0.02f && speed>=k.rotate &&',
          'if(!belly && speed>=k.rotate &&'),
