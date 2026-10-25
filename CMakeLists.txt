@@ -888,6 +888,7 @@ set_tests_properties(room_ui_sigs PROPERTIES SKIP_RETURN_CODE 77)
 # lock, the room layouts never stopping an install, stale generated variant files removed (a fake game directory).
 add_test(NAME installer_lock COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/installer_lock_test.py")
 set_tests_properties(installer_lock PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME modelpack COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/modelpack_test.py")
 # The menu screen's switches (RoomLoadout / RoomPreSync) and screen identity, from its source (no game needed).
 add_test(NAME room_ui_wiring COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/room_ui_wiring_guard.py")
 # EDF6Coop's member attributes taken in one place, the host's switches read through host_settings.h (tests/coop_attr_guard.py).

@@ -63,6 +63,7 @@
 
 - 往 `main` 合并 PR（一批合并的，在最后一个合并之后）后，**不用再问**，直接按 `D:\APP\edf6-share\CLAUDE.md` 打分享包（推荐包）：等这次 main 推送的 CI 跑完、`nightly` 换成该 commit 的安装器，复制上一版 `.work/recommend-<sha7>/` 改 sha / 日期 / 更新说明后打包。
 - 打包用的源码 worktree 放 `D:\APP\edf6-wt-<MMDD>-share`（detached 在该 main commit）。CI 拿不到的模型（`twin_tank` / `drill_tank` / `sazabi` / `dreadnought`，即 `tools/build_release.py` 的 `RELEASE_MODELS` 里没入库的那些）要从 `D:\APP\edf6-models` 补进包；`RELEASE_MODELS` 新增未入库的文件夹时同步改 `run_export.py` 的 `EXTERNAL_MODELS`。
+- **分两个 zip 发**（用户 2026-10-25 要求）：`run_export.py` 打出推荐包目录后，再跑 `python -B make_share.py split <推荐包目录>`（`D:\APP\edf6-share`）拆成 `…-主包.zip`（Coop、安装器、edf41、`models-required.json`，不含模型）和 `EDF6全军出击-模型包-<版本>.zip`（`RELEASE_MODELS` 全部模型 + `models/MODELS.json`）。模型版本 = `pylib/modelpack.py` 的内容哈希，模型没变则版本同名、模型包沿用旧的，只发主包；主包说明写明需要的模型包版本。带 `models-required.json` 的安装器（`install` 时）发现 `models/` 不是这个版本或不完整就拒绝安装并说明；CI nightly zip 没有该文件，不受影响。拆完用 `make_share.py verify` 复核两包互补。
 - 安装到本机游戏仍守「实机测试」铁律：游戏开着就只打包不装，装要经 `gamequeue.py`。回报 zip 路径、sha256 与校验结果。
 
 ## 版本与发版

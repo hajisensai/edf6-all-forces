@@ -60,6 +60,7 @@ for _p in (HERE, os.path.join(HERE, '..', 'pylib'), os.path.join(HERE, '..', 'te
 import edf41src  # noqa: E402
 import gamedir  # noqa: E402
 import modfiles  # noqa: E402
+import modelpack  # noqa: E402
 
 PLUGIN = 'EDF6VehicleCrew'
 PROCESS = modfiles.PROCESS
@@ -502,6 +503,8 @@ def build_packs(game: str, campaign: bool, root41: str | None = None,
 
 
 def install(game: str, campaign_requested: bool = False) -> None:
+    if why := modelpack.problem(bundle_app_dir()):   # the split share package's models: every install path (menu 1 and 6)
+        raise SystemExit(why)
     import buildcache
     import call_weapons
     import gen
@@ -967,6 +970,12 @@ def build_name() -> str:
             return json.load(f).get('name', '')
     except (OSError, ValueError):
         return ''
+
+
+def bundle_app_dir() -> str:
+    """The folder of the installer exe (the repository root when run from source): where models/ and models-required.json are."""
+    return os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, 'frozen', False) else \
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def download_latest() -> int:
