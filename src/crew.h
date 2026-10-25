@@ -475,6 +475,7 @@ struct Config {
                                     // 2026-10-19: "暂时取消这个掩护设定吧"), true = kept by its top NPC before and after recruiting
     bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
     float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
+    bool vehicleGears=true;         // drivegear.cpp: the player driving a stock ground vehicle on the keyboard, W / S shift War Thunder's cruise gears
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
     float tankPostHold=6.0f;        // ...m off its post before it does
     float tankReverseMax=30.0f;     // ...the post behind it and nearer than this (m): it reverses onto it, else turns round
