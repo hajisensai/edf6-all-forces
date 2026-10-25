@@ -3,7 +3,7 @@
 // Relocation ported from "EDF6 WeaponLimit" v1.0, Copyright (c) 2026 AnonymousHello, MIT License (the full notice:
 // third_party/EDF6WeaponLimit/LICENSE). Its persistence (a polling thread OR-merging into a file), its signature
 // checks and its widened weapon-select copy are replaced here by:
-//  - 101 instruction-exact constant patches (weapon_records_sites.inc), all verified before the first write, applied
+//  - 100 instruction-exact constant patches (weapon_records_sites.inc), all verified before the first write, applied
 //    together or rolled back together, behind EDF.dll's TimeDateStamp gate (plugin.cpp IdentifyImage).
 //  - The game status's allocation grows (12 sites in the list) and its constructor's block init (0xD6468) is followed
 //    by zeroing the relocated table: the block init itself (0xDEDA0) also initialises stack and record copies.
@@ -42,18 +42,7 @@ namespace {
 using namespace wrec;
 
 constexpr unsigned kGameStatus=0x20B2890;
-constexpr unsigned kMemcpy=0x12DA77A;                     // jmp [memcpy]
-constexpr unsigned kBlockInit=0xDEDA0,kBlockInitCall=0xD6468;   // the game status's constructor 0xD62C0
-constexpr unsigned kOutCalls[]={0x70AF25,0x70B079,0x70B61C,0x70B79C};   // memcpy(record, GS block, 0xDCE8)
-constexpr unsigned kInCalls[]={0x70B23A,0x70B421,0x70B956};            // memcpy(GS block, record, 0xDCE8)
-constexpr unsigned kNewGameCall=0xDB96D;                  // 0xDB920: memcpy(GS block, template, 0xDCE8)
-constexpr unsigned kLoadCopyCall=0x7C1AD1;                // the load job 0x7C1670: memcpy(dest, decoded, size)
-constexpr unsigned kUiSnapCall=0x8B49B1;                  // HUiHQWeaponSelect 0x8B4280: memcpy(screen+0x800, block, 0xDCE8)
-constexpr unsigned kSaveCall=0x7C2F66,kSave=0x7BCD40;     // MAIN.GST's save request (0x7C2E30), 9 arguments
-constexpr unsigned kWriteCall=0x7C228B,kWrite=0x7B9990;   // the save job 0x7C1CB0 writes a file
-constexpr unsigned kReadOpen=0x7B90CD,kWriteOpen=0x7B9C28;   // call [CreateFileW] in 0x7B8DE0 / 0x7B9990
-constexpr unsigned kDeleteCalls[]={0x7B69F1,0x7B7FEB};    // call [DeleteFileW] in 0x7B61B0 / 0x7B7EC0
-constexpr unsigned kUiOwned=0x8B4F70,kUiStatus=0x8B51A0;  // the screen's two reads of its snapshot's table
+// Every patched site (the constants, the redirected calls, the screen's two reads): src/weapon_records_logic.h.
 constexpr std::size_t kSaveSourceArg=5;                   // 0x7BCD40's sixth argument: the block it saves
 // 0x7B9990(path, desc) writes desc's parts one after another (its loop 0x7B9CB0..0x7B9E0E): desc+8 -> {data, size}
 // a part (16 bytes), desc+0x18 their count.
@@ -430,7 +419,7 @@ bool InstallWeaponRecords() noexcept {
         }
     }
     if(!Matches(kReadOpen,kReadOpenSig,6) || !Matches(kWriteOpen,kWriteOpenSig,6) || !Matches(kDeleteCalls[0],kDeleteSigs[0],6) ||
-       !Matches(kDeleteCalls[1],kDeleteSigs[1],6) || !Matches(kUiOwned,kUiOwnedSig,8) || !Matches(kUiStatus,kUiStatusSig,8)) {
+       !Matches(kDeleteCalls[1],kDeleteSigs[1],6) || !Matches(kUiOwned,kUiOwnedSig,kUiReadSize) || !Matches(kUiStatus,kUiStatusSig,kUiReadSize)) {
         Log("WEAPONREC REFUSED: the save files' calls or the weapon select screen's reads are not the expected code");
         return false;
     }
@@ -475,8 +464,8 @@ bool InstallWeaponRecords() noexcept {
         if(!edf::PatchCode(image+kSites[applied].rva,kSites[applied].code,patched,kSites[applied].size))break;
     }
     const bool constants=applied==kSiteCount;
-    const bool owned=constants && edf::PatchCode(image+kUiOwned,kUiOwnedSig,ownedJump,8);
-    const bool status=owned && edf::PatchCode(image+kUiStatus,kUiStatusSig,statusJump,8);
+    const bool owned=constants && edf::PatchCode(image+kUiOwned,kUiOwnedSig,ownedJump,kUiReadSize);
+    const bool status=owned && edf::PatchCode(image+kUiStatus,kUiStatusSig,statusJump,kUiReadSize);
     if(!status) {   // back to the game's code: a half-moved table is worse than none
         std::size_t stuck=0;
         for(std::size_t i=0;i<applied;++i) {
@@ -487,7 +476,7 @@ bool InstallWeaponRecords() noexcept {
                 Log("WEAPONREC putting back EDF+0x%X failed",kSites[i].rva);
             }
         }
-        if(owned && !edf::PatchCode(image+kUiOwned,ownedJump,kUiOwnedSig,8)){++stuck;Log("WEAPONREC putting back EDF+0x%X failed",kUiOwned);}
+        if(owned && !edf::PatchCode(image+kUiOwned,ownedJump,kUiOwnedSig,kUiReadSize)){++stuck;Log("WEAPONREC putting back EDF+0x%X failed",kUiOwned);}
         if(stuck) {   // part of the table's code moved and part not: no save is safe; say so where the player sees it
             Log("WEAPONREC REFUSED: writing the code failed at %s and %zu sites could not be put back: the game's weapon records are "
                 "inconsistent this session",constants ? "the weapon select screen" : "a constant",stuck);

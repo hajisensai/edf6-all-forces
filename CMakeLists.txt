@@ -89,6 +89,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/viewdiag.cpp)
 # The DLC's EDF4.1 small dragons: the hit reaction on 4.1's ragdoll bodies (src/edf41smalldragon.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/edf41smalldragon.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41insects.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/edf41mech_boost.cpp)
 # Which machine runs the plugin's work on an object online (src/online_authority.h, docs/online-re.md section 3).
 target_sources(EDF6VehicleCrew PRIVATE src/online_authority.cpp)
 # The EDF4.1 classes online (src/edf41net.h, docs/edf41-classes.md 联机): child identities, the host's decisions as events.
@@ -1090,6 +1091,17 @@ set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
 # EDF4.1's pre-mission scenes (src/edf41before.cpp): the patched call in Before(), _DeleteAllMenuUi, the fade screen name.
 add_test(NAME edf41_before_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41_before_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(edf41_before_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
+# The 406 Begaruta's jet group (src/edf41mech_boost.h): the stubs run on fake slots; the EDF.dll facts behind them.
+add_executable(edf41mech_boost_test tests/edf41mech_boost_test.cpp)
+target_include_directories(edf41mech_boost_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_compile_options(edf41mech_boost_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME edf41mech_boost COMMAND edf41mech_boost_test)
+add_dependencies(offline_checks edf41mech_boost_test)
+add_test(NAME edf41mech_boost_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41mech_boost_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(edf41mech_boost_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
+# V301 on Vehicle601_Tank (pylib/edf41tank.py CLASS_POSED): the class turns the gun bone's local in place each frame.
+add_test(NAME edf41tank_pose_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41tank_pose_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(edf41tank_pose_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 # The stock join mark (hidden while the map recruits) and the free-squad cover a recruited squad keeps (src/npcai.cpp
 # InstallFreeSquadCover): the patched bytes and the original visit run on stand-ins against the real EDF.dll.
 add_test(NAME npc_cover_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_cover_native_audit.py" "${EDF6_NATIVE_DLL}")
@@ -1290,7 +1302,8 @@ add_test(NAME npc_gunners_online COMMAND npc_gunners_online_test)
 # tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
 # cmake --build build --target EDF6Autopilot
 add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp tests/autopilot/airdrop_probe.cpp
-            tests/autopilot/wdenergy_probe.cpp tests/autopilot/hector_probe.cpp tests/autopilot/players_probe.cpp)
+            tests/autopilot/wdenergy_probe.cpp tests/autopilot/hector_probe.cpp tests/autopilot/players_probe.cpp
+            tests/autopilot/umbra_probe.cpp)
 target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
 target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
 target_include_directories(EDF6Autopilot PRIVATE common)
@@ -1429,6 +1442,8 @@ add_test(NAME killcount_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_D
 set_tests_properties(killcount_native PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME allclass_census COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_census_check.py" "${EDF6_GAME_DIR}")
 set_tests_properties(allclass_census PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
+add_test(NAME allclass_bench_lift COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/allclass_bench_lift_audit.py" "${EDF6_GAME_DIR}")
+set_tests_properties(allclass_bench_lift PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT PYTHONIOENCODING=utf-8)
 
 add_test(NAME mission_crew_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/mission_crew_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(mission_crew_native PROPERTIES SKIP_RETURN_CODE 77)
