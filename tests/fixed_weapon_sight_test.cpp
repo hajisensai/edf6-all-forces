@@ -25,6 +25,7 @@ const unsigned char* PlayerTurretGun(const unsigned char*,const unsigned char*) 
 float SightZoomNow(const void*) noexcept{return 1;}
 int SightZoomRange(const void*,float*) noexcept{return 0;}
 int StabState(unsigned char*,unsigned) noexcept{return 0;}
+int DriveGearOf(const void*) noexcept{return kNoDriveGear;}
 bool IsSub(const void*) noexcept{return false;}
 bool IsPlayerJet(const void*) noexcept{return false;}
 namespace jet {int LockersOf(const void*,float (*)[3],int) noexcept{return 0;}}

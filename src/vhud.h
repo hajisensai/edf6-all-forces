@@ -97,6 +97,7 @@ struct StockHudReadout {
     float pos[3],hull[3],aim[3],look[3];   // hull: its nose; aim: its first weapon's muzzle way; look: the camera's
     bool aimOk,lookOk;
     float speed;                 // m/s, level (its own position's change)
+    int gear;                    // the driver's cruise gear (drivegear.h DriveGearOf: -1 R, 0 N, 1..4; kNoDriveGear none)
     float hp,hpMax;
     float zoom;                  // the sight's magnification (sightzoom.cpp SightZoomNow: 1 none)
     int zero;                    // its range setting, m (sightzoom.cpp SightZoomRange: 0 the bore line)
