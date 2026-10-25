@@ -1,4 +1,5 @@
-"""Self-test of the install chain, without the game (CI runs it; python tools/selftest.py, exit 1 on a failure):
+"""Self-test of the install chain, without the game (CI runs it; python tools/selftest.py [-j N], exit 1 on a failure;
+the tests run in up to 8 worker processes, -j 1 in this one in order):
   - tools/calls.py is consistent and src/calls.inc is what tools/gen_calls.py writes from it;
   - the call order rules: every released order is a prefix of CALLS, and installs of every order ever shipped
     (withdrawn ones too), with other mods' rows after ours and with uninstall placeholders, keep every row
@@ -14126,21 +14127,85 @@ def edf41_ui_names() -> None:
     assert {k for k, n in fades.items() if n} == {'M015', 'M016', 'M190', 'M192'}, fades
 
 
-def main() -> int:
+# The last run's seconds a test (build/selftest-cost.json, as ctest's CTestCostData): the longest are started first, so
+# the slowest (spawn_catalog_archives_recorded) does not start last and leave the other workers idle at the end.
+COST_FILE = os.path.join(ROOT, 'build', 'selftest-cost.json')
+_START_GAME: str | None = None
+
+
+def _run_one(index: int) -> tuple[int, bool, float, str]:
+    """TESTS[index], its output caught (a worker's lines would otherwise interleave with the others')."""
+    import time
     import rootcpk
-    game = rootcpk.DEFAULT_GAME
-    failed = 0
-    for fn in TESTS:
+    global _START_GAME
+    if _START_GAME is None:
+        _START_GAME = rootcpk.DEFAULT_GAME
+    fn = TESTS[index]
+    out = io.StringIO()
+    ok = True
+    started = time.perf_counter()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
         try:
             fn()
-            print(f'ok    {fn.__name__}')
         except (Exception, SystemExit):   # the tools report refusals with SystemExit
-            failed += 1
-            print(f'FAIL  {fn.__name__}')
+            ok = False
             traceback.print_exc()
         finally:   # installer.install / uninstall point it at their stand-in game: the real-data tests after need the real one
-            rootcpk.use(game)
-    print(f'{len(TESTS) - failed}/{len(TESTS)} passed')
+            rootcpk.use(_START_GAME)
+    return index, ok, time.perf_counter() - started, out.getvalue()
+
+
+def _costs() -> dict[str, float]:
+    try:
+        with open(COST_FILE, encoding='utf-8') as f:
+            return {str(k): float(v) for k, v in json.load(f).items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def _jobs(argv: list[str]) -> int:
+    """-j N (1: one process, in order, as before 2026-10-25); none: up to 8, one a core."""
+    if '-j' in argv:
+        return max(1, int(argv[argv.index('-j') + 1]))
+    return max(1, min(8, os.cpu_count() or 1))
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Every test, in -j worker processes (each a fresh interpreter: what one test leaves in a module's state stays in
+    its worker, as it stayed in the one process before). The tests share no file outside their own temporary folders.
+    Took ~21 min in one process (2026-10-25)."""
+    import time
+    argv = sys.argv[1:] if argv is None else argv
+    jobs = _jobs(argv)
+    costs = _costs()
+    order = sorted(range(len(TESTS)), key=lambda i: -costs.get(TESTS[i].__name__, 1e9))   # unknown ones first
+    failed = 0
+    took: dict[str, float] = {}
+    started = time.perf_counter()
+
+    def report(index: int, ok: bool, sec: float, text: str) -> None:
+        nonlocal failed
+        name = TESTS[index].__name__
+        took[name] = round(sec, 2)
+        sys.stdout.write(text)
+        print(f'{"ok  " if ok else "FAIL"}  {name}  ({sec:.1f} s)', flush=True)
+        failed += 0 if ok else 1
+    if jobs == 1:
+        for i in range(len(TESTS)):
+            report(*_run_one(i))
+    else:
+        import multiprocessing
+        # One BLAS thread a worker: -j processes each starting one a core oversubscribe the machine.
+        for var in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
+            os.environ.setdefault(var, '1')
+        with multiprocessing.get_context('spawn').Pool(jobs) as pool:
+            for result in pool.imap_unordered(_run_one, order, chunksize=1):
+                report(*result)
+    if os.path.isdir(os.path.dirname(COST_FILE)):
+        with contextlib.suppress(OSError):
+            with open(COST_FILE, 'w', encoding='utf-8') as f:
+                json.dump({**costs, **took}, f, indent=0, sort_keys=True)
+    print(f'{len(TESTS) - failed}/{len(TESTS)} passed in {time.perf_counter() - started:.0f} s ({jobs} workers)')
     return 1 if failed else 0
 
 

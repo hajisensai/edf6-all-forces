@@ -25,6 +25,7 @@
 #include "enemy_control_net.h"
 #include "thermal.h"
 #include "vehicle_look.h"
+#include "drivegear.h"
 #include "aim_line_want.h"
 #include "boarding_entrance.h"
 #include "mission_crew.h"
@@ -873,6 +874,9 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepNpcGunners,&NpcGunnersInput,static_cast<unsigned char*>(vehicle)); // also releases our last inputs when disabled
     // A Dreadnought's local rider's aim stick as the observation reads it, before the stock input (dreadnought_turrets.inc).
     if(Cfg().enabled)Guarded(kStepDreadnought,&DreadnoughtInput,static_cast<unsigned char*>(vehicle));
+    // The player driver's War Thunder gears on the keyboard (drivegear.cpp): the stock input reads the gear's stick, the
+    // seat gets the keys' own back at the end of this traversal.
+    DriveGearInput gears(static_cast<unsigned char*>(vehicle));
     // A fixed emplacement never drives: its drive stick cleared last, over every writer before (emplacement.cpp).
     if(Cfg().enabled)Guarded(kStepEmplacement,&EmplacementInput,static_cast<unsigned char*>(vehicle));
     nextInput[I](vehicle,hasInput,a3,a4);

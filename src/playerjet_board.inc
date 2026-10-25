@@ -341,7 +341,7 @@ void HoverStick(const PJet& j,const jet::Kind& k,const Stick& s,bool down,float*
     const float fwd[3]={std::sin(j.yaw),0.0f,std::cos(j.yaw)};
     float right[3];RightOf(fwd,right);
     const float fore=s.keys ? (s.ly<-0.3f ? 1.0f : s.ly>0.3f ? -1.0f : 0.0f) : -s.ly,side=s.lx;
-    const float top=k.cruise*(s.keys && s.throttle<=0.0f ? kHoverCruise : 1.0f);
+    const float top=k.cruise*(s.keys && s.boost<=0.0f ? kHoverCruise : 1.0f);
     want[0]=(fwd[0]*fore+right[0]*side)*top;want[1]=0.0f;want[2]=(fwd[2]*fore+right[2]*side)*top;
     const float asked=Len(want);
     if(asked>top)for(int i=0;i<3;i+=2)want[i]*=top/asked;
@@ -377,7 +377,7 @@ void HoverStep(PJet& j,unsigned char* v,const Stick& s,const float* pos,float cl
     const jet::Kind& k=jet::KindOf(e->role);
     const float* m=reinterpret_cast<const float*>(v+kMatrix);
     const float nose=std::atan2(m[8],m[10]);
-    const bool down=s.keys ? s.throttle<0.0f : (At<std::uint16_t>(SeatAt(v,0),kSeatButtons)&kButtonL3)!=0;
+    const bool down=s.keys ? s.boost<0.0f : (At<std::uint16_t>(SeatAt(v,0),kSeatButtons)&kButtonL3)!=0;
     float want[3]={0.0f,0.0f,0.0f},vz=0.0f;
     const bool aimFlight=s.keys && Cfg().heliMouseAim;
     if(aimFlight)HoverAim(j,v,s,pos,nose,clear,down,dt,want,&vz);

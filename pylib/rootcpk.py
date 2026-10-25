@@ -23,12 +23,17 @@ class Game:
     def __init__(self, root: str, archive: str = 'Root.cpk') -> None:
         self.root = root
         self.cpk = cpk.Cpk(os.path.join(root, archive))
+        # The index by its upper-cased (folder, name), the first entry of a spelling kept: a read was a scan of the
+        # whole index (tens of thousands of entries) every time.
+        self._keys: dict[tuple[str, str], tuple[str, str]] = {}
+        for k in self.cpk.index:
+            self._keys.setdefault((k[0].upper(), k[1].upper()), k)
 
     def _key(self, folder: str, name: str) -> tuple[str, str]:
-        for k in self.cpk.index:
-            if k[0].upper() == folder.upper() and k[1].upper() == name.upper():
-                return k
-        raise KeyError(f'{folder}/{name}')
+        try:
+            return self._keys[folder.upper(), name.upper()]
+        except KeyError:
+            raise KeyError(f'{folder}/{name}') from None
 
     def names(self, folder: str) -> list[str]:
         """The file names in `folder` (case-insensitive), sorted."""

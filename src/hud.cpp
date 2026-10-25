@@ -44,6 +44,8 @@
 #include "turretaim.h"
 #include "vecmath.h"
 #include "warn.h"
+#include "drivegear.h"
+#include "drive_gear.h"
 #include "support_net.h"
 #include "pvp.h"
 #include "map_pvp_input.h"
@@ -1059,16 +1061,16 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
            stall,cue[0] ? L"    " : L"",cue);
     StoresLine(arms,j);
     if(j.keys) {
-        wchar_t boost[32],brake[32],swap[32];
-        KeyName(Cfg().playerJetBoostKey,boost,32);KeyName(Cfg().playerJetBrakeKey,brake,32);KeyName(Cfg().playerJetSwitchKey,swap,32);
+        // War Thunder's keys (playerjet.cpp ReadStick): W / S the throttle lever, SPACE / the brake key the pitch.
+        wchar_t brake[32],swap[32];
+        KeyName(Cfg().playerJetBrakeKey,brake,32);KeyName(Cfg().playerJetSwitchKey,swap,32);
         if(j.air) {
-            Format(keys,L"%ls",Tr(Cfg().playerJetMouseFlight ? Tx::jetKeysMouse : Tx::jetKeysHand));
-            if(Cfg().playerJetMouseFlight)Format(keys,L"%ls",Tr(Tx::jetKeysMouseHand));
+            Format(keys,Tr(Cfg().playerJetMouseFlight ? Tx::jetKeysMouseHand : Tx::jetKeysHand),brake);
             wchar_t target[32];KeyName(Cfg().playerJetTargetKey,target,32);
             wchar_t flare[32];KeyName(Cfg().playerJetFlareKey,flare,32);
-            Format(keys2,Tr(Tx::jetKeysAir),boost,brake,swap,target,flare);
+            Format(keys2,Tr(Tx::jetKeysAir),swap,target,flare);
         } else {
-            Format(keys,Tr(Tx::jetKeysGround),boost,brake);
+            Format(keys,L"%ls",Tr(Tx::jetKeysGround));
             Format(keys2,Tr(Tx::jetKeysTakeoff),rotateKmh);
         }
     } else if(j.air) {
@@ -3167,6 +3169,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     if(r.seat==0)Format(title,L"%hs",kind);
     else Format(title,Tr(Tx::stockGunner),kind,r.seat);
     Format(info,Tr(Tx::stockInfo),static_cast<int>(std::lround(r.speed*3.6f)),static_cast<int>(std::lround(hp*100.0f)));
+    if(r.gear!=kNoDriveGear){Append(info,L"    ");Append(info,Tr(Tx::driveGear),drivegear::Name(r.gear));}   // drivegear.cpp
     if(nix){Append(info,L"    ");Append(info,Tr(Tx::twist),static_cast<int>(std::lround(-x.nix->twist*57.2957795f)));}   // right positive, as headings
     if(r.stab)Append(info,L"    %ls",Tr(r.stab==2 ? Tx::stabLag : Tx::stab));   // the gun stabilizer holds it (LAG: the hull outruns its drive)
     wchar_t fuel[32];
