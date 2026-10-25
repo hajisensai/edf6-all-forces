@@ -53,7 +53,7 @@ EDF.dll TimeDateStamp 0x678CCB46，RVA。【证实】= 反汇编直接读出；�
 - `src/edf41mother.cpp`（1013、2497、2520、2525）、`src/edf41mother401.cpp`（2087、2108、2113）：`team >= 7` 拒绝。
 - `src/enemy_control.cpp:278`、`src/enemy_control_radar.cpp:52`：只收 0..6。
 - `src/heli.cpp`、`src/carrierlaser.cpp`、`src/damagestats.cpp`、`src/enemy_control_target.cpp`：按行数读，上限 64，无需改。
-- `src/command_identity.cpp`：用 `0x5E0C80` 全队枚举，跟原生一样只到 7 行。
+- `src/command_identity.cpp`、`mission_participants.cpp`、`pvp_native.cpp`、`support_source.cpp`：用 `0x5E0C80` 全队枚举，跟原生一样走到 `0x5E0D28` 的界（原版 7 行，装了扩容 16 行）。调用前由 `src/team_walk.h` 核对：界是整行、等于管理器 `+0x48` 行数、行数组可读那么长，否则不枚举。
 
 ## 6. 待查
 

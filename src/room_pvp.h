@@ -17,6 +17,8 @@ roompvp::View RoomPvpView() noexcept;
 void RoomPvpChange(const roompvp::Action& action) noexcept;
 // The units page's line: this member's faction and role ("" when the room has no PvP: offline).
 void RoomPvpSummary(wchar_t* out,std::size_t n) noexcept;
+// The room's status line while the host holds the start: who has not confirmed the lock yet (false: nothing held).
+bool RoomPvpWaitingLine(wchar_t* out,std::size_t n) noexcept;
 // Any thread: the host's lock this machine started from (the host: the one every member acknowledged when the start was
 // let through; a member: the one it acknowledged), and its serial (false: none, or PvP off). The host's pvp.cpp applies it
 // through the protocol once per mission world (each retry too); every machine preloads its units (debug_spawn.cpp).

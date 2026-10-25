@@ -9,7 +9,7 @@ std::array<std::array<unsigned char,0x500>,3> objects{};
 std::array<std::array<unsigned char,16>,3> controls{};
 std::array<std::array<unsigned char,32>,3> ids{};
 unsigned count=0;bool swapManager=false,changeAfterWalk=false;
-unsigned char manager[0x80]{},replacement[0x80]{};
+unsigned char manager[0x80]{},replacement[0x80]{},rows[7*0x38]{};
 int checks=0;
 void Check(bool value,const char* why){++checks;if(!value){std::fprintf(stderr,"FAIL source: %s\n",why);std::exit(1);}}
 void __fastcall Walk(void*,void* raw) {
@@ -20,6 +20,7 @@ void __fastcall Walk(void*,void* raw) {
 }
 void Reset() {
     count=1;swapManager=changeAfterWalk=false;crew::Put<void*>(crew::image,0x20B2978,manager);
+    crew::Put<void*>(manager,0x38,rows);crew::Put<std::uint64_t>(manager,0x48,7);
     for(unsigned i=0;i<3;++i) {
         objects[i].fill(0);controls[i].fill(0);ids[i].fill(0);
         crew::Put<void*>(objects[i].data(),crew::kSelf,objects[i].data());
@@ -48,6 +49,7 @@ int main() {
     const auto target=reinterpret_cast<std::uintptr_t>(&Walk);std::memcpy(tail+4,&target,8);
     std::memcpy(image+0x5E0C80+sizeof(kEnumSignature),tail,sizeof(tail));
     FlushInstructionCache(GetCurrentProcess(),image+0x5E0C80,sizeof(kEnumSignature)+sizeof(tail));
+    const unsigned char bound[]={0x48,0x81,0xFE,0x88,0x01,0x00,0x00};std::memcpy(image+0x5E0D28,bound,sizeof(bound)); // the walk's 7 rows
     Reset();ObjRef ref{objects[0].data(),controls[0].data()},out{};
     const auto key=SupportSourceKey(ref);Check(key!=0,"live canonical registered source has a stable descriptor");
     Check(ResolveSupportSource(key,&out) && out.obj==ref.obj && out.ctrl==ref.ctrl,"full native registry resolves exact weak identity");
@@ -60,6 +62,7 @@ int main() {
     Reset();objects[0][kDead]=1;Check(!SupportSourceKey(ref),"dead source is refused");
     Reset();objects[0][0x18]=4;Check(!SupportSourceKey(ref),"deleted source is refused");
     Reset();Put<void*>(objects[0].data(),kSelf,nullptr);Check(!SupportSourceKey(ref),"forged alias is not a native self identity");
+    Reset();Put<std::uint64_t>(manager,0x48,16);Check(!ResolveSupportSource(key,&out) && !out,"a walk bound that is not the manager's row count is refused");
     Reset();swapManager=true;Check(!ResolveSupportSource(key,&out) && !out,"registry replacement during native walk invalidates the entire result");
     Reset();changeAfterWalk=true;Check(!ResolveSupportSource(key,&out) && !out,"native identity is rechecked after enumeration");
     Reset();const auto before=controls[0];Check(SupportSourceKey(ref)==key && controls[0]==before,"read-only lookup changes no native reference counts");

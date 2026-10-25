@@ -211,6 +211,7 @@ void RoomPvpSummary(wchar_t* out,std::size_t n) noexcept {
     if(!room.online){out[0]=0;return;}
     rd::detail::Put(out,n,hudtext::Tr(Tx::pvpRoomEntry),hudtext::Tr(FactionText(mine.faction)),hudtext::Tr(RoleText(mine.role)));
 }
+bool RoomPvpWaitingLine(wchar_t* out,std::size_t n) noexcept { return WaitingLine(RoomPvpView(),out,n); }
 
 // For EDF6Coop's room member rows (their faction beside each name): the member's faction as this room reads it, in the
 // HUD's language, and its colour (0xAARRGGBB). 1 written; 0 when the room has no PvP on, the member is unknown or the

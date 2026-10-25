@@ -2,6 +2,8 @@
 // host's settings, the start lock with its acknowledgement, and the protocol state the lock asks for.
 // cmake --build build --target room_pvp_test && build\room_pvp_test.exe
 #include "../src/room_pvp_logic.h"
+#include "../src/room_pvp_dialog.h"
+#include <cwchar>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -325,10 +327,27 @@ void MatchStates() {
            state.entries[1].team==2,"a member without a pick is the default's team");
     Expect(MatchState(MakeLock(8,CustomSettings(true),1,true)).count==8,"eight members");
 }
+// The room's status line while the host holds the start: the members not confirmed yet, as the main page names them.
+void Waiting() {
+    View v;v.host=v.online=true;v.count=3;
+    for(int i=0;i<3;++i){v.lines[i].ordinal=i;v.lines[i].hasPick=true;}
+    v.lines[0].host=v.lines[0].self=v.lines[0].acked=true;v.lines[2].acked=true;
+    wchar_t out[128];
+    Expect(!WaitingLine(v,out,128) && !out[0],"no start held: no line");
+    v.locking=true;
+    Expect(WaitingLine(v,out,128) && std::wcsstr(out,L"Member 2") && !std::wcsstr(out,L"Member 3") && !std::wcsstr(out,L"You"),
+           "the held start names the member not confirmed, only that one");
+    v.lines[2].acked=false;
+    Expect(WaitingLine(v,out,128) && std::wcsstr(out,L"Member 2, Member 3"),"every member not confirmed, in the room's order");
+    v.lines[1].acked=v.lines[2].acked=true;
+    Expect(!WaitingLine(v,out,128) && !out[0],"everyone confirmed: no line");
+    v.lines[1].acked=false;
+    Expect(!WaitingLine(v,nullptr,0) && WaitingLine(v,out,8) && std::wcslen(out)<8,"a short buffer is cut, never overrun");
+}
 }  // namespace
 
 int main() {
-    Picks();SettingsCodec();LockCodec();Building();Acks();MatchStates();
+    Picks();SettingsCodec();LockCodec();Building();Acks();MatchStates();Waiting();
     if(failures){std::printf("room_pvp_test: %d of %d checks FAILED\n",failures,checks);return 1;}
     std::printf("room_pvp_test: %d checks passed\n",checks);return 0;
 }

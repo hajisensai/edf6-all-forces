@@ -5,6 +5,7 @@
 #include "enemy_control_pvp_transport.h"
 #include "enemy_control_pvp_berserker.h"
 #include "enemy_control_walking_parts.h"
+#include "team_native_logic.h"
 #include <cstring>
 #include <limits>
 
@@ -165,7 +166,7 @@ bool Ready() noexcept {
     return true;
 }
 bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
-bool Team(int value) noexcept {return value>=-1 && value<7;}
+bool Team(int value) noexcept {return team_native::TeamOrClosing(value);}
 bool Derived(EmitterKind kind) noexcept {return kind==EmitterKind::liveOwnerTeam || kind==EmitterKind::liveOwnerLastTeam;}
 bool Cache(EmitterKind kind) noexcept {return kind==EmitterKind::ownerTeamCache || kind==EmitterKind::ownerLastTeamCache;}
 bool Supported(const NativeProfile& p) noexcept {
@@ -767,7 +768,7 @@ bool EnemyControlNativePvpWrite(const controlled_pvp::Emitter& emitter,int team)
 }
 
 bool EnemyControlNativePvpBaseline(const ObjRef& root,const ObjRef& member,int rootTeam,int rootLast,int* team,int* last) noexcept {
-    if(!team || !last || !native_pvp_detail::Team(rootTeam) || rootLast<0 || rootLast>=7)return false;
+    if(!team || !last || !native_pvp_detail::Team(rootTeam) || !team_native::TeamRow(rootLast))return false;
     __try {
         if(EnemyControlBossPvpSupports(root) || EnemyControlBossPvpSupports(member))return EnemyControlBossPvpBaseline(root,member,rootTeam,rootLast,team,last);
         if(EnemyControlTransportPvpSupports(root) || EnemyControlTransportPvpSupports(member))return EnemyControlTransportPvpBaseline(root,member,rootTeam,rootLast,team,last);
@@ -778,7 +779,7 @@ bool EnemyControlNativePvpBaseline(const ObjRef& root,const ObjRef& member,int r
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 bool EnemyControlNativePvpBaseline(const controlled_pvp::Emitter& emitter,int ownerTeam,int ownerLast,int* team) noexcept {
-    if(!team || !native_pvp_detail::Team(ownerTeam) || ownerLast<0 || ownerLast>=7)return false;
+    if(!team || !native_pvp_detail::Team(ownerTeam) || !team_native::TeamRow(ownerLast))return false;
     __try {
         if(EnemyControlNativePvpCacheRetained(emitter)) {
             int current=-1;

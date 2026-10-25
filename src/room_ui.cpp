@@ -684,6 +684,11 @@ bool Draw(unsigned char* self,bool shown) noexcept {
     if(!shown)ClearMenu(self);
     return true;
 }
+// The host's held PvP start as a status line (room_pvp.h RoomPvpWaitingLine): 1 written, 0 none.
+int PvpWaiting(roomsync::SyncLine* out) noexcept {
+    if(!RoomPvpWaitingLine(out->text,sizeof(out->text)/sizeof(out->text[0])))return 0;
+    out->warn=true;return 1;
+}
 void DrawMenu(unsigned char* self) noexcept {
     rm::View v=rm::Snapshot(st.menu);
     DressCrewRows(v,st.menu,Kinds());
@@ -700,7 +705,8 @@ void DrawMenu(unsigned char* self) noexcept {
     const ULONGLONG now=GetTickCount64();
     if(!st.genAt || now-st.genAt>500){st.gen=VariantGenerationStatus();st.genAt=now;}
     roomsync::SyncLine sync[kStatusLines]{};
-    const int syncCount=st.room ? roomsync::RoomSyncLines(sync,kStatusLines) : 0;
+    int syncCount=st.room ? PvpWaiting(sync) : 0;   // the host's held start first: who it waits for
+    if(st.room)syncCount+=roomsync::RoomSyncLines(sync+syncCount,kStatusLines-syncCount);
     const Status s=ComposeStatus(st.room && !OnlineHostOnly(),st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
     for(int i=0;i<kStatusLines;++i) {
         StatusName(i,name);
@@ -741,7 +747,8 @@ Status MenuStatus() noexcept {
     const ULONGLONG now=GetTickCount64();
     if(!st.genAt || now-st.genAt>500){st.gen=VariantGenerationStatus();st.genAt=now;}
     roomsync::SyncLine sync[kStatusLines]{};
-    int syncCount=st.room ? HostSettingsLines(sync,kStatusLines) : 0;   // the host's settings, the builds that differ
+    int syncCount=st.room ? PvpWaiting(sync) : 0;   // the host's held start first: who it waits for
+    if(st.room)syncCount+=HostSettingsLines(sync+syncCount,kStatusLines-syncCount);   // the host's settings, the builds that differ
     if(st.room)syncCount+=roomsync::RoomSyncLines(sync+syncCount,kStatusLines-syncCount);
     return ComposeStatus(st.room && !OnlineHostOnly(),st.saveNote,st.saveWarn,&st.gen,sync,syncCount);
 }

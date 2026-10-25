@@ -9,6 +9,10 @@ namespace crew::team_native {
 // mission's environment). The PvP factions take 7..kTeamCapacity-1.
 constexpr int kNativeTeams=7,kTeamCapacity=16,kFirstFactionTeam=kNativeTeams;
 constexpr std::size_t kRowStride=0x38;
+// A team row once the capacity is installed (the native team field +0x314 and its kept last team +0x318), and the same
+// or -1: a closing object's team (SetTeam -1 keeps +0x318, docs/enemy-control-target-re.md).
+constexpr bool TeamRow(int t) noexcept { return t>=0 && t<kTeamCapacity; }
+constexpr bool TeamOrClosing(int t) noexcept { return t==-1 || TeamRow(t); }
 // Relation values as TeamManager stores them (row a, column b: how a sees b).
 constexpr std::uint8_t kNeutral=0,kFriend=1,kEnemy=2;
 

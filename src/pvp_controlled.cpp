@@ -433,7 +433,7 @@ bool ReadBaseline(const ObjRef& root,const ObjRef& member,int* team,int* lastTea
 bool ReadAppliedTeam(const ObjRef& member,int* team) noexcept {
     if(!team || !Live(member))return false;
     for(auto& s:leases)if(s.id && Member(s,member) && !s.restoring && s.tagged && s.status.result==Result::ready &&
-        s.status.followsOwnerTeam && (s.assigned==1 || s.assigned==2) && PvpSupportTeam(s.puid)==s.assigned) {
+        s.status.followsOwnerTeam && pvp_match::PvpTeam(s.assigned) && PvpSupportTeam(s.puid)==s.assigned) {
         *team=s.assigned;return true;
     }
     return false;

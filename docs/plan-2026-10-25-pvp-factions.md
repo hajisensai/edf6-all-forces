@@ -23,7 +23,8 @@
 
 - 启动时（TeamManager 建好之前）把构造函数里 13 处 `7` 和全队枚举 `0x5E0C80` 的 `0x188` 改成 16 行：行和关系向量都由游戏自己的容器建、自己的析构释放。管理器已存在则整体拒绝（日志 `TEAMS refused`）。
 - 5 个原版重置调用点（`0x5E1E90` 默认值、`0x5E1F90` 单位阵）改走包装：原版重置后，对局开着就在管理器锁内重写关系。
-- 插件里写死 `<7` / `<=2` 的地方（4.1 母舰、敌体操控雷达、受控体、支援归属、支援协议）改成按 `kTeamCapacity` / `PvpTeam` 判断。
+- 插件里写死 `<7` / `<=2` 的地方（4.1 母舰、敌体操控雷达、受控体、支援归属、支援协议）改成按 `kTeamCapacity` / `PvpTeam` 判断。审查补漏（2026-10-26）：受控体的 `ReadAppliedTeam`（`src/pvp_controlled.cpp`，运输舰子单位、4.1 母舰部件读它）原来仍只认队 1 / 2，敌体操控的 PvP 提供者（`enemy_control_pvp_boss` / `_native` / `_berserker` / `_transport`）的队伍校验仍是 `<7`：EDF 2..4、星导者、外来者的成员一接管就 Fault，子单位落回原版队。现在前者按 `PvpTeam`，后者按 `team_native::TeamRow` / `TeamOrClosing`（`src/team_native_logic.h`），`pvp_controlled_fixture`、`enemy_control_pvp_boss_core`、`enemy_control_pvp_transport` 有队 ≥7 的用例。
+- 全队枚举 `0x5E0C80` 的调用方（`command_identity` / `mission_participants` / `pvp_native` / `support_source`）原来只检查 7 行可读；扩容后它走 16 行。现在由 `src/team_walk.h` 在调用前核对：`0x5E0D28` 的界是整行、等于管理器 `+0x48` 的行数、行数组可读那么长。
 - 原生按队伍号索引的其他数组：任务对象 `+0x280` 的每队倍率表只在生成时读描述符或 `+0x318` 的原版队伍号，插件的单位一律先按原版敌队生成、再改队，不越界。
 - 离线：`team_native_test`（补丁位、默认关系、合法性），`team_native_sigs`（逐字节对真实 EDF.dll，含构造函数里没有遗漏的 7）。
 
@@ -39,6 +40,7 @@
 - **加锁**（逆向见 [room-start-gate-re.md](room-start-gate-re.md)）：原版开打是全员就绪握手，房主统计到全员就绪后才写开始名单 `l1 / l2`，客人只认这份名单。插件把这一步唯一的「我是不是房主」调用 `0x73E3E9` 换成「是房主且全员确认了锁定表」：对战开着时，房主先发布锁定表、等全员回执；有人改选择或进出就换下一个序号重来。等待期间握手原样停着，房主再按就绪就是原版取消，客人什么都收不到。放行那一帧冻结锁定表。
 - **进任务**：房主的协议就绪后用锁定表发一次 `RequestMatch`（每个任务世界一次，重试也会重发）；各端拿到的是房主的表，不是各自读到的属性。
 - **版本门禁**（`src/mod_room.h`）：房间协议号 2，`SEARCH_TYPE` 前缀 `0x41460200`、`AF_PROFILE=2`。旧版本找不到也进不了新房间，新版本拒绝旧房间。EDF6Coop 改为从 `EDF6AF_RoomPrefix` / `EDF6AF_RoomProfile` 读取（Coop 仓库同步改动）。
+- **EDF6Coop 2.7.0**（Coop#42）：房间协议 2 要 EDF6Coop 2.7.0 及以上。2.6.x 要求 `AF_PROFILE==1`，REJOIN 与虚拟房间会被拒，`lobbystate.cpp` 也解不开 `0x412602xx`。`mod_room.cpp` `CoopVersionProblem` 读 `EDF6CoopVersion`：不够就拒绝建房 / 进房并弹窗写明当前版本与要升级到的版本；EDF6Coop 自己的路线问 `EDF6AF_RoomIsolationReady` 时答「不可以」并每分钟最多弹一次同样的提示。
 
 ## 5. 角色
 
@@ -57,7 +59,12 @@
 
 - 原版只有 4 块成员面板的根源是 `0x8F8020` 栈上一张 4 项的模板表；Coop 改两条指令让游戏自己建出 N 块面板，再按人数重新排版（行高缩小、再多分列），删掉翻页；每行用 `EDF6AF_PvpMemberLabel` 显示阵营名与颜色。见 Coop 仓库对应提交。
 
-## 7. 还没验证的
+## 7. 设计缺口（本次不改）
+
+- **NPC 友方判定仍按原版 0 / 2 / 5**：`src/npcai.cpp` 的 `Think`（`team!=0 && team!=kTeamFriend` 就不接管 AI）、`PreThink`（班长继承）、`FriendlyVehicle`（上车）、班组 / 载具命令的 `notFriendly` 判定（`NpcSquadCommandForRequester` 一带），以及 `src/npcpost.cpp:147` `Available`（只收 0 / 2 / 5 的车）。EDF 1 的 NPC 本来就在队 2，所以只有 EDF 1 的玩家能招募、指挥 NPC 和给 NPC 派车；EDF 2 / 3 / 4（队 7 / 8 / 9）的玩家（包括选了指挥官的）在 M 地图下命令会得到「不是友军」，也没有自己阵营的 NPC。要补得先定「阵营的 NPC 从哪来」（生成时改队？锁定表里给每个 EDF 阵营分配 NPC？），再把这些判定改成按关系表的友方（`NativeTeamRelation`），不是简单把 7..9 加进白名单。
+- **EDF6Coop 的 worldrng 只同步队 1**（推测，未在本仓库核实，Coop 侧代码也没对照）：若属实，队 7..11 的单位在客机上的随机数驱动行为（生成、AI 抽签）可能与房主不同步。需在 Coop 仓库确认后再定是否扩到全部阵营队。
+
+## 8. 还没验证的
 
 - 全部未实机：16 行管理器在真实游戏里的表现、重置后重写、敌对锁定 / 伤害 / 雷达颜色、指挥官 NoTarget 对 AI 的实际效果、单位生成与接管、开打拦截的手感、Coop 面板排版。
 - 联机：客机关系表是否各自由 `0x5E1E90` 生成（推断是，各端都写同一张表）；单位死亡后尸体的清理与回合结束的删除同步（原生大概没有删除复制）。

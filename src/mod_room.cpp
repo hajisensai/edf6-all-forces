@@ -56,6 +56,25 @@ FARPROC CoopExport(const char* name) noexcept {
     return module ? GetProcAddress(module,name) : nullptr;
 }
 ResolveCoop resolveCoop=&CoopExport;
+// The room protocol's EDF6Coop (coop_attr.h kRoomCoop*): an older one would refuse its own REJOIN / virtual rooms of
+// this protocol. The player's words for it, nullptr when EDF6Coop is new enough.
+const wchar_t* CoopVersionProblem() noexcept {
+    thread_local wchar_t old[256];
+    int a=0,b=0,c=0;
+    const auto marker=reinterpret_cast<const char*>(resolveCoop("EDF6CoopVersion"));
+    coopattr::CoopVersion v=coopattr::CoopVersion::unreadable;
+    __try { v=coopattr::RoomCoopVersion(marker,&a,&b,&c); } __except(EXCEPTION_EXECUTE_HANDLER){v=coopattr::CoopVersion::unreadable;}
+    if(v!=coopattr::CoopVersion::ok) {
+        wchar_t found[32];
+        if(v==coopattr::CoopVersion::old)swprintf_s(found,L"EDF6Coop %d.%d.%d",a,b,c);
+        else swprintf_s(found,L"这个 EDF6Coop（读不出版本）");
+        swprintf_s(old,L"%ls 版本过旧：本版全军出击的联机房间需要 EDF6Coop %d.%d.%d 及以上（旧版不认新的房间协议，"
+                   L"重新加入、虚拟房间会被拒绝）。请把 EDF6Coop 升级到 %d.%d.%d。",found,coopattr::kRoomCoopMajor,coopattr::kRoomCoopMinor,
+                   coopattr::kRoomCoopPatch,coopattr::kRoomCoopMajor,coopattr::kRoomCoopMinor,coopattr::kRoomCoopPatch);
+        return old;
+    }
+    return nullptr;
+}
 const wchar_t* CoopDependencyProblem() noexcept {
     const auto get=reinterpret_cast<EDF6CoopGetExtensionApiFn>(resolveCoop("EDF6CoopGetExtensionApi"));
     if(!get)return L"未安装匹配版本的 EDF6Coop，或当前版本过旧。";
@@ -63,6 +82,7 @@ const wchar_t* CoopDependencyProblem() noexcept {
     if(get(EDF6COOP_EXTENSION_VERSION,sizeof(api),&api)!=1 || api.size!=sizeof(api) ||
        api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll)
         return L"EDF6Coop 联机扩展接口不兼容或不完整。";
+    if(const wchar_t* old=CoopVersionProblem())return old;
     using AdmissionReady=std::uint32_t(*)();
     const auto admission=reinterpret_cast<AdmissionReady>(resolveCoop("EDF6Coop_MissionAdmissionReady"));
     if(!admission || !resolveCoop("EDF6Coop_ResolveMissionPlayerPuid"))
@@ -330,5 +350,8 @@ extern "C" __declspec(dllexport) int EDF6AF_RoomPackCompatible(std::int64_t dlc,
 extern "C" __declspec(dllexport) bool EDF6AF_RoomIsolationReady() noexcept {
     // Coop also asks this before its synthetic/full-lobby DirectNet joins,
     // which may sit outside our native EOS import hook in the chain.
+    // EDF6Coop's own routes (REJOIN, its virtual rooms) show no dialog of ours otherwise: an EDF6Coop too old for the
+    // room protocol is told once a minute here, on a thread of its own (pack_notice.h).
+    if(crew::resolveCoop("EDF6CoopGetExtensionApi"))if(const wchar_t* old=crew::CoopVersionProblem())crew::notice::Post("coop-room-version",L"全军出击：请升级 EDF6Coop",old,60000);
     return crew::ready.load(std::memory_order_acquire) && crew::CoopDependencyProblem()==nullptr;
 }

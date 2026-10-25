@@ -232,6 +232,13 @@ void TestProbeAndTypedApply() {
     ownerTeam=2;CHECK(!ReadAppliedTeam(root,&applied));CHECK(Frame(lease));CHECK(Team(world.root)==2 && Team(world.part)==2);
     CHECK(ReadAppliedTeam(root,&applied) && applied==2);
     for(const auto& emitter:world.emitters)CHECK(emitter.Team()==2);
+    // Every faction's own team (EDF 2-4, the Primers, the Foreigners: pvp_match.h), not only the stock pair.
+    for(const int faction:{7,8,9,10,11}) {
+        ownerTeam=faction;CHECK(!ReadAppliedTeam(root,&applied));CHECK(Frame(lease));
+        CHECK(Team(world.root)==faction && Team(world.part)==faction);
+        CHECK(ReadAppliedTeam(root,&applied) && applied==faction);
+        for(const auto& emitter:world.emitters)CHECK(emitter.Team()==faction);
+    }
     ownerTeam=0;CHECK(Frame(lease));CHECK(Team(world.root)==5 && Team(world.part)==5);CHECK(!ReadAppliedTeam(root,&applied));
     for(const auto& emitter:world.emitters)CHECK(emitter.Team()==5);
     CHECK(ReadStatus(lease,&status));CHECK(status.controlledTeam==5 && !status.followsOwnerTeam);CheckUntouchedIdentity(world);

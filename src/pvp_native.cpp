@@ -7,6 +7,7 @@
 #include "crew.h"
 #include "edf41classes.h"
 #include "memory.h"
+#include "team_walk.h"
 #include "mission_participants.h"
 #include "pvp_match.h"
 #include "team_native.h"
@@ -200,7 +201,7 @@ bool Collect(const pvp_protocol::State& state,Collection& c) noexcept {
     const auto* status=At<const unsigned char*>(image,kGameStatus);
     if(!Readable(manager,0x50) || !Readable(status,0x14FFC))return false;
     c.expected=At<unsigned>(status,0x14FF8);
-    if(!c.expected || c.expected>kMaxActors || !Readable(At<void*>(manager,0x38),7*0x38))return false;
+    if(!c.expected || c.expected>kMaxActors || !team_walk::WalkRows(manager))return false;
     Visitor visitor{kVisitorVtable,&c};
     reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kEnumAllTeams)(manager,&visitor);
     if(c.failed || c.count!=c.expected || At<void*>(image,kTeamManager)!=manager ||

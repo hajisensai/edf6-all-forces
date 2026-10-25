@@ -86,6 +86,28 @@ inline void MemberLine(const Line& l,wchar_t* out,std::size_t n) noexcept {
                     l.acked ? hudtext::Tr(Tx::pvpRoomAcked) : l.hasPick ? L"" : hudtext::Tr(Tx::pvpRoomDefault));
 }
 
+// The room's status line while the host holds the start (View::locking): who has not confirmed the lock yet, named as
+// the main page names them. False (out "") when nothing is held or everyone has confirmed.
+inline bool WaitingLine(const View& v,wchar_t* out,std::size_t n) noexcept {
+    if(!out || !n)return false;
+    out[0]=0;
+    if(!v.locking)return false;
+    wchar_t names[rd::kTextMost]{};
+    std::size_t used=0;bool any=false;
+    for(int i=0;i<v.count;++i) {
+        const Line& l=v.lines[i];
+        if(l.acked)continue;
+        wchar_t who[32];
+        rd::detail::Put(who,32,hudtext::Tr(l.self ? Tx::pvpRoomYou : l.host ? Tx::pvpRoomHostN : Tx::pvpRoomMemberN),l.ordinal+1);
+        rd::detail::Put(names+used,rd::kTextMost-used,L"%ls%ls",any ? hudtext::Tr(Tx::pvpRoomListSep) : L"",who);
+        used+=wcslen(names+used);any=true;
+        if(used+1>=rd::kTextMost)break;
+    }
+    if(!any)return false;
+    rd::detail::Put(out,n,hudtext::Tr(Tx::pvpRoomWaiting),names);
+    return true;
+}
+
 inline rd::Dialog Build(const View& v,const Nav& nav) noexcept {
     rd::Dialog d;
     const pm::Pick mine=v.mine;

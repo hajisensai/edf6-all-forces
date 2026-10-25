@@ -3,6 +3,7 @@
 #include "enemy_control_pvp_native.h"
 #include "enemy_control_pvp_tree.h"
 #include "memory.h"
+#include "team_native_logic.h"
 #include <cstring>
 #include <cwchar>
 #include <limits>
@@ -71,7 +72,7 @@ using SpawnerFn=ObjRef*(__fastcall*)(void*,ObjRef*,const float*,void*);
 using TeamFn=void(__fastcall*)(void*,int,bool);
 using DeleteFn=void(__fastcall*)(void*);
 bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
-bool Team(int value) noexcept {return value>=-1 && value<7;}
+bool Team(int value) noexcept {return team_native::TeamOrClosing(value);}
 bool Scalar(EmitterKind kind) noexcept {return kind==EmitterKind::ownerTeamMirror || kind==EmitterKind::ownerTeamCache || kind==EmitterKind::ownerLastTeamCache;}
 Life Identity(const ObjRef& ref) noexcept {
     if(!ref.obj || !ref.ctrl || !Readable(ref.ctrl,16))return Life::invalid;
@@ -155,7 +156,7 @@ void Sweep() noexcept {
 }
 bool Room() noexcept {Sweep();for(const auto& row:born)if(!row.child)return true;return false;}
 bool Record(const ObjRef& parent,const ObjRef& child,int team,int last,bool spawner=false,int cache=-1,bool acceptedDeletedParent=false) noexcept {
-    if(!Team(team) || last<0 || last>=7 || (acceptedDeletedParent ? !KnownCurrent(parent) : Identity(parent)!=Life::live) ||
+    if(!Team(team) || !team_native::TeamRow(last) || (acceptedDeletedParent ? !KnownCurrent(parent) : Identity(parent)!=Life::live) ||
        Identity(child)!=Life::live || Same(parent,child))return false;
     if(auto* old=Recorded(child))return Same(old->parent,parent) && old->team==team && old->last==last && old->spawner==spawner;
     Sweep();Born* slot=nullptr;
@@ -204,9 +205,9 @@ const void* GeneratorControl(const ObjRef& owner,const unsigned char* generator)
 bool Original(const ObjRef& member,int* team,int* last) noexcept {
     if(!team || !last)return false;
     if(controlled_pvp::HasTemporaryTeam(member))
-        return controlled_pvp::ReadBaselineForMember(member,team,last) && Team(*team) && *last>=0 && *last<7;
+        return controlled_pvp::ReadBaselineForMember(member,team,last) && Team(*team) && team_native::TeamRow(*last);
     if(Identity(member)!=Life::live)return false;
-    *team=At<int>(member.obj,kTeam);*last=At<int>(member.obj,0x318);return Team(*team) && *last>=0 && *last<7;
+    *team=At<int>(member.obj,kTeam);*last=At<int>(member.obj,0x318);return Team(*team) && team_native::TeamRow(*last);
 }
 Mirror* Cache(const ObjRef& owner,const unsigned char* field,const void* control,int baseline,bool remember) noexcept {
     for(auto& row:mirrors)if(Same(row.owner,owner) && row.field==field && row.control==control){if(remember && Team(baseline))row.baseline=baseline;return &row;}
@@ -489,13 +490,13 @@ ObjRef* __fastcall CreatePending(void* manager,ObjRef* out,const float* matrix,v
     return result;
 }
 bool CapsuleBaseline(const ObjRef& parent,int constructorLast,int* team,int* last) noexcept {
-    if(!team || !last || Kind(parent)!=kTime || !KnownCurrent(parent) || constructorLast<0 || constructorLast>=7)return false;
+    if(!team || !last || Kind(parent)!=kTime || !KnownCurrent(parent) || !team_native::TeamRow(constructorLast))return false;
     const int current=At<int>(parent.obj,kTeam);if(!Team(current))return false;
     *team=current;*last=constructorLast;
     if(current<0)return true; // A physically closed parent creates a closed pod, preserving its constructor last-team.
     if(controlled_pvp::HasTemporaryTeam(parent)) {
         int original=0,originalLast=0;
-        if(!controlled_pvp::ReadBaselineForMember(parent,&original,&originalLast) || !Team(original) || originalLast<0 || originalLast>=7)return false;
+        if(!controlled_pvp::ReadBaselineForMember(parent,&original,&originalLast) || !Team(original) || !team_native::TeamRow(originalLast))return false;
         *team=original<0 ? originalLast : original;
     }
     *last=*team;return true;
@@ -691,7 +692,7 @@ bool EnemyControlTransportPvpAdoptCapsule(std::uint64_t token,const ObjRef& pare
             return false;
         }
         if(!controlled_pvp::OwnsMember(parent))return false;
-        auto* row=Recorded(child);if(!row || !Same(row->parent,parent) || !Team(row->team) || row->last<0 || row->last>=7)return false;
+        auto* row=Recorded(child);if(!row || !Same(row->parent,parent) || !Team(row->team) || !team_native::TeamRow(row->last))return false;
         ObjRef members[1]{};Emitter emitters[1]{};unsigned used=0,emitted=0;
         if(!CapsuleProofCollect(nullptr,child,members,1,&used,emitters,0,&emitted))return false;
         // 3EC8D6 has now copied the parent's temporary current team. Restore both
@@ -768,7 +769,7 @@ bool EnemyControlTransportPvpBaseline(const ObjRef& root,const ObjRef& member,in
     using namespace transport_pvp_detail;
     if(!team || !last)return false;
     __try {
-        if(Same(root,member)){*team=rootTeam;*last=rootLast;return Team(*team) && *last>=0 && *last<7;}
+        if(Same(root,member)){*team=rootTeam;*last=rootLast;return Team(*team) && team_native::TeamRow(*last);}
         if(const auto* row=Recorded(member))if(Ancestor(root,member)){*team=row->team;*last=row->last;return true;}
         if(controlled_pvp::ReadBaseline(root,member,team,last))return true;
         const unsigned kind=Kind(member);
@@ -777,7 +778,7 @@ bool EnemyControlTransportPvpBaseline(const ObjRef& root,const ObjRef& member,in
             ObjRef parts[controlled_pvp::kMaxMembers]{};unsigned count=0;
             if(!TimeChildren(root,parts,controlled_pvp::kMaxMembers,&count))return false;
             for(unsigned i=0;i<count;++i)if(Same(parts[i],member)) {
-                *team=rootTeam;*last=rootTeam>=0 ? rootTeam : rootLast;return Team(*team) && *last>=0 && *last<7;
+                *team=rootTeam;*last=rootTeam>=0 ? rootTeam : rootLast;return Team(*team) && team_native::TeamRow(*last);
             }
             return false;
         }
@@ -794,7 +795,7 @@ bool EnemyControlTransportPvpBaseline(const ObjRef& root,const ObjRef& member,in
                 if(Same(barrier,member)) {int parentTeam=0;if(!Original(row.child,&parentTeam,last))return false;*team=*last;return true;}
             }
             if(Kind(root)==kAnchor) {ObjRef barrier{};if(!Weak(static_cast<const unsigned char*>(root.obj)+0x1088,&barrier))return false;
-                if(Same(barrier,member)){*team=rootLast;*last=rootLast;return rootLast>=0 && rootLast<7;}}
+                if(Same(barrier,member)){*team=rootLast;*last=rootLast;return team_native::TeamRow(rootLast);}}
         }
         return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -808,7 +809,7 @@ bool EnemyControlTransportPvpBaseline(const controlled_pvp::Emitter& emitter,int
         if(emitter.kind==EmitterKind::ownerLastTeamCache){*team=ownerLast;return Team(*team);}
         if(emitter.kind==EmitterKind::ownerTeamCache){*team=ownerTeam;return Team(*team);}
         if(emitter.kind==EmitterKind::ownerTeamMirror) {
-            if(Kind(emitter.member)==kBarrier){*team=ownerLast;return ownerLast>=0 && ownerLast<7;}
+            if(Kind(emitter.member)==kBarrier){*team=ownerLast;return team_native::TeamRow(ownerLast);}
             for(const auto& row:born)if(row.child && row.spawner && Same(row.child,emitter.member) &&
                 emitter.object==static_cast<const unsigned char*>(row.child.obj)+0x620 &&
                 emitter.incarnation==reinterpret_cast<std::uintptr_t>(row.child.ctrl)){*team=row.cache;return Team(*team);}
