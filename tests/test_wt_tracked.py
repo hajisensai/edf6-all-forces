@@ -39,6 +39,13 @@ class PrepRuleTests(unittest.TestCase):
         self.assertEqual(prep.bone_of(b, 'gun_barrel_02'), 'cannon_slide_l')  # +x is the vehicle's left
         self.assertEqual(prep.bone_of(b, 'bone_turret_03'), 'body')           # the hull's grenade launchers
         self.assertEqual(prep.bone_of(b, '9m120_rocket'), 'cannon_main')
+        # docs/feedback-2026-10-25-model-rigs.md: the PzH 2000's dust cover elevates with the gun, the Sturmtiger's
+        # roof hatches stay on the hull (its radar bones ride the mortar's traverse)
+        z, s = prep.PZH2000, prep.STURMTIGER
+        for name in ('bone_gun', 'ex_decor_04', 'ex_decor_05', 'ex_armor_05'):
+            self.assertEqual(prep.bone_of(z, name), 'cannon_l', name)
+        for name in ('hatch_01', 'hatch_02'):
+            self.assertEqual(prep.bone_of(s, name), 'body', name)
 
     def test_collision_hulls_are_outward_convex_pieces(self) -> None:
         cube = np.asarray([(x, y, z) for x in (0, 1) for y in (0, 1) for z in (0, 1)], dtype=float)
