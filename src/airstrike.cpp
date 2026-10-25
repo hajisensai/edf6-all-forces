@@ -52,6 +52,7 @@
 #include <cstdarg>
 #include <cwchar>
 #include <optional>
+#include <vector>
 
 namespace crew {
 namespace {
@@ -62,6 +63,7 @@ constexpr float kAboveTarget=150.0f;
 // Ownership (docs/loadout-re.md 8): the game status, its weapon table (cfg = GS+0x130, the table loaded
 // once cfg+0x188 is set) and per row a record of 12 bytes, u32 flags (bit0 owned, bit2 NEW) and 8 star
 // bytes: 0x800 of them at GS+0xEB50 natively, wrec::kSlots relocated (weapon_records.h WeaponRecord).
+constexpr unsigned kClampStars=0xD7930;   // (GS*): every star byte clamped to its weapon's cap (RowCount loop)
 constexpr unsigned kUnlockDlc=0xDC550,kUnlockDlcCall=0xDC348,kUnlockDlcJump=0x70FF87;
 constexpr unsigned kRowCount=0xE23F0,kGetRow=0xE1CF0;
 constexpr std::size_t kCfg=0x130,kTableRef=0x188,kRecord=12;
@@ -636,11 +638,45 @@ Granted GrantCalls(unsigned char* gs,bool ported) noexcept {
     return out;
 }
 
+// AllWeaponsUnlocked: every row of the table (the relocated records past 0x800 too) owned at max stars, then the game's
+// own clamp to each weapon's cap (0xD7930, its loop runs to RowCount). A row whose cap is under 10 ends at its cap; a
+// star byte of a weapon that has fewer parameters than the record's 8 stays 10 (as the stock unlock_weapon command
+// leaves it). Returns the number of records that differ from before (-1: no table; -2: more rows than records, the
+// native clamp would run past them: nothing written).
+int GrantAll(unsigned char* gs) noexcept {
+    const std::uint32_t most=WeaponRecordCapacity();
+    unsigned char* const first=WeaponRecord(gs,0);
+    if(!first || !Readable(first,std::size_t{most}*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return -1;
+    void* const table=gs+kCfg;
+    if(!At<void*>(table,kTableRef))return -1;
+    const std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
+    WeaponRecordsCheckRows(n);
+    if(n>most)return -2;
+    std::vector<unsigned char> before(std::size_t{n}*kRecord);
+    for(std::uint32_t id=0;id<n;++id)std::memcpy(&before[std::size_t{id}*kRecord],WeaponRecord(gs,id),kRecord);
+    alignas(8) unsigned char row[0x100];
+    for(std::uint32_t id=0;id<n;++id) {
+        reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,id);
+        const auto name=At<const wchar_t*>(row,0);
+        if(!name || !Readable(name,sizeof(wchar_t)*16) || ported::Placeholder(name))continue;
+        ported::OwnMax(WeaponRecord(gs,id));
+    }
+    reinterpret_cast<UnlockFn>(image+kClampStars)(gs);
+    int changed=0;
+    for(std::uint32_t id=0;id<n;++id)
+        if(std::memcmp(&before[std::size_t{id}*kRecord],WeaponRecord(gs,id),kRecord)!=0)++changed;
+    return changed;
+}
+
 void Grant(unsigned char* gs) noexcept {
     __try {
         const bool ported=Cfg().portedWeaponsUnlocked;
         const Granted granted=GrantCalls(gs,ported);
         if(granted.calls>0)Log("CALLS %d call weapons owned now",granted.calls);
+        if(Cfg().allWeaponsUnlocked) {
+            const int all=GrantAll(gs);
+            Log("ALL weapons unlocked: %d records changed%s",all,all==-1 ? " (no weapon table yet)" : all==-2 ? " (more weapon rows than records: nothing written)" : "");
+        }
         if(ported)Log("PORTED weapons unlocked: %d owned now%s",granted.ported,granted.calls<0 ? " (no weapon table yet)" : "");
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("CALLS granting failed");}
 }

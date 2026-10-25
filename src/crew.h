@@ -413,6 +413,7 @@ struct Config {
     // The ported content unlocked (unlock_ported.h; both off by default: a shared package keeps everyone's progress):
     bool portedMissionsUnlocked=false;  // every mission of the EDF5 / EDF4.1 packs selectable (edf5campaign.cpp InstallPortedMissions), live
     bool portedWeaponsUnlocked=false;   // every ported weapon owned at the next save load (airstrike.cpp UnlockDlcHook); never taken back
+    bool allWeaponsUnlocked=false;      // every weapon row of the table owned at max stars at the next save load (airstrike.cpp GrantAll); never taken back
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
     // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.

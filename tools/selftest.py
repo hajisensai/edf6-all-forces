@@ -7523,7 +7523,7 @@ def ported_content_unlock_keys() -> None:
     mission select's one clear-check call, still a stock call to 0x8A4C00 in the supported EDF.dll."""
     import ported_weapons as pw
     shipped = src('EDF6VehicleCrew.ini')
-    for key in ('PortedMissionsUnlocked', 'PortedWeaponsUnlocked'):
+    for key in ('PortedMissionsUnlocked', 'PortedWeaponsUnlocked', 'AllWeaponsUnlocked'):
         assert re.search(rf'^{key}=0$', shipped, re.M), f'{key} must ship as 0'
         assert key not in installer.NEW_DEFAULTS[installer.SECTION] and key not in installer.NEW_DEFAULTS_1017[installer.SECTION]
         assert key not in installer.NEW_DEFAULTS_1024[installer.SECTION]
@@ -7538,6 +7538,7 @@ def ported_content_unlock_keys() -> None:
     assert 'bool portedMissionsUnlocked=false;' in crew and 'bool portedWeaponsUnlocked=false;' in crew
     assert 'n.portedMissionsUnlocked=ReadBool(L"PortedMissionsUnlocked",n.portedMissionsUnlocked);' in plugin
     assert 'n.portedWeaponsUnlocked=ReadBool(L"PortedWeaponsUnlocked",n.portedWeaponsUnlocked);' in plugin
+    assert 'bool allWeaponsUnlocked=false;' in crew and 'n.allWeaponsUnlocked=ReadBool(L"AllWeaponsUnlocked",n.allWeaponsUnlocked);' in plugin
     assert 'InstallPortedMissions();' in plugin
     header = src('src/unlock_ported.h')
     prefixes = set(re.findall(r'L"(EDF6VC_E[0-9]+_)"', header))
@@ -7555,6 +7556,9 @@ def ported_content_unlock_keys() -> None:
         assert ('MigrateMissionPackSave(gs)' in hook) == (name == 'ScriptUnlockDlcHook'), name
     grant = air.split('Granted GrantCalls(unsigned char* gs,bool ported) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert '&=' not in grant and '~' not in grant, 'the grant never clears a bit'
+    every = air.split('int GrantAll(unsigned char* gs) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'ported::OwnMax(WeaponRecord(gs,id))' in every and 'kClampStars' in every and 'if(n>most)return -2;' in every and '&=' not in every, 'owns every row, then the cap clamp'
+    assert 'Cfg().allWeaponsUnlocked' in give and 'constexpr unsigned kClampStars=0xD7930;' in air
     camp = src('src/edf5campaign.cpp')
     assert 'constexpr unsigned kListScan=0x8A21C3;' in camp and 'constexpr unsigned kCleared=0x8A4C00;' in camp
     assert 'ported::StoryPack(content,cfg.edf5CampaignContent,cfg.edf41Content)' in camp, 'the six story packs only'
