@@ -7390,7 +7390,7 @@ def ported_content_unlock_keys() -> None:
     grant = air.split('Granted GrantCalls(unsigned char* gs,bool ported) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert '&=' not in grant and '~' not in grant, 'the grant never clears a bit'
     every = air.split('int GrantAll(unsigned char* gs) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'ported::OwnMax(WeaponRecord(gs,id))' in every and 'kClampStars' in every and '&=' not in every, 'owns every row, then the cap clamp'
+    assert 'ported::OwnMax(WeaponRecord(gs,id))' in every and 'kClampStars' in every and 'if(n>most)return -2;' in every and '&=' not in every, 'owns every row, then the cap clamp'
     assert 'Cfg().allWeaponsUnlocked' in give and 'constexpr unsigned kClampStars=0xD7930;' in air
     camp = src('src/edf5campaign.cpp')
     assert 'constexpr unsigned kListScan=0x8A21C3;' in camp and 'constexpr unsigned kCleared=0x8A4C00;' in camp

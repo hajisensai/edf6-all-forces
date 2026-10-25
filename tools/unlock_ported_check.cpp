@@ -124,7 +124,7 @@ int main() {
 
 
     // AllWeaponsUnlocked: a table past the native 0x800 (the relocated 0x2000 records), every named row owned at max
-    // stars, a placeholder / nameless row untouched, a second pass changes nothing, no bit cleared.
+    // stars, a placeholder / nameless row untouched, a second load changes nothing once the game's cap clamp has run, no bit cleared.
     {
         constexpr std::size_t kRows=0x2000,kPlaceholder=100,kNameless=101;
         std::vector<unsigned char> table(kRows*12,0);
@@ -134,25 +134,31 @@ int main() {
         const auto names=[&](std::size_t id)->const wchar_t* {
             return id==kNameless ? nullptr : id==kPlaceholder ? L"EDF6VC_RETIRED_E5_X" : L"eWeapon051";
         };
+        // One load as the plugin does it: own every named row at 10 stars, then the game's clamp (0xD7930) to each
+        // weapon's cap (here 5 for odd rows, 10 for even); the records that differ from before are the count.
         const auto pass=[&]{
-            int changed=0;
+            const std::vector<unsigned char> before=table;
             for(std::size_t id=0;id<kRows;++id)
-                if(!Placeholder(names(id)) && OwnMax(&table[id*12]))++changed;
+                if(!Placeholder(names(id)))OwnMax(&table[id*12]);
+            for(std::size_t id=0;id<kRows;++id)
+                for(int i=4;i<12;++i)if((id&1) && table[id*12+i]>5)table[id*12+i]=5;
+            int changed=0;
+            for(std::size_t id=0;id<kRows;++id)if(std::memcmp(&before[id*12],&table[id*12],12)!=0)++changed;
             return changed;
         };
-        Expect(pass()==static_cast<int>(kRows-2)-1,"every row but the placeholder, the nameless one and the maxed one changed");
+        Expect(pass()==static_cast<int>(kRows-3),"every row but the placeholder, the nameless one and the already maxed one changed");
         int owned=0,maxed=0;
         for(std::size_t id=0;id<kRows;++id) {
             owned+=table[id*12]&1;
             bool all=true;
-            for(int i=4;i<12;++i)all=all && table[id*12+i]==kMaxStar;
+            for(int i=4;i<12;++i)all=all && table[id*12+i]==((id&1) ? 5 : kMaxStar);
             maxed+=all;
         }
-        Expect(owned==static_cast<int>(kRows-2) && maxed==static_cast<int>(kRows-2),"8190 records owned at 10 stars");
+        Expect(owned==static_cast<int>(kRows-2) && maxed==static_cast<int>(kRows-2),"8190 records owned at their cap (5 on odd rows, 10 on even)");
         Expect(table[kPlaceholder*12]==8 && table[kNameless*12]==0 && table[kNameless*12+4]==0,"placeholder and nameless rows untouched");
         Expect(table[200*12]==3 && (table[201*12]&4),"used bit kept, NEW on a first grant");
         Expect(table[300*12]==1,"an owned maxed record is not marked NEW");
-        Expect(pass()==0,"a second pass changes nothing");
+        Expect(pass()==0,"a second load (own, clamp) changes nothing");
     }
 
     std::printf("unlock_ported_check: %d checks, %d failed\n",checks,failures);

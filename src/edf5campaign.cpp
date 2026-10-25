@@ -329,7 +329,8 @@ bool InstallPortedMissions() noexcept {
 // LoadSaveData_ModeSelect, then UnlockDownloadContents, MAINSCRIPT.AS 842..852): one of our packs' save, at
 // GS+0x57A4, marked with its layout and moved to the rows now once (mission_packs.h MigrateModeSave). Before the game
 // writes it again, so the next save has the new rows and the marker. A save whose layout cannot be told is left as it
-// is and the player told, once a session per pack.
+// is and not marked (nothing about its rows is known, so no stamp is safe): the same judgement runs at every load and
+// only the log says so (2026-10-25 user: the popup it used to raise each launch was removed).
 namespace { int lastMigration=-1,lastMigrationContent=-1; }
 void SetMissionPackSaveHook(bool ready) noexcept { saveHookReady=ready; }
 void MigrateMissionPackSave(unsigned char* gs) noexcept {
