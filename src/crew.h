@@ -1369,6 +1369,9 @@ void ResetKatyushas() noexcept;
 // Whether the player in `vehicle` sees our gun sight instead of the stock aim lines (crew.cpp AimLines): an aircraft
 // the player-jet flight flies (playerjet.cpp), ini PlayerJetGunSight on.
 bool PlayerJetOwnSight(const void* vehicle) noexcept;
+// Whether `vehicle` is one of the plugin's aircraft the player-jet flight flies (a kind in playerjet_kinds.h), whatever
+// the ini says (firstperson.cpp: a flown craft's pilot monitor is no gun camera).
+bool PlayerJetCraft(const void* vehicle) noexcept;
 // helisight.cpp: the weapons' sight of a stock helicopter (heli.cpp IsHelicopter, no plugin body) the player flies or
 // mans (ini PlayerHeliGunSight). The gun (the primary trigger's: `gun`): `bore` the way its muzzle points (a
 // direction), `pipper` where a round fired now first hits the map along its real arc (hit), else where it is at the

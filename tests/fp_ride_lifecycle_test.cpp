@@ -91,7 +91,9 @@ int VehicleScreens(const unsigned char*,int,const float*,CockpitScreens* out) no
     if(sensorScreen){out->s[0]=CockpitScreen{};out->s[0].kind=ScreenKind::sensor;out->n=1;}
     return out->n;
 }
-bool PlayerJetOwnSight(const void*) noexcept { return flownCraft; }
+bool PlayerJetCraft(const void*) noexcept { return flownCraft; }
+bool gunTurns=false;float gunWay[3]={0,0,1};   // the seat's gun turns on its own (vhud.cpp SeatGunLine) and its bore
+bool SeatGunLine(const void*,unsigned,float* dir) noexcept { if(!gunTurns)return false;std::memcpy(dir,gunWay,12);return true; }
 bool IsHelicopter(const void*) noexcept { return false; }
 void* retiredThis=nullptr;unsigned retiredFlags=0;
 void* __fastcall RecordFlashDtor(void* object,unsigned flags) { retiredThis=object;retiredFlags=flags;return object; }
@@ -350,7 +352,15 @@ int main() {
         std::memcpy(cam+kCamMatrix,native.m,64);
         check(Ride(cam,human) && std::fabs(At<float>(cam,kCamMatrix+36)-native.m[9])<1e-5f &&
               std::fabs(At<float>(cam,kCamMatrix+32)-native.m[8])<1e-5f && At<float>(cam,kCamMatrix+48)==5.0f,
-              "a weapon station's first person looks where the seat aims (raised with the gun), from its marker's eye");
+              "a fixed gun's station (a virtual aim) looks the stock seat camera's way, from its marker's eye");
+        // A gun that turns: its bore, held at a 20 degree stop while the stock camera looks 0.5 rad up and further round.
+        gunTurns=true;
+        const fpview::M4 bore=fpview::HeadingFrame(.3f,.349f,eyeAt);std::memcpy(gunWay,bore.m+8,12);
+        std::memcpy(cam+kCamMatrix,native.m,64);
+        check(Ride(cam,human) && std::fabs(At<float>(cam,kCamMatrix+36)-bore.m[9])<1e-5f &&
+              std::fabs(At<float>(cam,kCamMatrix+32)-bore.m[8])<1e-5f && At<float>(cam,kCamMatrix+48)==5.0f,
+              "a turning gun's camera looks along its bore (stopped at its elevation limit), not the stock camera's way");
+        gunTurns=false;
         flownCraft=true;
         std::memcpy(cam+kCamMatrix,native.m,64);
         check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,"a flown craft's pilot monitor keeps the nose's frame");

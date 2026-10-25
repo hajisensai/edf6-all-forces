@@ -3894,7 +3894,8 @@ def stock_gun_sight_ranged() -> None:
     arm = vhud.split('void Arm(', 1)[1].split('\n}\n', 1)[0]
     assert 'GunMarkOf(w,m,pos,dir,a)' in arm, 'src/vhud.cpp Arm: an arc gun\'s marks are GunMarkOf\'s'
     mark = vhud.split('void GunMarkOf(', 1)[1].split('\n}\n', 1)[0]
-    assert 'roundaim::GunSight(' in mark and 'target.ok ? target.at : nullptr' in mark
+    assert 'roundaim::Solve(round,pos,shooter,target.at,target.vel,' in mark and 'if(!target.ok ||' in mark, \
+        'the guide is the solved aim point (lead and drop), not where the target is at the bore pass'
     # The target is acquired in the cone of the sight gun's fire control (src/firecontrol.h: a radar's wider).
     assert 'RangeTarget(v,r,eye,ms,fcs::KitOf(' in vhud.split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
     stock = hud.split('void StockMark(', 1)[1].split('\n}\n', 1)[0]

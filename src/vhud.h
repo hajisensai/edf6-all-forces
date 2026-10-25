@@ -114,6 +114,10 @@ struct StockHudReadout {
 // Whether the player in `vehicle` sees this HUD's sights in place of the stock aim lines (crew.cpp AimLines): a stock
 // vehicle (no plugin body, not a heli: those have their own), ini StockVehicleHud on.
 bool PlayerStockOwnSight(const void* vehicle) noexcept;
+// Game thread: the unit way the gun of `vehicle`'s seat `seat` points now (its fire-control pick's first muzzle), when
+// that gun turns on its own in yaw and pitch (weapon_mount.h Freedom): the gun camera of a weapon station looks along
+// it (firstperson.cpp Ride). False for a fixed or partly fixed mount, a seat with no live gun, or a read fault.
+bool SeatGunLine(const void* vehicle,unsigned seat,float* dir) noexcept;
 bool HudReady() noexcept;   // hud.cpp: its quads can be drawn (InstallHud): no line is hidden for a HUD that cannot show
 void StockHudFrame(unsigned char* vehicle) noexcept;   // every vehicle's input (crew.cpp InputHook), after AimLines
 bool PlayerStockHud(StockHudReadout* out) noexcept;    // the last frame's, false with none (hud.cpp HudPublish)

@@ -841,14 +841,15 @@ void __fastcall DamageDrawHook(void* object,void* a,void* b,void* c) {
     bool lent=false;
     unsigned char* cam=nullptr;
     AcquireSRWLockExclusive(&hudLock);
-    __try {
+    __try {   // the stock draw's faults are its own: only the lent switch and the lock are put back on the way out
         cam=Readable(object,kHudCamera+8) ? At<unsigned char*>(object,kHudCamera) : nullptr;
         if(cam && Readable(cam,kCamHudShown+1) && !cam[kCamHudShown] &&
            maphud::LendsDamage(hudRecord,cam,cameraSession.Generation())){cam[kCamHudShown]=1;lent=true;}
-    } __except(EXCEPTION_EXECUTE_HANDLER){lent=false;}
-    __try { nextDamageDraw(object,a,b,c); } __except(EXCEPTION_EXECUTE_HANDLER){}
-    if(lent)cam[kCamHudShown]=0;
-    ReleaseSRWLockExclusive(&hudLock);
+        nextDamageDraw(object,a,b,c);
+    } __finally {
+        if(lent)cam[kCamHudShown]=0;
+        ReleaseSRWLockExclusive(&hudLock);
+    }
 }
 
 // SetPlayerHudShow's write (its call to 0x118DF30): kept for the end of the hold on the map's camera, else written.

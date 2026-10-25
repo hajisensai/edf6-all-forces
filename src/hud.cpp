@@ -1519,8 +1519,9 @@ void LeadMark(void* drawer,void* ctx,const float* vp,float width,float height,fl
     Arc(drawer,ctx,x,y,r,0.0f,kTurn,t,10,rgba);
     Seg(drawer,ctx,x-r,y-r,x+r,y+r,t,rgba);Seg(drawer,ctx,x-r,y+r,x+r,y-r,t,rgba);
 }
-// A vehicle gun's lead as its fire control shows it (firecontrol.h): the lead mark; a radar's dashed line to it from the
-// gun's line (the way to swing the gun); a computer's solution under it (the round's flight there, the target's speed).
+// A vehicle gun's lead as its fire control shows it (firecontrol.h): the aim point (vhud.cpp GunMarkOf: the solved way to
+// fire, lead and drop both: the gun's line on it, the round meets the target); a radar's dashed line to it from the gun's
+// line (the way to swing the gun); a computer's solution under it (the round's flight, the target's speed).
 void FcsLead(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,const float* rgba,
              Line* lines,int* at) noexcept {
     const fcs::Kit kit=fcs::KitOf(a.fcs);

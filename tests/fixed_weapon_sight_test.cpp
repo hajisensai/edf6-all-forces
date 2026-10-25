@@ -107,6 +107,17 @@ void Run(){
     Check(withTarget.hit==fixed.hit&&vec::Dist(withTarget.at,fixed.at)<.001f&&withTarget.flight==fixed.flight,"camera target cannot move fixed physical hit");
     StockArm turret{};turret.physicalOnly=false;Arm(f.weapon,true,turret);
     Check(turret.ranged&&turret.targetRange>0,"articulated gun retains optional target lead guide");
+    {   // The guide is the aim point the fire control solves (roundaim::Solve: lead and drop together): a round fired at it
+        // meets the target, and for a still target it stands above the target's own line by the drop.
+        RoundModel m{};roundaim::Round round{};float shooter[3],pos[3],dir[3];
+        const bool ok=ReadRound(f.weapon,&m) && ArcRoundOf(f.weapon,m,&round,shooter) && edf::MuzzleFrame(f.weapon,f.muzzle,pos,dir);
+        float way[3]={turret.lead[0]-pos[0],turret.lead[1]-pos[1],turret.lead[2]-pos[2]};
+        float line[3]={target.at[0]-pos[0],target.at[1]-pos[1],target.at[2]-pos[2]};
+        const bool unit=vec::Normalize(way) && vec::Normalize(line);
+        const roundaim::Pass p=roundaim::Fire(round,pos,way,shooter,target.at,target.vel);
+        Check(ok && unit && p.ok && p.miss<3.0f && turret.leadFlight>0.0f,"fired at the guide, the round meets the target");
+        Check(way[1]>line[1]+1e-4f,"a still target's guide stands above its line by the drop");
+    }
     Check(turret.hit==fixed.hit&&vec::Dist(turret.at,fixed.at)<.001f&&turret.flight==fixed.flight,"articulated target guide also cannot replace physical map hit");
     terrain=false;StockArm sky{};Arm(f.weapon,true,sky);
     Check(sky.paths==2&&!sky.hit&&!sky.path[1].hit&&sky.flight==5,"no terrain keeps explicit finite lifetime endpoints");

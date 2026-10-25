@@ -39,6 +39,7 @@ constexpr ULONGLONG kFreshMs=200;        // a readout not refreshed this long (g
 constexpr std::uint64_t kMostMuzzles=64;
 constexpr float kReach=3000.0f;          // m: the farthest an impact point is looked for (the near camera's far clip)
 constexpr float kThreatRadius=30.0f;     // m: a missile's lock point this near the vehicle is homing on it (playerjet.cpp's)
+constexpr float kSolveClose=3.0f;        // m: a fire-control solution passing the target this near meets it (roundaim::Solve)
 constexpr float kPickCone=0.087f;        // rad (5 deg) off the screen's centre an enemy is ranged on
 constexpr float kKeepCone=0.26f;         // rad (15 deg): the ranged one is kept this far off (the lead and the drop move the
                                          // view off it while the pipper is put on its lead mark)
@@ -162,15 +163,21 @@ void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const
     float shooter[3];
     if(a.physicalOnly || EnergyWeapon(m.style) || m.lobbed || !ArcRoundOf(w,m,&round,shooter))return;
     a.ladder=gunsight::Of(round,pos,dir,shooter);
-    const roundaim::GunMark g=roundaim::GunSight(round,pos,dir,shooter,a.hit,a.at,a.flight*60.0f,target.ok ? target.at : nullptr,
-                                                 target.vel);
-    if(g.mark!=roundaim::SightMark::ranged || !fcs::KitOf(a.fcs).lead)return;   // a telescope computes no lead (firecontrol.h)
-    a.ranged=g.mark==roundaim::SightMark::ranged;
-    a.inReach=g.inReach;
+    // The fire control's solution (firecontrol.h; the review of 2026-10-25: the old guide was where the target would be when
+    // a round fired along the bore now passed it, not where to aim): the way to fire so the round meets the ranged target,
+    // its lead and its drop together (roundaim::Solve), shown as the point that far along that way. A still target's too:
+    // the gun's superelevation. A telescope computes none.
+    if(!target.ok || !fcs::KitOf(a.fcs).lead)return;
+    float aim[3];
+    roundaim::Pass pass{};
+    const bool solved=roundaim::Solve(round,pos,shooter,target.at,target.vel,kSolveClose,aim,&pass);
+    if(!pass.ok)return;
+    a.ranged=true;
+    a.inReach=solved && pass.frames<static_cast<float>(round.alive)-1.0f;
     // A target guide is not where this shot hits terrain. Keep RoundLands' physical endpoint/hit/time intact.
-    std::memcpy(a.lead,g.lead,12);
-    a.targetRange=vec::Dist(pos,a.lead);
-    a.leadFlight=g.frames/60.0f;
+    a.targetRange=vec::Dist(pos,target.at);
+    for(int i=0;i<3;++i)a.lead[i]=pos[i]+aim[i]*a.targetRange;
+    a.leadFlight=pass.frames/60.0f;
     a.targetSpeed=vec::Len(target.vel);
 }
 
@@ -291,6 +298,29 @@ void DebugLog(const StockHudReadout& r) noexcept {
 
 void SetStockSelectedStore(const void* vehicle,unsigned seat,int store) noexcept {
     selection=Selection{vehicle,seat,store,GameFrame()};
+}
+
+bool SeatGunLine(const void* vehicle,unsigned seat,float* dir) noexcept {
+    __try {
+        auto v=static_cast<unsigned char*>(const_cast<void*>(vehicle));
+        if(!v || seat>=SeatCount(v))return false;
+        const unsigned char* const s=SeatAt(v,seat);
+        const unsigned char* const gun=PayloadSightPicked(v,seat);
+        const auto holders=At<unsigned char* const*>(s,kSeatWeapons);
+        const auto n=At<std::uint64_t>(s,kSeatWeaponCount);
+        if(!gun || !n || n>16 || !Readable(holders,n*8))return false;
+        for(std::uint64_t i=0;i<n;++i) {
+            if(!Readable(holders[i],kHolderWeapon+8) || At<const unsigned char*>(holders[i],kHolderWeapon)!=gun)continue;
+            const auto freedom=weaponmount::Of(v,s,holders[i]);
+            if(!freedom.known || !freedom.yaw || !freedom.pitch)return false;
+            const auto muzzles=At<const unsigned char*>(gun,edf::kMuzzles);
+            const auto count=At<std::uint64_t>(gun,edf::kMuzzleCount);
+            float pos[3];
+            if(!count || count>kMostMuzzles || !Readable(muzzles,edf::kMuzzleStride) || !edf::MuzzleFrame(gun,muzzles,pos,dir))return false;
+            return vec::Normalize(dir);
+        }
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 bool PlayerStockOwnSight(const void* vehicle) noexcept {

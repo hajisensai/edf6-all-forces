@@ -1418,15 +1418,20 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     // preserve the physical eye while taking rotation from the same heading/pitch that drives its aim.
     SazabiFirstPersonFrame(ride.vehicle,static_cast<unsigned>(ride.seat),ride.frame);
     VehicleScreens(ride.vehicle,ride.seat,eye,&Current().screens);
-    // A weapon station's camera looks where its gun is laid, every gunner seat alike (fp_view.h GunCameraFrame): the
-    // stock seat camera's way (cam+0x220 as the native step left it) from the marker's eye; the cockpit seats keep their
-    // bone's frame.
+    // A weapon station's camera is on its gun, every gunner seat alike (fp_view.h GunCameraFrame): from the marker's eye
+    // along the gun's bore where the gun turns (vhud.cpp SeatGunLine: its elevation stops are the view's), else along the
+    // stock seat camera's way (cam+0x220 as the native step left it: a rider's virtual aim). Cockpit seats keep their bone's frame.
     bool sensor=false;
     for(int i=0;i<Current().screens.n;++i)sensor=sensor || Current().screens.s[i].kind==ScreenKind::sensor;
     const void* const rv=ride.vehicle;
-    const bool flies=PlayerJetOwnSight(rv) || IsHelicopter(rv) || IsSazabi(rv);
+    const bool flies=PlayerJetCraft(rv) || IsHelicopter(rv) || IsSazabi(rv);
     M4 gunCam;
-    const bool gunCamera=fpview::GunCameraSeat(sensor,flies,ride.seat) && fpview::GunCameraFrame(MatrixAt(cam+kCamMatrix),eye,&gunCam);
+    bool gunCamera=false;
+    if(fpview::GunCameraSeat(sensor,flies,ride.seat)) {
+        float way[3];
+        if(!SeatGunLine(rv,static_cast<unsigned>(ride.seat),way))std::memcpy(way,cam+kCamMatrix+32,12);
+        gunCamera=fpview::GunCameraFrame(way,eye,&gunCam);
+    }
     if(gunCamera!=Current().gunCamera){Current().gunCamera=gunCamera;Log("FP seat %d: %s",ride.seat,gunCamera ? "a gun camera, laid with the aim" : "its cockpit's frame");}
     std::memcpy(cam+kCamMatrix,gunCamera ? gunCam.m : ride.frame,64);
     VehicleLookCamera(h,reinterpret_cast<float*>(cam+kCamMatrix));
