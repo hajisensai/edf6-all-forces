@@ -267,6 +267,9 @@ class Plan:
     # Friendly soldier squads (GRAND_SOLDIERS, six each) by the player before the waves: real soldiers the plugin's
     # auto-crew walks to the empty vehicles (with NpcCrewTest=1 no player has to drive them first).
     squads: int = 0
+    # Enemies made once at the start (CreateEnemy), each on an enemy spot of its own (PVP_ENEMY_GAP apart): the PvP
+    # presets' giants (PVP_PLANS). The launcher's plans have none (save_plan leaves it out).
+    enemies: dict[str, int] = field(default_factory=dict)
 
 
 # An air battle (the test range's 「空战」 button): the player's fighter, a few friendly jets, eight enemy fighters to
@@ -385,6 +388,35 @@ def target_range(plan: Plan) -> Plan:
     return plan
 
 
+# The PvP presets (tools/make_edf5_campaign.py PVP_ROWS: the range pack's rows after the range, the user, 2026-10-25:
+# 「直接弄几个预制关卡就行了」): each a mission folder of its own on one of the SITES, only empty vehicles parked by the
+# start for the players to board (one per player and spares), no enemy and no target. The sides are the M map's PvP
+# panel's: a vehicle takes its driver's (src/pvp.h).
+def pvp_plan(site: str, vehicles: dict[str, int], enemies: dict[str, int] | None = None) -> Plan:
+    return Plan(vehicles=dict(vehicles), waves=Waves(enabled=False), site=site, air=AirWaves(enabled=False),
+                enemies=dict(enemies or {}))
+
+
+PVP_FIGHTER, PVP_EROS, PVP_BRUTE = 'edf6tr_pjet_fighter_mission', 'edf6tr_v506_heli_mission', 'edf6tr_vehicle410_heli_mission'
+PVP_TANK, PVP_BALAM, PVP_BEGARUTA = 'vehicle403_tank_mission', 'v515_retrobalam_mission', 'v504_begaruta_mission'
+# Erginus (the user, 2026-10-25: 「巴尔加直接对战埃尔基努斯呢」, as EDF4.1's 「巨人的战场」): the native enemy team, which
+# is PvP side 1 (docs/feedback-2026-10-18-pvp.md: sides 1 / 2 are the native teams 1 / 2, 2 the players'). Without
+# PvP both players fight them in Balams; with it, a side-1 player takes one over (M map 「操控此单位」) and the other
+# stays the game's AI on that side.
+PVP_ERGINUS = 'monster501'
+PVP_ENEMY_GAP = 80.0   # m between two preset enemies' spots: a giant on each, never one inside the other
+PVP_PLANS: dict[str, Plan] = {
+    'EDF6TR_PVP_JET': pvp_plan('M045', {PVP_FIGHTER: 4}),
+    'EDF6TR_PVP_HELI': pvp_plan('M045', {PVP_EROS: 2, PVP_BRUTE: 2}),
+    'EDF6TR_PVP_TANK': pvp_plan('RM016B', {PVP_TANK: 4}),
+    'EDF6TR_PVP_BALAM': pvp_plan('M045', {PVP_BALAM: 2}),
+    'EDF6TR_PVP_ERGINUS': pvp_plan('M045', {PVP_BALAM: 2}, {PVP_ERGINUS: 2}),
+    'EDF6TR_PVP_INFANTRY': pvp_plan('RM016B', {}),
+    'EDF6TR_PVP_MIXED': pvp_plan('M045', {PVP_FIGHTER: 2, PVP_EROS: 2, PVP_TANK: 2, PVP_BALAM: 2, PVP_BEGARUTA: 2}),
+}
+PVP_MISSIONS = packs.PVP_MISSIONS
+
+
 def grand_points(lay: Layout) -> list[tuple[str, float, rmpa.Point]]:
     """(ship SGO, height, its point): the farthest free points, raised (install writes them up in MISSION.RMPA)."""
     far = lay.far_points[::-1]
@@ -400,6 +432,20 @@ def placements(plan: Plan) -> list[tuple[str, bool]]:
               [(s, not (s in JETS and (JETS[s].player or JETS[s].parked))) for s, n in plan.friends.items()
                for _ in range(max(0, n))])
     return [c for c in chosen if c[0] not in BIG] + [c for c in chosen if c[0] in BIG]
+
+
+def enemy_spots(plan: Plan, lay: Layout) -> list[tuple[str, rmpa.Point]]:
+    """(enemy SGO, its spot) for plan.enemies: the enemy spots nearest first, each PVP_ENEMY_GAP from those taken."""
+    wanted = [kind for kind, n in plan.enemies.items() for _ in range(max(0, n))]
+    spots: list[rmpa.Point] = []
+    for p in lay.enemy_points:
+        if len(spots) == len(wanted):
+            break
+        if all(_apart(p, q) >= PVP_ENEMY_GAP for q in spots):
+            spots.append(p)
+    if len(spots) < len(wanted):
+        raise ValueError(f'敌人太多：这张地图的敌人点位只放得下 {len(spots)} 个（相隔 {PVP_ENEMY_GAP:.0f} 米）')
+    return list(zip(wanted, spots))
 
 
 def mission_vehicle(name: str) -> str:
@@ -549,7 +595,9 @@ REACH: dict[str, float] = {'v510_maser_mission': 21.5, 'vehicle404_bigtank': 17.
                            'vehicle407_bigbegaruta_mission': 11.5,
                            # the Sazabi: its shield and funnel packs 11.1 m out to a side (its tubes reach 15.1 m back,
                            # but 13 m up: over every vehicle parked round it)
-                           SAZABI_JET: 12.0}
+                           SAZABI_JET: 12.0,
+                           # the stock Balam (the PvP presets park it): its arms 19.4 m out (v515_retrobalam.mdb)
+                           'v515_retrobalam_mission': 20.0}
 # The air carriers (pylib/vcobjects.py JETS: the EDF transport x 1.6, 59 x 77 m): half its diagonal (48.5 m), whichever
 # way it faces, and a margin.
 CARRIER_MODEL = 'EDF6VC_CARRIER.MRAB'
@@ -652,7 +700,8 @@ def script(plan: Plan, lay: Layout) -> str:
                      | ({f'app:/object/{AIR_ENEMY}.sgo'} if air.enabled else set())
                      | ({s for s, _ in GRAND_SHIPS} | set(GRAND_GROUND) | set(GRAND_AIR) | set(GRAND_SOLDIERS) | {GRAND_BEARER}
                         if grand else set())
-                     | (set(GRAND_SOLDIERS) if plan.squads > 0 else set()))
+                     | (set(GRAND_SOLDIERS) if plan.squads > 0 else set())
+                     | {f'app:/object/{e}.sgo' for e in plan.enemies})
     lines = [
         '//',
         '// EDF6 test range, generated by testrange/gen.py (EDF6VehicleCrew). The test range pack\'s mission.',
@@ -726,6 +775,8 @@ def script(plan: Plan, lay: Layout) -> str:
             lines.append(f'\tCreateFriend({_q(point.name)}, {path}, {plan.vehicle_level:.2f}, false);')
         else:
             lines.append(f'\tCreateVehicle2({_q(point.name)}, {path}, {plan.vehicle_level:.2f});')
+    for kind, point in enemy_spots(plan, lay):
+        lines.append(f'	CreateEnemy({_q(point.name)}, {_q("app:/object/" + kind + ".sgo")}, {plan.vehicle_level:.2f}, true);')
     for _ in range(0 if grand else plan.squads):
         lines.append(f'	CreateFriendSquad({_q(lay.player.name)}, 20, {_q(GRAND_SOLDIERS[0])}, {_q(GRAND_SOLDIERS[1])}, 6, '
                      f'{plan.vehicle_level:.2f}, false);')
@@ -1252,8 +1303,9 @@ def ours(game_root: str, mission: str) -> bool:
 
 
 def installed(game_root: str) -> bool:
-    """The range's mission is written and its pack is in the mode table (both are needed to play it)."""
-    return ours(game_root, RANGE_MISSION) and packs.range_installed(game_root)
+    """The range's missions (the range's and the PvP presets') are written and its pack is in the mode table (both are
+    needed to play it)."""
+    return all(ours(game_root, m) for m in (RANGE_MISSION, *PVP_MISSIONS)) and packs.range_installed(game_root)
 
 
 def _set_pack(game_root: str, present: bool) -> list[str]:
@@ -1288,25 +1340,31 @@ def spawned(plan: Plan) -> set[str]:
 
 
 def install(game_root: str, plan: Plan) -> list[str]:
-    """Writes the range's mission (its pack registered last, when missing: a failure leaves a folder no mode names,
+    """Writes the range's mission and the PvP presets' (PVP_PLANS; its pack registered last, when missing: a failure leaves a folder no mode names,
     never a mode naming a folder that is not there) and takes a range out of the story's missions it used to replace
     (LEGACY_SLOTS). Refuses to touch a folder another mod put there."""
-    out = mission_dir(game_root, RANGE_MISSION)
-    if os.path.isdir(out) and os.listdir(out) and not ours(game_root, RANGE_MISSION):
-        raise RuntimeError(f'{out} 已有别的 mod 的文件，不覆盖。请先手动处理。')
+    # The range's pack names every one of these folders (the range and the PvP presets): all written, or none touched.
+    for mission in (RANGE_MISSION, *PVP_MISSIONS):
+        out = mission_dir(game_root, mission)
+        if os.path.isdir(out) and os.listdir(out) and not ours(game_root, mission):
+            raise RuntimeError(f'{out} 已有别的 mod 的文件，不覆盖。请先手动处理。')
     game = Game(game_root)
     plan, skipped = without_missing(game_root, plan)
+    presets = {mission: without_missing(game_root, p)[0] for mission, p in PVP_PLANS.items()}
+    every = (plan, *presets.values())
     wave = enemy_row(plan.waves.enemy) if plan.waves.enabled else None
     if wave and not catalog.available(game_root, wave):
         raise RuntimeError(f'敌人「{wave.label}」的文件不在 Mods 里（{wave.rel}）：先运行 EDF6VehicleCrew 安装器选「安装」，'
                            '或换一种敌人')
     own = placeable_derived()
-    for sgo_name in (spawned(plan) & (DERIVED.keys() | JETS.keys() | {mission_vehicle(x) for x, _ in placements(plan)})) | own:
-        if not has_mission_setup(game, sgo_name):
-            raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
+    for p in every:
+        for sgo_name in (spawned(p) & (DERIVED.keys() | JETS.keys() | {mission_vehicle(x) for x, _ in placements(p)})) | own:
+            if not has_mission_setup(game, sgo_name):
+                raise RuntimeError(f'{sgo_name} 没有 mission_setup，不能由脚本放置（会让游戏崩溃）')
     # The installer's files the range's script names (its placed sedan / 4.1 vehicles, a 4.1 wave): needed by the range too
     # (pylib/ledger.py), so taking the installer's part away leaves them while the range uses them.
-    uses = sorted({rel for s, _ in placements(plan) if s in OPTIONAL_VEHICLES for rel in catalog.files_of(OPTIONAL_VEHICLES[s])}
+    uses = sorted({rel for p in every for s, _ in placements(p) if s in OPTIONAL_VEHICLES
+                   for rel in catalog.files_of(OPTIONAL_VEHICLES[s])}
                   | (set(catalog.files_of(wave)) if wave else set()))
     points_file = game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA')
     lay = layout(rmpa.points(points_file), small_count(plan), far_reserved(plan))
@@ -1323,24 +1381,38 @@ def install(game_root: str, plan: Plan) -> list[str]:
     primer = plan.waves.enabled and plan.waves.enemy in PRIMER_KINDS
     if primer and not all(os.path.isfile(os.path.join(game_root, 'Mods', *rel.split('/'))) for rel in PRIMER_FILES):
         raise RuntimeError('没有星导者生物的机体（Mods/OBJECT/EDF6VC_CENTIPEDE / _DRAGONFLY.SGO）：先运行 EDF6VehicleCrew 安装器选「安装」')
+    # The presets' scripts before anything is written (one that does not fit its site stops the install here).
+    preset_files = {}
+    for mission, p in presets.items():
+        points = game.read(f'MISSION/EDF6/{p.site}', 'MISSION.RMPA')
+        preset_files[mission] = (p.site, script(p, layout(rmpa.points(points), small_count(p), far_reserved(p))), points)
     for mission in LEGACY_SLOTS:   # the story's missions back first, whether or not the pack can be registered
         _remove(game_root, mission)
-    os.makedirs(out, exist_ok=True)
     # Every vehicle of ours the M map's 「摆放」 makes (PLACEABLE_DERIVED), whether this plan places it or not.
-    _write_derived(game_root, game, {x for x in spawned(plan) if x in DERIVED} | own,
+    _write_derived(game_root, game, {x for p in every for x in spawned(p) if x in DERIVED} | own,
                    (PRIMER_FILES if primer else ()) + tuple(uses))
-    # A stock mission folder's three files: the script, the site's points, and the site's MISSION.JSON (no EDF.dll
-    # string names it; a new folder has no stock one under it, as RM015's had).
+    _write_mission(game_root, game, RANGE_MISSION, plan.site, text, points_file)
+    for mission, (site, preset, points) in preset_files.items():
+        _write_mission(game_root, game, mission, site, preset, points)
+    register_pack(game_root)
+    return ([f'{p.name}: {s}{"（NPC 驾驶）" if npc else ""}' for s, npc, p in placed] + skipped
+            + [f'对战预制关 {mission}：{site_of(p.site).label}，' + ('、'.join(f'{s} ×{n}' for s, n in p.vehicles.items())
+                                                              or '不放载具') for mission, p in presets.items()])
+
+
+def _write_mission(game_root: str, game: Game, mission: str, site: str, text: str, points: bytes) -> None:
+    """A stock mission folder's three files: the script, the site's points, and the site's MISSION.JSON (no EDF.dll
+    string names it; a new folder has no stock one under it, as RM015's had); and the MARKER that makes it ours."""
+    out = mission_dir(game_root, mission)
+    os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, 'MISSION.JSON'), 'wb') as f:
-        f.write(game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.JSON'))
+        f.write(game.read(f'MISSION/EDF6/{site}', 'MISSION.JSON'))
     with open(os.path.join(out, 'MISSION.AC'), 'wb') as f:
         f.write(b'\xef\xbb\xbf' + text.encode('utf-8'))
     with open(os.path.join(out, 'MISSION.RMPA'), 'wb') as f:
-        f.write(points_file)
+        f.write(points)
     with open(os.path.join(out, MARKER), 'w', encoding='utf-8') as f:
         f.write('EDF6 测试场（EDF6VehicleCrew/testrange）：「测试场」任务包的关卡。删除本目录即删除测试场关卡。\n')
-    register_pack(game_root)
-    return [f'{p.name}: {s}{"（NPC 驾驶）" if npc else ""}' for s, npc, p in placed] + skipped
 
 
 def without_missing(game_root: str, plan: Plan) -> tuple[Plan, list[str]]:
@@ -1365,7 +1437,7 @@ def uninstall(game_root: str, unregister: bool = True) -> bool:
         _set_pack(game_root, False)
     led = ledger.Ledger(game_root)
     deleted, _ = _release_derived(led, set(led.owned_by(OWNER)))
-    return any([_remove(game_root, x) for x in (RANGE_MISSION, *LEGACY_SLOTS)]
+    return any([_remove(game_root, x) for x in (RANGE_MISSION, *PVP_MISSIONS, *LEGACY_SLOTS)]
                + [_remove_legacy(game_root), bool(deleted)])
 
 

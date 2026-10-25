@@ -62,8 +62,8 @@
    "name": "body.wt_sturmmorser_sturmtiger_body_c_ger_camo_dunkelgelb",
    "bone": "body",
    "material": 0,
-   "triangles": 84609,
-   "vertices": 106653
+   "triangles": 86045,
+   "vertices": 108407
   },
   {
    "name": "body.wt_sturmmorser_sturmtiger_gun_c_ger_camo_dunkelgelb",
@@ -120,13 +120,6 @@
    "material": 2,
    "triangles": 4176,
    "vertices": 4216
-  },
-  {
-   "name": "doppler_radar.wt_sturmmorser_sturmtiger_body_c_ger_camo_dunkelgelb",
-   "bone": "doppler_radar",
-   "material": 0,
-   "triangles": 934,
-   "vertices": 1152
   },
   {
    "name": "wheel_A_l",
@@ -239,13 +232,6 @@
    "material": 0,
    "triangles": 1904,
    "vertices": 2230
-  },
-  {
-   "name": "tracking_radar.wt_sturmmorser_sturmtiger_body_c_ger_camo_dunkelgelb",
-   "bone": "tracking_radar",
-   "material": 0,
-   "triangles": 502,
-   "vertices": 602
   }
  ],
  "origins": {
@@ -611,8 +597,8 @@
      3.15369
     ]
    ],
-   "source_triangles": 89418,
-   "hull_triangles": 6792
+   "source_triangles": 90854,
+   "hull_triangles": 6816
   },
   "cannon_main": {
    "target": [

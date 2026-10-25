@@ -2789,9 +2789,13 @@ def footprint_covers_the_stock_models() -> None:
     # Match gen.install's effective plan: an optional migrated vehicle absent from Mods is not spawned, and is not a
     # stock Root.cpk model this audit can measure. Installed optional vehicles are still included.
     plan, _skipped = gen.without_missing(rootcpk.DEFAULT_GAME, gen.target_range(gen.Plan()))
-    for name in sorted({s for s, _ in gen.placements(plan)} - gen.JETS.keys()):
-        model = sgo.load(data=gen.vehicle_sgo(game, name)).get('animation_model')
-        path, member = model[0][0], model[0][1]
+    # ... and the PvP presets' (gen.PVP_PLANS: the Balam, 19.4 m across its arms).
+    every = {s for p in (plan, *gen.PVP_PLANS.values()) for s, _ in gen.placements(p)}
+    for name in sorted(every - gen.JETS.keys()):
+        model = sgo.load(data=gen.vehicle_sgo(game, name)).get('animation_model')[0]
+        while isinstance(model[0], list):   # the Balam's is one level deeper: [[[archive, member]], cas, ...]
+            model = model[0]
+        path, member = model[0], model[1]
         folder, file = path.split('app:/')[1].rsplit('/', 1)
         try:
             archive = mdb.rab_read(game.read(folder.upper(), file.upper()))
@@ -4610,11 +4614,12 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(rootcpk, use=lambda root: None))   # its readers are stubbed; DEFAULT_GAME stays
 
             def mission(game: str, plan: object) -> list[str]:
-                out = gen.mission_dir(game, gen.RANGE_MISSION)
-                modfiles.atomic_write(os.path.join(out, gen.MARKER), b'range')
-                modfiles.atomic_write(os.path.join(out, 'MISSION.AC'), b'script')
-                modfiles.atomic_write(os.path.join(out, 'MISSION.RMPA'), b'points')
-                modfiles.atomic_write(os.path.join(out, 'MISSION.JSON'), b'{}')
+                for folder in (gen.RANGE_MISSION, *gen.PVP_MISSIONS):   # the range and the PvP presets
+                    out = gen.mission_dir(game, folder)
+                    modfiles.atomic_write(os.path.join(out, gen.MARKER), b'range')
+                    modfiles.atomic_write(os.path.join(out, 'MISSION.AC'), b'script')
+                    modfiles.atomic_write(os.path.join(out, 'MISSION.RMPA'), b'points')
+                    modfiles.atomic_write(os.path.join(out, 'MISSION.JSON'), b'{}')
                 ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
                 return []
             enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
@@ -6679,7 +6684,7 @@ def edf5_campaign_build() -> None:
     # the plugin's EDF6VehicleCrew.packs.ini: a section per pack written, by its fixed id, nothing missing here
     packs_ini = files[e5c.PACKS_FILE].decode('ascii')
     for pack in (*e5c.PACKS, e5c.RANGE):
-        rows = [r for r in p['rows'] if r['group'] == pack.group] or [None]
+        rows = [r for r in p['rows'] if r['group'] == pack.group] or [None] * len(e5c.definition_keys(pack))
         section = packs_ini.split(f'[Pack{e5c.CONTENT[pack.tag]}]\r\n', 1)[1].split('\r\n\r\n', 1)[0].split('\r\n')
         assert section[0] == f'Tag={pack.tag}' and section[2] == f'Rows={len(rows)}', (pack.tag, section)
         assert section[3] == 'Missing=' + '0' * ((len(rows) + 3) // 4), (pack.tag, section)
@@ -6853,6 +6858,57 @@ def edf5_campaign_install_remove() -> None:
 
 
 @test
+@test
+def pvp_presets_agree() -> None:
+    """The PvP presets (2026-10-25): the range pack's rows after the range (make_edf5_campaign PVP_ROWS) are the folders
+    testrange/gen.py writes (PVP_PLANS), in the order of the last released layout (pack_layouts.json); each row's
+    thumbnail is its plan's site, each plan only parks empty vehicles (no target, no NPC; enemies only placed once, known ones); uninstall and the
+    installer's check know every folder; the plugin opens every row of the range's pack."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    assert list(gen.PVP_PLANS) == list(e5c.PVP_MISSIONS) == list(gen.PVP_MISSIONS)
+    assert e5c.definition_keys(e5c.RANGE) == [f'EDF6/{m}' for m in (e5c.RANGE_MISSION, *e5c.PVP_MISSIONS)]
+    assert e5c.released_layouts(e5c.RANGE.tag)[-1] == e5c.definition_keys(e5c.RANGE)
+    sites = {x.source for x in gen.SITES}
+    for row, (mission, plan) in zip(e5c.PVP_ROWS, gen.PVP_PLANS.items()):
+        assert row['key'] == f'EDF6/{mission}' and row['thumb'] == f'EDF6/{plan.site}' and plan.site in sites, mission
+        assert set(row['title']) == set(row['brief']) == set(e5c.LANGS), mission
+        assert not plan.waves.enabled and not plan.air.enabled and not plan.friends and not plan.squads, mission
+        assert not plan.scenario and all(s in dict(gen.VEHICLES) for s in plan.vehicles), mission
+        assert all(e in {s for s, _, _ in gen.ENEMIES} for e in plan.enemies), mission
+        assert all(not npc for _, npc in gen.placements(plan)), mission
+    assert '(RANGE_MISSION, *PVP_MISSIONS, *LEGACY_SLOTS)' in src('testrange/gen.py')
+    assert '(gen.RANGE_MISSION, *gen.PVP_MISSIONS)' in src('tools/installer.py')
+    assert '|| (cfg.testRangeContent>0 && content==cfg.testRangeContent);' in src('src/edf5campaign.cpp')
+
+
+@test
+def pvp_presets_fit_their_sites() -> None:
+    """Each PvP preset's vehicles fit its site's real points (Root.cpk) with no footprint overlap, and its script parks
+    them all, puts its enemies apart off the vehicles' spots, and spawns nothing else."""
+    import rootcpk
+    import rmpa
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    game = gen.Game(rootcpk.DEFAULT_GAME)
+    for mission, plan in gen.PVP_PLANS.items():
+        points = rmpa.points(game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA'))
+        lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan))
+        text = gen.script(plan, lay)
+        placed = gen.spots_for(plan, gen.layout(points, gen.small_count(plan), gen.far_reserved(plan)))
+        assert len(placed) == sum(plan.vehicles.values()), mission
+        for i, (s, _, p) in enumerate(placed):
+            others = [(q, gen.footprint(t)) for j, (t, _, q) in enumerate(placed) if j != i]
+            assert gen.overlap(p, gen.footprint(s), others) == 0.0, (mission, s, p.name)
+        assert text.count('CreateVehicle2(') == len(placed), mission
+        assert text.count('CreateEnemy(') == sum(plan.enemies.values()) and 'CreateFriend' not in text, mission
+        spots = [p for _, p in gen.enemy_spots(plan, lay)]
+        assert all(gen._apart(a, b) >= gen.PVP_ENEMY_GAP for i, a in enumerate(spots) for b in spots[i + 1:]), mission
+        assert not {p.name for p in spots} & ({p.name for _, _, p in placed} | {lay.player.name}), mission
+
+
 def edf5_campaign_range_pack() -> None:
     """The test range's pack from the real Root.cpk (2026-10-09: the range over RM015 never ends, so the story stopped
     there): an offline and an online mode after the EDF5 packs, one content id and one save file for both (as the stock
@@ -6895,12 +6951,17 @@ def edf5_campaign_range_pack() -> None:
             assert m[e5c.M_FILES] == e5c.RANGE.paths(kind) and (m[e5c.M_NAME], m[e5c.M_DESC]) == e5c.RANGE.keys(kind)
             listed, image, txt = e5c.RANGE.kind_files(kind)
             rows = dsgo.parse(files[listed]).root.get('table').items
-            assert len(rows) == 1 and rows[0].names == {10: 'flags'} and rows[0].items[3].items == []
-            assert rows[0].items[:3] == [0.0, f'app:/Mission/EDF6/{e5c.RANGE_MISSION}', f'EDF6/{e5c.RANGE_MISSION}']
-            assert rows[0].items[5:] == rm015.items[5:], 'not RM015\'s row values'
+            # The range, then the PvP presets (PVP_ROWS), each chained to the next (the plugin opens them all anyway).
+            defined = (e5c.RANGE_ROW, *e5c.PVP_ROWS)
+            assert len(rows) == len(defined) and all(r.names == {10: 'flags'} for r in rows)
+            assert [r.items[3].items for r in rows] == [[float(i + 1)] for i in range(len(rows) - 1)] + [[]]
+            for i, (r, d) in enumerate(zip(rows, defined)):
+                assert r.items[:3] == [float(i), f'app:/Mission/{d["key"]}', d['key']]
+                assert r.items[5:] == rm015.items[5:], 'not RM015\'s row values'
+            assert rows[0].items[2] == f'EDF6/{e5c.RANGE_MISSION}'
             for lang, rel in txt.items():
-                assert sgo.read(files[rel])[1]['table'] == [[e5c.RANGE_ROW['title'][lang], e5c.RANGE_ROW['brief'][lang]]]
-            assert [f.name for f in mdb.rab_read(files[image]).files] == [e5c.thumb_name(rows[0].items[2])]
+                assert sgo.read(files[rel])[1]['table'] == [[d['title'][lang], d['brief'][lang]] for d in defined]
+            assert [f.name for f in mdb.rab_read(files[image]).files] == [e5c.thumb_name(r.items[2]) for r in rows]
         for lang, rel in e5c.TEXTS.items():
             text = sgo.read(files[rel])[1]
             for kind in e5c.RANGE.kinds:
