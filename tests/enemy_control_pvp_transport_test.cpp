@@ -165,7 +165,8 @@ void TestTypedGeneratorAndMirrors() {
     edf::Put<void*>(generator.bytes,0xE0,other.bytes);
     CHECK(crew::EnemyControlTransportPvpRead(mirror,&team)==crew::controlled_pvp::Life::invalid);
     CHECK(!crew::EnemyControlTransportPvpWrite(mirror,1));edf::Put<void*>(generator.bytes,0xE0,hull.bytes);
-    CHECK(!crew::EnemyControlTransportPvpWrite(mirror,7));CHECK(crew::EnemyControlTransportPvpWrite(mirror,1));
+    CHECK(crew::EnemyControlTransportPvpWrite(mirror,7));CHECK(edf::At<int>(generator.bytes,0xC0)==7); // EDF 2's team (pvp_match.h)
+    CHECK(!crew::EnemyControlTransportPvpWrite(mirror,crew::team_native::kTeamCapacity));CHECK(crew::EnemyControlTransportPvpWrite(mirror,1));
     CHECK(edf::At<LONG>(hull.control,12)==2 && edf::At<LONG>(generator.control,12)==2);
     crew::EnemyControlTransportPvpReset();CHECK(edf::At<LONG>(hull.control,12)==1 && edf::At<LONG>(generator.control,12)==1);
 }

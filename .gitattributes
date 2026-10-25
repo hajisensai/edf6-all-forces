@@ -11,6 +11,7 @@ edf41port/outfits/**/*.members.json -text
 # Byte-exact generated proof manifests and their hashed native-profile input.
 src/enemy_control_ported_spawn_profiles.inc text eol=lf
 src/enemy_control_pvp_spawn_profiles.inc text eol=lf
+src/pvp_units.inc text eol=lf
 src/enemy_control_native_profiles.inc -text
 
 # Model pack files are hashed byte-exactly (pylib/modelpack.py): no autocrlf on a checkout of models/.

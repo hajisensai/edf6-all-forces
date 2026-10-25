@@ -7,7 +7,10 @@
 #include "crew.h"
 #include "edf41classes.h"
 #include "memory.h"
+#include "team_walk.h"
 #include "mission_participants.h"
+#include "pvp_match.h"
+#include "team_native.h"
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -19,18 +22,19 @@ constexpr std::size_t kUser=0x1ED0,kUserCtrl=0x1ED8,kHumanVehicle=0x1548;
 constexpr std::size_t kWeapons=0x1950,kWeaponCount=0x1960,kLastTeam=0x318;
 constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
 constexpr unsigned kMaxActors=32,kMaxObjects=2304,kMaxSupportOwned=2048;
-constexpr std::uint32_t kRegistered=0x40,kNotCounted=0x2000;
+// kNoTarget: the native enemy walk 0x5E0F20 skips an object with it (0x5E0FBF): a commander is nobody's target.
+constexpr std::uint32_t kRegistered=0x40,kNotCounted=0x2000,kNoTarget=0x80;
 constexpr unsigned char kEnumSignature[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83};
 constexpr unsigned char kSetTeamSignature[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
 constexpr unsigned char kLockSignature[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C};
 struct Player { ObjRef ref{}; int index=-1; char puid[65]{}; int team=0; };
-struct Desired { ObjRef ref{}; int team=0; bool player=false,vehicle=false; };
+struct Desired { ObjRef ref{}; int team=0; bool player=false,vehicle=false,commander=false; };
 struct DriverOwner { ObjRef vehicle{},driver{};char puid[65]{}; };
 struct Collection { Player players[kMaxActors]{}; unsigned count=0,expected=0; Desired objects[kMaxObjects]{}; unsigned objectsCount=0; bool failed=false; DriverOwner sourceOwners[kMaxActors]{};unsigned sourceCount=0; };
 struct Saved {
     ObjRef ref{};
     int originalTeam=0,originalLastTeam=0,assignedTeam=0;
-    bool originalRegistered=false,originalNotCounted=false,changed=false,vehicle=false,emittersApplied=false;
+    bool originalRegistered=false,originalNotCounted=false,originalNoTarget=false,changed=false,vehicle=false,emittersApplied=false;
     void* lockPoint=nullptr;
     unsigned wanted=0;
     char sourceOwner[65]{};ObjRef sourceDriver{};
@@ -113,6 +117,12 @@ int TeamFor(const pvp_protocol::State& state,const char* puid) noexcept {
     for(unsigned i=0;i<state.count;++i)if(!std::strcmp(state.entries[i].puid,puid))return state.entries[i].team;
     return 0;
 }
+// The member plays the commander (pvp_match.h Role): the M map's view, no target for anyone's AI or lock.
+bool CommanderFor(const pvp_protocol::State& state,const char* puid) noexcept {
+    for(unsigned i=0;i<state.count;++i)if(!std::strcmp(state.entries[i].puid,puid))
+        return state.entries[i].role==static_cast<std::uint8_t>(pvp_match::Role::commander);
+    return false;
+}
 bool AddVehicleCrew(Collection& c,unsigned char* vehicle,int team) noexcept {
     if(!vehicle || !Readable(vehicle,kSeatCount+8) || !AddObject(c,vehicle,team,false,true))return false;
     const unsigned seats=SeatCount(vehicle);
@@ -162,7 +172,7 @@ bool AppendOwnedSupport(Collection& c,const pvp_protocol::State& state) noexcept
         if(identity==enemy_identity::State::unknown)return false;
         if(identity==enemy_identity::State::gone || !Live(owner.ref))continue;
         const int team=TeamFor(state,owner.puid);
-        if(team!=1 && team!=2)continue; // disconnected owner: old Saved state is restored outside the desired set
+        if(!pvp_match::PvpTeam(team))continue; // disconnected owner: old Saved state is restored outside the desired set
         const auto* object=static_cast<const unsigned char*>(owner.ref.obj);
         if(IsSoldierClass(object)) {
             if(!AddObject(c,object,team,true) || !AddRide(c,object,team))return false;
@@ -191,7 +201,7 @@ bool Collect(const pvp_protocol::State& state,Collection& c) noexcept {
     const auto* status=At<const unsigned char*>(image,kGameStatus);
     if(!Readable(manager,0x50) || !Readable(status,0x14FFC))return false;
     c.expected=At<unsigned>(status,0x14FF8);
-    if(!c.expected || c.expected>kMaxActors || !Readable(At<void*>(manager,0x38),7*0x38))return false;
+    if(!c.expected || c.expected>kMaxActors || !team_walk::WalkRows(manager))return false;
     Visitor visitor{kVisitorVtable,&c};
     reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kEnumAllTeams)(manager,&visitor);
     if(c.failed || c.count!=c.expected || At<void*>(image,kTeamManager)!=manager ||
@@ -203,10 +213,12 @@ bool Collect(const pvp_protocol::State& state,Collection& c) noexcept {
         if(!Live(c.players[i].ref) || !resolve(c.players[i].index,&who) || !PuidValid(who.id))return false;
         std::memcpy(c.players[i].puid,who.id,sizeof(who.id));
         const int team=TeamFor(state,who.id);
-        if(team!=1 && team!=2)return false;
+        if(!pvp_match::PvpTeam(team))return false;
         c.players[i].team=team;
         for(unsigned j=0;j<state.count;++j)if(!std::strcmp(state.entries[j].puid,who.id))found[j]=true;
         if(!AddObject(c,c.players[i].ref.obj,team,true))return false;
+        if(CommanderFor(state,who.id))
+            for(unsigned j=0;j<c.objectsCount;++j)if(c.objects[j].ref.obj==c.players[i].ref.obj)c.objects[j].commander=true;
     }
     for(unsigned i=0;i<state.count;++i)if(!found[i])return false;
     for(unsigned i=0;i<c.count;++i)
@@ -257,7 +269,7 @@ int RadarFriendTeam(const void* hud,int requested) noexcept {
         const ObjRef identity{object,control};
         if(Live(identity) && IsSoldierClass(object) && IsAnyPlayer(object)) {
             const int team=At<int>(object,kTeam);
-            if(team==1 || team==2)selected=team;
+            if(pvp_match::PvpTeam(team))selected=team;
         }
     } __finally {ReleaseStrong(control);}
     return selected;
@@ -283,7 +295,7 @@ bool SetLastTeam(const ObjRef& ref,int team) noexcept;
 int VehicleAssignedTeam(const void* vehicle,int fallback) noexcept {
     if(!radarActive.load(std::memory_order_acquire))return fallback;
     const Saved* item=Find(ObjRef::Of(vehicle));
-    return item && item->changed && item->vehicle && (item->assignedTeam==1 || item->assignedTeam==2) ? item->assignedTeam : fallback;
+    return item && item->changed && item->vehicle && pvp_match::PvpTeam(item->assignedTeam) ? item->assignedTeam : fallback;
 }
 void __fastcall RecomputeVehicleTeam(void* vehicle,int nativeTeam,bool registered) noexcept {
     int selected=nativeTeam;
@@ -358,7 +370,7 @@ bool SetNativeTeam(const ObjRef& ref,int team,bool registered) noexcept {
     return Live(ref) && At<int>(object,kTeam)==team && ((At<std::uint32_t>(object,kObjectFlags)&kRegistered)!=0)==registered;
 }
 bool SetLastTeam(const ObjRef& ref,int team) noexcept {
-    if(!Live(ref) || team < -1 || team>=7)return false;
+    if(!Live(ref) || team < -1 || team>=team_native::kTeamCapacity)return false;
     auto* field=static_cast<unsigned char*>(const_cast<void*>(ref.obj))+kLastTeam;
     if(!Readable(field,4,true))return false;
     Put<int>(field,0,team);return Live(ref) && At<int>(field,0)==team;
@@ -487,7 +499,8 @@ bool Restore(Saved& item) noexcept {
         {
             auto* object=const_cast<void*>(item.ref.obj);
             const auto flags=At<std::uint32_t>(object,kObjectFlags);
-            Put<std::uint32_t>(object,kObjectFlags,item.originalNotCounted ? flags|kNotCounted : flags&~kNotCounted);
+            const std::uint32_t counted=item.originalNotCounted ? flags|kNotCounted : flags&~kNotCounted;
+            Put<std::uint32_t>(object,kObjectFlags,item.originalNoTarget ? counted|kNoTarget : counted&~kNoTarget);
         }
         item.changed=false;
     }
@@ -528,15 +541,21 @@ bool ApplyCollected(Collection& c) noexcept {
         }
         if(!item.changed) {
             item.originalTeam=At<int>(item.ref.obj,kTeam);item.originalLastTeam=At<int>(item.ref.obj,kLastTeam);
-            if(item.originalTeam < -1 || item.originalTeam>=7 || item.originalLastTeam < -1 || item.originalLastTeam>=7)return false;
+            if(item.originalTeam < -1 || item.originalTeam>=team_native::kTeamCapacity || item.originalLastTeam < -1 ||
+               item.originalLastTeam>=team_native::kTeamCapacity)return false;
             const auto flags=At<std::uint32_t>(item.ref.obj,kObjectFlags);
             item.originalRegistered=(flags&kRegistered)!=0;item.originalNotCounted=(flags&kNotCounted)!=0;
+            item.originalNoTarget=(flags&kNoTarget)!=0;
             item.changed=true;
         }
         const bool registered=desired.player || desired.vehicle || item.originalRegistered;
         if(!SetNativeTeam(item.ref,desired.team,registered) || !SetLastTeam(item.ref,desired.team))return false;
         auto* object=const_cast<void*>(item.ref.obj);
-        Put<std::uint32_t>(object,kObjectFlags,At<std::uint32_t>(object,kObjectFlags)|kNotCounted);
+        {
+            const std::uint32_t flags=At<std::uint32_t>(object,kObjectFlags)|kNotCounted;
+            const bool noTarget=desired.commander || item.originalNoTarget;
+            Put<std::uint32_t>(object,kObjectFlags,noTarget ? flags|kNoTarget : flags&~kNoTarget);
+        }
         if(!Weapons(desired,desired.team))return false;
         item.emittersApplied=true;
         if(desired.player) {
@@ -549,7 +568,7 @@ bool ApplyCollected(Collection& c) noexcept {
             if(!std::isfinite(position[0]+position[1]+position[2]))return false;
             edf41c::SetLockPoint(item.lockPoint,position);
             Put<unsigned char>(item.lockPoint,0x29,(At<std::uint32_t>(human,kObjectFlags)&kRegistered) ? 1 : 0);
-            const bool lockEnabled=!human[kDead] && At<int>(human,kTeam)!=-1;
+            const bool lockEnabled=!human[kDead] && At<int>(human,kTeam)!=-1 && !desired.commander;
             Put<unsigned char>(item.lockPoint,0x2A,lockEnabled ? 1 : 0);
         }
     }
@@ -558,9 +577,15 @@ bool ApplyCollected(Collection& c) noexcept {
     return true;
 }
 bool ApplyChecked(const pvp_protocol::State& state) noexcept {
-    if(!state.enabled){radarActive.store(false,std::memory_order_release);if(!RestoreAll())return false;activeState=state;return true;}
+    if(!state.enabled) {
+        radarActive.store(false,std::memory_order_release);
+        if(!RestoreAll())return false;
+        ClearTeamOverlay();activeState=state;return true;
+    }
     Collection collection{};
     if(!Collect(state,collection))return false;
+    // The match's relations before any member moves onto a faction team (team_native.h: written again after resets).
+    if(!SetTeamOverlay(pvp_match::TeamOverlay(state.relations)))return false;
     if(!ApplyCollected(collection))return false;
     activeState=state;radarActive.store(true,std::memory_order_release);return true;
 }
@@ -575,6 +600,8 @@ bool InstallPvpNative() noexcept {
 bool PvpNativePrepare(const pvp_protocol::State& state) noexcept {
     __try {
         if(!state.enabled)return true;
+        // Every faction team is a row of this machine's manager (team_native.cpp InstallTeamCapacity).
+        if(NativeTeamRows()!=team_native::kTeamCapacity || !state.relations.Valid())return false;
         Collection collection{};
         return Collect(state,collection);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -586,8 +613,9 @@ bool PvpNativeApply(const pvp_protocol::State& state) noexcept {
         // A requested baseline restore must never reactivate the old PVP state.
         // Keep Saved originals/weak identities for Protocol::Restoring's next frame.
         if(!state.enabled){activeState={};radarActive.store(false,std::memory_order_release);return false;}
-        RestoreAll();activeState={};radarActive.store(false,std::memory_order_release);
-        if(previous.enabled && !ApplyChecked(previous)){RestoreAll();activeState={};radarActive.store(false,std::memory_order_release);}
+        if(RestoreAll())ClearTeamOverlay();
+        activeState={};radarActive.store(false,std::memory_order_release);
+        if(previous.enabled && !ApplyChecked(previous)){if(RestoreAll())ClearTeamOverlay();activeState={};radarActive.store(false,std::memory_order_release);}
         return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){ResetPvpNative();return false;}
 }
@@ -597,7 +625,8 @@ bool PvpNativeTick() noexcept {
         if(!activeState.enabled)return true;
         Collection collection{};
         if(Collect(activeState,collection) && ApplyCollected(collection))return true;
-        RestoreAll();activeState={};radarActive.store(false,std::memory_order_release);return false;
+        if(RestoreAll())ClearTeamOverlay();
+        activeState={};radarActive.store(false,std::memory_order_release);return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){ResetPvpNative();return false;}
 }
 void ResetPvpNative() noexcept {
@@ -609,6 +638,7 @@ void ResetPvpNative() noexcept {
         Log("PVP original native teams not yet restored; retaining weak identities and original state");
         activeState={};radarActive.store(false,std::memory_order_release);return;
     }
+    ClearTeamOverlay();
     for(auto& item:saved)if(item.ref) {
         __try {ReleaseWeak(item);} __except(EXCEPTION_EXECUTE_HANDLER){item={};}
     }
@@ -616,7 +646,7 @@ void ResetPvpNative() noexcept {
 }
 bool PvpNativeAttachSupport(const char* puid,const ObjRef* objects,unsigned count,int team) noexcept {
     __try {
-        if(!PuidValid(puid) || !objects || !count || count>16 || (team!=0 && team!=1 && team!=2))return false;
+        if(!PuidValid(puid) || !objects || !count || count>16 || (team!=0 && !pvp_match::PvpTeam(team)))return false;
         if(!team && activeState.enabled)return false;
         if(team && (!activeState.enabled || TeamFor(activeState,puid)!=team))return false;
         unsigned slots[16]{};unsigned additions=0;

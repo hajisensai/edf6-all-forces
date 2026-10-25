@@ -356,7 +356,11 @@ support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalo
     if(team<0)return support_net::PlanResult::refused; // an unconfirmed transition must not silently create stock-team support
     const bool ownership=session.PeersHaveDetails(support_net::kDetailPvpSupport);
     if(team && !ownership)return support_net::PlanResult::refused;
-    const auto result=hooks.planForRequester ? hooks.planForRequester(peer,catalog,target,loadout,out) :
+    // A PvP member's own unit: only in a committed match, owned by that member, on their faction's team.
+    const bool unit=catalog==debugspawn::kPvpUnitCatalog;
+    if(unit && (!team || !ownership))return support_net::PlanResult::refused;
+    const auto result=unit ? PlanPvpUnit(peers[peer].id,target,loadout,out) :
+        hooks.planForRequester ? hooks.planForRequester(peer,catalog,target,loadout,out) :
         hooks.plan ? hooks.plan(catalog,target,loadout,out) : support_net::PlanResult::refused;
     if(result!=support_net::PlanResult::ready)return result;
     if(ownership) {
@@ -365,6 +369,14 @@ support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalo
     }
     return PvpValidateSupportPlan(*out) ? result : support_net::PlanResult::refused;
 }
+}
+bool SupportPlanRequesterIsLocal(const support_net::Plan& plan) noexcept {
+    unsigned char local[32]{};
+    __try {
+        const unsigned char* human=PlayerHuman();
+        if(!human || !ReadNativeObjectId(human,local))return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    return std::memcmp(local,plan.requester,sizeof(local))==0;
 }
 bool SupportAuthenticatedRequester(std::uint32_t peer,ObjRef* out) noexcept {
     if(!out)return false;
@@ -376,19 +388,21 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
     auto combined=hooks;
     combined.plan=[](std::uint32_t catalog,const float* target,std::uint64_t loadout,support_net::Plan* out) noexcept {
         if(catalog==debugspawn::kNetworkCatalog)return PlanRangeEnemy(catalog,target,loadout,out);
+        if(catalog==debugspawn::kPvpUnitCatalog)return support_net::PlanResult::refused;   // a member's own: PlanForRequester
         return hooks.plan ? hooks.plan(catalog,target,loadout,out) : support_net::PlanResult::refused;
     };
     combined.planForRequester=&PlanForRequester;
     combined.prepare=[](const support_net::Plan& plan) noexcept {   // the range's rows load before READY (debug_spawn.cpp)
-        return plan.catalogId==debugspawn::kNetworkCatalog ? PrepareRangeEnemy(plan) :
+        return debugspawn::NetworkCatalog(plan.catalogId) ? PrepareRangeEnemy(plan) :
             hooks.prepare ? hooks.prepare(plan) : support_net::PlanResult::ready;
     };
     combined.validate=[](const support_net::Plan& plan) noexcept {
+        if(plan.catalogId==debugspawn::kPvpUnitCatalog)return PvpValidateSupportPlan(plan) && ValidateRangeEnemy(plan);
         return plan.catalogId==debugspawn::kNetworkCatalog ? ValidateRangeEnemy(plan) :
             PvpValidateSupportPlan(plan) && hooks.validate && hooks.validate(plan);
     };
     combined.spawn=[](std::uint64_t token,const support_net::Plan& plan,bool remote) noexcept {
-        return plan.catalogId==debugspawn::kNetworkCatalog ? SpawnRangeEnemy(token,plan,remote) : hooks.spawn && hooks.spawn(token,plan,remote);
+        return debugspawn::NetworkCatalog(plan.catalogId) ? SpawnRangeEnemy(token,plan,remote) : hooks.spawn && hooks.spawn(token,plan,remote);
     };
     combined.destroy=[](std::uint64_t token) noexcept {
         DestroyRangeEnemy(token);

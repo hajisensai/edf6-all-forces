@@ -518,6 +518,7 @@ void Publish(const Game& g,const unsigned char* human,const float* eye,const flo
     ReleaseSRWLockExclusive(&lock);
 }
 
+std::atomic<bool> commander{false};
 // The map shut (any reason but a closing key: that one drains first, see Frame); its hold let go.
 void Close(const char* why) noexcept {
     if(game.draining){game.draining=false;holds.store(false);}
@@ -662,8 +663,9 @@ bool Frame(unsigned char* human) noexcept {
         Log("MAP key edge: map %d, pad map %d, stats %d, esc %d, pad close %d (open %d, front %d, pad read %d)",k.map && !game.was.map,
             k.padMap && !game.was.padMap,stats,k.esc && !game.was.esc,k.padClose && !game.was.padClose,game.open,front,pad);
     game.was=k;
+    const bool keepOpen=commander.load(std::memory_order_acquire);   // a PvP commander's view: the map keys do not shut it
     if(game.open && stats && !DamageStatsShown())DamageStatsShow(true);
-    else if(game.open && (toggle || close || stats)) {
+    else if(game.open && (stats || (!keepOpen && (toggle || close)))) {
         Close(close ? "Esc / B" : stats ? "the stats key" : "the map key");
         // The key that closed it is still down: let through now, the stock pad read would take this frame's B as the
         // vehicle's or the soldier's (the seat switch, a stock B action), Esc as the pause menu's. The hold stays on
@@ -675,7 +677,7 @@ bool Frame(unsigned char* human) noexcept {
         game.draining=false;holds.store(false);
     }
     if(!game.open) {
-        if(!toggle && !stats)return false;
+        if(!toggle && !stats && !keepOpen)return false;
         Open(human);
         DamageStatsShow(stats);
         game.pad=k.padMap && !k.map && !stats;
@@ -1002,6 +1004,7 @@ bool MapPadState(std::uint16_t* buttons,std::uint8_t* leftTrigger,std::uint8_t* 
     *buttons=s.Gamepad.wButtons;*leftTrigger=s.Gamepad.bLeftTrigger;*rightTrigger=s.Gamepad.bRightTrigger;
     return true;
 }
+void MapSetCommander(bool on) noexcept { commander.store(on,std::memory_order_release); }
 }  // namespace crew
 
 // EDF6AutoTurret asks whether the map holds the keys before it reads its own (common/edf/aimlink.h InputHeldV1).
