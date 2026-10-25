@@ -165,10 +165,20 @@ int UnlockMode() {
     Check(Run(caller,FreshRows(5),1)==stock,"only at the scan's first row");
     Put<void*>(image,kGameStatus,e41.gs);
     Check(Run(caller,FreshRows(3))==std::vector<int>({1,1,1}),"EDF4.1 Mission Pack 2 opened");
-    for(ModeFixture* other:{&edf6,&range,&dlc}) {
+    for(ModeFixture* other:{&edf6,&dlc}) {
         Put<void*>(image,kGameStatus,other->gs);
-        Check(Run(caller,FreshRows(5))==stock,"EDF6's story, the test range, EDF6's DLC: stock");
+        Check(Run(caller,FreshRows(5))==stock,"EDF6's story, EDF6's DLC: stock");
     }
+    // The test range's rows (the range, then the PvP presets) never end, so all of them are open whatever the key.
+    Put<void*>(image,kGameStatus,range.gs);
+    for(const bool key:{true,false}) {
+        config.portedMissionsUnlocked=key;
+        const auto rows=Run(caller,FreshRows(5));
+        bool open=rows.size()==5;
+        for(int r:rows)open=open && r!=4;
+        Check(open,"the test range: every row open");
+    }
+    config.portedMissionsUnlocked=true;
     Put<void*>(image,kGameStatus,e5.gs);
     auto odd=FreshRows(4);
     odd[2].state=1;
@@ -189,7 +199,12 @@ int UnlockMode() {
     config.portedMissionsUnlocked=true;
     Check(Run(caller,FreshRows(5))==std::vector<int>({1,1,3,2,3}),"key on: every row open but the placeholders");
     Put<void*>(image,kGameStatus,range.gs);
-    Check(Run(caller,FreshRows(5))==std::vector<int>({1,4,3,4,3}),"the test range's placeholders too (no unlock there)");
+    {
+        // The test range's rows are all open (none ever ends), its placeholders still locked.
+        const auto rows=Run(caller,FreshRows(5));
+        Check(rows.size()==5 && rows[2]==3 && rows[4]==3 && rows[0]!=4 && rows[1]!=4 && rows[3]!=4,
+              "the test range's placeholders locked, its other rows open");
+    }
     // A placeholder cleared before its resources went missing is not cleared now (it would be shown selectable);
     // any other row keeps the prior's answer.
     Put<void*>(image,kGameStatus,e5.gs);
