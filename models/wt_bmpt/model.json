@@ -220,8 +220,8 @@
    "name": "cannon_l.wt_bmpt_terminator_gun_c_ussr_camo_green",
    "bone": "cannon_l",
    "material": 12,
-   "triangles": 20839,
-   "vertices": 18136
+   "triangles": 33821,
+   "vertices": 34915
   },
   {
    "name": "cannon_l.wt_mg_pkt_c",
@@ -229,6 +229,20 @@
    "material": 14,
    "triangles": 1424,
    "vertices": 1819
+  },
+  {
+   "name": "cannon_l.wt_9m114_9m120_c",
+   "bone": "cannon_l",
+   "material": 15,
+   "triangles": 34520,
+   "vertices": 37992
+  },
+  {
+   "name": "cannon_l.wt_headlight_glass_c_1",
+   "bone": "cannon_l",
+   "material": 16,
+   "triangles": 920,
+   "vertices": 680
   },
   {
    "name": "cannon_main.wt_us_turret_glass_c",
@@ -250,27 +264,6 @@
    "material": 10,
    "triangles": 12,
    "vertices": 16
-  },
-  {
-   "name": "cannon_main.wt_bmpt_terminator_gun_c_ussr_camo_green",
-   "bone": "cannon_main",
-   "material": 12,
-   "triangles": 12982,
-   "vertices": 16779
-  },
-  {
-   "name": "cannon_main.wt_9m114_9m120_c",
-   "bone": "cannon_main",
-   "material": 15,
-   "triangles": 34520,
-   "vertices": 37992
-  },
-  {
-   "name": "cannon_main.wt_headlight_glass_c_1",
-   "bone": "cannon_main",
-   "material": 16,
-   "triangles": 920,
-   "vertices": 680
   },
   {
    "name": "cannon_slide_l.wt_bmpt_2a42_twingun_c_ussr_camo_green",
@@ -786,7 +779,7 @@
   ],
   "missiles": [
    {
-    "bone": "cannon_main",
+    "bone": "cannon_l",
     "point": [
      0.9892509999999999,
      2.3661060000000003,
@@ -794,7 +787,7 @@
     ]
    },
    {
-    "bone": "cannon_main",
+    "bone": "cannon_l",
     "point": [
      0.989611,
      2.65138,
@@ -802,7 +795,7 @@
     ]
    },
    {
-    "bone": "cannon_main",
+    "bone": "cannon_l",
     "point": [
      -0.9713719999999999,
      2.366103,
@@ -810,7 +803,7 @@
     ]
    },
    {
-    "bone": "cannon_main",
+    "bone": "cannon_l",
     "point": [
      -0.9725599999999999,
      2.651293,

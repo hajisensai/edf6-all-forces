@@ -38,7 +38,14 @@ class PrepRuleTests(unittest.TestCase):
         self.assertEqual(prep.bone_of(b, 'wheel_l_top_02'), 'body')           # return rollers do not turn
         self.assertEqual(prep.bone_of(b, 'gun_barrel_02'), 'cannon_slide_l')  # +x is the vehicle's left
         self.assertEqual(prep.bone_of(b, 'bone_turret_03'), 'body')           # the hull's grenade launchers
-        self.assertEqual(prep.bone_of(b, '9m120_rocket'), 'cannon_main')
+        # docs/feedback-2026-10-25-missiles.md: the Ataka launchers (tubes and brackets) elevate with the weapon module,
+        # the missiles' holder their bone: the rounds leave along the guns' line, not level with the hull
+        for name in ('9m120_rocket', 'gun_mask_03', 'gun_mask_04'):
+            self.assertEqual(prep.bone_of(b, name), 'cannon_l', name)
+        self.assertEqual(b.missile_bone, 'cannon_l')
+        for v in prep.VEHICLES.values():
+            if v.missiles and v is not b:
+                self.assertEqual(prep.bone_of(v, v.missiles), v.missile_bone, v.kind)
         # docs/feedback-2026-10-25-model-rigs.md: the PzH 2000's dust cover elevates with the gun, the Sturmtiger's
         # roof hatches stay on the hull (its radar bones ride the mortar's traverse)
         z, s = prep.PZH2000, prep.STURMTIGER
