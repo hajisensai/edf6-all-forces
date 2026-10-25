@@ -167,6 +167,11 @@ class Missile:
     burst_gap: float = 10.0   # frames between them
     interval: float = 45.0    # frames from one shot (or salvo) to the next
     eject: float = 0.3    # m a frame it leaves the rail at, along the launcher's nose, over the launcher's velocity
+    # rad: FireAccuracy, the half angle of the cone a round leaves its rail in (fire 0x691B02 -> 0x4E820: polar angle
+    # uniform in [0, it]; src/launcher.cpp Cone). A rail sets the missile's line: none. The helicopter template's 0.3
+    # (17 deg) is a stock pursuit missile's spray; kept, it sent a ground launcher's missiles into the ground at its
+    # feet and its 12 m blast onto itself (the user, 2026-10-25: 「bmpt的飞弹怎么会往地里射？天启也会射到自己身上导弹」).
+    spread: float = 0.0
     guided: bool = True   # False: an unguided rocket (no lock: src/missile.cpp only burns its motor, it flies straight)
     # The stock weapon (Root.cpk WEAPON) whose muzzle list (animation_model[2], mab_muzzles) it fires from; None: the
     # helicopter missile's own four pod muzzles. Offsets are from the holder's bone: a gun-launched missile on a tank's
@@ -178,7 +183,7 @@ class Missile:
         return {'AmmoSpeed': self.eject, 'AmmoOwnerMove': 1.0, 'AmmoGravityFactor': 0.0, 'AmmoAlive': self.life * 60.0,
                 'AmmoDamage': self.damage, 'AmmoExplosion': self.blast, 'AmmoCount': float(rounds),
                 'FireBurstCount': self.burst, 'FireBurstInterval': self.burst_gap, 'FireInterval': self.interval,
-                'LockonRange': self.lock_range, 'LockonTime': self.lock_time,
+                'FireAccuracy': self.spread, 'LockonRange': self.lock_range, 'LockonTime': self.lock_time,
                 # A lock lives while its target stays in the cone (Lockon_AutoTimeOut 0: the hold timer restarts
                 # there) and LockonHoldTime frames once it leaves: the nose on another, it locks that one
                 # (docs/stores-re.md §7; stock: 600 frames whatever the nose does, no switching).
@@ -408,7 +413,7 @@ STORES: dict[str, Store] = {
     # the nose. A round's mass and drag carry its pod's share. About 1.4 m with its M151 warhead (the Mk 66 motor 1.06 m).
     'RKT': Store('Hydra 70', 'rocket', 32.0, 0.0015, Missile('Hydra 70', Look('bullet_rocket', 1.4), burn=1.1, top=740.0,
                  accel=650.0, max_g=1.0, nav=1.0, life=6.0, damage=250.0, blast=6.0, lock_range=0.0, lock_cone=0.3, lock_time=0.0,
-                 burst=4.0, burst_gap=4.0, interval=20.0, eject=0.6, guided=False)),
+                 burst=4.0, burst_gap=4.0, interval=20.0, eject=0.6, spread=0.006, guided=False)),
     # --- the stock vehicles' rounds (tools/make_stock_stores.py LOADOUTS; docs/feedback-2026-10-09-loadcamp.md) ---
     # A main battle tank's armour-piercing round: the Blacker A's 90 mm smooth-bore round (V_505TANK_CANNON01S:
     # SolidBullet01Rail, 18 m a frame = 1080 m/s, a tenth of gravity, penetrating, no blast, 350): the stock A series.
