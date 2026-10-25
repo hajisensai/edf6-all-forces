@@ -42,7 +42,7 @@ float TopOf(const unsigned char* v) noexcept {
     if(BodyOf(v)!=PluginBody::none || IsHelicopter(v) || IsPlayerJet(v) || IsSub(v) || IsEmplacement(v))return 0.0f;
     const char* const name=VehicleClassName(v);
     if(Named(name,{"403_Tank","404_Tank","505_Tank","510_Maser","601_Tank","603_Flak"}))return vmix::kHeavy.topSpeed;
-    if(Named(name,{"402_Rocket","Car"}))return vmix::kLight.topSpeed;
+    if(Named(name,{"402_Rocket","Car","607_RoboTruck","60X_Truck","507_Rescuetank"}))return vmix::kLight.topSpeed;
     if(Named(name,{"503_Bike","511_Bike"}))return vmix::kBike.topSpeed;
     return 0.0f;
 }
@@ -105,7 +105,10 @@ DriveGearInput::DriveGearInput(unsigned char* v) noexcept {
 }
 DriveGearInput::~DriveGearInput() noexcept {
     __try {
-        if(seat_ && At<const void*>(vehicle_,kSelfCtrl)==ctrl_)Put<float>(seat_,kSeatLY,saved_);
+        // A seat switch this frame zeroed the seat the player left: hand the keys back only to a seat he still drives.
+        const auto human=PlayerHuman();
+        if(seat_ && At<const void*>(vehicle_,kSelfCtrl)==ctrl_ && human && SeatRider(seat_)==Rider::player &&
+           At<const void*>(seat_,kSeatRider)==human)Put<float>(seat_,kSeatLY,saved_);
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 
