@@ -1099,6 +1099,9 @@ add_test(NAME edf41mech_boost COMMAND edf41mech_boost_test)
 add_dependencies(offline_checks edf41mech_boost_test)
 add_test(NAME edf41mech_boost_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41mech_boost_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(edf41mech_boost_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
+# V301 on Vehicle601_Tank (pylib/edf41tank.py CLASS_POSED): the class turns the gun bone's local in place each frame.
+add_test(NAME edf41tank_pose_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/edf41tank_pose_native_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(edf41tank_pose_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 # The stock join mark (hidden while the map recruits) and the free-squad cover a recruited squad keeps (src/npcai.cpp
 # InstallFreeSquadCover): the patched bytes and the original visit run on stand-ins against the real EDF.dll.
 add_test(NAME npc_cover_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_cover_native_audit.py" "${EDF6_NATIVE_DLL}")
@@ -1299,7 +1302,8 @@ add_test(NAME npc_gunners_online COMMAND npc_gunners_online_test)
 # tests/autopilot/drive.py); a MODULE into build/tools, never shipped:
 # cmake --build build --target EDF6Autopilot
 add_library(EDF6Autopilot MODULE EXCLUDE_FROM_ALL tests/autopilot/autopilot.cpp tests/autopilot/airdrop_probe.cpp
-            tests/autopilot/wdenergy_probe.cpp tests/autopilot/hector_probe.cpp tests/autopilot/players_probe.cpp)
+            tests/autopilot/wdenergy_probe.cpp tests/autopilot/hector_probe.cpp tests/autopilot/players_probe.cpp
+            tests/autopilot/umbra_probe.cpp)
 target_include_directories(EDF6Autopilot PRIVATE third_party/EDFModLoader)
 target_link_libraries(EDF6Autopilot PRIVATE edf6common psapi)
 target_include_directories(EDF6Autopilot PRIVATE common)
