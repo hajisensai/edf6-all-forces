@@ -1,5 +1,6 @@
 // Support deployment ownership is resolved from a live canonical native ID on
 // this machine. No PUID or team claimed by the support payload is authority.
+#include "pvp_match.h"
 #include "pvp.h"
 #include "pvp_native.h"
 #include "command_identity.h"
@@ -121,7 +122,7 @@ bool PvpInheritSupport(const ObjRef& parent,const ObjRef* children,unsigned coun
 }
 
 bool PvpValidateSupportPlan(const support_net::Plan& plan) noexcept {
-    if(!plan.count || plan.count>support_net::kMaxUnits || plan.team>2)return false;
+    if(!plan.count || plan.count>support_net::kMaxUnits || (plan.team && !pvp_match::PvpTeam(static_cast<int>(plan.team))))return false;
     // Old peers/planners have neither owner nor PvP metadata. They are safe
     // only while fully disabled, outside every mode/team transaction or restore.
     if(EmptyRequester(plan.requester))return plan.team==0 && PvpSupportTeam(nullptr)==0;

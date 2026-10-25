@@ -236,7 +236,7 @@ alone (`src/mission_packs.h` `MigrateModeSave`):
   the save had, and only when the save fits it (nothing past its rows);
   otherwise (`layout-unknown`: an older version uninstalled before this one, so no
   record) the save is left unmarked and unmoved: the player is told once a session
-  (「全军出击：任务包存档」) that clears past that row may be off. Nothing is guessed,
+  (the former「全军出击：任务包存档」popup, now only in the log) that clears past that row may be off. Nothing is guessed,
   so nothing wrong is made permanent; the game writes the next save with the rows now,
   still unmarked. Not covered: a save copied from another machine whose older list
   differed from this one's record (it is moved by this machine's record).

@@ -151,6 +151,7 @@ SupportPlan preparedSubPlan{};std::uint64_t preparedSubToken=0;
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept {preparedSubPlan=plan;return ++preparedSubToken;}
 unsigned char* PlayerHuman() noexcept {return objects[31];}
 int SupportAirCallCount() noexcept {return 21;}
+void SupportFollowUpQueue(int,const float*) noexcept {}   // a sortie's second wave (airstrike.cpp, not linked here)
 const wchar_t* SupportAirCallName(int) noexcept {return L"Heli";}
 const wchar_t* airKeys[21]={L"INTERCEPTOR",L"INTERCEPTOR_F",L"STRIKE",L"STRIKE_F",L"MULTIROLE",L"MULTIROLE_F",L"FIGHTER",L"FIGHTER_F",
     L"CARRIER",L"CARRIER_F",L"HELI",L"HELI_F",L"BLAST_CARRIER",L"BLAST_CARRIER_F",L"DOLL_CARRIER",L"DOLL_CARRIER_F",L"SUB",
@@ -412,7 +413,9 @@ int main() {
     check(!Validate(invalid),"a manifest cannot detach the specified crew from its aircraft");
     invalid=deployments[0].plan;invalid.count=1;
     check(!Validate(invalid),"a manned aircraft manifest cannot omit its real pilot");
-    check(!SupportCallAt(0,target,note,128),"successful deployment consumes cooldown");
+    // No cooldown after a delivery (2026-10-25, the user: 「支援调度 30 秒的全局冷却 删掉」): the next call is taken at once.
+    check(SupportCallAt(0,target,note,128) && SupportCallReadiness().state==SupportReady::planning,
+          "a call right after a delivery is taken (no cooldown)");
     ResetSupportDispatch();made=deleted=boardRequests=activated=0;terrain=false;fixtureMs+=40000;
     check(SupportCallAt(0,target,note,128),"invalid terrain request can be queued for explicit validation");
     SupportDispatchTick();check(!made && !offlinePending,"no safe entry refuses without spawning at target");
@@ -1136,8 +1139,7 @@ int main() {
     check(At<float>(objects[0],kPosition)==-1400 && activated==1 && lastAirborne,"made in the air at the edge entry, flying at once");
     check(rescueDeployed==1 && rescueFlown && rescueHeli==objects[0] && !std::memcmp(rescueTarget,sea,12) && rescueRequester.obj==objects[31],
           "handed to the rescue with the request's point, flown here, for this machine's player (the requester)");
-    check(deployments[0].delivered && callAt==0 && std::wcscmp(status,L"map line")==0,
-          "the rescue starts no cooldown and never writes the map's support line");
+    check(deployments[0].delivered && std::wcscmp(status,L"map line")==0,"the rescue never writes the map's support line");
     for(int i=0;i<3;++i){fixtureMs+=100;SupportDispatchTick();}
     check(heliCommands==0 && activated==1,"no arrival release, no second activation");
     {SupportPlan wrong=rp;wrong.count=4;wrong.units[3]=wrong.units[1];
@@ -1153,8 +1155,6 @@ int main() {
     check(SupportCallAt(21,target,note,128) && offlinePending,"a map call is planning its ground route");
     check(SupportRescueAt(sea,note,128) && made==3 && offlinePending && planning.catalog==21u,
           "a rescue meanwhile is made at once and leaves the map's planning as it was");
-    callAt=GameMs();
-    check(SupportRescueAt(sea,note,128),"the map's cooldown does not hold the rescue");
     routeResult=npc::navigation::Result::moving;
     missionEnvironment=support::Environment::noExternalSupport;
     ResetSupportDispatch();fixtureMs+=40000;made=0;

@@ -5,6 +5,7 @@
 #include <cstdint>
 
 namespace crew {
+enum class SortiePass : std::uint8_t;   // crew.h
 bool IsHelicopter(const void* vehicle) noexcept;
 // The player's board button pressed for them (the stock button's code: the nearest seat they may take in reach).
 void PressBoardButton(unsigned char* human) noexcept;
@@ -75,6 +76,10 @@ void HeliReap(const void* self) noexcept;
 // its weapons are not refilled, and out of ammo, after `fuelSec` or badly damaged it flies off away from the
 // player and is deleted far from them.
 void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSec) noexcept;
+// A called heli's sortie (after HeliCalled; docs/plan-2026-10-25-strikes.md §1.2): one pass of `pass` at `mark` from where it
+// is (the strafing pass along its heading, the missile hunter's station short of the mark, the circle round it), then it
+// leaves as a called heli does.
+void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept;
 // A called heli's fuel (game thread): seconds until it flies off (0: leaving); false with no limit.
 bool HeliFuel(const void* vehicle,float* sec) noexcept;
 // A called heli that has left and is far enough out to go (its reap is set). HeliReap deletes such a heli only with

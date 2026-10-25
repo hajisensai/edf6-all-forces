@@ -8,11 +8,17 @@ struct SupportAircraft {
     std::uint32_t fuelSeconds=0;
     bool follow=false;
     bool transportPlane=false; // the paratroop plane (jet_internal.h Body::transportPlane; jet and heli -1)
+    int sortie=0;              // a sortie call's pass (crew.h SortiePass; 0 none): one pass at the target, then away
 };
 int SupportAirCallCount() noexcept;
 const wchar_t* SupportAirCallName(int index) noexcept;
 const wchar_t* SupportAirCallKey(int index) noexcept;
 bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept;
+// A sortie's second wave (airstrike.cpp; tools/calls.py `then`): queued once this machine's request for `catalog` was
+// accepted, called onto `target` by this machine when due (the tick: crew.cpp SharedFrameTick); forgotten at a new mission.
+void SupportFollowUpQueue(int catalog,const float* target) noexcept;
+void SupportFollowUpTick() noexcept;
+void ResetSupportFollowUps() noexcept;
 // Whether call `catalog` brings the submarine carrier (no aircraft: SupportAircraftSpec is false for it; it surfaces,
 // support_call.h SupportSubCallAt).
 bool SupportSubCatalog(int catalog) noexcept;

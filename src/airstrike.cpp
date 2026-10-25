@@ -38,6 +38,7 @@
 // of the sky with no plane to take over, and stay stock.
 #include "crew.h"
 #include "call_net.h"
+#include "hudtext.h"
 #include "support_call.h"
 #include "support_aircraft.h"
 #include "support_entry.h"
@@ -48,8 +49,10 @@
 #include "weapon_records.h"
 #include <atomic>
 #include <cmath>
+#include <cstdarg>
 #include <cwchar>
 #include <optional>
+#include <vector>
 
 namespace crew {
 namespace {
@@ -60,6 +63,7 @@ constexpr float kAboveTarget=150.0f;
 // Ownership (docs/loadout-re.md 8): the game status, its weapon table (cfg = GS+0x130, the table loaded
 // once cfg+0x188 is set) and per row a record of 12 bytes, u32 flags (bit0 owned, bit2 NEW) and 8 star
 // bytes: 0x800 of them at GS+0xEB50 natively, wrec::kSlots relocated (weapon_records.h WeaponRecord).
+constexpr unsigned kClampStars=0xD7930;   // (GS*): every star byte clamped to its weapon's cap (RowCount loop)
 constexpr unsigned kUnlockDlc=0xDC550,kUnlockDlcCall=0xDC348,kUnlockDlcJump=0x70FF87;
 constexpr unsigned kRowCount=0xE23F0,kGetRow=0xE1CF0;
 constexpr std::size_t kCfg=0x130,kTableRef=0x188,kRecord=12;
@@ -92,8 +96,10 @@ using DeleteFn=void(*)(void*);
 // What a call brings: jets (`role`), helis (`body`; both made by the support deployment) or the submarine carrier
 // (a planned hull plus its real pilot); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
+// A sortie (docs/plan-2026-10-25-strikes.md §1.2): `sortie` its pass (crew.h SortiePass, 0 none), `then` the kCalls index of
+// its second wave (-1 none), called onto the same mark `thenMs` after this one was accepted (SupportFollowUpQueue).
 struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
-              bool follow; const char* name; const wchar_t* id; };
+              bool follow; const char* name; const wchar_t* id; int sortie; int then; DWORD thenMs; };
 // A weapon table row tools/call_weapons.py installs (a vehicle request too): its id, its SGO in Mods/WEAPON and
 // the object SGO a vehicle request brings in Mods/OBJECT (nullptr: none).
 struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* objectFile; };
@@ -102,6 +108,10 @@ struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* ob
 struct Throw { std::uint32_t markBits; ThrownDrone drone; DWORD fuelSec; const char* name; const wchar_t* id; };
 // An ultimate strike's weapon (tools/calls.py brings 'ultimate'): its AmmoHitSizeAdjust (an integer, as kCalls').
 struct Ultimate { float mark; const char* name; const wchar_t* id; };
+// A long-range barrage's weapon (tools/calls.py brings 'barrage'): its AmmoHitSizeAdjust, its kind (barrage_plan.h Kind) and
+// each round's damage (the plugin's own: the weapon's AmmoDamage is the stock bombers', who fly when the plugin does not
+// take the call: tools/call_weapons.py barrage_sgo).
+struct Barrage { float mark; int kind; float damage; const char* name; const wchar_t* id; };
 #include "calls.inc"
 // The in-mission pick (CallPick, overlay.cpp's keys): -1 = each weapon's own call; otherwise only local players'
 // call weapons bring kCalls[picked]. This UI preference is not carried in the native radio-call message.
@@ -246,13 +256,59 @@ bool EntryClear(const float* from,const float* to) noexcept {
     return true;
 }
 
+// The barrage weapon `w` is (its mark), or nullptr.
+const Barrage* BarrageOf(const unsigned char* w) noexcept {
+    if(!Readable(w+kWeaponHitSize,4))return nullptr;
+    const float mark=At<float>(w,kWeaponHitSize);
+    for(const auto& b:kBarrages)if(std::fabs(mark-b.mark)<0.5f)return &b;
+    return nullptr;
+}
+
+// The caller's HUD line for its strike calls (PlayerStrikeCue; hud.cpp StrikeBanner reads it on the draw thread).
+SRWLOCK strikeCueLock=SRWLOCK_INIT;
+wchar_t strikeCueText[200]{};
+ULONGLONG strikeCueAt=0;
+void StrikeCue(const wchar_t* format,...) noexcept {
+    wchar_t text[200];
+    va_list a;va_start(a,format);_vsnwprintf_s(text,_countof(text),_TRUNCATE,format,a);va_end(a);
+    AcquireSRWLockExclusive(&strikeCueLock);
+    std::memcpy(strikeCueText,text,sizeof(text));strikeCueAt=GetTickCount64();
+    ReleaseSRWLockExclusive(&strikeCueLock);
+}
+const wchar_t* BarrageWhy(BarrageResult r) noexcept {
+    using hudtext::Tx;
+    switch(r) {
+    case BarrageResult::noHook: return hudtext::Tr(Tx::barrageNoHook);
+    case BarrageResult::full: return hudtext::Tr(Tx::barrageFull);
+    case BarrageResult::noRounds: return hudtext::Tr(Tx::barrageNoRounds);
+    default: return hudtext::Tr(Tx::barrageNoTarget);
+    }
+}
+
 // The Air Raider's bomber call (redirected call at kRadioCall): IFC_Start(ifc = weapon+0x1660, params).
 // A call weapon's: its jets or helis, and no bombers (when none could be launched the bombers fly).
+// A barrage weapon's: its barrage (barrage.cpp) on every machine, each on its copy of the call (the radio callback is
+// replayed for remote players too), and no bombers. A barrage that could not start (every barrage slot taken, no flight
+// hook, no caller or target, no round planned) leaves the stock bombers to fly (the weapon is the KM6 call with its stock
+// damage: tools/call_weapons.py barrage_sgo), and the caller is told on the HUD.
 std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
     const auto result=reinterpret_cast<IfcStartFn>(image+kIfcStart)(ifc,params);
-    if(!Cfg().enabled || !Cfg().jetAirRaider)return result;
+    if(!Cfg().enabled)return result;
     __try {
         const auto owner=At<const unsigned char*>(params,0);   // params+0: owner weak pointer (docs/airstrike-re.md section 2)
+        const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
+        if(const Barrage* const b=BarrageOf(w)) {
+            const auto p=static_cast<const unsigned char*>(params);
+            const float* target=reinterpret_cast<const float*>(p+kStartTarget);
+            const float* heading=reinterpret_cast<const float*>(p+kStartForward);
+            const BarrageResult got=BarrageStart(b->kind,owner,target,heading,b->damage);
+            const bool started=got==BarrageResult::started;
+            if(started)Put<std::int32_t>(ifc,kIfcPlanes,0);   // the barrage instead of the stock bombers
+            else if(!InSession() || IsPlayer(owner))StrikeCue(hudtext::Tr(hudtext::Tx::barrageRefused),BarrageWhy(got));
+            Log("AIRSTRIKE barrage call %s: started=%d%s",b->name,started,started ? "" : " (the stock bombers fly instead)");
+            return result;
+        }
+        if(!Cfg().jetAirRaider)return result;
         const Call* const c=CallOf(ifc,owner);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
         if(c && std::isfinite(target[0]+target[1]+target[2])) {
@@ -582,11 +638,45 @@ Granted GrantCalls(unsigned char* gs,bool ported) noexcept {
     return out;
 }
 
+// AllWeaponsUnlocked: every row of the table (the relocated records past 0x800 too) owned at max stars, then the game's
+// own clamp to each weapon's cap (0xD7930, its loop runs to RowCount). A row whose cap is under 10 ends at its cap; a
+// star byte of a weapon that has fewer parameters than the record's 8 stays 10 (as the stock unlock_weapon command
+// leaves it). Returns the number of records that differ from before (-1: no table; -2: more rows than records, the
+// native clamp would run past them: nothing written).
+int GrantAll(unsigned char* gs) noexcept {
+    const std::uint32_t most=WeaponRecordCapacity();
+    unsigned char* const first=WeaponRecord(gs,0);
+    if(!first || !Readable(first,std::size_t{most}*kRecord,true) || !Readable(gs+kCfg+kTableRef,8))return -1;
+    void* const table=gs+kCfg;
+    if(!At<void*>(table,kTableRef))return -1;
+    const std::uint32_t n=reinterpret_cast<RowCountFn>(image+kRowCount)(table);
+    WeaponRecordsCheckRows(n);
+    if(n>most)return -2;
+    std::vector<unsigned char> before(std::size_t{n}*kRecord);
+    for(std::uint32_t id=0;id<n;++id)std::memcpy(&before[std::size_t{id}*kRecord],WeaponRecord(gs,id),kRecord);
+    alignas(8) unsigned char row[0x100];
+    for(std::uint32_t id=0;id<n;++id) {
+        reinterpret_cast<GetRowFn>(image+kGetRow)(table,row,id);
+        const auto name=At<const wchar_t*>(row,0);
+        if(!name || !Readable(name,sizeof(wchar_t)*16) || ported::Placeholder(name))continue;
+        ported::OwnMax(WeaponRecord(gs,id));
+    }
+    reinterpret_cast<UnlockFn>(image+kClampStars)(gs);
+    int changed=0;
+    for(std::uint32_t id=0;id<n;++id)
+        if(std::memcmp(&before[std::size_t{id}*kRecord],WeaponRecord(gs,id),kRecord)!=0)++changed;
+    return changed;
+}
+
 void Grant(unsigned char* gs) noexcept {
     __try {
         const bool ported=Cfg().portedWeaponsUnlocked;
         const Granted granted=GrantCalls(gs,ported);
         if(granted.calls>0)Log("CALLS %d call weapons owned now",granted.calls);
+        if(Cfg().allWeaponsUnlocked) {
+            const int all=GrantAll(gs);
+            Log("ALL weapons unlocked: %d records changed%s",all,all==-1 ? " (no weapon table yet)" : all==-2 ? " (more weapon rows than records: nothing written)" : "");
+        }
         if(ported)Log("PORTED weapons unlocked: %d owned now%s",granted.ported,granted.calls<0 ? " (no weapon table yet)" : "");
     } __except(EXCEPTION_EXECUTE_HANDLER){Log("CALLS granting failed");}
 }
@@ -661,7 +751,55 @@ bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept {
     const auto& c=kCalls[catalog];
     *out={c.role ? static_cast<int>(*c.role) : -1,c.body ? static_cast<int>(*c.body) : -1,
           c.count,c.fuelSec,c.follow};
+    out->sortie=c.sortie;
     return true;
+}
+
+// A sortie's second wave (Call::then): queued when this machine's request for the first was accepted (support_dispatch.cpp
+// SupportCallAt), called onto the same mark by this machine, the caller's, once due (SupportFollowUpTick: SharedFrameTick).
+// Due while the call before it is still being planned offline (SupportCallReadiness planning: the dispatcher takes one
+// request at a time, often the first wave itself), it waits for that plan and is called the frame it is over. Any other
+// refusal (the entry disabled in the ini, the mission's support rules, the plugin off, ...) would refuse it again: it is
+// given up at once and the caller told why on the HUD. Online `accepted` is this machine's request queued for the host: a
+// refusal there is the host's to say (support_net).
+namespace {
+struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; };
+FollowUp followUps[8]{};
+}  // namespace
+void SupportFollowUpQueue(int catalog,const float* target) noexcept {
+    if(catalog<0 || catalog>=kCallCount || kCalls[catalog].then<0 || !target)return;
+    for(auto& f:followUps)if(f.catalog<0) {
+        f.catalog=kCalls[catalog].then;std::memcpy(f.at,target,12);f.due=GameMs()+kCalls[catalog].thenMs;
+        Log("SUPPORT %s: its second wave (%s) in %lu s",kCalls[catalog].name,kCalls[f.catalog].name,kCalls[catalog].thenMs/1000);
+        return;
+    }
+    Log("SUPPORT %s: no room for its second wave (8 waiting)",kCalls[catalog].name);
+}
+void SupportFollowUpTick() noexcept {
+    const ULONGLONG ms=GameMs();
+    for(auto& f:followUps) {
+        if(f.catalog<0 || ms<f.due)continue;
+        if(SupportCallReadiness().state==SupportReady::planning) {   // the call before it still planned: its turn comes
+            if(!f.waited)Log("SUPPORT second wave %s: waiting for the call being planned",kCalls[f.catalog].name);
+            f.waited=true;
+            continue;
+        }
+        const FollowUp now=f;
+        f=FollowUp{};
+        wchar_t note[128]{};
+        const bool ok=SupportCallAt(now.catalog,now.at,note,_countof(note));   // a second wave has no wave of its own
+        Log("SUPPORT second wave %s: accepted=%d",kCalls[now.catalog].name,ok);
+        if(!ok)StrikeCue(hudtext::Tr(hudtext::Tx::followUpRefused),note[0] ? note : L"-");
+    }
+}
+void ResetSupportFollowUps() noexcept { for(auto& f:followUps)f=FollowUp{}; }
+bool PlayerStrikeCue(wchar_t* out,std::size_t capacity) noexcept {
+    constexpr ULONGLONG kShowMs=8000;
+    AcquireSRWLockShared(&strikeCueLock);
+    const bool fresh=strikeCueAt && GetTickCount64()-strikeCueAt<=kShowMs && out && capacity;
+    if(fresh)_snwprintf_s(out,capacity,_TRUNCATE,L"%ls",strikeCueText);
+    ReleaseSRWLockShared(&strikeCueLock);
+    return fresh;
 }
 int SupportAirCallCount() noexcept { return kCallCount; }
 // The call's configuration key: its weapon row id without EDF6VC_CALL_ (INTERCEPTOR, HELI_F, ...).

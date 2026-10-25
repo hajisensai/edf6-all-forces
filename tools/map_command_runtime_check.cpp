@@ -59,9 +59,18 @@ bool SetPvpEnabledAt(bool enabled,std::uint64_t epoch,std::uint32_t revision,con
     if(!pvpStateStub.host || !PvpUiMatches(epoch,revision,puid))return false;
     ++pvpUiRequests;pvpUiCode=enabled ? 10 : 11;return true;
 }
-bool SetPvpLocalTeamAt(int team,std::uint64_t epoch,std::uint32_t revision,const char* puid) noexcept {
-    if((team!=1 && team!=2) || !PvpUiMatches(epoch,revision,puid))return false;
-    ++pvpUiRequests;pvpUiCode=team;return true;
+// A faction pick is recorded as its M map row (kPvpFaction0 + faction), a preset as 20 + preset.
+bool SetPvpLocalPickAt(const pvp_match::Pick& pick,std::uint64_t epoch,std::uint32_t revision,const char* puid) noexcept {
+    if(!pvp_match::PickValid(pick) || !PvpUiMatches(epoch,revision,puid))return false;
+    ++pvpUiRequests;pvpUiCode=kPvpFaction0+pick.faction;return true;
+}
+bool SetPvpPresetAt(int preset,std::uint64_t epoch,std::uint32_t revision,const char* puid) noexcept {
+    if(!pvpStateStub.host || !PvpUiMatches(epoch,revision,puid))return false;
+    ++pvpUiRequests;pvpUiCode=20+preset;return true;
+}
+pvp_match::Pick PvpPickForFaction(int faction,const pvp_protocol::Entry&) noexcept {
+    return {static_cast<std::uint8_t>(faction),static_cast<std::uint8_t>(pvp_match::DefaultRole(faction)),
+            pvp_match::DefaultRole(faction)==static_cast<int>(pvp_match::Role::unit) ? std::uint16_t{0} : pvp_match::kNoUnit};
 }
 unsigned char* PlayerHuman() noexcept {return nullptr;}
 const void* remoteAuthority=nullptr;bool allRemote=false,mapOnline=false;
@@ -1004,13 +1013,13 @@ void PvpUiActions() noexcept {
     const float vp[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
     MapCmdInput input{};input.front=true;input.mouse=true;input.eye[1]=100;float centre[3]{};
     MapCommandView(vp,1280,720);MapCommandFrame(input,centre);
-    const float rect[4]={600,340,680,380};const int code=kPvpTeam1;
+    const float rect[4]={600,340,680,380};const int code=kPvpFaction0;
     MapCommandUiPanels(rect,1);MapCommandPvpButtons(rect,&code,1,&pvpStateStub);
     game.armedOrder=true;game.armed=Order::guard;
     inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(input,centre);
     Check(MapCommandPointerCaptured(),"PVP press captures the map pointer and armed world order");
     inputstub::keys[VK_LBUTTON]=false;MapCommandFrame(input,centre);
-    Check(pvpUiRequests==1 && pvpUiCode==1 && game.armedOrder && !game.armedClick,
+    Check(pvpUiRequests==1 && pvpUiCode==kPvpFaction0 && game.armedOrder && !game.armedClick,
         "PVP click uses the rendered native-world/revision/member snapshot without leaking onto ground");
     inputstub::keys[VK_LBUTTON]=true;MapCommandFrame(input,centre);
     ++pvpStateStub.revision;MapCommandPvpButtons(rect,&code,1,&pvpStateStub);
@@ -1022,11 +1031,11 @@ void PvpUiActions() noexcept {
     Check(pvpUiRequests==1,"a still-rendered old world cannot enqueue a PVP action after native state changed");
     MapCommandPvpButtons(nullptr,nullptr,0,&pvpStateStub);input.mouse=false;input.pad=true;input.usingPad=true;
     input.buttons=XINPUT_GAMEPAD_RIGHT_THUMB;MapCommandFrame(input,centre);
-    Check(MapPvpPadSelection()==kPvpTeam1 && MapPlaceHoldsPad(),"R3 focuses a collapsed PVP panel with no invisible click boxes");
+    Check(MapPvpPadSelection()==kPvpFaction0 && MapPlaceHoldsPad(),"R3 focuses a collapsed PVP panel with no invisible click boxes");
     input.buttons=0;MapCommandFrame(input,centre);input.buttons=XINPUT_GAMEPAD_DPAD_DOWN;MapCommandFrame(input,centre);
-    Check(MapPvpPadSelection()==kPvpTeam2 && !game.place.open,"PVP D-pad selects its team and never opens range placement");
+    Check(MapPvpPadSelection()==kPvpFaction0+1 && !game.place.open,"PVP D-pad selects the next faction and never opens range placement");
     input.buttons=0;MapCommandFrame(input,centre);input.buttons=XINPUT_GAMEPAD_A;MapCommandFrame(input,centre);
-    Check(pvpUiRequests==2 && pvpUiCode==2 && MapPlaceHoldsPad(),"PVP A confirms the selected team while map centring stays held");
+    Check(pvpUiRequests==2 && pvpUiCode==kPvpFaction0+1 && MapPlaceHoldsPad(),"PVP A confirms the selected faction while map centring stays held");
     input.buttons=XINPUT_GAMEPAD_A|XINPUT_GAMEPAD_B;MapCommandFrame(input,centre);
     Check(MapPvpPadSelection()<0 && MapPlaceHoldsPad(),"PVP B returns but held A/B cannot close or centre the map");
     input.buttons=0;MapCommandFrame(input,centre);Check(!MapPlaceHoldsPad(),"both pad buttons released ends PVP capture");

@@ -16,6 +16,10 @@
 #include "support_soldier.h"
 #include "support_spawn.h"
 #include "support_drone.h"
+#include "enemy_control.h"
+#include "pvp.h"
+#include "pvp_units.h"
+#include "room_pvp.h"
 #include <cstdarg>
 #include <cstring>
 #include <cwchar>
@@ -153,7 +157,12 @@ ULONGLONG loadTickFrame=0;
 bool rangeMission=false;
 // The objects made by a network transaction (NetSpawn), each by its kind (debug_spawn_net.h KindByte): held weakly
 // until the transaction ends, activated when every peer has made and registered it.
-struct NetworkEnemy { std::uint64_t token=0;ObjRef ref{};int row=-1;How how=How::enemy;bool activated=false; };
+// pvp: a PvP member's own unit (kPvpUnitCatalog); local: that member is this machine's player, whose control of it is
+// asked for once it is active (controlAskedAt the last ask).
+struct NetworkEnemy {
+    std::uint64_t token=0;ObjRef ref{};int row=-1;How how=How::enemy;bool activated=false;
+    bool pvp=false,local=false;ULONGLONG controlAskedAt=0;
+};
 NetworkEnemy networkEnemies[support_net::kMaxTransactions]{};
 bool submittingNetwork=false;
 int submittingRow=-1;
@@ -168,6 +177,10 @@ bool NetworkEnemyLive(const NetworkEnemy& e) noexcept {
     // Weak control blocks are retained until transaction teardown: test the strong count before the actor pointer.
     return e.ref.ctrl && At<LONG>(e.ref.ctrl,8)>0 && e.ref.Is(e.ref.obj) &&
         !(At<unsigned char>(e.ref.obj,0x18)&4);
+}
+// A dead actor: the byte the native walks skip one by (kDead, 0x5E0FB6).
+bool NetworkEnemyDead(const NetworkEnemy& e) noexcept {
+    return !NetworkEnemyLive(e) || At<unsigned char>(e.ref.obj,kDead)!=0;
 }
 void ReleaseNetworkEnemy(NetworkEnemy& e) noexcept {
     if(e.ref.ctrl) {
@@ -567,29 +580,63 @@ support_net::PlanResult PlanRangeEnemy(std::uint32_t catalog,const float* target
     alignas(16) float matrix[16];FacingMatrix(heading,ground,matrix);
     return BuildNetworkPlan(row,matrix,out) ? support_net::PlanResult::ready : support_net::PlanResult::refused;
 }
+// The PvP unit's plan: the member's committed pick is this row as their unit, and it is a unit of their faction's side.
+support_net::PlanResult PlanPvpUnit(const char* requesterPuid,const float* target,std::uint64_t descriptor,
+                                    support_net::Plan* out) noexcept {
+    if(!OnlineHostOnly() || !InSession() || !target || !out || !requesterPuid)return support_net::PlanResult::refused;
+    const int row=NetworkRow(descriptor);
+    pvp_match::Pick pick{};
+    if(row<0 || kEntries[row].how!=How::enemy || !PvpMemberPick(requesterPuid,&pick) ||
+       pick.role!=static_cast<std::uint8_t>(pvp_match::Role::unit) || pick.unit!=row ||
+       !pvp_units::Playable(row,pvp_match::kFactions[pick.faction].side)) {
+        Log("PVP UNIT plan refused: row %d is not %s's committed unit",row,requesterPuid);
+        return support_net::PlanResult::refused;
+    }
+    if(const auto loaded=LoadedHere(row);loaded!=support_net::PlanResult::ready)return loaded;
+    float ground[3]={target[0],target[1]-kEntries[row].lift,target[2]};
+    if(!std::isfinite(ground[0]+ground[1]+ground[2]) || !GroundUnder(ground))return support_net::PlanResult::refused;
+    ground[1]+=kEntries[row].lift;
+    const float heading[3]={0.0f,0.0f,1.0f};
+    alignas(16) float matrix[16];FacingMatrix(heading,ground,matrix);
+    return BuildNetworkPlan(row,matrix,out,kPvpUnitCatalog) ? support_net::PlanResult::ready : support_net::PlanResult::refused;
+}
+// A network row may be made here: the range's on the test range; a PvP unit while this machine's match is on.
+bool NetworkRowAllowed(const support_net::Plan& plan) noexcept {
+    return plan.catalogId==kPvpUnitCatalog ? PvpSupportTeam(nullptr)!=0 : RangePlaceOn();
+}
 support_net::PlanResult PrepareRangeEnemy(const support_net::Plan& plan) noexcept {
     const int row=NetworkPlanRow(plan);
-    if(!InSession() || !RangePlaceOn() || row<0)return support_net::PlanResult::refused;
+    if(!InSession() || !NetworkRowAllowed(plan) || row<0)return support_net::PlanResult::refused;
     return LoadedHere(row);
 }
 bool ValidateRangeEnemy(const support_net::Plan& plan) noexcept {
     const int row=NetworkPlanRow(plan);
-    return InSession() && RangePlaceOn() && row>=0 && StateOf(row)==RowState::ready;
+    return InSession() && NetworkRowAllowed(plan) && row>=0 && StateOf(row)==RowState::ready;
 }
 namespace {
 // The native object of kind `how` for a network plan's unit, registered under its NetId (the same ID on each peer; the
 // native registration sets host/local vs guest/remote ownership itself), inert until ACTIVATE. Null: not made (any part
 // made is undone here).
-unsigned char* MakeNetworkObject(int row,const support_net::Unit& unit,const float* target,const char** why) noexcept {
+// A guest's copy of a networked enemy (docs/pvp-unit-spawn-re.md): the script's own creation callback 0x1DED20 calls
+// 0x54EDB0 on it before registering it (0x1DEDD6; +0x338 = -1, +0x340 = 0, then +0x348: its own target state cleared,
+// the owner's target messages drive it). Checked by its first bytes; refused (nothing made) when they differ.
+constexpr std::size_t kGuestCopy=0x54EDB0;
+constexpr unsigned char kGuestCopySig[]={0xC7,0x81,0x38,0x03,0x00,0x00,0xFF,0xFF,0xFF,0xFF,0x48,0xC7,0x81,0x40,0x03,0x00};
+// `team`: the enemy team, or a PvP unit's faction team (its plan's). `remote`: this machine is not the owner (a guest).
+unsigned char* MakeNetworkObject(int row,const support_net::Unit& unit,const float* target,std::int32_t team,bool remote,
+                                 const char** why) noexcept {
     const Entry& e=kEntries[row];
     switch(e.how) {
     case How::enemy: {
-        // Generic NetworkObject registration, exactly as native script objects: SetTeam, SetLevel, then the ID.
+        // Generic NetworkObject registration, exactly as native script objects: SetTeam, SetLevel, a guest's copy reset,
+        // then the ID.
+        if(remote && !Matches(kGuestCopy,kGuestCopySig,sizeof(kGuestCopySig))){*why="unexpected EDF.dll code at 0x54EDB0";return nullptr;}
         auto* object=Create(row,unit.matrix,kGameObjectType,why);
         if(!object)return nullptr;
-        reinterpret_cast<SetTeamFn>(image+kSetTeam)(object,kTeamEnemy,true);
+        reinterpret_cast<SetTeamFn>(image+kSetTeam)(object,team,true);
         reinterpret_cast<SetLevelFn>(image+kSetLevel)(object,1.0f);
-        if(At<std::int32_t>(object,kTeam)!=kTeamEnemy || !RegisterSupportObject(object,unit.netId)) {
+        if(remote)reinterpret_cast<void(__fastcall*)(void*)>(image+kGuestCopy)(object);
+        if(At<std::int32_t>(object,kTeam)!=team || !RegisterSupportObject(object,unit.netId)) {
             *why="its team or its registration failed";reinterpret_cast<DeleteFn>(image+kDelete)(object);return nullptr;
         }
         return object;
@@ -637,7 +684,10 @@ bool SpawnRangeEnemy(std::uint64_t token,const support_net::Plan& plan,bool remo
     if(!free)return false;
     const char* why="";
     unsigned char* object=nullptr;
-    __try { object=MakeNetworkObject(row,plan.units[0],plan.target,&why); }
+    const bool pvp=plan.catalogId==kPvpUnitCatalog;
+    const std::int32_t team=pvp ? static_cast<std::int32_t>(plan.team) : kTeamEnemy;
+    if(pvp && !pvp_match::PvpTeam(team)){Log("RANGE NET PvP unit refused: plan team %d is no faction's",team);return false;}
+    __try { object=MakeNetworkObject(row,plan.units[0],plan.target,team,remote,&why); }
     __except(SpawnFault(row,GetExceptionInformation())) {object=nullptr;why="the game faulted making it";}
     if(!object){Log("RANGE NET create failed row=%s: %s",kEntries[row].id,why);return false;}
     __try {
@@ -647,6 +697,7 @@ bool SpawnRangeEnemy(std::uint64_t token,const support_net::Plan& plan,bool remo
         }
         InterlockedIncrement(reinterpret_cast<volatile LONG*>(ctrl+0xC));
         *free={token,ObjRef::Of(object),row,kEntries[row].how,false};
+        free->pvp=pvp;free->local=pvp && SupportPlanRequesterIsLocal(plan);
         Log("RANGE NET registered token=%llu row=%s remote=%d flags=%u; waiting for all-peer ACTIVATE",
             static_cast<unsigned long long>(token),kEntries[row].id,remote,At<unsigned>(object,0x128)&3u);
         return true;
@@ -678,9 +729,23 @@ void RangeEnemyNetworkTick() noexcept {
             else if(e.how==How::drone)on=ActivateSupportDrone(e.ref);
             if(!on){ReportSupportFailure(e.token);continue;}
             e.activated=true;
-            Log("RANGE NET activated token=%llu row=%s (all peers registered)",
-                static_cast<unsigned long long>(e.token),kEntries[e.row].id);
+            Log("RANGE NET activated token=%llu row=%s (all peers registered)%s",
+                static_cast<unsigned long long>(e.token),kEntries[e.row].id,e.pvp ? (e.local ? " PvP unit: this player's" : " PvP unit") : "");
         } __except(SpawnFault(e.row,GetExceptionInformation())) {ReportSupportFailure(e.token);}
+    }
+    // This player's PvP unit, active: its control asked for (enemy control's own online lease), again every 2 s until it
+    // holds it; a dead one is let go (pvp.cpp asks for a new one).
+    const ULONGLONG now=GetTickCount64();
+    for(auto& e:networkEnemies)if(e.token && e.activated && e.pvp && e.local) {
+        __try {
+            if(NetworkEnemyDead(e) || EnemyControlTargetActive(e.ref.obj))continue;
+            if(e.controlAskedAt && now-e.controlAskedAt<2000)continue;
+            e.controlAskedAt=now;
+            const ObjRef me=ObjRef::Of(PlayerHuman());
+            enemy_control::Snapshot snapshot{};
+            const bool asked=me.obj && EnemyControlDescribe(me,e.ref,&snapshot) && EnemyControlRequest(snapshot);
+            Log("PVP UNIT control of %s %s",kEntries[e.row].id,asked ? "asked for" : "not available yet");
+        } __except(EXCEPTION_EXECUTE_HANDLER) {}
     }
 }
 bool RangeEnemyRequestNotice(std::uint32_t request,support_net::RequestStatus status) noexcept {
@@ -703,6 +768,20 @@ bool RangeEnemyRequestNotice(std::uint32_t request,support_net::RequestStatus st
     if(status!=support_net::RequestStatus::accepted)*ask=NetAsk{};   // its outcome told: the slot free again
     Say(result,row,text,"online request=%u status=%u",request,static_cast<unsigned>(status));
     return true;
+}
+bool RequestPvpUnit(int row,const float* at,wchar_t* note,std::size_t size) noexcept {
+    if(row<0 || row>=kEntryCount || kEntries[row].how!=How::enemy || !at)return false;
+    const bool queued=SubmitSupportRequest(static_cast<int>(kPvpUnitCatalog),at,note,size,Descriptor(kEntries[row]));
+    Log("PVP UNIT %s requested at (%.1f,%.1f,%.1f): %s",kEntries[row].id,at[0],at[1],at[2],queued ? "queued" : "refused");
+    return queued;
+}
+bool PvpUnitLive() noexcept {
+    for(const auto& e:networkEnemies)if(e.token && e.pvp && e.local) {
+        bool dead=true;
+        __try { dead=NetworkEnemyDead(e); } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        if(!dead)return true;
+    }
+    return false;
 }
 namespace {
 // An object row online (MakeRow): one support transaction for every peer (preload on demand -> PREPARE -> every peer
@@ -756,7 +835,18 @@ void PreloadDebugSpawn() noexcept {
     // Preload on every peer before the mission's native WaitPreload. An online enemy is created only after every
     // participant validates this same descriptor/resource and ACKs the host's plan.
     const bool range=rangeMission && c.rangePlace;
-    if(!c.enabled || (!c.debugSpawn && !range))return;   // off: nothing preloaded, nothing touched
+    // A PvP match this machine started from (room_pvp.h): every member's unit is made on every machine, so each preloads
+    // them all (the transaction refuses a peer that has not: PrepareRangeEnemy).
+    bool pvpRows[kEntryCount]{};int pvpUnits=0;
+    {
+        pvp_protocol::State lock{};
+        if(c.enabled && RoomPvpMatch(&lock,nullptr))
+            for(unsigned i=0;i<lock.count;++i)if(lock.entries[i].role==static_cast<std::uint8_t>(pvp_match::Role::unit) &&
+                                                 lock.entries[i].unit<kEntryCount && !pvpRows[lock.entries[i].unit]) {
+                pvpRows[lock.entries[i].unit]=true;++pvpUnits;
+            }
+    }
+    if(!c.enabled || (!c.debugSpawn && !range && !pvpUnits))return;   // off: nothing preloaded, nothing touched
     if(!profileChecked){profileChecked=true;profile=CheckProfile();}
     if(!profile)return;
     int lacking=0;
@@ -771,7 +861,7 @@ void PreloadDebugSpawn() noexcept {
         missionMgr=At<void*>(image,kObjectMgr);
         if(!mgr || !missionMgr)return;
         for(int i=0;i<kEntryCount;++i) {
-            if(!PreloadsRow(kEntries[i],range) || broken[i])continue;
+            if((!PreloadsRow(kEntries[i],range) && !pvpRows[i]) || broken[i])continue;
             if(missing[i]){++absent;continue;}   // not installed: a missing SGO is never handed to the preload
             reinterpret_cast<PreloadFn>(image+kPreload)(mgr,kEntries[i].sgo,2,-1);
             preloaded[i]=true;

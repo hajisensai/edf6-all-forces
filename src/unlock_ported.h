@@ -88,4 +88,16 @@ inline bool Own(unsigned char* record) noexcept {
     std::memcpy(record,&flags,4);
     return fresh;
 }
+// AllWeaponsUnlocked: a record owned and every star byte 10 (the game's own unlock_weapon command writes min(star,10), then
+// 0xD7930 clamps each to the weapon's cap). NEW only the first time, as Own. Whether anything changed. Never clears a bit.
+constexpr unsigned char kMaxStar=10;
+inline bool OwnMax(unsigned char* record) noexcept {
+    bool changed=Own(record);
+    for(int i=4;i<12;++i)if(record[i]!=kMaxStar){record[i]=kMaxStar;changed=true;}
+    return changed;
+}
+// The weapon rows AllWeaponsUnlocked leaves alone: no name, and an uninstall's placeholder (EDF6VC_RETIRED_*).
+inline bool Placeholder(const wchar_t* name) noexcept {
+    return !name || std::wcsncmp(name,L"EDF6VC_RETIRED_",15)==0;
+}
 }  // namespace crew::ported

@@ -44,7 +44,9 @@ bool RequestPayloadSelection(std::uint64_t token,int seat,int entry) noexcept {
     ++payloadRequests;payloadToken=token;payloadSeat=seat;payloadEntry=entry;return true;
 }
 bool SetPvpEnabledAt(bool,std::uint64_t,std::uint32_t,const char*) noexcept {return false;}
-bool SetPvpLocalTeamAt(int,std::uint64_t,std::uint32_t,const char*) noexcept {return false;}
+bool SetPvpLocalPickAt(const pvp_match::Pick&,std::uint64_t,std::uint32_t,const char*) noexcept {return false;}
+bool SetPvpPresetAt(int,std::uint64_t,std::uint32_t,const char*) noexcept {return false;}
+pvp_match::Pick PvpPickForFaction(int faction,const pvp_protocol::Entry&) noexcept {return {static_cast<std::uint8_t>(faction),0,pvp_match::kNoUnit};}
 unsigned char* PlayerHuman() noexcept {return nullptr;}
 const void* remoteAuthority=nullptr;bool allRemote=false,mapOnline=false;
 bool IsOnlineAuthority(const void* object) noexcept {return !allRemote && object!=remoteAuthority;}

@@ -1,6 +1,7 @@
 #include "support_source.h"
 #include "crew.h"
 #include "memory.h"
+#include "team_walk.h"
 #include "support_soldier.h"
 #include <cstring>
 
@@ -46,7 +47,7 @@ bool ResolveSupportSource(std::uint64_t key,ObjRef* out) noexcept {
     __try {
         if(!key || !image || !Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)))return false;
         void* const manager=At<void*>(image,kTeamManager);
-        if(!Readable(manager,0x50))return false;
+        if(!Readable(manager,0x50) || !team_walk::WalkRows(manager))return false;
         Visitor visitor{kVisitorVtable,key};
         reinterpret_cast<void(__fastcall*)(void*,void*)>(image+kEnumAllTeams)(manager,&visitor);
         if(visitor.failed || !visitor.ref || At<void*>(image,kTeamManager)!=manager)return false;

@@ -53,6 +53,7 @@
 #include "support_net.h"
 #include "hudtext.h"
 #include "rescue_logic.h"
+#include "sortie_plan.h"
 #include "helipad.h"
 #include "log_once.h"
 #include "profile_sigs.h"
@@ -511,6 +512,18 @@ struct Heli {
     // A squad's transport (HeliKeep, transport.cpp): it stays theirs until WITHDRAW; out of fuel or ammo (its door guns
     // are the squad's to fire) it does not leave on its own, only badly damaged.
     bool keep;
+    // A sortie (HeliSortie, docs/plan-2026-10-25-strikes.md §1.2; SortieFly): its pass at the mark (sortieLine through it),
+    // begun at sortieAt, the hunter on its station since sortieStation, its missiles (seen by missileAt) and at whom
+    // (counted by holder 2's rounds, sortieMissileLeft last frame; struck: each another), the circle counted (sortieLap, turning
+// sortieTurn); this frame's nose point (sortieFace).
+    SortiePass sortie;
+    sortie::Line sortieLine;
+    sortie::Lap sortieLap;
+    ULONGLONG sortieAt,sortieStation;
+    int sortieMissiles,sortieMissileLeft,sortieTurn,struckCount;
+    ObjRef struck[8];
+    bool sortieFace;
+    float sortieFaceAt[3];
 };
 Heli helis[16]{};
 constexpr float kFerryLandNear=80.0f;   // m (level) from its landing point a ferry starts down
@@ -829,6 +842,7 @@ bool EnemyInLine(const unsigned char* v,const unsigned char* weapon,const float*
 // The one nearest to `from` (the heli: the shortest turn and flight) wins, the current
 // one counting kKeepTarget nearer and one too close below to aim at kTooClose farther. Returns false
 // with none.
+constexpr float kStruckCost=4000.0f;
 bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* from,float range,float* aim) noexcept {
     const bool circler=h.type->attack==Attack::gunship;
     const float minHoriz=MinAimHoriz();
@@ -847,6 +861,7 @@ bool PickTarget(Heli& h,const unsigned char* v,const float* around,const float* 
         float score=std::sqrt(f[0]*f[0]+f[1]*f[1]+f[2]*f[2])+extra;
         if(current)score-=circler ? kCircleKeep : kKeepTarget;
         if(now<h.passedUntil && h.passed.Is(object))score+=kPassed;
+        for(int i=0;i<h.struckCount;++i)if(h.struck[i].Is(object))score+=kStruckCost;   // a sortie's missile went at it
         if(!circler && speed>3.0f && Dot2(f,f)>1.0f)
             score+=kTurnCost*std::fabs(Wrap(std::atan2(f[0],f[2])-std::atan2(h.vel[0],h.vel[2])));
         for(const auto& o:helis)if(&o!=&h && o.ref && now-o.seen<2000 && o.target.Is(object))score+=kShareTarget;
@@ -2193,7 +2208,8 @@ Control Steer(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
     // Yaw: running in, onto the target (with its bearing rate fed forward); else (circling too) the way it
     // flies (so it banks round), or the player when slow.
     float face[3]={0,0,0},faceRate=0.0f;
-    if(mode==Mode::run || mode==Mode::aim){face[0]=s.lead[0]-pos[0];face[2]=s.lead[2]-pos[2];faceRate=s.losRate;}
+    if(h.sortieFace){face[0]=h.sortieFaceAt[0]-pos[0];face[2]=h.sortieFaceAt[2]-pos[2];}
+    else if(mode==Mode::run || mode==Mode::aim){face[0]=s.lead[0]-pos[0];face[2]=s.lead[2]-pos[2];faceRate=s.losRate;}
     else if(std::sqrt(Dot2(w.vel,w.vel))>kFaceSpeed){face[0]=w.vel[0];face[2]=w.vel[2];}
     else if(s.follow){face[0]=player.pos[0]-pos[0];face[2]=player.pos[2]-pos[2];}
     c.yaw=0.0f;c.offYaw=kPi;
@@ -2256,8 +2272,9 @@ Shot Fire(Heli& h,const Sense& s,Mode mode) noexcept {
                     s.v,h.target.obj,s.storePass.miss,s.storeTol,s.storeRange,s.storePass.frames,h.storeAmmo);
             }
         } else {
+            const ULONGLONG gap=h.sortie==SortiePass::heliHunter && !h.leaving ? sortie::kHunterGapMs : Cfg().heliMissileMs;
             shot.missile=Cfg().heliMissile && shot.miss<kMissileCone && s.dist>kMissileMin && s.dist<Cfg().heliRange &&
-                         s.ms-h.missileAt>Cfg().heliMissileMs;
+                         s.ms-h.missileAt>gap;
             if(shot.missile)h.missileAt=s.ms;
         }
     } else h.firing=false;
@@ -2342,12 +2359,82 @@ void SoftEdge(Heli& h,const Sense& s,Mode mode,Want& w) noexcept {
 
 void MirrorStick(unsigned char* v,const Control& c) noexcept;   // online: the input block onto seat 0's stick (below)
 
+// A sortie's flight this frame (HeliSortie; sortie_plan.h): true when it set `w` (Steer then flies it as a hold: no aim
+// dip), with its nose point (sortieFace) where it wants one; false once it leaves (StartLeave), or with none.
+//   heliStrafe  low along its line over the mark (its guns and missiles at what comes before the nose), on past it, away
+//   heliHunter  to its station kHunterStation short of the mark, hovering kHunterAlt up, the nose on each target in turn
+//               for its missiles (one a kHunterGapMs, each at another: struck), until kHunterMissiles or kHunterMs, away
+//   heliCircle  round the mark on kCircleRadius, kCircleAlt up, once (sortie::Lap): the door guns on the middle (a 410
+//               flies nose first, its doors to the sides), a nose-gun 506 sideways with its nose on the middle; away
+bool SortieFly(Heli& h,const Sense& s,Want& w) noexcept {
+    h.sortieFace=false;
+    if(h.sortie==SortiePass::none || h.leaving || !h.called)return false;
+    // A missile left (holder 2's rounds fell since last frame): one more, at its target (Fire's intent alone may have been
+    // held: HoldFire, the weapon not ready).
+    const std::int32_t left=s.arms.ammo[2];
+    if(left>=0 && h.sortieMissileLeft>=0 && left<h.sortieMissileLeft) {
+        h.sortieMissiles+=h.sortieMissileLeft-left;
+        if(h.target && h.struckCount<static_cast<int>(sizeof(h.struck)/sizeof(h.struck[0])))h.struck[h.struckCount++]=h.target;
+    }
+    h.sortieMissileLeft=left;
+    const float* mark=h.sortieLine.at;
+    w=Want{};
+    switch(h.sortie) {
+    case SortiePass::heliStrafe: {
+        if(sortie::Along(h.sortieLine,s.pos)>sortie::kHeliPassBeyond){StartLeave(h,s.pos,s.fwd,"sortie: its pass made");return false;}
+        float p[3];sortie::Ahead(h.sortieLine,s.pos,sortie::kHeliStrafeLead,p);
+        float d[3]={p[0]-s.pos[0],0.0f,p[2]-s.pos[2]};
+        const float l=std::sqrt(Dot2(d,d));
+        if(l>1e-3f)for(float& x:d)x*=h.top/l;
+        std::memcpy(w.vel,d,12);w.height=mark[1]+sortie::kHeliStrafeAlt;
+        return true;
+    }
+    case SortiePass::heliHunter: {
+        const float station[3]={mark[0]-h.sortieLine.dir[0]*sortie::kHunterStation,mark[1]+sortie::kHunterAlt,
+                                mark[2]-h.sortieLine.dir[2]*sortie::kHunterStation};
+        Arrive(h,s.pos,station,kRest,w.vel);
+        w.off=Dist2(s.pos,station);w.height=station[1];
+        if(!h.sortieStation && w.off<sortie::kHunterNear)h.sortieStation=s.ms;
+        h.sortieFace=true;
+        std::memcpy(h.sortieFaceAt,s.engage ? s.aim : mark,12);
+        if(h.sortieMissiles>=sortie::kHunterMissiles || (h.sortieStation && s.ms-h.sortieStation>sortie::kHunterMs) ||
+           s.ms-h.sortieAt>3*sortie::kHunterMs) {
+            StartLeave(h,s.pos,s.fwd,h.sortieMissiles ? "sortie: its missiles away" : "sortie: nothing to strike");
+            h.sortieFace=false;
+            return false;
+        }
+        return true;
+    }
+    case SortiePass::heliCircle: {
+        const float d=Dist2(s.pos,mark);
+        if(d>sortie::kCircleRadius+150.0f) {   // on its way to the circle: at it at full speed
+            Arrive(h,s.pos,mark,kRest,w.vel);
+            Limit2(w.vel,h.top);
+        } else sortie::CircleVelocity(mark,s.pos,sortie::kCircleRadius,sortie::kCircleSpeed,h.sortieTurn,w.vel);
+        w.off=std::fabs(d-sortie::kCircleRadius);w.height=mark[1]+sortie::kCircleAlt;
+        if(w.off<sortie::kCircleNear)sortie::LapStep(h.sortieLap,mark,s.pos);
+        if(s.type->guns==Guns::nose){h.sortieFace=true;std::memcpy(h.sortieFaceAt,mark,12);}
+        if(sortie::LapDone(h.sortieLap) || s.ms-h.sortieAt>3*sortie::kHunterMs) {
+            StartLeave(h,s.pos,s.fwd,sortie::LapDone(h.sortieLap) ? "sortie: its circle flown" : "sortie: its circle took too long");
+            h.sortieFace=false;
+            return false;
+        }
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
 void Fly(Heli& h,unsigned char* v,bool playerAboard) noexcept {
     Sense s{};
     if(!SenseFrame(h,v,playerAboard,s))return;
     Advance(h,s);
-    const Mode mode=SelectMode(h,s);
+    Mode mode=SelectMode(h,s);
     Want w=FlyMode(h,s,mode);
+    // A sortie flies its own pass (SortieFly): its stick from the velocity it wants, no aim dip; the guns as ever.
+    if(SortieFly(h,s,w) && (mode==Mode::aim || mode==Mode::run || mode==Mode::extend || mode==Mode::circle ||
+                            mode==Mode::guardFight || mode==Mode::guard))mode=Mode::hold;
     SoftEdge(h,s,mode,w);
     const Control c=Steer(h,s,mode,w);
     MirrorStick(v,c);
@@ -3051,6 +3138,21 @@ void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSe
         const float rotor=At<float>(vehicle,kRotor);
         if(!(std::isfinite(rotor) && rotor>0.2f))Put<float>(vehicle,kRotor,0.5f);
         Log("HELI v=%p called: %s at (%.0f,%.0f,%.0f), fuel %lus",vehicle,guard ? "guard" : "follow",post[0],post[1],post[2],fuelSec);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept {
+    __try {
+        Heli* const h=HeliCrewed(vehicle) ? Find(vehicle) : nullptr;
+        if(!h || !h->called){Log("HELI v=%p sortie, but not a called heli flown by the plugin: none",vehicle);return;}
+        const float* pos=reinterpret_cast<const float*>(vehicle+kPosition);
+        const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
+        h->sortie=pass;h->sortieAt=GameMs();h->sortieStation=0;h->sortieMissiles=0;h->sortieMissileLeft=-1;
+        h->sortieLine=sortie::LineThrough(mark,pos,m+8);h->sortieLap=sortie::Lap{};h->struckCount=0;
+        // Round the circle the way it comes in turning (its heading's side of the mark): no turn back onto it.
+        const float to[3]={mark[0]-pos[0],0.0f,mark[2]-pos[2]};
+        h->sortieTurn=to[0]*m[10]-to[2]*m[8]>0.0f ? -1 : 1;
+        Log("HELI v=%p sortie %d at (%.0f,%.0f,%.0f)",vehicle,static_cast<int>(pass),mark[0],mark[1],mark[2]);
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
