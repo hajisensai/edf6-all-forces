@@ -41,12 +41,4 @@ with tempfile.TemporaryDirectory() as app:
     os.environ['EDF6VC_MODELS'] = os.path.join(app, 'elsewhere')       # the models folder the installer really uses
     assert modelpack.problem(app) is not None
     del os.environ['EDF6VC_MODELS']
-    write(os.path.join(models, modelpack.MANIFEST), b'{"version": "%s"}' % m['version'].encode())
-    assert '损坏' in modelpack.problem(app)                             # a manifest without files: message, no KeyError
-    write(os.path.join(models, modelpack.MANIFEST), json.dumps(modelpack.manifest(models)).encode())
-    write(os.path.join(app, modelpack.REQUIRED), json.dumps({'models_version': modelpack.manifest(models)['version']}).encode())
-    assert modelpack.problem(app) is None
-    os.environ['EDF6VC_MODELS'] = os.path.join(app, 'elsewhere')       # the models folder the installer really uses
-    assert modelpack.problem(app) is not None
-    del os.environ['EDF6VC_MODELS']
 print('modelpack_test: ok')
