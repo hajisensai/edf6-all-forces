@@ -1534,11 +1534,11 @@ def hand_copies_agree() -> None:
     # the drill's: tools/make_drill.py; the EMC's: tools/make_emc.py; the Sazabi's beams: tools/make_sazabi.py; the
     # Proteus's shield: tools/make_proteus.py; the ultimate strike's rounds: tools/make_ultimate.py
     import make_proteus
-    # ...and the Dreadnought's fighters: tools/make_dreadnought.py
+    # ...and the Dreadnought's fighters and its turrets' rounds: tools/make_dreadnought.py
     import make_dreadnought
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
                | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES)
-               | set(make_dreadnought.FIGHTER_SGOS.values()))
+               | set(make_dreadnought.FIGHTER_SGOS.values()) | set(make_dreadnought.TURRET_ROUNDS.values()))
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
