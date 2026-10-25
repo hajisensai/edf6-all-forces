@@ -178,7 +178,10 @@ PZH2000 = Vehicle(
         (r'^wheel_([lr])_back$', 'tire_moveH_{0}'),
         (r'^track_([lr])$', 'catapi_body'),
         (r'^gun_barrel$', 'cannon_slide_l'),
-        (r'^bone_gun$', 'cannon_l'),
+        # The mantlet's fittings elevate with it (2026-10-25, docs/feedback-2026-10-25-model-rigs.md: 「炮管的防尘布转炮管的
+        # 时候留在原地了」): the dust cover round the barrel ahead of the mantlet (ex_decor_04, outside turret_box: it
+        # was left on the hull), the shroud on the mantlet's face (ex_decor_05) and the plate on its top (ex_armor_05).
+        (r'^(bone_gun|ex_decor_04|ex_decor_05|ex_armor_05)$', 'cannon_l'),
         (r'^bone_commander_sight_h$', 'doppler_radar'),          # the commander's sight head
         (r'^mg_aa_mount_h$', 'tracking_radar'),                  # the roof machine gun's ring
         (r'^(bone_turret|bone_turret_01|antenna_0[12]|bone_mg_aa_v|mg_aa_mount_v|ammo)$', 'cannon_main'),
@@ -203,13 +206,16 @@ STURMTIGER = Vehicle(
         (r'^track_([lr])$', 'catapi_body'),
         (r'^(gun_barrel|380mm_spgr_4581)$', 'cannon_slide_l'),   # the mortar and the round in it
         (r'^bone_gun$', 'cannon_l'),
-        (r'^hatch_01$', 'doppler_radar'),                        # the commander's hatch
-        (r'^hatch_02$', 'tracking_radar'),                       # the loading hatch
+        # The roof's hatches (the commander's hatch_01, the loading hatch_02) stay on the hull: doppler_radar /
+        # tracking_radar ride cannon_main, here the mortar's traverse, so they swung with the mortar (2026-10-25,
+        # docs/feedback-2026-10-25-model-rigs.md: 「顶部的天花板怎么和炮管联动了」). The casemate has no fitting that turns:
+        # the two radar bones carry no mesh, their origins and kinematic proxies still fitted to the hatches (collision).
     ],
     turret=(-0.285, 2.10, 1.0),      # the ball mount's centre: the mortar's axis (its box) behind the casemate's face
     trunnion={'cannon_l': (2.10, 1.10), 'cannon_r': (2.10, 1.10)},
     barrels={'left': 'gun_barrel', 'right': 'gun_barrel'},
-    collision={'cannon_main': [r'^bone_gun$'], 'cannon_l': [r'^(gun_barrel|380mm_spgr_4581)$'], 'cannon_r': [r'^bone_gun$']},
+    collision={'cannon_main': [r'^bone_gun$'], 'cannon_l': [r'^(gun_barrel|380mm_spgr_4581)$'], 'cannon_r': [r'^bone_gun$'],
+               'doppler_radar': [r'^hatch_01$'], 'tracking_radar': [r'^hatch_02$']},
 )
 
 # The Apocalypse (Command & Conquer: Red Alert 2's, ska-ara's Sketchfab model; the user, 2026-10-24: 「再做个冷战那种
@@ -627,7 +633,12 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
             if bone[9] in 'BCDEFG':
                 origins[f'catapi{bone[9]}_{bone[-1]}'] = centre.tolist()
     for bone in ('doppler_radar', 'tracking_radar'):
-        lo, hi = box(src.positions[np.unique(src.tri_v[bones == bone])])
+        sel = bones == bone
+        if not sel.any():       # a bone with no mesh (the Sturmtiger's): at the nodes its proxy is fitted to
+            sel = np.asarray([any(re.match(p, n) for p in v.collision.get(bone, ())) for n in tri_node])
+        if not sel.any():
+            raise ValueError(f'{v.kind}: {bone} has no mesh and no collision nodes')
+        lo, hi = box(src.positions[np.unique(src.tri_v[sel])])
         origins[bone] = ((lo + hi) / 2).tolist()
     visual = []
     if v.rotor:

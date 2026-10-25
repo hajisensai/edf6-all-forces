@@ -9,7 +9,8 @@
 // endings (none: MAINSCRIPT plays them for contents 0..2) and the story's statistics (content 0 only) are the
 // game's own handling of a mode. EDF5CampaignContent=0 (no packs installed): the native answer alone.
 // The test range (testrange/gen.py) is a mission pack of its own too, no longer laid over RM015: an offline and an
-// online mode sharing one content id, TestRangeContent (0: not installed), owned through the same hook. So is EDF4.1's
+// online mode sharing one content id, TestRangeContent (0: not installed), owned through the same hook; its rows (the
+// range, then the PvP presets) are all opened by the mission select's hook, as none of them ever ends. So is EDF4.1's
 // story (plan P6), slotted after the range so no installed pack's id moves, and its two DLC mission packs right after
 // it: EDF41Content .. +2 (0: not installed).
 // Since 2026-10-18 the ids are fixed (mission_packs.h: 65..71, whatever else the machine has installed: a room's DLC
@@ -236,7 +237,10 @@ void OpenRows(unsigned char* vec) noexcept {
     unsigned char* gs=nullptr;
     const int content=CurrentContent(gs);
     const packs::Pack* const pack=Installed(cfg,content);
-    const bool unlock=cfg.portedMissionsUnlocked && ported::StoryPack(content,cfg.edf5CampaignContent,cfg.edf41Content);
+    // The test range's pack always: its rows (the range, then the PvP presets, tools/make_edf5_campaign.py PVP_ROWS)
+    // never end, so none would ever open the next.
+    const bool unlock=(cfg.portedMissionsUnlocked && ported::StoryPack(content,cfg.edf5CampaignContent,cfg.edf41Content))
+        || (cfg.testRangeContent>0 && content==cfg.testRangeContent);
     const bool lock=pack && pack->MissingCount()>0;
     if(!unlock && !lock)return;
     auto* const begin=At<ported::ListRow*>(vec,0);
