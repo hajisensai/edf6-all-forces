@@ -262,6 +262,14 @@ int main() {
     ResetJet(j);j.throttleIn=1.0f;Lever(j,recoveryVehicle,Stick{},1.0f/60.0f);
     ReconcileGround(j,recoveryVehicle,1.0f,false,false,recoveryTime);
     Check(j.throttle==0.0f,"releasing boost on the contact frame clears cruise throttle");
+    // The keys' lever (War Thunder's, playerjet.cpp ReadStick): W / S move it and it stays, through a touchdown too.
+    ResetJet(j);j.keys=true;
+    {Stick keys{};keys.keys=true;keys.lever=true;keys.throttle=1.0f;Lever(j,recoveryVehicle,keys,0.1f);
+     Check(std::fabs(j.throttle-0.7f)<1e-4f,"W held moves the keys' lever up at its air rate");
+     keys.throttle=0.0f;for(int i=0;i<60;++i)Lever(j,recoveryVehicle,keys,1.0f/60.0f);
+     Check(std::fabs(j.throttle-0.7f)<1e-4f,"let go, the keys' lever stays where W left it (no return to cruise)");}
+    ReconcileGround(j,recoveryVehicle,1.0f,false,false,recoveryTime);
+    Check(j.phase==Phase::rolling && std::fabs(j.throttle-0.7f)<1e-4f,"a touchdown keeps the keys' lever where the player set it");
     float bodyPos[3]={0.0f,108.5f,0.0f};Put<float>(recoveryBone,kBoneWorld506+0x34,100.0f);
     Check(std::fabs(FloorClear(j,recoveryVehicle,bodyPos,8.5f))<0.001f,"a large wing touching its bottom is at zero clearance");
     Check(FloorClear(j,recoveryVehicle,bodyPos,kNoGround)==kNoGround,"missing ground remains missing");

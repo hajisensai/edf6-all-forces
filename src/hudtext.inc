@@ -88,7 +88,7 @@ HUDTEXT(storesGun,L"GUN %d  ",L"机炮 %d  ",L"機砲 %d  ",L"機関砲 %d  ")
 HUDTEXT(storesFlare,L"FLARE %d",L"热焰弹 %d",L"熱焰彈 %d",L"フレア %d")
 HUDTEXT(fuelTime,L"FUEL %d%% %d:%02d",L"燃料 %d%% %d:%02d",L"燃料 %d%% %d:%02d",L"燃料 %d%% %d:%02d")
 HUDTEXT(fuelShare,L"FUEL %d%%",L"燃料 %d%%",L"燃料 %d%%",L"燃料 %d%%")
-HUDTEXT(rotateNow,L"ROTATE: PULL UP (W / SPACE)",L"抬头：拉起（W / 空格）",L"抬頭：拉起（W / 空白鍵）",L"機首上げ：引き起こし（W / スペース）")
+HUDTEXT(rotateNow,L"ROTATE: PULL UP (SPACE)",L"抬头：拉起（空格）",L"抬頭：拉起（空白鍵）",L"機首上げ：引き起こし（スペース）")
 HUDTEXT(rotateAt,L"ROTATE AT %d km/h",L"抬头速度 %d km/h",L"抬頭速度 %d km/h",L"機首上げ %d km/h")
 HUDTEXT(pullUpTerrain,L"PULL UP! TERRAIN",L"拉起！地形",L"拉起！地形",L"プルアップ！地表")
 HUDTEXT(missileBang,L"MISSILE!",L"飞弹！",L"飛彈！",L"ミサイル！")
@@ -101,22 +101,20 @@ HUDTEXT(climbDown,L"DOWN",L"下降",L"下降",L"下降")
 HUDTEXT(jetThrottle,L"THROTTLE %d%%%ls%ls    G %.1f%ls%ls%ls",L"油门 %d%%%ls%ls    G %.1f%ls%ls%ls",L"油門 %d%%%ls%ls    G %.1f%ls%ls%ls",
         L"スロットル %d%%%ls%ls    G %.1f%ls%ls%ls")
 HUDTEXT(stall,L"STALL",L"失速",L"失速",L"失速")
-HUDTEXT(jetKeysMouse,L"MOUSE: aim (the square)    W / SPACE: pull up    S: push down    A / D: roll",
-        L"鼠标：瞄准（方框）    W / 空格：拉起    S：压低    A / D：滚转",L"滑鼠：瞄準（方框）    W / 空白鍵：拉起    S：壓低    A / D：滾轉",
-        L"マウス：照準（四角）    W / スペース：機首上げ    S：機首下げ    A / D：ロール")
-HUDTEXT(jetKeysHand,L"W / SPACE: pull up    S: push down    A / D: roll    (let go: wings level)",
-        L"W / 空格：拉起    S：压低    A / D：滚转    （松开：改平）",L"W / 空白鍵：拉起    S：壓低    A / D：滾轉    （放開：改平）",
-        L"W / スペース：機首上げ    S：機首下げ    A / D：ロール    （離すと水平）")
-HUDTEXT(jetKeysMouseHand,L"MOUSE: aim    W / SPACE / S / A / D: fly by hand (the mouse takes over once it moves)",
-        L"鼠标：瞄准    W / 空格 / S / A / D：手动飞行（鼠标一动即接管）",L"滑鼠：瞄準    W / 空白鍵 / S / A / D：手動飛行（滑鼠一動即接管）",
-        L"マウス：照準    W / スペース / S / A / D：手動操縦（マウスを動かすと戻る）")
-HUDTEXT(jetKeysAir,L"%ls: boost    %ls: brake    %ls: switch weapon    %ls: next target    %ls: flares",
-        L"%ls：加速    %ls：减速    %ls：替换武器    %ls：下一个目标    %ls：热焰弹",L"%ls：加速    %ls：減速    %ls：替換武器    %ls：下一個目標    %ls：熱焰彈",
-        L"%ls：ブースト    %ls：ブレーキ    %ls：武器切替    %ls：次の目標    %ls：フレア")
-HUDTEXT(jetKeysGround,L"%ls: throttle up    %ls: throttle down    A / D, MOUSE: steer",L"%ls：加油门    %ls：减油门    A / D、鼠标：转向",
-        L"%ls：加油門    %ls：減油門    A / D、滑鼠：轉向",L"%ls：スロットル上げ    %ls：スロットル下げ    A / D・マウス：旋回")
-HUDTEXT(jetKeysTakeoff,L"W / SPACE: pull up to take off (from %d km/h)",L"W / 空格：拉起起飞（%d km/h 起）",L"W / 空白鍵：拉起起飛（%d km/h 起）",
-        L"W / スペース：引き起こして離陸（%d km/h から）")
+HUDTEXT(jetKeysHand,L"SPACE: pull up    %ls: push down    A / D: roll    (let go: wings level)",
+        L"空格：拉起    %ls：压低    A / D：滚转    （松开：改平）",L"空白鍵：拉起    %ls：壓低    A / D：滾轉    （放開：改平）",
+        L"スペース：機首上げ    %ls：機首下げ    A / D：ロール    （離すと水平）")
+HUDTEXT(jetKeysMouseHand,L"MOUSE: aim    SPACE / %ls / A / D: fly by hand (the mouse takes over once it moves)",
+        L"鼠标：瞄准    空格 / %ls / A / D：手动飞行（鼠标一动即接管）",L"滑鼠：瞄準    空白鍵 / %ls / A / D：手動飛行（滑鼠一動即接管）",
+        L"マウス：照準    スペース / %ls / A / D：手動操縦（マウスを動かすと戻る）")
+HUDTEXT(jetKeysAir,L"W / S: throttle (it stays; S at 0%%: airbrake)    %ls: switch weapon    %ls: next target    %ls: flares",
+        L"W / S：油门（松手停在原位；0%% 时按 S 减速板）    %ls：替换武器    %ls：下一个目标    %ls：热焰弹",
+        L"W / S：油門（放開停在原位；0%% 時按 S 減速板）    %ls：替換武器    %ls：下一個目標    %ls：熱焰彈",
+        L"W / S：スロットル（離すとその位置；0%% で S はエアブレーキ）    %ls：武器切替    %ls：次の目標    %ls：フレア")
+HUDTEXT(jetKeysGround,L"W / S: throttle (it stays)    A / D, MOUSE: steer",L"W / S：油门（松手停在原位）    A / D、鼠标：转向",
+        L"W / S：油門（放開停在原位）    A / D、滑鼠：轉向",L"W / S：スロットル（離すとその位置）    A / D・マウス：旋回")
+HUDTEXT(jetKeysTakeoff,L"SPACE: pull up to take off (from %d km/h)",L"空格：拉起起飞（%d km/h 起）",L"空白鍵：拉起起飛（%d km/h 起）",
+        L"スペース：引き起こして離陸（%d km/h から）")
 HUDTEXT(jetPadAir,L"BOOST: forward / ascend    BRAKE: back    ROLL: left stick sideways",L"加速：前进 / 上升    减速：后退    滚转：左摇杆左右",
         L"加速：前進 / 上升    減速：後退    滾轉：左搖桿左右",L"ブースト：前進 / 上昇    ブレーキ：後退    ロール：左スティック左右")
 HUDTEXT(jetPadAir2,L"PITCH, TURN: right stick    %ls: stores    %ls: target    keyboard %ls: flares",L"俯仰、转向：右摇杆    %ls：挂载    %ls：目标    键盘 %ls：热诱弹",
@@ -239,6 +237,7 @@ HUDTEXT(drillOverheat,L"DRILL OVERHEAT",L"钻头过热",L"鑽頭過熱",L"ドリ
 HUDTEXT(noAmmo,L"NO AMMO",L"弹药耗尽",L"彈藥耗盡",L"弾切れ")
 HUDTEXT(stockGunner,L"%hs  GUNNER %u",L"%hs  炮手 %u",L"%hs  砲手 %u",L"%hs  砲手 %u")
 HUDTEXT(stockInfo,L"SPD %d km/h    HP %d%%",L"速度 %d km/h    耐久 %d%%",L"速度 %d km/h    耐久 %d%%",L"速度 %d km/h    耐久 %d%%")
+HUDTEXT(driveGear,L"GEAR %ls",L"挡位 %ls",L"檔位 %ls",L"ギア %ls")
 HUDTEXT(twist,L"TWIST %+d",L"扭转 %+d",L"扭轉 %+d",L"ひねり %+d")
 HUDTEXT(stabLag,L"STAB LAG",L"稳定器滞后",L"穩定器滯後",L"スタビ遅れ")
 HUDTEXT(stab,L"STAB",L"稳定器",L"穩定器",L"スタビ")

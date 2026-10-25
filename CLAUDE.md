@@ -38,7 +38,8 @@
 
 - 离线（不需要游戏），推送前至少跑：
   - `cmake --build build --target offline_checks` 后 `ctest --test-dir build --output-on-failure -j 8`（用例互不共享输出，可并行；新用例别写固定的共享路径，也别按墙钟判时效）
-  - `python tools/selftest.py`（安装链自测：calls.inc 一致性、武器表事务、归属账本、ini 合并、每个插件都进了安装包）
+  - `python tools/selftest.py`（安装链自测：calls.inc 一致性、武器表事务、归属账本、ini 合并、每个插件都进了安装包；默认 8 个工作进程并行、按上次耗时从长到短排，`-j 1` 串行）
+- 测试墙钟由最长的单个用例决定：一个用例超过约 3 分钟就拆分片（`cockpit_build_<I>` 的 `--shard I/N`、`wt_tracked_<I>` 的 `EDF6_TEST_SHARD`），别让一个进程串行跑全部车型；只验证某一样东西的测试别顺带走「生成全部载具」的安装路径（patch 掉 `gen.placeable_derived` 之类，由那些载具自己的测试覆盖）。ctest 已给每个用例设 `OPENBLAS_NUM_THREADS=1`（`-j` 并行时 numpy 每进程开满核会超订）。
 - 单个离线检查：`cmake --build build --target <x>_check && build\<x>_check.exe`。
 - 需要游戏文件的 native 审计测试靠缓存变量 `EDF6_NATIVE_DLL` / `EDF6_GAME_DIR`，不设就跳过。
 - CI 只有 `.github/workflows/build.yml`（windows-latest）：build → offline_checks + ctest → py_compile → 生成文件 `--check` → selftest → 打安装包。push 到 main 重建 `nightly` 预发布并镜像到测试站 nightly 通道；手动 dispatch 镜像到 `test` 通道；`v*` 标签发正式版。

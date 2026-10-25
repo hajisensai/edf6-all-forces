@@ -134,14 +134,9 @@ def rooms(model) -> list[tuple[str, dict[str, float]]]:  # noqa: ANN001 - cockpi
     return out
 
 
-def main() -> int:
-    root = rootcpk.DEFAULT_GAME
-    if not os.path.isfile(os.path.join(root, 'Root.cpk')) or not cockpits.assets_present():
-        print('SKIP: Root.cpk and the cockpits\' assets (the model folder\'s cockpits/) are needed')
-        return 77
-    game = rootcpk.Game(root)
-    # Measure the original C-130 circular bores, not the asymmetric outer plates
-    # or an invented 2x2 grid. The native surface is a 16-sided ring at this depth.
+def c130_dials() -> None:
+    """Measure the original C-130 circular bores, not the asymmetric outer plates or an invented 2x2 grid. The native
+    surface is a 16-sided ring at this depth."""
     import numpy as np
     pos=cockpit_kits_plugin._cockpit(cockpit_kits_plugin.DECK.slug)[0]
     for site in cockpit_retrofit.C130[0].dials[:2]:
@@ -151,73 +146,69 @@ def main() -> int:
                f'C-130 standby: live case centred on the original bore {site.centre}')
         expect(len(ring)>0 and np.ptp(ring,axis=0).max()<site.diameter<.1236,
                'C-130 standby: case covers its bore without exceeding the original bezel')
-    for name, (model, _) in sorted(cockpit_kits_plugin.MODELS.items()):
-        if model.sill is None:
-            continue
-        for label, room in rooms(model):
-            closed(f'{name} in the room {label}', cockpit_kits.KITS[name](room))
-    stock = {m.stem: m for m in vehicle_optics.MODELS if m.cockpits}
-    copies = stock_copies(game)
-    expect(set(copies) <= set(cockpit_fits.FITS), f'the stock copies {sorted(copies)} are fitted')
-    for stem, fits in sorted(cockpit_fits.FITS.items()):
-        if stem not in stock and stem not in copies:
-            # Its model is its generator's; its cockpits' instrument bones laid out in a generous room must leave the
-            # skeleton GENERATED_SKELETON bones (EV603_MARINE, the largest a generator starts from, has 19).
-            need = generated_bones(fits)
-            expect(need + GENERATED_SKELETON <= 256,
-                   f'{stem}: a generated model; its cockpits need {need} bones, {256 - need} left for its skeleton')
-            continue
-        started = time.perf_counter()
-        md = copies[stem] if stem in copies else model_of(game, stem)
-        hull = cockpits.hull_triangles(md)
-        separated=cockpit_shell.separate(md,fits,hull)
-        expect(all(b.inv_bind==md.bones[b.parent].inv_bind for b in separated.bones[len(md.bones):]),
-               f'{stem}: shell children preserve the exact native inverse binds')
-        before=sum(len(me.indices) for o in md.objects for me in o.meshes)
-        after=sum(len(me.indices) for o in separated.objects for me in o.meshes)
-        expect(before==after,f'{stem}: all native triangles retained for outside views')
-        envelopes=cockpit_shell.regions(md,fits,hull)
-        expect(len(envelopes)==sum(f.kit in cockpit_shell.REPLACEMENTS for f in fits),
-               f'{stem}: every replacement station has a bounded native cabin region')
-        remaining=sum(int((cockpit_shell.triangle_masks(separated,o,me,envelopes)[0]!=0).sum())
-                      for o in separated.objects for me in o.meshes)
-        expect(remaining==0,f'{stem}: no unguarded native cabin triangles remain')
-        required_bones=len(separated.bones)+len(fits)
-        for fit in fits:
-            try:
-                kit = cockpits.fitted(hull, fit, cockpit_kits.KITS[fit.kit])
-                required_bones+=len(kit.screens)
-                shared=set()
-                def key(control):   # as cockpits.graft shares a bone
-                    return (control.control if control.control[0] in 'dDplcuveZ' else
-                            (control.control,control.centre,control.facing,control.up,control.extent))
-                for control in kit.controls:
-                    shared.add(key(control))
-                for index,screen in enumerate(kit.screens):
-                    if screen.kind not in ('hud','sensor'):
-                        _parts,controls=cockpit_instruments.instrument(screen,index,numbers=fit.seat==0,
-                                                                     thumbnail=(("111","111"),1.))
-                        for control in controls:
-                            shared.add(key(control))
-                required_bones+=len(shared)
-                kinds = {s.kind for s in kit.screens}
-                expect(kinds <= set(cockpits.SCREEN_KINDS),
-                       f'{stem} seat {fit.seat} ({fit.kit} on {fit.bone}): laid out inside the hull, screens {sorted(kinds)}')
-                closed(f'{stem} seat {fit.seat} ({fit.kit})', kit, fit.kit)
-            except Exception as e:  # noqa: BLE001 - every seat reported, then the count fails the test
-                expect(False, f'{stem} seat {fit.seat} ({fit.kit}): {e}')
-            for alt in ALTERNATES.get(fit.kit, ()):
-                try:
-                    kit = cockpits.fitted(hull, replace(fit, kit=alt), cockpit_kits.KITS[alt])
-                    expect({s.kind for s in kit.screens} <= set(cockpits.SCREEN_KINDS),
-                           f'{stem} seat {fit.seat} as {alt} (no seat of its own yet): laid out inside the hull')
-                    closed(f'{stem} seat {fit.seat} as {alt}', kit)
-                except Exception as e:  # noqa: BLE001
-                    expect(False, f'{stem} seat {fit.seat} as {alt}: {e}')
-        expect(required_bones<=256,f'{stem}: all localized labels and vehicle thumbnails fit the skin palette ({required_bones}/256)')
-        print(f'      {stem}: {time.perf_counter() - started:.1f} s', flush=True)
 
-    spec = stock['VEHICLE403_TANK']
+
+def generated(stem: str, fits) -> None:  # noqa: ANN001
+    """Its model is its generator's; its cockpits' instrument bones laid out in a generous room must leave the skeleton
+    GENERATED_SKELETON bones (EV603_MARINE, the largest a generator starts from, has 19)."""
+    need = generated_bones(fits)
+    expect(need + GENERATED_SKELETON <= 256,
+           f'{stem}: a generated model; its cockpits need {need} bones, {256 - need} left for its skeleton')
+
+
+def fitted_model(game, stem: str, fits, copies) -> None:  # noqa: ANN001
+    started = time.perf_counter()
+    md = copies()[stem] if stem in STOCK_COPY_STEMS else model_of(game, stem)
+    hull = cockpits.hull_triangles(md)
+    separated=cockpit_shell.separate(md,fits,hull)
+    expect(all(b.inv_bind==md.bones[b.parent].inv_bind for b in separated.bones[len(md.bones):]),
+           f'{stem}: shell children preserve the exact native inverse binds')
+    before=sum(len(me.indices) for o in md.objects for me in o.meshes)
+    after=sum(len(me.indices) for o in separated.objects for me in o.meshes)
+    expect(before==after,f'{stem}: all native triangles retained for outside views')
+    envelopes=cockpit_shell.regions(md,fits,hull)
+    expect(len(envelopes)==sum(f.kit in cockpit_shell.REPLACEMENTS for f in fits),
+           f'{stem}: every replacement station has a bounded native cabin region')
+    remaining=sum(int((cockpit_shell.triangle_masks(separated,o,me,envelopes)[0]!=0).sum())
+                  for o in separated.objects for me in o.meshes)
+    expect(remaining==0,f'{stem}: no unguarded native cabin triangles remain')
+    required_bones=len(separated.bones)+len(fits)
+    for fit in fits:
+        try:
+            kit = cockpits.fitted(hull, fit, cockpit_kits.KITS[fit.kit])
+            required_bones+=len(kit.screens)
+            shared=set()
+            def key(control):   # as cockpits.graft shares a bone
+                return (control.control if control.control[0] in 'dDplcuveZ' else
+                        (control.control,control.centre,control.facing,control.up,control.extent))
+            for control in kit.controls:
+                shared.add(key(control))
+            for index,screen in enumerate(kit.screens):
+                if screen.kind not in ('hud','sensor'):
+                    _parts,controls=cockpit_instruments.instrument(screen,index,numbers=fit.seat==0,
+                                                                 thumbnail=(("111","111"),1.))
+                    for control in controls:
+                        shared.add(key(control))
+            required_bones+=len(shared)
+            kinds = {s.kind for s in kit.screens}
+            expect(kinds <= set(cockpits.SCREEN_KINDS),
+                   f'{stem} seat {fit.seat} ({fit.kit} on {fit.bone}): laid out inside the hull, screens {sorted(kinds)}')
+            closed(f'{stem} seat {fit.seat} ({fit.kit})', kit, fit.kit)
+        except Exception as e:  # noqa: BLE001 - every seat reported, then the count fails the test
+            expect(False, f'{stem} seat {fit.seat} ({fit.kit}): {e}')
+        for alt in ALTERNATES.get(fit.kit, ()):
+            try:
+                kit = cockpits.fitted(hull, replace(fit, kit=alt), cockpit_kits.KITS[alt])
+                expect({s.kind for s in kit.screens} <= set(cockpits.SCREEN_KINDS),
+                       f'{stem} seat {fit.seat} as {alt} (no seat of its own yet): laid out inside the hull')
+                closed(f'{stem} seat {fit.seat} as {alt}', kit)
+            except Exception as e:  # noqa: BLE001
+                expect(False, f'{stem} seat {fit.seat} as {alt}: {e}')
+    expect(required_bones<=256,f'{stem}: all localized labels and vehicle thumbnails fit the skin palette ({required_bones}/256)')
+    print(f'      {stem}: {time.perf_counter() - started:.1f} s', flush=True)
+
+
+def built_blacker(game, spec) -> None:  # noqa: ANN001
     data = vehicle_optics.build_model(game, spec)
     arc = rab_read(data)
     member = spec.stem.lower() + '.mdb'
@@ -245,9 +236,67 @@ def main() -> int:
                f'{spec.stem} seat {fit.seat}: {marker} under {fit.bone}')
         screens = [n for n in names if n.startswith(f'vc_scr_{fit.seat}_')]
         expect(bool(screens), f'{spec.stem} seat {fit.seat}: its screens {screens}')
+
+
+# The stems the plugin's vehicles wear a stock model under (stock_copies' keys), known without building them: a shard
+# builds the copies only when one of its units needs them. Shard 0 checks the two agree.
+STOCK_COPY_STEMS = frozenset([f.removesuffix('.MRAB') for f in jet_models.STOCK_COPIES]
+                             + [make_jets.TRANSPORT_HELI_MODEL_FILE.removesuffix('.MRAB')])
+
+
+def units(game) -> list:  # noqa: ANN001 - rootcpk.Game
+    """Every check as a (name, run) unit standing alone, so `--shard I/N` (ctest's cockpit_build_<I>, run in parallel)
+    takes every N-th of them: a kit in each of its rooms, each fitted model, the Blacker built whole."""
+    built: dict = {}
+
+    def copies() -> dict:
+        if 'copies' not in built:
+            built['copies'] = stock_copies(game)
+        return built['copies']
+    out = [('C-130 dials', c130_dials),
+           ('stock copies', lambda: expect(set(copies()) == STOCK_COPY_STEMS and STOCK_COPY_STEMS <= set(cockpit_fits.FITS),
+                                           f'the stock copies {sorted(copies())} are STOCK_COPY_STEMS and fitted'))]
+    for name, (model, _) in sorted(cockpit_kits_plugin.MODELS.items()):
+        if model.sill is None:
+            continue
+        for label, room in rooms(model):
+            out.append((f'{name} in the room {label}',
+                        lambda n=name, la=label, r=room: closed(f'{n} in the room {la}', cockpit_kits.KITS[n](r))))
+    stock = {m.stem: m for m in vehicle_optics.MODELS if m.cockpits}
+    for stem, fits in sorted(cockpit_fits.FITS.items()):
+        if stem not in stock and stem not in STOCK_COPY_STEMS:
+            out.append((stem, lambda s=stem, f=fits: generated(s, f)))
+        else:
+            out.append((stem, lambda s=stem, f=fits: fitted_model(game, s, f, copies)))
+    out.append(('VEHICLE403_TANK built', lambda: built_blacker(game, stock['VEHICLE403_TANK'])))
+    return out
+
+
+def shard_of(argv: list[str]) -> tuple[int, int]:
+    """`--shard I/N` (0 <= I < N): this run's share of the units; none: all of them."""
+    if '--shard' not in argv:
+        return 0, 1
+    i, n = (int(x) for x in argv[argv.index('--shard') + 1].split('/'))
+    if not 0 <= i < n:
+        raise SystemExit(f'--shard {i}/{n}: I must be 0..N-1')
+    return i, n
+
+
+def main(argv: list[str]) -> int:
+    root = rootcpk.DEFAULT_GAME
+    if not os.path.isfile(os.path.join(root, 'Root.cpk')) or not cockpits.assets_present():
+        print('SKIP: Root.cpk and the cockpits\' assets (the model folder\'s cockpits/) are needed')
+        return 77
+    shard, count = shard_of(argv)
+    todo = units(rootcpk.Game(root))
+    mine = todo[shard::count]
+    for name, run in mine:
+        print(f'--- {name}', flush=True)
+        run()
+    print(f'shard {shard}/{count}: {len(mine)} of {len(todo)} units')
     print(f'{failures} FAILED' if failures else 'all passed')
     return 1 if failures else 0
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
