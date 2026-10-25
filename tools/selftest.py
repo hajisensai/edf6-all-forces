@@ -1229,6 +1229,28 @@ def stores_inc_current() -> None:
     assert f'kSgoHull={vc.JETS["edf6tr_sub_carrier_mission"].durability:.1f}f' in sub, 'subcarrier.cpp kSgoHull'
 
 @test
+def missiles_leave_along_their_rail() -> None:
+    """A missile store leaves its rail on its line (pylib/vcobjects.py Missile.spread; the user, 2026-10-25: 「bmpt的飞弹
+    怎么会往地里射？天启也会射到自己身上导弹」): the helicopter template's FireAccuracy 0.3 (a 17 deg cone) is never kept,
+    every missile's cone is its own and a guided one's none, an unguided rocket's a few mrad. With the game: every missile
+    store's SGO (the jets', the tracked vehicles' secondaries, the Sazabi's) fires with that cone."""
+    missiles = {kind: s.weapon for kind, s in vc.STORES.items() if isinstance(s.weapon, vc.Missile)}
+    missiles['SAZABI'] = vc.SAZABI_MISSILE.weapon
+    assert {'BMPT_ATGM', 'BMPT_ATGMF', 'APOC_SAM', 'TUNGUSKA_SAM', 'PATRIOT_SAM'} <= set(missiles)
+    for kind, m in missiles.items():
+        assert m.params(4)['FireAccuracy'] == m.spread, kind
+        assert m.spread == 0.0 if m.guided else 0.0 < m.spread <= 0.01, (kind, m.spread)
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+    assert dsgo.parse(game.read('WEAPON', vc.JET_MISSILE_STOCK)).root.get('FireAccuracy') > 0.1, 'the template sprays'
+    for kind, m in missiles.items():
+        blob = (vc.sazabi_weapons(game)[vc.SAZABI_MISSILE_FILE] if kind == 'SAZABI'
+                else vc.store_sgo(game, vc.store_file(kind, 4)))
+        assert abs(dsgo.parse(blob).root.get('FireAccuracy') - m.spread) < 1e-9, kind
+
+@test
 def store_looks() -> None:
     """Every store's round flies a model of its own at its weapon's real length (pylib/vcobjects.py STORE_MODELS, Look; the
     user, 2026-10-07: 「不同挂载要有不同模型，射出去的时候也应该是对应模型」): each look's model is one of STORE_MODELS and its
