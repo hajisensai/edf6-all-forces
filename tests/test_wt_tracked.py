@@ -55,6 +55,16 @@ class PrepRuleTests(unittest.TestCase):
         self.assertTrue(np.all(np.einsum('ij,ij->i', n, p.mean(axis=1) - c) > 0))
 
 
+def shard_kinds(kinds) -> list:  # noqa: ANN001
+    """The kinds this run builds and checks: every one, or with EDF6_TEST_SHARD=I/N (ctest's wt_tracked_<I>, run side by
+    side) every N-th of them."""
+    shard = os.environ.get('EDF6_TEST_SHARD', '')
+    if not shard:
+        return list(kinds)
+    i, n = (int(x) for x in shard.split('/'))
+    return list(kinds)[i::n]
+
+
 def _ready() -> bool:
     return (Path(rootcpk.DEFAULT_GAME) / 'Root.cpk').is_file() and wt.available('vulcan') and wt.available('bmpt')
 
@@ -71,7 +81,8 @@ class WtAssetTests(unittest.TestCase):
         # test_grafted_eyes_sit_on_the_war_thunder_geometry).
         # The emplacements (pylib/emplacement_model.py: a Dreadnought turret or a prepared glTF folder on a built base,
         # their wheels hidden boxes) are tests/test_emplacement.py's.
-        cls.files = {kind: combat.authored(cls.game.root, kind) for kind in combat.KINDS if kind not in combat.EMPLACEMENTS}
+        cls.files = {kind: combat.authored(cls.game.root, kind)
+                     for kind in shard_kinds(k for k in combat.KINDS if k not in combat.EMPLACEMENTS)}
 
     def model(self, kind: str):  # noqa: ANN201
         import mdb
@@ -97,6 +108,8 @@ class WtAssetTests(unittest.TestCase):
                 wt.check_skeleton(md, host, spec)                # names, links, rotations; origins per model.json
                 extra = len(spec.info['visual_bones'])
                 self.assertEqual(len(md.bones), len(host.bones) + extra)
+        if 'vulcan' not in self.files:   # another shard's (shard_kinds)
+            return
         md, _rab = self.model('vulcan')
         rotor = md.bone_index('edf6vc_m61_rotor')
         self.assertEqual(md.name_of(md.bones[md.bones[rotor].parent].name), 'cannon_slide_l')
@@ -123,6 +136,8 @@ class WtAssetTests(unittest.TestCase):
                         placed = g.xform(local, world[md.bone_index(row['bone'])])
                         np.testing.assert_allclose(placed, row['point'], atol=2e-5)
         # the mouths are the barrels' front ends
+        if 'bmpt' not in self.files:
+            return
         md, _rab = self.model('bmpt')
         spec = wt.load('bmpt')
         for side in ('left', 'right'):
@@ -169,15 +184,17 @@ class WtAssetTests(unittest.TestCase):
             k = next(i for i, p in enumerate(spec.info['parts']) if p['name'].startswith(name))
             P = spec.part(k)[0]
             return P.min(axis=0), P.max(axis=0)
-        eye, spec = eyes['bmpt']
-        lo, hi = bounds(spec, 'cannon_main.wt_optic_glass_c')
-        self.assertTrue(lo[0] < eye[0] < hi[0] and lo[1] < eye[1] < hi[1] and eye[2] > hi[2],
-                        'BMPT: the eye looks out of the gunner sight window')
-        eye, spec = eyes['vulcan']
-        lo, hi = bounds(spec, 'cannon_main.wt_m163_vulcan_gun')
-        radar_lo, radar_hi = bounds(spec, 'doppler_radar.')
-        self.assertTrue(eye[1] > hi[1] and eye[2] < hi[2] and radar_hi[0] < eye[0] < hi[0],
-                        'M163: the eye is behind and above the M61, left of the radar')
+        if 'bmpt' in eyes:
+            eye, spec = eyes['bmpt']
+            lo, hi = bounds(spec, 'cannon_main.wt_optic_glass_c')
+            self.assertTrue(lo[0] < eye[0] < hi[0] and lo[1] < eye[1] < hi[1] and eye[2] > hi[2],
+                            'BMPT: the eye looks out of the gunner sight window')
+        if 'vulcan' in eyes:
+            eye, spec = eyes['vulcan']
+            lo, hi = bounds(spec, 'cannon_main.wt_m163_vulcan_gun')
+            radar_lo, radar_hi = bounds(spec, 'doppler_radar.')
+            self.assertTrue(eye[1] > hi[1] and eye[2] < hi[2] and radar_hi[0] < eye[0] < hi[0],
+                            'M163: the eye is behind and above the M61, left of the radar')
 
     def test_cas_retargets_absolute_clip_and_drops_radar_tracks(self) -> None:
         import cas_pose
@@ -240,6 +257,8 @@ class WtAssetTests(unittest.TestCase):
         import mdb
         import quadvulcan_model as q
         import vcobjects as vc
+        if 'quadvulcan' not in self.files:
+            self.skipTest('quadvulcan is in another shard')
         base, spec = wt.load('vulcan'), wt.load('quadvulcan')
         md, _rab = self.model('quadvulcan')
         world = mdb.bind_world(md)
