@@ -8,8 +8,12 @@
 //    to every class while closed, every class again after;
 //  - the plugin's own seat tests (the same triple test as the stock's) agree with the stock test on every case;
 //  - RideState: a state the rider's CAS has is played as asked; a refused one is followed by the bench pose
-//    (vehicle_striker_rear) with the option on, not with it off; a null name is not retried.
+//    (vehicle_striker_rear) with the option on, not with it off; a null name is not retried;
+//  - the bench lift: a Wing Diver / Fencer put on the bench pose for a bike state is registered with the table's lift,
+//    PlaceRider moves the copied matrix by it in the rider's axes and then runs the stock normalise; a Ranger with the
+//    bike pose, a rider on another seat or off the seat, and the option off are not moved.
 #include "../src/allclass.cpp"
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cwchar>
@@ -57,6 +61,9 @@ bool __fastcall StockSetCasState(void*,std::int32_t,const wchar_t* name,std::int
     return false;
 }
 
+int normalised=0;
+void* __fastcall StockNormalize(float*) { ++normalised; return nullptr; }
+
 // An absolute jump at image+rva to `to` (jmp [rip+0]; dq to).
 void JumpAt(std::size_t rva,void* to) {
     unsigned char* at=crew::image+rva;
@@ -90,6 +97,7 @@ int main() {
     Check(image!=nullptr,"private image");
     JumpAt(0x62B430,reinterpret_cast<void*>(&StockSeatBuild));
     JumpAt(0x116C2D0,reinterpret_cast<void*>(&StockSetCasState));
+    JumpAt(0x511C0,reinterpret_cast<void*>(&StockNormalize));
 
     // The policy on every stock mask.
     Check(seatclass::Widen(15)==15 && seatclass::Widen(9)==15 && seatclass::Widen(143)==143 && seatclass::Widen(0)==0,
@@ -151,6 +159,65 @@ int main() {
     Check(!RideState(nullptr,0,L"vehicle503_bike_driver",0) && played.size()==2,"no bench pose either: false, as the stock");
     casStates={L"vehicle503_bike_driver",L"vehicle_striker_rear"};played.clear();   // a Ranger's CAS
     Check(RideState(nullptr,0,L"vehicle503_bike_driver",0) && played.size()==1,"the Ranger keeps the bike pose");
+
+    // The bench lift.
+    {
+        static unsigned char rider[0x1600]{};
+        unsigned char seatA[0x300]{},seatB[0x300]{};
+        void* const cas=rider+kRiderCas;
+        auto place=[&](float yaw){   // the ride's copy: the rider's axes turned by yaw about y, at (10, 2, 30)
+            float* m=reinterpret_cast<float*>(rider+kRiderMatrix);
+            const float c=std::cos(yaw),s=std::sin(yaw);
+            const float rows[16]={c,0,-s,0, 0,1,0,0, s,0,c,0, 10,2,30,1};
+            std::memcpy(m,rows,sizeof(rows));
+            PlaceRider(m);
+            return m;
+        };
+        auto board=[&](std::uint32_t cls,void* seat){
+            Put<std::uint32_t>(rider,kRiderClass,cls);Put<void*>(rider,kRiderSeat,seat);Put<void*>(rider,kRiderVehicle,vehicle);
+        };
+        casStates={L"vehicle_striker_rear"};   // a Wing Diver's
+        board(2,seatA);
+        Check(RideState(cas,0,L"vehicle503_bike_driver",0),"the Wing Diver sits the bench");
+        normalised=0;
+        float* m=place(0.0f);
+        Check(normalised==1,"the stock normalise still runs");
+        Check(std::fabs(m[12]-(10.0f-0.0052f))<1e-4f && std::fabs(m[13]-(2.0f+0.6556f))<1e-4f && std::fabs(m[14]-(30.0f+0.3802f))<1e-4f,
+              "lifted by the 503 seat's pelvis less the Wing Diver's bench pelvis");
+        m=place(1.5707964f);   // facing +x: the lift's forward goes along the rider's own z row
+        Check(std::fabs(m[12]-(10.0f+0.3802f))<1e-3f && std::fabs(m[13]-(2.0f+0.6556f))<1e-3f,"in the rider's own axes");
+        Put<void*>(rider,kRiderSeat,seatB);
+        m=place(0.0f);
+        Check(m[12]==10.0f && m[13]==2.0f && m[14]==30.0f,"on another seat: not moved");
+        Put<void*>(rider,kRiderSeat,seatA);
+        m=place(0.0f);
+        Check(m[13]==2.0f,"...and forgotten");
+        board(4,seatA);
+        Check(RideState(cas,0,L"vehicle613_bike_driver",0),"the Fencer on the 613 seat");
+        m=place(0.0f);
+        Check(std::fabs(m[13]-(2.0f+0.6887f))<1e-4f && std::fabs(m[14]-(30.0f+0.3882f))<1e-4f,"the Fencer's 613 lift");
+        Put<void*>(rider,kRiderVehicle,nullptr);
+        m=place(0.0f);
+        Check(m[13]==2.0f,"off the vehicle: not moved");
+        casStates={L"vehicle503_bike_driver",L"vehicle_striker_rear"};   // a Ranger's
+        board(1,seatA);
+        Check(RideState(cas,0,L"vehicle503_bike_driver",0),"the Ranger rides its own pose");
+        m=place(0.0f);
+        Check(m[13]==2.0f && m[14]==30.0f,"the Ranger is not moved");
+        casStates={L"vehicle_striker_rear"};
+        board(2,seatA);
+        Check(RideState(cas,0,L"vehicle_striker_rear",0),"a bench seat's own state");
+        m=place(0.0f);
+        Check(m[13]==2.0f,"a bench seat: no lift");
+        Check(RideState(cas,0,L"vehicle503_bike_driver",0),"back on the bike");
+        testConfig.allClassesRide=false;
+        m=place(0.0f);
+        Check(m[13]==2.0f,"AllClassesRide=0: not moved");
+        testConfig.allClassesRide=true;
+        Check(seatclass::BenchLiftFor(L"vehicle503_bike_driver",1)==nullptr && seatclass::BenchLiftFor(L"vehicle503_bike_driver",8)==nullptr &&
+              seatclass::BenchLiftFor(L"vehicle503_bike_drive",2)==nullptr && seatclass::BenchLiftFor(nullptr,2)==nullptr,
+              "no lift for the classes with the pose, a near name or none");
+    }
 
     // A vehicle whose seat vector's count (+0x618) lies past readable memory: SeatBuild reads nothing of it (its check
     // covers +0x608..+0x61F, every byte it reads), the stock build still runs, nothing is widened.

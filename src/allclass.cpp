@@ -18,6 +18,12 @@
 //      a Wing Diver or a Fencer on one kept their on-foot state (no crash: the name is refused, nothing changes). That
 //      call is redirected: a refused name is followed by seatclass::kFallbackRide, a seated pose every class has.
 //      Seats that hide their rider (every other stock pilot seat) need nothing.
+//   3. the bench rider's height. A seat locator puts the pelvis where its own Animation has it; the bench pose has it
+//      about 0.65 m lower and further back, so a Wing Diver or Fencer on a bike sank into it. RideState registers the
+//      rider with seatclass::BenchLiftFor (the seat state's pelvis less the bench pose's, for that class); the ride's
+//      per-frame copy of the seat's matrix into the rider (0x5751D3..0x57520B, then 0x575210 call 0x511C0 normalising
+//      rider+0x60) goes through PlaceRider, which moves the copied matrix by the lift in the rider's axes before the
+//      stock call. A rider with its seat's own state, on another seat, or off the seat is not moved (and forgotten).
 // Online: who boards is decided on the boarder's own machine (the board button's FindSeat / CanRideSeat; NPCs on their
 // authority, npcai.cpp), and a peer replays the ride without any class test (HUMAN_EVENT_VEHICLE_RIDE Recv 0x5775F1
 // -> 0x5765E0 RideVehicle). So a player needs this on their own machine to board; a peer without it still sees them
@@ -36,6 +42,13 @@ constexpr std::size_t kSeatBuild=0x62B430;
 constexpr std::size_t kRideStateCall=0x57AE8E;   // call 0x116C2D0(rider+0xB90, [rider+0x1420], seat->Animation, 0)
 constexpr std::size_t kSetCasState=0x116C2D0;
 constexpr std::size_t kSeatClassMask=0x30;
+constexpr std::size_t kRiderPlaceCall=0x575210;   // call 0x511C0(rider+0x60): the copied matrix, right after the copy
+constexpr std::size_t kNormalize=0x511C0;
+constexpr std::size_t kRiderCas=0xB90;      // the rider's CAS (kRideStateSig: lea rcx,[rdi+0xB90], rdi the rider)
+constexpr std::size_t kRiderSeat=0x1540;    // its seat
+constexpr std::size_t kRiderVehicle=0x1550; // its vehicle reference (0x5751B9: the copy runs only while it is set)
+constexpr std::size_t kRiderClass=0x31C;    // game_object_vehicle_mask
+constexpr std::size_t kRiderMatrix=0x60;
 const unsigned char kSeatBuildCallSig[]={0x49,0x8B,0xCE,0xE8,0xE4,0x17,0x00,0x00};   // 0x629C44 mov rcx,r14; call 0x62B430
 const unsigned char kSeatBuildSig[]={0x48,0x89,0x5C,0x24,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
 const unsigned char kMaskStoreSig[]={0x89,0x85,0x90,0x00,0x00,0x00};   // 0x62B79C mov [rbp+0x90],eax: the class mask (seat = rbp+0x60)
@@ -47,6 +60,11 @@ const unsigned char kAppendSig[]={0x48,0x8B,0x43,0x18,0x48,0x69,0xC8,0x40,0x03,0
 const unsigned char kRideStateSig[]={0x48,0x8B,0xB7,0x40,0x15,0x00,0x00,0x48,0x8D,0x8F,0x60,0x08,0x00,0x00,0x44,0x38,0xBE,0x54,0x02,
     0x00,0x00,0x74,0x2A,0xB2,0x01,0xE8,0x36,0x56,0x14,0x00,0x4C,0x8B,0x46,0x10,0x48,0x8D,0x8F,0x90,0x0B,0x00,0x00,0x8B,0x97,0x20,0x14,
     0x00,0x00,0x45,0x33,0xC9,0xE8,0x3D,0x14,0xBF,0x00};
+// 0x5751D3: mov rax,[rsi+0x1540] (the seat); the seat's matrix +0x270..+0x2AF into rsi+0x60..+0x9F; lea rcx,[rsi+0x60];
+// call 0x511C0
+const unsigned char kRiderPlaceSig[]={0x48,0x8B,0x86,0x40,0x15,0x00,0x00,0x0F,0x10,0x80,0x70,0x02,0x00,0x00,0x0F,0x11,0x46,0x60,
+    0x0F,0x10,0x88,0x80,0x02,0x00,0x00,0x0F,0x11,0x4E,0x70,0x0F,0x10,0x80,0x90,0x02,0x00,0x00,0x0F,0x11,0x86,0x80,0x00,0x00,0x00,
+    0x0F,0x10,0x88,0xA0,0x02,0x00,0x00,0x0F,0x11,0x8E,0x90,0x00,0x00,0x00,0x48,0x8D,0x4E,0x60,0xE8,0xAB,0xBF,0xAD,0xFF};
 const unsigned char kSetCasStateSig[]={0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74,0x24,0x10,0x57,0x48,0x83,0xEC,0x20,0x41};
 static_assert(kSeats==0x608 && kSeatCount==0x618 && kSeatStride==0x340,"the seat vector 0x62BE33 appends to");
 // What SeatBuild reads of the vehicle: the seat vector's data pointer (kSeats) through its count (kSeatCount, 8 bytes).
@@ -55,7 +73,24 @@ static_assert(kSeatVectorRead==0x18,"vehicle+0x608 .. +0x61F");
 
 using SeatBuildFn=void(__fastcall*)(unsigned char*,void*);
 using SetCasStateFn=bool(__fastcall*)(void*,std::int32_t,const wchar_t*,std::int32_t);
-std::atomic<int> widenedSaid{0},fallbackSaid{0};
+using NormalizeFn=void*(__fastcall*)(float*);
+std::atomic<int> widenedSaid{0},fallbackSaid{0},liftSaid{0};
+
+// The riders on a bench pose with a lift (the game thread's: the ride state's entry and the human's update).
+struct Lifted { const unsigned char* rider; const void* seat; const seatclass::BenchLift* lift; };
+constexpr int kMostLifted=16;
+Lifted lifted[kMostLifted]{};
+Lifted* LiftedOf(const unsigned char* rider) noexcept {
+    for(auto& l:lifted)if(l.rider && l.rider==rider)return &l;
+    return nullptr;
+}
+void Forget(const unsigned char* rider) noexcept { if(Lifted* l=LiftedOf(rider))*l=Lifted{}; }
+void Remember(const unsigned char* rider,const void* seat,const seatclass::BenchLift* lift) noexcept {
+    Lifted* l=LiftedOf(rider);
+    for(int i=0;!l && i<kMostLifted;++i)if(!lifted[i].rider)l=&lifted[i];
+    if(!l)l=&lifted[0];   // more riders than slots: the oldest slot (a rider not seen again is only a stale pointer)
+    *l=Lifted{rider,seat,lift};
+}
 
 bool On() noexcept { return Cfg().enabled && Cfg().allClassesRide; }
 
@@ -79,13 +114,33 @@ void __fastcall SeatBuild(unsigned char* vehicle,void* entry) {
 // The ride state's pose: the seat's own, else (a class without it) the bench pose every class has.
 bool __fastcall RideState(void* cas,std::int32_t casPlayer,const wchar_t* name,std::int32_t flag) {
     const auto stock=reinterpret_cast<SetCasStateFn>(image+kSetCasState);
+    unsigned char* const rider=cas ? static_cast<unsigned char*>(cas)-kRiderCas : nullptr;
+    if(rider)Forget(rider);
     if(stock(cas,casPlayer,name,flag))return true;
     if(!name || !On())return false;   // refused: the state is unchanged (0x116C2EF), so the bench pose may be asked next
     const bool sat=stock(cas,casPlayer,seatclass::kFallbackRide,flag);
+    if(sat && rider && Readable(rider+kRiderClass,4) && Readable(rider+kRiderSeat,8)) {
+        if(const seatclass::BenchLift* lift=seatclass::BenchLiftFor(name,At<std::uint32_t>(rider,kRiderClass))) {
+            Remember(rider,At<const void*>(rider,kRiderSeat),lift);
+            if(liftSaid.fetch_add(1)<8)
+                Log("ALLCLASS rider %p on the bench pose for \"%ls\": lifted (%.3f, %.3f, %.3f) m in its axes",static_cast<void*>(rider),
+                    lift->state,lift->d[0],lift->d[1],lift->d[2]);
+        }
+    }
     if(fallbackSaid.fetch_add(1)<8)
         Log("ALLCLASS rider CAS %p has no ride state \"%ls\": %ls %s",cas,Readable(name,64) ? name : L"?",seatclass::kFallbackRide,
             sat ? "played instead" : "missing too (the rider keeps its pose)");
     return sat;
+}
+// The ride's copy of the seat's matrix into the rider, about to be normalised: a lifted rider still on its seat is moved.
+void* __fastcall PlaceRider(float* matrix) {
+    auto* const rider=reinterpret_cast<unsigned char*>(matrix)-kRiderMatrix;
+    if(Lifted* l=LiftedOf(rider)) {
+        if(On() && At<const void*>(rider,kRiderSeat)==l->seat && At<const void*>(rider,kRiderVehicle))
+            seatclass::Lift(matrix,l->lift->d);
+        else *l=Lifted{};
+    }
+    return reinterpret_cast<NormalizeFn>(image+kNormalize)(matrix);
 }
 }  // namespace
 
@@ -95,13 +150,16 @@ bool InstallAllClassesRide() noexcept {
         build=Matches(kSeatBuildCall-3,kSeatBuildCallSig,sizeof(kSeatBuildCallSig)) &&
               Matches(kSeatBuild,kSeatBuildSig,sizeof(kSeatBuildSig)) && Matches(0x62B79C,kMaskStoreSig,sizeof(kMaskStoreSig)) &&
               Matches(0x62BD57,kVectorSig,sizeof(kVectorSig)) && Matches(0x62BE33,kAppendSig,sizeof(kAppendSig));
-        pose=Matches(0x57AE5C,kRideStateSig,sizeof(kRideStateSig)) && Matches(kSetCasState,kSetCasStateSig,sizeof(kSetCasStateSig));
+        pose=Matches(0x57AE5C,kRideStateSig,sizeof(kRideStateSig)) && Matches(kSetCasState,kSetCasStateSig,sizeof(kSetCasStateSig)) &&
+             Matches(0x5751D3,kRiderPlaceSig,sizeof(kRiderPlaceSig));
     } __except(EXCEPTION_EXECUTE_HANDLER) {build=pose=false;}
     bool changed=false;
     const bool seats=build && RedirectCall(image+kSeatBuildCall,image+kSeatBuild,reinterpret_cast<void*>(&SeatBuild),changed);
     changed=false;
-    const bool poses=pose && RedirectCall(image+kRideStateCall,image+kSetCasState,reinterpret_cast<void*>(&RideState),changed);
-    Log("ALLCLASS seat build %s, ride pose %s (AllClassesRide=%d)",seats ? "hooked" : build ? "NOT hooked" : "not as read: not hooked",
+    bool poses=pose && RedirectCall(image+kRideStateCall,image+kSetCasState,reinterpret_cast<void*>(&RideState),changed);
+    changed=false;
+    poses=poses && RedirectCall(image+kRiderPlaceCall,image+kNormalize,reinterpret_cast<void*>(&PlaceRider),changed);
+    Log("ALLCLASS seat build %s, ride pose and bench lift %s (AllClassesRide=%d)",seats ? "hooked" : build ? "NOT hooked" : "not as read: not hooked",
         poses ? "hooked" : pose ? "NOT hooked" : "not as read: not hooked",Cfg().allClassesRide ? 1 : 0);
     return seats;
 }
