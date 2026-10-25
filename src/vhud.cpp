@@ -172,6 +172,9 @@ void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const
     roundaim::Pass pass{};
     const bool solved=roundaim::Solve(round,pos,shooter,target.at,target.vel,kSolveClose,aim,&pass);
     if(!pass.ok)return;
+    // A target behind the map (a ridge, a building): the solved round meets the map before it, so there is no solution.
+    float land[3],landSec=0.0f;
+    if(RoundLands(w,m,pos,aim,vec::Dist(pos,target.at)+kSolveClose,land,&landSec) && landSec*60.0f<pass.frames-1.0f)return;
     a.ranged=true;
     a.inReach=solved && pass.frames<static_cast<float>(round.alive)-1.0f;
     // A target guide is not where this shot hits terrain. Keep RoundLands' physical endpoint/hit/time intact.

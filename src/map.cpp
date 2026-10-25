@@ -836,19 +836,24 @@ void StockHud(unsigned char* cam,std::uint64_t generation) noexcept {
 }
 
 // The damage layer's draw (map_stock_hud.h LendsDamage): while a vehicle's first person alone holds its camera's switch,
-// the switch is 1 for this one draw, under hudLock (the camera step's StockHud waits for it: it never sees the lent 1).
+// the switch is 1 for this one draw. Lent and returned under hudLock (Lend / Return: the record knows the 1 is lent, so
+// StockHud never takes it for the game's), the stock draw itself called without the lock (nothing it reaches can wait on it).
 void __fastcall DamageDrawHook(void* object,void* a,void* b,void* c) {
+    unsigned char* cam=Readable(object,kHudCamera+8) ? At<unsigned char*>(object,kHudCamera) : nullptr;
+    if(cam && !Readable(cam,kCamHudShown+1))cam=nullptr;
     bool lent=false;
-    unsigned char* cam=nullptr;
-    AcquireSRWLockExclusive(&hudLock);
-    __try {   // the stock draw's faults are its own: only the lent switch and the lock are put back on the way out
-        cam=Readable(object,kHudCamera+8) ? At<unsigned char*>(object,kHudCamera) : nullptr;
-        if(cam && Readable(cam,kCamHudShown+1) && !cam[kCamHudShown] &&
-           maphud::LendsDamage(hudRecord,cam,cameraSession.Generation())){cam[kCamHudShown]=1;lent=true;}
-        nextDamageDraw(object,a,b,c);
-    } __finally {
-        if(lent)cam[kCamHudShown]=0;
+    if(cam) {
+        AcquireSRWLockExclusive(&hudLock);
+        lent=maphud::Lend(hudRecord,cam,cameraSession.Generation(),cam+kCamHudShown);
         ReleaseSRWLockExclusive(&hudLock);
+    }
+    __try { nextDamageDraw(object,a,b,c); }
+    __finally {   // the stock draw's faults are its own: only the lent switch is put back on the way out
+        if(lent) {
+            AcquireSRWLockExclusive(&hudLock);
+            maphud::Return(hudRecord,cam,cam+kCamHudShown);
+            ReleaseSRWLockExclusive(&hudLock);
+        }
     }
 }
 

@@ -142,6 +142,27 @@ int main() {
         maphud::Step(r,&c,1,false,&c.shown,false);
         Check(c.shown==1 && !maphud::LendsDamage(r,&c,1),"first person off: the switch back, nothing to lend",c.shown);
     }
+    // The lend is a transaction (Lend .. draw without the lock .. Return): a camera step in the middle never takes the lent
+    // 1 for the game's, a hold that ends in the middle is not undone by the return, a lend never nests.
+    {
+        maphud::Record r;Cam c;
+        maphud::Step(r,&c,1,true,&c.shown,true);
+        Check(maphud::Lend(r,&c,1,&c.shown) && c.shown==1,"lent: 1 for the damage layer's draw",c.shown);
+        Check(!maphud::Lend(r,&c,1,&c.shown),"a lend never nests");
+        maphud::Step(r,&c,1,true,&c.shown,true);   // the camera steps while the draw runs
+        GameSet(r,c,1,false);GameSet(r,c,1,true);
+        Check(r.want && c.shown==0,"a step mid-draw holds 0 and keeps the game's own wish",c.shown);
+        maphud::Return(r,&c,&c.shown);
+        Check(c.shown==0 && !r.lent && maphud::LendsDamage(r,&c,1),"returned: 0 again, ready for the next draw",c.shown);
+        GameSet(r,c,1,false);
+        maphud::Step(r,&c,1,true,&c.shown,true);
+        Check(!maphud::Lend(r,&c,1,&c.shown) && c.shown==0,"a cutscene's hide: nothing lent",c.shown);
+        GameSet(r,c,1,true);
+        Check(maphud::Lend(r,&c,1,&c.shown),"shown again: lent");
+        maphud::Step(r,&c,1,false,&c.shown,false);  // first person ends while the draw runs
+        maphud::Return(r,&c,&c.shown);
+        Check(c.shown==1 && !r.hidden,"a hold that ended mid-draw keeps the game's value",c.shown);
+    }
     std::printf(failures ? "map_hud_check: %d of %d FAILED\n" : "map_hud_check: %d checks passed\n",failures ? failures : cases,cases);
     return failures ? 1 : 0;
 }

@@ -5999,9 +5999,14 @@ def map_hides_stock_hud() -> None:
     assert re.search(r'\bkDamageObjectVtable=0x17FCA28\b', code) and '0x17FCA28' in doc
     assert '*slot!=image+kHudObjectDrawFn' in install, 'the damage slot is chained only while it is the stock draw'
     lend = code.split('void __fastcall DamageDrawHook(', 1)[1].split('\n}\n', 1)[0]
-    assert lend.index('AcquireSRWLockExclusive(&hudLock);') < lend.index('maphud::LendsDamage(') < lend.index('nextDamageDraw(') \
-        < lend.index('ReleaseSRWLockExclusive(&hudLock);')
-    assert 'inline bool LendsDamage(' in h
+    # Lent and returned under hudLock, the stock draw called without it (SRW locks do not nest: nothing the draw reaches
+    # may wait on the lock), the return in a __finally (the draw's faults are its own, never swallowed).
+    draw_at = lend.index('nextDamageDraw(')
+    assert lend.index('AcquireSRWLockExclusive(&hudLock);') < lend.index('maphud::Lend(') \
+        < lend.index('ReleaseSRWLockExclusive(&hudLock);') < draw_at < lend.index('__finally') < lend.index('maphud::Return(')
+    assert '__except' not in lend, 'the stock draw\'s faults are not swallowed'
+    assert 'inline bool LendsDamage(' in h and 'inline bool Lend(' in h and 'inline void Return(' in h
+    assert 'else if(*shown && !r.lent)r.want=true;' in h, 'a lent 1 is never taken for the game\'s wish'
     assert 'maphud::GameSet(hudRecord,cam,cameraSession.Generation(),show)' in code
     assert 'if(write)reinterpret_cast<HudShowFn>(image+kHudShow)(cam,show);' in code
     assert 'cameraSession.Reset();' in code.split('void ResetMap() noexcept {', 1)[1].split('\n}\n', 1)[0]

@@ -81,6 +81,14 @@ def main(argv: list[str]) -> int:
             expected = bytes.fromhex(hex_bytes)
             check(pe.get_data(address, len(expected)) == expected,
                   f"native {address:#x}: {label}")
+        # Vehicle603_Flak's setup finds its aim bones by name (the only references to cannon_l / cannon_r in EDF.dll):
+        # lea rdx,[name]; ... call 0x11002A0 (ModelInstance bone by name) for cannon_main, cannon_r, cannon_l.
+        for address, name in ((0x621099, "cannon_main"), (0x621119, "cannon_r"), (0x621199, "cannon_l")):
+            code = pe.get_data(address, 7)
+            target = address + 7 + struct.unpack_from("<i", code, 3)[0]
+            text = pe.get_data(target, 2 * len(name) + 2).decode("utf-16le")
+            check(code[:3] == bytes.fromhex("488d15") and text == name + "\0",
+                  f"native {address:#x}: V603 looks its aim bone {name} up by name")
     finally:
         pe.close()
 
@@ -186,6 +194,29 @@ def main(argv: list[str]) -> int:
           and constraints[1][3][1][1] == [1, -60, 5]
           and artillery["vehicle_weapon_setting"] == [["cannon_slide_l", 0], ["cannon_slide_r", 0]],
           "in-memory artillery fixes yaw but preserves independent elevation")
+    # The plugin's V603 vehicles whose weapon station sees along the gun (src/vhud.cpp SeatGunLine; the review of #263:
+    # BMPT, PzH 2000, Patriot, guns with elevation stops). SeatGunLine takes the bore only where weapon_mount.h finds the
+    # fire-control gun's holder under bones both the seat's yaw and pitch axes turn; on V603 those are the class's own
+    # cannon_main (yaw) and cannon_l / cannon_r (pitch, found by name above). Built in memory from Root.cpk and the
+    # repository's model folders, as the installer builds them.
+    import make_tracked_combat
+    import vcobjects
+    plugin_game = vcobjects.Game(str(root))
+    for kind in ("bmpt", "pzh2000", "patriot"):
+        if make_tracked_combat.model_missing(kind):
+            print(f"SKIP {kind}: its model folder is missing")
+            continue
+        vehicle = dsgo.to_py(dsgo.parse(make_tracked_combat.vehicle_sgo(plugin_game, kind)).root)
+        md = make_tracked_combat._assets(plugin_game, kind)[1]
+        joints = {tuple(e[:2]): e[3] for e in vehicle["car_base_constraint_data"]}
+        yaw, pitch = joints.get(("cannon_main", "body")), joints.get(("cannon_r", "cannon_main"))
+        check(vehicle["xgs_scene_object_class"] == "Vehicle603_Flak" and yaw is not None and yaw[0] == 1.0
+              and yaw[1][1] == [0.0] and pitch is not None and pitch[0] == 0.0 and pitch[1][1][0] == 1.0
+              and pitch[1][1][1] < pitch[1][1][2], f"{kind}: V603 class, free yaw hinge, pitch hinge with travel")
+        guns = [bone for bone, _ in vehicle["vehicle_weapon_setting"] if bone != "cannon_main"]
+        check(len(guns) >= 1 and all(chain(md, bone)[1] in ("cannon_l", "cannon_r") and "cannon_main" in chain(md, bone)
+                                     for bone in guns),
+              f"{kind}: every gun holder hangs under a pitch bone and the turret (yaw and pitch: SeatGunLine's bore)")
     print(f"PASS: {checked} read-only native/resource contracts; no game or DLL execution")
     return 0
 

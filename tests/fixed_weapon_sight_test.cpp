@@ -117,6 +117,12 @@ void Run(){
         const roundaim::Pass p=roundaim::Fire(round,pos,way,shooter,target.at,target.vel);
         Check(ok && unit && p.ok && p.miss<3.0f && turret.leadFlight>0.0f,"fired at the guide, the round meets the target");
         Check(way[1]>line[1]+1e-4f,"a still target's guide stands above its line by the drop");
+        // Behind the ground (under the floor at y 0 left of the middle): the solved round meets the map first: no guide.
+        const auto was=target;
+        target.at[1]=-5;
+        StockArm hidden{};hidden.physicalOnly=false;Arm(f.weapon,true,hidden);
+        Check(!hidden.ranged,"a target behind the map gets no guide (the solved round lands first)");
+        target=was;
     }
     Check(turret.hit==fixed.hit&&vec::Dist(turret.at,fixed.at)<.001f&&turret.flight==fixed.flight,"articulated target guide also cannot replace physical map hit");
     terrain=false;StockArm sky{};Arm(f.weapon,true,sky);
