@@ -419,7 +419,7 @@ void __fastcall UnlockDlcHook(unsigned char* gs) {
 
 做法（移植并改写 MIT 插件 EDF6 WeaponLimit v1.0 的“整表搬家”，许可见 `third_party/EDF6WeaponLimit/LICENSE`）：
 
-- **搬家**：记录整体搬到 `GS+0x150A8`（对象原长 `0x150A0` 之后第一个 12 的倍数；折叠形式 `(id+K)*12` 要求偏移能被 12 整除），容量 `wrec::kSlots = 0x2000`。`src/weapon_records_sites.inc` 是 101 条**整条指令**（逐条带全部字节，安装前全部核对、全部写或全部回滚）：GS 基址 `0xEB50/0xEB54/0xEB44`、块基址 `0x7CE8/0x7CEC/0x7CF4`、折叠常量 `0x139C`(7)/`0xA69`(10)、辅助函数的条数 `0x800/0x7FF`(9)、GS 单例的 12 处 `mov ecx,0x150A0`（分配）。`tests/weapon_records_native_audit.py` 对整个 `.text` 线性反汇编，确认除清单与 10 条已知无关指令外没有别的指令用这些偏移。比参考插件多出：`0xAECFB`（`[rcx+rax+0xEB44]`，循环指针落后一条）、`0x8DAD92`（无 .pdata 的叶函数）。
+- **搬家**：记录整体搬到 `GS+0x150A8`（对象原长 `0x150A0` 之后第一个 12 的倍数；折叠形式 `(id+K)*12` 要求偏移能被 12 整除），容量 `wrec::kSlots = 0x2000`。`src/weapon_records_sites.inc` 是 100 条**整条指令**（逐条带全部字节，安装前全部核对、全部写或全部回滚）：GS 基址 `0xEB50/0xEB54/0xEB44`、块基址 `0x7CE8/0x7CEC/0x7CF4`、折叠常量 `0x139C`(7)/`0xA69`(10)、辅助函数的条数 `0x800/0x7FF`(9)、GS 单例的 12 处 `mov ecx,0x150A0`（分配）。`tests/weapon_records_native_audit.py` 对整个 `.text` 线性反汇编，确认除清单与 11 条已知无关 / 另行处理的指令外没有别的指令用这些偏移。比参考插件多出：`0xAECFB`（`[rcx+rax+0xEB44]`，循环指针落后一条）、`0x8DAD92`（无 .pdata 的叶函数）。
 - **不改 `0xDEDA0`**（块初始化）：它也初始化栈上模板（`0xDB920`）、状态记录与选武器界面的快照。GS 构造里那一次调用（`0xD6468`）改调到 `BlockInitHook`：原函数后把搬家后的整表清零。
 - **两份表的同步**：存档块 `GS+0x6E68`（MAIN.GST）里的旧表保留为 0..0x7FF 行的存档副本。
   - 块被拷出之前（旧表 ← 新表 0..0x7FF）：四个状态记录构造的 memcpy `0x70AF25/0x70B079/0x70B61C/0x70B79C`（并按记录数据指针记下 0x800 以后的行）、MAIN.GST 存档请求 `0x7C2F66 → 0x7BCD40`（第 6 个参数是块；按旧表的 FNV-1a 哈希记下 0x800 以后的行，`0x7BCE7C` 的 outfit41 钩子只改颜色块，不影响哈希）。
@@ -431,7 +431,8 @@ void __fastcall UnlockDlcHook(unsigned char* gs) {
   - 删：`0x7B69F1`/`0x7B7FEB` 两处 `call [DeleteFileW]`：删的是 `…\MAIN.GST` 时一并删 sidecar。
   - 格式：`"EDF6VCWR"`、版本 1、首行 `0x800`、行数、FNV-1a-32、行×12 字节（`weapon_records_logic.h`）。
 - **插件自己的写入**：`airstrike.cpp GrantCalls`、`loadout.cpp` 改走 `WeaponRecord(gs,id)` / `WeaponRecordCapacity()`；`GrantCalls` 发现 `RowCount` 超过容量时日志 + 提示一次（`WeaponRecordsCheckRows`）。
-- **安装条件**（任一不满足就 `WEAPONREC REFUSED`，什么都不改，记录仍是原生 0x800 条）：`edf6_weaponlimit.dll` 未加载；GS 尚未分配（`[EDF+0x20B2890]` 为空，EML6_Load 时）；101 条指令、两处界面读取、四处导入调用字节全部吻合；13 处被改调的 call 仍指向原函数。包装函数在 `active` 置位前都是原样直通。
+- **安装条件**（任一不满足就 `WEAPONREC REFUSED`，什么都不改，记录仍是原生 0x800 条）：`edf6_weaponlimit.dll` 未加载；GS 尚未分配（`[EDF+0x20B2890]` 为空，EML6_Load 时）；100 条指令、两处界面读取、四处导入调用字节全部吻合；13 处被改调的 call 仍指向原函数。包装函数在 `active` 置位前都是原样直通。
+- **2026-10-25 实机：#246 的搬家从未装上（启动即崩）**。分享包 main `471bfc5` 第一次在本机启动：`WEAPONREC REFUSED: writing the code failed at the weapon select screen; everything put back` → `WEAPONREC the weapon table has 2060 rows, the game status holds 2048 records` → 标题阶段 `CRASH ... C0000005 at EDF.dll+0xCDAE6`（`mov r10,[rax+8]`，`rcx = GS+0x14B50`：正是第 0x800 条记录的位置 `0xEB50+0x800*12`，原生紧跟记录表的成员，被游戏写第 0x800 行以后的记录写坏）。根因：`0x8B4F70`（武器选择界面读快照表 `movzx eax,[rbx+rcx*4+0x7CE8]`）同时在常量清单里和界面跳转里；常量循环先把它改成 `0xE240`，界面跳转的 `PatchCode` 再核对原字节就失败，于是整份搬家回滚，而安装器已按 0x2000 的容量写了 2060 行。这条读的是界面自己 `0xDCE8` 字节的快照，本来就不该改常量（改了会读出快照外），由界面跳转处理。修：清单删掉这一行（100 条），`weapon_records_logic.h` 汇总所有被改写的调用 / 读取（`kOtherPatches`），`static_assert(PatchesApart())` 与 `weapon_records_test`、`weapon_records_native_audit.py` 都核对任何两处补丁不共用字节。
 - **联机**：房间检查查的是内容号（8.5），成员记录的武器是 int32 行号、星级随记录按值发送（`0x78E9A0` 读的是新表，已在清单里），远端玩家建人用记录里的星级（`0x5A4374`），不读本机表。所以搬家不改协议；房间里各人武器表一致这个老要求不变。
 - 安装器：`tools/call_weapons.py SAVE_WEAPONS = 0x2000`（与 `kSlots` 一致，selftest `weapon_table_fits_the_save` 校验两者相等）。
   只有插件的搬家装得上时才用这个上限（`record_room`：游戏目录的 EDF.dll 是 `0x678CCB46`、`Mods/Plugins` 里没有 `edf6_weaponlimit.dll`），否则上限是原生的 `0x800`，超过就拒绝安装、一个字节都不写：搬家不生效时，每多一行游戏就越界写一条记录（GS+0x14B50 起是击杀计数的 map）。

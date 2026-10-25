@@ -41,3 +41,11 @@ EDF6 的 ragdoll loader 已内置旧 `hkpPhysicsData` 到 `hknpPhysicsSceneData`
 这些证据来自离线数据与 native 代码核对；还需要实际任务验收上车、移动、炮塔/旋翼、开火、卸载与联机表现。
 
 408 已进一步沿真实 CarBase / seat1 Aim 合同适配，见 `pylib/edf41bike.py` 与 `src/edf41bike.cpp`：保留原 8 代理、3 真实轮、双座与独立车载机枪，不复用装饰第三轮 / 自由站立射手。数据测试 `tests/test_edf41bike.py` 7 项通过；四职业拟合座位的骨盆最大残差 7.32 cm，姿态与实际驾驶 / 炮手表现仍待实机验收。当前真实模型总计 13 个源对象、64 个原模型配置资源；另有 13 个私有默认摆放 SGO，45 条相关请求。
+
+## 2026-10-25 实机：406 跳跃崩溃（「维加泰跳跃会炸游戏」）
+
+- 复现（本机，main 471bfc5 + #weaponrec 修复，`drive.py` 后台）：测试场 `DebugSpawn` 召唤 `VEHICLE406_BEGARUTA`，游骑兵上车，按一次跳跃即崩：`C0000005 at EDF.dll+0x64833E, writing 0x3EC`，栈 `0x64833E <- 0x638D22 <- 0x6443CA`（`EDF6.exe.89740.plugin.dmp`）。
+- 根因：406 保留 EDF6 仍注册的 `VehicleBegaruta` 与 4.1 的 `begaruta_boost` 键，载具设定把它交给旧喷口解析 `0x636DCE -> 0x640340`（`begaruta_boost6` 走 `0x63DEC0`，`begaruta_boost5` 走 `0x63CEC0`）。喷口组 `vehicle+0x1BB0` 有四个槽（`+0x20 + i*0xA0`，喷焰发射器在 `+0x50`）；EDF6 自己的两种解析按骨骼一槽一个填满四槽（504 / 608 / 612 全用 boost5 / boost6），旧解析只循环两次（`0x640CB3 cmp rsi,2`），槽 2、3 的发射器留空。更新里两处循环不检查就写每个槽的发射器：状态步 `0x6482A0`（起跳 / 推进开始时由 `0x638CE7 / 0x638D1D` 调用，写 `+0x3EC` 强度与 `+0x3F0`）、推进停止 `0x638EF0`（写 `+0x3EC`）。崩溃转储里槽 0、1 有发射器，槽 2、3 为 null。原版数据从不走旧键，所以这条路径在原版从未运行过。
+- 修复（`src/edf41mech_boost.cpp` / `.h`）：给这两处循环补上旧解析的约定——没建成的槽不是喷口，跳过对其发射器的写入。两段循环体各换成跳到近址桩，桩里执行原样指令、只把发射器写入放在 null 判断之后，再跳回循环步进；建成的槽（所有 EDF6 原版对象的每个槽）执行与原版逐字节相同的指令。406 仍按 4.1 的两组喷口显示。
+- 检查：`tests/edf41mech_boost_test.cpp`（ctest `edf41mech_boost`，真实执行两个桩：空槽不写不崩、建成槽写入值与原版相同；变异：去掉 null 判断即访问违规）、`tests/edf41mech_boost_native_audit.py`（ctest `edf41mech_boost_native`：三条解析的键与调用、旧解析两槽、两处循环四槽、本类代码中再无其它写发射器的指令）。
+- 实机（同一租约，修复后 DLL `8130a582…`，日志 `EDF41MECH boost: ... on`）：同样召唤 406、上车，起跳 / 空格 / 前推加推进共 8 轮，未崩，机体移动约 250 m（日志 `VEH ... Begaruta ... seats=[P] pos=(-407,6,-51)`）。原版 504 的跳跃本次未实机回归（其四槽全建成，走的仍是原版指令，单测覆盖）。

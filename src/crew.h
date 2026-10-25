@@ -594,6 +594,8 @@ bool InstallEdf41Dragon() noexcept;
 bool InstallEdf41SmallDragon() noexcept;
 // edf41insects.cpp: the DLC's EDF4.1 queen bee and Nephilas: 4.1's needle speed and thread scatter.
 bool InstallEdf41Insects() noexcept;
+// edf41mech_boost.cpp: the 406 Begaruta's jet group skips the thruster slots its old begaruta_boost parser leaves unbuilt (its jump crashed).
+bool InstallEdf41MechBoost() noexcept;
 // edf41natives.cpp: EDF4.1 script natives EDF6's BVM executor lacks (SetEncountReportRadius as table 1 id 3003).
 bool InstallEdf41Natives() noexcept;
 // edf41before.cpp: EDF4.1's pre-mission scenes (BEFORE.BVM) play with the menu's UIs (its black fade) closed, as in 4.1.

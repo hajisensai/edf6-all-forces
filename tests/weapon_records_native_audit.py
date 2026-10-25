@@ -46,6 +46,8 @@ NOT_RECORDS = {
     0x14D8496: 'stack slot rbp+0x139C (0x14D793B)',
     0x15AB962: 'stack slot rbp+0x139C (0x15A92B7)',
     0x15ABD63: 'stack slot rbp+0x139C (0x15A92B7)',
+    0x8B4F70: 'the weapon select screen read of its snapshot (block+0x7CE8): jumped to a copy of the relocated table '
+              '(kUiOwned), never relocated in place (the jump checks these bytes)',
 }
 CALLS = {  # site: expected target (weapon_records.cpp)
     0x70AF25: 0x12DA77A, 0x70B079: 0x12DA77A, 0x70B61C: 0x12DA77A, 0x70B79C: 0x12DA77A,
@@ -69,7 +71,7 @@ def sites() -> list[tuple[int, int, int, int, bytes]]:
 
 def audit(pe, img: bytes) -> None:
     rows = sites()
-    check(len(rows) == 101, f'101 rows in the site list (has {len(rows)})')
+    check(len(rows) == 100, f'100 rows in the site list (has {len(rows)})')
     for rva, size, field, value, code in rows:
         check(img[rva:rva + size] == code, f'EDF+{rva:#x} is the listed instruction')
         check(struct.unpack_from('<I', code, field)[0] == value, f'EDF+{rva:#x}: the constant at +{field}')
@@ -78,6 +80,11 @@ def audit(pe, img: bytes) -> None:
         check(img[site] == 0xE8 and site + 5 + rel == target, f'EDF+{site:#x} calls {target:#x}')
     for site, hexbytes in BYTES.items():
         check(img[site:site + len(hexbytes) // 2].hex() == hexbytes, f'EDF+{site:#x} bytes')
+    # The calls and reads the plugin rewrites whole: none may share a byte with a constant site (the second write finds
+    # the first's bytes; 0x8B4F70 listed as a site rolled the whole relocation back in build 471bfc5).
+    spans = [(site, 5) for site in CALLS] + [(site, len(h) // 2) for site, h in BYTES.items()]
+    shared = sorted(hex(site) for site, n in spans for rva, size, *_ in rows if site < rva + size and rva < site + n)
+    check(not shared, f'no rewritten call / read shares bytes with a constant site: {shared}')
     try:
         import capstone
         from capstone import x86
