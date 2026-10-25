@@ -77,7 +77,7 @@ FARPROC ResolveDependency(const char* name) noexcept {
     if(!std::strcmp(name,"EDF6CoopGetMemberAttributeApi"))return dependencyMode==6 ? nullptr : reinterpret_cast<FARPROC>(&AttributeTable);
     // The room protocol's EDF6Coop (coop_attr.h kRoomCoop*): 8 the 2.6.1 before it, 9 none that says its version.
     static const char kOld[]="EDF6COOP_VERSION=2.6.1",kCurrent[]="EDF6COOP_VERSION=2.7.0";
-    if(!std::strcmp(name,"EDF6CoopVersion"))return dependencyMode==9 ? nullptr : reinterpret_cast<FARPROC>(dependencyMode==8 ? kOld : kCurrent);
+    if(!std::strcmp(name,"EDF6CoopVersion"))return dependencyMode==9 ? nullptr : reinterpret_cast<FARPROC>(reinterpret_cast<std::uintptr_t>(dependencyMode==8 ? kOld : kCurrent));
     return nullptr;
 }
 void RecordNotice(const wchar_t* text) noexcept {++notices;depNotice=text;}
@@ -406,10 +406,10 @@ int main(int argc,char** argv){
         if(mode==8)Check(depNotice.find(L"EDF6Coop 2.6.1 版本过旧")!=std::wstring::npos && depNotice.find(L"升级到 2.7.0")!=std::wstring::npos,
                          "an EDF6Coop older than the room protocol's is named with its version and the one to upgrade to");
         if(mode==8 || mode==9) {   // EDF6Coop's own routes (REJOIN, its virtual rooms) are told too, once a minute
-            const int before=packNotices;fakeNow+=60000;
-            Check(!EDF6AF_RoomIsolationReady() && packNotices==before+1 && packNotice.find(L"升级到 2.7.0")!=std::wstring::npos,
+            const int posted=packNotices;fakeNow+=60000;
+            Check(!EDF6AF_RoomIsolationReady() && packNotices==posted+1 && packNotice.find(L"升级到 2.7.0")!=std::wstring::npos,
                   "EDF6Coop's own route tells the player to upgrade EDF6Coop");
-            Check(!EDF6AF_RoomIsolationReady() && packNotices==before+1,"not again within the minute");
+            Check(!EDF6AF_RoomIsolationReady() && packNotices==posted+1,"not again within the minute");
         }
         if(mode==9)Check(depNotice.find(L"读不出版本")!=std::wstring::npos && depNotice.find(L"升级到 2.7.0")!=std::wstring::npos,
                          "an EDF6Coop that says no version is told to upgrade too");
