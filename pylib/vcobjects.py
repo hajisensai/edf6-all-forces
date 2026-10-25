@@ -2345,6 +2345,58 @@ def check_ult(files: dict[str, bytes]) -> None:
         assert p[2] == 1 and p[11] == 0 and p[9] == radius and m['indirect_fire_damage'] == 0.0, (name, p)
 
 
+# ------------------------------------------------------------------------------------------ the long-range barrages
+# The long-range barrages' rounds (src/barrage.cpp, src/barrage_plan.h, docs/plan-2026-10-25-strikes.md §1.1; written by
+# tools/make_barrage.py), fired through the EMC's table (src/jet_bay.cpp kEmcFiles: EmcRound::barrage, barrageBurst):
+#   BARRAGE_ROUND_FILE  one round: the missions' indirect fire rocket (BARRAGE_STOCK: DemoIndirectFire, a RocketBullet01 with
+#                       its smoke trail) with no gravity and a long life (the plugin flies it along its curve and writes its
+#                       size, blast and mark into the IFC before it fires), no wait, damage 0 (the plugin's)
+#   BARRAGE_BURST_FILE  a cluster's flash where its bomblets leave: the EMC's impact charge, BARRAGE_BURST_RADIUS m, no damage
+BARRAGE_STOCK = 'DEMOINDIRECTFIREE50.SGO'
+BARRAGE_ROUND_FILE = 'EDF6VC_BARRAGE_ROUND.SGO'
+BARRAGE_BURST_FILE = 'EDF6VC_BARRAGE_BURST.SGO'
+BARRAGE_FILES = (BARRAGE_ROUND_FILE, BARRAGE_BURST_FILE)   # EmcRound's order
+BARRAGE_SPEED = 5.0          # m a frame: its first frame's flight, before the plugin flies it
+BARRAGE_LIFE = 45 * 60       # frames: past the longest flight (the ballistic missile's 22 s, the creeping barrage's shells)
+BARRAGE_SIZE, BARRAGE_BLAST = 6.0, 12.0   # the SGO's own (the plugin writes each round's)
+BARRAGE_BURST_RADIUS = 20.0
+BARRAGE_BURST_COLOUR = (3.0, 1.6, 0.6, 1.0)
+
+
+def barrage_rounds(game: Game) -> dict[str, bytes]:
+    """The barrages' DemoIndirectFire SGOs (BARRAGE_FILES), {Mods/OBJECT file: bytes}."""
+    version, m = sgo.read(game.read('OBJECT', BARRAGE_STOCK))
+    p = m.get('indirect_fire_param')
+    if (m.get('xgs_scene_object_class') != 'DemoIndirectFire' or not isinstance(p, list) or len(p) != 19
+            or p[4] != 'RocketBullet01' or 'indirect_fire_damage' not in m):
+        raise ValueError(f'{BARRAGE_STOCK} 不是预期的任务火箭弹（DemoIndirectFire / RocketBullet01）')
+    for i, value in ((2, 1), (3, 0), (5, BARRAGE_SPEED), (6, 0), (7, BARRAGE_SIZE), (9, BARRAGE_BLAST), (10, BARRAGE_LIFE),
+                     (11, 0), (15, 0)):
+        p[i] = int(value) if isinstance(p[i], int) else float(value)   # each keeps its node type
+    p[0] = [0.0, 0.0]
+    m['indirect_fire_damage'] = 0.0
+    out = {BARRAGE_ROUND_FILE: sgo.write(version, m)}
+    version, m = sgo.read(_emc_charge(game, BARRAGE_BURST_RADIUS, EMC_BLAST_SPEED, EMC_BLAST_LIFE))
+    m['indirect_fire_param'][12] = list(BARRAGE_BURST_COLOUR)
+    out[BARRAGE_BURST_FILE] = sgo.write(version, m)
+    return {name: out[name] for name in BARRAGE_FILES}
+
+
+def check_barrage(files: dict[str, bytes]) -> None:
+    """The barrages' SGOs as src/barrage.cpp fires them: the round a RocketBullet01, one round, no gravity, no wait, not
+    penetrating, living past the longest flight; the flash a SolidBullet01 charge of BARRAGE_BURST_RADIUS m; damage 0."""
+    assert list(files) == list(BARRAGE_FILES), list(files)
+    m = sgo.load(data=files[BARRAGE_ROUND_FILE])
+    p = m['indirect_fire_param']
+    assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'RocketBullet01', p
+    assert p[2] == 1 and p[3] == 0 and p[6] == 0 and p[11] == 0 and p[15] == 0 and m['indirect_fire_damage'] == 0.0, p
+    assert p[10] >= 30 * 60 and p[5] == BARRAGE_SPEED, p
+    m = sgo.load(data=files[BARRAGE_BURST_FILE])
+    p = m['indirect_fire_param']
+    assert m['xgs_scene_object_class'] == 'DemoIndirectFire' and p[4] == 'SolidBullet01', p
+    assert p[2] == 1 and p[9] == BARRAGE_BURST_RADIUS and m['indirect_fire_damage'] == 0.0, p
+
+
 # ------------------------------------------------------------------------------------------ the Sazabi's arms
 # The Sazabi (JETS[SAZABI_JET], src/sazabi.cpp, tools/make_sazabi.py writes these). Its holders (weapon_bones):
 #   0 the beam shot rifle on sz_muzzle: the 506's own laser (a null model: nothing hangs on the muzzle) made a thick

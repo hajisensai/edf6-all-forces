@@ -64,6 +64,10 @@ target_sources(EDF6VehicleCrew PRIVATE src/support_config.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/emc.cpp)
 # The ultimate strike (src/ultimate.cpp, src/ultimate_plan.h).
 target_sources(EDF6VehicleCrew PRIVATE src/ultimate.cpp)
+# The long-range barrages (src/barrage.cpp, src/barrage_plan.h; docs/plan-2026-10-25-strikes.md).
+target_sources(EDF6VehicleCrew PRIVATE src/barrage.cpp)
+# The sorties: one pass at the mark, then away (src/jet_sortie.cpp, src/heli.cpp HeliSortie, src/sortie_plan.h).
+target_sources(EDF6VehicleCrew PRIVATE src/jet_sortie.cpp)
 # The Proteus rework (its own line too).
 target_sources(EDF6VehicleCrew PRIVATE src/proteus.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/proteus_net.cpp)
@@ -417,7 +421,7 @@ file(READ src/jet_combat.cpp EDF6_SIM_COMBAT)
 string(REPLACE "    Ahead(j,pos,ms);\n" "" EDF6_SIM_FLIGHT_BEFORE "${EDF6_SIM_FLIGHT}")
 string(REPLACE " && InSight(pos,lead)" "" EDF6_SIM_COMBAT_BEFORE "${EDF6_SIM_COMBAT}")
 set(EDF6_SIMS jet_obstacle_sim)
-add_executable(jet_obstacle_sim EXCLUDE_FROM_ALL tools/jet_obstacle_sim.cpp src/jet_flight.cpp src/jet_combat.cpp src/body506.cpp)
+add_executable(jet_obstacle_sim EXCLUDE_FROM_ALL tools/jet_obstacle_sim.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_sortie.cpp src/body506.cpp)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS src/jet_flight.cpp src/jet_combat.cpp)
 # The cut not found (the code moved): no "before" build, never a failed configure of the plugin's own.
 if(EDF6_SIM_FLIGHT_BEFORE STREQUAL EDF6_SIM_FLIGHT OR EDF6_SIM_COMBAT_BEFORE STREQUAL EDF6_SIM_COMBAT)
@@ -426,7 +430,7 @@ else()
     file(WRITE "${CMAKE_BINARY_DIR}/sim/jet_flight_before.cpp" "${EDF6_SIM_FLIGHT_BEFORE}")
     file(WRITE "${CMAKE_BINARY_DIR}/sim/jet_combat_before.cpp" "${EDF6_SIM_COMBAT_BEFORE}")
     add_executable(jet_obstacle_sim_before EXCLUDE_FROM_ALL tools/jet_obstacle_sim.cpp "${CMAKE_BINARY_DIR}/sim/jet_flight_before.cpp"
-                   "${CMAKE_BINARY_DIR}/sim/jet_combat_before.cpp" src/body506.cpp)
+                   "${CMAKE_BINARY_DIR}/sim/jet_combat_before.cpp" src/jet_sortie.cpp src/body506.cpp)
     list(APPEND EDF6_SIMS jet_obstacle_sim_before)
 endif()
 foreach(sim ${EDF6_SIMS})
@@ -468,6 +472,16 @@ set_target_properties(emc_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BIN
 add_executable(ultimate_check EXCLUDE_FROM_ALL tools/ultimate_check.cpp)
 target_compile_options(ultimate_check PRIVATE /W4 /WX /utf-8 /permissive-)
 set_target_properties(ultimate_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The long-range barrages offline (tools/barrage_check.cpp: src/barrage_plan.h's rounds, curves and replay).
+# cmake --build build --target barrage_check && buildarrage_check.exe
+add_executable(barrage_check EXCLUDE_FROM_ALL tools/barrage_check.cpp)
+target_compile_options(barrage_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(barrage_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The sorties' geometry offline (tools/sortie_check.cpp: src/sortie_plan.h's pass line, carpet, lap and circle).
+# cmake --build build --target sortie_check && build\sortie_check.exe
+add_executable(sortie_check EXCLUDE_FROM_ALL tools/sortie_check.cpp)
+target_compile_options(sortie_check PRIVATE /W4 /WX /utf-8 /permissive-)
+set_target_properties(sortie_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 # Where a sound is heard from the camera offline (tools/sound_place_check.cpp, src/sound_place.h: SoundAt's arithmetic,
 # a still sound given no velocity). cmake --build build --target sound_place_check && build\sound_place_check.exe
 add_executable(sound_place_check EXCLUDE_FROM_ALL tools/sound_place_check.cpp)
@@ -941,7 +955,7 @@ set_target_properties(fp_view_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE
 
 # Run the feature checks in CI as well as locally; these targets remain optional for plugin-only builds.
 set(EDF6_OFFLINE_CHECKS append_log_test common_host_check pjet_kinds heli_aim_check heli_fire_check
-    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check fp_view_check cockpit_canvas_check unlock_ported_check)
+    nix_twist_check seat_aim_check rounds_check turret_cam_check turret_lead_check warn_check grape_turret_check vehicle_ram_check gravity_check katyusha_rack_check stab_check vsound_check map_cam_check map_cmd_check crawl_check hector_ai_check edf41_fortress_check map_marks_check hud_cue_check emc_check ultimate_check barrage_check sortie_check sound_place_check proteus_check sidecar_board_check map_hud_check pause_clock_check hudtext_check gunship_muzzle_check exhaust_pose_check airbound_check rotor_clear_check hover_lift_check view_clip_check npc_ai_check npc_backpack_check sazabi_pose_check sazabi_flight_check sazabi_funnel_check gunsight_check reticle_check formation_check pickup_check map_buttons_check scopeview_check sazabi_assist_check armor_hud_check seat_switch_check ground_contact_check transport_check seat_events_check airdrop_check aim_line_want_check air_chase_check wasted_fire_check hit_predict_check own_round_check exhaust_nozzles_check smoke_trail_check damage_stats_check fp_view_check cockpit_canvas_check unlock_ported_check)
 add_custom_target(offline_checks DEPENDS ${EDF6_OFFLINE_CHECKS} hud_view jet_obstacle_sim)
 add_dependencies(offline_checks transport_runtime_test edf41fortress_runtime_test npc_backpack_native_check)
 add_test(NAME npc_backpack_native_check COMMAND npc_backpack_native_check)

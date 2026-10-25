@@ -198,6 +198,7 @@ void Guide(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,const float* pos
     default:
         break;
     }
+    if(j.sortie.pass!=SortiePass::none && SortieGuide(j,kind,arms,pos,nose,lead,height,ms,want,speed,gunsOk,missileOk))return;
     if(j.ferry) {   // the paratroop plane: passes along its line over its point (Ferry), never Patrol's ring round it
         if(j.mode!=Mode::patrol)SetMode(j,Mode::patrol,ms);
         *speed=Ferry(j,pos,height,want);
@@ -696,7 +697,7 @@ void JetFrame(unsigned char* v) noexcept {
     if(!moving && !j->ferry && j->mode!=Mode::withdraw && j->mode!=Mode::takeoff && j->mode!=Mode::recover)
         PickTarget(*j,v,pos,anchor,targetRange,dt,ms);
     else j->t.target=nullptr;
-    if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,j->t.flyer,Len(to));}
+    if(j->t.target){const float to[3]={j->t.aim[0]-pos[0],j->t.aim[1]-pos[1],j->t.aim[2]-pos[2]};PickStore(arms,SortieStoreFlyer(*j,j->t.flyer),Len(to));}
     if(kind.weapon==Weapon::charge && j->t.target && j->mode!=Mode::withdraw && j->mode!=Mode::recover) {
         // Its run at the target (airchase::Step): within its trigger it goes off; held off it (by its body, from any side)
         // within its charge's blast, as well; farther out it keeps after it.
@@ -724,6 +725,7 @@ void JetFrame(unsigned char* v) noexcept {
     BayFrame(*j,pos);
     if(gunner){v[kFireGun]=0;v[kFireMissile]=0;}   // the gun is the player's (playerjet_crew.inc GunnerFire)
     else Arm(*j,kind,v,pos,nose,lead,gunsOk,missileOk,arms,ms);
+    if(!gunner && j->mode!=Mode::withdraw)SortieFire(*j,v,pos,arms,ms);   // a sortie's bombs (jet_sortie.cpp)
     NpcFlares(*j,v,pos,nose,ms);
     if(Cfg().debug && ms-j->loggedAt>1000) {
         j->loggedAt=ms;

@@ -92,8 +92,10 @@ using DeleteFn=void(*)(void*);
 // What a call brings: jets (`role`), helis (`body`; both made by the support deployment) or the submarine carrier
 // (a planned hull plus its real pilot); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
+// A sortie (docs/plan-2026-10-25-strikes.md §1.2): `sortie` its pass (crew.h SortiePass, 0 none), `then` the kCalls index of
+// its second wave (-1 none), called onto the same mark `thenMs` after this one was accepted (SupportFollowUpQueue).
 struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
-              bool follow; const char* name; const wchar_t* id; };
+              bool follow; const char* name; const wchar_t* id; int sortie; int then; DWORD thenMs; };
 // A weapon table row tools/call_weapons.py installs (a vehicle request too): its id, its SGO in Mods/WEAPON and
 // the object SGO a vehicle request brings in Mods/OBJECT (nullptr: none).
 struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* objectFile; };
@@ -102,6 +104,8 @@ struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* ob
 struct Throw { std::uint32_t markBits; ThrownDrone drone; DWORD fuelSec; const char* name; const wchar_t* id; };
 // An ultimate strike's weapon (tools/calls.py brings 'ultimate'): its AmmoHitSizeAdjust (an integer, as kCalls').
 struct Ultimate { float mark; const char* name; const wchar_t* id; };
+// A long-range barrage's weapon (tools/calls.py brings 'barrage'): its AmmoHitSizeAdjust and its kind (barrage_plan.h Kind).
+struct Barrage { float mark; int kind; const char* name; const wchar_t* id; };
 #include "calls.inc"
 // The in-mission pick (CallPick, overlay.cpp's keys): -1 = each weapon's own call; otherwise only local players'
 // call weapons bring kCalls[picked]. This UI preference is not carried in the native radio-call message.
@@ -246,13 +250,35 @@ bool EntryClear(const float* from,const float* to) noexcept {
     return true;
 }
 
+// The barrage weapon `w` is (its mark), or nullptr.
+const Barrage* BarrageOf(const unsigned char* w) noexcept {
+    if(!Readable(w+kWeaponHitSize,4))return nullptr;
+    const float mark=At<float>(w,kWeaponHitSize);
+    for(const auto& b:kBarrages)if(std::fabs(mark-b.mark)<0.5f)return &b;
+    return nullptr;
+}
+constexpr std::size_t kBarrageDamage=0x89C;   // the weapon's AmmoDamage with its stars (flat: tools/call_weapons.py barrage_sgo)
+
 // The Air Raider's bomber call (redirected call at kRadioCall): IFC_Start(ifc = weapon+0x1660, params).
 // A call weapon's: its jets or helis, and no bombers (when none could be launched the bombers fly).
+// A barrage weapon's: its barrage (barrage.cpp) on every machine, each on its copy of the call (the radio callback is
+// replayed for remote players too), and no bombers.
 std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
     const auto result=reinterpret_cast<IfcStartFn>(image+kIfcStart)(ifc,params);
-    if(!Cfg().enabled || !Cfg().jetAirRaider)return result;
+    if(!Cfg().enabled)return result;
     __try {
         const auto owner=At<const unsigned char*>(params,0);   // params+0: owner weak pointer (docs/airstrike-re.md section 2)
+        const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
+        if(const Barrage* const b=BarrageOf(w)) {
+            const auto p=static_cast<const unsigned char*>(params);
+            const float* target=reinterpret_cast<const float*>(p+kStartTarget);
+            const float* heading=reinterpret_cast<const float*>(p+kStartForward);
+            const bool started=BarrageStart(b->kind,owner,target,heading,At<float>(w,kBarrageDamage));
+            Put<std::int32_t>(ifc,kIfcPlanes,0);   // never the stock bombers instead
+            Log("AIRSTRIKE barrage call %s: started=%d",b->name,started);
+            return result;
+        }
+        if(!Cfg().jetAirRaider)return result;
         const Call* const c=CallOf(ifc,owner);
         const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
         if(c && std::isfinite(target[0]+target[1]+target[2])) {
@@ -661,8 +687,42 @@ bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept {
     const auto& c=kCalls[catalog];
     *out={c.role ? static_cast<int>(*c.role) : -1,c.body ? static_cast<int>(*c.body) : -1,
           c.count,c.fuelSec,c.follow};
+    out->sortie=c.sortie;
     return true;
 }
+
+// A sortie's second wave (Call::then): queued when this machine's request for the first was accepted (support_dispatch.cpp
+// SupportCallAt), called onto the same mark by this machine, the caller's, once due (SupportFollowUpTick: SharedFrameTick).
+// Refused here (another call still being planned), it is tried again every kFollowUpRetryMs for kFollowUpRetries. Online `accepted` is this machine's request queued for the host: a refusal
+// there is the host's to say (support_net), not retried.
+namespace {
+constexpr ULONGLONG kFollowUpRetryMs=3000;
+constexpr int kFollowUpRetries=10;
+struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; int tries=0; };
+FollowUp followUps[8]{};
+}  // namespace
+void SupportFollowUpQueue(int catalog,const float* target) noexcept {
+    if(catalog<0 || catalog>=kCallCount || kCalls[catalog].then<0 || !target)return;
+    for(auto& f:followUps)if(f.catalog<0) {
+        f.catalog=kCalls[catalog].then;std::memcpy(f.at,target,12);f.due=GameMs()+kCalls[catalog].thenMs;
+        Log("SUPPORT %s: its second wave (%s) in %lu s",kCalls[catalog].name,kCalls[f.catalog].name,kCalls[catalog].thenMs/1000);
+        return;
+    }
+    Log("SUPPORT %s: no room for its second wave (8 waiting)",kCalls[catalog].name);
+}
+void SupportFollowUpTick() noexcept {
+    const ULONGLONG ms=GameMs();
+    for(auto& f:followUps) {
+        if(f.catalog<0 || ms<f.due)continue;
+        const FollowUp now=f;
+        f=FollowUp{};
+        wchar_t note[128]{};
+        const bool ok=SupportCallAt(now.catalog,now.at,note,_countof(note));   // a second wave has no wave of its own
+        Log("SUPPORT second wave %s: accepted=%d (try %d)",kCalls[now.catalog].name,ok,now.tries+1);
+        if(!ok && now.tries+1<kFollowUpRetries){f=now;f.due=ms+kFollowUpRetryMs;++f.tries;}
+    }
+}
+void ResetSupportFollowUps() noexcept { for(auto& f:followUps)f=FollowUp{}; }
 int SupportAirCallCount() noexcept { return kCallCount; }
 // The call's configuration key: its weapon row id without EDF6VC_CALL_ (INTERCEPTOR, HELI_F, ...).
 const wchar_t* SupportAirCallKey(int index) noexcept {

@@ -511,6 +511,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_edf5_campaign
     import make_emc
     import make_ultimate
+    import make_barrage
     import make_tracked_combat
     import make_chute
     import make_jets
@@ -558,6 +559,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     drill = build_asset(cache, make_drill, '钻头战车')
     emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
     ult = build_asset(cache, make_ultimate, '终极支援「天罚」特效')
+    barrage = build_asset(cache, make_barrage, '远程炮击弹药')
     # The vehicles and emplacements on the V603 (tools/make_tracked_combat.py LABELS), each by its make_<kind> tool.
     tracked = {kind: build_asset(cache, importlib.import_module('make_' + kind), label)
                for kind, label in make_tracked_combat.LABELS.items()}
@@ -600,6 +602,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_drill.install(game, drill) if drill is not None else []) + \
             (make_emc.install(game, emc) if emc is not None else []) + \
             (make_ultimate.install(game, ult) if ult is not None else []) + \
+            (make_barrage.install(game, barrage) if barrage is not None else []) + \
             [path for kind, files in tracked.items() if files is not None
              for path in make_tracked_combat.install(game, files, kind)] + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
@@ -700,7 +703,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), *tracked.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('barrage', barrage), *tracked.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -774,6 +777,7 @@ def uninstall(game: str) -> None:
     import make_drill
     import make_emc
     import make_ultimate
+    import make_barrage
     import make_tracked_combat
     import make_chute
     import make_jets
@@ -823,7 +827,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), make_emc.remove, make_ultimate.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
