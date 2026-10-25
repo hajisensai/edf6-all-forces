@@ -188,7 +188,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     kept = sum(1 for line in text.splitlines() if line.startswith('{'))
     if args.check:
-        if not args.output.is_file() or args.output.read_bytes() != text.encode('utf-8'):
+        # A checkout's line endings are not the file's content (.gitattributes keeps it LF; a CRLF copy still checks).
+        if not args.output.is_file() or args.output.read_bytes().replace(b'\r\n', b'\n') != text.encode('utf-8'):
             print(f'STALE: {args.output}: run python tools/gen_pvp_units.py', file=sys.stderr)
             return 1
         print(f'OK: {kept} PvP units ({source})')
