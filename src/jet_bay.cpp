@@ -171,16 +171,21 @@ const EmcFile kEmcFiles[]={
     {L"app:/object/edf6vc_ult_core.sgo",L"EDF6VC_ULT_CORE.SGO","ultimate core"},
     {L"app:/object/edf6vc_ult_blast.sgo",L"EDF6VC_ULT_BLAST.SGO","ultimate blast"},
     {L"app:/object/edf6vc_ult_gather.sgo",L"EDF6VC_ULT_GATHER.SGO","ultimate gather pulse"},
+    // the long-range barrages' (barrage.cpp; pylib/vcobjects.py BARRAGE_FILES, tools/make_barrage.py)
+    {L"app:/object/edf6vc_barrage_round.sgo",L"EDF6VC_BARRAGE_ROUND.SGO","barrage round"},
+    {L"app:/object/edf6vc_barrage_burst.sgo",L"EDF6VC_BARRAGE_BURST.SGO","barrage burst"},
 };
 constexpr int kEmcCount=static_cast<int>(sizeof(kEmcFiles)/sizeof(kEmcFiles[0]));
-static_assert(kEmcCount==static_cast<int>(EmcRound::ultGather)+1,"kEmcFiles is indexed by EmcRound");
+static_assert(kEmcCount==static_cast<int>(EmcRound::barrageBurst)+1,"kEmcFiles is indexed by EmcRound");
 bool emcReady[kEmcCount]{};               // preloaded this mission (PreloadShells)
-// The IFC's own copy of the round's AmmoSize (#7) and AmmoExplosion (#9), as its config 0x2B5F40 writes them (r14 = the
-// IFC: 0x2B6A15 movss [r14+0x100],xmm0; 0x2B68C5 movss [r14+0xF0],xmm0; docs/carrier-laser-re.md §3): a round takes its
-// InitParam (IFC +0x70 on) when it is fired, so a write here changes the rounds fired after it (RoundSize, RoundBlast).
-constexpr std::size_t kIfcAmmoSize=0x100,kIfcAmmoBlast=0xF0;
+// The IFC's own copy of the round's AmmoSize (#7), AmmoHitSizeAdjust (#8) and AmmoExplosion (#9), as its config 0x2B5F40
+// writes them (r14 = the IFC: 0x2B6A15 movss [r14+0x100],xmm0; 0x2B6AC7 movss [r14+0x104],xmm0; 0x2B68C5 movss
+// [r14+0xF0],xmm0; docs/carrier-laser-re.md §3): a round takes its InitParam (IFC +0x70 on) when it is fired, so a write here
+// changes the rounds fired after it (RoundSize, RoundBlast; BarrageFire's mark).
+constexpr std::size_t kIfcAmmoSize=0x100,kIfcAmmoHit=0x104,kIfcAmmoBlast=0xF0;
 const Sig kIfcAmmoSigs[]={
     {0x2B6A15,{0xF3,0x41,0x0F,0x11,0x86,0x00,0x01,0x00,0x00,0x66,0x3B,0xC6}},
+    {0x2B6AC7,{0xF3,0x41,0x0F,0x11,0x86,0x04,0x01,0x00,0x00,0x66,0x3B,0xC6}},
     {0x2B68C5,{0xF3,0x41,0x0F,0x11,0x86,0xF0,0x00,0x00,0x00,0x66,0x3B,0xC6}},
 };
 bool ifcAmmoOk=false;
@@ -827,6 +832,23 @@ bool RoundBlast(const RoundObj& r,float radius) noexcept {
         Put<float>(ifc,kIfcAmmoBlast,radius);
         return true;
     } __except(FaultLog("EMC round blast",GetExceptionInformation())){return false;}
+}
+
+bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark) noexcept {
+    const int i=static_cast<int>(EmcRound::barrage);
+    if(!by || !ifcAmmoOk || !EmcRoundReady(EmcRound::barrage) || !(size>0.0f) || !(blast>=0.0f))return false;
+    unsigned char* const o=ShellMake(kEmcFiles[i].sgo,emcReady[i],by,from,aim,damage,true,kEmcFiles[i].name);
+    if(!o)return false;
+    __try {
+        unsigned char* const ifc=o+kDemoIfc;
+        Put<float>(ifc,kIfcAmmoSize,size);Put<float>(ifc,kIfcAmmoBlast,blast);Put<float>(ifc,kIfcAmmoHit,mark);
+        return true;
+    } __except(FaultLog("BARRAGE round setup",GetExceptionInformation())){return false;}
+}
+
+void BarrageBurst(const unsigned char* by,const float* at) noexcept {
+    const float from[3]={at[0],at[1]+2.0f,at[2]},to[3]={at[0],at[1]-2.0f,at[2]};
+    (void)EmcFire(EmcRound::barrageBurst,by,from,to,0.0f);
 }
 
 void RoundDrop(RoundObj& r) noexcept {

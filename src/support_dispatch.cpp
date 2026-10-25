@@ -47,7 +47,7 @@ namespace {
 constexpr std::uint32_t kSoldier=kSupportRangerResource,kLeader=kSupportLeaderResource,
     kAircraft=kSupportAircraftResource,kVehicle=kSupportVehicleResource;
 constexpr int kDeployments=16;
-constexpr ULONGLONG kBoardLimit=120000,kCallCooldown=30000;
+constexpr ULONGLONG kBoardLimit=120000;
 constexpr ULONGLONG kStuckMs=20000;   // a delivery making no way this long gets off where it is (see Deployment::stuckSince)
 constexpr float kStuckMove=5.0f;      // m: moved this far from where its wait began, it is making way
 // The deployments' trace (always on, rate-limited): every kTraceMs while it comes in, kTraceAfterMs on after delivery.
@@ -101,7 +101,9 @@ struct Deployment {
     float traced[support_net::kMaxUnits][3]{};
 };
 Deployment deployments[kDeployments]{};
-bool offlinePending=false;std::uint64_t nextOffline=1;ULONGLONG callAt=0;
+// No cooldown after a delivery (the user, 2026-10-25: 「支援调度 30 秒的全局冷却 删掉」; a limit will be the calls' pt): a call
+// waits only for the one still being planned.
+bool offlinePending=false;std::uint64_t nextOffline=1;
 wchar_t status[160]{};
 struct LocalRequest {
     bool shown=false,acceptNotices=false,hasNotice=false;
@@ -1381,7 +1383,6 @@ bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* n
         return accepted;
     }
     else if(offlinePending)Status(L"上一项支援仍在核实入场路线");
-    else if(callAt && GameMs()-callAt<kCallCooldown)Status(L"支援调度冷却中（30 秒）");
     else {
         Renew(planning);planning.active=true;planning.catalog=static_cast<unsigned>(index);std::memcpy(planning.target,target,12);
         planning.loadout=loadout;
@@ -1504,7 +1505,10 @@ bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* l
         // Only the rescue's own trigger asks for it (a swimmer to pick up and a carrier to ferry them to).
         Status(L"海上救援只在玩家落海时自动呼叫");_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",status);return false;
     }
-    return Request(index,target,load,note,capacity);
+    const bool accepted=Request(index,target,load,note,capacity);
+    // A sortie's second wave (airstrike.cpp), whether the radio or the map called it.
+    if(accepted && index<SupportAirCallCount())SupportFollowUpQueue(index,target);
+    return accepted;
 }
 namespace {
 // Offline rescue is planned and made at once (an air plan never waits), with no queue,
@@ -1576,12 +1580,10 @@ SupportVariant SupportCallVariant(int index) noexcept {
     return mode==SupportCrewMode::unmanned ? SupportVariant::empty : SupportVariant::crewed;
 }
 SupportReadiness SupportCallReadiness() noexcept {
-    // Online requests use Session admission and readiness; only offline calls use the local pending plan/cooldown.
+    // Online requests use Session admission and readiness; only offline calls use the local pending plan.
     if(!Cfg().enabled)return {SupportReady::off,0};
     if(InSession() && !LocalAuthority())return {SupportReady::ready,0};
     if(offlinePending)return {SupportReady::planning,0};
-    const ULONGLONG now=GameMs();
-    if(callAt && now-callAt<kCallCooldown)return {SupportReady::cooldown,static_cast<int>((kCallCooldown-(now-callAt)+999)/1000)};
     return {SupportReady::ready,0};
 }
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept {
@@ -1640,7 +1642,7 @@ void SupportDispatchTick() noexcept {
         if(result!=support_net::PlanResult::pending) {
             offlinePending=false;
             if(result==support_net::PlanResult::ready) {
-                if(SpawnDeployment(nextOffline++,plan,false,false))callAt=GameMs();else Status(L"支援资源、真实机组或席位分配失败");
+                if(!SpawnDeployment(nextOffline++,plan,false,false))Status(L"支援资源、真实机组或席位分配失败");
             }
         }
     }
@@ -1842,7 +1844,7 @@ void SupportDispatchTick() noexcept {
 void ResetSupportDispatch() noexcept {
     airdropTestSince=0;airdropTestAsked=false;
     // Mission reset invalidates the old objects; do not delete through last mission's borrowed pointers.
-    Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;callAt=0;nextOffline=1;status[0]=0;configNoticeShown=false;
+    Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;nextOffline=1;status[0]=0;configNoticeShown=false;
     rescueNote[0]=0;rescueSubmitting=false;rescueEnded=false;rescueRequest=0;
     legacyNoticed=false;loadoutNoticed=false;variantNote[0]=0;
     localRequest={};

@@ -264,6 +264,8 @@ bool SupportVersionCue(wchar_t* line,std::size_t capacity) noexcept {
 }
 // The ultimate strike's caller line (ultimate.cpp PlayerUltimateCue): not drawn in any scene.
 bool PlayerUltimateCue(wchar_t*,std::size_t) noexcept { return false; }
+// The strike calls' caller line (airstrike.cpp PlayerStrikeCue): not drawn in any scene.
+bool PlayerStrikeCue(wchar_t*,std::size_t) noexcept { return false; }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};

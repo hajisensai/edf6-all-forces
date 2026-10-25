@@ -36,7 +36,7 @@ ground = re.search(r'static const wchar_t\* keys\[\]=\{([^}]*)\}', dispatch).gro
 check(tuple(re.findall(r'L"(\w+)"', ground)) == sc.GROUND_KEYS, 'ground / infantry keys equal SupportCallKey\'s')
 flown = tuple(c.id[len(calls.ID_PREFIX):] for c in calls.CALLS if c.flown)
 check(flown == sc.AIR_KEYS, 'air keys: the flown calls in calls.py order (airstrike.cpp SupportAirCallKey)')
-check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 37, 'one label per catalog entry (the sea rescue last)')
+check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 48, 'one label per catalog entry (the sea rescue last)')
 check(sc.UNIT_KEYS[-1] == 'RESCUE', "the sea rescue is the catalog's last entry (support_dispatch.cpp RescueCatalog)")
 names = re.search(r'static const wchar_t\* labels\[\]=\{([^}]*)\}', dispatch).group(1)
 rescue_name = re.search(r'if\(index==SupportRescueCatalog\(\)\)return L"([^"]+)";', dispatch)
@@ -90,7 +90,7 @@ for bad in ('9', '-1', 'two'):
         check(True, '')
 
 # The menu itself, with scripted answers: toggle two units on/off, a weapon, the platoon, a count, an invalid answer.
-answers = iter(['7', '22', '7', 'w', '1', 'shotgun', 'p', 'sniper,flame,rocket', 'c', 'heli_f', '3', 'w', '2', 'laser', ''])
+answers = iter(['7', '33', '7', 'w', '1', 'shotgun', 'p', 'sniper,flame,rocket', 'c', 'heli_f', '3', 'w', '2', 'laser', ''])
 edited = sc.edit(ini, lambda _prompt: next(answers))
 check(sc.disabled(edited) == ['SQUAD'], 'units toggled off and back on')
 check(sc.get(edited, 'SupportSquadWeapon') == 'shotgun' and sc.get(edited, 'SupportSquadLeaderWeapon') == 'rifle',

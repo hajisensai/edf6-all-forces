@@ -845,6 +845,10 @@ bool JetWithdrawNow(const void* vehicle,const char* why) noexcept;
 // The plugin's helicopter bodies (EDF6VC_HELI_410 / _506 / _MEDIC / _TRANSPORT.SGO, tools/make_jets.py). Every one of them
 // is made by the support deployment (support_aircraft.h PrepareSupportAircraft): in the air with its real crew seated at
 // once; the sea rescue too (support_call.h SupportRescueAt). Nothing makes one with an empty or dummy seat.
+// A sortie call's pass (docs/plan-2026-10-25-strikes.md §1.2; tools/calls.py SORTIE_PASSES after `none`): its aircraft make
+// one pass at the mark and leave the map (jets: jet_sortie.cpp; helicopters: heli.cpp HeliSortie).
+enum class SortiePass : std::uint8_t { none, gunRun, missilePass, carpet, popUp, missileRain, gunshipLap, heliStrafe, heliHunter,
+                                       heliCircle };
 enum class HeliBody { brute410, eros506, medic410, transport410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic); transport410:
                                                                       // EDF6VC_HELI_TRANSPORT (transport.cpp)
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
@@ -970,7 +974,7 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // particle cannon's beam, its charge's glow at the chest, a funnel's burst. The Proteus's shield is raised the same way
 // (proteus_shield.inc; tools/make_proteus.py): one BarrierBullet01, the stock Air Raider's electromagnetic barrier.
 enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,
-                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather };
+                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather, barrage, barrageBurst };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;
@@ -979,6 +983,25 @@ bool RoundSize(const RoundObj& r,float size) noexcept;       // its next rounds'
 bool RoundBlast(const RoundObj& r,float radius) noexcept;    // its next rounds' blast radius (AmmoExplosion)
 void RoundDrop(RoundObj& r) noexcept;                        // deleted while it is there; forgotten
 bool EmcIfcOk() noexcept;                                    // RoundSize / RoundBlast's IFC fields are where they write
+
+// jet_bay.cpp: a long-range barrage's round (barrage.cpp; EmcRound::barrage): fired by `by` from `from` toward `aim` with
+// `damage`, its AmmoSize `size`, blast `blast` m and AmmoHitSizeAdjust `mark` (the plugin's flight tells it by that); a
+// cluster's flash where its bomblets leave (EmcRound::barrageBurst, no damage). False: not fired (not preloaded, the IFC's
+// fields not where they are written).
+bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark) noexcept;
+void BarrageBurst(const unsigned char* by,const float* at) noexcept;
+// barrage.cpp: the long-range barrages (docs/plan-2026-10-25-strikes.md §1.1, src/barrage_plan.h): a barrage call's radio
+// call (airstrike.cpp) starts kind `kind` (barrage::Kind) at `at` along `heading` by `caller` with `damage` a round, on every
+// machine; BarrageTick fires its rounds (SharedFrameTick); the rounds' flight is RocketBullet01's update wrapped
+// (InstallBarrages, at load). Anything but started: not started, and why (the radio call lets the stock bombers fly then).
+enum class BarrageResult : int { started, noTarget, noHook, full, noCaller, noRounds };
+BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept;
+void BarrageTick() noexcept;
+void ResetBarrages() noexcept;
+bool InstallBarrages() noexcept;
+// airstrike.cpp: the caller's HUD line for its strike calls (hud.cpp StrikeBanner, the draw thread): a barrage that could
+// not start (the stock bombers fly instead), a sortie's second wave not called; a moment.
+bool PlayerStrikeCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // ultimate.cpp: the ultimate strike (docs/plan-2026-10-19-ultimate.md, src/ultimate_plan.h): the satellite call's fire
 // (airstrike.cpp) starts its show at `at` by `caller` with the weapon's `damage`; UltimateTick plays it a frame at a time
