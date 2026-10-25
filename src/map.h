@@ -40,6 +40,9 @@ bool InstallMap() noexcept;    // at load: the input hold, the camera hook, the 
 void ResetMap() noexcept;      // mission.cpp MissionStart: the map closed
 // The map is open now (wall clock fresh): `out` its readout. The draw thread's.
 bool PlayerMap(MapReadout* out) noexcept;
+// A PvP commander (pvp.cpp, the committed match): the M map is their view; it opens by itself and the map key / Esc do
+// not shut it while this is on (the stats key still shows its page). Any thread.
+void MapSetCommander(bool on) noexcept;
 // The map holds the player's input (every key the plugin reads gives way: KeyHeld helpers test this).
 bool MapHoldsKeys() noexcept;
 // Published map/TV input ownership for this exact soldier, including closing-key drain.

@@ -57,16 +57,45 @@ int main(){
     h[edf::kHumanPlayer]=1;edf::Put<void*>(h,edf::kHumanPad,h);
     turretObserver=&EDF6VehicleCrew_TurretObserverV1;
     cameraTurret=[](const void*,unsigned)->bool{return true;};
-    // One auto-aim (2026-10-25, "这个自动瞄准是不是多余了一个版本，删掉一个"): no mode key is read and the readout always says
-    // auto-aim with its lock binding alone; the old V and the legacy Z are no keys of this plugin's (Z is the optic's).
+    // Auto-aim off by default (2026-10-25, "怎么自动开启自动瞄准了……自动瞄准不要开启"): the readout says off with the key that
+    // turns it on; nothing turns the player's gun, with the turret camera or without it, locked or not.
     cfg.lockKey='Q';cfg.lockButton=4;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    PublishAim(v,true,v,reinterpret_cast<const float*>(v+0x100));
+    edf::aimlink::TurretReadoutV1 r{};
+    expect(EDF6AutoTurret_TurretReadoutV1(&r) && r.mode==edf::aimlink::Mode::manual && r.modeKey==0x4A && r.modeButton==0 &&
+           r.lockKey=='Q' && r.lockButton==4 && !r.target && r.lock==edf::aimlink::Lock::none,
+           "off at the start: the readout says off, names J, rings nothing even with a target handed in");
+    edf::aimlink::TurretLockV1 tl{sizeof(tl),nullptr,0,false,false,nullptr,{}};
+    image=v;
+    expect(EDF6AutoTurret_TurretLockV1(&tl) && !tl.autoAim && tl.keys && tl.lockKey=='Q' && !tl.target && !tl.pick,
+           "off: the seat is answered (the Q mark picks by the lock's rule) with auto-aim off and no lock");
+    image=nullptr;
+    auto rule=PlayerControlRule(v,0,true);
+    expect(!rule.steer&&!rule.drag,"off: a lock (were there one) never turns the gun");
+    cameraTurret=[](const void*,unsigned)->bool{return false;};
+    rule=PlayerControlRule(v,0,false);
+    expect(!rule.steer&&!rule.drag,"off, no turret camera: no V1 auto-aim and no drag (the old default pulled the gun)");
+    cameraTurret=[](const void*,unsigned)->bool{return true;};
+    // A Q press while off locks nothing and is no press once auto-aim is on.
+    bindingkeys::down['Q']=true;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    // V is EDF6VehicleCrew's first person key in every seat and Z its optic's: neither flips it.
     bindingkeys::down['V']=bindingkeys::down['Z']=true;PilotFrame(v,0,seats,nullptr,nullptr,500);
     bindingkeys::down['V']=bindingkeys::down['Z']=false;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    expect(!AutoAimOn(),"V (first person) and Z (the optic) are no auto-aim keys");
+    // J flips it on; a held J is one flip.
+    bindingkeys::down['J']=true;PilotFrame(v,0,seats,nullptr,nullptr,500);PilotFrame(v,0,seats,nullptr,nullptr,500);
+    bindingkeys::down['J']=false;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    expect(AutoAimOn(),"J turns auto-aim on, once");
+    expect(pilot.lockLong,"the Q held across the flip is no lock press");
+    bindingkeys::down['Q']=false;PilotFrame(v,0,seats,nullptr,nullptr,500);
     PublishAim(v,true,nullptr,nullptr);
-    edf::aimlink::TurretReadoutV1 r{};
-    expect(EDF6AutoTurret_TurretReadoutV1(&r) && r.mode==edf::aimlink::Mode::autoAim && r.modeKey==0 && r.modeButton==0 &&
-           r.lockKey=='Q' && r.lockButton==4 && !r.lead,"the readout is the one auto-aim and its lock binding, V / Z pressed or not");
-    crew::observer=true;auto rule=PlayerControlRule(v,0,true);
+    expect(EDF6AutoTurret_TurretReadoutV1(&r) && r.mode==edf::aimlink::Mode::autoAim && r.modeKey==0x4A && r.lockKey=='Q' && !r.lead,
+           "on: the readout says on with its toggle and lock bindings");
+    tl=edf::aimlink::TurretLockV1{sizeof(tl),nullptr,0,false,false,nullptr,{}};
+    image=v;
+    expect(EDF6AutoTurret_TurretLockV1(&tl) && tl.autoAim && tl.keys && tl.lockKey=='Q' && tl.target==nullptr,"on: Q is the turret lock's, nothing locked yet");
+    image=nullptr;
+    crew::observer=true;rule=PlayerControlRule(v,0,true);
     expect(!rule.steer&&!rule.drag,"C observation cannot restore V1 auto steering even with an existing lock");
     crew::observer=false;crew::transition=true;rule=PlayerControlRule(v,0,true);
     expect(!rule.steer&&!rule.drag,"camera return blend retains observation ownership");
@@ -93,5 +122,20 @@ int main(){
     expect(rule.steer&&!rule.drag,"first person with a lock: auto-aim onto the lock only");
     expect(!EDF6VehicleCrew_CameraTurretV2(v,1),"first person of another seat's rider is not this player's view");
     crew::firstPerson=false;crew::camTurret=true;
+    // J again: off; the V1 case that steered above no longer does.
+    bindingkeys::down['J']=true;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    bindingkeys::down['J']=false;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    crew::camTurret=false;rule=PlayerControlRule(v,0,false);
+    expect(!AutoAimOn() && !rule.steer && !rule.drag,"J turns it off again: no V1 pull");
+    crew::camTurret=true;
+    // A new mission (EDF6VehicleCrew's MissionStart): back to the ini's state, the lock let go; AutoAim=1 starts it on.
+    bindingkeys::down['J']=true;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    bindingkeys::down['J']=false;PilotFrame(v,0,seats,nullptr,nullptr,500);
+    expect(AutoAimOn(),"J on again");
+    EDF6AutoTurret_MissionResetV1();
+    expect(!AutoAimOn() && !Fresh(),"a new mission: auto-aim back to the ini's off, the seat forgotten");
+    cfg.autoAim=1;EDF6AutoTurret_MissionResetV1();
+    expect(AutoAimOn(),"AutoAim=1: a new mission starts it on");
+    cfg.autoAim=0;EDF6AutoTurret_MissionResetV1();
     std::printf("autoturret binding: %d checks, %d failures\n",checked,failed);return failed?1:0;
 }

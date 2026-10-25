@@ -15,6 +15,7 @@
 #pragma once
 #include "coop_extension_api.h"
 #include "coop_member_attribute_api.h"
+#include "edf5online_room.h"
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -28,6 +29,22 @@ inline constexpr std::size_t kValueMost=EDF6COOP_MEMBER_ATTRIBUTE_MAX_VALUE+1;
 // The table as EDF6Coop hands it, kept only when it is v1's and reaches `snapshot` (what every reader needs).
 inline const Table* Usable(const Table* t) noexcept {
     return t && t->version==EDF6COOP_MEMBER_ATTRIBUTE_VERSION && EDF6COOP_MA_HAS(t,snapshot) && t->snapshot ? t : nullptr;
+}
+
+// The EDF6Coop this build's rooms need: the room protocol 2 (mod_room.h) is EDF6Coop 2.7.0's (Coop#42). 2.6.x wants
+// AF_PROFILE 1, refuses its own REJOIN and virtual rooms of this protocol and cannot read 0x412602xx lobby states, so a
+// room with it would half work: mod_room.cpp refuses to create or join one and says to upgrade.
+inline constexpr int kRoomCoopMajor=2,kRoomCoopMinor=7,kRoomCoopPatch=0;
+enum class CoopVersion : std::uint8_t { ok, old, unreadable };
+// EDF6Coop's exported EDF6CoopVersion marker (nullptr: not exported, older than 2.5.0) against kRoomCoop*; the version
+// read back when there is one.
+inline CoopVersion RoomCoopVersion(const char* marker,int* major,int* minor,int* patch) noexcept {
+    int a=0,b=0,c=0;
+    if(!bvmroom::ParseCoopVersion(marker,a,b,c))return CoopVersion::unreadable;
+    if(major)*major=a;
+    if(minor)*minor=b;
+    if(patch)*patch=c;
+    return bvmroom::AtLeast(a,b,c,kRoomCoopMajor,kRoomCoopMinor,kRoomCoopPatch) ? CoopVersion::ok : CoopVersion::old;
 }
 
 // A room frame's beat: Due at most every `every` ms (the first call always).

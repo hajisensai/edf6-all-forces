@@ -10,6 +10,10 @@
 
 namespace crew::debugspawn {
 inline constexpr std::uint32_t kNetworkCatalog=1022;
+// A PvP member's own unit (pvp_match.h Role::unit): the same transaction, made on the member's faction team (the plan's
+// team), the requester the member; once every peer has it, the member's machine takes control of it (enemy control).
+inline constexpr std::uint32_t kPvpUnitCatalog=1021;
+constexpr bool NetworkCatalog(std::uint32_t c) noexcept { return c==kNetworkCatalog || c==kPvpUnitCatalog; }
 // Stable across catalog reorderings. The complete descriptor hash is sent in variant as well: another build with a
 // changed path, lift or required files refuses at PREPARE, before any peer creates anything.
 constexpr std::uint64_t HashByte(std::uint64_t h,unsigned char b) noexcept { return (h^b)*1099511628211ull; }
@@ -58,18 +62,20 @@ inline int NetworkRow(std::uint64_t descriptor) noexcept {
     }
     return found;
 }
-inline bool BuildNetworkPlan(int row,const float* matrix,support_net::Plan* out) noexcept {
-    if(!out || !matrix || row<0 || row>=kEntryCount || !NetworkKind(kEntries[row].how))return false;
-    *out={};out->catalogId=kNetworkCatalog;out->count=1;
+inline bool BuildNetworkPlan(int row,const float* matrix,support_net::Plan* out,std::uint32_t catalog=kNetworkCatalog) noexcept {
+    if(!out || !matrix || row<0 || row>=kEntryCount || !NetworkKind(kEntries[row].how) || !NetworkCatalog(catalog))return false;
+    if(catalog==kPvpUnitCatalog && kEntries[row].how!=How::enemy)return false;
+    *out={};out->catalogId=catalog;out->count=1;
     auto& unit=out->units[0];unit.resourceId=Resource(kEntries[row]);unit.variant=Descriptor(kEntries[row]);
     std::memcpy(unit.matrix,matrix,sizeof(unit.matrix));
     for(unsigned i=0;i<3;++i)out->target[i]=matrix[12+i];
     return support_net::ValidPlan(*out,false);
 }
 inline int NetworkPlanRow(const support_net::Plan& plan,bool requireIds=true) noexcept {
-    if(plan.catalogId!=kNetworkCatalog || plan.count!=1 || plan.units[0].role || !support_net::ValidPlan(plan,requireIds))return -1;
+    if(!NetworkCatalog(plan.catalogId) || plan.count!=1 || plan.units[0].role || !support_net::ValidPlan(plan,requireIds))return -1;
     for(unsigned i=0;i<3;++i)if(plan.units[0].matrix[12+i]!=plan.target[i])return -1;
-    return NetworkRow(plan.units[0].resourceId,plan.units[0].variant);
+    const int row=NetworkRow(plan.units[0].resourceId,plan.units[0].variant);
+    return row>=0 && (plan.catalogId!=kPvpUnitCatalog || kEntries[row].how==How::enemy) ? row : -1;
 }
 } // namespace crew::debugspawn
 
@@ -85,4 +91,11 @@ void DestroyRangeEnemy(std::uint64_t) noexcept;
 void RangeEnemyNetworkTick() noexcept;
 void ResetRangeEnemyNetwork() noexcept;
 bool RangeEnemyRequestNotice(std::uint32_t,support_net::RequestStatus) noexcept;
+// The PvP unit's plan on the host for the member `requesterPuid` (authenticated by support_net): their committed pick
+// must be the unit role with this row (pvp.h PvpMemberPick). Ownership (requester, team) is added by support_net after.
+support_net::PlanResult PlanPvpUnit(const char* requesterPuid,const float* target,std::uint64_t descriptor,support_net::Plan* out) noexcept;
+// This member's machine (game thread): ask for its own unit at `at` (pvp.cpp, the committed match). False: not sent.
+bool RequestPvpUnit(int row,const float* at,wchar_t* note,std::size_t size) noexcept;
+// This member's unit made by the transaction and still alive (its control asked for once activated).
+bool PvpUnitLive() noexcept;
 }

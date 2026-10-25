@@ -66,7 +66,11 @@ class Vehicle:
     trunnion: dict[str, tuple[float, float]]   # elevation bone -> (y, z) of its axis (x: the barrel's)
     barrels: dict[str, str]               # weapon side ('left' / 'right') -> the node of its barrel
     rotor: str | None = None              # a visual rotor bone under cannon_slide_l, spinning the barrel node
-    missiles: str | None = None           # node whose instances are the missile tubes (cannon_main)
+    missiles: str | None = None           # node whose instances are the missile tubes (on missile_bone)
+    # The bone the tubes ride and the missiles' holder (make_tracked_combat: the muzzle contract's bone): the round
+    # leaves along that bone's forward row (muzzle mode 0, 0x633DD0). cannon_main only turns; launchers on the gun's
+    # elevating bone leave along the gun's line.
+    missile_bone: str = 'cannon_main'
     split_idler: str | None = None        # the wheel bone whose outer half goes on tire_moveH (M113: no H station)
     collision: dict[str, list[str]] = field(default_factory=dict)   # proxy -> node regexes (default: by bone)
     clip: dict[str, tuple[int, str, float]] = field(default_factory=dict)  # proxy -> (axis, 'min'/'max', value)
@@ -116,19 +120,20 @@ BMPT = Vehicle(
         (r'^track_([lr])$', 'catapi_body'),
         (r'^gun_barrel_02$', 'cannon_slide_l'),                  # +x: the left 2A42
         (r'^gun_barrel_01$', 'cannon_slide_r'),
-        # The weapon module (both 2A42s' cradle and the coaxial PKTM) elevates about its trunnion on cannon_l; the
-        # Ataka launchers stay on the turret, where the missiles' holder is (make_tracked_combat: cannon_main).
-        (r'^(bone_gun|ex_decor_01|bone_mg_gun_twin)$', 'cannon_l'),
+        # The weapon module (both 2A42s' cradle and the coaxial PKTM) elevates about its trunnion on cannon_l, and with
+        # it the Ataka launchers (the four tubes and their brackets gun_mask_03 / 04, War Thunder's elevating mantlet
+        # nodes), as on the real Terminator: on the turret the missiles left level with the hull whatever the gun's
+        # elevation, into the ground on a downslope (the user, 2026-10-25: 「bmpt的飞弹怎么会往地里射？」).
+        (r'^(bone_gun|ex_decor_01|bone_mg_gun_twin|gun_mask_0[34]|9m120_rocket)$', 'cannon_l'),
         (r'^bone_commander_sight_h$', 'doppler_radar'),          # the commander's panoramic sight
         (r'^hatch_04$', 'tracking_radar'),                       # the gunner's hatch and sight block
         # bone_turret_01..04 are the hull's grenade launchers (outside the ring): body
-        (r'^(bone_turret|ex_armor_turret_.*|ex_era_turret_.*|hatch_03|antenna|gun_mask_0[34]|9m120_rocket)$',
-         'cannon_main'),
+        (r'^(bone_turret|ex_armor_turret_.*|ex_era_turret_.*|hatch_03|antenna)$', 'cannon_main'),
     ],
     turret=(0.0, 1.70, -0.25),       # ring circle fit at y 1.50..1.75: centre z -0.20..-0.30, r 1.17..1.22
     trunnion={'cannon_l': (2.44, -1.47), 'cannon_r': (2.44, -1.47)},  # the module's side bearing (side render)
     barrels={'left': 'gun_barrel_02', 'right': 'gun_barrel_01'},
-    missiles='9m120_rocket',
+    missiles='9m120_rocket', missile_bone='cannon_l',
     # The module's collision is the turret's (cannon_main): on cannon_l it would wrap the right barrel's body, its
     # sibling (D93250 lets siblings collide). Each barrel's body is its barrel.
     collision={'cannon_l': [r'^gun_barrel_02$'], 'cannon_r': [r'^gun_barrel_01$'],
@@ -178,7 +183,10 @@ PZH2000 = Vehicle(
         (r'^wheel_([lr])_back$', 'tire_moveH_{0}'),
         (r'^track_([lr])$', 'catapi_body'),
         (r'^gun_barrel$', 'cannon_slide_l'),
-        (r'^bone_gun$', 'cannon_l'),
+        # The mantlet's fittings elevate with it (2026-10-25, docs/feedback-2026-10-25-model-rigs.md: 「炮管的防尘布转炮管的
+        # 时候留在原地了」): the dust cover round the barrel ahead of the mantlet (ex_decor_04, outside turret_box: it
+        # was left on the hull), the shroud on the mantlet's face (ex_decor_05) and the plate on its top (ex_armor_05).
+        (r'^(bone_gun|ex_decor_04|ex_decor_05|ex_armor_05)$', 'cannon_l'),
         (r'^bone_commander_sight_h$', 'doppler_radar'),          # the commander's sight head
         (r'^mg_aa_mount_h$', 'tracking_radar'),                  # the roof machine gun's ring
         (r'^(bone_turret|bone_turret_01|antenna_0[12]|bone_mg_aa_v|mg_aa_mount_v|ammo)$', 'cannon_main'),
@@ -203,13 +211,16 @@ STURMTIGER = Vehicle(
         (r'^track_([lr])$', 'catapi_body'),
         (r'^(gun_barrel|380mm_spgr_4581)$', 'cannon_slide_l'),   # the mortar and the round in it
         (r'^bone_gun$', 'cannon_l'),
-        (r'^hatch_01$', 'doppler_radar'),                        # the commander's hatch
-        (r'^hatch_02$', 'tracking_radar'),                       # the loading hatch
+        # The roof's hatches (the commander's hatch_01, the loading hatch_02) stay on the hull: doppler_radar /
+        # tracking_radar ride cannon_main, here the mortar's traverse, so they swung with the mortar (2026-10-25,
+        # docs/feedback-2026-10-25-model-rigs.md: 「顶部的天花板怎么和炮管联动了」). The casemate has no fitting that turns:
+        # the two radar bones carry no mesh, their origins and kinematic proxies still fitted to the hatches (collision).
     ],
     turret=(-0.285, 2.10, 1.0),      # the ball mount's centre: the mortar's axis (its box) behind the casemate's face
     trunnion={'cannon_l': (2.10, 1.10), 'cannon_r': (2.10, 1.10)},
     barrels={'left': 'gun_barrel', 'right': 'gun_barrel'},
-    collision={'cannon_main': [r'^bone_gun$'], 'cannon_l': [r'^(gun_barrel|380mm_spgr_4581)$'], 'cannon_r': [r'^bone_gun$']},
+    collision={'cannon_main': [r'^bone_gun$'], 'cannon_l': [r'^(gun_barrel|380mm_spgr_4581)$'], 'cannon_r': [r'^bone_gun$'],
+               'doppler_radar': [r'^hatch_01$'], 'tracking_radar': [r'^hatch_02$']},
 )
 
 # The Apocalypse (Command & Conquer: Red Alert 2's, ska-ara's Sketchfab model; the user, 2026-10-24: 「再做个冷战那种
@@ -627,7 +638,12 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
             if bone[9] in 'BCDEFG':
                 origins[f'catapi{bone[9]}_{bone[-1]}'] = centre.tolist()
     for bone in ('doppler_radar', 'tracking_radar'):
-        lo, hi = box(src.positions[np.unique(src.tri_v[bones == bone])])
+        sel = bones == bone
+        if not sel.any():       # a bone with no mesh (the Sturmtiger's): at the nodes its proxy is fitted to
+            sel = np.asarray([any(re.match(p, n) for p in v.collision.get(bone, ())) for n in tri_node])
+        if not sel.any():
+            raise ValueError(f'{v.kind}: {bone} has no mesh and no collision nodes')
+        lo, hi = box(src.positions[np.unique(src.tri_v[sel])])
         origins[bone] = ((lo + hi) / 2).tolist()
     visual = []
     if v.rotor:
@@ -641,6 +657,10 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
         muzzles['right'] = [dict(muzzles['left'][0])]
     tubes = []
     if v.missiles:
+        # The holder is the tubes' bone: a tube elsewhere would leave its round off the tube as the gun elevates.
+        on = {str(b) for b in bones[np.isin(src.tri_obj, [k for k, o in enumerate(src.objects) if node(o) == v.missiles])]}
+        if on != {v.missile_bone}:
+            raise ValueError(f'{v.kind}: the {v.missiles} tubes ride {sorted(on)}, not missile_bone {v.missile_bone}')
         for P in instances(src, v.missiles):
             lo, hi = box(P)
             tubes.append([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, hi[2]])
@@ -648,7 +668,7 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
             tubes = [p for sign in (1, -1) for p in sorted((p for p in tubes if p[0] * sign > 0),
                                                            key=lambda p: (-round(abs(p[0]), 1), -p[1]))[:v.missiles_keep // 2]]
         tubes.sort(key=lambda p: (-round(p[0], 1), p[1]))     # left low, left high, right low, right high
-    muzzles['missiles'] = [{'bone': 'cannon_main', 'point': p} for p in tubes]
+    muzzles['missiles'] = [{'bone': v.missile_bone, 'point': p} for p in tubes]
     ejections = {}
     for side, sign in (('left', 1.0), ('right', -1.0)):
         x, y, z0, _z1 = axes[side]

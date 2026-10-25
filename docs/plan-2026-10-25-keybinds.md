@@ -1,7 +1,7 @@
 # 键位体系重新设计（2026-10-25）
 
 来源：[`feedback-2026-10-25-keybinds.md`](feedback-2026-10-25-keybinds.md)（「好多重叠的 加到原生的按键设置里面？同时重新设计一下原生的按键设计吧」）。
-原版按键设置的逆向：[`keyconfig-re.md`](keyconfig-re.md)。基于 `origin/main` `30a795b4`，并兼容开放中的 PR #254（W/S 油门 / 挡位）。
+原版按键设置的逆向：[`keyconfig-re.md`](keyconfig-re.md)。起草于 `origin/main` `30a795b4`，已合入 `20984503`：PR #254（W/S 油门 / 挡位）与 PR #266（自动瞄准开关 `AutoAimKey`）都已在 main，本方案按它们之后的键位写。
 
 ## 0. 结论
 
@@ -53,7 +53,8 @@ LB 0x100、RB 0x200、A/B/X/Y 0x1000/2000/4000/8000。
 | R | LB（固定） | `PlayerJetSwitchKey` | 切换挂载 / 弹种（原版武器 ↔ 插件挂载） |
 | T | 十字右 | `VehicleSecondarySwitchKey/Button` | 自带副武器的原版车切副武器弹种（BMPT 等） |
 | Q | — | `NpcMarkKey` | 自制 Q 标记（乘车也生效） |
-| Q | X | AutoTurret `LockKey/Button` | 炮塔座位锁定（坦克驾驶座只锁定） |
+| Q | X | AutoTurret `LockKey/Button` | 炮塔座位锁定（坦克驾驶座只锁定）；只在自动瞄准开着时读（`AutoAim=0` 默认关） |
+| J | — | AutoTurret `AutoAimKey/Button` | 开关自动瞄准（PR #266；手柄默认不设，避开 L3 自由视角） |
 
 ### 1.3 地面车（PR #254 合入后）
 
@@ -85,7 +86,7 @@ LB 0x100、RB 0x200、A/B/X/Y 0x1000/2000/4000/8000。
 ### 1.6 炮手座（炮舰机炮手、EDF6AutoTurret 炮塔）
 
 - 炮舰机炮手：R / LB 在炮弹与机炮间切，右键 / RB 按住加特林（`GunshipGatlingKey`）。
-- 炮塔：Q / X 锁定（AutoTurret），同时自制 Q 标记（`npcai.cpp` 注释写明是有意的）。
+- 炮塔：自动瞄准开着时 Q / X 锁定（AutoTurret），同一次按键的 Q 标记跟随锁定目标（有意）；关着时 Q 只是 Q 标记。J 开关自动瞄准。
 
 ### 1.7 舰船（无畏舰）
 
@@ -140,7 +141,7 @@ LB 0x100、RB 0x200、A/B/X/Y 0x1000/2000/4000/8000。
 |---|---|---|---|---|---|
 | 1 | 无畏舰 | Q | 横移左 + 自制 Q 标记 | ✗ 每次按 Q 横移都会执行一次 Q 标记：准星下有敌人就标记（同一个再按就取消），没有就把小队派到准星所指的点（`ToggleMark` → `SendToPoint`） | `dreadnought.cpp:141`、`npcai.cpp:3381` |
 | 2 | 固定翼 | Q | 锁定下一目标 + 自制 Q 标记 | ✗ 每次换目标都连带执行一次 Q 标记（同上：标记 / 取消 / 派小队到点） | `playerjet.cpp:443`、`npcai.cpp:3381` |
-| 3 | 炮塔座 | Q | AutoTurret 锁定 + 自制 Q 标记 | △ 有意（标记即锁定点） | `designate.cpp:216`、`npcai.cpp:3377` |
+| 3 | 炮塔座 | Q | AutoTurret 锁定 + 自制 Q 标记 | △ 有意：标记跟随锁定；自动瞄准关（默认）时不读锁定键 | `designate.cpp`、`npcai.cpp NpcMarkFrame` |
 | 4 | Proteus / 原版副武器车 | T | `ProteusModeKey` 与 `VehicleSecondarySwitchKey` | ✗（未核实 Proteus 是否走副武器切换）语义不同却同键 | `proteus.cpp:309`、`payload.cpp:644` |
 | 5 | 固定翼（手柄） | L3 | 起落架 + 自由视角 | ✗ 代码上未见互斥，需实机核对 | `playerjet.cpp:1649`、`vehicle_look.cpp:48` |
 | 6 | 插件旋翼机（手柄） | L3 | 悬停下降 + 自由视角 | 同上，未核对 | `playerjet_board.inc:380` |
@@ -176,7 +177,7 @@ LB 0x100、RB 0x200、A/B/X/Y 0x1000/2000/4000/8000。
 | 速度 | W / S（PR #254） | 战机油门杆、地面车挡位 | 战雷式；Shift 在战机上同 W |
 | 升降 | Space / Ctrl | 战机拉起 / 压低、旋翼机 / 直升机 / 沙扎比 / 无畏舰 / 怪物下降 | 「Space 上、Ctrl 下」全线一致 |
 | 加速 | Shift | 旋翼机巡航、沙扎比冲刺、无畏舰加速 | |
-| 指向 | Q | Q 标记、AutoTurret 锁定、战机下一目标（自动瞄准的 Q 提示留在这一族，归另一个会话） | 标记与锁定同时发生是有意的；会让「指向」以外的 Q 用法（无畏舰横移）让位，见 3.3 |
+| 指向 | Q（开关自动瞄准 J） | Q 标记、AutoTurret 锁定、战机下一目标；自动瞄准的开关是 J（PR #266） | 标记与锁定同时发生是有意的；会让「指向」以外的 Q 用法（无畏舰横移）让位，见 3.3 |
 | 武器切换 | R | 挂载 / 弹种（`PlayerJetSwitchKey`）、炮舰机炮弹 ↔ 机炮 | 原版「装填」若也在 R，由占用表处理（阶段 1 才能知道） |
 | 副武器 | T | 原版副武器车切弹种 | |
 | 特殊武器 | R / E / 右键 | 钻头发射（R）、浮游炮（R）、米加炮（E）、导弹架 / 加特林（右键） | 本身是开火类，跟着各自机体的武器习惯，不强行统一 |
@@ -254,12 +255,12 @@ LB 0x100、RB 0x200、A/B/X/Y 0x1000/2000/4000/8000。
 
 拿到原版默认键后，再出一份「推荐原版设置」：只改原版里与 §3 家族冲突的键，由玩家在原版菜单里照着改，或阶段 3 后提供一键套用。
 
-## 5. 顺手修正（本 PR）
+## 5. 已在 main 修正
 
-- `EDF6VehicleCrew.ini` / `crew.h`：`FirstPersonKey` 注释原写「只在步行时生效」，实际 `FirstPersonVehicle=1` 时乘车也生效（`firstperson.cpp ToggleDown`），已改。
+- `FirstPersonKey` 注释原写「只在步行时生效」，实际 `FirstPersonVehicle=1` 时乘车也生效：main 已改（本 PR 起草时也改了同一处，合并时采用 main 的写法）。
 
 ## 6. 本 PR 不做
 
 - 不改任何默认键、不加仲裁代码。§3.3 的 A~D 与 §4 阶段 3 等用户确认。
 - 不碰自动瞄准逻辑（另一个会话）。
-- 不改 PR #254 的键位。本方案与它的 W/S、Space、Ctrl 语义一致。
+- 不改 PR #254 / #266 的键位。本方案与它们的 W/S、Space、Ctrl、Q、J 语义一致。

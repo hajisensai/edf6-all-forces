@@ -35,6 +35,7 @@
 // hull (durability, damage, kills and targets travel natively); every machine runs the parts' machines from the same script
 // actions, a cannon's random charge timer is the host's.
 #include "crew.h"
+#include "team_native_logic.h"
 #include "edf41_hitlayer.h"
 #include "edf41classes.h"
 #include "edf41mother_pose.h"
@@ -1010,7 +1011,7 @@ bool OriginalSpawnTeam301(const Part& part,int* team) noexcept {
         if(!controlled_pvp::ReadBaselineForMember(hull,&baseline,&last))return false;
         *team=baseline==-1 || baseline==3 ? 1 : baseline;
     } else *team=PartTeam(part.hull); // a stable mode-off lease must honour a task's current team, before its next generic Frame
-    return *team>=0 && *team<7;
+    return *team>=0 && *team<crew::team_native::kTeamCapacity;
 }
 
 // ---- the hatch: 4.1's ObjectGenerator (0x330E70 / 0x331270 / 0x3313C0) ------------------------------------------------
@@ -2494,7 +2495,7 @@ bool PvpCollect301(void*,const ObjRef& root,ObjRef* members,unsigned capacity,un
         const ObjRef ref{object,weak->second.control};
         const auto life=PvpIdentity301(ref);if(life==controlled_pvp::Life::gone)continue;
         if(life!=controlled_pvp::Life::live || At<const void*>(object,0)!=&partClass.block[1])return false;
-        if(p->team<-1 || p->team>=7 || !add(ref) || emission>=emitterCapacity)return false;
+        if(p->team<-1 || p->team>=crew::team_native::kTeamCapacity || !add(ref) || emission>=emitterCapacity)return false;
         emitters[emission++]={controlled_pvp::EmitterKind::ownerTeamMirror,ref,&p->team,p->pvpIncarnation};
     }
     // Native +550 children are a separate proven container. Any live descendant outside our typed family is unsupported.
@@ -2517,12 +2518,12 @@ controlled_pvp::Life PvpRead301(void*,const controlled_pvp::Emitter& emitter,int
     const auto it=refs.find(const_cast<void*>(emitter.member.obj));
     if(it==refs.end())return Life::invalid;
     if(it->second.object!=emitter.member.obj || it->second.control!=emitter.member.ctrl)return Life::invalid;
-    if(p->team<-1 || p->team>=7)return Life::invalid;
+    if(p->team<-1 || p->team>=crew::team_native::kTeamCapacity)return Life::invalid;
     *team=p->team;return Life::live;
 }
 bool PvpWrite301(void*,const controlled_pvp::Emitter& emitter,int team) noexcept {
     std::lock_guard<std::recursive_mutex> hold(lock);int previous=0;
-    if(team<-1 || team>=7 || PvpRead301(nullptr,emitter,&previous)!=controlled_pvp::Life::live)return false;
+    if(team<-1 || team>=crew::team_native::kTeamCapacity || PvpRead301(nullptr,emitter,&previous)!=controlled_pvp::Life::live)return false;
     Part* p=PartOf(const_cast<void*>(emitter.member.obj));p->team=team;return p->team==team;
 }
 bool PvpMemberBaseline301(void*,const ObjRef& root,const ObjRef& member,int,int,int* team,int* last) noexcept {

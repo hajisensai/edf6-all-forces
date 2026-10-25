@@ -271,7 +271,7 @@ struct Config {
     bool firstPerson=true;          // first person on foot: the key switches it (firstperson.cpp)
     bool fpVehicle=true;            // ...in a vehicle as well: each seat's eye at its station (fp_vehicle.cpp)
     bool fpHideStockHud=true;       // ...and the stock HUD off there (its information on the cockpit's panels)
-    int firstPersonKey=0x56;        // ...its key ('V'; on foot, and riding with FirstPersonVehicle; a vehicle's own V key takes it there (KeyTaken); 0 none)
+    int firstPersonKey=0x56;        // ...its key ('V', on its release; on foot, and in every vehicle seat with fpVehicle; 0 none)
     bool firstPersonStart=false;    // ...on from the start
     float fpEyeUp=0.05f;            // ...the eye this far over the head bone, m
     float fpEyeAhead=0.10f;         // ...and this far ahead of it, m
@@ -413,6 +413,7 @@ struct Config {
     // The ported content unlocked (unlock_ported.h; both off by default: a shared package keeps everyone's progress):
     bool portedMissionsUnlocked=false;  // every mission of the EDF5 / EDF4.1 packs selectable (edf5campaign.cpp InstallPortedMissions), live
     bool portedWeaponsUnlocked=false;   // every ported weapon owned at the next save load (airstrike.cpp UnlockDlcHook); never taken back
+    bool allWeaponsUnlocked=false;      // every weapon row of the table owned at max stars at the next save load (airstrike.cpp GrantAll); never taken back
     float bigWorld=0.0f;            // the physics world +-this many m instead of +-3000 (bigworld.cpp), from the game's start;
                                     // 0: stock. At 10000 parked vehicles fell through the ground (2026-10-04): an experiment
     // The flyers' soft edge (airbound.h): the band inside the play edge where the NPC jets and helis turn back.
@@ -475,6 +476,7 @@ struct Config {
                                     // 2026-10-19: "暂时取消这个掩护设定吧"), true = kept by its top NPC before and after recruiting
     bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
     float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
+    bool vehicleGears=true;         // drivegear.cpp: the player driving a stock ground vehicle on the keyboard, W / S shift War Thunder's cruise gears
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
     float tankPostHold=6.0f;        // ...m off its post before it does
     float tankReverseMax=30.0f;     // ...the post behind it and nearer than this (m): it reverses onto it, else turns round
@@ -844,6 +846,10 @@ bool JetWithdrawNow(const void* vehicle,const char* why) noexcept;
 // The plugin's helicopter bodies (EDF6VC_HELI_410 / _506 / _MEDIC / _TRANSPORT.SGO, tools/make_jets.py). Every one of them
 // is made by the support deployment (support_aircraft.h PrepareSupportAircraft): in the air with its real crew seated at
 // once; the sea rescue too (support_call.h SupportRescueAt). Nothing makes one with an empty or dummy seat.
+// A sortie call's pass (docs/plan-2026-10-25-strikes.md §1.2; tools/calls.py SORTIE_PASSES after `none`): its aircraft make
+// one pass at the mark and leave the map (jets: jet_sortie.cpp; helicopters: heli.cpp HeliSortie).
+enum class SortiePass : std::uint8_t { none, gunRun, missilePass, carpet, popUp, missileRain, gunshipLap, heliStrafe, heliHunter,
+                                       heliCircle };
 enum class HeliBody { brute410, eros506, medic410, transport410 };   // medic410: EDF6VC_HELI_MEDIC (heli.cpp Medic); transport410:
                                                                       // EDF6VC_HELI_TRANSPORT (transport.cpp)
 // A bomber's payload: BombingPlane_Init's arguments (0x5AABB0; speed in metres a frame), which a jet's bomb
@@ -969,7 +975,7 @@ bool PlayerDrillCue(DrillCue* out) noexcept;
 // particle cannon's beam, its charge's glow at the chest, a funnel's burst. The Proteus's shield is raised the same way
 // (proteus_shield.inc; tools/make_proteus.py): one BarrierBullet01, the stock Air Raider's electromagnetic barrier.
 enum class EmcRound { beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,
-                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather };
+                      ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast, ultGather, barrage, barrageBurst };
 struct RoundObj { unsigned char* obj; const void* ctrl; };   // an object and its weak-this control block (none: obj null)
 bool EmcRoundReady(EmcRound kind) noexcept;
 RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const float* at,float damage) noexcept;
@@ -978,6 +984,25 @@ bool RoundSize(const RoundObj& r,float size) noexcept;       // its next rounds'
 bool RoundBlast(const RoundObj& r,float radius) noexcept;    // its next rounds' blast radius (AmmoExplosion)
 void RoundDrop(RoundObj& r) noexcept;                        // deleted while it is there; forgotten
 bool EmcIfcOk() noexcept;                                    // RoundSize / RoundBlast's IFC fields are where they write
+
+// jet_bay.cpp: a long-range barrage's round (barrage.cpp; EmcRound::barrage): fired by `by` from `from` toward `aim` with
+// `damage`, its AmmoSize `size`, blast `blast` m and AmmoHitSizeAdjust `mark` (the plugin's flight tells it by that); a
+// cluster's flash where its bomblets leave (EmcRound::barrageBurst, no damage). False: not fired (not preloaded, the IFC's
+// fields not where they are written).
+bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark) noexcept;
+void BarrageBurst(const unsigned char* by,const float* at) noexcept;
+// barrage.cpp: the long-range barrages (docs/plan-2026-10-25-strikes.md §1.1, src/barrage_plan.h): a barrage call's radio
+// call (airstrike.cpp) starts kind `kind` (barrage::Kind) at `at` along `heading` by `caller` with `damage` a round, on every
+// machine; BarrageTick fires its rounds (SharedFrameTick); the rounds' flight is RocketBullet01's update wrapped
+// (InstallBarrages, at load). Anything but started: not started, and why (the radio call lets the stock bombers fly then).
+enum class BarrageResult : int { started, noTarget, noHook, full, noCaller, noRounds };
+BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept;
+void BarrageTick() noexcept;
+void ResetBarrages() noexcept;
+bool InstallBarrages() noexcept;
+// airstrike.cpp: the caller's HUD line for its strike calls (hud.cpp StrikeBanner, the draw thread): a barrage that could
+// not start (the stock bombers fly instead), a sortie's second wave not called; a moment.
+bool PlayerStrikeCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // ultimate.cpp: the ultimate strike (docs/plan-2026-10-19-ultimate.md, src/ultimate_plan.h): the satellite call's fire
 // (airstrike.cpp) starts its show at `at` by `caller` with the weapon's `damage`; UltimateTick plays it a frame at a time

@@ -5,6 +5,7 @@
 // place it picks what it works round (its anchor / post / leader), reusing its own flight, targeting and fight.
 // Included by crew.h.
 #pragma once
+#include "pvp_match.h"
 #include "march_pace.h"
 #include <Windows.h>
 #include "mapcmd_logic.h"
@@ -229,8 +230,9 @@ bool MapCommandWheel(int delta) noexcept;
 void MapCommandLegendButton(const float* rect) noexcept;
 bool MapLegendOpen() noexcept;
 struct PvpStatus;
-// kPvpFold: the panel's title row (a click opens / folds it: MapPvpOpen).
-constexpr int kPvpModeToggle=0,kPvpTeam1=1,kPvpTeam2=2,kPvpFold=3,kMapPvpItems=4;
+// The panel's rows (map_pvp_input.h): the host's mode and relation preset, one row per faction; kPvpFold: the panel's
+// title row (a click opens / folds it: MapPvpOpen).
+constexpr int kPvpModeToggle=0,kPvpPreset=1,kPvpFaction0=2,kPvpFold=kPvpFaction0+pvp_match::kFactionCount,kMapPvpItems=kPvpFold+1;
 bool MapPvpOpen() noexcept;
 // The exact rendered state accompanies every action; stale world/revision/member identity is rejected on use.
 void MapCommandPvpButtons(const float* rects,const int* codes,int n,const PvpStatus* snapshot) noexcept;

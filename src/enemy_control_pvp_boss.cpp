@@ -5,6 +5,7 @@
 #include "enemy_control.h"
 #include "enemy_control_pvp_tree.h"
 #include "memory.h"
+#include "team_native_logic.h"
 #include <cmath>
 #include <cstring>
 
@@ -55,7 +56,7 @@ struct Meteor {ObjRef root{},ref{};int team=-1,last=-1;bool adopted=false;};
 struct Binding {ObjRef root{},part{};const unsigned char* launcher=nullptr;const void* context=nullptr;const void* maker=nullptr;std::uint64_t serial=0;};
 Root roots[kRootLimit]{};Meteor meteors[kMeteorLimit]{};Binding bindings[kBindingLimit]{};
 bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
-bool Team(int v) noexcept {return v>=-1 && v<7;}
+bool Team(int v) noexcept {return team_native::TeamOrClosing(v);}
 bool Cache(EmitterKind kind) noexcept {return kind==EmitterKind::ownerTeamCache || kind==EmitterKind::ownerLastTeamCache;}
 Life Live(const ObjRef& r) noexcept {
     if(!r.obj || !r.ctrl || !Readable(r.ctrl,16))return Life::invalid;
@@ -234,7 +235,7 @@ controlled_pvp::SpawnProof Proof() noexcept {
     return {{nullptr,SpawnCollect,SpawnRead,SpawnWrite,SpawnMemberBaseline,SpawnEmitterBaseline},1,1};
 }
 bool SetBaseline(const ObjRef& r,int team,int last) noexcept {
-    if(!Team(team) || last<0 || last>=7 || Live(r)!=Life::live || !Readable(r.obj,0x384))return false;
+    if(!Team(team) || !team_native::TeamRow(last) || Live(r)!=Life::live || !Readable(r.obj,0x384))return false;
     auto* p=const_cast<void*>(r.obj);const bool registered=(At<unsigned>(p,0x380)&0x40u)!=0 && team!=-1;
     Native<void(__fastcall*)(void*,int,bool)>(kSetTeam)(p,team,registered);
     if(Live(r)!=Life::live || At<int>(p,kTeam)!=team)return false;
@@ -275,7 +276,7 @@ void __fastcall OnMeteor(void* raw,const ObjRef* argument,unsigned kind,unsigned
             if(ok && !record)for(auto& m:meteors)if(!m.ref) {
                 int team=At<int>(child.obj,kTeam),last=At<int>(child.obj,0x318);
                 if(owned && !controlled_pvp::ReadBaselineForMember(root,&team,&last)){ok=false;break;}
-                if(!Team(team) || last<0 || last>=7 || !Pin(root)){ok=false;break;}
+                if(!Team(team) || !team_native::TeamRow(last) || !Pin(root)){ok=false;break;}
                 if(!Pin(child)){auto copy=root;Drop(copy);ok=false;break;}
                 m={root,child,team,last};record=&m;break;
             }
@@ -436,7 +437,7 @@ bool EnemyControlBossPvpWrite(const controlled_pvp::Emitter& e,int team) noexcep
 }
 bool EnemyControlBossPvpBaseline(const ObjRef& root,const ObjRef& member,int rootTeam,int rootLast,int* team,int* last) noexcept {
     using namespace boss_pvp_detail;
-    if(!team || !last || !Team(rootTeam) || rootLast<0 || rootLast>=7)return false;
+    if(!team || !last || !Team(rootTeam) || !team_native::TeamRow(rootLast))return false;
     __try {
         const auto* t=TypeOf(member);if(!t)return false;
         if(t->meteor)if(const auto* m=FindMeteor(member)) {
@@ -457,7 +458,7 @@ bool EnemyControlBossPvpBaseline(const controlled_pvp::Emitter& e,int ownerTeam,
             return EnemyControlNativePvpReadRetainedCache(e,&actual)==Life::live && controlled_pvp::ReadEmitterBaseline(e,team);
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
-    if(!Team(ownerTeam) || ownerLast<0 || ownerLast>=7)return false;
+    if(!Team(ownerTeam) || !team_native::TeamRow(ownerLast))return false;
     int actual=-1;if(EnemyControlBossPvpRead(e,&actual)!=Life::live)return false;
     if(Cache(e.kind) && !controlled_pvp::HasTemporaryTeam(e.member)){*team=actual;return true;}
     __try {

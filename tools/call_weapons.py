@@ -642,6 +642,33 @@ def ultimate_sgo(template: bytes, call: Call) -> bytes:
     return dsgo.write(doc)
 
 
+def barrage_sgo(template: bytes, call: Call) -> bytes:
+    """The KM6 bomber call made a long-range barrage (src/barrage.cpp): the barrage's marker, its pt (calls.py reload) at every
+    star count, its names; its radio lines (CP[3]: the bombers' fire / after-fire lines; Ammo_EquipVoice) emptied. Its
+    AmmoDamage is left the KM6's: the stock bombers read it as each bomb's damage, and they fly whenever the plugin does not
+    take the call (the plugin off, a peer without it, a barrage that could not start: airstrike.cpp RadioStartHook). Each
+    round's damage (calls.py damage) is the plugin's own: src/calls.inc kBarrages (gen_calls.py), not the weapon's; the menu
+    row shows it (_barrage_stats)."""
+    doc = dsgo.parse(template)
+    r = doc.root
+    if call.damage <= 0.0:
+        raise ValueError(f'{call.id}: a barrage needs its damage a round')
+    r.set('AmmoHitSizeAdjust', float(call.mark))
+    flat_curve(r.get('ReloadTime'), call.reload)
+    if any(abs(star_value(r.get('ReloadTime'), stars) - call.reload) > 1e-3 for stars in (0, 5, 10)):
+        raise ValueError(f'{TEMPLATE} 的 ReloadTime 不是已知的星级曲线（{dsgo.to_py(r.get("ReloadTime"))}）')
+    cp = r.get('Ammo_CustomParameter')
+    for v in (cp.items[3], r.get('Ammo_EquipVoice')):
+        if not isinstance(v, Node) or not all(isinstance(x, str) for x in v.items):
+            raise ValueError(f'{TEMPLATE} 的语音不是预期的字符串列表')
+        v.items[:] = [''] * len(v.items)
+    for lang in LANGS:
+        key = f'name.{lang.lower()}'
+        if key in r.names.values():
+            r.set(key, call_name(call, lang))
+    return dsgo.write(doc)
+
+
 # The gravity gun (Call.brings 'gravity', src/gravitygun.cpp): the Laser Guide Kit (Weapon_LaserMarker: its beam is drawn
 # while the trigger is held, it fires no round, so its one shot never runs out) under its own name, its AmmoHitSizeAdjust the
 # call's mark (the plugin's test, with the class's vtable; the class never reads the field). Its beam reaches AmmoSpeed x
@@ -675,6 +702,8 @@ def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, floa
         return ultimate_sgo(template, call)
     if call.brings == 'gravity':
         return gravity_sgo(template, call)
+    if call.brings == 'barrage':
+        return barrage_sgo(template, call)
     if call.brings == 'vehicle':
         return vehicle_sgo(template, call, request_tier(curve or [], call.level), fallback=fallback)
     if call.brings == 'throw':
@@ -742,6 +771,9 @@ def _text_row(template: Node, call: Call, lang: str, durability: float | None = 
     if call.brings == 'gravity':
         _gravity_stats(row)
         return row
+    if call.brings == 'barrage':
+        _barrage_stats(row, call)
+        return row
     # A vehicle request's stats: [re-request, durability, fuel, fuel cost]; the durability is the jet's.
     stats = row.items[2].items
     if durability is not None and len(stats) > 1 and len(stats[1].items) == 2:
@@ -804,6 +836,28 @@ def _ultimate_stats(row: Node, call: Call) -> None:
     if len(area.items) == 2 and isinstance(area.items[1], str):
         area.items[1] = area.items[1].replace('70.0', str(ULTIMATE_RADIUS))
     del stats[_ULT_ROUNDS_STAT]
+
+
+# KM6's stat list: its damage line shows the AmmoDamage curve (KM6_DAMAGE_BASE its base), its reload line ($0pt) the
+# ReloadTime curve. A barrage's: those two alone, each made the weapon's at every star count (the round's damage, the pt);
+# KM6's spread and plane count lines go (no bombers come).
+KM6_DAMAGE_BASE = 90.0
+
+
+def _barrage_stats(row: Node, call: Call) -> None:
+    keep = []
+    for stat in row.items[2].items:
+        if len(stat.items) != 3 or not isinstance(stat.items[2], Node) or len(stat.items[2].items) <= STAR_SHARE:
+            continue
+        if str(stat.items[1]).startswith('$0pt'):
+            flat_curve(stat.items[2], float(call.reload))
+            keep.append(stat)
+        elif abs(float(stat.items[2].items[0]) - KM6_DAMAGE_BASE) < 1e-6:
+            flat_curve(stat.items[2], float(call.damage))
+            keep.append(stat)
+    if len(keep) != 2:
+        raise ValueError(f'{call.id}: KM6 的说明行不是预期的伤害与 pt 两行曲线')
+    row.items[2].items = keep
 
 
 # The Laser Guide Kit's stat list: [projection range (its AmmoSpeed curve), lock-on speed, lock-on range, zoom]. The gravity

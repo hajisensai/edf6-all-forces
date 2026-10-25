@@ -1,6 +1,7 @@
 #include "mission_participants.h"
 #include "crew.h"
 #include "memory.h"
+#include "team_walk.h"
 #include "edf/host.h"
 
 namespace crew {
@@ -69,7 +70,7 @@ static bool ReadMissionParticipantsChecked(void** puids,unsigned capacity,unsign
         const auto status=At<const unsigned char*>(image,kGameStatus);
         if(!Readable(mgr,0x50) || !Readable(status,0x14FFC))return false;
         const unsigned expected=At<unsigned>(status,0x14FF8);
-        if(!expected || expected>kMaxActors || !Readable(At<void*>(mgr,0x38),7*0x38))return false;
+        if(!expected || expected>kMaxActors || !team_walk::WalkRows(mgr))return false;
         Visitor visitor{kVisitorVtable,puids,capacity,0,false,{},{},created,createdCount};
         reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
         // Snapshot invalidated by scene replacement or a mission-count change during native traversal.

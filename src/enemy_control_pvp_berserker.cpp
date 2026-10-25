@@ -5,6 +5,7 @@
 #include "enemy_control_gun_factory.h"
 #include "enemy_control_walking_parts.h"
 #include "memory.h"
+#include "team_native_logic.h"
 #include <cstring>
 namespace crew {
 bool EnemyControlOwnsTargetSelector(const void*,const void*) noexcept;
@@ -76,7 +77,7 @@ Root roots[kRootLimit]{};Born born[kBornLimit]{};Binding bindings[kBindingLimit]
 unsigned char bulletPublicationCode[28]{};const unsigned char* bulletPublicationRelay=nullptr;unsigned char bulletPublicationAfter[13]{};bool bulletPublicationChanged=false;
 unsigned char publicationCode[24]{};const unsigned char* publicationRelay=nullptr;const void* constructingRocket=nullptr;Construction* construction=nullptr;Shot* active=nullptr;BombBirth* activeBomb=nullptr;ObjRef pendingDenied{};unsigned char publicationAfter[9]{};bool publicationChanged=false;bool installed=false,attempted=false,globalUnsafe=false;unsigned char* admittedImage=nullptr;std::uint64_t serial=0;
 bool Same(const ObjRef& a,const ObjRef& b) noexcept {return a.obj==b.obj && a.ctrl==b.ctrl;}
-bool Team(int t) noexcept {return t>=-1 && t<7;}
+bool Team(int t) noexcept {return team_native::TeamOrClosing(t);}
 bool RootKind(Kind k) noexcept {return k<=Kind::shooter;}
 bool Body(Kind k) noexcept {return k!=Kind::wire;}
 Life Identity(const ObjRef& r) noexcept {

@@ -18,7 +18,7 @@ using namespace crew;
 using namespace crew::command_identity;
 int checks=0,walks=0,mutation=0;
 unsigned char actors[19][0x1EE0]{},ctrls[19][16]{},netctrls[19][16]{},entries[19][0x28]{};
-unsigned char user[0x50]{},userctrl[16]{},mgr[0x50]{},teams[7*0x38]{},status[0x15000]{};
+unsigned char user[0x50]{},userctrl[16]{},mgr[0x50]{},teams[team_native::kTeamCapacity*0x38]{},status[0x15000]{};
 unsigned char ids[19][32]{},heads[7][0x30]{},nodes[19][0x30]{};
 unsigned sceneCount=19;
 void Check(bool ok,const char* why){++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}}
@@ -46,7 +46,7 @@ void Reset() {
     std::memset(user,0,sizeof user);std::memset(userctrl,0,sizeof userctrl);
     std::memset(ids,0,sizeof ids);
     Put<void*>(image,kTeamManager,mgr);Put<void*>(image,kGameStatus,status);
-    Put<void*>(mgr,0x38,teams);Put<unsigned>(status,0x14FF8,1);
+    Put<void*>(mgr,0x38,teams);Put<std::uint64_t>(mgr,0x48,7);Put<unsigned>(status,0x14FF8,1);
     for(unsigned i=0;i<19;++i) {
         Put<unsigned>(actors[i],0,0x534F4C44);Put<void*>(actors[i],kSelf,actors[i]);
         Put<void*>(actors[i],kSelfCtrl,ctrls[i]);Put<LONG>(ctrls[i],8,1);
@@ -102,6 +102,8 @@ int main(int argc,char** argv) {
     // Complete signature's ADD RSP,0, undo its three pushes, then tail-call the private walker.
     unsigned char jump[]={0xC4,0,0x41,0x5E,0x5F,0x5E,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
     const auto fn=&Walk;std::memcpy(jump+8,&fn,8);std::memcpy(image+kEnumAllTeams+16,jump,sizeof jump);
+    // The walk's row bound (cmp rsi,imm32): stock 7 rows here, the capacity's rows below.
+    const unsigned char bound[]={0x48,0x81,0xFE,0x88,0x01,0x00,0x00};std::memcpy(image+team_walk::kWalkBound,bound,sizeof bound);
     Reset();Check(Resolve() && walks==1 && out.count==16 && out.units[15].obj==actors[16] &&
         out.focus.obj==actors[17] && out.requesterPuid==user,"single walk resolves requester, 16 remote/local units and focus");
     Check(At<LONG>(ctrls[0],8)==1 && At<LONG>(ctrls[1],8)==1 && At<LONG>(userctrl,8)==1 &&
@@ -137,6 +139,15 @@ int main(int argc,char** argv) {
     Put<unsigned>(status,0x14FF8,0);Rejected("no current players rejected");Reset();
     Put<void*>(user,0x18,nullptr);Rejected("missing PUID rejected");Reset();
     for(int m=1;m<=8;++m){mutation=m;Rejected("snapshot mutation rejected");Reset();}
+    // The rows checked before the walk are the rows it walks: its bound, the manager's live count, both.
+    Put<std::uint32_t>(image,team_walk::kWalkBound+3,team_native::kCapRows);Rejected("walk bound past the manager's 7 rows rejected");
+    Put<std::uint64_t>(mgr,0x48,team_native::kTeamCapacity);
+    Check(Resolve() && out.count==16,"installed capacity: a 16-row walk over a 16-row manager resolves");
+    Put<std::uint64_t>(mgr,0x48,team_native::kTeamCapacity+1);Rejected("rows beyond the capacity rejected");
+    Put<std::uint32_t>(image,team_walk::kWalkBound+3,0x188);Reset();
+    Put<std::uint32_t>(image,team_walk::kWalkBound+3,0x18C);Rejected("walk bound not whole rows rejected");
+    Put<std::uint32_t>(image,team_walk::kWalkBound+3,0x188);Reset();
+    image[team_walk::kWalkBound]^=1;Rejected("unrecognized walk bound rejected");image[team_walk::kWalkBound]^=1;Reset();
     image[kEnumAllTeams]^=1;Rejected("unsupported native walker rejected");
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     if(argc>1 && argv[1][0])Native(argv[1]);

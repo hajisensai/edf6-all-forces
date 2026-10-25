@@ -44,8 +44,11 @@
 #include "turretaim.h"
 #include "vecmath.h"
 #include "warn.h"
+#include "drivegear.h"
+#include "drive_gear.h"
 #include "support_net.h"
 #include "pvp.h"
+#include "map_pvp_input.h"
 #include "thermal.h"
 #include "map_enemy_ui.h"
 #include "enemy_control_bindings.h"
@@ -1058,16 +1061,16 @@ void Cockpit(void* drawer,void* ctx,Text* text,float width,float height,float s,
            stall,cue[0] ? L"    " : L"",cue);
     StoresLine(arms,j);
     if(j.keys) {
-        wchar_t boost[32],brake[32],swap[32];
-        KeyName(Cfg().playerJetBoostKey,boost,32);KeyName(Cfg().playerJetBrakeKey,brake,32);KeyName(Cfg().playerJetSwitchKey,swap,32);
+        // War Thunder's keys (playerjet.cpp ReadStick): W / S the throttle lever, SPACE / the brake key the pitch.
+        wchar_t brake[32],swap[32];
+        KeyName(Cfg().playerJetBrakeKey,brake,32);KeyName(Cfg().playerJetSwitchKey,swap,32);
         if(j.air) {
-            Format(keys,L"%ls",Tr(Cfg().playerJetMouseFlight ? Tx::jetKeysMouse : Tx::jetKeysHand));
-            if(Cfg().playerJetMouseFlight)Format(keys,L"%ls",Tr(Tx::jetKeysMouseHand));
+            Format(keys,Tr(Cfg().playerJetMouseFlight ? Tx::jetKeysMouseHand : Tx::jetKeysHand),brake);
             wchar_t target[32];KeyName(Cfg().playerJetTargetKey,target,32);
             wchar_t flare[32];KeyName(Cfg().playerJetFlareKey,flare,32);
-            Format(keys2,Tr(Tx::jetKeysAir),boost,brake,swap,target,flare);
+            Format(keys2,Tr(Tx::jetKeysAir),swap,target,flare);
         } else {
-            Format(keys,Tr(Tx::jetKeysGround),boost,brake);
+            Format(keys,L"%ls",Tr(Tx::jetKeysGround));
             Format(keys2,Tr(Tx::jetKeysTakeoff),rotateKmh);
         }
     } else if(j.air) {
@@ -1208,7 +1211,7 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
 // (StoreGlyph: a silhouette from quads, hud_cue.h; the HUD has no texture of the game's to draw), its name and rounds
 // under it, the picked one on a panel in a cyan frame; on a switch the picked store large over it for kSwitchMs
 // (LoadoutBanner). For the plugin's jets and rotor craft (PlayerJetReadout) and a stock heli (StockHudReadout). ---
-constexpr unsigned long long kSwitchMs=1500;   // a switch's banner (the store's)
+constexpr unsigned long long kSwitchMs=1500;   // a switch's banner (the store's, EDF6AutoTurret's auto-aim's)
 constexpr float kCellW=112.0f,kCellH=48.0f;   // px at 1080 lines: a strip's cell
 constexpr float kRows3[]={-4.0f,0.0f,4.0f};   // a glyph's three rows (the pod's rockets, the gun's rounds)
 struct LoadCell { hudcue::StoreIcon icon; wchar_t text[64]; const float* rgba; bool picked; float load=-1.0f; };   // load: hud_cue.h CellLoad
@@ -2637,9 +2640,15 @@ void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,f
 
 // EDF6AutoTurret's turret the player is at (turretaim.cpp, common/edf/aimlink.h; the user, 2026-10-06: "a lock box on
 // the target I pick"). The lock as the jets' (LockAt: a yellow square closing in while its track settles, then the red
-// diamond). Low on the screen one line: the auto-aim and its lock binding. One auto-aim since 2026-10-25 (the user:
-// "这个自动瞄准是不是多余了一个版本，删掉一个"): the lead-circle mode, its circle, its bore cross and its two lines
-// ("自动瞄准 开" over "[Z] 自动瞄准 关", read as two auto-aims) went; StockMarks' own lead mark shows where to aim.
+// diamond). Low on the screen one line: the auto-aim's state, the key that flips it and, while on, the lock binding.
+// One auto-aim since 2026-10-25 (the user: "这个自动瞄准是不是多余了一个版本，删掉一个"): the lead-circle mode, its circle,
+// its bore cross and its two lines ("自动瞄准 开" over "[Z] 自动瞄准 关", read as two auto-aims) went; StockMarks' own lead
+// mark shows where to aim. Off by default since the same day (the user: "怎么自动开启自动瞄准了，而且也没啥提示欸……自动瞄准不要
+// 开启，开启以后应该有被瞄准敌人的高亮圈之类的"): AUTO-AIM: OFF (white) and the key that turns it on, or AUTO-AIM: ON (green)
+// with the key that turns it off and the lock's; for kSwitchMs after a flip (`flipped`) the new state large over the
+// screen's middle on a panel; while on and nothing is locked, a green ring (TargetRing) on the enemy the gun is turned
+// onto, else on the one a lock press would take now.
+constexpr float kTargetRing=26.0f;   // px at 1080 lines
 void ButtonName(int bits,wchar_t* out,int size) noexcept {
     static const wchar_t* const kNames[]={L"A",L"B",L"X",L"Y",L"LB",L"RB",L"L3",L"R3"};
     for(int i=0;i<8;++i)if(bits==(1<<i)){wcscpy_s(out,static_cast<rsize_t>(size),kNames[i]);return;}
@@ -2649,23 +2658,53 @@ void Binding(bool keys,int key,int button,wchar_t* out,int size) noexcept {
     if(keys)KeyName(key,out,size);
     else ButtonName(button,out,size);
 }
+// A ring with four ticks out of it round `p` (the auto-aim's target with no lock).
+void TargetRing(void* drawer,void* ctx,const float* vp,float width,float height,float s,const float* p) noexcept {
+    float x,y,depth;
+    if(!Project(vp,p,width,height,&x,&y,&depth))return;
+    const float r=kTargetRing*s,t=2.0f*s,tick=8.0f*s;
+    Arc(drawer,ctx,x,y,r,0.0f,kTurn,t,24,kGreen);
+    Seg(drawer,ctx,x-r-tick,y,x-r,y,t,kGreen);Seg(drawer,ctx,x+r,y,x+r+tick,y,t,kGreen);
+    Seg(drawer,ctx,x,y-r-tick,x,y-r,t,kGreen);Seg(drawer,ctx,x,y+r,x,y+r+tick,t,kGreen);
+}
 void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
                     const edf::aimlink::TurretReadoutV1& r,Line* lines,int* at,float controlsBottom=-1.0f) noexcept {
     namespace link=edf::aimlink;
+    const bool on=r.mode!=link::Mode::manual;
     float x,y;
-    if(r.lock!=link::Lock::none)LockAt(drawer,ctx,vp,width,height,s,r.lock==link::Lock::locked ? 2 : 1,r.at,r.lockProgress,&x,&y);
-    // AUTO-AIM (green; a tank driver's whose lock its gunners fight: GUNNERS: AUTO-AIM, white) and the lock's binding on
-    // the same line, red while locked.
-    wchar_t text1[160];
-    wcscpy_s(text1,Tr(r.ownGun ? Tx::autoAim : Tx::gunnersAuto));
-    if(r.keys ? r.lockKey>0 : r.lockButton>0) {
+    if(on && r.lock!=link::Lock::none)LockAt(drawer,ctx,vp,width,height,s,r.lock==link::Lock::locked ? 2 : 1,r.at,r.lockProgress,&x,&y);
+    else if(on && r.target)TargetRing(drawer,ctx,vp,width,height,s,r.at);
+    // The state (on: green, a tank driver's whose lock its gunners fight GUNNERS: AUTO-AIM, white; off: white), the key
+    // that flips it (a pad with no AutoAimButton: where to set one) and, while on, the lock's binding; red while locked.
+    wchar_t text1[200];
+    wcscpy_s(text1,Tr(!on ? Tx::autoAimStateOff : r.ownGun ? Tx::autoAimStateOn : Tx::gunnersAuto));
+    std::size_t n=wcslen(text1);
+    if(r.keys ? r.modeKey>0 : r.modeButton>0) {
+        wchar_t flip[32];
+        Binding(r.keys,r.modeKey,r.modeButton,flip,32);
+        std::swprintf(text1+n,200-n,Tr(on ? Tx::autoAimTurnOff : Tx::autoAimTurnOn),L"   ",flip);
+    } else if(!r.keys) {
+        std::swprintf(text1+n,200-n,Tr(Tx::autoAimPadUnset),L"   ");
+    }
+    n=wcslen(text1);
+    if(on && (r.keys ? r.lockKey>0 : r.lockButton>0)) {
         wchar_t lock[32];
         Binding(r.keys,r.lockKey,r.lockButton,lock,32);
-        const std::size_t n=wcslen(text1);
-        std::swprintf(text1+n,160-n,Tr(Tx::lockKey),L"   ",lock,Tr(r.lock==link::Lock::none ? Tx::lockWord : Tx::nextWord));
+        std::swprintf(text1+n,200-n,Tr(Tx::lockKey),L"   ",lock,Tr(r.lock==link::Lock::none ? Tx::lockWord : Tx::nextWord));
     }
-    const float* const colour=r.lock==link::Lock::locked ? kRed : r.ownGun ? kGreen : kWhite;
+    const float* const colour=!on ? kWhite : r.lock==link::Lock::locked ? kRed : r.ownGun ? kGreen : kWhite;
     Label(text,lines,at,width*0.5f,controlsBottom>=0.0f ? controlsBottom : height*0.905f,1,kLineScale,colour,L"%ls",text1);
+}
+// The new auto-aim state large over the screen's middle on a panel, for kSwitchMs after a flip: drawn whenever the
+// turret's readout is there, with the line above or without it (the optic, the overhead view, the gunner's sight, first
+// person: the flip's key works there too, and its only answer must not be hidden).
+void AutoAimBanner(void* drawer,void* ctx,Text* text,float width,float height,float s,bool on,Line* lines,int* at) noexcept {
+    const float by=height*0.30f;
+    const float* const banner=on ? kGreen : kWhite;
+    Label(text,lines,at,width*0.5f,by,1,kTitleScale,banner,L"%ls",Tr(on ? Tx::autoAimBannerOn : Tx::autoAimBannerOff));
+    const float w=(*at>0 && lines[*at-1].w>0.0f ? lines[*at-1].w : 420.0f*s)+40.0f*s,h=48.0f*s;
+    Rect(drawer,ctx,(width-w)*0.5f,by-h*0.5f,(width+w)*0.5f,by+h*0.5f,kPanel);
+    Rect(drawer,ctx,(width-w)*0.5f,by-h*0.5f,(width+w)*0.5f,by-h*0.5f+3.0f*s,banner);
 }
 
 // --- The stock vehicles' HUD (vhud.cpp gathers it; ini StockVehicleHud; docs/hud-re.md §7): for the stock vehicle the
@@ -3166,6 +3205,7 @@ void StockBlock(void* drawer,void* ctx,Text* text,float width,float height,float
     if(r.seat==0)Format(title,L"%hs",kind);
     else Format(title,Tr(Tx::stockGunner),kind,r.seat);
     Format(info,Tr(Tx::stockInfo),static_cast<int>(std::lround(r.speed*3.6f)),static_cast<int>(std::lround(hp*100.0f)));
+    if(r.gear!=kNoDriveGear){Append(info,L"    ");Append(info,Tr(Tx::driveGear),drivegear::Name(r.gear));}   // drivegear.cpp
     if(nix){Append(info,L"    ");Append(info,Tr(Tx::twist),static_cast<int>(std::lround(-x.nix->twist*57.2957795f)));}   // right positive, as headings
     if(r.stab)Append(info,L"    %ls",Tr(r.stab==2 ? Tx::stabLag : Tx::stab));   // the gun stabilizer holds it (LAG: the hull outruns its drive)
     wchar_t fuel[32];
@@ -4685,12 +4725,31 @@ Tx MapPvpResult(pvp_protocol::Result result) noexcept {
     }
     return Tx::pvpNotReady;
 }
+// A faction's and a preset's words, a faction's chip colour (pvp_match.h kFactions' ARGB).
+Tx PvpFactionName(int faction) noexcept {
+    constexpr Tx kNames[]={Tx::pvpFactionEdf,Tx::pvpFactionEdf2,Tx::pvpFactionEdf3,Tx::pvpFactionEdf4,
+                           Tx::pvpFactionMonster,Tx::pvpFactionPrimer,Tx::pvpFactionForeigner};
+    static_assert(sizeof(kNames)/sizeof(kNames[0])==pvp_match::kFactionCount,"a name a faction");
+    return pvp_match::FactionValid(faction) ? kNames[faction] : Tx::pvpFactionEdf;
+}
+Tx PvpPresetName(int preset) noexcept {
+    constexpr Tx kNames[]={Tx::pvpPresetFfa,Tx::pvpPresetHva,Tx::pvpPresetCivil,Tx::pvpPresetAliens,Tx::pvpPresetCustom};
+    static_assert(sizeof(kNames)/sizeof(kNames[0])==pvp_match::kPresetCount,"a name a preset");
+    return preset>=0 && preset<pvp_match::kPresetCount ? kNames[preset] : Tx::pvpPresetFfa;
+}
+void PvpFactionColor(int faction,float* rgba) noexcept {
+    const std::uint32_t argb=pvp_match::FactionValid(faction) ? pvp_match::kFactions[faction].color : 0xFFFFFFFFu;
+    rgba[0]=static_cast<float>((argb>>16)&0xFF)/255.0f;rgba[1]=static_cast<float>((argb>>8)&0xFF)/255.0f;
+    rgba[2]=static_cast<float>(argb&0xFF)/255.0f;rgba[3]=static_cast<float>(argb>>24)/255.0f;
+}
 float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,
                   const MapCommandReadout& c,Line* lines,int* at) noexcept {
     PvpStatus status{};ReadPvpStatus(&status);
-    if(*at+7>kMaxLines || top+28.0f*s>bottom){MapCommandPvpButtons(nullptr,nullptr,0,nullptr);return top;}
+    // The host's two rows full width, then the factions two to a row (the dock's panels below keep their room).
+    constexpr int kButtons=pvpmenu::kItems,kFactionRows=(pvp_match::kFactionCount+1)/2,kRows=pvpmenu::kFaction0+kFactionRows;
+    if(*at+kButtons+4>kMaxLines || top+28.0f*s>bottom){MapCommandPvpButtons(nullptr,nullptr,0,nullptr);return top;}
     const float x1=width-12.0f*s,x0=x1-std::fmin(420.0f*s,width*0.32f),titleH=28.0f*s,rowH=24.0f*s,footH=19.0f*s;
-    const float expandedBottom=top+titleH+3.0f*rowH+2.0f*footH+8.0f*s;
+    const float expandedBottom=top+titleH+static_cast<float>(kRows)*rowH+2.0f*footH+8.0f*s;
     const int padPick=pad ? MapPvpPadSelection() : -1;
     const bool pointer=!pad && c.pointer;
     const bool overTitle=pointer && c.px>=x0 && c.px<x1 && c.py>=top && c.py<top+titleH;
@@ -4702,7 +4761,7 @@ float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float to
     Rect(drawer,ctx,x0,top,x1,top+titleH,overTitle ? kBtnLit : kBtnFill);
     const float* stateTint=!status.ready || status.pending ? kAmber : status.enabled ? kWhite : kMapOrderDim;
     Label(text,lines,at,x0+8.0f*s,top+titleH*0.5f,0,kLineScale*0.7f,stateTint,
-          Tr(Tx::pvpTitleState),Tr(status.enabled ? Tx::pvpOn : Tx::pvpOff),status.localTeam);
+          Tr(Tx::pvpTitleState),Tr(status.enabled ? Tx::pvpOn : Tx::pvpOff),Tr(PvpFactionName(status.local.faction)));
     const float hintLeft=x1-108.0f*s;
     if(*at>0)MapFitLabel(text,lines[*at-1],x0+8.0f*s,hintLeft-8.0f*s);
     Label(text,lines,at,x1-22.0f*s,top+titleH*0.5f,2,kLineScale*0.55f,kMapOrderDim,L"%ls",
@@ -4714,25 +4773,39 @@ float MapPvpPanel(void* drawer,void* ctx,Text* text,float width,float s,float to
     float rects[kMapPvpItems*4]{};int codes[kMapPvpItems]{};int hits=0;
     if(pointer){float* q=rects;q[0]=x0;q[1]=top;q[2]=x1;q[3]=top+titleH;codes[hits++]=kPvpFold;}
     if(!open){MapCommandPvpButtons(rects,codes,hits,&status);return panelBottom;}
-    const int choices[]={kPvpModeToggle,kPvpTeam1,kPvpTeam2};
-    const Tx words[]={status.enabled ? Tx::pvpDisable : Tx::pvpEnable,Tx::pvpTeam1,Tx::pvpTeam2};
-    const float left=x0+8.0f*s,right=x1-8.0f*s;
-    float y=top+titleH;
-    for(int i=0;i<3;++i) {
-        const int code=choices[i];
-        const bool allowed=status.ready && !status.pending && (code!=kPvpModeToggle || status.host);
-        const bool selected=code==kPvpModeToggle ? status.enabled : status.localTeam==code;
-        const bool hover=pointer && c.px>=left && c.px<right && c.py>=y && c.py<y+rowH-3.0f*s;
+    const float left=x0+8.0f*s,right=x1-8.0f*s,half=(right-left-4.0f*s)*0.5f;
+    const float rowsTop=top+titleH;
+    for(int code=0;code<kButtons;++code) {
+        const int faction=pvpmenu::CodeFaction(code);
+        // Its cell: a host row across the panel, a faction in its row's left or right half.
+        const int slot=faction<0 ? code : pvpmenu::kFaction0+faction/2;
+        const float y=rowsTop+static_cast<float>(slot)*rowH;
+        const float cellLeft=faction<0 || faction%2==0 ? left : left+half+4.0f*s;
+        const float cellRight=faction<0 ? right : faction%2==0 ? left+half : right;
+        const bool allowed=pvpmenu::Allowed(status,code);
+        const bool selected=code==kPvpModeToggle ? status.enabled : faction>=0 && status.local.faction==faction;
+        const bool hover=pointer && c.px>=cellLeft && c.px<cellRight && c.py>=y && c.py<y+rowH-3.0f*s;
         const bool focus=padPick==code;
-        Rect(drawer,ctx,left,y,right,y+rowH-3.0f*s,(allowed && hover) || focus ? kBtnLit : kBtnFill);
-        if(selected)Rect(drawer,ctx,left,y+4.0f*s,left+3.0f*s,y+rowH-7.0f*s,kMapOrder);
-        Label(text,lines,at,left+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,
-              allowed ? kWhite : kMapOrderDim,L"%ls",Tr(words[i]));
-        if(*at>0)MapFitLabel(text,lines[*at-1],left+10.0f*s,right-4.0f*s);
-        if(code==kPvpModeToggle)MapTipSet(c,left,y,right,y+rowH,L"%ls",Tr(Tx::pvpHostOnly));
-        if(allowed){float* q=rects+4*hits;q[0]=left;q[1]=y;q[2]=right;q[3]=y+rowH-3.0f*s;codes[hits++]=code;}
-        y+=rowH;
+        Rect(drawer,ctx,cellLeft,y,cellRight,y+rowH-3.0f*s,(allowed && hover) || focus ? kBtnLit : kBtnFill);
+        if(selected)Rect(drawer,ctx,cellLeft,y+4.0f*s,cellLeft+3.0f*s,y+rowH-7.0f*s,kMapOrder);
+        const float* tint=allowed ? kWhite : kMapOrderDim;
+        if(code==kPvpModeToggle)
+            Label(text,lines,at,left+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,tint,L"%ls",
+                  Tr(status.enabled ? Tx::pvpDisable : Tx::pvpEnable));
+        else if(code==kPvpPreset)
+            Label(text,lines,at,left+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,tint,Tr(Tx::pvpPresetRow),
+                  Tr(PvpPresetName(status.preset)));
+        else {
+            float chip[4];PvpFactionColor(faction,chip);
+            Rect(drawer,ctx,cellRight-14.0f*s,y+5.0f*s,cellRight-4.0f*s,y+rowH-8.0f*s,chip);
+            Label(text,lines,at,cellLeft+10.0f*s,y+(rowH-3.0f*s)*0.5f,0,kLineScale*0.64f,tint,L"%ls",Tr(PvpFactionName(faction)));
+            MapTipSet(c,cellLeft,y,cellRight,y+rowH,Tr(Tx::pvpJoinFaction),Tr(PvpFactionName(faction)));
+        }
+        if(*at>0)MapFitLabel(text,lines[*at-1],cellLeft+10.0f*s,cellRight-18.0f*s);
+        if(code==kPvpModeToggle || code==kPvpPreset)MapTipSet(c,left,y,right,y+rowH,L"%ls",Tr(Tx::pvpHostOnly));
+        if(allowed){float* q=rects+4*hits;q[0]=cellLeft;q[1]=y;q[2]=cellRight;q[3]=y+rowH-3.0f*s;codes[hits++]=code;}
     }
+    float y=rowsTop+static_cast<float>(kRows)*rowH;
     const Tx result=status.pending ? Tx::pvpPending : !status.ready ? Tx::pvpNotReady : MapPvpResult(status.result);
     Label(text,lines,at,left,y+footH*0.5f,0,kLineScale*0.56f,stateTint,L"%ls",Tr(result));
     if(*at>0)MapFitLabel(text,lines[*at-1],left,right);
@@ -5257,6 +5330,13 @@ void UltimateBanner(Text* text,float width,float height,float s,Line* lines,int*
     if(!PlayerUltimateCue(line,_countof(line)))return;
     Label(text,lines,at,width*0.5f,height*0.5f+342.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
 }
+// The caller's strike calls (airstrike.cpp PlayerStrikeCue): a barrage that could not start, a sortie's second wave not
+// called; a moment, under the ultimate's banner.
+void StrikeBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
+    wchar_t line[200];
+    if(!PlayerStrikeCue(line,_countof(line)))return;
+    Label(text,lines,at,width*0.5f,height*0.5f+370.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
+}
 // The mark key with no enemy near the aim (npcai.cpp SendToPoint): what came of it under the point for a moment (the
 // selected units sent there, how many; none selected; online); the point's own ring is the Q mark's (QMarkHud). An
 // enemy near the aim but not on it: a ring there and the word to aim at it.
@@ -5661,6 +5741,13 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(fresh && !overhead)ThermalControlHint(t,width,height,s,thermalStatus,lines,&at);
         if(fresh && snap.sensor && !overhead)VehicleContacts(drawer,ctx,t,viewProj,width,height,s,snap.sensorHud,thermalStatus,lines,&at);
         const bool showTurretOverlay=fresh && snap.turret && !mountedOptic && !snap.cockpit && !(physicalSight && snap.turretAim.ownGun) && (!stockHud || hudcue::TurretOverlayOwned(stockPick,snap.stockHud.turret)) && !launcherSight && !overhead && !gunnerSight && !mechSight;
+        // A flip of EDF6AutoTurret's auto-aim (its readout's mode) while at its turret: the new state large for a moment,
+        // whatever view hides the line. Forgotten while there is no readout, so boarding with the state it already had
+        // is no flip.
+        static hudcue::Change aimMode{};
+        const bool turretRead=fresh && snap.turret;
+        if(!turretRead)aimMode.seen=false;
+        const bool aimFlipped=turretRead && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
         if(showTurretOverlay) {
             float controlsBottom=-1.0f;
             if(stockHud) {
@@ -5672,6 +5759,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             }
             TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,lines,&at,controlsBottom);
         }
+        if(aimFlipped)AutoAimBanner(drawer,ctx,t,width,height,s,snap.turretAim.mode!=edf::aimlink::Mode::manual,lines,&at);
         if(stockHud) {
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,
@@ -5688,6 +5776,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         RescueCueBanner(t,width,height,s,lines,&at);
         VersionBanner(t,width,height,s,lines,&at);
         UltimateBanner(t,width,height,s,lines,&at);
+        StrikeBanner(t,width,height,s,lines,&at);
         NpcPingHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         DebugSpawnHud(drawer,ctx,t,width,height,s,lines,&at);
         if(Cfg().vehicleHud) {

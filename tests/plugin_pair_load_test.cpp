@@ -31,6 +31,8 @@ const char* const kCrewExports[]={
     "EDF6VehicleCrew_SetInputSourceV1","EDF6VehicleCrew_SetInputSourceV2",      // src/plugin.cpp
     "EDF6VehicleCrew_InputHeldV1",                                              // src/map.cpp
     "EDF6AF_DecodeRoomType","EDF6AF_RoomPackCompatible","EDF6AF_RoomIsolationReady",   // src/mod_room.cpp
+    "EDF6AF_RoomPrefix","EDF6AF_RoomProfile",   // src/mod_room.cpp: the room namespace for EDF6Coop
+    "EDF6AF_PvpMemberLabel",   // src/room_pvp.cpp: a member row's faction for EDF6Coop
     "EDF6VehicleCrew_PriorityZoneV1",                                           // src/proteus.cpp
     "EDF6VehicleCrew_StabilizerV3",                                             // src/stab.cpp
     "EDF6AF_SupportProtocolVersion","EDF6AF_GetMissionParticipants","EDF6AF_AllowMissionPlayer",
@@ -41,7 +43,7 @@ const char* const kCrewExports[]={
 };
 const char* const kTurretExports[]={
     "EML6_Load","EDF6AutoTurret_SetInputSourceV1","EDF6AutoTurret_SteersV2","EDF6AutoTurret_StabilizerAwareV3",   // plugin.cpp
-    "EDF6AutoTurret_TurretReadoutV1","EDF6AutoTurret_PlayerAimV4",                // designate.cpp
+    "EDF6AutoTurret_TurretReadoutV1","EDF6AutoTurret_PlayerAimV4","EDF6AutoTurret_TurretLockV1","EDF6AutoTurret_MissionResetV1",   // designate.cpp
 };
 
 // The aimlink.h contract: each name, and the DLL that exports it.

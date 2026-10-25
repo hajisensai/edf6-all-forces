@@ -56,6 +56,25 @@ FARPROC CoopExport(const char* name) noexcept {
     return module ? GetProcAddress(module,name) : nullptr;
 }
 ResolveCoop resolveCoop=&CoopExport;
+// The room protocol's EDF6Coop (coop_attr.h kRoomCoop*): an older one would refuse its own REJOIN / virtual rooms of
+// this protocol. The player's words for it, nullptr when EDF6Coop is new enough.
+const wchar_t* CoopVersionProblem() noexcept {
+    thread_local wchar_t old[256];
+    int a=0,b=0,c=0;
+    const auto marker=reinterpret_cast<const char*>(resolveCoop("EDF6CoopVersion"));
+    coopattr::CoopVersion v=coopattr::CoopVersion::unreadable;
+    __try { v=coopattr::RoomCoopVersion(marker,&a,&b,&c); } __except(EXCEPTION_EXECUTE_HANDLER){v=coopattr::CoopVersion::unreadable;}
+    if(v!=coopattr::CoopVersion::ok) {
+        wchar_t found[32];
+        if(v==coopattr::CoopVersion::old)swprintf_s(found,L"EDF6Coop %d.%d.%d",a,b,c);
+        else swprintf_s(found,L"这个 EDF6Coop（读不出版本）");
+        swprintf_s(old,L"%ls 版本过旧：本版全军出击的联机房间需要 EDF6Coop %d.%d.%d 及以上（旧版不认新的房间协议，"
+                   L"重新加入、虚拟房间会被拒绝）。请把 EDF6Coop 升级到 %d.%d.%d。",found,coopattr::kRoomCoopMajor,coopattr::kRoomCoopMinor,
+                   coopattr::kRoomCoopPatch,coopattr::kRoomCoopMajor,coopattr::kRoomCoopMinor,coopattr::kRoomCoopPatch);
+        return old;
+    }
+    return nullptr;
+}
 const wchar_t* CoopDependencyProblem() noexcept {
     const auto get=reinterpret_cast<EDF6CoopGetExtensionApiFn>(resolveCoop("EDF6CoopGetExtensionApi"));
     if(!get)return L"未安装匹配版本的 EDF6Coop，或当前版本过旧。";
@@ -63,6 +82,7 @@ const wchar_t* CoopDependencyProblem() noexcept {
     if(get(EDF6COOP_EXTENSION_VERSION,sizeof(api),&api)!=1 || api.size!=sizeof(api) ||
        api.version!=EDF6COOP_EXTENSION_VERSION || !api.snapshot || !api.peer || !api.send || !api.poll)
         return L"EDF6Coop 联机扩展接口不兼容或不完整。";
+    if(const wchar_t* old=CoopVersionProblem())return old;
     using AdmissionReady=std::uint32_t(*)();
     const auto admission=reinterpret_cast<AdmissionReady>(resolveCoop("EDF6Coop_MissionAdmissionReady"));
     if(!admission || !resolveCoop("EDF6Coop_ResolveMissionPlayerPuid"))
@@ -104,6 +124,9 @@ void CreateRoom(void* h,const void* o,void* client,Callback cb) {
 }
 bool Type(const Data* d) noexcept {return d && d->key && d->type==1 && !std::strcmp(d->key,"SEARCH_TYPE");}
 bool Content(const Data* d) noexcept {return d && d->key && d->type==kInt64 && !std::strcmp(d->key,"DLC");}
+bool MissionNo(const Data* d) noexcept {return d && d->key && d->type==kInt64 && !std::strcmp(d->key,"MISSION_NO");}
+// What this machine's room published last (PublishedRoomMission): room_pvp.cpp turns PvP on for a PvP preset map.
+std::atomic<std::int64_t> publishedContent{-1},publishedMission{-1};
 // The game publishes the room's content id (DLC, 0x749CF8); on one of our packs its identity goes with it, from this
 // machine's EDF6VehicleCrew.packs.ini. A later change of the room's pack publishes DLC again, and with it the line.
 int PublishContent(void* h,const Options* o) {
@@ -126,11 +149,13 @@ int PublishContent(void* h,const Options* o) {
     return published;
 }
 int Add(void* h,const Options* o) {
+    if(o && Content(o->data))publishedContent.store(o->data->value);
+    if(o && MissionNo(o->data))publishedMission.store(o->data->value);
     if(o && Content(o->data))return PublishContent(h,o);
     if(!o || !Type(o->data))return add(h,o);
     // A durable marker survives DirectNet's persisted room attributes, whose
     // game-facing type may already have been decoded by another wrapper.
-    const Data profile{o->data->version,"AF_PROFILE",1,1};
+    const Data profile{o->data->version,"AF_PROFILE",kAllForcesRoomProtocol,1};
     const Options marker{o->version,&profile,0};
     const int marked=add(h,&marker);
     if(marked)return marked;
@@ -290,9 +315,22 @@ bool InstallModRoom() noexcept {
 }
 // Coop reads EOS directly as well as through EDF's IAT. Its read side uses this
 // bridge, never the presence of the resource files or a permissive metadata flag.
+namespace crew {
+bool PublishedRoomMission(std::int64_t* content,std::int64_t* mission) noexcept {
+    const std::int64_t c=publishedContent.load(),m=publishedMission.load();
+    if(c<0 || m<0)return false;
+    if(content)*content=c;
+    if(mission)*mission=m;
+    return true;
+}
+}
 extern "C" __declspec(dllexport) std::int64_t EDF6AF_DecodeRoomType(std::int64_t value) noexcept {
     return crew::DecodeAllForcesRoom(value);
 }
+// The room namespace this build publishes and accepts (mod_room.h): SEARCH_TYPE's prefix and the AF_PROFILE value.
+// EDF6Coop's own EOS reads take them from here, so a new room protocol is one change on this side.
+extern "C" __declspec(dllexport) std::int64_t EDF6AF_RoomPrefix() noexcept { return crew::kAllForcesRoomPrefix; }
+extern "C" __declspec(dllexport) std::int64_t EDF6AF_RoomProfile() noexcept { return crew::kAllForcesRoomProtocol; }
 // For EDF6Coop's remembered / virtual rooms (their attributes persisted by Coop, which All Forces cannot read through
 // a synthetic handle): 1 when a room with content id `dlc` and AF_PACK `line` (nullptr: absent) may be joined here,
 // 0 when not: logged, and the player told why in the EOS route's dialog (ExplainPackRefusal: on its own thread, so
@@ -312,5 +350,8 @@ extern "C" __declspec(dllexport) int EDF6AF_RoomPackCompatible(std::int64_t dlc,
 extern "C" __declspec(dllexport) bool EDF6AF_RoomIsolationReady() noexcept {
     // Coop also asks this before its synthetic/full-lobby DirectNet joins,
     // which may sit outside our native EOS import hook in the chain.
+    // EDF6Coop's own routes (REJOIN, its virtual rooms) show no dialog of ours otherwise: an EDF6Coop too old for the
+    // room protocol is told once a minute here, on a thread of its own (pack_notice.h).
+    if(crew::resolveCoop("EDF6CoopGetExtensionApi"))if(const wchar_t* old=crew::CoopVersionProblem())crew::notice::Post("coop-room-version",L"全军出击：请升级 EDF6Coop",old,60000);
     return crew::ready.load(std::memory_order_acquire) && crew::CoopDependencyProblem()==nullptr;
 }

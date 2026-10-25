@@ -58,7 +58,7 @@ def audit_source() -> None:
         check(bool(m) and int(m.group(1), 16) == value, f'game_dialog.h {field} = {value:#x}')
     check('ok=Matches(' not in src and 'CheckSignatures(kSignatures,"ROOMDIALOG")' in src, 'the signatures checked by code_signatures.h')
     logic = open(os.path.join(ROOT, 'src', 'room_dialog_logic.h'), encoding='utf-8').read()
-    check('kItemsMost=kPerPage+4' in logic, 'a page: its entries, previous, next, one action, back')
+    check('kItemsMost=kPerPage+5' in logic, 'a page: the 对战 entry, its entries, previous, next, one action, back')
     ui = open(os.path.join(ROOT, 'src', 'room_ui.cpp'), encoding='utf-8').read()
     check('nativedialog::CloseDialog(st.dialog)' in ui.split('void ForgetMenu()', 1)[1].split('}', 1)[0],
           'a screen forgotten closes the dialog over it')

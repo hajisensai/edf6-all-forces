@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import os
 import struct
 import sys
 from pathlib import Path
@@ -288,6 +289,25 @@ def _weapon_muzzles(doc: dsgo.Document, points: list[tuple[str, tuple[float, flo
     animation.items[2] = dsgo.Blob(set_muzzles(block.data, points), block.kind)
 
 
+# A machine gun's report (FireSe: [loop owner, cue, volume, pitch, 1, heard-at-full metres]). The gatling cue has no end
+# (its ACB length is 0xFFFFFFFF, like every cue the stock weapons play in loop-owner mode: the M163's own guns, the 403's
+# machine gun, the bike's gatling), so it must be played in the weapon's loop-owner mode (entry 0 = 1): the weapon starts
+# it once, renews its hold (+0xE20 = FireInterval + 4) at each round and stops it (+0xE28, 8 frames' fade) once the
+# trigger is let go (0x693FD3..0x69400B). Played one-shot (entry 0 = 0) each round starts another voice nothing owns and
+# nothing stops: the fire sound that never ended after the trigger was released (the user, 2026-10-25). A slower gun
+# (BMPT, GDF-005) takes the Striker's autocannon report instead, a finite cue played a round at a time as the stock
+# weapons play theirs (vehsound.cpp calls such a gun an autocannon, a looped one a machine gun).
+RAPID_FRAMES = 5   # vehmix.h kRapidFrames: the interval up to which the plugin hears a gun as a machine gun's burst
+GATLING_CUE, AUTOCANNON_CUE = 'weapon_VHC_heli302_gatling', 'weapon_VHC_striker401_cannonTekkoRapid'
+
+
+def fire_se(interval: float, pitch: float) -> list:
+    """The FireSe entries of a replaced machine gun / autocannon firing every `interval` frames."""
+    if interval <= RAPID_FRAMES:
+        return [1.0, GATLING_CUE, 0.55, pitch, 1.0, 50.0]
+    return [0.0, AUTOCANNON_CUE, 0.55, pitch, 1.0, 50.0]
+
+
 def gun_sgo(game: vc.Game, kind: str, stock: str, side: str,
             points: list[tuple[str, tuple[float, float, float]]], belt: str | None = None) -> bytes:
     if kind == 'vulcan':
@@ -346,11 +366,9 @@ def gun_sgo(game: vc.Game, kind: str, stock: str, side: str,
                 doc.root.set(key, copy.deepcopy(shell.get(key)))
     if doc.root.get('xgs_scene_object_class') != 'Weapon_VehicleShoot':
         raise ValueError(f'{stock}: not a native vehicle gun')
-    # Each shot is a finite one-shot cue. A continuous native loop needs a stop
-    # event and cannot safely be introduced by replacing only the firing cue.
     fire = doc.root.get('FireSe')
     if isinstance(fire, dsgo.Node) and len(fire.items) == 6 and kind not in CANNON_SHELL + HOWITZERS:
-        fire.items[:] = [0.0, 'weapon_VHC_heli302_gatling', 0.55, 1.2 if kind in ONE_CRADLE else 0.85, 1.0, 50.0]
+        fire.items[:] = fire_se(float(doc.root.get('FireInterval')), 1.2 if kind in ONE_CRADLE else 0.85)
     _weapon_muzzles(doc, points)
     # 20/30 mm cases must leave the authored receiver, not the Kepler's
     # floating ejection port; preserve the native velocity/rotation lists.
@@ -400,23 +418,31 @@ def animation_path(kind: str) -> str:
     return f'OBJECT/{model_module(kind).OUT_CAS}'
 
 
+_ASSETS: dict[tuple, tuple] = {}
+
+
 def _assets(game: vc.Game, kind: str):
-    """Share one actual model/collision build within a complete asset transaction."""
+    """One actual model/collision build a kind, shared by every reader in the process: it reads only the game's archive
+    (vc.Game is rootcpk's: Root.cpk, read only) and the repository's model folders, so it is the same build for the
+    same archive (its path, size and time). Until 2026-10-25 it was shared by one Game object only: authored(),
+    vehicle_sgo() and testrange's gen each open their own, and a reader of every kind's SGOs (gen_spawn_catalog,
+    tools/selftest.py spawn_catalog_archives_recorded) built each kind four or five times (85 builds, ~15 min)."""
     import tracked_combat_model as tracked
     import tracked_collision
-    cache = getattr(game, '_tracked_combat_assets', None)
-    if cache is None:
-        cache = {}
-        game._tracked_combat_assets = cache
-    if kind not in cache:
+    import wt_tracked
+    st = os.stat(game.cpk.path)
+    # wt_tracked.ENABLED: the War Thunder models or the procedural ones (tests switch it off): another build.
+    key = (os.path.normcase(os.path.abspath(game.cpk.path)), st.st_size, st.st_mtime_ns, wt_tracked.ENABLED, kind)
+    cache = _ASSETS
+    if key not in cache:
         model = model_module(kind)
         arc, md, _info = model.build_with_info(game)
         assembly = tracked.Assembly(md)
         model.parts(assembly)
         shkt, binding, overrides, report = tracked_collision.build(game, kind, md, assembly.parts,
                                                                    layout=model.collision_layout())
-        cache[kind] = arc, md, shkt, binding, overrides, report
-    return cache[kind]
+        cache[key] = arc, md, shkt, binding, overrides, report
+    return cache[key]
 
 
 def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
@@ -461,9 +487,15 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
         # HE/AP are alternate belts in the same visible M61 (the quad's: its four on one cradle): the right holders
         # must follow the left slide too, throughout elevation and recoil.
         guns[1].items[0] = 'cannon_slide_l'
-    # A gun barrel's holder on its side's moving bone, the missiles' on the turret (slot).
+    # A gun barrel's holder on its side's moving bone, the missiles' on the bone their tubes ride (the muzzle contract's:
+    # the turret, or the BMPT's elevating weapon module, prep_wt_tracked Vehicle.missile_bone): the round leaves along
+    # that bone's forward row (muzzle mode 0), so on the module it leaves along the guns' line (slot).
     sides = [slot(kind, i) for i in range(len(vehicle.weapons))]
-    setting.items = [copy.deepcopy(guns[side == 'right']) if side != 'missiles' else _node(['cannon_main', 0.0])
+    tubes = {bone for bone, _ in _points(model, game).get('missiles', [])} if 'missiles' in sides else {'cannon_main'}
+    if len(tubes) != 1:
+        raise ValueError(f'{kind}: the missile tubes ride {sorted(tubes)}: one holder bone needs them on one')
+    (launcher,) = tubes
+    setting.items = [copy.deepcopy(guns[side == 'right']) if side != 'missiles' else _node([launcher, 0.0])
                      for side in sides]
     if kind in TURRET_LIMITS:
         import make_artillery

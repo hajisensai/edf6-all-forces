@@ -1,10 +1,13 @@
 """Writes src/calls.inc, the plugin's side of the call weapons (src/airstrike.cpp includes it), from tools/calls.py:
-  kCalls       the calls the plugin flies (Call), in CALLS order (the in-mission pick cycles through them)
+  kCalls       the calls the plugin flies (Call), in CALLS order (the in-mission pick cycles through them); a sortie's
+               pass (crew.h SortiePass, 0 none) and its second wave (`then`: another kCalls index, -1 none; after ms)
   kCallLabels  their names on the pick's banner (the SC names the weapons carry)
   kCallRows    every row tools/call_weapons.py installs (vehicle requests too): its id, its weapon SGO under
                Mods/WEAPON and the object SGO a vehicle request brings under Mods/OBJECT (nullptr: none)
   kThrows      the thrown drones (Robot Bombs, brings 'throw'): the marker's float bits, the drone, its fuel
   kUltimates   the ultimate strikes (satellite calls, brings 'ultimate'): the marker, its name in the log
+  kBarrages    the long-range barrages (bomber calls, brings 'barrage'): the marker, its kind (src/barrage_plan.h), each
+               round's damage (the plugin's own: the weapon's AmmoDamage stays the stock bombers'), its log name
 
   python tools/gen_calls.py            write it
   python tools/gen_calls.py --check    exit 1 when the committed file is not what this would write (CI)
@@ -35,8 +38,11 @@ def _opt(enum: str, value: str) -> str:
 
 
 def _call(c: calls.Call) -> str:
+    sortie = 1 + calls.SORTIE_PASSES.index(c.sortie) if c.sortie else 0
+    then = [f.id for f in calls.FLOWN].index(c.then) if c.then else -1
     return (f'    {{{_float(c.mark)},{BRINGS[c.brings]},{_opt("JetRole", c.role)},{_opt("HeliBody", c.body)},'
-            f'{c.count},{c.fuel_sec},{"true" if c.follow else "false"},"{c.log}",{_wstr(c.id)}}},')
+            f'{c.count},{c.fuel_sec},{"true" if c.follow else "false"},"{c.log}",{_wstr(c.id)},{sortie},{then},'
+            f'{c.then_after * 1000}u}},')
 
 
 def _throw(c: calls.Call) -> str:
@@ -45,6 +51,10 @@ def _throw(c: calls.Call) -> str:
 
 def _ultimate(c: calls.Call) -> str:
     return f'    {{{_float(c.mark)},"{c.log}",{_wstr(c.id)}}},'
+
+
+def _barrage(c: calls.Call) -> str:
+    return f'    {{{_float(c.mark)},{calls.BARRAGE_KINDS.index(c.barrage)},{_float(c.damage)},"{c.log}",{_wstr(c.id)}}},'
 
 
 def _row(c: calls.Call) -> str:
@@ -81,6 +91,11 @@ def render() -> str:
         '// The ultimate strikes: their weapons\' AmmoHitSizeAdjust (weapon +0x8C4), in tools/calls.py CALLS order.',
         'const Ultimate kUltimates[]={',
         *[_ultimate(c) for c in calls.CALLS if c.brings == 'ultimate'],
+        '};',
+        '// The long-range barrages: their weapons\' AmmoHitSizeAdjust (weapon +0x8C4), kind (src/barrage_plan.h Kind) and each',
+        '// round\'s damage (tools/calls.py damage; the weapon\'s AmmoDamage stays the stock bombers\', who fly without the plugin).',
+        'const Barrage kBarrages[]={',
+        *[_barrage(c) for c in calls.CALLS if c.brings == 'barrage'],
         '};',
         '',
     ]

@@ -1,4 +1,5 @@
-"""Self-test of the install chain, without the game (CI runs it; python tools/selftest.py, exit 1 on a failure):
+"""Self-test of the install chain, without the game (CI runs it; python tools/selftest.py [-j N], exit 1 on a failure;
+the tests run in up to 8 worker processes, -j 1 in this one in order):
   - tools/calls.py is consistent and src/calls.inc is what tools/gen_calls.py writes from it;
   - the call order rules: every released order is a prefix of CALLS, and installs of every order ever shipped
     (withdrawn ones too), with other mods' rows after ours and with uninstall placeholders, keep every row
@@ -718,7 +719,15 @@ def calls_table_consistent() -> None:
     drones = set(re.search(r'enum class ThrownDrone \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     for c in calls.CALLS:
         assert c.kind in calls.KINDS, c.id
-        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'ultimate', 'gravity'), c.id
+        assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'ultimate', 'gravity', 'barrage'), c.id
+        # A barrage: its kind one of barrage_plan.h's, its damage a round, an integer mark as kCalls' (BarrageOf).
+        assert bool(c.barrage) == (c.brings == 'barrage') and (not c.barrage or c.barrage in calls.BARRAGE_KINDS), c.id
+        assert (c.damage > 0) == (c.brings == 'barrage') and (c.brings != 'barrage' or float(c.mark).is_integer()), c.id
+        # A sortie: a pass of SORTIE_PASSES on a jets / helis call, no follow version; its second wave another such call.
+        assert not c.sortie or (c.sortie in calls.SORTIE_PASSES and c.brings in ('jets', 'helis') and not c.follow), c.id
+        assert not c.sortie or (c.sortie.startswith('heli')) == (c.brings == 'helis'), c.id
+        assert bool(c.then) == (c.then_after > 0) and (not c.then or (c.sortie and c.then_after >= 10)), c.id
+        assert not c.then or any(f.id == c.then and f.sortie and not f.then for f in calls.FLOWN), c.id
         thrown = c.brings == 'throw'
         assert bool(c.drone) == thrown and (not c.drone or c.drone in drones), c.id
         # A thrown drone's marker: the bits of 1.0 with its code in the low ones, never 1.0 itself (calls.throw_mark).
@@ -733,7 +742,7 @@ def calls_table_consistent() -> None:
         assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground)) == (c.brings == 'vehicle'), c.id
         assert not (c.jet and c.ground) and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
         assert not c.ground or vc.GROUND_VEHICLES[c.ground].sgo == c.vehicle, c.id
-        assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown or c.brings == 'ultimate'), c.id
+        assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown or c.brings in ('ultimate', 'barrage')), c.id
         assert not thrown or not c.flown, c.id   # not in the in-mission pick (kCalls)
         for lang in cw.LANGS:
             assert calls.call_name(c, lang) and calls.call_description(c, lang)
@@ -950,7 +959,8 @@ def thrown_drones_marked_and_wired() -> None:
 # The kinds a call brings (calls.Call.brings): tools/call_weapons.py weapon_sgo / _text_row branch on each. The 2026-10-20
 # merge dropped ultimate_sgo's `return dsgo.write(doc)` and the ultimate text branch's `return row` and nothing offline saw
 # it: these run every call through both, on synthetic templates (no game: CI) and on the real ones (with the game).
-CALL_KINDS = ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'ultimate', 'gravity')
+CALL_KINDS = ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'ultimate', 'gravity', 'barrage')
+_KM6_DAMAGE = [90.0, 8.0, 0.0, 10.0, 0.800000011920929, 0.699999988079071, 1.0]   # the KM6 bomber call's AmmoDamage
 _STOCK_PT = [1020.0, 21.0, 1.0, 10.0, 1.0, 0.30000001192092896, 0.0]          # a call's ReloadTime star curve
 _SAT_DAMAGE = [670.0, 8.0, 0.0, 10.0, 0.800000011920929, 0.699999988079071, 1.0]   # Spritefall Destroy's AmmoDamage
 _SAT_PT = [3200.0, 21.0, 1.0, 10.0, 1.0, 0.30000001192092896, 0.0]                 # ...and its ReloadTime
@@ -994,6 +1004,10 @@ def _synthetic_call_sgo(c: calls.Call) -> bytes:
                 'Ammo_CustomParameter': [0.0, 0.0, 0.0, 0.0, [0.0, 0.0, 0.0, 0.0, 'LaserBullet02'],
                                          list(cw.ULTIMATE_VOICES[0])],
                 'Ammo_EquipVoice': list(cw.ULTIMATE_VOICES[1])}
+    elif k == 'barrage':
+        root = {'AmmoHitSizeAdjust': 1.0, 'ReloadTime': list(_STOCK_PT), 'AmmoDamage': list(_KM6_DAMAGE),
+                'Ammo_CustomParameter': [30.0, 1.0, [0.0, 2.0, 30.0], ['fire', 'hit', 'after']],
+                'Ammo_EquipVoice': ['equipped', 'unavailable']}
     elif k == 'gravity':
         root = {'AmmoHitSizeAdjust': 0.0, 'AmmoSpeed': [30.0, 8.0, 0.0, 10.0, 0.5, 0.5, 1.0], 'AmmoAlive': 1.0,
                 'AmmoColor': [1.0, 0.0, 0.0, 1.0], 'AmmoSize': 0.5, 'AmmoDamage': 0.0}
@@ -1019,6 +1033,9 @@ def _synthetic_call_text(c: calls.Call, template: bytes) -> dsgo.Node:
     elif k == 'ultimate':
         stats = [['Damage', '$0', list(_SAT_DAMAGE)], ['Attack Range', 'Radius 70.0m'], ['Reload', '$0pt', list(_SAT_PT)],
                  ['Laser Range', '$0m', [600.0, 16.0, 2.0, 10.0, 0.8, 1.0, 1.0]], ['Shots', '160'], ['Zoom', '4.0x']]
+    elif k == 'barrage':
+        stats = [['Damage', '$0', list(_KM6_DAMAGE)], ['Hit Error', 'Radius 8.0m'], ['Reload', '$0pt', list(_STOCK_PT)],
+                 ['Shots', '70x2 Units'], ['Blast Area', '----']]
     else:   # gravity
         stats = [['Projection Range', '$0m', [30.0, 8.0, 0.0, 10.0, 0.5, 0.5, 1.0]], ['Lock-on Speed', '1.0x'],
                  ['Lock-on Range', '300m'], ['Zoom', '2.0x']]
@@ -1033,7 +1050,7 @@ def _check_call_outputs(c: calls.Call, out: object, row: object, lang: str, dura
     if 'name.en' in r.names.values():
         assert r.get('name.en') == calls.call_name(c, 'EN'), (c.id, r.get('name.en'))
     k = c.brings
-    if k in ('jets', 'helis', 'sub', 'throw', 'ultimate', 'gravity'):
+    if k in ('jets', 'helis', 'sub', 'throw', 'ultimate', 'gravity', 'barrage'):
         assert r.get('AmmoHitSizeAdjust') == float(c.mark), (c.id, r.get('AmmoHitSizeAdjust'), c.mark)
     if k in ('jets', 'helis', 'sub'):
         assert r.get('ReloadTime').items[0] == c.reload, c.id
@@ -1057,6 +1074,16 @@ def _check_call_outputs(c: calls.Call, out: object, row: object, lang: str, dura
                 (c.id, stars, dsgo.to_py(r.get('AmmoDamage')))
             assert cw.star_value(r.get('ReloadTime'), stars) == c.reload, (c.id, stars, dsgo.to_py(r.get('ReloadTime')))
         voices = (*r.get('Ammo_CustomParameter').items[5].items, *r.get('Ammo_EquipVoice').items)
+        assert all(v == '' for v in voices), (c.id, 'its radio lines silenced', voices)
+    elif k == 'barrage':
+        # The pt at every star count (owned at 0 stars), the bombers' radio lines silenced. AmmoDamage left the KM6's: the
+        # stock bombers read it a bomb, and they fly whenever the plugin does not take the call (each round's damage is
+        # kBarrages', src/calls.inc).
+        assert dsgo.to_py(r.get('AmmoDamage')) == _KM6_DAMAGE, (c.id, "the stock bombers' damage changed",
+                                                               dsgo.to_py(r.get('AmmoDamage')))
+        for stars in range(11):
+            assert cw.star_value(r.get('ReloadTime'), stars) == c.reload, (c.id, stars, dsgo.to_py(r.get('ReloadTime')))
+        voices = (*r.get('Ammo_CustomParameter').items[3].items, *r.get('Ammo_EquipVoice').items)
         assert all(v == '' for v in voices), (c.id, 'its radio lines silenced', voices)
     elif k == 'gravity':
         assert r.get('AmmoSpeed').items[0] == cw.GRAVITY_RANGE and r.get('AmmoDamage') == 1.0, c.id
@@ -1082,6 +1109,11 @@ def _check_call_outputs(c: calls.Call, out: object, row: object, lang: str, dura
         assert str(cw.ULTIMATE_RADIUS) in stats[cw._ULT_RANGE_STAT][1], (c.id, lang, stats[cw._ULT_RANGE_STAT])
     elif k == 'gravity':
         assert len(stats) == 2 and stats[0][2][0] == cw.GRAVITY_RANGE, (c.id, lang, stats)
+    elif k == 'barrage':
+        assert len(stats) == 2, (c.id, lang, "KM6's spread and plane lines left", stats)
+        for stars in range(11):
+            assert cw.star_value(stats[0][2], stars) == c.damage and cw.star_value(stats[1][2], stars) == c.reload, \
+                (c.id, lang, stars, stats)
 
 
 @test
@@ -1195,6 +1227,28 @@ def stores_inc_current() -> None:
     built = {w.split('/')[-1].upper() for w in vc.JETS['edf6tr_sub_carrier_mission'].weapons}
     assert listed and set(listed) <= built, (listed, built)
     assert f'kSgoHull={vc.JETS["edf6tr_sub_carrier_mission"].durability:.1f}f' in sub, 'subcarrier.cpp kSgoHull'
+
+@test
+def missiles_leave_along_their_rail() -> None:
+    """A missile store leaves its rail on its line (pylib/vcobjects.py Missile.spread; the user, 2026-10-25: 「bmpt的飞弹
+    怎么会往地里射？天启也会射到自己身上导弹」): the helicopter template's FireAccuracy 0.3 (a 17 deg cone) is never kept,
+    every missile's cone is its own and a guided one's none, an unguided rocket's a few mrad. With the game: every missile
+    store's SGO (the jets', the tracked vehicles' secondaries, the Sazabi's) fires with that cone."""
+    missiles = {kind: s.weapon for kind, s in vc.STORES.items() if isinstance(s.weapon, vc.Missile)}
+    missiles['SAZABI'] = vc.SAZABI_MISSILE.weapon
+    assert {'BMPT_ATGM', 'BMPT_ATGMF', 'APOC_SAM', 'TUNGUSKA_SAM', 'PATRIOT_SAM'} <= set(missiles)
+    for kind, m in missiles.items():
+        assert m.params(4)['FireAccuracy'] == m.spread, kind
+        assert m.spread == 0.0 if m.guided else 0.0 < m.spread <= 0.01, (kind, m.spread)
+    import rootcpk
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    game = rootcpk.default()
+    assert dsgo.parse(game.read('WEAPON', vc.JET_MISSILE_STOCK)).root.get('FireAccuracy') > 0.1, 'the template sprays'
+    for kind, m in missiles.items():
+        blob = (vc.sazabi_weapons(game)[vc.SAZABI_MISSILE_FILE] if kind == 'SAZABI'
+                else vc.store_sgo(game, vc.store_file(kind, 4)))
+        assert abs(dsgo.parse(blob).root.get('FireAccuracy') - m.spread) < 1e-9, kind
 
 @test
 def store_looks() -> None:
@@ -1519,6 +1573,7 @@ def hand_copies_agree() -> None:
     import make_dreadnought
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
                | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES)
+               | set(vc.BARRAGE_FILES)
                | set(make_dreadnought.FIGHTER_SGOS.values()))
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
@@ -1594,7 +1649,7 @@ def emc_copies_agree() -> None:
     bay, plan, emc = src('src/jet_bay.cpp'), src('src/emc_plan.h'), src('src/emc.cpp')
     files = re.findall(r'\{L"app:/object/(edf6vc_emc_[a-z_]+\.sgo)",L"(EDF6VC_EMC_[A-Z_]+\.SGO)"', bay)
     assert [f for _, f in files] == list(vc.EMC_FILES) and all(s == f.lower() for s, f in files), files
-    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather \};',
+    assert re.search(r'enum class EmcRound \{ beam, sight, breakCharge, blast, szMega, szCharge, szFunnel, proteusShield,\s+ultSight, ultBolt, ultSpark, ultBeam, ultCore, ultBlast,\s+ultGather, barrage, barrageBurst \};',
                      src('src/crew.h')), 'src/crew.h EmcRound'
     # after the EMC's, the Sazabi's beams (src/sazabi_arms.inc), in EmcRound's order: the files tools/make_sazabi.py writes
     sz_files = re.findall(r'\{L"app:/object/(edf6vc_sz_[a-z_]+\.sgo)",L"(EDF6VC_SZ_[A-Z_]+\.SGO)"', bay)
@@ -1688,6 +1743,79 @@ def ultimate_copies_agree() -> None:
     import rootcpk
     if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         make_ultimate.build(rootcpk.DEFAULT_GAME)
+
+
+@test
+def barrage_copies_agree() -> None:
+    """The long-range barrages (src/barrage.cpp, src/barrage_plan.h, tools/make_barrage.py; docs/plan-2026-10-25-strikes.md):
+    the kinds in one order in calls.py and barrage_plan.h (kBarrages carries the index), the round files the EMC table loads
+    are make_barrage's, in EmcRound's order; the plugin is wired through (the radio call, the tick, the mission reset, the
+    hook at load) and the install chain carries its files (ledger, build cache, installer, release); the offline check is
+    built. With the game: make_barrage builds and passes its checks."""
+    import make_barrage
+    plan = src('src/barrage_plan.h')
+    m = re.search(r'enum class Kind : std::uint8_t \{ ([a-z, ]+), count \};', plan)
+    assert m and tuple(x.strip() for x in m.group(1).split(',')) == calls.BARRAGE_KINDS, m and m.group(1)
+    names = re.search(r'kKindNames\[kKinds\]=\{([^}]*)\}', plan, re.S)
+    assert names and tuple(re.findall(r'"([a-z]+)"', names.group(1))) == calls.BARRAGE_KINDS, names
+    barrages = [c for c in calls.CALLS if c.brings == 'barrage']
+    assert sorted(c.barrage for c in barrages) == sorted(calls.BARRAGE_KINDS), 'a call for each barrage kind'
+    assert all(cw.template_of(c) == cw.TEMPLATE for c in barrages)
+    bay = src('src/jet_bay.cpp')
+    files = re.findall(r'\{L"app:/object/(edf6vc_barrage_[a-z]+\.sgo)",L"(EDF6VC_BARRAGE_[A-Z]+\.SGO)"', bay)
+    assert [f for _, f in files] == list(vc.BARRAGE_FILES) and all(s == f.lower() for s, f in files), files
+    assert 'EmcRound::barrage,' not in src('src/crew.h') and 'barrage, barrageBurst };' in src('src/crew.h')
+    assert [n.split('/', 1)[1] for n in make_barrage.names()] == list(vc.BARRAGE_FILES)
+    assert 'BarrageStart(b->kind,owner,target,heading,' in src('src/airstrike.cpp')
+    assert 'GuardedTick(kStepBarrage,&BarrageTick);' in src('src/crew.cpp') and 'ResetBarrages();' in src('src/mission.cpp')
+    assert 'InstallBarrages();' in src('src/plugin.cpp')
+    import ledger
+    import buildcache
+    assert make_barrage.OWNER in ledger.OWNERS and 'barrage' in buildcache.GROUPS
+    inst = src('tools/installer.py')
+    assert 'build_asset(cache, make_barrage,' in inst and 'make_barrage.install(game, barrage)' in inst and \
+        'make_barrage.remove' in inst and "('barrage', barrage)" in inst
+    assert "'make_barrage'" in src('tools/build_release.py')
+    cmake = src('CMakeLists.txt')
+    assert 'src/barrage.cpp' in cmake and 'add_executable(barrage_check EXCLUDE_FROM_ALL tools/barrage_check.cpp)' in cmake
+    assert ' barrage_check ' in cmake
+    import rootcpk
+    if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        make_barrage.build(rootcpk.DEFAULT_GAME)
+
+
+@test
+def sortie_copies_agree() -> None:
+    """The sorties (src/jet_sortie.cpp, src/heli.cpp HeliSortie, src/sortie_plan.h; docs/plan-2026-10-25-strikes.md §1.2): the
+    passes in one order in calls.py and crew.h (kCalls carries 1 + the index), each sortie call a flown one with its catalog key
+    and label (tools/support_config.py), the plugin wired through (the spec, the activation of jets and helis, the guidance, the
+    bombs, the second waves' queue, tick and reset), the offline check built."""
+    crew_h = src('src/crew.h')
+    m = re.search(r'enum class SortiePass : std::uint8_t \{ ([A-Za-z, \n]+) \};', crew_h)
+    assert m and tuple(x.strip() for x in m.group(1).split(',')) == ('none',) + calls.SORTIE_PASSES, m and m.group(1)
+    plan = src('src/sortie_plan.h')
+    assert 'struct Line' in plan and 'struct Lap' in plan
+    import support_config
+    sorties = [c for c in calls.CALLS if c.sortie]
+    assert sorties and all(c.flown and c.id[len(calls.ID_PREFIX):] in support_config.AIR_KEYS for c in sorties)
+    assert {c.sortie for c in sorties} == set(calls.SORTIE_PASSES), 'a call for every pass'
+    inc = src('src/calls.inc')
+    for c in sorties:
+        then = [f.id for f in calls.FLOWN].index(c.then) if c.then else -1
+        row = f'L"{c.id}",{1 + calls.SORTIE_PASSES.index(c.sortie)},{then},{c.then_after * 1000}u}},'
+        assert row in inc, (c.id, row)
+    spawn, jet, combat, air = src('src/jet_spawn.cpp'), src('src/jet.cpp'), src('src/jet_combat.cpp'), src('src/airstrike.cpp')
+    assert 'SortieBegin(*entry,static_cast<SortiePass>(spec.sortie),' in spawn and 'HeliSortie(vehicle,static_cast<SortiePass>(spec.sortie),' in spawn
+    assert 'SortieGuide(j,kind,arms,pos,nose,lead,height,ms,want,speed,gunsOk,missileOk)' in jet and 'SortieFire(*j,v,pos,arms,ms);' in jet
+    assert 'SortieStruck(*k.j,object)' in combat and 'SortieLockMs(j,kLockMs)' in combat
+    assert 'out->sortie=c.sortie;' in air and 'void SupportFollowUpTick() noexcept' in air
+    assert 'SupportFollowUpQueue(index,target);' in src('src/support_dispatch.cpp')
+    assert 'GuardedTick(kStepFollowUp,&SupportFollowUpTick);' in src('src/crew.cpp') and 'ResetSupportFollowUps();' in src('src/mission.cpp')
+    heli = src('src/heli.cpp')
+    assert 'void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept' in heli and 'SortieFly(h,s,w)' in heli
+    cmake = src('CMakeLists.txt')
+    assert 'src/jet_sortie.cpp' in cmake and 'add_executable(sortie_check EXCLUDE_FROM_ALL tools/sortie_check.cpp)' in cmake
+    assert ' sortie_check ' in cmake
 
 
 @test
@@ -2158,8 +2286,16 @@ def turret_aim_wired() -> None:
     keys are read, shipped and documented; the jets' pick scores by the view only with PlayerJetLockByView."""
     at, ini = src('autoturret/src/plugin.cpp'), src('autoturret/EDF6AutoTurret.ini')
     zh, en = src('autoturret/README.zh-CN.md'), src('autoturret/README.md')
-    for key in ('LockKey', 'LockButton', 'LockCone', 'LockRange', 'LockClearMs'):
+    for key in ('LockKey', 'LockButton', 'LockCone', 'LockRange', 'LockClearMs', 'AutoAim', 'AutoAimKey', 'AutoAimButton'):
         assert f'L"{key}"' in at and re.search(rf'^{key}=', ini, re.M) and key in zh and key in en, key
+    # Auto-aim off by default (2026-10-25, "自动瞄准不要开启"): the shipped ini and the code's own default agree, and with
+    # it off the ownership rule hands the player's gun back before any steering (no V1 pull, no drag).
+    assert re.search(r'^AutoAim=0\s*$', ini, re.M) and 'L"AutoAim",0,' in at
+    assert 'int autoAim=0;' in src('autoturret/src/turret.h')
+    des = src('autoturret/src/designate.cpp')
+    control = des.split('PlayerGun PlayerControlRule(', 1)[1].split('\n}\n', 1)[0]
+    assert control.find('if(!AutoAimOn())return {false,false};') < control.find('PlayerGunRule('), 'PlayerControlRule: off first'
+    assert 'r.mode=on ? link::Mode::autoAim : link::Mode::manual;' in des and 'r.modeKey=cfg.autoAimKey;' in des
     # One player turret aim (2026-10-25, "这个自动瞄准是不是多余了一个版本，删掉一个"): the lead-circle mode, its keys and
     # its HUD lines are gone from both plugins and the ini (the READMEs name them only as removed).
     for key in ('AimMode', 'AimModeKey', 'AimModeButton'):
@@ -2178,7 +2314,19 @@ def turret_aim_wired() -> None:
     link = src('common/edf/aimlink.h')
     names = dict(re.findall(r'constexpr char (k\w+)\[\]="(\w+)";', link))
     assert set(names) == {'kViewRay', 'kMapRay', 'kTurretReadout', 'kCameraTurret', 'kSteers', 'kStabilizer', 'kStabilizerAware', 'kPriorityZone',
-                          'kInputHeld', 'kTurretObserver', 'kPlayerAim', 'kAimsTurret', 'kPayloadAim'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+                          'kInputHeld', 'kTurretObserver', 'kPlayerAim', 'kAimsTurret', 'kPayloadAim', 'kTurretLock', 'kMissionReset'}, names   # kPriorityZone: proteus_wired; kInputHeld: map_wired
+    # One key, one pick (2026-10-25, "载具上按q……提示对准敌人才能。但是我明明对准了"): EDF6AutoTurret exports its lock, and
+    # EDF6VehicleCrew's Q mark asks it before making a pick of its own.
+    assert names['kTurretLock'].endswith('V1') and f'bool __cdecl {names["kTurretLock"]}(' in src('autoturret/src/designate.cpp')
+    assert 'link::kTurretLock' in src('src/turretaim.cpp')
+    mark = src('src/npcai.cpp').split('void NpcMarkFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert 'const bool atTurret=AutoTurretSeat(&turret);' in mark and 'if(atTurret)TurretMark(human,turret,turretKey);' in mark
+    assert 'qmark::KeyIsTurretLock(c.npcMarkKey,turret.autoAim && turret.keys,turret.lockKey)' in mark and 'FollowTurretLock(turret.target)' in mark
+    # A new mission: auto-aim back to the ini's (off), through EDF6VehicleCrew's MissionStart.
+    assert names['kMissionReset'].endswith('V1') and f'void __cdecl {names["kMissionReset"]}(' in src('autoturret/src/designate.cpp')
+    assert 'AutoTurretMissionReset();' in src('src/mission.cpp').split('void MissionStart()', 1)[1]
+    # Not V (EDF6VehicleCrew's FirstPersonKey in every seat): J.
+    assert 'int autoAimKey=0x4A,' in src('autoturret/src/turret.h') and re.search(r'^AutoAimKey=0x4A\s*$', ini, re.M)
     assert names['kCameraTurret'].endswith('V2') and names['kSteers'].endswith('V2'), names
     # V4, the one player turret aim (2026-10-09): EDF6AutoTurret answers it, EDF6VehicleCrew's turret camera asks it every
     # frame and says it steers; the flak's own Steer and the tank driver's frame then leave the turret to the camera.
@@ -2768,9 +2916,13 @@ def footprint_covers_the_stock_models() -> None:
     # Match gen.install's effective plan: an optional migrated vehicle absent from Mods is not spawned, and is not a
     # stock Root.cpk model this audit can measure. Installed optional vehicles are still included.
     plan, _skipped = gen.without_missing(rootcpk.DEFAULT_GAME, gen.target_range(gen.Plan()))
-    for name in sorted({s for s, _ in gen.placements(plan)} - gen.JETS.keys()):
-        model = sgo.load(data=gen.vehicle_sgo(game, name)).get('animation_model')
-        path, member = model[0][0], model[0][1]
+    # ... and the PvP presets' (gen.PVP_PLANS: the Balam, 19.4 m across its arms).
+    every = {s for p in (plan, *gen.PVP_PLANS.values()) for s, _ in gen.placements(p)}
+    for name in sorted(every - gen.JETS.keys()):
+        model = sgo.load(data=gen.vehicle_sgo(game, name)).get('animation_model')[0]
+        while isinstance(model[0], list):   # the Balam's is one level deeper: [[[archive, member]], cas, ...]
+            model = model[0]
+        path, member = model[0], model[1]
         folder, file = path.split('app:/')[1].rsplit('/', 1)
         try:
             archive = mdb.rab_read(game.read(folder.upper(), file.upper()))
@@ -3217,7 +3369,7 @@ def proteus_wired() -> None:
     # The shield: the stock barrier round raised through the EMC table (preloaded whenever its file is installed).
     bay = src('src/jet_bay.cpp')
     assert 'L"app:/object/edf6vc_proteus_shield.sgo",L"EDF6VC_PROTEUS_SHIELD.SGO"' in bay
-    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::ultGather)+1' in bay   # the Proteus's before the ultimate's
+    assert 'static_assert(kEmcCount==static_cast<int>(EmcRound::barrageBurst)+1' in bay   # the Proteus's before the ultimate's
     assert 'PreloadShells(mgr,Preloaded(Body::gunship) || ModFileThere(L"EDF6VC_DN_DREADNOUGHT.MRAB"));' in src('src/jet_spawn.cpp')
     assert 'EmcFire(EmcRound::proteusShield,v,p,at,1.0f)' in shield
     assert "SHIELD_FILE = 'OBJECT/EDF6VC_PROTEUS_SHIELD.SGO'" in src('tools/make_proteus.py')
@@ -4589,11 +4741,12 @@ def pack_install_upgrade_uninstall() -> None:
             enter(patched(rootcpk, use=lambda root: None))   # its readers are stubbed; DEFAULT_GAME stays
 
             def mission(game: str, plan: object) -> list[str]:
-                out = gen.mission_dir(game, gen.RANGE_MISSION)
-                modfiles.atomic_write(os.path.join(out, gen.MARKER), b'range')
-                modfiles.atomic_write(os.path.join(out, 'MISSION.AC'), b'script')
-                modfiles.atomic_write(os.path.join(out, 'MISSION.RMPA'), b'points')
-                modfiles.atomic_write(os.path.join(out, 'MISSION.JSON'), b'{}')
+                for folder in (gen.RANGE_MISSION, *gen.PVP_MISSIONS):   # the range and the PvP presets
+                    out = gen.mission_dir(game, folder)
+                    modfiles.atomic_write(os.path.join(out, gen.MARKER), b'range')
+                    modfiles.atomic_write(os.path.join(out, 'MISSION.AC'), b'script')
+                    modfiles.atomic_write(os.path.join(out, 'MISSION.RMPA'), b'points')
+                    modfiles.atomic_write(os.path.join(out, 'MISSION.JSON'), b'{}')
                 ledger.Ledger(game).put(gen.OWNER, 'OBJECT/EDF6TR_FAKE.SGO', b'range object')
                 return []
             enter(patched(gen, install=mission, grand_battle=lambda plan: plan))
@@ -5936,10 +6089,20 @@ def hud_switch_cues_wired() -> None:
                  'StockCells(snap.stockHud,cells)', 'snap.turretAim,lines,&at,controlsBottom'):
         assert call in hud, call
     # One auto-aim (2026-10-25, "这个自动瞄准是不是多余了一个版本，删掉一个"): one line naming it, no on / off pair, no
-    # lead-circle mode, its banner or its key's text.
-    assert 'StoresText(stores,_countof(stores),j,false);' in hud and 'Tx::autoAim' in hud
+    # lead-circle mode, its banner or its key's text. Off by default since the same day ("怎么自动开启自动瞄准了，而且也没啥
+    # 提示欸"): the line says on or off with the key that flips it, a flip its banner, the target a ring.
+    assert 'StoresText(stores,_countof(stores),j,false);' in hud
     table = src('src/hudtext.inc')
-    assert 'HUDTEXT(autoAim,L"AUTO-AIM",L"自动瞄准",' in table
+    for word in ('autoAimStateOn', 'autoAimStateOff', 'autoAimTurnOn', 'autoAimTurnOff', 'autoAimPadUnset', 'autoAimBannerOn', 'autoAimBannerOff'):
+        assert f'HUDTEXT({word},' in table and f'Tx::{word}' in hud, word
+    assert 'HUDTEXT(autoAimStateOff,L"AUTO-AIM: OFF",L"自动瞄准：关",' in table
+    assert 'hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs)' in hud
+    # The banner is the flip's answer in every view (the optic, the overhead view, first person hide the line): it is
+    # drawn on the readout, outside the overlay's condition.
+    flip = hud.split('static hudcue::Change aimMode{};', 1)[1].split('if(aimFlipped)AutoAimBanner(', 1)[0]
+    assert 'const bool turretRead=fresh && snap.turret;' in flip and 'turretRead && hudcue::Changed(' in flip
+    assert 'if(showTurretOverlay) {' in flip and flip.rstrip().endswith('}')
+    assert 'else if(on && r.target)TargetRing(' in hud
     for gone in ('autoAimOn', 'autoAimOffCircle', 'autoAimToggle', 'autoAimOffBanner', 'aimModeKeyUnset', 'aimModeButtonUnset', 'aimSightBinding'):
         assert f'HUDTEXT({gone},' not in table and f'Tx::{gone}' not in hud, gone
     assert 'Mode::leadCircle' not in hud and 'Mode::leadCircle' not in src('src/turretcam.cpp')
@@ -6172,7 +6335,7 @@ def npc_ai_wired() -> None:
     # 取代原版 Q」): read on foot and riding alike, with or without the custom NPC AI (npcmark::MarkOn: the plugin on and the
     # key set; the NPCs' priority on it stays the AI's, npcmark::Enabled), drawn by the HUD; the focus order needs it.
     tick = code.split('void NpcMarkFrame(unsigned char* human,bool mapOpen)', 1)[1].split('\n}\n', 1)[0]
-    assert 'down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()' in tick
+    assert 'down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()' in tick   # a turret seat's press: TurretMark (turret_aim_wired)
     assert 'HumanOnFoot' not in tick and 'customNpcAi' not in tick, 'the custom Q marks riding too, without the NPC AI'
     assert 'KeepMark();' in tick and 'QMarkFrame();' in tick
     # A teammate's point mark is named (slot and name tag) as its enemy mark is: its marker is looked up for either.
@@ -6658,7 +6821,7 @@ def edf5_campaign_build() -> None:
     # the plugin's EDF6VehicleCrew.packs.ini: a section per pack written, by its fixed id, nothing missing here
     packs_ini = files[e5c.PACKS_FILE].decode('ascii')
     for pack in (*e5c.PACKS, e5c.RANGE):
-        rows = [r for r in p['rows'] if r['group'] == pack.group] or [None]
+        rows = [r for r in p['rows'] if r['group'] == pack.group] or [None] * len(e5c.definition_keys(pack))
         section = packs_ini.split(f'[Pack{e5c.CONTENT[pack.tag]}]\r\n', 1)[1].split('\r\n\r\n', 1)[0].split('\r\n')
         assert section[0] == f'Tag={pack.tag}' and section[2] == f'Rows={len(rows)}', (pack.tag, section)
         assert section[3] == 'Missing=' + '0' * ((len(rows) + 3) // 4), (pack.tag, section)
@@ -6832,6 +6995,57 @@ def edf5_campaign_install_remove() -> None:
 
 
 @test
+@test
+def pvp_presets_agree() -> None:
+    """The PvP presets (2026-10-25): the range pack's rows after the range (make_edf5_campaign PVP_ROWS) are the folders
+    testrange/gen.py writes (PVP_PLANS), in the order of the last released layout (pack_layouts.json); each row's
+    thumbnail is its plan's site, each plan only parks empty vehicles (no target, no NPC; enemies only placed once, known ones); uninstall and the
+    installer's check know every folder; the plugin opens every row of the range's pack."""
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    assert list(gen.PVP_PLANS) == list(e5c.PVP_MISSIONS) == list(gen.PVP_MISSIONS)
+    assert e5c.definition_keys(e5c.RANGE) == [f'EDF6/{m}' for m in (e5c.RANGE_MISSION, *e5c.PVP_MISSIONS)]
+    assert e5c.released_layouts(e5c.RANGE.tag)[-1] == e5c.definition_keys(e5c.RANGE)
+    sites = {x.source for x in gen.SITES}
+    for row, (mission, plan) in zip(e5c.PVP_ROWS, gen.PVP_PLANS.items()):
+        assert row['key'] == f'EDF6/{mission}' and row['thumb'] == f'EDF6/{plan.site}' and plan.site in sites, mission
+        assert set(row['title']) == set(row['brief']) == set(e5c.LANGS), mission
+        assert not plan.waves.enabled and not plan.air.enabled and not plan.friends and not plan.squads, mission
+        assert not plan.scenario and all(s in dict(gen.VEHICLES) for s in plan.vehicles), mission
+        assert all(e in {s for s, _, _ in gen.ENEMIES} for e in plan.enemies), mission
+        assert all(not npc for _, npc in gen.placements(plan)), mission
+    assert '(RANGE_MISSION, *PVP_MISSIONS, *LEGACY_SLOTS)' in src('testrange/gen.py')
+    assert '(gen.RANGE_MISSION, *gen.PVP_MISSIONS)' in src('tools/installer.py')
+    assert '|| (cfg.testRangeContent>0 && content==cfg.testRangeContent);' in src('src/edf5campaign.cpp')
+
+
+@test
+def pvp_presets_fit_their_sites() -> None:
+    """Each PvP preset's vehicles fit its site's real points (Root.cpk) with no footprint overlap, and its script parks
+    them all, puts its enemies apart off the vehicles' spots, and spawns nothing else."""
+    import rootcpk
+    import rmpa
+    if not os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+        return
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    game = gen.Game(rootcpk.DEFAULT_GAME)
+    for mission, plan in gen.PVP_PLANS.items():
+        points = rmpa.points(game.read(f'MISSION/EDF6/{plan.site}', 'MISSION.RMPA'))
+        lay = gen.layout(points, gen.small_count(plan), gen.far_reserved(plan))
+        text = gen.script(plan, lay)
+        placed = gen.spots_for(plan, gen.layout(points, gen.small_count(plan), gen.far_reserved(plan)))
+        assert len(placed) == sum(plan.vehicles.values()), mission
+        for i, (s, _, p) in enumerate(placed):
+            others = [(q, gen.footprint(t)) for j, (t, _, q) in enumerate(placed) if j != i]
+            assert gen.overlap(p, gen.footprint(s), others) == 0.0, (mission, s, p.name)
+        assert text.count('CreateVehicle2(') == len(placed), mission
+        assert text.count('CreateEnemy(') == sum(plan.enemies.values()) and 'CreateFriend' not in text, mission
+        spots = [p for _, p in gen.enemy_spots(plan, lay)]
+        assert all(gen._apart(a, b) >= gen.PVP_ENEMY_GAP for i, a in enumerate(spots) for b in spots[i + 1:]), mission
+        assert not {p.name for p in spots} & ({p.name for _, _, p in placed} | {lay.player.name}), mission
+
+
 def edf5_campaign_range_pack() -> None:
     """The test range's pack from the real Root.cpk (2026-10-09: the range over RM015 never ends, so the story stopped
     there): an offline and an online mode after the EDF5 packs, one content id and one save file for both (as the stock
@@ -6874,12 +7088,17 @@ def edf5_campaign_range_pack() -> None:
             assert m[e5c.M_FILES] == e5c.RANGE.paths(kind) and (m[e5c.M_NAME], m[e5c.M_DESC]) == e5c.RANGE.keys(kind)
             listed, image, txt = e5c.RANGE.kind_files(kind)
             rows = dsgo.parse(files[listed]).root.get('table').items
-            assert len(rows) == 1 and rows[0].names == {10: 'flags'} and rows[0].items[3].items == []
-            assert rows[0].items[:3] == [0.0, f'app:/Mission/EDF6/{e5c.RANGE_MISSION}', f'EDF6/{e5c.RANGE_MISSION}']
-            assert rows[0].items[5:] == rm015.items[5:], 'not RM015\'s row values'
+            # The range, then the PvP presets (PVP_ROWS), each chained to the next (the plugin opens them all anyway).
+            defined = (e5c.RANGE_ROW, *e5c.PVP_ROWS)
+            assert len(rows) == len(defined) and all(r.names == {10: 'flags'} for r in rows)
+            assert [r.items[3].items for r in rows] == [[float(i + 1)] for i in range(len(rows) - 1)] + [[]]
+            for i, (r, d) in enumerate(zip(rows, defined)):
+                assert r.items[:3] == [float(i), f'app:/Mission/{d["key"]}', d['key']]
+                assert r.items[5:] == rm015.items[5:], 'not RM015\'s row values'
+            assert rows[0].items[2] == f'EDF6/{e5c.RANGE_MISSION}'
             for lang, rel in txt.items():
-                assert sgo.read(files[rel])[1]['table'] == [[e5c.RANGE_ROW['title'][lang], e5c.RANGE_ROW['brief'][lang]]]
-            assert [f.name for f in mdb.rab_read(files[image]).files] == [e5c.thumb_name(rows[0].items[2])]
+                assert sgo.read(files[rel])[1]['table'] == [[d['title'][lang], d['brief'][lang]] for d in defined]
+            assert [f.name for f in mdb.rab_read(files[image]).files] == [e5c.thumb_name(r.items[2]) for r in rows]
         for lang, rel in e5c.TEXTS.items():
             text = sgo.read(files[rel])[1]
             for kind in e5c.RANGE.kinds:
@@ -7356,7 +7575,7 @@ def ported_content_unlock_keys() -> None:
     mission select's one clear-check call, still a stock call to 0x8A4C00 in the supported EDF.dll."""
     import ported_weapons as pw
     shipped = src('EDF6VehicleCrew.ini')
-    for key in ('PortedMissionsUnlocked', 'PortedWeaponsUnlocked'):
+    for key in ('PortedMissionsUnlocked', 'PortedWeaponsUnlocked', 'AllWeaponsUnlocked'):
         assert re.search(rf'^{key}=0$', shipped, re.M), f'{key} must ship as 0'
         assert key not in installer.NEW_DEFAULTS[installer.SECTION] and key not in installer.NEW_DEFAULTS_1017[installer.SECTION]
         assert key not in installer.NEW_DEFAULTS_1024[installer.SECTION]
@@ -7371,6 +7590,7 @@ def ported_content_unlock_keys() -> None:
     assert 'bool portedMissionsUnlocked=false;' in crew and 'bool portedWeaponsUnlocked=false;' in crew
     assert 'n.portedMissionsUnlocked=ReadBool(L"PortedMissionsUnlocked",n.portedMissionsUnlocked);' in plugin
     assert 'n.portedWeaponsUnlocked=ReadBool(L"PortedWeaponsUnlocked",n.portedWeaponsUnlocked);' in plugin
+    assert 'bool allWeaponsUnlocked=false;' in crew and 'n.allWeaponsUnlocked=ReadBool(L"AllWeaponsUnlocked",n.allWeaponsUnlocked);' in plugin
     assert 'InstallPortedMissions();' in plugin
     header = src('src/unlock_ported.h')
     prefixes = set(re.findall(r'L"(EDF6VC_E[0-9]+_)"', header))
@@ -7388,6 +7608,9 @@ def ported_content_unlock_keys() -> None:
         assert ('MigrateMissionPackSave(gs)' in hook) == (name == 'ScriptUnlockDlcHook'), name
     grant = air.split('Granted GrantCalls(unsigned char* gs,bool ported) noexcept {', 1)[1].split('\n}\n', 1)[0]
     assert '&=' not in grant and '~' not in grant, 'the grant never clears a bit'
+    every = air.split('int GrantAll(unsigned char* gs) noexcept {', 1)[1].split('\n}\n', 1)[0]
+    assert 'ported::OwnMax(WeaponRecord(gs,id))' in every and 'kClampStars' in every and 'if(n>most)return -2;' in every and '&=' not in every, 'owns every row, then the cap clamp'
+    assert 'Cfg().allWeaponsUnlocked' in give and 'constexpr unsigned kClampStars=0xD7930;' in air
     camp = src('src/edf5campaign.cpp')
     assert 'constexpr unsigned kListScan=0x8A21C3;' in camp and 'constexpr unsigned kCleared=0x8A4C00;' in camp
     assert 'ported::StoryPack(content,cfg.edf5CampaignContent,cfg.edf41Content)' in camp, 'the six story packs only'
@@ -14065,21 +14288,85 @@ def edf41_ui_names() -> None:
     assert {k for k, n in fades.items() if n} == {'M015', 'M016', 'M190', 'M192'}, fades
 
 
-def main() -> int:
+# The last run's seconds a test (build/selftest-cost.json, as ctest's CTestCostData): the longest are started first, so
+# the slowest (spawn_catalog_archives_recorded) does not start last and leave the other workers idle at the end.
+COST_FILE = os.path.join(ROOT, 'build', 'selftest-cost.json')
+_START_GAME: str | None = None
+
+
+def _run_one(index: int) -> tuple[int, bool, float, str]:
+    """TESTS[index], its output caught (a worker's lines would otherwise interleave with the others')."""
+    import time
     import rootcpk
-    game = rootcpk.DEFAULT_GAME
-    failed = 0
-    for fn in TESTS:
+    global _START_GAME
+    if _START_GAME is None:
+        _START_GAME = rootcpk.DEFAULT_GAME
+    fn = TESTS[index]
+    out = io.StringIO()
+    ok = True
+    started = time.perf_counter()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
         try:
             fn()
-            print(f'ok    {fn.__name__}')
         except (Exception, SystemExit):   # the tools report refusals with SystemExit
-            failed += 1
-            print(f'FAIL  {fn.__name__}')
+            ok = False
             traceback.print_exc()
         finally:   # installer.install / uninstall point it at their stand-in game: the real-data tests after need the real one
-            rootcpk.use(game)
-    print(f'{len(TESTS) - failed}/{len(TESTS)} passed')
+            rootcpk.use(_START_GAME)
+    return index, ok, time.perf_counter() - started, out.getvalue()
+
+
+def _costs() -> dict[str, float]:
+    try:
+        with open(COST_FILE, encoding='utf-8') as f:
+            return {str(k): float(v) for k, v in json.load(f).items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def _jobs(argv: list[str]) -> int:
+    """-j N (1: one process, in order, as before 2026-10-25); none: up to 8, one a core."""
+    if '-j' in argv:
+        return max(1, int(argv[argv.index('-j') + 1]))
+    return max(1, min(8, os.cpu_count() or 1))
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Every test, in -j worker processes (each a fresh interpreter: what one test leaves in a module's state stays in
+    its worker, as it stayed in the one process before). The tests share no file outside their own temporary folders.
+    Took ~21 min in one process (2026-10-25)."""
+    import time
+    argv = sys.argv[1:] if argv is None else argv
+    jobs = _jobs(argv)
+    costs = _costs()
+    order = sorted(range(len(TESTS)), key=lambda i: -costs.get(TESTS[i].__name__, 1e9))   # unknown ones first
+    failed = 0
+    took: dict[str, float] = {}
+    started = time.perf_counter()
+
+    def report(index: int, ok: bool, sec: float, text: str) -> None:
+        nonlocal failed
+        name = TESTS[index].__name__
+        took[name] = round(sec, 2)
+        sys.stdout.write(text)
+        print(f'{"ok  " if ok else "FAIL"}  {name}  ({sec:.1f} s)', flush=True)
+        failed += 0 if ok else 1
+    if jobs == 1:
+        for i in range(len(TESTS)):
+            report(*_run_one(i))
+    else:
+        import multiprocessing
+        # One BLAS thread a worker: -j processes each starting one a core oversubscribe the machine.
+        for var in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
+            os.environ.setdefault(var, '1')
+        with multiprocessing.get_context('spawn').Pool(jobs) as pool:
+            for result in pool.imap_unordered(_run_one, order, chunksize=1):
+                report(*result)
+    if os.path.isdir(os.path.dirname(COST_FILE)):
+        with contextlib.suppress(OSError):
+            with open(COST_FILE, 'w', encoding='utf-8') as f:
+                json.dump({**costs, **took}, f, indent=0, sort_keys=True)
+    print(f'{len(TESTS) - failed}/{len(TESTS)} passed in {time.perf_counter() - started:.0f} s ({jobs} workers)')
     return 1 if failed else 0
 
 

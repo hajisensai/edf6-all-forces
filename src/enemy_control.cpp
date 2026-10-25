@@ -2,6 +2,7 @@
 // AI decisions, input and target selection are leased. The original
 // Soldier remains the authenticated source and resumes immediately on release.
 #include "crew.h"
+#include "team_native_logic.h"
 #include "enemy_control.h"
 #include "enemy_control_native.h"
 #include "enemy_control_identity.h"
@@ -275,7 +276,7 @@ void Publish() {
             const auto* actor=static_cast<const unsigned char*>(s.target.obj);
             std::memcpy(r.center,actor+0x90,12);std::memcpy(r.side,actor+0x70,12);std::memcpy(r.forward,actor+0x80,12);
             r.team=At<int>(actor,0x314);if(r.team==-1)r.team=At<int>(actor,0x318);
-            if(r.team>=0 && r.team<=6)++radarCount;
+            if(r.team>=0 && r.team<crew::team_native::kTeamCapacity)++radarCount;
         }
         Selected(s.snapshot,s.catalogue);
         Snapshot view=s.snapshot;view.sourceProtected=s.sourceProtected;ReadBodyStatus(view,s.target);

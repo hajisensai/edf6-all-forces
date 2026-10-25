@@ -222,7 +222,9 @@ def check_calls(root: str) -> None:
     request = body(dispatch, 'bool Request(int index,')
     if 'return SupportCallComposedAt(index,target,nullptr,note,capacity);' not in body(dispatch, 'bool SupportCallAt('):
         fail('SupportCallAt must only delegate to SupportCallComposedAt (one gated path)')
-    if 'return Request(index,target,load,note,capacity);' not in body(dispatch, 'bool SupportCallComposedAt('):
+    # (its result kept for a sortie's second wave, queued only once the request was accepted)
+    composed = body(dispatch, 'bool SupportCallComposedAt(')
+    if 'return Request(index,target,load,note,capacity);' not in composed and             'const bool accepted=Request(index,target,load,note,capacity);' not in composed:
         fail('src/support_dispatch.cpp SupportCallComposedAt: not through the request path (Request)')
     # The sea rescue: its own path (no map queue / cooldown), the same host transaction for any non-local machine.
     rescue = body(dispatch, 'bool RescueRequest(')

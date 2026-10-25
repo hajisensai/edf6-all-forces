@@ -26,6 +26,7 @@ void PvpForgetSupportObject(const ObjRef& ref) noexcept {if(ref.obj)++routePvpFo
 namespace {bool supportSessionActive=true;}
 support::Policy SupportMissionPolicy() noexcept {return {support::Environment::normal,false};}
 int SupportAirCallCount() noexcept{return 21;}
+void SupportFollowUpQueue(int,const float*) noexcept{}   // a sortie's second wave (airstrike.cpp, not linked here)
 const wchar_t* SupportAirCallName(int) noexcept{return L"air";}
 const wchar_t* SupportAirCallKey(int) noexcept{return L"AIR";}
 bool SupportSoloHostWorld() noexcept{return false;}

@@ -78,6 +78,7 @@ float BodyMark(const void*) noexcept {return 0;}
 bool IsHelicopter(const void*) noexcept {return false;}
 float MapRay(const float*,const float*,float*) noexcept {++fixture::terrain;return -1;}
 void HeliCalled(unsigned char*,bool,const float*,DWORD) noexcept {}
+void HeliSortie(unsigned char*,SortiePass,const float*) noexcept {}   // a sortie heli's pass (heli.cpp, not linked here)
 bool HeliCommand(const void*,const Command&,const ObjRef&) noexcept {return false;}
 bool HeliLeft(const void*) noexcept {return false;}
 bool ProteusReady() noexcept {return false;}
@@ -107,6 +108,7 @@ void PvpForgetSupportObject(const ObjRef&) noexcept {++fixture::forgets;fixture:
 void PreloadUltimate(void*) noexcept {}   // jet_spawn.cpp's PreloadJets loads the ultimate's circles (ultimate.cpp, not linked here)
 namespace jet {
 Jet jets[kMaxJets]{};
+void SortieBegin(Jet&,SortiePass,const float*,const float*,const float*,ULONGLONG) noexcept {}   // jet_sortie.cpp, not linked here
 float FerryTurn(const Kind&) noexcept {return 0;}
 bool Alive(const ObjRef& ref) noexcept {
     return ref.obj && ref.ctrl && At<LONG>(ref.ctrl,8)>0 && At<const void*>(ref.obj,kSelfCtrl)==ref.ctrl &&

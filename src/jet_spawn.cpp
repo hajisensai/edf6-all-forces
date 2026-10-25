@@ -466,7 +466,9 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
     if(!vehicle || !target || !NpcDriver(vehicle))return false;
     if(spec.heli>=0) {
         HeliCalled(vehicle,!spec.follow,target,spec.fuelSeconds);
-        return HeliCommand(vehicle,Command{Order::guard,{target[0],target[1],target[2]}});
+        const bool ok=HeliCommand(vehicle,Command{Order::guard,{target[0],target[1],target[2]}});
+        if(spec.sortie)HeliSortie(vehicle,static_cast<SortiePass>(spec.sortie),target);   // one pass, then away
+        return ok;
     }
     Jet* entry=FindJet(vehicle);
     if(!entry)entry=NewEntry(vehicle,GameMs());
@@ -480,6 +482,13 @@ bool ActivateSupportAircraft(unsigned char* vehicle,const SupportAircraft& spec,
     std::memcpy(entry->anchor,target,12);entry->fuelMs=static_cast<ULONGLONG>(spec.fuelSeconds)*1000;
     JoinFlight(*entry,FlightFor(&supportAircraft,GameMs()));
     ApplyMapCommand(*entry,Command{Order::guard,{target[0],target[1],target[2]}},GameMs());
+    if(spec.sortie) {   // one pass at the target, then away (jet_sortie.cpp)
+        // Along its nose in the air; on an older host's runway (its nose the runway's), straight at the mark (sortie_plan.h).
+        const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);
+        const float none[3]={0.0f,0.0f,0.0f};
+        SortieBegin(*entry,static_cast<SortiePass>(spec.sortie),target,reinterpret_cast<const float*>(vehicle+kPosition),
+                    airborne ? m+8 : none,GameMs());
+    }
     return true;
 }
 

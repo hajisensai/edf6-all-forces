@@ -88,7 +88,7 @@ HUDTEXT(storesGun,L"GUN %d  ",L"机炮 %d  ",L"機砲 %d  ",L"機関砲 %d  ")
 HUDTEXT(storesFlare,L"FLARE %d",L"热焰弹 %d",L"熱焰彈 %d",L"フレア %d")
 HUDTEXT(fuelTime,L"FUEL %d%% %d:%02d",L"燃料 %d%% %d:%02d",L"燃料 %d%% %d:%02d",L"燃料 %d%% %d:%02d")
 HUDTEXT(fuelShare,L"FUEL %d%%",L"燃料 %d%%",L"燃料 %d%%",L"燃料 %d%%")
-HUDTEXT(rotateNow,L"ROTATE: PULL UP (W / SPACE)",L"抬头：拉起（W / 空格）",L"抬頭：拉起（W / 空白鍵）",L"機首上げ：引き起こし（W / スペース）")
+HUDTEXT(rotateNow,L"ROTATE: PULL UP (SPACE)",L"抬头：拉起（空格）",L"抬頭：拉起（空白鍵）",L"機首上げ：引き起こし（スペース）")
 HUDTEXT(rotateAt,L"ROTATE AT %d km/h",L"抬头速度 %d km/h",L"抬頭速度 %d km/h",L"機首上げ %d km/h")
 HUDTEXT(pullUpTerrain,L"PULL UP! TERRAIN",L"拉起！地形",L"拉起！地形",L"プルアップ！地表")
 HUDTEXT(missileBang,L"MISSILE!",L"飞弹！",L"飛彈！",L"ミサイル！")
@@ -101,22 +101,20 @@ HUDTEXT(climbDown,L"DOWN",L"下降",L"下降",L"下降")
 HUDTEXT(jetThrottle,L"THROTTLE %d%%%ls%ls    G %.1f%ls%ls%ls",L"油门 %d%%%ls%ls    G %.1f%ls%ls%ls",L"油門 %d%%%ls%ls    G %.1f%ls%ls%ls",
         L"スロットル %d%%%ls%ls    G %.1f%ls%ls%ls")
 HUDTEXT(stall,L"STALL",L"失速",L"失速",L"失速")
-HUDTEXT(jetKeysMouse,L"MOUSE: aim (the square)    W / SPACE: pull up    S: push down    A / D: roll",
-        L"鼠标：瞄准（方框）    W / 空格：拉起    S：压低    A / D：滚转",L"滑鼠：瞄準（方框）    W / 空白鍵：拉起    S：壓低    A / D：滾轉",
-        L"マウス：照準（四角）    W / スペース：機首上げ    S：機首下げ    A / D：ロール")
-HUDTEXT(jetKeysHand,L"W / SPACE: pull up    S: push down    A / D: roll    (let go: wings level)",
-        L"W / 空格：拉起    S：压低    A / D：滚转    （松开：改平）",L"W / 空白鍵：拉起    S：壓低    A / D：滾轉    （放開：改平）",
-        L"W / スペース：機首上げ    S：機首下げ    A / D：ロール    （離すと水平）")
-HUDTEXT(jetKeysMouseHand,L"MOUSE: aim    W / SPACE / S / A / D: fly by hand (the mouse takes over once it moves)",
-        L"鼠标：瞄准    W / 空格 / S / A / D：手动飞行（鼠标一动即接管）",L"滑鼠：瞄準    W / 空白鍵 / S / A / D：手動飛行（滑鼠一動即接管）",
-        L"マウス：照準    W / スペース / S / A / D：手動操縦（マウスを動かすと戻る）")
-HUDTEXT(jetKeysAir,L"%ls: boost    %ls: brake    %ls: switch weapon    %ls: next target    %ls: flares",
-        L"%ls：加速    %ls：减速    %ls：替换武器    %ls：下一个目标    %ls：热焰弹",L"%ls：加速    %ls：減速    %ls：替換武器    %ls：下一個目標    %ls：熱焰彈",
-        L"%ls：ブースト    %ls：ブレーキ    %ls：武器切替    %ls：次の目標    %ls：フレア")
-HUDTEXT(jetKeysGround,L"%ls: throttle up    %ls: throttle down    A / D, MOUSE: steer",L"%ls：加油门    %ls：减油门    A / D、鼠标：转向",
-        L"%ls：加油門    %ls：減油門    A / D、滑鼠：轉向",L"%ls：スロットル上げ    %ls：スロットル下げ    A / D・マウス：旋回")
-HUDTEXT(jetKeysTakeoff,L"W / SPACE: pull up to take off (from %d km/h)",L"W / 空格：拉起起飞（%d km/h 起）",L"W / 空白鍵：拉起起飛（%d km/h 起）",
-        L"W / スペース：引き起こして離陸（%d km/h から）")
+HUDTEXT(jetKeysHand,L"SPACE: pull up    %ls: push down    A / D: roll    (let go: wings level)",
+        L"空格：拉起    %ls：压低    A / D：滚转    （松开：改平）",L"空白鍵：拉起    %ls：壓低    A / D：滾轉    （放開：改平）",
+        L"スペース：機首上げ    %ls：機首下げ    A / D：ロール    （離すと水平）")
+HUDTEXT(jetKeysMouseHand,L"MOUSE: aim    SPACE / %ls / A / D: fly by hand (the mouse takes over once it moves)",
+        L"鼠标：瞄准    空格 / %ls / A / D：手动飞行（鼠标一动即接管）",L"滑鼠：瞄準    空白鍵 / %ls / A / D：手動飛行（滑鼠一動即接管）",
+        L"マウス：照準    スペース / %ls / A / D：手動操縦（マウスを動かすと戻る）")
+HUDTEXT(jetKeysAir,L"W / S: throttle (it stays; S at 0%%: airbrake)    %ls: switch weapon    %ls: next target    %ls: flares",
+        L"W / S：油门（松手停在原位；0%% 时按 S 减速板）    %ls：替换武器    %ls：下一个目标    %ls：热焰弹",
+        L"W / S：油門（放開停在原位；0%% 時按 S 減速板）    %ls：替換武器    %ls：下一個目標    %ls：熱焰彈",
+        L"W / S：スロットル（離すとその位置；0%% で S はエアブレーキ）    %ls：武器切替    %ls：次の目標    %ls：フレア")
+HUDTEXT(jetKeysGround,L"W / S: throttle (it stays)    A / D, MOUSE: steer",L"W / S：油门（松手停在原位）    A / D、鼠标：转向",
+        L"W / S：油門（放開停在原位）    A / D、滑鼠：轉向",L"W / S：スロットル（離すとその位置）    A / D・マウス：旋回")
+HUDTEXT(jetKeysTakeoff,L"SPACE: pull up to take off (from %d km/h)",L"空格：拉起起飞（%d km/h 起）",L"空白鍵：拉起起飛（%d km/h 起）",
+        L"スペース：引き起こして離陸（%d km/h から）")
 HUDTEXT(jetPadAir,L"BOOST: forward / ascend    BRAKE: back    ROLL: left stick sideways",L"加速：前进 / 上升    减速：后退    滚转：左摇杆左右",
         L"加速：前進 / 上升    減速：後退    滾轉：左搖桿左右",L"ブースト：前進 / 上昇    ブレーキ：後退    ロール：左スティック左右")
 HUDTEXT(jetPadAir2,L"PITCH, TURN: right stick    %ls: stores    %ls: target    keyboard %ls: flares",L"俯仰、转向：右摇杆    %ls：挂载    %ls：目标    键盘 %ls：热诱弹",
@@ -197,7 +195,14 @@ HUDTEXT(drillLaunched,L"LAUNCHED",L"发射中",L"發射中",L"射出中")
 HUDTEXT(drillReturning,L"RETURNING",L"回收中",L"回收中",L"回収中")
 HUDTEXT(drillLaunchHint,L"[%ls] LAUNCH",L"[%ls] 发射",L"[%ls] 發射",L"[%ls] 射出")
 HUDTEXT(gunnersAuto,L"GUNNERS: AUTO-AIM",L"炮手：自动瞄准",L"砲手：自動瞄準",L"砲手：自動照準")
-HUDTEXT(autoAim,L"AUTO-AIM",L"自动瞄准",L"自動瞄準",L"自動照準")
+HUDTEXT(autoAimStateOn,L"AUTO-AIM: ON",L"自动瞄准：开",L"自動瞄準：開",L"自動照準：オン")
+HUDTEXT(autoAimStateOff,L"AUTO-AIM: OFF",L"自动瞄准：关",L"自動瞄準：關",L"自動照準：オフ")
+HUDTEXT(autoAimTurnOn,L"%ls[%ls] turn on",L"%ls[%ls] 开启",L"%ls[%ls] 開啟",L"%ls[%ls] オンにする")
+HUDTEXT(autoAimTurnOff,L"%ls[%ls] turn off",L"%ls[%ls] 关闭",L"%ls[%ls] 關閉",L"%ls[%ls] オフにする")
+HUDTEXT(autoAimPadUnset,L"%ls(pad: set AutoAimButton in EDF6AutoTurret.ini)",L"%ls（手柄：在 EDF6AutoTurret.ini 设置 AutoAimButton）",
+        L"%ls（手把：在 EDF6AutoTurret.ini 設定 AutoAimButton）",L"%ls（パッド：EDF6AutoTurret.ini で AutoAimButton を設定）")
+HUDTEXT(autoAimBannerOn,L"AUTO-AIM ON",L"自动瞄准 已开启",L"自動瞄準 已開啟",L"自動照準 オン")
+HUDTEXT(autoAimBannerOff,L"AUTO-AIM OFF",L"自动瞄准 已关闭",L"自動瞄準 已關閉",L"自動照準 オフ")
 HUDTEXT(lockKey,L"%ls[%ls] %ls (hold: clear)",L"%ls[%ls] %ls（长按：清除）",L"%ls[%ls] %ls（長按：清除）",L"%ls[%ls] %ls（長押し：解除）")
 HUDTEXT(lockWord,L"lock",L"锁定",L"鎖定",L"ロック")
 HUDTEXT(nextWord,L"next",L"下一个",L"下一個",L"次")
@@ -239,6 +244,7 @@ HUDTEXT(drillOverheat,L"DRILL OVERHEAT",L"钻头过热",L"鑽頭過熱",L"ドリ
 HUDTEXT(noAmmo,L"NO AMMO",L"弹药耗尽",L"彈藥耗盡",L"弾切れ")
 HUDTEXT(stockGunner,L"%hs  GUNNER %u",L"%hs  炮手 %u",L"%hs  砲手 %u",L"%hs  砲手 %u")
 HUDTEXT(stockInfo,L"SPD %d km/h    HP %d%%",L"速度 %d km/h    耐久 %d%%",L"速度 %d km/h    耐久 %d%%",L"速度 %d km/h    耐久 %d%%")
+HUDTEXT(driveGear,L"GEAR %ls",L"挡位 %ls",L"檔位 %ls",L"ギア %ls")
 HUDTEXT(twist,L"TWIST %+d",L"扭转 %+d",L"扭轉 %+d",L"ひねり %+d")
 HUDTEXT(stabLag,L"STAB LAG",L"稳定器滞后",L"穩定器滯後",L"スタビ遅れ")
 HUDTEXT(stab,L"STAB",L"稳定器",L"穩定器",L"スタビ")
@@ -592,6 +598,14 @@ HUDTEXT(versionFeatPlayerVehicle,L"players' own loaded jets (stock for everyone 
 HUDTEXT(versionFeatUltimate,L"the ultimate strike (others see the stock beam)",L"终极支援天罚（其他人看到原版光束）",L"終極支援天罰（其他人看到原版光束）",L"究極支援「天罰」（他の人には標準のビーム）")
 // The ultimate strike's caller online (ultimate.cpp SayOldPeers): a peer without its channel sees the stock satellite beam.
 HUDTEXT(ultimateOldPeers,L"Some teammates run an older version: they may see the stock satellite beam",L"部分队员版本旧，可能看到原版光束",L"部分隊員版本舊，可能看到原版光束",L"一部の隊員は旧版のため、標準の衛星ビームが見えることがあります")
+// A barrage call that could not start (airstrike.cpp RadioStartHook, barrage.cpp BarrageResult): the stock bombers fly.
+HUDTEXT(barrageRefused,L"Barrage did not start (%ls): the stock bombers fly instead",L"炮击未能开始（%ls），改由原版轰炸机出动",L"砲擊未能開始（%ls），改由原版轟炸機出動",L"砲撃を開始できません（%ls）。代わりに通常の爆撃機が出撃します")
+HUDTEXT(barrageFull,L"too many barrages at once",L"同时进行的炮击已达上限",L"同時進行的砲擊已達上限",L"同時に行える砲撃の上限です")
+HUDTEXT(barrageNoHook,L"this EDF.dll's rockets cannot be steered",L"此版 EDF.dll 无法接管炮弹飞行",L"此版 EDF.dll 無法接管砲彈飛行",L"この EDF.dll では砲弾の弾道を制御できません")
+HUDTEXT(barrageNoTarget,L"no caller or target",L"呼叫者或目标无效",L"呼叫者或目標無效",L"呼び出し元または目標が無効です")
+HUDTEXT(barrageNoRounds,L"no round could be planned",L"未能规划任何炮弹",L"未能規劃任何砲彈",L"砲弾を計画できませんでした")
+// A sortie's second wave refused when due (airstrike.cpp SupportFollowUpTick): given up, with the dispatcher's reason.
+HUDTEXT(followUpRefused,L"Second wave not called: %ls",L"第二波未能呼叫：%ls",L"第二波未能呼叫：%ls",L"第二波を呼べませんでした：%ls")
 // --- The room's host settings and builds (host_settings.cpp; the room menu's status lines) ---
 HUDTEXT(hostSettingsHost,L"Host's settings: walk-up recruit %ls, free squad cover %ls",L"按房主设置：原版走近招募 %ls，自由小队掩护 %ls",L"按房主設定：原版走近招募 %ls，自由小隊掩護 %ls",L"ホストの設定：近づいて合流 %ls・自由小隊の援護 %ls")
 HUDTEXT(hostSettingsSilent,L"The host's All Forces is older: recruit / cover by this machine's ini",L"房主的全军出击较旧：招募 / 掩护按本机 ini",L"房主的全軍出擊較舊：招募 / 掩護按本機 ini",L"ホストの全軍出撃が古い：合流 / 援護はこの機の ini")
@@ -687,25 +701,61 @@ HUDTEXT(placeFailed,L"Not placed: %ls (see DEBUGSPAWN in the log)",L"摆放失�
 HUDTEXT(placeNoGround,L"No ground under the pointer",L"指针下没有地面",L"指標下沒有地面",L"ポインターの下に地面がありません")
 
 // --- PVP controls on the M map (hud.cpp MapPvpPanel; pvp.h) ---
-HUDTEXT(pvpTitleState,L"PVP: %ls  TEAM %d",L"对战：%ls  阵营 %d",L"對戰：%ls  陣營 %d",L"対戦：%ls  チーム %d")
+HUDTEXT(pvpTitleState,L"PVP: %ls  %ls",L"对战：%ls  %ls",L"對戰：%ls  %ls",L"対戦：%ls  %ls")
 HUDTEXT(pvpOn,L"ON",L"开",L"開",L"有効")
 HUDTEXT(pvpOff,L"OFF",L"关",L"關",L"無効")
 HUDTEXT(pvpExpand,L"Click to expand",L"点击展开",L"點擊展開",L"クリックで開く")
 HUDTEXT(pvpFocusPad,L"R3: PVP",L"R3 对战",L"R3 對戰",L"R3 対戦")
 HUDTEXT(pvpEnable,L"Enable PVP (host)",L"开启对战（仅房主）",L"開啟對戰（僅房主）",L"対戦を有効にする（ホスト）")
 HUDTEXT(pvpDisable,L"Disable PVP (host)",L"关闭对战（仅房主）",L"關閉對戰（僅房主）",L"対戦を無効にする（ホスト）")
-HUDTEXT(pvpTeam1,L"Join team 1",L"加入阵营 1",L"加入陣營 1",L"チーム 1 に参加")
-HUDTEXT(pvpTeam2,L"Join team 2",L"加入阵营 2",L"加入陣營 2",L"チーム 2 に参加")
+HUDTEXT(pvpPresetRow,L"Sides: %ls (host)",L"阵营关系：%ls（仅房主）",L"陣營關係：%ls（僅房主）",L"陣営関係：%ls（ホスト）")
+HUDTEXT(pvpPresetFfa,L"free for all",L"全员混战",L"全員混戰",L"全員敵対")
+HUDTEXT(pvpPresetHva,L"EDF vs aliens",L"人类对外星",L"人類對外星",L"人類対異星")
+HUDTEXT(pvpPresetCivil,L"EDF civil war",L"EDF 内战",L"EDF 內戰",L"EDF 内戦")
+HUDTEXT(pvpPresetAliens,L"aliens at war",L"外星内战",L"外星內戰",L"異星内戦")
+HUDTEXT(pvpPresetCustom,L"custom",L"自定义",L"自訂",L"カスタム")
+HUDTEXT(pvpFactionEdf,L"EDF 1st Army",L"EDF 第一军",L"EDF 第一軍",L"EDF 第一軍")
+HUDTEXT(pvpFactionEdf2,L"EDF 2nd Army",L"EDF 第二军",L"EDF 第二軍",L"EDF 第二軍")
+HUDTEXT(pvpFactionEdf3,L"EDF 3rd Army",L"EDF 第三军",L"EDF 第三軍",L"EDF 第三軍")
+HUDTEXT(pvpFactionEdf4,L"EDF 4th Army",L"EDF 第四军",L"EDF 第四軍",L"EDF 第四軍")
+HUDTEXT(pvpFactionMonster,L"Monsters",L"怪物",L"怪物",L"怪物")
+HUDTEXT(pvpFactionPrimer,L"Primers",L"星导者",L"星導者",L"プライマー")
+HUDTEXT(pvpFactionForeigner,L"Foreigners",L"外来者",L"外來者",L"フォーリナー")
+HUDTEXT(pvpJoinFaction,L"Join %ls",L"加入 %ls",L"加入 %ls",L"%ls に参加")
+HUDTEXT(pvpRoleSoldier,L"Soldier",L"士兵",L"士兵",L"兵士")
+HUDTEXT(pvpRoleCommander,L"Commander (M map)",L"指挥官（M 地图视角）",L"指揮官（M 地圖視角）",L"指揮官（M マップ視点）")
+HUDTEXT(pvpRoleUnit,L"Control a unit",L"操控单位",L"操控單位",L"ユニットを操作")
+// --- The room menu's PvP pages (room_pvp_dialog.h) ---
+HUDTEXT(pvpRoomEntry,L"PvP: %ls / %ls",L"对战：%ls / %ls",L"對戰：%ls / %ls",L"対戦：%ls / %ls")
+HUDTEXT(pvpRoomTitle,L"PvP setup\nPvP %ls, sides: %ls\n%ls",L"对战设置\n对战：%ls　阵营关系：%ls\n%ls",L"對戰設定\n對戰：%ls　陣營關係：%ls\n%ls",L"対戦設定\n対戦：%ls　陣営関係：%ls\n%ls")
+HUDTEXT(pvpRoomHostHint,L"Turn PvP on and pick the sides; the start waits until every member has confirmed the teams",L"开启对战并选择阵营关系；开打时等全员确认阵营表后才开始",L"開啟對戰並選擇陣營關係；開打時等全員確認陣營表後才開始",L"対戦を有効にして陣営関係を選択。開始は全員が陣営表を確認するまで待ちます")
+HUDTEXT(pvpRoomGuestHint,L"Pick your faction and role; the host fixes the teams when the mission starts",L"选择自己的阵营与角色；开打时由房主锁定阵营表",L"選擇自己的陣營與角色；開打時由房主鎖定陣營表",L"自分の陣営と役割を選択。開始時にホストが陣営表を確定します")
+HUDTEXT(pvpRoomLocking,L"Start held: waiting for every member to confirm the teams",L"已开打：等待全员确认阵营表",L"已開打：等待全員確認陣營表",L"開始保留中：全員の陣営表確認を待っています")
+HUDTEXT(pvpRoomMode,L"PvP: %ls (host)",L"对战：%ls（仅房主）",L"對戰：%ls（僅房主）",L"対戦：%ls（ホスト）")
+HUDTEXT(pvpRoomFaction,L"Faction: %ls",L"阵营：%ls",L"陣營：%ls",L"陣営：%ls")
+HUDTEXT(pvpRoomRole,L"Role: %ls",L"角色：%ls",L"角色：%ls",L"役割：%ls")
+HUDTEXT(pvpRoomUnit,L"Unit: %ls",L"单位：%ls",L"單位：%ls",L"ユニット：%ls")
+HUDTEXT(pvpRoomPickFaction,L"Choose a faction",L"选择阵营",L"選擇陣營",L"陣営を選択")
+HUDTEXT(pvpRoomPickRole,L"Choose a role",L"选择角色",L"選擇角色",L"役割を選択")
+HUDTEXT(pvpRoomPickUnit,L"%ls units (page %d / %d)",L"%ls 的单位（第 %d / %d 页）",L"%ls 的單位（第 %d / %d 頁）",L"%ls のユニット（%d / %d ページ）")
+HUDTEXT(pvpRoomYou,L"You",L"你",L"你",L"あなた")
+HUDTEXT(pvpRoomHostN,L"Host %d",L"房主 %d",L"房主 %d",L"ホスト %d")
+HUDTEXT(pvpRoomMemberN,L"Member %d",L"成员 %d",L"成員 %d",L"メンバー %d")
+HUDTEXT(pvpRoomMemberLine,L"%ls: %ls / %ls %ls%ls",L"%ls：%ls / %ls %ls%ls",L"%ls：%ls / %ls %ls%ls",L"%ls：%ls / %ls %ls%ls")
+HUDTEXT(pvpRoomWaiting,L"PvP start held, not confirmed yet: %ls",L"对战开打等待确认，未确认：%ls",L"對戰開打等待確認，未確認：%ls",L"対戦開始保留中、未確認：%ls")
+HUDTEXT(pvpRoomListSep,L", ",L"、",L"、",L"、")
+HUDTEXT(pvpRoomAcked,L" (confirmed)",L"（已确认）",L"（已確認）",L"（確認済み）")
+HUDTEXT(pvpRoomDefault,L" (not picked: default)",L"（未选：默认）",L"（未選：預設）",L"（未選択：既定）")
 HUDTEXT(pvpHostOnly,L"Only the host can change PVP mode",L"仅房主可切换对战模式",L"僅房主可切換對戰模式",L"対戦モードを変更できるのはホストのみ")
-HUDTEXT(pvpMouseHint,L"Click the title to open / fold; click a row to change your team",L"点击标题展开 / 收起；点击条目更改自己的阵营",L"點擊標題展開 / 收起；點擊項目更改自己的陣營",L"タイトルをクリックで開閉、行をクリックで自分のチームを変更")
+HUDTEXT(pvpMouseHint,L"Click the title to open / fold; click a faction to join it",L"点击标题展开 / 收起；点击阵营加入",L"點擊標題展開 / 收起；點擊陣營加入",L"タイトルをクリックで開閉、陣営をクリックで参加")
 HUDTEXT(pvpPadHint,L"R3: PVP / Up-Down: select / A: confirm / B: back",L"R3 聚焦对战 / ↑↓ 选择 / A 确认 / B 返回",
         L"R3 聚焦對戰 / ↑↓ 選擇 / A 確認 / B 返回",L"R3 対戦操作 / ↑↓ 選択 / A 決定 / B 戻る")
-HUDTEXT(pvpReady,L"Host sets the mode; each player chooses their own team",L"房主设置模式；每位玩家选择自己的阵营",L"房主設定模式；每位玩家選擇自己的陣營",L"ホストがモードを設定し、各プレイヤーが自分のチームを選択")
+HUDTEXT(pvpReady,L"Host sets the mode and sides; each player picks a faction",L"房主设置模式与阵营关系；每位玩家选择自己的阵营",L"房主設定模式與陣營關係；每位玩家選擇自己的陣營",L"ホストがモードと陣営関係を設定し、各プレイヤーが陣営を選択")
 HUDTEXT(pvpPending,L"Waiting for every peer to confirm",L"等待全员确认，请暂勿交战",L"等待全員確認，請暫勿交戰",L"全員の確認待ち。まだ交戦しないでください")
 HUDTEXT(pvpComplete,L"Team settings confirmed by every peer",L"全员已确认阵营设置",L"全員已確認陣營設定",L"全員がチーム設定を確認しました")
 HUDTEXT(pvpNotReady,L"Needs a shared online mission and PVP support on every peer",L"需进入同一联机任务，且全员版本支持对战",L"需進入同一連線任務，且全員版本支援對戰",L"同じオンラインミッションと全員の対戦対応版が必要です")
 HUDTEXT(pvpBusy,L"The previous team change is still pending",L"上一项阵营更改仍在等待确认",L"上一項陣營更改仍在等待確認",L"前のチーム変更はまだ確認待ちです")
-HUDTEXT(pvpInvalid,L"Only the host changes mode; choose team 1 or 2",L"仅房主可切换模式；阵营只能选 1 或 2",L"僅房主可切換模式；陣營只能選 1 或 2",L"モード変更はホストのみ。チームは 1 または 2 を選択")
+HUDTEXT(pvpInvalid,L"Only the host changes mode and sides; that faction does not take this role",L"仅房主可切换模式与关系；该阵营不能选这个角色",L"僅房主可切換模式與關係；該陣營不能選這個角色",L"モードと関係の変更はホストのみ。この陣営はこの役割を選べません")
 HUDTEXT(pvpRoster,L"PVP supports at most 8 online members",L"对战最多支持 8 名联机成员",L"對戰最多支援 8 名連線成員",L"対戦のオンライン人数は最大 8 人です")
 HUDTEXT(pvpChanged,L"Mission or team state changed; select again",L"任务或阵营信息已变化，请重新选择",L"任務或陣營資訊已變化，請重新選擇",L"ミッションかチーム情報が変化しました。再選択してください")
 HUDTEXT(pvpPrepareFailed,L"Check failed: players must be loaded; no rival teams in one vehicle",L"检查未通过：玩家须已加载，同车玩家不能敌对",L"檢查未通過：玩家須已載入，同車玩家不能敵對",L"確認失敗：全員のロード完了と同乗者のチーム一致が必要です")

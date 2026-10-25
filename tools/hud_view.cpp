@@ -264,6 +264,8 @@ bool SupportVersionCue(wchar_t* line,std::size_t capacity) noexcept {
 }
 // The ultimate strike's caller line (ultimate.cpp PlayerUltimateCue): not drawn in any scene.
 bool PlayerUltimateCue(wchar_t*,std::size_t) noexcept { return false; }
+// The strike calls' caller line (airstrike.cpp PlayerStrikeCue): not drawn in any scene.
+bool PlayerStrikeCue(wchar_t*,std::size_t) noexcept { return false; }
 bool NpcPingReadout(NpcPing* p) noexcept { *p=NpcPing{};return false; }
 // The debug spawn tool's menu (debug_spawn.cpp DebugSpawnReadout): up in the debug_spawn scenes.
 bool sceneDebugSpawnOn=false;DebugSpawnCue sceneDebugSpawn{};
@@ -1118,9 +1120,10 @@ bool MapDrawsMapAlone(const float* pos,const float* fwd) {
     return ok;
 }
 
-// EDF6AutoTurret's line (TurretAimMarks: the one auto-aim and its lock key, locked) at `width` x 1080: apart from the
-// stock HUD's block and its RWR scope, on the screen; one auto-aim line, never an on / off pair (2026-10-25: "这个自动瞄准
-// 是不是多余了一个版本，删掉一个").
+// EDF6AutoTurret's line (TurretAimMarks: the one auto-aim, its toggle key and its lock key, locked) at `width` x 1080:
+// apart from the stock HUD's block and its RWR scope, on the screen; one auto-aim line, never an on / off pair
+// (2026-10-25: "这个自动瞄准是不是多余了一个版本，删掉一个"). Off (the default since the same day: "自动瞄准不要开启"): one
+// line saying off and naming the key that turns it on, the lock key not offered; a flip adds its banner and nothing else.
 bool TurretLayoutApart(int width) {
     const float w=static_cast<float>(width),h=1080.0f,s=1.0f;
     void* const drawer=At<void*>(image,kQuadDrawer);
@@ -1134,9 +1137,26 @@ bool TurretLayoutApart(int width) {
     const Box lines=Measured([&](Text* t,Line* l,int* at){
         TurretAimMarks(drawer,ctx,t,vp,w,h,s,r,l,at);
         count=*at;
-        for(int i=0;i<*at;++i)aims+=wcsstr(l[i].text,Tr(Tx::autoAim))!=nullptr;
+        for(int i=0;i<*at;++i)aims+=wcsstr(l[i].text,Tr(Tx::autoAimStateOn))!=nullptr;
     });
-    const bool on=aims==1 && count==1;
+    edf::aimlink::TurretReadoutV1 off=r;
+    off.mode=edf::aimlink::Mode::manual;off.lock=edf::aimlink::Lock::none;off.target=false;
+    int offLines=0,offCount=0,offLock=0,banner=0;
+    Measured([&](Text* t,Line* l,int* at){
+        TurretAimMarks(drawer,ctx,t,vp,w,h,s,off,l,at);
+        offCount=*at;
+        wchar_t v[32],q[32],flip[64],lockWord[64];
+        KeyName(0x4A,v,32);KeyName(0x51,q,32);
+        swprintf_s(flip,L"[%ls]",v);swprintf_s(lockWord,L"[%ls] %ls",q,Tr(Tx::lockWord));
+        for(int i=0;i<*at;++i){offLines+=wcsstr(l[i].text,Tr(Tx::autoAimStateOff))!=nullptr && wcsstr(l[i].text,flip)!=nullptr;
+                               offLock+=wcsstr(l[i].text,lockWord)!=nullptr;}
+    });
+    Measured([&](Text* t,Line* l,int* at){
+        AutoAimBanner(drawer,ctx,t,w,h,s,false,l,at);   // alone: drawn without the line where a view hides it
+        for(int i=0;i<*at;++i)banner+=wcsstr(l[i].text,Tr(Tx::autoAimBannerOff))!=nullptr;
+        banner+=*at==1 ? 0 : 100;
+    });
+    const bool on=aims==1 && count==1 && offLines==1 && offCount==1 && offLock==0 && banner==1;
     PlayerJetSymbols y{};
     std::memcpy(y.pos,sceneStock.pos,12);std::memcpy(y.nose,sceneStock.hull,12);
     y.threats=sceneStock.threats;
@@ -2318,7 +2338,7 @@ int Scenes(const std::wstring& dir) {
     hasTurret=true;
     sceneTurret=edf::aimlink::TurretReadoutV1{};
     sceneTurret.mode=edf::aimlink::Mode::autoAim;sceneTurret.keys=true;sceneTurret.ownGun=true;
-    sceneTurret.lockKey=0x51;sceneTurret.lockButton=0x04;
+    sceneTurret.modeKey=0x4A;sceneTurret.lockKey=0x51;sceneTurret.lockButton=0x04;
     Prime(ground);
     Scene(dir,L"stock_turret_auto",ground);
     failed+=!TurretLayoutApart(1920);

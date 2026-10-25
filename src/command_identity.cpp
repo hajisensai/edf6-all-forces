@@ -1,5 +1,6 @@
 #include "command_identity.h"
 #include "memory.h"
+#include "team_walk.h"
 #include "support_soldier.h"
 
 namespace crew {
@@ -117,7 +118,7 @@ bool ResolveCommandIdentities(const unsigned char requester[32],const unsigned c
         if(!Readable(mgr,0x50) || !Readable(status,0x14FFC))return false;
         void* teams=At<void*>(mgr,0x38);
         visitor.expected=At<unsigned>(status,0x14FF8);
-        if(!visitor.expected || visitor.expected>kMaxPlayers || !Readable(teams,7*0x38))return false;
+        if(!visitor.expected || visitor.expected>kMaxPlayers || !team_walk::WalkRows(mgr))return false;
         reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
         if(visitor.failed || At<void*>(image,kTeamManager)!=mgr || At<const void*>(image,kGameStatus)!=status ||
            At<void*>(mgr,0x38)!=teams || At<unsigned>(status,0x14FF8)!=visitor.expected || !StillLive(visitor))return false;
@@ -141,7 +142,7 @@ bool ResolveMarks(const unsigned char marker[32],const unsigned char target[32],
         const auto status=At<const unsigned char*>(image,kGameStatus);
         if(!Readable(mgr,0x50) || !Readable(status,0x14FFC))return false;
         visitor.expected=At<unsigned>(status,0x14FF8);
-        if(!visitor.expected || visitor.expected>kMaxPlayers || !Readable(At<void*>(mgr,0x38),7*0x38))return false;
+        if(!visitor.expected || visitor.expected>kMaxPlayers || !team_walk::WalkRows(mgr))return false;
         reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
         *out=visitor.out;
         return true;
