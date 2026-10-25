@@ -127,7 +127,7 @@ def build(root: str, hangars: tuple[bool, ...] = dm.ALL_HANGARS) -> dict[str, by
 
 def grid_of(model: str) -> tuple[int, int]:
     """Model `model`'s collision grid: the dreadnought's own (aircraft_collision.DN_GRID), its fighters' the jets'."""
-    return aircraft_collision.DN_GRID if model == dm.SHIP else (aircraft_collision.NX, aircraft_collision.NZ)
+    return aircraft_collision.grid_of(dm.archive_name(model))
 
 
 def made_files() -> list[str]:

@@ -30,7 +30,9 @@
 #include "dreadnought_net.h"
 #include "drill_net.h"
 #include "firstperson.h"
+#include "gunmuzzle.h"
 #include "seat_net_transport.h"
+#include "seat_switch_logic.h"
 #include "heli.h"
 #include "layout.h"
 #include "map.h"
@@ -79,13 +81,13 @@ constexpr float kAttitudeGain=1.6f,kAttitudeMost=0.5f;   // BodyAttitude: 1/s, r
 constexpr float kLeanMost=4.0f*kDeg;      // rad its lean at a full turn at full way ahead
 constexpr float kDipMost=1.5f*kDeg;       // rad its bow's dip (or lift) at its full acceleration (braking)
 constexpr float kDipEase=2.0f;            // 1/s the measured acceleration it dips by is eased at
-// Its place kept with nothing asked across (Station): latched once it has slowed under kAnchorSpeed, then pushed back to
-// at kAnchorGain, kAnchorMost at most. The plugin writes its velocity, never its place: the soldiers on its deck pushed
-// it in the solver's step after that write, a little every frame, and nothing brought it back (the user, 2026-10-25:
-// 「无畏舰会被上面的玩家挤走」).
-constexpr float kAnchorSpeed=0.5f;        // m/s across
-constexpr float kAnchorGain=0.8f;         // 1/s
-constexpr float kAnchorMost=4.0f;         // m/s
+// Its flight body's mass (HullMass). The 506 makes that body with 1 kg (GetMass on the range 2026-10-26, whatever
+// heli_rigid_body says), so any contact the solver resolves on it after the plugin's velocity write (a soldier, a
+// fighter, a monster, debris) gave the 500 m ship tens of m/s for that step: it slid away and sank under a player on its
+// deck while its velocity asked nothing (the user, 2026-10-25: 「无畏舰会被上面的玩家挤走」; the 23:12 log: 35 m/s astern
+// and down against 0 across and 18 m/s up asked). Its velocity is the plugin's either way (written every step, whatever
+// the mass); with a ship's mass a contact's push is lost in it (a 10 t fighter at 100 m/s: 0.1 m/s, a soldier none).
+constexpr float kHullMass=1.0e7f;         // kg
 constexpr ULONGLONG kLogMs=1000;
 
 struct Ship {
@@ -103,8 +105,8 @@ struct Ship {
     float ahead=0.0f,dip=0.0f;   // its way ahead (m/s) last frame, and its eased acceleration along it (m/s^2)
     bool holding=false;    // holdY: the height (its position's y) it keeps while no climb is asked
     float holdY=0.0f;
-    bool anchored=false;   // anchor: the place (x, z) it keeps while nothing is asked across (Station)
-    float anchor[2]{};
+    float massSeen=0.0f;   // its flight body's mass as last found (HullMass), for the log
+    bool massStuck=false;  // ...set and not taken: not set again
 };
 constexpr int kMaxShips=4;
 Ship ships[kMaxShips]{};
@@ -218,26 +220,13 @@ float HoldClimb(Ship& s,const unsigned char* v,float climb,float floor,float acc
     return Clamp(gap*kHoldGain,-most,most);
 }
 
-// Nothing asked across (`still`: no throttle, strafe or turn): the velocity across it is asked (`want`, x and z) brings it
-// back to its place, latched once it has slowed (see kAnchorSpeed); asked anything, its place goes.
-void Station(Ship& s,const unsigned char* v,bool still,float* want) noexcept {
-    if(!still){s.anchored=false;return;}
-    const float* p=reinterpret_cast<const float*>(v+kPosition);
-    if(!s.anchored) {
-        if(std::sqrt(s.vel[0]*s.vel[0]+s.vel[2]*s.vel[2])>kAnchorSpeed)return;
-        s.anchor[0]=p[0];s.anchor[1]=p[2];s.anchored=true;
-    }
-    want[0]=Clamp((s.anchor[0]-p[0])*kAnchorGain,-kAnchorMost,kAnchorMost);
-    want[2]=Clamp((s.anchor[1]-p[2])*kAnchorGain,-kAnchorMost,kAnchorMost);
-}
-
 void Board(Ship& s,unsigned char* v) noexcept {
     s.driven=true;s.everDriven=true;s.flown=true;
     if(!s.insetSaved){s.savedInset=At<float>(v,kAreaInset);s.insetSaved=true;}
     const float* f=reinterpret_cast<const float*>(v+kMatrix)+8;
     s.heading=std::atan2(f[0],f[2]);
     s.turn=0.0f;s.throttle=0.0f;s.dip=0.0f;
-    s.holding=false;s.anchored=false;
+    s.holding=false;
     std::memcpy(s.vel,s.measured,12);
     s.ahead=s.vel[0]*f[0]+s.vel[2]*f[2];
     Log("DREADNOUGHT v=%p boarded by the player: hp %.0f/%.0f, keel %.1f m over the ground",v,At<float>(v,kHp),At<float>(v,kHpMax),s.clear);
@@ -283,8 +272,7 @@ void Settle(Ship& s,unsigned char* v,float dt) noexcept {
     // keel's probes (range 2026-10-21).
     const bool resting=(v[kContact]&kContactGround)!=0;
     const float down=s.clear==kNoGround || resting ? 0.0f : -Clamp((s.clear-kSettleGap)*kFloorGain,0.0f,kSettleSpeed);
-    float want[3]={0.0f,down,0.0f};
-    Station(s,v,true,want);
+    const float want[3]={0.0f,down,0.0f};
     Approach(s.vel,want,Cfg().dreadnoughtAccel,dt);
     if(resting)s.vel[1]=std::fmax(s.vel[1],0.0f);
     Floor(s,0.0f,Cfg().dreadnoughtAccel);
@@ -310,8 +298,7 @@ void Fly(Ship& s,unsigned char* v,const Controls& c,float dt) noexcept {
     // ahead (sin, 0, cos); its right is -x of its frame (x is its left): (-cos, 0, sin)
     const float ahead=s.throttle*speed*boost,right=c.strafe*speed*kStrafeShare;
     const float accel=Cfg().dreadnoughtAccel*boost;
-    float want[3]={sh*ahead-ch*right,HoldClimb(s,v,c.climb,Cfg().dreadnoughtFloor,accel),ch*ahead+sh*right};
-    Station(s,v,s.throttle==0.0f && c.strafe==0.0f && c.turn==0.0f && s.turn==0.0f,want);
+    const float want[3]={sh*ahead-ch*right,HoldClimb(s,v,c.climb,Cfg().dreadnoughtFloor,accel),ch*ahead+sh*right};
     Approach(s.vel,want,accel,dt);
     Floor(s,Cfg().dreadnoughtFloor,accel);
     // its lean into the turn (as fast as it goes), its bow's dip as it gathers way (eased: the measured change is rough)
@@ -328,14 +315,39 @@ void Report(Ship& s,const unsigned char* v,const Controls& c,ULONGLONG ms) noexc
     if(!Cfg().debug || ms-s.logAt<kLogMs)return;
     s.logAt=ms;
     const float* p=reinterpret_cast<const float*>(v+kPosition);
-    Log("DREADNOUGHT v=%p %s vel=(%.1f,%.1f,%.1f) keel %.1f m heading %.0f turn %.1f throttle %.2f boost %.2f%s pos=(%.0f,%.0f,%.0f) hp %.0f in(thrust %.2f strafe %.2f turn %.1f climb %.2f) anchor %s %.1f m",
+    Log("DREADNOUGHT v=%p %s vel=(%.1f,%.1f,%.1f) keel %.1f m heading %.0f turn %.1f throttle %.2f boost %.2f%s pos=(%.0f,%.0f,%.0f) hp %.0f in(thrust %.2f strafe %.2f turn %.1f climb %.2f) moved (%.1f,%.1f,%.1f)",
         v,s.driven ? "FLOWN" : s.flown ? "HOLDING" : "SETTLING",s.vel[0],s.vel[1],s.vel[2],s.clear,s.heading/kDeg,s.turn,s.throttle,s.boost,
-        s.boosting ? " (on)" : "",p[0],p[1],p[2],At<float>(v,kHp),c.thrust,c.strafe,c.turn,c.climb,s.anchored ? "on" : "off",
-        s.anchored ? std::sqrt((s.anchor[0]-p[0])*(s.anchor[0]-p[0])+(s.anchor[1]-p[2])*(s.anchor[1]-p[2])) : 0.0f);
+        s.boosting ? " (on)" : "",p[0],p[1],p[2],At<float>(v,kHp),c.thrust,c.strafe,c.turn,c.climb,s.measured[0],s.measured[1],s.measured[2]);
 }
 
 #include "dreadnought_turrets.inc"
 #include "dreadnought_hangar.inc"
+
+// Its flight body given kHullMass whenever it has another (SetMass 0x11B1930, docs/gravity-re.md §2: the 506 makes it
+// with 1 kg; set again should the game reset it). The flight body only: its ragdoll parts are keyframed (no mass).
+constexpr unsigned kBodySetMass=0x11B1930;
+const unsigned char kBodySetMassHead[]={0x48,0x8B,0x81,0x00,0x01,0x00,0x00,0x45,0x33,0xC9,0x8B,0x91,0xF0,0x00,0x00,0x00};
+const unsigned char kBodySetMassTail[]={0x48,0xFF,0xA0,0xF8,0x00,0x00,0x00};   // at +0x1F: jmp [rax+0xF8] (slot 31)
+void HullMass(Ship& s,unsigned char* v) noexcept {
+    unsigned char* const flight=At<unsigned char*>(v,kBody);
+    if(!flight || s.massStuck)return;
+    static int said=0;
+    __try {
+        const float mass=BodyMass(flight);
+        if(mass<0.0f || std::memcmp(image+kBodySetMass,kBodySetMassHead,sizeof(kBodySetMassHead))!=0 ||
+           std::memcmp(image+kBodySetMass+0x1F,kBodySetMassTail,sizeof(kBodySetMassTail))!=0) {
+            if(!said++)Log("DREADNOUGHT v=%p its flight body's mass code is not as known: left at %.6g kg",v,mass);
+            return;
+        }
+        if(std::fabs(mass-kHullMass)<=0.01f*kHullMass)return;
+        reinterpret_cast<void(__fastcall*)(void*,float)>(image+kBodySetMass)(flight,kHullMass);
+        const float now=BodyMass(flight);
+        s.massStuck=std::fabs(now-kHullMass)>0.01f*kHullMass;
+        Log("DREADNOUGHT v=%p its flight body %.6g kg (%s): set to %.6g kg, now %.6g%s",v,mass,s.massSeen>0.0f ? "reset" : "as made",
+            kHullMass,now,s.massStuck ? " (not taken: left so)" : "");
+        s.massSeen=mass;
+    } __except(EXCEPTION_EXECUTE_HANDLER){if(!said++)Log("DREADNOUGHT v=%p its flight body's mass: faulted, left as it is",v);}
+}
 
 // Slot `i` new: everything kept per ship (its Ship, its turrets' rigs, remote gunners and network gate, its hangars'
 // rig, fitting, bays, escorts and sorties, its hull's bodies in the bullets' hook) goes together. Reused for another ship, a slot
@@ -434,6 +446,7 @@ void DreadnoughtFrame(unsigned char* v) noexcept {
     if(!s && (s=Take(v))==nullptr)return;
     s->frame=GameFrame();
     HullBodies(static_cast<int>(s-ships),v);   // its turrets' rounds through its own hull (jet_hooks.cpp)
+    HullMass(*s,v);
     Drive(*s,v,GameMs());
     Publish(*s,v);           // the local player's panel, in any of its seats
     WatchPlayer(GameMs());   // once a frame: the local player getting out onto its bridge (of its seats, or of a fighter brought home)

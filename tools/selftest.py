@@ -1433,12 +1433,13 @@ def dreadnought_agrees() -> None:
     import make_tracked_combat as tc
     kinds = list(make_dreadnought.TURRET_ROUNDS)
     assert kinds == list(tc.DREADNOUGHT_GUNS) and len(vc.DREADNOUGHT_TURRET_GUNS) == vc.DREADNOUGHT_TURRETS
-    guns = re.findall(r'\{(\d+),(\d+),([\d.]+)f,([\d.]+)f\}', turrets.split('kGuns[]={', 1)[1].split('};', 1)[0])
+    guns = re.findall(r'\{(\d+),(\d+),([\d.]+)f,([\d.]+)f,([\d.]+)f\}', turrets.split('kGuns[]={', 1)[1].split('};', 1)[0])
     assert len(guns) == len(kinds), guns
-    for i, (kind, (rnd, gap, reach, barrel)) in enumerate(zip(kinds, guns)):
+    for i, (kind, (rnd, gap, reach, barrel, spread)) in enumerate(zip(kinds, guns)):
         g = tc.GUNS[kind]
         assert int(rnd) == i and int(gap) == round(g['FireInterval'] * 1000 / 60), (kind, rnd, gap)
         assert float(reach) == g['AmmoSpeed'] * g['AmmoAlive'] and float(barrel) == vc.DREADNOUGHT_BARRELS[kind], (kind, reach, barrel)
+        assert float(spread) == g['FireAccuracy'], (kind, spread, g['FireAccuracy'])
     of = re.search(r'kGunOf\[kTurrets\]=\{([^}]*)\}', turrets)
     assert of and [kinds[int(x)] for x in of.group(1).split(',')] == list(vc.DREADNOUGHT_TURRET_GUNS), 'kGunOf'
     rounds = re.findall(r'\{L"app:/object/(\w+\.sgo)",L"(\w+\.SGO)","\w+",([\d.]+)f\}',

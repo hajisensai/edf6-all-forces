@@ -11,7 +11,8 @@ it from them). Triangles are clipped to
 each X/Z cell before measuring its Y range, so empty corners around swept wings stay
 empty. Unlike a vertex-only sampler this includes long triangles spanning many cells.
 This is a conservative collision approximation, not a triangle-perfect mesh: 24 by 32
-cells, at most one cell of silhouette error and a 3 cm skin for zero-thickness surfaces.
+cells (the 500 m Dreadnought: DN_GRID, 48 by 64), at most one cell of silhouette error and a 3 cm skin for
+zero-thickness surfaces.
 Landing gear is included in the grounded bind pose (its movement is cosmetic).
 """
 from __future__ import annotations
@@ -42,6 +43,12 @@ DN_FILES = {k: k.replace('.MRAB', '_AIRFRAME.SHKT') for k in jet_models.DN_FILES
 # installed model, 2026-10-25): soldiers stood on air by its turrets and superstructure (the user, 2026-10-25:
 # 「无畏舰…模型和实际不符」). 48 x 64 (4.75 by 7.8 m, 2451 cells) nests in it: 16.2%, 1.06 m on average.
 DN_GRID = (48, 64)
+DN_SHIP = 'EDF6VC_DN_DREADNOUGHT.MRAB'
+
+
+def grid_of(key) -> tuple[int, int]:
+    """A model_key's collision grid: the dreadnought's DN_GRID, every other aircraft's NX x NZ."""
+    return DN_GRID if key == DN_SHIP else (NX, NZ)
 
 
 def file_of(key) -> str:
@@ -157,7 +164,7 @@ def _pieces(tf, tris, magic=0):
 @lru_cache(maxsize=32)
 def build(game, key, mode=None):
     """Return one complete .SHKT; all points relative to the unchanged full-model centre."""
-    return airframe(game, jet_models._model_of(game, key), jet_models.model_box(game, key)[0], mode)
+    return airframe(game, jet_models._model_of(game, key), jet_models.model_box(game, key)[0], mode, grid_of(key))
 
 
 def airframe(game, md, centre, mode=None, grid=(NX, NZ)):

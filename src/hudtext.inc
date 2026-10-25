@@ -1031,5 +1031,6 @@ HUDTEXT(dnHangarWait,L"  next flight %.0f s",L"  下一编队 %.0f 秒",L"  下�
 HUDTEXT(dnLegend,L"green yours  blue other players  amber the bridge's",L"绿 你的  蓝 其他玩家  橙 舰桥指挥",L"綠 你的  藍 其他玩家  橙 艦橋指揮",L"緑 自分  青 他のプレイヤー  橙 艦橋の指揮")
 HUDTEXT(dnKeysFly,L"W/S throttle  A/D turn  Q/E strafe  Space/%ls up/down  %ls boost",L"W/S 油门  A/D 转向  Q/E 横移  空格/%ls 升降  %ls 加速",L"W/S 油門  A/D 轉向  Q/E 橫移  空白/%ls 升降  %ls 加速",L"W/S スロットル  A/D 旋回  Q/E 横移動  Space/%ls 上昇/下降  %ls ブースト")
 HUDTEXT(dnPadFly,L"LS throttle/turn  LT/%ls up/down  %ls boost  RS view",L"左摇杆 油门/转向  LT/%ls 升降  %ls 加速  右摇杆 视角",L"左搖桿 油門/轉向  LT/%ls 升降  %ls 加速  右搖桿 視角",L"Lスティック スロットル/旋回  LT/%ls 上昇/下降  %ls ブースト  Rスティック 視点")
-HUDTEXT(dnKeysBridge,L"fire: every free turret at the sight  %ls hangar  %ls seats  %ls first person  hold %ls look ahead",L"开火：所有空炮塔打准星  %ls 机库  %ls 换座  %ls 第一人称  按住 %ls 前视",L"開火：所有空砲塔打準星  %ls 機庫  %ls 換座  %ls 第一人稱  按住 %ls 前視",L"射撃：空いている全砲塔が照準へ  %ls 格納庫  %ls 座席  %ls 一人称  %ls 長押し 前方視点")
-HUDTEXT(dnKeysGun,L"fire: this turret  %ls seats  %ls first person  hold %ls look ahead",L"开火：本炮塔  %ls 换座  %ls 第一人称  按住 %ls 前视",L"開火：本砲塔  %ls 換座  %ls 第一人稱  按住 %ls 前視",L"射撃：この砲塔  %ls 座席  %ls 一人称  %ls 長押し 前方視点")
+HUDTEXT(dnKeysBridge,L"fire: every free turret at the sight  %ls hangar  %ls seats  %ls first person%ls",L"开火：所有空炮塔打准星  %ls 机库  %ls 换座  %ls 第一人称%ls",L"開火：所有空砲塔打準星  %ls 機庫  %ls 換座  %ls 第一人稱%ls",L"射撃：空いている全砲塔が照準へ  %ls 格納庫  %ls 座席  %ls 一人称%ls")
+HUDTEXT(dnKeysGun,L"fire: this turret  %ls seats  %ls first person%ls",L"开火：本炮塔  %ls 换座  %ls 第一人称%ls",L"開火：本砲塔  %ls 換座  %ls 第一人稱%ls",L"射撃：この砲塔  %ls 座席  %ls 一人称%ls")
+HUDTEXT(dnKeysAhead,L"  hold %ls look ahead",L"  按住 %ls 前视",L"  按住 %ls 前視",L"  %ls 長押し 前方視点")

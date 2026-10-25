@@ -1096,17 +1096,21 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             held.add(ledger.key(f'WEAPON/{name}'))
     if DREADNOUGHT_JET in jets:
         # Its fighters (the hangar launches them) and every model's airframe: tools/make_dreadnought.py's files, its own
-        # SGO aside (the range's is EDF6TR_DREADNOUGHT_MISSION.SGO: vehicle_sgo). The installer's when it put them all
-        # there (its hangar fitting kept, no 3 minute rebuild on every range install now that the map always places it),
-        # else built here with the plugin ini's fitting.
+        # SGO aside (the range's is EDF6TR_DREADNOUGHT_MISSION.SGO: vehicle_sgo). The installer's when its build cache
+        # says they are what this generator, its model folder and the plugin ini's hangar fitting make now (pylib/
+        # buildcache.py Cache.current, the installer's own test: no 3 minute rebuild on every range install now that the
+        # map always places it), else built here with that fitting.
+        import buildcache
         import make_dreadnought
         made = make_dreadnought.made_files()
-        if all(os.path.isfile(led.disk(rel)) for rel in made):
+        hangars = make_dreadnought.hangars_of(game_root, [])
+        installed = buildcache.Cache(game_root).current(make_dreadnought.OWNER, {'hangars': dreadnought_model.hangars_text(hangars)})
+        if installed and all(os.path.isfile(led.disk(rel)) for rel in made):
             for rel in made:
                 led.need(OWNER, rel)
                 held.add(ledger.key(rel))
         else:
-            for rel, data in make_dreadnought.build(game.root, make_dreadnought.hangars_of(game_root, [])).items():
+            for rel, data in make_dreadnought.build(game.root, hangars).items():
                 if rel != f'OBJECT/{make_dreadnought.SGO_FILE}':
                     led.put(OWNER, rel, data)
                     held.add(ledger.key(rel))
@@ -1131,7 +1135,9 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
     import aircraft_collision
     for name in sorted(jets):
         key = aircraft_collision.model_key(JETS[name], JET_ELEVON_MODEL if elevons else None)
-        if key is not False:
+        # the Dreadnought's (its fighters' too) are the block above's: the installer's fitting and DN_GRID, which this
+        # generic rebuild (every hangar fitted) had written over
+        if key is not False and key not in aircraft_collision.DN_FILES:
             rel = f'OBJECT/{aircraft_collision.file_of(key)}'
             # Rebuild from the same Root.cpk/model recipe, never reuse a stale
             # loose shape with a different mesh or a previous collision version.
