@@ -1211,7 +1211,7 @@ void EntranceMark(void* drawer,void* ctx,Text* text,const float* vp,float width,
 // (StoreGlyph: a silhouette from quads, hud_cue.h; the HUD has no texture of the game's to draw), its name and rounds
 // under it, the picked one on a panel in a cyan frame; on a switch the picked store large over it for kSwitchMs
 // (LoadoutBanner). For the plugin's jets and rotor craft (PlayerJetReadout) and a stock heli (StockHudReadout). ---
-constexpr unsigned long long kSwitchMs=1500;   // a switch's banner (the store's)
+constexpr unsigned long long kSwitchMs=1500;   // a switch's banner (the store's, EDF6AutoTurret's auto-aim's)
 constexpr float kCellW=112.0f,kCellH=48.0f;   // px at 1080 lines: a strip's cell
 constexpr float kRows3[]={-4.0f,0.0f,4.0f};   // a glyph's three rows (the pod's rockets, the gun's rounds)
 struct LoadCell { hudcue::StoreIcon icon; wchar_t text[64]; const float* rgba; bool picked; float load=-1.0f; };   // load: hud_cue.h CellLoad
@@ -2659,9 +2659,15 @@ void CarrierBars(void* drawer,void* ctx,Text* text,const float* vp,float width,f
 
 // EDF6AutoTurret's turret the player is at (turretaim.cpp, common/edf/aimlink.h; the user, 2026-10-06: "a lock box on
 // the target I pick"). The lock as the jets' (LockAt: a yellow square closing in while its track settles, then the red
-// diamond). Low on the screen one line: the auto-aim and its lock binding. One auto-aim since 2026-10-25 (the user:
-// "这个自动瞄准是不是多余了一个版本，删掉一个"): the lead-circle mode, its circle, its bore cross and its two lines
-// ("自动瞄准 开" over "[Z] 自动瞄准 关", read as two auto-aims) went; StockMarks' own lead mark shows where to aim.
+// diamond). Low on the screen one line: the auto-aim's state, the key that flips it and, while on, the lock binding.
+// One auto-aim since 2026-10-25 (the user: "这个自动瞄准是不是多余了一个版本，删掉一个"): the lead-circle mode, its circle,
+// its bore cross and its two lines ("自动瞄准 开" over "[Z] 自动瞄准 关", read as two auto-aims) went; StockMarks' own lead
+// mark shows where to aim. Off by default since the same day (the user: "怎么自动开启自动瞄准了，而且也没啥提示欸……自动瞄准不要
+// 开启，开启以后应该有被瞄准敌人的高亮圈之类的"): AUTO-AIM: OFF (white) and the key that turns it on, or AUTO-AIM: ON (green)
+// with the key that turns it off and the lock's; for kSwitchMs after a flip (`flipped`) the new state large over the
+// screen's middle on a panel; while on and nothing is locked, a green ring (TargetRing) on the enemy the gun is turned
+// onto, else on the one a lock press would take now.
+constexpr float kTargetRing=26.0f;   // px at 1080 lines
 void ButtonName(int bits,wchar_t* out,int size) noexcept {
     static const wchar_t* const kNames[]={L"A",L"B",L"X",L"Y",L"LB",L"RB",L"L3",L"R3"};
     for(int i=0;i<8;++i)if(bits==(1<<i)){wcscpy_s(out,static_cast<rsize_t>(size),kNames[i]);return;}
@@ -2671,23 +2677,53 @@ void Binding(bool keys,int key,int button,wchar_t* out,int size) noexcept {
     if(keys)KeyName(key,out,size);
     else ButtonName(button,out,size);
 }
+// A ring with four ticks out of it round `p` (the auto-aim's target with no lock).
+void TargetRing(void* drawer,void* ctx,const float* vp,float width,float height,float s,const float* p) noexcept {
+    float x,y,depth;
+    if(!Project(vp,p,width,height,&x,&y,&depth))return;
+    const float r=kTargetRing*s,t=2.0f*s,tick=8.0f*s;
+    Arc(drawer,ctx,x,y,r,0.0f,kTurn,t,24,kGreen);
+    Seg(drawer,ctx,x-r-tick,y,x-r,y,t,kGreen);Seg(drawer,ctx,x+r,y,x+r+tick,y,t,kGreen);
+    Seg(drawer,ctx,x,y-r-tick,x,y-r,t,kGreen);Seg(drawer,ctx,x,y+r,x,y+r+tick,t,kGreen);
+}
 void TurretAimMarks(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,
                     const edf::aimlink::TurretReadoutV1& r,Line* lines,int* at,float controlsBottom=-1.0f) noexcept {
     namespace link=edf::aimlink;
+    const bool on=r.mode!=link::Mode::manual;
     float x,y;
-    if(r.lock!=link::Lock::none)LockAt(drawer,ctx,vp,width,height,s,r.lock==link::Lock::locked ? 2 : 1,r.at,r.lockProgress,&x,&y);
-    // AUTO-AIM (green; a tank driver's whose lock its gunners fight: GUNNERS: AUTO-AIM, white) and the lock's binding on
-    // the same line, red while locked.
-    wchar_t text1[160];
-    wcscpy_s(text1,Tr(r.ownGun ? Tx::autoAim : Tx::gunnersAuto));
-    if(r.keys ? r.lockKey>0 : r.lockButton>0) {
+    if(on && r.lock!=link::Lock::none)LockAt(drawer,ctx,vp,width,height,s,r.lock==link::Lock::locked ? 2 : 1,r.at,r.lockProgress,&x,&y);
+    else if(on && r.target)TargetRing(drawer,ctx,vp,width,height,s,r.at);
+    // The state (on: green, a tank driver's whose lock its gunners fight GUNNERS: AUTO-AIM, white; off: white), the key
+    // that flips it (a pad with no AutoAimButton: where to set one) and, while on, the lock's binding; red while locked.
+    wchar_t text1[200];
+    wcscpy_s(text1,Tr(!on ? Tx::autoAimStateOff : r.ownGun ? Tx::autoAimStateOn : Tx::gunnersAuto));
+    std::size_t n=wcslen(text1);
+    if(r.keys ? r.modeKey>0 : r.modeButton>0) {
+        wchar_t flip[32];
+        Binding(r.keys,r.modeKey,r.modeButton,flip,32);
+        std::swprintf(text1+n,200-n,Tr(on ? Tx::autoAimTurnOff : Tx::autoAimTurnOn),L"   ",flip);
+    } else if(!r.keys) {
+        std::swprintf(text1+n,200-n,Tr(Tx::autoAimPadUnset),L"   ");
+    }
+    n=wcslen(text1);
+    if(on && (r.keys ? r.lockKey>0 : r.lockButton>0)) {
         wchar_t lock[32];
         Binding(r.keys,r.lockKey,r.lockButton,lock,32);
-        const std::size_t n=wcslen(text1);
-        std::swprintf(text1+n,160-n,Tr(Tx::lockKey),L"   ",lock,Tr(r.lock==link::Lock::none ? Tx::lockWord : Tx::nextWord));
+        std::swprintf(text1+n,200-n,Tr(Tx::lockKey),L"   ",lock,Tr(r.lock==link::Lock::none ? Tx::lockWord : Tx::nextWord));
     }
-    const float* const colour=r.lock==link::Lock::locked ? kRed : r.ownGun ? kGreen : kWhite;
+    const float* const colour=!on ? kWhite : r.lock==link::Lock::locked ? kRed : r.ownGun ? kGreen : kWhite;
     Label(text,lines,at,width*0.5f,controlsBottom>=0.0f ? controlsBottom : height*0.905f,1,kLineScale,colour,L"%ls",text1);
+}
+// The new auto-aim state large over the screen's middle on a panel, for kSwitchMs after a flip: drawn whenever the
+// turret's readout is there, with the line above or without it (the optic, the overhead view, the gunner's sight, first
+// person: the flip's key works there too, and its only answer must not be hidden).
+void AutoAimBanner(void* drawer,void* ctx,Text* text,float width,float height,float s,bool on,Line* lines,int* at) noexcept {
+    const float by=height*0.30f;
+    const float* const banner=on ? kGreen : kWhite;
+    Label(text,lines,at,width*0.5f,by,1,kTitleScale,banner,L"%ls",Tr(on ? Tx::autoAimBannerOn : Tx::autoAimBannerOff));
+    const float w=(*at>0 && lines[*at-1].w>0.0f ? lines[*at-1].w : 420.0f*s)+40.0f*s,h=48.0f*s;
+    Rect(drawer,ctx,(width-w)*0.5f,by-h*0.5f,(width+w)*0.5f,by+h*0.5f,kPanel);
+    Rect(drawer,ctx,(width-w)*0.5f,by-h*0.5f,(width+w)*0.5f,by-h*0.5f+3.0f*s,banner);
 }
 
 // --- The stock vehicles' HUD (vhud.cpp gathers it; ini StockVehicleHud; docs/hud-re.md §7): for the stock vehicle the
@@ -5724,6 +5760,13 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         if(fresh && !overhead)ThermalControlHint(t,width,height,s,thermalStatus,lines,&at);
         if(fresh && snap.sensor && !overhead)VehicleContacts(drawer,ctx,t,viewProj,width,height,s,snap.sensorHud,thermalStatus,lines,&at);
         const bool showTurretOverlay=fresh && snap.turret && !mountedOptic && !snap.cockpit && !(physicalSight && snap.turretAim.ownGun) && (!stockHud || hudcue::TurretOverlayOwned(stockPick,snap.stockHud.turret)) && !launcherSight && !overhead && !gunnerSight && !mechSight;
+        // A flip of EDF6AutoTurret's auto-aim (its readout's mode) while at its turret: the new state large for a moment,
+        // whatever view hides the line. Forgotten while there is no readout, so boarding with the state it already had
+        // is no flip.
+        static hudcue::Change aimMode{};
+        const bool turretRead=fresh && snap.turret;
+        if(!turretRead)aimMode.seen=false;
+        const bool aimFlipped=turretRead && hudcue::Changed(aimMode,static_cast<int>(snap.turretAim.mode),now,kSwitchMs);
         if(showTurretOverlay) {
             float controlsBottom=-1.0f;
             if(stockHud) {
@@ -5735,6 +5778,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             }
             TurretAimMarks(drawer,ctx,t,viewProj,width,height,s,snap.turretAim,lines,&at,controlsBottom);
         }
+        if(aimFlipped)AutoAimBanner(drawer,ctx,t,width,height,s,snap.turretAim.mode!=edf::aimlink::Mode::manual,lines,&at);
         if(stockHud) {
             const StockExtras x{fresh && snap.nix ? &snap.nixTorso : nullptr,fresh && snap.drill ? &snap.drillCue : nullptr,
                                 fresh && snap.emc ? &snap.emcCue : nullptr,

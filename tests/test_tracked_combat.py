@@ -9,7 +9,9 @@ import copy
 
 import numpy as np
 import sys
+import types
 import unittest
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'tools'), str(ROOT / 'pylib')]
@@ -22,7 +24,9 @@ import make_tracked_combat as combat
 import rootcpk
 import vcobjects as vc
 import graft_pure as graft
+import acb
 import mdb
+import os
 import tracked_combat_model as tracked
 import vulcan_model
 
@@ -284,6 +288,62 @@ class NativeAssetContractTests(unittest.TestCase):
         self.assertEqual(changed, bytes(expected))
         with self.assertRaises(ValueError):
             combat.set_muzzles(native, [point, point])
+
+    def test_fire_se_by_the_guns_interval(self) -> None:
+        # A machine gun's cue loops under the weapon (the quad Vulcan's FireInterval is 1), a slower gun's is a finite
+        # cue played a round at a time.
+        for interval in (1.0, 2.0, float(combat.RAPID_FRAMES)):
+            self.assertEqual(combat.fire_se(interval, 1.2)[:2], [1.0, combat.GATLING_CUE])
+        for interval in (6.0, 12.0):
+            self.assertEqual(combat.fire_se(interval, 0.85)[:2], [0.0, combat.AUTOCANNON_CUE])
+        self.assertEqual(combat.fire_se(1.0, 1.2)[3], 1.2)
+
+
+@unittest.skipUnless((Path(rootcpk.DEFAULT_GAME) / 'Root.cpk').is_file(), 'EDF6 Root.cpk is unavailable')
+class FireSoundTests(unittest.TestCase):
+    """The replaced guns' fire sounds (tools/make_tracked_combat.py fire_se)."""
+    game = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.game = rootcpk.default()
+
+    def test_unbounded_fire_cues_are_played_by_the_weapons_loop_owner(self) -> None:
+        # The user, 2026-10-25: 「停火的时候这个四联装火神炮的开火声音还是有」. weapon_VHC_heli302_gatling has no end (its ACB
+        # length is 0xFFFFFFFF, as with every cue the stock weapons play with FireSe[0] = 1). Played one-shot (0) every round
+        # it started a voice nothing owned and nothing stopped; the weapon stops only the voice it owns (0x693FD3..0x69400B).
+        folder = Path(self.game.root) / 'SOUND' / 'PC'
+        if not folder.is_dir():
+            self.skipTest('the SOUND/PC banks are unavailable')
+        lengths: dict[str, int] = {}
+        for name in sorted(os.listdir(folder)):
+            if name.upper().endswith('.ACB'):
+                lengths.update(acb.cue_lengths((folder / name).read_bytes()))
+        self.assertEqual(lengths[combat.GATLING_CUE], 0xFFFFFFFF)
+        self.assertNotEqual(lengths[combat.AUTOCANNON_CUE], 0xFFFFFFFF)
+        point = [('cannon_slide_l', (0.1, 0.2, 1.5))]
+        checked = 0
+        # The casing's ejection point comes from each kind's model, which CI does not have: the weapon file does not
+        # depend on where it is.
+        stub = types.SimpleNamespace(ejection_local=lambda game: {'left': (0.0, 0.0, 0.0), 'right': (0.0, 0.0, 0.0)})
+        patch = unittest.mock.patch.object(combat, 'model_module', lambda kind: stub)
+        patch.start()
+        self.addCleanup(patch.stop)
+        for kind in combat.KINDS:
+            vehicle = vc.GROUND_VEHICLES[kind]
+            for i, path in enumerate(vehicle.weapons):
+                side = combat.slot(kind, i)
+                if side == 'missiles':
+                    continue
+                root = dsgo.parse(combat.gun_sgo(self.game, kind, combat.STOCK_GUNS[side == 'right'], side, point,
+                                                 path.rsplit('/', 1)[1].upper() if i >= 2 else None)).root
+                loop, cue = root.get('FireSe').items[:2]
+                with self.subTest(kind=kind, weapon=i):
+                    self.assertIn(cue, lengths)
+                    if lengths[cue] == 0xFFFFFFFF:
+                        self.assertEqual(loop, 1.0, f'{kind} weapon {i}: {cue} never ends and has no owner to stop it')
+                    checked += 1
+        self.assertGreater(checked, 20)
 
 
 if __name__ == '__main__':

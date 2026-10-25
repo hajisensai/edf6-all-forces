@@ -216,17 +216,23 @@ void HighView() {
 struct Gun { const char* name; float speed,factor; int alive; float up; };
 constexpr float kGravity=14.7f,kSightFar=3000.0f,kSegment=15;   // turretcam.cpp (its search: twice kSightFar) / rounds.cpp's
 
+// The flat ground ends at z = groundEdge (a stock map's ground stops at +-1500..2000 m; past it, the void).
+float groundEdge=INFINITY;
+float boxOff=0.0f;   // m the measured box falls short of the real edge (negative: past it)
 float FlatRay(const float* a,const float* b,float* hit) {
     if(!(a[1]>=0.0f) || !(b[1]<0.0f))return -1.0f;
     const float t=a[1]/(a[1]-b[1]);
     for(int i=0;i<3;++i)hit[i]=a[i]+(b[i]-a[i])*t;
+    if(!(std::fabs(hit[2])<=groundEdge))return -1.0f;
     float d[3]={hit[0]-a[0],hit[1]-a[1],hit[2]-a[2]};
     return std::sqrt(vec::Dot(d,d));
 }
 
 // What ShotFocus observes for `g` fired at `elev` rad (heading +Z), and the old observation (the shot's end as it was).
-struct Seen { float across,y,oldY; };
-Seen Observe(const Gun& g,float elev) {
+// `walk`: tcam::GroundReach as ShotFocus has it (false: the point straight under the shot's end, as before 2026-10-25).
+// `voided`: no ground under the observed point.
+struct Seen { float across,y,oldY; bool voided; };
+Seen Observe(const Gun& g,float elev,bool walk=true) {
     const float muzzle[3]={0.0f,g.up,0.0f},dir[3]={0.0f,std::sin(elev),std::cos(elev)};
     rounds::Arc arc{};
     for(int i=0;i<3;++i){arc.vel[i]=dir[i]*g.speed;arc.drop[i]=0.0f;}
@@ -236,19 +242,41 @@ Seen Observe(const Gun& g,float elev) {
     const float* at=landed ? hit : end;
     float out[3];
     tcam::HighFocus(muzzle,dir,landed,at,kSightFar,0.0f,out);
-    if(!(landed && tcam::AcrossDistance(muzzle,at)<=kSightFar)) {   // ShotFocus: the ground straight under it
-        const float from[3]={out[0],g.up+1000.0f,out[2]},to[3]={out[0],-1000.0f,out[2]};
-        float down[3];
-        if(FlatRay(from,to,down)>=0.0f)out[1]=down[1];
+    const auto down=[&](float x,float z,float* y) {   // a map ray straight down
+        const float from[3]={x,g.up+1000.0f,z},to[3]={x,-1000.0f,z};
+        float under[3];
+        if(!(FlatRay(from,to,under)>=0.0f))return false;
+        *y=under[1];
+        return true;
+    };
+    if(!(landed && tcam::AcrossDistance(muzzle,at)<=kSightFar)) {   // ShotFocus: the ground under it
+        if(!walk) {   // before 2026-10-25: straight under it, wherever that is
+            float y=0.0f;
+            if(down(out[0],out[2],&y))out[1]=y;
+        } else {
+            float r=tcam::AcrossDistance(muzzle,out);
+            float h[2]={out[0]-muzzle[0],out[2]-muzzle[2]};
+            if(r>1e-3f){h[0]/=r;h[1]/=r;}else{h[0]=0.0f;h[1]=0.0f;}
+            float start=r;
+            if(std::isfinite(groundEdge)) {   // the measured box (MapPlayArea widened back to the edge), off the real one
+                const float lo[2]={-1e4f,-groundEdge+boxOff},hi[2]={1e4f,groundEdge-boxOff};
+                start=tcam::AreaReach(lo,hi,muzzle[0],muzzle[2],h[0],h[1],r);
+            }
+            float y=g.up;
+            r=tcam::GroundReach([&](float d,float* ground){return down(muzzle[0]+h[0]*d,muzzle[2]+h[1]*d,ground);},r,start,&y);
+            out[0]=muzzle[0]+h[0]*r;out[1]=y;out[2]=muzzle[2]+h[1]*r;
+        }
     }
-    return Seen{tcam::AcrossDistance(muzzle,out),out[1],at[1]};
+    float y=0.0f;
+    const bool over=down(out[0],out[2],&y);
+    return Seen{tcam::AcrossDistance(muzzle,out),out[1],at[1],!over};
 }
 
 // The largest change of the observed distance between neighbouring elevations `step` deg apart over [lo, hi] deg.
-float WorstStep(const Gun& g,float lo,float hi,float step) {
-    float worst=0.0f,last=Observe(g,lo*kDeg).across;
+float WorstStep(const Gun& g,float lo,float hi,float step,bool walk=true) {
+    float worst=0.0f,last=Observe(g,lo*kDeg,walk).across;
     for(float e=lo+step;e<=hi+1e-4f;e+=step) {
-        const float d=Observe(g,e*kDeg).across;
+        const float d=Observe(g,e*kDeg,walk).across;
         worst=std::fmax(worst,std::fabs(d-last));
         last=d;
     }
@@ -291,8 +319,42 @@ void HighFocusSweep() {
     }
 }
 
+// The map's ground ends (the user, 2026-10-25: "俯瞰视角的移动视角会一下去很远的地方，而且动的时候地图会整个变灰一下"): ground
+// to kEdge m ahead, the void past it. Over the gun's elevation the observed point is always over ground, never past the
+// edge, and continuous across the elevation where the rounds stop landing inside it. The old observation (straight under
+// the shot's end) is checked to go out over the void in one step: the jump and the grey. The measured box (where the edge
+// is looked for from) on the edge, short of it and past it: the same edge found either way.
+void FiniteMap() {
+    constexpr float kEdge=1500.0f,kLo=-30.0f,kHi=85.0f,kStep=0.01f,kSlack=1.0f;
+    const Gun guns[]={{"howitzer",4.0f,1.0f,1200,3.5f},{"flat gun",20.0f,0.5f,120,4.0f},{"long flat gun",20.0f,0.5f,400,4.0f}};
+    groundEdge=kEdge;
+    for(float off:{0.0f,40.0f,350.0f,-250.0f})for(const Gun& g:guns) {
+        boxOff=off;
+        float most=0.0f,oldMost=0.0f;
+        bool voided=false,oldVoided=false;
+        for(float e=kLo;e<=kHi+1e-4f;e+=kStep) {
+            const Seen s=Observe(g,e*kDeg),o=Observe(g,e*kDeg,false);
+            most=std::fmax(most,s.across);oldMost=std::fmax(oldMost,o.across);
+            voided=voided || s.voided;oldVoided=oldVoided || o.voided;
+        }
+        Expect(!voided,"finite map: the observed point is over ground at every elevation");
+        Expect(most<=kEdge+kSlack,"finite map: never past the ground's edge",most,kEdge);
+        const float coarse=WorstStep(g,kLo,kHi,0.04f),fine=WorstStep(g,kLo,kHi,kStep);
+        Expect(fine<=0.5f*coarse+tcam::kGroundFine+kSlack,"finite map: continuous in the elevation (no jump)",coarse,fine);
+        const float oldFine=WorstStep(g,kLo,kHi,kStep,false);
+        if(g.speed*static_cast<float>(g.alive)>kEdge+500.0f) {
+            Expect(oldVoided && oldMost>kEdge+400.0f,"finite map: the old observation went out over the void",oldMost);
+            Expect(oldFine>400.0f,"finite map: the old observation jumped there in one step",oldFine);
+        }
+        std::printf("finite map %s, box %+.0f m off: farthest %.0f m (edge %.0f), largest change %.1f m / 0.04 deg, %.1f m / 0.01 deg;"
+                    " the old observation out to %.0f m, a %.0f m step\n",g.name,off,most,kEdge,coarse,fine,oldMost,oldFine);
+    }
+    groundEdge=INFINITY;boxOff=0.0f;
+}
+
 int main() {
     HighFocusSweep();
+    FiniteMap();
     Owners();
     Steps();
     Ends();

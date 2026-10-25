@@ -128,6 +128,62 @@ inline void HighFocus(const float* muzzle,const float* dir,bool landed,const flo
     out[0]=muzzle[0]+h[0]/len*r;out[1]=ground;out[2]=muzzle[2]+h[1]/len*r;
 }
 
+// The map's ground ends (the user, 2026-10-25: "俯瞰视角的移动视角会一下去很远的地方，而且动的时候地图会整个变灰一下"): a stock
+// map's ground reaches +-1500..2000 m (playarea.h), HighFocus' cap is kSightFar (3 km). A flat gun laid at the far edge's
+// ground landed there; raised a hair, the round flew out past the edge, landed nowhere, and the point not landed on went
+// to the cap: from the map's edge to over the void in one step of the gun (the jump), the view then over nothing but the
+// void's grey and the sky (the grey; the HUD's mark stays at the round's real end). So a point not landed on is the
+// farthest along the shot's line, up to HighFocus' distance, with ground under it: where a round flying out past the edge
+// was last over the map, the same place its landing just inside the edge was (no jump).
+//  - AreaReach: where to start looking, the measured ground's box (`lo`/`hi` x, z; MapPlayArea's walls widened back to
+//    the edge): the m along unit (hx, hz) from `p` before it leaves; an axis `p` is already outside of is the box's guess
+//    wrong there (an irregular map): no cut on it. Only a start: the box is the median of a few lanes, the ground's real
+//    edge on this line can be either side of it, and cutting there would be a jump of its own.
+//  - GroundReach: `ground(s, &y)` (the ground under s m along the line, its height) from `start` (<= `r`), kGroundStep m
+//    at a time out toward `r` while there is ground, else back toward the muzzle until there is, then the edge refined to
+//    kGroundFine m: the last ground the line is over before its first void past `start`. `r` itself when it is over
+//    ground; 0 when none is found back to the muzzle (`y` untouched).
+constexpr float kGroundStep=100.0f,kGroundFine=5.0f;
+inline float AreaReach(const float* lo,const float* hi,float px,float pz,float hx,float hz,float r) noexcept {
+    const float p[2]={px,pz},h[2]={hx,hz};
+    for(int k=0;k<2;++k) {
+        if(!(p[k]>=lo[k] && p[k]<=hi[k]))continue;
+        if(h[k]>1e-6f)r=std::fmin(r,(hi[k]-p[k])/h[k]);
+        else if(h[k]<-1e-6f)r=std::fmin(r,(lo[k]-p[k])/h[k]);
+    }
+    return std::fmax(r,0.0f);
+}
+template<class Ground> float GroundReach(Ground ground,float r,float start,float* y) noexcept {
+    float at=0.0f;
+    if(ground(r,&at)){*y=at;return r;}
+    start=std::fmin(std::fmax(start,0.0f),r);
+    float land=start,gap=r;   // over ground / over the void
+    float found=0.0f;
+    if(start<r && ground(start,&at)) {   // out from the start while there is ground
+        found=at;
+        for(;;) {
+            const float next=std::fmin(land+kGroundStep,r);
+            if(!(next<r) || !ground(next,&at)){gap=next;break;}
+            land=next;found=at;
+        }
+    } else {                             // back from it until there is
+        gap=start;
+        for(;;) {
+            land=std::fmax(0.0f,gap-kGroundStep);
+            if(ground(land,&at)){found=at;break;}
+            if(!(land>0.0f))return 0.0f;
+            gap=land;
+        }
+    }
+    while(gap-land>kGroundFine) {
+        const float mid=0.5f*(land+gap);
+        if(ground(mid,&at)){land=mid;found=at;}
+        else gap=mid;
+    }
+    *y=found;
+    return land;
+}
+
 // The view (yaw, pitch) of rig `r` whose screen's centre goes through world point `p` (the high view handing back: the
 // normal view comes back on the point the high one was on). The centre's line goes through O, raised with the eye when
 // the eye would be under O + rise (Place); found by going round a few times (O turns with the heading, the raise
