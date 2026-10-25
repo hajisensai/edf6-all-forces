@@ -5,6 +5,9 @@
 
 ## 1. 「坦克的炮管会360度动」
 
+- 2026-10-25 补充：4.1 的 V301 坦克另有一条实机确认的整圈转原因（俯仰轴，CAS 缺 `cannon` 轨道，`docs/feedback-2026-10-25-greymap.md`），
+  已在转换链修复；用户若开的是 V301，即是这一条（未实机复现玩家驾驶的情形）。
+
 没有日志和录像，下面两条是沿代码路径能严格成立、且会表现为整圈转的缺陷；用户看到的是哪一条（或两条都有）未实机确认。
 委托方怀疑的「±π 包角错」「整圈阈值不一致」已排除：整圈轴的差值都包了角（`turretcam.h SteerAxes`、`stab.h Diff/Keep`、
 `autoturret plugin.cpp AxisInput`、`gunner.cpp` 的 delta/off），不限位的轴原版写的是常数 ±π（`docs/artillery-re.md`），各处判定一致。

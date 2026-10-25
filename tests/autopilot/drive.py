@@ -24,6 +24,8 @@ background"). For measurements, e.g. the big map's memory against the stock test
                            and main CAS state from its own frame: tests/autopilot/hector_probe.cpp)
                            or --cmd "probe players" (each local soldier's pad +0x338 and class key record +0xD40
                            every second: tests/autopilot/players_probe.cpp)
+                           or --cmd "probe umbra" (every box EDF.dll hands Umbra checked for values out of reach, with
+                           its owner, and every Vehicle601_Tank's aim and gun pose: tests/autopilot/umbra_probe.cpp)
           --loadout FILE   the run's forced loadout: FILE copied as <plugins>/EDF6TestRange.loadout.ini (read by the
                            installed EDF6VehicleCrew at the player's creation; the file must not exist already, and
                            is removed again afterwards), e.g. tests/autopilot/loadouts/airraider_grape.ini

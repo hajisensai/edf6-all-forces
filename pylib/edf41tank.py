@@ -25,6 +25,14 @@ ROOTS = tuple('VEHICLE301_TANK' + suffix + '.SGO' for suffix in
               ('', '_AI', '_BULLETGIRLS', '_DCZERO', '_DC55', '_EDF2PV2', '_NATSUIRO'))
 RECOIL_BIND_BONE = 'edf6vc_cannon_slide_physics'
 RUNTIME_CLASS = 'Vehicle601_Tank'
+# The bones Vehicle601_Tank's pose (slot 45, 0x620830) turns by the seat-0 aim IN PLACE every frame: 0x661810 reads the
+# bone's local (its record's +0x70), rotates it by the aim's absolute pitch (0x296F90) and writes it back (0x661BCC).
+# The class's CAS (V601_TANK.CAS: a static rest-pose track for every bone) rewrites that local each frame first, so the
+# pitch is applied once. A bone without a track keeps last frame's turned local and turns by the pitch again every frame:
+# the barrel spins while the gun is laid off level, float error grows its matrix past 1e20 in about a second, and
+# Umbra, handed that box (0x11B30C0 -> Object::setObjectToCellMatrix), culls the whole scene down to the sky (the user,
+# 2026-10-25: 4.1 mission 1 turning into a grey map; docs/feedback-2026-10-25-greymap.md). Each needs its own rest track.
+CLASS_POSED = frozenset({'cannon'})
 
 
 def rel(ref: str) -> str:
@@ -162,13 +170,28 @@ def check(members: dict, md: mdb.Mdb, physics: bytes, cas: bytes) -> None:
         raise ValueError('V301 recoil CAS no longer has the audited two clips')
     tracks = {t.name for c in pose.clips for t in c.tracks}
     driven = {row[0][1] for row in inner['animation_from_ragdoll']}
-    if tracks != {'cannon_slide'} or tracks & driven:
+    # Physics owns every other bound bone; the class's in-place pose (CLASS_POSED) needs its track as V601's has one.
+    if (tracks & driven) - CLASS_POSED:
         raise ValueError('V301 recoil animation conflicts with physics ownership')
-    target = md.bones[mdb.bone_named(md, 'cannon_slide')].local[12:15]
+    if tracks != {'cannon_slide'} | CLASS_POSED:
+        raise ValueError(f'V301 CAS must hold the recoil and the rest pose of {sorted(CLASS_POSED)} '
+                         f'(the 601 pose turns them in place every frame), holds {sorted(tracks)}')
     for clip in pose.clips:
-        start = pose.translation(clip.tracks[0].translation)
-        if max(abs(a - b) for a, b in zip(start, target)) > 1e-4:
-            raise ValueError('V301 recoil CAS is not rebased to its own barrel')
+        if {t.name for t in clip.tracks} != tracks:
+            raise ValueError(f'V301 CAS clip {clip.name} lacks a track another clip has')
+        for track in clip.tracks:
+            local = md.bones[mdb.bone_named(md, track.name)].local
+            start = pose.translation(track.translation)
+            if max(abs(a - b) for a, b in zip(start, local[12:15])) > 1e-4:
+                raise ValueError(f'V301 CAS track {track.name} is not rebased to its own bone')
+            if track.name in CLASS_POSED:
+                # A static rest track: the rotation (the bind's rows) and the translation of its first key, every key.
+                rows = ragdoll_fit.axes(cas_pose.rotation(pose, track.rotation))
+                if max(abs(rows[i][j] - local[4 * i + j]) for i in range(3) for j in range(3)) > 1e-4:
+                    raise ValueError(f'V301 CAS track {track.name} is not the rest rotation of its bone')
+                for frame in range(1, cas_pose.clip_info(pose, clip)[2]):
+                    if max(abs(a - b) for a, b in zip(pose.translation(track.translation, frame), start)) > 1e-6:
+                        raise ValueError(f'V301 CAS track {track.name} moves: the 601 pose owns its motion')
 
 
 def build(games, root: str) -> dict[str, bytes]:
@@ -191,9 +214,10 @@ def build(games, root: str) -> dict[str, bytes]:
     donor_md = model(games.read6(rel(donor_am[0][0])), donor_am[0][1])
     cas_data = games.read6(rel(donor_am[1]))
     pose = cas_pose.CasPose(cas_data)
-    # Only the recoil is portable. Every other donor track encodes V601's absolute
-    # rest pose and would move the original wheels/turret back onto V601's skeleton.
-    free = {t.name for c in pose.clips for t in c.tracks} - {'cannon_slide'}
+    # The recoil and the rest pose of the bones the class turns in place (CLASS_POSED), both rebased onto V301's own
+    # skeleton (retarget). Every other donor track encodes V601's absolute rest pose and would move the original
+    # wheels / turret back onto V601's skeleton.
+    free = {t.name for c in pose.clips for t in c.tracks} - {'cannon_slide'} - CLASS_POSED
     cas_data = cas_pose.retarget(cas_data, donor_md, md, {'default', 'fire'}, free)
     cas_rel = 'OBJECT/EDF41_V301_RECOIL.CAS'
     out[cas_rel] = cas_data
