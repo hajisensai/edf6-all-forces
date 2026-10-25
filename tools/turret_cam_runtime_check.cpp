@@ -64,9 +64,16 @@ bool CameraRay(float* eye,float* dir) noexcept {
 bool terrain=true;
 float floorY=-25.0f;
 bool wall=false;float wallZ=0.0f;   // a wall across the world at z = wallZ (a building behind the vehicle)
+float groundEdge=INFINITY;           // the map's ground ends groundEdge m across from groundCentre: the void past it
+float groundCentre[2]={0.0f,0.0f};
+PlayArea MapPlayArea() noexcept { return PlayArea{{-2400.0f,-2400.0f},{2400.0f,2400.0f},false,0.0f,false}; }
 float MapRay(const float* from,const float* to,float* hit) noexcept {
     float t=2.0f;
-    if(terrain && from[1]>=floorY && to[1]<=floorY && from[1]!=to[1])t=(floorY-from[1])/(to[1]-from[1]);
+    if(terrain && from[1]>=floorY && to[1]<=floorY && from[1]!=to[1]) {
+        t=(floorY-from[1])/(to[1]-from[1]);
+        const float x=from[0]+t*(to[0]-from[0])-groundCentre[0],z=from[2]+t*(to[2]-from[2])-groundCentre[1];
+        if(!(std::sqrt(x*x+z*z)<=groundEdge))t=2.0f;
+    }
     if(wall && from[2]!=to[2]) {
         const float w=(wallZ-from[2])/(to[2]-from[2]);
         if(w>=0.0f && w<t)t=w;
@@ -173,12 +180,20 @@ void Run() {
     Put<int>(picked.data,edf::kWeaponAmmoAlive,30);ShotFocus(shared);
     float airborne[3];std::memcpy(airborne,shared.focus,12);
     Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-floorY)<0.001f,"no landing: the ground under the shot's end");
+    // The map's ground ends short of it (2026-10-25, "俯瞰视角的移动视角会一下去很远的地方，而且动的时候地图会整个变灰一下"): the
+    // farthest point along the line still over ground (tcam::GroundReach), never the void past the edge.
+    const float shotDir[2]={airborne[0]-hull[0],airborne[2]-hull[2]};
+    groundCentre[0]=hull[0];groundCentre[1]=hull[2];groundEdge=0.5f*across();ShotFocus(shared);
+    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-floorY)<0.001f && across()<=groundEdge &&
+          across()>groundEdge-tcam::kGroundFine-15.0f,"no landing past the ground's edge: the last ground along the shot");
+    Check(std::fabs((shared.focus[0]-hull[0])*shotDir[1]-(shared.focus[2]-hull[2])*shotDir[0])<0.05f*across()*std::hypot(shotDir[0],shotDir[1])+15.0f,
+          "... on the shot's own line");
+    groundEdge=INFINITY;
     terrain=false;ShotFocus(shared);
-    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-hull[1])<0.001f && across()>20 && across()<=kSightFar,
-          "no landing, no ground found: the hull's height, never the shot's end in the air");
-    Check(std::fabs(shared.focus[0]-airborne[0])<0.001f && std::fabs(shared.focus[2]-airborne[2])<0.001f,"the same point across the ground either way");
+    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-hull[1])<0.001f && across()<15.0f,
+          "no landing, no ground anywhere: back at the muzzle (10 m ahead of the hull) at the hull's height, never the shot's end in the air or the void");
     Put<int>(picked.data,kWeaponLockon,kHoming);ShotFocus(shared);
-    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-hull[1])<0.001f && across()<=kAimFar+1,
+    Check(shared.focusValid && !shared.focusHit && std::fabs(shared.focus[1]-hull[1])<0.001f && across()<15.0f,
           "guided/unpredictable shot: under the real rail within kAimFar, not up in the air");
     Put<int>(picked.data,kWeaponLockon,0);
     for(bool coupled:{false,true}) {
