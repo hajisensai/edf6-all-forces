@@ -3,6 +3,12 @@
 #include "pvp_controlled_npc_test.cpp"
 #undef main
 #include "../src/pvp_native.cpp"
+namespace crew {
+// team_native.cpp is not linked: the manager is a stand-in (the relations are pvp_native_fixture's concern).
+bool SetTeamOverlay(const team_native::Overlay&) noexcept {return true;}
+void ClearTeamOverlay() noexcept {}
+int NativeTeamRows() noexcept {return team_native::kTeamCapacity;}
+}
 
 namespace native_live_fixture {
 unsigned lockCount=0;

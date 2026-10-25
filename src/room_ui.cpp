@@ -27,6 +27,7 @@
 #include "room_dialog.h"
 #include "room_dialog_logic.h"
 #include "pvp.h"
+#include "room_pvp.h"
 #include "outfit41.h"
 #include "host_settings.h"
 #include "crew.h"
@@ -245,6 +246,9 @@ struct State {
     const wchar_t* dialogLayout=nullptr;   // the pages' layout (LoadoutBoxLayout), chosen when the menu opens
     bool hasPick=false;
     roomdialog::Choice pick{};
+    // The 对战 pages (room_pvp_dialog.h) shown instead of the loadout pages, and where in them.
+    bool pvpPages=false;
+    roompvp::Nav pvpNav{};
 };
 State st;
 rm::SaveSet saveSet;   // big: not on the stack
@@ -396,7 +400,7 @@ void Act(rm::Act a) noexcept {
 // Keep its native button/action identity until Follow observes a different object or its chained destructor.
 void ForgetMenu() noexcept {
     nativedialog::CloseDialog(st.dialog);   // the screen it stood over is going: nothing of ours left on top
-    st.hasPick=false;
+    st.hasPick=false;st.pvpPages=false;
     HidePreview();
     if(st.menu.open)rm::Discard(st.menu);
     if(LeaveOnForget(st.switches))roomsync::LeaveRoomSync();
@@ -730,7 +734,7 @@ void OpenMenu() noexcept {
     Log("ROOMUI menu pages in %ls",st.dialogLayout ? st.dialogLayout : L"the stock dialog box (Mods\\UI\\EDF6VC_LOADOUTBOX.SGO not installed)");
     Opened();
     roomdialog::Begin(st.menu,st.nav);
-    st.hasPick=false;
+    st.hasPick=false;st.pvpPages=false;
 }
 // The status lines the units page's message carries (ComposeStatus, as the overlay showed them).
 Status MenuStatus() noexcept {
@@ -749,23 +753,35 @@ void DriveDialog(bool hasInput) noexcept {
         if(nativedialog::TakePicked(st.dialog,&id)){st.pick=roomdialog::Unpack(id);st.hasPick=true;}
         if(nativedialog::DialogAlive(st.dialog))return;   // open, or still closing
         nativedialog::ForgetDialog(st.dialog);
-        const roomdialog::Result r=st.hasPick ? roomdialog::Apply(st.menu,st.nav,st.pick) : roomdialog::Cancel(st.menu,st.nav);
-        st.hasPick=false;
-        if(r==roomdialog::Result::save) {
-            Save();
-            st.menu.open=true;st.nav=roomdialog::Nav{};   // the units page again, its message the save's result
-        }
-        if(r==roomdialog::Result::close || !st.menu.open) {
-            st.menu.open=false;
-            Log("ROOMUI menu closed");
-            return;
+        if(st.pvpPages) {   // the 对战 pages: their change published by room_pvp.cpp, back to the units page from the first
+            roompvp::Action action{};
+            const roompvp::Result pr=st.hasPick ? roompvp::Apply(RoomPvpView(),st.pvpNav,st.pick,&action) : roompvp::Cancel(st.pvpNav);
+            st.hasPick=false;
+            RoomPvpChange(action);
+            if(pr==roompvp::Result::back)st.pvpPages=false;
+        } else {
+            const roomdialog::Result r=st.hasPick ? roomdialog::Apply(st.menu,st.nav,st.pick) : roomdialog::Cancel(st.menu,st.nav);
+            st.hasPick=false;
+            if(r==roomdialog::Result::pvp){st.pvpPages=true;st.pvpNav=roompvp::Nav{};}
+            if(r==roomdialog::Result::save) {
+                Save();
+                st.menu.open=true;st.nav=roomdialog::Nav{};   // the units page again, its message the save's result
+            }
+            if(r==roomdialog::Result::close || !st.menu.open) {
+                st.menu.open=false;
+                Log("ROOMUI menu closed");
+                return;
+            }
         }
     }
     if(!hasInput)return;   // something of the game's over the screen: the next page waits for it
     const Status s=MenuStatus();
     roomdialog::Context ctx;
     for(int i=0;i<s.count && i<4;++i)ctx.status[ctx.statusCount++]=s.text[i];
-    page=roomdialog::Build(st.menu,st.nav,ctx);
+    static wchar_t pvpLine[roomdialog::kTextMost];
+    RoomPvpSummary(pvpLine,roomdialog::kTextMost);
+    ctx.pvp=pvpLine;
+    page=st.pvpPages ? roompvp::Build(RoomPvpView(),st.pvpNav) : roomdialog::Build(st.menu,st.nav,ctx);
     nativedialog::Button buttons[roomdialog::kItemsMost];
     // Each button's description beside the list (the description dialog: HUiDescriptionDialog); `page` keeps the texts
     // until this dialog is gone (the next page is built only after it closed).
@@ -801,6 +817,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     }
     Follow(self,screen.room);
     PvpRoomTick();       // capability advertisement only; native team changes stay on the game-thread PvpFrame
+    RoomPvpTick();       // this member's faction pick, the host's settings and start lock (room_pvp.cpp)
     Outfit41RoomTick();   // the EDF4.1 outfit told to the room whatever the menu's switches (outfit41.cpp)
     HostSettingsRoomTick();   // this machine's word to the room, the host's settings and the room's builds (host_settings.h)
     Edf5OnlineRoomTick(); // this machine's word that it creates every player of an EDF5/4.1 mission (edf5online_room.cpp)

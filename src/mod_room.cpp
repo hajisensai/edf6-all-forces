@@ -104,6 +104,9 @@ void CreateRoom(void* h,const void* o,void* client,Callback cb) {
 }
 bool Type(const Data* d) noexcept {return d && d->key && d->type==1 && !std::strcmp(d->key,"SEARCH_TYPE");}
 bool Content(const Data* d) noexcept {return d && d->key && d->type==kInt64 && !std::strcmp(d->key,"DLC");}
+bool MissionNo(const Data* d) noexcept {return d && d->key && d->type==kInt64 && !std::strcmp(d->key,"MISSION_NO");}
+// What this machine's room published last (PublishedRoomMission): room_pvp.cpp turns PvP on for a PvP preset map.
+std::atomic<std::int64_t> publishedContent{-1},publishedMission{-1};
 // The game publishes the room's content id (DLC, 0x749CF8); on one of our packs its identity goes with it, from this
 // machine's EDF6VehicleCrew.packs.ini. A later change of the room's pack publishes DLC again, and with it the line.
 int PublishContent(void* h,const Options* o) {
@@ -126,11 +129,13 @@ int PublishContent(void* h,const Options* o) {
     return published;
 }
 int Add(void* h,const Options* o) {
+    if(o && Content(o->data))publishedContent.store(o->data->value);
+    if(o && MissionNo(o->data))publishedMission.store(o->data->value);
     if(o && Content(o->data))return PublishContent(h,o);
     if(!o || !Type(o->data))return add(h,o);
     // A durable marker survives DirectNet's persisted room attributes, whose
     // game-facing type may already have been decoded by another wrapper.
-    const Data profile{o->data->version,"AF_PROFILE",1,1};
+    const Data profile{o->data->version,"AF_PROFILE",kAllForcesRoomProtocol,1};
     const Options marker{o->version,&profile,0};
     const int marked=add(h,&marker);
     if(marked)return marked;
@@ -290,9 +295,22 @@ bool InstallModRoom() noexcept {
 }
 // Coop reads EOS directly as well as through EDF's IAT. Its read side uses this
 // bridge, never the presence of the resource files or a permissive metadata flag.
+namespace crew {
+bool PublishedRoomMission(std::int64_t* content,std::int64_t* mission) noexcept {
+    const std::int64_t c=publishedContent.load(),m=publishedMission.load();
+    if(c<0 || m<0)return false;
+    if(content)*content=c;
+    if(mission)*mission=m;
+    return true;
+}
+}
 extern "C" __declspec(dllexport) std::int64_t EDF6AF_DecodeRoomType(std::int64_t value) noexcept {
     return crew::DecodeAllForcesRoom(value);
 }
+// The room namespace this build publishes and accepts (mod_room.h): SEARCH_TYPE's prefix and the AF_PROFILE value.
+// EDF6Coop's own EOS reads take them from here, so a new room protocol is one change on this side.
+extern "C" __declspec(dllexport) std::int64_t EDF6AF_RoomPrefix() noexcept { return crew::kAllForcesRoomPrefix; }
+extern "C" __declspec(dllexport) std::int64_t EDF6AF_RoomProfile() noexcept { return crew::kAllForcesRoomProtocol; }
 // For EDF6Coop's remembered / virtual rooms (their attributes persisted by Coop, which All Forces cannot read through
 // a synthetic handle): 1 when a room with content id `dlc` and AF_PACK `line` (nullptr: absent) may be joined here,
 // 0 when not: logged, and the player told why in the EOS route's dialog (ExplainPackRefusal: on its own thread, so

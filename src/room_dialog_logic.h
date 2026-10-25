@@ -38,7 +38,7 @@ struct Nav { Page page=Page::units; int unit=0,row=0,first=0; };
 
 // What a button does; its argument (a unit, a row, a value) beside it. Packed into the button's 8 bytes (Pack / Unpack).
 enum class Do : std::uint8_t { none, open, save, close, discard, keep, back, prev, next, row, add, copy, remove, reset,
-                               customise, field, set };
+                               customise, field, set, pvp };
 struct Choice { Do what=Do::none; std::int32_t arg=0; };
 constexpr std::uint64_t Pack(Choice c) noexcept {
     return (static_cast<std::uint64_t>(static_cast<std::uint8_t>(c.what))<<32)|static_cast<std::uint32_t>(c.arg);
@@ -50,7 +50,7 @@ constexpr Choice Unpack(std::uint64_t v) noexcept {
 constexpr std::int32_t FieldArg(Page p) noexcept { return static_cast<std::int32_t>(p); }
 
 inline constexpr int kPerPage=10;            // entries a page shows before "previous" / "next"
-inline constexpr int kItemsMost=kPerPage+4;  // + previous, next, an action, back
+inline constexpr int kItemsMost=kPerPage+5;  // + the 对战 entry, previous, next, an action, back
 inline constexpr std::size_t kTextMost=96;
 inline constexpr std::size_t kTitleMost=512;
 inline constexpr std::size_t kDescMost=400;
@@ -60,7 +60,8 @@ struct Dialog { wchar_t title[kTitleMost]{}; int count=0; Item item[kItemsMost]{
 
 // What the units page's title says under its name: the client's note, the last save, the generator, the room's sync
 // (room_ui_logic.h ComposeStatus's lines, already in the HUD's language).
-struct Context { const wchar_t* status[4]{}; int statusCount=0; };
+// `pvp`: the units page's first button, the room's 对战 pages (room_pvp_dialog.h; nullptr / "": no PvP here, offline).
+struct Context { const wchar_t* status[4]{}; int statusCount=0; const wchar_t* pvp=nullptr; };
 
 namespace detail {
 template<class... A> void Put(wchar_t* out,std::size_t n,const wchar_t* format,A... args) noexcept {
@@ -372,11 +373,13 @@ inline Dialog Build(const rm::Menu& m,const Nav& nav,const Context& c,int wantCu
     int first=nav.first<0 ? 0 : nav.first>=total ? (total>0 ? (total-1)/kPerPage*kPerPage : 0) : nav.first;
     first=first/kPerPage*kPerPage;
     const int current=detail::Current(m,nav);
+    if(nav.page==Page::units && c.pvp && c.pvp[0] && first==0)detail::Add(d,{Do::pvp,0},c.pvp);
     Entries(m,nav,[&](int i,Choice ch,const wchar_t* t) noexcept {
         if(i<first || i>=first+kPerPage)return;
         if(i==current)d.cursor=d.count;
         detail::Add(d,ch,t);
     });
+    if(nav.page==Page::units && c.pvp && c.pvp[0] && first==0 && current<0)d.cursor=0;
     if(first>0)detail::Add(d,{Do::prev,0},hudtext::Tr(Tx::roomDlgPrev));
     if(first+kPerPage<total)detail::Add(d,{Do::next,0},hudtext::Tr(Tx::roomDlgNext));
     detail::Actions(d,m,nav);
@@ -523,7 +526,8 @@ inline void Describe(const rm::Menu& m,const Nav& nav,Choice c,wchar_t* out,std:
 }
 
 // What the caller does after Apply / Cancel.
-enum class Result : std::uint8_t { show, save, close };
+// pvp: the caller opens the 对战 pages (room_pvp_dialog.h) and comes back to this page from them.
+enum class Result : std::uint8_t { show, save, close, pvp };
 
 namespace detail {
 // The page above `p` (where back / cancel go).
@@ -615,6 +619,7 @@ inline Result Apply(rm::Menu& m,Nav& nav,Choice c) noexcept {
         nav.unit=c.arg;detail::Go(m,nav,Page::unit,0);
         return Result::show;
     case Do::save: detail::Go(m,nav,Page::units,0); return Result::save;
+    case Do::pvp: return Result::pvp;
     case Do::close:
         if(rm::Dirty(m)){detail::Go(m,nav,Page::discard,0);return Result::show;}
         rm::Discard(m);

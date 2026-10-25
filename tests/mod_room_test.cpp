@@ -346,7 +346,7 @@ int main(int argc,char** argv){
         Check(publish(nullptr,&options)==0 && writes.size()==2,"publish marker and native search field");
         const auto wire=writes.back().value;
         Check(wire==kAllForcesRoomPrefix+type && value.value==type,"outgoing type encoded without changing caller memory");
-        Check(writes.front().value==1 && !std::strcmp(writes.front().key,"AF_PROFILE"),"persistent profile marker");
+        Check(writes.front().value==kAllForcesRoomProtocol && !std::strcmp(writes.front().key,"AF_PROFILE"),"persistent profile marker");
         for(const auto pair:{std::pair<std::int64_t,std::int64_t>{0x91,0x94},{0x12,0x94}}){
             writes.clear();Data lo{1,"SEARCH_TYPE",pair.first,1},hi{1,"SEARCH_TYPE",pair.second,1};
             const Options low{1,&lo,3},high{1,&hi,2};
@@ -370,10 +370,13 @@ int main(int argc,char** argv){
                 Check(!(wire>=static_cast<std::uint32_t>(range) && wire<=static_cast<std::uint32_t>(range>>32)),"real vanilla search range excludes All Forces");}
         }
     }
+    value.value=kAllForcesRoomPrefix-0x100+0x93;const auto beforeOlder=joins;
+    enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
+    Check(joins==beforeOlder,"an older room protocol's room refused (no compatibility with older builds)");
     value.value=kAllForcesRoomPrefix+0x100+0x93;const auto before=joins;
     enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
     Check(joins==before,"unknown future profile refused");
-    Check(releases==17,"copied EOS attributes released on accept and refusal");
+    Check(releases==18,"copied EOS attributes released on accept and refusal");
     rawResult=4;const auto beforeReadFailure=joins;
     enter(nullptr,&jo,reinterpret_cast<void*>(9),&RecordCallback);
     Check(joins==beforeReadFailure && result==10 && lastLog.find("reason=search-type-read-failed")!=std::string::npos

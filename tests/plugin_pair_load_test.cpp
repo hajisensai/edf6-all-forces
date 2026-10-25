@@ -31,6 +31,8 @@ const char* const kCrewExports[]={
     "EDF6VehicleCrew_SetInputSourceV1","EDF6VehicleCrew_SetInputSourceV2",      // src/plugin.cpp
     "EDF6VehicleCrew_InputHeldV1",                                              // src/map.cpp
     "EDF6AF_DecodeRoomType","EDF6AF_RoomPackCompatible","EDF6AF_RoomIsolationReady",   // src/mod_room.cpp
+    "EDF6AF_RoomPrefix","EDF6AF_RoomProfile",   // src/mod_room.cpp: the room namespace for EDF6Coop
+    "EDF6AF_PvpMemberLabel",   // src/room_pvp.cpp: a member row's faction for EDF6Coop
     "EDF6VehicleCrew_PriorityZoneV1",                                           // src/proteus.cpp
     "EDF6VehicleCrew_StabilizerV3",                                             // src/stab.cpp
     "EDF6AF_SupportProtocolVersion","EDF6AF_GetMissionParticipants","EDF6AF_AllowMissionPlayer",

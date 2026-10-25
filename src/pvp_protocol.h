@@ -2,25 +2,49 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include "pvp_match.h"
 
 // Authenticated transport peer indices are local-only. No payload claims sender
 // authority: a PUID is accepted only from Receive's authenticatedPuid argument.
 // Generation is opaque/local; only an authenticated host Welcome creates the
 // shared wire epoch. At most eight total members keep every datagram < 1024 B.
+// v3 (2026-10-25): a member is a faction, a role and a unit (pvp_match.h); the
+// team is the faction's; the state carries the match's faction relations.
 // Transport contract: successful sends are reliable and ordered; permanent
 // delivery/link failure must invalidate the affected Context. That invalidation
 // can be local: enabled commits additionally require fresh ACKs from every
 // participant, so an isolated extension fault cannot leave the others enabled.
 namespace pvp_protocol {
-constexpr std::uint8_t kVersion = 2;
+constexpr std::uint8_t kVersion = 3;
 constexpr std::size_t kMaxMembers = 8;
-constexpr std::size_t kMaxWireBytes = 32 + kMaxMembers * 66;
+constexpr std::size_t kEntryBytes = 70;   // puid 65, team, faction, role, unit 2
+constexpr std::size_t kRelationBytes = crew::pvp_match::kMaxFactions * crew::pvp_match::kMaxFactions / 4;
+constexpr std::size_t kRequestBytes = 36;  // header + the pick's unit (2) + 2 zero
+constexpr std::size_t kMaxWireBytes = 32 + kRelationBytes + kMaxMembers * kEntryBytes;
 constexpr std::uint64_t kTimeoutMs = 5000;
 constexpr std::uint64_t kLeaseProbeMs = 1000;
 constexpr std::uint64_t kLeaseTimeoutMs = 5000;
 constexpr std::size_t kLeaseProbeWindow = kLeaseTimeoutMs / kLeaseProbeMs + 1;
-struct Entry { char puid[65]{}; std::uint8_t team = 2; };
-struct State { bool enabled = false; std::uint8_t count = 0; Entry entries[kMaxMembers]{}; };
+struct Entry {
+    char puid[65]{}; std::uint8_t team = 2;
+    std::uint8_t faction = 0, role = 0; std::uint16_t unit = crew::pvp_match::kNoUnit;
+    crew::pvp_match::Pick Pick() const noexcept { return {faction, role, unit}; }
+};
+inline crew::pvp_match::Relations DefaultRelations() noexcept {
+    crew::pvp_match::Relations r; r.FromPreset(crew::pvp_match::Preset::freeForAll); return r;
+}
+// A member's pick as the wire holds it: its team is its faction's.
+inline bool ValidEntry(const Entry& e) noexcept {
+    return crew::pvp_match::PickValid(e.Pick()) && e.team == crew::pvp_match::FactionTeam(e.faction);
+}
+inline void SetPick(Entry& e, const crew::pvp_match::Pick& p) noexcept {
+    e.faction = p.faction; e.role = p.role; e.unit = p.unit;
+    e.team = static_cast<std::uint8_t>(crew::pvp_match::FactionTeam(p.faction));
+}
+struct State {
+    bool enabled = false; std::uint8_t count = 0; Entry entries[kMaxMembers]{};
+    crew::pvp_match::Relations relations = DefaultRelations();
+};
 struct Context {
     bool ready = false, host = false;
     std::uint64_t epoch = 0;
@@ -39,7 +63,7 @@ enum class Result {
     SessionLost, Faulted
 };
 enum class Kind : std::uint8_t {
-    Hello = 1, Welcome, RequestMode, RequestTeam, Prepare, Prepared,
+    Hello = 1, Welcome, RequestMode, RequestPick, Prepare, Prepared,
     Apply, Applied, Final, Abort, Fault, FailSafe, Reject, Lease, LeaseAck
 };
 
@@ -53,10 +77,12 @@ inline bool ValidPuid(const char* value) noexcept {
     return false;
 }
 inline bool SameState(const State& a, const State& b) noexcept {
-    if (a.enabled != b.enabled || a.count != b.count) return false;
-    for (std::size_t i = 0; i < a.count; ++i)
-        if (a.entries[i].team != b.entries[i].team ||
-            std::strcmp(a.entries[i].puid, b.entries[i].puid)) return false;
+    if (a.enabled != b.enabled || a.count != b.count || !a.relations.Same(b.relations)) return false;
+    for (std::size_t i = 0; i < a.count; ++i) {
+        const Entry &x = a.entries[i], &y = b.entries[i];
+        if (x.team != y.team || x.faction != y.faction || x.role != y.role || x.unit != y.unit ||
+            std::strcmp(x.puid, y.puid)) return false;
+    }
     return true;
 }
 
@@ -67,6 +93,7 @@ struct Message {
     std::uint64_t epoch = 0;
     std::uint32_t revision = 0, token = 0;
     std::uint8_t arg = 0, status = 0;
+    std::uint8_t role = 0; std::uint16_t unit = 0;   // RequestPick: arg = faction
     char puid[65]{};
     State state{};
 };
@@ -88,7 +115,9 @@ inline bool HasState(Kind kind) noexcept { return kind == Kind::Welcome || kind 
 inline std::size_t Encode(const Message& msg, void* buffer, std::size_t capacity) noexcept {
     const bool state = HasState(msg.kind);
     if (msg.state.count > kMaxMembers) return 0;
-    const std::size_t n = 32 + (msg.kind == Kind::Hello ? 65 : state ? msg.state.count * 66 : 0);
+    const bool pick = msg.kind == Kind::RequestPick;
+    const std::size_t n = msg.kind == Kind::Hello ? 32 + 65 : state ? 32 + kRelationBytes + msg.state.count * kEntryBytes :
+        pick ? kRequestBytes : 32;
     if (!buffer || n > capacity) return 0;
     auto* out = static_cast<std::uint8_t*>(buffer);
     std::memset(out, 0, n);
@@ -96,12 +125,22 @@ inline std::size_t Encode(const Message& msg, void* buffer, std::size_t capacity
     out[4] = kVersion; out[5] = static_cast<std::uint8_t>(msg.kind);
     Put(out + 6, n, 2); Put(out + 8, msg.epoch, 8);
     Put(out + 16, msg.revision, 4); Put(out + 20, msg.token, 4);
-    if (state) { out[24] = msg.state.count; out[25] = msg.state.enabled ? 1 : 0; }
+    constexpr std::size_t kF = crew::pvp_match::kMaxFactions;
+    if (state) {
+        out[24] = msg.state.count;
+        out[25] = static_cast<std::uint8_t>((msg.state.enabled ? 1 : 0) | (msg.state.relations.preset << 1));
+        const auto& rel = msg.state.relations.rel;
+        for (std::size_t i = 0; i < kF * kF; ++i)
+            out[32 + i / 4] = static_cast<std::uint8_t>(out[32 + i / 4] | ((rel[i / kF][i % kF] & 3) << ((i % 4) * 2)));
+    }
+    if (pick) { out[24] = msg.role; Put(out + 32, msg.unit, 2); }
     out[26] = msg.arg; out[27] = msg.status;
     if (msg.kind == Kind::Hello) std::memcpy(out + 32, msg.puid, 65);
     for (std::size_t i = 0; state && i < msg.state.count; ++i) {
-        std::memcpy(out + 32 + i * 66, msg.state.entries[i].puid, 65);
-        out[32 + i * 66 + 65] = msg.state.entries[i].team;
+        std::uint8_t* e = out + 32 + kRelationBytes + i * kEntryBytes;
+        const Entry& entry = msg.state.entries[i];
+        std::memcpy(e, entry.puid, 65);
+        e[65] = entry.team; e[66] = entry.faction; e[67] = entry.role; Put(e + 68, entry.unit, 2);
     }
     Put(out + 28, Checksum(out, n), 4);
     return n;
@@ -115,30 +154,42 @@ inline bool Decode(const void* buffer, std::size_t n, Message& msg) noexcept {
     next.kind = static_cast<Kind>(in[5]);
     next.epoch = Get(in + 8, 8); next.revision = static_cast<std::uint32_t>(Get(in + 16, 4));
     next.token = static_cast<std::uint32_t>(Get(in + 20, 4)); next.arg = in[26]; next.status = in[27];
-    const bool state = HasState(next.kind);
-    if (in[24] > kMaxMembers || in[25] > 1 || (!state && (in[24] || in[25]))) return false;
-    const std::size_t expected = 32 + (next.kind == Kind::Hello ? 65 : state ? std::size_t(in[24]) * 66 : 0);
+    const bool state = HasState(next.kind), pick = next.kind == Kind::RequestPick;
+    constexpr std::size_t kF = crew::pvp_match::kMaxFactions;
+    if ((state && (in[24] > kMaxMembers || (in[25] >> 1) >= crew::pvp_match::kPresetCount)) ||
+        (pick && (in[24] >= crew::pvp_match::kRoleCount || in[25])) || (!state && !pick && (in[24] || in[25]))) return false;
+    const std::size_t expected = next.kind == Kind::Hello ? 32 + 65 : state ? 32 + kRelationBytes + std::size_t(in[24]) * kEntryBytes :
+        pick ? kRequestBytes : 32;
     if (n != expected) return false;
+    if (pick) {
+        next.role = in[24]; next.unit = static_cast<std::uint16_t>(Get(in + 32, 2));
+        if (in[34] || in[35] || !crew::pvp_match::PickValid({in[26], next.role, next.unit})) return false;
+    }
     if (next.kind == Kind::Hello) {
         std::memcpy(next.puid, in + 32, 65);
         if (!ValidPuid(next.puid) || next.epoch || next.revision || !next.token) return false;
     }
     if (state) {
-        next.state.count = in[24]; next.state.enabled = in[25] != 0;
-        if (!next.state.count) return false;
+        next.state.count = in[24]; next.state.enabled = (in[25] & 1) != 0;
+        next.state.relations.preset = static_cast<std::uint8_t>(in[25] >> 1);
+        for (std::size_t i = 0; i < kF * kF; ++i)
+            next.state.relations.rel[i / kF][i % kF] = static_cast<std::uint8_t>((in[32 + i / 4] >> ((i % 4) * 2)) & 3);
+        if (!next.state.count || !next.state.relations.Valid()) return false;
         for (std::size_t i = 0; i < next.state.count; ++i) {
             auto& entry = next.state.entries[i];
-            std::memcpy(entry.puid, in + 32 + i * 66, 65); entry.team = in[32 + i * 66 + 65];
-            if (!ValidPuid(entry.puid) || (entry.team != 1 && entry.team != 2)) return false;
+            const std::uint8_t* e = in + 32 + kRelationBytes + i * kEntryBytes;
+            std::memcpy(entry.puid, e, 65); entry.team = e[65]; entry.faction = e[66]; entry.role = e[67];
+            entry.unit = static_cast<std::uint16_t>(Get(e + 68, 2));
+            if (!ValidPuid(entry.puid) || !ValidEntry(entry)) return false;
             for (std::size_t j = 0; j < i; ++j)
                 if (!std::strcmp(entry.puid, next.state.entries[j].puid)) return false;
         }
     }
-    const bool request = next.kind == Kind::RequestMode || next.kind == Kind::RequestTeam;
+    const bool request = next.kind == Kind::RequestMode || next.kind == Kind::RequestPick;
     const bool ack = next.kind == Kind::Prepared || next.kind == Kind::Applied || next.kind == Kind::Reject;
     if ((!request && next.arg) || (!ack && next.status) || (ack && next.status > 1) ||
         (next.kind == Kind::RequestMode && next.arg > 1) ||
-        (next.kind == Kind::RequestTeam && next.arg != 1 && next.arg != 2)) return false;
+        (pick && !crew::pvp_match::FactionValid(next.arg))) return false;
     if (next.kind != Kind::Hello && (!next.epoch || !next.token)) return false;
     msg = next;
     return true;
@@ -207,9 +258,34 @@ public:
         if (!context_.host) { result_ = Result::InvalidArgument; return false; }
         return Request(Kind::RequestMode, enabled ? 1 : 0, now);
     }
-    bool RequestTeam(std::uint8_t team, std::uint64_t now) noexcept {
-        if (team != 1 && team != 2) { result_ = Result::InvalidArgument; return false; }
-        return Request(Kind::RequestTeam, team, now);
+    // This member's faction, role and unit.
+    bool RequestPick(const crew::pvp_match::Pick& pick, std::uint64_t now) noexcept {
+        if (!crew::pvp_match::PickValid(pick)) { result_ = Result::InvalidArgument; return false; }
+        pick_ = pick;
+        return Request(Kind::RequestPick, pick.faction, now);
+    }
+    // Host only: the match's faction relations (applied to everyone through the same transaction).
+    bool RequestRelations(const crew::pvp_match::Relations& relations, std::uint64_t now) noexcept {
+        if (!context_.host || !relations.Valid()) { result_ = Result::InvalidArgument; return false; }
+        if (!Ready()) { result_ = Result::NotReady; return false; }
+        if (Busy()) { result_ = Result::Busy; return false; }
+        State candidate = state_; candidate.relations = relations;
+        return Begin(candidate, now);
+    }
+    // Host only: the whole match in one transaction (the room's locked table): mode, relations and every listed pick.
+    bool RequestMatch(const State& wanted, std::uint64_t now) noexcept {
+        if (!context_.host || !wanted.relations.Valid()) { result_ = Result::InvalidArgument; return false; }
+        if (!Ready()) { result_ = Result::NotReady; return false; }
+        if (Busy()) { result_ = Result::Busy; return false; }
+        State candidate = state_;
+        candidate.enabled = wanted.enabled; candidate.relations = wanted.relations;
+        for (std::size_t i = 0; i < candidate.count; ++i)
+            for (std::size_t j = 0; j < wanted.count; ++j)
+                if (!std::strcmp(candidate.entries[i].puid, wanted.entries[j].puid)) {
+                    if (!ValidEntry(wanted.entries[j])) { result_ = Result::InvalidArgument; return false; }
+                    SetPick(candidate.entries[i], wanted.entries[j].Pick());
+                }
+        return Begin(candidate, now);
     }
     // A runtime invariant failed after commit. Restore the native baseline on the
     // reporting peer immediately, and make the authenticated host disable all.
@@ -283,7 +359,7 @@ public:
             if (!fromHost || !requestPending_ || msg.token != serial_ || msg.revision < revision_) return false;
             requestPending_ = false; result_ = msg.status ? Result::Aborted : Result::Complete; return true;
         }
-        if (msg.kind == Kind::RequestMode || msg.kind == Kind::RequestTeam) {
+        if (msg.kind == Kind::RequestMode || msg.kind == Kind::RequestPick) {
             if (!context_.host || msg.kind == Kind::RequestMode || msg.token <= requests_[peer]) return false;
             if (Busy() || msg.revision != revision_) {
                 Message reject = Control(Kind::Reject); reject.token = msg.token; reject.status = 1;
@@ -292,7 +368,7 @@ public:
             requests_[peer] = msg.token;
             State candidate = state_;
             if (msg.kind == Kind::RequestMode) candidate.enabled = msg.arg != 0;
-            else if (!SetTeam(candidate, authenticatedPuid, msg.arg)) return false;
+            else if (!SetMemberPick(candidate, authenticatedPuid, {msg.arg, msg.role, msg.unit})) return false;
             const bool unchanged = SameState(candidate, state_);
             const bool accepted = Begin(candidate, now);
             if (!accepted || unchanged) {
@@ -350,6 +426,7 @@ private:
     State state_{}, previous_{}, pending_{}, restoreState_{};
     bool initialized_ = false, broken_ = false, saved_ = false, requestPending_ = false, preparedOk_ = false, restorePending_ = false;
     Phase phase_ = Phase::None; Result result_ = Result::Idle;
+    crew::pvp_match::Pick pick_{};
     std::uint32_t revision_ = 0, transaction_ = 0, committedToken_ = 0, exposedRevision_ = 0, previousRevision_ = 0, localToken_ = 0, seed_ = 0, serial_ = 0;
     std::uint64_t sharedEpoch_ = 0, deadline_ = 0, lastHello_ = 0;
     struct LeaseProbe { std::uint32_t token = 0; std::uint64_t issued = 0; };
@@ -415,7 +492,7 @@ private:
         if (!AllKnown() || state.count != context_.peerCount + 1) return false;
         for (std::size_t i = 0; i < state.count; ++i) {
             const auto& entry = state.entries[i];
-            if (!ValidPuid(entry.puid) || (entry.team != 1 && entry.team != 2)) return false;
+            if (!ValidPuid(entry.puid) || !ValidEntry(entry)) return false;
             bool known = !std::strcmp(entry.puid, local_);
             for (std::uint32_t j = 1; j <= context_.peerCount; ++j)
                 known = known || !std::strcmp(entry.puid, peers_[j]);
@@ -483,9 +560,10 @@ private:
         for (std::uint32_t i = 1; i <= context_.peerCount; ++i) if (!Send(i, msg)) ok = false;
         return ok;
     }
-    static bool SetTeam(State& state, const char* puid, std::uint8_t team) noexcept {
+    static bool SetMemberPick(State& state, const char* puid, const crew::pvp_match::Pick& pick) noexcept {
+        if (!crew::pvp_match::PickValid(pick)) return false;
         for (std::size_t i = 0; i < state.count; ++i)
-            if (!std::strcmp(state.entries[i].puid, puid)) { state.entries[i].team = team; return true; }
+            if (!std::strcmp(state.entries[i].puid, puid)) { SetPick(state.entries[i], pick); return true; }
         return false;
     }
     bool Request(Kind kind, std::uint8_t value, std::uint64_t now) noexcept {
@@ -494,10 +572,11 @@ private:
         if (context_.host) {
             State candidate = state_;
             if (kind == Kind::RequestMode) candidate.enabled = value != 0;
-            else if (!SetTeam(candidate, local_, value)) return false;
+            else if (!SetMemberPick(candidate, local_, pick_)) return false;
             return Begin(candidate, now);
         }
         Message msg = Control(kind); msg.token = NextToken(); msg.arg = value;
+        if (kind == Kind::RequestPick) { msg.role = pick_.role; msg.unit = pick_.unit; }
         const bool ok = Send(context_.hostPeer, msg);
         requestPending_ = ok; deadline_ = now + kTimeoutMs;
         result_ = ok ? Result::Pending : Result::SendFailed; return ok;
