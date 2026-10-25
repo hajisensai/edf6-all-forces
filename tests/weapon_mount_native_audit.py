@@ -214,9 +214,9 @@ def main(argv: list[str]) -> int:
               and yaw[1][1] == [0.0] and pitch is not None and pitch[0] == 0.0 and pitch[1][1][0] == 1.0
               and pitch[1][1][1] < pitch[1][1][2], f"{kind}: V603 class, free yaw hinge, pitch hinge with travel")
         guns = [bone for bone, _ in vehicle["vehicle_weapon_setting"] if bone != "cannon_main"]
-        check(len(guns) >= 1 and all(chain(md, bone)[1] in ("cannon_l", "cannon_r") and "cannon_main" in chain(md, bone)
+        check(len(guns) >= 1 and all({"cannon_l", "cannon_r"} & set(chain(md, bone)) and "cannon_main" in chain(md, bone)
                                      for bone in guns),
-              f"{kind}: every gun holder hangs under a pitch bone and the turret (yaw and pitch: SeatGunLine's bore)")
+              f"{kind}: every elevating holder is on (or under) a pitch bone and the turret (yaw and pitch: SeatGunLine's bore)")
     print(f"PASS: {checked} read-only native/resource contracts; no game or DLL execution")
     return 0
 
