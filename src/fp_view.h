@@ -119,6 +119,23 @@ inline bool LookFrame(const float* eye,const float* look,M4* out) noexcept {
     return Finite(*out);
 }
 
+// A gun camera's first person (the user, 2026-10-25: a weapon station's view lost the gun once it was raised, "往上抬炮管
+// 就看不见了"; the gunship gunner's first person "无法动视角"). A remote_display seat (pylib/cockpit_kits.py: a weapon station,
+// the gunship's side guns, the 410's pod guns, a mech's gun mounts) sees a camera's picture, and its eye marker rides a
+// bone that does not carry the aim: the turret's yaw (cannon_main), the hull (bomber401, gunCam_l), the body. Its
+// orientation from that bone held the view level while the gun climbed, or fixed to the airframe while the rider's aim
+// (which the gunship's guns are laid by: no bone at all) turned. The seat's own stock camera is what the game turns with
+// the rider's aim, for every seat alike (a turret's, the gunship gunner's GunshipGunnerCamera, a pod gun's): the gun
+// camera takes its way from that, level, at the marker's eye. `native` the stock camera's frame (rows left, up, ahead).
+inline bool GunCameraFrame(const M4& native,const float* eye,M4* out) noexcept {
+    const float look[3]={eye[0]+native.m[8],eye[1]+native.m[9],eye[2]+native.m[10]};
+    return LookFrame(eye,look,out);
+}
+// Whether seat `seat`'s first person is a gun camera (above): it has the station's monitor (a sensor screen marker), and
+// it is not the pilot's seat of a craft the player flies (`flies`: a drone's, an aircraft's, a helicopter's, the
+// Sazabi's: their monitor shows the nose, which the flight turns, not an aim).
+constexpr bool GunCameraSeat(bool sensorScreen,bool flies,int seat) noexcept { return sensorScreen && !(flies && seat==0); }
+
 // The procedural motion (fp_motion.h) as a matrix in the camera's frame (x right, y up, z ahead): turned about `pivot`
 // by pitch (up), yaw (right) and roll (right), then moved by the offset.
 inline M4 MotionMatrix(float x,float y,float z,float pitch,float yaw,float roll,const float* pivot) noexcept {

@@ -3,6 +3,7 @@
 #pragma once
 #include <Windows.h>
 #include <cstdint>
+#include "firecontrol.h"
 #include "gunsight.h"
 #include "reticle.h"
 #include "roundaim.h"
@@ -85,6 +86,9 @@ struct StockArm {
     reticle::Style reticle=reticle::Style::none;   // its sight's style (reticle.h Classify, from the weapon's own data)
     reticle::Shell shell=reticle::Shell::none;     // its round as the sight names it (AP / HE / BEAM)
     float roundSpeed=0.0f;       // m/s: AmmoSpeed x 60 (the flak sight's lead rings)
+    fcs::System fcs=fcs::System::computer;   // its fire-control system (firecontrol.h): what the sight shows beyond its reticle
+    float leadFlight=0.0f;       // s: the round's flight to the ranged target's lead point (`ranged`)
+    float targetSpeed=0.0f;      // m/s: the ranged target's speed (its lock point's smoothed moves)
 };
 struct StockHudReadout {
     char kind[16];

@@ -540,3 +540,20 @@ fd  (0x38 字节): +0x00..+0x14 = mgr+0x80..+0x94 的 6 个 float；+0x18 = 1；
 **需实机确认**：开地图时雷达、武器栏、护甲条、准星、跟随者血条都消失，关地图（M / Esc / B）后恢复；地图开着时进过场、过场中开地图
 的表现；双人分屏时只藏开地图那位玩家的 HUD（原版 `SetPlayerHudShow` 本身是四个视口一起改）；原版 HUD 布局的滑出动画（§10.1）
 在这个开关下是否出现（静态看开关只跳过绘制，不触发动画）。
+### 12.3 伤害层在载具第一人称里照画（2026-10-25，`map_stock_hud.h LendsDamage`、`map.cpp DamageDrawHook`）
+
+用户：「第一人称的伤害显示没了」。载具第一人称有座舱屏时（`FirstPersonHidesStockHud`）同一个开关把原版 HUD 整体关掉，伤害数字跟着没了。
+
+| 项 | 内容 | 可信度 |
+|---|---|---|
+| 伤害数字 | `ui::DamageNumberDraw`（vtable `0x17FC8A0`）/ `ui::DamageNumberDrawTexture`（`0x17FC908`），在 `ui::HUiHudDamage`（`0x17FC970`，构造 `0x81DCF0`，`0x81DEB1` 调 `0x81DC30` 建数字层）里建 | 类名 H（RTTI）；归属 M（构造附近的 vtable 写，静态，未实机） |
+| 外层 | `ui::HUiHudDamageObject`（vtable `0x17FCA28`，构造 `0x81E1A0`）第 3 槽 = 共用绘制 `0x8168B0`：`[rcx+18h]` 取镜头，`+0x200` 为 0 直接返回，否则 `call [cam+48h]` 后逐个画 `+0x70..+0x78` 里的子层 | H |
+| 参数 | `0x8168B0` 只读 `rcx`（`rdx` / `r8` / `r9` 在写之前不读，无栈参数） | H |
+
+做法：只把 `HUiHudDamageObject` 自己 vtable 的第 3 槽串上 `DamageDrawHook`（雷达、武器栏等别的包装类 vtable 不动）。记录多一位
+`damage`：这次按住开关的只是载具第一人称（不是地图视角）。`LendsDamage`（按住的是这台镜头、本关、`damage`、且游戏想要显示 HUD——过场
+藏了就不借）为真时，在 `hudLock` 下把 `+0x200` 写 1、调原函数、写回 0；镜头步进的 `StockHud` 也拿 `hudLock`，看不到借出的 1，所以
+`want` 不会被误改。槽位不是 `0x8168B0`（别的模组改过）或串不上：写日志，第一人称里没有伤害数字（与以前相同）。
+
+离线：`map_hud_check` 加 6 条（第一人称借出、别的镜头 / 新一关不借、过场藏了不借、地图视角不借、关地图后再借、退出第一人称后开关复原）。
+

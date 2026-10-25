@@ -125,6 +125,23 @@ int main() {
         Steps(r,c,2,false);
         Check(c.shown==1,"closed: on",c.shown);
     }
+    // A vehicle's first person alone holds the switch: the damage layer (the numbers, the hit marks) is lent it for its
+    // draw; the map's hold, a cutscene's hide, another camera, a stale mission's record never lend it.
+    {
+        maphud::Record r;Cam c,other;
+        maphud::Step(r,&c,1,true,&c.shown,true);
+        Check(c.shown==0 && maphud::LendsDamage(r,&c,1),"first person: gauges off, the damage layer lent the switch",c.shown);
+        Check(!maphud::LendsDamage(r,&other,1) && !maphud::LendsDamage(r,&c,2),"never another camera's or a new mission's");
+        GameSet(r,c,1,false);
+        Check(!maphud::LendsDamage(r,&c,1),"a cutscene hid the HUD meanwhile: no damage layer either");
+        GameSet(r,c,1,true);
+        maphud::Step(r,&c,1,true,&c.shown,false);
+        Check(c.shown==0 && !maphud::LendsDamage(r,&c,1),"the map's view on it: nothing lent");
+        maphud::Step(r,&c,1,true,&c.shown,true);
+        Check(maphud::LendsDamage(r,&c,1),"the map closed, first person still on: lent again");
+        maphud::Step(r,&c,1,false,&c.shown,false);
+        Check(c.shown==1 && !maphud::LendsDamage(r,&c,1),"first person off: the switch back, nothing to lend",c.shown);
+    }
     std::printf(failures ? "map_hud_check: %d of %d FAILED\n" : "map_hud_check: %d checks passed\n",failures ? failures : cases,cases);
     return failures ? 1 : 0;
 }

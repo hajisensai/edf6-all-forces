@@ -130,12 +130,13 @@ void PickVisit(void* ctx,const void* object,const float* aim) noexcept {
     if(!(l>1.0f) || l>kReach)return;
     const float off=std::acos(vec::Clamp(vec::Dot(d,p.look)/l,-1.0f,1.0f));
     if(target.ref.Is(object) && off<=kKeepCone){p.keep=true;std::memcpy(p.keepAt,aim,12);}
-    if(off>kPickCone || off>=p.best)return;
+    if(off>=p.best)return;   // p.best starts at the acquisition cone
     p.best=off;p.found=object;std::memcpy(p.at,aim,12);
 }
-void RangeTarget(const unsigned char* v,const StockHudReadout& r,const float* eye,ULONGLONG ms) noexcept {
+// `cone`: how far off the line of sight a new target is acquired (firecontrol.h Kit::pickCone: a radar's is wider).
+void RangeTarget(const unsigned char* v,const StockHudReadout& r,const float* eye,ULONGLONG ms,float cone) noexcept {
     TargetPick p{};
-    p.best=kPickCone;
+    p.best=cone>kPickCone ? cone : kPickCone;
     if(!r.lookOk || r.heli){target=Target{};return;}
     std::memcpy(p.eye,eye,12);std::memcpy(p.look,r.look,12);
     VisitEnemies(v,&PickVisit,&p);
@@ -162,12 +163,14 @@ void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const
     a.ladder=gunsight::Of(round,pos,dir,shooter);
     const roundaim::GunMark g=roundaim::GunSight(round,pos,dir,shooter,a.hit,a.at,a.flight*60.0f,target.ok ? target.at : nullptr,
                                                  target.vel);
-    if(g.mark!=roundaim::SightMark::ranged)return;
+    if(g.mark!=roundaim::SightMark::ranged || !fcs::KitOf(a.fcs).lead)return;   // a telescope computes no lead (firecontrol.h)
     a.ranged=g.mark==roundaim::SightMark::ranged;
     a.inReach=g.inReach;
     // A target guide is not where this shot hits terrain. Keep RoundLands' physical endpoint/hit/time intact.
     std::memcpy(a.lead,g.lead,12);
     a.targetRange=vec::Dist(pos,a.lead);
+    a.leadFlight=g.frames/60.0f;
+    a.targetSpeed=vec::Len(target.vel);
 }
 
 // The sight weapon `w` (its round `m`) gets: reticle.h Classify on the weapon's own numbers; `antiAir` the vehicle's role.
@@ -191,6 +194,9 @@ void SightOf(const unsigned char* w,const RoundModel& m,bool antiAir,StockArm& a
         else if(spec->shell==StoreShell::canister)a.shell=reticle::Shell::canister;
     }
     a.roundSpeed=t.speed;
+    std::size_t length=0;
+    const wchar_t* file=WeaponFile(w,&length);
+    a.fcs=fcs::Of(file,length,antiAir);
 }
 
 // One weapon's line and its impact point (see the top). `aim`: work the point out (not for a heli's).
@@ -312,13 +318,18 @@ void StockHudFrame(unsigned char* v) noexcept {
     r.hp=At<float>(v,kHp);r.hpMax=At<float>(v,kHpMax);
     Speed(v,r,ms);
     r.stab=StabState(v,r.seat);
-    RangeTarget(v,r,eye,ms);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
     // The store the payload switch has picked (payload.cpp: the secondary fires it), found by its weapon: selected.
     const unsigned char* const picked=PayloadPicked(v);
     const unsigned char* const ownPicked=PayloadOwnSecondaryPicked(v);   // the missile the secondary fires (both are shown)
     const unsigned char* const sight=PayloadSightPicked(v,r.seat);
+    const bool antiAir=reticle::AntiAirClass(VehicleClassName(v));
+    {   // the target is acquired as the sight's fire control acquires it (firecontrol.h: a radar's wider cone)
+        std::size_t length=0;
+        const wchar_t* file=sight ? WeaponFile(sight,&length) : nullptr;
+        RangeTarget(v,r,eye,ms,fcs::KitOf(fcs::Of(file,length,antiAir)).pickCone);
+    }
     const unsigned char* const turret=PlayerTurretGun(v,seat);
     unsigned char* fired[kStockArms]{};
     const int firing=PayloadSightWeapons(v,r.seat,fired,kStockArms);
@@ -329,7 +340,6 @@ void StockHudFrame(unsigned char* v) noexcept {
     // SetStockSelectedStore's index is the holder's, the arms' skip the tank: its arm found as the list is walked.
     const int store=selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
     int pickedArm=-1,storeArm=-1;
-    const bool antiAir=reticle::AntiAirClass(VehicleClassName(v));
     if(n<=16 && Readable(holders,n*8))
         for(std::uint64_t i=0;i<n && r.arms<kStockArms;++i) {
             if(!Readable(holders[i],kHolderWeapon+8))continue;

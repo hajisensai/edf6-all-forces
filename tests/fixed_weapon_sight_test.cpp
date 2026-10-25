@@ -41,6 +41,7 @@ unsigned char* PayloadPicked(const void*) noexcept{return nullptr;}
 unsigned char* PayloadOwnSecondaryPicked(const void*) noexcept{return nullptr;}
 const StoreSpec* sightStore=nullptr;
 const StoreSpec* StoreOf(const unsigned char*) noexcept{return sightStore;}
+const wchar_t* WeaponFile(const unsigned char*,std::size_t* length) noexcept{*length=0;return nullptr;}   // a stock gun: the computer
 unsigned char* PayloadSightPicked(const void*,unsigned) noexcept{return nullptr;}
 int PayloadSightWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}
 int PayloadTriggerWeapons(const void*,unsigned,unsigned char**,int) noexcept{return 0;}

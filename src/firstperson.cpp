@@ -294,6 +294,7 @@ struct State {
     CockpitScreens screens;     // ...and its screens round the eye (VehicleScreens), for the HUD
     instruments::Readings instruments;
     bool instrumentsReady;
+    bool gunCamera;             // the seat's view is its gun camera's (Ride: fp_view.h GunCameraFrame), last said in the log
 };
 /// Each local camera owns its pose, motion, batches and effects. Never evict another local player's view.
 constexpr int kLocalViews=4;
@@ -1416,9 +1417,19 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     // Most seats follow their physical cockpit frame. Sazabi's decorated neck is not its pilot's view controller:
     // preserve the physical eye while taking rotation from the same heading/pitch that drives its aim.
     SazabiFirstPersonFrame(ride.vehicle,static_cast<unsigned>(ride.seat),ride.frame);
-    std::memcpy(cam+kCamMatrix,ride.frame,64);
-    VehicleLookCamera(h,reinterpret_cast<float*>(cam+kCamMatrix));
     VehicleScreens(ride.vehicle,ride.seat,eye,&Current().screens);
+    // A weapon station's camera looks where its gun is laid, every gunner seat alike (fp_view.h GunCameraFrame): the
+    // stock seat camera's way (cam+0x220 as the native step left it) from the marker's eye; the cockpit seats keep their
+    // bone's frame.
+    bool sensor=false;
+    for(int i=0;i<Current().screens.n;++i)sensor=sensor || Current().screens.s[i].kind==ScreenKind::sensor;
+    const void* const rv=ride.vehicle;
+    const bool flies=PlayerJetOwnSight(rv) || IsHelicopter(rv) || IsSazabi(rv);
+    M4 gunCam;
+    const bool gunCamera=fpview::GunCameraSeat(sensor,flies,ride.seat) && fpview::GunCameraFrame(MatrixAt(cam+kCamMatrix),eye,&gunCam);
+    if(gunCamera!=Current().gunCamera){Current().gunCamera=gunCamera;Log("FP seat %d: %s",ride.seat,gunCamera ? "a gun camera, laid with the aim" : "its cockpit's frame");}
+    std::memcpy(cam+kCamMatrix,gunCamera ? gunCam.m : ride.frame,64);
+    VehicleLookCamera(h,reinterpret_cast<float*>(cam+kCamMatrix));
     std::memcpy(Current().screens.frame,Current().ride.frame,64);
     ReturnNear(cam);
     if(Current().smoothSet){Put<float>(h,kLookSmooth,Current().savedSmooth);Current().smoothSet=false;}

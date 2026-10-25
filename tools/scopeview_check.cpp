@@ -2,7 +2,7 @@
 //  - the round field: every sampled point of the screen farther than the circle (by 1%) is under a dark piece, every
 //    point nearer (by 1%) under none (the pieces' straight inner edges stay within the circle's 1%);
 //  - the field is round and centred, inside the screen (its radius the smaller side's kRound);
-//  - the sensor fits by uniform scaling: every point outside dark, every point inside clear, always 4:3;
+//  - the sensor fills the view: its bezel a few percent inside every edge, nothing of the view outside it left over;
 //  - real triangle-strip winding matches hud.cpp Seg/Rect for both triangles, and high-resolution edges have no leaks.
 //   cmake --build build --target scopeview_check && build\scopeview_check.exe      (exit code 1 on a failure)
 #include "../src/scopeview.h"
@@ -76,24 +76,12 @@ void Round(float w,float h) {
 }
 
 void Sensor(float w,float h) {
-    Quad b[4];
-    RectBands(w,h,b);
     float hx,hy;
     RectHalf(w,h,&hx,&hy);
-    Check(hx>0.0f && hy>0.0f && hx<=0.48f*w+1e-3f && hy<=kRectHigh*h+1e-3f,
-          "sensor fits both viewport dimensions",hx,hy);
-    Check(std::fabs(hx/hy-4.0f/3.0f)<1e-5f,"sensor keeps 4:3 even on narrow/portrait screens",hx,hy);
-    for(const auto& q:b)Winding(q);
-    int wrong=0;
-    const float cx=w*0.5f,cy=h*0.5f;
-    for(float y=0.5f;y<h;y+=h/97.0f)
-        for(float x=0.5f;x<w;x+=w/151.0f) {
-            const bool in=std::fabs(x-cx)<hx-0.5f && std::fabs(y-cy)<hy-0.5f,outside=std::fabs(x-cx)>hx+0.5f || std::fabs(y-cy)>hy+0.5f;
-            bool dark=false;
-            for(const Quad& p:b)dark=dark || Inside(p,x,y);
-            if((in && dark) || (outside && !dark))++wrong;
-        }
-    Check(wrong==0,"the sensor: dark outside, clear inside",wrong,w);
+    const float in=kRectInset*(w<h ? w : h);
+    Check(hx>0.0f && hy>0.0f && hx<0.5f*w && hy<0.5f*h,"the sensor's bezel inside the view",hx,hy);
+    Check(std::fabs((0.5f*w-hx)-in)<0.01f && std::fabs((0.5f*h-hy)-in)<0.01f,
+          "the sensor fills the view: the same narrow margin at every edge, no band",hx,hy);
 }
 }  // namespace
 

@@ -1516,6 +1516,24 @@ void LeadMark(void* drawer,void* ctx,const float* vp,float width,float height,fl
     Arc(drawer,ctx,x,y,r,0.0f,kTurn,t,10,rgba);
     Seg(drawer,ctx,x-r,y-r,x+r,y+r,t,rgba);Seg(drawer,ctx,x-r,y+r,x+r,y-r,t,rgba);
 }
+// A vehicle gun's lead as its fire control shows it (firecontrol.h): the lead mark; a radar's dashed line to it from the
+// gun's line (the way to swing the gun); a computer's solution under it (the round's flight there, the target's speed).
+void FcsLead(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,const StockArm& a,const float* rgba,
+             Line* lines,int* at) noexcept {
+    const fcs::Kit kit=fcs::KitOf(a.fcs);
+    if(!kit.lead)return;
+    LeadMark(drawer,ctx,vp,width,height,s,a.lead,rgba);
+    float lx,ly,bx,by;
+    if(!sight::ToScreen(vp,a.lead,1.0f,width,height,&lx,&ly))return;
+    if(kit.leadLine && sight::ToScreen(vp,a.bore,0.0f,width,height,&bx,&by)) {
+        const float dx=lx-bx,dy=ly-by,len=std::sqrt(dx*dx+dy*dy),dash=8.0f*s,gap=7.0f*s,clear=10.0f*s;
+        for(float d=clear;len>0.0f && d+dash<=len-clear;d+=dash+gap)
+            Seg(drawer,ctx,bx+dx*d/len,by+dy*d/len,bx+dx*(d+dash)/len,by+dy*(d+dash)/len,1.5f*s,rgba);
+    }
+    if(kit.solution && a.leadFlight>0.0f)
+        Label(text,lines,at,lx,ly+20.0f*s,1,kLineScale*0.7f,rgba,Tr(Tx::fcsSolution),a.leadFlight,
+              static_cast<int>(std::lround(a.targetSpeed*3.6f)));
+}
 
 // The guns' sight: a cross on the boresight (where the nose points: the guns' line), the pipper (a circle, a dot in it)
 // where the rounds fired now will be at the target's range (else at the sight's own), the target's lead mark (a cross
@@ -2745,6 +2763,7 @@ void GunReticle(void* drawer,void* ctx,Text* text,const float* vp,float width,fl
     const float over=cy-16.0f*s,note=kLineScale*0.85f;
     Label(text,lines,at,cx-in,over,2,note,kHud,L"%ls",name);
     const float measured=a.ranged ? a.targetRange : a.range;
+    if(!fcs::KitOf(a.fcs).rangefinder)return;   // a telescope: the stadia and the ladder are the range
     if(measured>0.0f && (a.hit || a.ranged))
         Label(text,lines,at,cx+in,over,0,note,a.ranged && !a.inReach ? kHudDim : kHud,Tr(Tx::sightRange),static_cast<int>(std::lround(measured)));
     else Label(text,lines,at,cx+in,over,0,note,kHudDim,L"%ls",Tr(Tx::sightNoRange));
@@ -2762,9 +2781,10 @@ void ScopeData(Text* text,Line* lines,int* at,float s,const scope::Field& f,cons
     if(a.name[0])_snwprintf_s(word,_countof(word),_TRUNCATE,L"%ls",a.name);
     else hudtext::WordTo(a.label,word,_countof(word));
     Label(text,lines,at,f.cx-gap,y,2,kLineScale*0.9f,kLed,L"%ls  %d",word,a.ammo>0 ? a.ammo : 0);
-    if(ranged)Label(text,lines,at,f.cx+gap,y,0,kLineScale*1.15f,a.ranged && !a.inReach ? kLedDim : kLed,L"%04d",
+    const bool laser=fcs::KitOf(a.fcs).rangefinder;   // a telescope has no range to show (firecontrol.h): the stadia are it
+    if(laser && ranged)Label(text,lines,at,f.cx+gap,y,0,kLineScale*1.15f,a.ranged && !a.inReach ? kLedDim : kLed,L"%04d",
                     static_cast<int>(std::lround(measured>9999.0f ? 9999.0f : measured)));
-    else Label(text,lines,at,f.cx+gap,y,0,kLineScale*1.15f,kLedDim,L"----");
+    else if(laser)Label(text,lines,at,f.cx+gap,y,0,kLineScale*1.15f,kLedDim,L"----");
     Label(text,lines,at,f.cx-gap,y+row,2,kLineScale*0.8f,kLed,L"%.0fx",zoom);
     if(a.ammo>0)Label(text,lines,at,f.cx+gap,y+row,0,kLineScale*0.8f,kLed,L"%ls",Tr(Tx::scopeReady));
     else if(a.canReload)Label(text,lines,at,f.cx+gap,y+row,0,kLineScale*0.8f,kLedDim,Tr(Tx::scopeLoading),a.reloadSec>0.0f ? a.reloadSec : 0.0f);
@@ -2796,7 +2816,7 @@ void ScopeArm(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     float x,y;
     if(a.kind==RoundKind::homing)LockAt(drawer,ctx,vp,width,height,s,a.lock,a.at,a.lockProgress,&x,&y);
     else if(a.kind==RoundKind::rocket && a.hit && sight::ToScreen(vp,a.at,1.0f,width,height,&x,&y))RocketDiamond(drawer,ctx,x,y,s,kLit);
-    else if(a.ranged && !a.physicalOnly)LeadMark(drawer,ctx,vp,width,height,s,a.lead,a.inReach ? kLit : kLedDim);
+    else if(a.ranged && !a.physicalOnly)FcsLead(drawer,ctx,text,vp,width,height,s,a,a.inReach ? kLit : kLedDim,lines,at);
     if(a.kind!=RoundKind::homing)PhysicalPaths(drawer,ctx,text,vp,width,height,s,a.path,a.paths,false,lines,at);
     ScopeData(text,lines,at,s,f,a,zoom,zero);
 }
@@ -2843,7 +2863,7 @@ void StockMark(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     }
     if(reticle && !a.physicalOnly)GunReticle(drawer,ctx,text,vp,width,height,s,a,name,lines,at);
     else Boresight(drawer,ctx,vp,width,height,s,a.bore);
-    if(a.ranged && !a.physicalOnly)LeadMark(drawer,ctx,vp,width,height,s,a.lead,a.inReach ? kHud : kHudDim);
+    if(a.ranged && !a.physicalOnly)FcsLead(drawer,ctx,text,vp,width,height,s,a,a.inReach ? kHud : kHudDim,lines,at);
     PhysicalPaths(drawer,ctx,text,vp,width,height,s,a.path,a.paths,!reticle,lines,at);
 }
 
@@ -5341,7 +5361,8 @@ void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,fl
 // optic (a gunner's sight, a scope): the eyepiece's black all round (opaque, as an eyepiece is), the image darkening
 // over the field's last few percent into it (scopeview.h kFeather*: no drawn rim), the reticle etched on the glass
 // (scopereticle.h, drawn with the weapon's marks: ScopeArm / InfantryScope). An electronic sensor (an energy weapon's
-// display, the gunship gunner's) is a 4:3 screen: black bands round it, a thin bezel, its field-of-view name.
+// display, the gunship gunner's, a weapon station's monitor) is the whole view (scopeview.h RectHalf; 2026-10-25 no
+// longer a 4:3 box in black bands): a thin bezel just inside the view's edge, corner marks, its field-of-view name.
 alignas(16) const float kScopeDark[4]={0.0f,0.0f,0.0f,0.97f};
 alignas(16) const float kScopeFeather[scopeview::kFeathers][4]={
     {0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[0]},{0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[1]},
@@ -5363,9 +5384,6 @@ void Eyepiece(void* drawer,void* ctx,float width,float height,float cx,float cy,
 void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float s,float zoom,bool sensor,Line* lines,int* at) noexcept {
     const float cx=width*0.5f,cy=height*0.5f;
     if(sensor) {
-        scopeview::Quad b[4];
-        scopeview::RectBands(width,height,b);
-        for(const auto& q:b)Quad4(drawer,ctx,q,kScopeDark);
         float hx,hy;
         scopeview::RectHalf(width,height,&hx,&hy);
         // A thin bezel, a corner mark at each corner, the field of view named (narrow / medium / wide) with its power.
