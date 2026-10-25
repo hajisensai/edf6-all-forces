@@ -162,13 +162,6 @@
    "vertices": 41
   },
   {
-   "name": "body.wt_pzh_2000_gun_c_ger_camo_bronzegruen",
-   "bone": "body",
-   "material": 4,
-   "triangles": 1232,
-   "vertices": 774
-  },
-  {
    "name": "body.wt_pzh_2000_turret_c",
    "bone": "body",
    "material": 8,
@@ -228,8 +221,8 @@
    "name": "cannon_l.wt_pzh_2000_gun_c_ger_camo_bronzegruen",
    "bone": "cannon_l",
    "material": 4,
-   "triangles": 1172,
-   "vertices": 1480
+   "triangles": 4726,
+   "vertices": 5122
   },
   {
    "name": "cannon_main.wt_pzh_2000_turret_c_ger_camo_bronzegruen",
@@ -251,13 +244,6 @@
    "material": 3,
    "triangles": 14,
    "vertices": 20
-  },
-  {
-   "name": "cannon_main.wt_pzh_2000_gun_c_ger_camo_bronzegruen",
-   "bone": "cannon_main",
-   "material": 4,
-   "triangles": 2322,
-   "vertices": 2868
   },
   {
    "name": "cannon_main.wt_mg_mount_leopard_2a7v_c_ger_camo_bronzegruen",
@@ -829,12 +815,12 @@
     ],
     [
      1.889346,
-     2.66351,
+     2.433759,
      3.677057
     ]
    ],
-   "source_triangles": 130804,
-   "hull_triangles": 4968
+   "source_triangles": 129572,
+   "hull_triangles": 4718
   },
   "cannon_main": {
    "target": [
@@ -846,10 +832,10 @@
     [
      1.58675,
      4.84028,
-     0.489341
+     0.00296
     ]
    ],
-   "source_triangles": 62801,
+   "source_triangles": 60479,
    "hull_triangles": 4710
   },
   "cannon_l": {
