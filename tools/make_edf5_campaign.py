@@ -222,13 +222,13 @@ RANGE_MISSION = 'EDF6TR_RANGE'
 RANGE = Pack('range', 'EDF6TR', 'TR00.MST', 0,
              {'CN': 'EDF6VehicleCrew 測試場', 'EN': 'EDF6VehicleCrew Test Range', 'JA': 'EDF6VehicleCrew テストレンジ',
               'KR': 'EDF6VehicleCrew 테스트 레인지', 'SC': 'EDF6VehicleCrew 测试场'},
-             {'CN': '試駕 EDF6VehicleCrew 的載具與武器：只有靶子，沒有敵人；不影響劇情進度。',
-              'EN': "Try EDF6VehicleCrew's vehicles and weapons: targets only, no enemies; the story's progress is untouched.",
-              'JA': 'EDF6VehicleCrew のビークルと武器を試せます。標的のみで敵は出ません。本編の進行には影響しません。',
-              'KR': 'EDF6VehicleCrew의 탈것과 무기를 시험합니다. 표적만 있고 적은 없으며 본편 진행에는 영향이 없습니다.',
-              'SC': '试驾 EDF6VehicleCrew 的载具与武器：只有靶子，没有敌人；不影响剧情进度。'},
+             {'CN': '試駕 EDF6VehicleCrew 的載具與武器：只有靶子，沒有敵人；另有幾關聯機對戰預製關；不影響劇情進度。',
+              'EN': "Try EDF6VehicleCrew's vehicles and weapons: targets only, no enemies; plus a few PvP presets for online play; the story's progress is untouched.",
+              'JA': 'EDF6VehicleCrew のビークルと武器を試せます。標的のみで敵は出ません。オンライン対戦用のプリセットもあります。本編の進行には影響しません。',
+              'KR': 'EDF6VehicleCrew의 탈것과 무기를 시험합니다. 표적만 있고 적은 없으며 온라인 대전용 프리셋도 있습니다. 본편 진행에는 영향이 없습니다.',
+              'SC': '试驾 EDF6VehicleCrew 的载具与武器：只有靶子，没有敌人；另有几关联机对战预制关；不影响剧情进度。'},
              (OFFLINE, ONLINE), weapon_cap=False)
-RANGE_LIKE = 'EDF6/RM015'   # the stock row whose music, progress and flags the range's row copies (range_row)
+RANGE_LIKE = 'EDF6/RM015'   # the stock row whose music, progress and flags the range's rows copy (range_rows)
 RANGE_ROW = {'group': 'range', 'key': f'EDF6/{RANGE_MISSION}', 'map': None, 'thumb': 'EDF6/M045',
              'title': {lang: RANGE.name[lang] for lang in LANGS},
              'brief': {'CN': '開闊的平原，載具停在出生點附近，靶子在遠處（一部分在空中）。\n這一關不會結束：測完從暫停選單撤退。',
@@ -239,6 +239,46 @@ RANGE_ROW = {'group': 'range', 'key': f'EDF6/{RANGE_MISSION}', 'map': None, 'thu
                        'KR': '탁 트인 평원. 탈것은 시작 지점 근처에, 표적은 멀리(일부는 공중)에 있습니다.\n'
                              '이 미션은 끝나지 않습니다. 시험이 끝나면 일시 정지 메뉴에서 철수하십시오.',
                        'SC': '开阔的平原，载具停在出生点附近，靶子在远处（一部分在空中）。\n这一关不会结束：测完从暂停菜单撤退。'}}
+# The PvP presets (the user, 2026-10-25, on docs/plan-2026-10-23-pvp-modes.md: 「这个太复杂了，不适合初次测试，直接弄几个
+# 预制关卡就行了」): rows 1.. of the range's pack, after the range (row 0 keeps its place: a save's clears are by row), each
+# a mission folder of its own (testrange/gen.py PVP_PLANS: empty vehicles by the start, no enemy, no target, never
+# ends). The sides are the M map's PvP panel's (the host turns it on, each player picks side 1 or 2: src/pvp.h). No row
+# of the pack is ever cleared, so the plugin opens them all in the mission select (src/edf5campaign.cpp OpenRows).
+# (folder, thumbnail, EN title, SC title, EN brief, SC brief): CN takes the SC text, JA and KR the EN one.
+_PVP_HOW = {'EN': '\nThe host turns PvP on in the M map\'s PvP panel, each player picks side 1 or 2, then boards.\n'
+                  'This mission never ends: withdraw from the pause menu when done.',
+            'SC': '\n房主在 M 地图「对战」面板开启对战，每人选阵营 1 / 2，再各自上车。\n这一关不会结束：打完从暂停菜单撤退。'}
+PVP_PRESETS = (
+    ('EDF6TR_PVP_JET', 'EDF6/M045', 'Jet Duel', '对战：战斗机对决',
+     'The plain: four player fighters parked by the start (1v1 or 2v2). Take off and split up before the fight.',
+     '平原，出生点旁停着 4 架玩家战斗机（1v1 或 2v2）。起飞后拉开距离再开打。'),
+    ('EDF6TR_PVP_HELI', 'EDF6/M045', 'Helicopter Duel', '对战：直升机对决',
+     'The plain: two Eros and two Brute helicopters parked by the start.',
+     '平原，出生点旁停着 Eros、Brute 直升机各 2 架。'),
+    ('EDF6TR_PVP_TANK', 'EDF6/RM016B', 'Tank Duel', '对战：坦克对决',
+     'Train City: four tanks parked by the start. Drive into the streets and find cover.',
+     '列车城城区，出生点旁停着 4 辆坦克。开进街区各自找掩护。'),
+    ('EDF6TR_PVP_BALAM', 'EDF6/M045', 'Balam Duel', '对战：巴尔加对决',
+     'The plain: two Balam giant mechs by the start, for a giants\' brawl.',
+     '平原，出生点旁站着 2 台巨型机甲巴尔加，巨人格斗。'),
+    ('EDF6TR_PVP_ERGINUS', 'EDF6/M045', 'Balam vs Erginus', '对战：巴尔加对艾尔基努斯',
+     'The plain: two Balams by the start, two Erginus out on the plain. Co-op: both of you in Balams against them. '
+     'PvP: one player picks side 1 (the monster side) and takes over an Erginus from the M map (Control this unit).',
+     '平原，出生点旁站着 2 台巴尔加，远处 2 只艾尔基努斯。合作：两人都开巴尔加打它们；'
+     '对战：一人选阵营 1（怪物一方），在 M 地图选中艾尔基努斯「操控此单位」，另一只由 AI 帮他。'),
+    ('EDF6TR_PVP_INFANTRY', 'EDF6/RM016B', 'Infantry Duel', '对战：步兵对决',
+     'Train City, no vehicles: pick your class and weapons before the sortie.',
+     '列车城城区，不放载具，兵种和武器在出击前自选。'),
+    ('EDF6TR_PVP_MIXED', 'EDF6/M045', 'Combined Arms', '对战：空地混战',
+     'The plain: two each of fighters, helicopters, tanks, Balams and Begaruta mechs by the start; pick any.',
+     '平原，出生点旁停着战斗机、直升机、坦克、巴尔加、机甲 Begaruta 各 2 台，自由挑选，空地混战。'),
+)
+PVP_ROWS = [{'group': 'range', 'key': f'EDF6/{folder}', 'map': None, 'thumb': thumb,
+             'title': {lang: sc if lang in ('SC', 'CN') else f'PvP: {en}' for lang in LANGS},
+             'brief': {lang: brief_sc + _PVP_HOW['SC'] if lang in ('SC', 'CN') else brief_en + _PVP_HOW['EN']
+                       for lang in LANGS}}
+            for folder, thumb, en, sc, brief_en, brief_sc in PVP_PRESETS]
+PVP_MISSIONS = tuple(r['key'].removeprefix('EDF6/') for r in PVP_ROWS)
 # EDF4.1's story: its own pack, slotted after the test range so no installed pack's content id moves. Its missions
 # need EDF4.1's maps, converted at install from the player's EDF4.1 (tools/edf41_maps.py): a mission whose map or
 # objects will not be there is left out, and without EDF4.1 the pack is not built at all (not a refusal).
@@ -658,14 +698,16 @@ def pack_image(game: rootcpk.Game, rows: list[dict], kind: str = OFFLINE) -> byt
     return mdb.rab_write(rab)
 
 
-def range_row(game: rootcpk.Game) -> dict:
-    """The test range's row: RANGE_ROW with RANGE_LIKE's music, progress and flags as the game has them."""
+def range_rows(game: rootcpk.Game) -> list[dict]:
+    """The test range pack's rows: RANGE_ROW, then the PvP presets (PVP_ROWS), with RANGE_LIKE's music, progress and
+    flags as the game has them."""
     table = dsgo.parse(game.read('MISSION', 'MISSIONLIST.OFFLINE.LIST.SGO')).root.get('table').items
     like = next((r for r in table if r.items[2] == RANGE_LIKE), None)
     if like is None:
         raise Refused(f'原版离线任务列表里没有 {RANGE_LIKE}：不知道测试场这一关按什么取参数。')
     # stable: every install since the range had a pack (2026-10-09) has had this one row
-    return {**RANGE_ROW, 'bgm': like.items[8], 'progress': like.items[9], 'flags': like.items[10], 'stable': True}
+    return [{**row, 'bgm': like.items[8], 'progress': like.items[9], 'flags': like.items[10], 'stable': True}
+            for row in (RANGE_ROW, *PVP_ROWS)]
 
 
 def pack_files(game: rootcpk.Game, pack: Pack, rows: list[dict]) -> dict[str, bytes]:
@@ -801,7 +843,7 @@ def build(root: str, campaign: bool = True, test_range: bool = True,
     empty = [pack.tag for pack in PACKS if campaign and not any(available(r) for r in by_pack[pack.group])]
     if empty:
         raise Refused(f'没有可安装的任务：{", ".join(empty)}（不写入空任务包）。')
-    by_pack[RANGE.group] = [range_row(game)] if test_range else []
+    by_pack[RANGE.group] = range_rows(game) if test_range else []
     for p41 in PACKS41:
         by_pack[p41.pack.group] = [r for r in p['rows'] if r['group'] == p41.pack.group]
     with41 = [p41 for p41 in PACKS41 if campaign and any(available(r) for r in by_pack[p41.pack.group])]
@@ -875,7 +917,7 @@ def definition_keys(pack: Pack) -> list[str]:
     """`pack`'s rows' mission keys from its committed definition alone (no game: every machine's rows, placeholders
     included, are these)."""
     if pack is RANGE:
-        return [RANGE_ROW['key']]
+        return [r['key'] for r in (RANGE_ROW, *PVP_ROWS)]
     for p41 in PACKS41:
         if p41.pack is pack:
             return [f'{p41.folder}/{m["id"]}' for m in edf41_text(p41.data)['missions']]
