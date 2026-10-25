@@ -29,7 +29,14 @@ void Sites() {
     Check(consistent,"every row: the constant sits at +field of its own bytes, and is one we relocate");
     Check(ordered,"rows sorted by address, none overlapping another");
     Check(known,"every row's constant is in the relocation list");
-    Check(kSiteCount==101,"101 sites (docs/loadout-re.md 8.8)");
+    Check(kSiteCount==100,"100 sites (docs/loadout-re.md 8.8)");
+    // The weapon select screen's reads are jumped over whole (UiStub), never relocated in place: listing 0x8B4F70 as a
+    // constant made the jump's write find patched bytes and roll the whole relocation back (build 471bfc5).
+    bool uiApart=true;
+    for(const Site& s:kSites)uiApart=uiApart && !Overlap(s.rva,s.size,kUiOwned,kUiReadSize) && !Overlap(s.rva,s.size,kUiStatus,kUiReadSize);
+    Check(uiApart,"no constant site shares a byte with the screen's two redirected reads");
+    Check(PatchesApart(),"no redirected call or read shares a byte with a constant site or another patch");
+    Check(Overlap(0x8B4F70,8,kUiOwned,kUiReadSize) && !Overlap(0x8B4F68,8,kUiOwned,kUiReadSize),"the overlap test itself");
     Check(perValue[10]==12,"twelve allocations of the game status (the singleton's inlined new)");
     Check(perValue[8]+perValue[9]==9,"nine record counts: 0xDF130/50/70, 0xDF600/20/40, 0xDF6C0, 0xDF720, 0xAECDE");
     Check(perValue[6]==7 && perValue[7]==10,"the folded forms: 0x139C seven times, 0xA69 ten times");

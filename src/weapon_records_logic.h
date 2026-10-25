@@ -63,6 +63,45 @@ inline constexpr Site kSites[]={
 };
 constexpr std::size_t kSiteCount=sizeof(kSites)/sizeof(kSites[0]);
 
+// The other code src/weapon_records.cpp writes (EDF.dll RVAs): the block copies, the save / load / delete calls it
+// redirects, and the weapon select screen's two reads of its snapshot's table, each replaced whole by a jump.
+constexpr unsigned kMemcpy=0x12DA77A;                     // jmp [memcpy]
+constexpr unsigned kBlockInit=0xDEDA0,kBlockInitCall=0xD6468;   // the game status's constructor 0xD62C0
+constexpr unsigned kOutCalls[]={0x70AF25,0x70B079,0x70B61C,0x70B79C};   // memcpy(record, GS block, 0xDCE8)
+constexpr unsigned kInCalls[]={0x70B23A,0x70B421,0x70B956};            // memcpy(GS block, record, 0xDCE8)
+constexpr unsigned kNewGameCall=0xDB96D;                  // 0xDB920: memcpy(GS block, template, 0xDCE8)
+constexpr unsigned kLoadCopyCall=0x7C1AD1;                // the load job 0x7C1670: memcpy(dest, decoded, size)
+constexpr unsigned kUiSnapCall=0x8B49B1;                  // HUiHQWeaponSelect 0x8B4280: memcpy(screen+0x800, block, 0xDCE8)
+constexpr unsigned kSaveCall=0x7C2F66,kSave=0x7BCD40;     // MAIN.GST's save request (0x7C2E30), 9 arguments
+constexpr unsigned kWriteCall=0x7C228B,kWrite=0x7B9990;   // the save job 0x7C1CB0 writes a file
+constexpr unsigned kReadOpen=0x7B90CD,kWriteOpen=0x7B9C28;   // call [CreateFileW] in 0x7B8DE0 / 0x7B9990
+constexpr unsigned kDeleteCalls[]={0x7B69F1,0x7B7FEB};    // call [DeleteFileW] in 0x7B61B0 / 0x7B7EC0
+// The screen's two reads of its snapshot's table (screen+0x800 = the block's copy: +0x7CE8 / +0x84E8 = block+0x7CE8):
+// both go to a copy of the relocated table (UiStub). Neither is a constant site: relocating 0x8B4F70's 0x7CE8 would
+// read past the 0xDCE8-byte snapshot, and it would change the bytes the jump expects there, so the jump's write fails
+// and the whole relocation is rolled back (build 471bfc5, 2026-10-25: "writing the code failed at the weapon select
+// screen", then the game's writes to rows 0x800.. land on GS+0x14B50 and the boot crashes at EDF+0xCDAE6).
+constexpr unsigned kUiOwned=0x8B4F70,kUiStatus=0x8B51A0;
+constexpr std::uint8_t kUiReadSize=8;
+
+// Each patch of the other code, [rva, rva+size): none may share a byte with a constant site, or with another of them
+// (two writes over one instruction: the second finds the first's bytes and fails).
+struct Span { std::uint32_t rva; std::uint8_t size; };
+inline constexpr Span kOtherPatches[]={
+    {kOutCalls[0],5},{kOutCalls[1],5},{kOutCalls[2],5},{kOutCalls[3],5},{kInCalls[0],5},{kInCalls[1],5},{kInCalls[2],5},
+    {kNewGameCall,5},{kLoadCopyCall,5},{kUiSnapCall,5},{kBlockInitCall,5},{kSaveCall,5},{kWriteCall,5},
+    {kReadOpen,6},{kWriteOpen,6},{kDeleteCalls[0],6},{kDeleteCalls[1],6},{kUiOwned,kUiReadSize},{kUiStatus,kUiReadSize},
+};
+constexpr bool Overlap(std::uint32_t a,std::uint32_t an,std::uint32_t b,std::uint32_t bn) noexcept { return a<b+bn && b<a+an; }
+constexpr bool PatchesApart() noexcept {
+    for(const Span& p:kOtherPatches) {
+        for(const Site& s:kSites)if(Overlap(p.rva,p.size,s.rva,s.size))return false;
+        for(const Span& q:kOtherPatches)if(&p!=&q && Overlap(p.rva,p.size,q.rva,q.size))return false;
+    }
+    return true;
+}
+static_assert(PatchesApart(),"a redirected call or screen read shares bytes with a constant site or another patch");
+
 // The site's own bytes are consistent: the constant sits at +field, it is one we relocate, the instruction fits.
 constexpr bool SiteConsistent(const Site& s) noexcept {
     if(s.size<5 || s.size>12 || s.field+4u>s.size || !Relocated(s.value))return false;
