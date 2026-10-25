@@ -68,7 +68,10 @@ class RealRange(unittest.TestCase):
             # Resolve the temporary game's resource reads to the genuine read-only
             # archive; all production install/ledger writes still target `root`.
             # The pack registration reads the whole game (tools/make_edf5_campaign.py, its own tests): not this one's.
-            with patch.object(gen, 'Game', return_value=self.game), patch.object(gen, 'register_pack', return_value=[]):
+            # Nor every other vehicle of ours the range writes besides (gen.placeable_derived: the tracked vehicles
+            # with their cockpits, ~13 min of builds; tests/test_tracked_range.py and their own tests): this plan's.
+            with patch.object(gen, 'Game', return_value=self.game), patch.object(gen, 'register_pack', return_value=[]), \
+                    patch.object(gen, 'placeable_derived', return_value=set()):
                 gen.install(root, plan)
             text = Path(gen.mission_dir(root, gen.RANGE_MISSION), 'MISSION.AC').read_text(encoding='utf-8-sig')
             self.assertIn(f'Preload("app:/object/{private}.sgo"', text)
