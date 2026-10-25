@@ -245,9 +245,11 @@ RANGE_ROW = {'group': 'range', 'key': f'EDF6/{RANGE_MISSION}', 'map': None, 'thu
 # ends). The sides are the M map's PvP panel's (the host turns it on, each player picks side 1 or 2: src/pvp.h). No row
 # of the pack is ever cleared, so the plugin opens them all in the mission select (src/edf5campaign.cpp OpenRows).
 # (folder, thumbnail, EN title, SC title, EN brief, SC brief): CN takes the SC text, JA and KR the EN one.
-_PVP_HOW = {'EN': '\nThe host turns PvP on in the M map\'s PvP panel, each player picks side 1 or 2, then boards.\n'
+_PVP_HOW = {'EN': '\nPicking this map turns PvP on. Each player picks a faction and role on the room\'s PvP page (the loadout '
+                  'menu); the start waits until every member has confirmed the teams.\n'
                   'This mission never ends: withdraw from the pause menu when done.',
-            'SC': '\n房主在 M 地图「对战」面板开启对战，每人选阵营 1 / 2，再各自上车。\n这一关不会结束：打完从暂停菜单撤退。'}
+            'SC': '\n房主选这张图即开启对战。每人在房间的「对战」页（配装菜单）选阵营与角色，开打前等全员确认阵营表。\n'
+                  '这一关不会结束：打完从暂停菜单撤退。'}
 PVP_PRESETS = (
     ('EDF6TR_PVP_JET', 'EDF6/M045', 'Jet Duel', '对战：战斗机对决',
      'The plain: four player fighters parked by the start (1v1 or 2v2). Take off and split up before the fight.',
@@ -263,9 +265,9 @@ PVP_PRESETS = (
      '平原，出生点旁站着 2 台巨型机甲巴尔加，巨人格斗。'),
     ('EDF6TR_PVP_ERGINUS', 'EDF6/M045', 'Balam vs Erginus', '对战：巴尔加对艾尔基努斯',
      'The plain: two Balams by the start, two Erginus out on the plain. Co-op: both of you in Balams against them. '
-     'PvP: one player picks side 1 (the monster side) and takes over an Erginus from the M map (Control this unit).',
+     'PvP: one player joins the Monsters in the room and takes over an Erginus from the M map (Control this unit).',
      '平原，出生点旁站着 2 台巴尔加，远处 2 只艾尔基努斯。合作：两人都开巴尔加打它们；'
-     '对战：一人选阵营 1（怪物一方），在 M 地图选中艾尔基努斯「操控此单位」，另一只由 AI 帮他。'),
+     '对战：一人在房间里选「怪物」阵营，在 M 地图选中艾尔基努斯「操控此单位」，另一只由 AI 帮他。'),
     ('EDF6TR_PVP_INFANTRY', 'EDF6/RM016B', 'Infantry Duel', '对战：步兵对决',
      'Train City, no vehicles: pick your class and weapons before the sortie.',
      '列车城城区，不放载具，兵种和武器在出击前自选。'),
