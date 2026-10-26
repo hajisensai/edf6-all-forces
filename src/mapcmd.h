@@ -93,7 +93,8 @@ void ResetMapCommands() noexcept;   // map.cpp ResetMap: a new mission (the sele
 void MapCommandView(const float* viewProj,float width,float height) noexcept;
 // hud.cpp: the command buttons as drawn this frame (map_buttons.h; `id` each one's mapbtn::Id), for the clicks.
 void MapCommandButtons(const float* rects,const int* ids,int n) noexcept;
-// hud.cpp: the support bar's rows and chips as drawn (`entries` each one's catalog index), for the clicks. Up to 48.
+// hud.cpp: the support bar's rows and chips as drawn (`entries` each one's catalog index), for the clicks. Up to
+// kMapSupportHits (a row and a chip an entry).
 void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept;
 // hud.cpp: the support composition panel's seats and kinds as drawn (`codes`: map_buttons.h ComposeApply's), for the clicks.
 void MapCommandComposeButtons(const float* rects,const int* codes,int n) noexcept;
@@ -159,9 +160,12 @@ constexpr std::uint8_t kCmdOwnerHeli=0,kCmdOwnerJet=1,kCmdOwnerGround=2;
 struct CmdMark { float pos[3]; Command now; bool selected,air,locked; std::uint8_t owner; char name[24]; bool riding=false;
     std::uint16_t groups=0; std::uint8_t ways=0; float way[mapcmd::kWaypointsMost][3]{}; };
 // The support catalog as the map's bar shows it (copied on the game thread: the draw reads no support state).
-constexpr int kMapSupports=48;
+constexpr int kMapSupports=64;
+constexpr int kMapSupportHits=kMapSupports*2;   // its rows and chips as hit (MapCommandSupportButtons)
 constexpr int kMapTransportLinks=16;   // the transports' lines the map draws (MapCommandReadout::link)
-struct MapSupportEntry { wchar_t name[40]; SupportIcon icon; SupportVariant variant; bool allowed; };   // SupportCallForbidden
+// `allowed`: SupportCallForbidden none; `price`: its pt now (SupportCallPrice), `afford` the pool holds them.
+struct MapSupportEntry { wchar_t name[40]; SupportIcon icon; SupportVariant variant; bool allowed; std::int32_t price; bool afford;
+                         SupportTab tab; };   // `tab`: the bar's tab it is on
 struct MapCommandReadout {
     bool allowed;              // command framework enabled; each target still validates authority and execution
     bool all;                  // every unit selected (more than one)
@@ -204,6 +208,8 @@ struct MapCommandReadout {
     int supports;              // the catalog, in its order
     MapSupportEntry support[kMapSupports];
     SupportReadiness supportReady;
+    std::int32_t points=0,pointsMost=0;   // the map's support pt (support_points.h): the pool, its most
+    int supportTab=0;          // the bar's tab shown (support_call.h SupportTab)
     wchar_t supportStatus[128];
     // The transports' pairs (transport.cpp TransportLinks): a squad on foot and its vehicle, a thin line between them.
     int links=0;

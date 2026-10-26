@@ -160,12 +160,16 @@ def check_damage(root: str) -> None:
                     ('src/subcarrier.cpp', 'unsigned char* SubLaunch(')):
         if 'NoteLocalCopy(' not in body(code_only(read(root, rel)), fn):
             fail(f'{rel} {fn}: a copy is made without its owner recorded (its damage would count on the host only)')
-    radio = body(code_only(read(root, 'src/airstrike.cpp')), 'std::uintptr_t __fastcall RadioStartHook(')
+    strike = body(code_only(read(root, 'src/airstrike.cpp')), 'bool SupportStrikeAt(')
     human_frame = body(code_only(read(root, 'src/map.cpp')), 'bool __fastcall MapHumanFrame(')
     if human_frame.find('SupportActorFrame(human)') < 0 or human_frame.find('SupportActorFrame(human)') > human_frame.find('IsPlayer(human)'):
         fail('mission support service must advance before filtering local player input')
-    if 'const bool localCaller=!InSession() || IsPlayer(owner);' not in radio or 'localCaller && SupportCallAt(' not in radio:
-        fail("src/airstrike.cpp RadioStartHook: a remote radio replay can submit a duplicate support request")
+    # A strike from the map's bar is this machine's player's (its peers play it from its own channel, never call it again).
+    if 'unsigned char* const caller=PlayerHuman();' not in strike:
+        fail("src/airstrike.cpp SupportStrikeAt: a strike must be called by this machine's player")
+    barrage = code_only(read(root, 'src/barrage.cpp'))
+    if 'if(IsPlayer(caller))Tell(' not in body(barrage, 'BarrageResult BarrageStart(') or             'SenderIsPlayer(m.caller,puid,&ids,true)' not in body(barrage, 'bool ReceiveBarrageNetwork('):
+        fail("src/barrage.cpp: only this machine's player's barrage is told, and a peer's only for its own player")
     support = code_only(read(root, 'src/support_dispatch.cpp'))
     dispatch = body(support, 'bool SpawnDeployment(')
     if 'RegisterSupportObject(vehicle,unit.netId)' not in dispatch or 'HoldSupportSoldier(object,true)' not in dispatch or \
@@ -224,8 +228,11 @@ def check_calls(root: str) -> None:
         fail('SupportCallAt must only delegate to SupportCallComposedAt (one gated path)')
     # (its result kept for a sortie's second wave, queued only once the request was accepted)
     composed = body(dispatch, 'bool SupportCallComposedAt(')
-    if 'return Request(index,target,load,note,capacity);' not in composed and             'const bool accepted=Request(index,target,load,note,capacity);' not in composed:
-        fail('src/support_dispatch.cpp SupportCallComposedAt: not through the request path (Request)')
+    if 'const bool accepted=Request(index,target,load,SupportCallPrice(index),note,capacity);' not in composed:
+        fail('src/support_dispatch.cpp SupportCallComposedAt: not through the request path (Request) for its price')
+    # A strike is never planned or deployed by the host: it is started here (SupportStrikeAt), before the online branch.
+    if not before(request, 'StrikeCatalog(static_cast<std::uint32_t>(index),strike)', 'else if(InSession())'):
+        fail('src/support_dispatch.cpp Request: a strike must start here, never be sent to the host as a deployment')
     # The sea rescue: its own path (no map queue / cooldown), the same host transaction for any non-local machine.
     rescue = body(dispatch, 'bool RescueRequest(')
     if 'RescueRequest(' not in body(dispatch, 'bool SupportRescueAt(') or             not before(rescue, 'InSession() && !LocalAuthority()', 'SubmitSupportRequest('):
@@ -239,14 +246,9 @@ def check_calls(root: str) -> None:
     spawn = body(dispatch, 'bool SpawnDeployment(')
     if 'unit.matrix' not in spawn or 'PlanAirSupport(' in spawn or 'player.pos' in spawn:
         fail('peers must apply explicit support matrices, never recalculate entry against their own player')
-    call_of = body(code, 'const Call* CallOf(')
-    remote = re.search(r'if\(InSession\(\) && edf::RemoteRider\(owner\)\) \{(.*?)\}', call_of, re.S)
-    if not remote or 'callnet::Decode(' not in remote.group(1) or call_of.count('callnet::Decode(') != 1:
-        fail('src/airstrike.cpp CallOf: a pick is decoded outside a call received from another machine')
-    if 'Put<std::uint64_t>(weapon,kWeaponSeed,sent)' not in body(code, 'bool __fastcall SeedSendHook('):
-        fail("src/airstrike.cpp SeedSendHook: the caller does not keep the seed it sent")
-    if 'InstallPickSend()' not in body(code, 'bool InstallAirstrikes()'):
-        fail("src/airstrike.cpp: the call's pick is no longer sent (InstallPickSend)")
+    # No support of the plugin's is a radio call any more (2026-10-26): the stock calls are left wholly native.
+    if 'RedirectCall(' in body(code, 'bool InstallAirstrikes()') or 'RadioStartHook' in code or 'SeedSendHook' in code:
+        fail("src/airstrike.cpp: a stock radio call is hooked again (the supports are the map bar's)")
 
 
 def check_session(root: str) -> None:

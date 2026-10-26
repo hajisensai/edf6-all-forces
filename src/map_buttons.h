@@ -180,6 +180,11 @@ inline int Column(const Group* g,int rows,float x0,float x1,float top,float bott
     return placed;
 }
 
+// The bar's tabs (support_call.h SupportTab) in its hit list: a tab's code, below every catalog entry (-1 is none).
+constexpr int kSupportTabHit=-2;
+constexpr int SupportTabHit(int tab) noexcept { return kSupportTabHit-tab; }
+constexpr int SupportTabOfHit(int entry) noexcept { return kSupportTabHit-entry; }   // >= 0: a tab's
+
 // --- The support bar's composition panel (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以点多次，
 // 直到座位满"; then: a click puts in a whole squad, not one soldier) ---
 // A support with seats (support_call.h SupportCallSeats: the infantry, the transports, a crewed APC / truck) armed from the

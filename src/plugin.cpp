@@ -527,8 +527,10 @@ void LoadConfig() noexcept {
     n.groundRange=ReadFloat(L"GroundRange",n.groundRange);
     n.groundLeash=ReadFloat(L"GroundLeash",n.groundLeash);
     n.groundFire=ReadBool(L"GroundFire",n.groundFire);
-    n.callNextKey=FixInt("CallNextKey",ReadInt(L"CallNextKey",n.callNextKey),0,255);   // virtual-key codes
-    n.callPrevKey=FixInt("CallPrevKey",ReadInt(L"CallPrevKey",n.callPrevKey),0,255);
+    n.supportPtStart=static_cast<int>(FixInt("SupportPtStart",ReadInt(L"SupportPtStart",n.supportPtStart),0,1000000));
+    n.supportPtMost=static_cast<int>(FixInt("SupportPtMost",ReadInt(L"SupportPtMost",n.supportPtMost),1000,1000000));
+    n.supportPtScale=ReadFloat(L"SupportPtScale",n.supportPtScale);
+    if(!(n.supportPtScale>=0.0f) || n.supportPtScale>100.0f){Log("CONFIG SupportPtScale=%.2f out of 0..100: 1",n.supportPtScale);n.supportPtScale=1.0f;}
     n.seaRescue=ReadBool(L"SeaRescue",n.seaRescue);
     n.rescueBelow=ReadFloat(L"RescueBelow",n.rescueBelow);
     n.rescueAutoBoard=ReadBool(L"RescueAutoBoard",n.rescueAutoBoard);
@@ -1026,7 +1028,7 @@ void LoadConfig() noexcept {
     Log("CONFIG rescue sea=%d below=%.1f autoBoard=%d cooldown=%lus boardingGun=%d",n.seaRescue,n.rescueBelow,n.rescueAutoBoard,
         n.seaRescueCooldownSec,n.boardingGun);
     Log("CONFIG carrierLaser=%d damage=%.0f break=%.2f",n.carrierLaser,n.carrierLaserDamage,n.carrierLaserBreak);
-    Log("CONFIG calls next=%#lx prev=%#lx (0: off)",n.callNextKey,n.callPrevKey);
+    Log("CONFIG support pt: start %d, most %d, prices x%.2f",n.supportPtStart,n.supportPtMost,n.supportPtScale);
     Log("CONFIG physics vehicleWelding=%d giantContactCap=%d splitMissileSurface=%d stockMissilePN=%d nav=%.1f playerLockByView=%d tempestTv=%d (mouse %.1f, boost x%.1f)",
         n.vehicleWelding,n.giantContactCap,n.splitMissileSurface,n.stockMissilePN,n.stockMissileNav,n.playerLockByView,
         n.tempestTv,n.tempestTvMouseSpeed,n.tempestTvBoost);
@@ -1330,7 +1332,6 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallLoadout(iniPath);
     Log("AIRSTRIKE takeovers=%d",InstallAirstrikes());
     if(!InstallCrew())Log("HOOK crew: no seat hook, so no per-frame hook either: crews, helis, crawlers and the HUD are off");
-    StartCallPicker();
     Log("LOAD complete (build %s)",EDF6_BUILD_ID);
     if(const unsigned n=edf::ProtectRestoreFailures())Log("PATCH %u code writes left their pages writable (the protection restore failed)",n);
     return true;

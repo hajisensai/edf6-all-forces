@@ -17,6 +17,4 @@ using PlayerPreloadFn=std::uintptr_t(__fastcall*)(std::uintptr_t,std::uintptr_t,
 std::uintptr_t LoadoutPreload(PlayerPreloadFn call,std::uintptr_t a,std::uintptr_t b,std::uintptr_t c,std::uintptr_t d);
 // loadout.cpp: forced test-range loadout (off unless EDF6TestRange.loadout.ini says Enabled=1).
 bool InstallLoadout(const wchar_t* pluginIni) noexcept;
-// overlay.cpp: the call-pick keys and banner (one thread for the plugin's life; the keys come from Cfg()).
-void StartCallPicker() noexcept;
 }  // namespace crew

@@ -417,8 +417,15 @@ HUDTEXT(supportTitle,L"SUPPORT",L"支援",L"支援",L"支援")
 HUDTEXT(supportPlanning,L"PLANNING",L"调度中",L"調度中",L"手配中")
 HUDTEXT(supportCooldown,L"%d s",L"冷却 %d 秒",L"冷卻 %d 秒",L"待機 %d 秒")
 HUDTEXT(supportOff,L"OFF",L"不可用",L"不可用",L"使用不可")
-HUDTEXT(supportTip,L"%ls   click, then left-click the map   [ ] pick, C call at the pointer",L"%ls   点击后左键点击地图   [ ] 切换，C 在指针处呼叫",
-        L"%ls   點擊後左鍵點擊地圖   [ ] 切換，C 在指標處呼叫",L"%ls   クリック後マップを左クリック   [ ] 切替、C ポインター位置に要請")
+HUDTEXT(supportTip,L"%ls   %d pt   click, then left-click the map   [ ] pick, C call at the pointer",L"%ls   %d pt   点击后左键点击地图   [ ] 切换，C 在指针处呼叫",
+        L"%ls   %d pt   點擊後左鍵點擊地圖   [ ] 切換，C 在指標處呼叫",L"%ls   %d pt   クリック後マップを左クリック   [ ] 切替、C ポインター位置に要請")
+// The map's support pt (support_points.h): the bar's pool, an entry's price, a call refused for want of them.
+HUDTEXT(supportTabAir,L"AIR",L"航空",L"航空",L"航空")
+HUDTEXT(supportTabSortie,L"SORTIE",L"出击",L"出擊",L"出撃")
+HUDTEXT(supportTabStrike,L"STRIKE",L"炮击",L"砲擊",L"砲撃")
+HUDTEXT(supportTabGround,L"GROUND",L"地面",L"地面",L"地上")
+HUDTEXT(supportPt,L"%d / %d pt",L"%d / %d 点",L"%d / %d 點",L"%d / %d ポイント")
+HUDTEXT(supportPtShort,L"Not enough pt: %d needed, %d held",L"pt 不足：需要 %d，现有 %d",L"pt 不足：需要 %d，現有 %d",L"pt が足りません：必要 %d、所持 %d")
 HUDTEXT(legendTitle,L"LEGEND",L"图例",L"圖例",L"凡例")
 HUDTEXT(cmdNoMark,L"NO MARK (Q, OR POINT AT AN ENEMY)",L"没有标记（按 Q，或把指针放到敌人上）",L"沒有標記（按 Q，或把指標放到敵人上）",
         L"マークなし（Q、または敵にポインターを合わせる）")
@@ -600,12 +607,17 @@ HUDTEXT(versionFeatBvmPlayers,L"players 5+ in EDF5/4.1 missions (four created)",
 HUDTEXT(versionFeatBackpack,L"support soldiers' backpack weapons",L"支援士兵的背包武器",L"支援士兵的背包武器",L"支援兵のバックパック武器")
 HUDTEXT(versionFeatGravity,L"gravity gun grabs and throws",L"重力枪抓取与投掷同步",L"重力槍抓取與投擲同步",L"グラビティガンの掴み・投げの同期")
 HUDTEXT(versionFeatFloatGun,L"float guns",L"悬浮炮同步",L"懸浮炮同步",L"浮遊砲の同期")
+HUDTEXT(versionFeatBarrage,L"the long-range barrages (not seen by them)",L"远程炮击（对方看不到）",L"遠程砲擊（對方看不到）",L"長距離砲撃（相手には見えない）")
 HUDTEXT(versionFeatPlayerVehicle,L"players' own loaded jets (stock for everyone otherwise)",L"玩家自己召唤的载具挂载（否则全员原版）",L"玩家自己召喚的載具掛載（否則全員原版）",L"自分で要請した機体の搭載（それ以外は全員標準）")
 HUDTEXT(versionFeatUltimate,L"the ultimate strike (others see the stock beam)",L"终极支援天罚（其他人看到原版光束）",L"終極支援天罰（其他人看到原版光束）",L"究極支援「天罰」（他の人には標準のビーム）")
 // The ultimate strike's caller online (ultimate.cpp SayOldPeers): a peer without its channel sees the stock satellite beam.
-HUDTEXT(ultimateOldPeers,L"Some teammates run an older version: they may see the stock satellite beam",L"部分队员版本旧，可能看到原版光束",L"部分隊員版本舊，可能看到原版光束",L"一部の隊員は旧版のため、標準の衛星ビームが見えることがあります")
+HUDTEXT(ultimateOldPeers,L"Some teammates cannot see this ultimate (no ultimate channel)",L"部分队员看不到这次天罚（缺少天罚联机通道）",L"部分隊員看不到這次天罰（缺少天罰連線通道）",L"一部の隊員にはこの天罰が見えません（天罰の通信路なし）")
+HUDTEXT(ultimateRefused,L"The ultimate did not start: its effects are not installed, or too many play at once",L"天罚未能开始：特效未安装，或同时进行的已满",
+        L"天罰未能開始：特效未安裝，或同時進行的已滿",L"天罰を開始できません：エフェクト未インストール、または同時実行数が上限です")
+HUDTEXT(strikeNoCaller,L"No player of this machine to call it",L"找不到本机玩家，无法呼叫",L"找不到本機玩家，無法呼叫",L"このマシンのプレイヤーがいないため要請できません")
+HUDTEXT(strikeStarted,L"%ls: incoming",L"%ls 已开始",L"%ls 已開始",L"%ls 開始")
 // A barrage call that could not start (airstrike.cpp RadioStartHook, barrage.cpp BarrageResult): the stock bombers fly.
-HUDTEXT(barrageRefused,L"Barrage did not start (%ls): the stock bombers fly instead",L"炮击未能开始（%ls），改由原版轰炸机出动",L"砲擊未能開始（%ls），改由原版轟炸機出動",L"砲撃を開始できません（%ls）。代わりに通常の爆撃機が出撃します")
+HUDTEXT(barrageRefused,L"Barrage did not start (%ls)",L"炮击未能开始（%ls）",L"砲擊未能開始（%ls）",L"砲撃を開始できません（%ls）")
 HUDTEXT(barrageFull,L"too many barrages at once",L"同时进行的炮击已达上限",L"同時進行的砲擊已達上限",L"同時に行える砲撃の上限です")
 HUDTEXT(barrageNoHook,L"this EDF.dll's rockets cannot be steered",L"此版 EDF.dll 无法接管炮弹飞行",L"此版 EDF.dll 無法接管砲彈飛行",L"この EDF.dll では砲弾の弾道を制御できません")
 HUDTEXT(barrageNoTarget,L"no caller or target",L"呼叫者或目标无效",L"呼叫者或目標無效",L"呼び出し元または目標が無効です")

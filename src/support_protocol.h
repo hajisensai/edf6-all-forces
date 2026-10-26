@@ -59,14 +59,17 @@ static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits")
 // kExtPlayerVehicle (2026-10-25): it takes part in the players' own loaded jets (player_vehicle_logic.h PVEH): its haves
 // and decisions; a requester loads its jet only when every peer announced this and has the file.
 // kExtUltimate (2026-10-20): it plays every machine's player's ultimate strike (天罚, ultimate.cpp; ultimate_net_protocol.h
-// ULTS) and holds back the stock beam of a call whose show it heard.
+// ULTS).
+// kExtBarrage (2026-10-26): it plays every machine's player's long-range barrage (barrage.cpp; barrage_net_protocol.h BRGS:
+// called from the map's bar, no stock radio call carries it any more).
 constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtOutfit41=8u,kExtBvmPlayers=16u,
     kExtBackpack=32u,kExtPeerRoster=64u,kExtGravity=128u,kExtFloatGun=256u,
-    kExtUltimate=512u,kExtPlayerVehicle=1024u,
+    kExtUltimate=512u,kExtPlayerVehicle=1024u,kExtBarrage=2048u,
     kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|
-        kExtGravity|kExtFloatGun|kExtUltimate|kExtPlayerVehicle;
+        kExtGravity|kExtFloatGun|kExtUltimate|kExtPlayerVehicle|kExtBarrage;
 // What every hello of this build announces (Tick):
-constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|kExtFloatGun|kExtUltimate|kExtPlayerVehicle;
+constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|
+    kExtFloatGun|kExtUltimate|kExtPlayerVehicle|kExtBarrage;
 constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it
 // What a build has, both words in one (the version notice compares and names these, support_net.cpp VersionTick): the
 // capability bits low (below kMaxUnits, 4 bits), the extension bits above them.

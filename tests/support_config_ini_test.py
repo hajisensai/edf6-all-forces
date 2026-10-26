@@ -1,5 +1,6 @@
 """The installer's support menu (tools/support_config.py) against the plugin's parser (src/support_config.cpp,
-src/support_dispatch.cpp SupportCallKey) and the call table (tools/calls.py): the same keys and weapons, and the menu
+src/support_dispatch.cpp SupportCallKey, src/calls.inc kStrikes) and the call table (tools/calls.py): the same keys and
+weapons, and the menu
 writes only values the plugin accepts. Pure text; no game files."""
 from __future__ import annotations
 
@@ -33,13 +34,28 @@ weapons = re.findall(r'\{SupportWeapon::(\w+),L"(\w+)",L"([^"]+)"\}', cpp)
 check([(n, l) for _, n, l in weapons] == list(sc.WEAPONS), 'weapon names and labels equal the plugin parser\'s')
 dispatch = read('src/support_dispatch.cpp')
 ground = re.search(r'static const wchar_t\* keys\[\]=\{([^}]*)\}', dispatch).group(1)
-check(tuple(re.findall(r'L"(\w+)"', ground)) == sc.GROUND_KEYS, 'ground / infantry keys equal SupportCallKey\'s')
+check(tuple(re.findall(r'L"(\w+)"', ground)) == sc.GROUND_KEYS, 'ground / infantry keys equal SupportCallKey\'s keys[]')
+check('RESCUE' not in sc.GROUND_KEYS and 'L"RESCUE"' not in ground and 'L"RESCUE"' in dispatch,
+      "the sea rescue's key is SupportCallKey's own, not in keys[]")
 flown = tuple(c.id[len(calls.ID_PREFIX):] for c in calls.CALLS if c.flown)
 check(flown == sc.AIR_KEYS, 'air keys: the flown calls in calls.py order (airstrike.cpp SupportAirCallKey)')
-check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 48, 'one label per catalog entry (the sea rescue last)')
+strikes = tuple(c.id[len(calls.ID_PREFIX):] for c in calls.CALLS if c.brings == 'barrage') + \
+    tuple(c.id[len(calls.ID_PREFIX):] for c in calls.CALLS if c.brings == 'ultimate')
+check(sc.STRIKE_KEYS == strikes and strikes[0] == 'BARRAGE_ROCKETS' and strikes[-1] == 'ULTIMATE',
+      'strike keys: the barrages in calls.py order, then the ultimate (calls.STRIKES, src/calls.inc kStrikes)')
+inc = read('src/calls.inc')
+check(tuple(re.findall(r'\{StrikeKind::\w+,-?\d+,[\d.]+f,\d+u,"[^"]*",L"(\w+)",', inc)) == sc.STRIKE_KEYS,
+      "src/calls.inc kStrikes' keys are the strike keys, in order")
+check(sc.UNIT_KEYS == sc.AIR_KEYS + sc.GROUND_KEYS + sc.STRIKE_KEYS + ('RESCUE',),
+      'the catalog: flown calls, ground / infantry / airdrops, strikes, the sea rescue')
+check(len(sc.LABELS) == len(sc.UNIT_KEYS) == 58 and set(sc.LABELS) == set(sc.UNIT_KEYS),
+      'one label per catalog entry (the sea rescue last)')
+check(all(sc.LABELS[c.id[len(calls.ID_PREFIX):]] == calls.call_name(c, 'SC') for c in calls.STRIKES),
+      "the strikes' labels are their SC names (kStrikes')")
 check(sc.UNIT_KEYS[-1] == 'RESCUE', "the sea rescue is the catalog's last entry (support_dispatch.cpp RescueCatalog)")
 names = re.search(r'static const wchar_t\* labels\[\]=\{([^}]*)\}', dispatch).group(1)
-rescue_name = re.search(r'if\(index==SupportRescueCatalog\(\)\)return L"([^"]+)";', dispatch)
+# SupportCallName's rescue line follows its labels[] (SupportCallKey's own returns the key L"RESCUE").
+rescue_name = re.search(r'labels\[\]=\{[^}]*\};\s*if\(index==SupportRescueCatalog\(\)\)return L"([^"]+)";', dispatch)
 check(rescue_name is not None and sc.LABELS['RESCUE'] == rescue_name.group(1), "the rescue label equals SupportCallName's")
 check(tuple(re.findall(r'L"([^"]+)"', names)) == tuple(sc.LABELS[k] for k in sc.GROUND_KEYS[2:8]),
       "ground labels equal SupportCallName's")

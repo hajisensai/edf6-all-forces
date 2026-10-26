@@ -54,7 +54,7 @@ struct Config {
     bool jetPilot=true;        // jets (edf6tr_jet_* SGOs) are flown by the plugin
     DWORD jetFuelSec=120;      // a jet withdraws after this long in the air
     DWORD jetSortieSec=60;     // ...one launched by an airstrike takeover
-    bool jetAirRaider=true;    // the Air Raider's bomber calls send jets instead, and its call weapons (airstrike.cpp) work
+    bool jetAirRaider=true;    // the map's air supports (the flown entries of the support bar, support_dispatch.cpp) come
     bool jetMissionStrike=true;// the missions' strafing-plane airstrikes (DemoAirStrike) send jets instead
     bool throwDrones=true;     // the thrown-drone Robot Bombs (EDF6VC_CALL_THROW_*) release the plugin's drones (airstrike.cpp)
     bool groundPilot=true;     // NPC-crewed Depth Crawlers (502, no stock AI) are driven by the plugin (ground.cpp)
@@ -62,8 +62,10 @@ struct Config {
     float groundRange=200.0f;  // it engages enemies within this distance
     float groundLeash=100.0f;  // it goes no further than this from the player while it has one
     bool groundFire=true;
-    DWORD callNextKey=0xDD;    // in a mission: the next call every call weapon brings (VK_OEM_6 `]`; 0 = off)
-    DWORD callPrevKey=0xDB;    // ...the one before (VK_OEM_4 `[`)
+    // The map's support pt (support_points_logic.h Settings; the user, 2026-10-26: 「所有插件支援改成m里面消耗pt召唤」).
+    int supportPtStart=6000;   // a mission begins with these
+    int supportPtMost=30000;   // the pool holds no more
+    float supportPtScale=1.0f; // every price times this (0: free)
     bool seaRescue=true;       // a heli comes for a local player in the sea and ferries them to a submarine carrier's deck
     float rescueBelow=-5.0f;   // ...once they have been below this height (metres) for 1.5 s
     bool boardingGun=true;     // the boarding gun's rounds put the player into the friendly vehicle they hit (boarding.cpp)
@@ -996,37 +998,30 @@ bool EmcIfcOk() noexcept;                                    // RoundSize / Roun
 // fields not where they are written).
 bool BarrageFire(const unsigned char* by,const float* from,const float* aim,float damage,float size,float blast,float mark) noexcept;
 void BarrageBurst(const unsigned char* by,const float* at) noexcept;
-// barrage.cpp: the long-range barrages (docs/plan-2026-10-25-strikes.md §1.1, src/barrage_plan.h): a barrage call's radio
-// call (airstrike.cpp) starts kind `kind` (barrage::Kind) at `at` along `heading` by `caller` with `damage` a round, on every
-// machine; BarrageTick fires its rounds (SharedFrameTick); the rounds' flight is RocketBullet01's update wrapped
-// (InstallBarrages, at load). Anything but started: not started, and why (the radio call lets the stock bombers fly then).
+// barrage.cpp: the long-range barrages (docs/plan-2026-10-25-strikes.md §1.1, src/barrage_plan.h): the map's bar
+// (airstrike.cpp SupportStrikeAt) starts kind `kind` (barrage::Kind) at `at` along `heading` by `caller` (this machine's
+// player) with `damage` a round; it is told to every peer (barrage_net_protocol.h), which plays it on its copy of the caller.
+// BarrageTick fires its rounds (SharedFrameTick); the rounds' flight is RocketBullet01's update wrapped (InstallBarrages, at
+// load). Anything but started: not started, and why (said on the bar's line; its pt are not taken).
 enum class BarrageResult : int { started, noTarget, noHook, full, noCaller, noRounds };
 BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept;
 void BarrageTick() noexcept;
 void ResetBarrages() noexcept;
 bool InstallBarrages() noexcept;
-// airstrike.cpp: the caller's HUD line for its strike calls (hud.cpp StrikeBanner, the draw thread): a barrage that could
-// not start (the stock bombers fly instead), a sortie's second wave not called; a moment.
+// airstrike.cpp: the caller's HUD line for its strike calls (hud.cpp StrikeBanner, the draw thread): a sortie's second wave
+// not called; a moment.
 bool PlayerStrikeCue(wchar_t* out,std::size_t capacity) noexcept;
 
-// ultimate.cpp: the ultimate strike (docs/plan-2026-10-19-ultimate.md, src/ultimate_plan.h): the satellite call's fire
-// (airstrike.cpp) starts its show at `at` by `caller` with the weapon's `damage`; UltimateTick plays it a frame at a time
+// ultimate.cpp: the ultimate strike (docs/plan-2026-10-19-ultimate.md, src/ultimate_plan.h): the map's bar (airstrike.cpp
+// SupportStrikeAt) starts its show at `at` by `caller` with `damage`; UltimateTick plays it a frame at a time
 // (SharedFrameTick); ResetUltimate at a new mission forgets it, nothing touched (its objects were the last mission's).
-// False: no show (its rounds not preloaded, every show slot taken): the stock satellite beam fires instead.
+// False: no show (its rounds not preloaded, every show slot taken; its pt are not taken).
 // Several play at once; online every machine plays each machine's player's shows (ultimate_net_protocol.h).
 bool UltimateStart(const unsigned char* caller,const float* at,float damage,std::uint64_t seed) noexcept;
 void UltimateTick() noexcept;
 void ResetUltimate() noexcept;
 void PreloadUltimate(void* mgr) noexcept;   // the magic circles, with the shells (jet_spawn.cpp)
-// Online, another machine's player's call here (airstrike.cpp SatFireHook): its stock beam is held back only for a show of
-// its caller's heard here (UltimateHeardFrom: began lately, not matched to a call yet), or one whose start comes before the
-// stock beam fires (UltimateStockHoldBack, from ultimate.cpp, true when one was held back). An older build's call (no
-// show heard) keeps its stock beam. Within kUltimateStockWaitMs of each other.
-constexpr ULONGLONG kUltimateStockWaitMs=4000;
-bool UltimateHeardFrom(const unsigned char* caller) noexcept;
-bool UltimateStockHoldBack(const unsigned char* caller) noexcept;
-void UltimateStockReset() noexcept;
-// The caller's HUD line (hud.cpp): peers of an older build in the room see the stock beam.
+// The caller's HUD line (hud.cpp): a peer in the room without the ultimate's channel does not see the show.
 bool PlayerUltimateCue(wchar_t* out,std::size_t capacity) noexcept;
 
 // emc.cpp: the EMC's charged beam (docs/emc-re.md, README EMC 蓄力光束): the player's trigger in a Vehicle510_Maser charges,
@@ -1170,7 +1165,6 @@ void ResetStabilizer() noexcept;
 
 // airstrike.cpp
 bool InstallAirstrikes() noexcept;
-void CallPick(int step,wchar_t* out,std::size_t size) noexcept;   // airstrike.cpp
 void SupportDispatchTick() noexcept;
 void ResetSupportDispatch() noexcept;
 

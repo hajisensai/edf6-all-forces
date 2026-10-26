@@ -6,7 +6,7 @@ edf6_version_info_at_end()
 set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only generated-asset checks")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/overlay.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp src/drivegear.cpp)
+add_library(EDF6VehicleCrew SHARED src/plugin.cpp src/crew.cpp src/heli.cpp src/ground.cpp src/jet.cpp src/jet_flight.cpp src/jet_combat.cpp src/jet_carrier.cpp src/jet_bay.cpp src/jet_spawn.cpp src/jet_hooks.cpp src/airstrike.cpp src/loadout.cpp src/subcarrier.cpp src/carrierlaser.cpp src/hud.cpp src/launcher.cpp src/katyusha.cpp src/highcam.cpp src/helisight.cpp src/jetsound.cpp src/jetaudio.cpp src/playerjet.cpp src/missile.cpp src/stores.cpp src/bigworld.cpp src/legacymap.cpp src/edf41sound.cpp src/edf41ai.cpp src/edf41classes.cpp src/edf41mother.cpp src/edf41fortress.cpp src/edf41dragon.cpp src/fieldshare.cpp src/jetprops.cpp src/booster.cpp src/shield.cpp src/view.cpp src/mission.cpp src/mission_watch.cpp src/crash_dump.cpp src/body506.cpp src/physics.cpp src/drill.cpp src/gear.cpp src/netprobe.cpp src/glyphs.cpp src/edf5campaign.cpp src/edf5online.cpp src/turretaim.cpp src/rounds.cpp src/vhud.cpp src/stockgauge.cpp src/warn.cpp src/payload.cpp src/seatswitch.cpp src/sidecar.cpp src/turretcam.cpp src/vehsound.cpp src/sightzoom.cpp src/drivegear.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/edf41robo.cpp)
 # The Nix's torso twist (its own line: the source list above is where every feature branch adds).
 target_sources(EDF6VehicleCrew PRIVATE src/nix.cpp)
@@ -49,6 +49,9 @@ target_sources(EDF6VehicleCrew PRIVATE src/wastedfire.cpp)
 # The map's NPC commands (src/mapcmd.cpp, src/mapcmd_logic.h).
 target_sources(EDF6VehicleCrew PRIVATE src/mapcmd.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_dispatch.cpp)
+# The map's support pt (src/support_points.cpp, rules in src/support_points_logic.h; tests/support_points_test.cpp) and the
+# supports' warnings on the ground (src/support_warning.cpp, src/support_warning_logic.h; tests/support_warning_test.cpp).
+target_sources(EDF6VehicleCrew PRIVATE src/support_points.cpp src/support_warning.cpp)
 # The squads' transports (src/transport.cpp, rules in src/transport_logic.h; tools/transport_check.cpp).
 target_sources(EDF6VehicleCrew PRIVATE src/transport.cpp)
 # The container airdrops (src/airdrop.cpp, the stock container's data and the carrier's decisions in src/airdrop_logic.h;
@@ -648,12 +651,13 @@ target_link_libraries(boarding_hit_test PRIVATE edf6common)
 target_compile_options(boarding_hit_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME boarding_hit COMMAND boarding_hit_test)
 
-# Exercise the production call picker with local/remote owners, without a running game.
-add_executable(call_pick_test tests/call_pick_test.cpp)
-target_link_libraries(call_pick_test PRIVATE edf6common)
-target_include_directories(call_pick_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
-target_compile_options(call_pick_test PRIVATE /W4 /WX /utf-8 /permissive-)
-add_test(NAME call_pick COMMAND call_pick_test)
+# src/airstrike.cpp without a running game: the player predicates, the flown supports' entry planner, the strikes of the
+# map's bar, the retired support rows, the stock radio calls left native.
+add_executable(airstrike_test tests/airstrike_test.cpp)
+target_link_libraries(airstrike_test PRIVATE edf6common)
+target_include_directories(airstrike_test PRIVATE third_party/EDFModLoader "${CMAKE_BINARY_DIR}/generated")
+target_compile_options(airstrike_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_test(NAME airstrike COMMAND airstrike_test)
 add_executable(support_entry_test tests/support_entry_test.cpp)
 target_compile_options(support_entry_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_test(NAME support_entry COMMAND support_entry_test)
@@ -1703,6 +1707,20 @@ add_executable(ultimate_net_test EXCLUDE_FROM_ALL tests/ultimate_net_test.cpp)
 target_compile_options(ultimate_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks ultimate_net_test)
 add_test(NAME ultimate_net COMMAND ultimate_net_test)
+# The map's support pt (src/support_points_logic.h), the supports' warnings (src/support_warning_logic.h) and the
+# barrages' online message (src/barrage_net_protocol.h), offline.
+add_executable(support_points_test EXCLUDE_FROM_ALL tests/support_points_test.cpp)
+target_compile_options(support_points_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks support_points_test)
+add_test(NAME support_points COMMAND support_points_test)
+add_executable(support_warning_test EXCLUDE_FROM_ALL tests/support_warning_test.cpp)
+target_compile_options(support_warning_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks support_warning_test)
+add_test(NAME support_warning COMMAND support_warning_test)
+add_executable(barrage_net_test EXCLUDE_FROM_ALL tests/barrage_net_test.cpp)
+target_compile_options(barrage_net_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks barrage_net_test)
+add_test(NAME barrage_net COMMAND barrage_net_test)
 # The marker's name from the game's own name tag source (src/player_name.cpp), read from EDF.dll without running it.
 add_test(NAME player_name_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_name_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(player_name_native PROPERTIES SKIP_RETURN_CODE 77)

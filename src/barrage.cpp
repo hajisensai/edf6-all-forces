@@ -1,7 +1,8 @@
-// The long-range barrages (docs/plan-2026-10-25-strikes.md §1.1; the user, 2026-10-25: 「攻击都做，实现方案可以随你」): the
-// barrage calls (tools/calls.py brings 'barrage': KM6 clones, their mark the kind) start one at the call (airstrike.cpp
-// RadioStartHook: on every machine, the caller's and every copy of it); BarrageTick fires its rounds as src/barrage_plan.h
-// planned them, and every round is flown along its curve by the plugin.
+// The long-range barrages (docs/plan-2026-10-25-strikes.md §1.1; the user, 2026-10-25: 「攻击都做，实现方案可以随你」): a
+// barrage entry of the map's support bar (tools/calls.py brings 'barrage', airstrike.cpp kStrikes; since 2026-10-26 no
+// weapon) starts one at the point clicked (airstrike.cpp SupportStrikeAt); BarrageTick fires its rounds as
+// src/barrage_plan.h planned them, and every round is flown along its curve by the plugin. Its area is warned of on the
+// ground while it lasts (support_warning.h).
 //  - a round: its own DemoIndirectFire (jet_bay.cpp BarrageFire: EDF6VC_BARRAGE_ROUND.SGO, one RocketBullet01 with its
 //    smoke trail, no gravity, no damage of its own), owned by the caller (its kills, its side's friends spared), fired from
 //    its launcher toward its curve's first stretch; its size, blast and mark written into the IFC before it fires (the
@@ -13,14 +14,22 @@
 //    curve is next frame from where it is (PathAt), its gravity cleared. It bursts on what it meets as the stock round
 //    does (its blast, the caller's damage); a cluster's carrier is put out at its split (its age to its life: the stock
 //    round expires without a blast) and its bomblets leave there as rounds of their own, a flash (BarrageBurst) with them.
-// Online every machine plans the same rounds from what the call carries (its point and heading: barrage_plan.h Seed) and
-// fires them on its copy of the caller; the damage counts on the caller's machine alone (ShellMake: OnlineShotCounts).
-// The guided rockets' aims are this machine's nearest enemies to the mark (each machine's own view of them).
+// Online the caller's machine tells every peer its kind, point and heading (barrage_net_protocol.h BRGS); every machine
+// plans the same rounds from them (barrage_plan.h Seed) and fires them on its copy of the caller; the damage counts on the
+// caller's machine alone (ShellMake: OnlineShotCounts). The guided rockets' aims are this machine's nearest enemies to the
+// mark (each machine's own view of them).
 #include "crew.h"
+#include "barrage_net.h"
+#include "barrage_net_protocol.h"
 #include "barrage_plan.h"
+#include "command_identity.h"   // SenderIsPlayer
 #include "edf41classes.h"   // WeakRef
 #include "heli.h"           // MapRay, VisitEnemiesOf
 #include "memory.h"
+#include "plugin_net.h"
+#include "support_protocol.h"   // kExtBarrage
+#include "support_soldier.h"    // ReadNativeObjectId
+#include "support_warning.h"    // WarnBarrage
 #include <cmath>
 #include <cstring>
 
@@ -187,6 +196,28 @@ void __fastcall UpdateHook(void* b,void* a2,void* a3,void* a4) noexcept {
     __try { Steer(static_cast<unsigned char*>(b)); } __except(EXCEPTION_EXECUTE_HANDLER){}
     nextUpdate(b,a2,a3,a4);
 }
+
+// ---- online (barrage_net_protocol.h) ----
+std::uint32_t origin=0,serial=0;   // this machine's barrages: its run, the last one's number in it
+barrage_net::Heard heard;          // the peers' barrages played here
+// This machine's player's barrage told to every peer that has the channel (the caller has no native ID: nobody else can
+// find it, nothing sent).
+void Tell(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept {
+    if(!plugin_net::Ready())return;
+    if(!origin)origin=plugin_net::NewOrigin();
+    barrage_net::Msg m;
+    m.kind=kind;m.origin=origin;m.serial=++serial;m.damage=damage;
+    std::memcpy(m.at,at,12);std::memcpy(m.heading,heading,12);
+    bool id=false;
+    __try { id=ReadNativeObjectId(caller,m.caller); } __except(EXCEPTION_EXECUTE_HANDLER){id=false;}
+    unsigned char bytes[barrage_net::kWire];
+    if(!id || !barrage_net::Encode(m,bytes,sizeof(bytes))) {
+        Log("BARRAGE NET %s: not told to the peers (%s)",barrage::kKindNames[kind],id ? "it does not encode" : "the caller has no native ID");
+        return;
+    }
+    const std::uint32_t sent=plugin_net::Broadcast(support_net::kExtBarrage,bytes,sizeof(bytes));
+    Log("BARRAGE NET %s %08X:%u told to %u peer(s)",barrage::kKindNames[kind],m.origin,m.serial,sent);
+}
 }  // namespace
 
 BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept {
@@ -246,7 +277,10 @@ BarrageResult BarrageStart(int kind,const unsigned char* caller,const float* at,
     Log("BARRAGE %s at (%.0f, %.0f, %.0f): %d rounds over %.1f s, damage %.0f a round%s",barrage::kKindNames[kind],setup.target[0],
         setup.target[1],setup.target[2],s.n,static_cast<float>(s.end)/60.0f,s.damage,
         s.kind==Kind::guided ? (aims.n ? ", aimed at enemies" : ", no enemy near: round the mark") : "");
-    return s.on ? BarrageResult::started : BarrageResult::noRounds;
+    if(!s.on)return BarrageResult::noRounds;
+    WarnBarrage(kind,setup.target,heading,s.end);
+    if(IsPlayer(caller))Tell(kind,caller,at,heading,s.damage);   // this machine's player's: every peer plays it too
+    return BarrageResult::started;
 }
 
 void BarrageTick() noexcept {
@@ -264,6 +298,42 @@ void ResetBarrages() noexcept {
     for(auto& s:shows){if(s.on)edf41c::WeakReset(s.caller);s=Show{};}
     for(auto& sl:slots)sl=Slot{};
     nextSlot=0;
+    origin=plugin_net::NewOrigin();serial=0;heard.Clear();
+}
+
+// ---- the channel (plugin_net.h: BRGS, support_protocol.h kExtBarrage) ----
+namespace {
+int netLogs=0;
+bool ReceiveBarrageNetwork(std::uint32_t peer,const char* puid,const void* bytes,std::size_t size,std::uint64_t) noexcept {
+    barrage_net::Msg m;
+    if(!barrage_net::Decode(bytes,size,m)) {
+        if(netLogs++<16)Log("BARRAGE NET peer %u: a message that does not read (%zu bytes): dropped",peer,size);
+        return true;
+    }
+    // The caller must be the sender's own player (a peer never starts a barrage for another machine's).
+    MarkIdentities ids{};
+    bool sender=false;
+    __try { sender=SenderIsPlayer(m.caller,puid,&ids,true); } __except(EXCEPTION_EXECUTE_HANDLER){sender=false;}
+    if(!sender || !ids.player.obj) {
+        if(netLogs++<16)Log("BARRAGE NET peer %u: barrage %08X:%u names a caller that is not its sender's player: dropped",peer,
+                            m.origin,m.serial);
+        return true;
+    }
+    if(!heard.First(m.origin,m.serial))return true;
+    const BarrageResult got=BarrageStart(m.kind,static_cast<const unsigned char*>(ids.player.obj),m.at,m.heading,m.damage);
+    Log("BARRAGE NET peer %u's barrage %08X:%u (%s): %s here",peer,m.origin,m.serial,barrage::kKindNames[m.kind],
+        got==BarrageResult::started ? "played" : "not played");
+    return true;
+}
+void ResetBarrageNetwork() noexcept {}
+}  // namespace
+
+plugin_net::Channel BarrageNetChannel() noexcept {
+    plugin_net::Channel c;
+    c.name="barrage";c.magic=barrage_net::kMagic;c.version=barrage_net::kVersion;c.featureBit=support_net::kExtBarrage;
+    c.minSize=c.maxSize=barrage_net::kWire;
+    c.receive=&ReceiveBarrageNetwork;c.reset=&ResetBarrageNetwork;
+    return c;
 }
 
 bool InstallBarrages() noexcept {

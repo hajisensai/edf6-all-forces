@@ -28,6 +28,8 @@
 #include "support_variants.h"
 #include "airdrop.h"
 #include "helipad.h"
+#include "support_points.h"
+#include "support_warning.h"
 #include <cwchar>
 #include <cstring>
 #include <new>
@@ -142,6 +144,10 @@ void RequestNotice(std::uint32_t request,support_net::RequestStatus state) noexc
         rescueEnded=true;RescueRequestFailed(kWhy[static_cast<unsigned>(state)]);
         return;
     }
+    // A paid call's pt (support_points.h): kept once delivered, given back when it came to nothing. A request not paid for
+    // (a second wave) owes nothing and settles nothing.
+    if(request && state==RequestStatus::active)SupportPointsSettle(request,false);
+    else if(request && state>=RequestStatus::refused)SupportPointsSettle(request,true);
     if(!localRequest.acceptNotices || !request || request<localRequest.id)return;
     if(request==localRequest.id && localRequest.hasNotice) {
         if(localRequest.state>=RequestStatus::refused)return;
@@ -219,9 +225,18 @@ bool AirdropSpec(std::uint32_t id,SupportAircraft* out) noexcept {
 // The riders a transport hull seats (tools/make_jets.py: the helicopter's two door gunners and ten passengers, the
 // plane's twelve passengers): a composed load fills up to these.
 constexpr unsigned kTransportSeats=12;
-// The sea rescue (support_call.h SupportRescueCatalog): the catalog's last entry, after the airdrops (every older index,
-// ini key and wire value stands; an older peer's catalog ends before it, support_protocol.h kExtSeaRescue).
-std::uint32_t RescueCatalog() noexcept {return static_cast<std::uint32_t>(AirdropStart()+kAirdropEntries);}
+// The strikes (airstrike.cpp kStrikes: the barrages, then the ultimate; 2026-10-26, the user: 「所有插件支援改成m里面消耗pt
+// 召唤」): after the airdrops. Never planned or deployed: the caller's machine starts it (SupportStrikeAt) and tells the
+// others itself (barrage_net_protocol.h, ultimate_net_protocol.h). The room's protocol (mod_room.h 3) keeps every machine
+// on this catalog.
+int StrikeStart() noexcept {return AirdropStart()+kAirdropEntries;}
+bool StrikeCatalog(std::uint32_t id,int& strike) noexcept {
+    const int k=static_cast<int>(id)-StrikeStart();
+    if(k<0 || k>=SupportStrikeCount())return false;
+    strike=k;return true;
+}
+// The sea rescue (support_call.h SupportRescueCatalog): the catalog's last entry, after the strikes.
+std::uint32_t RescueCatalog() noexcept {return static_cast<std::uint32_t>(StrikeStart()+SupportStrikeCount());}
 bool IsRescue(std::uint32_t catalog) noexcept {return catalog==RescueCatalog();}
 // Entries that bring aircraft made in the air as a flown call does (crew groups, formation): the flown calls, and the
 // rescue. The transports and the airdrops have their own plans (TransportCatalog / AirdropCatalog).
@@ -230,8 +245,10 @@ bool AirCatalog(std::uint32_t catalog) noexcept {return catalog<static_cast<unsi
 // the transports, the airdrops' helicopter), a support hull (a tank / an APC military, the light truck civilian), or
 // soldiers walking in.
 support::Capability CapabilityOf(std::uint32_t catalog) noexcept {
-    SupportVehicleKind kind{};SupportCrewMode mode{};bool platoon=false,plane=false;
-    if(AirCatalog(catalog) || TransportCatalog(catalog,platoon,plane) || AirdropCatalog(catalog,kind))return support::Capability::air;
+    SupportVehicleKind kind{};SupportCrewMode mode{};bool platoon=false,plane=false;int strike=0;
+    // A strike comes out of the sky as an aircraft does (not underground, not where the mission forbids outside support).
+    if(AirCatalog(catalog) || TransportCatalog(catalog,platoon,plane) || AirdropCatalog(catalog,kind) || StrikeCatalog(catalog,strike))
+        return support::Capability::air;
     if(GroundCatalog(catalog,kind,mode))
         return SupportVehicleInfo(kind)->wasteland ? support::Capability::civilianGround : support::Capability::militaryGround;
     return support::Capability::infantry;
@@ -456,8 +473,8 @@ support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalo
                                          std::uint64_t loadout,SupportPlan* out) noexcept;
 support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint64_t loadout,SupportPlan* out) noexcept {
     using support_net::PlanResult;
-    if(!out || !target || catalog>=static_cast<unsigned>(SupportCallCount())) {
-        Refuse(catalog,"invalid request or target",L"支援请求或目标无效");return PlanResult::refused;
+    if(int strike=0;!out || !target || catalog>=static_cast<unsigned>(SupportCallCount()) || StrikeCatalog(catalog,strike)) {
+        Refuse(catalog,"invalid request or target (a strike is never planned)",L"支援请求或目标无效");return PlanResult::refused;
     }
     if(!SupportCfg().Enabled(static_cast<int>(catalog))) {
         Refuse(catalog,"disabled by SupportDisabled in EDF6VehicleCrew.ini",L"该支援单位已在配置中停用（EDF6VehicleCrew.ini SupportDisabled）");
@@ -725,8 +742,8 @@ bool Validate(const SupportPlan& plan) noexcept {
     if(plan.catalogId==support_net::kMissionCrewCatalog)return ValidateMissionCrewPlan(plan);
     const bool dynamicDrone=plan.count==1 &&
         (plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(plan.units[0].resourceId));
-    if(!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) ||
-       (!dynamicDrone && !SupportSoldiersReady()))return false;
+    if(int strike=0;!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) ||
+       StrikeCatalog(plan.catalogId,strike) || (!dynamicDrone && !SupportSoldiersReady()))return false;
     if(SupportSubCatalog(static_cast<int>(plan.catalogId))) {
         if(plan.count==2 && plan.units[0].resourceId==kSupportSubmarineResource) {
             return !SupportMissionPolicy().underground && !plan.units[0].role && !plan.units[0].variant && plan.units[1].role==1 &&
@@ -1142,6 +1159,10 @@ bool SpawnDeployment(std::uint64_t id,const SupportPlan& plan,bool remote,bool n
     if(!BoardAirborne(*deployed,networked)){Destroy(id);return false;}
     Log("SUPPORT spawn %llu: catalog %u, %u units created (%s)",static_cast<unsigned long long>(id),plan.catalogId,plan.count,
         networked ? "networked" : InSession() ? "host of a one-player world" : "offline");
+    // Its route on every machine's view and map (support_warning.h): a map support, not a carrier's drone or the rescue.
+    const bool child=plan.count==1 &&
+        (plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(plan.units[0].resourceId));
+    if(!child && !IsRescue(plan.catalogId))WarnDeployment(plan);
     if(IsRescue(plan.catalogId)) {
         // The rescue's own logic (heli.cpp) flies it where it is flown and boards the swimmer on the swimmer's machine;
         // the dispatcher keeps only the deployment's bookkeeping (held crew, cancel, losses), never the arrival order
@@ -1276,7 +1297,9 @@ bool SupportWithdrawVehicle(const void* vehicle) noexcept {
         return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
-int SupportCallCount() noexcept {return AirCount()+2+kSupportVehicleCount*2+kTransportEntries+kAirdropEntries+1;}
+int SupportCallCount() noexcept {
+    return AirCount()+2+kSupportVehicleCount*2+kTransportEntries+kAirdropEntries+SupportStrikeCount()+1;
+}
 int SupportMenuCount() noexcept {return SupportCallCount()-1;}   // the rescue (last) is no map call
 const wchar_t* SupportCallForbidden(int index) noexcept {
     if(index<0 || index>=SupportCallCount() || IsRescue(static_cast<std::uint32_t>(index)))return nullptr;
@@ -1294,9 +1317,11 @@ const wchar_t* SupportCallKey(int index) noexcept {
     if(index<AirCount())return SupportAirCallKey(index);
     static const wchar_t* keys[]={L"SQUAD",L"PLATOON",L"TANK_CREWED",L"TANK_DELIVERY",L"TRANSPORT_CREWED",L"TRANSPORT_DELIVERY",
                                   L"TRUCK_CREWED",L"TRUCK_DELIVERY",L"SQUAD_HELI",L"PLATOON_HELI",L"SQUAD_AIRDROP",L"PLATOON_AIRDROP",
-                                  L"TANK_AIRDROP",L"TRANSPORT_AIRDROP",L"TRUCK_AIRDROP",L"RESCUE"};
-    static_assert(sizeof(keys)/sizeof(keys[0])==2+kSupportVehicleCount*2+kTransportEntries+kAirdropEntries+1,
-                  "one key per infantry, ground, transport, airdrop and the rescue entry");
+                                  L"TANK_AIRDROP",L"TRANSPORT_AIRDROP",L"TRUCK_AIRDROP"};
+    static_assert(sizeof(keys)/sizeof(keys[0])==2+kSupportVehicleCount*2+kTransportEntries+kAirdropEntries,
+                  "one key per infantry, ground, transport and airdrop entry");
+    if(index==SupportRescueCatalog())return L"RESCUE";
+    if(int strike=0;StrikeCatalog(static_cast<std::uint32_t>(index),strike))return SupportStrikeKey(strike);
     const int rest=index-AirCount();
     return rest<static_cast<int>(sizeof(keys)/sizeof(keys[0])) ? keys[rest] : nullptr;
 }
@@ -1307,6 +1332,7 @@ const wchar_t* SupportCallName(int index) noexcept {
     // Returned static strings can safely be copied into draw-thread snapshots.
     static const wchar_t* labels[]={L"坦克·有人",L"坦克·空车交付",L"装甲运兵车·有人",L"装甲运兵车·空车交付",L"民用轻卡·有人",L"民用轻卡·空车交付"};
     if(index==SupportRescueCatalog())return L"海上救援直升机";
+    if(int strike=0;index>=0 && StrikeCatalog(static_cast<std::uint32_t>(index),strike))return SupportStrikeName(strike);
     const int ground=index-GroundStart();
     if(ground>=0 && ground<6)return labels[ground];
     static const wchar_t* transports[kTransportEntries]={L"直升机机降·小队（4人）",L"直升机机降·大队（12人）",L"运输机空降·小队（4人）",
@@ -1348,10 +1374,26 @@ bool SupportCallPreset(int index,SupportLoadout* out) noexcept {
     return true;
 }
 namespace {
-// A request of entry `index` (a map / radio call): local offline planning or the registered online host transaction.
-bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
+// What the entries that are no call of tools/calls.py cost on the map (pt at SupportPtScale 1; the user, 2026-10-26:
+// 「所有插件支援改成m里面消耗pt召唤」), by SupportCallKey order from the infantry. A delivered vehicle as the stock request
+// of its kind charges at 0 stars (Blacker E1 / Grape 10800); crewed a fifth more; the infantry and the truck as the
+// cheap end of the calls (an interceptor guard's 1800); a transport's flight on top of its riders'.
+constexpr std::uint32_t kGroundPt[]={3000,7500,          // SQUAD, PLATOON
+                                     13000,10800,         // TANK_CREWED, TANK_DELIVERY
+                                     9000,7200,           // TRANSPORT_CREWED, TRANSPORT_DELIVERY
+                                     3000,2000,           // TRUCK_CREWED, TRUCK_DELIVERY
+                                     4500,9000,4000,8000, // SQUAD_HELI, PLATOON_HELI, SQUAD_AIRDROP, PLATOON_AIRDROP
+                                     10800,7200,2000};    // TANK_AIRDROP, TRANSPORT_AIRDROP, TRUCK_AIRDROP
+static_assert(sizeof(kGroundPt)/sizeof(kGroundPt[0])==2+kSupportVehicleCount*2+kTransportEntries+kAirdropEntries,
+              "a price per infantry, ground, transport and airdrop entry");
+// The offline call's price while it is planned (given back when its plan is refused or not made).
+std::int32_t offlineCharge=0;
+// A request of entry `index` (the map's bar, or a sortie's second wave): local offline planning or the registered
+// online host transaction; a strike started here (it is never planned). `price`: its pt, taken once it is accepted (0:
+// a second wave, paid with its first). Not enough pt: refused before anything is asked.
+bool Request(int index,const float* target,const SupportLoadout* load,std::int32_t price,wchar_t* note,std::size_t capacity) noexcept {
     if(!note || !capacity)return false;
-    // A call made as it is (a radio weapon, airstrike.cpp) brings the entry's out-of-game preset, as the bar's panel does.
+    // A call made as it is (a second wave) brings the entry's out-of-game preset, as the bar's panel does.
     SupportLoadout preset;
     if((!load || load->count<=0) && index>=0 && index<kSupportConfigUnits && SupportCfg().preset[index].count>0 &&
        SupportCallPreset(index,&preset))load=&preset;
@@ -1371,9 +1413,25 @@ bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* n
         // The mission's rules, known here before anything is planned or sent (the host's Plan / Validate ask them too).
         Refuse(static_cast<std::uint32_t>(index),"the mission's support rules (support_policy.h Allowed)",why);
     }
+    else if(price>0 && SupportPoints()<price) {
+        _snwprintf_s(status,_countof(status),_TRUNCATE,hudtext::Tr(hudtext::Tx::supportPtShort),price,SupportPoints());
+        Log("SUPPORT request catalog=%d: %d pt asked, %d held",index,price,SupportPoints());
+    }
+    else if(int strike=0;StrikeCatalog(static_cast<std::uint32_t>(index),strike)) {
+        // A strike: started here at once and told to the others by its own channel (airstrike.cpp SupportStrikeAt).
+        accepted=SupportStrikeAt(strike,target,status,_countof(status));
+        if(accepted)SupportPointsSpend(price);
+    }
     else if(InSession()) {
         localRequest.acceptNotices=true;
         accepted=SubmitSupportRequest(index,target,note,capacity,loadout);
+        // Paid once the host has it: its accepted notice came inside the submit (support_protocol.cpp Session::Submit), so
+        // its id is known and its outcome settles the pt (RequestNotice); one refused at once costs nothing.
+        if(accepted && price>0) {
+            using support_net::RequestStatus;
+            if(localRequest.hasNotice && localRequest.state==RequestStatus::accepted && localRequest.id)SupportPointsOwe(price,localRequest.id);
+            else if(!localRequest.hasNotice || localRequest.state==RequestStatus::active)SupportPointsSpend(price);
+        }
         if(!accepted || !localRequest.hasNotice) {
             localRequest.shown=true;localRequest.acceptNotices=accepted;localRequest.hasNotice=false;
             _snwprintf_s(localRequest.text,_countof(localRequest.text),_TRUNCATE,L"%ls",
@@ -1387,7 +1445,8 @@ bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* n
         Renew(planning);planning.active=true;planning.catalog=static_cast<unsigned>(index);std::memcpy(planning.target,target,12);
         planning.loadout=loadout;
         offlinePending=true;accepted=true;Status(L"正在安排支援入口及路线");
-        Log("SUPPORT request catalog=%d accepted offline, load %llX",index,static_cast<unsigned long long>(loadout));
+        if(SupportPointsSpend(price))offlineCharge=price;
+        Log("SUPPORT request catalog=%d accepted offline, load %llX, %d pt",index,static_cast<unsigned long long>(loadout),price);
     }
     if(SupportCfg().problems[0] && !configNoticeShown) {
         // An invalid setting is said once a mission (the default it fell back to is used; the log has it too).
@@ -1401,11 +1460,30 @@ bool Request(int index,const float* target,const SupportLoadout* load,wchar_t* n
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
     return SupportCallComposedAt(index,target,nullptr,note,capacity);
 }
-bool SupportSubCallAt(const float* target,const float* from,bool local,wchar_t* note,std::size_t capacity) noexcept {
-    (void)from;
-    if(InSession() && !local)return false; // replayed native callbacks never submit duplicate requests
-    for(int i=0;i<SupportCallCount();++i)if(SupportSubCatalog(i))return SupportCallAt(i,target,note,capacity);
-    return false;
+bool SupportCallUnpaidAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept {
+    if(!note || !capacity || index==SupportRescueCatalog())return false;
+    return Request(index,target,nullptr,0,note,capacity);
+}
+std::uint32_t SupportCallPt(int index) noexcept {
+    if(index<0 || index>=SupportCallCount() || index==SupportRescueCatalog())return 0;
+    if(index<AirCount())return SupportAirCallPt(index);
+    if(int strike=0;StrikeCatalog(static_cast<std::uint32_t>(index),strike))return SupportStrikePt(strike);
+    const int k=index-AirCount();
+    return k>=0 && k<static_cast<int>(sizeof(kGroundPt)/sizeof(kGroundPt[0])) ? kGroundPt[k] : 0;
+}
+std::int32_t SupportCallPrice(int index) noexcept { return SupportPointsPrice(SupportCallPt(index)); }
+int SupportCatalogStrike(int index) noexcept {
+    int strike=-1;
+    return index>=0 && StrikeCatalog(static_cast<std::uint32_t>(index),strike) ? strike : -1;
+}
+bool SupportCatalogAir(int index) noexcept { return index>=0 && index<AirCount() && !SupportSubCatalog(index); }
+bool SupportPreviewEntry(int index,const float* target,float* from) noexcept {
+    SupportAircraft spec;
+    if(!from || !target || !SupportCatalogAir(index) || !SupportAircraftSpec(index,&spec) || !player.at || !PlayAreaMeasured())return false;
+    support::Route route{};
+    if(PreviewAirRoute(spec,target,player.pos,&route)!=support::Refusal::none)return false;
+    std::memcpy(from,route.from,12);
+    return true;
 }
 namespace {
 bool BuildCarrierDronePlan(const ObjRef& parent,const float* from,const float* heading,const float* anchor,
@@ -1505,8 +1583,8 @@ bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* l
         // Only the rescue's own trigger asks for it (a swimmer to pick up and a carrier to ferry them to).
         Status(L"海上救援只在玩家落海时自动呼叫");_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",status);return false;
     }
-    const bool accepted=Request(index,target,load,note,capacity);
-    // A sortie's second wave (airstrike.cpp), whether the radio or the map called it.
+    const bool accepted=Request(index,target,load,SupportCallPrice(index),note,capacity);
+    // A sortie's second wave (airstrike.cpp).
     if(accepted && index<SupportAirCallCount())SupportFollowUpQueue(index,target);
     return accepted;
 }
@@ -1563,9 +1641,19 @@ SupportIcon SupportCallIcon(int index) noexcept {
     if(InfantryCatalog(static_cast<std::uint32_t>(index)))return index==AirCount() ? SupportIcon::squad : SupportIcon::platoon;
     if(bool platoon=false,plane=false;TransportCatalog(static_cast<std::uint32_t>(index),platoon,plane))return plane ? SupportIcon::jet : SupportIcon::heli;
     if(SupportVehicleKind dropped{};AirdropCatalog(static_cast<std::uint32_t>(index),dropped))return SupportIcon::heli;   // the carrier
+    if(int strike=0;index>=0 && StrikeCatalog(static_cast<std::uint32_t>(index),strike))
+        return SupportStrikeBarrage(strike)>=0 ? SupportIcon::barrage : SupportIcon::satellite;
     SupportVehicleKind kind{};SupportCrewMode mode{};
     if(!GroundCatalog(static_cast<std::uint32_t>(index),kind,mode))return SupportIcon::squad;
     return kind==SupportVehicleKind::tank ? SupportIcon::tank : kind==SupportVehicleKind::transport ? SupportIcon::apc : SupportIcon::truck;
+}
+SupportTab SupportCallTab(int index) noexcept {
+    if(index>=0 && index<AirCount()) {
+        SupportAircraft spec;
+        return SupportAircraftSpec(index,&spec) && spec.sortie ? SupportTab::sortie : SupportTab::air;   // the submarine: air
+    }
+    if(int strike=0;index>=0 && StrikeCatalog(static_cast<std::uint32_t>(index),strike))return SupportTab::strike;
+    return SupportTab::ground;
 }
 SupportVariant SupportCallVariant(int index) noexcept {
     SupportAircraft spec;
@@ -1618,7 +1706,7 @@ void AirdropTestCall() noexcept {
     const float target[3]={player.pos[0]+kAirdropTestAhead*dx,player.pos[1],player.pos[2]+kAirdropTestAhead*dz};
     const int index=AirdropStart()+Cfg().airdropTest-1;
     wchar_t note[128]{};
-    const bool asked=SupportCallAt(index,target,note,_countof(note));
+    const bool asked=SupportCallUnpaidAt(index,target,note,_countof(note));   // a test's call: no pt
     // The key, not the name: the log is narrow and %ls of Chinese text fails its whole line (the note is the HUD's).
     Log("SUPPORT AirdropTest: %ls asked at (%.0f,%.0f,%.0f), %.0f m from the player: %s",SupportCallKey(index),target[0],
         target[1],target[2],kAirdropTestAhead,asked ? "accepted" : "refused");
@@ -1635,15 +1723,22 @@ void SupportDispatchTick() noexcept {
     dispatchFrame=GameFrame();
     Configure();SupportNetTick();
     AirdropTestCall();
-    if(offlinePending && !LocalAuthority()){offlinePending=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");}
+    if(offlinePending && !LocalAuthority()) {
+        offlinePending=false;planning.active=false;Status(L"已取消离线请求，请通过房主重新调度");
+        SupportPointsRefund(offlineCharge);offlineCharge=0;
+    }
     if(offlinePending) {
         SupportPlan plan;
         const auto result=Plan(planning.catalog,planning.target,planning.loadout,&plan);
         if(result!=support_net::PlanResult::pending) {
             offlinePending=false;
+            bool made=false;
             if(result==support_net::PlanResult::ready) {
-                if(!SpawnDeployment(nextOffline++,plan,false,false))Status(L"支援资源、真实机组或席位分配失败");
+                made=SpawnDeployment(nextOffline++,plan,false,false);
+                if(!made)Status(L"支援资源、真实机组或席位分配失败");
             }
+            if(!made)SupportPointsRefund(offlineCharge);   // its plan refused or not made: its pt back
+            offlineCharge=0;
         }
     }
     for(auto& deployed:deployments) {
@@ -1844,7 +1939,7 @@ void SupportDispatchTick() noexcept {
 void ResetSupportDispatch() noexcept {
     airdropTestSince=0;airdropTestAsked=false;
     // Mission reset invalidates the old objects; do not delete through last mission's borrowed pointers.
-    Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;nextOffline=1;status[0]=0;configNoticeShown=false;
+    Renew(planning);for(auto& row:deployments)Renew(row);offlinePending=false;offlineCharge=0;nextOffline=1;status[0]=0;configNoticeShown=false;
     rescueNote[0]=0;rescueSubmitting=false;rescueEnded=false;rescueRequest=0;
     legacyNoticed=false;loadoutNoticed=false;variantNote[0]=0;
     localRequest={};

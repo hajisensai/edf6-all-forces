@@ -124,6 +124,12 @@ plugin_net::Channel UltimateNetChannel() noexcept {
     plugin_net::Channel c;c.name="ultimate";c.magic=0x53544C55u;c.version=1;c.featureBit=support_net::kExtUltimate;
     c.minSize=c.maxSize=96;c.receive=&ReceiveUltimate;return c;
 }
+// The barrages' (barrage.cpp): BRGS for kExtBarrage peers, not under test here.
+bool ReceiveBarrage(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+plugin_net::Channel BarrageNetChannel() noexcept {
+    plugin_net::Channel c;c.name="barrage";c.magic=0x53475242u;c.version=1;c.featureBit=support_net::kExtBarrage;
+    c.minSize=c.maxSize=80;c.receive=&ReceiveBarrage;return c;
+}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}

@@ -1,8 +1,10 @@
-"""Air Raider call weapons for the plugin's jets and helicopters: the rows tools/calls.py lists, added to the
-shared weapon table. The calls are clones of the stock eWeapon051 (Combat Bomber KM6, Weapon_RadioContact,
-category 312) with a marker in its SGO's AmmoHitSizeAdjust. The plugin reads the marker (weapon +0x8C4)
-and flies its own planes for the call; the field does nothing for a RadioContact weapon, so without the
-plugin the weapon is simply a working KM6 bomber call.
+"""Air Raider weapons of the plugin: the rows tools/calls.py lists, added to the shared weapon table.
+The supports (calls.Call.on_map: the flown calls, the barrages, the ultimate) were weapons until 2026-10-26 (clones of
+the stock KM6 bomber call eWeapon051 or the satellite call eWeapon116 with a marker the plugin read); they are called from
+the M map's support bar for pt now (src/support_dispatch.cpp), and their rows are placeholders: the template's stock row
+under the id EDF6VC_RETIRED_* (_retired_table_row), as an uninstall leaves, at the index the row always had, with no SGO
+of their own. The plugin un-owns them at every save load (src/calls.inc kMovedRows), so they leave the equip list; install
+deletes the SGOs an earlier install wrote for them.
 The vehicle requests (Call.brings 'vehicle') are clones of the stock eWeapon394 (N9 Eros, Weapon_Sub,
 category 308): the stock request brings the player jet SGO (tools/make_jets.py EDF6VC_PJET_*.SGO, which
 must be installed first) with the jet's mark and guns in the request's vehicle setup, empty, for the player
@@ -11,10 +13,8 @@ The thrown drones (Call.brings 'throw') are clones of the stock eWeapon217 (Patr
 the Robot Bomb list) with a marker in AmmoHitSizeAdjust (calls.throw_mark: about 1.0004, so the bomb hits as the
 stock one): the plugin turns the bomb into its drone where it lands (src/airstrike.cpp kThrows); without the
 plugin the weapon is a plain Patroller.
-The ultimate strike (Call.brings 'ultimate') is a clone of the stock eWeapon116 (Spritefall Destroy,
-Weapon_LaserMarkerCallFire) with its marker in AmmoHitSizeAdjust, which the satellite's own code never reads (its
-state machine 0x6A0C50-0x6A6900 reads +0x89C, +0x8B0, +0x8C8): the plugin catches its fire (src/airstrike.cpp, the
-satellite's fire state) and plays its show (src/ultimate.cpp); without the plugin it is a plain Spritefall Destroy.
+The boarding guns (Call.brings 'gun') and the gravity gun ('gravity') are stock hand weapons under their own names
+(gun_sgo, gravity_sgo).
 
   python tools/call_weapons.py build OUTDIR [--game DIR]     write the SGOs + the stacked tables into OUTDIR
   python tools/call_weapons.py install [--game DIR]          into <game>/Mods (refuses while EDF6 runs)
@@ -28,8 +28,8 @@ installed Mods/WEAPON copy when there is one, else Root.cpk. Saves refer to weap
 plugin's GrantCalls sets the owned bit by row index too, so a row of ours never moves and its index is never
 given to anything else:
   - install keeps every row of ours where it is (found by id; tools/calls.py slot_of) and replaces it in place;
-    the calls a table lacks go at its end, in CALLS order. Every other row is checked unchanged before anything
-    is written (verify).
+    the calls a table lacks go at its end, in CALLS order (a support's as its placeholder, so every install has the
+    same rows at the same indices). Every other row is checked unchanged before anything is written (verify).
   - uninstall turns our rows into placeholders (the template's stock row under the id EDF6VC_RETIRED_*, named
     as uninstalled): the index stays taken, a save with one equipped still has a working stock weapon, and no
     later mod's row moves or inherits our owned bits. --delete-rows really deletes the rows at the very end of
@@ -71,20 +71,16 @@ import vcobjects as vc  # noqa: E402
 from calls import CALLS, IDS, Call, call_name  # noqa: E402
 from dsgo import Node  # noqa: E402
 
-TEMPLATE = 'eWeapon051'          # Combat Bomber KM6
+TEMPLATE = 'eWeapon051'          # Combat Bomber KM6 (a flown call's or a barrage's placeholder)
 VEHICLE_TEMPLATE = 'eWeapon394'  # N9 Eros (a heli vehicle request)
 THROW_TEMPLATE = 'eWeapon217'    # Patroller (a Robot Bomb: Weapon_Sub, BombBullet01)
-ULTIMATE_TEMPLATE = 'eWeapon116'  # Spritefall Destroy (Weapon_LaserMarkerCallFire, its fire state CP[3] = 0)
-# The ultimate's damage: what src/ultimate.cpp reads off the weapon (+0x89C) and shares out over its bolts, blasts and
-# beam, and its pt (calls.py reload): each at every star count (flat_curve). The stock curves scale them by the stars, and a
-# call weapon is owned at 0 (src/unlock_ported.h Own): the 2026-10-20 smoke test's show had damage 2400, 12000 x 0.2, and
-# would have needed 30000 pt (docs/plan-2026-10-19-ultimate.md, 「伤害 2400 的根因」).
-ULTIMATE_DAMAGE = 12000.0
+ULTIMATE_TEMPLATE = 'eWeapon116'  # Spritefall Destroy (the ultimate's placeholder)
 
 # A star curve [base, mode, star slot, most stars, share, power, integer flag] (EDF.dll 0xD7CE0, the weapon loader's and
 # the menu's): with s = min(the weapon's stars in that slot, most stars), x = share * (s / 5) ** power, its value is
 # base * (1 - share + x) for mode & 3 == 0 (growing with the stars), base * (1 + share - x) for 1 (falling), base else;
-# never below 0, the base's sign kept. Its value at 5 stars is the base.
+# never below 0, the base's sign kept. Its value at 5 stars is the base. (calls.Call.pt: what a support's call weapon
+# asked at 0 stars.)
 STAR_SHARE = 4
 STAR_PIVOT = 5.0
 
@@ -100,13 +96,6 @@ def star_value(curve: list, stars: int) -> float:
     return max(0.0, value) * sign
 
 
-def flat_curve(curve: Node, value: float) -> None:
-    """Star curve `curve` (a weapon field's or its menu line's) made `value` at every star count: its share 0."""
-    curve.items[0] = float(value)
-    curve.items[STAR_SHARE] = 0.0
-# The template's radio lines (SOUND/SUPPORT_UNIT_TALK.SGO keys), emptied in the ultimate: CP[5] (fire, -, after) and
-# Ammo_EquipVoice (equipped, unavailable).
-ULTIMATE_VOICES = (('スプライト発射', '', 'スプライト攻撃後'), ('スプライト出撃直後', 'スプライト支援不能'))
 LANGS = ('JA', 'EN', 'CN', 'KR', 'SC')
 TABLE = 'WEAPON/WEAPONTABLE.SGO'
 TEXTS = [f'WEAPON/WEAPONTEXT.{lang}.SGO' for lang in LANGS]
@@ -139,9 +128,15 @@ def vehicle_file(call: Call) -> str:
 
 
 def our_sgos() -> list[str]:
-    """Every weapon file install writes: the calls' SGOs and the earlier games' SGOs and assets
-    (tools/ported_weapons.py files)."""
-    return [sgo_file(c) for c in CALLS] + [rel for p in pw.PORTS for rel in pw.files(p)]
+    """Every weapon file install writes: the live calls' SGOs (not the supports moved to the map) and the earlier games'
+    SGOs and assets (tools/ported_weapons.py files)."""
+    return [sgo_file(c) for c in CALLS if not c.on_map] + [rel for p in pw.PORTS for rel in pw.files(p)]
+
+
+def moved_sgos() -> list[str]:
+    """The SGOs an install before 2026-10-26 wrote for the supports now on the map (calls.Call.on_map): install, uninstall
+    and repair delete each one still ours (ours())."""
+    return [sgo_file(c) for c in CALLS if c.on_map]
 
 
 def owned_assets(game_root: str, manifest: dict | None = None) -> dict[str, str]:
@@ -201,9 +196,10 @@ def row_ids(table: bytes) -> list[str]:
 
 
 def template_of(call: Call) -> str:
-    """The stock row a call's row and SGO are made from: the bomber call, the N9 Eros request (a player jet), a
-    ground vehicle's own request (vcobjects.GROUND_VEHICLES: the Naegling's for the Katyusha), or the Patroller (a
-    thrown drone: its row, and so its place in the Robot Bomb list, category 331)."""
+    """The stock row a call's row and SGO are made from: the N9 Eros request (a player jet), a ground vehicle's own
+    request (vcobjects.GROUND_VEHICLES: the Naegling's for the Katyusha), the Patroller (a thrown drone: its row, and so
+    its place in the Robot Bomb list, category 331), a gun's own stock weapon; a support on the map's placeholder is the
+    bomber call's row (the satellite call's for the ultimate), as its weapon was made from."""
     if call.gun:
         return call.gun
     if call.weapon:
@@ -612,63 +608,6 @@ def gun_sgo(template: bytes, call: Call) -> bytes:
     return dsgo.write(doc)
 
 
-def ultimate_sgo(template: bytes, call: Call) -> bytes:
-    """Spritefall Destroy with the ultimate's marker, its reload (pt) and damage at every star count (ULTIMATE_DAMAGE) and
-    names; its laser marker, countdown and stock beam (the fallback without the plugin) as they are. Its radio lines silenced (the user, 2026-10-20: 「语音还是用的
-    原版语音」, 「没人说你用说话的语音啊」: the show has its own sounds, no speech): ULTIMATE_VOICES, the satellite's fire /
-    after-fire lines (CP[5]) and its equip / unavailable lines (Ammo_EquipVoice), every one emptied (the stock CP[5][1] is
-    already empty: the game plays nothing for an empty name)."""
-    doc = dsgo.parse(template)
-    r = doc.root
-    cp = r.get('Ammo_CustomParameter')
-    if cp.items[4].items[4] != 'LaserBullet02' or cp.items[3] != 0:
-        raise ValueError(f'{ULTIMATE_TEMPLATE} 不是预期的卫星激光呼叫（CP[3] = 0 的发射态，LaserBullet02）')
-    voices = (cp.items[5], r.get('Ammo_EquipVoice'))
-    if [list(v.items) for v in voices] != [list(v) for v in ULTIMATE_VOICES]:
-        raise ValueError(f'{ULTIMATE_TEMPLATE} 的语音不是预期的 {ULTIMATE_VOICES}')
-    for v in voices:
-        v.items[:] = [''] * len(v.items)
-    r.set('AmmoHitSizeAdjust', float(call.mark))
-    # Flat: the pt and the damage asked for at the 0 stars a call is owned with (ULTIMATE_DAMAGE).
-    flat_curve(r.get('ReloadTime'), call.reload)
-    flat_curve(r.get('AmmoDamage'), ULTIMATE_DAMAGE)
-    for key, want in (('ReloadTime', float(call.reload)), ('AmmoDamage', ULTIMATE_DAMAGE)):
-        if any(star_value(r.get(key), stars) != want for stars in (0, 5, 10)):
-            raise ValueError(f'{ULTIMATE_TEMPLATE} 的 {key} 不是已知的星级曲线（{dsgo.to_py(r.get(key))}）')
-    for lang in LANGS:
-        key = f'name.{lang.lower()}'
-        if key in r.names.values():
-            r.set(key, call_name(call, lang))
-    return dsgo.write(doc)
-
-
-def barrage_sgo(template: bytes, call: Call) -> bytes:
-    """The KM6 bomber call made a long-range barrage (src/barrage.cpp): the barrage's marker, its pt (calls.py reload) at every
-    star count, its names; its radio lines (CP[3]: the bombers' fire / after-fire lines; Ammo_EquipVoice) emptied. Its
-    AmmoDamage is left the KM6's: the stock bombers read it as each bomb's damage, and they fly whenever the plugin does not
-    take the call (the plugin off, a peer without it, a barrage that could not start: airstrike.cpp RadioStartHook). Each
-    round's damage (calls.py damage) is the plugin's own: src/calls.inc kBarrages (gen_calls.py), not the weapon's; the menu
-    row shows it (_barrage_stats)."""
-    doc = dsgo.parse(template)
-    r = doc.root
-    if call.damage <= 0.0:
-        raise ValueError(f'{call.id}: a barrage needs its damage a round')
-    r.set('AmmoHitSizeAdjust', float(call.mark))
-    flat_curve(r.get('ReloadTime'), call.reload)
-    if any(abs(star_value(r.get('ReloadTime'), stars) - call.reload) > 1e-3 for stars in (0, 5, 10)):
-        raise ValueError(f'{TEMPLATE} 的 ReloadTime 不是已知的星级曲线（{dsgo.to_py(r.get("ReloadTime"))}）')
-    cp = r.get('Ammo_CustomParameter')
-    for v in (cp.items[3], r.get('Ammo_EquipVoice')):
-        if not isinstance(v, Node) or not all(isinstance(x, str) for x in v.items):
-            raise ValueError(f'{TEMPLATE} 的语音不是预期的字符串列表')
-        v.items[:] = [''] * len(v.items)
-    for lang in LANGS:
-        key = f'name.{lang.lower()}'
-        if key in r.names.values():
-            r.set(key, call_name(call, lang))
-    return dsgo.write(doc)
-
-
 # The gravity gun (Call.brings 'gravity', src/gravitygun.cpp): the Laser Guide Kit (Weapon_LaserMarker: its beam is drawn
 # while the trigger is held, it fires no round, so its one shot never runs out) under its own name, its AmmoHitSizeAdjust the
 # call's mark (the plugin's test, with the class's vtable; the class never reads the field). Its beam reaches AmmoSpeed x
@@ -696,30 +635,16 @@ def gravity_sgo(template: bytes, call: Call) -> bytes:
 
 def weapon_sgo(template: bytes, call: Call, curve: list[tuple[float, float, float]] | None = None,
                *, fallback: bool = False) -> bytes:
+    """A live call's weapon SGO (a support on the map has none: its row is a placeholder)."""
     if call.brings == 'gun':
         return gun_sgo(template, call)
-    if call.brings == 'ultimate':
-        return ultimate_sgo(template, call)
     if call.brings == 'gravity':
         return gravity_sgo(template, call)
-    if call.brings == 'barrage':
-        return barrage_sgo(template, call)
     if call.brings == 'vehicle':
         return vehicle_sgo(template, call, request_tier(curve or [], call.level), fallback=fallback)
     if call.brings == 'throw':
         return throw_sgo(template, call)
-    doc = dsgo.parse(template)
-    r = doc.root
-    r.set('AmmoHitSizeAdjust', float(call.mark))
-    reload = r.get('ReloadTime')
-    reload.items[0] = float(call.reload)
-    custom = r.get('Ammo_CustomParameter').items[2]
-    custom.items[1] = float(call.count)
-    for lang in LANGS:
-        key = f'name.{lang.lower()}'
-        if key in r.names.values():
-            r.set(key, call_name(call, lang))
-    return dsgo.write(doc)
+    raise ValueError(f'{call.id} is a support on the map (calls.Call.on_map): no weapon SGO')
 
 
 def _table_row(template: Node, call: Call) -> Node:
@@ -759,20 +684,17 @@ def gun_stats(template: bytes) -> list[tuple[float, list, float]]:
 
 def _text_row(template: Node, call: Call, lang: str, durability: float | None = None,
               gun: list[tuple[float, list, float]] | None = None) -> Node:
+    """A live call's menu row (a support on the map's is its placeholder's: _retired_text_row)."""
+    if call.on_map:
+        raise ValueError(f'{call.id} is a support on the map (calls.Call.on_map): its row is a placeholder')
     row = copy.deepcopy(template)
     row.items[0] = call_name(call, lang)
     row.items[1] = calls.call_description(call, lang)
     if call.brings == 'throw':
         _throw_stats(row, call)
         return row
-    if call.brings == 'ultimate':
-        _ultimate_stats(row, call)
-        return row
     if call.brings == 'gravity':
         _gravity_stats(row)
-        return row
-    if call.brings == 'barrage':
-        _barrage_stats(row, call)
         return row
     # A vehicle request's stats: [re-request, durability, fuel, fuel cost]; the durability is the jet's.
     stats = row.items[2].items
@@ -794,8 +716,8 @@ def _text_row(template: Node, call: Call, lang: str, durability: float | None = 
         if changed < 5:
             raise ValueError(f'{call.id} {lang}: only {changed} of its template text lines matched its fields')
         return row
-    # The stat list stays KM6's, except the reload line's curve, which the game shows as $0pt
-    # from that list: it must be the weapon's own ReloadTime or the menu shows KM6's 1020.
+    # The stat list stays the request's, except the re-request line's curve, which the game shows as $0pt
+    # from that list: it must be the weapon's own ReloadTime or the menu shows the template's.
     for stat in row.items[2].items:
         if len(stat.items) == 3 and str(stat.items[1]).startswith('$0pt') and isinstance(stat.items[2], Node):
             stat.items[2].items[0] = float(call.reload)
@@ -818,48 +740,6 @@ def _throw_stats(row: Node, call: Call) -> None:
     row.items[2].items = keep
 
 
-# Spritefall Destroy's stat list: [damage, blast range, reload, laser range, rounds, zoom]. The ultimate's: its damage base,
-# its area (src/ultimate_plan.h kRadius) for the blast range, its pt; the stock beam's round count goes (the show has none).
-_ULT_DAMAGE_STAT, _ULT_RANGE_STAT, _ULT_RELOAD_STAT, _ULT_ROUNDS_STAT = 0, 1, 2, 4
-ULTIMATE_RADIUS = 220   # m: src/ultimate_plan.h kRadius (tools/selftest.py holds the two equal)
-
-
-def _ultimate_stats(row: Node, call: Call) -> None:
-    stats = row.items[2].items
-    if len(stats) <= _ULT_ROUNDS_STAT:
-        return   # another tool rewrote the satellite's text: left as it is
-    for at, value in ((_ULT_DAMAGE_STAT, ULTIMATE_DAMAGE), (_ULT_RELOAD_STAT, float(call.reload))):
-        stat = stats[at]
-        if len(stat.items) == 3 and isinstance(stat.items[2], Node) and len(stat.items[2].items) > STAR_SHARE:
-            flat_curve(stat.items[2], value)   # the menu's curve: the weapon's at every star count
-    area = stats[_ULT_RANGE_STAT]
-    if len(area.items) == 2 and isinstance(area.items[1], str):
-        area.items[1] = area.items[1].replace('70.0', str(ULTIMATE_RADIUS))
-    del stats[_ULT_ROUNDS_STAT]
-
-
-# KM6's stat list: its damage line shows the AmmoDamage curve (KM6_DAMAGE_BASE its base), its reload line ($0pt) the
-# ReloadTime curve. A barrage's: those two alone, each made the weapon's at every star count (the round's damage, the pt);
-# KM6's spread and plane count lines go (no bombers come).
-KM6_DAMAGE_BASE = 90.0
-
-
-def _barrage_stats(row: Node, call: Call) -> None:
-    keep = []
-    for stat in row.items[2].items:
-        if len(stat.items) != 3 or not isinstance(stat.items[2], Node) or len(stat.items[2].items) <= STAR_SHARE:
-            continue
-        if str(stat.items[1]).startswith('$0pt'):
-            flat_curve(stat.items[2], float(call.reload))
-            keep.append(stat)
-        elif abs(float(stat.items[2].items[0]) - KM6_DAMAGE_BASE) < 1e-6:
-            flat_curve(stat.items[2], float(call.damage))
-            keep.append(stat)
-    if len(keep) != 2:
-        raise ValueError(f'{call.id}: KM6 的说明行不是预期的伤害与 pt 两行曲线')
-    row.items[2].items = keep
-
-
 # The Laser Guide Kit's stat list: [projection range (its AmmoSpeed curve), lock-on speed, lock-on range, zoom]. The gravity
 # gun's: its range (GRAVITY_RANGE) and the zoom; the lock-on lines are the kit's (the beam still paints, but that is not
 # what this weapon is for).
@@ -878,7 +758,8 @@ def _gravity_stats(row: Node) -> None:
 
 
 def _retired_table_row(template: Node, call: Call) -> Node:
-    """The placeholder for an uninstalled call: the template's own stock row (its stock SGO, level, acquire)."""
+    """The placeholder for an uninstalled call or a support moved to the map (calls.Call.on_map): the template's own
+    stock row (its stock SGO, level, acquire)."""
     row = copy.deepcopy(template)
     row.items[0] = calls.retired_id(call.id)
     return row
@@ -917,8 +798,9 @@ def load_shared(game_root: str) -> Shared:
 
 
 def stack(game_root: str) -> dict[str, bytes]:
-    """The SGOs and the shared table + texts with every call in (plan_rows), keyed by path under Mods. Reads
-    only; raises (Misaligned, ValueError) before anything could be written."""
+    """The SGOs and the shared table + texts with every call in (plan_rows; a support on the map as its placeholder,
+    without an SGO), keyed by path under Mods. Reads only; raises (Misaligned, ValueError) before anything could be
+    written."""
     s = load_shared(game_root)
     before = s.ids
     plan = plan_rows(before)
@@ -930,11 +812,12 @@ def stack(game_root: str) -> dict[str, bytes]:
               + '; '.join(reasons[:3]) + (' ...' if len(reasons) > 3 else ''))
     tpl = {t: _template_index(before, t) for t in templates()}
     template_sgo = {t: stock(game_root, f'WEAPON/{t.upper()}.SGO') for t in tpl}
-    curves = {request_family(c): request_curve(game_root, request_family(c)) for c in CALLS if c.brings == 'vehicle'}
-    fallback = {c.id for c in CALLS if model_missing(c)}
+    live = [c for c in CALLS if not c.on_map]   # a support on the map: its placeholder row, no SGO
+    curves = {request_family(c): request_curve(game_root, request_family(c)) for c in live if c.brings == 'vehicle'}
+    fallback = {c.id for c in live if model_missing(c)}
     out: dict[str, bytes] = {sgo_file(c): weapon_sgo(template_sgo[template_of(c)], c, curves.get(request_family(c)),
                                                 fallback=c.id in fallback)
-                             for c in CALLS}
+                             for c in live}
     order = sorted(CALLS, key=lambda c: plan.at[c.id])   # appended rows in their order
     # A ported weapon this run cannot build for want of its game keeps the row an earlier install gave it (all its files
     # are still in Mods), else its row is a placeholder until the game is there (pw.pending_*): its index is taken either
@@ -951,35 +834,37 @@ def stack(game_root: str) -> dict[str, bytes]:
     row_template = {c.id: rows[tpl[template_of(c)]] for c in CALLS}
     port_rows = {p.id: pw.table_row(rows[port_tpl[p.id]], p) if p.id in ports
                  else pw.pending_table_row(rows[port_tpl[p.id]], p) for p in put_ports}
-    puts = sorted([(plan.at[c.id], _table_row(row_template[c.id], c)) for c in order]
+    puts = sorted([(plan.at[c.id], _retired_table_row(row_template[c.id], c) if c.on_map
+                    else _table_row(row_template[c.id], c)) for c in order]
                   + [(plan.at[p.id], port_rows[p.id]) for p in put_ports], key=lambda x: x[0])
     for at, row in puts:
         _put(rows, at, row)
     out[TABLE] = dsgo.compact(s.table)
-    durability = {c.id: vehicle_durability(game_root, c) if c.brings == 'vehicle' else None for c in CALLS}
+    durability = {c.id: vehicle_durability(game_root, c) if c.brings == 'vehicle' else None for c in live}
     if fallback:
         import sgo
-        for c in CALLS:
+        for c in live:
             if c.id in fallback:
                 # the stock object the fallback writes under the vehicle's name, times its template request's multiplier
                 body = 'OBJECT/V603_FLAK.SGO' if c.ground else 'OBJECT/V506_HELI.SGO'
                 hp = float(sgo.load(data=stock(game_root, body))['game_object_durability'])
                 mult = dsgo.parse(template_sgo[template_of(c)]).root.get('Ammo_CustomParameter').items[4].items[3].items[0].items[0]
                 durability[c.id] = hp * float(mult)
-    stats = {c.id: gun_stats(template_sgo[template_of(c)]) for c in CALLS if c.brings == 'gun'}
+    stats = {c.id: gun_stats(template_sgo[template_of(c)]) for c in live if c.brings == 'gun'}
     for lang, rel in zip(LANGS, TEXTS):
         text = s.text_rows(rel)
         text_templates = {c.id: text[tpl[template_of(c)]] for c in CALLS}
         port_text = {p.id: pw.text_row(p, lang) if p.id in ports
                      else pw.pending_text_row(text[port_tpl[p.id]], p, lang) for p in put_ports}
-        puts = sorted([(plan.at[c.id], _text_row(text_templates[c.id], c, lang, durability[c.id], stats.get(c.id)))
+        puts = sorted([(plan.at[c.id], _retired_text_row(text_templates[c.id], c, lang) if c.on_map
+                        else _text_row(text_templates[c.id], c, lang, durability[c.id], stats.get(c.id)))
                        for c in order] + [(plan.at[p.id], port_text[p.id]) for p in put_ports], key=lambda x: x[0])
         for at, row in puts:
             _put(text, at, row)
         out[rel] = dsgo.compact(s.texts[rel])
-    # What each row of ours must hold: a call and a ported weapon built or kept their own id, one waiting for its game
-    # its placeholder's.
-    want = {c.id: c.id for c in CALLS}
+    # What each row of ours must hold: a live call and a ported weapon built or kept their own id; a support on the map,
+    # and a ported weapon waiting for its game, its placeholder's.
+    want = {c.id: calls.retired_id(c.id) if c.on_map else c.id for c in CALLS}
     want.update({p.id: p.id if p.id in ports or p.id in kept else pw.retired_id(p.id) for p in pw.PORTS})
     verify(game_root, out, plan, want)
     return out
@@ -1161,7 +1046,7 @@ def _first_backup(game_root: str, manifest: dict, rels: list[str]) -> None:
 
 
 def ours(game_root: str, manifest: dict, rel: str) -> bool:
-    """Whether the Mods file `rel` (one of our_sgos) is ours to remove: what we last wrote into it (the manifest's
+    """Whether the Mods file `rel` (one of our_sgos or moved_sgos) is ours to remove: what we last wrote into it (the manifest's
     sha), or, for a file of our own prefix an older manifest may not list, not changed by another tool since. A file
     under a stock name (an earlier game's model, ported_weapons assets) another mod may have put there: only by the
     sha."""
@@ -1192,7 +1077,10 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     if recover(game_root):
         print('rolled back the weapon table files of an earlier run that did not finish')
     files = stack(game_root) if files is None else files
-    needs = {rel for c in CALLS if c.vehicle for rel in vehicle_needs(c, files[sgo_file(c)])}
+    stale = sorted(set(files) & set(moved_sgos()))
+    if stale:
+        raise ValueError(f'{", ".join(stale)}: a support on the map has no weapon SGO (calls.Call.on_map)')
+    needs = {rel for c in CALLS if c.vehicle and not c.on_map for rel in vehicle_needs(c, files[sgo_file(c)])}
     missing = [rel for rel in sorted(needs) if not os.path.isfile(_mods(game_root, rel))]
     if missing:
         raise SystemExit(f'{", ".join(missing)} not installed: run python tools/make_jets.py first')
@@ -1201,6 +1089,9 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
         note = 'its other rows are kept' if rel in SHARED else 'overwritten'
         print(f'note: {rel} was changed by another tool since our last install ({note})')
     old_rows = dict(manifest['rows'])
+    # The SGOs an earlier install wrote for the supports now on the map go in the same transaction (removed_sgos: only
+    # those still ours; a pre-install original under that name is put back).
+    gone = removed_sgos(game_root, manifest, moved_sgos())
     _first_backup(game_root, manifest, list(files))
     ids = row_ids(files[TABLE])
     written = {rel: modfiles.sha256(data) for rel, data in files.items()}
@@ -1210,7 +1101,9 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
                     if rel not in written and rel in our_sgos() and ours(game_root, manifest, rel)})
     manifest['written'] = written
     manifest['rows'] = {slot_of(x): i for i, x in enumerate(ids) if slot_of(x)}   # placeholders too, as uninstall
-    commit(game_root, {**files, MANIFEST: _manifest_bytes(manifest)})
+    commit(game_root, {**gone, **files, MANIFEST: _manifest_bytes(manifest)})
+    for rel, data in gone.items():
+        print(f'{"removed" if data is None else "restored"} {rel} (the support is called from the map now)')
     moved = {c: (old_rows[c], manifest['rows'].get(c)) for c in old_rows if old_rows[c] != manifest['rows'].get(c)}
     for c, (was, now) in moved.items():
         print(f'WARNING: {c} was row {was}, now {now}: another tool rewrote the weapon table without it; a save '
@@ -1226,6 +1119,40 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     return dict(manifest['written'])
 
 
+def removed_sgos(game_root: str, manifest: dict, rels: list[str]) -> dict[str, bytes | None]:
+    """What removing our weapon files `rels` changes (commit's form): the original a first install backed up put back, or
+    the file deleted when it is still ours (ours()); one another tool wrote or changed is kept, one another installed
+    component still needs left to the ledger (held_elsewhere). Each released file leaves `manifest`'s created / replaced:
+    no longer ours to restore or delete, so a later install decides its first backup afresh (_first_backup)."""
+    changes: dict[str, bytes | None] = {}
+    led = ledger.Ledger(game_root)
+    for rel in rels:
+        if held_elsewhere(led, game_root, manifest, rel):
+            # Another installed component still needs this shared model, or the ledger puts its original back.
+            _forget(manifest, rel)
+            continue
+        path = _mods(game_root, rel)
+        bak = _mods(game_root, BACKUP, rel)
+        if rel in manifest['replaced'] and os.path.isfile(bak):
+            with open(bak, 'rb') as f:
+                changes[rel] = f.read()
+        elif os.path.isfile(path):
+            if not ours(game_root, manifest, rel):
+                print(f'kept {rel}: not what we wrote there (another tool wrote or changed it)')
+                continue
+            changes[rel] = None
+        else:
+            continue
+        _forget(manifest, rel)
+    return changes
+
+
+def _forget(manifest: dict, rel: str) -> None:
+    for done in ('created', 'replaced'):
+        if rel in manifest[done]:
+            manifest[done].remove(rel)
+
+
 def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = False) -> None:
     """Our rows become placeholders (or, delete_rows, the ones ending the table are deleted), our SGOs go."""
     if modfiles.game_running():
@@ -1238,30 +1165,12 @@ def uninstall(game_root: str, delete_rows: bool = False, unequipped: bool = Fals
         raise SystemExit(f'deleting the rows of {", ".join(deleted)}: unequip these weapons in every save first (a '
                          'save with one equipped crashes the game once its row is gone), then rerun with --unequipped')
     changes: dict[str, bytes | None] = {}
-    led = ledger.Ledger(game_root)
     for rel, data in shared.items():
         if rel in manifest['created'] and data == stock(game_root, rel):
             changes[rel] = None   # we made it and nobody else's rows are left in it
         elif data != base(game_root, rel):
             changes[rel] = data
-    for rel in our_sgos():
-        if held_elsewhere(led, game_root, manifest, rel):
-            # Another installed component still needs this shared model, or the ledger puts its original back: no
-            # longer ours to restore or delete, so a later install decides its first backup afresh (_first_backup).
-            for done in ('created', 'replaced'):
-                if rel in manifest[done]:
-                    manifest[done].remove(rel)
-            continue
-        path = _mods(game_root, rel)
-        bak = _mods(game_root, BACKUP, rel)
-        if rel in manifest['replaced'] and os.path.isfile(bak):
-            with open(bak, 'rb') as f:
-                changes[rel] = f.read()
-        elif os.path.isfile(path):
-            if not ours(game_root, manifest, rel):
-                print(f'kept {rel}: not what we wrote there (another tool wrote or changed it)')
-                continue
-            changes[rel] = None
+    changes.update(removed_sgos(game_root, manifest, our_sgos() + moved_sgos()))
     _first_backup(game_root, manifest, list(shared))
     ids = row_ids(shared[TABLE])   # the table as this commit leaves it (deleted only when it is stock again)
     left = [x for x in ids if slot_of(x)]
@@ -1289,7 +1198,7 @@ def repair(game_root: str) -> list[str]:
         raise SystemExit('EDF6VehicleCrew never installed its call weapons here: nothing to restore')
     changes: dict[str, bytes | None] = {}
     led = ledger.Ledger(game_root)
-    for rel in SHARED + our_sgos():
+    for rel in SHARED + our_sgos() + moved_sgos():
         if rel not in SHARED and held_elsewhere(led, game_root, manifest, rel):
             continue
         bak = _mods(game_root, BACKUP, rel)
@@ -1330,6 +1239,16 @@ def check(game_root: str) -> bool:
         i = plan.at[c.id]
         state = 'missing' if i >= len(ids) else 'placeholder' if ids[i] != c.id else 'in'
         moved = f' (installed at {rows[c.id]})' if c.id in rows and rows[c.id] != i and state != 'missing' else ''
+        if c.on_map:
+            # A support called from the map: its row a placeholder, its SGO an earlier install wrote gone.
+            note = ' (on the map, its row a placeholder)' if state == 'placeholder' else \
+                ' (on the map: its row must be a placeholder; install again)' if state == 'in' else ''
+            print(f'  {i if state != "missing" else "-":>5} {c.id}: {state}{note}{moved}')
+            ok &= state == 'placeholder' and not moved
+            if os.path.isfile(_mods(game_root, sgo_file(c))):
+                print(f'        {sgo_file(c)} left by an earlier install (install again)')
+                ok = False
+            continue
         print(f'  {i if state != "missing" else "-":>5} {c.id}: {state}{moved}')
         ok &= state == 'in' and not moved
         if state == 'in' and not os.path.isfile(_mods(game_root, sgo_file(c))):
