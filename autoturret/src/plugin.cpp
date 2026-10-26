@@ -25,6 +25,7 @@
 #include "autoturret_version.h"
 #include "build_id.h"
 #include "edf/input_source.h"
+#include "edf/keybind.h"
 #include "append_log.h"
 #include "turret.h"
 
@@ -35,6 +36,7 @@ wchar_t logPath[MAX_PATH]{};
 wchar_t iniPath[MAX_PATH]{};
 
 Config cfg{};
+bool lockWanted=true;
 edf::IniWatch ini{};
 
 VehicleInputFn nextInput[2]{};   // the flak's (0) and the rocket launcher's (1) input slots, as found
@@ -867,6 +869,7 @@ void LoadConfig() noexcept {
     next.lockRange=Clamp(ReadFloat(L"LockRange",next.lockRange),0.0f,5000.0f);
     next.lockClearMs=static_cast<DWORD>(ReadInt(L"LockClearMs",static_cast<int>(next.lockClearMs),200,5000));
     cfg=next;
+    lockWanted=cfg.lockKey!=0;   // the ini's LockKey: 0 none, else the stock spot's key (ApplyStockKeys)
     Log("CONFIG enabled=%d debug=%d gain=%.2f yaw=%.0f%+.3f pitch=%.0f%+.3f pivot=%.1f air=%.1f lead=%d track=%.2f ff=%d slew=%.0f drag=%.2f/%lums fuse=%d%+.1f min=%d proximity=%.1f contact=%d",
         cfg.enabled,cfg.debug,cfg.gain,cfg.yawSign,cfg.yawOffset,cfg.pitchSign,cfg.pitchOffset,cfg.pivotHeight,
         cfg.airHeight,cfg.lead,cfg.trackRange,cfg.feedForward,cfg.slewWeight,cfg.dragDeadzone,cfg.dragDropMs,cfg.fuse,cfg.fuseBias,cfg.fuseMin,cfg.proximity,cfg.contact);
@@ -876,9 +879,52 @@ void LoadConfig() noexcept {
         cfg.autoAim,cfg.autoAimKey,cfg.autoAimButton,cfg.lockKey,cfg.lockButton,cfg.lockCone,cfg.lockRange,cfg.lockClearMs);
 }
 
-// Edits to the ini apply within a second; no game restart needed.
+// The keys in the game's key store (common/edf/keybind.h, EDF6VehicleCrew's key config pages): this plugin's slot (the
+// auto-aim toggle) seeded once from the ini (its marker), then read from the store; the lock key is the stock 「标记」's
+// (Spot), as EDF6VehicleCrew's Q mark (LockKey 0: none, as ever). Nothing changed while the store is not built yet.
+namespace {
+namespace kb=edf::keybind;
+bool storeSeedLogged=false;
+unsigned char* KeyStore() noexcept {
+    __try {
+        if(!image)return nullptr;
+        unsigned char* options=At<unsigned char*>(image,kb::kOptions);
+        if(!options || !Readable(options+kb::kStore,kb::kStoreSize,true))return nullptr;
+        unsigned char* store=options+kb::kStore;
+        return At<std::int32_t>(store,kb::kReady)==1 ? store : nullptr;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
+}
+int IniKey(const kb::Slot& s) noexcept {
+    const int vk=static_cast<int>(GetPrivateProfileIntW(L"AutoTurret",s.ini,s.defaultVk,iniPath));
+    return vk>=0 && vk<=0xFE ? vk : s.defaultVk;
+}
+void ApplyStockKeys() noexcept {
+    unsigned char* store=KeyStore();
+    if(!store)return;
+    __try {
+        if(!kb::Seeded(store,kb::Owner::turret)) {
+            kb::Seed(store,kb::Owner::turret,&IniKey);
+            Log("KEYCONFIG AutoAimKey seeded from the ini into the game's key store%s; from now on it is set in the game's key "
+                "config (EDF6VehicleCrew's 「插件」 page), the ini's value is no longer read",storeSeedLogged ? " again" : "");
+            storeSeedLogged=true;
+        }
+        int autoAimKey=cfg.autoAimKey,lockKey=cfg.lockKey;
+        for(const kb::Slot& s:kb::kSlots)
+            if(s.owner==kb::Owner::turret)autoAimKey=kb::SlotVk(store,s.action);
+        lockKey=lockWanted ? kb::SlotVk(store,kb::kSpotAction) : 0;
+        if(autoAimKey!=cfg.autoAimKey || lockKey!=cfg.lockKey) {
+            Log("CONFIG keys from the game's key config: auto-aim 0x%X (was 0x%X), lock 0x%X (the stock spot; was 0x%X)",autoAimKey,
+                cfg.autoAimKey,lockKey,cfg.lockKey);
+            cfg.autoAimKey=autoAimKey;cfg.lockKey=lockKey;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+}
+}  // namespace
+
+// Edits to the ini apply within a second; no game restart needed. The keys are the game's key store's.
 void ReloadConfigIfChanged() noexcept {
     if(ini.Changed())LoadConfig();
+    ApplyStockKeys();
 }
 
 // The rocket launcher (Vehicle402_Rocket, the Naegling's class: EDF6VehicleCrew's Katyusha is one): its input slot

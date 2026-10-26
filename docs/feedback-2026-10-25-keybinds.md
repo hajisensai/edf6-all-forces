@@ -15,3 +15,5 @@
 - 盘点、冲突表、重新设计方案：[`plan-2026-10-25-keybinds.md`](plan-2026-10-25-keybinds.md)。
 - 原版按键设置的逆向（能不能追加条目、键值存在哪）：[`keyconfig-re.md`](keyconfig-re.md)，离线审计 `tests/keyconfig_native_audit.py`（ctest `keyconfig_native`）。
 - 同批的相关会话：PR #254（战雷式 W/S 油门 / 定速挡位，改了固定翼与地面车的 W/S、Space、Ctrl 语义），方案在它之上设计；自动瞄准的 Q 键提示归另一个会话，本方案只在键位表里给它留位。
+- 2026-10-26 用户决定：「按键重绑 阶段2删掉，直接阶段3」。插件键存进原版键值表、在原版按键设置里加「插件」页，见方案 §4 与
+  `keyconfig-re.md` §5～§7；§3.3 的默认键改动仍等用户逐条确认。

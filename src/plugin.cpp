@@ -55,6 +55,7 @@
 #include "build_id.h"
 #include "pack_notice.h"
 #include "profile_sigs.h"
+#include "keyconfig.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -923,6 +924,12 @@ void LoadConfig() noexcept {
     n.tankReverseMax=ReadFloat(L"TankReverseMax",n.tankReverseMax);
     Validate(n);
     IgnoreRetired();
+    {
+        // The keys the game's key store holds (keyconfig.cpp): the ini's values were their first seed only.
+        const Config fromIni=n;
+        if(OverlayStockKeys(n,true) && StockKeysDiffer(fromIni,n))
+            Log("CONFIG keys: the game's key config's (the 「插件」 pages; the Q mark the stock 「标记」), not the ini's *Key values");
+    }
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         n.enabled,n.debug,n.autoCrew,n.crewDelayMs,n.crewRange,n.bump,n.bumpToGunner,
         n.heliPilot,n.heliHeight,n.heliFollow,n.heliRange,n.heliFire);
@@ -1038,6 +1045,20 @@ void LoadConfig() noexcept {
 }
 
 }  // namespace
+
+// The published config with the key store's keys, when they differ from it (keyconfig.cpp KeyConfigTick: a key changed
+// in the game's key config, or the store just seeded / loaded). The old config is never freed (as LoadConfig).
+void RepublishStockKeys() noexcept {
+    const Config& now=Cfg();
+    Config next=now;
+    if(!OverlayStockKeys(next,false) || !StockKeysDiffer(now,next))return;
+    Config* const fresh=new(std::nothrow) Config(next);
+    if(!fresh)return;
+    published.store(fresh,std::memory_order_release);
+    Log("CONFIG keys from the game's key config: formation=0x%X map=0x%X firstPerson=0x%X seat=0x%X switch=0x%X boost=0x%X mark=0x%X",
+        next.npcFormationKey,next.mapKey,next.firstPersonKey,next.seatNextKey,next.playerJetSwitchKey,next.playerJetBoostKey,
+        next.npcMarkKey);
+}
 
 // The log: lines are copied into a memory buffer on the caller's thread (the game thread, the call picker, the draw
 // thread: one memcpy under a lock) and a writer thread of its own writes the buffer to one handle kept open every
@@ -1283,6 +1304,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
+    InstallKeyConfig();     // the plugins' keys as pages of the game's own key config (keyconfig.cpp)
     Log("OUTFIT41 installed=%d",InstallOutfit41());   // the EDF4.1 outfit: the HQ popup's sixth item, the model paths
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallEdf5Campaign();  // the EDF5 campaign's mission packs owned (edf5campaign.cpp)

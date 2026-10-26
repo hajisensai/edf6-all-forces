@@ -24,6 +24,7 @@ void RoomPvpChange(const roompvp::Action&) noexcept {UnexpectedRoomDependency();
 void RoomPvpSummary(wchar_t*,std::size_t) noexcept {UnexpectedRoomDependency();}
 bool RoomPvpWaitingLine(wchar_t*,std::size_t) noexcept {UnexpectedRoomDependency();return false;}
 void Outfit41RoomTick() noexcept {UnexpectedRoomDependency();}
+void KeyConfigTick() noexcept {UnexpectedRoomDependency();}
 void Edf5OnlineRoomTick() noexcept {UnexpectedRoomDependency();}
 void HostSettingsRoomTick() noexcept {UnexpectedRoomDependency();}
 int HostSettingsLines(roomsync::SyncLine*,int) noexcept {UnexpectedRoomDependency();return 0;}

@@ -19,6 +19,7 @@
 // Per vehicle the module keeps a State, keyed by the vehicle's ObjRef (a new object at an old address is a
 // new vehicle), dropped at a new mission (ResetCrew) and reused only once its vehicle has not run its
 // per-frame input for kStaleMs (gone): a full table takes on no new vehicle rather than drop a live one.
+#include "keyconfig.h"
 #include "crew.h"
 #include "pvp.h"
 #include "enemy_control.h"
@@ -840,6 +841,7 @@ void SharedFrameTick() noexcept {
     if(tickFrame==GameFrame())return;
     tickFrame=GameFrame();
     PerfTick();
+    KeyConfigTick();   // the keys follow the game's key config (keyconfig.cpp): seeded once, republished when changed
     GuardedTick(kStepUnderground,&UnderPlayer);
     GuardedTick(kStepUnderground,&ExitGroundTick);   // off a vehicle: on the floor, not in it (exit_ground.h)
     GuardedTick(kStepRescue,&RescueTick);
