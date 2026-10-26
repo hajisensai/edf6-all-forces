@@ -6,6 +6,7 @@
 // 自己身上爆炸，射不出去」: locked on something 12.5 m off, the proximity fuse (6.6 m off its lock point) went off 7 frames out of
 // the pod, 6.8 m from the Apocalypse, and its 12 m blast took 175 off the tank, every shot (docs/feedback-2026-10-25-missiles.md
 // 后续 3).
+// A round without that flag (an NPC's weapon: RideAi clears it) has the stock team filter and is armed from the pod.
 // Unarmed, the proximity fuse holds and a hit is the round's single-target damage (core+0xAF4 0x10 off: the hit 0x232616
 // takes 0x543920 instead of the area damage), as a real missile inside its arming distance strikes without bursting.
 // Pure functions (no game): tests/fuze_test.cpp.
