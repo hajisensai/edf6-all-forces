@@ -54,6 +54,19 @@ CALLS = {  # site: expected target (weapon_records.cpp)
     0x70B23A: 0x12DA77A, 0x70B421: 0x12DA77A, 0x70B956: 0x12DA77A, 0xDB96D: 0x12DA77A,
     0x7C1AD1: 0x12DA77A, 0x8B49B1: 0x12DA77A, 0xD6468: 0xDEDA0, 0x7C2F66: 0x7BCD40, 0x7C228B: 0x7B9990,
 }
+# Tail jumps (E9) the plugin rewrites: the load completion's copy into the request's destination (the block for MAIN.GST).
+TAILS = {0x7BE99D: 0x12DA77A}
+# The load's two copies (docs/loadout-re.md 8.8, 2026-10-26). The completion 0x7BE970, whole: status not an error,
+# destination [req+0x90] set, [req+0x98] == the buffer's size, then jmp memcpy([req+0x90], [[req+0xB0]+8], [req+0x98]).
+# The load job's copy 0x7C1AD1 goes into its own buffer ([[job+0xB0]+8], just resized), never into the block; the
+# MAIN.GST request (0x7C05F6 -> 0x7BBFA0 -> 0x7BD720) stores the block at +0x90 and 0xDCE8 at +0x98.
+LOAD_SHAPE = {
+    0x7BE970: '83793000' '7c2c' '488b8190000000' '4885c0' '7420' '488b91b0000000' '4c8b4218' '4c398198000000'
+              '750c' '488b5208' '488bc8' 'e9',
+    0x7C1ABF: '488b8bb0000000' '4d8bc6' '498d5714' '488b4908' 'e8',
+    0x7BD7A6: '4c89b390000000' '4889ab98000000',
+    0x7BC0C8: '41b9e8dc0000',
+}
 BYTES = {
     0x7B90CD: 'ff158dc5f900', 0x7B9C28: 'ff1532baf900', 0x7B69F1: 'ff1561ecf900', 0x7B7FEB: 'ff1567d6f900',
     0x8B4F70: '0fb6848be87c0000', 0x8B51A0: '418b948de8840000',
@@ -78,11 +91,17 @@ def audit(pe, img: bytes) -> None:
     for site, target in CALLS.items():
         rel = struct.unpack_from('<i', img, site + 1)[0]
         check(img[site] == 0xE8 and site + 5 + rel == target, f'EDF+{site:#x} calls {target:#x}')
+    for site, target in TAILS.items():
+        rel = struct.unpack_from('<i', img, site + 1)[0]
+        check(img[site] == 0xE9 and site + 5 + rel == target, f'EDF+{site:#x} tail-jumps to {target:#x}')
     for site, hexbytes in BYTES.items():
         check(img[site:site + len(hexbytes) // 2].hex() == hexbytes, f'EDF+{site:#x} bytes')
+    for site, hexbytes in LOAD_SHAPE.items():
+        check(img[site:site + len(hexbytes) // 2].hex() == hexbytes, f'EDF+{site:#x}: the load copy is as read')
+    check(0x7BE970 + len(LOAD_SHAPE[0x7BE970]) // 2 - 1 in TAILS, 'the completion ends in the wrapped tail jump')
     # The calls and reads the plugin rewrites whole: none may share a byte with a constant site (the second write finds
     # the first's bytes; 0x8B4F70 listed as a site rolled the whole relocation back in build 471bfc5).
-    spans = [(site, 5) for site in CALLS] + [(site, len(h) // 2) for site, h in BYTES.items()]
+    spans = [(site, 5) for site in CALLS] + [(site, 5) for site in TAILS] + [(site, len(h) // 2) for site, h in BYTES.items()]
     shared = sorted(hex(site) for site, n in spans for rva, size, *_ in rows if site < rva + size and rva < site + n)
     check(not shared, f'no rewritten call / read shares bytes with a constant site: {shared}')
     try:

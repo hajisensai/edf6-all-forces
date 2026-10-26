@@ -13,8 +13,10 @@
 //      (0x7C2F66 -> 0x7BCD40, its job copies the block; rows 0x800.. remembered by the hash of the copied old table,
 //      a write taking the newest request with its hash: weapon_records_logic.h PickSave);
 //      into it (rows 0..0x7FF read back from it): the three record restores (0x70B23A, 0x70B421, 0x70B956; rows
-//      0x800.. from what that record remembered), the new game's template (0xDB96D; rows 0x800.. zero) and the load
-//      job's final copy of a decoded file (0x7C1AD1, on the save thread; rows 0x800.. from the sidecar);
+//      0x800.. from what that record remembered), the new game's template (0xDB96D; rows 0x800.. zero) and a load's
+//      completion (0x7BE970's tail jump 0x7BE99D: memcpy(request's destination, the load job's buffer, its size);
+//      rows 0x800.. from the sidecar of the file the job read: the job's own copy 0x7C1AD1 into that buffer, on the
+//      save thread, remembers buffer and path; weapon_records_logic.h kResultJump);
 //      the weapon select screen's snapshot (0x8B49B1): its two reads of the snapshot's table (0x8B4F70, 0x8B51A0, both
 //      reached only after that copy in the same call) are redirected to a copy of the relocated table made there.
 //    The one such copy left as it is: the screen's write-back 0x8BD7FE (the whole block from its snapshot): it touches
@@ -68,6 +70,13 @@ alignas(16) unsigned char uiTable[kTableBytes];
 struct Kept { const void* record=nullptr; std::uint64_t hash=0; std::vector<std::uint8_t> ext; };
 constexpr std::size_t kMostRecords=16,kMostSaves=8;
 std::vector<Kept> records,saves;
+
+// A load job's result buffer with the file it read (LoadCopyHook, save thread), for the completion's copy into the
+// block (ResultCopyHook). A load that failed never comes back: the oldest goes when the list is full.
+struct Loaded { const void* buffer=nullptr; wchar_t path[MAX_PATH]{}; };
+constexpr std::size_t kMostLoads=8;
+Loaded loads[kMostLoads];
+std::size_t loadCount=0;   // under the lock
 
 using CopyFn=void*(__cdecl*)(void*,const void*,std::size_t);
 using BlockInitFn=void*(__fastcall*)(unsigned char*);
@@ -260,15 +269,52 @@ void* __cdecl NewGameCopyHook(void* dst,const void* src,std::size_t n) {
     }
     return dst;
 }
+// The load job's copy of a decoded file into its own result buffer (0x7C1AD1, save thread; never the block): a file
+// of the block's size is remembered with the path the job's read opened (ReadOpenHook, this thread).
 void* __cdecl LoadCopyHook(void* dst,const void* src,std::size_t n) {
+    std::memcpy(dst,src,n);
+    if(!active.load(std::memory_order_acquire) || n!=kBlockSize)return dst;
+    Locked l;
+    const void* buffers[kMostLoads];
+    for(std::size_t i=0;i<loadCount;++i)buffers[i]=loads[i].buffer;
+    std::size_t at=PickLoad(buffers,loadCount,dst);   // the buffer's address used again: that entry is stale
+    if(at==loadCount && loadCount==kMostLoads)at=0;      // full: the oldest goes
+    if(at<loadCount) {
+        for(std::size_t i=at+1;i<loadCount;++i)loads[i-1]=loads[i];
+        --loadCount;
+    }
+    Loaded& e=loads[loadCount++];
+    e.buffer=dst;
+    Remember(e.path,readPath);
+    return dst;
+}
+// A load's completion copies the job's buffer into the request's destination (0x7BE970, tail jump 0x7BE99D). Into the
+// game status's block: rows 0..0x7FF come with it (read back from the old table), rows 0x800.. from the sidecar of the
+// file that buffer was read from.
+void* __cdecl ResultCopyHook(void* dst,const void* src,std::size_t n) {
     std::memcpy(dst,src,n);
     unsigned char* const gs=Gs();
     if(!active.load(std::memory_order_acquire) || !LiveBlock(dst,n))return dst;
     ReadFromBlock(gs);
-    if(IsMainSave(readPath)){Locked l;ReadSidecar(readPath,Ext(gs));}
+    Locked l;
+    const void* buffers[kMostLoads];
+    for(std::size_t i=0;i<loadCount;++i)buffers[i]=loads[i].buffer;
+    const std::size_t at=PickLoad(buffers,loadCount,src);
+    if(at==loadCount) {   // never silent, never another save's rows: none until a load this session saw read
+        std::memset(Ext(gs),0,kExtBytes);
+        held=true;
+        Log("WEAPONREC a load filled the save block from a buffer no load job of this session filled: rows past 0x800 "
+            "cleared; no save writes the sidecar until the next load");
+        return dst;
+    }
+    wchar_t path[MAX_PATH];
+    std::memcpy(path,loads[at].path,sizeof(path));
+    for(std::size_t i=at+1;i<loadCount;++i)loads[i-1]=loads[i];
+    --loadCount;
+    if(IsMainSave(path))ReadSidecar(path,Ext(gs));
     else {
         std::memset(Ext(gs),0,kExtBytes);
-        Log("WEAPONREC a load filled the save block from \"%ls\", not a MAIN.GST: rows past 0x800 cleared",readPath);
+        Log("WEAPONREC a load filled the save block from \"%ls\", not a MAIN.GST: rows past 0x800 cleared",path);
     }
     return dst;
 }
@@ -429,6 +475,7 @@ bool InstallWeaponRecords() noexcept {
     for(unsigned site:kInCalls)hooks=Redirect(site,kMemcpy,reinterpret_cast<void*>(&InCopyHook)) && hooks;
     hooks=Redirect(kNewGameCall,kMemcpy,reinterpret_cast<void*>(&NewGameCopyHook)) && hooks;
     hooks=Redirect(kLoadCopyCall,kMemcpy,reinterpret_cast<void*>(&LoadCopyHook)) && hooks;
+    hooks=Redirect(kResultJump,kMemcpy,reinterpret_cast<void*>(&ResultCopyHook)) && hooks;   // a tail jump (E9)
     hooks=Redirect(kUiSnapCall,kMemcpy,reinterpret_cast<void*>(&UiSnapHook)) && hooks;
     hooks=Redirect(kBlockInitCall,kBlockInit,reinterpret_cast<void*>(&BlockInitHook)) && hooks;
     hooks=Redirect(kSaveCall,kSave,reinterpret_cast<void*>(&SaveHook)) && hooks;
@@ -492,7 +539,7 @@ bool InstallWeaponRecords() noexcept {
     active.store(true,std::memory_order_release);
     Log("WEAPONREC installed: %zu constants relocated (records at GS+0x%zX, %u of them, object 0x%zX bytes), %zu block copies, "
         "the save files' calls, the weapon select screen; sidecar MAIN.GST%ls",kSiteCount,kNewTable,kSlots,kNewObjectSize,
-        std::size(kOutCalls)+std::size(kInCalls)+4,kSidecarSuffix);
+        std::size(kOutCalls)+std::size(kInCalls)+5,kSidecarSuffix);
     return true;
 }
 }  // namespace crew
