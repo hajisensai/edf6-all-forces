@@ -46,11 +46,8 @@ Jet jets[kMaxJets]{};
 namespace {
 constexpr std::size_t kInLateral=0x1540,kInThrottle=0x1544,kInForward=0x1548,kInW=0x154C,kInYaw=0x1550;
 constexpr float kThrownHover=12.0f;    // m a thrown charge drone hovers over where its bomb landed, waiting (Rotor)
-// Withdrawing it climbs toward the ceiling and flies away from the player at full speed; it is deleted
-// only out there (never in front of the player): kGone from the player, or, held in by the map's edge,
-// kGoneStuck after kStuckMs of withdrawing.
-constexpr float kWithdrawHp=0.25f,kGone=1600.0f,kGoneStuck=900.0f,kWithdrawClimb=300.0f;
-constexpr ULONGLONG kStuckMs=60000;
+// Below this share of its HP it withdraws (Leave; the way out and the delete: jet_flight.cpp Away).
+constexpr float kWithdrawHp=0.25f;
 constexpr float kFerryAlt=150.0f;   // m over its point a ferry (the paratroop plane) flies: the stick under canopies ~25 s
 // The map's edge (docs/map-edge-re.md): the heli input (slot 55, 0x6543A0) clamps the body into the
 // mission's move area shrunk by veh+kAreaInset (0x5A9E50) and teleports it back, every frame, so a jet at
@@ -148,26 +145,6 @@ void Leave(Jet& j,const Kind& kind,const Arms& arms,Jet* mother,float hp,float h
         why=nullptr;
     }
     if(why)Withdraw(j,why,ms);
-}
-
-// Withdrawing: climbing toward the ceiling, away from `viewer` (a bomber along its run), at full speed; deleted
-// out of sight (see kGone).
-void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float* viewer,bool walled,ULONGLONG ms,float* want,
-          float* speed) noexcept {
-    const bool bomber=j.bay.bombSpeed>0.0f;
-    float away[3]={pos[0]-viewer[0],0,pos[2]-viewer[2]};
-    if(bomber)std::memcpy(away,j.bay.bombDir,12);
-    if(!Normalize(away)){away[0]=nose[0];away[2]=nose[2];}
-    const float top=CeilingY()-kCeilingGap*2.0f,climb=viewer[1]+kWithdrawClimb;
-    Level(pos,away,climb<top ? climb : top,want);
-    *speed=bomber && j.bay.bombSpeed>kind.attack ? j.bay.bombSpeed : kind.attack;
-    const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
-    const float gone=Len(d),turn=Len(j.m.vel)*Len(j.m.vel)/(kind.maxG*kG);
-    const bool edge=walled || NearWall(j,pos,turn*1.5f,ms);
-    if(gone>kGone || (gone>kGoneStuck && (edge || ms-j.modeAt>kStuckMs))) {
-        if(!j.reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",j.Vehicle(),gone);
-        j.reap=true;
-    }
 }
 
 // What it does with no target of its own to attack, or with a weapon that does not fly at targets: it circles.

@@ -10,6 +10,7 @@
 //   jet_obstacle_sim --scenario a|b|b2|c|c2|d|d0 [--kind strike|fighter] [--seconds N] [--out DIR] [--tag NAME]
 //   jet_obstacle_sim --selftest [--out DIR]
 //   jet_obstacle_sim --edge-suite   (the soft edge's cases, EdgeSuite: exit 1 when one fails; edge_suite.log here)
+//   jet_obstacle_sim --withdraw-suite (withdrawing jets leave the map and are reaped: WithdrawSuite; withdraw_suite.log here)
 //   jet_obstacle_sim --player-rotor-suite (real Hover: player/hail goals in the NPC band remain reachable)
 //   jet_obstacle_sim --ground-settle-suite (real HoldOffGround: a craft standing on the ground is not thrown up)
 //
@@ -930,6 +931,84 @@ int EdgeSuite() {
     if(logFile)std::fclose(logFile);
     return fails ? 1 : 0;
 }
+
+// --withdraw-suite (CTest jet_withdraw_suite): a withdrawing NPC jet (the user, 2026-10-26: 「空中支援不会退场」) flown by the
+// production Away (its way out and its reap) through Wing (a wing) or Hover (a rotor, its goal as jet.cpp Rotor puts it:
+// kHoverLeave on along Away's want), the player (`viewer`) on the ground in the middle of the map or off it, on a stock
+// map's ground (+-1500 / +-2000 m) and on the physics square. Each must be reaped (deleted out of sight: kWithdrawNear past
+// its soft edge, or kWithdrawFar) within its time. Held in by its soft edge, a wing turned back at the soft line +-750 m
+// from a player in the middle of a +-1500 m ground and never got kWithdrawNear from them: it flew round under RTB
+// (before jet_internal.h SoftEdgeHolds: 11 of these cases never reaped in 120 s / 400 s).
+int WithdrawSuite() {
+    static std::vector<unsigned char> fakeImage(0x20B2998+0x100,0);
+    image=fakeImage.data();
+    Put<unsigned char*>(image,0x20B2998,fakeArea);
+    Put<float>(fakeArea,0x3C,1200.0f);
+    config=Config{};config.debug=true;
+    logFile=std::fopen("withdraw_suite.log","w");
+    boxes.clear();
+    int cases=0,fails=0;
+    for(const float ground:{1500.0f,2000.0f,0.0f})
+        for(const Role role:{Role::strike,Role::fighter,Role::interceptor,Role::multirole,Role::gunship,Role::carrier})
+            for(const float viewerX:{0.0f,500.0f})
+                for(const float headDeg:{0.0f,90.0f,180.0f}) {
+                    groundHalf=ground;
+                    ResetWalls();
+                    const Kind& kind=KindOf(role);
+                    const bool rotor=kind.flight==FlightModel::rotor;
+                    std::vector<unsigned char> mem(kBodySize,0),ctrl(kCtrlSize,0);
+                    unsigned char* v=mem.data();
+                    Jet& j=jets[0];
+                    nowMs=1000;
+                    const float viewer[3]={viewerX,0.0f,0.0f};
+                    // Over the player's side of them, heading off across (90), away (0) or back over them (180).
+                    const float at[3]={viewerX+200.0f,rotor ? 150.0f : 400.0f,0.0f};
+                    const float rad=headDeg*kPi/180.0f;
+                    const float dir[3]={std::cos(rad),0.0f,std::sin(rad)};
+                    const float s0=rotor ? 0.0f : std::fmin(kind.attack,TightSpeed(kind,airbound::HalfOf(PlayBox())))*0.8f;
+                    Place(j,v,ctrl.data(),role,at,dir,s0,0.0f);
+                    Withdraw(j,"withdraw suite",nowMs);
+                    // Straight off the map: a wing is out of sight within some 15 s, the carrier (25 m/s) within 30 s. Held
+                    // in, the ones that did get there wandered up to 113 s first.
+                    const float seconds=rotor ? 60.0f : 40.0f;
+                    const int frames=static_cast<int>(seconds*60.0f);
+                    float most=0.0f,reapAt=-1.0f,reapGone=0.0f;
+                    for(int f=0;f<frames && reapAt<0.0f;++f) {
+                        nowMs+=16+(f%3==0 ? 1 : 0);
+                        const float* pos=reinterpret_cast<const float*>(v+kPosition);
+                        const float* m=reinterpret_cast<const float*>(v+kMatrix);
+                        float nose[3]={m[8],m[9],m[10]};
+                        if(!Normalize(nose)){nose[0]=0;nose[1]=0;nose[2]=1;}
+                        j.seen=nowMs;
+                        const bool walled=Sense(j,pos,nowMs);
+                        const float clear=GroundClearance(pos);
+                        float want[3]={nose[0],0.0f,nose[2]},speed=kind.cruise;
+                        Away(j,kind,pos,nose,viewer,walled,nowMs,want,&speed);
+                        if(rotor) {
+                            float goal[3];
+                            for(int i=0;i<3;++i)goal[i]=pos[i]+want[i]*kHoverLeave;
+                            Hover(j,kind,v,pos,goal,goal,kind.cruise,kHoverClimb,kDt);
+                        } else Wing(j,kind,v,pos,clear,nose,want,speed,kDt,nowMs);
+                        HoldOffGround(j,pos,clear,kDt,nowMs);
+                        j.m.ready=true;
+                        Move(j,v);
+                        const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
+                        const float gone=Len(d);
+                        if(gone>most)most=gone;
+                        if(j.reap){reapAt=static_cast<float>(f)/60.0f;reapGone=gone;}
+                    }
+                    const bool ok=reapAt>=0.0f && reapGone>kWithdrawNear;
+                    fails+=!ok;++cases;
+                    std::printf("%-11s ground %4.0f (soft x %5.0f..%5.0f) player x %4.0f head %3.0f | farthest %6.0f m | %s\n",kind.name,
+                                ground,JetSoftBox(j).lo[0],JetSoftBox(j).hi[0],viewerX,headDeg,most,
+                                ok ? "reaped" : "NOT REAPED: FAIL");
+                    if(ok)std::printf("%-11s   reaped at %.1f s, %.0f m from the player\n","",reapAt,reapGone);
+                }
+    std::printf("withdraw suite: %d cases, %d failed\n",cases,fails);
+    if(logFile)std::fclose(logFile);
+    groundHalf=0.0f;
+    return fails ? 1 : 0;
+}
 }  // namespace
 
 // --strike-room-suite (CTest jet_strike_room): ground attack runs on a stock-size map (walls +-1600 m: the ground
@@ -1036,6 +1115,7 @@ int main(int argc,char** argv) {
     float seconds=0.0f;
     bool selftest=false,playerRotors=false,strikeRoom=false;
     for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--edge-suite"))return EdgeSuite();
+    for(int a=1;a<argc;++a)if(!std::strcmp(argv[a],"--withdraw-suite"))return WithdrawSuite();
     for(int a=1;a<argc;++a) {
         if(!std::strcmp(argv[a],"--scenario") && a+1<argc)scenario=argv[++a];
         else if(!std::strcmp(argv[a],"--kind") && a+1<argc)kindName=argv[++a];

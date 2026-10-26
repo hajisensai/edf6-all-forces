@@ -616,6 +616,20 @@ inline bool Entering(const Jet& j,ULONGLONG ms) noexcept { return j.launched && 
 // --- jet_flight.cpp ---
 void SetMode(Jet& j,Mode m,ULONGLONG ms) noexcept;
 void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept;
+// Withdrawing it climbs kWithdrawClimb over `viewer` and flies away from them (a bomber on along its run) at full speed,
+// off the map, and is deleted only out there (never in front of the player): kWithdrawFar from them, or kWithdrawNear once past
+// its soft edge (or held by a wall, or after kWithdrawStuckMs of withdrawing).
+constexpr float kWithdrawFar=1600.0f,kWithdrawNear=900.0f,kWithdrawClimb=300.0f;
+constexpr ULONGLONG kWithdrawStuckMs=60000;
+// The soft edge (airbound.h: SoftEdge for a wing, Hover's goal for a rotor) holds every NPC jet in but one withdrawing:
+// that one leaves the map (the user, 2026-10-26: 「空中支援不会退场」). Held in, a withdrawal never got kWithdrawNear from a
+// player in the middle of a map whose soft box is under ~900 m a side of them (a stock map's ground ~1500 m: soft +-750
+// m), and flew round inside it under RTB for the rest of the mission.
+inline bool SoftEdgeHolds(const Jet& j) noexcept { return j.mode!=Mode::withdraw; }
+// Withdrawing: its guidance (`want`, `speed`) away from `viewer`, and its reap once out of sight (see kWithdrawFar). `walled`:
+// Sense found it held by a wall this frame.
+void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float* viewer,bool walled,ULONGLONG ms,float* want,
+          float* speed) noexcept;
 // Clearance / Ceiling / the body part / the attitude command are the 506 body's shared tools (body506.h:
 // GroundClearance, CeilingY, FixBodyPart506, BodyAttitude), the same for the carrier and the player jets.
 void Toward(const float* pos,const float* goal,float* out) noexcept;

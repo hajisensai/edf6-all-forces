@@ -31,7 +31,7 @@
 ## 构建
 
 - `build.cmd`：经 `tools\msvc-x64-env.cmd` 找到 VS x64 工具链（含 VS 自带 CMake / Ninja），再 `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo` + `cmake --build build`。
-- C++17、`/W4 /WX /utf-8 /permissive-`、静态 CRT：**警告即错误**。
+- C++17、`/W4 /WX /utf-8 /permissive-`：**警告即错误**。游戏插件 DLL 与 `edf6cmpl` 静态 CRT；测试 / 工具 exe 由 `cmake/toolcrt.cmake` 改为动态 CRT（链接 `edf6common_dyn`，避开杀软误报），新 exe 不用手动处理。
 - Windows 头里 `far` / `near` 是空宏，变量和参数别用这两个名字。
 - 改了 `tools/calls.py` 必须跑 `python tools/gen_calls.py`，把 `src/calls.inc` 一起提交；`gen_stores.py` / `gen_nozzles.py` 同理，CI 会用 `--check` 校验生成文件是否最新。
 
