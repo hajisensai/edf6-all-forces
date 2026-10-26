@@ -253,7 +253,7 @@ script ended   = 上一帧 scripted、这一帧不是（判据 A 的「路线清
 
 - 纯逻辑 `src/formation.h`（离线 `tools/formation_check.cpp`）：形状（`Shape`）、每人槽位（`Offset`：编队锚点右 x、前 z 米）、世界坐标（`World`，右 = 游戏相机的水平右 (-f.z, f.x)）、行进朝向（`Track`：锚点走过 2 米才更新）、交替掩护（`Step`：两半轮流，到位或 `kBoundMost` 8 秒交换）；旧 `GiveUp` 工具保留兼容测试，运行时已由下面的地面路径规划替代。
 - 接入 `npcai.cpp` `Drive`：在躲避、上车、后撤、躲枪线之后，**没有目标时**走 `FormationMove`；有目标时照旧去交战位置。
-- **行进**（`NpcFormation`，步行键 `NpcFormationKey` T / 地图 T）：本机玩家招募的、没有地图指令的小队合成一份名单（`MarchRoster`：按小队表顺序、每队 `Members` 广度优先，只要步行的），玩家是锚点；名单每帧重建，阵亡后后面的人补位；士兵间距 `NpcFormationSpacing`（2~30 米，默认 5）。
+- **行进**（`NpcFormation`，步行键 `NpcFormationCycleKey` U（2026-10-26 前是 `NpcFormationKey` T） / 地图 T）：本机玩家招募的、没有地图指令的小队合成一份名单（`MarchRoster`：按小队表顺序、每队 `Members` 广度优先，只要步行的），玩家是锚点；名单每帧重建，阵亡后后面的人补位；士兵间距 `NpcFormationSpacing`（2~30 米，默认 5）。
 - **防御**（`NpcGuardFormation`，地图里选中警戒中的小队按 T）：每个警戒小队自己一份（`Members`），锚点 = 警戒点，朝向 = 下令时玩家→ 警戒点（`SquadCommand` 记在 `Squad::guardFwd`）。
 - 地图 T：选中的小队里警戒中的各自循环防御方案（`CycleGuardFormation`），其余（跟随玩家的）只循环一次行进编队（`CycleMarchFormation`），离线 `map_command_runtime_check` `FormationKey`。
 - 地面寻路：`src/ground_navigation.h` 的增量 A* + `ground_navigation.cpp` 的实际 `MapFloorRay` / `MapRay` 查询，统一接入 `MoveTo`（编队、驻守、交战位置、拾箱、登车）。只改输入方向，不瞬移，不写位置。脚底每 0.5 米沿连接地面采样，左右身体宽度和中心检查支撑、竖直净空及足/腰/头轨迹；单步落差不超过 0.55 米，不能通过同 XZ 的上下层切换楼层。

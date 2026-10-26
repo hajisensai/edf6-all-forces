@@ -141,7 +141,7 @@ struct Config {
     // its default) and the chest cannon (held: charged, let go: fired; E; a pad's B)
     int sazabiFunnelKey=0x52;
     int sazabiFunnelButton=0x10;
-    int sazabiCannonKey=0x45;
+    int sazabiCannonKey=0x58;       // X (ini SazabiMegaCannonKey; E was the stock get-off key: plan §3.3)
     int sazabiCannonButton=0x02;
     int sazabiMeleeKey=0x56;        // the beam tomahawk swung (V; a pad's X)
     int sazabiMeleeButton=0x04;
@@ -192,7 +192,8 @@ struct Config {
     bool playerJetLockByView=true;  // ...its locks (and the target key's next one) go to the target nearest the screen's centre, not the nose
     bool turretAimHud=true;         // EDF6AutoTurret's turrets the player is at: its lock box and lead circle (hud.cpp TurretAimMarks)
     int playerJetGearKey=0x47;      // the key that raises / lowers the landing gear ('G'; gear.cpp PlayerGear)
-    int playerJetGearButton=0x40;   // ...and the pad button (the seat's button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
+    int playerJetGearPad=0x0002;    // ...and on a pad: these XInput buttons held kGearPadHoldSec (0x0002 the d-pad down; L3 is
+                                    // the free look; plan-2026-10-25-keybinds.md §3.3 D; 0 none)
     bool playerJetAll=true;         // the player can board every other aircraft of the plugin too (playerjet_kinds.h)
     int playerJetHailKey=0x48;      // ...and this key calls the nearest one down to them ('H'; 0: off)
     bool gunshipBoardGunner=false;  // the gunship's board button takes its gunner seat (off: its pilot seat; playerjet_crew.inc)
@@ -349,7 +350,8 @@ struct Config {
                                     // which), not only a moment after boarding / a move; with SeatSwitch off and online too
     // proteus.cpp: the Proteus rework (README 普罗透斯, docs/proteus-re.md), while a local player rides one.
     bool proteus=true;              // two stances (walk / deployed), two seats, the stock barrier as its shield, the field; off: the stock Proteus
-    int proteusModeKey=0x54;        // ...the driver's stance key ('T'; a Windows virtual-key code, 0: none)
+    int proteusModeKey=0x47;        // ...the driver's stance key ('G', the 形态 family with the landing gear: plan §3.3 A; ini
+                                    // ProteusStanceKey; a Windows virtual-key code, 0: none)
     int proteusModeButton=0x20;     // ...and pad button (the seat's button bits, docs/stores-re.md §4: 0x20 RB; 0 none)
     int proteusShieldKey=0x42;      // ...the shield's switch ('B')
     int proteusShieldButton=0x10;   // ...(0x10 LB)
@@ -466,7 +468,8 @@ struct Config {
     float qmarkVolume=0.8f;         // the Q mark's cues (marked / a teammate marked / let go), 0: silent
     bool vanillaSpot=false;         // the stock spot (原版 Q, SpotEffect): false = the local players' is not cast (turretaim.cpp)
     int npcFormation=0;             // the recruited squads' march round the player (formation.h Shape: 0 stock, 1 column...)
-    int npcFormationKey=0x54;       // ...on foot: cycles it ('T'; 0: off; the map's T on a selected squad too)
+    int npcFormationKey=0x55;       // ...on foot: cycles it ('U', ini NpcFormationCycleKey: T is the stock Shotcut, plan §3.3; 0: off;
+                                    // the map's T on a selected squad too)
     float npcFormationSpacing=5.0f; // ...m between soldiers
     int npcGuardFormation=0;        // a guard order's defence (0 stock radius, 10 perimeter, 5 line, 3 wedge)
     int npcPickupKey=0x59;          // on foot: the recruited squads spread out and fetch the item boxes ('Y'; 0: off)
@@ -901,6 +904,9 @@ bool IsSazabi(const void* vehicle) noexcept;
 // dreadnought.cpp: the Dreadnought (docs/dreadnought-plan.md), a 506 body with its mark (7601-7699): never crewed, never
 // flown as a heli; with the player in seat 0 the plugin flies it, empty after that it settles on the ground.
 bool IsDreadnought(const void* vehicle) noexcept;
+// `human` at a Dreadnought's bridge on the keyboard, and `vk` one of its strafe keys (dreadnought.cpp): the bridge holds the
+// key, the Q mark yields to it (npcai.cpp; plan-2026-10-25-keybinds.md §3.3 B).
+bool DreadnoughtBridgeClaims(const unsigned char* human,int vk) noexcept;
 void BoardingRequest(unsigned char* vehicle) noexcept;   // boarding.cpp: the player into it (the boarding gun's path)
 bool BoardingUnderway() noexcept;                        // boarding.cpp: a boarding is still pressing the button
 // The local player's Sazabi as the HUD shows it (sazabi.cpp publishes it each frame on the game thread; hud.cpp reads it,
@@ -1202,6 +1208,13 @@ bool JetHud(const void* vehicle,JetHudInfo* out) noexcept;
 // playerjet.cpp: jets the player flies (docs/player-jet-re.md), 506 bodies with a player-jet mark (7201-7202).
 // The plugin never crews them; with the player in seat 0 it flies them as fixed-wing planes.
 bool IsPlayerJet(const void* vehicle) noexcept;
+// One of the plugin's rotor craft the player may fly (playerjet_kinds.h Airframe::rotor): its L3 is the descend, so no pad
+// free look there (vehicle_look.cpp; plan-2026-10-25-keybinds.md §3.3 D).
+bool PlayerRotorCraft(const void* vehicle) noexcept;
+// The local player `human` at the stick of one of the plugin's aircraft (playerjet.cpp): true, `object` the target its
+// picked store has locked (nullptr: none), `at` its lock point. The Q mark there marks that and nothing else (npcai.cpp;
+// plan §3.3 C).
+bool PlayerJetMarkTarget(const unsigned char* human,const void** object,float* at) noexcept;
 // Any other aircraft of the plugin (playerjet_kinds.h) is the player's too: they may board it now (one of ours, low and
 // slow enough: crew.cpp bumps its NPC pilot for them); the plugin holds it for them (they fly it, it comes down for
 // them, catches them or waits where they left it): jet.cpp does not fly it then, crew.cpp does not crew it.

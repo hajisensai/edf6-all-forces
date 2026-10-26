@@ -23,6 +23,7 @@
 // entry line it used to draw sat in HUiMainFrame's guide band, over EDF6Coop's label): the entry is the native button.
 // Nothing is patched unless every address checks out (REFUSED in the log: both screens as they are). The slots are read
 // and chained, never assumed stock: EDF6Coop chains the room's too.
+#include "keyconfig.h"
 #include "room_ui.h"
 #include "room_dialog.h"
 #include "room_dialog_logic.h"
@@ -826,6 +827,7 @@ std::uint64_t Frame(Screen& screen,unsigned char* self,void* ctx) noexcept {
     PvpRoomTick();       // capability advertisement only; native team changes stay on the game-thread PvpFrame
     RoomPvpTick();       // this member's faction pick, the host's settings and start lock (room_pvp.cpp)
     Outfit41RoomTick();   // the EDF4.1 outfit told to the room whatever the menu's switches (outfit41.cpp)
+    KeyConfigTick();      // the keys seeded into / read from the game's key store (keyconfig.cpp)
     HostSettingsRoomTick();   // this machine's word to the room, the host's settings and the room's builds (host_settings.h)
     Edf5OnlineRoomTick(); // this machine's word that it creates every player of an EDF5/4.1 mission (edf5online_room.cpp)
     const bool on=Cfg().enabled && Cfg().roomLoadout;

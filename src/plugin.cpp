@@ -55,6 +55,8 @@
 #include "build_id.h"
 #include "pack_notice.h"
 #include "profile_sigs.h"
+#include "keyconfig.h"
+#include "pad_hold.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -255,7 +257,7 @@ void Validate(Config& n) noexcept {
     n.gunshipGatlingKey=static_cast<int>(FixInt("GunshipGatlingKey",n.gunshipGatlingKey,0,254));
     n.playerJetFlares=static_cast<int>(FixInt("PlayerJetFlares",n.playerJetFlares,0,99));
     n.playerJetGearKey=static_cast<int>(FixInt("PlayerJetGearKey",n.playerJetGearKey,0,254));
-    n.playerJetGearButton=static_cast<int>(FixInt("PlayerJetGearButton",n.playerJetGearButton,0,255));
+    n.playerJetGearPad=static_cast<int>(FixInt("PlayerJetGearPadButton",n.playerJetGearPad,0,0xFFFF));
     n.playerJetChuteCutKey=static_cast<int>(FixInt("PlayerJetChuteCutKey",n.playerJetChuteCutKey,0,254));
     Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
     Fix("SazabiWalk",n.sazabiWalk,1.0f,60.0f);
@@ -277,7 +279,7 @@ void Validate(Config& n) noexcept {
     n.sazabiDescendKey=static_cast<int>(FixInt("SazabiDescendKey",n.sazabiDescendKey,0,254));
     n.sazabiFunnelKey=static_cast<int>(FixInt("SazabiFunnelKey",n.sazabiFunnelKey,0,254));
     n.sazabiFunnelButton=static_cast<int>(FixInt("SazabiFunnelButton",n.sazabiFunnelButton,0,255));
-    n.sazabiCannonKey=static_cast<int>(FixInt("SazabiCannonKey",n.sazabiCannonKey,0,254));
+    n.sazabiCannonKey=static_cast<int>(FixInt("SazabiMegaCannonKey",n.sazabiCannonKey,0,254));
     n.sazabiCannonButton=static_cast<int>(FixInt("SazabiCannonButton",n.sazabiCannonButton,0,255));
     n.sazabiMeleeKey=static_cast<int>(FixInt("SazabiMeleeKey",n.sazabiMeleeKey,0,254));
     n.sazabiMeleeButton=static_cast<int>(FixInt("SazabiMeleeButton",n.sazabiMeleeButton,0,255));
@@ -394,7 +396,7 @@ void Validate(Config& n) noexcept {
     Fix("DebugSpawnDistance",n.debugSpawnDistance,10.0f,500.0f);
     n.roomLoadoutKey=static_cast<int>(FixInt("RoomLoadoutKey",n.roomLoadoutKey,0,254));
     n.roomLoadoutButton=static_cast<int>(FixInt("RoomLoadoutButton",n.roomLoadoutButton,0,0xFFFF));
-    n.proteusModeKey=static_cast<int>(FixInt("ProteusModeKey",n.proteusModeKey,0,254));
+    n.proteusModeKey=static_cast<int>(FixInt("ProteusStanceKey",n.proteusModeKey,0,254));
     n.proteusModeButton=static_cast<int>(FixInt("ProteusModeButton",n.proteusModeButton,0,255));
     n.proteusShieldKey=static_cast<int>(FixInt("ProteusShieldKey",n.proteusShieldKey,0,254));
     n.proteusShieldButton=static_cast<int>(FixInt("ProteusShieldButton",n.proteusShieldButton,0,255));
@@ -448,7 +450,7 @@ void Validate(Config& n) noexcept {
     Fix("QMarkPointSec",n.qmarkPointSec,1.0f,600.0f);
     Fix("QMarkVolume",n.qmarkVolume,0.0f,2.0f);
     n.npcFormation=static_cast<int>(FixInt("NpcFormation",n.npcFormation,0,10));
-    n.npcFormationKey=static_cast<int>(FixInt("NpcFormationKey",n.npcFormationKey,0,254));
+    n.npcFormationKey=static_cast<int>(FixInt("NpcFormationCycleKey",n.npcFormationKey,0,254));
     Fix("NpcFormationSpacing",n.npcFormationSpacing,2.0f,30.0f);
     n.npcGuardFormation=static_cast<int>(FixInt("NpcGuardFormation",n.npcGuardFormation,0,10));
     n.npcPickupKey=static_cast<int>(FixInt("NpcPickupKey",n.npcPickupKey,0,254));
@@ -472,7 +474,11 @@ void IgnoreRetired() noexcept {
     static const Retired kRetired[]={{L"HeliMoveGain",kGainsFixed},{L"HeliBrakeGain",kGainsFixed},{L"HeliClimbGain",kGainsFixed},
                                      {L"HeliHoverLearn",kGainsFixed},{L"HeliMousePitch","superseded by HeliMouseAim"},
                                      {L"DrillHeatSec","superseded by DrillOverheatSec (30 s by default: 12 s overheated too soon)"},
-                                     {L"FirstPersonEyeEase","superseded by FirstPersonViewHeightEase (the eye no longer follows the head's sway)"}};
+                                     {L"FirstPersonEyeEase","superseded by FirstPersonViewHeightEase (the eye no longer follows the head's sway)"},
+                                     {L"ProteusModeKey","superseded by ProteusStanceKey (G by default since 2026-10-26: the 形态 family with the landing gear)"},
+                                     {L"NpcFormationKey","superseded by NpcFormationCycleKey (U by default since 2026-10-26: T is the stock Shotcut)"},
+                                     {L"SazabiCannonKey","superseded by SazabiMegaCannonKey (X by default since 2026-10-26: E is the stock get-off)"},
+                                     {L"PlayerJetGearButton","superseded by PlayerJetGearPadButton (the d-pad down held, since 2026-10-26: L3 is the free look)"}};
     constexpr int kCount=static_cast<int>(sizeof(kRetired)/sizeof(kRetired[0]));
     static bool said[kCount]{};
     for(int i=0;i<kCount;++i) {
@@ -577,7 +583,7 @@ void LoadConfig() noexcept {
     n.gunshipGatlingKey=ReadInt(L"GunshipGatlingKey",static_cast<DWORD>(n.gunshipGatlingKey));
     n.playerJetFlares=ReadInt(L"PlayerJetFlares",static_cast<DWORD>(n.playerJetFlares));
     n.playerJetGearKey=ReadInt(L"PlayerJetGearKey",static_cast<DWORD>(n.playerJetGearKey));
-    n.playerJetGearButton=ReadInt(L"PlayerJetGearButton",static_cast<DWORD>(n.playerJetGearButton));
+    n.playerJetGearPad=ReadInt(L"PlayerJetGearPadButton",static_cast<DWORD>(n.playerJetGearPad));
     n.playerJetChuteCutKey=ReadInt(L"PlayerJetChuteCutKey",static_cast<DWORD>(n.playerJetChuteCutKey));
     n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
@@ -606,7 +612,7 @@ void LoadConfig() noexcept {
     n.sazabiFunnelKey=ReadInt(L"SazabiFunnelKey",static_cast<DWORD>(ReadInt(L"SazabiSwitchKey",static_cast<DWORD>(n.sazabiFunnelKey))));
     n.sazabiFunnelButton=ReadInt(L"SazabiFunnelButton",
                                  static_cast<DWORD>(ReadInt(L"SazabiSwitchButton",static_cast<DWORD>(n.sazabiFunnelButton))));
-    n.sazabiCannonKey=ReadInt(L"SazabiCannonKey",static_cast<DWORD>(n.sazabiCannonKey));
+    n.sazabiCannonKey=ReadInt(L"SazabiMegaCannonKey",static_cast<DWORD>(n.sazabiCannonKey));
     n.sazabiCannonButton=ReadInt(L"SazabiCannonButton",static_cast<DWORD>(n.sazabiCannonButton));
     n.sazabiMeleeKey=ReadInt(L"SazabiMeleeKey",static_cast<DWORD>(n.sazabiMeleeKey));
     n.sazabiMeleeButton=ReadInt(L"SazabiMeleeButton",static_cast<DWORD>(n.sazabiMeleeButton));
@@ -838,7 +844,7 @@ void LoadConfig() noexcept {
     n.seatSwitchOnline=ReadBool(L"SeatSwitchOnline",n.seatSwitchOnline);
     n.seatList=ReadBool(L"SeatList",n.seatList);
     n.proteus=ReadBool(L"ProteusRework",n.proteus);
-    n.proteusModeKey=ReadInt(L"ProteusModeKey",static_cast<DWORD>(n.proteusModeKey));
+    n.proteusModeKey=ReadInt(L"ProteusStanceKey",static_cast<DWORD>(n.proteusModeKey));
     n.proteusModeButton=ReadInt(L"ProteusModeButton",static_cast<DWORD>(n.proteusModeButton));
     n.proteusShieldKey=ReadInt(L"ProteusShieldKey",static_cast<DWORD>(n.proteusShieldKey));
     n.proteusShieldButton=ReadInt(L"ProteusShieldButton",static_cast<DWORD>(n.proteusShieldButton));
@@ -905,7 +911,7 @@ void LoadConfig() noexcept {
     n.qmarkVolume=ReadFloat(L"QMarkVolume",n.qmarkVolume);
     n.vanillaSpot=ReadBool(L"VanillaSpot",n.vanillaSpot);
     n.npcFormation=ReadInt(L"NpcFormation",static_cast<DWORD>(n.npcFormation));
-    n.npcFormationKey=ReadInt(L"NpcFormationKey",static_cast<DWORD>(n.npcFormationKey));
+    n.npcFormationKey=ReadInt(L"NpcFormationCycleKey",static_cast<DWORD>(n.npcFormationKey));
     n.npcFormationSpacing=ReadFloat(L"NpcFormationSpacing",n.npcFormationSpacing);
     n.npcGuardFormation=ReadInt(L"NpcGuardFormation",static_cast<DWORD>(n.npcGuardFormation));
     n.npcPickupKey=ReadInt(L"NpcPickupKey",static_cast<DWORD>(n.npcPickupKey));
@@ -925,6 +931,12 @@ void LoadConfig() noexcept {
     n.tankReverseMax=ReadFloat(L"TankReverseMax",n.tankReverseMax);
     Validate(n);
     IgnoreRetired();
+    {
+        // The keys the game's key store holds (keyconfig.cpp): the ini's values were their first seed only.
+        const Config fromIni=n;
+        if(OverlayStockKeys(n,true) && StockKeysDiffer(fromIni,n))
+            Log("CONFIG keys: the game's key config's (the 「插件」 pages; the Q mark the stock 「标记」), not the ini's *Key values");
+    }
     Log("CONFIG enabled=%d debug=%d autoCrew=%d delay=%lums range=%.0f bump=%d toGunner=%d heli=%d height=%.0f follow=%.0f engage=%.0f fire=%d",
         n.enabled,n.debug,n.autoCrew,n.crewDelayMs,n.crewRange,n.bump,n.bumpToGunner,
         n.heliPilot,n.heliHeight,n.heliFollow,n.heliRange,n.heliFire);
@@ -958,7 +970,7 @@ void LoadConfig() noexcept {
     Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d lockByView=%d turretAimHud=%d; warnings audio=%d voice=%d volume=%.2f",
         n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud,n.playerJetLockByView,n.turretAimHud,n.warnAudio,n.warnVoice,
         n.warnVolume);
-    Log("CONFIG playerJet gearKey=0x%X gearButton=0x%X",n.playerJetGearKey,n.playerJetGearButton);
+    Log("CONFIG playerJet gearKey=0x%X gearPad=0x%X (XInput bits, held %.1f s)",n.playerJetGearKey,n.playerJetGearPad,kGearPadHoldSec);
     Log("CONFIG vehicleSound=%d engine=%.2f turret=%.2f reload=%.2f gun=%.2f mg=%.2f missile=%.2f",n.vehicleSound,n.vehicleEngineVolume,
         n.vehicleTurretVolume,n.vehicleReloadVolume,n.vehicleGunVolume,n.vehicleMgVolume,n.vehicleMissileVolume);
     Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X gatlingKey=0x%X",n.playerJetAll,n.playerJetHailKey,
@@ -1040,6 +1052,20 @@ void LoadConfig() noexcept {
 }
 
 }  // namespace
+
+// The published config with the key store's keys, when they differ from it (keyconfig.cpp KeyConfigTick: a key changed
+// in the game's key config, or the store just seeded / loaded). The old config is never freed (as LoadConfig).
+void RepublishStockKeys() noexcept {
+    const Config& now=Cfg();
+    Config next=now;
+    if(!OverlayStockKeys(next,false) || !StockKeysDiffer(now,next))return;
+    Config* const fresh=new(std::nothrow) Config(next);
+    if(!fresh)return;
+    published.store(fresh,std::memory_order_release);
+    Log("CONFIG keys from the game's key config: formation=0x%X map=0x%X firstPerson=0x%X seat=0x%X switch=0x%X boost=0x%X mark=0x%X",
+        next.npcFormationKey,next.mapKey,next.firstPersonKey,next.seatNextKey,next.playerJetSwitchKey,next.playerJetBoostKey,
+        next.npcMarkKey);
+}
 
 // The log: lines are copied into a memory buffer on the caller's thread (the game thread, the call picker, the draw
 // thread: one memcpy under a lock) and a writer thread of its own writes the buffer to one handle kept open every
@@ -1286,6 +1312,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallRounds();        // the stock vehicles' and helis' impact points: the rounds as the game flies them
     InstallStockGauges();   // the stock weapon gauge where our HUD lists the weapons, the fuel tanks it showed
     InstallRoomUi();        // the support loadout menu in the online room and the offline HQ (chains both OnUpdates)
+    InstallKeyConfig();     // the plugins' keys as pages of the game's own key config (keyconfig.cpp)
     Log("OUTFIT41 installed=%d",InstallOutfit41());   // the EDF4.1 outfit: the HQ popup's sixth item, the model paths
     InstallGlyphLock();     // the game's own text, wrong or missing characters (glyphs.cpp)
     InstallEdf5Campaign();  // the EDF5 campaign's mission packs owned (edf5campaign.cpp)

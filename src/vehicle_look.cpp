@@ -47,7 +47,9 @@ bool Current(const Look& s,const void* v) noexcept {
 bool Offered(const unsigned char* v,bool keys) noexcept {
     const Config& c=Cfg();
     const int binding=keys ? c.freeLookKey : c.freeLookButton;
-    return binding>0 && !(IsSazabi(v) && (keys ? binding==c.sazabiLockKey : (binding&c.sazabiLockButton)!=0));
+    constexpr int kL3=0x40;   // a rotor craft's descend on a pad (playerjet_board.inc kButtonL3): no free look on it there
+    return binding>0 && !(IsSazabi(v) && (keys ? binding==c.sazabiLockKey : (binding&c.sazabiLockButton)!=0)) &&
+           !(!keys && (binding&kL3)!=0 && PlayerRotorCraft(v));
 }
 // `turretLook`: the seat the player holds there has the turret camera's own free look (TurretCamFreeLook): this one
 // yields, takes no input and turns no camera (asked before lookLock: it reads the sight, whose Up asks VehicleLookActive).

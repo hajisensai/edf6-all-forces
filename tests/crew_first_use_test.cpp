@@ -141,6 +141,7 @@ namespace gravity { void Frame() noexcept{} namespace net { void Frame() noexcep
 void GravityGunTick() noexcept{}
 void MapCommandQueueTick() noexcept{}   // crew.cpp's SharedFrameTick advances the map's queues (mapcmd.cpp, not linked here)
 void FloatGunTick() noexcept{}
+void KeyConfigTick() noexcept{}   // crew.cpp's FrameTick follows the game's key config (keyconfig.cpp, not linked here)
 void const * BoardingOnly(void) noexcept{unexpectedHook();return {};}
 void PlayerJetFrame(unsigned char *) noexcept{unexpectedHook();return;}
 void LauncherFrame(unsigned char *) noexcept{unexpectedHook();return;}

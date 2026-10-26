@@ -434,6 +434,16 @@ void Drive(Ship& s,unsigned char* v,ULONGLONG ms) noexcept {
 
 bool IsDreadnought(const void* vehicle) noexcept { return BodyOf(vehicle)==PluginBody::dreadnought; }
 
+bool DreadnoughtBridgeClaims(const unsigned char* human,int vk) noexcept {
+    if(!vk || !installed || !Cfg().dreadnought || (vk!=Cfg().dreadnoughtStrafeLeftKey && vk!=Cfg().dreadnoughtStrafeRightKey))return false;
+    __try {
+        const auto v=At<unsigned char*>(human,0x1548);   // the vehicle it rides (crew.h kHumanVehicleCtrl - 8)
+        if(!v || !IsDreadnought(v) || SeatCount(v)==0)return false;
+        const unsigned char* seat0=SeatAt(v,0);
+        return At<const unsigned char*>(seat0,kSeatRider)==human && !Pad(seat0);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 void DreadnoughtFrame(unsigned char* v) noexcept {
     if(!installed || !Cfg().dreadnought || !IsDreadnought(v))return;
     Ship* s=Find(v);

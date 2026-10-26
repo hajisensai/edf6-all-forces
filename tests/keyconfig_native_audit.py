@@ -4,6 +4,12 @@ What the key-binding plan (docs/plan-2026-10-25-keybinds.md) builds on: the HQ k
 has 11 compiled pages with immediate row counts and compiled row labels; each page's actions come from a fixed table of
 11 x 13 action bytes (0x4E ends a page); the bindings themselves live in the input manager, one int32 per
 (player, class, action byte), 0xFF actions per class, so the actions the stock game uses (up to 0x4D) leave spare slots.
+Stage 3 (the plugin's pages 11..16 in that menu, src/keyconfig.cpp): the game codes and their virtual keys, the stock
+defaults, COMMON.CFG saving the whole store raw (the spare slots persist), the runtime binder reading no slot past 0x4E,
+src/keyconfig_signatures.inc against the DLL, and what each patched site does (the six page dispatches and their joins,
+the page table's six readers, the model's all-sets rows, the redirected calls, the top list's items); that the stock reads
+no volatile register (nor the flags) a stub changes after its join / default, the stack's alignment at the stubs' calls,
+and that every patched byte is signed.
 Missing input: 77.
 """
 from pathlib import Path
@@ -96,4 +102,359 @@ ok(wstr(rip(0x897E52, 7)) == 'OptionPlayer_KeyboardHeliAttack1' and wstr(rip(0x8
 b = ins(0x8969FB, 0xE8)
 ok(b[0x8969FB] == ('mov', 'dword ptr [rsi + 0x7b0], r15d') and b[0x896AD2] == ('mov', 'dword ptr [rsi + 0x804], 0x15'),
    'menu edit buffer this+0x7B0..0x804: 22 dwords')
+
+# ---- Stage 3 (docs/keyconfig-re.md §5..§7): the codes, the defaults, COMMON.CFG, and every site src/keyconfig.cpp patches.
+import re  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+img = p.get_memory_mapped_image()
+base = p.OPTIONAL_HEADER.ImageBase
+import keyconfig_sigs as sigs  # noqa: E402
+ok((ROOT / 'src' / 'keyconfig_signatures.inc').read_text(encoding='utf-8') == sigs.render(img),
+   'keyconfig_signatures.inc is EDF.dll\'s code (rerun tools/keyconfig_sigs.py)')
+for site, callee in sigs.CALLS:
+    ok(img[site] == 0xE8 and site + 5 + struct.unpack_from('<i', img, site + 1)[0] == callee, f'{site:#x} calls {callee:#x}')
+keybind = (ROOT / 'common' / 'edf' / 'keybind.h').read_text(encoding='utf-8')
+menu_h = (ROOT / 'src' / 'keyconfig_menu.h').read_text(encoding='utf-8')
+
+# The keyboard codes 0x12..0x78 and their virtual keys (0x11852C0), the names (0x11856F0) and keybind.h's kKeyVk.
+vks = []
+for k in range(0x67):
+    t = struct.unpack_from('<i', img, 0x118554C + 4 * k)[0]
+    a, b2 = list(m.disasm(img[t:t + 8], t))[:2]
+    assert a.mnemonic == 'mov' and a.op_str.startswith('eax, ') and b2.mnemonic == 'ret'
+    vks.append(int(a.op_str.split(', ')[1], 16))
+table_h = re.search(r'kKeyVk\[[^\]]*\]=\{(.*?)\};', keybind, re.S).group(1)
+table_h = re.sub(r'//[^\n]*', '', table_h)
+ok([int(x, 16) for x in re.findall(r'0x[0-9A-Fa-f]{2}', table_h)] == vks, 'keybind.h kKeyVk is 0x11852C0\'s 0x67 virtual keys')
+ok(ins(0x11852C0, 4)[0x11852C0] == ('cmp', 'ecx, 0x66') and ins(0x11856F0, 4)[0x11856F0] == ('cmp', 'ecx, 0x66'),
+   'keyboard codes 0x12..0x78 (index 0..0x66) in both the virtual-key and the name tables')
+names = [wstr(struct.unpack_from('<Q', img, 0x1F56050 + 8 * k)[0] - base) for k in range(0x12)]
+ok(names[0] == 'OptionPlayer_NoAssign' and names[12:18] == ['OptionPlayer_MouseL', 'OptionPlayer_MouseM', 'OptionPlayer_MouseR',
+   'OptionPlayer_MouseWheel', 'OptionPlayer_MouseSide1', 'OptionPlayer_MouseSide2'] and names[1] == 'OptionPlayer_A',
+   'codes 0 unassigned, 1..0xB the pad, 0xC..0x11 mouse L M R wheel side1 side2 (0x1F56050)')
+b = ins(0xD4290, 0x45)
+ok(b[0xD42C9] == ('lea', 'ecx, [rbx - 0x12]') and b[0xD42CC] == ('cmp', 'ecx, 0x66'),
+   'a key name: codes 0x12..0x78 by name, the rest index 0x1F56050 unchecked (keyconfig.cpp shows a bad code unassigned)')
+
+
+def writes(start):
+    out = {}
+    for i in m.disasm(img[start:start + 0x900], start):
+        mm = re.match(r'dword ptr \[r\w+ \+ (0x[0-9a-f]+)\], (0x[0-9a-f]+|\d+)$', i.op_str)
+        if i.mnemonic == 'mov' and mm:
+            d = int(mm.group(1), 16) - 0x28
+            out[(d // 0x3FC, d % 0x3FC // 4)] = int(mm.group(2), 0)
+        if i.mnemonic == 'ret':
+            break
+    return out
+
+
+# The stock keyboard defaults (0xD4530 flags 0xFFF at the store's construction 0xD3F90).
+common = writes(0xD48B0)
+ok(all(common[(s_, a)] == v for s_ in range(4) for a, v in
+       {0x16: 0x28, 0x17: 0x24, 0x18: 0x12, 0x19: 0x15, 0x1A: 0x16, 0x1B: 0x22, 0x1C: 0x25, 0x1D: 0x58, 0x1E: 0x2D, 0x1F: 0x2E,
+        0x20: 0x2F, 0x21: 0x27}.items()),
+   'common page defaults W S A D E, Spot Q, Shotcut T, Chat ControlL, 1 2 3, VoiceChat V, in sets 0..3 (0xD48B0)')
+drive = writes(0xD52F0)
+ok(all(drive[(s_, a)] == v for s_ in range(4) for a, v in {0x32: 0x28, 0x33: 0x24, 0x34: 0x63, 0x35: 0xC, 0x36: 0xD, 0x4D: 0xE}.items()),
+   'drive page defaults W S Space, mouse L, M (0x36), R (0x4D) in sets 0..3 (0xD52F0)')
+b = ins(0xD46C9, 0x38)
+ok(b[0xD46C9] == ('mov', 'dword ptr [rdi], 0xc') and b[0xD46CF] == ('mov', 'dword ptr [rdi + 8], 0x63')
+   and b[0xD46DD] == ('mov', 'dword ptr [rdi + 0x10], 0x23') and b[0xD46E4] == ('mov', 'dword ptr [rdi + 0x1c], 0x17')
+   and b[0xD46EB] == ('mov', 'dword ptr [rdi + 0x18], 0x2b') and b[0xD46F2] == ('mov', 'dword ptr [rdi + 4], 0xe')
+   and b[0xD46F9] == ('mov', 'dword ptr [rdi + 0x14], 0x56'),
+   'infantry defaults (actions 0x22..0x29): mouse L, R, Space, the wheel, R, ShiftL, Z, F (0xD46C9, rdi = set + 0xB0)')
+b = ins(0xD4821, 0x40)
+ok(b[0xD4821] == ('mov', 'dword ptr [rbx + 0x150], 0xc') and b[0xD4835] == ('mov', 'dword ptr [rbx + 0x158], 0x63'),
+   'heli defaults (0x4A..0x4C): mouse L, R, Space')
+
+# COMMON.CFG: the whole store, raw, both ways; spare slots persist.
+ok(img[0x17F1498:0x17F14A3] == b'COMMON.CFG\0' and rip(0x7C01F6, 8) == 0x17F1498, 'the save\'s file name COMMON.CFG (0x7C01F6)')
+b = ins(0x7C01D0, 0x10)
+ok(rip(0x7C01D0, 7) == 0x20B2890 and b[0x7C01D7] == ('lea', 'rdx, [rax + 0x318]'), 'the save hands the store [0x20B2890]+0x318')
+ok(ins(0x7BBD58, 6)[0x7BBD58] == ('mov', 'r9d, 0x548c') and ins(0x7BCB0D, 6)[0x7BCB0D] == ('mov', 'r9d, 0x548c'),
+   'COMMON.CFG write (0x7BBC30) and read (0x7BC9E0): 0x548C bytes, the whole store, every slot')
+ok(ins(0xDB8F8, 6)[0xDB8F8] == ('mov', 'r8d, 0x548c'), 'the reset to defaults: the whole store from a fresh one (0xDB8C0)')
+ok(re.search(r'kStoreSize=0x548C', keybind) is not None and re.search(r'kReady=0x5488', keybind) is not None,
+   'keybind.h: the store size and ready flag')
+b = ins(0xD3F90, 0x180)
+ok(b[0xD4101] == ('mov', 'dword ptr [rsi + 0x5488], 1'), 'the store built: +0x5488 = 1 (0xD3F90)')
+b = ins(0xD5470, 0x3C)
+ok(b[0xD5482] == ('mov', 'dword ptr [rcx + rax*4 + 0x28], r9d') and b[0xD548B] == ('mov', 'dword ptr [rcx + rax*4 + 0x424], r9d')
+   and b[0xD5497] == ('mov', 'dword ptr [rcx + rax*4 + 0x820], r9d') and b[0xD54A3] == ('mov', 'dword ptr [rcx + rax*4 + 0xc1c], r9d'),
+   'an all-sets row writes sets 0..3 (0xD5470)')
+
+# Who reads the store at run time: the binder 0xD43C0, each call an immediate action, none past 0x4E.
+text = [s_ for s_ in p.sections if s_.Name.startswith(b'.text')][0]
+tb = img[text.VirtualAddress:text.VirtualAddress + text.Misc_VirtualSize]
+xs = [text.VirtualAddress + mm.start() for mm in re.finditer(rb'\xE8', tb)
+      if text.VirtualAddress + mm.start() + 5 + struct.unpack_from('<i', tb, mm.start() + 1)[0] == 0xD43C0]
+acts = set()
+for c in xs:
+    for back in range(48, 4, -1):
+        seq = list(m.disasm(img[c - back:c + 5], c - back))
+        if seq and seq[-1].address == c:
+            break
+    v = None
+    for i in seq[:-1]:
+        if i.op_str.startswith(('r9d, ', 'r9b, ')):
+            v = i.op_str.split(', ')[1]
+        if i.mnemonic == 'xor' and i.op_str == 'r9d, r9d':
+            v = '0'
+    acts.add(int(v, 0) if v and v[0].isdigit() else -1)
+ok(len(xs) == 51 and -1 not in acts and max(acts) == 0x4E,
+   f'the runtime binder 0xD43C0: {len(xs)} calls, each an immediate action, the highest 0x4E (slots 0x4F.. unread)')
+
+# The six page dispatches (keyconfig_menu.h kDispatches): site, its stock bytes, back, default, join.
+disp = re.findall(r'inline constexpr Dispatch k\w+\{"([^"]+)",(0x[0-9A-F]+),(\d+),(0x[0-9A-F]+),(0x[0-9A-F]+),(0x[0-9A-F]+),(\d)\}', menu_h)
+ok(len(disp) == 6, 'keyconfig_menu.h: six dispatches')
+for name, site, size, back, default, join, reg in disp:
+    site, size, back, default = int(site, 16), int(size), int(back, 16), int(default, 16)
+    seq = list(m.disasm(img[site:site + size], site))
+    ok(len(seq) == 2 and seq[0].mnemonic == 'cmp' and seq[0].op_str.endswith(('0xa', '9')) and seq[1].mnemonic == 'ja'
+       and int(seq[1].op_str, 16) == default and site + size == back,
+       f'{name}: {seq[0].op_str}; ja {default:#x}, the jump table right after ({back:#x})')
+    t = list(m.disasm(img[back:back + 0x20], back))
+    ok(any(i.mnemonic == 'jmp' and i.op_str in ('rcx', 'rax') for i in t[:5]), f'{name}: {back:#x} is the jump table')
+j = {n: int(jo, 16) for n, _s, _z, _b, _d, jo, _r in disp}
+ok(ins(j['page row'], 9)[j['page row'] + 3] == ('mov', 'dword ptr [rsi + 0x850], ebx'), 'A: its join stores ebx as the table row')
+ok(ins(j['row count'], 5)[j['row count']] == ('mov', 'ebx, 1') and
+   ins(0x89738C, 0x17)[0x89738C] == ('mov', 'dword ptr [rsi + 0x844], 0xc'),
+   'B: its join clones the rows up to +0x844 (page 0 sets +0x844 and [rsp+0x30] then jumps there)')
+ok(ins(j['labels'], 0x20)[j['labels']] == ('mov', 'rdx, rax') and ins(0x897E77, 8)[0x897E77] == ('mov', 'dword ptr [r15 + 4], edi'),
+   'C: its join takes rax as the label, sets the ids when not null')
+ok(ins(j['texts'], 3)[j['texts']] == ('mov', 'r14, rax'), 'D: its join takes rax as the label, r12 the value (0x897FFC)')
+ok(ins(0x8980E8, 0x1F)[0x8980EF] == ('mov', 'rcx, r15'), 'D: the item is r15 ([r15] its row, 0x897B9A)')
+ok(ins(0x897B9A, 3)[0x897B9A] == ('mov', 'dword ptr [r15], r9d'), 'the item\'s row is the page\'s row r9d')
+ok(ins(j['dialog'], 5)[j['dialog']] == ('lea', 'rcx, [rsp + 0x50]') and ins(0x899267, 6)[0x899267] == ('mov', 'byte ptr [rbp + 0x80], bl'),
+   'E: from its join the dialog takes r14 label, r15 value, bl action')
+b = ins(0x898F6B, 0x50)
+ok(b[0x898FA6] == ('mov', 'r14, qword ptr [rcx + r14*8]'), 'E: r14 is the item under the cursor')
+ok(ins(j['refresh'], 3)[j['refresh']] == ('mov', 'rbx, rax'), 'F: its join takes rax as the value')
+b = ins(0x89AD17, 0x60)
+ok(b[0x89AD17] == ('mov', 'rsi, rcx') and b[0x89AD5D] == ('lea', 'rdx, [rsi + 0x798]') and b[0x89AD64] == ('mov', 'rcx, qword ptr [rdi]'),
+   'F: rsi the menu, [rdi] the item')
+
+# The page table's readers (keyconfig_menu.h kTableLeas) and the all-sets rows.
+leas = [int(x, 16) for x in re.search(r'kTableLeas\[\]=\{([^}]*)\}', menu_h).group(1).split(',')]
+ok(len(leas) == 6 and all(rip(a, 7) == 0x17F26B0 for a in leas), 'the six lea\'s of the page table 0x17F26B0')
+ok(rip(0x7CD9E0, 7) == 0x17F26B0 + 26, '0x7CD9E0: the common row alone (left on the stock table)')
+b = ins(0x7CDE10, 0x3D)
+ok(b[0x7CDE36] == ('cmp', 'r9d, 2') and b[0x7CDE3C] == ('lea', 'eax, [r9 - 5]') and b[0x7CDE40] == ('cmp', 'eax, 5')
+   and b[0x7CDE45] == ('mov', 'byte ptr [rcx + 0x10], 1') and b[0x7CDE26] == ('cmp', 'eax, 3'),
+   'the model: all sets for rows 2 and 5..10 (0x7CDE40 widened to 5..16); the class = page - 1 for pages 1..4, else 0')
+b = ins(0x7CDD4C, 0x31)
+ok(b[0x7CDD56] == ('cmp', 'byte ptr [rdi + 0x10], bpl') and b[0x7CDD63] == ('call', '0xd5470') and b[0x7CDD77] == ('call', '0xd54b0'),
+   'the assignment writes all sets (0xD5470) with the model\'s +0x10, else one (0xD54B0)')
+b = ins(0x7CD9B0, 0x30)
+ok(b[0x7CD9CA] == ('lea', 'eax, [r9 - 3]') and b[0x7CD9D7] == ('cmp', 'eax, 7'),
+   'the common-page check is rows 3..10 only: the plugin rows 11..16 are not held to it (keyconfig-re.md §7)')
+ok(ins(0xD4BB0, 0x0B)[0xD4BB3] == ('cmp', 'r8d, 0xa'), 'the stock page defaults: pages 0..10 (the plugin\'s redirected)')
+# the top list and its items
+ok(ins(0x89304A, 0x0A)[0x89304D] == ('mov', 'r12d, 6'), 'the top list: six keyboard items')
+ok(ins(0x8932A9, 0x0A)[0x8932A9] == ('mov', 'dword ptr [rbp + 0x1c8], 5') and ins(0x893325, 7)[0x893325] == ('lea', 'r9, [rbp + 0xa0]'),
+   'the top list\'s request: type 5 at +0x128, at rbp+0xA0')
+ok(rip(0x893401, 7) == 0x18030C0 and rip(0x893520, 7) == 0x1803088, 'the items: lambda_3 0x18030C0 (a page), lambda_2 0x1803088 (vehicles)')
+ok(struct.unpack_from('<Q', img, 0x18030C0 + 16)[0] - base == 0x8928E0, 'lambda_3\'s _Do_call 0x8928E0')
+b = ins(0x8928E0, 0x22)
+ok(b[0x8928F1] == ('mov', 'edx, dword ptr [rbx + 0x10]') and b[0x8928FD] == ('jmp', '0x88dd00'),
+   'lambda_3 opens the key config on its captured page (impl +0x10) by 0x88DD00')
+ok(ins(0x7CD940, 0x46)[0x7CD975] == ('call', '0x7ccd10'), 'the dialog\'s key check: the pad / move / chat limits only')
+ok(re.search(r'kFirstAction=0x4F', keybind) is not None and max(a for acts_ in PAGES for a in acts_) < 0x4F,
+   'the plugins\' slots 0x4F.. are past every stock action and the 0x4E the binder reads')
+
+# The stock common page's defaults the plugin changes (keyconfig_menu.h kStockDefaults: Chat -> Enter, VoiceChat -> K): each
+# site is 0xD48B0's write of that action into that set, with the stock key; the new keys pass the dialog's chat limits.
+sd = re.findall(r'\{(0x[0-9A-F]+),(0x1D|0x21),(\d),(kChatFrom|kVoiceFrom),(kChatTo|kVoiceTo)\}', menu_h)
+consts = {k: int(v, 16) for k, v in re.findall(r'(kChatFrom|kChatTo|kVoiceFrom|kVoiceTo)=(0x[0-9A-F]+)', menu_h)}
+ok(len(sd) == 8, 'keyconfig_menu.h: eight stock default sites')
+for rva, act, st, frm, to in sd:
+    rva, act, st = int(rva, 16), int(act, 16), int(st)
+    want = bytes([0xC7, 0x81]) + struct.pack('<I', 0x28 + st * 0x3FC + act * 4) + struct.pack('<i', consts[frm])
+    ok(bytes(img[rva:rva + 10]) == want and 0xD48B0 <= rva < 0xD4A91,
+       f'{rva:#x}: 0xD48B0 writes action {act:#x} of set {st} as {consts[frm]:#x} (the plugin makes it {consts[to]:#x})')
+
+
+def chat_refuses(key):   # 0x7CCD10 for actions 0x1C / 0x1D / 0x21
+    return bool((0 <= key - 0x63 <= 8 and (0x1E3 >> (key - 0x63)) & 1) or (key <= 0x2A and (0x5100024F000 >> key) & 1))
+
+
+ok(not chat_refuses(consts['kChatTo']) and not chat_refuses(consts['kVoiceTo']) and chat_refuses(0x63) and chat_refuses(0x28),
+   'Enter (0x62) and K (0x1C) are keys the stock dialog takes for Chat / VoiceChat (0x7CCD10 refuses Space, W ...)')
+b = ins(0x7CCD10, 0x38)
+ok(b[0x7CCD25] == ('mov', 'ecx, 0x1e3') and b[0x7CCD35] == ('movabs', 'rcx, 0x5100024f000'), 'the chat limits as read (0x7CCD10)')
+# ---- The stubs against the code they join (keyconfig_menu.h): what the stub path changes is never read by the stock.
+# A stub leaves through its join (the plugin's pages) or its default (a page past 16): the Head's cmp's change the flags
+# alone, A writes ebx, B ecx / [rsi+0x844] / [rsp+0x30], C..F call the plugin (Microsoft x64: rcx, rdx, r8..r11, xmm0..5
+# and the flags lost) and set rax (C, D, F), r12 (D), r14 / r15 / bl (E). So: from each join, on every path up to the
+# next call (or ret), no volatile register but the stub's rax is read before it is written; from each default, none the
+# stub wrote. Every join of C, D, F follows a call in the stock (0x7A3500, the text lookup) and E's join leads straight to
+# one: the stock itself keeps nothing in a volatile register across them, which is why the stubs need not save any.
+md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+md.detail = True
+from capstone import x86  # noqa: E402
+VOLATILE = ['rflags', 'rax', 'rcx', 'rdx', 'r8', 'r9', 'r10', 'r11'] + [f'xmm{k}' for k in range(6)]
+PARTIAL = {'al', 'ah', 'ax', 'cl', 'ch', 'cx', 'dl', 'dh', 'dx'} | {f'r{k}{s}' for k in range(8, 12) for s in 'bw'}
+XMM_FULL = {'movaps', 'movups', 'movdqa', 'movdqu', 'movapd', 'movupd', 'xorps', 'xorpd', 'pxor', 'movd', 'movq',
+            'cvtsi2ss', 'cvtsi2sd', 'movss', 'movsd'}
+
+
+def vreg(r):
+    n = md.reg_name(r)
+    for v in ('rax', 'rcx', 'rdx'):
+        if n in (v, 'e' + v[1:], v[1:], v[1] + 'l', v[1] + 'h'):
+            return v, n
+    for v in ('r8', 'r9', 'r10', 'r11'):
+        if n == v or (n.startswith(v) and n[len(v):] in ('d', 'w', 'b')):
+            return v, n
+    if n.startswith(('xmm', 'ymm')):
+        return 'xmm' + n[3:], n
+    return n, n
+
+
+def jump_table(at):
+    """The targets of the MSVC jump table whose indirect jmp is at `at` (cmp idx, N; ja; mov ecx, [base + idx*4 + T];
+    add rcx, base; jmp rcx with base the image's 0: N + 1 RVAs), or None."""
+    for back in range(0x28, 4, -1):
+        seq = list(md.disasm(img[at - back:at + 2], at - back))
+        if not seq or seq[-1].address != at or seq[-1].mnemonic != 'jmp':
+            continue
+        mv = [i for i in seq if i.mnemonic == 'mov' and re.match(r'e(cx|ax), dword ptr \[r\w+ \+ r\w+\*4 \+ 0x[0-9a-f]+\]$', i.op_str)]
+        cm = [i for i in seq if i.mnemonic == 'cmp' and re.match(r'\w+, (0x[0-9a-f]+|\d+)$', i.op_str)]
+        if mv and cm:
+            t = int(mv[-1].op_str.split('+ ')[-1].rstrip(']'), 16)
+            return [struct.unpack_from('<i', img, t + 4 * k)[0] for k in range(int(cm[-1].op_str.split(', ')[1], 0) + 1)]
+    return None
+
+
+def live_in(start):
+    """The volatile registers read before written on some path from `start` up to a call / ret (8- / 16-bit writes and
+    xmm writes that keep the upper lanes do not count as written), and the indirect jmps it could not follow."""
+    seen, reads, unknown, work = set(), {}, set(), [(start, frozenset())]
+    while work:
+        a, w = work.pop()
+        if (a, w) in seen:
+            continue
+        seen.add((a, w))
+        i = next(md.disasm(img[a:a + 16], a))
+        rr, ww = i.regs_access()
+        same = (len(i.operands) == 2 and all(o.type == x86.X86_OP_REG for o in i.operands)
+                and i.operands[0].reg == i.operands[1].reg and i.mnemonic in ('xor', 'sub', 'pxor', 'xorps', 'xorpd'))
+        for r in ([] if same or i.mnemonic == 'nop' else rr):
+            c, _ = vreg(r)
+            if c in VOLATILE and c not in w:
+                reads.setdefault(c, []).append(f'{a:#x} {i.mnemonic} {i.op_str}')
+        nw = set(w)
+        for r in ww:
+            c, n = vreg(r)
+            if c not in VOLATILE or n in PARTIAL:
+                continue
+            if c.startswith('xmm') and (i.mnemonic not in XMM_FULL or
+                                        (i.mnemonic in ('movss', 'movsd') and i.operands[1].type == x86.X86_OP_REG)):
+                continue
+            nw.add(c)
+        nw = frozenset(nw)
+        if i.mnemonic in ('call', 'ret', 'int3'):
+            continue
+        if i.mnemonic == 'jmp':
+            op = i.operands[0]
+            if op.type == x86.X86_OP_IMM:
+                work.append((op.imm, nw))
+            elif jump_table(a) is not None:
+                work += [(t, nw) for t in jump_table(a)]
+            else:
+                unknown.add(a)
+            continue
+        if i.mnemonic.startswith('j'):
+            work.append((i.operands[0].imm, nw))
+        work.append((a + i.size, nw))
+    return reads, unknown
+
+
+# (name: what the stub sets that the join may read, the registers the stock set before the site that the default reads)
+STUB_OUT = {'page row': set(), 'row count': set(), 'labels': {'rax'}, 'texts': {'rax'}, 'dialog': set(), 'refresh': {'rax'}}
+DEF_IN = {'page row': set(), 'row count': {'rdx'}, 'labels': {'r9', 'r10'}, 'texts': set(), 'dialog': set(), 'refresh': set()}
+for name, site, size, back, default, join, reg_ in disp:
+    jo, de = int(join, 16), int(default, 16)
+    reads, unknown = live_in(jo)
+    ok(not unknown and set(reads) <= STUB_OUT[name],
+       f'{name}: from the join {jo:#x} no volatile register but the stub\'s {sorted(STUB_OUT[name])} is read before written '
+       f'(read: {sorted(reads)})')
+    reads, unknown = live_in(de)
+    ok(not unknown and set(reads) == DEF_IN[name],
+       f'{name}: from the default {de:#x} only what the stock set before the site is read ({sorted(reads)}), not the flags')
+head = re.search(r'inline void Head\(Code& c,.*?\n\}', menu_h, re.S).group(0)
+raws = re.findall(r'c\.Raw\(\{([^}]*)\}\)', head)
+ok(len(raws) == 5 and all(r.replace(' ', '').startswith(('0x83,', '0x41,0x83,')) for r in raws),
+   'the stubs\' Head writes no register (cmp\'s and jcc\'s alone): a default sees the registers the stock left there')
+for jo in (0x897E65, 0x897F25, 0x89AF3E):
+    prev = list(m.disasm(img[jo - 5:jo], jo - 5))
+    ok(len(prev) == 1 and prev[0].mnemonic == 'call' and int(prev[0].op_str, 16) == 0x7A3500,
+       f'{jo:#x}: the stock reaches this join from the call of 0x7A3500 (no volatile register lives across it)')
+e_next = list(m.disasm(img[0x8991AC:0x8991B6], 0x8991AC))
+ok([(i.mnemonic, i.op_str) for i in e_next] == [('lea', 'rcx, [rsp + 0x50]'), ('call', '0x8c320')],
+   'E: its join 0x8991AC sets rcx and calls 0x8C320')
+
+
+def frame(site):
+    """rsp's offset below the function's entry rsp at `site` (the function's unwind info: pushes and allocations; no
+    frame register, no chain), with the site past the prologue."""
+    lo, hi = 0, p.OPTIONAL_HEADER.DATA_DIRECTORY[3].Size // 12
+    pd = p.OPTIONAL_HEADER.DATA_DIRECTORY[3].VirtualAddress
+    while lo < hi:
+        mid = (lo + hi) // 2
+        b_, e_, u_ = struct.unpack_from('<III', img, pd + 12 * mid)
+        if site < b_:
+            hi = mid
+        elif site >= e_:
+            lo = mid + 1
+        else:
+            break
+    else:
+        raise AssertionError(f'{site:#x}: no function')
+    ver, prolog, count, fr = img[u_], img[u_ + 1], img[u_ + 2], img[u_ + 3]
+    assert ver & 7 == 1 and not (ver >> 3) & 4 and fr & 0xF == 0 and site - b_ >= prolog, (hex(site), ver, fr)
+    total, k = 0, 0
+    while k < count:
+        op, info = img[u_ + 4 + 2 * k + 1] & 0xF, img[u_ + 4 + 2 * k + 1] >> 4
+        if op == 0:
+            total, k = total + 8, k + 1
+        elif op == 1:
+            total += 8 * struct.unpack_from('<H', img, u_ + 6 + 2 * k)[0] if info == 0 else struct.unpack_from('<I', img, u_ + 6 + 2 * k)[0]
+            k += 2 if info == 0 else 3
+        elif op == 2:
+            total, k = total + 8 * info + 8, k + 1
+        elif op in (4, 8):
+            k += 2
+        elif op in (5, 9):
+            k += 3
+        else:
+            raise AssertionError(f'{site:#x}: unwind op {op}')
+    return b_, total
+
+
+STUB_FRAME = {'labels': 0x20, 'texts': 0x30, 'dialog': 0x40, 'refresh': 0x20}
+for name, site, *_ in disp:
+    if name not in STUB_FRAME:
+        continue
+    fn, total = frame(int(site, 16))
+    ok((8 + total) % 16 == 0 and STUB_FRAME[name] % 16 == 0 and
+       re.search(rf'0x48,0x83,0xEC,{STUB_FRAME[name]:#04x}', menu_h) is not None,
+       f'{name}: rsp is 16-aligned at {int(site, 16):#x} (function {fn:#x}, {total:#x} below the return address), the stub\'s '
+       f'sub rsp,{STUB_FRAME[name]:#x} keeps it so for its call')
+
+# Every byte the plugin patches, and every join, lies in a signature CheckCode checks first.
+spans = [(rva, rva + size) for rva, size, _ in sigs.SIGNATURES]
+
+
+def signed(lo, n):
+    return any(a <= lo and lo + n <= b for a, b in spans)
+
+
+ok(all(signed(int(site, 16), int(size)) and signed(int(join, 16), 1) and signed(int(back, 16), 1)
+       for _n, site, size, back, _d, join, _r in disp), 'the six dispatches, their jump tables and joins are signed')
+ok(all(signed(a, 7) for a in leas), 'each of the six lea\'s of the page table is signed (0x7CDB34 too)')
+ok(signed(0x7CDE40, 3) and all(signed(int(rva, 16), 10) for rva, *_ in sd), 'the all-sets rows and the eight stock defaults are signed')
+
 print(f'{checks} checks passed')

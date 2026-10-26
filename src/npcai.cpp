@@ -254,6 +254,9 @@ void PlayerLane(World& w) noexcept {
 struct MarkState { ObjRef obj; float at[3]; bool held; };
 MarkState mark{};
 const void* followedLock=nullptr;   // the turret lock the mark last followed (FollowTurretLock)
+// A mark key press at an aircraft's stick waiting for its lock (JetMarkFrame).
+struct JetMark { bool pending; const void* from; ULONGLONG until; };
+JetMark jetMark{};
 struct MarkPub { bool on; float at[3]; ULONGLONG wall; NpcPing ping; };
 MarkPub markPub{};
 NpcPing ping{};
@@ -1948,7 +1951,7 @@ void ResetNpcAi() noexcept {
     for(auto& q:squads){npcmark::Assign(q.commandFocus,{});q=Squad{};}
     cooldowns=npc::Cooldowns<kMaxSquads>{};
     dismissedCount=0;
-    npcmark::Assign(mark.obj,{});mark=MarkState{};ping=NpcPing{};followedLock=nullptr;
+    npcmark::Assign(mark.obj,{});mark=MarkState{};ping=NpcPing{};followedLock=nullptr;jetMark=JetMark{};
     AcquireSRWLockExclusive(&markLock);markPub=MarkPub{};ReleaseSRWLockExclusive(&markLock);
     world=World{};
     march.heading=npc::formation::Heading{};march.bound=npc::formation::Bound{};march.frame=0;march.n=0;
@@ -3392,6 +3395,20 @@ void TurretMark(const unsigned char* human,const edf::aimlink::TurretLockV1& t,b
     }
 }
 
+// A press at the stick of one of the plugin's aircraft (qmark_ray.h SeatMarkPress / JetMarkDue): the same key cycles its
+// store's target, so the mark waits for the lock it brings and marks that (plan-2026-10-25-keybinds.md §3.3 C).
+void JetMarkFrame(const unsigned char* human) noexcept {
+    const void* locked=nullptr;float at[3]{};
+    if(!npcmark::MarkOn() || !PlayerJetMarkTarget(human,&locked,at)){jetMark=JetMark{};return;}   // left the stick
+    const bool expired=GetTickCount64()>=jetMark.until;
+    const void* due=qmark::JetMarkDue(jetMark.from,locked,expired,locked && mark.obj.Is(locked));
+    if(due && npcmark::Capture(due)) {
+        Mark(due,at);QMarkPlay(QMarkCue::own);
+        Log("NPCAI mark: the aircraft's locked target marked");
+        jetMark=JetMark{};
+    } else if(expired)jetMark=JetMark{};
+}
+
 bool NpcMarked() noexcept { return npcmark::Enabled() && MarkAlive(); }
 
 bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept {
@@ -3423,10 +3440,21 @@ void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept {
     const bool atTurret=AutoTurretSeat(&turret);
     const bool turretKey=atTurret && qmark::KeyIsTurretLock(c.npcMarkKey,turret.autoAim && turret.keys,turret.lockKey);
     if(down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()) {
-        if(atTurret)TurretMark(human,turret,turretKey);
-        else ToggleMark(human,At<std::int32_t>(human,kTeam));
+        const void* locked=nullptr;float lockAt[3]{};
+        const bool atStick=!atTurret && PlayerJetMarkTarget(human,&locked,lockAt);
+        const bool bridge=!atTurret && DreadnoughtBridgeClaims(human,c.npcMarkKey);
+        switch(qmark::SeatMarkPress(bridge,atStick)) {
+        case qmark::SeatPress::none: break;   // the bridge's strafe
+        case qmark::SeatPress::markLock:   // the target key the same: wait for the lock its cycle brings, else mark the lock now
+            jetMark=JetMark{true,c.playerJetTargetKey==c.npcMarkKey ? locked : nullptr,GetTickCount64()+qmark::kJetMarkWaitMs};break;
+        case qmark::SeatPress::normal:
+            if(atTurret)TurretMark(human,turret,turretKey);
+            else ToggleMark(human,At<std::int32_t>(human,kTeam));
+            break;
+        }
     }
     mark.held=down;
+    if(jetMark.pending)JetMarkFrame(human);
     if(turretKey && npcmark::MarkOn())FollowTurretLock(turret.target);
     else followedLock=nullptr;
     KeepMark();
