@@ -19,6 +19,7 @@ import mab_legacy  # noqa: E402
 import make_edf41_objects as objects  # noqa: E402
 import mdb  # noqa: E402
 import outfit41  # noqa: E402
+import rabpool  # noqa: E402
 import sgo  # noqa: E402
 
 GAME4 = os.environ.get('EDF41_GAME_DIR', r'D:\Steam\steamapps\common\Earth Defense Force 4.1')
@@ -36,6 +37,24 @@ def locator_params(block: bytes, name: str) -> dict:
 
 
 SHIPPED = os.path.join(ROOT, 'edf41port', 'objects')
+MODEL_RAB = 'OBJECT/VEHICLE408_MOTORBIKE.RAB'
+
+
+def shipped_archive(rel: str) -> bytes:
+    def read(path: str) -> bytes:
+        with open(os.path.join(SHIPPED, *path.split('/')), 'rb') as f:
+            return f.read()
+    return rabpool.unpack(rel, read)
+
+
+def rotation_angle(a: list[float], b: list[float]) -> float:
+    """Degrees between the 3x3 rotations of two row-vector matrices."""
+    trace = sum(a[i * 4 + k] * b[i * 4 + k] for i in range(3) for k in range(3))
+    return math.degrees(math.acos(max(-1.0, min(1.0, (trace - 1.0) / 2.0))))
+
+
+# 4.1's own driver's wrists on the 408's bars (vehicle_bike_driver, pylib/edf41bike.py grip_targets), model space.
+GRIP41 = {'te_ik_l': (0.426013, 1.251633, 0.444186), 'te_ik_r': (-0.426014, 1.251632, 0.444187)}
 
 
 class Shipped(unittest.TestCase):
@@ -78,6 +97,27 @@ class Shipped(unittest.TestCase):
                              list(bike.SEAT_STATES))
             self.assertEqual([r[4] for r in sgo.plain(members['vehicle_riding_position'])], [9, 15])
 
+    def test_driver_grip_bones_hold_the_bars(self) -> None:
+        # 2026-10-26 「人手臂伸出去好远」: vehicle503_bike_driver reaches its hands for seat 0's grip matrices, which only
+        # V503's te_ik_l / te_ik_r bones fill (0x617A30); without them on the 408 the targets were the seat's identity,
+        # the map's origin. The shipped model carries both, under the steering handle, on the bars' grips.
+        md = bike.model(shipped_archive(MODEL_RAB), 'Vehicle408_motorbike.mdb')
+        world = mdb.bind_world(md)
+        names = [md.name_of(b.name) for b in md.bones]
+        handle = names.index(bike.GRIP_PARENT)
+        for bone, _hand in bike.GRIP_BONES:
+            at = names.index(bone)
+            self.assertEqual((md.bones[at].parent, md.bones[at].kind), (handle, 0))
+            for got, want in zip(world[at][12:15], GRIP41[bone]):
+                self.assertAlmostEqual(got, want, delta=1e-4)
+            self.assertLess(math.dist(world[at][12:15], world[handle][12:15]), 0.6)   # on the bars, not at the origin
+            inverse = mdb.mmul(world[at], md.bones[at].inv_bind)
+            self.assertLess(max(abs(x - y) for x, y in zip(inverse, mdb.ident())), 1e-4)
+            bike._rotation(world[at])   # a rotation, right-handed
+        left, right = (world[names.index(b)] for b, _h in bike.GRIP_BONES)
+        mirror = [-1.0, 1.0, 1.0]   # the right hand is the left one mirrored in x (axes and position)
+        self.assertLess(max(abs(left[12 + c] * mirror[c] - right[12 + c]) for c in range(3)), 1e-4)
+
     def test_call_drive_block(self) -> None:
         for members in (self.members, self.spawn):
             for key in ('vehicle_setup', 'mission_setup'):
@@ -104,7 +144,7 @@ class Native(unittest.TestCase):
         old = {source.name_of(b.name): (b.local, b.inv_bind) for b in source.bones}
         new = {self.md.name_of(b.name): (b.local, b.inv_bind) for b in self.md.bones}
         self.assertEqual({k: new[k] for k in old}, old)
-        self.assertEqual(set(new) - set(old), {bike.MARKER})
+        self.assertEqual(set(new) - set(old), {bike.MARKER, *(b for b, _h in bike.GRIP_BONES)})
         bodies = {o['name'] for o in hk2014.read(self.physics).objects if o.type.name == 'hkpRigidBody'}
         self.assertEqual(bodies, {'RagDollProxys.' + n for n in bike.PROXIES})
         bike.check(self.members, self.md, self.physics)
@@ -242,10 +282,43 @@ class Native(unittest.TestCase):
         for rel in ('OBJECT/VEHICLE408_MOTORBIKE.SGO', 'OBJECT/VEHICLE408_MOTORBIKE.SHKT'):
             with open(os.path.join(SHIPPED, *rel.split('/')), 'rb') as f:
                 self.assertEqual(f.read(), self.files[rel], f'{rel} is stale: run tools/make_edf41_objects.py')
+        self.assertEqual(shipped_archive(MODEL_RAB), self.files[MODEL_RAB], f'{MODEL_RAB} is stale: run tools/make_edf41_objects.py')
         with open(os.path.join(SHIPPED, 'OBJECT', 'EDF41_RANGE_VEHICLE408_MOTORBIKE.SGO'), 'rb') as f:
             spawn = sgo.read(f.read())[1]
         self.assertEqual({k: v for k, v in spawn.items() if k != 'mission_setup'},
                          {k: v for k, v in self.members.items() if k != 'mission_setup'})
+
+    def test_v503_grip_bone_is_its_riders_hand(self) -> None:
+        # What a grip target is: V503's te_ik_l / te_ik_r bind (its seat at the model origin) is the Ranger's own
+        # te_l / te_r in vehicle503_bike_driver, position and rotation (cas_pose.pose_world's row-vector quaternion).
+        v503 = bike.model(self.games.read6('OBJECT/V503_BIKE.MRAB'), 'v503_bike.mdb')
+        bind = {v503.name_of(b.name): m for b, m in zip(v503.bones, mdb.bind_world(v503))}
+        ranger = bike.model(self.games.read6(bike.GRIP_RIDER6[0]), bike.GRIP_RIDER6[1])
+        held = bike.hand_pose(self.games.read6('OBJECT/EDF6ARMYSOLDIER.CAS'), ranger, bike.SEAT_STATES[0])
+        for bone, hand in bike.GRIP_BONES:
+            self.assertLess(max(abs(a - b) for a, b in zip(held[hand], bind[bone])), 1e-3, bone)
+
+    def test_grip_bones_are_4_1s_hands_in_edf6_axes(self) -> None:
+        grips = dict(bike.grip_targets(self.games))
+        world = {self.md.name_of(b.name): m for b, m in zip(self.md.bones, mdb.bind_world(self.md))}
+        v503 = bike.model(self.games.read6('OBJECT/V503_BIKE.MRAB'), 'v503_bike.mdb')
+        bind503 = {v503.name_of(b.name): m for b, m in zip(v503.bones, mdb.bind_world(v503))}
+        md41 = bike.model(self.games.read4(bike.GRIP_RIDER41[0]), bike.GRIP_RIDER41[1])
+        cas41 = bike.cas_legacy.cas_from_legacy(self.games.read4(bike.GRIP_RIDER41[2]))
+        held41 = bike.hand_pose(cas41, md41, bike.SOURCE_STATES[0])
+        for bone, hand in bike.GRIP_BONES:
+            self.assertLess(max(abs(a - b) for a, b in zip(world[bone], grips[bone])), 1e-4)
+            self.assertEqual([round(x, 6) for x in held41[hand][12:15]], list(GRIP41[bone]))
+            # Both hold a motorcycle grip: the relabelled 4.1 hand turns ~23 degrees from V503's pose, not the
+            # 90-degree axis swap of 4.1's raw te_l frame.
+            self.assertLess(rotation_angle(grips[bone], bind503[bone]), 30.0)
+            self.assertGreater(rotation_angle(held41[hand], bind503[bone]), 60.0)
+        # The Air Raider (the driver seat's other class) holds the bars in the same place in both games.
+        md41e = bike.model(self.games.read4(bike.GRIP_RIDER41[0]), 'Engineer.mdb')
+        engineer41 = bike.hand_pose(bike.cas_legacy.cas_from_legacy(self.games.read4('OBJECT/ENGINEER.CAS')), md41e,
+                                    bike.SOURCE_STATES[0])
+        for _bone, hand in bike.GRIP_BONES:
+            self.assertLess(math.dist(engineer41[hand][12:15], held41[hand][12:15]), 1e-3)
 
     def test_dynamic_gun_and_missing_body_fail_closed(self) -> None:
         members = copy.deepcopy(self.members)
