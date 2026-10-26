@@ -339,23 +339,33 @@ int main(int argc,char** argv) {
                   "the loaded save of the pack moved and logged");
             MigrateMissionPackSave(gs.data());
             Check(save[packs::kClear+3]==1 && save[0]==3,"a second load moves nothing");
-            // a save of a pack without a record whose layout cannot be told: left as it is, the player told once
+            // a save of a pack without a record whose layout cannot be told: left as it is, only the log says so (no
+            // popup since 2026-10-25, docs/feedback-2026-10-25-range-unlock.md), and the same judgement logged once
+            const auto count=[](const std::string& text,const char* what){
+                std::size_t n=0;
+                for(std::size_t at=text.find(what);at!=std::string::npos;at=text.find(what,at+1))++n;
+                return n;
+            };
             Put<std::int32_t>(node,0x10+0x74,66);
             std::memset(save,0,packs::kModeSaveSize);
             save[packs::kClear+1]=1;
             const std::vector<unsigned char> unknown(save,save+packs::kModeSaveSize);
             const int notes=packNotices;
+            const std::size_t unknownLogs=count(logs,"layout-unknown");
             MigrateMissionPackSave(gs.data());
-            Check(std::equal(unknown.begin(),unknown.end(),save) && lastLog.find("layout-unknown")!=std::string::npos
-                  && packNotices==notes+1 && packNotice.find(L"EDF5 任务包１")!=std::wstring::npos
-                  && packNotice.find(L"无法确定")!=std::wstring::npos,"an undetermined save: untouched, unmarked, the player told");
+            Check(std::equal(unknown.begin(),unknown.end(),save) && lastLog.find("content 66 (EDF5DLC1) layout-unknown")!=std::string::npos
+                  && count(logs,"layout-unknown")==unknownLogs+1 && packNotices==notes,
+                  "an undetermined save: untouched, unmarked, logged, no popup");
             MigrateMissionPackSave(gs.data());
-            Check(std::equal(unknown.begin(),unknown.end(),save) && packNotices==notes+1,"...once a session");
+            Check(std::equal(unknown.begin(),unknown.end(),save) && count(logs,"layout-unknown")==unknownLogs+1 && packNotices==notes,
+                  "...logged once while the judgement holds");
             const std::uint32_t other=0x5555;
             std::memcpy(save+packs::kMarker,&other,4);
+            const std::vector<unsigned char> foreign(save,save+packs::kModeSaveSize);
             MigrateMissionPackSave(gs.data());
-            Check(packNotices==notes+2 && packNotice.find(L"另一版本")!=std::wstring::npos && lastLog.find("other-layout")!=std::string::npos,
-                  "another version's marker: untouched, the player told");
+            Check(std::equal(foreign.begin(),foreign.end(),save) && packNotices==notes
+                  && lastLog.find("other-layout (marker 00005555")!=std::string::npos,
+                  "another version's marker: untouched, logged, no popup");
             Put<std::int32_t>(node,0x10+0x74,0);
             std::memset(save+packs::kMarker,0,4);
             const std::vector<unsigned char> before(save,save+packs::kModeSaveSize);
