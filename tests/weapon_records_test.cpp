@@ -138,7 +138,25 @@ void SavePairing() {
     Check(PickSave(mixed,4,7)==2 && PickSave(mixed,4,9)==3,"the newest with the write's table");
 }
 
+// The load of MAIN.GST reaches the block at the completion's tail jump, not at the load job's copy (2026-10-26: wrapping
+// only the job's copy, into its own buffer, left the relocated table empty after every load: EDF6's weapons gone).
+void LoadPairing() {
+    bool wrapped=false;
+    for(const Span& p:kOtherPatches)wrapped=wrapped || (p.rva==kResultJump && p.size==5);
+    Check(wrapped,"the completion's tail jump into the block is one of the rewritten sites");
+    Check(kResultJump>kResultCopy && kResultJump-kResultCopy<0x40,"the tail jump lies in the completion 0x7BE970");
+    int a=0,b=0,c=0;
+    const void* none[1]{};
+    Check(PickLoad(none,0,&a)==0,"no load remembered: none taken");
+    const void* loads[]={&a,&b};
+    Check(PickLoad(loads,2,&a)==0 && PickLoad(loads,2,&b)==1 && PickLoad(loads,2,&c)==2,"the load whose buffer is the copy's source");
+    Check(PickLoad(loads,2,nullptr)==2,"a null source is no load");
+    const void* reused[]={&a,&b,&a};
+    Check(PickLoad(reused,3,&a)==2,"a buffer address used again: the newest load with it");
+}
+
 int main() {
+    LoadPairing();
     Sites();
     Constants();
     Sidecar();

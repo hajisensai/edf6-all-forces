@@ -70,7 +70,16 @@ constexpr unsigned kBlockInit=0xDEDA0,kBlockInitCall=0xD6468;   // the game stat
 constexpr unsigned kOutCalls[]={0x70AF25,0x70B079,0x70B61C,0x70B79C};   // memcpy(record, GS block, 0xDCE8)
 constexpr unsigned kInCalls[]={0x70B23A,0x70B421,0x70B956};            // memcpy(GS block, record, 0xDCE8)
 constexpr unsigned kNewGameCall=0xDB96D;                  // 0xDB920: memcpy(GS block, template, 0xDCE8)
-constexpr unsigned kLoadCopyCall=0x7C1AD1;                // the load job 0x7C1670: memcpy(dest, decoded, size)
+// A load of the block goes through two copies (docs/loadout-re.md 8.8, 2026-10-26). The load job 0x7C1670 (save
+// thread) decodes the file into ITS OWN result buffer: 0x7C1AD1 memcpy([[job+0xB0]+8], decoded, size), never the block.
+// The request's completion 0x7BE970 then copies that buffer into the request's destination: [req+0x90] the block
+// (0x7C05F6 asks with GS+0x6E68), [req+0x98] its size 0xDCE8 (0x7BD7A6 / 0x7BD7AD), only when the status is not an
+// error and the sizes agree; its memcpy is a tail jump (E9 at 0x7BE99D) with the size from the request, so no list
+// of "memcpy calls with 0xDCE8" finds it. Unwrapped, every load filled only the block's old table and the game went
+// on with the relocated table it had: an empty one after the constructor, so EDF6's own weapons were gone and only
+// what the plugin and the DLC grant re-own showed; the next save mirrored that into MAIN.GST.
+constexpr unsigned kLoadCopyCall=0x7C1AD1;                // the load job 0x7C1670: memcpy(its buffer, decoded, size)
+constexpr unsigned kResultCopy=0x7BE970,kResultJump=0x7BE99D;   // the completion: jmp memcpy([req+0x90], buffer, [req+0x98])
 constexpr unsigned kUiSnapCall=0x8B49B1;                  // HUiHQWeaponSelect 0x8B4280: memcpy(screen+0x800, block, 0xDCE8)
 constexpr unsigned kSaveCall=0x7C2F66,kSave=0x7BCD40;     // MAIN.GST's save request (0x7C2E30), 9 arguments
 constexpr unsigned kWriteCall=0x7C228B,kWrite=0x7B9990;   // the save job 0x7C1CB0 writes a file
@@ -89,7 +98,7 @@ constexpr std::uint8_t kUiReadSize=8;
 struct Span { std::uint32_t rva; std::uint8_t size; };
 inline constexpr Span kOtherPatches[]={
     {kOutCalls[0],5},{kOutCalls[1],5},{kOutCalls[2],5},{kOutCalls[3],5},{kInCalls[0],5},{kInCalls[1],5},{kInCalls[2],5},
-    {kNewGameCall,5},{kLoadCopyCall,5},{kUiSnapCall,5},{kBlockInitCall,5},{kSaveCall,5},{kWriteCall,5},
+    {kNewGameCall,5},{kLoadCopyCall,5},{kResultJump,5},{kUiSnapCall,5},{kBlockInitCall,5},{kSaveCall,5},{kWriteCall,5},
     {kReadOpen,6},{kWriteOpen,6},{kDeleteCalls[0],6},{kDeleteCalls[1],6},{kUiOwned,kUiReadSize},{kUiStatus,kUiReadSize},
 };
 constexpr bool Overlap(std::uint32_t a,std::uint32_t an,std::uint32_t b,std::uint32_t bn) noexcept { return a<b+bn && b<a+an; }
@@ -136,6 +145,16 @@ inline std::uint64_t Hash(const void* data,std::size_t size) noexcept {
 constexpr std::size_t PickSave(const std::uint64_t* hashes,std::size_t n,std::uint64_t hash) noexcept {
     std::size_t at=n;
     for(std::size_t i=0;i<n;++i)if(hashes[i]==hash)at=i;
+    return at;
+}
+
+// --- Which file a load's copy into the block came from (src/weapon_records.cpp LoadCopyHook / ResultCopyHook) ---
+// The load job remembers its result buffer with the path it read (save thread); the completion's copy into the block
+// names that buffer as its source. A buffer address can come back for a later load: the newest entry with it.
+// `buffers`: the remembered loads' buffers, oldest first. Returns the index taken, `n` when none has `src`.
+constexpr std::size_t PickLoad(const void* const* buffers,std::size_t n,const void* src) noexcept {
+    std::size_t at=n;
+    for(std::size_t i=0;i<n;++i)if(src && buffers[i]==src)at=i;
     return at;
 }
 
