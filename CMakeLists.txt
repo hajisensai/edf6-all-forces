@@ -3,6 +3,9 @@ project(EDF6VehicleCrew VERSION 0.8.0 LANGUAGES CXX)
 # Every exe / DLL this file builds carries a version resource (cmake/versioninfo.cmake: antivirus false positives).
 include("${CMAKE_SOURCE_DIR}/cmake/versioninfo.cmake")
 edf6_version_info_at_end()
+# The tests and tools link the CRT as a DLL, the plugins keep it static (cmake/toolcrt.cmake: the same false positives).
+include("${CMAKE_SOURCE_DIR}/cmake/toolcrt.cmake")
+edf6_tool_crt_at_end()
 set(EDF6_GAME_DIR "" CACHE PATH "Optional EDF6 game directory for read-only generated-asset checks")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -1718,6 +1721,8 @@ add_executable(crash_dump_test tests/crash_dump_test.cpp)
 target_compile_options(crash_dump_test PRIVATE /W4 /WX /utf-8 /permissive-)
 target_link_libraries(crash_dump_test PRIVATE dbghelp)
 add_test(NAME crash_dump COMMAND crash_dump_test)
+# It crashes in the exe's own CRT too: the static one, the plugins' (cmake/toolcrt.cmake).
+set_target_properties(crash_dump_test PROPERTIES EDF6_STATIC_CRT ON)
 add_dependencies(offline_checks crash_dump_test)
 # More than four in an EDF5 / EDF4.1 script mission online: EDF6Coop's version and hook shape, the room word, and the
 # spawn layout both plugins share to the bit (src/edf5online_room.h, src/spawn_layout.h). No game.

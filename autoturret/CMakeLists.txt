@@ -3,6 +3,8 @@ project(EDF6AutoTurret VERSION 0.3.0 LANGUAGES CXX)
 # Every exe / DLL this file builds carries a version resource (cmake/versioninfo.cmake: antivirus false positives).
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/versioninfo.cmake")
 edf6_version_info_at_end()
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/toolcrt.cmake")
+edf6_tool_crt_at_end()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 add_library(EDF6AutoTurret SHARED src/plugin.cpp src/gunner.cpp src/designate.cpp)
