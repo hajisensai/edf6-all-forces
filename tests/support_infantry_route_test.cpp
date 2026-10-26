@@ -26,7 +26,8 @@ void PvpForgetSupportObject(const ObjRef& ref) noexcept {if(ref.obj)++routePvpFo
 namespace {bool supportSessionActive=true;}
 support::Policy SupportMissionPolicy() noexcept {return {support::Environment::normal,false};}
 int SupportAirCallCount() noexcept{return 21;}
-void SupportFollowUpQueue(int,const float*) noexcept{}   // a sortie's second wave (airstrike.cpp, not linked here)
+void SupportFollowUpQueue(int,const float*,std::uint32_t) noexcept{}   // a sortie's second wave (airstrike.cpp, not linked here)
+void SupportFollowUpSettle(std::uint32_t,bool) noexcept{}
 const wchar_t* SupportAirCallName(int) noexcept{return L"air";}
 const wchar_t* SupportAirCallKey(int) noexcept{return L"AIR";}
 // The map's pt, strikes and warnings (support_points.cpp, airstrike.cpp, support_warning.cpp: not linked here): a pool that

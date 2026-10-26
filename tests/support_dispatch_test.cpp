@@ -152,7 +152,10 @@ SupportPlan preparedSubPlan{};std::uint64_t preparedSubToken=0;
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept {preparedSubPlan=plan;return ++preparedSubToken;}
 unsigned char* PlayerHuman() noexcept {return objects[31];}
 int SupportAirCallCount() noexcept {return 21;}
-void SupportFollowUpQueue(int,const float*) noexcept {}   // a sortie's second wave (airstrike.cpp, not linked here)
+// A sortie's second wave (airstrike.cpp, not linked here): what the dispatcher queued and settled.
+int followUpsQueued=0,followUpsSettled=0;std::uint32_t followUpRequest=~0u,followUpSettledRequest=0;bool followUpOut=false;
+void SupportFollowUpQueue(int,const float*,std::uint32_t request) noexcept {++followUpsQueued;followUpRequest=request;}
+void SupportFollowUpSettle(std::uint32_t request,bool out) noexcept {++followUpsSettled;followUpSettledRequest=request;followUpOut=out;}
 const wchar_t* SupportAirCallName(int) noexcept {return L"Heli";}
 const wchar_t* airKeys[21]={L"INTERCEPTOR",L"INTERCEPTOR_F",L"STRIKE",L"STRIKE_F",L"MULTIROLE",L"MULTIROLE_F",L"FIGHTER",L"FIGHTER_F",
     L"CARRIER",L"CARRIER_F",L"HELI",L"HELI_F",L"BLAST_CARRIER",L"BLAST_CARRIER_F",L"DOLL_CARRIER",L"DOLL_CARRIER_F",L"SUB",
@@ -452,18 +455,26 @@ int main() {
           "a call right after a delivery is taken (no cooldown)");
     ResetSupportDispatch();made=deleted=boardRequests=activated=0;terrain=false;fixtureMs+=40000;
     {const std::int32_t pt=SupportPoints();
+    followUpsQueued=0;
     check(SupportCallAt(0,target,note,128),"invalid terrain request can be queued for explicit validation");
     check(SupportPoints()==pt-1800,"the map's pt (2026-10-26): a call is paid when it is taken");
+    check(followUpsQueued==0,"a sortie's second wave waits for its first to be made (it is paid with it)");
     SupportDispatchTick();check(!made && !offlinePending,"no safe entry refuses without spawning at target");
     check(SupportPoints()==pt,"its plan refused: its pt back");
+    check(followUpsQueued==0,"its plan refused: no second wave either (2026-10-27 review: a refunded first wave's second came free)");
     ResetSupportDispatch();terrain=true;made=0;fixtureMs+=40000;
-    check(SupportCallAt(0,target,note,128),"a call on good terrain is queued");SupportDispatchTick();
+    check(SupportCallAt(0,target,note,128),"a call on good terrain is queued");
+    check(followUpsQueued==0,"still planned: no second wave yet");
+    SupportDispatchTick();
     check(made==2 && SupportPoints()==pt-1800,"delivered: its pt stay spent");
+    check(followUpsQueued==1 && followUpRequest==0,"made: its second wave's wait starts");
     ResetSupportDispatch();made=0;fixtureMs+=40000;fixturePool.points=1000;
     check(!SupportCallAt(0,target,note,128) && !offlinePending && fixturePool.points==1000 && std::wcsstr(note,L"1800"),
           "not enough pt: refused with the price, nothing asked, nothing taken");
+    followUpsQueued=0;
     check(SupportCallUnpaidAt(0,target,note,128) && offlinePending && fixturePool.points==1000,"a second wave is not paid");
     SupportDispatchTick();
+    check(made==2 && followUpsQueued==0,"a second wave made brings no wave of its own");
     ResetSupportDispatch();made=0;fixtureMs+=40000;fixturePool.Start(fixturePt);
     const int started=strikesStarted;
     check(SupportCallAt(36,target,note,128) && strikesStarted==started+1 && !offlinePending && !made &&
@@ -523,16 +534,32 @@ int main() {
     check(SupportPoints()==pt,"...and gives its pt back");
     // Online: paid once the host has it (its accepted notice inside the submit), given back when it comes to nothing.
     ResetSupportDispatch();fixtureMs+=40000;
+    followUpsQueued=followUpsSettled=0;
     check(SupportCallAt(0,target,note,128) && SupportPoints()==pt-1800,"an online call is paid as the host takes it");
+    check(followUpsQueued==1 && followUpRequest==noticeRequest,"its second wave is held under its open request");
     configuredHooks.notice(noticeRequest,support_net::RequestStatus::refused);
     check(SupportPoints()==pt,"refused by the host: its pt back");
+    check(followUpsSettled==1 && followUpSettledRequest==noticeRequest && !followUpOut,"...and its second wave is forgotten");
     configuredHooks.notice(noticeRequest,support_net::RequestStatus::refused);
     check(SupportPoints()==pt,"settled once");
     ResetSupportDispatch();fixtureMs+=40000;
     check(SupportCallAt(0,target,note,128) && SupportPoints()==pt-1800,"another online call");
+    followUpsSettled=0;
     configuredHooks.notice(noticeRequest,support_net::RequestStatus::active);
+    check(followUpsSettled==1 && followUpSettledRequest==noticeRequest && followUpOut,"out: its second wave's wait starts");
     configuredHooks.notice(noticeRequest,support_net::RequestStatus::interrupted);
     check(SupportPoints()==pt-1800,"delivered: its pt stay spent, whatever comes after");
+    // A strike called while an online request is open (2026-10-27 review): its own line is shown, the request is still
+    // followed (its later outcome shown and settled).
+    ResetSupportDispatch();fixtureMs+=40000;
+    check(SupportCallAt(0,target,note,128),"an online call waiting for the host");
+    const unsigned open=noticeRequest;
+    check(SupportCallAt(36,target,note,128) && strikesStarted>0,"a strike meanwhile");
+    SupportCallStatus(note,128);
+    check(!std::wcsstr(note,L"支援调度中"),"the strike's line is shown, not the request's");
+    configuredHooks.notice(open,support_net::RequestStatus::active);
+    SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"支援已出动")!=nullptr,"the open request's outcome still reaches the HUD after the strike");
     fixturePool.Start(fixturePt);netRequests=0;}
     testOnline=false;
     ResetSupportDispatch();testOnline=true;made=0;

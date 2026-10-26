@@ -73,7 +73,7 @@ class Call:
     damage: float = 0.0
     # ...or (brings 'jets' / 'helis') a sortie (docs/plan-2026-10-25-strikes.md §1.2): its aircraft make one pass of
     # SORTIE_PASSES[sortie] at the mark and leave the map, no guard / follow version; `then` another flown call's id the
-    # caller's machine calls onto the same mark `then_after` s after this one was accepted (a strike in two waves).
+    # caller's machine calls onto the same mark `then_after` s after this one went out (a strike in two waves).
     sortie: str = ''
     then: str = ''
     then_after: int = 0

@@ -5433,7 +5433,7 @@ void VersionBanner(Text* text,float width,float height,float s,Line* lines,int* 
     Label(text,lines,at,width*0.5f,height*0.5f+286.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
     if(second && *second)Label(text,lines,at,width*0.5f,height*0.5f+314.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",second);
 }
-// The ultimate strike's caller online (ultimate.cpp): peers of an older build see the stock beam; a moment, under the
+// The ultimate strike's caller online (ultimate.cpp): peers without its channel see nothing of it; a moment, under the
 // version banner.
 void UltimateBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
     wchar_t line[160];

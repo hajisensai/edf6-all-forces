@@ -54,7 +54,7 @@ struct Config {
     bool jetPilot=true;        // jets (edf6tr_jet_* SGOs) are flown by the plugin
     DWORD jetFuelSec=120;      // a jet withdraws after this long in the air
     DWORD jetSortieSec=60;     // ...one launched by an airstrike takeover
-    bool jetAirRaider=true;    // the map's air supports (the flown entries of the support bar, support_dispatch.cpp) come
+    bool jetAirRaider=true;    // the map's air supports (the flown entries of the support bar, support_dispatch.cpp) can be called
     bool jetMissionStrike=true;// the missions' strafing-plane airstrikes (DemoAirStrike) send jets instead
     bool throwDrones=true;     // the thrown-drone Robot Bombs (EDF6VC_CALL_THROW_*) release the plugin's drones (airstrike.cpp)
     bool groundPilot=true;     // NPC-crewed Depth Crawlers (502, no stock AI) are driven by the plugin (ground.cpp)
@@ -762,7 +762,7 @@ void ResetPlayer() noexcept;
 // Shared game-thread scene tick, called by the local Soldier and by vehicle inputs; de-duplicated by GameFrame.
 void FrameTick() noexcept;
 
-// The core modules' own declarations (crew, heli, ground, hud, mission, loadout, overlay) are in their
+// The core modules' own declarations (crew, heli, ground, hud, mission, loadout) are in their
 // headers, included at the end of this file.
 
 // jet.cpp

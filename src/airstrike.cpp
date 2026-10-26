@@ -77,7 +77,7 @@ using DeleteFn=void(*)(void*);
 // (a planned hull plus its real pilot); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
 // A sortie (docs/plan-2026-10-25-strikes.md §1.2): `sortie` its pass (crew.h SortiePass, 0 none), `then` the kCalls index of
-// its second wave (-1 none), called onto the same mark `thenMs` after this one was accepted (SupportFollowUpQueue). `pt`
+// its second wave (-1 none), called onto the same mark `thenMs` after this one went out (SupportFollowUpQueue). `pt`
 // its price on the map's bar (tools/calls.py Call.pt).
 struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
               bool follow; const char* name; const wchar_t* id; int sortie; int then; DWORD thenMs; std::uint32_t pt; };
@@ -494,31 +494,48 @@ bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept {
     return true;
 }
 
-// A sortie's second wave (Call::then): queued when this machine's request for the first was accepted (support_dispatch.cpp
-// SupportCallComposedAt), called onto the same mark by this machine, the caller's, once due (SupportFollowUpTick: SharedFrameTick).
-// Due while the call before it is still being planned offline (SupportCallReadiness planning: the dispatcher takes one
-// request at a time, often the first wave itself), it waits for that plan and is called the frame it is over. Any other
-// refusal (the entry disabled in the ini, the mission's support rules, the plugin off, ...) would refuse it again: it is
-// given up at once and the caller told why on the HUD. Online `accepted` is this machine's request queued for the host: a
-// refusal there is the host's to say (support_net).
+// A sortie's second wave (Call::then): due `thenMs` after its first wave went out, called onto the same mark by this
+// machine, the caller's (SupportFollowUpTick: SharedFrameTick). It goes only when the first did, as the first's pt are
+// kept only then (docs/plan-2026-10-26-map-support-pt.md §1: it is paid with the first): queued by support_dispatch.cpp
+// once the first is made (offline: SpawnDeployment), or, online, held under the first's request until its outcome
+// (SupportFollowUpSettle: active starts its wait, refused / timed out / cancelled / interrupted forgets it).
+// Due while another call is still being planned offline (SupportCallReadiness planning: the dispatcher takes one
+// request at a time), it waits for that plan and is called the frame it is over. Any other refusal (the entry disabled in
+// the ini, the mission's support rules, the plugin off, ...) would refuse it again: it is given up at once and the caller
+// told why on the HUD. Online `accepted` is this machine's request queued for the host: a refusal there is the host's to
+// say (support_net).
 namespace {
-struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; };
+// `request`: the first wave's online request still open (0: the first is out, `due` set).
+struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; std::uint32_t request=0; DWORD afterMs=0; };
 FollowUp followUps[8]{};
 }  // namespace
-void SupportFollowUpQueue(int catalog,const float* target) noexcept {
+void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request) noexcept {
     if(catalog<0 || catalog>=kCallCount || kCalls[catalog].then<0 || !target)return;
     for(auto& f:followUps)if(f.catalog<0) {
-        f.catalog=kCalls[catalog].then;std::memcpy(f.at,target,12);f.due=GameMs()+kCalls[catalog].thenMs;
-        Log("SUPPORT %s: its second wave (%s) in %lu s",kCalls[catalog].name,kCalls[f.catalog].name,kCalls[catalog].thenMs/1000);
+        f=FollowUp{};f.catalog=kCalls[catalog].then;std::memcpy(f.at,target,12);f.afterMs=kCalls[catalog].thenMs;
+        f.request=request;
+        if(!request)f.due=GameMs()+f.afterMs;
+        if(request)Log("SUPPORT %s: its second wave (%s) %lu s after request %u is out",kCalls[catalog].name,
+                       kCalls[f.catalog].name,f.afterMs/1000,request);
+        else Log("SUPPORT %s: its second wave (%s) in %lu s",kCalls[catalog].name,kCalls[f.catalog].name,f.afterMs/1000);
         return;
     }
     Log("SUPPORT %s: no room for its second wave (8 waiting)",kCalls[catalog].name);
 }
+void SupportFollowUpSettle(std::uint32_t request,bool out) noexcept {
+    if(!request)return;
+    for(auto& f:followUps) {
+        if(f.catalog<0 || f.request!=request)continue;
+        if(out){f.request=0;f.due=GameMs()+f.afterMs;Log("SUPPORT request %u out: its second wave (%s) in %lu s",request,
+                                                        kCalls[f.catalog].name,f.afterMs/1000);}
+        else {Log("SUPPORT request %u came to nothing: its second wave (%s) is not called",request,kCalls[f.catalog].name);f=FollowUp{};}
+    }
+}
 void SupportFollowUpTick() noexcept {
     const ULONGLONG ms=GameMs();
     for(auto& f:followUps) {
-        if(f.catalog<0 || ms<f.due)continue;
-        if(SupportCallReadiness().state==SupportReady::planning) {   // the call before it still planned: its turn comes
+        if(f.catalog<0 || f.request || ms<f.due)continue;
+        if(SupportCallReadiness().state==SupportReady::planning) {   // another call still planned: its turn comes
             if(!f.waited)Log("SUPPORT second wave %s: waiting for the call being planned",kCalls[f.catalog].name);
             f.waited=true;
             continue;

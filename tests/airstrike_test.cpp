@@ -187,12 +187,29 @@ int main() {
      Check(ported::Disown(record) && record[0]==0 && record[4]==3,"un-owned: owned and NEW cleared, stars left");
      Check(!ported::Disown(record),"a record not owned stays as it is");}
 
-    // ---- A sortie's second wave: called for no pt ----
+    // ---- A sortie's second wave: called for no pt, only once its first is out ----
     {int combo=-1;for(int i=0;i<kCallCount;++i)if(kCalls[i].then>=0)combo=i;
      Check(combo>=0,"a combined sortie exists");
      const float at[3]={0,0,0};
-     SupportFollowUpQueue(combo,at);gameMs+=kCalls[combo].thenMs;SupportFollowUpTick();
-     Check(unpaidCalls==1,"the second wave is called unpaid (paid with its first)");}
+     SupportFollowUpQueue(combo,at,0);gameMs+=kCalls[combo].thenMs-1;SupportFollowUpTick();
+     Check(unpaidCalls==0,"not before then_after");
+     gameMs+=1;SupportFollowUpTick();
+     Check(unpaidCalls==1,"the second wave is called unpaid (paid with its first)");
+     SupportFollowUpTick();Check(unpaidCalls==1,"called once");
+     // Online: held under the first's open request (2026-10-27 review: a first refused and refunded brought its second free).
+     SupportFollowUpQueue(combo,at,41);gameMs+=kCalls[combo].thenMs*4;SupportFollowUpTick();
+     Check(unpaidCalls==1,"the first's request still open: no second wave however long");
+     SupportFollowUpSettle(40,false);SupportFollowUpSettle(41,false);gameMs+=kCalls[combo].thenMs*4;SupportFollowUpTick();
+     Check(unpaidCalls==1,"the first came to nothing (refused, timed out, cancelled, interrupted): its second never comes");
+     SupportFollowUpSettle(41,true);gameMs+=kCalls[combo].thenMs;SupportFollowUpTick();
+     Check(unpaidCalls==1,"forgotten: a later outcome of that id brings nothing");
+     SupportFollowUpQueue(combo,at,42);gameMs+=kCalls[combo].thenMs;SupportFollowUpTick();
+     SupportFollowUpSettle(42,true);SupportFollowUpTick();
+     Check(unpaidCalls==1,"out now: its wait starts from now, not from the request");
+     gameMs+=kCalls[combo].thenMs;SupportFollowUpTick();
+     Check(unpaidCalls==2,"the first made: its second wave comes then_after later");
+     SupportFollowUpQueue(combo,at,43);ResetSupportFollowUps();SupportFollowUpSettle(43,true);gameMs+=kCalls[combo].thenMs;
+     SupportFollowUpTick();Check(unpaidCalls==2,"a new mission forgets a held one");}
 
     // ---- Installation leaves every stock radio call native ----
     image=static_cast<unsigned char*>(VirtualAlloc(nullptr,0x2000000,MEM_RESERVE|MEM_COMMIT,PAGE_EXECUTE_READWRITE));

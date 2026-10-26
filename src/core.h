@@ -1,4 +1,4 @@
-// The core's entry points (crew.cpp, mission.cpp, loadout.cpp, overlay.cpp), which plugin.cpp installs in
+// The core's entry points (crew.cpp, mission.cpp, loadout.cpp), which plugin.cpp installs in
 // order. Included by crew.h.
 #pragma once
 #include <cstdint>

@@ -1936,7 +1936,12 @@ def sortie_copies_agree() -> None:
     assert 'SortieGuide(j,kind,arms,pos,nose,lead,height,ms,want,speed,gunsOk,missileOk)' in jet and 'SortieFire(*j,v,pos,arms,ms);' in jet
     assert 'SortieStruck(*k.j,object)' in combat and 'SortieLockMs(j,kLockMs)' in combat
     assert 'out->sortie=c.sortie;' in air and 'void SupportFollowUpTick() noexcept' in air
-    assert 'SupportFollowUpQueue(index,target);' in src('src/support_dispatch.cpp')
+    dispatch = src('src/support_dispatch.cpp')
+    # The second wave goes with its first's pt (2026-10-27 review): queued once the first is made offline, held under its
+    # open request online and settled by its outcome.
+    assert 'else if(offlineFollowUp)SupportFollowUpQueue(catalog,at,0);' in dispatch
+    assert 'SupportFollowUpQueue(index,target,localRequest.id);' in dispatch
+    assert 'SupportFollowUpSettle(request,true);' in dispatch and 'SupportFollowUpSettle(request,false);' in dispatch
     assert 'GuardedTick(kStepFollowUp,&SupportFollowUpTick);' in src('src/crew.cpp') and 'ResetSupportFollowUps();' in src('src/mission.cpp')
     heli = src('src/heli.cpp')
     assert 'void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept' in heli and 'SortieFly(h,s,w)' in heli

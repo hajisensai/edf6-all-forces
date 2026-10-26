@@ -111,7 +111,8 @@ enum class PreparedKind : std::uint8_t { missionCrew,dynamicDrone };
 bool ValidPreparedDronePlan(const Plan&) noexcept;
 constexpr std::uint32_t kBeginRequesterMetadata=0x52565050u;
 // Request statuses kept per requester (host) and for this machine's own requests (any machine): the map's call and the
-// sea rescue are separate requests, each told its own outcome even when the other came later.
+// sea rescue are separate requests, each told its own outcome even when the other came later. This machine never has
+// more than this many requests waiting at once (Session::Submit refuses another): each is told its outcome.
 constexpr std::uint32_t kRecentRequests=4;
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
 // RESULT !ok with this reserved index acknowledges processing the host's CANCEL. A guest-local
@@ -238,6 +239,8 @@ private:
     bool Broadcast(Message message) noexcept;
     void Cancel(std::uint32_t id,bool broadcast,RequestStatus reason=RequestStatus::cancelled) noexcept;
     void ClearTransactions() noexcept;
+    void InterruptLocalRequests() noexcept;   // this machine's requests still waiting: told interrupted
+    std::uint32_t LocalWaiting() const noexcept;
     bool HasSpawned() const noexcept;
     void Welcome(std::uint32_t peer) noexcept;
     void HostRequest(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;

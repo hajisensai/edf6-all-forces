@@ -609,14 +609,15 @@ HUDTEXT(versionFeatGravity,L"gravity gun grabs and throws",L"重力枪抓取与�
 HUDTEXT(versionFeatFloatGun,L"float guns",L"悬浮炮同步",L"懸浮炮同步",L"浮遊砲の同期")
 HUDTEXT(versionFeatBarrage,L"the long-range barrages (not seen by them)",L"远程炮击（对方看不到）",L"遠程砲擊（對方看不到）",L"長距離砲撃（相手には見えない）")
 HUDTEXT(versionFeatPlayerVehicle,L"players' own loaded jets (stock for everyone otherwise)",L"玩家自己召唤的载具挂载（否则全员原版）",L"玩家自己召喚的載具掛載（否則全員原版）",L"自分で要請した機体の搭載（それ以外は全員標準）")
-HUDTEXT(versionFeatUltimate,L"the ultimate strike (others see the stock beam)",L"终极支援天罚（其他人看到原版光束）",L"終極支援天罰（其他人看到原版光束）",L"究極支援「天罰」（他の人には標準のビーム）")
-// The ultimate strike's caller online (ultimate.cpp SayOldPeers): a peer without its channel sees the stock satellite beam.
+HUDTEXT(versionFeatUltimate,L"the ultimate strike (not seen by them)",L"终极支援天罚（对方看不到）",L"終極支援天罰（對方看不到）",L"究極支援「天罰」（相手には見えない）")
+// The ultimate strike's caller online (ultimate.cpp SayOldPeers): a peer without its channel sees nothing of it.
 HUDTEXT(ultimateOldPeers,L"Some teammates cannot see this ultimate (no ultimate channel)",L"部分队员看不到这次天罚（缺少天罚联机通道）",L"部分隊員看不到這次天罰（缺少天罰連線通道）",L"一部の隊員にはこの天罰が見えません（天罰の通信路なし）")
 HUDTEXT(ultimateRefused,L"The ultimate did not start: its effects are not installed, or too many play at once",L"天罚未能开始：特效未安装，或同时进行的已满",
         L"天罰未能開始：特效未安裝，或同時進行的已滿",L"天罰を開始できません：エフェクト未インストール、または同時実行数が上限です")
 HUDTEXT(strikeNoCaller,L"No player of this machine to call it",L"找不到本机玩家，无法呼叫",L"找不到本機玩家，無法呼叫",L"このマシンのプレイヤーがいないため要請できません")
 HUDTEXT(strikeStarted,L"%ls: incoming",L"%ls 已开始",L"%ls 已開始",L"%ls 開始")
-// A barrage call that could not start (airstrike.cpp RadioStartHook, barrage.cpp BarrageResult): the stock bombers fly.
+// A barrage from the map's bar that could not start (airstrike.cpp SupportStrikeAt, barrage.cpp BarrageResult): nothing
+// fires and its pt are not taken.
 HUDTEXT(barrageRefused,L"Barrage did not start (%ls)",L"炮击未能开始（%ls）",L"砲擊未能開始（%ls）",L"砲撃を開始できません（%ls）")
 HUDTEXT(barrageFull,L"too many barrages at once",L"同时进行的炮击已达上限",L"同時進行的砲擊已達上限",L"同時に行える砲撃の上限です")
 HUDTEXT(barrageNoHook,L"this EDF.dll's rockets cannot be steered",L"此版 EDF.dll 无法接管炮弹飞行",L"此版 EDF.dll 無法接管砲彈飛行",L"この EDF.dll では砲弾の弾道を制御できません")
