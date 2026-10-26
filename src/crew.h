@@ -777,6 +777,9 @@ bool InstallBulletPass() noexcept;
 bool InstallJetProps() noexcept;                   // jetprops.cpp: from InstallJets
 bool InstallBoosters() noexcept;                   // booster.cpp: the carrier's nozzle flames (stock Booster)
 bool InstallShields() noexcept;                    // shield.cpp: the Shield Bearer's shield lets slow things through
+bool InstallBodyBox() noexcept;                    // body_box.cpp: before InstallMissiles and InstallJets
+// body_box.cpp: physics body (wrapper) `body`'s world box, min xyz then max xyz; false without one
+bool BodyWorldBox(const void* body,float* box) noexcept;
 // shield.cpp: whether a round (its candidate collector) passes a shield layer's body (slow: true, so it is left out)
 bool ShieldLetsThrough(void* collector,std::uint32_t body) noexcept;
 // shield.cpp: a fast vehicle's velocity (m/s) kept from crossing a hostile shield's face; the speed it lost

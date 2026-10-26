@@ -98,9 +98,11 @@ constexpr bool ShooterIsAttacker(const Facts& f,Shooter by) noexcept {
 // named a player for (`ownerIsPlayer`: this machine's) must spare that player's vehicle as the vehicle-owned round spares
 // it. The stock collector leaves out only the owner itself, by pointer (0x232AA0 step 1, core +0x9A8; its base's single
 // ignored object +0x30 is 0 for bullets: docs/bullet-pass-re.md section 3.2), nothing along the owner's ride: the round,
-// made at the muzzle inside the vehicle's own collision, would hit it. The rounds' blasts need nothing: the
-// IndirectFireUnit's blast hurts only what is hostile to its team (+0xD0, the owner's +0x314: docs/carrier-laser-re.md),
-// and the player's vehicle is on the player's side. Offline the owner is never the player (the vehicle stays it), and
+// made at the muzzle inside the vehicle's own collision, would hit it. Blasts are not this test's: the IndirectFireUnit's
+// hurts only what is hostile to its team (+0xD0, the owner's +0x314: docs/carrier-laser-re.md), but a weapon a player
+// drives carries the friendly-fire flag (weapon+0x8B6, docs/swarm-team-re.md) and its round's blast takes its own vehicle
+// too (2026-10-26, the Apocalypse's missile: -175 a burst 6.8 m off); the plugin missiles hold their burst while it would
+// reach the launcher (fuze.h). Offline the owner is never the player (the vehicle stays it), and
 // the test is off besides, so the stock path is untouched.
 constexpr bool SparesRide(bool session,bool ownerIsPlayer,const void* ownerVehicle,const void* target) noexcept {
     return session && ownerIsPlayer && ownerVehicle && ownerVehicle==target;

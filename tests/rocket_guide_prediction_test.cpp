@@ -17,6 +17,10 @@ void Log(const char*,...) noexcept{}
 bool TvSteer(unsigned char*) noexcept{return false;}
 void TvAfter(unsigned char*) noexcept{}
 void ResetTv() noexcept{}
+// The warhead safety's launcher lookup (missile.cpp Launcher): these rounds have no owner and no blast.
+bool BodyWorldBox(const void*,float*) noexcept{return false;}
+int VehicleClassOf(const void*) noexcept{return -1;}
+bool IsHelicopter(const void*) noexcept{return false;}
 }
 int main(){
     using namespace crew;

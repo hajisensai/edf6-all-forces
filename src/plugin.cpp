@@ -1237,6 +1237,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     Log("ROOM isolation=%d",InstallModRoom());
     Log("SUPPORT soldiers=%d",InstallSupportSoldiers());
     InstallBody506();       // the one 506 physics hook: before the jets, the carrier and the player jets
+    InstallBodyBox();       // physics bodies' world boxes: the shield, the missiles' warhead safety
     InstallBulletPass();    // the bullets' candidate hook: the jets' wingmen and the sidecar's passengers, whatever the heli profile
     if(heli) {
         InstallDoorGuns();  // the 410's door guns are part of the heli pilot
