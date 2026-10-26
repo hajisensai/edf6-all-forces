@@ -235,6 +235,31 @@ void DamageStatsUi(const float*,const int*,int n,int,int) noexcept { sceneStatsT
 bool sceneMarkOn=false;float sceneMark[3]{};
 bool NpcMarkReadout(float* at) noexcept { if(sceneMarkOn)std::memcpy(at,sceneMark,12);return sceneMarkOn; }
 // The Q marks (qmark.cpp) with it: ours on that enemy, a teammate's (P2) on another one, a teammate's (P3) point.
+// The supports' warnings (support_warning.cpp, not linked here): in the map scenes a barrage's red area round a point ahead
+// (its words and seconds over it), a guard heli's route in from the edge with its circle at the point, and the armed
+// support's dashed preview under the pointer.
+bool sceneWarnings=false;
+struct SceneCircle { float centre[3]; float radius; };
+void SceneRing(const SceneCircle& c,WarningView& v) noexcept {
+    v.closed=true;v.points=48;
+    for(int i=0;i<48;++i){const float a=6.2831853f*static_cast<float>(i)/48.0f;
+        v.pt[i][0]=c.centre[0]+c.radius*std::cos(a);v.pt[i][1]=c.centre[1];v.pt[i][2]=c.centre[2]+c.radius*std::sin(a);}
+    std::memcpy(v.label,c.centre,12);
+}
+int SupportWarningViews(WarningView* views,int most) noexcept {
+    if(!sceneWarnings || most<3)return 0;
+    views[0]=WarningView{};views[0].look=warning::Look::strike;SceneRing({{260.0f,0.0f,150.0f},95.0f},views[0]);
+    wcscpy_s(views[0].text,L"火箭齐射 9s");
+    views[1]=WarningView{};views[1].look=warning::Look::route;views[1].closed=false;views[1].points=2;
+    const float from[3]={-900.0f,150.0f,-650.0f},to[3]={-120.0f,0.0f,-220.0f};
+    std::memcpy(views[1].pt[0],from,12);std::memcpy(views[1].pt[1],to,12);std::memcpy(views[1].label,from,12);
+    wcscpy_s(views[1].text,L"武装直升机·守点");
+    views[2]=WarningView{};views[2].look=warning::Look::orbit;SceneRing({{to[0],to[1],to[2]},120.0f},views[2]);
+    if(most<4)return 3;
+    views[3]=WarningView{};views[3].look=warning::Look::strike;views[3].preview=true;SceneRing({{-40.0f,0.0f,260.0f},275.0f},views[3]);
+    wcscpy_s(views[3].text,L"天罚");
+    return 4;
+}
 int QMarkViews(QMarkView* to,int max) noexcept {
     if(!sceneMarkOn || max<3)return 0;
     to[0]=QMarkView{true,true,-1,{sceneMark[0],sceneMark[1],sceneMark[2]}};
@@ -590,15 +615,38 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
         {L"潜水母舰支援",SupportIcon::sub},{L"炮舰机·守点",SupportIcon::gunship},{L"炮舰机·跟随",SupportIcon::gunship},
         {L"步兵小队（4人）",SupportIcon::squad},{L"步兵大队（12人）",SupportIcon::platoon},{L"坦克·有人",SupportIcon::tank},
         {L"坦克·空车交付",SupportIcon::tank},{L"装甲运兵车·有人",SupportIcon::apc},{L"装甲运兵车·空车交付",SupportIcon::apc},
-        {L"民用轻卡·有人",SupportIcon::truck},{L"民用轻卡·空车交付",SupportIcon::truck}};
+        {L"民用轻卡·有人",SupportIcon::truck},{L"民用轻卡·空车交付",SupportIcon::truck},
+        // The sorties and the strikes (2026-10-26: every support on the bar): more rows than a column holds at 1080 lines.
+        {L"直升机扫射",SupportIcon::heli},{L"导弹猎手",SupportIcon::heli},{L"死亡回旋",SupportIcon::heli},{L"俯冲扫射",SupportIcon::jet},
+        {L"导弹掠过",SupportIcon::jet},{L"地毯轰炸",SupportIcon::jet},{L"打了就跑",SupportIcon::jet},{L"天顶导弹雨",SupportIcon::jet},
+        {L"锤与砧",SupportIcon::heli},{L"狼群",SupportIcon::jet},{L"引导打击",SupportIcon::gunship},
+        {L"火箭齐射",SupportIcon::barrage},{L"精确制导火箭",SupportIcon::barrage},{L"温压齐射",SupportIcon::barrage},
+        {L"子母火箭",SupportIcon::barrage},{L"徐进弹幕",SupportIcon::barrage},{L"同时弹着射击",SupportIcon::barrage},
+        {L"重型臼炮",SupportIcon::barrage},{L"巡航导弹",SupportIcon::barrage},{L"弹道导弹",SupportIcon::barrage},
+        {L"天罚",SupportIcon::satellite}};
     sceneCmd.supports=static_cast<int>(sizeof(kCatalog)/sizeof(kCatalog[0]));
     for(int i=0;i<sceneCmd.supports;++i){wcscpy_s(sceneCmd.support[i].name,kCatalog[i].name);sceneCmd.support[i].icon=kCatalog[i].icon;const wchar_t* v=mapbtn::VariantOf(kCatalog[i].name);sceneCmd.support[i].variant=!v ? SupportVariant::none : std::wcscmp(v,L"守点")==0 ? SupportVariant::guard : std::wcscmp(v,L"跟随")==0 ? SupportVariant::follow : std::wcscmp(v,L"有人")==0 ? SupportVariant::crewed : SupportVariant::empty;}
+    // Their prices (support_dispatch.cpp SupportCallPrice) and the pool: the dear ones past it red.
+    sceneCmd.points=6180;sceneCmd.pointsMost=30000;
+    for(int i=0;i<sceneCmd.supports;++i){sceneCmd.support[i].price=1800+(i*1300)%13200;sceneCmd.support[i].afford=sceneCmd.support[i].price<=sceneCmd.points;}
+    sceneCmd.support[sceneCmd.supports-1].price=15000;sceneCmd.support[sceneCmd.supports-1].afford=false;
+    sceneWarnings=!pad;
+    // Their tabs (support_call.h SupportTab): the strikes by their icons, the infantry and vehicles on the ground, the
+    // sorties by their names (no "·"), the rest in the air.
+    for(int i=0;i<sceneCmd.supports;++i) {
+        const SupportIcon ic=sceneCmd.support[i].icon;
+        sceneCmd.support[i].tab=ic==SupportIcon::barrage || ic==SupportIcon::satellite ? SupportTab::strike :
+            ic==SupportIcon::squad || ic==SupportIcon::platoon || ic==SupportIcon::tank || ic==SupportIcon::apc || ic==SupportIcon::truck ?
+            SupportTab::ground : !mapbtn::VariantOf(sceneCmd.support[i].name) && ic!=SupportIcon::sub ? SupportTab::sortie : SupportTab::air;
+    }
+    sceneCmd.supportTab=static_cast<int>(SupportTab::air);
     sceneCmd.supportArmed=payload ? 3 : -1;sceneCmd.supportPick=3;
     // The payload scenes arm the platoon row and open its composition (map_buttons.h ComposePanel): two squads in, a
     // Wing Diver and a Fencer one, of its twelve seats.
     sceneCmd.composeEntry=-1;sceneCmd.composeSeats=0;sceneCmd.compose=SupportLoadout{};
     if(payload) {
         sceneCmd.supportArmed=sceneCmd.supportPick=sceneCmd.composeEntry=10;sceneCmd.composeSeats=12;sceneCmd.compose.count=8;
+        sceneCmd.supportTab=static_cast<int>(SupportTab::ground);   // the platoon's tab shown
         for(int i=0;i<4;++i){sceneCmd.compose.soldier[i]=SupportWeapon::wingLance;sceneCmd.compose.soldier[4+i]=SupportWeapon::fencerCannon;}
     }
     sceneCmd.supportReady=payload ? SupportReadiness{SupportReady::cooldown,17} : SupportReadiness{SupportReady::ready,0};
@@ -701,8 +749,12 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
                 }
             }
         } else if(sceneComposeHitCount){++textFailed;std::printf("FAIL composition clickable with none armed: %d\n",sceneComposeHitCount);}
-        int reached=0;for(int i=0;i<sceneCmd.supports;++i)reached+=reach[i];
-        if(reached!=sceneCmd.supports){++textFailed;std::printf("FAIL support entries clickable: %d of %d\n",reached,sceneCmd.supports);}
+        // Every entry of the tab shown reachable, every tab too (support_call.h SupportTab, map_buttons.h SupportTabHit).
+        int reached=0,onTab=0;
+        for(int i=0;i<sceneCmd.supports;++i)if(static_cast<int>(sceneCmd.support[i].tab)==sceneCmd.supportTab){++onTab;reached+=reach[i];}
+        if(reached!=onTab){++textFailed;std::printf("FAIL support entries clickable: %d of %d\n",reached,onTab);}
+        int tabs=0;for(int i=0;i<sceneSupportHitCount;++i)tabs+=mapbtn::SupportTabOfHit(sceneSupportEntry[i])>=0;
+        if(tabs!=kSupportTabs){++textFailed;std::printf("FAIL support tabs clickable: %d\n",tabs);}
         for(int i=0;i<sceneButtons;++i) {
             const float* b=sceneButton[i];
             if(b[0]<0.0f || b[2]>static_cast<float>(width) || b[1]<0.0f || b[3]>1080.0f){++textFailed;std::printf("FAIL map button %d off the screen\n",i);}
@@ -839,7 +891,7 @@ void MapScene(const std::wstring& dir,const wchar_t* name,float height,float pit
                 std::printf("FAIL map UI overlay: %s / %s\n",Narrow(a.text).c_str(),Narrow(b.text).c_str());}}
     }
     std::fclose(out);out=nullptr;
-    hasMap=false;hasMapPayload=false;config.hudScale=previousScale;
+    hasMap=false;hasMapPayload=false;sceneWarnings=false;config.hudScale=previousScale;
     std::printf("%ls\n",path.c_str());
 }
 // The damage statistics' page (hud_stats.inc) on its own scenes: a mission's book as the hook would fill it (my weapons

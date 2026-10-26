@@ -720,9 +720,10 @@ def calls_table_consistent() -> None:
     for c in calls.CALLS:
         assert c.kind in calls.KINDS, c.id
         assert c.brings in ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'ultimate', 'gravity', 'barrage'), c.id
-        # A barrage: its kind one of barrage_plan.h's, its damage a round, an integer mark as kCalls' (BarrageOf).
+        # A barrage: its kind one of barrage_plan.h's, its damage a round, an integer mark as kCalls'; the ultimate its show's.
         assert bool(c.barrage) == (c.brings == 'barrage') and (not c.barrage or c.barrage in calls.BARRAGE_KINDS), c.id
-        assert (c.damage > 0) == (c.brings == 'barrage') and (c.brings != 'barrage' or float(c.mark).is_integer()), c.id
+        assert (c.damage > 0) == (c.brings in ('barrage', 'ultimate')) and \
+            (c.brings != 'barrage' or float(c.mark).is_integer()), c.id
         # A sortie: a pass of SORTIE_PASSES on a jets / helis call, no follow version; its second wave another such call.
         assert not c.sortie or (c.sortie in calls.SORTIE_PASSES and c.brings in ('jets', 'helis') and not c.follow), c.id
         assert not c.sortie or (c.sortie.startswith('heli')) == (c.brings == 'helis'), c.id
@@ -956,12 +957,12 @@ def thrown_drones_marked_and_wired() -> None:
 
 
 # ---------------------------------------------------------------- every call's SGO and text row
-# The kinds a call brings (calls.Call.brings): tools/call_weapons.py weapon_sgo / _text_row branch on each. The 2026-10-20
-# merge dropped ultimate_sgo's `return dsgo.write(doc)` and the ultimate text branch's `return row` and nothing offline saw
-# it: these run every call through both, on synthetic templates (no game: CI) and on the real ones (with the game).
-CALL_KINDS = ('jets', 'helis', 'sub', 'vehicle', 'throw', 'gun', 'ultimate', 'gravity', 'barrage')
-_KM6_DAMAGE = [90.0, 8.0, 0.0, 10.0, 0.800000011920929, 0.699999988079071, 1.0]   # the KM6 bomber call's AmmoDamage
-_STOCK_PT = [1020.0, 21.0, 1.0, 10.0, 1.0, 0.30000001192092896, 0.0]          # a call's ReloadTime star curve
+# The kinds a live call brings (calls.Call.brings, not on_map): tools/call_weapons.py weapon_sgo / _text_row branch on each.
+# The 2026-10-20 merge dropped a builder's `return dsgo.write(doc)` and a text branch's `return row` and nothing offline saw
+# it: these run every live call through both, on synthetic templates (no game: CI) and on the real ones (with the game).
+# A support on the map (on_map: the flown calls, the barrages, the ultimate) has neither: both refuse it.
+CALL_KINDS = ('vehicle', 'throw', 'gun', 'gravity')
+_STOCK_PT = [1020.0, 21.0, 1.0, 10.0, 1.0, 0.30000001192092896, 0.0]          # KM6's ReloadTime star curve (a call's)
 _SAT_DAMAGE = [670.0, 8.0, 0.0, 10.0, 0.800000011920929, 0.699999988079071, 1.0]   # Spritefall Destroy's AmmoDamage
 _SAT_PT = [3200.0, 21.0, 1.0, 10.0, 1.0, 0.30000001192092896, 0.0]                 # ...and its ReloadTime
 
@@ -976,10 +977,7 @@ def _dnode(v):
 def _synthetic_call_sgo(c: calls.Call) -> bytes:
     """A stand-in for call `c`'s stock template with the fields its kind's builder reads and writes."""
     k = c.brings
-    if k in ('jets', 'helis', 'sub'):
-        root = {'AmmoHitSizeAdjust': 0.0, 'ReloadTime': list(_STOCK_PT),
-                'Ammo_CustomParameter': [0.0, 'bomber', [1.0, 3.0, 0.5], 'app:/object/x.sgo']}
-    elif k == 'vehicle':
+    if k == 'vehicle':
         entry, fuel = ['app:/weapon/v_506heli_gatling01_l.sgo', [1.0, 0.0]], ['app:/weapon/v_fueltank.sgo', [1.0]]
         if c.ground:
             n = 2 if len(vc.GROUND_VEHICLES[c.ground].slots) > 2 else len(cw.vehicle_weapons(c))
@@ -999,15 +997,6 @@ def _synthetic_call_sgo(c: calls.Call) -> bytes:
         root.update({key: 0.0 for key in cw.GUN_SCALARS})
         root.update({'AmmoAlive': 40.0, 'AmmoColor': [0.25, 0.5, 0.75, 1.0], 'AmmoClass': 'LaserBullet01',
                      'Ammo_CustomParameter': [1.0]})
-    elif k == 'ultimate':
-        root = {'AmmoHitSizeAdjust': 0.0, 'AmmoDamage': list(_SAT_DAMAGE), 'ReloadTime': list(_SAT_PT),
-                'Ammo_CustomParameter': [0.0, 0.0, 0.0, 0.0, [0.0, 0.0, 0.0, 0.0, 'LaserBullet02'],
-                                         list(cw.ULTIMATE_VOICES[0])],
-                'Ammo_EquipVoice': list(cw.ULTIMATE_VOICES[1])}
-    elif k == 'barrage':
-        root = {'AmmoHitSizeAdjust': 1.0, 'ReloadTime': list(_STOCK_PT), 'AmmoDamage': list(_KM6_DAMAGE),
-                'Ammo_CustomParameter': [30.0, 1.0, [0.0, 2.0, 30.0], ['fire', 'hit', 'after']],
-                'Ammo_EquipVoice': ['equipped', 'unavailable']}
     elif k == 'gravity':
         root = {'AmmoHitSizeAdjust': 0.0, 'AmmoSpeed': [30.0, 8.0, 0.0, 10.0, 0.5, 0.5, 1.0], 'AmmoAlive': 1.0,
                 'AmmoColor': [1.0, 0.0, 0.0, 1.0], 'AmmoSize': 0.5, 'AmmoDamage': 0.0}
@@ -1020,9 +1009,7 @@ def _synthetic_call_sgo(c: calls.Call) -> bytes:
 def _synthetic_call_text(c: calls.Call, template: bytes) -> dsgo.Node:
     """A stand-in for call `c`'s template's menu row: [name, description, stat lines] as its stock one is laid out."""
     k = c.brings
-    if k in ('jets', 'helis', 'sub'):
-        stats = [['Planes', '3'], ['Reload', '$0pt', list(_STOCK_PT)]]
-    elif k == 'vehicle':
+    if k == 'vehicle':
         stats = [['Re-request', '$0pt', [8000.0, 21.0, 0.0, 8.0, 1.0, 0.5, 0.0]], ['Durability', '1000'],
                  ['Fuel', '100'], ['Fuel cost', '1']]
     elif k == 'throw':
@@ -1030,12 +1017,6 @@ def _synthetic_call_text(c: calls.Call, template: bytes) -> dsgo.Node:
                  ['Reload', '$0 sec', [8.0, 21.0, 2.0, 8.0, 1.0, 0.5, 1.0]], ['Spread', '75.0m']]
     elif k == 'gun':
         stats = [[f'line {i}', '', [old, *stars, -1.0]] for i, (old, stars, _) in enumerate(cw.gun_stats(template))]
-    elif k == 'ultimate':
-        stats = [['Damage', '$0', list(_SAT_DAMAGE)], ['Attack Range', 'Radius 70.0m'], ['Reload', '$0pt', list(_SAT_PT)],
-                 ['Laser Range', '$0m', [600.0, 16.0, 2.0, 10.0, 0.8, 1.0, 1.0]], ['Shots', '160'], ['Zoom', '4.0x']]
-    elif k == 'barrage':
-        stats = [['Damage', '$0', list(_KM6_DAMAGE)], ['Hit Error', 'Radius 8.0m'], ['Reload', '$0pt', list(_STOCK_PT)],
-                 ['Shots', '70x2 Units'], ['Blast Area', '----']]
     else:   # gravity
         stats = [['Projection Range', '$0m', [30.0, 8.0, 0.0, 10.0, 0.5, 0.5, 1.0]], ['Lock-on Speed', '1.0x'],
                  ['Lock-on Range', '300m'], ['Zoom', '2.0x']]
@@ -1050,12 +1031,9 @@ def _check_call_outputs(c: calls.Call, out: object, row: object, lang: str, dura
     if 'name.en' in r.names.values():
         assert r.get('name.en') == calls.call_name(c, 'EN'), (c.id, r.get('name.en'))
     k = c.brings
-    if k in ('jets', 'helis', 'sub', 'throw', 'ultimate', 'gravity', 'barrage'):
+    if k in ('throw', 'gravity'):
         assert r.get('AmmoHitSizeAdjust') == float(c.mark), (c.id, r.get('AmmoHitSizeAdjust'), c.mark)
-    if k in ('jets', 'helis', 'sub'):
-        assert r.get('ReloadTime').items[0] == c.reload, c.id
-        assert r.get('Ammo_CustomParameter').items[2].items[1] == c.count, c.id
-    elif k == 'vehicle':
+    if k == 'vehicle':
         assert r.get('ReloadTime').items[0] == c.reload, c.id
         assert r.get('Ammo_CustomParameter').items[4].items[2] == cw._object_path(c), c.id
         assert r.get('use_underground') == (1.0 if c.underground else 0.0), c.id
@@ -1067,31 +1045,13 @@ def _check_call_outputs(c: calls.Call, out: object, row: object, lang: str, dura
             field = r.get(key)
             assert (field.items[0] if isinstance(field, dsgo.Node) else field) == value, (c.id, key)
         assert r.get('AmmoClass') == 'SolidBullet01' and r.get('AmmoAlive') == cw.GUN_LIFE, c.id
-    elif k == 'ultimate':
-        # The damage and the pt the call asks for at every star count (a call is owned at 0 stars: the 2026-10-20 2400).
-        for stars in range(11):
-            assert cw.star_value(r.get('AmmoDamage'), stars) == cw.ULTIMATE_DAMAGE, \
-                (c.id, stars, dsgo.to_py(r.get('AmmoDamage')))
-            assert cw.star_value(r.get('ReloadTime'), stars) == c.reload, (c.id, stars, dsgo.to_py(r.get('ReloadTime')))
-        voices = (*r.get('Ammo_CustomParameter').items[5].items, *r.get('Ammo_EquipVoice').items)
-        assert all(v == '' for v in voices), (c.id, 'its radio lines silenced', voices)
-    elif k == 'barrage':
-        # The pt at every star count (owned at 0 stars), the bombers' radio lines silenced. AmmoDamage left the KM6's: the
-        # stock bombers read it a bomb, and they fly whenever the plugin does not take the call (each round's damage is
-        # kBarrages', src/calls.inc).
-        assert dsgo.to_py(r.get('AmmoDamage')) == _KM6_DAMAGE, (c.id, "the stock bombers' damage changed",
-                                                               dsgo.to_py(r.get('AmmoDamage')))
-        for stars in range(11):
-            assert cw.star_value(r.get('ReloadTime'), stars) == c.reload, (c.id, stars, dsgo.to_py(r.get('ReloadTime')))
-        voices = (*r.get('Ammo_CustomParameter').items[3].items, *r.get('Ammo_EquipVoice').items)
-        assert all(v == '' for v in voices), (c.id, 'its radio lines silenced', voices)
     elif k == 'gravity':
         assert r.get('AmmoSpeed').items[0] == cw.GRAVITY_RANGE and r.get('AmmoDamage') == 1.0, c.id
         assert dsgo.to_py(r.get('AmmoColor')) == list(cw.GRAVITY_COLOR) and r.get('AmmoSize') == cw.GRAVITY_WIDTH, c.id
     assert isinstance(row, dsgo.Node), f'{c.id} {lang}: _text_row gave {type(row).__name__}, not the row'
     assert row.items[0] == calls.call_name(c, lang) and row.items[1] == calls.call_description(c, lang), (c.id, lang)
     stats = dsgo.to_py(row.items[2])
-    if k in ('jets', 'helis', 'sub', 'vehicle'):
+    if k == 'vehicle':
         pt = [s for s in stats if len(s) == 3 and str(s[1]).startswith('$0pt')]
         assert pt and all(s[2][0] == c.reload for s in pt), (c.id, lang, stats)
     if k == 'vehicle' and durability is not None:
@@ -1100,31 +1060,28 @@ def _check_call_outputs(c: calls.Call, out: object, row: object, lang: str, dura
         assert f"'{durability:.0f}'" not in repr(stats), (c.id, lang, "a vehicle request's durability line written", stats)
     if k == 'throw':
         assert len(stats) == 2 and stats[0][2][0] == c.count and abs(stats[1][2][0] - c.reload / 60.0) < 1e-9, (c.id, stats)
-    elif k == 'ultimate':
-        assert len(stats) == 5, (c.id, lang, "the stock beam's round count left", stats)
-        damage, reload = stats[cw._ULT_DAMAGE_STAT][2], stats[cw._ULT_RELOAD_STAT][2]
-        for stars in range(11):
-            assert cw.star_value(damage, stars) == cw.ULTIMATE_DAMAGE and cw.star_value(reload, stars) == c.reload, \
-                (c.id, lang, stars, damage, reload)
-        assert str(cw.ULTIMATE_RADIUS) in stats[cw._ULT_RANGE_STAT][1], (c.id, lang, stats[cw._ULT_RANGE_STAT])
     elif k == 'gravity':
         assert len(stats) == 2 and stats[0][2][0] == cw.GRAVITY_RANGE, (c.id, lang, stats)
-    elif k == 'barrage':
-        assert len(stats) == 2, (c.id, lang, "KM6's spread and plane lines left", stats)
-        for stars in range(11):
-            assert cw.star_value(stats[0][2], stars) == c.damage and cw.star_value(stats[1][2], stars) == c.reload, \
-                (c.id, lang, stars, stats)
+
+
+def _refuses(fn: Callable[[], object]) -> bool:
+    try:
+        fn()
+    except ValueError:
+        return True
+    return False
 
 
 @test
 def every_call_kind_builds_synthetic() -> None:
-    """Every call (calls.CALLS, every kind it brings) through weapon_sgo and _text_row on stand-ins for its template
-    (no game needed: CI): the SGO comes back as bytes with its kind's fields written, each language's menu row as a
-    Node with its name, description and kind's lines; a vehicle request's durability goes on its durability line and
-    on no other kind's (the ultimate's row is not a vehicle request's)."""
-    kinds = {c.brings for c in calls.CALLS}
-    assert kinds == set(CALL_KINDS), f'a kind of call with no stand-in here: {sorted(kinds - set(CALL_KINDS))}'
-    for c in calls.CALLS:
+    """Every live call (calls.CALLS not on_map, every kind it brings) through weapon_sgo and _text_row on stand-ins for its
+    template (no game needed: CI): the SGO comes back as bytes with its kind's fields written, each language's menu row as a
+    Node with its name, description and kind's lines; a vehicle request's durability goes on its durability line and on no
+    other kind's. A support on the map gets neither (its row is a placeholder)."""
+    live = [c for c in calls.CALLS if not c.on_map]
+    kinds = {c.brings for c in live}
+    assert kinds == set(CALL_KINDS), f'a kind of call with no stand-in here: {sorted(kinds ^ set(CALL_KINDS))}'
+    for c in live:
         template = _synthetic_call_sgo(c)
         out = cw.weapon_sgo(template, c, [(0.0, 1.0, 1.0), (5.0, 10.0, 10.0)] if c.brings == 'vehicle' else None)
         text = _synthetic_call_text(c, template)
@@ -1133,6 +1090,11 @@ def every_call_kind_builds_synthetic() -> None:
             _check_call_outputs(c, out, cw._text_row(text, c, lang, 4321.0, stats), lang, 4321.0)
             if c.brings != 'vehicle':
                 _check_call_outputs(c, out, cw._text_row(text, c, lang, None, stats), lang, None)
+    stand_in = _synthetic_call_sgo(live[0])
+    for c in calls.CALLS:
+        if c.on_map:
+            assert _refuses(lambda: cw.weapon_sgo(stand_in, c)), f'{c.id}: a support on the map got a weapon SGO'
+            assert _refuses(lambda: cw._text_row(_dnode(['n', 'd', []]), c, 'EN')), f'{c.id}: a support got a menu row'
     # The star curve as EDF.dll 0xD7CE0 reads it: the satellite's damage a fifth of its base at 0 stars, its base at 5,
     # about 1.5 times at 10 (the most); its pt twice its base at 0 (a falling curve), its base at 5.
     near = lambda a, b: abs(a - b) <= 1e-6 * abs(b)   # noqa: E731  (the game's float shares, read back as doubles)
@@ -1145,10 +1107,10 @@ def every_call_kind_builds_synthetic() -> None:
 
 @test
 def every_call_kind_builds_real() -> None:
-    """With the game: every call through weapon_sgo and _text_row on its real stock template, SGO and menu rows, as
+    """With the game: every live call through weapon_sgo and _text_row on its real stock template, SGO and menu rows, as
     call_weapons.stack makes them (the vehicle requests on their families' curves, the durability shown), the same
-    checks as every_call_kind_builds_synthetic. The satellite's damage curve is still the one the flat curve was made
-    against (a fifth of its base at the 0 stars a call is owned with)."""
+    checks as every_call_kind_builds_synthetic. KM6's ReloadTime is still the curve calls.Call.pt was read off (twice its
+    base at 0 stars)."""
     import rootcpk
     game = rootcpk.DEFAULT_GAME
     if not os.path.isfile(os.path.join(game, 'Root.cpk')):
@@ -1156,12 +1118,12 @@ def every_call_kind_builds_real() -> None:
     ids = cw.row_ids(cw.stock(game, cw.TABLE))
     texts = {lang: cw._rows(dsgo.parse(cw.stock(game, rel)), rel) for lang, rel in zip(cw.LANGS, cw.TEXTS)}
     sgo = {t: cw.stock(game, f'WEAPON/{t.upper()}.SGO') for t in cw.templates()}
-    stock_damage = dsgo.parse(sgo[cw.ULTIMATE_TEMPLATE]).root.get('AmmoDamage')
-    assert abs(cw.star_value([cw.ULTIMATE_DAMAGE, *stock_damage.items[1:]], 0) - cw.ULTIMATE_DAMAGE * 0.2) < 0.01, \
-        dsgo.to_py(stock_damage)
-    families = {cw.request_family(c) for c in calls.CALLS if c.brings == 'vehicle'}
+    km6 = dsgo.parse(sgo[cw.TEMPLATE]).root.get('ReloadTime')
+    assert [round(float(x), 6) for x in km6.items] == [round(x, 6) for x in _STOCK_PT], dsgo.to_py(km6)
+    live = [c for c in calls.CALLS if not c.on_map]
+    families = {cw.request_family(c) for c in live if c.brings == 'vehicle'}
     curves = {f: cw.request_curve(game, f) for f in families}
-    for c in calls.CALLS:
+    for c in live:
         t = cw.template_of(c)
         out = cw.weapon_sgo(sgo[t], c, curves.get(cw.request_family(c)))
         durability = cw.vehicle_durability(game, c) if c.brings == 'vehicle' else None
@@ -1169,6 +1131,145 @@ def every_call_kind_builds_real() -> None:
         at = cw._template_index(ids, t)
         for lang in cw.LANGS:
             _check_call_outputs(c, out, cw._text_row(texts[lang][at], c, lang, durability, stats), lang, durability)
+
+
+@test
+def supports_on_map_pt() -> None:
+    """calls.Call.pt, what a support costs on the map: what its call weapon asked at the 0 stars the plugin granted it with.
+    A flown call's weapon had KM6's falling ReloadTime curve (twice its base at 0 stars: 2040 for KM6's own 1020), a
+    barrage's and the ultimate's flat curves (their base); src/calls.inc carries it last in kCalls' and in kStrikes' rows.
+    The supports are exactly the flown calls, the barrages and the ultimate; every other call has no pt."""
+    assert round(cw.star_value(_STOCK_PT, 0)) == 2040, cw.star_value(_STOCK_PT, 0)
+    on_map = [c for c in calls.CALLS if c.on_map]
+    assert {c.brings for c in on_map} == {'jets', 'helis', 'sub', 'barrage', 'ultimate'}
+    assert len(on_map) == 42 and [c for c in on_map if c.flown] == list(calls.FLOWN), len(on_map)
+    assert list(calls.STRIKES) == [c for c in on_map if c.brings == 'barrage'] + [c for c in on_map if c.brings == 'ultimate']
+    inc = src('src/calls.inc')
+    for c in on_map:
+        if c.flown:
+            assert c.pt == round(cw.star_value([float(c.reload), *_STOCK_PT[1:]], 0)) == round(2 * c.reload), (c.id, c.pt)
+            assert f'L"{c.id}",' in inc and f'u,{c.pt}u}},' in inc, (c.id, 'kCalls row without its pt')
+        else:
+            assert c.pt == round(c.reload), (c.id, c.pt)
+            key = c.id[len(calls.ID_PREFIX):]
+            assert f'{c.pt}u,"{c.log}",L"{key}",' in inc, (c.id, 'kStrikes row without its pt')
+    ultimate = next(c for c in on_map if c.brings == 'ultimate')
+    assert ultimate.pt == 15000 and ultimate.damage == 12000.0, (ultimate.pt, ultimate.damage)
+    for c in calls.CALLS:
+        if not c.on_map:
+            assert _refuses(lambda: c.pt), f'{c.id}: a weapon with a pt'
+
+
+def _placeholder_game_rows(game: str) -> list[str]:
+    """The table ids in the stand-in game's Mods table."""
+    return [r.items[0] for r in dsgo.parse(modfiles.read(_mods(game, cw.TABLE))).root.get('table').items]
+
+
+@test
+def supports_on_map_rows_are_placeholders() -> None:
+    """call_weapons.stack and install on a stand-in game: every support on the map (calls.Call.on_map) gets its
+    EDF6VC_RETIRED_ placeholder (its template's stock row: KM6's, the satellite's for the ultimate) at the index plan_rows
+    gives it, on a fresh table (appended, so every install has the same rows) and over a table an older release installed
+    the live rows into (kept where they were); the SGOs that older install wrote for them go (ours), one another tool
+    wrote under that name stays; every live row (vehicle requests, thrown drones, guns, the gravity gun) is its own,
+    unchanged; no SGO is built for a support. The placeholders and the live rows stay where they are on a reinstall."""
+    import ported_weapons as pw
+    templates = sorted({*cw.templates(), *(p.template for p in pw.PORTS)} - set(STOCK))
+    base_ids = STOCK + templates
+
+    def table(key: str, rows: list[str]) -> bytes:
+        def row(i: str) -> dsgo.Node:
+            return dsgo.Node([i, f'app:/weapon/{i}.sgo', 0.0, 1.0, 7.5, 1.0, dsgo.Node([]), 1.0, 0.0]
+                             if key == 'table' else [f'name {i}', f'about {i}', dsgo.Node([])])
+        return dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([row(i) for i in rows])], {0: key}), []))
+
+    live = [c for c in calls.CALLS if not c.on_map]
+    on_map = [c for c in calls.CALLS if c.on_map]
+
+    def fake_sgo(template: bytes, c: calls.Call, *_a: object, **_k: object) -> bytes:
+        assert not c.on_map, f'{c.id}: stack built an SGO for a support on the map'
+        return f'sgo {c.id}'.encode()
+
+    def fake_text(template: dsgo.Node, c: calls.Call, lang: str, *_a: object) -> dsgo.Node:
+        assert not c.on_map, f'{c.id}: stack wrote a live menu row for a support on the map'
+        return dsgo.Node([calls.call_name(c, lang), 'live', dsgo.Node([])])
+
+    # An install before 2026-10-26: every call's own row (the ported weapons waiting for their games), another mod's after.
+    old_release = base_ids + list(calls.IDS) + [pw.retired_id(x) for x in pw.IDS] + OTHER
+    with tempfile.TemporaryDirectory(prefix='edf6vc-onmap-') as game, \
+            patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
+            patched(cw, stock=lambda game_root, rel: table('table', base_ids) if rel == cw.TABLE else
+                    table('text_table', base_ids) if rel in cw.TEXTS else b'stock sgo',
+                    weapon_sgo=fake_sgo, _text_row=fake_text, gun_stats=lambda t: [],
+                    request_curve=lambda game_root, family=cw.EROS_REQUESTS: [(0.0, 1.0, 1.0)],
+                    vehicle_durability=lambda game_root, c: 1000.0, model_missing=lambda c: False,
+                    record_room=lambda game_root: (cw.SAVE_WEAPONS, None)), \
+            patched(pw, build=lambda game_root, stock: ({}, {p.id: 'Unavailable: test' for p in pw.PORTS})):
+        def check_rows(ids: list[str], at: dict[str, int]) -> None:
+            for c in calls.CALLS:
+                want = calls.retired_id(c.id) if c.on_map else c.id
+                assert ids[at[c.id]] == want, (c.id, at[c.id], ids[at[c.id]])
+            assert not any(c.id in ids for c in on_map), 'a support on the map kept its live row'
+            assert all(cw.sgo_file(c) not in out for c in on_map), 'an SGO was built for a support on the map'
+
+        # A fresh table: every call appended in CALLS order, the supports as placeholders of their templates' rows.
+        out = cw.stack(game)
+        ids = cw.row_ids(out[cw.TABLE])
+        at = {c.id: len(base_ids) + k for k, c in enumerate(calls.CALLS)}
+        check_rows(ids, at)
+        rows = {r.items[0]: r for r in dsgo.parse(out[cw.TABLE]).root.get('table').items}
+        for c in on_map:
+            placeholder, tpl = rows[calls.retired_id(c.id)], rows[cw.template_of(c)]
+            assert dsgo.to_py(placeholder)[1:] == dsgo.to_py(tpl)[1:], (c.id, 'not its template\'s stock row')
+            assert cw.template_of(c) == (cw.ULTIMATE_TEMPLATE if c.brings == 'ultimate' else cw.TEMPLATE), c.id
+        text = dsgo.parse(out['WEAPON/WEAPONTEXT.EN.SGO']).root.get('text_table').items
+        for c in on_map:
+            assert text[at[c.id]].items[0] == calls.retired_name(c, 'EN'), (c.id, text[at[c.id]].items[0])
+        for c in live:
+            assert out[cw.sgo_file(c)] == f'sgo {c.id}'.encode() and text[at[c.id]].items[1] == 'live', c.id
+
+        # Over an older release's table: its rows stay at their indices, the supports' turned placeholders, and the SGOs
+        # it wrote for them go in the install's transaction (one another tool rewrote since stays).
+        modfiles.atomic_write(_mods(game, cw.TABLE), table('table', old_release))
+        for rel in cw.TEXTS:
+            modfiles.atomic_write(_mods(game, rel), table('text_table', old_release))
+        written = {cw.sgo_file(c): f'old {c.id}'.encode() for c in calls.CALLS}
+        for rel, data in written.items():
+            modfiles.atomic_write(_mods(game, rel), data)
+        foreign = cw.sgo_file(on_map[0])
+        modfiles.atomic_write(_mods(game, cw.MANIFEST), json.dumps(
+            {'created': sorted(written), 'replaced': [], 'written': {rel: modfiles.sha256(d) for rel, d in written.items()},
+             'rows': {c.id: old_release.index(c.id) for c in calls.CALLS}}).encode())
+        modfiles.atomic_write(_mods(game, foreign), b'another tool wrote this')
+        old_at = {c.id: old_release.index(c.id) for c in calls.CALLS}
+        with patched(cw, vehicle_needs=lambda c, request=None: [cw.vehicle_file(c)]):
+            for c in live:
+                if c.vehicle:
+                    modfiles.atomic_write(_mods(game, cw.vehicle_file(c)), b'jet')
+            cw.install(game)
+            ids = _placeholder_game_rows(game)
+            assert len(ids) == len(old_release), 'the table grew or shrank'
+            check_rows(ids, old_at)
+            assert [x for x in ids if cw.slot_of(x) is None] == base_ids + OTHER, 'another row moved'
+            for c in on_map:
+                rel = cw.sgo_file(c)
+                assert os.path.isfile(_mods(game, rel)) == (rel == foreign), (rel, 'an old SGO of ours left, or a foreign one removed')
+            for c in live:
+                assert _read(_mods(game, cw.sgo_file(c))) == f'sgo {c.id}'.encode(), c.id
+            manifest = cw.load_manifest(game)
+            assert all(manifest['rows'][c.id] == old_at[c.id] for c in calls.CALLS), 'manifest rows'
+            assert not any(cw.sgo_file(c) in manifest['written'] or cw.sgo_file(c) in manifest['created'] for c in on_map
+                           if cw.sgo_file(c) != foreign), 'a removed SGO still recorded as ours'
+            assert cw.check(game) is False   # the foreign file under a support's name is reported
+            os.remove(_mods(game, foreign))
+            assert cw.check(game), 'check of an install with the supports on the map'
+            # A reinstall keeps everything where it is.
+            cw.install(game)
+            assert _placeholder_game_rows(game) == ids
+            # Retire on rows already placeholders: still placeholders, nothing moved.
+            retired, deleted = cw.retire(game, False)
+            assert deleted == [] and cw.row_ids(retired[cw.TABLE]) == [
+                x if cw.slot_of(x) is None else cw.retired_id(cw.slot_of(x)) for x in ids]
 
 
 @test
@@ -1741,7 +1842,7 @@ def ultimate_copies_agree() -> None:
     radii = re.search(r'kModelRadius\[kModelCount\]=\{([^}]*)\}', plan)
     assert radii and [float(x.strip().rstrip('f')) for x in radii.group(1).split(',')] ==         [magic_circle.LAYERS[k].radius for k in magic_circle.LAYERS], radii
     assert 'PreloadUltimate(mgr);' in src('src/jet_spawn.cpp')
-    for name, value in (('kRadius', cw.ULTIMATE_RADIUS), ('kRingBlast', vc.ULT_BLAST_RADIUS), ('kSparkRadius', vc.ULT_SPARK_RADIUS)):
+    for name, value in (('kRingBlast', vc.ULT_BLAST_RADIUS), ('kSparkRadius', vc.ULT_SPARK_RADIUS)):
         m = re.search(rf'\b{name}=([\d.]+)f', plan)
         assert m and float(m.group(1)) == value, (name, m and m.group(1), value)
     m = re.search(r'\bkGatherReach=([\d.]+)f', plan)
@@ -1752,7 +1853,9 @@ def ultimate_copies_agree() -> None:
     assert ults and all(cw.template_of(c) == cw.ULTIMATE_TEMPLATE and c.mark >= 1 and float(c.mark).is_integer()
                         for c in ults), ults
     strike, crew, airstrike = src('src/ultimate.cpp'), src('src/crew.cpp'), src('src/airstrike.cpp')
-    assert 'InstallUltimate()' in airstrike and 'UltimateStart(owner,aim,' in airstrike
+    # Called from the map's bar (2026-10-26): the strike's start, its warning, no stock satellite call caught any more.
+    assert 'UltimateStart(caller,target,k.damage,seed)' in airstrike and 'SatFireHook' not in airstrike
+    assert 'WarnUltimate(s.at,' in strike
     assert 'GuardedTick(kStepUltimate,&UltimateTick);' in crew and 'ResetUltimate();' in src('src/mission.cpp')
     assert 'EmcRound::ultBeam' in strike and 'kSkyBackSec' in strike
     inst = src('tools/installer.py')
@@ -1768,7 +1871,7 @@ def ultimate_copies_agree() -> None:
 @test
 def barrage_copies_agree() -> None:
     """The long-range barrages (src/barrage.cpp, src/barrage_plan.h, tools/make_barrage.py; docs/plan-2026-10-25-strikes.md):
-    the kinds in one order in calls.py and barrage_plan.h (kBarrages carries the index), the round files the EMC table loads
+    the kinds in one order in calls.py and barrage_plan.h (kStrikes carries the index), the round files the EMC table loads
     are make_barrage's, in EmcRound's order; the plugin is wired through (the radio call, the tick, the mission reset, the
     hook at load) and the install chain carries its files (ledger, build cache, installer, release); the offline check is
     built. With the game: make_barrage builds and passes its checks."""
@@ -1786,7 +1889,11 @@ def barrage_copies_agree() -> None:
     assert [f for _, f in files] == list(vc.BARRAGE_FILES) and all(s == f.lower() for s, f in files), files
     assert 'EmcRound::barrage,' not in src('src/crew.h') and 'barrage, barrageBurst };' in src('src/crew.h')
     assert [n.split('/', 1)[1] for n in make_barrage.names()] == list(vc.BARRAGE_FILES)
-    assert 'BarrageStart(b->kind,owner,target,heading,' in src('src/airstrike.cpp')
+    # Called from the map's bar (2026-10-26), told to the peers by its own channel, its area warned of.
+    assert 'BarrageStart(k.barrage,caller,target,heading,k.damage)' in src('src/airstrike.cpp')
+    barrage_cpp = src('src/barrage.cpp')
+    assert 'WarnBarrage(kind,setup.target,heading,s.end);' in barrage_cpp and 'if(IsPlayer(caller))Tell(' in barrage_cpp
+    assert 'plugin_net::RegisterChannel(BarrageNetChannel());' in src('src/support_net.cpp')
     assert 'GuardedTick(kStepBarrage,&BarrageTick);' in src('src/crew.cpp') and 'ResetBarrages();' in src('src/mission.cpp')
     assert 'InstallBarrages();' in src('src/plugin.cpp')
     import ledger
@@ -1822,14 +1929,19 @@ def sortie_copies_agree() -> None:
     inc = src('src/calls.inc')
     for c in sorties:
         then = [f.id for f in calls.FLOWN].index(c.then) if c.then else -1
-        row = f'L"{c.id}",{1 + calls.SORTIE_PASSES.index(c.sortie)},{then},{c.then_after * 1000}u}},'
+        row = f'L"{c.id}",{1 + calls.SORTIE_PASSES.index(c.sortie)},{then},{c.then_after * 1000}u,{c.pt}u}},'
         assert row in inc, (c.id, row)
     spawn, jet, combat, air = src('src/jet_spawn.cpp'), src('src/jet.cpp'), src('src/jet_combat.cpp'), src('src/airstrike.cpp')
     assert 'SortieBegin(*entry,static_cast<SortiePass>(spec.sortie),' in spawn and 'HeliSortie(vehicle,static_cast<SortiePass>(spec.sortie),' in spawn
     assert 'SortieGuide(j,kind,arms,pos,nose,lead,height,ms,want,speed,gunsOk,missileOk)' in jet and 'SortieFire(*j,v,pos,arms,ms);' in jet
     assert 'SortieStruck(*k.j,object)' in combat and 'SortieLockMs(j,kLockMs)' in combat
     assert 'out->sortie=c.sortie;' in air and 'void SupportFollowUpTick() noexcept' in air
-    assert 'SupportFollowUpQueue(index,target);' in src('src/support_dispatch.cpp')
+    dispatch = src('src/support_dispatch.cpp')
+    # The second wave goes with its first's pt (2026-10-27 review): queued once the first is made offline, held under its
+    # open request online and settled by its outcome.
+    assert 'else if(offlineFollowUp)SupportFollowUpQueue(catalog,at,0);' in dispatch
+    assert 'SupportFollowUpQueue(index,target,localRequest.id);' in dispatch
+    assert 'SupportFollowUpSettle(request,true);' in dispatch and 'SupportFollowUpSettle(request,false);' in dispatch
     assert 'GuardedTick(kStepFollowUp,&SupportFollowUpTick);' in src('src/crew.cpp') and 'ResetSupportFollowUps();' in src('src/mission.cpp')
     heli = src('src/heli.cpp')
     assert 'void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept' in heli and 'SortieFly(h,s,w)' in heli
@@ -4441,6 +4553,11 @@ def _flak_request_template() -> bytes:
     return dsgo.write(dsgo.Document(root, []))
 
 
+def _call_ids() -> list[str]:
+    """The call rows a current install holds: each live call's own, each support on the map's placeholder."""
+    return [calls.retired_id(c.id) if c.on_map else c.id for c in calls.CALLS]
+
+
 def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
     """What call_weapons.stack would give (shape only), and the jets the vehicle requests need."""
     for c in calls.CALLS:
@@ -4449,7 +4566,7 @@ def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
                 modfiles.atomic_write(_mods(game, rel), b'jet')
     files = {cw.TABLE: _sgo_table('table', table_ids)}
     files.update({rel: _sgo_table('text_table', table_ids) for rel in cw.TEXTS})
-    files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS})
+    files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS if not c.on_map})   # a support on the map has none
     for c in calls.CALLS:
         if c.jet in cw.MODEL_VEHICLES:   # their install reads the request's own setup (call_weapons.vehicle_needs)
             files[cw.sgo_file(c)] = cw.vehicle_sgo(_sazabi_request_template(), c, (2.0, 3.0))
@@ -4505,7 +4622,7 @@ def sazabi_fallback_install_upgrade() -> None:
             patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
             patched(sazabi_model, model_dir=lambda: None), patched(vc, Game=lambda root: Game()):
         import ported_weapons as pw   # every install has a row per EDF5 weapon: here they wait for EDF5
-        files = _call_files(game, STOCK + list(calls.IDS) + [pw.retired_id(x) for x in pw.IDS])
+        files = _call_files(game, STOCK + _call_ids() + [pw.retired_id(x) for x in pw.IDS])
         arms = {f'WEAPON/{w.split("/")[-1].upper()}' for w in vc.SAZABI_WEAPONS}
         for rel in arms:
             os.remove(_mods(game, rel))  # clean CI package: no Sazabi weapons have ever been installed
@@ -4578,8 +4695,8 @@ def calls_failed_install_records_nothing() -> None:
     game = tempfile.mkdtemp(prefix='edf6vc-selftest-')
     try:
         with patched(modfiles, game_running=lambda process=modfiles.PROCESS: False):
-            files = _call_files(game, STOCK + list(calls.IDS))
-            with patched(modfiles, atomic_write=_failing_write(cw.sgo_file(calls.CALLS[-1]))):
+            files = _call_files(game, STOCK + _call_ids())
+            with patched(modfiles, atomic_write=_failing_write(cw.sgo_file([c for c in calls.CALLS if not c.on_map][-1]))):
                 try:
                     cw.install(game, files)
                 except OSError:
@@ -4590,7 +4707,7 @@ def calls_failed_install_records_nothing() -> None:
             assert cw.TABLE not in cw.load_manifest(game)['created'], 'a rolled back install recorded created'
             other = _sgo_table('table', STOCK + OTHER)
             modfiles.atomic_write(_mods(game, cw.TABLE), other)   # another mod's table, installed since
-            cw.install(game, _call_files(game, STOCK + OTHER + list(calls.IDS)))
+            cw.install(game, _call_files(game, STOCK + OTHER + _call_ids()))
             cw.repair(game)
             assert _read(_mods(game, cw.TABLE)) == other, "repair deleted the other mod's table"
     finally:
@@ -4603,7 +4720,7 @@ def uninstall_misaligned_skips_table() -> None:
     table and still get the plugin removed."""
     game = tempfile.mkdtemp(prefix='edf6vc-selftest-')
     try:
-        modfiles.atomic_write(_mods(game, cw.TABLE), _sgo_table('table', STOCK + list(calls.IDS)))
+        modfiles.atomic_write(_mods(game, cw.TABLE), _sgo_table('table', STOCK + _call_ids()))
         for rel in cw.TEXTS:
             modfiles.atomic_write(_mods(game, rel), _sgo_table('text_table', STOCK))
         dll = _mods(game, f'Plugins/{installer.PLUGIN}.dll')
@@ -4619,7 +4736,7 @@ def uninstall_misaligned_skips_table() -> None:
         answers = iter(['1', 'y'])
         with patched(modfiles, game_running=lambda process=modfiles.PROCESS: False), \
                 patched(installer, ask=lambda prompt: next(answers)):
-            cw.install(game, _call_files(game, STOCK + list(calls.IDS)))
+            cw.install(game, _call_files(game, STOCK + _call_ids()))
             for rel in cw.TEXTS:
                 modfiles.atomic_write(_mods(game, rel), _sgo_table('text_table', STOCK))
             modfiles.atomic_write(dll, b'dll')
@@ -5950,7 +6067,6 @@ def map_wired() -> None:
     assert 'NpcMarkFrame(human,open && game.open);' in code
     close = code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     assert 'SuspendMapCommands();' in close, 'closing invalidates the hover/view without waiting for the stale timer'
-    assert '!MapHoldsKeys() && GameInFront' in src('src/overlay.cpp')
     # ...and EDF6AutoTurret's keys too (its LockKey Q is the map's turn): through the link's export.
     held = re.search(r'kInputHeld\[\]="(\w+)"', src('common/edf/aimlink.h')).group(1)
     assert held.endswith('V1') and f'extern "C" __declspec(dllexport) bool __cdecl {held}() {{ return crew::MapHoldsKeys(); }}' in code
@@ -5966,7 +6082,7 @@ def map_wired() -> None:
     assert at_readers == ['designate.cpp'], f'a new EDF6AutoTurret key reader: make it give way to the map ({at_readers})'
     readers = [f for f in os.listdir(os.path.join(ROOT, 'src')) if f.endswith('.cpp') and 'edf::AsyncKey(' in src(f'src/{f}')]
     assert sorted(readers) == sorted(['heli.cpp', 'highcam.cpp', 'payload.cpp', 'playerjet.cpp', 'seatswitch.cpp', 'turretcam.cpp',
-                                      'overlay.cpp', 'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'dreadnought.cpp', 'sightzoom.cpp',
+                                      'map.cpp', 'mapcmd.cpp', 'proteus.cpp', 'npcai.cpp', 'drill.cpp', 'sazabi.cpp', 'dreadnought.cpp', 'sightzoom.cpp',
                                       'debug_spawn.cpp', 'firstperson.cpp', 'room_ui.cpp', 'vehicle_look.cpp', 'thermal.cpp', 'enemy_control.cpp']), f'a new key reader: make it give way to the map ({readers})'
     assert 'InFront() && !MapHoldsKeys()' in src('src/debug_spawn.cpp'), 'the debug spawn keys give way to the map'
     fp = src('src/firstperson.cpp')
@@ -6541,10 +6657,13 @@ def soft_edge_wired() -> None:
     # KeepIn every frame (its state follows the jet); only a gun dive at a ground point inside the soft box keeps its
     # line (KeepIn on a copy, 2026-10-09: bent by the edge the dive never came onto the lead).
     soft_edge = flight.split('void SoftEdge(Jet& j,const float* pos,float* want) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
+    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
     # And the paratroop plane on its pass line (ferry_line.h, 2026-10-10): its line's ends stand off the map with room to
-    # turn (support_entry.h PassEnd); the soft edge turned it back the moment it was made. Withdrawing, the edge's again.
-    assert 'const bool line=j.ferry && j.mode!=Mode::withdraw;' in soft_edge, 'a ferry on its line keeps it'
+    # turn (support_entry.h PassEnd); the soft edge turned it back the moment it was made.
+    assert 'const bool line=j.ferry && SoftEdgeHolds(j);' in soft_edge, 'a ferry on its line keeps it'
+    # A withdrawing jet is not held either (the user, 2026-10-26: 「空中支援不会退场」): it leaves the map and is reaped out
+    # there (jet_internal.h SoftEdgeHolds; tools/jet_obstacle_sim --withdraw-suite, tests/support_exit_guard.py).
+    assert 'const bool leaving=!SoftEdgeHolds(j);' in soft_edge, 'a withdrawal leaves the map'
     assert 'const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;' in soft_edge, \
         'only a dive at a ground point inside the soft box is spared the edge'
     assert 'airbound::CapClimb(' in flight
@@ -6593,7 +6712,8 @@ def support_arrives_from_off_the_map() -> None:
     assert 'Put<float>(v,kAreaInset,a.stockInset);a.held=false;' in arrival and 'MoveAreaBox(lo,hi)' in arrival
     assert 'kAnimationModelVtable=0x17C4030' in spawn and 'vt!=image+kAnimationModelVtable && vt!=image+kRenderNodeVtable' in spawn
     assert 'if(!At<const void*>(node,kNodeUmbra))return Far::later;' in spawn, 'no Umbra object yet: setBitmask would get a null this'
-    plan = src('src/airstrike.cpp').split('support::Refusal PlanAirSupport(', 1)[1].split('\n}\n', 1)[0]
+    # The planner's body (PlanAirSupport and the map's preview, PreviewAirRoute, both call it).
+    plan = src('src/airstrike.cpp').split('support::Refusal AirRouteFor(', 1)[1].split('\n}\n', 1)[0]
     assert 'const support::Reach reach{ArrivalHalf(),NearDrawDistance()};' in plan
     assert 'std::fabs(at[0])>reach.half || std::fabs(at[2])>reach.half' in plan, 'each formation slot inside the physical square'
     assert 'at[0]<area.lo[0]' not in plan, 'no slot is held to the map any more'

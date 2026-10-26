@@ -31,6 +31,12 @@ const wchar_t* SupportCallName(int) noexcept { return L"Support"; }
 SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
 SupportVariant SupportCallVariant(int) noexcept { return SupportVariant::none; }
 SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }
+// The map's support pt and the armed support's preview (support_points.cpp, support_warning.cpp: not linked here).
+std::int32_t SupportCallPrice(int) noexcept { return 1800; }
+std::int32_t SupportPoints() noexcept { return 6000; }
+std::int32_t SupportPointsMost() noexcept { return 30000; }
+void WarnPreview(int,const float*) noexcept {}
+SupportTab SupportCallTab(int) noexcept { return SupportTab::air; }
 int forbiddenEntry=-1;   // the entry the stub mission forbids (underground: an aircraft), -1 none
 const wchar_t* SupportCallForbidden(int index) noexcept { return index==forbiddenEntry ? L"underground: soldiers only" : nullptr; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};

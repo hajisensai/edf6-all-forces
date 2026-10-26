@@ -142,6 +142,9 @@ void Support() {
     Check(Hit(hits,k,x0+20.0f,row[0].y1+gap*0.5f)<0,"a click in the gap between rows: none");
     // Not enough room: the rows that fit.
     Check(Column(g,rows,x0,x1,top,top+3.0f*(rowH+gap),rowH,gap,inset,row,chip)==3,"a short column: the rows that fit");
+    // The bar's tabs in its hit list: codes below every entry and below -1 (none), each tab back from its code.
+    Check(SupportTabHit(0)<-1 && SupportTabOfHit(SupportTabHit(3))==3 && SupportTabOfHit(-1)<0 && SupportTabOfHit(5)<0,
+          "a tab's hit code, never an entry's or none");
 }
 // The formation menu (the user, 2026-10-09: "这个编队应该点击以后展开选择里面的东西"): its entries' codes, its column over
 // the button (under it with no room above), on the screen.

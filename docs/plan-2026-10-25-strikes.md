@@ -72,9 +72,10 @@
 | 10 | 狼群 | 制空战斗机 ×4 | gunRun | |
 | 11 | 引导打击 | 炮艇机 ×1 → 对地攻击机 ×2 | gunshipLap（原有绕圈开炮，计满一圈撤），25 s 后第二波 #4 | |
 
-- 第二波（`then` / `then_after`）：第一波请求被本机受理后（武器呼叫或 M 地图都走 `SupportCallComposedAt`），由**呼叫者那台机器**
-  在 25 s 后对同一点再发一次支援请求（`airstrike.cpp SupportFollowUpQueue / Tick`）。到点时单机上一项支援还在核实路线
-  （`SupportCallReadiness` 为 planning）就等它核实完再发；其它拒绝（ini 停用、任务规则禁止支援、插件关闭……）再发也一样被拒，
+- 第二波（`then` / `then_after`）：第一波真正出动后（M 地图走 `SupportCallComposedAt`；离线是第一波生成出来，联机是第一波请求
+  active，2026-10-27 起，之前是「受理」，第一波被拒退 pt 后第二波照样免费来），由**呼叫者那台机器**在 25 s 后对同一点再发一次
+  支援请求（`airstrike.cpp SupportFollowUpQueue / SupportFollowUpSettle / Tick`）；第一波没出动（被拒、超时、取消、中断）则第二波
+  作废。到点时单机另一项支援还在核实路线（`SupportCallReadiness` 为 planning）就等它核实完再发；其它拒绝（ini 停用、任务规则禁止支援、插件关闭……）再发也一样被拒，
   直接放弃并在 HUD 上提示原因；联机时房主那边的拒绝由房主的回执提示（日志 `SUPPORT second wave ... accepted=0`）。
 - 支援调度原有的 30 s 全局冷却已删除（用户 2026-10-25：「支援调度 30 秒的全局冷却 删掉不就好了，以后限制我用pt来做」）。
 

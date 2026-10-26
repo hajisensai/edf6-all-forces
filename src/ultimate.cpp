@@ -28,6 +28,7 @@
 #include "plugin_net.h"
 #include "support_protocol.h"
 #include "support_soldier.h"   // ReadNativeObjectId
+#include "support_warning.h"   // WarnUltimate
 #include "ultimate_net.h"
 #include "ultimate_net_protocol.h"
 #include "ultimate_plan.h"
@@ -200,8 +201,6 @@ struct Show {
     bool heard=false;        // a recording of the show's played: the plugin's voices beat every frame (jetaudio.h Beat)
     int thunder=-100;        // the storm frame of the last thunder
     ULONGLONG keptAt=0;      // this machine's: when its last keep went out (GetTickCount64)
-    ULONGLONG begunMs=0;     // GetTickCount64 when it began here
-    bool stockMatched=false; // another machine's: a call of its caller's weapon here was matched to it (airstrike.cpp)
     int bursts=0,burstsLost=0;   // BurstsFrame: played, and of them not shown for want of their round (the caller there)
 };
 Show shows[kMaxShows];
@@ -567,7 +566,8 @@ void Send(Show& s,ultimate_net::Kind kind,std::uint32_t peer=0) noexcept {
     s.keptAt=GetTickCount64();
 }
 
-// The caller's HUD line (hud.cpp UltimateBanner, the draw thread): a peer without the channel sees the stock beam.
+// The caller's HUD line (hud.cpp UltimateBanner, the draw thread): a peer without the channel does not see the show (the
+// room's protocol keeps an older build out: mod_room.h).
 SRWLOCK cueLock=SRWLOCK_INIT;
 wchar_t cueText[160]{};
 ULONGLONG cueAt=0;
@@ -576,7 +576,7 @@ void SayOldPeers() noexcept {
     std::uint32_t old=0;
     for(std::uint32_t p=1;p<=n;++p)if(!plugin_net::PeerHas(p,support_net::kExtUltimate))++old;
     if(!old)return;
-    Log("ULTIMATE %u of %u peers did not announce the ultimate's channel (an older build): they may see the stock beam",old,n);
+    Log("ULTIMATE %u of %u peers did not announce the ultimate's channel: they do not see the show",old,n);
     AcquireSRWLockExclusive(&cueLock);
     _snwprintf_s(cueText,_TRUNCATE,L"%ls",hudtext::Tr(hudtext::Tx::ultimateOldPeers));
     cueAt=GetTickCount64();
@@ -677,7 +677,8 @@ Show& Begin(int i,bool remote,const Key& k,const unsigned char* caller,const flo
     s.damage=std::isfinite(damage) && damage>0.0f ? damage : 0.0f;
     s.seed=seed;
     s.start=GameFrame()-static_cast<ULONGLONG>(frame);
-    s.begunMs=GetTickCount64();
+    // Its warning on the ground (support_warning.h), on every machine: the cleared area until the main beam's last ring.
+    if(frame<kCannonEnd)WarnUltimate(s.at,static_cast<ULONGLONG>(kCannonEnd-frame)*1000/kFps);
     (void)audio::ClipsReady();   // the recordings read on their thread from the first call: ready by the first sound
     return s;
 }
@@ -718,18 +719,6 @@ void UltimateTick() noexcept {
     for(int i=0;i<kMaxShows;++i)if(shows[i].on)Tick(i);
 }
 
-// A call of another machine's player's ultimate weapon here (airstrike.cpp SatFireHook): true when a show of that
-// caller's began here lately and was not matched to a call yet (its stock beam is to be held back); false: none heard
-// (yet): the stock beam stays unless the show's start comes before it fires (UltimateStockHoldBack).
-bool UltimateHeardFrom(const unsigned char* caller) noexcept {
-    for(Show& s:shows)
-        if(s.on && s.remote && s.live && s.by==caller && !s.stockMatched && GetTickCount64()-s.begunMs<=kUltimateStockWaitMs) {
-            s.stockMatched=true;
-            return true;
-        }
-    return false;
-}
-
 // A mission's start (jet_spawn.cpp, with the shells): the circles' objects preloaded when their files are installed.
 void PreloadUltimate(void* mgr) noexcept {
     int ready=0;
@@ -755,7 +744,6 @@ void ResetUltimate() noexcept {
     sky.refs.Reset();
     for(bool& o:sky.ours)o=false;
     origin=plugin_net::NewOrigin();serial=0;
-    UltimateStockReset();
 }
 
 bool PlayerUltimateCue(wchar_t* out,std::size_t capacity) noexcept {
@@ -807,7 +795,7 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
     case Act::none: break;
     case Act::begin: {
         if(!ShowRoundsReady()) {
-            if(netLogs++<16)Log("ULTIMATE NET peer %u's show %08X:%u: this machine's rounds are not preloaded: the stock beam stays",
+            if(netLogs++<16)Log("ULTIMATE NET peer %u's show %08X:%u: this machine's rounds are not preloaded: not played here",
                                 peer,m.origin,m.serial);
             break;
         }
@@ -819,7 +807,6 @@ bool ReceiveUltimateNetwork(std::uint32_t peer,const char* puid,const void* byte
         Log("ULTIMATE NET peer %u's show %08X:%u (%s at frame %d) at (%.0f,%.0f,%.0f), seed %016llX: played here from frame %d",
             peer,k.origin,k.serial,m.kind==ultimate_net::Kind::start ? "started" : "heard",m.frame,m.at[0],m.at[1],m.at[2],
             static_cast<unsigned long long>(m.seed),from);
-        s.stockMatched=UltimateStockHoldBack(caller);
         break;
     }
     case Act::follow: {

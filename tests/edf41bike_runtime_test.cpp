@@ -7,7 +7,8 @@
 #include <vector>
 
 namespace fixture {
-unsigned char vehicle[0x3000]{},seats[2*edf::kSeatStride]{},gun[0x110]{},marker[0x110]{};
+unsigned char vehicle[0x3000]{},seats[2*edf::kSeatStride]{},gun[0x110]{},marker[0x110]{},gripL[0x110]{},gripR[0x110]{};
+bool hasGrips=true;int updates=0;bool updateSawGrip=false;
 crew::Config config{};
 edf::Rider rider=edf::Rider::player;
 unsigned char patches[2][21]{},stubs[2][96]{};std::size_t stubSize[2]{};bool failGate=false;
@@ -31,16 +32,20 @@ int chainedSteps=0;
 void __fastcall ChainedStep(unsigned char* aim,const float* values){++chainedSteps;Step(aim,values);}
 void __fastcall PriorFrame(unsigned char*){++frames;}
 void __fastcall PriorPose(unsigned char*){++poses;}
+// the native Car update: it leaves seat 0's grip matrices as they were (the seat constructor's identity)
+void __fastcall PriorUpdate(unsigned char*){++updates;updateSawGrip=std::memcmp(seats+0x40,gripL+0xB0,0x40)==0;}
 void __fastcall Find(const void*,void* request){static_cast<crew::ifcmodel::Find*>(request)->index=tagged ? 0 : -1;}
 void Reset(){
  std::memset(vehicle,0,sizeof vehicle);std::memset(seats,0,sizeof seats);std::memset(gun,0,sizeof gun);
  config.enabled=true;tagged=marked=living=matches=gunnerAllowed=true;npc=map=false;rider=edf::Rider::player;
- chainCalls=failChain=sets=steps=pulls=frames=poses=registrations=0;aimed=pulled=entrySeen=nullptr;holderSeen=-1;order.clear();
+ chainCalls=failChain=sets=steps=pulls=frames=poses=registrations=updates=0;hasGrips=true;updateSawGrip=false;
+ crew::grips=crew::gripsMissingSaid=false;crew::nextUpdate=nullptr;
+ std::memset(gripL,0,sizeof gripL);std::memset(gripR,0,sizeof gripR);aimed=pulled=entrySeen=nullptr;holderSeen=-1;order.clear();
  crew::on=false;crew::nextFrame=crew::nextPose=nullptr;callHook=nullptr;failGate=false;
  edf::Put<void*>(vehicle,0,crew::image+0x17E01B0);edf::Put<void*>(vehicle,0x608,seats);edf::Put<std::uint64_t>(vehicle,0x618,2);
  edf::Put<std::uint16_t>(vehicle,0x110,2);edf::Put<int>(vehicle+0xEE0,0x20,13);edf::Put<int>(gun,0xC,11);
  for(unsigned i=0;i<2;++i)edf::Put<void*>(seats+i*edf::kSeatStride,0xE0,crew::image+0x17D8A68);
- auto vt=reinterpret_cast<void**>(crew::image+0x17E01B0);vt[4]=reinterpret_cast<void*>(&PriorFrame);vt[45]=reinterpret_cast<void*>(&PriorPose);
+ auto vt=reinterpret_cast<void**>(crew::image+0x17E01B0);vt[4]=reinterpret_cast<void*>(&PriorFrame);vt[5]=reinterpret_cast<void*>(&PriorUpdate);vt[45]=reinterpret_cast<void*>(&PriorPose);
  auto aimvt=reinterpret_cast<void**>(crew::image+0x17D8A68);aimvt[2]=crew::image+0x5FBDA0;aimvt[3]=crew::image+0x5FACD0;
  auto sevt=reinterpret_cast<void**>(crew::image+0x17D8A90);sevt[2]=crew::image+0x5FCD80;sevt[3]=crew::image+0x5FACD0;
  edf::Put<void*>(crew::image,0x179EBA8+16,reinterpret_cast<void*>(&Find));
@@ -76,6 +81,8 @@ bool Edf41BikeGunnerAllowed() noexcept{return fixture::gunnerAllowed;}
 void Edf41BikeDiagFrame(unsigned char*) noexcept{++fixture::diags;fixture::diagSawFrames=fixture::frames;}
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept{return fixture::npc;}
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept{
+ if(std::wcscmp(name,L"te_ik_l")==0)return fixture::hasGrips ? fixture::gripL : nullptr;
+ if(std::wcscmp(name,L"te_ik_r")==0)return fixture::hasGrips ? fixture::gripR : nullptr;
  if(!fixture::marked)return nullptr;
  return std::wcscmp(name,L"gun")==0 ? fixture::gun : fixture::marker;
 }
@@ -146,6 +153,29 @@ int main(){
  tagged=false;Check(!crew::BuildsGun(vehicle)&&!crew::BuildsRow(vehicle,1),"another Car: the stock skips");tagged=true;
  edf::Put<std::uint64_t>(seats+edf::kSeatStride,0xD8,0);Check(!crew::BuildsGun(vehicle),"no seat-1 holder: nothing to build");
  Reset();failGate=true;Check(!crew::InstallEdf41Bike()&&!crew::on,"a gate that cannot be patched: not installed");
+ // The driver's grip IK targets (2026-10-26 「人手臂伸出去好远」): Car slot 5 chained; after the native update the 408's
+ // te_ik_l / te_ik_r world matrices (bone +0xB0) land in seat 0 +0x40 / +0x80, as Vehicle503_Bike's 0x617A30 does.
+ Check(crew::grips,"the grips install even when the gunner seat's gate does not");
+ auto seatIdentity=[](unsigned char* seat){for(int i=0;i<2;++i)for(int r=0;r<4;++r)for(int c=0;c<4;++c)edf::Put<float>(seat,0x40+i*0x40+(r*4+c)*4,r==c ? 1.0f : 0.0f);};
+ auto gripWorld=[](unsigned char* rec,float base){for(int k=0;k<16;++k)edf::Put<float>(rec,0xB0+k*4,base+static_cast<float>(k));};
+ auto table5=[]{return reinterpret_cast<crew::VehicleFn*>(crew::image+0x17E01B0)[5];};
+ Reset();Check(crew::InstallEdf41Bike(),"install with the grips");
+ Check(reinterpret_cast<void*>(table5())==reinterpret_cast<void*>(&crew::GripUpdate)&&crew::nextUpdate==reinterpret_cast<void*>(&PriorUpdate),"Car slot 5 is chained to the grip update");
+ seatIdentity(seats);seatIdentity(seats+edf::kSeatStride);gripWorld(gripL,10.0f);gripWorld(gripR,40.0f);
+ unsigned char gunnerSeat[0x80];std::memcpy(gunnerSeat,seats+edf::kSeatStride+0x40,0x80);
+ table5()(vehicle);
+ Check(updates==1&&!updateSawGrip,"the native update runs first");
+ Check(std::memcmp(seats+0x40,gripL+0xB0,0x40)==0&&std::memcmp(seats+0x80,gripR+0xB0,0x40)==0,"the driver's grip targets are the 408's grip bones' world matrices");
+ Check(std::memcmp(seats+edf::kSeatStride+0x40,gunnerSeat,0x80)==0,"the gunner's seat is left alone");
+ gripWorld(gripL,70.0f);gunnerAllowed=false;config.enabled=false;vehicle[edf::kDead]=1;table5()(vehicle);
+ Check(updates==2&&std::memcmp(seats+0x40,gripL+0xB0,0x40)==0,"every frame, whatever the gunner seat's gate, Enabled or the wreck (V503 does not ask either)");
+ Reset();Check(crew::InstallEdf41Bike(),"reinstall for another Car");tagged=false;seatIdentity(seats);gripWorld(gripL,10.0f);
+ unsigned char stock[0x80];std::memcpy(stock,seats+0x40,0x80);table5()(vehicle);
+ Check(updates==1&&std::memcmp(seats+0x40,stock,0x80)==0,"another Car keeps its native seat");
+ Reset();Check(crew::InstallEdf41Bike(),"reinstall for a model without the bones");hasGrips=false;seatIdentity(seats);
+ std::memcpy(stock,seats+0x40,0x80);table5()(vehicle);table5()(vehicle);
+ Check(updates==2&&std::memcmp(seats+0x40,stock,0x80)==0&&crew::gripsMissingSaid,"a 408 without its grip bones: logged once, the seat untouched");
+ Reset();matches=false;Check(!crew::InstallEdf41Bike()&&!crew::grips&&table5()==reinterpret_cast<crew::VehicleFn>(&PriorUpdate),"a differing native update: no grip hook");
  VirtualFree(crew::image,0,MEM_RELEASE);crew::image=nullptr;
  std::puts("original 408 production routing and lifecycle checks passed");
 }

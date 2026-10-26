@@ -346,7 +346,7 @@ void RequestOutcomes() {
     r.Settle();r.nodes[0]->refusePlan=false;r.nodes[0]->pending=true;r.Step(2500);r.Submit();
     const auto notices=r.nodes[1]->notices.size();r.Deliver(refused);
     Check(r.nodes[1]->notices.size()==notices && r.nodes[1]->notices.back().second==RequestStatus::accepted,
-        "old epoch refusal cannot terminate new epoch request with the same request number");
+        "an old epoch's refusal cannot terminate the new epoch's request");
     r.Settle();r.Step(121000);r.Settle();
     Check(r.nodes[1]->notices.back().second==RequestStatus::timeout,"host planning deadline produces real timeout status, not arbitrary UI timer");
 
@@ -405,7 +405,7 @@ void RoomBuilds() {
     {Room r(3);r.legacyNode=2;r.legacyCaps=kCapabilities;r.legacyExt=kExtVariants;r.With(2);r.nodes[2]->session->Stop();
      r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();r.Step(1100);r.Settle();
      std::uint32_t missing=0;
-     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==FeatureExt(kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|kExtFloatGun|kExtUltimate|kExtPlayerVehicle) &&
+     Check(r.nodes[0]->session->PeersBehind(&missing)==1 && missing==FeatureExt(kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|kExtFloatGun|kExtUltimate|kExtPlayerVehicle|kExtBarrage) &&
            r.nodes[0]->session->PeersAhead()==0,"a guest without the sea rescue (all four capabilities) is behind, the rescue and the EDF4.1 outfit named");
      Check(r.nodes[1]->session->RoomBehindHost(),"and the other guest is told");}
     // A newer guest: the capability bits are full (kCapabilities<kMaxUnits), so newer is an extension bit this build lacks.
@@ -487,6 +487,57 @@ void RescueChannel() {
      r.nodes[2]->failSpawn=false;
      Check(r.Submit(1,kRescue),"asked again at once");r.Settle();
      Check(LastFor(r,1)==RequestStatus::active,"a rescue that was cancelled started no cooldown (it starts once made everywhere)");}
+}
+// 2026-10-27 (PR #269 review): a paid request's pt are settled by its outcome (support_points.h Ledger, keyed by the request
+// id), so every request this machine made is told one, and an id is never reused.
+bool Told(Room& r,unsigned node,std::uint32_t request,RequestStatus status) {
+    for(const auto& n:r.nodes[node]->notices)if(n.first==request && n.second==status)return true;
+    return false;
+}
+void LocalOutcomes() {
+    // A peer rejoining before anything was made restarts the host's epoch (its transactions cleared): the requests still
+    // waiting on every machine are told interrupted, as a suspension tells them.
+    {Room r(3);r.nodes[0]->pending=true;
+     Check(r.Submit(1,5),"a guest's map call being planned");r.Settle();
+     const std::uint32_t first=r.nodes[1]->notices.back().first;
+     Check(LastFor(r,1)==RequestStatus::accepted,"it waits for the host's plan");
+     r.With(2);r.nodes[2]->session->Stop();r.nodes[2]->session->Start(false,2,1,r.now);r.Settle();
+     Check(LastFor(r,1)==RequestStatus::interrupted && r.nodes[1]->notices.back().first==first,
+           "the host's new epoch: the guest's waiting request is told interrupted");
+     r.nodes[0]->pending=false;r.Step(2100);
+     Check(r.Submit(1,5),"the next call");r.Settle();
+     const std::uint32_t second=r.nodes[1]->notices.back().first;
+     Check(second>first,"request ids keep growing across an epoch (never the cleared one's again)");
+     Check(Told(r,1,second,RequestStatus::active) && !Told(r,1,first,RequestStatus::active),"the next is made, told by its own id");}
+    {Room r(2);r.nodes[0]->pending=true;
+     Check(r.Submit(0,5),"the host's own map call being planned");r.Settle();
+     const std::uint32_t first=r.nodes[0]->notices.back().first;
+     r.With(1);r.nodes[1]->session->Stop();r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();
+     Check(Told(r,0,first,RequestStatus::interrupted),"a peer's rejoin clears the host's transactions: its own request is told interrupted");}
+    {Room r(2);r.nodes[0]->pending=true;
+     Check(r.Submit(1,5),"a guest's call being planned");r.Settle();
+     const std::uint32_t first=r.nodes[1]->notices.back().first;
+     r.With(1);r.nodes[1]->session->Stop();
+     Check(Told(r,1,first,RequestStatus::interrupted),"leaving the session: a waiting request is told interrupted");
+     r.nodes[1]->session->Start(false,1,1,r.now);r.Settle();r.nodes[0]->pending=false;r.Step(2100);
+     Check(r.Submit(1,5),"a call in the new session");r.Settle();
+     Check(r.nodes[1]->notices.back().first>first && LastFor(r,1)==RequestStatus::active,"its id is new, its outcome its own");}
+    // A request waiting while later ones end: it keeps its slot and is told its outcome however many came after it.
+    {Room r(2);r.nodes[0]->pending=true;
+     Check(r.Submit(1,5),"a call being planned");r.Settle();
+     const std::uint32_t first=r.nodes[1]->notices.back().first;
+     for(int i=0;i<4;++i){r.Step(100);Check(r.Submit(1,5),"later requests");r.Settle();}
+     Check(r.nodes[1]->notices.back().first==first+4 && LastFor(r,1)==RequestStatus::refused,"each refused at once (one plan at a time)");
+     r.nodes[0]->pending=false;r.Settle();r.Settle();
+     Check(Told(r,1,first,RequestStatus::active),"the first, four requests behind, is still told it was made");}
+    // Every slot waiting: another request is not taken (it would push one out untold).
+    {Room r(2);r.dropTo=1;r.dropKind=Kind::requestStatus;r.nodes[0]->pending=true;
+     for(int i=0;i<static_cast<int>(kRecentRequests);++i){Check(r.Submit(1,5),"a request whose outcome has not come");r.Step(2100);}
+     const auto told=r.nodes[1]->notices.size();
+     Check(!r.Submit(1,5) && r.nodes[1]->notices.size()==told,"all slots waiting: the next is refused here, nothing sent or told");
+     r.dropTo=999;
+     for(const auto& p:r.history)if(p.to==1 && p.message.kind==Kind::requestStatus && p.message.index>=static_cast<std::uint32_t>(RequestStatus::refused)){r.Deliver(p);break;}
+     Check(r.Submit(1,5),"one told: a slot is free again");}
 }
 void PvpSupportCodec() {
     static_assert(kVersion==2 && kWireSize==176 && (kFeatures&kWelcomeCatalogMask)<1024 &&
@@ -930,4 +981,4 @@ void PreparedDroneDetails() {
     }
 }
 } // namespace
-int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();LocalOutcomes();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }

@@ -319,6 +319,24 @@ void Withdraw(Jet& j,const char* why,ULONGLONG ms) noexcept {
     Log("JET v=%p withdraws: %s",j.Vehicle(),why);
 }
 
+void Away(Jet& j,const Kind& kind,const float* pos,const float* nose,const float* viewer,bool walled,ULONGLONG ms,float* want,
+          float* speed) noexcept {
+    const bool bomber=j.bay.bombSpeed>0.0f;
+    float away[3]={pos[0]-viewer[0],0,pos[2]-viewer[2]};
+    if(bomber)std::memcpy(away,j.bay.bombDir,12);
+    if(!Normalize(away)){away[0]=nose[0];away[2]=nose[2];}
+    const float top=CeilingY()-kCeilingGap*2.0f,climb=viewer[1]+kWithdrawClimb;
+    Level(pos,away,climb<top ? climb : top,want);
+    *speed=bomber && j.bay.bombSpeed>kind.attack ? j.bay.bombSpeed : kind.attack;
+    const float d[3]={pos[0]-viewer[0],pos[1]-viewer[1],pos[2]-viewer[2]};
+    const float gone=Len(d),turn=Len(j.m.vel)*Len(j.m.vel)/(kind.maxG*kG);
+    const bool edge=walled || NearWall(j,pos,turn*1.5f,ms);
+    if(gone>kWithdrawFar || (gone>kWithdrawNear && (edge || ms-j.modeAt>kWithdrawStuckMs))) {
+        if(!j.reap)Log("JET v=%p out of sight (%.0f m from the player): deleting",j.Vehicle(),gone);
+        j.reap=true;
+    }
+}
+
 
 // The carrier's nacelles along the thrust Hover asked for (see kThrustBack). A nacelle's thrust, along its nose
 // (local +z) turned theta about X, is (0, -sin theta, cos theta) in the body: theta = atan2(-up, forward). Its
@@ -582,12 +600,16 @@ void SoftEdge(Jet& j,const float* pos,float* want) noexcept {
     // A ferry on its line (the paratroop plane, ferry_line.h) keeps it too: the line was planned from off the map, through
     // the drop point to off the map, each end past the ground's edge with room to turn round inside the physical square
     // (support_entry.h PassEnd); the soft edge 600 m inside the area turned it back the moment it was made (2026-10-10
-    // 13:17:21) and round over the map after its pass. Withdrawing, it is the edge's again.
+    // 13:17:21) and round over the map after its pass.
+    // Withdrawing (SoftEdgeHolds), it is not held either: it flies off the map along Away's way out and is reaped out
+    // there (Away). Held in, a player in the middle of a stock map's ground (soft box +-750 m) was never kWithdrawNear
+    // away from it: it flew round inside under RTB for the rest of the mission (tools/jet_obstacle_sim --withdraw-suite).
     float kept[3]={want[0],want[1],want[2]};
     const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;
-    const bool line=j.ferry && j.mode!=Mode::withdraw;
-    airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
-    if(j.m.edgeBack!=was && !line)
+    const bool line=j.ferry && SoftEdgeHolds(j);
+    const bool leaving=!SoftEdgeHolds(j);
+    airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);
+    if(j.m.edgeBack!=was && !line && !leaving)
         Log("JET v=%p %s the soft edge at (%.0f,%.0f): soft x %.0f..%.0f z %.0f..%.0f, band %.0f, %.0f m/s%s",j.Vehicle(),
             was ? "back inside" : "past",pos[0],pos[2],soft.lo[0],soft.hi[0],soft.lo[1],soft.hi[1],band,s,was ? "" : ": back in first");
     // Over the top it pushes over: its lift down at most kNegG, gravity with it (JetSteer), a radius of s^2 / ((1 + kNegG) g).
@@ -726,10 +748,11 @@ void Hover(Jet& j,const Kind& k,const unsigned char* v,const float* pos,const fl
            float dt,float lift,bool npcGoal) noexcept {
     const Lean& how=*k.lean;
     Motion& mo=j.m;
-    // NPC goals stop inside their soft edge. Player flight and its hail retain their requested goal instead.
+    // NPC goals stop inside their soft edge, but a withdrawal's (SoftEdgeHolds: it leaves the map, Away reaps it out
+    // there). Player flight and its hail retain their requested goal instead.
     float inside[3];
     std::memcpy(inside,goal,12);
-    if(npcGoal)airbound::ClampIn(JetSoftBox(j),inside,0.0f);
+    if(npcGoal && SoftEdgeHolds(j))airbound::ClampIn(JetSoftBox(j),inside,0.0f);
     goal=inside;
     float to[3]={goal[0]-pos[0],0.0f,goal[2]-pos[2]};
     const float d=Len(to);

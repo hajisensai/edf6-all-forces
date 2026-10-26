@@ -15,9 +15,13 @@
 // round stores at +0x1390 and never reads; vcobjects.py Missile.motion): an air-to-air
 // missile burns long, a ship's missile is another; acceleration and top speed are CP[4] / CP[6] as stock.
 //  - fuses by proximity: closer than kFuseShare of its blast radius (AmmoExplosion) to the target within the coming
-//    frame, it goes off now (core +0xAF4 |= 0x20, its age set to its life: the stock expiry blasts it there).
+//    frame, it goes off now (core +0xAF4 |= 0x20, its age set to its life: the stock expiry blasts it there);
+//  - arms its warhead only while its burst cannot reach its launcher (fuze.h: the blast's own box query against the
+//    launcher's bodies, Launcher): unarmed, the proximity fuse holds and a hit is single-target, no burst.
 // Docs: docs/missile-re.md. All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "fuze.h"
+#include "heli.h"
 #include "memory.h"
 #include "pn.h"
 #include "tvguide.h"
@@ -37,6 +41,15 @@ constexpr std::size_t kGuidance=0x1390;   // CP[3]: burn frames, g limit, naviga
 constexpr std::size_t kIgnition=0x13AC,kFlown=0x1400;   // CP[7][0] (frames before ignition), frames since launch
 constexpr std::size_t kOwn=0x13D0,kInherited=0x13E0,kAccel=0x13A0,kHomingDelay=0x13B8,kHomingFrames=0x13BC;
 constexpr std::size_t kCore=0x140,kPos=kCore+0xB80,kFlags=kCore+0xAF4,kAge=kCore+0xAF8,kLife=kCore+0xA08,kBlast=kCore+0xA20;
+// The friendly-fire flag (byte, from weapon+0x8B6; docs/swarm-team-re.md 友伤标志 A26): its burst has no team filter.
+constexpr std::size_t kFriendlyFire=kCore+0xA26;
+// Its owner (core+0x9A8 / +0x9B0, a weak reference: object, control block; docs/bullet-pass-re.md): the vehicle offline,
+// online the player riding it (online_authority.h ShooterIsAttacker), whose ride is the human's +0x1548 (boarding.cpp).
+constexpr std::size_t kOwner=kCore+0x9A8,kOwnerCtrl=kCore+0x9B0,kHumanVehicle=0x1548;
+// A vehicle's bodies: its parts (veh+0x1398, count +0x13A8, 0xC0 each, the body wrapper at +0x50: vehicleram.cpp,
+// jet_hooks.cpp OwnBodies) and a helicopter's rigid body (+0x1650: shield.cpp).
+constexpr std::size_t kParts=0x1398,kPartCount=0x13A8,kPartStride=0xC0,kPartBody=0x50,kHeliBody=0x1650;
+constexpr std::size_t kMostParts=4096;   // bounds the read of a part list (not a body count kept)
 constexpr std::int32_t kNoStockHoming=1000000,kPluginMark=4242;   // vcobjects.py MISSILE_NO_STOCK_HOMING / MISSILE_MARK
 constexpr std::uint32_t kDead=1,kBlastOnExpiry=0x20;
 constexpr float kFrame=1.0f/60.0f;
@@ -53,7 +66,7 @@ constexpr float kJumpM=20.0f;          // a lock point moving more in a frame we
 // `decoy`: 1 + the flare it chases instead of its lock (FlaresStep), 0 none; `rolled`: the last flare drop it was
 // judged against (each drop once); `pos`, `dir`: where it is and where it flies (the judgement's range and aspect).
 struct Round { const unsigned char* b; std::int32_t age; ULONGLONG frame; float last[3]; bool seen; int decoy;
-               unsigned rolled; float pos[3],dir[3]; };
+               unsigned rolled; float pos[3],dir[3]; bool armed; };
 // Flares (the user, 2026-10-05: "add flares", then all of: they work while they burn, they break locks, the chance
 // goes by the moment, the NPC jets drop them too). A flare dropped by a jet (playerjet.cpp, jet.cpp) falls under
 // kFlareGravity with kFlareDrag of its speed lost a second and burns kFlareLifeMs. While a drop burns, every round
@@ -183,6 +196,55 @@ Round& RoundOf(const unsigned char* b,std::int32_t age,ULONGLONG frame) noexcept
     return *free;
 }
 
+// Whether a burst of `blast` at either of `at` reaches a body of round `b`'s launcher (its owner's vehicle, see kOwner),
+// every body looked at; `bodies`: how many it has. None with the owner gone (nothing left to keep its burst off).
+bool LauncherInReach(const unsigned char* b,const float* const (&at)[2],float blast,int* bodies) noexcept {
+    *bodies=0;
+    const auto owner=At<const unsigned char*>(b,kOwner);
+    const auto ctrl=At<const unsigned char*>(b,kOwnerCtrl);
+    if(!owner || !ctrl || !Readable(ctrl,0x10) || At<std::int32_t>(ctrl,8)<=0)return false;
+    const unsigned char* v=owner;
+    if(VehicleClassOf(owner)<0)v=Readable(owner,kHumanVehicle+8) ? At<const unsigned char*>(owner,kHumanVehicle) : nullptr;
+    if(!v || VehicleClassOf(v)<0)return false;
+    bool reached=false;
+    const auto Body=[&](const void* body) noexcept {
+        float box[6];
+        if(!BodyWorldBox(body,box))return;
+        ++*bodies;
+        for(const float* p:at)if(fuze::Reaches(p,blast,box))reached=true;
+    };
+    const auto parts=At<const unsigned char*>(v,kParts);
+    const auto count=At<std::size_t>(v,kPartCount);
+    if(parts && count<=kMostParts && Readable(parts,count*kPartStride))
+        for(std::size_t i=0;i<count;++i)Body(At<const void*>(parts+i*kPartStride,kPartBody));
+    if(IsHelicopter(v))Body(At<const void*>(v,kHeliBody));
+    return reached;
+}
+
+// Arms or disarms round `b` for the step it is about to take (fuze.h; a hit or a burst lands between where it is and
+// where its velocity takes it) and says which; its first arming logged (Cfg().debug).
+bool Arm(unsigned char* b,Round& round) noexcept {
+    const float blast=At<float>(b,kBlast);
+    const bool explosive=std::isfinite(blast) && blast>0.0f;
+    // Only a burst without the team filter takes its own launcher: without the flag (an NPC's weapon: RideAi clears it)
+    // the stock burst spares it, and the round is armed from the pod.
+    const bool selfHarm=explosive && At<std::uint8_t>(b,kFriendlyFire)!=0;
+    const float* pos=reinterpret_cast<const float*>(b+kPos);
+    const float* own=reinterpret_cast<const float*>(b+kOwn);
+    const float* inherited=reinterpret_cast<const float*>(b+kInherited);
+    const float next[3]={pos[0]+own[0]+inherited[0],pos[1]+own[1]+inherited[1],pos[2]+own[2]+inherited[2]};
+    int n=0;
+    const bool armed=!selfHarm || !LauncherInReach(b,{pos,next},blast,&n);
+    Put<std::uint32_t>(b,kFlags,fuze::HitFlags(At<std::uint32_t>(b,kFlags),explosive,armed));
+    if(armed && !round.armed && explosive && Cfg().debug) {
+        if(selfHarm)Log("MISSILE %p armed at age %d: its %.0f m blast clear of the %d bodies of its launcher",b,
+                        At<std::int32_t>(b,kAge),blast,n);
+        else Log("MISSILE %p armed at age %d: its %.0f m blast spares its own side",b,At<std::int32_t>(b,kAge),blast);
+    }
+    round.armed=armed;
+    return armed;
+}
+
 void Detonate(unsigned char* b,const float* r) noexcept {
     Put<std::uint32_t>(b,kFlags,At<std::uint32_t>(b,kFlags)|kBlastOnExpiry);
     Put<std::int32_t>(b,kAge,At<std::int32_t>(b,kLife));
@@ -225,10 +287,12 @@ void Guide(unsigned char* b) noexcept {
     if(At<const void*>(b,0)!=image+kVtable)return;
     if(At<std::int32_t>(b,kHomingDelay)!=kNoStockHoming || At<std::int32_t>(b,kHomingFrames)!=kPluginMark)return;
     if(At<std::uint32_t>(b,kFlags)&kDead)return;
+    // Its warhead's safety every frame it lives, before anything else here can leave it to the stock step.
+    const std::int32_t age=At<std::int32_t>(b,kAge);
+    const bool armed=Arm(b,RoundOf(b,age,GameFrame()));
     // Before its motor lights (CP[7][0] frames; 0 for every store) the stock code fades and drops what it inherited:
     // left to it.
     if(At<std::int32_t>(b,kFlown)<At<std::int32_t>(b,kIgnition))return;
-    const std::int32_t age=At<std::int32_t>(b,kAge);
     float* own=reinterpret_cast<float*>(b+kOwn);
     float* inherited=reinterpret_cast<float*>(b+kInherited);
     float vel[3];
@@ -250,7 +314,7 @@ void Guide(unsigned char* b) noexcept {
         const float v2=Dot(rv,rv),t=v2>1e-6f ? Clamp(-Dot(r,rv)/v2,0.0f,1.0f) : 0.0f;
         const float miss[3]={r[0]+rv[0]*t,r[1]+rv[1]*t,r[2]+rv[2]*t};
         const float blast=At<float>(b,kBlast),fuse=std::isfinite(blast) && blast*kFuseShare>kFuseLeast ? blast*kFuseShare : kFuseLeast;
-        if(Len(miss)<fuse){Detonate(b,miss);return;}
+        if(armed && Len(miss)<fuse){Detonate(b,miss);return;}
         float a[3];
         pn::Lateral(pos,vel,aim,tv,nav,maxG*kG*kFrame*kFrame,a);
         for(int i=0;i<3;++i)dir[i]=vel[i]+a[i];

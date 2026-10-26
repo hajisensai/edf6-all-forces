@@ -47,6 +47,7 @@
 #include "drivegear.h"
 #include "drive_gear.h"
 #include "support_net.h"
+#include "support_warning.h"
 #include "pvp.h"
 #include "map_pvp_input.h"
 #include "thermal.h"
@@ -310,7 +311,7 @@ float DepthScale(float depth,float readTo) noexcept {
 
 // A line of text to draw once the quads are down: where, its size (measured), its scale and colour.
 struct Line { wchar_t text[128]; float x,y,w,h,scale; const float* rgba; };
-constexpr int kMaxLines=192;   // the map's panels, card, support bar, the test range's place panel and tooltip on top of its grid labels
+constexpr int kMaxLines=256;   // the map's panels, card, support bar (a name and a price a row), the test range's place panel and tooltip on top of its grid labels
 
 void Format(Line& l,const wchar_t* format,...) noexcept {
     va_list args;va_start(args,format);
@@ -4274,6 +4275,14 @@ void MapSupportIcon(void* d,void* c,SupportIcon icon,float x,float y,float h,flo
         Seg(d,c,x-r*0.9f,y+r*0.3f,x+r*0.2f,y+r*0.3f,t,rgba);Seg(d,c,x-r*0.9f,y+r*0.3f,x-r*0.9f,y-r*0.15f,t,rgba);
         for(const float o:kIconWheels2)Arc(d,c,x+o*r,y+r*0.55f,r*0.22f,0.0f,kTurn,t*0.8f,8,rgba);
         break;
+    case SupportIcon::barrage:   // three shells falling onto a burst
+        for(int i=-1;i<=1;++i)Seg(d,c,x+i*r*0.5f-r*0.3f,y-r*0.9f,x+i*r*0.5f,y-r*0.1f,t,rgba);
+        Arc(d,c,x,y+r*0.45f,r*0.45f,0.0f,kTurn,t,12,kRed);
+        break;
+    case SupportIcon::satellite:   // a beam down onto a ring
+        Seg(d,c,x,y-r*0.95f,x,y+r*0.35f,t*1.4f,rgba);Rect(d,c,x-r*0.45f,y-r*0.95f,x+r*0.45f,y-r*0.7f,rgba);
+        Arc(d,c,x,y+r*0.45f,r*0.8f,0.0f,kTurn,t,16,kRed);
+        break;
     }
 }
 // A variant chip's icon (support_call.h SupportCallVariant: the catalog's own data, never its words): guarding a point,
@@ -4413,6 +4422,8 @@ int MapButtons(void* drawer,void* ctx,Text* text,float width,float height,float 
 // chips at the row's right; over them its title and whether the dispatcher takes a call now (dim when it does not). A
 // click on a row or chip arms that call (lit), the next left click on the map is its point; its tooltip the full name.
 constexpr float kSupRowH=26.0f,kSupGap=3.0f,kSupW=250.0f,kSupIcon=18.0f;   // px at 1080 lines
+constexpr float kSupPriceW=44.0f;   // px at 1080 lines: a row's price (up to five digits) at the right of its name
+constexpr float kSupTabH=22.0f;     // px at 1080 lines: the tabs' row (support_call.h SupportTab)
 // The composition panel's words (map_buttons.h ComposePanel): a soldier kind's short name (SupportWeapon order), a class's.
 constexpr Tx kKindText[kSupportWeaponCount]={Tx::kindRifle,Tx::kindFlame,Tx::kindRocket,Tx::kindShotgun,Tx::kindSniper,
     Tx::kindLance,Tx::kindLaser,Tx::kindMonster,Tx::kindIzuna,Tx::kindThunderBow,
@@ -4483,68 +4494,96 @@ void MapComposePanel(void* drawer,void* ctx,Text* text,float s,const MapCommandR
 void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float top,float bottom,bool pad,const MapCommandReadout& c,
                    Line* lines,int* at) noexcept {
     if(pad || c.supports<=0){MapCommandSupportButtons(nullptr,nullptr,0);return;}
-    const wchar_t* names[kMapSupports];
-    for(int i=0;i<c.supports;++i)names[i]=c.support[i].name;
+    // The tab shown (support_call.h SupportTab): its entries, in catalog order (`idx`: an entry's catalog index).
+    const int tab=c.supportTab>=0 && c.supportTab<kSupportTabs ? c.supportTab : 0;
+    const wchar_t* names[kMapSupports];int idx[kMapSupports];int n=0;
+    for(int i=0;i<c.supports;++i)if(static_cast<int>(c.support[i].tab)==tab){names[n]=c.support[i].name;idx[n++]=i;}
     mapbtn::Group groups[kMapSupports];
-    const int rows=mapbtn::GroupSupport(names,c.supports,groups,kMapSupports);
+    const int rows=mapbtn::GroupSupport(names,n,groups,kMapSupports);
     const float x0=8.0f*s,x1=std::fmin(kSupW*s,width*0.3f),titleH=24.0f*s;
+    const float poolH=18.0f*s,tabH=kSupTabH*s;   // the pool's line, then the tabs, under the title
+    const float tabsTop=top+titleH+poolH,rowsTop=tabsTop+tabH+kSupGap*s;
     mapbtn::Rect row[kMapSupports]{},chip[kMapSupports]{};
-    const int placed=mapbtn::Column(groups,rows,x0+4.0f*s,x1-4.0f*s,top+titleH,bottom,kSupRowH*s,kSupGap*s,4.0f*s,row,chip);
-    if(placed<=0){MapCommandSupportButtons(nullptr,nullptr,0);return;}
-    const float last=row[placed-1].y1;
+    const int placed=rows>0 ? mapbtn::Column(groups,rows,x0+4.0f*s,x1-4.0f*s,rowsTop,bottom,kSupRowH*s,kSupGap*s,4.0f*s,row,chip) : 0;
+    if(rowsTop>bottom){MapCommandSupportButtons(nullptr,nullptr,0);return;}
+    const float last=placed>0 ? row[placed-1].y1 : rowsTop;
     MapUiBox(drawer,ctx,x0,top,x1,last+4.0f*s,lines,*at);
     const bool ready=c.supportReady.state==SupportReady::ready;
     const float* tint=ready ? kWhite : kMapOrderDim;
     Label(text,lines,at,x0+8.0f*s,top+titleH*0.5f,0,kLineScale*0.75f,kMapOrder,L"%ls",Tr(Tx::supportTitle));
+    // The pool (support_points.h): what the calls are paid from, on its own line under the title.
+    Label(text,lines,at,x0+8.0f*s,top+titleH+poolH*0.4f,0,kLineScale*0.6f,kAmber,Tr(Tx::supportPt),c.points,c.pointsMost);
     if(!ready) {
         const SupportReadiness& r=c.supportReady;
         if(r.state==SupportReady::cooldown)Label(text,lines,at,x1-8.0f*s,top+titleH*0.5f,2,kLineScale*0.65f,kAmber,Tr(Tx::supportCooldown),r.seconds);
         else Label(text,lines,at,x1-8.0f*s,top+titleH*0.5f,2,kLineScale*0.65f,kAmber,L"%ls",
                    Tr(r.state==SupportReady::planning ? Tx::supportPlanning : Tx::supportOff));
     }
-    float rects[kMapSupports*2*4];int entries[kMapSupports*2];int hits=0;
+    float rects[kMapSupportHits*4];int entries[kMapSupportHits];int hits=0;
     auto hit=[&](const mapbtn::Rect& q,int entry){
-        if(hits>=kMapSupports*2)return;
+        if(hits>=kMapSupportHits)return;
         rects[hits*4]=q.x0;rects[hits*4+1]=q.y0;rects[hits*4+2]=q.x1;rects[hits*4+3]=q.y1;entries[hits++]=entry;
     };
+    // The tabs, side by side across the bar: the one shown lit; a click shows another (map_buttons.h SupportTabHit).
+    static constexpr Tx kTabText[kSupportTabs]={Tx::supportTabAir,Tx::supportTabSortie,Tx::supportTabStrike,Tx::supportTabGround};
+    const float tabW=(x1-x0-8.0f*s-static_cast<float>(kSupportTabs-1)*kSupGap*s)/static_cast<float>(kSupportTabs);
+    for(int t=0;t<kSupportTabs;++t) {
+        const float tx0=x0+4.0f*s+static_cast<float>(t)*(tabW+kSupGap*s);
+        const mapbtn::Rect q{tx0,tabsTop,tx0+tabW,tabsTop+tabH};
+        const bool lit=t==tab,hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
+        Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,lit ? kBtnLit : hover ? kMapBoxFill : kBtnFill);
+        {const float w=1.2f*s;const float* edge=lit ? kWhite : kMapOrderDim;
+         Seg(drawer,ctx,q.x0,q.y0,q.x1,q.y0,w,edge);Seg(drawer,ctx,q.x1,q.y0,q.x1,q.y1,w,edge);
+         Seg(drawer,ctx,q.x1,q.y1,q.x0,q.y1,w,edge);Seg(drawer,ctx,q.x0,q.y1,q.x0,q.y0,w,edge);}
+        Label(text,lines,at,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,1,kLineScale*0.6f,lit ? kWhite : kMapOrder,L"%ls",Tr(kTabText[t]));
+        if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+2.0f*s,q.x1-2.0f*s);
+        hit(q,mapbtn::SupportTabHit(t));
+    }
+    // An entry the mission forbids, or one the pool cannot pay for now: dimmed (a click on it still says why).
+    auto entryTint=[&](int e){ return c.support[e].allowed && c.support[e].afford ? tint : kMapOrderDim; };
     // The rows under their chips (drawn first), the chips over them; the hit list the chips first: a click on a chip is
-    // that variant, not the row's.
+    // that variant, not the row's. `g.first` and the chips are the tab's own positions; idx[] their catalog entries.
     mapbtn::Rect body[kMapSupports]{};int pickOf[kMapSupports]{};
     for(int k=0;k<placed;++k) {
         const mapbtn::Group& g=groups[k];
         const mapbtn::Rect& q=row[k];
         bool lit=false;
-        for(int e=g.first;e<g.first+g.count;++e)lit=lit || c.supportArmed==e;
+        for(int e=g.first;e<g.first+g.count;++e)lit=lit || c.supportArmed==idx[e];
         const bool hover=c.pointer && c.px>=q.x0 && c.px<q.x1 && c.py>=q.y0 && c.py<q.y1;
         if(lit || hover)Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,lit ? kBtnLit : kMapBoxFill);
         const float mid=(q.y0+q.y1)*0.5f;
         // The row itself (left of its chips): its first variant, or the one [ ] picked last within it.
-        pickOf[k]=c.supportPick>=g.first && c.supportPick<g.first+g.count ? c.supportPick : g.first;
-        const float* rowTint=c.support[pickOf[k]].allowed ? tint : kMapOrderDim;   // one the mission forbids: dimmed
-        MapSupportIcon(drawer,ctx,c.support[g.first].icon,q.x0+(4.0f+kSupIcon*0.5f)*s,mid,kSupIcon*s,s,rowTint);
+        pickOf[k]=idx[g.first];
+        for(int e=g.first;e<g.first+g.count;++e)if(c.supportPick==idx[e])pickOf[k]=idx[e];
+        const int pick=pickOf[k];
+        const float* rowTint=entryTint(pick);
+        MapSupportIcon(drawer,ctx,c.support[idx[g.first]].icon,q.x0+(4.0f+kSupIcon*0.5f)*s,mid,kSupIcon*s,s,rowTint);
         wchar_t base[40]{};   // the name before its "·" (map_buttons.h BaseLength)
         const int most=static_cast<int>(_countof(base))-1,len=mapbtn::BaseLength(names[g.first])<most ? mapbtn::BaseLength(names[g.first]) : most;
         std::wmemcpy(base,names[g.first],static_cast<std::size_t>(len));
-        const float textRight=g.count>1 ? chip[g.first].x0-4.0f*s : q.x1-4.0f*s;
+        const float chipsLeft=g.count>1 ? chip[g.first].x0-4.0f*s : q.x1-4.0f*s;
+        // Its price (the picked variant's) at the right of its words: amber when the pool holds it, red when not.
+        Label(text,lines,at,chipsLeft,mid,2,kLineScale*0.6f,c.support[pick].afford ? kAmber : kRed,L"%d",c.support[pick].price);
+        const float textRight=chipsLeft-kSupPriceW*s;
         Label(text,lines,at,q.x0+(8.0f+kSupIcon)*s,mid,0,kLineScale*0.7f,rowTint,L"%ls",base);
         if(*at>0)MapFitLabel(text,lines[*at-1],q.x0+(8.0f+kSupIcon)*s,textRight);
-        body[k]=mapbtn::Rect{q.x0,q.y0,textRight,q.y1};
-        MapTipSet(c,body[k].x0,body[k].y0,body[k].x1,body[k].y1,Tr(Tx::supportTip),names[pickOf[k]]);
+        body[k]=mapbtn::Rect{q.x0,q.y0,chipsLeft,q.y1};
+        MapTipSet(c,body[k].x0,body[k].y0,body[k].x1,body[k].y1,Tr(Tx::supportTip),c.support[pick].name,c.support[pick].price);
     }
     for(int k=0;k<placed;++k) {
         const mapbtn::Group& g=groups[k];
         if(g.count<=1)continue;
         for(int e=g.first;e<g.first+g.count;++e) {
             const mapbtn::Rect& q=chip[e];
-            const bool lit=c.supportArmed==e;
+            const int entry=idx[e];
+            const bool lit=c.supportArmed==entry;
             Rect(drawer,ctx,q.x0,q.y0,q.x1,q.y1,lit ? kBtnLit : kBtnFill);
             const float t=1.2f*s;const float* edge=lit ? kWhite : kMapOrderDim;
             Seg(drawer,ctx,q.x0,q.y0,q.x1,q.y0,t,edge);Seg(drawer,ctx,q.x1,q.y0,q.x1,q.y1,t,edge);
             Seg(drawer,ctx,q.x1,q.y1,q.x0,q.y1,t,edge);Seg(drawer,ctx,q.x0,q.y1,q.x0,q.y0,t,edge);
-            MapVariantIcon(drawer,ctx,c.support[e].variant,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,(q.y1-q.y0)*0.8f,s,
-                           c.support[e].allowed ? tint : kMapOrderDim);
-            MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::supportTip),names[e]);
-            hit(q,e);
+            MapVariantIcon(drawer,ctx,c.support[entry].variant,(q.x0+q.x1)*0.5f,(q.y0+q.y1)*0.5f,(q.y1-q.y0)*0.8f,s,entryTint(entry));
+            MapTipSet(c,q.x0,q.y0,q.x1,q.y1,Tr(Tx::supportTip),c.support[entry].name,c.support[entry].price);
+            hit(q,entry);
         }
     }
     for(int k=0;k<placed;++k)hit(body[k],pickOf[k]);
@@ -4552,11 +4591,11 @@ void MapSupportBar(void* drawer,void* ctx,Text* text,float width,float s,float t
     // The armed support's composition beside its row (its name before the "·").
     int composeRow=-1;
     for(int k=0;k<placed && composeRow<0;++k)
-        if(c.composeEntry>=groups[k].first && c.composeEntry<groups[k].first+groups[k].count)composeRow=k;
+        for(int e=groups[k].first;e<groups[k].first+groups[k].count;++e)if(c.composeEntry==idx[e])composeRow=k;
     if(composeRow<0){MapCommandComposeButtons(nullptr,nullptr,0);return;}
     wchar_t base[40]{};
-    const int most=static_cast<int>(_countof(base))-1,blen=mapbtn::BaseLength(names[c.composeEntry]);
-    std::wmemcpy(base,names[c.composeEntry],static_cast<std::size_t>(blen<most ? blen : most));
+    const int most=static_cast<int>(_countof(base))-1,blen=mapbtn::BaseLength(c.support[c.composeEntry].name);
+    std::wmemcpy(base,c.support[c.composeEntry].name,static_cast<std::size_t>(blen<most ? blen : most));
     MapComposePanel(drawer,ctx,text,s,c,base,x1+6.0f*s,row[composeRow].y0,top,bottom,lines,at);
 }
 
@@ -5205,6 +5244,7 @@ void MapText(void* drawer,void* ctx,Text* text,float width,float height,float s,
 }
 
 void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
+void SupportWarnHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept;
 
 #include "hud_stats.inc"
 
@@ -5244,6 +5284,7 @@ bool MapScreen(void* drawer,void* ctx,Text* text,const float* vp,float width,flo
     MapUnits(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapCommandView(vp,width,height);   // the commands' box, clicks and pointer are found on this view
     QMarkHud(drawer,ctx,text,vp,width,height,s,lines,at);   // the Q marks, ours and the teammates', on the map too
+    SupportWarnHud(drawer,ctx,text,vp,width,height,s,lines,at);   // the supports' areas and routes, the armed one's preview
     MapCommands(drawer,ctx,text,vp,width,height,s,m,lines,at);
     MapUiBox(drawer,ctx,width*0.55f-8*s,146*s,width-12*s,198*s,lines,*at);
     MapScale(drawer,ctx,text,vp,width,height,s,m,lines,at);
@@ -5302,6 +5343,49 @@ void QMarkHud(void* drawer,void* ctx,Text* text,const float* vp,float width,floa
     }
 }
 
+// The supports' warnings (support_warning.h; the user, 2026-10-26: 「支援要有攻击警告红圈，直升机等没有红圈的可以给出路线预览
+// 图之类的」): a strike's area red, pulsing; a flight's route cyan with an arrow at its end, its guard ring cyan; the map's
+// preview of the armed support fainter and dashed. Their words (the name, the seconds left) over the area / at the route's
+// start. On the map (`map`) and on the view alike: each outline is laid on the ground where it was made.
+void SupportWarnHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
+    static WarningView views[kWarningViews];
+    const int n=SupportWarningViews(views,kWarningViews);
+    if(n<=0)return;
+    const float pulse=0.55f+0.45f*std::fabs(std::sin(static_cast<float>(GetTickCount64()%2000ull)*kTurn/2000.0f));
+    for(int w=0;w<n;++w) {
+        const WarningView& v=views[w];
+        const float* base=v.look==warning::Look::strike ? kRed : kCyan;
+        const float a=v.preview ? 0.6f : v.look==warning::Look::strike ? pulse : 0.9f;
+        // Its colour kept past this call: a Line keeps a pointer to it until the text is drawn (DrawAll).
+        static float colours[kWarningViews][4];
+        float* const rgba=colours[w];
+        rgba[0]=base[0];rgba[1]=base[1];rgba[2]=base[2];rgba[3]=base[3]*a;
+        const float t=(v.look==warning::Look::strike ? 2.6f : 2.0f)*s;
+        const int segs=v.closed ? v.points : v.points-1;
+        for(int i=0;i<segs;++i) {
+            const float* p=v.pt[i];const float* q=v.pt[(i+1)%v.points];
+            if(!std::isfinite(p[0]) || !std::isfinite(q[0]))continue;   // a gap between two outlines of one warning
+            if(v.preview && (i&1))continue;                              // dashed
+            MapLine(drawer,ctx,vp,width,height,p,q,t,rgba);
+        }
+        if(!v.closed && v.points>=2) {   // the route's arrow at its end (on the screen, along its last stretch)
+            float ex,ey,ed,fx,fy,fd;
+            const float* end=v.pt[v.points-1];const float* before=v.pt[v.points-2];
+            if(std::isfinite(before[0]) && Project(vp,end,width,height,&ex,&ey,&ed) && Project(vp,before,width,height,&fx,&fy,&fd)) {
+                const float dx=ex-fx,dy=ey-fy,l=std::sqrt(dx*dx+dy*dy);
+                if(l>1.0f) {
+                    const float ux=dx/l,uy=dy/l,h=12.0f*s;
+                    Seg(drawer,ctx,ex,ey,ex-ux*h-uy*h*0.6f,ey-uy*h+ux*h*0.6f,t,rgba);
+                    Seg(drawer,ctx,ex,ey,ex-ux*h+uy*h*0.6f,ey-uy*h-ux*h*0.6f,t,rgba);
+                }
+            }
+        }
+        float x,y,depth;
+        if(v.text[0] && Project(vp,v.label,width,height,&x,&y,&depth))
+            Label(text,lines,at,x,y-14.0f*s,1,kLineScale*0.7f,rgba,L"%ls",v.text);
+    }
+}
+
 // The march formation just cycled (npcai.cpp; the player's key on foot or the map's T): its name and the key, a moment
 // under the screen's centre.
 // The formation's name (formation.h Shape) as the HUD says it (mapcmd.cpp's notes too).
@@ -5350,7 +5434,7 @@ void VersionBanner(Text* text,float width,float height,float s,Line* lines,int* 
     Label(text,lines,at,width*0.5f,height*0.5f+286.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",line);
     if(second && *second)Label(text,lines,at,width*0.5f,height*0.5f+314.0f*s,1,kLineScale*0.85f,kAmber,L"%ls",second);
 }
-// The ultimate strike's caller online (ultimate.cpp): peers of an older build see the stock beam; a moment, under the
+// The ultimate strike's caller online (ultimate.cpp): peers without its channel see nothing of it; a moment, under the
 // version banner.
 void UltimateBanner(Text* text,float width,float height,float s,Line* lines,int* at) noexcept {
     wchar_t line[160];
@@ -5796,6 +5880,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         // The hidden stock armor gauge's numbers for a vehicle whose HUD is no StockBlock (that one has them in it).
         if(now-snap.tick<=kFreshMs && snap.armor && !stockHud && !screensOn)ArmorPanel(drawer,ctx,t,s,snap.armorRo,lines,&at);
         QMarkHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
+        SupportWarnHud(drawer,ctx,t,viewProj,width,height,s,lines,&at);
         FormationBanner(t,width,height,s,lines,&at);
         SweepBanner(t,width,height,s,lines,&at);
         RescueCueBanner(t,width,height,s,lines,&at);

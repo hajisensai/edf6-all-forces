@@ -114,6 +114,31 @@ def native(path: Path) -> int:
     require(data[0x5FA150:0x5FA161].hex()=='83fa02740939117505488b4110c333c0c3',
             'wrong recoil variant must return null')
     require(relative(data,0x65A83A)==0x5F9FB0,'Car recoil payload consumer differs')
+    # The driver's grip IK targets (2026-10-26, 「人手臂伸出去好远」; src/edf41bike.cpp GripUpdate). A seated rider's
+    # update sets its v_vehicle_grip_l / _r_ik_target (indices +0x1440 / +0x1444, looked up by those names) from its
+    # seat's +0x40 / +0x80 matrices; the seat constructor makes both the identity (a target at the map's origin).
+    lea = lambda at: data[at + 7 + struct.unpack_from('<i', data, at + 3)[0]:][:80].decode('utf-16le').split('\0')[0]
+    require(lea(0x56E495)=='v_vehicle_grip_l_ik_target' and data[0x56E4A4:0x56E4AB].hex()=='41898740140000'
+            and lea(0x56E4AE)=='v_vehicle_grip_r_ik_target' and data[0x56E4BD:0x56E4C4].hex()=='41898744140000',
+            'the rider looks up its two grip IK targets by name')
+    require(data[0x5751B9:0x5751C0].hex()=='488b8650150000','the grip copy is the seated rider\'s branch')
+    require(data[0x575266:0x575280].hex()=='8b964014000083faff0f849e000000488b86401500000f106040'
+            and data[0x57531A:0x575337].hex()=='8b964414000083faff0f84a1000000488b86401500000f10a080000000',
+            'the rider takes its grip targets from seat +0x40 / +0x80')
+    require(data[0x6291EB:0x6291F3].hex()=='48c741400000803f' and data[0x629225:0x629230].hex()=='48c781800000000000803f',
+            'the seat constructor leaves both grip targets the identity')
+    # Vehicle503_Bike fills seat 0's two: its constructor finds te_ik_l / te_ik_r (+0x29A0 / +0x29A4) and its update
+    # 0x6181D0 runs the base update (0x659650 -> 0x674B00), then 0x617A30 copies both bones' world matrices (bone record
+    # +0xB0, records at +0xEF0, 0x110 each) into seat 0. Vehicle_Car's update (slot 5 0x65B5C0) calls the same base
+    # update and never writes them.
+    require(lea(0x61757D)=='te_ik_l' and data[0x61759E:0x6175A4].hex()=='8987a0290000'
+            and lea(0x6175FE)=='te_ik_r' and data[0x61761F:0x617625].hex()=='8987a4290000','V503 finds its grip bones')
+    require(table(0x17DA508,5)==0x6181D0 and relative(data,0x6181ED)==0x659650 and relative(data,0x659650,0xE9)==0x674B00
+            and relative(data,0x61822B)==0x617A30,'V503 copies its grips after the base update')
+    require(data[0x617A30:0x617A67].hex()=='4c8b81f00e0000486381a42900004c8b89080600004869d010010000486381a0290000'
+            '4869c810010000420f288401b0000000410f2941' and data[0x617A9B:0x617AA3].hex()=='410f298180000000',
+            'V503 copies the two bone worlds into seat 0 +0x40 / +0x80')
+    require(table(0x17E01B0,5)==0x65B5C0 and relative(data,0x65B5CD)==0x674B00,'Car update runs the same base update')
     print(f'EDF6 original 408 adapter: {audited} runtime signatures and native Car/Aim/physics contracts passed')
     return audited
 

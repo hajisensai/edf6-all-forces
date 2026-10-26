@@ -240,3 +240,51 @@ EDF6 读 `ReloadType`（武器 `+0x208`）在 `0x693E8D`：0 / 3 手动换弹；
 - 修复（`src/allclass.cpp` `PlaceRider`，`src/seat_class.h` `kBenchLifts`）：`RideState` 走长凳回退时按「座位动画的骨盆 − 该职业长凳姿势的骨盆」登记偏移（`koshi` 第 0 帧，取自游戏 CAS：`vehicle503_bike_driver` (0, 1.0158, −0.0913)、`vehicle613_bike_driver` (0, 1.0456, −0.0435)，游骑兵与空降兵相同；`vehicle_striker_rear` 飞翼 (0.0052, 0.3602, −0.4715)、剑兵 (0, 0.3569, −0.4317)）；`0x575210` 的调用改经 `PlaceRider`：已登记、仍在同一座位、仍在载具上的乘员，拷贝来的矩阵按乘员自身轴移动该偏移，再调原版规范化。用自己座位动画的乘员、换座 / 下车的乘员不动并被遗忘。四行偏移：飞翼 503 (−0.005, 0.656, 0.380)、剑兵 503 (0, 0.659, 0.340)、飞翼 613 (−0.005, 0.685, 0.428)、剑兵 613 (0, 0.689, 0.388)。原版 V503 / V613 摩托也同样受益。
 - 检查：`allclass_test`（真实钩子在私有镜像上：飞翼 / 剑兵登记并按自身轴抬高、规范化照常调用；游骑兵、长凳座位、换座、下车、`AllClassesRide=0` 不动；近似名字 / 有姿势的职业无偏移）；`allclass_native`（新签名与 `0x575210 -> 0x511C0`）；`allclass_bench_lift`（有游戏文件时从 Root.cpk 的四职业 CAS 重算四行偏移，0.5 mm 内一致）。
 - 实机（修复后 DLL，日志 `ALLCLASS rider 000002329C41E870 on the bench pose for "vehicle503_bike_driver": lifted (-0.005, 0.656, 0.380) m in its axes`）：飞翼坐上 408 驾驶座后身体在车座之上（修前只露出翼尖、身体沉进车里）；下车后人物回到地面（相对车 y 0.10）。游骑兵骑 408 未实机回归（单测覆盖：不登记、不移动）。手是否握在车把上未核（长凳姿势本身没有握把动作）。
+
+## 2026-10-26 反馈：驾驶员手臂伸向地图原点
+
+用户原话「人手臂伸出去好远」（`docs/feedback-2026-10-26-sdl1-arms.md`）：SDL1 Z 型驾驶座，第三人称看到双臂成两根细杆，越过车把伸向远处。
+
+### 根因（H，指令与数据直接可见）
+
+- 骑乘中的人物每帧在自己的 update 里设两个握把 IK 目标：`0x5751B9` 有载具引用时，`0x575266..0x57530C` 在 `human+0x1440 != -1` 时把
+  座位 `+0x40..+0x7F` 矩阵（叠上 `human+0x1460` 偏移）经 `0x116DF60` 写进动画变量；`0x57531A..0x5753C5` 用 `+0x1444` / 座位 `+0x80` / `+0x1450`
+  写右手。两个索引在 `0x56E495 / 0x56E4AE` 按名字 `v_vehicle_grip_l_ik_target` / `v_vehicle_grip_r_ik_target` 查得（四职业 CAS 都有这两个变量）。
+- 座位构造 `0x6291B0` 把 `+0x40` 与 `+0x80` 两个矩阵初始化为单位阵（`0x6291EB`、`0x629225`）：平移为 0，即**世界原点**。
+- 只有 Vehicle503_Bike 填这两个矩阵：构造 `0x6173D0` 在 `0x61757D / 0x6175FE` 按名字找 `te_ik_l / te_ik_r`，骨骼号存 `+0x29A0 / +0x29A4`；
+  update（slot 5 `0x6181D0`）先跑基类 update（`0x659650 → 0x674B00`），再 `0x61822B call 0x617A30`：把两根骨骼的世界矩阵
+  （骨骼记录 `+0xEF0` 数组、`0x110` 一项、`+0xB0` 起 64 字节）复制到座位 0 的 `+0x40` / `+0x80`。Vehicle_Car 的 update（slot 5 `0x65B5C0`）
+  调同一个 `0x674B00`，之后不写这两个矩阵。全 EDF.dll 只有 V503 构造引用 `te_ik_l` 字符串。
+- V503 的 `te_ik_l` 绑定矩阵**就是**游骑兵 `vehicle503_bike_driver` 姿势里 `te_l`（手骨）的模型空间矩阵，位置 (0.2381, 1.1361, 0.4806) 与朝向
+  到 1e-4 一致（座位定位点在原点）；即握把目标 = 这个姿势自己的手。所以姿势会把双手拉向这两个目标。
+- 10-25 起 408 驾驶座改播 `vehicle503_bike_driver`（上一节根因 3），而 408 是 Vehicle_Car：两个目标一直是单位阵，双手被 IK 拉向地图原点
+  （几百米外），手臂被拉成细杆。之前的长凳姿势 `vehicle_striker_rear` 不用握把 IK，所以以前没有这个现象；炮手座、格雷普乘客等长凳座位不受影响。
+  飞翼 / 剑兵经 `AllClassesRide` 坐驾驶座时走长凳回退，也不受影响。
+
+### 修复
+
+- 数据（`pylib/edf41bike.py` `grip_targets` / `add_grips`）：408 模型加 `te_ik_l / te_ik_r` 两根变换骨骼（kind 0，与 V503 相同），挂在车把
+  `handle` 下（随车把转），`check()` 拒绝缺骨骼或父骨骼不对的模型。目标矩阵 = 4.1 自己的游骑兵在 408 上握把的手：4.1 `ARMYSOLDIER.CAS`
+  `vehicle_bike_driver` 第 0 帧（各帧不变）在 4.1 骨架上正向运动学得到 `te_l / te_r`，座位在原点（`seat_mab` 已核对 4.1 定位点在原点；
+  `pose_fit` 让 EDF6 骨盆落在 4.1 骨盆上），位置 (±0.426, 1.2516, 0.4442)，正好在 408 车把两端握把（网格量得中心约 (±0.486, 1.232, 0.550)）
+  的内后侧，与 V503 手骨相对握把的关系一致。朝向：4.1 与 EDF6 骨架的 `te_l` 局部轴不同（原始 4.1 朝向与 V503 差 60° 以上），按两副骨架的
+  绑定姿势换轴 `D = bind6 × bind41⁻¹`（两者手骨绑定位置相同），换轴后与 V503 握把朝向差 23°（都在握车把）。4.1 空降兵与游骑兵的手位一致。
+  正向运动学 `cas_pose.pose_world`：四元数按行向量约定转成矩阵，用它重算 V503 的握把骨骼到 1e-4（测试即以此为约定的证据）。
+- 运行（`src/edf41bike.cpp` `InstallGrips` / `GripUpdate` / `Grips`）：链 Car vtable slot 5，先调原 update，再对 408（`Tagged`）把
+  `te_ik_l / te_ik_r` 的骨骼世界矩阵复制到座位 0 `+0x40 / +0x80`，与 `0x617A30` 同一时机、同一数据。与炮手座的 profile、房间门控、
+  `Enabled` 无关（姿势来自 SGO，原版 V503 也不问），独立安装（`0x65B5C0` 字节签名不符则不装并记日志）。模型缺这两根骨骼即安装损坏：记一行日志，不写座位。
+- 联机：手臂只是本机渲染，各机器各自用自己的 DLL 与模型，不影响同步；混装时旧版那台看到的仍是伸长的手臂，不加功能位。
+
+### 检查
+
+- `tests/edf41bike_native_audit.py`：人物按名字查两个握把变量、骑乘分支从座位 `+0x40 / +0x80` 取目标、座位构造的单位阵、V503 构造找骨骼、
+  V503 update 先基类再 `0x617A30`、`0x617A30` 的复制、Car slot 5 调同一个基类 update；`kCarUpdateCode` 签名。
+- `tests/edf41bike_runtime_test.cpp`：slot 5 链上、先原 update 后复制、驾驶座得到两根骨骼的世界矩阵、炮手座不动、炮手座关闭 / Enabled=0 /
+  毁车照样复制、别的 Car 不动、缺骨骼只记一次日志不写、签名不符不装。变异：不调 `Grips` → `FAIL: the driver's grip targets are the 408's grip bones' world matrices`。
+- `tests/test_edf41bike.py`：`Shipped.test_driver_grip_bones_hold_the_bars`（无游戏文件：发出的模型有两根骨骼、父骨骼 handle、位置、逆绑定、左右镜像）；
+  `Native.test_v503_grip_bone_is_its_riders_hand`、`test_grip_bones_are_4_1s_hands_in_edf6_axes`；`test_shipped_object_is_this_generator_output`
+  另核对发出的 RAB 与生成器逐字节一致（10-25 的教训：只改生成器、发出的文件没重生成）。
+
+### 尚待实机
+
+未开游戏。需实测：游骑兵 / 空降兵驾驶 408 时双手握在车把两端，转向时手跟着车把；高速行驶时手不滞后（复制时机与 V503 相同）。

@@ -1,12 +1,18 @@
-"""The Air Raider's call weapons: the one table both sides are made from. tools/call_weapons.py writes the
-weapon rows and SGOs from it; tools/gen_calls.py writes src/calls.inc (the plugin's kCalls, kCallLabels and
-kCallRows, src/airstrike.cpp) from it; tools/selftest.py checks that the generated file is current, that
-the hand-kept copies elsewhere agree, and that the order rules below hold (CI runs both).
+"""The Air Raider's call weapons and the map's supports: the one table both sides are made from. tools/call_weapons.py
+writes the weapon rows and SGOs from it; tools/gen_calls.py writes src/calls.inc (the plugin's kCalls, kCallLabels,
+kCallRows, kMovedRows, kThrows and kStrikes, src/airstrike.cpp) from it; tools/selftest.py checks that the generated file
+is current, that the hand-kept copies elsewhere agree, and that the order rules below hold (CI runs both).
+
+The supports (Call.on_map: the flown calls, the barrages and the ultimate) are called from the M map's support bar for pt
+since 2026-10-26 (the user: 「所有插件支援改成m里面消耗pt召唤，空袭兵召唤的支援武器删掉」): src/support_dispatch.cpp's
+catalog, at Call.pt. They are no weapons any more: their rows are placeholders (RETIRED_PREFIX). The vehicle requests,
+thrown drones and guns stay weapons.
 
 Row order: saves refer to weapons by their row in the shared weapon table, so a row, once installed, never
 moves. tools/call_weapons.py keeps every installed row where it is (by its id) and appends the ones a table
 lacks at its end, in CALLS order. A new call is only ever appended to CALLS, never inserted, and none is ever
-removed (RELEASED: each order a release installed must stay a prefix of CALLS).
+removed (RELEASED: each order a release installed must stay a prefix of CALLS); a support moved to the map keeps its
+row as a placeholder.
 """
 from __future__ import annotations
 
@@ -14,15 +20,17 @@ import struct
 from dataclasses import dataclass
 
 ID_PREFIX = 'EDF6VC_CALL_'
-# An uninstalled call's row (tools/call_weapons.py retire): its template's stock row under this id, so the row
-# keeps its index (no save loses or gains a weapon) and the plugin's GrantCalls (ID_PREFIX only) leaves it be.
+# A placeholder row: its template's stock row under this id, so the row keeps its index (no save loses or gains a
+# weapon) and the plugin's GrantCalls (ID_PREFIX only) leaves it be. Two make them: an uninstall (tools/call_weapons.py
+# retire: every row of ours), and every install since 2026-10-26 for the supports moved to the map (Call.on_map,
+# call_weapons.stack), whose placeholders the plugin un-owns at every save load (src/calls.inc kMovedRows).
 RETIRED_PREFIX = 'EDF6VC_RETIRED_'
 
 
 @dataclass(frozen=True)
 class Call:
     id: str
-    mark: float          # a call: AmmoHitSizeAdjust, the plugin's call marker; a vehicle request: the jet's mark
+    mark: float          # a call: its id in the plugin (once its weapon's AmmoHitSizeAdjust); a vehicle request: the jet's mark
     kind: str            # key into KINDS
     follow: bool         # escorts the caller instead of holding the marked point
     count: int           # what it brings; also the stock bomber fallback's plane count (Ammo_CustomParameter[2][1]);
@@ -59,13 +67,13 @@ class Call:
     # texts) under its own name, `mark` its AmmoHitSizeAdjust (throw_mark: the plugin tells it by the float's bits).
     weapon: str = ''
     # ...or (brings 'barrage') a long-range barrage (src/barrage.cpp, src/barrage_plan.h; docs/plan-2026-10-25-strikes.md):
-    # a bomber call (TEMPLATE) whose call the plugin turns into its rounds; `barrage` its kind (BARRAGE_KINDS), `damage`
-    # each round's (its AmmoDamage at every star count, the plugin's per round), `mark` its AmmoHitSizeAdjust.
+    # on the map since 2026-10-26 (on_map; its row the bomber call TEMPLATE's placeholder); `barrage` its kind
+    # (BARRAGE_KINDS), `damage` each round's (the plugin's, src/calls.inc kStrikes). The ultimate's `damage` is its show's.
     barrage: str = ''
     damage: float = 0.0
     # ...or (brings 'jets' / 'helis') a sortie (docs/plan-2026-10-25-strikes.md §1.2): its aircraft make one pass of
     # SORTIE_PASSES[sortie] at the mark and leave the map, no guard / follow version; `then` another flown call's id the
-    # caller's machine calls onto the same mark `then_after` s after this one was accepted (a strike in two waves).
+    # caller's machine calls onto the same mark `then_after` s after this one went out (a strike in two waves).
     sortie: str = ''
     then: str = ''
     then_after: int = 0
@@ -79,6 +87,22 @@ class Call:
     def modal(self) -> bool:
         """It comes in a guard and a follow version, and its name says which (a sortie does not: one pass and gone)."""
         return self.brings in ('jets', 'helis') and not self.sortie
+
+    @property
+    def on_map(self) -> bool:
+        """A support called from the M map's support bar for pt since 2026-10-26 (src/support_dispatch.cpp's catalog: the
+        flown calls, then the strikes, STRIKES), no weapon: its weapon table row is a placeholder (RETIRED_PREFIX)."""
+        return self.brings in ('jets', 'helis', 'sub', 'barrage', 'ultimate')
+
+    @property
+    def pt(self) -> int:
+        """What the support costs on the map: what its call weapon charged at the 0 stars the plugin granted it with. A
+        flown call's weapon kept KM6 eWeapon051's ReloadTime star curve [base, 21, 1, 10, 1.0, 0.3, 0], which falls to
+        twice its base at 0 stars (call_weapons.star_value; the stock KM6 asks 2040 for its 1020); a barrage's and the
+        ultimate's curves were made flat (the same at every star count), so they cost their base."""
+        if not self.on_map:
+            raise ValueError(f'{self.id} is a weapon, not a support on the map: it has no pt')
+        return round(2 * self.reload) if self.flown else round(self.reload)
 
 
 # A thrown drone's marker (brings 'throw'): its weapon's AmmoHitSizeAdjust (weapon +0x8C4, which the plugin
@@ -200,7 +224,9 @@ CALLS: tuple[Call, ...] = (
     # Appended 2026-10-19: the ultimate strike (src/ultimate.cpp, docs/plan-2026-10-19-ultimate.md; the user: 「特效拉满
     # 昏天暗地」「清一片区域的终极技能 pt要求很高」): a stock satellite call (call_weapons.ULTIMATE_TEMPLATE: the laser
     # marker, its countdown and voice) whose fire the plugin turns into its show. 15000 pt: the stock satellites ask 2400-5400.
-    Call('EDF6VC_CALL_ULTIMATE', 7501, 'ultimate', False, 0, 15000, 2.4, 'ultimate', 'ultimate strike'),
+    # `damage` the show's (src/ultimate.cpp shares it out over its bolts, blasts and beam): at the 0 stars the stock curve
+    # would scale it by 0.2 (the 2026-10-20 smoke test's 2400, docs/plan-2026-10-19-ultimate.md).
+    Call('EDF6VC_CALL_ULTIMATE', 7501, 'ultimate', False, 0, 15000, 2.4, 'ultimate', 'ultimate strike', damage=12000.0),
     # Appended 2026-10-20 (the user: 「看看这里面的重力枪，咱们也做一个……根据速度和质量造成伤害」): the gravity gun, the Air Raider's
     # Laser Guide Kit (eLockonMarkerL01: its beam held while the trigger is, no round of its own) that grabs, carries and
     # throws what its beam is on (src/gravitygun.cpp, src/gravity.h).
@@ -298,6 +324,9 @@ CALLS: tuple[Call, ...] = (
 )
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
+# The strikes on the map's support bar (the plugin's kStrikes): the barrages in CALLS order, then the ultimate.
+STRIKES: tuple[Call, ...] = (tuple(c for c in CALLS if c.brings == 'barrage')
+                             + tuple(c for c in CALLS if c.brings == 'ultimate'))
 
 # Every order of CALLS a commit on main installed (git log -p tools/call_weapons.py), frozen: each must stay a
 # prefix of CALLS (tools/selftest.py). A release that adds calls adds its own order here.

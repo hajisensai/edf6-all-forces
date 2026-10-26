@@ -16,10 +16,8 @@
 //    crash (the player jet: the crash a building gives, playerjet.cpp Crash). The plugin's jets and the player jet
 //    from their physics steps (their own velocity), every other vehicle (stock helis, tanks, ...) from its frame
 //    (ShieldVehicle: the physics body's velocity). Slower vehicles, and everyone on foot, cross freely.
-// The layer's sphere: the world box of its body's shape, as the heli's check measures it (0x64FC1A..0x64FCD6):
-// shape 0x11B15E0(body), transform = the world interface (*(*(body+0x100)+0x58)+0x20) slot 0x80 (id), box = the
-// shape type's entry of the table at kAabbTable (+type*0x100+0x18)(shape, transform, out min/max). Centre and the
-// half of its x extent. The shields are gathered once a frame from the lock-on registry (the EDF side's enemies).
+// The layer's sphere: the world box of its body's shape (body_box.cpp BodyWorldBox, as the heli's check measures it).
+// Centre and the half of its x extent. The shields are gathered once a frame from the lock-on registry (the EDF side's enemies).
 #include "crew.h"
 #include "heli.h"
 #include "memory.h"
@@ -28,11 +26,10 @@
 
 namespace crew {
 namespace {
-constexpr unsigned kBearerVtable=0x17A9650,kBodyObject=0x108260,kBodyShape=0x11B15E0,kAabbTable=0x20F1930;
+constexpr unsigned kBearerVtable=0x17A9650,kBodyObject=0x108260,kBodyShape=0x11B15E0;
 constexpr std::size_t kLayers[2]={0x18C0,0x1F40};
-constexpr std::size_t kLayerBody=0x580,kLayerInfo=0x590,kInfoTeam=8,kBodyId=0xF0,kBodyWorld=0x100,kWorldIface=0x58;
+constexpr std::size_t kLayerBody=0x580,kLayerInfo=0x590,kInfoTeam=8,kBodyId=0xF0,kBodyWorld=0x100;
 constexpr std::size_t kCollectorCore=0x88,kBulletVelocity=0xB90;
-constexpr unsigned kTransformSlot=0x80/8;
 constexpr std::size_t kHeliBody=0x1650;   // HelicopterBase's rigid body
 constexpr unsigned kGetLinVel=0x11B1300,kSetLinVel=0x11B18F0;   // (body) -> m/s; (body, m/s): physics.cpp
 constexpr std::int32_t kSideEdf=0;   // the shields are the EDF side's enemies (the lock-on registry)
@@ -48,9 +45,6 @@ const unsigned char kBodyShapeSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x81,0x00,0x0
 const unsigned char kBodyObjectSig[]={0x48,0x83,0xEC,0x28,0x48,0x8B,0x05};
 
 using BodyObjectFn=const void*(__fastcall*)(std::uint32_t);
-using BodyShapeFn=const unsigned char*(__fastcall*)(const void*);
-using TransformFn=const void*(__fastcall*)(const void*,std::uint32_t);
-using AabbFn=void(__fastcall*)(const void*,const void*,float*);
 using GetVecFn=const float*(*)(void*);
 using SetVecFn=std::uintptr_t(*)(void*,const float*);
 
@@ -74,20 +68,10 @@ const unsigned char* LayerBody(const unsigned char* bearer,int i) noexcept {
 
 bool LayerSphere(const unsigned char* bearer,int i,Sphere& s) noexcept {
     const unsigned char* body=LayerBody(bearer,i);
-    if(!body)return false;
-    const unsigned char* shape=reinterpret_cast<BodyShapeFn>(image+kBodyShape)(body);
-    const auto world=At<const unsigned char*>(body,kBodyWorld);
-    if(!shape || !world)return false;
-    const unsigned char* iface=At<const unsigned char*>(world,kWorldIface)+0x20;
-    const auto vt=At<const TransformFn*>(iface,0);
-    const void* transform=vt[kTransformSlot](iface,At<std::uint32_t>(body,kBodyId));
-    const auto table=At<const unsigned char*>(image,kAabbTable);
-    if(!transform || !table)return false;
-    const auto aabb=At<AabbFn>(table,static_cast<std::size_t>(shape[0x18])*0x100+0x18);
-    alignas(16) float box[8]{};
-    aabb(shape,transform,box);
-    for(int k=0;k<3;++k)s.c[k]=(box[k]+box[4+k])*0.5f;
-    s.r=(box[4]-box[0])*0.5f;
+    float box[6];
+    if(!body || !BodyWorldBox(body,box))return false;
+    for(int k=0;k<3;++k)s.c[k]=(box[k]+box[3+k])*0.5f;
+    s.r=(box[3]-box[0])*0.5f;
     s.team=At<std::int32_t>(bearer+kLayers[i],kLayerInfo+kInfoTeam);
     // Not set up yet: the bearer's first frames have the layer on team -1 with its body at the origin (2026-10-05:
     // a jet near (0,0,0) ran into it).

@@ -3141,9 +3141,14 @@ void HeliCalled(unsigned char* vehicle,bool guard,const float* post,DWORD fuelSe
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
+// The entry HeliCalled made just before (ActivateSupportAircraft) is looked up, never made again: HeliCrewed starts an
+// entry afresh (Heli{}), and called that way here it wiped the call (called, guard post, fuel) it was given a moment
+// before: the sortie refused itself ("not a called heli") and the heli, no longer a called one, never left (no
+// LeaveReason, no StartLeave, no reap): it followed the player for the rest of the mission (the user, 2026-10-26:
+// 「空中支援不会退场」; tests/support_exit_guard.py).
 void HeliSortie(unsigned char* vehicle,SortiePass pass,const float* mark) noexcept {
     __try {
-        Heli* const h=HeliCrewed(vehicle) ? Find(vehicle) : nullptr;
+        Heli* const h=Find(vehicle);
         if(!h || !h->called){Log("HELI v=%p sortie, but not a called heli flown by the plugin: none",vehicle);return;}
         const float* pos=reinterpret_cast<const float*>(vehicle+kPosition);
         const float* m=reinterpret_cast<const float*>(vehicle+kMatrix);

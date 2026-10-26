@@ -26,9 +26,27 @@ void PvpForgetSupportObject(const ObjRef& ref) noexcept {if(ref.obj)++routePvpFo
 namespace {bool supportSessionActive=true;}
 support::Policy SupportMissionPolicy() noexcept {return {support::Environment::normal,false};}
 int SupportAirCallCount() noexcept{return 21;}
-void SupportFollowUpQueue(int,const float*) noexcept{}   // a sortie's second wave (airstrike.cpp, not linked here)
+void SupportFollowUpQueue(int,const float*,std::uint32_t) noexcept{}   // a sortie's second wave (airstrike.cpp, not linked here)
+void SupportFollowUpSettle(std::uint32_t,bool) noexcept{}
 const wchar_t* SupportAirCallName(int) noexcept{return L"air";}
 const wchar_t* SupportAirCallKey(int) noexcept{return L"AIR";}
+// The map's pt, strikes and warnings (support_points.cpp, airstrike.cpp, support_warning.cpp: not linked here): a pool that
+// pays for anything, no strike, no warning.
+std::uint32_t SupportAirCallPt(int) noexcept{return 0;}
+int SupportStrikeCount() noexcept{return 0;}
+const wchar_t* SupportStrikeKey(int) noexcept{return nullptr;}
+const wchar_t* SupportStrikeName(int) noexcept{return L"strike";}
+std::uint32_t SupportStrikePt(int) noexcept{return 0;}
+int SupportStrikeBarrage(int) noexcept{return -1;}
+bool SupportStrikeAt(int,const float*,wchar_t*,std::size_t) noexcept{return false;}
+support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route*) noexcept{return support::Refusal::unsupported;}
+void WarnDeployment(const support_net::Plan&) noexcept{}
+std::int32_t SupportPoints() noexcept{return 1000000;}
+std::int32_t SupportPointsPrice(std::uint32_t) noexcept{return 0;}
+bool SupportPointsSpend(std::int32_t) noexcept{return true;}
+void SupportPointsRefund(std::int32_t) noexcept{}
+bool SupportPointsOwe(std::int32_t,std::uint32_t) noexcept{return true;}
+void SupportPointsSettle(std::uint32_t,bool) noexcept{}
 bool SupportSoloHostWorld() noexcept{return false;}
 bool SupportAircraftSpec(int,SupportAircraft*) noexcept{return false;}
 bool SupportSubCatalog(int) noexcept{return false;}

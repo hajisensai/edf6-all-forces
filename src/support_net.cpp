@@ -14,6 +14,7 @@
 #include "floatgun.h"
 #include "gravity_net.h"
 #include "ultimate_net.h"
+#include "barrage_net.h"
 #include "player_vehicle.h"
 #include "support_submarine.h"
 #include "support_soldier.h"
@@ -183,6 +184,7 @@ void RegisterPluginChannels() noexcept {
     plugin_net::RegisterChannel(GravityNetChannel());
     plugin_net::RegisterChannel(FloatGunNetChannel());
     plugin_net::RegisterChannel(UltimateNetChannel());
+    plugin_net::RegisterChannel(BarrageNetChannel());
     plugin_net::RegisterChannel(PlayerVehicleNetChannel());
 }
 // A message no channel and not the support protocol owns (a newer build's channel this one does not have): dropped,
@@ -265,6 +267,7 @@ void Features(std::uint32_t caps,bool command,wchar_t* out,std::size_t size) noe
         {FeatureExt(support_net::kExtFloatGun),Tx::versionFeatFloatGun},
         {FeatureExt(support_net::kExtUltimate),Tx::versionFeatUltimate},
         {FeatureExt(support_net::kExtPlayerVehicle),Tx::versionFeatPlayerVehicle},
+        {FeatureExt(support_net::kExtBarrage),Tx::versionFeatBarrage},
         {support_net::kCapAirborneAir,Tx::versionFeatAir},{support_net::kCapTransports,Tx::versionFeatTransport},
         {support_net::kCapLoadout,Tx::versionFeatCompose},{FeatureExt(support_net::kExtVariants),Tx::versionFeatVariants},
         {support_net::kCapSoldierVariants,Tx::versionFeatLoadout}};
