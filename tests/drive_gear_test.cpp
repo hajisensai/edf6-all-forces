@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 namespace {
 int checks=0;
@@ -66,6 +67,27 @@ int main() {
     Check(Run(r,top,0.0f,20.0f).most<0.0f,"R backs");
     State n;n.gear=kNeutral;
     Check(Drive(n,10.0f,top)==0.0f && Run(n,top,10.0f,20.0f).most<0.01f,"N lets go: it coasts to a stop");
+
+    // Each vehicle's own top (its native gear table's last row): the stock tops span 5 m/s (402) to 57.2 m/s (503), the
+    // requests up to 80 m/s (the Striker); every gear is a share of that vehicle's own, not of its class's.
+    Check(TopOfGears(1,14.0f)==14.0f,"a simple gear table (one row): its row's speed");
+    Check(TopOfGears(6,27.0f)==27.0f,"a six-row table: the last row's speed");
+    Check(TopOfGears(0,14.0f)==0.0f,"no rows: no top (no gears for it)");
+    Check(TopOfGears(kMaxGearRows+1,14.0f)==0.0f,"a row count past any table: not a table (no gears)");
+    Check(TopOfGears(1,0.0f)==0.0f && TopOfGears(1,-14.0f)==0.0f,"a top of 0 or less: none");
+    Check(TopOfGears(1,std::nanf(""))==0.0f && TopOfGears(1,std::numeric_limits<float>::infinity())==0.0f,"a top not finite: none");
+    const float owns[]={5.0f,14.0f,57.2f,80.0f};
+    for(const float own:owns) {
+        for(int gear=1;gear<kTopGear;++gear) {
+            State g;g.gear=gear;
+            const Band b=Run(g,own,0.0f,120.0f);
+            const float want=kShare[gear]*own;
+            char text[112];
+            std::snprintf(text,sizeof(text),"top %.1f m/s: gear %d holds its own share %.2f m/s (%.2f..%.2f)",own,gear,want,
+                          b.least,b.most);
+            Check(b.least>=want-kBand*own-0.02f*own && b.most<=want+0.02f*own,text);
+        }
+    }
     std::printf("drive_gear: %d checks passed\n",checks);
     return 0;
 }

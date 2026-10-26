@@ -1,12 +1,16 @@
 // War Thunder's cruise gears for the stock ground vehicles (the user, 2026-10-25: 「飞机和车类改成ws调挡位和战雷一样」
 // 「车辆定速挡位吧」; ini VehicleGears): on the keyboard W shifts up a gear and S down one (held, one more a kRepeatSec),
 // R N 1 2 3 4, and the vehicle keeps going in the gear it was left in. Each forward gear below the top holds a speed, its
-// share of its class's governed top (vehmix.h EngineClass::topSpeed); the top gear is the throttle held open, R held in
-// reverse, N let go. The stock drive is given only what a key gives it (the seat's left stick, -1 forward / +1 back /
-// 0), the speed held by opening it below the gear's speed and letting it go above it (kBand under it: no chatter), so
-// nothing rests on how the stock responds to a part-way stick (no record of one: docs/feedback-2026-10-25-ws-gears.md).
+// share of this vehicle's own governed top (the user, 2026-10-26: by each vehicle's real top, not its class's): the
+// native drive's top gear speed, read off the vehicle (drivegear.cpp; docs/vehicle-top-speed-re.md); the top gear is the
+// throttle held open, R held in reverse, N let go. The stock drive is given only what a key gives it (the seat's left
+// stick, -1 forward / +1 back / 0), the speed held by opening it below the gear's speed and letting it go above it
+// (kBand under it: no chatter), so nothing rests on how the stock responds to a part-way stick (no record of one:
+// docs/feedback-2026-10-25-ws-gears.md).
 // Pure (tests/drive_gear_test.cpp); drivegear.cpp reads the game.
 #pragma once
+#include <cmath>
+#include <cstddef>
 
 namespace drivegear {
 
@@ -40,7 +44,16 @@ inline void Shift(State& s,int key,float dt) noexcept {
     if(s.heldSec>=kRepeatSec){s.heldSec-=kRepeatSec;Step(s,key);}
 }
 
-// The seat's left stick Y for the gear at `forward` m/s along the nose (negative backing), `top` m/s its class's top.
+// The native forward gear table (CarBase +0x1760, docs/vehicle-top-speed-re.md): `count` rows, the last one's speed
+// `lastSpeed` (m/s, after the setup scaled it) is the drive's top. 0: no usable table (no gears for this vehicle). The
+// stock tables have 1 (car_base_engine_simple_gear) to 6 rows (car_base_engine_gear); kMaxGearRows only bounds the read.
+constexpr std::size_t kMaxGearRows=32;
+inline float TopOfGears(std::size_t count,float lastSpeed) noexcept {
+    if(count==0 || count>kMaxGearRows || !std::isfinite(lastSpeed) || lastSpeed<=0.0f)return 0.0f;
+    return lastSpeed;
+}
+
+// The seat's left stick Y for the gear at `forward` m/s along the nose (negative backing), `top` m/s this vehicle's top.
 inline float Drive(State& s,float forward,float top) noexcept {
     if(s.gear==kNeutral){s.open=false;return 0.0f;}
     if(s.gear==kReverse){s.open=false;return kBack;}
