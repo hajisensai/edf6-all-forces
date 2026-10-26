@@ -147,8 +147,9 @@ VoiceChat 在 `0xD491E` / `0xD4996` / `0xD4A0E` / `0xD4A86`（`keyconfig_menu.h 
 - 各页「恢复默认」`0x89A230` → `0xD4BB0(store, player, page)`：页 0..10 各写各的默认，页号 > 10 直接返回。
 
 结论：插件键写进空槽后，跟着原版改键 / 退出设置时的 COMMON.CFG 保存一起持久化，**不需要插件自己存再写回**。
-插件只需要一次性「播种」：每个插件在 `0xFE`（EDF6VehicleCrew）/ `0xFD`（EDF6AutoTurret）第 0 套放一个标记值，标记不在
-就从 ini 把自己的键写进去（`common/edf/keybind.h Seed`）。旧 COMMON.CFG 读入、全部恢复默认后标记消失，会再播种一次。
+插件只需要一次性「播种」：每个插件在 `0xFE`（EDF6VehicleCrew）/ `0xFD`（EDF6AutoTurret）第 0 套放一个标记值
+（`"BK"` 标签 | 已播种到的动作号），标记之后的本插件槽（新版本新增的）从 ini 写进去，之前的槽保留玩家的键（`common/edf/keybind.h Seed`）。
+旧 COMMON.CFG 读入、全部恢复默认后标记消失，会再全部播种一次。插件页没挂上时两个插件都不播种、不读这些槽（§7）。
 
 ## 7. 插件页的实现（`src/keyconfig.cpp`、`src/keyconfig_menu.h`）
 

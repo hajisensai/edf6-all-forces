@@ -452,7 +452,9 @@ python autoturret\tools\build.py uninstall    （按安装清单恢复，别的 
 
 **插件按键在游戏自己的按键设置里改**（2026-10-26，`src/keyconfig.cpp`、`docs/keyconfig-re.md` §5～§7、`docs/plan-2026-10-25-keybinds.md` §4）：
 HQ → 设置 → 按键设置，列表末尾多了六页「插件：步行与通用 / 载具通用 / 战机 / 钻头战车·普罗透斯 / 无畏舰 / 沙扎比」，用原版的改键框、
-同页撞键互换和「恢复默认」。键存进原版的键位表（随 COMMON.CFG 保存）；ini 里的 `*Key` 只在第一次装好时作初值，之后改 ini 不再生效。
+同页撞键互换和「恢复默认」。键存进原版的键位表（随 COMMON.CFG 保存）；ini 里的 `*Key` 只在第一次装好时作初值，之后改 ini 不再生效
+（以后版本新增的键同样只在第一次出现时取 ini 值，已改过的键不动）。插件页没挂上时（日志 `KEYCONFIG ... NOT offered`），以及只装
+EDF6AutoTurret 时，键仍按 ini。
 只管键盘鼠标；手柄按钮（`*Button`）仍在 ini 里改。自制 Q 标记和 EDF6AutoTurret 的锁定键跟随原版通用页的「标记」键（`NpcMarkKey` /
 `LockKey` 写 0 仍是关闭）。为减少撞键，插件把原版通用页的默认「聊天」改为 Enter、「语音」改为 K（只影响新建键位表和通用页「恢复默认」，
 不改你已有的 COMMON.CFG；老玩家想用新默认需在通用页按「恢复默认」）；编队键改 U、沙扎比米加炮改 X。仍有意保留的同键（如原版 Shotcut T 与

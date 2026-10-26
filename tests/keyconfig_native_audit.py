@@ -7,7 +7,9 @@ has 11 compiled pages with immediate row counts and compiled row labels; each pa
 Stage 3 (the plugin's pages 11..16 in that menu, src/keyconfig.cpp): the game codes and their virtual keys, the stock
 defaults, COMMON.CFG saving the whole store raw (the spare slots persist), the runtime binder reading no slot past 0x4E,
 src/keyconfig_signatures.inc against the DLL, and what each patched site does (the six page dispatches and their joins,
-the page table's six readers, the model's all-sets rows, the redirected calls, the top list's items).
+the page table's six readers, the model's all-sets rows, the redirected calls, the top list's items); that the stock reads
+no volatile register (nor the flags) a stub changes after its join / default, the stack's alignment at the stubs' calls,
+and that every patched byte is signed.
 Missing input: 77.
 """
 from pathlib import Path
@@ -282,4 +284,177 @@ ok(not chat_refuses(consts['kChatTo']) and not chat_refuses(consts['kVoiceTo']) 
    'Enter (0x62) and K (0x1C) are keys the stock dialog takes for Chat / VoiceChat (0x7CCD10 refuses Space, W ...)')
 b = ins(0x7CCD10, 0x38)
 ok(b[0x7CCD25] == ('mov', 'ecx, 0x1e3') and b[0x7CCD35] == ('movabs', 'rcx, 0x5100024f000'), 'the chat limits as read (0x7CCD10)')
+# ---- The stubs against the code they join (keyconfig_menu.h): what the stub path changes is never read by the stock.
+# A stub leaves through its join (the plugin's pages) or its default (a page past 16): the Head's cmp's change the flags
+# alone, A writes ebx, B ecx / [rsi+0x844] / [rsp+0x30], C..F call the plugin (Microsoft x64: rcx, rdx, r8..r11, xmm0..5
+# and the flags lost) and set rax (C, D, F), r12 (D), r14 / r15 / bl (E). So: from each join, on every path up to the
+# next call (or ret), no volatile register but the stub's rax is read before it is written; from each default, none the
+# stub wrote. Every join of C, D, F follows a call in the stock (0x7A3500, the text lookup) and E's join leads straight to
+# one: the stock itself keeps nothing in a volatile register across them, which is why the stubs need not save any.
+md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+md.detail = True
+from capstone import x86  # noqa: E402
+VOLATILE = ['rflags', 'rax', 'rcx', 'rdx', 'r8', 'r9', 'r10', 'r11'] + [f'xmm{k}' for k in range(6)]
+PARTIAL = {'al', 'ah', 'ax', 'cl', 'ch', 'cx', 'dl', 'dh', 'dx'} | {f'r{k}{s}' for k in range(8, 12) for s in 'bw'}
+XMM_FULL = {'movaps', 'movups', 'movdqa', 'movdqu', 'movapd', 'movupd', 'xorps', 'xorpd', 'pxor', 'movd', 'movq',
+            'cvtsi2ss', 'cvtsi2sd', 'movss', 'movsd'}
+
+
+def vreg(r):
+    n = md.reg_name(r)
+    for v in ('rax', 'rcx', 'rdx'):
+        if n in (v, 'e' + v[1:], v[1:], v[1] + 'l', v[1] + 'h'):
+            return v, n
+    for v in ('r8', 'r9', 'r10', 'r11'):
+        if n == v or (n.startswith(v) and n[len(v):] in ('d', 'w', 'b')):
+            return v, n
+    if n.startswith(('xmm', 'ymm')):
+        return 'xmm' + n[3:], n
+    return n, n
+
+
+def jump_table(at):
+    """The targets of the MSVC jump table whose indirect jmp is at `at` (cmp idx, N; ja; mov ecx, [base + idx*4 + T];
+    add rcx, base; jmp rcx with base the image's 0: N + 1 RVAs), or None."""
+    for back in range(0x28, 4, -1):
+        seq = list(md.disasm(img[at - back:at + 2], at - back))
+        if not seq or seq[-1].address != at or seq[-1].mnemonic != 'jmp':
+            continue
+        mv = [i for i in seq if i.mnemonic == 'mov' and re.match(r'e(cx|ax), dword ptr \[r\w+ \+ r\w+\*4 \+ 0x[0-9a-f]+\]$', i.op_str)]
+        cm = [i for i in seq if i.mnemonic == 'cmp' and re.match(r'\w+, (0x[0-9a-f]+|\d+)$', i.op_str)]
+        if mv and cm:
+            t = int(mv[-1].op_str.split('+ ')[-1].rstrip(']'), 16)
+            return [struct.unpack_from('<i', img, t + 4 * k)[0] for k in range(int(cm[-1].op_str.split(', ')[1], 0) + 1)]
+    return None
+
+
+def live_in(start):
+    """The volatile registers read before written on some path from `start` up to a call / ret (8- / 16-bit writes and
+    xmm writes that keep the upper lanes do not count as written), and the indirect jmps it could not follow."""
+    seen, reads, unknown, work = set(), {}, set(), [(start, frozenset())]
+    while work:
+        a, w = work.pop()
+        if (a, w) in seen:
+            continue
+        seen.add((a, w))
+        i = next(md.disasm(img[a:a + 16], a))
+        rr, ww = i.regs_access()
+        same = (len(i.operands) == 2 and all(o.type == x86.X86_OP_REG for o in i.operands)
+                and i.operands[0].reg == i.operands[1].reg and i.mnemonic in ('xor', 'sub', 'pxor', 'xorps', 'xorpd'))
+        for r in ([] if same or i.mnemonic == 'nop' else rr):
+            c, _ = vreg(r)
+            if c in VOLATILE and c not in w:
+                reads.setdefault(c, []).append(f'{a:#x} {i.mnemonic} {i.op_str}')
+        nw = set(w)
+        for r in ww:
+            c, n = vreg(r)
+            if c not in VOLATILE or n in PARTIAL:
+                continue
+            if c.startswith('xmm') and (i.mnemonic not in XMM_FULL or
+                                        (i.mnemonic in ('movss', 'movsd') and i.operands[1].type == x86.X86_OP_REG)):
+                continue
+            nw.add(c)
+        nw = frozenset(nw)
+        if i.mnemonic in ('call', 'ret', 'int3'):
+            continue
+        if i.mnemonic == 'jmp':
+            op = i.operands[0]
+            if op.type == x86.X86_OP_IMM:
+                work.append((op.imm, nw))
+            elif jump_table(a) is not None:
+                work += [(t, nw) for t in jump_table(a)]
+            else:
+                unknown.add(a)
+            continue
+        if i.mnemonic.startswith('j'):
+            work.append((i.operands[0].imm, nw))
+        work.append((a + i.size, nw))
+    return reads, unknown
+
+
+# (name: what the stub sets that the join may read, the registers the stock set before the site that the default reads)
+STUB_OUT = {'page row': set(), 'row count': set(), 'labels': {'rax'}, 'texts': {'rax'}, 'dialog': set(), 'refresh': {'rax'}}
+DEF_IN = {'page row': set(), 'row count': {'rdx'}, 'labels': {'r9', 'r10'}, 'texts': set(), 'dialog': set(), 'refresh': set()}
+for name, site, size, back, default, join, reg_ in disp:
+    jo, de = int(join, 16), int(default, 16)
+    reads, unknown = live_in(jo)
+    ok(not unknown and set(reads) <= STUB_OUT[name],
+       f'{name}: from the join {jo:#x} no volatile register but the stub\'s {sorted(STUB_OUT[name])} is read before written '
+       f'(read: {sorted(reads)})')
+    reads, unknown = live_in(de)
+    ok(not unknown and set(reads) == DEF_IN[name],
+       f'{name}: from the default {de:#x} only what the stock set before the site is read ({sorted(reads)}), not the flags')
+head = re.search(r'inline void Head\(Code& c,.*?\n\}', menu_h, re.S).group(0)
+raws = re.findall(r'c\.Raw\(\{([^}]*)\}\)', head)
+ok(len(raws) == 5 and all(r.replace(' ', '').startswith(('0x83,', '0x41,0x83,')) for r in raws),
+   'the stubs\' Head writes no register (cmp\'s and jcc\'s alone): a default sees the registers the stock left there')
+for jo in (0x897E65, 0x897F25, 0x89AF3E):
+    prev = list(m.disasm(img[jo - 5:jo], jo - 5))
+    ok(len(prev) == 1 and prev[0].mnemonic == 'call' and int(prev[0].op_str, 16) == 0x7A3500,
+       f'{jo:#x}: the stock reaches this join from the call of 0x7A3500 (no volatile register lives across it)')
+e_next = list(m.disasm(img[0x8991AC:0x8991B6], 0x8991AC))
+ok([(i.mnemonic, i.op_str) for i in e_next] == [('lea', 'rcx, [rsp + 0x50]'), ('call', '0x8c320')],
+   'E: its join 0x8991AC sets rcx and calls 0x8C320')
+
+
+def frame(site):
+    """rsp's offset below the function's entry rsp at `site` (the function's unwind info: pushes and allocations; no
+    frame register, no chain), with the site past the prologue."""
+    lo, hi = 0, p.OPTIONAL_HEADER.DATA_DIRECTORY[3].Size // 12
+    pd = p.OPTIONAL_HEADER.DATA_DIRECTORY[3].VirtualAddress
+    while lo < hi:
+        mid = (lo + hi) // 2
+        b_, e_, u_ = struct.unpack_from('<III', img, pd + 12 * mid)
+        if site < b_:
+            hi = mid
+        elif site >= e_:
+            lo = mid + 1
+        else:
+            break
+    else:
+        raise AssertionError(f'{site:#x}: no function')
+    ver, prolog, count, fr = img[u_], img[u_ + 1], img[u_ + 2], img[u_ + 3]
+    assert ver & 7 == 1 and not (ver >> 3) & 4 and fr & 0xF == 0 and site - b_ >= prolog, (hex(site), ver, fr)
+    total, k = 0, 0
+    while k < count:
+        op, info = img[u_ + 4 + 2 * k + 1] & 0xF, img[u_ + 4 + 2 * k + 1] >> 4
+        if op == 0:
+            total, k = total + 8, k + 1
+        elif op == 1:
+            total += 8 * struct.unpack_from('<H', img, u_ + 6 + 2 * k)[0] if info == 0 else struct.unpack_from('<I', img, u_ + 6 + 2 * k)[0]
+            k += 2 if info == 0 else 3
+        elif op == 2:
+            total, k = total + 8 * info + 8, k + 1
+        elif op in (4, 8):
+            k += 2
+        elif op in (5, 9):
+            k += 3
+        else:
+            raise AssertionError(f'{site:#x}: unwind op {op}')
+    return b_, total
+
+
+STUB_FRAME = {'labels': 0x20, 'texts': 0x30, 'dialog': 0x40, 'refresh': 0x20}
+for name, site, *_ in disp:
+    if name not in STUB_FRAME:
+        continue
+    fn, total = frame(int(site, 16))
+    ok((8 + total) % 16 == 0 and STUB_FRAME[name] % 16 == 0 and
+       re.search(rf'0x48,0x83,0xEC,{STUB_FRAME[name]:#04x}', menu_h) is not None,
+       f'{name}: rsp is 16-aligned at {int(site, 16):#x} (function {fn:#x}, {total:#x} below the return address), the stub\'s '
+       f'sub rsp,{STUB_FRAME[name]:#x} keeps it so for its call')
+
+# Every byte the plugin patches, and every join, lies in a signature CheckCode checks first.
+spans = [(rva, rva + size) for rva, size, _ in sigs.SIGNATURES]
+
+
+def signed(lo, n):
+    return any(a <= lo and lo + n <= b for a, b in spans)
+
+
+ok(all(signed(int(site, 16), int(size)) and signed(int(join, 16), 1) and signed(int(back, 16), 1)
+       for _n, site, size, back, _d, join, _r in disp), 'the six dispatches, their jump tables and joins are signed')
+ok(all(signed(a, 7) for a in leas), 'each of the six lea\'s of the page table is signed (0x7CDB34 too)')
+ok(signed(0x7CDE40, 3) and all(signed(int(rva, 16), 10) for rva, *_ in sd), 'the all-sets rows and the eight stock defaults are signed')
+
 print(f'{checks} checks passed')

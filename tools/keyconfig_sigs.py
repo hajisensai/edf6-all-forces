@@ -45,6 +45,7 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0xD4290, 0x45, 'the key name: the slot read, codes 0x12..0x78 by 0x11856F0'),
     (0x7CD2D0, 0x30, 'a page\'s conflict: the row\'s list 0x17F26B0 + row * 13'),
     (0x7CDA40, 0x6A, 'the assignment: the old key, the row\'s list, the pad / move / chat limits, 0x7CD9B0'),
+    (0x7CDB34, 0x13, 'the assignment: r14 = the page table 0x17F26B0 (a kTableLeas lea), the key list on the stack'),
     (0x7CDBE4, 0x12, 'the assignment: the row\'s list walked from r15'),
     (0x7CDC46, 0x1D, 'the assignment: a conflict in the row swaps (the list at 0x17F26B0)'),
     (0x7CDD4C, 0x31, 'the assignment written: +0x10 all sets by 0xD5470, else the one set by 0xD54B0'),

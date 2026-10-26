@@ -281,6 +281,38 @@ void Store() {
     *kb::SlotPtr(store.data(),0,0,0x53)=0x200;
     Check(kb::SlotVk(store.data(),0x53)==0,"a code no menu writes: no key");
     Check(*kb::SlotPtr(store.data(),1,0,0x53)==0,"player 1 untouched");
+
+    // The marker: the tag and the end of what was seeded; anything else is nothing seeded.
+    Check(kb::MarkerEnd(0)==kb::kFirstAction && kb::MarkerEnd(0x31564B42)==kb::kFirstAction && kb::MarkerEnd(-1)==kb::kFirstAction,
+          "no tag (a fresh store's 0, anything else): nothing seeded");
+    Check(kb::MarkerEnd(kb::MarkerOf(0x70))==0x70,"the marker says where the seeding got to");
+    Check(kb::OwnerEnd(kb::Owner::crew)==kb::kSlots[kb::kSlotCount-1].action+1 && kb::OwnerEnd(kb::Owner::turret)==0x5A,
+          "each owner's end: one past its highest slot");
+    Check(kb::SeededEnd(store.data(),kb::Owner::crew)==kb::OwnerEnd(kb::Owner::crew),"seeded: the marker at the crew's end");
+    // A store seeded by an older catalog (up to 0x70), a key the player changed since: only the slots from 0x70 on are
+    // seeded, the player's key kept; then nothing more to seed.
+    std::vector<unsigned char> old(kb::kStoreSize,0);
+    *kb::SlotPtr(old.data(),0,0,kb::kMarkerAction[0])=kb::MarkerOf(0x70);
+    for(int set=0;set<kb::kSyncedSets;++set)*kb::SlotPtr(old.data(),0,set,0x53)=kb::CodeOfVk('P');
+    Check(!kb::Seeded(old.data(),kb::Owner::crew),"seeded up to 0x70: the slots added since not yet");
+    int added=0;
+    for(const kb::Slot& s:kb::kSlots)added+=s.owner==kb::Owner::crew && s.action>=0x70 ? 1 : 0;
+    const int written=kb::Seed(old.data(),kb::Owner::crew,[](const kb::Slot& s){ return s.defaultVk; });
+    bool fresh=true,kept=true;
+    for(const kb::Slot& s:kb::kSlots) {
+        const std::int32_t v=*kb::SlotPtr(old.data(),0,0,s.action);
+        if(s.owner==kb::Owner::crew && s.action>=0x70)fresh=fresh && v==kb::CodeOfVk(s.defaultVk);
+        else if(s.action!=0x53)kept=kept && v==0;
+    }
+    Check(written==added && fresh,"the slots added since seeded, in the four sets (" + std::to_string(written) + ")");
+    Check(kept && kb::SlotVk(old.data(),0x53)=='P',"the slots seeded before keep what they hold: the player's key stays");
+    Check(kb::Seeded(old.data(),kb::Owner::crew) && kb::SeededEnd(old.data(),kb::Owner::crew)==kb::OwnerEnd(kb::Owner::crew),
+          "the marker moved to the crew's end");
+    Check(kb::Seed(old.data(),kb::Owner::crew,[](const kb::Slot&){ return 'Z'; })==0 && kb::SlotVk(old.data(),0x53)=='P',
+          "seeded through: a second seed writes nothing");
+    Check(kb::Seed(old.data(),kb::Owner::turret,[](const kb::Slot&){ return 'J'; })==1 && kb::SlotVk(old.data(),0x59)=='J' &&
+          kb::Seeded(old.data(),kb::Owner::turret) && kb::SlotVk(old.data(),0x53)=='P',
+          "the turret's marker its own: its one slot seeded, the crew's left alone");
 }
 // The jets' gear on the d-pad down, held (plan §3.3 D): a tap is nothing, a hold one toggle's edge.
 // The stock defaults the plugin changes: Chat Enter, VoiceChat K, each in the four sets, each a key the stock dialog

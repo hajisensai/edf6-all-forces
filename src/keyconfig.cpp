@@ -2,12 +2,15 @@
 //
 // The keys live in the game's key store (common/edf/keybind.h): slots 0x4F.. no code of the game reads, saved raw with
 // the rest of COMMON.CFG. This plugin
-//   - seeds its slots once from its ini (the store's marker slot says it did; EDF6AutoTurret seeds its own the same way),
+//   - seeds each of its slots once from its ini (the store's marker slot says up to which byte; EDF6AutoTurret seeds its
+//     own the same way, while this plugin says the pages are offered: EDF6VehicleCrew_KeyConfigPagesV1),
 //   - reads its keys from them (OverlayStockKeys: into the published config, so every module's Cfg().xxxKey is the
 //     store's), the Q mark from the stock 「标记」 (Spot, action 0x1B),
 //   - and offers them as six more pages of the stock key config (pages 11..16, the top list's 「插件」 items): the
 //     stock rows, the stock 「按下新键」 dialog and the stock conflict check within a page (a key taken by another row of
 //     the page swaps), the stock 「恢复默认」 (the slots' defaults). keyconfig_menu.h has the sites and the stubs.
+// All of it only with the pages offered (InstallKeyConfig): without them nothing could change the store's keys, so the
+// store is neither seeded nor read and the ini's *Key values stay the keys.
 // The keyboard only: the stock pad pages are 11 fixed buttons without the d-pad or Start the plugins' pad buttons use;
 // those stay the ini's.
 #include "keyconfig.h"
@@ -116,23 +119,31 @@ unsigned char* KeyStore() noexcept {
         return At<std::int32_t>(store,kb::kReady)==1 ? store : nullptr;
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
+std::atomic<bool> installed{false};   // the pages offered (InstallKeyConfig): the store's slots are the keys
 std::atomic<bool> seededLogged{false};
 std::atomic<bool> markWanted{true};   // the ini's NpcMarkKey: 0 the custom Q off, else on with the stock 「标记」's key
-// This plugin's slots from its ini, once (the marker); EDF6AutoTurret's own are its business.
+// The ini's keys as LoadConfig read and validated them (OverlayStockKeys from the ini, before the store's go over them):
+// what a slot is seeded with. Index: kFields'.
+std::atomic<int> iniKeys[kFieldCount];
+std::atomic<bool> iniKeysRead{false};
+// This plugin's slots its marker does not cover yet, from the ini; EDF6AutoTurret's own are its business.
 void EnsureSeeded(unsigned char* store) noexcept {
-    if(kb::Seeded(store,kb::Owner::crew))return;
-    const wchar_t* ini=ConfigPath();
+    if(kb::Seeded(store,kb::Owner::crew) || !iniKeysRead.load())return;
+    const int from=kb::SeededEnd(store,kb::Owner::crew);
     int unmapped=0;
-    kb::Seed(store,kb::Owner::crew,[&](const kb::Slot& s) noexcept {
-        int vk=static_cast<int>(GetPrivateProfileIntW(L"VehicleCrew",s.ini,s.defaultVk,ini));
-        if(vk<0 || vk>0xFE)vk=s.defaultVk;
+    const int written=kb::Seed(store,kb::Owner::crew,[&](const kb::Slot& s) noexcept {
+        const KeyField* f=FieldOf(s.ini);
+        const int vk=f ? iniKeys[f-kFields].load() : s.defaultVk;
         if(vk && kb::CodeOfVk(vk)==kb::kNoAssign) {
             Log("KEYCONFIG %ls=0x%X has no key code in the game: the slot left unassigned (set it in the key config)",s.ini,vk);
             ++unmapped;
         }
         return vk;
     });
-    if(!seededLogged.exchange(true))
+    if(from>kb::kFirstAction)
+        Log("KEYCONFIG %d key(s) added since the store was seeded (slots 0x%X..) seeded from the ini (%d unmapped); the others kept",
+            written,from,unmapped);
+    else if(!seededLogged.exchange(true))
         Log("KEYCONFIG this plugin's keys seeded from the ini into the game's key store (slots 0x%X.., %d unmapped): from now on "
             "they are set in the game's key config (the 「插件」 pages), the ini's *Key values are no longer read",kb::kFirstAction,
             unmapped);
@@ -224,18 +235,37 @@ std::uintptr_t __fastcall TopDialogHook(std::uintptr_t system,std::uintptr_t out
 }
 
 bool CheckCode() noexcept { return CheckSignatures(kSignatures,"KEYCONFIG"); }
-bool installed=false;
 
-int Redirect(std::size_t site,std::size_t target,void* hook) noexcept {
+// A redirected call: whether the site now calls the hook (`changed`: a page protection not restored after the write is
+// logged, the hook in place all the same).
+bool Redirect(std::size_t site,std::size_t target,void* hook) noexcept {
     bool changed=false;
-    if(RedirectCall(image+site,image+target,hook,changed))return 1;
-    Log("KEYCONFIG call site %#zx %s",site,changed ? "half patched" : "not redirected (another hook holds it)");
-    return 0;
+    if(RedirectCall(image+site,image+target,hook,changed))return true;
+    Log("KEYCONFIG call site %#zx %s",site,changed ? "redirected, its page protection not restored" : "not redirected (another hook holds it)");
+    return changed;
+}
+// The stock common page's defaults (kStockDefaults) made the plugin's (`ours`; stops at the first that does not take) or
+// put back (every one that is the plugin's). True when all of them are so.
+bool PatchDefaults(bool ours) noexcept {
+    bool ok=true;
+    for(const StockDefault& d:kStockDefaults) {
+        unsigned char stock[kDefaultSize],mine[kDefaultSize];
+        StockDefaultCode(d,false,stock);StockDefaultCode(d,true,mine);
+        const bool took=ours ? edf::PatchCode(image+d.rva,stock,mine,kDefaultSize) : edf::PatchCode(image+d.rva,mine,stock,kDefaultSize);
+        if(!took && ours)return false;
+        ok=ok && took;
+    }
+    return ok;
 }
 }  // namespace
 
 bool OverlayStockKeys(Config& c,bool fromIni) noexcept {
-    if(fromIni)markWanted.store(c.npcMarkKey!=0);
+    if(fromIni) {
+        markWanted.store(c.npcMarkKey!=0);
+        for(int i=0;i<kFieldCount;++i)iniKeys[i].store(Get(c,kFields[i]));
+        iniKeysRead.store(true);
+    }
+    if(!installed.load())return false;
     unsigned char* store=KeyStore();
     if(!store)return false;
     __try {
@@ -256,6 +286,7 @@ bool StockKeysDiffer(const Config& a,const Config& b) noexcept {
 }
 
 void KeyConfigTick() noexcept {
+    if(!installed.load())return;
     unsigned char* store=KeyStore();
     if(!store)return;
     bool changed=false;
@@ -274,7 +305,7 @@ void KeyConfigTick() noexcept {
 }
 
 bool InstallKeyConfig() noexcept {
-    if(installed)return true;
+    if(installed.load())return true;
     if(!CheckCode())return false;
     // Everything built first; nothing is patched unless all of it was.
     unsigned char table[kRows*kRowBytes];
@@ -305,8 +336,11 @@ bool InstallKeyConfig() noexcept {
             Log("KEYCONFIG the page table is out of the lea at EDF+%#zx's reach: no plugin pages",kTableLeas[i]);
             return false;
         }
-    // The stubs' code, then the readers of the table and the model's all-sets rows, then the dispatches, then the calls;
-    // the top list last: until then no page 11..16 can be opened, so a failure on the way leaves the stock menu working.
+    // The stubs' code, the readers of the table, the model's all-sets rows, the dispatches, 「恢复默认」 and the dialog's key
+    // check: each of these does for the stock pages 0..10 what the stock did, so a failure on the way leaves the stock menu
+    // working. Then the two a player sees: the stock common page's defaults (Chat Enter, VoiceChat K: only what a new
+    // store or 「恢复默认」 writes) and, last, the top list's items; a failure of either puts the defaults back, so there are
+    // the plugin's pages and the changed defaults, or neither.
     bool ok=true;
     for(int i=0;i<6 && ok;++i)ok=edf::PatchCode(stubs+i*kStubSlot,zeros,code[i].b,code[i].n);
     unsigned char stockLea[kLeaSize];
@@ -315,19 +349,27 @@ bool InstallKeyConfig() noexcept {
         ok=edf::PatchCode(image+kTableLeas[i],stockLea,leas[i],kLeaSize);
     }
     ok=ok && edf::PatchCode(image+kSyncedRows,kSyncedRowsCode,kSyncedRowsOurs,sizeof(kSyncedRowsCode));
-    // the stock common page's defaults (Chat Enter, VoiceChat K): only what a new store or 「恢复默认」 writes
-    for(const StockDefault& d:kStockDefaults) {
-        unsigned char stock[kDefaultSize],ours[kDefaultSize];
-        StockDefaultCode(d,false,stock);StockDefaultCode(d,true,ours);
-        ok=ok && edf::PatchCode(image+d.rva,stock,ours,kDefaultSize);
-    }
     for(int i=0;i<6 && ok;++i)ok=edf::PatchCode(image+kDispatches[i].site,kDispatchCode[i],jumps[i],kDispatches[i].size);
     ok=ok && Redirect(kResetCall,kResetPage,reinterpret_cast<void*>(&ResetHook));
     ok=ok && Redirect(kAllowedCall,kKeyAllowed,reinterpret_cast<void*>(&AllowedHook));
-    ok=ok && Redirect(kTopDialogCall,kShowDialog,reinterpret_cast<void*>(&TopDialogHook));
-    installed=ok;
-    Log("KEYCONFIG plugin pages %d..%d in the game's key config: %s (%d keys; the keyboard's, the pads' stay the ini's)",
-        kb::kFirstPage,kLastPage,ok ? "offered" : "NOT offered (a patch did not take: the stock menu as it was)",kb::kSlotCount);
-    return ok;
+    if(!ok) {
+        Log("KEYCONFIG plugin pages NOT offered (a patch did not take; what took does the stock's for the stock pages): the "
+            "stock menu and its defaults as they were, the ini's *Key values the keys");
+        return false;
+    }
+    const bool defaults=PatchDefaults(true);
+    if(!defaults || !Redirect(kTopDialogCall,kShowDialog,reinterpret_cast<void*>(&TopDialogHook))) {
+        const bool back=PatchDefaults(false);
+        Log("KEYCONFIG plugin pages NOT offered (%s did not take): the stock common page's defaults %s, the ini's *Key values "
+            "the keys",defaults ? "the top list's call" : "a stock default",back ? "put back" : "NOT all put back");
+        return false;
+    }
+    installed.store(true);
+    Log("KEYCONFIG plugin pages %d..%d in the game's key config: offered (%d keys; the keyboard's, the pads' stay the ini's)",
+        kb::kFirstPage,kLastPage,kb::kSlotCount);
+    return true;
 }
 }  // namespace crew
+
+// EDF6AutoTurret asks whether the pages are offered before it seeds or reads its slot (common/edf/keybind.h kPagesExport).
+extern "C" __declspec(dllexport) bool __cdecl EDF6VehicleCrew_KeyConfigPagesV1() { return crew::installed.load(); }

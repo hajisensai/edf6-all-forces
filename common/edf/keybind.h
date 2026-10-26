@@ -14,9 +14,10 @@
 // A slot holds a game key code (below), 0 = unassigned.
 //
 // The plugins' slots are action bytes 0x4F.. in the order of kSlots: COMMON.CFG keeps them, so a slot's byte never
-// changes and a new key only ever gets the next byte. Each owner seeds its slots once from its ini (the marker slot
-// says it did): from then on the game's key config (HQ -> settings -> key config -> the 「插件」 pages) is where they
-// are set, the ini value is no longer read.
+// changes and a new key only ever gets the next byte. Each owner seeds each of its slots once from its ini (the marker
+// slot says up to which byte it did, so a slot added later is seeded alone, the player's keys left as they are): from
+// then on the game's key config (HQ -> settings -> key config -> the 「插件」 pages) is where they are set, the ini value
+// is no longer read. Only while EDF6VehicleCrew offers those pages (kPagesExport): without them the ini stays the keys.
 #pragma once
 #include <cstddef>
 #include <cstdint>
@@ -165,9 +166,21 @@ inline constexpr Slot kSlots[]={
 };
 inline constexpr int kSlotCount=static_cast<int>(sizeof(kSlots)/sizeof(kSlots[0]));
 inline constexpr int kFirstAction=0x4F;
-// Each owner's marker: a slot of set 0 no page lists, holding kMarker once the owner seeded its slots from its ini.
+// Each owner's marker: a slot of set 0 no page lists, holding kMarkerTag | the end of what the owner seeded (one past its
+// highest slot byte then). The slots are only ever added at the next byte, so the owner's slots from that end on are the
+// ones added since: those alone are seeded (MarkerEnd). Anything else in the slot (0 in a fresh store): nothing seeded.
 inline constexpr unsigned char kMarkerAction[2]={0xFE,0xFD};   // Owner::crew, Owner::turret
-inline constexpr std::int32_t kMarker=0x31564B42;              // "BKV1"
+inline constexpr std::uint32_t kMarkerTag=0x4B420000u,kMarkerTagMask=0xFFFF0000u;   // "BK" in the high half
+constexpr std::int32_t MarkerOf(int end) noexcept { return static_cast<std::int32_t>(kMarkerTag|static_cast<std::uint32_t>(end)); }
+constexpr int MarkerEnd(std::int32_t marker) noexcept {
+    const std::uint32_t m=static_cast<std::uint32_t>(marker);
+    return (m&kMarkerTagMask)==kMarkerTag ? static_cast<int>(m&~kMarkerTagMask) : kFirstAction;
+}
+// EDF6VehicleCrew's export (looked up by name, common/edf/aimlink.h Resolve): true once its 「插件」 pages are in the game's
+// key config. The store's slots are the keys only then; EDF6AutoTurret without it (alone, or the pages not offered)
+// neither seeds nor reads the store, its ini is its keys.
+using PagesOfferedFn=bool(__cdecl*)();
+inline constexpr char kPagesExport[]="EDF6VehicleCrew_KeyConfigPagesV1";
 
 constexpr int RowsOf(int page) noexcept {
     int n=0;
@@ -184,6 +197,17 @@ constexpr const Slot* SlotOf(int action) noexcept {
     return nullptr;
 }
 constexpr int IndexOf(const Slot* s) noexcept { return s ? static_cast<int>(s-kSlots) : -1; }
+constexpr int SlotsOf(Owner owner) noexcept {
+    int n=0;
+    for(const Slot& s:kSlots)n+=s.owner==owner ? 1 : 0;
+    return n;
+}
+// One past the owner's highest slot byte: what its marker says once all of its slots are seeded.
+constexpr int OwnerEnd(Owner owner) noexcept {
+    int end=kFirstAction;
+    for(const Slot& s:kSlots)if(s.owner==owner && s.action>=end)end=s.action+1;
+    return end;
+}
 
 // The catalog's own rules (also tests/keybind_test.cpp's): bytes in order from kFirstAction, pages in order with rows
 // 0.. in order, every page a list the stock page code can hold, no slot on a marker.
@@ -212,15 +236,19 @@ inline std::int32_t Read(unsigned char* store,int player,int action) noexcept { 
 inline void WriteSynced(unsigned char* store,int player,int action,std::int32_t code) noexcept {
     for(int set=0;set<kSyncedSets;++set)*SlotPtr(store,player,set,action)=code;
 }
-inline bool Seeded(unsigned char* store,Owner owner) noexcept {
-    return Read(store,0,kMarkerAction[static_cast<int>(owner)])==kMarker;
-}
-// The owner's slots from its ini (`iniVk(slot)`: the ini's virtual key, or the slot's default when the ini has none),
-// then its marker. Player 0's: the keyboard is the first local player's (the menu's keyboard pages are player 0's).
-template<class IniVk> void Seed(unsigned char* store,Owner owner,IniVk iniVk) noexcept {
+// Where the owner's marker says its seeding got to (kFirstAction: nothing seeded).
+inline int SeededEnd(unsigned char* store,Owner owner) noexcept { return MarkerEnd(Read(store,0,kMarkerAction[static_cast<int>(owner)])); }
+inline bool Seeded(unsigned char* store,Owner owner) noexcept { return SeededEnd(store,owner)>=OwnerEnd(owner); }
+// The owner's slots its marker does not cover yet from its ini (`iniVk(slot)`: the ini's virtual key, or the slot's
+// default when the ini has none), then its marker; the slots it covers keep what they hold (the player's keys). Player
+// 0's: the keyboard is the first local player's (the menu's keyboard pages are player 0's). The slots written.
+template<class IniVk> int Seed(unsigned char* store,Owner owner,IniVk iniVk) noexcept {
+    const int from=SeededEnd(store,owner);
+    int written=0;
     for(const Slot& s:kSlots)
-        if(s.owner==owner)WriteSynced(store,0,s.action,CodeOfVk(iniVk(s)));
-    *SlotPtr(store,0,0,kMarkerAction[static_cast<int>(owner)])=kMarker;
+        if(s.owner==owner && s.action>=from){WriteSynced(store,0,s.action,CodeOfVk(iniVk(s)));++written;}
+    if(from<OwnerEnd(owner))*SlotPtr(store,0,0,kMarkerAction[static_cast<int>(owner)])=MarkerOf(OwnerEnd(owner));
+    return written;
 }
 // The virtual key a slot holds now for the plugins (0: unassigned, or a code they cannot read: see VkOfCode).
 inline int SlotVk(unsigned char* store,int action) noexcept {
