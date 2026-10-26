@@ -115,8 +115,21 @@ class Shipped(unittest.TestCase):
             self.assertLess(max(abs(x - y) for x, y in zip(inverse, mdb.ident())), 1e-4)
             bike._rotation(world[at])   # a rotation, right-handed
         left, right = (world[names.index(b)] for b, _h in bike.GRIP_BONES)
-        mirror = [-1.0, 1.0, 1.0]   # the right hand is the left one mirrored in x (axes and position)
+        mirror = [-1.0, 1.0, 1.0]   # the right hand is the left one mirrored in x (its position)
         self.assertLess(max(abs(left[12 + c] * mirror[c] - right[12 + c]) for c in range(3)), 1e-4)
+
+    def test_missing_or_misparented_grip_bone_fails_closed(self) -> None:
+        md = bike.model(shipped_archive(MODEL_RAB), 'Vehicle408_motorbike.mdb')
+        bike.check(self.members, md, self.physics)
+        names = [md.name_of(b.name) for b in md.bones]
+        gone = copy.deepcopy(md)   # te_ik_l renamed away: the bone is not there
+        gone.bones[names.index('te_ik_l')].name = md.bones[names.index(bike.GRIP_PARENT)].name
+        with self.assertRaisesRegex(ValueError, 'te_ik_l must be a bone under'):
+            bike.check(self.members, gone, self.physics)
+        moved = copy.deepcopy(md)   # te_ik_r under the body, not the steering handle
+        moved.bones[names.index('te_ik_r')].parent = names.index('body')
+        with self.assertRaisesRegex(ValueError, 'te_ik_r must be a bone under'):
+            bike.check(self.members, moved, self.physics)
 
     def test_call_drive_block(self) -> None:
         for members in (self.members, self.spawn):
