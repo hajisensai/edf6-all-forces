@@ -1,21 +1,23 @@
-// Aircraft support uses the shared deployment transaction: verified entry, real crew, all-peer ACK,
-// actual boarding, then takeoff. Stock RadioContact / mission BombingPlane objects retain their native
-// init, update, payload and cleanup. Replacing them through Launch() would create an airborne empty
-// hull: recruiting nearby soldiers cannot staff an aircraft already outside the map at flight height.
-//  - The Air Raider's call weapons (tools/call_weapons.py: EDF6VC_CALL_*, KM6 bomber calls told apart by
-//    their AmmoHitSizeAdjust, weapon+0x8C4, kCalls' marks): at the call (its one call of IFC_Start,
-//    0x6A8DFB) the plugin launches that call's jets or helis instead of its bombers, which it keeps home
-//    (the call's plane count, ifc+0x80, set to 0 after IFC_Start: the call is spent, its state machine
-//    goes back to idle). A guard call works round its marker, a follow call round the player. Each
-//    caller submits once; the host sends the verified entry and actors through support_net. The local
-//    picker changes only a local player's call; online the pick goes out in the call's seed (call_net.h,
-//    SeedSendHook) and every machine, the caller's too, replays that pick (docs/online-re.md sections 1, 9, 11).
-//  - The call weapons are owned from the start (docs/loadout-re.md section 8): before the game's own
-//    "grant the installed DLC weapons" step (0xDC550, UnlockDownloadContents: after every save load, and
-//    in a new game's reset; its two entries, a call at 0xDC348 and the script thunk's jump at 0x70FF87,
-//    are redirected) every weapon table row named EDF6VC_CALL_* gets the owned bit, as that step gives a
-//    DLC weapon its: NEW and 0 stars the first time, stars left alone after. Before it, so its "equipped
-//    but not owned: back to the default weapon" pass keeps them on the soldiers that carry them.
+// The Air Raider's weapons the plugin still reads, and the map's flown supports and strikes (the user, 2026-10-26:
+// 「所有插件支援改成m里面消耗pt召唤，空袭兵召唤的支援武器删掉」):
+//  - The supports (tools/calls.py on_map: the flown calls kCalls, the strikes kStrikes) are entries of the map's support bar
+//    (support_dispatch.cpp's catalog: kCalls first, kStrikes after the airdrops), each for its pt (support_points.h). Their
+//    weapon rows are placeholders now (tools/call_weapons.py: EDF6VC_RETIRED_*, kMovedRows): their index kept (a save
+//    refers to a weapon by its row), un-owned at every save load (Grant) so the game's own pass (0xDC550's last part)
+//    puts any soldier that had one equipped back on its default weapon. No radio call of the plugin's is read any more:
+//    the stock bombers, Vesta, Phobos and the missions' strafing runs keep their native init, payload and cleanup.
+//  - A flown support (kCalls) uses the shared deployment transaction: verified entry, real crew, all-peer ACK, actual
+//    boarding, then flight (support_dispatch.cpp); its spec here (SupportAircraftSpec), its second wave (a sortie's `then`:
+//    SupportFollowUpQueue).
+//  - A strike (kStrikes, SupportStrikeAt): a long-range barrage (barrage.cpp: this machine plans and fires it, and tells the
+//    others, barrage_net_protocol.h) or the ultimate (ultimate.cpp, ultimate_net_protocol.h), called by the local player
+//    from the bar onto the point clicked, heading from the player to it.
+//  - The rows still installed (kCallRows: the vehicle requests, the thrown drones, the guns) are owned from the start
+//    (docs/loadout-re.md section 8): before the game's own "grant the installed DLC weapons" step (0xDC550,
+//    UnlockDownloadContents: after every save load, and in a new game's reset; its two entries, a call at 0xDC348 and the
+//    script thunk's jump at 0x70FF87, are redirected) every weapon table row of kCallRows gets the owned bit, as that step
+//    gives a DLC weapon its: NEW and 0 stars the first time, stars left alone after. Before it, so its "equipped but not
+//    owned: back to the default weapon" pass keeps them on the soldiers that carry them.
 //    The script's entry alone also marks / moves the mission pack's save (edf5campaign.cpp MigrateMissionPackSave):
 //    MAINSCRIPT calls UnlockDownloadContents only after SetMode and a LoadSaveData_ModeSelect that succeeded
 //    (MAINSCRIPT.AS 363, 852, 1691, 1801, 1851, 1889, 1913), so GS+0x57A4 is the new mode's save (read whole by
@@ -30,14 +32,9 @@
 //    (JetLaunchThrown) and the bomb deleted (0x118A1B0, as its own update deletes a spent bomb at 0x2962D5) before
 //    its update runs, so the stock patroller never starts. A drone that cannot be launched leaves the stock bomb as
 //    it is. Only the thrower's game: in an online game the others see the stock patroller (their copy's owner is no
-//    local player). Kills are the drone's (an NPC friend's), as a call's jets' are.
-// Refused custom support does not fall back to a stock strike that could violate mission restrictions.
-// Without the plugin the call weapons are plain KM6 calls (still owned: the bit is in the save), the thrown drones
-// plain Patrollers.
-// The other scripted strikes (DemoIndirectFire, gunship fire, missiles, satellite laser) are shells out
-// of the sky with no plane to take over, and stay stock.
+//    local player). Kills are the drone's (an NPC friend's), as a flown support's jets' are.
+// Without the plugin the thrown drones are plain Patrollers, the vehicle requests the stock requests of their vehicles.
 #include "crew.h"
-#include "call_net.h"
 #include "hudtext.h"
 #include "support_call.h"
 #include "support_aircraft.h"
@@ -47,7 +44,6 @@
 #include "online_authority.h"
 #include "unlock_ported.h"
 #include "weapon_records.h"
-#include <atomic>
 #include <cmath>
 #include <cstdarg>
 #include <cwchar>
@@ -56,8 +52,6 @@
 
 namespace crew {
 namespace {
-constexpr unsigned kIfcStart=0x2B5DA0,kRadioCall=0x6A8DFB;
-constexpr std::size_t kIfcPlanes=0x80,kStartForward=0x40,kStartTarget=0x50;   // IFC_Start's params: its matrix's rows
 constexpr unsigned kDelete=0x118A1B0;
 constexpr float kAboveTarget=150.0f;
 // Ownership (docs/loadout-re.md 8): the game status, its weapon table (cfg = GS+0x130, the table loaded
@@ -70,52 +64,35 @@ constexpr std::size_t kCfg=0x130,kTableRef=0x188,kRecord=12;
 constexpr unsigned char kUnlockDlcSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x74,0x24,0x18,0x48,0x89,0x7C,0x24,0x20,
                                          0x55,0x41,0x54,0x41,0x55,0x41,0x56,0x41,0x57};
 constexpr unsigned char kUnlockThunkSig[]={0x48,0x8B,0x0D};   // 0x70FF80: mov rcx,[GS]; jmp 0xDC550
-// The weapon a radio call's IndirectFireControl is in (ifc = weapon+0x1660), and its AmmoHitSizeAdjust.
-constexpr std::size_t kWeaponIfc=0x1660,kWeaponHitSize=0x8C4;
-// RadioContact: its owner (+0x120, 0x6A938A), its random state (+0xBC8, message 9's seed), the seed a received call
-// brought (+0x1958, written by the receive slot 30 at 0x6A8724, kept until the next one); the confirm state's send of the
-// seed (0x6A936A: mov rdx,[rbx+0xBC8]; lea rcx,[rbp-0x60]; call 0x12B5690, rbx the weapon) and the message's u64 writer
-// (0x12B5690: the value as it is). See call_net.h.
-constexpr std::size_t kWeaponOwner=0x120,kWeaponSeed=0xBC8,kWeaponRxSeed=0x1958;
-constexpr unsigned kSeedSend=0x6A936A,kSeedCall=0x6A9375,kWriteU64=0x12B5690;
-const unsigned char kSeedSendSig[]={0x48,0x8B,0x93,0xC8,0x0B,0x00,0x00,0x48,0x8D,0x4D,0xA0,0xE8};
-const unsigned char kWriteU64Sig[]={0x4C,0x8B,0xC1,0x48,0x8D,0x82,0xFF,0xFF,0xFF,0x7F,0xB9,0xFD,0xFF,0xFF,0xFF};
-
-const unsigned char kIfcStartSig[]={0x48,0x89,0x5C,0x24,0x18,0x56,0x57,0x41,0x56,0x48,0x83,0xEC,0x60,0x48,0x8B,0x05};
-// call IFC_Start; then the caller marks the call active and copies the plane count (+0x16E0 -> +0x16E4)
-const unsigned char kRadioCallSig[]={0xE8,0xA0,0xCF,0xC0,0xFF,0xC6,0x87,0xEC,0x16,0x00,0x00,0x01,0x8B,0x87,0xE0,0x16};
-using IfcStartFn=std::uintptr_t(__fastcall*)(void*,const void*);
+// A weapon's AmmoHitSizeAdjust (a thrown drone's marker).
+constexpr std::size_t kWeaponHitSize=0x8C4;
 using DeleteFn=void(*)(void*);
 
-// The call weapons, made from one table (tools/calls.py): tools/call_weapons.py writes their weapon rows and
-// SGOs, tools/gen_calls.py writes calls.inc below (CI checks it is current). Per role a guard call (round its
-// marker) and a follow call (round the player), the follow one dearer (its reload). The stronger the call,
-// the fewer and the longer it reloads; the carrier is one, its drones do the work. What a call lasts is its
-// ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of fuel
+// The supports, made from one table (tools/calls.py): tools/gen_calls.py writes calls.inc below (CI checks it is
+// current). Per role a guard support (round the point clicked) and a follow one (round the player), the follow one dearer
+// (its pt). The stronger the support, the fewer and the dearer; the carrier is one, its drones do the work. What a support
+// lasts is its ammo (jets and helis are not refilled, a carrier has kCarrierSorties launches): out of it, out of fuel
 // (fuelSec) or badly damaged each leaves.
-// What a call brings: jets (`role`), helis (`body`; both made by the support deployment) or the submarine carrier
+// What a support brings: jets (`role`), helis (`body`; both made by the support deployment) or the submarine carrier
 // (a planned hull plus its real pilot); the field of what it does not bring is empty.
 enum class Brings { jets, helis, sub };
 // A sortie (docs/plan-2026-10-25-strikes.md §1.2): `sortie` its pass (crew.h SortiePass, 0 none), `then` the kCalls index of
-// its second wave (-1 none), called onto the same mark `thenMs` after this one was accepted (SupportFollowUpQueue).
+// its second wave (-1 none), called onto the same mark `thenMs` after this one went out (SupportFollowUpQueue). `pt`
+// its price on the map's bar (tools/calls.py Call.pt).
 struct Call { float mark; Brings brings; std::optional<JetRole> role; std::optional<HeliBody> body; int count; DWORD fuelSec;
-              bool follow; const char* name; const wchar_t* id; int sortie; int then; DWORD thenMs; };
-// A weapon table row tools/call_weapons.py installs (a vehicle request too): its id, its SGO in Mods/WEAPON and
-// the object SGO a vehicle request brings in Mods/OBJECT (nullptr: none).
+              bool follow; const char* name; const wchar_t* id; int sortie; int then; DWORD thenMs; std::uint32_t pt; };
+// A weapon table row tools/call_weapons.py installs (a vehicle request, a thrown drone, a gun): its id, its SGO in
+// Mods/WEAPON and the object SGO a vehicle request brings in Mods/OBJECT (nullptr: none).
 struct CallRow { const wchar_t* id; const wchar_t* weaponFile; const wchar_t* objectFile; };
 // A thrown drone's weapon (tools/calls.py brings 'throw'): its AmmoHitSizeAdjust's bits (calls.throw_mark), the
 // drone its bomb releases and that drone's fuel.
 struct Throw { std::uint32_t markBits; ThrownDrone drone; DWORD fuelSec; const char* name; const wchar_t* id; };
-// An ultimate strike's weapon (tools/calls.py brings 'ultimate'): its AmmoHitSizeAdjust (an integer, as kCalls').
-struct Ultimate { float mark; const char* name; const wchar_t* id; };
-// A long-range barrage's weapon (tools/calls.py brings 'barrage'): its AmmoHitSizeAdjust, its kind (barrage_plan.h Kind) and
-// each round's damage (the plugin's own: the weapon's AmmoDamage is the stock bombers', who fly when the plugin does not
-// take the call: tools/call_weapons.py barrage_sgo).
-struct Barrage { float mark; int kind; float damage; const char* name; const wchar_t* id; };
+// A strike of the map's bar (tools/calls.py STRIKES): a barrage (`barrage` its barrage_plan.h Kind, `damage` each round's)
+// or the ultimate (`damage` the show's, barrage -1); its pt; its key (SupportDisabled) and its name on the bar.
+enum class StrikeKind { barrage, ultimate };
+struct Strike { StrikeKind kind; int barrage; float damage; std::uint32_t pt; const char* name; const wchar_t* key;
+                const wchar_t* label; };
 #include "calls.inc"
-// The in-mission pick (CallPick, overlay.cpp's keys): -1 = each weapon's own call; otherwise only local players'
-// call weapons bring kCalls[picked]. This UI preference is not carried in the native radio-call message.
-std::atomic<int> picked{-1};
 
 
 // Whether `data` holds `id` as a whole NUL-terminated UTF-16LE string (the table's id column).
@@ -174,67 +151,6 @@ void CheckCallTable() noexcept {
     else Log("CALLS all %d rows in the weapon table, their files there",kCallRowCount);
 }
 
-// The plugin's call weapon `w` is (its mark), or nullptr (a stock call).
-const Call* OwnCall(const unsigned char* w) noexcept {
-    if(!Readable(w+kWeaponHitSize,4))return nullptr;
-    const float mark=At<float>(w,kWeaponHitSize);
-    for(const auto& c:kCalls)if(std::fabs(mark-c.mark)<0.5f)return &c;
-    return nullptr;
-}
-
-// The picks this machine sent with its calls (SeedSendHook), per weapon: the caller replays the pick it sent even if its
-// picker moved during the confirm state. Game thread only.
-struct SentPick { const unsigned char* weapon; int pick; };
-SentPick sentPicks[8]{};
-int sentNext=0;
-
-int SentPickOf(const unsigned char* w) noexcept {
-    for(const auto& s:sentPicks)if(s.weapon==w)return s.pick;
-    return callnet::kNoMark;
-}
-
-// The call weapon `ifc` is in, or nullptr (a stock call). The owner comes from IFC_Start's parameter weak pair, populated
-// by the native RadioContact call state.
-//  - offline (no message is sent, nothing is decoded): a local player's call takes this machine's pick, any other its
-//    weapon's own: origin/main's rule;
-//  - online, a call of another machine's player (the only kind replayed from a received message): the pick its caller
-//    sent (call_net.h, the received seed +0x1958), else the weapon's own;
-//  - online, this machine's player: the pick it sent (SentPickOf), else this machine's pick.
-const Call* CallOf(const void* ifc,const unsigned char* owner) noexcept {
-    const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
-    const Call* const own=OwnCall(w);
-    if(!own)return nullptr;
-    int p=-1;
-    if(InSession() && edf::RemoteRider(owner)) {
-        const int sent=Readable(w+kWeaponRxSeed,8) ? callnet::Decode(At<std::uint64_t>(w,kWeaponRxSeed)) : callnet::kNoMark;
-        p=sent!=callnet::kNoMark ? sent : -1;
-    } else if(IsPlayer(owner)) {
-        const int sent=InSession() ? SentPickOf(w) : callnet::kNoMark;
-        p=sent!=callnet::kNoMark ? sent : picked.load();
-    }
-    return p>=0 && p<kCallCount ? &kCalls[p] : own;
-}
-
-// The confirm state's send of the call's seed (kSeedCall, through a stub: rcx the message, rdx the seed, r8 the weapon):
-// a local player's call of one of ours goes out with this machine's pick in the seed, and the weapon keeps the seed sent
-// (its random state goes on from the value every other machine replays from).
-using WriteU64Fn=bool(__fastcall*)(void*,std::uint64_t);
-bool __fastcall SeedSendHook(void* message,std::uint64_t seed,unsigned char* weapon) {
-    std::uint64_t sent=seed;
-    __try {
-        if(Cfg().enabled && Cfg().jetAirRaider && OwnCall(weapon) && IsPlayer(At<const unsigned char*>(weapon,kWeaponOwner))) {
-            const int pick=picked.load();
-            sent=callnet::Encode(seed,pick);
-            Put<std::uint64_t>(weapon,kWeaponSeed,sent);
-            SentPick* slot=nullptr;
-            for(auto& s:sentPicks)if(s.weapon==weapon)slot=&s;
-            if(!slot){slot=&sentPicks[sentNext];sentNext=(sentNext+1)%8;}
-            *slot=SentPick{weapon,pick};
-        }
-    } __except(FaultLog("AIRSTRIKE call pick send (the seed as it was)",GetExceptionInformation())) { sent=seed; }
-    return reinterpret_cast<WriteU64Fn>(image+kWriteU64)(message,sent);
-}
-
 bool OpenSky(const float* target) noexcept {
     const float from[3]={target[0],target[1]+2.0f,target[2]},to[3]={target[0],target[1]+3000.0f,target[2]};
     float hit[3];return MapRay(from,to,hit)<0.0f;
@@ -256,14 +172,6 @@ bool EntryClear(const float* from,const float* to) noexcept {
     return true;
 }
 
-// The barrage weapon `w` is (its mark), or nullptr.
-const Barrage* BarrageOf(const unsigned char* w) noexcept {
-    if(!Readable(w+kWeaponHitSize,4))return nullptr;
-    const float mark=At<float>(w,kWeaponHitSize);
-    for(const auto& b:kBarrages)if(std::fabs(mark-b.mark)<0.5f)return &b;
-    return nullptr;
-}
-
 // The caller's HUD line for its strike calls (PlayerStrikeCue; hud.cpp StrikeBanner reads it on the draw thread).
 SRWLOCK strikeCueLock=SRWLOCK_INIT;
 wchar_t strikeCueText[200]{};
@@ -283,48 +191,6 @@ const wchar_t* BarrageWhy(BarrageResult r) noexcept {
     case BarrageResult::noRounds: return hudtext::Tr(Tx::barrageNoRounds);
     default: return hudtext::Tr(Tx::barrageNoTarget);
     }
-}
-
-// The Air Raider's bomber call (redirected call at kRadioCall): IFC_Start(ifc = weapon+0x1660, params).
-// A call weapon's: its jets or helis, and no bombers (when none could be launched the bombers fly).
-// A barrage weapon's: its barrage (barrage.cpp) on every machine, each on its copy of the call (the radio callback is
-// replayed for remote players too), and no bombers. A barrage that could not start (every barrage slot taken, no flight
-// hook, no caller or target, no round planned) leaves the stock bombers to fly (the weapon is the KM6 call with its stock
-// damage: tools/call_weapons.py barrage_sgo), and the caller is told on the HUD.
-std::uintptr_t __fastcall RadioStartHook(void* ifc,const void* params) {
-    const auto result=reinterpret_cast<IfcStartFn>(image+kIfcStart)(ifc,params);
-    if(!Cfg().enabled)return result;
-    __try {
-        const auto owner=At<const unsigned char*>(params,0);   // params+0: owner weak pointer (docs/airstrike-re.md section 2)
-        const auto w=static_cast<const unsigned char*>(ifc)-kWeaponIfc;
-        if(const Barrage* const b=BarrageOf(w)) {
-            const auto p=static_cast<const unsigned char*>(params);
-            const float* target=reinterpret_cast<const float*>(p+kStartTarget);
-            const float* heading=reinterpret_cast<const float*>(p+kStartForward);
-            const BarrageResult got=BarrageStart(b->kind,owner,target,heading,b->damage);
-            const bool started=got==BarrageResult::started;
-            if(started)Put<std::int32_t>(ifc,kIfcPlanes,0);   // the barrage instead of the stock bombers
-            else if(!InSession() || IsPlayer(owner))StrikeCue(hudtext::Tr(hudtext::Tx::barrageRefused),BarrageWhy(got));
-            Log("AIRSTRIKE barrage call %s: started=%d%s",b->name,started,started ? "" : " (the stock bombers fly instead)");
-            return result;
-        }
-        if(!Cfg().jetAirRaider)return result;
-        const Call* const c=CallOf(ifc,owner);
-        const float* target=reinterpret_cast<const float*>(static_cast<const unsigned char*>(params)+kStartTarget);
-        if(c && std::isfinite(target[0]+target[1]+target[2])) {
-            const online::CopyOwner was=SetSpawnOwner(CopyOwnerOfCaller(owner));   // its copies are the caller's (online_authority.h)
-            wchar_t note[128]{};
-            // The radio callback is replayed for remote players too. Only the actual caller submits
-            // one request; the support protocol commits the host-selected entry on every peer.
-            const bool localCaller=!InSession() || IsPlayer(owner);
-            const bool accepted=localCaller && SupportCallAt(static_cast<int>(c-kCalls),target,note,_countof(note));
-            SetSpawnOwner(was);
-            // A refused custom support must not silently turn into stock bombers (especially underground).
-            Put<std::int32_t>(ifc,kIfcPlanes,0);
-            Log("AIRSTRIKE support call: catalog=%d local=%d accepted=%d",static_cast<int>(c-kCalls),localCaller,accepted);
-        }
-    } __except(FaultLog("AIRSTRIKE radio call (its bombers fly)",GetExceptionInformation())) { SetSpawnOwner(online::kCopyHost); }
-    return result;
 }
 
 // --- Thrown drones (see the file comment) ---
@@ -483,117 +349,6 @@ bool InstallThrows() noexcept {
     return PatchVtableSlot(reinterpret_cast<void**>(image+kSubShotSlot),shot,reinterpret_cast<void*>(&SubShotHook));
 }
 
-// --- The ultimate strike (ultimate.cpp, docs/plan-2026-10-19-ultimate.md) ---
-// Weapon_LaserMarkerCallFire's fire state with CP[3] = 0 (0x6A59F0; docs/tvguide-re.md §1.3) loads its IndirectFireUnit
-// (weapon+0x18A0) on entering: 0x6A5A22 add rcx,0x18A0; 0x6A5A29 call 0x2B8090 (the shots of its spec into the unit's
-// +0x2F0), then every frame waits for 0x2B7B90 (no shot left, every round dead) to go back to idle. At that call (redirected:
-// SatFireHook) one of ours has its shots set to 0 after the load when a show plays instead, so the stock beam never fires
-// and the weapon goes back to idle on its next frame; the show starts at the laser's smoothed point (+0x1D60, which follows
-// the laser's hit +0x1780). The weapon's damage +0x89C (its AmmoDamage with its stars, read by the satellite at 0x6A1A62) is
-// the show's.
-// Whose call (the weapon's owner +0x120):
-//  - this machine's player's: the show (UltimateStart); the shots cleared only once it started (B: before 2026-10-20 they
-//    were cleared first, and a call the show refused spent its points on nothing): refused, the stock beam fires;
-//  - another machine's player's (online; every machine runs the call on its copy of the weapon: 推测 from the shots it saw
-//    cleared, docs/plan-2026-10-19-ultimate.md 待确认 6): that player's machine plays the show and tells this one
-//    (ultimate_net_protocol.h), which plays it too. Its stock beam is held back only when the show was heard (A: before
-//    2026-10-20 it was cleared here whatever the caller's build, and a peer of an older one, or one whose show did not
-//    start, left this machine with neither): heard before this call, at once; heard within kUltimateStockWaitMs after it,
-//    while the stock round is not out yet (the unit's first-shot wait, M), then (UltimateStockHoldBack). Never heard: the
-//    stock beam is this machine's sight of the call;
-//  - a soldier's: the stock beam.
-constexpr unsigned kSatFire=0x6A5A22,kSatFireCall=0x6A5A29,kUnitLoad=0x2B8090,kLaserMarkerVtable=0x17E4750;
-constexpr std::size_t kSatUnit=0x18A0,kSatAim=0x1D60,kSatLaser=0x1780,kWeaponDamage=0x89C,kUnitShots=0x2F0;
-constexpr std::size_t kUnitRounds=0x468;   // the unit's list of rounds made (+0x460): its size (docs/tvguide-re.md §1.1, +0x1D08)
-const unsigned char kSatFireSig[]={0x48,0x81,0xC1,0xA0,0x18,0x00,0x00,0xE8,0x62,0x26,0xC1,0xFF};
-using UnitLoadFn=void(__fastcall*)(unsigned char*);
-
-// The ultimate weapon `w` is (its mark), or nullptr.
-const Ultimate* UltimateOf(const unsigned char* w) noexcept {
-    if(!Readable(w+kWeaponHitSize,4))return nullptr;
-    const float mark=At<float>(w,kWeaponHitSize);
-    for(const auto& u:kUltimates)if(std::fabs(mark-u.mark)<0.5f)return &u;
-    return nullptr;
-}
-
-// Another machine's player's calls whose show was not heard yet: the weapon (checked by its class and owner when the show
-// comes: a weapon is no scene object with a weak-this), its owner, when.
-struct StockCall { unsigned char* weapon; const unsigned char* owner; ULONGLONG at; };
-StockCall stockCalls[8]{};
-int stockNext=0;
-
-void __fastcall SatFireHook(unsigned char* unit) {
-    reinterpret_cast<UnitLoadFn>(image+kUnitLoad)(unit);
-    if(!Cfg().enabled)return;
-    __try {
-        unsigned char* const w=unit-kSatUnit;
-        const Ultimate* const u=UltimateOf(w);
-        if(!u)return;
-        const auto owner=At<const unsigned char*>(w,kWeaponOwner);
-        if(IsPlayer(owner)) {
-            const float* aim=reinterpret_cast<const float*>(w+kSatAim);
-            if(!std::isfinite(aim[0]+aim[1]+aim[2]))aim=reinterpret_cast<const float*>(w+kSatLaser);
-            const std::uint64_t seed=GetTickCount64()*0x9E3779B97F4A7C15ull^reinterpret_cast<std::uintptr_t>(w);
-            if(UltimateStart(owner,aim,At<float>(w,kWeaponDamage),seed))Put<std::int32_t>(unit,kUnitShots,0);   // the show instead
-            else Log("ULTIMATE %s: no show: the stock satellite beam fires instead",u->name);
-            return;
-        }
-        if(InSession() && IsAnyPlayer(owner)) {
-            if(UltimateHeardFrom(owner)) {
-                Put<std::int32_t>(unit,kUnitShots,0);
-                Log("ULTIMATE %s: another machine's call, its show heard already: no stock beam here",u->name);
-                return;
-            }
-            stockCalls[stockNext]=StockCall{w,owner,GetTickCount64()};
-            stockNext=(stockNext+1)%static_cast<int>(sizeof(stockCalls)/sizeof(stockCalls[0]));
-            Log("ULTIMATE %s: another machine's call, no show of its caller's heard yet: the stock beam stays unless the show's "
-                "start comes before it fires",u->name);
-            return;
-        }
-        Log("ULTIMATE %s: a soldier's call: the stock satellite beam",u->name);
-    } __except(FaultLog("ULTIMATE call (the stock beam)",GetExceptionInformation())) {}
-}
-
-}  // namespace
-
-bool UltimateStockHoldBack(const unsigned char* caller) noexcept {
-    bool any=false;
-    const ULONGLONG now=GetTickCount64();
-    for(StockCall& c:stockCalls) {
-        if(!c.weapon || c.owner!=caller)continue;
-        const StockCall was=c;
-        c=StockCall{};
-        if(now-was.at>kUltimateStockWaitMs)continue;
-        int held=0;   // 1 held back, 2 already out, 0 the weapon gone
-        __try {
-            unsigned char* const w=was.weapon;
-            if(Readable(w,kSatUnit+kUnitRounds+8) && At<const void*>(w,0)==image+kLaserMarkerVtable &&
-               At<const unsigned char*>(w,kWeaponOwner)==caller) {
-                unsigned char* const unit=w+kSatUnit;
-                if(At<std::int32_t>(unit,kUnitShots)>0 && At<std::uint64_t>(unit,kUnitRounds)==0){Put<std::int32_t>(unit,kUnitShots,0);held=1;}
-                else held=2;
-            }
-        } __except(FaultLog("ULTIMATE stock beam hold-back",GetExceptionInformation())){held=0;}
-        Log("ULTIMATE another machine's call: its show came %llu ms after it: %s",static_cast<unsigned long long>(now-was.at),
-            held==1 ? "its stock beam held back" : held==2 ? "its stock beam was out already (both seen here)" : "its weapon is gone");
-        any=any || held==1;
-    }
-    return any;
-}
-void UltimateStockReset() noexcept { for(StockCall& c:stockCalls)c=StockCall{}; stockNext=0; }
-
-namespace {
-bool InstallUltimate() noexcept {
-    if(!Matches(kSatFire,kSatFireSig,sizeof(kSatFireSig))) {
-        Log("ULTIMATE satellite fire state: profile mismatch (the ultimate stays a stock satellite call)");
-        return false;
-    }
-    bool changed=false;
-    const bool ok=RedirectCall(image+kSatFireCall,image+kUnitLoad,reinterpret_cast<void*>(&SatFireHook),changed);
-    if(!ok)Log("ULTIMATE satellite fire state %s",changed ? "half patched" : "not patched");
-    return ok;
-}
-
 using UnlockFn=void(__fastcall*)(unsigned char*);
 using RowCountFn=std::uint32_t(__fastcall*)(void*);
 using GetRowFn=void*(__fastcall*)(void*,void*,std::uint32_t);
@@ -607,12 +362,21 @@ bool IsCallRow(const wchar_t* name) noexcept {
     }
     return false;
 }
+// Whether it is the placeholder of a support moved to the map (kMovedRows), exactly.
+bool IsMovedRow(const wchar_t* name) noexcept {
+    for(const wchar_t* id:kMovedRows) {
+        const std::size_t len=std::wcslen(id)+1;
+        if(Readable(name,len*sizeof(wchar_t)) && std::wcsncmp(name,id,len)==0)return true;
+    }
+    return false;
+}
 
-// Every EDF6VC_CALL_* row owned (see the file comment), and with PortedWeaponsUnlocked every ported weapon's row
+// Every kCallRows row owned (see the file comment), and with PortedWeaponsUnlocked every ported weapon's row
 // (unlock_ported.h PortedWeapon: EDF6VC_E5_*, EDF6VC_E41_*) as well; how many of each were not yet (-1: no table).
-// Only ever sets bits: switching the key off takes nothing back (a weapon a save has equipped must stay owned, and
-// the weapons are in MAIN.GST, which every mode shares); EDF6's own rows are never touched.
-struct Granted { int calls=-1,ported=0; };
+// Only ever sets bits there: switching the key off takes nothing back (a weapon a save has equipped must stay owned, and
+// the weapons are in MAIN.GST, which every mode shares); EDF6's own rows are never touched. The one bit cleared: the owned
+// one of a support moved to the map (kMovedRows; `moved` counts them), whose weapon no longer exists.
+struct Granted { int calls=-1,ported=0,moved=0; };
 Granted GrantCalls(unsigned char* gs,bool ported) noexcept {
     Granted out;
     const std::uint32_t most=WeaponRecordCapacity();
@@ -631,6 +395,8 @@ Granted GrantCalls(unsigned char* gs,bool ported) noexcept {
         if(!name)continue;
         if(IsCallRow(name)) {
             if(ported::Own(WeaponRecord(gs,id)))++out.calls;
+        } else if(IsMovedRow(name)) {
+            if(ported::Disown(WeaponRecord(gs,id)))++out.moved;
         } else if(ported && Readable(name,ported::kLongestPrefix*sizeof(wchar_t)) && ported::PortedWeapon(name)) {
             if(ported::Own(WeaponRecord(gs,id)))++out.ported;
         }
@@ -673,6 +439,8 @@ void Grant(unsigned char* gs) noexcept {
         const bool ported=Cfg().portedWeaponsUnlocked;
         const Granted granted=GrantCalls(gs,ported);
         if(granted.calls>0)Log("CALLS %d call weapons owned now",granted.calls);
+        if(granted.moved>0)Log("CALLS %d support call weapons are on the map's bar now: no longer owned (one equipped goes back "
+                               "to the default weapon)",granted.moved);
         if(Cfg().allWeaponsUnlocked) {
             const int all=GrantAll(gs);
             Log("ALL weapons unlocked: %d records changed%s",all,all==-1 ? " (no weapon table yet)" : all==-2 ? " (more weapon rows than records: nothing written)" : "");
@@ -712,36 +480,7 @@ bool InstallOwnership(bool& script) noexcept {
     return ok;
 }
 
-// The call's pick into its message (SeedSendHook): the confirm state's call of the u64 writer at kSeedCall, through a stub
-// that hands the hook the weapon (rbx there) as its third argument. Off (the calls replay each
-// weapon's own on the other machines, as before) when either piece of code is not the one read.
-bool InstallPickSend() noexcept {
-    if(!Matches(kSeedSend,kSeedSendSig,sizeof(kSeedSendSig)) || !Matches(kWriteU64,kWriteU64Sig,sizeof(kWriteU64Sig))) {
-        Log("AIRSTRIKE call pick send: profile mismatch (online, the others fly each call weapon's own)");
-        return false;
-    }
-    // mov r8,rbx; mov rax,SeedSendHook; jmp rax
-    unsigned char stub[]={0x49,0x89,0xD8,0x48,0xB8,0,0,0,0,0,0,0,0,0xFF,0xE0};
-    void* const hook=reinterpret_cast<void*>(&SeedSendHook);
-    std::memcpy(stub+5,&hook,sizeof(hook));
-    void* const code=AllocateNearCode(image+kSeedCall,stub,sizeof(stub));
-    bool changed=false;
-    const bool ok=code && RedirectCall(image+kSeedCall,image+kWriteU64,code,changed);
-    if(!ok)Log("AIRSTRIKE call pick send %s",changed ? "half patched" : "not patched");
-    return ok;
-}
-
 }  // namespace
-
-// One step through "each its own" and kCalls; `out` gets the banner text.
-void CallPick(int step,wchar_t* out,std::size_t size) noexcept {
-    const int n=kCallCount+1;
-    const int p=((picked.load()+1+step)%n+n)%n-1;
-    picked.store(p);
-    if(p<0)swprintf_s(out,size,L"空袭呼叫：按各武器原样  [ / ]");
-    else swprintf_s(out,size,L"空袭呼叫：%ls（%d/%d）  [ / ]",kCallLabels[p],p+1,kCallCount);
-    Log("CALLS pick %d: %s",p,p<0 ? "each its own" : kCalls[p].name);
-}
 
 bool SupportSubCatalog(int catalog) noexcept {
     return catalog>=0 && catalog<kCallCount && kCalls[catalog].brings==Brings::sub;
@@ -755,31 +494,48 @@ bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept {
     return true;
 }
 
-// A sortie's second wave (Call::then): queued when this machine's request for the first was accepted (support_dispatch.cpp
-// SupportCallAt), called onto the same mark by this machine, the caller's, once due (SupportFollowUpTick: SharedFrameTick).
-// Due while the call before it is still being planned offline (SupportCallReadiness planning: the dispatcher takes one
-// request at a time, often the first wave itself), it waits for that plan and is called the frame it is over. Any other
-// refusal (the entry disabled in the ini, the mission's support rules, the plugin off, ...) would refuse it again: it is
-// given up at once and the caller told why on the HUD. Online `accepted` is this machine's request queued for the host: a
-// refusal there is the host's to say (support_net).
+// A sortie's second wave (Call::then): due `thenMs` after its first wave went out, called onto the same mark by this
+// machine, the caller's (SupportFollowUpTick: SharedFrameTick). It goes only when the first did, as the first's pt are
+// kept only then (docs/plan-2026-10-26-map-support-pt.md §1: it is paid with the first): queued by support_dispatch.cpp
+// once the first is made (offline: SpawnDeployment), or, online, held under the first's request until its outcome
+// (SupportFollowUpSettle: active starts its wait, refused / timed out / cancelled / interrupted forgets it).
+// Due while another call is still being planned offline (SupportCallReadiness planning: the dispatcher takes one
+// request at a time), it waits for that plan and is called the frame it is over. Any other refusal (the entry disabled in
+// the ini, the mission's support rules, the plugin off, ...) would refuse it again: it is given up at once and the caller
+// told why on the HUD. Online `accepted` is this machine's request queued for the host: a refusal there is the host's to
+// say (support_net).
 namespace {
-struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; };
+// `request`: the first wave's online request still open (0: the first is out, `due` set).
+struct FollowUp { int catalog=-1; float at[3]{}; ULONGLONG due=0; bool waited=false; std::uint32_t request=0; DWORD afterMs=0; };
 FollowUp followUps[8]{};
 }  // namespace
-void SupportFollowUpQueue(int catalog,const float* target) noexcept {
+void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request) noexcept {
     if(catalog<0 || catalog>=kCallCount || kCalls[catalog].then<0 || !target)return;
     for(auto& f:followUps)if(f.catalog<0) {
-        f.catalog=kCalls[catalog].then;std::memcpy(f.at,target,12);f.due=GameMs()+kCalls[catalog].thenMs;
-        Log("SUPPORT %s: its second wave (%s) in %lu s",kCalls[catalog].name,kCalls[f.catalog].name,kCalls[catalog].thenMs/1000);
+        f=FollowUp{};f.catalog=kCalls[catalog].then;std::memcpy(f.at,target,12);f.afterMs=kCalls[catalog].thenMs;
+        f.request=request;
+        if(!request)f.due=GameMs()+f.afterMs;
+        if(request)Log("SUPPORT %s: its second wave (%s) %lu s after request %u is out",kCalls[catalog].name,
+                       kCalls[f.catalog].name,f.afterMs/1000,request);
+        else Log("SUPPORT %s: its second wave (%s) in %lu s",kCalls[catalog].name,kCalls[f.catalog].name,f.afterMs/1000);
         return;
     }
     Log("SUPPORT %s: no room for its second wave (8 waiting)",kCalls[catalog].name);
 }
+void SupportFollowUpSettle(std::uint32_t request,bool out) noexcept {
+    if(!request)return;
+    for(auto& f:followUps) {
+        if(f.catalog<0 || f.request!=request)continue;
+        if(out){f.request=0;f.due=GameMs()+f.afterMs;Log("SUPPORT request %u out: its second wave (%s) in %lu s",request,
+                                                        kCalls[f.catalog].name,f.afterMs/1000);}
+        else {Log("SUPPORT request %u came to nothing: its second wave (%s) is not called",request,kCalls[f.catalog].name);f=FollowUp{};}
+    }
+}
 void SupportFollowUpTick() noexcept {
     const ULONGLONG ms=GameMs();
     for(auto& f:followUps) {
-        if(f.catalog<0 || ms<f.due)continue;
-        if(SupportCallReadiness().state==SupportReady::planning) {   // the call before it still planned: its turn comes
+        if(f.catalog<0 || f.request || ms<f.due)continue;
+        if(SupportCallReadiness().state==SupportReady::planning) {   // another call still planned: its turn comes
             if(!f.waited)Log("SUPPORT second wave %s: waiting for the call being planned",kCalls[f.catalog].name);
             f.waited=true;
             continue;
@@ -787,7 +543,7 @@ void SupportFollowUpTick() noexcept {
         const FollowUp now=f;
         f=FollowUp{};
         wchar_t note[128]{};
-        const bool ok=SupportCallAt(now.catalog,now.at,note,_countof(note));   // a second wave has no wave of its own
+        const bool ok=SupportCallUnpaidAt(now.catalog,now.at,note,_countof(note));   // paid with the first; no wave of its own
         Log("SUPPORT second wave %s: accepted=%d",kCalls[now.catalog].name,ok);
         if(!ok)StrikeCue(hudtext::Tr(hudtext::Tx::followUpRefused),note[0] ? note : L"-");
     }
@@ -810,7 +566,55 @@ const wchar_t* SupportAirCallKey(int index) noexcept {
 const wchar_t* SupportAirCallName(int index) noexcept {
     return index>=0 && index<kCallCount ? kCallLabels[index] : L"支援";
 }
-support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept {
+std::uint32_t SupportAirCallPt(int index) noexcept { return index>=0 && index<kCallCount ? kCalls[index].pt : 0u; }
+
+// ---- The strikes (kStrikes): the map's bar calls them for the local player ----
+int SupportStrikeCount() noexcept { return kStrikeCount; }
+const wchar_t* SupportStrikeKey(int strike) noexcept { return strike>=0 && strike<kStrikeCount ? kStrikes[strike].key : nullptr; }
+const wchar_t* SupportStrikeName(int strike) noexcept { return strike>=0 && strike<kStrikeCount ? kStrikes[strike].label : L"支援"; }
+std::uint32_t SupportStrikePt(int strike) noexcept { return strike>=0 && strike<kStrikeCount ? kStrikes[strike].pt : 0u; }
+int SupportStrikeBarrage(int strike) noexcept {
+    return strike>=0 && strike<kStrikeCount && kStrikes[strike].kind==StrikeKind::barrage ? kStrikes[strike].barrage : -1;
+}
+// The heading a strike at `target` comes along: from the player toward it (a barrage's launchers stand behind it, its
+// creeping walk goes along it), +z when the player is on the point or not known.
+void SupportStrikeHeading(const float* target,float* out) noexcept {
+    out[0]=0.0f;out[1]=0.0f;out[2]=1.0f;
+    const unsigned char* const human=PlayerHuman();
+    if(!human || !target || !Readable(human+0x90,12))return;
+    const float* const by=reinterpret_cast<const float*>(human+0x90);   // its position (the matrix's last row)
+    const float dx=target[0]-by[0],dz=target[2]-by[2],l=std::sqrt(dx*dx+dz*dz);
+    if(l>1.0f){out[0]=dx/l;out[2]=dz/l;}
+}
+bool SupportStrikeAt(int strike,const float* target,wchar_t* note,std::size_t capacity) noexcept {
+    if(!note || !capacity)return false;
+    note[0]=0;
+    if(strike<0 || strike>=kStrikeCount || !target || !std::isfinite(target[0]+target[1]+target[2])) {
+        _snwprintf_s(note,capacity,_TRUNCATE,L"%ls",L"支援请求或目标无效");return false;
+    }
+    const Strike& k=kStrikes[strike];
+    unsigned char* const caller=PlayerHuman();
+    if(!caller){_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",hudtext::Tr(hudtext::Tx::strikeNoCaller));return false;}
+    float heading[3];SupportStrikeHeading(target,heading);
+    bool started=false;
+    __try {
+        if(k.kind==StrikeKind::barrage) {
+            const BarrageResult got=BarrageStart(k.barrage,caller,target,heading,k.damage);
+            started=got==BarrageResult::started;
+            if(!started)_snwprintf_s(note,capacity,_TRUNCATE,hudtext::Tr(hudtext::Tx::barrageRefused),BarrageWhy(got));
+        } else {
+            const std::uint64_t seed=GetTickCount64()*0x9E3779B97F4A7C15ull^reinterpret_cast<std::uintptr_t>(caller);
+            started=UltimateStart(caller,target,k.damage,seed);
+            if(!started)_snwprintf_s(note,capacity,_TRUNCATE,L"%ls",hudtext::Tr(hudtext::Tx::ultimateRefused));
+        }
+    } __except(FaultLog("AIRSTRIKE strike from the map",GetExceptionInformation())){started=false;}
+    if(started)_snwprintf_s(note,capacity,_TRUNCATE,hudtext::Tr(hudtext::Tx::strikeStarted),k.label);
+    Log("AIRSTRIKE strike %s from the map at (%.0f,%.0f,%.0f): %s",k.name,target[0],target[1],target[2],started ? "started" : "not started");
+    return started;
+}
+namespace {
+support::Refusal AirRouteFor(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route,
+                             bool logged) noexcept {
     // A spec that brings an aircraft: a jet row, a heli row, or the paratroop plane (no row of either).
     if(!route || !target || (spec.jet<0 && spec.heli<0 && !spec.transportPlane) || spec.count<1)return support::Refusal::unsupported;
     if(!OpenSky(target))return support::Refusal::noSky;
@@ -847,12 +651,19 @@ support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,
         return true;
     };
     const auto refusal=support::AirRoute(area,reach,target,observer,direction,altitude,SupportPassTurn(spec),entry,EntryHeight,*route);
-    if(refusal==support::Refusal::none)
+    if(logged && refusal==support::Refusal::none)
         Log("SUPPORT air entry (%.0f,%.0f,%.0f): %.0f m from the target, %.0f m from the caller (draws to %.0f m: %s), the physical "
             "square +-%.0f",route->from[0],route->from[1],route->from[2],support::FlatDistance(route->from,target),
             observer ? support::FlatDistance(route->from,observer) : -1.0f,reach.draw,route->beyond ? "past it" :
             "none past it in the square, the farthest taken",reach.half);
     return refusal;
+}
+}  // namespace
+support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept {
+    return AirRouteFor(spec,target,observer,route,true);
+}
+support::Refusal PreviewAirRoute(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept {
+    return AirRouteFor(spec,target,observer,route,false);
 }
 
 support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,
@@ -865,27 +676,18 @@ support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* tar
 bool InstallAirstrikes() noexcept {
     CheckCallTable();
     __try {
-        bool calls=false;
         bool script=false;
         const bool owned=InstallOwnership(script);
         SetMissionPackSaveHook(script);   // a mission pack is owned only while its saves are marked (edf5campaign.cpp Ours)
-        if(Matches(kIfcStart,kIfcStartSig,sizeof(kIfcStartSig)) && Matches(kRadioCall,kRadioCallSig,sizeof(kRadioCallSig))) {
-            bool changed=false;
-            calls=RedirectCall(image+kRadioCall,image+kIfcStart,reinterpret_cast<void*>(&RadioStartHook),changed);
-            if(!calls && changed)Log("AIRSTRIKE radio call half patched");
-        } else Log("AIRSTRIKE bomber call: profile mismatch");
-        // Native bombers are not crewed support vehicles. Leave both native callsites and the
-        // update vtable untouched so their original payload/timeline cannot be suppressed.
+        // The stock radio calls (bombers, Vesta, Phobos, the satellites) are left wholly native: no support of the plugin's
+        // is a weapon any more (they are the map's bar's).
         const bool throws=InstallThrows();
-        const bool pickSend=calls && InstallPickSend();
-        const bool ultimate=InstallUltimate();
-        Log("HOOK airstrikes calls=%d owned=%d packSaves=%d stockBombers=native throws=%d pickSend=%d ultimate=%d",calls,owned,script,
-            throws,pickSend,ultimate);
-        return calls || throws || ultimate;
+        Log("HOOK airstrikes owned=%d packSaves=%d stockCalls=native throws=%d",owned,script,throws);
+        return owned || throws;
     } __except(FaultLog("AIRSTRIKE install",GetExceptionInformation())){return false;}
 }
 // A new mission (mission.cpp MissionStart): the thrown bombs were the last mission's (their
-// addresses may be the new mission's objects'): forgotten, nothing of them touched. The call pick stays.
+// addresses may be the new mission's objects'): forgotten, nothing of them touched.
 void ResetAirstrikes() noexcept {
     for(auto& b:bombs)b=Bomb{};
     bombCount=0;

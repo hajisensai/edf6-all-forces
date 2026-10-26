@@ -102,7 +102,7 @@ void TableChecks() {
     Check(t.Find(peer)<0 && t.Receive(peer,false)==Act::none,"ended: a late keep of it never starts it again");
     Check(t.Receive(Key{},false)==Act::none && t.Claim(Key{},false,0)==-1,"no key: nothing");
     for(std::uint32_t s=10;t.Count()<kMaxShows;++s)t.Claim(Key{2,s},false,0);
-    Check(t.Claim(Key{3,1},false,0)==-1,"every slot taken: the next show refused (its call keeps the stock beam)");
+    Check(t.Claim(Key{3,1},false,0)==-1,"every slot taken: the next show refused (the strike does not start, its pt are not taken)");
     t.Reset();
     Check(t.Count()==0 && t.Receive(peer,false)==Act::begin,"a new mission: every show and ended key forgotten");
 }

@@ -13,14 +13,18 @@ struct SupportAircraft {
 int SupportAirCallCount() noexcept;
 const wchar_t* SupportAirCallName(int index) noexcept;
 const wchar_t* SupportAirCallKey(int index) noexcept;
+std::uint32_t SupportAirCallPt(int index) noexcept;   // its pt on the map's bar (tools/calls.py Call.pt)
 bool SupportAircraftSpec(int catalog,SupportAircraft* out) noexcept;
-// A sortie's second wave (airstrike.cpp; tools/calls.py `then`): queued once this machine's request for `catalog` was
-// accepted, called onto `target` by this machine when due (the tick: crew.cpp SharedFrameTick); forgotten at a new mission.
-void SupportFollowUpQueue(int catalog,const float* target) noexcept;
+// A sortie's second wave (airstrike.cpp; tools/calls.py `then`): called onto `target` by this machine `then_after` s after
+// its first wave (`catalog`) went out (the tick: crew.cpp SharedFrameTick); forgotten at a new mission. Queued once the
+// first is out (`request` 0: offline, made), or online under the first's open `request` until SupportFollowUpSettle tells
+// its outcome (`out`: active; else it came to nothing and so does its second wave).
+void SupportFollowUpQueue(int catalog,const float* target,std::uint32_t request) noexcept;
+void SupportFollowUpSettle(std::uint32_t request,bool out) noexcept;
 void SupportFollowUpTick() noexcept;
 void ResetSupportFollowUps() noexcept;
-// Whether call `catalog` brings the submarine carrier (no aircraft: SupportAircraftSpec is false for it; it surfaces,
-// support_call.h SupportSubCallAt).
+// Whether call `catalog` brings the submarine carrier (no aircraft: SupportAircraftSpec is false for it; the dispatcher
+// plans its real hull and pilot, support_dispatch.cpp PlanSubmarine).
 bool SupportSubCatalog(int catalog) noexcept;
 // `spec`: what the entry brings (its kind, and spec.count aircraft: every one's formation slot, support_entry.h
 // AirFormationSlot, is checked); the dispatcher's, so an entry the call table does not hold (the sea rescue) plans the same.
@@ -29,6 +33,8 @@ bool SupportSubCatalog(int catalog) noexcept;
 // TransportSpec: the paratroop plane is transportPlane, no jet or heli row), the rescue's. Refused (unsupported) for a spec
 // that brings nothing.
 support::Refusal PlanAirSupport(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept;
+// The same route unlogged: the map's preview of an armed entry (support_warning.cpp), asked a few times a second.
+support::Refusal PreviewAirRoute(const SupportAircraft& spec,const float* target,const float* observer,support::Route* route) noexcept;
 // One aircraft from the nearest of `spots` (takeoff points: a carrier's deck) it can climb out of to over `target`
 // (support_entry.h TakeoffRoute): route->from on the spot, kTakeoffLift over it. noEntry: none; the caller tries the edge.
 support::Refusal PlanTakeoffSupport(const SupportAircraft& spec,const float* target,const float (*spots)[3],int count,

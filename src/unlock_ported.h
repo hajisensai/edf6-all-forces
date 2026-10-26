@@ -88,6 +88,17 @@ inline bool Own(unsigned char* record) noexcept {
     std::memcpy(record,&flags,4);
     return fresh;
 }
+// A record no longer owned (its owned and NEW bits cleared; its stars left): the row of a support moved to the map's bar
+// (airstrike.cpp kMovedRows). Before 0xDC550 runs, so its last pass puts a soldier that has it equipped back on its
+// default weapon (docs/loadout-re.md 8.3). Whether it was owned.
+inline bool Disown(unsigned char* record) noexcept {
+    std::uint32_t flags;
+    std::memcpy(&flags,record,4);
+    const bool owned=(flags&1)!=0;
+    flags&=~5u;
+    std::memcpy(record,&flags,4);
+    return owned;
+}
 // AllWeaponsUnlocked: a record owned and every star byte 10 (the game's own unlock_weapon command writes min(star,10), then
 // 0xD7930 clamps each to the weapon's cap). NEW only the first time, as Own. Whether anything changed. Never clears a bit.
 constexpr unsigned char kMaxStar=10;

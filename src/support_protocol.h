@@ -59,14 +59,17 @@ static_assert(kCapabilities<kMaxUnits,"hello.index carries the capability bits")
 // kExtPlayerVehicle (2026-10-25): it takes part in the players' own loaded jets (player_vehicle_logic.h PVEH): its haves
 // and decisions; a requester loads its jet only when every peer announced this and has the file.
 // kExtUltimate (2026-10-20): it plays every machine's player's ultimate strike (天罚, ultimate.cpp; ultimate_net_protocol.h
-// ULTS) and holds back the stock beam of a call whose show it heard.
+// ULTS).
+// kExtBarrage (2026-10-26): it plays every machine's player's long-range barrage (barrage.cpp; barrage_net_protocol.h BRGS:
+// called from the map's bar, no stock radio call carries it any more).
 constexpr std::uint32_t kExtVariants=1u,kExtSeaRescue=2u,kExtRescueChannel=4u,kExtOutfit41=8u,kExtBvmPlayers=16u,
     kExtBackpack=32u,kExtPeerRoster=64u,kExtGravity=128u,kExtFloatGun=256u,
-    kExtUltimate=512u,kExtPlayerVehicle=1024u,
+    kExtUltimate=512u,kExtPlayerVehicle=1024u,kExtBarrage=2048u,
     kExtensions=kExtVariants|kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|
-        kExtGravity|kExtFloatGun|kExtUltimate|kExtPlayerVehicle;
+        kExtGravity|kExtFloatGun|kExtUltimate|kExtPlayerVehicle|kExtBarrage;
 // What every hello of this build announces (Tick):
-constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|kExtFloatGun|kExtUltimate|kExtPlayerVehicle;
+constexpr std::uint32_t kExtBuilt=kExtSeaRescue|kExtRescueChannel|kExtOutfit41|kExtBvmPlayers|kExtBackpack|kExtPeerRoster|kExtGravity|
+    kExtFloatGun|kExtUltimate|kExtPlayerVehicle|kExtBarrage;
 constexpr std::uint64_t kRescueCooldownMs=30000;   // the default; the host's ini SeaRescueCooldownSec sets it
 // What a build has, both words in one (the version notice compares and names these, support_net.cpp VersionTick): the
 // capability bits low (below kMaxUnits, 4 bits), the extension bits above them.
@@ -108,7 +111,8 @@ enum class PreparedKind : std::uint8_t { missionCrew,dynamicDrone };
 bool ValidPreparedDronePlan(const Plan&) noexcept;
 constexpr std::uint32_t kBeginRequesterMetadata=0x52565050u;
 // Request statuses kept per requester (host) and for this machine's own requests (any machine): the map's call and the
-// sea rescue are separate requests, each told its own outcome even when the other came later.
+// sea rescue are separate requests, each told its own outcome even when the other came later. This machine never has
+// more than this many requests waiting at once (Session::Submit refuses another): each is told its outcome.
 constexpr std::uint32_t kRecentRequests=4;
 enum class Kind : std::uint32_t { hello=1,welcome,request,begin,unit,prepare,ready,commit,result,cancel,activate,activated,requestStatus };
 // RESULT !ok with this reserved index acknowledges processing the host's CANCEL. A guest-local
@@ -235,6 +239,8 @@ private:
     bool Broadcast(Message message) noexcept;
     void Cancel(std::uint32_t id,bool broadcast,RequestStatus reason=RequestStatus::cancelled) noexcept;
     void ClearTransactions() noexcept;
+    void InterruptLocalRequests() noexcept;   // this machine's requests still waiting: told interrupted
+    std::uint32_t LocalWaiting() const noexcept;
     bool HasSpawned() const noexcept;
     void Welcome(std::uint32_t peer) noexcept;
     void HostRequest(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;

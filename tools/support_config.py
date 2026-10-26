@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import re
 
+import calls
+
 SECTION = 'VehicleCrew'
 # src/support_config.cpp kWeaponNames (the ini spelling, the label shown).
 WEAPONS = (('rifle', '步枪'), ('flame', '火焰'), ('rocket', '火箭'), ('shotgun', '霰弹'), ('sniper', '狙击'))
 # The catalog keys in catalog order: tools/calls.py's flown calls (EDF6VC_CALL_* without the prefix; src/airstrike.cpp
 # SupportAirCallKey), then src/support_dispatch.cpp SupportCallKey's own (the infantry, the ground pairs, the transports, the
-# airdrops, and last the sea rescue: never on the map's bar, a player in the sea asks for it; disabling it here stops the
-# rescue).
+# airdrops: its keys[]), then the strikes (calls.STRIKES: the barrages and the ultimate, src/calls.inc kStrikes), and last
+# the sea rescue (never on the map's bar, a player in the sea asks for it; disabling it here stops the rescue).
 AIR_KEYS = ('INTERCEPTOR', 'INTERCEPTOR_F', 'STRIKE', 'STRIKE_F', 'MULTIROLE', 'MULTIROLE_F', 'FIGHTER', 'FIGHTER_F',
             'CARRIER', 'CARRIER_F', 'HELI', 'HELI_F', 'BLAST_CARRIER', 'BLAST_CARRIER_F', 'DOLL_CARRIER', 'DOLL_CARRIER_F', 'SUB',
             'GUNSHIP', 'GUNSHIP_F', 'MEDIC_HELI', 'MEDIC_HELI_F',
@@ -22,9 +24,10 @@ AIR_KEYS = ('INTERCEPTOR', 'INTERCEPTOR_F', 'STRIKE', 'STRIKE_F', 'MULTIROLE', '
             'SORTIE_CARPET', 'SORTIE_POPUP', 'SORTIE_MISSILE_RAIN', 'SORTIE_HAMMER', 'SORTIE_WOLFPACK', 'SORTIE_GUIDED')
 GROUND_KEYS = ('SQUAD', 'PLATOON', 'TANK_CREWED', 'TANK_DELIVERY', 'TRANSPORT_CREWED', 'TRANSPORT_DELIVERY', 'TRUCK_CREWED',
                'TRUCK_DELIVERY', 'SQUAD_HELI', 'PLATOON_HELI',
-               'SQUAD_AIRDROP', 'PLATOON_AIRDROP', 'TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP', 'RESCUE')
-UNIT_KEYS = AIR_KEYS + GROUND_KEYS
-LABELS = dict(zip(UNIT_KEYS, (
+               'SQUAD_AIRDROP', 'PLATOON_AIRDROP', 'TANK_AIRDROP', 'TRANSPORT_AIRDROP', 'TRUCK_AIRDROP')
+STRIKE_KEYS = tuple(c.id[len(calls.ID_PREFIX):] for c in calls.STRIKES)
+UNIT_KEYS = AIR_KEYS + GROUND_KEYS + STRIKE_KEYS + ('RESCUE',)
+LABELS = dict(zip(AIR_KEYS + GROUND_KEYS, (
     '截击机·守点', '截击机·跟随', '对地攻击机·守点', '对地攻击机·跟随', '多用途机·守点', '多用途机·跟随', '制空战斗机·守点',
     '制空战斗机·跟随', '无人机母舰·守点', '无人机母舰·跟随', '直升机·守点', '直升机·跟随', '自爆无人机母舰·守点',
     '自爆无人机母舰·跟随', '人偶无人机母舰·守点', '人偶无人机母舰·跟随', '潜水母舰', '炮艇机·守点', '炮艇机·跟随',
@@ -33,7 +36,9 @@ LABELS = dict(zip(UNIT_KEYS, (
     '出击·天顶导弹雨', '出击·锤与砧', '出击·狼群', '出击·引导打击', '步兵小队（4人）', '步兵大队（12人）', '坦克·有人', '坦克·空车交付',
     '装甲运兵车·有人', '装甲运兵车·空车交付', '民用轻卡·有人', '民用轻卡·空车交付',
     '直升机机降·小队（4人）', '直升机机降·大队（12人）', '运输机空降·小队（4人）', '运输机空降·大队（12人）',
-    '直升机投送·坦克', '直升机投送·装甲运兵车', '直升机投送·民用轻卡', '海上救援直升机')))
+    '直升机投送·坦克', '直升机投送·装甲运兵车', '直升机投送·民用轻卡')))
+LABELS.update({k: calls.call_name(c, 'SC') for k, c in zip(STRIKE_KEYS, calls.STRIKES)})   # kStrikes' labels
+LABELS['RESCUE'] = '海上救援直升机'
 WEAPON_KEYS = (('SupportSquadWeapon', '4 人小队队员'), ('SupportSquadLeaderWeapon', '所有小队队长'),
                ('SupportVehicleCrewWeapon', '车辆机组'), ('SupportAircraftCrewWeapon', '飞机机组'))
 DEFAULTS = {'SupportDisabled': '', 'SupportSquadWeapon': 'rifle', 'SupportSquadLeaderWeapon': 'rifle',

@@ -26,6 +26,12 @@ SupportIcon SupportCallIcon(int) noexcept { return SupportIcon::jet; }
 SupportVariant SupportCallVariant(int) noexcept { return SupportVariant::none; }
 const wchar_t* SupportCallForbidden(int) noexcept { return nullptr; }
 SupportReadiness SupportCallReadiness() noexcept { return {SupportReady::ready,0}; }
+// The map's support pt and the armed support's preview (support_points.cpp, support_warning.cpp: not linked here).
+std::int32_t SupportCallPrice(int) noexcept { return 1800; }
+std::int32_t SupportPoints() noexcept { return 6000; }
+std::int32_t SupportPointsMost() noexcept { return 30000; }
+void WarnPreview(int,const float*) noexcept {}
+SupportTab SupportCallTab(int) noexcept { return SupportTab::air; }
 int supportCalls=0,supportChosen=-1;float supportTarget[3]{};SupportLoadout supportLoad{};
 bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept {
     ++supportCalls;supportChosen=index;std::memcpy(supportTarget,target,12);supportLoad=load ? *load : SupportLoadout{};

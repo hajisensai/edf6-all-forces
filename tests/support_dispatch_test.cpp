@@ -2,6 +2,7 @@
 #include "../src/support_dispatch.cpp"
 #include "../src/support_config.cpp"
 #include "../src/support_protocol.h"
+#include "../src/support_points_logic.h"
 #include <set>
 #include <string>
 #include <vector>
@@ -151,12 +152,48 @@ SupportPlan preparedSubPlan{};std::uint64_t preparedSubToken=0;
 std::uint64_t SubmitPreparedSupportPlan(const SupportPlan& plan) noexcept {preparedSubPlan=plan;return ++preparedSubToken;}
 unsigned char* PlayerHuman() noexcept {return objects[31];}
 int SupportAirCallCount() noexcept {return 21;}
-void SupportFollowUpQueue(int,const float*) noexcept {}   // a sortie's second wave (airstrike.cpp, not linked here)
+// A sortie's second wave (airstrike.cpp, not linked here): what the dispatcher queued and settled.
+int followUpsQueued=0,followUpsSettled=0;std::uint32_t followUpRequest=~0u,followUpSettledRequest=0;bool followUpOut=false;
+void SupportFollowUpQueue(int,const float*,std::uint32_t request) noexcept {++followUpsQueued;followUpRequest=request;}
+void SupportFollowUpSettle(std::uint32_t request,bool out) noexcept {++followUpsSettled;followUpSettledRequest=request;followUpOut=out;}
 const wchar_t* SupportAirCallName(int) noexcept {return L"Heli";}
 const wchar_t* airKeys[21]={L"INTERCEPTOR",L"INTERCEPTOR_F",L"STRIKE",L"STRIKE_F",L"MULTIROLE",L"MULTIROLE_F",L"FIGHTER",L"FIGHTER_F",
     L"CARRIER",L"CARRIER_F",L"HELI",L"HELI_F",L"BLAST_CARRIER",L"BLAST_CARRIER_F",L"DOLL_CARRIER",L"DOLL_CARRIER_F",L"SUB",
     L"GUNSHIP",L"GUNSHIP_F",L"MEDIC_HELI",L"MEDIC_HELI_F"};
 const wchar_t* SupportAirCallKey(int index) noexcept {return index>=0 && index<21 ? airKeys[index] : nullptr;}
+std::uint32_t SupportAirCallPt(int index) noexcept {return index>=0 && index<21 ? 1800u : 0u;}
+// The strikes (airstrike.cpp kStrikes, not linked here): a barrage and the ultimate, after the airdrops (36, 37).
+const wchar_t* strikeKeys[2]={L"BARRAGE_ROCKETS",L"ULTIMATE"};
+int SupportStrikeCount() noexcept {return 2;}
+const wchar_t* SupportStrikeKey(int k) noexcept {return k>=0 && k<2 ? strikeKeys[k] : nullptr;}
+const wchar_t* SupportStrikeName(int k) noexcept {return k==0 ? L"火箭齐射" : L"天罚";}
+std::uint32_t SupportStrikePt(int k) noexcept {return k==0 ? 2000u : k==1 ? 15000u : 0u;}
+int SupportStrikeBarrage(int k) noexcept {return k==0 ? 0 : -1;}
+int strikesStarted=0;bool strikeStarts=true;
+bool SupportStrikeAt(int,const float*,wchar_t* note,std::size_t capacity) noexcept {
+    ++strikesStarted;if(note && capacity)note[0]=0;return strikeStarts;
+}
+support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float*,support::Route* route) noexcept {
+    *route={{-1400,150,0},{1,0,0}};return support::Refusal::none;
+}
+int warnedDeployments=0;
+void WarnDeployment(const support_net::Plan&) noexcept {++warnedDeployments;}
+// The pool (support_points.cpp, not linked here): the real rules (support_points_logic.h) on a fixture's pool.
+support_points::Settings fixturePt{1000000,1000000,1.0f};
+support_points::Pool fixturePool;support_points::Ledger fixtureLedger;
+struct PoolStart { PoolStart(){fixturePool.Start(fixturePt);} } poolStart;
+std::int32_t SupportPoints() noexcept {return fixturePool.points;}
+std::int32_t SupportPointsPrice(std::uint32_t pt) noexcept {return support_points::Price(pt,fixturePt.scale);}
+bool SupportPointsSpend(std::int32_t price) noexcept {return fixturePool.Spend(price);}
+void SupportPointsRefund(std::int32_t price) noexcept {fixturePool.Refund(price,fixturePt);}
+bool SupportPointsOwe(std::int32_t price,std::uint32_t request) noexcept {
+    if(!fixturePool.Spend(price))return false;
+    fixtureLedger.Keep(request,price);return true;
+}
+void SupportPointsSettle(std::uint32_t request,bool back) noexcept {
+    const std::int32_t price=fixtureLedger.Settle(request);
+    if(back)fixturePool.Refund(price,fixturePt);
+}
 bool soloHost=false;
 bool SupportSoloHostWorld() noexcept {return soloHost;}
 bool SupportAircraftSpec(int id,SupportAircraft* out) noexcept {
@@ -378,8 +415,8 @@ int main() {
     check(configured && netConfigured==1 && gateBeforeNetwork,"mission preload installs admission gate before configuring support networking");
     check(configuredHooks.participants==&ReadMissionParticipants && configuredHooks.admissionReady==&MissionParticipantGateReady,
           "network quorum reads actual mission actors and the verified upper admission gate");
-    check(configuredHooks.ownChannel && configuredHooks.ownChannel(36) && !configuredHooks.ownChannel(29) &&
-          !configuredHooks.ownChannel(0) && !configuredHooks.ownChannel(21),
+    check(configuredHooks.ownChannel && configuredHooks.ownChannel(38) && !configuredHooks.ownChannel(29) &&
+          !configuredHooks.ownChannel(0) && !configuredHooks.ownChannel(21) && !configuredHooks.ownChannel(36),
           "the protocol is told which catalog entry is the sea rescue (its own channel and cooldown)");
     check(installedCreatedObserver==&NoteSupportMissionPlayerCreated && configuredHooks.createdMatches==&MissionParticipantCreationsMatch,
           "successful native actor creation observer and exact identity matcher are both wired before creation");
@@ -417,8 +454,38 @@ int main() {
     check(SupportCallAt(0,target,note,128) && SupportCallReadiness().state==SupportReady::planning,
           "a call right after a delivery is taken (no cooldown)");
     ResetSupportDispatch();made=deleted=boardRequests=activated=0;terrain=false;fixtureMs+=40000;
+    {const std::int32_t pt=SupportPoints();
+    followUpsQueued=0;
     check(SupportCallAt(0,target,note,128),"invalid terrain request can be queued for explicit validation");
+    check(SupportPoints()==pt-1800,"the map's pt (2026-10-26): a call is paid when it is taken");
+    check(followUpsQueued==0,"a sortie's second wave waits for its first to be made (it is paid with it)");
     SupportDispatchTick();check(!made && !offlinePending,"no safe entry refuses without spawning at target");
+    check(SupportPoints()==pt,"its plan refused: its pt back");
+    check(followUpsQueued==0,"its plan refused: no second wave either (2026-10-27 review: a refunded first wave's second came free)");
+    ResetSupportDispatch();terrain=true;made=0;fixtureMs+=40000;
+    check(SupportCallAt(0,target,note,128),"a call on good terrain is queued");
+    check(followUpsQueued==0,"still planned: no second wave yet");
+    SupportDispatchTick();
+    check(made==2 && SupportPoints()==pt-1800,"delivered: its pt stay spent");
+    check(followUpsQueued==1 && followUpRequest==0,"made: its second wave's wait starts");
+    ResetSupportDispatch();made=0;fixtureMs+=40000;fixturePool.points=1000;
+    check(!SupportCallAt(0,target,note,128) && !offlinePending && fixturePool.points==1000 && std::wcsstr(note,L"1800"),
+          "not enough pt: refused with the price, nothing asked, nothing taken");
+    followUpsQueued=0;
+    check(SupportCallUnpaidAt(0,target,note,128) && offlinePending && fixturePool.points==1000,"a second wave is not paid");
+    SupportDispatchTick();
+    check(made==2 && followUpsQueued==0,"a second wave made brings no wave of its own");
+    ResetSupportDispatch();made=0;fixtureMs+=40000;fixturePool.Start(fixturePt);
+    const int started=strikesStarted;
+    check(SupportCallAt(36,target,note,128) && strikesStarted==started+1 && !offlinePending && !made &&
+          fixturePool.points==fixturePt.start-2000,"a strike starts here, never planned or sent, and is paid");
+    strikeStarts=false;
+    check(!SupportCallAt(37,target,note,128) && fixturePool.points==fixturePt.start-2000,"a strike that does not start costs nothing");
+    strikeStarts=true;
+    check(warnedDeployments>0,"a deployment made shows its route (support_warning.h)");
+    SupportPlan strikePlan{};
+    check(Plan(36,target,0,&strikePlan)==support_net::PlanResult::refused,"a host never plans a strike");
+    fixturePool.Start(fixturePt);ResetSupportDispatch();terrain=false;made=0;fixtureMs+=40000;}
     // 2026-10-09 16:52:26: an air call made 50 ms before the play area was measured was refused ("no clear air corridor"),
     // the same call worked later. Until the area is in, a request waits; then it is planned as usual.
     ResetSupportDispatch();terrain=true;areaMeasured=false;made=0;
@@ -461,8 +528,40 @@ int main() {
         routeResult=npc::navigation::Result::pending;
     }
     ResetSupportDispatch();made=0;routeResult=npc::navigation::Result::pending;
+    {const std::int32_t pt=SupportPoints();
     SupportCallAt(21,target,note,128);testOnline=true;SupportDispatchTick();
     check(!offlinePending && !made,"entering an online session cancels an uncommitted offline request");
+    check(SupportPoints()==pt,"...and gives its pt back");
+    // Online: paid once the host has it (its accepted notice inside the submit), given back when it comes to nothing.
+    ResetSupportDispatch();fixtureMs+=40000;
+    followUpsQueued=followUpsSettled=0;
+    check(SupportCallAt(0,target,note,128) && SupportPoints()==pt-1800,"an online call is paid as the host takes it");
+    check(followUpsQueued==1 && followUpRequest==noticeRequest,"its second wave is held under its open request");
+    configuredHooks.notice(noticeRequest,support_net::RequestStatus::refused);
+    check(SupportPoints()==pt,"refused by the host: its pt back");
+    check(followUpsSettled==1 && followUpSettledRequest==noticeRequest && !followUpOut,"...and its second wave is forgotten");
+    configuredHooks.notice(noticeRequest,support_net::RequestStatus::refused);
+    check(SupportPoints()==pt,"settled once");
+    ResetSupportDispatch();fixtureMs+=40000;
+    check(SupportCallAt(0,target,note,128) && SupportPoints()==pt-1800,"another online call");
+    followUpsSettled=0;
+    configuredHooks.notice(noticeRequest,support_net::RequestStatus::active);
+    check(followUpsSettled==1 && followUpSettledRequest==noticeRequest && followUpOut,"out: its second wave's wait starts");
+    configuredHooks.notice(noticeRequest,support_net::RequestStatus::interrupted);
+    check(SupportPoints()==pt-1800,"delivered: its pt stay spent, whatever comes after");
+    // A strike called while an online request is open (2026-10-27 review): its own line is shown, the request is still
+    // followed (its later outcome shown and settled).
+    ResetSupportDispatch();fixtureMs+=40000;
+    check(SupportCallAt(0,target,note,128),"an online call waiting for the host");
+    const unsigned open=noticeRequest;
+    check(SupportCallAt(36,target,note,128) && strikesStarted>0,"a strike meanwhile");
+    SupportCallStatus(note,128);
+    check(!std::wcsstr(note,L"支援调度中"),"the strike's line is shown, not the request's");
+    configuredHooks.notice(open,support_net::RequestStatus::active);
+    SupportCallStatus(note,128);
+    check(std::wcsstr(note,L"支援已出动")!=nullptr,"the open request's outcome still reaches the HUD after the strike");
+    fixturePool.Start(fixturePt);netRequests=0;}
+    testOnline=false;
     ResetSupportDispatch();testOnline=true;made=0;
     check(SupportCallAt(0,target,note,128) && netRequests==1 && !made,"online click uses reliable request rather than local spawn");
     ResetSupportDispatch();made=boardRequests=0;held=0;seatNow=0;registered=0;registeredBeforeSeat=0;activated=0;SupportPlan networkPlan;
@@ -590,8 +689,6 @@ int main() {
         testOnline=true;const int before=netRequests;
         check(SupportCallAt(16,target,note,128) && netRequests==before+1 && subLaunches==1,
               "online map submarine sends exactly one authenticated host request and creates no local copy");
-        check(!SupportSubCallAt(target,nullptr,false,note,128) && netRequests==before+1,
-              "remote native radio replay never submits a duplicate submarine request");
         testOnline=wasOnline;terrainSea=Sea::land;
     }
     // One-participant online worlds must share Session native IDs and tokens with later submarine/child requests.
@@ -656,7 +753,7 @@ int main() {
     check(!std::wcsstr(note,hudtext::Tr(hudtext::Tx::supportLegacyPeers)),"the older-peer notice ends with the mission");
     // The transports (transport.cpp; the user, 2026-10-09: "飞机和直升机应该也有运输机", "飞机就空降"): four entries after the
     // ground ones, every older index and key as it was; a hull in the air, its pilot and the soldiers made inside it.
-    check(SupportCallCount()==37 && !std::wcscmp(SupportCallKey(28),L"TRUCK_DELIVERY") && !std::wcscmp(SupportCallKey(29),L"SQUAD_HELI") &&
+    check(SupportCallCount()==39 && !std::wcscmp(SupportCallKey(28),L"TRUCK_DELIVERY") && !std::wcscmp(SupportCallKey(29),L"SQUAD_HELI") &&
           !std::wcscmp(SupportCallKey(32),L"PLATOON_AIRDROP"),"the transports appended: every older index and key stands");
     check(SupportCallIcon(29)==SupportIcon::heli && SupportCallIcon(31)==SupportIcon::jet && SupportCallVariant(30)==SupportVariant::platoon &&
           SupportCallVariant(31)==SupportVariant::squad,
@@ -700,7 +797,7 @@ int main() {
     // The container airdrops (airdrop.cpp; the user, 2026-10-09: "运输机还要能空投载具"): one entry per ground vehicle
     // after the transports, one row (the plane) with the vehicles as its chips.
     check(!std::wcscmp(SupportCallKey(33),L"TANK_AIRDROP") && !std::wcscmp(SupportCallKey(34),L"TRANSPORT_AIRDROP") &&
-          !std::wcscmp(SupportCallKey(35),L"TRUCK_AIRDROP") && !SupportCallKey(37),"three airdrop entries appended after the transports");
+          !std::wcscmp(SupportCallKey(35),L"TRUCK_AIRDROP") && !std::wcscmp(SupportCallKey(36),L"BARRAGE_ROCKETS") && !SupportCallKey(39),"three airdrop entries appended after the transports, the strikes after them");
     check(SupportCallIcon(33)==SupportIcon::heli && SupportCallVariant(33)==SupportVariant::tank &&
           SupportCallVariant(34)==SupportVariant::apc && SupportCallVariant(35)==SupportVariant::truck,
           "the airdrop row: the helicopter, its chips the tank, the APC, the truck");
@@ -1111,8 +1208,8 @@ int main() {
     // limits, a gunner, takeoff from the carrier, the requester's own) ----
     {
     const int rescue=SupportRescueCatalog();
-    check(rescue==36 && SupportCallCount()==37 && SupportMenuCount()==36,
-          "the rescue is the catalog's last entry, after the transports and the airdrops (never #100's TransportStart 29)");
+    check(rescue==38 && SupportCallCount()==39 && SupportMenuCount()==38,
+          "the rescue is the catalog's last entry, after the transports, the airdrops and the strikes (never #100's TransportStart 29)");
     check(std::wcscmp(SupportCallKey(rescue),L"RESCUE")==0 && std::wcscmp(SupportCallName(rescue),L"海上救援直升机")==0 &&
           SupportCallIcon(rescue)==SupportIcon::heli && SupportCallVariant(rescue)==SupportVariant::none,"its key, name and icon");
     check(std::wcscmp(SupportCallKey(28),L"TRUCK_DELIVERY")==0 && std::wcscmp(SupportCallKey(21),L"SQUAD")==0 &&

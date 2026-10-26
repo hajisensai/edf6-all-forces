@@ -44,6 +44,8 @@
 #include "playarea.h"
 #include "sazabi_sound.h"
 #include "support_aircraft.h"   // SupportFollowUpTick
+#include "support_points.h"
+#include "support_warning.h"
 #include "warn.h"
 #include <cmath>
 
@@ -860,6 +862,8 @@ void SharedFrameTick() noexcept {
     GuardedTick(kStepUltimate,&UltimateTick);       // the ultimate strike's show (ultimate.cpp), on with the plugin off too
     GuardedTick(kStepBarrage,&BarrageTick);         // the long-range barrages' rounds (barrage.cpp)
     GuardedTick(kStepFollowUp,&SupportFollowUpTick); // the sorties' second waves (airstrike.cpp)
+    GuardedTick(kStepFollowUp,&SupportPointsTick);   // the map's support pt from the team score (support_points.cpp)
+    GuardedTick(kStepFollowUp,&SupportWarningTick);  // the supports' warnings on the ground (support_warning.cpp)
     GuardedTick(kStepGravity,&GravityTick);         // what is thrown: its impacts and contacts (gravity.cpp)
     GuardedTick(kStepMapQueue,&MapCommandQueueTick);  // the Shift-queued points of this machine's units (mapcmd.cpp)
 }

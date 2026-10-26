@@ -73,8 +73,12 @@ def main() -> int:
         fail('src/support_dispatch.cpp SpawnDeployment: the rescue gets its heli before the real pilot is seated')
     keys = re.search(r'static const wchar_t\* keys\[\]=\{([^}]*)\}', dispatch)
     checks += 1
-    if not keys or re.findall(r'L"(\w+)"', keys.group(1))[-1:] != ['RESCUE']:
-        fail('src/support_dispatch.cpp SupportCallKey: RESCUE is not the catalog\'s last entry (older indices would move)')
+    # Since 2026-10-26 the strikes come between the airdrops and the rescue: RescueCatalog stands after them, SupportCallKey
+    # names it apart from the ground keys.
+    if not keys or 'RESCUE' in re.findall(r'L"(\w+)"', keys.group(1)) or \
+            'return static_cast<std::uint32_t>(StrikeStart()+SupportStrikeCount());' not in dispatch or \
+            'if(index==SupportRescueCatalog())return L"RESCUE";' not in dispatch:
+        fail('src/support_dispatch.cpp: RESCUE is not the catalog\'s last entry, after the strikes')
     crew = body(dispatch, 'unsigned AirCrew(')
     checks += 1
     if 'if(IsRescue(catalog))return 2u;' not in crew:
@@ -112,7 +116,7 @@ def main() -> int:
     hello = body(code_only(read(root, 'src/support_protocol.cpp')), 'void Session::Tick(')
     checks += 1
     if not before(hello, 'backend_.hooks.variants(', 'm.unit.resourceId|=kExtBuilt;') or \
-            not re.search(r'kExtBuilt=kExtSeaRescue\|kExtRescueChannel(\|kExtOutfit41)?(\|kExtBvmPlayers)?(\|kExtBackpack)?(\|kExt\w+)*;', protocol):
+            not re.search(r'kExtBuilt=kExtSeaRescue\|kExtRescueChannel(\|kExtOutfit41)?(\|kExtBvmPlayers)?(\|kExtBackpack)?(\|\s*kExt\w+)*;', protocol):
         fail('src/support_protocol.cpp Tick: the hello does not announce the rescue\'s bits (kExtBuilt) after the variants '
              'hook wrote its word')
     net = code_only(read(root, 'src/support_net.cpp'))

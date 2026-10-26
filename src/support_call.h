@@ -48,8 +48,10 @@ constexpr bool IsSupportAircraft(std::uint32_t id) noexcept { return id>=kSuppor
 static_assert(SupportSoldierResource(SupportWeapon::rifle,false)==kSupportRangerResource &&
               SupportSoldierResource(SupportWeapon::rifle,true)==kSupportLeaderResource,"protocol v2 rifle ids unchanged");
 static_assert(SupportSoldierResource(SupportWeapon::sniper,true)<kSupportAircraftResource,"soldiers stay below hulls");
-// Same catalog as native radio weapons. Online requests go through the host (support_net); a world whose only actual
-// participant is this host is deployed here directly (no peer exists to replicate to).
+// The catalog of the map's support bar (since 2026-10-26 the only way a support is called: the user, 「所有插件支援改成m里面
+// 消耗pt召唤」): the flown calls (tools/calls.py, airstrike.cpp kCalls), the infantry, the ground vehicles, the transports,
+// the airdrops, the strikes (kStrikes), the sea rescue last. Online requests go through the host (support_net); a world
+// whose only actual participant is this host is deployed here directly (no peer exists to replicate to).
 // --- A composed load (the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人并且可以点多次，直到座位满") ---
 // The soldiers a player puts aboard a call, in seat order: soldier i is the leader of its squad when i % 4 == 0 (the
 // same rule as every infantry plan). On the wire (a request's `challenge`, support_protocol.cpp: unused by a request and
@@ -93,16 +95,33 @@ bool SupportCallPreset(int index,SupportLoadout* out) noexcept;
 bool SupportCallComposedAt(int index,const float* target,const SupportLoadout* load,wchar_t* note,std::size_t capacity) noexcept;
 // The catalog entry's stable configuration key (EDF6VehicleCrew.ini SupportDisabled / SupportAircraftCount_<key>).
 const wchar_t* SupportCallKey(int index) noexcept;
-// A map / radio call of entry `index`; the sea rescue entry is refused here and by SupportCallComposedAt (only the
-// rescue's own trigger asks for it).
+// The map's call of entry `index` for its price (SupportCallPrice: refused with why when the pool holds less, taken once it
+// is accepted, given back when it comes to nothing); the sea rescue entry is refused here and by SupportCallComposedAt
+// (only the rescue's own trigger asks for it).
 bool SupportCallAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
-// The submarine carrier's call (support_aircraft.h SupportSubCatalog): it comes up out of the water (subcarrier.cpp
-// SubLaunch: made under the surface, it rises), not through the support planner (it has no aircraft, crew or route to
-// plan). Placed kSubAhead past `target` away from `from` (the caller), else nearer, at the first spot that is not land:
-// the hull clear of the caller where the water lets it. `local`: this machine's own call (its status is shown); a radio
-// call is replayed on every machine, each surfacing its own copy (the caller's: airstrike.cpp sets the spawn owner).
-// False: no water near the target, its files not preloaded, or kMaxSubs out already.
-bool SupportSubCallAt(const float* target,const float* from,bool local,wchar_t* note,std::size_t capacity) noexcept;
+// The same call for no pt: a sortie's second wave (airstrike.cpp, paid with its first), the autopilot's AirdropTest.
+bool SupportCallUnpaidAt(int index,const float* target,wchar_t* note,std::size_t capacity) noexcept;
+// An entry's pt (tools/calls.py Call.pt for the calls and strikes, support_dispatch.cpp kGroundPt for the rest; the rescue
+// 0) and its price now (times SupportPtScale: support_points.h).
+std::uint32_t SupportCallPt(int index) noexcept;
+std::int32_t SupportCallPrice(int index) noexcept;
+// The strike an entry is (airstrike.cpp kStrikes index), -1 for none; whether it is a flown call (kCalls, not the
+// submarine carrier).
+int SupportCatalogStrike(int index) noexcept;
+bool SupportCatalogAir(int index) noexcept;
+// The map's preview (support_warning.cpp): where a flown entry would come in for `target` as the planner sees it now
+// from this machine's player (airstrike.cpp PreviewAirRoute: quiet). False: none found (or not a flown entry).
+bool SupportPreviewEntry(int index,const float* target,float* from) noexcept;
+// airstrike.cpp: the strikes (kStrikes): how many, a strike's ini key, its name on the bar, its pt, its barrage kind
+// (barrage_plan.h Kind; -1: the ultimate), the heading one at `target` comes along (from the local player to it), and the
+// local player's call of one (started here and told to the others; false with why in `note`).
+int SupportStrikeCount() noexcept;
+const wchar_t* SupportStrikeKey(int strike) noexcept;
+const wchar_t* SupportStrikeName(int strike) noexcept;
+std::uint32_t SupportStrikePt(int strike) noexcept;
+int SupportStrikeBarrage(int strike) noexcept;
+void SupportStrikeHeading(const float* target,float* out) noexcept;
+bool SupportStrikeAt(int strike,const float* target,wchar_t* note,std::size_t capacity) noexcept;
 // The entries the map's support bar offers and cycles (mapcmd.cpp): every one but the sea rescue, the catalog's last.
 int SupportMenuCount() noexcept;
 // Why the mission's rules (support_policy.h Allowed) keep entry `index` from coming now, nullptr when they let it: the
@@ -135,7 +154,7 @@ void ResetSupportDispatch() noexcept;
 void SupportCallStatus(wchar_t* out,std::size_t capacity) noexcept;
 // What the map's support bar shows of the catalog (hud.cpp MapSupportBar): an entry's icon, and whether a call can be
 // asked for now (one dispatcher serves every entry: a request still being planned, its cooldown after a delivery).
-enum class SupportIcon : std::uint8_t { jet, heli, carrier, gunship, sub, squad, platoon, tank, apc, truck };
+enum class SupportIcon : std::uint8_t { jet, heli, carrier, gunship, sub, squad, platoon, tank, apc, truck, barrage, satellite };
 SupportIcon SupportCallIcon(int index) noexcept;
 // Which of its kind's variants an entry is (the bar's chip icon): an aircraft guarding the mark or following the player,
 // a ground vehicle crewed or delivered empty; none for the ones with no variants (the infantry, the submarine carrier).
@@ -143,6 +162,12 @@ SupportIcon SupportCallIcon(int index) noexcept;
 // paratroop drop). The container airdrops' (AirdropCatalog): the vehicle the plane drops (the row: the plane).
 enum class SupportVariant : std::uint8_t { none, guard, follow, crewed, empty, squad, platoon, tank, apc, truck };
 SupportVariant SupportCallVariant(int index) noexcept;
+// The bar's tabs (2026-10-26: every support on the bar, more rows than its column holds): the flown supports that stay
+// (guard / follow, the carriers), the sorties, the strikes (barrages, the ultimate), and the ones on the ground or carried
+// there (infantry, vehicles, transports, airdrops). Each entry is in one.
+enum class SupportTab : std::uint8_t { air, sortie, strike, ground, count };
+inline constexpr int kSupportTabs=static_cast<int>(SupportTab::count);
+SupportTab SupportCallTab(int index) noexcept;
 enum class SupportReady : std::uint8_t { ready, planning, cooldown, off };
 struct SupportReadiness { SupportReady state; int seconds; };   // seconds: the cooldown left
 SupportReadiness SupportCallReadiness() noexcept;

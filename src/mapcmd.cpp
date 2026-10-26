@@ -47,6 +47,8 @@
 #include "map_cam.h"
 #include "npc_mark.h"
 #include "support_call.h"
+#include "support_points.h"
+#include "support_warning.h"
 #include "transport.h"
 #include <Xinput.h>
 #include <algorithm>
@@ -103,6 +105,7 @@ struct Game {
     int composeEntry=-1;SupportLoadout compose{};
     bool armedClick=false;
     int supportPick;
+    int supportTab=0;          // the bar's tab shown (a click on a tab; [ ] picking into another tab: that tab)
     int marchPace=-1;           // the paced march (P): 1 the slowest unit's pace, 0 each at full speed, -1 MapMarchPace's
     bool panelOpen=false;       // the squad panel opened past its commandable rows (mapcmd_logic.h SquadRowsShown)
     bool formationMenu=false;   // the formation button's menu open (map_buttons.h MenuEntry)
@@ -163,8 +166,8 @@ constexpr int kUiItems=16;
 struct View {
     float vp[16],w,h; ULONGLONG at; int buttons; mapbtn::Rect button[mapbtn::kCount]; int id[mapbtn::kCount];
     int squads=0,payloads=0,panels=0,supports=0;
-    mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kMapUiPanels]{},support[kMapSupports]{};
-    int supportEntry[kMapSupports]{};
+    mapbtn::Rect squad[kUiItems]{},payload[kUiItems]{},panel[kMapUiPanels]{},support[kMapSupportHits]{};
+    int supportEntry[kMapSupportHits]{};
     int composes=0;mapbtn::Rect compose[mapbtn::kComposeItems]{};int composeCode[mapbtn::kComposeItems]{};
     bool pvpVisible=false;
     int pvps=0;mapbtn::Rect pvp[kMapPvpItems]{};int pvpCode[kMapPvpItems]{};PvpStatus pvpStatus{};
@@ -628,6 +631,7 @@ void UiClick(Game& g,const Game::UiHit& hit,bool shift) noexcept {
         return;
     }
     if(hit.kind==Game::UiKind::support) {   // its row or chip: armed (again: disarmed); one the mission forbids: why
+        if(const int tab=mapbtn::SupportTabOfHit(hit.entry);tab>=0 && tab<kSupportTabs){g.supportTab=tab;return;}   // a tab
         const bool again=g.armedSupport==hit.entry;
         if(const wchar_t* why=again ? nullptr : SupportCallForbidden(hit.entry)){Note(g,L"%ls",why);return;}
         Arm(g,false,Order::none,again ? -1 : hit.entry);
@@ -1357,8 +1361,10 @@ void Publish(const Game& g,bool allowed,bool pointOk,const float* point,bool poi
     for(int i=0;i<r.supports;++i) {
         _snwprintf_s(r.support[i].name,_countof(r.support[i].name),_TRUNCATE,L"%ls",SupportCallName(i));
         r.support[i].icon=SupportCallIcon(i);r.support[i].variant=SupportCallVariant(i);r.support[i].allowed=!SupportCallForbidden(i);
+        r.support[i].price=SupportCallPrice(i);r.support[i].afford=SupportPoints()>=r.support[i].price;r.support[i].tab=SupportCallTab(i);
     }
     r.supportReady=SupportCallReadiness();
+    r.points=SupportPoints();r.pointsMost=SupportPointsMost();r.supportTab=g.supportTab;
     SupportCallStatus(r.supportStatus,_countof(r.supportStatus));
     r.noteFresh=g.noteAt && GetTickCount64()-g.noteAt<=kNoteMs;
     r.placeOn=g.placeOn;r.placeOnline=placeOnline;r.placeOpen=g.placeOn && g.place.open;r.placeCategory=g.place.category;
@@ -1479,6 +1485,7 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         if(previous || following) {
             g.supportPick=(g.supportPick+(previous ? -1 : 1)+supportCount)%supportCount;
             Note(g,hudtext::Tr(hudtext::Tx::cmdSupportPicked),SupportCallName(g.supportPick));
+            g.supportTab=static_cast<int>(SupportCallTab(g.supportPick));   // its tab shown
         }
     }
     Hover(g,in,haveView ? &v : nullptr);
@@ -1610,9 +1617,11 @@ bool MapCommandFrame(MapCmdInput& in,float* centre) noexcept {
         if(g.composeEntry==supportAt)load=g.compose;
     }
     g.was=rawKeys;
-    float point[3];
+    float point[3]{};
     const bool pointOk=TargetPoint(g,in,haveView ? &v : nullptr,point);
     const bool allowed=Cfg().enabled;
+    // The armed support's preview under the pointer (support_warning.h): its strike's area, its flight's route.
+    WarnPreview(g.armedSupport>=0 && pointOk ? g.armedSupport : -1,point);
     if(supportAt>=0) {
         if(pointOk){SupportCallComposedAt(supportAt,point,load.count>0 ? &load : nullptr,g.note,_countof(g.note));g.noteAt=GetTickCount64();}
         else Note(g,L"%ls",hudtext::Tr(hudtext::Tx::cmdSupportNoPoint));
@@ -1696,7 +1705,7 @@ void MapCommandButtons(const float* rects,const int* ids,int n) noexcept {
 }
 
 void MapCommandSupportButtons(const float* rects,const int* entries,int n) noexcept {
-    n=rects && entries ? (std::max)(0,(std::min)(n,kMapSupports)) : 0;
+    n=rects && entries ? (std::max)(0,(std::min)(n,kMapSupportHits)) : 0;
     AcquireSRWLockExclusive(&viewLock);view.supports=n;
     if(!n)view.composes=0;   // no bar drawn: no composition panel beside it either
     for(int i=0;i<n;++i){view.support[i]={rects[i*4],rects[i*4+1],rects[i*4+2],rects[i*4+3]};view.supportEntry[i]=entries[i];}

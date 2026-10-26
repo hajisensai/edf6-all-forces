@@ -130,12 +130,22 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     out=m;return true;
 }
 void Session::ClearTransactions() noexcept {
+    // This machine's requests still waiting for their outcome end here, as Suspend ends them: their transactions (and the
+    // host's ledger of them) are gone, so no outcome will ever come (the pt they cost are owed back, support_points.h).
+    InterruptLocalRequests();
     for(std::uint32_t i=0;i<kMaxTransactions;++i) {
         if(transactions_[i].token && backend_.hooks.destroy)backend_.hooks.destroy(transactions_[i].token);
         transactions_[i]=Transaction{};
     }
-    nextTransaction_=0;requests_.fill(0);lastRequestAt_.fill(0);nextRequest_=0;rescueAt_.fill(0);
+    // nextRequest_ is never reset: this machine's request ids stay unique for the Session's life, as its notices' readers
+    // key by them (the pt ledger, the sortie's second wave, the rescue's id). A host's replay guard (requests_) starts
+    // over with the transactions; a requester's ids only grow, so a new one always passes it.
+    nextTransaction_=0;requests_.fill(0);lastRequestAt_.fill(0);rescueAt_.fill(0);
     replies_.fill(Replies{});localReplies_.fill(Reply{});
+}
+void Session::InterruptLocalRequests() noexcept {
+    const Replies open=localReplies_;
+    for(const auto& reply:open)if(reply.request && reply.status==RequestStatus::accepted)Notice(reply.request,RequestStatus::interrupted);
 }
 void Session::Stop() noexcept {
     ClearTransactions();running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);
@@ -195,7 +205,7 @@ void Session::Suspend() noexcept {
     // copies, including those awaiting finalize: another peer may already have
     // activated them. Only the explicit mission reset may clear that ledger.
     running_=false;suspended_=true;
-    for(const auto reply:localReplies_)if(reply.request && reply.status==RequestStatus::accepted)Notice(reply.request,RequestStatus::interrupted);
+    InterruptLocalRequests();
     for(std::uint32_t i=0;i<kMaxTransactions;++i) {
         auto& t=transactions_[i];
         if(!t.spawned && t.phase!=Phase::empty && t.phase!=Phase::cancelled)Cancel(i+1,false);
@@ -250,25 +260,36 @@ void Session::Failed(std::uint64_t token,RequestStatus reason) noexcept {
     if(host_)Cancel(id,true,reason);
     else {Cancel(id,false,reason);Message m;m.kind=Kind::result;m.transaction=transactions_[id-1].id;m.index=static_cast<std::uint32_t>(reason);Send(hostPeer_,m);}
 }
-// The kept status of `request` among `replies` (or the slot it may take: the oldest kept, if older than it), applying
-// the status rules: a terminal one never reopens on a late reply, an active one never goes back to accepted. nullptr:
-// nothing to record (the same status again, a late one, or older than every kept request).
+// The kept status of `request` among `replies` (or the slot it may take), applying the status rules: a terminal one never
+// reopens on a late reply, an active one never goes back to accepted. A new request takes a free slot, else the oldest
+// one whose outcome is known (active or terminal), and only when none is, the oldest: one still waiting is the last to
+// go (this machine's own never do: Submit keeps a slot that is not waiting). nullptr: nothing to record (the same status
+// again, a late one, or older than the request it would replace).
 Session::Reply* Session::Record(Replies& replies,std::uint32_t request,RequestStatus status) noexcept {
-    Reply* oldest=nullptr;
+    Reply *free=nullptr,*known=nullptr,*oldest=nullptr;
     for(auto& reply:replies) {
-        if(reply.request==request) {
+        if(reply.request && reply.request==request) {
             if(reply.status==status || reply.status>=RequestStatus::refused)return nullptr;
             if(reply.status==RequestStatus::active && status==RequestStatus::accepted)return nullptr;
             reply.status=status;return &reply;
         }
+        if(!reply.request){if(!free)free=&reply;continue;}
+        if(reply.status!=RequestStatus::accepted && (!known || reply.request<known->request))known=&reply;
         if(!oldest || reply.request<oldest->request)oldest=&reply;
     }
-    if(!oldest || oldest->request>request)return nullptr;
-    *oldest={request,status,false};return oldest;
+    Reply* slot=free ? free : known ? known : oldest;
+    if(!slot || (slot->request && slot->request>request))return nullptr;
+    *slot={request,status,false};return slot;
+}
+std::uint32_t Session::LocalWaiting() const noexcept {
+    std::uint32_t waiting=0;
+    for(const auto& reply:localReplies_)waiting+=reply.request && reply.status==RequestStatus::accepted;
+    return waiting;
 }
 void Session::Notice(std::uint32_t request,RequestStatus status) noexcept {
-    // Any of this machine's last kRecentRequests requests: the map's call and the rescue are told apart by their ids.
-    if(!request || request>nextRequest_ || nextRequest_-request>=kRecentRequests)return;
+    // Any of this machine's requests still kept (each waiting one always is: Submit): the map's call and the rescue are
+    // told apart by their ids.
+    if(!request || request>nextRequest_)return;
     if(!Record(localReplies_,request,status))return;
     if(backend_.hooks.notice)backend_.hooks.notice(request,status);
 }
@@ -290,6 +311,9 @@ void Session::Publish(std::uint32_t peer,std::uint32_t request,RequestStatus sta
 }
 bool Session::Submit(std::uint32_t catalog,const float* target,std::uint64_t now,std::uint64_t loadout) noexcept {
     if(!target || !Ready() || catalog>=kMissionCrewCatalog || !Point(target) || nextRequest_==UINT32_MAX)return false;
+    // Every slot holds a request still waiting for its outcome: a new one would push one out unsettled (its outcome
+    // never told, its pt never settled). Not taken; nothing is sent.
+    if(LocalWaiting()>=kRecentRequests)return false;
     Message m;m.kind=Kind::request;m.epoch=epoch_;m.request=++nextRequest_;m.catalog=catalog;m.challenge=loadout;
     Notice(m.request,RequestStatus::accepted);
     std::memcpy(m.target,target,sizeof(m.target));
