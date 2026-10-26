@@ -3,7 +3,7 @@
 #include "crew.h"
 
 namespace crew {
-// The pages 11..15 put into the game's key config (HQ -> settings -> key config, the top list's 「插件」 items): every
+// The pages 11..16 put into the game's key config (HQ -> settings -> key config, the top list's 「插件」 items): every
 // site checked first (keyconfig_signatures.inc), nothing patched on a mismatch; the top list's items added last, so a
 // half-patched menu offers no plugin page. True with the pages offered.
 bool InstallKeyConfig() noexcept;

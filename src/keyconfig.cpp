@@ -5,7 +5,7 @@
 //   - seeds its slots once from its ini (the store's marker slot says it did; EDF6AutoTurret seeds its own the same way),
 //   - reads its keys from them (OverlayStockKeys: into the published config, so every module's Cfg().xxxKey is the
 //     store's), the Q mark from the stock 「标记」 (Spot, action 0x1B),
-//   - and offers them as five more pages of the stock key config (pages 11..15, the top list's 「插件」 items): the
+//   - and offers them as six more pages of the stock key config (pages 11..16, the top list's 「插件」 items): the
 //     stock rows, the stock 「按下新键」 dialog and the stock conflict check within a page (a key taken by another row of
 //     the page swaps), the stock 「恢复默认」 (the slots' defaults). keyconfig_menu.h has the sites and the stubs.
 // The keyboard only: the stock pad pages are 11 fixed buttons without the d-pad or Start the plugins' pad buttons use;
@@ -50,7 +50,7 @@ constexpr hudtext::Tx kSlotText[]={
 };
 static_assert(sizeof(kSlotText)/sizeof(kSlotText[0])==static_cast<std::size_t>(kb::kSlotCount),"a label for every slot");
 constexpr hudtext::Tx kPageText[kb::kPages]={hudtext::Tx::kbPageFoot,hudtext::Tx::kbPageVehicle,hudtext::Tx::kbPageAir,
-                                              hudtext::Tx::kbPageDreadnought,hudtext::Tx::kbPageSazabi};
+                                              hudtext::Tx::kbPageGround,hudtext::Tx::kbPageDreadnought,hudtext::Tx::kbPageSazabi};
 
 // The config's key of each of this plugin's slots (by the slot's ini name).
 struct KeyField { const wchar_t* ini; int Config::* key; DWORD Config::* dword; };
@@ -69,7 +69,7 @@ constexpr KeyField kFields[]={
     {L"PlayerJetBoostKey",&Config::playerJetBoostKey,nullptr},{L"PlayerJetBrakeKey",&Config::playerJetBrakeKey,nullptr},
     {L"PlayerJetTargetKey",&Config::playerJetTargetKey,nullptr},{L"PlayerJetFlareKey",&Config::playerJetFlareKey,nullptr},
     {L"PlayerJetGearKey",&Config::playerJetGearKey,nullptr},{L"DrillLaunchKey",&Config::drillLaunchKey,nullptr},
-    {L"ProteusModeKey",&Config::proteusModeKey,nullptr},{L"ProteusShieldKey",&Config::proteusShieldKey,nullptr},
+    {L"ProteusStanceKey",&Config::proteusModeKey,nullptr},{L"ProteusShieldKey",&Config::proteusShieldKey,nullptr},
     {L"ProteusSalvoKey",&Config::proteusSalvoKey,nullptr},
     {L"DreadnoughtBoostKey",&Config::dreadnoughtBoostKey,nullptr},{L"DreadnoughtDescendKey",&Config::dreadnoughtDescendKey,nullptr},
     {L"DreadnoughtStrafeLeftKey",&Config::dreadnoughtStrafeLeftKey,nullptr},
@@ -306,7 +306,7 @@ bool InstallKeyConfig() noexcept {
             return false;
         }
     // The stubs' code, then the readers of the table and the model's all-sets rows, then the dispatches, then the calls;
-    // the top list last: until then no page 11..15 can be opened, so a failure on the way leaves the stock menu working.
+    // the top list last: until then no page 11..16 can be opened, so a failure on the way leaves the stock menu working.
     bool ok=true;
     for(int i=0;i<6 && ok;++i)ok=edf::PatchCode(stubs+i*kStubSlot,zeros,code[i].b,code[i].n);
     unsigned char stockLea[kLeaSize];

@@ -30,6 +30,8 @@ constexpr std::size_t kLockList=0xC60,kLockCount=0xC68,kLocking=0xC70,kLockingCt
 constexpr std::size_t kLockFailed=0xCA0,kLockTime=0x6D4,kLockMost=0x6DC,kWeaponOwner=0x120;
 constexpr std::size_t kLockSoundTimer=0xCB8;
 constexpr std::size_t kNodeEntry=0x10,kNodeCtrl=0x18,kEntryPoint=0x10;
+// The entry is the lock-target registry's record (heli.cpp kTargetObject / kTargetAim: object +0x8, aim point +0x10).
+constexpr std::size_t kEntryObject=0x8;
 constexpr std::size_t kSeatWeapons=0xC8,kSeatWeaponCount=0xD8,kHolderWeapon=0x10;
 constexpr unsigned kSoldierVts[]={0x17CDF28,0x17D0FF8,0x17CF5B8,0x17CF100};   // Ranger, Wing Diver, Fencer, Air Raider
 constexpr std::size_t kClearLock=0x68FF60,kDropLocking=0x68FEE0,kCancelLocking=0x695150;
@@ -186,6 +188,17 @@ int WeaponLock(const unsigned char* w,float* point,float* progress) noexcept {
         return 1;
     }
     return 0;
+}
+
+const void* WeaponLockObject(const unsigned char* w) noexcept {
+    if(!w || !Readable(w+kLockList,0x48))return nullptr;
+    const void* got=nullptr;
+    EachLock(w,[&](const unsigned char* node) {
+        if(got || !Live(At<const unsigned char*>(node,kNodeCtrl)))return;
+        const auto entry=At<const unsigned char*>(node,kNodeEntry);
+        if(Readable(entry,kEntryObject+8))got=At<const void*>(entry,kEntryObject);
+    });
+    return got;
 }
 
 void ClearWeaponLock(unsigned char* w) noexcept {

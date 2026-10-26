@@ -11,6 +11,7 @@
 //   keybind_test <EDF6VehicleCrew.ini> <EDF6AutoTurret.ini>
 #include "edf/keybind.h"
 #include "keyconfig_menu.h"
+#include "pad_hold.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -132,7 +133,7 @@ std::vector<Bind> Binds() {
 // (docs/feedback-2026-10-25-keybinds.md) waits on §3.3, or the two are meant to go together. A new pair fails here.
 const char* const kKnown[]={
     // the common page's Shotcut T / Chat Ctrl / VoiceChat V / RideRescue E against the plugins' (plan §2 #17, now seen)
-    "stock Shotcut|NpcFormationKey","stock Shotcut|VehicleSecondarySwitchKey","stock Shotcut|ProteusModeKey",
+    "stock Shotcut|NpcFormationKey","stock Shotcut|VehicleSecondarySwitchKey",
     "stock VoiceChat|FirstPersonKey","stock VoiceChat|GunshipGunnerKey","stock VoiceChat|SazabiMeleeKey",
     "stock Chat|PlayerJetBrakeKey","stock Chat|DreadnoughtDescendKey","stock Chat|SazabiDescendKey",
     "stock RideRescue|DreadnoughtStrafeRightKey","stock RideRescue|SazabiCannonKey",
@@ -140,7 +141,6 @@ const char* const kKnown[]={
     // in a vehicle: the plugins' own across pages
     "FirstPersonKey|GunshipGunnerKey",          // plan §2 #8: V released / held (KeyTaken)
     "FirstPersonKey|SazabiMeleeKey",            // plan §2 #8
-    "VehicleSecondarySwitchKey|ProteusModeKey", // plan §2 #4, §3.3 A (ProteusModeKey to G) waits on the user
     "PlayerJetSwitchKey|DrillLaunchKey",        // R: the drill tank's launch and its stores (both on R since the drill's launch)
     "PlayerJetSwitchKey|SazabiFunnelKey",       // R: the family 「武器切换」 (plan §3.2)
     "FreeLookKey|stock TanksAttack2",           // the middle button: the stock vehicles' second weapon vs free look (§1.2)
@@ -220,7 +220,7 @@ void Stubs() {
             if(ins[k].kind==6)stack-=static_cast<int>(ins[k].imm);
         }
         Check(jcc.size()==3 && jcc[0]==base+d.back && jcc[1]==base+d.def && jcc[2]==base+d.def,
-              n + ": pages 0..10 to the stock jump table, outside 11..15 the stock default");
+              n + ": pages 0..10 to the stock jump table, outside 11..16 the stock default");
         Check(!ins.empty() && ins.back().kind==2 && ins.back().target==base+d.join,n + ": the plugin's page to the stock join");
         Check(stack==0 && aligned,n + ": its stack moves balanced, each call with aligned shadow space");
         const int want[]={0,0,1,2,1,1};
@@ -262,7 +262,7 @@ void Stubs() {
     const unsigned char stockLea[km::kLeaSize]={0x48,0x8D,0x05,1,2,3,4};
     Check(km::LeaTo(0x7FF600000000ull,stockLea,0x7FF600001007ull,lea) && lea[0]==0x48 && lea[2]==0x05 && lea[3]==0x00 && lea[4]==0x10,
           "a lea pointed at the new table");
-    Check(km::kSyncedRowsOurs[2]==km::kLastPage-5,"the all-sets rows: 5..15");
+    Check(km::kSyncedRowsOurs[2]==km::kLastPage-5,"the all-sets rows: 5..16");
 }
 
 // The store's helpers on a fake store.
@@ -283,6 +283,18 @@ void Store() {
     Check(kb::SlotVk(store.data(),0x53)==0,"a code no menu writes: no key");
     Check(*kb::SlotPtr(store.data(),1,0,0x53)==0,"player 1 untouched");
 }
+// The jets' gear on the d-pad down, held (plan §3.3 D): a tap is nothing, a hold one toggle's edge.
+void PadHold() {
+    float sec=0.0f;
+    bool any=false;
+    for(int f=0;f<5;++f)any=any || crew::HeldLong(true,1.0f/60.0f,&sec,crew::kGearPadHoldSec);
+    any=any || crew::HeldLong(false,1.0f/60.0f,&sec,crew::kGearPadHoldSec);
+    Check(!any && sec==0.0f,"a tap of the gear's pad button: nothing, the time reset");
+    int first=-1;
+    for(int f=0;f<60;++f)if(crew::HeldLong(true,1.0f/60.0f,&sec,crew::kGearPadHoldSec) && first<0)first=f;
+    Check(first>=23 && first<=25,"held: true from 0.4 s on (frame " + std::to_string(first) + ")");
+    Check(crew::HeldLong(true,1.0f/60.0f,&sec,crew::kGearPadHoldSec),"...and while still held (one edge for the toggle)");
+}
 }  // namespace
 
 int main(int argc,char** argv) {
@@ -293,6 +305,7 @@ int main(int argc,char** argv) {
     Matrix();
     Stubs();
     Store();
+    PadHold();
     std::printf("%d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }

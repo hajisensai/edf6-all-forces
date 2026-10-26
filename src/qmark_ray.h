@@ -42,4 +42,24 @@ inline TurretPress TurretMarkPress(bool lockOwns,bool pick) noexcept {
 }
 // ...and the mark follows the lock: a lock new since the one last followed (`followed`), not already the mark, is marked.
 inline bool MarkLock(const void* lock,const void* followed,bool marked) noexcept { return lock && lock!=followed && !marked; }
+// A press of the mark key by the seat the player holds (plan-2026-10-25-keybinds.md §3.3 B / C):
+//   - a Dreadnought's bridge on the keyboard whose strafe keys include the mark key (`bridgeClaims`): the bridge holds
+//     the key (Q / E strafe, as the map's Q / E turn), the mark yields: nothing;
+//   - at the stick of one of the plugin's aircraft (`atStick`): the same key is its target key (the next target), so the
+//     press waits for the lock (markLock: JetMarkDue), never lets a mark go and never sends to a ground point (a miss at
+//     its speed is nearly always a slip);
+//   - anywhere else: the press as ever (an enemy toggled, else the ground point).
+enum class SeatPress { normal, none, markLock };
+inline SeatPress SeatMarkPress(bool bridgeClaims,bool atStick) noexcept {
+    return bridgeClaims ? SeatPress::none : atStick ? SeatPress::markLock : SeatPress::normal;
+}
+// A press at an aircraft's stick waiting (kJetMarkWaitMs at most): what to mark now. `from` the target locked at the
+// press (the one the target key cycles away from), `locked` the lock now, `expired` the wait over: the new lock once it
+// is there; at the wait's end the lock it kept (one target in the cone: the cycle came back to it); nothing while there
+// is no lock or it is already the mark (`marked`).
+constexpr unsigned kJetMarkWaitMs=2500;
+inline const void* JetMarkDue(const void* from,const void* locked,bool expired,bool marked) noexcept {
+    if(!locked || marked)return nullptr;
+    return locked!=from || expired ? locked : nullptr;
+}
 }  // namespace crew::qmark

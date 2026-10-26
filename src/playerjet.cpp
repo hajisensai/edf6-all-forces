@@ -33,6 +33,7 @@
 // Every other aircraft of the plugin (the NPC jets, carriers, drones, the gunship, the bombers: playerjet_kinds.h) is
 // boarded and flown through this same record and these steps; what is theirs alone is in playerjet_board.inc.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
+#include "pad_hold.h"
 #include "body506.h"
 #include "lockon.h"
 #include "edf/weapon.h"
@@ -243,6 +244,8 @@ struct PJet {
     float impact[3];
     bool targetHeld;             // the target key / X down last frame
     int lock;                    // the picked store's lock (WeaponLock), for the cockpit
+    const unsigned char* lockWeapon; // ...and the store's weapon it is of (the Q mark marks its target: PlayerJetMarkTarget)
+    float gearPadSec;            // the gear's pad buttons held so far (s; PilotGear)
     float lockAt[3],lockProgress;
     bool stall;                  // ...and whether all its wing gives is too little to hold its path (kStallWarn)
     float stallShare;            // ...the share of all its wing gives its path needs, kStallWarn over (>= 1: stall)
@@ -1066,7 +1069,7 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     Store st[kMostStores];
     const int real=ReadStores(v,st,j.board ? kMostStores-SpecialRoom(j) : kMostStores);
     const int n=real+SpecialStore(j,v,st+real);   // the aircraft's own weapons as more stores (playerjet_board.inc)
-    j.stores=n;j.bomb=j.hasImpact=false;j.lock=0;
+    j.stores=n;j.bomb=j.hasImpact=false;j.lock=0;j.lockWeapon=nullptr;
     j.burden=BurdenOf(static_cast<float>(j.kind->mark),st,real);
     if(n==0){ForgetAircraftPayload(v);return;}   // no clickable aircraft stores
     if(j.store>=n || j.store<0)j.store=0;
@@ -1088,6 +1091,7 @@ void Stores(PJet& j,unsigned char* v,const Stick& s,const float* pos) noexcept {
     const bool guided=st[j.store].weapon && (st[j.store].spec->role==StoreRole::air || st[j.store].spec->role==StoreRole::ground);
     if(next && guided){NextLockTarget(st[j.store].weapon);Log("PJET v=%p target: the next one",v);}
     j.lock=guided ? WeaponLock(st[j.store].weapon,j.lockAt,&j.lockProgress) : 0;
+    j.lockWeapon=guided ? st[j.store].weapon : nullptr;
     audio::LockTone(j.lock,j.lockProgress);
     // Being locked on (the user, 2026-10-05: "being locked on should sound a warning too"): a missile homing on it
     // (its lock point within kThreatRadius), else an enemy jet's missile lock on it.
@@ -1652,11 +1656,17 @@ void AutoFly(PJet& j,unsigned char* v,const float* pos,float dt,ULONGLONG ms) no
     JetFlames(v,j.throttle,j.throttle>0.95f,ms);
 }
 
-// The landing gear (gear.cpp PlayerGear): the gear key (keyboard and mouse) or the pad's gear button toggles it.
+// The landing gear (gear.cpp PlayerGear): the gear key (keyboard and mouse), or on a pad its XInput buttons (the d-pad down
+// by default: the seat's button word has no d-pad) held kGearPadHoldSec, toggles it (plan §3.3 D: L3 is the free look's).
 void PilotGear(PJet& j,unsigned char* v,float dt) noexcept {
-    const unsigned char* seat=SeatAt(v,0);
-    const bool held=j.keys ? KeyDown(Cfg().playerJetGearKey)
-                           : (At<std::uint16_t>(seat,kSeatButtons)&static_cast<std::uint16_t>(Cfg().playerJetGearButton))!=0;
+    bool held=false;
+    if(j.keys){held=KeyDown(Cfg().playerJetGearKey);j.gearPadSec=0.0f;}
+    else {
+        const std::uint16_t mask=static_cast<std::uint16_t>(Cfg().playerJetGearPad);
+        std::uint16_t buttons=0;std::uint8_t lt=0,rt=0;
+        const bool down=mask && !MapHoldsKeys() && MapPadState(&buttons,&lt,&rt) && (buttons&mask)==mask;
+        held=HeldLong(down,dt,&j.gearPadSec,kGearPadHoldSec);
+    }
     PlayerGear(v,held,j.keys,j.phase==Phase::air,Len(j.vel),j.clear,j.climb,dt);
 }
 // Any of the plugin's other aircraft under the player (boarding, a rotor craft's flight, the special stores, the hail).
@@ -2053,6 +2063,27 @@ void PlayerJetLaunched(unsigned char* v) noexcept {
 bool IsPlayerJet(const void* vehicle) noexcept {
     __try { return BodyOf(vehicle)==PluginBody::playerJet && KindOf(static_cast<const unsigned char*>(vehicle))!=nullptr; }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool PlayerRotorCraft(const void* vehicle) noexcept {
+    __try {
+        const pjet::Boardable* row=vehicle ? BoardRowOf(static_cast<const unsigned char*>(vehicle)) : nullptr;
+        return row && row->frame==pjet::Airframe::rotor;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool PlayerJetMarkTarget(const unsigned char* human,const void** object,float* at) noexcept {
+    *object=nullptr;
+    __try {
+        for(const PJet& j:jets) {
+            if(!j.vehicle || !Live(j) || SeatCount(j.vehicle)==0)continue;
+            const unsigned char* seat=SeatAt(j.vehicle,0);
+            if(SeatRider(seat)!=Rider::player || At<const unsigned char*>(seat,kSeatRider)!=human)continue;
+            if(j.lock==2 && j.lockWeapon){*object=WeaponLockObject(j.lockWeapon);std::memcpy(at,j.lockAt,12);}
+            return true;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){*object=nullptr;}
+    return false;
 }
 
 bool PlayerJetCraft(const void* vehicle) noexcept {

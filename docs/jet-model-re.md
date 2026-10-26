@@ -464,7 +464,7 @@ SetLinearVelocity 写多少都没用，Havok 在积分时夹到 200：18:58 那�
 
 - 每帧把每条腿的局部矩阵写成 `Rx(at × kLegUp) × bind`（`at` 0 放下 … 1 收起），和舵面一样；模型里找不到三根骨骼就什么都不写。
 - 顺序：收起时前起落架先动、主起落架 0.6 / 0.9 s 后跟上；放下时主起落架先动；每条腿 2.5 s。
-- 玩家：`PlayerJetGearKey`（G）/ `PlayerJetGearButton`（0x40 = L3）切换；地面（不在 `Phase::air`）上不能收起。放下时阻力加干净构型寄生阻力的 1.5 倍；`Touch` 时没放下锁好 = 机腹迫降（`Crash` 的伤害，然后 `Phase::rolling`，`Ground` 里 10 m/s² 减速、无推力、无转向、不能起飞）。登机时在地面 = 放下，接机的飞机飞来时收起。
+- 玩家：`PlayerJetGearKey`（G）/ `PlayerJetGearPadButton`（XInput 位，默认 0x0002 十字键下，按住 0.4 秒；2026-10-26 前是座位位 0x40 = L3）切换；地面（不在 `Phase::air`）上不能收起。放下时阻力加干净构型寄生阻力的 1.5 倍；`Touch` 时没放下锁好 = 机腹迫降（`Crash` 的伤害，然后 `Phase::rolling`，`Ground` 里 10 m/s² 减速、无推力、无转向、不能起飞）。登机时在地面 = 放下，接机的飞机飞来时收起。
 - NPC：`jet_flight.cpp Wing` 里每帧 `NpcGear`：低于 60 m 且慢于 70 m/s 放下，否则收起（第一次见到直接到位）。
 - 座舱：`hud.cpp GearPanel`（在 `Cockpit` 之后一行调用），数据经 `GearHudLatest`（读写锁保护的一份拷贝）从游戏线程传到绘制线程。
 

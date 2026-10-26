@@ -27,6 +27,8 @@ ULONGLONG GameMs() noexcept{return now;}
 bool GamePaused() noexcept{return paused;}
 bool MapHoldsKeys() noexcept{return map;}
 bool IsSazabi(const void*) noexcept{return sazabi;}
+bool rotor=false;
+bool PlayerRotorCraft(const void*) noexcept{return rotor;}
 bool HumanOnFoot(const unsigned char*) noexcept{return onFoot;}
 unsigned char* PlayerHuman() noexcept{return human;}
 void Log(const char*,...) noexcept{}
@@ -106,6 +108,11 @@ int main(){
     check(!look.offered,"existing Sazabi lock binding remains reserved");
     config.freeLookButton=0x20;++frame;{VehicleLookInput input(vehicle);}
     check(look.offered,"a distinct binding enables Sazabi observation");
+    sazabi=false;rotor=true;config.freeLookButton=0x40;++frame;{VehicleLookInput input(vehicle);}
+    check(!look.offered,"a rotor craft on a pad: L3 is its descend, no free look there (plan §3.3 D)");
+    config.freeLookButton=0x20;++frame;{VehicleLookInput input(vehicle);}
+    check(look.offered,"...another free look button: offered");
+    rotor=false;sazabi=true;
     // A turret the turret camera places in third person: its free look is the camera's own (it orbits on the rig and
     // keeps the held point's circle, hud.cpp TurretMark); this one takes neither the stick nor the camera (2026-10-21).
     turretLook=true;++frame;

@@ -140,6 +140,19 @@ void RayChecks() {
     Check(qmark::MarkLock(&b,&a,false),"a press cycling the lock on: the new one is marked");
     Check(!qmark::MarkLock(&b,&a,true),"already the mark: nothing (no cue twice)");
     Check(!qmark::MarkLock(nullptr,&a,false),"the lock let go: the mark stays");
+    Check(qmark::SeatMarkPress(true,false)==qmark::SeatPress::none && qmark::SeatMarkPress(true,true)==qmark::SeatPress::none,
+          "the Dreadnought's bridge holding the key (strafe): the mark yields (§3.3 B)");
+    Check(qmark::SeatMarkPress(false,true)==qmark::SeatPress::markLock,"at an aircraft's stick: the press waits for its lock (§3.3 C)");
+    Check(qmark::SeatMarkPress(false,false)==qmark::SeatPress::normal,"anywhere else: the press as ever");
+    {
+        int was=0,now=0;
+        Check(qmark::JetMarkDue(&was,&now,false,false)==&now,"the new lock after the cycle: marked");
+        Check(qmark::JetMarkDue(&was,&was,false,false)==nullptr,"still the old lock: waits");
+        Check(qmark::JetMarkDue(&was,&was,true,false)==&was,"the wait over and the lock kept (one target): that one marked");
+        Check(qmark::JetMarkDue(&was,nullptr,true,false)==nullptr,"no lock: nothing (no ground point, no squad sent)");
+        Check(qmark::JetMarkDue(nullptr,&now,false,true)==nullptr,"already the mark: never let go, nothing");
+        Check(qmark::JetMarkDue(nullptr,&now,false,false)==&now,"no lock at the press, one now: marked");
+    }
     Check(qmark::TurretMarkPress(false,true)==qmark::TurretPress::toggle,"auto-aim off: the lock rule's pick is marked (or let go)");
     Check(qmark::TurretMarkPress(true,true)==qmark::TurretPress::none,"the lock's press with a pick: the lock takes it, the mark follows");
     Check(qmark::TurretMarkPress(false,false)==qmark::TurretPress::point && qmark::TurretMarkPress(true,false)==qmark::TurretPress::point,

@@ -4,7 +4,7 @@ What the key-binding plan (docs/plan-2026-10-25-keybinds.md) builds on: the HQ k
 has 11 compiled pages with immediate row counts and compiled row labels; each page's actions come from a fixed table of
 11 x 13 action bytes (0x4E ends a page); the bindings themselves live in the input manager, one int32 per
 (player, class, action byte), 0xFF actions per class, so the actions the stock game uses (up to 0x4D) leave spare slots.
-Stage 3 (the plugin's pages 11..15 in that menu, src/keyconfig.cpp): the game codes and their virtual keys, the stock
+Stage 3 (the plugin's pages 11..16 in that menu, src/keyconfig.cpp): the game codes and their virtual keys, the stock
 defaults, COMMON.CFG saving the whole store raw (the spare slots persist), the runtime binder reading no slot past 0x4E,
 src/keyconfig_signatures.inc against the DLL, and what each patched site does (the six page dispatches and their joins,
 the page table's six readers, the model's all-sets rows, the redirected calls, the top list's items).
@@ -241,13 +241,13 @@ ok(rip(0x7CD9E0, 7) == 0x17F26B0 + 26, '0x7CD9E0: the common row alone (left on 
 b = ins(0x7CDE10, 0x3D)
 ok(b[0x7CDE36] == ('cmp', 'r9d, 2') and b[0x7CDE3C] == ('lea', 'eax, [r9 - 5]') and b[0x7CDE40] == ('cmp', 'eax, 5')
    and b[0x7CDE45] == ('mov', 'byte ptr [rcx + 0x10], 1') and b[0x7CDE26] == ('cmp', 'eax, 3'),
-   'the model: all sets for rows 2 and 5..10 (0x7CDE40 widened to 5..15); the class = page - 1 for pages 1..4, else 0')
+   'the model: all sets for rows 2 and 5..10 (0x7CDE40 widened to 5..16); the class = page - 1 for pages 1..4, else 0')
 b = ins(0x7CDD4C, 0x31)
 ok(b[0x7CDD56] == ('cmp', 'byte ptr [rdi + 0x10], bpl') and b[0x7CDD63] == ('call', '0xd5470') and b[0x7CDD77] == ('call', '0xd54b0'),
    'the assignment writes all sets (0xD5470) with the model\'s +0x10, else one (0xD54B0)')
 b = ins(0x7CD9B0, 0x30)
 ok(b[0x7CD9CA] == ('lea', 'eax, [r9 - 3]') and b[0x7CD9D7] == ('cmp', 'eax, 7'),
-   'the common-page check is rows 3..10 only: the plugin rows 11..15 are not held to it (keyconfig-re.md §7)')
+   'the common-page check is rows 3..10 only: the plugin rows 11..16 are not held to it (keyconfig-re.md §7)')
 ok(ins(0xD4BB0, 0x0B)[0xD4BB3] == ('cmp', 'r8d, 0xa'), 'the stock page defaults: pages 0..10 (the plugin\'s redirected)')
 # the top list and its items
 ok(ins(0x89304A, 0x0A)[0x89304D] == ('mov', 'r12d, 6'), 'the top list: six keyboard items')

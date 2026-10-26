@@ -99,7 +99,7 @@ inline constexpr int kSpotAction=0x1B;   // the common page's 「标记」 (Opti
 
 // --- The plugins' slots
 enum class Owner : unsigned char { crew, turret };
-inline constexpr int kFirstPage=11,kPages=5;   // the key config's pages 11..15 (the stock ones are 0..10)
+inline constexpr int kFirstPage=11,kPages=6;   // the key config's pages 11..16 (the stock ones are 0..10)
 inline constexpr int kMaxRows=12;              // a page's list: 13 bytes, the 0x4E end included (0x7CD2EA)
 struct Slot {
     unsigned char action;   // the store's slot, fixed forever (COMMON.CFG keeps it)
@@ -135,31 +135,33 @@ inline constexpr Slot kSlots[]={
     {0x62,12,8,Owner::crew,L"VehicleSecondarySwitchKey",0x54},
     {0x63,12,9,Owner::crew,L"GunshipGunnerKey",0x56},
     {0x64,12,10,Owner::crew,L"GunshipGatlingKey",0x02},
-    // page 13: the jets, the drill tank, the Proteus
+    // page 13: the jets
     {0x65,13,0,Owner::crew,L"PlayerJetBoostKey",0x10},
     {0x66,13,1,Owner::crew,L"PlayerJetBrakeKey",0x11},
     {0x67,13,2,Owner::crew,L"PlayerJetTargetKey",0x51},
     {0x68,13,3,Owner::crew,L"PlayerJetFlareKey",0x58},
     {0x69,13,4,Owner::crew,L"PlayerJetGearKey",0x47},
-    {0x6A,13,5,Owner::crew,L"DrillLaunchKey",0x52},
-    {0x6B,13,6,Owner::crew,L"ProteusModeKey",0x54},
-    {0x6C,13,7,Owner::crew,L"ProteusShieldKey",0x42},
-    {0x6D,13,8,Owner::crew,L"ProteusSalvoKey",0x02},
-    // page 14: the Dreadnought
-    {0x6E,14,0,Owner::crew,L"DreadnoughtBoostKey",0x10},
-    {0x6F,14,1,Owner::crew,L"DreadnoughtDescendKey",0x11},
-    {0x70,14,2,Owner::crew,L"DreadnoughtStrafeLeftKey",0x51},
-    {0x71,14,3,Owner::crew,L"DreadnoughtStrafeRightKey",0x45},
-    {0x72,14,4,Owner::crew,L"DreadnoughtHangarKey",0x48},
-    {0x73,14,5,Owner::crew,L"DreadnoughtAheadKey",0x02},
-    // page 15: the Sazabi
-    {0x74,15,0,Owner::crew,L"SazabiLockKey",0x04},
-    {0x75,15,1,Owner::crew,L"SazabiDashKey",0x10},
-    {0x76,15,2,Owner::crew,L"SazabiDescendKey",0x11},
-    {0x77,15,3,Owner::crew,L"SazabiFunnelKey",0x52},
-    {0x78,15,4,Owner::crew,L"SazabiCannonKey",0x45},
-    {0x79,15,5,Owner::crew,L"SazabiMeleeKey",0x56},
-    {0x7A,15,6,Owner::crew,L"SazabiGuardKey",0x42},
+    // page 14: the drill tank, the Proteus (its stance on G, the jets' gear key: the 形态 family, plan §3.3 A; so not
+    // on the jets' page, where one key is one row)
+    {0x6A,14,0,Owner::crew,L"DrillLaunchKey",0x52},
+    {0x6B,14,1,Owner::crew,L"ProteusStanceKey",0x47},
+    {0x6C,14,2,Owner::crew,L"ProteusShieldKey",0x42},
+    {0x6D,14,3,Owner::crew,L"ProteusSalvoKey",0x02},
+    // page 15: the Dreadnought
+    {0x6E,15,0,Owner::crew,L"DreadnoughtBoostKey",0x10},
+    {0x6F,15,1,Owner::crew,L"DreadnoughtDescendKey",0x11},
+    {0x70,15,2,Owner::crew,L"DreadnoughtStrafeLeftKey",0x51},
+    {0x71,15,3,Owner::crew,L"DreadnoughtStrafeRightKey",0x45},
+    {0x72,15,4,Owner::crew,L"DreadnoughtHangarKey",0x48},
+    {0x73,15,5,Owner::crew,L"DreadnoughtAheadKey",0x02},
+    // page 16: the Sazabi
+    {0x74,16,0,Owner::crew,L"SazabiLockKey",0x04},
+    {0x75,16,1,Owner::crew,L"SazabiDashKey",0x10},
+    {0x76,16,2,Owner::crew,L"SazabiDescendKey",0x11},
+    {0x77,16,3,Owner::crew,L"SazabiFunnelKey",0x52},
+    {0x78,16,4,Owner::crew,L"SazabiCannonKey",0x45},
+    {0x79,16,5,Owner::crew,L"SazabiMeleeKey",0x56},
+    {0x7A,16,6,Owner::crew,L"SazabiGuardKey",0x42},
 };
 inline constexpr int kSlotCount=static_cast<int>(sizeof(kSlots)/sizeof(kSlots[0]));
 inline constexpr int kFirstAction=0x4F;

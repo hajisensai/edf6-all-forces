@@ -56,6 +56,7 @@
 #include "pack_notice.h"
 #include "profile_sigs.h"
 #include "keyconfig.h"
+#include "pad_hold.h"
 
 namespace crew {
 unsigned char* image=nullptr;
@@ -256,7 +257,7 @@ void Validate(Config& n) noexcept {
     n.gunshipGatlingKey=static_cast<int>(FixInt("GunshipGatlingKey",n.gunshipGatlingKey,0,254));
     n.playerJetFlares=static_cast<int>(FixInt("PlayerJetFlares",n.playerJetFlares,0,99));
     n.playerJetGearKey=static_cast<int>(FixInt("PlayerJetGearKey",n.playerJetGearKey,0,254));
-    n.playerJetGearButton=static_cast<int>(FixInt("PlayerJetGearButton",n.playerJetGearButton,0,255));
+    n.playerJetGearPad=static_cast<int>(FixInt("PlayerJetGearPadButton",n.playerJetGearPad,0,0xFFFF));
     n.playerJetChuteCutKey=static_cast<int>(FixInt("PlayerJetChuteCutKey",n.playerJetChuteCutKey,0,254));
     Fix("PlayerJetMouseSpeed",n.playerJetMouseSpeed,0.1f,10.0f);
     Fix("SazabiWalk",n.sazabiWalk,1.0f,60.0f);
@@ -395,7 +396,7 @@ void Validate(Config& n) noexcept {
     Fix("DebugSpawnDistance",n.debugSpawnDistance,10.0f,500.0f);
     n.roomLoadoutKey=static_cast<int>(FixInt("RoomLoadoutKey",n.roomLoadoutKey,0,254));
     n.roomLoadoutButton=static_cast<int>(FixInt("RoomLoadoutButton",n.roomLoadoutButton,0,0xFFFF));
-    n.proteusModeKey=static_cast<int>(FixInt("ProteusModeKey",n.proteusModeKey,0,254));
+    n.proteusModeKey=static_cast<int>(FixInt("ProteusStanceKey",n.proteusModeKey,0,254));
     n.proteusModeButton=static_cast<int>(FixInt("ProteusModeButton",n.proteusModeButton,0,255));
     n.proteusShieldKey=static_cast<int>(FixInt("ProteusShieldKey",n.proteusShieldKey,0,254));
     n.proteusShieldButton=static_cast<int>(FixInt("ProteusShieldButton",n.proteusShieldButton,0,255));
@@ -473,7 +474,9 @@ void IgnoreRetired() noexcept {
     static const Retired kRetired[]={{L"HeliMoveGain",kGainsFixed},{L"HeliBrakeGain",kGainsFixed},{L"HeliClimbGain",kGainsFixed},
                                      {L"HeliHoverLearn",kGainsFixed},{L"HeliMousePitch","superseded by HeliMouseAim"},
                                      {L"DrillHeatSec","superseded by DrillOverheatSec (30 s by default: 12 s overheated too soon)"},
-                                     {L"FirstPersonEyeEase","superseded by FirstPersonViewHeightEase (the eye no longer follows the head's sway)"}};
+                                     {L"FirstPersonEyeEase","superseded by FirstPersonViewHeightEase (the eye no longer follows the head's sway)"},
+                                     {L"ProteusModeKey","superseded by ProteusStanceKey (G by default since 2026-10-26: the 形态 family with the landing gear)"},
+                                     {L"PlayerJetGearButton","superseded by PlayerJetGearPadButton (the d-pad down held, since 2026-10-26: L3 is the free look)"}};
     constexpr int kCount=static_cast<int>(sizeof(kRetired)/sizeof(kRetired[0]));
     static bool said[kCount]{};
     for(int i=0;i<kCount;++i) {
@@ -576,7 +579,7 @@ void LoadConfig() noexcept {
     n.gunshipGatlingKey=ReadInt(L"GunshipGatlingKey",static_cast<DWORD>(n.gunshipGatlingKey));
     n.playerJetFlares=ReadInt(L"PlayerJetFlares",static_cast<DWORD>(n.playerJetFlares));
     n.playerJetGearKey=ReadInt(L"PlayerJetGearKey",static_cast<DWORD>(n.playerJetGearKey));
-    n.playerJetGearButton=ReadInt(L"PlayerJetGearButton",static_cast<DWORD>(n.playerJetGearButton));
+    n.playerJetGearPad=ReadInt(L"PlayerJetGearPadButton",static_cast<DWORD>(n.playerJetGearPad));
     n.playerJetChuteCutKey=ReadInt(L"PlayerJetChuteCutKey",static_cast<DWORD>(n.playerJetChuteCutKey));
     n.playerJetCatch=ReadInt(L"PlayerJetCatch",n.playerJetCatch ? 1u : 0u)!=0;
     n.playerJetMouseSpeed=ReadFloat(L"PlayerJetMouseSpeed",n.playerJetMouseSpeed);
@@ -837,7 +840,7 @@ void LoadConfig() noexcept {
     n.seatSwitchOnline=ReadBool(L"SeatSwitchOnline",n.seatSwitchOnline);
     n.seatList=ReadBool(L"SeatList",n.seatList);
     n.proteus=ReadBool(L"ProteusRework",n.proteus);
-    n.proteusModeKey=ReadInt(L"ProteusModeKey",static_cast<DWORD>(n.proteusModeKey));
+    n.proteusModeKey=ReadInt(L"ProteusStanceKey",static_cast<DWORD>(n.proteusModeKey));
     n.proteusModeButton=ReadInt(L"ProteusModeButton",static_cast<DWORD>(n.proteusModeButton));
     n.proteusShieldKey=ReadInt(L"ProteusShieldKey",static_cast<DWORD>(n.proteusShieldKey));
     n.proteusShieldButton=ReadInt(L"ProteusShieldButton",static_cast<DWORD>(n.proteusShieldButton));
@@ -963,7 +966,7 @@ void LoadConfig() noexcept {
     Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d lockByView=%d turretAimHud=%d; warnings audio=%d voice=%d volume=%.2f",
         n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud,n.playerJetLockByView,n.turretAimHud,n.warnAudio,n.warnVoice,
         n.warnVolume);
-    Log("CONFIG playerJet gearKey=0x%X gearButton=0x%X",n.playerJetGearKey,n.playerJetGearButton);
+    Log("CONFIG playerJet gearKey=0x%X gearPad=0x%X (XInput bits, held %.1f s)",n.playerJetGearKey,n.playerJetGearPad,kGearPadHoldSec);
     Log("CONFIG vehicleSound=%d engine=%.2f turret=%.2f reload=%.2f gun=%.2f mg=%.2f missile=%.2f",n.vehicleSound,n.vehicleEngineVolume,
         n.vehicleTurretVolume,n.vehicleReloadVolume,n.vehicleGunVolume,n.vehicleMgVolume,n.vehicleMissileVolume);
     Log("CONFIG playerJetAll=%d hailKey=0x%X gunshipBoardGunner=%d gunnerKey=0x%X gatlingKey=0x%X",n.playerJetAll,n.playerJetHailKey,

@@ -232,6 +232,14 @@ bool AutoTurretSeat(edf::aimlink::TurretLockV1* t) noexcept {
     *t=edf::aimlink::TurretLockV1{sizeof(*t),turretAuto ? turretLockTarget : nullptr,0x51,turretAuto,turretKeys,turretPick,{0,0,20}};
     return turretSeat;
 }
+// The player at an aircraft's stick (playerjet.cpp PlayerJetMarkTarget) and its store's lock; at a Dreadnought's bridge
+// holding the mark key (dreadnought.cpp DreadnoughtBridgeClaims).
+bool jetStick=false,bridgeHolds=false;const void* jetLocked=nullptr;
+bool PlayerJetMarkTarget(const unsigned char*,const void** object,float* at) noexcept {
+    *object=jetStick ? jetLocked : nullptr;at[0]=at[1]=0.0f;at[2]=50.0f;
+    return jetStick;
+}
+bool DreadnoughtBridgeClaims(const unsigned char*,int) noexcept { return bridgeHolds; }
 // The teammates' marked enemies (qmark.cpp QMarkTeamEnemies: live, found in this world).
 const void* teamMarks[4]{};int teamMarkCount=0;
 int QMarkTeamEnemies(const void** out,int max) noexcept {
@@ -952,6 +960,25 @@ int main() {
         Expect(!NpcMarked() && cueOff==1,"a pad's player: the keyboard's Q is the mark's (the pick again: let go)");
         turretKeys=true;turretAuto=false;turretSeat=false;turretPick=nullptr;
         Put<void*>(human,kHumanVehicleCtrl,nullptr);markEnemy=nullptr;
+        ResetNpcAi();
+    }
+    // The bridge's strafe Q and an aircraft's target Q (plan-2026-10-25-keybinds.md §3.3 B / C).
+    {
+        Reset();mapHeld=false;rayOn=true;config.enabled=true;config.npcMarkKey=0x51;config.playerJetTargetKey=0x51;
+        unsigned char foeCtrl[0x10]{};Put<void*>(other,kSelfCtrl,foeCtrl);Put<long>(foeCtrl,8,1);Put<long>(foeCtrl,0xC,1);
+        auto press=[&]{markinput::down=true;NpcMarkFrame(human,false);markinput::down=false;NpcMarkFrame(human,false);};
+        markEnemy=other;bridgeHolds=true;cueOwn=cueOff=pointMarks=pointOrders=0;
+        press();
+        Expect(!NpcMarked() && pointMarks==0 && pointOrders==0,"the Dreadnought's bridge holds Q (strafe): no mark, no point, no order");
+        bridgeHolds=false;jetStick=true;jetLocked=nullptr;markEnemy=nullptr;
+        press();
+        Expect(!NpcMarked() && pointMarks==0 && pointOrders==0,"at an aircraft's stick with no lock: no ground point, no order");
+        jetLocked=other;NpcMarkFrame(human,false);
+        Expect(NpcMarked() && cueOwn==1,"...the lock the target key's cycle brings: marked, once");
+        press();
+        for(int f=0;f<3;++f)NpcMarkFrame(human,false);
+        Expect(NpcMarked() && cueOff==0,"...pressed again on the same lock: never let go");
+        jetStick=false;jetLocked=nullptr;
         ResetNpcAi();
     }
     // The teammates' marks are the NPCs' as this machine's are (the user, 2026-10-10: "npc不是统一的吗，都去打"): each NPC

@@ -178,7 +178,7 @@ EDF.dll TimeDateStamp `0x678CCB46`，下列地址都是 RVA；纯静态分析（
 - `Air`：阻力的寄生项加上 `GearDragShare`（放下时 1.5 倍干净构型）。
 - `Touch`：着陆条件都满足但 `GearDown` 为假 → `BellyLanding`（`Crash` 的伤害，转为滑行）。
 - `Ground`：`GearDown` 为假时（机腹着地）只减速（10 m/s²），不转向、不起飞。
-- `PilotGear`：读键（`PlayerJetGearKey`）/ 手柄位（`PlayerJetGearButton`，座位按键位 `seat+0x2E8`，docs/stores-re.md §4），交给 `gear.cpp PlayerGear`；地面上收起被拒绝。
+- `PilotGear`：读键（`PlayerJetGearKey`）/ 手柄（`PlayerJetGearPadButton`，XInput 位经 `map.cpp MapPadState`——座位按键位没有十字键——按住 `kGearPadHoldSec` 0.4 秒，`src/pad_hold.h`），交给 `gear.cpp PlayerGear`；地面上收起被拒绝。
 
 ## 10. 插件的其它飞机也能开（2026-10-05，`src/playerjet_kinds.h`、`src/playerjet_board.inc`）
 

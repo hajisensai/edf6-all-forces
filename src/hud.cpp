@@ -2122,9 +2122,10 @@ void GearPanel(void* drawer,void* ctx,Text* text,float width,float height,float 
     for(int i=0;i<kGearLegs;++i){down=down && g.at[i]<=0.0f;up=up && g.at[i]>=1.0f;}
     // The lines first: the panel is as wide as they need (WEIGHT ON WHEELS, or a language's longer words, ran past it).
     Line& state=lines[(*at)++];
-    wchar_t key[32]=L"L3";
+    wchar_t key[32]{};
     if(g.keys)KeyName(Cfg().playerJetGearKey,key,32);
-    else if(Cfg().playerJetGearButton!=0x40)std::swprintf(key,32,Tr(Tx::padButton),Cfg().playerJetGearButton);
+    else if(Cfg().playerJetGearPad==0x0002)wcscpy_s(key,Tr(Tx::gearPadHold));   // the d-pad down, held (playerjet.cpp PilotGear)
+    else std::swprintf(key,32,Tr(Tx::padButton),Cfg().playerJetGearPad);
     Format(state,Tr(Tx::gearState),Tr(down ? Tx::gearDown : up ? Tx::gearUp : Tx::gearTransit),key);
     state.scale=kLineScale*0.85f;state.rgba=down ? kGreen : up ? kWhite : kAmber;
     state.w=state.h=0.0f;

@@ -1,4 +1,4 @@
-// The pure part of src/keyconfig.cpp: the plugin's pages 11..15 put into the game's own key config (HUiHQKeyConfig,
+// The pure part of src/keyconfig.cpp: the plugin's pages 11..16 put into the game's own key config (HUiHQKeyConfig,
 // docs/keyconfig-re.md §7): the sites it patches, the extended page table and the stubs. No Windows, no game:
 // tests/keyconfig_menu_test.cpp builds every stub and checks its jumps; tests/keyconfig_native_audit.py checks every
 // site against EDF.dll (TimeDateStamp 0x678CCB46).
@@ -7,7 +7,7 @@
 // label and element ids (0x897B9D), its texts (0x8980CC), the dialog a row opens (0x898FBD) and the values the frame
 // refreshes (0x89AD47). Each of these six is a `cmp page, 10; ja default; jump table` whose default is no page at all
 // (an empty page, or registers left stale); each `cmp; ja` is replaced by a jump to a stub that runs the stock jump table
-// for pages 0..10, the plugin's code for pages 11..15, the stock default for any other.
+// for pages 0..10, the plugin's code for pages 11..16, the stock default for any other.
 #pragma once
 #include "edf/keybind.h"
 #include <cstddef>
@@ -44,12 +44,12 @@ static_assert(sizeof(kPageRowCode)==kPageRow.size && sizeof(kRowCountCode)==kRow
               "each site's size is its stock cmp + ja");
 
 // --- The page table (0x17F26B0: 13 bytes a row, 0x4E ends a row's actions): read through six lea's (7 bytes each, a
-// rip disp32 at +3), which are pointed at a copy with rows 11..15 added. 0x7CD9E0's lea of row 2 alone stays.
+// rip disp32 at +3), which are pointed at a copy with rows 11..16 added. 0x7CD9E0's lea of row 2 alone stays.
 inline constexpr std::size_t kTable=0x17F26B0,kRowBytes=13,kStockRows=11,kRows=kStockRows+kb::kPages;
 inline constexpr std::size_t kTableLeas[]={0x7CCE8B,0x7CCF13,0x7CD2EE,0x7CDA96,0x7CDB34,0x7CDC51};
 inline constexpr std::size_t kLeaSize=7,kLeaDisp=3;
 // The model's all-sets flag (0x7CDE10: rows 2 and 5..10 write the four class sets, 0xD5470): `cmp eax,5` of
-// `lea eax,[r9-5]` widened to rows 5..15.
+// `lea eax,[r9-5]` widened to rows 5..16.
 inline constexpr std::size_t kSyncedRows=0x7CDE40;
 inline constexpr unsigned char kSyncedRowsCode[]={0x83,0xF8,0x05};
 inline constexpr unsigned char kSyncedRowsOurs[]={0x83,0xF8,static_cast<unsigned char>(kLastPage-5)};
@@ -102,7 +102,7 @@ struct Code {
 };
 inline constexpr unsigned char kJb=0x82,kJae=0x83,kJbe=0x86;
 
-// The common head: the stock cmp and its jump table for 0..10, the default outside 11..15.
+// The common head: the stock cmp and its jump table for 0..10, the default outside 11..16.
 inline void Head(Code& c,const Dispatch& d,std::uint64_t base) noexcept {
     const unsigned char limit=d.reg==1 ? 9 : 10;
     switch(d.reg) {

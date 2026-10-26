@@ -45,6 +45,7 @@ HUDTEXT(rwsElevation,L"EL %+03d",L"俯仰 %+03d",L"俯仰 %+03d",L"俯仰 %+03d"
 // --- Aim marks and cues ---
 HUDTEXT(launcherLine,L"%d m   %.1f s   ELEV %d",L"%d m   %.1f s   仰角 %d",L"%d m   %.1f s   仰角 %d",L"%d m   %.1f s   仰角 %d")
 HUDTEXT(padButton,L"button 0x%X",L"手柄键 0x%X",L"手把鍵 0x%X",L"ボタン 0x%X")
+HUDTEXT(gearPadHold,L"D-pad down hold",L"十字下长按",L"十字下長按",L"十字下長押し")
 HUDTEXT(highCamOn,L"HIGH CAM ON [%ls]",L"俯瞰视角 开 [%ls]",L"俯瞰視角 開 [%ls]",L"俯瞰カメラ オン [%ls]")
 HUDTEXT(highCamOff,L"HIGH CAM [%ls]",L"俯瞰视角 [%ls]",L"俯瞰視角 [%ls]",L"俯瞰カメラ [%ls]")
 HUDTEXT(sightRange,L"LRF %d m",L"测距 %d m",L"測距 %d m",L"測距 %d m")
@@ -1095,7 +1096,8 @@ HUDTEXT(dnKeysAhead,L"  hold %ls look ahead",L"  按住 %ls 前视",L"  按住 %
 // --- The game's key config: the plugin's pages and rows (keyconfig.cpp; common/edf/keybind.h kSlots, in its order) ---
 HUDTEXT(kbPageFoot,L"Plugin: on foot & general",L"插件：步行与通用",L"外掛：步行與通用",L"プラグイン：歩兵・共通")
 HUDTEXT(kbPageVehicle,L"Plugin: vehicles",L"插件：载具通用",L"外掛：載具通用",L"プラグイン：ビークル共通")
-HUDTEXT(kbPageAir,L"Plugin: aircraft, drill tank, Proteus",L"插件：战机/钻头战车/普罗透斯",L"外掛：戰機/鑽頭戰車/普羅透斯",L"プラグイン：戦闘機・ドリル戦車・プロテウス")
+HUDTEXT(kbPageAir,L"Plugin: aircraft",L"插件：战机",L"外掛：戰機",L"プラグイン：戦闘機")
+HUDTEXT(kbPageGround,L"Plugin: drill tank, Proteus",L"插件：钻头战车/普罗透斯",L"外掛：鑽頭戰車/普羅透斯",L"プラグイン：ドリル戦車・プロテウス")
 HUDTEXT(kbPageDreadnought,L"Plugin: Dreadnought",L"插件：无畏舰",L"外掛：無畏艦",L"プラグイン：ドレッドノート")
 HUDTEXT(kbPageSazabi,L"Plugin: Sazabi",L"插件：沙扎比",L"外掛：沙薩比",L"プラグイン：サザビー")
 HUDTEXT(kbFormation,L"Squad formation",L"小队队形",L"小隊隊形",L"分隊の隊形")
