@@ -121,7 +121,7 @@ std::vector<Bind> Binds() {
     stock("stock HeliAttack1",0x0C,kHeli,7);stock("stock HeliAttack2",0x0E,kHeli,7);stock("stock HeliFlight",0x63,kHeli,7);
     // the plugins' slots and where each is read (docs/plan-2026-10-25-keybinds.md §1)
     const unsigned ctx[kb::kSlotCount]={
-        kFoot,kFoot,kFoot,kFoot|kVehicles,kFoot|kVehicles,kFoot|kVehicles,kFoot|kVehicles,kFoot|kVehicles,kRoom,kFoot,kTurret,
+        kFoot,kFoot,kFoot,kFoot|kVehicles,kFoot|kVehicles,kFoot|kVehicles,kRoom,kFoot,kTurret,
         kVehicles&~kSazabi,kGround,kGround|kTurret,kGround|kTurret,kGround|kTurret,kVehicles,kVehicles,kVehicles,kGround|kProteus,kFoot,kGunship,
         kJet,kJet|kHeli,kJet,kJet,kJet,kDrill,kProteus,kProteus,kProteus,
         kDread,kDread,kDread,kDread,kDread,kDread,
@@ -286,7 +286,7 @@ void Store() {
     Check(kb::MarkerEnd(0)==kb::kFirstAction && kb::MarkerEnd(0x31564B42)==kb::kFirstAction && kb::MarkerEnd(-1)==kb::kFirstAction,
           "no tag (a fresh store's 0, anything else): nothing seeded");
     Check(kb::MarkerEnd(kb::MarkerOf(0x70))==0x70,"the marker says where the seeding got to");
-    Check(kb::OwnerEnd(kb::Owner::crew)==kb::kSlots[kb::kSlotCount-1].action+1 && kb::OwnerEnd(kb::Owner::turret)==0x5A,
+    Check(kb::OwnerEnd(kb::Owner::crew)==kb::kSlots[kb::kSlotCount-1].action+1 && kb::OwnerEnd(kb::Owner::turret)==0x58,
           "each owner's end: one past its highest slot");
     Check(kb::SeededEnd(store.data(),kb::Owner::crew)==kb::OwnerEnd(kb::Owner::crew),"seeded: the marker at the crew's end");
     // A store seeded by an older catalog (up to 0x70), a key the player changed since: only the slots from 0x70 on are
@@ -310,7 +310,7 @@ void Store() {
           "the marker moved to the crew's end");
     Check(kb::Seed(old.data(),kb::Owner::crew,[](const kb::Slot&){ return 'Z'; })==0 && kb::SlotVk(old.data(),0x53)=='P',
           "seeded through: a second seed writes nothing");
-    Check(kb::Seed(old.data(),kb::Owner::turret,[](const kb::Slot&){ return 'J'; })==1 && kb::SlotVk(old.data(),0x59)=='J' &&
+    Check(kb::Seed(old.data(),kb::Owner::turret,[](const kb::Slot&){ return 'J'; })==1 && kb::SlotVk(old.data(),0x57)=='J' &&
           kb::Seeded(old.data(),kb::Owner::turret) && kb::SlotVk(old.data(),0x53)=='P',
           "the turret's marker its own: its one slot seeded, the crew's left alone");
 }

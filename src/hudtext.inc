@@ -1119,8 +1119,6 @@ HUDTEXT(kbHail,L"Call the nearest aircraft",L"呼叫最近的飞机",L"呼叫最
 HUDTEXT(kbFirstPerson,L"First person view",L"第一人称视角",L"第一人稱視角",L"一人称視点")
 HUDTEXT(kbMap,L"Map",L"地图",L"地圖",L"マップ")
 HUDTEXT(kbDamageStats,L"Damage statistics",L"伤害统计",L"傷害統計",L"ダメージ統計")
-HUDTEXT(kbCallPrev,L"Previous support call",L"上一个支援呼叫",L"上一個支援呼叫",L"前の支援要請")
-HUDTEXT(kbCallNext,L"Next support call",L"下一个支援呼叫",L"下一個支援呼叫",L"次の支援要請")
 HUDTEXT(kbRoomLoadout,L"Support loadout menu",L"支援战前配置",L"支援戰前配置",L"支援の出撃前設定")
 HUDTEXT(kbChuteCut,L"Cut the parachute",L"切断降落伞",L"切斷降落傘",L"パラシュート切り離し")
 HUDTEXT(kbAutoAim,L"Turret auto-aim on/off",L"炮塔自动瞄准开关",L"砲塔自動瞄準開關",L"砲塔オートエイム切替")

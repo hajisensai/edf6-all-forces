@@ -39,7 +39,7 @@ using Signature=CodeSignature;
 // The label of each slot, in kSlots' order, and each page's name.
 constexpr hudtext::Tx kSlotText[]={
     hudtext::Tx::kbFormation,hudtext::Tx::kbPickup,hudtext::Tx::kbHail,hudtext::Tx::kbFirstPerson,hudtext::Tx::kbMap,
-    hudtext::Tx::kbDamageStats,hudtext::Tx::kbCallPrev,hudtext::Tx::kbCallNext,hudtext::Tx::kbRoomLoadout,hudtext::Tx::kbChuteCut,
+    hudtext::Tx::kbDamageStats,hudtext::Tx::kbRoomLoadout,hudtext::Tx::kbChuteCut,
     hudtext::Tx::kbAutoAim,
     hudtext::Tx::kbFreeLook,hudtext::Tx::kbHighCam,hudtext::Tx::kbSightZoom,hudtext::Tx::kbRangeUp,hudtext::Tx::kbRangeDown,
     hudtext::Tx::kbThermal,hudtext::Tx::kbSeatNext,hudtext::Tx::kbSwitch,hudtext::Tx::kbSecondary,hudtext::Tx::kbGunshipGunner,
@@ -56,32 +56,31 @@ constexpr hudtext::Tx kPageText[kb::kPages]={hudtext::Tx::kbPageFoot,hudtext::Tx
                                               hudtext::Tx::kbPageGround,hudtext::Tx::kbPageDreadnought,hudtext::Tx::kbPageSazabi};
 
 // The config's key of each of this plugin's slots (by the slot's ini name).
-struct KeyField { const wchar_t* ini; int Config::* key; DWORD Config::* dword; };
+struct KeyField { const wchar_t* ini; int Config::* key; };
 constexpr KeyField kFields[]={
-    {L"NpcFormationCycleKey",&Config::npcFormationKey,nullptr},{L"NpcPickupKey",&Config::npcPickupKey,nullptr},
-    {L"PlayerJetHailKey",&Config::playerJetHailKey,nullptr},{L"FirstPersonKey",&Config::firstPersonKey,nullptr},
-    {L"MapKey",&Config::mapKey,nullptr},{L"DamageStatsKey",&Config::damageStatsKey,nullptr},
-    {L"CallPrevKey",nullptr,&Config::callPrevKey},{L"CallNextKey",nullptr,&Config::callNextKey},
-    {L"RoomLoadoutKey",&Config::roomLoadoutKey,nullptr},{L"PlayerJetChuteCutKey",&Config::playerJetChuteCutKey,nullptr},
-    {L"FreeLookKey",&Config::freeLookKey,nullptr},{L"HighCamKey",&Config::highCamKey,nullptr},
-    {L"SightZoomKey",&Config::sightZoomKey,nullptr},{L"SightRangeUpKey",&Config::sightRangeUpKey,nullptr},
-    {L"SightRangeDownKey",&Config::sightRangeDownKey,nullptr},{L"VehicleThermalKey",&Config::thermalKey,nullptr},
-    {L"SeatNextKey",&Config::seatNextKey,nullptr},{L"PlayerJetSwitchKey",&Config::playerJetSwitchKey,nullptr},
-    {L"VehicleSecondarySwitchKey",&Config::vehicleSecondarySwitchKey,nullptr},{L"GunshipGunnerKey",&Config::gunshipGunnerKey,nullptr},
-    {L"GunshipGatlingKey",&Config::gunshipGatlingKey,nullptr},
-    {L"PlayerJetBoostKey",&Config::playerJetBoostKey,nullptr},{L"PlayerJetBrakeKey",&Config::playerJetBrakeKey,nullptr},
-    {L"PlayerJetTargetKey",&Config::playerJetTargetKey,nullptr},{L"PlayerJetFlareKey",&Config::playerJetFlareKey,nullptr},
-    {L"PlayerJetGearKey",&Config::playerJetGearKey,nullptr},{L"DrillLaunchKey",&Config::drillLaunchKey,nullptr},
-    {L"ProteusStanceKey",&Config::proteusModeKey,nullptr},{L"ProteusShieldKey",&Config::proteusShieldKey,nullptr},
-    {L"ProteusSalvoKey",&Config::proteusSalvoKey,nullptr},
-    {L"DreadnoughtBoostKey",&Config::dreadnoughtBoostKey,nullptr},{L"DreadnoughtDescendKey",&Config::dreadnoughtDescendKey,nullptr},
-    {L"DreadnoughtStrafeLeftKey",&Config::dreadnoughtStrafeLeftKey,nullptr},
-    {L"DreadnoughtStrafeRightKey",&Config::dreadnoughtStrafeRightKey,nullptr},
-    {L"DreadnoughtHangarKey",&Config::dreadnoughtHangarKey,nullptr},{L"DreadnoughtAheadKey",&Config::dreadnoughtAheadKey,nullptr},
-    {L"SazabiLockKey",&Config::sazabiLockKey,nullptr},{L"SazabiDashKey",&Config::sazabiDashKey,nullptr},
-    {L"SazabiDescendKey",&Config::sazabiDescendKey,nullptr},{L"SazabiFunnelKey",&Config::sazabiFunnelKey,nullptr},
-    {L"SazabiMegaCannonKey",&Config::sazabiCannonKey,nullptr},{L"SazabiMeleeKey",&Config::sazabiMeleeKey,nullptr},
-    {L"SazabiGuardKey",&Config::sazabiGuardKey,nullptr},
+    {L"NpcFormationCycleKey",&Config::npcFormationKey},{L"NpcPickupKey",&Config::npcPickupKey},
+    {L"PlayerJetHailKey",&Config::playerJetHailKey},{L"FirstPersonKey",&Config::firstPersonKey},
+    {L"MapKey",&Config::mapKey},{L"DamageStatsKey",&Config::damageStatsKey},
+    {L"RoomLoadoutKey",&Config::roomLoadoutKey},{L"PlayerJetChuteCutKey",&Config::playerJetChuteCutKey},
+    {L"FreeLookKey",&Config::freeLookKey},{L"HighCamKey",&Config::highCamKey},
+    {L"SightZoomKey",&Config::sightZoomKey},{L"SightRangeUpKey",&Config::sightRangeUpKey},
+    {L"SightRangeDownKey",&Config::sightRangeDownKey},{L"VehicleThermalKey",&Config::thermalKey},
+    {L"SeatNextKey",&Config::seatNextKey},{L"PlayerJetSwitchKey",&Config::playerJetSwitchKey},
+    {L"VehicleSecondarySwitchKey",&Config::vehicleSecondarySwitchKey},{L"GunshipGunnerKey",&Config::gunshipGunnerKey},
+    {L"GunshipGatlingKey",&Config::gunshipGatlingKey},
+    {L"PlayerJetBoostKey",&Config::playerJetBoostKey},{L"PlayerJetBrakeKey",&Config::playerJetBrakeKey},
+    {L"PlayerJetTargetKey",&Config::playerJetTargetKey},{L"PlayerJetFlareKey",&Config::playerJetFlareKey},
+    {L"PlayerJetGearKey",&Config::playerJetGearKey},{L"DrillLaunchKey",&Config::drillLaunchKey},
+    {L"ProteusStanceKey",&Config::proteusModeKey},{L"ProteusShieldKey",&Config::proteusShieldKey},
+    {L"ProteusSalvoKey",&Config::proteusSalvoKey},
+    {L"DreadnoughtBoostKey",&Config::dreadnoughtBoostKey},{L"DreadnoughtDescendKey",&Config::dreadnoughtDescendKey},
+    {L"DreadnoughtStrafeLeftKey",&Config::dreadnoughtStrafeLeftKey},
+    {L"DreadnoughtStrafeRightKey",&Config::dreadnoughtStrafeRightKey},
+    {L"DreadnoughtHangarKey",&Config::dreadnoughtHangarKey},{L"DreadnoughtAheadKey",&Config::dreadnoughtAheadKey},
+    {L"SazabiLockKey",&Config::sazabiLockKey},{L"SazabiDashKey",&Config::sazabiDashKey},
+    {L"SazabiDescendKey",&Config::sazabiDescendKey},{L"SazabiFunnelKey",&Config::sazabiFunnelKey},
+    {L"SazabiMegaCannonKey",&Config::sazabiCannonKey},{L"SazabiMeleeKey",&Config::sazabiMeleeKey},
+    {L"SazabiGuardKey",&Config::sazabiGuardKey},
 };
 constexpr int kFieldCount=static_cast<int>(sizeof(kFields)/sizeof(kFields[0]));
 constexpr bool SameName(const wchar_t* a,const wchar_t* b) noexcept {
@@ -103,9 +102,9 @@ constexpr bool EveryCrewSlotHasAField() noexcept {
 }
 static_assert(EveryCrewSlotHasAField(),"each of this plugin's slots is one config key, each listed key one slot");
 
-int Get(const Config& c,const KeyField& f) noexcept { return f.key ? c.*f.key : static_cast<int>(c.*f.dword); }
+int Get(const Config& c,const KeyField& f) noexcept { return c.*f.key; }
 void Set(Config& c,const KeyField& f,int vk) noexcept {
-    if(f.key)c.*f.key=vk; else c.*f.dword=static_cast<DWORD>(vk);
+    c.*f.key=vk;
 }
 
 // --- The store

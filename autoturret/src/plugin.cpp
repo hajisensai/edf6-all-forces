@@ -912,7 +912,7 @@ unsigned char* KeyStore() noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER){return nullptr;}
 }
 // This plugin's one slot is AutoAimKey (keybind.h kSlots): seeded with the ini's value as LoadConfig read and checked it.
-static_assert(kb::SlotsOf(kb::Owner::turret)==1 && kb::SlotOf(0x59) && kb::SlotOf(0x59)->owner==kb::Owner::turret,
+static_assert(kb::SlotsOf(kb::Owner::turret)==1 && kb::SlotOf(0x57) && kb::SlotOf(0x57)->owner==kb::Owner::turret,
               "EDF6AutoTurret's slots: AutoAimKey alone");
 int IniKey(const kb::Slot&) noexcept { return iniAutoAimKey; }
 void ApplyStockKeys() noexcept {
