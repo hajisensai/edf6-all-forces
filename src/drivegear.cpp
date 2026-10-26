@@ -50,14 +50,18 @@ bool Geared(const unsigned char* v) noexcept {
     return Named(VehicleClassName(v),{"403_Tank","404_Tank","505_Tank","510_Maser","601_Tank","603_Flak","402_Rocket","Car",
                                       "607_RoboTruck","60X_Truck","507_Rescuetank","503_Bike","511_Bike"});
 }
-// Its own governed top (m/s): its native top gear's speed, 0: the table unreadable.
-float TopOf(const unsigned char* v) noexcept {
+// Its own governed top (m/s): its native top gear's speed, 0: no usable table (`why`: what of it).
+float TopOf(const unsigned char* v,const char** why) noexcept {
+    *why="unreadable";
     if(!Readable(v+kGearRows,kGearCount+8-kGearRows))return 0.0f;
     const auto* const rows=At<const unsigned char*>(v,kGearRows);
     const std::size_t count=At<std::size_t>(v,kGearCount);
+    *why="has no rows or too many";
     if(count==0 || count>drivegear::kMaxGearRows)return 0.0f;
     const unsigned char* const last=rows+(count-1)*kGearRow;
+    *why="unreadable";
     if(!Readable(last,sizeof(float)))return 0.0f;
+    *why="ends in no forward speed";
     return drivegear::TopOfGears(count,At<float>(last,0));
 }
 
@@ -95,19 +99,22 @@ DriveGearInput::DriveGearInput(unsigned char* v) noexcept {
         if(!Cfg().enabled)return;
         unsigned char* const seat=DriverSeat(v);
         if(!seat || !Geared(v))return;
-        const float top=TopOf(v);
-        if(top<=0.0f) {
-            if(!untabled.Is(v)){untabled=ObjRef::Of(v);Log("GEAR v=%p %s: its gear table (+0x%zX) unreadable, no gears for it",
-                                                          v,VehicleClassName(v),kGearRows);}
-            return;
-        }
         const ULONGLONG ms=GameMs();
-        if(!drive.vehicle.Is(v) || ms-drive.ms>kStaleMs) {
+        if(!drive.vehicle.Is(v) || ms-drive.ms>kStaleMs) {   // the table is read here: written once, at its setup
+            const char* why=nullptr;
+            const float top=TopOf(v,&why);
+            if(top<=0.0f) {
+                drive=Drive{};
+                if(!untabled.Is(v)){untabled=ObjRef::Of(v);Log("GEAR v=%p %s: its gear table (+0x%zX) %s, no gears for it",
+                                                              v,VehicleClassName(v),kGearRows,why);}
+                return;
+            }
             if(!drive.vehicle.Is(v))Log("GEAR v=%p %s: its top %.1f m/s (%.0f km/h), from its gear table",v,VehicleClassName(v),top,
                                         top*3.6f);
             drive=Drive{};drive.vehicle=ObjRef::Of(v);drive.top=top;
             std::memcpy(drive.pos,v+kPosition,12);drive.ms=ms;
         }
+        const float top=drive.top;
         const float keys=At<float>(seat,kSeatLY);
         if(drive.frame!=GameFrame()) {
             const ULONGLONG was=drive.ms;
