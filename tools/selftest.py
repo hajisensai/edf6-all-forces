@@ -6541,10 +6541,13 @@ def soft_edge_wired() -> None:
     # KeepIn every frame (its state follows the jet); only a gun dive at a ground point inside the soft box keeps its
     # line (KeepIn on a copy, 2026-10-09: bent by the edge the dive never came onto the lead).
     soft_edge = flight.split('void SoftEdge(Jet& j,const float* pos,float* want) noexcept {', 1)[1].split('\n}\n', 1)[0]
-    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
+    assert 'airbound::KeepIn(soft,pos,j.m.vel,r,react,dive || line || leaving ? kept : want,&j.m.edgeBack,&j.m.edgeTurn);' in soft_edge
     # And the paratroop plane on its pass line (ferry_line.h, 2026-10-10): its line's ends stand off the map with room to
-    # turn (support_entry.h PassEnd); the soft edge turned it back the moment it was made. Withdrawing, the edge's again.
-    assert 'const bool line=j.ferry && j.mode!=Mode::withdraw;' in soft_edge, 'a ferry on its line keeps it'
+    # turn (support_entry.h PassEnd); the soft edge turned it back the moment it was made.
+    assert 'const bool line=j.ferry && SoftEdgeHolds(j);' in soft_edge, 'a ferry on its line keeps it'
+    # A withdrawing jet is not held either (the user, 2026-10-26: 「空中支援不会退场」): it leaves the map and is reaped out
+    # there (jet_internal.h SoftEdgeHolds; tools/jet_obstacle_sim --withdraw-suite, tests/support_exit_guard.py).
+    assert 'const bool leaving=!SoftEdgeHolds(j);' in soft_edge, 'a withdrawal leaves the map'
     assert 'const bool dive=j.mode==Mode::dive && j.t.target && !j.t.flyer && airbound::Depth(soft,j.t.aim)>=0.0f;' in soft_edge, \
         'only a dive at a ground point inside the soft box is spared the edge'
     assert 'airbound::CapClimb(' in flight

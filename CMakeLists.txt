@@ -1014,6 +1014,13 @@ add_test(NAME jet_attack_runs COMMAND jet_obstacle_sim --selftest --out "${CMAKE
 # The NPC flyers' soft edge (src/airbound.h): its rules (airbound_check) and the jets' real flight code flown at the play
 # edge (jet_obstacle_sim --edge-suite).
 add_test(NAME jet_edge_suite COMMAND jet_obstacle_sim --edge-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+# A withdrawing jet (fuel, ammo, damage, a sortie's pass made) is not held by that soft edge: it leaves the map and is
+# reaped out of sight (jet_obstacle_sim --withdraw-suite; the user, 2026-10-26: 「空中支援不会退场」).
+add_test(NAME jet_withdraw_suite COMMAND jet_obstacle_sim --withdraw-suite WORKING_DIRECTORY "${CMAKE_BINARY_DIR}")
+# The support aircraft's way out in the source: a heli sortie keeps the call it is laid on, a withdrawal is not held by the
+# soft edge (tests/support_exit_guard.py).
+add_test(NAME support_exit_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_exit_guard.py")
+set_tests_properties(support_exit_guard PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # Ground attack runs on a stock-size map, whose soft box is narrower than the strike's own run (jet_obstacle_sim
 # --strike-room-suite; the 2026-10-09 log's multirole jets that never fired).
 add_test(NAME jet_strike_room COMMAND jet_obstacle_sim --strike-room-suite --out "${CMAKE_BINARY_DIR}")
