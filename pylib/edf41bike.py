@@ -84,6 +84,21 @@ RIDER_CLASSES = (('ARMYSOLDIER', 'EDF6ARMYSOLDIER', 'P505_RANGER', 1),
                  ('ENGINEER', 'EDF6ENGINEER', 'P508_AIRRADER', 8),
                  ('PALEWING', 'EDF6_WINGDIVER', 'P506_WINGDIVER', 2),
                  ('HEAVYARMOR', 'EDF6HEAVYARMOR', 'P507_FENCER', 4))   # (4.1 CAS, EDF6 CAS, EDF6 model, class bit)
+# The driver's hand IK targets (2026-10-26, feedback 「人手臂伸出去好远」: on the 408 the driver's arms ran as thin rods
+# from the shoulders far past the bars). vehicle503_bike_driver reaches each hand for its seat's grip matrix: HumanBase's
+# update (0x575275 / 0x575329) sets the rider's v_vehicle_grip_l / _r_ik_target (indices +0x1440 / +0x1444, looked up at
+# 0x56E495 / 0x56E4AE) from seat +0x40 / +0x80 whenever the rider is in a seat. Only Vehicle503_Bike fills those two
+# matrices: its constructor finds te_ik_l / te_ik_r (0x61757D / 0x6175FE -> +0x29A0 / +0x29A4) and its update copies
+# the two bones' world matrices into seat 0 every frame (0x617A30). Vehicle_Car never writes them, so they stay the
+# seat constructor's identity (0x6291EB / 0x629225): a target at the map's origin. The 408 now carries the same two
+# bones (under its steering `handle`) and src/edf41bike.cpp copies them as 0x617A30 does. V503's te_ik_l bind is
+# exactly the Ranger's te_l in vehicle503_bike_driver (position and rotation, the pose's own hands); the 408's bones are
+# 4.1's own driver's hands in vehicle_bike_driver on this bike (4.1's seat at the origin, whose pelvis pose_fit
+# matches), turned onto EDF6's te_l axes by the two skeletons' binds.
+GRIP_BONES = (('te_ik_l', 'te_l'), ('te_ik_r', 'te_r'))   # (vehicle bone, the rider's hand bone)
+GRIP_PARENT = 'handle'
+GRIP_RIDER41 = ('OBJECT/ARMYANDENGINEER.MRAB', 'ArmySoldier.mdb', 'OBJECT/ARMYSOLDIER.CAS')
+GRIP_RIDER6 = ('OBJECT/P505_RANGER.MRAB', 'p505_ranger.mdb')
 WHEELS = ('front_tire', 'rear_tire', 'side_tire')
 PROXIES = frozenset(('body', 'handle', 'front_sus', 'front_tire', 'rear_sus', 'rear_tire', 'side_tire', 'gun'))
 
@@ -158,6 +173,74 @@ def pose_fit(games, masks: tuple[int, int]) -> tuple[list[list[float]], list[lis
     result = offsets, rows
     games._edf41bike_pose_fit = copy.deepcopy([list(masks), result])
     return result
+
+
+def hand_pose(cas: bytes, md: mdb.Mdb, state: str) -> dict[str, list[float]]:
+    """Model-space matrices of the rider's two hand bones (GRIP_BONES' te_l / te_r) in the seated `state` (one clip,
+    every key the same), the skeleton's root at the seat."""
+    clips = cas_graft.state_clips(cas).get('main', {}).get(state, [])
+    if len(clips) != 1:
+        raise ValueError(f'408 rider state {state} does not resolve to one clip')
+    pose = cas_pose.CasPose(cas)
+    clip = next(c for c in pose.clips if c.name == clips[0])
+    names = [md.name_of(b.name) for b in md.bones]
+    _duration, _step, frames = cas_pose.clip_info(pose, clip)
+    keys = [cas_pose.pose_world(pose, clip, md, k) for k in range(max(frames, 1))]
+    out = {}
+    for _vehicle, hand in GRIP_BONES:
+        rows = [w[names.index(hand)] for w in keys]
+        if max(abs(a - b) for m in rows for a, b in zip(m, rows[0])) > 1e-4:
+            raise ValueError(f'408 seated rider {state} moves its {hand}')
+        out[hand] = rows[0]
+    return out
+
+
+def _rotation(m: list[float]) -> list[float]:
+    """`m` with its translation dropped; refused unless its 3x3 part is a rotation (orthonormal, right-handed)."""
+    r = [m[i * 4:i * 4 + 3] for i in range(3)]
+    for i in range(3):
+        for j in range(3):
+            if abs(sum(r[i][k] * r[j][k] for k in range(3)) - (1.0 if i == j else 0.0)) > 1e-3:
+                raise ValueError('408 grip frame is not a rotation')
+    det = (r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1]) - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
+           + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]))
+    if det < 0.999:
+        raise ValueError('408 grip frame is not right-handed')
+    return [*r[0], 0.0, *r[1], 0.0, *r[2], 0.0, 0.0, 0.0, 0.0, 1.0]
+
+
+def grip_targets(games) -> list[tuple[str, list[float]]]:
+    """The 408's driver grip IK bones (GRIP_BONES' te_ik_l / te_ik_r) as model-space matrices: where 4.1's own Ranger
+    held this bike's bars. Position: 4.1's te_l / te_r in vehicle_bike_driver (SOURCE_STATES[0]) with the skeleton's
+    root at 4.1's seat (the model origin: seat_mab refuses any other source locator; pose_fit puts EDF6's pelvis on 4.1's).
+    Rotation: the same hand in EDF6's te_l axes, D x R41 with D = bind6 x bind41^-1 (both skeletons bind their hands
+    in the same place, so D only relabels the bone's axes). The EDF6 pose then bends its arms to 4.1's grip instead of
+    reaching for the identity matrix at the map's origin."""
+    archive41, model41, cas41 = GRIP_RIDER41
+    md41 = model(games.read4(archive41), model41)
+    md6 = model(games.read6(GRIP_RIDER6[0]), GRIP_RIDER6[1])
+    held = hand_pose(cas_legacy.cas_from_legacy(games.read4(cas41)), md41, SOURCE_STATES[0])
+    bind41 = {md41.name_of(b.name): m for b, m in zip(md41.bones, mdb.bind_world(md41))}
+    bind6 = {md6.name_of(b.name): m for b, m in zip(md6.bones, mdb.bind_world(md6))}
+    out = []
+    for bone, hand in GRIP_BONES:
+        if max(abs(a - b) for a, b in zip(bind41[hand][12:15], bind6[hand][12:15])) > 1e-3:
+            raise ValueError(f'408 grip: 4.1 and EDF6 bind {hand} in different places')
+        relabel = mdb.mmul(_rotation(bind6[hand]), mdb.inverse_affine(_rotation(bind41[hand])))
+        target = _rotation(mdb.mmul(relabel, _rotation(held[hand])))
+        target[12:15] = held[hand][12:15]
+        out.append((bone, [round(x, 6) for x in target]))
+    return out
+
+
+def add_grips(md: mdb.Mdb, grips: list[tuple[str, list[float]]]) -> None:
+    """GRIP_BONES' vehicle bones into `md` under GRIP_PARENT (kind 0, transform only, as V503's), at `grips`' model-space
+    matrices: local = target x parent bind^-1 so they turn with the bars, inverse bind = target^-1."""
+    for bone, target in grips:
+        at = mdb.insert_bone(md, bone, GRIP_PARENT)
+        parent = mdb.bind_world(md)[md.bones[at].parent]
+        md.bones[at].local = [round(x, 6) for x in mdb.mmul(target, mdb.inverse_affine(parent))]
+        md.bones[at].inv_bind = [round(x, 6) for x in mdb.inverse_affine(target)]
 
 
 def seat_mab(block: bytes, offsets: list[list[float]]) -> bytes:
@@ -288,6 +371,9 @@ def check(members: dict, md: mdb.Mdb, physics: bytes) -> None:
     names = {md.name_of(b.name) for b in md.bones}
     if MARKER not in names or members.get('car_aim_node') != []:
         raise ValueError('408 must have its own marker and a real empty native car aim')
+    for bone, _hand in GRIP_BONES:
+        if bone not in names or md.name_of(md.bones[md.bones[mdb.bone_named(md, bone)].parent].name) != GRIP_PARENT:
+            raise ValueError(f'408 driver grip {bone} must be a bone under {GRIP_PARENT} (src/edf41bike.cpp copies it)')
     bodies = {o['name']: o['motion']['motionState']['transform'] for o in hk2014.read(physics).objects
               if o.type.name == 'hkpRigidBody'}
     if set(bodies) != {'RagDollProxys.' + n for n in PROXIES}:
@@ -365,6 +451,7 @@ def build(games, root: str) -> dict[str, bytes]:
     member = next(f for f in rab.files if f.name.lower() == entry[1].lower())
     md = mdb.mdb_read(member.data)
     mdb.insert_bone(md, MARKER, 'body')
+    add_grips(md, grip_targets(games))
     member.stored = mdb.cmpl_compress(mdb.mdb_write(md)) if member.stored[:4] == b'CMPL' else mdb.mdb_write(md)
     files = {archive_rel: mdb.rab_write(rab)}
     seats41 = source['vehicle_riding_position']

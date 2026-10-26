@@ -158,6 +158,42 @@ def clip_info(pose: CasPose, clip: Clip) -> tuple[float, float, int]:
     return duration, step, frames
 
 
+def quat_rows(q: tuple[float, float, float, float]) -> list[list[float]]:
+    """The 3x3 rotation of a CANM quaternion (xyzw) in EDF's row-vector convention (v' = v R): the transpose of the
+    usual column-vector matrix. With it the Ranger's te_l in vehicle503_bike_driver is V503's own te_ik_l bind to 1e-4
+    (tests/test_edf41bike.py test_v503_grip_bone_is_its_riders_hand)."""
+    x, y, z, w = q
+    return [[1 - 2 * (y * y + z * z), 2 * (x * y + z * w), 2 * (x * z - y * w)],
+            [2 * (x * y - z * w), 1 - 2 * (x * x + z * z), 2 * (y * z + x * w)],
+            [2 * (x * z + y * w), 2 * (y * z - x * w), 1 - 2 * (x * x + y * y)]]
+
+
+def pose_world(pose: CasPose, clip: Clip, md: Mdb, frame: int = 0) -> list[list[float]]:
+    """Model-space matrix (mdb's 16-float row-vector layout, row 3 the translation) of every bone of `md` at key `frame`
+    of `clip`: a tracked bone's local rotation / translation is its key, every other local part the bind's, chained
+    parent first as mdb.bind_world does. Scale tracks are refused rather than ignored."""
+    tracks = {t.name: t for t in clip.tracks}
+    world: list[list[float]] = []
+    for b in md.bones:
+        local = list(b.local)
+        track = tracks.get(md.name_of(b.name))
+        if track is not None:
+            if track.scale >= 0:
+                raise ValueError(f'{clip.name}: {track.name} has a scale track')
+            if track.rotation >= 0:
+                rows = quat_rows(rotation(pose, track.rotation, frame))
+                for r in range(3):
+                    local[r * 4:r * 4 + 3] = rows[r]
+            if track.translation >= 0:
+                local[12:15] = pose.translation(track.translation, frame)
+        if b.parent < 0:
+            world.append(local)
+        else:
+            parent = world[b.parent]
+            world.append([sum(local[r * 4 + k] * parent[k * 4 + c] for k in range(4)) for r in range(4) for c in range(4)])
+    return world
+
+
 def root_motion(pose: CasPose, clip: Clip, bone: str) -> list[tuple[float, float, float]] | None:
     """The bone's ground motion over the clip, one (x, z, yaw) per key, relative to its first key: x / z the
     translation in the clip's start frame, yaw = atan2(forward x, forward z) of the bone's +Z turned by its rotation

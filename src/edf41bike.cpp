@@ -38,6 +38,17 @@ constexpr unsigned kPhysicsToBones=0x6EDCA0,kBuildWorld=0x1100B90,kBonesToPhysic
 constexpr std::size_t kRagdoll=0x1320,kCas=0x1180,kSgo=0x100,kSeatRightX=0x2D0,kSeatRightY=0x2D4,kSeatFire=0x2E4;
 constexpr std::size_t kSeatHolders=0xC8,kSeatHoldersCount=0xD8;
 constexpr int kFrameSlot=4,kPoseSlot=45;
+// The driver's hand IK targets (2026-10-26, 「人手臂伸出去好远」; pylib/edf41bike.py GRIP_BONES). HumanBase's update
+// (0x575275 / 0x575329) sets a seated rider's v_vehicle_grip_l / _r_ik_target from its seat's +0x40 / +0x80 matrices,
+// and vehicle503_bike_driver reaches its hands for them. Only Vehicle503_Bike fills them: its update 0x6181D0 runs the
+// base update (0x659650 -> 0x674B00) and then 0x617A30 copies its te_ik_l / te_ik_r bones' world matrices (bone
+// record +0xB0, 64 bytes) into seat 0. Vehicle_Car's update (slot 5, 0x65B5C0) calls the same 0x674B00 and never
+// writes them: the seat constructor's identity (0x6291EB / 0x629225), a target at the map's origin, the arms stretched
+// toward it. The 408 carries the same two bones; GripUpdate copies them as 0x617A30 does, after the native update.
+constexpr unsigned kCarUpdate=0x65B5C0;
+constexpr int kUpdateSlot=5;
+constexpr std::size_t kSeatGripL=0x40,kSeatGripR=0x80,kGripMatrix=0x40;
+constexpr wchar_t kGripL[]=L"te_ik_l",kGripR[]=L"te_ik_r";
 constexpr std::size_t kStubMost=96;
 using VehicleFn=void(__fastcall*)(unsigned char*);
 using SetWeaponFn=void(__fastcall*)(unsigned char*,void*,void*,int);
@@ -49,14 +60,16 @@ using AimRegisterFn=void(__fastcall*)(unsigned char*,int,const AxisMap*);
 using SyncFn=void(__fastcall*)(void*);
 using WorldFn=void(__fastcall*)(void*,const void*);
 using PullFn=void(__fastcall*)(void*);
-void *nextFrame=nullptr,*nextPose=nullptr;
-bool on=false;
+void *nextFrame=nullptr,*nextPose=nullptr,*nextUpdate=nullptr;
+bool on=false,grips=false,gripsMissingSaid=false;
 const unsigned char kWeaponCallCode[]={0xE8,0xAD,0x7F,0xFD,0xFF};
 // mov rax,[r15+0x608]; cmp qword [rax+0xD8],0; jbe 0x65B3EF
 const unsigned char kGunGateCode[]={0x49,0x8B,0x87,0x08,0x06,0x00,0x00,0x48,0x83,0xB8,0xD8,0x00,0x00,0x00,0x00,0x0F,0x86,0x8F,0x02,0x00,0x00};
 // test ebx,ebx; jne 0x65B3A6
 const unsigned char kGunRowCode[]={0x85,0xDB,0x0F,0x85,0x83,0x00,0x00,0x00};
 const unsigned char kCarFrameCode[]={0x40,0x53,0x48,0x83,0xEC,0x30,0x48,0x8B,0xD9,0xE8,0xE2,0x91,0x01,0x00};
+// mov [rsp+18h],rbx; push rdi; sub rsp,30h; mov rbx,rcx; call 0x674B00 (CarBase's update, as V503's 0x659650 jumps to)
+const unsigned char kCarUpdateCode[]={0x48,0x89,0x5C,0x24,0x18,0x57,0x48,0x83,0xEC,0x30,0x48,0x8B,0xD9,0xE8,0x2E,0x95,0x01,0x00};
 const unsigned char kCarPoseCode[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xD9,0x48};
 const unsigned char kAimPoseCode[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x08,0x48,0x89,0x68,0x10,0x48,0x89,0x70,0x18,0x57};
 const unsigned char kAimRegisterCode[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x63,0xC2,0x48,0x8B,0xD9,0x4D,0x8B,0xD0};
@@ -271,6 +284,26 @@ void __fastcall Frame(unsigned char* v) {
     __try { if(Ours(v))Update(v); }
     __except(EXCEPTION_EXECUTE_HANDLER) { Log("EDF41BIKE gunner frame rejected unreadable native state v=%p",v); }
 }
+// 0x617A30 for the 408: the two grip bones' world matrices into the driver's seat, every frame, whoever rides (V503
+// does not ask either). A 408 without the bones is a broken install: one log line, the seat left as the native one.
+void Grips(unsigned char* v) noexcept {
+    if(SeatCount(v)<1)return;
+    const auto* left=BoneRecord506(v+kModelInst506,kGripL);
+    const auto* right=BoneRecord506(v+kModelInst506,kGripR);
+    if(!left || !right) {
+        if(!gripsMissingSaid){gripsMissingSaid=true;Log("EDF41BIKE 408 model lacks its grip bones %ls / %ls (install broken): the driver's hands reach for the map origin",kGripL,kGripR);}
+        return;
+    }
+    auto* seat=SeatAt(v,0);
+    if(!Readable(seat,kSeatGripR+kGripMatrix) || !Readable(left+kBoneWorld506,kGripMatrix) || !Readable(right+kBoneWorld506,kGripMatrix))return;
+    std::memcpy(seat+kSeatGripL,left+kBoneWorld506,kGripMatrix);
+    std::memcpy(seat+kSeatGripR,right+kBoneWorld506,kGripMatrix);
+}
+void __fastcall GripUpdate(unsigned char* v) {
+    reinterpret_cast<VehicleFn>(nextUpdate)(v);
+    __try { if(Tagged(v))Grips(v); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { Log("EDF41BIKE grip update rejected unreadable native state v=%p",v); }
+}
 void Pose408(unsigned char* v,unsigned char* gun,unsigned char* aim) noexcept {
     reinterpret_cast<SyncFn>(image+kPhysicsToBones)(v+kRagdoll);
     auto* local=reinterpret_cast<float*>(gun+kBoneLocal506);
@@ -298,12 +331,18 @@ void __fastcall Pose(unsigned char* v) {
         reinterpret_cast<VehicleFn>(nextPose)(v);
     }
 }
-}  // namespace
-bool IsEdf41Bike(const void* vehicle) noexcept {
-    __try { return Ours(static_cast<unsigned char*>(const_cast<void*>(vehicle))); }
-    __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+// The grips are their own hook: the driver's arms do not depend on the gunner seat's profile, its room gate or Enabled
+// (the seat's pose is the SGO's, whatever the plugin does with the gun).
+bool InstallGrips() noexcept {
+    if(grips)return true;
+    bool known=false;
+    __try { known=Matches(kCarUpdate,kCarUpdateCode,sizeof(kCarUpdateCode)); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { known=false; }
+    grips=known && edf::ChainVtableSlot(reinterpret_cast<void**>(image+kCarVtable)+kUpdateSlot,reinterpret_cast<void*>(&GripUpdate),&nextUpdate);
+    Log("EDF41BIKE source 408: driver grip targets=%d%s",grips,known ? "" : " (native Car update differs)");
+    return grips;
 }
-bool InstallEdf41Bike() noexcept {
+bool InstallGunner() noexcept {
     if(on)return true;
     bool known=false;
     __try {
@@ -331,5 +370,15 @@ bool InstallEdf41Bike() noexcept {
     on=weapon && frame && pose && gate;
     Log("EDF41BIKE source 408: seat1 native build=%d input=%d single-bone physical pose=%d gun gate=%d",weapon,frame,pose,gate);
     return on;
+}
+}  // namespace
+bool IsEdf41Bike(const void* vehicle) noexcept {
+    __try { return Ours(static_cast<unsigned char*>(const_cast<void*>(vehicle))); }
+    __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+bool InstallEdf41Bike() noexcept {
+    const bool gunner=InstallGunner();
+    InstallGrips();
+    return gunner;
 }
 }  // namespace crew
