@@ -39,6 +39,7 @@ constexpr ULONGLONG kFreshMs=200;        // a readout not refreshed this long (g
 constexpr std::uint64_t kMostMuzzles=64;
 constexpr float kReach=3000.0f;          // m: the farthest an impact point is looked for (the near camera's far clip)
 constexpr float kThreatRadius=30.0f;     // m: a missile's lock point this near the vehicle is homing on it (playerjet.cpp's)
+constexpr float kSolveClose=3.0f;        // m: a fire-control solution passing the target this near meets it (roundaim::Solve)
 constexpr float kPickCone=0.087f;        // rad (5 deg) off the screen's centre an enemy is ranged on
 constexpr float kKeepCone=0.26f;         // rad (15 deg): the ranged one is kept this far off (the lead and the drop move the
                                          // view off it while the pipper is put on its lead mark)
@@ -131,12 +132,13 @@ void PickVisit(void* ctx,const void* object,const float* aim) noexcept {
     if(!(l>1.0f) || l>kReach)return;
     const float off=std::acos(vec::Clamp(vec::Dot(d,p.look)/l,-1.0f,1.0f));
     if(target.ref.Is(object) && off<=kKeepCone){p.keep=true;std::memcpy(p.keepAt,aim,12);}
-    if(off>kPickCone || off>=p.best)return;
+    if(off>=p.best)return;   // p.best starts at the acquisition cone
     p.best=off;p.found=object;std::memcpy(p.at,aim,12);
 }
-void RangeTarget(const unsigned char* v,const StockHudReadout& r,const float* eye,ULONGLONG ms) noexcept {
+// `cone`: how far off the line of sight a new target is acquired (firecontrol.h Kit::pickCone: a radar's is wider).
+void RangeTarget(const unsigned char* v,const StockHudReadout& r,const float* eye,ULONGLONG ms,float cone) noexcept {
     TargetPick p{};
-    p.best=kPickCone;
+    p.best=cone>kPickCone ? cone : kPickCone;
     if(!r.lookOk || r.heli){target=Target{};return;}
     std::memcpy(p.eye,eye,12);std::memcpy(p.look,r.look,12);
     VisitEnemies(v,&PickVisit,&p);
@@ -161,14 +163,25 @@ void GunMarkOf(const unsigned char* w,const RoundModel& m,const float* pos,const
     float shooter[3];
     if(a.physicalOnly || EnergyWeapon(m.style) || m.lobbed || !ArcRoundOf(w,m,&round,shooter))return;
     a.ladder=gunsight::Of(round,pos,dir,shooter);
-    const roundaim::GunMark g=roundaim::GunSight(round,pos,dir,shooter,a.hit,a.at,a.flight*60.0f,target.ok ? target.at : nullptr,
-                                                 target.vel);
-    if(g.mark!=roundaim::SightMark::ranged)return;
-    a.ranged=g.mark==roundaim::SightMark::ranged;
-    a.inReach=g.inReach;
+    // The fire control's solution (firecontrol.h; the review of 2026-10-25: the old guide was where the target would be when
+    // a round fired along the bore now passed it, not where to aim): the way to fire so the round meets the ranged target,
+    // its lead and its drop together (roundaim::Solve), shown as the point that far along that way. A still target's too:
+    // the gun's superelevation. A telescope computes none.
+    if(!target.ok || !fcs::KitOf(a.fcs).lead)return;
+    float aim[3];
+    roundaim::Pass pass{};
+    const bool solved=roundaim::Solve(round,pos,shooter,target.at,target.vel,kSolveClose,aim,&pass);
+    if(!pass.ok)return;
+    // A target behind the map (a ridge, a building): the solved round meets the map before it, so there is no solution.
+    float land[3],landSec=0.0f;
+    if(RoundLands(w,m,pos,aim,vec::Dist(pos,target.at)+kSolveClose,land,&landSec) && landSec*60.0f<pass.frames-1.0f)return;
+    a.ranged=true;
+    a.inReach=solved && pass.frames<static_cast<float>(round.alive)-1.0f;
     // A target guide is not where this shot hits terrain. Keep RoundLands' physical endpoint/hit/time intact.
-    std::memcpy(a.lead,g.lead,12);
-    a.targetRange=vec::Dist(pos,a.lead);
+    a.targetRange=vec::Dist(pos,target.at);
+    for(int i=0;i<3;++i)a.lead[i]=pos[i]+aim[i]*a.targetRange;
+    a.leadFlight=pass.frames/60.0f;
+    a.targetSpeed=vec::Len(target.vel);
 }
 
 // The sight weapon `w` (its round `m`) gets: reticle.h Classify on the weapon's own numbers; `antiAir` the vehicle's role.
@@ -192,6 +205,9 @@ void SightOf(const unsigned char* w,const RoundModel& m,bool antiAir,StockArm& a
         else if(spec->shell==StoreShell::canister)a.shell=reticle::Shell::canister;
     }
     a.roundSpeed=t.speed;
+    std::size_t length=0;
+    const wchar_t* file=WeaponFile(w,&length);
+    a.fcs=fcs::Of(file,length,antiAir);
 }
 
 // One weapon's line and its impact point (see the top). `aim`: work the point out (not for a heli's).
@@ -287,6 +303,29 @@ void SetStockSelectedStore(const void* vehicle,unsigned seat,int store) noexcept
     selection=Selection{vehicle,seat,store,GameFrame()};
 }
 
+bool SeatGunLine(const void* vehicle,unsigned seat,float* dir) noexcept {
+    __try {
+        auto v=static_cast<unsigned char*>(const_cast<void*>(vehicle));
+        if(!v || seat>=SeatCount(v))return false;
+        const unsigned char* const s=SeatAt(v,seat);
+        const unsigned char* const gun=PayloadSightPicked(v,seat);
+        const auto holders=At<unsigned char* const*>(s,kSeatWeapons);
+        const auto n=At<std::uint64_t>(s,kSeatWeaponCount);
+        if(!gun || !n || n>16 || !Readable(holders,n*8))return false;
+        for(std::uint64_t i=0;i<n;++i) {
+            if(!Readable(holders[i],kHolderWeapon+8) || At<const unsigned char*>(holders[i],kHolderWeapon)!=gun)continue;
+            const auto freedom=weaponmount::Of(v,s,holders[i]);
+            if(!freedom.known || !freedom.yaw || !freedom.pitch)return false;
+            const auto muzzles=At<const unsigned char*>(gun,edf::kMuzzles);
+            const auto count=At<std::uint64_t>(gun,edf::kMuzzleCount);
+            float pos[3];
+            if(!count || count>kMostMuzzles || !Readable(muzzles,edf::kMuzzleStride) || !edf::MuzzleFrame(gun,muzzles,pos,dir))return false;
+            return vec::Normalize(dir);
+        }
+        return false;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool PlayerStockOwnSight(const void* vehicle) noexcept {
     if(!Cfg().enabled || !Cfg().stockVehicleHud)return false;
     __try { return HudReady() && StockVehicle(vehicle) && !IsHelicopter(vehicle); }
@@ -314,13 +353,18 @@ void StockHudFrame(unsigned char* v) noexcept {
     Speed(v,r,ms);
     r.gear=r.seat==0 ? DriveGearOf(v) : kNoDriveGear;
     r.stab=StabState(v,r.seat);
-    RangeTarget(v,r,eye,ms);
     const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
     const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
     // The store the payload switch has picked (payload.cpp: the secondary fires it), found by its weapon: selected.
     const unsigned char* const picked=PayloadPicked(v);
     const unsigned char* const ownPicked=PayloadOwnSecondaryPicked(v);   // the missile the secondary fires (both are shown)
     const unsigned char* const sight=PayloadSightPicked(v,r.seat);
+    const bool antiAir=reticle::AntiAirClass(VehicleClassName(v));
+    {   // the target is acquired as the sight's fire control acquires it (firecontrol.h: a radar's wider cone)
+        std::size_t length=0;
+        const wchar_t* file=sight ? WeaponFile(sight,&length) : nullptr;
+        RangeTarget(v,r,eye,ms,fcs::KitOf(fcs::Of(file,length,antiAir)).pickCone);
+    }
     const unsigned char* const turret=PlayerTurretGun(v,seat);
     unsigned char* fired[kStockArms]{};
     const int firing=PayloadSightWeapons(v,r.seat,fired,kStockArms);
@@ -331,7 +375,6 @@ void StockHudFrame(unsigned char* v) noexcept {
     // SetStockSelectedStore's index is the holder's, the arms' skip the tank: its arm found as the list is walked.
     const int store=selection.vehicle==v && selection.seat==r.seat && GameFrame()-selection.frame<=2 ? selection.store : -1;
     int pickedArm=-1,storeArm=-1;
-    const bool antiAir=reticle::AntiAirClass(VehicleClassName(v));
     if(n<=16 && Readable(holders,n*8))
         for(std::uint64_t i=0;i<n && r.arms<kStockArms;++i) {
             if(!Readable(holders[i],kHolderWeapon+8))continue;

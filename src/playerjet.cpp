@@ -2055,6 +2055,11 @@ bool IsPlayerJet(const void* vehicle) noexcept {
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
+bool PlayerJetCraft(const void* vehicle) noexcept {
+    __try { return vehicle && KindOf(static_cast<const unsigned char*>(vehicle))!=nullptr; }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
 bool PlayerJetOwnSight(const void* vehicle) noexcept {
     // KindOf, not IsPlayerJet: the plugin's other aircraft the player boards fly this path too (playerjet_kinds.h).
     if(!flyOk || !Cfg().enabled || !Cfg().playerJet || !Cfg().playerJetGunSight)return false;

@@ -3,6 +3,7 @@
 #pragma once
 #include <Windows.h>
 #include <cstdint>
+#include "firecontrol.h"
 #include "gunsight.h"
 #include "reticle.h"
 #include "roundaim.h"
@@ -85,6 +86,9 @@ struct StockArm {
     reticle::Style reticle=reticle::Style::none;   // its sight's style (reticle.h Classify, from the weapon's own data)
     reticle::Shell shell=reticle::Shell::none;     // its round as the sight names it (AP / HE / BEAM)
     float roundSpeed=0.0f;       // m/s: AmmoSpeed x 60 (the flak sight's lead rings)
+    fcs::System fcs=fcs::System::computer;   // its fire-control system (firecontrol.h): what the sight shows beyond its reticle
+    float leadFlight=0.0f;       // s: the round's flight to the ranged target's lead point (`ranged`)
+    float targetSpeed=0.0f;      // m/s: the ranged target's speed (its lock point's smoothed moves)
 };
 struct StockHudReadout {
     char kind[16];
@@ -110,6 +114,10 @@ struct StockHudReadout {
 // Whether the player in `vehicle` sees this HUD's sights in place of the stock aim lines (crew.cpp AimLines): a stock
 // vehicle (no plugin body, not a heli: those have their own), ini StockVehicleHud on.
 bool PlayerStockOwnSight(const void* vehicle) noexcept;
+// Game thread: the unit way the gun of `vehicle`'s seat `seat` points now (its fire-control pick's first muzzle), when
+// that gun turns on its own in yaw and pitch (weapon_mount.h Freedom): the gun camera of a weapon station looks along
+// it (firstperson.cpp Ride). False for a fixed or partly fixed mount, a seat with no live gun, or a read fault.
+bool SeatGunLine(const void* vehicle,unsigned seat,float* dir) noexcept;
 bool HudReady() noexcept;   // hud.cpp: its quads can be drawn (InstallHud): no line is hidden for a HUD that cannot show
 void StockHudFrame(unsigned char* vehicle) noexcept;   // every vehicle's input (crew.cpp InputHook), after AimLines
 bool PlayerStockHud(StockHudReadout* out) noexcept;    // the last frame's, false with none (hud.cpp HudPublish)

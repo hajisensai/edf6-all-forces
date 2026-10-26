@@ -97,6 +97,12 @@ const unsigned char kHudObjectDraw[]={0x48,0x8B,0x49,0x18,0x80,0xB9,0x00,0x02,0x
 const unsigned char kRescueDraw[]={0x48,0x8B,0x49,0x18,0x80,0xB9,0x00,0x02,0x00,0x00,0x00};               // 0x80843B
 const unsigned char kCrossDraw[]={0x80,0xB9,0x00,0x02,0x00,0x00,0x00};                                   // 0x803AC9
 const unsigned char kViewportStep[]={0x48,0x8B,0x01,0x48,0x8B,0xF2,0x48,0x8B,0xF9,0xFF,0x50,0x20,0x48,0x8B,0xBF,0x08,0x02,0x00,0x00};   // 0x118DF4F
+// The damage layer's wrapper (map_stock_hud.h LendsDamage): ui::HUiHudDamageObject's vtable, its draw slot (the shared
+// HUiHud*Object draw 0x8168B0: it reads only rcx, the object, whose +0x18 is its camera).
+constexpr unsigned kDamageObjectVtable=0x17FCA28,kHudObjectDrawFn=0x8168B0;
+constexpr std::size_t kDamageDrawSlot=3,kHudCamera=0x18;
+using HudObjectDrawFn=void(__fastcall*)(void*,void*,void*,void*);
+HudObjectDrawFn nextDamageDraw=nullptr;
 const HudSig kHudSigs[]={{kHudShow,kHudShowCode,sizeof(kHudShowCode)},{0x1BA80D,kHudShowUse,sizeof(kHudShowUse)},
     {0x1BA7C0,kHudShowLoop,sizeof(kHudShowLoop)},{0x8168CF,kHudObjectDraw,sizeof(kHudObjectDraw)},
     {0x80843B,kRescueDraw,sizeof(kRescueDraw)},{0x803AC9,kCrossDraw,sizeof(kCrossDraw)},
@@ -817,15 +823,38 @@ void Camera(unsigned char* cam,std::uint64_t generation) noexcept {
 // One owner of the switch for both, so the scripts' own writes are kept for the end of either hold.
 void StockHud(unsigned char* cam,std::uint64_t generation) noexcept {
     if(!hudOk)return;
-    const bool hide=(camSide.shown && camSide.cam==cam && cameraSession.Current(generation)) || FirstPersonHidesStockHud(cam);
+    const bool mapHide=camSide.shown && camSide.cam==cam && cameraSession.Current(generation),fpHide=FirstPersonHidesStockHud(cam);
+    const bool hide=mapHide || fpHide;
     AcquireSRWLockExclusive(&hudLock);
     const bool was=hudRecord.hidden && hudRecord.cam==cam;
-    __try { maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown); }
+    __try { maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown,!mapHide); }
     __except(EXCEPTION_EXECUTE_HANDLER){hudRecord=maphud::Record{};}
     const bool now=hudRecord.hidden && hudRecord.cam==cam,want=hudRecord.want;
     ReleaseSRWLockExclusive(&hudLock);
     if(was!=now)Log(now ? "MAP the stock HUD hidden on camera %p (its switch +0x200 was %d)" : "MAP the stock HUD back on camera %p (%d)",
                     static_cast<void*>(cam),now ? static_cast<int>(want) : static_cast<int>(cam[kCamHudShown]));
+}
+
+// The damage layer's draw (map_stock_hud.h LendsDamage): while a vehicle's first person alone holds its camera's switch,
+// the switch is 1 for this one draw. Lent and returned under hudLock (Lend / Return: the record knows the 1 is lent, so
+// StockHud never takes it for the game's), the stock draw itself called without the lock (nothing it reaches can wait on it).
+void __fastcall DamageDrawHook(void* object,void* a,void* b,void* c) {
+    unsigned char* cam=Readable(object,kHudCamera+8) ? At<unsigned char*>(object,kHudCamera) : nullptr;
+    if(cam && !Readable(cam,kCamHudShown+1))cam=nullptr;
+    bool lent=false;
+    if(cam) {
+        AcquireSRWLockExclusive(&hudLock);
+        lent=maphud::Lend(hudRecord,cam,cameraSession.Generation(),cam+kCamHudShown);
+        ReleaseSRWLockExclusive(&hudLock);
+    }
+    __try { nextDamageDraw(object,a,b,c); }
+    __finally {   // the stock draw's faults are its own: only the lent switch is put back on the way out
+        if(lent) {
+            AcquireSRWLockExclusive(&hudLock);
+            maphud::Return(hudRecord,cam,cam+kCamHudShown);
+            ReleaseSRWLockExclusive(&hudLock);
+        }
+    }
 }
 
 // SetPlayerHudShow's write (its call to 0x118DF30): kept for the end of the hold on the map's camera, else written.
@@ -922,6 +951,12 @@ bool InstallHudSwitch() noexcept {
         Log("MAP the stock HUD's switch: SetPlayerHudShow's call could not be redirected: the stock HUD stays up on the map");
         return false;
     }
+    // The damage layer through a vehicle's first person (LendsDamage); without it the numbers go with the gauges.
+    auto slot=reinterpret_cast<void**>(image+kDamageObjectVtable)+kDamageDrawSlot;
+    void* next=nullptr;
+    if(*slot!=image+kHudObjectDrawFn || !edf::ChainVtableSlot(slot,reinterpret_cast<void*>(&DamageDrawHook),&next))
+        Log("MAP the damage layer's draw is not where expected: no damage numbers in a vehicle's first person");
+    else nextDamageDraw=reinterpret_cast<HudObjectDrawFn>(next);
     return true;
 }
 }  // namespace

@@ -3956,12 +3956,17 @@ def stock_gun_sight_ranged() -> None:
     arm = vhud.split('void Arm(', 1)[1].split('\n}\n', 1)[0]
     assert 'GunMarkOf(w,m,pos,dir,a)' in arm, 'src/vhud.cpp Arm: an arc gun\'s marks are GunMarkOf\'s'
     mark = vhud.split('void GunMarkOf(', 1)[1].split('\n}\n', 1)[0]
-    assert 'roundaim::GunSight(' in mark and 'target.ok ? target.at : nullptr' in mark
-    assert 'RangeTarget(v,r,eye,ms);' in vhud.split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
+    assert 'roundaim::Solve(round,pos,shooter,target.at,target.vel,' in mark and 'if(!target.ok ||' in mark, \
+        'the guide is the solved aim point (lead and drop), not where the target is at the bore pass'
+    # The target is acquired in the cone of the sight gun's fire control (src/firecontrol.h: a radar's wider).
+    assert 'RangeTarget(v,r,eye,ms,fcs::KitOf(' in vhud.split('void StockHudFrame(', 1)[1].split('\n}\n', 1)[0]
     stock = hud.split('void StockMark(', 1)[1].split('\n}\n', 1)[0]
-    assert 'a.ranged && !a.physicalOnly' in stock and 'LeadMark(' in stock
+    assert 'a.ranged && !a.physicalOnly' in stock and 'FcsLead(' in stock
+    lead = hud.split('void FcsLead(', 1)[1].split('\n}\n', 1)[0]
+    assert 'if(!kit.lead)return;' in lead and 'LeadMark(' in lead, 'the lead mark only where the fire control computes one'
     assert 'PhysicalPaths(' in stock and 'Pipper(' not in stock, 'physical endpoint is distinct from target lead cue'
     assert 'a.physicalOnly ||' in mark and 'a.targetRange=' in mark
+    assert '!fcs::KitOf(a.fcs).lead' in mark, 'a telescope computes no lead (GunMarkOf)'
     assert 'memcpy(a.at' not in mark and 'a.hit=' not in mark, 'lead selection cannot overwrite physical terrain result'
     assert 'SkySight();' in check.split('int main()', 1)[1]
     row = re.search(r'kE551Gun=\{"(V_\w+) \([^)]*\)",([\d.]+)f,([\d.]+)f,([\d.]+)f,(\d+)\}', check)
@@ -6051,7 +6056,19 @@ def map_hides_stock_hud() -> None:
     assert 'hudOk=holdOk && InstallHudSwitch();' in code and 'if(!hudOk)return;' in code
     step = code.split('void __fastcall CamStepHook(void* cam,void* step) {', 1)[1].split('\n}\n', 1)[0]
     assert step.index('__except(EXCEPTION_EXECUTE_HANDLER){camSide=CamSide{};') < step.index('StockHud(static_cast<unsigned char*>(cam),generation);')
-    assert 'maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown)' in code
+    assert 'maphud::Step(hudRecord,cam,generation,hide,cam+kCamHudShown,!mapHide)' in code
+    # The damage layer (docs/hud-re.md §12.3): its own wrapper's draw slot only, lent the switch under hudLock.
+    assert re.search(r'\bkDamageObjectVtable=0x17FCA28\b', code) and '0x17FCA28' in doc
+    assert '*slot!=image+kHudObjectDrawFn' in install, 'the damage slot is chained only while it is the stock draw'
+    lend = code.split('void __fastcall DamageDrawHook(', 1)[1].split('\n}\n', 1)[0]
+    # Lent and returned under hudLock, the stock draw called without it (SRW locks do not nest: nothing the draw reaches
+    # may wait on the lock), the return in a __finally (the draw's faults are its own, never swallowed).
+    draw_at = lend.index('nextDamageDraw(')
+    assert lend.index('AcquireSRWLockExclusive(&hudLock);') < lend.index('maphud::Lend(') \
+        < lend.index('ReleaseSRWLockExclusive(&hudLock);') < draw_at < lend.index('__finally') < lend.index('maphud::Return(')
+    assert '__except' not in lend, 'the stock draw\'s faults are not swallowed'
+    assert 'inline bool LendsDamage(' in h and 'inline bool Lend(' in h and 'inline void Return(' in h
+    assert 'else if(*shown && !r.lent)r.want=true;' in h, 'a lent 1 is never taken for the game\'s wish'
     assert 'maphud::GameSet(hudRecord,cam,cameraSession.Generation(),show)' in code
     assert 'if(write)reinterpret_cast<HudShowFn>(image+kHudShow)(cam,show);' in code
     assert 'cameraSession.Reset();' in code.split('void ResetMap() noexcept {', 1)[1].split('\n}\n', 1)[0]

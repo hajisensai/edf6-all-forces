@@ -85,7 +85,16 @@ bool VehicleEye(unsigned char*,float* eye,RideView* out) noexcept {
     *out=RideView{};out->vehicle=rideVehicle;
     std::memcpy(out->frame,rideFrame.m,64);std::memcpy(eye,rideFrame.m+12,12);return true;
 }
-int VehicleScreens(const unsigned char*,int,const float*,CockpitScreens* out) noexcept { out->n=0;return 0; }
+bool sensorScreen=false,flownCraft=false;   // the seat has a weapon station's monitor; the vehicle is a craft the player flies
+int VehicleScreens(const unsigned char*,int,const float*,CockpitScreens* out) noexcept {
+    out->n=0;
+    if(sensorScreen){out->s[0]=CockpitScreen{};out->s[0].kind=ScreenKind::sensor;out->n=1;}
+    return out->n;
+}
+bool PlayerJetCraft(const void*) noexcept { return flownCraft; }
+bool gunTurns=false;float gunWay[3]={0,0,1};   // the seat's gun turns on its own (vhud.cpp SeatGunLine) and its bore
+bool SeatGunLine(const void*,unsigned,float* dir) noexcept { if(!gunTurns)return false;std::memcpy(dir,gunWay,12);return true; }
+bool IsHelicopter(const void*) noexcept { return false; }
 void* retiredThis=nullptr;unsigned retiredFlags=0;
 void* __fastcall RecordFlashDtor(void* object,unsigned flags) { retiredThis=object;retiredFlags=flags;return object; }
 bool drawArmMask=false;
@@ -332,6 +341,32 @@ int main() {
         rideFrame.m[12]=5;rideFrame.m[13]=2;rideFrame.m[14]=7;
         check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,
               "the production ride copies the complete seat frame, including bank/inversion and position");
+    }
+    // A weapon station's seat (a sensor screen): its camera looks the stock seat camera's way (the rider's aim), level, from
+    // the marker's eye; the pilot's seat of a flown craft and a cockpit seat keep the marker's frame (fp_view.h GunCamera*).
+    {
+        const float eyeAt[3]={5,2,7};
+        rideFrame=fpview::Identity();std::memcpy(rideFrame.m+12,eyeAt,12);
+        const fpview::M4 native=fpview::HeadingFrame(.8f,.5f,eyeAt);   // the stock camera laid 0.5 rad up with the aim
+        sensorScreen=true;
+        std::memcpy(cam+kCamMatrix,native.m,64);
+        check(Ride(cam,human) && std::fabs(At<float>(cam,kCamMatrix+36)-native.m[9])<1e-5f &&
+              std::fabs(At<float>(cam,kCamMatrix+32)-native.m[8])<1e-5f && At<float>(cam,kCamMatrix+48)==5.0f,
+              "a fixed gun's station (a virtual aim) looks the stock seat camera's way, from its marker's eye");
+        // A gun that turns: its bore, held at a 20 degree stop while the stock camera looks 0.5 rad up and further round.
+        gunTurns=true;
+        const fpview::M4 bore=fpview::HeadingFrame(.3f,.349f,eyeAt);std::memcpy(gunWay,bore.m+8,12);
+        std::memcpy(cam+kCamMatrix,native.m,64);
+        check(Ride(cam,human) && std::fabs(At<float>(cam,kCamMatrix+36)-bore.m[9])<1e-5f &&
+              std::fabs(At<float>(cam,kCamMatrix+32)-bore.m[8])<1e-5f && At<float>(cam,kCamMatrix+48)==5.0f,
+              "a turning gun's camera looks along its bore (stopped at its elevation limit), not the stock camera's way");
+        gunTurns=false;
+        flownCraft=true;
+        std::memcpy(cam+kCamMatrix,native.m,64);
+        check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,"a flown craft's pilot monitor keeps the nose's frame");
+        flownCraft=false;sensorScreen=false;
+        std::memcpy(cam+kCamMatrix,native.m,64);
+        check(Ride(cam,human) && std::memcmp(cam+kCamMatrix,rideFrame.m,64)==0,"a cockpit seat keeps its bone's frame");
     }
     // Production instrument pose on a synthetic skeleton, then the same restore used after native draw.
     unsigned char inst[0x50]{},bones[2*kBoneStride]{};float pose[32]{},backup[32]{};

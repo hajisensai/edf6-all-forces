@@ -281,8 +281,9 @@ bool HudGlass(const CockpitScreens& c) noexcept {
     return false;
 }
 
-// A remote weapon station's monitor over the whole view (a sensor screen: the eye is the gun's camera): the sensor's 4:3
-// field (ScopeShade's: dark bands, a thin bezel, corner marks, the field of view), a faint green of a monitor over it,
+// A remote weapon station's monitor over the whole view (a sensor screen: the eye is the gun's camera, looking where the
+// gun is laid: firstperson.cpp Ride): the sensor's frame (ScopeShade's: the whole view, a thin bezel just inside its
+// edge, corner marks, the field of view), a faint green of a monitor over it,
 // the gun's bearing off the hull and its elevation bottom left, the weapon and its rounds top right. The gun's reticle
 // is the aim marks' (StockAimOnly).
 void RwsDisplay(void* drawer,void* ctx,Text* t,float width,float height,float s,const ScreenFeed& f,const Snapshot& snap,
@@ -292,10 +293,18 @@ void RwsDisplay(void* drawer,void* ctx,Text* t,float width,float height,float s,
     float hx,hy;
     scopeview::RectHalf(width,height,&hx,&hy);
     const float cx=width*0.5f,cy=height*0.5f,pad=40.0f*s;
-    Rect(drawer,ctx,cx-hx,cy-hy,cx+hx,cy+hy,kScreenGlow);
+    Rect(drawer,ctx,0.0f,0.0f,width,height,kScreenGlow);
     Label(t,lines,at,cx+hx-pad,cy-hy+pad,2,kLineScale,kScreenInk,L"%ls",Tr(Tx::rwsTitle));
     if(f.picked>=0 && f.picked<f.cells)Label(t,lines,at,cx+hx-pad,cy-hy+pad+34.0f*s,2,kLineScale,kScreenInk,L"%ls",f.cell[f.picked].text);
     else if(f.cells>0)Label(t,lines,at,cx+hx-pad,cy-hy+pad+34.0f*s,2,kLineScale,kScreenInk,L"%ls",f.cell[0].text);
+    // The station's fire control (firecontrol.h), of the gun it lays now.
+    const StockHudReadout& r=snap.stockHud;
+    const int sightArm=snap.stock && r.sight>=0 && r.sight<r.arms && r.sight<kStockArms ? r.sight : -1;
+    if(sightArm>=0) {
+        static const Tx kSystems[]={Tx::fcsOptical,Tx::fcsGyro,Tx::fcsComputer,Tx::fcsRadar};
+        Label(t,lines,at,cx+hx-pad,cy-hy+pad+68.0f*s,2,kLineScale*0.8f,kScreenDim,L"%ls",
+              Tr(kSystems[static_cast<int>(r.arm[sightArm].fcs)]));
+    }
     if(snap.stock && snap.stockHud.aimOk) {
         const float* a=snap.stockHud.aim;
         const float gun=sight::HeadingOf(a),hull=sight::HeadingOf(snap.stockHud.hull);

@@ -1,10 +1,12 @@
 // A magnified sight's picture (the user, 2026-10-08: "the gunner's sight: the zoomed one too, and not only ground
 // vehicles: everything that has a sight"): while the sight is magnified (sightzoom.cpp, SightZoomNow > 1) the screen
 // is the sight's field of view, the rest dark. A round one for an optical sight (a tank's, a gun's), centred on the
-// screen (the camera's line of sight: what the sight looks along); a rectangle (4:3) for the gunship gunner's sensor.
+// screen (the camera's line of sight: what the sight looks along). An electronic sensor (the gunship gunner's, a remote
+// weapon station's monitor) is a screen of its own and fills the whole view (the user, 2026-10-25: "武器站改成全屏显示，
+// 周围好多黑块"; it was a 4:3 box in black bands): only its bezel and corner marks, a little inside the view's edge.
 // The dark is drawn with the HUD's own strip quads (hud.cpp Quad4): the round field's outside as kSides ring pieces
-// from the circle out past the screen's farthest corner, the rectangle's as four bands. Pure arithmetic (no EDF.dll):
-// tools/scopeview_check.cpp samples the screen: dark exactly outside the field, clear inside it.
+// from the circle out past the screen's farthest corner. Pure arithmetic (no EDF.dll): tools/scopeview_check.cpp
+// samples the screen: dark exactly outside the round field, clear inside it; the sensor's frame inside the view.
 #pragma once
 #include <cmath>
 
@@ -12,7 +14,7 @@ namespace crew {
 namespace scopeview {
 constexpr int kSides=64;
 constexpr float kRound=0.46f;     // the round field's radius: this share of the screen's smaller side
-constexpr float kRectHigh=0.40f;  // the sensor's half height: this share of the screen's height (its width 4:3, held to the screen)
+constexpr float kRectInset=0.03f;  // the sensor's bezel: this share of the screen's smaller side in from each edge
 constexpr float kPi=3.14159265f;
 // The eyepiece's edge (2026-10-11, the sight redone as a real optic): a real exit pupil does not end in a drawn line;
 // the image darkens over the last few percent of the field (vignetting) into the black of the eyepiece. kFeathers
@@ -40,19 +42,11 @@ inline Quad RingPiece(int i,float cx,float cy,float r,float out) noexcept {
     const float ca=std::cos(a),sa=std::sin(a),cb=std::cos(b),sb=std::sin(b);
     return Quad{{cx+ca*r,cx+ca*out,cx+cb*r,cx+cb*out},{cy+sa*r,cy+sa*out,cy+sb*r,cy+sb*out}};
 }
-// The sensor's half size on a w x h screen.
+// The sensor's bezel's half size on a w x h screen: the whole view less kRectInset of its smaller side each way (no
+// dark band: the picture is the whole screen).
 inline void RectHalf(float w,float h,float* hx,float* hy) noexcept {
-    *hy=kRectHigh*h;
-    *hx=*hy*4.0f/3.0f;
-    if(*hx>0.48f*w){*hx=0.48f*w;*hy=*hx*3.0f/4.0f;} // fit narrow/split-screen viewports without squeezing the sensor
-}
-// The four dark bands round the sensor's field (above, under, left, right).
-inline void RectBands(float w,float h,Quad* out) noexcept {
-    float hx,hy;
-    RectHalf(w,h,&hx,&hy);
-    const float cx=w*0.5f,cy=h*0.5f,l=cx-hx,r=cx+hx,t=cy-hy,b=cy+hy;
-    const auto box=[](float x0,float y0,float x1,float y1){return Quad{{x0,x1,x0,x1},{y0,y0,y1,y1}};};
-    out[0]=box(0.0f,0.0f,w,t);out[1]=box(0.0f,b,w,h);out[2]=box(0.0f,t,l,b);out[3]=box(r,t,w,b);
+    const float in=kRectInset*(w<h ? w : h);
+    *hx=0.5f*w-in;*hy=0.5f*h-in;
 }
 
 // Whether (px, py) is inside the quad (either of its triangles).

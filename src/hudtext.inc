@@ -49,6 +49,12 @@ HUDTEXT(highCamOn,L"HIGH CAM ON [%ls]",L"俯瞰视角 开 [%ls]",L"俯瞰視角 
 HUDTEXT(highCamOff,L"HIGH CAM [%ls]",L"俯瞰视角 [%ls]",L"俯瞰視角 [%ls]",L"俯瞰カメラ [%ls]")
 HUDTEXT(sightRange,L"LRF %d m",L"测距 %d m",L"測距 %d m",L"測距 %d m")
 HUDTEXT(sightNoRange,L"LRF ----",L"测距 ----",L"測距 ----",L"測距 ----")
+// A gun's fire control (firecontrol.h): its solution by the lead mark (hud.cpp FcsLead), its system on a station's monitor
+HUDTEXT(fcsSolution,L"TOF %.1f s  TGT %d km/h",L"飞行 %.1f 秒  目标 %d km/h",L"飛行 %.1f 秒  目標 %d km/h",L"飛翔 %.1f 秒  目標 %d km/h")
+HUDTEXT(fcsOptical,L"FCS OPTICAL",L"火控 光学瞄准镜",L"火控 光學瞄準鏡",L"射統 光学照準")
+HUDTEXT(fcsGyro,L"FCS GYRO LEAD",L"火控 陀螺提前量瞄具",L"火控 陀螺提前量瞄具",L"射統 ジャイロ見越し")
+HUDTEXT(fcsComputer,L"FCS LRF + BALLISTIC",L"火控 激光测距 + 弹道计算机",L"火控 雷射測距 + 彈道計算機",L"射統 レーザー測距 + 弾道計算機")
+HUDTEXT(fcsRadar,L"FCS TRACKING RADAR",L"火控 跟踪雷达",L"火控 追蹤雷達",L"射統 追尾レーダー")
 // A magnified optic's fire-control data line (hud.cpp ScopeData) and the electronic sensor's field of view (ScopeShade)
 HUDTEXT(scopeReady,L"READY",L"就绪",L"就緒",L"射撃可")
 HUDTEXT(scopeLoading,L"LOAD %.1f",L"装填 %.1f",L"裝填 %.1f",L"装填 %.1f")

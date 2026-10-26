@@ -510,8 +510,35 @@ void CameraOwnership() {
     }
 }
 
+// A gun camera (fp_view.h GunCameraFrame): at the marker's eye, looking along the way it is given, level. With a gun
+// held at its elevation limit (20 degrees) while the stock camera looks 60 degrees up (a BMPT / PzH 2000 / Patriot laid
+// past its stops), the camera given the bore stays on the gun: the gun's line is the view's centre, never under its edge.
+void GunCamera() {
+    const float eye[3]={4,3,-2},elsewhere[3]={-30,12,40};
+    for(float yaw:{-2.5f,0.0f,1.2f})for(float pitch:{-.3f,0.0f,.4f,1.2f}) {
+        M4 rolled=crew::fpview::HeadingFrame(yaw,pitch,elsewhere);
+        rolled.m[4]+=.2f;rolled.m[1]+=.2f;   // a rolled frame's forward: the camera stays level
+        M4 out;
+        const bool ok=crew::fpview::GunCameraFrame(rolled.m+8,eye,&out);
+        const M4 want=crew::fpview::HeadingFrame(yaw,pitch,eye);
+        float error=0;for(int i=0;i<16;++i)error+=std::fabs(out.m[i]-want.m[i]);
+        Expect(ok && error<1e-4f,"a gun camera looks along its way from its own eye, level",error);
+    }
+    const float limit=.349f,wanted=1.047f;   // the gun's stop and where the stock camera looks
+    const M4 stock=crew::fpview::HeadingFrame(.6f,wanted,elsewhere),gun=crew::fpview::HeadingFrame(.6f,limit,eye);
+    M4 out;
+    Expect(crew::fpview::GunCameraFrame(gun.m+8,eye,&out) && std::fabs(std::asin(out.m[9])-limit)<1e-4f &&
+           std::fabs(std::asin(stock.m[9])-wanted)<1e-4f,"a gun at its stop: the camera on the gun's line, not the stock view's");
+    const float none[3]={0,0,0};
+    Expect(!crew::fpview::GunCameraFrame(none,eye,&out),"no way to look: no gun camera (the bone's frame stays)");
+    Expect(crew::fpview::GunCameraSeat(true,false,0) && crew::fpview::GunCameraSeat(true,true,1) &&
+           !crew::fpview::GunCameraSeat(true,true,0) && !crew::fpview::GunCameraSeat(false,false,1),
+           "gun cameras: every station monitor seat but a flown craft's pilot's");
+}
+
 int main() {
     CameraOwnership();
+    GunCamera();
     OrientationAndSteadiness();
     SupportArms();
     Expect(Near(CenteredGrip(.17f,.07f),.10f) && Near(CenteredGrip(.34f,.07f),.27f),
