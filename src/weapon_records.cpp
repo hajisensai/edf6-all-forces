@@ -312,9 +312,11 @@ void* __cdecl ResultCopyHook(void* dst,const void* src,std::size_t n) {
     for(std::size_t i=at+1;i<loadCount;++i)loads[i-1]=loads[i];
     --loadCount;
     if(IsMainSave(path))ReadSidecar(path,Ext(gs));
-    else {
+    else {   // no sidecar of its own: MAIN.GST's is kept (a save deleting it would lose its rows for good)
         std::memset(Ext(gs),0,kExtBytes);
-        Log("WEAPONREC a load filled the save block from \"%ls\", not a MAIN.GST: rows past 0x800 cleared",path);
+        held=true;
+        Log("WEAPONREC a load filled the save block from \"%ls\", not a MAIN.GST: rows past 0x800 cleared; no save "
+            "writes the sidecar until the next load",path);
     }
     return dst;
 }
