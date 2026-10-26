@@ -114,6 +114,14 @@ Tanks / Combat / Bulga / Depth / Heli / 各兵种）同样编译在代码里。
 通用页行标签的实际顺序（`0x899750`）：Up、Down、Left、Right、RideRescue、Spot、**Shotcut（T）、Chat（Ctrl）**、
 WeaponShotcut1~3、VoiceChat（§1 表里 Chat / Shotcut 两行的顺序以此为准）。键盘页的行号 = 动作号 − 页首动作（`0x898FF7 add bl,0x16`）。
 
+**插件改动的原版默认值（2026-10-26，用户批准）**：通用页 Chat（`0x1D`）左 Ctrl → **Enter（0x62）**、VoiceChat（`0x21`）V → **K（0x1C）**。
+`0xD48B0` 对每个动作、每套各有一条 `mov dword [rcx+disp32], imm32`（10 字节，立即数在 +6）：Chat 在 `0xD48EC` / `0xD4964` / `0xD49DC` / `0xD4A54`，
+VoiceChat 在 `0xD491E` / `0xD4996` / `0xD4A0E` / `0xD4A86`（`keyconfig_menu.h kStockDefaults`，插件加载时核对原字节后只改立即数）。
+`0xD48B0` 只在两处运行：新建键位表（`0xD3F90` → `0xD4530` 标志 8；没有 COMMON.CFG 时就用它，「全部恢复默认」`0xDB8C0` 复制的也是新建表）
+和通用页「恢复默认」（`0xD4BB0` 页 0）。所以已存在的 COMMON.CFG 不受影响。验证：`tests/keyconfig_native_audit.py` 逐条核对这 8 处的原字节
+（动作、套号、原键）与 `0x7CCD10` 的聊天键限制（Enter、K 都允许）；实机待验证的是「无 COMMON.CFG 首次启动」与「通用页恢复默认」后显示 Enter / K。
+假设插件在键位表建立前加载（EDFModLoader 在游戏初始化早期加载插件），未实机核对；若键位表先建好，首次启动仍会存 Ctrl / V，「恢复默认」后才变。
+
 `0xD5560`（加载后 `0xD41F0` 调）只做一件事：旧存档没有 `0x4D`（喇叭）时，从候选键里挑一个没被占用的填进去。
 
 ### 5.3 按兵种存键

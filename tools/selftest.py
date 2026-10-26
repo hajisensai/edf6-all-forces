@@ -6265,7 +6265,7 @@ def npc_formation_wired() -> None:
     form = drive.index('if(!t.e && FormationMove(')
     for before in ('Evade(s,h,c,pos,ms,&p.move)', 'Board(s,h,pos,ms)', 'FallBack(s,h,pos,served,ms)', 'npc::LaneEscape('):
         assert drive.index(before) < form, before
-    for key, default in (('NpcFormation', '0'), ('NpcFormationKey', '84'), ('NpcFormationSpacing', '5'), ('NpcGuardFormation', '0')):
+    for key, default in (('NpcFormation', '0'), ('NpcFormationCycleKey', '85'), ('NpcFormationSpacing', '5'), ('NpcGuardFormation', '0')):
         assert f'L"{key}"' in plugin and (f'FixInt("{key}"' in plugin or f'Fix("{key}"' in plugin), key
         assert re.search(rf'^{key}={default}\s*$', ini, re.M), key
         assert key in readme and key in doc, key

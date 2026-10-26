@@ -279,7 +279,7 @@ void Validate(Config& n) noexcept {
     n.sazabiDescendKey=static_cast<int>(FixInt("SazabiDescendKey",n.sazabiDescendKey,0,254));
     n.sazabiFunnelKey=static_cast<int>(FixInt("SazabiFunnelKey",n.sazabiFunnelKey,0,254));
     n.sazabiFunnelButton=static_cast<int>(FixInt("SazabiFunnelButton",n.sazabiFunnelButton,0,255));
-    n.sazabiCannonKey=static_cast<int>(FixInt("SazabiCannonKey",n.sazabiCannonKey,0,254));
+    n.sazabiCannonKey=static_cast<int>(FixInt("SazabiMegaCannonKey",n.sazabiCannonKey,0,254));
     n.sazabiCannonButton=static_cast<int>(FixInt("SazabiCannonButton",n.sazabiCannonButton,0,255));
     n.sazabiMeleeKey=static_cast<int>(FixInt("SazabiMeleeKey",n.sazabiMeleeKey,0,254));
     n.sazabiMeleeButton=static_cast<int>(FixInt("SazabiMeleeButton",n.sazabiMeleeButton,0,255));
@@ -450,7 +450,7 @@ void Validate(Config& n) noexcept {
     Fix("QMarkPointSec",n.qmarkPointSec,1.0f,600.0f);
     Fix("QMarkVolume",n.qmarkVolume,0.0f,2.0f);
     n.npcFormation=static_cast<int>(FixInt("NpcFormation",n.npcFormation,0,10));
-    n.npcFormationKey=static_cast<int>(FixInt("NpcFormationKey",n.npcFormationKey,0,254));
+    n.npcFormationKey=static_cast<int>(FixInt("NpcFormationCycleKey",n.npcFormationKey,0,254));
     Fix("NpcFormationSpacing",n.npcFormationSpacing,2.0f,30.0f);
     n.npcGuardFormation=static_cast<int>(FixInt("NpcGuardFormation",n.npcGuardFormation,0,10));
     n.npcPickupKey=static_cast<int>(FixInt("NpcPickupKey",n.npcPickupKey,0,254));
@@ -476,6 +476,8 @@ void IgnoreRetired() noexcept {
                                      {L"DrillHeatSec","superseded by DrillOverheatSec (30 s by default: 12 s overheated too soon)"},
                                      {L"FirstPersonEyeEase","superseded by FirstPersonViewHeightEase (the eye no longer follows the head's sway)"},
                                      {L"ProteusModeKey","superseded by ProteusStanceKey (G by default since 2026-10-26: the 形态 family with the landing gear)"},
+                                     {L"NpcFormationKey","superseded by NpcFormationCycleKey (U by default since 2026-10-26: T is the stock Shotcut)"},
+                                     {L"SazabiCannonKey","superseded by SazabiMegaCannonKey (X by default since 2026-10-26: E is the stock get-off)"},
                                      {L"PlayerJetGearButton","superseded by PlayerJetGearPadButton (the d-pad down held, since 2026-10-26: L3 is the free look)"}};
     constexpr int kCount=static_cast<int>(sizeof(kRetired)/sizeof(kRetired[0]));
     static bool said[kCount]{};
@@ -608,7 +610,7 @@ void LoadConfig() noexcept {
     n.sazabiFunnelKey=ReadInt(L"SazabiFunnelKey",static_cast<DWORD>(ReadInt(L"SazabiSwitchKey",static_cast<DWORD>(n.sazabiFunnelKey))));
     n.sazabiFunnelButton=ReadInt(L"SazabiFunnelButton",
                                  static_cast<DWORD>(ReadInt(L"SazabiSwitchButton",static_cast<DWORD>(n.sazabiFunnelButton))));
-    n.sazabiCannonKey=ReadInt(L"SazabiCannonKey",static_cast<DWORD>(n.sazabiCannonKey));
+    n.sazabiCannonKey=ReadInt(L"SazabiMegaCannonKey",static_cast<DWORD>(n.sazabiCannonKey));
     n.sazabiCannonButton=ReadInt(L"SazabiCannonButton",static_cast<DWORD>(n.sazabiCannonButton));
     n.sazabiMeleeKey=ReadInt(L"SazabiMeleeKey",static_cast<DWORD>(n.sazabiMeleeKey));
     n.sazabiMeleeButton=ReadInt(L"SazabiMeleeButton",static_cast<DWORD>(n.sazabiMeleeButton));
@@ -907,7 +909,7 @@ void LoadConfig() noexcept {
     n.qmarkVolume=ReadFloat(L"QMarkVolume",n.qmarkVolume);
     n.vanillaSpot=ReadBool(L"VanillaSpot",n.vanillaSpot);
     n.npcFormation=ReadInt(L"NpcFormation",static_cast<DWORD>(n.npcFormation));
-    n.npcFormationKey=ReadInt(L"NpcFormationKey",static_cast<DWORD>(n.npcFormationKey));
+    n.npcFormationKey=ReadInt(L"NpcFormationCycleKey",static_cast<DWORD>(n.npcFormationKey));
     n.npcFormationSpacing=ReadFloat(L"NpcFormationSpacing",n.npcFormationSpacing);
     n.npcGuardFormation=ReadInt(L"NpcGuardFormation",static_cast<DWORD>(n.npcGuardFormation));
     n.npcPickupKey=ReadInt(L"NpcPickupKey",static_cast<DWORD>(n.npcPickupKey));

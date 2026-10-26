@@ -261,4 +261,25 @@ ok(b[0x8928F1] == ('mov', 'edx, dword ptr [rbx + 0x10]') and b[0x8928FD] == ('jm
 ok(ins(0x7CD940, 0x46)[0x7CD975] == ('call', '0x7ccd10'), 'the dialog\'s key check: the pad / move / chat limits only')
 ok(re.search(r'kFirstAction=0x4F', keybind) is not None and max(a for acts_ in PAGES for a in acts_) < 0x4F,
    'the plugins\' slots 0x4F.. are past every stock action and the 0x4E the binder reads')
+
+# The stock common page's defaults the plugin changes (keyconfig_menu.h kStockDefaults: Chat -> Enter, VoiceChat -> K): each
+# site is 0xD48B0's write of that action into that set, with the stock key; the new keys pass the dialog's chat limits.
+sd = re.findall(r'\{(0x[0-9A-F]+),(0x1D|0x21),(\d),(kChatFrom|kVoiceFrom),(kChatTo|kVoiceTo)\}', menu_h)
+consts = {k: int(v, 16) for k, v in re.findall(r'(kChatFrom|kChatTo|kVoiceFrom|kVoiceTo)=(0x[0-9A-F]+)', menu_h)}
+ok(len(sd) == 8, 'keyconfig_menu.h: eight stock default sites')
+for rva, act, st, frm, to in sd:
+    rva, act, st = int(rva, 16), int(act, 16), int(st)
+    want = bytes([0xC7, 0x81]) + struct.pack('<I', 0x28 + st * 0x3FC + act * 4) + struct.pack('<i', consts[frm])
+    ok(bytes(img[rva:rva + 10]) == want and 0xD48B0 <= rva < 0xD4A91,
+       f'{rva:#x}: 0xD48B0 writes action {act:#x} of set {st} as {consts[frm]:#x} (the plugin makes it {consts[to]:#x})')
+
+
+def chat_refuses(key):   # 0x7CCD10 for actions 0x1C / 0x1D / 0x21
+    return bool((0 <= key - 0x63 <= 8 and (0x1E3 >> (key - 0x63)) & 1) or (key <= 0x2A and (0x5100024F000 >> key) & 1))
+
+
+ok(not chat_refuses(consts['kChatTo']) and not chat_refuses(consts['kVoiceTo']) and chat_refuses(0x63) and chat_refuses(0x28),
+   'Enter (0x62) and K (0x1C) are keys the stock dialog takes for Chat / VoiceChat (0x7CCD10 refuses Space, W ...)')
+b = ins(0x7CCD10, 0x38)
+ok(b[0x7CCD25] == ('mov', 'ecx, 0x1e3') and b[0x7CCD35] == ('movabs', 'rcx, 0x5100024f000'), 'the chat limits as read (0x7CCD10)')
 print(f'{checks} checks passed')

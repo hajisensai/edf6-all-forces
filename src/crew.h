@@ -139,7 +139,7 @@ struct Config {
     // its default) and the chest cannon (held: charged, let go: fired; E; a pad's B)
     int sazabiFunnelKey=0x52;
     int sazabiFunnelButton=0x10;
-    int sazabiCannonKey=0x45;
+    int sazabiCannonKey=0x58;       // X (ini SazabiMegaCannonKey; E was the stock get-off key: plan §3.3)
     int sazabiCannonButton=0x02;
     int sazabiMeleeKey=0x56;        // the beam tomahawk swung (V; a pad's X)
     int sazabiMeleeButton=0x04;
@@ -466,7 +466,8 @@ struct Config {
     float qmarkVolume=0.8f;         // the Q mark's cues (marked / a teammate marked / let go), 0: silent
     bool vanillaSpot=false;         // the stock spot (原版 Q, SpotEffect): false = the local players' is not cast (turretaim.cpp)
     int npcFormation=0;             // the recruited squads' march round the player (formation.h Shape: 0 stock, 1 column...)
-    int npcFormationKey=0x54;       // ...on foot: cycles it ('T'; 0: off; the map's T on a selected squad too)
+    int npcFormationKey=0x55;       // ...on foot: cycles it ('U', ini NpcFormationCycleKey: T is the stock Shotcut, plan §3.3; 0: off;
+                                    // the map's T on a selected squad too)
     float npcFormationSpacing=5.0f; // ...m between soldiers
     int npcGuardFormation=0;        // a guard order's defence (0 stock radius, 10 perimeter, 5 line, 3 wedge)
     int npcPickupKey=0x59;          // on foot: the recruited squads spread out and fetch the item boxes ('Y'; 0: off)

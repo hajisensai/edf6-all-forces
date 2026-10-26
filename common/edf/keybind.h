@@ -112,7 +112,7 @@ struct Slot {
 };
 inline constexpr Slot kSlots[]={
     // page 11: on foot and anywhere
-    {0x4F,11,0,Owner::crew,L"NpcFormationKey",0x54},
+    {0x4F,11,0,Owner::crew,L"NpcFormationCycleKey",0x55},
     {0x50,11,1,Owner::crew,L"NpcPickupKey",0x59},
     {0x51,11,2,Owner::crew,L"PlayerJetHailKey",0x48},
     {0x52,11,3,Owner::crew,L"FirstPersonKey",0x56},
@@ -159,7 +159,7 @@ inline constexpr Slot kSlots[]={
     {0x75,16,1,Owner::crew,L"SazabiDashKey",0x10},
     {0x76,16,2,Owner::crew,L"SazabiDescendKey",0x11},
     {0x77,16,3,Owner::crew,L"SazabiFunnelKey",0x52},
-    {0x78,16,4,Owner::crew,L"SazabiCannonKey",0x45},
+    {0x78,16,4,Owner::crew,L"SazabiMegaCannonKey",0x58},
     {0x79,16,5,Owner::crew,L"SazabiMeleeKey",0x56},
     {0x7A,16,6,Owner::crew,L"SazabiGuardKey",0x42},
 };

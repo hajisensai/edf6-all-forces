@@ -54,6 +54,29 @@ inline constexpr std::size_t kSyncedRows=0x7CDE40;
 inline constexpr unsigned char kSyncedRowsCode[]={0x83,0xF8,0x05};
 inline constexpr unsigned char kSyncedRowsOurs[]={0x83,0xF8,static_cast<unsigned char>(kLastPage-5)};
 
+// --- The stock common page's defaults (plan §3.3, the user 2026-10-26: Chat to Enter, VoiceChat to a key nobody uses)
+// 0xD48B0 writes the common page's defaults into sets 0..3, one `mov dword [rcx+disp32], imm32` (10 bytes, the imm at +6)
+// per action per set; it runs when the store is built without a COMMON.CFG (0xD3F90 -> 0xD4530 flag 8, and the full
+// reset 0xDB8C0 copies such a store) and on the common page's 「恢复默认」 (0xD4BB0 page 0). Only these immediates change:
+// a player's COMMON.CFG keeps whatever it holds (keyconfig-re.md §5.2).
+struct StockDefault { std::size_t rva; int action,set; std::int32_t from,to; };
+inline constexpr std::size_t kDefaultImm=6,kDefaultSize=10;
+inline constexpr std::int32_t kChatFrom=0x58,kChatTo=0x62,kVoiceFrom=0x27,kVoiceTo=0x1C;   // ControlL -> Return, V -> K
+inline constexpr StockDefault kStockDefaults[]={
+    {0xD48EC,0x1D,0,kChatFrom,kChatTo},{0xD491E,0x21,0,kVoiceFrom,kVoiceTo},
+    {0xD4964,0x1D,1,kChatFrom,kChatTo},{0xD4996,0x21,1,kVoiceFrom,kVoiceTo},
+    {0xD49DC,0x1D,2,kChatFrom,kChatTo},{0xD4A0E,0x21,2,kVoiceFrom,kVoiceTo},
+    {0xD4A54,0x1D,3,kChatFrom,kChatTo},{0xD4A86,0x21,3,kVoiceFrom,kVoiceTo},
+};
+// The instruction as the stock has it (c7 81 disp32 imm32) and as it is made.
+inline void StockDefaultCode(const StockDefault& d,bool ours,unsigned char* out) noexcept {
+    const std::uint32_t disp=static_cast<std::uint32_t>(kb::kSlotsAt+static_cast<std::size_t>(d.set)*kb::kSetStride+static_cast<std::size_t>(d.action)*4);
+    const std::int32_t imm=ours ? d.to : d.from;
+    out[0]=0xC7;out[1]=0x81;
+    std::memcpy(out+2,&disp,4);
+    std::memcpy(out+kDefaultImm,&imm,4);
+}
+
 // --- Calls redirected
 inline constexpr std::size_t kResetCall=0x89A286,kResetPage=0xD4BB0;      // 「恢复默认」: the page's defaults (mgr, player, page)
 inline constexpr std::size_t kAllowedCall=0x89D1F1,kKeyAllowed=0x7CD940;  // the dialog: may this key go to this action

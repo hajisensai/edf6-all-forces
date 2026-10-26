@@ -105,14 +105,14 @@ enum Ctx : unsigned {
 struct Bind { std::string name; int code; unsigned ctx; int page; };
 std::vector<Bind> Binds() {
     std::vector<Bind> b;
-    // the stock keyboard defaults (0xD48B0, 0xD4530 flags 0x10/0x20, 0xD52F0, 0xD50D0, 0xD4FD0, 0xD51A0, 0xD4530 0x80 / bit 11;
+    // the stock keyboard defaults (Chat and VoiceChat as the plugin makes them: keyconfig_menu.h kStockDefaults) (0xD48B0, 0xD4530 flags 0x10/0x20, 0xD52F0, 0xD50D0, 0xD4FD0, 0xD51A0, 0xD4530 0x80 / bit 11;
     // tests/keyconfig_native_audit.py reads them), the common page in every situation; Spot left out (the plugins follow it)
     const auto stock=[&](const char* n,int code,unsigned ctx,int page){b.push_back({n,code,ctx,page});};
     stock("stock Up",0x28,kFoot|kVehicles,0);stock("stock Down",0x24,kFoot|kVehicles,0);
     stock("stock Left",0x12,kFoot|kVehicles,0);stock("stock Right",0x15,kFoot|kVehicles,0);
     stock("stock RideRescue",0x16,kFoot|kVehicles,0);stock("stock Shotcut",0x25,kFoot|kVehicles,0);
-    stock("stock Chat",0x58,kFoot|kVehicles,0);stock("stock WeaponShotcut1",0x2D,kFoot,0);
-    stock("stock WeaponShotcut2",0x2E,kFoot,0);stock("stock WeaponShotcut3",0x2F,kFoot,0);stock("stock VoiceChat",0x27,kFoot|kVehicles,0);
+    stock("stock Chat",km::kChatTo,kFoot|kVehicles,0);stock("stock WeaponShotcut1",0x2D,kFoot,0);
+    stock("stock WeaponShotcut2",0x2E,kFoot,0);stock("stock WeaponShotcut3",0x2F,kFoot,0);stock("stock VoiceChat",km::kVoiceTo,kFoot|kVehicles,0);
     stock("stock Attack1",0x0C,kFoot,1);stock("stock Attack2",0x0E,kFoot,1);stock("stock Jump",0x63,kFoot,1);
     stock("stock WeaponSelect",0x0F,kFoot,1);stock("stock Reload",0x23,kFoot,1);stock("stock Dash/Boost",0x56,kFoot,1);
     stock("stock UseSub",0x2B,kFoot,1);stock("stock CallVehicle",0x17,kFoot,1);
@@ -132,11 +132,10 @@ std::vector<Bind> Binds() {
 // Two actions on one key where both are read (as the defaults ship). Each one is a known overlap: the user's 「好多重叠」
 // (docs/feedback-2026-10-25-keybinds.md) waits on §3.3, or the two are meant to go together. A new pair fails here.
 const char* const kKnown[]={
-    // the common page's Shotcut T / Chat Ctrl / VoiceChat V / RideRescue E against the plugins' (plan §2 #17, now seen)
-    "stock Shotcut|NpcFormationKey","stock Shotcut|VehicleSecondarySwitchKey",
-    "stock VoiceChat|FirstPersonKey","stock VoiceChat|GunshipGunnerKey","stock VoiceChat|SazabiMeleeKey",
-    "stock Chat|PlayerJetBrakeKey","stock Chat|DreadnoughtDescendKey","stock Chat|SazabiDescendKey",
-    "stock RideRescue|DreadnoughtStrafeRightKey","stock RideRescue|SazabiCannonKey",
+    // the common page's Shotcut T and RideRescue E against the plugins' (plan §3.3, the user 2026-10-26: the secondary switch keeps
+    // T; the Dreadnought's strafe keeps Q / E)
+    "stock Shotcut|VehicleSecondarySwitchKey",
+    "stock RideRescue|DreadnoughtStrafeRightKey",
     // on foot: the stock Dash on Shift is the jets' boost elsewhere only; the infantry right button: none
     // in a vehicle: the plugins' own across pages
     "FirstPersonKey|GunshipGunnerKey",          // plan §2 #8: V released / held (KeyTaken)
@@ -269,13 +268,13 @@ void Stubs() {
 void Store() {
     std::vector<unsigned char> store(kb::kStoreSize,0);
     Check(!kb::Seeded(store.data(),kb::Owner::crew),"a fresh store: not seeded");
-    kb::Seed(store.data(),kb::Owner::crew,[](const kb::Slot& s){ return s.defaultVk==0x54 ? 0 : s.defaultVk; });
+    kb::Seed(store.data(),kb::Owner::crew,[](const kb::Slot& s){ return s.action==0x4F ? 0 : s.defaultVk; });
     Check(kb::Seeded(store.data(),kb::Owner::crew) && !kb::Seeded(store.data(),kb::Owner::turret),"seeded: its marker only");
     bool all=true;
     for(const kb::Slot& s:kb::kSlots)
         for(int set=0;set<kb::kSyncedSets;++set) {
             const std::int32_t v=*kb::SlotPtr(store.data(),0,set,s.action);
-            all=all && v==(s.owner!=kb::Owner::crew || s.defaultVk==0x54 ? 0 : kb::CodeOfVk(s.defaultVk));
+            all=all && v==(s.owner!=kb::Owner::crew || s.action==0x4F ? 0 : kb::CodeOfVk(s.defaultVk));
         }
     Check(all,"seeded: the owner's slots in the four sets, an ini 0 unassigned, the other owner's untouched");
     Check(kb::SlotVk(store.data(),0x53)=='M' && kb::SlotVk(store.data(),0x4F)==0,"read back as virtual keys");
@@ -284,6 +283,25 @@ void Store() {
     Check(*kb::SlotPtr(store.data(),1,0,0x53)==0,"player 1 untouched");
 }
 // The jets' gear on the d-pad down, held (plan §3.3 D): a tap is nothing, a hold one toggle's edge.
+// The stock defaults the plugin changes: Chat Enter, VoiceChat K, each in the four sets, each a key the stock dialog
+// accepts for its action (0x7CCD10: no Space / BackSpace / Home / End / PageUp / PageDown / mouse / W A S D Y for 0x1C 0x1D
+// 0x21), none of the plugins' defaults, none of the stock keyboard defaults.
+void StockDefaults() {
+    int sets[2]{};
+    for(const km::StockDefault& d:km::kStockDefaults) {
+        ++sets[d.action==0x1D ? 0 : 1];
+        unsigned char code[km::kDefaultSize];
+        km::StockDefaultCode(d,false,code);
+        std::uint32_t disp;std::memcpy(&disp,code+2,4);
+        Check(code[0]==0xC7 && code[1]==0x81 && disp==static_cast<std::uint32_t>(0x28+d.set*0x3FC+d.action*4),"the default's instruction: mov [rcx+slot], imm32");
+    }
+    Check(sets[0]==4 && sets[1]==4,"Chat and VoiceChat in each of the four sets");
+    const int restricted[]={0x63,0x64,0x68,0x69,0x6A,0x6B,0x0C,0x0D,0x0E,0x0F,0x12,0x15,0x24,0x28,0x2A};
+    for(int r:restricted)Check(r!=km::kChatTo && r!=km::kVoiceTo,"Enter and K are keys the stock dialog takes for chat");
+    for(const kb::Slot& s:kb::kSlots)
+        Check(kb::CodeOfVk(s.defaultVk)!=km::kChatTo && kb::CodeOfVk(s.defaultVk)!=km::kVoiceTo,Narrow(s.ini) + ": not on Enter or K");
+    Check(km::kChatTo==kb::CodeOfVk(0x0D) && km::kVoiceTo==kb::CodeOfVk('K'),"Chat Enter, VoiceChat K");
+}
 void PadHold() {
     float sec=0.0f;
     bool any=false;
@@ -306,6 +324,7 @@ int main(int argc,char** argv) {
     Stubs();
     Store();
     PadHold();
+    StockDefaults();
     std::printf("%d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }

@@ -55,7 +55,7 @@ constexpr hudtext::Tx kPageText[kb::kPages]={hudtext::Tx::kbPageFoot,hudtext::Tx
 // The config's key of each of this plugin's slots (by the slot's ini name).
 struct KeyField { const wchar_t* ini; int Config::* key; DWORD Config::* dword; };
 constexpr KeyField kFields[]={
-    {L"NpcFormationKey",&Config::npcFormationKey,nullptr},{L"NpcPickupKey",&Config::npcPickupKey,nullptr},
+    {L"NpcFormationCycleKey",&Config::npcFormationKey,nullptr},{L"NpcPickupKey",&Config::npcPickupKey,nullptr},
     {L"PlayerJetHailKey",&Config::playerJetHailKey,nullptr},{L"FirstPersonKey",&Config::firstPersonKey,nullptr},
     {L"MapKey",&Config::mapKey,nullptr},{L"DamageStatsKey",&Config::damageStatsKey,nullptr},
     {L"CallPrevKey",nullptr,&Config::callPrevKey},{L"CallNextKey",nullptr,&Config::callNextKey},
@@ -77,7 +77,7 @@ constexpr KeyField kFields[]={
     {L"DreadnoughtHangarKey",&Config::dreadnoughtHangarKey,nullptr},{L"DreadnoughtAheadKey",&Config::dreadnoughtAheadKey,nullptr},
     {L"SazabiLockKey",&Config::sazabiLockKey,nullptr},{L"SazabiDashKey",&Config::sazabiDashKey,nullptr},
     {L"SazabiDescendKey",&Config::sazabiDescendKey,nullptr},{L"SazabiFunnelKey",&Config::sazabiFunnelKey,nullptr},
-    {L"SazabiCannonKey",&Config::sazabiCannonKey,nullptr},{L"SazabiMeleeKey",&Config::sazabiMeleeKey,nullptr},
+    {L"SazabiMegaCannonKey",&Config::sazabiCannonKey,nullptr},{L"SazabiMeleeKey",&Config::sazabiMeleeKey,nullptr},
     {L"SazabiGuardKey",&Config::sazabiGuardKey,nullptr},
 };
 constexpr int kFieldCount=static_cast<int>(sizeof(kFields)/sizeof(kFields[0]));
@@ -315,6 +315,12 @@ bool InstallKeyConfig() noexcept {
         ok=edf::PatchCode(image+kTableLeas[i],stockLea,leas[i],kLeaSize);
     }
     ok=ok && edf::PatchCode(image+kSyncedRows,kSyncedRowsCode,kSyncedRowsOurs,sizeof(kSyncedRowsCode));
+    // the stock common page's defaults (Chat Enter, VoiceChat K): only what a new store or 「恢复默认」 writes
+    for(const StockDefault& d:kStockDefaults) {
+        unsigned char stock[kDefaultSize],ours[kDefaultSize];
+        StockDefaultCode(d,false,stock);StockDefaultCode(d,true,ours);
+        ok=ok && edf::PatchCode(image+d.rva,stock,ours,kDefaultSize);
+    }
     for(int i=0;i<6 && ok;++i)ok=edf::PatchCode(image+kDispatches[i].site,kDispatchCode[i],jumps[i],kDispatches[i].size);
     ok=ok && Redirect(kResetCall,kResetPage,reinterpret_cast<void*>(&ResetHook));
     ok=ok && Redirect(kAllowedCall,kKeyAllowed,reinterpret_cast<void*>(&AllowedHook));

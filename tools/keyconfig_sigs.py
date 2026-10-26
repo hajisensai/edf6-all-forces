@@ -54,6 +54,7 @@ SIGNATURES: tuple[tuple[int, int, str], ...] = (
     (0xD5470, 0x3C, 'write an action to sets 0..3'),
     (0xD54B0, 0x28, 'write an action to one set'),
     (0xD4260, 0x24, 'read an action of a set'),
+    (0xD48B0, 0x1E1, 'the common page\'s defaults into sets 0..3 (Chat 0x1D and VoiceChat 0x21 changed by keyconfig_menu.h kStockDefaults)'),
     # The page table and its readers (keyconfig_menu.h kTableLeas).
     (0x17F26B0, 0x8F, 'the page table: 11 rows of 13 bytes, 0x4E ends each row\'s actions'),
     (0x7CD9E0, 0x07, 'the common row\'s list (row 2) for 0x7CD9B0: left on the stock table'),
