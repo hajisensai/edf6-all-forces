@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import cockpits  # noqa: E402
 import ledger  # noqa: E402
+import model_lod  # noqa: E402
 import sgo  # noqa: E402
 import sidecar_model  # noqa: E402
 import vcobjects as vc  # noqa: E402
@@ -78,7 +79,9 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> dict:
     across the ground (its plan) and its top the model's floor. Returns what the checks measured."""
     v = sgo.load(data=files[f'OBJECT/{SGO_FILE}'])
     assert v['xgs_scene_object_class'] == CLASS and v['game_object_durability'] == VEHICLE.durability, v['xgs_scene_object_class']
-    assert v['animation_model'][0] == MODEL, v['animation_model'][0]
+    # [archive, model] (+ the LOD table model_lod.finish adds: checked against the archive)
+    assert v['animation_model'][0][:2] == MODEL, v['animation_model'][0]
+    assert not model_lod.check_files(files), model_lod.check_files(files)
     assert v['ragdoll'][0] == RAGDOLL, v['ragdoll'][0]
     assert [w[0] for w in v['vehicle_setup'][-1]] == list(VEHICLE.weapons)
     assert len(v['vehicle_riding_position']) == 1, 'the gunner is no seat: the plugin holds them (src/sidecar.cpp)'
@@ -105,7 +108,9 @@ def build(root: str) -> dict[str, bytes]:
     files = {f'OBJECT/{MODEL_FILE}': sidecar_model.build(game), f'OBJECT/{RAGDOLL_FILE}': shkt,
              f'OBJECT/{SGO_FILE}': vehicle_sgo(game)}
     build.measured = check(files, game)   # type: ignore[attr-defined]
-    return cockpits.graft_files(game, files)   # its seats' first-person cockpits (pylib/cockpits.py)
+    # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
+    # (pylib/model_lod.py)
+    return model_lod.finish(cockpits.graft_files(game, files))
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

@@ -748,6 +748,11 @@
    "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],
+  "edf6tr_xm_medium_tank_regular_mission": [
+   "OBJECT/EDF6VC_XM_MEDIUM_TANK_REGULAR.MRAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
   "edf6vc_sedan": [
    "OBJECT/EDF6VC_SEDAN.MRAB"
   ],

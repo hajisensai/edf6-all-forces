@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import cockpits  # noqa: E402
 import ledger  # noqa: E402
+import model_lod  # noqa: E402
 import sazabi_model as sz  # noqa: E402
 import sgo  # noqa: E402
 import vcobjects as vc  # noqa: E402
@@ -54,7 +55,9 @@ def build(root: str) -> dict[str, bytes]:
                  **{f'WEAPON/{n}': d for n, d in vc.sazabi_weapons(game).items()},
                  **{f'OBJECT/{n}': d for n, d in vc.sazabi_rounds(game).items()}}
     check(files)
-    return cockpits.graft_files(game, files)   # its seats' first-person cockpits (pylib/cockpits.py)
+    # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
+    # (pylib/model_lod.py)
+    return model_lod.finish(cockpits.graft_files(game, files))
 
 
 def check(files: dict[str, bytes]) -> None:
@@ -68,7 +71,8 @@ def check(files: dict[str, bytes]) -> None:
     assert JET.model == (f'app:/object/{sz.OUT_ARC.lower()}', sz.OUT_MDB) and JET.file == sz.OUT_ARC, JET
     assert JET.cas is None, JET.cas   # the V506's: a CAS naming our bones would write them back to bind (docs/sazabi-re.md §2)
     assert v['xgs_scene_object_class'] == 'Vehicle506_Helicopter', v['xgs_scene_object_class']
-    assert v['animation_model'][0] == list(JET.model) and v['animation_model'][1] == 'app:/object/v506_heli.cas',         v['animation_model'][:2]
+    assert not model_lod.check_files(files), model_lod.check_files(files)   # the LOD table model_lod.finish adds
+    assert v['animation_model'][0][:2] == list(JET.model) and v['animation_model'][1] == 'app:/object/v506_heli.cas',         v['animation_model'][:2]
     assert v['vehicle_setup'][1][0] == JET.mark and v['game_object_durability'] == JET.durability
     assert [w[0] for w in v['vehicle_setup'][3][:len(JET.weapons)]] == list(JET.weapons), v['vehicle_setup'][3]
     arc = files[f'OBJECT/{sz.OUT_ARC}']

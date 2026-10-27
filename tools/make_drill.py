@@ -35,6 +35,7 @@ import cockpits  # noqa: E402
 import drill_model  # noqa: E402
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
+import model_lod  # noqa: E402
 import ragdoll_fit  # noqa: E402
 import sgo  # noqa: E402
 import vcobjects as vc  # noqa: E402
@@ -193,7 +194,9 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
     v = sgo.load(data=files[f'OBJECT/{SGO_FILE}'])
     built = f'OBJECT/{MODEL_FILE}' in files
     want = [f'app:/Object/{MODEL_FILE.lower()}', MODEL_MDB] if built else STOCK_MODEL
-    assert v['animation_model'][0] == want, v['animation_model'][0]
+    # [archive, model] (+ the LOD table model_lod.finish adds: checked against the archive)
+    assert v['animation_model'][0][:2] == want, v['animation_model'][0]
+    assert not model_lod.check_files(files), model_lod.check_files(files)
     assert [w[0] for w in v['vehicle_setup'][2]] == list(VEHICLE.weapons)
     assert v['xgs_scene_object_class'] == 'Vehicle505_Tank' and v['game_object_durability'] == VEHICLE.durability
     cam = v['game_object_camera_setting']
@@ -241,7 +244,9 @@ def build(root: str, models: str | None = None) -> dict[str, bytes]:
         files[f'OBJECT/{SGO_FILE}'] = vehicle_sgo(game, [f'app:/Object/{MODEL_FILE.lower()}', MODEL_MDB])
         files[f'WEAPON/{BIT_FILE}'] = bit_sgo(game, plain=False)
     check(files, game)
-    return cockpits.graft_files(game, files)   # its seats' first-person cockpits (pylib/cockpits.py)
+    # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
+    # (pylib/model_lod.py)
+    return model_lod.finish(cockpits.graft_files(game, files))
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

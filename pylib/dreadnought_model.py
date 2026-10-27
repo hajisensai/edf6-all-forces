@@ -32,6 +32,7 @@ from dataclasses import replace
 
 import obj_model as om
 import texfile
+import texfile_accel
 from mdb import Mdb, Object, Rab, RabFile, bind_world, cmpl_compress, insert_member, mdb_read, mdb_write, mmul, rab_read, \
     rab_write
 
@@ -236,9 +237,9 @@ def _textures(folder: str, model: str, material: str) -> tuple[bool, dict[str, b
         px = bytearray(px)
         px[2::4] = b'\xff' * (len(px) // 4)
         rml = texfile.Image(rml.width, rml.height, px)
-    files = {f'{stem}_df.dds': texfile.dxt1_dds(texfile.load_image(os.path.join(folder, f'{material}_df.png'))),
-             f'{stem}_nm.dds': texfile.dxt1_dds(texfile.load_image(os.path.join(folder, f'{material}_nm.png'))),
-             f'{stem}_rm.dds': texfile.dxt1_dds(rml)}
+    files = {f'{stem}_df.dds': texfile_accel.dxt1_dds(texfile.load_image(os.path.join(folder, f'{material}_df.png'))),
+             f'{stem}_nm.dds': texfile_accel.bc5_normal_file(os.path.join(folder, f'{material}_nm.png')),
+             f'{stem}_rm.dds': texfile_accel.dxt1_dds(rml)}
     slots = dict(zip(LIGHT_SLOTS if lit else BODY_SLOTS, files))
     return lit, files, slots
 

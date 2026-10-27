@@ -214,7 +214,7 @@ class IncrementalTests(unittest.TestCase):
             stack.enter_context(patch.object(make_edf5_campaign.modfiles, 'refuse_while_running', lambda *a, **k: None))
             builders = {}
             for group in buildcache.GROUPS:
-                module = importlib.import_module('make_' + group)
+                module = buildcache.tool(group)   # make_<group>, an X-Morph unit's builder
                 files = {f'OBJECT/{group}.MRAB' if group == 'optics' else f'OBJECT/{group}.SGO': group.encode()}
                 if group == 'optics':
                     stack.enter_context(patch.object(module, 'build_stock_redirects', return_value={}))

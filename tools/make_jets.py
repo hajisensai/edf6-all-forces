@@ -46,6 +46,7 @@ import cockpits  # noqa: E402
 import jet_models  # noqa: E402
 import mdb_jet  # noqa: E402
 import ledger  # noqa: E402
+import model_lod  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
 OWNER = 'jets'   # pylib/ledger.py
@@ -322,7 +323,9 @@ def build(root: str) -> dict[str, bytes]:
     for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET), TRANSPORT_PLANE_FILE, TRANSPORT_HELI_FILE):
         check_own_model(out, name)
     check_weapon_bones(out, game)
-    return cockpits.graft_files(game, out)   # its seats' first-person cockpits (pylib/cockpits.py)
+    # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
+    # (pylib/model_lod.py)
+    return model_lod.finish(cockpits.graft_files(game, out))
 
 
 def medic_gun(stock: bytes, round_stock: bytes) -> bytes:

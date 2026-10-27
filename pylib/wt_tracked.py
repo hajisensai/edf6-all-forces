@@ -29,10 +29,13 @@ import numpy as np
 import graft_pure as g
 import obj_model as om
 import tracked_combat_model as t
+import xm_units
 from mdb import Mdb, Mesh, bind_world, cmpl_compress, cmpl_decompress, mdb_read, mdb_write, rab_read, rab_write
 
 FOLDERS = {'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'tunguska': 'wt_tunguska', 'pzh2000': 'wt_pzh2000',
-           'sturmtiger': 'wt_sturmtiger', 'apocalypse': 'wt_apocalypse', 'tos1': 'wt_tos1'}
+           'sturmtiger': 'wt_sturmtiger', 'apocalypse': 'wt_apocalypse', 'tos1': 'wt_tos1',
+           # the X-Morph: Defense units (pylib/xm_units.py; tools/prep_xmorph.py writes these folders, the model pack's)
+           **{u.key: xm_units.folder(u.key) for u in xm_units.ported('tracked')}}
 # A kind made from another kind's folder: its module's derive(spec) turns that kind's spec into its own (the quad M61:
 # the M163's model with its one gun made four, pylib/quadvulcan_model.py); with no base kind, its module's spec(kind)
 # makes it from its own folder (folder(): the Dreadnought's turrets on their bases, pylib/emplacement_model.py).
@@ -50,7 +53,6 @@ FORMAT = 1                # tools/prep_wt_tracked.py FORMAT
 PLAIN_RMO = (140, 90)     # roughness, metalness (~ the V603 / E551 body maps' mean); occlusion from the model
 TRACK_RMX = (189, 0, 0)   # the V603 track parameter map's mean
 NO_OCCLUSION = 200
-MAX_TRIS = 21000          # triangles per mesh before the u16 index limit could be reached (3 corners each)
 HALF_TOL = 4e-3           # m: stored positions are half floats (2^-9 m steps at 2..4 m)
 
 
@@ -243,10 +245,10 @@ def _columns(template: Mesh, pos: np.ndarray, nrm: np.ndarray, tan: np.ndarray, 
     return out.tobytes()
 
 
-def pack(template: Mesh, pos: np.ndarray, nrm: np.ndarray, uv: np.ndarray, tris: np.ndarray, bone: int,
-         material: int) -> list[Mesh]:
-    """The part as skinned meshes in `template`'s layout, each under 65536 vertices. A triangle with two corners at
-    one stored (half-float) point draws nothing and is left out (obj_model.drawn_triangles)."""
+def part_rows(template: Mesh, pos: np.ndarray, nrm: np.ndarray, uv: np.ndarray, tris: np.ndarray, bone: int
+              ) -> tuple[np.ndarray, np.ndarray]:
+    """The part's vertices packed in `template`'s layout (one row each, rigid on `bone`) and the triangles that draw:
+    one with two corners at one stored (half-float) point draws nothing and is left out (obj_model.drawn_triangles)."""
     pos = pos.astype(np.float64)
     nrm = nrm.astype(np.float64)
     uv = uv.astype(np.float64)
@@ -254,16 +256,29 @@ def pack(template: Mesh, pos: np.ndarray, nrm: np.ndarray, uv: np.ndarray, tris:
     half = pos.astype(np.float16)
     a, b, c = (half[tris[:, k]] for k in range(3))
     keep = ~(np.all(a == b, axis=1) | np.all(b == c, axis=1) | np.all(a == c, axis=1))
-    tris = tris[keep]
-    meshes = []
-    for start in range(0, len(tris), MAX_TRIS):
-        chunk = tris[start:start + MAX_TRIS]
-        used, inverse = np.unique(chunk, return_inverse=True)
-        _req(len(used) <= 0xFFFF, 'mesh chunk over 65535 vertices')
-        vdata = _columns(template, pos[used], nrm[used], tan[used], bin_[used], uv[used], bone)
-        indices = inverse.reshape(-1).astype('<u2').tobytes()
-        meshes.append(replace(template, flags=bytes((0, 1, 1, 0)), material=material, mesh_index=0, vdata=vdata,
-                              indices=indices))
+    rows = np.frombuffer(_columns(template, pos, nrm, tan, bin_, uv, bone), dtype=np.uint8).reshape(len(pos), -1)
+    return rows, tris[keep]
+
+
+def pack(parts: list[tuple[Mesh, int, np.ndarray, np.ndarray]]) -> list[Mesh]:
+    """The parts (template, material, rows, triangles: part_rows) as skinned meshes, one material's parts together
+    across their bones (each vertex carries its own bone: one influence, up to bone 255), split only where the u16
+    indices end (model_lod.pack_rows), in the order of each material's first part. A mesh is one draw in every pass
+    (depth, G-buffer, each shadow cascade): until 2026-10-27 each part (one bone x one material) was a mesh of its own,
+    cut every 21000 triangles (the BMPT: 58 meshes, now one or two per material)."""
+    import model_lod
+    by: dict[int, list] = {}
+    for template, material, rows, tris in parts:
+        by.setdefault(material, [replace(template, flags=bytes((0, 1, 1, 0)), material=material), [], [], 0])
+        entry = by[material]
+        _req(entry[0].vsize == template.vsize and entry[0].elems == template.elems,
+             'two parts of one material in different vertex layouts')
+        entry[1].append(rows)
+        entry[2].append(tris + entry[3])
+        entry[3] += len(rows)
+    meshes: list[Mesh] = []
+    for template, rows, tris, _n in by.values():
+        meshes += model_lod.pack_rows(template, np.concatenate(rows), np.concatenate(tris))
     return meshes
 
 
@@ -280,6 +295,13 @@ def _image(path: str):  # noqa: ANN202 - texfile.Image
 def _dds_of(path: str) -> bytes:
     import texfile_accel
     return texfile_accel.dxt1_dds(_image(path))
+
+
+def _normal_dds(path: str) -> bytes:
+    """A tangent-space normal map (R = X, G = Y, DirectX green: +G is the texture's down, +v, the binormal's way;
+    docs/texture-quality.md) as the stock vehicles' BC5U."""
+    import texfile_accel
+    return texfile_accel.bc5_normal_dds(_image(path))
 
 
 def _param_dds(occlusion: str | None, rg: tuple[int, int]) -> bytes:
@@ -304,9 +326,9 @@ def material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
     path = lambda key: os.path.join(spec.folder, m[key]) if m.get(key) else None   # noqa: E731
     out = {'albedo': (f'{stem}_col.dds', _dds_of(path('albedo')))}
     if m.get('normal'):
-        out['normal'] = (f'{stem}_nor.dds', _dds_of(path('normal')))
+        out['normal'] = (f'{stem}_nor.dds', _normal_dds(path('normal')))
     else:
-        out['normal'] = ('edf6vc_flat_nor.dds', texfile.solid_dxt1((128, 128, 255)))
+        out['normal'] = ('edf6vc_flat_nor.dds', texfile.solid_bc5())
     if m['template'].startswith('v603_kyata'):
         out['param_r_m_xxx'] = ('edf6vc_wt_track_rmx.dds', texfile.solid_dxt1(TRACK_RMX))
         occ = path('occlusion')
@@ -389,12 +411,13 @@ def build_with_info(game, kind: str) -> tuple[bytes, Mdb, dict]:  # noqa: ANN001
                 om.add_texture(rab, fn, dds)
                 added.add(fn)
     templates = {host.name_of(host.materials[me.material].name): me for me in host.objects[0].meshes}
-    meshes: list[Mesh] = []
+    packed_parts = []
     for k, p in enumerate(spec.info['parts']):
         pos, nrm, uv, tris = spec.part(k)
         tmpl = templates[spec.info['materials'][p['material']]['template']]
-        meshes += pack(tmpl, pos, nrm, uv, tris.astype(np.int64), md.bone_index(p['bone']), mat_index[p['material']])
-    meshes = [replace(me, mesh_index=k) for k, me in enumerate(meshes)]
+        rows, kept = part_rows(tmpl, pos, nrm, uv, tris.astype(np.int64), md.bone_index(p['bone']))
+        packed_parts.append((tmpl, mat_index[p['material']], rows, kept))
+    meshes = [replace(me, mesh_index=k) for k, me in enumerate(pack(packed_parts))]
     md = g.recompute_bounds(replace(md, objects=[replace(md.objects[0], meshes=meshes)]))
     data = mdb_write(md)
     _req(mdb_write(mdb_read(data)) == data, 'MDB write/read/write differs')

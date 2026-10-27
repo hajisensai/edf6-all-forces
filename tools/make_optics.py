@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pylib'))
 import ledger
+import model_lod
 import modfiles
 import rootcpk
 import dsgo
@@ -208,7 +209,8 @@ def build_stock_redirects(root: str) -> dict[str, bytes]:
 
 
 def build(root: str) -> dict[str, bytes]:
-    return {**build_models(root), **build_stock_redirects(root)}
+    # the models merged by material and given their LODs where a vehicle SGO here draws them (pylib/model_lod.py)
+    return model_lod.finish({**build_models(root), **build_stock_redirects(root)})
 
 
 def _load(root: str) -> dict:

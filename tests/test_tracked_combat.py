@@ -26,6 +26,7 @@ import vcobjects as vc
 import graft_pure as graft
 import acb
 import mdb
+import model_lod
 import os
 import tracked_combat_model as tracked
 import vulcan_model
@@ -108,8 +109,16 @@ class NativeAssetContractTests(unittest.TestCase):
                 built = combat.build(self.game.root, kind)
                 rel = f'OBJECT/{model.OUT_ARC}'
                 self.assertEqual(set(built), set(self.files[kind]))
-                self.assertEqual({k: v for k, v in built.items() if k != rel},
-                                 {k: v for k, v in self.files[kind].items() if k != rel})
+                # ... and its models merged and given their LODs (pylib/model_lod.py): the vehicle SGO differs only in
+                # animation_model[0]'s LOD table
+                sgo_rel = f'OBJECT/{vc.GROUND_VEHICLES[kind].sgo}.SGO'
+                self.assertEqual({k: v for k, v in built.items() if k not in (rel, sgo_rel)},
+                                 {k: v for k, v in self.files[kind].items() if k not in (rel, sgo_rel)})
+                got, was = (dsgo.to_py(dsgo.parse(f[sgo_rel]).root) for f in (built, self.files[kind]))
+                self.assertEqual(got['animation_model'][0][:2], was['animation_model'][0])
+                got['animation_model'][0] = was['animation_model'][0]
+                self.assertEqual(got, was)
+                self.assertEqual(model_lod.check_files(built), [])
                 fits = cockpit_fits.FITS[model.OUT_ARC.rsplit('.', 1)[0]]
                 arc = mdb.rab_read(built[rel])
                 md = mdb.mdb_read(next(f for f in arc.files if f.name.lower() == model.HOST_MDB).data)

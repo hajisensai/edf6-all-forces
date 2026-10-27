@@ -6,7 +6,8 @@
                        origin), triangles
         model.json     the parts (role, material), the materials (texture files), the pivots (the turret's turning
                        axis, the guns' trunnion, their mouths, a rotor's axis), the source and its licence
-        textures/      each material's base colour, at most MAX_TEXTURE pixels a side
+        textures/      each material's base colour at its own size (no limit of ours: docs/texture-quality.md), and
+                       its normal map where it has one (<name>_normal.png, DirectX green: Model.normal_green)
         LICENSE.txt    the attribution the licence asks for
 
     python tools/prep_glb_model.py <kind> <model.glb> [--out <models>/<folder>] [--license <license.json>]
@@ -38,7 +39,6 @@ sys.path.insert(0, os.path.join(ROOT, 'pylib'))
 import gltf  # noqa: E402
 
 FORMAT = 1
-MAX_TEXTURE = 1024
 ROLES = ('base', 'turret', 'gun', 'rotor')
 
 
@@ -75,6 +75,9 @@ class Model:
     # A launcher's tube mouths: True puts the 2 x 2 grid of mouths at the guns' front in pivots['tubes'] (the
     # emplacement's missile holder fires from them).
     tubes: bool = False
+    # Its normal maps' green, measured (texfile_accel.green_down_score, docs/texture-quality.md): 'down' DirectX (as the
+    # game's), 'up' OpenGL; required when its materials have normal maps (a download's own, whatever glTF says).
+    normal_green: str = ''
 
 
 MODELS: dict[str, Model] = {
@@ -83,13 +86,13 @@ MODELS: dict[str, Model] = {
     # 4.7 m tall to the radome's top.
     # bear17's Flak 18/36 (merged meshes: its pieces sorted by box): the cruciform carriage and the pedestal stay, the
     # top carriage with its shield turns, the barrel and its cradle lift. 7.6 m long over its outriggers.
-    'flak88': Model(kind='flak88', folder='emp_flak88', title='8.8 cm Flak 18/36', rules=[], yaw=-90.0, width=7.6,
+    'flak88': Model(kind='flak88', folder='emp_flak88', title='8.8 cm Flak 18/36', rules=[], yaw=-90.0, width=7.6, normal_green='down',
                     boxes=[('gun', (-3.0, 2.12, -9.0), (3.0, 9.0, 9.0)), ('turret', (-3.0, 1.05, -9.0), (3.0, 2.12, 9.0))],
                     trunnion=(2.35, -1.3)),
     # KojfDiscord's GDF-005 (WARNO; one merged object, an OBJ): the four-wheeled carriage stays, the turret with its
     # radar turns, the twin 35 mm barrels lift. Its export is about twice the real gun's size: 8.5 m long over its
     # barrels (the real towed gun 7.8 m).
-    'gdf005': Model(kind='gdf005', folder='emp_gdf005', title='Oerlikon GDF-005 35 mm', rules=[], length=8.5,
+    'gdf005': Model(kind='gdf005', folder='emp_gdf005', title='Oerlikon GDF-005 35 mm', rules=[], length=8.5, normal_green='down',
                     boxes=[('gun', (-0.27, 1.20, 0.55), (0.27, 1.55, 9.0)), ('turret', (-1.0, 1.0, -9.0), (1.0, 9.0, 0.9))],
                     trunnion=(1.38, 0.30)),
     # Planetrix23's M11-23A1 anti-drone turret (its nodes: Base, Turret (the yaw), Gun (the projector)): the laser
@@ -200,17 +203,37 @@ def role_of(m: Model, path: str) -> str | None:
 
 
 def _texture(mat: gltf.Material, out_dir: str, name: str) -> str | None:
-    """The material's base colour as a file in textures/ (PNG, at most MAX_TEXTURE a side), None: it has none."""
+    """The material's base colour as a file in textures/ (PNG, its own size), None: it has none."""
     from PIL import Image
     if mat.texture is None:
         return None
     with Image.open(io.BytesIO(mat.texture)) as im:
         im = im.convert('RGBA')
-        if max(im.size) > MAX_TEXTURE:
-            k = MAX_TEXTURE / max(im.size)
-            im = im.resize((max(1, round(im.width * k)), max(1, round(im.height * k))), Image.LANCZOS)
         rel = f'textures/{name}.png'
         im.convert('RGB').save(os.path.join(out_dir, rel), optimize=True)
+    return rel
+
+
+def _normal(mat: gltf.Material, m: Model, out_dir: str, name: str) -> str | None:
+    """The material's normal map as textures/<name>_normal.<ext> in the game's (DirectX) green, None: it has none.
+    A DirectX source is its own file (checked, not re-encoded); an OpenGL one is flipped into a PNG."""
+    from PIL import Image
+    import texfile_accel
+    if mat.normal is None:
+        return None
+    if not m.normal_green:
+        raise ValueError(f'{m.kind}: material {mat.name} has a normal map; measure its green (Model.normal_green)')
+    with Image.open(io.BytesIO(mat.normal)) as im:
+        rgb = np.asarray(im.convert('RGB'))
+        ext = {'JPEG': 'jpg', 'PNG': 'png'}.get(im.format or '', '')
+    fixed = texfile_accel.directx_normals(rgb, m.normal_green, f'{m.kind} {mat.name}')
+    if m.normal_green == 'down' and ext:
+        rel = f'textures/{name}_normal.{ext}'
+        with open(os.path.join(out_dir, rel), 'wb') as f:
+            f.write(mat.normal)
+    else:
+        rel = f'textures/{name}_normal.png'
+        Image.fromarray(fixed, 'RGB').save(os.path.join(out_dir, rel), optimize=True)
     return rel
 
 
@@ -260,6 +283,7 @@ def read_obj(path: str) -> tuple[gltf.Scene, list[str]]:
                     tri_t.append([int(c[0][1]) - 1, int(c[k][1]) - 1, int(c[k + 1][1]) - 1])
                     mat.append(cur)
     maps: dict[str, str] = {}
+    normal_maps: dict[str, str] = {}
     if mtllib:
         name = None
         with open(os.path.join(os.path.dirname(path), mtllib), encoding='utf-8', errors='replace') as f:
@@ -269,6 +293,8 @@ def read_obj(path: str) -> tuple[gltf.Scene, list[str]]:
                     name = t[1]
                 elif t and t[0] == 'map_Kd' and name:
                     maps[name] = t[1]
+                elif t and t[0] in ('map_normal', 'norm', 'map_Bump', 'bump') and name:
+                    normal_maps[name] = t[1].split()[-1]    # the file is the last word (after any -bm option)
     P, UV = np.asarray(V, dtype=np.float64), np.asarray(T, dtype=np.float64)
     tv, tt = np.asarray(tri_v, dtype=np.int64), np.asarray(tri_t, dtype=np.int64)
     # unweld per (position, uv) corner, as glTF stores them
@@ -278,8 +304,10 @@ def read_obj(path: str) -> tuple[gltf.Scene, list[str]]:
     for name in mats:
         tex = maps.get(name)
         data = open(os.path.join(os.path.dirname(path), tex), 'rb').read() if tex else None
+        ntex = normal_maps.get(name)
+        normal = open(os.path.join(os.path.dirname(path), ntex), 'rb').read() if ntex else None
         materials.append(gltf.Material(name, (1.0, 1.0, 1.0, 1.0), (0.0, 0.0, 0.0), texture=data,
-                                       texture_mime='image/jpeg' if data else ''))
+                                       texture_mime='image/jpeg' if data else '', normal=normal))
     uv = UV[uniq[:, 1]] * (1.0, -1.0) + (0.0, 1.0)     # bottom-left OBJ v -> glTF's top-left
     scene = gltf.Scene(P[uniq[:, 0]], None, inv.reshape(-1, 3), np.asarray(mat, dtype=np.int64), materials, {},
                        np.asarray(mat, dtype=np.int64), uv)
@@ -384,6 +412,9 @@ def prepare(m: Model, src: str, out: str) -> dict:
                 mat_of[mi] = len(materials)
                 materials.append({'name': f'edf6vc_{name}', 'template': 'v603_body', 'albedo': albedo,
                                   'source': mat.name})
+                normal = _normal(mat, m, out, name)
+                if normal:
+                    materials[-1]['normal'] = normal
             tri = scene.triangles[sel]
             idx, inv = np.unique(tri, return_inverse=True)
             k = len(parts)

@@ -19,8 +19,10 @@ sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 import cockpits
 import dsgo
 import ledger
+import model_lod
 import emplacement_model
 import vcobjects as vc
+import xm_units
 
 # The fixed emplacements (pylib/emplacement_model.py: the Dreadnought's secondary turrets and the real guns on their
 # bases).
@@ -207,6 +209,30 @@ NAMES = {
     'pzh2000': ('155 mm L52 Howitzer', '155mm L52 榴弹炮', '155mm L52 榴弾砲', '155mm L52 榴彈砲'),
     'sturmtiger': ('380 mm Rocket Mortar', '380mm 火箭臼炮', '380mm ロケット臼砲', '380mm 火箭臼砲'),
 }
+# The X-Morph: Defense units (pylib/xm_units.py, built by tools/make_xmorph.py): their `like`'s gun in every table above
+# (its numbers, its shell, its kind of round) with the row's numbers over it, its own gun names, its vehicle camera over
+# the `like`'s, a model folder of its own (WT_ONLY: wt_tracked.Model). What belongs to the `like`'s hull or model (the
+# one-cradle M61s, turret stops, the procedural models) is not inherited.
+for _xm in xm_units.ported('tracked'):
+    if _xm.like not in GUNS or _xm.like not in WT_ONLY:
+        raise ValueError(f'{_xm.key}: its like {_xm.like!r} is no model-folder kind with a gun table (GUNS, WT_ONLY)')
+    LABELS[_xm.key] = f'{xm_units.label(_xm)}（X-Morph: Defense 模型）'
+    GUNS[_xm.key] = {**GUNS[_xm.like], **_xm.guns}
+    NAMES[_xm.key] = _xm.gun
+    WT_ONLY[_xm.key] = {**WT_ONLY[_xm.like], **_xm.camera}
+    if _xm.like in SHELL_OF:
+        SHELL_OF[_xm.key] = SHELL_OF[_xm.like]
+    M61_ROUNDS += (_xm.key,) if _xm.like in M61_ROUNDS else ()
+    HOWITZERS += (_xm.key,) if _xm.like in HOWITZERS else ()
+    CANNON_SHELL += (_xm.key,) if _xm.like in CANNON_SHELL else ()
+    MISSILE_SHELL += (_xm.key,) if _xm.like in MISSILE_SHELL else ()
+# The kinds whose track faces are a fixed part of the body's texture atlas (the X-Morph units: tools/prep_xmorph.py
+# puts their belts' running faces under v603_kyata_L / _R only because the native class binds those two names): their
+# SGO keeps the two tank_caterpillar_animation rows (the class reads exactly two, EDF.dll 0x67E4B0) but scrolls them at
+# rate 0. Each frame the class sets a track's offset to frac(tank_caterpillar_animation_info[0] x K x track speed +
+# offset) (0x67EADB: +0x2960 the rate, read at 0x67E787 from _info[0]), so a zero rate leaves the texture where it is;
+# the V603's -0.43 would scroll the atlas's neighbouring art through the tread.
+STATIC_TRACKS = tuple(u.key for u in xm_units.ported('tracked'))
 
 
 def _node(value: object) -> object:
@@ -503,6 +529,8 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
         if dsgo.to_py(joint.items[1].items[1]) != [0.0]:
             raise ValueError(f'{kind}: the native turret hinge already has stops')
         joint.items[1].items[1] = _node(TURRET_LIMITS[kind])
+    if kind in STATIC_TRACKS:
+        r.get('tank_caterpillar_animation_info').items[0] = 0.0
     camera = r.get('game_object_camera_setting')
     camera.items[0] = _node([0.0, model.CAMERA['model_eye'][1], 2.0])
     camera.items[1] = _node([0.0, model.CAMERA['third_person_height'], -model.CAMERA['third_person_distance']])
@@ -553,8 +581,13 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
         raise ValueError(f'{kind}: weapon/mount/setup contracts disagree')
     if r.get('xgs_scene_object_class') != 'Vehicle603_Flak':
         raise ValueError(f'{kind}: native vehicle class changed')
-    if dsgo.to_py(r.get('animation_model'))[0] != [f'app:/Object/{model.OUT_ARC.lower()}', model.HOST_MDB]:
+    # [archive, model] as authored(); [archive, model, LOD table] once build() has made the LODs (model_lod.finish)
+    if dsgo.to_py(r.get('animation_model'))[0][:2] != [f'app:/Object/{model.OUT_ARC.lower()}', model.HOST_MDB]:
         raise ValueError(f'{kind}: generated model is not selected')
+    lod_faults = model_lod.check_files({f'OBJECT/{vehicle.sgo}.SGO': files[f'OBJECT/{vehicle.sgo}.SGO'],
+                                        f'OBJECT/{model.OUT_ARC}': files[f'OBJECT/{model.OUT_ARC}']})
+    if lod_faults:
+        raise ValueError(f'{kind}: ' + '; '.join(lod_faults))
     if r.get('animation_model').items[1] != 'app:/' + animation_path(kind).lower():
         raise ValueError(f'{kind}: private fixed-optics animation is not selected')
     for index, path in enumerate(vehicle.weapons):
@@ -570,6 +603,10 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
             raise ValueError(f'{kind}: weapon does not round-trip')
     if game is not None:
         original = dsgo.parse(game.read('OBJECT', STOCK_VEHICLE)).root
+        info = dsgo.to_py(original.get('tank_caterpillar_animation_info'))
+        want = [0.0, *info[1:]] if kind in STATIC_TRACKS else info
+        if dsgo.to_py(r.get('tank_caterpillar_animation_info')) != want:
+            raise ValueError(f'{kind}: track scroll {dsgo.to_py(r.get("tank_caterpillar_animation_info"))}, not {want}')
         for key in ('car_base_rigid_body', 'car_base_constraint_data', 'tank_caterpillar_animation'):
             if key == 'car_base_constraint_data' and kind in TURRET_LIMITS:
                 import make_artillery
@@ -640,7 +677,8 @@ def build(root: str, kind: str) -> dict[str, bytes]:
         files = {f'OBJECT/{vc.GROUND_VEHICLES[kind].sgo}.SGO': game.read('OBJECT', STOCK_VEHICLE)}
         check(files, kind, game)
         return files
-    return cockpits.graft_files(vc.Game(root), authored(root, kind))
+    # its seats' cockpits, then every model merged by material and given its LODs (pylib/model_lod.py)
+    return model_lod.finish(cockpits.graft_files(vc.Game(root), authored(root, kind)))
 
 
 def install(root: str, files: dict[str, bytes], kind: str) -> list[str]:

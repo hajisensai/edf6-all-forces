@@ -10,25 +10,29 @@
    "name": "edf6vc_flak88_1",
    "template": "v603_body",
    "albedo": "textures/flak88_1.png",
-   "source": "Mat_pied_detail"
+   "source": "Mat_pied_detail",
+   "normal": "textures/flak88_1_normal.png"
   },
   {
    "name": "edf6vc_flak88_2",
    "template": "v603_body",
    "albedo": "textures/flak88_2.png",
-   "source": "Mat_pied"
+   "source": "Mat_pied",
+   "normal": "textures/flak88_2_normal.png"
   },
   {
    "name": "edf6vc_flak88_3",
    "template": "v603_body",
    "albedo": "textures/flak88_3.png",
-   "source": "mat_sous_haut"
+   "source": "mat_sous_haut",
+   "normal": "textures/flak88_3_normal.png"
   },
   {
    "name": "edf6vc_flak88_0",
    "template": "v603_body",
    "albedo": "textures/flak88_0.png",
-   "source": "Mat_haut"
+   "source": "Mat_haut",
+   "normal": "textures/flak88_0_normal.png"
   }
  ],
  "parts": [

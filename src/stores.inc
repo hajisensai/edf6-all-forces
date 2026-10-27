@@ -63,6 +63,8 @@ inline constexpr TwinBarrel kTwinBarrels[]={
     {L"EDF6VC_APOCALYPSE_R.SGO",13},
     {L"EDF6VC_TOS1_L.SGO",14},
     {L"EDF6VC_TOS1_R.SGO",14},
+    {L"EDF6VC_XM_MEDIUM_TANK_REGULAR_L.SGO",15},
+    {L"EDF6VC_XM_MEDIUM_TANK_REGULAR_R.SGO",15},
 };
 inline constexpr JetMass kJetMasses[]={
     {7001.0f,22000.0f,1500.0f},

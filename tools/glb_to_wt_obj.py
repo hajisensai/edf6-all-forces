@@ -24,9 +24,9 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 
 import gltf  # noqa: E402
+import texfile_accel  # noqa: E402
 import prep_glb_model as pg  # noqa: E402
 
-MAX_TEXTURE = 2048
 
 
 @dataclass(frozen=True)
@@ -34,6 +34,8 @@ class Source:
     yaw: float                                  # deg about +y taking the model's front onto +z
     classify: Callable[[str, np.ndarray, np.ndarray, int], str]   # (glb node, piece box lo, hi, triangles) -> node
     gear: str                                   # the glb node of its tracks: their box is centred on x 0, z 0
+    normal_green: str = ''                      # its normal maps' green, measured ('down' DirectX, 'up' OpenGL;
+                                                # texfile_accel.directx_normals): required when it has them
 
 
 def _apocalypse(node: str, lo: np.ndarray, hi: np.ndarray, tris: int) -> str:
@@ -88,7 +90,7 @@ def _tos1(node: str, lo: np.ndarray, hi: np.ndarray, tris: int) -> str:
 
 TURRET_SOURCE_Z = -2.4    # the Apocalypse's turret's middle along z before its running gear is centred
 TURRET_Z = TURRET_SOURCE_Z   # after: convert() adds the centring's shift
-SOURCES = {'apocalypse': Source(90.0, _apocalypse, 'tracks'), 'tos1': Source(0.0, _tos1, 'Object_3')}
+SOURCES = {'apocalypse': Source(90.0, _apocalypse, 'tracks', 'up'), 'tos1': Source(0.0, _tos1, 'Object_3')}
 
 
 def stations(names: set[str]) -> dict[str, str]:
@@ -149,17 +151,25 @@ def convert(kind: str, src: str, out: str) -> dict:
     mtl = []
     for mi, m in enumerate(scene.materials):
         name = f'm{mi}'
-        if m.texture is not None:
+        # the colour at its own size; a JPEG as it is (saving it again would lose more), anything else as a JPEG
+        if m.texture is not None and m.texture[:2] == b'\xff\xd8':
+            with open(os.path.join(out, 'textures', f'{name}_c.jpg'), 'wb') as f:
+                f.write(m.texture)
+        elif m.texture is not None:
             with Image.open(io.BytesIO(m.texture)) as im:
-                im = im.convert('RGB')
-                if max(im.size) > MAX_TEXTURE:
-                    k = MAX_TEXTURE / max(im.size)
-                    im = im.resize((round(im.width * k), round(im.height * k)), Image.LANCZOS)
-                im.save(os.path.join(out, 'textures', f'{name}_c.jpg'), quality=90)
+                im.convert('RGB').save(os.path.join(out, 'textures', f'{name}_c.jpg'), quality=90)
         else:
             c = tuple(int(round(255 * min(1.0, max(0.0, v)) ** (1 / 2.2))) for v in m.base[:3])
             Image.new('RGB', (4, 4), c).save(os.path.join(out, 'textures', f'{name}_c.jpg'))
         mtl.append(f'newmtl {name}\nmap_Kd textures/{name}_c.jpg\n')
+        if m.normal is not None:     # the normal map in the game's green, lossless (decoded to be flipped)
+            if not s.normal_green:
+                raise SystemExit(f'{kind}: material {m.name} has a normal map; measure its green (Source.normal_green)')
+            with Image.open(io.BytesIO(m.normal)) as im:
+                rgb = np.asarray(im.convert('RGB'))
+            Image.fromarray(texfile_accel.directx_normals(rgb, s.normal_green, f'{kind} {m.name}'), 'RGB').save(
+                os.path.join(out, 'textures', f'{name}_n.png'), optimize=True)
+            mtl[-1] += f'map_normal textures/{name}_n.png\n'
     with open(os.path.join(out, f'{kind}.mtl'), 'w', encoding='utf-8', newline='\n') as f:
         f.write('\n'.join(mtl))
     uv = scene.uvs if scene.uvs is not None else np.zeros((len(P), 2))

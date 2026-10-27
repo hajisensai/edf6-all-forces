@@ -278,7 +278,8 @@ def _prepared(kind: str, e: Emplacement) -> Source:
     mouths = {s: np.asarray(v['muzzles'][s]) * e.scale + up for s in ('left', 'right')}
     rotor = np.asarray(v['rotor']) * e.scale + up if 'rotor' in v else None
     tubes = [np.asarray(p) * e.scale + up for p in v.get('tubes', [])]
-    materials = [{**m, 'albedo': os.path.join(d, m['albedo'])} for m in info['materials']]  # type: ignore[arg-type]
+    materials = [{**m, **{k: os.path.join(d, m[k]) for k in ('albedo', 'normal') if k in m}}  # type: ignore[arg-type]
+                 for m in info['materials']]
     plating = {'albedo': os.path.join(d, 'textures', 'plating.png')}  # type: ignore[arg-type]
     return Source(d, e.title, info.get('source', e.folder), materials, pieces, ring, cradle, mouths, plating, rotor, tubes)  # type: ignore[arg-type]
 

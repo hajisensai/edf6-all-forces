@@ -16,6 +16,7 @@ from functools import lru_cache
 
 import dsgo
 import sgo
+import xm_units
 from rootcpk import DEFAULT_GAME, Game  # noqa: F401  (re-exported: the tools take both from here)
 
 @dataclass(frozen=True)
@@ -926,15 +927,25 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
                              ('app:/weapon/v_503_bike_gun_l.sgo', 'app:/weapon/v_503_bike_gun_r.sgo',
                               'app:/weapon/v_fuel01.sgo'), 300.0, 'make_sidecar'),
 }
-# The ground vehicles tools/make_tracked_combat.py builds on the V603 (each its make_<kind> tool, its own ledger owner and
-# build group): the War Thunder M163 / BMPT, the quad Vulcan, the fixed emplacements; with what the test range calls
-# each (testrange/gen.py: edf6tr_<kind>_mission).
+# The X-Morph: Defense units on the V603 (pylib/xm_units.py; one generator for them all, tools/make_xmorph.py): each its
+# `like`'s native gun pair (the two V603 holders, in the `like`'s cadence) under its own weapon files, its own
+# durability; the `like`'s stores (missiles, a second belt: their own store rows and muzzles) are not inherited.
+for _xm in xm_units.ported('tracked'):
+    _like = GROUND_VEHICLES[_xm.like]
+    assert _like.stock == 'V603_FLAK' and _like.slots[:2] == ('left', 'right'), (_xm.key, _xm.like)
+    GROUND_VEHICLES[_xm.key] = replace(
+        _like, sgo=f'EDF6VC_{_xm.key.upper()}', durability=_xm.durability, tool='make_xmorph', slots=('left', 'right'),
+        weapons=(f'app:/weapon/edf6vc_{_xm.key}_l.sgo', f'app:/weapon/edf6vc_{_xm.key}_r.sgo'))
+# The ground vehicles tools/make_tracked_combat.py builds on the V603 (each its make_<kind> tool, an X-Morph unit
+# make_xmorph's builder; each its own ledger owner and build group): the War Thunder M163 / BMPT, the quad Vulcan, the
+# fixed emplacements, the X-Morph units; with what the test range calls each (testrange/gen.py: edf6tr_<kind>_mission).
 TRACKED: dict[str, str] = {
     'vulcan': 'M163 火神炮车', 'bmpt': 'BMPT 火力支援车', 'quadvulcan': '四联装火神防空车',
     'emp_mid': '无畏舰副炮炮台·中型', 'emp_short': '无畏舰副炮炮台·短管', 'emp_long': '无畏舰副炮炮台·长管',
     'tunguska': '2S6 通古斯卡防空车', 'pzh2000': 'PzH 2000 自行榴弹炮', 'sturmtiger': '突击虎',
     'ciws_phalanx': '密集阵近防炮', 'flak88': '88 毫米高射炮', 'apocalypse': '天启坦克', 'gdf005': 'GDF-005 双联高炮',
-    'laser': '激光防空炮台', 'railgun': '电磁炮炮台', 'tos1': 'TOS-1 喷火兵火箭炮', 'patriot': '爱国者防空导弹'
+    'laser': '激光防空炮台', 'railgun': '电磁炮炮台', 'tos1': 'TOS-1 喷火兵火箭炮', 'patriot': '爱国者防空导弹',
+    **{u.key: xm_units.label(u) for u in xm_units.ported('tracked')},
 }
 # The drill tank's bite (src/jet_bay.cpp kDrillChargeFile, DrillCharge): an impact charge (tools/make_jets.py
 # impact_charge) with a blast of DRILL_CHARGE_RADIUS m (3 m or more: the stock path that lets a blast break buildings,

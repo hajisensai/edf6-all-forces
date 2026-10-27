@@ -104,7 +104,7 @@ LIGHT_SLOTS = ('albedo', 'normal', 'param_r_m_light_hr')
 LIGHT_PARAM = 'light_color'
 # The palette: the mip levels down to a cell's 1 x 1 (four of them) stay one colour.
 PALETTE, CELL = 128, 16
-FLAT_NORMAL = (128, 128, 255)
+FLAT_NORMAL = texfile.FLAT_NORMAL_XY
 TEX_ALBEDO = 'edf6vc_sazabi_df.dds'
 TEX_RMO = 'edf6vc_sazabi_rmo.dds'      # hull shader: R roughness, G metal, B occlusion (255: none; tools/make_drill.py)
 TEX_RML = 'edf6vc_sazabi_rml.dds'      # light shader: R roughness, G metal, B light mask (255: lit)
@@ -221,7 +221,7 @@ def palette(colours: dict[str, Colour]) -> tuple[dict[str, tuple[float, float]],
                 img[k][row:row + CELL * 4] = rgba * CELL
     tex = {name: texfile.dxt1_dds(texfile.Image(PALETTE, PALETTE, img[k]))
            for name, k in ((TEX_ALBEDO, 'df'), (TEX_RMO, 'rmo'), (TEX_RML, 'rml'))}
-    tex[TEX_NORMAL] = texfile.solid_dxt1(FLAT_NORMAL)
+    tex[TEX_NORMAL] = texfile.solid_bc5(FLAT_NORMAL)
     return uv, tex
 
 

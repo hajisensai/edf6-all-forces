@@ -853,6 +853,8 @@ foreach(_shard RANGE ${_cockpit_last})
 endforeach()
 # Every generated ground vehicle's seats have their first-person eye: fitted, grafted, rebuilt on a fit change.
 add_test(NAME cockpit_coverage_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_coverage_guard.py")
+# Every ported X-Morph unit (pylib/xm_units.py) is in every vehicle registry, from the catalog alone.
+add_test(NAME xmorph_registry_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/xmorph_registry_guard.py")
 add_test(NAME cabin_view COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cabin_view_test.py")
 add_test(NAME cockpit_instruments COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_instruments_test.py")
 add_test(NAME cockpit_retrofit COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_retrofit_test.py")
@@ -892,12 +894,13 @@ set_tests_properties(slim_generator PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-
 add_test(NAME frozen_cockpit_package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_frozen_cockpit_package.py")
 set_tests_properties(frozen_cockpit_package PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 add_test(NAME texture_acceleration COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_texture_acceleration.py")
+add_test(NAME bc5_normals COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_bc5_normals.py")
 add_test(NAME model_workers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_workers.py")
 add_test(NAME native_cmpl COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_native_cmpl.py")
 add_test(NAME native_helpers COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_native_helpers.py")
 # tools/edf41_maps.py converting maps in processes of their own writes what one by one writes (skipped without the games)
 add_test(NAME edf41_maps_parallel COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf41_maps_parallel.py")
-set_tests_properties(texture_acceleration model_workers edf41_maps_parallel PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
+set_tests_properties(texture_acceleration bc5_normals model_workers edf41_maps_parallel PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
 # Exported share bundles must include the current mandatory maps, sounds and menu assets, not only a valid old manifest.
 add_test(NAME edf41_install_safety COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_edf41_install_safety.py")
 set_tests_properties(edf41_install_safety PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -2055,6 +2058,11 @@ add_test(NAME npc_action_look COMMAND npc_action_look_test)
 add_test(NAME npc_action_look_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/npc_action_look_native.py")
 
 add_test(NAME tracked_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_tracked_collision.py")
+# X-Morph: Defense's units (docs/xmorph-port.md): the Ogre / text readers and the rig rules always, a unit from the
+# packs with the game installed (the developer machine), built on the V603 with Root.cpk too.
+add_test(NAME xmorph COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_xmorph.py")
+# The generated vehicles' mesh merge and LODs (pylib/model_lod.py, pylib/mesh_simplify.py) on synthetic meshes.
+add_test(NAME model_lod COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_lod.py")
 # The M163 / BMPT from their War Thunder model folders (pylib/wt_tracked.py): prep rules always, the assets with the game.
 # Its kinds in WT_TRACKED_SHARDS parts run side by side (EDF6_TEST_SHARD; all in one run took ~11 min).
 set(WT_TRACKED_SHARDS 4)

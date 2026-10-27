@@ -62,7 +62,7 @@ MODEL_SUBDIR, OBJ_FILE = 'drill_tank', 'drill_tank.obj'
 MATERIALS = {'MI_Tank_C': ('edf6vc_drill_c', 'Tank_C_BC.png'), 'MI_Tank_B_CS': ('edf6vc_drill_b', 'Tank_C_BC.png')}
 ALBEDO_TEX = {'Tank_C_BC.png': 'edf6vc_drill_c.dds'}    # each source texture's archive file (one per source)
 STEEL = (62, 64, 60)                                     # dark steel: the albedo of the stock materials no mesh draws
-FLAT_NORMAL, NEUTRAL_RMO = (128, 128, 255), (150, 110, 255)   # tangent-space up; roughness 0.6, metal 0.43, no occlusion
+FLAT_NORMAL, NEUTRAL_RMO = texfile.FLAT_NORMAL_XY, (150, 110, 255)   # tangent-space up; roughness 0.6, metal 0.43, no occlusion
 TEMPLATE_MATERIAL = 'v505_tank'
 NORMAL_TEX, RMO_TEX, STEEL_TEX = 'edf6vc_drill_n.dds', 'edf6vc_drill_rmo.dds', 'edf6vc_drill_steel.dds'
 # OBJ (+X forward, +Y up) -> game (+Z forward, +Y up, +X left): x -> z, y -> y, z -> -x (a rotation, no mirror)
@@ -224,7 +224,7 @@ def textures(obj: om.ObjFile) -> dict[str, bytes]:
     """The archive's new texture files {name: DDS}: each source albedo once, the flat normal, the neutral RMO, the
     steel of the undrawn stock materials."""
     folder = os.path.dirname(obj.path)
-    out = {NORMAL_TEX: texfile.solid_dxt1(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO), STEEL_TEX: texfile.solid_dxt1(STEEL)}
+    out = {NORMAL_TEX: texfile.solid_bc5(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO), STEEL_TEX: texfile.solid_dxt1(STEEL)}
     for source in sorted({src for _, src in MATERIALS.values()}):
         out[ALBEDO_TEX[source]] = om.texture_dds(os.path.join(folder, source))
     return out

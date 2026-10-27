@@ -43,6 +43,7 @@ import jet_models  # noqa: E402
 import make_jets  # noqa: E402
 import dreadnought_model as dm  # noqa: E402
 import ledger  # noqa: E402
+import model_lod  # noqa: E402
 import sgo  # noqa: E402
 import vcobjects as vc  # noqa: E402
 from mdb import mdb_read, rab_read  # noqa: E402
@@ -122,7 +123,7 @@ def build(root: str, hangars: tuple[bool, ...] = dm.ALL_HANGARS) -> dict[str, by
             make_jets.check_gun_round(files[f'OBJECT/{gun.file}'], gun)
         check_barrels()
     check(files, hangars)
-    return files
+    return model_lod.finish(files)   # its models merged by material and given their LODs (pylib/model_lod.py)
 
 
 def grid_of(model: str) -> tuple[int, int]:
@@ -150,6 +151,7 @@ def check(files: dict[str, bytes], hangars: tuple[bool, ...] = dm.ALL_HANGARS) -
         assert set(files) == {f'OBJECT/{SGO_FILE}'}, sorted(files)
         return
     assert JET.file == dm.archive_name(dm.SHIP) and JET.model == (f'app:/object/{JET.file.lower()}', dm.mdb_name(dm.SHIP))
+    assert not model_lod.check_files(files), model_lod.check_files(files)   # the LOD tables model_lod.finish adds
     jets = {SGO_FILE: (vc.DREADNOUGHT_JET, dm.SHIP)}
     jets.update({FIGHTER_SGOS[k]: (name, k) for k, (name, *_r) in vc.DREADNOUGHT_FIGHTERS.items()})
     for file, (name, model) in jets.items():
@@ -157,7 +159,7 @@ def check(files: dict[str, bytes], hangars: tuple[bool, ...] = dm.ALL_HANGARS) -
         v = sgo.load(data=files[f'OBJECT/{file}'])
         assert jet.file == dm.archive_name(model) and jet.cas is None, (file, jet.file, jet.cas)
         assert v['xgs_scene_object_class'] == 'Vehicle506_Helicopter', (file, v['xgs_scene_object_class'])
-        assert v['animation_model'][0] == list(jet.model) and v['animation_model'][1] == 'app:/object/v506_heli.cas', \
+        assert v['animation_model'][0][:2] == list(jet.model) and v['animation_model'][1] == 'app:/object/v506_heli.cas', \
             (file, v['animation_model'][:2])
         setup = v['vehicle_setup'] if jet.player else v['mission_setup']
         assert setup[1][0] == jet.mark and v['game_object_durability'] == jet.durability, file

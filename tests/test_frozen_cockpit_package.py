@@ -80,8 +80,8 @@ class FrozenCockpitPackageTests(unittest.TestCase):
             root = Path(folder)
             (root / 'tools').mkdir()
             (root / 'pylib').mkdir()
-            for group in buildcache.GROUPS:
-                (root / 'tools' / ('make_' + group + '.py')).write_text(
+            for group in buildcache.GROUPS:   # each group's generator (an X-Morph unit's: make_xmorph)
+                (root / 'tools' / (buildcache.generator(group) + '.py')).write_text(
                     'import cockpit_fits\nimport cockpit_kits\n' if group == 'optics' else 'pass\n')
             for name in ('cockpit_fits', 'cockpit_kits'):
                 for path in (ROOT / 'pylib').glob(name + '*.py'):

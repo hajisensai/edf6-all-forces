@@ -31,7 +31,7 @@ from mdb import Mdb, Mesh, Rab, cmpl_compress, mdb_read, mdb_write, rab_read, ra
 Vec3 = tuple[float, float, float]
 
 TEMPLATE_ARC, TEMPLATE_MDB, TEMPLATE_MATERIAL = 'V505_TANK.MRAB', 'v505_tank.mdb', 'v505_tank'
-FLAT_NORMAL, NEUTRAL_RMO = (128, 128, 255), (190, 0, 255)   # matte nonmetal interior, no occlusion baked twice
+FLAT_NORMAL, NEUTRAL_RMO = texfile.FLAT_NORMAL_XY, (190, 0, 255)   # matte nonmetal interior, no occlusion baked twice
 NORMAL_TEX, RMO_TEX = 'edf6vc_cpit_n.dds', 'edf6vc_cpit_rmo.dds'
 ASSET_DIR = 'cockpits'          # under a model root: textures/, parts/<asset>/, CREDITS.txt
 MARKER = 'vc_eye_{}'
@@ -306,7 +306,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
             part_bone = md.bone_index(controls[fit.seat][part.name]) if part.name in controls[fit.seat] else bone
             by_material.setdefault((fit.kit, part.material), []).append((placed, om.rigid(placed, part_bone)))
             materials[(fit.kit, part.material)] = kit.materials[part.material]
-    textures = {NORMAL_TEX: texfile.solid_dxt1(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO)}
+    textures = {NORMAL_TEX: texfile.solid_bc5(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO)}
     meshes = []
     for (kit_name, key), pieces in sorted(by_material.items()):
         tex = texture_name(kit_name, key)

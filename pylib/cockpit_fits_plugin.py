@@ -18,6 +18,7 @@ from __future__ import annotations
 import cockpit_kits_plugin as plugin_kits
 from cockpit_fits_air import FITS as _AIR
 from cockpits import Fit
+import xm_units
 
 Vec3 = tuple[float, float, float]
 
@@ -176,4 +177,8 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # VEHICLE410_HELI, the same model) and its cabin's passengers in the UH-60M's troop seats.
     'EDF6VC_HELI_TRANSPORT': _AIR['VEHICLE410_HELI'] + _heli_cabin('body', _410_CABIN, range(3, 13)),
 }
+# The X-Morph units (pylib/xm_units.py eye): the gunner's sight camera on the turret over the gun (remote_display), as the
+# War Thunder tanks'.
+FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, 'cannon_main', u.eye, 'remote_display'),)
+             for u in xm_units.ported('tracked')})
 DIGESTS: dict[str, str] = {}
