@@ -82,8 +82,14 @@ for u in ported:
           f'{key}: pylib/vcobjects.py GROUND_VEHICLES')
     check(key in vc.TRACKED, f'{key}: pylib/vcobjects.py TRACKED')
     if v is not None and v.alternate:
-        for w in v.weapons:
+        for w in v.weapons[:2]:
             check(f'{{L"{w.rsplit("/", 1)[1].upper()}",' in stores_inc, f'{key}: src/stores.inc lacks {w} (gen_stores)')
+    # its other weapons (xm_units.Arm): each an intrinsic secondary store, its muzzle slot after the pair
+    for a in u.arms:
+        kind = vc.xm_store(u, a)
+        check(kind in vc.STORES and vc.STORES[kind].independent_secondary
+              and f'{{L"EDF6VC_{kind}_",' in stores_inc, f'{key}: arm {a.key}: STORES {kind} / src/stores.inc (gen_stores)')
+    check(v is None or v.slots == ('left', 'right', *(f'xm_{a.key}' for a in u.arms)), f'{key}: its slots are not its arms')
     # its model: a tracked unit's a wt_tracked folder (WT_ONLY its camera), an emplacement's on the fortified base
     if u.family == 'tracked':
         check(wt_tracked.FOLDERS.get(key) == xm_units.folder(key) and key in mtc.WT_ONLY,

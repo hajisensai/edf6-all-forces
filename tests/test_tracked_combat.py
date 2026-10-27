@@ -30,6 +30,7 @@ import model_lod
 import os
 import tracked_combat_model as tracked
 import vulcan_model
+import xm_units
 
 
 class CatalogContractTests(unittest.TestCase):
@@ -61,8 +62,10 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(tuple(combat.slot('bmpt', i) for i in range(6)), ('left', 'right', 'missiles', 'left', 'right', 'missiles'))
         # 2026-10-21: both Ataka rounds ride the V603's otherwise unread secondary, alongside the cannons (src/payload.cpp).
         # 2026-10-24: the Tunguska's, the Apocalypse's and the Patriot's missiles ride it too.
+        # 2026-10-27: and every X-Morph unit's other weapons (xm_units.Arm).
         self.assertEqual([kind for kind, store in vc.STORES.items() if store.independent_secondary],
-                         ['TUNGUSKA_SAM', 'APOC_SAM', 'PATRIOT_SAM', 'BMPT_ATGM', 'BMPT_ATGMF'])
+                         ['TUNGUSKA_SAM', 'APOC_SAM', 'PATRIOT_SAM', 'BMPT_ATGM', 'BMPT_ATGMF',
+                          *(vc.xm_store(u, a) for u in xm_units.v603() for a in u.arms)])
         self.assertFalse(any(vc.STORES[k].native_control or vc.STORES[k].group for k in ('BMPT_ATGM', 'BMPT_ATGMF')),
                          'a missile is not alternate cannon ammunition')
 
@@ -343,7 +346,7 @@ class FireSoundTests(unittest.TestCase):
             vehicle = vc.GROUND_VEHICLES[kind]
             for i, path in enumerate(vehicle.weapons):
                 side = combat.slot(kind, i)
-                if side == 'missiles':
+                if side not in combat.GUN_SLOTS:
                     continue
                 root = dsgo.parse(combat.gun_sgo(self.game, kind, combat.STOCK_GUNS[side == 'right'], side, point,
                                                  path.rsplit('/', 1)[1].upper() if i >= 2 else None)).root

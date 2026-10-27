@@ -761,11 +761,15 @@
   ],
   "edf6tr_xm_large_tank_emp_mission": [
    "OBJECT/EDF6VC_XM_LARGE_TANK_EMP.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/BULLET_MISSILE.RAB",
    "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],
   "edf6tr_xm_large_tank_mission": [
    "OBJECT/EDF6VC_XM_LARGE_TANK.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/BULLET_ROCKET.RAB",
    "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],
@@ -782,6 +786,7 @@
   ],
   "edf6tr_xm_medium_tank_aa_mission": [
    "OBJECT/EDF6VC_XM_MEDIUM_TANK_AA.MRAB",
+   "WEAPON/BULLET_RPG.RAB",
    "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],

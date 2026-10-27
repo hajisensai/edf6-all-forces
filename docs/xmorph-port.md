@@ -138,7 +138,23 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
 - 炮口用 X-Morph 的挂点：常规坦克炮口在炮管末端后约 0.6 m（炮口制退器起点），炮弹从管内出；未实机核对是否打到自身。
 - `artillery` 的 `doppler_radar` 切片在左半边没有可拟合的块，退回把供体凸包拉伸到目标盒（`tracked_collision._fit_shape`，`fitted_pieces 0`）。
 - 主武器之外的武器、主动防御、护盾 / 力场效果、摧毁阶段网格（`_dest_*`）都没移植。
-- 7 辆履带车全部开放呼叫（2026-10-27，武器表第 85–91 行）。数值按原作比例换算：耐久 ≈ 原作 max_health 的比例（战斗坦克 170 → 2500 为基准，
-  装甲很薄的防空车 / 自行火炮给到 1500 保底），射速取原作 `fire_rate`（秒）；激光单位（先进坦克、护盾车）的弹用直升机激光炮的光束
-  （`Unit.shell` → `make_tracked_combat.SHELL_OF`）。视角与瞄准镜位置按各模型实测的炮塔顶与炮口（`xm_units.py` 各行注释）。
+- 7 辆履带车全部开放呼叫（2026-10-27，武器表第 85–91 行）。耐久 ≈ 原作 max_health 的比例（战斗坦克 170 → 2500 为基准，
+  装甲很薄的防空车 / 自行火炮给到 1500 保底）。视角与瞄准镜位置按各模型实测的炮塔顶与炮口（`xm_units.py` 各行注释）。
+
+## 武器（攻击方式按原作，2026-10-27 用户：「攻击方式按照游戏里面那样搞」）
+
+- 数据来源：单位蓝图 `WeaponComp` 的每个 `Weapon`（`weapon_definition`：`fire_rate` = 一轮间隔秒数，`FirePattern.burst_rows` 发、
+  间隔 `burst_rate` 秒，`muzzles_per_fire`），弹头是 `ammo_blueprint` 指向的**具名蓝图**（定义在 `entities/projectiles/*.ent` 这类
+  一文件多蓝图的组文件里：`xm_model.named()` 按名字索引全部 EntityBlueprint）：`MovementComp.speed`、`DamagePattern.Damage.value/type`、
+  `Area.radius`、`AimPattern`（导弹追踪什么）。
+- 换算（`xm_units.DAMAGE` / `BLAST`）：anti_core、artillery、laser 原作 1 点 = 120（战斗坦克 5 → 600），anti_player、emp（原作打玩家的
+  轻型飞行器）1 点 = 30；Area 半径 × 1.5 m。射速、连发、齐射（`muzzles_per_fire 2` → 两个挂点同时，`GroundVehicle.alternate`
+  可按单位覆盖：`Unit.alternate`）照原作。BeamWeaponDef（持续光束）= 每 4 帧一段的激光流。
+- 主武器 = V603 的原生一对挂点；其余每个 `Weapon` 是一个 `xm_units.Arm`：`vcobjects.STORES` 里一个 independent_secondary 的挂载
+  （`<单位>_<臂>`，和 BMPT 的 Ataka 同一机制：座位本来不读的第二扳机，与主武器同时开火，多个时互相轮换），从原作该武器的
+  `Muzzle` 位置射出（`prep_xmorph.arm_muzzles` → model.json `muzzles['xm_<臂>']`；`make_tracked_combat` 的挂载槽从唯一的 `missiles`
+  推广为任意槽：`slot_points` 把槽的炮口按模板的定位点数轮流分配，`store_weapon_sgo` 生成）。导弹挂在炮塔（`cannon_main`），
+  枪炮挂在炮身（`cannon_l`：跟主炮瞄准）。
+- 做不到的：原作的副炮塔各自独立瞄准（EDF 里随主炮）；主动防御激光（拦截来袭弹药，EDF 没有这个机制）；护盾；
+  重坦两门炮之间的 0.25 秒间隔（这里同时）；EMP 坦克两座防空机炮塔共四个炮口，机枪模板只有一个定位点，从第一个射出（每次两发）。
 - 材质名沿用 `prepare()` 的 `wt_<贴图名>` 前缀（仅 MRAB 内部名字）。

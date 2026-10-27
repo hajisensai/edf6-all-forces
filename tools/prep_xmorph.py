@@ -350,6 +350,21 @@ def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Ve
     return v, src, report
 
 
+def arm_muzzles(packs: xp.Packs, unit: xm_units.Unit) -> dict[str, list[dict]]:
+    """The unit's other weapons' muzzles (xm_units.Arm: muzzle slot xm_<key>), model space, on the arm's holder bone:
+    each of its game weapons' Muzzle attachments (or bones), in the blueprint's order."""
+    um = xm.load(packs, unit.entity)
+    weapons = {w.name: w for w in um.weapons()}
+    out = {}
+    for arm in unit.arms:
+        missing = [w for w in arm.weapons if w not in weapons]
+        _req(not missing, f'{unit.key}: arm {arm.key}: no weapon {missing} in its blueprint')
+        points = [um.point(m) * SCALE for w in arm.weapons for m, _r in weapons[w].muzzles]
+        _req(bool(points), f'{unit.key}: arm {arm.key} has no muzzle')
+        out[f'xm_{arm.key}'] = [{'bone': arm.bone, 'point': [float(c) for c in p]} for p in points]
+    return out
+
+
 def prepare_tracked(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
     out = os.path.join(out_root, xm_units.folder(unit.key))
     with tempfile.TemporaryDirectory(prefix='prep_xmorph_') as staging:
@@ -359,6 +374,7 @@ def prepare_tracked(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict
         os.makedirs(out)
         info = prep.prepare(v, src, out)
     _req(not info['winding_flipped'], f'{unit.key}: the hull winds clockwise (the frame change is a rotation)')
+    info['muzzles'].update(arm_muzzles(packs, unit))
     # the conversion's record (wt_tracked reads neither key)
     info['xmorph'] = {**report, 'scale': SCALE}
     with open(os.path.join(out, 'model.json'), 'w', encoding='utf-8', newline='\n') as f:

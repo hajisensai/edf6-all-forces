@@ -355,18 +355,25 @@ def parts(a: t.Assembly, kind: str) -> None:
         tris = spec.arrays[f'c_{proxy}_tri'].astype(np.int64)
         a.parts['collision:' + proxy] = Piece('collision:' + proxy, pos, tris, a.bone(proxy))
     for side, rows in spec.info['muzzles'].items():
-        for i, row in enumerate(rows):
-            name = side if side != 'missiles' else f'missile_{i + 1}'
+        for name, row in zip(muzzle_names(side, len(rows)), rows):
             a.muzzle(name, row['bone'], tuple(row['point']), 0.0)
     for bone, w in spec.info['wheels'].items():
         a.wheels[bone] = tuple(w['centre'])
 
 
+def muzzle_names(side: str, count: int) -> list[str]:
+    """The Assembly's names of a muzzle slot's `count` points: a gun side its own name; the missile tubes missile_<n>
+    (bmpt_model's), another store slot (an X-Morph unit's arm, xm_<key>) <slot>_<n>."""
+    if side in ('left', 'right'):
+        return [side]
+    stem = 'missile' if side == 'missiles' else side
+    return [f'{stem}_{i + 1}' for i in range(count)]
+
+
 def _weapon_muzzles(a: t.Assembly, spec: Spec) -> dict:
     out = {}
     for side, rows in spec.info['muzzles'].items():
-        names = [side] if side != 'missiles' else [f'missile_{i + 1}' for i in range(len(rows))]
-        out[side] = [(a.muzzles[n]['bone'], a.muzzles[n]['local']) for n in names] if rows else []
+        out[side] = [(a.muzzles[n]['bone'], a.muzzles[n]['local']) for n in muzzle_names(side, len(rows))] if rows else []
     return out
 
 

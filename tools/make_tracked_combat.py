@@ -425,16 +425,30 @@ def _howitzer_case() -> float:
     return make_artillery.CASE_SCALE
 
 
+GUN_SLOTS = ('left', 'right')
+
+
 def slot(kind: str, index: int) -> str:
-    """What holder `index` of `kind` fires from: 'left' / 'right' (a gun's barrel) or 'missiles' (the tubes)."""
+    """What holder `index` of `kind` fires from: 'left' / 'right' (a gun's barrel), else a store's own muzzles (the
+    model's muzzle contract of that name: 'missiles' the tubes, an X-Morph unit's arm its 'xm_<key>')."""
     slots = vc.GROUND_VEHICLES[kind].slots
     return slots[index] if slots else ('left' if index == 0 else 'right')
 
 
-def missile_sgo(game: vc.Game, points: list[tuple[str, tuple[float, float, float]]],
-                store: str = vc.store_file('BMPT_ATGM', 4)) -> bytes:  # the BMPT's Ataka, the 2S6's 9M311 (`store`)
+def slot_points(points: list[tuple[str, tuple[float, float, float]]], count: int) -> list:
+    """A store slot's authored muzzles as its weapon's `count` locators take them, in turn (the BMPT's four tubes their
+    four; an X-Morph pod's one or two game muzzles round its template's four; a one-muzzle gun its first)."""
+    if not points:
+        raise ValueError('a store slot without muzzles')
+    return [points[i % len(points)] for i in range(count)]
+
+
+def store_weapon_sgo(game: vc.Game, points: list[tuple[str, tuple[float, float, float]]], store: str) -> bytes:
+    """A store's weapon (vcobjects.store_sgo: the BMPT's Ataka, the 2S6's 9M311, an X-Morph unit's arm) firing from its
+    slot's muzzles (slot_points)."""
     doc = dsgo.parse(vc.store_sgo(game, store))
-    _weapon_muzzles(doc, points)
+    count = len(vc.mab_muzzles(doc.root.get('animation_model').items[2].data))
+    _weapon_muzzles(doc, slot_points(points, count))
     return dsgo.compact(doc)
 
 
@@ -517,15 +531,20 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
         # HE/AP are alternate belts in the same visible M61 (the quad's: its four on one cradle): the right holders
         # must follow the left slide too, throughout elevation and recoil.
         guns[1].items[0] = 'cannon_slide_l'
-    # A gun barrel's holder on its side's moving bone, the missiles' on the bone their tubes ride (the muzzle contract's:
-    # the turret, or the BMPT's elevating weapon module, prep_wt_tracked Vehicle.missile_bone): the round leaves along
-    # that bone's forward row (muzzle mode 0), so on the module it leaves along the guns' line (slot).
+    # A gun barrel's holder on its side's moving bone, a store's on the bone its muzzles ride (the muzzle contract's:
+    # the turret, the BMPT's elevating weapon module, prep_wt_tracked Vehicle.missile_bone; an X-Morph arm's
+    # xm_units.Arm.bone): the round leaves along that bone's forward row (muzzle mode 0), so on the module or the gun it
+    # leaves along the guns' line (slot).
     sides = [slot(kind, i) for i in range(len(vehicle.weapons))]
-    tubes = {bone for bone, _ in _points(model, game).get('missiles', [])} if 'missiles' in sides else {'cannon_main'}
-    if len(tubes) != 1:
-        raise ValueError(f'{kind}: the missile tubes ride {sorted(tubes)}: one holder bone needs them on one')
-    (launcher,) = tubes
-    setting.items = [copy.deepcopy(guns[side == 'right']) if side != 'missiles' else _node([launcher, 0.0])
+    points = _points(model, game)
+    holders = {}
+    for side in sides:
+        if side not in GUN_SLOTS:
+            bones = {bone for bone, _ in points.get(side, [])}
+            if len(bones) != 1:
+                raise ValueError(f'{kind}: the {side} muzzles ride {sorted(bones)}: one holder bone needs them on one')
+            (holders[side],) = bones
+    setting.items = [copy.deepcopy(guns[side == 'right']) if side in GUN_SLOTS else _node([holders[side], 0.0])
                      for side in sides]
     if kind in TURRET_LIMITS:
         import make_artillery
@@ -600,9 +619,9 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
         if gun.get('AmmoCount') <= 0 or gun.get('AmmoDamage') <= 0:
             raise ValueError(f'{kind}: nonfunctional weapon {path}')
         muzzles = vc.mab_muzzles(gun.get('animation_model').items[2].data)
-        expected_count = 4 if slot(kind, index) == 'missiles' else 1
-        if len(muzzles) != expected_count:
-            raise ValueError(f'{kind}: {path} has {len(muzzles)} muzzle locators, expected {expected_count}')
+        side = slot(kind, index)
+        if side in GUN_SLOTS and len(muzzles) != 1 or side == 'missiles' and len(muzzles) != 4 or not muzzles:
+            raise ValueError(f'{kind}: {path} has {len(muzzles)} muzzle locators for {side}')
         if dsgo.write(dsgo.parse(blob)) != blob:
             raise ValueError(f'{kind}: weapon does not round-trip')
     if game is not None:
@@ -638,6 +657,8 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
             block = gun.get('animation_model').items[2].data
             positions = [struct.unpack_from('<3f', block, off) for _, _, off in vc.mab_muzzles(block)]
             authored = points[slot(kind, index)]
+            if slot(kind, index) not in GUN_SLOTS:
+                authored = slot_points(authored, len(positions))
             if any(bone != settings[index][0] for bone, _ in authored):
                 raise ValueError(f'{kind}: holder uses a different moving bone from the visible barrel')
             wanted = [p for _, p in authored]
@@ -658,10 +679,11 @@ def authored(root: str, kind: str) -> dict[str, bytes]:
              f'OBJECT/{model.OUT_ARC}': arc, collision_path(kind): shkt,
              animation_path(kind): model.animation(game)}
     for i, path in enumerate(vehicle.weapons):
-        # The native pair (the first two), then the stores: a second belt on the same barrels, the missiles.
+        # The native pair (the first two), then the stores: a second belt on the same barrels, the missiles, an
+        # X-Morph unit's other weapons.
         name, side = path.rsplit('/', 1)[1].upper(), slot(kind, i)
-        if side == 'missiles':
-            files[f'WEAPON/{name}'] = missile_sgo(game, points['missiles'], name)
+        if side not in GUN_SLOTS:
+            files[f'WEAPON/{name}'] = store_weapon_sgo(game, points[side], name)
         else:
             files[f'WEAPON/{name}'] = gun_sgo(game, kind, STOCK_GUNS[side == 'right'], side, points[side],
                                               name if i >= 2 else None)
