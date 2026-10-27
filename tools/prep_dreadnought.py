@@ -62,7 +62,10 @@ import obj_model  # noqa: E402
 
 GENERIC = 'DreadGame/Content/Generic'
 SHIP_LENGTH = 500.0        # metres, the dreadnought's bow to stern: its fighters a fighter's size (see Size above)
-TEX = 1024                 # every texture's size
+# Texture sizes: each written map at the largest native size of the source maps it is made of (df: diffuse, colour
+# mask, AO; nm: normal; rml: colour mask, AO), never resampled above that (the heavy hull's normal / mask / AO are
+# 2048, its diffuse 1024; no limit of our own: stock vehicles' maps are 2048, V515's normal 4096). It was 1024 for every
+# map (2026-10-27: the 2048 sources halved, the 512 ones blown up).
 # The source's colour is its paint x its diffuse as a shading map, in linear colour (the shader's; the diffuse is sRGB):
 # the diffuse's median neutral, so the paint shows as authored on a plain plate, its edges lighter, its grime darker
 # (the master's math is cooked away; its default diffuse CH_DN_Empty_D is white with alpha 0: alpha weighs it).
@@ -508,12 +511,23 @@ def find_texture(export: str, material: str, slot: tuple[str, ...]) -> str | Non
     return None
 
 
-def _img(path: str | None, fill: tuple[int, ...], mode: str = 'RGBA') -> np.ndarray:
+def _size(*paths: str | None) -> tuple[int, int]:
+    """(width, height): the largest of the files' own sizes (16 x 16 when there is none)."""
+    sizes = []
+    for path in paths:
+        if path is not None:
+            with Image.open(path) as im:
+                sizes.append(im.size)
+    return (max(w for w, _ in sizes), max(h for _, h in sizes)) if sizes else (16, 16)
+
+
+def _img(path: str | None, fill: tuple[int, ...], size: tuple[int, int], mode: str = 'RGBA') -> np.ndarray:
+    """The file (`fill` where there is none) at `size` (width, height), 0..1."""
     if path is None:
-        return np.broadcast_to(np.array(fill, np.float64) / 255.0, (TEX, TEX, len(fill))).copy()
+        return np.broadcast_to(np.array(fill, np.float64) / 255.0, (size[1], size[0], len(fill))).copy()
     im = Image.open(path).convert(mode)
     # each channel alone: PIL resizes RGBA premultiplied, which zeroes the colour where alpha (here a mask) is 0
-    chans = [c.resize((TEX, TEX), Image.LANCZOS) for c in im.split()]
+    chans = [c if c.size == size else c.resize(size, Image.LANCZOS) for c in im.split()]
     return np.stack([np.asarray(c, np.float64) for c in chans], axis=-1) / 255.0
 
 
@@ -527,31 +541,41 @@ def to_srgb(c: np.ndarray) -> np.ndarray:
 
 
 def bake(export: str, material: str, paint: Vanity | None = None) -> dict[str, Image.Image]:
-    """The material's three textures (see the module doc); `paint`: the ship's vanity, on the ship's materials."""
-    d = _img(find_texture(export, material, ('Albedo', 'PM_Diffuse', 'Diffuse')), (188, 188, 188, 255))
+    """The material's three textures (see the module doc), each at its sources' size (above); `paint`: the ship's
+    vanity, on the ship's materials."""
+    d_file = find_texture(export, material, ('Albedo', 'PM_Diffuse', 'Diffuse'))
     mask = paint.masks.get(material) if paint is not None else None
-    mc = _img(mask or find_texture(export, material, ('colorMask', 'PM_SpecularMasks')), (0, 0, 0, 255))
-    ao = _img(find_texture(export, material, ('AO',)), (255, 255, 255, 0))
-    nm = _img(find_texture(export, material, ('Normal', 'PM_Normals')), (128, 128, 255, 255))
+    mc_file = mask or find_texture(export, material, ('colorMask', 'PM_SpecularMasks'))
+    ao_file = find_texture(export, material, ('AO',))
+    nm_file = find_texture(export, material, ('Normal', 'PM_Normals'))
+    colour_size, param_size = _size(d_file, mc_file, ao_file), _size(mc_file, ao_file)
+    d = _img(d_file, (188, 188, 188, 255), colour_size)
+    mc = _img(mc_file, (0, 0, 0, 255), colour_size)
+    ao = _img(ao_file, (255, 255, 255, 0), colour_size)
+    nm = _img(nm_file, (128, 128, 255, 255), _size(nm_file))
     colours, scalars = params(export, material, paint)
     base = colours.get('BaseColor', colours.get('DetailSurfaceColor01', DEFAULT_BASE))
     lin = to_linear(d[..., :3])
     detail = np.clip(lin / max(float(np.median(lin.mean(-1))), 1e-3), 0.0, DETAIL_MAX)
     detail = 1.0 + d[..., 3:4] * (detail - 1.0)   # its alpha: how much (the "empty" CH_DN_Empty_D: white, alpha 0)
     rgb = np.broadcast_to(np.array(base), d[..., :3].shape)
-    metal = np.full(d.shape[:2], scalars.get('BaseMetalic', 0.8))
-    rough = np.full(d.shape[:2], scalars.get('BaseRoughness01', 0.5))
-    for k, ch in enumerate(('Red', 'Green', 'Blue')):
-        w = mc[..., k]
+    for k in range(3):
         if f'CustomColor0{k + 1}' in colours:
-            rgb = rgb + w[..., None] * (np.array(colours[f'CustomColor0{k + 1}']) - rgb)
-        # a colour set gives metal for its base alone (m_baseMetalic): its paints over the masks are coats, not metal
-        # (at 0.5 the hull read as chrome under the game's sky: range 2026-10-21)
-        metal = metal + w * (scalars.get(f'{ch}Metalic', 0.0) - metal)
-        rough = rough + w * (scalars.get(f'{ch}Roughness01', 0.5) - rough)
+            rgb = rgb + mc[..., k:k + 1] * (np.array(colours[f'CustomColor0{k + 1}']) - rgb)
     ao_w = scalars.get('AoInfluence', AO_DEFAULT)
     rgb = to_srgb(rgb * detail * (1.0 - ao_w * (1.0 - ao[..., 1:2])))
-    light = ao[..., 3] if ao[..., 3].mean() < 0.5 else np.zeros(d.shape[:2])   # the fighters' AO alpha is all 1: no lights
+    if param_size != colour_size:   # the roughness / metal / light map from the masks at their own size
+        mc = _img(mc_file, (0, 0, 0, 255), param_size)
+        ao = _img(ao_file, (255, 255, 255, 0), param_size)
+    metal = np.full(mc.shape[:2], scalars.get('BaseMetalic', 0.8))
+    rough = np.full(mc.shape[:2], scalars.get('BaseRoughness01', 0.5))
+    for k, ch in enumerate(('Red', 'Green', 'Blue')):
+        # a colour set gives metal for its base alone (m_baseMetalic): its paints over the masks are coats, not metal
+        # (at 0.5 the hull read as chrome under the game's sky: range 2026-10-21)
+        w = mc[..., k]
+        metal = metal + w * (scalars.get(f'{ch}Metalic', 0.0) - metal)
+        rough = rough + w * (scalars.get(f'{ch}Roughness01', 0.5) - rough)
+    light = ao[..., 3] if ao[..., 3].mean() < 0.5 else np.zeros(ao.shape[:2])   # the fighters' AO alpha is all 1: no lights
     if paint is not None:
         # the ship's bare metal (its colour set's m_baseMetalic 1) under the game's bright sky: a mirror of it, the hull
         # white and the paint lost (range 2026-10-21; the original flies in space, its sky dark): half of it

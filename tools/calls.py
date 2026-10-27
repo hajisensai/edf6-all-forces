@@ -16,8 +16,13 @@ row as a placeholder.
 """
 from __future__ import annotations
 
+import os
 import struct
+import sys
 from dataclasses import dataclass
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'pylib'))
+import xm_units  # noqa: E402
 
 ID_PREFIX = 'EDF6VC_CALL_'
 # A placeholder row: its template's stock row under this id, so the row keeps its index (no save loses or gains a
@@ -322,6 +327,26 @@ CALLS: tuple[Call, ...] = (
     Call('EDF6VC_CALL_SORTIE_GUIDED', 7811, 'sortie_guided', False, 1, 3600, 1.7, 'jets', 'guided strike', 180, 'gunship',
          sortie='gunshipLap', then='EDF6VC_CALL_SORTIE_DIVE', then_after=25),
 )
+
+
+def _with_xmorph(hand: tuple[Call, ...]) -> tuple[Call, ...]:
+    """`hand` with the X-Morph units' requests (pylib/xm_units.py ported: one row a unit, a ground vehicle request as the
+    War Thunder vehicles' are, its texts KINDS[key]), each right after the call its unit names (Unit.after): the row
+    order rule above holds for them as for every row (tools/selftest.py checks RELEASED against it). The rows are the
+    catalog's on every machine; whether a unit's model folder is here only decides whether its row is live
+    (tools/call_weapons.py undeployed)."""
+    out = list(hand)
+    units = xm_units.v603()
+    if len({u.after for u in units}) != len(units):
+        raise ValueError('two X-Morph units name the same call to follow (pylib/xm_units.py Unit.after)')
+    for u in units:
+        at = [c.id for c in out].index(u.after) + 1
+        out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', 0, u.key, False, 0, u.reload, u.level, 'vehicle',
+                            vehicle=f'EDF6VC_{u.key.upper()}', ground=u.key))
+    return tuple(out)
+
+
+CALLS = _with_xmorph(CALLS)
 IDS: tuple[str, ...] = tuple(c.id for c in CALLS)
 FLOWN: tuple[Call, ...] = tuple(c for c in CALLS if c.flown)   # the plugin's kCalls, in this order
 # The strikes on the map's support bar (the plugin's kStrikes): the barrages in CALLS order, then the ultimate.
@@ -355,6 +380,8 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'Patriot (2026-10-24)': IDS[:64],
     'long-range barrages (2026-10-25)': IDS[:73],
     'sorties (2026-10-25)': IDS[:84],
+    'X-Morph battle tank (2026-10-27)': IDS[:85],
+    'X-Morph tracked units and forts (2026-10-27)': IDS[:93],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -1042,6 +1069,7 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('Gunships', 'Calls gunships that attack nearby enemies.'),
     },
 }
+KINDS.update({u.key: {lang: xm_units.text(u, lang) for lang in xm_units.LANGS} for u in xm_units.ported()})
 MODES: dict[str, tuple[tuple[str, str], tuple[str, str]]] = {  # (hold, follow): (name suffix, sentence)
     'SC': (('·守点', '守在标记的地点上空。'), ('·跟随', '跟随呼叫者行动。')),
     'CN': (('·守點', '守在標記的地點上空。'), ('·跟隨', '跟隨呼叫者行動。')),
@@ -1097,6 +1125,7 @@ PLUGIN_NOTES: dict[str, str] = {
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
 GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES, 'quadvulcan': PLUGIN_NOTES, 'emp_mid': PLUGIN_NOTES, 'emp_short': PLUGIN_NOTES, 'emp_long': PLUGIN_NOTES, 'tunguska': PLUGIN_NOTES, 'pzh2000': PLUGIN_NOTES, 'sturmtiger': PLUGIN_NOTES, 'tos1': PLUGIN_NOTES, 'apocalypse': PLUGIN_NOTES, 'ciws_phalanx': PLUGIN_NOTES, 'flak88': PLUGIN_NOTES, 'gdf005': PLUGIN_NOTES, 'laser': PLUGIN_NOTES, 'railgun': PLUGIN_NOTES, 'patriot': PLUGIN_NOTES}
+GROUND_NOTES_BY_KIND.update({u.key: PLUGIN_NOTES for u in xm_units.v603()})   # pylib/xm_units.py
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',

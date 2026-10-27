@@ -63,7 +63,7 @@ E551_OBJECTS = ('v505_tank', 'Caterpi')
 HULL_MATERIALS = {'v505_tank': 'v505_tank', 'Light01': 'Light01', 'Light02': 'Light02', 'Caterpi_l': 'v603_kyata_L',
                   'Caterpi_r': 'v603_kyata_R'}
 TURRET_MATERIAL = ('fortressx_02', 'v505_tank')       # (name, E551 template material) of the turret's material
-FLAT_NORMAL = ('edf6vc_flat_nor.dds', (128, 128, 255))      # x, y = 0: the shader's normal is the surface's
+FLAT_NORMAL = ('edf6vc_flat_nor.dds', texfile.FLAT_NORMAL_XY)   # x, y = 0: the shader's normal is the surface's
 PLAIN_RMO = ('edf6vc_plain_rmo.dds', (140, 90, 200))        # ~ the E551 / Kepler body maps' mean (roughness, metal, occ)
 # E551 bone -> Kepler bone (by name). cannon_main: a plate of the E551's turret floor the OBJ hull still has (under the
 # new turret, x +-0.29, y 1.309), turning with the turret as in the E551.
@@ -361,7 +361,7 @@ def build_model(game, folder: str) -> tuple[Mdb, Rab, dict]:  # noqa: ANN001 - r
     albedo = om.texture_path(obj, turret.material)
     tex = {'albedo': os.path.basename(albedo).rsplit('.', 1)[0].lower() + '.dds', 'normal': FLAT_NORMAL[0],
            'param_r_m_occ_hr': PLAIN_RMO[0]}
-    made = {tex['albedo']: om.texture_dds(albedo), FLAT_NORMAL[0]: texfile.solid_dxt1(FLAT_NORMAL[1]),
+    made = {tex['albedo']: om.texture_dds(albedo), FLAT_NORMAL[0]: texfile.solid_bc5(FLAT_NORMAL[1]),
             PLAIN_RMO[0]: texfile.solid_dxt1(PLAIN_RMO[1])}
     md, turret_mat = om.add_material(md, ref, TURRET_MATERIAL[1], tm, tex)
     for fn, dds in sorted(made.items()):

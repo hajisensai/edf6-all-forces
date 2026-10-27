@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import cockpits  # noqa: E402
 import jet_models  # noqa: E402
 import ledger  # noqa: E402
+import model_lod  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
 JET = 'edf6tr_sub_carrier_mission'
@@ -51,7 +52,7 @@ def check_sgo(data: bytes) -> None:
     jet = vc.JETS[JET]
     assert v['mission_setup'][1][0] == jet.mark, 'mark'
     assert v['game_object_durability'] == jet.durability, 'durability'
-    assert v['animation_model'][0] == list(jet.model), v['animation_model'][0]
+    assert v['animation_model'][0][:2] == list(jet.model), v['animation_model'][0]   # + model_lod.finish's LOD table
     assert v['animation_model_bone_mapping'] == ['mdl', 'body']
     box = v['heli_rigid_body']
     assert all(abs(a - b) < 1e-3 for got, want in zip(box[:2], jet.rigid) for a, b in zip(got, want)), box   # float32
@@ -84,7 +85,11 @@ def build(root: str) -> dict[str, bytes]:
     check_sgo(data)
     out[f'OBJECT/{MODEL_FILE}'] = arc
     out[f'OBJECT/{SGO_FILE}'] = data
-    return cockpits.graft_files(game, out)   # its seats' first-person cockpits (pylib/cockpits.py)
+    # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
+    # (pylib/model_lod.py)
+    out = model_lod.finish(cockpits.graft_files(game, out))
+    check_model(out[f'OBJECT/{MODEL_FILE}'])   # what is written is held to the same contract
+    return out
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

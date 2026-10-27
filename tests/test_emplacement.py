@@ -20,6 +20,7 @@ import cockpit_fits
 import emplacement_model as em
 import rootcpk
 import vcobjects as vc
+import xm_units
 
 
 class RegistryTests(unittest.TestCase):
@@ -29,7 +30,9 @@ class RegistryTests(unittest.TestCase):
                 self.assertIn(kind, vc.TRACKED)
                 vehicle = vc.GROUND_VEHICLES[kind]
                 self.assertEqual(vehicle.stock, 'V603_FLAK')
-                self.assertEqual(vehicle.alternate, kind != 'gdf005', 'two guns in turn, the GDF-005 both together')
+                # two guns in turn, the GDF-005 (and an X-Morph emplacement like it: xm_units.Unit.like) both together
+                like = xm_units.UNITS[kind].like if kind in xm_units.UNITS else kind
+                self.assertEqual(vehicle.alternate, like != 'gdf005', 'two guns in turn, the GDF-005 both together')
                 # the Patriot's PAC-3 from its tubes as well (a missile holder, vcobjects PATRIOT_SAM)
                 self.assertEqual(vehicle.slots, ('left', 'right') + (('missiles',) if kind == 'patriot' else ()))
                 self.assertTrue((ROOT / 'tools' / f'{vehicle.tool}.py').is_file())

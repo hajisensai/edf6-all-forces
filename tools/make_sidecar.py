@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 sys.path.insert(0, HERE)
 import cockpits  # noqa: E402
 import ledger  # noqa: E402
+import model_lod  # noqa: E402
 import sgo  # noqa: E402
 import sidecar_model  # noqa: E402
 import vcobjects as vc  # noqa: E402
@@ -78,13 +79,15 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> dict:
     across the ground (its plan) and its top the model's floor. Returns what the checks measured."""
     v = sgo.load(data=files[f'OBJECT/{SGO_FILE}'])
     assert v['xgs_scene_object_class'] == CLASS and v['game_object_durability'] == VEHICLE.durability, v['xgs_scene_object_class']
-    assert v['animation_model'][0] == MODEL, v['animation_model'][0]
+    # [archive, model] (+ the LOD table model_lod.finish adds: checked against the archive)
+    assert v['animation_model'][0][:2] == MODEL, v['animation_model'][0]
+    assert not model_lod.check_files(files), model_lod.check_files(files)
     assert v['ragdoll'][0] == RAGDOLL, v['ragdoll'][0]
     assert [w[0] for w in v['vehicle_setup'][-1]] == list(VEHICLE.weapons)
     assert len(v['vehicle_riding_position']) == 1, 'the gunner is no seat: the plugin holds them (src/sidecar.cpp)'
     reach = sidecar_model.soldier_reach(game) if game is not None else None
     assert reach is None or reach <= sidecar_model.SOLDIER_REACH, f'the Ranger reaches {reach}, SOLDIER_REACH is {sidecar_model.SOLDIER_REACH}'
-    model = sidecar_model.check(files[f'OBJECT/{MODEL_FILE}'], sidecar_model.stock_bones(game) if game is not None else None, reach)
+    model = sidecar_model.check(files[f'OBJECT/{MODEL_FILE}'], sidecar_model.stock_model(game) if game is not None else None, reach)
     stock = game.read('OBJECT', sidecar_model.HOST_RAGDOLL) if game is not None else None
     collision = sidecar_model.check_collision(files[f'OBJECT/{RAGDOLL_FILE}'], stock)
     (mlo, mhi), r = model['tub'], collision['radius']
@@ -104,8 +107,12 @@ def build(root: str) -> dict[str, bytes]:
     shkt, _info = sidecar_model.build_collision(game)
     files = {f'OBJECT/{MODEL_FILE}': sidecar_model.build(game), f'OBJECT/{RAGDOLL_FILE}': shkt,
              f'OBJECT/{SGO_FILE}': vehicle_sgo(game)}
+    check(files, game)
+    # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
+    # (pylib/model_lod.py); what is written is held to the same contract
+    files = model_lod.finish(cockpits.graft_files(game, files))
     build.measured = check(files, game)   # type: ignore[attr-defined]
-    return cockpits.graft_files(game, files)   # its seats' first-person cockpits (pylib/cockpits.py)
+    return files
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

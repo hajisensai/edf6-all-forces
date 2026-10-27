@@ -69,8 +69,6 @@ def manifest() -> dict:
         bones[f'bay_{i}'] = {'parent': 'dreadnought', 'pivot': [0.0, 0.0, 0.0]}
         bones[f'bay_{i}_out'] = {'parent': 'dreadnought', 'pivot': [0.0, 0.0, 0.0]}
     bones['bridge'] = {'parent': 'dreadnought', 'pivot': [0.0, 12.0, -100.0]}
-    bones['ready'] = {'parent': 'dreadnought', 'pivot': [0.0, 10.0, -10.0]}       # a folder made before 2026-10-24
-    bones['ready_side'] = {'parent': 'dreadnought', 'pivot': [8.0, 10.0, -10.0]}
     return {'models': {'dreadnought': {'bones': bones}, 'fighter': {'bones': {'fighter': {'parent': '', 'pivot': [0, 0, 0]}}}}}
 
 
@@ -110,7 +108,6 @@ def main() -> int:
                 check(not geometry & kept, f'{label}: module {m} not fitted, its parts {sorted(geometry & kept)} built')
                 check(not ours & names, f'{label}: module {m} not fitted, its bones {sorted(ours & names)} in the skeleton')
         check('dreadnought' in kept, f'{label}: the hull left out')
-        check(not {'dn_ready', 'dn_ready_side'} & names, f'{label}: the foredeck ready markers in the skeleton')
         check({'dn_bridge', 'dn_hull'} <= names, f'{label}: the hull or its bridge marker missing')
         bays = {i for i in range(dm.BAYS) if f'dn_bay_{i}' in names}
         check(bays == {i for i in range(dm.BAYS) if fitting[i // 2]}, f'{label}: bays {sorted(bays)}')

@@ -1183,7 +1183,8 @@ def supports_on_map_rows_are_placeholders() -> None:
                              if key == 'table' else [f'name {i}', f'about {i}', dsgo.Node([])])
         return dsgo.compact(dsgo.Document(dsgo.Node([dsgo.Node([row(i) for i in rows])], {0: key}), []))
 
-    live = [c for c in calls.CALLS if not c.on_map]
+    # live: a row of its own (an X-Morph unit whose model folder is not here is a placeholder too: cw.undeployed)
+    live = [c for c in calls.CALLS if not cw.placeholder(c)]
     on_map = [c for c in calls.CALLS if c.on_map]
 
     def fake_sgo(template: bytes, c: calls.Call, *_a: object, **_k: object) -> bytes:
@@ -1207,7 +1208,7 @@ def supports_on_map_rows_are_placeholders() -> None:
             patched(pw, build=lambda game_root, stock: ({}, {p.id: 'Unavailable: test' for p in pw.PORTS})):
         def check_rows(ids: list[str], at: dict[str, int]) -> None:
             for c in calls.CALLS:
-                want = calls.retired_id(c.id) if c.on_map else c.id
+                want = calls.retired_id(c.id) if cw.placeholder(c) else c.id
                 assert ids[at[c.id]] == want, (c.id, at[c.id], ids[at[c.id]])
             assert not any(c.id in ids for c in on_map), 'a support on the map kept its live row'
             assert all(cw.sgo_file(c) not in out for c in on_map), 'an SGO was built for a support on the map'
@@ -1708,7 +1709,8 @@ def ground_mission_builders_take_the_game_alone() -> None:
     sys.path.insert(0, os.path.join(ROOT, 'testrange'))
     import gen
     for name, tool in gen.GROUND_MISSION.items():
-        params = list(inspect.signature(importlib.import_module(tool).vehicle_sgo).parameters.values())[1:]
+        builder = gen.ground_tool(name)   # its module, an X-Morph unit's builder (a bound vehicle_sgo: game first too)
+        params = list(inspect.signature(builder.vehicle_sgo).parameters.values())[1:]
         assert all(p.default is not inspect.Parameter.empty for p in params), f'{tool}.vehicle_sgo for {name}: {params}'
 
 
@@ -2268,11 +2270,13 @@ def katyusha_bm13_launcher() -> None:
     if os.path.exists(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
         files = make_katyusha.build(rootcpk.DEFAULT_GAME)   # katyusha_model.check + make_katyusha.check
         make_katyusha.check(files)
-        # The clean-up's archive against the unpruned one: before the cockpit's graft (cockpits.graft_files, the last
-        # step of the build, adds its own textures; tests/cockpit_build_test.py checks that one).
+        # The clean-up's archive against the unpruned one: before the cockpit's graft (cockpits.graft_files adds its
+        # own textures; tests/cockpit_build_test.py checks that one) and the mesh merge and LODs after it
+        # (model_lod.finish: tests/test_model_lod.py, model_lod.check_files in make_katyusha.check above).
         from unittest.mock import patch
         import cockpits
-        with patch.object(cockpits, 'graft_files', lambda game, made: made):
+        import model_lod
+        with patch.object(cockpits, 'graft_files', lambda game, made: made),                 patch.object(model_lod, 'finish', lambda made: made):
             plain = make_katyusha.build(rootcpk.DEFAULT_GAME)
         katyusha_kept_whole_bar_the_prune(rootcpk.DEFAULT_GAME, plain[f'OBJECT/{make_katyusha.MODEL_FILE}'])
 
@@ -4554,8 +4558,9 @@ def _flak_request_template() -> bytes:
 
 
 def _call_ids() -> list[str]:
-    """The call rows a current install holds: each live call's own, each support on the map's placeholder."""
-    return [calls.retired_id(c.id) if c.on_map else c.id for c in calls.CALLS]
+    """The call rows a current install holds: each live call's own, each support on the map's placeholder (and an
+    undeployed unit's: call_weapons.placeholder)."""
+    return [calls.retired_id(c.id) if cw.placeholder(c) else c.id for c in calls.CALLS]
 
 
 def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
@@ -4566,7 +4571,7 @@ def _call_files(game: str, table_ids: list[str]) -> dict[str, bytes]:
                 modfiles.atomic_write(_mods(game, rel), b'jet')
     files = {cw.TABLE: _sgo_table('table', table_ids)}
     files.update({rel: _sgo_table('text_table', table_ids) for rel in cw.TEXTS})
-    files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS if not c.on_map})   # a support on the map has none
+    files.update({cw.sgo_file(c): c.id.encode() for c in calls.CALLS if not cw.placeholder(c)})   # a placeholder has none
     for c in calls.CALLS:
         if c.jet in cw.MODEL_VEHICLES:   # their install reads the request's own setup (call_weapons.vehicle_needs)
             files[cw.sgo_file(c)] = cw.vehicle_sgo(_sazabi_request_template(), c, (2.0, 3.0))
@@ -4600,6 +4605,43 @@ def emplacement_fallback_without_the_dreadnought() -> None:
         pass   # the stand-in is not a V603: refused, as a wrong fallback must be
     else:
         raise AssertionError('a fallback that is not the stock V603 was accepted')
+
+
+@test
+def xmorph_undeployed_without_its_folder() -> None:
+    """An X-Morph unit (pylib/xm_units.py) whose model folder is not here is registered all the same (its request row,
+    its catalog row) and deployed nowhere, with no stand-in (CLAUDE.md): tools/make_xmorph.py builds no file (the
+    installer's install then releases what an earlier one wrote), its request row is a placeholder
+    (call_weapons.placeholder: no SGO, nothing needed), the test range leaves it out of a plan. With the folder
+    (model.json and model.npz) it is deployed."""
+    from unittest.mock import patch
+    import io
+    import make_xmorph
+    import obj_model
+    import xm_units
+    sys.path.insert(0, os.path.join(ROOT, 'testrange'))
+    import gen
+    assert make_xmorph.KINDS, 'no ported X-Morph unit'
+    with tempfile.TemporaryDirectory() as root, patch.object(obj_model, 'model_roots', lambda: [root]):
+        for kind in make_xmorph.KINDS:
+            call = next(c for c in calls.CALLS if c.ground == kind)
+            mission = f'{gen.DERIVED_PREFIX}{kind}_mission'
+            assert not make_xmorph.deployable(kind) and cw.undeployed(call) and cw.placeholder(call), kind
+            assert cw.sgo_file(call) in cw.parked_sgos() and cw.sgo_file(call) in cw.our_sgos(), kind
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                assert make_xmorph.builder(kind).build(root) == {}, kind
+            assert out.getvalue().count('\n') == 1 and xm_units.folder(kind) in out.getvalue(), out.getvalue()
+            kept, said = gen.without_missing(root, gen.Plan(vehicles={mission: 1, 'edf6tr_vulcan_mission': 1}))
+            assert mission not in kept.vehicles and 'edf6tr_vulcan_mission' in kept.vehicles and len(said) == 1, said
+            folder = os.path.join(root, xm_units.folder(kind))
+            os.makedirs(folder)
+            for name in ('model.json', 'model.npz'):
+                with open(os.path.join(folder, name), 'wb'):
+                    pass
+            assert make_xmorph.deployable(kind) and not cw.placeholder(call), kind
+            assert cw.sgo_file(call) not in cw.parked_sgos(), kind
+            assert gen.without_missing(root, gen.Plan(vehicles={mission: 1}))[0].vehicles == {mission: 1}, kind
 
 
 @test
@@ -4696,7 +4738,7 @@ def calls_failed_install_records_nothing() -> None:
     try:
         with patched(modfiles, game_running=lambda process=modfiles.PROCESS: False):
             files = _call_files(game, STOCK + _call_ids())
-            with patched(modfiles, atomic_write=_failing_write(cw.sgo_file([c for c in calls.CALLS if not c.on_map][-1]))):
+            with patched(modfiles, atomic_write=_failing_write(cw.sgo_file([c for c in calls.CALLS if not cw.placeholder(c)][-1]))):
                 try:
                     cw.install(game, files)
                 except OSError:
@@ -4897,7 +4939,7 @@ def pack_install_upgrade_uninstall() -> None:
             for group in buildcache.GROUPS:
                 made = (b'mac', {'FAKE_PIECE.MAC': b'piece'}) if group == 'bigmap' else \
                     {f'OBJECT/EDF6VC_FAKE_{group.upper()}.SGO': group.encode()}
-                enter(patched(importlib.import_module('make_' + group), build=lambda game, *_choices, made=made: made))   # make_dreadnought.build(game, hangars)
+                enter(patched(buildcache.tool(group), build=lambda game, *_choices, made=made: made))   # make_dreadnought.build(game, hangars)
             # Geometry/SGO parsing are generator boundaries; scoped optic journals/install/remove stay real.
             import make_optics
             enter(patched(make_optics, build_models=lambda game: {'OBJECT/EDF6VC_OPTIC_FAKE.MRAB': b'optic'},

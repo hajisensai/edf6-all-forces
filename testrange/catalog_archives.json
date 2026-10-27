@@ -748,6 +748,58 @@
    "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],
+  "edf6tr_xm_aa_cannon_machinegun_mission": [
+   "OBJECT/EDF6VC_XM_AA_CANNON_MACHINEGUN.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_xm_aa_cannon_mission": [
+   "OBJECT/EDF6VC_XM_AA_CANNON.MRAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_xm_large_tank_emp_mission": [
+   "OBJECT/EDF6VC_XM_LARGE_TANK_EMP.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_xm_large_tank_mission": [
+   "OBJECT/EDF6VC_XM_LARGE_TANK.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/BULLET_ROCKET.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_xm_medium_artillery_regular_mission": [
+   "OBJECT/EDF6VC_XM_MEDIUM_ARTILLERY_REGULAR.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_xm_medium_shield_generator_mission": [
+   "OBJECT/EDF6VC_XM_MEDIUM_SHIELD_GENERATOR.MRAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_xm_medium_tank_aa_mission": [
+   "OBJECT/EDF6VC_XM_MEDIUM_TANK_AA.MRAB",
+   "WEAPON/BULLET_RPG.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_xm_medium_tank_advanced_mission": [
+   "OBJECT/EDF6VC_XM_MEDIUM_TANK_ADVANCED.MRAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_xm_medium_tank_regular_mission": [
+   "OBJECT/EDF6VC_XM_MEDIUM_TANK_REGULAR.MRAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
   "edf6vc_sedan": [
    "OBJECT/EDF6VC_SEDAN.MRAB"
   ],

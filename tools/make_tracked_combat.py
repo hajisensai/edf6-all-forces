@@ -19,8 +19,10 @@ sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 import cockpits
 import dsgo
 import ledger
+import model_lod
 import emplacement_model
 import vcobjects as vc
+import xm_units
 
 # The fixed emplacements (pylib/emplacement_model.py: the Dreadnought's secondary turrets and the real guns on their
 # bases).
@@ -207,6 +209,34 @@ NAMES = {
     'pzh2000': ('155 mm L52 Howitzer', '155mm L52 榴弹炮', '155mm L52 榴弾砲', '155mm L52 榴彈砲'),
     'sturmtiger': ('380 mm Rocket Mortar', '380mm 火箭臼炮', '380mm ロケット臼砲', '380mm 火箭臼砲'),
 }
+# The X-Morph: Defense units (pylib/xm_units.py, built by tools/make_xmorph.py): their `like`'s gun in every table above
+# (its numbers, its shell, its kind of round) with the row's numbers over it, its own gun names, its vehicle camera over
+# the `like`'s, a model folder of its own (WT_ONLY: wt_tracked.Model). What belongs to the `like`'s hull or model (the
+# one-cradle M61s, turret stops, the procedural models) is not inherited.
+for _xm in xm_units.v603():
+    # a tracked unit is a wt_tracked.Model kind (WT_ONLY: its camera), an emplacement an emplacement_model one (KINDS)
+    _kinds = WT_ONLY if _xm.family == 'tracked' else EMPLACEMENTS
+    if _xm.like not in GUNS or _xm.like not in _kinds:
+        raise ValueError(f'{_xm.key}: its like {_xm.like!r} is no {_xm.family} kind with a gun table (GUNS)')
+    LABELS[_xm.key] = f'{xm_units.label(_xm)}（X-Morph: Defense 模型）'
+    GUNS[_xm.key] = {**GUNS[_xm.like], **_xm.guns}
+    NAMES[_xm.key] = _xm.gun
+    if _xm.family == 'tracked':
+        WT_ONLY[_xm.key] = {**WT_ONLY[_xm.like], **_xm.camera}
+    if _xm.shell or _xm.like in SHELL_OF:
+        SHELL_OF[_xm.key] = _xm.shell or SHELL_OF[_xm.like]
+    M61_ROUNDS += (_xm.key,) if _xm.like in M61_ROUNDS else ()
+    HOWITZERS += (_xm.key,) if _xm.like in HOWITZERS else ()
+    CANNON_SHELL += (_xm.key,) if _xm.like in CANNON_SHELL else ()
+    MISSILE_SHELL += (_xm.key,) if _xm.like in MISSILE_SHELL else ()
+# The kinds whose track faces are a fixed part of the body's texture atlas (the X-Morph units: tools/prep_xmorph.py
+# puts their belts' running faces under v603_kyata_L / _R only because the native class binds those two names): their
+# SGO keeps the two tank_caterpillar_animation rows (the class reads exactly two, EDF.dll 0x67E4B0) but scrolls them at
+# rate 0. Each frame the class sets a track's offset to frac(tank_caterpillar_animation_info[0] x K x track speed +
+# offset) (0x67EADB: +0x2960 the rate, read at 0x67E787 from _info[0]), so a zero rate leaves the texture where it is;
+# the V603's -0.43 would scroll the atlas's neighbouring art through the tread.
+STATIC_TRACKS = tuple(u.key for u in xm_units.ported('tracked'))
+ONE_CRADLE += tuple(u.key for u in xm_units.ported('emplacement'))   # as every emplacement: both holders on its cradle
 
 
 def _node(value: object) -> object:
@@ -395,16 +425,30 @@ def _howitzer_case() -> float:
     return make_artillery.CASE_SCALE
 
 
+GUN_SLOTS = ('left', 'right')
+
+
 def slot(kind: str, index: int) -> str:
-    """What holder `index` of `kind` fires from: 'left' / 'right' (a gun's barrel) or 'missiles' (the tubes)."""
+    """What holder `index` of `kind` fires from: 'left' / 'right' (a gun's barrel), else a store's own muzzles (the
+    model's muzzle contract of that name: 'missiles' the tubes, an X-Morph unit's arm its 'xm_<key>')."""
     slots = vc.GROUND_VEHICLES[kind].slots
     return slots[index] if slots else ('left' if index == 0 else 'right')
 
 
-def missile_sgo(game: vc.Game, points: list[tuple[str, tuple[float, float, float]]],
-                store: str = vc.store_file('BMPT_ATGM', 4)) -> bytes:  # the BMPT's Ataka, the 2S6's 9M311 (`store`)
+def slot_points(points: list[tuple[str, tuple[float, float, float]]], count: int) -> list:
+    """A store slot's authored muzzles as its weapon's `count` locators take them, in turn (the BMPT's four tubes their
+    four; an X-Morph pod's one or two game muzzles round its template's four; a one-muzzle gun its first)."""
+    if not points:
+        raise ValueError('a store slot without muzzles')
+    return [points[i % len(points)] for i in range(count)]
+
+
+def store_weapon_sgo(game: vc.Game, points: list[tuple[str, tuple[float, float, float]]], store: str) -> bytes:
+    """A store's weapon (vcobjects.store_sgo: the BMPT's Ataka, the 2S6's 9M311, an X-Morph unit's arm) firing from its
+    slot's muzzles (slot_points)."""
     doc = dsgo.parse(vc.store_sgo(game, store))
-    _weapon_muzzles(doc, points)
+    count = len(vc.mab_muzzles(doc.root.get('animation_model').items[2].data))
+    _weapon_muzzles(doc, slot_points(points, count))
     return dsgo.compact(doc)
 
 
@@ -487,15 +531,20 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
         # HE/AP are alternate belts in the same visible M61 (the quad's: its four on one cradle): the right holders
         # must follow the left slide too, throughout elevation and recoil.
         guns[1].items[0] = 'cannon_slide_l'
-    # A gun barrel's holder on its side's moving bone, the missiles' on the bone their tubes ride (the muzzle contract's:
-    # the turret, or the BMPT's elevating weapon module, prep_wt_tracked Vehicle.missile_bone): the round leaves along
-    # that bone's forward row (muzzle mode 0), so on the module it leaves along the guns' line (slot).
+    # A gun barrel's holder on its side's moving bone, a store's on the bone its muzzles ride (the muzzle contract's:
+    # the turret, the BMPT's elevating weapon module, prep_wt_tracked Vehicle.missile_bone; an X-Morph arm's
+    # xm_units.Arm.bone): the round leaves along that bone's forward row (muzzle mode 0), so on the module or the gun it
+    # leaves along the guns' line (slot).
     sides = [slot(kind, i) for i in range(len(vehicle.weapons))]
-    tubes = {bone for bone, _ in _points(model, game).get('missiles', [])} if 'missiles' in sides else {'cannon_main'}
-    if len(tubes) != 1:
-        raise ValueError(f'{kind}: the missile tubes ride {sorted(tubes)}: one holder bone needs them on one')
-    (launcher,) = tubes
-    setting.items = [copy.deepcopy(guns[side == 'right']) if side != 'missiles' else _node([launcher, 0.0])
+    points = _points(model, game)
+    holders = {}
+    for side in sides:
+        if side not in GUN_SLOTS:
+            bones = {bone for bone, _ in points.get(side, [])}
+            if len(bones) != 1:
+                raise ValueError(f'{kind}: the {side} muzzles ride {sorted(bones)}: one holder bone needs them on one')
+            (holders[side],) = bones
+    setting.items = [copy.deepcopy(guns[side == 'right']) if side in GUN_SLOTS else _node([holders[side], 0.0])
                      for side in sides]
     if kind in TURRET_LIMITS:
         import make_artillery
@@ -503,6 +552,8 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
         if dsgo.to_py(joint.items[1].items[1]) != [0.0]:
             raise ValueError(f'{kind}: the native turret hinge already has stops')
         joint.items[1].items[1] = _node(TURRET_LIMITS[kind])
+    if kind in STATIC_TRACKS:
+        r.get('tank_caterpillar_animation_info').items[0] = 0.0
     camera = r.get('game_object_camera_setting')
     camera.items[0] = _node([0.0, model.CAMERA['model_eye'][1], 2.0])
     camera.items[1] = _node([0.0, model.CAMERA['third_person_height'], -model.CAMERA['third_person_distance']])
@@ -553,8 +604,13 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
         raise ValueError(f'{kind}: weapon/mount/setup contracts disagree')
     if r.get('xgs_scene_object_class') != 'Vehicle603_Flak':
         raise ValueError(f'{kind}: native vehicle class changed')
-    if dsgo.to_py(r.get('animation_model'))[0] != [f'app:/Object/{model.OUT_ARC.lower()}', model.HOST_MDB]:
+    # [archive, model] as authored(); [archive, model, LOD table] once build() has made the LODs (model_lod.finish)
+    if dsgo.to_py(r.get('animation_model'))[0][:2] != [f'app:/Object/{model.OUT_ARC.lower()}', model.HOST_MDB]:
         raise ValueError(f'{kind}: generated model is not selected')
+    lod_faults = model_lod.check_files({f'OBJECT/{vehicle.sgo}.SGO': files[f'OBJECT/{vehicle.sgo}.SGO'],
+                                        f'OBJECT/{model.OUT_ARC}': files[f'OBJECT/{model.OUT_ARC}']})
+    if lod_faults:
+        raise ValueError(f'{kind}: ' + '; '.join(lod_faults))
     if r.get('animation_model').items[1] != 'app:/' + animation_path(kind).lower():
         raise ValueError(f'{kind}: private fixed-optics animation is not selected')
     for index, path in enumerate(vehicle.weapons):
@@ -563,13 +619,17 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
         if gun.get('AmmoCount') <= 0 or gun.get('AmmoDamage') <= 0:
             raise ValueError(f'{kind}: nonfunctional weapon {path}')
         muzzles = vc.mab_muzzles(gun.get('animation_model').items[2].data)
-        expected_count = 4 if slot(kind, index) == 'missiles' else 1
-        if len(muzzles) != expected_count:
-            raise ValueError(f'{kind}: {path} has {len(muzzles)} muzzle locators, expected {expected_count}')
+        side = slot(kind, index)
+        if side in GUN_SLOTS and len(muzzles) != 1 or side == 'missiles' and len(muzzles) != 4 or not muzzles:
+            raise ValueError(f'{kind}: {path} has {len(muzzles)} muzzle locators for {side}')
         if dsgo.write(dsgo.parse(blob)) != blob:
             raise ValueError(f'{kind}: weapon does not round-trip')
     if game is not None:
         original = dsgo.parse(game.read('OBJECT', STOCK_VEHICLE)).root
+        info = dsgo.to_py(original.get('tank_caterpillar_animation_info'))
+        want = [0.0, *info[1:]] if kind in STATIC_TRACKS else info
+        if dsgo.to_py(r.get('tank_caterpillar_animation_info')) != want:
+            raise ValueError(f'{kind}: track scroll {dsgo.to_py(r.get("tank_caterpillar_animation_info"))}, not {want}')
         for key in ('car_base_rigid_body', 'car_base_constraint_data', 'tank_caterpillar_animation'):
             if key == 'car_base_constraint_data' and kind in TURRET_LIMITS:
                 import make_artillery
@@ -597,6 +657,8 @@ def check(files: dict[str, bytes], kind: str, game: vc.Game | None = None) -> No
             block = gun.get('animation_model').items[2].data
             positions = [struct.unpack_from('<3f', block, off) for _, _, off in vc.mab_muzzles(block)]
             authored = points[slot(kind, index)]
+            if slot(kind, index) not in GUN_SLOTS:
+                authored = slot_points(authored, len(positions))
             if any(bone != settings[index][0] for bone, _ in authored):
                 raise ValueError(f'{kind}: holder uses a different moving bone from the visible barrel')
             wanted = [p for _, p in authored]
@@ -617,10 +679,11 @@ def authored(root: str, kind: str) -> dict[str, bytes]:
              f'OBJECT/{model.OUT_ARC}': arc, collision_path(kind): shkt,
              animation_path(kind): model.animation(game)}
     for i, path in enumerate(vehicle.weapons):
-        # The native pair (the first two), then the stores: a second belt on the same barrels, the missiles.
+        # The native pair (the first two), then the stores: a second belt on the same barrels, the missiles, an
+        # X-Morph unit's other weapons.
         name, side = path.rsplit('/', 1)[1].upper(), slot(kind, i)
-        if side == 'missiles':
-            files[f'WEAPON/{name}'] = missile_sgo(game, points['missiles'], name)
+        if side not in GUN_SLOTS:
+            files[f'WEAPON/{name}'] = store_weapon_sgo(game, points[side], name)
         else:
             files[f'WEAPON/{name}'] = gun_sgo(game, kind, STOCK_GUNS[side == 'right'], side, points[side],
                                               name if i >= 2 else None)
@@ -640,7 +703,11 @@ def build(root: str, kind: str) -> dict[str, bytes]:
         files = {f'OBJECT/{vc.GROUND_VEHICLES[kind].sgo}.SGO': game.read('OBJECT', STOCK_VEHICLE)}
         check(files, kind, game)
         return files
-    return cockpits.graft_files(vc.Game(root), authored(root, kind))
+    # its seats' cockpits, then every model merged by material and given its LODs (pylib/model_lod.py); what is
+    # written is held to the same contract as what was authored (the model's own parts, bones and materials)
+    files = model_lod.finish(cockpits.graft_files(vc.Game(root), authored(root, kind)))
+    check(files, kind)
+    return files
 
 
 def install(root: str, files: dict[str, bytes], kind: str) -> list[str]:

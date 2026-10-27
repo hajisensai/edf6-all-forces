@@ -23,6 +23,7 @@ import time
 from dataclasses import dataclass, replace
 from typing import Callable
 
+import cockpit_shell
 import graft_pure as g
 import obj_model as om
 import texfile
@@ -31,10 +32,11 @@ from mdb import Mdb, Mesh, Rab, cmpl_compress, mdb_read, mdb_write, rab_read, ra
 Vec3 = tuple[float, float, float]
 
 TEMPLATE_ARC, TEMPLATE_MDB, TEMPLATE_MATERIAL = 'V505_TANK.MRAB', 'v505_tank.mdb', 'v505_tank'
-FLAT_NORMAL, NEUTRAL_RMO = (128, 128, 255), (190, 0, 255)   # matte nonmetal interior, no occlusion baked twice
+FLAT_NORMAL, NEUTRAL_RMO = texfile.FLAT_NORMAL_XY, (190, 0, 255)   # matte nonmetal interior, no occlusion baked twice
 NORMAL_TEX, RMO_TEX = 'edf6vc_cpit_n.dds', 'edf6vc_cpit_rmo.dds'
 ASSET_DIR = 'cockpits'          # under a model root: textures/, parts/<asset>/, CREDITS.txt
 MARKER = 'vc_eye_{}'
+MATERIAL_PREFIX = 'edf6vc_cpit_'   # every kit material's (graft)
 
 
 class CockpitAssetsMissing(Exception):
@@ -64,6 +66,8 @@ class KitMaterial:
 
 SCREEN_KINDS = ('flight', 'weapons', 'status', 'hud', 'map', 'sensor')
 SCREEN = 'vc_scr_{}_{}_{}x{}'   # seat, kind, width and height in mm: the plugin draws that kind of live read-out there
+INSTRUMENT = 'vc_i_{}_{}_{}'   # seat, screen / control index, control: a moving instrument's pivot (graft)
+GRAFTED_BONES = (*(p.split('{')[0] for p in (MARKER, SCREEN, INSTRUMENT)), cockpit_shell.PREFIX)
 
 
 @dataclass(frozen=True)
@@ -168,6 +172,25 @@ def place(part: om.Part, m: list[float], scale: float) -> om.Part:
     return om.Part(part.name, part.material, verts, list(part.tris))
 
 
+def grafted_bone(name: str) -> bool:
+    """A bone graft() adds to a vehicle's model (a seat's eye, a screen's or an instrument's marker, a shell region's
+    child, cockpit_shell), not one of the vehicle's own: a generator's check of its finished model leaves these out."""
+    return name.startswith(GRAFTED_BONES)
+
+
+def own_bone(md: Mdb, index: int) -> str:
+    """The vehicle's own bone a vertex skinned to `index` belongs to: a shell region's child (an identity child of the
+    bone it was taken from, cockpit_shell.separate) stands for its parent."""
+    while grafted_bone(md.name_of(md.bones[index].name)):
+        index = md.bones[index].parent
+    return md.name_of(md.bones[index].name)
+
+
+def grafted_material(name: str) -> bool:
+    """A material graft() adds (a kit's, edf6vc_cpit_<kit>_<key>), not one of the vehicle's own."""
+    return name.startswith(MATERIAL_PREFIX)
+
+
 def screen_marker(seat: int, scr: Screen) -> str:
     if scr.kind not in SCREEN_KINDS:
         raise ValueError(f'screen kind {scr.kind} not one of {SCREEN_KINDS}')
@@ -255,7 +278,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
                    (control.control, control.centre, control.facing, control.up, control.extent))
             name = shared.get(key)
             if name is None:
-                name = f'vc_i_{fit.seat}_{index}_{control.control}'
+                name = INSTRUMENT.format(fit.seat, index, control.control)
                 at = Screen('status', control.centre, control.facing, .01, .01, control.up)
                 transform = screen_frame(at, fit)
                 if control.control.startswith(('t_','T_','g_')):   # moved in units of the extent (g: screen heights)
@@ -306,7 +329,7 @@ def graft(md: Mdb, fits: tuple[Fit, ...], kits: dict[str, KitFn], game,  # noqa:
             part_bone = md.bone_index(controls[fit.seat][part.name]) if part.name in controls[fit.seat] else bone
             by_material.setdefault((fit.kit, part.material), []).append((placed, om.rigid(placed, part_bone)))
             materials[(fit.kit, part.material)] = kit.materials[part.material]
-    textures = {NORMAL_TEX: texfile.solid_dxt1(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO)}
+    textures = {NORMAL_TEX: texfile.solid_bc5(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO)}
     meshes = []
     for (kit_name, key), pieces in sorted(by_material.items()):
         tex = texture_name(kit_name, key)

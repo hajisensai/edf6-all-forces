@@ -36,6 +36,7 @@ import artillery_model  # noqa: E402
 import cockpits  # noqa: E402
 import dsgo  # noqa: E402
 import ledger  # noqa: E402
+import model_lod  # noqa: E402
 import ragdoll_fit  # noqa: E402
 import vcobjects as vc  # noqa: E402
 import graft_pure  # noqa: E402
@@ -277,7 +278,9 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> None:
     md = None
     assert own == (f'OBJECT/{RAGDOLL_FILE}' in files), 'the model and its ragdoll come together'
     want = [f'app:/Object/{MODEL_FILE.lower()}', MODEL_MDB] if own else ['app:/Object/v603_flak.mrab', MODEL_MDB]
-    assert v['animation_model'][0] == want, v['animation_model'][0]
+    # [archive, model] (+ the LOD table model_lod.finish adds: checked against the archive)
+    assert v['animation_model'][0][:2] == want, v['animation_model'][0]
+    assert not model_lod.check_files(files), model_lod.check_files(files)
     assert v['ragdoll'][0].lower() == (RAGDOLL if own else STOCK_RAGDOLL).lower(), v['ragdoll'][0]
     assert [w[0] for w in v['vehicle_setup'][2]] == list(VEHICLE.weapons)
     cam = v['game_object_camera_setting']
@@ -367,7 +370,12 @@ def build(root: str) -> dict[str, bytes]:
         mount = None if folder is None else gun_mount(md, info['barrels'][side])
         files[f'WEAPON/{path.split("/")[-1].upper()}'] = howitzer_sgo(game, stock, mount)
     check(files, game)
-    return cockpits.graft_files(game, files)   # its seats' first-person cockpits (pylib/cockpits.py)
+    # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
+    # (pylib/model_lod.py)
+    files = model_lod.finish(cockpits.graft_files(game, files))
+    # what is written is held to the same contract as what was authored
+    check(files, game)
+    return files
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

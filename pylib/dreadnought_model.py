@@ -32,6 +32,7 @@ from dataclasses import replace
 
 import obj_model as om
 import texfile
+import texfile_accel
 from mdb import Mdb, Object, Rab, RabFile, bind_world, cmpl_compress, insert_member, mdb_read, mdb_write, mmul, rab_read, \
     rab_write
 
@@ -70,9 +71,6 @@ INI_SECTION = 'VehicleCrew'
 # m across the ship and along it either side of dn_hangar_<m>, under and over it. tools/make_dreadnought.py holds every
 # fitted module's mesh inside it (across, along) and its roof within (below, above).
 HANGAR_REACH = {'across': 28.0, 'along': 48.0, 'below': 3.0, 'above': 15.0}
-# The markers the prep tool once made for the foredeck's ready fighter (before 2026-10-24, when a player boarded there):
-# left out of the model, so a folder made before then builds as one made after.
-LEGACY_MARKERS = ('ready', 'ready_side')
 
 
 def hangar_parts(m: int) -> set[str]:
@@ -83,10 +81,9 @@ def hangar_parts(m: int) -> set[str]:
 
 
 def left_out(hangars: tuple[bool, ...]) -> set[str]:
-    """The prep tool's bones not in the dreadnought fitted with `hangars` (module m: hangars[m]), and the legacy
-    markers."""
+    """The prep tool's bones not in the dreadnought fitted with `hangars` (module m: hangars[m])."""
     _req(len(hangars) == HANGARS, f'{len(hangars)} hangar choices, not {HANGARS}')
-    out = set(LEGACY_MARKERS)
+    out: set[str] = set()
     for m, fitted in enumerate(hangars):
         if not fitted:
             out |= hangar_parts(m)
@@ -236,9 +233,9 @@ def _textures(folder: str, model: str, material: str) -> tuple[bool, dict[str, b
         px = bytearray(px)
         px[2::4] = b'\xff' * (len(px) // 4)
         rml = texfile.Image(rml.width, rml.height, px)
-    files = {f'{stem}_df.dds': texfile.dxt1_dds(texfile.load_image(os.path.join(folder, f'{material}_df.png'))),
-             f'{stem}_nm.dds': texfile.dxt1_dds(texfile.load_image(os.path.join(folder, f'{material}_nm.png'))),
-             f'{stem}_rm.dds': texfile.dxt1_dds(rml)}
+    files = {f'{stem}_df.dds': texfile_accel.dxt1_dds(texfile.load_image(os.path.join(folder, f'{material}_df.png'))),
+             f'{stem}_nm.dds': texfile_accel.bc5_normal_file(os.path.join(folder, f'{material}_nm.png')),
+             f'{stem}_rm.dds': texfile_accel.dxt1_dds(rml)}
     slots = dict(zip(LIGHT_SLOTS if lit else BODY_SLOTS, files))
     return lit, files, slots
 

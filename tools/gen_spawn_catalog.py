@@ -185,10 +185,19 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
     tracked = {f'WEAPON/{path.rsplit("/", 1)[1].upper()}': kind
                for kind in vcobjects.TRACKED for path in vcobjects.GROUND_VEHICLES[kind].weapons}
     authored: dict[str, dict[str, bytes]] = {}
+    # An X-Morph unit whose model folder this machine has not is not deployed (pylib/xm_units.py): its files are not
+    # there, so its row cannot be measured here (--archives refuses; tools/selftest.py leaves it unchecked).
+    import make_xmorph
+    undeployed = {k for k in make_xmorph.KINDS if not make_xmorph.deployable(k)}
+    undeployed_rows = {f'OBJECT/{gen.DERIVED_PREFIX.upper()}{k.upper()}_MISSION.SGO' for k in undeployed}
 
     def read(rel: str) -> bytes | None:
+        if rel in undeployed_rows:
+            return None
         if rel in tracked:
             kind = tracked[rel]
+            if kind in undeployed:
+                return None
             if kind not in authored:
                 import make_tracked_combat
                 authored[kind] = make_tracked_combat.authored(root, kind)   # its weapons: no cockpit needed

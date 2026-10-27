@@ -47,6 +47,8 @@ class Material:
     texture: bytes | None = None    # the base colour texture's image file (PNG / JPEG bytes), None: none
     texture_mime: str = ''          # 'image/png', 'image/jpeg'
     alpha_mode: str = 'OPAQUE'      # OPAQUE, MASK, BLEND
+    normal: bytes | None = None     # the normal texture's image file, None: none (its green: the source's own, which
+                                    # glTF says is +Y up but downloads do not all keep: texfile_accel.directx_normals)
 
 
 @dataclass
@@ -143,8 +145,14 @@ def _materials(g: dict, buffers: list[bytes] | None = None, base_dir: str = '') 
             source = g['textures'][tex['index']].get('source')
             if source is not None:
                 texture, mime = _image(g, source, buffers, base_dir)
+        normal = None
+        ntex = m.get('normalTexture')
+        if ntex is not None and buffers is not None:
+            source = g['textures'][ntex['index']].get('source')
+            if source is not None:
+                normal = _image(g, source, buffers, base_dir)[0]
         out.append(Material(m.get('name', f'material{i}'), base, em, float(pbr.get('metallicFactor', 1.0)),
-                            float(pbr.get('roughnessFactor', 1.0)), texture, mime, m.get('alphaMode', 'OPAQUE')))
+                            float(pbr.get('roughnessFactor', 1.0)), texture, mime, m.get('alphaMode', 'OPAQUE'), normal))
     return out
 
 

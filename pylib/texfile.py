@@ -438,10 +438,11 @@ def lod_level(width: int, height: int) -> int:
 
 
 def _header(width: int, height: int, mips: int, fourcc: bytes, bits: int, masks: tuple[int, int, int, int],
-            top: int) -> bytes:
+            top: int, depth: int = 0) -> bytes:
+    """The 128-byte legacy header. `depth` (+0x18): stock BC5U files say 1 (every one surveyed), DXT1 either."""
     pf = struct.pack('<II4sI4I', 32, 0x4 if fourcc else 0x41, fourcc, bits, *masks)
     flags = DDSD | (DDSD_LINEARSIZE if fourcc else DDSD_PITCH)
-    return (DDS_MAGIC + struct.pack('<7I', 124, flags, height, width, top, 0, mips) + bytes(44) + pf +
+    return (DDS_MAGIC + struct.pack('<7I', 124, flags, height, width, top, depth, mips) + bytes(44) + pf +
             struct.pack('<5I', CAPS, 0, 0, 0, 0))
 
 
@@ -462,7 +463,8 @@ def dds_tail(data: bytes, level: int, count: int | None = None) -> bytes:
     for _ in range(count):
         end += level_size(info, lw, lh)
         lw, lh = max(1, lw // 2), max(1, lh // 2)
-    return _header(w, h, count, info.fourcc, info.bits, masks, top) + data[pos:end]
+    depth = struct.unpack_from('<I', data, 24)[0]
+    return _header(w, h, count, info.fourcc, info.bits, masks, top, depth) + data[pos:end]
 
 
 def lod_mips(width: int, height: int) -> int:
@@ -586,3 +588,22 @@ def dxt1_dds(img: Image) -> bytes:
 def solid_dxt1(rgb: tuple[int, int, int], size: int = 16) -> bytes:
     """A size x size DXT1 DDS of one colour, full mip chain."""
     return dxt1_dds(Image(size, size, bytearray(bytes((rgb[0], rgb[1], rgb[2], 255)) * (size * size))))
+
+
+FLAT_NORMAL_XY = (128, 128)     # X = Y = 0 to 8 bits (0.004: 127.5 has no code); texfile_accel's flat texel
+
+
+def solid_bc5(xy: tuple[int, int] = FLAT_NORMAL_XY, size: int = 16) -> bytes:
+    """A size x size BC5U DDS of one (R, G), full mip chain: a flat normal map in the stock normal-map format
+    (texfile_accel.bc5_normal_dds of a uniform map is the same bytes). Each BC4 half: e0 = e1 = the value, codes 0."""
+    block = bytes((xy[0], xy[0])) + bytes(6) + bytes((xy[1], xy[1])) + bytes(6)
+    w = h = size
+    body, mips = bytearray(), 0
+    while True:
+        body += block * (max(1, (w + 3) // 4) * max(1, (h + 3) // 4))
+        mips += 1
+        if w == 1 and h == 1:
+            break
+        w, h = max(1, w // 2), max(1, h // 2)
+    top = max(1, (size + 3) // 4) ** 2 * 16
+    return _header(size, size, mips, b'BC5U', 0, (0, 0, 0, 0), top, 1) + bytes(body)
