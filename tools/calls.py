@@ -381,6 +381,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'long-range barrages (2026-10-25)': IDS[:73],
     'sorties (2026-10-25)': IDS[:84],
     'X-Morph battle tank (2026-10-27)': IDS[:85],
+    'X-Morph tracked units and forts (2026-10-27)': IDS[:93],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
