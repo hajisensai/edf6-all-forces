@@ -146,6 +146,8 @@ class WtAssetTests(unittest.TestCase):
                 block = gun.get('animation_model').items[2].data
                 got = [struct.unpack_from('<3f', block, off) for _, _, off in vc.mab_muzzles(block)]
                 want = spec.info['muzzles'][side]
+                if side not in self.combat.GUN_SLOTS:   # a store's muzzles round its template's locators, in turn
+                    want = self.combat.slot_points(want, len(got))
                 self.assertEqual(len(got), len(want))
                 for local, row in zip(got, want):
                     with self.subTest(kind=kind, weapon=path):
