@@ -8,8 +8,9 @@ pylib/cockpit_sweep.py aim_blocked raises the gun through the V603's elevation r
 the vehicle. The TOS-1's and the Patriot's eyes on the turret (cannon_main) met their own launcher packs from 31 / 26
 deg up; the check is held to catch that fit.
 
-A model folder that is not there (the Dreadnought's turrets are the user's model, not in the repository) is skipped.
-Read only; no game needed.
+A model folder that is not there (the Dreadnought's turrets are the user's model, not in the repository) is skipped,
+and so is an emplacement without the installed EDF6 Root.cpk (pylib/emplacement_model.py spec reads its stock wheel
+origin there; CI has no game). Read only.
 
     python tests/gun_camera_sweep_guard.py
 """
@@ -23,6 +24,8 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path[:0] = [os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'tools')]
 import cockpit_fits  # noqa: E402
 import cockpit_sweep  # noqa: E402
+import emplacement_model as em  # noqa: E402
+import rootcpk  # noqa: E402
 import vcobjects as vc  # noqa: E402
 import wt_tracked as wt  # noqa: E402
 
@@ -54,6 +57,10 @@ def main() -> int:
         if wt.folder(kind) is None:
             skipped += 1
             print(f'SKIP {stem}: its model folder is not there')
+            continue
+        if kind in em.KINDS and not os.path.isfile(os.path.join(rootcpk.DEFAULT_GAME, 'Root.cpk')):
+            skipped += 1
+            print(f'SKIP {stem}: an emplacement, and the EDF6 Root.cpk is not there')
             continue
         spec = wt.load(kind)
         seen += 1
