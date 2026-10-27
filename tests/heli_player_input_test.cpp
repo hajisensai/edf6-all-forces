@@ -399,6 +399,24 @@ int main() {
           "looking up keeps orbit eye above the aircraft at its native height");
     Check(std::fabs((cameraLook[1]-cameraEye[1])/pilotCamera.radius-pilotCamera.dir[1])<1e-5f,
           "height floor lifts both camera points without changing the viewing ray");
+    // The cockpit's first person: the level airframe's eye frame turned onto the mouse view, elevation included, the eye kept.
+    const float cockpit[16]={-1,0,0,0, 0,1,0,0, 0,0,1,0, 3,4,5,1};
+    float fpFrame[16];std::memcpy(fpFrame,cockpit,64);
+    Check(PlayerHeliFirstPersonFrame(inputVehicle,0,fpFrame) && std::fabs(fpFrame[9]-std::sin(1.0f))<1e-5f &&
+          fpFrame[12]==3.0f && fpFrame[13]==4.0f && fpFrame[14]==5.0f,"first person looks up along the mouse view from the cockpit eye");
+    const float down[3]={0.0f,-std::sin(0.5f),std::cos(0.5f)};
+    for(int frame=0;frame<120;++frame) {
+        inputTime+=16;PublishPilotView({pilot.ref,inputSeat,inputTime,{down[0],down[1],down[2]}});
+        std::memcpy(fpFrame,cockpit,64);
+        Check(PlayerHeliFirstPersonFrame(inputVehicle,0,fpFrame),"first person stays owned by the mouse pilot");
+    }
+    Check(std::fabs(fpFrame[9]-down[1])<1e-4f && std::fabs(fpFrame[10]-down[2])<1e-4f && std::fabs(fpFrame[5]-std::cos(0.5f))<1e-4f,
+          "mouse down pitches the first-person view while the airframe stays level");
+    std::memcpy(fpFrame,cockpit,64);
+    Check(!PlayerHeliFirstPersonFrame(inputVehicle,1,fpFrame) && std::memcmp(fpFrame,cockpit,64)==0,"another seat keeps its cockpit frame");
+    inputSeat[kSeatPad]=1;Check(!PlayerHeliFirstPersonFrame(inputVehicle,0,fpFrame) && std::memcmp(fpFrame,cockpit,64)==0,
+                                "pad first person keeps the cockpit frame");inputSeat[kSeatPad]=0;
+    PublishPilotView({pilot.ref,inputSeat,inputTime,{down[0],down[1],down[2]}});
     inputSeat[kSeatPad]=1;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"pad camera remains stock");inputSeat[kSeatPad]=0;
     inputHuman[0x128]=1;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"remote player's camera is untouched");inputHuman[0x128]=0;
     inputConfig.heliMouseAim=false;Check(!PlayerHeliCamera(inputSeat,stockEye,stockLook,cameraEye,cameraLook),"disabled flight releases camera");inputConfig.heliMouseAim=true;

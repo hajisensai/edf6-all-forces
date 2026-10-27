@@ -1416,7 +1416,9 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
     HookDrawOf(At<void**>(ride.vehicle+0xE40,0));
     // Most seats follow their physical cockpit frame. Sazabi's decorated neck is not its pilot's view controller:
     // preserve the physical eye while taking rotation from the same heading/pitch that drives its aim.
-    SazabiFirstPersonFrame(ride.vehicle,static_cast<unsigned>(ride.seat),ride.frame);
+    // A stock helicopter the mouse flies likewise looks along the mouse's view (heli.cpp), not its airframe's bone.
+    if(!SazabiFirstPersonFrame(ride.vehicle,static_cast<unsigned>(ride.seat),ride.frame))
+        PlayerHeliFirstPersonFrame(ride.vehicle,static_cast<unsigned>(ride.seat),ride.frame);
     VehicleScreens(ride.vehicle,ride.seat,eye,&Current().screens);
     // A weapon station's camera is on its gun, every gunner seat alike (fp_view.h GunCameraFrame): from the marker's eye
     // along the gun's bore where the gun turns (vhud.cpp SeatGunLine: its elevation stops are the view's), else along the

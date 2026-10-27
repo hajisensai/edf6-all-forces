@@ -29,6 +29,9 @@ bool PlayerHeliCue(HeliCue* out) noexcept;           // the player's, as of the 
 bool HeliCrewed(const void* vehicle) noexcept;
 // Native Type-1 seat camera: orbit by the current local mouse pilot, preserving native collision.
 bool PlayerHeliCamera(const unsigned char* seat,const float* stockEye,const float* stockLook,float* eye,float* look) noexcept;
+// Vehicle first person (firstperson.cpp Ride, camera thread): the same pilot's cockpit eye frame (rows left, up, ahead,
+// the eye) turned onto the mouse view, the eye kept. False: not that pilot's seat 0 (the cockpit's own frame then).
+bool PlayerHeliFirstPersonFrame(const void* vehicle,unsigned seat,float* frame) noexcept;
 void HeliFrame(unsigned char* vehicle) noexcept;   // after the stock input, NPC-crewed helicopters only
 // Checks only (no patch): the flight's own code, and which of avoidance, the water probe, the rescue's seat
 // reach and board button and the delete of called helis can be used. False: no heli is flown.
