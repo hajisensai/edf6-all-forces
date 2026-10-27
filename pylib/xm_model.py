@@ -5,6 +5,7 @@ here is family-specific: the tracked preparer builds a V603 model folder from it
 
     load(packs, entity) -> UnitModel        entity: 'ground/medium_tank_regular' (entities/units/<entity>.ent)
     blueprint(packs, path) -> Node           an entity's blueprint with its BlueprintComp base's components
+    named(packs, name) -> Node               the blueprint called name (a weapon's ammo_blueprint)
     to_edf(points)                           X-Morph (x fwd, y left, z up) -> EDF (x left, y up, z fwd): (y, z, x)
     texture_images(packs, material)          {'diffuse': RGB image, 'normal': RGB tangent-space image} (what it has)
 
@@ -116,19 +117,49 @@ def _attachments(packs: xp.Packs, mesh_path: str) -> dict[str, tuple[str, np.nda
     return out
 
 
-def blueprint(packs: xp.Packs, path: str) -> xp.Node:
-    """The EntityBlueprint at `path` (entities/<name>.ent) as the game composes it: an entity whose BlueprintComp names
-    another (`blueprint "units/air/large_helicopter_core"`: entities/<it>.ent) has that one's components, its own
-    replacing the base's of the same name (the warcar's escort helicopter is the core helicopter with its own turrets,
-    weapons and health)."""
-    bp = xp.parse(packs.text(path)).child('EntityBlueprint')
-    _req(bp is not None, f'{path}: no EntityBlueprint')
+_INDEX: dict[int, dict[str, xp.Node]] = {}
+
+
+def blueprints(packs: xp.Packs) -> dict[str, xp.Node]:
+    """Every EntityBlueprint in the packs by its name (entities/**/*.ent: a unit's file holds one, a projectile family's
+    several: entities/projectiles/enemy_flak.ent defines projectiles/enemy_flak_medium and its kin), as written."""
+    if id(packs) not in _INDEX:
+        out: dict[str, xp.Node] = {}
+        for path in packs.paths('entities/'):
+            if path.endswith('.ent'):
+                for bp in xp.parse(packs.text(path)).all('EntityBlueprint'):
+                    if bp.get('name'):
+                        out.setdefault(bp.get('name'), bp)
+        _INDEX[id(packs)] = out
+    return _INDEX[id(packs)]
+
+
+def compose(packs: xp.Packs, bp: xp.Node) -> xp.Node:
+    """`bp` as the game composes it: one whose BlueprintComp names another (`blueprint "units/air/large_helicopter_core"`)
+    has that one's components, its own replacing the base's of the same name (the warcar's escort helicopter is the
+    core helicopter with its own turrets, weapons and health)."""
     base = bp.child('BlueprintComp')
     if base is None or not base.get('blueprint'):
         return bp
-    parent = blueprint(packs, f'entities/{base.get("blueprint")}.ent')
+    parent = blueprints(packs).get(base.get('blueprint'))
+    _req(parent is not None, f'{bp.get("name")}: its base {base.get("blueprint")} is no blueprint in the packs')
+    parent = compose(packs, parent)
     own = {c.name for c in bp.children}
     return xp.Node(bp.name, bp.values, [c for c in parent.children if c.name not in own] + bp.children)
+
+
+def blueprint(packs: xp.Packs, path: str) -> xp.Node:
+    """The (composed) EntityBlueprint of the file `path` (entities/units/<entity>.ent: a unit's one)."""
+    bp = xp.parse(packs.text(path)).child('EntityBlueprint')
+    _req(bp is not None, f'{path}: no EntityBlueprint')
+    return compose(packs, bp)
+
+
+def named(packs: xp.Packs, name: str) -> xp.Node:
+    """The (composed) blueprint called `name` (a weapon's ammo_blueprint: 'projectiles/enemy_flak_medium')."""
+    bp = blueprints(packs).get(name)
+    _req(bp is not None, f'no blueprint {name} in the packs')
+    return compose(packs, bp)
 
 
 STATIC_BONE = 'body'   # the one bone of a unit whose mesh is not skinned (the bunkers, the highway tank's drone)

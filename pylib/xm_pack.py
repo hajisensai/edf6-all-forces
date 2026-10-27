@@ -124,7 +124,9 @@ class Node:
         return tuple(float(self.get(a, '0')) for a in 'xyz')          # type: ignore[return-value]
 
 
-_TOKEN = re.compile(r'"((?:[^"\\]|\\.)*)"|([{}])|(\n)|([^\s{}"]+)')
+# A quoted value ends on its line; a quote left open (tree_large_birch_01.ent's `"..._burned_parts""`, the game's own
+# file) runs to the line's end and is dropped.
+_TOKEN = re.compile(r'"((?:[^"\\\n]|\\.)*)"|([{}])|(\n)|("[^\n]*)|([^\s{}"]+)')
 NL = 'nl'
 
 
@@ -137,14 +139,14 @@ def parse(text: str) -> Node:
                                  or, when '{' follows, a child whose 'type' is the words ('material a : b')
     '//' comments run to the line's end."""
     toks = []
-    for q, brace, nl, word in _TOKEN.findall(re.sub(r'//[^\n]*', '', text)):
+    for q, brace, nl, unclosed, word in _TOKEN.findall(re.sub(r'//[^\n]*', '', text)):
         if brace:
             toks.append((brace, brace))
         elif nl:
             toks.append((NL, ''))
         elif word:
             toks.append(('w', word))
-        else:
+        elif not unclosed:
             toks.append(('q', q))
     root = Node('')
     stack = [root]
