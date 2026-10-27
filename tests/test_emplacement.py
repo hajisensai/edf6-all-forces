@@ -117,7 +117,9 @@ class AssetTests(unittest.TestCase):
         for kind in em.KINDS:
             with self.subTest(kind=kind):
                 (fit,) = cockpit_fits.FITS[f'EDF6VC_{kind.upper()}']
-                self.assertEqual(fit.bone, 'cannon_main')
+                # On the turret, or on the guns' pitch hinge where they would swing through an eye on the turret (the
+                # Patriot's pack: tests/gun_camera_sweep_guard.py holds every eye's aim line clear).
+                self.assertIn(fit.bone, ('cannon_main', 'cannon_l'))
                 np.testing.assert_allclose(fit.eye, em.spec(kind).info['eye'], atol=1e-3)
 
     def test_weapons_fire_the_cannon_shell_in_turn(self) -> None:

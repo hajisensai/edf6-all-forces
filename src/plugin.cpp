@@ -1176,33 +1176,31 @@ void ReloadConfigNow() noexcept {
 
 const wchar_t* ConfigPath() noexcept { return iniPath; }
 
-// The player's human. SeePlayer gets a position inside an object: the human's own (the on-foot ride prompt,
-// crew.cpp PromptHook) or the vehicle's they ride (crew.cpp Crew). A vehicle is told by the player in one
-// of its seats (the seat's rider is the human); else the object is the human if it is the player (pad and
-// player flag) and its weak-this points at itself. Kept with its weak-this control block, so a new object
-// at the same address (the next mission) is not taken for it.
+// The player's human: the soldier a local camera follows (firstperson.cpp CamStepHook, every frame of a local
+// camera, on foot, riding, dead or with the map open). Until 2026-10-27 it was taken from SeePlayer, whose two
+// feeds are the on-foot ride prompt (crew.cpp PromptHook: only while a rideable object is about) and the plugin's
+// vehicle classes (crew.cpp Crew): away from every vehicle, or in a vehicle of no class, it went stale in 2 s and
+// every caller of PlayerHuman saw nobody (a support call: "找不到本机玩家，无法呼叫"). Split screen's second camera
+// does not take it from the first while the first's is fresh. Kept with its weak-this control block, so a new
+// object at the same address (the next mission) is not taken for it.
 namespace {
 constexpr ULONGLONG kPlayerHumanMs=2000;
 unsigned char* playerHuman=nullptr;
 ObjRef playerHumanRef;
 ULONGLONG playerHumanAt=0;
-
-unsigned char* HumanOf(unsigned char* object) noexcept {
-    const unsigned n=SeatCount(object);
-    for(unsigned i=0;i<n;++i)
-        if(SeatRider(SeatAt(object,i))==Rider::player)return At<unsigned char*>(SeatAt(object,i),kSeatRider);
-    return IsPlayer(object) && At<const void*>(object,kSelf)==object ? object : nullptr;
-}
 }  // namespace
 
 void SeePlayer(const float* pos,std::int32_t team) noexcept {
     std::memcpy(player.pos,pos,sizeof(player.pos));player.team=team;player.at=GameMs();
+}
+
+void SeeCameraPlayer(unsigned char* human) noexcept {
+    if(!human)return;
+    const ULONGLONG now=GameMs();
     __try {
-        auto object=const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(pos))-kPosition;
-        if(auto human=HumanOf(object)) {
-            playerHuman=human;playerHumanRef=ObjRef::Of(human);playerHumanAt=player.at;
-        }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        if(playerHuman && playerHuman!=human && now-playerHumanAt<=kPlayerHumanMs && playerHumanRef.Is(playerHuman))return;
+        playerHuman=human;playerHumanRef=ObjRef::Of(human);playerHumanAt=now;
+    } __except(EXCEPTION_EXECUTE_HANDLER){playerHuman=nullptr;playerHumanRef=ObjRef{};playerHumanAt=0;}
 }
 
 void ResetPlayer() noexcept {

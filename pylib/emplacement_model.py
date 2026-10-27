@@ -48,7 +48,7 @@ class Emplacement:
     scale: float          # the source's size to the emplacement's
     durability: float
     folder: str = ''      # a model folder tools/prep_glb_model.py made, in place of a Dreadnought turret
-    eye: tuple[float, float, float] | None = None   # the gunner's first-person eye (on cannon_main), else over the guns
+    eye: tuple[float, float, float] | None = None   # the gunner's first-person eye (on cannon_main, or cannon_l where the raised guns would sweep it: pylib/cockpit_fits_plugin.py), else over the guns
 
 
 # prep_dreadnought's turrets: turret_0/1 the SecMid (on the bow's domes), 2..5 the SecShort, 6/7 the SecLong.

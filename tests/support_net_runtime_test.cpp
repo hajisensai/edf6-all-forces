@@ -130,6 +130,12 @@ plugin_net::Channel BarrageNetChannel() noexcept {
     plugin_net::Channel c;c.name="barrage";c.magic=0x53475242u;c.version=1;c.featureBit=support_net::kExtBarrage;
     c.minSize=c.maxSize=80;c.receive=&ReceiveBarrage;return c;
 }
+// The support pt's (support_points.cpp): SPTS for every peer, not under test here.
+bool ReceiveSupportPoints(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+plugin_net::Channel SupportPointsNetChannel() noexcept {
+    plugin_net::Channel c;c.name="support pt";c.magic=0x53545053u;c.version=1;
+    c.minSize=c.maxSize=56;c.receive=&ReceiveSupportPoints;return c;
+}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}
