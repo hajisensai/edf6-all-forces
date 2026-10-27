@@ -4,6 +4,7 @@ the attachments (.att), the turrets and weapons the blueprint declares, and its 
 here is family-specific: the tracked preparer builds a V603 model folder from it, a wheeled / heli one can do the same.
 
     load(packs, entity) -> UnitModel        entity: 'ground/medium_tank_regular' (entities/units/<entity>.ent)
+    blueprint(packs, path) -> Node           an entity's blueprint with its BlueprintComp base's components
     to_edf(points)                           X-Morph (x fwd, y left, z up) -> EDF (x left, y up, z fwd): (y, z, x)
     texture_images(packs, material)          {'diffuse': RGB image, 'normal': RGB tangent-space image} (what it has)
 
@@ -115,24 +116,56 @@ def _attachments(packs: xp.Packs, mesh_path: str) -> dict[str, tuple[str, np.nda
     return out
 
 
+def blueprint(packs: xp.Packs, path: str) -> xp.Node:
+    """The EntityBlueprint at `path` (entities/<name>.ent) as the game composes it: an entity whose BlueprintComp names
+    another (`blueprint "units/air/large_helicopter_core"`: entities/<it>.ent) has that one's components, its own
+    replacing the base's of the same name (the warcar's escort helicopter is the core helicopter with its own turrets,
+    weapons and health)."""
+    bp = xp.parse(packs.text(path)).child('EntityBlueprint')
+    _req(bp is not None, f'{path}: no EntityBlueprint')
+    base = bp.child('BlueprintComp')
+    if base is None or not base.get('blueprint'):
+        return bp
+    parent = blueprint(packs, f'entities/{base.get("blueprint")}.ent')
+    own = {c.name for c in bp.children}
+    return xp.Node(bp.name, bp.values, [c for c in parent.children if c.name not in own] + bp.children)
+
+
+STATIC_BONE = 'body'   # the one bone of a unit whose mesh is not skinned (the bunkers, the highway tank's drone)
+
+
 def load(packs: xp.Packs, entity: str) -> UnitModel:
-    bp = xp.parse(packs.text(f'entities/units/{entity}.ent')).child('EntityBlueprint')
-    _req(bp is not None, f'{entity}: no EntityBlueprint')
+    bp = blueprint(packs, f'entities/units/{entity}.ent')
     rend, skel = bp.child('RenderableDescComp'), bp.child('SkeletonDescComp')
-    _req(rend is not None and skel is not None, f'{entity}: no mesh or no skeleton')
+    _req(rend is not None and bool(rend.get('mesh')), f'{entity}: no mesh')
     mesh_path = rend.get('mesh')
     mesh = om.read_mesh(packs.read(mesh_path))
-    sk = om.read_skeleton(packs.read(skel.get('name') + '.skeleton'))
-    world = sk.world()
-    by_handle = {b.handle: b.name for b in sk.bones}
+    rigid = [mesh.rigid_bones(sub) for sub in mesh.submeshes]
+    if all((rb < 0).all() for rb in rigid):
+        # Not skinned: the game draws it as it is (a SkeletonDescComp naming a skeleton the packs do not have, as
+        # bunker_barracks_02's, changes nothing), so one bone at the origin carries it.
+        names, parents = [STATIC_BONE], {STATIC_BONE: None}
+        frames = {STATIC_BONE: np.eye(4)}
+        rigid = [np.zeros_like(rb) for rb in rigid]
+    else:
+        _req(skel is not None, f'{entity}: a skinned mesh and no SkeletonDescComp')
+        sk = om.read_skeleton(packs.read(skel.get('name') + '.skeleton'))
+        by_handle = {b.handle: b.name for b in sk.bones}
+        names = [b.name for b in sk.bones]
+        parents = {b.name: (by_handle[b.parent] if b.parent >= 0 else None) for b in sk.bones}
+        frames = {b.name: w for b, w in zip(sk.bones, sk.world())}
+        index = {b.handle: i for i, b in enumerate(sk.bones)}
+        root = next(i for i, b in enumerate(sk.bones) if b.parent < 0)
+        # A vertex assigned to a handle the skeleton has not (large_gunship_aa's mesh: 16 vertices on a fifth bone of
+        # a four-bone skeleton, in the game's own files) rides the root.
+        rigid = [np.asarray([index.get(int(h), root) for h in rb], dtype=np.int32) for rb in rigid]
     pos, uv, tris, tbone, tmat = [], [], [], [], []
     materials: list[str] = []
     base = 0
-    for sub in mesh.submeshes:
+    for sub, rb in zip(mesh.submeshes, rigid):
         p = mesh.positions(sub)
         t = mesh.uvs(sub)
         _req(t is not None, f'{entity}: submesh {sub.name} has no texture coordinates')
-        rb = mesh.rigid_bones(sub)
         _req(bool((rb >= 0).all()), f'{entity}: submesh {sub.name} has unskinned vertices')
         corner = rb[sub.indices]
         # one bone a triangle: X-Morph's units are rigid pieces (a triangle whose corners disagree takes its first's)
@@ -141,14 +174,11 @@ def load(packs: xp.Packs, entity: str) -> UnitModel:
         pos.append(to_edf(p))
         uv.append(t)
         tris.append(sub.indices + base)
-        tbone.append(np.asarray([sk.bones[i].name for i in corner[:, 0]], dtype=object))
+        tbone.append(np.asarray([names[i] for i in corner[:, 0]], dtype=object))
         tmat.append(np.full(len(sub.indices), materials.index(sub.material)))
         base += len(p)
-    names = [b.name for b in sk.bones]
-    return UnitModel(entity, bp, mesh_path, names,
-                     {b.name: (by_handle[b.parent] if b.parent >= 0 else None) for b in sk.bones},
-                     {b.name: to_edf(w[:3, 3]) for b, w in zip(sk.bones, world)},
-                     {b.name: w for b, w in zip(sk.bones, world)},
+    return UnitModel(entity, bp, mesh_path, names, parents,
+                     {n: to_edf(w[:3, 3]) for n, w in frames.items()}, frames,
                      _attachments(packs, mesh_path),
                      np.vstack(pos), np.vstack(uv), np.vstack(tris), np.concatenate(tbone), np.concatenate(tmat),
                      materials)

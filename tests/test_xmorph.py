@@ -287,6 +287,19 @@ class XmorphAssetTests(unittest.TestCase):
         self.assertGreater(float(P[:, 2].max()), 8.0)                    # the barrel points +z
         self.assertIn('normal', xm.texture_images(self.packs, um.materials[0]))
 
+    def test_every_unit_reads(self) -> None:
+        # Every row of the table, ported or not: an inherited blueprint (the warcar's escort helicopter), an unskinned
+        # mesh (the bunkers: one body bone), a skin naming a bone the skeleton lacks (large_gunship_aa: the root).
+        import xm_units
+        for key, unit in xm_units.UNITS.items():
+            with self.subTest(unit=key):
+                um = xm.load(self.packs, unit.entity)
+                self.assertGreater(len(um.triangles), 0)
+                self.assertTrue(set(um.tri_bone) <= set(um.bones))
+        self.assertEqual(xm.load(self.packs, 'fort/bunker_barracks').bones, [xm.STATIC_BONE])
+        escort = xm.blueprint(self.packs, 'entities/units/bosses/warcar_escort_helicopter.ent')
+        self.assertEqual(escort.child('RenderableDescComp').get('mesh'), 'meshes/units/air/large_helicopter_core.mesh')
+
     def test_folder(self) -> None:
         info = self.info
         self.assertEqual((info['format'], info['kind']), (1, self.UNIT))
