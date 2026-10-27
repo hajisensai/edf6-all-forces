@@ -10,97 +10,116 @@
   {
    "name": "wt_m0_c",
    "template": "v603_body",
-   "albedo": "textures/m0_c.jpg"
+   "albedo": "textures/m0_c.jpg",
+   "normal": "textures/m0_n.png"
   },
   {
    "name": "wt_m10_c",
    "template": "v603_body",
-   "albedo": "textures/m10_c.jpg"
+   "albedo": "textures/m10_c.jpg",
+   "normal": "textures/m10_n.png"
   },
   {
    "name": "wt_m11_c",
    "template": "v603_body",
-   "albedo": "textures/m11_c.jpg"
+   "albedo": "textures/m11_c.jpg",
+   "normal": "textures/m11_n.png"
   },
   {
    "name": "wt_m12_c",
    "template": "v603_body",
-   "albedo": "textures/m12_c.jpg"
+   "albedo": "textures/m12_c.jpg",
+   "normal": "textures/m12_n.png"
   },
   {
    "name": "v603_kyata_L",
    "template": "v603_kyata_L",
-   "albedo": "textures/m1_c.jpg"
+   "albedo": "textures/m1_c.jpg",
+   "normal": "textures/m1_n.png"
   },
   {
    "name": "v603_kyata_R",
    "template": "v603_kyata_R",
-   "albedo": "textures/m1_c.jpg"
+   "albedo": "textures/m1_c.jpg",
+   "normal": "textures/m1_n.png"
   },
   {
    "name": "v603_kyata_L_6",
    "template": "v603_kyata_L",
-   "albedo": "textures/m2_c.jpg"
+   "albedo": "textures/m2_c.jpg",
+   "normal": "textures/m2_n.png"
   },
   {
    "name": "v603_kyata_R_7",
    "template": "v603_kyata_R",
-   "albedo": "textures/m2_c.jpg"
+   "albedo": "textures/m2_c.jpg",
+   "normal": "textures/m2_n.png"
   },
   {
    "name": "v603_kyata_L_8",
    "template": "v603_kyata_L",
-   "albedo": "textures/m3_c.jpg"
+   "albedo": "textures/m3_c.jpg",
+   "normal": "textures/m3_n.png"
   },
   {
    "name": "v603_kyata_R_9",
    "template": "v603_kyata_R",
-   "albedo": "textures/m3_c.jpg"
+   "albedo": "textures/m3_c.jpg",
+   "normal": "textures/m3_n.png"
   },
   {
    "name": "v603_kyata_L_10",
    "template": "v603_kyata_L",
-   "albedo": "textures/m4_c.jpg"
+   "albedo": "textures/m4_c.jpg",
+   "normal": "textures/m4_n.png"
   },
   {
    "name": "v603_kyata_R_11",
    "template": "v603_kyata_R",
-   "albedo": "textures/m4_c.jpg"
+   "albedo": "textures/m4_c.jpg",
+   "normal": "textures/m4_n.png"
   },
   {
    "name": "wt_m4_c",
    "template": "v603_body",
-   "albedo": "textures/m4_c.jpg"
+   "albedo": "textures/m4_c.jpg",
+   "normal": "textures/m4_n.png"
   },
   {
    "name": "wt_m9_c",
    "template": "v603_body",
-   "albedo": "textures/m9_c.jpg"
+   "albedo": "textures/m9_c.jpg",
+   "normal": "textures/m9_n.png"
   },
   {
    "name": "wt_m5_c",
    "template": "v603_body",
-   "albedo": "textures/m5_c.jpg"
+   "albedo": "textures/m5_c.jpg",
+   "normal": "textures/m5_n.png"
   },
   {
    "name": "wt_m6_c",
    "template": "v603_body",
-   "albedo": "textures/m6_c.jpg"
+   "albedo": "textures/m6_c.jpg",
+   "normal": "textures/m6_n.png"
   },
   {
    "name": "wt_m7_c",
    "template": "v603_body",
-   "albedo": "textures/m7_c.jpg"
+   "albedo": "textures/m7_c.jpg",
+   "normal": "textures/m7_n.png"
   },
   {
    "name": "wt_m8_c",
    "template": "v603_body",
-   "albedo": "textures/m8_c.jpg"
+   "albedo": "textures/m8_c.jpg",
+   "normal": "textures/m8_n.png"
   },
   {
    "name": "wt_m13_c",
    "template": "v603_body",
-   "albedo": "textures/m13_c.jpg"
+   "albedo": "textures/m13_c.jpg",
+   "normal": "textures/m13_n.png"
   }
  ],
  "parts": [

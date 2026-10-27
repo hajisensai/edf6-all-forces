@@ -21,6 +21,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', 'pylib'))
 import chute_model  # noqa: E402
 import ledger  # noqa: E402
+import model_lod  # noqa: E402
 import vcobjects as vc  # noqa: E402
 
 OWNER = 'chute'   # pylib/ledger.py
@@ -31,7 +32,10 @@ def build(root: str) -> dict[str, bytes]:
     game = vc.Game(root)
     arc = chute_model.build(game)
     chute_model.check(arc)
-    return {f'OBJECT/{chute_model.OUT_ARC}': arc, f'OBJECT/{chute_model.SGO_FILE}': chute_model.sgo(game)}
+    # its model merged by material and given its LODs when its SGO is a vehicle's (pylib/model_lod.py)
+    files = model_lod.finish({f'OBJECT/{chute_model.OUT_ARC}': arc, f'OBJECT/{chute_model.SGO_FILE}': chute_model.sgo(game)})
+    chute_model.check(files[f'OBJECT/{chute_model.OUT_ARC}'])   # what is written is held to the same contract
+    return files
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

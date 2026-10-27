@@ -16,6 +16,7 @@ import sys
 from typing import Any
 
 import ledger
+import xm_units
 from modfiles import atomic_write, sha256, sha256_file
 
 MANIFEST = '.edf6vc_builds.json'
@@ -27,7 +28,26 @@ MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'saza
                 'gdf005': 'emp_gdf005', 'laser': 'emp_laser', 'railgun': 'emp_railgun', 'patriot': 'emp_patriot'}
 # The groups whose models carry first-person cockpits (pylib/cockpits.py): the cockpits' asset folder is an input.
 COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'sazabi', 'optics')
+# Every X-Morph unit is a group of its own (its ledger owner, its model folder, its cockpit; pylib/xm_units.py), all built by
+# the one generator tools/make_xmorph.py (generator(), tool()).
+XMORPH = tuple(u.key for u in xm_units.ported())
+GROUPS += XMORPH
+COCKPIT_GROUPS += XMORPH
+MODEL_INPUTS.update({key: xm_units.folder(key) for key in XMORPH})
 MODULE_FOLDERS = ('tools', 'pylib', 'testrange', 'autoturret/tools')
+
+
+def generator(group: str) -> str:
+    """The module that builds `group`: tools/make_<group>.py, an X-Morph unit's tools/make_xmorph.py."""
+    return 'make_xmorph' if group in XMORPH else 'make_' + group
+
+
+def tool(group: str) -> Any:
+    """`group`'s generator as the installer and the test range use it (OWNER, build, install, remove, vehicle_sgo,
+    check): its module, an X-Morph unit's builder (make_xmorph.builder: one object per unit, the same every call)."""
+    import importlib
+    module = importlib.import_module(generator(group))
+    return module.builder(group) if group in XMORPH else module
 
 
 def source_modules(root: str) -> dict[str, Path]:
@@ -79,7 +99,7 @@ def source_recipes(root: str) -> dict[str, str]:
     out = {}
     for group in GROUPS:
         seen: set[str] = set()
-        pending = ['make_' + group]
+        pending = [generator(group)]
         while pending:
             name = pending.pop()
             if name not in seen:

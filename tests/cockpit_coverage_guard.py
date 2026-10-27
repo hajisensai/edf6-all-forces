@@ -77,7 +77,7 @@ for kind, vehicle in vc.GROUND_VEHICLES.items():
     check(bool(fits), f'{kind}: no cockpit fitted to {stem} (pylib/cockpit_fits_plugin.py FITS): its seats have no first person')
     check(0 in {f.seat for f in fits}, f'{kind}: the driver\'s seat 0 has no eye')
     check(build_grafts(vehicle.tool), f'{kind}: tools/{vehicle.tool}.py grafts no cockpit (cockpits.graft_files)')
-    group = vehicle.tool.removeprefix('make_')
+    group = kind if kind in vc.TRACKED else vehicle.tool.removeprefix('make_')   # a V603 kind is its own group
     check(group in buildcache.GROUPS and group in buildcache.COCKPIT_GROUPS,
           f'{kind}: buildcache COCKPIT_GROUPS lacks {group!r} (a fit change would not rebuild its installed model)')
 

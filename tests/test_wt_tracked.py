@@ -95,8 +95,10 @@ class WtAssetTests(unittest.TestCase):
         # test_grafted_eyes_sit_on_the_war_thunder_geometry).
         # The emplacements (pylib/emplacement_model.py: a Dreadnought turret or a prepared glTF folder on a built base,
         # their wheels hidden boxes) are tests/test_emplacement.py's.
+        # An X-Morph unit's folder is the model pack's (pylib/xm_units.py): built where it is here.
         cls.files = {kind: combat.authored(cls.game.root, kind)
-                     for kind in shard_kinds(k for k in combat.KINDS if k not in combat.EMPLACEMENTS)}
+                     for kind in shard_kinds(k for k in combat.KINDS if k not in combat.EMPLACEMENTS
+                                             and (k not in wt.xm_units.UNITS or wt.available(k)))}
 
     def model(self, kind: str):  # noqa: ANN201
         import mdb
@@ -144,6 +146,8 @@ class WtAssetTests(unittest.TestCase):
                 block = gun.get('animation_model').items[2].data
                 got = [struct.unpack_from('<3f', block, off) for _, _, off in vc.mab_muzzles(block)]
                 want = spec.info['muzzles'][side]
+                if side not in self.combat.GUN_SLOTS:   # a store's muzzles round its template's locators, in turn
+                    want = self.combat.slot_points(want, len(got))
                 self.assertEqual(len(got), len(want))
                 for local, row in zip(got, want):
                     with self.subTest(kind=kind, weapon=path):

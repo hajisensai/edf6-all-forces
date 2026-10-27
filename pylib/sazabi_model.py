@@ -27,6 +27,7 @@ import os
 import struct
 from dataclasses import dataclass, replace
 
+import cockpits
 import obj_model as om
 import sazabi_arms
 import texfile
@@ -104,7 +105,7 @@ LIGHT_SLOTS = ('albedo', 'normal', 'param_r_m_light_hr')
 LIGHT_PARAM = 'light_color'
 # The palette: the mip levels down to a cell's 1 x 1 (four of them) stay one colour.
 PALETTE, CELL = 128, 16
-FLAT_NORMAL = (128, 128, 255)
+FLAT_NORMAL = texfile.FLAT_NORMAL_XY
 TEX_ALBEDO = 'edf6vc_sazabi_df.dds'
 TEX_RMO = 'edf6vc_sazabi_rmo.dds'      # hull shader: R roughness, G metal, B occlusion (255: none; tools/make_drill.py)
 TEX_RML = 'edf6vc_sazabi_rml.dds'      # light shader: R roughness, G metal, B light mask (255: lit)
@@ -221,7 +222,7 @@ def palette(colours: dict[str, Colour]) -> tuple[dict[str, tuple[float, float]],
                 img[k][row:row + CELL * 4] = rgba * CELL
     tex = {name: texfile.dxt1_dds(texfile.Image(PALETTE, PALETTE, img[k]))
            for name, k in ((TEX_ALBEDO, 'df'), (TEX_RMO, 'rmo'), (TEX_RML, 'rml'))}
-    tex[TEX_NORMAL] = texfile.solid_dxt1(FLAT_NORMAL)
+    tex[TEX_NORMAL] = texfile.solid_bc5(FLAT_NORMAL)
     return uv, tex
 
 
@@ -328,7 +329,9 @@ def check_archive(arc: bytes) -> None:
     data = _member(rab, OUT_MDB).data
     md = mdb_read(data)
     _req(mdb_write(md) == data, 'model does not round-trip')
-    _req([md.name_of(b.name) for b in md.bones] == BONE_NAMES, 'bone names are not SKELETON\'s')
+    # a finished model also carries its seat's eye / screen markers (make_sazabi.build: cockpits.graft_files)
+    _req([n for n in (md.name_of(b.name) for b in md.bones) if not cockpits.grafted_bone(n)] == BONE_NAMES,
+         'bone names are not SKELETON\'s')
     bad = om.texture_problems(rab, md, OUT_MDB)
     _req(not bad, 'textures: ' + '; '.join(bad))
     _req(len(md.objects) == 1 and md.bones[md.objects[0].bone].kind == 2, 'not one object on a kind-2 bone')

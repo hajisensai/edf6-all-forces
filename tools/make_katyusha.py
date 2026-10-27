@@ -43,6 +43,7 @@ import cockpits  # noqa: E402
 import dsgo  # noqa: E402
 import katyusha_model  # noqa: E402
 import ledger  # noqa: E402
+import model_lod  # noqa: E402
 import mab  # noqa: E402
 import sgo  # noqa: E402
 import vcobjects as vc  # noqa: E402
@@ -220,7 +221,9 @@ def check(files: dict[str, bytes]) -> None:
     and the weapon is marked, looks like a rocket and lives long enough for its high arc."""
     from mdb import mdb_read, rab_read
     v = sgo.load(data=files[f'OBJECT/{SGO_FILE}'])
-    assert v['animation_model'][0] == [f'app:/Object/{MODEL_FILE.lower()}', MODEL_MDB], v['animation_model'][0]
+    # [archive, model] (+ the LOD table model_lod.finish adds: checked against the archive)
+    assert v['animation_model'][0][:2] == [f'app:/Object/{MODEL_FILE.lower()}', MODEL_MDB], v['animation_model'][0]
+    assert not model_lod.check_files(files), model_lod.check_files(files)
     assert [w[0] for w in v['vehicle_setup'][2]] == list(VEHICLE.weapons)
     md = mdb_read(next(f for f in rab_read(files[f'OBJECT/{MODEL_FILE}']).files if f.name.lower() == MODEL_MDB.lower()).data)
     names = {md.name_of(b.name) for b in md.bones}
@@ -268,7 +271,12 @@ def build(root: str) -> dict[str, bytes]:
     files = {f'OBJECT/{MODEL_FILE}': arc, f'OBJECT/{SGO_FILE}': vehicle_sgo(game),
              f'WEAPON/{vc.KATYUSHA_ROCKETS}': rockets_sgo(game)}
     check(files)
-    return cockpits.graft_files(game, files)   # its seats' first-person cockpits (pylib/cockpits.py)
+    # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
+    # (pylib/model_lod.py)
+    files = model_lod.finish(cockpits.graft_files(game, files))
+    # what is written is held to the same contract as what was authored
+    check(files)
+    return files
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

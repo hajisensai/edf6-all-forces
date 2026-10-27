@@ -43,13 +43,11 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import importlib
 import os
 import re
 import sys
 import traceback
 import time
-from types import ModuleType
 from typing import Any, Iterator, Mapping
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -458,9 +456,9 @@ def remove_autoturret(game: str) -> None:
     at_build.uninstall(mods, force=False)
 
 
-def build_asset(cache: Any, module: ModuleType, label: str, builder: Any = None, settings: dict | None = None) -> Any:
+def build_asset(cache: Any, module: Any, label: str, builder: Any = None, settings: dict | None = None) -> Any:
     """Only regenerate an asset group when its recipe, inputs, `settings` (the ini's choices it is built by) or
-    installed outputs changed."""
+    installed outputs changed. `module`: the group's generator (a make_<group> module, or buildcache.tool's)."""
     started = time.perf_counter()
     if cache.current(module.OWNER, settings):
         print(f'{label}：校验通过，复用已有资源（{time.perf_counter() - started:.1f} 秒）', flush=True)
@@ -563,8 +561,9 @@ def install(game: str, campaign_requested: bool = False) -> None:
     emc = build_asset(cache, make_emc, 'EMC 蓄力光束')
     ult = build_asset(cache, make_ultimate, '终极支援「天罚」特效')
     barrage = build_asset(cache, make_barrage, '远程炮击弹药')
-    # The vehicles and emplacements on the V603 (tools/make_tracked_combat.py LABELS), each by its make_<kind> tool.
-    tracked = {kind: build_asset(cache, importlib.import_module('make_' + kind), label)
+    # The vehicles and emplacements on the V603 (tools/make_tracked_combat.py LABELS), each by its generator (its
+    # make_<kind> tool; an X-Morph unit's, make_xmorph's builder: buildcache.tool).
+    tracked = {kind: build_asset(cache, buildcache.tool(kind), label)
                for kind, label in make_tracked_combat.LABELS.items()}
     stock = None
     if stock_stores:
@@ -1298,7 +1297,7 @@ def check_package() -> int:
     import frozen_collision_probe
     frozen_collision_probe.check()
     for kind in make_tracked_combat.KINDS:
-        builder = importlib.import_module('make_' + kind)
+        builder = buildcache.tool(kind)
         model = make_tracked_combat.model_module(kind)
         assert builder.OWNER == kind and kind in ledger.OWNERS and kind in buildcache.GROUPS
         assert callable(builder.build) and callable(builder.install) and callable(builder.remove)

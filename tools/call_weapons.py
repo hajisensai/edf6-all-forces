@@ -68,6 +68,7 @@ import ported_weapons as pw  # noqa: E402
 import ledger  # noqa: E402
 import modfiles  # noqa: E402
 import vcobjects as vc  # noqa: E402
+import xm_units  # noqa: E402
 from calls import CALLS, IDS, Call, call_name  # noqa: E402
 from dsgo import Node  # noqa: E402
 
@@ -137,6 +138,26 @@ def moved_sgos() -> list[str]:
     """The SGOs an install before 2026-10-26 wrote for the supports now on the map (calls.Call.on_map): install, uninstall
     and repair delete each one still ours (ours())."""
     return [sgo_file(c) for c in CALLS if c.on_map]
+
+
+def undeployed(call: Call) -> bool:
+    """An X-Morph unit's request whose model folder this machine has not (pylib/xm_units.py: the catalog registers the
+    unit everywhere, its folder deploys it; CLAUDE.md: no stand-in vehicle): tools/make_xmorph.py writes nothing for it,
+    so its row is a placeholder as a support's on the map is (its index kept), and the SGO an earlier install wrote for
+    it goes, until the folder is there and the installer runs again."""
+    if call.ground not in xm_units.UNITS:
+        return False
+    return not xm_units.deployed(call.ground)
+
+
+def placeholder(call: Call) -> bool:
+    """Its row is a placeholder (RETIRED_PREFIX, no SGO of ours): a support on the map, or an undeployed unit."""
+    return call.on_map or undeployed(call)
+
+
+def parked_sgos() -> list[str]:
+    """The SGOs an earlier install wrote for the units undeployed now (undeployed): install deletes each one still ours."""
+    return [sgo_file(c) for c in CALLS if undeployed(c)]
 
 
 def owned_assets(game_root: str, manifest: dict | None = None) -> dict[str, str]:
@@ -812,7 +833,7 @@ def stack(game_root: str) -> dict[str, bytes]:
               + '; '.join(reasons[:3]) + (' ...' if len(reasons) > 3 else ''))
     tpl = {t: _template_index(before, t) for t in templates()}
     template_sgo = {t: stock(game_root, f'WEAPON/{t.upper()}.SGO') for t in tpl}
-    live = [c for c in CALLS if not c.on_map]   # a support on the map: its placeholder row, no SGO
+    live = [c for c in CALLS if not placeholder(c)]   # a support on the map, an undeployed unit: a placeholder row
     curves = {request_family(c): request_curve(game_root, request_family(c)) for c in live if c.brings == 'vehicle'}
     fallback = {c.id for c in live if model_missing(c)}
     out: dict[str, bytes] = {sgo_file(c): weapon_sgo(template_sgo[template_of(c)], c, curves.get(request_family(c)),
@@ -834,7 +855,7 @@ def stack(game_root: str) -> dict[str, bytes]:
     row_template = {c.id: rows[tpl[template_of(c)]] for c in CALLS}
     port_rows = {p.id: pw.table_row(rows[port_tpl[p.id]], p) if p.id in ports
                  else pw.pending_table_row(rows[port_tpl[p.id]], p) for p in put_ports}
-    puts = sorted([(plan.at[c.id], _retired_table_row(row_template[c.id], c) if c.on_map
+    puts = sorted([(plan.at[c.id], _retired_table_row(row_template[c.id], c) if placeholder(c)
                     else _table_row(row_template[c.id], c)) for c in order]
                   + [(plan.at[p.id], port_rows[p.id]) for p in put_ports], key=lambda x: x[0])
     for at, row in puts:
@@ -856,15 +877,15 @@ def stack(game_root: str) -> dict[str, bytes]:
         text_templates = {c.id: text[tpl[template_of(c)]] for c in CALLS}
         port_text = {p.id: pw.text_row(p, lang) if p.id in ports
                      else pw.pending_text_row(text[port_tpl[p.id]], p, lang) for p in put_ports}
-        puts = sorted([(plan.at[c.id], _retired_text_row(text_templates[c.id], c, lang) if c.on_map
+        puts = sorted([(plan.at[c.id], _retired_text_row(text_templates[c.id], c, lang) if placeholder(c)
                         else _text_row(text_templates[c.id], c, lang, durability[c.id], stats.get(c.id)))
                        for c in order] + [(plan.at[p.id], port_text[p.id]) for p in put_ports], key=lambda x: x[0])
         for at, row in puts:
             _put(text, at, row)
         out[rel] = dsgo.compact(s.texts[rel])
     # What each row of ours must hold: a live call and a ported weapon built or kept their own id; a support on the map,
-    # and a ported weapon waiting for its game, its placeholder's.
-    want = {c.id: calls.retired_id(c.id) if c.on_map else c.id for c in CALLS}
+    # an undeployed unit and a ported weapon waiting for its game, its placeholder's.
+    want = {c.id: calls.retired_id(c.id) if placeholder(c) else c.id for c in CALLS}
     want.update({p.id: p.id if p.id in ports or p.id in kept else pw.retired_id(p.id) for p in pw.PORTS})
     verify(game_root, out, plan, want)
     return out
@@ -1077,10 +1098,11 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     if recover(game_root):
         print('rolled back the weapon table files of an earlier run that did not finish')
     files = stack(game_root) if files is None else files
-    stale = sorted(set(files) & set(moved_sgos()))
+    parked = parked_sgos()
+    stale = sorted(set(files) & set(moved_sgos() + parked))
     if stale:
-        raise ValueError(f'{", ".join(stale)}: a support on the map has no weapon SGO (calls.Call.on_map)')
-    needs = {rel for c in CALLS if c.vehicle and not c.on_map for rel in vehicle_needs(c, files[sgo_file(c)])}
+        raise ValueError(f'{", ".join(stale)}: a support on the map or an undeployed unit has no weapon SGO (placeholder)')
+    needs = {rel for c in CALLS if c.vehicle and not placeholder(c) for rel in vehicle_needs(c, files[sgo_file(c)])}
     missing = [rel for rel in sorted(needs) if not os.path.isfile(_mods(game_root, rel))]
     if missing:
         raise SystemExit(f'{", ".join(missing)} not installed: run python tools/make_jets.py first')
@@ -1091,19 +1113,20 @@ def install(game_root: str, files: dict[str, bytes] | None = None) -> dict[str, 
     old_rows = dict(manifest['rows'])
     # The SGOs an earlier install wrote for the supports now on the map go in the same transaction (removed_sgos: only
     # those still ours; a pre-install original under that name is put back).
-    gone = removed_sgos(game_root, manifest, moved_sgos())
+    gone = removed_sgos(game_root, manifest, moved_sgos() + parked)
     _first_backup(game_root, manifest, list(files))
     ids = row_ids(files[TABLE])
     written = {rel: modfiles.sha256(data) for rel, data in files.items()}
     # A port this run kept as an earlier install built it (stack: its game is gone now) keeps its files' record, or a
     # later uninstall could not tell them ours (ours()).
     written.update({rel: sha for rel, sha in manifest['written'].items()
-                    if rel not in written and rel in our_sgos() and ours(game_root, manifest, rel)})
+                    if rel not in written and rel not in gone and rel in our_sgos() and ours(game_root, manifest, rel)})
     manifest['written'] = written
     manifest['rows'] = {slot_of(x): i for i, x in enumerate(ids) if slot_of(x)}   # placeholders too, as uninstall
     commit(game_root, {**gone, **files, MANIFEST: _manifest_bytes(manifest)})
     for rel, data in gone.items():
-        print(f'{"removed" if data is None else "restored"} {rel} (the support is called from the map now)')
+        why = 'its unit is not deployed' if rel in parked else 'the support is called from the map now'
+        print(f'{"removed" if data is None else "restored"} {rel} ({why})')
     moved = {c: (old_rows[c], manifest['rows'].get(c)) for c in old_rows if old_rows[c] != manifest['rows'].get(c)}
     for c, (was, now) in moved.items():
         print(f'WARNING: {c} was row {was}, now {now}: another tool rewrote the weapon table without it; a save '
@@ -1239,10 +1262,12 @@ def check(game_root: str) -> bool:
         i = plan.at[c.id]
         state = 'missing' if i >= len(ids) else 'placeholder' if ids[i] != c.id else 'in'
         moved = f' (installed at {rows[c.id]})' if c.id in rows and rows[c.id] != i and state != 'missing' else ''
-        if c.on_map:
-            # A support called from the map: its row a placeholder, its SGO an earlier install wrote gone.
-            note = ' (on the map, its row a placeholder)' if state == 'placeholder' else \
-                ' (on the map: its row must be a placeholder; install again)' if state == 'in' else ''
+        if placeholder(c):
+            # A support called from the map, an undeployed unit: its row a placeholder, its SGO an earlier install wrote
+            # gone.
+            where = 'on the map' if c.on_map else 'not deployed: no model folder'
+            note = f' ({where}, its row a placeholder)' if state == 'placeholder' else \
+                f' ({where}: its row must be a placeholder; install again)' if state == 'in' else ''
             print(f'  {i if state != "missing" else "-":>5} {c.id}: {state}{note}{moved}')
             ok &= state == 'placeholder' and not moved
             if os.path.isfile(_mods(game_root, sgo_file(c))):

@@ -42,6 +42,7 @@ import os
 import struct
 from dataclasses import replace
 
+import cockpits
 import graft_pure as g
 import cas_pose
 import obj_model as om
@@ -62,7 +63,7 @@ MODEL_SUBDIR, OBJ_FILE = 'drill_tank', 'drill_tank.obj'
 MATERIALS = {'MI_Tank_C': ('edf6vc_drill_c', 'Tank_C_BC.png'), 'MI_Tank_B_CS': ('edf6vc_drill_b', 'Tank_C_BC.png')}
 ALBEDO_TEX = {'Tank_C_BC.png': 'edf6vc_drill_c.dds'}    # each source texture's archive file (one per source)
 STEEL = (62, 64, 60)                                     # dark steel: the albedo of the stock materials no mesh draws
-FLAT_NORMAL, NEUTRAL_RMO = (128, 128, 255), (150, 110, 255)   # tangent-space up; roughness 0.6, metal 0.43, no occlusion
+FLAT_NORMAL, NEUTRAL_RMO = texfile.FLAT_NORMAL_XY, (150, 110, 255)   # tangent-space up; roughness 0.6, metal 0.43, no occlusion
 TEMPLATE_MATERIAL = 'v505_tank'
 NORMAL_TEX, RMO_TEX, STEEL_TEX = 'edf6vc_drill_n.dds', 'edf6vc_drill_rmo.dds', 'edf6vc_drill_steel.dds'
 # OBJ (+X forward, +Y up) -> game (+Z forward, +Y up, +X left): x -> z, y -> y, z -> -x (a rotation, no mirror)
@@ -224,7 +225,7 @@ def textures(obj: om.ObjFile) -> dict[str, bytes]:
     """The archive's new texture files {name: DDS}: each source albedo once, the flat normal, the neutral RMO, the
     steel of the undrawn stock materials."""
     folder = os.path.dirname(obj.path)
-    out = {NORMAL_TEX: texfile.solid_dxt1(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO), STEEL_TEX: texfile.solid_dxt1(STEEL)}
+    out = {NORMAL_TEX: texfile.solid_bc5(FLAT_NORMAL), RMO_TEX: texfile.solid_dxt1(NEUTRAL_RMO), STEEL_TEX: texfile.solid_dxt1(STEEL)}
     for source in sorted({src for _, src in MATERIALS.values()}):
         out[ALBEDO_TEX[source]] = om.texture_dds(os.path.join(folder, source))
     return out
@@ -392,7 +393,8 @@ def check(arc: bytes, host_bones: list[str] | None = None) -> None:
     _req(di > body and md.bones[di].parent == body and md.bones[di].kind == 3 and md.bones[di].child == -1
          and not any(b.parent == di for b in md.bones), f'{SPIN_BONE} not a childless skin bone under body')
     if host_bones is not None:
-        _req([n for n in names if n != DRILL_BONE] == host_bones, 'the stock bones changed')
+        # (a finished model also has the seats' eye / screen markers and shell children: cockpits.graft_files)
+        _req([n for n in names if n != DRILL_BONE and not cockpits.grafted_bone(n)] == host_bones, 'the stock bones changed')
     for k in (mi, di):
         rot = w[k][:3] + w[k][4:7] + w[k][8:11]
         _req(max(abs(a - b) for a, b in zip(rot, (1, 0, 0, 0, 1, 0, 0, 0, 1))) < 1e-5, f'{names[k]}: axes not the model\'s')
@@ -402,6 +404,8 @@ def check(arc: bytes, host_bones: list[str] | None = None) -> None:
     for j, me in enumerate(o.meshes):
         nv = me.nverts
         tag = f'mesh {j}'
+        if cockpits.grafted_material(md.name_of(md.materials[me.material].name)):
+            continue   # a seat's cockpit (cockpits.graft_files), not the hull or the drill
         _req(len(me.vdata) == nv * me.vsize and 0 < nv < 0x10000, f'{tag}: {nv} vertices')
         idx = struct.unpack(f'<{len(me.indices) // 2}H', me.indices)
         _req(idx and len(idx) % 3 == 0 and max(idx) < nv, f'{tag}: index buffer')
@@ -416,10 +420,12 @@ def check(arc: bytes, host_bones: list[str] | None = None) -> None:
                 _req(rr <= DRILL_RADIUS + STORED_STEP and -STORED_STEP <= p[2] - origin[2] <= DRILL_LENGTH + 0.05,
                      f'{tag}: drill vertex {p} outside its cylinder')
             else:
-                _req(bone == body and p[2] < DRILL_SPLIT_Z + 1e-3, f'{tag}: vertex {p} on bone {bone}')
+                _req(cockpits.own_bone(md, bone) == names[body] and p[2] < DRILL_SPLIT_Z + 1e-3, f'{tag}: vertex {p} on bone {bone}')
                 hull_lo = min(hull_lo, p[1])
     _req(drill_pts > 1000 and -0.01 <= hull_lo < 0.05, f'{drill_pts} drill vertices, hull bottom {hull_lo:.3f}')
     for m in md.materials:
+        if cockpits.grafted_material(md.name_of(m.name)):
+            continue
         for x in m.textures:
             fn = md.textures[x.texture].filename
             stem, ext = fn.rsplit('.', 1)
@@ -437,6 +443,8 @@ def drawn_albedo_problems(md: Mdb) -> list[str]:
     for me in (me for o in md.objects for me in o.meshes):
         m = md.materials[me.material]
         name = md.name_of(m.name)
+        if cockpits.grafted_material(name):
+            continue   # a seat's cockpit (cockpits.graft_files)
         albedo = next((md.textures[x.texture].filename.lower() for x in m.textures if x.kind.lower() == 'albedo'), None)
         if name not in want:
             out.append(f'mesh on material {name}: not one of the OBJ materials')

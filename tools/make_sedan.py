@@ -22,6 +22,7 @@ import cockpits
 import cockpit_kits
 import graft_pure as graft
 import ledger
+import model_lod
 import rootcpk
 import sgo
 import texfile
@@ -236,8 +237,11 @@ def build(root):
     m['game_object_durability'] = 300.
     shkt = collision(game, m)
     m['ragdoll'][0] = 'app:/object/edf6vc_sedan.shkt'
-    return {'OBJECT/'+STEM+'.MRAB': model(game), 'OBJECT/'+STEM+'.SHKT': shkt,
-            'OBJECT/'+STEM+'.SGO': sgo.write(version, m)}
+    # its model merged by material and given its LODs (pylib/model_lod.py)
+    files = model_lod.finish({'OBJECT/'+STEM+'.MRAB': model(game), 'OBJECT/'+STEM+'.SHKT': shkt,
+                              'OBJECT/'+STEM+'.SGO': sgo.write(version, m)})
+    assert not model_lod.check_files(files), model_lod.check_files(files)   # the LOD table just added
+    return files
 
 
 def install(root, files):

@@ -26,9 +26,11 @@ import vcobjects as vc
 import graft_pure as graft
 import acb
 import mdb
+import model_lod
 import os
 import tracked_combat_model as tracked
 import vulcan_model
+import xm_units
 
 
 class CatalogContractTests(unittest.TestCase):
@@ -60,8 +62,10 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(tuple(combat.slot('bmpt', i) for i in range(6)), ('left', 'right', 'missiles', 'left', 'right', 'missiles'))
         # 2026-10-21: both Ataka rounds ride the V603's otherwise unread secondary, alongside the cannons (src/payload.cpp).
         # 2026-10-24: the Tunguska's, the Apocalypse's and the Patriot's missiles ride it too.
+        # 2026-10-27: and every X-Morph unit's other weapons (xm_units.Arm).
         self.assertEqual([kind for kind, store in vc.STORES.items() if store.independent_secondary],
-                         ['TUNGUSKA_SAM', 'APOC_SAM', 'PATRIOT_SAM', 'BMPT_ATGM', 'BMPT_ATGMF'])
+                         ['TUNGUSKA_SAM', 'APOC_SAM', 'PATRIOT_SAM', 'BMPT_ATGM', 'BMPT_ATGMF',
+                          *(vc.xm_store(u, a) for u in xm_units.v603() for a in u.arms)])
         self.assertFalse(any(vc.STORES[k].native_control or vc.STORES[k].group for k in ('BMPT_ATGM', 'BMPT_ATGMF')),
                          'a missile is not alternate cannon ammunition')
 
@@ -108,8 +112,17 @@ class NativeAssetContractTests(unittest.TestCase):
                 built = combat.build(self.game.root, kind)
                 rel = f'OBJECT/{model.OUT_ARC}'
                 self.assertEqual(set(built), set(self.files[kind]))
-                self.assertEqual({k: v for k, v in built.items() if k != rel},
-                                 {k: v for k, v in self.files[kind].items() if k != rel})
+                # ... and its models merged and given their LODs (pylib/model_lod.py): the vehicle SGO differs only in
+                # animation_model[0]'s LOD table
+                sgo_rel = f'OBJECT/{vc.GROUND_VEHICLES[kind].sgo}.SGO'
+                self.assertEqual({k: v for k, v in built.items() if k not in (rel, sgo_rel)},
+                                 {k: v for k, v in self.files[kind].items() if k not in (rel, sgo_rel)})
+                got, was = (dsgo.to_py(dsgo.parse(f[sgo_rel]).root) for f in (built, self.files[kind]))
+                self.assertEqual(got['animation_model'][0][:2], was['animation_model'][0])
+                got['animation_model'][0] = was['animation_model'][0]
+                self.assertEqual(got, was)
+                self.assertEqual(model_lod.check_files(built), [])
+                combat.check(built, kind, self.game)   # the written files keep the authored contract (cockpits aside)
                 fits = cockpit_fits.FITS[model.OUT_ARC.rsplit('.', 1)[0]]
                 arc = mdb.rab_read(built[rel])
                 md = mdb.mdb_read(next(f for f in arc.files if f.name.lower() == model.HOST_MDB).data)
@@ -333,7 +346,7 @@ class FireSoundTests(unittest.TestCase):
             vehicle = vc.GROUND_VEHICLES[kind]
             for i, path in enumerate(vehicle.weapons):
                 side = combat.slot(kind, i)
-                if side == 'missiles':
+                if side not in combat.GUN_SLOTS:
                     continue
                 root = dsgo.parse(combat.gun_sgo(self.game, kind, combat.STOCK_GUNS[side == 'right'], side, point,
                                                  path.rsplit('/', 1)[1].upper() if i >= 2 else None)).root

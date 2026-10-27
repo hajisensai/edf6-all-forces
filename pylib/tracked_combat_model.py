@@ -15,9 +15,11 @@ import math
 import struct
 from dataclasses import dataclass, field, replace
 import copy
+from collections import Counter
 
 import numpy as np
 
+import cockpits
 import graft_pure as g
 import procmesh as pm
 from mdb import Mdb, Mesh, Rab, bind_world, cmpl_compress, cmpl_decompress, inverse_affine, insert_bone, mdb_read, mdb_write, mmul, rab_read, rab_write
@@ -121,7 +123,8 @@ def check_skeleton(md: Mdb, additions: tuple[VisualBone, ...] = ()) -> None:
         require(not any(other.parent == index for other in md.bones), f'{extra.name}: not a visual leaf')
         require(max(abs(a-b) for a,b in zip(world[index][12:15],extra.origin)) < 1e-5,
                 f'{extra.name}: rotor origin moved off its barrel axis')
-    native = [b for b in md.bones if md.name_of(b.name) not in extra_names]
+    # the seats' eye / screen markers a finished model carries (cockpits.graft_files) are not the model's own
+    native = [b for b in md.bones if md.name_of(b.name) not in extra_names and not cockpits.grafted_bone(md.name_of(b.name))]
     remap = {b.index: index for index,b in enumerate(native)}
     restored = [replace(b,index=remap[b.index],parent=remap[b.parent] if b.parent>=0 else -1) for b in native]
     link(restored)
@@ -377,6 +380,16 @@ def build_with_info(game, make_parts, designation: str, dimensions, camera, driv
     return arc, md, info
 
 
+def _triangle_keys(T: np.ndarray) -> list[tuple]:
+    """Each triangle (n, 3, 3) as a key independent of which corner a mesh starts it on (its winding kept)."""
+    keys = []
+    for t in T:
+        corners = [tuple(float(x) for x in c) for c in t]
+        k = min(range(3), key=lambda i: corners[i])
+        keys.append(tuple(corners[k:] + corners[:k]))
+    return keys
+
+
 def check(arc: bytes, make_parts, host: Mdb | None = None,
           visual_bones: tuple[VisualBone, ...] = ()) -> dict:
     rab = rab_read(arc)
@@ -391,27 +404,42 @@ def check(arc: bytes, make_parts, host: Mdb | None = None,
     make_parts(a)
     require(len(md.objects) == 1, 'generated model must have one object')
     meshes = md.objects[0].meshes
-    require(len(meshes) == len(a.parts), 'stock/residual/missing meshes present')
+    # What is drawn, by (bone, material), is the authored parts' triangles (winding kept), nothing more: an authored
+    # model has a mesh a part, a finished one (model_lod.finish) its meshes merged by material and its seats' cockpits
+    # (cockpits.graft_files: their own materials) beside them.
+    want: dict[tuple[str, int], Counter] = {}
     drawn = {}
-    for mesh, (name, part) in zip(meshes, a.parts.items()):
-        require(mesh.mesh_index == len(drawn), f'{name}: mesh order differs')
-        require(mesh.material == part.material, f'{name}: material differs')
-        require(mesh.nverts == len(part.pos) and len(mesh.indices) == len(part.tris)*6, f'{name}: geometry size differs')
-        stored = np.asarray(g.mesh_positions(mesh))
-        expected = np.asarray(part.pos).astype('<f2').astype(float)
-        require(np.array_equal(stored, expected), f'{name}: geometry is not the authored part')
-        require(mesh.indices == np.asarray(part.tris, dtype='<u2').tobytes(), f'{name}: triangles differ')
-        require(np.isfinite(stored).all(), f'{name}: nonfinite vertex')
-        require(all(0 <= i < mesh.nverts for t in g.triangles(mesh) for i in t), f'{name}: invalid index')
-        bi, bw = g.skin_columns(mesh)
-        require(all(int(i[0]) == part._rigid_bone and abs(w[0]-1) < 1e-6 and
-                    all(abs(x) < 1e-6 for x in w[1:]) for i, w in zip(bi, bw)), f'{name}: incorrect rigid skin')
+    for name, part in a.parts.items():
         require(0 <= part._rigid_bone < len(md.bones) and md.bones[part._rigid_bone].kind == 3,
                 f'{name}: vertices do not use a skin bone')
-        T = stored[np.asarray(list(g.triangles(mesh)))]
+        P = np.asarray(part.pos).astype('<f2').astype(float)
+        require(np.isfinite(P).all(), f'{name}: nonfinite vertex')
+        T = P[np.asarray(part.tris, dtype=int).reshape(-1, 3)]
         areas = np.linalg.norm(np.cross(T[:,1]-T[:,0], T[:,2]-T[:,0]), axis=1)
         require(bool((areas > 1e-9).all()), f'{name}: degenerate stored triangle')
-        drawn[name] = {'bone': md.name_of(md.bones[part._rigid_bone].name), 'triangles': len(part.tris)}
+        bone = md.name_of(md.bones[part._rigid_bone].name)
+        want.setdefault((bone, part.material), Counter()).update(_triangle_keys(T))
+        drawn[name] = {'bone': bone, 'triangles': len(part.tris)}
+    got: dict[tuple[str, int], Counter] = {}
+    for mesh in meshes:
+        if cockpits.grafted_material(md.name_of(md.materials[mesh.material].name)):
+            continue
+        require(all(0 <= i < mesh.nverts for t in g.triangles(mesh) for i in t), f'mesh {mesh.mesh_index}: invalid index')
+        stored = np.asarray(g.mesh_positions(mesh))
+        require(np.isfinite(stored).all(), f'mesh {mesh.mesh_index}: nonfinite vertex')
+        bi, bw = g.skin_columns(mesh)
+        require(all(abs(w[0]-1) < 1e-6 and all(abs(x) < 1e-6 for x in w[1:]) for w in bw),
+                f'mesh {mesh.mesh_index}: a vertex is not rigid')
+        bones = np.asarray([int(i[0]) for i in bi])
+        tris = np.asarray(list(g.triangles(mesh)), dtype=int).reshape(-1, 3)
+        for b in np.unique(bones[tris[:, 0]]):
+            sel = tris[bones[tris[:, 0]] == b]
+            require(bool((bones[sel] == b).all()), f'mesh {mesh.mesh_index}: a triangle spans two bones')
+            got.setdefault((cockpits.own_bone(md, int(b)), mesh.material), Counter()).update(
+                _triangle_keys(stored[sel]))
+    for key in sorted(set(want) | set(got)):
+        require(want.get(key) == got.get(key),
+                f'{key[0]} / {md.name_of(md.materials[key[1]].name)}: drawn triangles are not the authored parts')
     files = {f.name.lower() for f in rab.files}
     for tex in md.textures:
         require(tex.filename.lower() in files, f'missing texture {tex.filename}')

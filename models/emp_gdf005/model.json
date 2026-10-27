@@ -10,7 +10,8 @@
    "name": "edf6vc_gdf005_0",
    "template": "v603_body",
    "albedo": "textures/gdf005_0.png",
-   "source": "afb7896f-0aab-4619-be91-faa6ff040210"
+   "source": "afb7896f-0aab-4619-be91-faa6ff040210",
+   "normal": "textures/gdf005_0_normal.jpg"
   }
  ],
  "parts": [

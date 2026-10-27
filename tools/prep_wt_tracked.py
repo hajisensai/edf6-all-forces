@@ -73,12 +73,17 @@ class Vehicle:
     missile_bone: str = 'cannon_main'
     split_idler: str | None = None        # the wheel bone whose outer half goes on tire_moveH (M113: no H station)
     collision: dict[str, list[str]] = field(default_factory=dict)   # proxy -> node regexes (default: by bone)
-    clip: dict[str, tuple[int, str, float]] = field(default_factory=dict)  # proxy -> (axis, 'min'/'max', value)
+    # proxy -> (axis, 'min'/'max', value), or a list of them (a proxy cut on two axes: X-Morph's turret-top slices)
+    clip: dict[str, tuple[int, str, float] | list[tuple[int, str, float]]] = field(default_factory=dict)
     hull: str = 'x_root'                  # the hull's node (winding_flipped measures its signed volume)
     missiles_keep: int = 0                # missile tubes the launcher's muzzles take (the outermost, half a side); 0: all
     # The turret's room (min, max corners): a node no rule names whose box lies inside it rides the turret (its armour,
     # hatches and fittings, too many to name), not the hull.
     turret_box: tuple[tuple[float, float, float], tuple[float, float, float]] | None = None
+    # Each side's muzzle (model space) where it is not the front of its barrel node's box on the box's axis: a source
+    # whose guns are not nodes of their own (tools/prep_xmorph.py: X-Morph's muzzle attachments). The barrel node still
+    # gives the breech (its box's rear: the case port).
+    mouths: dict[str, tuple[float, float, float]] | None = None
 
 
 M163 = Vehicle(
@@ -619,6 +624,9 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
         P = node_points(src, '^' + re.escape(v.barrels[side]) + '$')
         lo, hi = box(P)
         axes[side] = ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2], hi[2])
+        if v.mouths:
+            mx, my, mz = v.mouths[side]
+            axes[side] = (mx, my, lo[2], mz)
     for side, b in (('left', 'l'), ('right', 'r')):
         x, y, z0, z1 = axes[side]
         ty, tz = v.trunnion[f'cannon_{b}']
@@ -700,8 +708,9 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
         lo, hi = box(src.positions[used])
         target = [lo.tolist(), hi.tolist()]
         if proxy in v.clip:
-            axis, end, value = v.clip[proxy]
-            target[0 if end == 'min' else 1][axis] = value
+            cuts = v.clip[proxy]
+            for axis, end, value in (cuts if isinstance(cuts, list) else [cuts]):
+                target[0 if end == 'min' else 1][axis] = value
         if v.split_idler and proxy[:-2] in (v.split_idler, 'tire_moveH'):
             # the idler's halves are siblings: 4 cm apart across the middle (tracked_collision._sweep)
             whole = box(src.positions[np.unique(src.tri_v[np.isin(bones, [f'{v.split_idler}_{proxy[-1]}',

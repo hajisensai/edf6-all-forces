@@ -28,6 +28,7 @@ import rmpa  # noqa: E402
 import dreadnought_model  # noqa: E402
 import sazabi_model  # noqa: E402
 import sgo  # noqa: E402
+import xm_units  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
 from vcobjects import (DEFAULT_GAME, DREADNOUGHT_JET, DREADNOUGHT_TURRETS, SAZABI_JET, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
                        GROUND_VEHICLES, TRACKED, as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
@@ -962,6 +963,16 @@ GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'e
                                   'edf6tr_tunguska_mission': 'make_tunguska',
                                   'edf6tr_pzh2000_mission': 'make_pzh2000',
                                   'edf6tr_sturmtiger_mission': 'make_sturmtiger', 'edf6tr_ciws_phalanx_mission': 'make_ciws_phalanx', 'edf6tr_flak88_mission': 'make_flak88', 'edf6tr_apocalypse_mission': 'make_apocalypse', 'edf6tr_gdf005_mission': 'make_gdf005', 'edf6tr_laser_mission': 'make_laser', 'edf6tr_railgun_mission': 'make_railgun', 'edf6tr_tos1_mission': 'make_tos1', 'edf6tr_patriot_mission': 'make_patriot'}
+# The X-Morph units (pylib/xm_units.py): all built by tools/make_xmorph.py, its builder per unit (ground_tool).
+GROUND_MISSION.update({f'{DERIVED_PREFIX}{u.key}_mission': 'make_xmorph' for u in xm_units.v603()})
+
+
+def ground_tool(sgo_name: str):  # noqa: ANN201 - a make_<kind> module or make_xmorph's builder (buildcache.tool)
+    """The generator of a GROUND_MISSION vehicle (build(root), vehicle_sgo(game)): its tool, an X-Morph unit's builder."""
+    import buildcache
+    import importlib
+    kind = sgo_name.removeprefix(DERIVED_PREFIX).removesuffix('_mission')
+    return buildcache.tool(kind) if kind in buildcache.XMORPH else importlib.import_module(GROUND_MISSION[sgo_name])
 
 
 def range_files(sgo_name: str) -> tuple[str, ...]:
@@ -1065,8 +1076,7 @@ def vehicle_sgo(game: Game, sgo_name: str, jet_model: list[str] | None = None) -
     if sgo_name in PROTEUS_MISSION.values() or sgo_name in OPTIC_MISSION.values():
         return game.read('OBJECT', DERIVED[sgo_name] + '.SGO')   # the stock model (the Proteus's shield is a round of its own)
     if sgo_name in GROUND_MISSION:
-        import importlib
-        data = importlib.import_module(GROUND_MISSION[sgo_name]).vehicle_sgo(game)
+        data = ground_tool(sgo_name).vehicle_sgo(game)
         # The Freed bike's SGO (the sidecar's) is a script's already: it has its mission_setup next to vehicle_setup.
         data = data if 'mission_setup'.encode('utf-16le') + b'\0\0' in data else as_mission_sgo(data)
         return _with_player_recoil(game, sgo_name, data)
@@ -1195,9 +1205,8 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             led.put(OWNER, rel, aircraft_collision.build(game, key))
             held.add(ledger.key(rel))
     for name in sorted(wanted & TRACKED_MISSION.keys()):
-        import importlib
         vehicle = TRACKED_MISSION[name]
-        files = importlib.import_module(GROUND_MISSION[name]).build(game.root)
+        files = ground_tool(name).build(game.root)
         dependencies = {rel: data for rel, data in files.items() if rel != f'OBJECT/{vehicle.sgo}.SGO'}
         expected = set(range_files(name)[1:])
         if set(dependencies) != expected:
@@ -1417,16 +1426,22 @@ def _write_mission(game_root: str, game: Game, mission: str, site: str, text: st
 
 def without_missing(game_root: str, plan: Plan) -> tuple[Plan, list[str]]:
     """`plan` without the vehicles whose files the installer writes and this game's Mods does not have (the sedan when
-    its build failed, EDF4.1's objects before the installer has run: catalog.available), and what was left out, said so.
-    Nothing else changes: a range without them is the same range."""
-    gone = sorted(s for s in {*plan.vehicles, *plan.friends}
-                  if s in OPTIONAL_VEHICLES and not catalog.available(game_root, OPTIONAL_VEHICLES[s]))
-    if not gone:
+    its build failed, EDF4.1's objects before the installer has run: catalog.available), nor the X-Morph units whose
+    model folder this machine has not (pylib/xm_units.py: not deployed), and what was left out, said so. Nothing else
+    changes: a range without them is the same range."""
+    import make_xmorph
+    held = {*plan.vehicles, *plan.friends}
+    gone = sorted(s for s in held if s in OPTIONAL_VEHICLES and not catalog.available(game_root, OPTIONAL_VEHICLES[s]))
+    undeployed = sorted(s for s in held if s in GROUND_MISSION and GROUND_MISSION[s] == 'make_xmorph'
+                        and not make_xmorph.deployable(s.removeprefix(DERIVED_PREFIX).removesuffix('_mission')))
+    if not gone and not undeployed:
         return plan, []
-    kept = replace(plan, vehicles={s: n for s, n in plan.vehicles.items() if s not in gone},
-                   friends={s: n for s, n in plan.friends.items() if s not in gone})
+    left = {*gone, *undeployed}
+    kept = replace(plan, vehicles={s: n for s, n in plan.vehicles.items() if s not in left},
+                   friends={s: n for s, n in plan.friends.items() if s not in left})
     return kept, [f'跳过 {OPTIONAL_VEHICLES[s].label}：它的文件不在 Mods 里（{OPTIONAL_VEHICLES[s].rel}，先运行安装器）'
-                  for s in gone]
+                  for s in gone] + [f'跳过 {TRACKED[s.removeprefix(DERIVED_PREFIX).removesuffix("_mission")]}：没有它的模型'
+                                    f'文件夹（模型包），这个单位不部署' for s in undeployed]
 
 
 def uninstall(game_root: str, unregister: bool = True) -> bool:
