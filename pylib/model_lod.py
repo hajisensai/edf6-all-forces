@@ -32,6 +32,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
+import cockpits
 import dsgo
 import mesh_simplify
 from mdb import (Mdb, Mesh, RabFile, bind_world, cmpl_compress, insert_member, mdb_read, mdb_write, rab_read,
@@ -49,7 +50,7 @@ VEHICLE_CLASSES = frozenset((
     'Vehicle60X_Truck', 'Vehicle612_nix', 'VehicleBegaruta', 'VehicleBigBegaruta', 'VehicleHelicopter409',
     'VehicleHelicopter410', 'VehicleHelicopterBase', 'Vehicle_BikeBase', 'Vehicle_Car', 'Vehicle_CarBase',
     'Vehicle_TankBase'))
-COCKPIT_PREFIX = 'edf6vc_cpit_'
+COCKPIT_PREFIX = cockpits.MATERIAL_PREFIX
 PIXEL = 2 * math.tan(math.radians(30)) / 1080      # m per m of distance: one line of a 60-degree view on 1080 lines
 KEEP_AT_MOST = 0.8
 TOLERANCE = 0.05                   # a LOD's box may be this part of the base box's diagonal smaller on a side

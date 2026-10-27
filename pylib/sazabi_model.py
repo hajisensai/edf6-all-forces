@@ -27,6 +27,7 @@ import os
 import struct
 from dataclasses import dataclass, replace
 
+import cockpits
 import obj_model as om
 import sazabi_arms
 import texfile
@@ -328,7 +329,9 @@ def check_archive(arc: bytes) -> None:
     data = _member(rab, OUT_MDB).data
     md = mdb_read(data)
     _req(mdb_write(md) == data, 'model does not round-trip')
-    _req([md.name_of(b.name) for b in md.bones] == BONE_NAMES, 'bone names are not SKELETON\'s')
+    # a finished model also carries its seat's eye / screen markers (make_sazabi.build: cockpits.graft_files)
+    _req([n for n in (md.name_of(b.name) for b in md.bones) if not cockpits.grafted_bone(n)] == BONE_NAMES,
+         'bone names are not SKELETON\'s')
     bad = om.texture_problems(rab, md, OUT_MDB)
     _req(not bad, 'textures: ' + '; '.join(bad))
     _req(len(md.objects) == 1 and md.bones[md.objects[0].bone].kind == 2, 'not one object on a kind-2 bone')

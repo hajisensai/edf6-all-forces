@@ -26,6 +26,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
+import cockpits
 import graft_pure as g
 import obj_model as om
 import tracked_combat_model as t
@@ -475,7 +476,8 @@ def check(arc: bytes, kind: str, host: Mdb | None = None) -> dict:
     _req(len(md.objects) == 1, 'the model must have one object')
     a = t.Assembly(md)
     parts(a, kind)
-    names = {md.name_of(m.name) for m in md.materials}
+    # a finished model also carries its seats' cockpits (make_tracked_combat.build: cockpits.graft_files), not ours
+    names = {n for n in (md.name_of(m.name) for m in md.materials) if not cockpits.grafted_material(n)}
     _req(names == {m['name'] for m in spec.info['materials']}, 'materials differ from model.json')
     _req({'v603_kyata_L', 'v603_kyata_R'} <= names, 'the tracks lost the native scrolled material names')
     by_material: dict[int, list[Mesh]] = {}
@@ -486,6 +488,8 @@ def check(arc: bytes, kind: str, host: Mdb | None = None) -> dict:
         bone = md.bone_index(p['bone'])
         _req(bone >= 0 and md.bones[bone].kind == 3, f'{p["name"]}: not on a skin bone')
     for me in md.objects[0].meshes:
+        if cockpits.grafted_material(md.name_of(md.materials[me.material].name)):
+            continue
         bi, bw = g.skin_columns(me)
         _req(all(abs(w[0] - 1) < 1e-6 and all(abs(x) < 1e-6 for x in w[1:]) for w in bw), 'a vertex is not rigid')
         _req(all(0 <= int(i[0]) < len(md.bones) and md.bones[int(i[0])].kind == 3 for i in bi), 'a vertex off the skin bones')

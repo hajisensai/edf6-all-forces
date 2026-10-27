@@ -119,6 +119,7 @@ class NativeAssetContractTests(unittest.TestCase):
                 got['animation_model'][0] = was['animation_model'][0]
                 self.assertEqual(got, was)
                 self.assertEqual(model_lod.check_files(built), [])
+                combat.check(built, kind, self.game)   # the written files keep the authored contract (cockpits aside)
                 fits = cockpit_fits.FITS[model.OUT_ARC.rsplit('.', 1)[0]]
                 arc = mdb.rab_read(built[rel])
                 md = mdb.mdb_read(next(f for f in arc.files if f.name.lower() == model.HOST_MDB).data)

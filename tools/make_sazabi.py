@@ -56,8 +56,10 @@ def build(root: str) -> dict[str, bytes]:
                  **{f'OBJECT/{n}': d for n, d in vc.sazabi_rounds(game).items()}}
     check(files)
     # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
-    # (pylib/model_lod.py)
-    return model_lod.finish(cockpits.graft_files(game, files))
+    # (pylib/model_lod.py); what is written is held to the same contract
+    files = model_lod.finish(cockpits.graft_files(game, files))
+    check(files)
+    return files
 
 
 def check(files: dict[str, bytes]) -> None:

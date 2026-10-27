@@ -677,8 +677,11 @@ def build(root: str, kind: str) -> dict[str, bytes]:
         files = {f'OBJECT/{vc.GROUND_VEHICLES[kind].sgo}.SGO': game.read('OBJECT', STOCK_VEHICLE)}
         check(files, kind, game)
         return files
-    # its seats' cockpits, then every model merged by material and given its LODs (pylib/model_lod.py)
-    return model_lod.finish(cockpits.graft_files(vc.Game(root), authored(root, kind)))
+    # its seats' cockpits, then every model merged by material and given its LODs (pylib/model_lod.py); what is
+    # written is held to the same contract as what was authored (the model's own parts, bones and materials)
+    files = model_lod.finish(cockpits.graft_files(vc.Game(root), authored(root, kind)))
+    check(files, kind)
+    return files
 
 
 def install(root: str, files: dict[str, bytes], kind: str) -> list[str]:
