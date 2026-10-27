@@ -129,4 +129,7 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
 - 炮口用 X-Morph 的挂点：常规坦克炮口在炮管末端后约 0.6 m（炮口制退器起点），炮弹从管内出；未实机核对是否打到自身。
 - `artillery` 的 `doppler_radar` 切片在左半边没有可拟合的块，退回把供体凸包拉伸到目标盒（`tracked_collision._fit_shape`，`fitted_pieces 0`）。
 - 主武器之外的武器、主动防御、护盾 / 力场效果、摧毁阶段网格（`_dest_*`）都没移植。
+- 7 辆履带车全部开放呼叫（2026-10-27，武器表第 85–91 行）。数值按原作比例换算：耐久 ≈ 原作 max_health 的比例（战斗坦克 170 → 2500 为基准，
+  装甲很薄的防空车 / 自行火炮给到 1500 保底），射速取原作 `fire_rate`（秒）；激光单位（先进坦克、护盾车）的弹用直升机激光炮的光束
+  （`Unit.shell` → `make_tracked_combat.SHELL_OF`）。视角与瞄准镜位置按各模型实测的炮塔顶与炮口（`xm_units.py` 各行注释）。
 - 材质名沿用 `prepare()` 的 `wt_<贴图名>` 前缀（仅 MRAB 内部名字）。

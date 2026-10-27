@@ -220,8 +220,8 @@ for _xm in xm_units.ported('tracked'):
     GUNS[_xm.key] = {**GUNS[_xm.like], **_xm.guns}
     NAMES[_xm.key] = _xm.gun
     WT_ONLY[_xm.key] = {**WT_ONLY[_xm.like], **_xm.camera}
-    if _xm.like in SHELL_OF:
-        SHELL_OF[_xm.key] = SHELL_OF[_xm.like]
+    if _xm.shell or _xm.like in SHELL_OF:
+        SHELL_OF[_xm.key] = _xm.shell or SHELL_OF[_xm.like]
     M61_ROUNDS += (_xm.key,) if _xm.like in M61_ROUNDS else ()
     HOWITZERS += (_xm.key,) if _xm.like in HOWITZERS else ()
     CANNON_SHELL += (_xm.key,) if _xm.like in CANNON_SHELL else ()

@@ -61,6 +61,7 @@ class Unit:
     texts: dict = field(default_factory=dict)  # lang -> (request name, what it does): tools/calls.py KINDS (+ SOURCE)
     gun: tuple[str, ...] = ()  # its gun's name (EN, SC, JA, CN): make_tracked_combat NAMES
     guns: dict = field(default_factory=dict)   # the gun's numbers over the `like`'s (make_tracked_combat GUNS)
+    shell: str = ''          # its round's look and sound (a WEAPON SGO) where not the `like`'s (make_tracked_combat SHELL_OF)
     camera: dict = field(default_factory=dict)  # its vehicle camera over the `like`'s (make_tracked_combat WT_ONLY)
     eye: tuple[float, ...] = ()  # the gunner's sight camera on the turret (cockpit_fits_plugin, remote_display), m
     durability: float = 0.0  # vcobjects GroundVehicle.durability
@@ -98,12 +99,125 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        camera={'model_eye': (0., 3.2, 0.5), 'model_look_at': (0., 2.8, 9.), 'third_person_distance': 11.,
                'third_person_height': 4.6},
        eye=(0.0, 3.55, 2.0), durability=2500.0, reload=10000, level=1.5, after='EDF6VC_CALL_SORTIE_GUIDED'),
-    _u('ground/medium_tank_advanced', 'tracked', 'apocalypse', title='Advanced Tank'),
-    _u('ground/medium_tank_aa', 'tracked', 'tunguska', title='Anti-Air Tank'),
-    _u('ground/large_tank', 'tracked', 'apocalypse', title='Heavy Tank'),
-    _u('ground/large_tank_emp', 'tracked', 'apocalypse', title='EMP Tank'),
-    _u('ground/medium_artillery_regular', 'tracked', 'pzh2000', title='Artillery'),
-    _u('ground/medium_shield_generator', 'tracked', 'apocalypse', title='Shield Generator'),
+    # The advanced tank: a laser cannon on its turret (the game's enemy_laser_medium, one a second), twice the battle
+    # tank's armour (350 against 170) and a shield (not ported). The Brute's laser cannon's beam as its round
+    # (make_tracked_combat SHELL_OF, as the laser turret's): straight, fast, through what it hits.
+    _u('ground/medium_tank_advanced', 'tracked', 'apocalypse', 'ported', 'Advanced Tank',
+       texts={'SC': ('X-Morph 先进坦克', '请求一辆人类军队的先进坦克：炮塔上一门激光炮为主攻击，光束笔直、穿透目标，约每秒一发；'
+                                     '装甲约为战斗坦克的两倍。'),
+              'CN': ('X-Morph 先進坦克', '請求一輛人類軍隊的先進坦克：砲塔上一門雷射砲為主攻擊，光束筆直、穿透目標，約每秒一發；'
+                                     '裝甲約為戰鬥坦克的兩倍。'),
+              'JA': ('X-Morph アドバンスドタンク', '人類軍のアドバンスドタンクを要請する。砲塔のレーザー砲（直進・貫通、約 1 秒に 1 発）を'
+                                          '主攻撃とする。装甲はバトルタンクの約 2 倍。'),
+              'EN': ('X-Morph Advanced Tank', "Requests the human army's advanced tank: its turret's laser cannon on the "
+                                              'primary attack, a straight beam through what it hits, about one a second; about '
+                                              "twice the battle tank's armour.")},
+       gun=('Laser Cannon', '激光炮', 'レーザー砲', '雷射砲'), shell='V_506HELI_LASERCANNON01_L.SGO',
+       guns={'AmmoCount': 60.0, 'AmmoDamage': 700.0, 'AmmoSpeed': 40.0, 'AmmoAlive': 60.0, 'AmmoSize': 0.8,
+             'AmmoGravityFactor': 0.0, 'AmmoExplosion': 0.0, 'AmmoIsPenetration': 1.0, 'FireInterval': 120.0,
+             'FireAccuracy': 0.001},
+       # models/xm_medium_tank_advanced: 12.8 m long, the turret y 3.3..5.5 (its roof ~5.2), z -4.5..1.7; the gun's axis
+       # y 4.3, its muzzle z 7.0
+       camera={'model_eye': (0., 5.0, -0.3), 'model_look_at': (0., 4.6, 9.), 'third_person_distance': 11.,
+               'third_person_height': 5.0},
+       eye=(0.0, 5.35, 1.25), durability=5000.0, reload=14000, level=2.5, after='EDF6VC_CALL_XM_MEDIUM_TANK_REGULAR'),
+    # The anti-air tank: twin flak guns either side of its turret (enemy_flak_medium, bursts) and AA missiles (not
+    # ported); light armour. The Tunguska's 30 mm belt with a flak burst: fewer, harder-hitting rounds that burst.
+    _u('ground/medium_tank_aa', 'tracked', 'tunguska', 'ported', 'Anti-Air Tank',
+       texts={'SC': ('X-Morph 防空坦克', '请求一辆人类军队的防空坦克：炮塔两侧的双联高射炮为主攻击，炮弹在目标附近爆炸，专打空中目标；'
+                                     '装甲较薄。'),
+              'CN': ('X-Morph 防空坦克', '請求一輛人類軍隊的防空坦克：砲塔兩側的雙聯高射砲為主攻擊，砲彈在目標附近爆炸，專打空中目標；'
+                                     '裝甲較薄。'),
+              'JA': ('X-Morph 対空戦車', '人類軍の対空戦車を要請する。砲塔両側の連装高射砲（炸裂弾）を主攻撃とし、空中目標に強い。'
+                                     '装甲は薄い。'),
+              'EN': ('X-Morph Anti-Air Tank', "Requests the human army's anti-air tank: the twin flak guns either side of its "
+                                              'turret on the primary attack, shells bursting by their target, for air '
+                                              'targets; light armour.')},
+       gun=('Twin Flak Gun', '双联高射炮', '連装高射砲', '雙聯高射砲'),
+       guns={'AmmoCount': 400.0, 'AmmoDamage': 40.0, 'AmmoExplosion': 4.0, 'FireInterval': 8.0},
+       # models/xm_medium_tank_aa: 8.8 m long; the turret at the back (z -3.0..-1.95, roof y ~6.0), its two guns at
+       # x +-1.5, y 4.0
+       camera={'model_eye': (0., 5.6, -2.4), 'model_look_at': (0., 5.0, 7.), 'third_person_distance': 8.,
+               'third_person_height': 5.6},
+       eye=(0.0, 6.15, -2.1), durability=1500.0, reload=10000, level=1.8, after='EDF6VC_CALL_XM_MEDIUM_TANK_ADVANCED'),
+    # The heavy tank: a twin heavy gun (enemy_bullet_big_anti_core, a pair every 3 s), machine-gun and missile turrets
+    # (not ported), seven times the battle tank's armour (1200). The Apocalypse's twin gun, the two barrels in turn.
+    _u('ground/large_tank', 'tracked', 'apocalypse', 'ported', 'Heavy Tank',
+       texts={'SC': ('X-Morph 重型坦克', '请求一辆人类军队的重型坦克：炮塔上的双管重炮为主攻击，两根炮管轮流发射大口径高爆弹；'
+                                     '装甲厚重。'),
+              'CN': ('X-Morph 重型坦克', '請求一輛人類軍隊的重型坦克：砲塔上的雙管重砲為主攻擊，兩根砲管輪流發射大口徑高爆彈；'
+                                     '裝甲厚重。'),
+              'JA': ('X-Morph 重戦車', '人類軍の重戦車を要請する。砲塔の連装重砲（大口径榴弾、2 門が交互に発射）を主攻撃とする。'
+                                    '装甲は厚い。'),
+              'EN': ('X-Morph Heavy Tank', "Requests the human army's heavy tank: its turret's twin heavy gun on the primary "
+                                           'attack, the two barrels firing big HE shells in turn; heavy armour.')},
+       gun=('Twin Heavy Gun', '双管重炮', '連装重砲', '雙管重砲'),
+       guns={'AmmoCount': 40.0, 'AmmoDamage': 1500.0, 'AmmoExplosion': 9.0, 'FireInterval': 180.0},
+       # models/xm_large_tank: 17.8 m long, the turret y 3.2..7.5 (roof ~6.7), z -2.3..3.3; the guns at x +-1.07,
+       # y 4.55, their muzzles z 10.8
+       camera={'model_eye': (0., 6.4, 0.6), 'model_look_at': (0., 5.2, 14.), 'third_person_distance': 15.,
+               'third_person_height': 6.8},
+       eye=(0.0, 6.85, 2.9), durability=9000.0, reload=18000, level=3.5, after='EDF6VC_CALL_XM_MEDIUM_TANK_AA'),
+    # The EMP tank: the heavy tank's twin gun on a bigger hull with EMP flak, gun turrets and missiles (not ported), the
+    # most armour of the tracked units (2000).
+    _u('ground/large_tank_emp', 'tracked', 'apocalypse', 'ported', 'EMP Tank',
+       texts={'SC': ('X-Morph EMP 坦克', '请求一辆人类军队的 EMP 坦克：比重型坦克更大的车体，炮塔上的双管重炮为主攻击，两根炮管轮流发射'
+                                      '大口径高爆弹；履带单位中装甲最厚。'),
+              'CN': ('X-Morph EMP 坦克', '請求一輛人類軍隊的 EMP 坦克：比重型坦克更大的車體，砲塔上的雙管重砲為主攻擊，兩根砲管輪流發射'
+                                      '大口徑高爆彈；履帶單位中裝甲最厚。'),
+              'JA': ('X-Morph EMP 戦車', '人類軍の EMP 戦車を要請する。重戦車より大きな車体で、砲塔の連装重砲（大口径榴弾、2 門が交互に'
+                                      '発射）を主攻撃とする。装甲は装軌車両で最も厚い。'),
+              'EN': ('X-Morph EMP Tank', "Requests the human army's EMP tank: a hull bigger than the heavy tank's, its "
+                                         "turret's twin heavy gun on the primary attack, the two barrels firing big HE "
+                                         'shells in turn; the heaviest armour of the tracked units.')},
+       gun=('Twin Heavy Gun', '双管重炮', '連装重砲', '雙管重砲'),
+       guns={'AmmoCount': 40.0, 'AmmoDamage': 1800.0, 'AmmoExplosion': 10.0, 'FireInterval': 180.0},
+       # models/xm_large_tank_emp: 18.2 m long, the turret y 4.6..8.9 (roof ~8.85), z -1.1..4.9; the guns at x +-0.49,
+       # y 6.5, their muzzles z 9.3
+       camera={'model_eye': (0., 8.6, 1.9), 'model_look_at': (0., 7.0, 13.), 'third_person_distance': 15.,
+               'third_person_height': 8.0},
+       eye=(0.0, 9.05, 4.5), durability=12000.0, reload=22000, level=4.5, after='EDF6VC_CALL_XM_LARGE_TANK'),
+    # The artillery: a howitzer at the back of the hull (enemy_artillery_medium, a shell every 3 s), light armour. The
+    # PzH 2000's lobbed 155 mm shell (make_artillery.howitzer_sgo), a smaller gun's numbers.
+    _u('ground/medium_artillery_regular', 'tracked', 'pzh2000', 'ported', 'Artillery',
+       texts={'SC': ('X-Morph 自行火炮', '请求一辆人类军队的自行火炮：车体后部的榴弹炮为主攻击，曲射远程炮弹，约每三秒一发；'
+                                     '装甲较薄。'),
+              'CN': ('X-Morph 自走砲', '請求一輛人類軍隊的自走砲：車體後部的榴彈砲為主攻擊，曲射遠程砲彈，約每三秒一發；'
+                                    '裝甲較薄。'),
+              'JA': ('X-Morph 自走砲', '人類軍の自走砲を要請する。車体後部の榴弾砲（曲射の遠距離砲弾、約 3 秒に 1 発）を主攻撃とする。'
+                                    '装甲は薄い。'),
+              'EN': ('X-Morph Artillery', "Requests the human army's artillery: the howitzer at the back of its hull on the "
+                                          'primary attack, long-range shells on an arc, about one every three seconds; light '
+                                          'armour.')},
+       gun=('Howitzer', '榴弹炮', '榴弾砲', '榴彈砲'),
+       guns={'AmmoCount': 30.0, 'AmmoDamage': 2400.0, 'AmmoExplosion': 22.0, 'FireInterval': 360.0},
+       # models/xm_medium_artillery_regular: 11.6 m long; the turret at the back (z -5.1..-0.9, roof ~3.3), the gun's
+       # axis y 2.45, its muzzle z 5.5
+       camera={'model_eye': (0., 3.2, -2.9), 'model_look_at': (0., 2.9, 8.), 'third_person_distance': 10.,
+               'third_person_height': 4.4},
+       eye=(0.0, 3.45, -1.3), durability=1500.0, reload=14000, level=2.5, after='EDF6VC_CALL_XM_LARGE_TANK_EMP'),
+    # The shield generator: a hull carrying a shield dome for the units round it (not ported) and a small laser turret
+    # (enemy_laser_medium, one a second); its armour between the battle and the advanced tank (250). The laser cannon's
+    # beam as its round, as the advanced tank's.
+    _u('ground/medium_shield_generator', 'tracked', 'apocalypse', 'ported', 'Shield Generator',
+       texts={'SC': ('X-Morph 护盾车', '请求一辆人类军队的护盾车：车顶小型激光炮塔为主攻击，光束笔直、穿透目标，约每秒一发'
+                                    '（护盾罩未移植）；装甲中等。'),
+              'CN': ('X-Morph 護盾車', '請求一輛人類軍隊的護盾車：車頂小型雷射砲塔為主攻擊，光束筆直、穿透目標，約每秒一發'
+                                    '（護盾罩未移植）；裝甲中等。'),
+              'JA': ('X-Morph シールドジェネレーター', '人類軍のシールドジェネレーターを要請する。車体上の小型レーザー砲塔（直進・貫通、'
+                                              '約 1 秒に 1 発）を主攻撃とする（シールドは未移植）。装甲は中程度。'),
+              'EN': ('X-Morph Shield Generator', "Requests the human army's shield generator: the small laser turret on its "
+                                                 'hull on the primary attack, a straight beam through what it hits, about one '
+                                                 'a second (its shield dome is not ported); medium armour.')},
+       gun=('Laser Turret', '激光炮塔', 'レーザー砲塔', '雷射砲塔'), shell='V_506HELI_LASERCANNON01_L.SGO',
+       guns={'AmmoCount': 60.0, 'AmmoDamage': 450.0, 'AmmoSpeed': 40.0, 'AmmoAlive': 60.0, 'AmmoSize': 0.6,
+             'AmmoGravityFactor': 0.0, 'AmmoExplosion': 0.0, 'AmmoIsPenetration': 1.0, 'FireInterval': 120.0,
+             'FireAccuracy': 0.001},
+       # models/xm_medium_shield_generator: 11.7 m long; the laser turret is small (x +-0.27, y 3.4..3.9, z 1.3..1.8),
+       # its muzzle y 4.2, z 3.1
+       camera={'model_eye': (0., 4.0, 1.5), 'model_look_at': (0., 3.8, 9.), 'third_person_distance': 11.,
+               'third_person_height': 5.0},
+       eye=(0.0, 4.1, 1.5), durability=4000.0, reload=12000, level=2.2, after='EDF6VC_CALL_XM_MEDIUM_ARTILLERY_REGULAR'),
     # ground: wheeled
     _u('ground/medium_missile_launcher', 'wheeled', 'tos1', title='Missile Launcher'),
     _u('ground/medium_apc', 'wheeled', 'bmpt', title='APC'),
