@@ -19,24 +19,32 @@ with tempfile.TemporaryDirectory() as app:
     models = os.path.join(app, 'models')
     write(os.path.join(models, 'a', 'x.bin'), b'1234')
     write(os.path.join(models, 'cockpits', 'parts', 'v', 'p.bin'), b'xy')
-    m = modelpack.manifest(models)
-    assert sorted(m['files']) == ['a/x.bin', 'cockpits/parts/v/p.bin'], m
-    assert modelpack.manifest(models)['version'] == m['version']       # stable
+    write(os.path.join(app, 'edf41', 'MAP', 'M.MAC'), b'map')
+    m = modelpack.manifest(app)
+    assert sorted(m['files']) == ['edf41/MAP/M.MAC', 'models/a/x.bin', 'models/cockpits/parts/v/p.bin'], m
+    assert modelpack.manifest(app)['version'] == m['version']          # stable
     write(os.path.join(app, modelpack.REQUIRED), json.dumps({'models_version': m['version']}).encode())
     assert 'MODELS' not in (modelpack.problem(app) or '') and modelpack.problem(app)   # models/ has no manifest yet
     write(os.path.join(models, modelpack.MANIFEST), json.dumps(m).encode())
     assert modelpack.problem(app) is None
-    assert modelpack.manifest(models)['version'] == m['version']       # the manifest is not part of the version
+    assert modelpack.manifest(app)['version'] == m['version']          # the manifest is not part of the version
     os.remove(os.path.join(models, 'a', 'x.bin'))
     assert 'x.bin' in modelpack.problem(app)                            # incomplete
+    write(os.path.join(models, 'a', 'x.bin'), b'1234')
+    os.remove(os.path.join(app, 'edf41', 'MAP', 'M.MAC'))
+    assert 'edf41/MAP/M.MAC' in modelpack.problem(app)                  # the EDF4.1 asset pack is part of it too
+    write(os.path.join(app, 'edf41', 'MAP', 'M.MAC'), b'maq')
+    assert modelpack.manifest(app)['version'] != m['version']          # its content changes the version
     write(os.path.join(models, 'a', 'x.bin'), b'1235')
-    assert modelpack.manifest(models)['version'] != m['version']       # content changes the version
-    write(os.path.join(models, modelpack.MANIFEST), json.dumps(modelpack.manifest(models)).encode())
+    assert modelpack.manifest(app)['version'] != m['version']          # so does a model's
+    write(os.path.join(models, modelpack.MANIFEST), json.dumps(modelpack.manifest(app)).encode())
     assert 'models' in modelpack.problem(app)                           # an older/newer pack than the installer wants
     write(os.path.join(models, modelpack.MANIFEST), b'{"version": "%s"}' % m['version'].encode())
     assert '损坏' in modelpack.problem(app)                             # a manifest without files: message, no KeyError
-    write(os.path.join(models, modelpack.MANIFEST), json.dumps(modelpack.manifest(models)).encode())
-    write(os.path.join(app, modelpack.REQUIRED), json.dumps({'models_version': modelpack.manifest(models)['version']}).encode())
+    write(os.path.join(models, modelpack.MANIFEST), json.dumps({'version': m['version'], 'files': {'a/x.bin': 4}}).encode())
+    assert '损坏' in modelpack.problem(app)                             # a path outside models/ and edf41/
+    write(os.path.join(models, modelpack.MANIFEST), json.dumps(modelpack.manifest(app)).encode())
+    write(os.path.join(app, modelpack.REQUIRED), json.dumps({'models_version': modelpack.manifest(app)['version']}).encode())
     assert modelpack.problem(app) is None
     os.environ['EDF6VC_MODELS'] = os.path.join(app, 'elsewhere')       # the models folder the installer really uses
     assert modelpack.problem(app) is not None
