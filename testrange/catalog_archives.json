@@ -748,6 +748,17 @@
    "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],
+  "edf6tr_xm_aa_cannon_machinegun_mission": [
+   "OBJECT/EDF6VC_XM_AA_CANNON_MACHINEGUN.MRAB",
+   "WEAPON/BULLET_GRENADE.RAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_xm_aa_cannon_mission": [
+   "OBJECT/EDF6VC_XM_AA_CANNON.MRAB",
+   "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
   "edf6tr_xm_large_tank_emp_mission": [
    "OBJECT/EDF6VC_XM_LARGE_TANK_EMP.MRAB",
    "WEAPON/SHELLCASE401L.RAB",

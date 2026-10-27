@@ -180,5 +180,5 @@ FITS: dict[str, tuple[Fit, ...]] = {
 # The X-Morph units (pylib/xm_units.py eye): the gunner's sight camera on the turret over the gun (remote_display), as the
 # War Thunder tanks'.
 FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, 'cannon_main', u.eye, 'remote_display'),)
-             for u in xm_units.ported('tracked')})
+             for u in xm_units.v603()})
 DIGESTS: dict[str, str] = {}

@@ -75,6 +75,8 @@ inline constexpr TwinBarrel kTwinBarrels[]={
     {L"EDF6VC_XM_MEDIUM_ARTILLERY_REGULAR_R.SGO",19},
     {L"EDF6VC_XM_MEDIUM_SHIELD_GENERATOR_L.SGO",20},
     {L"EDF6VC_XM_MEDIUM_SHIELD_GENERATOR_R.SGO",20},
+    {L"EDF6VC_XM_AA_CANNON_L.SGO",21},
+    {L"EDF6VC_XM_AA_CANNON_R.SGO",21},
 };
 inline constexpr JetMass kJetMasses[]={
     {7001.0f,22000.0f,1500.0f},

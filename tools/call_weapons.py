@@ -147,8 +147,7 @@ def undeployed(call: Call) -> bool:
     it goes, until the folder is there and the installer runs again."""
     if call.ground not in xm_units.UNITS:
         return False
-    import wt_tracked
-    return not wt_tracked.available(call.ground)
+    return not xm_units.deployed(call.ground)
 
 
 def placeholder(call: Call) -> bool:

@@ -336,7 +336,7 @@ def _with_xmorph(hand: tuple[Call, ...]) -> tuple[Call, ...]:
     catalog's on every machine; whether a unit's model folder is here only decides whether its row is live
     (tools/call_weapons.py undeployed)."""
     out = list(hand)
-    units = xm_units.ported('tracked')
+    units = xm_units.v603()
     if len({u.after for u in units}) != len(units):
         raise ValueError('two X-Morph units name the same call to follow (pylib/xm_units.py Unit.after)')
     for u in units:
@@ -1124,7 +1124,7 @@ PLUGIN_NOTES: dict[str, str] = {
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
 GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES, 'quadvulcan': PLUGIN_NOTES, 'emp_mid': PLUGIN_NOTES, 'emp_short': PLUGIN_NOTES, 'emp_long': PLUGIN_NOTES, 'tunguska': PLUGIN_NOTES, 'pzh2000': PLUGIN_NOTES, 'sturmtiger': PLUGIN_NOTES, 'tos1': PLUGIN_NOTES, 'apocalypse': PLUGIN_NOTES, 'ciws_phalanx': PLUGIN_NOTES, 'flak88': PLUGIN_NOTES, 'gdf005': PLUGIN_NOTES, 'laser': PLUGIN_NOTES, 'railgun': PLUGIN_NOTES, 'patriot': PLUGIN_NOTES}
-GROUND_NOTES_BY_KIND.update({u.key: PLUGIN_NOTES for u in xm_units.ported('tracked')})   # pylib/xm_units.py
+GROUND_NOTES_BY_KIND.update({u.key: PLUGIN_NOTES for u in xm_units.v603()})   # pylib/xm_units.py
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',

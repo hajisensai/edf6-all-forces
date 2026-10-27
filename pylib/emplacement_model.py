@@ -21,6 +21,7 @@ import numpy as np
 import obj_model as om
 import tracked_combat_model as t
 import wt_tracked as wt
+import xm_units
 from tracked_combat_model import HOST_ARC, HOST_MDB, HOST_CAS, TrackedCombatCheckError  # noqa: F401 - the modules' API
 
 MODEL_SUBDIR = 'dreadnought'          # pylib/dreadnought_model.py MODEL_SUBDIR: the Dreadnought's model folder
@@ -66,6 +67,10 @@ KINDS = {
     'railgun': Emplacement('Railgun turret', '', '', 1.0, 2400.0, 'emp_railgun'),
     'patriot': Emplacement('MIM-104 Patriot launcher', '', '', 1.0, 2000.0, 'emp_patriot', (0.0, 5.9, -4.0)),
 }
+# The X-Morph: Defense forts' guns (pylib/xm_units.py, family 'emplacement'): their folders tools/prep_xmorph.py
+# emplacement writes in tools/prep_glb_model.py's format, at the game's own size, the sight the row's.
+KINDS.update({u.key: Emplacement(f'{u.title_en} (X-Morph: Defense)', '', '', 1.0, u.durability, xm_units.folder(u.key),
+                                 u.eye) for u in xm_units.ported('emplacement')})
 EYE_UP, EYE_BACK = 0.8, 0.6           # m: a gunner's sight over the guns' top, behind their trunnions
 # A box's 12 triangles, outward, over its corners numbered by bits (x 1, y 2, z 4: set = the high side).
 BOX_TRIS = ((0, 2, 1), (1, 2, 3), (4, 5, 6), (5, 7, 6), (0, 1, 4), (1, 5, 4),

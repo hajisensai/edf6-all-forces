@@ -21,15 +21,14 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 
 import make_tracked_combat as tracked  # noqa: E402
-import wt_tracked  # noqa: E402
 import xm_units  # noqa: E402
 
-KINDS = tuple(u.key for u in xm_units.ported('tracked'))
+KINDS = tuple(u.key for u in xm_units.v603())
 
 
 def deployable(kind: str) -> bool:
-    """Its model folder is here (wt_tracked.folder: models/xm_<key>, or EDF6VC_MODELS / the model pack's)."""
-    return wt_tracked.available(kind)
+    """Its model folder is here (xm_units.deployed: models/xm_<key>, or EDF6VC_MODELS / the model pack's)."""
+    return xm_units.deployed(kind)
 
 
 def build(root: str, kind: str) -> dict[str, bytes]:

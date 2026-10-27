@@ -930,7 +930,7 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
 # The X-Morph: Defense units on the V603 (pylib/xm_units.py; one generator for them all, tools/make_xmorph.py): each its
 # `like`'s native gun pair (the two V603 holders, in the `like`'s cadence) under its own weapon files, its own
 # durability; the `like`'s stores (missiles, a second belt: their own store rows and muzzles) are not inherited.
-for _xm in xm_units.ported('tracked'):
+for _xm in xm_units.v603():
     _like = GROUND_VEHICLES[_xm.like]
     assert _like.stock == 'V603_FLAK' and _like.slots[:2] == ('left', 'right'), (_xm.key, _xm.like)
     GROUND_VEHICLES[_xm.key] = replace(
@@ -945,7 +945,7 @@ TRACKED: dict[str, str] = {
     'tunguska': '2S6 通古斯卡防空车', 'pzh2000': 'PzH 2000 自行榴弹炮', 'sturmtiger': '突击虎',
     'ciws_phalanx': '密集阵近防炮', 'flak88': '88 毫米高射炮', 'apocalypse': '天启坦克', 'gdf005': 'GDF-005 双联高炮',
     'laser': '激光防空炮台', 'railgun': '电磁炮炮台', 'tos1': 'TOS-1 喷火兵火箭炮', 'patriot': '爱国者防空导弹',
-    **{u.key: xm_units.label(u) for u in xm_units.ported('tracked')},
+    **{u.key: xm_units.label(u) for u in xm_units.v603()},
 }
 # The drill tank's bite (src/jet_bay.cpp kDrillChargeFile, DrillCharge): an impact charge (tools/make_jets.py
 # impact_charge) with a blast of DRILL_CHARGE_RADIUS m (3 m or more: the stock path that lets a blast break buildings,

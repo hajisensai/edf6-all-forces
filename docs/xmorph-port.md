@@ -105,6 +105,15 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
 - 贴图写到临时目录当作 MTL 的文件，`prepare()` 照常复制进 `textures/`。
 - `pylib/xm_model.py` 与家族无关（实体、网格→EDF 坐标、刚性骨骼、挂点、炮塔 / 武器、材质贴图），轮式 / 直升机家族可直接复用。
 
+## 炮台（`prep_xmorph.py emplacement`）
+
+- 堡垒的两种防空炮（`fort/aa_cannon`、`fort/aa_cannon_machinegun`，同一网格、不同武器）转成 `tools/prep_glb_model.py` 的文件夹格式
+  （按角色分件：`body` 归 base、炮塔归 turret、炮归 gun；枢轴：炮塔 yaw 骨骼为座圈、pitch 骨骼为耳轴，炮口取主武器挂点），
+  由 `pylib/emplacement_model.py` 放上加固底座（V603），与 88 高炮、GDF-005 同一路径；`emplacement_model.KINDS` 从
+  `xm_units.ported('emplacement')` 取行。V603 上的两个家族（履带、炮台）的登记表统一从 `xm_units.v603()` 取，是否部署统一看
+  `xm_units.deployed()`（文件夹里 model.json + model.npz 齐全）。
+- 兵营（`bunker_barracks*`）没有武器，归 `structure` 家族（地图摆件），不是炮台。
+
 ## 新增一个单位
 
 1. `pylib/xm_units.py` 加一行（实体路径、家族、`like`、状态）。

@@ -4,7 +4,7 @@ builds every unit). A new row with status 'ported' shows up in each of these, or
 from:
 
   the request (tools/calls.py CALLS, KINDS, GROUND_NOTES_BY_KIND; src/calls.inc), the vehicle (pylib/vcobjects.py
-  GROUND_VEHICLES, TRACKED; its weapons' twin cadence in src/stores.inc), its model folder (pylib/wt_tracked.py FOLDERS),
+  GROUND_VEHICLES, TRACKED; its weapons' twin cadence in src/stores.inc), its model folder (pylib/wt_tracked.py FOLDERS, an emplacement's pylib/emplacement_model.py KINDS),
   its builder (tools/make_tracked_combat.py KINDS, LABELS, GUNS, NAMES, WT_ONLY; pylib/buildcache.py generator / tool),
   its files' owner (pylib/ledger.py OWNERS), its build group (pylib/buildcache.py GROUPS, COCKPIT_GROUPS, MODEL_INPUTS),
   its cockpit (pylib/cockpit_fits.py FITS), the test range and the M map (testrange/gen.py GROUND_MISSION,
@@ -27,6 +27,7 @@ import buildcache  # noqa: E402
 import build_release  # noqa: E402
 import calls  # noqa: E402
 import cockpit_fits  # noqa: E402
+import emplacement_model  # noqa: E402
 import gen  # noqa: E402
 import ledger  # noqa: E402
 import make_tracked_combat as mtc  # noqa: E402
@@ -83,10 +84,17 @@ for u in ported:
     if v is not None and v.alternate:
         for w in v.weapons:
             check(f'{{L"{w.rsplit("/", 1)[1].upper()}",' in stores_inc, f'{key}: src/stores.inc lacks {w} (gen_stores)')
-    check(wt_tracked.FOLDERS.get(key) == xm_units.folder(key), f'{key}: pylib/wt_tracked.py FOLDERS')
+    # its model: a tracked unit's a wt_tracked folder (WT_ONLY its camera), an emplacement's on the fortified base
+    if u.family == 'tracked':
+        check(wt_tracked.FOLDERS.get(key) == xm_units.folder(key) and key in mtc.WT_ONLY,
+              f'{key}: pylib/wt_tracked.py FOLDERS / make_tracked_combat WT_ONLY')
+    else:
+        e = emplacement_model.KINDS.get(key)
+        check(e is not None and e.folder == xm_units.folder(key) and e.eye == u.eye and key in mtc.EMPLACEMENTS
+              and key in mtc.ONE_CRADLE, f'{key}: pylib/emplacement_model.py KINDS / make_tracked_combat EMPLACEMENTS')
     # its builder: one generator for every unit
-    check(key in mtc.KINDS and key in mtc.LABELS and key in mtc.GUNS and mtc.NAMES.get(key) == u.gun
-          and key in mtc.WT_ONLY, f'{key}: tools/make_tracked_combat.py tables (KINDS, LABELS, GUNS, NAMES, WT_ONLY)')
+    check(key in mtc.KINDS and key in mtc.LABELS and key in mtc.GUNS and mtc.NAMES.get(key) == u.gun,
+          f'{key}: tools/make_tracked_combat.py tables (KINDS, LABELS, GUNS, NAMES)')
     check(buildcache.generator(key) == 'make_xmorph' and buildcache.tool(key) is make_xmorph.builder(key)
           and buildcache.tool(key).OWNER == key, f'{key}: pylib/buildcache.py generator / tool')
     # its files and its build group

@@ -30,17 +30,18 @@ Families (the chassis an EDF6 class drives; tools/prep_xmorph.py has one prepare
                  their own muzzles) and are not inherited
     wheeled      planned: a wheeled chassis
     mech         planned: the Proteus / Balam walkers
-    emplacement  planned: the fixed emplacements (pylib/emplacement_model.py)
+    emplacement  a fort's gun on pylib/emplacement_model.py's fortified base (the V603, tools/prep_xmorph.py emplacement)
     heli, jet    planned: the V506 frame / the jets (pylib/jet_models.py)
     infantry     planned
     boss         planned: the game's bosses (several bodies each)
-    civilian     planned: their entities carry no mesh of their own (a prefab's)
+    civilian     planned: the maps' traffic and bystanders (their meshes through an inherited blueprint)
+    structure    planned: buildings without a weapon (the barracks): the maps' props
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-FAMILIES = ('tracked', 'wheeled', 'mech', 'emplacement', 'heli', 'jet', 'infantry', 'boss', 'civilian')
+FAMILIES = ('tracked', 'wheeled', 'mech', 'emplacement', 'heli', 'jet', 'infantry', 'boss', 'civilian', 'structure')
 LANGS = ('SC', 'CN', 'JA', 'EN')   # tools/calls.py KINDS' languages (KR reads EN)
 # Where every request's text says its model is from (each language's), after the unit's own description.
 SOURCE = {'SC': '外观取自 EXOR Studios 的游戏《X-Morph: Defense》（人类一方的单位）。',
@@ -229,10 +230,37 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     _u('ground/large_mech', 'mech', title='Heavy Mech'),
     _u('ground/small_infantry', 'infantry', title='Infantry'),
     # forts
-    _u('fort/aa_cannon', 'emplacement', 'flak88', title='AA Cannon'),
-    _u('fort/aa_cannon_machinegun', 'emplacement', 'gdf005', title='AA Machine Gun'),
-    _u('fort/bunker_barracks', 'emplacement', title='Barracks'),
-    _u('fort/bunker_barracks_02', 'emplacement', title='Barracks'),
+    # The forts' AA guns: one mesh (a twin-barrelled gun on a round fort, 7 m tall), two weapons. The AA cannon fires
+    # flak (enemy_flak_medium, one a second): the Flak 88's shell, a burst at its target; the AA machine gun bursts of
+    # three (enemy_bullet_medium): the GDF-005's belt. Both on pylib/emplacement_model.py's fortified base.
+    _u('fort/aa_cannon', 'emplacement', 'flak88', 'ported', 'AA Cannon',
+       texts={'SC': ('X-Morph 防空炮台', '请求一座人类军队的防空炮台：固定炮台，双联高射炮发射在目标附近爆炸的高射炮弹，约每秒一发，'
+                                     '专打空中目标；不能移动。'),
+              'CN': ('X-Morph 防空砲台', '請求一座人類軍隊的防空砲台：固定砲台，雙聯高射砲發射在目標附近爆炸的高射砲彈，約每秒一發，'
+                                     '專打空中目標；不能移動。'),
+              'JA': ('X-Morph 対空砲台', '人類軍の対空砲台を要請する。固定砲台で、連装高射砲が目標付近で炸裂する砲弾を約 1 秒に 1 発'
+                                     '撃つ。空中目標に強い。移動はできない。'),
+              'EN': ('X-Morph AA Cannon', "Requests the human army's AA cannon: a fixed emplacement, its twin flak gun "
+                                          'firing shells that burst by their target, about one a second, for air targets; '
+                                          'it does not move.')},
+       gun=('Twin Flak Cannon', '双联高射炮', '連装高射砲', '雙聯高射砲'),
+       guns={'AmmoCount': 60.0, 'AmmoDamage': 450.0, 'AmmoExplosion': 8.0, 'FireInterval': 120.0},
+       # models/xm_aa_cannon (on the base, 1.3 m up): the gun's trunnion y 4.7 + 1.3, z -0.63; its muzzles x +-0.85,
+       # z 6.7: the sight over the trunnion, behind it
+       eye=(0.0, 7.0, -1.5), durability=1500.0, reload=8000, level=1.3, after='EDF6VC_CALL_XM_MEDIUM_SHIELD_GENERATOR'),
+    _u('fort/aa_cannon_machinegun', 'emplacement', 'gdf005', 'ported', 'AA Machine Gun',
+       texts={'SC': ('X-Morph 防空机枪炮台', '请求一座人类军队的防空机枪炮台：固定炮台，双联机炮三发一组连射，专打空中目标；不能移动。'),
+              'CN': ('X-Morph 防空機槍砲台', '請求一座人類軍隊的防空機槍砲台：固定砲台，雙聯機砲三發一組連射，專打空中目標；不能移動。'),
+              'JA': ('X-Morph 対空機銃砲台', '人類軍の対空機銃砲台を要請する。固定砲台で、連装機関砲が 3 発ずつ連射する。'
+                                       '空中目標に強い。移動はできない。'),
+              'EN': ('X-Morph AA Machine Gun', "Requests the human army's AA machine gun: a fixed emplacement, its twin "
+                                               'autocannon firing bursts of three, for air targets; it does not move.')},
+       gun=('Twin AA Machine Gun', '双联防空机炮', '連装対空機関砲', '雙聯防空機砲'),
+       guns={'FireBurstCount': 3.0, 'FireBurstInterval': 12.0, 'FireInterval': 60.0},
+       eye=(0.0, 7.0, -1.5), durability=1500.0, reload=7000, level=1.2, after='EDF6VC_CALL_XM_AA_CANNON'),
+    # the forts' barracks: buildings (no weapon; in the game they send infantry out), the maps' props
+    _u('fort/bunker_barracks', 'structure', title='Barracks'),
+    _u('fort/bunker_barracks_02', 'structure', title='Barracks'),
     # air
     _u('air/small_helicopter_core', 'heli', title='Light Helicopter'),
     _u('air/medium_helicopter_core', 'heli', title='Helicopter'),
@@ -267,8 +295,10 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
 )}
 assert all(u.family in FAMILIES for u in UNITS.values())
 assert all(u.status in ('ported', 'planned') for u in UNITS.values())
-# Only the tracked family has its EDF-side builder (tools/make_xmorph.py over make_tracked_combat) so far.
-PORTABLE = ('tracked',)
+# The families with their EDF-side builder (tools/make_xmorph.py over make_tracked_combat: both on the V603, a tracked
+# unit through pylib/wt_tracked.py, an emplacement through pylib/emplacement_model.py's fortified base).
+PORTABLE = ('tracked', 'emplacement')
+V603 = ('tracked', 'emplacement')
 
 
 def check(u: Unit) -> None:
@@ -294,6 +324,22 @@ def ported(family: str | None = None) -> list[Unit]:
 
 def folder(key: str) -> str:
     return UNITS[key].key
+
+
+def v603() -> list[Unit]:
+    """The ported units make_tracked_combat builds on the V603 (V603: tracked hulls and emplacements), in table order:
+    what every V603 registry (vcobjects GROUND_VEHICLES / TRACKED, the requests, the cockpits, the test range) lists."""
+    return [u for u in ported() if u.family in V603]
+
+
+def deployed(key: str) -> bool:
+    """Its model folder is on this machine (obj_model.model_dir: the model pack's, EDF6VC_MODELS, the developer's),
+    whole (model.json and model.npz): only then is the unit built and installed (CLAUDE.md: no stand-in)."""
+    import os
+
+    import obj_model
+    d = obj_model.model_dir(folder(key))
+    return d is not None and all(os.path.isfile(os.path.join(d, f)) for f in ('model.json', 'model.npz'))
 
 
 def text(u: Unit, lang: str) -> tuple[str, str]:

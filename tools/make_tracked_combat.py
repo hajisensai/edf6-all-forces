@@ -213,13 +213,16 @@ NAMES = {
 # (its numbers, its shell, its kind of round) with the row's numbers over it, its own gun names, its vehicle camera over
 # the `like`'s, a model folder of its own (WT_ONLY: wt_tracked.Model). What belongs to the `like`'s hull or model (the
 # one-cradle M61s, turret stops, the procedural models) is not inherited.
-for _xm in xm_units.ported('tracked'):
-    if _xm.like not in GUNS or _xm.like not in WT_ONLY:
-        raise ValueError(f'{_xm.key}: its like {_xm.like!r} is no model-folder kind with a gun table (GUNS, WT_ONLY)')
+for _xm in xm_units.v603():
+    # a tracked unit is a wt_tracked.Model kind (WT_ONLY: its camera), an emplacement an emplacement_model one (KINDS)
+    _kinds = WT_ONLY if _xm.family == 'tracked' else EMPLACEMENTS
+    if _xm.like not in GUNS or _xm.like not in _kinds:
+        raise ValueError(f'{_xm.key}: its like {_xm.like!r} is no {_xm.family} kind with a gun table (GUNS)')
     LABELS[_xm.key] = f'{xm_units.label(_xm)}（X-Morph: Defense 模型）'
     GUNS[_xm.key] = {**GUNS[_xm.like], **_xm.guns}
     NAMES[_xm.key] = _xm.gun
-    WT_ONLY[_xm.key] = {**WT_ONLY[_xm.like], **_xm.camera}
+    if _xm.family == 'tracked':
+        WT_ONLY[_xm.key] = {**WT_ONLY[_xm.like], **_xm.camera}
     if _xm.shell or _xm.like in SHELL_OF:
         SHELL_OF[_xm.key] = _xm.shell or SHELL_OF[_xm.like]
     M61_ROUNDS += (_xm.key,) if _xm.like in M61_ROUNDS else ()
@@ -233,6 +236,7 @@ for _xm in xm_units.ported('tracked'):
 # offset) (0x67EADB: +0x2960 the rate, read at 0x67E787 from _info[0]), so a zero rate leaves the texture where it is;
 # the V603's -0.43 would scroll the atlas's neighbouring art through the tread.
 STATIC_TRACKS = tuple(u.key for u in xm_units.ported('tracked'))
+ONE_CRADLE += tuple(u.key for u in xm_units.ported('emplacement'))   # as every emplacement: both holders on its cradle
 
 
 def _node(value: object) -> object:

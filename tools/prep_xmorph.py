@@ -2,11 +2,13 @@
 from, read from the developer's own copy of the game (its packs, read only; docs/xmorph-port.md). The folders go into
 the model pack (obj_model.DEV_MODELS, like sazabi / dreadnought), never into the public repository:
 
-    python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
+    python tools/prep_xmorph.py tracked|emplacement [unit ...] [--out DIR] [--game DIR]
 
     tracked     every unit of the 'tracked' family (or the named ones: 'xm_medium_tank_regular' or
                 'medium_tank_regular'), whatever its status: <out>/xm_<name>/ in tools/prep_wt_tracked.py's format
                 (model.json FORMAT 1, model.npz, textures/, LICENSE.txt), which pylib/wt_tracked.py builds on the V603
+    emplacement the forts' guns: <out>/xm_<name>/ in tools/prep_glb_model.py's format (parts by role, pivots), which
+                pylib/emplacement_model.py puts on its fortified base (prepare_emplacement)
 
 It needs numpy, Pillow and scipy. The packs are data: nothing in them runs.
 
@@ -367,6 +369,79 @@ def prepare_tracked(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict
     return info
 
 
+# ------------------------------------------------------------------------------------------ emplacements
+
+ROLES = {'body': 'base', 'cannon_main': 'turret', 'cannon_l': 'gun', 'cannon_slide_l': 'gun', 'cannon_slide_r': 'gun'}
+
+
+def prepare_emplacement(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
+    """An emplacement (a fort's gun) into tools/prep_glb_model.py's folder format, which pylib/emplacement_model.py
+    puts on its fortified base: the rig's bones (rig()) as roles (the hull's: base, the turret's: turret, the gun's:
+    gun), one part a role and material; the pivots off the skeleton (the turret's yaw bone its ring, the gun's pitch
+    bone its trunnion) and the main weapon's mouths."""
+    import prep_glb_model as glb
+    um = xm.load(packs, unit.entity)
+    r = rig(um, unit.key)
+    out = os.path.join(out_root, xm_units.folder(unit.key))
+    if os.path.isdir(out):
+        shutil.rmtree(out)
+    os.makedirs(os.path.join(out, 'textures'))
+    glb.plating(out)
+    role = np.asarray([ROLES[r['bone'][b]] for b in um.tri_bone], dtype=object)
+    P = um.positions * SCALE
+    materials, arrays, parts = [], {}, []
+    for mi, m in enumerate(um.materials):
+        stem = f'{unit.key}_{mi}'
+        imgs = xm.texture_images(packs, m)
+        imgs['diffuse'].save(os.path.join(out, 'textures', f'{stem}.png'), optimize=True)
+        materials.append({'name': f'edf6vc_{stem}', 'template': 'v603_body', 'albedo': f'textures/{stem}.png',
+                          'source': m})
+        if 'normal' in imgs:      # DirectX green already (xm_model.normal_rgb), as the folders keep it
+            imgs['normal'].save(os.path.join(out, 'textures', f'{stem}_normal.png'), optimize=True)
+            materials[-1]['normal'] = f'textures/{stem}_normal.png'
+    for rl in glb.ROLES:
+        for mi in range(len(um.materials)):
+            sel = np.flatnonzero((role == rl) & (um.tri_material == mi))
+            if not len(sel):
+                continue
+            tri = um.triangles[sel]
+            idx, inv = np.unique(tri, return_inverse=True)
+            pos, t = P[idx], inv.reshape(-1, 3)
+            nrm = np.zeros_like(pos)          # the faces' own, per vertex (the mesh's normals are not read)
+            fn = np.cross(pos[t[:, 1]] - pos[t[:, 0]], pos[t[:, 2]] - pos[t[:, 0]])
+            for c in range(3):
+                np.add.at(nrm, t[:, c], fn)
+            nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+            k = len(parts)
+            arrays[f'p{k}_pos'] = pos.astype(np.float32)
+            arrays[f'p{k}_nrm'] = nrm.astype(np.float32)
+            arrays[f'p{k}_uv'] = um.uvs[idx].astype(np.float32)   # Ogre's top-left origin, as the folders keep them
+            arrays[f'p{k}_tri'] = t.astype(np.uint32)
+            parts.append({'name': f'{rl}.{materials[mi]["name"]}', 'role': rl, 'material': mi,
+                          'triangles': int(len(sel)), 'vertices': int(len(idx))})
+    _req({p['role'] for p in parts} >= {'base', 'turret', 'gun'}, f'{unit.key}: a role without mesh {parts}')
+    yaw, pitch = um.bind[r['yaw']] * SCALE, um.bind[r['pitch']] * SCALE
+    mouths = {s: [float(c) for c in r['mouths'][s] * SCALE] for s in ('left', 'right')}
+    pivots = {'ring': [float(yaw[0]), float(yaw[2])], 'trunnion': [float(pitch[1]), float(pitch[2])], 'muzzles': mouths}
+    np.savez_compressed(os.path.join(out, 'model.npz'), **arrays)
+    used = np.unique(um.triangles)
+    info = {'format': glb.FORMAT, 'kind': unit.key, 'title': f'{unit.title_en or unit.key} (X-Morph: Defense)',
+            'prepared_from': um.mesh_path, 'scale': SCALE, 'yaw': 0.0, 'materials': materials, 'parts': parts,
+            'pivots': pivots, 'triangles': int(sum(p['triangles'] for p in parts)),
+            'size': (P[used].max(0) - P[used].min(0)).tolist(),
+            'xmorph': {'entity': unit.entity, 'weapon': r['weapon'], 'yaw': r['yaw'], 'pitch': r['pitch'],
+                       'muzzles': r['muzzle_names'], 'bones': {b: r['bone'][b] for b in um.bones}}}
+    with open(os.path.join(out, 'model.json'), 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(info, f, indent=1)
+        f.write('\n')
+    with open(os.path.join(out, 'LICENSE.txt'), 'w', encoding='utf-8', newline='\n') as f:
+        f.write(LICENSE.format(title=info['title'], entity=f'entities/units/{unit.entity}.ent', mesh=um.mesh_path))
+    return info
+
+
+PREPARERS = {'tracked': prepare_tracked, 'emplacement': prepare_emplacement}
+
+
 def select(family: str, names: list[str]) -> list[xm_units.Unit]:
     units = [u for u in xm_units.UNITS.values() if u.family == family]
     if not names:
@@ -379,7 +454,7 @@ def select(family: str, names: list[str]) -> list[xm_units.Unit]:
 
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('family', choices=['tracked'])
+    ap.add_argument('family', choices=sorted(PREPARERS))
     ap.add_argument('units', nargs='*', help='unit keys (default: the whole family)')
     ap.add_argument('--out', default=om.DEV_MODELS, help=f'the models root (default {om.DEV_MODELS})')
     ap.add_argument('--game', default=xp.STEAM_DIR, help='the X-Morph: Defense folder')
@@ -387,11 +462,9 @@ def main(argv: list[str]) -> int:
     packs = xp.Packs(a.game)
     try:
         for u in select(a.family, a.units):
-            info = prepare_tracked(packs, u, a.out)
-            print(json.dumps({'kind': info['kind'], 'triangles': info['triangles'], 'parts': len(info['parts']),
-                              'materials': [m['name'] for m in info['materials']], 'origins': info['origins'],
-                              'muzzles': info['muzzles'], 'gun_split': info['xmorph']['gun_split'],
-                              'running_gear': info['xmorph']['running_gear']}, indent=1))
+            info = PREPARERS[a.family](packs, u, a.out)
+            print(json.dumps({k: info[k] for k in ('kind', 'triangles', 'materials', 'origins', 'muzzles', 'pivots')
+                              if k in info} | {'parts': len(info['parts'])}, indent=1, default=str))
     finally:
         packs.close()
     return 0
