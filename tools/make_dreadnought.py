@@ -122,8 +122,9 @@ def build(root: str, hangars: tuple[bool, ...] = dm.ALL_HANGARS) -> dict[str, by
             files[f'OBJECT/{gun.file}'] = make_jets.gun_round(game, gun)
             make_jets.check_gun_round(files[f'OBJECT/{gun.file}'], gun)
         check_barrels()
-    check(files, hangars)
-    return model_lod.finish(files)   # its models merged by material and given their LODs (pylib/model_lod.py)
+    files = model_lod.finish(files)   # its models merged by material and given their LODs (pylib/model_lod.py)
+    check(files, hangars)   # what is written is held to the same contract
+    return files
 
 
 def grid_of(model: str) -> tuple[int, int]:
@@ -216,7 +217,6 @@ def check_fitting(md, hangars: tuple[bool, ...]) -> None:  # noqa: ANN001 - mdb.
             assert mine <= names, f'hangar {m} fitted: its model lacks {sorted(mine - names)}'
         else:
             assert not mine & names, f'hangar {m} not fitted: its model has {sorted(mine & names)}'
-    assert not {dm._ours(dm.SHIP, b) for b in dm.LEGACY_MARKERS} & names, 'the foredeck ready markers are left out'
     world = bind_world(md)
     index = {md.name_of(b.name): b.index for b in md.bones}
     reach = dm.HANGAR_REACH

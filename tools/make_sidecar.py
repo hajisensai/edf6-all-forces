@@ -87,7 +87,7 @@ def check(files: dict[str, bytes], game: vc.Game | None = None) -> dict:
     assert len(v['vehicle_riding_position']) == 1, 'the gunner is no seat: the plugin holds them (src/sidecar.cpp)'
     reach = sidecar_model.soldier_reach(game) if game is not None else None
     assert reach is None or reach <= sidecar_model.SOLDIER_REACH, f'the Ranger reaches {reach}, SOLDIER_REACH is {sidecar_model.SOLDIER_REACH}'
-    model = sidecar_model.check(files[f'OBJECT/{MODEL_FILE}'], sidecar_model.stock_bones(game) if game is not None else None, reach)
+    model = sidecar_model.check(files[f'OBJECT/{MODEL_FILE}'], sidecar_model.stock_model(game) if game is not None else None, reach)
     stock = game.read('OBJECT', sidecar_model.HOST_RAGDOLL) if game is not None else None
     collision = sidecar_model.check_collision(files[f'OBJECT/{RAGDOLL_FILE}'], stock)
     (mlo, mhi), r = model['tub'], collision['radius']
@@ -107,10 +107,12 @@ def build(root: str) -> dict[str, bytes]:
     shkt, _info = sidecar_model.build_collision(game)
     files = {f'OBJECT/{MODEL_FILE}': sidecar_model.build(game), f'OBJECT/{RAGDOLL_FILE}': shkt,
              f'OBJECT/{SGO_FILE}': vehicle_sgo(game)}
-    build.measured = check(files, game)   # type: ignore[attr-defined]
+    check(files, game)
     # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
-    # (pylib/model_lod.py)
-    return model_lod.finish(cockpits.graft_files(game, files))
+    # (pylib/model_lod.py); what is written is held to the same contract
+    files = model_lod.finish(cockpits.graft_files(game, files))
+    build.measured = check(files, game)   # type: ignore[attr-defined]
+    return files
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

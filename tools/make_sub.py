@@ -87,7 +87,9 @@ def build(root: str) -> dict[str, bytes]:
     out[f'OBJECT/{SGO_FILE}'] = data
     # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
     # (pylib/model_lod.py)
-    return model_lod.finish(cockpits.graft_files(game, out))
+    out = model_lod.finish(cockpits.graft_files(game, out))
+    check_model(out[f'OBJECT/{MODEL_FILE}'])   # what is written is held to the same contract
+    return out
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

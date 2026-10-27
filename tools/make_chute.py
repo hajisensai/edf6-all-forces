@@ -33,7 +33,9 @@ def build(root: str) -> dict[str, bytes]:
     arc = chute_model.build(game)
     chute_model.check(arc)
     # its model merged by material and given its LODs when its SGO is a vehicle's (pylib/model_lod.py)
-    return model_lod.finish({f'OBJECT/{chute_model.OUT_ARC}': arc, f'OBJECT/{chute_model.SGO_FILE}': chute_model.sgo(game)})
+    files = model_lod.finish({f'OBJECT/{chute_model.OUT_ARC}': arc, f'OBJECT/{chute_model.SGO_FILE}': chute_model.sgo(game)})
+    chute_model.check(files[f'OBJECT/{chute_model.OUT_ARC}'])   # what is written is held to the same contract
+    return files
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

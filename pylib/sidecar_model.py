@@ -47,8 +47,11 @@ import math
 import struct
 from dataclasses import replace
 
+from collections import Counter
+
 import numpy as np
 
+import cockpits
 import graft_pure as g
 import procmesh as pm
 from mdb import Mdb, Mesh, bind_world, cmpl_compress, cmpl_decompress, ident, inverse_affine, mdb_read, mdb_write, mmul, rab_read, rab_write
@@ -484,9 +487,63 @@ def build(game) -> bytes:  # noqa: ANN001 - rootcpk.Game
     return build_with_info(game)[0]
 
 
+def stock_model(game) -> Mdb:  # noqa: ANN001 - rootcpk.Game
+    """The stock bike's model (check()'s reference: its bones, and its triangles, which the sidecar's are told from)."""
+    return mdb_read(member(rab_read(game.read('OBJECT', HOST_ARC)), HOST_MDB).data)
+
+
 def stock_bones(game) -> list[str]:  # noqa: ANN001 - rootcpk.Game
-    md = mdb_read(member(rab_read(game.read('OBJECT', HOST_ARC)), HOST_MDB).data)
+    md = stock_model(game)
     return [md.name_of(b.name) for b in md.bones]
+
+
+def _triangle_key(t: np.ndarray) -> tuple:
+    """A triangle (3, 3) as a key independent of which corner a mesh starts it on (its winding kept)."""
+    corners = [tuple(float(x) for x in c) for c in t]
+    k = min(range(3), key=lambda i: corners[i])
+    return tuple(corners[k:] + corners[:k])
+
+
+def _split_drawn(md: Mdb, host: Mdb | None) -> tuple[np.ndarray, float]:
+    """(the sidecar's triangles (M, 3, 3), the bike's lowest x). The model's own meshes are the bike's and the sidecar's
+    (the seats' cockpits, cockpits.graft_files, are neither). An authored model keeps the sidecar in meshes of its own
+    (flagged, wholly right of the bike's widest point: told from the bike's by the mesh); a finished one has them merged
+    by material with the bike's (model_lod.finish), so with `host` (the stock bike) the sidecar's triangles are those the
+    stock bike does not draw, and every triangle the stock bike draws must still be there. Every sidecar vertex is
+    weighted wholly to the body bone (or a shell child of it)."""
+    o = md.objects[0]
+    body = md.bone_index(BODY_BONE)
+    drawn = [me for me in o.meshes if not cockpits.grafted_material(md.name_of(md.materials[me.material].name))]
+    stock: Counter | None = None
+    if host is not None:
+        stock = Counter(_triangle_key(t) for me in (me for ho in host.objects for me in ho.meshes)
+                        for t in _triangles(host, [me]))
+    new, bike_right = [], 0.0
+    for me in drawn:
+        P = np.array(g.mesh_positions(me), dtype=np.float64)
+        T = np.frombuffer(me.indices, dtype='<u2').reshape(-1, 3).astype(np.int64)
+        bi, bw = g.skin_columns(me)
+        if stock is None:
+            mine = np.full(len(T), bool(me.flags[1] and len(P) and P[:, 0].max() < -0.18))
+        else:
+            mine = np.zeros(len(T), dtype=bool)
+            for k, t in enumerate(T):
+                key = _triangle_key(P[t])
+                if stock[key] > 0:
+                    stock[key] -= 1
+                else:
+                    mine[k] = True
+        if (~mine).any():
+            bike_right = min(bike_right, float(P[np.unique(T[~mine])][:, 0].min()))
+        for k in np.flatnonzero(mine):
+            for v in T[k]:
+                _req(cockpits.own_bone(md, int(bi[v][0])) == BODY_BONE and abs(bw[v][0] - 1.0) < 1e-6,
+                     'a sidecar vertex off the body bone')
+            new.append(P[T[k]])
+    if stock is not None:
+        _req(not +stock, f'{sum((+stock).values())} stock-bike triangles are missing from the model')
+    _req(bool(new), 'no sidecar triangles')
+    return np.array(new), bike_right
 
 
 def soldier_reach(game) -> float:  # noqa: ANN001 - rootcpk.Game
@@ -593,10 +650,13 @@ def check_tub(T: np.ndarray, reach: float | None = None) -> dict:
             'side top': round(lowest_side, 3), 'faces seen': facing[0], 'faces seen from behind': facing[0] - facing[1]}
 
 
-def check(arc: bytes, host_bones: list[str] | None = None, reach: float | None = None) -> dict:
+def check(arc: bytes, host: Mdb | None = None, reach: float | None = None) -> dict:
     """The archive opens and its model round-trips; every skin bone's bind x inverse bind is identity; the stock bones keep
     their names and order with MARKER_BONE (no geometry) at GUNNER_POINT right after the body's subtree; every new
-    vertex is on the body bone alone and in the bike's own material (no texture added). The tub: its vertices fill
+    vertex is on the body bone alone and in the bike's own material (no texture added). What is checked is the model as
+    written: with the seats' cockpits (cockpits.graft_files: their bones, shell children and materials are not the
+    bike's or the sidecar's) and the meshes merged by material (_split_drawn; `host`, the stock bike, tells the
+    sidecar's triangles from the bike's). The tub: its vertices fill
     TUB, clear of the bike; a floor (upward faces) at FLOOR_Y under the gunner's point; round the gunner, from the
     floor up to the rim, every way across is walled (a ray from the point hits the sidecar), no wall nearer than
     `reach` (soldier_reach: their legs and hips do not go through it) and the sides no lower than RIM_Y; its outer
@@ -615,9 +675,12 @@ def check(arc: bytes, host_bones: list[str] | None = None, reach: float | None =
     m = md.bone_index(MARKER_BONE)
     body = md.bone_index(BODY_BONE)
     _req(m > 0 and md.bones[m].parent == body and md.bones[m].kind == 3, f'{MARKER_BONE}: {m}')
-    _req(m == max(g.subtree(md, body)) and m - 1 in g.subtree(md, body), f'{MARKER_BONE} not at the end of the body subtree')
-    if host_bones is not None:
-        _req(names[:m] + names[m + 1:] == host_bones, f'stock bones changed: {names}')
+    own = [i for i in g.subtree(md, body) if not cockpits.grafted_bone(names[i])]
+    _req(m == max(own) and m - 1 in own, f'{MARKER_BONE} not at the end of the body subtree')
+    if host is not None:
+        stock = [host.name_of(b.name) for b in host.bones]
+        mine = [n for n in names if not cockpits.grafted_bone(n)]
+        _req(mine[:mine.index(MARKER_BONE)] + mine[mine.index(MARKER_BONE) + 1:] == stock, f'stock bones changed: {names}')
     _req(max(abs(a - b) for a, b in zip(w[m][12:15], GUNNER_POINT)) < 1e-4, f'{MARKER_BONE} at {w[m][12:15]}')
     pts = g.skinned_points(md)
     _req(m not in pts, f'vertices on {MARKER_BONE}')
@@ -625,19 +688,9 @@ def check(arc: bytes, host_bones: list[str] | None = None, reach: float | None =
     have = {f.name.lower() for f in rab.files}
     for t in md.textures:
         _req(t.filename.lower() in have, f'texture {t.filename} missing from the archive')
-    # The new meshes: everything on the body bone wholly inside the sidecar's side (x under the bike's widest point
-    # less the arms' bike end) is the sidecar's.
-    new, bike_right = [], 0.0
-    for me in o.meshes:
-        P = g.mesh_positions(me)
-        if not (me.flags[1] and P and max(p[0] for p in P) < -0.18):
-            bike_right = min([bike_right] + [p[0] for p in P])
-        else:
-            bi, bw = g.skin_columns(me)
-            _req(all(int(i[0]) == body and abs(x[0] - 1.0) < 1e-6 for i, x in zip(bi, bw)), 'a sidecar vertex off the body bone')
-            new.append(me)
-    _req(bool(new), 'no sidecar meshes')
-    T = _triangles(md, new)
+    # The sidecar's triangles: everything on the body bone wholly inside the sidecar's side (x under the bike's widest
+    # point less the arms' bike end) is the sidecar's.
+    T, bike_right = _split_drawn(md, host)
     allp = T.reshape(-1, 3)
     tub = allp[(allp[:, 0] >= TUB_OUT - 1e-3) & (allp[:, 0] <= TUB_IN + 1e-3)]
     lo, hi = tub.min(axis=0), tub.max(axis=0)
@@ -659,7 +712,7 @@ def check(arc: bytes, host_bones: list[str] | None = None, reach: float | None =
     guard = out[(rr > wr + 0.005) & (out[:, 1] > hub[1]) & (np.abs(out[:, 0] - hub[0]) <= TYRE_HALF_WIDTH + 0.04)]
     _req(len(guard) > 50 and float(np.hypot(guard[:, 1] - hub[1], guard[:, 2] - hub[2]).min()) >= TYRE_RADIUS + 0.03,
          'no mudguard clear over the wheel')
-    return {'bones': len(md.bones), 'marker': m, 'sidecar meshes': len(new), 'triangles': len(T),
+    return {'bones': len(md.bones), 'marker': m, 'triangles': len(T),
             'clear of the bike': round(bike_right - float(hi[0]), 3),
             'tub': [lo.round(3).tolist(), hi.round(3).tolist()], **tub_measured, 'wheel vertices': len(wheel), 'wheel radius': round(wr, 4),
             'wheel low': round(low, 4), 'wheel inner x': round(inner_x, 3),

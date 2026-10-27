@@ -273,7 +273,10 @@ def build(root: str) -> dict[str, bytes]:
     check(files)
     # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
     # (pylib/model_lod.py)
-    return model_lod.finish(cockpits.graft_files(game, files))
+    files = model_lod.finish(cockpits.graft_files(game, files))
+    # what is written is held to the same contract as what was authored
+    check(files)
+    return files
 
 
 def install(root: str, files: dict[str, bytes]) -> list[str]:

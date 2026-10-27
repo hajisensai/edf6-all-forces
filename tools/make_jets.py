@@ -325,7 +325,12 @@ def build(root: str) -> dict[str, bytes]:
     check_weapon_bones(out, game)
     # its seats' first-person cockpits (pylib/cockpits.py), then its models merged by material and given their LODs
     # (pylib/model_lod.py)
-    return model_lod.finish(cockpits.graft_files(game, out))
+    out = model_lod.finish(cockpits.graft_files(game, out))
+    # what is written is held to the same contract as what was authored
+    for name in (GUNSHIP_FILE, request_file(vc.GUNSHIP_JET), TRANSPORT_PLANE_FILE, TRANSPORT_HELI_FILE):
+        check_own_model(out, name)
+    check_weapon_bones(out, game)
+    return out
 
 
 def medic_gun(stock: bytes, round_stock: bytes) -> bytes:
@@ -425,7 +430,7 @@ def with_model(data: bytes, model: tuple[str, str] | list[str]) -> bytes:
 def check_own_model(files: dict[str, bytes], name: str) -> None:
     """The SGO OBJECT/`name` of `files` (build) wears a model `files` holds: its archive is one of them, its member in it."""
     from mdb import rab_read
-    path, member = model_ref(files[f'OBJECT/{name}'])
+    path, member, *_lods = model_ref(files[f'OBJECT/{name}'])   # (+ the LOD table model_lod.finish adds)
     rel = 'OBJECT/' + path.removeprefix('app:/object/').upper()
     if not path.startswith('app:/object/') or rel not in files:
         raise ValueError(f'{name}: 模型 {path} 不是本工具写的')

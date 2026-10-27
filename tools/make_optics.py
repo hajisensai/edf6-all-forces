@@ -210,7 +210,9 @@ def build_stock_redirects(root: str) -> dict[str, bytes]:
 
 def build(root: str) -> dict[str, bytes]:
     # the models merged by material and given their LODs where a vehicle SGO here draws them (pylib/model_lod.py)
-    return model_lod.finish({**build_models(root), **build_stock_redirects(root)})
+    files = model_lod.finish({**build_models(root), **build_stock_redirects(root)})
+    assert not model_lod.check_files(files), model_lod.check_files(files)   # the LOD tables just added
+    return files
 
 
 def _load(root: str) -> dict:
