@@ -143,6 +143,9 @@ struct Backend {
 class Session {
 public:
     void Configure(const Backend& backend) noexcept { backend_=backend; }
+    // Suspended (a transport generation lost, 2026-10-30): a Start with the same room shape resumes, a new handshake and
+    // epoch with the made transactions kept (their ids, tokens and actors), instead of staying shut until the mission
+    // reset. Running: a Start suspends.
     void Start(bool host,std::uint32_t peers,std::uint32_t hostPeer,std::uint64_t now) noexcept;
     void Stop() noexcept;
     void Suspend() noexcept;
@@ -194,7 +197,9 @@ public:
     // Host: how long one requester's rescues stand apart (from its last rescue made); the host's setting decides.
     void SetRescueCooldown(std::uint64_t ms) noexcept { rescueCooldown_=ms; }
 private:
-    enum class Phase { empty,planning,assembling,prepared,spawning,active,cancelled };
+    // queued (host): a map request waiting for the one map plan in flight to end (2026-10-30: it was refused, "房主拒绝了
+    // 本机支援请求" whenever another player's call was being routed); not in flight, nothing sent for it yet.
+    enum class Phase { empty,planning,assembling,prepared,spawning,active,cancelled,queued };
     struct Transaction {
         Phase phase=Phase::empty;
         bool external=false;
@@ -229,6 +234,9 @@ private:
     std::array<std::uint64_t,kMaxPeers+1> rescueAt_{};   // host: when each requester's last rescue was made (0: none)
     std::uint64_t rescueCooldown_=kRescueCooldownMs;
     bool InFlight(const Transaction& t) const noexcept;
+    bool MapBusy() const noexcept;   // a map transaction in flight (one plan at a time: the planner's state is one)
+    void Retain() noexcept;          // keep the made transactions, cancel the rest: a suspension or a re-handshake
+    void Refuse(std::uint32_t peer,const Message&,const char* why) noexcept;
     Transaction* AllocateTransaction() noexcept;
     struct Reply { std::uint32_t request=0;RequestStatus status=RequestStatus::accepted;bool dirty=false; };
     using Replies=std::array<Reply,kRecentRequests>;
