@@ -275,6 +275,7 @@ bool HoldFire(const void*,const void* target,const float*,float speed,float grav
 }
 int coaxCalls=0;   // payload.cpp NpcOwnWeaponsFire: called beside every crew aim (no coax or keyed weapons on these fixtures)
 bool NpcOwnWeaponsFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { ++coaxCalls;return false; }
+void SeatTurretsTrain(unsigned char*,unsigned,const void*) noexcept {}   // seat_turret.cpp: no gunner seat turrets on these fixtures
 unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float,bool,PayloadFire* fire) noexcept {
     if(fire)*fire=chosenGunnerFire;
     if(suppressGunnerChoice)return nullptr;

@@ -39,6 +39,7 @@
 #include "turretaim.h"
 #include "online_authority.h"
 #include "real_driver_native.h"
+#include "seat_turret.h"
 #include "seat_events.h"
 #include "support_soldier.h"
 #include "transport.h"
@@ -3240,6 +3241,7 @@ unsigned char* CrewMainGun(unsigned char* v,unsigned index,const void* target,fl
 // extra keys' weapons on their own shots (payload.cpp NpcOwnWeaponsFire, the auto turrets' rule).
 void CrewOwnWeapons(unsigned char* v,unsigned index,const void* target,float distance,bool airborne,bool primaryAim) {
     AimIndependentSecondary(v,index,target,distance,airborne,primaryAim);
+    SeatTurretsTrain(v,index,target);   // a gunner seat's own turret turns to it (seat_turret.h)
     NpcOwnWeaponsFire(v,index,target,&FriendInLine);
 }
 }  // namespace

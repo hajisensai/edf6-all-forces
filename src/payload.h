@@ -3,6 +3,7 @@
 // seatswitch.cpp: the player moving to another seat of the vehicle they are in (docs/stock-payload-re.md §5).
 // Included by crew.h; game thread unless said.
 #pragma once
+#include "stores.h"
 #include <cstdint>
 
 namespace crew {
@@ -104,11 +105,17 @@ using LineBlocked=bool(*)(const float* from,const float* to,const void* self) no
 // (HasShot: a missile once its lock holds, a gun laid within ~3 degrees of it in its reach); no friend in the line. Their
 // trigger latches pulled this frame. True when one fired.
 bool NpcOwnWeaponsFire(unsigned char* vehicle,unsigned seat,const void* target,LineBlocked blocked=nullptr) noexcept;
+// The auto turrets of gunner seat `seat` of `vehicle` with nobody in it (StoreSpec::seat, seat_turret.cpp trains them on
+// the machine that runs the vehicle): each fires itself on a shot at any enemy (HasShot), no friend in the line. True when
+// one fired.
+bool UnmannedTurretsFire(unsigned char* vehicle,unsigned seat) noexcept;
+// Whether `vehicle`'s auto turrets are on here: the local player's switch with them aboard (VehicleAutoTurretKey), else on.
+bool VehicleAutoTurretsOn(const unsigned char* vehicle) noexcept;
 // Whether the HUD's control row has anything to say for this seat: the own secondary's cycle, an extra fire key, an auto
 // turret (hud.cpp PayloadControls).
 inline bool PayloadControlsShown(const PayloadReadout& p) noexcept {
     if(p.ownChoices>1 || p.autoTurrets>0)return true;
-    for(int i=0;i<p.count && i<kMostPayload;++i)if(p.entry[i].key>2)return true;
+    for(int i=0;i<p.count && i<kMostPayload;++i)if(p.entry[i].key>2 || p.entry[i].key==kSeatTriggerKey)return true;
     return false;
 }
 // Intrinsic secondary weapon: plan separately from the primary; the NPC caller must run native seat aim/lock/safety.

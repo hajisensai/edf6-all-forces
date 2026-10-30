@@ -44,6 +44,7 @@
 #include "online_authority.h"
 #include "playarea.h"
 #include "sazabi_sound.h"
+#include "seat_turret.h"
 #include "support_aircraft.h"   // SupportFollowUpTick
 #include "support_points.h"
 #include "support_warning.h"
@@ -926,6 +927,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepLauncher,&LauncherFrame,v);
     Guarded(kStepPayload,&PayloadFrame,v);       // before the sight: it marks the store the secondary fires
+    Guarded(kStepPayload,&SeatTurretsFrame,v);   // the gunner seats' own turrets: trained, the unmanned ones fired
     Guarded(kStepPayload,&TwinBarrelFrame,v);    // after every pull of this frame (stock, store, NPC): twin barrels in turn
     Guarded(kStepHeliSight,&HeliSightFrame,v);   // after AimLines: the sight reads which lines are hidden
     Guarded(kStepStockHud,&StockHudFrame,v);

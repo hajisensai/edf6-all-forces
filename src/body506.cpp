@@ -403,6 +403,19 @@ unsigned char* BoneRecord506(const unsigned char* inst,const wchar_t* name) noex
     return nullptr;
 }
 
+bool BoneBind506(const unsigned char* inst,const unsigned char* record,float* bind) noexcept {
+    const auto* skeleton=At<const unsigned char*>(inst,0);
+    if(!Readable(skeleton,0x6C) || !Readable(record,0x10))return false;
+    const auto* definitions=At<const unsigned char*>(skeleton,0x58);
+    const int index=At<std::int32_t>(record,0x0C),last=At<std::int32_t>(skeleton,0x68);
+    if(index<0 || index>last || last>255 || !definitions)return false;
+    const auto* local=definitions+static_cast<std::size_t>(index)*0xD0+0x20;
+    if(!Readable(local,64))return false;
+    std::memcpy(bind,local,64);
+    for(int i=0;i<16;++i)if(!std::isfinite(bind[i]))return false;
+    return true;
+}
+
 void HingePose(const float* bind,float angle,float* out) noexcept {
     const float co=std::cos(angle),si=std::sin(angle);
     for(int x=0;x<4;++x) {

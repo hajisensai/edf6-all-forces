@@ -627,6 +627,13 @@ void PayloadControls(Line& line,const PayloadReadout& p) noexcept {
     }
     for(int i=0;i<p.count && i<kMostPayload;++i) {
         const int k=p.entry[i].key;
+        if(k==kSeatTriggerKey) {   // a gunner seat's own weapon: its attack button
+            wchar_t name[48];
+            std::swprintf(name,48,L"%ls%ls",p.entry[i].name,p.entry[i].autoTurret ? Tr(Tx::controlAutoMark) : L"");
+            if(line.text[0])Append(line,L"   ");
+            Append(line,Tr(Tx::controlSeatFire),name);
+            continue;
+        }
         if(k<3)continue;
         if(p.keys)KeyName(FireKeyVk(static_cast<unsigned char>(k)),key,32);else PadBitsName(FireKeyButton(static_cast<unsigned char>(k)),key,32);
         wchar_t name[48];

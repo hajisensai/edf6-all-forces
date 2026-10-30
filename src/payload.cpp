@@ -345,6 +345,9 @@ struct Control { Source source=Source::cycle; unsigned char key=0; bool autoTurr
 Control ControlOf(Class c,const unsigned char* w) noexcept {
     const auto spec=StoreOf(w);
     if(!spec || spec->nativeControl)return {};
+    // A gunner seat's own weapon (its own turret, seat_turret.cpp): that seat's primary trigger, which the V603 reads on
+    // seat 0 alone (docs/independent-seat-re.md).
+    if(spec->seat && c==Class::flak603)return {Source::key,kSeatTriggerKey,spec->autoTurret};
     if(spec->fireKey==kSecondTriggerKey && c==Class::flak603)return {Source::second,kSecondTriggerKey,spec->autoTurret};
     if(spec->fireKey>kSecondTriggerKey && spec->fireKey<=kFireLastKey)return {Source::key,spec->fireKey,spec->autoTurret};
     if(spec->role==StoreRole::coax)return {Source::coax,0,false};
@@ -734,6 +737,21 @@ bool FireSeat(const unsigned char* v,Class c,unsigned char* const* ws,const Payl
     return fired;
 }
 
+// The auto turrets of `v`'s gunner seats but `seat` (StoreSpec::seat: their own turrets, with nobody in them trained by
+// the machine that runs the vehicle): the player's switch (VehicleAutoTurretKey) turns them on and off too.
+int SeatAutoTurrets(unsigned char* v,unsigned seat) noexcept {
+    const auto holders=At<const unsigned char*>(v,kHolders);
+    const auto count=At<std::uint64_t>(v,kHolderCount);
+    if(!holders || count>16 || !Readable(holders,count*kHolderStride))return 0;
+    int n=0;
+    for(std::uint64_t i=0;i<count;++i) {
+        const auto* w=At<const unsigned char*>(holders+i*kHolderStride,kHolderWeapon);
+        const StoreSpec* spec=w && Readable(w,kWeaponCharge+4) ? StoreOf(w) : nullptr;
+        n+=spec && spec->seat && spec->seat!=seat && spec->autoTurret && ClassOf(v)==Class::flak603 ? 1 : 0;
+    }
+    return n;
+}
+
 // The store switch on the player's seat (see the top). `ws` the seat's weapons, `r` their entries. Two cycles: the
 // primary's (its native belts and the stores riding it: `p.weapon`) and the intrinsic secondary's (IndependentSecondary:
 // `p.secondary`, the BMPT's two Ataka rounds on the V603's otherwise unread second trigger). Both fire at once, each on
@@ -901,6 +919,7 @@ void PayloadFrame(unsigned char* v) noexcept {
     //  - the auto turrets with them on (their switch VehicleAutoTurretKey / -Button, only where the seat has one): each
     //    fires itself when it has a shot (HasShot), whatever its key. The second trigger's is only the round picked.
     for(int i=0;i<r.count;++i)r.autoTurrets+=r.entry[i].autoTurret ? 1 : 0;
+    r.autoTurrets+=SeatAutoTurrets(v,static_cast<unsigned>(seat));   // the gunner seats' (their switch is the vehicle's)
     const bool autoDown=r.autoTurrets>0 && PlayerKeyHeld(s,Cfg().vehicleAutoTurretKey,Cfg().vehicleAutoTurretButton);
     if(autoDown && !autoTurretHeld) {
         autoTurretsSet=AutoTurretsOn() ? 0 : 1;
@@ -910,6 +929,7 @@ void PayloadFrame(unsigned char* v) noexcept {
     r.autoOn=AutoTurretsOn();
     SeatIntent in{};
     in.second=in.coax=secondary && !MapHoldsKeys();
+    in.keys[kSeatTriggerKey]=primary && !MapHoldsKeys();   // a gunner seat's own weapons (ControlOf)
     in.secondPick=p->secondary;
     for(unsigned char k=kSecondTriggerKey+1;k<=kFireLastKey;++k)in.keys[k]=PlayerKeyHeld(s,FireKeyVk(k),FireKeyButton(k));
     in.autoOn=r.autoOn;in.blocked=&FriendInLine;
@@ -1058,6 +1078,29 @@ bool NpcOwnWeaponsFire(unsigned char* v,unsigned seat,const void* target,LineBlo
         in.crew=target;in.blocked=blocked;
         return FireSeat(v,c,ws,r,in);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool UnmannedTurretsFire(unsigned char* v,unsigned seat) noexcept {
+    __try {
+        if(!pullOk || !Cfg().enabled || !v || v[kDead] || BodyOf(v)!=PluginBody::none || seat>=SeatCount(v))return false;
+        const Rider rider=SeatRider(SeatAt(v,seat));
+        if(rider!=Rider::none && rider!=Rider::dummy)return false;
+        PayloadReadout r{};unsigned char* ws[kMostPayload]{};
+        const Class c=ClassOf(v);r.count=ReadSeat(v,seat,c,ws,r,false);
+        SeatIntent in{};
+        in.autoOn=true;in.blocked=&FriendInLine;
+        return FireSeat(v,c,ws,r,in);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool VehicleAutoTurretsOn(const unsigned char* v) noexcept {
+    __try {
+        if(!v || !Readable(v,kSeatCount+8))return true;
+        for(unsigned i=0;i<SeatCount(v);++i) {
+            const unsigned char* seat=SeatAt(const_cast<unsigned char*>(v),i);
+            if(SeatRider(seat)==Rider::player && At<const void*>(seat,kSeatRider)==PlayerHuman())return AutoTurretsOn();
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER){}
+    return true;
 }
 
 // --- Twin barrels in turn (twin_cadence.h). The weapon fields the cadence reads, as the shot and the weapon update use
