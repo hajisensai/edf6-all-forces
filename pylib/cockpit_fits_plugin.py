@@ -184,9 +184,9 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # VEHICLE410_HELI, the same model) and its cabin's passengers in the UH-60M's troop seats.
     'EDF6VC_HELI_TRANSPORT': _AIR['VEHICLE410_HELI'] + _heli_cabin('body', _410_CABIN, range(3, 13)),
 }
-# The X-Morph units (pylib/xm_units.py eye, eye_bone): the gunner's sight camera over the gun (remote_display), as the
-# War Thunder tanks'; on the gun's pitch hinge where the raised gun would cross it on the turret (2026-10-27: the medium
-# tanks from 45-47 deg, the shield generator's eye inside its gun at rest; tests/gun_camera_sweep_guard.py).
-FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, u.eye_bone, u.eye, 'remote_display'),)
+# The X-Morph units (pylib/xm_units.py eye(), eye_bone): the gunner's sight camera over the gun (remote_display), as
+# the War Thunder tanks'; on the gun's pitch hinge where the raised gun would cross it on the turret (2026-10-27: the
+# medium tanks from 45-47 deg, the shield generator's eye inside its gun at rest; tests/gun_camera_sweep_guard.py).
+FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, u.eye_bone, xm_units.eye(u), 'remote_display'),)
              for u in xm_units.v603()})
 DIGESTS: dict[str, str] = {}

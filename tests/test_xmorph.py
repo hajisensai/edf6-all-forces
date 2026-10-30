@@ -223,8 +223,8 @@ class RigTests(unittest.TestCase):
         self.assertEqual(b['recoil'], 'cannon_slide_l')
         self.assertEqual(b['be_mast'], 'cannon_main')       # on the ring, over the axis: carried by the turret
         self.assertEqual(b['launcher'], 'body')             # off the ring: stays on the hull
-        np.testing.assert_allclose(r['mouths']['left'], (0, 2.0, 3.3))
-        np.testing.assert_allclose(r['mouths']['right'], (0, 2.0, 3.3))
+        np.testing.assert_allclose(r['mouths']['left'], (0, 2.0, 3.4))   # at the barrel's end, not the attachment's 3.3
+        np.testing.assert_allclose(r['mouths']['right'], (0, 2.0, 3.4))   # at the barrel's end, not the attachment's 3.3
 
     def test_running_gear_inside_the_belts(self) -> None:
         um = synthetic_unit()
@@ -252,6 +252,49 @@ class RigTests(unittest.TestCase):
 
     def test_runs_merge(self) -> None:
         self.assertEqual(px._merge([(3, 4), (0, 1), (1.2, 2)], tol=0.3), [(0, 2), (3, 4)])
+
+    def test_hull_wheels_on_the_stations(self) -> None:
+        # the hull's own road wheels (closed pieces of the hull mesh) leave it for the stations; the synthetic unit's
+        # belts get six of them and an idler in front, the rear station a filler inside the last road wheel
+        um = synthetic_unit()
+        P, T, B = [um.positions], [um.triangles], list(um.tri_bone)
+        wheels = [(z, 0.3, 0.3) for z in (1.8, 1.1, 0.4, -0.3, -1.0, -1.7)] + [(2.4, 0.7, 0.25)]   # apart
+        for sign in (1, -1):
+            for z, y, r in wheels:
+                p, t = px.wheel_mesh((sign * 1.5, y, z), r, 0.15)
+                T.append(t + sum(len(x) for x in P))
+                P.append(p)
+                B += ['body'] * len(t)
+        allp = np.vstack(P)
+        um = xm.UnitModel(um.entity, um.blueprint, um.mesh_path, um.bones, um.parent, um.bind, um.frames, {}, allp,
+                          np.zeros((len(allp), 2)), np.vstack(T), np.asarray(B, dtype=object), np.zeros(len(B), int),
+                          um.materials)
+        gear = px.running_gear(um, px.rig(um, 'xm_synthetic')['bone'])
+        for side in 'lr':
+            g = gear[side]
+            zs = [round(c[2], 2) for c, _r, _h in g['wheels']]
+            self.assertEqual(zs, [2.4, 1.8, 1.1, 0.4, -0.3, -1.0, -1.7, -1.7])
+            self.assertEqual([r is not None for r in g['real']], [True] * 7 + [False])
+            self.assertAlmostEqual(g['wheels'][1][1], 0.3, places=6)                  # a road wheel's own radius
+            self.assertAlmostEqual(g['wheels'][7][1], px.FILLER * 0.3, places=6)      # the filler hides in G's
+            real = np.concatenate([r for r in g['real'] if r is not None])
+            self.assertFalse(g['belt'][real].any())                                    # a wheel is no belt face
+
+    def test_stations(self) -> None:
+        ax = lambda z, ground, r=0.4, y=None: {'z': z, 'y': y if y is not None else (r if ground else 1.0),  # noqa: E731
+                                               'radius': r, 'ground': ground, 'tris': np.array([0])}
+        # more road wheels than six, no idlers: the end ones are A and H, six spread over the rest
+        st = px.stations([ax(z, True) for z in range(9, 0, -1)])
+        self.assertEqual([a['z'] for a in st], [9, 8, 7, 6, 4, 3, 2, 1])
+        self.assertFalse(any(a['filler'] for a in st))
+        # four road wheels (a half-track): fillers share axles, A and H too
+        st = px.stations([ax(z, True) for z in (4, -1, -2, -3)])
+        self.assertEqual([a['z'] for a in st], [4, 4, -1, -1, -1, -2, -3, -3])
+        self.assertEqual([a['filler'] for a in st], [True, False, True, True, False, False, False, True])
+        # a round thing high on the hull is no idler
+        st = px.stations([ax(5, False, r=0.5, y=3.0)] + [ax(z, True) for z in range(4, -2, -1)])
+        self.assertTrue(st[0]['filler'])
+        self.assertIsNone(px.stations([ax(1, False)]))
 
 
 # ------------------------------------------------------------------------------------------ the game's own unit

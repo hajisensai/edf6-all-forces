@@ -8,7 +8,8 @@ here is family-specific: the tracked preparer builds a V603 model folder from it
     blueprint(packs, path) -> Node           an entity's blueprint with its BlueprintComp base's components
     named(packs, name) -> Node               the blueprint called name (a weapon's ammo_blueprint)
     to_edf(points)                           X-Morph (x fwd, y left, z up) -> EDF (x left, y up, z fwd): (y, z, x)
-    texture_images(packs, material)          {'diffuse': RGB image, 'normal': RGB tangent-space image} (what it has)
+    texture_images(packs, material)          {'diffuse': RGB, 'normal': RGB tangent space, 'specular' / 'emissive':
+                                             grey} images (what it has)
 
 Frames (measured 2026-10-27): X-Morph's units face +X with +Y their left and +Z up, metres (barrels point +X, the
 left wing / track at +Y, civilian cars 4.4 x 1.8 x 1.45 m: real scale), the ground at z = 0. EDF's vehicles face +Z
@@ -69,6 +70,7 @@ class UnitModel:
     part_turrets: dict = field(default_factory=dict)
     part_weapons: list = field(default_factory=list)
     parts: list = field(default_factory=list)   # (part blueprint, the bone or attachment it hangs on or None, bones)
+    normals: np.ndarray | None = None      # (n, 3) EDF frame, unit: the mesh's own (its normal maps were baked on them)
 
     def children(self, bone: str) -> list[str]:
         return [b for b in self.bones if self.parent[b] == bone]
@@ -208,7 +210,7 @@ def load_blueprint(packs: xp.Packs, bp: xp.Node, entity: str) -> UnitModel:
         # A vertex assigned to a handle the skeleton has not (large_gunship_aa's mesh: 16 vertices on a fifth bone of
         # a four-bone skeleton, in the game's own files) rides the root.
         rigid = [np.asarray([index.get(int(h), root) for h in rb], dtype=np.int32) for rb in rigid]
-    pos, uv, tris, tbone, tmat = [], [], [], [], []
+    pos, uv, nrm, tris, tbone, tmat = [], [], [], [], [], []
     materials: list[str] = []
     base = 0
     # A blueprint can put its own material on a submesh (RenderableDescComp SubMeshes: the TARANTULA Mk VI / Mk VII are
@@ -219,6 +221,8 @@ def load_blueprint(packs: xp.Packs, bp: xp.Node, entity: str) -> UnitModel:
         p = mesh.positions(sub)
         t = mesh.uvs(sub)
         _req(t is not None, f'{entity}: submesh {sub.name} has no texture coordinates')
+        n = mesh.normals(sub)
+        _req(n is not None, f'{entity}: submesh {sub.name} has no normals')
         _req(bool((rb >= 0).all()), f'{entity}: submesh {sub.name} has unskinned vertices')
         corner = rb[sub.indices]
         # one bone a triangle: X-Morph's units are rigid pieces (a triangle whose corners disagree takes its first's)
@@ -226,6 +230,8 @@ def load_blueprint(packs: xp.Packs, bp: xp.Node, entity: str) -> UnitModel:
             materials.append(material)
         pos.append(to_edf(p))
         uv.append(t)
+        n = to_edf(n)
+        nrm.append(n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12))
         tris.append(sub.indices + base)
         tbone.append(np.asarray([names[i] for i in corner[:, 0]], dtype=object))
         tmat.append(np.full(len(sub.indices), materials.index(material)))
@@ -234,7 +240,7 @@ def load_blueprint(packs: xp.Packs, bp: xp.Node, entity: str) -> UnitModel:
                      {n: to_edf(w[:3, 3]) for n, w in frames.items()}, frames,
                      _attachments(packs, mesh_path),
                      np.vstack(pos), np.vstack(uv), np.vstack(tris), np.concatenate(tbone), np.concatenate(tmat),
-                     materials)
+                     materials, normals=np.vstack(nrm))
 
 
 def _from_edf(points) -> np.ndarray:  # noqa: ANN001 - array-like (..., 3)
@@ -311,6 +317,7 @@ def _assemble_into(packs: xp.Packs, um: UnitModel, bp: xp.Node, _at: str | None)
         base = len(um.positions)
         um.positions = np.vstack((um.positions, place(pm.positions)))
         um.uvs = np.vstack((um.uvs, pm.uvs))
+        um.normals = np.vstack((um.normals, to_edf(_from_edf(pm.normals) @ R.T)))   # directions: turned only
         um.triangles = np.vstack((um.triangles, pm.triangles + base))
         um.tri_bone = np.concatenate((um.tri_bone, np.asarray([bone[b] for b in pm.tri_bone], dtype=object)))
         um.tri_material = np.concatenate((um.tri_material, np.asarray(mat, dtype=um.tri_material.dtype)[pm.tri_material]))
@@ -370,11 +377,15 @@ def normal_rgb(im):  # noqa: ANN001, ANN201 - PIL image -> PIL image
 
 
 def texture_images(packs: xp.Packs, material: str) -> dict:
-    """{'diffuse': RGB image, 'normal': RGB image} of what the material declares (no specular or emissive: the EDF
-    body material has no slot for them)."""
+    """{'diffuse': RGB image, 'normal': RGB image, 'specular': grey image, 'emissive': grey image} of what the material
+    declares. The specular and emissive maps are grey (R = G = B, measured on every unit's): their red. The EDF side
+    reads the specular map as roughness / metalness and the emissive one as a light mask (pylib/wt_tracked.py)."""
     files = texture_files(packs, material)
     _req('diffuse' in files, f'material {material}: no diffuse texture')
     out = {'diffuse': _image(packs.read(files['diffuse'])).convert('RGB')}
     if 'normal' in files:
         out['normal'] = normal_rgb(_image(packs.read(files['normal'])))
+    for kind in ('specular', 'emissive'):
+        if kind in files:
+            out[kind] = _image(packs.read(files[kind])).convert('RGB').getchannel('R')
     return out

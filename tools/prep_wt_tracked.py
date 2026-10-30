@@ -296,6 +296,7 @@ class Source:
     objects: list[str]           # OBJ object names less the exporter's material number ('vehicle#wheel_l_01_72')
     materials: list[str]
     mtl: dict[str, dict[str, str]]   # material -> {'map_Kd': file, 'map_normal': file, 'map_ao': file, ...}
+    normals: np.ndarray | None = None   # (n, 3) per position, the source's own (None: smoothed here, AUTO_SMOOTH)
 
 
 def read_source(path: str) -> Source:
@@ -568,7 +569,10 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
     else:
         flipped = False
     bones = triangle_bones(v, src)
-    normals, normal_of = corner_normals(src.positions, src.tri_v)
+    if src.normals is not None:     # the source's own: its normal maps were baked on them
+        normals, normal_of = src.normals, src.tri_v
+    else:
+        normals, normal_of = corner_normals(src.positions, src.tri_v)
 
     # materials: one per distinct texture set; the tracks under the native names the SGO scrolls
     tex_dir = os.path.join(out, 'textures')
