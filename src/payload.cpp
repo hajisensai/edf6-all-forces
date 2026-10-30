@@ -919,7 +919,8 @@ void PayloadFrame(unsigned char* v) noexcept {
     //  - the auto turrets with them on (their switch VehicleAutoTurretKey / -Button, only where the seat has one): each
     //    fires itself when it has a shot (HasShot), whatever its key. The second trigger's is only the round picked.
     for(int i=0;i<r.count;++i)r.autoTurrets+=r.entry[i].autoTurret ? 1 : 0;
-    r.autoTurrets+=SeatAutoTurrets(v,static_cast<unsigned>(seat));   // the gunner seats' (their switch is the vehicle's)
+    // The gunner seats' unmanned ones: their switch is this player's where this machine runs them (RunsUnmannedTurrets).
+    if(RunsUnmannedTurrets(v))r.autoTurrets+=SeatAutoTurrets(v,static_cast<unsigned>(seat));
     const bool autoDown=r.autoTurrets>0 && PlayerKeyHeld(s,Cfg().vehicleAutoTurretKey,Cfg().vehicleAutoTurretButton);
     if(autoDown && !autoTurretHeld) {
         autoTurretsSet=AutoTurretsOn() ? 0 : 1;
@@ -1083,13 +1084,23 @@ bool NpcOwnWeaponsFire(unsigned char* v,unsigned seat,const void* target,LineBlo
 bool UnmannedTurretsFire(unsigned char* v,unsigned seat) noexcept {
     __try {
         if(!pullOk || !Cfg().enabled || !v || v[kDead] || BodyOf(v)!=PluginBody::none || seat>=SeatCount(v))return false;
-        const Rider rider=SeatRider(SeatAt(v,seat));
-        if(rider!=Rider::none && rider!=Rider::dummy)return false;
+        if(SeatRider(SeatAt(v,seat))!=Rider::none)return false;   // a dummy rider is an NPC gunner's (AiGunner)
         PayloadReadout r{};unsigned char* ws[kMostPayload]{};
         const Class c=ClassOf(v);r.count=ReadSeat(v,seat,c,ws,r,false);
         SeatIntent in{};
         in.autoOn=true;in.blocked=&FriendInLine;
         return FireSeat(v,c,ws,r,in);
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+bool RunsUnmannedTurrets(unsigned char* v) noexcept {
+    __try {
+        if(!v || !Readable(v,kSeatCount+8))return false;
+        if(!SeatCount(v))return IsOnlineAuthority(v);
+        const unsigned char* seat=SeatAt(v,0);
+        const Rider rider=SeatRider(seat);
+        if(rider==Rider::player)return At<const void*>(seat,kSeatRider)==PlayerHuman();
+        if(rider!=Rider::none)return AiGunner(v,seat);
+        return IsOnlineAuthority(v);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 bool VehicleAutoTurretsOn(const unsigned char* v) noexcept {

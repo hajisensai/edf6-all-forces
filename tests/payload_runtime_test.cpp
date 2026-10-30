@@ -17,6 +17,7 @@ bool mapHeld=false;
 bool MapHoldsKeys() noexcept { return mapHeld; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
 bool AiGunner(const unsigned char*,const unsigned char* s) noexcept { return authority && SeatRider(s)==Rider::other; }
+bool IsOnlineAuthority(const void*) noexcept { return authority; }   // payload.cpp RunsUnmannedTurrets
 void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }

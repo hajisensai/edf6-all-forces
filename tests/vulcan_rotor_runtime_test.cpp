@@ -54,6 +54,21 @@ bool RedirectCall(unsigned char* at,void* prior,void* replacement,bool& changed)
 namespace crew {
 int recoilPoses=0;const void* recoilVehicle=nullptr;
 void BarrelRecoilPose(unsigned char* v) noexcept{++recoilPoses;recoilVehicle=v;}   // barrel_recoil.cpp (its own test)
+int turretPoses=0;
+void SeatTurretsPose(unsigned char*) noexcept{++turretPoses;}   // seat_turret.cpp (tests/seat_turret_test.cpp)
+// A copy of body506.cpp's (the skeleton definition's bind): the fixture's skeleton is read as production reads it.
+bool BoneBind506(const unsigned char* inst,const unsigned char* record,float* bind) noexcept{
+ const auto* skeleton=At<const unsigned char*>(inst,0);
+ if(!Readable(skeleton,0x6C) || !Readable(record,0x10))return false;
+ const auto* definitions=At<const unsigned char*>(skeleton,0x58);
+ const int index=At<std::int32_t>(record,0x0C),last=At<std::int32_t>(skeleton,0x68);
+ if(index<0 || index>last || last>255 || !definitions)return false;
+ const auto* local=definitions+static_cast<std::size_t>(index)*0xD0+0x20;
+ if(!Readable(local,64))return false;
+ std::memcpy(bind,local,64);
+ for(int i=0;i<16;++i)if(!std::isfinite(bind[i]))return false;
+ return true;
+}
 unsigned char* image=nullptr;
 const Config& Cfg() noexcept{return fixture::config;}
 ULONGLONG GameMs() noexcept{return fixture::now;}
@@ -79,6 +94,7 @@ int main(){
  Reset();Check(crew::InstallVulcanRotor(),"actual production install succeeds");Call();
  Check(builds==1&&lastInst==vehicle+0xEE0&&lastMatrix==vehicle+0x60,"forward native world-build exactly once with unchanged arguments");
  Check(crew::recoilPoses==1&&crew::recoilVehicle==vehicle,"the same last pose step gives the BMPT's barrels their recoil, once a build");
+ Check(crew::turretPoses==1,"the gunner seats' own turrets are posed at the same last local step, once a build");
  Check(Angle()==0&&edf::At<int>(rotor,8)==1,"idle visual bone uses bind and native dirty flag");
  edf::Put<int>(weapon[0],0xBD4,1);edf::Put<int>(weapon[0],0xBE8,1999);Tick();
  Check(std::fabs(Angle())>.001f,"actual native HE firing rotates the real production bone");

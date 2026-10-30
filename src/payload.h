@@ -109,6 +109,9 @@ bool NpcOwnWeaponsFire(unsigned char* vehicle,unsigned seat,const void* target,L
 // the machine that runs the vehicle): each fires itself on a shot at any enemy (HasShot), no friend in the line. True when
 // one fired.
 bool UnmannedTurretsFire(unsigned char* vehicle,unsigned seat) noexcept;
+// Whether this machine runs `vehicle`'s unmanned gunner-seat turrets: its driver's (seat 0) machine, an NPC driver's
+// (AiGunner), else the vehicle's authority (IsOnlineAuthority).
+bool RunsUnmannedTurrets(unsigned char* vehicle) noexcept;
 // Whether `vehicle`'s auto turrets are on here: the local player's switch with them aboard (VehicleAutoTurretKey), else on.
 bool VehicleAutoTurretsOn(const unsigned char* vehicle) noexcept;
 // Whether the HUD's control row has anything to say for this seat: the own secondary's cycle, an extra fire key, an auto

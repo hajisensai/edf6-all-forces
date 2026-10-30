@@ -40,7 +40,9 @@ int main(){
  const float bindGun[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 1,1,1,1};
  float yaw[16],gun[16];
  st::Pose(bindYaw,bindGun,{},yaw,gun);
- Check(std::memcmp(yaw,bindYaw,64)==0 && std::memcmp(gun,bindGun,64)==0,"the rest pose is the bind");
+ bool rest=true;
+ for(int i=0;i<16;++i)rest=rest && yaw[i]==bindYaw[i] && gun[i]==bindGun[i];   // == : -0 is 0
+ Check(rest,"the rest pose is the bind");
  st::Pose(bindYaw,bindGun,{st::kPi/2,0.0f},yaw,gun);
  float p[3];const float barrel[3]={0,0,1},origin[3]={0,0,0};
  Through(origin,gun,p);

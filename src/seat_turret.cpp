@@ -10,7 +10,6 @@
 #include "layout.h"
 #include "memory.h"
 #include "npcai.h"
-#include "online_authority.h"
 #include "payload.h"
 #include "seat_net_transport.h"
 #include "seat_turret_net.h"
@@ -47,10 +46,12 @@ struct Vehicle {
     const void* bones=nullptr;
     int count=0;
     Turret t[kMostTurrets]{};
-    seat_net::BasicGate<64> gate{};
     ULONGLONG seen=0,lastMs=0,sentAt=0;
 };
 Vehicle vehicles[kMostVehicles]{};
+// Each vehicle's sender watermarks, apart from its record (seat_net.h StreamGates: a record re-rigged or taken for another
+// vehicle keeps them, so a delayed older block is never admitted again); dropped with the vehicle or the mission.
+seat_net::StreamGates<kMostVehicles*2,64> gates;
 SRWLOCK lock=SRWLOCK_INIT;
 bool installed=false,netReady=false;
 
@@ -66,8 +67,8 @@ bool Rig(Vehicle& x,unsigned char* v) noexcept {
     const void* bones=At<const void*>(inst,kInstBones506);
     if(!bones)return false;
     if(bones==x.bones)return x.count>0;
-    const ObjRef ref=x.ref;
-    x=Vehicle{};x.ref=ref;x.bones=bones;
+    const ObjRef ref=x.ref;const ULONGLONG seen=x.seen;
+    x=Vehicle{};x.ref=ref;x.seen=seen;x.bones=bones;
     const auto holders=At<const unsigned char*>(v,kHolders);
     const auto count=At<std::uint64_t>(v,kHolderCount);
     if(!holders || count>16 || !Readable(holders,count*kHolderStride))return false;
@@ -156,7 +157,7 @@ bool Trainer(unsigned char* v,Turret& t,bool runs,bool autoOn,Aim* want,bool* fi
         if(AimPoint(at))*want=AimAt(v,t,at);
         return true;
     }
-    if(rider!=Rider::none && rider!=Rider::dummy) {
+    if(rider!=Rider::none) {   // a dummy rider too: an NPC gunner's seat (AiGunner)
         if(!AiGunner(v,seat))return false;
         const float* at=t.target && GameFrame()-t.targetFrame<=kTargetFrames ? TargetPoint(t.target) : nullptr;
         if(at){const float aim[3]={at[0],at[1]+0.5f,at[2]};*want=AimAt(v,t,aim);}
@@ -172,23 +173,13 @@ bool Trainer(unsigned char* v,Turret& t,bool runs,bool autoOn,Aim* want,bool* fi
     }
     return true;
 }
-// Whether this machine runs `v`'s unmanned turrets: its driver's (seat 0) machine, else the vehicle's authority.
-bool Runs(unsigned char* v) noexcept {
-    if(!SeatCount(v))return IsOnlineAuthority(v);
-    const unsigned char* seat=SeatAt(v,0);
-    const Rider rider=SeatRider(seat);
-    if(rider==Rider::player)return At<const void*>(seat,kSeatRider)==PlayerHuman();
-    if(rider!=Rider::none && rider!=Rider::dummy)return AiGunner(v,seat);
-    return IsOnlineAuthority(v);
-}
-
 void FrameLocked(unsigned char* v) noexcept {
     const ULONGLONG now=GameMs();
     Vehicle* const x=Take(v,now);
     if(!x)return;
     const float dt=x->lastMs && now>x->lastMs ? std::fmin(static_cast<float>(now-x->lastMs)*0.001f,0.1f) : 1.0f/60.0f;
     x->seen=now;x->lastMs=now;
-    const bool runs=Runs(v),autoOn=VehicleAutoTurretsOn(v);
+    const bool runs=RunsUnmannedTurrets(v),autoOn=VehicleAutoTurretsOn(v);
     seat_turret_net::State out{};
     unsigned fired=0;
     for(int n=0;n<x->count;++n) {
@@ -219,7 +210,11 @@ void Received(unsigned char* v,const void* block,std::size_t size) noexcept {
         AcquireSRWLockExclusive(&lock);
         __try {
             Vehicle* const x=Take(v,GameMs());
-            if(!x || !x->gate.Admit(s.head,true,false,-1))return;
+            if(!x)return;
+            auto* const gate=gates.For({x->ref.obj,x->ref.ctrl,0},[](const void* obj,const void* ctrl) noexcept {
+                return Readable(obj,kSelfCtrl+8) && ObjRef{obj,ctrl}.Is(obj);
+            });
+            if(!gate || !gate->Admit(s.head,true,false,-1))return;
             const ULONGLONG now=GameMs();
             for(int n=0;n<kMostTurrets;++n) {
                 if(!(s.trained&(1u<<n)))continue;
@@ -281,6 +276,7 @@ bool InstallSeatTurrets() noexcept {
 void ResetSeatTurrets() noexcept {
     AcquireSRWLockExclusive(&lock);
     for(auto& x:vehicles)x=Vehicle{};
+    gates.Reset();
     ReleaseSRWLockExclusive(&lock);
 }
 }  // namespace crew
