@@ -7,6 +7,7 @@
 #include "body506.h"
 #include "layout.h"
 #include "memory.h"
+#include "seat_turret.h"
 #include "stores.h"
 #include <cstring>
 #include <cwchar>
@@ -62,18 +63,6 @@ bool Activity(unsigned char* v,Rotor& rotor) noexcept {
     for(int i=0;i<vulcanrotor::kMostHolders;++i)if(!seen[i])rotor.sample[i]=vulcanrotor::Sample{};
     return shot;
 }
-bool BindOf(const unsigned char* inst,const unsigned char* record,float* bind) noexcept {
-    const auto* skeleton=At<const unsigned char*>(inst,0);
-    if(!Readable(skeleton,0x6C))return false;
-    const auto* definitions=At<const unsigned char*>(skeleton,0x58);
-    const int index=At<std::int32_t>(record,0x0C),last=At<std::int32_t>(skeleton,0x68);
-    if(index<0 || index>last || last>255 || !definitions)return false;
-    const auto* local=definitions+static_cast<std::size_t>(index)*0xD0+0x20;
-    if(!Readable(local,64))return false;
-    std::memcpy(bind,local,64);
-    for(int i=0;i<16;++i)if(!std::isfinite(bind[i]))return false;
-    return true;
-}
 bool Resolve(unsigned char* v,Rotor& rotor) noexcept {
     const auto* inst=v+kModelInst506;
     const auto bones=At<const void*>(inst,kInstBones506);
@@ -86,7 +75,7 @@ bool Resolve(unsigned char* v,Rotor& rotor) noexcept {
         if(!record[n] || !Readable(record[n]+kBoneLocal506,64,true))break;
         // Immutable MDB bind, never an instance local left at the last drawn phase.
         // Same native skeleton definitions/count contract as katyusha.cpp.
-        if(!BindOf(inst,record[n],bind[n]))return false;
+        if(!BoneBind506(inst,record[n],bind[n]))return false;
     }
     if(!n)return false;
     rotor=Rotor{rotor.ref};rotor.bones=bones;rotor.count=n;
@@ -102,7 +91,7 @@ void FollowIdlers(unsigned char* v) noexcept {
         auto* follower=BoneRecord506(inst,side==0 ? L"tire_moveH_l" : L"tire_moveH_r");
         if(!driver || !follower || !Readable(driver+kBoneWorld506,64) || !Readable(follower+kBoneWorld506,64,true))continue;
         float g[16],h[16],out[16];
-        if(!BindOf(inst,driver,g) || !BindOf(inst,follower,h) ||
+        if(!BoneBind506(inst,driver,g) || !BoneBind506(inst,follower,h) ||
            !vulcanrotor::Follow(g,h,reinterpret_cast<const float*>(driver+kBoneWorld506),out))continue;
         // 66F430 writes final wheel WORLDS directly and leaves record+8 as is.
         // G/H have one parent, so the immutable local-bind difference also
@@ -142,6 +131,7 @@ void __fastcall Build(void* inst,const void* matrix) {
         __except(EXCEPTION_EXECUTE_HANDLER) { Log("VULCAN rotor rejected unreadable native instance"); }
         // The same last local step for the BMPT's barrels: each one's own recoil on its own shot (barrel_recoil.h).
         BarrelRecoilPose(static_cast<unsigned char*>(inst)-kModelInst506);
+        SeatTurretsPose(static_cast<unsigned char*>(inst)-kModelInst506);   // its gunner seats' own turrets (seat_turret.h)
     }
     reinterpret_cast<BuildFn>(image+kBuildWorld)(inst,matrix); // exactly once, for every native 603
 }

@@ -25,6 +25,9 @@ unless its blueprint misleads, MOUTHS):
     tire_moveA..H       synthetic road wheels inside the track belts (X-Morph's wheels are baked into the hull):
                         cylinders in the hull's texture, hidden in the belt, for the V603's contact radius and stations
     catapi_body         the belts' running faces, under the native track materials' names (v603_kyata_L / _R)
+    xm_<arm>, _gun      an arm with its own turret (xm_units.Arm.turret, its gunner seat): the blueprint's turret of
+                        its weapon, its yaw bone's subtree (but the pitch bone's) and its pitch bone's subtree, two
+                        visual leaves of `body` at those bones' binds (src/seat_turret.inc turns them)
     body                the rest (the hull, its own turrets and launchers: they stay put)
 """
 from __future__ import annotations
@@ -108,10 +111,34 @@ def meshed(um: xm.UnitModel, bones) -> list[str]:  # noqa: ANN001
     return [b for b in bones if b in have]
 
 
-def rig(um: xm.UnitModel, key: str) -> dict:
+def arm_turrets(um: xm.UnitModel, unit: xm_units.Unit) -> dict[str, tuple[str, str]]:
+    """The unit's arms with their own turret (Arm.turret): arm key -> the blueprint's (yaw bone, pitch bone) of the
+    turret its weapon is aimed by."""
+    turrets, weapons = um.turrets(), {w.name: w for w in um.weapons()}
+    out = {}
+    for arm in unit.arms:
+        if not arm.turret:
+            continue
+        _req(len(arm.weapons) == 1 and arm.weapons[0] in weapons, f'{unit.key}: arm {arm.key}: one blueprint weapon a turret')
+        yaw, pitch = turrets.get(weapons[arm.weapons[0]].turret, (None, None))
+        _req(yaw in um.bind and pitch in um.bind and pitch in um.subtree(yaw),
+             f'{unit.key}: arm {arm.key}: its turret has no yaw bone over a pitch bone ({yaw}, {pitch})')
+        out[arm.key] = (yaw, pitch)
+    return out
+
+
+def rig(um: xm.UnitModel, key: str, unit: xm_units.Unit | None = None) -> dict:
     """The bone assignment (module doc): X-Morph bone -> V603 bone, the gun's sides and mouths."""
     w, yaw, pitch = main_weapon(um)
-    gun = um.subtree(pitch)
+    bone: dict[str, str] = {}
+    own = arm_turrets(um, unit) if unit else {}
+    for k, (ty, tp) in own.items():
+        tyb, tpb = xm_units.turret_bones(k)
+        for b in um.subtree(tp):
+            bone[b] = tpb
+        for b in um.subtree(ty):
+            bone.setdefault(b, tyb)
+    gun = [b for b in um.subtree(pitch) if b not in bone]
     recoils = []
     for _att, r in w.muzzles:
         if r and r in um.bind and r not in recoils:
@@ -127,7 +154,6 @@ def rig(um: xm.UnitModel, key: str) -> dict:
         left, right = sorted(mouths, key=lambda p: -p[0])        # +x is the vehicle's left
     else:
         left = right = mouths[0]
-    bone: dict[str, str] = {}
     sides = sorted(recoils, key=lambda b: -um.bind[b][0])
     slides = dict(zip(sides, ['cannon_slide_l', 'cannon_slide_r'])) if len(sides) == 2 else \
         {b: 'cannon_slide_l' for b in sides}
@@ -158,7 +184,7 @@ def rig(um: xm.UnitModel, key: str) -> dict:
         _req(bool(nodes), f'{key}: the gun has no mesh')
         barrel[side] = nodes[0]
     return {'weapon': w.name, 'yaw': yaw, 'pitch': pitch, 'bone': bone, 'recoils': sides, 'barrel': barrel,
-            'mouths': {'left': left, 'right': right}, 'muzzle_names': list(names)}
+            'mouths': {'left': left, 'right': right}, 'muzzle_names': list(names), 'turrets': own}
 
 
 def _ancestors(um: xm.UnitModel, b: str) -> list[str]:
@@ -263,7 +289,7 @@ def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Ve
     """The unit as prep_wt_tracked's Vehicle and Source (its textures written as PNGs into `staging`)."""
     um = model(packs, unit)
     key = unit.key
-    r = rig(um, key)
+    r = rig(um, key, unit)
     bone = r['bone']
     gear = running_gear(um, bone, BELT_FLOOR.get(key, 2 * GROUND))
     # objects: one per X-Morph bone, the belts' running faces, the synthetic wheels; named as Source names them (its
@@ -354,6 +380,7 @@ def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Ve
         collision=collision, clip=clip, hull=um.bones[0],
         mouths={s: tuple(float(c) for c in r['mouths'][s] * SCALE) for s in ('left', 'right')})
     report = {'entity': unit.entity, 'mesh': um.mesh_path, 'weapon': r['weapon'], 'yaw': yaw, 'pitch': pitch,
+              'turrets': r['turrets'],
               'muzzles': r['muzzle_names'], 'recoils': r['recoils'],
               'bones': {b: bone[b] for b in um.bones}, 'gun_split': split, 'radar_slice_y': cut,
               'running_gear': {s: {'band_x': gear[s]['band'], 'runs_z': gear[s]['runs'], 'belt_top': gear[s]['top'],
@@ -373,7 +400,7 @@ def arm_muzzles(packs: xp.Packs, unit: xm_units.Unit) -> dict[str, list[dict]]:
         _req(not missing, f'{unit.key}: arm {arm.key}: no weapon {missing} in its blueprint')
         points = [um.point(m) * SCALE for w in arm.weapons for m, _r in weapons[w].muzzles]
         _req(bool(points), f'{unit.key}: arm {arm.key} has no muzzle')
-        out[f'xm_{arm.key}'] = [{'bone': arm.bone, 'point': [float(c) for c in p]} for p in points]
+        out[f'xm_{arm.key}'] = [{'bone': arm.holder_bone, 'point': [float(c) for c in p]} for p in points]
     return out
 
 
@@ -387,6 +414,11 @@ def prepare_tracked(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict
         info = prep.prepare(v, src, out)
     _req(not info['winding_flipped'], f'{unit.key}: the hull winds clockwise (the frame change is a rotation)')
     info['muzzles'].update(arm_muzzles(packs, unit))
+    # the arms' own turrets: two visual leaves of the hull each, at the blueprint's yaw and pitch bones' binds
+    um = xm.load(packs, unit.entity)
+    for k, (ty, tp) in report['turrets'].items():
+        for name, src in zip(xm_units.turret_bones(k), (ty, tp)):
+            info['visual_bones'].append({'name': name, 'parent': 'body', 'origin': [float(c) for c in um.bind[src] * SCALE]})
     # the conversion's record (wt_tracked reads neither key)
     info['xmorph'] = {**report, 'scale': SCALE}
     with open(os.path.join(out, 'model.json'), 'w', encoding='utf-8', newline='\n') as f:

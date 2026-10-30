@@ -77,8 +77,25 @@ class Arm:
     missile: dict = field(default_factory=dict)   # a missile's vcobjects.Missile fields (look: (model, length))
     shell: tuple[str, str, str] = ()              # a gun's (stock template, its AmmoClass, round kind): vcobjects.Shell
     numbers: dict = field(default_factory=dict)   # a gun's SGO numbers over the template's (Shell.extra)
-    fire: int = 2            # its fire key (vcobjects Store.key: 2 the second trigger, 3..6 VehicleFire<n>Key), one a unit
+    fire: int = 2            # its fire key (vcobjects Store.key: 2 the second trigger, 3..6 VehicleFire<n>Key), one a unit;
+                             # 0 with a `seat` (that seat's trigger fires it)
     auto: bool = False       # an auto turret (vcobjects Store.auto): it fires itself with the auto turrets on
+    # Its own gunner seat (vcobjects Store.seat, docs/multi-weapon-keys.md「独立座位」): 0 none (on the driver's key); n
+    # the vehicle's seat n, one arm a seat, numbered from 1 in arms order. Needs `turret`.
+    seat: int = 0
+    # Its own turret (vcobjects Turret: the limits; its bones are TURRET_BONES(key), tools/prep_xmorph.py makes them of the
+    # blueprint's turret for its weapon: its yaw bone's mesh and its pitch bone's), {} none: it rides `bone`.
+    turret: dict = field(default_factory=dict)
+
+    @property
+    def holder_bone(self) -> str:
+        """The bone its holder and muzzles ride: its own turret's pitch bone, else `bone`."""
+        return turret_bones(self.key)[1] if self.turret else self.bone
+
+
+def turret_bones(arm_key: str) -> tuple[str, str]:
+    """An arm's own turret's two model bones (yaw, pitch): leaves of the hull's `body` (tools/prep_xmorph.py)."""
+    return f'xm_{arm_key}', f'xm_{arm_key}_gun'
 
 
 @dataclass(frozen=True)
@@ -236,16 +253,17 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # most armour of the tracked units (2000).
     _u('ground/large_tank_emp', 'tracked', 'apocalypse', 'ported', 'EMP Tank',
        texts={'SC': ('X-Morph EMP 坦克', '请求一辆人类军队的 EMP 坦克：比重型坦克更大的车体，炮塔上的双管重炮为主攻击，每三秒两门齐射两轮；'
-                                      '副武器各用一个开火键、与主炮同时发射： EMP 高射弹、两座防空机炮塔（十五发连射）与导弹塔（二十发连射）；履带单位中装甲最厚。'),
+                                      '副武器与主炮同时发射： EMP 高射弹与导弹塔（二十发连射）各用一个开火键；两座防空机炮塔（十五发连射）各有炮手座位、各自转向，无人时自动开火；履带单位中装甲最厚。'),
               'CN': ('X-Morph EMP 坦克', '請求一輛人類軍隊的 EMP 坦克：比重型坦克更大的車體，砲塔上的雙管重砲為主攻擊，每三秒兩門齊射兩輪；'
-                                      '副武器各用一個開火鍵、與主砲同時發射： EMP 高射彈、兩座防空機砲塔（十五發連射）與飛彈塔（二十發連射）；履帶單位中裝甲最厚。'),
+                                      '副武器與主砲同時發射： EMP 高射彈與飛彈塔（二十發連射）各用一個開火鍵；兩座防空機砲塔（十五發連射）各有砲手座位、各自轉向，無人時自動開火；履帶單位中裝甲最厚。'),
               'JA': ('X-Morph EMP 戦車', '人類軍の EMP 戦車を要請する。重戦車より大きな車体で、砲塔の連装重砲（3 秒ごとに 2 門斉射を 2 回）を'
-                                      '主攻撃とする。副武器はそれぞれ専用の発射キーで主砲と同時に撃てる： EMP 炸裂弾、対空機関砲塔 2 基（15 発連射）、ミサイル塔（20 発連射）。装甲は装軌車両で最も厚い。'),
+                                      '主攻撃とする。EMP 炸裂弾とミサイル塔（20 発連射）はそれぞれ専用の発射キーで主砲と同時に撃てる。対空機関砲塔 2 基（15 発連射）はそれぞれ砲手席を持ち個別に旋回し、無人なら自動で撃つ。装甲は装軌車両で最も厚い。'),
               'EN': ('X-Morph EMP Tank', "Requests the human army's EMP tank: a hull bigger than the heavy tank's, its "
                                          "turret's twin heavy gun on the primary attack, both barrels twice every 3 s; "
-                                         'each on its own fire key with the gun, EMP flak, two AA gun turrets (bursts of '
-                                         'fifteen) and a missile turret (bursts of twenty); the heaviest armour of '
-                                         'the tracked units.')},
+                                         'each on its own fire key with the gun, EMP flak and a missile turret (bursts of '
+                                         'twenty); two AA gun turrets (bursts of fifteen), each with its own gunner seat '
+                                         'and turning on its own, firing by themselves when unmanned; the heaviest armour '
+                                         'of the tracked units.')},
        gun=('Twin Heavy Gun', '双管重炮', '連装重砲', '雙管重砲'),
        # main_gun: fire_rate 3, muzzles_per_fire 2, two 0.25 s apart (enemy_bullet_big_anti_core: 30, no Area): both
        # barrels together, twice, every 3 s
@@ -256,18 +274,22 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  shell=('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
                  numbers={'AmmoDamage': 1500.0, 'AmmoExplosion': 13.5, 'AmmoSpeed': 30.0, 'FireInterval': 600.0,
                           'FireBurstCount': 1.0}),
-             Arm('aa', ('aa_left_turret', 'aa_right_turret'), 'gun', ('AA guns', '対空機関砲', '防空機砲', '防空机炮', '대공 기관포'), 600, 'cannon_l',
-                 # aa_left_turret / aa_right_turret: fire_rate 5, fifteen 0.1 s apart each (enemy_bullet_medium: 10
-                 # anti_player)
-                 shell=('V_403TANK_MACHINEGUN.SGO', 'SolidBullet01', 'mg'),
-                 numbers={'AmmoDamage': 300.0, 'AmmoSpeed': 12.0, 'AmmoAlive': 90.0, 'FireInterval': 300.0,
-                          'FireBurstCount': 15.0, 'FireBurstInterval': 6.0, 'FireCount': 2.0}, fire=3, auto=True),
+             # aa_left_turret / aa_right_turret: fire_rate 5, fifteen 0.1 s apart each (enemy_bullet_medium: 10
+             # anti_player); each its own turret and gunner seat (the user, 2026-10-30: 「一些应该是独立的座位」): manned, its
+             # gunner turns and fires it; empty, an auto turret
+             *(Arm(f'aa_{side}', (f'aa_{name}_turret',), 'gun', (f'AA gun ({side.upper()})', f'対空機関砲（{jp}）',
+                                                                   f'防空機砲（{tw}）', f'防空机炮（{tw}）', f'대공 기관포 ({kr})'), 600,
+                   shell=('V_403TANK_MACHINEGUN.SGO', 'SolidBullet01', 'mg'),
+                   numbers={'AmmoDamage': 300.0, 'AmmoSpeed': 12.0, 'AmmoAlive': 90.0, 'FireInterval': 300.0,
+                            'FireBurstCount': 15.0, 'FireBurstInterval': 6.0, 'FireCount': 2.0},
+                   fire=0, auto=True, seat=seat, turret={'low': -5.0, 'high': 80.0, 'yaw_rate': 90.0, 'pitch_rate': 60.0})
+               for seat, side, name, jp, tw, kr in ((1, 'l', 'left', '左', '左', '좌'), (2, 'r', 'right', '右', '右', '우'))),
              Arm('aam', ('missile_turret',), 'air', ('AA missiles', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), 80,
                  # missile_turret: fire_rate 5, twenty 0.1 s apart (enemy_missile_anti_aa_small: 8 anti_player)
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 240.0, 'blast': 3.0,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 20.0, 'burst_gap': 6.0,
-                          'interval': 300.0}, fire=4, auto=True)),
+                          'interval': 300.0}, fire=3, auto=True)),
        # models/xm_large_tank_emp: 18.2 m long, the turret y 4.6..8.9 (roof ~8.85), z -1.1..4.9; the guns at x +-0.49,
        # y 6.5, their muzzles z 9.3
        camera={'model_eye': (0., 8.6, 1.9), 'model_look_at': (0., 7.0, 13.), 'third_person_distance': 15.,

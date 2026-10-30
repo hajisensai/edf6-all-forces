@@ -11,6 +11,7 @@ import copy
 import os
 import struct
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -19,6 +20,7 @@ sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 import cockpits
 import dsgo
 import ledger
+import mab_legacy
 import model_lod
 import emplacement_model
 import vcobjects as vc
@@ -544,8 +546,11 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
             if len(bones) != 1:
                 raise ValueError(f'{kind}: the {side} muzzles ride {sorted(bones)}: one holder bone needs them on one')
             (holders[side],) = bones
-    setting.items = [copy.deepcopy(guns[side == 'right']) if side in GUN_SLOTS else _node([holders[side], 0.0])
-                     for side in sides]
+    # A store on its own gunner seat (vcobjects Store.seat): its holder on that seat ([bone, seat]: VehicleBase
+    # 0x62A52E puts it in that seat's list; stores.cpp Fill builds its weapon, docs/independent-seat-re.md §1).
+    setting.items = [copy.deepcopy(guns[side == 'right']) if side in GUN_SLOTS else
+                     _node([holders[side], float(store_seat(vehicle.weapons[i]))]) for i, side in enumerate(sides)]
+    gunner_seats(r, vehicle)
     if kind in TURRET_LIMITS:
         import make_artillery
         joint = make_artillery.turret_constraint(r)
@@ -565,6 +570,60 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
             if path.lower() not in {str(item).lower() for item in resource.items}:
                 resource.items.append(path)
     return dsgo.compact(doc)
+
+
+def store_seat(weapon: str) -> int:
+    """The gunner seat a weapon's store is on (vcobjects Store.seat), 0 the driver's."""
+    store = vc.store_of(weapon)
+    return vc.STORES[store[0]].seat if store else 0
+
+
+GUNNER_SEAT_TEXT = '410_HELI_GUNNER_L'   # the seat's name key in the game's text table: "Gunner"
+GUNNER_EYE = (0.0, 2.6, -7.0)           # m: a gunner seat's camera from its turret's pitch bone (behind it, over it)
+GUNNER_LOOK = (0.0, 1.0, 6.0)           # ...and the point it looks at, ahead along its guns
+
+
+def gunner_seats(r, vehicle: vc.GroundVehicle) -> None:  # noqa: ANN001 - dsgo node
+    """The vehicle's gunner seats (vcobjects Store.seat, docs/multi-weapon-keys.md「独立座位」): seat n a copy of the
+    driver's seat row (its door, its class mask and its numbers) with its own seat and camera locators on its turret's
+    bones (Store.turret: the rider on the yaw bone, the camera and its look-at on the pitch bone, so the view turns with
+    the turret the plugin trains: src/seat_turret.inc). Seats in order, one a gunner seat number."""
+    turrets = {}
+    for w in vehicle.weapons:
+        store = vc.store_of(w)
+        spec = vc.STORES[store[0]] if store else None
+        if spec and spec.seat:
+            turrets.setdefault(spec.seat, spec.turret)
+    if not turrets:
+        return
+    if sorted(turrets) != list(range(1, len(turrets) + 1)):
+        raise ValueError(f'{vehicle.sgo}: gunner seats {sorted(turrets)} are not 1..n')
+    seats = r.get('vehicle_riding_position')
+    if len(seats.items) != 1:
+        raise ValueError(f'{vehicle.sgo}: the native V603 has one seat, this has {len(seats.items)}')
+    animation = r.get('animation_model')
+    block = animation.items[2].data
+    locators = {loc.name: loc for _i, loc in mab_legacy.mab_locators(block)}
+    driver = dsgo.to_py(seats.items[0])
+    eye = locators[driver[2][0]]
+    looks = [n for n in locators if n != eye.name and n.startswith(eye.name) and locators[n].node == eye.node]
+    if len(looks) != 1:
+        raise ValueError(f'{vehicle.sgo}: the driver camera {eye.name!r} has {len(looks)} look-at locators')
+    suffix = looks[0][len(eye.name):]
+    seat_loc = locators[driver[1]]
+    new = []
+    for n in sorted(turrets):
+        yaw, pitch = turrets[n].yaw, turrets[n].pitch
+        row = copy.deepcopy(seats.items[0])
+        names = (f'xm_seat_{n}', f'xm_cam_{n}')
+        new.append(replace(seat_loc, name=names[0], node=yaw, a=(0.0, 0.0, 0.0, 1.0)))
+        new.append(replace(eye, name=names[1], node=pitch, a=(*GUNNER_EYE, 1.0)))
+        new.append(replace(locators[looks[0]], name=names[1] + suffix, node=pitch, a=(*GUNNER_LOOK, 1.0)))
+        row.items[1] = names[0]
+        row.items[2].items[0] = names[1]
+        row.items[3] = GUNNER_SEAT_TEXT
+        seats.items.append(row)
+    animation.items[2] = dsgo.Blob(mab_legacy.mab_add_locators(block, new), animation.items[2].kind)
 
 
 def _points(model, game: vc.Game) -> dict[str, list[tuple[str, tuple[float, float, float]]]]:

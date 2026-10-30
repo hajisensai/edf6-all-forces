@@ -29,6 +29,7 @@ bool GunshipGunnerCamera(const unsigned char*,const float*,const float*,float*,f
 bool DreadnoughtCamera(const unsigned char*,float*,float*) noexcept {return false;}
 bool IsHelicopter(const void*) noexcept { return false; }
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
+bool IsOnlineAuthority(const void*) noexcept { return true; }   // payload.cpp RunsUnmannedTurrets
 bool IsFuelTank(const unsigned char*) noexcept { return false; }
 void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }

@@ -365,6 +365,7 @@ HUDTEXT(controlStores,L"[%ls] stores",L"[%ls] 切换挂载",L"[%ls] 切換掛載
 // A vehicle with its own secondary (the BMPT): each control's round now and the key that switches it (hud.cpp PayloadControls).
 HUDTEXT(controlPrimaryRounds,L"[%ls] gun: %ls",L"[%ls] 主武器：%ls",L"[%ls] 主武器：%ls",L"[%ls] 主兵装：%ls")
 HUDTEXT(controlFireKey,L"[%ls] fire: %ls",L"[%ls] 开火：%ls",L"[%ls] 開火：%ls",L"[%ls] 発射：%ls")
+HUDTEXT(controlSeatFire,L"[ATTACK] fire: %ls",L"[攻击] 开火：%ls",L"[攻擊] 開火：%ls",L"[攻撃] 発射：%ls")
 HUDTEXT(controlAutoMark,L" (auto)",L"（自动）",L"（自動）",L"（自動）")
 HUDTEXT(controlAutoTurretsOn,L"[%ls] auto turrets: on",L"[%ls] 自动炮塔：开",L"[%ls] 自動砲塔：開",L"[%ls] 自動砲塔：オン")
 HUDTEXT(controlAutoTurretsOff,L"[%ls] auto turrets: off",L"[%ls] 自动炮塔：关",L"[%ls] 自動砲塔：關",L"[%ls] 自動砲塔：オフ")

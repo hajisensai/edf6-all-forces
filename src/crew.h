@@ -506,6 +506,17 @@ struct Config {
 // The live config: an immutable snapshot, swapped whole by the ini reload (plugin.cpp LoadConfig) and read
 // from any thread (game, call picker, HUD draw) without a torn mix of old and new values.
 const Config& Cfg() noexcept;
+// An extra vehicle fire key's (3..6) binding: VehicleFire<key>Key's virtual key, VehicleFire<key>Button's XInput bits; 0
+// none (payload.cpp fires on it, hud.cpp PayloadControls names it).
+inline int FireKeyVk(unsigned char key) noexcept {
+    const Config& c=Cfg();
+    return key==3 ? c.vehicleFire3Key : key==4 ? c.vehicleFire4Key : key==5 ? c.vehicleFire5Key : key==6 ? c.vehicleFire6Key : 0;
+}
+inline int FireKeyButton(unsigned char key) noexcept {
+    const Config& c=Cfg();
+    return key==3 ? c.vehicleFire3Button : key==4 ? c.vehicleFire4Button : key==5 ? c.vehicleFire5Button :
+           key==6 ? c.vehicleFire6Button : 0;
+}
 // Between SuppressBump(true) and SuppressBump(false) on this thread, the player's board button takes no
 // NPC's seat (heli.cpp PressBoard): an override of the call, not a write to the config. (A pair of calls,
 // not a scoped object: the callers run under __try, which allows no destructors.)

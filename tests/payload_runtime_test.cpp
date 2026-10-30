@@ -17,6 +17,7 @@ bool mapHeld=false;
 bool MapHoldsKeys() noexcept { return mapHeld; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
 bool AiGunner(const unsigned char*,const unsigned char* s) noexcept { return authority && SeatRider(s)==Rider::other; }
+bool IsOnlineAuthority(const void*) noexcept { return authority; }   // payload.cpp RunsUnmannedTurrets
 void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
@@ -226,18 +227,18 @@ int main() {
         float* where=reinterpret_cast<float*>(enemy+kPosition);where[0]=0;where[1]=-0.5f;where[2]=80;
         weapons[1][0][kWeaponTrigger]=weapons[1][2][kWeaponTrigger]=0;
         Put<int>(weapons[1][2],kWeaponAmmo,2999);
-        check(NpcCoaxFire(v,0,enemy,&FriendInLine) && weapons[1][2][kWeaponTrigger]==1,"the coax fires alongside it, laid on the target");
+        check(NpcOwnWeaponsFire(v,0,enemy,&FriendInLine) && weapons[1][2][kWeaponTrigger]==1,"the coax fires alongside it, laid on the target");
         check(is(weapons[1][2],kCoaxBall),"an NPC's coax belt too: 2999 left, a ball round");
         Put<int>(weapons[1][2],kWeaponAmmo,3000);
         PullHook(holders[1][0]);
         check(weapons[1][0][kWeaponTrigger]==1,"and the main gun's own pull still lands on the main gun");
         weapons[1][2][kWeaponTrigger]=0;where[0]=30;
-        check(!NpcCoaxFire(v,0,enemy,&FriendInLine) && !weapons[1][2][kWeaponTrigger],"not laid on it (20 degrees off): no coax burst");
+        check(!NpcOwnWeaponsFire(v,0,enemy,&FriendInLine) && !weapons[1][2][kWeaponTrigger],"not laid on it (20 degrees off): no coax burst");
         where[0]=0;where[2]=850;weapons[1][2][kWeaponTrigger]=0;
-        check(NpcCoaxFire(v,0,enemy,&FriendInLine) && weapons[1][2][kWeaponTrigger]==1,"850 m: inside a 7.62 mm coax's reach, it fires");
-        where[2]=950;check(!NpcCoaxFire(v,0,enemy,&FriendInLine),"beyond 900 m (its tracer burns out): the coax holds");
-        where[2]=80;friendInLine=true;check(!NpcCoaxFire(v,0,enemy,&FriendInLine),"a friend in the line: the coax holds");friendInLine=false;
-        check(!NpcCoaxFire(v,0,nullptr),"no target, no burst");
+        check(NpcOwnWeaponsFire(v,0,enemy,&FriendInLine) && weapons[1][2][kWeaponTrigger]==1,"850 m: inside a 7.62 mm coax's reach, it fires");
+        where[2]=950;check(!NpcOwnWeaponsFire(v,0,enemy,&FriendInLine),"beyond 900 m (its tracer burns out): the coax holds");
+        where[2]=80;friendInLine=true;check(!NpcOwnWeaponsFire(v,0,enemy,&FriendInLine),"a friend in the line: the coax holds");friendInLine=false;
+        check(!NpcOwnWeaponsFire(v,0,nullptr),"no target, no burst");
         Put<void*>(v,0,image+kVt403);
     }
     // 2026-10-12 「同轴机枪开火的时候主炮会伸缩」: the 505's and the 601's slot 48 play the main gun's firing motion for
@@ -761,12 +762,12 @@ int main() {
         check((npcGun==w5[0] || npcGun==w5[1]) && fire==PayloadFire::primary,"NPC: the gun pair on the primary, never a keyed weapon");
         check(NpcSecondarySelect(v,0,300,false)==w5[2],"NPC: the second trigger's MG planned apart");
         for(auto& w:w5)w[kWeaponTrigger]=0;
-        check(NpcOwnKeysFire(v,0,enemy,&FriendInLine) && latches()==16u,"NPC: the AA gun laid on its target fires; the missiles, unlocked, hold");
+        check(NpcOwnWeaponsFire(v,0,enemy,&FriendInLine) && latches()==16u,"NPC: the AA gun laid on its target fires; the missiles, unlocked, hold");
         for(auto& w:w5)w[kWeaponTrigger]=0;lockObject=enemy;airTarget=true;at[0]=110;
-        check(NpcOwnKeysFire(v,0,enemy,&FriendInLine) && latches()==8u,"NPC: the missiles locked on an aircraft launch; the gun off its line holds");
+        check(NpcOwnWeaponsFire(v,0,enemy,&FriendInLine) && latches()==8u,"NPC: the missiles locked on an aircraft launch; the gun off its line holds");
         lockObject=nullptr;airTarget=false;at[0]=0;authority=false;for(auto& w:w5)w[kWeaponTrigger]=0;
-        check(!NpcOwnKeysFire(v,0,enemy,&FriendInLine) && !latches(),"another machine's NPC: nothing fired here");authority=true;
-        check(!NpcOwnKeysFire(v,0,nullptr),"no target, no shot");
+        check(!NpcOwnWeaponsFire(v,0,enemy,&FriendInLine) && !latches(),"another machine's NPC: nothing fired here");authority=true;
+        check(!NpcOwnWeaponsFire(v,0,nullptr),"no target, no shot");
         // The second trigger is only the V603's to give; the extra keys are no class's own input.
         Put<void*>(v,0,image+kVt403);
         PayloadReadout c403{};unsigned char* ws[kMostPayload]{};

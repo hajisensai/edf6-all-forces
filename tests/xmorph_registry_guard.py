@@ -88,8 +88,14 @@ for u in ported:
     for a in u.arms:
         kind = vc.xm_store(u, a)
         check(kind in vc.STORES and vc.STORES[kind].key == a.fire and vc.STORES[kind].auto == a.auto
+              and vc.STORES[kind].seat == a.seat
               and f'{{L"EDF6VC_{kind}_",' in stores_inc, f'{key}: arm {a.key}: STORES {kind} / src/stores.inc (gen_stores)')
-    check(len({a.fire for a in u.arms}) == len(u.arms), f'{key}: two arms on one fire key')
+    keyed = [a.fire for a in u.arms if a.fire]
+    check(len(set(keyed)) == len(keyed), f'{key}: two arms on one fire key')
+    # its gunner seats (Arm.seat): one arm a seat, numbered 1.. in arms order, each with its own turret and no key
+    seated = [a.seat for a in u.arms if a.seat]
+    check(seated == list(range(1, len(seated) + 1)), f'{key}: the gunner seats of its arms {seated} are not 1..n in order')
+    check(all((a.turret and not a.fire) if a.seat else a.fire for a in u.arms), f'{key}: a seat arm has a key or no turret')
     check(v is None or v.slots == ('left', 'right', *(f'xm_{a.key}' for a in u.arms)), f'{key}: its slots are not its arms')
     # its model: a tracked unit's a wt_tracked folder (WT_ONLY its camera), an emplacement's on the fortified base
     if u.family == 'tracked':

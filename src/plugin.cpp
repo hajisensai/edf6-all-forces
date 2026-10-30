@@ -50,6 +50,7 @@
 #include "pvp_controlled_spawn.h"
 #include "enemy_control_pvp_native.h"
 #include "vulcan_rotor.h"
+#include "seat_turret.h"
 #include "edf/host.h"
 #include "version.h"
 #include "build_id.h"
@@ -1352,6 +1353,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
     Log("EDF41 original sidecar hooks=%d",InstallEdf41Bike());
     Log("M163 visual rotor=%d",InstallVulcanRotor());
+    InstallSeatTurrets();    // the gunner seats' own turrets, posed at the same world build
     InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked
     Log("PVP native hooks=%d",InstallPvp());
     InstallRoomPvp();       // the room's start held until every member acknowledged the PvP lock (room_pvp.cpp)
