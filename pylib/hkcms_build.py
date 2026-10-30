@@ -338,6 +338,7 @@ class Body:
     matrix, like every EDF6 object collision); its name is '<model>.<node>' (the map loader looks it up)."""
     name: str
     triangles: np.ndarray
+    ground: bool = False     # the terrain palette (the ground's material) rather than the objects'
 
 
 @dataclass
@@ -418,14 +419,15 @@ def soup_tiles(tris: np.ndarray) -> list[tuple[np.ndarray, np.ndarray, np.ndarra
     return out
 
 
-def build_collision(donor: bytes, terrain_name: str, heights: np.ndarray, x0: float, z0: float, step: float,
+def build_collision(donor: bytes, terrain_name: str, heights: np.ndarray | None, x0: float, z0: float, step: float,
                     bodies: list[Body] | None = None, tile_cells: int = 10,
                     values: np.ndarray | None = None) -> bytes:
     """The collision.hkt of a map whose ground is `heights` (rows, cols): vertex (i, j) at (x0 + j * step, h, z0 + i *
     step), a static body named f'{terrain_name}.{terrain_name}' (a compound of tile_cells x tile_cells tiles of one
     quad per cell, up to 127 quads each), plus `bodies` (static, identity transform). `values` (rows - 1, cols - 1)
-    uint8 picks each quad's material of the terrain's palette (0..5, default 0). The donor's libraries and physics
-    system are kept, its bodies dropped."""
+    uint8 picks each quad's material of the terrain's palette (0..5, default 0). heights None: no lattice body (a map
+    whose ground is meshes: its ground bodies are `bodies` with ground=True, on the terrain's palette). The donor's
+    libraries and physics system are kept, its bodies dropped."""
     if tile_cells * tile_cells > MAX_PRIMS:
         raise ValueError('a tile holds at most %d quads' % MAX_PRIMS)
     tf = hkfile.read(donor)
@@ -451,12 +453,13 @@ def build_collision(donor: bytes, terrain_name: str, heights: np.ndarray, x0: fl
             return items[0]
         return b.compound(items, doms, bits, so)
 
-    tname = f'{terrain_name}.{terrain_name}'
-    add_body(tname, shapes_of(grid_tiles(heights, x0, z0, step, tile_cells, values), tname), don.palette_terrain)
+    if heights is not None:
+        tname = f'{terrain_name}.{terrain_name}'
+        add_body(tname, shapes_of(grid_tiles(heights, x0, z0, step, tile_cells, values), tname), don.palette_terrain)
     for body in bodies or []:
         parts = soup_tiles(np.asarray(body.triangles, dtype=np.float64).reshape(-1, 3, 3))
         if parts:
-            add_body(body.name, shapes_of(parts, body.name), don.palette_object)
+            add_body(body.name, shapes_of(parts, body.name), don.palette_terrain if body.ground else don.palette_object)
     cinfos = tf.new(don.cinfos.type, len(made))
     for k, (name, shape) in enumerate(made):
         don.cinfos.copy_element(0, cinfos, k)          # the donor's first body (the ground): the template of ours
