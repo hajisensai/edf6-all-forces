@@ -49,6 +49,7 @@ RELEASE_MODELS = ('twin_tank', 'drill_tank', 'sazabi', 'dreadnought', 'cockpits'
 # and every ported X-Morph unit's folder (pylib/xm_units.py; the model pack's, never the repository's: the share package's
 # run_export.py EXTERNAL_MODELS lists the same folders, CLAUDE.md)
 RELEASE_MODELS += tuple(xm_units.folder(u.key) for u in xm_units.ported())
+RELEASE_MODELS += ('xm_maps',)   # tools/make_xm_maps.py MODEL_DIR: X-Morph's maps, built by the developer
 
 README = """EDF6VehicleCrew {version}（空中支援 / 载具乘员插件）
 
@@ -229,7 +230,7 @@ def build_exe(name: str, generator: str | None = None) -> str:
            '--specpath', WORK]
     for p in paths:
         cmd += ['--paths', p]
-    for mod in ('call_weapons', 'edf41_objects', 'edf41_outfits', 'edf41_maps', 'edf41_menu_bg', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model', 'make_sedan',
+    for mod in ('call_weapons', 'edf41_objects', 'edf41_outfits', 'edf41_maps', 'make_xm_maps', 'edf41_menu_bg', 'edf41_sounds', 'edf5_dlc', 'awe', 'map_legacy', 'rmpa_legacy', 'legacy_sgo', 'make_jets', 'make_sub', 'make_katyusha', 'katyusha_model', 'make_artillery', 'artillery_model', 'ragdoll_fit', 'make_chute', 'chute_model', 'obj_model', 'texfile', 'make_drill', 'drill_model', 'make_stock_stores', 'graft_pure', 'primer_fighter_model', 'calls', 'make_sidecar', 'sidecar_model', 'make_sedan',
                 'make_bigmap', 'bigmap', 'seams', 'fmb', 'fmb_build', 'hkcms', 'hkcms_build', 'hktag', 'hkfile', 'hkshape', 'hk2014', 'shkt_check', 'vehicle_check', 'model_pieces', 'sk_map', 'sk_terrain', 'gen', 'catalog', 'rmpa', 'jet_models', 'jet_gear', 'weapons',
                 'testhub', 'make_emc', 'make_ultimate', 'make_barrage', 'magic_circle', 'make_vulcan', 'make_bmpt', 'make_quadvulcan', 'make_emp_mid', 'make_emp_short', 'make_emp_long', 'make_tunguska', 'make_pzh2000', 'make_sturmtiger', 'make_ciws_phalanx', 'make_flak88', 'make_apocalypse', 'make_gdf005', 'make_laser', 'make_railgun', 'make_tos1', 'make_patriot', 'make_xmorph', 'xm_units', 'emplacement_model', 'quadvulcan_model', 'make_tracked_combat', 'tracked_combat_model', 'tracked_collision', 'frozen_collision_probe', 'vulcan_model', 'bmpt_model',
                 'edf41_materials', 'edf41materials', 'goldcoat', 'centipede_model', 'dragonfly_model', 'buildcache', 'rootcpk', 'ledger',

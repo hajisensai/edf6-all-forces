@@ -172,6 +172,39 @@ def remove(root: str) -> tuple[list[str], list[str]]:
     return led.release(OWNER, sorted(set(led.owned_by(OWNER))), writer=True)
 
 
+# ------------------------------------------------------------------------------------------------ trial (developer)
+
+TRIAL_SOURCE = 'M045'     # the stock mission whose MISSION.RMPA (its 'プレイヤー' point) the trial moves onto the map
+TRIAL_DROP = 8.0          # metres above the map's highest ground the player starts (falls onto whatever is there)
+
+
+def trial_mission(name: str, entry: dict, game_root: str) -> dict[str, bytes]:
+    """{file: bytes} of a mission that loads map `name` in its first weather and puts the player over the map's centre:
+    for tests/autopilot/drive.py run ... --place (MISSION.AC / MISSION.RMPA over a stock mission's, put back after)."""
+    import rmpa
+    from vcobjects import Game
+    points = Game(game_root).read(f'MISSION/EDF6/{TRIAL_SOURCE}', 'MISSION.RMPA')
+    y = entry['bounds'][1][1] + TRIAL_DROP
+    points = rmpa.moved(points, {'プレイヤー': ((0.0, y, 0.0), (0.0, y, 10.0))})
+    m, w = f'app:/Map/{name}.mac', entry['weathers'][0].lower()
+    lines = ['#include "app:/Mission/AsCommon.h"', '', 'Talkers g_soldiers;', '', 'class __EventData {',
+             '\tuint m_counter  = 0;', '\tbool m_is_break = false;', '\tbool m_is_pass = false;',
+             '\tinternal_SyncCounter m_game_thread_sync;', '\tinternal_SyncCounter m_voice_thread_sync;',
+             '\tMutex m_mutex;', '};', '', '__EventData __0000_data;', '', 'const uint __END_SYNC = 0x7fffffff;', '',
+             'void Main()', '{', '\tif( IsBoolState(0,::__0000_data.m_is_break,::__0000_data.m_is_break) ) return;',
+             '\t::__0000_data.m_counter++;', '\tconst uint32 MAX_EVENT_ID = 1;', '\tinternal_Initialize(MAX_EVENT_ID);',
+             '\tinternal_GetEventState(0).SetName("開始");',
+             '\tMutex_LockObject@ __internal_thread_lock = ::__0000_data.m_mutex.Lock();',
+             '\tinternal_InitEventThread(0, ::__0000_data.m_counter, "Main", "開始");', '', '\tBeginLoading();',
+             f'\tPreloadMap("{m}", "{w}", -1);', '\tPreload("app:/ui/UiResourceGroup_InMission.sgo", -1);',
+             '\tPreloadPlayerResource();', '\tWaitPreload();', '\tOnline_WaitStart();', '\tEndLoading();', '',
+             '\tWaitVoice();', '\tg_soldiers = GetTalkers();', '\t::__0000_data.m_game_thread_sync.Reset();',
+             '\t::__0000_data.m_voice_thread_sync.Reset();', '\t::internal_CreateThread("__0000_voice_event");', '',
+             f'\tMap("{m}", "{w}");', '\tCreatePlayer("プレイヤー");', '\twhile( true ) {', '\t\tWait(1.0);', '\t}',
+             '}', '', 'void __0000_voice_event()', '{', '\t::__0000_data.m_voice_thread_sync.Update(__END_SYNC);', '}', '']
+    return {'MISSION.AC': '﻿'.encode('utf-8') + '\n'.join(lines).encode('utf-8'), 'MISSION.RMPA': points}
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -180,9 +213,20 @@ def main(argv: list[str]) -> int:
     b.add_argument('maps', nargs='*')
     for c in ('install', 'remove'):
         sub.add_parser(c).add_argument('game')
+    t = sub.add_parser('trial')
+    t.add_argument('map')
+    t.add_argument('out')
+    t.add_argument('--game', default=None)
     a = ap.parse_args(argv)
     if a.cmd == 'build':
         build(a.out, a.maps)
+    elif a.cmd == 'trial':
+        from vcobjects import DEFAULT_GAME
+        files = trial_mission(a.map, _index(obj_model.model_dir(MODEL_DIR))[a.map], a.game or DEFAULT_GAME)
+        os.makedirs(a.out, exist_ok=True)
+        for fn, data in files.items():
+            with open(os.path.join(a.out, fn), 'wb') as f:
+                f.write(data)
     elif a.cmd == 'install':
         written, skipped = install(a.game)
         for p in written:
