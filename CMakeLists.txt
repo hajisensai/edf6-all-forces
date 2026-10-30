@@ -117,7 +117,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/npcai.cpp src/npcpost.cpp src/npc_bac
 target_sources(EDF6VehicleCrew PRIVATE src/ground_navigation.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/mission_crew_support.cpp src/mission_crew_team.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_soldier.cpp)
-target_sources(EDF6VehicleCrew PRIVATE src/npc_gunner_aim.cpp src/real_driver_native.cpp src/mission_crew.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/npc_gunner_aim.cpp src/real_driver_native.cpp src/mission_crew.cpp src/vehicle_target.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/command_unit.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_spawn.cpp)
 # The generated variant files (coloured soldiers, loaded vehicles) a mission preloads (src/support_variants.h).

@@ -470,10 +470,10 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('2S6 Tunguska', 'Requests a 2S6 Tunguska: two twin-barrel 30 mm 2A38M cannon (firing together) on the primary attack and 9M311 anti-air missiles (lock on to air targets) on the secondary, both at once; T / D-pad right switches the missile. Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
     },
     'pzh2000': {
-        'SC': ('PzH 2000 自行榴弹炮', '请求一辆 PzH 2000：自行榴弹炮的升级版，炮塔可以转动，155mm 长身管榴弹炮，射速、射程和单发威力都更高。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),
-        'CN': ('PzH 2000 自走榴彈砲', '請求一輛 PzH 2000：自走榴彈砲的升級版，砲塔可以轉動，155mm 長身管榴彈砲，射速、射程和單發威力都更高。外觀為 KojfDiscord 分享的戰雷（War Thunder）模型（CC BY 4.0）。'),
-        'JA': ('PzH 2000 自走榴弾砲', '自走榴弾砲の強化型 PzH 2000 を要請する。砲塔が旋回し、155mm 長砲身榴弾砲は発射速度・射程・一発の威力がいずれも上。外観は KojfDiscord が公開した War Thunder のモデル（CC BY 4.0）。'),
-        'EN': ('PzH 2000', 'Requests a PzH 2000, the self-propelled howitzer upgraded: its turret turns, and its long 155 mm gun fires faster, further and harder. Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
+        'SC': ('PzH 2000 自行榴弹炮', '请求一辆 PzH 2000：自行榴弹炮的升级版，炮塔可以转动，155mm 长身管榴弹炮，射速、射程和单发威力都更高；副武器为炮塔顶的 MG3 机枪（随炮塔转动、水平射击）。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),
+        'CN': ('PzH 2000 自走榴彈砲', '請求一輛 PzH 2000：自走榴彈砲的升級版，砲塔可以轉動，155mm 長身管榴彈砲，射速、射程和單發威力都更高；副武器為砲塔頂的 MG3 機槍（隨砲塔轉動、水平射擊）。外觀為 KojfDiscord 分享的戰雷（War Thunder）模型（CC BY 4.0）。'),
+        'JA': ('PzH 2000 自走榴弾砲', '自走榴弾砲の強化型 PzH 2000 を要請する。砲塔が旋回し、155mm 長砲身榴弾砲は発射速度・射程・一発の威力がいずれも上。副武器は砲塔上の MG3 機関銃（砲塔と共に旋回、水平射撃）。外観は KojfDiscord が公開した War Thunder のモデル（CC BY 4.0）。'),
+        'EN': ('PzH 2000', 'Requests a PzH 2000, the self-propelled howitzer upgraded: its turret turns, and its long 155 mm gun fires faster, further and harder; the MG3 on the turret roof on the secondary (turning with the turret, firing level). Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
     },
     'sturmtiger': {
         'SC': ('突击虎', '请求一辆突击虎：虎式底盘上的 380mm 火箭臼炮，没有炮塔，炮只能左右各转 10 度，转向靠车身。装填很慢，一发的爆炸范围极大，用来拔除据点。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),

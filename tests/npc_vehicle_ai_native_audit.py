@@ -153,5 +153,28 @@ for vt in CREWED:
 aim = code(0x65FF26, 0x30)
 assert aim[0x65FF2B] == 'cmp byte ptr [rsp + 0x30], 0' and aim[0x65FF32] == 'test r14b, r14b'
 assert aim[0x65FF37] == 'test r15b, r15b' and aim[0x65FF3C] == 'mov dword ptr [r12 + rbx + 0x2e4], 0x3f800000'
+
+# The AI target (src/vehicle_target.cpp): the object update asks slot 14 (0x54C010 call [rax+0x70]) and stores it at
+# +0x518 (0x54C130); CarBase's slot 14 0x630890 takes the nearest enemy (0x54C4B0: the team walk 0x5E0F20, no range
+# limit) and, with +0xE04 set, keeps it only when 0x62DE60 (reach, arc, map ray) passes on its lock point.
+upd = code(0x54C00A, 0x130)
+assert upd[0x54C010] == 'call qword ptr [rax + 0x70]' and upd[0x54C130] == 'mov qword ptr [rdi + 0x518], rdx'
+search = code(0x630890, 0x6B)
+assert search[0x63089D] == 'call 0x54c4b0' and search[0x6308A2] == 'cmp byte ptr [rdi + 0xe04], 0'
+assert search[0x6308B3] == 'cmp qword ptr [rax + 0x378], 0' and search[0x6308BD] == 'lea rdx, [rax + 0x90]'
+assert search[0x6308C6] == 'mov rax, qword ptr [rax + 0x368]' and search[0x6308D0] == 'add rdx, 0x10'
+assert search[0x6308D7] == 'call 0x62de60' and search[0x6308E0] == 'xor eax, eax'
+near = code(0x54C4B0, 0x66)
+assert near[0x54C4B4] == 'movzx eax, byte ptr [rcx + 0x4a0]' and near[0x54C4F9] == 'mov edx, dword ptr [rcx + 0x314]'
+assert near[0x54C506] == 'call 0x5e0f20' and near[0x54C50C] == 'mov rax, qword ptr [rsp + 0x50]'
+assert struct.unpack('<f', p.get_data(0x176B03C, 4))[0] > 3e38   # FLT_MAX: no range limit
+step = code(0x54A3B0, 0xF0)   # the walk's step: active (+0x39C), distance times +0x47C when weighted
+assert step[0x54A3BA] == 'test dword ptr [rdx + 0x39c], 0xfffffffd' and step[0x54A453] == 'mulss xmm6, dword ptr [rdi + 0x47c]'
+walk = code(0x5E0F20, 0xC0)
+assert walk[0x5E0F94] == 'cmp dword ptr [rax + rbp], 2' and walk[0x5E0FD2] == 'call qword ptr [rax + 8]'
+CAR_AI = (0x17D8B50, 0x17D8FA0, 0x17D9458, 0x17DA508, 0x17DADB0, 0x17DB590, 0x17DB9D8, 0x17DBDF8, 0x17DC250,
+          0x17DC620, 0x17DCAB0, 0x17DCFB8, 0x17DFDC8, 0x17E01B0, 0x17E0A80, 0x17E1828)
+for vt in CAR_AI:
+    assert slot(vt, 14) == 0x630890 and slot(vt, 72) == 0x661440, hex(vt)
 print('PASS: AI-list flag -> slot 6, the three AI passes and actions (the Barga slot 4 kind), the mech attack table and aim origin, '
       'the trucks\' own slot 6, its key lookup (+0x100 through 0x66F040) and aim table, the seat aim gate')

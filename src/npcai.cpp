@@ -51,6 +51,7 @@
 #include <vector>
 
 namespace crew {
+bool InstallVehicleTargetSearch() noexcept;   // vehicle_target.cpp
 namespace {
 void ResetGunnerInputs() noexcept;
 bool InstallDriverPayload() noexcept;
@@ -1940,6 +1941,7 @@ bool InstallNpcAi() noexcept {
     ok=hooked==kClasses;
     Log("NPCAI soldiers' Think hooked %d/%d%s",hooked,kClasses,ok ? "" : ": the custom AI stays off");
     if(ok){InstallDriverPayload();InstallFreeSquadCover();}
+    InstallVehicleTargetSearch();   // every CarBase AI driver, the stock's dummies too: not tied to the soldiers' Think
     ConfigureNpcCommandNetwork(ok ? &NpcMapCommandForRequester : nullptr);
     return ok;
 }
