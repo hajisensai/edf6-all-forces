@@ -28,7 +28,9 @@ Families (the chassis an EDF6 class drives; tools/prep_xmorph.py has one prepare
                  `like`'s native gun pair (the two V603 holders: GUNS / NAMES / the shell over the `like`'s); the
                  `like`'s stores (missiles, a second belt) are vehicle-specific store rows (vcobjects STORES, with
                  their own muzzles) and are not inherited
-    wheeled      planned: a wheeled chassis
+    wheeled      V603 too, the same way (tools/prep_xmorph.py wheeled: its real wheels on the V603's wheel stations;
+                 it turns as the V603, skid steering); the Grape's wheeled class (Vehicle401_Striker) has one weapon
+                 holder and a skeleton of its own, which no generator here builds a model on
     mech         planned: the Proteus / Balam walkers
     emplacement  a fort's gun on pylib/emplacement_model.py's fortified base (the V603, tools/prep_xmorph.py emplacement)
     heli         the stock V506 heli in its own model (pylib/xm_heli.py, pylib/xm_air_model.py; tools/prep_xmorph.py heli)
@@ -137,6 +139,10 @@ class Unit:
     guns: dict = field(default_factory=dict)   # the gun's numbers over the `like`'s (make_tracked_combat GUNS)
     shell: str = ''          # its round's look and sound (a WEAPON SGO) where not the `like`'s (make_tracked_combat SHELL_OF)
     alternate: bool | None = None   # its two holders fire in turn (vcobjects GroundVehicle.alternate); None: the like's
+    # Its gun pair's round is a homing missile (make_tracked_combat MISSILE_SHELL: the Titan's side missile, its look
+    # and lock-on, as the Patriot's) where its `like`'s is a gun's
+    homing: bool = False
+    traverse: float = 0.0    # its turret's stops, deg either side (make_tracked_combat TURRET_LIMITS); 0: free
     arms: tuple[Arm, ...] = ()      # its other weapons (Arm)
     # (camera, eye: measured on the model at the game's size, metres; read through camera() / eye(), at SCALE)
     camera: dict = field(default_factory=dict)  # its vehicle camera over the `like`'s (make_tracked_combat WT_ONLY)
@@ -378,11 +384,121 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                'third_person_height': 5.0},
        eye=(0.0, 4.6, 1.7), eye_bone='cannon_l', durability=4000.0, reload=12000, level=2.2, after='EDF6VC_CALL_XM_MEDIUM_ARTILLERY_REGULAR'),
     # ground: wheeled
-    _u('ground/medium_missile_launcher', 'wheeled', 'tos1', title='Missile Launcher'),
-    _u('ground/medium_apc', 'wheeled', 'bmpt', title='APC'),
+    # Their armour: the game's max_health at the tracked units' scale (the battle tank's 170 = 2500), WHEELED_FLOOR at
+    # least (the light ones' 15..40 would be a few hundred: the stock sedan's 300).
+    # The missile launcher: a truck whose rack (four tubes, its one bone pitching and turning at the rack's rear)
+    # fires one big missile every 5 s (enemy_missile_anti_core_launchers: 125, Area 12, flown to a point it is given).
+    # The TOS-1's lofted salvo made one round (EDF6AutoTurret's lofted mark: aimed at a ground point on the arc), the
+    # upper pair of tubes the native holders' (prep_xmorph MOUTHS), in turn. The rack turns +-30 deg: it pivots at its
+    # rear and sweeps the cab further round.
+    _u('ground/medium_missile_launcher', 'wheeled', 'tos1', 'ported', 'Missile Launcher',
+       texts={'SC': ('X-Morph 导弹发射车', '请求一辆人类军队的导弹发射车：卡车后部的发射架为主攻击，每五秒曲射一枚重型导弹，落点大范围爆炸；'
+                                     '发射架左右各可转 30 度；装甲很薄。'),
+              'CN': ('X-Morph 飛彈發射車', '請求一輛人類軍隊的飛彈發射車：卡車後部的發射架為主攻擊，每五秒曲射一枚重型飛彈，落點大範圍爆炸；'
+                                     '發射架左右各可轉 30 度；裝甲很薄。'),
+              'JA': ('X-Morph ミサイルランチャー', '人類軍のミサイルランチャーを要請する。トラック後部の発射機（5 秒ごとに重ミサイルを 1 発、'
+                                          '山なりに撃ち、着弾点で広く爆発）を主攻撃とする。発射機は左右 30 度まで旋回。装甲は非常に薄い。'),
+              'EN': ('X-Morph Missile Launcher', "Requests the human army's missile launcher: the rack on its truck's bed on "
+                                                 'the primary attack, a heavy missile every 5 s on a high arc, bursting wide '
+                                                 'where it lands; the rack turns 30 deg either way; very light armour.')},
+       gun=('Heavy Missiles', '重型导弹', '重ミサイル', '重型飛彈'),
+       # main_weapon: MissileWeaponDef, fire_rate 5, muzzles_per_fire 1 (enemy_missile_anti_core_launchers: 125, Area
+       # 12): one missile every 5 s, the two holders in turn
+       guns={'AmmoCount': 16.0, 'AmmoDamage': 15000.0, 'AmmoExplosion': 18.0, 'FireInterval': 600.0,
+             'FireBurstCount': 1.0, 'FireBurstInterval': 0.0, 'FireAccuracy': 0.01},
+       # models/xm_medium_missile_launcher: 12.3 m long (z -7.0..5.3); the cab in front (roof ~3.4), the rack on the
+       # bed y 1.5..3.7, z -7.0..0.7, its pivot y 2.37, z -5.2; the upper tubes' mouths y 3.1, z 0.8
+       camera={'model_eye': (0., 4.2, -3.0), 'model_look_at': (0., 3.0, 10.), 'third_person_distance': 13.,
+               'third_person_height': 5.4},
+       eye=(0.0, 4.1, -4.6), durability=800.0, reload=16000, level=2.5, traverse=30.0,
+       after='EDF6VC_CALL_XM_LARGE_BOMBER_CORE'),
+    # The APC: eight wheels, a turret with twin heavy machine guns (bursts of three, every 1.3 s) and a radar; two
+    # weapons on the same guns: anti-air rounds (main_weapon, both barrels) and ground rounds (core_weapon, the
+    # barrels in turn). The 2S6's 30 mm belt as its round.
+    _u('ground/medium_apc', 'wheeled', 'tunguska', 'ported', 'APC',
+       texts={'SC': ('X-Morph 装甲运兵车', '请求一辆人类军队的装甲运兵车：八轮，炮塔上的双联重机枪为主攻击，三发一组、两根枪管齐射（对空弹）；'
+                                      '副武器为同一对枪管轮流射出的对地弹；装甲中等。'),
+              'CN': ('X-Morph 裝甲運兵車', '請求一輛人類軍隊的裝甲運兵車：八輪，砲塔上的雙聯重機槍為主攻擊，三發一組、兩根槍管齊射（對空彈）；'
+                                      '副武器為同一對槍管輪流射出的對地彈；裝甲中等。'),
+              'JA': ('X-Morph 装甲兵員輸送車', '人類軍の装甲兵員輸送車を要請する。8 輪で、砲塔の連装重機関銃（3 発ずつ、2 門同時：対空弾）を'
+                                         '主攻撃とする。副武器は同じ銃身から交互に撃つ対地弾。装甲は中程度。'),
+              'EN': ('X-Morph APC', "Requests the human army's APC: eight wheels, its turret's twin heavy machine gun on the "
+                                    'primary attack, bursts of three from both barrels (anti-air rounds); on the secondary '
+                                    'the same barrels\' ground rounds, in turn; medium armour.')},
+       gun=('Twin Heavy MG', '双联重机枪', '連装重機関銃', '雙聯重機槍'),
+       # main_weapon: fire_rate 1.3, three 0.2 s apart, both muzzles (enemy_bullet_medium: 10 anti_player)
+       guns={'AmmoCount': 300.0, 'AmmoDamage': 300.0, 'AmmoExplosion': 0.0, 'FireInterval': 78.0,
+             'FireBurstCount': 3.0, 'FireBurstInterval': 12.0}, alternate=False,
+       arms=(Arm('core', ('core_weapon',), 'gun', ('Ground rounds', '対地弾', '對地彈', '对地弹', '대지탄'), 300, 'cannon_l',
+                 # core_weapon: fire_rate 1.3, three 0.2 s apart, muzzles_per_fire 1 (enemy_bullet_medium_anti_core:
+                 # 5 anti_core)
+                 shell=('V_403TANK_MACHINEGUN.SGO', 'SolidBullet01', 'mg'),
+                 numbers={'AmmoDamage': 600.0, 'AmmoSpeed': 16.0, 'AmmoAlive': 90.0, 'FireInterval': 78.0,
+                          'FireBurstCount': 3.0, 'FireBurstInterval': 12.0}),),
+       # models/xm_medium_apc: 10.9 m long, the hull's roof ~4.0; the turret y 3.0..4.7 (its radar to 5.8), z -0.05..
+       # 2.5; the guns at x +-1.2, y 3.95, their muzzles z 5.6
+       camera={'model_eye': (0., 4.7, 0.6), 'model_look_at': (0., 4.2, 10.), 'third_person_distance': 11.,
+               'third_person_height': 5.6},
+       eye=(0.0, 4.95, 1.7), durability=3700.0, reload=12000, level=2.0,
+       after='EDF6VC_CALL_XM_MEDIUM_MISSILE_LAUNCHER'),
+    # The cargo truck: no weapon in the game (no WeaponComp; its skeleton's turret bones have no mesh): not ported.
     _u('ground/medium_truck_cargo', 'wheeled', title='Cargo Truck'),
-    _u('ground/small_humvee', 'wheeled', title='Humvee'),
-    _u('ground/small_buggy', 'wheeled', title='Buggy'),
+    # The Humvee: a machine gun on its roof's turret, anti-air rounds (main_weapon) and ground rounds (core_weapon);
+    # the lightest armour. The 2S6's 30 mm belt as its round, both holders on the one gun in turn.
+    _u('ground/small_humvee', 'wheeled', 'tunguska', 'ported', 'Humvee',
+       texts={'SC': ('X-Morph 悍马', '请求一辆人类军队的悍马：车顶枪塔上的机枪为主攻击，三发一组（对空弹）；副武器为同一挺机枪的对地弹；'
+                                  '装甲很薄、速度快。'),
+              'CN': ('X-Morph 悍馬', '請求一輛人類軍隊的悍馬：車頂槍塔上的機槍為主攻擊，三發一組（對空彈）；副武器為同一挺機槍的對地彈；'
+                                  '裝甲很薄、速度快。'),
+              'JA': ('X-Morph ハンヴィー', '人類軍のハンヴィーを要請する。屋根の銃塔の機関銃（3 発ずつ：対空弾）を主攻撃とし、'
+                                      '副武器は同じ機関銃の対地弾。装甲は非常に薄く、速い。'),
+              'EN': ('X-Morph Humvee', "Requests the human army's Humvee: the machine gun on its roof's turret on the primary "
+                                       'attack, bursts of three (anti-air rounds); on the secondary the same gun\'s ground '
+                                       'rounds; very light armour, fast.')},
+       gun=('Machine Gun', '机枪', '機関銃', '機槍'),
+       # main_weapon: fire_rate 1.5, three 0.15 s apart, one muzzle (enemy_bullet_small: 5 anti_player): both holders
+       # on it, in turn
+       guns={'AmmoCount': 400.0, 'AmmoDamage': 150.0, 'AmmoExplosion': 0.0, 'FireInterval': 180.0,
+             'FireBurstCount': 3.0, 'FireBurstInterval': 9.0}, alternate=True,
+       arms=(Arm('core', ('core_weapon',), 'gun', ('Ground rounds', '対地弾', '對地彈', '对地弹', '대지탄'), 300, 'cannon_l',
+                 # core_weapon: fire_rate 2, three 0.1 s apart (enemy_bullet_small_anti_core: 2 anti_core)
+                 shell=('V_403TANK_MACHINEGUN.SGO', 'SolidBullet01', 'mg'),
+                 numbers={'AmmoDamage': 240.0, 'AmmoSpeed': 16.0, 'AmmoAlive': 90.0, 'FireInterval': 120.0,
+                          'FireBurstCount': 3.0, 'FireBurstInterval': 6.0}),),
+       # models/xm_small_humvee: 5.9 m long, the roof ~2.4; the turret y 2.1..3.1, z -1.2..0.8; the gun's axis y 2.64,
+       # its muzzle y 2.95, z 1.6
+       camera={'model_eye': (0., 3.1, -0.4), 'model_look_at': (0., 2.8, 8.), 'third_person_distance': 8.,
+               'third_person_height': 3.6},
+       eye=(0.0, 3.35, 0.1), durability=800.0, reload=6000, level=0.8, after='EDF6VC_CALL_XM_MEDIUM_APC'),
+    # The buggy: AA missile pods either side of its turret (bursts of five, homing on air units) and a machine gun at
+    # the front (core_weapon, on an attachment of the hull: a fixed mount the game aims itself). The pods are the
+    # native pair (the Titan's side missile, its lock-on: Unit.homing), the gun its secondary along the turret's aim.
+    _u('ground/small_buggy', 'wheeled', 'tunguska', 'ported', 'Buggy',
+       texts={'SC': ('X-Morph 越野车', '请求一辆人类军队的越野车：炮塔两侧的防空导弹为主攻击，五发连射、追踪空中目标；副武器为车头机枪'
+                                   '（六发连射，对地）；装甲很薄、速度快。'),
+              'CN': ('X-Morph 越野車', '請求一輛人類軍隊的越野車：砲塔兩側的防空飛彈為主攻擊，五發連射、追蹤空中目標；副武器為車頭機槍'
+                                   '（六發連射，對地）；裝甲很薄、速度快。'),
+              'JA': ('X-Morph バギー', '人類軍のバギーを要請する。砲塔両側の対空ミサイル（5 発連射、空中目標を追尾）を主攻撃とし、'
+                                    '副武器は車体前部の機関銃（6 発連射、対地）。装甲は非常に薄く、速い。'),
+              'EN': ('X-Morph Buggy', "Requests the human army's buggy: the AA missile pods either side of its turret on the "
+                                      'primary attack, bursts of five homing on air targets; on the secondary its front '
+                                      'machine gun (bursts of six, ground rounds); very light armour, fast.')},
+       gun=('AA Missiles', '防空导弹', '対空ミサイル', '防空飛彈'), homing=True,
+       # main_weapon: MissileWeaponDef, fire_rate 3, five 0.3 s apart, muzzles_per_fire 1 (enemy_missile_anti_aa_small:
+       # 8 anti_player, no Area; the heavy tank's AA missiles' numbers): the two pods in turn
+       guns={'AmmoCount': 40.0, 'AmmoDamage': 240.0, 'AmmoExplosion': 3.0, 'AmmoAlive': 300.0, 'AmmoSize': 0.6,
+             'FireInterval': 360.0, 'FireBurstCount': 5.0, 'FireBurstInterval': 18.0, 'FireAccuracy': 0.02,
+             'LockonTargetType': 7301.0}, alternate=True,
+       arms=(Arm('mg', ('core_weapon',), 'gun', ('Machine gun', '機銃', '機槍', '机枪', '기관총'), 600, 'cannon_l',
+                 # core_weapon: fire_rate 1.5, six 0.1 s apart (enemy_bullet_small_anti_core: 2 anti_core)
+                 shell=('V_403TANK_MACHINEGUN.SGO', 'SolidBullet01', 'mg'),
+                 numbers={'AmmoDamage': 240.0, 'AmmoSpeed': 16.0, 'AmmoAlive': 90.0, 'FireInterval': 90.0,
+                          'FireBurstCount': 6.0, 'FireBurstInterval': 6.0}),),
+       # models/xm_small_buggy: 5.7 m long, its roll cage ~2.2; the turret y 1.6..2.3, z -1.1..-0.25, the pods
+       # (barrel_1) y 2.0..2.8, their mouths x +-0.77, y 2.72, z 0.4
+       camera={'model_eye': (0., 2.9, -0.8), 'model_look_at': (0., 2.5, 8.), 'third_person_distance': 7.5,
+               'third_person_height': 3.2},
+       eye=(0.0, 3.0, -0.5), durability=800.0, reload=6000, level=1.0, after='EDF6VC_CALL_XM_SMALL_HUMVEE'),
     # walkers, foot
     _u('ground/small_mech', 'mech', title='Light Mech'),
     _u('ground/large_mech', 'mech', title='Heavy Mech'),
@@ -728,10 +844,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
 )}
 assert all(u.family in FAMILIES for u in UNITS.values())
 assert all(u.status in ('ported', 'planned') for u in UNITS.values())
-# The families with their EDF-side builder (tools/make_xmorph.py over make_tracked_combat: both on the V603, a tracked
-# unit through pylib/wt_tracked.py, an emplacement through pylib/emplacement_model.py's fortified base).
-PORTABLE = ('tracked', 'emplacement', 'heli', 'jet')
-V603 = ('tracked', 'emplacement')
+# The families with their EDF-side builder (tools/make_xmorph.py over make_tracked_combat: the V603's, a tracked or
+# wheeled unit through pylib/wt_tracked.py, an emplacement through pylib/emplacement_model.py's fortified base; the
+# aircraft through pylib/xm_air_model.py).
+PORTABLE = ('tracked', 'wheeled', 'emplacement', 'heli', 'jet')
+V603 = ('tracked', 'wheeled', 'emplacement')
+# The hulls (pylib/wt_tracked.py builds their model folders on the V603: tools/prep_xmorph.py tracked / wheeled)
+HULLS = ('tracked', 'wheeled')
+WHEELED_FLOOR = 800.0    # a wheeled row's durability at least (its comment)
 
 
 def check(u: Unit) -> None:
@@ -742,7 +862,9 @@ def check(u: Unit) -> None:
         ('family', u.family in PORTABLE), ('like', bool(u.like) or u.family not in V603), ('title_en', bool(u.title_en)),
         ('texts', set(u.texts) == set(LANGS) and all(len(t) == 2 and all(t) for t in u.texts.values())),
         ('gun', len(u.gun) == 4 and all(u.gun)), ('eye', len(u.eye) == 3), ('durability', u.durability > 0),
-        ('reload', u.reload > 0), ('level', u.level > 0), ('after', u.after.startswith('EDF6VC_CALL_'))) if not ok]
+        ('reload', u.reload > 0), ('level', u.level > 0),
+        ('a wheeled durability >= WHEELED_FLOOR', u.family != 'wheeled' or u.durability >= WHEELED_FLOOR),
+        ('after', u.after.startswith('EDF6VC_CALL_'))) if not ok]
     if why:
         raise ValueError(f'{u.key}: a ported unit without {", ".join(why)} (pylib/xm_units.py)')
 
@@ -773,6 +895,11 @@ def v603() -> list[Unit]:
     """The ported units make_tracked_combat builds on the V603 (V603: tracked hulls and emplacements), in table order:
     what every V603 registry (vcobjects GROUND_VEHICLES / TRACKED, the requests, the cockpits, the test range) lists."""
     return [u for u in ported() if u.family in V603]
+
+
+def hulls() -> list[Unit]:
+    """The ported units pylib/wt_tracked.py builds from their model folders (HULLS), in table order."""
+    return [u for u in ported() if u.family in HULLS]
 
 
 def deployed(key: str) -> bool:

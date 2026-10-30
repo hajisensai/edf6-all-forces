@@ -157,8 +157,9 @@ for u in xm_units.v603():
     check(seated == list(range(1, len(seated) + 1)), f'{key}: the gunner seats of its arms {seated} are not 1..n in order')
     check(all((a.turret and not a.fire) if a.seat else a.fire for a in u.arms), f'{key}: a seat arm has a key or no turret')
     check(v is None or v.slots == ('left', 'right', *(f'xm_{a.key}' for a in u.arms)), f'{key}: its slots are not its arms')
-    # its model: a tracked unit's a wt_tracked folder (WT_ONLY its camera), an emplacement's on the fortified base
-    if u.family == 'tracked':
+    # its model: a tracked or wheeled unit's a wt_tracked folder (WT_ONLY its camera), an emplacement's on the
+    # fortified base
+    if u.family in xm_units.HULLS:
         check(wt_tracked.FOLDERS.get(key) == xm_units.folder(key) and key in mtc.WT_ONLY,
               f'{key}: pylib/wt_tracked.py FOLDERS / make_tracked_combat WT_ONLY')
     else:

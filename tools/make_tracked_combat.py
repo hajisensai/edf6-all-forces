@@ -216,14 +216,15 @@ NAMES = {
 # the `like`'s, a model folder of its own (WT_ONLY: wt_tracked.Model). What belongs to the `like`'s hull or model (the
 # one-cradle M61s, turret stops, the procedural models) is not inherited.
 for _xm in xm_units.v603():
-    # a tracked unit is a wt_tracked.Model kind (WT_ONLY: its camera), an emplacement an emplacement_model one (KINDS)
-    _kinds = WT_ONLY if _xm.family == 'tracked' else EMPLACEMENTS
+    # a tracked or wheeled unit is a wt_tracked.Model kind (WT_ONLY: its camera), an emplacement an emplacement_model
+    # one (KINDS)
+    _kinds = WT_ONLY if _xm.family in xm_units.HULLS else EMPLACEMENTS
     if _xm.like not in GUNS or _xm.like not in _kinds:
         raise ValueError(f'{_xm.key}: its like {_xm.like!r} is no {_xm.family} kind with a gun table (GUNS)')
     LABELS[_xm.key] = f'{xm_units.label(_xm)}（X-Morph: Defense 模型）'
     GUNS[_xm.key] = {**GUNS[_xm.like], **_xm.guns}
     NAMES[_xm.key] = _xm.gun
-    if _xm.family == 'tracked':
+    if _xm.family in xm_units.HULLS:
         WT_ONLY[_xm.key] = {**WT_ONLY[_xm.like], **xm_units.camera(_xm)}
     if _xm.shell or _xm.like in SHELL_OF:
         SHELL_OF[_xm.key] = _xm.shell or SHELL_OF[_xm.like]
@@ -231,13 +232,20 @@ for _xm in xm_units.v603():
     HOWITZERS += (_xm.key,) if _xm.like in HOWITZERS else ()
     CANNON_SHELL += (_xm.key,) if _xm.like in CANNON_SHELL else ()
     MISSILE_SHELL += (_xm.key,) if _xm.like in MISSILE_SHELL else ()
+    if _xm.homing:      # its gun pair's round the Patriot's: the Titan's side missile, its look and its lock-on
+        SHELL_OF[_xm.key] = SHELL_OF['patriot']
+        CANNON_SHELL += (_xm.key,) if _xm.key not in CANNON_SHELL else ()
+        MISSILE_SHELL += (_xm.key,) if _xm.key not in MISSILE_SHELL else ()
+    if _xm.traverse:
+        TURRET_LIMITS[_xm.key] = [1.0, -_xm.traverse, _xm.traverse]
 # The kinds whose track faces are a fixed part of the body's texture atlas (the X-Morph units: tools/prep_xmorph.py
 # puts their belts' running faces under v603_kyata_L / _R only because the native class binds those two names): their
 # SGO keeps the two tank_caterpillar_animation rows (the class reads exactly two, EDF.dll 0x67E4B0) but scrolls them at
 # rate 0. Each frame the class sets a track's offset to frac(tank_caterpillar_animation_info[0] x K x track speed +
 # offset) (0x67EADB: +0x2960 the rate, read at 0x67E787 from _info[0]), so a zero rate leaves the texture where it is;
-# the V603's -0.43 would scroll the atlas's neighbouring art through the tread.
-STATIC_TRACKS = tuple(u.key for u in xm_units.ported('tracked'))
+# the V603's -0.43 would scroll the atlas's neighbouring art through the tread. A wheeled unit's belts are slivers
+# hidden in its hubs (tools/prep_xmorph.py wheeled): the two names still, nothing to scroll.
+STATIC_TRACKS = tuple(u.key for u in xm_units.hulls())
 ONE_CRADLE += tuple(u.key for u in xm_units.ported('emplacement'))   # as every emplacement: both holders on its cradle
 
 

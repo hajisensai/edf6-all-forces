@@ -44,7 +44,7 @@ from mdb import Mdb, Mesh, bind_world, cmpl_compress, cmpl_decompress, mdb_read,
 FOLDERS = {'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'tunguska': 'wt_tunguska', 'pzh2000': 'wt_pzh2000',
            'sturmtiger': 'wt_sturmtiger', 'apocalypse': 'wt_apocalypse', 'tos1': 'wt_tos1',
            # the X-Morph: Defense units (pylib/xm_units.py; tools/prep_xmorph.py writes these folders, the model pack's)
-           **{u.key: xm_units.folder(u.key) for u in xm_units.ported('tracked')}}
+           **{u.key: xm_units.folder(u.key) for u in xm_units.hulls()}}
 # A kind made from another kind's folder: its module's derive(spec) turns that kind's spec into its own (the quad M61:
 # the M163's model with its one gun made four, pylib/quadvulcan_model.py); with no base kind, its module's spec(kind)
 # makes it from its own folder (folder(): the Dreadnought's turrets on their bases, pylib/emplacement_model.py).
