@@ -33,7 +33,9 @@ Families (the chassis an EDF6 class drives; tools/prep_xmorph.py has one prepare
     emplacement  a fort's gun on pylib/emplacement_model.py's fortified base (the V603, tools/prep_xmorph.py emplacement)
     heli, jet    planned: the V506 frame / the jets (pylib/jet_models.py)
     infantry     planned
-    boss         planned: the game's bosses (several bodies each)
+    boss         planned: the game's bosses (parts each: xm_model.assemble), until their chassis is known (docs/
+                 xmorph-bosses.md); a boss whose chassis is one of the above is ported as that family (the JAGUAR
+                 Type S, the highway_tank boss: tracked)
     civilian     planned: the maps' traffic and bystanders (their meshes through an inherited blueprint)
     structure    planned: buildings without a weapon (the barracks): the maps' props
 """
@@ -370,11 +372,80 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     _u('air/large_gunship_aa', 'jet', title='Heavy Attack Plane'),
     _u('air/large_bomber_core', 'jet', title='Bomber'),
     # bosses
+    # The JAGUAR Type S (the game's highway_tank boss, story_germany: 「the prototype JAGUAR Type S tank」): a 46 m tracked
+    # hull of eighteen parts (xm_model.assemble: the tracks, the turrets, the pods; tools/prep_xmorph.py BELT_FLOOR), a
+    # tracked unit on the V603 like the tanks. Its main turret's gun (main_turret_projectile: fire_rate 10,
+    # enemy_bullet_tank_boss_projectile: 500 and a 16 m shock wave; its twin main_turret_artillery lobs the same round)
+    # on the primary, its one barrel's two holders in turn (a round every half FireInterval, as the battle tank's); its
+    # parts' weapons on the secondary (Arm). Not ported: the sentry drones its hull launches (left_ / right_sentries
+    # fire highway_tank_drone, a drone that flies and shoots, as their ammunition: docs/xmorph-bosses.md), the barrel's
+    # laser pointer (a sight, no damage), its parts destroyed one by one (EDF: one durability), the side and front
+    # turrets turning on their own (they fire along the main gun, as the heavy tank's machine-gun turret).
+    _u('bosses/highway_tank', 'tracked', 'apocalypse', 'ported', 'JAGUAR Type S',
+       texts={'SC': ('X-Morph 美洲豹 S 型', '请求人类军队的原型超重型坦克「美洲豹 S 型」（原作首领）：全长 46 米。主炮塔的巨炮为主攻击，'
+                                       '约每十秒一发、命中处大范围冲击波；副武器（切换）为车头两组巡航火箭（各六连发）、主炮塔顶的防空导弹（十二连发）、'
+                                       '四座侧炮塔的高射炮、车头迫击炮与前炮塔的激光（照射三秒）；装甲极厚。'),
+              'CN': ('X-Morph 美洲豹 S 型', '請求人類軍隊的原型超重型坦克「美洲豹 S 型」（原作首領）：全長 46 公尺。主砲塔的巨砲為主攻擊，'
+                                       '約每十秒一發、命中處大範圍衝擊波；副武器（切換）為車頭兩組巡航火箭（各六連發）、主砲塔頂的防空飛彈（十二連發）、'
+                                       '四座側砲塔的高射砲、車頭迫擊砲與前砲塔的雷射（照射三秒）；裝甲極厚。'),
+              'JA': ('X-Morph ジャガー S 型', '人類軍の試作超重戦車「ジャガー S 型」（原作のボス）を要請する。全長 46 m。主砲塔の巨砲'
+                                        '（約 10 秒に 1 発、着弾点に広い衝撃波）を主攻撃とする。副武器（切替）は車体前部の巡航ロケット 2 基（各 6 連射）、'
+                                        '主砲塔上の対空ミサイル（12 連射）、側面砲塔 4 基の高射砲、前部の迫撃砲、前部砲塔のレーザー（3 秒照射）。装甲は極めて厚い。'),
+              'EN': ('X-Morph JAGUAR Type S', "Requests the human army's prototype super-heavy tank JAGUAR Type S (a boss in "
+                                              "the game): 46 m long. Its main turret's great gun on the primary attack, a "
+                                              'round about every 10 s with a wide shock wave where it hits; on the secondary '
+                                              '(switched) the two front cruise rocket pods (six each), the AA missiles on '
+                                              "the main turret (twelve), the four side turrets' flak, the front mortar and "
+                                              "the front turret's laser (a 3 s beam); extremely heavy armour.")},
+       gun=('Great Gun', '巨炮', '巨砲', '巨砲'),
+       # main_turret_projectile: fire_rate 10, 500 (anti_core: DAMAGE) and a ShockWave radius 16 (x BLAST)
+       guns={'AmmoCount': 20.0, 'AmmoDamage': 60000.0, 'AmmoExplosion': 24.0, 'FireInterval': 1200.0},
+       arms=(Arm('rockets', ('front_left_rockets', 'front_right_rockets'), 'ground',
+                 ('Cruise rockets', '巡航ロケット', '巡航火箭', '巡航火箭', '순항 로켓'), 36,
+                 # front_left_ / front_right_rockets: fire_rate 10, six 0.5 s apart each (enemy_missile_anti_core_big_tank:
+                 # speed 30, turning 15 deg/s, 33 + Area 8, homing on the core)
+                 missile={'model': 'Cruise rocket', 'look': ('bullet_missile', 2.5), 'burn': 3.0, 'top': 200.0,
+                          'accel': 150.0, 'max_g': 6.0, 'nav': 3.0, 'life': 15.0, 'damage': 3960.0, 'blast': 12.0,
+                          'lock_range': 1500.0, 'lock_cone': 0.6, 'lock_time': 20.0, 'burst': 6.0, 'burst_gap': 30.0,
+                          'interval': 600.0}),
+             Arm('aam', ('main_turret_anti_player_missiles_left', 'main_turret_anti_player_missiles_right'), 'air',
+                 ('AA missiles', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), 48,
+                 # main_turret_anti_player_missiles_left / _right: fire_rate 30 / 26, twelve 0.5 s apart
+                 # (enemy_missile_anti_aa_gunship: speed 40, turning 100 deg/s, 15 anti_player + Area 3)
+                 missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
+                          'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 450.0, 'blast': 4.5,
+                          'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 12.0, 'burst_gap': 30.0,
+                          'interval': 1680.0}),
+             Arm('flak', ('side_left_front_turret', 'side_right_front_turret', 'side_left_back_turret',
+                          'side_right_back_turret'), 'gun',
+                 ('Flak', '高射砲', '高射砲', '高射炮', '고사포'), 120, 'cannon_l',
+                 # side_*_turret: InstantWeaponDef, fire_rate 7..10.6 each (enemy_flak_medium_boss: bursts 0.75 s on,
+                 # 20 anti_player, Area 12): the four together a shell every 2.25 s
+                 shell=('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
+                 numbers={'AmmoDamage': 600.0, 'AmmoExplosion': 18.0, 'AmmoSpeed': 30.0, 'FireInterval': 135.0,
+                          'FireBurstCount': 1.0}),
+             Arm('mortar', ('front_mortar',), 'gun', ('Mortar', '迫撃砲', '迫擊砲', '迫击炮', '박격포'), 10, 'cannon_l',
+                 # front_mortar: ArtilleryWeaponDef, fire_rate 18 (enemy_artillery_boss_tank: 333 artillery, Area 10):
+                 # the grenade launcher's lobbed round
+                 shell=('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
+                 numbers={'AmmoDamage': 39960.0, 'AmmoExplosion': 15.0, 'FireInterval': 1080.0, 'FireBurstCount': 1.0}),
+             Arm('laser', ('front_turret',), 'gun', ('Laser', 'レーザー', '雷射', '激光', '레이저'), 900, 'cannon_l',
+                 # front_turret: BeamWeaponDef, fire_delay 22, fire_duration 3 (enemy_laser_highway_tank: 100 a second,
+                 # through three): the advanced tank's pulse stream (a pulse every 4 frames), 3 s every 25 s
+                 shell=('V_506HELI_LASERCANNON01_L.SGO', 'LaserBullet01', 'mg'),
+                 numbers={'AmmoDamage': 800.0, 'AmmoSpeed': 40.0, 'AmmoAlive': 20.0, 'AmmoIsPenetration': 1.0,
+                          'FireInterval': 1500.0, 'FireBurstCount': 45.0, 'FireBurstInterval': 4.0})),
+       # models/xm_highway_tank: 46 m long, 28 m wide; the main turret's ring y 16.25 at z -1.8, its roof ~y 21, the
+       # gun's trunnion y 16.2 at z 3.2, its muzzle z 23.1
+       camera={'model_eye': (0., 21.5, 0.), 'model_look_at': (0., 18., 40.), 'third_person_distance': 45.,
+               'third_person_height': 22.},
+       eye=(0.0, 21.8, 2.0), durability=100000.0, reload=60000, level=6.0,
+       # rows are only ever appended (Unit.after): after the forts' guns, the requests' end when it was ported
+       after='EDF6VC_CALL_XM_AA_CANNON_MACHINEGUN'),
     _u('bosses/four_leg_mech', 'boss'),
     _u('bosses/giant_mech_minotaur', 'boss'),
     _u('bosses/gunship', 'boss'),
     _u('bosses/gunship_drone', 'boss'),
-    _u('bosses/highway_tank', 'boss'),
     _u('bosses/highway_tank_drone', 'boss'),
     _u('bosses/tarantula_mk_vi', 'boss'),
     _u('bosses/tarantula_mk_vii', 'boss'),
