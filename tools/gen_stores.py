@@ -1,7 +1,8 @@
 """Writes src/stores.inc, the plugin's side of the jets' stores (src/stores.cpp includes it), from pylib/vcobjects.py:
   kStores     every store kind (STORES: the jets' and the stock vehicles'): its weapon files' name prefix (vcobjects.store_file: EDF6VC_<KIND>_<rounds>.SGO),
               its name, its role, a round's mass and drag, its barrel group, its round's name on the sight (SHELLS), its own fire key and whether it is an auto turret
-              (Store.key / auto: src/payload.cpp OwnKey)
+              (Store.key / auto: src/payload.cpp ControlOf), its gunner seat and its own turret (Store.seat / turret:
+              src/seat_turret.cpp; the turret's angles in rad, its rates in rad/s)
   kTwinBarrels the barrels that fire in turn (GroundVehicle.alternate: vcobjects.twin_barrels): weapon file, pair
   kJetMasses  a jet's mass without stores by its mark (JET_MASSES) and the durability its SGO gives it (JETS; the gunship
               tools/make_jets.py builds from the strike jet's): the ram's damage scales by its HP over that (src/playerjet.cpp)
@@ -13,6 +14,7 @@
 """
 from __future__ import annotations
 
+import math
 import os
 import sys
 
@@ -37,6 +39,16 @@ def shell_of(s: vc.Store) -> str:
     return SHELLS.get(kind, 'StoreShell::native')
 
 
+def turret_of(s: vc.Store) -> str:
+    """StoreSpec's turret fields (src/stores.h StoreTurret): its bones and limits, rad; {} none."""
+    t = s.turret
+    if t is None:
+        return '{}'
+    rad = math.pi / 180.0
+    return (f'{{L"{t.yaw}",L"{t.pitch}",{t.low * rad:.6f}f,{t.high * rad:.6f}f,{t.arc * rad:.6f}f,'
+            f'{t.yaw_rate * rad:.6f}f,{t.pitch_rate * rad:.6f}f}}')
+
+
 def durabilities() -> dict[float, float]:
     """Each jet mark's SGO durability (vcobjects.JETS), the gunship's that of the strike jet it is built from."""
     out = {jet.mark: jet.durability for jet in vc.JETS.values()}
@@ -49,7 +61,7 @@ def render() -> str:
              'inline constexpr StoreSpec kStores[]={']
     for kind, s in vc.STORES.items():
         lines.append(f'    {{L"EDF6VC_{kind}_","{s.name}",{ROLES[s.role]},{s.mass:.1f}f,{s.drag:.4f}f,{s.group},{s.barrel},'
-                     f'{str(s.native_control).lower()},{shell_of(s)},{s.key},{str(s.auto).lower()}}},')
+                     f'{str(s.native_control).lower()},{shell_of(s)},{s.key},{str(s.auto).lower()},{s.seat},{turret_of(s)}}},')
     lines.append('};')
     lines.append('inline constexpr TwinBarrel kTwinBarrels[]={')
     for name, pair in vc.twin_barrels():

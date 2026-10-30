@@ -270,22 +270,57 @@ class Store:
     # one launcher's rounds, cycled by VehicleSecondarySwitchKey); 3..6 VehicleFire<n>Key, one weapon a key on a
     # vehicle. Every key fires at once with the primary and the others (src/payload.cpp OwnKey).
     key: int = 0
-    # An automatic turret (needs a key: by hand when they are off): with the vehicle's auto turrets on
+    # An automatic turret (needs a key or a seat: by hand when they are off): with the vehicle's auto turrets on
     # (VehicleAutoTurretKey) it fires itself, a missile once locked, a gun laid on an enemy in its reach.
     auto: bool = False
+    # The crew seat that mans it (docs/multi-weapon-keys.md「独立座位」; the user, 2026-10-30: 「一些应该是独立的座位」): 0 the
+    # seat its key is on (the driver's); n >= 1 its own gunner seat n (its holder on that seat: vehicle_weapon_setting
+    # [bone, n]), fired by that seat's primary trigger (src/payload.cpp ControlOf: the V603 never reads it), aimed by its
+    # rider; with nobody in it an auto turret aims and fires itself. Needs `turret` and no `key`.
+    seat: int = 0
+    # Its own turret, turned apart from the vehicle's (Turret: src/seat_turret.cpp poses its bones), else None: it fires
+    # along its holder's bone, which the seat's turret turns.
+    turret: Turret | None = None
 
     def __post_init__(self) -> None:
         if self.key not in (0, *FIRE_KEYS):
             raise ValueError(f'{self.name}: key {self.key} is none of 0, {FIRE_KEYS}')
-        if self.auto and not self.key:
-            raise ValueError(f'{self.name}: an auto turret needs its own key (fired by hand with the turrets off)')
-        if self.key and (self.group or self.native_control):
+        if self.auto and not self.key and not self.seat:
+            raise ValueError(f'{self.name}: an auto turret needs its own key or seat (fired by hand with the turrets off)')
+        if (self.key or self.seat) and (self.group or self.native_control):
             raise ValueError(f'{self.name}: a weapon on its own key is no belt of the primary')
+        if not 0 <= self.seat <= MOST_GUNNER_SEAT:
+            raise ValueError(f'{self.name}: seat {self.seat} is none of 0..{MOST_GUNNER_SEAT}')
+        if self.seat and (self.key or self.turret is None):
+            raise ValueError(f'{self.name}: a gunner seat weapon has its turret and no key (the seat trigger fires it)')
+
+
+@dataclass(frozen=True)
+class Turret:
+    """A store's own turret (Store.turret; src/seat_turret.cpp): two bones of its vehicle's model the plugin turns every
+    frame, `yaw` about its upright and `pitch` (under it) its guns' lift about their own across; its muzzles ride `pitch`
+    (its holder's bone). Matched by name in the model (the engine's bone names: at most 15 characters, distinct). Angles
+    deg, from its bind pose (ahead, level); rates deg/s."""
+    yaw: str
+    pitch: str
+    low: float = -5.0          # its guns' elevations
+    high: float = 70.0
+    arc: float = 180.0         # its traverse either side of ahead (180: all round)
+    yaw_rate: float = 60.0
+    pitch_rate: float = 45.0
+
+    def __post_init__(self) -> None:
+        for bone in (self.yaw, self.pitch):
+            if not bone or len(bone) > 15:
+                raise ValueError(f'turret bone {bone!r}: 1..15 characters')
+        if self.yaw == self.pitch or not -90.0 <= self.low < self.high <= 90.0 or not 0.0 < self.arc <= 180.0 or                 not (self.yaw_rate > 0.0 and self.pitch_rate > 0.0):
+            raise ValueError(f'turret {self.yaw}/{self.pitch}: bad limits')
 
 
 # The vehicles' own fire keys (Store.key; src/stores.h StoreSpec::fireKey): the second trigger, then the four extra keys.
 FIRE_SECONDARY = 2
 FIRE_KEYS = (FIRE_SECONDARY, 3, 4, 5, 6)
+MOST_GUNNER_SEAT = 7   # Store.seat: src/stores.h kMostGunnerSeat
 
 
 def _local(en: str, ja: str, cn: str, sc: str, kr: str) -> tuple[tuple[str, str], ...]:
@@ -586,7 +621,8 @@ def _xm_arm(arm: xm_units.Arm) -> Store:
         weapon: Missile | Shell = Missile(**{**m, 'look': Look(*m['look'])})
     else:
         weapon = Shell(*arm.shell, extra=tuple(arm.numbers.items()))
-    return Store(arm.names[0], arm.role, 0.0, 0.0, weapon, names, key=arm.fire, auto=arm.auto)
+    turret = Turret(*xm_units.turret_bones(arm.key), **arm.turret) if arm.turret else None
+    return Store(arm.names[0], arm.role, 0.0, 0.0, weapon, names, key=arm.fire, auto=arm.auto, seat=arm.seat, turret=turret)
 
 
 # The X-Morph units' other weapons (pylib/xm_units.py Arm): each on its own fire key of its unit (Arm.key).
