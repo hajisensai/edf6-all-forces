@@ -157,6 +157,38 @@ class FrameTests(unittest.TestCase):
         self.assertGreater(rgb[1, 1, 2], 250)   # flat: z = 1
 
 
+class RotorTests(unittest.TestCase):
+    @staticmethod
+    def _rotor(x: float, y: float, z: float, radius: float) -> dict:
+        return {'bones': [f'rotor_{x}_{z}'], 'centre': np.array([x, y, z]), 'axis': np.array([0.0, 1.0, 0.0]),
+                'radius': radius}
+
+    def test_main_is_the_biggest_tail_its_mirror_partner(self) -> None:
+        r = self._rotor
+        groups = [r(0, 2, 3, 1.0), r(3, 2, -1, 4.0), r(-3, 2, -1, 4.0), r(0, 2, -6, 2.0)]
+        main, tail = px.spun_rotors(groups)
+        self.assertIs(main, groups[1])
+        self.assertIs(tail, groups[2])          # the gunship's pairs: both sides turn
+
+    def test_tail_is_the_biggest_unpaired_rotor(self) -> None:
+        r = self._rotor
+        groups = [r(0, 3, 0, 5.0), r(2, 2, 2, 1.0), r(-2, 2, 2, 1.0), r(0, 2, -6, 1.5)]
+        main, tail = px.spun_rotors(groups)
+        self.assertIs(main, groups[0])
+        self.assertIs(tail, groups[3])          # the paired side rotors stay still
+        self.assertEqual(px.spun_rotors([]), (None, None))
+        self.assertEqual(px.spun_rotors(groups[:1]), (groups[0], None))
+
+    def test_frame_puts_the_axis_in_its_slot(self) -> None:
+        for axis, slot in (((0, 1, 0), 1), ((0.2, 0.9, 0.1), 1), ((1, 0, 0), 0), ((-0.9, 0.3, 0.1), 0)):
+            rows = np.asarray(px._frame(axis, slot))
+            a = np.asarray(axis, float) / np.linalg.norm(axis)
+            self.assertAlmostEqual(abs(float(rows[slot] @ a)), 1.0)
+            self.assertGreater(float(rows[slot] @ np.eye(3)[slot]), 0)    # nearest the airframe's own axis
+            np.testing.assert_allclose(rows @ rows.T, np.eye(3), atol=1e-9)
+            self.assertAlmostEqual(float(np.linalg.det(rows)), 1.0)
+
+
 def _box(c, h) -> tuple[np.ndarray, np.ndarray]:  # noqa: ANN001
     """A closed box (EDF frame) wound outward."""
     c, h = np.asarray(c, float), np.asarray(h, float)

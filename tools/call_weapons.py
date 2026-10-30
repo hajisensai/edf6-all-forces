@@ -145,9 +145,10 @@ def undeployed(call: Call) -> bool:
     unit everywhere, its folder deploys it; CLAUDE.md: no stand-in vehicle): tools/make_xmorph.py writes nothing for it,
     so its row is a placeholder as a support's on the map is (its index kept), and the SGO an earlier install wrote for
     it goes, until the folder is there and the installer runs again."""
-    if call.ground not in xm_units.UNITS:
+    unit = call.ground or call.heli
+    if unit not in xm_units.UNITS:
         return False
-    return not xm_units.deployed(call.ground)
+    return not xm_units.deployed(unit)
 
 
 def placeholder(call: Call) -> bool:
@@ -395,7 +396,11 @@ def model_vehicle(call: Call) -> bool:
 
 
 def vehicle_weapons(call: Call) -> tuple[str, ...]:
-    """The weapons a vehicle request's setup carries: the player jet's (vcobjects.JETS) or the ground vehicle's."""
+    """The weapons a vehicle request's setup carries: the player jet's (vcobjects.JETS), the ground vehicle's or the
+    X-Morph helicopter's (pylib/xm_heli.py)."""
+    if call.heli:
+        import xm_heli
+        return xm_heli.weapon_paths(xm_units.UNITS[call.heli])
     return vc.GROUND_VEHICLES[call.ground].weapons if call.ground else vc.JETS[call.jet].weapons
 
 
@@ -484,15 +489,15 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
         return dsgo.write(doc)
     setup = req.items[3]
     setup.items[0].items[0], setup.items[0].items[1] = tier   # request_tier: its level's on its family's curve
-    if not call.ground:
-        setup.items[1].items[0] = float(call.mark)   # the heli params' speed gain: the jet's mark
+    if not call.ground and not call.heli:
+        setup.items[1].items[0] = float(call.mark)   # the heli params' speed gain: the jet's mark (a heli keeps the Eros's)
     # The weapon list: the setup's last entry ([multipliers, heli params, fuel, weapons] in the Eros's request;
     # [multipliers, vehicle params, weapons] in a ground vehicle's, the Naegling's; [multipliers, bike params, fuel,
     # weapons] in the Freed bike's, the sidecar's).
     at = len(setup.items) - 1 if call.ground else 3
     weapons = setup.items[at].items
     jet_weapons = vehicle_weapons(call)
-    swap = {stock_vehicle.lower(): _object_path(call), **_VEHICLE_SWAP}
+    swap = {stock_vehicle.lower(): _object_path(call), **({} if call.heli else _VEHICLE_SWAP)}
     if call.ground:
         # The ground vehicle's weapons in its request's entries' places (the stock request's per-weapon parameters):
         # one entry a holder of its vehicle_weapon_setting, as the stock one.
@@ -543,7 +548,8 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
 
 def vehicle_durability(game_root: str, call: Call) -> float:
     """What the menu shows: the vehicle's durability times the request's HP multiplier (vehicle_sgo: request_tier)."""
-    hp = vc.GROUND_VEHICLES[call.ground].durability if call.ground else vc.JETS[call.jet].durability
+    hp = (xm_units.UNITS[call.heli].durability if call.heli else
+          vc.GROUND_VEHICLES[call.ground].durability if call.ground else vc.JETS[call.jet].durability)
     return hp * request_tier(request_curve(game_root, request_family(call)), call.level)[0]
 
 

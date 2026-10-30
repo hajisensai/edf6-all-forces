@@ -158,3 +158,35 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
 - 做不到的：原作的副炮塔各自独立瞄准（EDF 里随主炮）；主动防御激光（拦截来袭弹药，EDF 没有这个机制）；护盾；
   重坦两门炮之间的 0.25 秒间隔（这里同时）；EMP 坦克两座防空机炮塔共四个炮口，机枪模板只有一个定位点，从第一个射出（每次两发）。
 - 材质名沿用 `prepare()` 的 `wt_<贴图名>` 前缀（仅 MRAB 内部名字）。
+
+## 直升机（`prep_xmorph.py heli`，2026-10-30）
+
+5 架：`small_helicopter_core`（轻型）、`medium_helicopter_core`、`large_helicopter_core`（重型）、`large_helicopter_transport`
+（运输）、`large_gunship_core`（炮艇），呼叫行在 `tools/calls.py` 末尾（`Call.heli`），比例 1.0 照原作（轻型 5.6 m 宽、炮艇 25 m 长）。
+
+- **飞行**：原版 `V506_HELI.SGO`（`Vehicle506_Helicopter`，请求保留 Eros 模板的 heli 参数，不写插件 mark）。玩家按原版直升机驾驶，
+  NPC 由 `src/heli.cpp` 驾驶（任何 506 都按 506 行飞）。SGO（`pylib/xm_heli.py`）换模型 / CAS / 碰撞盒（模型包围盒，切在原点）/
+  门与座位视角 / 第三人称相机（按机体长度 / 12 m 放大）/ 武器与挂点 / 耐久；运输直升机照 `make_jets.with_passenger_seats` 加 10 个乘客座。
+- **模型**（`prep_xmorph.prepare_air` → `pylib/xm_air_model.py`）：MDB 保留 V506 的全部骨骼（mdl、globalSRT、body、rearWheelSus、
+  rotor、bend_roterA–D、tailRotor：原版的音效 / 布娃娃 / 残骸效果引用它们），CAS 用 V506 的，`default` 片段经
+  `cas_pose.retarget` 平移到我们的枢轴。整机往上抬到最低点 y = 0。贴图挂在 V505_TANK 的 `v505_tank` 宿主材质上；没有法线图的给平法线，
+  粗糙度用常量金属值。透明的旋翼模糊材质（`unlit_transparent`）丢弃。
+- **旋翼**：骨骼名含 `rotor` 的子树各成一组（共轴的合并），主旋翼 = 半径最大的一组，映射到 V506 的 `rotor`（绕本地 y 转）；尾旋翼 =
+  主旋翼的左右镜像伙伴（炮艇的成对旋翼：两侧都转），没有则取没有伙伴的最大一组（重型的尾桨、运输的后旋翼），映射到 `tailRotor`
+  （绕本地 x 转）。每个旋翼挂在转过轴向的安装骨骼上（`xm_rotor_mount` / `xm_tail_mount`）。**其余旋翼静止**（炮艇前一对、重型两侧）：
+  V506 的 CAS 只驱动它自己的两根骨骼。
+- **武器**（现有机制：V506 的机枪对 + 导弹 + 油箱四个挂点；多武器会话的新字段合入后再迁）：机枪扳机（0x2020）打挂点 0、1，导弹扳机
+  （0x2021）打挂点 2。武器 SGO 是原版 506 武器改数值与名字（`xm_units.HeliArm`），数值按原作蓝图换算（同上节 `DAMAGE` / `BLAST`）：
+
+  | 单位 | 耐久 | 机枪扳机 | 导弹扳机 |
+  |---|---|---|---|
+  | 轻型 | 800 | 撞击炸药（同右） | 撞击炸药：原作自爆撞核心、没有机炮（接触伤害 22 → 2640，爆炸半径 4.5 m），建模为机首各一发近程炸药 |
+  | 直升机 | 1500 | 左右导弹舱 | 左右导弹舱（360 伤害、半径 6 m，每 3 秒 4 发） |
+  | 重型 | 6000 | 机首炮塔（150 伤害，3+3 连发 / 120 帧） | 四个导弹舱（每 3 秒 16 发） |
+  | 运输 | 3000 | 原版 506 机炮（原作无武器） | 原版 506 导弹 |
+  | 炮艇 | 12000 | 左右炮塔（6 连发 / 90 帧） | 重型导弹（15000 伤害，半径 18 m） |
+
+- **没做 / 风险**：额外旋翼静止；没有第一人称座舱（不在 `COCKPIT_GROUPS`）；不在测试场 / 生成目录；运输直升机保留原版武器；
+  布娃娃代理沿用 Eros 尺寸；**未实机验证**（飞行姿态、碰撞盒、座位视角、旋翼转向都只做了离线核对：CAS 默认姿态的世界坐标 = 绑定姿态）。
+
+固定翼（`medium_fighter_aa`、`medium_gunship_aa`、`large_gunship_aa`、`large_bomber_core`）走 `pylib/jet_models.py` 链，另一个 PR。

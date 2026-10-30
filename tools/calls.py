@@ -55,6 +55,9 @@ class Call:
     jet: str = ''
     # ...or the pylib/vcobjects.py GROUND_VEHICLES entry it brings (a vehicle request of a ground vehicle; `mark` 0).
     ground: str = ''
+    # ...or the pylib/xm_units.py helicopter it brings (a vehicle request of the stock V506 in its own model, flown as the
+    # game's helis are: pylib/xm_heli.py; `mark` 0, the request keeping the Eros's heli params).
+    heli: str = ''
     # A vehicle request the game lets the player use underground (its SGO's use_underground, the native weapon +0x228
     # that EDF.dll 0x690DB0 reads with the scene's underground flag). Underground only the drill tank comes (the user,
     # 2026-10-14: 「地底也能召唤飞机……应该只能召唤地底的钻地战车这种」): every other request is written 0, whatever its
@@ -336,13 +339,20 @@ def _with_xmorph(hand: tuple[Call, ...]) -> tuple[Call, ...]:
     catalog's on every machine; whether a unit's model folder is here only decides whether its row is live
     (tools/call_weapons.py undeployed)."""
     out = list(hand)
-    units = xm_units.v603()
+    units = [u for u in xm_units.ported() if u.family in xm_units.PORTABLE]
     if len({u.after for u in units}) != len(units):
         raise ValueError('two X-Morph units name the same call to follow (pylib/xm_units.py Unit.after)')
-    for u in units:
-        at = [c.id for c in out].index(u.after) + 1
-        out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', 0, u.key, False, 0, u.reload, u.level, 'vehicle',
-                            vehicle=f'EDF6VC_{u.key.upper()}', ground=u.key))
+    while units:
+        # a unit after another unit's row: that one first
+        ready = [u for u in units if u.after in {c.id for c in out}]
+        if not ready:
+            raise ValueError(f'X-Morph units follow no call there is: {[u.after for u in units]}')
+        for u in ready:
+            at = [c.id for c in out].index(u.after) + 1
+            which = {'heli': u.key} if u.family == 'heli' else {'ground': u.key}
+            out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', 0, u.key, False, 0, u.reload, u.level, 'vehicle',
+                                vehicle=f'EDF6VC_{u.key.upper()}', **which))
+        units = [u for u in units if u not in ready]
     return tuple(out)
 
 
@@ -382,6 +392,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'sorties (2026-10-25)': IDS[:84],
     'X-Morph battle tank (2026-10-27)': IDS[:85],
     'X-Morph tracked units and forts (2026-10-27)': IDS[:93],
+    'X-Morph helicopters (2026-10-30)': IDS[:98],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row

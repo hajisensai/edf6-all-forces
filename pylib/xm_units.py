@@ -31,7 +31,8 @@ Families (the chassis an EDF6 class drives; tools/prep_xmorph.py has one prepare
     wheeled      planned: a wheeled chassis
     mech         planned: the Proteus / Balam walkers
     emplacement  a fort's gun on pylib/emplacement_model.py's fortified base (the V603, tools/prep_xmorph.py emplacement)
-    heli, jet    planned: the V506 frame / the jets (pylib/jet_models.py)
+    heli         the stock V506 heli in its own model (pylib/xm_heli.py, pylib/xm_air_model.py; tools/prep_xmorph.py heli)
+    jet          planned: the jets (pylib/jet_models.py)
     infantry     planned
     boss         planned: the game's bosses (several bodies each)
     civilian     planned: the maps' traffic and bystanders (their meshes through an inherited blueprint)
@@ -78,6 +79,17 @@ class Arm:
 
 
 @dataclass(frozen=True)
+class HeliArm:
+    """One of an aircraft's V506 weapons (Unit.air): a stock 506 weapon SGO under the unit's name with the game's numbers
+    over it (`numbers`: SGO values), fired from the blueprint's muzzle attachments (`muzzles`: the left holder's and the
+    right's for the gun pair, any number for the missile: their middle)."""
+    template: str                     # Root.cpk WEAPON/<template>
+    muzzles: tuple[str, ...]
+    names: tuple[str, str, str, str]  # EN, SC, JA, CN
+    numbers: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class Unit:
     key: str                 # the EDF-side kind (make_tracked_combat kind, ledger owner, build group): xm_<entity name>
     entity: str              # entities/units/<entity>.ent in the packs
@@ -100,6 +112,10 @@ class Unit:
     # The call id its request row comes right after in tools/calls.py CALLS: rows are only ever appended (saves keep
     # weapons by row), so a newly ported unit names the call that ended CALLS when it was ported, never an earlier one.
     after: str = ''
+    # An aircraft's (family heli: pylib/xm_heli.py) weapons on the V506's holders: 'guns' the pair the gun trigger fires
+    # together (veh+0x2020: holders 0 and 1), 'missile' the missile trigger's (holder 2); each a HeliArm. 'seats': the
+    # passenger seats it carries over the V506's (the transport's, tools/make_jets.py with_passenger_seats).
+    air: dict = field(default_factory=dict)
 
 
 def _u(entity: str, family: str, like: str = '', status: str = 'planned', title: str = '', **edf) -> Unit:
@@ -357,11 +373,122 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     _u('fort/bunker_barracks', 'structure', title='Barracks'),
     _u('fort/bunker_barracks_02', 'structure', title='Barracks'),
     # air
-    _u('air/small_helicopter_core', 'heli', title='Light Helicopter'),
-    _u('air/medium_helicopter_core', 'heli', title='Helicopter'),
-    _u('air/large_helicopter_core', 'heli', title='Heavy Helicopter'),
-    _u('air/large_helicopter_transport', 'heli', title='Transport Helicopter'),
-    _u('air/large_gunship_core', 'heli', title='Gunship'),
+    # helicopters: the stock V506's flight (the player flies them as the game's helis, an NPC pilot as src/heli.cpp flies
+    # any 506), their model on its skeleton (pylib/xm_air_model.py), their weapons on its holders (Unit.air; the game's
+    # numbers as the tracked units', docs/xmorph-port.md 「武器」). Durability: the game's max_health on the tracked
+    # units' scale (about x6 at the top, x15 at the bottom), the light ones floored as the tracked ones are.
+    # The light helicopter: a drone that rams the core (Behavior kamikaze, ContactDamageDealerDef const 22); it has no
+    # gun. Its ram is a charge fired from its nose (22 -> 2640, a blast its size), one on each trigger.
+    _u('air/small_helicopter_core', 'heli', status='ported', title='Light Helicopter',
+       texts={'SC': ('X-Morph 轻型直升机', '请求一架人类军队的轻型直升机：原作里是撞向目标的自杀无人机，没有机炮；这里机炮键和导弹键各发射机首撞击炸药'
+                                       '（近距离、大威力，各一枚）；机体很小、装甲很薄。'),
+              'CN': ('X-Morph 輕型直升機', '請求一架人類軍隊的輕型直升機：原作裡是撞向目標的自殺無人機，沒有機砲；這裡機砲鍵和飛彈鍵各發射機首撞擊炸藥'
+                                       '（近距離、大威力，各一枚）；機體很小、裝甲很薄。'),
+              'JA': ('X-Morph 軽ヘリ', '人類軍の軽ヘリを要請する。原作では目標に体当たりする自爆ドローンで機銃はない。ここでは機銃キーとミサイルキーで'
+                                     '機首の体当たり爆薬（近距離・高威力、各 1 発）を撃つ。機体は小さく装甲は薄い。'),
+              'EN': ('X-Morph Light Helicopter', "Requests the human army's light helicopter: in the game a drone that rams its "
+                                                 'target, with no gun; here its gun and missile triggers fire ram charges from '
+                                                 'its nose (short range, hard-hitting, one each); very small, thin armour.')},
+       gun=('Ram Charge', '撞击炸药', '体当たり爆薬', '撞擊炸藥'),
+       air={'guns': HeliArm('V_506HELI_MISSILE01.SGO', ('att_muzzle_1', 'att_muzzle_1'),
+                            ('Ram Charge', '撞击炸药', '体当たり爆薬', '撞擊炸藥'),
+                            {'AmmoCount': 1.0, 'AmmoDamage': 2640.0, 'AmmoExplosion': 4.5, 'FireBurstCount': 1.0,
+                             'FireInterval': 60.0, 'LockonType': 0.0}),
+            'missile': HeliArm('V_506HELI_MISSILE01.SGO', ('att_muzzle_1',), ('Ram Charge', '撞击炸药', '体当たり爆薬', '撞擊炸藥'),
+                               {'AmmoCount': 1.0, 'AmmoDamage': 2640.0, 'AmmoExplosion': 4.5, 'FireBurstCount': 1.0,
+                                'FireInterval': 60.0, 'LockonType': 0.0})},
+       # models/xm_small_helicopter_core: 5.6 x 2.3 x 4.6 m: the sight over and behind it
+       eye=(0.0, 3.2, -3.5), durability=800.0, reload=6000, level=0.8, after='EDF6VC_CALL_XM_AA_CANNON_MACHINEGUN'),
+    # The helicopter: a coaxial rotor, four missile pods (missiles: MissileWeaponDef, fire_rate 3, four 0.3 s apart:
+    # enemy_missile_anti_core_small, 3 + Area 4). The outer pods on the gun trigger, the inner on the missile trigger.
+    _u('air/medium_helicopter_core', 'heli', status='ported', title='Helicopter',
+       texts={'SC': ('X-Morph 直升机', '请求一架人类军队的直升机：共轴双旋翼，机翼下四个导弹巢；机炮键发射外侧两巢、导弹键发射内侧两巢的导弹'
+                                     '（每三秒一轮连射，与原作相同）；装甲较薄。'),
+              'CN': ('X-Morph 直升機', '請求一架人類軍隊的直升機：共軸雙旋翼，機翼下四個飛彈巢；機砲鍵發射外側兩巢、飛彈鍵發射內側兩巢的飛彈'
+                                     '（每三秒一輪連射，與原作相同）；裝甲較薄。'),
+              'JA': ('X-Morph ヘリ', '人類軍のヘリを要請する。二重反転ローターで、翼下に 4 基のミサイルポッドを持つ。機銃キーで外側 2 基、'
+                                    'ミサイルキーで内側 2 基のミサイルを撃つ（原作どおり 3 秒ごとの連射）。装甲は薄い。'),
+              'EN': ('X-Morph Helicopter', "Requests the human army's helicopter: coaxial rotors, four missile pods under its "
+                                           'wings; the gun trigger fires the outer two, the missile trigger the inner two '
+                                           '(a burst every 3 s, as in the game); light armour.')},
+       gun=('Missile Pods', '导弹巢', 'ミサイルポッド', '飛彈巢'),
+       air={'guns': HeliArm('V_506HELI_MISSILE01.SGO', ('att_left_wing_missiles_1', 'att_right_wing_missiles_1'),
+                            ('Missile Pods (outer)', '导弹巢（外侧）', 'ミサイルポッド（外側）', '飛彈巢（外側）'),
+                            {'AmmoCount': 32.0, 'AmmoDamage': 360.0, 'AmmoExplosion': 6.0, 'FireBurstCount': 2.0,
+                             'FireBurstInterval': 18.0, 'FireInterval': 180.0}),
+            'missile': HeliArm('V_506HELI_MISSILE01.SGO', ('att_left_wing_missiles_2', 'att_right_wing_missiles_2'),
+                               ('Missile Pods (inner)', '导弹巢（内侧）', 'ミサイルポッド（内側）', '飛彈巢（内側）'),
+                               {'AmmoCount': 32.0, 'AmmoDamage': 360.0, 'AmmoExplosion': 6.0, 'FireBurstCount': 4.0,
+                                'FireBurstInterval': 18.0, 'FireInterval': 180.0})},
+       # models/xm_medium_helicopter_core: 10.7 x 4.0 x 11.6 m, the rotors' mast at y 2.2..3.6 over the cabin
+       eye=(0.0, 4.8, -3.0), durability=1500.0, reload=10000, level=1.5, after='EDF6VC_CALL_XM_SMALL_HELICOPTER_CORE'),
+    # The heavy helicopter: a nose gun turret (main_gun: fire_rate 2, six 0.07 s apart: enemy_bullet_small_fast, the
+    # heavy tank's machine gun's round) and four missile pods (each the helicopter's: four every 3 s). Three lift rotors;
+    # the V506 animation spins the front one and the tail propeller.
+    _u('air/large_helicopter_core', 'heli', status='ported', title='Heavy Helicopter',
+       texts={'SC': ('X-Morph 重型直升机', '请求一架人类军队的重型直升机：三旋翼大型机，机首机炮塔（六发连射，每两秒一轮）为机炮键，'
+                                       '四个导弹巢（每三秒十六发）为导弹键；装甲厚重。'),
+              'CN': ('X-Morph 重型直升機', '請求一架人類軍隊的重型直升機：三旋翼大型機，機首機砲塔（六發連射，每兩秒一輪）為機砲鍵，'
+                                       '四個飛彈巢（每三秒十六發）為飛彈鍵；裝甲厚重。'),
+              'JA': ('X-Morph 重ヘリ', '人類軍の重ヘリを要請する。3 ローターの大型機で、機首の機銃塔（6 発連射、2 秒ごと）を機銃キー、'
+                                     '4 基のミサイルポッド（3 秒ごとに 16 発）をミサイルキーで撃つ。装甲は厚い。'),
+              'EN': ('X-Morph Heavy Helicopter', "Requests the human army's heavy helicopter: a big three-rotor craft, its nose "
+                                                 'gun turret (bursts of six every 2 s) on the gun trigger, four missile pods '
+                                                 '(sixteen every 3 s) on the missile trigger; heavy armour.')},
+       gun=('Nose Gun', '机首机炮', '機首機銃', '機首機砲'),
+       air={'guns': HeliArm('V_506HELI_GATLING01_{side}.SGO', ('att_turret_1', 'att_turret_1'),
+                            ('Nose Gun', '机首机炮', '機首機銃', '機首機砲'),
+                            {'AmmoCount': 600.0, 'AmmoDamage': 150.0, 'AmmoSpeed': 20.0, 'AmmoAlive': 60.0,
+                             'FireInterval': 120.0, 'FireBurstCount': 3.0, 'FireBurstInterval': 4.0}),
+            'missile': HeliArm('V_506HELI_MISSILE01.SGO', ('att_left_wing_missiles_inner_1', 'att_right_wing_missiles_inner_1',
+                                                           'att_left_wing_missiles_outer_1', 'att_right_wing_missiles_outer_1'),
+                               ('Missile Pods', '导弹巢', 'ミサイルポッド', '飛彈巢'),
+                               {'AmmoCount': 96.0, 'AmmoDamage': 360.0, 'AmmoExplosion': 6.0, 'FireBurstCount': 16.0,
+                                'FireBurstInterval': 4.0, 'FireInterval': 180.0})},
+       # models/xm_large_helicopter_core: 13.6 x 6.6 x 19.1 m
+       eye=(0.0, 8.0, -6.0), durability=6000.0, reload=16000, level=3.0, after='EDF6VC_CALL_XM_MEDIUM_HELICOPTER_CORE'),
+    # The transport helicopter: tandem rotors, no weapon (it drops troops). EDF's V506 holds four weapons whatever it
+    # carries, so it keeps the stock 506's (the Eros's autocannons and missiles, as they are); ten passenger seats as the
+    # plugin's transport helicopter (tools/make_jets.py TRANSPORT_HELI_EXTRA): squads ride it (src/transport.cpp).
+    _u('air/large_helicopter_transport', 'heli', status='ported', title='Transport Helicopter',
+       texts={'SC': ('X-Morph 运输直升机', '请求一架人类军队的运输直升机：纵列双旋翼，原作里没有武器，这里保留 EDF 直升机原有的机炮和导弹；'
+                                       '另有十个乘员座位，可以运送小队（与运输直升机相同）；装甲中等。'),
+              'CN': ('X-Morph 運輸直升機', '請求一架人類軍隊的運輸直升機：縱列雙旋翼，原作裡沒有武器，這裡保留 EDF 直升機原有的機砲和飛彈；'
+                                       '另有十個乘員座位，可以運送小隊（與運輸直升機相同）；裝甲中等。'),
+              'JA': ('X-Morph 輸送ヘリ', '人類軍の輸送ヘリを要請する。タンデムローター機で、原作では非武装。ここでは EDF のヘリ本来の機関砲とミサイルを'
+                                      '残す。乗員席が 10 あり、分隊を運べる（輸送ヘリと同じ）。装甲は中程度。'),
+              'EN': ('X-Morph Transport Helicopter', "Requests the human army's transport helicopter: tandem rotors; unarmed in "
+                                                     "the game, it keeps the EDF helicopter's own autocannons and missiles here; "
+                                                     'ten passenger seats that carry a squad (as the transport helicopter); '
+                                                     'medium armour.')},
+       gun=('Autocannon', '机炮', '機関砲', '機砲'),
+       air={'seats': 10},
+       # models/xm_large_helicopter_transport: 13.8 x 5.5 x 22.7 m, the cockpit at the nose
+       eye=(0.0, 7.5, -4.0), durability=3000.0, reload=9000, level=1.5, after='EDF6VC_CALL_XM_LARGE_HELICOPTER_CORE'),
+    # The gunship: four pairs of rotors (the rear pair spun), two gun turrets on its back (left_turret / right_turret:
+    # fire_rate 1.5, six 0.1 s apart each: enemy_bullet_small_fast) and its launcher (missile_launcher: fire_rate 5,
+    # enemy_missile_anti_core_launchers: a slow homing missile, 125 + Area 12, the game's heaviest round).
+    _u('air/large_gunship_core', 'heli', status='ported', title='Gunship',
+       texts={'SC': ('X-Morph 武装运输机', '请求一架人类军队的武装运输机：八旋翼巨型机，背上前后两座机炮塔（各六发连射，每一秒半一轮）为机炮键，'
+                                       '机腹发射器的重型导弹（每五秒一枚，大范围爆炸）为导弹键；直升机中装甲最厚。'),
+              'CN': ('X-Morph 武裝運輸機', '請求一架人類軍隊的武裝運輸機：八旋翼巨型機，背上前後兩座機砲塔（各六發連射，每一秒半一輪）為機砲鍵，'
+                                       '機腹發射器的重型飛彈（每五秒一枚，大範圍爆炸）為飛彈鍵；直升機中裝甲最厚。'),
+              'JA': ('X-Morph ガンシップ', '人類軍のガンシップを要請する。8 ローターの巨大機で、背中の前後 2 基の機銃塔（各 6 発連射、1.5 秒ごと）を'
+                                       '機銃キー、機体下の発射機の重ミサイル（5 秒に 1 発、広い爆発）をミサイルキーで撃つ。ヘリで最も装甲が厚い。'),
+              'EN': ('X-Morph Gunship', "Requests the human army's gunship: a huge eight-rotor craft, the two gun turrets on its "
+                                        "back (bursts of six every 1.5 s each) on the gun trigger, its launcher's heavy missile "
+                                        '(one every 5 s, a wide blast) on the missile trigger; the heaviest armour of the '
+                                        'helicopters.')},
+       gun=('Twin Gun Turrets', '双机炮塔', '連装機銃塔', '雙機砲塔'),
+       air={'guns': HeliArm('V_506HELI_GATLING01_{side}.SGO', ('att_left_turret_muzzle_1', 'att_right_turret_muzzle_1'),
+                            ('Gun Turrets', '机炮塔', '機銃塔', '機砲塔'),
+                            {'AmmoCount': 600.0, 'AmmoDamage': 150.0, 'AmmoSpeed': 20.0, 'AmmoAlive': 60.0,
+                             'FireInterval': 90.0, 'FireBurstCount': 6.0, 'FireBurstInterval': 6.0}),
+            'missile': HeliArm('V_506HELI_MISSILE01.SGO', ('att_bombs_1',), ('Heavy Missile', '重型导弹', '重ミサイル', '重型飛彈'),
+                               {'AmmoCount': 8.0, 'AmmoDamage': 15000.0, 'AmmoExplosion': 18.0, 'FireBurstCount': 1.0,
+                                'FireInterval': 300.0})},
+       # models/xm_large_gunship_core: 23.6 x 7.4 x 25.2 m
+       eye=(0.0, 11.0, -9.0), durability=12000.0, reload=22000, level=4.5, after='EDF6VC_CALL_XM_LARGE_HELICOPTER_TRANSPORT'),
     _u('air/medium_fighter_aa', 'jet', title='Fighter'),
     _u('air/medium_gunship_aa', 'jet', title='Attack Plane'),
     _u('air/large_gunship_aa', 'jet', title='Heavy Attack Plane'),
@@ -392,7 +519,7 @@ assert all(u.family in FAMILIES for u in UNITS.values())
 assert all(u.status in ('ported', 'planned') for u in UNITS.values())
 # The families with their EDF-side builder (tools/make_xmorph.py over make_tracked_combat: both on the V603, a tracked
 # unit through pylib/wt_tracked.py, an emplacement through pylib/emplacement_model.py's fortified base).
-PORTABLE = ('tracked', 'emplacement')
+PORTABLE = ('tracked', 'emplacement', 'heli')
 V603 = ('tracked', 'emplacement')
 
 
@@ -401,7 +528,7 @@ def check(u: Unit) -> None:
     if u.status != 'ported':
         return
     why = [what for what, ok in (
-        ('family', u.family in PORTABLE), ('like', bool(u.like)), ('title_en', bool(u.title_en)),
+        ('family', u.family in PORTABLE), ('like', bool(u.like) or u.family not in V603), ('title_en', bool(u.title_en)),
         ('texts', set(u.texts) == set(LANGS) and all(len(t) == 2 and all(t) for t in u.texts.values())),
         ('gun', len(u.gun) == 4 and all(u.gun)), ('eye', len(u.eye) == 3), ('durability', u.durability > 0),
         ('reload', u.reload > 0), ('level', u.level > 0), ('after', u.after.startswith('EDF6VC_CALL_'))) if not ok]
