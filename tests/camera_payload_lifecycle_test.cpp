@@ -27,6 +27,7 @@ bool IsPlayerJet(const void*) noexcept { return false; }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
 bool GunshipGunnerCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
 bool DreadnoughtCamera(const unsigned char*,float*,float*) noexcept {return false;}
+bool SeatTurretCamera(const unsigned char*,float*,float*) noexcept {return false;}
 bool IsHelicopter(const void*) noexcept { return false; }
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
 bool IsOnlineAuthority(const void*) noexcept { return true; }   // payload.cpp RunsUnmannedTurrets

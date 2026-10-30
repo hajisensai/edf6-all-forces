@@ -53,6 +53,7 @@
 #include "sight.h"
 #include "sightzoom.h"
 #include "turretaim.h"
+#include "seat_turret.h"
 #include "edf/weapon.h"
 #include <cmath>
 #include <cstring>
@@ -809,6 +810,8 @@ float* __fastcall LookHook(const void* point,float* lookOut,unsigned char* cam) 
             Place(lookOut+12,lookOut+28,cam,eye,look);   // the gunship's gun seat: the rider's own view (playerjet_crew.inc)
         else if(DreadnoughtCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,eye,look))
             Place(lookOut+12,lookOut+28,cam,eye,look);   // a Dreadnought turret's gunner: theirs (dreadnought_turrets.inc)
+        else if(SeatTurretCamera(static_cast<const unsigned char*>(point)-kSeatCamLook,eye,look))
+            Place(lookOut+12,lookOut+28,cam,eye,look);   // a gunner seat's own turret: the gunner's view (seat_turret.cpp)
         else if(shared.seat && static_cast<const unsigned char*>(point)==shared.seat+kSeatCamLook)
             Camera(static_cast<const unsigned char*>(point)-kSeatCamLook,lookOut+12,cam);
         // A seat it does not place: a deployed Proteus raises the stock targets (proteus.cpp), the game eases onto them.

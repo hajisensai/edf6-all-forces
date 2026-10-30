@@ -93,10 +93,36 @@ Arm('aa_l', ..., fire=0, auto=True, seat=1, turret={'low': -5, 'high': 80, 'yaw_
 | 天启坦克 | 防空导弹 | 2 | 是 |
 | 爱国者 | PAC-3 | 2 | |
 | X-Morph 防空坦克 | 导弹 | 2 | |
-| X-Morph 重型坦克 | 机枪塔 / 防空导弹 / 车头火箭 | 2 / 3 / 4 | 防空导弹 |
+| X-Morph 重型坦克 | 防空导弹 / 车头火箭；机枪塔为炮手座 1（原作 `machinegun_turret` 单骨炮塔，整座随炮手转动、抬起） | 3 / 4；炮手座攻击键 | 防空导弹、机枪塔（空座时） |
 | X-Morph EMP 坦克 | EMP 高射弹 / 导弹塔；左右防空机炮塔为炮手座 1 / 2（`seat`，各有自己的炮塔骨骼） | 2 / 3；炮手座攻击键 | 导弹塔、两座防空机炮塔（空座时） |
+| 格雷普（401）| AGM 反坦克导弹架 | 3 | |
+| 403 电磁炮坦克 | AGM 导弹 | 3 | |
+| 404 超重型坦克 | AGM 导弹 | 3 | |
+| 开普勒（V603 防空车） | AAM 防空导弹（两种弹，T 切换） | 2 | 是 |
+| 摩托（503 / 613） | 火箭巢 | 3 | |
 
-坦克的 AP / HE / HEAT / 霰弹、防空车的 AP / 近炸弹链等仍是**同一门炮的不同弹种**，保持主武器循环；同轴机枪本来就在副扳机上独立开火。直升机、战机的挂载暂未改动（挂载种类在多种载具间共用，`key` 是按种类设的）。
+### 原版车：表驱动（`vcobjects.STOCK_MOUNTS`）
+
+原版车的插件挂载按「车类别 → 挂载种类 → 控制方式」登记在 `pylib/vcobjects.py` `STOCK_MOUNTS`（类别即 `tools/make_stock_stores.py CATEGORIES`），不写逐车代码：
+
+```python
+STOCK_MOUNTS = {
+    'ifv': {'AGM_L': Mounting(3)},                      # 开火键 3
+    'flak': {'AAM_S': Mounting(FIRE_SECONDARY, auto=True), ...},   # 副扳机 + 可开关自动炮塔
+    ...
+}
+```
+
+表里的种类在这些车上变成独立的派生种类 `mounted(kind, how)` = `<KIND>_K<key>[A]`（如 `AGM_L_K3`、`AAM_S_K2A`，自己的武器文件 `EDF6VC_AGM_L_K3_4.SGO`），`make_stock_stores._mounted` 把该类别 loadout 里的挂载换成派生种类；同一种类在别的车上（如直升机挂架上的 `AGM_L`）保持原控制。表里没有的挂载照旧走主武器循环。新增一种映射只改这张表。
+
+三选一的判定：
+
+- **同一门炮 / 同一发射架的另一种弹**（坦克 AP / HE / HEAT / 霰弹、炮射导弹 GLM、防空炮弹链、402 火箭车与直升机挂架上的几种弹）→ 不映射，留在主武器循环。
+- **独立挂载、无独立炮塔骨骼**（原版车的导弹架、火箭巢；X-Morph 固定火箭巢）→ 开火键（`key`）；能自己判射又适合无人值守的（防空导弹）再加 `auto`。
+- **有独立炮塔骨骼的副炮塔**（X-Morph 原作蓝图里 yaw 骨骼下另有俯仰骨骼 / 单骨炮塔，且是炮而不是要锁定的导弹）→ 炮手座（`seat` + `turret`），空座时 `auto`。只对 V603 车型可用，原版车模型没有插件的炮塔骨骼，不做炮手座。
+- 需要锁定的导弹塔（X-Morph 重型 / EMP 坦克的导弹塔）不做炮手座：空座时没有人的锁定可用来开火，保持开火键 + 自动。
+
+直升机、战机的挂载不在这次范围内（挂架上是同一发射位的几种弹）。
 
 ## 独立炮手座（`src/seat_turret.cpp`）
 
@@ -105,11 +131,11 @@ Arm('aa_l', ..., fire=0, auto=True, seat=1, turret={'low': -5, 'high': 80, 'yaw_
 | 部分 | 做法 |
 |---|---|
 | 摆骨骼 | `SeatTurretsPose`（`vulcan_rotor.cpp Build` 调用）：偏航骨骼绕自己的竖轴转；俯仰骨骼（与偏航骨骼同为 `body` 的叶子）旋转 = 俯仰 × 偏航、原点绕偏航骨骼原点转（`src/seat_turret_pose.h`，`tests/seat_turret_test.cpp`）。绑定姿态取骨架定义（`BoneBind506`），不取上一帧的本地矩阵。 |
-| 谁来瞄 | `SeatTurretsFrame`（`crew.cpp`，`PayloadFrame` 之后）每帧按座位上的人决定：本机玩家 → 屏幕中心对准的地面点 / 3000 m 外；本机运行的 NPC 炮手 → `npcai.cpp CrewOwnWeapons` 经 `SeatTurretsTrain` 给的目标；座位空着、是自动炮塔、本机运行这辆车（驾驶座本机玩家 / 本机 NPC，空车看 `IsOnlineAuthority`）且自动炮塔开着 → 射程内、射界内、类型合适（防空 → 只打空中）的最近敌人；以上都不是 → 跟随其他机器发来的角度（600 ms 内），否则回正。按 `Turret` 的转速与限位转动。 |
+| 谁来瞄 | `SeatTurretsFrame`（`crew.cpp`，`PayloadFrame` 之后）每帧按座位上的人决定：本机玩家 → 自己的炮手视线（见「镜头」）中心对准的地面点 / 3000 m 外，不跟主炮；本机运行的 NPC 炮手 → `npcai.cpp CrewOwnWeapons` 经 `SeatTurretsTrain` 给的目标；座位空着、是自动炮塔、本机运行这辆车（驾驶座本机玩家 / 本机 NPC，空车看 `IsOnlineAuthority`）且自动炮塔开着 → 射程内、射界内、类型合适（防空 → 只打空中）的最近敌人；以上都不是 → 跟随其他机器发来的角度（600 ms 内），否则回正。按 `Turret` 的转速与限位转动。 |
 | 开火 | 玩家：该座位攻击键 → `SeatIntent.keys[kSeatTriggerKey]` → `FireSeat`。NPC：`NpcOwnWeaponsFire`（`HasShot` 判炮口 3° 内）。空座自动炮塔：`UnmannedTurretsFire`（`FireSeat` + `autoOn`），同样 `HasShot` 判射。都是置扳机锁存，射击走原版武器同步。 |
 | 开关 | 自动炮塔开关（`VehicleAutoTurretKey`）同时管炮手座的空座自动炮塔：本机玩家在车上时按其开关，否则开。驾驶座 HUD 的开关计数包含其他座位的自动炮塔（`SeatAutoTurrets`）。 |
 | HUD | 炮手座的控制行显示「[攻击] 开火：<武器>」（`Tx::controlSeatFire`），自动炮塔带「（自动）」。 |
-| 镜头 | 用原版座位镜头：模型上的 `xm_cam_n` 定位器挂在俯仰骨骼上，随炮塔转。 |
+| 镜头 | 本机炮手的视线是插件自己的（`SeatTurretCamera`，`turretcam.cpp LookHook` 里与无畏舰炮塔同一处接管）：世界坐标下的偏航 / 俯仰，由炮手自己的鼠标 / 右摇杆转（`SeatTurretsInput` 在原版输入前读 `seat+0x2D0`，速率 `TurretCamRate`），车体和主炮塔转动不带动它；镜头在炮塔俯仰轴心上方 2.2 m、沿视线后退 6 m。炮塔按自己的转速追视线。模型上的 `xm_cam_n` 定位器只在插件不接管时（如插件关闭）给原版镜头用。 |
 | 联机 | tag 15 新类型 `'STUR'`（`src/seat_turret_net.h`）：本机在瞄的炮塔（holder 序号 + 角度）每 50 ms 发给其他副本；接收方只更新本机没在瞄的炮塔。 |
 
 **未实机验证**（需要 `gamequeue.py` 排队实测）：座位 ≥1 的主扳机（`seat+0x2E4`）在 V603 上是否由原版写入；座位 ≥1 的 holder 在联机时的开火权限（`0x630DF0`）；摆骨骼后原版弹道是否确实跟随；原版对座位 ≥1 的镜头是否使用 `xm_cam_n`。

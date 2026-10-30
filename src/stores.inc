@@ -35,7 +35,7 @@ inline constexpr StoreSpec kStores[]={
     {L"EDF6VC_MG601_","Type 74 coax",StoreRole::coax,0.0f,0.0000f,0,0,false,StoreShell::native,0,false,0,{}},
     {L"EDF6VC_MG401_","M240C coax",StoreRole::coax,0.0f,0.0000f,0,0,false,StoreShell::native,0,false,0,{}},
     {L"EDF6VC_XM_MEDIUM_TANK_AA_MISSILE_","Missiles",StoreRole::ground,0.0f,0.0000f,0,0,false,StoreShell::native,2,false,0,{}},
-    {L"EDF6VC_XM_LARGE_TANK_MG_","Machine gun",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,2,false,0,{}},
+    {L"EDF6VC_XM_LARGE_TANK_MG_","Machine gun",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,0,true,1,{L"xm_mg",L"xm_mg_gun",-0.174533f,1.047198f,3.141593f,2.094395f,1.570796f}},
     {L"EDF6VC_XM_LARGE_TANK_AAM_","AA missiles",StoreRole::air,0.0f,0.0000f,0,0,false,StoreShell::native,3,true,0,{}},
     {L"EDF6VC_XM_LARGE_TANK_ROCKETS_","Rockets",StoreRole::air,0.0f,0.0000f,0,0,false,StoreShell::native,4,false,0,{}},
     {L"EDF6VC_XM_LARGE_TANK_EMP_EMP_","EMP flak",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,2,false,0,{}},
@@ -47,6 +47,10 @@ inline constexpr StoreSpec kStores[]={
     {L"EDF6VC_XM_HIGHWAY_TANK_FLAK_","Flak",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,2,false,0,{}},
     {L"EDF6VC_XM_HIGHWAY_TANK_MORTAR_","Mortar",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,2,false,0,{}},
     {L"EDF6VC_XM_HIGHWAY_TANK_LASER_","Laser",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,2,false,0,{}},
+    {L"EDF6VC_AGM_L_K3_","AGM-114",StoreRole::ground,50.0f,0.0040f,0,0,false,StoreShell::native,3,false,0,{}},
+    {L"EDF6VC_AAM_S_K2A_","AIM-9X",StoreRole::air,85.0f,0.0060f,0,0,false,StoreShell::native,2,true,0,{}},
+    {L"EDF6VC_AAM_M_K2A_","AIM-120",StoreRole::air,152.0f,0.0100f,0,0,false,StoreShell::native,2,true,0,{}},
+    {L"EDF6VC_RKT_K3_","Hydra 70",StoreRole::rocket,32.0f,0.0015f,0,0,false,StoreShell::native,3,false,0,{}},
 };
 inline constexpr TwinBarrel kTwinBarrels[]={
     {L"EDF6VC_BMPT_L.SGO",1},

@@ -121,6 +121,8 @@ def arm_turrets(um: xm.UnitModel, unit: xm_units.Unit) -> dict[str, tuple[str, s
             continue
         _req(len(arm.weapons) == 1 and arm.weapons[0] in weapons, f'{unit.key}: arm {arm.key}: one blueprint weapon a turret')
         yaw, pitch = turrets.get(weapons[arm.weapons[0]].turret, (None, None))
+        if yaw in um.bind and pitch not in um.bind:
+            pitch = yaw   # a one-bone mount (its pitch an attachment, the heavy tank's machine gun): the whole mount lifts
         _req(yaw in um.bind and pitch in um.bind and pitch in um.subtree(yaw),
              f'{unit.key}: arm {arm.key}: its turret has no yaw bone over a pitch bone ({yaw}, {pitch})')
         out[arm.key] = (yaw, pitch)
