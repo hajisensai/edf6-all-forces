@@ -266,6 +266,9 @@ void MaterialAnimsFree(MaterialAnims& m) noexcept;                     // before
 // as given (that helper scales the colour by 2.5 and the radius by 5, as 4.1's 0x1b5080 does; 4.1 code that fills the param
 // itself, like the 401 WeakPanel, passes raw numbers).
 void StencilLight(const float* pos,const float* colour,float radius,int frames) noexcept;
+// A ParticleObject (0x844C0, InitParam@ParticleObject) at `pos`: one billboard of `texture` (an effect texture by name, as
+// EffectGenUtil finds it), `size` shrinking to 0 over `life` frames, in `colour` (rgba, HDR). Fire and forget. false: not made.
+bool Particle(const float* pos,int life,float size,const float* colour,const wchar_t* texture) noexcept;
 // EffectGenUtil 0x2E7D00 (pos, dir, size): 4.1's 0x1b1910, the 火炎_01 small explosion the 401's burning panels throw (the two
 // share every constant: 0.97, 0.01, 0.2, 0.1, 1.5, 0.4, 30, 31; FireBurst's Flame 0x2E7FF0 is 4.1's 0x1b16b0 the same way).
 void SmallBurst(const float* pos,const float* dir,float size) noexcept;

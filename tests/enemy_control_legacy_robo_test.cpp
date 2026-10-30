@@ -109,6 +109,7 @@ bool FillSePreset(unsigned char*,const void*,const wchar_t*) noexcept {return fa
 void AtGameShutdown(void(*)() noexcept) noexcept {}
 
 bool ShuttingDown() noexcept {return false;}
+bool Particle(const float*,int,float,const float*,const wchar_t*) noexcept {return true;}
 bool LocatorMatrix(const LocatorHandle&,float* out) noexcept {for(int i=0;i<16;++i)out[i]=(i%5==0) ? 1.0f : 0.0f;return true;}
 bool WeakAlive(const WeakRef&) noexcept {return false;}
 void WeakReset(WeakRef& ref) noexcept {ref={};}

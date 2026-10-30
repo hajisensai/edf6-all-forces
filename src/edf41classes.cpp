@@ -1173,6 +1173,93 @@ void StencilLight(const float* pos,const float* colour,float radius,int frames) 
     WeakReset(w);
 }
 
+namespace {
+constexpr std::size_t kParticleCreate=0x844C0,kParticleParamInit=0x300C80,kTexByName=0x2E8510,kTexAssign=0xF5E10,kTexFree=0x1120820,
+    kParticleParamFree=0x8FDF0,kInitParamBase=0x1762068,kParticleParamVtable=0x17620E8;
+bool ParticlePrims() noexcept {
+    static const Print prints[]={
+        {kParticleCreate,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x6C}},{kParticleParamInit,{0x48,0x89,0x5C,0x24,0x10,0x57,0x48,0x83}},
+        {kTexByName,{0x48,0x89,0x5C,0x24,0x08,0x48,0x89,0x74}},{kTexAssign,{0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C}},
+        {kTexFree,{0x40,0x53,0x48,0x83,0xEC,0x20,0x48,0x8B}},{kParticleParamFree,{0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83}},
+    };
+    static std::atomic<int> state{0};
+    if(!state.load()) {
+        bool ok=true;
+        for(const Print& p:prints)ok=ok && Readable(image+p.rva,8) && std::memcmp(image+p.rva,p.bytes,8)==0;
+        state=ok ? 1 : 2;
+        if(!ok)Log("EDF41CLASS the ParticleObject code is not what this was written for: no particle flashes");
+    }
+    return state.load()==1;
+}
+}  // namespace
+
+// A ParticleObject (4.1's muzzle flash, EDF41 0x27C3F7..0x27C5A7, is one made from an InitParam@ParticleObject). EDF6 has the
+// same class with the same parameter block (create 0x844C0(manager, out weak_ptr, matrix, param), ctor 0x301110, param vtable
+// 0x17620E8 over InitParamBase, 0x1D0 bytes, its emitter part constructed by 0x300C80(param + 0x30) = 4.1's 0x1C1920, destroyed by
+// 0x8FDF0): the fields 4.1 writes are the ones EDF6's EffectGenUtil::Explosion (0x2E5ED0, the only EDF6 maker of a ParticleObject
+// besides its factory) writes at the same offsets: +0x1A0 = 1, +0x1A4 = 0xFFFF, +0x1A8 / +0x1B0 / +0x1B8 = the addresses of +0x90
+// (the position), +0xA0 ((0, 0, 0, 1)) and +0x30 (0x20), +0x38 / +0x3C the life in frames, +0x50 0.98, +0xC8 0.1, +0xE8 0, +0xF4 /
+// +0xF8 the size, +0xFC -size / life, +0x110 the colour, +0x130 its rgb with alpha 0. The texture (`texture`) is a
+// TextureRef (0x30 bytes) at +0x158 that 0x300C80 constructs (0x1120520): got by name from EffectGenUtil (0x2E8510, as
+// UfoRoboCanonChargeEffect's constructor does at 0x306D4B), assigned with 0xF5E10, the temporary freed with 0x1120820.
+bool Particle(const float* pos,int life,float size,const float* colour,const wchar_t* texture) noexcept {
+    void* mgr=Manager();
+    void* egu=Global(kEffects);
+    if(!ParticlePrims() || !mgr || !egu || !texture || life<=0 || !(size>0.0f))return false;
+    alignas(16) unsigned char param[0x1D0]={};
+    const void* base=image+kInitParamBase;
+    std::memcpy(param,&base,8);
+    At<void*(__fastcall*)(void*)>(kParticleParamInit)(param+0x30);
+    const void* vt=image+kParticleParamVtable;
+    std::memcpy(param,&vt,8);
+    const void* at90=param+0x90;
+    const void* atA0=param+0xA0;
+    const void* at30=param+0x30;
+    std::memcpy(param+0x1A8,&at90,8);
+    std::memcpy(param+0x1B0,&atA0,8);
+    std::memcpy(param+0x1B8,&at30,8);
+    const std::int32_t one=1,mask=0xFFFF,kind=0x20;
+    std::memcpy(param+0x1A0,&one,4);
+    std::memcpy(param+0x1A4,&mask,4);
+    param[0x1C0]=0;
+    std::memcpy(param+0x30,&kind,4);
+    const float p4[4]={pos[0],pos[1],pos[2],1.0f},w4[4]={0.0f,0.0f,0.0f,1.0f};
+    std::memcpy(param+0x90,p4,16);
+    std::memcpy(param+0xA0,w4,16);
+    std::memcpy(param+0x38,&life,4);
+    std::memcpy(param+0x3C,&life,4);
+    const float fade=0.98f,spread=0.1f,shrink=-size/static_cast<float>(life),zero=0.0f;
+    std::memcpy(param+0x50,&fade,4);
+    std::memcpy(param+0xC8,&spread,4);
+    std::memset(param+0xE8,0,8);
+    std::memcpy(param+0xF4,&size,4);
+    std::memcpy(param+0xF8,&size,4);
+    std::memcpy(param+0xFC,&shrink,4);
+    std::memcpy(param+0x110,colour,16);
+    std::memcpy(param+0x130,colour,12);
+    std::memcpy(param+0x13C,&zero,4);
+    alignas(16) unsigned char tex[0x40]={};
+    void* ref=At<void*(__fastcall*)(void*,void*,const wchar_t*)>(kTexByName)(egu,tex,texture);
+    if(ref)At<void*(__fastcall*)(void*,void*)>(kTexAssign)(param+0x158,ref);
+    At<void(__fastcall*)(void*)>(kTexFree)(tex);
+    if(!ref) {   // an untextured particle draws a plain square
+        static std::atomic<int> said{0};
+        if(said.fetch_add(1)<4)Log("EDF41CLASS no effect texture %ls: no particle",texture);
+        At<void*(__fastcall*)(void*,unsigned)>(kParticleParamFree)(param,0);
+        return false;
+    }
+    alignas(16) static const float identity[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    alignas(16) void* weak[2]={nullptr,nullptr};
+    At<void*(__fastcall*)(void*,void*,const float*,void*)>(kParticleCreate)(mgr,weak,identity,param);
+    WeakRef w;
+    w.object=weak[0];
+    w.control=weak[1];
+    const bool made=w.object!=nullptr;
+    WeakReset(w);
+    At<void*(__fastcall*)(void*,unsigned)>(kParticleParamFree)(param,0);
+    return made;
+}
+
 // ---- shutdown callbacks (the 401's charge glows; the 301's emitters) ----------------------------------------------------------
 namespace {
 constexpr std::size_t kAppDtor=0x7021F0,kAppDtorCall=0x70293F;

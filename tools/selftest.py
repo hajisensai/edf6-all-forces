@@ -13463,11 +13463,21 @@ def edf41_hector_alias() -> None:
         assert struct.unpack_from('<if', blob, 0) == ((0, 180.0) if i == m.BERSERKER_DEATH_SLOT else (1, 480.0)), i
     # 4.1's time to the first shot: the 301 cannon charges 180 frames (EDF41.exe 0x225A7A, 3 s)
     assert [c['gun_battery']['charge']['time'] for c in top['gun_control']] == [180.0, 180.0], top['gun_control']
+    # no Berserker look (the planner's report #28: e602_berserker.efarc large_gun_charge / _fire on a 4.1 weapon): the battery
+    # draws nothing, the plugin draws 4.1's (HECTOR_FX): the cannons' charge ball and flash, at each gun's muzzle locator
+    for c in top['gun_control']:
+        battery = c['gun_battery']
+        assert 'effect_arc' not in battery and 'effect' not in battery['charge'] and 'effect' not in battery['fire'], battery
+        assert 'se' in battery['charge'], 'a cannon keeps its charge sound'
+    fx = top['edf41_hector']['fx']
+    assert [f[:2] for f in fx] == [[1.0, 180.0]] * 2, fx
+    assert all(max(f[3:6]) == 1.0 and f[5] == 1.0 and f[6] == 10.0 for f in fx), fx   # 4.1's blue flash, 10 frames
     located = ml.mab_locators(am.items[2].data)
     names = {l.name: l for _i, l in located}
     assert {'目の基準位置', '砲台１', '砲台２'} <= set(names) and all(l.node in bones for _i, l in located)
     assert [c['gun_battery']['muzzle']['shape'] for c in top['gun_control']] == ['砲台１', '砲台２']
     assert names['砲台１'].node == 'arms_l' and names['砲台２'].node == 'arms_r' and names['砲台１'].a[2] > 20.0
+    assert [f[2] for f in fx] == [names['砲台１'].a[2], names['砲台２'].a[2]], fx   # the plugin's muzzle is the locator
     wk = top['WalkingEnemyBase']['InterpolateNode']
     assert wk in bones and top['BerserkerSettings']['WakeupNode'][0] in bones
     shkt = files['OBJECT/RAGDOLL_HECTOR301_HAS_HKA.SHKT']

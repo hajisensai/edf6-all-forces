@@ -265,9 +265,27 @@ HECTOR_WEAPONS: dict[tuple[str, str], HectorWeapon] = {
 # (120 frames, 0x229B00) and it fires. The gatlings and 301's launcher fire at once (their first state is the firing one,
 # 0x2265A0 / 0x228F70 / 0x2270E0: those waits, 10 / 10 / 4 s, are how long they fire). EDF6's battery charges for
 # charge.time frames (+0x140 -> +0x2E8, counted down to the first shot, 0x6D5474..0x6D556A) and plays the class's charge
-# effect and sound meanwhile.
+# sound meanwhile (no effect: HECTOR_FX).
 HECTOR_CHARGE: dict[str, float] = {'Hector301_Cannon': 180.0, 'Hector401_Cannon': 360.0, 'Hector401_Launcher': 120.0}
 HECTOR_CHARGE_LIGHT_SLOT = 4      # where 301 cannon's charge light would go (not shipped: alias_dsgo, the M113 glare)
+
+# The weapons' look when they charge and fire, drawn by the plugin (src/edf41ai.cpp Effects), not by the battery: the battery's
+# own effects are esb files from an effect_arc (EDF+0x6D49C9 effect_arc, 0x6D7783 charge.effect.esb, 0x6D832D fire.effect.esb: no
+# other form), and the template's are Berserker's (e602_berserker.efarc large_gun_charge / large_gun_fire), not 4.1's (the
+# planner's report #28, 2026-10-30). 4.1's weapon objects fire a MuzzleFlash01 (their muzzle_flash_class / muzzle_flash_param:
+# マズルフラッシュ01.dds, life [4] frames, colour [8]: blue [1, 2, 16, 10] on the cannons and gatlings, red [16, 2, 2, 10] on the
+# launchers). Per kind (edf41_hector fx [kind, glow frames, muzzle z, r, g, b, flash frames]):
+#   1 cannon: a light ball grows at the muzzle through its charge state (as EDF6's Deiroi main gun's ChargeEffect_DeiroiBody:
+#     Particle3_k.dds), then a flash at each shot; glow frames = 4.1's charge state (301: 180; 401: 300, after its 60-frame open)
+#   2 launcher: the muzzle only lights up at each shot (a light flash, no particle, no charge look while it opens)
+#   3 gatling: a muzzle-fire flash at each shot (as EDF6's E506_HA_HEAVYMACHINEGUN fires its MuzzleFlash01)
+#   0 the shield: nothing
+HECTOR_FX: dict[str, tuple[int, float]] = {
+    'Hector301_Cannon': (1, 180.0), 'Hector401_Cannon': (1, 300.0),
+    'Hector301_Launcher': (2, 0.0), 'Hector401_Launcher': (2, 0.0),
+    'Hector301_Gatling': (3, 0.0), 'Hector401_Gatling': (3, 0.0),
+    'Hector401_Shield': (0, 0.0),
+}
 
 # The Hector variants 4.1's missions name (root SGO -> (generation, left arm, right arm, missions)). The letters are
 # what the SGO's hector_weapon holds (arms_l then arms_r), not the file name: HECTOR401SG holds the gatling on the
@@ -3316,7 +3334,7 @@ def alias_dsgo(games: 'Games', root: str, files: dict[str, bytes], a: Alias, t_d
             entries.append(entry)
         out.set('gun_control', dsgo.Node(entries))
         if all(g.fire for g in a.guns):
-            hector_fire(games, files, mine, out, a)
+            hector_fire(games, files, mine, out, a, barrel)
             out.set(HECTOR_ANIM_KEY, dsgo_value(hector_anim(files, a, mdb_bones(files[rab_rel], mdb_name))))
 
     cas = rel_of(am[1])
@@ -3380,10 +3398,12 @@ def hector_bullet(games: 'Games', w: HectorWeapon, damage: float, custom: list[f
     return bullet
 
 
-def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.Node, a: Alias) -> None:
+def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.Node, a: Alias, muzzles: list[float]) -> None:
     """gun_control's entries made to fire what 4.1's arms hold, and the AI's gun range their longest: each entry
     gets the bullet of its HectorWeapon, fire.count / interval / accuracy, and 4.1's time to the first shot as its
-    charge (HECTOR_CHARGE; one frame for the weapons that fire at once).
+    charge (HECTOR_CHARGE; one frame for the weapons that fire at once). No battery effect (no effect_arc, no
+    charge / fire effect; the charge sound only on a cannon): the plugin draws 4.1's look (HECTOR_FX) at the muzzle,
+    `muzzles` (each gun's locator z on its arm bone).
     The weapon SGOs (in `files`: the closure holds them until prune) are checked against the table and give
     hector_weapon_range and bullet_custom_param. Damage: 4.1's coefficient times (this object's HP / 4.1's HP)
     -- the same HP, durability is a key both have and 4.1's wins -- so the ratio of a hit to the HP is 4.1's;
@@ -3394,7 +3414,8 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
     hp_ratio = float(out.get('game_object_durability')) / num(mine['game_object_durability'])
     reach = 0.0
     ranges: list[float] = []
-    for gun, arm, entry in zip(a.guns, arms, entries):
+    fx: list[list[float]] = []
+    for gun, arm, entry, z in zip(a.guns, arms, entries, muzzles, strict=True):
         w = gun.fire
         if rel_of(arm[3]) != 'OBJECT/' + w.sgo:
             raise ValueError(f'{arm[0]} holds {arm[3]}, the table says {w.sgo}')
@@ -3409,6 +3430,20 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
         battery = entry.get('gun_battery')
         battery.set('bullet', hector_bullet(games, w, coef * hp_ratio, custom, hit_se))
         set_path(battery, 'charge/time', HECTOR_CHARGE.get(w.cls, 1.0))
+        kind, glow = HECTOR_FX[w.cls]
+        remove_key(battery, 'effect_arc')
+        remove_key(battery.get('charge'), 'effect')
+        if kind != 1:
+            remove_key(battery.get('charge'), 'se')     # 4.1's launcher opens and its gatling spins up silently
+        remove_key(battery.get('fire'), 'effect')
+        if kind:
+            flash = weapon['muzzle_flash_param']
+            if weapon.get('muzzle_flash_class') != 'MuzzleFlash01' or len(flash) < 9 or len(flash[8]) != 4:
+                raise ValueError(f'{w.sgo}: muzzle flash {weapon.get("muzzle_flash_class")} {flash}')
+            rgb = [num(c) for c in flash[8][:3]]
+            fx.append([float(kind), glow, float(z), *(c / max(rgb) for c in rgb), num(flash[4])])
+        else:
+            fx.append([0.0, 0.0, float(z), 0.0, 0.0, 0.0, 0.0])
         fire = battery.get('fire')
         fire.set('count', w.count)
         fire.set('interval', w.interval)
@@ -3419,12 +3454,13 @@ def hector_fire(games: 'Games', files: dict[str, bytes], mine: dict, out: dsgo.N
     set_path(out, 'AiSettings/gun_attack/range', reach)
     # What Berserker's keys cannot say, for the plugin (src/edf41ai.cpp reads this key through the game's SGO accessors;
     # the class never looks it up): each arm's own range (4.1 starts only the arms that reach the target), whether the
-    # two arms hold the same weapon class (4.1 then always fires both), and 4.1's hector_ai_setting (back-off cycle).
+    # two arms hold the same weapon class (4.1 then always fires both), 4.1's hector_ai_setting (back-off cycle), and each
+    # arm's charge and fire look (HECTOR_FX).
     ai = [num(x) for x in mine['hector_ai_setting']]
     if len(ai) != 7:
         raise ValueError(f'hector_ai_setting has {len(ai)} numbers, not 7')
     out.set('edf41_hector', dsgo_value({'ranges': ranges, 'same_weapon': float(a.guns[0].fire.cls == a.guns[1].fire.cls),
-                                        'ai': ai}))
+                                        'ai': ai, 'fx': fx}))
 
 
 # EDF6_Berserker_Large's material_animation slots (BerserkerBase, EDF.dll, enabled through 0x6DC830 / 0x6C0200(model,
