@@ -82,3 +82,15 @@ node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.toml
 大小对不上就丢弃）；中途失败调 `/api/build/abort`。整包 SHA-256 由上传方计算（Worker 的 CPU 预算算不完 100 MB+），安装器下载后按它校验。
 每次分块上传在独立临时对象完成并核对大小，再用流和原子条件写入发布对象；失败不会覆盖或删除已有同名包。
 已发布文件名不可复用（单次上传和分块上传均返回 409），重发请使用新的构建文件名。升级前尚未完成的上传需重新 start；upload_id 对客户端仍是不透明字符串。
+
+## 公开下载页（/download）
+
+全站唯一不用登录的地方：最新分享包，链接可以直接发给玩家（https://edf6.fushi.moe/download）。
+存储和下载与 fushi.moe 的推荐包同一套：包切成 64 MiB 的分片（`share/<version>/part-NNN`），清单写明每片的 offset、长度和 SHA-256；
+页面（`public/download.js` + 从 fushi.moe 原样复制的 `public/chunked-download.mjs` / `public/pack-download.mjs`，改动请两边同步）
+每片开 4 条 Range 连接并发下载，校验后写进用户选的文件（Chrome / Edge 流式写盘，其他浏览器在内存里拼好再保存）。
+「普通下载」`/share/<version>/file` 把各片按顺序拼成一个流，给 IDM 等下载工具和不支持分片的情况用。
+
+发布：`python tools/testhub.py share <zip> [--notes TEXT]`（开发者账号）。每片上传时带 SHA-256，由 R2 校验；
+已存在且哈希相同的片会跳过，中断后原样重跑即可。最后一步 publish 核对分片首尾相接、大小与哈希，再切换 `share/latest.json`；
+保留上一版（正在下载的人不受影响），更早的版本删除。

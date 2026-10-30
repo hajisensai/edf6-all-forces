@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EDF 全军出击下载</title>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/download.js"></script>
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>EDF 全军出击 · 下载</h1>
+  </header>
+
+  <section>
+    <h2>最新分享包</h2>
+    <div id="info" class="muted">加载中……</div>
+    <div class="row gap-top">
+      <button id="go" class="btn" disabled>下载</button>
+      <button id="cancel" class="btn ghost" hidden>取消</button>
+      <a id="plain" class="btn ghost" hidden>普通下载</a>
+    </div>
+    <div id="bar" class="progress" hidden><div id="fill"></div></div>
+    <div id="status" class="muted"></div>
+    <p class="muted">
+      「下载」用分片加速：浏览器把文件分成若干片，每片 4 条连接并发下载，逐片校验 SHA-256 后写进你选的文件，校验不过的片不会落盘。
+      Chrome / Edge 会先问保存位置；其他浏览器在内存里拼好再保存（需要约 1 GB 空闲内存）。
+      用下载工具（IDM 等）或分片下载失败时，点「普通下载」。
+    </p>
+  </section>
+
+  <section id="notesBox" hidden>
+    <h2>更新说明</h2>
+    <pre id="notes"></pre>
+  </section>
+</main>
+</body>
+</html>
