@@ -71,7 +71,7 @@ class PrivateSpawnContract(unittest.TestCase):
                 self.assertEqual(sgo.plain(spawn['mission_setup']), sgo.plain(source['vehicle_setup']))
                 self.assertEqual(sgo.plain(spawn['vehicle_setup']), sgo.plain(source['vehicle_setup']))
                 self.assertEqual(gen.mission_vehicle(row.sgo), row.spawn_sgo)
-                self.assertTrue(row.preload, 'installed vehicles must be placeable with RangePlaceAll=0')
+                self.assertFalse(row.preload, 'vehicles load when first placed (RequestLoad), not at the range start')
                 if 'VEHICLE301' in source_rel:
                     self.assertEqual(len(spawn['mission_setup'][2]), 1)
                 elif 'VEHICLE302' in source_rel:

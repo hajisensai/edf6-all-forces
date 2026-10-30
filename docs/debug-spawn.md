@@ -12,6 +12,7 @@
 ## 没有自己的钩子
 
 - 预载：`mission.cpp MissionStart` → `PreloadDebugSpawn()`（和 `PreloadSupportVehicles` / `PreloadSupportSoldiers` 同一时机，任务 `WaitPreload` 之前）。`DebugSpawn=0` 时第一行就返回。
+- 测试场默认不预载任何载具行（2026-10-30，反馈 #26 / #29）：生成载具换成 BC5 法线、原生分辨率贴图（2b684366）后，全部载具一起预载让进关这一步提交内存 1.4 → 5.6 GB、17 秒（地图进来后 7.1 GB，显存 6.1 GB，本机实测 eba4372），8 GB 内存 + GTX 1050 的测试者在这一步崩溃（联机开 EDF6TR_PVP_TANK / PVP_JET）。载具改为第一次放置时 `RequestLoad`（联机由 `LoadedHere` 让每个成员各自加载后再 PREPARE），本场 PvP 选中的单位照旧预载；`RangePlaceAll=1` 仍全部预载。
 - 每帧：`map.cpp MapHumanFrame`（玩家士兵的 pre-update）和 `crew.cpp FrameTick`（坐在载具里时）都调 `DebugSpawnFrame`，按 `GameFrame()` 每帧只跑一次。关闭时在读任何按键之前返回。
 - 绘制：`hud.cpp HudDraw` → `DebugSpawnHud`，读 `DebugSpawnReadout`（关闭时返回 false）。
 
