@@ -339,10 +339,18 @@ def _with_xmorph(hand: tuple[Call, ...]) -> tuple[Call, ...]:
     units = xm_units.v603()
     if len({u.after for u in units}) != len(units):
         raise ValueError('two X-Morph units name the same call to follow (pylib/xm_units.py Unit.after)')
-    for u in units:
-        at = [c.id for c in out].index(u.after) + 1
-        out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', 0, u.key, False, 0, u.reload, u.level, 'vehicle',
-                            vehicle=f'EDF6VC_{u.key.upper()}', ground=u.key))
+    # each once the call it follows is in (a unit later in the table may follow one after it: the order ported)
+    todo = list(units)
+    while todo:
+        ids = [c.id for c in out]
+        ready = [u for u in todo if u.after in ids]
+        if not ready:
+            raise ValueError(f'X-Morph units follow no call: {[(u.key, u.after) for u in todo]} (pylib/xm_units.py)')
+        for u in ready:
+            at = [c.id for c in out].index(u.after) + 1
+            out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', 0, u.key, False, 0, u.reload, u.level, 'vehicle',
+                                vehicle=f'EDF6VC_{u.key.upper()}', ground=u.key))
+            todo.remove(u)
     return tuple(out)
 
 
@@ -382,6 +390,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'sorties (2026-10-25)': IDS[:84],
     'X-Morph battle tank (2026-10-27)': IDS[:85],
     'X-Morph tracked units and forts (2026-10-27)': IDS[:93],
+    'X-Morph wheeled units (2026-10-30)': IDS[:97],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row

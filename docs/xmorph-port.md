@@ -114,10 +114,44 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
   `xm_units.deployed()`（文件夹里 model.json + model.npz 齐全）。
 - 兵营（`bunker_barracks*`）没有武器，归 `structure` 家族（地图摆件），不是炮台。
 
+## 轮式（`prep_xmorph.py wheeled`，2026-10-30）
+
+- **底盘选 V603**（`Vehicle603_Flak`），和履带车同一条生成链（`wt_tracked` / `tracked_collision` / `make_tracked_combat` / `make_xmorph`，
+  所有登记表经 `xm_units.v603()` / `hulls()`）。看过的现有轮式车：EDF 的轮式炮车类是 Grape 的 `Vehicle401_Striker`（4 轴 8 轮、前两轴转向、
+  只有一个武器挂点 `Barrel`、骨架自成一套），仓库里没有在它上面建模型的生成器；喀秋莎（`make_katyusha`）是把卡车放在履带类 Naegling
+  （`Vehicle402_Rocket`，轮行 `[11] = -1` 不转向）的轮骨上，即「轮式外观 + 履带类」的先例；轿车（V512）没有武器。V603 有两个原生挂点、
+  `Arm` 的独立副武器、座舱 / 测试场 / 请求整套现成，所以轮式单位也放 V603。**代价：转向是 V603 的原地差速转向，不是前轮转向**
+  （见「未做 / 风险」）。
+- 车轮：X-Morph 的轮子烘焙在车体里（装甲车的 `wheel_1..4` 是横跨两侧的轴骨），每个轮是一块独立的连通网格。`wheels()` 取车体上
+  触地（最低点 < 0.2 m）、高≈长（差 ≤ 15%）、高 ≥ 0.5 m、宽 < 1 m、偏离中线的连通块为轮，按侧从前到后排。
+- 轮位：V603 每侧 8 个（A..H，B..G 是有弹簧的物理轮，A / H 只画）。B..G 按 `round(k·(n−1)/5)` 分到 n 个轮上（首个在前轮、末个在后轮），
+  A = 前轮、H = 后轮。一个轮分到几个轮位时，轮子自己的网格挂在它的第一个轮位上转动，其余轮位各一个藏在轮胎里的圆柱（半径 0.98×，
+  宽 60%），给物理接地半径与轮心——同一轴上多个弹簧轮，与喀秋莎在 Naegling 上的做法相同。
+- 履带：V603 类按名字绑定 `v603_kyata_L / _R` 两个材质，轮式单位每侧放一个藏在前轮轮毂里的小圆柱（半径 3 cm）占这两个名字，
+  `make_tracked_combat.STATIC_TRACKS` 对所有 `hulls()` 把滚动速率置 0。
+- 导弹车的发射架是一根骨骼同时做 yaw 和 pitch（`barrel_1`，枢轴在架尾 z −5.19）：`rig()` 把整个发射架当炮（`cannon_l`，绕枢轴俯仰），
+  在枢轴下合成一个藏在架子里的转台（`TURNTABLE`）当 `cannon_main`；四个发射管取上面一对为原生左右挂点（`MOUTHS`）。架子绕尾部转，
+  转太多会扫到驾驶室，`Unit.traverse = 30`（`TURRET_LIMITS` 左右各 30°）。
+- 装甲车的骨架以车门为根（`be_door_*`）：车体骨骼取 `body`（`hull_bone()`）。
+
+| 单位 | 三角形 | 轮（每侧） | 轮半径 | 主武器（原生一对） | 副武器（`Arm`） | 耐久 |
+|---|---|---|---|---|---|---|
+| xm_medium_missile_launcher | 8,684 | 5 | 0.60 | 重型导弹：每 5 s 一枚、曲射（TOS-1 的落点标记），15000 / 爆炸 18 m，两管轮流 | — | 800 |
+| xm_medium_apc | 4,753 | 4 | 0.84 | 双联重机枪对空弹：每 1.3 s 三发、两管齐射，300 | 对地弹（同一对枪管轮流，600） | 3700 |
+| xm_small_humvee | 1,857 | 2 | 0.52 | 机枪对空弹：每 1.5 s 三发，150 | 对地弹（240，每 2 s 三发） | 800 |
+| xm_small_buggy | 3,048 | 2 | 0.49 / 0.77 | 防空导弹：每 3 s 五发、追踪（泰坦侧导弹的外观与锁定，`Unit.homing`），240 | 车头机枪（每 1.5 s 六发，240） | 800 |
+
+- 换算照「武器」节；`like` 都是 V603 上有模型文件夹的车（`WT_ONLY`）：导弹车 `tos1`，其余 `tunguska`（30 mm 炮弹外观）。
+  耐久 = 原作 max_health × 2500/170，至少 `xm_units.WHEELED_FLOOR`（800；悍马 / 越野车原作 15、导弹车 40）。
+- 原作同一挺枪的两种 `Weapon`（`main_weapon` 打空中、`core_weapon` 打地面）分成主武器与 `Arm`，两者同时开火（独立副武器）。
+  多武器机制会话的新字段合入后改用它表达；目前仍是现有 `Arm`。
+- **货车 `medium_truck_cargo` 没有移植**：原作蓝图没有 `WeaponComp` / `TurretComp`（骨架里的炮塔骨骼没有网格），V603 没有无武器的路径；
+  行保持 planned、不写 `like`（`prep_xmorph.select()` 默认只准备写了 `like` 的行）。
+
 ## 新增一个单位
 
 1. `pylib/xm_units.py` 加一行（实体路径、家族、`like`、状态）。
-2. `python tools/prep_xmorph.py tracked xm_<名>`（写进模型包）；看生成日志里的骨骼归属、接地段，必要时离线渲染核对。
+2. `python tools/prep_xmorph.py tracked|wheeled xm_<名>`（写进模型包）；看生成日志里的骨骼归属、接地段 / 车轮，必要时离线渲染核对。
 3. 只有蓝图误导时（主武器炮口不在炮上之类）才在 `MOUTHS` 加例外，并写明证据。
 
 ## 验证（本机，离线）
@@ -131,6 +165,11 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
 
 ## 未做 / 风险
 
+- **轮式车不用前轮转向**：V603 的轮行 `car_base_wheel [11]` 全是 −1（不转向），轮式单位照此原地差速转向。EDF6 Car 在 `0x679CFC..0x67A004`
+  读 `[10..12]`（`docs/edf41-bike-re.md`），Striker 的前两轴是 `[11] = 1`；但 `Vehicle603_Flak` 的输入是否会给转向轮角度没有逆向过，
+  改了可能开不动，需实机验证后再做（`tracked_collision._wheel_overrides` 按轮位改 `[11] / [12]` 即可）。
+- 轮式单位未实机测试：同轴叠放的多个弹簧轮（导弹车 5 轴、悍马 2 轴各分到 3 个物理轮）的悬挂手感、发射架 ±30° 是否擦到驾驶室、
+  越野车车头机枪挂在炮身上（随炮塔瞄准，原作是车体上的固定挂点）都只做了离线检查。
 - **履带贴图滚动**：X-Morph 的履带是车体图集上的静态贴图，`v603_kyata_L / _R` 只是给 SGO 的 `tank_caterpillar_animation` 留名字；
   若 SGO 照 V603 的速率滚动，会把图集相邻区域滚进履带面。需要 SGO 侧对 xm 单位关闭或置零滚动（`make_xmorph` 的事），未实机核对。
 - 法线图 Y（绿）通道：X-Morph 是 OpenGL 约定（+G = 贴图上方），原版载具与我们的副法线（+v，贴图下方）是 DirectX 约定，`xm_model.normal_rgb` 取反 Y。证据（旋度符号与高度 / 颜色相关）见 `docs/texture-quality.md`。

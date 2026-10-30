@@ -40,6 +40,9 @@ inline constexpr StoreSpec kStores[]={
     {L"EDF6VC_XM_LARGE_TANK_EMP_EMP_","EMP flak",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
     {L"EDF6VC_XM_LARGE_TANK_EMP_AA_","AA guns",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
     {L"EDF6VC_XM_LARGE_TANK_EMP_AAM_","AA missiles",StoreRole::air,0.0f,0.0000f,0,0,false,StoreShell::native,true},
+    {L"EDF6VC_XM_MEDIUM_APC_CORE_","Ground rounds",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
+    {L"EDF6VC_XM_SMALL_HUMVEE_CORE_","Ground rounds",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
+    {L"EDF6VC_XM_SMALL_BUGGY_MG_","Machine gun",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
 };
 inline constexpr TwinBarrel kTwinBarrels[]={
     {L"EDF6VC_BMPT_L.SGO",1},
@@ -80,8 +83,14 @@ inline constexpr TwinBarrel kTwinBarrels[]={
     {L"EDF6VC_XM_MEDIUM_ARTILLERY_REGULAR_R.SGO",18},
     {L"EDF6VC_XM_MEDIUM_SHIELD_GENERATOR_L.SGO",19},
     {L"EDF6VC_XM_MEDIUM_SHIELD_GENERATOR_R.SGO",19},
-    {L"EDF6VC_XM_AA_CANNON_L.SGO",20},
-    {L"EDF6VC_XM_AA_CANNON_R.SGO",20},
+    {L"EDF6VC_XM_MEDIUM_MISSILE_LAUNCHER_L.SGO",20},
+    {L"EDF6VC_XM_MEDIUM_MISSILE_LAUNCHER_R.SGO",20},
+    {L"EDF6VC_XM_SMALL_HUMVEE_L.SGO",21},
+    {L"EDF6VC_XM_SMALL_HUMVEE_R.SGO",21},
+    {L"EDF6VC_XM_SMALL_BUGGY_L.SGO",22},
+    {L"EDF6VC_XM_SMALL_BUGGY_R.SGO",22},
+    {L"EDF6VC_XM_AA_CANNON_L.SGO",23},
+    {L"EDF6VC_XM_AA_CANNON_R.SGO",23},
 };
 inline constexpr JetMass kJetMasses[]={
     {7001.0f,22000.0f,1500.0f},

@@ -2,11 +2,12 @@
 from, read from the developer's own copy of the game (its packs, read only; docs/xmorph-port.md). The folders go into
 the model pack (obj_model.DEV_MODELS, like sazabi / dreadnought), never into the public repository:
 
-    python tools/prep_xmorph.py tracked|emplacement [unit ...] [--out DIR] [--game DIR]
+    python tools/prep_xmorph.py tracked|wheeled|emplacement [unit ...] [--out DIR] [--game DIR]
 
-    tracked     every unit of the 'tracked' family (or the named ones: 'xm_medium_tank_regular' or
+    tracked     every unit of the 'tracked' family that names a like (or the named ones: 'xm_medium_tank_regular' or
                 'medium_tank_regular'), whatever its status: <out>/xm_<name>/ in tools/prep_wt_tracked.py's format
                 (model.json FORMAT 1, model.npz, textures/, LICENSE.txt), which pylib/wt_tracked.py builds on the V603
+    wheeled     the 'wheeled' family the same way, on the same V603 (its real wheels on the wheel stations, wheels())
     emplacement the forts' guns: <out>/xm_<name>/ in tools/prep_glb_model.py's format (parts by role, pivots), which
                 pylib/emplacement_model.py puts on its fortified base (prepare_emplacement)
 
@@ -14,9 +15,12 @@ It needs numpy, Pillow and scipy. The packs are data: nothing in them runs.
 
 How a unit becomes a V603 (everything is read off its entity blueprint and skeleton; a new unit needs no entry here
 unless its blueprint misleads, MOUTHS):
-    the main weapon     the blueprint's first weapon aimed by a TurretComp turret whose yaw is a bone
+    the main weapon     the blueprint's first weapon aimed by a TurretComp turret whose yaw is a bone (a weapon no
+                        turret aims, the missile launcher's: the blueprint's one turret that turns a bone)
     cannon_main         that turret's yaw bone and every bone under it (but the gun), and the hull's bones that stand
                         on the turret's ring (a radar mast the hull carries over the turret's axis)
+                        (a turret whose yaw and pitch are one bone, the launcher's rack: a synthetic turntable at
+                        that bone, hidden in the rack)
     cannon_l            the turret's pitch bone and everything under it but the recoil bones (one gun: one cradle)
     cannon_slide_l, _r  the main weapon's muzzles' recoil bones (or the gun's recoil* bones): two, by side; one, left
     muzzles             the main weapon's muzzle attachments (or bones): two, by side; one, both sides
@@ -26,6 +30,15 @@ unless its blueprint misleads, MOUTHS):
                         cylinders in the hull's texture, hidden in the belt, for the V603's contact radius and stations
     catapi_body         the belts' running faces, under the native track materials' names (v603_kyata_L / _R)
     body                the rest (the hull, its own turrets and launchers: they stay put)
+
+A wheeled unit (wheels()): its wheels are the hull's round pieces on the ground (one connected piece each: X-Morph's
+wheels are baked into the hull, or on an axle bone across both sides), per side front to rear. The V603's six sprung
+stations B..G a side are spread over them (the first on the front wheel, the last on the rear one; a wheel with
+several stations is one wheel to the springs, as the Katyusha's axles on the Naegling), A on the front wheel and H on
+the rear one (drawn only). Each wheel's own mesh rides its first station; its other stations get a cylinder hidden in
+the tyre (WHEEL_HIDDEN of its radius: the contact the tyre's). The belts are a sliver hidden in each side's front hub
+under the two track materials (the class binds both names; make_tracked_combat STATIC_TRACKS stops their scroll). It
+turns as the V603 does (skid steering), not by its front wheels.
 """
 from __future__ import annotations
 
@@ -57,11 +70,24 @@ GAP = 0.20           # m: between sibling proxies' collision (tracked_collision.
 TOP_SLICE = 0.30     # the turret's top this fraction of its height: the two radar proxies' room
 WHEEL_STATIONS = 'ABCDEFGH'
 WHEEL_SEGMENTS = 12
+# A wheeled unit's wheels (wheels()): a hull piece touching the ground (lower than WHEEL_GROUND) as tall as it is long
+# (within WHEEL_ROUND of its size), at least WHEEL_MIN tall, narrower than WHEEL_WIDE, off the middle.
+WHEEL_GROUND = 0.2
+WHEEL_ROUND = 0.15
+WHEEL_MIN = 0.5
+WHEEL_WIDE = 1.0
+WHEEL_HIDDEN = 0.98     # a wheel's other stations' hidden cylinders: of its radius (inside the tread)
+SPRUNG = 'BCDEFG'       # the V603's sprung stations (tracked_collision._wheel_overrides); A and H are drawn only
+SLIVER = 0.03           # m: the hidden belts' radius and half width
+TURNTABLE = (0.5, 0.6, 0.1)   # m: a one-bone turret's turntable: its radius, its foot and top under the pivot
 
 # A unit whose blueprint's main weapon fires from somewhere its guns are not: (left, right) attachments. The AA tank's
 # main weapon names att_muzzle_3, which sits between its two gun pods at the turret's middle; att_muzzle_1 / _2 (on
 # barrel_1, y +-1.52) are the pods' mouths.
-MOUTHS = {'xm_medium_tank_aa': ('att_muzzle_1', 'att_muzzle_2')}
+MOUTHS = {'xm_medium_tank_aa': ('att_muzzle_1', 'att_muzzle_2'),
+          # The missile launcher's four tubes (att_muzzle_1..4, a missile at a time): the upper pair (x +-0.66, y 3.11;
+          # _3 / _4 the lower pair, y 1.98) are the native holders' two; the lower tubes ride the rack.
+          'xm_medium_missile_launcher': ('att_muzzle_1', 'att_muzzle_2')}
 
 LICENSE = """X-Morph: Defense (c) EXOR Studios.
 
@@ -83,13 +109,23 @@ def _req(ok: bool, message: str) -> None:
 # ------------------------------------------------------------------------------------------ the rig
 
 def main_weapon(um: xm.UnitModel) -> tuple[xm.Weapon, str, str]:
-    """(weapon, yaw bone, pitch bone) of the blueprint's first turret-aimed weapon whose turret turns a bone."""
+    """(weapon, yaw bone, pitch bone) of the blueprint's first turret-aimed weapon whose turret turns a bone; a weapon
+    no turret aims (the missile launcher's ManualWeaponController) takes the blueprint's one turret that does."""
     turrets = um.turrets()
+    boned = [(y, p) for y, p in turrets.values() if y in um.bind and p in um.bind]
     for w in um.weapons():
-        yaw, pitch = turrets.get(w.turret, (None, None))
+        if w.turret:
+            yaw, pitch = turrets.get(w.turret, (None, None))
+        else:
+            yaw, pitch = boned[0] if len(boned) == 1 else (None, None)
         if yaw in um.bind and pitch in um.bind:
             return w, yaw, pitch
     raise PrepError(f'{um.entity}: no weapon on a turret with yaw and pitch bones')
+
+
+def hull_bone(um: xm.UnitModel) -> str:
+    """The hull's bone: 'body' (the APC's skeleton starts with its doors' roots), else the skeleton's first."""
+    return 'body' if 'body' in um.bind else um.bones[0]
 
 
 def meshed(um: xm.UnitModel, bones) -> list[str]:  # noqa: ANN001
@@ -101,15 +137,15 @@ def rig(um: xm.UnitModel, key: str) -> dict:
     """The bone assignment (module doc): X-Morph bone -> V603 bone, the gun's sides and mouths."""
     w, yaw, pitch = main_weapon(um)
     gun = um.subtree(pitch)
+    names = MOUTHS.get(key) or [a for a, _r in w.muzzles]
     recoils = []
-    for _att, r in w.muzzles:
-        if r and r in um.bind and r not in recoils:
+    for att, r in w.muzzles:
+        if att in names and r and r in um.bind and r not in recoils:
             recoils.append(r)
     if not recoils:
         recoils = [b for b in gun if b.startswith('recoil')]
     recoils = meshed(um, recoils)
     _req(len(recoils) <= 2, f'{key}: {len(recoils)} recoil bones')
-    names = MOUTHS.get(key) or [a for a, _r in w.muzzles]
     mouths = [um.point(n) for n in names]
     _req(1 <= len(mouths) <= 2, f'{key}: {len(mouths)} muzzles on the main weapon')
     if len(mouths) == 2:
@@ -125,15 +161,23 @@ def rig(um: xm.UnitModel, key: str) -> dict:
             bone[b] = slide
     for b in gun:
         bone.setdefault(b, 'cannon_l')
-    # the turret: the yaw bone's subtree, and hull bones standing on its ring (over its axis, inside its radius)
+    # the turret: the yaw bone's subtree, and hull bones standing on its ring (over its axis, inside its radius); a
+    # turret on one bone (its yaw and pitch: the launcher's rack, the gun) a synthetic turntable under that bone
     axis = um.bind[yaw]
-    ring = um.bone_points([b for b in um.subtree(yaw) if b not in gun])
+    turntable = None
+    if yaw == pitch:
+        r0, foot, top = TURNTABLE
+        turntable = {'centre': [float(axis[0]), float(axis[2])], 'y': [float(axis[1] - foot), float(axis[1] - top)],
+                     'radius': r0}
+        ring = np.asarray([[axis[0] + r0, axis[1], axis[2]]])
+    else:
+        ring = um.bone_points([b for b in um.subtree(yaw) if b not in gun])
     _req(len(ring) > 0, f'{key}: the turret {yaw} has no mesh')
     radius = float(np.max(np.hypot(ring[:, 0] - axis[0], ring[:, 2] - axis[2])))
     for b in um.subtree(yaw):
         bone.setdefault(b, 'cannon_main')
     for b in um.bones:
-        if b in bone or b == um.bones[0] or yaw in _ancestors(um, b):
+        if b in bone or b == hull_bone(um) or um.parent[b] is None or yaw in _ancestors(um, b):
             continue
         p = um.bind[b]
         if np.hypot(p[0] - axis[0], p[2] - axis[2]) < radius and p[1] > axis[1]:
@@ -147,7 +191,7 @@ def rig(um: xm.UnitModel, key: str) -> dict:
         _req(bool(nodes), f'{key}: the gun has no mesh')
         barrel[side] = nodes[0]
     return {'weapon': w.name, 'yaw': yaw, 'pitch': pitch, 'bone': bone, 'recoils': sides, 'barrel': barrel,
-            'mouths': {'left': left, 'right': right}, 'muzzle_names': list(names)}
+            'mouths': {'left': left, 'right': right}, 'muzzle_names': list(names), 'turntable': turntable}
 
 
 def _ancestors(um: xm.UnitModel, b: str) -> list[str]:
@@ -245,39 +289,137 @@ def wheel_mesh(centre, radius: float, half: float) -> tuple[np.ndarray, np.ndarr
     return np.asarray(part.pos), np.asarray(part.tris, dtype=np.int64)
 
 
+def pieces(um: xm.UnitModel) -> np.ndarray:
+    """(t,) each triangle's connected piece (corners welded at 1 mm: the mesh splits its vertices at UV seams)."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    _, vid = np.unique(np.round(um.positions / 1e-3).astype(np.int64), axis=0, return_inverse=True)
+    t = vid.reshape(-1)[um.triangles]
+    n = int(t.max()) + 1
+    rows, cols = np.concatenate([t[:, 0], t[:, 1]]), np.concatenate([t[:, 1], t[:, 2]])
+    _, label = connected_components(coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n)), directed=False)
+    return label[t[:, 0]]
+
+
+def wheels(um: xm.UnitModel, bone: dict[str, str]) -> dict:
+    """Per side ('l': +x, 'r': -x), front to rear: the hull's wheels (module doc), each {'tris': its triangles,
+    'centre', 'radius', 'half' (width / 2)}; and the stations A..H each on its wheel ('stations': letter -> index)."""
+    piece = pieces(um)
+    hull = np.asarray([bone[b] == 'body' for b in um.tri_bone])
+    out = {side: [] for side in 'lr'}
+    for c in np.unique(piece[hull]):
+        sel = hull & (piece == c)
+        pts = um.positions[np.unique(um.triangles[sel])]
+        lo, hi = pts.min(0), pts.max(0)
+        tall, long_, wide = hi[1] - lo[1], hi[2] - lo[2], hi[0] - lo[0]
+        x = (lo[0] + hi[0]) / 2
+        if lo[1] < WHEEL_GROUND and tall >= WHEEL_MIN and abs(tall - long_) <= WHEEL_ROUND * max(tall, long_) \
+                and wide < WHEEL_WIDE and abs(x) > wide / 2:
+            radius = float(min(tall, long_)) / 2
+            centre = (float(x), float(lo[1] + hi[1]) / 2, float(lo[2] + hi[2]) / 2)
+            out['l' if x > 0 else 'r'].append({'tris': sel, 'centre': centre, 'radius': radius,
+                                               'half': float(wide) / 2})
+    for side in 'lr':
+        _req(len(out[side]) >= 2, f'{um.entity}: {len(out[side])} wheels on the {side} side')
+        out[side].sort(key=lambda w: -w['centre'][2])
+    _req(len(out['l']) == len(out['r']), f'{um.entity}: {len(out["l"])} wheels left, {len(out["r"])} right')
+    n = len(out['l'])
+    stations = {'A': 0, 'H': n - 1}
+    stations.update({s: int(round(k * (n - 1) / (len(SPRUNG) - 1))) for k, s in enumerate(SPRUNG)})
+    return {'sides': out, 'stations': dict(sorted(stations.items()))}
+
+
+# ------------------------------------------------------------------------------------------ the running gear's objects
+
+def tracked_gear(um: xm.UnitModel, bone: dict[str, str]) -> tuple[list, list, dict]:
+    """A tracked hull's (objects, meshes, report): the belts' running faces (their hull triangles' node) and the
+    synthetic road wheels (running_gear)."""
+    gear = running_gear(um, bone)
+    objects = [(f'track_{side}', gear[side]['belt']) for side in 'lr']
+    meshes = []
+    for side in 'lr':
+        for letter, (centre, radius, half) in zip(WHEEL_STATIONS, gear[side]['wheels']):
+            # hidden: one texel of the belt's
+            meshes.append((f'wheel_{side}_{letter}', *wheel_mesh(centre, radius, half), gear[side]['ground_uv']))
+    report = {s: {'band_x': gear[s]['band'], 'runs_z': gear[s]['runs'], 'belt_top': gear[s]['top'],
+                  'wheel_radius': gear[s]['wheels'][0][1], 'belt_faces': int(gear[s]['belt'].sum())} for s in 'lr'}
+    return objects, meshes, {'running_gear': report}
+
+
+def wheeled_gear(um: xm.UnitModel, bone: dict[str, str]) -> tuple[list, list, dict]:
+    """A wheeled hull's (objects, meshes, report): each wheel's own triangles on its first station, a hidden cylinder
+    on each of its other stations, a hidden belt sliver in each side's front hub (module doc)."""
+    w = wheels(um, bone)
+    objects, meshes = [], []
+    for side in 'lr':
+        first: set[int] = set()
+        for letter, i in w['stations'].items():
+            wheel = w['sides'][side][i]
+            uv = um.uvs[um.triangles[np.flatnonzero(wheel['tris'])[0], 0]]
+            if i not in first:
+                first.add(i)
+                objects.append((f'wheel_{side}_{letter}', wheel['tris']))
+            else:
+                meshes.append((f'wheel_{side}_{letter}',
+                               *wheel_mesh(wheel['centre'], WHEEL_HIDDEN * wheel['radius'], 0.6 * wheel['half']), uv))
+        hub = w['sides'][side][0]
+        uv = um.uvs[um.triangles[np.flatnonzero(hub['tris'])[0], 0]]
+        meshes.append((f'track_{side}', *wheel_mesh(hub['centre'], SLIVER, SLIVER), uv))
+    report = {'wheels': {s: [{'centre': list(x['centre']), 'radius': x['radius'], 'width': 2 * x['half'],
+                              'triangles': int(x['tris'].sum())} for x in w['sides'][s]] for s in 'lr'},
+              'stations': w['stations']}
+    return objects, meshes, report
+
+
+def turntable_mesh(t: dict) -> tuple[np.ndarray, np.ndarray]:
+    """A one-bone turret's turntable (rig()): an upright cylinder under the pivot, wound outward."""
+    import procmesh
+    part = procmesh.Part(0)
+    x, z = t['centre']
+    procmesh.hard_cylinder(part, (x, t['y'][0], z), (x, t['y'][1], z), t['radius'], [(0, 1.0)], WHEEL_SEGMENTS)
+    return np.asarray(part.pos), np.asarray(part.tris, dtype=np.int64)
+
+
+GEAR = {'tracked': tracked_gear, 'wheeled': wheeled_gear}
+
+
 # ------------------------------------------------------------------------------------------ the Source
 
 def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Vehicle, prep.Source, dict]:
-    """The unit as prep_wt_tracked's Vehicle and Source (its textures written as PNGs into `staging`)."""
+    """The unit (a tracked or a wheeled hull: GEAR) as prep_wt_tracked's Vehicle and Source (its textures written as
+    PNGs into `staging`)."""
     um = xm.load(packs, unit.entity)
     key = unit.key
     r = rig(um, key)
     bone = r['bone']
-    gear = running_gear(um, bone)
-    # objects: one per X-Morph bone, the belts' running faces, the synthetic wheels; named as Source names them (its
-    # OBJ objects: '<node>_<object number>', prep_wt_tracked.node() drops the number)
+    objects, meshes, gear_report = GEAR[unit.family](um, bone)
+    if r['turntable']:
+        p, t = turntable_mesh(r['turntable'])
+        meshes.append(('turntable', p, t, um.uvs[um.triangles[np.flatnonzero(um.tri_bone == r['yaw'])[0], 0]]))
+    # objects: one per X-Morph bone, the running gear's (hull triangles of their own node, synthetic meshes); named
+    # as Source names them (its OBJ objects: '<node>_<object number>', prep_wt_tracked.node() drops the number)
     nodes = list(um.bones)
     tri_obj = np.asarray([nodes.index(b) for b in um.tri_bone], dtype=np.int64)
-    for side in 'lr':
-        nodes.append(f'track_{side}')
-        tri_obj[gear[side]['belt']] = len(nodes) - 1
+    for name, sel in objects:
+        nodes.append(name)
+        tri_obj[sel] = len(nodes) - 1
     positions = [um.positions * SCALE]
     uvs = [um.uvs]
     tri_v = [um.triangles]
     tri_m = [um.tri_material]
     base = len(um.positions)
-    hull_mat = int(um.tri_material[np.flatnonzero(um.tri_bone == um.bones[0])[0]])
+    hull_mat = int(um.tri_material[np.flatnonzero(um.tri_bone == hull_bone(um))[0]])
     obj = [tri_obj]
-    for side in 'lr':
-        for letter, (centre, radius, half) in zip(WHEEL_STATIONS, gear[side]['wheels']):
-            p, t = wheel_mesh(centre, radius, half)
-            nodes.append(f'wheel_{side}_{letter}')
-            positions.append(p * SCALE)
-            uvs.append(np.tile(gear[side]['ground_uv'], (len(p), 1)))   # hidden: one texel of the belt's
-            tri_v.append(t + base)
-            tri_m.append(np.full(len(t), hull_mat))
-            obj.append(np.full(len(t), len(nodes) - 1))
-            base += len(p)
+    synthetic = {}
+    for name, p, t, uv in meshes:
+        nodes.append(name)
+        positions.append(p * SCALE)
+        uvs.append(np.tile(uv, (len(p), 1)))
+        tri_v.append(t + base)
+        tri_m.append(np.full(len(t), hull_mat))
+        obj.append(np.full(len(t), len(nodes) - 1))
+        synthetic[name] = p * SCALE
+        base += len(p)
     uv = np.vstack(uvs)
     src_uv = np.column_stack((uv[:, 0], -uv[:, 1]))   # prepare() writes (u, -v): its OBJ sources' v is negated
     tv = np.vstack(tri_v)
@@ -296,10 +438,12 @@ def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Ve
                       list(um.materials), mtl)
 
     # bones: by node name (exact)
-    rules = [(r'^wheel_([lr])_([A-H])$', 'tire_move{1}_{0}'), (r'^track_([lr])$', 'catapi_body')]
+    rules = [(r'^wheel_([lr])_([A-H])$', 'tire_move{1}_{0}'), (r'^track_([lr])$', 'catapi_body'),
+             (r'^turntable$', 'cannon_main')]
     rules += [('^' + re.escape(b) + '$', v) for b, v in bone.items() if v != 'body']
     yaw, pitch = r['yaw'], r['pitch']
-    turret_nodes = meshed(um, [b for b, v in bone.items() if v == 'cannon_main'])
+    turret_nodes = meshed(um, [b for b, v in bone.items() if v == 'cannon_main']) + \
+        (['turntable'] if r['turntable'] else [])
     gun_nodes = meshed(um, [b for b, v in bone.items() if v in ('cannon_l', 'cannon_slide_l', 'cannon_slide_r')])
     rx = lambda nodes: '^(' + '|'.join(re.escape(n) for n in nodes) + ')$'   # noqa: E731
 
@@ -323,7 +467,7 @@ def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Ve
         clip['cannon_l'] = (2, 'min', s + GAP / 2)        # the barrel's front
         clip['cannon_r'] = (2, 'max', s - GAP / 2)        # the cradle behind it
         split = ('along the bore', s)
-    tur = um.bone_points(turret_nodes) * SCALE
+    tur = np.vstack([um.bone_points(turret_nodes) * SCALE, synthetic.get('turntable', np.zeros((0, 3)))])
     cut = float(tur[:, 1].max() - TOP_SLICE * (tur[:, 1].max() - tur[:, 1].min()))
     x0 = float(um.bind[yaw][0]) * SCALE
     clip['cannon_main'] = (1, 'max', cut - GAP / 2)
@@ -339,14 +483,12 @@ def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Ve
         rules=rules, turret=tuple(float(c) for c in um.bind[yaw] * SCALE),
         trunnion={'cannon_l': (float(p[1]), float(p[2])), 'cannon_r': (float(p[1]), float(p[2]))},
         barrels={'left': r['barrel']['left'], 'right': r['barrel']['right']},
-        collision=collision, clip=clip, hull=um.bones[0],
+        collision=collision, clip=clip, hull=hull_bone(um),
         mouths={s: tuple(float(c) for c in r['mouths'][s] * SCALE) for s in ('left', 'right')})
     report = {'entity': unit.entity, 'mesh': um.mesh_path, 'weapon': r['weapon'], 'yaw': yaw, 'pitch': pitch,
               'muzzles': r['muzzle_names'], 'recoils': r['recoils'],
               'bones': {b: bone[b] for b in um.bones}, 'gun_split': split, 'radar_slice_y': cut,
-              'running_gear': {s: {'band_x': gear[s]['band'], 'runs_z': gear[s]['runs'], 'belt_top': gear[s]['top'],
-                                   'wheel_radius': gear[s]['wheels'][0][1], 'belt_faces': int(gear[s]['belt'].sum())}
-                               for s in 'lr'}}
+              'turntable': r['turntable'], **gear_report}
     return v, src, report
 
 
@@ -455,11 +597,12 @@ def prepare_emplacement(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> 
     return info
 
 
-PREPARERS = {'tracked': prepare_tracked, 'emplacement': prepare_emplacement}
+PREPARERS = {'tracked': prepare_tracked, 'wheeled': prepare_tracked, 'emplacement': prepare_emplacement}
 
 
 def select(family: str, names: list[str]) -> list[xm_units.Unit]:
-    units = [u for u in xm_units.UNITS.values() if u.family == family]
+    # the family's rows that name a `like` (an EDF counterpart: the cargo truck, unarmed in the game, has none)
+    units = [u for u in xm_units.UNITS.values() if u.family == family and u.like]
     if not names:
         return units
     want = {n if n.startswith('xm_') else 'xm_' + n for n in names}
