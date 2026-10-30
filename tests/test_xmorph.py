@@ -300,6 +300,34 @@ class XmorphAssetTests(unittest.TestCase):
         escort = xm.blueprint(self.packs, 'entities/units/bosses/warcar_escort_helicopter.ent')
         self.assertEqual(escort.child('RenderableDescComp').get('mesh'), 'meshes/units/air/large_helicopter_core.mesh')
 
+    def test_boss_assembles(self) -> None:
+        # The highway tank (the JAGUAR Type S) is eighteen parts: their meshes join the hull's where the game draws
+        # them, the barrel on its gun's pitch bone, the parts' weapons with their muzzles on the parts.
+        um = xm.assemble(self.packs, 'bosses/highway_tank')
+        alone = xm.load(self.packs, 'bosses/highway_tank')
+        self.assertEqual(len(um.parts), 18)
+        self.assertGreater(len(um.triangles), 2 * len(alone.triangles))
+        self.assertTrue(set(um.tri_bone) <= set(um.bones))
+        self.assertEqual(um.parent['be_main_turret_barrel'], 'be_main_turret_turret_vert')
+        self.assertEqual(um.parent['be_front_turret_turret'], um.bones[0])
+        P = um.positions
+        self.assertAlmostEqual(float(P[:, 1].min()), 0.0, places=1)      # the tracks on the ground
+        barrel = um.bone_points(['be_main_turret_barrel'])
+        muzzle = um.point('att_main_turret_muzzle_1')
+        self.assertLess(abs(float(barrel[:, 2].max()) - float(muzzle[2])), 1.5)   # the muzzle at the barrel's end
+        weapons = {w.name: w for w in um.weapons()}
+        self.assertIn('front_mortar', weapons)
+        mortar = um.point(weapons['front_mortar'].muzzles[0][0])
+        tube = um.bone_points(['be_front_mortar_barrel_1'])
+        self.assertTrue((tube.min(0) - 1.0 <= mortar).all() and (mortar <= tube.max(0) + 1.0).all())
+        self.assertEqual(um.turrets()['front_turret'], ('be_front_turret_turret', 'be_front_turret_turret_vert'))
+        # a blueprint's own submesh material (the Mk VI's skin); a part's name with the designers' note after it
+        self.assertEqual(xm.load(self.packs, 'bosses/tarantula_mk_vi').materials, ['bosses/four_leg_mech_skin1'])
+        self.assertEqual(len(xm.assemble(self.packs, 'bosses/warcar').parts), 18)
+        # a unit without parts assembles to itself
+        tank = xm.assemble(self.packs, self.unit.entity)
+        self.assertEqual((len(tank.triangles), tank.parts), (len(xm.load(self.packs, self.unit.entity).triangles), []))
+
     def test_folder(self) -> None:
         info = self.info
         self.assertEqual((info['format'], info['kind']), (1, self.UNIT))

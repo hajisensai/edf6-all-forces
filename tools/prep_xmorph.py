@@ -62,6 +62,11 @@ WHEEL_SEGMENTS = 12
 # main weapon names att_muzzle_3, which sits between its two gun pods at the turret's middle; att_muzzle_1 / _2 (on
 # barrel_1, y +-1.52) are the pods' mouths.
 MOUTHS = {'xm_medium_tank_aa': ('att_muzzle_1', 'att_muzzle_2')}
+# A unit whose belts are parts of their own (xm_model.assemble: the highway tank's left_track / right_track, closed
+# 8 m loops) shows the belt's lower run from inside: an upward face 0.44 m up all along the run, which is not the
+# belt's top. Its upward faces start over this height (m); the next are the road wheels' housings at 2.88 m, the
+# belt's upper run at 8 m (measured 2026-10-30).
+BELT_FLOOR = {'xm_highway_tank': 1.0}
 
 LICENSE = """X-Morph: Defense (c) EXOR Studios.
 
@@ -81,6 +86,12 @@ def _req(ok: bool, message: str) -> None:
 
 
 # ------------------------------------------------------------------------------------------ the rig
+
+def model(packs: xp.Packs, unit: xm_units.Unit) -> xm.UnitModel:
+    """The unit's model: a boss with its parts (xm_model.assemble: its turrets, tracks, legs are part blueprints), any
+    other unit alone (the advanced tank's and the shield generator's one part is their shield bubble, not ported)."""
+    return xm.assemble(packs, unit.entity) if unit.entity.startswith('bosses/') else xm.load(packs, unit.entity)
+
 
 def main_weapon(um: xm.UnitModel) -> tuple[xm.Weapon, str, str]:
     """(weapon, yaw bone, pitch bone) of the blueprint's first turret-aimed weapon whose turret turns a bone."""
@@ -170,9 +181,10 @@ def _merge(intervals: list[tuple[float, float]], tol: float = 0.3) -> list[tuple
     return [(a, b) for a, b in out]
 
 
-def running_gear(um: xm.UnitModel, bone: dict[str, str]) -> dict:
-    """Per side ('l': +x, 'r': -x): the belt's ground run (lateral band, its runs along z), its top, the eight
-    stations' wheels (centre, radius, half width) and the hull triangles that are the belt's running faces."""
+def running_gear(um: xm.UnitModel, bone: dict[str, str], floor: float = 2 * GROUND) -> dict:
+    """Per side ('l': +x, 'r': -x): the belt's ground run (lateral band, its runs along z), its top (its upward faces
+    over `floor`: BELT_FLOOR), the eight stations' wheels (centre, radius, half width) and the hull triangles that are
+    the belt's running faces."""
     P, T = um.positions, um.triangles
     hull = np.asarray([bone[b] == 'body' for b in um.tri_bone])
     tri = P[T]
@@ -204,7 +216,7 @@ def running_gear(um: xm.UnitModel, bone: dict[str, str]) -> dict:
         mid = slab & (tri[:, :, 2].min(axis=1) >= z0) & (tri[:, :, 2].max(axis=1) <= z1)
         # its top: the lowest upward face over the run (the belt's upper run; the hull over a belt as wide as it,
         # sponsons and skirts, is higher), the median over the run's length
-        up = mid & (n[:, 1] > 0.7) & (tri[:, :, 1].min(axis=1) > 2 * GROUND)
+        up = mid & (n[:, 1] > 0.7) & (tri[:, :, 1].min(axis=1) > floor)
         bins = np.linspace(z0, z1, 9)
         tops = []
         for a, b in zip(bins[:-1], bins[1:]):
@@ -249,11 +261,11 @@ def wheel_mesh(centre, radius: float, half: float) -> tuple[np.ndarray, np.ndarr
 
 def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Vehicle, prep.Source, dict]:
     """The unit as prep_wt_tracked's Vehicle and Source (its textures written as PNGs into `staging`)."""
-    um = xm.load(packs, unit.entity)
+    um = model(packs, unit)
     key = unit.key
     r = rig(um, key)
     bone = r['bone']
-    gear = running_gear(um, bone)
+    gear = running_gear(um, bone, BELT_FLOOR.get(key, 2 * GROUND))
     # objects: one per X-Morph bone, the belts' running faces, the synthetic wheels; named as Source names them (its
     # OBJ objects: '<node>_<object number>', prep_wt_tracked.node() drops the number)
     nodes = list(um.bones)
@@ -353,7 +365,7 @@ def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Ve
 def arm_muzzles(packs: xp.Packs, unit: xm_units.Unit) -> dict[str, list[dict]]:
     """The unit's other weapons' muzzles (xm_units.Arm: muzzle slot xm_<key>), model space, on the arm's holder bone:
     each of its game weapons' Muzzle attachments (or bones), in the blueprint's order."""
-    um = xm.load(packs, unit.entity)
+    um = model(packs, unit)
     weapons = {w.name: w for w in um.weapons()}
     out = {}
     for arm in unit.arms:

@@ -40,6 +40,11 @@ inline constexpr StoreSpec kStores[]={
     {L"EDF6VC_XM_LARGE_TANK_EMP_EMP_","EMP flak",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
     {L"EDF6VC_XM_LARGE_TANK_EMP_AA_","AA guns",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
     {L"EDF6VC_XM_LARGE_TANK_EMP_AAM_","AA missiles",StoreRole::air,0.0f,0.0000f,0,0,false,StoreShell::native,true},
+    {L"EDF6VC_XM_HIGHWAY_TANK_ROCKETS_","Cruise rockets",StoreRole::ground,0.0f,0.0000f,0,0,false,StoreShell::native,true},
+    {L"EDF6VC_XM_HIGHWAY_TANK_AAM_","AA missiles",StoreRole::air,0.0f,0.0000f,0,0,false,StoreShell::native,true},
+    {L"EDF6VC_XM_HIGHWAY_TANK_FLAK_","Flak",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
+    {L"EDF6VC_XM_HIGHWAY_TANK_MORTAR_","Mortar",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
+    {L"EDF6VC_XM_HIGHWAY_TANK_LASER_","Laser",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
 };
 inline constexpr TwinBarrel kTwinBarrels[]={
     {L"EDF6VC_BMPT_L.SGO",1},
@@ -82,6 +87,8 @@ inline constexpr TwinBarrel kTwinBarrels[]={
     {L"EDF6VC_XM_MEDIUM_SHIELD_GENERATOR_R.SGO",19},
     {L"EDF6VC_XM_AA_CANNON_L.SGO",20},
     {L"EDF6VC_XM_AA_CANNON_R.SGO",20},
+    {L"EDF6VC_XM_HIGHWAY_TANK_L.SGO",21},
+    {L"EDF6VC_XM_HIGHWAY_TANK_R.SGO",21},
 };
 inline constexpr JetMass kJetMasses[]={
     {7001.0f,22000.0f,1500.0f},
