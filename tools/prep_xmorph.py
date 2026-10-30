@@ -57,7 +57,8 @@ GAP = 0.20           # m: between sibling proxies' collision (tracked_collision.
 TOP_SLICE = 0.30     # the turret's top this fraction of its height: the two radar proxies' room
 WHEEL_STATIONS = 'ABCDEFGH'
 WHEEL_SEGMENTS = 12
-MIN_WHEEL = 0.12     # m: a round hull piece smaller than this in radius is no wheel (bolts, hubs, lights)
+MOUTH_BORE = 0.6     # m: a gun's mesh this near a muzzle's bore line is its barrel (rig(): the mouth at its end)
+MIN_WHEEL = 0.12    # m: a round hull piece smaller than this in radius is no wheel (bolts, hubs, lights)
 WHEEL_ROUND = 0.25   # a wheel's height and length differ by less than this fraction
 WHEEL_GROUND = 0.2   # m: a wheel whose bottom is this near the ground carries the vehicle (a road wheel)
 IDLER_LIFT = 1.2     # m: an idler / sprocket's bottom is under this (round things higher up are drums, lights)
@@ -120,6 +121,14 @@ def rig(um: xm.UnitModel, key: str) -> dict:
     names = MOUTHS.get(key) or [a for a, _r in w.muzzles]
     mouths = [um.point(n) for n in names]
     _req(1 <= len(mouths) <= 2, f'{key}: {len(mouths)} muzzles on the main weapon')
+    # The game's muzzle attachments sit where its flash is drawn, some well inside the barrel (the battle tank's 0.6 m
+    # back, at its muzzle brake's root; the artillery's 1.1 m): a round leaves from the barrel's end, the gun's
+    # foremost point within MOUTH_BORE of the bore line.
+    tip = um.bone_points(gun)
+    for m in mouths:
+        near = tip[np.hypot(tip[:, 0] - m[0], tip[:, 1] - m[1]) < MOUTH_BORE]
+        if len(near):
+            m[2] = max(m[2], float(near[:, 2].max()))
     if len(mouths) == 2:
         left, right = sorted(mouths, key=lambda p: -p[0])        # +x is the vehicle's left
     else:
