@@ -18,7 +18,11 @@ EDF41_LEFT_OUT with why) and that src/spawn_catalog.inc is what this writes.
 A row: `sgo` the object name as the game's app:/object/ path has it (no folder prefix, no .sgo; lower case; a 4.1 DLC
 object keeps its folder: 'edf41mp01/giantant04'), its label, its category (the panel's tab), where its file comes from
 (`source`), how far over the clicked ground it is made (`lift`), whether it flies (the range's waves) and whether the
-plugin preloads it in the test range by default (`preload`; ini RangePlaceAll=1 preloads every row).
+plugin preloads it in the test range by default (`preload`; ini RangePlaceAll=1 preloads every row). No vehicle is:
+each loads the first time it is placed (src/debug_spawn.cpp RequestLoad, online too). Reports #26 / #29 (2026-10-27..28):
+the range's preload step grew commit 1.4 -> 5.6 GB in 17 s (7.1 GB with the map in, 6.1 GB of video memory) once the
+generated vehicles' textures grew (2b684366), and a tester's 8 GB machine with a 2 GB card died there, online and off;
+leaving the vehicles out cut the step to 4.7 GB in 9 s.
 """
 from __future__ import annotations
 
@@ -347,9 +351,9 @@ def edf41_left_out(obj: dict) -> str | None:
 def edf41_rows() -> tuple[Row, ...]:
     """The 4.1 rows, most used in 4.1's missions first within a class. The plugin preloads by default the first of each
     class and any other whose model archives (MODEL_ARCHIVES) the rows before it bring already (a variant on the same
-    model costs no more memory: a ragdoll SHKT or a CAS of its own is no model). All ported vehicles are preloaded; the
-    other enemies load the first time they are placed (src/debug_spawn.cpp RequestLoad; ini RangePlaceAll=1 preloads
-    every row at the mission's start)."""
+    model costs no more memory: a ragdoll SHKT or a CAS of its own is no model). The ported vehicles, like every
+    vehicle row, and the other enemies load the first time they are placed (src/debug_spawn.cpp RequestLoad; ini
+    RangePlaceAll=1 preloads every row at the mission's start)."""
     reg = _edf41_registry()
     objects = [o for o in reg['objects'] if edf41_left_out(o) is None and o['class'] in EDF41_CLASSES]
     order = {c: i for i, c in enumerate(EDF41_CLASSES)}
@@ -362,7 +366,7 @@ def edf41_rows() -> tuple[Row, ...]:
         stem = o['object'].removeprefix('OBJECT/').removesuffix('.SGO')
         words = EDF41_DRAGON_LABELS.get(stem, words)
         models = {f for f in o['files'] if f.upper().endswith(MODEL_ARCHIVES)}
-        preload = category == 'vehicle' or o['class'] not in first or models <= brought
+        preload = category != 'vehicle' and (o['class'] not in first or models <= brought)
         first.add(o['class'])
         if preload:
             brought |= {f for f in o['files'] if f.upper().endswith(MODEL_ARCHIVES)}
@@ -418,11 +422,11 @@ def rows() -> list[Row]:
     """Every row, in the panel's order (category, then the registries' order). Imports the range's own module for its
     vehicles (gen.VEHICLES, gen.PLACEABLE_DERIVED)."""
     import gen
-    out = [Row(s, label, 'vehicle', 'stock') for s, label in STOCK_VEHICLES]
+    out = [Row(s, label, 'vehicle', 'stock', preload=False) for s, label in STOCK_VEHICLES]
     out += [r for r in edf41_rows() if r.category == 'vehicle']
     labels = dict(gen.VEHICLES)
-    out += [Row(s, short(labels[s]), 'ours', 'range') for s in gen.PLACEABLE_DERIVED]
-    out += [Row(s, label, 'ours', 'installer') for s, label, _ in INSTALLER_VEHICLES]
+    out += [Row(s, short(labels[s]), 'ours', 'range', preload=False) for s in gen.PLACEABLE_DERIVED]
+    out += [Row(s, label, 'ours', 'installer', preload=False) for s, label, _ in INSTALLER_VEHICLES]
     out += [Row(s, label, 'enemy', 'stock', lift, flying, preload) for s, label, flying, lift, preload in STOCK_ENEMIES]
     out += list(edf5dlc_rows())
     out += [r for r in edf41_rows() if r.category == 'enemy41']
