@@ -766,6 +766,11 @@
    "WEAPON/SHELLCASE401L.RAB",
    "WEAPON/V_NULL.RAB"
   ],
+  "edf6tr_xm_large_mech_mission": [
+   "OBJECT/EDF6VC_XM_LARGE_MECH.MRAB",
+   "WEAPON/BULLET_MISSILE.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
   "edf6tr_xm_large_tank_emp_mission": [
    "OBJECT/EDF6VC_XM_LARGE_TANK_EMP.MRAB",
    "WEAPON/BULLET_GRENADE.RAB",
@@ -826,6 +831,10 @@
   "edf6tr_xm_small_humvee_mission": [
    "OBJECT/EDF6VC_XM_SMALL_HUMVEE.MRAB",
    "WEAPON/SHELLCASE401L.RAB",
+   "WEAPON/V_NULL.RAB"
+  ],
+  "edf6tr_xm_small_mech_mission": [
+   "OBJECT/EDF6VC_XM_SMALL_MECH.MRAB",
    "WEAPON/V_NULL.RAB"
   ],
   "edf6vc_sedan": [

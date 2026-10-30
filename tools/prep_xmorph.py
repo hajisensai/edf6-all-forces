@@ -2,7 +2,7 @@
 from, read from the developer's own copy of the game (its packs, read only; docs/xmorph-port.md). The folders go into
 the model pack (obj_model.DEV_MODELS, like sazabi / dreadnought), never into the public repository:
 
-    python tools/prep_xmorph.py tracked|wheeled|emplacement [unit ...] [--out DIR] [--game DIR]
+    python tools/prep_xmorph.py tracked|wheeled|emplacement|heli|jet|car|mech|infantry [unit ...] [--out DIR] [--game DIR]
 
     tracked     every unit of the 'tracked' family that names a like (or the named ones: 'xm_medium_tank_regular' or
                 'medium_tank_regular'), whatever its status: <out>/xm_<name>/ in tools/prep_wt_tracked.py's format
@@ -10,6 +10,9 @@ the model pack (obj_model.DEV_MODELS, like sazabi / dreadnought), never into the
     wheeled     the 'wheeled' family the same way, on the same V603 (its real wheels on the wheel stations, wheels())
     emplacement the forts' guns: <out>/xm_<name>/ in tools/prep_glb_model.py's format (parts by role, pivots), which
                 pylib/emplacement_model.py puts on its fortified base (prepare_emplacement)
+    mech        the walkers, infantry the foot soldiers: <out>/xm_<name>/ as rigid pieces, one bone each, with the
+                skeleton's bind points and the attachments (prepare_walker, WALKER_FORMAT), which pylib/xm_rig.py
+                retargets onto a stock walker's or the Ranger's skeleton
 
 It needs numpy, Pillow and scipy. The packs are data: nothing in them runs.
 
@@ -1049,8 +1052,74 @@ def prepare_air(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
     return info
 
 
-PREPARERS = {'tracked': prepare_tracked, 'wheeled': prepare_tracked, 'emplacement': prepare_emplacement, 'heli': prepare_air, 'jet': prepare_air,
-             'car': prepare_car}
+# ------------------------------------------------------------------------------------------ walkers
+
+WALKER_FORMAT = 1    # pylib/xm_rig.py FORMAT
+
+
+def prepare_walker(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
+    """A walker (a mech, the infantry's powered suit) into the folder pylib/xm_rig.py puts on its EDF host's skeleton:
+    the model as the game has it (its frame turned to EDF's, metres), one part a bone and material (X-Morph's units are
+    rigid pieces), the skeleton's bind points and parents, the attachments (every muzzle among them) and the weapons'
+    muzzle lists. Nothing here knows the host: which X-Morph bone rides which host bone is xm_rig.RIGS'."""
+    um = xm.load(packs, unit.entity)
+    out = os.path.join(out_root, xm_units.folder(unit.key))
+    if os.path.isdir(out):
+        shutil.rmtree(out)
+    os.makedirs(os.path.join(out, 'textures'))
+    P = um.positions * SCALE
+    materials, arrays, parts = [], {}, []
+    for mi, m in enumerate(um.materials):
+        stem = f'{unit.key}_{mi}'
+        imgs = xm.texture_images(packs, m)
+        imgs['diffuse'].save(os.path.join(out, 'textures', f'{stem}.png'), optimize=True)
+        materials.append({'name': f'edf6vc_{stem}', 'albedo': f'textures/{stem}.png', 'source': m})
+        if 'normal' in imgs:      # DirectX green already (xm_model.normal_rgb)
+            imgs['normal'].save(os.path.join(out, 'textures', f'{stem}_normal.png'), optimize=True)
+            materials[-1]['normal'] = f'textures/{stem}_normal.png'
+    for b in um.bones:
+        for mi in range(len(um.materials)):
+            sel = np.flatnonzero((um.tri_bone == b) & (um.tri_material == mi))
+            if not len(sel):
+                continue
+            tri = um.triangles[sel]
+            idx, inv = np.unique(tri, return_inverse=True)
+            pos, t = P[idx], inv.reshape(-1, 3)
+            nrm = np.zeros_like(pos)          # the faces' own, per vertex (the mesh's normals are not read)
+            fn = np.cross(pos[t[:, 1]] - pos[t[:, 0]], pos[t[:, 2]] - pos[t[:, 0]])
+            for c in range(3):
+                np.add.at(nrm, t[:, c], fn)
+            nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+            k = len(parts)
+            arrays[f'p{k}_pos'] = pos.astype(np.float32)
+            arrays[f'p{k}_nrm'] = nrm.astype(np.float32)
+            arrays[f'p{k}_uv'] = um.uvs[idx].astype(np.float32)   # Ogre's top-left origin, as the folders keep them
+            arrays[f'p{k}_tri'] = t.astype(np.uint32)
+            parts.append({'name': f'{b}.{materials[mi]["name"]}', 'bone': b, 'material': mi,
+                          'triangles': int(len(sel)), 'vertices': int(len(idx))})
+    _req(bool(parts), f'{unit.key}: no mesh')
+    np.savez_compressed(os.path.join(out, 'model.npz'), **arrays)
+    used = np.unique(um.triangles)
+    info = {'format': WALKER_FORMAT, 'kind': unit.key, 'family': unit.family,
+            'title': f'{unit.title_en or unit.key} (X-Morph: Defense)', 'prepared_from': um.mesh_path, 'scale': SCALE,
+            'materials': materials, 'parts': parts,
+            'bones': [{'name': b, 'parent': um.parent[b], 'point': [float(c) for c in um.bind[b] * SCALE]}
+                      for b in um.bones],
+            'attachments': {n: {'bone': parent, 'point': [float(c) for c in um.point(n) * SCALE]}
+                            for n, (parent, _o) in sorted(um.attachments.items())},
+            'weapons': [{'name': w.name, 'turret': w.turret, 'muzzles': [m for m, _r in w.muzzles]} for w in um.weapons()],
+            'triangles': int(sum(p['triangles'] for p in parts)),
+            'size': (P[used].max(0) - P[used].min(0)).tolist(), 'entity': unit.entity}
+    with open(os.path.join(out, 'model.json'), 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(info, f, indent=1)
+        f.write('\n')
+    with open(os.path.join(out, 'LICENSE.txt'), 'w', encoding='utf-8', newline='\n') as f:
+        f.write(LICENSE.format(title=info['title'], entity=f'entities/units/{unit.entity}.ent', mesh=um.mesh_path))
+    return info
+
+
+PREPARERS = {'tracked': prepare_tracked, 'wheeled': prepare_tracked, 'emplacement': prepare_emplacement, 'heli': prepare_air,
+             'jet': prepare_air, 'car': prepare_car, 'mech': prepare_walker, 'infantry': prepare_walker}
 
 
 def select(family: str, names: list[str]) -> list[xm_units.Unit]:

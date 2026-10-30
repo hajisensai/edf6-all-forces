@@ -184,6 +184,9 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
     import vcobjects
     tracked = {f'WEAPON/{path.rsplit("/", 1)[1].upper()}': kind
                for kind in vcobjects.TRACKED for path in vcobjects.GROUND_VEHICLES[kind].weapons}
+    # the walkers' weapons as their builder makes them (pylib/xm_walker.py: on the X-Morph model's muzzles)
+    walkers = {f'WEAPON/{path.rsplit("/", 1)[1].upper()}': kind
+               for kind in vcobjects.WALKERS for path in vcobjects.GROUND_VEHICLES[kind].weapons if path}
     authored: dict[str, dict[str, bytes]] = {}
     # An X-Morph unit whose model folder this machine has not is not deployed (pylib/xm_units.py): its files are not
     # there, so its row cannot be measured here (--archives refuses; tools/selftest.py leaves it unchecked).
@@ -212,6 +215,13 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
             if kind not in authored:
                 import make_tracked_combat
                 authored[kind] = make_tracked_combat.authored(root, kind)   # its weapons: no cockpit needed
+            return authored[kind].get(rel)
+        if rel in walkers:
+            kind = walkers[rel]
+            if kind in undeployed:
+                return None
+            if kind not in authored:
+                authored[kind] = make_xmorph.builder(kind).build(root)
             return authored[kind].get(rel)
         if rel in reg:
             return edf41_objects.read(rel)

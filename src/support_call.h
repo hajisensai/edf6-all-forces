@@ -15,13 +15,19 @@ namespace crew {
 // plans only when every peer announced support_protocol.h kCapLoadout.
 enum class SupportWeapon : std::uint8_t { rifle, flame, rocket, shotgun, sniper,
                                           wingLance, wingLaser, wingMonster, wingIzuna, wingThunderBow,
-                                          fencerCannon, fencerMiddleCannon, fencerPileBanker, fencerShotgun, count };
+                                          fencerCannon, fencerMiddleCannon, fencerPileBanker, fencerShotgun,
+                                          xmInfantry, count };
 inline constexpr int kSupportWeaponCount=static_cast<int>(SupportWeapon::count);
 inline constexpr int kSupportRangerWeaponCount=5;
+// The last kind: the X-Morph: Defense powered-suit infantry (EDF6VC_XM_SMALL_INFANTRY[_LEADER].SGO, written by the
+// installer): an AssultSoldier, so a Ranger's class, on the plugin's own model.
 // A soldier kind's class: 0 Ranger, 1 Wing Diver, 2 Fencer (the bar's composition panel rows).
 constexpr int SupportSoldierClass(SupportWeapon w) noexcept {
-    return static_cast<int>(w)<kSupportRangerWeaponCount ? 0 : w<SupportWeapon::fencerCannon ? 1 : 2;
+    return w==SupportWeapon::xmInfantry ? 0 : static_cast<int>(w)<kSupportRangerWeaponCount ? 0 : w<SupportWeapon::fencerCannon ? 1 : 2;
 }
+// Whether a kind can wear a colour or a backpack: those are generated from the kind's stock template in Root.cpk. The
+// X-Morph infantry has no such template and its model no change-colour material, so it is always the plain body.
+constexpr bool SupportKindHasLooks(SupportWeapon k) noexcept { return k!=SupportWeapon::xmInfantry; }
 inline constexpr std::uint32_t kSupportRangerResource=1,kSupportLeaderResource=2,
     kSupportAircraftResource=0x10000,kSupportVehicleResource=0x20000;
 constexpr std::uint32_t SupportSoldierResource(SupportWeapon weapon,bool leader) noexcept {

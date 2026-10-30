@@ -32,7 +32,7 @@ inline constexpr const wchar_t* kMenuRangerStock=L"APP:/MENUOBJECT/p505_ranger.S
 inline constexpr const wchar_t* kMenuWingDiver=L"APP:/MENUOBJECT/p606_WingDiver.SGO";
 inline constexpr const wchar_t* kMenuFencer=L"APP:/MENUOBJECT/p607_fencer.SGO";
 constexpr bool HeadOnlyLeader(SupportWeapon k,bool leader) noexcept {
-    return leader && SupportSoldierClass(k)==0 && k!=SupportWeapon::rifle;
+    return leader && SupportSoldierClass(k)==0 && k!=SupportWeapon::rifle && k!=SupportWeapon::xmInfantry;
 }
 // The generated file the kind needs (Mods-relative), or nullptr (a stock menu SGO).
 constexpr const wchar_t* MenuFileOf(SupportWeapon k,bool leader) noexcept {
@@ -54,7 +54,8 @@ inline constexpr int kDescWeaponsMost=6;
 struct MenuWeapons { int count; const wchar_t* name[2]; };
 constexpr MenuWeapons MenuWeaponsOf(SupportWeapon k) noexcept {
     switch(k) {
-        case SupportWeapon::rifle: return {1,{L"aWeapon003",nullptr}};
+        case SupportWeapon::rifle:
+        case SupportWeapon::xmInfantry: return {1,{L"aWeapon003",nullptr}};   // the X-Morph infantry previews as the rifle Ranger
         case SupportWeapon::flame: return {1,{L"aWeapon197",nullptr}};
         case SupportWeapon::rocket: return {1,{L"RocketLauncher01",nullptr}};
         case SupportWeapon::shotgun: return {1,{L"aWeapon046",nullptr}};
@@ -92,10 +93,12 @@ inline constexpr StockColours kKindStock[kSupportWeaponCount]={
     {{{{0.255f,0.443f,0.451f,1.f}},{{0.302f,0.302f,0.549f,1.f}}}},   // midcannon
     {{{{0.278f,0.251f,0.251f,1.f}},{{0.251f,0.243f,0.251f,1.f}}}},   // pilebanker
     {{{{0.709f,0.286f,0.094f,1.f}},{{0.788f,0.0f,0.0f,1.f}}}},       // fshotgun
+    kRangerStock,                                                     // xminfantry: previewed as the rifle Ranger
 };
 constexpr const StockColours& StockOf(SupportWeapon k,bool leader) noexcept {
     const int i=static_cast<int>(k);
-    if(leader && SupportSoldierClass(k)==0)return k==SupportWeapon::rifle ? kRangerLeaderBody : kRangerLeaderHead;
+    if(leader && SupportSoldierClass(k)==0)
+        return k==SupportWeapon::rifle || k==SupportWeapon::xmInfantry ? kRangerLeaderBody : kRangerLeaderHead;
     return kKindStock[i>=0 && i<kSupportWeaponCount ? i : 0];
 }
 // 0xRRGGBB as the generator writes it (tools/support_loadout.py recolour: each byte / 255, alpha 1); kStockColour: `stock`.

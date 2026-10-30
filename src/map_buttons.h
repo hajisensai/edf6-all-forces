@@ -233,6 +233,17 @@ inline int ComposeKinds(int cls,int* out,int most) noexcept {
 constexpr float kComposePad=6.0f,kComposeTitleH=22.0f,kComposeSquadH=22.0f,kComposeGap=3.0f,
                 kComposeLabelW=66.0f,kComposeKindW=56.0f,kComposeKindH=22.0f,kComposeHintH=18.0f;
 constexpr int kComposeClasses=3;
+// The most kinds any one class has (a row of the panel): the width fits it.
+constexpr int ComposeKindsMost() noexcept {
+    int most=0;
+    for(int c=0;c<kComposeClasses;++c) {
+        int n=0;
+        for(int k=0;k<crew::kSupportWeaponCount;++k)n+=crew::SupportSoldierClass(static_cast<crew::SupportWeapon>(k))==c;
+        if(n>most)most=n;
+    }
+    return most;
+}
+constexpr int kComposeKindsMost=ComposeKindsMost();
 struct ComposeLayout {
     Rect box{},title{},hint{};
     int slots=0;Rect slot[kComposeSquadsMost]{};   // a squad's place each (the seats / kSquad), one row
@@ -240,7 +251,8 @@ struct ComposeLayout {
     int kinds=0;Rect kind[crew::kSupportWeaponCount]{};int kindCode[crew::kSupportWeaponCount]{};
 };
 inline float ComposeWidth(float s) noexcept {
-    return (2*kComposePad+kComposeLabelW+5*kComposeKindW+4*kComposeGap)*s;
+    return (2*kComposePad+kComposeLabelW+static_cast<float>(kComposeKindsMost)*kComposeKindW+
+            static_cast<float>(kComposeKindsMost-1)*kComposeGap)*s;
 }
 inline float ComposeHeight(float s) noexcept {
     return (2*kComposePad+kComposeTitleH+kComposeSquadH+kComposeGap+kComposeClasses*(kComposeKindH+kComposeGap)+kComposeHintH)*s;

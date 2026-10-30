@@ -18,6 +18,8 @@ void Expect(bool ok,const char* what) {
     if(!ok){++failures;std::printf("FAIL %s\n",what);}
 }
 
+// The kinds that can wear a colour: all but the last, the X-Morph infantry (support_call.h SupportKindHasLooks).
+constexpr int kKindsWithLooks=kSupportWeaponCount-1;
 std::wstring Soldier(int kind,bool leader,std::int32_t primary) {
     SupportLook look;look.primary=primary;
     wchar_t f[96];SupportLookFile(static_cast<SupportWeapon>(kind),leader,look,f,96);
@@ -25,7 +27,7 @@ std::wstring Soldier(int kind,bool leader,std::int32_t primary) {
 }
 std::vector<std::wstring> Soldiers(int n,std::int32_t base) {
     std::vector<std::wstring> out;
-    for(int i=0;i<n;++i)out.push_back(Soldier(i%kSupportWeaponCount,(i/kSupportWeaponCount)%2==1,base+i));
+    for(int i=0;i<n;++i)out.push_back(Soldier(i%kKindsWithLooks,(i/kKindsWithLooks)%2==1,base+i));
     return out;
 }
 std::string Lines(const std::vector<std::wstring>& names,const char* eol="\r\n") {

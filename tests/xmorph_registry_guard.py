@@ -8,10 +8,14 @@ from:
   its builder (tools/make_tracked_combat.py KINDS, LABELS, GUNS, NAMES, WT_ONLY; pylib/buildcache.py generator / tool),
   its files' owner (pylib/ledger.py OWNERS), its build group (pylib/buildcache.py GROUPS, COCKPIT_GROUPS, MODEL_INPUTS),
   its cockpit (pylib/cockpit_fits.py FITS), the test range and the M map (testrange/gen.py GROUND_MISSION,
-  TRACKED_MISSION, CATALOG_ONLY; testrange/catalog_archives.json; src/spawn_catalog.inc), the release's model pack
+  TRACKED_MISSION / WALKER_MISSION, CATALOG_ONLY; testrange/catalog_archives.json; src/spawn_catalog.inc), the release's model pack
   (tools/build_release.py RELEASE_MODELS) and the frozen installer's hidden imports. A car (xm_units car: on the V512,
   pylib/car_model.py) is in none of the V603's tables (TRACKED, make_tracked_combat's, wt_tracked FOLDERS): it is
   tools/make_xmorph.py CARS', and the range places it as the sedan (testrange/catalog.py INSTALLER_VEHICLES).
+
+By family (pylib/xm_units.py): the request rows are the requested units' (V603 and the walkers); the V603's tables, the
+cockpits the V603 units'; the test range both (a walker's WALKER_MISSION); a walker's vehicle its host's holders (pylib/xm_walker.py weapons, its rig
+in pylib/xm_rig.py RIGS); the infantry a support soldier kind (its bodies in src/support_soldier.cpp kBodies), no request.
 
 Registration does not depend on the model folders a machine has (CI has none): nothing here reads one. Read only; no game.
 
@@ -37,7 +41,10 @@ import make_tracked_combat as mtc  # noqa: E402
 import make_xmorph  # noqa: E402
 import vcobjects as vc  # noqa: E402
 import wt_tracked  # noqa: E402
+import xm_infantry  # noqa: E402
+import xm_rig  # noqa: E402
 import xm_units  # noqa: E402
+import xm_walker  # noqa: E402
 
 checks = failed = 0
 
@@ -56,6 +63,7 @@ def text(rel: str) -> str:
 
 
 calls_inc, stores_inc, spawn_inc = text('src/calls.inc'), text('src/stores.inc'), text('src/spawn_catalog.inc')
+soldier_cpp = text('src/support_soldier.cpp')
 archives = json.loads(text('testrange/catalog_archives.json'))['rows']
 release = text('tools/build_release.py')
 hidden = release.split("for mod in ('call_weapons'", 1)[1].split('):', 1)[0]
@@ -124,12 +132,14 @@ for u in [u for u in ported if u.family == 'jet']:
     check(xm_units.folder(key) in build_release.RELEASE_MODELS, f'{key}: tools/build_release.py RELEASE_MODELS')
 for module in ('xm_heli', 'xm_jet', 'xm_air_model'):
     check(f"'{module}'" in hidden, f'tools/build_release.py: {module} is not a hidden import of the installer')
-for u in xm_units.v603():
+requested, v603 = {u.key for u in xm_units.requested()}, {u.key for u in xm_units.v603()}
+for u in [u for u in ported if u.family not in ('heli', 'jet')]:   # the aircraft: above
     key, upper, mission = u.key, u.key.upper(), f'{gen.DERIVED_PREFIX}{u.key}_mission'
     sgo = f'EDF6VC_{upper}'
     # the request
     mine = [c for c in calls.CALLS if c.ground == key]
-    check(len(mine) == 1, f'{key}: {len(mine)} requests in tools/calls.py CALLS (want 1)')
+    check(len(mine) == (1 if key in requested else 0),
+          f'{key}: {len(mine)} requests in tools/calls.py CALLS (want {1 if key in requested else 0})')
     if mine:
         c = mine[0]
         check(c.id == calls.ID_PREFIX + upper and c.vehicle == sgo and c.brings == 'vehicle' and c.kind == key,
@@ -138,11 +148,42 @@ for u in xm_units.v603():
         check(at > 0 and calls.IDS[at - 1] == u.after, f'{key}: its row does not follow {u.after} (Unit.after)')
         check(f'{{L"{c.id}",L"{c.id}.SGO",L"{sgo}.SGO"}}' in calls_inc, f'{key}: src/calls.inc lacks {c.id} (gen_calls)')
     check(set(calls.KINDS.get(key, {})) == set(xm_units.LANGS), f'{key}: tools/calls.py KINDS lacks its texts')
+    # its builder: one generator for every unit
+    check(buildcache.generator(key) == 'make_xmorph' and buildcache.tool(key) is make_xmorph.builder(key)
+          and buildcache.tool(key).OWNER == key, f'{key}: pylib/buildcache.py generator / tool')
+    # its files and its build group
+    check(key in ledger.OWNERS, f'{key}: pylib/ledger.py OWNERS')
+    check(key in buildcache.GROUPS and key in buildcache.COCKPIT_GROUPS
+          and buildcache.MODEL_INPUTS.get(key) == xm_units.folder(key), f'{key}: pylib/buildcache.py groups')
+    # the release
+    check(xm_units.folder(key) in build_release.RELEASE_MODELS, f'{key}: tools/build_release.py RELEASE_MODELS')
+    if u.family == 'infantry':
+        # a support soldier kind: its member and leader bodies the plugin's (pylib/xm_infantry.py writes them)
+        member, leader = xm_infantry.body_files(key)
+        check(f'{{L"app:/object/{member}",L"app:/object/{leader}"}}'.lower() in soldier_cpp.lower(),
+              f'{key}: src/support_soldier.cpp kBodies lacks {member} / {leader}')
+        check(key in xm_rig.RIGS and key not in vc.GROUND_VEHICLES, f'{key}: xm_rig.RIGS / not a ground vehicle')
+        continue
     check(calls.GROUND_NOTES_BY_KIND.get(key) is calls.PLUGIN_NOTES, f'{key}: GROUND_NOTES_BY_KIND')
     # the vehicle
     v = vc.GROUND_VEHICLES.get(key)
     check(v is not None and v.sgo == sgo and v.tool == 'make_xmorph' and v.durability == u.durability,
           f'{key}: pylib/vcobjects.py GROUND_VEHICLES')
+    if u.family == 'mech':
+        # a walker: the host's class and request, the unit's weapons on the host's holders, its rig
+        w = xm_walker.WALKERS.get(key)
+        check(w is not None and v is not None and v.stock == w.stock and v.family == w.family
+              and v.weapons == xm_walker.weapons(key) and v.weapons_at == w.weapons_at and key in xm_rig.RIGS,
+              f'{key}: pylib/vcobjects.py GROUND_VEHICLES is not its walker (pylib/xm_walker.py WALKERS, xm_rig RIGS)')
+        check(all(any(a.key == h.arm for a in u.arms) for h in w.holders if h.arm) if w else False,
+              f'{key}: a holder names an arm the unit has not')
+        check(f'EDF6VC_{upper}' in cockpit_fits.FITS, f'{key}: pylib/cockpit_fits_plugin.py FITS')
+        # the test range and the M map (its host's SGO turned into a mission one)
+        check(key in vc.WALKERS and gen.GROUND_MISSION.get(mission) == 'make_xmorph' and mission in gen.WALKER_MISSION
+              and mission in gen.CATALOG_ONLY, f'{key}: testrange/gen.py GROUND_MISSION / WALKER_MISSION / CATALOG_ONLY')
+        check(f'"{mission.upper()}"' in spawn_inc, f'{key}: src/spawn_catalog.inc lacks {mission} (gen_spawn_catalog)')
+        check(f'OBJECT/{sgo}.MRAB' in archives.get(mission, ()), f'{key}: testrange/catalog_archives.json lacks {mission}')
+        continue
     car = u.family in xm_units.V512
     check((key in vc.TRACKED) != car and (key in make_xmorph.CARS) == car,
           f'{key}: pylib/vcobjects.py TRACKED / tools/make_xmorph.py CARS')
@@ -178,12 +219,6 @@ for u in xm_units.v603():
     # its builder: one generator for every unit
     check(car or key in mtc.KINDS and key in mtc.LABELS and key in mtc.GUNS and mtc.NAMES.get(key) == u.gun,
           f'{key}: tools/make_tracked_combat.py tables (KINDS, LABELS, GUNS, NAMES)')
-    check(buildcache.generator(key) == 'make_xmorph' and buildcache.tool(key) is make_xmorph.builder(key)
-          and buildcache.tool(key).OWNER == key, f'{key}: pylib/buildcache.py generator / tool')
-    # its files and its build group
-    check(key in ledger.OWNERS, f'{key}: pylib/ledger.py OWNERS')
-    check(key in buildcache.GROUPS and key in buildcache.COCKPIT_GROUPS
-          and buildcache.MODEL_INPUTS.get(key) == xm_units.folder(key), f'{key}: pylib/buildcache.py groups')
     check(f'EDF6VC_{upper}' in cockpit_fits.FITS, f'{key}: pylib/cockpit_fits_plugin.py FITS')
     # the test range and the M map (a car: placed as its own SGO, the sedan's way)
     if car:
@@ -194,9 +229,7 @@ for u in xm_units.v603():
               and mission in gen.CATALOG_ONLY, f'{key}: testrange/gen.py GROUND_MISSION / TRACKED_MISSION / CATALOG_ONLY')
     check(f'"{mission.upper()}"' in spawn_inc, f'{key}: src/spawn_catalog.inc lacks {mission} (gen_spawn_catalog)')
     check(f'OBJECT/{sgo}.MRAB' in archives.get(mission, ()), f'{key}: testrange/catalog_archives.json lacks {mission}')
-    # the release
-    check(xm_units.folder(key) in build_release.RELEASE_MODELS, f'{key}: tools/build_release.py RELEASE_MODELS')
-for module in ('make_xmorph', 'xm_units', 'car_model'):
+for module in ('make_xmorph', 'xm_units', 'car_model', 'xm_walker', 'xm_infantry', 'xm_rig'):
     check(f"'{module}'" in hidden, f'tools/build_release.py: {module} is not a hidden import of the installer')
 
 print(f'xmorph_registry_guard: {len(ported)} ported units, {checks} checks, {failed} failed')

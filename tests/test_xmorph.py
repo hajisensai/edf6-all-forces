@@ -472,5 +472,118 @@ class XmorphAssetTests(unittest.TestCase):
             tc.KINDS = old[2]
 
 
+
+# ------------------------------------------------------------------------------------------ the walkers and the infantry
+
+class RetargetTests(unittest.TestCase):
+    """pylib/xm_rig.py's pieces that need no model folder or game (CI), and the walkers' weapon lists."""
+
+    def test_turn_takes_one_direction_onto_another(self) -> None:
+        import xm_rig
+        rng = np.random.default_rng(3)
+        for _ in range(20):
+            a, b = rng.normal(size=3), rng.normal(size=3)
+            R = xm_rig._turn(a, b)
+            self.assertTrue(np.allclose(R @ R.T, np.eye(3), atol=1e-9))
+            self.assertAlmostEqual(float(np.linalg.det(R)), 1.0, places=9)
+            self.assertTrue(np.allclose(R @ (a / np.linalg.norm(a)), b / np.linalg.norm(b), atol=1e-9))
+        R = xm_rig._turn(np.array([0., 1., 0.]), np.array([0., -1., 0.]))   # opposite: half a turn
+        self.assertTrue(np.allclose(R @ np.array([0., 1., 0.]), [0., -1., 0.]))
+
+    def test_far_weight_runs_along_the_segment(self) -> None:
+        import xm_rig
+        h0, h1 = np.array([0., 2., 0.]), np.array([0., 0., 0.])
+        pl = xm_rig.Placement(1.0, {'shin': (np.eye(3), np.zeros(3))}, {'shin': 'sune'}, {'shin': ('ashi', h0, h1)})
+        w = pl.far_weight('shin', np.array([[0., 3., 0.], [0., 2., 0.], [0.3, 1., 0.], [0., 0., 0.], [0., -1., 0.]]))
+        self.assertTrue(np.allclose(w, [0., 0., 0.5, 1., 1.]))
+        self.assertTrue(np.allclose(pl.far_weight('other', np.zeros((2, 3))), 0.))
+
+    def test_trim_keeps_the_bits_near_the_joint(self) -> None:
+        import xm_rig
+        near, _ = _box((0.1, 0., 0.), 0.1)
+        far, _ = _box((1.5, 0., 0.), 0.1)
+        tris = np.array([[0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]], dtype=np.int32)
+        pos = np.vstack((near[:4], far[:4]))
+        info = {'kind': 'k', 'parts': [{'bone': 'hand'}], 'bones': [{'name': 'hand', 'point': [0., 0., 0.]}],
+                'attachments': {}}
+        arrays = {'p0_pos': pos, 'p0_nrm': np.zeros_like(pos), 'p0_uv': np.zeros((8, 2)), 'p0_tri': tris}
+        spec = xm_rig.Spec('', info, arrays)
+        rig = xm_rig.Rig('S', 'A', 'm', ('hand', 'b'), {}, trim={'hand': 0.5})
+        p, _n, _uv, t = xm_rig.trimmed(spec, rig, 0)
+        self.assertEqual(len(p), 4)
+        self.assertEqual(len(t), 2)
+        self.assertTrue(np.allclose(p, near[:4]))
+        self.assertEqual(int(t.max()), 3)
+        whole = xm_rig.trimmed(spec, xm_rig.Rig('S', 'A', 'm', ('hand', 'b'), {}), 0)
+        self.assertEqual(len(whole[3]), 4)
+
+    def test_walker_weapon_lists(self) -> None:
+        import call_weapons as cw
+        import dsgo
+        import xm_walker
+        for key, w in xm_walker.WALKERS.items():
+            with self.subTest(walker=key):
+                paths = xm_walker.weapons(key)
+                self.assertEqual(len(paths), len(xm_walker.HOST_HOLDERS[w.stock]))
+                self.assertEqual(sum(1 for p in paths if p), len(w.holders))
+        # the Nix's eight holders: its hands carry the unit's guns, the stock entries' params kept, the rest empty
+        stock = [['app:/weapon/a.sgo', [0.5, 0.25]], [0.0], [0.0], ['app:/weapon/b.sgo', [0.1, 0.2]]]
+        made = xm_walker._setup_weapons(stock, ('app:/weapon/x.sgo', 'app:/weapon/y.sgo', '', ''))
+        self.assertEqual(made, [['app:/weapon/x.sgo', [0.5, 0.25]], ['app:/weapon/y.sgo', [0.5, 0.25]], [0.0], [0.0]])
+        nodes = [dsgo.Node(['app:/weapon/a.sgo', dsgo.Node([0.5, 0.25])]), dsgo.Node([0.0])]
+        out = cw._walker_weapons(nodes, ('', 'app:/weapon/y.sgo'))
+        self.assertEqual(dsgo.to_py(dsgo.Node(out)), [[0.0], ['app:/weapon/y.sgo', [0.5, 0.25]]])
+        with self.assertRaises(ValueError):
+            cw._walker_weapons(nodes, ('app:/weapon/y.sgo',))
+
+
+def _walkers_here() -> bool:
+    import rootcpk
+    import xm_rig
+    return (Path(rootcpk.DEFAULT_GAME) / 'Root.cpk').is_file() and all(
+        xm_rig.folder(k) is not None for k in ('xm_small_mech', 'xm_large_mech', 'xm_small_infantry'))
+
+
+@unittest.skipUnless(_walkers_here(), 'the model pack (xm_small_mech, xm_large_mech, xm_small_infantry) or EDF6 '
+                     'Root.cpk unavailable (the developer machine only)')
+class WalkerAssetTests(unittest.TestCase):
+    """The three folders built on their hosts and posed through the hosts' clips (docs/xmorph-port.md 「步行单位」:
+    the measured gaps; a rig change that opens a joint or sinks a foot fails here)."""
+    # the worst joint gap (m) and the floor range (m) over the rig's clips, as measured 2026-10-30, with a margin
+    LIMITS = {'xm_small_mech': (0.4, -0.45), 'xm_large_mech': (0.4, -0.2), 'xm_small_infantry': (0.12, -0.15)}
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import rootcpk
+        cls.game = rootcpk.default()
+
+    def test_poses(self) -> None:
+        import xm_rig
+        for key, (joint, floor) in self.LIMITS.items():
+            for clip in xm_rig.RIGS[key].clips:
+                with self.subTest(unit=key, clip=clip):
+                    r = xm_rig.gaps(self.game, key, clips=(clip,))
+                    self.assertLessEqual(max(r['joints'].values()), joint, r['joints'])
+                    if clip != 'jump_start':   # the hosts' own crouch: their root goes 1.4-2.0 m down in it
+                        self.assertGreaterEqual(r['floor'][0], floor, r['floor'])
+
+    def test_walkers_build(self) -> None:
+        import sgo
+        import xm_walker
+        for key in xm_walker.WALKERS:
+            with self.subTest(unit=key):
+                files = xm_walker.build(self.game, key)       # checks itself (xm_rig.check, xm_walker.check)
+                self.assertEqual(len(files), 2 + len(xm_walker.WALKERS[key].holders))
+                v = sgo.load(data=files[f'OBJECT/{xm_walker.vehicle_file(key)}'])
+                self.assertEqual(v['animation_model'][1], sgo.load(
+                    data=self.game.read('OBJECT', xm_walker.WALKERS[key].stock + '.SGO'))['animation_model'][1])
+
+    def test_infantry_builds(self) -> None:
+        import xm_infantry
+        files = xm_infantry.build(self.game, 'xm_small_infantry')   # checks itself
+        self.assertEqual(set(files), {f'OBJECT/{xm_infantry.model_file("xm_small_infantry")}',
+                                      *(f'OBJECT/{b}' for b in xm_infantry.body_files('xm_small_infantry'))})
+
+
 if __name__ == '__main__':
     unittest.main()

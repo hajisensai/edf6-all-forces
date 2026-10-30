@@ -25,18 +25,26 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 
+import ledger  # noqa: E402
 import make_tracked_combat as tracked  # noqa: E402
+import vcobjects as vc  # noqa: E402
 import xm_heli  # noqa: E402
 import xm_jet  # noqa: E402
 import xm_units  # noqa: E402
 
 KINDS = tuple(u.key for u in xm_units.v603()) + tuple(u.key for u in xm_units.ported('heli')) + \
-    tuple(u.key for u in xm_units.ported('jet')) + tuple(u.key for u in xm_units.v512())
+    tuple(u.key for u in xm_units.ported('jet')) + tuple(u.key for u in xm_units.v512()) + \
+    tuple(u.key for u in xm_units.ported('mech')) + tuple(u.key for u in xm_units.ported('infantry'))
 HELIS = frozenset(u.key for u in xm_units.ported('heli'))
 JETS = frozenset(u.key for u in xm_units.ported('jet'))
 # The cars (pylib/car_model.py) and what the installer calls each; the V603 units are make_tracked_combat.LABELS'.
 CARS = {u.key: f'{xm_units.label(u)}（X-Morph: Defense 模型）' for u in xm_units.v512()}
-LABELS = {**{u.key: tracked.LABELS[u.key] for u in xm_units.v603()}, **CARS}
+WALKERS = tuple(u.key for u in xm_units.ported('mech'))
+INFANTRY = tuple(u.key for u in xm_units.ported('infantry'))
+OWN = WALKERS + INFANTRY   # built here (pylib/xm_walker.py, xm_infantry.py), not by make_tracked_combat
+# what the installer says it builds
+LABELS = {**{u.key: tracked.LABELS[u.key] for u in xm_units.v603()}, **CARS,
+          **{kind: f'{xm_units.label(xm_units.UNITS[kind])}（X-Morph: Defense 模型）' for kind in OWN}}
 
 
 def deployable(kind: str) -> bool:
@@ -50,28 +58,42 @@ def build(root: str, kind: str) -> dict[str, bytes]:
               flush=True)
         return {}
     if kind in HELIS:
-        files = xm_heli.files(tracked.vc.Game(root), xm_units.UNITS[kind])
+        files = xm_heli.files(vc.Game(root), xm_units.UNITS[kind])
         check(files, kind)
         return files
     if kind in JETS:
-        return xm_jet.files(tracked.vc.Game(root), xm_units.UNITS[kind])   # checked (xm_jet.check)
+        return xm_jet.files(vc.Game(root), xm_units.UNITS[kind])   # checked (xm_jet.check)
     if kind in CARS:
         import car_model
         import cockpits
         import model_lod
-        import vcobjects as vc
         game = vc.Game(root)
         files = model_lod.finish(cockpits.graft_files(game, car_model.build(game, kind)))
         car_model.check(files, kind)
         return files
+    if kind in WALKERS:
+        import xm_walker
+        return xm_walker.build(vc.Game(root), kind)
+    if kind in INFANTRY:
+        import xm_infantry
+        return xm_infantry.build(vc.Game(root), kind)
     return tracked.build(root, kind)
 
 
 def install(root: str, files: dict[str, bytes], kind: str) -> list[str]:
-    return tracked.install(root, files, kind)   # the ledger's, under the unit's own owner (any kind's)
+    if kind in OWN:   # the unit's files, the ledger's (owner: its key); what an earlier install wrote and this not, released
+        led = ledger.Ledger(root)
+        before = set(led.owned_by(kind))
+        paths = [led.put(kind, rel, data) for rel, data in files.items()]
+        led.release(kind, sorted(before - {ledger.key(rel) for rel in files}))
+        return paths
+    return tracked.install(root, files, kind)
 
 
 def remove(root: str, kind: str) -> tuple[list[str], list[str]]:
+    if kind in OWN:
+        led = ledger.Ledger(root)
+        return led.release(kind, sorted(set(led.owned_by(kind))), writer=True)
     return tracked.remove(root, kind)
 
 
@@ -82,10 +104,15 @@ def vehicle_sgo(game, kind: str) -> bytes:  # noqa: ANN001 - vcobjects.Game
         unit = xm_units.UNITS[kind]
         return xm_heli.vehicle_sgo(game, unit, xa.read_info(om.model_dir(xm_units.folder(kind))))
     if kind in JETS:
-        return tracked.vc.jet_sgo(game, xm_units.jet_request(kind))   # what its request brings
+        return vc.jet_sgo(game, xm_units.jet_request(kind))   # what its request brings
     if kind in CARS:
         import car_model
         return car_model.build(game, kind)[f'OBJECT/{car_model.out_names(kind)[0]}.SGO']
+    if kind in WALKERS:
+        import xm_walker
+        return xm_walker.vehicle_sgo(game, kind)
+    if kind in INFANTRY:
+        raise ValueError(f'{kind} 是支援士兵，不是载具')
     return tracked.vehicle_sgo(game, kind)
 
 
@@ -102,6 +129,14 @@ def check(files: dict[str, bytes], kind: str, game=None) -> None:  # noqa: ANN00
         return
     if kind in JETS:
         xm_jet.check(files, xm_units.UNITS[kind])
+        return
+    if kind in WALKERS:
+        import xm_walker
+        xm_walker.check(files, kind)
+        return
+    if kind in INFANTRY:
+        import xm_infantry
+        xm_infantry.check(files, kind)
         return
     if kind in CARS:
         import car_model
@@ -149,15 +184,15 @@ def main(argv: list[str]) -> int:
     if not deployable(args.kind) and '--remove' not in rest:
         build('', args.kind)
         return 1
-    if args.kind in HELIS or args.kind in JETS or args.kind in CARS:
+    if args.kind in HELIS or args.kind in JETS or args.kind in CARS or args.kind in OWN:
         return _own_main(rest, args.kind)
     return tracked.main(rest, args.kind)
 
 
 def _own_main(argv: list[str], kind: str) -> int:
-    """make_tracked_combat.main's options for a helicopter, a jet or a car (its build is this module's)."""
+    """make_tracked_combat.main's options for a helicopter, a jet, a car, a walker or the infantry (its build is this module's)."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('game', nargs='?', default=tracked.vc.DEFAULT_GAME)
+    parser.add_argument('game', nargs='?', default=vc.DEFAULT_GAME)
     parser.add_argument('--out', type=Path, help='write generated files under this output root; never installs')
     parser.add_argument('--check', action='store_true', help='generate and validate in memory only')
     parser.add_argument('--remove', action='store_true')

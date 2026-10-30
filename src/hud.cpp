@@ -4451,7 +4451,7 @@ constexpr float kSupTabH=22.0f;     // px at 1080 lines: the tabs' row (support_
 // The composition panel's words (map_buttons.h ComposePanel): a soldier kind's short name (SupportWeapon order), a class's.
 constexpr Tx kKindText[kSupportWeaponCount]={Tx::kindRifle,Tx::kindFlame,Tx::kindRocket,Tx::kindShotgun,Tx::kindSniper,
     Tx::kindLance,Tx::kindLaser,Tx::kindMonster,Tx::kindIzuna,Tx::kindThunderBow,
-    Tx::kindCannon,Tx::kindMiddleCannon,Tx::kindPileBanker,Tx::kindFencerShotgun};
+    Tx::kindCannon,Tx::kindMiddleCannon,Tx::kindPileBanker,Tx::kindFencerShotgun,Tx::kindXmInfantry};
 constexpr Tx kClassText[mapbtn::kComposeClasses]={Tx::classRanger,Tx::classWingDiver,Tx::classFencer};
 const wchar_t* KindText(SupportWeapon w) noexcept {
     const int i=static_cast<int>(w);

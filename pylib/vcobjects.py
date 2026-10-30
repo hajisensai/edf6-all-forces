@@ -17,6 +17,7 @@ from functools import lru_cache
 import dsgo
 import sgo
 import xm_units
+import xm_walker
 from rootcpk import DEFAULT_GAME, Game  # noqa: F401  (re-exported: the tools take both from here)
 
 @dataclass(frozen=True)
@@ -861,6 +862,10 @@ class GroundVehicle:
     # The left / right barrels fire in turn, not together (src/twin_cadence.h): each 'left' weapon is paired with the
     # 'right' one of the same belt (the k-th left with the k-th right in `weapons`); tools/gen_stores.py kTwinBarrels.
     alternate: bool = False
+    # The setup entry holding the weapon list where it is not the last (the walkers' requests, the Begaruta's and the
+    # Proteus's: [multipliers, params, params, [seat params], weapons, [x]]); there one entry a holder of the host's,
+    # '' in `weapons` an empty one ([0.0]). None: the last entry (tools/call_weapons.py vehicle_sgo).
+    weapons_at: int | None = None
 
 
 def vehicle_fire_keys(vehicle: GroundVehicle) -> dict[int, list[str]]:
@@ -1117,6 +1122,16 @@ for _xm in xm_units.v512():
     assert _like.stock == 'V512_KEITRUCK' and not _like.slots, (_xm.key, _xm.like)
     GROUND_VEHICLES[_xm.key] = replace(_like, sgo=f'EDF6VC_{_xm.key.upper()}', durability=_xm.durability,
                                        tool='make_xmorph')
+
+# The X-Morph walkers (pylib/xm_walker.py; make_xmorph's builder): the host's class and request, the unit's weapons on
+# the host's holders.
+for _xm in xm_units.ported('mech'):
+    _walker = xm_walker.WALKERS[_xm.key]
+    GROUND_VEHICLES[_xm.key] = GroundVehicle(
+        f'EDF6VC_{_xm.key.upper()}', _walker.stock, _walker.family[0], _walker.family, xm_walker.weapons(_xm.key),
+        _xm.durability, 'make_xmorph', weapons_at=_walker.weapons_at)
+# The walkers with what the test range calls each (testrange/gen.py: edf6tr_<kind>_mission, as TRACKED).
+WALKERS: dict[str, str] = {_xm.key: xm_units.label(_xm) for _xm in xm_units.ported('mech')}
 
 for _ground in GROUND_VEHICLES.values():
     vehicle_fire_keys(_ground)   # an extra fire key never holds two weapons

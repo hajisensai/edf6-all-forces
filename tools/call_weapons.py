@@ -413,9 +413,30 @@ def vehicle_needs(call: Call, request: bytes | None = None) -> list[str]:
         # Follow the prepared/installed request, not today's model directory: the model may have been
         # added or removed since these bytes were built. The stock fallback has only stock weapons.
         setup = dsgo.parse(request).root.get('Ammo_CustomParameter').items[4].items[3]
-        weapons = tuple(w.items[0] for w in setup.items[len(setup.items) - 1 if call.ground else 3].items)
-    ours = [w for w in weapons if w.split('/')[-1].upper().startswith('EDF6VC_')]
+        weapons = tuple(w.items[0] for w in setup.items[_weapons_at(call, setup)].items)
+    ours = [w for w in weapons if isinstance(w, str) and w.split('/')[-1].upper().startswith('EDF6VC_')]
     return [vehicle_file(call)] + [f'WEAPON/{w.split("/")[-1].upper()}' for w in ours]
+
+
+def _weapons_at(call: Call, setup) -> int:  # noqa: ANN001 - dsgo.Node
+    """Where a vehicle request's setup holds its weapon list: the Eros's [3]; a ground vehicle's last entry, a walker's
+    its own (vcobjects.GroundVehicle.weapons_at)."""
+    if not call.ground:
+        return 3
+    at = vc.GROUND_VEHICLES[call.ground].weapons_at
+    return len(setup.items) - 1 if at is None else at
+
+
+def _walker_weapons(entries: list, paths: tuple[str, ...]) -> list:
+    """A walker request's weapon list (vcobjects.GroundVehicle.weapons_at): per host holder the unit's weapon (the
+    stock entry's per-weapon params on that holder, else the first stock weapon's), [0.0] where it has none."""
+    if len(entries) != len(paths):
+        raise ValueError(f'{len(entries)} holders in the request, {len(paths)} weapons')
+    armed = [e for e in entries if isinstance(e, Node) and e.items and isinstance(e.items[0], str)]
+    if not armed:
+        raise ValueError('the request carries no weapon to take the params from')
+    return [_with_path(e if any(e is a for a in armed) else armed[0], path) if path else Node([0.0])
+            for e, path in zip(entries, paths)]
 
 
 def _object_path(call: Call) -> str:
@@ -494,7 +515,7 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
     # The weapon list: the setup's last entry ([multipliers, heli params, fuel, weapons] in the Eros's request;
     # [multipliers, vehicle params, weapons] in a ground vehicle's, the Naegling's; [multipliers, bike params, fuel,
     # weapons] in the Freed bike's, the sidecar's).
-    at = len(setup.items) - 1 if call.ground else 3
+    at = _weapons_at(call, setup)
     weapons = setup.items[at].items
     jet_weapons = vehicle_weapons(call)
     swap = {stock_vehicle.lower(): _object_path(call), **({} if call.heli else _VEHICLE_SWAP)}
@@ -502,6 +523,18 @@ def vehicle_sgo(template: bytes, call: Call, tier: tuple[float, float], *, fallb
         # The ground vehicle's weapons in its request's entries' places (the stock request's per-weapon parameters):
         # one entry a holder of its vehicle_weapon_setting, as the stock one.
         ground = vc.GROUND_VEHICLES[call.ground]
+        if ground.weapons_at is not None:
+            # A walker: the unit's weapons on the host's holders, the stock ones gone from the preloads too.
+            native = {str(w.items[0]).lower() for w in weapons if w.items and isinstance(w.items[0], str)}
+            setup.items[at].items = _walker_weapons(weapons, jet_weapons)
+            res = r.get('resource')
+            ours = [w for w in jet_weapons if w]
+            res.items = [swap.get(x.lower(), x) for x in res.items if x.lower() not in native] + ours
+            for lang in LANGS:
+                key = f'name.{lang.lower()}'
+                if key in r.names.values():
+                    r.set(key, call_name(call, lang))
+            return dsgo.write(doc)
         if ground.setup is not None:
             setup.items = [dsgo.Node([float(tier[0]), float(tier[1])]), dsgo.Node(list(ground.setup)), dsgo.Node([])]
             weapons = []

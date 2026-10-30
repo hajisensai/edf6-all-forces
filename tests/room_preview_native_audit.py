@@ -102,7 +102,11 @@ def near(a: list[float], b: list[float]) -> bool:
 def audit_colours(game, text: str, support_loadout, dsgo) -> None:
     rows = stock_rows(text)
     check(len(rows) == len(support_loadout.KINDS), 'kKindStock has a row a kind')
+    templates = {n: t for n, _, t in support_loadout.KINDS}
     for (kind, _, template), row in zip(support_loadout.KINDS, rows):
+        if not support_loadout.has_looks(kind):
+            # The X-Morph infantry has no Root.cpk template: it is previewed as the rifle Ranger, so its row is the rifle's.
+            template = templates['rifle']
         check(near(row, template_colours(game, dsgo, template, None)), f'stock colours of {kind} are {template}\'s')
     head = template_colours(game, dsgo, 'N601_COMMON_RANGER_FL_LEADER', 'p609_proto_ranger_common_head')
     body = template_colours(game, dsgo, 'N601_COMMON_RANGER_AF_LEADER', 'p609_proto_ranger_common_body')

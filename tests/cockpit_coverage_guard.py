@@ -24,6 +24,7 @@ sys.path[:0] = [os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'tools')]
 import buildcache  # noqa: E402
 import cockpit_fits  # noqa: E402
 import vcobjects as vc  # noqa: E402
+import xm_walker  # noqa: E402
 
 checks = failed = 0
 
@@ -64,7 +65,7 @@ def build_grafts(tool: str, seen: tuple[str, ...] = ()) -> bool:
 
 def model_stem(kind: str, vehicle: vc.GroundVehicle) -> str:
     """The stem of the model `kind`'s generator makes: the tracked builder's model module names it (OUT_ARC); the
-    others (an X-Morph car's tools/make_xmorph.py among them) make OBJECT/<their SGO's stem>.MRAB."""
+    others (an X-Morph car's and walker's tools/make_xmorph.py among them) make OBJECT/<their SGO's stem>.MRAB."""
     import make_tracked_combat
     if kind in make_tracked_combat.KINDS:
         return make_tracked_combat.model_module(kind).OUT_ARC.rsplit('.', 1)[0].upper()

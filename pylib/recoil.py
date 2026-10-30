@@ -63,10 +63,11 @@ def items_of(v: object) -> list | None:
 
 def guns_of(setup: object, where: str) -> list:
     """The setup's weapon list: [2] in a vehicle's ([multipliers, vehicle params, weapons, ...]), the last entry
-    in a bike's ([multipliers, bike params, fuel, weapons]: the Freed bike's, the sidecar's)."""
+    in a bike's ([multipliers, bike params, fuel, weapons]: the Freed bike's, the sidecar's), the one before last in a
+    walker's ([multipliers, walk params, ..., weapons, recoil]: the Nix's, the Proteus's; vcobjects weapons_at)."""
     items = items_of(setup)
     if items and len(items) > 2:
-        for at in (2, len(items) - 1):
+        for at in (2, len(items) - 1, len(items) - 2):
             guns = items_of(items[at])
             if guns and any(gun_of(m) for m in guns):
                 return guns

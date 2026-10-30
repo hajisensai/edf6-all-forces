@@ -37,12 +37,15 @@ Families (the chassis an EDF6 class drives; tools/prep_xmorph.py has one prepare
     car          an unarmed vehicle on the sedan's V512 (Vehicle_Car: its `like` is 'sedan'; pylib/car_model.py, through
                  tools/prep_xmorph.py car): its own wheels on the V512's wheel bones (steered by the front pair),
                  the driver's seat alone, no gun; the civilian rows' cars come this way too
-    mech         planned: the Proteus / Balam walkers
+    mech         a walker on a stock one (pylib/xm_walker.py: the light mech on the Nix, the heavy on the Proteus Mk2;
+                 the Balam is four times the heavy mech's size), its model retargeted onto the host's skeleton
+                 (pylib/xm_rig.py, tools/prep_xmorph.py mech), its weapons on the host's holders
     emplacement  a fort's gun on pylib/emplacement_model.py's fortified base (the V603, tools/prep_xmorph.py emplacement)
     heli         the stock V506 heli in its own model (pylib/xm_heli.py, pylib/xm_air_model.py; tools/prep_xmorph.py heli)
     jet          the plugin's own aircraft in its own model (pylib/vcobjects.py XM_JETS, pylib/xm_air_model.py; tools/
                  prep_xmorph.py jet): src/jet.cpp flies it (kBodies), the player boards it (kBoardable)
-    infantry     planned
+    infantry     a support soldier kind (src/support_call.h xmInfantry) on the Ranger's body (pylib/xm_infantry.py,
+                 tools/prep_xmorph.py infantry), not a request
     boss         planned: the game's bosses (parts each: xm_model.assemble), until their chassis is known (docs/
                  xmorph-bosses.md); a boss whose chassis is one of the above is ported as that family (the JAGUAR
                  Type S, the highway_tank boss: tracked)
@@ -521,9 +524,62 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                'third_person_height': 3.2},
        eye=(0.0, 3.0, -0.5), durability=800.0, reload=6000, level=1.0, after='EDF6VC_CALL_XM_SMALL_HUMVEE'),
     # walkers, foot
-    _u('ground/small_mech', 'mech', title='Light Mech'),
-    _u('ground/large_mech', 'mech', title='Heavy Mech'),
-    _u('ground/small_infantry', 'infantry', title='Infantry'),
+    # The light mech: two arm guns (weapon_enemy_mg_small, one round each every 0.4 s: enemy_bullet_small_anti_core, 2
+    # anti_core), 45 health (a quarter of the battle tank's). On the Nix (pylib/xm_walker.py: the Nix's hand holders).
+    _u('ground/small_mech', 'mech', '', 'ported', 'Light Mech',
+       texts={'SC': ('X-Morph 轻型机甲', '请求一台人类军队的轻型机甲：双足步行机甲，两臂各一挺机枪为主攻击，两挺同时开火，'
+                                     '每 0.4 秒一发（与原作相同）；装甲较薄。'),
+              'CN': ('X-Morph 輕型機甲', '請求一台人類軍隊的輕型機甲：雙足步行機甲，兩臂各一挺機槍為主攻擊，兩挺同時開火，'
+                                     '每 0.4 秒一發（與原作相同）；裝甲較薄。'),
+              'JA': ('X-Morph ライトメック', '人類軍のライトメックを要請する。二足歩行メックで、両腕の機関銃（2 挺同時、0.4 秒に 1 発、'
+                                       '原作どおり）を主攻撃とする。装甲は薄い。'),
+              'EN': ('X-Morph Light Mech', "Requests the human army's light mech: a two-legged walker, the machine guns "
+                                           'on its arms on the primary attack, both at once, a round every 0.4 s (as in '
+                                           'the game); light armour.')},
+       gun=('Arm Machine Gun', '臂载机枪', '腕部機関銃', '臂載機槍'),
+       # 2 anti_core = 240 a round (DAMAGE), every 0.4 s; the round's speed 35 as the tanks' (the coax's 6 m a frame
+       # template a little faster)
+       guns={'AmmoCount': 600.0, 'AmmoDamage': 240.0, 'AmmoSpeed': 8.0, 'AmmoAlive': 40.0, 'FireInterval': 24.0},
+       # level 1.6: the Nix requests' multipliers (x8.3 there) about the battle tank's (x8.1 at 1.5): 700 -> ~5800,
+       # the game's 45 against the tank's 170 (20200)
+       durability=700.0, reload=9000, level=1.6, after='EDF6VC_CALL_XM_MEDIUM_TRUCK_CARGO'),
+    # The heavy mech: twin heavy guns on its turret (enemy_bullet_big_anti_core, 30 anti_core: four rounds 0.4 s apart,
+    # the barrels in turn, every 6 s), AA missiles (three pairs 0.4 s apart every 4 s: enemy_missile_anti_aa_small, 8
+    # anti_player, homing on air units), 600 health (3.5 times the battle tank's). On the Proteus Mk2 (its barrels' and
+    # launcher's holders).
+    _u('ground/large_mech', 'mech', '', 'ported', 'Heavy Mech',
+       texts={'SC': ('X-Morph 重型机甲', '请求一台人类军队的重型机甲：大型双足步行机甲，炮塔两侧的重炮为主攻击，每六秒两门各连射两发；'
+                                     '副武器为防空导弹（三轮连射，每轮两发）；装甲厚重。'),
+              'CN': ('X-Morph 重型機甲', '請求一台人類軍隊的重型機甲：大型雙足步行機甲，砲塔兩側的重砲為主攻擊，每六秒兩門各連射兩發；'
+                                     '副武器為防空飛彈（三輪連射，每輪兩發）；裝甲厚重。'),
+              'JA': ('X-Morph ヘビーメック', '人類軍のヘビーメックを要請する。大型の二足歩行メックで、砲塔両側の重砲（6 秒ごとに 2 門が'
+                                       '各 2 発連射）を主攻撃とする。副武器は対空ミサイル（2 発ずつ 3 回連射）。装甲は厚い。'),
+              'EN': ('X-Morph Heavy Mech', "Requests the human army's heavy mech: a big two-legged walker, the heavy "
+                                           'guns either side of its turret on the primary attack, two rounds from each '
+                                           'every 6 s; AA missiles on the secondary (three pairs in a burst); heavy '
+                                           'armour.')},
+       gun=('Twin Heavy Cannon', '双联重炮', '連装重砲', '雙聯重砲'),
+       # 30 anti_core = 3600 a round, no Area; the game's four a volley from the two barrels in turn: two from each
+       guns={'AmmoCount': 60.0, 'AmmoDamage': 3600.0, 'AmmoExplosion': 0.0, 'AmmoSpeed': 6.0, 'FireInterval': 360.0,
+             'FireBurstCount': 2.0, 'FireBurstInterval': 48.0},
+       arms=(Arm('missiles', ('missiles',), 'air', ('AA missiles', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), 36,
+                 'missile_launcher',
+                 # fire_rate 4, muzzles_per_fire 2, three 0.4 s apart (8 anti_player = 240 a missile; no Area: the
+                 # heavy tank's AA missiles' small blast)
+                 numbers={'AmmoCount': 36.0, 'AmmoDamage': 240.0, 'AmmoExplosion': 3.0, 'FireInterval': 240.0,
+                          'FireBurstCount': 3.0, 'FireBurstInterval': 24.0, 'FireCount': 2.0}),),
+       durability=8800.0, reload=20000, level=2.2, after='EDF6VC_CALL_XM_SMALL_MECH'),
+    # The infantry: a powered suit with a machine gun (weapon_enemy_mg_small, 5 anti_player every 0.4 s) and a
+    # three-round burst against the core every 2 s, 6 health. A support soldier kind (src/support_call.h xmInfantry,
+    # pylib/xm_infantry.py) on the Ranger's body: it carries the kind's EDF weapon (its own gun is left out), a
+    # Ranger's durability and a half (a suit, not a man; the game's weakest unit, an eighth of the light mech).
+    _u('ground/small_infantry', 'infantry', '', 'ported', 'Infantry',
+       texts={'SC': ('X-Morph 步兵', '人类军队的动力装甲步兵：外观取自原作，使用所选的 EDF 武器；耐久为游骑兵的 1.5 倍。'),
+              'CN': ('X-Morph 步兵', '人類軍隊的動力裝甲步兵：外觀取自原作，使用所選的 EDF 武器；耐久為遊騎兵的 1.5 倍。'),
+              'JA': ('X-Morph 歩兵', '人類軍のパワードスーツ歩兵。外観は原作のもので、選んだ EDF の武器を使う。耐久はレンジャーの 1.5 倍。'),
+              'EN': ('X-Morph Infantry', "The human army's powered-suit infantry: the game's look, the EDF weapon "
+                                         "chosen for them; one and a half times a Ranger's durability.")},
+       durability=300.0),
     # forts
     # The forts' AA guns: one mesh (a twin-barrelled gun on a round fort, 7 m tall), two weapons. The AA cannon fires
     # flak (enemy_flak_medium, one a second): the Flak 88's shell, a burst at its target; the AA machine gun bursts of
@@ -867,8 +923,11 @@ assert all(u.family in FAMILIES for u in UNITS.values())
 assert all(u.status in ('ported', 'planned') for u in UNITS.values())
 # The families with their EDF-side builder (tools/make_xmorph.py: over make_tracked_combat on the V603, a tracked or
 # wheeled unit through pylib/wt_tracked.py, an emplacement through pylib/emplacement_model.py's fortified base; the
-# aircraft through pylib/xm_air_model.py; a car through pylib/car_model.py on the V512).
-PORTABLE = ('tracked', 'wheeled', 'emplacement', 'heli', 'jet', 'car')
+# aircraft through pylib/xm_air_model.py; a car through pylib/car_model.py on the V512; a walker through pylib/xm_walker.py,
+# the infantry through pylib/xm_infantry.py).
+# The families requested as vehicles (tools/calls.py: a request row each); the infantry is a support soldier kind.
+REQUESTED = ('tracked', 'wheeled', 'emplacement', 'heli', 'jet', 'car', 'mech')
+PORTABLE = REQUESTED + ('infantry',)
 V603 = ('tracked', 'wheeled', 'emplacement')
 V512 = ('car',)          # pylib/car_model.py builds them on the V512 (the sedan's chassis)
 # The hulls (pylib/wt_tracked.py builds their model folders on the V603: tools/prep_xmorph.py tracked / wheeled)
@@ -883,11 +942,14 @@ def check(u: Unit) -> None:
     why = [what for what, ok in (
         ('family', u.family in PORTABLE), ('like', bool(u.like) or u.family not in V603), ('title_en', bool(u.title_en)),
         ('texts', set(u.texts) == set(LANGS) and all(len(t) == 2 and all(t) for t in u.texts.values())),
-        ('gun', len(u.gun) == 4 and all(u.gun) if u.family not in V512 else not (u.gun or u.guns or u.arms)),
-        ('cab', bool(u.cab) == (u.family in V512)), ('eye', len(u.eye) == 3), ('durability', u.durability > 0),
-        ('reload', u.reload > 0), ('level', u.level > 0),
+        ('gun', not (u.gun or u.guns or u.arms) if u.family in V512
+                else (len(u.gun) == 4 and all(u.gun)) or u.family not in REQUESTED),
+        ('cab', bool(u.cab) == (u.family in V512)), ('eye', len(u.eye) == 3 or u.family in ('mech', 'infantry')),
+        ('durability', u.durability > 0),
+        # a request row's (REQUESTED); the infantry is a support soldier kind, no request
+        ('reload', u.reload > 0 or u.family not in REQUESTED), ('level', u.level > 0 or u.family not in REQUESTED),
         ('a wheeled durability >= WHEELED_FLOOR', u.family != 'wheeled' or u.durability >= WHEELED_FLOOR),
-        ('after', u.after.startswith('EDF6VC_CALL_'))) if not ok]
+        ('after', u.after.startswith('EDF6VC_CALL_') or (u.family not in REQUESTED and not u.after))) if not ok]
     if why:
         raise ValueError(f'{u.key}: a ported unit without {", ".join(why)} (pylib/xm_units.py)')
 
@@ -928,6 +990,12 @@ def v512() -> list[Unit]:
 def hulls() -> list[Unit]:
     """The ported units pylib/wt_tracked.py builds from their model folders (HULLS), in table order."""
     return [u for u in ported() if u.family in HULLS]
+
+
+def requested() -> list[Unit]:
+    """The ported units requested as ground vehicles (REQUESTED: the V603's and the walkers), in table order: what
+    tools/calls.py makes a request row of and vcobjects.GROUND_VEHICLES lists."""
+    return [u for u in ported() if u.family in REQUESTED]
 
 
 def deployed(key: str) -> bool:
