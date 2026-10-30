@@ -56,6 +56,7 @@ WATER_CELL = 2.0           # metres: the water plane redrawn as runs of cells th
 # A placement's tilt under SNAP_TILT degrees is dropped and its scales rounded to SNAP_SCALE steps (1 within one
 # step): X-Morph sets nearly every prop a hair off level and off scale, which would make each one its own model.
 SNAP_TILT = 2.5
+MISSING = ''               # prop_meshes' override key for a submesh whose material does not exist
 SNAP_SCALE = 0.03
 
 
@@ -462,6 +463,9 @@ class Reader:
                 parts.append(self._part(self.water_tex(), pos, np.tile([0.0, 0.0, 1.0], (len(pos), 1)),
                                         np.zeros((len(pos), 2)), tris))
                 continue
+            if s.material.startswith('water/'):    # a river (animated water shaders): as is, in the water's colour
+                parts.append(self._part(self.water_tex(), s.pos, s.nrm, np.zeros((len(s.pos), 2)), s.tris))
+                continue
             if s.material.startswith('base/water'):
                 self.scene.skipped['water foam'] += 1
                 continue
@@ -504,6 +508,10 @@ class Reader:
         skin = b.get('chunk_material') or ''
         plain = re.sub(r'_skin\d+$', '', skin)
         over = {plain: skin} if skin and skin != plain else {}
+        if skin:
+            # a submesh whose own material is no material (an exporter's leftover such as oil_shaft_01's 'Standard_5')
+            # is drawn with the building's chunk_material
+            over[MISSING] = skin
         meshes = [b.get('mesh_prefix') + '.mesh']
         topo = b.get('chunk_topology_file_path')
         if topo and self.packs.exists(topo):
@@ -534,7 +542,10 @@ class Reader:
             for s in subs(self.packs, mesh):
                 if not s.uv:
                     continue
-                tex = self.material_tex(over.get(s.material, s.material))
+                material = over.get(s.material, s.material)
+                if not self.mats.has(material) and MISSING in over:
+                    material = over[MISSING]
+                tex = self.material_tex(material)
                 if tex is None:
                     continue
                 p, n, t = _transform(s, m)
