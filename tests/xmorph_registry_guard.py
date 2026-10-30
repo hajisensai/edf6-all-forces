@@ -61,7 +61,31 @@ check(bool(ported), 'no ported unit: the guard checks nothing')
 for u in xm_units.UNITS.values():
     check(not os.path.exists(os.path.join(ROOT, 'tools', f'make_{u.key}.py')),
           f'{u.key}: a tools/make_{u.key}.py stub (tools/make_xmorph.py builds every unit)')
-for u in ported:
+for u in [u for u in ported if u.family == 'heli']:
+    # a helicopter: a vehicle request of the stock V506 in its own model (pylib/xm_heli.py), built by make_xmorph
+    key, upper = u.key, u.key.upper()
+    sgo = f'EDF6VC_{upper}'
+    mine = [c for c in calls.CALLS if c.heli == key]
+    check(len(mine) == 1 and not mine[0].ground and not mine[0].jet and mine[0].mark == 0,
+          f'{key}: {len(mine)} helicopter requests in tools/calls.py CALLS (want 1)')
+    if mine:
+        c = mine[0]
+        check(c.id == calls.ID_PREFIX + upper and c.vehicle == sgo and c.brings == 'vehicle' and c.kind == key,
+              f'{key}: its request {c.id} is not a vehicle request of {sgo}')
+        at = calls.IDS.index(c.id)
+        check(at > 0 and calls.IDS[at - 1] == u.after, f'{key}: its row does not follow {u.after} (Unit.after)')
+        check(f'{{L"{c.id}",L"{c.id}.SGO",L"{sgo}.SGO"}}' in calls_inc, f'{key}: src/calls.inc lacks {c.id} (gen_calls)')
+    check(set(calls.KINDS.get(key, {})) == set(xm_units.LANGS), f'{key}: tools/calls.py KINDS lacks its texts')
+    check(key not in vc.GROUND_VEHICLES and key not in mtc.KINDS, f'{key}: a helicopter among the ground vehicles')
+    check(key in make_xmorph.KINDS and key in make_xmorph.HELIS and buildcache.generator(key) == 'make_xmorph'
+          and buildcache.tool(key) is make_xmorph.builder(key), f'{key}: tools/make_xmorph.py / pylib/buildcache.py tool')
+    check(key in ledger.OWNERS and key in buildcache.GROUPS and key not in buildcache.COCKPIT_GROUPS
+          and buildcache.MODEL_INPUTS.get(key) == xm_units.folder(key), f'{key}: pylib/buildcache.py groups / ledger')
+    check(xm_units.folder(key) in build_release.RELEASE_MODELS, f'{key}: tools/build_release.py RELEASE_MODELS')
+    check({'guns', 'missile'} <= set(u.air) or set(u.air) == {'seats'}, f'{key}: Unit.air has neither its arms nor seats')
+for module in ('xm_heli', 'xm_air_model'):
+    check(f"'{module}'" in hidden, f'tools/build_release.py: {module} is not a hidden import of the installer')
+for u in xm_units.v603():
     key, upper, mission = u.key, u.key.upper(), f'{gen.DERIVED_PREFIX}{u.key}_mission'
     sgo = f'EDF6VC_{upper}'
     # the request

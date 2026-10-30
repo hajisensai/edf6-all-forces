@@ -1,6 +1,7 @@
 """The X-Morph: Defense units' generator (pylib/xm_units.py): one module for every ported unit, where each War Thunder
-vehicle has a tools/make_<kind>.py. A tracked unit is a tools/make_tracked_combat.py kind (its `like`'s gun, its model
-folder models/xm_<key>, wt_tracked.Model); each unit is its own ledger owner and build group (its key), so one unit's
+vehicle has a tools/make_<kind>.py. A tracked unit or an emplacement is a tools/make_tracked_combat.py kind (its `like`'s
+gun, its model folder models/xm_<key>, wt_tracked.Model); a helicopter is pylib/xm_heli.py's (the stock V506 in its own
+model, its weapons); each unit is its own ledger owner and build group (its key), so one unit's
 model changing rebuilds only that unit, and one unit's folder gone takes only that unit's files away.
 
 A ported unit whose model folder this machine has not (the folders are the model pack's, never the repository's) is not
@@ -21,9 +22,11 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 
 import make_tracked_combat as tracked  # noqa: E402
+import xm_heli  # noqa: E402
 import xm_units  # noqa: E402
 
-KINDS = tuple(u.key for u in xm_units.v603())
+KINDS = tuple(u.key for u in xm_units.v603()) + tuple(u.key for u in xm_units.ported('heli'))
+HELIS = frozenset(u.key for u in xm_units.ported('heli'))
 
 
 def deployable(kind: str) -> bool:
@@ -33,8 +36,13 @@ def deployable(kind: str) -> bool:
 
 def build(root: str, kind: str) -> dict[str, bytes]:
     if not deployable(kind):
-        print(f'未找到 {tracked.LABELS[kind]} 的模型文件夹 {xm_units.folder(kind)}（模型包）：不部署这个单位。', flush=True)
+        print(f'未找到 {xm_units.label(xm_units.UNITS[kind])} 的模型文件夹 {xm_units.folder(kind)}（模型包）：不部署这个单位。',
+              flush=True)
         return {}
+    if kind in HELIS:
+        files = xm_heli.files(tracked.vc.Game(root), xm_units.UNITS[kind])
+        check(files, kind)
+        return files
     return tracked.build(root, kind)
 
 
@@ -47,10 +55,25 @@ def remove(root: str, kind: str) -> tuple[list[str], list[str]]:
 
 
 def vehicle_sgo(game, kind: str) -> bytes:  # noqa: ANN001 - vcobjects.Game
+    if kind in HELIS:
+        import obj_model as om
+        import xm_air_model as xa
+        unit = xm_units.UNITS[kind]
+        return xm_heli.vehicle_sgo(game, unit, xa.read_info(om.model_dir(xm_units.folder(kind))))
     return tracked.vehicle_sgo(game, kind)
 
 
 def check(files: dict[str, bytes], kind: str, game=None) -> None:  # noqa: ANN001
+    if kind in HELIS:
+        import obj_model as om
+        import xm_air_model as xa
+        unit = xm_units.UNITS[kind]
+        want = {f'OBJECT/{xm_heli.sgo_name(kind)}.SGO', f'OBJECT/{xa.archive_name(kind)}', f'OBJECT/{xa.animation_name(kind)}'}
+        want |= {f'WEAPON/{p.split("/")[-1].upper()}' for p in xm_heli.weapon_paths(unit) if 'edf6vc_' in p}
+        if set(files) != want:
+            raise ValueError(f'{kind}: files {sorted(set(files) ^ want)}')
+        xm_heli.check(files[f'OBJECT/{xm_heli.sgo_name(kind)}.SGO'], unit, xa.read_info(om.model_dir(xm_units.folder(kind))))
+        return
     tracked.check(files, kind, game)
 
 
@@ -94,7 +117,40 @@ def main(argv: list[str]) -> int:
     if not deployable(args.kind) and '--remove' not in rest:
         build('', args.kind)
         return 1
+    if args.kind in HELIS:
+        return _heli_main(rest, args.kind)
     return tracked.main(rest, args.kind)
+
+
+def _heli_main(argv: list[str], kind: str) -> int:
+    """make_tracked_combat.main's options for a helicopter (its build is this module's)."""
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('game', nargs='?', default=tracked.vc.DEFAULT_GAME)
+    parser.add_argument('--out', type=Path)
+    parser.add_argument('--check', action='store_true')
+    parser.add_argument('--remove', action='store_true')
+    args = parser.parse_args(argv)
+    if args.remove:
+        deleted, kept = remove(args.game, kind)
+        for path in deleted:
+            print('deleted', path)
+        for path in kept:
+            print('kept modified file', path)
+        return 0
+    files = build(args.game, kind)
+    if args.out:
+        for rel, data in files.items():
+            path = args.out / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        print(f'{kind}: generated and checked {len(files)} files in {args.out}')
+    elif args.check:
+        print(f'{kind}: generated and checked {len(files)} files in memory')
+    else:
+        for path in install(args.game, files, kind):
+            print('wrote', path)
+    return 0
 
 
 if __name__ == '__main__':

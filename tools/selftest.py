@@ -707,12 +707,14 @@ def collision_box_codec_holds_its_child() -> None:
 
 @test
 def calls_table_consistent() -> None:
+    import xm_units
     ids = [c.id for c in calls.CALLS]
     assert len(set(ids)) == len(ids), 'duplicate ids'
     assert all(i.startswith(calls.ID_PREFIX) for i in ids)
-    marks = [c.mark for c in calls.CALLS if not c.ground]   # a ground vehicle's request has no mark (0)
+    # a ground vehicle's request has no mark (0), nor an X-Morph helicopter's (the stock heli flight: no plugin body)
+    marks = [c.mark for c in calls.CALLS if not c.ground and not c.heli]
     assert len(set(marks)) == len(marks), 'duplicate marks'
-    assert all(c.mark == 0 for c in calls.CALLS if c.ground), 'a ground vehicle request with a mark'
+    assert all(c.mark == 0 for c in calls.CALLS if c.ground or c.heli), 'a ground vehicle / helicopter request with a mark'
     crew_h = src('src/crew.h')
     roles = set(re.search(r'enum class JetRole \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     bodies = set(re.search(r'enum class HeliBody \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
@@ -740,8 +742,9 @@ def calls_table_consistent() -> None:
         assert c.brings != 'gravity' or (bits & ~0xFFF == calls.THROW_MARK_BASE and bits != calls.THROW_MARK_BASE), c.id
         assert bool(c.role) == (c.brings == 'jets') and (not c.role or c.role in roles), c.id
         assert bool(c.body) == (c.brings == 'helis') and (not c.body or c.body in bodies), c.id
-        assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground)) == (c.brings == 'vehicle'), c.id
-        assert not (c.jet and c.ground) and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
+        assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground) or bool(c.heli)) == (c.brings == 'vehicle'), c.id
+        assert sum(map(bool, (c.jet, c.ground, c.heli))) <= 1 and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
+        assert not c.heli or (c.heli in xm_units.UNITS and xm_units.UNITS[c.heli].family == 'heli'), c.id
         assert not c.ground or vc.GROUND_VEHICLES[c.ground].sgo == c.vehicle, c.id
         assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown or c.brings in ('ultimate', 'barrage')), c.id
         assert not thrown or not c.flown, c.id   # not in the in-mission pick (kCalls)
@@ -1660,7 +1663,7 @@ def hand_copies_agree() -> None:
     # kKinds rows: {"name",mark,...}, the mark an integer or a float literal.
     pjet = dict(re.findall(r'\{"(\w+)",\s*(\d+)(?:\.0f)?\s*,', src('src/playerjet.cpp').split('kKinds[]={', 1)[1].split('};', 1)[0]))
     for c in calls.CALLS:
-        if c.brings != 'vehicle' or c.ground:
+        if c.brings != 'vehicle' or c.ground or c.heli:
             continue
         jet = vc.JETS[c.jet]
         if c.jet == vc.SAZABI_JET:   # the Sazabi: tools/make_sazabi.py writes it, src/sazabi.cpp knows its mark
@@ -4624,7 +4627,7 @@ def xmorph_undeployed_without_its_folder() -> None:
     assert make_xmorph.KINDS, 'no ported X-Morph unit'
     with tempfile.TemporaryDirectory() as root, patch.object(obj_model, 'model_roots', lambda: [root]):
         for kind in make_xmorph.KINDS:
-            call = next(c for c in calls.CALLS if c.ground == kind)
+            call = next(c for c in calls.CALLS if kind in (c.ground, c.heli))
             mission = f'{gen.DERIVED_PREFIX}{kind}_mission'
             assert not make_xmorph.deployable(kind) and cw.undeployed(call) and cw.placeholder(call), kind
             assert cw.sgo_file(call) in cw.parked_sgos() and cw.sgo_file(call) in cw.our_sgos(), kind
@@ -4632,8 +4635,10 @@ def xmorph_undeployed_without_its_folder() -> None:
             with contextlib.redirect_stdout(out):
                 assert make_xmorph.builder(kind).build(root) == {}, kind
             assert out.getvalue().count('\n') == 1 and xm_units.folder(kind) in out.getvalue(), out.getvalue()
-            kept, said = gen.without_missing(root, gen.Plan(vehicles={mission: 1, 'edf6tr_vulcan_mission': 1}))
-            assert mission not in kept.vehicles and 'edf6tr_vulcan_mission' in kept.vehicles and len(said) == 1, said
+            range_unit = kind not in make_xmorph.HELIS   # the helicopters are not on the test range (yet)
+            if range_unit:
+                kept, said = gen.without_missing(root, gen.Plan(vehicles={mission: 1, 'edf6tr_vulcan_mission': 1}))
+                assert mission not in kept.vehicles and 'edf6tr_vulcan_mission' in kept.vehicles and len(said) == 1, said
             folder = os.path.join(root, xm_units.folder(kind))
             os.makedirs(folder)
             for name in ('model.json', 'model.npz'):
@@ -4641,7 +4646,7 @@ def xmorph_undeployed_without_its_folder() -> None:
                     pass
             assert make_xmorph.deployable(kind) and not cw.placeholder(call), kind
             assert cw.sgo_file(call) not in cw.parked_sgos(), kind
-            assert gen.without_missing(root, gen.Plan(vehicles={mission: 1}))[0].vehicles == {mission: 1}, kind
+            assert not range_unit or gen.without_missing(root, gen.Plan(vehicles={mission: 1}))[0].vehicles == {mission: 1}, kind
 
 
 @test

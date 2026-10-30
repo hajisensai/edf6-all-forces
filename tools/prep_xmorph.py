@@ -672,7 +672,165 @@ def prepare_emplacement(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> 
     return info
 
 
-PREPARERS = {'tracked': prepare_tracked, 'emplacement': prepare_emplacement}
+# ------------------------------------------------------------------------------------------ aircraft
+
+ROTOR = re.compile(r'(^|_)rotor')
+COAXIAL = 0.3        # m: two rotors' axes this close (and parallel) are one rotor (the medium heli's coaxial pair)
+MIRROR = 0.3         # m: a rotor's centre this close to another's mirrored in x is its partner across the airframe
+MAIN, TAIL = 'rotor', 'tailRotor'   # the V506's spun bones (its CAS: rotor about its local y, tailRotor about its x)
+
+
+def rotor_groups(um: xm.UnitModel) -> list[dict]:
+    """The airframe's rotors: every rotor bone with mesh and the bones under it (a hub's blades), coaxial ones merged;
+    each {'bones', 'centre' (EDF), 'axis' (unit, EDF: the disc's normal, the least spread of its vertices), 'radius'},
+    in skeleton order."""
+    have = set(um.tri_bone)
+    tops = [b for b in um.bones if ROTOR.search(b) and not any(ROTOR.search(a) for a in _ancestors(um, b))]
+    groups = []
+    for b in tops:
+        bones = [x for x in um.subtree(b) if x in have]
+        p = um.bone_points(bones) * SCALE
+        if len(p) < 3:
+            continue
+        c = p.mean(0)
+        _w, v = np.linalg.eigh(np.cov((p - c).T))
+        axis = v[:, 0] / np.linalg.norm(v[:, 0])
+        groups.append({'bones': bones, 'centre': c, 'axis': axis, 'points': p})
+    merged: list[dict] = []
+    for g in groups:
+        for m in merged:
+            d = g['centre'] - m['centre']
+            if abs(float(g['axis'] @ m['axis'])) > 0.95 and np.linalg.norm(d - (d @ m['axis']) * m['axis']) < COAXIAL:
+                m['bones'] += g['bones']
+                m['points'] = np.vstack([m['points'], g['points']])
+                break
+        else:
+            merged.append(dict(g))
+    for m in merged:
+        p, a = m.pop('points'), m['axis']
+        m['centre'] = p.mean(0)
+        r = (p - m['centre']) - np.outer((p - m['centre']) @ a, a)
+        m['radius'] = float(np.linalg.norm(r, axis=1).max())
+    return merged
+
+
+def spun_rotors(groups: list[dict]) -> tuple[dict | None, dict | None]:
+    """(main, tail): the two rotors the V506's animation spins. The main rotor is the biggest; the tail its partner across
+    the airframe where it has one (the gunship's rotor pairs: both sides turn), else the biggest rotor without a partner
+    (the heavy heli's tail propeller, the transport's rear rotor). The rest stay still (the V506 animates its own two)."""
+    if not groups:
+        return None, None
+    def partner(g: dict) -> dict | None:  # noqa: E306
+        m = g['centre'] * np.array([-1.0, 1.0, 1.0])
+        return next((h for h in groups if h is not g and np.linalg.norm(h['centre'] - m) < MIRROR), None)
+    main = max(groups, key=lambda g: g['radius'])
+    tail = partner(main)
+    if tail is None:
+        rest = [g for g in groups if g is not main and partner(g) is None]
+        tail = max(rest, key=lambda g: g['radius']) if rest else None
+    return main, tail
+
+
+def _frame(axis, slot: int) -> list[list[float]]:  # noqa: ANN001
+    """Rows (left, up, ahead) of a rotor bone's frame whose row `slot` is `axis` (the V506 spins rotor about its y,
+    tailRotor about its x): the frame nearest the airframe's, right-handed."""
+    a = np.asarray(axis, dtype=np.float64)
+    a = a / np.linalg.norm(a)
+    rows = np.eye(3)
+    if rows[slot] @ a < 0:
+        a = -a
+    rows[slot] = a
+    # the airframe axis least along `axis` keeps its direction (less its part along it), the third completes the frame
+    k0, k1 = sorted((k for k in range(3) if k != slot), key=lambda k: abs(np.eye(3)[k] @ a))
+    rows[k0] = rows[k0] - (rows[k0] @ a) * a
+    rows[k0] /= np.linalg.norm(rows[k0])
+    rows[k1] = np.cross(rows[(k1 + 1) % 3], rows[(k1 + 2) % 3])
+    _req(abs(np.linalg.det(rows) - 1.0) < 1e-6, f'rotor frame {rows.tolist()} is no rotation')
+    return rows.tolist()
+
+
+def prepare_air(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
+    """An aircraft (a heli or a jet) into the folder pylib/xm_air_model.py builds its V506 model from: one part a bone
+    and material (xm_hull: the airframe; rotor / tailRotor: the two rotors the V506 animation spins, spun_rotors), each
+    spun rotor's centre and frame, every attachment's point (the weapons' muzzles, the exits, the engines), the
+    blueprint's weapons and the textures (the diffuse map, the normal map where the material names one)."""
+    um = xm.load(packs, unit.entity)
+    # stood on its lowest point (the game's origin is on the ground where it makes a vehicle: vcobjects.on_origin); the
+    # small heli hangs 0.72 m under X-Morph's ground
+    lift = -float(um.positions[np.unique(um.triangles)][:, 1].min()) * SCALE
+    um.positions = um.positions + np.array([0.0, lift / SCALE, 0.0])
+    out = os.path.join(out_root, xm_units.folder(unit.key))
+    if os.path.isdir(out):
+        shutil.rmtree(out)
+    os.makedirs(os.path.join(out, 'textures'))
+    groups = rotor_groups(um) if unit.family == 'heli' else []
+    main, tail = spun_rotors(groups)
+    bone_of = {b: 'xm_hull' for b in um.bones}
+    rotors = {}
+    for name, g, slot in ((MAIN, main, 1), (TAIL, tail, 0)):
+        if g is None:
+            continue
+        for b in g['bones']:
+            bone_of[b] = name
+        rotors[name] = {'centre': [float(c) for c in g['centre']], 'frame': _frame(g['axis'], slot),
+                        'radius': round(g['radius'], 3), 'from': g['bones']}
+    still = [{'from': g['bones'], 'centre': [round(float(c), 3) for c in g['centre']], 'radius': round(g['radius'], 3)}
+             for g in groups if g is not main and g is not tail]
+    P = um.positions * SCALE
+    materials, arrays, parts, dropped = [], {}, [], []
+    for mi, m in enumerate(um.materials):
+        stem = f'{unit.key}_{mi}'
+        if 'transparent' in (xm.material_node(packs, m).get('type') or ''):
+            # a rotor's blur (a quad or two in an animated see-through texture): EDF's hull material is opaque
+            dropped.append(m)
+            materials.append({'name': f'xm_{mi}', 'source': m, 'dropped': True})
+            continue
+        imgs = xm.texture_images(packs, m)
+        imgs['diffuse'].save(os.path.join(out, 'textures', f'{stem}.png'), optimize=True)
+        materials.append({'name': f'xm_{mi}', 'albedo': f'textures/{stem}.png', 'source': m})
+        if 'normal' in imgs:      # DirectX green already (xm_model.normal_rgb)
+            imgs['normal'].save(os.path.join(out, 'textures', f'{stem}_normal.png'), optimize=True)
+            materials[-1]['normal'] = f'textures/{stem}_normal.png'
+    tri_bone = np.asarray([bone_of[b] for b in um.tri_bone], dtype=object)
+    for bone in ('xm_hull', MAIN, TAIL):
+        for mi in range(len(um.materials)):
+            sel = np.flatnonzero((tri_bone == bone) & (um.tri_material == mi))
+            if not len(sel) or materials[mi].get('dropped'):
+                continue
+            tri = um.triangles[sel]
+            idx, inv = np.unique(tri, return_inverse=True)
+            pos, t = P[idx], inv.reshape(-1, 3)
+            nrm = np.zeros_like(pos)          # the faces' own, per vertex (the mesh's normals are not read)
+            fn = np.cross(pos[t[:, 1]] - pos[t[:, 0]], pos[t[:, 2]] - pos[t[:, 0]])
+            for c in range(3):
+                np.add.at(nrm, t[:, c], fn)
+            nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-12)
+            k = len(parts)
+            arrays[f'p{k}_pos'] = pos.astype(np.float32)
+            arrays[f'p{k}_nrm'] = nrm.astype(np.float32)
+            arrays[f'p{k}_uv'] = um.uvs[idx].astype(np.float32)   # Ogre's top-left origin
+            arrays[f'p{k}_tri'] = t.astype(np.uint32)
+            parts.append({'bone': bone, 'material': mi, 'triangles': int(len(sel)), 'vertices': int(len(idx))})
+    _req(any(p['bone'] == 'xm_hull' for p in parts), f'{unit.key}: no airframe mesh')
+    points = {a: [round(float(c), 4) for c in um.point(a) * SCALE + np.array([0.0, lift, 0.0])] for a in sorted(um.attachments)}
+    weapons = [{'name': w.name, 'turret': w.turret, 'muzzles': [m for m, _r in w.muzzles]} for w in um.weapons()]
+    np.savez_compressed(os.path.join(out, 'model.npz'), **arrays)
+    used = np.unique(um.triangles)
+    lo, hi = P[used].min(0), P[used].max(0)
+    info = {'format': 1, 'kind': unit.key, 'family': unit.family, 'title': f'{unit.title_en or unit.key} (X-Morph: Defense)',
+            'prepared_from': um.mesh_path, 'scale': SCALE, 'lift': round(lift, 4), 'materials': materials, 'parts': parts, 'rotors': rotors,
+            'still_rotors': still, 'dropped_materials': dropped, 'attachments': points, 'weapons': weapons,
+            'triangles': int(sum(p['triangles'] for p in parts)), 'bounds': [lo.tolist(), hi.tolist()],
+            'size': (hi - lo).tolist(), 'xmorph': {'entity': unit.entity, 'bones': {b: bone_of[b] for b in um.bones}}}
+    with open(os.path.join(out, 'model.json'), 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(info, f, indent=1)
+        f.write('\n')
+    with open(os.path.join(out, 'LICENSE.txt'), 'w', encoding='utf-8', newline='\n') as f:
+        f.write(LICENSE.format(title=info['title'], entity=f'entities/units/{unit.entity}.ent', mesh=um.mesh_path))
+    return info
+
+
+PREPARERS = {'tracked': prepare_tracked, 'emplacement': prepare_emplacement, 'heli': prepare_air, 'jet': prepare_air}
 
 
 def select(family: str, names: list[str]) -> list[xm_units.Unit]:

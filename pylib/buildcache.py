@@ -28,11 +28,11 @@ MODEL_INPUTS = {'artillery': 'twin_tank', 'drill': 'drill_tank', 'sazabi': 'saza
                 'gdf005': 'emp_gdf005', 'laser': 'emp_laser', 'railgun': 'emp_railgun', 'patriot': 'emp_patriot'}
 # The groups whose models carry first-person cockpits (pylib/cockpits.py): the cockpits' asset folder is an input.
 COCKPIT_GROUPS = ('jets', 'sub', 'katyusha', 'artillery', 'drill', 'sidecar', 'sedan', 'vulcan', 'bmpt', 'quadvulcan', 'emp_mid', 'emp_short', 'emp_long', 'tunguska', 'pzh2000', 'sturmtiger', 'ciws_phalanx', 'flak88', 'apocalypse', 'gdf005', 'laser', 'railgun', 'tos1', 'patriot', 'sazabi', 'optics')
-# Every X-Morph unit is a group of its own (its ledger owner, its model folder, its cockpit; pylib/xm_units.py), all built by
-# the one generator tools/make_xmorph.py (generator(), tool()).
+# Every X-Morph unit is a group of its own (its ledger owner, its model folder; pylib/xm_units.py), all built by the one
+# generator tools/make_xmorph.py (generator(), tool()); the V603 ones carry cockpits (the helicopters none yet).
 XMORPH = tuple(u.key for u in xm_units.ported())
 GROUPS += XMORPH
-COCKPIT_GROUPS += XMORPH
+COCKPIT_GROUPS += tuple(u.key for u in xm_units.v603())
 MODEL_INPUTS.update({key: xm_units.folder(key) for key in XMORPH})
 MODULE_FOLDERS = ('tools', 'pylib', 'testrange', 'autoturret/tools')
 
