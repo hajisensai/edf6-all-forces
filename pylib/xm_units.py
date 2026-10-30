@@ -207,16 +207,16 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The heavy tank: a twin heavy gun (enemy_bullet_big_anti_core, a pair every 3 s), machine-gun and missile turrets
     # (not ported), seven times the battle tank's armour (1200). The Apocalypse's twin gun, the two barrels in turn.
     _u('ground/large_tank', 'tracked', 'apocalypse', 'ported', 'Heavy Tank',
-       texts={'SC': ('X-Morph 重型坦克', '请求一辆人类军队的重型坦克：炮塔上的双管重炮为主攻击，两根炮管每三秒齐射一次；副武器各用一个开火键、与主炮同时发射：机枪塔（十发连射）、'
-                                     '防空导弹（五发连射）和车头火箭；装甲厚重。'),
-              'CN': ('X-Morph 重型坦克', '請求一輛人類軍隊的重型坦克：砲塔上的雙管重砲為主攻擊，兩根砲管每三秒齊射一次；副武器各用一個開火鍵、與主砲同時發射：機槍塔（十發連射）、'
-                                     '防空飛彈（五發連射）和車頭火箭；裝甲厚重。'),
-              'JA': ('X-Morph 重戦車', '人類軍の重戦車を要請する。砲塔の連装重砲（3 秒ごとに 2 門斉射）を主攻撃とする。副武器はそれぞれ専用の発射キーで主砲と同時に撃てる：機銃塔（10 発連射）、'
-                                    '対空ミサイル（5 発連射）、車体前部のロケット。装甲は厚い。'),
+       texts={'SC': ('X-Morph 重型坦克', '请求一辆人类军队的重型坦克：炮塔上的双管重炮为主攻击，两根炮管每三秒齐射一次；机枪塔（十发连射）是独立炮手座，坐上去自己瞄准开火，没人坐时是自动炮塔；'
+                                     '防空导弹（五发连射）和车头火箭各用一个开火键、与主炮同时发射；装甲厚重。'),
+              'CN': ('X-Morph 重型坦克', '請求一輛人類軍隊的重型坦克：砲塔上的雙管重砲為主攻擊，兩根砲管每三秒齊射一次；機槍塔（十發連射）是獨立砲手座，坐上去自己瞄準開火，沒人坐時是自動砲塔；'
+                                     '防空飛彈（五發連射）和車頭火箭各用一個開火鍵、與主砲同時發射；裝甲厚重。'),
+              'JA': ('X-Morph 重戦車', '人類軍の重戦車を要請する。砲塔の連装重砲（3 秒ごとに 2 門斉射）を主攻撃とする。機銃塔（10 発連射）は独立した砲手席で、乗れば自分で狙って撃ち、無人なら自動砲塔になる。'
+                                    '対空ミサイル（5 発連射）と車体前部のロケットはそれぞれ専用の発射キーで主砲と同時に撃てる。装甲は厚い。'),
               'EN': ('X-Morph Heavy Tank', "Requests the human army's heavy tank: its turret's twin heavy gun on the primary "
-                                           'attack, both barrels every 3 s; each on its own fire key with the gun, its machine-gun '
-                                           'turret (bursts of ten), AA missiles (bursts of five) and front rockets; '
-                                           'heavy armour.')},
+                                           'attack, both barrels every 3 s; its machine-gun turret (bursts of ten) is a gunner seat of '
+                                           'its own, an auto turret with nobody in it; AA missiles (bursts of five) and '
+                                           'front rockets each on its own fire key with the gun; heavy armour.')},
        gun=('Twin Heavy Gun', '双管重炮', '連装重砲', '雙管重砲'),
        # main_gun: fire_rate 3, both barrels (enemy_bullet_big_anti_core: 30 anti_core, no Area): the pair every 3 s
        # (the game's 0.25 s between them: here together)
@@ -225,7 +225,10 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  # machinegun: fire_rate 1.5, ten 0.07 s apart (enemy_bullet_small_fast: speed 100, 5 anti_player)
                  shell=('V_403TANK_MACHINEGUN.SGO', 'SolidBullet01', 'mg'),
                  numbers={'AmmoDamage': 150.0, 'AmmoSpeed': 20.0, 'AmmoAlive': 60.0, 'FireInterval': 90.0,
-                          'FireBurstCount': 10.0, 'FireBurstInterval': 4.0}),
+                          'FireBurstCount': 10.0, 'FireBurstInterval': 4.0},
+                 # its own turret (machinegun_turret: turret_2 over att_machinegun) and gunner seat; empty, an auto
+                 # turret. The missile turret keeps its key: an unmanned launcher has nobody's lock to fire on.
+                 fire=0, auto=True, seat=1, turret={'low': -10.0, 'high': 60.0, 'yaw_rate': 120.0, 'pitch_rate': 90.0}),
              Arm('aam', ('missile_turret',), 'air', ('AA missiles', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), 40,
                  # missile_turret: fire_rate 4, five 0.3 s apart (enemy_missile_anti_aa_small: speed 50, 8 anti_player)
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,

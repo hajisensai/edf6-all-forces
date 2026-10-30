@@ -586,8 +586,9 @@ GUNNER_LOOK = (0.0, 1.0, 6.0)           # ...and the point it looks at, ahead al
 def gunner_seats(r, vehicle: vc.GroundVehicle) -> None:  # noqa: ANN001 - dsgo node
     """The vehicle's gunner seats (vcobjects Store.seat, docs/multi-weapon-keys.md「独立座位」): seat n a copy of the
     driver's seat row (its door, its class mask and its numbers) with its own seat and camera locators on its turret's
-    bones (Store.turret: the rider on the yaw bone, the camera and its look-at on the pitch bone, so the view turns with
-    the turret the plugin trains: src/seat_turret.inc). Seats in order, one a gunner seat number."""
+    bones (Store.turret: the rider on the yaw bone, the camera and its look-at on the pitch bone; the local gunner's view
+    is the plugin's own, src/seat_turret.cpp SeatTurretCamera, these the stock camera's when it is not). Seats in order,
+    one a gunner seat number."""
     turrets = {}
     for w in vehicle.weapons:
         store = vc.store_of(w)

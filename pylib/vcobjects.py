@@ -629,6 +629,44 @@ def _xm_arm(arm: xm_units.Arm) -> Store:
 STORES.update({xm_store(u, a): _xm_arm(a) for u in xm_units.v603() for a in u.arms})
 
 
+@dataclass(frozen=True)
+class Mounting:
+    """The control a stock vehicle's independent weapon is on (STOCK_MOUNTS): its own fire key (Store.key) and whether it is
+    a switchable auto turret (Store.auto)."""
+    key: int
+    auto: bool = False
+
+    def __post_init__(self):
+        if self.key not in FIRE_KEYS:
+            raise ValueError(f'a mounting needs a fire key of FIRE_KEYS, not {self.key}')
+
+
+# Each independent weapon of the stock vehicles the plugin arms (the user, 2026-10-30: every weapon that is a mount of its
+# own, not another round of the same gun, on a fire key of its own, a switchable auto turret, or a gunner seat; table
+# driven, never per vehicle in code): vehicle category (tools/make_stock_stores.py CATEGORIES) -> store kind -> its
+# control. A kind left out rides the primary's cycle (a gun's other rounds, a launcher's other rounds: the 402's and the
+# helicopters' pylons). The stock models carry no turret bones of the plugin's: none is a gunner seat (Store.seat), and
+# only the V603 reads its second trigger nowhere (key 2). A mounted kind is a kind of its own (mounted()), so the vehicles
+# that share the kind elsewhere keep its control there.
+STOCK_MOUNTS: dict[str, dict[str, Mounting]] = {
+    'ifv': {'AGM_L': Mounting(3)},              # the Grape's launcher beside its autocannon
+    'railgun': {'AGM_L': Mounting(3)},          # the 403's missiles beside its rail gun
+    'superheavy': {'AGM_L': Mounting(3)},       # the 404's missiles beside the driver's front gatling
+    'flak': {'AAM_S': Mounting(FIRE_SECONDARY, auto=True),   # the Kepler's SAM launcher: one launcher's two rounds on the
+             'AAM_M': Mounting(FIRE_SECONDARY, auto=True)},  # second trigger (T switches them), firing itself on a lock
+    'bike': {'RKT': Mounting(3)},               # the bike's rocket pod beside its guns
+}
+
+
+def mounted(kind: str, how: Mounting) -> str:
+    """The store kind `kind` as a vehicle mounts it on `how` (STOCK_MOUNTS): <KIND>_K<key>, an A for an auto turret."""
+    return f'{kind}_K{how.key}{"A" if how.auto else ""}'
+
+
+STORES.update({mounted(k, how): replace(STORES[k], key=how.key, auto=how.auto)
+               for mounts in STOCK_MOUNTS.values() for k, how in mounts.items()})
+
+
 
 # The fuel tank's place in a jet's weapon list and holders: fourth (index 3, or last with fewer), among the four the
 # 506 builds without the plugin's loop patch (src/stores.cpp), so it is always built; the stores past it are the
