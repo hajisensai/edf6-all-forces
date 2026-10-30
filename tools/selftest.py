@@ -5862,7 +5862,7 @@ def stock_stores_build() -> None:
     got = dsgo.to_py(dsgo.parse(handed[flak]).root)
     mine = dsgo.to_py(dsgo.parse(turret[flak]).root)
     assert [k for k in got if k not in ('Ammo_CustomParameter', 'resource')] == [k for k in mine if k not in ('Ammo_CustomParameter', 'resource')]
-    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_2.sgo' in str(got['resource'])
+    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_k2a_2.sgo' in str(got['resource'])   # its mounted kind (vc.STOCK_MOUNTS)
 
 
 @test
