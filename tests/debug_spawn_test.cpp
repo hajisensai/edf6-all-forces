@@ -76,8 +76,8 @@ void Catalog() {
             Expect(n>0 && own,"a Mods row lists its own SGO among its files");
         }
         if(!e.preload)Expect(e.how==How::enemy || e.how==How::vehicle,"only object rows load when first placed (RequestLoad)");
-        // Reports #26 / #29 (2026-10-27..28): every vehicle preloaded at the range's start held some 4 GB more once the
-        // generated vehicles' textures grew, and an 8 GB machine died there; each vehicle loads when first placed.
+        // Reports #26 / #29 (2026-10-27..28): the range's preload step grew commit by 4.2 GB once the generated
+        // vehicles' textures grew (the vehicles ~0.9 GB of it), and an 8 GB machine died there; each vehicle loads when first placed.
         if(e.how==How::vehicle)Expect(!e.preload,"no vehicle row is preloaded by default (RangePlaceAll=1 preloads them)");
         if(e.category==Category::ours)Expect(std::wcsncmp(e.sgo,L"app:/object/EDF6TR_",19)==0 || std::wcsncmp(e.sgo,L"app:/object/EDF6VC_",19)==0,
                                             "our vehicles are the range's (EDF6TR_) or the installer's (EDF6VC_)");

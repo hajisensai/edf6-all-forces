@@ -20,9 +20,9 @@ object keeps its folder: 'edf41mp01/giantant04'), its label, its category (the p
 (`source`), how far over the clicked ground it is made (`lift`), whether it flies (the range's waves) and whether the
 plugin preloads it in the test range by default (`preload`; ini RangePlaceAll=1 preloads every row). No vehicle is:
 each loads the first time it is placed (src/debug_spawn.cpp RequestLoad, online too). Reports #26 / #29 (2026-10-27..28):
-with every vehicle preloaded the range's start held some 4 GB more (measured: commit 1.4 -> 5.6 GB in that one step,
-17 s; 7.1 GB with the map in, 6.1 GB of video memory) once the generated vehicles' textures grew (2b684366), and a
-tester's 8 GB machine with a 2 GB card died there, online and off.
+the range's preload step grew commit 1.4 -> 5.6 GB in 17 s (7.1 GB with the map in, 6.1 GB of video memory) once the
+generated vehicles' textures grew (2b684366), and a tester's 8 GB machine with a 2 GB card died there, online and off;
+leaving the vehicles out cut the step to 4.7 GB in 9 s.
 """
 from __future__ import annotations
 
