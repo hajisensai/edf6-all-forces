@@ -15,6 +15,12 @@
 //            body is from the last received / sent position (+0x1D60)
 //   tx       the pose's send throttle (+0x1D80: countdown, interval, min, max frames; +0x1D90 the fast flag),
 //            the send rate statics could not find (docs/online-re.md section 4)
+// The ground vehicles (CarBase / TankBase: main slot 51 0x672AD0, docs/online-re.md section 4.6) get the same row as
+// `NET ground`: auth / op / reg as above, ai = veh+0x1A bit 8 (the native AI list: the writer then sends no velocity),
+// seat0 = seat 0 rider's net word (-1 none), rx = how far the body is from the last received position (+0x2630) and
+// its settled flags (+0x2650 position, +0x2651 rotation; set once corrected, cleared by each packet), stale = slot 51's
+// frame count (+0x2624, seat 0's input block cleared at 30, then 0 again), tx = the position
+// throttle (+0x2660: countdown, interval, min, max) and how far the body is from the last sent position (+0x26B0).
 #include "crew.h"
 #include "gunnerrecoil.h"
 #include "heli.h"
@@ -38,6 +44,9 @@ constexpr unsigned char kOnlineCode[]={
 };
 constexpr std::size_t kNetFlagsWord=0x128;
 constexpr std::size_t kRxPos=0x1D60,kRxBlend=0x1D70,kRxSettled=0x1D74,kRxFrames=0x1D78,kTxThrottle=0x1D80,kTxFast=0x1D90;
+constexpr unsigned kGroundSlot51=0x672AD0;   // CarBase / TankBase's network step (slot 51)
+constexpr std::size_t kSlot51=51,kListFlags=0x1A;
+constexpr std::size_t kGroundStale=0x2624,kGroundRxPos=0x2630,kGroundRxSettled=0x2650,kGroundTx=0x2660,kGroundTxPos=0x26B0;
 constexpr ULONGLONG kLogMs=1000;
 // Room for every vehicle (it was 16: past 16 helicopters each newcomer pushed the oldest out and logged at once, so
 // the once-a-second row came every frame, about 1000 rows/s with 22 helis, 2026-10-07 CPU audit).
@@ -126,6 +135,33 @@ void Report(unsigned char* v,bool host) noexcept {
         At<float>(v,kRxBlend),At<unsigned char>(v,kRxSettled),std::sqrt(dx*dx+dy*dy+dz*dz),At<int>(v,kTxThrottle),
         At<int>(v,kTxThrottle+4),At<int>(v,kTxThrottle+8),At<int>(v,kTxThrottle+0xC),At<unsigned char>(v,kTxFast));
 }
+bool IsGround(const unsigned char* v) noexcept {
+    const auto vt=At<void* const*>(v,0);
+    return Readable(vt,(kSlot51+1)*8) && vt[kSlot51]==image+kGroundSlot51;
+}
+
+float Off(const unsigned char* v,std::size_t at) noexcept {
+    const float* p=reinterpret_cast<const float*>(v+kPosition);
+    const float* q=reinterpret_cast<const float*>(v+at);
+    const float dx=p[0]-q[0],dy=p[1]-q[1],dz=p[2]-q[2];
+    return std::sqrt(dx*dx+dy*dy+dz*dz);
+}
+
+void ReportGround(unsigned char* v,bool host) noexcept {
+    const bool seated=At<const void*>(v,kSeats)!=nullptr && At<std::size_t>(v,kSeatCount)>0;
+    const int auth=seated ? reinterpret_cast<SeatLocalFn>(image+kSeatLocal)(v,0,0,0,true) : -1;
+    const int op=seated ? reinterpret_cast<OperatorFn>(image+kOperator)(v,true,true) : -1;
+    int seat0=-1;
+    if(seated) {
+        const auto* rider=At<const unsigned char*>(At<const unsigned char*>(v,kSeats),kSeatRider);
+        if(rider && Readable(rider,kNetFlagsWord+2))seat0=At<std::uint16_t>(rider,kNetFlagsWord);
+    }
+    const float* p=reinterpret_cast<const float*>(v+kPosition);
+    Log("NET ground v=%p host=%d auth=%d op=%d reg=0x%04X ai=%d seat0=%d pos=(%.1f,%.1f,%.1f) rx off=%.2f m settled=%d/%d"
+        " stale=%d tx=%d/%d/%d/%d sent off=%.2f m",v,host,auth,op,At<std::uint16_t>(v,kNetFlagsWord),(v[kListFlags]&8)!=0,seat0,
+        p[0],p[1],p[2],Off(v,kGroundRxPos),v[kGroundRxSettled],v[kGroundRxSettled+1],At<int>(v,kGroundStale),At<int>(v,kGroundTx),
+        At<int>(v,kGroundTx+4),At<int>(v,kGroundTx+8),At<int>(v,kGroundTx+0xC),Off(v,kGroundTxPos));
+}
 }  // namespace
 
 // Whether a session is on. An EDF.dll whose session function is not the one read counts as no session (logged once):
@@ -163,7 +199,9 @@ bool InSession() noexcept {
 }
 
 void NetProbe(unsigned char* v) noexcept {
-    if(!Cfg().debug || !IsHelicopter(v))return;
+    if(!Cfg().debug)return;
+    const bool heli=IsHelicopter(v);
+    if(!heli && !IsGround(v))return;
     const bool online=InSession();
     if(!online) {
         if(lastOnline!=0){lastOnline=0;Log("NET session off");}
@@ -182,7 +220,8 @@ void NetProbe(unsigned char* v) noexcept {
         const bool host=reinterpret_cast<IsHostFn>(image+kIsHost)(nullptr);
         if(!InSession())return;
         if(lastOnline!=1){lastOnline=1;Log("NET session on, this machine %s the host",host ? "is" : "is not");}
-        if(due && Readable(v+kTxFast,1))Report(v,host);
+        if(due && heli && Readable(v+kTxFast,1))Report(v,host);
+        if(due && !heli && Readable(v+kGroundTxPos,16))ReportGround(v,host);
     } __except(SessionReadFault(GetExceptionCode())) {}
 }
 }  // namespace crew
