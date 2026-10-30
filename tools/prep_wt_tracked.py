@@ -84,6 +84,9 @@ class Vehicle:
     # whose guns are not nodes of their own (tools/prep_xmorph.py: X-Morph's muzzle attachments). The barrel node still
     # gives the breech (its box's rear: the case port).
     mouths: dict[str, tuple[float, float, float]] | None = None
+    # A store slot's muzzles (make_tracked_combat slot: a weapon besides the gun pair, firing from them) where no node
+    # of its own gives them: slot -> (bone, [model-space points]). The PzH 2000's roof MG3: its barrel's front face.
+    stores: dict[str, tuple[str, list[tuple[float, float, float]]]] = field(default_factory=dict)
 
 
 M163 = Vehicle(
@@ -201,6 +204,10 @@ PZH2000 = Vehicle(
     barrels={'left': 'gun_barrel', 'right': 'gun_barrel'},
     turret_box=((-1.7, 1.95, -4.7), (1.7, 5.0, 0.6)),
     collision={'cannon_l': [r'^(gun_barrel|bone_gun)$'], 'cannon_r': [r'^bone_gun$']},
+    # The roof MG3 on the loader's ring (the tester, 2026-10-28, #29: 「Pzh2000自行榴弹炮可以加个机枪或者机枪位」): the
+    # front face of its barrel (wt_mg_mg_42_c's foremost vertices, x 1.05..1.09, y 3.36..3.40 at z -1.452), on the
+    # turret (its ring's mount rides cannon_main): it turns with the turret and fires level along it.
+    stores={'mg': ('cannon_main', [(1.0697, 3.3773, -1.4517)])},
 )
 
 # The Sturmtiger (WT: 38 cm Sturmmorser): no turret, a 380 mm rocket mortar in the casemate's ball mount, which the
@@ -677,6 +684,8 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
                                                            key=lambda p: (-round(abs(p[0]), 1), -p[1]))[:v.missiles_keep // 2]]
         tubes.sort(key=lambda p: (-round(p[0], 1), p[1]))     # left low, left high, right low, right high
     muzzles['missiles'] = [{'bone': v.missile_bone, 'point': p} for p in tubes]
+    for slot, (bone, points) in v.stores.items():
+        muzzles[slot] = [{'bone': bone, 'point': list(p)} for p in points]
     ejections = {}
     for side, sign in (('left', 1.0), ('right', -1.0)):
         x, y, z0, _z1 = axes[side]

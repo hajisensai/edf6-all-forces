@@ -15,6 +15,7 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 
 namespace crew {
 bool InstallRealDriverNative(NpcSeatInputOwnedFn) noexcept { return true; }
+bool InstallVehicleTargetSearch() noexcept { return true; }   // vehicle_target.cpp: a vtable hook, nothing to stand in
 // npc_backpack.cpp stand-ins: one sub slot (packSlot) when packReady; its uses and reloads recorded, the use going on
 // (packBusy) as the case sets.
 bool packReady=false,packBusy=false,packCanUse=true;int packSlots=0,packUses=0,packUseSlot=-1,packReloads=0;

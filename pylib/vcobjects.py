@@ -511,6 +511,19 @@ STORES: dict[str, Store] = {
                                  max_g=50.0, nav=4.5, life=16.0, damage=2500.0, blast=14.0, lock_range=3500.0,
                                  lock_cone=0.6, lock_time=20.0),
                          _local('PAC-3', 'PAC-3', 'PAC-3', 'PAC-3', 'PAC-3'), independent_secondary=True),
+    # The PzH 2000's roof MG3 (the tester, 2026-10-28, #29: 「Pzh2000自行榴弹炮可以加个机枪或机枪位」; models/wt_pzh2000's
+    # MG on the loader's ring, tools/prep_wt_tracked.py PZH2000 stores): a 7.62 x 51 mm general-purpose machine gun on
+    # the V603's otherwise unread secondary (independent_secondary, as the 2S6's 9M311), fired while the howitzer keeps
+    # its load. The stock Epsilon gunner's machine gun round (as the coax, COAX_*) with the MG3's numbers: about 1200 a
+    # minute (a round every 3 frames), 820 m/s (13.7 m a frame), its rounds alive 1100 m; a tight mounted cone; a belt
+    # of 1000 changed in 10 s. On the turret, it turns with it and fires level along it (no elevation of its own).
+    'PZH2000_MG': Store('MG3', 'gun', 0.0, 0.0,
+                        Shell('V_403TANK_MACHINEGUN.SGO', 'SolidBullet01', 'mg',
+                              (('AmmoSpeed', 13.7), ('AmmoAlive', 81.0), ('FireInterval', 3.0),
+                               ('ReloadTime', COAX_BELT_CHANGE), ('FireAccuracy', COAX_SPREAD), ('AmmoSize', COAX_SIZE),
+                               ('AmmoHitSizeAdjust', COAX_HIT))),
+                        _local('MG3 7.62 mm', 'MG3 7.62mm 機関銃', 'MG3 7.62mm 機槍', 'MG3 7.62mm 机枪', 'MG3 7.62mm 기관총'),
+                        independent_secondary=True),
     'QVULCAN_AP': Store('Quad M61 AP', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
                         _local('Quad M61 AP', '4連装 M61 徹甲弾', '四聯 M61 穿甲彈', '四联 M61 穿甲弹', '4연장 M61 철갑탄'),
                         group=4, barrel=0),
@@ -910,11 +923,13 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
                                'app:/weapon/edf6vc_tunguska_sam_4.sgo'), 1300.0, 'make_tunguska',
                               slots=('left', 'right', 'missiles')),
     # The PzH 2000 and the Sturmtiger (tools/make_pzh2000.py / make_sturmtiger.py; their War Thunder models): one gun
-    # each, both native holders on it, in turn (tools/make_tracked_combat.py GUNS).
+    # each, both native holders on it, in turn (tools/make_tracked_combat.py GUNS); the PzH 2000's roof MG3 on the
+    # secondary (STORES PZH2000_MG), from the model's MG (muzzle slot 'mg').
     'pzh2000': GroundVehicle('EDF6VC_PZH2000', 'V603_FLAK', 'AWEAPON346',
                              ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
-                             ('app:/weapon/edf6vc_pzh2000_l.sgo', 'app:/weapon/edf6vc_pzh2000_r.sgo'), 1500.0, 'make_pzh2000',
-                             slots=('left', 'right'), alternate=True),
+                             ('app:/weapon/edf6vc_pzh2000_l.sgo', 'app:/weapon/edf6vc_pzh2000_r.sgo',
+                              'app:/weapon/edf6vc_pzh2000_mg_1000.sgo'), 1500.0, 'make_pzh2000',
+                             slots=('left', 'right', 'mg'), alternate=True),
     'sturmtiger': GroundVehicle('EDF6VC_STURMTIGER', 'V603_FLAK', 'AWEAPON346',
                                 ('AWEAPON346', 'AWEAPON349', 'AWEAPON352', 'AWEAPON359', 'AWEAPON361'),
                                 ('app:/weapon/edf6vc_sturmtiger_l.sgo', 'app:/weapon/edf6vc_sturmtiger_r.sgo'), 2200.0,

@@ -24,6 +24,7 @@ inline constexpr StoreSpec kStores[]={
     {L"EDF6VC_TUNGUSKA_SAM_","9M311",StoreRole::air,0.0f,0.0000f,0,0,false,StoreShell::native,true},
     {L"EDF6VC_APOC_SAM_","Apocalypse SAM",StoreRole::air,0.0f,0.0000f,0,0,false,StoreShell::native,true},
     {L"EDF6VC_PATRIOT_SAM_","PAC-3",StoreRole::air,0.0f,0.0000f,0,0,false,StoreShell::native,true},
+    {L"EDF6VC_PZH2000_MG_","MG3",StoreRole::gun,0.0f,0.0000f,0,0,false,StoreShell::native,true},
     {L"EDF6VC_QVULCAN_AP_","Quad M61 AP",StoreRole::gun,0.0f,0.0000f,4,0,false,StoreShell::native,false},
     {L"EDF6VC_QVULCAN_AP_R_","Quad M61 AP",StoreRole::gun,0.0f,0.0000f,4,1,false,StoreShell::native,false},
     {L"EDF6VC_BMPT_ATGM_","9M120 Ataka",StoreRole::ground,0.0f,0.0000f,0,0,false,StoreShell::native,true},

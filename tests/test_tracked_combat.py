@@ -62,9 +62,9 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(tuple(combat.slot('bmpt', i) for i in range(6)), ('left', 'right', 'missiles', 'left', 'right', 'missiles'))
         # 2026-10-21: both Ataka rounds ride the V603's otherwise unread secondary, alongside the cannons (src/payload.cpp).
         # 2026-10-24: the Tunguska's, the Apocalypse's and the Patriot's missiles ride it too.
-        # 2026-10-27: and every X-Morph unit's other weapons (xm_units.Arm).
+        # 2026-10-27: and every X-Morph unit's other weapons (xm_units.Arm). 2026-10-30 (#29): the PzH 2000's roof MG3.
         self.assertEqual([kind for kind, store in vc.STORES.items() if store.independent_secondary],
-                         ['TUNGUSKA_SAM', 'APOC_SAM', 'PATRIOT_SAM', 'BMPT_ATGM', 'BMPT_ATGMF',
+                         ['TUNGUSKA_SAM', 'APOC_SAM', 'PATRIOT_SAM', 'PZH2000_MG', 'BMPT_ATGM', 'BMPT_ATGMF',
                           *(vc.xm_store(u, a) for u in xm_units.v603() for a in u.arms)])
         self.assertFalse(any(vc.STORES[k].native_control or vc.STORES[k].group for k in ('BMPT_ATGM', 'BMPT_ATGMF')),
                          'a missile is not alternate cannon ammunition')

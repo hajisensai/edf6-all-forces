@@ -785,7 +785,17 @@
     ]
    }
   ],
-  "missiles": []
+  "missiles": [],
+  "mg": [
+   {
+    "bone": "cannon_main",
+    "point": [
+     1.0697,
+     3.3773,
+     -1.4517
+    ]
+   }
+  ]
  },
  "ejections": {
   "left": {
