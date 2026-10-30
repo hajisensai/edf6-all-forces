@@ -130,14 +130,16 @@ _TOKEN = re.compile(r'"((?:[^"\\\n]|\\.)*)"|([{}])|(\n)|("[^\n]*)|([^\s{}"]+)')
 NL = 'nl'
 
 
-def parse(text: str) -> Node:
+def parse(text: str, stray_close: bool = False) -> Node:
     """EXOR's blocks. A line's head word and what follows it on that line:
         Name                     then '{' (here or on a later line): a child block
         key "value"              a value (written once per occurrence: a key may repeat)
         key "value" {            a child carrying a value (aim_volume "SphericalAimVolume" { ... }): its 'type'
         key word word ...        a value of the words (a material script's 'set_texture_alias diffuse a.dds'),
                                  or, when '{' follows, a child whose 'type' is the words ('material a : b')
-    '//' comments run to the line's end."""
+    '//' comments run to the line's end. stray_close: a '}' that closes nothing at the top level is dropped (the game's
+    own materials/scripts/manmade.material has an orphan `technique` block after a material's end, which Ogre's script
+    compiler skips); otherwise it is an error."""
     toks = []
     for q, brace, nl, unclosed, word in _TOKEN.findall(re.sub(r'//[^\n]*', '', text)):
         if brace:
@@ -164,7 +166,10 @@ def parse(text: str) -> Node:
             continue
         if kind == '}':
             if len(stack) == 1:
-                raise PackError('unbalanced }')
+                if not stray_close:
+                    raise PackError('unbalanced }')
+                i += 1
+                continue
             stack.pop()
             i += 1
             continue

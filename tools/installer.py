@@ -519,6 +519,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import edf41_objects
     import edf41_outfits
     import edf41_maps
+    import make_xm_maps
     import edf41_menu_bg
     import edf41_sounds
     import edf5_dlc
@@ -655,6 +656,12 @@ def install(game: str, campaign_requested: bool = False) -> None:
     written41, skipped_maps = edf41_maps.install(game, root41, material_compat=material_compat)
     for name, why in skipped_maps:
         print('  跳过', name, why)
+    print('安装 X-Morph: Defense 的 5 张地图（模型包的 xm_maps，借用 EDF6 地图的天气与寻路网格）……')
+    written_xm, skipped_xm = make_xm_maps.install(game)
+    for path in written_xm:
+        print('写入', path)
+    for name, why in skipped_xm:
+        print('  跳过', name, why)
     # The pack's rows may name only what is on disk now: objects and maps left out (a shared file's owner only known
     # after the weapons' install, a map whose conversion failed) take their missions out of the pack, rebuilt here.
     left_out41 = {**dict(skipped41), **dict(skipped_maps)}
@@ -786,6 +793,7 @@ def uninstall(game: str) -> None:
     import edf41_objects
     import edf41_outfits
     import edf41_maps
+    import make_xm_maps
     import edf41_menu_bg
     import edf41_sounds
     import edf5_dlc
@@ -829,7 +837,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, make_xm_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:

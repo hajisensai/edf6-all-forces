@@ -2066,6 +2066,7 @@ add_test(NAME tracked_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_
 # X-Morph: Defense's units (docs/xmorph-port.md): the Ogre / text readers and the rig rules always, a unit from the
 # packs with the game installed (the developer machine), built on the V603 with Root.cpk too.
 add_test(NAME xmorph COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_xmorph.py")
+add_test(NAME xm_maps COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_xm_maps.py")
 # The generated vehicles' mesh merge and LODs (pylib/model_lod.py, pylib/mesh_simplify.py) on synthetic meshes.
 add_test(NAME model_lod COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_lod.py")
 # The M163 / BMPT from their War Thunder model folders (pylib/wt_tracked.py): prep rules always, the assets with the game.
