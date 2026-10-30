@@ -85,12 +85,13 @@ node node_modules/wrangler/bin/wrangler.js deploy --config wrangler.toml
 
 ## 公开下载页（/download）
 
-全站唯一不用登录的地方：最新分享包，链接可以直接发给玩家（https://edf6.fushi.moe/download）。
-存储和下载与 fushi.moe 的推荐包同一套：包切成 64 MiB 的分片（`share/<version>/part-NNN`），清单写明每片的 offset、长度和 SHA-256；
+全站唯一不用登录的地方：最新分享包，链接可以直接发给玩家（https://edf6.fushi.moe/download）。两个槽位各放最新一版：
+`main` 主包、`models` 模型包（主包的 `models-required.json` 写明要哪一版模型包）。
+存储和下载与 fushi.moe 的推荐包同一套：包切成 64 MiB 的分片（`share/<slot>/<version>/part-NNN`），清单写明每片的 offset、长度和 SHA-256；
 页面（`public/download.js` + 从 fushi.moe 原样复制的 `public/chunked-download.mjs` / `public/pack-download.mjs`，改动请两边同步）
 每片开 4 条 Range 连接并发下载，校验后写进用户选的文件（Chrome / Edge 流式写盘，其他浏览器在内存里拼好再保存）。
-「普通下载」`/share/<version>/file` 把各片按顺序拼成一个流，给 IDM 等下载工具和不支持分片的情况用。
+「普通下载」`/share/<slot>/<version>/file` 把各片按顺序拼成一个流，给 IDM 等下载工具和不支持分片的情况用。
 
-发布：`python tools/testhub.py share <zip> [--notes TEXT]`（开发者账号）。每片上传时带 SHA-256，由 R2 校验；
-已存在且哈希相同的片会跳过，中断后原样重跑即可。最后一步 publish 核对分片首尾相接、大小与哈希，再切换 `share/latest.json`；
-保留上一版（正在下载的人不受影响），更早的版本删除。
+发布：`python tools/testhub.py share <zip> --slot main|models [--notes TEXT]`（开发者账号）。每片上传时带 SHA-256，由 R2 校验；
+已存在且哈希相同的片会跳过，中断后原样重跑即可。最后一步 publish 核对分片首尾相接、大小与哈希，再切换该槽位的 `latest.json`；
+每个槽位保留上一版（正在下载的人不受影响），更早的版本删除。
