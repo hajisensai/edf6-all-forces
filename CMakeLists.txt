@@ -1164,6 +1164,8 @@ add_test(NAME npc_core_check COMMAND npc_core_check)
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks")
 add_test(NAME net_session_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/net_session_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(net_session_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
+add_test(NAME net_ground_probe_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/net_ground_probe_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(net_ground_probe_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 add_test(NAME item_pickup_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/item_pickup_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
 # EDF4.1's pre-mission scenes (src/edf41before.cpp): the patched call in Before(), _DeleteAllMenuUi, the fade screen name.
