@@ -98,11 +98,11 @@ def _leg(xm: tuple[str, str, str], host: tuple[str, str, str], knee: str, sole: 
 
 
 # The X-Morph walkers on their hosts (measured 2026-10-30, docs/xmorph-port.md 「步行单位」):
-#  - the light mech (4.5 m: legs, a torso, two gun arms held out sideways in the bind pose) on the Nix the Air Raider
+#  - the light mech (4.5 m: legs, a torso, two gun arms held out sideways in the bind pose) on the Begaruta the Air Raider
 #    calls (V504_BEGARUTA_BLUE: Vehicle504_begaruta, the EWEAPON356 request family): hip 2.25 m to its 5.28, x 2.35.
-#    Its shins from the Nix's knee (sune0) to its ankle (ashi), over the short second joint (sune1) between them; its
-#    arms' two segments (the shoulder held sideways, the gun arm) on the Nix's upper arm (hanging) and forearm (forward,
-#    the hand's weapon locator at its end): the guns point where the Nix holds its guns.
+#    Its shins from the Begaruta's knee (sune0) to its ankle (ashi), over the short second joint (sune1) between them; its
+#    arms' two segments (the shoulder held sideways, the gun arm) on the Begaruta's upper arm (hanging) and forearm (forward,
+#    the hand's weapon locator at its end): the guns point where the Begaruta holds its guns.
 #  - the heavy mech (11.4 m: bird legs, a turret with a gun pod either side) on the Proteus Mk2 (V614_PROTEUS_MK2_CALL,
 #    VehicleBigBegaruta, the EWEAPON387 family): hip 5.73 m to its 8.35, x 1.46. Its shins from the Proteus' knee (sune)
 #    to its heel, over the strut (leg) between them; its turret and gun on the neck, the pods on the gun mounts.
@@ -356,7 +356,7 @@ def _material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
 
 def skeleton(md: Mdb) -> Mdb:
     """The host's bones as they are, its skinned object empty (no meshes, materials or textures); its other objects
-    (the Nix's shields on their own bones) gone."""
+    (the Begaruta's shields on their own bones) gone."""
     skinned = [o for o in md.objects if md.bones[o.bone].kind == 2]
     _req(len(skinned) == 1, 'the host has not exactly one skinned object')
     return replace(md, objects=[replace(skinned[0], meshes=[])], materials=[], textures=[], buffer_order=None)

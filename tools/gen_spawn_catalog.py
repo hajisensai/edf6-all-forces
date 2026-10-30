@@ -198,6 +198,9 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
     # no cockpit needed), not read from a Mods it may not be installed in.
     cars = {f'OBJECT/{vcobjects.GROUND_VEHICLES[k].sgo}.{ext}': k for k in make_xmorph.CARS if k not in undeployed
             for ext in ('SGO', 'MRAB', 'SHKT')}
+    # an undeployed car's own files cannot be measured either (the same refusal as its mission row above)
+    undeployed_rows |= {f'OBJECT/{vcobjects.GROUND_VEHICLES[k].sgo}.{ext}' for k in make_xmorph.CARS if k in undeployed
+                        for ext in ('SGO', 'MRAB', 'SHKT')}
 
     def read(rel: str) -> bytes | None:
         if rel in undeployed_rows:

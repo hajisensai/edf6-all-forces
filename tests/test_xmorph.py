@@ -423,6 +423,27 @@ class XmorphAssetTests(unittest.TestCase):
         # a blueprint's own submesh material (the Mk VI's skin); a part's name with the designers' note after it
         self.assertEqual(xm.load(self.packs, 'bosses/tarantula_mk_vi').materials, ['bosses/four_leg_mech_skin1'])
         self.assertEqual(len(xm.assemble(self.packs, 'bosses/warcar').parts), 18)
+        # nested parts (the MECHATAUR's head, hands, launchers on body_upper's be_spine_body_upper) hang on their
+        # parent part's bone; the left hand's misc/laser_tracer beam is an effect, not a part; a turret named in two
+        # parts (laser_turret: the unit's own and the laser cannon's) keeps each part's weapons on its own
+        mt = xm.assemble(self.packs, 'bosses/giant_mech_minotaur')
+        names = [p[0].split('/')[-1] for p in mt.parts]
+        self.assertNotIn('laser_tracer', names)
+        self.assertTrue(all(p[0].startswith('units/') for p in mt.parts))
+        self.assertTrue(set(mt.tri_bone) <= set(mt.bones))
+        upper = next(p for p in mt.parts if p[0].endswith('/body_upper'))
+        for part in ('head', 'left_hand', 'right_hand', 'laser_cannon', 'missile_launcher'):
+            hung = next(p for p in mt.parts if p[0].endswith('/' + part))
+            self.assertIn(hung[1], upper[2], part)                       # on body_upper's (renamed) bone
+            self.assertEqual(mt.parent[hung[2][0]], hung[1], part)
+        laser = next(w for w in mt.weapons() if w.name == 'laser')
+        self.assertEqual(laser.turret, 'laser_cannon/laser_turret')
+        self.assertTrue(set(mt.turrets()[laser.turret]) <= set(mt.bones) | set(mt.attachments))
+        self.assertTrue(mt.turrets()['laser_pointer'][0].startswith('left_hand/'))
+        gs = xm.assemble(self.packs, 'bosses/gunship')
+        left, right = (next(w for w in gs.weapons() if w.name == f'{s}_wing_laser') for s in ('left', 'right'))
+        self.assertEqual(gs.turrets()[left.turret][0], 'be_left_wing_laser')
+        self.assertEqual(gs.turrets()[right.turret][0], 'be_right_wing_laser')
         # a unit without parts assembles to itself
         tank = xm.assemble(self.packs, self.unit.entity)
         self.assertEqual((len(tank.triangles), tank.parts), (len(xm.load(self.packs, self.unit.entity).triangles), []))
@@ -470,6 +491,38 @@ class XmorphAssetTests(unittest.TestCase):
             wt.FOLDERS.clear()
             wt.FOLDERS.update(old[1])
             tc.KINDS = old[2]
+
+
+class HeliWeaponNameTests(unittest.TestCase):
+    """HeliArm.names is (en, ja, cn, sc, kr) as Arm.names; xm_heli.weapon_sgo writes each name.* row from its language."""
+
+    def test_names_have_five_languages(self) -> None:
+        import xm_units
+        for u in xm_units.ported('heli'):
+            for slot in ('guns', 'missile'):
+                if slot in u.air:
+                    self.assertEqual(len(u.air[slot].names), 5, f'{u.key}.{slot}')
+
+    def test_weapon_sgo_names_follow_their_language(self) -> None:
+        import rootcpk
+        if not (Path(rootcpk.DEFAULT_GAME) / 'Root.cpk').is_file():
+            self.skipTest('EDF6 Root.cpk unavailable')
+        import dsgo
+        import xm_heli
+        import xm_units
+        game = rootcpk.default()
+        unit = xm_units.UNITS['xm_medium_helicopter_core']
+        arm = unit.air['missile']
+        r = dsgo.parse(xm_heli.weapon_sgo(game, unit, 'missile')).root
+        seen = set()
+        for key in r.names.values():
+            if key.startswith('name.'):
+                lang = key[5:].lower()
+                want = dict(zip(('en', 'ja', 'cn', 'sc', 'kr'), arm.names)).get(lang, arm.names[0])
+                self.assertEqual(r.get(key), want, key)
+                seen.add(lang)
+        self.assertTrue({'ja', 'cn', 'sc'} <= seen, seen)
+        self.assertNotEqual(arm.names[1], arm.names[2])
 
 
 

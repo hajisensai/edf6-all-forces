@@ -28,7 +28,7 @@ STOCK_SGO = 'V506_HELI.SGO'
 STOCK_GUNS = ('V_506HELI_GATLING01_L.SGO', 'V_506HELI_GATLING01_R.SGO')
 STOCK_MISSILE = 'V_506HELI_MISSILE01.SGO'
 STOCK_LENGTH = 12.0          # m: the V506's airframe, whose third-person camera (game_object_camera_setting) is scaled
-LANGS = ('en', 'ja', 'cn', 'sc')
+LANGS = ('en', 'ja', 'cn', 'sc', 'kr')   # HeliArm.names' order (vcobjects._local)
 
 
 def sgo_name(key: str) -> str:
@@ -72,10 +72,11 @@ def weapon_sgo(game, unit: xm_units.Unit, slot: str) -> bytes:  # noqa: ANN001 -
             raise ValueError(f'{template}: no {k}')
         r.set(k, float(v))
     side = {'gun_l': (' (L)', '（左）'), 'gun_r': (' (R)', '（右）')}.get(slot, ('', ''))
-    for lang, name in zip(LANGS, arm.names):
-        key = f'name.{lang}'
-        if key in r.names.values():
-            r.set(key, name + (side[0] if lang == 'en' else side[1]))
+    local = dict(zip(LANGS, arm.names))
+    for key in list(r.names.values()):   # every name.* row (vcobjects._named): its language's, else the English
+        if key.startswith('name.'):
+            lang = key[5:].lower()
+            r.set(key, local.get(lang, arm.names[0]) + (side[0] if lang in ('en', 'kr') or lang not in local else side[1]))
     return dsgo.write(doc)
 
 

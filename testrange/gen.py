@@ -967,8 +967,11 @@ GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'e
                                   'edf6tr_tunguska_mission': 'make_tunguska',
                                   'edf6tr_pzh2000_mission': 'make_pzh2000',
                                   'edf6tr_sturmtiger_mission': 'make_sturmtiger', 'edf6tr_ciws_phalanx_mission': 'make_ciws_phalanx', 'edf6tr_flak88_mission': 'make_flak88', 'edf6tr_apocalypse_mission': 'make_apocalypse', 'edf6tr_gdf005_mission': 'make_gdf005', 'edf6tr_laser_mission': 'make_laser', 'edf6tr_railgun_mission': 'make_railgun', 'edf6tr_tos1_mission': 'make_tos1', 'edf6tr_patriot_mission': 'make_patriot'}
-# The X-Morph units (pylib/xm_units.py): all built by tools/make_xmorph.py, its builder per unit (ground_tool).
-GROUND_MISSION.update({f'{DERIVED_PREFIX}{u.key}_mission': 'make_xmorph' for u in xm_units.requested()})
+# The X-Morph units (pylib/xm_units.py): all built by tools/make_xmorph.py, its builder per unit (ground_tool). The V603
+# ones and the walkers; the cars are the installer's rows (catalog INSTALLER_VEHICLES: edf6vc_<key>), the aircraft not on
+# the range (yet).
+GROUND_MISSION.update({f'{DERIVED_PREFIX}{u.key}_mission': 'make_xmorph'
+                       for u in xm_units.requested() if u.family in (*xm_units.V603, 'mech')})
 
 
 def ground_tool(sgo_name: str):  # noqa: ANN201 - a make_<kind> module or make_xmorph's builder (buildcache.tool)

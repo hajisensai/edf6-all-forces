@@ -4653,8 +4653,7 @@ def xmorph_undeployed_without_its_folder() -> None:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 assert make_xmorph.builder(kind).build(root) == {}, kind
-            assert out.getvalue().count('
-') == 1 and xm_units.folder(kind) in out.getvalue(), out.getvalue()
+            assert out.getvalue().count('\n') == 1 and xm_units.folder(kind) in out.getvalue(), out.getvalue()
             call = next((c for c in calls.CALLS if c.kind == kind and c.brings == 'vehicle'), None)
             assert (call is not None) == (kind in requested), kind
             car = kind in make_xmorph.CARS

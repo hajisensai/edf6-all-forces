@@ -140,6 +140,191 @@ class Water(unittest.TestCase):
         self.assertGreaterEqual(verts[:, 0].max(), 20.0)
 
 
+MATERIALS = '''
+material base/default
+{
+    technique 1light
+    {
+        pass 0
+        {
+            depth_write on
+        }
+    }
+}
+material base/default_alpha_test : base/default
+{
+    technique 1light
+    {
+        pass 0
+        {
+            alpha_rejection greater_equal 128
+            scene_blend one zero
+        }
+    }
+}
+material base/default_alpha_blend : base/default
+{
+    technique 1light
+    {
+        pass 0
+        {
+            scene_blend alpha_blend
+        }
+    }
+}
+material base/decal_static
+{
+    technique 1light
+    {
+        pass 0
+        {
+            separate_scene_blend src_alpha one_minus_src_alpha zero one
+        }
+    }
+}
+material base/unlit_additive : base/default
+{
+    technique 1light
+    {
+        pass 0
+        {
+            scene_blend add
+        }
+    }
+}
+material t/box : base/default
+{
+    set_texture_alias diffuse t/holes.png
+}
+material t/leaf : base/default_alpha_test
+{
+    set_texture_alias diffuse t/holes.png
+}
+material t/leaf_solid : base/default_alpha_test
+{
+    set_texture_alias diffuse t/solid.png
+}
+material t/road : base/default_alpha_blend
+{
+    set_texture_alias diffuse t/holes.png
+}
+material t/crack : base/decal_static
+{
+    set_texture_alias diffuse t/holes.png
+}
+material t/glow : base/unlit_additive
+{
+    set_texture_alias diffuse t/holes.png
+}
+'''
+
+
+class FakePacks:
+    """A packs tree of one material script and two textures: holes.png half see-through, solid.png not."""
+
+    def __init__(self) -> None:
+        import io
+        holes = np.full((8, 8, 4), 200, np.uint8)
+        holes[:4, :, 3] = 0
+        self.files = {'materials/scripts/test.material': MATERIALS.encode()}
+        for name, rgba in (('t/holes.png', holes), ('t/solid.png', np.full((8, 8, 4), 200, np.uint8))):
+            b = io.BytesIO()
+            Image.fromarray(rgba, 'RGBA').save(b, 'PNG')
+            self.files[name] = b.getvalue()
+
+    def paths(self, prefix: str = '') -> list[str]:
+        return sorted(k for k in self.files if k.startswith(prefix))
+
+    def text(self, path: str) -> str:
+        return self.files[path].decode()
+
+    def read(self, path: str) -> bytes:
+        return self.files[path]
+
+    def exists(self, path: str) -> bool:
+        return path in self.files
+
+
+class AlphaModes(unittest.TestCase):
+    """The see-through mode follows the material's inheritance chain (alpha_rejection / scene_blend), never the
+    texture's own alpha: base/default with a diffuse that has alpha holes (electric_box_01, billboard_large_01) stays
+    opaque."""
+
+    def setUp(self) -> None:
+        packs = FakePacks()
+        r = object.__new__(xm_map.Reader)
+        r.packs = packs
+        r.xm = xm_map.MAPS['XM_STORY_JAPAN']
+        r.mats = xm_map.Materials(packs, None)
+        r.images = xm_map.Images(packs)
+        r.scene = xm_map.Scene('XM_TEST', r.xm, 'maps/test', np.zeros(3))
+        r.tex_ids = {}
+        self.r = r
+
+    def mode(self, material: str) -> str:
+        return self.r.scene.textures[self.r.material_tex(material)].mode
+
+    def test_material_chain_decides(self) -> None:
+        m = self.r.mats
+        self.assertEqual(m.alpha('t/box'), ('opaque', 0))
+        self.assertEqual(m.alpha('t/leaf'), ('clip', 128))
+        self.assertEqual(m.alpha('t/road'), ('blend', 0))
+        self.assertEqual(m.alpha('t/crack'), ('blend', 0))
+        self.assertEqual(m.alpha('t/glow'), ('opaque', 0))
+
+    def test_scene_modes(self) -> None:
+        self.assertEqual(self.mode('t/box'), 'opaque')          # holes in the texture, opaque material
+        self.assertEqual(self.mode('t/leaf'), 'clip')
+        self.assertEqual(self.mode('t/road'), 'clip')           # alpha blend on a map surface: alpha-tested
+        self.assertEqual(self.mode('t/crack'), 'clip')
+        self.assertEqual(self.mode('t/glow'), 'opaque')
+        self.assertEqual(self.mode('t/leaf_solid'), 'opaque')   # a test that rejects nothing: stored as DXT1
+
+    def test_one_image_two_modes(self) -> None:
+        box, leaf = self.r.material_tex('t/box'), self.r.material_tex('t/leaf')
+        self.assertNotEqual(box, leaf)
+        self.assertEqual(self.r.material_tex('t/road'), self.r.material_tex('t/crack'))
+
+
+class Install(unittest.TestCase):
+    """make_xm_maps.install with no usable model pack index releases what it installed before."""
+
+    def test_no_index_releases_old_maps(self) -> None:
+        import tempfile
+        from unittest import mock
+        import ledger
+        import make_xm_maps
+        with tempfile.TemporaryDirectory() as game:
+            led = ledger.Ledger(game)
+            old = led.put(make_xm_maps.OWNER, 'MAP/XM_STORY_JAPAN.MAC', b'old map')
+            other = led.put('edf41maps', 'MAP/OTHER.MAC', b'not ours')
+            for folder in (None, os.path.join(game, 'empty')):        # no model pack / no xm_maps.json in it
+                with mock.patch.object(make_xm_maps.obj_model, 'model_dir', return_value=folder):
+                    written, skipped = make_xm_maps.install(game, say=lambda _s: None)
+                self.assertEqual(written, [])
+                self.assertEqual(len(skipped), 1)
+                self.assertFalse(os.path.exists(old))
+                self.assertTrue(os.path.exists(other))
+                self.assertEqual(ledger.Ledger(game).owned_by(make_xm_maps.OWNER), [])
+
+    def test_unreadable_archives_release_old_maps(self) -> None:
+        import tempfile
+        from unittest import mock
+        import ledger
+        import make_xm_maps
+        with tempfile.TemporaryDirectory() as game:
+            pack = os.path.join(game, 'pack')
+            os.makedirs(pack)
+            with open(os.path.join(pack, make_xm_maps.INDEX), 'w', encoding='utf-8') as f:
+                f.write('{"version": %d, "maps": {"XM_TEST": {"donor": "X", "weathers": [], "label": "", "files": {}}}}'
+                        % make_xm_maps.VERSION)
+            old = ledger.Ledger(game).put(make_xm_maps.OWNER, 'MAP/XM_TEST.MAC', b'old map')
+            with mock.patch.object(make_xm_maps.obj_model, 'model_dir', return_value=pack):
+                written, skipped = make_xm_maps.install(game, say=lambda _s: None)   # no EDF6 archives in `game`
+            self.assertEqual((written, [n for n, _why in skipped]), ([], ['XM_TEST']))
+            self.assertFalse(os.path.exists(old))
+
+
 class Trial(unittest.TestCase):
     @unittest.skipUnless(os.path.isdir(os.environ.get('EDF6_GAME_DIR', r'd:\steam\steamapps\common\EARTH DEFENSE FORCE 6')),
                          'EDF6 not installed')

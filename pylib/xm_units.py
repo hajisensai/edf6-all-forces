@@ -37,7 +37,7 @@ Families (the chassis an EDF6 class drives; tools/prep_xmorph.py has one prepare
     car          an unarmed vehicle on the sedan's V512 (Vehicle_Car: its `like` is 'sedan'; pylib/car_model.py, through
                  tools/prep_xmorph.py car): its own wheels on the V512's wheel bones (steered by the front pair),
                  the driver's seat alone, no gun; the civilian rows' cars come this way too
-    mech         a walker on a stock one (pylib/xm_walker.py: the light mech on the Nix, the heavy on the Proteus Mk2;
+    mech         a walker on a stock one (pylib/xm_walker.py: the light mech on the Begaruta, the heavy on the Proteus Mk2;
                  the Balam is four times the heavy mech's size), its model retargeted onto the host's skeleton
                  (pylib/xm_rig.py, tools/prep_xmorph.py mech), its weapons on the host's holders
     emplacement  a fort's gun on pylib/emplacement_model.py's fortified base (the V603, tools/prep_xmorph.py emplacement)
@@ -130,7 +130,7 @@ class HeliArm:
     right's for the gun pair, any number for the missile: their middle)."""
     template: str                     # Root.cpk WEAPON/<template>
     muzzles: tuple[str, ...]
-    names: tuple[str, str, str, str]  # EN, SC, JA, CN
+    names: tuple[str, str, str, str, str]  # en, ja, cn, sc, kr (vcobjects._local's order, as Arm.names; kr: the English)
     numbers: dict = field(default_factory=dict)
 
 
@@ -421,7 +421,8 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # bed y 1.5..3.7, z -7.0..0.7, its pivot y 2.37, z -5.2; the upper tubes' mouths y 3.1, z 0.8
        camera={'model_eye': (0., 4.2, -3.0), 'model_look_at': (0., 3.0, 10.), 'third_person_distance': 13.,
                'third_person_height': 5.4},
-       eye=(0.0, 4.1, -4.6), durability=800.0, reload=16000, level=2.5, traverse=30.0,
+       # the eye rides the rack (cannon_l): on the turret the raised rack swung through its view from 32 deg up
+       eye=(0.0, 4.1, -4.6), eye_bone='cannon_l', durability=800.0, reload=16000, level=2.5, traverse=30.0,
        after='EDF6VC_CALL_XM_LARGE_BOMBER_CORE'),
     # The APC: eight wheels, a turret with twin heavy machine guns (bursts of three, every 1.3 s) and a radar; two
     # weapons on the same guns: anti-air rounds (main_weapon, both barrels) and ground rounds (core_weapon, the
@@ -450,7 +451,9 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # 2.5; the guns at x +-1.2, y 3.95, their muzzles z 5.6
        camera={'model_eye': (0., 4.7, 0.6), 'model_look_at': (0., 4.2, 10.), 'third_person_distance': 11.,
                'third_person_height': 5.6},
-       eye=(0.0, 4.95, 1.7), durability=3700.0, reload=12000, level=2.0,
+       # the eye on the turret's front edge: from z 1.7 the aim line met the turret's own top from 35 deg up
+       # (tests/gun_camera_sweep_guard.py)
+       eye=(0.0, 4.95, 2.5), durability=3700.0, reload=12000, level=2.0,
        after='EDF6VC_CALL_XM_MEDIUM_MISSILE_LAUNCHER'),
     # The cargo truck: no weapon in the game (no WeaponComp; its skeleton's turret bones have no mesh): an unarmed car
     # on the sedan's V512 (family car), its driver alone. models/xm_medium_truck_cargo: 7.0 m long, 2.65 m wide, its
@@ -493,7 +496,8 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # its muzzle y 2.95, z 1.6
        camera={'model_eye': (0., 3.1, -0.4), 'model_look_at': (0., 2.8, 8.), 'third_person_distance': 8.,
                'third_person_height': 3.6},
-       eye=(0.0, 3.35, 0.1), durability=800.0, reload=6000, level=0.8, after='EDF6VC_CALL_XM_MEDIUM_APC'),
+       # the eye rides the gun (cannon_l): on the turret the raised gun met its view from 33 deg up
+       eye=(0.0, 3.35, 0.1), eye_bone='cannon_l', durability=800.0, reload=6000, level=0.8, after='EDF6VC_CALL_XM_MEDIUM_APC'),
     # The buggy: AA missile pods either side of its turret (bursts of five, homing on air units) and a machine gun at
     # the front (core_weapon, on an attachment of the hull: a fixed mount the game aims itself). The pods are the
     # native pair (the Titan's side missile, its lock-on: Unit.homing), the gun its secondary along the turret's aim.
@@ -525,7 +529,8 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        eye=(0.0, 3.0, -0.5), durability=800.0, reload=6000, level=1.0, after='EDF6VC_CALL_XM_SMALL_HUMVEE'),
     # walkers, foot
     # The light mech: two arm guns (weapon_enemy_mg_small, one round each every 0.4 s: enemy_bullet_small_anti_core, 2
-    # anti_core), 45 health (a quarter of the battle tank's). On the Nix (pylib/xm_walker.py: the Nix's hand holders).
+    # anti_core), 45 health (a quarter of the battle tank's). On the Begaruta
+    # (V504_BEGARUTA_BLUE; pylib/xm_walker.py: its hand holders).
     _u('ground/small_mech', 'mech', '', 'ported', 'Light Mech',
        texts={'SC': ('X-Morph 轻型机甲', '请求一台人类军队的轻型机甲：双足步行机甲，两臂各一挺机枪为主攻击，两挺同时开火，'
                                      '每 0.4 秒一发（与原作相同）；装甲较薄。'),
@@ -540,7 +545,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # 2 anti_core = 240 a round (DAMAGE), every 0.4 s; the round's speed 35 as the tanks' (the coax's 6 m a frame
        # template a little faster)
        guns={'AmmoCount': 600.0, 'AmmoDamage': 240.0, 'AmmoSpeed': 8.0, 'AmmoAlive': 40.0, 'FireInterval': 24.0},
-       # level 1.6: the Nix requests' multipliers (x8.3 there) about the battle tank's (x8.1 at 1.5): 700 -> ~5800,
+       # level 1.6: the Begaruta requests' multipliers (x8.3 there) about the battle tank's (x8.1 at 1.5): 700 -> ~5800,
        # the game's 45 against the tank's 170 (20200)
        durability=700.0, reload=9000, level=1.6, after='EDF6VC_CALL_XM_MEDIUM_TRUCK_CARGO'),
     # The heavy mech: twin heavy guns on its turret (enemy_bullet_big_anti_core, 30 anti_core: four rounds 0.4 s apart,
@@ -635,10 +640,10 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                                  'its nose (short range, hard-hitting, one each); very small, thin armour.')},
        gun=('Ram Charge', '撞击炸药', '体当たり爆薬', '撞擊炸藥'),
        air={'guns': HeliArm('V_506HELI_MISSILE01.SGO', ('att_muzzle_1', 'att_muzzle_1'),
-                            ('Ram Charge', '撞击炸药', '体当たり爆薬', '撞擊炸藥'),
+                            ('Ram Charge', '体当たり爆薬', '撞擊炸藥', '撞击炸药', 'Ram Charge'),
                             {'AmmoCount': 1.0, 'AmmoDamage': 2640.0, 'AmmoExplosion': 4.5, 'FireBurstCount': 1.0,
                              'FireInterval': 60.0, 'LockonType': 0.0}),
-            'missile': HeliArm('V_506HELI_MISSILE01.SGO', ('att_muzzle_1',), ('Ram Charge', '撞击炸药', '体当たり爆薬', '撞擊炸藥'),
+            'missile': HeliArm('V_506HELI_MISSILE01.SGO', ('att_muzzle_1',), ('Ram Charge', '体当たり爆薬', '撞擊炸藥', '撞击炸药', 'Ram Charge'),
                                {'AmmoCount': 1.0, 'AmmoDamage': 2640.0, 'AmmoExplosion': 4.5, 'FireBurstCount': 1.0,
                                 'FireInterval': 60.0, 'LockonType': 0.0})},
        # models/xm_small_helicopter_core: 5.6 x 2.3 x 4.6 m: the sight over and behind it
@@ -657,11 +662,11 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                            '(a burst every 3 s, as in the game); light armour.')},
        gun=('Missile Pods', '导弹巢', 'ミサイルポッド', '飛彈巢'),
        air={'guns': HeliArm('V_506HELI_MISSILE01.SGO', ('att_left_wing_missiles_1', 'att_right_wing_missiles_1'),
-                            ('Missile Pods (outer)', '导弹巢（外侧）', 'ミサイルポッド（外側）', '飛彈巢（外側）'),
+                            ('Missile Pods (outer)', 'ミサイルポッド（外側）', '飛彈巢（外側）', '导弹巢（外侧）', 'Missile Pods (outer)'),
                             {'AmmoCount': 32.0, 'AmmoDamage': 360.0, 'AmmoExplosion': 6.0, 'FireBurstCount': 2.0,
                              'FireBurstInterval': 18.0, 'FireInterval': 180.0}),
             'missile': HeliArm('V_506HELI_MISSILE01.SGO', ('att_left_wing_missiles_2', 'att_right_wing_missiles_2'),
-                               ('Missile Pods (inner)', '导弹巢（内侧）', 'ミサイルポッド（内側）', '飛彈巢（内側）'),
+                               ('Missile Pods (inner)', 'ミサイルポッド（内側）', '飛彈巢（内側）', '导弹巢（内侧）', 'Missile Pods (inner)'),
                                {'AmmoCount': 32.0, 'AmmoDamage': 360.0, 'AmmoExplosion': 6.0, 'FireBurstCount': 4.0,
                                 'FireBurstInterval': 18.0, 'FireInterval': 180.0})},
        # models/xm_medium_helicopter_core: 10.7 x 4.0 x 11.6 m, the rotors' mast at y 2.2..3.6 over the cabin
@@ -681,12 +686,12 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                                  '(sixteen every 3 s) on the missile trigger; heavy armour.')},
        gun=('Nose Gun', '机首机炮', '機首機銃', '機首機砲'),
        air={'guns': HeliArm('V_506HELI_GATLING01_{side}.SGO', ('att_turret_1', 'att_turret_1'),
-                            ('Nose Gun', '机首机炮', '機首機銃', '機首機砲'),
+                            ('Nose Gun', '機首機銃', '機首機砲', '机首机炮', 'Nose Gun'),
                             {'AmmoCount': 600.0, 'AmmoDamage': 150.0, 'AmmoSpeed': 20.0, 'AmmoAlive': 60.0,
                              'FireInterval': 120.0, 'FireBurstCount': 3.0, 'FireBurstInterval': 4.0}),
             'missile': HeliArm('V_506HELI_MISSILE01.SGO', ('att_left_wing_missiles_inner_1', 'att_right_wing_missiles_inner_1',
                                                            'att_left_wing_missiles_outer_1', 'att_right_wing_missiles_outer_1'),
-                               ('Missile Pods', '导弹巢', 'ミサイルポッド', '飛彈巢'),
+                               ('Missile Pods', 'ミサイルポッド', '飛彈巢', '导弹巢', 'Missile Pods'),
                                {'AmmoCount': 96.0, 'AmmoDamage': 360.0, 'AmmoExplosion': 6.0, 'FireBurstCount': 16.0,
                                 'FireBurstInterval': 4.0, 'FireInterval': 180.0})},
        # models/xm_large_helicopter_core: 13.6 x 6.6 x 19.1 m
@@ -725,10 +730,10 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                         'helicopters.')},
        gun=('Twin Gun Turrets', '双机炮塔', '連装機銃塔', '雙機砲塔'),
        air={'guns': HeliArm('V_506HELI_GATLING01_{side}.SGO', ('att_left_turret_muzzle_1', 'att_right_turret_muzzle_1'),
-                            ('Gun Turrets', '机炮塔', '機銃塔', '機砲塔'),
+                            ('Gun Turrets', '機銃塔', '機砲塔', '机炮塔', 'Gun Turrets'),
                             {'AmmoCount': 600.0, 'AmmoDamage': 150.0, 'AmmoSpeed': 20.0, 'AmmoAlive': 60.0,
                              'FireInterval': 90.0, 'FireBurstCount': 6.0, 'FireBurstInterval': 6.0}),
-            'missile': HeliArm('V_506HELI_MISSILE01.SGO', ('att_bombs_1',), ('Heavy Missile', '重型导弹', '重ミサイル', '重型飛彈'),
+            'missile': HeliArm('V_506HELI_MISSILE01.SGO', ('att_bombs_1',), ('Heavy Missile', '重ミサイル', '重型飛彈', '重型导弹', 'Heavy Missile'),
                                {'AmmoCount': 8.0, 'AmmoDamage': 15000.0, 'AmmoExplosion': 18.0, 'FireBurstCount': 1.0,
                                 'FireInterval': 300.0})},
        # models/xm_large_gunship_core: 23.6 x 7.4 x 25.2 m
@@ -839,21 +844,21 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # laser pointer (a sight, no damage), its parts destroyed one by one (EDF: one durability), the side and front
     # turrets turning on their own (they fire along the main gun, as the heavy tank's machine-gun turret).
     _u('bosses/highway_tank', 'tracked', 'apocalypse', 'ported', 'JAGUAR Type S',
-       texts={'SC': ('X-Morph 美洲豹 S 型', '请求人类军队的原型超重型坦克「美洲豹 S 型」（原作首领）：全长 46 米。主炮塔的巨炮为主攻击，'
-                                       '约每十秒一发、命中处大范围冲击波；副武器（切换）为车头两组巡航火箭（各六连发）、主炮塔顶的防空导弹（十二连发）、'
-                                       '四座侧炮塔的高射炮、车头迫击炮与前炮塔的激光（照射三秒）；装甲极厚。'),
-              'CN': ('X-Morph 美洲豹 S 型', '請求人類軍隊的原型超重型坦克「美洲豹 S 型」（原作首領）：全長 46 公尺。主砲塔的巨砲為主攻擊，'
-                                       '約每十秒一發、命中處大範圍衝擊波；副武器（切換）為車頭兩組巡航火箭（各六連發）、主砲塔頂的防空飛彈（十二連發）、'
-                                       '四座側砲塔的高射砲、車頭迫擊砲與前砲塔的雷射（照射三秒）；裝甲極厚。'),
-              'JA': ('X-Morph ジャガー S 型', '人類軍の試作超重戦車「ジャガー S 型」（原作のボス）を要請する。全長 46 m。主砲塔の巨砲'
-                                        '（約 10 秒に 1 発、着弾点に広い衝撃波）を主攻撃とする。副武器（切替）は車体前部の巡航ロケット 2 基（各 6 連射）、'
-                                        '主砲塔上の対空ミサイル（12 連射）、側面砲塔 4 基の高射砲、前部の迫撃砲、前部砲塔のレーザー（3 秒照射）。装甲は極めて厚い。'),
+       texts={'SC': ('X-Morph 美洲豹 S 型', '请求人类军队的原型超重型坦克「美洲豹 S 型」（原作首领）：全长约 32 米。主炮塔的巨炮为主攻击，'
+                                       '约每十秒一发、命中处大范围冲击波；车头两组巡航火箭（各六连发）、主炮塔顶的防空导弹（十二连发）、'
+                                       '四座侧炮塔的高射炮、车头迫击炮与前炮塔的激光（照射三秒）各用一个开火键、与主炮同时发射，防空导弹和高射炮可当自动炮塔；装甲极厚。'),
+              'CN': ('X-Morph 美洲豹 S 型', '請求人類軍隊的原型超重型坦克「美洲豹 S 型」（原作首領）：全長約 32 公尺。主砲塔的巨砲為主攻擊，'
+                                       '約每十秒一發、命中處大範圍衝擊波；車頭兩組巡航火箭（各六連發）、主砲塔頂的防空飛彈（十二連發）、'
+                                       '四座側砲塔的高射砲、車頭迫擊砲與前砲塔的雷射（照射三秒）各用一個開火鍵、與主砲同時發射，防空飛彈和高射砲可當自動砲塔；裝甲極厚。'),
+              'JA': ('X-Morph ジャガー S 型', '人類軍の試作超重戦車「ジャガー S 型」（原作のボス）を要請する。全長約 32 m。主砲塔の巨砲'
+                                        '（約 10 秒に 1 発、着弾点に広い衝撃波）を主攻撃とする。車体前部の巡航ロケット 2 基（各 6 連射）、'
+                                        '主砲塔上の対空ミサイル（12 連射）、側面砲塔 4 基の高射砲、前部の迫撃砲、前部砲塔のレーザー（3 秒照射）はそれぞれ専用の発射キーで主砲と同時に撃てる。対空ミサイルと高射砲は自動砲塔にもなる。装甲は極めて厚い。'),
               'EN': ('X-Morph JAGUAR Type S', "Requests the human army's prototype super-heavy tank JAGUAR Type S (a boss in "
-                                              "the game): 46 m long. Its main turret's great gun on the primary attack, a "
-                                              'round about every 10 s with a wide shock wave where it hits; on the secondary '
-                                              '(switched) the two front cruise rocket pods (six each), the AA missiles on '
+                                              "the game): about 32 m long. Its main turret's great gun on the primary attack, a "
+                                              'round about every 10 s with a wide shock wave where it hits; each on its own '
+                                              'fire key with the gun: the two front cruise rocket pods (six each), the AA missiles on '
                                               "the main turret (twelve), the four side turrets' flak, the front mortar and "
-                                              "the front turret's laser (a 3 s beam); extremely heavy armour.")},
+                                              "the front turret's laser (a 3 s beam); the AA missiles and the flak can be auto turrets; extremely heavy armour.")},
        gun=('Great Gun', '巨炮', '巨砲', '巨砲'),
        # main_turret_projectile: fire_rate 10, 500 (anti_core: DAMAGE) and a ShockWave radius 16 (x BLAST)
        guns={'AmmoCount': 20.0, 'AmmoDamage': 60000.0, 'AmmoExplosion': 24.0, 'FireInterval': 1200.0},
@@ -864,7 +869,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  missile={'model': 'Cruise rocket', 'look': ('bullet_missile', 2.5), 'burn': 3.0, 'top': 200.0,
                           'accel': 150.0, 'max_g': 6.0, 'nav': 3.0, 'life': 15.0, 'damage': 3960.0, 'blast': 12.0,
                           'lock_range': 1500.0, 'lock_cone': 0.6, 'lock_time': 20.0, 'burst': 6.0, 'burst_gap': 30.0,
-                          'interval': 600.0}),
+                          'interval': 600.0}, fire=2),
              Arm('aam', ('main_turret_anti_player_missiles_left', 'main_turret_anti_player_missiles_right'), 'air',
                  ('AA missiles', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), 48,
                  # main_turret_anti_player_missiles_left / _right: fire_rate 30 / 26, twelve 0.5 s apart
@@ -872,7 +877,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 450.0, 'blast': 4.5,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 12.0, 'burst_gap': 30.0,
-                          'interval': 1680.0}),
+                          'interval': 1680.0}, fire=3, auto=True),
              Arm('flak', ('side_left_front_turret', 'side_right_front_turret', 'side_left_back_turret',
                           'side_right_back_turret'), 'gun',
                  ('Flak', '高射砲', '高射砲', '高射炮', '고사포'), 120, 'cannon_l',
@@ -880,18 +885,18 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  # 20 anti_player, Area 12): the four together a shell every 2.25 s
                  shell=('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
                  numbers={'AmmoDamage': 600.0, 'AmmoExplosion': 18.0, 'AmmoSpeed': 30.0, 'FireInterval': 135.0,
-                          'FireBurstCount': 1.0}),
+                          'FireBurstCount': 1.0}, fire=4, auto=True),
              Arm('mortar', ('front_mortar',), 'gun', ('Mortar', '迫撃砲', '迫擊砲', '迫击炮', '박격포'), 10, 'cannon_l',
                  # front_mortar: ArtilleryWeaponDef, fire_rate 18 (enemy_artillery_boss_tank: 333 artillery, Area 10):
                  # the grenade launcher's lobbed round
                  shell=('V603_FLAK_GLGUN01_DLC_L.SGO', 'GrenadeBullet01_MapNoDamage', 'he'),
-                 numbers={'AmmoDamage': 39960.0, 'AmmoExplosion': 15.0, 'FireInterval': 1080.0, 'FireBurstCount': 1.0}),
+                 numbers={'AmmoDamage': 39960.0, 'AmmoExplosion': 15.0, 'FireInterval': 1080.0, 'FireBurstCount': 1.0}, fire=5),
              Arm('laser', ('front_turret',), 'gun', ('Laser', 'レーザー', '雷射', '激光', '레이저'), 900, 'cannon_l',
                  # front_turret: BeamWeaponDef, fire_delay 22, fire_duration 3 (enemy_laser_highway_tank: 100 a second,
                  # through three): the advanced tank's pulse stream (a pulse every 4 frames), 3 s every 25 s
                  shell=('V_506HELI_LASERCANNON01_L.SGO', 'LaserBullet01', 'mg'),
                  numbers={'AmmoDamage': 800.0, 'AmmoSpeed': 40.0, 'AmmoAlive': 20.0, 'AmmoIsPenetration': 1.0,
-                          'FireInterval': 1500.0, 'FireBurstCount': 45.0, 'FireBurstInterval': 4.0})),
+                          'FireInterval': 1500.0, 'FireBurstCount': 45.0, 'FireBurstInterval': 4.0}, fire=6)),
        # models/xm_highway_tank: 46 m long, 28 m wide; the main turret's ring y 16.25 at z -1.8, its roof ~y 21, the
        # gun's trunnion y 16.2 at z 3.2, its muzzle z 23.1
        camera={'model_eye': (0., 21.5, 0.), 'model_look_at': (0., 18., 40.), 'third_person_distance': 45.,

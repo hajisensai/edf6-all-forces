@@ -7,9 +7,10 @@
 // no target at all. So a vehicle whose nearest enemy stood behind a building or a hill held its fire at every other
 // enemy in its guns' reach until the swarm closed in and the nearest came into view (the tester's log: the PzH 2000
 // under an NPC driver without a target for a minute, then firing only at 29-99 m).
-// The hook keeps the stock answer when there is one; when the stock rejected its nearest, the next nearest enemies
-// (by the stock's own score) are put to the same 0x62DE60, the first that passes is the target. The reach, the arc
-// and the ray stay the stock's; nothing here decides a range of its own.
+// The hook keeps the stock answer when there is one; when the stock rejected its nearest (0x54C4B0's pick, asked
+// again so it is not tried twice), the next nearest enemies (by the stock's distance score) are put to the same
+// 0x62DE60, the first that passes is the target. The reach, the arc and the ray stay the stock's; nothing here
+// decides a range of its own.
 #include "crew.h"
 #include "memory.h"
 #include <algorithm>
@@ -22,8 +23,9 @@
 namespace crew {
 namespace {
 constexpr std::size_t kSlotSearch=14;
-constexpr unsigned kSearch=0x630890,kInReach=0x62DE60,kVisitEnemies=0x5E0F20,kTeams=0x20B2978;
+constexpr unsigned kSearch=0x630890,kNearest=0x54C4B0,kInReach=0x62DE60,kVisitEnemies=0x5E0F20,kTeams=0x20B2978;
 constexpr unsigned char kSearchSig[]={0x48,0x89,0x5C,0x24,0x08,0x57,0x48,0x83,0xEC,0x20,0x48,0x8B,0xF9,0xE8,0x0E,0xBC};
+constexpr unsigned char kNearestSig[]={0x48,0x83,0xEC,0x68,0x0F,0xB6,0x81,0xA0,0x04,0x00,0x00,0x48,0x8D,0x15};
 constexpr unsigned char kInReachSig[]={0x48,0x8B,0xC4,0x48,0x89,0x58,0x18,0x55,0x56,0x57,0x41,0x54,0x41,0x55,0x41,0x56};
 constexpr unsigned char kVisitSig[]={0x48,0x89,0x5C,0x24,0x10,0x48,0x89,0x6C,0x24,0x18,0x56,0x57,0x41,0x55,0x41,0x56};
 // Every class whose slot 14 is 0x630890 and whose AI action (slot 72) is CarBase's 0x661440 (scanned off .rdata:
@@ -37,6 +39,7 @@ constexpr int kMaxEnemies=128;   // enemies a walk keeps (the nearest by score; 
 constexpr int kTries=8;          // the next nearest put to the stock check (each casts its rays)
 
 using SearchFn=void*(__fastcall*)(void*);
+using NearestFn=const unsigned char*(__fastcall*)(void*);
 using InReachFn=bool(__fastcall*)(void*,const float*);
 SearchFn nextSearch[kVt]{};
 bool ready=false;
@@ -46,7 +49,9 @@ struct Walk { const void* const* vtable; const unsigned char* self; float from[3
 using VisitFn=void(__fastcall*)(void*,std::int32_t,Walk*);
 
 // The stock walk's per-object step (0x54A3B0): an active enemy (+0x39C none but bit 1), its score its distance from
-// the vehicle, times its weight when the vehicle weighs them.
+// the vehicle, times its weight when the vehicle weighs them. (The stock also divides the score of the object its
+// +0x548 handle resolves to by +0x538, a held target's bonus, through 0x30C0F0; that is left out here, so the nearest
+// by this score need not be the one the stock picked and rejected: NextInReach asks 0x54C4B0 for that one.)
 void Consider(Walk& w,const unsigned char* o) noexcept {
     if(!o || o==w.self || !Readable(o,kObjWeight+4) || (At<std::uint32_t>(o,kObjState)&~2u))return;
     const float* p=reinterpret_cast<const float*>(o+kObjPos);
@@ -75,9 +80,12 @@ const float* LockPoint(const unsigned char* o) noexcept {
 void* NextInReach(unsigned char* v) noexcept {
     const auto teams=At<void*>(image,kTeams);
     if(!teams)return nullptr;
-    static Walk w;   // game thread (object update); too big for the stack frame the stock gives slot 14
+    // the nearest 0x630890 just put to 0x62DE60 and that failed: its own pick, the same walk on the same frame
+    const unsigned char* const rejected=reinterpret_cast<NearestFn>(image+kNearest)(v);
+    Walk w;   // about 2 KB on this hook's own frame (c[] is filled up to n, never read past it)
     w.vtable=kWalkVtable;w.self=v;std::memcpy(w.from,v+kObjPos,12);w.weighted=v[kWeighted]!=0;w.n=0;
     reinterpret_cast<VisitFn>(image+kVisitEnemies)(teams,At<std::int32_t>(v,kTeam),&w);
+    w.n=static_cast<int>(std::remove_if(w.c,w.c+w.n,[rejected](const Candidate& c){return c.obj==rejected;})-w.c);
     const int tries=w.n<kTries ? w.n : kTries;
     std::partial_sort(w.c,w.c+tries,w.c+w.n,[](const Candidate& a,const Candidate& b){return a.score<b.score;});
     const auto inReach=reinterpret_cast<InReachFn>(image+kInReach);
@@ -110,10 +118,11 @@ bool InstallVehicleTargetSearch() noexcept {
     bool matches=false;
     __try {
         matches=edf::Matches(image,kSearch,kSearchSig,sizeof(kSearchSig)) &&
+                edf::Matches(image,kNearest,kNearestSig,sizeof(kNearestSig)) &&
                 edf::Matches(image,kInReach,kInReachSig,sizeof(kInReachSig)) &&
                 edf::Matches(image,kVisitEnemies,kVisitSig,sizeof(kVisitSig));
     } __except(EXCEPTION_EXECUTE_HANDLER) {}
-    if(!matches){Log("VEHTARGET off: the stock target search / reach check / enemy walk differ");return false;}
+    if(!matches){Log("VEHTARGET off: the stock target search / nearest pick / reach check / enemy walk differ");return false;}
     int hooked=0;
     for(int i=0;i<kVt;++i) {
         auto slot=reinterpret_cast<void**>(image+kVtables[i])+kSlotSearch;

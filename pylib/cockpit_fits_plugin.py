@@ -193,7 +193,7 @@ FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, u.eye_bone, xm_units.eye(u), 're
              for u in xm_units.v603()})
 # ... and a car's (xm_units car): its driver's eye in its cab kit (xm_units.Unit.cab), as the Katyusha's truck cab.
 FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, 'body', u.eye, u.cab),) for u in xm_units.v512()})
-# The X-Morph walkers (pylib/xm_walker.py): the host's skeleton and seats, so the host model's cockpits (the Nix's
+# The X-Morph walkers (pylib/xm_walker.py): the host's skeleton and seats, so the host model's cockpits (the Begaruta's
 # enclosed station, the Proteus's gunners' remote displays) on the same bones. The heavy mech's turret is not the
 # Proteus's neck pod (its enclosed kit crosses the X-Morph turret): its pilot's sight over the turret's front slope
 # (the turret's front at x 0 reaches z 2.8 at y 14, behind z 0 above y 15; its roof y 17.4).

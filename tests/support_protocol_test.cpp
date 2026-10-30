@@ -602,6 +602,21 @@ void TransportResume() {
      for(const auto& n:r.nodes)Check(n->session->Ready() && n->session->IsActive(1) && n->destroys==0,"every machine ready, the support kept");
      r.Step(2100);Check(r.Submit(1,5),"the next call");r.Settle();
      for(const auto& n:r.nodes)Check(n->session->ActiveCount()==2,"made everywhere");}
+    // 2026-10-30 review: the two ends of a re-handshake hold different things (the host cancelled its copy, the guest has
+    // not heard the cancellation yet). Neither starts its ids over: the host's cancellation reaches the guest in the new
+    // epoch (no orphan) and the next call takes a newer id the guest's slot accepts (no slot held for good).
+    {Room r(2);
+     Check(r.Submit(1,5),"a call");r.Settle();
+     r.dropTo=1;r.dropKind=Kind::cancel;
+     r.With(0);r.nodes[0]->session->Failed(1);r.Settle();
+     Check(!r.nodes[0]->active[1] && r.nodes[1]->active[1],"the host's copy cancelled, its cancellation lost on the way");
+     r.With(1);r.nodes[1]->session->Suspend();r.nodes[1]->session->Start(false,1,r.Peer(1,0),r.now);r.Settle();
+     Check(r.nodes[1]->session->Ready(),"the guest resumed with a new challenge");
+     r.dropTo=999;r.Step(1100);r.Settle();
+     Check(!r.nodes[1]->active[1] && r.nodes[1]->session->ActiveCount()==0,"the host's kept cancellation reaches the guest after the re-handshake");
+     r.Step(2100);Check(r.Submit(1,5),"the next call");r.Settle();
+     Check(LastFor(r,1)==RequestStatus::active,"the next call is made");
+     for(const auto& n:r.nodes)Check(n->session->ActiveCount()==1,"made on both ends: its id is newer than the guest's old slot");}
     // A call in flight when the link goes: told interrupted, rolled back; the kept one stays.
     {Room r(2);
      Check(r.Submit(1,5),"a call");r.Settle();

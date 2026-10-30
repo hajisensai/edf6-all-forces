@@ -178,6 +178,44 @@ class Materials:
                     return words[1]
         return None
 
+    def _pass_value(self, name: str, keys: tuple[str, ...]) -> tuple[str, str] | None:
+        """(key, value) of the first of `keys` the material's pass sets (Ogre: a child block that does not set a pass
+        attribute keeps its parent's; within one pass the last line wins), None when no block of the chain sets any."""
+        for n in self.chain(name):
+            block = self.blocks[n]
+            for node in [block, *block.find('pass')]:
+                found = [(k, node.values[k][-1].strip()) for k in keys if node.values.get(k)]
+                if found:
+                    return found[-1]
+        return None
+
+    def alpha(self, name: str) -> tuple[str, int]:
+        """(how the material uses its diffuse's alpha, the alpha-test threshold 0..255) from its pass's
+        alpha_rejection / scene_blend / separate_scene_blend along the inheritance chain:
+            'clip'    an alpha test (base/default_alpha_test, base/deferred_vegetation: `alpha_rejection
+                      greater_equal 128`)
+            'blend'   an alpha blend of the colour (`scene_blend alpha_blend`: base/default_alpha_blend,
+                      base/roads_alpha_blend; `separate_scene_blend src_alpha one_minus_src_alpha ...`: the static
+                      decals)
+            'opaque'  neither (base/default and every material inheriting it untouched: electric_box_01,
+                      billboard_large_01, whatever alpha their diffuse carries); an additive / modulating blend
+                      (`add`, `modulate`, `one one`: glows, effects) does not read the alpha either"""
+        rej = self._pass_value(name, ('alpha_rejection',))
+        words = rej[1].split() if rej else []
+        if words and words[0] != 'always_pass':
+            # the texels it rejects are those below the threshold; another compare function (none in the game's
+            # scripts) keeps the test whatever the texture holds
+            v = int(float(words[1])) if len(words) > 1 else 0
+            return 'clip', {'greater_equal': v, 'greater': v + 1}.get(words[0], 256)
+        blend = self._pass_value(name, ('scene_blend', 'separate_scene_blend'))
+        if blend:
+            words = blend[1].split()
+            if blend[0] == 'separate_scene_blend':        # colour then alpha: 2 simple words or 4 factors
+                words = words[:1] if len(words) == 2 else words[:2]
+            if words in (['alpha_blend'], ['src_alpha', 'one_minus_src_alpha']):
+                return 'blend', 0
+        return 'opaque', 0
+
     def units(self, name: str) -> list[str]:
         """The `texture_unit { texture <path> }` paths of the block's first pass, in order (terrain / cliff layers)."""
         out = []
@@ -208,10 +246,20 @@ class Images:
         return self.packs.exists(path)
 
 
-def alpha_mode(rgba: np.ndarray) -> str:
-    """'clip' when a real share of the texture is see-through (foliage, fences, decals), else 'opaque'."""
-    a = rgba[..., 3]
-    return 'clip' if np.count_nonzero(a < 128) > a.size * 0.01 else 'opaque'
+BLEND_CLIP = 128    # the alpha test an alpha-blended map surface (roads, decals) is drawn with (alpha_clip 0.5)
+
+
+def alpha_mode(material_mode: str, threshold: int, rgba: np.ndarray) -> str:
+    """The scene texture's mode from its material's (Materials.alpha): an opaque material is 'opaque' whatever its
+    diffuse's alpha holds (electric_box_01's, billboard_large_01's carry one that base/default never reads); an
+    alpha test, and an alpha blend (EDF's map shaders draw roads and decals alpha-tested; 'blend' is the water's), is
+    'clip'. The pixels only pick the storage: a test that rejects no texel of the texture draws as the opaque
+    material does and is stored as one (DXT1, no alpha clip)."""
+    if material_mode == 'opaque':
+        return 'opaque'
+    if material_mode == 'blend':
+        threshold = BLEND_CLIP
+    return 'clip' if np.any(rgba[..., 3] < threshold) else 'opaque'
 
 
 def _fit(img, limit: int):  # noqa: ANN001, ANN202 - PIL image
@@ -311,12 +359,14 @@ class Reader:
             self.scene.skipped[f'material without a diffuse: {material}'] += 1
             return None
 
+        material_mode, threshold = self.mats.alpha(material)
+
         def make():  # noqa: ANN202
             from PIL import Image
             rgba = self.images.get(path)
-            mode = alpha_mode(rgba)
-            return _fit(Image.fromarray(rgba, 'RGBA'), PROP_TEX_MAX), mode
-        return self.texture(('mat', path), make)
+            return _fit(Image.fromarray(rgba, 'RGBA'), PROP_TEX_MAX), alpha_mode(material_mode, threshold, rgba)
+        # one image drawn by an opaque and by an alpha-tested material is two scene textures (their modes differ)
+        return self.texture(('mat', path, material_mode, threshold), make)
 
     def water_tex(self) -> str:
         def make():  # noqa: ANN202

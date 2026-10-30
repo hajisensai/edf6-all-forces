@@ -31,8 +31,10 @@
 //    key of their own, the second trigger (the V603's otherwise unread one: its weapons one launcher's rounds, cycled on
 //    VehicleSecondarySwitchKey) or one of the extra keys VehicleFire3Key..6 (one weapon each), held at once with the
 //    primary; and an auto turret (StoreSpec::autoTurret) fires itself with the auto turrets on (VehicleAutoTurretKey):
-//    a missile once its lock holds, a gun laid on an enemy in its reach (HasShot). An NPC crew fires them all
-//    (NpcSecondarySelect, NpcOwnWeaponsFire). Every one of them is pulled through FireSeat (ControlOf: who pulls it).
+//    a missile once its lock holds, a gun laid on an enemy in its reach (HasShot), pulled only on the frames it can
+//    fire (SelfFire). An NPC crew fires them all (NpcSecondarySelect, NpcOwnWeaponsFire). A gunner seat's own turret
+//    fires itself only with nobody in that seat (UnmannedTurretsFire): its rider fires it on the seat's trigger. Every
+//    one of them is pulled through FireSeat (ControlOf: who pulls it).
 #include "crew.h"
 #include "jetaudio.h"
 #include "layout.h"
@@ -645,7 +647,8 @@ bool PlayerKeyHeld(const unsigned char* seat,int vk,int mask) noexcept {
 
 // Whether weapon `w` on `v` has a shot of its own now (HasShot: an auto turret's, an NPC crew's own-key weapon or coax):
 // a homing one once the game's lock (lockon.cpp, the lock it would fire on) holds a target it may engage
-// (NpcWeaponCandidate: an anti-air missile only at an aircraft); a gun with an enemy in its reach within its cone of its
+// (NpcWeaponCandidate: an anti-air missile only at an aircraft; the lock forms with no pull, SelfFire below, and a pull
+// with none fires nothing); a gun with an enemy in its reach within its cone of its
 // muzzle's line and no friend in that line: `target`, or with none (an auto turret) any enemy of the vehicle's. A coax's
 // reach is its own, at most kCoaxNpcM (a 7.62 mm's point-target reach), any target; another gun's is NpcWeaponCandidate's.
 // It aims nothing: it fires along its holder's bone, which the seat's turret turns.
@@ -700,6 +703,42 @@ bool Pull(unsigned char* w) noexcept {
     w[kWeaponTrigger]=1;
     return true;
 }
+// A weapon the plugin fires by itself (SelfFire: an auto turret, an NPC crew's coax and own-key weapons), as the game's
+// Weapon_VehicleShoot runs it (every store and stock vehicle weapon: the stores' missiles are V_506HELI_MISSILE01's, the
+// guns the stock vehicle guns'; its update 0x6B3850, its one fire state 0x6B3970):
+//  - its lock: the update calls the lock tick 0x6963A0 every frame (0x6B386B), pulled or not (for LockonType 1/2 the tick
+//    asks only that the weapon is mounted +0x13E, can fire 0x691040 and is in no burst +0xE18), so a lock forms with no
+//    pull (the base update's drop of an unfinished lock, 0x6935EA, reads the flag +0xBF0 that tick sets every frame:
+//    the trigger-held tick of docs/lockon-re.md §2 is the other weapon classes', 0x69EA7C / 0x69EBF2). Its fire 0x690BB0
+//    needs a lock (0x690C3D): a homing one is pulled once WeaponLockObject holds a target (HasShot);
+//  - its pull: the fire state shoots on the latch held this frame (+0x13A) when FireBurstCount (+0x370) is 1, else only on
+//    its edge (+0x13D, held now and not the frame before: 0x691080), and only when it can fire (0x691040: rounds, no delay
+//    +0x144, its cooldown +0xE0C under FLT_EPSILON, +0x145C bit 0 clear). A latch held through its cooldown is one edge: a
+//    burst weapon (the X-Morph AAM pods' bursts of 5 and 20, the gunner turrets' bursts) fired once and never again while
+//    its target stayed. So it is pulled only on a frame it fires (SelfReady: read before this frame's update, its delay and
+//    cooldown as that update leaves them, twin_cadence.h After) and let go between: every shot a fresh edge.
+// selfFireOk: those bytes as read (InstallPayload); otherwise nothing fires itself (logged).
+constexpr std::size_t kWeaponDelay=0x144,kWeaponBurstLeft=0xE18,kWeaponCooling=0xE0C,kWeaponCoolStep=0xE10,kWeaponFireBlock=0x145C;
+bool selfFireOk=false;
+bool SelfReady(const unsigned char* w) noexcept {
+    if(!Readable(w,kWeaponFireBlock+1))return false;
+    if(At<std::int32_t>(w,kWeaponAmmo)<=0 || At<std::int32_t>(w,kWeaponBurstLeft)>0 || At<std::uint32_t>(w,kWeaponDelay)>1)return false;
+    const float cooling=At<float>(w,kWeaponCooling),step=At<float>(w,kWeaponCoolStep);
+    if(!std::isfinite(cooling) || !std::isfinite(step))return false;
+    const float after=cooling-step>0.0f ? cooling-step : 0.0f;   // 0x693A64
+    return after<twin::kReady && (At<std::uint8_t>(w,kWeaponFireBlock)&1u)==0;
+}
+bool SelfFire(const unsigned char* v,const unsigned char* w,const void* target,LineBlocked blocked) noexcept {
+    return selfFireOk && SelfReady(w) && HasShot(v,w,target,blocked);
+}
+constexpr unsigned kShootUpdate=0x6B3850,kShootFireState=0x6B3970,kBaseUpdate=0x6934F0,kLockTick=0x6963A0,kTriggerOf=0x691080,
+                   kCanFire=0x691040,kShootFire=0x690BB0,kDelayStep=0x693630;
+const unsigned char kTriggerOfCode[]={0x83,0xB9,0x70,0x03,0x00,0x00,0x01,0x7F,0x11,0x80,0xB9,0x43,0x01,0x00,0x00,0x00,0x75,0x08,
+                                      0x0F,0xB6,0x81,0x3A,0x01,0x00,0x00,0xC3,0x0F,0xB6,0x81,0x3D,0x01,0x00,0x00,0xC3};
+const unsigned char kCanFireCode[]={0x83,0xB9,0xE8,0x0B,0x00,0x00,0x00,0x7E,0x26,0x83,0xB9,0x44,0x01,0x00,0x00,0x00,0x75,0x1D,
+                                    0xF3,0x0F,0x10,0x05,0x26,0x59,0x5A,0x01,0x0F,0x2F,0x81,0x0C,0x0E,0x00,0x00,0x76,0x0C,
+                                    0xF6,0x81,0x5C,0x14,0x00,0x00,0x01,0x75,0x03,0xB0,0x01,0xC3,0x32,0xC0,0xC3};
+const unsigned char kDelayStepCode[]={0x8B,0x86,0x44,0x01,0x00,0x00,0x85,0xC0,0x74,0x08,0xFF,0xC8,0x89,0x86,0x44,0x01,0x00,0x00};
 // What a seat's controls ask of its own weapons (ControlOf: not `cycle`) this frame: a player's held controls and auto
 // turrets, or an NPC crew's target.
 struct SeatIntent {
@@ -707,7 +746,9 @@ struct SeatIntent {
     const unsigned char* secondPick=nullptr;   // ...the round its cycle picked (Switch, NpcSecondarySelect); nullptr any
     bool coax=false;                           // the coax's trigger held (the player's second trigger, FireOf `secondary`)
     bool keys[kFireLastKey+1]{};               // the extra fire keys held
-    bool autoOn=false;                         // the auto turrets on: each fires itself on a shot at any enemy
+    bool autoOn=false;                         // the auto turrets on: each fires itself on a shot at any enemy...
+    bool unmanned=false;                       // ...a gunner seat's own one only with nobody in its seat (UnmannedTurretsFire):
+                                               // its rider fires it on the seat's trigger (kSeatTriggerKey)
     const void* crew=nullptr;                  // an NPC crew's target: its coax and extra-key weapons fire on a shot at it
     LineBlocked blocked=nullptr;
 };
@@ -720,16 +761,19 @@ bool FireSeat(const unsigned char* v,Class c,unsigned char* const* ws,const Payl
         switch(k.source) {
             case Source::coax:
                 pull=Cfg().stockStores && ((in.coax && r.entry[i].fire==PayloadFire::secondary && !Spent(ws[i])) ||
-                                           (in.crew && HasShot(v,ws[i],in.crew,in.blocked)));
+                                           (in.crew && SelfFire(v,ws[i],in.crew,in.blocked)));
                 break;
             case Source::second:   // one launcher's rounds: the round picked alone
                 pull=(!in.secondPick || ws[i]==in.secondPick) &&
-                     ((in.second && r.entry[i].rounds>0) || (k.autoTurret && in.autoOn && in.secondPick && HasShot(v,ws[i],nullptr,in.blocked)));
+                     ((in.second && r.entry[i].rounds>0) || (k.autoTurret && in.autoOn && in.secondPick && SelfFire(v,ws[i],nullptr,in.blocked)));
                 break;
-            case Source::key:
-                pull=!Spent(ws[i]) && (in.keys[k.key] || (k.autoTurret && in.autoOn && HasShot(v,ws[i],nullptr,in.blocked)) ||
-                                       (in.crew && HasShot(v,ws[i],in.crew,in.blocked)));
+            case Source::key: {
+                // A gunner seat's own turret is its rider's to fire: by itself only with nobody in the seat.
+                const bool autoFire=k.autoTurret && in.autoOn && (k.key!=kSeatTriggerKey || in.unmanned);
+                pull=!Spent(ws[i]) && (in.keys[k.key] || (autoFire && SelfFire(v,ws[i],nullptr,in.blocked)) ||
+                                       (in.crew && SelfFire(v,ws[i],in.crew,in.blocked)));
                 break;
+            }
             case Source::cycle: break;
         }
         if(pull && Pull(ws[i]))fired=true;
@@ -918,6 +962,8 @@ void PayloadFrame(unsigned char* v) noexcept {
     //  - the extra fire keys, each its one weapon, held at once with the triggers;
     //  - the auto turrets with them on (their switch VehicleAutoTurretKey / -Button, only where the seat has one): each
     //    fires itself when it has a shot (HasShot), whatever its key. The second trigger's is only the round picked.
+    // A gunner seat's own turret with this player in its seat is theirs to fire (FireSeat): no auto turret on this seat.
+    for(int i=0;i<r.count;++i)if(r.entry[i].key==kSeatTriggerKey)r.entry[i].autoTurret=false;
     for(int i=0;i<r.count;++i)r.autoTurrets+=r.entry[i].autoTurret ? 1 : 0;
     // The gunner seats' unmanned ones: their switch is this player's where this machine runs them (RunsUnmannedTurrets).
     if(RunsUnmannedTurrets(v))r.autoTurrets+=SeatAutoTurrets(v,static_cast<unsigned>(seat));
@@ -1085,10 +1131,11 @@ bool UnmannedTurretsFire(unsigned char* v,unsigned seat) noexcept {
     __try {
         if(!pullOk || !Cfg().enabled || !v || v[kDead] || BodyOf(v)!=PluginBody::none || seat>=SeatCount(v))return false;
         if(SeatRider(SeatAt(v,seat))!=Rider::none)return false;   // a dummy rider is an NPC gunner's (AiGunner)
+        if(!RunsUnmannedTurrets(v))return false;   // another machine runs them (seat 0's player's, or the authority)
         PayloadReadout r{};unsigned char* ws[kMostPayload]{};
         const Class c=ClassOf(v);r.count=ReadSeat(v,seat,c,ws,r,false);
         SeatIntent in{};
-        in.autoOn=true;in.blocked=&FriendInLine;
+        in.autoOn=true;in.unmanned=true;in.blocked=&FriendInLine;
         return FireSeat(v,c,ws,r,in);
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
@@ -1330,6 +1377,14 @@ bool InstallPayload() noexcept {
                Matches(kCooldownStepAt,kCooldownStepCode,sizeof(kCooldownStepCode)) &&
                Matches(kLatchReadAt,kLatchReadCode,sizeof(kLatchReadCode));
         Log("HOOK twin barrels in turn=%d (the BMPT's 2A42 pair fires left, right, left)",twinOk);
+        // Weapon_VehicleShoot as SelfReady / SelfFire read it: its update's base step then lock tick, its fire state's
+        // trigger test and fire, the can-fire test and the delay step those mirror.
+        selfFireOk=CallsTo(kShootUpdate+0x10,kBaseUpdate) && CallsTo(kShootUpdate+0x1B,kLockTick) &&
+                   CallsTo(kShootFireState+0x0D,kTriggerOf) && CallsTo(kShootFireState+0x45,kShootFire) &&
+                   Matches(kTriggerOf,kTriggerOfCode,sizeof(kTriggerOfCode)) && Matches(kCanFire,kCanFireCode,sizeof(kCanFireCode)) &&
+                   Matches(kDelayStep,kDelayStepCode,sizeof(kDelayStepCode)) &&
+                   Matches(kCooldownStepAt,kCooldownStepCode,sizeof(kCooldownStepCode));
+        Log("HOOK weapons firing themselves=%d (auto turrets, an NPC crew's coax and own keys: pulled on the frames they fire)",selfFireOk);
         if(!Matches(kPull,kPullCode,sizeof(kPullCode))) {
             Log("HOOK payload=0 (unexpected EDF.dll code at the holder pull: the stock vehicles' stores do not switch)");
             return false;

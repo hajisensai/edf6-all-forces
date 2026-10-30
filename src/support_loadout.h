@@ -145,6 +145,9 @@ inline bool ParseSupportPreset(const wchar_t* text,int seatCount,SupportPreset* 
         const wchar_t* at=Find(a,plus,L'@');
         SupportWeapon kind;
         if(!ParseSupportKind(a,at,&kind)){Say(why,whyCapacity,L"未知兵种：",a,at);return false;}
+        // A kind whose bodies this install lacks (support_call.h SupportKindInstalled: the X-Morph model pack) is never
+        // composed: the value is refused whole, the reason named, like any other fault.
+        if(!SupportKindInstalled(kind)){Say(why,whyCapacity,L"该兵种未安装（缺少 X-Morph 模型包）：",a,at);return false;}
         SupportLook look;
         if(!SupportKindHasLooks(kind) && (at<plus || plus<star)) {
             Say(why,whyCapacity,L"X-Morph 步兵没有涂装与背包：",a,star);return false;

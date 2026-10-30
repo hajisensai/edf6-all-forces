@@ -562,6 +562,7 @@ HUDTEXT(supportLegacyPeers,L"Support: an older All Forces in the room, so rifles
 // --- The support bar's composition panel (hud.cpp MapComposePanel; the user, 2026-10-09: "支援栏是断剑那种，先点载具，然后选里面的人") ---
 HUDTEXT(supportLoadoutLegacyPeers,L"Support: an older All Forces in the room, so the call's own soldiers this time (the chosen load was not sent)",L"支援：房间里有旧版全军出击，本次按默认兵员出动（自选编组未同步）",L"支援：房間裡有舊版全軍出擊，本次按預設兵員出動（自選編組未同步）",L"支援：旧版の全軍出撃の参加者がいるため、今回は既定の兵員で出撃します（編成は同期されません）")
 HUDTEXT(supportLoadoutTooMany,L"More soldiers than this support has seats",L"兵员超过该支援的座位数",L"兵員超過該支援的座位數",L"兵員がこの支援の座席数を超えています")
+HUDTEXT(supportKindNotInstalled,L"Support: X-Morph infantry is not installed (the X-Morph model pack is missing)",L"支援：X-Morph 步兵未安装（缺少 X-Morph 模型包）",L"支援：X-Morph 步兵未安裝（缺少 X-Morph 模型包）",L"支援：X-Morph 歩兵がインストールされていません（X-Morph モデルパックがありません）")
 HUDTEXT(composeSeats,L"%ls  seats %d / %d",L"%ls  座位 %d / %d",L"%ls  座位 %d / %d",L"%ls  座席 %d / %d")
 HUDTEXT(composeHint,L"Click a kind to add a squad, a squad to take it out; left click the map to send",L"点兵种加一个小队，点小队移除；左键点地图投送",L"點兵種加一個小隊，點小隊移除；左鍵點地圖投送",L"兵種をクリックで分隊を追加、分隊をクリックで外す。マップを左クリックで投入")
 HUDTEXT(composeAddTip,L"%ls squad: add one (%d seats; %d left)",L"%ls小队：加一个（占 %d 座，剩 %d 座）",L"%ls小隊：加一個（佔 %d 座，剩 %d 座）",L"%ls分隊：追加（%d 席使用、残り %d 席）")

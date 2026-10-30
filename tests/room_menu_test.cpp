@@ -608,7 +608,25 @@ void SnapshotAndScroll() {
 }
 }
 
+// Without the X-Morph model pack (support_call.h SupportKindInstalled false, the plugin's state when its bodies are not in
+// Mods/OBJECT): the kind field steps over it both ways, and an ini preset naming it is refused (the unit's own load).
+void XmInfantryNotInstalled() {
+    SetSupportKindInstalled(SupportWeapon::xmInfantry,false);
+    Ini ini;Menu m;
+    Set(ini,L"SupportPreset_SQUAD",L"xminfantry*4");
+    Tap(m,&Keys::toggle);Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
+    Expect(m.unit[0].refused && m.unit[0].squad.count==0,"a preset of an uninstalled kind: refused, the unit's own load");
+    Tap(m,&Keys::confirm);Tap(m,&Keys::confirm);Tap(m,&Keys::confirm);   // into SQUAD, a stock rifle added, its fields
+    Expect(m.unit[0].squad.count==1 && m.unit[0].squad.kind[0]==SupportWeapon::rifle && m.fieldAt==0,"a stock rifle added, its kind field");
+    Tap(m,&Keys::left);
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::fencerShotgun,"left past the first kind skips the X-Morph infantry: the Fencer shotgun");
+    Tap(m,&Keys::right);
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::rifle,"right from the last installed kind: the rifle again");
+}
+
 int main() {
+    XmInfantryNotInstalled();
+    SetSupportKindInstalled(SupportWeapon::xmInfantry,true);   // the rest: the model pack installed
     GrammarExamples();
     ExhaustiveRoundTrip();
     PressAndShut();

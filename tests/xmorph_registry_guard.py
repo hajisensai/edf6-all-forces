@@ -153,7 +153,8 @@ for u in [u for u in ported if u.family not in ('heli', 'jet')]:   # the aircraf
           and buildcache.tool(key).OWNER == key, f'{key}: pylib/buildcache.py generator / tool')
     # its files and its build group
     check(key in ledger.OWNERS, f'{key}: pylib/ledger.py OWNERS')
-    check(key in buildcache.GROUPS and key in buildcache.COCKPIT_GROUPS
+    # (the infantry is a soldier: no seat, so no cockpit)
+    check(key in buildcache.GROUPS and (key in buildcache.COCKPIT_GROUPS) == (u.family != 'infantry')
           and buildcache.MODEL_INPUTS.get(key) == xm_units.folder(key), f'{key}: pylib/buildcache.py groups')
     # the release
     check(xm_units.folder(key) in build_release.RELEASE_MODELS, f'{key}: tools/build_release.py RELEASE_MODELS')

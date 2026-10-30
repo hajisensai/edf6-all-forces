@@ -3,6 +3,7 @@
 #include "memory.h"
 #include "mod_file.h"
 #include "online_authority.h"
+#include "hudtext.h"
 #include <cmath>
 #include <iterator>
 
@@ -144,9 +145,12 @@ bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned
     if(!Gate(netId!=nullptr,local))return false;
     const wchar_t* const body=Body(resource) && look ? look : Body(resource);
     if(!body){failure=SupportSpawnFailure::transform;return false;}
-    if(!BodyInstalled(body)) {
-        Log("SUPPORT soldier %ls is not installed in Mods/OBJECT (the X-Morph model pack is missing); not spawned",OurFile(body));
-        failure=SupportSpawnFailure::mission;return false;
+    // Its kind is offered, parsed and planned only when installed (support_call.h SupportKindInstalled): a plan of another
+    // machine with it reaches here only past this machine's Validate, which refuses it first.
+    if(!SupportKindInstalled(SupportSoldierWeapon(resource))) {
+        Log("SUPPORT soldier %ls is not installed in Mods/OBJECT (the X-Morph model pack is missing); not spawned",
+            OurFile(Body(resource)) ? OurFile(Body(resource)) : Body(resource));
+        failure=SupportSpawnFailure::notInstalled;return false;
     }
     if(netId && (!InSession() || !Readable(netId,32) || At<unsigned>(netId,0xC)!=5 || !registerObject || !At<void*>(image,kNetworkManager))) {
         failure=SupportSpawnFailure::onlineReplication;return false;
@@ -201,6 +205,15 @@ bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned
 }
 }
 
+void NoteSupportKindsInstalled() noexcept {
+    using namespace support_native;
+    for(int k=0;k<kSupportWeaponCount;++k) {
+        const bool here=BodyInstalled(kBodies[k][0]) && BodyInstalled(kBodies[k][1]);
+        SetSupportKindInstalled(static_cast<SupportWeapon>(k),here);
+        if(!here)Log("SUPPORT soldier kind %d not installed (%ls / %ls missing in Mods/OBJECT: the X-Morph model pack): not offered, never planned",
+                     k,OurFile(kBodies[k][0]),OurFile(kBodies[k][1]));
+    }
+}
 bool InstallSupportSoldiers() noexcept {
     using namespace support_native;
     struct Signature { unsigned rva; unsigned char bytes[16]; };
@@ -242,7 +255,8 @@ void PreloadSupportSoldiers() noexcept {
         void* mgr=At<void*>(image,kPreloadManager);
         missionManager=At<void*>(image,kObjectManager);
         if(!mgr || !missionManager)return;
-        for(const auto& pair:kBodies)for(const wchar_t* path:pair)if(BodyInstalled(path))preload(mgr,path,2,-1);
+        for(int k=0;k<kSupportWeaponCount;++k)
+            if(SupportKindInstalled(static_cast<SupportWeapon>(k)))for(const wchar_t* path:kBodies[k])preload(mgr,path,2,-1);
         preloaded=true;
     } __except(SpawnFault("preload",GetExceptionInformation(),nullptr,nullptr,nullptr)) {
         preloaded=false;RecordFault(SupportSpawnFailure::mission);
@@ -290,6 +304,7 @@ const wchar_t* SupportSoldierFailureText() noexcept {
     case SupportSpawnFailure::create:return L"创建支援士兵失败";
     case SupportSpawnFailure::wrongClass:return L"支援资源未生成真实士兵";
     case SupportSpawnFailure::setup:return L"支援士兵配置失败";
+    case SupportSpawnFailure::notInstalled:return hudtext::Tr(hudtext::Tx::supportKindNotInstalled);
     }
     return L"支援不可用";
 }

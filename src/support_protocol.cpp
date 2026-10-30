@@ -140,8 +140,9 @@ void Session::ClearTransactions() noexcept {
     }
     // nextRequest_ is never reset: this machine's request ids stay unique for the Session's life, as its notices' readers
     // key by them (the pt ledger, the sortie's second wave, the rescue's id). A host's replay guard (requests_) starts
-    // over with the transactions; a requester's ids only grow, so a new one always passes it.
-    nextTransaction_=0;requests_.fill(0);lastRequestAt_.fill(0);rescueAt_.fill(0);
+    // over with the transactions; a requester's ids only grow, so a new one always passes it. The transaction ids are
+    // not reset here but in Stop alone (the only caller): within a Session's run they only grow (see Receive's hello).
+    requests_.fill(0);lastRequestAt_.fill(0);rescueAt_.fill(0);
     replies_.fill(Replies{});localReplies_.fill(Reply{});
 }
 void Session::InterruptLocalRequests() noexcept {
@@ -149,7 +150,7 @@ void Session::InterruptLocalRequests() noexcept {
     for(const auto& reply:open)if(reply.request && reply.status==RequestStatus::accepted)Notice(reply.request,RequestStatus::interrupted);
 }
 void Session::Stop() noexcept {
-    ClearTransactions();running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);
+    ClearTransactions();nextTransaction_=0;running_=false;suspended_=false;epoch_=0;challenge_=0;challenges_.fill(0);peerMissions_.fill(0);peerCaps_.fill(0);
     peerExt_.fill(0);peerDetails_.fill(0);for(auto& b:peerBloom_)b.fill(0);
     hostCaps_=0;hostDetails_=0;hostCapsKnown_=false;hostRoomBehind_=false;
 }
@@ -197,10 +198,6 @@ bool Session::PeersHaveVariant(std::uint32_t ext,std::uint64_t hash) const noexc
     }
     return true;
 }
-bool Session::HasSpawned() const noexcept {
-    for(const auto& t:transactions_)if(t.spawned && t.phase!=Phase::cancelled)return true;
-    return false;
-}
 // A transport generation is not an actor lifetime. Preserve constructed
 // copies, including those awaiting finalize: another peer may already have
 // activated them. Only the explicit mission reset may clear that ledger.
@@ -211,7 +208,7 @@ void Session::Retain() noexcept {
     InterruptLocalRequests();
     for(std::uint32_t i=0;i<kMaxTransactions;++i) {
         auto& t=transactions_[i];
-        if(!t.spawned && t.phase!=Phase::empty && t.phase!=Phase::cancelled)Cancel(i+1,false);
+        if(!t.spawned && t.phase!=Phase::empty && t.phase!=Phase::cancelled)Cancel(i+1,false,RequestStatus::interrupted);   // its requester told interrupted, not cancelled
     }
 }
 void Session::Suspend() noexcept {
@@ -493,10 +490,14 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
         // The whole extension word (PeersAhead reads the bits this build does not know) and the variant files' filter.
         peerExt_[peer]=m.unit.resourceId;peerDetails_[peer]=m.unit.role;std::memcpy(peerBloom_[peer].data(),m.unit.netId,32);
         if(challenges_[peer] && challenges_[peer]!=m.challenge) {
-            // The peer started over (a transport blip it resumed from, 2026-10-30): a new epoch for everyone. What was made
-            // stays made (Retain), ids going on; before anything was, the room starts clean as at a mission's start.
+            // The peer started over (a transport blip it resumed from, 2026-10-30): a new epoch for everyone. Every end
+            // keeps its transactions (Retain: what was made stays, the rest cancelled, each tombstone re-sent until
+            // acknowledged in the new epoch) and its ids going on, whatever it holds itself: two ends deciding by what
+            // each had made (the host's copy cancelled, the guest's cancellation not heard yet) diverged, the host's ids
+            // starting over at 1 under a guest slot that only takes newer ones (2026-10-30 review: a slot held for good,
+            // an orphan actor). Only Stop (a mission's reset, the session left) starts the ids over.
             if(epochSerial_==UINT32_MAX){Stop();return;}
-            if(HasSpawned())Retain();else ClearTransactions();
+            Retain();
             epoch_=backend_.nonce(backend_.context);++epochSerial_;
             if(!epoch_){Stop();return;}
             challenges_[peer]=m.challenge;
@@ -507,7 +508,7 @@ void Session::Receive(std::uint32_t peer,const Message& m,std::uint64_t now) noe
     if(!host_ && peer==hostPeer_ && m.kind==Kind::welcome && m.challenge==challenge_ && m.request>=seenEpochSerial_) {
         if(m.request==seenEpochSerial_ && epoch_!=m.epoch)return;
         hostCaps_=WelcomeFeatures(m.catalog,m.unit.resourceId);hostDetails_=m.unit.role;hostRoomBehind_=m.ok!=0;hostCapsKnown_=true;   // the host's kFeatures (0: an older host)
-        if(epoch_!=m.epoch){if(HasSpawned())Retain();else ClearTransactions();epoch_=m.epoch;}
+        if(epoch_!=m.epoch){Retain();epoch_=m.epoch;}   // as the host's re-handshake: kept, the ids going on
         seenEpochSerial_=m.request;
         return;
     }

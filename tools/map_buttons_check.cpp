@@ -189,6 +189,19 @@ void Compose() {
     SupportLoadout odd{};odd.count=6;
     Check(ComposeSquads(odd)==2 && ComposeApply(odd,12,ComposeSquadCode(1)) && odd.count==4,"a partial second squad taken out whole");
     int ranger[16],wing[16],fencer[16];
+    // Without the X-Morph model pack (support_call.h SupportKindInstalled false): not in the Rangers' row, its click refused.
+    crew::SetSupportKindInstalled(SupportWeapon::xmInfantry,false);
+    {
+        SupportLoadout none{};
+        Check(ComposeKinds(0,ranger,16)==5 && ranger[4]==static_cast<int>(SupportWeapon::sniper) && ComposeKinds(1,wing,16)==5 &&
+              ComposeKinds(2,fencer,16)==4,"not installed: the five Rangers alone, the others as they are");
+        Check(!ComposeApply(none,12,static_cast<int>(SupportWeapon::xmInfantry)) && none.count==0,"not installed: its squad never added");
+        const ComposeLayout L=ComposePanel(250.0f,120.0f,100.0f,900.0f,12,1.0f);
+        bool shown=false;
+        for(int k=0;k<L.kinds;++k)shown=shown || L.kindCode[k]==static_cast<int>(SupportWeapon::xmInfantry);
+        Check(L.kinds==crew::kSupportWeaponCount-1 && !shown,"not installed: the panel draws every kind but it");
+    }
+    crew::SetSupportKindInstalled(SupportWeapon::xmInfantry,true);   // installed: the rest below
     Check(ComposeKinds(0,ranger,16)==6 && ComposeKinds(1,wing,16)==5 && ComposeKinds(2,fencer,16)==4 &&
           ranger[5]==static_cast<int>(SupportWeapon::xmInfantry) &&
           wing[0]==static_cast<int>(SupportWeapon::wingLance) && fencer[3]==static_cast<int>(SupportWeapon::fencerShotgun),

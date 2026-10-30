@@ -91,8 +91,24 @@ bool Rig(Vehicle& x,unsigned char* v) noexcept {
     if(x.count)Log("SEATTURRET v=%p rig: %d turrets",v,x.count);
     return x.count>0;
 }
+// Whether `v` carries a turret store at all (StoreSpec::seat with its turret's bones: what Rig takes). A V603 with none
+// (the stock flak, the BMPT, an X-Morph unit without a gunner seat) takes no record: there are kMostVehicles of them.
+bool HasTurrets(const unsigned char* v) noexcept {
+    const auto holders=At<const unsigned char*>(v,kHolders);
+    const auto count=At<std::uint64_t>(v,kHolderCount);
+    if(!holders || count>16 || !Readable(holders,count*kHolderStride))return false;
+    for(std::uint64_t i=0;i<count;++i) {
+        const auto* w=At<const unsigned char*>(holders+i*kHolderStride,kHolderWeapon);
+        const StoreSpec* spec=w && Readable(w,0x200) ? StoreOf(w) : nullptr;
+        if(spec && spec->seat && spec->turret.yaw && spec->turret.pitch)return true;
+    }
+    return false;
+}
 Vehicle* Take(unsigned char* v,ULONGLONG now) noexcept {
-    if(Vehicle* x=Find(v))return Rig(*x,v) ? x : nullptr;
+    // Seen whether or not it rigs: a vehicle whose model lacks its turret bones keeps its record (Rig logs that once, and
+    // a free record is never taken over from it to rig it again).
+    if(Vehicle* x=Find(v)){x->seen=now;return Rig(*x,v) ? x : nullptr;}
+    if(!HasTurrets(v))return nullptr;
     for(auto& x:vehicles)if(!x.ref || !x.ref.Is(x.ref.obj) || now-x.seen>kStaleMs) {
         x=Vehicle{};x.ref=ObjRef::Of(v);x.seen=now;
         return Rig(x,v) ? &x : nullptr;
@@ -292,8 +308,8 @@ void SeatTurretsInput(unsigned char* v) noexcept {
         if(!Readable(v,kHolderCount+8) || v[kDead] || !Is603(v))return;
         bool turrets=false;
         AcquireSRWLockShared(&lock);
-        for(const auto& x:vehicles)if(x.ref.Is(v))turrets=x.count>0;
-        ReleaseSRWLockShared(&lock);
+        __try { for(const auto& x:vehicles)if(x.ref.Is(v))turrets=x.count>0; }
+        __finally { ReleaseSRWLockShared(&lock); }
         if(!turrets)return;
         for(unsigned i=1;i<SeatCount(v);++i) {
             const unsigned char* seat=SeatAt(v,i);
@@ -334,10 +350,13 @@ void SeatTurretsPose(unsigned char* v) noexcept {
 
 void SeatTurretsTrain(unsigned char* v,unsigned seat,const void* target) noexcept {
     if(!installed)return;
-    AcquireSRWLockExclusive(&lock);
-    for(auto& x:vehicles)if(x.ref.Is(v))
-        for(int n=0;n<x.count;++n)if(x.t[n].seat==seat){x.t[n].target=target;x.t[n].targetFrame=GameFrame();}
-    ReleaseSRWLockExclusive(&lock);
+    __try {
+        AcquireSRWLockExclusive(&lock);
+        __try {
+            for(auto& x:vehicles)if(x.ref.Is(v))
+                for(int n=0;n<x.count;++n)if(x.t[n].seat==seat){x.t[n].target=target;x.t[n].targetFrame=GameFrame();}
+        } __finally { ReleaseSRWLockExclusive(&lock); }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 bool InstallSeatTurrets() noexcept {

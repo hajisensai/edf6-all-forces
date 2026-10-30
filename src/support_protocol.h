@@ -249,7 +249,6 @@ private:
     void ClearTransactions() noexcept;
     void InterruptLocalRequests() noexcept;   // this machine's requests still waiting: told interrupted
     std::uint32_t LocalWaiting() const noexcept;
-    bool HasSpawned() const noexcept;
     void Welcome(std::uint32_t peer) noexcept;
     void HostRequest(std::uint32_t peer,const Message&,std::uint64_t now) noexcept;
     void Advance(std::uint32_t id,std::uint64_t now) noexcept;

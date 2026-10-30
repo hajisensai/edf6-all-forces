@@ -54,6 +54,20 @@ int main() {
     SupportLoadout load=PresetLoadout(p);
     load.soldier[0]=SupportWeapon::flame;
     Check(!PresetLookFor(p,load,0).On() && PresetLookFor(p,load,1)==p.look[1],"a seat changed on the panel: stock, others keep theirs");
+    // The X-Morph infantry not installed (support_call.h SupportKindInstalled; no model pack, the plugin's start state):
+    // a preset naming it is refused whole, the reason named; the stock kinds are always there.
+    SetSupportKindInstalled(SupportWeapon::xmInfantry,false);
+    Check(!SupportKindInstalled(SupportWeapon::xmInfantry) && SupportKindInstalled(SupportWeapon::rifle) &&
+          SupportKindInstalled(SupportWeapon::fencerShotgun),"stock kinds installed, the X-Morph infantry only when its bodies are");
+    p=Preset(L"rifle*3,xminfantry",12,&ok,why);
+    Check(!ok && p.count==0 && std::wcsstr(why,L"未安装"),"an uninstalled kind in a preset: refused whole, the reason named");
+    {
+        SupportLoadout xm{};xm.count=2;xm.soldier[1]=SupportWeapon::xmInfantry;
+        Check(!SupportLoadoutInstalled(xm),"a load holding it is not installed");
+        xm.soldier[1]=SupportWeapon::wingLance;
+        Check(SupportLoadoutInstalled(xm),"a stock load is");
+    }
+    SetSupportKindInstalled(SupportWeapon::xmInfantry,true);   // the model pack installed
     // The X-Morph infantry: the kind alone (its model has no change-colour material, no stock template to recolour).
     p=Preset(L"xminfantry*4,rifle",12,&ok);
     Check(ok && p.count==5 && p.kind[0]==SupportWeapon::xmInfantry && p.kind[3]==SupportWeapon::xmInfantry && !p.look[0].On() &&

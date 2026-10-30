@@ -252,43 +252,78 @@ def _rename(name: str, taken, part: str) -> str:  # noqa: ANN001 - container of 
     return name if name not in taken else f'{part}/{name}'
 
 
+PART_ROOT = 'units/'   # a ChildDesc blueprint outside units/ is an effect the unit carries, not a part (assemble)
+
+
+@dataclass
+class _Carrier:
+    """What a ChildDesc list belongs to: where its `bone` names are looked up (bones / atts None: the unit's own
+    names as UnitModel holds them; else a part's bone / attachment names -> their names in the unit) and what a part
+    naming no bone hangs on (that unit bone, its frame; scene: the frame is the unit's own)."""
+    bone: str
+    frame: np.ndarray                      # 4x4, X-Morph frame
+    scene: bool
+    bones: dict[str, str] | None = None
+    atts: dict[str, str] | None = None
+
+    def resolve(self, um: UnitModel, at: str, part: str) -> str:
+        if self.bones is None:
+            _req(at in um.frames or at in um.attachments, f'{um.entity}: part {part} hangs on {at}, no bone or attachment')
+            return at
+        if at in self.bones:
+            return self.bones[at]
+        _req(at in self.atts, f'{um.entity}: part {part} hangs on {at}, no bone or attachment of its parent part')
+        return self.atts[at]
+
+
 def assemble(packs: xp.Packs, entity: str) -> UnitModel:
     """The unit with its parts (ChildDescComp: the bosses are built of them, every turret, leg, wing, track a part
     blueprint with its own mesh and skeleton, hit and destroyed one by one in the game) as one model: what the game
     draws when nothing is destroyed. A part names the bone (or attachment) it hangs on, its mesh in that bone's bind
-    frame (main_turret_barrel on be_main_turret_turret_vert), or none, its mesh then in the unit's own frame (measured
-    2026-10-30: the highway tank's tracks, side turrets, rocket pods sit where they belong with no offset); its root
-    bones become the children of that bone (of the unit's root bone). Parts nest (a part's own ChildDescComp).
+    frame (main_turret_barrel on be_main_turret_turret_vert), or none, its mesh then in the frame of what carries it
+    (the unit's own: measured 2026-10-30, the highway tank's tracks, side turrets, rocket pods sit where they belong
+    with no offset); its root bones become the children of that bone (of the unit's root bone). Parts nest (a part's
+    own ChildDescComp): a nested part's bone is one of its parent part's, by the parent's own names (the MECHATAUR's
+    head on body_upper's be_spine_body_upper). Only blueprints under units/ are parts: the misc/, effects/, lights/,
+    shield/ ones a unit or part carries (the MECHATAUR left hand's misc/laser_tracer beam, trails, lights, shield
+    bubbles) are effects, not standing geometry.
     A part's bone or attachment named as one before it is is renamed '<part>/<name>' (a static part's one bone, its
-    att_smoke_1), its weapons' muzzles with it; its turrets and weapons join the unit's (UnitModel.part_*)."""
+    att_smoke_1), its weapons' muzzles with it; so is a turret (the gunship's two wing lasers' laser_turret), its
+    weapons' `turret` with it; its turrets and weapons join the unit's (UnitModel.part_*)."""
     um = load(packs, entity)
-    _assemble_into(packs, um, um.blueprint, None)
+    _assemble_into(packs, um, um.blueprint, _Carrier(um.bones[0], np.eye(4), True))
     return um
 
 
-def _assemble_into(packs: xp.Packs, um: UnitModel, bp: xp.Node, _at: str | None) -> None:
+def _assemble_into(packs: xp.Packs, um: UnitModel, bp: xp.Node, carrier: _Carrier) -> None:
     cdc = bp.child('ChildDescComp')
     for cd in (cdc.find('ChildDesc') if cdc else []):
         # the name alone: a line can carry the designers' note after it (the warcar's
         # 'units/bosses/warcar/middle_grenade_launcher -- obecny laser projectile')
         name = cd.get('blueprint').split()[0]
+        if not name.startswith(PART_ROOT):
+            continue
         raw = blueprints(packs).get(name)
         _req(raw is not None, f'{um.entity}: its part {name} is no blueprint in the packs')
         part_bp = compose(packs, raw)
         part = name.split('/')[-1]
         at = cd.get('bone')
+        scene = False
         if at is None:
-            host, frame = um.bones[0], np.eye(4)
-        elif at in um.frames:
-            host, frame = at, um.frames[at]
+            host, frame, scene = carrier.bone, carrier.frame, carrier.scene
         else:
-            _req(at in um.attachments, f'{um.entity}: part {part} hangs on {at}, no bone or attachment')
-            parent, offset = um.attachments[at]
-            host = um.bones[0] if parent == 'scene_node' else parent
-            frame = (np.eye(4) if parent == 'scene_node' else um.frames[parent]).copy()
-            frame[:3, 3] = frame[:3, :3] @ offset + frame[:3, 3]
+            at = carrier.resolve(um, at, part)
+            if at in um.frames:
+                host, frame = at, um.frames[at]
+            else:
+                parent, offset = um.attachments[at]
+                host = um.bones[0] if parent == 'scene_node' else parent
+                frame = (np.eye(4) if parent == 'scene_node' else um.frames[parent]).copy()
+                frame[:3, 3] = frame[:3, :3] @ offset + frame[:3, 3]
         if part_bp.child('RenderableDescComp') is None or not part_bp.child('RenderableDescComp').get('mesh'):
-            _assemble_into(packs, um, part_bp, at)   # a part without a mesh of its own (a destructor, a marker)
+            # a part without a mesh of its own (a destructor, a marker): what it carries hangs where it does, its
+            # bones named as in the list it is in
+            _assemble_into(packs, um, part_bp, _Carrier(host, frame, scene, carrier.bones, carrier.atts))
             continue
         pm = load_blueprint(packs, part_bp, name)
         bone = {b: _rename(b, um.frames, part) for b in pm.bones}
@@ -302,8 +337,8 @@ def _assemble_into(packs: xp.Packs, um: UnitModel, bp: xp.Node, _at: str | None)
             um.frames[nb] = frame @ pm.frames[b]
             um.bind[nb] = place(pm.bind[b])
         for a, (parent, offset) in pm.attachments.items():
-            if parent == 'scene_node' and at is None:
-                um.attachments[att[a]] = ('scene_node', offset)
+            if parent == 'scene_node' and scene:
+                um.attachments[att[a]] = ('scene_node', R @ offset + t)
             elif parent == 'scene_node':      # the part's origin is the host's frame (an attachment host: its point)
                 h = um.frames[host]
                 um.attachments[att[a]] = (host, h[:3, :3].T @ (R @ offset + t - h[:3, 3]))
@@ -321,13 +356,16 @@ def _assemble_into(packs: xp.Packs, um: UnitModel, bp: xp.Node, _at: str | None)
         um.triangles = np.vstack((um.triangles, pm.triangles + base))
         um.tri_bone = np.concatenate((um.tri_bone, np.asarray([bone[b] for b in pm.tri_bone], dtype=object)))
         um.tri_material = np.concatenate((um.tri_material, np.asarray(mat, dtype=um.tri_material.dtype)[pm.tri_material]))
+        turret = {}
         for tn, (yaw, pitch) in _turrets(part_bp).items():
-            um.part_turrets[tn] = (bone.get(yaw, att.get(yaw, yaw)), bone.get(pitch, att.get(pitch, pitch)))
+            turret[tn] = _rename(tn, um.turrets(), part)
+            _req(turret[tn] not in um.turrets(), f'{um.entity}: part {part}: its turret {turret[tn]} is named twice')
+            um.part_turrets[turret[tn]] = (bone.get(yaw, att.get(yaw, yaw)), bone.get(pitch, att.get(pitch, pitch)))
         for w in _weapons(part_bp):
-            um.part_weapons.append(Weapon(w.name, w.turret, [(bone.get(m, att.get(m, m)), bone.get(r, r) if r else r)
-                                                             for m, r in w.muzzles]))
+            um.part_weapons.append(Weapon(w.name, turret.get(w.turret, w.turret),
+                                          [(bone.get(m, att.get(m, m)), bone.get(r, r) if r else r) for m, r in w.muzzles]))
         um.parts.append((name, at, [bone[b] for b in pm.bones]))
-        _assemble_into(packs, um, part_bp, at)
+        _assemble_into(packs, um, part_bp, _Carrier(host, frame, scene, bone, att))
 
 
 # ------------------------------------------------------------------------------------------ textures

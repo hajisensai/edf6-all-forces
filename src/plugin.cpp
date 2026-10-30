@@ -1266,6 +1266,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     edf::DescribeModuleFile(module,file,sizeof(file));
     Log("EDF6VehicleCrew %s loading (build %s, %s)",EDF6VC_VERSION,EDF6_BUILD_ID,file);
     ini.Start(iniPath);
+    NoteSupportKindsInstalled();   // before the ini's SupportPreset_ values are first parsed (support_call.h SupportKindInstalled)
     LoadConfig();
     image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
     if(!image){Log("REFUSED: unsupported EDF.dll");return false;}

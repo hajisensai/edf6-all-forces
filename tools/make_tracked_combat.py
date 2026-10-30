@@ -511,7 +511,7 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
     animation.items[0].items[0] = f'app:/Object/{model.OUT_ARC.lower()}'
     animation.items[0].items[1] = model.HOST_MDB
     animation.items[1] = 'app:/' + animation_path(kind).lower()
-    _arc, _md, _shkt, binding, overrides, _report = _assets(game, kind)
+    _arc, md, _shkt, binding, overrides, _report = _assets(game, kind)
     ragdoll = r.get('ragdoll')
     ragdoll.items[0] = 'app:/' + collision_path(kind).lower()
     ragdoll.items[1] = dsgo.Blob(binding, ragdoll.items[1].kind)
@@ -558,7 +558,7 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
     # 0x62A52E puts it in that seat's list; stores.cpp Fill builds its weapon, docs/independent-seat-re.md §1).
     setting.items = [copy.deepcopy(guns[side == 'right']) if side in GUN_SLOTS else
                      _node([holders[side], float(store_seat(vehicle.weapons[i]))]) for i, side in enumerate(sides)]
-    gunner_seats(r, vehicle)
+    gunner_seats(r, vehicle, md)
     if kind in TURRET_LIMITS:
         import make_artillery
         joint = make_artillery.turret_constraint(r)
@@ -591,12 +591,14 @@ GUNNER_EYE = (0.0, 2.6, -7.0)           # m: a gunner seat's camera from its tur
 GUNNER_LOOK = (0.0, 1.0, 6.0)           # ...and the point it looks at, ahead along its guns
 
 
-def gunner_seats(r, vehicle: vc.GroundVehicle) -> None:  # noqa: ANN001 - dsgo node
+def gunner_seats(r, vehicle: vc.GroundVehicle, md) -> None:  # noqa: ANN001 - dsgo node, mdb.Mdb
     """The vehicle's gunner seats (vcobjects Store.seat, docs/multi-weapon-keys.md「独立座位」): seat n a copy of the
     driver's seat row (its door, its class mask and its numbers) with its own seat and camera locators on its turret's
     bones (Store.turret: the rider on the yaw bone, the camera and its look-at on the pitch bone; the local gunner's view
     is the plugin's own, src/seat_turret.cpp SeatTurretCamera, these the stock camera's when it is not). Seats in order,
-    one a gunner seat number."""
+    one a gunner seat number. `md`: the vehicle's built model; every turret bone a locator or the plugin's turret
+    (src/seat_turret.cpp Rig) hangs on must be one of its bones (tools/prep_xmorph.py makes them, xm_units.turret_bones):
+    a model without them is a broken build, refused here (no seat on a bone the game cannot find)."""
     turrets = {}
     for w in vehicle.weapons:
         store = vc.store_of(w)
@@ -607,6 +609,12 @@ def gunner_seats(r, vehicle: vc.GroundVehicle) -> None:  # noqa: ANN001 - dsgo n
         return
     if sorted(turrets) != list(range(1, len(turrets) + 1)):
         raise ValueError(f'{vehicle.sgo}: gunner seats {sorted(turrets)} are not 1..n')
+    bones = {md.name_of(b.name) for b in md.bones}
+    for n in sorted(turrets):
+        missing = [bone for bone in (turrets[n].yaw, turrets[n].pitch) if bone not in bones]
+        if missing:
+            raise ValueError(f'{vehicle.sgo}: gunner seat {n} turret bones {missing} are not in the model '
+                             f'(tools/prep_xmorph.py did not make them)')
     seats = r.get('vehicle_riding_position')
     if len(seats.items) != 1:
         raise ValueError(f'{vehicle.sgo}: the native V603 has one seat, this has {len(seats.items)}')

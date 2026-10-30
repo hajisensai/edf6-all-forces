@@ -184,12 +184,24 @@ support_points::Pool fixturePool;support_points::Ledger fixtureLedger;
 struct PoolStart { PoolStart(){fixturePool.Start(fixturePt);} } poolStart;
 std::int32_t SupportPoints() noexcept {return fixturePool.points;}
 std::int32_t SupportPointsPrice(std::uint32_t pt) noexcept {return support_points::Price(pt,fixturePt.scale);}
-bool SupportPointsSpend(std::int32_t price) noexcept {return fixturePool.Spend(price);}
-void SupportPointsRefund(std::int32_t price) noexcept {fixturePool.Refund(price,fixturePt);}
-bool SupportPointsOwe(std::int32_t price,std::uint32_t request) noexcept {
-    if(!fixturePool.Spend(price))return false;
-    fixtureLedger.Keep(request,price);return true;
+// The held price (support_points.cpp SupportPointsHold); fixtureHoldRefused: as a guest whose earlier changes the host has
+// not confirmed (support_points_net.h kChangesMost), the pool holding enough.
+std::int32_t fixtureHeld=0;bool fixtureHoldRefused=false;int fixtureHoldsDropped=0;
+bool SupportPointsHold(std::int32_t price) noexcept {
+    if(price<=0)return true;
+    if(fixtureHeld>0 || fixtureHoldRefused || !fixturePool.Spend(price))return false;
+    fixtureHeld=price;return true;
 }
+void SupportPointsKeepHeld() noexcept {fixtureHeld=0;}
+void SupportPointsOweHeld(std::uint32_t request) noexcept {
+    if(fixtureHeld>0)fixtureLedger.Keep(request,fixtureHeld);
+    fixtureHeld=0;
+}
+void SupportPointsDropHeld() noexcept {
+    if(fixtureHeld>0){fixturePool.Unspend(fixtureHeld);++fixtureHoldsDropped;}
+    fixtureHeld=0;
+}
+void SupportPointsRefund(std::int32_t price) noexcept {fixturePool.Refund(price,fixturePt);}
 void SupportPointsSettle(std::uint32_t request,bool back) noexcept {
     const std::int32_t price=fixtureLedger.Settle(request);
     if(back)fixturePool.Refund(price,fixturePt);
@@ -560,6 +572,21 @@ int main() {
     configuredHooks.notice(open,support_net::RequestStatus::active);
     SupportCallStatus(note,128);
     check(std::wcsstr(note,L"支援已出动")!=nullptr,"the open request's outcome still reaches the HUD after the strike");
+    check(fixtureHeld==0,"every held price ended with its call");
+    // 2026-10-30 review: a guest whose earlier pt changes the host has not confirmed (no room for another change) is not
+    // asked at all, the pool holding enough: before, its request went and the pt it then could not spend were never paid.
+    ResetSupportDispatch();fixtureMs+=40000;fixturePool.Start(fixturePt);
+    {const int before=netRequests;fixtureHoldRefused=true;
+     check(!SupportCallAt(0,target,note,128) && netRequests==before && SupportPoints()==fixturePt.start,
+           "the price not held: no request sent, nothing taken");
+     check(std::wcsstr(note,L"房主确认")!=nullptr,"the HUD says why");
+     fixtureHoldRefused=false;}
+    // A request not taken (the transport not ready): the held price goes back as it was (nothing spent, no refund).
+    ResetSupportDispatch();fixtureMs+=40000;fixturePool.Start(fixturePt);
+    {const int dropped=fixtureHoldsDropped;submitReady=false;
+     check(!SupportCallAt(0,target,note,128) && SupportPoints()==fixturePt.start && fixturePool.spent==0 &&
+           fixtureHoldsDropped==dropped+1 && fixtureHeld==0,"not taken: the held price put back");
+     submitReady=true;}
     fixturePool.Start(fixturePt);netRequests=0;}
     testOnline=false;
     ResetSupportDispatch();testOnline=true;made=0;

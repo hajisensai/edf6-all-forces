@@ -571,6 +571,12 @@ def prepare(v: Vehicle, src: Source, out: str) -> dict:
     bones = triangle_bones(v, src)
     if src.normals is not None:     # the source's own: its normal maps were baked on them
         normals, normal_of = src.normals, src.tri_v
+        # a corner whose own normal is degenerate (the X-Morph JAGUAR's mesh has zero ones) takes the faces' around it
+        bad = np.linalg.norm(normals, axis=1)[normal_of] < 0.5
+        if bad.any():
+            computed, computed_of = corner_normals(src.positions, src.tri_v)
+            normal_of = np.where(bad, computed_of.reshape(normal_of.shape) + len(normals), normal_of)
+            normals = np.vstack((normals, computed))
     else:
         normals, normal_of = corner_normals(src.positions, src.tri_v)
 

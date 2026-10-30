@@ -65,6 +65,7 @@ void Setup() {
     profile=true;faulted=false;firstFault=SupportSpawnFailure::none;failure=SupportSpawnFailure::none;
     create=&Create;destroy=&Delete;team=&Team;level=&Level;follow=&Follow;preload=&Preload;registerObject=&Register;installed=&FakeInstalled;
     Put<void*>(image,kObjectManager,objects);Put<void*>(image,kPreloadManager,controls);Put<void*>(image,kNetworkManager,registeredId);
+    NoteSupportKindsInstalled();   // the plugin's load: what Mods/OBJECT holds (the test's ourFilesThere)
     PreloadSupportSoldiers();
 }
 }
@@ -87,12 +88,16 @@ int main() {
           "every stock template a load may hold (member and leader) queued: five Rangers, five Wing Divers, four Fencers");
     Check(asked==2,"only our own body files (the X-Morph infantry's member and leader) are asked for, never a stock template");
     // Our own bodies are preloaded and spawned only when the installer wrote them; no stand-in, one log line, nothing made.
+    Check(SupportKindInstalled(SupportWeapon::xmInfantry) && SupportKindInstalled(SupportWeapon::rifle),"both bodies there: the kind is installed");
     ourFilesThere=false;Setup();
+    Check(!SupportKindInstalled(SupportWeapon::xmInfantry) && SupportKindInstalled(SupportWeapon::rifle) &&
+          SupportKindInstalled(SupportWeapon::fencerShotgun),"its bodies missing: the X-Morph infantry is not installed, every stock kind is");
     Check(preloads==2*(kSupportWeaponCount-1) && SupportSoldiersReady(),"the X-Morph infantry's missing bodies are not preloaded, the stock ones are");
     {ObjRef xm;const int madeBefore=made,logsBefore=logLines;
      Check(!ApplySupportSoldierResource(poses[0],SupportSoldierResource(SupportWeapon::xmInfantry,false),nullptr,true,&xm) && made==madeBefore &&
-           logLines==logsBefore+1 && SupportSoldierLastFailure()==SupportSpawnFailure::mission && !xm,
-           "an X-Morph infantry whose file is missing is refused and logged once, not spawned");
+           logLines==logsBefore+1 && SupportSoldierLastFailure()==SupportSpawnFailure::notInstalled && !xm &&
+           !wcscmp(SupportSoldierFailureText(),hudtext::Tr(hudtext::Tx::supportKindNotInstalled)),
+           "an X-Morph infantry whose file is missing is refused and logged once, not spawned, its own failure and text (not mission)");
      Check(!ApplySupportSoldierResource(poses[0],SupportSoldierResource(SupportWeapon::xmInfantry,true),nullptr,true,&xm) && made==madeBefore &&
            logLines==logsBefore+2,"its leader the same");
      Check(ApplySupportSoldierResource(poses[0],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&xm) && made==madeBefore+1 &&

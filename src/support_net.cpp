@@ -49,6 +49,9 @@ ULONGLONG nextResolve=0,lastTick=~0ULL;
 SRWLOCK worldLock=SRWLOCK_INIT;
 EDF6AFMissionParticipants world{sizeof(EDF6AFMissionParticipants),0,0,0,1,{}};
 bool worldFrozen=false,worldCreationSeen=false;
+// The sender check's log lines (SupportCommandRequesterMatches): at most 16 a mission, counted again from ResetSupportNet
+// (a mission's start), not 16 for the whole process (a later mission's drops would go unlogged).
+std::atomic<int> senderCheckLogs{0};
 std::uint64_t worldSerial=1;
 std::uint32_t worldPhase=0;
 ObjRef worldCreated[support_net::kMaxPeers]{};
@@ -444,6 +447,7 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
 }
 void ResetSupportNet() noexcept {
     session.Stop();ResetRangeEnemyNetwork();running=false;blockedUntilMission=false;snapshot={};lastTick=~0ULL;ResetWorld();
+    senderCheckLogs.store(0);
     for(auto& v:commandVersionOf)v=0;
     versionShown={};AcquireSRWLockExclusive(&versionLock);versionAt=0;ReleaseSRWLockExclusive(&versionLock);
     commandHostPeer=0;RegisterPluginChannels();plugin_net::Reset();
@@ -600,7 +604,7 @@ bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) no
     if(!authenticatedPuid || !std::memchr(authenticatedPuid,0,65))return false;
     // Which part failed, for the drops each channel logs as "not its sender's player" (2026-10-30 report #27: in one
     // session every channel dropped the other machine's player, both ways, from the client's log alone undecidable).
-    static std::atomic<int> said{0};
+    std::atomic<int>& said=senderCheckLogs;
     EDF6CoopPeer peer;
     if(!PuidText(puid,peer)) {
         if(said.fetch_add(1)<16)Log("SUPPORT sender check: the player's native PUID has no text (sender %.12s)",authenticatedPuid);

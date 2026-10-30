@@ -6,6 +6,7 @@
 #include "support_points_net.h"
 #include "crew.h"
 #include "memory.h"
+#include "online_authority.h"
 #include "plugin_net.h"
 #include "support_net.h"
 #include <cstring>
@@ -39,7 +40,10 @@ int checked=0;              // 0 not yet, 1 the stock read is as expected, -1 it
 std::int32_t lastTeam=-1;   // the player's team when last seen (a dead player keeps earning for it)
 ULONGLONG loggedAt=0;
 std::int32_t loggedPoints=-1;
-int netLogs=0;
+int netLogs=0;              // the channel's log lines this mission (16 at most; SupportPointsReset counts again)
+// The price of the call being asked (SupportPointsHold): taken already, kept or put back before the call returns.
+struct Held { std::int32_t price=0,team=-1; bool guest=false; };
+Held held;
 
 support_points::Settings Settings() noexcept {
     const Config& c=Cfg();
@@ -67,7 +71,11 @@ bool TeamScore(std::int32_t team,float* out) noexcept {
     *out=At<float>(row,kTeamScore);
     return true;
 }
-bool IsGuest() noexcept { return plugin_net::Ready() && !plugin_net::Host(); }
+// Who keeps the pt is the session's: a guest of an online session stays a guest while the channel is not ready a moment
+// (its changes wait in the mirror and go once it is back); the host is the session's host (the game's own, online_authority.h).
+// Not the channel's Ready (2026-10-30 review: a blip made a guest keep its own pool, and the changes it had not had
+// confirmed were dropped when it became a guest again).
+bool IsGuest() noexcept { return InSession() && !OnlineHostOnly(); }
 Guest* GuestOf(const char* puid) noexcept {
     if(!puid || !puid[0])return nullptr;
     for(Guest& g:guests)if(g.puid[0] && !std::strncmp(g.puid,puid,sizeof(g.puid)-1))return &g;
@@ -87,7 +95,11 @@ bool SendState(std::uint32_t peer) noexcept {
     for(int t=0;t<support_points::kTeams;++t)m.points[t]=pools.team[t].points;
     if(const Guest* g=GuestAt(peer)){m.origin=g->peer.origin;m.serial=g->peer.taken;}
     unsigned char bytes[support_points::kWire];
-    return support_points::Encode(m,bytes,sizeof(bytes)) && plugin_net::Send(peer,0,bytes,sizeof(bytes));
+    if(!support_points::Encode(m,bytes,sizeof(bytes))) {
+        if(netLogs++<16)Log("SUPPORT PT NET the state does not encode (most %d, scale %.2f): not sent to peer %u",m.most,m.scale,peer);
+        return false;
+    }
+    return plugin_net::Send(peer,0,bytes,sizeof(bytes));
 }
 void SendStates() noexcept {
     for(std::uint32_t p=1;p<=plugin_net::PeerCount();++p)SendState(p);
@@ -117,7 +129,7 @@ bool ReceivePointsNetwork(std::uint32_t peer,const char* puid,const void* bytes,
         mirror.Hear(m);
         return true;
     }
-    Guest* const g=plugin_net::Host() && peer ? GuestOf(puid) : nullptr;
+    Guest* const g=!IsGuest() && plugin_net::Host() && peer ? GuestOf(puid) : nullptr;
     if(!g)return true;
     g->index=peer;g->generation=plugin_net::RoomGeneration();
     // A guest spends and gets back only its own team's pt (a PvP faction never the other's).
@@ -155,7 +167,7 @@ void SupportPointsReset() noexcept {
     pools.Start(Settings());
     mirror.Start(Settings(),plugin_net::NewOrigin());
     for(Guest& g:guests)g=Guest{};
-    ledger.Clear();
+    ledger.Clear();held=Held{};netLogs=0;
     guest=IsGuest();stateDirty=true;stateAt=0;
     lastTeam=-1;loggedPoints=-1;
     Log("SUPPORT PT a new mission: %d pt a team (most %d, prices x%.2f), %s",pools.team[0].points,Cfg().supportPtMost,
@@ -182,6 +194,10 @@ void SupportPointsTick() noexcept {
         for(int i=0;i<mirror.count;++i)
             if(now-mirror.changes[i].sentAt>=kChangeAgainMs){mirror.changes[i].sentAt=now;SendChange(mirror.ChangeMsg(mirror.changes[i]));}
     } else {
+        if(pools.Cap(Settings())) {
+            stateDirty=true;
+            Log("SUPPORT PT SupportPtMost is %d now: the pools over it brought down to it",Cfg().supportPtMost);
+        }
         if(Checked()) {
             __try {
                 const support_points::Settings s=Settings();
@@ -214,20 +230,47 @@ std::int32_t SupportPoints() noexcept {
 std::int32_t SupportPointsMost() noexcept { return guest ? mirror.most : Cfg().supportPtMost; }
 std::int32_t SupportPointsPrice(std::uint32_t pt) noexcept { return support_points::Price(pt,guest ? mirror.scale : Cfg().supportPtScale); }
 
-bool SupportPointsSpend(std::int32_t price) noexcept {
+bool SupportPointsHold(std::int32_t price) noexcept {
     if(price<=0)return true;
+    if(held.price>0) {
+        Log("SUPPORT PT a call asked while another's %d pt are held: not paid",held.price);
+        return false;
+    }
     const std::int32_t t=OwnTeam();
     if(t<0 || SupportPoints()<price)return false;
     if(guest) {
-        support_points::Msg m;
-        if(!mirror.Keep(t,-price,GetTickCount64(),&m)){Log("SUPPORT PT %d changes unconfirmed by the host: no call paid",mirror.count);return false;}
-        SendChange(m);
-    } else {
-        if(!pools.team[t].Spend(price))return false;
-        stateDirty=true;
-    }
-    Log("SUPPORT PT team %d spent %d (%d left)",t,price,SupportPoints());
+        if(!mirror.Hold(t,price)) {
+            Log("SUPPORT PT %d changes unconfirmed by the host: the call is not asked",mirror.count);
+            return false;
+        }
+    } else if(!pools.team[t].Spend(price))return false;
+    held=Held{price,t,guest};
     return true;
+}
+void SupportPointsKeepHeld() noexcept {
+    const Held h=held;
+    if(h.price<=0)return;
+    held=Held{};
+    if(h.guest) {
+        support_points::Msg m;
+        // Its room was held with it (Mirror::Hold): the change is kept.
+        if(mirror.Commit(GetTickCount64(),&m))SendChange(m);
+        else Log("SUPPORT PT the held %d pt are no longer the mirror's: not sent",h.price);
+    } else stateDirty=true;
+    Log("SUPPORT PT team %d spent %d (%d left)",h.team,h.price,SupportPoints());
+}
+void SupportPointsOweHeld(std::uint32_t request) noexcept {
+    const std::int32_t price=held.price;
+    SupportPointsKeepHeld();
+    if(price>0 && !ledger.Keep(request,price))Log("SUPPORT PT more than %d calls owed at once: the oldest one's pt stay spent",
+                                                  support_points::kOwedMost);
+}
+void SupportPointsDropHeld() noexcept {
+    const Held h=held;
+    if(h.price<=0)return;
+    held=Held{};
+    if(h.guest)mirror.Drop();
+    else if(h.team>=0 && h.team<support_points::kTeams)pools.team[h.team].Unspend(h.price);
 }
 void SupportPointsRefund(std::int32_t price) noexcept {
     const std::int32_t t=OwnTeam();
@@ -241,12 +284,6 @@ void SupportPointsRefund(std::int32_t price) noexcept {
         stateDirty=true;
     }
     Log("SUPPORT PT the call came to nothing: team %d %d back (%d now)",t,price,SupportPoints());
-}
-bool SupportPointsOwe(std::int32_t price,std::uint32_t request) noexcept {
-    if(!SupportPointsSpend(price))return false;
-    if(price>0 && !ledger.Keep(request,price))Log("SUPPORT PT more than %d calls owed at once: the oldest one's pt stay spent",
-                                                  support_points::kOwedMost);
-    return true;
 }
 void SupportPointsSettle(std::uint32_t request,bool back) noexcept {
     const std::int32_t price=ledger.Settle(request);

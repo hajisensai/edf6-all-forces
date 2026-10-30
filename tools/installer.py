@@ -1326,6 +1326,13 @@ def check_package() -> int:
         assert builder.OWNER == kind and kind in ledger.OWNERS and kind in buildcache.GROUPS
         assert callable(builder.build) and callable(builder.install) and callable(builder.remove)
         assert callable(model.build) and callable(model.check) and model.OUT_ARC.startswith('EDF6VC_')
+    import make_xmorph
+    for kind in make_xmorph.KINDS:   # the X-Morph units (tracked, cars, helicopters, jets, walkers, infantry) too
+        builder = buildcache.tool(kind)
+        assert builder.OWNER == kind and kind in ledger.OWNERS and kind in buildcache.GROUPS
+        assert callable(builder.build) and callable(builder.install) and callable(builder.remove)
+    for name in ('car_model', 'xm_walker', 'xm_infantry', 'xm_rig'):
+        importlib.import_module(name)
     materials = importlib.import_module('edf41_materials')
     importlib.import_module('edf41materials')
     assert callable(materials.apply)

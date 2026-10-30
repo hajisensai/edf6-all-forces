@@ -14,10 +14,17 @@ void SupportPointsTick() noexcept;         // once a frame (crew.cpp SharedFrame
 std::int32_t SupportPoints() noexcept;     // what the local player's team's pool holds (0: their team not known yet)
 std::int32_t SupportPointsMost() noexcept; // SupportPtMost (a guest: the host's)
 std::int32_t SupportPointsPrice(std::uint32_t pt) noexcept;   // a price: an entry's pt times SupportPtScale (a guest: the host's)
-bool SupportPointsSpend(std::int32_t price) noexcept;         // false: the pool holds less (nothing taken)
+// A call's price, held before the call is asked (support_dispatch.cpp Request), so that paying for it once it is taken
+// cannot fail (2026-10-30 review: a guest's change refused for want of room after its request had gone, a call made
+// unpaid). Held: taken from the pool at once (a guest: shown spent, the room for its change kept). False (nothing held):
+// the pool holds less, a guest has kChangesMost changes the host has not confirmed, or another call's price is held.
+// One at a time; each hold ends, before the call returns, in exactly one of:
+bool SupportPointsHold(std::int32_t price) noexcept;
+void SupportPointsKeepHeld() noexcept;                       // the call taken: its pt spent (a guest: its change sent)
+// An online call taken: spent and owed to support_net's `request` until SupportPointsSettle (`back`: it came to nothing,
+// its pt back).
+void SupportPointsOweHeld(std::uint32_t request) noexcept;
+void SupportPointsDropHeld() noexcept;                       // the call not taken: the pool as it was, nothing sent
 void SupportPointsRefund(std::int32_t price) noexcept;        // a call taken that came to nothing (offline): its pt back
-// An online call's price, spent and owed to support_net's `request` until SupportPointsSettle (`back`: it came to nothing,
-// its pt back). False: the pool holds less (nothing taken).
-bool SupportPointsOwe(std::int32_t price,std::uint32_t request) noexcept;
 void SupportPointsSettle(std::uint32_t request,bool back) noexcept;
 }  // namespace crew

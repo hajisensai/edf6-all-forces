@@ -232,7 +232,7 @@ python tools/prep_xmorph.py mech|infantry [unit ...] [--out DIR]
 ```
 
 - **宿主**（保留它的骨架、CAS、布娃娃、座位、SGO 类与请求，只换几何）：
-  - 轻型机甲（4.5 m，双腿 + 两臂各一挺枪）→ 尼克斯 `V504_BEGARUTA_BLUE`（Vehicle504_begaruta，请求族 EWEAPON356–365 的 v504 行）。
+  - 轻型机甲（4.5 m，双腿 + 两臂各一挺枪）→ 贝加尔塔 `V504_BEGARUTA_BLUE`（Vehicle504_begaruta，请求族 EWEAPON356–365 的 v504 行）。
   - 重型机甲（11.4 m，鸟腿 + 炮塔两侧炮舱 + 导弹）→ 普罗透斯 `V614_PROTEUS_MK2_CALL`（VehicleBigBegaruta，请求族 EWEAPON387/388/390/392）。
     任务原文写的是「Proteus / Balam」：巴拉姆 49 m，是重型机甲的四倍多，按比例放上去腿比例全不对，没用。
   - 步兵（3.2 m 动力装甲，T 姿）→ 游骑兵 `N601_COMMON_RANGER_AF`（AssultSoldier，`EDF6ArmySoldier.cas`），新的支援种类
@@ -242,18 +242,21 @@ python tools/prep_xmorph.py mech|infantry [unit ...] [--out DIR]
   线性蒙皮到近、远两根骨（膝→踝：宿主的小腿中间还有一节，刚性放置膝或踝会脱开 0.4–3.7 m）；`@ground:` 点把脚拉伸到地面。
   步兵的脚关节本身就在地面（2 cm），改为小腿伸到踝下地面、脚不拉伸（`_leg(boot=True)`）。
 - **材质**：用 V603 的 `v603_body` 材质模板与顶点布局（`tracked_combat_model.BODY_MATERIAL`），贴图走 wt_tracked 的转换；
-  宿主的着色器不用（尼克斯的 snd_BRDF_Common_Light 有光照遮罩风险，游骑兵的 2ColorChange 会重新染色）。双骨顶点的网格标志 [0,1,4,0]，同原版角色。
+  宿主的着色器不用（贝加尔塔的 snd_BRDF_Common_Light 有光照遮罩风险，游骑兵的 2ColorChange 会重新染色）。双骨顶点的网格标志 [0,1,4,0]，同原版角色。
 - **实测缝隙**（`xm_rig.gaps`：每个关节两侧的件在各动作每帧把关节带到的位置之差的最大值，及模型最低点高度；`tests/test_xmorph.py WalkerAssetTests` 守住）：
-  - 轻型机甲：髋 0.1–0.33 m（X-Morph 髋关节与尼克斯 momo 的位置差），肩 ≈0.2 m（尼克斯 kata 的转动），其余 0；走 / 跑时脚最低 −0.35 m。
+  - 轻型机甲：髋 0.1–0.33 m（X-Morph 髋关节与贝加尔塔 momo 的位置差），肩 ≈0.2 m（贝加尔塔 kata 的转动），其余 0；走 / 跑时脚最低 −0.35 m。
   - 重型机甲：髋 0.12–0.31 m，炮塔 0–0.07 m，其余 0；地面 ≈0。
   - 步兵：躯干 0.04–0.07 m，肩 0.03–0.08 m，其余 0；地面 −0.09..0.06 m。
   - `jump_start` 里宿主自己的根下沉 1.4–2.0 m，地面检查跳过该动作。
 - **武器**（`pylib/xm_walker.py WALKERS`）：每个挂载（宿主 `vehicle_weapon_setting` 的骨骼）一个武器文件，模板是无模型（v_null）的原版载具武器
   （机枪 `V_403TANK_MACHINEGUN`、炮 `V_407BIGBEGARUTA_CANNON`、导弹 `V_407BIGBEGARUTA_MISSILE`），数值按原作蓝图换算（`xm_units` 行的注释），
-  炮口移到 X-Morph 模型的炮口挂点（换到挂载骨骼坐标）。尼克斯的 8 个挂载只用双手两个，其余为空（`[0.0]`）；请求的武器列表在 setup[4]
+  炮口移到 X-Morph 模型的炮口挂点（换到挂载骨骼坐标）。贝加尔塔的 8 个挂载只用双手两个，其余为空（`[0.0]`）；请求的武器列表在 setup[4]
   （`GroundVehicle.weapons_at`），`tools/call_weapons.py vehicle_sgo` 按挂载逐个写入，原版武器从预载列表去掉。
   **多武器**：用现有机制（主炮在主攻击、导弹在普罗透斯原本的导弹挂载上）；「多武器机制」会话的新字段（`Store.key/auto`、`Arm.key`）合入后再迁。
-- **请求倍率**：机甲按宿主的请求族定倍率（`call_weapons.request_tier`）。轻型机甲取等级 1.6（尼克斯族 ×8.3，接近战斗坦克 1.5 级的 ×8.1），
+  **不是普罗透斯**：两台机甲的模型都带标记骨 `edf6vc_xm_walker`（`xm_walker.MARKER`，根下的空叶子骨，排在宿主骨架之后，不移动任何宿主骨序号）；
+  `src/proteus.cpp IsProteus` 只把模型里没有它的 VehicleBigBegaruta 当普罗透斯重做，重型机甲因此保留 `xm_units` 给它的数值
+  （四座、原版腿、炮的射速 / 散布），不套普罗透斯的两座 / 护盾 / 架设。
+- **请求倍率**：机甲按宿主的请求族定倍率（`call_weapons.request_tier`）。轻型机甲取等级 1.6（贝加尔塔族 ×8.3，接近战斗坦克 1.5 级的 ×8.1），
   重型 2.2（普罗透斯族 ×8.7）：有效耐久约 5800 / 76000，对应原作 45 / 600 对战斗坦克 170（20200）。
 - **步兵**：原作的枪与拳头是同一件（`Be_L_Hand` 的散块），用 `Rig.trim` 只留距手关节 0.3 m 内的块，士兵拿该种类的 EDF 武器。
   种类没有涂装与背包（模型没有可换色材质，Root.cpk 里也没有可重新染色的模板）。LOD：模型太轻，`model_lod.lods` 不生成，SGO 去掉 LOD 表。

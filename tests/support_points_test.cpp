@@ -49,6 +49,10 @@ int main() {
     p.Refund(29000,s);
     Check(p.points==s.most,"a refund comes back, up to the most");
     Check(p.spent==29000 && p.refunded==29000,"the mission's ledger for the log");
+    // A price held and then not asked: back as it was, not a refund.
+    Check(p.Spend(500) && p.points==s.most-500,"a price held");
+    p.Unspend(500);
+    Check(p.points==s.most && p.spent==29000 && p.refunded==29000,"the call not asked: the pool and its ledger as they were");
     // A start past the most is the most; a negative start none.
     {Settings t;t.start=50000;Pool q;q.Start(t);Check(q.points==t.most,"the start is kept under the most");
      t.start=-5;q.Start(t);Check(q.points==0,"a negative start is none");}
@@ -112,8 +116,52 @@ int main() {
         Msg c2=g.ChangeMsg(g.changes[0]);
         Check(!peer.Next(c3),"a change out of order: not taken");
         Check(peer.Next(c2) && peer.Next(c3) && peer.taken==3,"the guest's changes sent again in order: each taken once");
-        // A host that has not seen this run (a new host, a new mission's table) begins at the first change that comes.
+        Check(c2.base==2 && c3.base==2,"each change carries the run's oldest unconfirmed serial");
+        // A host that has not seen this run (a new host, a new mission's table) begins at the run's oldest unconfirmed
+        // change (base), whichever comes first.
         Peer fresh;Check(fresh.Next(c2) && fresh.taken==2,"a run not seen yet begins at its oldest unconfirmed change");
+        // 2026-10-30 review: a run's first change lost (its send failed, waiting for its resend) and its second met first.
+        {Mirror r;r.Start(h,0x5151u);Msg r1,r2;
+         Check(r.Keep(0,-100,0,&r1) && r.Keep(0,-200,0,&r2) && r1.base==1 && r2.base==1,"two changes, none confirmed");
+         Peer host;
+         Check(!host.Next(r2),"a new run's second change met first: not taken (its first is still to come)");
+         Check(host.Next(r1) && host.Next(r2) && host.taken==2,"then both, in order: neither skipped");
+         Check(!host.Next(r1) && !host.Next(r2),"and each once");
+         // A run whose first changes another host confirmed (the host moved): the next host goes on from its base.
+         Msg st2;st2.kind=Kind::state;st2.most=h.most;st2.scale=h.scale;st2.origin=0x5151u;st2.serial=2;
+         for(int t=0;t<kTeams;++t)st2.points[t]=h.start;
+         r.Hear(st2);Msg r3;
+         Check(r.count==0 && r.Keep(0,-300,0,&r3) && r3.serial==3 && r3.base==3,"confirmed by the old host: the next change's base is 3");
+         Peer moved;Check(moved.Next(r3) && moved.taken==3,"a new host takes it");
+         Msg bad=r3;bad.base=0;
+         Check(!moved.Next(bad) && !Encode(bad,bytes,sizeof(bytes)),"a change with no base is neither taken nor sent");
+         bad.base=4;Check(!Encode(bad,bytes,sizeof(bytes)),"a base past its serial is not sent");
+         Msg rd;Check(Encode(r3,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),rd) && rd.base==3,"the base round-trips");}
+        // A call's price held while it is asked (support_points.cpp SupportPointsHold): shown spent, its change's room kept.
+        {Mirror m;m.Start(h,7u);Msg x;
+         Check(!m.Hold(0,h.start+1),"more than the pool shows: not held");
+         Check(m.Hold(0,1000) && m.Shown(0)==h.start-1000 && m.count==0,"held: shown spent, nothing sent yet");
+         Check(!m.Hold(0,1),"one held at a time");
+         for(int i=0;i<kChangesMost-1;++i)Check(m.Keep(1,-1,0,&x),"other changes meanwhile (refunds)");
+         Check(!m.Keep(1,-1,0,&x) && m.count==kChangesMost-1,"the held price's room is not another change's");
+         Check(m.Commit(5,&x) && m.count==kChangesMost && x.pt==-1000 && x.team==0 && x.serial==kChangesMost,
+               "the call taken: its change kept in the room held for it");
+         Check(m.Shown(0)==h.start-1000 && m.heldPt==0,"shown spent once, not twice");
+         Check(!m.Commit(5,&x),"nothing held: nothing more");
+         Mirror n;n.Start(h,8u);
+         Check(n.Hold(2,500) && n.Shown(2)==h.start-500,"held");
+         n.Drop();
+         Check(n.Shown(2)==h.start && n.count==0 && n.Hold(2,500),"the call not asked: as it was, nothing sent");
+         Mirror f;f.Start(h,9u);
+         for(int i=0;i<kChangesMost;++i)f.Keep(1,-1,0,&x);
+         Check(!f.Hold(0,1),"no room for its change: not held (the call is not asked)");}
+        // SupportPtMost lowered during the mission: the pools brought down to it, the state sent again.
+        {Pools capped;capped.Start(h);Settings lower=h;lower.most=4000;
+         Check(capped.Cap(lower) && capped.team[0].points==4000 && capped.team[6].points==4000,"every pool down to the new most");
+         Check(!capped.Cap(lower),"none over it any more");
+         Msg sc;sc.kind=Kind::state;sc.most=lower.most;sc.scale=lower.scale;
+         for(int t=0;t<kTeams;++t)sc.points[t]=capped.team[t].points;
+         Check(Encode(sc,bytes,sizeof(bytes)),"the state encodes again under the new most");}
         // The guest's list has room for kChangesMost unconfirmed.
         Mirror full;full.Start(h,1u);Msg x;
         for(int i=0;i<kChangesMost;++i)full.Keep(1,-1,0,&x);
@@ -124,7 +172,7 @@ int main() {
         Msg bad=st;bad.points[3]=h.most+1;
         Check(!Encode(bad,bytes,sizeof(bytes)),"a pool past the most is not sent");
         Check(Encode(st,bytes,sizeof(bytes)),"the state encodes again");
-        bytes[4]=2;
+        bytes[4]=static_cast<unsigned char>(kVersion-1);
         Check(!Decode(bytes,sizeof(bytes),e),"another version is not read");
         Check(Encode(st,bytes,sizeof(bytes)) && !Decode(bytes,sizeof(bytes)-1,e),"the wrong size is not read");
         Msg zero=c;zero.pt=0;

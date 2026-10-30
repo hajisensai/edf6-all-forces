@@ -211,7 +211,8 @@ inline crew::SupportWeapon ComposeSquadKind(const crew::SupportLoadout& l,int j)
 }
 inline bool ComposeApply(crew::SupportLoadout& l,int seats,int code) noexcept {
     if(code>=0) {
-        if(code>=crew::kSupportWeaponCount || !ComposeRoom(l,seats))return false;
+        if(code>=crew::kSupportWeaponCount || !crew::SupportKindInstalled(static_cast<crew::SupportWeapon>(code)) ||
+           !ComposeRoom(l,seats))return false;
         for(int k=0;k<kSquad;++k)l.soldier[l.count++]=static_cast<crew::SupportWeapon>(code);
         return true;
     }
@@ -222,11 +223,12 @@ inline bool ComposeApply(crew::SupportLoadout& l,int seats,int code) noexcept {
     for(int i=l.count-gone;i<l.count;++i)l.soldier[i]=crew::SupportWeapon::rifle;
     l.count-=gone;return true;
 }
-// The kinds of a class in the panel's row order (support_call.h SupportSoldierClass).
+// The installed kinds of a class in the panel's row order (support_call.h SupportSoldierClass, SupportKindInstalled).
 inline int ComposeKinds(int cls,int* out,int most) noexcept {
     int n=0;
     for(int k=0;k<crew::kSupportWeaponCount && n<most;++k)
-        if(crew::SupportSoldierClass(static_cast<crew::SupportWeapon>(k))==cls)out[n++]=k;
+        if(crew::SupportSoldierClass(static_cast<crew::SupportWeapon>(k))==cls &&
+           crew::SupportKindInstalled(static_cast<crew::SupportWeapon>(k)))out[n++]=k;
     return n;
 }
 // Pixel sizes at 1080 lines (times the HUD scale `s`).

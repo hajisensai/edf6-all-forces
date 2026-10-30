@@ -432,8 +432,12 @@ def crash_dump_cases(root: str, game: str, dumps: str, exe: str, crew: str, run:
                      f'{tod(run)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
                      f'{tod(run)} CRASHDUMP installed: {folder}\\EDF6.exe.7500.plugin.dmp (dbghelp 1, ...)'],
               now - 5)
-    expect(testhub.logged_runs(game) == {7400: tod(before)[1:9], 7500: tod(run)[1:9]},
+    runs = testhub.logged_runs(game)
+    expect({pid: [r.loading for r in rs] for pid, rs in runs.items()} == {7400: [tod(before)[1:9]], 7500: [tod(run)[1:9]]},
            'each run of the sent logs by its process id, with its loading time')
+    expect(abs(runs[7400][0].start - int(before)) <= 1 and abs(runs[7400][0].end - int(run)) <= 1
+           and abs(runs[7500][0].start - int(run)) <= 1 and runs[7500][0].end is None,
+           "each run dated from the log's last write, ending where the next run's loading is")
     crashed = os.path.join(dumps, 'EDF6.exe.7400.plugin.dmp')
     write_dump(crashed, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=before + 65,
                created=before - 1, exception=(0xC0000409, 0x140000000 + 0x1234, [7]))
@@ -446,6 +450,39 @@ def crash_dump_cases(root: str, game: str, dumps: str, exe: str, crew: str, run:
     os.utime(crashed, (now - testhub.DUMP_AGE - 60, now - testhub.DUMP_AGE - 60))
     sent, listing = collected(game)
     expect(sent == [] and '异常 C0000409' in listing and '天，未上传' in listing, 'an old dump is named with its crash, not sent')
+    os.utime(crashed, (before + 65, before + 65))
+    # Windows reuses process ids: a dump named 7400 but written after the logged 7400 run, once the next run began
+    # (here a later process that got 7400 again and logged nothing), is not that run's.
+    reused = os.path.join(dumps, 'EDF6.exe.7400.dmp')
+    os.remove(crashed)
+    write_dump(reused, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=run + 60, created=run + 30)
+    os.utime(reused, (run + 60, run + 60))
+    sent, listing = collected(game)
+    expect(sent == [] and '晚于日志里该进程号的那次游戏之后的下一次游戏' in listing and '不是本次游戏' in listing,
+           "a dump of a reused pid written after its logged run ended is refused, with both reasons")
+    # ...and one whose process started well after the logged run began (its MiscInfo), though written inside it.
+    write_dump(reused, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=before + 65,
+               created=before + 30)
+    os.utime(reused, (before + 65, before + 65))
+    sent, listing = collected(game)
+    expect(sent == [] and '不是日志里该进程号的那次游戏' in listing, 'a reused pid told apart by its process start time')
+    # Two logged runs that both had pid 7400: the dump goes with the run it was written in.
+    write_log(game, [f'{tod(before)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
+                     f'{tod(before)} CRASHDUMP installed: {folder}\\EDF6.exe.7400.plugin.dmp (dbghelp 1, ...)',
+                     f'{tod(run - 900)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
+                     f'{tod(run - 900)} CRASHDUMP installed: {folder}\\EDF6.exe.7400.plugin.dmp (dbghelp 1, ...)',
+                     f'{tod(run)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
+                     f'{tod(run)} CRASHDUMP installed: {folder}\\EDF6.exe.7500.plugin.dmp (dbghelp 1, ...)'],
+              now - 5)
+    write_dump(reused, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=run - 600,
+               created=run - 901)
+    os.utime(reused, (run - 600, run - 600))
+    sent, listing = collected(game)
+    expect(sent == ['crash/EDF6.exe.7400.dmp'] and f'loading {tod(run - 900)[1:9]}' in listing,
+           'of two logged runs with the same pid, the dump goes with the one it was written in')
+    os.remove(reused)
+    write_dump(crashed, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=before + 65,
+               created=before - 1, exception=(0xC0000409, 0x140000000 + 0x1234, [7]))
     os.utime(crashed, (before + 65, before + 65))
     # A process the sent logs do not hold (no CRASHDUMP line of its pid): the time rule, so an earlier run's is refused.
     os.rename(crashed, os.path.join(dumps, 'EDF6.exe.7399.plugin.dmp'))

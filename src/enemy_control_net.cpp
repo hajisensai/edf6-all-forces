@@ -58,6 +58,9 @@ UiRequest uiRequests[ep::kMaxLeases]{};
 SRWLOCK statusLock=SRWLOCK_INIT;
 EnemyControlNetworkStatus roomStatus{},statuses[ep::kMaxLeases]{};
 unsigned statusCount=0;
+// Requester's refusal log lines: at most 16 a mission, counted again from ResetEnemyControlNetwork (a mission's start),
+// not 16 for the whole process.
+std::atomic<int> requesterLogs{0};
 ep::Result lastLogged=ep::Result::Idle;
 
 bool Match(const ep::NativeId& id,const unsigned char* bytes) noexcept {return bytes && !std::memcmp(id.data(),bytes,id.size());}
@@ -75,7 +78,7 @@ ep::SendResult TrySendAction(void*,std::uint32_t peer,const void* bytes,std::siz
 bool Requester(const char* authenticated,const ep::NativeId& id) noexcept {
     // The host's reason for an Unauthorized reply (the guest sees only that; 2026-10-30 report #27). A PUID / participant
     // mismatch is logged by the sender check itself (SupportCommandRequesterMatches).
-    static std::atomic<int> said{0};
+    std::atomic<int>& said=requesterLogs;
     if(!ep::ValidPuid(authenticated) || !ep::CanonicalId(id)) {
         if(said.fetch_add(1)<16)Log("ENEMYCTRL NET request refused: malformed sender or player ID");
         return false;
@@ -359,7 +362,7 @@ void EnemyControlNetworkFrame() noexcept {
     Publish();
 }
 void ResetEnemyControlNetwork() noexcept {
-    protocol.Reset(GetTickCount64());transport={};std::memset(localPuid,0,sizeof(localPuid));
+    protocol.Reset(GetTickCount64());transport={};std::memset(localPuid,0,sizeof(localPuid));requesterLogs.store(0);
     for(auto& sample:samples)sample={};for(auto& sample:poseSamples)sample={};for(auto& request:uiRequests)request={};Publish();
 }
 bool ReadEnemyControlNetworkStatus(const unsigned char source[32],EnemyControlNetworkStatus* out) noexcept {

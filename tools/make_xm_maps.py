@@ -36,7 +36,7 @@ import obj_model  # noqa: E402
 from modfiles import sha256, sha256_file  # noqa: E402
 
 OWNER = 'xmmaps'      # pylib/ledger.py OWNERS
-VERSION = 1           # raise when the builder's output changes
+VERSION = 2           # raise when the builder's output changes
 MODEL_DIR = 'xm_maps'
 INDEX = 'xm_maps.json'
 NAVMESH = ('NAVMESH.HKT', 'NAVMESH.NVMD', 'NAVMESH_H.HKT', 'NAVMESH_H.NVMD')
@@ -119,37 +119,30 @@ def _foreign(led: ledger.Ledger, rel: str) -> bool:
 
 
 def install(root: str, say: Callable[[str], None] = print) -> tuple[list[str], list[tuple[str, str]]]:
-    """Every map of the model pack written as OWNER's; (paths written, [(map, why not)])."""
+    """Every map of the model pack written as OWNER's; (paths written, [(map, why not)]). Whatever OWNER installed
+    before and no map installs now (the pack's index gone or of another VERSION, a map left out) is released."""
     import edf41_maps
-    folder = obj_model.model_dir(MODEL_DIR)
-    maps = _index(folder)
-    if not maps:
-        return [], [('X-Morph 地图', f'模型包里没有 {MODEL_DIR}/{INDEX}（或版本不是 {VERSION}）')]
-    try:
-        e6 = edf41_maps.Archives(root)
-    except (OSError, ValueError, struct.error) as e:   # the donors' weather / navmesh come from these
-        return [], [(name, f'读不了 EDF6 的档案（借用的天气 / 寻路文件在里面）：{type(e).__name__}: {e}') for name in maps]
     led = ledger.Ledger(root)
     written: list[str] = []
     skipped: list[tuple[str, str]] = []
     wanted: set[str] = set()
-    for name, entry in maps.items():
+    folder = obj_model.model_dir(MODEL_DIR)
+    maps = _index(folder)
+    e6 = None
+    if not maps:
+        skipped.append(('X-Morph 地图', f'模型包里没有 {MODEL_DIR}/{INDEX}（或版本不是 {VERSION}）'))
+    else:
+        try:
+            e6 = edf41_maps.Archives(root)
+        except (OSError, ValueError, struct.error) as e:   # the donors' weather / navmesh come from these
+            skipped += [(name, f'读不了 EDF6 的档案（借用的天气 / 寻路文件在里面）：{type(e).__name__}: {e}') for name in maps]
+    for name, entry in maps.items() if e6 is not None else ():
         foreign = [rel for rel in files_of(name, entry) if _foreign(led, rel)]
         if foreign:
             skipped.append((name, f"Mods 里已有别的 MOD 的文件：{', '.join(foreign)}"))
             continue
+        # the donor's files first: reading them is cheap, hashing the model pack's (about 0.9 GB in all) is not
         files: dict[str, bytes] = {}
-        bad = []
-        for fn, sha in entry['files'].items():
-            path = os.path.join(folder, fn)
-            if not os.path.isfile(path) or sha256_file(path) != sha:
-                bad.append(fn)
-                continue
-            with open(path, 'rb') as f:
-                files[f'MAP/{fn}'] = f.read()
-        if bad:
-            skipped.append((name, f"模型包里的文件缺失或内容不对：{', '.join(bad)}"))
-            continue
         donor = entry['donor']
         try:
             for w in entry['weathers']:
@@ -159,6 +152,21 @@ def install(root: str, say: Callable[[str], None] = print) -> tuple[list[str], l
                 files[f'MAP/{name}.{n}'] = e6.read(f'{donor}.{n}')
         except KeyError as e:
             skipped.append((name, f'EDF6 里没有借用的天气 / 寻路文件 {e}'))
+            continue
+        bad = []
+        for fn, sha in entry['files'].items():
+            path = os.path.join(folder, fn)
+            if not os.path.isfile(path):
+                bad.append(fn)
+                continue
+            with open(path, 'rb') as f:
+                data = f.read()
+            if sha256(data) != sha:
+                bad.append(fn)
+                continue
+            files[f'MAP/{fn}'] = data
+        if bad:
+            skipped.append((name, f"模型包里的文件缺失或内容不对：{', '.join(bad)}"))
             continue
         say(f"  X-Morph 地图 {name}（{entry['label']}，借用 EDF6 {donor} 的天气与寻路网格）")
         wanted.update(ledger.key(rel) for rel in files)

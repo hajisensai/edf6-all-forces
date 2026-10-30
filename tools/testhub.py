@@ -41,7 +41,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import zipfile
-from typing import BinaryIO
+from typing import BinaryIO, NamedTuple
 
 SITE = os.environ.get('EDF6_TESTHUB_URL', 'https://edf6.fushi.moe').rstrip('/')
 CONFIG = os.path.join(os.environ.get('APPDATA') or os.path.expanduser('~'), 'EDF6AllForces', 'testhub.json')
@@ -301,11 +301,17 @@ def _last_loading(path: str) -> float | None:
         pass
     if last is None:
         return None
-    h, m, s = (int(g) for g in last.groups())
-    day = time.localtime(written)
+    return _at_or_before(last.group(1, 2, 3), written)
+
+
+def _at_or_before(hms, limit: float) -> float:  # noqa: ANN001 - (h, m, s) as bytes or str
+    """The time of day hms on the latest date that puts it no later than `limit` (SESSION_SKEW of rounding allowed),
+    seconds since the epoch."""
+    h, m, s = (int(g) for g in hms)
+    day = time.localtime(limit)
     at = time.mktime((day.tm_year, day.tm_mon, day.tm_mday, h, m, s, 0, 0, -1))
-    if at > written + SESSION_SKEW:
-        day = time.localtime(written - 86400)
+    if at > limit + SESSION_SKEW:
+        day = time.localtime(limit - 86400)
         at = time.mktime((day.tm_year, day.tm_mon, day.tm_mday, h, m, s, 0, 0, -1))
     return at
 
@@ -323,29 +329,77 @@ _INSTALLED = re.compile(rb'CRASHDUMP installed: [^\r\n]*?\.(\d+)\.plugin\.dmp \(
 _DUMP_PID = re.compile(r'\.(\d+)(?:\.plugin)?\.dmp$', re.I)
 
 
-def logged_runs(game: str) -> dict[int, str]:
-    """The runs the sent logs hold (the same tails collect() sends), by process id: pid -> the time of day of its
-    `loading` line. A tester sends the logs after starting the game again, so the run that crashed is seldom the one the
-    logs end with (reports #29 / #30, 2026-10-28..29: the plugin's dump of the crashed run, 22:18:37, was left out as
-    「早于本次游戏」 while its run's lines were in the very log sent): a dump of any run whose lines go along matches it."""
-    runs: dict[int, str] = {}
+class Run(NamedTuple):
+    """A run the sent logs hold: its `loading` line's time of day, that time (seconds since the epoch; None when the
+    sent tail cut the line off) and the next run's (None: the last run the logs hold)."""
+    loading: str
+    start: float | None
+    end: float | None
+
+
+def logged_runs(game: str) -> dict[int, list[Run]]:
+    """The runs the sent logs hold (the same tails collect() sends), by process id: pid -> its runs. A tester sends the
+    logs after starting the game again, so the run that crashed is seldom the one the logs end with (reports #29 / #30,
+    2026-10-28..29: the plugin's dump of the crashed run, 22:18:37, was left out as 「早于本次游戏」 while its run's lines
+    were in the very log sent): a dump of any run whose lines go along matches it, when it was written in that run
+    (dump_in_run: Windows reuses process ids, so a pid alone may name a later run's dump). A log's lines carry the time
+    of day only: the last `loading` is dated by the log's last write, each earlier one by the one after it."""
+    order: list[tuple[str, float | None, list[int]]] = []
     for name in ('EDF6VehicleCrew.log.1', 'EDF6VehicleCrew.log'):
         path = os.path.join(game, 'Mods', 'Plugins', name)
         if not os.path.isfile(path):
             continue
         data = _tail(path, LOG_TAIL)
-        loading = '?'
-        for m in re.finditer(_LOADING.pattern + rb'|' + _INSTALLED.pattern, data, re.M):
+        found = list(re.finditer(_LOADING.pattern + rb'|' + _INSTALLED.pattern, data, re.M))
+        at: dict[int, float] = {}
+        limit = os.path.getmtime(path)
+        for m in reversed(found):
             if m.group(1) is not None:
-                loading = '%s:%s:%s' % tuple(g.decode() for g in m.groups()[:3])
+                limit = at[m.start()] = _at_or_before(m.group(1, 2, 3), limit)
+        current: tuple[str, float | None, list[int]] | None = None
+        for m in found:
+            if m.group(1) is not None:
+                current = ('%s:%s:%s' % tuple(g.decode() for g in m.group(1, 2, 3)), at[m.start()], [])
+                order.append(current)
             else:
-                runs[int(m.group(4))] = loading
+                if current is None:          # the tail starts inside a run: its loading line is not sent
+                    current = ('?', None, [])
+                    order.append(current)
+                current[2].append(int(m.group(4)))
+    runs: dict[int, list[Run]] = {}
+    for i, (loading, start, pids) in enumerate(order):
+        end = next((s for _l, s, _p in order[i + 1:] if s is not None), None)
+        for pid in pids:
+            runs.setdefault(pid, []).append(Run(loading, start, end))
     return runs
 
 
 def dump_pid(path: str) -> int | None:
     m = _DUMP_PID.search(os.path.basename(path))
     return int(m.group(1)) if m else None
+
+
+def _dump_in(path: str, start: float, end: float | None, what: str) -> str:
+    """'' when the dump was written by the run that began at `start` (and before the next one began at `end`), and
+    (when the dump records it) by a process that started then, else why not."""
+    written, created = dump_times(path)
+    if written is None:
+        written = int(os.path.getmtime(path))
+    when = lambda t: time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t))  # noqa: E731
+    if written < start - SESSION_SKEW:
+        return f'写于 {when(written)}，早于{what}（日志 loading {when(start)}）'
+    if end is not None and written > end + SESSION_SKEW:
+        return f'写于 {when(written)}，晚于{what}之后的下一次游戏（日志 loading {when(end)}）'
+    if created is not None and not (start - SESSION_EARLY <= created <= start + SESSION_SKEW):
+        return f'进程启动于 {when(created)}，不是{what}（日志 loading {when(start)}）'
+    return ''
+
+
+def dump_in_run(path: str, run: Run) -> str:
+    """'' when the dump is of `run` (a run the sent logs hold under the dump's process id: logged_runs), else why not."""
+    if run.start is None:
+        return '它那次游戏的 loading 行不在发送的日志尾部，对不上时间'
+    return _dump_in(path, run.start, run.end, '日志里该进程号的那次游戏')
 
 
 def dump_in_session(path: str, start: float | None) -> str:
@@ -355,15 +409,7 @@ def dump_in_session(path: str, start: float | None) -> str:
     that started then, not before (an earlier run) or after (a later run whose plugins never logged)."""
     if start is None:
         return '插件日志里没有 loading 行，对不上是哪次游戏'
-    written, created = dump_times(path)
-    if written is None:
-        written = int(os.path.getmtime(path))
-    when = lambda t: time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t))  # noqa: E731
-    if written < start - SESSION_SKEW:
-        return f'写于 {when(written)}，早于本次游戏（日志 loading {when(start)}）'
-    if created is not None and not (start - SESSION_EARLY <= created <= start + SESSION_SKEW):
-        return f'进程启动于 {when(created)}，不是本次游戏（日志 loading {when(start)}）'
-    return ''
+    return _dump_in(path, start, None, '本次游戏')
 
 
 def _dump_module_rows(f: BinaryIO) -> list[tuple[str, int, int, int]] | None:
@@ -637,12 +683,16 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
             (dump_exception: bounded reads, so also of a dump too big to send)."""
             why = dump_matches(path, game)
             pid = dump_pid(path)
-            if not why and pid in runs:
-                where = f'本次安装、日志里的一次游戏（进程 {pid}，loading {runs[pid]}）'
+            logged = [] if why else [(r, dump_in_run(path, r)) for r in runs.get(pid, [])]
+            run = next((r for r, off in logged if not off), None)
+            if run is not None:
+                where = f'本次安装、日志里的一次游戏（进程 {pid}，loading {run.loading}）'
             else:
                 if not why:
                     session = dump_in_session(path, start)
-                    why = f'不是本次游戏：{session}' if session else ''
+                    # a logged run of its pid it was not written in (Windows reused the id): said with the time rule's
+                    why = (f'不是本次游戏：{session}' + ''.join(f'；进程 {pid}（loading {r.loading}）：{off}'
+                                                          for r, off in logged)) if session else ''
                 where = f'来源不符：{why}' if why else '本次安装、本次游戏'
             crash = dump_exception(path)
             verdicts.append(f'{os.path.basename(path)}  {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(path)))}  '

@@ -16,7 +16,10 @@ ULONGLONG GameMs() noexcept { return now; }
 bool mapHeld=false;
 bool MapHoldsKeys() noexcept { return mapHeld; }
 PluginBody BodyOf(const void*) noexcept { return PluginBody::none; }
-bool AiGunner(const unsigned char*,const unsigned char* s) noexcept { return authority && SeatRider(s)==Rider::other; }
+// npcai.cpp's: an NPC this machine runs, never a player of another machine (IsAnyPlayer).
+bool AiGunner(const unsigned char*,const unsigned char* s) noexcept {
+    return authority && SeatRider(s)==Rider::other && !IsAnyPlayer(At<const unsigned char*>(s,kSeatRider));
+}
 bool IsOnlineAuthority(const void*) noexcept { return authority; }   // payload.cpp RunsUnmannedTurrets
 void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
@@ -33,8 +36,11 @@ const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG",
                 // missiles on fire key 3 and an anti-air gun on key 4, both auto turrets
                 xmMg{L"XM_MG", "MG", StoreRole::gun,0,0,0,0,false,StoreShell::native,kSecondTriggerKey},
                 xmAam{L"XM_AAM", "AAM", StoreRole::air,0,0,0,0,false,StoreShell::native,3,true},
-                xmAa{L"XM_AA", "AA", StoreRole::gun,0,0,0,0,false,StoreShell::native,4,true};
+                xmAa{L"XM_AA", "AA", StoreRole::gun,0,0,0,0,false,StoreShell::native,4,true},
+                // a gunner seat's own turret gun (StoreSpec::seat 1), an auto turret with nobody in that seat
+                xmSeatGun{L"XM_TG", "TG", StoreRole::gun,0,0,0,0,false,StoreShell::native,0,true,1};
 const StoreSpec* StoreOf(const unsigned char* w) noexcept {
+    if(w[0x101]==23)return &xmSeatGun;
     if(w[0x101]>=20 && w[0x101]<=22)return w[0x101]==20 ? &xmMg : w[0x101]==21 ? &xmAam : &xmAa;
     return w[0x101]==10 ? &bmptMissile : w[0x101]==11 ? &bmptApLeft : w[0x101]==12 ? &bmptApRight : w[0x101]==13 ? &bmptThermobaric : w[0x101]==8 ? &npcNativeHE : w[0x101]==9 ? &npcNativeAP : w[0x101]==6 ? &npcPairedLeft : w[0x101]==7 ? &npcPairedRight : w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : w[0x101]==5 ? &coaxSpec : nullptr;
 }
@@ -55,7 +61,9 @@ namespace audio { void LockTone(int,float) noexcept {} }
 }
 namespace crew { bool friendInLine=false; bool FriendInLine(const float*,const float*,const void*) noexcept { return friendInLine; } }
 // The game's lock (lockon.cpp), the target's height over the ground (npcai.cpp) and the enemy list (heli.cpp), as the
-// auto turrets read them: one enemy at a time.
+// auto turrets read them: one enemy at a time. `lockObject` stands for the lock list the game's own tick fills: a
+// Weapon_VehicleShoot's update runs that tick every frame, pulled or not (0x6B386B: payload.cpp SelfFire), so a test sets
+// what the game would have locked; the plugin's part is when it pulls (a lock held, the weapon ready to fire).
 namespace crew {
 const void* lockObject=nullptr;
 const void* WeaponLockObject(const unsigned char*) noexcept { return lockObject; }
@@ -94,7 +102,7 @@ int main() {
     unsigned char vehicles[2][0x2400]{},seats[2][edf::kSeatStride*2]{},ctrl[2][16]{},riders[2][0x2000]{};
     unsigned char weapons[2][3][0x1600]{},holders[2][3][kHolderStride]{};
     unsigned char* seatHolders[2][3]{};
-    cfg.enabled=cfg.stockStores=cfg.npcGunners=true;pullOk=true;
+    cfg.enabled=cfg.stockStores=cfg.npcGunners=true;pullOk=true;selfFireOk=true;   // InstallPayload's, on the EDF.dll read
     for(int j=0;j<2;++j) {
         auto v=vehicles[j];Put<void*>(v,0,image+kVt403);Put<void*>(v,kSelfCtrl,ctrl[j]);
         Put<void*>(v,kSeats,seats[j]);Put<std::uint64_t>(v,kSeatCount,2);Put<void*>(v,kHolders,holders[j]);Put<std::uint64_t>(v,kHolderCount,3);
@@ -731,8 +739,29 @@ int main() {
         // The auto turrets on: each fires itself when it has a shot.
         cfg.autoTurrets=true;at[0]=0;at[1]=100;at[2]=500;
         check(frame(false,false,0)==0u && PlayerPayload(&r) && r.autoOn,"turrets on, no lock, no enemy: they hold");
-        lockObject=enemy;airTarget=true;
+        enemyObject=enemy;airTarget=true;at[0]=0;at[1]=100;at[2]=500;
+        check(!(frame(false,false,0)&8u),"an aircraft in the missiles' cone, no lock yet: not pulled (the game locks it unpulled, "
+                                         "0x6B386B; a pull with no lock fires nothing, 0x690C3D)");
+        enemyObject=nullptr;
+        lockObject=enemy;
         check(frame(false,false,0)==8u,"the missiles' lock holds an aircraft: they launch by themselves");
+        // A burst weapon (FireBurstCount > 1: the AAM pods' 5 and 20) fires on its trigger's edge (0x691080): its latch is
+        // let go while it cannot fire, so every salvo after the first is a fresh edge.
+        Put<float>(w5[3],kWeaponCooling,30.0f);Put<float>(w5[3],kWeaponCoolStep,1.0f);
+        check(frame(false,false,0)==0u,"cooling after its salvo, its lock still held: its latch let go");
+        check(frame(false,false,0x0004)==8u,"its own key held: the player's pull, whenever he holds it");
+        Put<float>(w5[3],kWeaponCooling,1.0f);
+        check(frame(false,false,0)==8u,"ready this frame (the update's countdown takes the last of it): pulled again, a new edge");
+        Put<float>(w5[3],kWeaponCooling,0.0f);Put<std::int32_t>(w5[3],kWeaponBurstLeft,3);
+        check(frame(false,false,0)==0u,"its burst still firing: not pulled (the burst fires itself)");
+        Put<std::int32_t>(w5[3],kWeaponBurstLeft,0);Put<std::uint32_t>(w5[3],kWeaponDelay,2);
+        check(frame(false,false,0)==0u,"its fire delay not out this frame: not pulled");
+        Put<std::uint32_t>(w5[3],kWeaponDelay,1);
+        check(frame(false,false,0)==8u,"the delay's last frame (the update takes it to 0 first): pulled");
+        Put<std::uint32_t>(w5[3],kWeaponDelay,0);w5[3][kWeaponFireBlock]=1;
+        check(frame(false,false,0)==0u,"the weapon's fire block set (0x691063): not pulled");
+        w5[3][kWeaponFireBlock]=0;selfFireOk=false;
+        check(frame(false,false,0)==0u,"Weapon_VehicleShoot not as read: nothing fires itself");selfFireOk=true;
         airTarget=false;
         check(frame(false,false,0)==0u,"locked on something on the ground: the anti-air missiles hold");
         lockObject=nullptr;enemyObject=enemy;at[0]=0;at[1]=0;at[2]=300;
@@ -779,6 +808,62 @@ int main() {
         Put<void*>(v,kHolders,oldHolders);Put<std::uint64_t>(v,kHolderCount,3);
         Put<void*>(s,kSeatWeapons,oldList);Put<std::uint64_t>(s,kSeatWeaponCount,3);
         Put<float>(s,0x2E4,0);Put<float>(s,0x2E0,0);Put<unsigned char>(s,kSeatPad,0);
+    }
+    // A gunner seat's own turret (StoreSpec::seat, seat_turret.cpp; docs/multi-weapon-keys.md「独立座位」): with nobody in
+    // its seat an auto turret, on the machine that runs the vehicle; with its rider in it, that rider's to fire.
+    {
+        ResetPayload();now+=1000;cfg.stockStores=true;cfg.autoTurrets=true;authority=true;trackedHuman=nullptr;padButtons=0;
+        static unsigned char v[0x2400]{},s[edf::kSeatStride*2]{},vc[16]{},hc[16]{},w[0x1600]{},driver[0x2000]{},gunner[0x2000]{},
+                             dc[16]{},gc[16]{},enemy[0x200]{};
+        alignas(16) static unsigned char array[kHolderStride]{};
+        static unsigned char* list[1]{};
+        Put<void*>(v,0,image+kVt603);Put<void*>(v,kSelfCtrl,vc);Put<int>(vc,8,1);
+        Put<void*>(v,kSeats,s);Put<std::uint64_t>(v,kSeatCount,2);Put<void*>(v,kHolders,array);Put<std::uint64_t>(v,kHolderCount,1);
+        list[0]=array;Put<void*>(array,kHolderWeapon,w);Put<void*>(array,kHolderCtrl,hc);Put<int>(hc,8,1);
+        w[0x100]=2;w[0x101]=23;Put<const wchar_t*>(w,0x08,L"EDF6VC_XM_TG_600.SGO");Put<const wchar_t*>(w,kWeaponName,L"TG");
+        Put<int>(w,kWeaponAmmo,600);Put<int>(w,kWeaponCapacity,600);Put<int>(w,kWeaponReloadTime,-1);
+        Put<float>(w,0x224,1000);Put<float>(w,0x89C,10);Put<float>(w,0x8B0,0.0f);
+        unsigned char* const s0=SeatAt(v,0);unsigned char* const s1=SeatAt(v,1);
+        Put<void*>(s1,kSeatWeapons,list);Put<std::uint64_t>(s1,kSeatWeaponCount,1);Put<unsigned char>(s1,kSeatPad,1);
+        float* const at=reinterpret_cast<float*>(enemy+kPosition);at[0]=0;at[1]=0;at[2]=300;
+        enemyObject=enemy;airTarget=false;friendInLine=false;
+        const auto seatRider=[](unsigned char* seat,unsigned char* rider,unsigned char* uses,bool human,bool remote) {
+            Put<void*>(seat,kSeatRider,rider);Put<void*>(seat,kSeatRiderCtrl,rider ? uses : nullptr);Put<int>(uses,8,rider ? 1 : 0);
+            if(!rider)return;
+            rider[edf::kHumanPlayer]=human ? 1 : 0;rider[edf::kRiderNet+edf::kNetFlags]=remote ? 1 : 0;
+            Put<void*>(rider,edf::kHumanPad,human && !remote ? rider : nullptr);
+        };
+        seatRider(s0,nullptr,dc,false,false);seatRider(s1,nullptr,gc,false,false);
+        check(SeatRider(s1)==Rider::none && RunsUnmannedTurrets(v),"fixture: both seats empty, this machine the vehicle's authority");
+        w[kWeaponTrigger]=0;
+        check(UnmannedTurretsFire(v,1) && w[kWeaponTrigger]==1,"nobody in the gunner seat: its turret fires itself on an enemy on its line");
+        w[kWeaponTrigger]=0;Put<float>(w,kWeaponCooling,5.0f);Put<float>(w,kWeaponCoolStep,1.0f);
+        check(!UnmannedTurretsFire(v,1) && !w[kWeaponTrigger],"...and lets go while it cools (each shot a fresh edge)");
+        Put<float>(w,kWeaponCooling,0.0f);
+        // Seat 0 another machine's player: that machine runs the turrets, never this copy too.
+        seatRider(s0,driver,dc,true,true);
+        check(SeatRider(s0)==Rider::other && IsAnyPlayer(driver) && !RunsUnmannedTurrets(v),
+              "seat 0 another machine's player: this machine does not run the unmanned turrets");
+        check(!UnmannedTurretsFire(v,1) && !w[kWeaponTrigger],"...so its copy's turret fires nothing here");
+        seatRider(s0,driver,dc,false,false);
+        check(RunsUnmannedTurrets(v) && UnmannedTurretsFire(v,1) && w[kWeaponTrigger]==1,"an NPC driver this machine runs: it does");
+        seatRider(s0,nullptr,dc,false,false);w[kWeaponTrigger]=0;
+        // This machine's player in the gunner seat: the turret is theirs, on the seat's trigger; never by itself.
+        seatRider(s1,gunner,gc,true,false);trackedHuman=gunner;
+        check(SeatRider(s1)==Rider::player && !UnmannedTurretsFire(v,1) && !w[kWeaponTrigger],"someone in the seat: no unmanned fire");
+        Put<float>(s1,0x2E4,0.0f);Put<float>(s1,0x2E0,0.0f);now+=16;PayloadFrame(v);
+        PayloadReadout r{};
+        check(!w[kWeaponTrigger],"the player in the gunner seat, auto turrets on, an enemy on its line: it holds until they fire");
+        check(PlayerPayload(&r) && r.seat==1 && r.count==1 && r.entry[0].key==kSeatTriggerKey && !r.entry[0].autoTurret &&
+              r.autoTurrets==0,"the HUD: the seat's gun on its trigger, no auto turret (nor its switch) for a manned seat");
+        Put<float>(s1,0x2E4,1.0f);now+=16;PayloadFrame(v);
+        check(w[kWeaponTrigger]==1,"their trigger fires it");
+        Put<float>(s1,0x2E4,0.0f);w[kWeaponTrigger]=0;
+        // An NPC gunner in it: its crew fire (NpcOwnWeaponsFire), not the auto turret's.
+        seatRider(s1,gunner,gc,false,false);trackedHuman=nullptr;
+        check(!UnmannedTurretsFire(v,1) && !w[kWeaponTrigger],"an NPC gunner in the seat: no unmanned fire");
+        check(NpcOwnWeaponsFire(v,1,enemy,&FriendInLine) && w[kWeaponTrigger]==1,"the NPC gunner fires it at its target");
+        enemyObject=nullptr;seatRider(s1,nullptr,gc,false,false);
     }
     ResetPayload();check(!PayloadPicked(vehicles[0]),"mission reset clears choices");
     VirtualFree(image,0,MEM_RELEASE);std::printf("payload runtime: %d checks, %d failures\n",checks,fail);return fail ? 1 : 0;

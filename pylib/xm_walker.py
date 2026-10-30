@@ -49,8 +49,9 @@ CANNON = ('V_407BIGBEGARUTA_CANNON.SGO', 'RocketBullet01')  # the Proteus's gun:
 MISSILE = ('V_407BIGBEGARUTA_MISSILE.SGO', 'MissileBullet01')  # the Proteus's missiles: v_null, a muzzle per tube
 
 WALKERS: dict[str, Walker] = {
-    # The light mech on the Nix (the EWEAPON356 family's v504 Begaruta, the Air Raider's): its two hand guns on the
-    # Nix's hand holders, where xm_rig puts the X-Morph guns' mouths (att_muzzle_1 the left gun's).
+    # The light mech on the Begaruta (V504_BEGARUTA_BLUE, class Vehicle504_begaruta: the Air Raider's EWEAPON356
+    # family): its two hand guns on the Begaruta's hand holders, where xm_rig puts the X-Morph guns' mouths
+    # (att_muzzle_1 the left gun's).
     'xm_small_mech': Walker('V504_BEGARUTA_BLUE', ('EWEAPON356', 'EWEAPON357', 'EWEAPON358', 'EWEAPON359', 'EWEAPON360',
                                                    'EWEAPON362', 'EWEAPON363', 'EWEAPON364', 'EWEAPON365'), 4,
                             (Holder('weapon_hand_r', *MG, ('att_muzzle_2',)),
@@ -63,6 +64,37 @@ WALKERS: dict[str, Walker] = {
                              Holder('missile_launcher', *MISSILE, ('att_missiles_left', 'att_missiles_right'),
                                     'missiles'))),
 }
+
+
+# The marker bone every walker's model carries (a transform-only leaf under the root, after the host's whole skeleton:
+# no host bone index moves). It says the object is an X-Morph walker on its host's class, not the host: src/proteus.cpp
+# reworks a VehicleBigBegaruta only when its model lacks it, so the heavy mech keeps the numbers xm_units gives it
+# rather than the Proteus rework's seats, shield, stances, legs and gun rates. 16 characters: the game's bone lookup
+# (body506.cpp BoneRecord506) compares the first 16.
+MARKER = 'edf6vc_xm_walker'
+assert len(MARKER) == 16
+
+
+def _marked(arc: bytes, model: str) -> bytes:
+    """`arc` with MARKER added to its model member `model` (as stored: raw or CMPL)."""
+    import mdb
+    rab = mdb.rab_read(arc)
+    member = next(f for f in rab.files if f.name.lower() == model.lower())
+    md = mdb.mdb_read(member.data)
+    if md.bone_index(MARKER) >= 0:
+        raise ValueError(f'{model} 已有标记骨骼 {MARKER}')
+    root = next(b for b in md.bones if b.parent < 0)
+    mdb.insert_bone(md, MARKER, md.name_of(root.name))
+    member.stored = mdb.cmpl_compress(mdb.mdb_write(md)) if member.stored[:4] == b'CMPL' else mdb.mdb_write(md)
+    return mdb.rab_write(rab)
+
+
+def marked(arc: bytes, model: str) -> bool:
+    """Whether the archive's model member carries MARKER (check)."""
+    import mdb
+    rab = mdb.rab_read(arc)
+    member = next((f for f in rab.files if f.name.lower() == model.lower()), None)
+    return member is not None and mdb.mdb_read(member.data).bone_index(MARKER) >= 0
 
 
 # The host model whose cockpit fits (pylib/cockpit_fits_mech.py FITS) the walker's model takes (cockpit_fits_plugin):
@@ -228,6 +260,7 @@ def build(game, key: str) -> dict[str, bytes]:  # noqa: ANN001
     import xm_rig
     u = xm_units.UNITS[key]
     arc, md, info = xm_rig.build(game, key)
+    arc = _marked(arc, f'edf6vc_{key}.mdb')   # not the host to the plugin (MARKER); `md` (the holders' frames) unchanged
     files = {f'OBJECT/{model_file(key)}': arc, f'OBJECT/{vehicle_file(key)}': vehicle_sgo(game, key)}
     for k, h in enumerate(WALKERS[key].holders):
         files[f'WEAPON/{weapon_file(key, k)}'] = weapon_sgo(game, u, h, holder_points(md, info, h))
@@ -252,6 +285,7 @@ def check(files: dict[str, bytes], key: str) -> None:
     assert v['animation_model'][0][1] == f'edf6vc_{key}.mdb', v['animation_model'][0]
     assert abs(v['game_object_durability'] - u.durability) < 1e-3, v['game_object_durability']
     assert f'OBJECT/{model_file(key)}' in files
+    assert marked(files[f'OBJECT/{model_file(key)}'], f'edf6vc_{key}.mdb'), f'{model_file(key)} 缺少标记骨骼 {MARKER}'
     assert [b for b, _ in v['vehicle_weapon_setting']] == list(HOST_HOLDERS[w.stock]), v['vehicle_weapon_setting']
     for name in SETUPS:
         if name in v or name == 'vehicle_setup':

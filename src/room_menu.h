@@ -427,7 +427,13 @@ inline void ChangeSoldier(Menu& m,Unit& u,int step) noexcept {
     const int i=m.rowAt;
     SupportLook& l=u.squad.look[i];
     if(m.fieldAt==0) {
-        u.squad.kind[i]=static_cast<SupportWeapon>(Wrap(static_cast<int>(u.squad.kind[i]),step,kSupportWeaponCount));
+        // The next installed kind (support_call.h SupportKindInstalled): one this install lacks is never offered.
+        int k=static_cast<int>(u.squad.kind[i]);
+        for(int tries=0;tries<kSupportWeaponCount;++tries) {
+            k=Wrap(k,step,kSupportWeaponCount);
+            if(SupportKindInstalled(static_cast<SupportWeapon>(k)))break;
+        }
+        u.squad.kind[i]=static_cast<SupportWeapon>(k);
         if(!SupportKindHasLooks(u.squad.kind[i]))l=SupportLook{};
         else if(!PackFits(l.pack,SupportSoldierClass(u.squad.kind[i])))l.pack=0;
         if(m.fieldAt>=FieldCount(u,i))m.fieldAt=0;

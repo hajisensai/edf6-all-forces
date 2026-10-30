@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 namespace crew {
@@ -28,6 +29,30 @@ constexpr int SupportSoldierClass(SupportWeapon w) noexcept {
 // Whether a kind can wear a colour or a backpack: those are generated from the kind's stock template in Root.cpk. The
 // X-Morph infantry has no such template and its model no change-colour material, so it is always the plain body.
 constexpr bool SupportKindHasLooks(SupportWeapon k) noexcept { return k!=SupportWeapon::xmInfantry; }
+// Whether a kind's bodies (member and leader) are installed here, so that it is offered at all: the room menu, its
+// dialogs, the map's composition panel, a SupportPreset_ value and the host's plan / every peer's Validate all ask this
+// one answer (CLAUDE.md: a missing resource is a broken install, the feature does not deploy; no stand-in). The stock
+// kinds are Root.cpk templates, always there; the X-Morph infantry's bodies are files the installer writes from the
+// model pack (pylib/xm_infantry.py). support_soldier.cpp NoteSupportKindsInstalled fills it once at plugin load, before
+// the ini is first read, from its BodyInstalled (Mods/OBJECT); until then only the stock kinds. Offline tests set it.
+namespace support_kind_detail {
+constexpr std::uint32_t StockKinds() noexcept {
+    std::uint32_t m=0;
+    for(int k=0;k<kSupportWeaponCount;++k)if(static_cast<SupportWeapon>(k)!=SupportWeapon::xmInfantry)m|=1u<<k;
+    return m;
+}
+inline std::atomic<std::uint32_t> installed{StockKinds()};
+}  // namespace support_kind_detail
+inline bool SupportKindInstalled(SupportWeapon k) noexcept {
+    const int i=static_cast<int>(k);
+    return i>=0 && i<kSupportWeaponCount && ((support_kind_detail::installed.load(std::memory_order_relaxed)>>i)&1u)!=0;
+}
+inline void SetSupportKindInstalled(SupportWeapon k,bool on) noexcept {
+    const int i=static_cast<int>(k);
+    if(i<0 || i>=kSupportWeaponCount)return;
+    if(on)support_kind_detail::installed.fetch_or(1u<<i,std::memory_order_relaxed);
+    else support_kind_detail::installed.fetch_and(~(1u<<i),std::memory_order_relaxed);
+}
 inline constexpr std::uint32_t kSupportRangerResource=1,kSupportLeaderResource=2,
     kSupportAircraftResource=0x10000,kSupportVehicleResource=0x20000;
 constexpr std::uint32_t SupportSoldierResource(SupportWeapon weapon,bool leader) noexcept {
@@ -87,6 +112,11 @@ constexpr bool UnpackSupportLoadout(std::uint64_t bits,SupportLoadout* out) noex
 }
 constexpr std::uint32_t SupportLoadoutResource(const SupportLoadout& l,int i) noexcept {
     return SupportSoldierResource(i>=0 && i<l.count ? l.soldier[i] : SupportWeapon::rifle,i%4==0);
+}
+// Every soldier of the load is of an installed kind (SupportKindInstalled).
+inline bool SupportLoadoutInstalled(const SupportLoadout& l) noexcept {
+    for(int i=0;i<l.count && i<kSupportLoadoutMost;++i)if(!SupportKindInstalled(l.soldier[i]))return false;
+    return true;
 }
 
 int SupportCallCount() noexcept;

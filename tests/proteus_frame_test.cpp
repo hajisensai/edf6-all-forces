@@ -73,7 +73,10 @@ RoundObj EmcFire(EmcRound kind,const unsigned char* by,const float* from,const f
     if(kind!=EmcRound::proteusShield || by!=vehicle || !emcSucceeds)return RoundObj{};
     ++emcFires;std::memcpy(emcFrom,from,12);std::memcpy(emcAt,at,12);return RoundObj{demo,nullptr};
 }
+bool walkerModel=false;   // the vehicle's model carries pylib/xm_walker.py MARKER (an X-Morph walker on the class)
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept{
+    static unsigned char walkerBone[kBoneStride]{};
+    if(walkerModel && !std::wcscmp(name,kWalkerMarker))return walkerBone;
     if(!testPoseBones)return nullptr;
     if(!std::wcscmp(name,L"pile_l"))return testPoseBones;
     if(!std::wcscmp(name,L"pile_r"))return testPoseBones+kBoneStride;
@@ -258,6 +261,21 @@ void GiveBackAll() {
     Check(ProteusVisibleSeats(vehicle,4)==4,"disabled rework restores four public seats");
     config.proteus=true;
 }
+// An X-Morph walker built on the class (the heavy mech: its model's marker bone, pylib/xm_walker.py MARKER) is not the
+// Proteus: a player aboard, it is never reworked; its legs, seats and guns stay what its SGO makes them.
+void WalkerNotProteus() {
+    ResetProteus();Setup();walkerModel=true;
+    Check(!IsProteus(vehicle),"the marker bone: not the Proteus");
+    Tick();Tick();
+    Check(!UnitOf(vehicle,false),"never taken");
+    Check(At<float>(vehicle,kWalk)==10 && At<float>(vehicle,kTurn)==0.2f && At<float>(vehicle,kJump)==8,"its own legs");
+    Check(At<int>(seats+2*kSeatStride,kSeatClassMask)==15 && At<int>(seats+3*kSeatStride,kSeatClassMask)==15 &&
+          ProteusVisibleSeats(vehicle,4)==4,"its four seats open");
+    Check(At<float>(cannonL,kRate)==1 && At<float>(cannonR,kSpread)==1,"its guns' own rate and spread");
+    walkerModel=false;
+    Check(IsProteus(vehicle),"the stock model (no marker): the Proteus");
+    ResetProteus();
+}
 }  // namespace
 
 int main() {
@@ -268,6 +286,7 @@ int main() {
     Weapons();
     Shield();
     GiveBackAll();
+    WalkerNotProteus();
     std::printf("proteus_frame_test: %d checks, %d failures\n",checks,failures);
     return failures ? 1 : 0;
 }
