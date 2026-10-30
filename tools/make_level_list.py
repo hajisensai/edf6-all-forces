@@ -2,15 +2,17 @@
 
   python -B tools/make_level_list.py [GAME_DIR]
 
-EDF5's campaign (main, DLC1, DLC2 in the order tools/make_edf5_campaign.py appends it; titles from
-edf5campaign/missions.json) and then EDF6's offline list (MISSION/MISSIONLIST.OFFLINE.LIST.SGO, 147 rows, its SC/JA
-titles): the plan reads the two games in story order. In the game's list EDF5 comes after EDF6; `n` keeps that.
+EDF4.1's story and two DLC packs (edf41port/**/missions.json), then EDF5's campaign
+(main, DLC1, DLC2 in the order tools/make_edf5_campaign.py appends it; titles from
+edf5campaign/missions.json), then EDF6's offline list (MISSION/MISSIONLIST.OFFLINE.LIST.SGO, 147 rows, its SC/JA
+titles): the plan reads the games in story order. In the game's list EDF5 comes after EDF6; `n` keeps that.
 Each entry:
-  key     'EDF6/M001', 'EDF5/M001', 'EDF5/DLC/DM011': the two games' folders share names, so the game is in the key
-  series  EDF6 / EDF5 / EDF5 DLC1 / EDF5 DLC2
-  n       its row number in the game's list once installed (EDF5 rows follow EDF6's 147), null when not in the game
+  key     the mission folder, prefixed by game/pack to avoid shared mission ids
+  series  EDF4.1 / EDF4.1 DLC1 / EDF4.1 DLC2 / EDF6 / EDF5 / EDF5 DLC1 / EDF5 DLC2
+  n       its combined-list row (EDF5 follows EDF6's 147), null for separate packs or unavailable missions
   sc, ja  the titles (only titles: the briefings stay in the game)
   missing why an EDF5 mission is not in the game (its map or objects are not in EDF6), else absent
+  pack_n  EDF4.1's position in its separate mission pack (not in the combined EDF6/EDF5 list)
 """
 from __future__ import annotations
 
@@ -63,16 +65,27 @@ def edf5_rows(root: str, first: int) -> list[dict[str, object]]:
     return out
 
 
+def edf41_rows() -> list[dict[str, object]]:
+    """Use the same committed titles, order and folders as the installer's three 4.1 packs."""
+    out = []
+    for p41, series in zip(edf5.PACKS41, ('EDF4.1', 'EDF4.1 DLC1', 'EDF4.1 DLC2')):
+        for i, m in enumerate(edf5.edf41_text(p41.data)['missions']):
+            out.append({'key': f'{p41.folder}/{m["id"]}', 'series': series, 'n': None, 'pack_n': i + 1,
+                        'sc': m['title']['SC'], 'ja': m['title']['JA']})
+    return out
+
+
 def build(root: str) -> list[dict[str, object]]:
     six = edf6_rows(rootcpk.Game(root))
-    return edf5_rows(root, len(six) + 1) + six
+    return edf41_rows() + edf5_rows(root, len(six) + 1) + six
 
 
 def main(argv: list[str]) -> int:
     rows = build(argv[1] if len(argv) > 1 else rootcpk.DEFAULT_GAME)
     with open(OUT, 'w', encoding='utf-8', newline='\n') as f:
         f.write('[\n' + ',\n'.join(json.dumps(r, ensure_ascii=False) for r in rows) + '\n]\n')
-    print(f'{len(rows)} missions ({sum(1 for r in rows if r["n"])} in the game) -> {os.path.relpath(OUT)}')
+    print(f'{len(rows)} missions ({sum(1 for r in rows if r["n"])} in the combined list, '
+          f'{sum(1 for r in rows if r.get("pack_n"))} in 4.1 packs) -> {os.path.relpath(OUT)}')
     return 0
 
 

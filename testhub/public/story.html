@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MOD 剧情关卡列表 · EDF 全军出击</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>EDF 全军出击 · MOD 剧情关卡列表</h1>
+    <nav><a href="/">测试</a> · <a href="/plan.html">关卡策划</a> · <b>MOD 剧情关卡</b></nav>
+    <span class="me"><span id="me"></span> · <a href="/logout">退出</a></span>
+  </header>
+  <p id="error" class="err hide" role="alert"></p>
+  <p id="groupBar" class="row hide"><label for="group" class="inline">查看哪个组</label><select id="group"></select></p>
+  <section>
+    <h2>剧情顺序</h2>
+    <p class="muted">同组共用一份 MOD 剧情列表，从第一关依次往下排列。这里单独维护自创剧情，不影响「关卡策划」大纲或游戏里的任务列表。每个人可以编辑自己的关卡，开发者可以编辑全部关卡；同组成员都可以调整顺序。</p>
+    <div class="row tools">
+      <button class="btn" id="add" type="button">新增剧情关卡</button>
+      <label for="filter" class="inline">搜索</label><input type="text" id="filter" placeholder="关卡名、剧情内容或参考地图">
+      <label for="statusFilter" class="inline">状态</label>
+      <select id="statusFilter"><option value="">全部状态</option value="planned">构思中</option><option value="writing">制作中</option><option value="testing">待测试</option><option value="done">已完成</option></select>
+    </div>
+    <p id="count" class="muted" role="status"></p>
+    <div id="story" aria-live="polite">加载中……</div>
+  </section>
+  <dialog id="editor" class="digestBox" aria-labelledby="editorTitle">
+    <form id="form">
+      <h2 id="editorTitle">新增剧情关卡</h2>
+      <label for="title">关卡名</label><input type="text" id="title" maxlength="100" required>
+      <label for="body">剧情与关卡内容</label><textarea id="body" maxlength="10000" placeholder="这一关发生什么、作战目标、关键事件，以及怎样衔接下一关。"></textarea>
+      <label for="mission">参考原版地图（可不选）</label><select id="mission"></select>
+      <label for="status">制作状态</label><select id="status"><option value="planned">构思中</option><option value="writing">制作中</option><option value="testing">待测试</option><option value="done">已完成</option></select>
+      <p id="formError" class="err" role="alert"></p>
+      <p class="row"><button class="btn" id="save" type="submit">保存关卡</button><button class="btn ghost" id="cancel" type="button">取消</button></p>
+    </form>
+  </dialog>
+  <dialog id="deleteDialog" class="digestBox" aria-labelledby="deleteTitle" aria-describedby="deleteText">
+    <h2 id="deleteTitle">删除剧情关卡</h2>
+    <p id="deleteText"></p>
+    <p class="muted">删除后无法在页面恢复，后面的关卡会重新连续编号。</p>
+    <p class="row"><button class="btn ghost" id="deleteCancel" type="button" autofocus>保留关卡</button><button class="btn" id="deleteConfirm" type="button">确认删除</button></p>
+  </dialog>
+</main>
+<script src="/story.js"></script>
+</body>
+</html>

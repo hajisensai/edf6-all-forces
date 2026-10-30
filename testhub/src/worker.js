@@ -6,6 +6,7 @@
 import { loadAccounts, checkLogin, makeSession, readSession, basicUser } from './auth.js';
 import { HttpError, json, body } from './http.js';
 import { planRoute } from './plan.js';
+import { storyRoute } from './story.js';
 import MISSIONS from './missions.json' with { type: 'json' };
 
 const MAX_UPLOAD = 95 * 1024 * 1024;        // the Workers request limit is 100 MB
@@ -75,6 +76,11 @@ async function route(request, env) {
   const dev = me.role === 'dev';
   const need = (ok) => { if (!ok) throw new HttpError(403, 'developer only'); };
 
+  if (path === '/api/missions' && method === 'GET') return json({ me, missions: MISSIONS });
+  if (path === '/api/story' || path.startsWith('/api/story/')) {
+    const out = await storyRoute(request, env, me, MISSIONS, groupsOf(accounts), path, url);
+    if (out) return json(out);
+  }
   if (path === '/api/state' && method === 'GET') return json(await state(env, me));
   if (path === '/api/latest' && method === 'GET') return json(await latest(env, url.searchParams.get('channel')));
   if (path.startsWith('/dl/') && method === 'GET') return download(env, 'builds/' + decodeURIComponent(path.slice(4)));

@@ -96,3 +96,18 @@ CREATE TABLE IF NOT EXISTS mission_digests (
   body TEXT NOT NULL,
   at INTEGER NOT NULL
 );
+
+-- Each group's custom MOD story. Separate from the stock-mission planning outline.
+CREATE TABLE IF NOT EXISTS story_missions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  grp TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  mission TEXT,
+  status TEXT NOT NULL DEFAULT 'planned',
+  sort REAL NOT NULL,
+  author TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS story_missions_grp ON story_missions(grp, sort, id);
