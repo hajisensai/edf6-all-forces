@@ -265,8 +265,27 @@ class Store:
     group: int = 0          # nonzero: the barrels of one selectable loadout (not separate R/LB choices)
     barrel: int = 0         # original native holder index this linked barrel replaces
     native_control: bool = False  # original native holder, selectable independently (two belts, one gun)
-    independent_secondary: bool = False  # intrinsic weapon on an unused native secondary input (concurrent with the
-                                         # primary; cycled only among its own kind, never a gun belt)
+    # The vehicle's own fire key for this weapon (FIRE_KEYS; docs/multi-weapon-keys.md): 0 none (it rides the primary's
+    # cycle, or is native); FIRE_SECONDARY the seat's otherwise unread second trigger (the stores of one vehicle on it are
+    # one launcher's rounds, cycled by VehicleSecondarySwitchKey); 3..6 VehicleFire<n>Key, one weapon a key on a
+    # vehicle. Every key fires at once with the primary and the others (src/payload.cpp OwnKey).
+    key: int = 0
+    # An automatic turret (needs a key: by hand when they are off): with the vehicle's auto turrets on
+    # (VehicleAutoTurretKey) it fires itself, a missile once locked, a gun laid on an enemy in its reach.
+    auto: bool = False
+
+    def __post_init__(self) -> None:
+        if self.key not in (0, *FIRE_KEYS):
+            raise ValueError(f'{self.name}: key {self.key} is none of 0, {FIRE_KEYS}')
+        if self.auto and not self.key:
+            raise ValueError(f'{self.name}: an auto turret needs its own key (fired by hand with the turrets off)')
+        if self.key and (self.group or self.native_control):
+            raise ValueError(f'{self.name}: a weapon on its own key is no belt of the primary')
+
+
+# The vehicles' own fire keys (Store.key; src/stores.h StoreSpec::fireKey): the second trigger, then the four extra keys.
+FIRE_SECONDARY = 2
+FIRE_KEYS = (FIRE_SECONDARY, 3, 4, 5, 6)
 
 
 def _local(en: str, ja: str, cn: str, sc: str, kr: str) -> tuple[tuple[str, str], ...]:
@@ -491,29 +510,31 @@ STORES: dict[str, Store] = {
     # The quad Vulcan's AP belt (tools/make_tracked_combat.py QUADVULCAN_AP_BELT): its HE is the native pair, this the
     # second loadout on the same four guns (group 4, its two columns the native holders' barrels).
     # The 2S6's 9M311 (tools/make_tracked_combat.py, models/wt_tunguska): a SACLOS anti-air missile, here locking air
-    # targets, on the V603's otherwise unread secondary as the BMPT's Ataka (independent_secondary). 2.56 m.
+    # targets, on the V603's otherwise unread secondary as the BMPT's Ataka (key FIRE_SECONDARY). 2.56 m.
     'TUNGUSKA_SAM': Store('9M311', 'air', 0.0, 0.0,
                           Missile('9M311', Look('bullet_rpg', 2.56), burn=3.0, top=900.0, accel=350.0, max_g=35.0,
                                   nav=4.0, life=14.0, damage=500.0, blast=9.0, lock_range=2500.0, lock_cone=0.5,
                                   lock_time=15.0),
-                          _local('9M311', '9M311', '9M311', '9M311', '9M311'), independent_secondary=True),
-    # The Apocalypse's anti-air missiles (its pods beside the turret; Red Alert 2's own were anti-air), on the V603's
-    # otherwise unread secondary as the BMPT's Ataka.
+                          _local('9M311', '9M311', '9M311', '9M311', '9M311'), key=FIRE_SECONDARY),
+    # The Apocalypse's anti-air missiles (its pods beside the turret; Red Alert 2's own were anti-air, firing at aircraft
+    # by themselves while its guns took the ground): on the V603's otherwise unread secondary as the BMPT's Ataka, an
+    # auto turret (fired by hand with the auto turrets off).
     'APOC_SAM': Store('Apocalypse SAM', 'air', 0.0, 0.0,
                       Missile('Apocalypse SAM', Look('bullet_mediummissile01', 3.0), burn=4.0, top=1000.0, accel=320.0,
                               max_g=35.0, nav=4.0, life=15.0, damage=700.0, blast=12.0, lock_range=2600.0,
                               lock_cone=0.6, lock_time=15.0),
-                      _local('Anti-air missile', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), independent_secondary=True),
+                      _local('Anti-air missile', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), key=FIRE_SECONDARY,
+                      auto=True),
     # The Patriot's PAC-3 (tools/make_patriot.py, models/emp_patriot): a hit-to-kill anti-air missile from the pack's
     # four tubes, on the V603's otherwise unread secondary as the BMPT's Ataka.
     'PATRIOT_SAM': Store('PAC-3', 'air', 0.0, 0.0,
                          Missile('PAC-3', Look('bullet_mediummissile01', 5.2), burn=4.0, top=1400.0, accel=450.0,
                                  max_g=50.0, nav=4.5, life=16.0, damage=2500.0, blast=14.0, lock_range=3500.0,
                                  lock_cone=0.6, lock_time=20.0),
-                         _local('PAC-3', 'PAC-3', 'PAC-3', 'PAC-3', 'PAC-3'), independent_secondary=True),
+                         _local('PAC-3', 'PAC-3', 'PAC-3', 'PAC-3', 'PAC-3'), key=FIRE_SECONDARY),
     # The PzH 2000's roof MG3 (the tester, 2026-10-28, #29: 「Pzh2000自行榴弹炮可以加个机枪或机枪位」; models/wt_pzh2000's
     # MG on the loader's ring, tools/prep_wt_tracked.py PZH2000 stores): a 7.62 x 51 mm general-purpose machine gun on
-    # the V603's otherwise unread secondary (independent_secondary, as the 2S6's 9M311), fired while the howitzer keeps
+    # the V603's otherwise unread secondary (key FIRE_SECONDARY, as the 2S6's 9M311), fired while the howitzer keeps
     # its load. The stock Epsilon gunner's machine gun round (as the coax, COAX_*) with the MG3's numbers: about 1200 a
     # minute (a round every 3 frames), 820 m/s (13.7 m a frame), its rounds alive 1100 m; a tight mounted cone; a belt
     # of 1000 changed in 10 s. On the turret, it turns with it and fires level along it (no elevation of its own).
@@ -523,7 +544,7 @@ STORES: dict[str, Store] = {
                                ('ReloadTime', COAX_BELT_CHANGE), ('FireAccuracy', COAX_SPREAD), ('AmmoSize', COAX_SIZE),
                                ('AmmoHitSizeAdjust', COAX_HIT))),
                         _local('MG3 7.62 mm', 'MG3 7.62mm 機関銃', 'MG3 7.62mm 機槍', 'MG3 7.62mm 机枪', 'MG3 7.62mm 기관총'),
-                        independent_secondary=True),
+                        key=FIRE_SECONDARY),
     'QVULCAN_AP': Store('Quad M61 AP', 'gun', 0.0, 0.0, Shell('V603_FLAK_GUNH01_DLC_L.SGO', 'SolidBullet01', 'ap'),
                         _local('Quad M61 AP', '4連装 M61 徹甲弾', '四聯 M61 穿甲彈', '四联 M61 穿甲弹', '4연장 M61 철갑탄'),
                         group=4, barrel=0),
@@ -535,7 +556,7 @@ STORES: dict[str, Store] = {
                                max_g=20.0, nav=3.0, life=12.0, damage=1200.0, blast=6.0,
                                lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
                        _local('9M120 Ataka', '9M120 アターカ', '9M120 阿塔卡', '9M120 阿塔卡', '9M120 아타카'),
-                       independent_secondary=True),
+                       key=FIRE_SECONDARY),
     # The BMPT's second belt: its 2A42s are dual-feed guns, HE-FRAG-T (the native belt, tools/make_tracked_combat GUNS)
     # and the 3UBR8 APDS-T the gunner switches to against armour. Two barrels, one choice (group 3, as the flak's);
     # its numbers are make_tracked_combat's (the native gun's own file and muzzles, BMPT_AP_BELT), this template only
@@ -555,7 +576,7 @@ STORES: dict[str, Store] = {
                                 lock_range=1800.0, lock_cone=0.3, lock_time=30.0),
                         _local('9M120F Ataka (thermobaric)', '9M120F アターカ（サーモバリック）', '9M120F 阿塔卡（溫壓）',
                                '9M120F 阿塔卡（温压）', '9M120F 아타카（열압력）'),
-                        independent_secondary=True),
+                        key=FIRE_SECONDARY),
     # A tank's / an IFV's coaxial machine gun (COAX_MOUNTS above): fired on its own trigger (src/payload.cpp: the
     # secondary trigger, the main gun staying loaded). The stock Epsilon gunner's machine gun (V_403TANK_MACHINEGUN:
     # SolidBullet01, 6 a round: the lightest round of any stock vehicle gun, a rifle round's; its own tank machine gun
@@ -578,10 +599,10 @@ def _xm_arm(arm: xm_units.Arm) -> Store:
         weapon: Missile | Shell = Missile(**{**m, 'look': Look(*m['look'])})
     else:
         weapon = Shell(*arm.shell, extra=tuple(arm.numbers.items()))
-    return Store(arm.names[0], arm.role, 0.0, 0.0, weapon, names, independent_secondary=True)
+    return Store(arm.names[0], arm.role, 0.0, 0.0, weapon, names, key=arm.fire, auto=arm.auto)
 
 
-# The X-Morph units' other weapons (pylib/xm_units.py Arm): each an intrinsic secondary of its unit.
+# The X-Morph units' other weapons (pylib/xm_units.py Arm): each on its own fire key of its unit (Arm.key).
 STORES.update({xm_store(u, a): _xm_arm(a) for u in xm_units.v603() for a in u.arms})
 
 
@@ -742,6 +763,21 @@ class GroundVehicle:
     # The left / right barrels fire in turn, not together (src/twin_cadence.h): each 'left' weapon is paired with the
     # 'right' one of the same belt (the k-th left with the k-th right in `weapons`); tools/gen_stores.py kTwinBarrels.
     alternate: bool = False
+
+
+def vehicle_fire_keys(vehicle: GroundVehicle) -> dict[int, list[str]]:
+    """A vehicle's own fire keys (Store.key): each key its store kinds, in its weapons' order (a kind once: its
+    left / right files are one weapon). ValueError for an extra key (3..6) with two weapons on it: only the second trigger
+    has a cycle (one launcher's rounds, VehicleSecondarySwitchKey)."""
+    out: dict[int, list[str]] = {}
+    for w in vehicle.weapons:
+        store = store_of(w)
+        if store and STORES[store[0]].key and store[0] not in out.get(STORES[store[0]].key, []):
+            out.setdefault(STORES[store[0]].key, []).append(store[0])
+    for key, kinds in out.items():
+        if key != FIRE_SECONDARY and len(kinds) > 1:
+            raise ValueError(f'{vehicle.sgo}: fire key {key} has {kinds}: one weapon an extra key')
+    return dict(sorted(out.items()))
 
 
 # A ground vehicle's own camera (game_object_camera_setting, docs/camera-re.md): [0] the point it looks at, [1] the
@@ -965,7 +1001,8 @@ GROUND_VEHICLES: dict[str, GroundVehicle] = {
 # `like`'s native gun pair (the two V603 holders, in the `like`'s cadence) under its own weapon files, its own
 # durability; the `like`'s stores (missiles, a second belt: their own store rows and muzzles) are not inherited.
 # Its other weapons (xm_units.Arm: the game's missile pods, machine-gun turrets, EMP flak) after the pair: each a store
-# (xm_store) on the seat's own secondary (independent_secondary), fired from its own muzzles (slot xm_<key>).
+# (xm_store) on its own fire key (Arm.key: the second trigger, then the extra keys), fired from its own muzzles (slot
+# xm_<key>), together with the pair and the other arms.
 for _xm in xm_units.v603():
     _like = GROUND_VEHICLES[_xm.like]
     assert _like.stock == 'V603_FLAK' and _like.slots[:2] == ('left', 'right'), (_xm.key, _xm.like)
@@ -975,6 +1012,8 @@ for _xm in xm_units.v603():
         alternate=_like.alternate if _xm.alternate is None else _xm.alternate,
         weapons=(f'app:/weapon/edf6vc_{_xm.key}_l.sgo', f'app:/weapon/edf6vc_{_xm.key}_r.sgo',
                  *(_weapon(store_file(xm_store(_xm, a), a.rounds)) for a in _xm.arms)))
+for _ground in GROUND_VEHICLES.values():
+    vehicle_fire_keys(_ground)   # an extra fire key never holds two weapons
 # The ground vehicles tools/make_tracked_combat.py builds on the V603 (each its make_<kind> tool, an X-Morph unit
 # make_xmorph's builder; each its own ledger owner and build group): the War Thunder M163 / BMPT, the quad Vulcan, the
 # fixed emplacements, the X-Morph units; with what the test range calls each (testrange/gen.py: edf6tr_<kind>_mission).

@@ -18,7 +18,8 @@ constexpr int kMostPayload=8;
 // choice of the primary's, whose cycle alone is R / LB.
 // A coaxial gun (StoreRole::coax, tools/make_stock_stores.py COAX) is `secondary` for the player on a class whose stock
 // input reads no second control (the Blacker 505, the Varius 601, the Grape): payload.cpp pulls it on that trigger.
-enum class PayloadFire : std::uint8_t { other, primary, secondary, store };
+// `key`: one of the vehicle's extra fire keys (PayloadEntry::key: VehicleFire<key>Key; payload.cpp OwnKey).
+enum class PayloadFire : std::uint8_t { other, primary, secondary, store, key };
 struct PayloadEntry {
     wchar_t name[32];          // the weapon's own name in the game's language (weapon +0x1B0), or its store's
     std::int32_t rounds;       // rounds in it now (weapon +0xBE8)
@@ -31,6 +32,8 @@ struct PayloadEntry {
     bool selectable;           // a live choice in its cycle (R / LB the primary's, T / the d-pad right the own
                                // secondary's); independent primary guns remain read-only
     bool coax;                 // a coaxial machine gun (StoreRole::coax): its own secondary trigger, never cycled
+    unsigned char key;         // its own fire key (StoreSpec::fireKey: 2 the second trigger, 3..6 VehicleFire<n>Key), 0 none
+    bool autoTurret;           // an auto turret (StoreSpec::autoTurret): it fires itself with the auto turrets on
 };
 // The local player's seat on a stock vehicle (a plugin aircraft has the cockpit readout, PlayerJetHud, instead).
 struct PayloadReadout {
@@ -43,6 +46,8 @@ struct PayloadReadout {
     // The own secondary's cycle (the BMPT's missiles: their own switch, VehicleSecondarySwitchKey / -Button): the entry it
     // fires (-1 none), how many it goes round (>= 2 when it switches), its pad buttons (XInput bits).
     int ownPicked,ownChoices,ownSwitchButton;
+    int autoTurrets;           // the auto turrets on the seat (VehicleAutoTurretKey switches them all)
+    bool autoOn;               // ...on now
     bool keys;                 // the player is on the keyboard and mouse (else a pad): which switch to name
     PayloadEntry entry[kMostPayload];
 };
@@ -97,6 +102,17 @@ unsigned char* NpcPayloadSelect(unsigned char* vehicle,unsigned seat,float dista
 // locked: whether a burst from -> to would pass a friend (heli.h FriendInLine); nullptr none checked.
 using LineBlocked=bool(*)(const float* from,const float* to,const void* self) noexcept;
 bool NpcCoaxFire(unsigned char* vehicle,unsigned seat,const void* target,LineBlocked blocked=nullptr) noexcept;
+// An NPC crew's weapons on the vehicle's extra fire keys (StoreSpec::fireKey 3..6), fired alongside whatever else it
+// fires: each that has a shot at `target` (payload.cpp OwnShot: a missile once its lock holds, a gun laid within ~3
+// degrees of it in its reach with no friend in the line); their trigger latches pulled this frame. True when one fired.
+bool NpcOwnKeysFire(unsigned char* vehicle,unsigned seat,const void* target,LineBlocked blocked=nullptr) noexcept;
+// Whether the HUD's control row has anything to say for this seat: the own secondary's cycle, an extra fire key, an auto
+// turret (hud.cpp PayloadControls).
+inline bool PayloadControlsShown(const PayloadReadout& p) noexcept {
+    if(p.ownChoices>1 || p.autoTurrets>0)return true;
+    for(int i=0;i<p.count && i<kMostPayload;++i)if(p.entry[i].key>2)return true;
+    return false;
+}
 // Intrinsic secondary weapon: plan separately from the primary; the NPC caller must run native seat aim/lock/safety.
 unsigned char* NpcSecondarySelect(unsigned char* vehicle,unsigned seat,float distance,bool airborne) noexcept;
 // Pull the live intrinsic secondary from its real seat input; local player or authoritative NPC only.

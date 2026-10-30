@@ -601,9 +601,18 @@ void AircraftControls(Line& line,bool keys,int choices,int storeButton,int targe
         add(keys ? Tx::controlFlares : Tx::controlFlaresKeyboard,key); // the flight path currently has no pad flare binding
     }
 }
-// A seat with its own secondary (the BMPT): each control's round now with the one key that switches it, the primary's
-// (PlayerJetSwitchKey / LB) and the own secondary's (VehicleSecondarySwitchKey / -Button, XInput bits); a control with
-// one choice shows none. Never "the last used": each key switches its own control (payload.cpp Switch).
+// A pad key's XInput bits (MapButton's: the d-pad 1 / 2 / 4 / 8, others by number) named.
+void PadBitsName(int mask,wchar_t* key,int size) noexcept {
+    wcsncpy_s(key,static_cast<std::size_t>(size),mask==0x0008 ? Tr(Tx::enemyKeyDpadRight) : mask==0x0004 ? Tr(Tx::enemyKeyDpadLeft) :
+                  mask==0x0001 ? Tr(Tx::enemyKeyDpadUp) : mask==0x0002 ? Tr(Tx::enemyKeyDpadDown) :
+                  mask<=0 ? Tr(Tx::controlUnbound) : L"?",_TRUNCATE);
+    if(mask>0 && (mask&~0x000F))std::swprintf(key,static_cast<std::size_t>(size),Tr(Tx::padButton),mask);
+}
+// A seat with its own secondary (the BMPT) or weapons on their own fire keys (payload.cpp OwnKey): each control's round
+// now with the one key that switches it, the primary's (PlayerJetSwitchKey / LB) and the own secondary's
+// (VehicleSecondarySwitchKey / -Button, XInput bits), a control with one choice showing none (never "the last used":
+// each key switches its own control, payload.cpp Switch); each extra fire key with the weapon it fires (an auto
+// turret marked so); the auto turrets' switch and whether they are on.
 void PayloadControls(Line& line,const PayloadReadout& p) noexcept {
     Format(line,L"");
     auto add=[&](Tx text,const wchar_t* key,const wchar_t* name){if(line.text[0])Append(line,L"   ");Append(line,Tr(text),key,name);};
@@ -613,13 +622,24 @@ void PayloadControls(Line& line,const PayloadReadout& p) noexcept {
         add(Tx::controlPrimaryRounds,key,p.entry[p.picked].name);
     }
     if(p.ownChoices>1 && p.ownPicked>=0 && p.ownPicked<p.count) {
-        const int mask=p.ownSwitchButton;
-        if(p.keys)KeyName(Cfg().vehicleSecondarySwitchKey,key,32);
-        else wcsncpy_s(key,mask==0x0008 ? Tr(Tx::enemyKeyDpadRight) : mask==0x0004 ? Tr(Tx::enemyKeyDpadLeft) :
-                           mask==0x0001 ? Tr(Tx::enemyKeyDpadUp) : mask==0x0002 ? Tr(Tx::enemyKeyDpadDown) :
-                           mask<=0 ? Tr(Tx::controlUnbound) : L"?",_TRUNCATE);
-        if(!p.keys && mask>0 && (mask&~0x000F))std::swprintf(key,32,Tr(Tx::padButton),mask);
+        if(p.keys)KeyName(Cfg().vehicleSecondarySwitchKey,key,32);else PadBitsName(p.ownSwitchButton,key,32);
         add(Tx::controlOwnSecondary,key,p.entry[p.ownPicked].name);
+    }
+    for(int i=0;i<p.count && i<kMostPayload;++i) {
+        const int k=p.entry[i].key;
+        if(k<3)continue;
+        const Config& c=Cfg();
+        const int vk=k==3 ? c.vehicleFire3Key : k==4 ? c.vehicleFire4Key : k==5 ? c.vehicleFire5Key : c.vehicleFire6Key;
+        const int mask=k==3 ? c.vehicleFire3Button : k==4 ? c.vehicleFire4Button : k==5 ? c.vehicleFire5Button : c.vehicleFire6Button;
+        if(p.keys)KeyName(vk,key,32);else PadBitsName(mask,key,32);
+        wchar_t name[48];
+        std::swprintf(name,48,L"%ls%ls",p.entry[i].name,p.entry[i].autoTurret ? Tr(Tx::controlAutoMark) : L"");
+        add(Tx::controlFireKey,key,name);
+    }
+    if(p.autoTurrets>0) {
+        if(p.keys)KeyName(Cfg().vehicleAutoTurretKey,key,32);else PadBitsName(Cfg().vehicleAutoTurretButton,key,32);
+        if(line.text[0])Append(line,L"   ");
+        Append(line,Tr(p.autoOn ? Tx::controlAutoTurretsOn : Tx::controlAutoTurretsOff),key);
     }
 }
 void JetControls(Line& line,const PlayerJetReadout& j) noexcept {
@@ -3402,7 +3422,7 @@ void StockDockHud(void* drawer,void* ctx,Text* text,const float* vp,float width,
     int pickedCell=-1;
     const int n=StockCells(r,cells,&pickedCell);
     Line controls{};
-    if(payload && payload->ownChoices>1)PayloadControls(controls,*payload);
+    if(payload && PayloadControlsShown(*payload))PayloadControls(controls,*payload);
     else if(payload)AircraftControls(controls,payload->keys,payload->choices,payload->switchButton,0,false,false);
     const LoadoutDock dock=LoadoutDockOf(text,width,height,s,cells,n,controls.text[0] ? 1 : 0);
     StockVehicleHud(drawer,ctx,text,vp,width,height,s,r,x,lines,at,&dock);
@@ -5816,7 +5836,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             int pickedCell=-1;
             const int n=own ? StockCells(snap.stockHud,cells,&pickedCell) : 0;
             Line controls{};
-            if(snap.payload && snap.payloadHud.ownChoices>1)PayloadControls(controls,snap.payloadHud);
+            if(snap.payload && PayloadControlsShown(snap.payloadHud))PayloadControls(controls,snap.payloadHud);
             else if(snap.payload)AircraftControls(controls,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
             if(!screensOn)HeliStrip(drawer,ctx,t,width,height,s,snap.heliHud.f,snap.heliHud.fuel,nullptr,cells,n,own ? pickedCell : -1,
                       storeSwitched,lines,&at,&controls);
@@ -5868,7 +5888,7 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
             float controlsBottom=-1.0f;
             if(stockHud) {
                 LoadCell cells[kStockArms];const int n=StockCells(snap.stockHud,cells);Line keys{};
-                if(snap.payload && snap.payloadHud.ownChoices>1)PayloadControls(keys,snap.payloadHud);
+                if(snap.payload && PayloadControlsShown(snap.payloadHud))PayloadControls(keys,snap.payloadHud);
                 else if(snap.payload)AircraftControls(keys,snap.payloadHud.keys,snap.payloadHud.choices,snap.payloadHud.switchButton,0,false,false);
                 const auto dock=LoadoutDockOf(t,width,height,s,cells,n,keys.text[0] ? 1 : 0);
                 controlsBottom=dock.top-20.0f*s;

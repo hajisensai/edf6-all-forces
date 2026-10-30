@@ -63,8 +63,8 @@ BLAST = 1.5
 @dataclass(frozen=True)
 class Arm:
     """A unit's weapon besides its main one (the game's other Weapon blocks: missile pods, machine-gun turrets, the EMP
-    flak), an independent secondary on the seat's second trigger (vcobjects STORES <UNIT>_<KEY>, src/payload.cpp
-    IndependentSecondary: fired with the main gun, the unit's arms cycled among themselves). It leaves from the game's
+    flak), on a fire key of its own (vcobjects STORES <UNIT>_<KEY>, Store.key / auto, src/payload.cpp OwnKey: fired with
+    the main gun and the unit's other arms, each on its key, never cycled with them). It leaves from the game's
     own muzzles (model.json muzzles 'xm_<key>', tools/prep_xmorph.py) on `bone`: the turret's ('cannon_main', a missile
     flies to its lock) or the gun's ('cannon_l': a gun fires along the main gun's aim; the game's own turret aims it
     by itself)."""
@@ -77,6 +77,8 @@ class Arm:
     missile: dict = field(default_factory=dict)   # a missile's vcobjects.Missile fields (look: (model, length))
     shell: tuple[str, str, str] = ()              # a gun's (stock template, its AmmoClass, round kind): vcobjects.Shell
     numbers: dict = field(default_factory=dict)   # a gun's SGO numbers over the template's (Shell.extra)
+    fire: int = 2            # its fire key (vcobjects Store.key: 2 the second trigger, 3..6 VehicleFire<n>Key), one a unit
+    auto: bool = False       # an auto turret (vcobjects Store.auto): it fires itself with the auto turrets on
 
 
 @dataclass(frozen=True)
@@ -193,14 +195,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # The heavy tank: a twin heavy gun (enemy_bullet_big_anti_core, a pair every 3 s), machine-gun and missile turrets
     # (not ported), seven times the battle tank's armour (1200). The Apocalypse's twin gun, the two barrels in turn.
     _u('ground/large_tank', 'tracked', 'apocalypse', 'ported', 'Heavy Tank',
-       texts={'SC': ('X-Morph 重型坦克', '请求一辆人类军队的重型坦克：炮塔上的双管重炮为主攻击，两根炮管每三秒齐射一次；副武器（切换）为机枪塔（十发连射）、'
+       texts={'SC': ('X-Morph 重型坦克', '请求一辆人类军队的重型坦克：炮塔上的双管重炮为主攻击，两根炮管每三秒齐射一次；副武器各用一个开火键、与主炮同时发射：机枪塔（十发连射）、'
                                      '防空导弹（五发连射）和车头火箭；装甲厚重。'),
-              'CN': ('X-Morph 重型坦克', '請求一輛人類軍隊的重型坦克：砲塔上的雙管重砲為主攻擊，兩根砲管每三秒齊射一次；副武器（切換）為機槍塔（十發連射）、'
+              'CN': ('X-Morph 重型坦克', '請求一輛人類軍隊的重型坦克：砲塔上的雙管重砲為主攻擊，兩根砲管每三秒齊射一次；副武器各用一個開火鍵、與主砲同時發射：機槍塔（十發連射）、'
                                      '防空飛彈（五發連射）和車頭火箭；裝甲厚重。'),
-              'JA': ('X-Morph 重戦車', '人類軍の重戦車を要請する。砲塔の連装重砲（3 秒ごとに 2 門斉射）を主攻撃とする。副武器（切替）は機銃塔（10 発連射）、'
+              'JA': ('X-Morph 重戦車', '人類軍の重戦車を要請する。砲塔の連装重砲（3 秒ごとに 2 門斉射）を主攻撃とする。副武器はそれぞれ専用の発射キーで主砲と同時に撃てる：機銃塔（10 発連射）、'
                                     '対空ミサイル（5 発連射）、車体前部のロケット。装甲は厚い。'),
               'EN': ('X-Morph Heavy Tank', "Requests the human army's heavy tank: its turret's twin heavy gun on the primary "
-                                           'attack, both barrels every 3 s; on the secondary (switched) its machine-gun '
+                                           'attack, both barrels every 3 s; each on its own fire key with the gun, its machine-gun '
                                            'turret (bursts of ten), AA missiles (bursts of five) and front rockets; '
                                            'heavy armour.')},
        gun=('Twin Heavy Gun', '双管重炮', '連装重砲', '雙管重砲'),
@@ -217,14 +219,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 240.0, 'blast': 3.0,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 5.0, 'burst_gap': 18.0,
-                          'interval': 240.0}),
+                          'interval': 240.0}, fire=3, auto=True),
              Arm('rockets', ('front_missile_1', 'front_missile_2'), 'air', ('Rockets', 'ロケット', '火箭', '火箭', '로켓'), 40,
                  # front_missile_1 / _2: fire_rate 2, two 0.4 s apart each (enemy_rocket_small: speed 60, accel 50,
                  # turning 15 deg/s: barely guided; 10 anti_player): both pods, four every 2 s
                  missile={'model': 'Rocket', 'look': ('bullet_rocket', 1.0), 'burn': 1.5, 'top': 400.0,
                           'accel': 300.0, 'max_g': 6.0, 'nav': 2.0, 'life': 4.0, 'damage': 300.0, 'blast': 3.0,
                           'lock_range': 1200.0, 'lock_cone': 0.4, 'lock_time': 20.0, 'burst': 2.0, 'burst_gap': 24.0,
-                          'interval': 120.0})),
+                          'interval': 120.0}, fire=4)),
        # models/xm_large_tank: 17.8 m long, the turret y 3.2..7.5 (roof ~6.7), z -2.3..3.3; the guns at x +-1.07,
        # y 4.55, their muzzles z 10.8
        camera={'model_eye': (0., 6.4, 0.6), 'model_look_at': (0., 5.2, 14.), 'third_person_distance': 15.,
@@ -234,14 +236,14 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
     # most armour of the tracked units (2000).
     _u('ground/large_tank_emp', 'tracked', 'apocalypse', 'ported', 'EMP Tank',
        texts={'SC': ('X-Morph EMP 坦克', '请求一辆人类军队的 EMP 坦克：比重型坦克更大的车体，炮塔上的双管重炮为主攻击，每三秒两门齐射两轮；'
-                                      '副武器（切换）为 EMP 高射弹、两座防空机炮塔（十五发连射）与导弹塔（二十发连射）；履带单位中装甲最厚。'),
+                                      '副武器各用一个开火键、与主炮同时发射： EMP 高射弹、两座防空机炮塔（十五发连射）与导弹塔（二十发连射）；履带单位中装甲最厚。'),
               'CN': ('X-Morph EMP 坦克', '請求一輛人類軍隊的 EMP 坦克：比重型坦克更大的車體，砲塔上的雙管重砲為主攻擊，每三秒兩門齊射兩輪；'
-                                      '副武器（切換）為 EMP 高射彈、兩座防空機砲塔（十五發連射）與飛彈塔（二十發連射）；履帶單位中裝甲最厚。'),
+                                      '副武器各用一個開火鍵、與主砲同時發射： EMP 高射彈、兩座防空機砲塔（十五發連射）與飛彈塔（二十發連射）；履帶單位中裝甲最厚。'),
               'JA': ('X-Morph EMP 戦車', '人類軍の EMP 戦車を要請する。重戦車より大きな車体で、砲塔の連装重砲（3 秒ごとに 2 門斉射を 2 回）を'
-                                      '主攻撃とする。副武器（切替）は EMP 炸裂弾、対空機関砲塔 2 基（15 発連射）、ミサイル塔（20 発連射）。装甲は装軌車両で最も厚い。'),
+                                      '主攻撃とする。副武器はそれぞれ専用の発射キーで主砲と同時に撃てる： EMP 炸裂弾、対空機関砲塔 2 基（15 発連射）、ミサイル塔（20 発連射）。装甲は装軌車両で最も厚い。'),
               'EN': ('X-Morph EMP Tank', "Requests the human army's EMP tank: a hull bigger than the heavy tank's, its "
                                          "turret's twin heavy gun on the primary attack, both barrels twice every 3 s; "
-                                         'on the secondary (switched) EMP flak, two AA gun turrets (bursts of '
+                                         'each on its own fire key with the gun, EMP flak, two AA gun turrets (bursts of '
                                          'fifteen) and a missile turret (bursts of twenty); the heaviest armour of '
                                          'the tracked units.')},
        gun=('Twin Heavy Gun', '双管重炮', '連装重砲', '雙管重砲'),
@@ -259,13 +261,13 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                  # anti_player)
                  shell=('V_403TANK_MACHINEGUN.SGO', 'SolidBullet01', 'mg'),
                  numbers={'AmmoDamage': 300.0, 'AmmoSpeed': 12.0, 'AmmoAlive': 90.0, 'FireInterval': 300.0,
-                          'FireBurstCount': 15.0, 'FireBurstInterval': 6.0, 'FireCount': 2.0}),
+                          'FireBurstCount': 15.0, 'FireBurstInterval': 6.0, 'FireCount': 2.0}, fire=3, auto=True),
              Arm('aam', ('missile_turret',), 'air', ('AA missiles', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), 80,
                  # missile_turret: fire_rate 5, twenty 0.1 s apart (enemy_missile_anti_aa_small: 8 anti_player)
                  missile={'model': 'AA missile', 'look': ('bullet_missile', 1.2), 'burn': 2.0, 'top': 350.0,
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 240.0, 'blast': 3.0,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 20.0, 'burst_gap': 6.0,
-                          'interval': 300.0})),
+                          'interval': 300.0}, fire=4, auto=True)),
        # models/xm_large_tank_emp: 18.2 m long, the turret y 4.6..8.9 (roof ~8.85), z -1.1..4.9; the guns at x +-0.49,
        # y 6.5, their muzzles z 9.3
        camera={'model_eye': (0., 8.6, 1.9), 'model_look_at': (0., 7.0, 13.), 'third_person_distance': 15.,

@@ -150,8 +150,9 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
 - 换算（`xm_units.DAMAGE` / `BLAST`）：anti_core、artillery、laser 原作 1 点 = 120（战斗坦克 5 → 600），anti_player、emp（原作打玩家的
   轻型飞行器）1 点 = 30；Area 半径 × 1.5 m。射速、连发、齐射（`muzzles_per_fire 2` → 两个挂点同时，`GroundVehicle.alternate`
   可按单位覆盖：`Unit.alternate`）照原作。BeamWeaponDef（持续光束）= 每 4 帧一段的激光流。
-- 主武器 = V603 的原生一对挂点；其余每个 `Weapon` 是一个 `xm_units.Arm`：`vcobjects.STORES` 里一个 independent_secondary 的挂载
-  （`<单位>_<臂>`，和 BMPT 的 Ataka 同一机制：座位本来不读的第二扳机，与主武器同时开火，多个时互相轮换），从原作该武器的
+- 主武器 = V603 的原生一对挂点；其余每个 `Weapon` 是一个 `xm_units.Arm`：`vcobjects.STORES` 里一个有自己开火键的挂载
+  （`<单位>_<臂>`，`Arm.fire` → `Store.key`：第一个在座位本来不读的第二扳机（和 BMPT 的 Ataka 同一机制），其余在开火键 3、4…；
+  与主武器、彼此同时开火，不轮换；`Arm.auto` 标自动炮塔。2026-10-30 起，见 `docs/multi-weapon-keys.md`），从原作该武器的
   `Muzzle` 位置射出（`prep_xmorph.arm_muzzles` → model.json `muzzles['xm_<臂>']`；`make_tracked_combat` 的挂载槽从唯一的 `missiles`
   推广为任意槽：`slot_points` 把槽的炮口按模板的定位点数轮流分配，`store_weapon_sgo` 生成）。导弹挂在炮塔（`cannon_main`），
   枪炮挂在炮身（`cannon_l`：跟主炮瞄准）。

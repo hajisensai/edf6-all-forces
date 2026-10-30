@@ -26,6 +26,13 @@
 //    LockTone: jetsound.cpp keeps the stores' stock lock beeps quiet), the stock missile's are its own; helisight.cpp's
 //    mark follows the pick (PayloadPicked). A seat with no store is left to the stock input, and so is a seat whose
 //    stores ride no stock weapon of a control read for its class.
+//  - The own fire keys (StoreSpec::fireKey, docs/multi-weapon-keys.md; the user, 2026-10-30: 「不是只有两个攻击按键的，很多
+//    东西可以同时发射，不一定需要切换副挂载才行。多加几个按键的事情」): a vehicle's weapons that fire together each have a
+//    key of their own, the second trigger (the V603's otherwise unread one: its weapons one launcher's rounds, cycled on
+//    VehicleSecondarySwitchKey) or one of the extra keys VehicleFire3Key..6 (one weapon each), held at once with the
+//    primary; and an auto turret (StoreSpec::autoTurret) fires itself with the auto turrets on (VehicleAutoTurretKey):
+//    a missile once its lock holds, a gun laid on an enemy in its reach (OwnShot). An NPC crew fires them all
+//    (NpcSecondarySelect, NpcOwnKeysFire).
 #include "crew.h"
 #include "jetaudio.h"
 #include "layout.h"
@@ -52,6 +59,8 @@ constexpr ULONGLONG kFreshMs=200;                 // a readout this old (game ms
 constexpr float kCoaxNpcM=900.0f;                 // an NPC crew's coaxial gun: targets this close (NpcCoaxFire; a 7.62 mm
                                                   // coax's point-target reach, where its tracer burns out)
 constexpr float kCoaxCone=0.05f;                  // ...within this of its line (rad, ~3 degrees)
+constexpr float kOwnCone=0.05f;                   // a gun on its own key fired by itself (an auto turret, an NPC's): an
+                                                  // enemy within this of its muzzle's line (rad, ~3 degrees)
 // A coax belt is linked four ball to one tracer (CoaxBelt). The round's colour is the weapon's AmmoColor, four floats
 // at +0x8D0 in the round template (+0x830) fire copies into each round it makes (docs/boarding-re.md §2: 0x68D978
 // writes it there, 0x69712F copies the block; only the drawing reads the round's copy). Keep these equal to
@@ -95,6 +104,10 @@ struct SightPick { ObjRef vehicle,human; unsigned seat; PayloadFire control=Payl
 SightPick sightPick{};
 PayloadReadout latest{};
 ULONGLONG latestMs=0;
+// The local player's auto turrets switched on (1) / off (0) this mission; -1: as the ini's AutoTurrets says.
+int autoTurretsSet=-1;
+bool autoTurretHeld=false;
+bool AutoTurretsOn() noexcept { return autoTurretsSet<0 ? Cfg().autoTurrets : autoTurretsSet!=0; }
 
 // UI request transport: only immutable numbers cross threads. Native identities are
 // kept on the game thread and compared again before a queued selection is applied.
@@ -315,15 +328,27 @@ int InstallCoaxMotion() noexcept {
 // Whether class `c`'s stock input leaves the seat's second fire control unread (the 505, the 601, the Grape: their
 // slot 55 pulls holder 0 on the primary trigger alone, docs/stock-payload-re.md §2), so a coaxial gun can have it.
 constexpr bool FreeSecondary(Class c) noexcept { return c==Class::other; }
-// V603 consumes only its primary trigger; the authored BMPT explicitly equips its spare secondary.
-// A catalogue flag cannot claim an unread input on another class or replace a native secondary weapon.
-bool IndependentSecondary(Class c,const unsigned char* w) noexcept {
+// The own fire key of weapon `w` on class `c` (StoreSpec::fireKey), 0 none. The second trigger only where the class's
+// stock input leaves it unread: V603 consumes only its primary trigger (the authored BMPT explicitly equips its spare
+// secondary); a catalogue flag cannot claim an unread input on another class or replace a native secondary weapon. The
+// extra keys are no stock input at all: a catalogued store's holder is never pulled by any class's own fire (only the
+// plugin's redirect reaches it), so its latch is the key's alone on every class.
+unsigned char OwnKey(Class c,const unsigned char* w) noexcept {
     const auto spec=StoreOf(w);
-    return c==Class::flak603 && spec && spec->independentSecondary;
+    if(!spec || !spec->fireKey || spec->nativeControl)return 0;
+    if(spec->fireKey==kSecondTriggerKey)return c==Class::flak603 ? kSecondTriggerKey : 0;
+    return spec->fireKey<=kFireLastKey ? spec->fireKey : 0;
 }
-bool HasIndependentSecondary(Class c,unsigned char* const* ws,const PayloadReadout& r) noexcept {
-    for(int i=0;i<r.count;++i)if(IndependentSecondary(c,ws[i]))return true;
+// The weapons on the second trigger (the BMPT's missiles): one launcher's rounds, its own cycle (Switch).
+bool IndependentSecondary(Class c,const unsigned char* w) noexcept { return OwnKey(c,w)==kSecondTriggerKey; }
+bool HasOwnKeys(Class c,unsigned char* const* ws,const PayloadReadout& r) noexcept {
+    for(int i=0;i<r.count;++i)if(OwnKey(c,ws[i]))return true;
     return false;
+}
+// An auto turret's weapon on `c` (it needs its own key: fired by hand with the auto turrets off).
+bool AutoTurret(Class c,const unsigned char* w) noexcept {
+    const auto spec=StoreOf(w);
+    return spec && spec->autoTurret && OwnKey(c,w);
 }
 bool SwitchSecondary(Class c,const unsigned char* w,const PayloadEntry& entry) noexcept {
     return entry.fire==PayloadFire::secondary && !entry.coax && !IndependentSecondary(c,w);
@@ -335,7 +360,7 @@ PayloadFire FireOf(Class c,unsigned seat,std::int64_t holder,const unsigned char
     const std::int64_t s=static_cast<std::int64_t>(seat);
     // EDF6VC_ also names native drill/Katyusha/Proteus weapons. Only catalogued add-on stores are redirectable.
     const auto spec=StoreOf(w);
-    if(IndependentSecondary(c,w))return PayloadFire::secondary;
+    if(const unsigned char key=OwnKey(c,w))return key==kSecondTriggerKey ? PayloadFire::secondary : PayloadFire::key;
     if(IsStoreWeapon(w) && !(spec && spec->nativeControl))
         return playerSeat && FreeSecondary(c) && IsCoax(w) ? PayloadFire::secondary : PayloadFire::store;
     switch(c) {
@@ -390,6 +415,8 @@ int ReadSeat(unsigned char* v,unsigned seat,Class c,unsigned char** ws,PayloadRe
         e.fire=FireOf(c,seat,index[i],ws[i],stock,playerSeat);
         e.coax=IsCoax(ws[i]);
         e.homing=At<std::int32_t>(ws[i],kWeaponLockon)==kHoming;
+        e.key=OwnKey(c,ws[i]);
+        e.autoTurret=AutoTurret(c,ws[i]);
     }
     return count;
 }
@@ -544,10 +571,10 @@ void ApplyRemotePicks(unsigned char* v) noexcept {
         PayloadReadout pr{};unsigned char* ws[kMostPayload]{};
         pr.count=ReadSeat(v,r.seat,ClassOf(v),ws,pr,!r.npc);
         // As NpcPayloadSelect: the coax and the intrinsic secondary are never the primary's pick.
-        if(r.npc)for(int i=0;i<pr.count;++i)if(pr.entry[i].coax || IndependentSecondary(ClassOf(v),ws[i]))pr.entry[i].fire=PayloadFire::other;
+        if(r.npc)for(int i=0;i<pr.count;++i)if(pr.entry[i].coax || OwnKey(ClassOf(v),ws[i]))pr.entry[i].fire=PayloadFire::other;
         int choice=-1;
         for(int i=0;i<pr.count;++i)if(NativeHolderIndex(v,r.seat,ws[i])==r.holder){choice=i;break;}
-        if(choice<0 || IndependentSecondary(ClassOf(v),ws[choice]))continue;   // a pick only ever names the primary's weapon
+        if(choice<0 || OwnKey(ClassOf(v),ws[choice]))continue;   // a pick only ever names the primary's weapon
         PayloadFire ride=PayloadFire::primary;   // the stores ride the seat's secondary when a stock weapon is on it (Switch)
         for(int i=0;i<pr.count;++i)if(SwitchSecondary(ClassOf(v),ws[i],pr.entry[i]))ride=PayloadFire::secondary;
         int stock[kMostPayload],count=0;
@@ -557,7 +584,7 @@ void ApplyRemotePicks(unsigned char* v) noexcept {
         // BMPT's HE is its native pair, and a redirect of it would map the right barrel's pull to no target (a single
         // mount receives one source, RedirectPayload), dropping it (2026-10-24 review: latches L=1 R=0).
         const bool alternates=NativeAlternates(ws,stock,count);
-        p->nativeControl=alternates || HasIndependentSecondary(ClassOf(v),ws,pr);
+        p->nativeControl=alternates || HasOwnKeys(ClassOf(v),ws,pr);
         p->weapon=ws[choice];
         if(pr.entry[choice].fire==PayloadFire::store || alternates)RedirectPayload(v,r.seat,*p,ws,pr,stock,count,choice);
     }
@@ -591,6 +618,70 @@ template<class SpentFn> int NextChoice(int at,int n,SpentFn spent) noexcept {
     return at;
 }
 
+// An extra fire key's virtual key and pad bits (VehicleFire<key>Key / -Button), 0 none.
+int FireKeyVk(unsigned char key) noexcept {
+    const Config& c=Cfg();
+    return key==3 ? c.vehicleFire3Key : key==4 ? c.vehicleFire4Key : key==5 ? c.vehicleFire5Key : key==6 ? c.vehicleFire6Key : 0;
+}
+int FireKeyButton(unsigned char key) noexcept {
+    const Config& c=Cfg();
+    return key==3 ? c.vehicleFire3Button : key==4 ? c.vehicleFire4Button : key==5 ? c.vehicleFire5Button :
+           key==6 ? c.vehicleFire6Button : 0;
+}
+// A plugin key held by the seat's player: on the keyboard its virtual key, on a pad all of its XInput bits (as the own
+// secondary's switch). Never while the map holds the keys.
+bool PlayerKeyHeld(const unsigned char* seat,int vk,int mask) noexcept {
+    if(MapHoldsKeys())return false;
+    if(At<unsigned char>(seat,kSeatPad)==0)return KeyDown(vk);
+    std::uint16_t buttons=0;std::uint8_t lt=0,rt=0;
+    return mask>0 && MapPadState(&buttons,&lt,&rt) && (buttons&mask)==mask;
+}
+
+// Whether weapon `w` on `v`, on its own key, has a shot of its own now (an auto turret's, an NPC crew's): a homing one
+// once the game's lock (lockon.cpp, the lock it would fire on) holds a target it may engage (NpcWeaponCandidate: an
+// anti-air missile only at an aircraft); a gun with an enemy in its reach within kOwnCone of its muzzle's line and no
+// friend in that line: `target`, or with none (an auto turret) any enemy of the vehicle's. It aims nothing: it fires
+// along its holder's bone, which the seat's turret turns.
+bool NpcWeaponCandidate(const unsigned char* w,float distance,bool airborne,float* rank) noexcept;
+struct LaidOn { const unsigned char* v; const unsigned char* w; float muzzle[3],dir[3]; LineBlocked blocked; bool hit; };
+bool Laid(LaidOn& l,const void* object,const float* aim) noexcept {
+    const float to[3]={aim[0]-l.muzzle[0],aim[1]-l.muzzle[1],aim[2]-l.muzzle[2]};
+    const float d=std::sqrt(to[0]*to[0]+to[1]*to[1]+to[2]*to[2]);
+    float rank=0.0f;
+    if(!(d>1.0f) || !NpcWeaponCandidate(l.w,d,GunnerAirTarget(object),&rank))return false;
+    if((to[0]*l.dir[0]+to[1]*l.dir[1]+to[2]*l.dir[2])/d<std::cos(kOwnCone))return false;
+    return !(l.blocked && l.blocked(l.muzzle,aim,l.v));
+}
+void LaidVisit(void* ctx,const void* object,const float* aim) {
+    auto& l=*static_cast<LaidOn*>(ctx);
+    if(!l.hit && Laid(l,object,aim))l.hit=true;
+}
+bool OwnShot(const unsigned char* v,const unsigned char* w,const void* target,LineBlocked blocked) noexcept {
+    if(Spent(w) || At<std::int32_t>(w,kWeaponAmmo)<=0)return false;
+    if(At<std::int32_t>(w,kWeaponLockon)==kHoming) {
+        const void* const locked=WeaponLockObject(w);
+        if(!locked || !Readable(locked,kPosition+12))return false;
+        const auto at=reinterpret_cast<const float*>(static_cast<const unsigned char*>(locked)+kPosition);
+        float muzzle[3],dir[3],rank=0.0f;
+        if(!edf::MeanMuzzle(w,64,muzzle,dir))return false;
+        const float d=std::sqrt((at[0]-muzzle[0])*(at[0]-muzzle[0])+(at[1]-muzzle[1])*(at[1]-muzzle[1])+(at[2]-muzzle[2])*(at[2]-muzzle[2]));
+        return NpcWeaponCandidate(w,d,GunnerAirTarget(locked),&rank);
+    }
+    LaidOn l{v,w,{},{},blocked,false};
+    if(!edf::MeanMuzzle(w,64,l.muzzle,l.dir))return false;
+    if(target) {
+        if(!Readable(target,kPosition+12))return false;
+        const float* p=reinterpret_cast<const float*>(static_cast<const unsigned char*>(target)+kPosition);
+        const float aim[3]={p[0],p[1]+0.5f,p[2]};
+        return Laid(l,target,aim);
+    }
+    VisitEnemies(v,&LaidVisit,&l);
+    return l.hit;
+}
+void PullOwn(unsigned char* w) noexcept {
+    if(Readable(w,kWeaponTrigger+1,true))w[kWeaponTrigger]=1;
+}
+
 // The store switch on the player's seat (see the top). `ws` the seat's weapons, `r` their entries. Two cycles: the
 // primary's (its native belts and the stores riding it: `p.weapon`) and the intrinsic secondary's (IndependentSecondary:
 // `p.secondary`, the BMPT's two Ataka rounds on the V603's otherwise unread second trigger). Both fire at once, each on
@@ -607,7 +698,7 @@ void Switch(unsigned char* v,const unsigned char* seat,Pick& p,unsigned char* co
     PayloadFire ride=PayloadFire::primary;   // the coaxial gun has the secondary to itself: the stores stay on the gun
     for(int i=0;i<r.count;++i)if(SwitchSecondary(c,ws[i],r.entry[i]))ride=PayloadFire::secondary;
     int stock[kMostPayload],ns=0,list[kMostPayload],n=0,own[kMostPayload],no=0;
-    for(int i=0;i<r.count;++i)if(r.entry[i].fire==ride && !IndependentSecondary(c,ws[i]))stock[ns++]=i;
+    for(int i=0;i<r.count;++i)if(r.entry[i].fire==ride && !OwnKey(c,ws[i]))stock[ns++]=i;
     for(int i=0;i<r.count;++i)if(IndependentSecondary(c,ws[i]))own[no++]=i;
     const bool alternatives=NativeAlternates(ws,stock,ns);
     p.nativeControl=alternatives || no>0;
@@ -760,6 +851,25 @@ void PayloadFrame(unsigned char* v) noexcept {
     // The intrinsic secondary (the BMPT's missiles) on its own trigger, the primary's guns untouched: optional add-on
     // stores off or not, it never redirects a cannon source. Only the one picked (Switch: p->secondary) is pulled.
     if(p->secondary)FireIndependentSecondary(v,static_cast<unsigned>(seat),p->secondary);
+    // The extra fire keys, each its one weapon, held at once with the triggers; and the auto turrets with them on (their
+    // switch VehicleAutoTurretKey / -Button, only where the seat has one): each fires itself when it has a shot (OwnShot),
+    // whatever its key. The second trigger's auto turret is only the round its cycle picked.
+    for(int i=0;i<r.count;++i)r.autoTurrets+=r.entry[i].autoTurret ? 1 : 0;
+    const bool autoDown=r.autoTurrets>0 && PlayerKeyHeld(s,Cfg().vehicleAutoTurretKey,Cfg().vehicleAutoTurretButton);
+    if(autoDown && !autoTurretHeld) {
+        autoTurretsSet=AutoTurretsOn() ? 0 : 1;
+        Log("PAYLOAD v=%p auto turrets %s",v,autoTurretsSet ? "on" : "off");
+    }
+    autoTurretHeld=autoDown;
+    r.autoOn=AutoTurretsOn();
+    for(int i=0;i<r.count;++i) {
+        const unsigned char key=r.entry[i].key;
+        if(!key || Spent(ws[i]))continue;
+        const bool held=key!=kSecondTriggerKey && PlayerKeyHeld(s,FireKeyVk(key),FireKeyButton(key));
+        const bool own=r.entry[i].autoTurret && r.autoOn && (key!=kSecondTriggerKey || ws[i]==p->secondary) &&
+                       OwnShot(v,ws[i],nullptr,&FriendInLine);
+        if(held || own)PullOwn(ws[i]);
+    }
     latest=r;latestMs=ms;PublishSelectableSnapshot(r);
     if(r.choices>=2 || p->weapon)SendPick(v,static_cast<unsigned>(seat),p->weapon,false);   // this seat's pick to its copies
 }
@@ -823,10 +933,10 @@ unsigned char* NpcPayloadPick(unsigned char* v,unsigned seat,float distance,bool
     if(!Cfg().stockStores) {
         bool native=false;
         for(int i=0;i<r.count;++i) {const auto spec=StoreOf(ws[i]);native=native || (spec && spec->nativeControl);}
-        if(!native && !HasIndependentSecondary(ClassOf(v),ws,r))return nullptr;
+        if(!native && !HasOwnKeys(ClassOf(v),ws,r))return nullptr;
     }
-    // Intrinsic independent weapons are planned alongside the main gun, never selected in its place.
-    for(int i=0;i<r.count;++i)if(r.entry[i].coax || IndependentSecondary(ClassOf(v),ws[i]))r.entry[i].fire=PayloadFire::other;
+    // The weapons on their own keys are planned alongside the main gun, never selected in its place.
+    for(int i=0;i<r.count;++i)if(r.entry[i].coax || OwnKey(ClassOf(v),ws[i]))r.entry[i].fire=PayloadFire::other;
     PayloadFire ride=PayloadFire::primary;
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==PayloadFire::secondary)ride=PayloadFire::secondary;
     int best=-1;float score=-1.0f;
@@ -841,7 +951,7 @@ unsigned char* NpcPayloadPick(unsigned char* v,unsigned seat,float distance,bool
     p->weapon=ws[best];
     int stock[kMostPayload],count=0;
     for(int i=0;i<r.count;++i)if(r.entry[i].fire==ride)stock[count++]=i;
-    p->nativeControl=NativeAlternates(ws,stock,count) || HasIndependentSecondary(ClassOf(v),ws,r);
+    p->nativeControl=NativeAlternates(ws,stock,count) || HasOwnKeys(ClassOf(v),ws,r);
     if(r.entry[best].fire==PayloadFire::store || NativeAlternates(ws,stock,count))
         RedirectPayload(v,seat,*p,ws,r,stock,count,best);
     if(r.entry[best].fire==PayloadFire::store && !p->redirects){p->weapon=nullptr;return nullptr;}
@@ -917,6 +1027,22 @@ bool NpcCoaxFire(unsigned char* v,unsigned seat,const void* target,LineBlocked b
             const float c=(to[0]*dir[0]+to[1]*dir[1]+to[2]*dir[2])/d;
             if(c<std::cos(kCoaxCone) || (blocked && blocked(muzzle,at,v)))continue;   // not laid on it yet, or a friend in the way
             if(Readable(ws[i],kWeaponTrigger+1)){CoaxBelt(ws[i]);ws[i][kWeaponTrigger]=1;fired=true;}
+        }
+        return fired;
+    } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool NpcOwnKeysFire(unsigned char* v,unsigned seat,const void* target,LineBlocked blocked) noexcept {
+    __try {
+        if(!pullOk || !Cfg().enabled || !Cfg().npcGunners || !v || v[kDead] || !target || BodyOf(v)!=PluginBody::none ||
+           seat>=SeatCount(v) || !AiGunner(v,SeatAt(v,seat)))return false;
+        PayloadReadout r{};unsigned char* ws[kMostPayload]{};
+        const Class c=ClassOf(v);r.count=ReadSeat(v,seat,c,ws,r,false);
+        bool fired=false;
+        for(int i=0;i<r.count;++i) {
+            const unsigned char key=OwnKey(c,ws[i]);
+            if(!key || key==kSecondTriggerKey || !OwnShot(v,ws[i],target,blocked))continue;
+            PullOwn(ws[i]);fired=true;
         }
         return fired;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -1109,7 +1235,7 @@ int SeatFireWeapons(const void* vehicle,unsigned index,bool both,unsigned char**
             }
             return count;
         };
-        if(both)return collect(PayloadFire::secondary,collect(PayloadFire::primary));
+        if(both)return collect(PayloadFire::key,collect(PayloadFire::secondary,collect(PayloadFire::primary)));
         if(const int count=collect(group))return count;
         // Missing/expired/spent secondary falls back to a real usable primary, never to an old weapon pointer.
         if(group!=PayloadFire::primary)if(const int count=collect(PayloadFire::primary))return count;
@@ -1168,7 +1294,7 @@ bool NativePayloadControl(const void* vehicle,unsigned index) noexcept {
             const auto weapon=At<const unsigned char*>(holders[i],kHolderWeapon);
             if(!Readable(weapon,kWeaponCharge+4))continue;
             const auto spec=StoreOf(weapon);
-            if(spec && (spec->nativeControl || IndependentSecondary(ClassOf(v),weapon)))return true;
+            if(spec && (spec->nativeControl || OwnKey(ClassOf(v),weapon)))return true;
         }
         return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
@@ -1197,8 +1323,8 @@ bool PayloadAimWeapon(const void* vehicle,unsigned index,const void* source,cons
             for(int i=0;i<r.count;++i)if(SwitchSecondary(ClassOf(v),ws[i],r.entry[i]))group=PayloadFire::secondary;
         }
         if(group==PayloadFire::other)return false;
-        // An intrinsic secondary aims as itself: it is no other weapon's redirect and redirects nothing.
-        if(IndependentSecondary(ClassOf(v),ws[from])){*out=Spent(ws[from]) ? nullptr : ws[from];return true;}
+        // A weapon on its own key aims as itself: it is no other weapon's redirect and redirects nothing.
+        if(OwnKey(ClassOf(v),ws[from])){*out=Spent(ws[from]) ? nullptr : ws[from];return true;}
         const Pick* picked=nullptr;
         for(const auto& p:picks)if(p.ref.Is(v) && p.seat==index && p.npc==npc && !p.remote){picked=&p;break;}
         const bool fresh=picked && GameMs()-picked->seen<=kFreshMs && (Cfg().stockStores || picked->nativeControl);
@@ -1229,5 +1355,6 @@ void ResetPayload() noexcept {
     for(auto& x:sentPicks)x=SentPick{};
     latest=PayloadReadout{};latestMs=0;
     sightPick=SightPick{};
+    autoTurretsSet=-1;autoTurretHeld=false;
 }
 }  // namespace crew
