@@ -29,6 +29,7 @@
 #include <cstring>
 #include <cwchar>
 #include <algorithm>
+#include <atomic>
 
 namespace crew {
 namespace {
@@ -554,13 +555,28 @@ bool SupportTransactionRequester(std::uint64_t token,ObjRef* out) noexcept {
 }
 bool SupportCommandRequesterMatches(void* puid,const char* authenticatedPuid) noexcept {
     if(!authenticatedPuid || !std::memchr(authenticatedPuid,0,65))return false;
+    // Which part failed, for the drops each channel logs as "not its sender's player" (2026-10-30 report #27: in one
+    // session every channel dropped the other machine's player, both ways, from the client's log alone undecidable).
+    static std::atomic<int> said{0};
     EDF6CoopPeer peer;
-    if(!PuidText(puid,peer) || std::strcmp(peer.id,authenticatedPuid))return false;
+    if(!PuidText(puid,peer)) {
+        if(said.fetch_add(1)<16)Log("SUPPORT sender check: the player's native PUID has no text (sender %.12s)",authenticatedPuid);
+        return false;
+    }
+    if(std::strcmp(peer.id,authenticatedPuid)) {
+        if(said.fetch_add(1)<16)Log("SUPPORT sender check: the player is %.12s, the sender %.12s",peer.id,authenticatedPuid);
+        return false;
+    }
     AcquireSRWLockShared(&worldLock);
     bool accepted=false;
-    if(worldFrozen && world.ready)for(std::uint32_t i=0;i<world.participantCount;++i)
+    const bool sealed=worldFrozen && world.ready;
+    const std::uint32_t count=world.participantCount;
+    if(sealed)for(std::uint32_t i=0;i<count;++i)
         accepted=accepted || !std::strcmp(peer.id,world.participants[i].id);
-    ReleaseSRWLockShared(&worldLock);return accepted;
+    ReleaseSRWLockShared(&worldLock);
+    if(!accepted && said.fetch_add(1)<16)
+        Log("SUPPORT sender check: %.12s is not a participant of the current world (sealed %d, %u participants)",peer.id,sealed ? 1 : 0,count);
+    return accepted;
 }
 bool SupportParticipantAllowed(void* puid) noexcept {
     AcquireSRWLockShared(&worldLock);
