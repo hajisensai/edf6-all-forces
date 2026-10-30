@@ -145,13 +145,35 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
   耐久 = 原作 max_health × 2500/170，至少 `xm_units.WHEELED_FLOOR`（800；悍马 / 越野车原作 15、导弹车 40）。
 - 原作同一挺枪的两种 `Weapon`（`main_weapon` 打空中、`core_weapon` 打地面）分成主武器与 `Arm`，两者同时开火（独立副武器）。
   多武器机制会话的新字段合入后改用它表达；目前仍是现有 `Arm`。
-- **货车 `medium_truck_cargo` 没有移植**：原作蓝图没有 `WeaponComp` / `TurretComp`（骨架里的炮塔骨骼没有网格），V603 没有无武器的路径；
-  行保持 planned、不写 `like`（`prep_xmorph.select()` 默认只准备写了 `like` 的行）。
+- 货车不在这一族：原作蓝图没有 `WeaponComp` / `TurretComp`，V603 没有无武器的路径，见下节「车（`car`）」。
+
+## 车（`prep_xmorph.py car`，V512，2026-10-30）
+
+无武器的车（货车，以后的 civilian 民用车）走轿车（`tools/make_sedan.py`）已验证的 V512 底盘（`Vehicle_Car`：轻卡的类、操控、
+物理拓扑）。`xm_units` 的 `car` 族：`like = 'sedan'`（无武器的请求模板），`cab` 是驾驶座的座舱套件，`eye` 是驾驶员眼点，不写 `gun`。
+每个登记表按族走同一个循环（`xm_units.v512()`）：`vcobjects.GROUND_VEHICLES`、`cockpit_fits_plugin.FITS`（`Fit(0, 'body', eye, cab)`）、
+`testrange/catalog.py INSTALLER_VEHICLES`（同轿车：SGO 保留 V512 的 `mission_setup`，直接可摆放）、`make_xmorph.CARS`
+（安装器的生成 / 写入 / 卸载循环）；`calls` / `ledger` / `buildcache` / `RELEASE_MODELS` 本来就按 `ported()`。
+
+- 准备（`prepare_car`）：车轮 = `wheels()` 找到的地面圆块，每侧前到后按轴命名（`axle_bones`）：前轴 `tireF`（转向）、后轴 `tireB`（驱动）、
+  中间的轴 `tireM<k>`；其余三角形都在 `body`。文件夹格式 `CAR_FORMAT = 1`（`model.json` 的 `wheels` / `bounds`，`model.npz` 同履带文件夹的部件数组）。
+- 生成（`pylib/car_model.py`）：
+  - 4 根轮骨移到前、后轴的轮心（只改原点），`car_base_wheel[8]` 半径改成轮胎的；
+  - 中间轴是挂在 `body` 下的可视骨（`add_visual_bones`），只画不算物理：`car_base_draw_wheel_info [[-1, 骨], [半径]]`，与 V603 的诱导轮同一种行；
+  - 材质用 V512 车身材质 `KT01L` 的布局配文件夹贴图；
+  - 碰撞：先 `ragdoll_fit.fit` 把布娃娃挪到新骨位，车体按网格拟合（`tracked_collision._fitted_shape`），轮胎把 V512 轮胎凸包映射到轮盒；
+    车门（模型没有）缩成 1 mm 放进车体中心（同轿车）；
+  - 驾驶座、下车点、追尾相机、车灯的 MAB 点按模型包围盒重放；只留驾驶座，`vehicle_weapon_setting` 为空。
+- `car_model.check`：SHKT `shkt_check`、布娃娃 `ragdoll_fit.problems`、`vehicle_check.vehicle_problems`（静止压缩、质量）、轮骨在轮心。
+
+| 单位 | 三角形 | 每侧轮（物理 / 只画） | 轮径 | 耐久 |
+|---|---|---|---|---|
+| xm_medium_truck_cargo | 5,675 | 3（前 + 后 / 中轴） | 0.56 | 1500 |
 
 ## 新增一个单位
 
 1. `pylib/xm_units.py` 加一行（实体路径、家族、`like`、状态）。
-2. `python tools/prep_xmorph.py tracked|wheeled xm_<名>`（写进模型包）；看生成日志里的骨骼归属、接地段 / 车轮，必要时离线渲染核对。
+2. `python tools/prep_xmorph.py tracked|wheeled|car xm_<名>`（写进模型包）；看生成日志里的骨骼归属、接地段 / 车轮，必要时离线渲染核对。
 3. 只有蓝图误导时（主武器炮口不在炮上之类）才在 `MOUTHS` 加例外，并写明证据。
 
 ## 验证（本机，离线）
@@ -168,6 +190,8 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
 - **轮式车不用前轮转向**：V603 的轮行 `car_base_wheel [11]` 全是 −1（不转向），轮式单位照此原地差速转向。EDF6 Car 在 `0x679CFC..0x67A004`
   读 `[10..12]`（`docs/edf41-bike-re.md`），Striker 的前两轴是 `[11] = 1`；但 `Vehicle603_Flak` 的输入是否会给转向轮角度没有逆向过，
   改了可能开不动，需实机验证后再做（`tracked_collision._wheel_overrides` 按轮位改 `[11] / [12]` 即可）。
+- 货车（`car`）未实机测试：V512 轻卡的质量、重心与悬挂行程原样保留，7 m 车身上的手感、中轴只画不着地、`truck_cab` 座舱是否与驾驶室对齐都只做了离线检查。
+  只留驾驶座：轻卡车斗的 4 个乘员座没有搬到货厢（货厢有篷布，要做运兵需另定座位）。
 - 轮式单位未实机测试：同轴叠放的多个弹簧轮（导弹车 5 轴、悍马 2 轴各分到 3 个物理轮）的悬挂手感、发射架 ±30° 是否擦到驾驶室、
   越野车车头机枪挂在炮身上（随炮塔瞄准，原作是车体上的固定挂点）都只做了离线检查。
 - **履带贴图滚动**：X-Morph 的履带是车体图集上的静态贴图，`v603_kyata_L / _R` 只是给 SGO 的 `tank_caterpillar_animation` 留名字；

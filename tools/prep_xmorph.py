@@ -527,6 +527,79 @@ def prepare_tracked(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict
     return info
 
 
+# ------------------------------------------------------------------------------------------ cars
+
+CAR_FORMAT = 1           # model.json 'format' of a car folder: pylib/car_model.py refuses another
+
+
+def axle_bones(n: int) -> list[str]:
+    """The V512's wheel bones of n axles a side, front to rear (without the side): the front axle its steered pair
+    (tireF), the rear one its driven pair (tireB), the axles between them drawn only (tireM1.., car_model's visual
+    bones: they turn at their own radius, car_base_draw_wheel_info)."""
+    _req(n >= 2, f'{n} axles')
+    return ['tireF', *(f'tireM{k}' for k in range(1, n - 1)), 'tireB']
+
+
+def prepare_car(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
+    """An unarmed vehicle (the 'car' family: pylib/car_model.py builds it on the V512's chassis) as a car folder:
+    <out>/xm_<name>/ model.json (CAR_FORMAT), model.npz (p<k>_pos / _nrm / _uv / _tri a part, as the tracked folders'),
+    textures/, LICENSE.txt. Its parts: each wheel (wheels(): the hull's round pieces on the ground) on its axle's bone
+    (axle_bones), the rest on 'body'. Every bone of the unit's skeleton is the hull's (a car has no turret)."""
+    um = xm.load(packs, unit.entity)
+    bone = {b: 'body' for b in um.bones}
+    w = wheels(um, bone)
+    n = len(w['sides']['l'])
+    tri_bone = np.full(len(um.triangles), 'body', dtype=object)
+    gear = {}
+    for side in 'lr':
+        for name, wheel in zip(axle_bones(n), w['sides'][side]):
+            tri_bone[wheel['tris']] = f'{name}_{side}'
+            gear[f'{name}_{side}'] = {'centre': [float(c) * SCALE for c in wheel['centre']],
+                                      'radius': wheel['radius'] * SCALE, 'half': wheel['half'] * SCALE}
+    P = um.positions.astype(np.float64) * SCALE
+    normals, normal_of = prep.corner_normals(P, um.triangles)
+    out = os.path.join(out_root, xm_units.folder(unit.key))
+    if os.path.isdir(out):
+        shutil.rmtree(out)
+    os.makedirs(os.path.join(out, 'textures'))
+    materials = []
+    for m in um.materials:
+        stem = m.split('/')[-1]
+        imgs = xm.texture_images(packs, m)
+        entry = {'name': f'xm_{stem}', 'albedo': f'textures/{stem}.png'}
+        imgs['diffuse'].save(os.path.join(out, entry['albedo']), optimize=True)
+        if 'normal' in imgs:
+            entry['normal'] = f'textures/{stem}_normal.png'
+            imgs['normal'].save(os.path.join(out, entry['normal']), optimize=True)
+        materials.append(entry)
+    arrays: dict[str, np.ndarray] = {}
+    parts = []
+    for b, mat in sorted({(b, int(m)) for b, m in zip(tri_bone, um.tri_material)}):
+        sel = np.flatnonzero((tri_bone == b) & (um.tri_material == mat))
+        corner = np.stack((um.triangles[sel], normal_of[sel]), axis=-1).reshape(-1, 2)
+        uniq, inverse = np.unique(corner, axis=0, return_inverse=True)
+        k = len(parts)
+        arrays[f'p{k}_pos'] = P[uniq[:, 0]].astype(np.float32)
+        arrays[f'p{k}_nrm'] = normals[uniq[:, 1]].astype(np.float32)
+        arrays[f'p{k}_uv'] = um.uvs[uniq[:, 0]].astype(np.float32)
+        arrays[f'p{k}_tri'] = inverse.reshape(-1, 3).astype(np.uint32)
+        parts.append({'name': f'{b}.{materials[mat]["name"]}', 'bone': b, 'material': mat, 'triangles': int(len(sel)),
+                      'vertices': int(len(uniq))})
+    np.savez_compressed(os.path.join(out, 'model.npz'), **arrays)
+    title = f'{unit.title_en or unit.key} (X-Morph: Defense)'
+    info = {'format': CAR_FORMAT, 'kind': unit.key, 'title': title,
+            'source': f'X-Morph: Defense (EXOR Studios), entities/units/{unit.entity}.ent',
+            'prepared_from': os.path.basename(um.mesh_path), 'materials': materials, 'parts': parts,
+            'wheels': gear, 'bounds': [P.min(0).tolist(), P.max(0).tolist()], 'triangles': int(len(um.triangles)),
+            'xmorph': {'entity': unit.entity, 'mesh': um.mesh_path, 'axles': n, 'scale': SCALE}}
+    with open(os.path.join(out, 'model.json'), 'w', encoding='utf-8', newline='\n') as f:
+        json.dump(info, f, indent=1)
+        f.write('\n')
+    with open(os.path.join(out, 'LICENSE.txt'), 'w', encoding='utf-8', newline='\n') as f:
+        f.write(LICENSE.format(title=title, entity=f'entities/units/{unit.entity}.ent', mesh=um.mesh_path))
+    return info
+
+
 # ------------------------------------------------------------------------------------------ emplacements
 
 ROLES = {'body': 'base', 'cannon_main': 'turret', 'cannon_l': 'gun', 'cannon_slide_l': 'gun', 'cannon_slide_r': 'gun'}
@@ -597,11 +670,12 @@ def prepare_emplacement(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> 
     return info
 
 
-PREPARERS = {'tracked': prepare_tracked, 'wheeled': prepare_tracked, 'emplacement': prepare_emplacement}
+PREPARERS = {'tracked': prepare_tracked, 'wheeled': prepare_tracked, 'emplacement': prepare_emplacement,
+             'car': prepare_car}
 
 
 def select(family: str, names: list[str]) -> list[xm_units.Unit]:
-    # the family's rows that name a `like` (an EDF counterpart: the cargo truck, unarmed in the game, has none)
+    # the family's rows that name a `like` (their EDF counterpart: a row that has none is not ported yet)
     units = [u for u in xm_units.UNITS.values() if u.family == family and u.like]
     if not names:
         return units
@@ -622,7 +696,7 @@ def main(argv: list[str]) -> int:
     try:
         for u in select(a.family, a.units):
             info = PREPARERS[a.family](packs, u, a.out)
-            print(json.dumps({k: info[k] for k in ('kind', 'triangles', 'materials', 'origins', 'muzzles', 'pivots')
+            print(json.dumps({k: info[k] for k in ('kind', 'triangles', 'materials', 'origins', 'muzzles', 'pivots', 'wheels')
                               if k in info} | {'parts': len(info['parts'])}, indent=1, default=str))
     finally:
         packs.close()

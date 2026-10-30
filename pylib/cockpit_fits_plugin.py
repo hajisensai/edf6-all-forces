@@ -181,4 +181,6 @@ FITS: dict[str, tuple[Fit, ...]] = {
 # War Thunder tanks'.
 FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, 'cannon_main', u.eye, 'remote_display'),)
              for u in xm_units.v603()})
+# ... and a car's (xm_units car): its driver's eye in its cab kit (xm_units.Unit.cab), as the Katyusha's truck cab.
+FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, 'body', u.eye, u.cab),) for u in xm_units.v512()})
 DIGESTS: dict[str, str] = {}

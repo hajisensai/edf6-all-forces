@@ -253,6 +253,13 @@ class RigTests(unittest.TestCase):
     def test_runs_merge(self) -> None:
         self.assertEqual(px._merge([(3, 4), (0, 1), (1.2, 2)], tol=0.3), [(0, 2), (3, 4)])
 
+    def test_car_axles(self) -> None:
+        """A car's axles on the V512's wheel bones: the front pair steers, the rear one drives, the rest drawn only."""
+        self.assertEqual(px.axle_bones(2), ['tireF', 'tireB'])
+        self.assertEqual(px.axle_bones(4), ['tireF', 'tireM1', 'tireM2', 'tireB'])
+        with self.assertRaises(px.PrepError):
+            px.axle_bones(1)
+
 
 # ------------------------------------------------------------------------------------------ the game's own unit
 

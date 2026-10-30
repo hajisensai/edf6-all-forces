@@ -1807,6 +1807,9 @@ add_test(NAME vehicle_look COMMAND vehicle_look_test)
 
 add_test(NAME sedan_build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sedan_build_test.py")
 set_tests_properties(sedan_build PROPERTIES SKIP_RETURN_CODE 77)
+# The X-Morph cars on the V512 (pylib/car_model.py): skipped without Root.cpk or the model pack's car folders.
+add_test(NAME xm_car_build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/xm_car_build_test.py")
+set_tests_properties(xm_car_build PROPERTIES SKIP_RETURN_CODE 77)
 
 # The two built plugins loaded for real into one process, in either order (tests/plugin_pair_load_test.cpp): each
 # exports its list (aimlink.h and the rest) from its own DLL, aimlink::Resolve finds the peer's names, and with no

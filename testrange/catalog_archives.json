@@ -824,6 +824,9 @@
   "edf6vc_sedan": [
    "OBJECT/EDF6VC_SEDAN.MRAB"
   ],
+  "edf6vc_xm_medium_truck_cargo": [
+   "OBJECT/EDF6VC_XM_MEDIUM_TRUCK_CARGO.MRAB"
+  ],
   "giantant01": [
    "OBJECT/GIANTANT.MRAB"
   ],

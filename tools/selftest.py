@@ -4613,7 +4613,8 @@ def xmorph_undeployed_without_its_folder() -> None:
     its catalog row) and deployed nowhere, with no stand-in (CLAUDE.md): tools/make_xmorph.py builds no file (the
     installer's install then releases what an earlier one wrote), its request row is a placeholder
     (call_weapons.placeholder: no SGO, nothing needed), the test range leaves it out of a plan. With the folder
-    (model.json and model.npz) it is deployed."""
+    (model.json and model.npz) it is deployed. A car (make_xmorph.CARS) is the range's as the sedan is (its own SGO,
+    testrange/catalog.py INSTALLER_VEHICLES): there once its files are in Mods."""
     from unittest.mock import patch
     import io
     import make_xmorph
@@ -4625,7 +4626,8 @@ def xmorph_undeployed_without_its_folder() -> None:
     with tempfile.TemporaryDirectory() as root, patch.object(obj_model, 'model_roots', lambda: [root]):
         for kind in make_xmorph.KINDS:
             call = next(c for c in calls.CALLS if c.ground == kind)
-            mission = f'{gen.DERIVED_PREFIX}{kind}_mission'
+            car = kind in make_xmorph.CARS
+            mission = f'edf6vc_{kind}' if car else f'{gen.DERIVED_PREFIX}{kind}_mission'
             assert not make_xmorph.deployable(kind) and cw.undeployed(call) and cw.placeholder(call), kind
             assert cw.sgo_file(call) in cw.parked_sgos() and cw.sgo_file(call) in cw.our_sgos(), kind
             out = io.StringIO()
@@ -4641,6 +4643,11 @@ def xmorph_undeployed_without_its_folder() -> None:
                     pass
             assert make_xmorph.deployable(kind) and not cw.placeholder(call), kind
             assert cw.sgo_file(call) not in cw.parked_sgos(), kind
+            if car:   # the installer's files, as an install writes them
+                for rel in gen.catalog.files_of(gen.OPTIONAL_VEHICLES[mission]):
+                    os.makedirs(os.path.dirname(os.path.join(root, 'Mods', rel)), exist_ok=True)
+                    with open(os.path.join(root, 'Mods', rel), 'wb'):
+                        pass
             assert gen.without_missing(root, gen.Plan(vehicles={mission: 1}))[0].vehicles == {mission: 1}, kind
 
 

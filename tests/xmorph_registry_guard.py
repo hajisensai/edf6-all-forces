@@ -9,7 +9,9 @@ from:
   its files' owner (pylib/ledger.py OWNERS), its build group (pylib/buildcache.py GROUPS, COCKPIT_GROUPS, MODEL_INPUTS),
   its cockpit (pylib/cockpit_fits.py FITS), the test range and the M map (testrange/gen.py GROUND_MISSION,
   TRACKED_MISSION, CATALOG_ONLY; testrange/catalog_archives.json; src/spawn_catalog.inc), the release's model pack
-  (tools/build_release.py RELEASE_MODELS) and the frozen installer's hidden imports.
+  (tools/build_release.py RELEASE_MODELS) and the frozen installer's hidden imports. A car (xm_units car: on the V512,
+  pylib/car_model.py) is in none of the V603's tables (TRACKED, make_tracked_combat's, wt_tracked FOLDERS): it is
+  tools/make_xmorph.py CARS', and the range places it as the sedan (testrange/catalog.py INSTALLER_VEHICLES).
 
 Registration does not depend on the model folders a machine has (CI has none): nothing here reads one. Read only; no game.
 
@@ -26,6 +28,7 @@ sys.path[:0] = [os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'tools'), os.pat
 import buildcache  # noqa: E402
 import build_release  # noqa: E402
 import calls  # noqa: E402
+import catalog  # noqa: E402
 import cockpit_fits  # noqa: E402
 import emplacement_model  # noqa: E402
 import gen  # noqa: E402
@@ -80,7 +83,9 @@ for u in ported:
     v = vc.GROUND_VEHICLES.get(key)
     check(v is not None and v.sgo == sgo and v.tool == 'make_xmorph' and v.durability == u.durability,
           f'{key}: pylib/vcobjects.py GROUND_VEHICLES')
-    check(key in vc.TRACKED, f'{key}: pylib/vcobjects.py TRACKED')
+    car = u.family in xm_units.V512
+    check((key in vc.TRACKED) != car and (key in make_xmorph.CARS) == car,
+          f'{key}: pylib/vcobjects.py TRACKED / tools/make_xmorph.py CARS')
     if v is not None and v.alternate:
         for w in v.weapons[:2]:
             check(f'{{L"{w.rsplit("/", 1)[1].upper()}",' in stores_inc, f'{key}: src/stores.inc lacks {w} (gen_stores)')
@@ -89,10 +94,14 @@ for u in ported:
         kind = vc.xm_store(u, a)
         check(kind in vc.STORES and vc.STORES[kind].independent_secondary
               and f'{{L"EDF6VC_{kind}_",' in stores_inc, f'{key}: arm {a.key}: STORES {kind} / src/stores.inc (gen_stores)')
-    check(v is None or v.slots == ('left', 'right', *(f'xm_{a.key}' for a in u.arms)), f'{key}: its slots are not its arms')
+    check(v is None or v.slots == (() if car else ('left', 'right', *(f'xm_{a.key}' for a in u.arms))),
+          f'{key}: its slots are not its arms')
     # its model: a tracked or wheeled unit's a wt_tracked folder (WT_ONLY its camera), an emplacement's on the
     # fortified base
-    if u.family in xm_units.HULLS:
+    if car:
+        check(key not in wt_tracked.FOLDERS and key not in mtc.KINDS and key in make_xmorph.LABELS,
+              f'{key}: a car in the V603 tables')
+    elif u.family in xm_units.HULLS:
         check(wt_tracked.FOLDERS.get(key) == xm_units.folder(key) and key in mtc.WT_ONLY,
               f'{key}: pylib/wt_tracked.py FOLDERS / make_tracked_combat WT_ONLY')
     else:
@@ -100,7 +109,7 @@ for u in ported:
         check(e is not None and e.folder == xm_units.folder(key) and e.eye == u.eye and key in mtc.EMPLACEMENTS
               and key in mtc.ONE_CRADLE, f'{key}: pylib/emplacement_model.py KINDS / make_tracked_combat EMPLACEMENTS')
     # its builder: one generator for every unit
-    check(key in mtc.KINDS and key in mtc.LABELS and key in mtc.GUNS and mtc.NAMES.get(key) == u.gun,
+    check(car or key in mtc.KINDS and key in mtc.LABELS and key in mtc.GUNS and mtc.NAMES.get(key) == u.gun,
           f'{key}: tools/make_tracked_combat.py tables (KINDS, LABELS, GUNS, NAMES)')
     check(buildcache.generator(key) == 'make_xmorph' and buildcache.tool(key) is make_xmorph.builder(key)
           and buildcache.tool(key).OWNER == key, f'{key}: pylib/buildcache.py generator / tool')
@@ -109,14 +118,18 @@ for u in ported:
     check(key in buildcache.GROUPS and key in buildcache.COCKPIT_GROUPS
           and buildcache.MODEL_INPUTS.get(key) == xm_units.folder(key), f'{key}: pylib/buildcache.py groups')
     check(f'EDF6VC_{upper}' in cockpit_fits.FITS, f'{key}: pylib/cockpit_fits_plugin.py FITS')
-    # the test range and the M map
-    check(gen.GROUND_MISSION.get(mission) == 'make_xmorph' and mission in gen.TRACKED_MISSION
-          and mission in gen.CATALOG_ONLY, f'{key}: testrange/gen.py GROUND_MISSION / TRACKED_MISSION / CATALOG_ONLY')
+    # the test range and the M map (a car: placed as its own SGO, the sedan's way)
+    if car:
+        mission = sgo.lower()
+        check(mission in {s for s, _l, _f in catalog.INSTALLER_VEHICLES}, f'{key}: testrange/catalog.py INSTALLER_VEHICLES')
+    else:
+        check(gen.GROUND_MISSION.get(mission) == 'make_xmorph' and mission in gen.TRACKED_MISSION
+              and mission in gen.CATALOG_ONLY, f'{key}: testrange/gen.py GROUND_MISSION / TRACKED_MISSION / CATALOG_ONLY')
     check(f'"{mission.upper()}"' in spawn_inc, f'{key}: src/spawn_catalog.inc lacks {mission} (gen_spawn_catalog)')
     check(f'OBJECT/{sgo}.MRAB' in archives.get(mission, ()), f'{key}: testrange/catalog_archives.json lacks {mission}')
     # the release
     check(xm_units.folder(key) in build_release.RELEASE_MODELS, f'{key}: tools/build_release.py RELEASE_MODELS')
-for module in ('make_xmorph', 'xm_units'):
+for module in ('make_xmorph', 'xm_units', 'car_model'):
     check(f"'{module}'" in hidden, f'tools/build_release.py: {module} is not a hidden import of the installer')
 
 print(f'xmorph_registry_guard: {len(ported)} ported units, {checks} checks, {failed} failed')
