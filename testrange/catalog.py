@@ -33,6 +33,9 @@ import sys
 from dataclasses import dataclass
 from functools import lru_cache
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'pylib'))
+import xm_units  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 # The registries: bundled next to the frozen installer (tools/build_release.py --add-data, as tools/edf41_objects.py
 # reads them), else the source tree's.
@@ -411,6 +414,10 @@ def edf5dlc_files(sgo: str) -> list[str]:
 INSTALLER_VEHICLES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ('edf6vc_sedan', '民用轿车', ('OBJECT/EDF6VC_SEDAN.SGO', 'OBJECT/EDF6VC_SEDAN.MRAB', 'OBJECT/EDF6VC_SEDAN.SHKT')),
 )
+# ... and the X-Morph cars the same way (pylib/xm_units.py car: pylib/car_model.py keeps the V512's mission_setup).
+INSTALLER_VEHICLES += tuple((f'edf6vc_{u.key}', xm_units.label(u),
+                             tuple(f'OBJECT/EDF6VC_{u.key.upper()}.{ext}' for ext in ('SGO', 'MRAB', 'SHKT')))
+                            for u in xm_units.v512())
 
 
 def short(label: str) -> str:

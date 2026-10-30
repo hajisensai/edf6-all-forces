@@ -401,6 +401,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'X-Morph helicopters (2026-10-30)': IDS[:99],
     'X-Morph jets (2026-10-30)': IDS[:103],
     'X-Morph wheeled units (2026-10-30)': IDS[:107],
+    'X-Morph cargo truck (2026-10-30)': IDS[:108],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -1144,7 +1145,7 @@ PLUGIN_NOTES: dict[str, str] = {
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
 GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES, 'quadvulcan': PLUGIN_NOTES, 'emp_mid': PLUGIN_NOTES, 'emp_short': PLUGIN_NOTES, 'emp_long': PLUGIN_NOTES, 'tunguska': PLUGIN_NOTES, 'pzh2000': PLUGIN_NOTES, 'sturmtiger': PLUGIN_NOTES, 'tos1': PLUGIN_NOTES, 'apocalypse': PLUGIN_NOTES, 'ciws_phalanx': PLUGIN_NOTES, 'flak88': PLUGIN_NOTES, 'gdf005': PLUGIN_NOTES, 'laser': PLUGIN_NOTES, 'railgun': PLUGIN_NOTES, 'patriot': PLUGIN_NOTES}
-GROUND_NOTES_BY_KIND.update({u.key: PLUGIN_NOTES for u in xm_units.v603()})   # pylib/xm_units.py
+GROUND_NOTES_BY_KIND.update({u.key: PLUGIN_NOTES for u in xm_units.ported()})   # pylib/xm_units.py
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',

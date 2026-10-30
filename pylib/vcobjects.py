@@ -1110,6 +1110,14 @@ for _xm in xm_units.v603():
         alternate=_like.alternate if _xm.alternate is None else _xm.alternate,
         weapons=(f'app:/weapon/edf6vc_{_xm.key}_l.sgo', f'app:/weapon/edf6vc_{_xm.key}_r.sgo',
                  *(_weapon(store_file(xm_store(_xm, a), a.rounds)) for a in _xm.arms)))
+# The X-Morph cars (pylib/xm_units.py car: pylib/car_model.py on the V512): the sedan's unarmed request (its `like`),
+# under their own SGO and durability.
+for _xm in xm_units.v512():
+    _like = GROUND_VEHICLES[_xm.like]
+    assert _like.stock == 'V512_KEITRUCK' and not _like.slots, (_xm.key, _xm.like)
+    GROUND_VEHICLES[_xm.key] = replace(_like, sgo=f'EDF6VC_{_xm.key.upper()}', durability=_xm.durability,
+                                       tool='make_xmorph')
+
 for _ground in GROUND_VEHICLES.values():
     vehicle_fire_keys(_ground)   # an extra fire key never holds two weapons
 # The ground vehicles tools/make_tracked_combat.py builds on the V603 (each its make_<kind> tool, an X-Morph unit

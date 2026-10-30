@@ -189,4 +189,6 @@ FITS: dict[str, tuple[Fit, ...]] = {
 # medium tanks from 45-47 deg, the shield generator's eye inside its gun at rest; tests/gun_camera_sweep_guard.py).
 FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, u.eye_bone, xm_units.eye(u), 'remote_display'),)
              for u in xm_units.v603()})
+# ... and a car's (xm_units car): its driver's eye in its cab kit (xm_units.Unit.cab), as the Katyusha's truck cab.
+FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, 'body', u.eye, u.cab),) for u in xm_units.v512()})
 DIGESTS: dict[str, str] = {}

@@ -15,13 +15,16 @@ says so in one line and deploys nothing of it (tools/make_xmorph.py build: no fi
 its request row a placeholder; testrange/gen.py without_missing: off the range).
 
 Who reads the rows (one loop each; tests/xmorph_registry_guard.py holds every one of them to ported()):
-    pylib/vcobjects.py            GROUND_VEHICLES (derived from its `like`'s: the native gun pair) and TRACKED
+    pylib/vcobjects.py            GROUND_VEHICLES (derived from its `like`'s: the native gun pair; a car's the sedan's
+                                  unarmed request) and TRACKED (the V603's)
     pylib/wt_tracked.py           FOLDERS (folder())
     pylib/ledger.py               OWNERS          pylib/buildcache.py   GROUPS, COCKPIT_GROUPS, MODEL_INPUTS, generator()
     pylib/cockpit_fits_plugin.py  FITS (eye)      tools/calls.py        CALLS (after), KINDS (texts), GROUND_NOTES_BY_KIND
     tools/make_tracked_combat.py  LABELS, GUNS, NAMES, WT_ONLY and the kind sets over its `like`'s
-    tools/make_xmorph.py          the one generator of every unit (builder(key)); tools/build_release.py RELEASE_MODELS
-    testrange/gen.py              GROUND_MISSION (the range's own tables follow vcobjects.TRACKED)
+    tools/make_xmorph.py          the one generator of every unit (builder(key); CARS: the installer's car loop);
+                                  tools/build_release.py RELEASE_MODELS
+    testrange/gen.py              GROUND_MISSION (the range's own tables follow vcobjects.TRACKED); a car:
+                                  testrange/catalog.py INSTALLER_VEHICLES (placed as its own SGO, as the sedan)
 
 Families (the chassis an EDF6 class drives; tools/prep_xmorph.py has one preparer per family):
     tracked      V603 (Vehicle603_Flak) through pylib/wt_tracked.py, like the War Thunder vehicles. It fires its
@@ -31,6 +34,9 @@ Families (the chassis an EDF6 class drives; tools/prep_xmorph.py has one prepare
     wheeled      V603 too, the same way (tools/prep_xmorph.py wheeled: its real wheels on the V603's wheel stations;
                  it turns as the V603, skid steering); the Grape's wheeled class (Vehicle401_Striker) has one weapon
                  holder and a skeleton of its own, which no generator here builds a model on
+    car          an unarmed vehicle on the sedan's V512 (Vehicle_Car: its `like` is 'sedan'; pylib/car_model.py, through
+                 tools/prep_xmorph.py car): its own wheels on the V512's wheel bones (steered by the front pair),
+                 the driver's seat alone, no gun; the civilian rows' cars come this way too
     mech         planned: the Proteus / Balam walkers
     emplacement  a fort's gun on pylib/emplacement_model.py's fortified base (the V603, tools/prep_xmorph.py emplacement)
     heli         the stock V506 heli in its own model (pylib/xm_heli.py, pylib/xm_air_model.py; tools/prep_xmorph.py heli)
@@ -47,7 +53,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-FAMILIES = ('tracked', 'wheeled', 'mech', 'emplacement', 'heli', 'jet', 'infantry', 'boss', 'civilian', 'structure')
+FAMILIES = ('tracked', 'wheeled', 'car', 'mech', 'emplacement', 'heli', 'jet', 'infantry', 'boss', 'civilian', 'structure')
 LANGS = ('SC', 'CN', 'JA', 'EN')   # tools/calls.py KINDS' languages (KR reads EN)
 # Where every request's text says its model is from (each language's), after the unit's own description.
 SOURCE = {'SC': '外观取自 EXOR Studios 的游戏《X-Morph: Defense》（人类一方的单位）。',
@@ -143,10 +149,12 @@ class Unit:
     # and lock-on, as the Patriot's) where its `like`'s is a gun's
     homing: bool = False
     traverse: float = 0.0    # its turret's stops, deg either side (make_tracked_combat TURRET_LIMITS); 0: free
+    cab: str = ''            # a car's driver's cockpit kit (pylib/cockpit_kits_ground.py KITS; cockpit_fits_plugin)
     arms: tuple[Arm, ...] = ()      # its other weapons (Arm)
     # (camera, eye: measured on the model at the game's size, metres; read through camera() / eye(), at SCALE)
     camera: dict = field(default_factory=dict)  # its vehicle camera over the `like`'s (make_tracked_combat WT_ONLY)
-    eye: tuple[float, ...] = ()  # the gunner's sight camera on the turret (cockpit_fits_plugin, remote_display), m
+    # the gunner's sight camera on the turret (cockpit_fits_plugin, remote_display), m; a car's: its driver's eye
+    eye: tuple[float, ...] = ()
     # The bone the eye rides: the turret (cannon_main), or the gun's pitch hinge (cannon_l) where the raised gun or its
     # mount would swing through the aim line of an eye on the turret (tests/gun_camera_sweep_guard.py, -5..60 deg).
     eye_bone: str = 'cannon_main'
@@ -441,8 +449,21 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                'third_person_height': 5.6},
        eye=(0.0, 4.95, 1.7), durability=3700.0, reload=12000, level=2.0,
        after='EDF6VC_CALL_XM_MEDIUM_MISSILE_LAUNCHER'),
-    # The cargo truck: no weapon in the game (no WeaponComp; its skeleton's turret bones have no mesh): not ported.
-    _u('ground/medium_truck_cargo', 'wheeled', title='Cargo Truck'),
+    # The cargo truck: no weapon in the game (no WeaponComp; its skeleton's turret bones have no mesh): an unarmed car
+    # on the sedan's V512 (family car), its driver alone. models/xm_medium_truck_cargo: 7.0 m long, 2.65 m wide, its
+    # cab z 0.8..1.8 under a roof at 3.1 m behind a 1.9 m bonnet; three axles (z 2.40, -1.07, -2.44; r 0.56): the front
+    # one steered, the rear one driven, the middle one drawn only. The cab's shell inside: floor 1.52, roof 2.55, z
+    # 0.46..1.54, its side windows open from y 2.0 (cockpits.clearance): a real cab kit (truck_cab) shows through them
+    # and shrinks away (cockpits.fitted), so the shell is the driver's view with the open rider's tablet.
+    _u('ground/medium_truck_cargo', 'car', 'sedan', 'ported', 'Cargo Truck',
+       texts={'SC': ('X-Morph 运输卡车', '请求一辆人类军队的运输卡车：三轴载货卡车，没有武器，只有驾驶座；前轮转向，车身大而结实。'),
+              'CN': ('X-Morph 運輸卡車', '請求一輛人類軍隊的運輸卡車：三軸載貨卡車，沒有武器，只有駕駛座；前輪轉向，車身大而結實。'),
+              'JA': ('X-Morph 輸送トラック', '人類軍の輸送トラックを要請する。3 軸の貨物トラックで、武装はなく運転席のみ。'
+                                       '前輪で操舵し、車体は大きく頑丈。'),
+              'EN': ('X-Morph Cargo Truck', "Requests the human army's cargo truck: a three-axle lorry, unarmed, its "
+                                            "driver's seat alone; it steers by its front wheels, big and sturdy.")},
+       eye=(-0.5, 2.1, 1.0), cab='open_rider', durability=1500.0, reload=2400, level=0.5,
+       after='EDF6VC_CALL_XM_SMALL_BUGGY'),
     # The Humvee: a machine gun on its roof's turret, anti-air rounds (main_weapon) and ground rounds (core_weapon);
     # the lightest armour. The 2S6's 30 mm belt as its round, both holders on the one gun in turn.
     _u('ground/small_humvee', 'wheeled', 'tunguska', 'ported', 'Humvee',
@@ -844,11 +865,12 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
 )}
 assert all(u.family in FAMILIES for u in UNITS.values())
 assert all(u.status in ('ported', 'planned') for u in UNITS.values())
-# The families with their EDF-side builder (tools/make_xmorph.py over make_tracked_combat: the V603's, a tracked or
+# The families with their EDF-side builder (tools/make_xmorph.py: over make_tracked_combat on the V603, a tracked or
 # wheeled unit through pylib/wt_tracked.py, an emplacement through pylib/emplacement_model.py's fortified base; the
-# aircraft through pylib/xm_air_model.py).
-PORTABLE = ('tracked', 'wheeled', 'emplacement', 'heli', 'jet')
+# aircraft through pylib/xm_air_model.py; a car through pylib/car_model.py on the V512).
+PORTABLE = ('tracked', 'wheeled', 'emplacement', 'heli', 'jet', 'car')
 V603 = ('tracked', 'wheeled', 'emplacement')
+V512 = ('car',)          # pylib/car_model.py builds them on the V512 (the sedan's chassis)
 # The hulls (pylib/wt_tracked.py builds their model folders on the V603: tools/prep_xmorph.py tracked / wheeled)
 HULLS = ('tracked', 'wheeled')
 WHEELED_FLOOR = 800.0    # a wheeled row's durability at least (its comment)
@@ -861,7 +883,8 @@ def check(u: Unit) -> None:
     why = [what for what, ok in (
         ('family', u.family in PORTABLE), ('like', bool(u.like) or u.family not in V603), ('title_en', bool(u.title_en)),
         ('texts', set(u.texts) == set(LANGS) and all(len(t) == 2 and all(t) for t in u.texts.values())),
-        ('gun', len(u.gun) == 4 and all(u.gun)), ('eye', len(u.eye) == 3), ('durability', u.durability > 0),
+        ('gun', len(u.gun) == 4 and all(u.gun) if u.family not in V512 else not (u.gun or u.guns or u.arms)),
+        ('cab', bool(u.cab) == (u.family in V512)), ('eye', len(u.eye) == 3), ('durability', u.durability > 0),
         ('reload', u.reload > 0), ('level', u.level > 0),
         ('a wheeled durability >= WHEELED_FLOOR', u.family != 'wheeled' or u.durability >= WHEELED_FLOOR),
         ('after', u.after.startswith('EDF6VC_CALL_'))) if not ok]
@@ -895,6 +918,11 @@ def v603() -> list[Unit]:
     """The ported units make_tracked_combat builds on the V603 (V603: tracked hulls and emplacements), in table order:
     what every V603 registry (vcobjects GROUND_VEHICLES / TRACKED, the requests, the cockpits, the test range) lists."""
     return [u for u in ported() if u.family in V603]
+
+
+def v512() -> list[Unit]:
+    """The ported units pylib/car_model.py builds on the V512 (V512: the cars), in table order."""
+    return [u for u in ported() if u.family in V512]
 
 
 def hulls() -> list[Unit]:

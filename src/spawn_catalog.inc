@@ -110,6 +110,7 @@
     {Category::ours,How::vehicle,"EDF6TR_SIDECAR_MISSION",L"边三轮摩托",L"app:/object/EDF6TR_SIDECAR_MISSION.sgo",0,0.5f,true,false,L"EDF6TR_SIDECAR_MISSION.SGO\0"},
     {Category::ours,How::vehicle,"EDF6TR_VEHICLE502_GROUNDROBO_MISSION",L"多足机 Depth Crawler 502",L"app:/object/EDF6TR_VEHICLE502_GROUNDROBO_MISSION.sgo",0,0.5f,true,false,L"EDF6TR_VEHICLE502_GROUNDROBO_MISSION.SGO\0"},
     {Category::ours,How::vehicle,"EDF6VC_SEDAN",L"民用轿车",L"app:/object/EDF6VC_SEDAN.sgo",0,0.5f,true,false,L"EDF6VC_SEDAN.SGO\0" L"EDF6VC_SEDAN.MRAB\0" L"EDF6VC_SEDAN.SHKT\0"},
+    {Category::ours,How::vehicle,"EDF6VC_XM_MEDIUM_TRUCK_CARGO",L"X-Morph 运输卡车",L"app:/object/EDF6VC_XM_MEDIUM_TRUCK_CARGO.sgo",0,0.5f,true,false,L"EDF6VC_XM_MEDIUM_TRUCK_CARGO.SGO\0" L"EDF6VC_XM_MEDIUM_TRUCK_CARGO.MRAB\0" L"EDF6VC_XM_MEDIUM_TRUCK_CARGO.SHKT\0"},
     {Category::enemy,How::enemy,"GIANTANT01",L"巨蚁",L"app:/object/GIANTANT01.sgo",0,0.5f,false,true,nullptr},
     {Category::enemy,How::enemy,"E650_GIANTANT01",L"巨蚁（EDF6）",L"app:/object/E650_GIANTANT01.sgo",0,0.5f,false,true,nullptr},
     {Category::enemy,How::enemy,"GIANTSPIDER01",L"巨蜘蛛",L"app:/object/GIANTSPIDER01.sgo",0,0.5f,false,true,nullptr},

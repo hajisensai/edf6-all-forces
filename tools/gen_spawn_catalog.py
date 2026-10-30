@@ -191,9 +191,20 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
     undeployed = {k for k in make_xmorph.KINDS if not make_xmorph.deployable(k)}
     undeployed_rows = {f'OBJECT/{gen.DERIVED_PREFIX.upper()}{k.upper()}_MISSION.SGO' for k in undeployed}
 
+    # An X-Morph car (make_xmorph.CARS: an installer row, as the sedan) is built in memory too (pylib/car_model.py:
+    # no cockpit needed), not read from a Mods it may not be installed in.
+    cars = {f'OBJECT/{vcobjects.GROUND_VEHICLES[k].sgo}.{ext}': k for k in make_xmorph.CARS if k not in undeployed
+            for ext in ('SGO', 'MRAB', 'SHKT')}
+
     def read(rel: str) -> bytes | None:
         if rel in undeployed_rows:
             return None
+        if rel in cars:
+            kind = cars[rel]
+            if kind not in authored:
+                import car_model
+                authored[kind] = car_model.build(game, kind)
+            return authored[kind].get(rel)
         if rel in tracked:
             kind = tracked[rel]
             if kind in undeployed:
