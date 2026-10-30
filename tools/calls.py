@@ -336,11 +336,19 @@ def _with_xmorph(hand: tuple[Call, ...]) -> tuple[Call, ...]:
     catalog's on every machine; whether a unit's model folder is here only decides whether its row is live
     (tools/call_weapons.py undeployed)."""
     out = list(hand)
-    units = xm_units.v603()
+    units = xm_units.requested()
     if len({u.after for u in units}) != len(units):
         raise ValueError('two X-Morph units name the same call to follow (pylib/xm_units.py Unit.after)')
-    for u in units:
-        at = [c.id for c in out].index(u.after) + 1
+    # Each once the call it follows is in (a unit may follow one listed after it in the table: the walkers the forts)
+    pending = list(units)
+    while pending:
+        ids = [c.id for c in out]
+        ready = [u for u in pending if u.after in ids]
+        if not ready:
+            raise ValueError(f'X-Morph units follow calls that are not there: {[u.after for u in pending]}')
+        u = ready[0]
+        pending.remove(u)
+        at = ids.index(u.after) + 1
         out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', 0, u.key, False, 0, u.reload, u.level, 'vehicle',
                             vehicle=f'EDF6VC_{u.key.upper()}', ground=u.key))
     return tuple(out)
@@ -382,6 +390,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'sorties (2026-10-25)': IDS[:84],
     'X-Morph battle tank (2026-10-27)': IDS[:85],
     'X-Morph tracked units and forts (2026-10-27)': IDS[:93],
+    'X-Morph walkers (2026-10-30)': IDS[:95],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -1125,7 +1134,7 @@ PLUGIN_NOTES: dict[str, str] = {
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
 GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES, 'quadvulcan': PLUGIN_NOTES, 'emp_mid': PLUGIN_NOTES, 'emp_short': PLUGIN_NOTES, 'emp_long': PLUGIN_NOTES, 'tunguska': PLUGIN_NOTES, 'pzh2000': PLUGIN_NOTES, 'sturmtiger': PLUGIN_NOTES, 'tos1': PLUGIN_NOTES, 'apocalypse': PLUGIN_NOTES, 'ciws_phalanx': PLUGIN_NOTES, 'flak88': PLUGIN_NOTES, 'gdf005': PLUGIN_NOTES, 'laser': PLUGIN_NOTES, 'railgun': PLUGIN_NOTES, 'patriot': PLUGIN_NOTES}
-GROUND_NOTES_BY_KIND.update({u.key: PLUGIN_NOTES for u in xm_units.v603()})   # pylib/xm_units.py
+GROUND_NOTES_BY_KIND.update({u.key: PLUGIN_NOTES for u in xm_units.requested()})   # pylib/xm_units.py
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',

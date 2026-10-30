@@ -104,6 +104,7 @@ void ExhaustiveRoundTrip() {
     int bad=0;
     for(int k=0;k<kSupportWeaponCount;++k)
         for(std::int32_t p:colours)for(std::int32_t s:colours) {
+            if(!SupportKindHasLooks(static_cast<SupportWeapon>(k)) && (p!=kStockColour || s!=kStockColour))continue;   // no colours to write
             SupportPreset a{};a.count=2;a.kind[0]=a.kind[1]=static_cast<SupportWeapon>(k);a.look[1].primary=p;a.look[1].secondary=s;
             wchar_t out[kValueMost],why[8];SupportPreset back;
             SerialisePreset(a,out,kValueMost);
@@ -174,7 +175,11 @@ void Navigation() {
     Tap(m,&Keys::right);
     Expect(m.unit[0].squad.kind[0]==SupportWeapon::flame,"right: the next kind");
     TapN(m,&Keys::left,2);
-    Expect(m.unit[0].squad.kind[0]==SupportWeapon::fencerShotgun,"left past the first kind wraps to the last");
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::xmInfantry,"left past the first kind wraps to the last");
+    Tap(m,&Keys::down);
+    Expect(m.fieldAt==0 && FieldCount(m.unit[0],0)==1,"the X-Morph infantry has the kind field alone: no colour, no backpack");
+    Tap(m,&Keys::left);
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::fencerShotgun,"left from the last kind: the Fencer shotgun");
     Tap(m,&Keys::down);
     Expect(m.fieldAt==1,"down: the primary colour");
     Tap(m,&Keys::right);
@@ -239,6 +244,33 @@ void Backpacks() {
     Expect(Tap(m,&Keys::confirm)==Act::save,"save");
     SaveSet s;
     Expect(CollectSave(m,&s) && SaysValue(s,L"SupportPreset_SQUAD",L"monster+pHandGrenade01"),"the pack written as the plugin reads it");
+}
+
+// The X-Morph infantry has the kind field alone: switching to it clears the colours and the pack, and the value written
+// never carries a colour or a backpack (the plugin's parser refuses both on it).
+void XmInfantryHasNoLooks() {
+    Ini ini;Menu m;
+    Tap(m,&Keys::toggle);Load(m,kDefaultUnits,kDefaultUnitCount,Read,&ini);
+    Tap(m,&Keys::confirm);Tap(m,&Keys::confirm);Tap(m,&Keys::confirm);   // into SQUAD, a stock rifle added, its fields
+    Tap(m,&Keys::down);Tap(m,&Keys::right);
+    Expect(m.unit[0].squad.look[0].primary==kDefaultPalette.rgb[0],"a colour put on the rifle");
+    Tap(m,&Keys::up);Tap(m,&Keys::up);   // the kind field, then (wrapped) the backpack field
+    Expect(m.fieldAt==kPackField,"up from the kind wraps to the backpack");
+    Tap(m,&Keys::right);Tap(m,&Keys::down);
+    Expect(m.unit[0].squad.look[0].pack==1 && m.fieldAt==0,"a backpack put on the rifle, back on the kind");
+    Tap(m,&Keys::left);
+    Expect(m.unit[0].squad.kind[0]==SupportWeapon::xmInfantry && !m.unit[0].squad.look[0].On(),
+           "to the X-Morph infantry: its colours and backpack cleared");
+    Expect(FieldCount(m.unit[0],0)==1 && !CarriesPack(SupportWeapon::xmInfantry),"one field, no backpack");
+    Tap(m,&Keys::cancel);Tap(m,&Keys::cancel);Tap(m,&Keys::up);
+    SaveSet s;
+    Expect(Tap(m,&Keys::confirm)==Act::save && CollectSave(m,&s) && SaysValue(s,L"SupportPreset_SQUAD",L"xminfantry"),
+           "written as the bare kind");
+    SupportPreset p;wchar_t why[160];
+    Expect(ParseSupportPreset(L"xminfantry*4",12,&p,why,160) && p.count==4 && p.kind[3]==SupportWeapon::xmInfantry && !p.look[0].On(),
+           "the preset parses");
+    Expect(!ParseSupportPreset(L"xminfantry@1E3A8A",12,&p,why,160) && !ParseSupportPreset(L"xminfantry+aHandGrenade01",12,&p,why,160),
+           "no colour, no backpack on it");
 }
 
 void SquadLimits() {
@@ -583,6 +615,7 @@ int main() {
     LoadsTheIni();
     Navigation();
     Backpacks();
+    XmInfantryHasNoLooks();
     SquadLimits();
     VehicleLimits();
     VehicleWeight();

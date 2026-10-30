@@ -5,6 +5,7 @@
 // off unless the ini says so (crew.h Config). Exit code 1 when one fails.
 // cmake --build build --target debug_spawn_test && build\debug_spawn_test.exe
 #include "../src/debug_spawn.h"
+#include "../src/support_call.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -85,7 +86,7 @@ void Catalog() {
                                                  "a crewed aircraft only as a support call (its real crew), the drone alone launched");
         if(e.how==How::soldier)Expect(e.category==Category::soldier,"soldiers");
         if(e.how==How::supportCall)Expect(e.arg>=0 && e.arg<kSupportCallCount,"a kSupportCalls index");
-        if(e.how==How::soldier)Expect(e.arg>=0 && e.arg<14,"a SupportWeapon (14 kinds, support_call.h)");
+        if(e.how==How::soldier)Expect(e.arg>=0 && e.arg<crew::kSupportWeaponCount,"a SupportWeapon (support_call.h)");
         for(int k=0;k<i;++k)Expect(std::strcmp(kEntries[k].id,e.id)!=0,"log ids are unique");
     }
 }

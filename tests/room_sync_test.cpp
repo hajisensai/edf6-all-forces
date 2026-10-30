@@ -221,17 +221,24 @@ VariantRef Vehicle(VehicleBody body,const wchar_t* text) {
 void NamesAndTokens() {
     // Every kind, both templates, every colour form.
     const std::int32_t colours[]={kStockColour,0x000000,0x1E3A8A,0xFFFFFF,0x00FF00};
-    int round=0;
+    int round=0,looklessRefused=0;
     for(int k=0;k<kSupportWeaponCount;++k)for(int leader=0;leader<2;++leader)for(auto p:colours)for(auto s:colours) {
         if(p==kStockColour && s==kStockColour)continue;
         const VariantRef r=Soldier(static_cast<SupportWeapon>(k),leader!=0,p,s);
         wchar_t file[96];VariantRef back;char t[24];VariantRef fromToken;
+        if(!SupportKindHasLooks(static_cast<SupportWeapon>(k))) {   // the X-Morph infantry: no template to recolour, no file, no token
+            looklessRefused+=!VariantFileOf(r,file,96) && !TokenOf(r,t,sizeof(t));
+            continue;
+        }
         const bool ok=VariantFileOf(r,file,96) && ParseVariantFile(file,&back) && back==r &&
                       TokenOf(r,t,sizeof(t)) && ParseToken(t,std::strlen(t),&fromToken) && fromToken==r;
         if(ok)++round;
         else std::printf("  soldier round trip failed: kind %d leader %d %06X %06X\n",k,leader,p,s);
     }
-    Expect(round==kSupportWeaponCount*2*24,"every soldier kind x leader x colour form round-trips name and token");
+    Expect(round==(kSupportWeaponCount-1)*2*24 && looklessRefused==2*24,
+           "every soldier kind with looks x leader x colour form round-trips name and token; the X-Morph infantry names no file");
+    Expect(!ParseVariantFile(L"EDF6VC_NPC_XMINFANTRY_1E3A8A_X.SGO",nullptr) && !ParseVariantFile(L"EDF6VC_NPC_XMINFANTRY_L_X_X_AHANDGRENADE01.SGO",nullptr) &&
+           !ParseToken("o1E3A8AX",8,nullptr),"a colour or backpack of the X-Morph infantry is refused by name and token");
     // The examples the docs give, exactly.
     Expect(Name(Soldier(SupportWeapon::rifle,true,0x1E3A8A,kStockColour))==L"EDF6VC_NPC_RIFLE_L_1E3A8A_X.SGO","doc example: rifle leader name");
     char t[24];
@@ -296,7 +303,7 @@ void NamesAndTokens() {
         SupportLook look;look.pack=p.code;if(leader)look.primary=0x1E3A8A;
         VariantRef r;r.sub=static_cast<std::uint8_t>(k);r.leader=leader!=0;r.bits=LookVariant(look);
         wchar_t file[96];VariantRef back;VariantRef fromToken;
-        const bool fit=PackFits(p.code,SupportSoldierClass(static_cast<SupportWeapon>(k)));
+        const bool fit=SupportKindHasLooks(static_cast<SupportWeapon>(k)) && PackFits(p.code,SupportSoldierClass(static_cast<SupportWeapon>(k)));
         fits+=fit;
         const bool named=VariantFileOf(r,file,96)>0;
         if(fit==(named && ParseVariantFile(file,&back) && back==r && TokenOf(r,t,sizeof(t)) && ParseToken(t,std::strlen(t),&fromToken) &&
@@ -304,7 +311,7 @@ void NamesAndTokens() {
         else std::printf("  pack round trip wrong: kind %d pack %d\n",k,p.code);
     }
     Expect(packs==kSupportWeaponCount*kPackWeaponCount*2 && fits==(5*45+5*29)*2,
-           "a pack its class carries round-trips name and token; one it cannot carry names no file");
+           "a pack its class carries round-trips name and token; one it cannot carry (or the X-Morph infantry) names no file");
     SupportLook grenade;grenade.pack=1;
     VariantRef g;g.sub=static_cast<std::uint8_t>(SupportWeapon::rifle);g.bits=LookVariant(grenade);
     TokenOf(g,t,sizeof(t));
@@ -324,7 +331,7 @@ void NamesAndTokens() {
 VariantSet BigSet(int soldiers) {
     VariantSet set;
     for(int i=0;i<soldiers;++i)
-        set.Add(Soldier(static_cast<SupportWeapon>(i%kSupportWeaponCount),(i/kSupportWeaponCount)%2!=0,0x010101*(i+1),i%3 ? 0xABCDEF : kStockColour));
+        set.Add(Soldier(static_cast<SupportWeapon>(i%(kSupportWeaponCount-1)),(i/(kSupportWeaponCount-1))%2!=0,0x010101*(i+1),i%3 ? 0xABCDEF : kStockColour));
     set.Add(Vehicle(VehicleBody::tank,L"HE,AP:25"));set.Add(Vehicle(VehicleBody::fighter,L"AAM_M:4,AAM_S:2"));
     return set;
 }

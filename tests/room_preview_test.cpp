@@ -31,7 +31,8 @@ void Models() {
             Expect(!std::wcscmp(MenuPathOf(Kind(i),leader,false),c==0 ? kMenuRangerStock : c==1 ? kMenuWingDiver : kMenuFencer),
                    "without the file: stock menu SGOs");
             if(c==0)Expect(!std::wcscmp(MenuPathOf(Kind(i),leader,true),
-                                         leader && i!=0 ? kMenuRangerLeader : kMenuRanger),"Rangers: the head-only leader file");
+                                         leader && Kind(i)!=SupportWeapon::rifle && Kind(i)!=SupportWeapon::xmInfantry ?
+                                             kMenuRangerLeader : kMenuRanger),"Rangers: the head-only leader file (not the rifle's, not the X-Morph infantry's)");
         }
         const MenuWeapons w=MenuWeaponsOf(Kind(i));
         Expect(w.count==(c==2 ? 2 : 1),"weapons: one, a Fencer's shield and weapon");
@@ -40,6 +41,17 @@ void Models() {
     Expect(!std::wcscmp(MenuWeaponsOf(SupportWeapon::rifle).name[0],L"aWeapon003"),"rifle row name");
     Expect(!std::wcscmp(MenuWeaponsOf(SupportWeapon::fencerPileBanker).name[1],L"hPileBanker01"),"pile banker row name");
     Expect(MenuWeaponsOf(SupportWeapon::count).count==0,"no weapons for an invalid kind");
+    // The X-Morph infantry previews as the stock rifle Ranger (both bodies: member and leader).
+    for(int l=0;l<2;++l) {
+        const bool leader=l==1;
+        Expect(MenuClassOf(SupportWeapon::xmInfantry)==kRangerClass,"X-Morph infantry: a Ranger's class");
+        Expect(!HeadOnlyLeader(SupportWeapon::xmInfantry,leader),"X-Morph infantry: no head-only leader");
+        Expect(MenuFileOf(SupportWeapon::xmInfantry,leader)==MenuFileOf(SupportWeapon::rifle,leader) &&
+               !std::wcscmp(MenuPathOf(SupportWeapon::xmInfantry,leader,true),MenuPathOf(SupportWeapon::rifle,leader,true)),
+               "X-Morph infantry: the rifle Ranger's menu file and path");
+    }
+    Expect(!std::wcscmp(MenuWeaponsOf(SupportWeapon::xmInfantry).name[0],MenuWeaponsOf(SupportWeapon::rifle).name[0]),
+           "X-Morph infantry: the rifle's weapon");
 }
 
 void Colours() {
@@ -49,6 +61,10 @@ void Colours() {
     Expect(SameRgba(ColourOf(kStockColour,stock),stock.v),"stock: the template's");
     Expect(SameRgba(StockOf(SupportWeapon::rocket,true).c[0],kRangerLeaderHead.c[0].v),"Ranger leaders: head colours");
     Expect(SameRgba(StockOf(SupportWeapon::rifle,true).c[0],kRangerLeaderBody.c[0].v),"Rifle leader: body colours");
+    for(int l=0;l<2;++l)
+        for(int ch=0;ch<2;++ch)
+            Expect(SameRgba(StockOf(SupportWeapon::xmInfantry,l==1).c[ch],StockOf(SupportWeapon::rifle,l==1).c[ch].v),
+                   "X-Morph infantry: the rifle Ranger's stock colours, member and leader");
     Expect(SameRgba(StockOf(SupportWeapon::wingLaser,true).c[0],StockOf(SupportWeapon::wingLaser,false).c[0].v),
            "Wing Diver leader: as the soldier (the face tint is no channel)");
     Expect(SameRgba(StockOf(SupportWeapon::count,false).c[0],kRangerStock.c[0].v),"invalid kind: no read past the table");

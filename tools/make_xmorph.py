@@ -20,10 +20,17 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 
+import ledger  # noqa: E402
 import make_tracked_combat as tracked  # noqa: E402
+import vcobjects as vc  # noqa: E402
 import xm_units  # noqa: E402
 
-KINDS = tuple(u.key for u in xm_units.v603())
+KINDS = tuple(u.key for u in xm_units.ported())
+WALKERS = tuple(u.key for u in xm_units.ported('mech'))
+INFANTRY = tuple(u.key for u in xm_units.ported('infantry'))
+OWN = WALKERS + INFANTRY   # built here (pylib/xm_walker.py, xm_infantry.py), not by make_tracked_combat
+# what the installer says it builds (make_tracked_combat.LABELS the V603 units')
+LABELS = {kind: f'{xm_units.label(xm_units.UNITS[kind])}（X-Morph: Defense 模型）' for kind in OWN}
 
 
 def deployable(kind: str) -> bool:
@@ -33,24 +40,53 @@ def deployable(kind: str) -> bool:
 
 def build(root: str, kind: str) -> dict[str, bytes]:
     if not deployable(kind):
-        print(f'未找到 {tracked.LABELS[kind]} 的模型文件夹 {xm_units.folder(kind)}（模型包）：不部署这个单位。', flush=True)
+        print(f'未找到 {xm_units.label(xm_units.UNITS[kind])} 的模型文件夹 {xm_units.folder(kind)}（模型包）：不部署这个单位。',
+              flush=True)
         return {}
+    if kind in WALKERS:
+        import xm_walker
+        return xm_walker.build(vc.Game(root), kind)
+    if kind in INFANTRY:
+        import xm_infantry
+        return xm_infantry.build(vc.Game(root), kind)
     return tracked.build(root, kind)
 
 
 def install(root: str, files: dict[str, bytes], kind: str) -> list[str]:
+    if kind in OWN:   # the unit's files, the ledger's (owner: its key); what an earlier install wrote and this not, released
+        led = ledger.Ledger(root)
+        before = set(led.owned_by(kind))
+        paths = [led.put(kind, rel, data) for rel, data in files.items()]
+        led.release(kind, sorted(before - {ledger.key(rel) for rel in files}))
+        return paths
     return tracked.install(root, files, kind)
 
 
 def remove(root: str, kind: str) -> tuple[list[str], list[str]]:
+    if kind in OWN:
+        led = ledger.Ledger(root)
+        return led.release(kind, sorted(set(led.owned_by(kind))), writer=True)
     return tracked.remove(root, kind)
 
 
 def vehicle_sgo(game, kind: str) -> bytes:  # noqa: ANN001 - vcobjects.Game
+    if kind in WALKERS:
+        import xm_walker
+        return xm_walker.vehicle_sgo(game, kind)
+    if kind in INFANTRY:
+        raise ValueError(f'{kind} 是支援士兵，不是载具')
     return tracked.vehicle_sgo(game, kind)
 
 
 def check(files: dict[str, bytes], kind: str, game=None) -> None:  # noqa: ANN001
+    if kind in WALKERS:
+        import xm_walker
+        xm_walker.check(files, kind)
+        return
+    if kind in INFANTRY:
+        import xm_infantry
+        xm_infantry.check(files, kind)
+        return
     tracked.check(files, kind, game)
 
 
@@ -94,7 +130,40 @@ def main(argv: list[str]) -> int:
     if not deployable(args.kind) and '--remove' not in rest:
         build('', args.kind)
         return 1
+    if args.kind in OWN:
+        return _own_main(rest, args.kind)
     return tracked.main(rest, args.kind)
+
+
+def _own_main(argv: list[str], kind: str) -> int:
+    """tools/make_tracked_combat.py main's options for a walker or the infantry: --out DIR, --check, --remove, else
+    install."""
+    import os
+    out = argv[argv.index('--out') + 1] if '--out' in argv else None
+    args = [a for i, a in enumerate(argv) if not a.startswith('--') and (i == 0 or argv[i - 1] != '--out')]
+    root = args[0] if args else vc.DEFAULT_GAME
+    if '--remove' in argv:
+        deleted, kept = remove(root, kind)
+        for path in deleted:
+            print('删除', path)
+        for path in kept:
+            print('保留（已被别人改过）', path)
+        return 0
+    files = build(root, kind)
+    if '--check' in argv:
+        print(f'{kind}: {len(files)} 个文件检查通过')
+        return 0
+    if out is None:
+        for path in install(root, files, kind):
+            print('写入', path)
+        return 0
+    for rel, data in files.items():
+        path = os.path.join(out, *rel.split('/'))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as h:
+            h.write(data)
+        print('写入', path)
+    return 0
 
 
 if __name__ == '__main__':

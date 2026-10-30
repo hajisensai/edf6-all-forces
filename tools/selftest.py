@@ -979,8 +979,15 @@ def _synthetic_call_sgo(c: calls.Call) -> bytes:
     k = c.brings
     if k == 'vehicle':
         entry, fuel = ['app:/weapon/v_506heli_gatling01_l.sgo', [1.0, 0.0]], ['app:/weapon/v_fueltank.sgo', [1.0]]
-        if c.ground:
-            n = 2 if len(vc.GROUND_VEHICLES[c.ground].slots) > 2 else len(cw.vehicle_weapons(c))
+        ground = vc.GROUND_VEHICLES[c.ground] if c.ground else None
+        if ground and ground.weapons_at is not None:
+            # a walker's (the host's request): its weapon list at weapons_at, an entry a host holder (some empty), and
+            # its recoil after it
+            n = len(cw.vehicle_weapons(c))
+            held = [['app:/weapon/stock_0.sgo', [0.0, 0.0]]] + [[0.0]] * (n - 1)
+            setup = [[1.0, 1.0], *([0.0, 1.0] for _ in range(ground.weapons_at - 1)), held, [0.02, 0.1]]
+        elif ground:
+            n = 2 if len(ground.slots) > 2 else len(cw.vehicle_weapons(c))
             setup = [[1.0, 1.0], [0.0, 1.0], [[f'app:/weapon/stock_{i}.sgo', [1.0, [0.0, 0.0]]] for i in range(n)]]
         else:
             setup = [[1.0, 1.0], [0.0, 1.0, 2.0], [100.0], [entry, fuel]]
@@ -4612,7 +4619,8 @@ def xmorph_undeployed_without_its_folder() -> None:
     """An X-Morph unit (pylib/xm_units.py) whose model folder is not here is registered all the same (its request row,
     its catalog row) and deployed nowhere, with no stand-in (CLAUDE.md): tools/make_xmorph.py builds no file (the
     installer's install then releases what an earlier one wrote), its request row is a placeholder
-    (call_weapons.placeholder: no SGO, nothing needed), the test range leaves it out of a plan. With the folder
+    (call_weapons.placeholder: no SGO, nothing needed), the test range leaves it out of a plan (the infantry: no request
+    row, no range mission; the plugin offers no kind without its soldier SGO, src/support_soldier.cpp). With the folder
     (model.json and model.npz) it is deployed."""
     from unittest.mock import patch
     import io
@@ -4623,23 +4631,31 @@ def xmorph_undeployed_without_its_folder() -> None:
     import gen
     assert make_xmorph.KINDS, 'no ported X-Morph unit'
     with tempfile.TemporaryDirectory() as root, patch.object(obj_model, 'model_roots', lambda: [root]):
+        requested = {u.key for u in xm_units.requested()}
+        assert set(make_xmorph.KINDS) - requested == set(make_xmorph.INFANTRY), 'an X-Morph unit neither requested nor a soldier'
         for kind in make_xmorph.KINDS:
-            call = next(c for c in calls.CALLS if c.ground == kind)
-            mission = f'{gen.DERIVED_PREFIX}{kind}_mission'
-            assert not make_xmorph.deployable(kind) and cw.undeployed(call) and cw.placeholder(call), kind
-            assert cw.sgo_file(call) in cw.parked_sgos() and cw.sgo_file(call) in cw.our_sgos(), kind
+            assert not make_xmorph.deployable(kind), kind
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 assert make_xmorph.builder(kind).build(root) == {}, kind
             assert out.getvalue().count('\n') == 1 and xm_units.folder(kind) in out.getvalue(), out.getvalue()
-            kept, said = gen.without_missing(root, gen.Plan(vehicles={mission: 1, 'edf6tr_vulcan_mission': 1}))
-            assert mission not in kept.vehicles and 'edf6tr_vulcan_mission' in kept.vehicles and len(said) == 1, said
+            call = next((c for c in calls.CALLS if c.ground == kind), None)
+            mission = f'{gen.DERIVED_PREFIX}{kind}_mission'
+            assert (call is not None) == (kind in requested) == (mission in gen.GROUND_MISSION), kind
+            if call is not None:
+                assert cw.undeployed(call) and cw.placeholder(call), kind
+                assert cw.sgo_file(call) in cw.parked_sgos() and cw.sgo_file(call) in cw.our_sgos(), kind
+                kept, said = gen.without_missing(root, gen.Plan(vehicles={mission: 1, 'edf6tr_vulcan_mission': 1}))
+                assert mission not in kept.vehicles and 'edf6tr_vulcan_mission' in kept.vehicles and len(said) == 1, said
             folder = os.path.join(root, xm_units.folder(kind))
             os.makedirs(folder)
             for name in ('model.json', 'model.npz'):
                 with open(os.path.join(folder, name), 'wb'):
                     pass
-            assert make_xmorph.deployable(kind) and not cw.placeholder(call), kind
+            assert make_xmorph.deployable(kind), kind
+            if call is None:
+                continue
+            assert not cw.placeholder(call), kind
             assert cw.sgo_file(call) not in cw.parked_sgos(), kind
             assert gen.without_missing(root, gen.Plan(vehicles={mission: 1}))[0].vehicles == {mission: 1}, kind
 

@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import cockpit_kits_plugin as plugin_kits
 from cockpit_fits_air import FITS as _AIR
+from cockpit_fits_mech import FITS as _MECH
 from cockpits import Fit
 import xm_units
+import xm_walker
 
 Vec3 = tuple[float, float, float]
 
@@ -181,4 +183,11 @@ FITS: dict[str, tuple[Fit, ...]] = {
 # War Thunder tanks'.
 FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, 'cannon_main', u.eye, 'remote_display'),)
              for u in xm_units.v603()})
+# The X-Morph walkers (pylib/xm_walker.py): the host's skeleton and seats, so the host model's cockpits (the Nix's
+# enclosed station, the Proteus's gunners' remote displays) on the same bones. The heavy mech's turret is not the
+# Proteus's neck pod (its enclosed kit crosses the X-Morph turret): its pilot's sight over the turret's front slope
+# (the turret's front at x 0 reaches z 2.8 at y 14, behind z 0 above y 15; its roof y 17.4).
+FITS.update({f'EDF6VC_{key.upper()}': _MECH[host] for key, host in xm_walker.COCKPITS.items()})
+FITS['EDF6VC_XM_LARGE_MECH'] = ((Fit(0, 'neck', (0.0, 15.6, 1.0), 'remote_display'),)
+                                + tuple(f for f in _MECH['V614_PROTEUS_MK2'] if f.seat))
 DIGESTS: dict[str, str] = {}

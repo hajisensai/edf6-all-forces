@@ -189,9 +189,11 @@ void Compose() {
     SupportLoadout odd{};odd.count=6;
     Check(ComposeSquads(odd)==2 && ComposeApply(odd,12,ComposeSquadCode(1)) && odd.count==4,"a partial second squad taken out whole");
     int ranger[16],wing[16],fencer[16];
-    Check(ComposeKinds(0,ranger,16)==5 && ComposeKinds(1,wing,16)==5 && ComposeKinds(2,fencer,16)==4 &&
+    Check(ComposeKinds(0,ranger,16)==6 && ComposeKinds(1,wing,16)==5 && ComposeKinds(2,fencer,16)==4 &&
+          ranger[5]==static_cast<int>(SupportWeapon::xmInfantry) &&
           wing[0]==static_cast<int>(SupportWeapon::wingLance) && fencer[3]==static_cast<int>(SupportWeapon::fencerShotgun),
-          "the rows: five Rangers, five Wing Divers, four Fencers");
+          "the rows: five Rangers and the X-Morph infantry, five Wing Divers, four Fencers");
+    Check(kComposeKindsMost==6,"the panel's width fits the longest row");
     for(float sc:{0.75f,1.0f,1.5f,2.0f})for(int seats:{4,12}) {
         const float ceiling=100.0f*sc,bottom=900.0f*sc;
         for(float top:{120.0f*sc,880.0f*sc}) {

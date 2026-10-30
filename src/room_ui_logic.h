@@ -211,7 +211,8 @@ inline constexpr const wchar_t* kKindIcons[kSupportWeaponCount]={
     L"app:/weapon/icon/lazerlance01.dds",L"app:/weapon/icon/LAZR.dds",L"app:/weapon/icon/monster01.dds",
     L"app:/weapon/icon/izuna.dds",L"app:/weapon/icon/thunderbow.dds",
     L"app:/weapon/icon/canon.dds",L"app:/weapon/icon/canon.dds",L"app:/weapon/icon/pilebunker.dds",
-    L"app:/weapon/icon/canon.dds"};
+    L"app:/weapon/icon/canon.dds",
+    L"app:/weapon/icon/AF14.dds"};   // the X-Morph infantry: the rifle's
 // kLoadStores codes 1..10.
 inline constexpr const wchar_t* kStoreIcons[kLoadStoreCount]={
     L"app:/weapon/icon/s_missile_617_falcon01.dds",L"app:/weapon/icon/s_missile_emeraude02.dds",
@@ -277,7 +278,7 @@ inline const wchar_t* UnitLabel(const wchar_t* key,const wchar_t* fallback) noex
 inline constexpr Tx kKindTexts[kSupportWeaponCount]={
     Tx::roomKindRifle,Tx::roomKindFlame,Tx::roomKindRocket,Tx::roomKindShotgun,Tx::roomKindSniper,
     Tx::roomKindLance,Tx::roomKindLaser,Tx::roomKindMonster,Tx::roomKindIzuna,Tx::roomKindThunderBow,
-    Tx::roomKindCannon,Tx::roomKindMidCannon,Tx::roomKindPileBanker,Tx::roomKindShotgunFencer};
+    Tx::roomKindCannon,Tx::roomKindMidCannon,Tx::roomKindPileBanker,Tx::roomKindShotgunFencer,Tx::roomKindXmInfantry};
 inline constexpr Tx kStoreTexts[kLoadStoreCount]={
     Tx::roomStoreAamS,Tx::roomStoreAamM,Tx::roomStoreAamL,Tx::roomStoreAgm,Tx::roomStoreAgmL,Tx::roomStoreMk82,
     Tx::roomStoreRkt,Tx::roomStoreAp,Tx::roomStoreHe,Tx::roomStoreGlm};
@@ -511,7 +512,8 @@ inline bool FocusPreview(const roommenu::Menu& m,const roomdialog::Nav& nav,room
             case Page::kind:
                 if(focused.arg<0 || focused.arg>=kSupportWeaponCount)return PreviewFor(m,out,kinds);
                 p.kind=static_cast<SupportWeapon>(focused.arg);
-                if(!PackFits(p.look.pack,SupportSoldierClass(p.kind)))p.look.pack=0;
+                if(!SupportKindHasLooks(p.kind))p.look=SupportLook{};
+                else if(!PackFits(p.look.pack,SupportSoldierClass(p.kind)))p.look.pack=0;
                 break;
             case Page::primary: p.look.primary=focused.arg; break;
             case Page::secondary: p.look.secondary=focused.arg; break;

@@ -24,6 +24,7 @@ sys.path[:0] = [os.path.join(ROOT, 'pylib'), os.path.join(ROOT, 'tools')]
 import buildcache  # noqa: E402
 import cockpit_fits  # noqa: E402
 import vcobjects as vc  # noqa: E402
+import xm_walker  # noqa: E402
 
 checks = failed = 0
 
@@ -65,6 +66,8 @@ def build_grafts(tool: str, seen: tuple[str, ...] = ()) -> bool:
 def model_stem(kind: str, vehicle: vc.GroundVehicle) -> str:
     """The stem of the model `kind`'s generator makes: the tracked builder's model module names it (OUT_ARC); the
     others make OBJECT/<their SGO's stem>.MRAB."""
+    if kind in xm_walker.WALKERS:   # make_xmorph's walkers: pylib/xm_walker.py, OBJECT/<their SGO's stem>.MRAB
+        return vehicle.sgo.upper()
     if 'make_tracked_combat' in {a.name for n in tree(vehicle.tool).body if isinstance(n, ast.Import) for a in n.names}:
         import make_tracked_combat
         return make_tracked_combat.model_module(kind).OUT_ARC.rsplit('.', 1)[0].upper()
@@ -77,7 +80,8 @@ for kind, vehicle in vc.GROUND_VEHICLES.items():
     check(bool(fits), f'{kind}: no cockpit fitted to {stem} (pylib/cockpit_fits_plugin.py FITS): its seats have no first person')
     check(0 in {f.seat for f in fits}, f'{kind}: the driver\'s seat 0 has no eye')
     check(build_grafts(vehicle.tool), f'{kind}: tools/{vehicle.tool}.py grafts no cockpit (cockpits.graft_files)')
-    group = kind if kind in vc.TRACKED else vehicle.tool.removeprefix('make_')   # a V603 kind is its own group
+    # a V603 kind and an X-Morph walker are each their own group
+    group = kind if kind in vc.TRACKED or kind in xm_walker.WALKERS else vehicle.tool.removeprefix('make_')
     check(group in buildcache.GROUPS and group in buildcache.COCKPIT_GROUPS,
           f'{kind}: buildcache COCKPIT_GROUPS lacks {group!r} (a fit change would not rebuild its installed model)')
 

@@ -1,8 +1,10 @@
 #include "support_soldier.h"
 #include "support_call.h"
 #include "memory.h"
+#include "mod_file.h"
 #include "online_authority.h"
 #include <cmath>
+#include <iterator>
 
 namespace crew {
 namespace support_native {
@@ -29,10 +31,27 @@ constexpr const wchar_t* kBodies[kSupportWeaponCount][2]={
     {L"app:/object/N607_AIHEAVYARMOR_SMC.sgo",L"app:/object/N607_AIHEAVYARMOR_SMC_LEADER.sgo"},
     {L"app:/object/N607_AIHEAVYARMOR_SP.sgo",L"app:/object/N607_AIHEAVYARMOR_SP_LEADER.sgo"},
     {L"app:/object/N607_AIHEAVYARMOR_SSG.sgo",L"app:/object/N607_AIHEAVYARMOR_SSG_LEADER.sgo"},
+    // The X-Morph infantry: our own bodies, written by the installer (an AssultSoldier on the plugin's model).
+    {L"app:/object/EDF6VC_XM_SMALL_INFANTRY.sgo",L"app:/object/EDF6VC_XM_SMALL_INFANTRY_LEADER.sgo"},
 };
 const wchar_t* Body(std::uint32_t resource) noexcept {
     return IsSupportSoldierResource(resource) ?
         kBodies[static_cast<int>(SupportSoldierWeapon(resource))][IsSupportLeaderResource(resource) ? 1 : 0] : nullptr;
+}
+// The file name of a body that is one of ours (app:/object/EDF6VC_*), nullptr for a stock template in Root.cpk.
+const wchar_t* OurFile(const wchar_t* body) noexcept {
+    constexpr wchar_t kDir[]=L"app:/object/",kOurs[]=L"EDF6VC_";
+    if(!body || _wcsnicmp(body,kDir,std::size(kDir)-1))return nullptr;
+    const wchar_t* file=body+std::size(kDir)-1;
+    return _wcsnicmp(file,kOurs,std::size(kOurs)-1) ? nullptr : file;
+}
+// Whether the installer wrote one of our bodies (Mods/OBJECT); tests replace it. A missing one is a broken install: the
+// soldier is not preloaded and not spawned, no stand-in.
+bool InstalledHere(const wchar_t* file) noexcept { return ModFileIn(L"OBJECT",file); }
+bool (*installed)(const wchar_t* file) noexcept=&InstalledHere;
+bool BodyInstalled(const wchar_t* body) noexcept {
+    const wchar_t* file=OurFile(body);
+    return !file || installed(file);
 }
 struct alignas(16) InitParam { const void* vtable; unsigned char rest[0x28]; };
 static_assert(sizeof(InitParam)==0x30);
@@ -125,6 +144,10 @@ bool Spawn(const float* matrix,std::uint32_t resource,ObjRef* out,const unsigned
     if(!Gate(netId!=nullptr,local))return false;
     const wchar_t* const body=Body(resource) && look ? look : Body(resource);
     if(!body){failure=SupportSpawnFailure::transform;return false;}
+    if(!BodyInstalled(body)) {
+        Log("SUPPORT soldier %ls is not installed in Mods/OBJECT (the X-Morph model pack is missing); not spawned",OurFile(body));
+        failure=SupportSpawnFailure::mission;return false;
+    }
     if(netId && (!InSession() || !Readable(netId,32) || At<unsigned>(netId,0xC)!=5 || !registerObject || !At<void*>(image,kNetworkManager))) {
         failure=SupportSpawnFailure::onlineReplication;return false;
     }
@@ -219,7 +242,7 @@ void PreloadSupportSoldiers() noexcept {
         void* mgr=At<void*>(image,kPreloadManager);
         missionManager=At<void*>(image,kObjectManager);
         if(!mgr || !missionManager)return;
-        for(const auto& pair:kBodies)for(const wchar_t* path:pair)preload(mgr,path,2,-1);
+        for(const auto& pair:kBodies)for(const wchar_t* path:pair)if(BodyInstalled(path))preload(mgr,path,2,-1);
         preloaded=true;
     } __except(SpawnFault("preload",GetExceptionInformation(),nullptr,nullptr,nullptr)) {
         preloaded=false;RecordFault(SupportSpawnFailure::mission);

@@ -514,6 +514,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     import make_ultimate
     import make_barrage
     import make_tracked_combat
+    import make_xmorph
     import make_chute
     import make_jets
     import edf41_objects
@@ -565,6 +566,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
     # make_<kind> tool; an X-Morph unit's, make_xmorph's builder: buildcache.tool).
     tracked = {kind: build_asset(cache, buildcache.tool(kind), label)
                for kind, label in make_tracked_combat.LABELS.items()}
+    # The X-Morph walkers and infantry (make_xmorph's own: pylib/xm_walker.py, xm_infantry.py), each its builder.
+    xmorph = {kind: build_asset(cache, buildcache.tool(kind), label) for kind, label in make_xmorph.LABELS.items()}
     stock = None
     if stock_stores:
         print('给原版载具的请求加上应有的挂载（坦克、导弹车、防空车、摩托、直升机；ini StockVehicleStores=1；读取 Root.cpk，不修改它）……')
@@ -606,7 +609,8 @@ def install(game: str, campaign_requested: bool = False) -> None:
             (make_ultimate.install(game, ult) if ult is not None else []) + \
             (make_barrage.install(game, barrage) if barrage is not None else []) + \
             [path for kind, files in tracked.items() if files is not None
-             for path in make_tracked_combat.install(game, files, kind)] + \
+             for path in make_tracked_combat.install(game, files, kind)] +             [path for kind, files in xmorph.items() if files is not None
+             for path in buildcache.tool(kind).install(game, files)] + \
             (make_sidecar.install(game, sidecar) if sidecar is not None else []) + \
             (make_sedan.install(game, sedan) if sedan is not None else []) + \
             (make_sazabi.install(game, sazabi) if sazabi is not None else []) + \
@@ -705,7 +709,7 @@ def install(game: str, campaign_requested: bool = False) -> None:
     else:
         make_bigmap.set_big_world(game, make_bigmap.world_half(1))
     for group, files in (('jets', jets), ('sub', sub), ('katyusha', katyusha), ('artillery', artillery),
-                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('barrage', barrage), *tracked.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
+                         ('chute', chute), ('drill', drill), ('emc', emc), ('ultimate', ult), ('barrage', barrage), *tracked.items(), *xmorph.items(), ('sidecar', sidecar), ('sedan', sedan), ('sazabi', sazabi), ('dreadnought', dreadnought), ('proteus', proteus), ('optics', optics)):
         if files is not None:
             cache.record(group, files)
     if bigmap is not None:
@@ -781,6 +785,7 @@ def uninstall(game: str) -> None:
     import make_ultimate
     import make_barrage
     import make_tracked_combat
+    import make_xmorph
     import make_chute
     import make_jets
     import edf41_objects
@@ -829,7 +834,7 @@ def uninstall(game: str) -> None:
         remove_autoturret(game)
         import menu_preview
         import support_loadout
-        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
+        for remove in (support_loadout.remove, menu_preview.remove, make_stock_stores.remove, make_proteus.remove, make_sazabi.remove, make_dreadnought.remove, make_sedan.remove, make_sidecar.remove, *(functools.partial(make_tracked_combat.remove, kind=kind) for kind in make_tracked_combat.KINDS), *(buildcache.tool(kind).remove for kind in make_xmorph.OWN), make_emc.remove, make_ultimate.remove, make_barrage.remove, make_drill.remove, make_chute.remove, make_artillery.remove, make_katyusha.remove, edf41_objects.remove, edf41_outfits.remove, edf41_maps.remove, edf41_sounds.remove, edf41_menu_bg.remove, edf5_dlc.remove,
                        make_sub.remove, make_jets.remove):
             deleted, kept = remove(game)
             for path in deleted:
