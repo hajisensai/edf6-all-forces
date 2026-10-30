@@ -52,6 +52,11 @@ BAKE_RES = 0.125           # metres a texel of the baked ground
 BAKE_MAX = 2048            # texels a side at most
 PROP_TEX_MAX = 1024        # a prop texture's longest side after conversion
 WATER_ALPHA = 0.55
+WATER_CELL = 2.0           # metres: the water plane redrawn as runs of cells this size
+# A placement's tilt under SNAP_TILT degrees is dropped and its scales rounded to SNAP_SCALE steps (1 within one
+# step): X-Morph sets nearly every prop a hair off level and off scale, which would make each one its own model.
+SNAP_TILT = 2.5
+SNAP_SCALE = 0.03
 
 
 @dataclass(frozen=True)
@@ -453,8 +458,9 @@ class Reader:
         parts = []
         for s in subs(self.packs, chunk_path):
             if s.material == 'base/water':
-                parts.append(self._part(self.water_tex(), s.pos, np.tile([0.0, 0.0, 1.0], (len(s.pos), 1)),
-                                        np.zeros((len(s.pos), 2)), s.tris))
+                pos, tris = water_grid(s.pos, s.tris)
+                parts.append(self._part(self.water_tex(), pos, np.tile([0.0, 0.0, 1.0], (len(pos), 1)),
+                                        np.zeros((len(pos), 2)), tris))
                 continue
             if s.material.startswith('base/water'):
                 self.scene.skipped['water foam'] += 1
@@ -584,6 +590,9 @@ class Reader:
             yaw = math.atan2(r[1, 0], r[0, 0])
             cz, sz = math.cos(-yaw), math.sin(-yaw)
             rest = np.array([[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]]) @ r
+            if np.arccos(np.clip((np.trace(rest) - 1) / 2, -1.0, 1.0)) < math.radians(SNAP_TILT):
+                rest = np.eye(3)
+            s = np.where(np.abs(s - 1) < SNAP_SCALE, 1.0, np.round(s / SNAP_SCALE) * SNAP_SCALE)
             m = rest @ np.diag(s)
             model = self.prop_model(name, bp, m)
             if model is None:
@@ -611,6 +620,30 @@ class Reader:
         pts = np.vstack([p.pos for m in self.scene.models.values() if m.ground for p in m.parts])
         self.scene.bounds = (pts.min(0), pts.max(0))
         return self.scene
+
+
+def water_grid(pos: np.ndarray, tris: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """The water plane (X-Morph world, z up) as a few quads: the WATER_CELL cells its vertices and triangle centres
+    fall in, merged into runs along x, at its mean height. X-Morph's plane is a dense mesh (about 100k triangles a
+    chunk) for its wave shader; a flat translucent plane needs none of that."""
+    pts = np.vstack((pos[:, :2], pos[tris].mean(1)[:, :2]))
+    lo = np.floor(pts.min(0) / WATER_CELL) * WATER_CELL
+    ij = np.floor((pts - lo) / WATER_CELL).astype(np.int64)
+    w, h = ij.max(0) + 1
+    grid = np.zeros((h, w), bool)
+    grid[ij[:, 1], ij[:, 0]] = True
+    z = float(pos[:, 2].mean())
+    verts, quads = [], []
+    for j in range(h):
+        row = np.concatenate(([False], grid[j], [False]))
+        d = np.diff(row.astype(np.int8))
+        for a, b in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)):
+            x0, x1 = lo[0] + a * WATER_CELL, lo[0] + b * WATER_CELL
+            y0, y1 = lo[1] + j * WATER_CELL, lo[1] + (j + 1) * WATER_CELL
+            k = len(verts)
+            verts += [(x0, y0, z), (x1, y0, z), (x1, y1, z), (x0, y1, z)]
+            quads += [(k, k + 1, k + 2), (k, k + 2, k + 3)]
+    return np.array(verts, float).reshape(-1, 3), np.array(quads, np.int64).reshape(-1, 3)
 
 
 def _sample(tex: np.ndarray, uv: np.ndarray) -> np.ndarray:
