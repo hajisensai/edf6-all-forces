@@ -25,10 +25,16 @@ const StoreSpec airSpec{L"AA", "AA", StoreRole::air,0,0},groundSpec{L"AG", "AG",
                 coaxSpec{L"MG", "MG", StoreRole::coax,0,0},
                 npcPairedLeft{L"PAIR_L", "pair", StoreRole::gun,0,0,1,0},npcPairedRight{L"PAIR_R", "pair", StoreRole::gun,0,0,1,1},
                 npcNativeHE{L"NATIVE_HE", "HE", StoreRole::gun,0,0,0,0,true},npcNativeAP{L"NATIVE_AP", "AP", StoreRole::gun,0,0,0,0,true},
-                bmptMissile{L"BMPT_ATGM", "Ataka", StoreRole::ground,0,0,0,0,false,StoreShell::native,true},
+                bmptMissile{L"BMPT_ATGM", "Ataka", StoreRole::ground,0,0,0,0,false,StoreShell::native,kSecondTriggerKey},
                 bmptApLeft{L"BMPT_AP", "APDS", StoreRole::gun,0,0,3,0},bmptApRight{L"BMPT_AP_R", "APDS", StoreRole::gun,0,0,3,1},
-                bmptThermobaric{L"BMPT_ATGMF", "Ataka F", StoreRole::ground,0,0,0,0,false,StoreShell::native,true};
+                bmptThermobaric{L"BMPT_ATGMF", "Ataka F", StoreRole::ground,0,0,0,0,false,StoreShell::native,kSecondTriggerKey},
+                // an X-Morph heavy tank's arms (pylib/xm_units.py): its machine gun on the second trigger, its anti-air
+                // missiles on fire key 3 and an anti-air gun on key 4, both auto turrets
+                xmMg{L"XM_MG", "MG", StoreRole::gun,0,0,0,0,false,StoreShell::native,kSecondTriggerKey},
+                xmAam{L"XM_AAM", "AAM", StoreRole::air,0,0,0,0,false,StoreShell::native,3,true},
+                xmAa{L"XM_AA", "AA", StoreRole::gun,0,0,0,0,false,StoreShell::native,4,true};
 const StoreSpec* StoreOf(const unsigned char* w) noexcept {
+    if(w[0x101]>=20 && w[0x101]<=22)return w[0x101]==20 ? &xmMg : w[0x101]==21 ? &xmAam : &xmAa;
     return w[0x101]==10 ? &bmptMissile : w[0x101]==11 ? &bmptApLeft : w[0x101]==12 ? &bmptApRight : w[0x101]==13 ? &bmptThermobaric : w[0x101]==8 ? &npcNativeHE : w[0x101]==9 ? &npcNativeAP : w[0x101]==6 ? &npcPairedLeft : w[0x101]==7 ? &npcPairedRight : w[0x101]==1 ? &airSpec : w[0x101]==2 ? &groundSpec : w[0x101]==3 ? &gunSpec : w[0x101]==5 ? &coaxSpec : nullptr;
 }
 unsigned TwinPairOf(const unsigned char* w) noexcept { return w[0x103]; }   // stores.cpp's, by kTwinBarrels
@@ -42,11 +48,24 @@ void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
 bool ReadRound(const unsigned char* w,RoundModel* m) noexcept {
     // 3: a catalogued gun round of the grenade class (the flak's HE proximity), 4: a stock grenade round
-    *m={};m->kind=w[0x101]==1 || w[0x101]==2 || w[0x101]==10 || w[0x101]==13 ? RoundKind::homing : RoundKind::arc;m->lobbed=w[0x101]==3 || w[0x101]==4;m->speed=2;m->alive=300;return true;
+    *m={};m->kind=w[0x101]==1 || w[0x101]==2 || w[0x101]==10 || w[0x101]==13 || w[0x101]==21 ? RoundKind::homing : RoundKind::arc;m->lobbed=w[0x101]==3 || w[0x101]==4;m->speed=2;m->alive=300;return true;
 }
 namespace audio { void LockTone(int,float) noexcept {} }
 }
 namespace crew { bool friendInLine=false; bool FriendInLine(const float*,const float*,const void*) noexcept { return friendInLine; } }
+// The game's lock (lockon.cpp), the target's height over the ground (npcai.cpp) and the enemy list (heli.cpp), as the
+// auto turrets read them: one enemy at a time.
+namespace crew {
+const void* lockObject=nullptr;
+const void* WeaponLockObject(const unsigned char*) noexcept { return lockObject; }
+bool airTarget=false;
+bool GunnerAirTarget(const void*) noexcept { return airTarget; }
+const void* enemyObject=nullptr;
+bool VisitEnemies(const unsigned char*,EnemyVisitor visit,void* ctx) noexcept {
+    if(enemyObject){const float* p=reinterpret_cast<const float*>(static_cast<const unsigned char*>(enemyObject)+kPosition);visit(ctx,enemyObject,p);}
+    return true;
+}
+}
 namespace edf { bool MeanMuzzle(const unsigned char* w,std::uint64_t,float* p,float* d) noexcept { p[0]=p[1]=p[2]=0;d[0]=d[1]=0;d[2]=1;return w[0x102]!=1; } }
 // The coax and the main gun's firing motion (2026-10-12): stand-ins for the 505's / 601's stock slot 48 and its
 // VehicleBase part, reached through 12-byte jumps from their EDF.dll addresses in the stand-in image.
@@ -648,6 +667,117 @@ int main() {
         Put<void*>(v,kHolders,oldHolders);Put<std::uint64_t>(v,kHolderCount,3);
         Put<void*>(s,kSeatWeapons,oldList);Put<std::uint64_t>(s,kSeatWeaponCount,3);
         Put<float>(s,0x2E4,0);Put<float>(s,0x2E0,0);Put<unsigned char>(s,kSeatPad,0);twinOk=false;
+    }
+    // The own fire keys (2026-10-30, docs/multi-weapon-keys.md; the user: 「不是只有两个攻击按键的，很多东西可以同时发射，
+    // 不一定需要切换副挂载才行。多加几个按键的事情。还有一些炮塔可以是自动无人炮塔（需要可开关）」): an X-Morph heavy tank on
+    // the V603, its native gun pair on the primary, its machine gun on the second trigger, its anti-air missiles on fire key
+    // 3 and an anti-air gun on key 4 (both auto turrets). Every key fires at once; nothing is cycled; the auto turrets fire
+    // on their own and switch off and on.
+    {
+        ResetPayload();now+=1000;cfg.stockStores=true;
+        auto* v=vehicles[1];auto* s=SeatAt(v,0);
+        alignas(16) static unsigned char array[5*kHolderStride]{};
+        static unsigned char w5[5][0x1600]{};
+        static unsigned char* list[5]{};
+        static unsigned char enemy[0x200]{};
+        const wchar_t* const files[5]={L"EDF6VC_XM_LARGE_TANK_L.SGO",L"EDF6VC_XM_LARGE_TANK_R.SGO",L"EDF6VC_XM_MG_600.SGO",
+                                       L"EDF6VC_XM_AAM_40.SGO",L"EDF6VC_XM_AA_600.SGO"};
+        const unsigned char kinds[5]={0,0,20,21,22};
+        for(int i=0;i<5;++i) {
+            auto* w=w5[i];list[i]=array+i*kHolderStride;
+            Put<void*>(list[i],kHolderWeapon,w);Put<void*>(list[i],kHolderCtrl,ctrl[1]);
+            w[0x100]=i<2 ? 0 : 2;w[0x101]=kinds[i];w[0x102]=0;w[0x103]=0;Put<const wchar_t*>(w,0x08,files[i]);
+            Put<int>(w,kWeaponAmmo,40);Put<int>(w,kWeaponReloadTime,-1);w[kWeaponTrigger]=0;
+            Put<float>(w,0x224,1000);Put<float>(w,0x6D0,1500);Put<float>(w,0x8B0,1.0f);Put<float>(w,0x89C,10);
+            Put<std::int32_t>(w,kWeaponLockon,kinds[i]==21 ? kHoming : 0);
+            Put<const wchar_t*>(w,kWeaponName,i<2 ? L"gun" : kinds[i]==20 ? L"MG" : kinds[i]==21 ? L"AAM" : L"AA");
+        }
+        unsigned char** const oldList=At<unsigned char**>(s,kSeatWeapons);
+        void* const oldHolders=At<void*>(v,kHolders);
+        Put<void*>(v,0,image+kVt603);Put<std::uint64_t>(v,kSeatCount,1);Put<void*>(v,kHolders,array);Put<std::uint64_t>(v,kHolderCount,5);
+        Put<void*>(s,kSeatWeapons,list);Put<std::uint64_t>(s,kSeatWeaponCount,5);
+        trackedHuman=riders[1];riders[1][edf::kHumanPlayer]=1;Put<void*>(riders[1],edf::kHumanPad,riders[1]);
+        Put<unsigned char>(s,kSeatPad,1);Put<std::uint16_t>(s,kSeatButtons,0);padButtons=0;
+        cfg.vehicleFire3Button=0x0004;cfg.vehicleFire4Button=0x0100;cfg.vehicleAutoTurretButton=0x0200;cfg.autoTurrets=false;
+        float* const at=reinterpret_cast<float*>(enemy+kPosition);
+        const auto latches=[&]() {unsigned m=0;for(int i=0;i<5;++i)if(w5[i][kWeaponTrigger])m|=1u<<i;return m;};
+        const auto frame=[&](bool primaryHeld,bool secondaryHeld,std::uint16_t pad) {
+            for(auto& w:w5)w[kWeaponTrigger]=0;
+            padButtons=pad;Put<float>(s,0x2E4,primaryHeld ? 1.0f : 0.0f);Put<float>(s,0x2E0,secondaryHeld ? 1.0f : 0.0f);
+            now+=16;PayloadFrame(v);
+            if(primaryHeld){PullHook(list[0]);PullHook(list[1]);}
+            return latches();
+        };
+        frame(false,false,0);
+        PayloadReadout r{};
+        check(PlayerPayload(&r) && r.count==5 && r.entry[0].fire==PayloadFire::primary && r.entry[1].fire==PayloadFire::primary &&
+              r.entry[2].fire==PayloadFire::secondary && r.entry[3].fire==PayloadFire::key && r.entry[4].fire==PayloadFire::key &&
+              r.entry[2].key==2 && r.entry[3].key==3 && r.entry[4].key==4,
+              "own keys: the gun pair on the primary, the MG on the second trigger, the missiles on key 3, the AA gun on key 4");
+        check(!r.choices && r.ownChoices<=1 && r.autoTurrets==2 && !r.entry[2].autoTurret && r.entry[3].autoTurret &&
+              r.entry[4].autoTurret && !r.autoOn && PayloadControlsShown(r),
+              "nothing to cycle; two auto turrets (off, as the ini starts them); the HUD's control row shown");
+        check(frame(false,false,0)==0u,"no key held, the turrets off: nothing fires");
+        check(frame(false,false,0x0004)==8u,"fire key 3 (its pad bits): the missiles alone");
+        check(frame(false,false,0x0100)==16u,"fire key 4: the AA gun alone");
+        check(frame(true,true,0x0104)==31u,"both triggers and keys 3 and 4 held: the gun pair, the MG, the missiles and the AA gun at once");
+        mapHeld=true;
+        check(frame(false,false,0x0104)==0u,"the map holding the keys: no extra key fires");mapHeld=false;
+        Put<unsigned char>(s,kSeatPad,0);
+        check(frame(false,false,0x0104)==0u,"a keyboard seat reads no pad bits");Put<unsigned char>(s,kSeatPad,1);
+        unsigned char* all[kMostPayload]{};
+        check(PayloadTriggerWeapons(v,0,all,kMostPayload)==5,"the HUD marks every weapon on a trigger or a key");
+        // The auto turrets on: each fires itself when it has a shot.
+        cfg.autoTurrets=true;at[0]=0;at[1]=100;at[2]=500;
+        check(frame(false,false,0)==0u && PlayerPayload(&r) && r.autoOn,"turrets on, no lock, no enemy: they hold");
+        lockObject=enemy;airTarget=true;
+        check(frame(false,false,0)==8u,"the missiles' lock holds an aircraft: they launch by themselves");
+        airTarget=false;
+        check(frame(false,false,0)==0u,"locked on something on the ground: the anti-air missiles hold");
+        lockObject=nullptr;enemyObject=enemy;at[0]=0;at[1]=0;at[2]=300;
+        check(frame(false,false,0)==16u,"an enemy on the AA gun's line in its reach: it fires by itself");
+        at[0]=110;
+        check(frame(false,false,0)==0u,"20 degrees off its line: it holds (it aims nothing: the turret turns it)");
+        at[0]=0;at[2]=700;
+        check(frame(false,false,0)==0u,"beyond its round's reach: it holds");
+        at[2]=300;friendInLine=true;
+        check(frame(false,false,0)==0u,"a friend in the line: it holds");friendInLine=false;
+        // The switch: one press, one change; off, the gun is the key's alone.
+        frame(false,false,0x0200);
+        check(PlayerPayload(&r) && !r.autoOn && frame(false,false,0x0200)==0u && PlayerPayload(&r) && !r.autoOn,
+              "the auto turret switch: off, held it stays off, the gun holds its fire");
+        check(frame(false,false,0x0100)==16u,"off: its own key still fires it");
+        frame(false,false,0);frame(false,false,0x0200);
+        check(PlayerPayload(&r) && r.autoOn && frame(false,false,0)==16u,"pressed again: on, firing by itself");
+        ResetPayload();now+=1000;cfg.autoTurrets=false;frame(false,false,0);
+        check(PlayerPayload(&r) && !r.autoOn,"a new mission: the ini's state again");
+        Put<int>(w5[4],kWeaponAmmo,0);cfg.autoTurrets=true;
+        check(frame(false,false,0x0100)==0u,"a spent weapon is never pulled, by its key or by itself");
+        Put<int>(w5[4],kWeaponAmmo,40);
+        // An NPC crew: the gun pair planned as ever, never one of the keyed weapons; those fired alongside.
+        trackedHuman=nullptr;riders[1][edf::kHumanPlayer]=0;Put<void*>(riders[1],edf::kHumanPad,nullptr);
+        PayloadFire fire=PayloadFire::other;
+        unsigned char* const npcGun=NpcPayloadSelect(v,0,300,false,&fire);
+        check((npcGun==w5[0] || npcGun==w5[1]) && fire==PayloadFire::primary,"NPC: the gun pair on the primary, never a keyed weapon");
+        check(NpcSecondarySelect(v,0,300,false)==w5[2],"NPC: the second trigger's MG planned apart");
+        for(auto& w:w5)w[kWeaponTrigger]=0;
+        check(NpcOwnKeysFire(v,0,enemy,&FriendInLine) && latches()==16u,"NPC: the AA gun laid on its target fires; the missiles, unlocked, hold");
+        for(auto& w:w5)w[kWeaponTrigger]=0;lockObject=enemy;airTarget=true;at[0]=110;
+        check(NpcOwnKeysFire(v,0,enemy,&FriendInLine) && latches()==8u,"NPC: the missiles locked on an aircraft launch; the gun off its line holds");
+        lockObject=nullptr;airTarget=false;at[0]=0;authority=false;for(auto& w:w5)w[kWeaponTrigger]=0;
+        check(!NpcOwnKeysFire(v,0,enemy,&FriendInLine) && !latches(),"another machine's NPC: nothing fired here");authority=true;
+        check(!NpcOwnKeysFire(v,0,nullptr),"no target, no shot");
+        // The second trigger is only the V603's to give; the extra keys are no class's own input.
+        Put<void*>(v,0,image+kVt403);
+        PayloadReadout c403{};unsigned char* ws[kMostPayload]{};
+        c403.count=ReadSeat(v,0,ClassOf(v),ws,c403,false);
+        check(c403.count==5 && c403.entry[2].fire==PayloadFire::store && !c403.entry[2].key && c403.entry[3].key==3 &&
+              c403.entry[4].fire==PayloadFire::key,"another class: the second-trigger weapon a plain store, the extra keys still keys");
+        Put<void*>(v,0,image+kVt603);
+        enemyObject=nullptr;padButtons=0;cfg.autoTurrets=true;
+        Put<void*>(v,kHolders,oldHolders);Put<std::uint64_t>(v,kHolderCount,3);
+        Put<void*>(s,kSeatWeapons,oldList);Put<std::uint64_t>(s,kSeatWeaponCount,3);
+        Put<float>(s,0x2E4,0);Put<float>(s,0x2E0,0);Put<unsigned char>(s,kSeatPad,0);
     }
     ResetPayload();check(!PayloadPicked(vehicles[0]),"mission reset clears choices");
     VirtualFree(image,0,MEM_RELEASE);std::printf("payload runtime: %d checks, %d failures\n",checks,fail);return fail ? 1 : 0;

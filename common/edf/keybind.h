@@ -161,6 +161,12 @@ inline constexpr Slot kSlots[]={
     {0x76,16,4,Owner::crew,L"SazabiMegaCannonKey",0x58},
     {0x77,16,5,Owner::crew,L"SazabiMeleeKey",0x56},
     {0x78,16,6,Owner::crew,L"SazabiGuardKey",0x42},
+    // page 14 again: every ground vehicle's own fire keys and its auto turrets (src/payload.cpp OwnKey, AutoShot)
+    {0x79,14,4,Owner::crew,L"VehicleFire3Key",0x58},
+    {0x7A,14,5,Owner::crew,L"VehicleFire4Key",0x05},
+    {0x7B,14,6,Owner::crew,L"VehicleFire5Key",0x06},
+    {0x7C,14,7,Owner::crew,L"VehicleFire6Key",0x48},
+    {0x7D,14,8,Owner::crew,L"VehicleAutoTurretKey",0x59},
 };
 inline constexpr int kSlotCount=static_cast<int>(sizeof(kSlots)/sizeof(kSlots[0]));
 inline constexpr int kFirstAction=0x4F;
@@ -207,20 +213,20 @@ constexpr int OwnerEnd(Owner owner) noexcept {
     return end;
 }
 
-// The catalog's own rules (also tests/keybind_test.cpp's): bytes in order from kFirstAction, pages in order with rows
-// 0.. in order, every page a list the stock page code can hold, no slot on a marker.
+// The catalog's own rules (also tests/keybind_test.cpp's): bytes in order from kFirstAction (a slot added later takes
+// the next byte, whatever its page: COMMON.CFG keeps the bytes), each page's rows 0.. in the order of its slots, every
+// page used and a list the stock page code can hold, no slot on a marker.
 constexpr bool CatalogValid() noexcept {
-    int page=kFirstPage,row=0;
+    int rows[kPages]{};
     for(int i=0;i<kSlotCount;++i) {
         const Slot& s=kSlots[i];
-        if(s.action!=kFirstAction+i)return false;
-        if(s.page==page+1 && row>0){++page;row=0;}
-        if(s.page!=page || s.row!=row)return false;
-        ++row;
-        if(row>kMaxRows)return false;
+        if(s.action!=kFirstAction+i || !PluginPage(s.page))return false;
+        int& row=rows[s.page-kFirstPage];
+        if(s.row!=row || ++row>kMaxRows)return false;
         if(s.action==kMarkerAction[0] || s.action==kMarkerAction[1])return false;
     }
-    return page==kFirstPage+kPages-1;
+    for(const int n:rows)if(!n)return false;
+    return true;
 }
 static_assert(CatalogValid(),"the slots' bytes, pages and rows are in order and fit the stock page lists");
 

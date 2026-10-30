@@ -84,11 +84,12 @@ for u in ported:
     if v is not None and v.alternate:
         for w in v.weapons[:2]:
             check(f'{{L"{w.rsplit("/", 1)[1].upper()}",' in stores_inc, f'{key}: src/stores.inc lacks {w} (gen_stores)')
-    # its other weapons (xm_units.Arm): each an intrinsic secondary store, its muzzle slot after the pair
+    # its other weapons (xm_units.Arm): each a store on its own fire key (one weapon a key), its muzzle slot after the pair
     for a in u.arms:
         kind = vc.xm_store(u, a)
-        check(kind in vc.STORES and vc.STORES[kind].independent_secondary
+        check(kind in vc.STORES and vc.STORES[kind].key == a.fire and vc.STORES[kind].auto == a.auto
               and f'{{L"EDF6VC_{kind}_",' in stores_inc, f'{key}: arm {a.key}: STORES {kind} / src/stores.inc (gen_stores)')
+    check(len({a.fire for a in u.arms}) == len(u.arms), f'{key}: two arms on one fire key')
     check(v is None or v.slots == ('left', 'right', *(f'xm_{a.key}' for a in u.arms)), f'{key}: its slots are not its arms')
     # its model: a tracked unit's a wt_tracked folder (WT_ONLY its camera), an emplacement's on the fortified base
     if u.family == 'tracked':

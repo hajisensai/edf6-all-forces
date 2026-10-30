@@ -1,7 +1,7 @@
 """Writes src/stores.inc, the plugin's side of the jets' stores (src/stores.cpp includes it), from pylib/vcobjects.py:
   kStores     every store kind (STORES: the jets' and the stock vehicles'): its weapon files' name prefix (vcobjects.store_file: EDF6VC_<KIND>_<rounds>.SGO),
-              its name, its role, a round's mass and drag, its barrel group, its round's name on the sight (SHELLS), whether it is an intrinsic secondary
-              (independent_secondary: the seat's otherwise unread second trigger fires it, src/payload.cpp)
+              its name, its role, a round's mass and drag, its barrel group, its round's name on the sight (SHELLS), its own fire key and whether it is an auto turret
+              (Store.key / auto: src/payload.cpp OwnKey)
   kTwinBarrels the barrels that fire in turn (GroundVehicle.alternate: vcobjects.twin_barrels): weapon file, pair
   kJetMasses  a jet's mass without stores by its mark (JET_MASSES) and the durability its SGO gives it (JETS; the gunship
               tools/make_jets.py builds from the strike jet's): the ram's damage scales by its HP over that (src/playerjet.cpp)
@@ -49,7 +49,7 @@ def render() -> str:
              'inline constexpr StoreSpec kStores[]={']
     for kind, s in vc.STORES.items():
         lines.append(f'    {{L"EDF6VC_{kind}_","{s.name}",{ROLES[s.role]},{s.mass:.1f}f,{s.drag:.4f}f,{s.group},{s.barrel},'
-                     f'{str(s.native_control).lower()},{shell_of(s)},{str(s.independent_secondary).lower()}}},')
+                     f'{str(s.native_control).lower()},{shell_of(s)},{s.key},{str(s.auto).lower()}}},')
     lines.append('};')
     lines.append('inline constexpr TwinBarrel kTwinBarrels[]={')
     for name, pair in vc.twin_barrels():

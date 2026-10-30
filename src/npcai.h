@@ -151,4 +151,7 @@ void NpcGunnersInput(unsigned char* vehicle) noexcept;
 // NPC gun input belongs to the local NPC's machine, not necessarily the vehicle driver's. Registered-vehicle
 // Dummies run on the host; unregistered copies use their recorded owner. All human seats are excluded.
 bool AiGunner(const unsigned char* vehicle,const unsigned char* seat) noexcept;
+// Whether `target` is in the air: more than 15 m over the map floor under it (an NPC crew's and an auto turret's choice
+// of weapon: payload.cpp NpcWeaponCandidate).
+bool GunnerAirTarget(const void* target) noexcept;
 }  // namespace crew

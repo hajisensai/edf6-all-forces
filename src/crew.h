@@ -104,6 +104,16 @@ struct Config {
     // stay on PlayerJetSwitchKey / LB: each switch one control, whatever was fired last (the user, 2026-10-21: 「学学战雷」).
     int vehicleSecondarySwitchKey=0x54;
     int vehicleSecondarySwitchButton=0x08;
+    // A vehicle's weapons on their own fire keys (pylib/vcobjects.py Store.key 3..6, payload.cpp OwnKey; the user,
+    // 2026-10-30: 「不是只有两个攻击按键的，很多东西可以同时发射…多加几个按键的事情」): each held fires its weapon with the
+    // primary and the second trigger. Keys: 'X', the mouse's side buttons 4 / 5, 'H'; the pad's XInput bits as
+    // VehicleSecondarySwitchButton's (4 the d-pad left; 0 none).
+    int vehicleFire3Key=0x58,vehicleFire4Key=0x05,vehicleFire5Key=0x06,vehicleFire6Key=0x48;
+    int vehicleFire3Button=0x04,vehicleFire4Button=0,vehicleFire5Button=0,vehicleFire6Button=0;
+    // The auto turrets (Store.auto, payload.cpp AutoShot): whether they are on as a mission starts, and the key / pad bits
+    // that turn them on and off ('Y'; no pad button).
+    bool autoTurrets=true;
+    int vehicleAutoTurretKey=0x59,vehicleAutoTurretButton=0;
     bool playerJetCatch=true;       // ...and after ejecting, another of the same jet catches the player in the air
     int playerJetFlareKey=0x58;     // the key that drops a pair of flares ('X'; missile.cpp FlareDrop)
     int playerJetFlares=8;          // the pairs a player jet carries

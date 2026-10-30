@@ -3221,12 +3221,14 @@ void AimIndependentSecondary(unsigned char* v,unsigned index,const void* target,
     Put<float>(seat,0x2E0,secondary);
     FireIndependentSecondary(v,index,weapon);
 }
+}  // namespace
 bool GunnerAirTarget(const void* target) noexcept {
     if(!Readable(target,kPosition+12))return false;
     const auto p=reinterpret_cast<const float*>(static_cast<const unsigned char*>(target)+kPosition);
     const float from[3]={p[0],p[1]+1.0f,p[2]},end[3]={p[0],p[1]-512.0f,p[2]};float hit[3];
     return MapFloorRay(from,end,hit)>=0.0f && p[1]-hit[1]>15.0f;
 }
+namespace {
 
 // CarBase's stock AI calls slot 70 for seat 0 after deciding its target and driving
 // inputs. Wrap those calls, rather than running a second driver fire pass in InputHook.
@@ -3288,6 +3290,7 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
             AimIndependentSecondary(v,0,target,npc::Dist(Pos(v),Pos(static_cast<const unsigned char*>(target))),
                                     GunnerAirTarget(target),weapon!=nullptr);
             NpcCoaxFire(v,0,target,&FriendInLine);   // the coaxial gun alongside whatever the crew chose (payload.cpp)
+            NpcOwnKeysFire(v,0,target,&FriendInLine);   // and the weapons on the vehicle's extra fire keys
         }
         RememberDriverPayload(v);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
@@ -3357,6 +3360,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
                 if(w)AimSelectedGunner(v,i,p.best,w,fire);
                 AimIndependentSecondary(v,i,p.best,p.bestD,airborne,w!=nullptr);
                 NpcCoaxFire(v,i,p.best,&FriendInLine);
+                NpcOwnKeysFire(v,i,p.best,&FriendInLine);
             } else reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
             RememberGunnerInputs(v,i,seat);
         }

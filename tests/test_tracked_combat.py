@@ -63,9 +63,17 @@ class CatalogContractTests(unittest.TestCase):
         # 2026-10-21: both Ataka rounds ride the V603's otherwise unread secondary, alongside the cannons (src/payload.cpp).
         # 2026-10-24: the Tunguska's, the Apocalypse's and the Patriot's missiles ride it too.
         # 2026-10-27: and every X-Morph unit's other weapons (xm_units.Arm).
-        self.assertEqual([kind for kind, store in vc.STORES.items() if store.independent_secondary],
-                         ['TUNGUSKA_SAM', 'APOC_SAM', 'PATRIOT_SAM', 'BMPT_ATGM', 'BMPT_ATGMF',
-                          *(vc.xm_store(u, a) for u in xm_units.v603() for a in u.arms)])
+        # 2026-10-30 (「不是只有两个攻击按键的…多加几个按键的事情」): each its own fire key (Store.key), the X-Morph arms
+        # past the first on the extra keys; the Apocalypse's anti-air missiles an auto turret.
+        self.assertEqual({kind: (store.key, store.auto) for kind, store in vc.STORES.items() if store.key},
+                         {'TUNGUSKA_SAM': (2, False), 'APOC_SAM': (2, True), 'PATRIOT_SAM': (2, False),
+                          'BMPT_ATGM': (2, False), 'BMPT_ATGMF': (2, False),
+                          **{vc.xm_store(u, a): (a.fire, a.auto) for u in xm_units.v603() for a in u.arms}})
+        self.assertEqual({k: vc.vehicle_fire_keys(vc.GROUND_VEHICLES[k]) for k in ('bmpt', 'xm_large_tank', 'xm_large_tank_emp')},
+                         {'bmpt': {2: ['BMPT_ATGM', 'BMPT_ATGMF']},
+                          'xm_large_tank': {2: ['XM_LARGE_TANK_MG'], 3: ['XM_LARGE_TANK_AAM'], 4: ['XM_LARGE_TANK_ROCKETS']},
+                          'xm_large_tank_emp': {2: ['XM_LARGE_TANK_EMP_EMP'], 3: ['XM_LARGE_TANK_EMP_AA'],
+                                                4: ['XM_LARGE_TANK_EMP_AAM']}})
         self.assertFalse(any(vc.STORES[k].native_control or vc.STORES[k].group for k in ('BMPT_ATGM', 'BMPT_ATGMF')),
                          'a missile is not alternate cannon ammunition')
 
@@ -81,7 +89,7 @@ class CatalogContractTests(unittest.TestCase):
         for name, _pair in bmpt:
             path = next(w for w in vc.GROUND_VEHICLES['bmpt'].weapons if w.rsplit('/', 1)[1].upper() == name)
             store = vc.store_of(path)
-            self.assertFalse(store and vc.STORES[store[0]].independent_secondary, name)
+            self.assertFalse(store and vc.STORES[store[0]].key, name)
         # The C++ table is the registry's (tools/gen_stores.py --check keeps it current).
         import gen_stores
         table = gen_stores.render()

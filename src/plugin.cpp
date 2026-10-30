@@ -250,6 +250,16 @@ void Validate(Config& n) noexcept {
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
     n.vehicleSecondarySwitchKey=static_cast<int>(FixInt("VehicleSecondarySwitchKey",n.vehicleSecondarySwitchKey,0,254));
     n.vehicleSecondarySwitchButton=static_cast<int>(FixInt("VehicleSecondarySwitchButton",n.vehicleSecondarySwitchButton,0,0xFFFF));
+    n.vehicleFire3Key=static_cast<int>(FixInt("VehicleFire3Key",n.vehicleFire3Key,0,254));
+    n.vehicleFire4Key=static_cast<int>(FixInt("VehicleFire4Key",n.vehicleFire4Key,0,254));
+    n.vehicleFire5Key=static_cast<int>(FixInt("VehicleFire5Key",n.vehicleFire5Key,0,254));
+    n.vehicleFire6Key=static_cast<int>(FixInt("VehicleFire6Key",n.vehicleFire6Key,0,254));
+    n.vehicleFire3Button=static_cast<int>(FixInt("VehicleFire3Button",n.vehicleFire3Button,0,0xFFFF));
+    n.vehicleFire4Button=static_cast<int>(FixInt("VehicleFire4Button",n.vehicleFire4Button,0,0xFFFF));
+    n.vehicleFire5Button=static_cast<int>(FixInt("VehicleFire5Button",n.vehicleFire5Button,0,0xFFFF));
+    n.vehicleFire6Button=static_cast<int>(FixInt("VehicleFire6Button",n.vehicleFire6Button,0,0xFFFF));
+    n.vehicleAutoTurretKey=static_cast<int>(FixInt("VehicleAutoTurretKey",n.vehicleAutoTurretKey,0,254));
+    n.vehicleAutoTurretButton=static_cast<int>(FixInt("VehicleAutoTurretButton",n.vehicleAutoTurretButton,0,0xFFFF));
     n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
     n.playerJetHailKey=static_cast<int>(FixInt("PlayerJetHailKey",n.playerJetHailKey,0,254));
@@ -574,6 +584,17 @@ void LoadConfig() noexcept {
     n.playerJetSwitchKey=ReadInt(L"PlayerJetSwitchKey",static_cast<DWORD>(n.playerJetSwitchKey));
     n.vehicleSecondarySwitchKey=ReadInt(L"VehicleSecondarySwitchKey",static_cast<DWORD>(n.vehicleSecondarySwitchKey));
     n.vehicleSecondarySwitchButton=ReadInt(L"VehicleSecondarySwitchButton",static_cast<DWORD>(n.vehicleSecondarySwitchButton));
+    n.vehicleFire3Key=ReadInt(L"VehicleFire3Key",static_cast<DWORD>(n.vehicleFire3Key));
+    n.vehicleFire4Key=ReadInt(L"VehicleFire4Key",static_cast<DWORD>(n.vehicleFire4Key));
+    n.vehicleFire5Key=ReadInt(L"VehicleFire5Key",static_cast<DWORD>(n.vehicleFire5Key));
+    n.vehicleFire6Key=ReadInt(L"VehicleFire6Key",static_cast<DWORD>(n.vehicleFire6Key));
+    n.vehicleFire3Button=ReadInt(L"VehicleFire3Button",static_cast<DWORD>(n.vehicleFire3Button));
+    n.vehicleFire4Button=ReadInt(L"VehicleFire4Button",static_cast<DWORD>(n.vehicleFire4Button));
+    n.vehicleFire5Button=ReadInt(L"VehicleFire5Button",static_cast<DWORD>(n.vehicleFire5Button));
+    n.vehicleFire6Button=ReadInt(L"VehicleFire6Button",static_cast<DWORD>(n.vehicleFire6Button));
+    n.autoTurrets=ReadBool(L"AutoTurrets",n.autoTurrets);
+    n.vehicleAutoTurretKey=ReadInt(L"VehicleAutoTurretKey",static_cast<DWORD>(n.vehicleAutoTurretKey));
+    n.vehicleAutoTurretButton=ReadInt(L"VehicleAutoTurretButton",static_cast<DWORD>(n.vehicleAutoTurretButton));
     n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
     n.playerJetFlareKey=ReadInt(L"PlayerJetFlareKey",static_cast<DWORD>(n.playerJetFlareKey));
     n.playerJetAll=ReadBool(L"PlayerJetAll",n.playerJetAll);
@@ -1017,6 +1038,9 @@ void LoadConfig() noexcept {
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f marchPace=%d",n.map,n.mapKey,n.mapButton,n.mapViewDistance,n.mapMarchPace);
     Log("CONFIG vehicle secondary switch key=0x%X button=0x%X (the primary's rounds: PlayerJetSwitchKey / LB)",
         n.vehicleSecondarySwitchKey,n.vehicleSecondarySwitchButton);
+    Log("CONFIG vehicle fire keys 0x%X 0x%X 0x%X 0x%X buttons 0x%X 0x%X 0x%X 0x%X; auto turrets %d key=0x%X button=0x%X",
+        n.vehicleFire3Key,n.vehicleFire4Key,n.vehicleFire5Key,n.vehicleFire6Key,n.vehicleFire3Button,n.vehicleFire4Button,
+        n.vehicleFire5Button,n.vehicleFire6Button,n.autoTurrets,n.vehicleAutoTurretKey,n.vehicleAutoTurretButton);
     Log("CONFIG ViewDistance=%.0f (%s)",n.viewDistance,n.viewDistance<0.0f ? "unlimited" : n.viewDistance==0.0f ? "the mission's own" : "m");
     Log("CONFIG damageStats=%d key=0x%X",n.damageStats,n.damageStatsKey);
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
