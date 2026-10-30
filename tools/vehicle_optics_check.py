@@ -9,7 +9,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-sys.path[:0] = [str(Path(__file__).resolve().parents[1]/'pylib')]
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT/'pylib')]
 import ledger
 import dsgo
 import make_optics
@@ -94,6 +95,28 @@ class Transactions(unittest.TestCase):
         for name, stem in models.items():
             self.assertEqual(optics.model_path(made['OBJECT/'+name]), f'app:/object/edf6vc_optic_{stem.lower()}.mrab')
             self.assertEqual(sgo.read(made['OBJECT/'+name])[1]['custom_setting'], 987)
+
+    def test_every_lens_names_its_eyepiece(self):
+        # docs/feedback-2026-10-30-sights.md: the unmanned stations see a gun camera's monitor (cockpit_fits
+        # remote_display, the Grape's remote turret), the manned main guns a biocular eyepiece until the user says
+        # which are monocular telescopes. The prefixes are the runtime's (src/optic_mount.h kFamilies).
+        got = {(m.stem, l.marker): optics.eyepiece(l.marker) for m in optics.MODELS for l in m.lenses}
+        cameras = {('VEHICLE401_STRIKER', 'vc_camera_00'), ('VEHICLE403_TANK', 'vc_camera_01'),
+                   ('VEHICLE403_TANK', 'vc_camera_02'), ('VEHICLE404_BIGTANK', 'vc_camera_01'),
+                   ('VEHICLE404_BIGTANK', 'vc_camera_02')}
+        self.assertEqual({k for k, v in got.items() if v == 'camera'}, cameras)
+        self.assertEqual({k for k, v in got.items() if v == 'binocular'},
+                         {(stem, 'vc_optic_00') for stem in ('V505_TANK', 'V601_TANK', 'V505_TANK_EDF6BENEFITS',
+                                                             'VEHICLE403_TANK', 'VEHICLE404_BIGTANK')})
+        header = (ROOT / 'src' / 'optic_mount.h').read_text(encoding='utf-8')
+        for prefix, kind in optics.EYEPIECES.items():
+            self.assertIn(f'{{L"{prefix}",sightzoom::Eyepiece::{kind}}}', header)
+        for bad in ('vc_optic_1', 'vc_optic_001', 'vc_eye_00', 'vc_monoc_xx'):
+            with self.assertRaises(ValueError):
+                optics.eyepiece(bad)
+        for spec in optics.MODELS:   # one marker per number and per parent bone in a model, whatever its family
+            numbers = [l.marker[-2:] for l in spec.lenses]
+            self.assertEqual(len(numbers), len(set(numbers)), spec.stem)
 
     def test_redirect_preserves_fields_and_rejects_custom_models(self):
         old = source_sgo()
@@ -256,9 +279,9 @@ class RealModels(unittest.TestCase):
 
     def test_real_holder_ancestry_selects_only_its_own_optic(self):
         expected = {'V505_TANK': ['vc_optic_00'], 'V601_TANK': ['vc_optic_00'],
-                    'V505_TANK_EDF6BENEFITS': ['vc_optic_00'], 'VEHICLE401_STRIKER': ['vc_optic_00'],
-                    'VEHICLE403_TANK': ['vc_optic_00', 'vc_optic_01', 'vc_optic_02'],
-                    'VEHICLE404_BIGTANK': ['vc_optic_00', 'vc_optic_01', 'vc_optic_02', None, None, None]}
+                    'V505_TANK_EDF6BENEFITS': ['vc_optic_00'], 'VEHICLE401_STRIKER': ['vc_camera_00'],
+                    'VEHICLE403_TANK': ['vc_optic_00', 'vc_camera_01', 'vc_camera_02'],
+                    'VEHICLE404_BIGTANK': ['vc_optic_00', 'vc_camera_01', 'vc_camera_02', None, None, None]}
         for spec, _a, _b, _old, md in self.models:
             data = self.game.read('OBJECT', spec.stem+'.SGO')
             values = optics.plain(dsgo.parse(data).root) if data[:4] == b'DSGO' else sgo.read(data)[1]

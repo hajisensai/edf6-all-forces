@@ -48,11 +48,11 @@ bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1.0f; }
 bool mountedOptic=false;
 bool SightZoomMounted(const void*) noexcept{return mountedOptic;}
-// The optic present on seat 0 (sightzoom.cpp SightZoomCanMount) and first person on (FirstPersonGunnerSight): with both,
+// The optic present on seat 0 (sightzoom.cpp SightZoomCanMount) and raised (SightZoomRaised): with both,
 // the gunner's sight is up and the free-look key is not the turret camera's (TurretCamFreeLook).
 bool canMount=false,gunnerSight=false;
 bool SightZoomCanMount(const void*,unsigned) noexcept{return canMount;}
-bool FirstPersonGunnerSight() noexcept{return gunnerSight;}
+bool SightZoomRaised(const void*) noexcept{return gunnerSight;}   // sightzoom.cpp: first person's sight raised (Press)
 bool highOn=true;
 bool HighCamOn(const void*) noexcept { return highOn; }
 int cameraReads=0;

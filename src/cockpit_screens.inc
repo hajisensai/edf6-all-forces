@@ -289,7 +289,7 @@ bool HudGlass(const CockpitScreens& c) noexcept {
 void RwsDisplay(void* drawer,void* ctx,Text* t,float width,float height,float s,const ScreenFeed& f,const Snapshot& snap,
                 Line* lines,int* at) noexcept {
     const float zoom=snap.stock && snap.stockHud.zoom>1.0f ? snap.stockHud.zoom : 1.0f;
-    ScopeShade(drawer,ctx,t,width,height,s,zoom,true,lines,at);
+    ScopeShade(drawer,ctx,t,width,height,s,zoom,sightzoom::Mask::sensor,lines,at);
     float hx,hy;
     scopeview::RectHalf(width,height,&hx,&hy);
     const float cx=width*0.5f,cy=height*0.5f,pad=40.0f*s;

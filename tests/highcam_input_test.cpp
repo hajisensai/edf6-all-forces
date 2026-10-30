@@ -11,10 +11,12 @@ Config config{};
 unsigned char vehicle[0x800]{},seat[edf::kSeatStride]{},human[0x500]{},other[0x500]{},control[16]{},vehicleControl[16]{};
 unsigned char weapon[0x1000]{},holder[0x100]{};
 unsigned char* holders[]={holder};
-bool mapHeld=false;
+bool mapHeld=false,firstPerson=false,lens=false;
 const Config& Cfg() noexcept { return config; }
 void Log(const char*,...) noexcept {}
 bool MapHoldsKeys() noexcept { return mapHeld; }
+bool FirstPersonGunnerSight() noexcept { return firstPerson; }
+bool SightZoomCanMount(const void*,unsigned) noexcept { return lens; }
 bool TurretCamServes(const void*) noexcept { return true; }
 bool TurretCamLarge(const void*) noexcept { return false; }
 unsigned char* PlayerHuman() noexcept { return human; }
@@ -46,5 +48,18 @@ int main() {
     Check(!HighCamOn(vehicle),"another local player's seat cannot publish this player's high view");
     Put<void*>(seat,kSeatRider,human);Put<std::uint64_t>(seat,kSeatWeaponCount,0);Press(0);Press(0x80);
     Check(!HighCamOn(vehicle),"weapon removed: no indirect high view");
+    Put<std::uint64_t>(seat,kSeatWeaponCount,1);Press(0);
+    Check(HighCamOffered(vehicle) && HighCamOn(vehicle),"weapon back: the remembered choice is on again");
+    Press(0x80);Press(0);Check(!HighCamOn(vehicle),"R3 turns it off");
+    firstPerson=true;lens=true;Press(0x80);
+    Check(!HighCamOn(vehicle) && HighCamYieldsButton(vehicle),"first person with a mounted optic: shared R3 is the sight's");
+    Press(0);firstPerson=false;Press(0x80);Check(!HighCamOn(vehicle),"R3 held from first person into third is no press");
+    Press(0);Press(0x80);Check(HighCamOn(vehicle) && !HighCamYieldsButton(vehicle),"third person: R3 turns the high view on");
+    firstPerson=true;Press(0);Press(0x80);Check(!HighCamOn(vehicle),"first person: R3 still turns an open high view off");
+    Check(!HighCamYieldsButton(vehicle),"the press that closed the high view is not also the sight's");
+    Press(0x80);Check(HighCamYieldsButton(vehicle) && !HighCamOn(vehicle),"then R3 is the sight's");
+    lens=false;Press(0);Press(0x80);Check(HighCamOn(vehicle),"no mounted optic: first person's R3 stays the high view's");
+    Press(0);Press(0x80);lens=true;config.sightZoomButton=0x40;Press(0);Press(0x80);
+    Check(HighCamOn(vehicle) && !HighCamYieldsButton(vehicle),"separately bound sight: R3 stays the high view's");
     std::printf("highcam_input: %d checks, %d failed\n",checks,failed);return failed ? 1 : 0;
 }
