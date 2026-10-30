@@ -315,10 +315,10 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
              'AmmoGravityFactor': 0.0, 'AmmoExplosion': 0.0, 'AmmoIsPenetration': 1.0, 'FireInterval': 8.0,
              'FireAccuracy': 0.001},
        # xm_medium_shield_generator at the game's size: 11.7 m long; the laser turret is small (x +-0.27, y 3.4..3.9, z 1.3..1.8),
-       # its muzzle y 4.2, z 3.1
+       # its muzzle y 4.2, z 3.1; the slide guards beside the gun reach y 4.4, so the eye sits above them
        camera={'model_eye': (0., 4.0, 1.5), 'model_look_at': (0., 3.8, 9.), 'third_person_distance': 11.,
                'third_person_height': 5.0},
-       eye=(0.0, 4.1, 1.5), durability=4000.0, reload=12000, level=2.2, after='EDF6VC_CALL_XM_MEDIUM_ARTILLERY_REGULAR'),
+       eye=(0.0, 4.6, 1.5), durability=4000.0, reload=12000, level=2.2, after='EDF6VC_CALL_XM_MEDIUM_ARTILLERY_REGULAR'),
     # ground: wheeled
     _u('ground/medium_missile_launcher', 'wheeled', 'tos1', title='Missile Launcher'),
     _u('ground/medium_apc', 'wheeled', 'bmpt', title='APC'),
