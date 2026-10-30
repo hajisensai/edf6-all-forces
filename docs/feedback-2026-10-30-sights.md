@@ -34,17 +34,17 @@
 | `VEHICLE403_TANK` 两侧机枪 (seat 1/2) | 原生炮手镜头 カメラ２/３ | **camera**（改） | 无人炮塔（用户 2026-10-13「明明是无人炮塔」），座位是 `remote_display` |
 | `VEHICLE404_BIGTANK` 泰坦两侧副炮 (seat 1/2) | 副炮塔观瞄玻璃 | **camera**（改） | 无人副炮塔，座位是 `remote_display` |
 | `VEHICLE401_STRIKER` 遥控炮塔 | 炮塔顶瞄准头的窗 | **camera**（改） | 遥控炮塔（塔里没有空间，驾驶员看监视器） |
-| `V505_TANK` E551 主炮 | 前向潜望镜面 Light02 | binocular（待定） | 虚构车型，真实对应的光学类型不确定 |
-| `V505_TANK_EDF6BENEFITS` E551 特典涂装主炮 | 同上 | binocular（待定） | 同上 |
-| `V601_TANK` 主炮 | 车体观瞄面 | binocular（待定） | 同上 |
-| `VEHICLE403_TANK` 主炮 | 炮塔圆顶观瞄块（观瞄窗，非同轴望远镜） | binocular（待定） | 同上 |
-| `VEHICLE404_BIGTANK` 泰坦主炮 | 主炮塔 barbette 观瞄窗 | binocular（待定） | 同上 |
+| `V505_TANK` E551 主炮 | 前向潜望镜面 Light02 | binocular | 用户 2026-10-30 定：保持双目 |
+| `V505_TANK_EDF6BENEFITS` E551 特典涂装主炮 | 同上 | binocular | 同上 |
+| `V601_TANK` 主炮 | 车体观瞄面 | binocular | 同上 |
+| `VEHICLE403_TANK` 主炮 | 炮塔圆顶观瞄块（观瞄窗，非同轴望远镜） | binocular | 同上 |
+| `VEHICLE404_BIGTANK` 泰坦主炮 | 主炮塔 barbette 观瞄窗 | binocular | 同上 |
 | 步兵：狙击镜 / 战斗瞄具 / 火箭筒镜 | 原生开镜 | **monocular**（改） | 手持武器瞄具都是单眼望远镜 |
 
 ## 待用户确认
 
-1. 四台有人主炮（E551 / E551 特典、601、403 主炮、泰坦主炮）是双目目镜（全黑）还是单眼目镜（周围变暗可见）？
-   改一行 `pylib/vehicle_optics.py` 的 `vc_optic_00` → `vc_monoc_00` 即可，重新安装生效。
+1. ~~四台有人主炮（E551 / E551 特典、601、403 主炮、泰坦主炮）是双目目镜（全黑）还是单眼目镜（周围变暗可见）？~~
+   用户 2026-10-30 定：**保持双目**（`vc_optic_00`，视场外全黑）。
 2. 步兵狙击镜要不要保留全黑（很多游戏的习惯画法），只把 ACOG / 火箭筒镜改成单眼？现在三种都是单眼。
 3. 单眼样式周围的亮度（现为 55% 黑）是否合适。
 
