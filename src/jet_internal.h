@@ -97,8 +97,9 @@ inline constexpr Lean kCarrierLean{kCarrierPitchShare,kThrustDrag,2.5f,1.2f,0.3f
 // mark makes it. The mark is the one source of what a jet is: an entry made again for a jet (JetFrame) reads it.
 enum class Body { strike, fighter, bomber401, bomber501_2, interceptor, multirole, carrier, drone, blast, doll, heli410, heli506,
                   gunship, blastCarrier, dollCarrier, enemyFighter, primerFighter, centipede, dragonfly, heliMedic,
-                  heliTransport, transportPlane, dnFighter, dnDefender, dnBomber, dnInterceptor };
-constexpr int kBodyCount=26;
+                  heliTransport, transportPlane, dnFighter, dnDefender, dnBomber, dnInterceptor, xmFighter, xmAttack,
+                  xmHeavyAttack, xmBomber };
+constexpr int kBodyCount=30;
 struct BodyRow {
     Body body;
     const wchar_t* sgo;
@@ -156,6 +157,16 @@ inline constexpr BodyRow kBodies[kBodyCount]={
     {Body::dnBomber,L"app:/object/edf6vc_dn_bomber.sgo",L"EDF6VC_DN_BOMBER.SGO",7043.0f,Role::strike,Role::drone,"dnBomber",false,true},
     {Body::dnInterceptor,L"app:/object/edf6vc_dn_interceptor.sgo",L"EDF6VC_DN_INTERCEPTOR.SGO",7044.0f,Role::interceptor,Role::drone,
      "dnInterceptor",false,true},
+    // The X-Morph jets (pylib/vcobjects.py XM_JETS, pylib/xm_units.py family jet): X-Morph: Defense's human air units in
+    // their own models (the model pack's), each flying its role's way; the Air Raider requests them to fly.
+    {Body::xmFighter,L"app:/object/edf6vc_xm_medium_fighter_aa.sgo",L"EDF6VC_XM_MEDIUM_FIGHTER_AA.SGO",7051.0f,Role::fighter,
+     Role::drone,"xmFighter"},
+    {Body::xmAttack,L"app:/object/edf6vc_xm_medium_gunship_aa.sgo",L"EDF6VC_XM_MEDIUM_GUNSHIP_AA.SGO",7052.0f,Role::multirole,
+     Role::drone,"xmAttack"},
+    {Body::xmHeavyAttack,L"app:/object/edf6vc_xm_large_gunship_aa.sgo",L"EDF6VC_XM_LARGE_GUNSHIP_AA.SGO",7053.0f,Role::multirole,
+     Role::drone,"xmHeavyAttack"},
+    {Body::xmBomber,L"app:/object/edf6vc_xm_large_bomber_core.sgo",L"EDF6VC_XM_LARGE_BOMBER_CORE.SGO",7054.0f,Role::strike,
+     Role::drone,"xmBomber"},
 };
 constexpr bool BodiesInOrder() noexcept {
     for(int i=0;i<kBodyCount;++i)if(static_cast<int>(kBodies[i].body)!=i)return false;

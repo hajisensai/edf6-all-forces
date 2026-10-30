@@ -60,6 +60,7 @@ import make_jets  # noqa: E402
 import make_katyusha  # noqa: E402
 import modfiles  # noqa: E402
 import vcobjects as vc  # noqa: E402
+import xm_units  # noqa: E402
 
 TESTS: list[Callable[[], None]] = []
 
@@ -707,7 +708,6 @@ def collision_box_codec_holds_its_child() -> None:
 
 @test
 def calls_table_consistent() -> None:
-    import xm_units
     ids = [c.id for c in calls.CALLS]
     assert len(set(ids)) == len(ids), 'duplicate ids'
     assert all(i.startswith(calls.ID_PREFIX) for i in ids)
@@ -1676,6 +1676,10 @@ def hand_copies_agree() -> None:
             assert f'kDreadnoughtMark={vc.DREADNOUGHT_MARK:.1f}f' in src('src/dreadnought.cpp'), 'src/dreadnought.cpp kDreadnoughtMark'
             assert f'{{{vc.DREADNOUGHT_MARK:.1f}f,' in src('src/body506.cpp').replace(' ', ''), 'src/body506.cpp kMarks lacks the Dreadnought'
             continue
+        if c.jet in {xm_units.jet_request(k) for k in vc.XM_JETS.values()}:   # an X-Morph jet's twin: make_xmorph writes it
+            import xm_jet
+            assert jet.mark == c.mark and jet.requested and jet.parked and xm_jet.request_file(c.kind) == f'{c.vehicle}.SGO', c.id
+            continue
         assert jet.mark == c.mark and make_jets.FILES[f'{c.vehicle}.SGO'] == c.jet, c.id
         if jet.player:   # a player jet: its mark src/playerjet.cpp kKinds'
             assert float(pjet[c.kind.removeprefix('pjet_')]) == c.mark, f'src/playerjet.cpp kKinds disagrees on {c.id}'
@@ -1699,7 +1703,9 @@ def hand_copies_agree() -> None:
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
                | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES)
                | set(vc.BARRAGE_FILES)
-               | set(make_dreadnought.FIGHTER_SGOS.values()) | set(make_dreadnought.TURRET_ROUNDS.values()))
+               | set(make_dreadnought.FIGHTER_SGOS.values()) | set(make_dreadnought.TURRET_ROUNDS.values())
+               # ...and the X-Morph jets' bodies: tools/make_xmorph.py (pylib/xm_jet.py)
+               | {f'EDF6VC_{k.upper()}.SGO' for k in vc.XM_JETS.values()})
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -2595,12 +2601,17 @@ def every_boardable_aircraft_requested() -> None:
              re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,', re.sub(r'\s+', ' ', table))}
     frames = dict(re.findall(r'\{Body::(\w+),Airframe::(\w+),', src('src/playerjet_kinds.h')))
     assert len(frames) >= 13 and set(left_out) <= set(frames), sorted(frames)
-    fly = [c for c in calls.CALLS if c.brings == 'vehicle' and c.jet and not vc.JETS[c.jet].player]
+    # The X-Morph jets' requests (pylib/vcobjects.py XM_JETS) are their units' rows (tools/calls.py _with_xmorph: appended
+    # where the catalog ports them, named after the unit), their twins tools/make_xmorph.py's (pylib/xm_jet.py).
+    xm = {xm_units.jet_request(k): vc.JETS[n].mark for n, k in vc.XM_JETS.items()}
+    fly = [c for c in calls.CALLS if c.brings == 'vehicle' and c.jet and not vc.JETS[c.jet].player and c.jet not in xm]
     by_mark = {c.mark: c for c in fly}
     assert len(by_mark) == len(fly), 'two requests of one kind'
+    xm_calls = {c.mark for c in calls.CALLS if c.jet in xm}
+    assert xm_calls == set(xm.values()) and not xm_calls & set(by_mark), sorted(xm_calls)
     for body, frame in frames.items():
         mark = marks[body]
-        assert (mark in by_mark) != (body in left_out), f'{body} (mark {mark:.0f}): requested and left out, or neither'
+        assert (mark in by_mark or mark in xm_calls) != (body in left_out),             f'{body} (mark {mark:.0f}): requested and left out, or neither'
     want = {vc.request_name(k) for k in vc.REQUEST_KINDS}
     assert {c.jet for c in fly} == want, sorted(want ^ {c.jet for c in fly})
     for kind in vc.REQUEST_KINDS:
@@ -4627,7 +4638,7 @@ def xmorph_undeployed_without_its_folder() -> None:
     assert make_xmorph.KINDS, 'no ported X-Morph unit'
     with tempfile.TemporaryDirectory() as root, patch.object(obj_model, 'model_roots', lambda: [root]):
         for kind in make_xmorph.KINDS:
-            call = next(c for c in calls.CALLS if kind in (c.ground, c.heli))
+            call = next(c for c in calls.CALLS if c.kind == kind and c.brings == 'vehicle')
             mission = f'{gen.DERIVED_PREFIX}{kind}_mission'
             assert not make_xmorph.deployable(kind) and cw.undeployed(call) and cw.placeholder(call), kind
             assert cw.sgo_file(call) in cw.parked_sgos() and cw.sgo_file(call) in cw.our_sgos(), kind
@@ -4635,7 +4646,7 @@ def xmorph_undeployed_without_its_folder() -> None:
             with contextlib.redirect_stdout(out):
                 assert make_xmorph.builder(kind).build(root) == {}, kind
             assert out.getvalue().count('\n') == 1 and xm_units.folder(kind) in out.getvalue(), out.getvalue()
-            range_unit = kind not in make_xmorph.HELIS   # the helicopters are not on the test range (yet)
+            range_unit = kind not in make_xmorph.HELIS | make_xmorph.JETS   # the aircraft are not on the test range (yet)
             if range_unit:
                 kept, said = gen.without_missing(root, gen.Plan(vehicles={mission: 1, 'edf6tr_vulcan_mission': 1}))
                 assert mission not in kept.vehicles and 'edf6tr_vulcan_mission' in kept.vehicles and len(said) == 1, said

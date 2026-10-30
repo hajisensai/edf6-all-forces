@@ -249,4 +249,33 @@ python tools/prep_xmorph.py tracked [unit ...] [--out DIR] [--game DIR]
 - **没做 / 风险**：额外旋翼静止；没有第一人称座舱（不在 `COCKPIT_GROUPS`）；不在测试场 / 生成目录；运输直升机保留原版武器；
   布娃娃代理沿用 Eros 尺寸；**未实机验证**（飞行姿态、碰撞盒、座位视角、旋翼转向都只做了离线核对：CAS 默认姿态的世界坐标 = 绑定姿态）。
 
-固定翼（`medium_fighter_aa`、`medium_gunship_aa`、`large_gunship_aa`、`large_bomber_core`）走 `pylib/jet_models.py` 链，另一个 PR。
+## 固定翼（`prep_xmorph.py jet`，2026-10-30）
+
+4 架：`medium_fighter_aa`（战斗机）、`medium_gunship_aa`（攻击机）、`large_gunship_aa`（重型攻击机）、`large_bomber_core`（轰炸机），
+比例 1.0 照原作（战斗机 5.7 m 翼展、7.7 m 长；轰炸机 20.1 m 翼展）。
+
+- **飞行**：本插件自己的喷气机（`src/jet.cpp`），与无畏舰战机同一条路：`pylib/vcobjects.py` `XM_JETS` 的 `Jet` 行（V506 机体、
+  自己的模型），C++ `src/jet_internal.h` `kBodies` 的 `xmFighter` / `xmAttack` / `xmHeavyAttack` / `xmBomber`（mark 7051–7054，
+  落在 `body506.cpp` 的 7001–7099 喷气机段），各按自己的角色飞（战斗机 fighter、两架攻击机 multirole、轰炸机 strike）；
+  `src/playerjet_kinds.h` `kBoardable` 让玩家登机驾驶（任何兵种），弹射后的接机是玩家战斗机（`kXmCatch`）。
+- **呼叫**：每架一行 `EDF6VC_CALL_XM_<KEY>`（`Call.jet` = 请求孪生体 `edf6tr_<key>_request_mission`，`Call.mark` = 机体 mark），
+  和空袭兵的 `EDF6VC_CALL_FLY_*` 一样空投一架空机到信号弹处自己驾驶；不进 `REQUEST_KINDS`（那是 `make_jets` 的，它们的模型是模型包的），
+  NPC 机体 SGO（`EDF6VC_XM_<KEY>.SGO`）与孪生体 SGO（`EDF6VC_FLY_XM_<KEY>.SGO`）由 `make_xmorph`（`pylib/xm_jet.py`）生成，
+  没有模型文件夹就不部署、呼叫行是占位。NPC 机体在 `PreloadJets` 里按文件在不在预载。
+- **模型**：与直升机同一个 `pylib/xm_air_model.py`（没有旋翼：V506 的旋翼骨骼空着留名），`jet_models.XM_FILES` 让
+  `model_box` / `model_bounds` 量到它（门、座位视角由 `vcobjects.jet_sgo` 按模型拟合）；不做网格碰撞复合体（`aircraft_collision`
+  对它返回 False：整机包围盒）。
+- **武器**（现有机制：机枪对 + 挂载，`src/stores.inc` 由 `gen_stores.py` 生成；多武器会话的新字段合入后再迁）：机枪扳机打两个机枪挂点
+  `xm_gun_l` / `xm_gun_r`，导弹扳机打挂载（多个时座舱轮换），挂点骨骼在原作的炮口（`xm_jet.holders`）。挂载是 `vcobjects.STORES`
+  里照现有挂载做的（`Arm.store`：AIM-9X / Hydra 70 / Mk 82 的质量、阻力与外形，原作的伤害、爆炸半径与射速）：
+
+  | 单位 | 耐久 | 机枪扳机 | 导弹扳机 |
+  |---|---|---|---|
+  | 战斗机 | 1200 | 喷气机机炮（原作没有机枪） | 对空导弹 8 发（240，每 3 秒 2 发） |
+  | 攻击机 | 2000 | 喷气机机炮（原作没有机枪） | 火箭弹 38 发（300，每 2 秒 2 发） |
+  | 重型攻击机 | 6000 | 机头两挺转管机枪（150，每 1.5 秒 10 连发） | 火箭弹 64 发（每秒 8 发）/ 对空导弹 16 发 |
+  | 轰炸机 | 9000 | 两翼机炮塔（150，每 1.3 秒 3 连发） | 重磅炸弹 20 发（11400，半径 12 m，每 0.4 秒 1 发） |
+
+- **没做 / 风险**：重型攻击机背上的炮塔（原作自己瞄准）没移植；轰炸机机炮塔、重型攻击机的转管机枪都顺机头方向射；没有第一人称座舱、
+  不在测试场；模型很小（战斗机只有 EDF 战机的三分之一），NPC 飞行参数照角色行，未按尺寸调；**未实机验证**（飞行、起降、挂点位置、
+  座位视角都只做了离线核对）。

@@ -189,6 +189,23 @@ class RotorTests(unittest.TestCase):
             self.assertAlmostEqual(float(np.linalg.det(rows)), 1.0)
 
 
+class JetHolderTests(unittest.TestCase):
+    def test_holders_at_the_games_muzzles(self) -> None:
+        import vcobjects as vc
+        import xm_jet
+        import xm_units
+        info = {'bounds': [[-10, 0, -9], [10, 3, 6]], 'weapons': [{'name': 'bombs', 'muzzles': ['b2', 'b3']}],
+                'attachments': {'gl': [3, 2, 2], 'gr': [-3, 2, 2], 'b2': [-4, -0.2, 0], 'b3': [4, -0.2, 0]}}
+        unit = xm_units.UNITS['xm_large_bomber_core']
+        unit = type(unit)(**{**unit.__dict__, 'air': {**unit.air, 'guns': ('gl', 'gr')}})
+        got = xm_jet.holders(unit, info)
+        self.assertEqual(got, {'xm_gun_l': (3.0, 2.0, 2.0), 'xm_gun_r': (-3.0, 2.0, 2.0), 'xm_bombs': (0.0, -0.2, 0.0)})
+        # vcobjects.JETS hangs its weapons on these, in this order
+        self.assertEqual(vc.JETS[xm_units.jet_name(unit.key)].weapon_bones, tuple(got))
+        nose = xm_jet.holders(type(unit)(**{**unit.__dict__, 'air': {**unit.air, 'guns': ()}}), info)
+        self.assertEqual((nose['xm_gun_l'][2], nose['xm_gun_r'][2]), (6.0, 6.0))      # no gun: the jets' own, at the nose
+
+
 def _box(c, h) -> tuple[np.ndarray, np.ndarray]:  # noqa: ANN001
     """A closed box (EDF frame) wound outward."""
     c, h = np.asarray(c, float), np.asarray(h, float)

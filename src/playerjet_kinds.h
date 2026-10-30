@@ -74,6 +74,7 @@ constexpr const char* kStrikeTwin="no requested twin of its own: the player stri
 constexpr const char* kBomberCatch="a stock bomber a strike jet took over (no SGO of ours to make it): the player strike jet";
 constexpr const char* kCarrierCatch="a 59 x 77 m rotor craft (the catch is a wing's flight): the player fighter";
 constexpr const char* kDnCatch="a Dreadnought fighter (no player twin of its own): the player fighter";
+constexpr const char* kXmCatch="an X-Morph jet (its twin is the model pack's, not always there): the player fighter";
 constexpr const char* kChargeCatch="a rotor drone its own charge destroys (the catch is a wing's flight): the player fighter";
 
 // The player's flight model's numbers (playerjet.cpp Kind, the same fields and units).
@@ -147,6 +148,11 @@ inline constexpr Boardable kBoardable[]={
     {Body::dnDefender,Airframe::wing,Arm::none,Wing("dnDefender",MarkOf(Body::dnDefender),Npc(jet::Role::fighter),15.0f),kCatchPlayerFighter,kDnCatch},
     {Body::dnBomber,Airframe::wing,Arm::none,Wing("dnBomber",MarkOf(Body::dnBomber),Npc(jet::Role::strike),14.0f),kCatchPlayerFighter,kDnCatch},
     {Body::dnInterceptor,Airframe::wing,Arm::none,Wing("dnInterceptor",MarkOf(Body::dnInterceptor),Npc(jet::Role::interceptor),15.0f),kCatchPlayerFighter,kDnCatch},
+    // The X-Morph jets (5.7, 4.8, 12.3, 20.1 m across): requested to fly (tools/calls.py EDF6VC_CALL_XM_*).
+    {Body::xmFighter,Airframe::wing,Arm::none,Wing("xmFighter",MarkOf(Body::xmFighter),Npc(jet::Role::fighter),4.0f),kCatchPlayerFighter,kXmCatch},
+    {Body::xmAttack,Airframe::wing,Arm::none,Wing("xmAttack",MarkOf(Body::xmAttack),Npc(jet::Role::multirole),5.0f),kCatchPlayerFighter,kXmCatch},
+    {Body::xmHeavyAttack,Airframe::wing,Arm::none,Wing("xmHeavyAttack",MarkOf(Body::xmHeavyAttack),Npc(jet::Role::multirole),7.0f),kCatchPlayerFighter,kXmCatch},
+    {Body::xmBomber,Airframe::wing,Arm::none,Wing("xmBomber",MarkOf(Body::xmBomber),Npc(jet::Role::strike),10.0f),kCatchPlayerFighter,kXmCatch},
 };
 constexpr int kBoardableCount=static_cast<int>(sizeof(kBoardable)/sizeof(kBoardable[0]));
 

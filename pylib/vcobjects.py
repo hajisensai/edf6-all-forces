@@ -680,6 +680,17 @@ STORES.update({mounted(k, how): replace(STORES[k], key=how.key, auto=how.auto)
                for mounts in STOCK_MOUNTS.values() for k, how in mounts.items()})
 
 
+def _xm_jet_store(arm: xm_units.Arm) -> Store:
+    like, over = arm.store
+    s = STORES[like]
+    return replace(s, name=arm.names[0], weapon=replace(s.weapon, **over), names=_local(*arm.names))
+
+
+# The X-Morph jets' stores (xm_units Unit.air 'stores'): each made like one of the jets' stores (Arm.store: its mass, drag
+# and look), the game's damage, blast and cadence over it.
+STORES.update({xm_store(u, a): _xm_jet_store(a) for u in xm_units.ported('jet') for a in u.air['stores']})
+
+
 
 # The fuel tank's place in a jet's weapon list and holders: fourth (index 3, or last with fewer), among the four the
 # 506 builds without the plugin's loop patch (src/stores.cpp), so it is always built; the stores past it are the
@@ -736,6 +747,15 @@ _MULTIROLE = _load(('AAM_M', 2), ('AAM_S', 2), ('AGM', 2), ('RKT', 19), ('MK82',
 _STRIKE = _load(('AGM', 6), ('RKT', 38), ('MK82', 6), ('AAM_S', 2))
 _DRONE = _load(('AGM_L', 4))
 _SHIP = _load(('ESSM', 32))
+# The X-Morph jets' (XM_JETS): their gun pair (the jets' gatling with the game's numbers, XM_GUN_FILES; a unit with no gun
+# the jets' own guns), then their stores.
+XM_GUN_FILES: dict[str, tuple[str, str]] = {f'EDF6VC_{u.key.upper()}_GUN_{s}.SGO': (stock, u.key)
+                                            for u in xm_units.ported('jet') if u.air['gun']
+                                            for s, stock in zip('LR', JET_GUN_FILES.values())}
+XM_LOADS: dict[str, tuple[str, ...]] = {
+    u.key: (tuple(_weapon(f) for f, (_s, k) in XM_GUN_FILES.items() if k == u.key) or _GUNS)
+    + tuple(_weapon(store_file(xm_store(u, a), a.rounds)) for a in u.air['stores'])
+    for u in xm_units.ported('jet')}
 HOMING_WEAPONS = tuple(w for jet_weapons in (_FIGHTER, _INTERCEPTOR, _MULTIROLE, _STRIKE, _DRONE, _SHIP)
                        for w in jet_weapons if store_of(w) and STORES[store_of(w)[0]].role in ('air', 'ground'))
 _ARMS = _FIGHTER
@@ -761,6 +781,8 @@ JET_MASSES = {7001.0: 22000.0, 7002.0: 16000.0, 7003.0: 20000.0, 7004.0: 18000.0
               # the Dreadnought's fighters (a light fighter's, the bomber a strike jet's), and the Dreadnought: a
               # supercarrier's displacement (~100 kt)
               7041.0: 14000.0, 7042.0: 15000.0, 7043.0: 22000.0, 7044.0: 13000.0, 7601.0: 1.0e8}
+# ...and the X-Morph jets' (pylib/xm_units.py Unit.air 'mass': small airframes, a light jet's to a medium bomber's)
+JET_MASSES.update({u.air['mark']: u.air['mass'] for u in xm_units.ported('jet')})
 # The Primer creatures (src/primer.cpp, docs/primer-plan.md): enemies. Their guns are the 506 gatling made a glowing
 # round (name -> damage, frames between rounds, m a frame, frames of life, round size, blast radius, colour, spread,
 # the share of the world's gravity it falls at). Damage is per round against the player (the stock gatling's is 10,
@@ -791,12 +813,14 @@ CREATURE_SOUNDS: dict[str, tuple[str, dict[int, str], str]] = {
                   {3: '蜂ヒットエフェクト', 4: '蜂ダメージ', 5: 'EDF6VC_SILENT', 6: '敵共通血しぶき小', 7: '敵共通血しぶき小',
                    8: '蜂死亡'}, '蜂ダメージ'),
 }
-STORE_FILES = tuple(sorted({w.split('/')[-1].upper() for w in (*_FIGHTER, *_INTERCEPTOR, *_MULTIROLE, *_STRIKE, *_DRONE, *_SHIP)
+STORE_FILES = tuple(sorted({w.split('/')[-1].upper() for w in (*_FIGHTER, *_INTERCEPTOR, *_MULTIROLE, *_STRIKE, *_DRONE, *_SHIP,
+                                                                 *(w for load in XM_LOADS.values() for w in load))
                             if store_of(w)}))
-JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *STORE_FILES, *PRIMER_GUN_FILES)
+JET_WEAPON_FILES = (*JET_GUN_FILES, *JET_BLAST_FILES, *STORE_FILES, *PRIMER_GUN_FILES, *XM_GUN_FILES)
 # A derived weapon's stock file: in a vehicle's weapon list it takes the stock one's per-weapon parameters.
 _STOCK_OF = {'app:/weapon/' + d.lower(): 'app:/weapon/' + st.lower()
              for d, st in (*JET_GUN_FILES.items(), *((f, PRIMER_GUN_STOCK) for f in PRIMER_GUN_FILES),
+                           *((f, stock) for f, (stock, _k) in XM_GUN_FILES.items()),
                            *((f, JET_BOMB_STOCK if STORES[store_of(_weapon(f))[0]].role == 'bomb' else JET_MISSILE_STOCK)
                              for f in STORE_FILES))}
 # The 506's sound table rows of its rotor (start-up and the main loop): a jet has no rotor to hear. A name SEPRESET.SGO
@@ -814,7 +838,7 @@ PLAYER_SEAT_POSE, PLAYER_SEAT_CLASSES = '505_TANK_DRIVER', 15
 # made from the strike jet (7001), and the Dreadnought's fighters (7041-7044). The enemy's, the Primer creatures' and the
 # submarine carrier keep the 506's seat.
 BOARDABLE_MARKS = frozenset({7001.0, 7002.0, 7003.0, 7004.0, 7005.0, 7006.0, 7007.0, 7008.0, 7009.0, 7010.0, 7011.0,
-                             7041.0, 7042.0, 7043.0, 7044.0})
+                             7041.0, 7042.0, 7043.0, 7044.0, *(u.air['mark'] for u in xm_units.ported('jet'))})
 
 
 @dataclass(frozen=True)
@@ -1229,6 +1253,20 @@ def request_name(kind: str) -> str:
 
 
 JETS.update({request_name(k): replace(JETS[k], parked=True, requested=True) for k in REQUEST_KINDS})
+# The X-Morph jets (pylib/xm_units.py family jet, docs/xmorph-port.md 「固定翼」): NPC kinds the plugin flies (src/jet_internal.h
+# kBodies, their marks) in their own models (pylib/xm_air_model.py: EDF6VC_XM_<KEY>.MRAB and its CAS, the model pack's
+# folder), each with its requested twin its request brings (tools/calls.py: Call.jet). Their gun pair on its holders
+# xm_gun_l / xm_gun_r, each store on xm_<arm> (pylib/xm_jet.py holders: the game's muzzles). Built by tools/make_xmorph.py
+# (the model folder's), so not in REQUEST_KINDS (tools/make_jets.py's).
+XM_JETS: dict[str, str] = {xm_units.jet_name(u.key): u.key for u in xm_units.ported('jet')}
+for _name, _key in XM_JETS.items():
+    _u = xm_units.UNITS[_key]
+    JETS[_name] = Jet(_u.air['mark'], _u.durability, XM_LOADS[_key],
+                      (f'app:/object/edf6vc_{_key}.mrab', f'edf6vc_{_key}.mdb'), f'EDF6VC_{_key.upper()}.MRAB', 'body', 'body',
+                      weapon_bones=('xm_gun_l', 'xm_gun_r', *(f'xm_{a.key}' for a in _u.air['stores'])),
+                      cas=f'app:/object/edf6vc_{_key}.cas')
+    JETS[request_name(_name)] = replace(JETS[_name], parked=True, requested=True)
+    assert request_name(_name) == xm_units.jet_request(_key), _name
 JET_MODEL = ['app:/object/bomber501.mrab', 'bomber501.mdb']
 # The bomber with elevon bones (tools/make_jets.py writes it): the jets use it when it is installed.
 JET_ELEVON_FILE = 'EDF6VC_JET.MRAB'
@@ -1854,7 +1892,9 @@ def _moves_door(jet: Jet) -> bool:
     import jet_models
     # A requested body measured on a stock bomber model (box_model: the gunship) is boarded on the ground too.
     # A player's vehicle with a model another builder makes (the Sazabi) is boarded on the ground too.
-    return jet.file is None or jet.file in jet_models.MODELS or jet.box_model is not None or jet.player
+    # An X-Morph jet's requested twin is dropped on the ground for the player to board.
+    return (jet.file is None or jet.file in jet_models.MODELS or jet.file in jet_models.XM_FILES or jet.box_model is not None
+            or jet.player)
 
 
 def as_mission_sgo(data: bytes) -> bytes:
@@ -1944,6 +1984,18 @@ def jet_guns(game: Game) -> dict[str, bytes]:
             raise ValueError(f'{stock} 不是预期的直升机机炮')
         r.set('AmmoSpeed', JET_GUN_SPEED)
         r.set('AmmoAlive', JET_GUN_ALIVE)
+        out[name] = dsgo.write(doc)
+    for name, (stock, key) in XM_GUN_FILES.items():
+        # an X-Morph jet's guns (XM_GUN_FILES): the jets' gun (its reach) with the game's numbers (Unit.air 'gun')
+        unit = xm_units.UNITS[key]
+        doc = dsgo.parse(out[next(f for f, s in JET_GUN_FILES.items() if s == stock)])
+        r = doc.root
+        for k, v in unit.air['gun'].items():
+            if k not in r.names.values():
+                raise ValueError(f'{stock}: no {k}')
+            r.set(k, float(v))
+        _named(r, Store(unit.gun[0], 'gun', 0.0, 0.0, Shell(stock, 'SolidBullet01', 'mg'),
+                        _local(unit.gun[0], unit.gun[2], unit.gun[3], unit.gun[1], unit.gun[0])))
         out[name] = dsgo.write(doc)
     for name, (damage, gap, speed, alive, size, blast, colour, spread, gravity) in PRIMER_GUN_FILES.items():
         doc = dsgo.parse(game.read('WEAPON', PRIMER_GUN_STOCK))

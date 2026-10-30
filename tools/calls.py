@@ -349,6 +349,11 @@ def _with_xmorph(hand: tuple[Call, ...]) -> tuple[Call, ...]:
             raise ValueError(f'X-Morph units follow no call there is: {[u.after for u in units]}')
         for u in ready:
             at = [c.id for c in out].index(u.after) + 1
+            if u.family == 'jet':
+                # an empty one to fly, as the plugin's other aircraft (EDF6VC_CALL_FLY_*): its requested twin, its mark
+                out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', u.air['mark'], u.key, False, 0, u.reload, u.level,
+                                    'vehicle', vehicle=f'EDF6VC_FLY_{u.key.upper()}', jet=xm_units.jet_request(u.key)))
+                continue
             which = {'heli': u.key} if u.family == 'heli' else {'ground': u.key}
             out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', 0, u.key, False, 0, u.reload, u.level, 'vehicle',
                                 vehicle=f'EDF6VC_{u.key.upper()}', **which))
@@ -394,6 +399,7 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'X-Morph tracked units and forts (2026-10-27)': IDS[:93],
     'X-Morph JAGUAR Type S (2026-10-30)': IDS[:94],
     'X-Morph helicopters (2026-10-30)': IDS[:99],
+    'X-Morph jets (2026-10-30)': IDS[:103],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row

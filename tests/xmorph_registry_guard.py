@@ -83,7 +83,43 @@ for u in [u for u in ported if u.family == 'heli']:
           and buildcache.MODEL_INPUTS.get(key) == xm_units.folder(key), f'{key}: pylib/buildcache.py groups / ledger')
     check(xm_units.folder(key) in build_release.RELEASE_MODELS, f'{key}: tools/build_release.py RELEASE_MODELS')
     check({'guns', 'missile'} <= set(u.air) or set(u.air) == {'seats'}, f'{key}: Unit.air has neither its arms nor seats')
-for module in ('xm_heli', 'xm_air_model'):
+import re  # noqa: E402
+bodies = {b: (sgo_file, float(mark), role) for b, sgo_file, mark, role in re.findall(
+    r'\{Body::(\w+),L"[^"]*",L"([^"]*)",(\d+)\.0f,Role::(\w+),', re.sub(r'\s+', ' ', text('src/jet_internal.h')))}
+boardable = {b: float(ram) for b, ram in re.findall(r'\{Body::(\w+),Airframe::wing,Arm::none,Wing\("\w+",MarkOf\(Body::\w+\),'
+                                                     r'Npc\(jet::Role::\w+\),([\d.]+)f\)', text('src/playerjet_kinds.h'))}
+for u in [u for u in ported if u.family == 'jet']:
+    # a jet: one of the plugin's aircraft (pylib/vcobjects.py XM_JETS, src/jet_internal.h kBodies) in its own model
+    # (pylib/xm_jet.py), the player's to board (src/playerjet_kinds.h kBoardable), requested empty to fly
+    key, upper, air = u.key, u.key.upper(), u.air
+    name, twin = xm_units.jet_name(key), xm_units.jet_request(key)
+    mine = [c for c in calls.CALLS if c.jet == twin]
+    check(len(mine) == 1 and not mine[0].ground and not mine[0].heli and mine[0].mark == air['mark'],
+          f'{key}: {len(mine)} jet requests in tools/calls.py CALLS (want 1, its mark)')
+    if mine:
+        c = mine[0]
+        check(c.id == calls.ID_PREFIX + upper and c.vehicle == f'EDF6VC_FLY_{upper}' and c.brings == 'vehicle'
+              and c.kind == key, f'{key}: its request {c.id} is not a vehicle request of EDF6VC_FLY_{upper}')
+        at = calls.IDS.index(c.id)
+        check(at > 0 and calls.IDS[at - 1] == u.after, f'{key}: its row does not follow {u.after} (Unit.after)')
+        check(f'{{L"{c.id}",L"{c.id}.SGO",L"EDF6VC_FLY_{upper}.SGO"}}' in calls_inc, f'{key}: src/calls.inc lacks {c.id}')
+    check(set(calls.KINDS.get(key, {})) == set(xm_units.LANGS), f'{key}: tools/calls.py KINDS lacks its texts')
+    check(vc.XM_JETS.get(name) == key and vc.JETS[name].mark == air['mark'] and vc.JETS[twin].requested
+          and vc.JETS[twin].parked and air['mark'] in vc.BOARDABLE_MARKS, f'{key}: pylib/vcobjects.py XM_JETS / JETS')
+    check(name not in vc.REQUEST_KINDS and not name.endswith('_mission'), f'{key}: a make_jets / test range kind')
+    body = air['body']
+    check(bodies.get(body) == (f'EDF6VC_{upper}.SGO', air['mark'], air['role']),
+          f'{key}: src/jet_internal.h kBodies {body} is not {air["mark"]} {air["role"]}')
+    check(boardable.get(body) == air['ram'], f'{key}: src/playerjet_kinds.h kBoardable {body} (ram {air["ram"]})')
+    for a in air['stores']:
+        check(f'{{L"EDF6VC_{vc.xm_store(u, a)}_"' in stores_inc, f'{key}: src/stores.inc lacks {vc.xm_store(u, a)} (gen_stores)')
+    check(f'{{{air["mark"]:.1f}f,L"' in stores_inc, f'{key}: src/stores.inc kJetWeapons lacks its mark (gen_stores)')
+    check(key in make_xmorph.KINDS and key in make_xmorph.JETS and buildcache.generator(key) == 'make_xmorph'
+          and buildcache.tool(key) is make_xmorph.builder(key), f'{key}: tools/make_xmorph.py / pylib/buildcache.py tool')
+    check(key in ledger.OWNERS and key in buildcache.GROUPS and key not in buildcache.COCKPIT_GROUPS
+          and buildcache.MODEL_INPUTS.get(key) == xm_units.folder(key), f'{key}: pylib/buildcache.py groups / ledger')
+    check(xm_units.folder(key) in build_release.RELEASE_MODELS, f'{key}: tools/build_release.py RELEASE_MODELS')
+for module in ('xm_heli', 'xm_jet', 'xm_air_model'):
     check(f"'{module}'" in hidden, f'tools/build_release.py: {module} is not a hidden import of the installer')
 for u in xm_units.v603():
     key, upper, mission = u.key, u.key.upper(), f'{gen.DERIVED_PREFIX}{u.key}_mission'

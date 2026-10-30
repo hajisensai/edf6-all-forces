@@ -32,7 +32,8 @@ Families (the chassis an EDF6 class drives; tools/prep_xmorph.py has one prepare
     mech         planned: the Proteus / Balam walkers
     emplacement  a fort's gun on pylib/emplacement_model.py's fortified base (the V603, tools/prep_xmorph.py emplacement)
     heli         the stock V506 heli in its own model (pylib/xm_heli.py, pylib/xm_air_model.py; tools/prep_xmorph.py heli)
-    jet          planned: the jets (pylib/jet_models.py)
+    jet          the plugin's own aircraft in its own model (pylib/vcobjects.py XM_JETS, pylib/xm_air_model.py; tools/
+                 prep_xmorph.py jet): src/jet.cpp flies it (kBodies), the player boards it (kBoardable)
     infantry     planned
     boss         planned: the game's bosses (parts each: xm_model.assemble), until their chassis is known (docs/
                  xmorph-bosses.md); a boss whose chassis is one of the above is ported as that family (the JAGUAR
@@ -96,6 +97,10 @@ class Arm:
     # blueprint's turret for its weapon: its yaw bone's mesh and its pitch bone's), {} none: it rides `bone`.
     turret: dict = field(default_factory=dict)
 
+    # A jet's store (Unit.air 'stores', family jet): (the vcobjects STORES kind it is made like, its Missile / Bomb
+    # fields over that one's): the like's mass, drag and look, the game's damage, blast and cadence.
+    store: tuple = ()
+
     @property
     def holder_bone(self) -> str:
         """The bone its holder and muzzles ride: its own turret's pitch bone, else `bone`."""
@@ -148,6 +153,11 @@ class Unit:
     # An aircraft's (family heli: pylib/xm_heli.py) weapons on the V506's holders: 'guns' the pair the gun trigger fires
     # together (veh+0x2020: holders 0 and 1), 'missile' the missile trigger's (holder 2); each a HeliArm. 'seats': the
     # passenger seats it carries over the V506's (the transport's, tools/make_jets.py with_passenger_seats).
+    # A jet's (family jet: pylib/vcobjects.py XM_JETS, flown by the plugin as its other aircraft): 'mark' (src/jet_internal.h
+    # kBodies, its body 'body' flying its 'role' row), 'mass' (kg, clean: vcobjects JET_MASSES, by a real jet its size),
+    # 'ram' (src/playerjet_kinds.h kBoardable: m, half its size), 'guns'
+    # (the gun pair's muzzle attachments, left and right) and 'gun' (their SGO numbers over the jets' gatling: empty,
+    # the stock jet guns: the unit has no gun), 'stores' (Arm, each with `store`: on the missile trigger, cycled).
     air: dict = field(default_factory=dict)
 
 
@@ -530,10 +540,101 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                                 'FireInterval': 300.0})},
        # models/xm_large_gunship_core: 23.6 x 7.4 x 25.2 m
        eye=(0.0, 11.0, -9.0), durability=12000.0, reload=22000, level=4.5, after='EDF6VC_CALL_XM_LARGE_HELICOPTER_TRANSPORT'),
-    _u('air/medium_fighter_aa', 'jet', title='Fighter'),
-    _u('air/medium_gunship_aa', 'jet', title='Attack Plane'),
-    _u('air/large_gunship_aa', 'jet', title='Heavy Attack Plane'),
-    _u('air/large_bomber_core', 'jet', title='Bomber'),
+    # The jets (pylib/vcobjects.py XM_JETS): the plugin flies them as its other aircraft (src/jet.cpp: an NPC pilot's,
+    # their kBodies rows; the player's, their kBoardable rows), each its role's way; their requests bring one empty to fly
+    # (the Air Raider's EDF6VC_CALL_FLY_* way). Their gun pair on the gun trigger, their stores on the missile trigger.
+    # The fighter: an air-superiority jet with no gun (main_weapon: fire_rate 3, two 0.4 s apart from its two wing rails:
+    # enemy_missile_anti_aa_small, 8 anti_player, homing on flyers). Its gun trigger fires the jets' own guns.
+    _u('air/medium_fighter_aa', 'jet', status='ported', title='Fighter',
+       texts={'SC': ('X-Morph 战斗机', '请求一架人类军队的战斗机，空投到信号弹处后自己驾驶：原作只挂对空导弹，这里导弹键发射翼下对空导弹'
+                                     '（每三秒两枚，追踪空中目标），机炮键是本插件喷气机的机炮；机体很小、装甲很薄。'),
+              'CN': ('X-Morph 戰鬥機', '請求一架人類軍隊的戰鬥機，空投到信號彈處後自己駕駛：原作只掛對空飛彈，這裡飛彈鍵發射翼下對空飛彈'
+                                     '（每三秒兩枚，追蹤空中目標），機砲鍵是本插件噴射機的機砲；機體很小、裝甲很薄。'),
+              'JA': ('X-Morph 戦闘機', '人類軍の戦闘機を要請し、信号弾の位置に届いた機体を自分で操縦する。原作は対空ミサイルのみで、ここではミサイル'
+                                     'キーで翼下の対空ミサイル（3 秒に 2 発、空中目標を追尾）、機銃キーで本プラグインのジェット機関砲を撃つ。'
+                                     '機体は小さく装甲は薄い。'),
+              'EN': ('X-Morph Fighter', "Requests the human army's fighter, dropped empty at the flare for you to fly: in the "
+                                        'game it carries only air-to-air missiles; here its missile trigger fires them from '
+                                        'its wing rails (two every 3 s, homing on flyers) and its gun trigger the jets\' own '
+                                        'cannon; very small, thin armour.')},
+       gun=('Jet Cannon', '机炮', '機関砲', '機砲'),
+       air={'mark': 7051.0, 'mass': 5000.0, 'body': 'xmFighter', 'role': 'fighter', 'ram': 4.0, 'guns': (), 'gun': {},
+            'stores': (Arm('aam', ('main_weapon',), 'air', ('AA Missiles', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'),
+                           8, store=('AAM_S', {'damage': 240.0, 'blast': 3.0, 'burst': 2.0, 'burst_gap': 24.0, 'interval': 180.0})),)},
+       # models/xm_medium_fighter_aa: 5.7 x 1.6 x 7.7 m
+       eye=(0.0, 2.6, -6.5), durability=1200.0, reload=7000, level=1.0, after='EDF6VC_CALL_XM_LARGE_GUNSHIP_CORE'),
+    # The attack plane: two rocket pods under its wings (main_weapon: fire_rate 2, two 0.4 s apart: enemy_rocket_small,
+    # 10 anti_player, barely guided), no gun.
+    _u('air/medium_gunship_aa', 'jet', status='ported', title='Attack Plane',
+       texts={'SC': ('X-Morph 攻击机', '请求一架人类军队的攻击机，空投到信号弹处后自己驾驶：导弹键发射翼下火箭弹（每两秒两枚，几乎不制导），'
+                                     '机炮键是本插件喷气机的机炮（原作没有机炮）；机体小、装甲薄。'),
+              'CN': ('X-Morph 攻擊機', '請求一架人類軍隊的攻擊機，空投到信號彈處後自己駕駛：飛彈鍵發射翼下火箭彈（每兩秒兩枚，幾乎不制導），'
+                                     '機砲鍵是本插件噴射機的機砲（原作沒有機砲）；機體小、裝甲薄。'),
+              'JA': ('X-Morph 攻撃機', '人類軍の攻撃機を要請し、信号弾の位置に届いた機体を自分で操縦する。ミサイルキーで翼下のロケット弾（2 秒に 2 発、'
+                                     'ほぼ無誘導）、機銃キーで本プラグインのジェット機関砲（原作に機銃はない）を撃つ。機体は小さく装甲は薄い。'),
+              'EN': ('X-Morph Attack Plane', "Requests the human army's attack plane, dropped empty at the flare for you to fly: "
+                                             'its missile trigger fires the rocket pods under its wings (two every 2 s, barely '
+                                             'guided), its gun trigger the jets\' own cannon (it has no gun in the game); '
+                                             'small, thin armour.')},
+       gun=('Jet Cannon', '机炮', '機関砲', '機砲'),
+       air={'mark': 7052.0, 'mass': 6000.0, 'body': 'xmAttack', 'role': 'multirole', 'ram': 5.0, 'guns': (), 'gun': {},
+            'stores': (Arm('rockets', ('main_weapon',), 'rocket', ('Rockets', 'ロケット', '火箭', '火箭', '로켓'), 38,
+                           store=('RKT', {'damage': 300.0, 'blast': 3.0, 'burst': 2.0, 'burst_gap': 24.0, 'interval': 120.0})),)},
+       # models/xm_medium_gunship_aa: 4.8 x 2.8 x 9.2 m
+       eye=(0.0, 4.0, -7.5), durability=2000.0, reload=9000, level=1.5, after='EDF6VC_CALL_XM_MEDIUM_FIGHTER_AA'),
+    # The heavy attack plane: a gun turret on its back (main_gun: fire_rate 1.5, five 0.1 s apart), two miniguns in its
+    # nose (miniguns: fire_rate 1.5, ten 0.08 s apart; both enemy_bullet_small: 5 anti_player), eight rocket pods
+    # (fire_rate 0.25 each) and four missile rails (fire_rate 3, two 0.4 s apart each). The miniguns are its gun pair
+    # (the turret, which the game aims by itself, is not ported: EDF's aircraft guns fire along the nose).
+    _u('air/large_gunship_aa', 'jet', status='ported', title='Heavy Attack Plane',
+       texts={'SC': ('X-Morph 重型攻击机', '请求一架人类军队的重型攻击机，空投到信号弹处后自己驾驶：机炮键是机头两挺转管机枪（每一秒半十发连射），'
+                                       '导弹键在八个火箭巢（快速连射）和四条对空导弹滑轨之间切换；固定翼中火力最猛。'),
+              'CN': ('X-Morph 重型攻擊機', '請求一架人類軍隊的重型攻擊機，空投到信號彈處後自己駕駛：機砲鍵是機頭兩挺轉管機槍（每一秒半十發連射），'
+                                       '飛彈鍵在八個火箭巢（快速連射）和四條對空飛彈滑軌之間切換；固定翼中火力最猛。'),
+              'JA': ('X-Morph 重攻撃機', '人類軍の重攻撃機を要請し、信号弾の位置に届いた機体を自分で操縦する。機銃キーで機首の 2 門のミニガン'
+                                       '（1.5 秒ごとに 10 発連射）、ミサイルキーで 8 基のロケットポッド（高速連射）と 4 本の対空ミサイルを'
+                                       '切り替えて撃つ。固定翼で最も火力が高い。'),
+              'EN': ('X-Morph Heavy Attack Plane', "Requests the human army's heavy attack plane, dropped empty at the flare for "
+                                                   'you to fly: its gun trigger fires the two miniguns in its nose (bursts of '
+                                                   'ten every 1.5 s), its missile trigger its eight rocket pods (a fast '
+                                                   'ripple) or its four air-to-air missile rails, cycled; the heaviest fire of '
+                                                   'the fixed-wing craft.')},
+       gun=('Miniguns', '转管机枪', 'ミニガン', '轉管機槍'),
+       air={'mark': 7053.0, 'mass': 15000.0, 'body': 'xmHeavyAttack', 'role': 'multirole', 'ram': 7.0,
+            'guns': ('att_minigun_2', 'att_minigun_1'),
+            'gun': {'AmmoCount': 900.0, 'AmmoDamage': 150.0, 'FireInterval': 90.0, 'FireBurstCount': 10.0,
+                    'FireBurstInterval': 5.0},
+            'stores': (Arm('rockets', tuple(f'{s}_wing_missiles_{p}_{n}' for s in ('left', 'right') for p in ('inner', 'outer')
+                                            for n in (1, 2)), 'rocket', ('Rockets', 'ロケット', '火箭', '火箭', '로켓'), 64,
+                           store=('RKT', {'damage': 300.0, 'blast': 3.0, 'burst': 8.0, 'burst_gap': 4.0, 'interval': 60.0})),
+                       Arm('aam', ('missile_left_1', 'missile_left_2', 'missile_right_1', 'missile_right_2'), 'air',
+                           ('AA Missiles', '対空ミサイル', '防空飛彈', '防空导弹', '대공 미사일'), 16,
+                           store=('AAM_S', {'damage': 240.0, 'blast': 3.0, 'burst': 8.0, 'burst_gap': 12.0, 'interval': 180.0})))},
+       # models/xm_large_gunship_aa: 12.3 x 4.0 x 14.5 m
+       eye=(0.0, 6.0, -11.0), durability=6000.0, reload=16000, level=3.0, after='EDF6VC_CALL_XM_MEDIUM_GUNSHIP_AA'),
+    # The bomber: a bomb bay (bombs: fire_rate 0.4 from two racks: enemy_bomb_big, 95 anti_core_bombs + Area 8) and two
+    # gun turrets on its wings (left_turret / right_turret: fire_rate 1.3, three 0.2 s apart: enemy_bullet_small), which
+    # here are its gun pair.
+    _u('air/large_bomber_core', 'jet', status='ported', title='Bomber',
+       texts={'SC': ('X-Morph 轰炸机', '请求一架人类军队的轰炸机，空投到信号弹处后自己驾驶：导弹键从弹舱投下重磅炸弹（每零点四秒一枚，大范围爆炸），'
+                                     '机炮键是两翼的机炮塔（每一秒多三发）；固定翼中装甲最厚。'),
+              'CN': ('X-Morph 轟炸機', '請求一架人類軍隊的轟炸機，空投到信號彈處後自己駕駛：飛彈鍵從彈艙投下重磅炸彈（每零點四秒一枚，大範圍爆炸），'
+                                     '機砲鍵是兩翼的機砲塔（每一秒多三發）；固定翼中裝甲最厚。'),
+              'JA': ('X-Morph 爆撃機', '人類軍の爆撃機を要請し、信号弾の位置に届いた機体を自分で操縦する。ミサイルキーで爆弾倉から大型爆弾'
+                                     '（0.4 秒に 1 発、広い爆発）を落とし、機銃キーで両翼の機銃塔（1.3 秒ごとに 3 発）を撃つ。固定翼で最も装甲が厚い。'),
+              'EN': ('X-Morph Bomber', "Requests the human army's bomber, dropped empty at the flare for you to fly: its missile "
+                                       'trigger drops heavy bombs from its bay (one every 0.4 s, a wide blast), its gun trigger '
+                                       'fires the gun turrets on its wings (three every 1.3 s); the heaviest armour of the '
+                                       'fixed-wing craft.')},
+       gun=('Wing Gun Turrets', '翼上机炮塔', '翼銃塔', '翼上機砲塔'),
+       air={'mark': 7054.0, 'mass': 30000.0, 'body': 'xmBomber', 'role': 'strike', 'ram': 10.0,
+            'guns': ('att_left_turret_muzzle_1', 'att_right_turret_muzzle_1'),
+            'gun': {'AmmoCount': 600.0, 'AmmoDamage': 150.0, 'FireInterval': 78.0, 'FireBurstCount': 3.0,
+                    'FireBurstInterval': 12.0},
+            'stores': (Arm('bombs', ('bombs',), 'bomb', ('Heavy Bombs', '大型爆弾', '重磅炸彈', '重磅炸弹', '대형 폭탄'), 20,
+                           store=('MK82', {'damage': 11400.0, 'blast': 12.0, 'interval': 24.0})),)},
+       # models/xm_large_bomber_core: 20.1 x 2.8 x 15.0 m
+       eye=(0.0, 5.0, -13.0), durability=9000.0, reload=20000, level=4.0, after='EDF6VC_CALL_XM_LARGE_GUNSHIP_AA'),
     # bosses
     # The JAGUAR Type S (the game's highway_tank boss, story_germany: 「the prototype JAGUAR Type S tank」): a 46 m tracked
     # hull of eighteen parts (xm_model.assemble: the tracks, the turrets, the pods; tools/prep_xmorph.py BELT_FLOOR), a
@@ -629,7 +730,7 @@ assert all(u.family in FAMILIES for u in UNITS.values())
 assert all(u.status in ('ported', 'planned') for u in UNITS.values())
 # The families with their EDF-side builder (tools/make_xmorph.py over make_tracked_combat: both on the V603, a tracked
 # unit through pylib/wt_tracked.py, an emplacement through pylib/emplacement_model.py's fortified base).
-PORTABLE = ('tracked', 'emplacement', 'heli')
+PORTABLE = ('tracked', 'emplacement', 'heli', 'jet')
 V603 = ('tracked', 'emplacement')
 
 
@@ -652,6 +753,16 @@ for _unit in UNITS.values():
 
 def ported(family: str | None = None) -> list[Unit]:
     return [u for u in UNITS.values() if u.status == 'ported' and (family is None or u.family == family)]
+
+
+def jet_name(key: str) -> str:
+    """A jet's NPC kind (pylib/vcobjects.py JETS: no _mission, the test range places none)."""
+    return f'edf6tr_{key}'
+
+
+def jet_request(key: str) -> str:
+    """...and its requested twin's (vcobjects.request_name of it): what its request (tools/calls.py Call.jet) brings."""
+    return f'edf6tr_{key}_request_mission'
 
 
 def folder(key: str) -> str:
