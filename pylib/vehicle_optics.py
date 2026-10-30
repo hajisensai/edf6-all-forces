@@ -22,9 +22,25 @@ from mdb import Bone, Mdb, bind_world, ident, inverse_affine, mdb_read, mdb_writ
 from mdb_jet import link
 
 
+# What the gunner looks through at a marker, by its name's prefix (src/optic_mount.h kFamilies, sightzoom.h Eyepiece;
+# the user, 2026-10-30: "有些瞄具周围不应该是全黑的，有些是单眼看的瞄具"): a biocular eyepiece (both eyes in its cups:
+# black round the field), a monocular telescope (one eye at its cup: the view round it dimmed, not black), an unmanned
+# station's gun camera (its operator's monitor: no eyepiece). docs/feedback-2026-10-30-sights.md lists every lens's.
+EYEPIECES = {'vc_optic_': 'binocular', 'vc_monoc_': 'monocular', 'vc_camera_': 'camera'}
+
+
+def eyepiece(marker: str) -> str:
+    """The eyepiece marker `marker` names (<prefix><nn>, nn 00..15: optic_mount.h kMaxAnchors)."""
+    for prefix, kind in EYEPIECES.items():
+        tail = marker[len(prefix):]
+        if marker.startswith(prefix) and len(tail) == 2 and tail.isdigit():
+            return kind
+    raise ValueError(f'not an optic marker: {marker}')
+
+
 @dataclass(frozen=True)
 class Lens:
-    marker: str
+    marker: str   # its name says its eyepiece (EYEPIECES)
     bone: str
     material: str = ''
     faces: tuple[int, ...] = ()
@@ -60,16 +76,19 @@ MODELS = (
     # on the turret's yaw bone; the pane faces 30 degrees outboard of the bore, so the marker looks along the bore.
     Model('VEHICLE403_TANK', '6de3f5b56bc7acb0d80b2d05a395d9ab4970a931f9966f69cb511055a9cf1baa',
           (Lens('vc_optic_00', 'cannon_main', 'Material4', (1586, 1587), bore=True),
-           Lens('vc_optic_01', 'MachineGun_A_aim', camera='カメラ２'),
-           Lens('vc_optic_02', 'MachineGun_B_aim', camera='カメラ３'))),
+           # The side machine guns: unmanned stations (cockpit_fits remote_display), their native gun cameras.
+           Lens('vc_camera_01', 'MachineGun_A_aim', camera='カメラ２'),
+           Lens('vc_camera_02', 'MachineGun_B_aim', camera='カメラ３'))),
     Model('VEHICLE404_BIGTANK', '23cfe876e973a16b46a41e40eb8c78eac363f1593af2f5d385545c270a055753',
           (Lens('vc_optic_00', 'cannon_aim', 'barbette8', (768, 769)),
-           Lens('vc_optic_01', 'subCannon_A_roll', 'barbette8', (1220, 1221, 1222, 1223)),
-           Lens('vc_optic_02', 'subCannon_B_roll', 'barbette8', (3100, 3101, 3102, 3103)))),
+           # The sub-turrets: unmanned (cockpit_fits_ground remote_display), their sight glass a gun camera's window.
+           Lens('vc_camera_01', 'subCannon_A_roll', 'barbette8', (1220, 1221, 1222, 1223)),
+           Lens('vc_camera_02', 'subCannon_B_roll', 'barbette8', (3100, 3101, 3102, 3103)))),
     # Grape remote turret: the sight head's window on the turret roof (the cylinder left of the gun, its tinted pane
-    # at uv (0.973-0.991, 0.522-0.555)), Material6 object/mesh 0/3 triangles 4905-4906, on the turret's yaw bone.
+    # at uv (0.973-0.991, 0.522-0.555)), Material6 object/mesh 0/3 triangles 4905-4906, on the turret's yaw bone. The
+    # turret is remote (no room in it: cockpit_fits_ground): the head is its camera, the driver sees its monitor.
     Model('VEHICLE401_STRIKER', 'f54ebc238331b9b357ee6b01ad74ec8f4d442695a3db66bfeea69ff5f81fe0f9',
-          (Lens('vc_optic_00', 'Battery', 'Material6', (4905, 4906)),)),
+          (Lens('vc_camera_00', 'Battery', 'Material6', (4905, 4906)),)),
 )
 
 
@@ -252,6 +271,7 @@ def add_marker(md: Mdb, parent_name: str, marker: str, frame: list[float]) -> Md
 def mark_model(md: Mdb, spec: Model, sgo_data: bytes) -> Mdb:
     world = bind_world(md)
     for lens in spec.lenses:
+        eyepiece(lens.marker)   # a name the runtime reads (EYEPIECES), or the build stops here
         parent = md.bone_index(lens.bone)
         if parent < 0:
             raise ValueError('unexpected source optic skeleton')

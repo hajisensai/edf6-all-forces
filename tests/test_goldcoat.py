@@ -473,7 +473,7 @@ class Game(unittest.TestCase):
         rab = mdb.rab_read(data)
         md = model_of(rab, 'Vehicle502_groundrobogold.mdb')
         names = [md.name_of(b.name) for b in md.bones]
-        self.assertFalse([n for n in names if n.startswith(('vc_eye_', 'vc_optic_'))])
+        self.assertFalse([n for n in names if n.startswith(('vc_eye_', 'vc_optic_', 'vc_monoc_', 'vc_camera_'))])
         stock = model_of(mdb.rab_read(game.read('OBJECT', 'VEHICLE502_GROUNDROBOGOLD.MRAB')), 'Vehicle502_groundrobogold.mdb')
         self.assertEqual(sorted(names), sorted(stock.name_of(b.name) for b in stock.bones))
         mat = next(m for m in md.materials if md.name_of(m.name) == 'groundrobo')

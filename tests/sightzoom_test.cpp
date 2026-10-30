@@ -21,6 +21,7 @@ float roundSpeed=0.0f,roundFactor=0.0f;
 int wheelNotches=0;bool wheelHeld=false;
 alignas(16) unsigned char bones[5*weaponmount::kStride]{};
 bool opticPresent=true,extraOptic=false;
+const wchar_t* opticName=L"vc_optic_00";   // the anchor's name: its family is its eyepiece (optic_mount.h kFamilies)
 float muzzleDirection[3]={0,0,1};
 LookToFn testedLookTo=nullptr;
 unsigned char weapon[0x1000]{},secondWeapon[0x1000]{},holder[0x100]{},secondHolder[0x100]{};
@@ -43,7 +44,7 @@ float* __fastcall LookFixture(float* m,const float* d) {
     m[8]=d[0];m[9]=d[1];m[10]=d[2];return m;
 }
 void Setup() {
-    ResetSightZoom();applied=Applied{};config=Config{};observing=false;installed=true;nextCamStep=&Original;opticLookTo=testedLookTo ? testedLookTo : &LookFixture;opticPresent=true;extraOptic=false;gunnerSight=false;
+    ResetSightZoom();applied=Applied{};config=Config{};observing=false;installed=true;nextCamStep=&Original;opticLookTo=testedLookTo ? testedLookTo : &LookFixture;opticPresent=true;extraOptic=false;opticName=L"vc_optic_00";gunnerSight=false;
     muzzleDirection[0]=muzzleDirection[1]=0;muzzleDirection[2]=1;
     mapKeys=false;mapView=false;highView=false;sazabiVehicle=false;paused=false;originalWrites=true;originalFov=sightzoom::kBaseFov;playerHuman=human;
     highActive=highReturning=heliVehicle=aircraft=gunship=fuel=lobbed=false;roundSpeed=roundFactor=0.0f;wheelNotches=0;knownRound=hud=true;roundKind=RoundKind::arc;roundStyle=WeaponStyle::projectile;pickedWeapon=nullptr;
@@ -98,7 +99,7 @@ float Sight(){Fov();return std::asin(At<float>(camera,kCamMatrix+36));}
 }
 unsigned char* BoneRecord506(const unsigned char*,const wchar_t* name) noexcept {
     if(extraOptic && std::wcscmp(name,L"vc_optic_01")==0)return bones+4*weaponmount::kStride;
-    return opticPresent && std::wcscmp(name,L"vc_optic_00")==0 ? bones+3*weaponmount::kStride : nullptr;
+    return opticPresent && std::wcscmp(name,opticName)==0 ? bones+3*weaponmount::kStride : nullptr;
 }
 const Config& Cfg() noexcept{return config;}
 bool FirstPersonGunnerSight() noexcept{return gunnerSight;}
@@ -240,15 +241,26 @@ int wmain(int argc,wchar_t** argv){
     Fov();Check(At<float>(camera,kCamMatrix+48)==4 && At<float>(camera,kCamMatrix+52)==5 && At<float>(camera,kCamMatrix+56)==6,
                 "scope eye uses physical optic bone, not third-person camera or muzzle");
     Check(SightZoomMounted(vehicle),"active physical view asks turret input to stay native");
-    // War Thunder's gunner sight: in a vehicle's first person the mounted optic is the view at 1x too.
-    Setup();Button(0);gunnerSight=true;
-    Check(SightZoomNow(vehicle)==1 && SightZoomMounted(vehicle),"first person: the optic is up at 1x (the gunner's sight)");
+    // War Thunder's gunner sight: in a vehicle's first person the mounted optic is the view at 1x too, once the sight key
+    // raises it; first person starts at the cockpit's eye (the user, 2026-10-30: "驾驶室视角得按观察键才显示。该成瞄准键？").
+    Setup();gunnerSight=true;Button(0);
+    Check(SightZoomNow(vehicle)==1 && !SightZoomMounted(vehicle) && !SightZoomRaised(vehicle),"first person: the cockpit's eye first, the optic down");
+    Button(0x80);
+    Check(SightZoomNow(vehicle)==1 && SightZoomMounted(vehicle) && SightZoomRaised(vehicle),"first person: the sight key raises the optic at 1x (the gunner's sight)");
     Fov();Check(At<float>(camera,kCamMatrix+48)==4 && At<float>(camera,kCamMatrix+52)==5 && At<float>(camera,kCamMatrix+56)==6 &&
                 Fov()==originalFov,"first person at 1x: the eye on the optic bone, the field of view unmagnified");
     observing=true;
     Check(!SightZoomMounted(vehicle) && Fov()==originalFov,"free look yields the mounted optic to the seat camera");
     observing=false;Check(SightZoomMounted(vehicle),"releasing observation resumes the same mounted optic");
+    observing=true;Check(SightZoomRaised(vehicle),"the look key turns the head, it does not lower the sight");observing=false;
+    Button(0);Button(0x80);Check(SightZoomNow(vehicle)==3 && SightZoomMounted(vehicle),"first person: then 3x");
+    Button(0);Button(0x80);Check(SightZoomNow(vehicle)==6 && SightZoomMounted(vehicle),"first person: then 6x");
+    Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1 && !SightZoomMounted(vehicle),"first person: then back to the cockpit's eye");
+    Button(0);Button(0x80);Check(SightZoomMounted(vehicle),"and raised again");
     gunnerSight=false;Check(!SightZoomMounted(vehicle),"first person off: 1x is the turret camera's again");
+    Button(0);gunnerSight=true;Button(0);Check(!SightZoomMounted(vehicle),"first person on again: the cockpit's eye, not the sight left raised");
+    Setup();Zoom();gunnerSight=true;Button(0);Check(SightZoomNow(vehicle)==3 && SightZoomMounted(vehicle),"3x from third person stays 3x in first person");
+    Button(0x80);Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1 && !SightZoomMounted(vehicle),"...then 6x and the cockpit");
     // The sight's field over the view (SightZoomScope, sightzoom.h ScopeField): what hud.cpp draws its eyepiece by and
     // holds the stock crosshair back by (scope_hold.h; 2026-10-21 "进入瞄具状态的时候没隐藏准星"): from one snapshot, the
     // soldier looking through it named, gone with the field.
@@ -257,16 +269,28 @@ int wmain(int argc,wchar_t** argv){
         Setup();Button(0);
         Check(!SightZoomScope(&s) && !s.human && s.zoom==1.0f,"1x in third person: no field (the turret camera's view)");
         Zoom();
-        Check(SightZoomScope(&s) && s.human==human && s.vehicle==vehicle && s.kind==sightzoom::Kind::optical && s.zoom==3.0f,
-              "magnified: the field, its soldier and power");
+        Check(SightZoomScope(&s) && s.human==human && s.vehicle==vehicle && s.kind==sightzoom::Kind::optical && s.zoom==3.0f &&
+              s.eyepiece==sightzoom::Eyepiece::binocular,"magnified: the field, its soldier and power, a vc_optic_ biocular eyepiece");
         mapView=true;Check(!SightZoomScope(&s) && !s.human,"the map's view: no field");
         mapView=false;Put<void*>(seats,kSeatRider,otherHuman);
         Check(!SightZoomScope(&s) && !s.human,"another local player in the seat: not this soldier's field");
-        Setup();Button(0);gunnerSight=true;
-        Check(SightZoomScope(&s) && s.human==human && s.zoom==1.0f,"first person at 1x: the mounted optic's field");
+        Setup();gunnerSight=true;Button(0);
+        Check(!SightZoomScope(&s),"first person at the cockpit's eye: no field");
+        Button(0x80);
+        Check(SightZoomScope(&s) && s.human==human && s.zoom==1.0f,"first person at 1x, raised: the mounted optic's field");
         Setup();opticPresent=false;gunnerSight=true;Button(0);
         Check(!SightZoomScope(&s),"first person without an optic: the cockpit's eye, no field (its stock HUD is first person's)");
         Setup();highActive=true;Button(0);Button(0x80);Check(!SightZoomScope(&s),"the overhead view has no field");
+        // The anchor's family is what the field is (the user, 2026-10-30: "有些瞄具周围不应该是全黑的，有些是单眼看的瞄具").
+        Setup();opticName=L"vc_monoc_07";Zoom();
+        Check(SightZoomScope(&s) && s.eyepiece==sightzoom::Eyepiece::monocular &&
+              sightzoom::MaskOf(s.kind,s.eyepiece)==sightzoom::Mask::monocular,"a vc_monoc_ anchor: a monocular telescope's field");
+        Setup();opticName=L"vc_camera_01";Zoom();
+        Check(SightZoomScope(&s) && SightZoomMounted(vehicle) && s.eyepiece==sightzoom::Eyepiece::camera &&
+              sightzoom::MaskOf(s.kind,s.eyepiece)==sightzoom::Mask::sensor,
+              "a vc_camera_ anchor: still the mounted sight (its eye, its power), seen as the station's monitor, no eyepiece");
+        Setup();opticName=L"vc_optic_16";Button(0);Button(0x80);
+        Check(!SightZoomMounted(vehicle) && SightZoomNow(vehicle)==1,"a number past kMaxAnchors is no anchor");
     }
     Setup();opticPresent=false;gunnerSight=true;Button(0);
     Check(!SightZoomMounted(vehicle),"first person in a seat without an optic: no gunner's sight (the cockpit's eye)");
@@ -312,6 +336,8 @@ int wmain(int argc,wchar_t** argv){
     // the camera's line of sight is laid under the bore by
     // the round's superelevation for that range, the setting kept across the seat's weapons and dropped with the seat.
     Setup();gunnerSight=true;roundSpeed=10.0f;roundFactor=1.0f;Button(0);
+    Check(!wheelHeld,"first person at the cockpit's eye: the wheel stays the game's");
+    Button(0x80);Button(0);
     Check(wheelHeld,"first person at 1x: the gunner's sight takes the wheel (its range)");
     wheelNotches=3;Button(0);Check(SightZoomRange(vehicle)==75,"first person at 1x: three notches set 75 m, as magnified");
     Setup();Button(0);Check(!wheelHeld,"at 1x the wheel stays the game's");

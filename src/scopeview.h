@@ -1,7 +1,8 @@
 // A magnified sight's picture (the user, 2026-10-08: "the gunner's sight: the zoomed one too, and not only ground
 // vehicles: everything that has a sight"): while the sight is magnified (sightzoom.cpp, SightZoomNow > 1) the screen
 // is the sight's field of view, the rest dark. A round one for an optical sight (a tank's, a gun's), centred on the
-// screen (the camera's line of sight: what the sight looks along). An electronic sensor (the gunship gunner's, a remote
+// screen (the camera's line of sight: what the sight looks along); a monocular one's (a telescope's eyecup: Radius
+// with `monocular`) a smaller field in a black ring, the view round it dimmed, not dark. An electronic sensor (the gunship gunner's, a remote
 // weapon station's monitor) is a screen of its own and fills the whole view (the user, 2026-10-25: "武器站改成全屏显示，
 // 周围好多黑块"; it was a 4:3 box in black bands): only its bezel and corner marks, a little inside the view's edge.
 // The dark is drawn with the HUD's own strip quads (hud.cpp Quad4): the round field's outside as kSides ring pieces
@@ -30,6 +31,16 @@ constexpr float FeatherTo(int b) noexcept { return kFeatherIn+(1.0f-kFeatherIn)*
 struct Quad { float x[4],y[4]; };
 
 inline float Radius(float w,float h) noexcept { return kRound*(w<h ? w : h); }
+// A monocular telescope's eyecup (the user, 2026-10-30: "有些瞄具周围不应该是全黑的，有些是单眼看的瞄具"; sightzoom.h
+// Eyepiece): one eye at the cup, the field smaller than a biocular eyepiece's (kMonoRound), the cup's rubber an opaque
+// ring kMonoCup of the field's radius wide round it, and past the cup what the other eye sees round the sight: the same
+// picture, dimmed (kSurroundAlpha), not black. A biocular eyepiece (Radius above) is black from its field out.
+constexpr float kMonoRound=0.40f;
+constexpr float kMonoCup=0.12f;
+constexpr float kSurroundAlpha=0.55f;
+inline float Radius(float w,float h,bool monocular) noexcept { return monocular ? kMonoRound*(w<h ? w : h) : Radius(w,h); }
+// The eyepiece's black reaches this far out from a field of radius r (a biocular one's: the screen's edge, Reach).
+inline float CupOut(float r,bool monocular) noexcept { return monocular ? r*(1.0f+kMonoCup) : r; }
 // The OUTER POLYGON, not only its vertices, must pass the farthest screen corner. Each straight edge is only
 // out*cos(pi/kSides) from the centre; choose the vertex radius so even that edge has four pixels of clearance.
 inline float Reach(float w,float h,float cx,float cy) noexcept {

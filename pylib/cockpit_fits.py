@@ -22,7 +22,7 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # with the turret, not with the gun's elevation. The stations' first guess, 0.6 m behind the trunnion, was over
     # the rear deck, outside: the trunnion is behind the dome); the two side machine guns are unmanned stations (the
     # user: "明明是无人炮塔"): their seats see the gun camera's monitor (remote_display), the eye at the guns' sights
-    # (the optics' vc_optic_01 / 02, on the guns' pitch bones).
+    # (the optics' vc_camera_01 / 02, on the guns' pitch bones).
     'VEHICLE403_TANK': (
         Fit(0, 'cannon_main', (0.45, 1.8, 0.0), 'tank_gunner'),
         Fit(1, 'MachineGun_A_aim', (1.0311, 2.9768, -0.4158), 'remote_display'),

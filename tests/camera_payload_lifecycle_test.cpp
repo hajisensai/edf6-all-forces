@@ -42,7 +42,7 @@ bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1; }
 bool SightZoomMounted(const void*) noexcept{return false;}
 bool SightZoomCanMount(const void*,unsigned) noexcept{return false;}
-bool FirstPersonGunnerSight() noexcept{return false;}
+bool SightZoomRaised(const void*) noexcept{return false;}
 bool highMode=false;
 bool HighCamOn(const void*) noexcept { return highMode; }
 int cameraReads=0,loftCalls=0;

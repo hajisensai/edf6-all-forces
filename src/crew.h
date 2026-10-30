@@ -1101,12 +1101,15 @@ void SightZoomStock(unsigned char* vehicle) noexcept;
 float SightZoomNow(const void* vehicle) noexcept;
 bool SightZoomCanMount(const void* vehicle,unsigned seat) noexcept; // game-thread query: real current optic, including at 1x
 bool SightZoomMounted(const void* vehicle=nullptr) noexcept; // active physical optic; turret input stays native
+// The seat's sight raised (magnified, or at 1x in first person by the sight key: sightzoom.h Press), the look key aside.
+bool SightZoomRaised(const void* vehicle=nullptr) noexcept;
 // Current validated seat/weapon fire-control surface; none when unavailable or another camera owns the view.
 sightzoom::Kind SightZoomView(const void* vehicle=nullptr) noexcept;
 // The sight's field over the view now (sightzoom.h ScopeField, from one snapshot of the seat's cue): the vehicle, the
 // soldier looking through it, its fire-control surface and magnification; false (all empty) with none, or while another
 // camera owns the view. hud.cpp draws the field by it, and so holds the stock crosshair back for that soldier.
-struct SightScope { const void* vehicle=nullptr; const void* human=nullptr; sightzoom::Kind kind=sightzoom::Kind::none; float zoom=1.0f; };
+struct SightScope { const void* vehicle=nullptr; const void* human=nullptr; sightzoom::Kind kind=sightzoom::Kind::none; float zoom=1.0f;
+                   sightzoom::Eyepiece eyepiece=sightzoom::Eyepiece::binocular; };
 bool SightZoomScope(SightScope* out) noexcept;
 // The sight's range setting (sightzoom.h kZeroStep..; 0 the bore line) and the superelevation, rad, it lays the line of
 // sight under the bore for the weapon looked through now; any thread, 0 with no magnified optic.

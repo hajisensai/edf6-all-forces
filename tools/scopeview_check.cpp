@@ -2,6 +2,8 @@
 //  - the round field: every sampled point of the screen farther than the circle (by 1%) is under a dark piece, every
 //    point nearer (by 1%) under none (the pieces' straight inner edges stay within the circle's 1%);
 //  - the field is round and centred, inside the screen (its radius the smaller side's kRound);
+//  - a monocular telescope's (2026-10-30): a smaller field, its cup's black ring kMonoCup wide, every point past the
+//    cup under a dimmed piece (the view round the sight), none of it black, the corners covered;
 //  - the sensor fills the view: its bezel a few percent inside every edge, nothing of the view outside it left over;
 //  - real triangle-strip winding matches hud.cpp Seg/Rect for both triangles, and high-resolution edges have no leaks.
 //   cmake --build build --target scopeview_check && build\scopeview_check.exe      (exit code 1 on a failure)
@@ -75,6 +77,32 @@ void Round(float w,float h) {
     Check(wrongDark==0,"inside the circle: clear",wrongDark,w);
 }
 
+void Monocular(float w,float h) {
+    const float cx=w*0.5f,cy=h*0.5f,r=Radius(w,h,true),cup=CupOut(r,true),out=Reach(w,h,cx,cy);
+    Check(r<Radius(w,h) && r>0.3f*(w<h ? w : h) && cup<Radius(w,h),
+          "the monocular field and its cup inside the biocular field's circle",r,cup);
+    Check(kSurroundAlpha>0.2f && kSurroundAlpha<0.8f,"round the cup: dimmed, neither black nor clear",kSurroundAlpha);
+    Quad black[kSides],dim[kSides];
+    for(int i=0;i<kSides;++i){black[i]=RingPiece(i,cx,cy,r,cup);dim[i]=RingPiece(i,cx,cy,cup,out);Winding(black[i]);Winding(dim[i]);}
+    int wrong=0;
+    for(float y=0.0f;y<=h;y+=h/97.0f)
+        for(float x=0.0f;x<=w;x+=w/151.0f) {
+            const float d=std::sqrt((x-cx)*(x-cx)+(y-cy)*(y-cy));
+            bool inBlack=false,inDim=false;
+            for(int i=0;i<kSides;++i){inBlack=inBlack || Inside(black[i],x,y);inDim=inDim || Inside(dim[i],x,y);}
+            if(d<r*0.99f && (inBlack || inDim))++wrong;                    // the field clear
+            if(d>r*1.01f && d<cup*0.99f && (!inBlack || inDim))++wrong;     // the cup black, only black
+            if(d>cup*1.01f && (inBlack || !inDim))++wrong;                  // round it dimmed, not black
+        }
+    const float corner[4][2]={{0.0f,0.0f},{w,0.0f},{0.0f,h},{w,h}};
+    for(const auto& c:corner) {
+        bool inDim=false;
+        for(const Quad& p:dim)inDim=inDim || Inside(p,c[0],c[1]);
+        wrong+=!inDim;
+    }
+    Check(wrong==0,"monocular: clear field, black cup, the view round it dimmed to the corners",wrong,w);
+}
+
 void Sensor(float w,float h) {
     float hx,hy;
     RectHalf(w,h,&hx,&hy);
@@ -88,7 +116,7 @@ void Sensor(float w,float h) {
 int main() {
     const float screens[][2]={{1920,1080},{2520,1080},{1280,1024},{1920,540},{3840,2160},
                              {960,1080},{1080,1920},{320,1080},{7680,4608},{15360,8640},{8192,1024}};
-    for(const auto& sc:screens){Round(sc[0],sc[1]);Sensor(sc[0],sc[1]);ScreenEdge(sc[0],sc[1],sc[0]*0.5f,sc[1]*0.5f);}
+    for(const auto& sc:screens){Round(sc[0],sc[1]);Monocular(sc[0],sc[1]);Sensor(sc[0],sc[1]);ScreenEdge(sc[0],sc[1],sc[0]*0.5f,sc[1]*0.5f);}
     // Reach documents a general centre; the farthest corner need not have the centred viewport's angle.
     ScreenEdge(7680,4320,100,100);
     std::printf(failures ? "scopeview_check: %d of %d FAILED\n" : "scopeview_check: all %d ok\n",failures ? failures : cases,cases);

@@ -14,6 +14,7 @@
 // and the HUD read only that. Addresses: RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #pragma once
 #include "scopereticle.h"
+#include "sightzoom.h"
 #include <cstdint>
 
 namespace crew {
@@ -25,6 +26,10 @@ constexpr scope::Look LookFor(int fireInterval,float blast,bool rocket) noexcept
     return rocket || blast>0.0f ? scope::Look::launcher : fireInterval>0 && fireInterval<kCombatFrames ? scope::Look::combat :
            scope::Look::marksman;
 }
+// What the soldier's eye is at (sightzoom.h Eyepiece; the user, 2026-10-30: "有些是单眼看的瞄具"): a hand-held weapon's
+// optic, a marksman's rifle scope, a combat optic or a launcher's telescope, is a telescope at one eye, the other open on
+// what is round it: monocular, every look.
+constexpr sightzoom::Eyepiece EyepieceOf(scope::Look) noexcept { return sightzoom::Eyepiece::monocular; }
 }  // namespace infantryscope
 
 struct InfantryScopeCue {

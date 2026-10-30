@@ -953,7 +953,7 @@ bool TurretCamFreeLook(const void* vehicle,unsigned seat) noexcept {
     // The same owners ExternalView yields to, but the free look itself (vehicle_look.cpp asks this to know whether it
     // is its look at all): the map, first person's cockpit eye, the optic up (magnified, or the gunner sight at 1x).
     if(MapHoldsKeys() || MapOwnsView() || HighCamOn(vehicle) || FirstPersonVehicleView(vehicle,0))return false;
-    return !(SightZoomCanMount(vehicle,0) && (SightZoomNow(vehicle)>1.0f || FirstPersonGunnerSight()));
+    return !(SightZoomCanMount(vehicle,0) && SightZoomRaised(vehicle));
 }
 
 bool TurretCamSteers(const void* vehicle) noexcept {

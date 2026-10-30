@@ -5534,7 +5534,10 @@ void DebugSpawnHud(void* drawer,void* ctx,Text* text,float width,float height,fl
 // (scopereticle.h, drawn with the weapon's marks: ScopeArm / InfantryScope). An electronic sensor (an energy weapon's
 // display, the gunship gunner's, a weapon station's monitor) is the whole view (scopeview.h RectHalf; 2026-10-25 no
 // longer a 4:3 box in black bands): a thin bezel just inside the view's edge, corner marks, its field-of-view name.
+// A monocular telescope's (2026-10-30: "有些是单眼看的瞄具") a smaller field in its eyecup's black ring, the view round
+// the cup only dimmed (scopeview.h kMono*): the other eye sees what is round the sight.
 alignas(16) const float kScopeDark[4]={0.0f,0.0f,0.0f,0.97f};
+alignas(16) const float kScopeSurround[4]={0.0f,0.0f,0.0f,scopeview::kSurroundAlpha};
 alignas(16) const float kScopeFeather[scopeview::kFeathers][4]={
     {0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[0]},{0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[1]},
     {0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[2]},{0.0f,0.0f,0.0f,scopeview::kFeatherAlpha[3]}};
@@ -5544,17 +5547,18 @@ void Quad4(void* drawer,void* ctx,const scopeview::Quad& q,const float* rgba) no
     alignas(16) const float v[12]={q.x[0],q.y[0],0.0f, q.x[1],q.y[1],0.0f, q.x[2],q.y[2],0.0f, q.x[3],q.y[3],0.0f};
     Emit(drawer,ctx,m,rgba,v);
 }
-// The round field's eyepiece round (cx, cy), radius r (see above).
-void Eyepiece(void* drawer,void* ctx,float width,float height,float cx,float cy,float r) noexcept {
-    const float out=scopeview::Reach(width,height,cx,cy);
+// The round field's eyepiece round (cx, cy), radius r (see above): a monocular one's black only out to its cup.
+void Eyepiece(void* drawer,void* ctx,float width,float height,float cx,float cy,float r,bool monocular) noexcept {
+    const float out=scopeview::Reach(width,height,cx,cy),cup=monocular ? scopeview::CupOut(r,true) : out;
     for(int b=0;b<scopeview::kFeathers;++b)
         for(int i=0;i<scopeview::kSides;++i)
             Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,r*scopeview::FeatherFrom(b),r*scopeview::FeatherTo(b)),kScopeFeather[b]);
-    for(int i=0;i<scopeview::kSides;++i)Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,r,out),kScopeDark);
+    for(int i=0;i<scopeview::kSides;++i)Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,r,cup),kScopeDark);
+    if(monocular)for(int i=0;i<scopeview::kSides;++i)Quad4(drawer,ctx,scopeview::RingPiece(i,cx,cy,cup,out),kScopeSurround);
 }
-void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float s,float zoom,bool sensor,Line* lines,int* at) noexcept {
+void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float s,float zoom,sightzoom::Mask mask,Line* lines,int* at) noexcept {
     const float cx=width*0.5f,cy=height*0.5f;
-    if(sensor) {
+    if(mask==sightzoom::Mask::sensor) {
         float hx,hy;
         scopeview::RectHalf(width,height,&hx,&hy);
         // A thin bezel, a corner mark at each corner, the field of view named (narrow / medium / wide) with its power.
@@ -5569,7 +5573,8 @@ void ScopeShade(void* drawer,void* ctx,Text* text,float width,float height,float
               Tr(zoom>=5.0f ? Tx::scopeFovNarrow : zoom>=2.0f ? Tx::scopeFovMedium : Tx::scopeFovWide),zoom);
         return;
     }
-    Eyepiece(drawer,ctx,width,height,cx,cy,scopeview::Radius(width,height));
+    const bool monocular=mask==sightzoom::Mask::monocular;
+    Eyepiece(drawer,ctx,width,height,cx,cy,scopeview::Radius(width,height,monocular),monocular);
     (void)s;(void)zoom;(void)text;(void)lines;(void)at;
 }
 
@@ -5582,8 +5587,9 @@ static void InfantryScope(void* drawer,void* ctx,Text* text,const float* vp,floa
         if(passCamera && (!Readable(passCamera,0x368) ||
            (At<const void*>(passCamera,0x350)!=c.human && At<const void*>(passCamera,0x360)!=c.human)))return;   // another player's view
     } __except(EXCEPTION_EXECUTE_HANDLER){return;}
-    const float cx=width*0.5f,cy=height*0.5f,r=scopeview::Radius(width,height);
-    Eyepiece(drawer,ctx,width,height,cx,cy,r);
+    const bool monocular=infantryscope::EyepieceOf(c.look)==sightzoom::Eyepiece::monocular;
+    const float cx=width*0.5f,cy=height*0.5f,r=scopeview::Radius(width,height,monocular);
+    Eyepiece(drawer,ctx,width,height,cx,cy,r,monocular);
     float focal=CentreFocal(vp,width,height);
     if(!(focal>0.0f))focal=0.5f*height/std::tan(0.5f*sightzoom::kBaseFov/c.zoom);   // the stock camera's vertical FOV
     const reticle::View v{cx,cy,focal,s,kLineScale};
@@ -5744,17 +5750,18 @@ void HudDraw(const float* viewProj,void* ctx,const void* viewport,const CarrierP
         SightScope sight{};
         const bool scopeOverlay=SightZoomScope(&sight);
         const float sightMagnification=scopeOverlay ? sight.zoom : 1.0f;
-        const sightzoom::Mask sightMask=sightzoom::MaskOf(sight.kind);
+        const sightzoom::Mask sightMask=sightzoom::MaskOf(sight.kind,sight.eyepiece);
         scopeNow=ScopeNow{};
         {   // A validated seat/weapon chooses the mask. Aircraft/mechs keep their own HUD; overhead has no optic.
             const Snapshot& z=Latest();
             const bool drawn=scopeOverlay && now-z.tick<=kFreshMs;
             PublishScopeDrawn(drawn ? sight.human : nullptr);   // the stock crosshair gives way to it (scope_hold.h)
             if(drawn) {
-                ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask==sightzoom::Mask::sensor,lines,&at);
+                ScopeShade(drawer,ctx,t,width,height,s,sightMagnification,sightMask,lines,&at);
                 // The optic's reticle goes with the weapon's marks (StockMark: ScopeArm), etched across this field.
-                if(sightMask==sightzoom::Mask::round)
-                    scopeNow=ScopeNow{true,scope::Field{width*0.5f,height*0.5f,scopeview::Radius(width,height)},sightMagnification,
+                if(sightzoom::Round(sightMask))
+                    scopeNow=ScopeNow{true,scope::Field{width*0.5f,height*0.5f,
+                                      scopeview::Radius(width,height,sightMask==sightzoom::Mask::monocular)},sightMagnification,
                                       z.stock ? z.stockHud.zero : 0};
             }
         }
