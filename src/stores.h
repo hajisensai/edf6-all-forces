@@ -16,6 +16,18 @@ enum class StoreRole { air, ground, bomb, rocket, gun, drone, charge, coax };
 // the sight's own reading (reticle.h ShellOf), `heat` a shaped charge (it bursts, but is no HE), `canister` a cloud of
 // balls (vhud.cpp Arm).
 enum class StoreShell : std::uint8_t { native, heat, canister };
+// The vehicles' own fire keys (StoreSpec::fireKey; pylib/vcobjects.py FIRE_KEYS): the second trigger, then the extra keys.
+// kSeatTriggerKey: a gunner seat's own weapon (StoreSpec::seat), fired by that seat's primary trigger (payload.cpp ControlOf).
+constexpr unsigned char kSeatTriggerKey=1,kSecondTriggerKey=2,kFireLastKey=6;
+constexpr unsigned char kMostGunnerSeat=7;   // pylib/vcobjects.py MOST_GUNNER_SEAT
+// A store's own turret (pylib/vcobjects.py Turret; seat_turret.cpp poses it): its model's yaw bone (it turns about its
+// upright) and pitch bone (its guns lift about their across), its guns' elevations, its traverse either side of ahead
+// (pi: all round), rad; its rates, rad/s. `yaw` nullptr: none (the store fires along its holder's bone).
+struct StoreTurret {
+    const wchar_t* yaw=nullptr;
+    const wchar_t* pitch=nullptr;
+    float low=0.0f,high=0.0f,arc=0.0f,yawRate=0.0f,pitchRate=0.0f;
+};
 struct StoreSpec {
     const wchar_t* prefix;   // its weapon files' names: prefix + rounds + ".SGO" (vcobjects.store_file)
     const char* name;        // shown in the cockpit
@@ -26,9 +38,17 @@ struct StoreSpec {
     unsigned barrel=0;       // original native holder index for that linked barrel
     bool nativeControl=false; // a native trigger source, independently selectable (alternate ammunition)
     StoreShell shell=StoreShell::native;
-    bool independentSecondary=false; // intrinsic weapon on the seat's otherwise unread secondary (the BMPT's missiles): concurrent
-                                     // with the primary; its own switch (T / the d-pad right, payload.cpp Switch)
-                                     // cycles it only among the other weapons of its kind, never R / LB
+    // Its own fire key (pylib/vcobjects.py Store.key, docs/multi-weapon-keys.md): 0 none (the primary's cycle, or native);
+    // kSecondTriggerKey the seat's otherwise unread second trigger (the BMPT's missiles: their own switch, T / the d-pad
+    // right, payload.cpp Switch, cycles the weapons on it, never R / LB); 3..kFireLastKey VehicleFire<n>Key, one weapon
+    // a key. Each fires at once with the primary and the other keys.
+    unsigned char fireKey=0;
+    bool autoTurret=false;   // fires itself with the vehicle's auto turrets on (VehicleAutoTurretKey; payload.cpp ControlOf, FireSeat)
+    // The gunner seat that mans it (pylib/vcobjects.py Store.seat): 0 the seat its key is on; n >= 1 seat n's own weapon
+    // (its holder on that seat), fired by that seat's primary trigger (kSeatTriggerKey) and aimed by its rider, an auto
+    // turret by itself with nobody in it.
+    unsigned char seat=0;
+    StoreTurret turret{};
 };
 // A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
 struct JetMass { float mark,mass,durability; };

@@ -50,17 +50,21 @@ using CamStepFn=void(__fastcall*)(void*,void*);
 CamStepFn nextCamStep=nullptr;
 bool installed=false;
 
-struct Capability { sightzoom::Kind kind; const void* weapon; bool mounted=false; };
+struct Capability { sightzoom::Kind kind; const void* weapon; bool mounted=false;
+                    sightzoom::Eyepiece eyepiece=sightzoom::Eyepiece::binocular; };   // the mounted optic's (optic_mount.h)
 struct Toggle { ObjRef ref,human; const void* v; unsigned seat; int step; bool held; Capability sight; int zero=0; bool upHeld=false,downHeld=false; std::uint16_t pad=0;
-                bool fresh=false; };   // fresh: the seat just taken (Debug=1 says its sight once)
+                bool fresh=false;      // fresh: the seat just taken (Debug=1 says its sight once)
+                bool raised=false; };  // first person: the sight raised at 1x (Raise), else the cockpit's eye
 Toggle toggle{};
 // Publish the entire seat identity together: a camera must not combine another seat's zoom and timestamp. `aim` the
 // seat's aim (seat+0xE0), what SightLayStep is told apart by before anything else is read.
-struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; Capability sight; int zero=0; const unsigned char* aim=nullptr; };
+struct Cue { ObjRef vehicle,human; unsigned seat; float zoom; Capability sight; int zero=0; const unsigned char* aim=nullptr; bool raised=false; };
 Cue cue{};
-// The sight is up (its camera, its lay, its reticle): magnified, or at 1x in a vehicle's first person (War Thunder's
-// gunner sight: firstperson.h FirstPersonGunnerSight). Otherwise at 1x the turret camera has the view and the gun.
-bool Up(const Cue& c) noexcept { return !VehicleLookActive(c.vehicle.obj) && (c.zoom>1.0f || FirstPersonGunnerSight()); }
+// The sight is up (its camera, its lay, its reticle): magnified, or raised at 1x in a vehicle's first person (War
+// Thunder's gunner sight: firstperson.h FirstPersonGunnerSight, sightzoom.h Raise). Otherwise at 1x the turret camera
+// (third person) or the cockpit's eye (first person) has the view.
+bool Raised(const Cue& c) noexcept { return c.zoom>1.0f || (c.raised && FirstPersonGunnerSight()); }
+bool Up(const Cue& c) noexcept { return !VehicleLookActive(c.vehicle.obj) && Raised(c); }
 // The lay (sightzoom.h LayStep): the superelevation the seat's gun carries over the line of sight now, as SightLayStep
 // last turned it (game thread, under cueLock; the camera reads it). Not engaged: the aim step never reached it (its hooks
 // are not in, stab.cpp RemapAimAxis cannot map the axis): the camera falls back to the set range's whole angle.
@@ -99,6 +103,7 @@ Capability SeatCapability(const unsigned char* v,unsigned index) noexcept {
         if(sightzoom::Magnifies(found.kind)) {
             optic::Pose pose;
             found.mounted=optic::Mounted(v,seat,weapon,&pose);
+            if(found.mounted)found.eyepiece=pose.eyepiece;
         }
         return found;
     };
@@ -173,7 +178,7 @@ Cue Snapshot() noexcept {
 // secondary trigger and the stores the switch picks all look through the seat's one sight, so picking another weapon
 // keeps the view, the magnification and the eye; only losing the optic, an overhead / indirect view or no weapon end it.
 bool SameScope(const Capability& a,const Capability& b) noexcept {
-    return a.kind!=sightzoom::Kind::none && b.kind!=sightzoom::Kind::none && a.mounted==b.mounted &&
+    return a.kind!=sightzoom::Kind::none && b.kind!=sightzoom::Kind::none && a.mounted==b.mounted && a.eyepiece==b.eyepiece &&
            sightzoom::Magnifies(a.kind)==sightzoom::Magnifies(b.kind);
 }
 
@@ -212,7 +217,7 @@ float LaidFor(const Cue& c,const unsigned char* w) noexcept {
 }
 
 void Publish(unsigned char* v,unsigned seat,float zoom) noexcept {
-    const Cue next{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),seat,zoom,toggle.sight,toggle.zero,SeatAt(v,seat)+kSeatAim};
+    const Cue next{ObjRef::Of(v),ObjRef::Of(PlayerHuman()),seat,zoom,toggle.sight,toggle.zero,SeatAt(v,seat)+kSeatAim,toggle.raised};
     AcquireSRWLockExclusive(&cueLock);
     cue=next;
     ReleaseSRWLockExclusive(&cueLock);
@@ -298,23 +303,30 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
             sight.mounted ? "mounted" : "none (no vc_optic_ on its mount's chain)");
     toggle.fresh=false;
     toggle.sight=sight;
+    // First person starts at the cockpit's eye every time it is turned on (the user, 2026-10-30: "驾驶室视角得按观察键才
+    // 显示。该成瞄准键？"); third person has no raised 1x.
+    const bool firstPerson=FirstPersonGunnerSight();
+    if(!firstPerson)toggle.raised=false;
     if(!sightzoom::Magnifies(sight.kind) || !sight.mounted){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,1.0f);return;}
     if(GamePaused()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
     const bool keys=At<unsigned char>(s,kSeatPad)==0;
+    // A pad button another view keeps (padButton false) is still followed, so one held across the hand-over is no press.
     const bool down=keys ? KeyHeld(c.sightZoomKey)
-                         : padButton && c.sightZoomButton && (At<std::uint16_t>(s,kSeatButtons)&static_cast<std::uint16_t>(c.sightZoomButton))!=0 &&
+                         : c.sightZoomButton && (At<std::uint16_t>(s,kSeatButtons)&static_cast<std::uint16_t>(c.sightZoomButton))!=0 &&
                            !seatsw::ChordOwns(At<std::uint16_t>(s,kSeatButtons),static_cast<unsigned>(c.thermalButton),static_cast<unsigned>(c.sightZoomButton));
     if(MapHoldsKeys()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
-    if(down && !toggle.held) {
-        toggle.step=sightzoom::Next(toggle.step);
-        Log("SIGHTZOOM v=%p seat %u: %.0fx by the %s",v,seat,sightzoom::At(toggle.step),keys ? "key" : "pad button");
+    if(down && !toggle.held && (keys || padButton)) {
+        const sightzoom::Raise r=sightzoom::Press(toggle.step,toggle.raised,firstPerson);
+        toggle.step=r.step;toggle.raised=r.raised;
+        Log("SIGHTZOOM v=%p seat %u: %s by the %s",v,seat,
+            r.step ? (r.step==1 ? "3x" : "6x") : r.raised || !firstPerson ? "1x" : "the cockpit",keys ? "key" : "pad button");
     }
     toggle.held=down;
     // The range setting, while the sight is magnified: the wheel (swallowed then: map.cpp TakeScopeWheel) and the
     // keys on the keyboard and mouse, the d-pad on a pad; one step a notch or a press (sightzoom.h NextZero).
     // At 1x too in a vehicle's first person (War Thunder's gunner sight: its range is set at any magnification; the
     // sight lays the gun by it, so a range that could not be turned there left the rounds short of the reticle).
-    const bool scoped=sightzoom::At(toggle.step)>1.0f || FirstPersonGunnerSight();
+    const bool scoped=sightzoom::At(toggle.step)>1.0f || (firstPerson && toggle.raised);
     int notches=TakeScopeWheel(scoped);   // the wheel whichever input the seat is on (a pad player's mouse too)
     const bool up=scoped && keys && KeyHeld(c.sightRangeUpKey),downKey=scoped && keys && KeyHeld(c.sightRangeDownKey);
     notches+=(up && !toggle.upHeld ? 1 : 0)-(downKey && !toggle.downHeld ? 1 : 0);
@@ -339,7 +351,7 @@ void SightZoomStock(unsigned char* v) noexcept {
     const unsigned n=SeatCount(v);
     for(unsigned i=0;i<n;++i) {
         if(SeatRider(SeatAt(v,i))!=Rider::player || At<const void*>(SeatAt(v,i),kSeatRider)!=PlayerHuman())continue;
-        const bool reserved=i==0 && ((HighCamOffered(v) && (Cfg().highCamButton & Cfg().sightZoomButton)!=0) ||
+        const bool reserved=i==0 && ((HighCamOffered(v) && (Cfg().highCamButton & Cfg().sightZoomButton)!=0 && !HighCamYieldsButton(v)) ||
             (Cfg().sazabi && IsSazabi(v) && (Cfg().sazabiLockButton & Cfg().sightZoomButton)!=0));
         SightZoomFrame(v,i,!reserved);
         return;
@@ -351,6 +363,13 @@ bool SightZoomCanMount(const void* vehicle,unsigned seat) noexcept {
     if(MapOwnsView())return false;
     const Cue c=Snapshot();
     __try { return c.vehicle.obj==vehicle && c.seat==seat && c.sight.mounted && Current(c); }
+    __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+}
+
+bool SightZoomRaised(const void* vehicle) noexcept {
+    if(MapOwnsView())return false;
+    const Cue c=Snapshot();
+    __try { return (!vehicle || c.vehicle.obj==vehicle) && Raised(c) && Current(c); }
     __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
@@ -375,7 +394,7 @@ bool SightZoomScope(SightScope* out) noexcept {
     const Cue c=Snapshot();
     __try {
         if(!Current(c) || !sightzoom::ScopeField(c.sight.kind,c.zoom,c.sight.mounted && Up(c)))return false;
-        out->vehicle=c.vehicle.obj;out->human=c.human.obj;out->kind=c.sight.kind;out->zoom=c.zoom;
+        out->vehicle=c.vehicle.obj;out->human=c.human.obj;out->kind=c.sight.kind;out->zoom=c.zoom;out->eyepiece=c.sight.eyepiece;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){*out=SightScope{};return false;}
 }

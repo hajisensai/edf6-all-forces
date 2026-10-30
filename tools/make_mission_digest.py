@@ -515,7 +515,7 @@ def digest_bvm(bvm: bytes, table: Voices, names: Names) -> str:
         if s in table and s not in seen:
             seen.add(s)
             lines.append(say(s, table))
-    out = ['（EDF5 的脚本是编译过的字节码，看不到事件和触发条件，也读不出刷怪数量；下面是脚本里出现的东西。台词按脚本字符串表的顺序，不一定是播放顺序。）', '',
+    out = ['（旧版关卡的脚本是编译过的字节码，看不到事件和触发条件，也读不出刷怪数量；下面是脚本里出现的东西。台词按脚本字符串表的顺序，不一定是播放顺序。）', '',
            '地图：' + ('、'.join(names.map(m) for m in bvm_maps(bvm)) or '（无）'),
            '音乐：' + ('、'.join(music) or '（无）'), '', '出场对象：', '  ' + NAME_NOTE]
     out += ['    ' + names.label(o) for o in objects] + ['', '台词：'] + ['    ' + x for x in lines]
@@ -530,8 +530,14 @@ def header(m: dict) -> str:
 
 
 def script(game: rootcpk.Game, key: str) -> str | bytes | None:
-    """An EDF6 mission's MISSION.AC text or an EDF5 one's MISSION.BVM bytes; None when Root.cpk lacks it."""
+    """EDF6's AC, EDF5's BVM, or a committed 4.1 pack's BVM; None when the script is absent."""
     series, rel = key.split('/', 1)
+    for p41 in edf5.PACKS41:
+        if series == p41.folder:
+            try:
+                return edf5.edf41_script(rel, 'MISSION.BVM', p41.data)
+            except FileNotFoundError:
+                return None
     try:
         if series == 'EDF6':
             return game.read(f'MISSION/EDF6/{rel}', 'MISSION.AC').decode('utf-8-sig')

@@ -54,6 +54,42 @@ int main() {
     SupportLoadout load=PresetLoadout(p);
     load.soldier[0]=SupportWeapon::flame;
     Check(!PresetLookFor(p,load,0).On() && PresetLookFor(p,load,1)==p.look[1],"a seat changed on the panel: stock, others keep theirs");
+    // The X-Morph infantry not installed (support_call.h SupportKindInstalled; no model pack, the plugin's start state):
+    // a preset naming it is refused whole, the reason named; the stock kinds are always there.
+    SetSupportKindInstalled(SupportWeapon::xmInfantry,false);
+    Check(!SupportKindInstalled(SupportWeapon::xmInfantry) && SupportKindInstalled(SupportWeapon::rifle) &&
+          SupportKindInstalled(SupportWeapon::fencerShotgun),"stock kinds installed, the X-Morph infantry only when its bodies are");
+    p=Preset(L"rifle*3,xminfantry",12,&ok,why);
+    Check(!ok && p.count==0 && std::wcsstr(why,L"未安装"),"an uninstalled kind in a preset: refused whole, the reason named");
+    {
+        SupportLoadout xm{};xm.count=2;xm.soldier[1]=SupportWeapon::xmInfantry;
+        Check(!SupportLoadoutInstalled(xm),"a load holding it is not installed");
+        xm.soldier[1]=SupportWeapon::wingLance;
+        Check(SupportLoadoutInstalled(xm),"a stock load is");
+    }
+    SetSupportKindInstalled(SupportWeapon::xmInfantry,true);   // the model pack installed
+    // The X-Morph infantry: the kind alone (its model has no change-colour material, no stock template to recolour).
+    p=Preset(L"xminfantry*4,rifle",12,&ok);
+    Check(ok && p.count==5 && p.kind[0]==SupportWeapon::xmInfantry && p.kind[3]==SupportWeapon::xmInfantry && !p.look[0].On() &&
+          SupportSoldierClass(SupportWeapon::xmInfantry)==0 && !SupportKindHasLooks(SupportWeapon::xmInfantry) &&
+          SupportKindHasLooks(SupportWeapon::rifle),"xminfantry parses: a Ranger's class, no looks");
+    p=Preset(L"xminfantry@1E3A8A",12,&ok,why);
+    Check(!ok && p.count==0 && std::wcsstr(why,L"X-Morph 步兵没有涂装与背包"),"a colour on the X-Morph infantry refused, the reason named");
+    p=Preset(L"xminfantry+aHandGrenade01",12,&ok,why);
+    Check(!ok && p.count==0 && std::wcsstr(why,L"X-Morph 步兵没有涂装与背包"),"a backpack on the X-Morph infantry refused, the reason named");
+    p=Preset(L"rifle,xminfantry@X",12,&ok);Check(!ok && p.count==0,"even an explicit stock colour is refused: no looks at all");
+    {
+        wchar_t file[96];SupportLook look;look.primary=0x1E3A8A;
+        Check(SupportLookFile(SupportWeapon::xmInfantry,false,look,file,96)==0 && !file[0] &&
+              SupportLookFile(SupportWeapon::xmInfantry,true,SupportLook{},file,96)==0,"no look file is named for the X-Morph infantry");
+        int files=0;
+        p=Preset(L"xminfantry*4",12,&ok);
+        ForEachPresetVariant(p,[&](const wchar_t*) noexcept {++files;});
+        Check(files==0,"no variant to preload for the X-Morph infantry");
+        Check(SupportLookFile(SupportWeapon::rifle,false,look,file,96)>0,"a kind with looks still names its file");
+    }
+    Check(PackSupportLoadout(PresetLoadout(p))!=0 && kSupportWeaponCount==15 &&
+          SupportSoldierResource(SupportWeapon::xmInfantry,true)==((14u<<8)|2u),"it rides the 4-bit packing as kind 14");
 
     // Vehicle pylons. A tank: its main gun, then rounds beside it (the user: 一半ap一半he = one tank carrying both).
     VehicleLoadout l=Load(L"HE,AP:25",VehicleBody::tank,&ok);

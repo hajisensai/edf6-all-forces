@@ -79,7 +79,7 @@ void Grow(float x,float y) {
     box.x0=std::fmin(box.x0,x);box.y0=std::fmin(box.y0,y);box.x1=std::fmax(box.x1,x);box.y1=std::fmax(box.y1,y);
 }
 std::FILE* out=nullptr;
-int scopePieces=0;
+int scopePieces=0,surroundPieces=0;   // the eyepiece's black pieces; a monocular cup's dimmed view round it
 float fontScale=1.0f,tallest=0.0f;   // the font scale begun; the tallest glyph drawn since `tallest` was zeroed
 // The game's screen hud.cpp reads (kUiScreen): the global points at a holder, the holder's +0x10 at the screen, its
 // width and height at +0x20 / +0x24.
@@ -120,6 +120,7 @@ bool keepHud=false;std::vector<std::array<float,8>> hudQuads;   // the HUD-green
 bool probeIntent=false;float intentX=0,intentY=0;int intentQuads=0;
 void __fastcall QuadRec(void*,void*,const float* m,const float* rgba,std::int32_t,const float* v,std::int32_t n,void*) {
     if(rgba==kScopeDark)++scopePieces;
+    if(rgba==kScopeSurround)++surroundPieces;
     float p[4][2];
     for(int i=0;i<n && i<4;++i){p[i][0]=v[i*3]*m[0]+v[i*3+1]*m[4]+m[12];p[i][1]=v[i*3]*m[1]+v[i*3+1]*m[5]+m[13];}
     if(probeIntent && n==4 && rgba==kWhite) {
@@ -196,13 +197,14 @@ bool PlayerHeliSight(HeliSightReadout* o) noexcept { if(hasHeliSight)*o=sceneHel
 float sceneZoom=1.0f;
 float SightZoomNow(const void*) noexcept { return sceneZoom; }
 sightzoom::Kind sceneSight=sightzoom::Kind::optical;
+sightzoom::Eyepiece sceneEyepiece=sightzoom::Eyepiece::binocular;   // the scene's optic anchor's (optic_mount.h kFamilies)
 sightzoom::Kind SightZoomView(const void*) noexcept { return sceneSight; }
 // The soldier looking through the scenes' sight (sightzoom.cpp SightZoomScope): the field as the plugin answers it.
 const int sceneScopeSoldier=0;
 bool SightZoomScope(SightScope* o) noexcept {
     *o=SightScope{};
     if(!sightzoom::ScopeField(sceneSight,sceneZoom,hasMountedOptic))return false;
-    o->human=&sceneScopeSoldier;o->kind=sceneSight;o->zoom=sceneZoom;
+    o->human=&sceneScopeSoldier;o->kind=sceneSight;o->zoom=sceneZoom;o->eyepiece=sceneEyepiece;
     return true;
 }
 // A soldier's open scope (infantryscope.cpp): on in the infantry_scope scenes.
@@ -1309,6 +1311,28 @@ int TankSightScenes(const std::wstring& dir,const float* ground) {
         const bool ok=scopePieces==scopeview::kSides && !tag && ready;
         failed+=!ok;
         std::printf("%s  stock_tank_sight_zoom_6x: eyepiece %d, no HUD tag %d, data line %d\n",ok ? "ok  " : "FAIL",scopePieces,!tag,ready);
+        // The anchor's eyepiece (the user, 2026-10-30: "有些瞄具周围不应该是全黑的，有些是单眼看的瞄具"): a monocular
+        // telescope's cup is black, the view round it dimmed (kSides pieces each), the reticle and data line as the
+        // biocular's; an unmanned station's camera is its monitor: no eyepiece, the sensor's frame and its power named.
+        {
+            sceneEyepiece=sightzoom::Eyepiece::monocular;
+            scopePieces=surroundPieces=0;Scene(dir,L"stock_tank_sight_zoom_6x_monocular",ground);
+            bool data=false;
+            for(const Drew& d:drew)data=data || d.text==Tr(Tx::scopeReady);
+            const bool mono=scopePieces==scopeview::kSides && surroundPieces==scopeview::kSides && data;
+            failed+=!mono;
+            std::printf("%s  stock_tank_sight_zoom_6x_monocular: cup %d, dimmed round it %d, data line %d\n",mono ? "ok  " : "FAIL",
+                        scopePieces,surroundPieces,data);
+            sceneEyepiece=sightzoom::Eyepiece::camera;
+            scopePieces=surroundPieces=0;Scene(dir,L"stock_tank_sight_zoom_6x_camera",ground);
+            bool fov=false;
+            for(const Drew& d:drew)fov=fov || d.text.find(L"6x")!=std::wstring::npos;
+            const bool cam=scopePieces==0 && surroundPieces==0 && fov;
+            failed+=!cam;
+            std::printf("%s  stock_tank_sight_zoom_6x_camera: no eyepiece %d, the monitor's power named %d\n",cam ? "ok  " : "FAIL",
+                        scopePieces==0 && surroundPieces==0,fov);
+            sceneEyepiece=sightzoom::Eyepiece::binocular;
+        }
         // The range setting (the wheel: sightzoom.h): named on the data line, ---- at the bore line.
         sceneStock.zero=400;Scene(dir,L"stock_tank_sight_zoom_range",ground);sceneStock.zero=0;
         wchar_t zero[32];_snwprintf_s(zero,_countof(zero),_TRUNCATE,Tr(Tx::scopeZero),400);
@@ -1590,9 +1614,9 @@ int InfantryScopeScenes(const std::wstring& dir,const float* ground) {
         sceneFov=55.0f/c.zoom;
         StockTank(ground);hasStock=false;
         sceneJet.sym.nose[0]=0.0f;sceneJet.sym.nose[1]=0.0f;sceneJet.sym.nose[2]=1.0f;   // the camera along +Z (Scene)
-        scopePieces=0;Scene(dir,c.name,ground);
+        scopePieces=surroundPieces=0;Scene(dir,c.name,ground);
         int numbers=0;bool inside=true,apart=true;
-        const float r=scopeview::Radius(1920.0f,1080.0f);
+        const float r=scopeview::Radius(1920.0f,1080.0f,infantryscope::EyepieceOf(c.look)==sightzoom::Eyepiece::monocular);
         for(std::size_t i=0;i<drew.size();++i) {
             const Drew& p=drew[i];
             if(!p.text.empty() && p.text[0]>=L'0' && p.text[0]<=L'9') {
@@ -1605,7 +1629,8 @@ int InfantryScopeScenes(const std::wstring& dir,const float* ground) {
                 if(!p.text.empty() && !q.text.empty() && p.x0<q.x1 && q.x0<p.x1 && p.y0<q.y1 && q.y0<p.y1){apart=false;std::printf("      overlap: %ls / %ls\n",p.text.c_str(),q.text.c_str());}
             }
         }
-        const bool ok=scopePieces==scopeview::kSides && numbers>=c.numbers && inside && apart;
+        // A hand-held weapon's telescope is at one eye (infantryscope.h EyepieceOf): the view round its cup dimmed, not black.
+        const bool ok=scopePieces==scopeview::kSides && surroundPieces==scopeview::kSides && numbers>=c.numbers && inside && apart;
         failed+=!ok;
         std::printf("%s  %ls: eyepiece %d, etched numbers %d (want >= %d) inside %d, no text overlapping %d\n",ok ? "ok  " : "FAIL",c.name,
                     scopePieces,numbers,c.numbers,inside,apart);
@@ -2655,6 +2680,8 @@ int PhysicalInstrumentFeedChecks() {
 
 int wmain(int argc,wchar_t** argv) {
     if(argc==2 && !wcscmp(argv[1],L"--check-feed"))return PhysicalInstrumentFeedChecks();
+    // the scenes are a full install's (the X-Morph model pack's infantry among the kinds: support_call.h SupportKindInstalled)
+    SetSupportKindInstalled(SupportWeapon::xmInfantry,true);
     wchar_t temp[MAX_PATH]{};
     GetTempPathW(MAX_PATH,temp);
     std::wstring dir=std::wstring(temp)+L"edf6_hud_view";

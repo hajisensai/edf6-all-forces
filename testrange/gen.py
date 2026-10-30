@@ -31,7 +31,7 @@ import sgo  # noqa: E402
 import xm_units  # noqa: E402
 # The generated jets and vehicles are shared with tools/make_jets.py and tools/make_sub.py (pylib/vcobjects.py).
 from vcobjects import (DEFAULT_GAME, DREADNOUGHT_JET, DREADNOUGHT_TURRETS, SAZABI_JET, JET_ELEVON_FILE, JET_ELEVON_MODEL, JETS, PARKED_KINDS, Game,  # noqa: E402,F401
-                       GROUND_VEHICLES, TRACKED, as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
+                       GROUND_VEHICLES, TRACKED, WALKERS, as_mission_sgo, jet_guns, jet_sgo, object_dir, parked_name, weapon_dir)
 
 OWNER = 'testrange'   # pylib/ledger.py: the files the range writes or uses
 MARKER = 'EDF6TestRange.txt'
@@ -106,6 +106,7 @@ OWN_VEHICLES: list[tuple[str, str]] = [
     ('edf6tr_katyusha_mission', '喀秋莎火箭炮车（自己驾驶；测试场生成）'),
     ('edf6tr_artillery_mission', '自行榴弹炮（自己驾驶；测试场生成）'),
     *((f'edf6tr_{kind}_mission', f'{name}（自己驾驶；测试场生成）') for kind, name in TRACKED.items()),
+    *((f'edf6tr_{kind}_mission', f'{name}（自己驾驶；测试场生成）') for kind, name in WALKERS.items()),
     ('edf6tr_drill_mission', '钻头战车（自己驾驶；测试场生成）'),
     ('edf6tr_sidecar_mission', '边三轮摩托（自己驾驶或坐边车；测试场生成）'),
     ('edf6tr_vehicle502_groundrobo_mission', '多足机 Depth Crawler 502（插件驾驶；测试场生成）'),
@@ -143,7 +144,7 @@ DERIVED: dict[str, str] = {
     **{private: source.upper() for source, private in {**PROTEUS_MISSION, **OPTIC_MISSION}.items()},
     'edf6tr_katyusha_mission': 'EDF6VC_KATYUSHA',     # GROUND_MISSION: made from our own SGO, not a stock one
     'edf6tr_artillery_mission': 'EDF6VC_ARTILLERY',
-    **{f'edf6tr_{kind}_mission': GROUND_VEHICLES[kind].sgo for kind in TRACKED},
+    **{f'edf6tr_{kind}_mission': GROUND_VEHICLES[kind].sgo for kind in (*TRACKED, *WALKERS)},
     'edf6tr_drill_mission': 'EDF6VC_DRILL',
     'edf6tr_sidecar_mission': 'EDF6VC_SIDECAR',
     'edf6tr_v506_heli_mission': 'V506_HELI',
@@ -372,7 +373,7 @@ RANGE_NEW = ('v507_rescuetank_ai', 'edf6vc_sedan', 'vehicle301_tank',
 # The V603 kinds added 2026-10-24 (the quad Vulcan, the emplacements, the 2S6, the PzH 2000, the Sturmtiger and the
 # real guns: vcobjects.TRACKED past the M163 / BMPT): the plain's 36 spots are all taken, so the installer's range does
 # not place them; the M map's 「摆放」 does (their spawn catalog rows), and a range plan may hold them (GROUND_MISSION).
-CATALOG_ONLY = tuple(f'edf6tr_{kind}_mission' for kind in TRACKED if kind not in ('vulcan', 'bmpt'))
+CATALOG_ONLY = tuple(f'edf6tr_{kind}_mission' for kind in (*TRACKED, *WALKERS) if kind not in ('vulcan', 'bmpt'))
 RANGE_FRIENDS = {'edf6tr_jet_fighter_mission': 1}
 RANGE_WAVES = Waves(enabled=True, enemy=TARGET, per_wave=4, max_alive=24, first_delay=5.0, interval=5.0)
 
@@ -951,6 +952,9 @@ def grand_threads(plan: Plan, lay: Layout) -> list[str]:
 # call-in SGOs are not mission resources: keep private mission twins, and retain
 # every generated model/weapon under the range's ledger owner as well.
 TRACKED_MISSION = {DERIVED_PREFIX + kind + '_mission': GROUND_VEHICLES[kind] for kind in TRACKED}
+# The X-Morph walkers (pylib/xm_walker.py on the Nix / the Proteus): built the same way, their files the model and the
+# weapons (no collision or animation of their own: the host's).
+WALKER_MISSION = {DERIVED_PREFIX + kind + '_mission': GROUND_VEHICLES[kind] for kind in WALKERS}
 GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'edf6tr_artillery_mission': 'make_artillery',
                                   'edf6tr_drill_mission': 'make_drill', 'edf6tr_sidecar_mission': 'make_sidecar',
                                   # every vcobjects.TRACKED kind (tools/selftest.py holds them together); a literal: the
@@ -963,8 +967,11 @@ GROUND_MISSION: dict[str, str] = {'edf6tr_katyusha_mission': 'make_katyusha', 'e
                                   'edf6tr_tunguska_mission': 'make_tunguska',
                                   'edf6tr_pzh2000_mission': 'make_pzh2000',
                                   'edf6tr_sturmtiger_mission': 'make_sturmtiger', 'edf6tr_ciws_phalanx_mission': 'make_ciws_phalanx', 'edf6tr_flak88_mission': 'make_flak88', 'edf6tr_apocalypse_mission': 'make_apocalypse', 'edf6tr_gdf005_mission': 'make_gdf005', 'edf6tr_laser_mission': 'make_laser', 'edf6tr_railgun_mission': 'make_railgun', 'edf6tr_tos1_mission': 'make_tos1', 'edf6tr_patriot_mission': 'make_patriot'}
-# The X-Morph units (pylib/xm_units.py): all built by tools/make_xmorph.py, its builder per unit (ground_tool).
-GROUND_MISSION.update({f'{DERIVED_PREFIX}{u.key}_mission': 'make_xmorph' for u in xm_units.v603()})
+# The X-Morph units (pylib/xm_units.py): all built by tools/make_xmorph.py, its builder per unit (ground_tool). The V603
+# ones and the walkers; the cars are the installer's rows (catalog INSTALLER_VEHICLES: edf6vc_<key>), the aircraft not on
+# the range (yet).
+GROUND_MISSION.update({f'{DERIVED_PREFIX}{u.key}_mission': 'make_xmorph'
+                       for u in xm_units.requested() if u.family in (*xm_units.V603, 'mech')})
 
 
 def ground_tool(sgo_name: str):  # noqa: ANN201 - a make_<kind> module or make_xmorph's builder (buildcache.tool)
@@ -983,6 +990,9 @@ def range_files(sgo_name: str) -> tuple[str, ...]:
     A call-in SGO is not used by the range and must not be claimed on its behalf.
     """
     own = f'OBJECT/{sgo_name.upper()}.SGO'
+    walker = WALKER_MISSION.get(sgo_name)
+    if walker is not None:
+        return (own, f'OBJECT/{walker.sgo}.MRAB', *(path.removeprefix('app:/').upper() for path in walker.weapons if path))
     vehicle = TRACKED_MISSION.get(sgo_name)
     if vehicle is None:
         return (own,)
@@ -1204,8 +1214,9 @@ def _write_derived(game_root: str, game: Game, wanted: set[str], uses: tuple[str
             # loose shape with a different mesh or a previous collision version.
             led.put(OWNER, rel, aircraft_collision.build(game, key))
             held.add(ledger.key(rel))
-    for name in sorted(wanted & TRACKED_MISSION.keys()):
-        vehicle = TRACKED_MISSION[name]
+    built = {**TRACKED_MISSION, **WALKER_MISSION}
+    for name in sorted(wanted & built.keys()):
+        vehicle = built[name]
         files = ground_tool(name).build(game.root)
         dependencies = {rel: data for rel, data in files.items() if rel != f'OBJECT/{vehicle.sgo}.SGO'}
         expected = set(range_files(name)[1:])
@@ -1440,7 +1451,7 @@ def without_missing(game_root: str, plan: Plan) -> tuple[Plan, list[str]]:
     kept = replace(plan, vehicles={s: n for s, n in plan.vehicles.items() if s not in left},
                    friends={s: n for s, n in plan.friends.items() if s not in left})
     return kept, [f'跳过 {OPTIONAL_VEHICLES[s].label}：它的文件不在 Mods 里（{OPTIONAL_VEHICLES[s].rel}，先运行安装器）'
-                  for s in gone] + [f'跳过 {TRACKED[s.removeprefix(DERIVED_PREFIX).removesuffix("_mission")]}：没有它的模型'
+                  for s in gone] + [f'跳过 {(TRACKED | WALKERS)[s.removeprefix(DERIVED_PREFIX).removesuffix("_mission")]}：没有它的模型'
                                     f'文件夹（模型包），这个单位不部署' for s in undeployed]
 
 

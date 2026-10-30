@@ -12,7 +12,8 @@ const Config& Cfg() noexcept { return cfg; }
 bool InSession() noexcept { return session; }
 bool OnlineHostOnly() noexcept { return host; }
 bool IsSoldierClass(const void* o) noexcept { return At<unsigned>(o,0)==0x534F4C44; }
-void Log(const char*,...) noexcept {}
+int logLines=0;
+void Log(const char*,...) noexcept { ++logLines; }
 }
 namespace {
 using namespace crew;
@@ -20,6 +21,10 @@ alignas(16) unsigned char objects[32][0x2100]{},controls[32][16]{};
 int made=0,deleted=0,preloads=0,failAt=-1,checks=0;
 const wchar_t* lastPath=nullptr;
 bool wrong=false,initGood=true,registerGood=true;
+// Whether the installer wrote our own bodies (EDF6VC_*) into Mods/OBJECT: the test says so explicitly each time.
+bool ourFilesThere=true;
+int asked=0;
+bool FakeInstalled(const wchar_t* file) noexcept { ++asked;return ourFilesThere && !wcsncmp(file,L"EDF6VC_",7); }
 unsigned char registeredId[32]{};
 void Check(bool ok,const char* what){++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",what);std::exit(1);}}
 unsigned char* __fastcall Create(void*,const float* m,const wchar_t* path,support_native::InitParam* init) {
@@ -58,8 +63,9 @@ void Setup() {
     using namespace support_native;
     ResetSupportSoldiers();made=deleted=preloads=0;failAt=-1;wrong=false;session=false;host=true;
     profile=true;faulted=false;firstFault=SupportSpawnFailure::none;failure=SupportSpawnFailure::none;
-    create=&Create;destroy=&Delete;team=&Team;level=&Level;follow=&Follow;preload=&Preload;registerObject=&Register;
+    create=&Create;destroy=&Delete;team=&Team;level=&Level;follow=&Follow;preload=&Preload;registerObject=&Register;installed=&FakeInstalled;
     Put<void*>(image,kObjectManager,objects);Put<void*>(image,kPreloadManager,controls);Put<void*>(image,kNetworkManager,registeredId);
+    NoteSupportKindsInstalled();   // the plugin's load: what Mods/OBJECT holds (the test's ourFilesThere)
     PreloadSupportSoldiers();
 }
 }
@@ -78,8 +84,31 @@ int main() {
         Check(std::memcmp(static_cast<const unsigned char*>(spawned.obj)+kPosition,wirePlan.units[i].matrix+12,12)==0,
               "aligned native copy preserves requested position exactly");
     }
-    Setup();Check(preloads==2*kSupportWeaponCount && SupportSoldiersReady(),
+    asked=0;Setup();Check(preloads==2*kSupportWeaponCount && SupportSoldiersReady(),
           "every stock template a load may hold (member and leader) queued: five Rangers, five Wing Divers, four Fencers");
+    Check(asked==2,"only our own body files (the X-Morph infantry's member and leader) are asked for, never a stock template");
+    // Our own bodies are preloaded and spawned only when the installer wrote them; no stand-in, one log line, nothing made.
+    Check(SupportKindInstalled(SupportWeapon::xmInfantry) && SupportKindInstalled(SupportWeapon::rifle),"both bodies there: the kind is installed");
+    ourFilesThere=false;Setup();
+    Check(!SupportKindInstalled(SupportWeapon::xmInfantry) && SupportKindInstalled(SupportWeapon::rifle) &&
+          SupportKindInstalled(SupportWeapon::fencerShotgun),"its bodies missing: the X-Morph infantry is not installed, every stock kind is");
+    Check(preloads==2*(kSupportWeaponCount-1) && SupportSoldiersReady(),"the X-Morph infantry's missing bodies are not preloaded, the stock ones are");
+    {ObjRef xm;const int madeBefore=made,logsBefore=logLines;
+     Check(!ApplySupportSoldierResource(poses[0],SupportSoldierResource(SupportWeapon::xmInfantry,false),nullptr,true,&xm) && made==madeBefore &&
+           logLines==logsBefore+1 && SupportSoldierLastFailure()==SupportSpawnFailure::notInstalled && !xm &&
+           !wcscmp(SupportSoldierFailureText(),hudtext::Tr(hudtext::Tx::supportKindNotInstalled)),
+           "an X-Morph infantry whose file is missing is refused and logged once, not spawned, its own failure and text (not mission)");
+     Check(!ApplySupportSoldierResource(poses[0],SupportSoldierResource(SupportWeapon::xmInfantry,true),nullptr,true,&xm) && made==madeBefore &&
+           logLines==logsBefore+2,"its leader the same");
+     Check(ApplySupportSoldierResource(poses[0],SupportSoldierResource(SupportWeapon::rifle,false),nullptr,true,&xm) && made==madeBefore+1 &&
+           logLines==logsBefore+2 && wcscmp(lastPath,L"app:/object/N601_COMMON_RANGER_AF.sgo")==0,"a stock soldier still spawns, nothing logged");}
+    ourFilesThere=true;Setup();
+    {ObjRef xm;
+     Check(ApplySupportSoldierResource(poses[0],SupportSoldierResource(SupportWeapon::xmInfantry,false),nullptr,true,&xm) &&
+           wcscmp(lastPath,L"app:/object/EDF6VC_XM_SMALL_INFANTRY.sgo")==0,"installed: the X-Morph infantry member is its own body");
+     Check(ApplySupportSoldierResource(poses[1],SupportSoldierResource(SupportWeapon::xmInfantry,true),nullptr,true,&xm) &&
+           wcscmp(lastPath,L"app:/object/EDF6VC_XM_SMALL_INFANTRY_LEADER.sgo")==0,"and its leader");}
+    Setup();
     ObjRef one;Check(SpawnSupportSoldier(poses[0],&one) && initGood,"native InitParam and fixed real resource");
     Check(At<LONG>(one.ctrl,8)==1 && At<LONG>(one.ctrl,12)==2,"retain weak only, scene owns strong");
     Check(SupportSoldierHeld(one.obj),"new soldiers start held before network Active");

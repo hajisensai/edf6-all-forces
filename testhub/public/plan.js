@@ -30,7 +30,7 @@ function when(ms) {
 }
 
 function code(m) {
-  return m.key.replace(/^EDF[56]\//, '').replace(/^DLC\//, '');
+  return m.key.slice(m.key.indexOf('/') + 1).replace(/^DLC\//, '');
 }
 
 function missionName(m) {
@@ -92,13 +92,14 @@ function rowsHtml() {
       const m = missions.get(r.mission);
       if (!m) continue;
       seq += 1;
-      const text = `${seq} ${m.key} ${m.sc} ${m.ja}`.toLowerCase();
+      const text = `${seq} ${m.series} ${m.key} ${m.sc} ${m.ja}`.toLowerCase();
       if (needle && !text.includes(needle)) continue;
       const n = counts.get(m.key) || 0;
       el = h('li', { class: 'stock' },
         h('span', { class: 'seq' }, seq),
         h('span', { class: 'tag' }, m.series), h('b', {}, ' ', code(m), ' ', m.sc), ' ', h('span', { class: 'muted' }, m.ja),
-        m.n ? h('span', { class: 'muted' }, ` · 游戏里第 ${m.n} 关`) : h('span', { class: 'bad' }, ' · 游戏里没有（', m.missing || '缺资源', '）'),
+        m.pack_n ? h('span', { class: 'muted' }, ` · 任务包内第 ${m.pack_n} 关（需安装对应 4.1 内容）`)
+          : m.n ? h('span', { class: 'muted' }, ` · 游戏里第 ${m.n} 关`) : h('span', { class: 'bad' }, ' · 游戏里没有（', m.missing || '缺资源', '）'),
         h('span', { class: 'acts' },
           state.digests.includes(m.key) ? button('看脚本', () => openDigest(m)) : null,
           n ? button(`意见 ${n}`, () => showOnly(m.key)) : null,
@@ -267,7 +268,7 @@ function renderMissionSelect() {
   const groups = new Map();
   for (const m of state.missions) (groups.get(m.series) || groups.set(m.series, []).get(m.series)).push(m);
   $('mission').replaceChildren(...[...groups].map(([series, ms]) => h('optgroup', { label: series },
-    ms.map((m) => h('option', { value: m.key }, `${code(m)} ${m.sc}${m.n ? '' : '（游戏里没有）'}`)))));
+    ms.map((m) => h('option', { value: m.key }, `${code(m)} ${m.sc}${m.pack_n ? `（任务包第 ${m.pack_n} 关）` : m.n ? '' : '（游戏里没有）'}`)))));
   if (keep) $('mission').value = keep;
 }
 

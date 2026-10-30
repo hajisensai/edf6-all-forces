@@ -175,7 +175,19 @@ _BY_STEM: dict[str, tuple[Mount, ...]] = {
                              'V505_TANK_MPACK2')},
     'V601_TANK': _VARIUS,
 }
-LOADOUTS: dict[str, tuple[Mount, ...]] = {stem: _BY_STEM.get(stem, _BY_CATEGORY[c]) + ((COAX[stem],) if stem in COAX else ())
+
+
+def _mounted(category: str, m: Mount) -> Mount:
+    """`m` on its category's control (vcobjects.STOCK_MOUNTS): a kind the table names becomes its mounted kind."""
+    def file(f: str | None) -> str | None:
+        got = vc.store_of('app:/weapon/' + f.lower()) if f else None
+        how = vc.STOCK_MOUNTS.get(category, {}).get(got[0]) if got else None
+        return vc.store_file(vc.mounted(got[0], how), got[1]) if how else f
+    return Mount(file(m.weapon), m.like, file(m.other), m.bone)
+
+
+LOADOUTS: dict[str, tuple[Mount, ...]] = {stem: tuple(_mounted(c, m) for m in _BY_STEM.get(stem, _BY_CATEGORY[c])) +
+                                          ((COAX[stem],) if stem in COAX else ())
                                           for stem, c in CATEGORIES.items()}
 LOADOUTS['VEHICLE409_HELI'] = (_store('RKT', 19, 1), _store('AGM_L', 4, 1), _store('AAM_S', 2, 1))   # its missile: holder 1
 # What each category must carry (tests/test_stock_store_loadouts.py): store kinds, or roles ('role:<role>').

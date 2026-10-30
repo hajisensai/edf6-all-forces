@@ -1,6 +1,8 @@
 """tools/testhub.py collect() sends only crash dumps this install wrote (2026-10-12: report #6 sent #5's dump of
-10-07, written by another build of the plugin), and of those only the run the sent logs end with (dump_in_session:
-the dump's write time and process start against the plugins' last `loading` line). Offline: minidumps and plugin DLLs
+10-07, written by another build of the plugin), and of those a run the sent logs hold: by its process id
+(logged_runs: each run's `CRASHDUMP installed: ...EDF6.exe.<pid>.plugin.dmp` line), else by time the run they end with
+(dump_in_session: the dump's write time and process start against the plugins' last `loading` line). Every dump's
+line in crash/dumps.txt names the crash it records (dump_exception), a dump too big to send too. Offline: minidumps and plugin DLLs
 are made here (MINIDUMP_HEADER with its TimeDateStamp, one ModuleListStream, MINIDUMP_MODULE rows, optionally a
 MiscInfoStream with ProcessCreateTime; a PE header with TimeDateStamp and SizeOfImage), the plugin's log is written
 with its `loading` lines, LOCALAPPDATA points at a scratch CrashDumps. Exit code 1 when a check fails.
@@ -54,10 +56,11 @@ def write_pe(path: str, stamp: int, size: int) -> None:
 
 
 def write_dump(path: str, modules: list[tuple[str, int, int]], written: float | None = None,
-               created: float | None = None) -> None:
-    """A minidump with one ModuleListStream: (full path, TimeDateStamp, SizeOfImage) per module; written: the header's
-    TimeDateStamp (default now); created: a MiscInfoStream with ProcessCreateTime (MINIDUMP_MISC1_PROCESS_TIMES)."""
-    streams = 2 if created is not None else 1
+               created: float | None = None, exception: tuple[int, int, list[int]] | None = None) -> None:
+    """A minidump with one ModuleListStream: (full path, TimeDateStamp, SizeOfImage) per module, module i based at
+    0x140000000 + i * 0x1000000; written: the header's TimeDateStamp (default now); created: a MiscInfoStream with
+    ProcessCreateTime (MINIDUMP_MISC1_PROCESS_TIMES); exception: an ExceptionStream (code, address, parameters)."""
+    streams = 1 + (created is not None) + (exception is not None)
     names = io.BytesIO()
     name_base = 32 + 12 * streams + 4 + 108 * len(modules)
     rows = io.BytesIO()
@@ -74,9 +77,16 @@ def write_dump(path: str, modules: list[tuple[str, int, int]], written: float | 
     misc_rva = name_base + names.tell()
     if created is not None:
         body += struct.pack('<III', 15, 24, misc_rva)
+    if exception is not None:
+        body += struct.pack('<III', 6, 168, misc_rva + (24 if created is not None else 0))
     body += struct.pack('<I', len(modules)) + rows.getvalue() + names.getvalue()
     if created is not None:   # MINIDUMP_MISC_INFO: SizeOfInfo, Flags1, ProcessId, ProcessCreateTime, user, kernel
         body += struct.pack('<IIIIII', 24, 0x3, 1234, int(created), 0, 0)
+    if exception is not None:   # MINIDUMP_EXCEPTION_STREAM: thread, MINIDUMP_EXCEPTION, the thread context's location
+        code, address, params = exception
+        info = list(params) + [0] * (15 - len(params))
+        body += struct.pack('<II', 4321, 0) + struct.pack('<IIQQII', code, 0, 0, address, len(params), 0)
+        body += struct.pack('<15Q', *info) + struct.pack('<II', 0, 0)
     with open(path, 'wb') as f:
         f.write(body)
 
@@ -360,32 +370,124 @@ def crash_dump_cases(root: str, game: str, dumps: str, exe: str, crew: str, run:
     os.utime(older, (run - 7000, run - 7000))
     expect('crash/EDF6.exe.7300.plugin.dmp' in collected(game)[0], "an earlier run's plugin dump is not sent in its place")
 
-    # Dumps over DUMP_MAX: named with their size, not dropped without a word (this machine's LocalDumps wrote
-    # 100 MB ones, 2026-10-18).
+    # Dumps over DUMP_MAX: named with their size and the crash they record, not dropped without a word (this
+    # machine's LocalDumps wrote 100 MB ones, 2026-10-18; the testers' 190 MB ones left reports #26 / #29 / #30 with
+    # no crash site, 2026-10-27..29). Only their metadata is read, in bounded reads; nothing of them is sent.
     limit = testhub.DUMP_MAX
     hang = os.path.join(game, 'Mods', 'Plugins', 'EDF6VehicleCrew.hang.dmp')
     write_dump(hang, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=run + 60, created=run - 1)
-    opened = []
+    write_dump(windows, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=run + 60, created=run - 1,
+               exception=(0xC0000005, 0x141000000 + 0x2B1A0, [1, 0x3EC]))
+    os.utime(windows, (run + 60, run + 60))
     real_open = open
+    whole = []
 
-    def no_dump_open(path, *args, **kwargs):
-        if os.fspath(path).lower().endswith('.dmp'):
-            opened.append(path)
-            raise AssertionError('an oversized dump must be rejected before parsing or reading: ' + path)
-        return real_open(path, *args, **kwargs)
+    class Bounded:
+        def __init__(self, f):
+            self.f = f
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return self.f.__exit__(*args)
+
+        def seek(self, *args):
+            return self.f.seek(*args)
+
+        def read(self, size=-1):
+            if not 0 <= size <= (1 << 20):
+                whole.append(size)
+            return self.f.read(size)
+
+    def bounded_open(path, *args, **kwargs):
+        f = real_open(path, *args, **kwargs)
+        return Bounded(f) if os.fspath(path).lower().endswith('.dmp') else f
 
     try:
-        testhub.DUMP_MAX = os.path.getsize(windows) - 1
-        with patch('builtins.open', no_dump_open):
+        testhub.DUMP_MAX = min(os.path.getsize(windows), os.path.getsize(plugin), os.path.getsize(hang)) - 1
+        with patch('builtins.open', bounded_open):
             sent, listing = collected(game)
         expect(sent == [], 'a dump over the limit is not sent')
         expect('EDF6.exe.7300.dmp: ' in listing and 'EDF6.exe.7300.plugin.dmp: ' in listing and '超过' in listing,
                'a dump over the limit is named in dumps.txt with its size')
-        expect('EDF6VehicleCrew.hang.dmp: ' in listing and not opened,
-               'all oversized sources, including hang dumps, are rejected without opening any dump')
+        expect('异常 C0000005 于 EDF6VehicleCrew.dll+0x2B1A0（线程 4321，写 0x3EC）' in listing,
+               'a dump over the limit still names its crash: code, module+offset, the access')
+        expect('EDF6VehicleCrew.hang.dmp: ' in listing and not whole,
+               'all oversized sources, including hang dumps, are read in bounded metadata reads only')
     finally:
         testhub.DUMP_MAX = limit
         os.remove(hang)
+
+    # Reports #29 / #30 (2026-10-28..29): the tester sent the logs after starting the game again; the crashed run's
+    # plugin dump was left out as an earlier run's, though that run's lines were in the log sent. Each run's log names
+    # its process (CRASHDUMP installed: ...EDF6.exe.<pid>.plugin.dmp): a dump of a run in the sent logs goes along.
+    for name in os.listdir(dumps):
+        os.remove(os.path.join(dumps, name))
+    before = run - 1800
+    folder = 'C:\\Users\\t\\AppData\\Local\\CrashDumps'
+    write_log(game, [f'{tod(before)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
+                     f'{tod(before)} CRASHDUMP installed: {folder}\\EDF6.exe.7400.plugin.dmp (dbghelp 1, ...)',
+                     f'{tod(before + 60)} MISSION start: per-object state dropped, resources preloaded',
+                     f'{tod(run)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
+                     f'{tod(run)} CRASHDUMP installed: {folder}\\EDF6.exe.7500.plugin.dmp (dbghelp 1, ...)'],
+              now - 5)
+    runs = testhub.logged_runs(game)
+    expect({pid: [r.loading for r in rs] for pid, rs in runs.items()} == {7400: [tod(before)[1:9]], 7500: [tod(run)[1:9]]},
+           'each run of the sent logs by its process id, with its loading time')
+    expect(abs(runs[7400][0].start - int(before)) <= 1 and abs(runs[7400][0].end - int(run)) <= 1
+           and abs(runs[7500][0].start - int(run)) <= 1 and runs[7500][0].end is None,
+           "each run dated from the log's last write, ending where the next run's loading is")
+    crashed = os.path.join(dumps, 'EDF6.exe.7400.plugin.dmp')
+    write_dump(crashed, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=before + 65,
+               created=before - 1, exception=(0xC0000409, 0x140000000 + 0x1234, [7]))
+    os.utime(crashed, (before + 65, before + 65))
+    sent, listing = collected(game)
+    expect(sent == ['crash/EDF6.exe.7400.plugin.dmp'], "the crashed earlier run's dump is sent with the logs holding it")
+    expect('进程 7400' in listing and '异常 C0000409 于 EDF6.exe+0x1234（线程 4321，__fastfail 代码 7）' in listing,
+           'dumps.txt names its run and its crash')
+    # Older than DUMP_AGE: still named with its crash (a tester updating days later keeps the old crashes' sites), not sent.
+    os.utime(crashed, (now - testhub.DUMP_AGE - 60, now - testhub.DUMP_AGE - 60))
+    sent, listing = collected(game)
+    expect(sent == [] and '异常 C0000409' in listing and '天，未上传' in listing, 'an old dump is named with its crash, not sent')
+    os.utime(crashed, (before + 65, before + 65))
+    # Windows reuses process ids: a dump named 7400 but written after the logged 7400 run, once the next run began
+    # (here a later process that got 7400 again and logged nothing), is not that run's.
+    reused = os.path.join(dumps, 'EDF6.exe.7400.dmp')
+    os.remove(crashed)
+    write_dump(reused, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=run + 60, created=run + 30)
+    os.utime(reused, (run + 60, run + 60))
+    sent, listing = collected(game)
+    expect(sent == [] and '晚于日志里该进程号的那次游戏之后的下一次游戏' in listing and '不是本次游戏' in listing,
+           "a dump of a reused pid written after its logged run ended is refused, with both reasons")
+    # ...and one whose process started well after the logged run began (its MiscInfo), though written inside it.
+    write_dump(reused, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=before + 65,
+               created=before + 30)
+    os.utime(reused, (before + 65, before + 65))
+    sent, listing = collected(game)
+    expect(sent == [] and '不是日志里该进程号的那次游戏' in listing, 'a reused pid told apart by its process start time')
+    # Two logged runs that both had pid 7400: the dump goes with the run it was written in.
+    write_log(game, [f'{tod(before)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
+                     f'{tod(before)} CRASHDUMP installed: {folder}\\EDF6.exe.7400.plugin.dmp (dbghelp 1, ...)',
+                     f'{tod(run - 900)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
+                     f'{tod(run - 900)} CRASHDUMP installed: {folder}\\EDF6.exe.7400.plugin.dmp (dbghelp 1, ...)',
+                     f'{tod(run)} EDF6VehicleCrew 0.9.0 loading (build eba4372d44, 1 bytes, written x)',
+                     f'{tod(run)} CRASHDUMP installed: {folder}\\EDF6.exe.7500.plugin.dmp (dbghelp 1, ...)'],
+              now - 5)
+    write_dump(reused, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=run - 600,
+               created=run - 901)
+    os.utime(reused, (run - 600, run - 600))
+    sent, listing = collected(game)
+    expect(sent == ['crash/EDF6.exe.7400.dmp'] and f'loading {tod(run - 900)[1:9]}' in listing,
+           'of two logged runs with the same pid, the dump goes with the one it was written in')
+    os.remove(reused)
+    write_dump(crashed, [(exe, 0x678CCB63, 401408), (crew, 0x6AC9C50B, 9416704)], written=before + 65,
+               created=before - 1, exception=(0xC0000409, 0x140000000 + 0x1234, [7]))
+    os.utime(crashed, (before + 65, before + 65))
+    # A process the sent logs do not hold (no CRASHDUMP line of its pid): the time rule, so an earlier run's is refused.
+    os.rename(crashed, os.path.join(dumps, 'EDF6.exe.7399.plugin.dmp'))
+    sent, listing = collected(game)
+    expect(sent == [] and '早于本次游戏' in listing, 'an earlier process the logs do not hold is still refused')
 
 
 _made = 0

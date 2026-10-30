@@ -17,6 +17,14 @@ The pieces are rigid (one bone each) and keep the model's own UVs and textures: 
 its occlusion map in the stock body material's occlusion channel (param_r_m_occ_hr: roughness and metalness are the
 stock maps' mean, the procedural vehicles' PLAIN_RMO), the tracks under the native track materials' names so the
 SGO's tank_caterpillar_animation still scrolls them.
+
+A material may say more (the X-Morph units' folders, tools/prep_xmorph.py, docs/xmorph-port.md):
+    'specular'   a grey specular map: roughness and metalness per texel (SPECULAR_RM) instead of PLAIN_RMO
+    'emissive'   a grey light mask, with the template LIGHT: Retro-Balam's light material (the Dreadnought's lit
+                 hulls': dreadnought_model.LIGHT_HOST), the mask's texels glowing in their albedo's colour ('light':
+                 its light_color strength), the v603_body template's colour parameters kept
+    'min_side'   its maps smaller than this are resampled (Lanczos) to it before block compression: DXT1 / BC5 4x4
+                 blocks on a 256 map are coarse against its detail, on the resampled one a quarter texel
 """
 from __future__ import annotations
 
@@ -36,7 +44,7 @@ from mdb import Mdb, Mesh, bind_world, cmpl_compress, cmpl_decompress, mdb_read,
 FOLDERS = {'vulcan': 'wt_m163', 'bmpt': 'wt_bmpt', 'tunguska': 'wt_tunguska', 'pzh2000': 'wt_pzh2000',
            'sturmtiger': 'wt_sturmtiger', 'apocalypse': 'wt_apocalypse', 'tos1': 'wt_tos1',
            # the X-Morph: Defense units (pylib/xm_units.py; tools/prep_xmorph.py writes these folders, the model pack's)
-           **{u.key: xm_units.folder(u.key) for u in xm_units.ported('tracked')}}
+           **{u.key: xm_units.folder(u.key) for u in xm_units.hulls()}}
 # A kind made from another kind's folder: its module's derive(spec) turns that kind's spec into its own (the quad M61:
 # the M163's model with its one gun made four, pylib/quadvulcan_model.py); with no base kind, its module's spec(kind)
 # makes it from its own folder (folder(): the Dreadnought's turrets on their bases, pylib/emplacement_model.py).
@@ -53,6 +61,12 @@ ENABLED = True            # False: the procedural models (their own tests switch
 FORMAT = 1                # tools/prep_wt_tracked.py FORMAT
 PLAIN_RMO = (140, 90)     # roughness, metalness (~ the V603 / E551 body maps' mean); occlusion from the model
 TRACK_RMX = (189, 0, 0)   # the V603 track parameter map's mean
+# A specular map's grey s (0..255) -> (roughness, metalness): matte paint at 0, polished metal at 255; the stock body
+# maps' mean (PLAIN_RMO) is about a mid grey's.
+SPECULAR_RM = ((215, 95), (20, 170))   # (roughness at 0, at 255), (metalness at 0, at 255)
+LIGHT = 'light'           # model.json template: Retro-Balam's light material (dreadnought_model.LIGHT_HOST)
+LIGHT_STRENGTH = 2.0      # its light_color (stock lights 1..30, the Dreadnought's 4: lamps; these are markings)
+BODY = 'v603_body'        # the template whose colour parameters a light material keeps
 NO_OCCLUSION = 200
 HALF_TOL = 4e-3           # m: stored positions are half floats (2^-9 m steps at 2..4 m)
 
@@ -285,24 +299,60 @@ def pack(parts: list[tuple[Mesh, int, np.ndarray, np.ndarray]]) -> list[Mesh]:
 
 # ------------------------------------------------------------------------------------------ textures
 
-def _image(path: str):  # noqa: ANN202 - texfile.Image
-    import texfile
+def _pil(path: str, min_side: int = 0, mode: str = 'RGBA'):  # noqa: ANN202 - PIL image
+    """The image at `path` in `mode`, resampled (Lanczos, a whole factor) to `min_side` on its shorter side where
+    smaller."""
     from PIL import Image
     with Image.open(path) as im:
-        rgba = im.convert('RGBA')
-        return texfile.Image(rgba.width, rgba.height, bytearray(rgba.tobytes()))
+        im = im.convert(mode)
+    if min(im.size) < min_side:
+        k = -(-min_side // min(im.size))
+        im = im.resize((im.width * k, im.height * k), Image.LANCZOS)
+    return im
 
 
-def _dds_of(path: str) -> bytes:
+def _texfile(rgba: np.ndarray):  # noqa: ANN202 - (h, w, 4) uint8 -> texfile.Image
+    import texfile
+    return texfile.Image(rgba.shape[1], rgba.shape[0], bytearray(np.ascontiguousarray(rgba).tobytes()))
+
+
+def _image(path: str, min_side: int = 0):  # noqa: ANN202 - texfile.Image
+    return _texfile(np.asarray(_pil(path, min_side)))
+
+
+def _dds_of(path: str, min_side: int = 0) -> bytes:
     import texfile_accel
-    return texfile_accel.dxt1_dds(_image(path))
+    return texfile_accel.dxt1_dds(_image(path, min_side))
 
 
-def _normal_dds(path: str) -> bytes:
+def _normal_dds(path: str, min_side: int = 0) -> bytes:
     """A tangent-space normal map (R = X, G = Y, DirectX green: +G is the texture's down, +v, the binormal's way;
-    docs/texture-quality.md) as the stock vehicles' BC5U."""
+    docs/texture-quality.md) as the stock vehicles' BC5U. Resampled (min_side) as vectors: renormalised after."""
     import texfile_accel
-    return texfile_accel.bc5_normal_dds(_image(path))
+    if not min_side:
+        return texfile_accel.bc5_normal_dds(_image(path))
+    v = np.asarray(_pil(path, min_side, 'RGB'), dtype=np.float64) / 127.5 - 1.0
+    v /= np.maximum(np.linalg.norm(v, axis=2, keepdims=True), 1e-6)
+    rgba = np.full(v.shape[:2] + (4,), 255, dtype=np.uint8)
+    rgba[..., :3] = np.clip((v + 1.0) * 127.5 + 0.5, 0, 255).astype(np.uint8)
+    return texfile_accel.bc5_normal_dds(_texfile(rgba))
+
+
+def _specular_dds(specular: str, blue: str | None, blue_default: int, min_side: int) -> bytes:
+    """A parameter map from a specular map (R roughness, G metalness: SPECULAR_RM) and a grey map in B (the occlusion,
+    the light mask; blue_default without one), at the larger of the two's sizes (min_side at least)."""
+    import texfile_accel
+    from PIL import Image
+    spec = _pil(specular, min_side, 'L')
+    other = _pil(blue, min_side, 'L') if blue else None
+    size = max((spec.size, other.size if other else (0, 0)), key=lambda wh: wh[0] * wh[1])
+    s = np.asarray(spec.resize(size, Image.LANCZOS), dtype=np.float64) / 255.0
+    (r0, r1), (m0, m1) = SPECULAR_RM
+    rgba = np.full(s.shape + (4,), 255, dtype=np.uint8)
+    rgba[..., 0] = np.clip(r0 + (r1 - r0) * s + 0.5, 0, 255)
+    rgba[..., 1] = np.clip(m0 + (m1 - m0) * s + 0.5, 0, 255)
+    rgba[..., 2] = np.asarray(other.resize(size, Image.LANCZOS)) if other else blue_default
+    return texfile_accel.dxt1_dds(_texfile(rgba))
 
 
 def _param_dds(occlusion: str | None, rg: tuple[int, int]) -> bytes:
@@ -325,12 +375,19 @@ def material_textures(spec: Spec, m: dict) -> dict[str, tuple[str, bytes]]:
     import texfile
     stem = m['name'].lower()
     path = lambda key: os.path.join(spec.folder, m[key]) if m.get(key) else None   # noqa: E731
-    out = {'albedo': (f'{stem}_col.dds', _dds_of(path('albedo')))}
+    side = int(m.get('min_side', 0))
+    out = {'albedo': (f'{stem}_col.dds', _dds_of(path('albedo'), side))}
     if m.get('normal'):
-        out['normal'] = (f'{stem}_nor.dds', _normal_dds(path('normal')))
+        out['normal'] = (f'{stem}_nor.dds', _normal_dds(path('normal'), side))
     else:
         out['normal'] = ('edf6vc_flat_nor.dds', texfile.solid_bc5())
-    if m['template'].startswith('v603_kyata'):
+    if m['template'] == LIGHT:
+        _req(bool(m.get('specular')) and bool(m.get('emissive')), f'{stem}: a light material without its maps')
+        out['param_r_m_light_hr'] = (f'{stem}_rml.dds', _specular_dds(path('specular'), path('emissive'), 0, side))
+    elif m.get('specular'):
+        out['param_r_m_occ_hr'] = (f'{stem}_rmo.dds',
+                                   _specular_dds(path('specular'), path('occlusion'), NO_OCCLUSION, side))
+    elif m['template'].startswith('v603_kyata'):
         out['param_r_m_xxx'] = ('edf6vc_wt_track_rmx.dds', texfile.solid_dxt1(TRACK_RMX))
         occ = path('occlusion')
         out['param_occ'] = (f'{stem}_occ.dds', _dds_of(occ) if occ else texfile.solid_dxt1((222, 219, 222)))
@@ -399,6 +456,21 @@ def ejection_local(game, kind: str) -> dict:  # noqa: ANN001
     return {side: a.muzzles[side]['local'] for side in spec.info['ejections']}
 
 
+def _lit(md: Mdb, index: int, host: Mdb, strength: float) -> Mdb:
+    """The light material `index` with the body template's colour parameters (BODY's diffuse and specular colour:
+    the light template's are Retro-Balam's brighter, glossier finish) and its light_color at `strength`."""
+    body = next(m for m in host.materials if host.name_of(m.name) == BODY)
+    own = {p.name: p for p in body.params}
+    mats = list(md.materials)
+    m = mats[index]
+    _req(any(p.name == 'light_color' for p in m.params), 'the light template has no light_color')
+    params = [replace(p, value=[strength] * 3 + [0.0]) if p.name == 'light_color' else
+              replace(p, value=list(own[p.name].value)) if p.name in ('diffuse', 'specular_color') else p
+              for p in m.params]
+    mats[index] = replace(m, params=params)
+    return replace(md, materials=mats)
+
+
 def build_with_info(game, kind: str) -> tuple[bytes, Mdb, dict]:  # noqa: ANN001 - rootcpk.Game
     host, rab = t.stock(game)
     spec = load(kind)
@@ -410,15 +482,23 @@ def build_with_info(game, kind: str) -> tuple[bytes, Mdb, dict]:  # noqa: ANN001
     rab.files = [f for f in rab.files if f.name.lower() == keep]
     mat_index = []
     added: set[str] = set()
+    templates = {host.name_of(host.materials[me.material].name): me for me in host.objects[0].meshes}
+    same: dict[bytes, str] = {}    # a texture's bytes -> the member that holds them (one atlas, several materials)
     for m in spec.info['materials']:
-        tex = material_textures(spec, m)
-        md, mi = om.add_material(md, host, m['template'], m['name'], {kind_: fn for kind_, (fn, _d) in tex.items()})
+        tex = {kind_: (same.setdefault(dds, fn), dds) for kind_, (fn, dds) in material_textures(spec, m).items()}
+        slots = {kind_: fn for kind_, (fn, _d) in tex.items()}
+        if m['template'] == LIGHT:
+            import dreadnought_model as dm
+            light_md, templates[LIGHT] = dm._host(game, dm.LIGHT_HOST)
+            md, mi = om.add_material(md, light_md, dm.LIGHT_HOST[2], m['name'], slots)
+            md = _lit(md, mi, host, float(m.get('light', LIGHT_STRENGTH)))
+        else:
+            md, mi = om.add_material(md, host, m['template'], m['name'], slots)
         mat_index.append(mi)
         for fn, dds in tex.values():
             if fn not in added:
                 om.add_texture(rab, fn, dds)
                 added.add(fn)
-    templates = {host.name_of(host.materials[me.material].name): me for me in host.objects[0].meshes}
     packed_parts = []
     for k, p in enumerate(spec.info['parts']):
         pos, nrm, uv, tris = spec.part(k)

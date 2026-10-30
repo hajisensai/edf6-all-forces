@@ -14,16 +14,26 @@ namespace crew {
 namespace sightzoom {
 // The seat's actual fire-control surface, not the vehicle class or the fact that a player is aboard.
 enum class Kind { none, optical, missile, rocket, indirect, sensor, flight, mech };
-enum class Mask { none, round, sensor };
+enum class Mask { none, round, monocular, sensor };
+// What the gunner puts his eyes to (the user, 2026-10-30: "有些瞄具周围不应该是全黑的，有些是单眼看的瞄具"), named by the
+// optic's own anchor (optic_mount.h kFamilies, pylib/vehicle_optics.py Lens.marker):
+//  - binocular: both eyes in the eyepiece's cups (a tank gunner's biocular sight): nothing but the field, black round it;
+//  - monocular: one eye at a telescope's eyecup (a rifle scope, a gun's sighting telescope): the field in the cup's
+//    black ring, the other eye still seeing what is round it, dimmed;
+//  - camera: an unmanned station's gun camera seen on the operator's monitor (the Blacker's side guns, the Titan's sub
+//    turrets, the Grape's remote turret): no eyepiece at all, the sensor's whole screen.
+enum class Eyepiece : unsigned char { binocular, monocular, camera };
 constexpr bool Magnifies(Kind k) noexcept { return k!=Kind::none && k!=Kind::indirect; }
 // A magnified seat looks through its one physical optic (sightzoom.cpp SeatCapability needs the model-authored lens):
 // the gun, the coaxial gun and a gun-launched missile or rocket picked on the same seat share that eyepiece, so they
-// share its round field (2026-10-11: one sight for both triggers). Only an electronic sensor (an energy weapon's
-// display, the gunship gunner's) is a rectangle.
-constexpr Mask MaskOf(Kind k) noexcept {
-    return k==Kind::optical || k==Kind::missile || k==Kind::rocket ? Mask::round :
+// share its round field (2026-10-11: one sight for both triggers), round as its eyepiece is (`e`); a camera's is its
+// monitor. An electronic sensor (an energy weapon's display, the gunship gunner's) is a rectangle whatever the anchor.
+constexpr Mask MaskOf(Kind k,Eyepiece e=Eyepiece::binocular) noexcept {
+    return k==Kind::optical || k==Kind::missile || k==Kind::rocket ?
+        (e==Eyepiece::camera ? Mask::sensor : e==Eyepiece::monocular ? Mask::monocular : Mask::round) :
         k==Kind::sensor ? Mask::sensor : Mask::none;
 }
+constexpr bool Round(Mask m) noexcept { return m==Mask::round || m==Mask::monocular; }
 // The sight's field is over the view (hud.cpp ScopeShade and its reticle): a seat whose fire-control surface has a field
 // (MaskOf) magnified, or its mounted optic up at 1x (`mountedUp`: a vehicle's first person, War Thunder's gunner sight).
 // The same answer holds the stock crosshair back for the soldier looking through it (infantryscope.cpp CrossDrawHook,
@@ -39,6 +49,14 @@ constexpr float kBaseFov=0.785398163f;   // the stock camera's (the constant at 
 constexpr int Next(int i) noexcept { return i>=0 && i+1<kStepCount ? i+1 : 0; }
 // The magnification of step `i` (out of range: 1x).
 constexpr float At(int i) noexcept { return i>=0 && i<kStepCount ? kSteps[i] : 1.0f; }
+// The sight key's press (SightZoomKey Z / SightZoomButton R3) at step `step`, the sight `raised` at 1x or not. Third
+// person: 1x -> 3x -> 6x -> 1x (the turret camera at 1x). First person (the user, 2026-10-30: "驾驶室视角得按观察键才显示。
+// 该成瞄准键？"): the cockpit's eye -> the sight at 1x -> 3x -> 6x -> the cockpit's eye; the look key only turns the head.
+struct Raise { int step; bool raised; };
+constexpr Raise Press(int step,bool raised,bool firstPerson) noexcept {
+    return firstPerson && !raised && (step<=0 || step>=kStepCount) ? Raise{0,true} :
+        Raise{Next(step),firstPerson && Next(step)!=0 ? raised : false};
+}
 
 // The field of view with the camera's own zoom `camZoom` (cam+0x410) and the sight's `zoom`; either not a number or
 // under 1 taken as 1 (never wider than the stock view).
@@ -129,8 +147,15 @@ inline void Lowered(const float* dir,float angle,float* out) noexcept {
 
 static_assert(Next(0)==1 && Next(1)==2 && Next(kStepCount-1)==0 && Next(-3)==0,"1x -> 3x -> 6x -> 1x");
 static_assert(At(0)==1.0f && At(kStepCount)==1.0f,"out of range is 1x");
+static_assert(Press(0,false,false).step==1 && !Press(2,false,false).raised && Press(2,false,false).step==0 &&
+              Press(0,false,true).raised && Press(0,false,true).step==0 && Press(0,true,true).step==1 && Press(0,true,true).raised &&
+              Press(2,true,true).step==0 && !Press(2,true,true).raised && Press(1,false,true).step==2,
+              "third person 1x 3x 6x; first person cockpit, 1x, 3x, 6x, cockpit (3x from third person carries on to 6x)");
 static_assert(ScopeField(Kind::optical,3.0f,false) && ScopeField(Kind::optical,1.0f,true) && ScopeField(Kind::sensor,1.0f,true) &&
               !ScopeField(Kind::optical,1.0f,false) && !ScopeField(Kind::indirect,3.0f,true) && !ScopeField(Kind::flight,3.0f,true) &&
               !ScopeField(Kind::none,6.0f,true),"a field over the view: magnified or the optic up, never an overhead / flight view");
+static_assert(MaskOf(Kind::optical)==Mask::round && MaskOf(Kind::missile,Eyepiece::monocular)==Mask::monocular &&
+              MaskOf(Kind::rocket,Eyepiece::camera)==Mask::sensor && MaskOf(Kind::sensor,Eyepiece::monocular)==Mask::sensor &&
+              MaskOf(Kind::flight,Eyepiece::camera)==Mask::none,"the eyepiece shapes an optic's field, a camera's is its monitor");
 }  // namespace sightzoom
 }  // namespace crew

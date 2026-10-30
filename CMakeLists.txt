@@ -117,7 +117,7 @@ target_sources(EDF6VehicleCrew PRIVATE src/npcai.cpp src/npcpost.cpp src/npc_bac
 target_sources(EDF6VehicleCrew PRIVATE src/ground_navigation.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/mission_crew_support.cpp src/mission_crew_team.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_soldier.cpp)
-target_sources(EDF6VehicleCrew PRIVATE src/npc_gunner_aim.cpp src/real_driver_native.cpp src/mission_crew.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/npc_gunner_aim.cpp src/real_driver_native.cpp src/mission_crew.cpp src/vehicle_target.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/command_unit.cpp)
 target_sources(EDF6VehicleCrew PRIVATE src/support_spawn.cpp)
 # The generated variant files (coloured soldiers, loaded vehicles) a mission preloads (src/support_variants.h).
@@ -853,6 +853,9 @@ foreach(_shard RANGE ${_cockpit_last})
 endforeach()
 # Every generated ground vehicle's seats have their first-person eye: fitted, grafted, rebuilt on a fit change.
 add_test(NAME cockpit_coverage_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_coverage_guard.py")
+# Every gun camera seat (remote_display) of a V603 vehicle sees along its gun at every elevation: nothing of the vehicle
+# swings through the aim line from its eye (pylib/cockpit_sweep.py; the TOS-1's launcher pack did from 31 deg up).
+add_test(NAME gun_camera_sweep_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gun_camera_sweep_guard.py")
 # Every ported X-Morph unit (pylib/xm_units.py) is in every vehicle registry, from the catalog alone.
 add_test(NAME xmorph_registry_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/xmorph_registry_guard.py")
 add_test(NAME cabin_view COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cabin_view_test.py")
@@ -1164,6 +1167,8 @@ add_test(NAME npc_core_check COMMAND npc_core_check)
 set(EDF6_NATIVE_DLL "" CACHE FILEPATH "Optional supported EDF.dll for isolated native checks")
 add_test(NAME net_session_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/net_session_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(net_session_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
+add_test(NAME net_ground_probe_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/net_ground_probe_audit.py" "${EDF6_NATIVE_DLL}")
+set_tests_properties(net_ground_probe_native PROPERTIES SKIP_RETURN_CODE 77 ENVIRONMENT "PYTHONIOENCODING=utf-8;PYTHONUTF8=1")
 add_test(NAME item_pickup_native COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/item_pickup_native_audit.py" "${EDF6_NATIVE_DLL}")
 set_tests_properties(item_pickup_native PROPERTIES SKIP_RETURN_CODE 77)
 # EDF4.1's pre-mission scenes (src/edf41before.cpp): the patched call in Before(), _DeleteAllMenuUi, the fade screen name.
@@ -1807,6 +1812,9 @@ add_test(NAME vehicle_look COMMAND vehicle_look_test)
 
 add_test(NAME sedan_build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/sedan_build_test.py")
 set_tests_properties(sedan_build PROPERTIES SKIP_RETURN_CODE 77)
+# The X-Morph cars on the V512 (pylib/car_model.py): skipped without Root.cpk or the model pack's car folders.
+add_test(NAME xm_car_build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/xm_car_build_test.py")
+set_tests_properties(xm_car_build PROPERTIES SKIP_RETURN_CODE 77)
 
 # The two built plugins loaded for real into one process, in either order (tests/plugin_pair_load_test.cpp): each
 # exports its list (aimlink.h and the rest) from its own DLL, aimlink::Resolve finds the peer's names, and with no
@@ -2015,7 +2023,12 @@ add_executable(enemy_control_protocol_test EXCLUDE_FROM_ALL tests/enemy_control_
 target_compile_options(enemy_control_protocol_test PRIVATE /W4 /WX /utf-8 /permissive-)
 add_dependencies(offline_checks enemy_control_protocol_test)
 add_test(NAME enemy_control_protocol COMMAND enemy_control_protocol_test)
-target_sources(EDF6VehicleCrew PRIVATE src/vulcan_rotor.cpp src/barrel_recoil.cpp)
+target_sources(EDF6VehicleCrew PRIVATE src/vulcan_rotor.cpp src/barrel_recoil.cpp src/seat_turret.cpp)
+add_executable(seat_turret_test EXCLUDE_FROM_ALL tests/seat_turret_test.cpp)
+target_include_directories(seat_turret_test PRIVATE src common third_party/EDFModLoader)
+target_compile_options(seat_turret_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks seat_turret_test)
+add_test(NAME seat_turret COMMAND seat_turret_test)
 add_executable(vulcan_rotor_test EXCLUDE_FROM_ALL tests/vulcan_rotor_test.cpp)
 target_include_directories(vulcan_rotor_test PRIVATE src common third_party/EDFModLoader)
 target_compile_options(vulcan_rotor_test PRIVATE /W4 /WX /utf-8 /permissive-)
@@ -2061,6 +2074,8 @@ add_test(NAME tracked_collision COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_
 # X-Morph: Defense's units (docs/xmorph-port.md): the Ogre / text readers and the rig rules always, a unit from the
 # packs with the game installed (the developer machine), built on the V603 with Root.cpk too.
 add_test(NAME xmorph COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_xmorph.py")
+add_test(NAME xm_maps COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_xm_maps.py")
+add_test(NAME level_list COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_level_list.py")
 # The generated vehicles' mesh merge and LODs (pylib/model_lod.py, pylib/mesh_simplify.py) on synthetic meshes.
 add_test(NAME model_lod COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/test_model_lod.py")
 # The M163 / BMPT from their War Thunder model folders (pylib/wt_tracked.py): prep rules always, the assets with the game.

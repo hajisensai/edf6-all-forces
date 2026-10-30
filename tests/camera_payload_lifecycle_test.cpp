@@ -27,11 +27,17 @@ bool IsPlayerJet(const void*) noexcept { return false; }
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
 bool GunshipGunnerCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept {return false;}
 bool DreadnoughtCamera(const unsigned char*,float*,float*) noexcept {return false;}
+bool SeatTurretCamera(const unsigned char*,float*,float*) noexcept {return false;}
 bool IsHelicopter(const void*) noexcept { return false; }
 bool AiGunner(const unsigned char*,const unsigned char*) noexcept { return false; }
+bool IsOnlineAuthority(const void*) noexcept { return true; }   // payload.cpp RunsUnmannedTurrets
 bool IsFuelTank(const unsigned char*) noexcept { return false; }
 void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
+const void* WeaponLockObject(const unsigned char*) noexcept { return nullptr; }   // no auto turrets on these fixtures
+bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { return false; }
+bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }
+bool GunnerAirTarget(const void*) noexcept { return false; }
 namespace audio { void LockTone(int,float) noexcept {} }
 void UnexpectedBoundary() noexcept { static volatile bool fail=true;if(fail)std::abort(); }
 void PumpAircraftPayloadUi(unsigned char*) noexcept { UnexpectedBoundary(); }
@@ -42,7 +48,7 @@ bool StabHeld(const void*,float*,float*,float*) noexcept { return false; }
 float SightZoomNow(const void*) noexcept { return 1; }
 bool SightZoomMounted(const void*) noexcept{return false;}
 bool SightZoomCanMount(const void*,unsigned) noexcept{return false;}
-bool FirstPersonGunnerSight() noexcept{return false;}
+bool SightZoomRaised(const void*) noexcept{return false;}
 bool highMode=false;
 bool HighCamOn(const void*) noexcept { return highMode; }
 int cameraReads=0,loftCalls=0;

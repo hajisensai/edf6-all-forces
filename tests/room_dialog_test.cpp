@@ -6,6 +6,7 @@
 #include "../src/room_dialog_logic.h"
 #include <cstdio>
 #include <initializer_list>
+#include <utility>
 #include <cwchar>
 
 namespace {
@@ -336,7 +337,33 @@ void Walk() {
 }
 }  // namespace
 
+// The class page offers the installed kinds alone (support_call.h SupportKindInstalled): without the X-Morph model pack
+// its infantry is not listed and a set of it changes nothing; installed, it is listed.
+void KindsInstalled() {
+    SetSupportKindInstalled(SupportWeapon::xmInfantry,false);
+    rm::Menu m=Fresh();Nav nav;Begin(m,nav);
+    const int squad=UnitOf(m,L"SQUAD",rm::UnitKind::squad);
+    Pick(m,nav,Do::open,squad);Pick(m,nav,Do::add);
+    Pick(m,nav,Do::field,FieldArg(Page::kind));
+    Expect(nav.page==Page::kind,"the class page");
+    const auto listed=[&](SupportWeapon k) {
+        bool found=false;int n=0;
+        Entries(m,nav,[&](int,Choice c,const wchar_t*) noexcept { if(c.what==Do::set){++n;found=found || c.arg==static_cast<int>(k);} });
+        return std::pair<bool,int>{found,n};
+    };
+    Expect(!listed(SupportWeapon::xmInfantry).first && listed(SupportWeapon::rifle).first &&
+           listed(SupportWeapon::rifle).second==kSupportWeaponCount-1,"not installed: every kind but the X-Morph infantry");
+    Apply(m,nav,Choice{Do::set,static_cast<int>(SupportWeapon::xmInfantry)});
+    Expect(m.unit[squad].squad.kind[0]==SupportWeapon::rifle,"a set of the uninstalled kind changes nothing");
+    SetSupportKindInstalled(SupportWeapon::xmInfantry,true);
+    Pick(m,nav,Do::field,FieldArg(Page::kind));
+    Expect(listed(SupportWeapon::xmInfantry).first && listed(SupportWeapon::rifle).second==kSupportWeaponCount,
+           "installed: every kind, the X-Morph infantry among them");
+    SetSupportKindInstalled(SupportWeapon::xmInfantry,false);
+}
+
 int main() {
+    KindsInstalled();
     PackRoundTrip();
     UnitsPage();
     Squad();

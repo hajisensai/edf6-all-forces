@@ -184,6 +184,9 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
     import vcobjects
     tracked = {f'WEAPON/{path.rsplit("/", 1)[1].upper()}': kind
                for kind in vcobjects.TRACKED for path in vcobjects.GROUND_VEHICLES[kind].weapons}
+    # the walkers' weapons as their builder makes them (pylib/xm_walker.py: on the X-Morph model's muzzles)
+    walkers = {f'WEAPON/{path.rsplit("/", 1)[1].upper()}': kind
+               for kind in vcobjects.WALKERS for path in vcobjects.GROUND_VEHICLES[kind].weapons if path}
     authored: dict[str, dict[str, bytes]] = {}
     # An X-Morph unit whose model folder this machine has not is not deployed (pylib/xm_units.py): its files are not
     # there, so its row cannot be measured here (--archives refuses; tools/selftest.py leaves it unchecked).
@@ -191,9 +194,23 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
     undeployed = {k for k in make_xmorph.KINDS if not make_xmorph.deployable(k)}
     undeployed_rows = {f'OBJECT/{gen.DERIVED_PREFIX.upper()}{k.upper()}_MISSION.SGO' for k in undeployed}
 
+    # An X-Morph car (make_xmorph.CARS: an installer row, as the sedan) is built in memory too (pylib/car_model.py:
+    # no cockpit needed), not read from a Mods it may not be installed in.
+    cars = {f'OBJECT/{vcobjects.GROUND_VEHICLES[k].sgo}.{ext}': k for k in make_xmorph.CARS if k not in undeployed
+            for ext in ('SGO', 'MRAB', 'SHKT')}
+    # an undeployed car's own files cannot be measured either (the same refusal as its mission row above)
+    undeployed_rows |= {f'OBJECT/{vcobjects.GROUND_VEHICLES[k].sgo}.{ext}' for k in make_xmorph.CARS if k in undeployed
+                        for ext in ('SGO', 'MRAB', 'SHKT')}
+
     def read(rel: str) -> bytes | None:
         if rel in undeployed_rows:
             return None
+        if rel in cars:
+            kind = cars[rel]
+            if kind not in authored:
+                import car_model
+                authored[kind] = car_model.build(game, kind)
+            return authored[kind].get(rel)
         if rel in tracked:
             kind = tracked[rel]
             if kind in undeployed:
@@ -201,6 +218,13 @@ def game_reader(root: str) -> Callable[[str], bytes | None]:
             if kind not in authored:
                 import make_tracked_combat
                 authored[kind] = make_tracked_combat.authored(root, kind)   # its weapons: no cockpit needed
+            return authored[kind].get(rel)
+        if rel in walkers:
+            kind = walkers[rel]
+            if kind in undeployed:
+                return None
+            if kind not in authored:
+                authored[kind] = make_xmorph.builder(kind).build(root)
             return authored[kind].get(rel)
         if rel in reg:
             return edf41_objects.read(rel)

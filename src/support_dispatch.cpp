@@ -498,6 +498,13 @@ support_net::PlanResult Plan(std::uint32_t catalog,const float* target,std::uint
     }
     if(!rescue)ComposeOnce(catalog);
     const bool composed=!rescue && planning.composed;const SupportLoadout& load=planning.load;
+    // A soldier kind this install lacks (support_call.h SupportKindInstalled: the X-Morph model pack) is never planned:
+    // the whole request is refused, nothing made (every peer runs the same install; Validate refuses it there too).
+    if(composed && !SupportLoadoutInstalled(load)) {
+        Refuse(catalog,"composed load holds a soldier kind not installed here (the X-Morph model pack is missing)",
+               hudtext::Tr(hudtext::Tx::supportKindNotInstalled));
+        return PlanResult::refused;
+    }
     SupportPlan plan{};plan.catalogId=catalog;std::memcpy(plan.target,target,12);
     if(AirCatalog(catalog)) {
         // The rescue is not held to the mission's support rules (2026-10-10, the user: 「不用受限制吧」).
@@ -744,6 +751,14 @@ bool Validate(const SupportPlan& plan) noexcept {
         (plan.units[0].resourceId==kSupportSubDroneResource || IsCarrierDroneResource(plan.units[0].resourceId));
     if(int strike=0;!support_net::ValidPlan(plan,false) || plan.catalogId>=static_cast<unsigned>(SupportCallCount()) ||
        StrikeCatalog(plan.catalogId,strike) || (!dynamicDrone && !SupportSoldiersReady()))return false;
+    // A soldier kind whose bodies are not installed here (support_call.h SupportKindInstalled: the X-Morph model pack) is
+    // refused before anything is made, whatever the entry (not half a deployment); every peer runs the same install.
+    for(unsigned i=0;i<plan.count;++i)
+        if(IsSupportSoldierResource(plan.units[i].resourceId) && !SupportKindInstalled(SupportSoldierWeapon(plan.units[i].resourceId))) {
+            Log("SUPPORT validate catalog=%u: unit %u resource %X: its soldier kind is not installed here (the X-Morph model pack)",
+                plan.catalogId,i,plan.units[i].resourceId);
+            return false;
+        }
     if(SupportSubCatalog(static_cast<int>(plan.catalogId))) {
         if(plan.count==2 && plan.units[0].resourceId==kSupportSubmarineResource) {
             return !SupportMissionPolicy().underground && !plan.units[0].role && !plan.units[0].variant && plan.units[1].role==1 &&
@@ -1397,6 +1412,15 @@ std::int32_t offlineCharge=0;bool offlineFollowUp=false;
 bool Request(int index,const float* target,const SupportLoadout* load,std::int32_t price,bool followUp,wchar_t* note,
              std::size_t capacity) noexcept {
     if(!note || !capacity)return false;
+    // Its price, held before anything is asked (support_points.h SupportPointsHold): once the call is taken, paying for it
+    // cannot fail; a call not taken puts it back as it was (on every way out of here).
+    struct HeldPrice {
+        bool on=false;
+        bool Take(std::int32_t p) noexcept { on=p>0 && SupportPointsHold(p); return p<=0 || on; }
+        void Keep() noexcept { if(on){on=false;SupportPointsKeepHeld();} }
+        void Owe(std::uint32_t request) noexcept { if(on){on=false;SupportPointsOweHeld(request);} }
+        ~HeldPrice() { if(on)SupportPointsDropHeld(); }
+    } held;
     // A call made as it is (a second wave) brings the entry's out-of-game preset, as the bar's panel does.
     SupportLoadout preset;
     if((!load || load->count<=0) && index>=0 && index<kSupportConfigUnits && SupportCfg().preset[index].count>0 &&
@@ -1421,10 +1445,15 @@ bool Request(int index,const float* target,const SupportLoadout* load,std::int32
         _snwprintf_s(status,_countof(status),_TRUNCATE,hudtext::Tr(hudtext::Tx::supportPtShort),price,SupportPoints());
         Log("SUPPORT request catalog=%d: %d pt asked, %d held",index,price,SupportPoints());
     }
+    else if(!held.Take(price)) {
+        // A guest whose earlier pt changes the host has not confirmed yet (support_points_net.h kChangesMost): not asked.
+        Status(L"本机之前的支援 pt 变动尚未得到房主确认，本次呼叫未发出");
+        Log("SUPPORT request catalog=%d: its %d pt not held (earlier changes unconfirmed by the host): not asked",index,price);
+    }
     else if(int strike=0;StrikeCatalog(static_cast<std::uint32_t>(index),strike)) {
         // A strike: started here at once and told to the others by its own channel (airstrike.cpp SupportStrikeAt).
         accepted=SupportStrikeAt(strike,target,status,_countof(status));
-        if(accepted)SupportPointsSpend(price);
+        if(accepted)held.Keep();
     }
     else if(InSession()) {
         // Cleared even when Submit refuses before allocating a request id: that attempt must not retain the previous
@@ -1432,11 +1461,12 @@ bool Request(int index,const float* target,const SupportLoadout* load,std::int32
         localRequest={};localRequest.acceptNotices=true;
         accepted=SubmitSupportRequest(index,target,note,capacity,loadout);
         // Paid once the host has it: its accepted notice came inside the submit (support_protocol.cpp Session::Submit), so
-        // its id is known and its outcome settles the pt (RequestNotice); one refused at once costs nothing.
+        // its id is known and its outcome settles the pt (RequestNotice); one refused at once costs nothing (the held
+        // price put back).
         if(accepted && price>0) {
             using support_net::RequestStatus;
-            if(localRequest.hasNotice && localRequest.state==RequestStatus::accepted && localRequest.id)SupportPointsOwe(price,localRequest.id);
-            else if(!localRequest.hasNotice || localRequest.state==RequestStatus::active)SupportPointsSpend(price);
+            if(localRequest.hasNotice && localRequest.state==RequestStatus::accepted && localRequest.id)held.Owe(localRequest.id);
+            else if(!localRequest.hasNotice || localRequest.state==RequestStatus::active)held.Keep();
         }
         // Its second wave with its pt: held under its open request (settled by RequestNotice), or due now that it is out.
         if(accepted && followUp) {
@@ -1458,7 +1488,7 @@ bool Request(int index,const float* target,const SupportLoadout* load,std::int32
         Renew(planning);planning.active=true;planning.catalog=static_cast<unsigned>(index);std::memcpy(planning.target,target,12);
         planning.loadout=loadout;
         offlinePending=true;accepted=true;Status(L"正在安排支援入口及路线");
-        if(SupportPointsSpend(price))offlineCharge=price;
+        offlineCharge=held.on ? price : 0;held.Keep();
         offlineFollowUp=followUp;
         Log("SUPPORT request catalog=%d accepted offline, load %llX, %d pt",index,static_cast<unsigned long long>(loadout),price);
     }

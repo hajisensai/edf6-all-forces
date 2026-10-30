@@ -50,6 +50,8 @@ struct Hooks {
     // its READY waits, the transaction's own deadline still running), or cannot be (refused). Null: ready. The test
     // range's rows not preloaded this mission (debug_spawn.cpp PrepareRangeEnemy) load on every peer before any is made.
     PlanResult (*prepare)(const Plan&) noexcept=nullptr;
+    // Optional, host only: why a request was refused before any plan (the requester is only told "refused"), for the log.
+    void (*refused)(std::uint32_t requesterPeer,std::uint32_t catalog,const char* why) noexcept=nullptr;
 };
 bool ValidPlan(const Plan& plan,bool requireIds=true) noexcept;
 } // namespace support_net

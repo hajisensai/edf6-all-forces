@@ -68,10 +68,20 @@ KINDS: tuple[tuple[str, str, str], ...] = (
     ('thunderbow', '翼人·雷弓', 'N606_AIPALEWING_TB'),
     ('cannon', '重装·重炮', 'N607_AIHEAVYARMOR_SC'), ('midcannon', '重装·中炮', 'N607_AIHEAVYARMOR_SMC'),
     ('pilebanker', '重装·打桩', 'N607_AIHEAVYARMOR_SP'), ('fshotgun', '重装·霰弹', 'N607_AIHEAVYARMOR_SSG'),
+    # The X-Morph infantry: the installer's own bodies (EDF6VC_XM_SMALL_INFANTRY[_LEADER].SGO), not a Root.cpk template.
+    ('xminfantry', 'X-Morph 步兵', 'EDF6VC_XM_SMALL_INFANTRY'),
 )
 KIND_NAMES = tuple(k[0] for k in KINDS)
-# support_call.h SupportSoldierClass: 0 Ranger, 1 Wing Diver, 2 Fencer (KINDS order: 5 Rangers, 5 Wing Divers, 4 Fencers).
-KIND_CLASS = {n: 0 if i < 5 else 1 if i < 10 else 2 for i, n in enumerate(KIND_NAMES)}
+# support_call.h SupportSoldierClass: 0 Ranger, 1 Wing Diver, 2 Fencer (KINDS order: 5 Rangers, 5 Wing Divers, 4 Fencers; the
+# X-Morph infantry, last, is a Ranger's class).
+KIND_CLASS = {n: 0 if i < 5 or n == 'xminfantry' else 1 if i < 10 else 2 for i, n in enumerate(KIND_NAMES)}
+# support_call.h SupportKindHasLooks: colours and a backpack are generated from a kind's stock template in Root.cpk; the
+# X-Morph infantry has none (its model has no change-colour material), so it is always the plain body.
+LOOKLESS = ('xminfantry',)
+
+
+def has_looks(k: str) -> bool:
+    return k not in LOOKLESS
 # src/npc_pack_table.h kPackWeapons (tests/support_loadout_ini_test.py compares): the backpack weapons a support soldier may
 # carry, (code, WEAPONTABLE name, class, use, category, lift, area, label).
 PACKS: tuple[tuple[int, str, int, str, int, float, float, str], ...] = (
@@ -310,6 +320,8 @@ def parse_preset(text: str, seats: int) -> list[Soldier]:
         head, plus, packed = head.partition('+')
         name, at, colours = head.partition('@')
         k = kind(name)
+        if not has_looks(k) and (at or plus):
+            raise Invalid('X-Morph 步兵没有涂装与背包：' + token.partition('*')[0].strip())
         look: Look = (STOCK, STOCK)
         if at:
             primary, colon, secondary = colours.partition(':')
@@ -532,7 +544,7 @@ def decode_name(file: str) -> tuple | None:
     None: not one."""
     name = file.strip().upper()
     m = _NPC_NAME.match(name)
-    if m and m.group(1).lower() in KIND_NAMES:
+    if m and m.group(1).lower() in KIND_NAMES and has_looks(m.group(1).lower()):
         k = m.group(1).lower()
         look = tuple(STOCK if g == 'X' else int(g, 16) for g in (m.group(3), m.group(4)))
         carried = ''
@@ -685,6 +697,8 @@ def with_pack(data: bytes, carried: str) -> bytes:
 
 
 def soldier_file(game: rootcpk.Game, k: str, leader: bool, look: Look, carried: str = '') -> bytes:
+    if not has_looks(k):
+        raise Invalid(f'{k} 没有涂装与背包，不生成变体文件')
     template = {n: t for n, _, t in KINDS}[k] + ('_LEADER' if leader else '')
     data = game.read('OBJECT', template + '.SGO')
     if look != (STOCK, STOCK):

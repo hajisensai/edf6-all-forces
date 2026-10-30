@@ -211,7 +211,8 @@ inline crew::SupportWeapon ComposeSquadKind(const crew::SupportLoadout& l,int j)
 }
 inline bool ComposeApply(crew::SupportLoadout& l,int seats,int code) noexcept {
     if(code>=0) {
-        if(code>=crew::kSupportWeaponCount || !ComposeRoom(l,seats))return false;
+        if(code>=crew::kSupportWeaponCount || !crew::SupportKindInstalled(static_cast<crew::SupportWeapon>(code)) ||
+           !ComposeRoom(l,seats))return false;
         for(int k=0;k<kSquad;++k)l.soldier[l.count++]=static_cast<crew::SupportWeapon>(code);
         return true;
     }
@@ -222,17 +223,29 @@ inline bool ComposeApply(crew::SupportLoadout& l,int seats,int code) noexcept {
     for(int i=l.count-gone;i<l.count;++i)l.soldier[i]=crew::SupportWeapon::rifle;
     l.count-=gone;return true;
 }
-// The kinds of a class in the panel's row order (support_call.h SupportSoldierClass).
+// The installed kinds of a class in the panel's row order (support_call.h SupportSoldierClass, SupportKindInstalled).
 inline int ComposeKinds(int cls,int* out,int most) noexcept {
     int n=0;
     for(int k=0;k<crew::kSupportWeaponCount && n<most;++k)
-        if(crew::SupportSoldierClass(static_cast<crew::SupportWeapon>(k))==cls)out[n++]=k;
+        if(crew::SupportSoldierClass(static_cast<crew::SupportWeapon>(k))==cls &&
+           crew::SupportKindInstalled(static_cast<crew::SupportWeapon>(k)))out[n++]=k;
     return n;
 }
 // Pixel sizes at 1080 lines (times the HUD scale `s`).
 constexpr float kComposePad=6.0f,kComposeTitleH=22.0f,kComposeSquadH=22.0f,kComposeGap=3.0f,
                 kComposeLabelW=66.0f,kComposeKindW=56.0f,kComposeKindH=22.0f,kComposeHintH=18.0f;
 constexpr int kComposeClasses=3;
+// The most kinds any one class has (a row of the panel): the width fits it.
+constexpr int ComposeKindsMost() noexcept {
+    int most=0;
+    for(int c=0;c<kComposeClasses;++c) {
+        int n=0;
+        for(int k=0;k<crew::kSupportWeaponCount;++k)n+=crew::SupportSoldierClass(static_cast<crew::SupportWeapon>(k))==c;
+        if(n>most)most=n;
+    }
+    return most;
+}
+constexpr int kComposeKindsMost=ComposeKindsMost();
 struct ComposeLayout {
     Rect box{},title{},hint{};
     int slots=0;Rect slot[kComposeSquadsMost]{};   // a squad's place each (the seats / kSquad), one row
@@ -240,7 +253,8 @@ struct ComposeLayout {
     int kinds=0;Rect kind[crew::kSupportWeaponCount]{};int kindCode[crew::kSupportWeaponCount]{};
 };
 inline float ComposeWidth(float s) noexcept {
-    return (2*kComposePad+kComposeLabelW+5*kComposeKindW+4*kComposeGap)*s;
+    return (2*kComposePad+kComposeLabelW+static_cast<float>(kComposeKindsMost)*kComposeKindW+
+            static_cast<float>(kComposeKindsMost-1)*kComposeGap)*s;
 }
 inline float ComposeHeight(float s) noexcept {
     return (2*kComposePad+kComposeTitleH+kComposeSquadH+kComposeGap+kComposeClasses*(kComposeKindH+kComposeGap)+kComposeHintH)*s;

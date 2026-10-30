@@ -86,7 +86,7 @@ template<class... A> void AddF(Dialog& d,Choice c,const wchar_t* format,A... arg
 inline constexpr Tx kKindTexts[kSupportWeaponCount]={
     Tx::roomKindRifle,Tx::roomKindFlame,Tx::roomKindRocket,Tx::roomKindShotgun,Tx::roomKindSniper,
     Tx::roomKindLance,Tx::roomKindLaser,Tx::roomKindMonster,Tx::roomKindIzuna,Tx::roomKindThunderBow,
-    Tx::roomKindCannon,Tx::roomKindMidCannon,Tx::roomKindPileBanker,Tx::roomKindShotgunFencer};
+    Tx::roomKindCannon,Tx::roomKindMidCannon,Tx::roomKindPileBanker,Tx::roomKindShotgunFencer,Tx::roomKindXmInfantry};
 inline constexpr Tx kStoreTexts[kLoadStoreCount]={
     Tx::roomStoreAamS,Tx::roomStoreAamM,Tx::roomStoreAamL,Tx::roomStoreAgm,Tx::roomStoreAgmL,Tx::roomStoreMk82,
     Tx::roomStoreRkt,Tx::roomStoreAp,Tx::roomStoreHe,Tx::roomStoreGlm};
@@ -154,7 +154,8 @@ template<class Put> int Entries(const rm::Menu& m,const Nav& nav,Put put) noexce
         for(int i=0;i<m.unitCount;++i){UnitLine(m.unit[i],text,kTextMost);emit({Do::open,i},text);}
         break;
     case Page::kind:
-        for(int k=0;k<kSupportWeaponCount;++k)emit({Do::set,k},KindName(k));
+        for(int k=0;k<kSupportWeaponCount;++k)
+            if(SupportKindInstalled(static_cast<SupportWeapon>(k)))emit({Do::set,k},KindName(k));   // an uninstalled kind: not offered
         break;
     case Page::primary: case Page::secondary: case Page::crewSecondary:
         ColourName(m.palette,kStockColour,text,kTextMost);emit({Do::set,kStockColour},text);
@@ -251,10 +252,12 @@ inline void Actions(Dialog& d,const rm::Menu& m,const Nav& nav) noexcept {
         if(!u || nav.row<0 || nav.row>=u->squad.count)break;
         const SupportLook& l=u->squad.look[nav.row];
         AddF(d,{Do::field,FieldArg(Page::kind)},hudtext::Tr(Tx::roomDlgKind),KindName(static_cast<int>(u->squad.kind[nav.row])));
-        ColourName(m.palette,l.primary,name,kTextMost);
-        AddF(d,{Do::field,FieldArg(Page::primary)},hudtext::Tr(Tx::roomDlgPrimary),name);
-        ColourName(m.palette,l.secondary,name,kTextMost);
-        AddF(d,{Do::field,FieldArg(Page::secondary)},hudtext::Tr(Tx::roomDlgSecondary),name);
+        if(SupportKindHasLooks(u->squad.kind[nav.row])) {   // the X-Morph infantry has no colours and no backpack
+            ColourName(m.palette,l.primary,name,kTextMost);
+            AddF(d,{Do::field,FieldArg(Page::primary)},hudtext::Tr(Tx::roomDlgPrimary),name);
+            ColourName(m.palette,l.secondary,name,kTextMost);
+            AddF(d,{Do::field,FieldArg(Page::secondary)},hudtext::Tr(Tx::roomDlgSecondary),name);
+        }
         if(rm::CarriesPack(u->squad.kind[nav.row]))AddF(d,{Do::field,FieldArg(Page::pack)},hudtext::Tr(Tx::roomDlgPack),PackName(l.pack));
         if(u->squad.count<u->seats)Add(d,{Do::copy,0},hudtext::Tr(Tx::roomDlgCopySoldier));
         Add(d,{Do::remove,0},hudtext::Tr(Tx::roomDlgRemoveSoldier));
@@ -562,14 +565,21 @@ inline void Set(rm::Menu& m,const Nav& nav,std::int32_t v) noexcept {
     rm::Unit& u=m.unit[nav.unit];
     switch(nav.page) {
     case Page::kind:
-        if(nav.row<0 || nav.row>=u.squad.count || v<0 || v>=kSupportWeaponCount)return;
+        if(nav.row<0 || nav.row>=u.squad.count || v<0 || v>=kSupportWeaponCount ||
+           !SupportKindInstalled(static_cast<SupportWeapon>(v)))return;
         u.squad.kind[nav.row]=static_cast<SupportWeapon>(v);
-        if(!PackFits(u.squad.look[nav.row].pack,SupportSoldierClass(u.squad.kind[nav.row])))u.squad.look[nav.row].pack=0;
+        if(!SupportKindHasLooks(u.squad.kind[nav.row]))u.squad.look[nav.row]=SupportLook{};
+        else if(!PackFits(u.squad.look[nav.row].pack,SupportSoldierClass(u.squad.kind[nav.row])))u.squad.look[nav.row].pack=0;
         return;
-    case Page::primary: if(nav.row>=0 && nav.row<u.squad.count)u.squad.look[nav.row].primary=v; return;
-    case Page::secondary: if(nav.row>=0 && nav.row<u.squad.count)u.squad.look[nav.row].secondary=v; return;
+    case Page::primary:
+        if(nav.row>=0 && nav.row<u.squad.count && SupportKindHasLooks(u.squad.kind[nav.row]))u.squad.look[nav.row].primary=v;
+        return;
+    case Page::secondary:
+        if(nav.row>=0 && nav.row<u.squad.count && SupportKindHasLooks(u.squad.kind[nav.row]))u.squad.look[nav.row].secondary=v;
+        return;
     case Page::pack:
-        if(nav.row>=0 && nav.row<u.squad.count && PackFits(v,SupportSoldierClass(u.squad.kind[nav.row])))
+        if(nav.row>=0 && nav.row<u.squad.count && SupportKindHasLooks(u.squad.kind[nav.row]) &&
+           PackFits(v,SupportSoldierClass(u.squad.kind[nav.row])))
             u.squad.look[nav.row].pack=static_cast<std::uint8_t>(v);
         return;
     case Page::gun: if(u.vehicle.On())u.vehicle.apGun=v!=0; return;

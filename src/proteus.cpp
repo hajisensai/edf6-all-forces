@@ -1,6 +1,8 @@
 // The Proteus rework (README 普罗透斯, docs/proteus-re.md; ini Proteus*; the user, 2026-10-06: "重构普罗透斯：行走时是快速
 // 转移的指挥平台，架设后变成能保护周围友军的火力据点。座位：两。"; 2026-10-09: "护盾用原版的护盾样式" "完全重做"). The Proteus is the
-// stock VehicleBigBegaruta (vtable 0x17DEC40: V614_PROTEUS_MK2*, VEHICLE407_BIGBEGARUTA*), its stock model and weapons.
+// stock VehicleBigBegaruta (vtable 0x17DEC40: V614_PROTEUS_MK2*, VEHICLE407_BIGBEGARUTA*) on its stock model and weapons:
+// the class alone is not the Proteus, a plugin unit built on it (the X-Morph heavy mech, pylib/xm_walker.py) is told
+// apart by its own model's marker bone (kWalkerMarker) and stays the vehicle its SGO makes it (IsProteus).
 // One table per concern, the game doing the work wherever it can:
 //  - Seats (proteus_logic.h kSeats): the driver (0) and the gunner (1). Seats 2 / 3 (the right cannon's, the
 //    launcher's) are closed to boarding while ProteusTwoSeats (their class mask seat+0x30 = 0: CanRideSeat 0x6346FC
@@ -37,6 +39,10 @@
 namespace crew {
 namespace {
 constexpr unsigned kVtBig=0x17DEC40;
+// pylib/xm_walker.py MARKER: a leaf bone every X-Morph walker's model carries (the game's lookup, BoneRecord506, compares
+// 16 characters: this is 16). A VehicleBigBegaruta whose model has it is that walker, not the Proteus.
+constexpr wchar_t kWalkerMarker[]=L"edf6vc_xm_walker";
+static_assert(sizeof(kWalkerMarker)/sizeof(kWalkerMarker[0])==17,"16 characters: BoneRecord506 compares 16");
 // The legs (vehicle; docs/proteus-re.md §2).
 constexpr std::size_t kMove=0x1950,kTurnNow=0x1974,kWalk=0x1978,kWalkEase=0x197C,kTurn=0x1980;
 constexpr std::size_t kCtrl=0x1720,kJump=kCtrl+0x290,kStepNormal=kCtrl+0xD4;
@@ -168,6 +174,10 @@ SRWLOCK readoutLock=SRWLOCK_INIT;
 struct Out { ProteusReadout r; ULONGLONG at; } out{};
 
 bool Big(const void* v) noexcept { return At<const unsigned char*>(v,0)==image+kVtBig; }
+// The Proteus's own model: no plugin unit's marker bone (proteus_visual.inc finds the piles on the same instance).
+bool StockModel(const void* v) noexcept {
+    return BoneRecord506(static_cast<const unsigned char*>(v)+kModelInst506,kWalkerMarker)==nullptr;
+}
 float Dot3(const float* a,const float* b) noexcept { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 const float* Pos(const void* o) noexcept { return reinterpret_cast<const float*>(static_cast<const unsigned char*>(o)+kPosition); }
 
@@ -608,7 +618,7 @@ bool AllMatch(const Sig* s,std::size_t n,const char* what) noexcept {
 bool ProteusReady() noexcept { return ok; }
 
 bool IsProteus(const void* vehicle) noexcept {
-    __try { return vehicle && Big(vehicle); } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
+    __try { return vehicle && Big(vehicle) && StockModel(vehicle); } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
 }
 
 int ProteusBorrowedWeapons(const unsigned char* vehicle,unsigned seat,const unsigned char** outW,int max) noexcept {

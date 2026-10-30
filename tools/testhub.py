@@ -41,13 +41,14 @@ import urllib.parse
 import urllib.request
 import uuid
 import zipfile
-from typing import BinaryIO
+from typing import BinaryIO, NamedTuple
 
 SITE = os.environ.get('EDF6_TESTHUB_URL', 'https://edf6.fushi.moe').rstrip('/')
 CONFIG = os.path.join(os.environ.get('APPDATA') or os.path.expanduser('~'), 'EDF6AllForces', 'testhub.json')
 LOG_TAIL = 12 << 20           # the last 12 MB of each log: the plugin's log grows to 32 MB before it rotates
 DUMP_MAX = 60 << 20           # crash dumps bigger than this stay home
-DUMP_AGE = 3 * 86400
+DUMP_AGE = 3 * 86400            # older crash dumps are named in crash/dumps.txt with their crash, not sent
+DUMP_LISTED = 20                # the newest this many in CrashDumps are named there (LocalDumps keeps 10 by default)
 UPLOAD_MAX = 95 << 20
 PART_SIZE = 32 << 20          # a build bigger than one request goes up in parts this size (R2 multipart: >= 5 MiB;
                               # the worker holds one part in memory, its limit is 128 MB)
@@ -300,11 +301,17 @@ def _last_loading(path: str) -> float | None:
         pass
     if last is None:
         return None
-    h, m, s = (int(g) for g in last.groups())
-    day = time.localtime(written)
+    return _at_or_before(last.group(1, 2, 3), written)
+
+
+def _at_or_before(hms, limit: float) -> float:  # noqa: ANN001 - (h, m, s) as bytes or str
+    """The time of day hms on the latest date that puts it no later than `limit` (SESSION_SKEW of rounding allowed),
+    seconds since the epoch."""
+    h, m, s = (int(g) for g in hms)
+    day = time.localtime(limit)
     at = time.mktime((day.tm_year, day.tm_mon, day.tm_mday, h, m, s, 0, 0, -1))
-    if at > written + SESSION_SKEW:
-        day = time.localtime(written - 86400)
+    if at > limit + SESSION_SKEW:
+        day = time.localtime(limit - 86400)
         at = time.mktime((day.tm_year, day.tm_mon, day.tm_mday, h, m, s, 0, 0, -1))
     return at
 
@@ -316,6 +323,85 @@ def session_start(game: str) -> float | None:
     return max(starts) if starts else None
 
 
+# Each run's crash dump names its process (src/crash_dump.cpp: `CRASHDUMP installed: <folder>\EDF6.exe.<pid>.plugin.dmp`),
+# and Windows' LocalDumps name theirs the same way (EDF6.exe.<pid>.dmp).
+_INSTALLED = re.compile(rb'CRASHDUMP installed: [^\r\n]*?\.(\d+)\.plugin\.dmp \(')
+_DUMP_PID = re.compile(r'\.(\d+)(?:\.plugin)?\.dmp$', re.I)
+
+
+class Run(NamedTuple):
+    """A run the sent logs hold: its `loading` line's time of day, that time (seconds since the epoch; None when the
+    sent tail cut the line off) and the next run's (None: the last run the logs hold)."""
+    loading: str
+    start: float | None
+    end: float | None
+
+
+def logged_runs(game: str) -> dict[int, list[Run]]:
+    """The runs the sent logs hold (the same tails collect() sends), by process id: pid -> its runs. A tester sends the
+    logs after starting the game again, so the run that crashed is seldom the one the logs end with (reports #29 / #30,
+    2026-10-28..29: the plugin's dump of the crashed run, 22:18:37, was left out as 「早于本次游戏」 while its run's lines
+    were in the very log sent): a dump of any run whose lines go along matches it, when it was written in that run
+    (dump_in_run: Windows reuses process ids, so a pid alone may name a later run's dump). A log's lines carry the time
+    of day only: the last `loading` is dated by the log's last write, each earlier one by the one after it."""
+    order: list[tuple[str, float | None, list[int]]] = []
+    for name in ('EDF6VehicleCrew.log.1', 'EDF6VehicleCrew.log'):
+        path = os.path.join(game, 'Mods', 'Plugins', name)
+        if not os.path.isfile(path):
+            continue
+        data = _tail(path, LOG_TAIL)
+        found = list(re.finditer(_LOADING.pattern + rb'|' + _INSTALLED.pattern, data, re.M))
+        at: dict[int, float] = {}
+        limit = os.path.getmtime(path)
+        for m in reversed(found):
+            if m.group(1) is not None:
+                limit = at[m.start()] = _at_or_before(m.group(1, 2, 3), limit)
+        current: tuple[str, float | None, list[int]] | None = None
+        for m in found:
+            if m.group(1) is not None:
+                current = ('%s:%s:%s' % tuple(g.decode() for g in m.group(1, 2, 3)), at[m.start()], [])
+                order.append(current)
+            else:
+                if current is None:          # the tail starts inside a run: its loading line is not sent
+                    current = ('?', None, [])
+                    order.append(current)
+                current[2].append(int(m.group(4)))
+    runs: dict[int, list[Run]] = {}
+    for i, (loading, start, pids) in enumerate(order):
+        end = next((s for _l, s, _p in order[i + 1:] if s is not None), None)
+        for pid in pids:
+            runs.setdefault(pid, []).append(Run(loading, start, end))
+    return runs
+
+
+def dump_pid(path: str) -> int | None:
+    m = _DUMP_PID.search(os.path.basename(path))
+    return int(m.group(1)) if m else None
+
+
+def _dump_in(path: str, start: float, end: float | None, what: str) -> str:
+    """'' when the dump was written by the run that began at `start` (and before the next one began at `end`), and
+    (when the dump records it) by a process that started then, else why not."""
+    written, created = dump_times(path)
+    if written is None:
+        written = int(os.path.getmtime(path))
+    when = lambda t: time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t))  # noqa: E731
+    if written < start - SESSION_SKEW:
+        return f'写于 {when(written)}，早于{what}（日志 loading {when(start)}）'
+    if end is not None and written > end + SESSION_SKEW:
+        return f'写于 {when(written)}，晚于{what}之后的下一次游戏（日志 loading {when(end)}）'
+    if created is not None and not (start - SESSION_EARLY <= created <= start + SESSION_SKEW):
+        return f'进程启动于 {when(created)}，不是{what}（日志 loading {when(start)}）'
+    return ''
+
+
+def dump_in_run(path: str, run: Run) -> str:
+    """'' when the dump is of `run` (a run the sent logs hold under the dump's process id: logged_runs), else why not."""
+    if run.start is None:
+        return '它那次游戏的 loading 行不在发送的日志尾部，对不上时间'
+    return _dump_in(path, run.start, run.end, '日志里该进程号的那次游戏')
+
+
 def dump_in_session(path: str, start: float | None) -> str:
     """'' when the dump is of the run that began at `start` (session_start), else why not. Report #6 (2026-10-10) sent
     a dump of 10-07 with logs of 10-10: the same install can crash in several runs, and only the last run's dump goes
@@ -323,15 +409,37 @@ def dump_in_session(path: str, start: float | None) -> str:
     that started then, not before (an earlier run) or after (a later run whose plugins never logged)."""
     if start is None:
         return '插件日志里没有 loading 行，对不上是哪次游戏'
-    written, created = dump_times(path)
-    if written is None:
-        written = int(os.path.getmtime(path))
-    when = lambda t: time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(t))  # noqa: E731
-    if written < start - SESSION_SKEW:
-        return f'写于 {when(written)}，早于本次游戏（日志 loading {when(start)}）'
-    if created is not None and not (start - SESSION_EARLY <= created <= start + SESSION_SKEW):
-        return f'进程启动于 {when(created)}，不是本次游戏（日志 loading {when(start)}）'
-    return ''
+    return _dump_in(path, start, None, '本次游戏')
+
+
+def _dump_module_rows(f: BinaryIO) -> list[tuple[str, int, int, int]] | None:
+    """A minidump's MINIDUMP_MODULE rows (stream 4): (full path, BaseOfImage, SizeOfImage, TimeDateStamp) each."""
+    rva = _dump_stream(f, 4)   # ModuleListStream
+    if rva is None:
+        return None
+    count = _dump_read(f, rva, 4)
+    if len(count) != 4:
+        return None
+    count = min(int.from_bytes(count, 'little'), 4096)
+    rows = _dump_read(f, rva + 4, 108 * count)
+    if len(rows) != 108 * count:
+        return None
+    out = []
+    for m in range(count):
+        row = rows[108 * m:108 * (m + 1)]
+        base = int.from_bytes(row[0:8], 'little')
+        size, stamp, name_rva = (int.from_bytes(row[o:o + 4], 'little') for o in (8, 16, 20))
+        raw_length = _dump_read(f, name_rva, 4)
+        if len(raw_length) != 4:
+            return None
+        length = int.from_bytes(raw_length, 'little')
+        if length > (1 << 16) or length % 2:   # Windows paths are at most 32767 UTF-16 code units
+            return None
+        raw_name = _dump_read(f, name_rva + 4, length)
+        if len(raw_name) != length:
+            return None
+        out.append((raw_name.decode('utf-16-le', 'replace'), base, size, stamp))
+    return out
 
 
 def dump_modules(path: str) -> dict[str, tuple[str, int, int]] | None:
@@ -339,34 +447,46 @@ def dump_modules(path: str) -> dict[str, tuple[str, int, int]] | None:
     SizeOfImage). None when it is no minidump or has no module list."""
     try:
         with open(path, 'rb') as f:
-            rva = _dump_stream(f, 4)   # ModuleListStream
-            if rva is None:
-                return None
-            count = _dump_read(f, rva, 4)
-            if len(count) != 4:
-                return None
-            count = min(int.from_bytes(count, 'little'), 4096)
-            rows = _dump_read(f, rva + 4, 108 * count)
-            if len(rows) != 108 * count:
-                return None
-            out: dict[str, tuple[str, int, int]] = {}
-            for m in range(count):
-                row = rows[108 * m:108 * (m + 1)]
-                size, stamp, name_rva = (int.from_bytes(row[o:o + 4], 'little') for o in (8, 16, 20))
-                raw_length = _dump_read(f, name_rva, 4)
-                if len(raw_length) != 4:
-                    return None
-                length = int.from_bytes(raw_length, 'little')
-                if length > (1 << 16) or length % 2:   # Windows paths are at most 32767 UTF-16 code units
-                    return None
-                raw_name = _dump_read(f, name_rva + 4, length)
-                if len(raw_name) != length:
-                    return None
-                name = raw_name.decode('utf-16-le', 'replace')
-                out[re.split(r'[\\/]', name)[-1].lower()] = (name, stamp, size)
-            return out
+            rows = _dump_module_rows(f)
     except OSError:
         return None
+    if rows is None:
+        return None
+    return {re.split(r'[\\/]', name)[-1].lower(): (name, stamp, size) for name, _, size, stamp in rows}
+
+
+def dump_exception(path: str) -> str:
+    """The crash a minidump records (MINIDUMP_EXCEPTION_STREAM, stream 6): its code at module+offset and what the code's
+    parameters say, read with bounded reads like the module list, so a dump too big to send still names its crash
+    (reports #26 / #29 / #30, 2026-10-27..29: Windows' LocalDumps of 190 MB, over DUMP_MAX, left the reports with no
+    crash site at all). '' when the dump has no exception stream."""
+    try:
+        with open(path, 'rb') as f:
+            rva = _dump_stream(f, 6)   # ExceptionStream
+            if rva is None:
+                return ''
+            raw = _dump_read(f, rva, 40 + 8 * 15)
+            if len(raw) != 160:
+                return ''
+            rows = _dump_module_rows(f) or []
+    except OSError:
+        return ''
+    thread, code = int.from_bytes(raw[0:4], 'little'), int.from_bytes(raw[8:12], 'little')
+    address = int.from_bytes(raw[24:32], 'little')
+    params = [int.from_bytes(raw[40 + 8 * i:48 + 8 * i], 'little') for i in range(min(int.from_bytes(raw[32:36], 'little'), 15))]
+    where = f'0x{address:X}'
+    for name, base, size, _ in rows:
+        if base <= address < base + size:
+            where = re.split(r'[\\/]', name)[-1] + f'+0x{address - base:X}'
+            break
+    if code == 0xC0000005 and len(params) >= 2:
+        access = {0: '读', 1: '写', 8: '执行'}.get(params[0], str(params[0]))
+        detail = f'，{access} 0x{params[1]:X}'
+    elif code == 0xC0000409 and params:   # __fastfail: the first parameter is the FAST_FAIL_* code
+        detail = f'，__fastfail 代码 {params[0]}'
+    else:
+        detail = ''.join(f'，参数 0x{p:X}' for p in params[:2])
+    return f'异常 {code:08X} 于 {where}（线程 {thread}{detail}）'
 
 
 def dump_matches(path: str, game: str) -> str:
@@ -556,40 +676,62 @@ def collect(game: str, build: str = '') -> tuple[bytes, list[str]]:
         if start is not None:
             verdicts.append(f'本次游戏：插件日志 loading {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start))}')
 
+        runs = logged_runs(game)
+
         def matches(path: str) -> bool:
+            """Whether the dump goes with the sent logs; its line in dumps.txt either way, with the crash it records
+            (dump_exception: bounded reads, so also of a dump too big to send)."""
             why = dump_matches(path, game)
-            if not why:
-                session = dump_in_session(path, start)
-                why = f'不是本次游戏：{session}' if session else ''
+            pid = dump_pid(path)
+            logged = [] if why else [(r, dump_in_run(path, r)) for r in runs.get(pid, [])]
+            run = next((r for r, off in logged if not off), None)
+            if run is not None:
+                where = f'本次安装、日志里的一次游戏（进程 {pid}，loading {run.loading}）'
+            else:
+                if not why:
+                    session = dump_in_session(path, start)
+                    # a logged run of its pid it was not written in (Windows reused the id): said with the time rule's
+                    why = (f'不是本次游戏：{session}' + ''.join(f'；进程 {pid}（loading {r.loading}）：{off}'
+                                                          for r, off in logged)) if session else ''
+                where = f'来源不符：{why}' if why else '本次安装、本次游戏'
+            crash = dump_exception(path)
             verdicts.append(f'{os.path.basename(path)}  {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(path)))}  '
-                            + (f'来源不符，未上传：{why}' if why else '本次安装、本次游戏'))
+                            + where + (f'；{crash}' if crash else ''))
             return not why
+
+        def too_big(path: str, size: int) -> None:
+            verdicts.append(f'{os.path.basename(path)}: {size} 字节，超过 {DUMP_MAX} 的上限，未上传（上一行是它的来源与异常）')
 
         for path in sorted(glob.glob(os.path.join(plugins, '*.hang.dmp'))):
             if time.time() - os.path.getmtime(path) >= DUMP_AGE:
                 continue
             size = os.path.getsize(path)
-            if size > DUMP_MAX:
-                verdicts.append(f'{os.path.basename(path)}: {size} 字节，超过 {DUMP_MAX} 的上限，未读取、未上传（来源未检查）')
-                add(path, 'crash/' + os.path.basename(path) + '.too-big.txt',
-                    f'{os.path.basename(path)}: {size} bytes, over the {DUMP_MAX} limit; left at home\r\n'.encode('utf-8'))
-            elif matches(path):
-                with open(path, 'rb') as f:
-                    add(path, 'crash/' + os.path.basename(path), f.read())
-        dumps = [p for p in glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'CrashDumps', 'EDF6*.dmp'))
-                 if time.time() - os.path.getmtime(p) < DUMP_AGE]
-        # Of each source the newest of this install's (dump_matches) and of the run the logs end with
-        # (dump_in_session): an older build's or an earlier run's dump is named in crash/dumps.txt, not sent. The
-        # plugin's first (it has the crash's own context); Windows' too while the upload stays under UPLOAD_MAX.
+            if matches(path):
+                if size > DUMP_MAX:
+                    too_big(path, size)
+                    add(path, 'crash/' + os.path.basename(path) + '.too-big.txt',
+                        f'{os.path.basename(path)}: {size} bytes, over the {DUMP_MAX} limit; left at home\r\n'.encode('utf-8'))
+                else:
+                    with open(path, 'rb') as f:
+                        add(path, 'crash/' + os.path.basename(path), f.read())
+        dumps = sorted(glob.glob(os.path.join(os.environ.get('LOCALAPPDATA', ''), 'CrashDumps', 'EDF6*.dmp')),
+                       key=os.path.getmtime, reverse=True)[:DUMP_LISTED]
+        # Of each source the newest of this install's (dump_matches) and of a run the sent logs hold (logged_runs, or
+        # by time the run they end with: dump_in_session): an older build's or an unlogged run's dump is named in
+        # crash/dumps.txt, not sent; one too big to send, or older than DUMP_AGE, is named with its crash. The plugin's
+        # first (it has the crash's own context); Windows' too while the upload stays under UPLOAD_MAX.
         sent = 0
         for source in ('plugin', 'windows'):
             group = [p for p in dumps if p.lower().endswith('.plugin.dmp') == (source == 'plugin')]
-            for path in sorted(group, key=os.path.getmtime, reverse=True):
+            for path in group:
                 size = os.path.getsize(path)
-                if size > DUMP_MAX:
-                    verdicts.append(f'{os.path.basename(path)}: {size} 字节，超过 {DUMP_MAX} 的上限，未读取、未上传（来源未检查）')
-                    continue
                 if not matches(path):
+                    continue
+                if time.time() - os.path.getmtime(path) >= DUMP_AGE:
+                    verdicts.append(f'{os.path.basename(path)}: 超过 {DUMP_AGE // 86400} 天，未上传（上一行是它的来源与异常）')
+                    continue
+                if size > DUMP_MAX:
+                    too_big(path, size)
                     continue
                 if mem.tell() + size > UPLOAD_MAX - (4 << 20):
                     verdicts.append(f'{os.path.basename(path)}: {size} 字节，加上它会超过上传上限 {UPLOAD_MAX}，未上传')

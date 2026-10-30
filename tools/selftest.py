@@ -60,6 +60,7 @@ import make_jets  # noqa: E402
 import make_katyusha  # noqa: E402
 import modfiles  # noqa: E402
 import vcobjects as vc  # noqa: E402
+import xm_units  # noqa: E402
 
 TESTS: list[Callable[[], None]] = []
 
@@ -710,9 +711,10 @@ def calls_table_consistent() -> None:
     ids = [c.id for c in calls.CALLS]
     assert len(set(ids)) == len(ids), 'duplicate ids'
     assert all(i.startswith(calls.ID_PREFIX) for i in ids)
-    marks = [c.mark for c in calls.CALLS if not c.ground]   # a ground vehicle's request has no mark (0)
+    # a ground vehicle's request has no mark (0), nor an X-Morph helicopter's (the stock heli flight: no plugin body)
+    marks = [c.mark for c in calls.CALLS if not c.ground and not c.heli]
     assert len(set(marks)) == len(marks), 'duplicate marks'
-    assert all(c.mark == 0 for c in calls.CALLS if c.ground), 'a ground vehicle request with a mark'
+    assert all(c.mark == 0 for c in calls.CALLS if c.ground or c.heli), 'a ground vehicle / helicopter request with a mark'
     crew_h = src('src/crew.h')
     roles = set(re.search(r'enum class JetRole \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
     bodies = set(re.search(r'enum class HeliBody \{([^}]*)\}', crew_h).group(1).replace(' ', '').split(','))
@@ -740,8 +742,9 @@ def calls_table_consistent() -> None:
         assert c.brings != 'gravity' or (bits & ~0xFFF == calls.THROW_MARK_BASE and bits != calls.THROW_MARK_BASE), c.id
         assert bool(c.role) == (c.brings == 'jets') and (not c.role or c.role in roles), c.id
         assert bool(c.body) == (c.brings == 'helis') and (not c.body or c.body in bodies), c.id
-        assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground)) == (c.brings == 'vehicle'), c.id
-        assert not (c.jet and c.ground) and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
+        assert bool(c.vehicle) == (bool(c.jet) or bool(c.ground) or bool(c.heli)) == (c.brings == 'vehicle'), c.id
+        assert sum(map(bool, (c.jet, c.ground, c.heli))) <= 1 and (not c.ground or c.ground in vc.GROUND_VEHICLES), c.id
+        assert not c.heli or (c.heli in xm_units.UNITS and xm_units.UNITS[c.heli].family == 'heli'), c.id
         assert not c.ground or vc.GROUND_VEHICLES[c.ground].sgo == c.vehicle, c.id
         assert (c.count > 0) == (c.flown or thrown) and bool(c.log) == (c.flown or thrown or c.brings in ('ultimate', 'barrage')), c.id
         assert not thrown or not c.flown, c.id   # not in the in-mission pick (kCalls)
@@ -979,8 +982,15 @@ def _synthetic_call_sgo(c: calls.Call) -> bytes:
     k = c.brings
     if k == 'vehicle':
         entry, fuel = ['app:/weapon/v_506heli_gatling01_l.sgo', [1.0, 0.0]], ['app:/weapon/v_fueltank.sgo', [1.0]]
-        if c.ground:
-            n = 2 if len(vc.GROUND_VEHICLES[c.ground].slots) > 2 else len(cw.vehicle_weapons(c))
+        ground = vc.GROUND_VEHICLES[c.ground] if c.ground else None
+        if ground and ground.weapons_at is not None:
+            # a walker's (the host's request): its weapon list at weapons_at, an entry a host holder (some empty), and
+            # its recoil after it
+            n = len(cw.vehicle_weapons(c))
+            held = [['app:/weapon/stock_0.sgo', [0.0, 0.0]]] + [[0.0]] * (n - 1)
+            setup = [[1.0, 1.0], *([0.0, 1.0] for _ in range(ground.weapons_at - 1)), held, [0.02, 0.1]]
+        elif ground:
+            n = 2 if len(ground.slots) > 2 else len(cw.vehicle_weapons(c))
             setup = [[1.0, 1.0], [0.0, 1.0], [[f'app:/weapon/stock_{i}.sgo', [1.0, [0.0, 0.0]]] for i in range(n)]]
         else:
             setup = [[1.0, 1.0], [0.0, 1.0, 2.0], [100.0], [entry, fuel]]
@@ -1660,7 +1670,7 @@ def hand_copies_agree() -> None:
     # kKinds rows: {"name",mark,...}, the mark an integer or a float literal.
     pjet = dict(re.findall(r'\{"(\w+)",\s*(\d+)(?:\.0f)?\s*,', src('src/playerjet.cpp').split('kKinds[]={', 1)[1].split('};', 1)[0]))
     for c in calls.CALLS:
-        if c.brings != 'vehicle' or c.ground:
+        if c.brings != 'vehicle' or c.ground or c.heli:
             continue
         jet = vc.JETS[c.jet]
         if c.jet == vc.SAZABI_JET:   # the Sazabi: tools/make_sazabi.py writes it, src/sazabi.cpp knows its mark
@@ -1672,6 +1682,10 @@ def hand_copies_agree() -> None:
             assert jet.mark == c.mark == vc.DREADNOUGHT_MARK and make_dreadnought.SGO_FILE == f'{c.vehicle}.SGO', c.id
             assert f'kDreadnoughtMark={vc.DREADNOUGHT_MARK:.1f}f' in src('src/dreadnought.cpp'), 'src/dreadnought.cpp kDreadnoughtMark'
             assert f'{{{vc.DREADNOUGHT_MARK:.1f}f,' in src('src/body506.cpp').replace(' ', ''), 'src/body506.cpp kMarks lacks the Dreadnought'
+            continue
+        if c.jet in {xm_units.jet_request(k) for k in vc.XM_JETS.values()}:   # an X-Morph jet's twin: make_xmorph writes it
+            import xm_jet
+            assert jet.mark == c.mark and jet.requested and jet.parked and xm_jet.request_file(c.kind) == f'{c.vehicle}.SGO', c.id
             continue
         assert jet.mark == c.mark and make_jets.FILES[f'{c.vehicle}.SGO'] == c.jet, c.id
         if jet.player:   # a player jet: its mark src/playerjet.cpp kKinds'
@@ -1696,7 +1710,9 @@ def hand_copies_agree() -> None:
     written = ({n.split('/', 1)[1] for n in make_jets.names()} | {vc.DRILL_CHARGE_FILE} | set(vc.EMC_FILES)
                | set(vc.SAZABI_ROUND_FILES) | {make_proteus.SHIELD_FILE.split('/', 1)[1]} | set(vc.ULT_FILES)
                | set(vc.BARRAGE_FILES)
-               | set(make_dreadnought.FIGHTER_SGOS.values()) | set(make_dreadnought.TURRET_ROUNDS.values()))
+               | set(make_dreadnought.FIGHTER_SGOS.values()) | set(make_dreadnought.TURRET_ROUNDS.values())
+               # ...and the X-Morph jets' bodies: tools/make_xmorph.py (pylib/xm_jet.py)
+               | {f'EDF6VC_{k.upper()}.SGO' for k in vc.XM_JETS.values()})
     assert files <= written, f'src/jet* loads files tools/make_jets.py does not write: {sorted(files - written)}'
 
 
@@ -2079,7 +2095,7 @@ def sight_zoom_wired() -> None:
     assert draw.index('ScopeShade(') < draw.index('CarrierBars(')
     # One snapshot of the seat's sight decides the field (SightZoomScope, sightzoom.h ScopeField) and whose stock
     # crosshair gives way to it (scope_hold.h PublishScopeDrawn); SightZoomView still tells the overhead view.
-    assert 'SightZoomScope(&sight)' in draw and 'sightzoom::MaskOf(sight.kind)' in draw and 'SightZoomView()' in draw
+    assert 'SightZoomScope(&sight)' in draw and 'sightzoom::MaskOf(sight.kind,sight.eyepiece)' in draw and 'SightZoomView()' in draw
     assert 'PublishScopeDrawn(drawn ? sight.human : nullptr)' in draw and 'HudScopeHoldsCrosshair(soldier)' in src('src/infantryscope.cpp')
     assert 'SeatCapability(v,seat)' in code and 'HighCamOn(v) || TurretCamHighTransition(v)' in code
     assert 'LadderTicks(drawer,ctx,text,vp,width,height,s,h.ladder,' in hud and 'r.ladder=gunsight::Of(' in src('src/helisight.cpp')
@@ -2592,12 +2608,17 @@ def every_boardable_aircraft_requested() -> None:
              re.findall(r'\{Body::(\w+),L"[^"]*",L"[^"]*",(\d+)\.0f,', re.sub(r'\s+', ' ', table))}
     frames = dict(re.findall(r'\{Body::(\w+),Airframe::(\w+),', src('src/playerjet_kinds.h')))
     assert len(frames) >= 13 and set(left_out) <= set(frames), sorted(frames)
-    fly = [c for c in calls.CALLS if c.brings == 'vehicle' and c.jet and not vc.JETS[c.jet].player]
+    # The X-Morph jets' requests (pylib/vcobjects.py XM_JETS) are their units' rows (tools/calls.py _with_xmorph: appended
+    # where the catalog ports them, named after the unit), their twins tools/make_xmorph.py's (pylib/xm_jet.py).
+    xm = {xm_units.jet_request(k): vc.JETS[n].mark for n, k in vc.XM_JETS.items()}
+    fly = [c for c in calls.CALLS if c.brings == 'vehicle' and c.jet and not vc.JETS[c.jet].player and c.jet not in xm]
     by_mark = {c.mark: c for c in fly}
     assert len(by_mark) == len(fly), 'two requests of one kind'
+    xm_calls = {c.mark for c in calls.CALLS if c.jet in xm}
+    assert xm_calls == set(xm.values()) and not xm_calls & set(by_mark), sorted(xm_calls)
     for body, frame in frames.items():
         mark = marks[body]
-        assert (mark in by_mark) != (body in left_out), f'{body} (mark {mark:.0f}): requested and left out, or neither'
+        assert (mark in by_mark or mark in xm_calls) != (body in left_out),             f'{body} (mark {mark:.0f}): requested and left out, or neither'
     want = {vc.request_name(k) for k in vc.REQUEST_KINDS}
     assert {c.jet for c in fly} == want, sorted(want ^ {c.jet for c in fly})
     for kind in vc.REQUEST_KINDS:
@@ -4612,8 +4633,10 @@ def xmorph_undeployed_without_its_folder() -> None:
     """An X-Morph unit (pylib/xm_units.py) whose model folder is not here is registered all the same (its request row,
     its catalog row) and deployed nowhere, with no stand-in (CLAUDE.md): tools/make_xmorph.py builds no file (the
     installer's install then releases what an earlier one wrote), its request row is a placeholder
-    (call_weapons.placeholder: no SGO, nothing needed), the test range leaves it out of a plan. With the folder
-    (model.json and model.npz) it is deployed."""
+    (call_weapons.placeholder: no SGO, nothing needed), the test range leaves it out of a plan (the infantry: no request
+    row, no range mission; the plugin offers no kind without its soldier SGO, src/support_soldier.cpp). With the folder
+    (model.json and model.npz) it is deployed. A car (make_xmorph.CARS) is the range's as the sedan is (its own SGO,
+    testrange/catalog.py INSTALLER_VEHICLES): there once its files are in Mods."""
     from unittest.mock import patch
     import io
     import make_xmorph
@@ -4623,25 +4646,41 @@ def xmorph_undeployed_without_its_folder() -> None:
     import gen
     assert make_xmorph.KINDS, 'no ported X-Morph unit'
     with tempfile.TemporaryDirectory() as root, patch.object(obj_model, 'model_roots', lambda: [root]):
+        requested = {u.key for u in xm_units.requested()}
+        assert set(make_xmorph.KINDS) - requested == set(make_xmorph.INFANTRY), 'an X-Morph unit neither requested nor a soldier'
         for kind in make_xmorph.KINDS:
-            call = next(c for c in calls.CALLS if c.ground == kind)
-            mission = f'{gen.DERIVED_PREFIX}{kind}_mission'
-            assert not make_xmorph.deployable(kind) and cw.undeployed(call) and cw.placeholder(call), kind
-            assert cw.sgo_file(call) in cw.parked_sgos() and cw.sgo_file(call) in cw.our_sgos(), kind
+            assert not make_xmorph.deployable(kind), kind
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
                 assert make_xmorph.builder(kind).build(root) == {}, kind
             assert out.getvalue().count('\n') == 1 and xm_units.folder(kind) in out.getvalue(), out.getvalue()
-            kept, said = gen.without_missing(root, gen.Plan(vehicles={mission: 1, 'edf6tr_vulcan_mission': 1}))
-            assert mission not in kept.vehicles and 'edf6tr_vulcan_mission' in kept.vehicles and len(said) == 1, said
+            call = next((c for c in calls.CALLS if c.kind == kind and c.brings == 'vehicle'), None)
+            assert (call is not None) == (kind in requested), kind
+            car = kind in make_xmorph.CARS
+            mission = f'edf6vc_{kind}' if car else f'{gen.DERIVED_PREFIX}{kind}_mission'
+            range_unit = call is not None and kind not in make_xmorph.HELIS | make_xmorph.JETS   # the aircraft: not on the range (yet)
+            if call is not None:
+                assert cw.undeployed(call) and cw.placeholder(call), kind
+                assert cw.sgo_file(call) in cw.parked_sgos() and cw.sgo_file(call) in cw.our_sgos(), kind
+            if range_unit:
+                kept, said = gen.without_missing(root, gen.Plan(vehicles={mission: 1, 'edf6tr_vulcan_mission': 1}))
+                assert mission not in kept.vehicles and 'edf6tr_vulcan_mission' in kept.vehicles and len(said) == 1, said
             folder = os.path.join(root, xm_units.folder(kind))
             os.makedirs(folder)
             for name in ('model.json', 'model.npz'):
                 with open(os.path.join(folder, name), 'wb'):
                     pass
-            assert make_xmorph.deployable(kind) and not cw.placeholder(call), kind
+            assert make_xmorph.deployable(kind), kind
+            if call is None:
+                continue
+            assert not cw.placeholder(call), kind
             assert cw.sgo_file(call) not in cw.parked_sgos(), kind
-            assert gen.without_missing(root, gen.Plan(vehicles={mission: 1}))[0].vehicles == {mission: 1}, kind
+            if car:   # the installer's files, as an install writes them
+                for rel in gen.catalog.files_of(gen.OPTIONAL_VEHICLES[mission]):
+                    os.makedirs(os.path.dirname(os.path.join(root, 'Mods', rel)), exist_ok=True)
+                    with open(os.path.join(root, 'Mods', rel), 'wb'):
+                        pass
+            assert not range_unit or gen.without_missing(root, gen.Plan(vehicles={mission: 1}))[0].vehicles == {mission: 1}, kind
 
 
 @test
@@ -5862,7 +5901,7 @@ def stock_stores_build() -> None:
     got = dsgo.to_py(dsgo.parse(handed[flak]).root)
     mine = dsgo.to_py(dsgo.parse(turret[flak]).root)
     assert [k for k in got if k not in ('Ammo_CustomParameter', 'resource')] == [k for k in mine if k not in ('Ammo_CustomParameter', 'resource')]
-    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_2.sgo' in str(got['resource'])
+    assert 'edf6vc_v603_flak_stores.sgo' in str(got['Ammo_CustomParameter']) and 'edf6vc_aam_s_k2a_2.sgo' in str(got['resource'])   # its mounted kind (vc.STOCK_MOUNTS)
 
 
 @test
@@ -13463,11 +13502,21 @@ def edf41_hector_alias() -> None:
         assert struct.unpack_from('<if', blob, 0) == ((0, 180.0) if i == m.BERSERKER_DEATH_SLOT else (1, 480.0)), i
     # 4.1's time to the first shot: the 301 cannon charges 180 frames (EDF41.exe 0x225A7A, 3 s)
     assert [c['gun_battery']['charge']['time'] for c in top['gun_control']] == [180.0, 180.0], top['gun_control']
+    # no Berserker look (the planner's report #28: e602_berserker.efarc large_gun_charge / _fire on a 4.1 weapon): the battery
+    # draws nothing, the plugin draws 4.1's (HECTOR_FX): the cannons' charge ball and flash, at each gun's muzzle locator
+    for c in top['gun_control']:
+        battery = c['gun_battery']
+        assert 'effect_arc' not in battery and 'effect' not in battery['charge'] and 'effect' not in battery['fire'], battery
+        assert 'se' in battery['charge'], 'a cannon keeps its charge sound'
+    fx = top['edf41_hector']['fx']
+    assert [f[:2] for f in fx] == [[1.0, 180.0]] * 2, fx
+    assert all(max(f[3:6]) == 1.0 and f[5] == 1.0 and f[6] == 10.0 for f in fx), fx   # 4.1's blue flash, 10 frames
     located = ml.mab_locators(am.items[2].data)
     names = {l.name: l for _i, l in located}
     assert {'目の基準位置', '砲台１', '砲台２'} <= set(names) and all(l.node in bones for _i, l in located)
     assert [c['gun_battery']['muzzle']['shape'] for c in top['gun_control']] == ['砲台１', '砲台２']
     assert names['砲台１'].node == 'arms_l' and names['砲台２'].node == 'arms_r' and names['砲台１'].a[2] > 20.0
+    assert [f[2] for f in fx] == [names['砲台１'].a[2], names['砲台２'].a[2]], fx   # the plugin's muzzle is the locator
     wk = top['WalkingEnemyBase']['InterpolateNode']
     assert wk in bones and top['BerserkerSettings']['WakeupNode'][0] in bones
     shkt = files['OBJECT/RAGDOLL_HECTOR301_HAS_HKA.SHKT']

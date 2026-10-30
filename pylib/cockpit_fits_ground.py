@@ -58,7 +58,7 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # Titan (404): the commander-gunner in the main turret left of the gun (room 2.42, 5.42, 0.46, 1.31, 2.41, 9.49:
     # the turret is a hall, the kit takes what it wants of it; on the axis the gun's breech filled the slot 0.85 m
     # ahead); the two side cannons are unmanned sub-turrets: their seats see the guns' camera monitors
-    # (remote_display), the eye at each turret's sight glass (the optics' vc_optic_01 / 02) on the gun's pitch bone.
+    # (remote_display), the eye at each turret's sight glass (the optics' vc_camera_01 / 02) on the gun's pitch bone.
     'VEHICLE404_BIGTANK': (
         Fit(0, 'cannon_main', (1.5, 5.0, 2.0), 'tank_gunner'),
         Fit(1, 'subCannon_A_aim', (2.0396, 7.6543, -3.9414), 'remote_display'),

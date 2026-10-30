@@ -43,6 +43,8 @@ bool EnemyControlWeaponAim(const void* object,float* out) noexcept {
 }
 namespace crew::edf41c {
 int BoneIndex(void*,const wchar_t*) noexcept {return -1;}
+bool Particle(const float*,int,float,const float*,const wchar_t*) noexcept {return true;}
+void StencilLight(const float*,const float*,float,int) noexcept {}
 bool AimPoint(const void*,float* out) noexcept {out[0]=10;out[1]=100;out[2]=20;return true;}
 }
 int main(){

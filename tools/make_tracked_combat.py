@@ -11,6 +11,7 @@ import copy
 import os
 import struct
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -19,6 +20,7 @@ sys.path[:0] = [str(HERE.parent / 'pylib'), str(HERE)]
 import cockpits
 import dsgo
 import ledger
+import mab_legacy
 import model_lod
 import emplacement_model
 import vcobjects as vc
@@ -214,28 +216,36 @@ NAMES = {
 # the `like`'s, a model folder of its own (WT_ONLY: wt_tracked.Model). What belongs to the `like`'s hull or model (the
 # one-cradle M61s, turret stops, the procedural models) is not inherited.
 for _xm in xm_units.v603():
-    # a tracked unit is a wt_tracked.Model kind (WT_ONLY: its camera), an emplacement an emplacement_model one (KINDS)
-    _kinds = WT_ONLY if _xm.family == 'tracked' else EMPLACEMENTS
+    # a tracked or wheeled unit is a wt_tracked.Model kind (WT_ONLY: its camera), an emplacement an emplacement_model
+    # one (KINDS)
+    _kinds = WT_ONLY if _xm.family in xm_units.HULLS else EMPLACEMENTS
     if _xm.like not in GUNS or _xm.like not in _kinds:
         raise ValueError(f'{_xm.key}: its like {_xm.like!r} is no {_xm.family} kind with a gun table (GUNS)')
     LABELS[_xm.key] = f'{xm_units.label(_xm)}（X-Morph: Defense 模型）'
     GUNS[_xm.key] = {**GUNS[_xm.like], **_xm.guns}
     NAMES[_xm.key] = _xm.gun
-    if _xm.family == 'tracked':
-        WT_ONLY[_xm.key] = {**WT_ONLY[_xm.like], **_xm.camera}
+    if _xm.family in xm_units.HULLS:
+        WT_ONLY[_xm.key] = {**WT_ONLY[_xm.like], **xm_units.camera(_xm)}
     if _xm.shell or _xm.like in SHELL_OF:
         SHELL_OF[_xm.key] = _xm.shell or SHELL_OF[_xm.like]
     M61_ROUNDS += (_xm.key,) if _xm.like in M61_ROUNDS else ()
     HOWITZERS += (_xm.key,) if _xm.like in HOWITZERS else ()
     CANNON_SHELL += (_xm.key,) if _xm.like in CANNON_SHELL else ()
     MISSILE_SHELL += (_xm.key,) if _xm.like in MISSILE_SHELL else ()
+    if _xm.homing:      # its gun pair's round the Patriot's: the Titan's side missile, its look and its lock-on
+        SHELL_OF[_xm.key] = SHELL_OF['patriot']
+        CANNON_SHELL += (_xm.key,) if _xm.key not in CANNON_SHELL else ()
+        MISSILE_SHELL += (_xm.key,) if _xm.key not in MISSILE_SHELL else ()
+    if _xm.traverse:
+        TURRET_LIMITS[_xm.key] = [1.0, -_xm.traverse, _xm.traverse]
 # The kinds whose track faces are a fixed part of the body's texture atlas (the X-Morph units: tools/prep_xmorph.py
 # puts their belts' running faces under v603_kyata_L / _R only because the native class binds those two names): their
 # SGO keeps the two tank_caterpillar_animation rows (the class reads exactly two, EDF.dll 0x67E4B0) but scrolls them at
 # rate 0. Each frame the class sets a track's offset to frac(tank_caterpillar_animation_info[0] x K x track speed +
 # offset) (0x67EADB: +0x2960 the rate, read at 0x67E787 from _info[0]), so a zero rate leaves the texture where it is;
-# the V603's -0.43 would scroll the atlas's neighbouring art through the tread.
-STATIC_TRACKS = tuple(u.key for u in xm_units.ported('tracked'))
+# the V603's -0.43 would scroll the atlas's neighbouring art through the tread. A wheeled unit's belts are slivers
+# hidden in its hubs (tools/prep_xmorph.py wheeled): the two names still, nothing to scroll.
+STATIC_TRACKS = tuple(u.key for u in xm_units.hulls())
 ONE_CRADLE += tuple(u.key for u in xm_units.ported('emplacement'))   # as every emplacement: both holders on its cradle
 
 
@@ -501,7 +511,7 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
     animation.items[0].items[0] = f'app:/Object/{model.OUT_ARC.lower()}'
     animation.items[0].items[1] = model.HOST_MDB
     animation.items[1] = 'app:/' + animation_path(kind).lower()
-    _arc, _md, _shkt, binding, overrides, _report = _assets(game, kind)
+    _arc, md, _shkt, binding, overrides, _report = _assets(game, kind)
     ragdoll = r.get('ragdoll')
     ragdoll.items[0] = 'app:/' + collision_path(kind).lower()
     ragdoll.items[1] = dsgo.Blob(binding, ragdoll.items[1].kind)
@@ -544,8 +554,11 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
             if len(bones) != 1:
                 raise ValueError(f'{kind}: the {side} muzzles ride {sorted(bones)}: one holder bone needs them on one')
             (holders[side],) = bones
-    setting.items = [copy.deepcopy(guns[side == 'right']) if side in GUN_SLOTS else _node([holders[side], 0.0])
-                     for side in sides]
+    # A store on its own gunner seat (vcobjects Store.seat): its holder on that seat ([bone, seat]: VehicleBase
+    # 0x62A52E puts it in that seat's list; stores.cpp Fill builds its weapon, docs/independent-seat-re.md §1).
+    setting.items = [copy.deepcopy(guns[side == 'right']) if side in GUN_SLOTS else
+                     _node([holders[side], float(store_seat(vehicle.weapons[i]))]) for i, side in enumerate(sides)]
+    gunner_seats(r, vehicle, md)
     if kind in TURRET_LIMITS:
         import make_artillery
         joint = make_artillery.turret_constraint(r)
@@ -565,6 +578,69 @@ def vehicle_sgo(game: vc.Game, kind: str) -> bytes:
             if path.lower() not in {str(item).lower() for item in resource.items}:
                 resource.items.append(path)
     return dsgo.compact(doc)
+
+
+def store_seat(weapon: str) -> int:
+    """The gunner seat a weapon's store is on (vcobjects Store.seat), 0 the driver's."""
+    store = vc.store_of(weapon)
+    return vc.STORES[store[0]].seat if store else 0
+
+
+GUNNER_SEAT_TEXT = '410_HELI_GUNNER_L'   # the seat's name key in the game's text table: "Gunner"
+GUNNER_EYE = (0.0, 2.6, -7.0)           # m: a gunner seat's camera from its turret's pitch bone (behind it, over it)
+GUNNER_LOOK = (0.0, 1.0, 6.0)           # ...and the point it looks at, ahead along its guns
+
+
+def gunner_seats(r, vehicle: vc.GroundVehicle, md) -> None:  # noqa: ANN001 - dsgo node, mdb.Mdb
+    """The vehicle's gunner seats (vcobjects Store.seat, docs/multi-weapon-keys.md「独立座位」): seat n a copy of the
+    driver's seat row (its door, its class mask and its numbers) with its own seat and camera locators on its turret's
+    bones (Store.turret: the rider on the yaw bone, the camera and its look-at on the pitch bone; the local gunner's view
+    is the plugin's own, src/seat_turret.cpp SeatTurretCamera, these the stock camera's when it is not). Seats in order,
+    one a gunner seat number. `md`: the vehicle's built model; every turret bone a locator or the plugin's turret
+    (src/seat_turret.cpp Rig) hangs on must be one of its bones (tools/prep_xmorph.py makes them, xm_units.turret_bones):
+    a model without them is a broken build, refused here (no seat on a bone the game cannot find)."""
+    turrets = {}
+    for w in vehicle.weapons:
+        store = vc.store_of(w)
+        spec = vc.STORES[store[0]] if store else None
+        if spec and spec.seat:
+            turrets.setdefault(spec.seat, spec.turret)
+    if not turrets:
+        return
+    if sorted(turrets) != list(range(1, len(turrets) + 1)):
+        raise ValueError(f'{vehicle.sgo}: gunner seats {sorted(turrets)} are not 1..n')
+    bones = {md.name_of(b.name) for b in md.bones}
+    for n in sorted(turrets):
+        missing = [bone for bone in (turrets[n].yaw, turrets[n].pitch) if bone not in bones]
+        if missing:
+            raise ValueError(f'{vehicle.sgo}: gunner seat {n} turret bones {missing} are not in the model '
+                             f'(tools/prep_xmorph.py did not make them)')
+    seats = r.get('vehicle_riding_position')
+    if len(seats.items) != 1:
+        raise ValueError(f'{vehicle.sgo}: the native V603 has one seat, this has {len(seats.items)}')
+    animation = r.get('animation_model')
+    block = animation.items[2].data
+    locators = {loc.name: loc for _i, loc in mab_legacy.mab_locators(block)}
+    driver = dsgo.to_py(seats.items[0])
+    eye = locators[driver[2][0]]
+    looks = [n for n in locators if n != eye.name and n.startswith(eye.name) and locators[n].node == eye.node]
+    if len(looks) != 1:
+        raise ValueError(f'{vehicle.sgo}: the driver camera {eye.name!r} has {len(looks)} look-at locators')
+    suffix = looks[0][len(eye.name):]
+    seat_loc = locators[driver[1]]
+    new = []
+    for n in sorted(turrets):
+        yaw, pitch = turrets[n].yaw, turrets[n].pitch
+        row = copy.deepcopy(seats.items[0])
+        names = (f'xm_seat_{n}', f'xm_cam_{n}')
+        new.append(replace(seat_loc, name=names[0], node=yaw, a=(0.0, 0.0, 0.0, 1.0)))
+        new.append(replace(eye, name=names[1], node=pitch, a=(*GUNNER_EYE, 1.0)))
+        new.append(replace(locators[looks[0]], name=names[1] + suffix, node=pitch, a=(*GUNNER_LOOK, 1.0)))
+        row.items[1] = names[0]
+        row.items[2].items[0] = names[1]
+        row.items[3] = GUNNER_SEAT_TEXT
+        seats.items.append(row)
+    animation.items[2] = dsgo.Blob(mab_legacy.mab_add_locators(block, new), animation.items[2].kind)
 
 
 def _points(model, game: vc.Game) -> dict[str, list[tuple[str, tuple[float, float, float]]]]:

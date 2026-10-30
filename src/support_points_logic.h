@@ -77,6 +77,12 @@ struct Pool {
         points-=price;spent+=price;
         return true;
     }
+    // A spend taken back as if it never was: a call's price held while it was asked, the call then not asked
+    // (support_points.cpp SupportPointsDropHeld). Not a refund (nothing was paid).
+    void Unspend(std::int32_t price) noexcept {
+        if(price<=0)return;
+        points+=price;spent-=price;
+    }
     // A call that was taken and then came to nothing (refused by the host, timed out, its plan refused): its pt back, up
     // to the most.
     void Refund(std::int32_t price,const Settings& s) noexcept {

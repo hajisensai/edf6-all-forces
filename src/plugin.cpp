@@ -50,6 +50,7 @@
 #include "pvp_controlled_spawn.h"
 #include "enemy_control_pvp_native.h"
 #include "vulcan_rotor.h"
+#include "seat_turret.h"
 #include "edf/host.h"
 #include "version.h"
 #include "build_id.h"
@@ -250,6 +251,16 @@ void Validate(Config& n) noexcept {
     n.playerJetSwitchKey=static_cast<int>(FixInt("PlayerJetSwitchKey",n.playerJetSwitchKey,0,254));
     n.vehicleSecondarySwitchKey=static_cast<int>(FixInt("VehicleSecondarySwitchKey",n.vehicleSecondarySwitchKey,0,254));
     n.vehicleSecondarySwitchButton=static_cast<int>(FixInt("VehicleSecondarySwitchButton",n.vehicleSecondarySwitchButton,0,0xFFFF));
+    n.vehicleFire3Key=static_cast<int>(FixInt("VehicleFire3Key",n.vehicleFire3Key,0,254));
+    n.vehicleFire4Key=static_cast<int>(FixInt("VehicleFire4Key",n.vehicleFire4Key,0,254));
+    n.vehicleFire5Key=static_cast<int>(FixInt("VehicleFire5Key",n.vehicleFire5Key,0,254));
+    n.vehicleFire6Key=static_cast<int>(FixInt("VehicleFire6Key",n.vehicleFire6Key,0,254));
+    n.vehicleFire3Button=static_cast<int>(FixInt("VehicleFire3Button",n.vehicleFire3Button,0,0xFFFF));
+    n.vehicleFire4Button=static_cast<int>(FixInt("VehicleFire4Button",n.vehicleFire4Button,0,0xFFFF));
+    n.vehicleFire5Button=static_cast<int>(FixInt("VehicleFire5Button",n.vehicleFire5Button,0,0xFFFF));
+    n.vehicleFire6Button=static_cast<int>(FixInt("VehicleFire6Button",n.vehicleFire6Button,0,0xFFFF));
+    n.vehicleAutoTurretKey=static_cast<int>(FixInt("VehicleAutoTurretKey",n.vehicleAutoTurretKey,0,254));
+    n.vehicleAutoTurretButton=static_cast<int>(FixInt("VehicleAutoTurretButton",n.vehicleAutoTurretButton,0,0xFFFF));
     n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
     n.playerJetHailKey=static_cast<int>(FixInt("PlayerJetHailKey",n.playerJetHailKey,0,254));
@@ -574,6 +585,17 @@ void LoadConfig() noexcept {
     n.playerJetSwitchKey=ReadInt(L"PlayerJetSwitchKey",static_cast<DWORD>(n.playerJetSwitchKey));
     n.vehicleSecondarySwitchKey=ReadInt(L"VehicleSecondarySwitchKey",static_cast<DWORD>(n.vehicleSecondarySwitchKey));
     n.vehicleSecondarySwitchButton=ReadInt(L"VehicleSecondarySwitchButton",static_cast<DWORD>(n.vehicleSecondarySwitchButton));
+    n.vehicleFire3Key=ReadInt(L"VehicleFire3Key",static_cast<DWORD>(n.vehicleFire3Key));
+    n.vehicleFire4Key=ReadInt(L"VehicleFire4Key",static_cast<DWORD>(n.vehicleFire4Key));
+    n.vehicleFire5Key=ReadInt(L"VehicleFire5Key",static_cast<DWORD>(n.vehicleFire5Key));
+    n.vehicleFire6Key=ReadInt(L"VehicleFire6Key",static_cast<DWORD>(n.vehicleFire6Key));
+    n.vehicleFire3Button=ReadInt(L"VehicleFire3Button",static_cast<DWORD>(n.vehicleFire3Button));
+    n.vehicleFire4Button=ReadInt(L"VehicleFire4Button",static_cast<DWORD>(n.vehicleFire4Button));
+    n.vehicleFire5Button=ReadInt(L"VehicleFire5Button",static_cast<DWORD>(n.vehicleFire5Button));
+    n.vehicleFire6Button=ReadInt(L"VehicleFire6Button",static_cast<DWORD>(n.vehicleFire6Button));
+    n.autoTurrets=ReadBool(L"AutoTurrets",n.autoTurrets);
+    n.vehicleAutoTurretKey=ReadInt(L"VehicleAutoTurretKey",static_cast<DWORD>(n.vehicleAutoTurretKey));
+    n.vehicleAutoTurretButton=ReadInt(L"VehicleAutoTurretButton",static_cast<DWORD>(n.vehicleAutoTurretButton));
     n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
     n.playerJetFlareKey=ReadInt(L"PlayerJetFlareKey",static_cast<DWORD>(n.playerJetFlareKey));
     n.playerJetAll=ReadBool(L"PlayerJetAll",n.playerJetAll);
@@ -1017,6 +1039,9 @@ void LoadConfig() noexcept {
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f marchPace=%d",n.map,n.mapKey,n.mapButton,n.mapViewDistance,n.mapMarchPace);
     Log("CONFIG vehicle secondary switch key=0x%X button=0x%X (the primary's rounds: PlayerJetSwitchKey / LB)",
         n.vehicleSecondarySwitchKey,n.vehicleSecondarySwitchButton);
+    Log("CONFIG vehicle fire keys 0x%X 0x%X 0x%X 0x%X buttons 0x%X 0x%X 0x%X 0x%X; auto turrets %d key=0x%X button=0x%X",
+        n.vehicleFire3Key,n.vehicleFire4Key,n.vehicleFire5Key,n.vehicleFire6Key,n.vehicleFire3Button,n.vehicleFire4Button,
+        n.vehicleFire5Button,n.vehicleFire6Button,n.autoTurrets,n.vehicleAutoTurretKey,n.vehicleAutoTurretButton);
     Log("CONFIG ViewDistance=%.0f (%s)",n.viewDistance,n.viewDistance<0.0f ? "unlimited" : n.viewDistance==0.0f ? "the mission's own" : "m");
     Log("CONFIG damageStats=%d key=0x%X",n.damageStats,n.damageStatsKey);
     Log("CONFIG debugSpawn=%d keys menu=0x%X prev=0x%X next=0x%X category=0x%X spawn=0x%X range=%.0f distance=%.0f",n.debugSpawn,
@@ -1176,33 +1201,31 @@ void ReloadConfigNow() noexcept {
 
 const wchar_t* ConfigPath() noexcept { return iniPath; }
 
-// The player's human. SeePlayer gets a position inside an object: the human's own (the on-foot ride prompt,
-// crew.cpp PromptHook) or the vehicle's they ride (crew.cpp Crew). A vehicle is told by the player in one
-// of its seats (the seat's rider is the human); else the object is the human if it is the player (pad and
-// player flag) and its weak-this points at itself. Kept with its weak-this control block, so a new object
-// at the same address (the next mission) is not taken for it.
+// The player's human: the soldier a local camera follows (firstperson.cpp CamStepHook, every frame of a local
+// camera, on foot, riding, dead or with the map open). Until 2026-10-27 it was taken from SeePlayer, whose two
+// feeds are the on-foot ride prompt (crew.cpp PromptHook: only while a rideable object is about) and the plugin's
+// vehicle classes (crew.cpp Crew): away from every vehicle, or in a vehicle of no class, it went stale in 2 s and
+// every caller of PlayerHuman saw nobody (a support call: "找不到本机玩家，无法呼叫"). Split screen's second camera
+// does not take it from the first while the first's is fresh. Kept with its weak-this control block, so a new
+// object at the same address (the next mission) is not taken for it.
 namespace {
 constexpr ULONGLONG kPlayerHumanMs=2000;
 unsigned char* playerHuman=nullptr;
 ObjRef playerHumanRef;
 ULONGLONG playerHumanAt=0;
-
-unsigned char* HumanOf(unsigned char* object) noexcept {
-    const unsigned n=SeatCount(object);
-    for(unsigned i=0;i<n;++i)
-        if(SeatRider(SeatAt(object,i))==Rider::player)return At<unsigned char*>(SeatAt(object,i),kSeatRider);
-    return IsPlayer(object) && At<const void*>(object,kSelf)==object ? object : nullptr;
-}
 }  // namespace
 
 void SeePlayer(const float* pos,std::int32_t team) noexcept {
     std::memcpy(player.pos,pos,sizeof(player.pos));player.team=team;player.at=GameMs();
+}
+
+void SeeCameraPlayer(unsigned char* human) noexcept {
+    if(!human)return;
+    const ULONGLONG now=GameMs();
     __try {
-        auto object=const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(pos))-kPosition;
-        if(auto human=HumanOf(object)) {
-            playerHuman=human;playerHumanRef=ObjRef::Of(human);playerHumanAt=player.at;
-        }
-    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+        if(playerHuman && playerHuman!=human && now-playerHumanAt<=kPlayerHumanMs && playerHumanRef.Is(playerHuman))return;
+        playerHuman=human;playerHumanRef=ObjRef::Of(human);playerHumanAt=now;
+    } __except(EXCEPTION_EXECUTE_HANDLER){playerHuman=nullptr;playerHumanRef=ObjRef{};playerHumanAt=0;}
 }
 
 void ResetPlayer() noexcept {
@@ -1243,6 +1266,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     edf::DescribeModuleFile(module,file,sizeof(file));
     Log("EDF6VehicleCrew %s loading (build %s, %s)",EDF6VC_VERSION,EDF6_BUILD_ID,file);
     ini.Start(iniPath);
+    NoteSupportKindsInstalled();   // before the ini's SupportPreset_ values are first parsed (support_call.h SupportKindInstalled)
     LoadConfig();
     image=edf::IdentifyImage(GetModuleHandleW(L"EDF.dll"));
     if(!image){Log("REFUSED: unsupported EDF.dll");return false;}
@@ -1330,6 +1354,7 @@ extern "C" __declspec(dllexport) bool EDFMLAPI EML6_Load(PluginInfo* info) {
     InstallStores();        // before any mission builds a jet: the 506 builds a weapon for every holder, the others their extras
     Log("EDF41 original sidecar hooks=%d",InstallEdf41Bike());
     Log("M163 visual rotor=%d",InstallVulcanRotor());
+    InstallSeatTurrets();    // the gunner seats' own turrets, posed at the same world build
     InstallPayload();       // the stock vehicles' stores: the holder pull lands on the one picked
     Log("PVP native hooks=%d",InstallPvp());
     InstallRoomPvp();       // the room's start held until every member acknowledged the PvP lock (room_pvp.cpp)

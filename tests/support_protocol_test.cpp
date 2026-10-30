@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <string>
 #include <memory>
 #include <vector>
 #include <limits>
@@ -65,6 +66,7 @@ struct Node {
     bool remote=false;
     std::vector<std::pair<std::uint32_t,RequestStatus>> notices;
     std::vector<std::uint64_t> destroyedTokens;
+    std::vector<std::string> refusals;   // the host's causes (Hooks::refused)
 };
 Node* current=nullptr;
 struct Packet { unsigned from,to;Message message; };
@@ -154,6 +156,7 @@ bool Derive(std::uint32_t ordinal,unsigned char* out) noexcept {
 bool DeriveForSession(std::uint32_t ordinal,unsigned char* out) noexcept {return !current->failDerive && Derive(ordinal,out);}
 void Notice(std::uint32_t request,RequestStatus status) noexcept { current->notices.emplace_back(request,status); }
 void Hello(std::uint32_t* ext,unsigned char* bloom) noexcept { *ext=current->ext;std::memcpy(bloom,current->bloom,32); }
+void Refused(std::uint32_t,std::uint32_t,const char* why) noexcept { current->refusals.emplace_back(why ? why : ""); }
 void RequesterPlanner(Node& node,bool only=false) {
     Backend b{&node,&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&DeriveForSession}};
     b.hooks.notice=&Notice;b.hooks.variants=&Hello;
@@ -164,7 +167,7 @@ Room::Room(unsigned count) {
     for(unsigned i=0;i<count;++i) {
         auto n=std::make_unique<Node>();n->id=i;n->room=this;n->nonce=100000+1000*i;
         Backend b{n.get(),&Send,&Nonce,{&PlanCall,&Validate,&Spawn,&Destroy,&DeriveForSession}};
-        b.hooks.notice=&Notice;b.hooks.variants=&Hello;
+        b.hooks.notice=&Notice;b.hooks.variants=&Hello;b.hooks.refused=&Refused;
         b.hooks.ownChannel=[](std::uint32_t catalog) noexcept {return catalog==kRescue;};
         n->session->Configure(b);nodes.push_back(std::move(n));
     }
@@ -475,7 +478,9 @@ void RescueChannel() {
      r.nodes[0]->pending=true;r.nodes[0]->pendingCatalog=5;
      Check(r.Submit(1,5),"a map call");r.Settle();
      Check(r.Submit(2,kRescue),"a rescue meanwhile");r.Settle();
-     Check(LastFor(r,2)==RequestStatus::refused,"one transaction at a time with that peer in the room");}
+     Check(LastFor(r,2)==RequestStatus::accepted && Active(r,kRescue)==false,"one transaction at a time with that peer in the room: it waits");
+     r.nodes[0]->pending=false;r.Settle();r.Settle();
+     Check(LastFor(r,2)==RequestStatus::active && Active(r,kRescue),"made once the map call is out");}
     // A failed rescue rolls back alone: the map's deployment stays.
     {Room r(3);
      Check(r.Submit(1,5),"a map call");r.Settle();
@@ -538,6 +543,98 @@ void LocalOutcomes() {
      r.dropTo=999;
      for(const auto& p:r.history)if(p.to==1 && p.message.kind==Kind::requestStatus && p.message.index>=static_cast<std::uint32_t>(RequestStatus::refused)){r.Deliver(p);break;}
      Check(r.Submit(1,5),"one told: a slot is free again");}
+}
+// 2026-10-30 (the user: 「有时候还没办法召唤支援」): one map plan at a time in the room, but another player's call waits its
+// turn (Phase::queued) instead of being refused; a player's own second call while its first is out is still refused, and
+// the host's log says why.
+void MapQueue() {
+    {Room r(3);r.nodes[0]->pending=true;
+     Check(r.Submit(1,5),"a guest's map call being routed");r.Settle();
+     Check(r.Submit(2,5),"another guest's map call meanwhile");r.Settle();
+     Check(LastFor(r,2)==RequestStatus::accepted,"queued, not refused");
+     Check(r.Submit(0,5),"the host's own call meanwhile");r.Settle();
+     Check(LastFor(r,0)==RequestStatus::accepted,"the host's own call queues too");
+     const auto plans=r.nodes[0]->plans;r.Step(500);
+     Check(r.nodes[0]->plans>plans,"the first is still planned");
+     r.Step(2100);
+     Check(r.Submit(1,5),"the first caller again while its call is out");r.Settle();
+     Check(LastFor(r,1)==RequestStatus::refused && !r.nodes[0]->refusals.empty() &&
+           r.nodes[0]->refusals.back()=="its map call in flight or queued","its own second call refused, the cause logged");
+     Check(r.nodes[1]->spawns==0,"nothing made while the plan waits");
+     r.nodes[0]->pending=false;
+     for(int i=0;i<6;++i)r.Settle();
+     for(unsigned n=0;n<3;++n)Check(r.nodes[n]->spawns==3,"all three calls made on every machine, one after another");
+     Check(LastFor(r,2)==RequestStatus::active && LastFor(r,0)==RequestStatus::active,"each queued caller told its call is out");}
+    // A queued call whose plan is refused is told so, and the next one goes on.
+    {Room r(3);r.nodes[0]->pending=true;
+     Check(r.Submit(1,5),"a map call being routed");r.Settle();
+     Check(r.Submit(2,6),"another queued behind it");r.Settle();
+     r.nodes[0]->pending=false;r.nodes[0]->refusePlan=true;r.Settle();r.Settle();
+     Check(LastFor(r,1)==RequestStatus::refused && LastFor(r,2)==RequestStatus::refused,"both planned in turn, both refused");
+     r.nodes[0]->refusePlan=false;r.Step(2100);
+     Check(r.Submit(2,6),"asked again");r.Settle();
+     Check(LastFor(r,2)==RequestStatus::active,"nothing left queued in the way");}
+}
+// 2026-10-30: the transport lost a moment (EDF6Coop's room lease or a link going quiet: a hitch) suspends the session; the
+// same room resumes it with a new epoch, what was made kept, instead of support shut for the rest of the mission.
+void TransportResume() {
+    {Room r(3);
+     Check(r.Submit(1,5),"a call");r.Settle();
+     for(const auto& n:r.nodes)Check(n->session->IsActive(1),"made everywhere");
+     const auto epoch=r.nodes[0]->session->Epoch();
+     for(unsigned i=0;i<3;++i){r.With(i);r.nodes[i]->session->Suspend();}
+     Check(!r.Submit(1,5),"suspended: no request");
+     for(unsigned i=0;i<3;++i){r.With(i);r.nodes[i]->session->Start(i==0,2,i==0 ? 0 : r.Peer(i,0),r.now);}
+     r.Settle();
+     for(const auto& n:r.nodes) {
+         Check(n->session->Ready() && !n->session->Suspended(),"the same room resumes");
+         Check(n->session->IsActive(1) && n->active[1] && n->destroys==0,"the delivered support is kept across the blip");
+     }
+     Check(r.nodes[0]->session->Epoch()!=epoch && r.nodes[1]->session->Epoch()==r.nodes[0]->session->Epoch(),"a new epoch everywhere");
+     r.Step(2100);Check(r.Submit(2,5),"a call after the blip");r.Settle();
+     for(const auto& n:r.nodes)Check(n->spawns==2 && n->session->ActiveCount()==2,"made everywhere beside the kept one");
+     Check(r.nodes[2]->last.units[0].netId[4]==16,"native ordinals go on (never reused)");}
+    // Only one guest lost its link: it resumes with a new challenge; the host and the other guest take the new epoch and
+    // keep what was made.
+    {Room r(3);
+     Check(r.Submit(1,5),"a call");r.Settle();
+     r.With(2);r.nodes[2]->session->Suspend();r.nodes[2]->session->Start(false,2,r.Peer(2,0),r.now);r.Settle();
+     for(const auto& n:r.nodes)Check(n->session->Ready() && n->session->IsActive(1) && n->destroys==0,"every machine ready, the support kept");
+     r.Step(2100);Check(r.Submit(1,5),"the next call");r.Settle();
+     for(const auto& n:r.nodes)Check(n->session->ActiveCount()==2,"made everywhere");}
+    // 2026-10-30 review: the two ends of a re-handshake hold different things (the host cancelled its copy, the guest has
+    // not heard the cancellation yet). Neither starts its ids over: the host's cancellation reaches the guest in the new
+    // epoch (no orphan) and the next call takes a newer id the guest's slot accepts (no slot held for good).
+    {Room r(2);
+     Check(r.Submit(1,5),"a call");r.Settle();
+     r.dropTo=1;r.dropKind=Kind::cancel;
+     r.With(0);r.nodes[0]->session->Failed(1);r.Settle();
+     Check(!r.nodes[0]->active[1] && r.nodes[1]->active[1],"the host's copy cancelled, its cancellation lost on the way");
+     r.With(1);r.nodes[1]->session->Suspend();r.nodes[1]->session->Start(false,1,r.Peer(1,0),r.now);r.Settle();
+     Check(r.nodes[1]->session->Ready(),"the guest resumed with a new challenge");
+     r.dropTo=999;r.Step(1100);r.Settle();
+     Check(!r.nodes[1]->active[1] && r.nodes[1]->session->ActiveCount()==0,"the host's kept cancellation reaches the guest after the re-handshake");
+     r.Step(2100);Check(r.Submit(1,5),"the next call");r.Settle();
+     Check(LastFor(r,1)==RequestStatus::active,"the next call is made");
+     for(const auto& n:r.nodes)Check(n->session->ActiveCount()==1,"made on both ends: its id is newer than the guest's old slot");}
+    // A call in flight when the link goes: told interrupted, rolled back; the kept one stays.
+    {Room r(2);
+     Check(r.Submit(1,5),"a call");r.Settle();
+     r.nodes[0]->pending=true;r.Step(2100);
+     Check(r.Submit(1,5),"a second being routed");r.Settle();
+     const auto second=r.nodes[1]->notices.back().first;
+     for(unsigned i=0;i<2;++i){r.With(i);r.nodes[i]->session->Suspend();}
+     Check(Told(r,1,second,RequestStatus::interrupted),"the one in flight is told interrupted");
+     for(unsigned i=0;i<2;++i){r.With(i);r.nodes[i]->session->Start(i==0,1,i==0 ? 0 : 1,r.now);}
+     r.nodes[0]->pending=false;r.Settle();r.Settle();
+     for(const auto& n:r.nodes)Check(n->session->ActiveCount()==1 && n->session->IsActive(1),"only the made one, kept");
+     r.Step(2100);Check(r.Submit(1,5),"called again");r.Settle();
+     Check(LastFor(r,1)==RequestStatus::active,"made");}
+    // Another room shape: no resume (its kept per-peer marks would mean other machines); the mission reset starts it.
+    {Room r(3);
+     Check(r.Submit(1,5),"a call");r.Settle();
+     r.With(0);r.nodes[0]->session->Suspend();r.nodes[0]->session->Start(true,3,0,r.now);
+     Check(r.nodes[0]->session->Suspended() && !r.nodes[0]->session->Ready() && r.nodes[0]->active[1],"stays suspended, the support kept");}
 }
 void PvpSupportCodec() {
     static_assert(kVersion==2 && kWireSize==176 && (kFeatures&kWelcomeCatalogMask)<1024 &&
@@ -981,4 +1078,4 @@ void PreparedDroneDetails() {
     }
 }
 } // namespace
-int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();LocalOutcomes();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }
+int main() { PlanSpecComparison();PvpSupportCodec();PvpSupport();Codec();Capabilities();Variants();Loadout();RoomBuilds();RescueChannel();MapQueue();TransportResume();LocalOutcomes();Success();Failure();Epoch();Existing();ActivationAndTransport();RequestOutcomes();PreparedDroneAdmission();PreparedDroneResources();PreparedDroneLifecycle();PreparedDroneFailure();PreparedDroneChannels();PreparedDroneDetails();PreparedDroneRecycling();PreparedDroneCapacity();PreparedDroneFailureIsNotCancellationAck();PreparedDroneCancelledBeforeBegin();LegacyTransactionCapacity();GenerationDetailsWithdrawal();std::printf("support protocol: %d checks passed\n",checks); }

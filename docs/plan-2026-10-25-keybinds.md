@@ -61,6 +61,8 @@ LB 0x100、RB 0x200、A/B/X/Y 0x1000/2000/4000/8000。
   实现是改写 `seat+0x2C4`，只作用于玩家键盘驾驶的座位 0。
 - 原版「驾驶 / 坦克」页的手刹、喇叭、主副炮照旧，由玩家在原版里设置。
 - 钻头战车：R / Y 发射钻头（`DrillLaunchKey/Button`）。
+- 多开火键（2026-10-30，`docs/multi-weapon-keys.md`）：X / 鼠标侧键 4 / 侧键 5 / H 是开火键 3～6（`VehicleFire3Key..6`，手柄 `VehicleFire3Button` 十字键左），
+  Y 开关自动炮塔（`VehicleAutoTurretKey`）；都在「插件：地面载具」页。
 - Proteus：T / RB 切行走 / 架设（`ProteusMode*`），B / LB 护盾（`ProteusShield*`），架设态右键 / LT 发射导弹架（`ProteusSalvoKey`）。
 
 ### 1.4 直升机（原版直升机与插件旋翼机）

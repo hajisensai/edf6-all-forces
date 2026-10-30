@@ -130,6 +130,12 @@ plugin_net::Channel BarrageNetChannel() noexcept {
     plugin_net::Channel c;c.name="barrage";c.magic=0x53475242u;c.version=1;c.featureBit=support_net::kExtBarrage;
     c.minSize=c.maxSize=80;c.receive=&ReceiveBarrage;return c;
 }
+// The support pt's (support_points.cpp): SPTS for every peer, not under test here.
+bool ReceiveSupportPoints(std::uint32_t,const char*,const void*,std::size_t,std::uint64_t) noexcept {return true;}
+plugin_net::Channel SupportPointsNetChannel() noexcept {
+    plugin_net::Channel c;c.name="support pt";c.magic=0x53545053u;c.version=1;
+    c.minSize=c.maxSize=56;c.receive=&ReceiveSupportPoints;return c;
+}
 void ResetPvpNetwork() noexcept { ++fixture::pvpResets; }
 void ResetPvp() noexcept { ResetPvpNetwork(); }
 int PvpSupportTeam(const char*) noexcept {return fixture::pvpTeam;}
@@ -363,7 +369,7 @@ int main() {
     auto carrierPacket=packet;std::memcpy(carrierPacket.bytes,"AFDQ",4);incoming.push_back(carrierPacket);
     reenterCarrier=true;const auto carrierContextsBefore=carrierContexts;Step();reenterCarrier=false;
     Check(carrierPackets==1 && enemyControlPackets==1 && subPackets==1,"carrier drone request is consumed once by its own shared-poll handler");
-    Check(carrierContexts-carrierContextsBefore==3,"nested prepared-plan enqueue cannot recursively poll/advance native support");
+    Check(carrierContexts-carrierContextsBefore==2,"nested prepared-plan enqueue cannot recursively poll/advance native support");
     // The newer channels (plugin_net.h): a peer that did not announce kExtGravity (this fixture's hellos carry no extension
     // word) is never heard on it; a channel this build does not have is dropped, never fed to the support parser.
     auto gravityPacket=packet;std::memset(gravityPacket.bytes,0,sizeof(gravityPacket.bytes));std::memcpy(gravityPacket.bytes,"GRVT",5);
@@ -371,6 +377,12 @@ int main() {
     Check(gravityPackets==0 && sendCount==sendsBefore && carrierPackets==1,"a gravity message from a peer without the bit: dropped");
     auto unknownPacket=packet;std::memcpy(unknownPacket.bytes,"ZZZZ",4);incoming.push_back(unknownPacket);Step();
     Check(sendCount==sendsBefore && commandPackets==1 && qmarkPackets==1 && crew::running,"a channel this build does not have: dropped quietly");
+    // 2026-10-30 (the user: 「联机时候巨卡无比」): the channels' frame ran once a received message (2 + n a tick); it runs
+    // before and after the poll only (and when the session's readiness or epoch changes), however many came in.
+    {const auto framesBefore=carrierContexts,qmarksBefore=qmarkPackets;
+     for(int i=0;i<64;++i)incoming.push_back(markPacket);
+     Step();
+     Check(qmarkPackets-qmarksBefore==64 && carrierContexts-framesBefore==2,"64 messages in one tick: every one routed, the channels' frame twice");}
     Check(crew::SubmitSupportRequest(1,at,note,256),"full handshake queues request");
     installed=false;Step();Check(!crew::SubmitSupportRequest(1,at,note,256),"unloaded bridge disables queued work");
     installed=true;peerCount=0;generation++;tick+=1000;Step();

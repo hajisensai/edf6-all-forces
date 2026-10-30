@@ -43,9 +43,11 @@ support::Refusal PreviewAirRoute(const SupportAircraft&,const float*,const float
 void WarnDeployment(const support_net::Plan&) noexcept{}
 std::int32_t SupportPoints() noexcept{return 1000000;}
 std::int32_t SupportPointsPrice(std::uint32_t) noexcept{return 0;}
-bool SupportPointsSpend(std::int32_t) noexcept{return true;}
+bool SupportPointsHold(std::int32_t) noexcept{return true;}
+void SupportPointsKeepHeld() noexcept{}
+void SupportPointsOweHeld(std::uint32_t) noexcept{}
+void SupportPointsDropHeld() noexcept{}
 void SupportPointsRefund(std::int32_t) noexcept{}
-bool SupportPointsOwe(std::int32_t,std::uint32_t) noexcept{return true;}
 void SupportPointsSettle(std::uint32_t,bool) noexcept{}
 bool SupportSoloHostWorld() noexcept{return false;}
 bool SupportAircraftSpec(int,SupportAircraft*) noexcept{return false;}

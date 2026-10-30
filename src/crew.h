@@ -104,6 +104,16 @@ struct Config {
     // stay on PlayerJetSwitchKey / LB: each switch one control, whatever was fired last (the user, 2026-10-21: 「学学战雷」).
     int vehicleSecondarySwitchKey=0x54;
     int vehicleSecondarySwitchButton=0x08;
+    // A vehicle's weapons on their own fire keys (pylib/vcobjects.py Store.key 3..6, payload.cpp OwnKey; the user,
+    // 2026-10-30: 「不是只有两个攻击按键的，很多东西可以同时发射…多加几个按键的事情」): each held fires its weapon with the
+    // primary and the second trigger. Keys: 'X', the mouse's side buttons 4 / 5, 'H'; the pad's XInput bits as
+    // VehicleSecondarySwitchButton's (4 the d-pad left; 0 none).
+    int vehicleFire3Key=0x58,vehicleFire4Key=0x05,vehicleFire5Key=0x06,vehicleFire6Key=0x48;
+    int vehicleFire3Button=0x04,vehicleFire4Button=0,vehicleFire5Button=0,vehicleFire6Button=0;
+    // The auto turrets (Store.auto, payload.cpp AutoShot): whether they are on as a mission starts, and the key / pad bits
+    // that turn them on and off ('Y'; no pad button).
+    bool autoTurrets=true;
+    int vehicleAutoTurretKey=0x59,vehicleAutoTurretButton=0;
     bool playerJetCatch=true;       // ...and after ejecting, another of the same jet catches the player in the air
     int playerJetFlareKey=0x58;     // the key that drops a pair of flares ('X'; missile.cpp FlareDrop)
     int playerJetFlares=8;          // the pairs a player jet carries
@@ -267,7 +277,7 @@ struct Config {
     int freeLookButton=0x40;        // ...and pad button (seat button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
     bool sightZoom=true;            // a vehicle gun's sight magnifies: 1x -> 3x -> 6x (sightzoom.cpp, docs/zoom-re.md)
     int sightZoomKey=0x5A;          // ...its key ('Z'; a Windows virtual-key code, 0: none)
-    int sightZoomButton=0x80;       // ...and pad button (seat button bits: 0x80 R3, the high view keeps it where offered; 0 none)
+    int sightZoomButton=0x80;       // ...and pad button (seat button bits: 0x80 R3, the high view keeps it where offered but in first person on a mounted optic; 0 none)
     int sightRangeUpKey=0x21;       // the magnified sight's range a step farther ('Page Up'; the wheel up too; 0 none)
     int sightRangeDownKey=0x22;     // ...nearer ('Page Down'; the wheel down too)
     int sightRangeStep=0;           // ...its step, m (0: graduated, 25 m to 300, 50 m to 1000, 100 m beyond: sightzoom.h)
@@ -496,6 +506,17 @@ struct Config {
 // The live config: an immutable snapshot, swapped whole by the ini reload (plugin.cpp LoadConfig) and read
 // from any thread (game, call picker, HUD draw) without a torn mix of old and new values.
 const Config& Cfg() noexcept;
+// An extra vehicle fire key's (3..6) binding: VehicleFire<key>Key's virtual key, VehicleFire<key>Button's XInput bits; 0
+// none (payload.cpp fires on it, hud.cpp PayloadControls names it).
+inline int FireKeyVk(unsigned char key) noexcept {
+    const Config& c=Cfg();
+    return key==3 ? c.vehicleFire3Key : key==4 ? c.vehicleFire4Key : key==5 ? c.vehicleFire5Key : key==6 ? c.vehicleFire6Key : 0;
+}
+inline int FireKeyButton(unsigned char key) noexcept {
+    const Config& c=Cfg();
+    return key==3 ? c.vehicleFire3Button : key==4 ? c.vehicleFire4Button : key==5 ? c.vehicleFire5Button :
+           key==6 ? c.vehicleFire6Button : 0;
+}
 // Between SuppressBump(true) and SuppressBump(false) on this thread, the player's board button takes no
 // NPC's seat (heli.cpp PressBoard): an override of the call, not a write to the config. (A pair of calls,
 // not a scoped object: the callers run under __try, which allows no destructors.)
@@ -1090,6 +1111,9 @@ bool IndirectFireSeat(const unsigned char* seat) noexcept;
 void ResetHighCam() noexcept;
 // The high view is offered in `vehicle` (seat 0 the player's, HighCam on): its button is the high view's there.
 bool HighCamOffered(unsigned char* vehicle) noexcept;
+// Game thread, after HighCamFrame: this frame the shared pad button is the gunner sight's in `vehicle` (first person,
+// a mounted optic, the high view off), not the high view's.
+bool HighCamYieldsButton(const void* vehicle) noexcept;
 
 // sightzoom.cpp: a vehicle gun's sight magnified (src/sightzoom.h, docs/zoom-re.md). InstallSightZoom at load (the
 // player camera's step, chained with map.cpp's); SightZoomFrame from the frame of the seat the player sits at (its key
@@ -1101,12 +1125,15 @@ void SightZoomStock(unsigned char* vehicle) noexcept;
 float SightZoomNow(const void* vehicle) noexcept;
 bool SightZoomCanMount(const void* vehicle,unsigned seat) noexcept; // game-thread query: real current optic, including at 1x
 bool SightZoomMounted(const void* vehicle=nullptr) noexcept; // active physical optic; turret input stays native
+// The seat's sight raised (magnified, or at 1x in first person by the sight key: sightzoom.h Press), the look key aside.
+bool SightZoomRaised(const void* vehicle=nullptr) noexcept;
 // Current validated seat/weapon fire-control surface; none when unavailable or another camera owns the view.
 sightzoom::Kind SightZoomView(const void* vehicle=nullptr) noexcept;
 // The sight's field over the view now (sightzoom.h ScopeField, from one snapshot of the seat's cue): the vehicle, the
 // soldier looking through it, its fire-control surface and magnification; false (all empty) with none, or while another
 // camera owns the view. hud.cpp draws the field by it, and so holds the stock crosshair back for that soldier.
-struct SightScope { const void* vehicle=nullptr; const void* human=nullptr; sightzoom::Kind kind=sightzoom::Kind::none; float zoom=1.0f; };
+struct SightScope { const void* vehicle=nullptr; const void* human=nullptr; sightzoom::Kind kind=sightzoom::Kind::none; float zoom=1.0f;
+                   sightzoom::Eyepiece eyepiece=sightzoom::Eyepiece::binocular; };
 bool SightZoomScope(SightScope* out) noexcept;
 // The sight's range setting (sightzoom.h kZeroStep..; 0 the bore line) and the superelevation, rad, it lays the line of
 // sight under the bore for the weapon looked through now; any thread, 0 with no magnified optic.
@@ -1456,8 +1483,10 @@ int FlaresOf(const void* owner,float (*at)[3],float (*vel)[3],int most) noexcept
 void FlareFlames(const unsigned char* v,const float (*at)[3],const float (*vel)[3],int n,ULONGLONG ms) noexcept;
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
-// The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
-// kPlayerHumanMs or no longer the same live player object.
+// The local player's human (plugin.cpp): the soldier a local camera follows, as its step reports it
+// (SeeCameraPlayer, firstperson.cpp CamStepHook); nullptr when no camera reported it for kPlayerHumanMs or it is
+// no longer the same live player object.
+void SeeCameraPlayer(unsigned char* human) noexcept;
 unsigned char* PlayerHuman() noexcept;
 
 // debug_spawn.cpp (ini DebugSpawn, off by default; src/debug_spawn.h): spawn vehicles, the plugin's aircraft, enemies and

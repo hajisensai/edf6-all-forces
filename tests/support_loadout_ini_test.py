@@ -55,6 +55,19 @@ check([(n, label) for _, n, label in kinds] == [(n, label) for n, label, _ in sl
 check([n for _, n, _ in kinds][:5] == [n for n, _ in sc.WEAPONS], 'the Rangers\' kind names are the ini weapons\'')
 bodies = re.findall(r'L"app:/object/(\w+)\.sgo",L"app:/object/(\w+)\.sgo"', read('src/support_soldier.cpp'))
 check([(t, t + '_LEADER') for _, _, t in sl.KINDS] == bodies, 'each kind\'s template (and its _LEADER) is the plugin\'s')
+# The X-Morph infantry (the last kind): a Ranger's class, no looks (no stock template to recolour, no change-colour material).
+call_header = read('src/support_call.h')
+lookless = re.search(r'SupportKindHasLooks\(SupportWeapon k\) noexcept \{ return k!=SupportWeapon::(\w+); \}', call_header)
+check(lookless is not None and (lookless.group(1).lower(),) == sl.LOOKLESS, 'the kinds without looks equal the plugin\'s')
+check(sl.KIND_NAMES[-1] == 'xminfantry' and sl.KIND_CLASS['xminfantry'] == 0 and not sl.has_looks('xminfantry') and sl.has_looks('rifle'),
+      'xminfantry: the last kind, a Ranger\'s class, no looks')
+check(re.search(r'w==SupportWeapon::xmInfantry \? 0 :', call_header) is not None, 'the plugin gives it the Ranger class too')
+check([s[0] for s in sl.parse_preset('xminfantry*4,rifle', 12)] == ['xminfantry'] * 4 + ['rifle'], 'xminfantry parses')
+check(refused(sl.parse_preset, 'xminfantry@1E3A8A', 12) and refused(sl.parse_preset, 'xminfantry+aHandGrenade01', 12) and
+      refused(sl.parse_preset, 'xminfantry@X', 12), 'a colour or a backpack on xminfantry is refused')
+check(sl.decode_name('EDF6VC_NPC_XMINFANTRY_1E3A8A_X.SGO') is None, 'no variant file is decoded for xminfantry')
+check(refused(sl.soldier_file, None, 'xminfantry', False, (0x1E3A8A, -1)), 'no variant SGO is generated for xminfantry (no template is read)')
+check(sl.wanted_files('[VehicleCrew]\r\nSupportPreset_SQUAD=xminfantry*4\r\n') == [], 'a preset of xminfantry wants no generated file')
 stores = re.findall(r'\{(\d+),L"(\w+)",L"([^"]+)",LoadRole::(\w+),(true|false),(true|false),(\d+)\}', header)
 check([(int(c), n, label, role, j == 'true', t == 'true') for c, n, label, role, j, t, _ in stores] == list(sl.LOAD_STORES),
       'pylon stores equal the plugin\'s')

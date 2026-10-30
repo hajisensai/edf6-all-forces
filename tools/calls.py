@@ -55,6 +55,9 @@ class Call:
     jet: str = ''
     # ...or the pylib/vcobjects.py GROUND_VEHICLES entry it brings (a vehicle request of a ground vehicle; `mark` 0).
     ground: str = ''
+    # ...or the pylib/xm_units.py helicopter it brings (a vehicle request of the stock V506 in its own model, flown as the
+    # game's helis are: pylib/xm_heli.py; `mark` 0, the request keeping the Eros's heli params).
+    heli: str = ''
     # A vehicle request the game lets the player use underground (its SGO's use_underground, the native weapon +0x228
     # that EDF.dll 0x690DB0 reads with the scene's underground flag). Underground only the drill tank comes (the user,
     # 2026-10-14: 「地底也能召唤飞机……应该只能召唤地底的钻地战车这种」): every other request is written 0, whatever its
@@ -336,13 +339,25 @@ def _with_xmorph(hand: tuple[Call, ...]) -> tuple[Call, ...]:
     catalog's on every machine; whether a unit's model folder is here only decides whether its row is live
     (tools/call_weapons.py undeployed)."""
     out = list(hand)
-    units = xm_units.v603()
+    units = xm_units.requested()
     if len({u.after for u in units}) != len(units):
         raise ValueError('two X-Morph units name the same call to follow (pylib/xm_units.py Unit.after)')
-    for u in units:
-        at = [c.id for c in out].index(u.after) + 1
-        out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', 0, u.key, False, 0, u.reload, u.level, 'vehicle',
-                            vehicle=f'EDF6VC_{u.key.upper()}', ground=u.key))
+    while units:
+        # a unit after another unit's row: that one first
+        ready = [u for u in units if u.after in {c.id for c in out}]
+        if not ready:
+            raise ValueError(f'X-Morph units follow no call there is: {[u.after for u in units]}')
+        for u in ready:
+            at = [c.id for c in out].index(u.after) + 1
+            if u.family == 'jet':
+                # an empty one to fly, as the plugin's other aircraft (EDF6VC_CALL_FLY_*): its requested twin, its mark
+                out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', u.air['mark'], u.key, False, 0, u.reload, u.level,
+                                    'vehicle', vehicle=f'EDF6VC_FLY_{u.key.upper()}', jet=xm_units.jet_request(u.key)))
+                continue
+            which = {'heli': u.key} if u.family == 'heli' else {'ground': u.key}
+            out.insert(at, Call(f'{ID_PREFIX}{u.key.upper()}', 0, u.key, False, 0, u.reload, u.level, 'vehicle',
+                                vehicle=f'EDF6VC_{u.key.upper()}', **which))
+        units = [u for u in units if u not in ready]
     return tuple(out)
 
 
@@ -382,6 +397,12 @@ RELEASED: dict[str, tuple[str, ...]] = {
     'sorties (2026-10-25)': IDS[:84],
     'X-Morph battle tank (2026-10-27)': IDS[:85],
     'X-Morph tracked units and forts (2026-10-27)': IDS[:93],
+    'X-Morph JAGUAR Type S (2026-10-30)': IDS[:94],
+    'X-Morph helicopters (2026-10-30)': IDS[:99],
+    'X-Morph jets (2026-10-30)': IDS[:103],
+    'X-Morph wheeled units (2026-10-30)': IDS[:107],
+    'X-Morph cargo truck (2026-10-30)': IDS[:108],
+    'X-Morph walkers (2026-10-30)': IDS[:110],
 }
 # Orders that broke the rule and shipped: 063bf99 (0.7.0) inserted the gunship's rows before the player jets'.
 # An install of it holds all of its ids, only in another order: tools/call_weapons.py keeps every installed row
@@ -470,10 +491,10 @@ KINDS: dict[str, dict[str, tuple[str, str]]] = {
         'EN': ('2S6 Tunguska', 'Requests a 2S6 Tunguska: two twin-barrel 30 mm 2A38M cannon (firing together) on the primary attack and 9M311 anti-air missiles (lock on to air targets) on the secondary, both at once; T / D-pad right switches the missile. Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
     },
     'pzh2000': {
-        'SC': ('PzH 2000 自行榴弹炮', '请求一辆 PzH 2000：自行榴弹炮的升级版，炮塔可以转动，155mm 长身管榴弹炮，射速、射程和单发威力都更高。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),
-        'CN': ('PzH 2000 自走榴彈砲', '請求一輛 PzH 2000：自走榴彈砲的升級版，砲塔可以轉動，155mm 長身管榴彈砲，射速、射程和單發威力都更高。外觀為 KojfDiscord 分享的戰雷（War Thunder）模型（CC BY 4.0）。'),
-        'JA': ('PzH 2000 自走榴弾砲', '自走榴弾砲の強化型 PzH 2000 を要請する。砲塔が旋回し、155mm 長砲身榴弾砲は発射速度・射程・一発の威力がいずれも上。外観は KojfDiscord が公開した War Thunder のモデル（CC BY 4.0）。'),
-        'EN': ('PzH 2000', 'Requests a PzH 2000, the self-propelled howitzer upgraded: its turret turns, and its long 155 mm gun fires faster, further and harder. Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
+        'SC': ('PzH 2000 自行榴弹炮', '请求一辆 PzH 2000：自行榴弹炮的升级版，炮塔可以转动，155mm 长身管榴弹炮，射速、射程和单发威力都更高；副武器为炮塔顶的 MG3 机枪（随炮塔转动、水平射击）。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),
+        'CN': ('PzH 2000 自走榴彈砲', '請求一輛 PzH 2000：自走榴彈砲的升級版，砲塔可以轉動，155mm 長身管榴彈砲，射速、射程和單發威力都更高；副武器為砲塔頂的 MG3 機槍（隨砲塔轉動、水平射擊）。外觀為 KojfDiscord 分享的戰雷（War Thunder）模型（CC BY 4.0）。'),
+        'JA': ('PzH 2000 自走榴弾砲', '自走榴弾砲の強化型 PzH 2000 を要請する。砲塔が旋回し、155mm 長砲身榴弾砲は発射速度・射程・一発の威力がいずれも上。副武器は砲塔上の MG3 機関銃（砲塔と共に旋回、水平射撃）。外観は KojfDiscord が公開した War Thunder のモデル（CC BY 4.0）。'),
+        'EN': ('PzH 2000', 'Requests a PzH 2000, the self-propelled howitzer upgraded: its turret turns, and its long 155 mm gun fires faster, further and harder; the MG3 on the turret roof on the secondary (turning with the turret, firing level). Model: the War Thunder model shared by KojfDiscord (CC BY 4.0).'),
     },
     'sturmtiger': {
         'SC': ('突击虎', '请求一辆突击虎：虎式底盘上的 380mm 火箭臼炮，没有炮塔，炮只能左右各转 10 度，转向靠车身。装填很慢，一发的爆炸范围极大，用来拔除据点。外观为 KojfDiscord 分享的战雷（War Thunder）模型（CC BY 4.0）。'),
@@ -1125,7 +1146,7 @@ PLUGIN_NOTES: dict[str, str] = {
     'EN': 'Needs the EDF6VehicleCrew plugin and the vehicle files the installer writes.',
 }
 GROUND_NOTES_BY_KIND: dict[str, dict[str, str]] = {'sidecar': PLUGIN_NOTES, 'sedan': PLUGIN_NOTES, 'vulcan': PLUGIN_NOTES, 'bmpt': PLUGIN_NOTES, 'quadvulcan': PLUGIN_NOTES, 'emp_mid': PLUGIN_NOTES, 'emp_short': PLUGIN_NOTES, 'emp_long': PLUGIN_NOTES, 'tunguska': PLUGIN_NOTES, 'pzh2000': PLUGIN_NOTES, 'sturmtiger': PLUGIN_NOTES, 'tos1': PLUGIN_NOTES, 'apocalypse': PLUGIN_NOTES, 'ciws_phalanx': PLUGIN_NOTES, 'flak88': PLUGIN_NOTES, 'gdf005': PLUGIN_NOTES, 'laser': PLUGIN_NOTES, 'railgun': PLUGIN_NOTES, 'patriot': PLUGIN_NOTES}
-GROUND_NOTES_BY_KIND.update({u.key: PLUGIN_NOTES for u in xm_units.v603()})   # pylib/xm_units.py
+GROUND_NOTES_BY_KIND.update({u.key: PLUGIN_NOTES for u in xm_units.requested()})   # pylib/xm_units.py
 GROUND_NOTES: dict[str, str] = {
     'SC': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安装器写入的车辆文件。',
     'CN': '需要 EDF6VehicleCrew 和 EDF6AutoTurret 插件，以及安裝器寫入的車輛檔案。',

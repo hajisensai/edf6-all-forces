@@ -7,6 +7,7 @@
 // parameters; it then flies at its strike point from the first frame.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "jet_internal.h"
+#include "mod_file.h"
 #include "online_authority.h"
 #include "support_aircraft.h"
 #include "pvp.h"
@@ -129,18 +130,6 @@ unsigned char* CreateJet(Body b,const float* m,InitParam* param,const wchar_t* s
 }
 }  // namespace
 
-namespace {
-bool ModFileIn(const wchar_t* dir,const wchar_t* file) noexcept {
-    wchar_t path[MAX_PATH];
-    const DWORD n=GetModuleFileNameW(nullptr,path,MAX_PATH);
-    wchar_t* slash=n && n<MAX_PATH ? wcsrchr(path,L'\\') : nullptr;
-    if(!slash)return false;
-    *slash=0;
-    if(wcscat_s(path,L"\\Mods\\")!=0 || wcscat_s(path,dir)!=0 || wcscat_s(path,L"\\")!=0 || wcscat_s(path,file)!=0)
-        return false;
-    return GetFileAttributesW(path)!=INVALID_FILE_ATTRIBUTES;
-}
-}  // namespace
 bool ModFileThere(const wchar_t* file) noexcept { return ModFileIn(L"OBJECT",file); }
 
 bool Preloaded(Body b) noexcept { return preloaded[static_cast<int>(b)]; }

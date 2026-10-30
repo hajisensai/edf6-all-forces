@@ -15,6 +15,7 @@ DWORD Process(HWND,LPDWORD pid) noexcept { *pid=GetCurrentProcessId();return 1; 
 
 namespace crew {
 bool InstallRealDriverNative(NpcSeatInputOwnedFn) noexcept { return true; }
+bool InstallVehicleTargetSearch() noexcept { return true; }   // vehicle_target.cpp: a vtable hook, nothing to stand in
 // npc_backpack.cpp stand-ins: one sub slot (packSlot) when packReady; its uses and reloads recorded, the use going on
 // (packBusy) as the case sets.
 bool packReady=false,packBusy=false,packCanUse=true;int packSlots=0,packUses=0,packUseSlot=-1,packReloads=0;
@@ -261,7 +262,7 @@ bool FireIndependentSecondary(unsigned char* v,unsigned seat,const unsigned char
 }
 bool suppressGunnerChoice=false;
 PayloadFire chosenGunnerFire=PayloadFire::primary;
-bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }   // heli.cpp's (NpcCoaxFire's check)
+bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }   // heli.cpp's (NpcOwnWeaponsFire's check)
 // wastedfire.cpp WastedFire: the target every shooter's fire is wasted on (the shut teleportation ship), as the case sets.
 const void* wastedTarget=nullptr;
 bool WastedFire(const void*,const void* target) noexcept { return target && target==wastedTarget; }
@@ -273,8 +274,9 @@ bool HoldFire(const void*,const void* target,const float*,float speed,float grav
     if(aim && weakAimSet && target)std::memcpy(aim,weakAim,12);
     return target && (target==wastedTarget || target==heldTarget);
 }
-int coaxCalls=0;   // payload.cpp NpcCoaxFire: called beside every crew aim (no coax on these fixtures)
-bool NpcCoaxFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { ++coaxCalls;return false; }
+int coaxCalls=0;   // payload.cpp NpcOwnWeaponsFire: called beside every crew aim (no coax or keyed weapons on these fixtures)
+bool NpcOwnWeaponsFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { ++coaxCalls;return false; }
+void SeatTurretsTrain(unsigned char*,unsigned,const void*) noexcept {}   // seat_turret.cpp: no gunner seat turrets on these fixtures
 unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float,bool,PayloadFire* fire) noexcept {
     if(fire)*fire=chosenGunnerFire;
     if(suppressGunnerChoice)return nullptr;

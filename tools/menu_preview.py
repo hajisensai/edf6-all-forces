@@ -53,8 +53,8 @@ def rels() -> list[str]:
 
 
 def _kinds() -> list[str]:
-    import support_loadout   # the 14 kinds and their AI templates
-    return [t for _, _, t in support_loadout.KINDS]
+    import support_loadout   # the 15 kinds; the stock AI templates of Root.cpk are the 14 with looks (not the X-Morph infantry)
+    return [t for n, _, t in support_loadout.KINDS if support_loadout.has_looks(n)]
 
 
 def templates(game: rootcpk.Game) -> Templates:

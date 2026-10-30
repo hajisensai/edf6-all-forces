@@ -44,6 +44,7 @@
 #include "online_authority.h"
 #include "playarea.h"
 #include "sazabi_sound.h"
+#include "seat_turret.h"
 #include "support_aircraft.h"   // SupportFollowUpTick
 #include "support_points.h"
 #include "support_warning.h"
@@ -883,6 +884,8 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepNpcGunners,&NpcGunnersInput,static_cast<unsigned char*>(vehicle)); // also releases our last inputs when disabled
     // A Dreadnought's local rider's aim stick as the observation reads it, before the stock input (dreadnought_turrets.inc).
     if(Cfg().enabled)Guarded(kStepDreadnought,&DreadnoughtInput,static_cast<unsigned char*>(vehicle));
+    // A gunner seat's own turret: its local rider's aim stick the same way (seat_turret.cpp).
+    if(Cfg().enabled)Guarded(kStepPayload,&SeatTurretsInput,static_cast<unsigned char*>(vehicle));
     // The player driver's War Thunder gears on the keyboard (drivegear.cpp): the stock input reads the gear's stick, the
     // seat gets the keys' own back at the end of this traversal.
     DriveGearInput gears(static_cast<unsigned char*>(vehicle));
@@ -926,6 +929,7 @@ template<int I> void __fastcall InputHook(void* vehicle,std::uintptr_t hasInput,
     Guarded(kStepHud,&HudSee,v);
     Guarded(kStepLauncher,&LauncherFrame,v);
     Guarded(kStepPayload,&PayloadFrame,v);       // before the sight: it marks the store the secondary fires
+    Guarded(kStepPayload,&SeatTurretsFrame,v);   // the gunner seats' own turrets: trained, the unmanned ones fired
     Guarded(kStepPayload,&TwinBarrelFrame,v);    // after every pull of this frame (stock, store, NPC): twin barrels in turn
     Guarded(kStepHeliSight,&HeliSightFrame,v);   // after AimLines: the sight reads which lines are hidden
     Guarded(kStepStockHud,&StockHudFrame,v);

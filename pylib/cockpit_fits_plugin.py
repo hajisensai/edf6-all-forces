@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import cockpit_kits_plugin as plugin_kits
 from cockpit_fits_air import FITS as _AIR
+from cockpit_fits_mech import FITS as _MECH
 from cockpits import Fit
 import xm_units
+import xm_walker
 
 Vec3 = tuple[float, float, float]
 
@@ -125,7 +127,9 @@ FITS: dict[str, tuple[Fit, ...]] = {
     'EDF6VC_QUADVULCAN': (Fit(0, 'cannon_main', (0.05, 2.95, -0.65), 'open_rider'),),
     # The fixed emplacements (pylib/emplacement_model.py: the Dreadnought's turrets, no crew space in them): the gunner
     # sees a camera's picture (remote_display) on the turret, over its guns and behind their trunnions (the spec's
-    # 'eye', tests/test_emplacement.py holds these to it).
+    # 'eye', tests/test_emplacement.py holds these to it). Every remote_display eye here is where its gun's aim line
+    # stays clear of the model over the whole elevation range (tests/gun_camera_sweep_guard.py): on the turret where the
+    # guns rise ahead of it, on the gun's pitch hinge where they would swing through it (the Patriot, the TOS-1).
     'EDF6VC_EMP_MID': (Fit(0, 'cannon_main', (0.0, 9.07, -0.113), 'remote_display'),),
     'EDF6VC_EMP_SHORT': (Fit(0, 'cannon_main', (0.0, 8.173, -1.534), 'remote_display'),),
     'EDF6VC_EMP_LONG': (Fit(0, 'cannon_main', (0.0, 8.854, -3.728), 'remote_display'),),
@@ -137,7 +141,9 @@ FITS: dict[str, tuple[Fit, ...]] = {
     'EDF6VC_RAILGUN': (Fit(0, 'cannon_main', (0.0, 6.6, -3.889), 'remote_display'),),
     # The Patriot (models/emp_patriot): a camera over the canister pack's back end (its top y 5.48 there, the pack's
     # trunnion at z -4.3 below), looking along the pack; beside it the pack filled half the view (2026-10-24 preview).
-    'EDF6VC_PATRIOT': (Fit(0, 'cannon_main', (0.0, 5.9, -4.0), 'remote_display'),),
+    # On the pack's pitch hinge (cannon_l), not the turret: the pack pivots at its foot behind the eye, so on the turret
+    # the raised pack swung through the eye from 26 deg up (pylib/cockpit_sweep.py; tests/gun_camera_sweep_guard.py).
+    'EDF6VC_PATRIOT': (Fit(0, 'cannon_l', (0.0, 5.9, -4.0), 'remote_display'),),
     # The 2S6 (tools/make_tunguska.py; its War Thunder model, models/wt_tunguska): the gunner's sight's picture
     # (remote_display), the eye at the front of its sight head on the turret roof (node optic_turret_05: x 0.17..0.64,
     # y 2.99..3.55, its face at z 0.83), the guns down on both sides, the tracking radar ahead.
@@ -151,8 +157,11 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # roof y 3.4 there, the guns' axis y 2.76 below and ahead, the missile pods either side).
     'EDF6VC_APOCALYPSE': (Fit(0, 'cannon_main', (0.0, 3.75, 2.6), 'remote_display'),),
     # The TOS-1 (models/wt_tos1): a camera over the launcher pack's back end (its top y 3.08, its trunnion at z -2.70),
-    # looking along the pack; beside it the pack's flank filled a third of the view (2026-10-24 preview).
-    'EDF6VC_TOS1': (Fit(0, 'cannon_main', (0.0, 3.5, -2.4), 'remote_display'),),
+    # looking along the pack; beside it the pack's flank filled a third of the view (2026-10-24 preview). On the pack's
+    # pitch hinge (cannon_l) so it rises with the pack and that view holds at every elevation: on the turret (cannon_main)
+    # the eye stayed put while the pack, pivoting at its foot 1.9 m under and 0.3 m behind the eye, swung up through it
+    # from 31 deg (the user, 2026-10-27: 「抬炮管以后看不见前面了」; pylib/cockpit_sweep.py, tests/gun_camera_sweep_guard.py).
+    'EDF6VC_TOS1': (Fit(0, 'cannon_l', (0.0, 3.5, -2.4), 'remote_display'),),
     # The drill tank: from inside its turret the drill and its mount fill every view ahead (the imported model is
     # modelled inside; a tank_gunner station's sight looked at the mount's back wall from every place tried), so its
     # one seat sees a camera's monitor (remote_display): the camera on the turret's right flank beside the drill,
@@ -177,8 +186,18 @@ FITS: dict[str, tuple[Fit, ...]] = {
     # VEHICLE410_HELI, the same model) and its cabin's passengers in the UH-60M's troop seats.
     'EDF6VC_HELI_TRANSPORT': _AIR['VEHICLE410_HELI'] + _heli_cabin('body', _410_CABIN, range(3, 13)),
 }
-# The X-Morph units (pylib/xm_units.py eye): the gunner's sight camera on the turret over the gun (remote_display), as the
-# War Thunder tanks'.
-FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, 'cannon_main', u.eye, 'remote_display'),)
+# The X-Morph units (pylib/xm_units.py eye(), eye_bone): the gunner's sight camera over the gun (remote_display), as
+# the War Thunder tanks'; on the gun's pitch hinge where the raised gun would cross it on the turret (2026-10-27: the
+# medium tanks from 45-47 deg, the shield generator's eye inside its gun at rest; tests/gun_camera_sweep_guard.py).
+FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, u.eye_bone, xm_units.eye(u), 'remote_display'),)
              for u in xm_units.v603()})
+# ... and a car's (xm_units car): its driver's eye in its cab kit (xm_units.Unit.cab), as the Katyusha's truck cab.
+FITS.update({f'EDF6VC_{u.key.upper()}': (Fit(0, 'body', u.eye, u.cab),) for u in xm_units.v512()})
+# The X-Morph walkers (pylib/xm_walker.py): the host's skeleton and seats, so the host model's cockpits (the Begaruta's
+# enclosed station, the Proteus's gunners' remote displays) on the same bones. The heavy mech's turret is not the
+# Proteus's neck pod (its enclosed kit crosses the X-Morph turret): its pilot's sight over the turret's front slope
+# (the turret's front at x 0 reaches z 2.8 at y 14, behind z 0 above y 15; its roof y 17.4).
+FITS.update({f'EDF6VC_{key.upper()}': _MECH[host] for key, host in xm_walker.COCKPITS.items()})
+FITS['EDF6VC_XM_LARGE_MECH'] = ((Fit(0, 'neck', (0.0, 15.6, 1.0), 'remote_display'),)
+                                + tuple(f for f in _MECH['V614_PROTEUS_MK2'] if f.seat))
 DIGESTS: dict[str, str] = {}

@@ -11,8 +11,12 @@ struct SupportSquad {
     unsigned leaderCount=0;
 };
 enum class SupportSpawnFailure {
-    none, disabled, profile, mission, onlineReplication, transform, capacity, create, wrongClass, setup
+    none, disabled, profile, mission, onlineReplication, transform, capacity, create, wrongClass, setup,
+    notInstalled   // the kind's bodies are not installed here (support_call.h SupportKindInstalled: the X-Morph model pack)
 };
+// Plugin load, before the ini is first read: support_call.h SupportKindInstalled from each kind's bodies in Mods/OBJECT
+// (a stock template always; one of ours when the installer wrote both its member and its leader). Logged per missing kind.
+void NoteSupportKindsInstalled() noexcept;
 bool InstallSupportSoldiers() noexcept;
 // MissionStart: release old weak records, then queue the stock resources before WaitPreload.
 void PreloadSupportSoldiers() noexcept;

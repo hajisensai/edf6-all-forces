@@ -10,7 +10,9 @@ namespace crew {
 bool InstallProteus() noexcept;
 void ResetProteus() noexcept;                     // a new mission (mission.cpp)
 bool ProteusReady() noexcept;                     // InstallProteus found the rework's code (the ini decides each frame)
-bool IsProteus(const void* vehicle) noexcept;     // a VehicleBigBegaruta (the Proteus, V614_PROTEUS_MK2* / VEHICLE407_BIGBEGARUTA*)
+// A VehicleBigBegaruta on the Proteus's own model (V614_PROTEUS_MK2* / VEHICLE407_BIGBEGARUTA*); an X-Morph walker on
+// the class (its model's marker bone, pylib/xm_walker.py MARKER) is not one.
+bool IsProteus(const void* vehicle) noexcept;
 // The stock weapons seat `seat` works without holding them (a borrowed mount, proteus_logic.h Operator): up to `max`
 // into `out`, their count. The vehicle HUD lists them with the seat's own (vhud.cpp).
 int ProteusBorrowedWeapons(const unsigned char* vehicle,unsigned seat,const unsigned char** out,int max) noexcept;

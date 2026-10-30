@@ -1609,7 +1609,10 @@ void CamStepSelected(void* camera,void* step) {
 }
 
 void SeeLocal(const State* state,unsigned char* cam) noexcept {
-    if(state)localSeen[state-states]=LocalSeen{CameraPlayer(cam),GetTickCount64()};
+    if(!state)return;
+    unsigned char* const human=CameraPlayer(cam);
+    localSeen[state-states]=LocalSeen{human,GetTickCount64()};
+    SeeCameraPlayer(human);   // PlayerHuman's source (plugin.cpp)
 }
 void __fastcall CamStepHook(void* camera,void* step) {
     SyncSession();

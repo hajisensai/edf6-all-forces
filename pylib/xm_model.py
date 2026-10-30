@@ -4,10 +4,12 @@ the attachments (.att), the turrets and weapons the blueprint declares, and its 
 here is family-specific: the tracked preparer builds a V603 model folder from it, a wheeled / heli one can do the same.
 
     load(packs, entity) -> UnitModel        entity: 'ground/medium_tank_regular' (entities/units/<entity>.ent)
+    assemble(packs, entity) -> UnitModel    ... with its parts (ChildDescComp: a boss's turrets, tracks, legs)
     blueprint(packs, path) -> Node           an entity's blueprint with its BlueprintComp base's components
     named(packs, name) -> Node               the blueprint called name (a weapon's ammo_blueprint)
     to_edf(points)                           X-Morph (x fwd, y left, z up) -> EDF (x left, y up, z fwd): (y, z, x)
-    texture_images(packs, material)          {'diffuse': RGB image, 'normal': RGB tangent-space image} (what it has)
+    texture_images(packs, material)          {'diffuse': RGB, 'normal': RGB tangent space, 'specular' / 'emissive':
+                                             grey} images (what it has)
 
 Frames (measured 2026-10-27): X-Morph's units face +X with +Y their left and +Z up, metres (barrels point +X, the
 left wing / track at +Y, civilian cars 4.4 x 1.8 x 1.45 m: real scale), the ground at z = 0. EDF's vehicles face +Z
@@ -19,7 +21,7 @@ Texture coordinates are Ogre's: the top-left origin, like EDF's.
 from __future__ import annotations
 
 import io
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -64,6 +66,11 @@ class UnitModel:
     tri_bone: np.ndarray                   # (t,) bone name (object array)
     tri_material: np.ndarray               # (t,) index into materials
     materials: list[str]                   # Ogre material names, one per distinct submesh material
+    # An assembly's (assemble()): its parts' turrets and weapons, after the root blueprint's own
+    part_turrets: dict = field(default_factory=dict)
+    part_weapons: list = field(default_factory=list)
+    parts: list = field(default_factory=list)   # (part blueprint, the bone or attachment it hangs on or None, bones)
+    normals: np.ndarray | None = None      # (n, 3) EDF frame, unit: the mesh's own (its normal maps were baked on them)
 
     def children(self, bone: str) -> list[str]:
         return [b for b in self.bones if self.parent[b] == bone]
@@ -89,21 +96,29 @@ class UnitModel:
 
     def turrets(self) -> dict[str, tuple[str | None, str | None]]:
         """TurretComp: turret name -> (yaw bone, pitch bone) as written (either may name an attachment)."""
-        tc = self.blueprint.child('TurretComp')
-        return {t.get('name'): (t.get('yaw'), t.get('pitch')) for t in (tc.find('Turret') if tc else [])}
+        return {**_turrets(self.blueprint), **self.part_turrets}
 
     def weapons(self) -> list[Weapon]:
-        wc = self.blueprint.child('WeaponComp')
-        out = []
-        for w in (wc.find('Weapon') if wc else []):
-            ctl = w.child('weapon_controller')
-            out.append(Weapon(w.get('name'), ctl.get('turret') if ctl else None,
-                              [(m.get('attachment'), m.get('recoil_bone')) for m in w.find('Muzzle')]))
-        return out
+        return _weapons(self.blueprint) + self.part_weapons
 
     def bone_points(self, bones) -> np.ndarray:  # noqa: ANN001 - iterable of bone names
         sel = np.isin(self.tri_bone, list(bones))
         return self.positions[np.unique(self.triangles[sel])] if sel.any() else np.zeros((0, 3))
+
+
+def _turrets(bp: xp.Node) -> dict[str, tuple[str | None, str | None]]:
+    tc = bp.child('TurretComp')
+    return {t.get('name'): (t.get('yaw'), t.get('pitch')) for t in (tc.find('Turret') if tc else [])}
+
+
+def _weapons(bp: xp.Node) -> list[Weapon]:
+    wc = bp.child('WeaponComp')
+    out = []
+    for w in (wc.find('Weapon') if wc else []):
+        ctl = w.child('weapon_controller')
+        out.append(Weapon(w.get('name'), ctl.get('turret') if ctl else None,
+                          [(m.get('attachment'), m.get('recoil_bone')) for m in w.find('Muzzle')]))
+    return out
 
 
 def _attachments(packs: xp.Packs, mesh_path: str) -> dict[str, tuple[str, np.ndarray]]:
@@ -166,7 +181,12 @@ STATIC_BONE = 'body'   # the one bone of a unit whose mesh is not skinned (the b
 
 
 def load(packs: xp.Packs, entity: str) -> UnitModel:
-    bp = blueprint(packs, f'entities/units/{entity}.ent')
+    return load_blueprint(packs, blueprint(packs, f'entities/units/{entity}.ent'), entity)
+
+
+def load_blueprint(packs: xp.Packs, bp: xp.Node, entity: str) -> UnitModel:
+    """The model of the (composed) blueprint `bp` (load(): a unit file's; assemble(): its parts', which live in the
+    unit's own file under their names, units/bosses/highway_tank/front_turret)."""
     rend, skel = bp.child('RenderableDescComp'), bp.child('SkeletonDescComp')
     _req(rend is not None and bool(rend.get('mesh')), f'{entity}: no mesh')
     mesh_path = rend.get('mesh')
@@ -190,42 +210,178 @@ def load(packs: xp.Packs, entity: str) -> UnitModel:
         # A vertex assigned to a handle the skeleton has not (large_gunship_aa's mesh: 16 vertices on a fifth bone of
         # a four-bone skeleton, in the game's own files) rides the root.
         rigid = [np.asarray([index.get(int(h), root) for h in rb], dtype=np.int32) for rb in rigid]
-    pos, uv, tris, tbone, tmat = [], [], [], [], []
+    pos, uv, nrm, tris, tbone, tmat = [], [], [], [], [], []
     materials: list[str] = []
     base = 0
-    for sub, rb in zip(mesh.submeshes, rigid):
+    # A blueprint can put its own material on a submesh (RenderableDescComp SubMeshes: the TARANTULA Mk VI / Mk VII are
+    # the four-legged mech's mesh in bosses/four_leg_mech_skin1 / _skin2)
+    skins = {int(s.get('id')): s.get('material') for s in rend.find('SubMesh') if s.get('id') and s.get('material')}
+    for k, (sub, rb) in enumerate(zip(mesh.submeshes, rigid)):
+        material = skins.get(k, sub.material)
         p = mesh.positions(sub)
         t = mesh.uvs(sub)
         _req(t is not None, f'{entity}: submesh {sub.name} has no texture coordinates')
+        n = mesh.normals(sub)
+        _req(n is not None, f'{entity}: submesh {sub.name} has no normals')
         _req(bool((rb >= 0).all()), f'{entity}: submesh {sub.name} has unskinned vertices')
         corner = rb[sub.indices]
         # one bone a triangle: X-Morph's units are rigid pieces (a triangle whose corners disagree takes its first's)
-        if sub.material not in materials:
-            materials.append(sub.material)
+        if material not in materials:
+            materials.append(material)
         pos.append(to_edf(p))
         uv.append(t)
+        n = to_edf(n)
+        nrm.append(n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12))
         tris.append(sub.indices + base)
         tbone.append(np.asarray([names[i] for i in corner[:, 0]], dtype=object))
-        tmat.append(np.full(len(sub.indices), materials.index(sub.material)))
+        tmat.append(np.full(len(sub.indices), materials.index(material)))
         base += len(p)
     return UnitModel(entity, bp, mesh_path, names, parents,
                      {n: to_edf(w[:3, 3]) for n, w in frames.items()}, frames,
                      _attachments(packs, mesh_path),
                      np.vstack(pos), np.vstack(uv), np.vstack(tris), np.concatenate(tbone), np.concatenate(tmat),
-                     materials)
+                     materials, normals=np.vstack(nrm))
+
+
+def _from_edf(points) -> np.ndarray:  # noqa: ANN001 - array-like (..., 3)
+    p = np.asarray(points, dtype=np.float64)
+    return p[..., [2, 0, 1]]
+
+
+def _rename(name: str, taken, part: str) -> str:  # noqa: ANN001 - container of names
+    return name if name not in taken else f'{part}/{name}'
+
+
+PART_ROOT = 'units/'   # a ChildDesc blueprint outside units/ is an effect the unit carries, not a part (assemble)
+
+
+@dataclass
+class _Carrier:
+    """What a ChildDesc list belongs to: where its `bone` names are looked up (bones / atts None: the unit's own
+    names as UnitModel holds them; else a part's bone / attachment names -> their names in the unit) and what a part
+    naming no bone hangs on (that unit bone, its frame; scene: the frame is the unit's own)."""
+    bone: str
+    frame: np.ndarray                      # 4x4, X-Morph frame
+    scene: bool
+    bones: dict[str, str] | None = None
+    atts: dict[str, str] | None = None
+
+    def resolve(self, um: UnitModel, at: str, part: str) -> str:
+        if self.bones is None:
+            _req(at in um.frames or at in um.attachments, f'{um.entity}: part {part} hangs on {at}, no bone or attachment')
+            return at
+        if at in self.bones:
+            return self.bones[at]
+        _req(at in self.atts, f'{um.entity}: part {part} hangs on {at}, no bone or attachment of its parent part')
+        return self.atts[at]
+
+
+def assemble(packs: xp.Packs, entity: str) -> UnitModel:
+    """The unit with its parts (ChildDescComp: the bosses are built of them, every turret, leg, wing, track a part
+    blueprint with its own mesh and skeleton, hit and destroyed one by one in the game) as one model: what the game
+    draws when nothing is destroyed. A part names the bone (or attachment) it hangs on, its mesh in that bone's bind
+    frame (main_turret_barrel on be_main_turret_turret_vert), or none, its mesh then in the frame of what carries it
+    (the unit's own: measured 2026-10-30, the highway tank's tracks, side turrets, rocket pods sit where they belong
+    with no offset); its root bones become the children of that bone (of the unit's root bone). Parts nest (a part's
+    own ChildDescComp): a nested part's bone is one of its parent part's, by the parent's own names (the MECHATAUR's
+    head on body_upper's be_spine_body_upper). Only blueprints under units/ are parts: the misc/, effects/, lights/,
+    shield/ ones a unit or part carries (the MECHATAUR left hand's misc/laser_tracer beam, trails, lights, shield
+    bubbles) are effects, not standing geometry.
+    A part's bone or attachment named as one before it is is renamed '<part>/<name>' (a static part's one bone, its
+    att_smoke_1), its weapons' muzzles with it; so is a turret (the gunship's two wing lasers' laser_turret), its
+    weapons' `turret` with it; its turrets and weapons join the unit's (UnitModel.part_*)."""
+    um = load(packs, entity)
+    _assemble_into(packs, um, um.blueprint, _Carrier(um.bones[0], np.eye(4), True))
+    return um
+
+
+def _assemble_into(packs: xp.Packs, um: UnitModel, bp: xp.Node, carrier: _Carrier) -> None:
+    cdc = bp.child('ChildDescComp')
+    for cd in (cdc.find('ChildDesc') if cdc else []):
+        # the name alone: a line can carry the designers' note after it (the warcar's
+        # 'units/bosses/warcar/middle_grenade_launcher -- obecny laser projectile')
+        name = cd.get('blueprint').split()[0]
+        if not name.startswith(PART_ROOT):
+            continue
+        raw = blueprints(packs).get(name)
+        _req(raw is not None, f'{um.entity}: its part {name} is no blueprint in the packs')
+        part_bp = compose(packs, raw)
+        part = name.split('/')[-1]
+        at = cd.get('bone')
+        scene = False
+        if at is None:
+            host, frame, scene = carrier.bone, carrier.frame, carrier.scene
+        else:
+            at = carrier.resolve(um, at, part)
+            if at in um.frames:
+                host, frame = at, um.frames[at]
+            else:
+                parent, offset = um.attachments[at]
+                host = um.bones[0] if parent == 'scene_node' else parent
+                frame = (np.eye(4) if parent == 'scene_node' else um.frames[parent]).copy()
+                frame[:3, 3] = frame[:3, :3] @ offset + frame[:3, 3]
+        if part_bp.child('RenderableDescComp') is None or not part_bp.child('RenderableDescComp').get('mesh'):
+            # a part without a mesh of its own (a destructor, a marker): what it carries hangs where it does, its
+            # bones named as in the list it is in
+            _assemble_into(packs, um, part_bp, _Carrier(host, frame, scene, carrier.bones, carrier.atts))
+            continue
+        pm = load_blueprint(packs, part_bp, name)
+        bone = {b: _rename(b, um.frames, part) for b in pm.bones}
+        att = {a: _rename(a, um.attachments, part) for a in pm.attachments}
+        R, t = frame[:3, :3], frame[:3, 3]
+        place = lambda p: to_edf(_from_edf(p) @ R.T + t)   # noqa: E731 - the part's frame -> the unit's
+        for b in pm.bones:
+            nb = bone[b]
+            um.bones.append(nb)
+            um.parent[nb] = bone[pm.parent[b]] if pm.parent[b] is not None else host
+            um.frames[nb] = frame @ pm.frames[b]
+            um.bind[nb] = place(pm.bind[b])
+        for a, (parent, offset) in pm.attachments.items():
+            if parent == 'scene_node' and scene:
+                um.attachments[att[a]] = ('scene_node', R @ offset + t)
+            elif parent == 'scene_node':      # the part's origin is the host's frame (an attachment host: its point)
+                h = um.frames[host]
+                um.attachments[att[a]] = (host, h[:3, :3].T @ (R @ offset + t - h[:3, 3]))
+            else:
+                um.attachments[att[a]] = (bone.get(parent, parent), offset)
+        mat = []
+        for m in pm.materials:
+            if m not in um.materials:
+                um.materials.append(m)
+            mat.append(um.materials.index(m))
+        base = len(um.positions)
+        um.positions = np.vstack((um.positions, place(pm.positions)))
+        um.uvs = np.vstack((um.uvs, pm.uvs))
+        um.normals = np.vstack((um.normals, to_edf(_from_edf(pm.normals) @ R.T)))   # directions: turned only
+        um.triangles = np.vstack((um.triangles, pm.triangles + base))
+        um.tri_bone = np.concatenate((um.tri_bone, np.asarray([bone[b] for b in pm.tri_bone], dtype=object)))
+        um.tri_material = np.concatenate((um.tri_material, np.asarray(mat, dtype=um.tri_material.dtype)[pm.tri_material]))
+        turret = {}
+        for tn, (yaw, pitch) in _turrets(part_bp).items():
+            turret[tn] = _rename(tn, um.turrets(), part)
+            _req(turret[tn] not in um.turrets(), f'{um.entity}: part {part}: its turret {turret[tn]} is named twice')
+            um.part_turrets[turret[tn]] = (bone.get(yaw, att.get(yaw, yaw)), bone.get(pitch, att.get(pitch, pitch)))
+        for w in _weapons(part_bp):
+            um.part_weapons.append(Weapon(w.name, turret.get(w.turret, w.turret),
+                                          [(bone.get(m, att.get(m, m)), bone.get(r, r) if r else r) for m, r in w.muzzles]))
+        um.parts.append((name, at, [bone[b] for b in pm.bones]))
+        _assemble_into(packs, um, part_bp, _Carrier(host, frame, scene, bone, att))
 
 
 # ------------------------------------------------------------------------------------------ textures
 
 def material_node(packs: xp.Packs, material: str) -> xp.Node:
     """The material script's block of `material` ('units_ground/medium_tank_regular': materials/scripts/
-    units_ground.material, the block whose 'type' starts with the name)."""
+    units_ground.material, the block whose 'type' starts with the name; the bosses' 'bosses/highway_tank':
+    units_bosses.material)."""
     group = material.split('/')[0]
-    root = xp.parse(packs.text(f'materials/scripts/{group}.material'))
-    for c in root.children:
-        if (c.get('type') or '').split(' ')[0] == material:
-            return c
-    raise XmModelError(f'material {material}: not in materials/scripts/{group}.material')
+    scripts = [f'materials/scripts/{g}.material' for g in (group, f'units_{group}')]
+    for path in scripts:
+        if packs.exists(path):
+            for c in xp.parse(packs.text(path)).children:
+                if (c.get('type') or '').split(' ')[0] == material:
+                    return c
+    raise XmModelError(f'material {material}: not in {" or ".join(scripts)}')
 
 
 def texture_files(packs: xp.Packs, material: str) -> dict[str, str]:
@@ -259,11 +415,15 @@ def normal_rgb(im):  # noqa: ANN001, ANN201 - PIL image -> PIL image
 
 
 def texture_images(packs: xp.Packs, material: str) -> dict:
-    """{'diffuse': RGB image, 'normal': RGB image} of what the material declares (no specular or emissive: the EDF
-    body material has no slot for them)."""
+    """{'diffuse': RGB image, 'normal': RGB image, 'specular': grey image, 'emissive': grey image} of what the material
+    declares. The specular and emissive maps are grey (R = G = B, measured on every unit's): their red. The EDF side
+    reads the specular map as roughness / metalness and the emissive one as a light mask (pylib/wt_tracked.py)."""
     files = texture_files(packs, material)
     _req('diffuse' in files, f'material {material}: no diffuse texture')
     out = {'diffuse': _image(packs.read(files['diffuse'])).convert('RGB')}
     if 'normal' in files:
         out['normal'] = normal_rgb(_image(packs.read(files['normal'])))
+    for kind in ('specular', 'emissive'):
+        if kind in files:
+            out[kind] = _image(packs.read(files[kind])).convert('RGB').getchannel('R')
     return out

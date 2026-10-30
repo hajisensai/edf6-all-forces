@@ -1,7 +1,7 @@
 # 坦克同轴机枪按现实重做（2026-10-11）
 
 用户反馈：「这个坦克的同轴机枪做的什么玩意，找现实的模型来做」。对象是 PR #137 加的布莱克 505 / 瓦利乌斯 601 / 格雷普 401 同轴机枪
-（`pylib/vcobjects.py` `STORES['MG<tank>']`、`tools/make_stock_stores.py` `COAX`、`src/payload.cpp` 副射击键与 `NpcCoaxFire`）。
+（`pylib/vcobjects.py` `STORES['MG<tank>']`、`tools/make_stock_stores.py` `COAX`、`src/payload.cpp` 副射击键与 `NpcOwnWeaponsFire`，原 `NpcCoaxFire`）。
 离线证据全部由 `python tools/coax_view.py OUT_DIR [--red] [--faces]` 从本机 Root.cpk 渲染/测量（只读）；**未进游戏验证**。
 
 ## 1. 旧实现到底是什么（证据）
@@ -45,7 +45,7 @@ T-72 的 PKT、10 式的 74 式）。射孔必须开在**会俯仰的那块**炮
 - **弹**：模板仍是原版坦克机枪 `V_403TANK_MACHINEGUN`（每发 6：所有原版载具枪里最轻的一档；枪声 `weapon_VHC_tank403_machinegun`），
   FireInterval、AmmoSpeed、AmmoAlive 按真实枪改；AmmoSize 0.15 + AmmoHitSizeAdjust 1.0（细弹迹，命中半径不变 0.15）；
   FireAccuracy 0.006；AmmoColor 红橙曳光 (3.0, 1.0, 0.35, 1)；枪口焰改橙色 (2.4, 1.7, 0.9, 1)。
-- **曳光 1/5**：`src/payload.cpp` `CoaxBelt` 在每次扣动（玩家副射击、NPC `NpcCoaxFire`）前按剩余发数改写武器 `+0x8D0` 的弹色：
+- **曳光 1/5**：`src/payload.cpp` `CoaxBelt` 在每次扣动（玩家副射击、NPC `NpcOwnWeaponsFire`）前按剩余发数改写武器 `+0x8D0` 的弹色：
   剩余发数是 5 的倍数为曳光，否则为暗淡的普通弹 (0.3, 0.28, 0.26, 0.1)。依据 `docs/boarding-re.md` §2（静态 H）：武器初始化
   `0x68D978` 把 AmmoColor 写到 `weapon+0x8D0`，开火 `0x696FD0` 在 `0x69712F` 把 `+0x830` 起的弹参数模板拷进新弹，弹色只被绘制读取。
   安装时这两处字节核对不上就不改（每发都是文件里的曳光色，照常开火）。车辆武器同样经 `0x696FD0` 开火（`src/gunnerrecoil.cpp`）。

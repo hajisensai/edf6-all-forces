@@ -39,6 +39,7 @@
 #include "turretaim.h"
 #include "online_authority.h"
 #include "real_driver_native.h"
+#include "seat_turret.h"
 #include "seat_events.h"
 #include "support_soldier.h"
 #include "transport.h"
@@ -51,6 +52,7 @@
 #include <vector>
 
 namespace crew {
+bool InstallVehicleTargetSearch() noexcept;   // vehicle_target.cpp
 namespace {
 void ResetGunnerInputs() noexcept;
 bool InstallDriverPayload() noexcept;
@@ -1940,6 +1942,7 @@ bool InstallNpcAi() noexcept {
     ok=hooked==kClasses;
     Log("NPCAI soldiers' Think hooked %d/%d%s",hooked,kClasses,ok ? "" : ": the custom AI stays off");
     if(ok){InstallDriverPayload();InstallFreeSquadCover();}
+    InstallVehicleTargetSearch();   // every CarBase AI driver, the stock's dummies too: not tied to the soldiers' Think
     ConfigureNpcCommandNetwork(ok ? &NpcMapCommandForRequester : nullptr);
     return ok;
 }
@@ -3204,9 +3207,13 @@ void AimSelectedGunner(unsigned char* v,unsigned index,const void* target,unsign
 // geometry and safety decision. Never copy the cannon's accepted intent to a missile.
 // When a primary remains usable it owns the turret axes; otherwise the secondary can
 // turn toward targets beyond the cannon's reach. Both fire results stay independent.
+// No round of weapon `w` from `v` would hurt `target` now (damagestats.h HoldFire, with the round's speed and drop).
+bool WeaponHoldsFire(unsigned char* v,const void* target,const unsigned char* w) noexcept {
+    return HoldFire(v,target,Pos(v),At<float>(w,0x894)*60.0f,At<float>(w,0x8E0)*14.7f);
+}
 void AimIndependentSecondary(unsigned char* v,unsigned index,const void* target,float distance,bool airborne,bool primaryAim) {
     const auto weapon=NpcSecondarySelect(v,index,distance,airborne);
-    if(!weapon || HoldFire(v,target,Pos(v),At<float>(weapon,0x894)*60.0f,At<float>(weapon,0x8E0)*14.7f))return;
+    if(!weapon || WeaponHoldsFire(v,target,weapon))return;
     const auto seat=SeatAt(v,index);
     const float saved[4]={At<float>(seat,0x2D0),At<float>(seat,0x2D4),At<float>(seat,0x2E4),At<float>(seat,0x2E0)};
     float secondary=0.0f;
@@ -3221,12 +3228,32 @@ void AimIndependentSecondary(unsigned char* v,unsigned index,const void* target,
     Put<float>(seat,0x2E0,secondary);
     FireIndependentSecondary(v,index,weapon);
 }
+// A seat's crew against `target` (the driver's seat 0 and the gunners' alike): the main gun or store NpcPayloadSelect
+// picks, laid and fired by the native seat aim (AimSelectedGunner); nullptr when none would hurt it (with no target: the
+// old pick's redirect cleared). The seat's inputs zeroed first by the caller.
+unsigned char* CrewMainGun(unsigned char* v,unsigned index,const void* target,float distance,bool airborne) {
+    PayloadFire fire=PayloadFire::other;
+    if(!target){NpcPayloadSelect(v,index,0.0f,false,&fire);return nullptr;}   // the old pick's redirect cleared
+    unsigned char* w=NpcPayloadSelect(v,index,distance,airborne,&fire);
+    if(w && WeaponHoldsFire(v,target,w))w=nullptr;
+    if(w)AimSelectedGunner(v,index,target,w,fire);
+    return w;
+}
+// ...and the seat's own weapons alongside it: the own secondary planned apart (AimIndependentSecondary), the coax and the
+// extra keys' weapons on their own shots (payload.cpp NpcOwnWeaponsFire, the auto turrets' rule).
+void CrewOwnWeapons(unsigned char* v,unsigned index,const void* target,float distance,bool airborne,bool primaryAim) {
+    AimIndependentSecondary(v,index,target,distance,airborne,primaryAim);
+    SeatTurretsTrain(v,index,target);   // a gunner seat's own turret turns to it (seat_turret.h)
+    NpcOwnWeaponsFire(v,index,target,&FriendInLine);
+}
+}  // namespace
 bool GunnerAirTarget(const void* target) noexcept {
     if(!Readable(target,kPosition+12))return false;
     const auto p=reinterpret_cast<const float*>(static_cast<const unsigned char*>(target)+kPosition);
     const float from[3]={p[0],p[1]+1.0f,p[2]},end[3]={p[0],p[1]-512.0f,p[2]};float hit[3];
     return MapFloorRay(from,end,hit)>=0.0f && p[1]-hit[1]>15.0f;
 }
+namespace {
 
 // CarBase's stock AI calls slot 70 for seat 0 after deciding its target and driving
 // inputs. Wrap those calls, rather than running a second driver fire pass in InputHook.
@@ -3272,23 +3299,16 @@ void __fastcall DriverPayloadAim(unsigned char* v,int index,const void* target) 
         ReleaseDriverPayload(v,true);
         if(target && HoldFire(v,target))target=nullptr;   // the stock AI's target no round would hurt now: none
         const auto seat=SeatAt(v,0);
-        PayloadFire fire=PayloadFire::other;
-        unsigned char* weapon=nullptr;
-        if(target && Readable(target,kPosition+12))
-            weapon=NpcPayloadSelect(v,0,npc::Dist(Pos(v),Pos(static_cast<const unsigned char*>(target))),GunnerAirTarget(target),&fire);
-        else NpcPayloadSelect(v,0,0.0f,false,&fire); // clear the old redirect on target loss
         Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
-        if(weapon && HoldFire(v,target,Pos(v),At<float>(weapon,0x894)*60.0f,At<float>(weapon,0x8E0)*14.7f))weapon=nullptr;
-        if(weapon)AimSelectedGunner(v,0,target,weapon,fire);
-        else {
+        if(target && !Readable(target,kPosition+12))target=nullptr;
+        const float distance=target ? npc::Dist(Pos(v),Pos(static_cast<const unsigned char*>(target))) : 0.0f;
+        const bool airborne=target && GunnerAirTarget(target);
+        unsigned char* const weapon=CrewMainGun(v,0,target,distance,airborne);   // with no target: the old redirect cleared
+        if(!weapon) {
             native(v,0,target); // keep native tracking/idle behavior, but no unavailable shot
             Put<float>(seat,0x2E4,0.0f);Put<float>(seat,0x2E0,0.0f);
         }
-        if(target) {
-            AimIndependentSecondary(v,0,target,npc::Dist(Pos(v),Pos(static_cast<const unsigned char*>(target))),
-                                    GunnerAirTarget(target),weapon!=nullptr);
-            NpcCoaxFire(v,0,target,&FriendInLine);   // the coaxial gun alongside whatever the crew chose (payload.cpp)
-        }
+        if(target)CrewOwnWeapons(v,0,target,distance,airborne,weapon!=nullptr);
         RememberDriverPayload(v);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         // The selected-list helper restores its temporary pointer in __finally.
@@ -3350,13 +3370,8 @@ void NpcGunnersInput(unsigned char* v) noexcept {
         if(p.best && HoldFire(v,p.best)){p.best=nullptr;}   // no round would hurt it now (HoldFire): the seat idles
         if(p.best) {
             if(Cfg().stockStores || NativePayloadControl(v,i)) {
-                PayloadFire fire=PayloadFire::other;
                 const bool airborne=GunnerAirTarget(p.best);
-                auto w=NpcPayloadSelect(v,i,p.bestD,airborne,&fire);
-                if(w && HoldFire(v,p.best,Pos(v),At<float>(w,0x894)*60.0f,At<float>(w,0x8E0)*14.7f))w=nullptr;
-                if(w)AimSelectedGunner(v,i,p.best,w,fire);
-                AimIndependentSecondary(v,i,p.best,p.bestD,airborne,w!=nullptr);
-                NpcCoaxFire(v,i,p.best,&FriendInLine);
+                CrewOwnWeapons(v,i,p.best,p.bestD,airborne,CrewMainGun(v,i,p.best,p.bestD,airborne)!=nullptr);
             } else reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
             RememberGunnerInputs(v,i,seat);
         }

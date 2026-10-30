@@ -62,10 +62,30 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(tuple(combat.slot('bmpt', i) for i in range(6)), ('left', 'right', 'missiles', 'left', 'right', 'missiles'))
         # 2026-10-21: both Ataka rounds ride the V603's otherwise unread secondary, alongside the cannons (src/payload.cpp).
         # 2026-10-24: the Tunguska's, the Apocalypse's and the Patriot's missiles ride it too.
-        # 2026-10-27: and every X-Morph unit's other weapons (xm_units.Arm).
-        self.assertEqual([kind for kind, store in vc.STORES.items() if store.independent_secondary],
-                         ['TUNGUSKA_SAM', 'APOC_SAM', 'PATRIOT_SAM', 'BMPT_ATGM', 'BMPT_ATGMF',
-                          *(vc.xm_store(u, a) for u in xm_units.v603() for a in u.arms)])
+        # 2026-10-27: and every X-Morph unit's other weapons (xm_units.Arm). 2026-10-30 (#29): the PzH 2000's roof MG3.
+        # 2026-10-30 (「不是只有两个攻击按键的…多加几个按键的事情」): each its own fire key (Store.key), the X-Morph arms
+        # past the first on the extra keys; the Apocalypse's anti-air missiles an auto turret.
+        self.assertEqual({kind: (store.key, store.auto) for kind, store in vc.STORES.items() if store.key},
+                         {'TUNGUSKA_SAM': (2, False), 'APOC_SAM': (2, True), 'PATRIOT_SAM': (2, False), 'PZH2000_MG': (2, False),
+                          'BMPT_ATGM': (2, False), 'BMPT_ATGMF': (2, False),
+                          **{vc.xm_store(u, a): (a.fire, a.auto) for u in xm_units.v603() for a in u.arms if a.fire},
+                          # the stock vehicles' independent weapons, each as its vehicles mount it (vc.STOCK_MOUNTS)
+                          'AGM_L_K3': (3, False), 'RKT_K3': (3, False), 'AAM_S_K2A': (2, True), 'AAM_M_K2A': (2, True)})
+        self.assertEqual({k: vc.vehicle_fire_keys(vc.GROUND_VEHICLES[k]) for k in ('bmpt', 'xm_large_tank', 'xm_large_tank_emp')},
+                         {'bmpt': {2: ['BMPT_ATGM', 'BMPT_ATGMF']},
+                          'xm_large_tank': {3: ['XM_LARGE_TANK_AAM'], 4: ['XM_LARGE_TANK_ROCKETS']},
+                          'xm_large_tank_emp': {2: ['XM_LARGE_TANK_EMP_EMP'], 3: ['XM_LARGE_TANK_EMP_AAM']}})
+        # 2026-10-30 (「一些应该是独立的座位」): the EMP tank's two AA gun turrets each their own gunner seat and turret, no
+        # key (the seat's trigger fires it), an auto turret with nobody in it; their holders on those seats.
+        self.assertEqual({kind: (store.seat, store.auto, store.turret.yaw, store.turret.pitch)
+                          for kind, store in vc.STORES.items() if store.seat},
+                         {'XM_LARGE_TANK_MG': (1, True, 'xm_mg', 'xm_mg_gun'),
+                          'XM_LARGE_TANK_EMP_AA_L': (1, True, 'xm_aa_l', 'xm_aa_l_gun'),
+                          'XM_LARGE_TANK_EMP_AA_R': (2, True, 'xm_aa_r', 'xm_aa_r_gun')})
+        emp = vc.GROUND_VEHICLES['xm_large_tank_emp'].weapons
+        self.assertEqual([combat.store_seat(w) for w in emp], [0, 0, 0, 1, 2, 0])
+        heavy = vc.GROUND_VEHICLES['xm_large_tank'].weapons
+        self.assertEqual([combat.store_seat(w) for w in heavy], [0, 0, 1, 0, 0])
         self.assertFalse(any(vc.STORES[k].native_control or vc.STORES[k].group for k in ('BMPT_ATGM', 'BMPT_ATGMF')),
                          'a missile is not alternate cannon ammunition')
 
@@ -81,7 +101,7 @@ class CatalogContractTests(unittest.TestCase):
         for name, _pair in bmpt:
             path = next(w for w in vc.GROUND_VEHICLES['bmpt'].weapons if w.rsplit('/', 1)[1].upper() == name)
             store = vc.store_of(path)
-            self.assertFalse(store and vc.STORES[store[0]].independent_secondary, name)
+            self.assertFalse(store and vc.STORES[store[0]].key, name)
         # The C++ table is the registry's (tools/gen_stores.py --check keeps it current).
         import gen_stores
         table = gen_stores.render()

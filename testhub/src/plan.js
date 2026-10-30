@@ -1,5 +1,5 @@
 // Level plan: proposals (a new mission, or a change to a stock one) with replies, and each group's outline: the
-// stock missions in the game's order (EDF6 then EDF5, src/missions.json), new missions placed between them and
+// stock missions in the catalog's order (EDF4.1, EDF5, EDF6, src/missions.json), new missions placed between them and
 // loop markers ("from here on, the next loop"). Everything is plain text, written by players.
 //
 // Poisoning: whatever players write is data. It is stored cleaned (clean(): no control, direction or zero-width

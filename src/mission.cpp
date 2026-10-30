@@ -30,6 +30,7 @@
 #include "enemy_control_net.h"
 #include "enemy_control_pvp_native.h"
 #include "vulcan_rotor.h"
+#include "seat_turret.h"
 #include "barrel_recoil.h"
 #include "support_variants.h"
 #include "support_aircraft.h"   // ResetSupportFollowUps
@@ -102,6 +103,7 @@ void MissionStart() noexcept {
     CheckCrashFilter();   // the crash dump's filter and abort handler still first (crash_dump.h)
     WatchMissionPhase("resets");
     ResetVulcanRotors();
+    ResetSeatTurrets();
     ResetBarrelRecoil();
     ResetEnemyControlNetwork(); // stop authenticated leases before native input restoration
     ResetEnemyControl(); // release native player-mode leases before scene/team identities are reset

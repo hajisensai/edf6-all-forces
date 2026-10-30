@@ -4,11 +4,17 @@
 #include "memory.h"
 #include "weapon_mount.h"
 #include "body506.h"
+#include "sightzoom.h"
 #include <cwchar>
 
 namespace crew::optic {
 constexpr unsigned kMaxAnchors=16;
-struct Pose { float eye[3]{},direction[3]{}; };
+// An anchor's name says what the gunner looks through there (sightzoom.h Eyepiece; pylib/vehicle_optics.py
+// EYEPIECES, the installer's names): <prefix><nn>, nn 00..kMaxAnchors-1, the numbers shared by the families.
+struct Family { const wchar_t* prefix; sightzoom::Eyepiece eyepiece; };
+constexpr Family kFamilies[]={{L"vc_optic_",sightzoom::Eyepiece::binocular},{L"vc_monoc_",sightzoom::Eyepiece::monocular},
+                              {L"vc_camera_",sightzoom::Eyepiece::camera}};
+struct Pose { float eye[3]{},direction[3]{}; sightzoom::Eyepiece eyepiece=sightzoom::Eyepiece::binocular; };
 
 inline bool Mounted(const unsigned char* vehicle,const unsigned char* seat,const unsigned char* weapon,Pose* out) noexcept {
     if(!vehicle || !seat || !weapon || !out)return false;
@@ -26,8 +32,9 @@ inline bool Mounted(const unsigned char* vehicle,const unsigned char* seat,const
     const int depth=weaponmount::Chain(inst,attached,chain);
     if(!depth)return false;
     const unsigned char* best=nullptr;int nearest=depth;bool ambiguous=false;
-    for(unsigned i=0;i<kMaxAnchors;++i) {
-        wchar_t name[16];std::swprintf(name,16,L"vc_optic_%02u",i);
+    sightzoom::Eyepiece eyepiece=sightzoom::Eyepiece::binocular;
+    for(const Family& family:kFamilies)for(unsigned i=0;i<kMaxAnchors;++i) {
+        wchar_t name[24];std::swprintf(name,24,L"%ls%02u",family.prefix,i);
         const auto anchor=BoneRecord506(inst,name);
         const int index=weaponmount::BoneIndex(inst,anchor);
         if(index<0)continue;
@@ -35,7 +42,7 @@ inline bool Mounted(const unsigned char* vehicle,const unsigned char* seat,const
         // The scene root is shared by unrelated guns and passenger seats.
         if(parent<=0)continue;
         for(int j=0;j<depth;++j)if(chain[j]==parent) {
-            if(j<nearest){best=anchor;nearest=j;ambiguous=false;}
+            if(j<nearest){best=anchor;nearest=j;ambiguous=false;eyepiece=family.eyepiece;}
             else if(j==nearest)ambiguous=true;
             break;
         }
@@ -52,6 +59,7 @@ inline bool Mounted(const unsigned char* vehicle,const unsigned char* seat,const
     if(!(norm>1e-8f) || !std::isfinite(norm))return false;
     norm=std::sqrt(norm);
     for(int i=0;i<3;++i)out->direction[i]=dir[i]/norm;
+    out->eyepiece=eyepiece;
     return true;
 }
 } // namespace crew::optic

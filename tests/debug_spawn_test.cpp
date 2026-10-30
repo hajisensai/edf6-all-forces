@@ -5,6 +5,7 @@
 // off unless the ini says so (crew.h Config). Exit code 1 when one fails.
 // cmake --build build --target debug_spawn_test && build\debug_spawn_test.exe
 #include "../src/debug_spawn.h"
+#include "../src/support_call.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -75,9 +76,10 @@ void Catalog() {
             }
             Expect(n>0 && own,"a Mods row lists its own SGO among its files");
         }
-        if(!e.preload)Expect((e.category==Category::enemy41 || e.category==Category::enemy) && e.how==How::enemy,
-                             "only enemy rows load when first placed (vehicles are preloaded: the player boards them at once)");
-        if(e.mod && e.category==Category::vehicle)Expect(e.preload,"every installed EDF4.1 vehicle is placeable by default");
+        if(!e.preload)Expect(e.how==How::enemy || e.how==How::vehicle,"only object rows load when first placed (RequestLoad)");
+        // Reports #26 / #29 (2026-10-27..28): the range's preload step grew commit by 4.2 GB once the generated
+        // vehicles' textures grew (the vehicles ~0.9 GB of it), and an 8 GB machine died there; each vehicle loads when first placed.
+        if(e.how==How::vehicle)Expect(!e.preload,"no vehicle row is preloaded by default (RangePlaceAll=1 preloads them)");
         if(e.category==Category::ours)Expect(std::wcsncmp(e.sgo,L"app:/object/EDF6TR_",19)==0 || std::wcsncmp(e.sgo,L"app:/object/EDF6VC_",19)==0,
                                             "our vehicles are the range's (EDF6TR_) or the installer's (EDF6VC_)");
         if(e.how==How::supportCall || e.how==How::drone)Expect(e.category==Category::aircraft,"the plugin's aircraft");
@@ -85,7 +87,7 @@ void Catalog() {
                                                  "a crewed aircraft only as a support call (its real crew), the drone alone launched");
         if(e.how==How::soldier)Expect(e.category==Category::soldier,"soldiers");
         if(e.how==How::supportCall)Expect(e.arg>=0 && e.arg<kSupportCallCount,"a kSupportCalls index");
-        if(e.how==How::soldier)Expect(e.arg>=0 && e.arg<14,"a SupportWeapon (14 kinds, support_call.h)");
+        if(e.how==How::soldier)Expect(e.arg>=0 && e.arg<crew::kSupportWeaponCount,"a SupportWeapon (support_call.h)");
         for(int k=0;k<i;++k)Expect(std::strcmp(kEntries[k].id,e.id)!=0,"log ids are unique");
     }
 }

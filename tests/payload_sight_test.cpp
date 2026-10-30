@@ -31,6 +31,7 @@ PluginBody sightBody=PluginBody::none;
 PluginBody BodyOf(const void*) noexcept { return sightBody; }
 bool aimApiNpc=false;
 bool AiGunner(const unsigned char*,const unsigned char* seat) noexcept { return aimApiNpc && SeatRider(seat)==Rider::other; }
+bool IsOnlineAuthority(const void*) noexcept { return true; }   // payload.cpp RunsUnmannedTurrets
 void Log(const char*,...) noexcept {}
 bool IsFuelTank(const unsigned char* w) noexcept { return w[0x100]==3; }
 bool IsLoadoutWeapon(const unsigned char* w) noexcept { return w[0x100]==2; }
@@ -46,6 +47,10 @@ const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
 }
 void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
+const void* WeaponLockObject(const unsigned char*) noexcept { return nullptr; }   // no auto turrets on these fixtures
+bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { return false; }
+bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }
+bool GunnerAirTarget(const void*) noexcept { return false; }
 bool ReadRound(const unsigned char*,RoundModel* out) noexcept { *out={};return false; }
 namespace audio { void LockTone(int,float) noexcept {} }
 }

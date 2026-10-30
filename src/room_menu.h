@@ -305,14 +305,16 @@ inline int MostRows(const Unit& u) noexcept {
     const VehicleBodyRow* row=VehicleBodyOf(u.body);
     return row ? row->most : 0;
 }
-// Fields of row `r`: a soldier 3 (kind, primary, secondary) and a Ranger's or a Wing Diver's 4th, its backpack weapon; a
+// Fields of row `r`: a soldier 3 (kind, primary, secondary) and a Ranger's or a Wing Diver's 4th, its backpack weapon (the
+// X-Morph infantry: the kind alone, SupportKindHasLooks); a
 // tank's gun 1; a pylon 2 (store, rounds); a crew 2 (primary, secondary); else 0.
 inline constexpr int kPackField=3;
-inline bool CarriesPack(SupportWeapon kind) noexcept { return CyclePack(0,SupportSoldierClass(kind),1)!=0; }
+inline bool CarriesPack(SupportWeapon kind) noexcept { return SupportKindHasLooks(kind) && CyclePack(0,SupportSoldierClass(kind),1)!=0; }
 inline int FieldCount(const Unit& u,int r) noexcept {
     if(IsSquad(u)) {
         if(u.squad.count<=0)return 0;
         const int i=r>=0 && r<u.squad.count ? r : 0;
+        if(!SupportKindHasLooks(u.squad.kind[i]))return 1;   // the kind alone: no colours, no backpack
         return CarriesPack(u.squad.kind[i]) ? 4 : 3;
     }
     if(r==CrewRow(u))return 2;
@@ -425,8 +427,15 @@ inline void ChangeSoldier(Menu& m,Unit& u,int step) noexcept {
     const int i=m.rowAt;
     SupportLook& l=u.squad.look[i];
     if(m.fieldAt==0) {
-        u.squad.kind[i]=static_cast<SupportWeapon>(Wrap(static_cast<int>(u.squad.kind[i]),step,kSupportWeaponCount));
-        if(!PackFits(l.pack,SupportSoldierClass(u.squad.kind[i])))l.pack=0;
+        // The next installed kind (support_call.h SupportKindInstalled): one this install lacks is never offered.
+        int k=static_cast<int>(u.squad.kind[i]);
+        for(int tries=0;tries<kSupportWeaponCount;++tries) {
+            k=Wrap(k,step,kSupportWeaponCount);
+            if(SupportKindInstalled(static_cast<SupportWeapon>(k)))break;
+        }
+        u.squad.kind[i]=static_cast<SupportWeapon>(k);
+        if(!SupportKindHasLooks(u.squad.kind[i]))l=SupportLook{};
+        else if(!PackFits(l.pack,SupportSoldierClass(u.squad.kind[i])))l.pack=0;
         if(m.fieldAt>=FieldCount(u,i))m.fieldAt=0;
     }
     else if(m.fieldAt==1)l.primary=CycleColour(m.palette,l.primary,step);

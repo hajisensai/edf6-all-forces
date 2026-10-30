@@ -6,6 +6,7 @@ import { parseAccounts } from '../src/auth.js';
 import { HttpError } from '../src/http.js';
 import { LIMIT, Plan, RATE, between, clean, scope } from '../src/plan.js';
 import worker from '../src/worker.js';
+import { readFileSync } from 'node:fs';
 
 const MISSIONS = [
   { key: 'EDF6/M001', series: 'EDF6', n: 1, sc: '一', ja: 'いち' },
@@ -83,6 +84,33 @@ test('outline: inserting again and again at one spot renumbers instead of losing
   assert.deepEqual(got.slice(-3), ['loop:0', 'EDF6/M002', 'EDF5/M001']);
 });
 
+test('4.1 catalog: all three packs seed once without changing an existing outline or proposals', async () => {
+  const missions = JSON.parse(readFileSync(new URL('../src/missions.json', import.meta.url), 'utf8'));
+  const packs = [['EDF41', ''], ['EDF41MP01', 'mp01/'], ['EDF41MP02', 'mp02/']];
+  for (const [folder, path] of packs) {
+    const source = JSON.parse(readFileSync(new URL(`../../edf41port/${path}missions.json`, import.meta.url), 'utf8')).missions;
+    const rows = missions.filter((m) => m.key.startsWith(folder + '/'));
+    assert.deepEqual(rows.map((m) => [m.key, m.sc, m.ja, m.pack_n, m.n]),
+      source.map((m, i) => [`${folder}/${m.id}`, m.title.SC, m.title.JA, i + 1, null]));
+  }
+  assert.equal(new Set(missions.map((m) => m.key)).size, missions.length);
+  const e = env();
+  const old = new Plan(e, alice, missions.filter((m) => !m.pack_n));
+  const first = (await old.state('a', [])).outline[0].id;
+  await old.insert('a', { kind: 'loop', after: first, note: '保留轮回' });
+  const proposal = await old.saveProposal('a', { kind: 'new', title: '保留新关卡' });
+  await old.insert('a', { kind: 'new', after: first, proposal_id: proposal.id });
+  const before = await order(e, 'a');
+  const updated = new Plan(e, alice, missions);
+  await updated.seed('a');
+  await updated.seed('a');
+  assert.deepEqual(await order(e, 'a'), [...before, ...missions.filter((m) => m.pack_n).map((m) => m.key)]);
+  assert.equal((await updated.state('a', [])).proposals[0].title, '保留新关卡');
+  await updated.saveProposal('a', { kind: 'edit', mission: 'EDF41/M190', title: '修改4.1' });
+  await updated.seed('b');
+  assert.deepEqual(await order(e, 'b'), missions.map((m) => m.key));
+});
+
 test('groups: another group sees nothing and can touch nothing; only authors and developers edit', async () => {
   const e = env();
   const { id } = await new Plan(e, alice, MISSIONS).saveProposal('a', { kind: 'edit', mission: 'EDF6/M002', title: '改一下' });
@@ -153,6 +181,18 @@ test('worker: pages and replies carry the security headers', async () => {
     assert.doesNotMatch(r.headers.get('content-security-policy'), /unsafe-inline/);
     assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   }
+});
+
+test('mission catalog is authenticated and read-only, without creating a group outline', async () => {
+  const e = wenv();
+  const response = await call(e, '/api/missions');
+  assert.equal(response.status, 200);
+  const catalog = await response.json();
+  assert.equal(catalog.me.user, 'alice');
+  assert.equal(catalog.missions.length, 424);
+  assert.equal(e.DB.raw.prepare('SELECT COUNT(*) AS n FROM outline').get().n, 0);
+  const denied = await worker.fetch(new Request('https://edf6.test/api/missions'), e);
+  assert.equal(denied.status, 401);
 });
 
 test('worker: cross-site writes, non-JSON bodies and unknown actions are refused', async () => {
