@@ -89,6 +89,7 @@ void Unexpected() noexcept { static volatile bool fail=true;if(fail)std::abort()
 bool PlayerHeliCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { Unexpected();return false; }
 bool GunshipGunnerCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { return false; }
 bool DreadnoughtCamera(const unsigned char*,float*,float*) noexcept { return false; }
+bool SeatTurretCamera(const unsigned char*,float*,float*) noexcept { return false; }   // seat_turret.cpp: no gunner-seat turrets here
 bool SazabiCamera(const unsigned char*,const float*,const float*,float*,float*) noexcept { Unexpected();return false; }
 bool indirectFixture=false;
 bool IndirectFireSeat(const unsigned char*) noexcept { if(!indirectFixture)Unexpected();return true; }

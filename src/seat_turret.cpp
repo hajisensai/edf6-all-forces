@@ -15,6 +15,7 @@
 #include "seat_turret_net.h"
 #include "seat_turret_pose.h"
 #include "stores.h"
+#include "turretcam.h"
 #include <cmath>
 #include <cstring>
 
@@ -113,13 +114,58 @@ Aim AimAt(const unsigned char* v,const Turret& t,const float* at) noexcept {
     for(int r=0;r<3;++r)local[r]=d[0]*m[4*r]+d[1]*m[4*r+1]+d[2]*m[4*r+2];
     return seat_turret::AnglesOf(local);
 }
-// Where the screen's centre meets the map, or kAimReach out along it.
-bool AimPoint(float* aim) noexcept {
-    float eye[3],dir[3];
-    if(!CameraRay(eye,dir))return false;
+// --- The local player's gunner view (one player, one seat): their own, world-held (the hull and the main turret turning
+// under it do not turn it), turned by their aim stick as the dreadnought's turret view is (dreadnought_turrets.inc Look);
+// the camera hook places the camera from it (SeatTurretCamera: over the turret, behind it along the view), and the
+// turret trains on where the view's centre meets the map (the user, 2026-10-30: the gunner's turret follows the gunner's
+// sight, not the main gun). The seat's own camera locators (xm_cam_n, on the turret) would turn the view with the turret
+// that turns toward the view: it would never move.
+constexpr float kEyeUp=2.2f,kEyeBack=6.0f;   // m: the eye over the turret's pivot, behind it along the view
+constexpr std::size_t kSeatAimStick=0x2D0;   // the rider's aim stick (the mouse's per-frame share), docs/camera-re.md §4
+struct View { ObjRef ref; const unsigned char* vehicle; const unsigned char* seat; float yaw,pitch; float off[3]; ULONGLONG frame; };
+View view{};
+SRWLOCK viewLock=SRWLOCK_INIT;
+// The rider's stick this frame as it stood before the stock input (SeatTurretsInput: read after it, the mouse's share is
+// gone, as the dreadnought found on 2026-10-21).
+struct AimIn { const unsigned char* seat=nullptr; ULONGLONG frame=0; float x=0.0f,y=0.0f; };
+AimIn aimIn{};
+
+void ViewPlace(const View& w,const float* p,float* eye,float* look) noexcept {
+    float dir[3];
+    tcam::Dir(w.yaw,w.pitch,dir);
+    for(int i=0;i<3;++i) {
+        eye[i]=p[i]+w.off[i]+(i==1 ? kEyeUp : 0.0f)-dir[i]*kEyeBack;
+        look[i]=eye[i]+dir[i]*100.0f;
+    }
+}
+// A frame of the local player's view from seat `seat` of `v` over turret `t`: begun along its guns, turned by their
+// stick (once a frame, however many turrets the seat has). Where its centre meets the map (kAimReach out with none): `at`.
+void PlayerView(unsigned char* v,const Turret& t,const unsigned char* seat,float* at) noexcept {
+    AcquireSRWLockShared(&viewLock);View w=view;ReleaseSRWLockShared(&viewLock);
+    const ULONGLONG frame=GameFrame();
+    if(w.seat!=seat || !w.ref.Is(v) || w.frame+2<frame) {
+        const float* f=reinterpret_cast<const float*>(t.rec[1]+kBoneWorld506)+8;   // its guns' ahead
+        w=View{ObjRef::Of(v),v,seat,tcam::YawOf(f),tcam::PitchOf(f),{},0};
+    }
+    if(w.frame!=frame) {
+        const bool early=aimIn.seat==seat && aimIn.frame==frame;
+        const float x=early ? aimIn.x : At<float>(seat,kSeatAimStick),y=early ? aimIn.y : At<float>(seat,kSeatAimStick+4);
+        const float rate=Cfg().turretCamRate*tcam::kPi/180.0f/60.0f;
+        if(std::isfinite(x) && std::isfinite(y)) {
+            w.yaw=tcam::Wrap(w.yaw+x*rate);
+            w.pitch=seat_turret::Clamp(w.pitch-y*rate,-tcam::kPitchMost,tcam::kPitchMost);
+        }
+        const float* pivot=PivotOf(t);
+        const float* p=reinterpret_cast<const float*>(v+kPosition);
+        for(int i=0;i<3;++i)w.off[i]=pivot[i]-p[i];
+        w.frame=frame;
+        AcquireSRWLockExclusive(&viewLock);view=w;ReleaseSRWLockExclusive(&viewLock);
+    }
+    float eye[3],look[3],dir[3];
+    ViewPlace(w,reinterpret_cast<const float*>(v+kPosition),eye,look);
+    tcam::Dir(w.yaw,w.pitch,dir);
     const float end[3]={eye[0]+dir[0]*kAimReach,eye[1]+dir[1]*kAimReach,eye[2]+dir[2]*kAimReach};
-    if(MapFixedRay(eye,end,aim)<0.0f)std::memcpy(aim,end,12);
-    return true;
+    if(MapFixedRay(eye,end,at)<0.0f)std::memcpy(at,end,12);
 }
 const float* TargetPoint(const void* object) noexcept {
     return Readable(object,kPosition+12) ? reinterpret_cast<const float*>(static_cast<const unsigned char*>(object)+kPosition) : nullptr;
@@ -154,7 +200,8 @@ bool Trainer(unsigned char* v,Turret& t,bool runs,bool autoOn,Aim* want,bool* fi
     const Rider rider=SeatRider(seat);
     if(rider==Rider::player && At<const void*>(seat,kSeatRider)==PlayerHuman()) {
         float at[3];
-        if(AimPoint(at))*want=AimAt(v,t,at);
+        PlayerView(v,t,seat,at);
+        *want=AimAt(v,t,at);
         return true;
     }
     if(rider!=Rider::none) {   // a dummy rider too: an NPC gunner's seat (AiGunner)
@@ -239,6 +286,33 @@ void SeatTurretsFrame(unsigned char* v) noexcept {
     } __except(EXCEPTION_EXECUTE_HANDLER) { Log("SEATTURRET v=%p: unreadable vehicle, its turrets left",v); }
 }
 
+void SeatTurretsInput(unsigned char* v) noexcept {
+    if(!installed || !Cfg().enabled)return;
+    __try {
+        if(!Readable(v,kHolderCount+8) || v[kDead] || !Is603(v))return;
+        bool turrets=false;
+        AcquireSRWLockShared(&lock);
+        for(const auto& x:vehicles)if(x.ref.Is(v))turrets=x.count>0;
+        ReleaseSRWLockShared(&lock);
+        if(!turrets)return;
+        for(unsigned i=1;i<SeatCount(v);++i) {
+            const unsigned char* seat=SeatAt(v,i);
+            if(SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=PlayerHuman())continue;
+            aimIn=AimIn{seat,GameFrame(),At<float>(seat,kSeatAimStick),At<float>(seat,kSeatAimStick+4)};
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+bool SeatTurretCamera(const unsigned char* seat,float* eye,float* look) noexcept {
+    if(!installed || !Cfg().enabled || !seat)return false;
+    AcquireSRWLockShared(&viewLock);const View w=view;ReleaseSRWLockShared(&viewLock);
+    if(!w.seat || seat!=w.seat || w.frame+2<GameFrame() || !w.ref.Is(w.vehicle) || w.vehicle[kDead] ||
+       SeatRider(seat)!=Rider::player || At<const void*>(seat,kSeatRider)!=PlayerHuman())return false;
+    ViewPlace(w,reinterpret_cast<const float*>(w.vehicle+kPosition),eye,look);
+    for(int i=0;i<3;++i)if(!std::isfinite(eye[i]+look[i]))return false;
+    return true;
+}
+
 void SeatTurretsPose(unsigned char* v) noexcept {
     if(!installed || !Cfg().enabled)return;
     __try {
@@ -278,5 +352,7 @@ void ResetSeatTurrets() noexcept {
     for(auto& x:vehicles)x=Vehicle{};
     gates.Reset();
     ReleaseSRWLockExclusive(&lock);
+    AcquireSRWLockExclusive(&viewLock);view=View{};ReleaseSRWLockExclusive(&viewLock);
+    aimIn=AimIn{};
 }
 }  // namespace crew
