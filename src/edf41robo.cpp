@@ -276,65 +276,9 @@ bool MakeCharge(const float* matrix,void* param,WeakRef& out) noexcept {
     out.control=weak[1];
     return out.object && out.control;
 }
-// 4.1's muzzle flash (EDF41 0x27C3F7..0x27C5A7): a ParticleObject made from an InitParam@ParticleObject at the muzzle. EDF6 has the
-// same class with the same parameter block (create 0x844C0(manager, out weak_ptr, matrix, param), ctor 0x301110, param vtable
-// 0x17620E8 over InitParamBase, 0x1D0 bytes, its emitter part constructed by 0x300C80(param + 0x30) = 4.1's 0x1C1920, destroyed by
-// 0x8FDF0): the fields 4.1 writes are the ones EDF6's EffectGenUtil::Explosion (0x2E5ED0, the only EDF6 maker of a ParticleObject
-// besides its factory) writes at the same offsets: +0x1A0 = 1, +0x1A4 = 0xFFFF, +0x1A8 / +0x1B0 / +0x1B8 = the addresses of +0x90
-// (the position), +0xA0 ((0, 0, 0, 1)) and +0x30 (0x20), +0x38 / +0x3C the life in frames, +0x50 0.98, +0xC8 0.1, +0xE8 0, +0xF4 /
-// +0xF8 the size, +0xFC -size / life, +0x110 the colour, +0x130 its rgb with alpha 0. The texture (ParticleAlpha_6.dds) is a
-// TextureRef (0x30 bytes) at +0x158 that 0x300C80 constructs (0x1120520): got by name from EffectGenUtil (0x2E8510, as
-// UfoRoboCanonChargeEffect's constructor does at 0x306D4B), assigned with 0xF5E10, the temporary freed with 0x1120820.
+// 4.1's muzzle flash (EDF41 0x27C3F7..0x27C5A7): a ParticleObject at the muzzle with ParticleAlpha_6.dds (edf41c::Particle).
 bool MuzzleFlash(const float* pos,int life,float size,const float* colour) noexcept {
-    void* mgr=Global(kManager);
-    void* egu=Global(kEffects);
-    if(!Ok() || !mgr || !egu || life<=0 || !(size>0.0f))return false;
-    alignas(16) unsigned char param[0x1D0]={};
-    const void* base=image+kInitParamBase;
-    std::memcpy(param,&base,8);
-    At<void*(__fastcall*)(void*)>(kParticleParamInit)(param+0x30);
-    const void* vt=image+kParticleParamVtable;
-    std::memcpy(param,&vt,8);
-    const void* at90=param+0x90;
-    const void* atA0=param+0xA0;
-    const void* at30=param+0x30;
-    std::memcpy(param+0x1A8,&at90,8);
-    std::memcpy(param+0x1B0,&atA0,8);
-    std::memcpy(param+0x1B8,&at30,8);
-    const std::int32_t one=1,mask=0xFFFF,kind=0x20;
-    std::memcpy(param+0x1A0,&one,4);
-    std::memcpy(param+0x1A4,&mask,4);
-    param[0x1C0]=0;
-    std::memcpy(param+0x30,&kind,4);
-    const float p4[4]={pos[0],pos[1],pos[2],1.0f},w4[4]={0.0f,0.0f,0.0f,1.0f};
-    std::memcpy(param+0x90,p4,16);
-    std::memcpy(param+0xA0,w4,16);
-    std::memcpy(param+0x38,&life,4);
-    std::memcpy(param+0x3C,&life,4);
-    const float fade=0.98f,spread=0.1f,shrink=-size/static_cast<float>(life),zero=0.0f;
-    std::memcpy(param+0x50,&fade,4);
-    std::memcpy(param+0xC8,&spread,4);
-    std::memset(param+0xE8,0,8);
-    std::memcpy(param+0xF4,&size,4);
-    std::memcpy(param+0xF8,&size,4);
-    std::memcpy(param+0xFC,&shrink,4);
-    std::memcpy(param+0x110,colour,16);
-    std::memcpy(param+0x130,colour,12);
-    std::memcpy(param+0x13C,&zero,4);
-    alignas(16) unsigned char texture[0x40]={};
-    void* ref=At<void*(__fastcall*)(void*,void*,const wchar_t*)>(kTexByName)(egu,texture,L"ParticleAlpha_6.dds");
-    if(ref)At<void*(__fastcall*)(void*,void*)>(kTexAssign)(param+0x158,ref);
-    At<void(__fastcall*)(void*)>(kTexFree)(texture);
-    alignas(16) static const float identity[16]={1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
-    alignas(16) void* weak[2]={nullptr,nullptr};
-    At<void*(__fastcall*)(void*,void*,const float*,void*)>(kParticleCreate)(mgr,weak,identity,param);
-    WeakRef w;
-    w.object=weak[0];
-    w.control=weak[1];
-    const bool made=w.object!=nullptr;
-    WeakReset(w);
-    At<void*(__fastcall*)(void*,unsigned)>(kParticleParamFree)(param,0);
-    return made;
+    return Ok() && Particle(pos,life,size,colour,L"ParticleAlpha_6.dds");
 }
 
 // A body's angular velocity set (the world part's slot 0xB0, 0x11B1760(body, vec): the Havok order setLinear 0xA8 / setAngular 0xB0 /

@@ -174,6 +174,17 @@ struct Entry {
     bool animRead=false;
     int headPlayer=-2;                   // -2: not looked up, -1: none
     hector::Head head;
+    // the weapons' charge and fire look (edf41_hector fx; tools/make_edf41_objects.py HECTOR_FX)
+    struct ArmFx {
+        int kind=0;                      // 0 none, 1 cannon, 2 launcher, 3 gatling
+        float glow=0.0f;                 // the cannon's charge state in frames: the ball shows over its last `glow` charge frames
+        float z=0.0f;                    // the muzzle on the arm bone (0, 0, z)
+        float rgb[3]{};                  // 4.1's flash colour, its largest channel 1
+        int flashLife=0;                 // frames
+        std::uint32_t left=0;            // the battery's shots left at the last frame (a drop is a shot)
+        std::uint32_t shots=0;
+    } fx[hector::kArms];
+    bool fxRead=false;
 };
 
 std::atomic<int> animState{0};          // 0 unchecked, 1 the functions are this build's, 2 they are not: no animation
@@ -552,12 +563,79 @@ void AimArms(void* self,Entry& e) noexcept {
     }
 }
 
+// Gun `i`'s battery (gun_control's order), or null.
+const char* BatteryOf(const void* owner,int i) noexcept {
+    const char* base=static_cast<const char*>(owner);
+    void* const* guns=*reinterpret_cast<void* const* const*>(base+kGunsAt);
+    if(!guns || *reinterpret_cast<const std::uint64_t*>(base+kGunCountAt)!=hector::kArms || !Readable(guns,sizeof(void*)*2*hector::kArms))
+        return nullptr;
+    const char* control=static_cast<const char*>(guns[2*i]);
+    const char* battery=control && Readable(control,sizeof(void*)) ? *reinterpret_cast<const char* const*>(control) : nullptr;
+    return battery && Readable(battery,kBatteryChargeAt+4) ? battery : nullptr;
+}
+
+// The object's edf41_hector fx: per arm [kind, glow frames, muzzle z, r, g, b, flash frames]. An arm without it: no look.
+void ReadFx(void* self,Entry& e) noexcept {
+    const Handle root{static_cast<char*>(self)+kTreeAt,0,0};
+    Handle key{},fx{};
+    if(!Child(root,L"edf41_hector",key) || !Child(key,L"fx",fx) || CountOf(fx)!=hector::kArms)return;
+    for(int i=0;i<hector::kArms;++i) {
+        float v[7];
+        if(!Floats(At(fx,i),v,7))continue;
+        Entry::ArmFx& f=e.fx[i];
+        f.kind=v[0]>=1.0f && v[0]<=3.0f ? static_cast<int>(v[0]) : 0;
+        f.glow=v[1]; f.z=v[2]; f.rgb[0]=v[3]; f.rgb[1]=v[4]; f.rgb[2]=v[5];
+        f.flashLife=static_cast<int>(v[6]);
+        if(const char* b=BatteryOf(self,i))f.left=*reinterpret_cast<const std::uint32_t*>(b+kBatteryLeftAt);
+    }
+    Log("EDF41AI hector %p fx: arm 0 kind %d glow %.0f muzzle %.1f flash %d, arm 1 kind %d glow %.0f muzzle %.1f flash %d",self,
+        e.fx[0].kind,e.fx[0].glow,e.fx[0].z,e.fx[0].flashLife,e.fx[1].kind,e.fx[1].glow,e.fx[1].z,e.fx[1].flashLife);
+}
+
+// 4.1's weapon look at each muzzle (tools/make_edf41_objects.py HECTOR_FX), after the arms are aimed (their world matrices are
+// this frame's). The battery's attack state: +0x2E8 the charge frames left (0x6D547A sets it from charge.time, 0x6D556A counts
+// down to the first shot), +0x2E0 the shots left of the attack (set to fire.count at the start, one less per shot): a drop
+// since the last frame is a shot. The muzzle is the locator (0, 0, z) on the arm bone (tools: alias_dsgo's locators).
+constexpr float kBallSize=14.0f,kBallStart=0.15f,kCannonFlash=12.0f,kGatlingFlash=6.0f,kLightRadius=30.0f,kBright=3.0f;
+void Effects(void* self,Entry& e) noexcept {
+    if(!e.fxRead) { e.fxRead=true; ReadFx(self,e); }
+    char* skel=static_cast<char*>(self)+kSkeletonAt;
+    char* recs=Readable(skel,0x28) ? *reinterpret_cast<char**>(skel+0x10) : nullptr;
+    const std::int64_t count=recs ? *reinterpret_cast<const std::int64_t*>(skel+0x20) : 0;
+    for(int i=0;i<hector::kArms;++i) {
+        Entry::ArmFx& f=e.fx[i];
+        const char* battery=f.kind ? BatteryOf(self,i) : nullptr;
+        if(!battery || e.arm[i]<0 || e.arm[i]>=count)continue;
+        const std::int32_t charge=*reinterpret_cast<const std::int32_t*>(battery+kBatteryChargeAt);
+        const std::uint32_t left=*reinterpret_cast<const std::uint32_t*>(battery+kBatteryLeftAt);
+        const bool shot=left<f.left;
+        f.left=left;
+        const bool ball=f.kind==1 && charge>0 && static_cast<float>(charge)<=f.glow;
+        if(!shot && !ball)continue;
+        const float* m=reinterpret_cast<const float*>(recs+static_cast<std::size_t>(e.arm[i])*kBoneSize+kBoneWorldAt);
+        if(!Finite16(m))continue;
+        const float at[3]={m[12]+m[8]*f.z,m[13]+m[9]*f.z,m[14]+m[10]*f.z};
+        const float colour[4]={f.rgb[0]*kBright,f.rgb[1]*kBright,f.rgb[2]*kBright,1.0f};
+        if(ball) {   // grows through the charge state, as Deiroi's main gun gathers its light (ChargeEffect_DeiroiBody, Particle3_k)
+            const float t=1.0f-static_cast<float>(charge)/f.glow;
+            edf41c::Particle(at,3,kBallSize*(kBallStart+(1.0f-kBallStart)*t),colour,L"Particle3_k.dds");
+        }
+        if(!shot)continue;
+        ++f.shots;
+        if(f.kind==1 || f.kind==3)
+            edf41c::Particle(at,(std::max)(1,f.flashLife),f.kind==1 ? kCannonFlash : kGatlingFlash,colour,L"マズルフラッシュ01.dds");
+        if(f.kind==1 || f.kind==2)edf41c::StencilLight(at,colour,kLightRadius,(std::max)(1,f.flashLife));
+        if(f.shots<=2)Log("EDF41AI hector %p arm %d shot #%u (%u left) kind %d at %.0f %.0f %.0f",self,i,f.shots,left,f.kind,at[0],at[1],at[2]);
+    }
+}
+
 std::uint64_t __fastcall BaseUpdateHook(void* self,void* dt) {
     Tick(self);
     const std::uint64_t result=reinterpret_cast<BaseUpdateFn>(image+kBaseUpdate)(self,dt);
     std::lock_guard<std::mutex> hold(tableLock);
     if(Entry* e=Find(self)) {
         AimArms(self,*e);
+        if(!*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt))Effects(self,*e);
         if(AnimReady() && !*reinterpret_cast<const std::uint8_t*>(static_cast<char*>(self)+kDestroyedAt)) {
             StepHead(self,*e);
             for(int i=0;i<hector::kArms;++i)ChargeLight(self,*e,i);

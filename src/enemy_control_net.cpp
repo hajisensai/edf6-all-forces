@@ -11,6 +11,7 @@
 #include "support_soldier.h"
 #include "online_authority.h"
 #include "memory.h"
+#include <atomic>
 #include <cstring>
 
 namespace crew {
@@ -72,10 +73,20 @@ ep::SendResult TrySendAction(void*,std::uint32_t peer,const void* bytes,std::siz
     return result==EDF6COOP_EXTENSION_SEND_WOULD_BLOCK ? ep::SendResult::wouldBlock : ep::SendResult::unavailable;
 }
 bool Requester(const char* authenticated,const ep::NativeId& id) noexcept {
-    if(!ep::ValidPuid(authenticated) || !ep::CanonicalId(id))return false;
+    // The host's reason for an Unauthorized reply (the guest sees only that; 2026-10-30 report #27). A PUID / participant
+    // mismatch is logged by the sender check itself (SupportCommandRequesterMatches).
+    static std::atomic<int> said{0};
+    if(!ep::ValidPuid(authenticated) || !ep::CanonicalId(id)) {
+        if(said.fetch_add(1)<16)Log("ENEMYCTRL NET request refused: malformed sender or player ID");
+        return false;
+    }
     CommandIdentities identities{};
-    return ResolveCommandIdentities(id.data(),nullptr,0,nullptr,&identities) && identities.requester &&
-        SenderIsPlayer(identities.requesterPuid,authenticated);
+    if(!ResolveCommandIdentities(id.data(),nullptr,0,nullptr,&identities) || !identities.requester) {
+        if(said.fetch_add(1)<16)Log("ENEMYCTRL NET request refused: the sender's player %02X%02X%02X%02X is not one live player here (not found, "
+            "not a soldier, or its ID on two objects)",id[0],id[1],id[2],id[3]);
+        return false;
+    }
+    return SenderIsPlayer(identities.requesterPuid,authenticated);
 }
 bool Authenticate(void*,const char* puid,const ep::NativeId& source) noexcept {
     __try {return InSession() && Requester(puid,source);}
