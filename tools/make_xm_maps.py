@@ -25,6 +25,7 @@ import argparse
 import hashlib
 import json
 import os
+import struct
 import sys
 from typing import Callable
 
@@ -124,7 +125,10 @@ def install(root: str, say: Callable[[str], None] = print) -> tuple[list[str], l
     maps = _index(folder)
     if not maps:
         return [], [('X-Morph 地图', f'模型包里没有 {MODEL_DIR}/{INDEX}（或版本不是 {VERSION}）')]
-    e6 = edf41_maps.Archives(root)
+    try:
+        e6 = edf41_maps.Archives(root)
+    except (OSError, ValueError, struct.error) as e:   # the donors' weather / navmesh come from these
+        return [], [(name, f'读不了 EDF6 的档案（借用的天气 / 寻路文件在里面）：{type(e).__name__}: {e}') for name in maps]
     led = ledger.Ledger(root)
     written: list[str] = []
     skipped: list[tuple[str, str]] = []
