@@ -94,6 +94,9 @@ class Unit:
     arms: tuple[Arm, ...] = ()      # its other weapons (Arm)
     camera: dict = field(default_factory=dict)  # its vehicle camera over the `like`'s (make_tracked_combat WT_ONLY)
     eye: tuple[float, ...] = ()  # the gunner's sight camera on the turret (cockpit_fits_plugin, remote_display), m
+    # The bone the eye rides: the turret (cannon_main), or the gun's pitch hinge (cannon_l) where the raised gun or its
+    # mount would swing through the aim line of an eye on the turret (tests/gun_camera_sweep_guard.py, -5..60 deg).
+    eye_bone: str = 'cannon_main'
     durability: float = 0.0  # vcobjects GroundVehicle.durability
     reload: int = 0          # its request (tools/calls.py Call): ReloadTime base
     level: float = 0.0       # ... and the weapon table level
@@ -130,7 +133,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # to y 5.2 at z -1..0), the gun's axis y 2.25, its muzzle z 7.5: the sight camera over the roof's front.
        camera={'model_eye': (0., 3.2, 0.5), 'model_look_at': (0., 2.8, 9.), 'third_person_distance': 11.,
                'third_person_height': 4.6},
-       eye=(0.0, 3.55, 2.0), durability=2500.0, reload=10000, level=1.5, after='EDF6VC_CALL_SORTIE_GUIDED'),
+       eye=(0.0, 3.55, 2.0), eye_bone='cannon_l', durability=2500.0, reload=10000, level=1.5, after='EDF6VC_CALL_SORTIE_GUIDED'),
     # The advanced tank: a laser cannon on its turret (the game's enemy_laser_medium, one a second), twice the battle
     # tank's armour (350 against 170) and a shield (not ported). The Brute's laser cannon's beam as its round
     # (make_tracked_combat SHELL_OF, as the laser turret's): straight, fast, through what it hits.
@@ -154,7 +157,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # y 4.3, its muzzle z 7.0
        camera={'model_eye': (0., 5.0, -0.3), 'model_look_at': (0., 4.6, 9.), 'third_person_distance': 11.,
                'third_person_height': 5.0},
-       eye=(0.0, 5.35, 1.25), durability=5000.0, reload=14000, level=2.5, after='EDF6VC_CALL_XM_MEDIUM_TANK_REGULAR'),
+       eye=(0.0, 5.5, 1.35), eye_bone='cannon_l', durability=5000.0, reload=14000, level=2.5, after='EDF6VC_CALL_XM_MEDIUM_TANK_REGULAR'),
     # The anti-air tank: twin flak guns either side of its turret (enemy_flak_medium, bursts) and AA missiles (not
     # ported); light armour. The Tunguska's 30 mm belt with a flak burst: fewer, harder-hitting rounds that burst.
     _u('ground/medium_tank_aa', 'tracked', 'tunguska', 'ported', 'Anti-Air Tank',
@@ -286,7 +289,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # axis y 2.45, its muzzle z 5.5
        camera={'model_eye': (0., 3.2, -2.9), 'model_look_at': (0., 2.9, 8.), 'third_person_distance': 10.,
                'third_person_height': 4.4},
-       eye=(0.0, 3.45, -1.3), durability=1500.0, reload=14000, level=2.5, after='EDF6VC_CALL_XM_LARGE_TANK_EMP'),
+       eye=(0.0, 3.55, -1.4), durability=1500.0, reload=14000, level=2.5, after='EDF6VC_CALL_XM_LARGE_TANK_EMP'),
     # The shield generator: a hull carrying a shield dome for the units round it (not ported) and a small laser turret
     # (enemy_laser_medium, one a second); its armour between the battle and the advanced tank (250). The laser cannon's
     # beam as its round, as the advanced tank's.
@@ -309,7 +312,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # its muzzle y 4.2, z 3.1
        camera={'model_eye': (0., 4.0, 1.5), 'model_look_at': (0., 3.8, 9.), 'third_person_distance': 11.,
                'third_person_height': 5.0},
-       eye=(0.0, 4.1, 1.5), durability=4000.0, reload=12000, level=2.2, after='EDF6VC_CALL_XM_MEDIUM_ARTILLERY_REGULAR'),
+       eye=(0.0, 4.5, 1.7), eye_bone='cannon_l', durability=4000.0, reload=12000, level=2.2, after='EDF6VC_CALL_XM_MEDIUM_ARTILLERY_REGULAR'),
     # ground: wheeled
     _u('ground/medium_missile_launcher', 'wheeled', 'tos1', title='Missile Launcher'),
     _u('ground/medium_apc', 'wheeled', 'bmpt', title='APC'),

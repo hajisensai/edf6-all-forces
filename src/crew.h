@@ -1456,8 +1456,10 @@ int FlaresOf(const void* owner,float (*at)[3],float (*vel)[3],int most) noexcept
 void FlareFlames(const unsigned char* v,const float (*at)[3],const float (*vel)[3],int n,ULONGLONG ms) noexcept;
 bool InstallPlayerJets() noexcept;                      // after InstallSub (it chains onto the 506 physics slot)
 
-// The local player's human (plugin.cpp, from SeePlayer): the object, or nullptr when not seen for
-// kPlayerHumanMs or no longer the same live player object.
+// The local player's human (plugin.cpp): the soldier a local camera follows, as its step reports it
+// (SeeCameraPlayer, firstperson.cpp CamStepHook); nullptr when no camera reported it for kPlayerHumanMs or it is
+// no longer the same live player object.
+void SeeCameraPlayer(unsigned char* human) noexcept;
 unsigned char* PlayerHuman() noexcept;
 
 // debug_spawn.cpp (ini DebugSpawn, off by default; src/debug_spawn.h): spawn vehicles, the plugin's aircraft, enemies and

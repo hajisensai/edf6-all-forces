@@ -8,9 +8,10 @@ namespace crew {
 // check), and this one refuses the older build's rooms. No compatibility with older builds (CLAUDE.md).
 //   1: up to 2026-10-25;  2: the named PvP factions (pvp_protocol.h v3, team_native.h's 16 teams);
 //   3 (2026-10-26): every support from the map's bar for pt (the support catalog with the strikes, support_call.h; the
-//      barrages' BRGS channel; the support call weapons retired from the weapon table).
+//      barrages' BRGS channel; the support call weapons retired from the weapon table);
+//   4 (2026-10-27): the support pt shared by a team, kept by the host (support_points_net.h: the SPTS channel).
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=3;
+constexpr std::int64_t kAllForcesRoomProtocol=4;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

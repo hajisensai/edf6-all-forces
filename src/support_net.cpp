@@ -13,6 +13,7 @@
 #include "carrier_drone_net.h"
 #include "floatgun.h"
 #include "gravity_net.h"
+#include "support_points.h"
 #include "ultimate_net.h"
 #include "barrage_net.h"
 #include "player_vehicle.h"
@@ -192,6 +193,7 @@ void RegisterPluginChannels() noexcept {
     plugin_net::RegisterChannel(UltimateNetChannel());
     plugin_net::RegisterChannel(BarrageNetChannel());
     plugin_net::RegisterChannel(PlayerVehicleNetChannel());
+    plugin_net::RegisterChannel(SupportPointsNetChannel());
 }
 // A message no channel and not the support protocol owns (a newer build's channel this one does not have): dropped,
 // said once a magic (a few magics), never once a message.

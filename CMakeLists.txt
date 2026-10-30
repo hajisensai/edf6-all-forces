@@ -853,6 +853,9 @@ foreach(_shard RANGE ${_cockpit_last})
 endforeach()
 # Every generated ground vehicle's seats have their first-person eye: fitted, grafted, rebuilt on a fit change.
 add_test(NAME cockpit_coverage_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cockpit_coverage_guard.py")
+# Every gun camera seat (remote_display) of a V603 vehicle sees along its gun at every elevation: nothing of the vehicle
+# swings through the aim line from its eye (pylib/cockpit_sweep.py; the TOS-1's launcher pack did from 31 deg up).
+add_test(NAME gun_camera_sweep_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/gun_camera_sweep_guard.py")
 # Every ported X-Morph unit (pylib/xm_units.py) is in every vehicle registry, from the catalog alone.
 add_test(NAME xmorph_registry_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/xmorph_registry_guard.py")
 add_test(NAME cabin_view COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/cabin_view_test.py")

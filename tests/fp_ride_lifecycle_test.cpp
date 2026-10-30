@@ -54,6 +54,8 @@ void ViewWriteNear(void* camera,float value) noexcept { Put<float>(camera,kCamNe
 float nativeNear=.1f;
 void ViewReturnNear(void* camera,float written) noexcept { if(At<float>(camera,kCamNear)==written)Put<float>(camera,kCamNear,nativeNear); }
 void VehicleLookSetReady(bool) noexcept {}
+unsigned char* cameraPlayerSeen=nullptr;   // plugin.cpp's PlayerHuman source, as each camera step reports it
+void SeeCameraPlayer(unsigned char* human) noexcept { cameraPlayerSeen=human; }
 bool enemyCamera=false;const unsigned char* enemyCameraHuman=nullptr;
 bool EnemyControlCamera(const unsigned char* human,const float*,const float*,float* eye,float* look) noexcept {
     if(!enemyCamera || human!=enemyCameraHuman)return false;
@@ -523,7 +525,10 @@ int main() {
     std::memcpy(p1+kAim,aim1.m,64);std::memcpy(p2+kAim,aim2.m,64);
     std::memcpy(p1+kBodyFrame,aim1.m,64);std::memcpy(p2+kBodyFrame,aim2.m,64);
     std::memcpy(c1+kCamMatrix,aim1.m,64);std::memcpy(c2+kCamMatrix,aim2.m,64);
-    ++renderFrame;CamStepHook(c1,nullptr);CamStepHook(c2,nullptr);
+    cameraPlayerSeen=nullptr;++renderFrame;CamStepHook(c1,nullptr);
+    check(cameraPlayerSeen==p1,"a local camera's step reports the player it follows (PlayerHuman's source, plugin.cpp)");
+    CamStepHook(c2,nullptr);
+    check(cameraPlayerSeen==p2,"each local camera's step reports its own player");
     auto a=CameraState(c1),b=CameraState(c2);
     check(a && b && a!=b && a->on && b->on && a->human==p1 && b->human==p2,
           "interleaved P1/P2 native camera steps keep independent active viewmodels");
