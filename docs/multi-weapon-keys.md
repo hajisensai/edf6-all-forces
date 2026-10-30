@@ -34,14 +34,34 @@ arms=(Arm('mg', ..., fire=2),
 
 ## 运行时（`src/payload.cpp`）
 
-- `OwnKey(class, weapon)`：武器的开火键。`key=2` 只在 V603 上认；`3..6` 任何车型都认；`nativeControl` 的原生弹链不认。
-- 玩家座位（`PayloadFrame`）：副扳机照旧走 `FireIndependentSecondary`（`seat+0x2E0`）；键 3～6 按住就给对应武器的扳机锁存（`weapon+0x139`）置位，射速由武器自己的 `FireInterval` 控制。地图打开时不读键。
-- 自动炮塔（`OwnShot`）：开着时每帧判断：
+### 统一接口（用户 2026-10-30：「让他可以统一函数之类的方便后续维护」）
+
+一个武器归谁扣扳机、能不能打、怎么扣，只在下面三个函数里判断；玩家座位、自动炮塔、NPC 乘员都走它们，新增开火来源只改这里：
+
+| 函数 | 作用 |
+|---|---|
+| `ControlOf(class, weapon)` → `Control{source, key, autoTurret}` | 开火来源：`cycle`（座位原版扳机与挂在上面的挂载，`FireOf` / `PullHook` 重定向）、`coax`（同轴机枪）、`second`（V603 原版不读的副扳机，一个发射器的多种弹，`Switch` 循环）、`key`（额外键 3～6）。`OwnKey` / `IndependentSecondary` / `AutoTurret` 都由它派生。 |
+| `HasShot(vehicle, weapon, target, blocked)` | 判射（玩家自动炮塔、NPC 的同轴机枪与额外键共用）：导弹看游戏自己的锁定 + `NpcWeaponCandidate`；炮看射程内、炮口方向 3° 内、线上无友军。同轴机枪射程取武器自己的、最多 900 m，不套 `NpcWeaponCandidate`。`target` 为空时找车辆的任意敌人（自动炮塔）。 |
+| `FireSeat(vehicle, class, ws, readout, SeatIntent)` | 按座位本帧的意图扣扳机（唯一的 `Pull`：置 `weapon+0x139`，同轴机枪先写曳光弹色）。`SeatIntent`：副扳机按住 + 选中的那一弹、同轴扳机按住、键 3～6 按住、自动炮塔开关、NPC 的目标。 |
+
+调用方：
+
+- 玩家座位（`PayloadFrame`）：读扳机、键、自动炮塔开关，填 `SeatIntent` 调一次 `FireSeat`。
+- NPC 乘员（`NpcOwnWeaponsFire`，原 `NpcCoaxFire` + `NpcOwnKeysFire` 合并）：`SeatIntent.crew` = 乘员的目标，同轴机枪与键 3～6 的武器各按 `HasShot` 开火。副扳机的导弹仍由 `NpcSecondarySelect` 选弹、原生瞄准后经 `FireIndependentSecondary`（同样是 `FireSeat`）发射。
+- `src/npcai.cpp`：驾驶座（`DriverPayloadAim`）与炮手座（`NpcGunnersInput`）共用 `CrewMainGun`（选主武器、`WeaponHoldsFire` 判是否白打、原生瞄准）与 `CrewOwnWeapons`（副扳机 + `NpcOwnWeaponsFire`）。
+- HUD（`hud.cpp PayloadControls`）的键名取 `FireKeyVk` / `FireKeyButton`（`crew.h`），与开火读的是同一份绑定。
+
+`EDF6AutoTurret` 插件（`autoturret/`）是另一个 DLL，管原版炮塔座位的转向与判射（`gunner.cpp OnTarget`：按炮的偏航 / 俯仰误差与目标尺寸），与这里的自有键武器不重叠，代码不共享。
+
+### 行为
+
+- 玩家座位（`PayloadFrame`）：副扳机（`seat+0x2E0`）只发 `Switch` 选中的那一弹；键 3～6 按住就扣对应武器，射速由武器自己的 `FireInterval` 控制。地图打开时不读键。
+- 自动炮塔（`HasShot`）：开着时每帧判断：
   - 导弹：游戏自己的锁定（`lockon.cpp`）锁住了目标，且这枚弹能打这个目标（`NpcWeaponCandidate`：防空导弹只打空中目标、射程内）就发射；
   - 炮：射程内有敌人在炮口方向 3° 以内，且中间没有友军（`FriendInLine`）就开火。
   - 副扳机上的自动炮塔只发当前循环选中的那一种弹。
   - 开关：`VehicleAutoTurretKey`（默认 Y，手柄默认不设），只在座位上有自动炮塔时读；ini `AutoTurrets` 是每个任务开始时的状态（默认开）。HUD 控制行显示「[Y] 自动炮塔：开 / 关」。
-- NPC 乘员：主武器与副扳机照旧（`NpcPayloadSelect`、`AimIndependentSecondary`）；键 3～6 的武器由 `NpcOwnKeysFire` 同时开火，判据同自动炮塔（目标是乘员选中的那个）。只在运行该 NPC 的机器上执行（`AiGunner`）。
+- NPC 乘员：主武器与副扳机照旧（`NpcPayloadSelect`、`AimIndependentSecondary`）；同轴机枪与键 3～6 的武器由 `NpcOwnWeaponsFire` 同时开火，判据同自动炮塔（目标是乘员选中的那个）。只在运行该 NPC 的机器上执行（`AiGunner`）。
 - 联机：开火只在操作该座位的机器上置扳机锁存，射击由原版的武器同步复制到其他机器，和副扳机、同轴机枪一样。
 - HUD（`hud.cpp PayloadControls`）：控制行列出每个额外键与它发射的武器（自动炮塔标「（自动）」），以及自动炮塔开关状态；载具 HUD 的瞄准标记把额外键的武器也当作「扳机上的武器」画出（`PayloadTriggerWeapons`）。
 

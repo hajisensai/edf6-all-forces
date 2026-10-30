@@ -33,7 +33,7 @@ struct StoreSpec {
     // right, payload.cpp Switch, cycles the weapons on it, never R / LB); 3..kFireLastKey VehicleFire<n>Key, one weapon
     // a key. Each fires at once with the primary and the other keys.
     unsigned char fireKey=0;
-    bool autoTurret=false;   // fires itself with the vehicle's auto turrets on (VehicleAutoTurretKey; payload.cpp AutoFire)
+    bool autoTurret=false;   // fires itself with the vehicle's auto turrets on (VehicleAutoTurretKey; payload.cpp ControlOf, FireSeat)
 };
 // A jet kind's mass without stores (kg) and the durability its SGO gives it (the HP before the game's tier scales it).
 struct JetMass { float mark,mass,durability; };

@@ -261,7 +261,7 @@ bool FireIndependentSecondary(unsigned char* v,unsigned seat,const unsigned char
 }
 bool suppressGunnerChoice=false;
 PayloadFire chosenGunnerFire=PayloadFire::primary;
-bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }   // heli.cpp's (NpcCoaxFire's check)
+bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }   // heli.cpp's (NpcOwnWeaponsFire's check)
 // wastedfire.cpp WastedFire: the target every shooter's fire is wasted on (the shut teleportation ship), as the case sets.
 const void* wastedTarget=nullptr;
 bool WastedFire(const void*,const void* target) noexcept { return target && target==wastedTarget; }
@@ -273,9 +273,8 @@ bool HoldFire(const void*,const void* target,const float*,float speed,float grav
     if(aim && weakAimSet && target)std::memcpy(aim,weakAim,12);
     return target && (target==wastedTarget || target==heldTarget);
 }
-int coaxCalls=0;   // payload.cpp NpcCoaxFire: called beside every crew aim (no coax on these fixtures)
-bool NpcCoaxFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { ++coaxCalls;return false; }
-bool NpcOwnKeysFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { return false; }   // no keyed weapons here
+int coaxCalls=0;   // payload.cpp NpcOwnWeaponsFire: called beside every crew aim (no coax or keyed weapons on these fixtures)
+bool NpcOwnWeaponsFire(unsigned char*,unsigned,const void*,LineBlocked) noexcept { ++coaxCalls;return false; }
 unsigned char* NpcPayloadSelect(unsigned char* v,unsigned seat,float,bool,PayloadFire* fire) noexcept {
     if(fire)*fire=chosenGunnerFire;
     if(suppressGunnerChoice)return nullptr;

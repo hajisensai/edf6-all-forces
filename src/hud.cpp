@@ -628,10 +628,7 @@ void PayloadControls(Line& line,const PayloadReadout& p) noexcept {
     for(int i=0;i<p.count && i<kMostPayload;++i) {
         const int k=p.entry[i].key;
         if(k<3)continue;
-        const Config& c=Cfg();
-        const int vk=k==3 ? c.vehicleFire3Key : k==4 ? c.vehicleFire4Key : k==5 ? c.vehicleFire5Key : c.vehicleFire6Key;
-        const int mask=k==3 ? c.vehicleFire3Button : k==4 ? c.vehicleFire4Button : k==5 ? c.vehicleFire5Button : c.vehicleFire6Button;
-        if(p.keys)KeyName(vk,key,32);else PadBitsName(mask,key,32);
+        if(p.keys)KeyName(FireKeyVk(static_cast<unsigned char>(k)),key,32);else PadBitsName(FireKeyButton(static_cast<unsigned char>(k)),key,32);
         wchar_t name[48];
         std::swprintf(name,48,L"%ls%ls",p.entry[i].name,p.entry[i].autoTurret ? Tr(Tx::controlAutoMark) : L"");
         add(Tx::controlFireKey,key,name);

@@ -96,16 +96,14 @@ bool NativePayloadControl(const void* vehicle,unsigned seat) noexcept;
 // `fire` reports the native trigger control to use (primary or secondary).
 // Repeat each frame; redirects expire and check AiGunner again at the native trigger pull.
 unsigned char* NpcPayloadSelect(unsigned char* vehicle,unsigned seat,float distance,bool airborne,PayloadFire* fire=nullptr) noexcept;
-// An NPC crew's coaxial gun (StoreRole::coax): fired alongside the main gun / store NpcPayloadSelect chose, whenever the
-// gun is laid within ~3 degrees of `target` inside 600 m (and its reach) with no friend in the line; its trigger latch
-// pulled this frame. True when it fired.
-// locked: whether a burst from -> to would pass a friend (heli.h FriendInLine); nullptr none checked.
+// locked: whether a burst from -> to would pass a friend (heli.h FriendInLine); nullptr none checked.
 using LineBlocked=bool(*)(const float* from,const float* to,const void* self) noexcept;
-bool NpcCoaxFire(unsigned char* vehicle,unsigned seat,const void* target,LineBlocked blocked=nullptr) noexcept;
-// An NPC crew's weapons on the vehicle's extra fire keys (StoreSpec::fireKey 3..6), fired alongside whatever else it
-// fires: each that has a shot at `target` (payload.cpp OwnShot: a missile once its lock holds, a gun laid within ~3
-// degrees of it in its reach with no friend in the line); their trigger latches pulled this frame. True when one fired.
-bool NpcOwnKeysFire(unsigned char* vehicle,unsigned seat,const void* target,LineBlocked blocked=nullptr) noexcept;
+// An NPC crew's own weapons, fired alongside the main gun / store NpcPayloadSelect chose (payload.cpp FireSeat, the same
+// pull and shot rule as the player's auto turrets): its coaxial gun (StoreRole::coax) laid within ~3 degrees of `target`
+// inside 900 m (and its reach), and its weapons on the extra fire keys (StoreSpec::fireKey 3..6) that have a shot at it
+// (HasShot: a missile once its lock holds, a gun laid within ~3 degrees of it in its reach); no friend in the line. Their
+// trigger latches pulled this frame. True when one fired.
+bool NpcOwnWeaponsFire(unsigned char* vehicle,unsigned seat,const void* target,LineBlocked blocked=nullptr) noexcept;
 // Whether the HUD's control row has anything to say for this seat: the own secondary's cycle, an extra fire key, an auto
 // turret (hud.cpp PayloadControls).
 inline bool PayloadControlsShown(const PayloadReadout& p) noexcept {
