@@ -149,7 +149,12 @@ std::uint32_t OwnExtension() noexcept {
 }
 // Every plugin channel's frame (plugin_net.h: the registry, the roster, the joins). The Q marks go peer to peer with no
 // host step: the context's `linked` (the transport alone) is theirs.
+// What the online frame costs this machine (debug, every kNetPerfMs, beside crew.cpp's PERF; the user, 2026-10-30:
+// "联机时候巨卡无比"): the support tick's time, the messages taken in, and the channels' frames they cost.
+constexpr ULONGLONG kNetPerfMs=5000;
+struct NetPerf { double sum,worst; unsigned ticks,messages,contexts; ULONGLONG at; } netPerf{};
 void CommandContext(ULONGLONG now) noexcept {
+    ++netPerf.contexts;
     plugin_net::Room room;
     room.context=CommandNetworkContext{running && session.Ready(),snapshot.isHost!=0,session.Epoch(),commandHostPeer,
         snapshot.peerCount,snapshot.local.id,&SendCommand,&TrySendCommand,running};
@@ -226,18 +231,33 @@ bool Start(const EDF6CoopSnapshot& next,ULONGLONG now) noexcept {
     running=false;
     if(!PeerValid(next.local) || !PeerValid(next.host) || next.peerCount>support_net::kMaxPeers ||
        !next.generation || next.isHost>1 || (next.isHost!=0)!=OnlineHostOnly())return false;
-    peers[0]=next.local;
+    static EDF6CoopPeer staged[support_net::kMaxPeers+1];   // game thread only
+    staged[0]=next.local;
     std::uint32_t hostPeer=0;
     for(std::uint32_t i=1;i<=next.peerCount;++i) {
-        if(!api.peer(next.generation,i-1,&peers[i]) || !PeerValid(peers[i]))return false;
-        for(std::uint32_t j=0;j<i;++j)if(!std::strcmp(peers[i].id,peers[j].id))return false;
-        if(!std::strcmp(peers[i].id,next.host.id))hostPeer=i;
+        if(!api.peer(next.generation,i-1,&staged[i]) || !PeerValid(staged[i]))return false;
+        for(std::uint32_t j=0;j<i;++j)if(!std::strcmp(staged[i].id,staged[j].id))return false;
+        if(!std::strcmp(staged[i].id,next.host.id))hostPeer=i;
     }
     if((next.isHost && std::strcmp(next.local.id,next.host.id)) || (!next.isHost && !hostPeer))return false;
+    // A suspended session resumes only into the same room: the same machines at the same peer indexes (the mission's
+    // sealed participants, EDF6Coop sorts them), which its kept transactions' per-peer marks and requesters refer to.
+    const bool resume=session.Suspended();
+    bool same=resume && next.isHost==snapshot.isHost && next.peerCount==snapshot.peerCount;
+    for(std::uint32_t i=0;same && i<=next.peerCount;++i)same=!std::strcmp(staged[i].id,peers[i].id);
+    if(resume && !same) {
+        blockedUntilMission=true;
+        Log("SUPPORT NET not resumed: the room's machines changed (host=%u peers=%u, were host=%u peers=%u); the next mission starts it again",
+            next.isHost,next.peerCount,snapshot.isHost,snapshot.peerCount);
+        return false;
+    }
+    for(std::uint32_t i=0;i<=next.peerCount;++i)peers[i]=staged[i];
     snapshot=next;running=true;
     commandHostPeer=hostPeer;
     session.Start(next.isHost!=0,next.peerCount,hostPeer,now);
-    Log("SUPPORT NET application started: host=%u peers=%u pending=%u",next.isHost,next.peerCount,session.PendingHandshakes());
+    if(session.Suspended()){running=false;blockedUntilMission=true;Log("SUPPORT NET not resumed: the session refused the room");return false;}
+    Log("SUPPORT NET application %s: host=%u peers=%u pending=%u",resume ? "resumed" : "started",next.isHost,next.peerCount,
+        session.PendingHandshakes());
     return true;
 }
 void Note(wchar_t* note,std::size_t size,const wchar_t* text) noexcept {
@@ -415,6 +435,9 @@ void ConfigureSupportNet(const support_net::Hooks& configured) noexcept {
     combined.notice=[](std::uint32_t request,support_net::RequestStatus status) noexcept {
         if(!RangeEnemyRequestNotice(request,status) && hooks.notice)hooks.notice(request,status);
     };
+    combined.refused=[](std::uint32_t peer,std::uint32_t catalog,const char* why) noexcept {
+        Log("SUPPORT NET host refused request: peer=%u catalog=%u (%s)",peer,catalog,why ? why : "?");
+    };
     session.Configure({nullptr,&Send,&Nonce,combined});
 }
 void ResetSupportNet() noexcept {
@@ -423,10 +446,15 @@ void ResetSupportNet() noexcept {
     versionShown={};AcquireSRWLockExclusive(&versionLock);versionAt=0;ReleaseSRWLockExclusive(&versionLock);
     commandHostPeer=0;RegisterPluginChannels();plugin_net::Reset();
 }
-void SuspendSupportNet() noexcept {
-    session.Suspend();running=false;blockedUntilMission=true;
+// The transport lost (its generation changed, or the room not ready a moment: EDF6Coop's room lease is 2 s and a link
+// 3 s quiet, so a long frame or a hitch on either side does it): suspended until the room is ready again, then the same
+// room resumes (Start, session.Start). Until 2026-10-30 every such blip shut the map's support for the rest of the
+// mission ("有时候还没办法召唤支援"). Only the return to the lobby, or another room shape, waits for the next mission.
+void SuspendSupportNet(bool untilMission) noexcept {
+    session.Suspend();running=false;blockedUntilMission=blockedUntilMission || untilMission;
     CommandContext(GetTickCount64());
-    Log("SUPPORT NET suspended: existing actors retained; mission participant resynchronization required");
+    Log("SUPPORT NET suspended: existing actors retained; %s",untilMission ? "the next mission starts it again" :
+        "resumes once the room is ready again");
 }
 void RunSupportNetTick() noexcept {
     const ULONGLONG now=GetTickCount64();
@@ -435,16 +463,16 @@ void RunSupportNetTick() noexcept {
     if(blockedUntilMission)return;
     if(!Cfg().enabled || !InSession() || !Resolve(now)) {
         if(!InSession())NoteTransport("offline");
-        if(running)SuspendSupportNet();
+        if(running)SuspendSupportNet(false);
         return;
     }
     EDF6CoopSnapshot next{};next.size=sizeof(next);
     if(!api.snapshot(&next) || !next.ready || next.size!=sizeof(next)) {
         NoteTransport("EDF6Coop extension room not ready (direct link, every participant's af-support/2 marker, or the sealed world)");
-        if(running)SuspendSupportNet();
+        if(running)SuspendSupportNet(false);
         return;
     }
-    if(running && snapshot.generation!=next.generation){SuspendSupportNet();return;}
+    if(running && snapshot.generation!=next.generation){SuspendSupportNet(false);return;}
     if(!running && !Start(next,now)){NoteTransport("EDF6Coop snapshot rejected (peer list / host identity)");return;}
     NoteTransport(next.isHost ? "ready (host)" : "ready (client)");
     CommandContext(now);
@@ -453,19 +481,23 @@ void RunSupportNetTick() noexcept {
     for(unsigned received=0;received<512;++received) {
         EDF6CoopPeer sender{};unsigned char bytes[EDF6COOP_EXTENSION_MAX_PAYLOAD]{};std::uint32_t count=0;
         if(!api.poll(snapshot.generation,&sender,bytes,sizeof(bytes),&count))break;
+        ++netPerf.messages;
         if(!PeerValid(sender))continue;
         std::uint32_t peer=0;
         for(std::uint32_t i=1;i<=snapshot.peerCount;++i)if(!std::strcmp(sender.id,peers[i].id)){peer=i;break;}
         if(peer) {
             NoteForeignVersion(peer,bytes,count);
-            CommandContext(now);
             if(plugin_net::Receive(peer,sender.id,bytes,count,now))continue;   // a channel's (plugin_net.h), before the support parser
             support_net::Message message;
             if(support_net::Decode(bytes,count,message)) {
                 const auto pending=session.PendingHandshakes();
+                const bool wasReady=session.Ready();const auto epoch=session.Epoch();
                 session.Receive(peer,message,now);
                 if(session.PendingHandshakes()!=pending)Log("SUPPORT NET handshake: kind=%u peer=%u pending=%u ready=%d",
                     static_cast<unsigned>(message.kind),peer,session.PendingHandshakes(),session.Ready());
+                // The channels' context changes only with the session's readiness or epoch: told before the next message.
+                // (It ran before every message until 2026-10-30: every channel's whole frame, once a received message.)
+                if(session.Ready()!=wasReady || session.Epoch()!=epoch)CommandContext(now);
             } else if(count>=4 && wire::HeadWord(bytes,count,0)==support_net::kMagic) {
                 Log("SUPPORT NET malformed application packet: peer=%u bytes=%u",peer,count);
             } else NoteUnknown(peer,bytes,count);
@@ -476,7 +508,7 @@ void RunSupportNetTick() noexcept {
     RangeEnemyNetworkTick();
     VersionTick(running);
     CommandContext(now);
-    if(session.Suspended())SuspendSupportNet();
+    if(session.Suspended())SuspendSupportNet(false);
 }
 void SupportNetTick() noexcept {
     // An authenticated carrier request may enqueue a prepared Session plan from inside this sole poll.
@@ -484,8 +516,17 @@ void SupportNetTick() noexcept {
     static bool ticking=false; // game thread only, just like the native spawn/owner callbacks
     if(ticking)return;
     ticking=true;
+    LARGE_INTEGER from,to,hz;QueryPerformanceCounter(&from);
     __try {RunSupportNetTick();}
     __finally {ticking=false;}
+    QueryPerformanceCounter(&to);QueryPerformanceFrequency(&hz);
+    const double ms=1000.0*static_cast<double>(to.QuadPart-from.QuadPart)/static_cast<double>(hz.QuadPart);
+    netPerf.sum+=ms;++netPerf.ticks;if(ms>netPerf.worst)netPerf.worst=ms;
+    const ULONGLONG now=GetTickCount64();
+    if(now-netPerf.at<kNetPerfMs)return;
+    if(Cfg().debug && running)Log("PERF NET %u support ticks: %.2f ms in all, worst %.2f ms; %u messages in, %u channel frames",
+        netPerf.ticks,netPerf.sum,netPerf.worst,netPerf.messages,netPerf.contexts);
+    netPerf={};netPerf.at=now;
 }
 bool SubmitSupportRequest(int catalogId,const float* target,wchar_t* note,std::size_t size,std::uint64_t loadout) noexcept {
     SupportNetTick();
@@ -632,7 +673,7 @@ void NoteSupportMissionPlayerCreated(int index,const ObjRef& object) noexcept {
     ReleaseSRWLockExclusive(&worldLock);
 }
 void SupportMissionReturnedToLobby() noexcept {
-    SuspendSupportNet();
+    SuspendSupportNet(true);
     ResetPvp(); // verified native scene release, unlike a transient transport readiness loss
     AcquireSRWLockExclusive(&worldLock);
     world={};world.size=sizeof(world);worldPhase=1;worldFrozen=false;worldCreationSeen=false;
