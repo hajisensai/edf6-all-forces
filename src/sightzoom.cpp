@@ -310,11 +310,12 @@ void SightZoomFrame(unsigned char* v,unsigned seat,bool padButton) noexcept {
     if(!sightzoom::Magnifies(sight.kind) || !sight.mounted){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,1.0f);return;}
     if(GamePaused()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
     const bool keys=At<unsigned char>(s,kSeatPad)==0;
+    // A pad button another view keeps (padButton false) is still followed, so one held across the hand-over is no press.
     const bool down=keys ? KeyHeld(c.sightZoomKey)
-                         : padButton && c.sightZoomButton && (At<std::uint16_t>(s,kSeatButtons)&static_cast<std::uint16_t>(c.sightZoomButton))!=0 &&
+                         : c.sightZoomButton && (At<std::uint16_t>(s,kSeatButtons)&static_cast<std::uint16_t>(c.sightZoomButton))!=0 &&
                            !seatsw::ChordOwns(At<std::uint16_t>(s,kSeatButtons),static_cast<unsigned>(c.thermalButton),static_cast<unsigned>(c.sightZoomButton));
     if(MapHoldsKeys()){toggle.held=true;TakeScopeWheel(false);Publish(v,seat,sightzoom::At(toggle.step));return;}
-    if(down && !toggle.held) {
+    if(down && !toggle.held && (keys || padButton)) {
         const sightzoom::Raise r=sightzoom::Press(toggle.step,toggle.raised,firstPerson);
         toggle.step=r.step;toggle.raised=r.raised;
         Log("SIGHTZOOM v=%p seat %u: %s by the %s",v,seat,
@@ -350,7 +351,7 @@ void SightZoomStock(unsigned char* v) noexcept {
     const unsigned n=SeatCount(v);
     for(unsigned i=0;i<n;++i) {
         if(SeatRider(SeatAt(v,i))!=Rider::player || At<const void*>(SeatAt(v,i),kSeatRider)!=PlayerHuman())continue;
-        const bool reserved=i==0 && ((HighCamOffered(v) && (Cfg().highCamButton & Cfg().sightZoomButton)!=0) ||
+        const bool reserved=i==0 && ((HighCamOffered(v) && (Cfg().highCamButton & Cfg().sightZoomButton)!=0 && !HighCamYieldsButton(v)) ||
             (Cfg().sazabi && IsSazabi(v) && (Cfg().sazabiLockButton & Cfg().sightZoomButton)!=0));
         SightZoomFrame(v,i,!reserved);
         return;

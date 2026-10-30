@@ -11,6 +11,7 @@
 //    is wrecked, HighCam or the plugin is switched off in the ini, and on a new mission.
 // All addresses are RVAs into EDF.dll TimeDateStamp 0x678CCB46.
 #include "crew.h"
+#include "firstperson.h"
 #include "seat_switch_logic.h"
 #include "layout.h"
 #include "memory.h"
@@ -33,6 +34,7 @@ struct HighCam {
     bool on;                    // the high view is on in it
     bool want;                  // the player's choice, kept from vehicle to vehicle in the mission
     bool held;                  // the key / button as last read (a press is the edge)
+    bool yields;                // this frame the pad's shared button is the gunner sight's (HighCamYieldsButton)
 };
 HighCam cam{};
 
@@ -82,7 +84,7 @@ void Publish(bool on,bool keys,const void* v) noexcept {
 
 void Off(const char* why) noexcept {
     if(cam.on)Log("HIGHCAM v=%p off (%s)",cam.v,why);
-    cam.on=false;cam.ref=ObjRef{};cam.v=nullptr;cam.held=true;
+    cam.on=false;cam.ref=ObjRef{};cam.v=nullptr;cam.held=true;cam.yields=false;
     Publish(false,true,nullptr);
 }
 
@@ -112,7 +114,12 @@ void HighCamFrame(unsigned char* v) noexcept {
             c.highCamKey,c.highCamButton);
     }
     const bool keys=At<unsigned char>(seat,kSeatPad)==0;
-    if(MapHoldsKeys())cam.held=true;
+    // In first person a pad's button shared with the sight key (both R3 by default) is the gunner sight's while the
+    // seat's gun carries a mounted optic: first person starts at the cockpit and that button raises the sight (the user,
+    // 2026-10-30: "该成瞄准键", sightzoom.h Press). The high view is turned on from third person or by its key; one
+    // already on still goes off by the button. Decided before this frame's press, so one press does one thing.
+    cam.yields=!keys && !cam.want && (c.highCamButton&c.sightZoomButton)!=0 && FirstPersonGunnerSight() && SightZoomCanMount(v,0);
+    if(MapHoldsKeys() || cam.yields)cam.held=true;
     else if(Pressed(seat,keys)) {
         cam.want=!cam.want;
         Log("HIGHCAM v=%p %s by the %s",v,cam.want ? "on" : "off",keys ? "key" : "pad button");
@@ -125,6 +132,8 @@ bool HighCamOffered(unsigned char* v) noexcept {
     const Config& c=Cfg();
     return c.enabled && c.highCam && SeatCount(v)>0 && Offered(v,SeatAt(v,0));
 }
+
+bool HighCamYieldsButton(const void* vehicle) noexcept { return cam.v==vehicle && cam.yields; }
 
 bool HighCamOn(const void* vehicle) noexcept {
     if(!Cfg().enabled || !Cfg().highCam)return false;

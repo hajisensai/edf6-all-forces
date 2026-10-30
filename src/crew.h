@@ -267,7 +267,7 @@ struct Config {
     int freeLookButton=0x40;        // ...and pad button (seat button bits, docs/stores-re.md §4: 0x40 L3; 0 none)
     bool sightZoom=true;            // a vehicle gun's sight magnifies: 1x -> 3x -> 6x (sightzoom.cpp, docs/zoom-re.md)
     int sightZoomKey=0x5A;          // ...its key ('Z'; a Windows virtual-key code, 0: none)
-    int sightZoomButton=0x80;       // ...and pad button (seat button bits: 0x80 R3, the high view keeps it where offered; 0 none)
+    int sightZoomButton=0x80;       // ...and pad button (seat button bits: 0x80 R3, the high view keeps it where offered but in first person on a mounted optic; 0 none)
     int sightRangeUpKey=0x21;       // the magnified sight's range a step farther ('Page Up'; the wheel up too; 0 none)
     int sightRangeDownKey=0x22;     // ...nearer ('Page Down'; the wheel down too)
     int sightRangeStep=0;           // ...its step, m (0: graduated, 25 m to 300, 50 m to 1000, 100 m beyond: sightzoom.h)
@@ -1090,6 +1090,9 @@ bool IndirectFireSeat(const unsigned char* seat) noexcept;
 void ResetHighCam() noexcept;
 // The high view is offered in `vehicle` (seat 0 the player's, HighCam on): its button is the high view's there.
 bool HighCamOffered(unsigned char* vehicle) noexcept;
+// Game thread, after HighCamFrame: this frame the shared pad button is the gunner sight's in `vehicle` (first person,
+// a mounted optic, the high view off), not the high view's.
+bool HighCamYieldsButton(const void* vehicle) noexcept;
 
 // sightzoom.cpp: a vehicle gun's sight magnified (src/sightzoom.h, docs/zoom-re.md). InstallSightZoom at load (the
 // player camera's step, chained with map.cpp's); SightZoomFrame from the frame of the seat the player sits at (its key

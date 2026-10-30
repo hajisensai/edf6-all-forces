@@ -12,7 +12,7 @@ Config config{};
 unsigned char vehicle[0x1200]{},otherVehicle[0x1200]{},seats[2*kSeatStride]{},human[0x1600]{},otherHuman[0x1600]{};
 unsigned char camera[0x500]{},otherCamera[0x500]{},vehicleCtrl[16]{},humanCtrl[16]{},otherCtrl[16]{};
 unsigned char* playerHuman=human;
-bool mapKeys=false,mapView=false,highView=false,originalWrites=true,sazabiVehicle=false,paused=false;
+bool mapKeys=false,mapView=false,highView=false,highYields=false,originalWrites=true,sazabiVehicle=false,paused=false;
 bool highActive=false,highReturning=false,heliVehicle=false,aircraft=false,gunship=false,fuel=false,knownRound=true,hud=true;
 RoundKind roundKind=RoundKind::arc;
 WeaponStyle roundStyle=WeaponStyle::projectile;
@@ -46,7 +46,7 @@ float* __fastcall LookFixture(float* m,const float* d) {
 void Setup() {
     ResetSightZoom();applied=Applied{};config=Config{};observing=false;installed=true;nextCamStep=&Original;opticLookTo=testedLookTo ? testedLookTo : &LookFixture;opticPresent=true;extraOptic=false;opticName=L"vc_optic_00";gunnerSight=false;
     muzzleDirection[0]=muzzleDirection[1]=0;muzzleDirection[2]=1;
-    mapKeys=false;mapView=false;highView=false;sazabiVehicle=false;paused=false;originalWrites=true;originalFov=sightzoom::kBaseFov;playerHuman=human;
+    mapKeys=false;mapView=false;highView=false;highYields=false;sazabiVehicle=false;paused=false;originalWrites=true;originalFov=sightzoom::kBaseFov;playerHuman=human;
     highActive=highReturning=heliVehicle=aircraft=gunship=fuel=lobbed=false;roundSpeed=roundFactor=0.0f;wheelNotches=0;knownRound=hud=true;roundKind=RoundKind::arc;roundStyle=WeaponStyle::projectile;pickedWeapon=nullptr;
     autoSteers=0;remaps=0;remapOk=true;
     std::memset(weapon,0,sizeof(weapon));std::memset(secondWeapon,0,sizeof(secondWeapon));
@@ -111,6 +111,7 @@ bool GamePaused() noexcept{return paused;}
 bool MapHoldsKeys() noexcept{return mapKeys;}
 bool MapOwnsView() noexcept{return mapView;}
 bool HighCamOffered(unsigned char*) noexcept{return highView;}
+bool HighCamYieldsButton(const void*) noexcept{return highYields;}
 bool IsSazabi(const void*) noexcept{return sazabiVehicle;}
 bool HudReady() noexcept{return hud;}
 bool HighCamOn(const void*) noexcept{return highActive;}
@@ -214,6 +215,9 @@ int wmain(int argc,wchar_t** argv){
     Put<void*>(seats,kSeatRiderCtrl,nullptr);
     Check(SightZoomNow(vehicle)==1,"identity loss still revokes scope immediately without a timeout");
     Setup();highView=true;Button(0);Button(0x80);Check(SightZoomNow(vehicle)==1,"high view keeps shared R3");
+    Setup();highView=true;Button(0x80);highYields=true;Button(0x80);
+    Check(toggle.step==0 && !toggle.raised,"R3 held across the high view's hand-over to the sight is no press");
+    Button(0);Button(0x80);Check(SightZoomNow(vehicle)==3,"first person's yielded R3 is the sight's again");
     Setup();highView=true;config.highCamButton=0x40;Zoom();Check(toggle.step==1,"separately bound high view leaves zoom button available");
     Setup();sazabiVehicle=true;Button(0);Button(0x80);Check(toggle.step==0,"Sazabi hard lock keeps shared R3 without also zooming");
     Setup();sazabiVehicle=true;config.sightZoomButton=0x40;Button(0);Button(0x40);
