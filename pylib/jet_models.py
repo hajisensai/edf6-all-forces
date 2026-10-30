@@ -57,6 +57,7 @@ import jet_gear  # noqa: E402
 import jet_hardpoints  # noqa: E402
 import jet_skids  # noqa: E402
 import mdb_jet  # noqa: E402
+import xm_units  # noqa: E402
 
 Box = tuple[list[float], list[float]]          # (min xyz, max xyz)
 GAME_DIR = gamedir.find_or_dev()
@@ -489,6 +490,8 @@ HELI_ARCHIVE, HELI_MODEL = 'V506_HELI.MRAB', 'v506_heli.mdb'
 SAZABI_FILE = 'EDF6VC_SAZABI.MRAB'   # pylib/sazabi_model.py OUT_ARC   # the stock heli every jet SGO is made from
 # The Dreadnought's ships (pylib/dreadnought_model.py FILES, archive -> model): made from the user's model folder too.
 DN_FILES = {f'EDF6VC_DN_{m.upper()}.MRAB': m for m in ('dreadnought', 'fighter', 'defender', 'bomber', 'interceptor')}
+# The X-Morph jets' (pylib/xm_air_model.py, archive -> unit key): made from the model pack's folders too.
+XM_FILES = {f'EDF6VC_{u.key.upper()}.MRAB': u.key for u in xm_units.ported('jet')}
 
 
 def heli_bounds(game) -> tuple[tuple[float, float, float], tuple[float, float, float]]:  # noqa: ANN001 - rootcpk.Game
@@ -526,6 +529,15 @@ def _make_model_of(game, file: str | None) -> Mdb:  # noqa: ANN001 - rootcpk.Gam
         if folder is None:
             raise FileNotFoundError(f'no {dreadnought_model.MODEL_SUBDIR} model folder')
         return dreadnought_model.build_model(game, folder, DN_FILES[file])[0]
+    if file in XM_FILES:     # made from the model pack's folder (pylib/xm_air_model.py, its holders pylib/xm_jet.py's)
+        import obj_model
+        import xm_air_model
+        import xm_jet
+        unit = xm_units.UNITS[XM_FILES[file]]
+        folder = obj_model.model_dir(xm_units.folder(unit.key))
+        if folder is None:
+            raise FileNotFoundError(f'no {xm_units.folder(unit.key)} model folder')
+        return xm_air_model.build_model(game, folder, unit.key, xm_jet.holders(unit, xm_air_model.read_info(folder)))[0]
     if file in STOCK_BOMBERS:
         arc, mdl = STOCK_BOMBERS[file]
         return mdb_read(next(f for f in rab_read(game.read('OBJECT', arc)).files if f.name.lower() == mdl).data)

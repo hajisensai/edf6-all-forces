@@ -145,7 +145,7 @@ def undeployed(call: Call) -> bool:
     unit everywhere, its folder deploys it; CLAUDE.md: no stand-in vehicle): tools/make_xmorph.py writes nothing for it,
     so its row is a placeholder as a support's on the map is (its index kept), and the SGO an earlier install wrote for
     it goes, until the folder is there and the installer runs again."""
-    unit = call.ground or call.heli
+    unit = call.ground or call.heli or vc.XM_JETS.get(call.jet.removesuffix('_request_mission'), '')
     if unit not in xm_units.UNITS:
         return False
     return not xm_units.deployed(unit)
