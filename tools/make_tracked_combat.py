@@ -222,7 +222,7 @@ for _xm in xm_units.v603():
     GUNS[_xm.key] = {**GUNS[_xm.like], **_xm.guns}
     NAMES[_xm.key] = _xm.gun
     if _xm.family == 'tracked':
-        WT_ONLY[_xm.key] = {**WT_ONLY[_xm.like], **_xm.camera}
+        WT_ONLY[_xm.key] = {**WT_ONLY[_xm.like], **xm_units.camera(_xm)}
     if _xm.shell or _xm.like in SHELL_OF:
         SHELL_OF[_xm.key] = _xm.shell or SHELL_OF[_xm.like]
     M61_ROUNDS += (_xm.key,) if _xm.like in M61_ROUNDS else ()

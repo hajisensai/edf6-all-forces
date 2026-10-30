@@ -32,6 +32,7 @@ ROTOR = 'edf6vc_m61_rotor'            # a gun's spinning barrels (src/vulcan_rot
 # The base (m): a regular octagon BASE_RADIUS across its corners, BASE_TOP tall, over the native wheels (the V603's
 # reach x +-1.25 m, z -2.4 .. 2.5 m, tops 0.9 m), its foot BASE_FOOT over the ground (it stands on those wheels).
 BASE_RADIUS, BASE_TOP, BASE_FOOT = 3.4, 1.3, 0.12
+assert BASE_TOP == xm_units.EMPLACEMENT_BASE
 TEXTURE_METRES = 6.0                  # m of the base's plating one hull texture repeat
 # The tracks' pieces (the native track materials, v603_kyata_L / _R, which the SGO's track animation scrolls): a box
 # each side, inside the base.
@@ -68,9 +69,9 @@ KINDS = {
     'patriot': Emplacement('MIM-104 Patriot launcher', '', '', 1.0, 2000.0, 'emp_patriot', (0.0, 5.9, -4.0)),
 }
 # The X-Morph: Defense forts' guns (pylib/xm_units.py, family 'emplacement'): their folders tools/prep_xmorph.py
-# emplacement writes in tools/prep_glb_model.py's format, at the game's own size, the sight the row's.
+# emplacement writes in tools/prep_glb_model.py's format, at xm_units.SCALE (the folder's own size), the sight the row's.
 KINDS.update({u.key: Emplacement(f'{u.title_en} (X-Morph: Defense)', '', '', 1.0, u.durability, xm_units.folder(u.key),
-                                 u.eye) for u in xm_units.ported('emplacement')})
+                                 xm_units.eye(u)) for u in xm_units.ported('emplacement')})
 EYE_UP, EYE_BACK = 0.8, 0.6           # m: a gunner's sight over the guns' top, behind their trunnions
 # A box's 12 triangles, outward, over its corners numbered by bits (x 1, y 2, z 4: set = the high side).
 BOX_TRIS = ((0, 2, 1), (1, 2, 3), (4, 5, 6), (5, 7, 6), (0, 1, 4), (1, 5, 4),
@@ -283,7 +284,7 @@ def _prepared(kind: str, e: Emplacement) -> Source:
     mouths = {s: np.asarray(v['muzzles'][s]) * e.scale + up for s in ('left', 'right')}
     rotor = np.asarray(v['rotor']) * e.scale + up if 'rotor' in v else None
     tubes = [np.asarray(p) * e.scale + up for p in v.get('tubes', [])]
-    materials = [{**m, **{k: os.path.join(d, m[k]) for k in ('albedo', 'normal') if k in m}}  # type: ignore[arg-type]
+    materials = [{**m, **{k: os.path.join(d, m[k]) for k in ('albedo', 'normal', 'specular', 'emissive') if k in m}}  # type: ignore[arg-type]
                  for m in info['materials']]
     plating = {'albedo': os.path.join(d, 'textures', 'plating.png')}  # type: ignore[arg-type]
     return Source(d, e.title, info.get('source', e.folder), materials, pieces, ring, cradle, mouths, plating, rotor, tubes)  # type: ignore[arg-type]

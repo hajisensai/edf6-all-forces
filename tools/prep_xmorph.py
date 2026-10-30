@@ -49,7 +49,7 @@ import xm_model as xm           # noqa: E402
 import xm_pack as xp            # noqa: E402
 import xm_units                 # noqa: E402
 
-SCALE = 1.0          # X-Morph's metres are real (its civilian cars: 4.4 x 1.8 x 1.45 m); its tanks are just big
+SCALE = xm_units.SCALE   # the units' EDF size against the game's (its tanks are drawn big for its top-down view)
 GROUND = 0.15        # m: a hull triangle wholly under this height is the belts' ground run
 LOW_BELT = 0.35      # m: a slab face reaching under this height is the belt's lower run (between ground pads)
 BELT_HOLE = 0.30     # m: a stretch of the slab this short without low geometry still joins two runs (a hole between faces)
@@ -57,11 +57,19 @@ GAP = 0.20           # m: between sibling proxies' collision (tracked_collision.
 TOP_SLICE = 0.30     # the turret's top this fraction of its height: the two radar proxies' room
 WHEEL_STATIONS = 'ABCDEFGH'
 WHEEL_SEGMENTS = 12
+MIN_WHEEL = 0.12     # m: a round hull piece smaller than this in radius is no wheel (bolts, hubs, lights)
+WHEEL_ROUND = 0.25   # a wheel's height and length differ by less than this fraction
+WHEEL_GROUND = 0.2   # m: a wheel whose bottom is this near the ground carries the vehicle (a road wheel)
+IDLER_LIFT = 1.2     # m: an idler / sprocket's bottom is under this (round things higher up are drums, lights)
+FILLER = 0.8         # a filler wheel's radius and width, of the wheel it hides in (a 12-gon's flats are at 0.966)
 
 # A unit whose blueprint's main weapon fires from somewhere its guns are not: (left, right) attachments. The AA tank's
 # main weapon names att_muzzle_3, which sits between its two gun pods at the turret's middle; att_muzzle_1 / _2 (on
 # barrel_1, y +-1.52) are the pods' mouths.
 MOUTHS = {'xm_medium_tank_aa': ('att_muzzle_1', 'att_muzzle_2')}
+
+MIN_SIDE = 1024      # the maps (256..1024 in the packs) resampled to this before block compression (wt_tracked min_side)
+LIT = 16             # an emissive map with a texel over this lights its material (wt_tracked LIGHT)
 
 LICENSE = """X-Morph: Defense (c) EXOR Studios.
 
@@ -170,9 +178,89 @@ def _merge(intervals: list[tuple[float, float]], tol: float = 0.3) -> list[tuple
     return [(a, b) for a, b in out]
 
 
+def components(um: xm.UnitModel, sel: np.ndarray) -> np.ndarray:
+    """Per triangle its connected piece among the triangles `sel` (-1 elsewhere): corners welded by position (the mesh
+    splits a vertex at every UV / normal seam)."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    _u, weld = np.unique(um.positions.round(4), axis=0, return_inverse=True)
+    W = weld.reshape(-1)[um.triangles[sel]]
+    n = int(weld.max()) + 1
+    rows = np.concatenate((W[:, 0], W[:, 1], W[:, 2]))
+    cols = np.concatenate((W[:, 1], W[:, 2], W[:, 0]))
+    _n, label = connected_components(coo_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n)), directed=False)
+    out = np.full(len(um.triangles), -1, dtype=np.int64)
+    out[sel] = label[W[:, 0]]
+    return out
+
+
+def axles(um: xm.UnitModel, hull: np.ndarray, sign: float, band: tuple[float, float]) -> list[dict]:
+    """The hull's own wheels on one side (X-Morph bakes its road wheels, idlers and sprockets into the hull mesh, each a
+    closed piece of its own): the pieces round across the vehicle (y and z extents within WHEEL_ROUND), their axle
+    in the belt's lateral band; pieces on one axle (a wheel and its hub, a double wheel's two rows) together.
+    [{'z', 'y', 'radius', 'tris' (triangle indices), 'ground' (its bottom within WHEEL_GROUND of the ground)}],
+    front first."""
+    P, T = um.positions, um.triangles
+    side = hull & (P[T][:, :, 0].mean(axis=1) * sign > 0.2)
+    label = components(um, side)
+    pieces = []
+    for k in np.unique(label[side]):
+        tris = np.flatnonzero(label == k)
+        p = P[np.unique(T[tris])]
+        lo, hi = p.min(axis=0), p.max(axis=0)
+        d = hi - lo
+        x = sign * (lo[0] + hi[0]) / 2
+        if d[1] < 2 * MIN_WHEEL or abs(d[1] - d[2]) > WHEEL_ROUND * max(d[1], d[2]) or \
+                not band[0] - 0.3 <= x <= band[1] + 0.3:
+            continue
+        pieces.append({'z': float(lo[2] + hi[2]) / 2, 'y': float(lo[1] + hi[1]) / 2, 'radius': float(d[1]) / 2,
+                       'tris': tris})
+    out: list[dict] = []
+    for pc in sorted(pieces, key=lambda q: -q['z']):
+        same = next((a for a in out if abs(a['z'] - pc['z']) < 0.1 and abs(a['y'] - pc['y']) < 0.1), None)
+        if same is None:
+            out.append(dict(pc))
+        else:
+            same['radius'] = max(same['radius'], pc['radius'])
+            same['tris'] = np.concatenate((same['tris'], pc['tris']))
+    for a in out:
+        a['ground'] = a['y'] - a['radius'] < WHEEL_GROUND
+    return out
+
+
+def stations(found: list[dict]) -> list[dict] | None:
+    """The hull's axles (axles(), front first) on the V603's eight stations: B..G its road wheels (they carry it:
+    tracked_collision gives them the wheel's radius as the contact's), A and H the idler / sprocket in front of and
+    behind them (drawn turning only; a round piece higher than IDLER_LIFT is none). Six road wheels a side are taken as they are; more, A / H take the end ones where
+    no idler stands beyond them and six are spread over the rest (the others stay on the hull, still); fewer, a station
+    without an axle of its own shares one (a filler: running_gear hides it in that wheel). None: no wheel at all."""
+    ground = [a for a in found if a['ground']]
+    if not ground:
+        return None
+    big = 0.5 * float(np.median([a['radius'] for a in ground]))
+    rest = [a for a in found if not a['ground'] and a['radius'] >= big and a['y'] - a['radius'] < IDLER_LIFT]
+    front = [a for a in rest if a['z'] > ground[0]['z']]
+    rear = [a for a in rest if a['z'] < ground[-1]['z']]
+    a_st = front[-1] if front else (ground.pop(0) if len(ground) > 6 else None)
+    h_st = rear[0] if rear else (ground.pop() if len(ground) > 6 else None)
+    if len(ground) > 6:
+        ground = [ground[int(round(i))] for i in np.linspace(0, len(ground) - 1, 6)]
+    while len(ground) < 6:      # the longest gap's front end shares its axle with a filler
+        i = max(range(1, len(ground)), key=lambda k: ground[k - 1]['z'] - ground[k]['z']) if len(ground) > 1 else 0
+        ground.insert(i, {**ground[i], 'filler': True})
+    out = [a_st or {**ground[0], 'filler': True}] + ground + [h_st or {**ground[-1], 'filler': True}]
+    return [{**a, 'filler': bool(a.get('filler'))} for a in out]
+
+
 def running_gear(um: xm.UnitModel, bone: dict[str, str]) -> dict:
     """Per side ('l': +x, 'r': -x): the belt's ground run (lateral band, its runs along z), its top, the eight
-    stations' wheels (centre, radius, half width) and the hull triangles that are the belt's running faces."""
+    stations' wheels (centre, radius, half width), which of them are the hull's own ('real': its triangles, None for a
+    filler or a synthetic wheel) and the hull triangles that are the belt's running faces.
+
+    The stations are the hull's own wheels where it has them (stations()): they leave the hull for their tire_move
+    bones and turn. A station without one gets a filler: a cylinder inside the wheel it shares an axle with (FILLER of
+    its radius and width: inside the wheel's polygon, out of sight). A hull without separate wheels (the advanced
+    tank's track pods) gets synthetic wheels inside its belts instead."""
     P, T = um.positions, um.triangles
     hull = np.asarray([bone[b] == 'body' for b in um.tri_bone])
     tri = P[T]
@@ -213,26 +301,47 @@ def running_gear(um: xm.UnitModel, bone: dict[str, str]) -> dict:
                 tops.append(float(tri[s][:, :, 1].mean(axis=1).min()))
         _req(bool(tops), f'{um.entity}: no belt over the {side} run')
         top = float(np.median(tops))
-        length = sum(b - a for a, b in runs)
-        radius = min(0.42 * length / len(WHEEL_STATIONS), 0.4 * top)
-        # stations front (A) to rear (H), evenly along the ground runs' length
-        stations = []
-        for k in range(len(WHEEL_STATIONS)):
-            s = (k + 0.5) / len(WHEEL_STATIONS) * length
-            for a, b in sorted(runs, key=lambda r: -r[1]):
-                if s <= b - a:
-                    stations.append(b - s)
-                    break
-                s -= b - a
-        centre_x = sign * (band[0] + band[1]) / 2
-        half = 0.3 * (band[1] - band[0])
-        wheels = [((centre_x, radius, z), radius, half) for z in stations]
-        # the running faces: the slab's faces not facing sideways, from the run's front slope to its rear one
+        found = axles(um, hull, sign, band)
+        chosen = stations(found)
+        wheel_tris = np.zeros(len(T), dtype=bool)
+        for a in found:
+            wheel_tris[a['tris']] = True
+        if chosen is not None:
+            wheels, real = [], []
+            for a in chosen:
+                p = P[np.unique(T[a['tris']])]
+                lo, hi = p.min(axis=0), p.max(axis=0)
+                centre = (float(lo[0] + hi[0]) / 2, a['y'], a['z'])
+                if a['filler']:
+                    wheels.append((centre, FILLER * a['radius'], FILLER * float(hi[0] - lo[0]) / 2))
+                    real.append(None)
+                else:
+                    wheels.append((centre, a['radius'], float(hi[0] - lo[0]) / 2))
+                    real.append(a['tris'])
+            z0, z1 = min(z0, chosen[-1]['z']), max(z1, chosen[0]['z'])
+        else:
+            length = sum(b - a for a, b in runs)
+            radius = min(0.42 * length / len(WHEEL_STATIONS), 0.4 * top)
+            # stations front (A) to rear (H), evenly along the ground runs' length
+            zs = []
+            for k in range(len(WHEEL_STATIONS)):
+                s = (k + 0.5) / len(WHEEL_STATIONS) * length
+                for a, b in sorted(runs, key=lambda r: -r[1]):
+                    if s <= b - a:
+                        zs.append(b - s)
+                        break
+                    s -= b - a
+            centre_x = sign * (band[0] + band[1]) / 2
+            half = 0.3 * (band[1] - band[0])
+            wheels = [((centre_x, radius, z), radius, half) for z in zs]
+            real = [None] * len(WHEEL_STATIONS)
+        # the running faces: the slab's faces not facing sideways, from the run's front slope to its rear one (not the
+        # wheels: they turn on their stations or stay on the hull)
         reach = 1.5 * top
-        belt = slab & (tri[:, :, 1].max(axis=1) <= top + 0.05) & (np.abs(n[:, 0]) < 0.5) & \
+        belt = slab & ~wheel_tris & (tri[:, :, 1].max(axis=1) <= top + 0.05) & (np.abs(n[:, 0]) < 0.5) & \
             (tri[:, :, 2].min(axis=1) >= z0 - reach) & (tri[:, :, 2].max(axis=1) <= z1 + reach)
-        out[side] = {'band': band, 'runs': runs, 'top': top, 'wheels': wheels, 'belt': belt,
-                     'ground_uv': um.uvs[T[np.flatnonzero(g)[0], 0]]}
+        out[side] = {'band': band, 'runs': runs, 'top': top, 'wheels': wheels, 'real': real, 'axles': len(found),
+                     'belt': belt, 'ground_uv': um.uvs[T[np.flatnonzero(g)[0], 0]]}
     return out
 
 
@@ -261,19 +370,29 @@ def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Ve
     for side in 'lr':
         nodes.append(f'track_{side}')
         tri_obj[gear[side]['belt']] = len(nodes) - 1
+    normals = um.normals if um.normals is not None else np.zeros_like(um.positions)
     positions = [um.positions * SCALE]
     uvs = [um.uvs]
+    nrm = [normals]
     tri_v = [um.triangles]
     tri_m = [um.tri_material]
     base = len(um.positions)
     hull_mat = int(um.tri_material[np.flatnonzero(um.tri_bone == um.bones[0])[0]])
     obj = [tri_obj]
     for side in 'lr':
-        for letter, (centre, radius, half) in zip(WHEEL_STATIONS, gear[side]['wheels']):
-            p, t = wheel_mesh(centre, radius, half)
+        for letter, (centre, radius, half), real in zip(WHEEL_STATIONS, gear[side]['wheels'], gear[side]['real']):
             nodes.append(f'wheel_{side}_{letter}')
+            if real is not None:        # the hull's own wheel: off the hull onto its station
+                tri_obj[real] = len(nodes) - 1
+                continue
+            p, t = wheel_mesh(centre, radius, half)
             positions.append(p * SCALE)
             uvs.append(np.tile(gear[side]['ground_uv'], (len(p), 1)))   # hidden: one texel of the belt's
+            fn = np.zeros_like(p)
+            face = np.cross(p[t[:, 1]] - p[t[:, 0]], p[t[:, 2]] - p[t[:, 0]])
+            for c in range(3):
+                np.add.at(fn, t[:, c], face)
+            nrm.append(fn / np.maximum(np.linalg.norm(fn, axis=1, keepdims=True), 1e-12))
             tri_v.append(t + base)
             tri_m.append(np.full(len(t), hull_mat))
             obj.append(np.full(len(t), len(nodes) - 1))
@@ -291,9 +410,12 @@ def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Ve
         if 'normal' in imgs:
             imgs['normal'].save(os.path.join(staging, f'{stem}_normal.png'), optimize=True)
             mtl[m]['map_normal'] = f'{stem}_normal.png'
+        for kind in ('specular', 'emissive'):
+            if kind in imgs:
+                imgs[kind].save(os.path.join(staging, f'{stem}_{kind}.png'), optimize=True)
     src = prep.Source(os.path.join(staging, os.path.basename(um.mesh_path)), np.vstack(positions), src_uv, tv,
                       tv.copy(), np.concatenate(obj), np.concatenate(tri_m), [f'{n}_{k}' for k, n in enumerate(nodes)],
-                      list(um.materials), mtl)
+                      list(um.materials), mtl, np.vstack(nrm) if um.normals is not None else None)
 
     # bones: by node name (exact)
     rules = [(r'^wheel_([lr])_([A-H])$', 'tire_move{1}_{0}'), (r'^track_([lr])$', 'catapi_body')]
@@ -345,7 +467,10 @@ def tracked(packs: xp.Packs, unit: xm_units.Unit, staging: str) -> tuple[prep.Ve
               'muzzles': r['muzzle_names'], 'recoils': r['recoils'],
               'bones': {b: bone[b] for b in um.bones}, 'gun_split': split, 'radar_slice_y': cut,
               'running_gear': {s: {'band_x': gear[s]['band'], 'runs_z': gear[s]['runs'], 'belt_top': gear[s]['top'],
-                                   'wheel_radius': gear[s]['wheels'][0][1], 'belt_faces': int(gear[s]['belt'].sum())}
+                                   'wheel_radius': gear[s]['wheels'][1][1], 'belt_faces': int(gear[s]['belt'].sum()),
+                                   'axles': gear[s]['axles'],
+                                   'stations': ''.join(k if r is not None else k.lower() for k, r in
+                                                       zip(WHEEL_STATIONS, gear[s]['real']))}
                                for s in 'lr'}}
     return v, src, report
 
@@ -365,6 +490,42 @@ def arm_muzzles(packs: xp.Packs, unit: xm_units.Unit) -> dict[str, list[dict]]:
     return out
 
 
+def material_maps(m: dict, stem: str, folder: str, imgs: dict) -> None:
+    """A folder material `m` told of its source's specular and emissive maps (written as textures/<stem>_<kind>.png
+    under `folder` where not there yet) and the resampling its maps want (MIN_SIDE): the specular map its roughness
+    and metalness, a lit emissive map (a texel over LIT) its light mask, on the light template (wt_tracked LIGHT)."""
+    import numpy as np
+    for kind in ('specular', 'emissive'):
+        if kind not in imgs or (kind == 'emissive' and int(np.asarray(imgs[kind]).max()) <= LIT):
+            continue
+        rel = f'textures/{stem}_{kind}.png'
+        if not os.path.isfile(os.path.join(folder, rel)):
+            imgs[kind].save(os.path.join(folder, rel), optimize=True)
+        m[kind] = rel
+    if m.get('emissive'):
+        m['template'] = 'light'
+    m['min_side'] = MIN_SIDE
+
+
+def finish_materials(materials: list[dict], staging: str, out: str) -> None:
+    """prepare()'s materials (the body's and the two track ones, each on its source's diffuse) given the source's
+    other maps (material_maps): a track keeps its native template (it is the belt's scrolled material) and only takes
+    the resampling."""
+    from PIL import Image
+    for m in materials:
+        stem = os.path.basename(m['albedo']).rsplit('.', 1)[0]
+        if m['template'].startswith('v603_kyata'):
+            m['min_side'] = MIN_SIDE
+            continue
+        imgs = {}
+        for kind in ('specular', 'emissive'):
+            p = os.path.join(staging, f'{stem}_{kind}.png')
+            if os.path.isfile(p):
+                with Image.open(p) as im:
+                    imgs[kind] = im.convert('L')
+        material_maps(m, stem, out, imgs)
+
+
 def prepare_tracked(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict:
     out = os.path.join(out_root, xm_units.folder(unit.key))
     with tempfile.TemporaryDirectory(prefix='prep_xmorph_') as staging:
@@ -373,6 +534,7 @@ def prepare_tracked(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> dict
             shutil.rmtree(out)
         os.makedirs(out)
         info = prep.prepare(v, src, out)
+        finish_materials(info['materials'], staging, out)
     _req(not info['winding_flipped'], f'{unit.key}: the hull winds clockwise (the frame change is a rotation)')
     info['muzzles'].update(arm_muzzles(packs, unit))
     # the conversion's record (wt_tracked reads neither key)
@@ -415,6 +577,7 @@ def prepare_emplacement(packs: xp.Packs, unit: xm_units.Unit, out_root: str) -> 
         if 'normal' in imgs:      # DirectX green already (xm_model.normal_rgb), as the folders keep it
             imgs['normal'].save(os.path.join(out, 'textures', f'{stem}_normal.png'), optimize=True)
             materials[-1]['normal'] = f'textures/{stem}_normal.png'
+        material_maps(materials[-1], stem, out, imgs)
     for rl in glb.ROLES:
         for mi in range(len(um.materials)):
             sel = np.flatnonzero((role == rl) & (um.tri_material == mi))

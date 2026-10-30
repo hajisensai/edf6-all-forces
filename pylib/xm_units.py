@@ -54,6 +54,14 @@ SOURCE = {'SC': '外观取自 EXOR Studios 的游戏《X-Morph: Defense》（人
 # shot (or burst) to the next, its FirePattern burst_rows shots burst_rate s apart; a projectile's Damage value by its
 # type (DAMAGE: the anti-core / ground rounds the battle tank's 5 = 600, the anti-player ones, which in the game hit the
 # player's light flyers, a quarter of that scale), its Area radius x BLAST m.
+# The units' size in EDF against the game's (docs/xmorph-port.md 「比例」): X-Morph draws its army for a top-down view,
+# a battle tank 5.5 m wide and 12.7 m long with its gun (its civilian cars at their real 4.4 m), against EDF's Blacker's
+# 3.2 x 9.2 m and a real battle tank's 3.7 x 9.8 m; at 0.7 it is 3.8 x 8.9 m, 2.4 m to its turret roof, and the heavy
+# tank 12.5 m, the Apocalypse's class. Every model folder is made at this size (tools/prep_xmorph.py); the rows' `eye`
+# and `camera` stay in the game's metres, read through eye() / camera().
+SCALE = 0.7
+EMPLACEMENT_BASE = 1.3   # m: an emplacement's model stands on its base this high (emplacement_model.BASE_TOP)
+
 DAMAGE = {'anti_core': 120.0, 'artillery': 120.0, 'laser': 120.0, 'anti_player': 30.0, 'emp': 30.0}
 BLAST = 1.5
 
@@ -92,6 +100,7 @@ class Unit:
     shell: str = ''          # its round's look and sound (a WEAPON SGO) where not the `like`'s (make_tracked_combat SHELL_OF)
     alternate: bool | None = None   # its two holders fire in turn (vcobjects GroundVehicle.alternate); None: the like's
     arms: tuple[Arm, ...] = ()      # its other weapons (Arm)
+    # (camera, eye: measured on the model at the game's size, metres; read through camera() / eye(), at SCALE)
     camera: dict = field(default_factory=dict)  # its vehicle camera over the `like`'s (make_tracked_combat WT_ONLY)
     eye: tuple[float, ...] = ()  # the gunner's sight camera on the turret (cockpit_fits_plugin, remote_display), m
     durability: float = 0.0  # vcobjects GroundVehicle.durability
@@ -126,7 +135,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # main_weapon: fire_rate 1, one round (enemy_bullet_medium_anti_core: 5 anti_core, no Area). Its active_armor
        # (a laser that shoots down incoming rounds, BeamWeaponDef on att_active_armor_muzzle) has no EDF counterpart.
        guns={'AmmoCount': 40.0, 'AmmoDamage': 600.0, 'AmmoExplosion': 0.0, 'FireInterval': 120.0},
-       # models/xm_medium_tank_regular: hull y 0..2.17, 9.6 m long; the turret roof y 3.0..3.4 (z -3.2..2.5; a mast
+       # xm_medium_tank_regular at the game's size: hull y 0..2.17, 9.6 m long; the turret roof y 3.0..3.4 (z -3.2..2.5; a mast
        # to y 5.2 at z -1..0), the gun's axis y 2.25, its muzzle z 7.5: the sight camera over the roof's front.
        camera={'model_eye': (0., 3.2, 0.5), 'model_look_at': (0., 2.8, 9.), 'third_person_distance': 11.,
                'third_person_height': 4.6},
@@ -150,7 +159,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        guns={'AmmoCount': 900.0, 'AmmoDamage': 80.0, 'AmmoSpeed': 40.0, 'AmmoAlive': 20.0, 'AmmoSize': 0.6,
              'AmmoGravityFactor': 0.0, 'AmmoExplosion': 0.0, 'AmmoIsPenetration': 1.0, 'FireInterval': 8.0,
              'FireAccuracy': 0.001},
-       # models/xm_medium_tank_advanced: 12.8 m long, the turret y 3.3..5.5 (its roof ~5.2), z -4.5..1.7; the gun's axis
+       # xm_medium_tank_advanced at the game's size: 12.8 m long, the turret y 3.3..5.5 (its roof ~5.2), z -4.5..1.7; the gun's axis
        # y 4.3, its muzzle z 7.0
        camera={'model_eye': (0., 5.0, -0.3), 'model_look_at': (0., 4.6, 9.), 'third_person_distance': 11.,
                'third_person_height': 5.0},
@@ -180,7 +189,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                           'accel': 250.0, 'max_g': 25.0, 'nav': 3.5, 'life': 5.0, 'damage': 480.0, 'blast': 6.0,
                           'lock_range': 1200.0, 'lock_cone': 0.6, 'lock_time': 20.0, 'burst': 2.0, 'burst_gap': 24.0,
                           'interval': 120.0}),),
-       # models/xm_medium_tank_aa: 8.8 m long; the turret at the back (z -3.0..-1.95, roof y ~6.0), its two guns at
+       # xm_medium_tank_aa at the game's size: 8.8 m long; the turret at the back (z -3.0..-1.95, roof y ~6.0), its two guns at
        # x +-1.5, y 4.0
        camera={'model_eye': (0., 5.6, -2.4), 'model_look_at': (0., 5.0, 7.), 'third_person_distance': 8.,
                'third_person_height': 5.6},
@@ -220,7 +229,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                           'accel': 300.0, 'max_g': 6.0, 'nav': 2.0, 'life': 4.0, 'damage': 300.0, 'blast': 3.0,
                           'lock_range': 1200.0, 'lock_cone': 0.4, 'lock_time': 20.0, 'burst': 2.0, 'burst_gap': 24.0,
                           'interval': 120.0})),
-       # models/xm_large_tank: 17.8 m long, the turret y 3.2..7.5 (roof ~6.7), z -2.3..3.3; the guns at x +-1.07,
+       # xm_large_tank at the game's size: 17.8 m long, the turret y 3.2..7.5 (roof ~6.7), z -2.3..3.3; the guns at x +-1.07,
        # y 4.55, their muzzles z 10.8
        camera={'model_eye': (0., 6.4, 0.6), 'model_look_at': (0., 5.2, 14.), 'third_person_distance': 15.,
                'third_person_height': 6.8},
@@ -261,7 +270,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
                           'accel': 300.0, 'max_g': 35.0, 'nav': 4.0, 'life': 5.0, 'damage': 240.0, 'blast': 3.0,
                           'lock_range': 1500.0, 'lock_cone': 0.8, 'lock_time': 15.0, 'burst': 20.0, 'burst_gap': 6.0,
                           'interval': 300.0})),
-       # models/xm_large_tank_emp: 18.2 m long, the turret y 4.6..8.9 (roof ~8.85), z -1.1..4.9; the guns at x +-0.49,
+       # xm_large_tank_emp at the game's size: 18.2 m long, the turret y 4.6..8.9 (roof ~8.85), z -1.1..4.9; the guns at x +-0.49,
        # y 6.5, their muzzles z 9.3
        camera={'model_eye': (0., 8.6, 1.9), 'model_look_at': (0., 7.0, 13.), 'third_person_distance': 15.,
                'third_person_height': 8.0},
@@ -282,7 +291,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # main_weapon: ArtilleryWeaponDef, fire_rate 3 (enemy_artillery_medium: 20 artillery, Area 12): a lobbed shell
        # every 3 s (both holders on its one gun, in turn)
        guns={'AmmoCount': 30.0, 'AmmoDamage': 2400.0, 'AmmoExplosion': 18.0, 'FireInterval': 360.0},
-       # models/xm_medium_artillery_regular: 11.6 m long; the turret at the back (z -5.1..-0.9, roof ~3.3), the gun's
+       # xm_medium_artillery_regular at the game's size: 11.6 m long; the turret at the back (z -5.1..-0.9, roof ~3.3), the gun's
        # axis y 2.45, its muzzle z 5.5
        camera={'model_eye': (0., 3.2, -2.9), 'model_look_at': (0., 2.9, 8.), 'third_person_distance': 10.,
                'third_person_height': 4.4},
@@ -305,7 +314,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        guns={'AmmoCount': 900.0, 'AmmoDamage': 80.0, 'AmmoSpeed': 40.0, 'AmmoAlive': 20.0, 'AmmoSize': 0.6,
              'AmmoGravityFactor': 0.0, 'AmmoExplosion': 0.0, 'AmmoIsPenetration': 1.0, 'FireInterval': 8.0,
              'FireAccuracy': 0.001},
-       # models/xm_medium_shield_generator: 11.7 m long; the laser turret is small (x +-0.27, y 3.4..3.9, z 1.3..1.8),
+       # xm_medium_shield_generator at the game's size: 11.7 m long; the laser turret is small (x +-0.27, y 3.4..3.9, z 1.3..1.8),
        # its muzzle y 4.2, z 3.1
        camera={'model_eye': (0., 4.0, 1.5), 'model_look_at': (0., 3.8, 9.), 'third_person_distance': 11.,
                'third_person_height': 5.0},
@@ -338,7 +347,7 @@ UNITS: dict[str, Unit] = {u.key: u for u in (
        # main_weapon: InstantWeaponDef, fire_rate 1, muzzles_per_fire 1 (the barrels in turn), enemy_flak_medium
        # (BombAmmoDef: 25 anti_player, Area 12)
        guns={'AmmoCount': 120.0, 'AmmoDamage': 750.0, 'AmmoSpeed': 30.0, 'AmmoExplosion': 18.0, 'FireInterval': 120.0},
-       # models/xm_aa_cannon (on the base, 1.3 m up): the gun's trunnion y 4.7 + 1.3, z -0.63; its muzzles x +-0.85,
+       # xm_aa_cannon at the game's size (on the base, 1.3 m up): the gun's trunnion y 4.7 + 1.3, z -0.63; its muzzles x +-0.85,
        # z 6.7: the sight over the trunnion, behind it
        eye=(0.0, 7.0, -1.5), durability=1500.0, reload=8000, level=1.3, after='EDF6VC_CALL_XM_MEDIUM_SHIELD_GENERATOR'),
     _u('fort/aa_cannon_machinegun', 'emplacement', 'gdf005', 'ported', 'AA Machine Gun',
@@ -435,6 +444,20 @@ def deployed(key: str) -> bool:
     import obj_model
     d = obj_model.model_dir(folder(key))
     return d is not None and all(os.path.isfile(os.path.join(d, f)) for f in ('model.json', 'model.npz'))
+
+
+def eye(u: Unit) -> tuple[float, float, float]:
+    """Its sight camera in its EDF model's frame (the row's, at SCALE; an emplacement's above its base's top)."""
+    x, y, z = u.eye
+    base = EMPLACEMENT_BASE if u.family == 'emplacement' else 0.0
+    return (round(x * SCALE, 4), round(base + (y - base) * SCALE, 4), round(z * SCALE, 4))
+
+
+def camera(u: Unit) -> dict:
+    """Its vehicle camera over the `like`'s (make_tracked_combat WT_ONLY): the row's, every length at SCALE."""
+    def at(v):  # noqa: ANN001, ANN202 - a length or a point
+        return tuple(round(c * SCALE, 4) for c in v) if isinstance(v, tuple) else round(v * SCALE, 4)
+    return {k: at(v) for k, v in u.camera.items()}
 
 
 def text(u: Unit, lang: str) -> tuple[str, str]:
