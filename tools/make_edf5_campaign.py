@@ -123,6 +123,12 @@ BGM5 = 'BGM_E5S02_EDFHonbu'
 BGM41, BGM41_MP01, BGM41_MP02 = 'BGM_E4S02_EDFHonbu', 'BGM_Sinkou_intermission', 'BGM_Sinkou_taisenmenu'
 # The values of EDF6's own EDF5-era rows (RM015, M046, ...): the EDF5 soldiers' look (member 6 = 0), EDF5's HQ
 # background (member 7 = 0: lyt_bg.sgo's BG_BASE, EDF5's own BG.sgo), flags 8 (no branch bits 0x80 / 0x100, no 0x20).
+# Member 7 is the colour scheme of the WHOLE UI, not just the background: EDF.dll 0x83E8A8 calls 0xE0950 for the row's
+# member 7 and stores it at the UI base +0x764 (0 = blue-blue, 1 = khaki, 2 = dark green; the late original rows
+# M092_5..M094, M131, M148..M152 use 2). The sortie soldier / weapon select (LYT_HUIHQSOLDIERSELECT / WEAPONSELECT)
+# and the HUD follow it, as do the soldier preview lights (menu_model_light_setting[2]). EDF4.1 packs write UI_EDF41
+# (its original dark green; BG_BASE_EDF41 already overrides the background); EDF5 packs and the range write 0.
+UI_BLUE, UI_EDF41 = 0.0, 2.0
 FLAGS = 8.0
 # The packs' content ids: fixed, CONTENT_BASE + the pack's place in SLOTS (docs/mission-list-re.md §7). EDF.dll knows
 # 0..2 (0xE3F80's names, MAINSCRIPT's endings); other mods append theirs after the highest (3, 4, ...), as this tool
@@ -472,7 +478,7 @@ def thumb_name(key: str) -> str:
 def new_row(i: int, row: dict, successors: list[int]) -> dsgo.Node:
     key = row['key']
     return dsgo.Node([float(i), f'app:/Mission/{key}', key, dsgo.Node([float(n) for n in successors]), float(i), 0.0,
-                      0.0, 0.0, row['bgm'], float(row['progress']), float(row['flags'])], {10: 'flags'})
+                      0.0, float(row['ui']), row['bgm'], float(row['progress']), float(row['flags'])], {10: 'flags'})
 
 
 def available(row: dict) -> bool:
@@ -530,7 +536,7 @@ def plan(root: str, root41: str | None = None, skip41: Skip41 = frozenset()) -> 
         for m in text[pack.group]:
             folder = f'MISSION/{SCRIPTS}/{m["path"]}'
             row = {'group': pack.group, 'path': m['path'], 'key': f'{SCRIPTS}/{m["path"]}', 'bgm': pack.bgm,
-                   'flags': FLAGS, 'progress': m['progress'], 'map': None,
+                   'ui': UI_BLUE, 'flags': FLAGS, 'progress': m['progress'], 'map': None,
                    'title': {lang: m['title'][lang] for lang in LANGS},
                    'brief': {lang: m['brief'][lang] for lang in LANGS}}
             try:
@@ -613,7 +619,7 @@ def plan41(root: str, maps: set[str], root41: str | None,
             if 'BEFORE.BVM' in m['files']:   # loads maps and objects too; not every mission has one
                 gone += missing_assets(names, maps41, edf41_script(m['id'], 'BEFORE.BVM', p41.data))
             row = {'group': p41.pack.group, 'path': m['id'], 'key': f'{p41.folder}/{m["id"]}', 'bgm': p41.pack.bgm,
-                   'flags': FLAGS, 'progress': round(i / len(missions), 4), 'map': first_map(bvm),
+                   'ui': UI_EDF41, 'flags': FLAGS, 'progress': round(i / len(missions), 4), 'map': first_map(bvm),
                    'title': m['title'], 'brief': m['brief'], 'files': m['files'], 'sha': m.get('sha', {})}
             if gone:
                 reason = '缺少 ' + ', '.join(sorted({_gone41(ref, why) for ref in gone}))
@@ -708,7 +714,8 @@ def range_rows(game: rootcpk.Game) -> list[dict]:
     if like is None:
         raise Refused(f'原版离线任务列表里没有 {RANGE_LIKE}：不知道测试场这一关按什么取参数。')
     # stable: every install since the range had a pack (2026-10-09) has had this one row
-    return [{**row, 'bgm': like.items[8], 'progress': like.items[9], 'flags': like.items[10], 'stable': True}
+    return [{**row, 'ui': like.items[7], 'bgm': like.items[8], 'progress': like.items[9], 'flags': like.items[10],
+             'stable': True}
             for row in (RANGE_ROW, *PVP_ROWS)]
 
 
