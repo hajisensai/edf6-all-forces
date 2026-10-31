@@ -499,7 +499,7 @@ struct Config {
     bool scriptNpcRecruit=true;     // ...a squad a mission script let go of may be recruited (its +0x540 set, §4.4)
     float scriptNpcSettleSec=5.0f;  // ...after this many s without the script taking it back
     bool vehicleGears=true;         // drivegear.cpp: the player driving a stock ground vehicle on the keyboard, two keys of their own shift War Thunder's cruise gears; W / S override them
-    int vehicleCruiseUpKey=0x10,vehicleCruiseDownKey=0x11;   // ...the gear-up / gear-down keys (left Shift / left Ctrl)
+    int vehicleCruiseUpKey=0x09,vehicleCruiseDownKey=0x70;   // ...the gear-up / gear-down keys (Tab / F1: no other binding in the ground vehicles, no sprint Shift or Chat Ctrl, no sticky-keys Shift x5; docs/feedback-2026-10-31-gears-lock-tone.md)
     bool tankReturnToPost=true;     // npcpost.cpp: an NPC tank pushed off its post (recoil, a ram) drives back to it
     float tankPostHold=6.0f;        // ...m off its post before it does
     float tankReverseMax=30.0f;     // ...the post behind it and nearer than this (m): it reverses onto it, else turns round

@@ -116,7 +116,7 @@ DriveGearInput::DriveGearInput(unsigned char* v) noexcept {
             }
             if(!drive.vehicle.Is(v))Log("GEAR v=%p %s: its top %.1f m/s (%.0f km/h), from its gear table",v,VehicleClassName(v),top,
                                         top*3.6f);
-            drive=Drive{};drive.vehicle=ObjRef::Of(v);drive.top=top;
+            drive=Drive{};drive.vehicle=ObjRef::Of(v);drive.top=top;drive.gear=drivegear::Fresh();
             std::memcpy(drive.pos,v+kPosition,12);drive.ms=ms;
         }
         const float top=drive.top;
@@ -131,7 +131,8 @@ DriveGearInput::DriveGearInput(unsigned char* v) noexcept {
             const bool up=allowed && VkDown(Cfg().vehicleCruiseUpKey),down=allowed && VkDown(Cfg().vehicleCruiseDownKey);
             const int key=up==down ? 0 : up ? 1 : -1;
             const int before=drive.gear.gear;
-            drive.active=drivegear::Input(drive.gear,key,manual,dt);
+            if(allowed)drive.active=drivegear::Input(drive.gear,key,manual,dt);
+            else drivegear::Hold(drive.gear);
             if(drive.gear.gear!=before)Log("GEAR v=%p %ls -> %ls at %.0f km/h (its top %.0f km/h)",v,drivegear::Name(before),
                                            drivegear::Name(drive.gear.gear),drive.speed*3.6f,top*3.6f);
             drive.frame=GameFrame();

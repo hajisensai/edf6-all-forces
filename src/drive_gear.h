@@ -57,12 +57,25 @@ inline bool Input(State& s,int cruiseKey,bool manual,float dt) noexcept {
         s.gear=kNeutral;s.open=false;s.held=cruiseKey;s.heldSec=0.0f;s.blocked=cruiseKey!=0;
         return false;
     }
-    if(s.blocked) {
-        if(cruiseKey!=0)return false;
+    if(s.blocked) {   // a gear key down since the cancel / the start / the keys' return: ignored until let go
+        if(cruiseKey!=0)return s.gear!=kNeutral;
         s.blocked=false;s.held=0;s.heldSec=0.0f;
     }
     Shift(s,cruiseKey,dt);
     return s.gear!=kNeutral;
+}
+
+// A drive that starts (boarding, another vehicle, a stale one begun again): in N, and a gear key already down then (the
+// sprint's Shift as the player gets in) is no press: it has to be let go and pressed anew.
+inline State Fresh() noexcept {
+    State s;
+    s.blocked=true;
+    return s;
+}
+// The keys are not the player's for now (the game paused, the map open, another window in front): a gear key still down
+// when they come back is no press either.
+inline void Hold(State& s) noexcept {
+    s.blocked=true;s.held=0;s.heldSec=0.0f;
 }
 
 // The native forward gear table (CarBase +0x1760, docs/vehicle-top-speed-re.md): `count` rows, the last one's speed
