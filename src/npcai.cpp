@@ -973,15 +973,37 @@ bool seatEventsOk=false;
 struct SharedRef { void* obj; void* ctrl; };
 using RideFn=void(__fastcall*)(void*,SharedRef*,int);
 
-bool OwnsNpcSeatInput(unsigned char* seat) noexcept {
-    if(!Cfg().enabled || !Cfg().customNpcAi || !Cfg().npcBoarding || !Readable(seat,kSeatRiderCtrl+8) ||
-       SeatRider(seat)!=Rider::other)return false;
-    auto* h=At<unsigned char*>(seat,kSeatRider);
-    if(!IsSoldierClass(h) || IsAnyPlayer(h) || h[kDead] || !IsOnlineAuthority(h) ||
-       At<const void*>(h,kHumanSeat)!=seat)return false;
-    auto* v=At<unsigned char*>(h,kHumanRiding);
-    return Readable(v,kSeatCount+8) && !v[kDead] && SeatCount(v)>0 && SeatAt(v,0)==seat && IsOnlineAuthority(v);
+// Whose a seat's input is: the plugin's real NPC driver (npc), or why not (the diagnosis names it: NpcVehicleAi below).
+enum class SeatInputOwner : std::uint8_t { npc, off, notOther, notSoldier, player, dead, remote, seatMismatch, vehicle, notSeat0 };
+const char* SeatInputOwnerName(SeatInputOwner o) noexcept {
+    switch(o) {
+    case SeatInputOwner::npc: return "the NPC's";
+    case SeatInputOwner::off: return "the plugin's NPC driving off";
+    case SeatInputOwner::notOther: return "no real rider";
+    case SeatInputOwner::notSoldier: return "rider not a soldier";
+    case SeatInputOwner::player: return "a player's";
+    case SeatInputOwner::dead: return "rider dead";
+    case SeatInputOwner::remote: return "rider another machine's";
+    case SeatInputOwner::seatMismatch: return "rider's seat is another";
+    case SeatInputOwner::vehicle: return "vehicle dead, empty or another machine's";
+    case SeatInputOwner::notSeat0: return "not seat 0";
+    }
+    return "?";
 }
+SeatInputOwner NpcSeatInputOwner(unsigned char* seat) noexcept {
+    if(!Cfg().enabled || !Cfg().customNpcAi || !Cfg().npcBoarding)return SeatInputOwner::off;
+    if(!Readable(seat,kSeatRiderCtrl+8) || SeatRider(seat)!=Rider::other)return SeatInputOwner::notOther;
+    auto* h=At<unsigned char*>(seat,kSeatRider);
+    if(!IsSoldierClass(h))return SeatInputOwner::notSoldier;
+    if(IsAnyPlayer(h))return SeatInputOwner::player;
+    if(h[kDead])return SeatInputOwner::dead;
+    if(!IsOnlineAuthority(h))return SeatInputOwner::remote;
+    if(At<const void*>(h,kHumanSeat)!=seat)return SeatInputOwner::seatMismatch;
+    auto* v=At<unsigned char*>(h,kHumanRiding);
+    if(!Readable(v,kSeatCount+8) || v[kDead] || SeatCount(v)==0 || !IsOnlineAuthority(v))return SeatInputOwner::vehicle;
+    return SeatAt(v,0)==seat ? SeatInputOwner::npc : SeatInputOwner::notSeat0;
+}
+bool OwnsNpcSeatInput(unsigned char* seat) noexcept { return NpcSeatInputOwner(seat)==SeatInputOwner::npc; }
 
 bool SeatTakes(const unsigned char* v,unsigned i,const unsigned char* h) noexcept {
     const unsigned char* seat=SeatAt(const_cast<unsigned char*>(v),i);
@@ -1801,73 +1823,200 @@ bool CarAimReady(unsigned char* v,void* const* vt) noexcept {
     return built;
 }
 
-// Each vehicle an NPC driver runs the AI pass of, once in kDrivenLogMs (Debug): its seats' weapons' rounds left, so a
-// log tells which of several driven vehicles fires (the rounds go down) and which only drives.
-constexpr ULONGLONG kDrivenLogMs=10000;
-constexpr std::size_t kVehicleTarget=0x518;   // the vehicle AI's target (npcpost.cpp kTarget: the native target ObjRef)
-constexpr int kDrivenLogged=16;
-struct DrivenLog { ObjRef v; ULONGLONG at; };
-DrivenLog drivenLogged[kDrivenLogged]{};
-void LogDrivenVehicle(const unsigned char* h,unsigned char* v) noexcept {
-    if(!Cfg().debug)return;
-    const ULONGLONG ms=GameMs();
-    DrivenLog* slot=nullptr;
-    for(auto& e:drivenLogged) {
-        if(e.v.Is(v)){slot=&e;break;}
-        if(!slot || e.at<slot->at)slot=&e;
+// --- Per vehicle: what its NPC driver's AI pass and its NPC gunners did (the user 2026-10-31 #3: with several vehicles
+// only one NPC crew fights, docs/feedback-2026-10-31-idle-vehicle-npc.md). One record per vehicle an NPC drives or
+// gunners in: the once-a-frame rule of the driver's pass (it was one static {vehicle, frame} for every vehicle), the
+// step each driver Think ended at, and each gunner seat's last decision. Debug=1 logs it per vehicle every
+// kVehicleAiLogMs, and at once (kVehicleAiChangeMs at most) when a driver's step changes, so a log of several vehicles
+// says which one's chain stops, and where.
+enum class DriveStep : std::uint8_t { ran, vehicleGone, onAiList, seatInput, noDriver, noPass, notPrepared, sameFrame,
+                                      bargaNotBuilt, carNotBuilt, count };
+constexpr const char* kDriveStepNames[]={"ran its AI pass","vehicle gone","on the AI list (its own pass)","seat input not the NPC's",
+                                         "seat 0 not an NPC driver","no AI pass of a known kind","AI not prepared (npcpost)",
+                                         "already run this frame","Barga AI not built","car aim not built"};
+static_assert(sizeof(kDriveStepNames)/sizeof(kDriveStepNames[0])==static_cast<std::size_t>(DriveStep::count),"a name per step");
+enum class GunnerStep : std::uint8_t { none, notAi, noWeapons, noReach, noTarget, holdFire, noShot, trigger };
+constexpr const char* kGunnerStepNames[]={"-","not an AI gunner","no weapons","no reach","no target","hold fire","aimed, no trigger",
+                                          "trigger"};
+constexpr unsigned kVehicleAiSeats=edf::kMaxSeats;
+struct NpcVehicleAi {
+    ObjRef v,driver;
+    ULONGLONG seen=0,loggedAt=0,changedAt=0;
+    ULONGLONG thinkAt=0,driverSince=0;   // its driver's last Think; since when the vehicle frame saw an NPC driver
+    ULONGLONG passFrame=0;bool passed=false;   // the frame its pass last ran (once a frame, per vehicle)
+    DriveStep last=DriveStep::count;SeatInputOwner owner=SeatInputOwner::npc;
+    unsigned steps[static_cast<std::size_t>(DriveStep::count)]{};unsigned actions=0;   // since the last log
+    GunnerStep gunner[kVehicleAiSeats]{};unsigned gunnerFrames[kVehicleAiSeats]{},gunnerTriggers[kVehicleAiSeats]{};
+};
+constexpr int kVehicleAiRecords=64;   // as many as npcpost's posts
+constexpr ULONGLONG kVehicleAiLogMs=5000,kVehicleAiChangeMs=1000,kVehicleAiThinkMs=1000;
+NpcVehicleAi vehicleAi[kVehicleAiRecords]{};
+void ResetVehicleAi() noexcept { for(auto& r:vehicleAi)r=NpcVehicleAi{}; }
+// `v`'s record, or a new one in the slot seen longest ago (nullptr: none there and `make` false).
+NpcVehicleAi* VehicleAiOf(const unsigned char* v,bool make) noexcept {
+    NpcVehicleAi* slot=nullptr;
+    for(auto& r:vehicleAi) {
+        if(r.v.Is(v))return &r;
+        if(!slot || !r.v || (slot->v && r.seen<slot->seen))slot=&r;
     }
-    if(slot->v.Is(v) && ms-slot->at<kDrivenLogMs)return;
-    slot->v=ObjRef::Of(v);slot->at=ms;
-    char rounds[160]{};std::size_t used=0;
+    if(!make || !slot)return nullptr;
+    *slot=NpcVehicleAi{};slot->v=ObjRef::Of(v);
+    return slot;
+}
+
+std::size_t SeatRounds(const unsigned char* v,char* out,std::size_t size) noexcept {
+    std::size_t used=0;out[0]=0;
     for(unsigned k=0;k<SeatCount(v) && k<edf::kMaxSeats;++k) {
-        const unsigned char* seat=SeatAt(v,k);
+        const unsigned char* seat=SeatAt(const_cast<unsigned char*>(v),k);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         for(std::uint64_t i=0;i<n && i<4 && Readable(holders,(i+1)*8);++i) {
             const auto w=Readable(holders[i],kHolderWeapon+8) ? At<const unsigned char*>(holders[i],kHolderWeapon) : nullptr;
             const int left=Readable(w,kWeaponAmmo+4) ? At<std::int32_t>(w,kWeaponAmmo) : -1;
-            const int wrote=std::snprintf(rounds+used,sizeof(rounds)-used,"%s%u:%d",used ? " " : "",k,left);
-            if(wrote<0 || static_cast<std::size_t>(wrote)>=sizeof(rounds)-used)break;
+            const int wrote=std::snprintf(out+used,size-used,"%s%u:%d",used ? " " : "",k,left);
+            if(wrote<0 || static_cast<std::size_t>(wrote)>=size-used)return used;
             used+=static_cast<std::size_t>(wrote);
         }
     }
-    const auto* target=At<const unsigned char*>(v,kVehicleTarget);
-    const float targetAt=Readable(target,kPosition+12) ? npc::Dist(Pos(v),Pos(target)) : -1.0f;
-    Log("NPCAI driver %p runs the AI pass of v=%p (not on the AI list); target %p at %.0f m; rounds left seat:n [%s]",h,v,target,
-        targetAt,rounds);
+    return used;
 }
 
-void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
-    static const void* lastV=nullptr;static ULONGLONG lastFrame=0;
-    if(!dt || !Cfg().npcBoarding || h[kDead])return;
-    auto* seat=At<unsigned char*>(h,kHumanSeat);
-    auto* v=At<unsigned char*>(h,kHumanRiding);
-    if(!seat || !Readable(v,kSeatCount+8) || v[kDead] || (v[kListFlags]&kInAiList) || !OwnsNpcSeatInput(seat))return;
-    if(seat!=SeatAt(v,0) || !NpcDriver(v))return; // passengers must not run seat-0 AI or take over a human driver
+// The vehicle AI's native gates (0x661440, docs/ground-ai-re.md): +0x4A0 its activation (0x548D50 sets it: the fire
+// branch 0x6616C0 needs it), +0x470 its sight (0x54C242: no activation by sight at 0), +0xE04 / +0xE08 / +0xE09 the
+// target / fire switches 0x6616AA..0x6616CD read, +0x518 its target (and that target's +0x4A0, read when +0xE08 is set).
+constexpr std::size_t kVehicleTarget=0x518;   // the vehicle AI's target (npcpost.cpp kTarget: the native target ObjRef)
+constexpr std::size_t kActiveFlag=0x4A0,kSightRange=0x470,kTargetCheck=0xE04,kTargetActive=0xE08,kFireSwitch=0xE09;
+void LogVehicleAi(NpcVehicleAi& r,unsigned char* v,const char* why) noexcept {
+    const ULONGLONG ms=GameMs();
+    const float elapsed=r.loggedAt ? static_cast<float>(ms-r.loggedAt)/1000.0f : 0.0f;
+    r.loggedAt=ms;
+    char skips[200]{};std::size_t used=0;
+    for(std::size_t i=1;i<static_cast<std::size_t>(DriveStep::count);++i)if(r.steps[i]) {
+        const int wrote=std::snprintf(skips+used,sizeof(skips)-used,"%s%s %u",used ? ", " : "",kDriveStepNames[i],r.steps[i]);
+        if(wrote<0 || static_cast<std::size_t>(wrote)>=sizeof(skips)-used)break;
+        used+=static_cast<std::size_t>(wrote);
+    }
+    char gunners[240]{};used=0;
+    for(unsigned i=1;i<kVehicleAiSeats && i<SeatCount(v);++i)if(r.gunner[i]!=GunnerStep::none || r.gunnerFrames[i]) {
+        const int wrote=std::snprintf(gunners+used,sizeof(gunners)-used,"%s%u:%s (trigger %u/%u)",used ? " " : "",i,
+                                      kGunnerStepNames[static_cast<int>(r.gunner[i])],r.gunnerTriggers[i],r.gunnerFrames[i]);
+        if(wrote<0 || static_cast<std::size_t>(wrote)>=sizeof(gunners)-used)break;
+        used+=static_cast<std::size_t>(wrote);
+    }
+    char rounds[160]{};SeatRounds(v,rounds,sizeof(rounds));
+    const auto* target=At<const unsigned char*>(v,kVehicleTarget);
+    const bool seen=Readable(target,kActiveFlag+1);
+    const float targetAt=seen && Readable(target,kPosition+12) ? npc::Dist(Pos(v),Pos(target)) : -1.0f;
+    const auto* driver=static_cast<const unsigned char*>(r.driver.obj);
+    Log("NPCAI vehicle v=%p (%s) driver %p: %s%s%s; %.0f s: pass %u, action %u%s%s; active=%d sight=%.0f e04/e08/e09=%d/%d/%d "
+        "list=%#x target %p at %.0f m (active %d); gunners [%s]; rounds seat:n [%s]",
+        v,why,driver,r.last==DriveStep::count ? "no driver Think" : kDriveStepNames[static_cast<int>(r.last)],
+        r.last==DriveStep::seatInput ? ": " : "",r.last==DriveStep::seatInput ? SeatInputOwnerName(r.owner) : "",elapsed,
+        r.steps[static_cast<int>(DriveStep::ran)],r.actions,skips[0] ? "; skipped: " : "",skips,v[kActiveFlag],
+        At<float>(v,kSightRange),v[kTargetCheck],v[kTargetActive],v[kFireSwitch],v[kListFlags],target,targetAt,
+        seen ? target[kActiveFlag] : -1,gunners,rounds);
+    for(auto& n:r.steps)n=0;
+    r.actions=0;
+    for(unsigned i=0;i<kVehicleAiSeats;++i){r.gunnerFrames[i]=0;r.gunnerTriggers[i]=0;}
+}
+// A driver Think's step for `v` (its seat 0's NPC), with the log it is due.
+void SeeDriveStep(unsigned char* v,const unsigned char* h,DriveStep step,SeatInputOwner owner=SeatInputOwner::npc) noexcept {
+    NpcVehicleAi* const r=VehicleAiOf(v,true);
+    if(!r)return;
+    const ULONGLONG ms=GameMs();
+    r->seen=ms;r->thinkAt=ms;
+    if(!r->driver.Is(h))r->driver=ObjRef::Of(h);
+    ++r->steps[static_cast<int>(step)];
+    const bool changed=step!=r->last || (step==DriveStep::seatInput && owner!=r->owner);
+    r->last=step;r->owner=owner;
+    if(!Cfg().debug)return;
+    // A frame's second Think is not news (sameFrame follows ran every such frame).
+    if(changed && step!=DriveStep::sameFrame && ms-r->changedAt>=kVehicleAiChangeMs){r->changedAt=ms;LogVehicleAi(*r,v,"changed");}
+    else if(ms-r->loggedAt>=kVehicleAiLogMs)LogVehicleAi(*r,v,"every 5 s");
+}
+
+// The step a Think of seat 0's rider ends at for `v`. Each return is one cause the diagnosis names.
+DriveStep DriveVehicleAiStep(unsigned char* v,unsigned char* seat,const float* dt,SeatInputOwner& owner) noexcept {
+    if(!Readable(v,kSeatCount+8) || v[kDead])return DriveStep::vehicleGone;
+    if(v[kListFlags]&kInAiList)return DriveStep::onAiList;
+    owner=NpcSeatInputOwner(seat);
+    if(owner!=SeatInputOwner::npc)return DriveStep::seatInput;
+    if(seat!=SeatAt(v,0) || !NpcDriver(v))return DriveStep::noDriver; // passengers must not run seat-0 AI or take over a human driver
     const auto vt=At<void* const*>(v,0);
-    if(!Readable(vt,(kSlotAiPass+1)*8))return;
+    if(!Readable(vt,(kSlotAiPass+1)*8))return DriveStep::noPass;
     const AiPass kind=AiPassOf(vt[kSlotAiPass]);
-    if(kind==AiPass::none)return;
-    if(!PrepareNpcVehicleAi(v))return;
+    if(kind==AiPass::none)return DriveStep::noPass;
+    if(!PrepareNpcVehicleAi(v))return DriveStep::notPrepared;
+    NpcVehicleAi* const r=VehicleAiOf(v,true);
     const ULONGLONG frame=GameFrame();
-    if(lastV==v && lastFrame==frame)return;   // once a frame
-    lastV=v;lastFrame=frame;
-    if(kind==AiPass::barga && !BargaReady(v,vt))return;
-    if(kind==AiPass::car && !CarAimReady(v,vt))return;
-    LogDrivenVehicle(h,v);
+    if(r && r->passed && r->passFrame==frame)return DriveStep::sameFrame;   // once a frame, per vehicle
+    if(r){r->passed=true;r->passFrame=frame;}
+    if(kind==AiPass::barga && !BargaReady(v,vt))return DriveStep::bargaNotBuilt;
+    if(kind==AiPass::car && !CarAimReady(v,vt))return DriveStep::carNotBuilt;
     reinterpret_cast<AiPassFn>(vt[kSlotAiPass])(v,dt);
-    if(kind==AiPass::barga)return;   // its action runs inside its pass
+    if(kind==AiPass::barga)return DriveStep::ran;   // its action runs inside its pass
     // The class's AI action when no slot 6 registered one (see above).
     const bool car=kind==AiPass::car;
     const std::size_t action=car ? kCarAction : kMechAction,inAction=car ? kCarInAction : kMechInAction;
     const std::size_t slot=car ? kSlotCarAi : kSlotMechAi;
-    if(At<const void*>(v,action) || !Readable(vt,(slot+1)*8))return;
+    if(At<const void*>(v,action) || !Readable(vt,(slot+1)*8))return DriveStep::ran;
     const void* fn=vt[slot];
-    if(car ? fn!=image+kCarAi : (fn!=image+kMechAi && fn!=image+kProteusAi))return;
-    if(!PrepareNpcVehicleAi(v))return; // the native pass may replace the target; refresh before firing
+    if(car ? fn!=image+kCarAi : (fn!=image+kMechAi && fn!=image+kProteusAi))return DriveStep::ran;
+    if(!PrepareNpcVehicleAi(v))return DriveStep::ran; // the native pass may replace the target; refresh before firing
+    if(r)++r->actions;
     const unsigned char previous=v[inAction];v[inAction]=1;
     __try {reinterpret_cast<AiActionFn>(const_cast<void*>(fn))(v,1,dt,nullptr);}
     __finally {v[inAction]=previous;}
+    return DriveStep::ran;
+}
+
+void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {
+    if(!dt || !Cfg().npcBoarding || h[kDead])return;
+    auto* seat=At<unsigned char*>(h,kHumanSeat);
+    auto* v=At<unsigned char*>(h,kHumanRiding);
+    if(!seat || !v)return;   // on foot
+    // Only seat 0's rider is the vehicle's driver: a gunner's Think ends here unrecorded (its seat: NpcGunnersInput).
+    if(!Readable(v,kSeatCount+8) || SeatCount(v)==0 || seat!=SeatAt(v,0))return;
+    SeatInputOwner owner=SeatInputOwner::npc;
+    const DriveStep step=DriveVehicleAiStep(v,seat,dt,owner);
+    SeeDriveStep(v,h,step,owner);
+}
+
+// Each frame of each vehicle (NpcGunnersInput): an NPC driver whose Think has not come for kVehicleAiThinkMs is named
+// (the soldier's own Think did not run: nothing above ran for its vehicle), and the periodic log of a vehicle whose
+// only NPCs are gunners.
+void SeeVehicleAiFrame(unsigned char* v) noexcept {
+    if(!Cfg().debug || v[kDead] || SeatCount(v)==0)return;
+    const ULONGLONG ms=GameMs();
+    const bool npcDriver=NpcDriver(v) && SeatRider(SeatAt(v,0))==Rider::other;
+    NpcVehicleAi* const r=VehicleAiOf(v,npcDriver);
+    if(!r)return;
+    if(npcDriver) {
+        r->seen=ms;
+        if(!r->driverSince)r->driverSince=ms;
+        const ULONGLONG quiet=ms-(r->thinkAt ? r->thinkAt : r->driverSince);
+        if(quiet>=kVehicleAiThinkMs && ms-r->changedAt>=kVehicleAiLogMs) {
+            r->changedAt=ms;
+            Log("NPCAI vehicle v=%p: its NPC driver %p has run no Think for %llu ms (%s)",v,At<const void*>(SeatAt(v,0),kSeatRider),
+                quiet,r->thinkAt ? "it ran before" : "never since it sat");
+        }
+        return;
+    }
+    r->driverSince=0;
+    if(ms-r->loggedAt>=kVehicleAiLogMs) {
+        bool any=false;
+        for(unsigned i=1;i<kVehicleAiSeats;++i)any=any || r->gunnerFrames[i];
+        if(any)LogVehicleAi(*r,v,"gunners");
+    }
+}
+// Gunner seat `i` of `v`'s decision this frame (NpcGunnersInput).
+void SeeGunnerStep(unsigned char* v,unsigned i,GunnerStep step) noexcept {
+    if(i>=kVehicleAiSeats)return;
+    NpcVehicleAi* const r=VehicleAiOf(v,step!=GunnerStep::notAi);
+    if(!r)return;
+    if(step!=GunnerStep::notAi)r->seen=GameMs();
+    r->gunner[i]=step;++r->gunnerFrames[i];
+    if(step==GunnerStep::trigger)++r->gunnerTriggers[i];
 }
 
 template<int I> void __fastcall ThinkHook(void* human,const float* dt) {
@@ -1949,7 +2098,7 @@ bool InstallNpcAi() noexcept {
 
 void ResetNpcAi() noexcept {
     ResetCommandSnapshots();
-    ResetGunnerInputs();ResetDriverPayload();
+    ResetGunnerInputs();ResetDriverPayload();ResetVehicleAi();
     for(auto& s:soldiers)s=Soldier{};
     for(auto& q:squads){npcmark::Assign(q.commandFocus,{});q=Squad{};}
     cooldowns=npc::Cooldowns<kMaxSquads>{};
@@ -3344,6 +3493,7 @@ void NpcGunnersInput(unsigned char* v) noexcept {
     ReleaseDriverPayload(v,false); // never erase this frame's still-valid stock driver aim
     ReleaseGunnerInputs(v);
     if(!ok || !Cfg().enabled || !Cfg().npcGunners || v[kDead])return;
+    SeeVehicleAiFrame(v);   // the diagnosis (Debug): an NPC driver whose Think does not come
     static int sig=0;
     if(!sig)sig=Matches(kSeatFire,kSeatFireSig,sizeof(kSeatFireSig)) ? 1 : -1;
     if(sig<0)return;
@@ -3351,11 +3501,15 @@ void NpcGunnersInput(unsigned char* v) noexcept {
     if(!Readable(vt,(kSlotSeatFire+1)*8) || vt[kSlotSeatFire]!=image+kSeatFire)return;
     for(unsigned i=1;i<SeatCount(v);++i) {
         unsigned char* const seat=SeatAt(v,i);
+        GunnerStep step=GunnerStep::notAi;   // each test below that passes moves it on (the diagnosis: SeeGunnerStep)
+        struct Seen { unsigned char* v;unsigned i;GunnerStep& step;~Seen(){SeeGunnerStep(v,i,step);} } seen{v,i,step};
         if(!AiGunner(v,seat))continue;
+        step=GunnerStep::noWeapons;
         for(const auto offset:kGunnerInputs)Put<float>(seat,offset,0.0f);
         const auto holders=At<unsigned char* const*>(seat,kSeatWeapons);
         const auto n=At<std::uint64_t>(seat,kSeatWeaponCount);
         if(!n || n>16 || !Readable(holders,n*8))continue; // same holder limit as ReadSeat/AimSelectedGunner
+        step=GunnerStep::noReach;
         float reach=0.0f;
         for(std::uint64_t k=0;k<n;++k) {
             if(!Readable(holders[k],kHolderWeapon+8))continue;
@@ -3363,17 +3517,19 @@ void NpcGunnersInput(unsigned char* v) noexcept {
             if(Readable(w,kArmReach+4) && At<float>(w,kArmReach)>reach)reach=At<float>(w,kArmReach);
         }
         if(!(reach>0.0f))continue;
+        step=GunnerStep::noTarget;
         GunnerPick p{v,Pos(v),reach,nullptr,1e30f};
         const Enemy* const m=world.frame==GameFrame() ? NearestMark(Pos(v)) : nullptr;   // the soldiers' list of this frame only
         if(m && npc::Dist(Pos(v),m->aim)<=reach && !WastedFire(v,m->object)){p.best=m->object;p.bestD=npc::Dist(Pos(v),m->aim);}
         else VisitEnemies(v,&GunnerVisit,&p);
-        if(p.best && HoldFire(v,p.best)){p.best=nullptr;}   // no round would hurt it now (HoldFire): the seat idles
+        if(p.best && HoldFire(v,p.best)){p.best=nullptr;step=GunnerStep::holdFire;}   // no round would hurt it now (HoldFire): the seat idles
         if(p.best) {
             if(Cfg().stockStores || NativePayloadControl(v,i)) {
                 const bool airborne=GunnerAirTarget(p.best);
                 CrewOwnWeapons(v,i,p.best,p.bestD,airborne,CrewMainGun(v,i,p.best,p.bestD,airborne)!=nullptr);
             } else reinterpret_cast<SeatFireFn>(image+kSeatFire)(v,static_cast<int>(i),p.best);
             RememberGunnerInputs(v,i,seat);
+            step=At<float>(seat,0x2E4)!=0.0f || At<float>(seat,0x2E0)!=0.0f ? GunnerStep::trigger : GunnerStep::noShot;
         }
     }
 }
