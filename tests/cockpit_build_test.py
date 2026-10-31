@@ -105,7 +105,7 @@ def generated_bones(fits) -> int:  # noqa: ANN001
                 _parts, controls = cockpit_instruments.instrument(screen, index, numbers=fit.seat == 0,
                                                                    thumbnail=(('111', '111'), 1.), ranges=dict(kit.ranges))
                 shared |= {key(c) for c in controls}
-        total += 1 + len(kit.screens) + len(shared)
+        total += 1 + kit.gaze + len(kit.screens) + len(shared)
     return total
 
 
@@ -176,7 +176,7 @@ def fitted_model(game, stem: str, fits, copies) -> None:  # noqa: ANN001
     for fit in fits:
         try:
             kit = cockpits.fitted(hull, fit, cockpit_kits.KITS[fit.kit])
-            required_bones+=len(kit.screens)
+            required_bones+=len(kit.screens)+kit.gaze
             shared=set()
             def key(control):   # as cockpits.graft shares a bone
                 return (control.control if control.control[0] in 'dDplcuveZ' else
@@ -236,6 +236,30 @@ def built_blacker(game, spec) -> None:  # noqa: ANN001
                f'{spec.stem} seat {fit.seat}: {marker} under {fit.bone}')
         screens = [n for n in names if n.startswith(f'vc_scr_{fit.seat}_')]
         expect(bool(screens), f'{spec.stem} seat {fit.seat}: its screens {screens}')
+        gaze = cockpits.GAZE.format(fit.seat)
+        at = names.index(gaze) if gaze in names else -1
+        want = cockpit_kits.KITS[fit.kit](ROOM).gaze
+        expect(at >= 0 and md.bones[at].parent == md.bone_index(fit.bone) if want else at < 0,
+               f'{spec.stem} seat {fit.seat} ({fit.kit}): {gaze} {"under " + fit.bone if want else "absent"}')
+
+
+def gaze_kits() -> None:
+    """Which kits lay the seat's sight line with its gun (Kit.gaze; cockpits.graft writes vc_gaze_<seat> for them, src/
+    fp_view.h GunCameraSeat): the seats with nothing round the eye turning with the gun, a weapon station's camera
+    (remote_display) and a rider at an open mount (open_rider: the M163's and the quad Vulcan's operator; the user,
+    2026-10-31: 「第一人称四管防空车视角不随炮管往上抬」); a closed turret's gunner (tank_gunner) keeps his cockpit's view.
+    Every fitted seat of those kits, the plugin's own vehicles' too, is a gaze seat (graft writes the marker from the
+    kit, so a fit of that kit cannot miss it)."""
+    used = sorted({f.kit for fits in cockpit_fits.FITS.values() for f in fits} | {'tank_gunner'})
+    gazing = {name for name in used if cockpit_kits.KITS[name](ROOM).gaze}
+    expect(gazing == {'remote_display', 'open_rider'},
+           f'of the kits the seats take, the gaze kits are remote_display and open_rider: {sorted(gazing)}')
+    seats = [(stem, f) for stem, fits in sorted(cockpit_fits.FITS.items()) for f in fits if f.kit in gazing]
+    named = {stem for stem, f in seats if f.kit == 'open_rider'}
+    expect({'EDF6VC_VULCAN', 'EDF6VC_QUADVULCAN'} <= named,
+           f'the M163 and the quad Vulcan seats are open_rider (gaze) seats: {sorted(named)}')
+    expect('vc_gaze_' in cockpits.GRAFTED_BONES and cockpits.grafted_bone(cockpits.GAZE.format(0)),
+           'the gaze marker is a grafted bone (an undo or a regraft removes it with the eye)')
 
 
 # The stems the plugin's vehicles wear a stock model under (stock_copies' keys), known without building them: a shard
@@ -253,7 +277,7 @@ def units(game) -> list:  # noqa: ANN001 - rootcpk.Game
         if 'copies' not in built:
             built['copies'] = stock_copies(game)
         return built['copies']
-    out = [('C-130 dials', c130_dials),
+    out = [('C-130 dials', c130_dials), ('gaze kits', gaze_kits),
            ('stock copies', lambda: expect(set(copies()) == STOCK_COPY_STEMS and STOCK_COPY_STEMS <= set(cockpit_fits.FITS),
                                            f'the stock copies {sorted(copies())} are STOCK_COPY_STEMS and fitted'))]
     for name, (model, _) in sorted(cockpit_kits_plugin.MODELS.items()):

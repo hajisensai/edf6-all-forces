@@ -254,9 +254,9 @@ def remote_display(cabin: Cabin) -> Kit:
     """An unmanned weapon station's seat (the user, 2026-10-13: the Blacker's side guns "明明是无人炮塔"; "哪怕弄成显示器那种
     显示都行"): no cockpit round a gun nobody stands at. The eye is the gun's camera (the fit puts it at the gun's sight /
     camera locator, riding its pitch bone) and the whole view is the operator's monitor: the plugin draws the station's
-    display over it (a sensor screen: hud.cpp RwsDisplay)."""
+    display over it (a sensor screen: hud.cpp RwsDisplay). The camera looks along the gun (gaze)."""
     del cabin   # open air round the camera: nothing to fit
-    return Kit([], {}, screens=(Screen('sensor', (0.0, 0.0, 1.0), (0.0, 0.0, -1.0), 0.4, 0.3),))
+    return Kit([], {}, screens=(Screen('sensor', (0.0, 0.0, 1.0), (0.0, 0.0, -1.0), 0.4, 0.3),), gaze=True)
 
 
 KITS = {

@@ -98,6 +98,9 @@ bool VehicleEye(unsigned char* human,float* eye,RideView* out) noexcept {
     std::memcpy(out->frame,frame.m,64);
     std::memcpy(eye,frame.m+12,12);
     out->station=true;
+    // The seat's kit lays its sight line with the gun (pylib/cockpits.py GAZE: an open seat standing at his gun).
+    std::swprintf(marker,16,L"vc_gaze_%d",out->seat);
+    out->gaze=Bone(v+kVehicleModel,marker)!=nullptr;
     return std::isfinite(eye[0]+eye[1]+eye[2]);
 }
 }  // namespace crew
