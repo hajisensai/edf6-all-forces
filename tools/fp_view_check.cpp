@@ -194,7 +194,7 @@ void ShotKick() {
         const M4 w=Mul(restScaled,aim);
         bool same=true;
         for(int k=0;k<5;++k) {
-            const bool moved=ShotAnchor(h,w,aim,false,&anchor);
+            const bool moved=ShotAnchor(h,w,aim,false,false,&anchor);
             M4 t0,t1;
             const M4 cam=CameraAt(aim,eye);
             same=same && !moved && std::memcmp(anchor.m,w.m,64)==0 && AnchoredTransform(anchor,cam,grip,s,&t0) &&
@@ -204,14 +204,14 @@ void ShotKick() {
     }
     {   // A shot: the kick (back 6 cm, up 9 degrees about the grip) is kept through T while the view turns.
         ShotHold h;
-        ShotAnchor(h,Mul(restScaled,aim),aim,false,&anchor);           // the step before the shot: R0
+        ShotAnchor(h,Mul(restScaled,aim),aim,false,false,&anchor);           // the step before the shot: R0
         const float kickAt[3]={0,.01f,-.06f};
         const M4 dev=Frame(-.16f,0,kickAt);   // a turn up about the root's own origin, 1 cm up and 6 cm back
         bool kept=true,grips=true;
         for(int k=0;k<6;++k) {
             const M4 turned=Frame(.2f+.02f*k,.7f-.05f*k,origin);   // the player looks round while firing
             const M4 w=Mul(Mul(dev,rest),turned);                    // the animation's departure from rest
-            const bool moved=ShotAnchor(h,w,turned,k==0,&anchor);
+            const bool moved=ShotAnchor(h,w,turned,k==0,false,&anchor);
             const M4 cam=CameraAt(turned,eye);
             M4 t;
             AnchoredTransform(anchor,cam,grip,s,&t);
@@ -229,14 +229,33 @@ void ShotKick() {
         Expect(kept,"a shot: the native kick is shown relative to the rest before it, following the aim");
         Expect(grips,"a shot: the hand moves with the weapon (one T)");
     }
+    {   // The after-shot phase: the hold stays past its window while the weapon is still firing, never past kShotHoldMost.
+        const M4 w=Mul(Mul(Translate(0,.02f,-.08f),restScaled),aim);
+        ShotHold h;
+        ShotAnchor(h,Mul(restScaled,aim),aim,false,false,&anchor);
+        ShotAnchor(h,w,aim,true,true,&anchor);
+        int held=1;
+        for(int k=0;k<kShotHoldFrames+6;++k)if(ShotAnchor(h,w,aim,false,true,&anchor) && h.holding)++held;
+        const bool past=h.holding && held==kShotHoldFrames+7;
+        ShotAnchor(h,w,aim,false,false,&anchor);
+        const bool ends=!h.holding && h.blend==kShotBlendFrames-1;
+        ShotHold g;
+        ShotAnchor(g,Mul(restScaled,aim),aim,false,false,&anchor);
+        ShotAnchor(g,w,aim,true,true,&anchor);
+        int most=1;
+        while(ShotAnchor(g,w,aim,false,true,&anchor) && g.holding && most<1000)++most;
+        Expect(past && ends,"the hold stays while the weapon is in its after-shot phase, then eases back when it ends");
+        Expect(most==kShotHoldMost,"a phase that never ends holds kShotHoldMost steps at most",static_cast<float>(most),
+               static_cast<float>(kShotHoldMost));
+    }
     {   // The hand-back: after the hold the anchor eases to the root and is then the root exactly.
         ShotHold h;
-        ShotAnchor(h,Mul(restScaled,aim),aim,false,&anchor);
+        ShotAnchor(h,Mul(restScaled,aim),aim,false,false,&anchor);
         M4 dev=Translate(0,.02f,-.08f);
         const M4 w=Mul(Mul(dev,restScaled),aim);
-        ShotAnchor(h,w,aim,true,&anchor);
+        ShotAnchor(h,w,aim,true,false,&anchor);
         int held=1;
-        while(ShotAnchor(h,w,aim,false,&anchor) && h.holding)++held;
+        while(ShotAnchor(h,w,aim,false,false,&anchor) && h.holding)++held;
         float lastGap=1e9f,most=0.0f;
         bool eases=true;
         M4 prev=anchor;
@@ -245,7 +264,7 @@ void ShotKick() {
             const float gap=std::sqrt((anchor.m[12]-w.m[12])*(anchor.m[12]-w.m[12])+(anchor.m[13]-w.m[13])*(anchor.m[13]-w.m[13])+
                                       (anchor.m[14]-w.m[14])*(anchor.m[14]-w.m[14]));
             eases=eases && gap<lastGap+1e-6f;lastGap=gap;
-            const bool moved=ShotAnchor(h,w,aim,false,&anchor);
+            const bool moved=ShotAnchor(h,w,aim,false,false,&anchor);
             const float step=std::sqrt((anchor.m[12]-prev.m[12])*(anchor.m[12]-prev.m[12])+(anchor.m[13]-prev.m[13])*(anchor.m[13]-prev.m[13])+
                                        (anchor.m[14]-prev.m[14])*(anchor.m[14]-prev.m[14]));
             most=std::fmax(most,step);prev=anchor;

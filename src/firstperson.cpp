@@ -1446,8 +1446,8 @@ void ForgetKicks() noexcept {
 }
 
 // Each hand's firearm anchor this step (fp_view.h ShotAnchor): its root, or around a shot the rest before it. A shot is
-// what FirstPersonShot told (0x696FD0, every round) or the weapon's own count rising; the hold runs its window (a reload
-// does not cut it, fp_view.h); a melee weapon or shield (NativeGrip) keeps its own placement.
+// what FirstPersonShot told (0x696FD0, every round) or the weapon's own count rising; the hold runs its window and on
+// through the weapon's after-shot phase (+0xBD4 2), a reload does not cut it (fp_view.h); a melee weapon or shield (NativeGrip) keeps its own placement.
 void Kicks(const unsigned char* h,const M4* anchor,const bool* anchored,M4* frame) noexcept {
     const M4 aim=MatrixAt(h+kAim);
     for(int hand=kRight;hand<=kLeft;++hand) {
@@ -1463,7 +1463,8 @@ void Kicks(const unsigned char* h,const M4* anchor,const bool* anchored,M4* fram
         Current().shotsTold[hand]=0;Current().shotCount[hand]=count;
         if(!w || !anchored[hand] || NativeGrip(w)){s=fpview::ShotHold{};continue;}
         const bool was=s.holding;
-        const bool moved=fpview::ShotAnchor(s,anchor[hand],aim,shot,&frame[hand]);
+        const std::int32_t state=At<std::int32_t>(w,kFireState);
+        const bool moved=fpview::ShotAnchor(s,anchor[hand],aim,shot,state==2,&frame[hand]);
         if(!Cfg().debug || !(moved || was))continue;
         // Debug=1 (the kick's probe): the root's departure from its rest R0 in the aim frame, each step of the hold.
         const M4& l=s.last;const M4& r=s.rest;
@@ -1474,7 +1475,7 @@ void Kicks(const unsigned char* h,const M4* anchor,const bool* anchored,M4* fram
         const float up=std::atan2(l.m[9],l.m[10])-std::atan2(r.m[9],r.m[10]);
         Log("FP kick %s %p: %s %d, root from rest (%.3f,%.3f,%.3f) m (aim frame: right, up, ahead), turned %.2f deg (bore up %.2f), shot %d, fire state %d",
             hand==kRight ? "right" : "left",static_cast<const void*>(w),s.holding ? "hold" : "ease",s.holding ? s.frames : s.blend,
-            d[0],d[1],d[2],turn,up*57.29578f,shot,At<std::int32_t>(w,kFireState));
+            d[0],d[1],d[2],turn,up*57.29578f,shot,state);
     }
 }
 
