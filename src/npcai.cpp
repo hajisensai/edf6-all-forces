@@ -1834,7 +1834,7 @@ enum class DriveStep : std::uint8_t { ran, vehicleGone, onAiList, seatInput, noD
 constexpr const char* kDriveStepNames[]={"ran its AI pass","vehicle gone","on the AI list (its own pass)","seat input not the NPC's",
                                          "seat 0 not an NPC driver","no AI pass of a known kind","AI not prepared (npcpost)",
                                          "already run this frame","Barga AI not built","car aim not built",
-                                         "not active (0x548D50 refused or not as read)"};
+                                         "ran its AI pass inactive (0x548D50 refused or not as read: no turn, aim or fire)"};
 static_assert(sizeof(kDriveStepNames)/sizeof(kDriveStepNames[0])==static_cast<std::size_t>(DriveStep::count),"a name per step");
 enum class GunnerStep : std::uint8_t { none, notAi, noWeapons, noReach, noTarget, holdFire, noShot, trigger };
 constexpr const char* kGunnerStepNames[]={"-","not an AI gunner","no weapons","no reach","no target","hold fire","aimed, no trigger",
@@ -1845,6 +1845,7 @@ struct NpcVehicleAi {
     ULONGLONG seen=0,loggedAt=0,changedAt=0;
     ULONGLONG thinkAt=0,driverSince=0;   // its driver's last Think; since when the vehicle frame saw an NPC driver
     ULONGLONG passFrame=0;bool passed=false;   // the frame its pass last ran (once a frame, per vehicle)
+    bool refusalLogged=false;                  // its activation refused: said once
     DriveStep last=DriveStep::count;SeatInputOwner owner=SeatInputOwner::npc;
     unsigned steps[static_cast<std::size_t>(DriveStep::count)]{};unsigned actions=0;   // since the last log
     GunnerStep gunner[kVehicleAiSeats]{};unsigned gunnerFrames[kVehicleAiSeats]{},gunnerTriggers[kVehicleAiSeats]{};
@@ -1892,7 +1893,7 @@ void LogVehicleAi(NpcVehicleAi& r,unsigned char* v,const char* why) noexcept {
     const float elapsed=r.loggedAt ? static_cast<float>(ms-r.loggedAt)/1000.0f : 0.0f;
     r.loggedAt=ms;
     char skips[200]{};std::size_t used=0;
-    for(std::size_t i=1;i<static_cast<std::size_t>(DriveStep::count);++i)if(r.steps[i]) {
+    for(std::size_t i=1;i<static_cast<std::size_t>(DriveStep::count);++i)if(r.steps[i] && i!=static_cast<std::size_t>(DriveStep::notActive)) {
         const int wrote=std::snprintf(skips+used,sizeof(skips)-used,"%s%s %u",used ? ", " : "",kDriveStepNames[i],r.steps[i]);
         if(wrote<0 || static_cast<std::size_t>(wrote)>=sizeof(skips)-used)break;
         used+=static_cast<std::size_t>(wrote);
@@ -1913,7 +1914,7 @@ void LogVehicleAi(NpcVehicleAi& r,unsigned char* v,const char* why) noexcept {
         "list=%#x target %p at %.0f m (active %d); gunners [%s]; rounds seat:n [%s]",
         v,why,driver,r.last==DriveStep::count ? "no driver Think" : kDriveStepNames[static_cast<int>(r.last)],
         r.last==DriveStep::seatInput ? ": " : "",r.last==DriveStep::seatInput ? SeatInputOwnerName(r.owner) : "",elapsed,
-        r.steps[static_cast<int>(DriveStep::ran)],r.actions,skips[0] ? "; skipped: " : "",skips,v[kActiveFlag],
+        r.steps[static_cast<int>(DriveStep::ran)]+r.steps[static_cast<int>(DriveStep::notActive)],r.actions,skips[0] ? "; skipped: " : "",skips,v[kActiveFlag],
         At<float>(v,kSightRange),v[kTargetCheck],v[kTargetActive],v[kFireSwitch],v[kListFlags],target,targetAt,
         seen ? target[kActiveFlag] : -1,gunners,rounds);
     for(auto& n:r.steps)n=0;
@@ -1940,17 +1941,18 @@ void SeeDriveStep(unsigned char* v,const unsigned char* h,DriveStep step,SeatInp
 // already or its +0x380 bit 21 forbids it. Every vehicle AI action reads +0x4A0 before it turns to, aims at or fires on
 // its target (CarBase 0x661440 at 0x6616C0, the mechs' 0x63C1C0 at 0x63C381, Proteus' 0x648F70 at 0x649067, the Barga's
 // stand-by 0x6049B0 at 0x604A1A): off, the action leaves its target alone. A stock AI vehicle is activated when it is
-// made (the script's CreateFriend / CreateEnemy `active` 0x1D8A9E), when its sight +0x470 sees a target (0x54C26A) or
+// made (the script's CreateFriend / CreateEnemy `active` 0x1D8AAB), when its sight +0x470 sees a target (0x54C26A) or
 // on some hits (0x5483E3); a vehicle a real soldier boards (a player's call-in, a range's CreateVehicle2 one) is made
 // inactive with sight 0. Measured (the user 2026-10-31 #3, the range with three NPC-driven tanks): the one already
 // active when its driver sat (+0x4A0 = 1; what woke it was not read, it stood empty while the ants came) fired its
 // main gun, the two inactive ones kept all 25 rounds for 100 s with the stock AI's target 80-150 m off. So the plugin,
 // taking such a vehicle's AI over for its NPC driver, activates it as the stock activates an AI vehicle it makes,
-// before its first pass.
+// before its first pass. Refused (or 0x548D50 not as read) the pass and the action still run: the gate keeps only the
+// turn, the aim and the fire, and the pass is what drives it (the command panel's moves among them); one line says so.
 constexpr unsigned kActivate=0x548D50;
 const unsigned char kActivateSig[]={0x40,0x53,0x48,0x83,0xEC,0x20,0x80,0xB9,0xA0,0x04,0x00,0x00,0x00,0x48,0x8B,0xD9};
 using ActivateFn=void(__fastcall*)(void*);
-bool ActivateDrivenVehicle(unsigned char* v) noexcept {
+bool ActivateDrivenVehicle(unsigned char* v,NpcVehicleAi* r) noexcept {
     static int sig=0;
     if(!sig) {
         sig=Matches(kActivate,kActivateSig,sizeof(kActivateSig)) ? 1 : -1;
@@ -1959,8 +1961,15 @@ bool ActivateDrivenVehicle(unsigned char* v) noexcept {
     if(v[kActiveFlag])return true;
     if(sig<0)return false;
     reinterpret_cast<ActivateFn>(image+kActivate)(v);
-    if(Cfg().debug)Log("NPCAI vehicle v=%p activated for its NPC driver: %s",v,v[kActiveFlag] ? "active" : "refused (+0x380 bit 21)");
-    return v[kActiveFlag]!=0;
+    if(v[kActiveFlag]) {
+        if(Cfg().debug)Log("NPCAI vehicle v=%p activated for its NPC driver: active",v);
+        return true;
+    }
+    if(r && !r->refusalLogged) {
+        r->refusalLogged=true;
+        Log("NPCAI vehicle v=%p refused activation (+0x380 bit 21): its NPC driver moves it, its AI does not turn, aim or fire",v);
+    }
+    return false;
 }
 
 // The step a Think of seat 0's rider ends at for `v`. Each return is one cause the diagnosis names.
@@ -1981,22 +1990,22 @@ DriveStep DriveVehicleAiStep(unsigned char* v,unsigned char* seat,const float* d
     if(r){r->passed=true;r->passFrame=frame;}
     if(kind==AiPass::barga && !BargaReady(v,vt))return DriveStep::bargaNotBuilt;
     if(kind==AiPass::car && !CarAimReady(v,vt))return DriveStep::carNotBuilt;
-    if(!ActivateDrivenVehicle(v))return DriveStep::notActive;
+    const DriveStep done=ActivateDrivenVehicle(v,r) ? DriveStep::ran : DriveStep::notActive;
     reinterpret_cast<AiPassFn>(vt[kSlotAiPass])(v,dt);
-    if(kind==AiPass::barga)return DriveStep::ran;   // its action runs inside its pass
+    if(kind==AiPass::barga)return done;   // its action runs inside its pass
     // The class's AI action when no slot 6 registered one (see above).
     const bool car=kind==AiPass::car;
     const std::size_t action=car ? kCarAction : kMechAction,inAction=car ? kCarInAction : kMechInAction;
     const std::size_t slot=car ? kSlotCarAi : kSlotMechAi;
-    if(At<const void*>(v,action) || !Readable(vt,(slot+1)*8))return DriveStep::ran;
+    if(At<const void*>(v,action) || !Readable(vt,(slot+1)*8))return done;
     const void* fn=vt[slot];
-    if(car ? fn!=image+kCarAi : (fn!=image+kMechAi && fn!=image+kProteusAi))return DriveStep::ran;
-    if(!PrepareNpcVehicleAi(v))return DriveStep::ran; // the native pass may replace the target; refresh before firing
+    if(car ? fn!=image+kCarAi : (fn!=image+kMechAi && fn!=image+kProteusAi))return done;
+    if(!PrepareNpcVehicleAi(v))return done; // the native pass may replace the target; refresh before firing
     if(r)++r->actions;
     const unsigned char previous=v[inAction];v[inAction]=1;
     __try {reinterpret_cast<AiActionFn>(const_cast<void*>(fn))(v,1,dt,nullptr);}
     __finally {v[inAction]=previous;}
-    return DriveStep::ran;
+    return done;
 }
 
 void DriveVehicleAi(unsigned char* h,const float* dt) noexcept {

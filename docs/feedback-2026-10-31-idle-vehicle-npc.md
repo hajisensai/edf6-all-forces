@@ -34,12 +34,13 @@ NPCAI vehicle v=…F40218B0 (every 5 s) driver …F2E467D0: ran its AI pass; 5 s
 ## 修法
 
 `src/npcai.cpp` `ActivateDrivenVehicle`：插件为真实 NPC 驾驶员接管载具 AI 时，在它第一次 AI 遍之前按原版激活 AI 载具的方式调用一次
-`0x548D50`（已激活就什么都不做；`+0x380` 第 21 位禁止激活时记为 `not active`，不跑 AI 遍）。签名不符（`0x548D50` 序言）就记一行日志、
-不跑 AI 遍。地址由 `tests/npc_vehicle_ai_native_audit.py` 钉住。
+`0x548D50`（已激活就什么都不做）。`+0x380` 第 21 位禁止激活或签名不符（`0x548D50` 序言）时，AI 遍与 AI 动作照常跑（原版那道门只拦
+转向 / 瞄准 / 开火，移动——包括指挥面板下的令——在 AI 遍里），只记为 `ran its AI pass inactive`，每辆车记一行日志。
+地址由 `tests/npc_vehicle_ai_native_audit.py` 钉住。
 
 同时加了按车诊断（Debug=1，每辆车每 5 秒一行，驾驶员的步骤变了立刻一行）：驾驶员 Think 停在哪一步、AI 遍 / AI 动作次数、
 `+0x4A0` / `+0x470` / `+0xE04/E08/E09`、原版目标与距离、各炮手座这一帧为什么开 / 没开火、各座弹药；
 驾驶员 Think 1 秒没来时由载具帧报出。原来「一帧只跑一次」的去重是全局一个 `{vehicle, frame}` 静态变量，改为按车记录。
 
 离线：`tests/real_npc_crew_test.cpp` 两辆假车两名 NPC 驾驶员同帧 / 交替顺序 / 同帧二次 Think / 下车再上车、玩家驾驶 + 两名 NPC 炮手，
-以及负对照（AI 表上的车、炮手的 Think、拒绝激活、玩家驾驶）；去掉激活调用时其中 3 条变红。
+拒绝激活时仍跑 AI 遍与动作，以及负对照（AI 表上的车、炮手的 Think、玩家驾驶）；去掉激活调用时其中 3 条变红。

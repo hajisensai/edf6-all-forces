@@ -209,8 +209,14 @@ int main() {
     Leave(other);
     CrewSetup();MakeCars();nextThink[0]=&ThinkRecord;refuseActivation=true;
     Sit(other,1,0);++frame;now+=16;ThinkOf(other);
-    Expect(activations[1]==1 && passes[1]==0 && LastStep(1)==DriveStep::notActive,
-           "negative: a vehicle the stock refuses to activate runs no pass and says why");
+    Expect(activations[1]==1 && passes[1]==1 && actions[1]==1 && LastStep(1)==DriveStep::notActive,
+           "a vehicle the stock refuses to activate still runs its pass and action (its moves), and says why");
+    {
+        const NpcVehicleAi* rr=VehicleAiOf(cars[1],false);
+        Expect(rr && rr->refusalLogged && !cars[1][kActiveFlag],"...the refusal is logged and the vehicle left inactive");
+    }
+    ++frame;now+=16;ThinkOf(other);
+    Expect(passes[1]==2 && actions[1]==2 && LastStep(1)==DriveStep::notActive,"...and next frame too, once a frame");
     Leave(other);
     // A player drives, two NPC gunners: both seats aim and pull their triggers in the same frame.
     CrewSetup();MakeCars();std::memset(playerSoldier,0,sizeof(playerSoldier));
