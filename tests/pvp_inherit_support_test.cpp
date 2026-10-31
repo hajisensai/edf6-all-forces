@@ -46,12 +46,12 @@ int main() {
     parent=ResetParent();fixture.cachedOwner=true;fixture.nativeOk=false;
     CHECK(!PvpInheritSupport(parent,children,1));CHECK(fixture.nativeCalls==1);
 
-    // A cache miss on an actual player goes through both independent native ID
-    // resolvers, Coop's mission-slot resolver, and the native PUID seal.
+    // A cache miss on an actual player goes through its mission-slot requester (never its NetId: a stock mission numbers
+    // those per machine), the slot's live player, Coop's mission-slot resolver, and the native PUID seal.
     parent=ResetParent(1);
     CHECK(PvpInheritSupport(parent,children,1));
     CHECK(fixture.ownerCalls==1 && fixture.soldierCalls==1 && fixture.playerCalls==1 && fixture.objectIdCalls==1);
-    CHECK(fixture.strictCalls==1 && fixture.markCalls==1 && fixture.resolveCalls==1 && fixture.sealCalls==1);
+    CHECK(fixture.strictCalls==0 && fixture.markCalls==1 && fixture.resolveCalls==1 && fixture.sealCalls==1);
     CHECK(fixture.correctObjectIdArgs && fixture.correctCommandArgs && fixture.correctMarkArgs &&
         fixture.correctLoaderArgs && fixture.correctSealArgs);
     CHECK(fixture.nativeCalls==1 && fixture.attachedTeam==1 && !std::strcmp(fixture.attachedPuid,kOwner));
@@ -65,7 +65,7 @@ int main() {
     parent=ResetParent(0);crew::Put<const void*>(vehicle,crew::kSelfCtrl,vehicleCtrl);crew::Put<LONG>(vehicleCtrl,8,1);
     fixture.driverOk=true;fixture.driverPlayer=parent;fixture.driverVehicle={vehicle,vehicleCtrl};
     CHECK(PvpInheritSupport(fixture.driverVehicle,children,1));
-    CHECK(fixture.driverCalls==1 && fixture.strictCalls==1 && fixture.sealCalls==1 && fixture.attachedTeam==0);
+    CHECK(fixture.driverCalls==1 && fixture.markCalls==1 && fixture.sealCalls==1 && fixture.attachedTeam==0);
     fixture.team=2;CHECK(PvpInheritSupport(fixture.driverVehicle,children,1));
     CHECK(fixture.attachedTeam==2 && !std::strcmp(fixture.attachedPuid,kOwner));
     fixture.driverOk=false;CHECK(!PvpInheritSupport(fixture.driverVehicle,children,1));
@@ -89,11 +89,11 @@ int main() {
     parent=ResetParent();parent.obj=reinterpret_cast<const void*>(1);
     CHECK(!PvpInheritSupport(parent,children,1));CHECK(fixture.objectIdCalls==0 && fixture.nativeCalls==0);
     parent=ResetParent();fixture.nativeIdOk=false;
-    CHECK(!PvpInheritSupport(parent,children,1));CHECK(fixture.strictCalls==0 && fixture.nativeCalls==0);
+    CHECK(!PvpInheritSupport(parent,children,1));CHECK(fixture.markCalls==0 && fixture.nativeCalls==0);
     parent=ResetParent();std::memset(fixture.parentId,0,sizeof(fixture.parentId));
-    CHECK(!PvpInheritSupport(parent,children,1));CHECK(fixture.strictCalls==0 && fixture.nativeCalls==0);
+    CHECK(!PvpInheritSupport(parent,children,1));CHECK(fixture.markCalls==0 && fixture.nativeCalls==0);
     parent=ResetParent();fixture.parentId[20]=1;
-    CHECK(!PvpInheritSupport(parent,children,1));CHECK(fixture.strictCalls==0 && fixture.nativeCalls==0);
+    CHECK(!PvpInheritSupport(parent,children,1));CHECK(fixture.markCalls==0 && fixture.nativeCalls==0);
     parent=ResetParent();fixture.commandPlayer=fixture.markPlayer=crew::ObjRef{actor,control};
     CHECK(!PvpInheritSupport(parent,children,1));CHECK(fixture.resolveCalls==0 && fixture.nativeCalls==0);
     parent=ResetParent();fixture.markPlayer.ctrl=otherControl;
@@ -119,19 +119,19 @@ int main() {
     // A delayed/rebuilt plan must refresh from the owner's present committed
     // side instead of trusting the old plan.team value (including invalid ones).
     auto plan=Reset(true);fixture.team=2;plan.team=99;
-    CHECK(PvpRefreshSupportOwner(&plan));CHECK(plan.team==2 && fixture.strictCalls==1 && fixture.sealCalls==1);
+    CHECK(PvpRefreshSupportOwner(&plan));CHECK(plan.team==2 && fixture.markCalls==1 && fixture.sealCalls==1);
     fixture.team=1;
-    CHECK(PvpRefreshSupportOwner(&plan));CHECK(plan.team==1 && fixture.strictCalls==2 && fixture.sealCalls==2);
+    CHECK(PvpRefreshSupportOwner(&plan));CHECK(plan.team==1 && fixture.markCalls==2 && fixture.sealCalls==2);
     fixture.team=0;
-    CHECK(PvpRefreshSupportOwner(&plan));CHECK(plan.team==0 && fixture.strictCalls==3 && fixture.sealCalls==3);
+    CHECK(PvpRefreshSupportOwner(&plan));CHECK(plan.team==0 && fixture.markCalls==3 && fixture.sealCalls==3);
     plan=Reset(true);fixture.team=-1;plan.team=1;
     CHECK(!PvpRefreshSupportOwner(&plan));CHECK(plan.team==1);
-    plan=Reset(true);fixture.strictOk=false;plan.team=2;
+    plan=Reset(true);fixture.markOk=false;plan.team=2;
     CHECK(!PvpRefreshSupportOwner(&plan));CHECK(plan.team==2);
     plan=Reset(true);fixture.sealed=false;plan.team=1;
     CHECK(!PvpRefreshSupportOwner(&plan));CHECK(plan.team==1);
     plan=Reset(true);plan.requester[23]=1;plan.team=2;
-    CHECK(!PvpRefreshSupportOwner(&plan));CHECK(plan.team==2 && fixture.strictCalls==0);
+    CHECK(!PvpRefreshSupportOwner(&plan));CHECK(plan.team==2 && fixture.markCalls==0);
     plan=Reset();plan.team=99;
     CHECK(PvpRefreshSupportOwner(&plan));CHECK(plan.team==0 && fixture.strictCalls==0 && fixture.nativeCalls==0);
     plan=Reset();fixture.team=2;plan.team=1;
@@ -162,7 +162,7 @@ int main() {
     fixture.driverVehicle={vehicle,vehicleCtrl};
     CHECK(crew::PvpMakeInheritedSupportPlan(fixture.driverVehicle,&inherited) &&
         !std::memcmp(inherited.requester,fixture.expectedId,32) && inherited.team==0);
-    CHECK(fixture.strictCalls==1 && fixture.markCalls==1 && fixture.resolveCalls==1 && fixture.sealCalls==1);
+    CHECK(fixture.strictCalls==0 && fixture.markCalls==1 && fixture.resolveCalls==1 && fixture.sealCalls==1);
     parent=ResetParent(2);fixture.parentId[20]=1;inherited={};
     CHECK(!crew::PvpMakeInheritedSupportPlan(parent,&inherited));
     CHECK(!crew::PvpMakeInheritedSupportPlan(parent,nullptr));

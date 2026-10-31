@@ -20,6 +20,7 @@
 #include "support_submarine.h"
 #include "support_soldier.h"
 #include "command_identity.h"
+#include "player_requester.h"
 #include "version_notice.h"
 #include "hudtext.h"
 #include "plugin_net.h"
@@ -366,9 +367,11 @@ bool PlanRequester(std::uint32_t peer,unsigned char* out,ObjRef* outActor=nullpt
         if(!actor.obj)continue;
         EDF6CoopPeer who{};
         if(!resolve(static_cast<std::int32_t>(i),&who) || !PeerValid(who) || std::strcmp(who.id,authenticated))continue;
+        // Named by its mission slot (player_requester.h), the same on every machine; its NetId is not (a stock mission's
+        // are the script thread's count on each machine).
         __try {
             unsigned char candidate[32]{};MarkIdentities identities{};
-            if(ReadNativeObjectId(static_cast<const unsigned char*>(actor.obj),candidate) &&
+            if(MakePlayerRequester(static_cast<int>(i),candidate) &&
                ResolveMarkIdentities(candidate,nullptr,&identities) && identities.player.obj==actor.obj &&
                identities.player.ctrl==actor.ctrl && SupportCommandRequesterMatches(identities.puid,authenticated)) {
                 std::memcpy(out,candidate,32);if(outActor)*outActor=actor;return true;
@@ -402,8 +405,8 @@ support_net::PlanResult PlanForRequester(std::uint32_t peer,std::uint32_t catalo
 bool SupportPlanRequesterIsLocal(const support_net::Plan& plan) noexcept {
     unsigned char local[32]{};
     __try {
-        const unsigned char* human=PlayerHuman();
-        if(!human || !ReadNativeObjectId(human,local))return false;
+        unsigned char* human=PlayerHuman();
+        if(!human || !PlayerRequesterOf(ObjRef::Of(human),local))return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
     return std::memcmp(local,plan.requester,sizeof(local))==0;
 }

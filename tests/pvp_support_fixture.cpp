@@ -24,7 +24,7 @@ struct Fixture {
     int markSlot=3,expectedSlot=3,team=0;
     char resolvedText[65]="nativeowner001";
     unsigned strictCalls=0,markCalls=0,resolveCalls=0,sealCalls=0,teamCalls=0,nativeCalls=0;
-    unsigned strictFailAt=0,teamRejectAt=0;
+    unsigned markFailAt=0,teamRejectAt=0;
     int resolvedSlot=-1,attachedTeam=-1;
     unsigned attachedCount=0;
     const crew::ObjRef* attachedObjects=nullptr;
@@ -53,7 +53,7 @@ crew::support_net::Plan Reset(bool owned=false,unsigned count=1) noexcept {
     fixture=Fixture{};
     crew::support_net::Plan plan{};plan.count=count;
     if(owned) {
-        plan.requester[0]=0x41;plan.requester[4]=7;plan.requester[12]=5;plan.requester[24]=0xAB;
+        crew::MakePlayerRequester(3,plan.requester);   // the requester's mission slot (player_requester.h)
         std::memcpy(fixture.expectedId,plan.requester,sizeof(plan.requester));
     }
     return plan;
@@ -115,7 +115,7 @@ bool ResolveCommandIdentities(const unsigned char requester[32],const unsigned c
         !units && !count && !focus && out;
     if(!out)return false;
     *out={};
-    if(!fixture.strictOk || (fixture.strictFailAt && fixture.strictCalls==fixture.strictFailAt))return false;
+    if(!fixture.strictOk)return false;
     out->requester=fixture.commandPlayer;out->requesterPuid=fixture.commandPuid;return true;
 }
 bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char target[32],MarkIdentities* out) noexcept {
@@ -123,8 +123,16 @@ bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char ta
     fixture.correctMarkArgs=fixture.correctMarkArgs && marker && !std::memcmp(marker,fixture.expectedId,32) && !target && out;
     if(!out)return false;
     *out={};
-    if(!fixture.markOk)return false;
+    if(!fixture.markOk || (fixture.markFailAt && fixture.markCalls==fixture.markFailAt))return false;
     out->player=fixture.markPlayer;out->puid=fixture.markPuid;out->slot=fixture.markSlot;return true;
+}
+// The player's requester identity (player_requester.h), as the fixture's parent ID says it is.
+bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept {
+    ++fixture.objectIdCalls;
+    fixture.correctObjectIdArgs=fixture.correctObjectIdArgs && who.obj==fixture.expectedParent.obj && out;
+    std::memset(out,0,32);
+    if(!fixture.nativeIdOk || who.obj!=fixture.expectedParent.obj)return false;
+    std::memcpy(out,fixture.parentId,32);return true;
 }
 bool SupportCommandRequesterMatches(void* puid,const char* text) noexcept {
     ++fixture.sealCalls;
@@ -173,17 +181,17 @@ int main() {
         plan=Reset(true);plan.requester[i]=1;CHECK(!PvpValidateSupportPlan(plan));
         CHECK(fixture.strictCalls==0 && fixture.markCalls==0);
     }
-    plan=Reset(true);fixture.strictOk=false;CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.markCalls==0);
-    plan=Reset(true);fixture.markOk=false;CHECK(!PvpValidateSupportPlan(plan));
-    plan=Reset(true);fixture.commandPlayer={};CHECK(!PvpValidateSupportPlan(plan));
-    plan=Reset(true);fixture.markPlayer={};CHECK(!PvpValidateSupportPlan(plan));
-    plan=Reset(true);fixture.markPlayer.obj=actor+1;CHECK(!PvpValidateSupportPlan(plan));
-    plan=Reset(true);fixture.markPlayer.ctrl=control+1;CHECK(!PvpValidateSupportPlan(plan));
-    plan=Reset(true);fixture.commandPuid=nativePuid+1;CHECK(!PvpValidateSupportPlan(plan));
-    plan=Reset(true);fixture.markPuid=nullptr;CHECK(!PvpValidateSupportPlan(plan));
-    plan=Reset(true);fixture.commandPuid=fixture.markPuid=nativePuid+1;CHECK(!PvpValidateSupportPlan(plan));
+    // The requester is the player's mission slot, never a NetId: a stock mission numbers the players' NetIds per machine,
+    // so a guest found no host player by the host's and refused every plan it asked for (2026-10-31).
+    plan=Reset(true);plan.requester[0]=0x41;plan.requester[1]=plan.requester[2]=plan.requester[3]=0;plan.requester[12]=5;
+    CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.markCalls==0 && fixture.strictCalls==0);
+    plan=Reset(true);fixture.strictOk=false;CHECK(PvpValidateSupportPlan(plan));CHECK(fixture.strictCalls==0);
+    plan=Reset(true);fixture.markOk=false;CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.resolveCalls==0);
+    plan=Reset(true);fixture.markPlayer={};CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.resolveCalls==0);
+    plan=Reset(true);fixture.markPuid=nullptr;CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.resolveCalls==0);
+    plan=Reset(true);fixture.markPuid=nativePuid+1;CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.sealCalls==1);
     plan=Reset(true);fixture.markSlot=-1;CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.resolveCalls==0);
-    plan=Reset(true);fixture.markSlot=4;CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.resolvedSlot==4);
+    plan=Reset(true);fixture.markSlot=4;CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.resolveCalls==0);
 
     plan=Reset(true);fixture.modulePresent=false;CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.resolveCalls==0);
     plan=Reset(true);fixture.exportPresent=false;CHECK(!PvpValidateSupportPlan(plan));CHECK(fixture.resolveCalls==0);
@@ -213,7 +221,7 @@ int main() {
     CHECK(PvpAttachSupportPlan(plan,objects,crew::support_net::kMaxUnits));
     CHECK(fixture.nativeCalls==1 && fixture.attachedTeam==0 &&
         fixture.attachedCount==crew::support_net::kMaxUnits && fixture.attachedObjects==objects);
-    CHECK(fixture.strictCalls==2 && fixture.markCalls==2 && fixture.resolveCalls==2 && fixture.sealCalls==2);
+    CHECK(fixture.strictCalls==0 && fixture.markCalls==2 && fixture.resolveCalls==2 && fixture.sealCalls==2);
     for(unsigned i=0;i<crew::support_net::kMaxUnits;++i)
         CHECK(fixture.attachedRefs[i].obj==actor+i && fixture.attachedRefs[i].ctrl==control+i);
     CHECK(fixture.correctCommandArgs && fixture.correctMarkArgs && fixture.correctLoaderArgs && fixture.correctSealArgs);
@@ -222,15 +230,15 @@ int main() {
     CHECK(!PvpAttachSupportPlan(plan,objects,crew::support_net::kMaxUnits-1));
     CHECK(!PvpAttachSupportPlan(plan,objects,crew::support_net::kMaxUnits+1));
     CHECK(!PvpAttachSupportPlan(plan,nullptr,crew::support_net::kMaxUnits));
-    CHECK(fixture.strictCalls==0 && fixture.nativeCalls==0);
+    CHECK(fixture.markCalls==0 && fixture.nativeCalls==0);
     plan=Reset();CHECK(!PvpAttachSupportPlan(plan,objects,0));CHECK(fixture.nativeCalls==0);
     plan=Reset();CHECK(!PvpAttachSupportPlan(plan,objects,2));CHECK(fixture.nativeCalls==0);
     plan=Reset(true);fixture.nativeOk=false;CHECK(!PvpAttachSupportPlan(plan,objects,1));CHECK(fixture.nativeCalls==1);
 
     // A valid planning/validation identity cannot authorize a changed player or
     // a mode transaction that begins before the final native attachment.
-    plan=Reset(true);fixture.strictFailAt=2;CHECK(!PvpAttachSupportPlan(plan,objects,1));
-    CHECK(fixture.strictCalls==2 && fixture.nativeCalls==0);
+    plan=Reset(true);fixture.markFailAt=2;CHECK(!PvpAttachSupportPlan(plan,objects,1));
+    CHECK(fixture.markCalls==2 && fixture.nativeCalls==0);
     plan=Reset(true);fixture.teamRejectAt=2;CHECK(!PvpAttachSupportPlan(plan,objects,1));
     CHECK(fixture.teamCalls==2 && fixture.nativeCalls==0);
 

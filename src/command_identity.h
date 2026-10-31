@@ -23,6 +23,8 @@ bool ResolveCommandIdentities(const unsigned char requester[32],const unsigned c
 // The Q mark's (qmark.cpp): one native all-team walk for a mark's marker (a live player: its ObjRef, its mission player
 // slot and its native PUID, borrowed as above) and its target. Either ID may be all zero (not asked) or not found (its
 // ObjRef left empty): only a walk that could not run fails. Game thread only; nothing written.
+// A marker that is a player requester (player_requester.h) is the live player of that mission slot, whatever its NetId
+// (none when two players hold the slot).
 struct MarkIdentities {
     ObjRef player{};
     int slot=-1;
@@ -33,6 +35,8 @@ bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char ta
 // The gravity operations' (gravity_net.cpp): as ResolveMarkIdentities, but the target may be dead (a corpse is still
 // thrown about), only not deleted.
 bool ResolveGrabIdentities(const unsigned char grabber[32],const unsigned char target[32],MarkIdentities* out) noexcept;
+// A live player's requester identity (player_requester.h: its mission slot). False (and `out` zero) for anything else.
+bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept;
 }
 namespace crew {
 // The sender check of every plugin channel (plugin_net.h) for a message that speaks for a player: `nativePuid` (a resolved

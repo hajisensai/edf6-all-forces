@@ -1,4 +1,5 @@
 #include "command_identity.h"
+#include "player_requester.h"
 #include "memory.h"
 #include "team_walk.h"
 #include "support_soldier.h"
@@ -65,6 +66,10 @@ struct MarkVisitor {
     unsigned expected=0;
     MarkIdentities out{};
     bool deadTarget=false;   // the target may be dead (not deleted)
+    // A marker given as a player requester (player_requester.h): the live player of that mission slot, found by its
+    // User, not by an ID; two of them is none.
+    int markerSlot=-1;
+    bool markerTwice=false;
 };
 // Not deleted, its own weak reference live (dead or alive).
 bool Present(const unsigned char* object,ObjRef* ref) noexcept {
@@ -76,9 +81,17 @@ bool Present(const unsigned char* object,ObjRef* ref) noexcept {
 void __fastcall VisitMark(MarkVisitor* v,const unsigned char* object) noexcept {
     if(!object)return;
     __try {
+        ObjRef ref{};
+        if(v->markerSlot>=0) {
+            void* puid=nullptr;int slot=-1;
+            if(Live(object,&ref) && Requester(object,v->expected,&puid,&slot) && slot==v->markerSlot) {
+                // The same object met again in another team is no second player.
+                if(v->out.player && (v->out.player.obj!=ref.obj || v->out.player.ctrl!=ref.ctrl))v->markerTwice=true;
+                v->out.player=ref;v->out.puid=puid;v->out.slot=slot;
+            }
+        }
         unsigned char id[32]{};
         if(!ReadNativeObjectId(object,id))return;
-        ObjRef ref{};
         if(v->marker && !std::memcmp(id,v->marker,32) && Live(object,&ref) && Requester(object,v->expected,&v->out.puid,&v->out.slot))
             v->out.player=ref;
         else if(v->target && !std::memcmp(id,v->target,32) && (v->deadTarget ? Present(object,&ref) : Live(object,&ref)))v->out.target=ref;
@@ -136,7 +149,8 @@ bool ResolveMarks(const unsigned char marker[32],const unsigned char target[32],
     __try {
         MarkVisitor visitor{kMarkVisitorVtable,Canonical(marker) ? marker : nullptr,Canonical(target) ? target : nullptr};
         visitor.deadTarget=deadTarget;
-        if(!visitor.marker && !visitor.target)return false;
+        if(visitor.marker && PlayerRequesterSlot(visitor.marker,&visitor.markerSlot))visitor.marker=nullptr;
+        if(!visitor.marker && visitor.markerSlot<0 && !visitor.target)return false;
         if(!Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)))return false;
         void* mgr=At<void*>(image,kTeamManager);
         const auto status=At<const unsigned char*>(image,kGameStatus);
@@ -144,6 +158,7 @@ bool ResolveMarks(const unsigned char marker[32],const unsigned char target[32],
         visitor.expected=At<unsigned>(status,0x14FF8);
         if(!visitor.expected || visitor.expected>kMaxPlayers || !team_walk::WalkRows(mgr))return false;
         reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
+        if(visitor.markerTwice){visitor.out.player={};visitor.out.puid=nullptr;visitor.out.slot=-1;}
         *out=visitor.out;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){*out=MarkIdentities{};return false;}
@@ -154,5 +169,20 @@ bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char ta
 }
 bool ResolveGrabIdentities(const unsigned char grabber[32],const unsigned char target[32],MarkIdentities* out) noexcept {
     return ResolveMarks(grabber,target,true,out);
+}
+bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept {
+    using namespace command_identity;
+    if(!out)return false;
+    std::memset(out,0,32);
+    __try {
+        const auto status=At<const unsigned char*>(image,kGameStatus);
+        if(!Readable(status,0x14FFC))return false;
+        const unsigned expected=At<unsigned>(status,0x14FF8);
+        const auto object=static_cast<const unsigned char*>(who.obj);
+        ObjRef ref{};void* puid=nullptr;int slot=-1;
+        if(!expected || expected>kMaxPlayers || !Live(object,&ref) || ref.ctrl!=who.ctrl ||
+           !Requester(object,expected,&puid,&slot))return false;
+        return MakePlayerRequester(slot,out);
+    } __except(EXCEPTION_EXECUTE_HANDLER){std::memset(out,0,32);return false;}
 }
 }
