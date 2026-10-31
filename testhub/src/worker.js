@@ -3,10 +3,12 @@
 //  - cases: what to test, how, and its state; reports: the tester's results with logs / videos attached;
 //  - the developer's replies sit under each report.
 // Everything is behind a login (ACCOUNTS secret); scripts and the installer use HTTP Basic instead of the cookie.
+// The one exception is /download (share.js): the share package, public so a link to it can be passed around.
 import { loadAccounts, checkLogin, makeSession, readSession, basicUser } from './auth.js';
 import { HttpError, json, body } from './http.js';
 import { planRoute } from './plan.js';
 import { storyRoute } from './story.js';
+import { shareRoute, putSharePart, publishShare } from './share.js';
 import MISSIONS from './missions.json' with { type: 'json' };
 
 const MAX_UPLOAD = 95 * 1024 * 1024;        // the Workers request limit is 100 MB
@@ -14,7 +16,8 @@ const RESULTS = ['pass', 'fail', 'new', 'info'];
 const STATUSES = ['todo', 'verify', 'pass', 'fail', 'done', 'closed'];
 // The developer's handling of a report (the page's 处理状态 column): 待处理 / 处理中 / 已修待确认 / 已完成 / 不处理.
 export const REPORT_STATUSES = ['open', 'doing', 'verify', 'done', 'closed'];
-const PUBLIC_ASSETS = new Set(['/login.html', '/login.js', '/style.css']);
+// The download page and its scripts are public too (share.js: the share package needs no account).
+const PUBLIC_ASSETS = new Set(['/login.html', '/login.js', '/style.css', '/download.html', '/download.js', '/chunked-download.mjs', '/pack-download.mjs']);
 const SESSION_DAYS = 60;
 
 export default {
@@ -67,6 +70,12 @@ async function route(request, env) {
   if (path === '/login' && method === 'POST') return login(request, env, accounts);
   if (path === '/logout') return redirect('/login.html', { 'set-cookie': 's=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax' });
   if (PUBLIC_ASSETS.has(path)) return env.ASSETS.fetch(request);
+  if (path === '/download') return env.ASSETS.fetch(new Request(new URL('/download.html', url), request));
+  if (path.startsWith('/share/')) {
+    const out = await shareRoute(request, env, path);
+    if (out) return out;
+    throw new HttpError(404, 'not found');
+  }
 
   const me = await who(request, env, accounts);
   if (!me) {
@@ -94,6 +103,8 @@ async function route(request, env) {
   if (path === '/api/build/part' && method === 'PUT') { need(dev); return json(await putBuildPart(request, env, url)); }
   if (path === '/api/build/finish' && method === 'POST') { need(dev); return json(await finishBuild(request, env, url)); }
   if (path === '/api/build/abort' && method === 'POST') { need(dev); return json(await abortBuild(env, url)); }
+  if (path === '/api/share/part' && method === 'PUT') { need(dev); return json(await putSharePart(request, env, url)); }
+  if (path === '/api/share/publish' && method === 'POST') { need(dev); return json(await publishShare(request, env)); }
   if (path === '/api/reports' && method === 'GET') { need(dev); return json(await reportsSince(env, Number(url.searchParams.get('since') || 0))); }
   if (path === '/api/plan' || path.startsWith('/api/plan/')) {
     const out = await planRoute(request, env, me, MISSIONS, groupsOf(accounts), path, url);

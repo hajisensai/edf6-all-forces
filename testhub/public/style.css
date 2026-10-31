@@ -90,3 +90,7 @@ dialog.digestBox .row label.inline { margin-left: auto; font-weight: 500; }
 .storyMission:first-child { border-top: 0; }
 .storyMission h3 { margin: 0; font-size: 16px; }
 .storyBody { white-space: pre-wrap; }
+.progress { height: 8px; background: var(--code); border-radius: 99px; overflow: hidden; margin: 12px 0 6px; }
+.progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.gap-top { margin-top: 12px; }
+[hidden] { display: none !important; }

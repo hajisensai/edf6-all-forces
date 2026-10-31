@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EDF 全军出击下载</title>
+<link rel="stylesheet" href="/style.css">
+<script type="module" src="/download.js"></script>
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>EDF 全军出击 · 下载</h1>
+  </header>
+
+  <p class="muted">
+    两个包都要下：主包（插件、联机修复、安装器）和模型包（载具模型与 EDF4.1 素材）。主包的安装器会检查模型包版本，对不上会拒绝安装。
+    「下载」用分片加速：每片 4 条连接并发下载，逐片校验 SHA-256 后写进你选的文件，校验不过的片不会落盘。
+    Chrome / Edge 会先问保存位置；其他浏览器只能对主包用分片下载（在内存里拼好再保存），模型包请用「普通下载」。
+    用下载工具（IDM 等）或分片下载失败时，也点「普通下载」。
+  </p>
+
+  <section class="pack" data-slot="main">
+    <h2>主包</h2>
+    <div class="info muted">加载中……</div>
+    <div class="row gap-top">
+      <button class="btn go" disabled>下载</button>
+      <button class="btn ghost cancel" hidden>取消</button>
+      <a class="btn ghost plain" hidden>普通下载</a>
+    </div>
+    <div class="progress" hidden><div class="fill"></div></div>
+    <div class="status muted"></div>
+    <details class="notesBox" hidden><summary class="muted">更新说明</summary><pre class="notes"></pre></details>
+  </section>
+
+  <section class="pack" data-slot="models">
+    <h2>模型包</h2>
+    <div class="info muted">加载中……</div>
+    <div class="row gap-top">
+      <button class="btn go" disabled>下载</button>
+      <button class="btn ghost cancel" hidden>取消</button>
+      <a class="btn ghost plain" hidden>普通下载</a>
+    </div>
+    <div class="progress" hidden><div class="fill"></div></div>
+    <div class="status muted"></div>
+    <details class="notesBox" hidden><summary class="muted">说明</summary><pre class="notes"></pre></details>
+  </section>
+</main>
+</body>
+</html>

@@ -16,6 +16,8 @@ Developer side:
   python tools/testhub.py case add TITLE [--steps T] [--status S] [--note T] [--sort N]
   python tools/testhub.py case set ID [--title T] [--steps T] [--status S] [--note T] [--sort N]
   python tools/testhub.py publish ZIP [--channel test] [--notes TEXT] [--commit SHA]
+  python tools/testhub.py share ZIP --slot main|models [--version V] [--notes TEXT]
+                                                         a share package to the public page /download
   python tools/testhub.py plan [--group G]                a group's level outline and proposals (players' text fenced)
   python tools/testhub.py digests [DIR]                   upload tools/make_mission_digest.py's output (default tmp/digests)
   case status: todo / verify (fixed, to be checked) / pass / fail / done / closed.
@@ -935,6 +937,37 @@ def _publish(hub: Hub, zpath: str, channel: str, notes: str, commit: str, part_s
     return out
 
 
+SHARE_PART = 64 << 20         # the share package's parts (one request each; the page checks each part's SHA-256)
+
+
+def _share(hub: Hub, zpath: str, slot: str, version: str, notes: str, part_size: int = SHARE_PART) -> dict:
+    """A share package to its slot (main: the main package, models: the model pack) on the public page /download: cut into parts, each uploaded with its SHA-256
+    (R2 checks it on the way in); a part already there with the same hash is skipped, so a cut-off run is rerun as is.
+    The publish at the end switches the slot to this version."""
+    name = os.path.basename(zpath)
+    version = version or re.sub(r'[^A-Za-z0-9._-]+', '-', name[:-4]).strip('-.')[:120]
+    size = os.path.getsize(zpath)
+    whole = hashlib.sha256()
+    parts = []
+    with open(zpath, 'rb') as f:
+        for n, at in enumerate(range(0, size, part_size)):
+            data = f.read(part_size)
+            whole.update(data)
+            part = {'name': f'part-{n:03d}', 'offset': at, 'length': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+            q = urllib.parse.urlencode({'slot': slot, 'version': version, 'name': part['name'], 'sha256': part['sha256']})
+            with hub.request('PUT', f'/api/share/part?{q}', data, {'Content-Type': 'application/octet-stream'},
+                             timeout=900) as r:
+                done = json.loads(r.read().decode('utf-8'))
+            parts.append(part)
+            print(f"  {part['name']}: {(at + len(data)) >> 20}/{size >> 20} MB{' (already there)' if done.get('existed') else ''}",
+                  flush=True)
+    out = hub.post_json('/api/share/publish', {'slot': slot, 'version': version, 'name': name, 'size_bytes': size,
+                                                'sha256': whole.hexdigest(), 'notes': notes, 'parts': parts})
+    print(json.dumps(out, ensure_ascii=False))
+    print(f'下载页：{hub.site}/download')
+    return out
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -964,6 +997,11 @@ def main(argv: list[str]) -> int:
     p.add_argument('--channel', default='test')
     p.add_argument('--notes', default='')
     p.add_argument('--commit', default='')
+    p = sub.add_parser('share', help='a share package to the public download page /download')
+    p.add_argument('zip')
+    p.add_argument('--slot', required=True, choices=('main', 'models'), help='main package or model pack')
+    p.add_argument('--version', default='', help='default: the zip name ([A-Za-z0-9._-] only)')
+    p.add_argument('--notes', default='')
     a = ap.parse_args(argv)
     # Players write emoji and the like; a pipe on a Chinese Windows console is GBK and would die on the first one.
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -994,6 +1032,8 @@ def main(argv: list[str]) -> int:
         _upload_digests(hub, os.path.normpath(a.dir))
     elif a.cmd == 'publish':
         _publish(hub, a.zip, a.channel, a.notes, a.commit)
+    elif a.cmd == 'share':
+        _share(hub, a.zip, a.slot, a.version, a.notes)
     return 0
 
 
