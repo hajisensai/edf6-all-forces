@@ -6,7 +6,10 @@
 //  - the rays from the circles: the aims leave the sky circles' rims (on their height) onto the edge and close in on the
 //    centre, growing; the bolts leave the lowest sky circle's disc; the gather's rays are only in the gather, the bolts stop;
 //  - the shock waves: each runs out before the show ends, the great one past the area's edge with the last ring;
-//  - the load: bolts a frame and objects alive at once (a bolt's rounds live kBoltFrames) printed, under a ceiling.
+//  - the load: bolts a frame and objects alive at once (a bolt's rounds live kBoltFrames) printed, under a ceiling;
+//  - the looks' budget (LooksAt; a player, 2026-10-31: 「低配置玩家使用后会很卡」): a whole show's smoke and fires and their
+//    sizes (no larger than the stock code's), the lights alive at once, the looks a frame, all within the show; and the
+//    damage dealt (the rounds and their shares) the same as before the budget.
 //
 //   cmake --build build --target ultimate_check && build\ultimate_check.exe        exit code 0: every check passed
 #include "../src/ultimate_plan.h"
@@ -66,7 +69,7 @@ void ReplayChecks() {
     Check(same,"one seed, one storm: every frame's bolts the same, whatever was replayed before");
     Check(differs,"another seed, another storm");
     float a[2],b[2];
-    Check(FireAt(seed,8,a) && FireAt(seed,8,b) && a[0]==b[0] && a[1]==b[1],"the fires replay too");
+    Check(FireAt(seed,kFireEvery,a) && FireAt(seed,kFireEvery,b) && a[0]==b[0] && a[1]==b[1],"the fires replay too");
     Check(RingOf(5,seed).phase==RingOf(5,seed).phase && RingOf(5,seed).phase!=RingOf(5,seed+7).phase,"the rings' turn replays");
 }
 
@@ -240,6 +243,96 @@ void BurstChecks() {
     Check(waves && fronts,"the ground shock waves burst along their fronts out to kWaveBurstReach, and only there");
     Check(replay,"one seed, the same bursts on every machine");
 }
+// The looks (LooksAt) of whole shows, as src/ultimate.cpp draws them on top of the bursts' rounds.
+void LookChecks() {
+    bool fits=true,linked=true,sized=true,lights=true,inShow=true;
+    int most=0,explosions=0,smokes=0,fires=0,peakLights=0,peakBig=0,peakBolt=0,lastFire=-1,lastLightEnd=-1;
+    float biggestSmoke=0.0f,biggestFire=0.0f,biggestExplosion=0.0f;
+    constexpr int kSeeds=8;
+    for(std::uint64_t seed=1;seed<=kSeeds;++seed) {
+        int ends[kAfterEnd+64]{},bigEnds[kAfterEnd+64]{},boltEnds[kAfterEnd+64]{};   // lights going out on each frame
+        int alive=0,big=0,bolt=0,showSmokes=0,showFires=0;
+        for(int f=0;f<kAfterEnd;++f) {
+            alive-=ends[f];big-=bigEnds[f];bolt-=boltEnds[f];
+            Burst b[kMaxBurstsAFrame];
+            const int nb=BurstsAt(seed,f,b,kMaxBurstsAFrame);
+            Look l[kMaxLooksAFrame+16];
+            const int n=LooksAt(seed,f,b,nb,l,kMaxLooksAFrame+16);
+            fits=fits && n<=kMaxLooksAFrame;
+            if(n>most)most=n;
+            int newBolts=0;
+            for(int k=0;k<n;++k) {
+                const Look& x=l[k];
+                // a burst's look is on its burst: a ring blast's explosion, the great wave's dust
+                if(x.burst>=0)linked=linked && x.burst<nb && x.at[0]==b[x.burst].at[0] && x.at[1]==b[x.burst].at[1] &&
+                                     (x.kind==LookKind::explosion ? b[x.burst].kind==BurstKind::blast :
+                                      x.kind==LookKind::smoke && b[x.burst].kind==BurstKind::wave && b[x.burst].great);
+                else linked=linked && x.kind!=LookKind::explosion;   // every explosion is a blast's
+                switch(x.kind) {
+                case LookKind::explosion: ++explosions; if(x.size>biggestExplosion)biggestExplosion=x.size; break;
+                case LookKind::smoke: ++showSmokes; if(x.size>biggestSmoke)biggestSmoke=x.size; break;
+                case LookKind::blaze: ++showFires; lastFire=f>lastFire ? f : lastFire; if(x.size>biggestFire)biggestFire=x.size; break;
+                case LookKind::light: {
+                    const int end=f+x.frames;
+                    if(x.frames<1 || end>kAfterEnd+63){lights=false;break;}
+                    ++alive;++ends[end];
+                    if(x.size>=kBigLight){++big;++bigEnds[end];}
+                    if(x.tint==LightTint::bolt){++bolt;++boltEnds[end];++newBolts;}
+                    lastLightEnd=end>lastLightEnd ? end : lastLightEnd;
+                    break;
+                }
+                }
+            }
+            lights=lights && newBolts<=1;
+            if(alive>peakLights)peakLights=alive;
+            if(big>peakBig)peakBig=big;
+            if(bolt>peakBolt)peakBolt=bolt;
+        }
+        smokes+=showSmokes;fires+=showFires;
+        sized=sized && showSmokes<=kMostSmokes && showFires<=kMostFires;
+    }
+    inShow=lastFire>=0 && lastFire<kCannonEnd+kFireFor && lastLightEnd<=kAfterEnd;
+    sized=sized && biggestExplosion<=kStockExplosionMost && biggestSmoke<=kStockSmokeMost && biggestFire<=kStockBlazeMost;
+    lights=lights && peakLights<=kMostLights && peakBig<=kMostBigLights && peakBolt<=kMostBoltLights;
+    char line[260];
+    std::snprintf(line,sizeof(line),"a show's looks fit the frame's list (at most %d a frame, of %d)",most,kMaxLooksAFrame);
+    Check(fits,line);
+    Check(linked,"every burst's look is on its burst (a ring blast's explosion, the great wave's dust); no explosion of its own");
+    std::snprintf(line,sizeof(line),"a show's smoke and fires within the budget: %d explosions (size %.1f), %d smoke (size %.1f, "
+                  "at most %d), %d fires (size %.1f, at most %d), none larger than the stock code's",explosions/kSeeds,
+                  biggestExplosion,smokes/kSeeds,biggestSmoke,kMostSmokes,fires/kSeeds,biggestFire,kMostFires);
+    Check(sized,line);
+    std::snprintf(line,sizeof(line),"the lights at once: at most %d (of %d), %d big (of %d), %d bolts' (of %d, one new a frame)",
+                  peakLights,kMostLights,peakBig,kMostBigLights,peakBolt,kMostBoltLights);
+    Check(lights,line);
+    Check(inShow,"the after's fires start in its first seconds, every light is out by the show's end");
+    Check(kSkyBackAt+static_cast<int>(kSkyBackSec*kFps)<=kCannonEnd+5*kFps,"the sky is back within 5 s of the cannon's end");
+}
+// The damage dealt (the user's 「伤害」 unchanged by the looks' budget): every bolt's share, every burst's, the main beam's and
+// its core's, a show's whole as a share of the weapon's damage, and the bursts by kind: as they were before the budget
+// (2026-10-31, the plan before LooksAt: seeds 1 .. 8).
+void DamageChecks() {
+    constexpr int kBefore[8]={994,1006,994,1024,1007,1002,1013,1019};   // bolts (and as many spark bursts)
+    constexpr double kShareBefore[8]={676.26,682.26,676.26,691.26,682.76,680.26,685.76,688.76};
+    bool same=true;
+    for(std::uint64_t seed=1;seed<=8;++seed) {
+        int bolts=0,sparks=0,blasts=0,waves=0;
+        double share=kBeamShare+kCoreShare;
+        for(int f=0;f<kAfterEnd;++f) {
+            Bolt b[kMaxBoltsAFrame];
+            if(PhaseAt(f)==Phase::storm){const int n=BoltsAt(seed,f-kChargeEnd,b);bolts+=n;share+=n*kBoltShare;}
+            Burst u[kMaxBurstsAFrame];
+            const int n=BurstsAt(seed,f,u,kMaxBurstsAFrame);
+            for(int k=0;k<n;++k) {
+                share+=u[k].share;
+                (u[k].kind==BurstKind::spark ? sparks : u[k].kind==BurstKind::blast ? blasts : waves)+=1;
+            }
+        }
+        same=same && bolts==kBefore[seed-1] && sparks==bolts && blasts==148 && waves==624 &&
+             std::fabs(share-kShareBefore[seed-1])<1e-3;
+    }
+    Check(same,"the damage as before the looks' budget: every bolt, spark, ring blast and wave burst, their shares' sum");
+}
 void CircleChecks() {
     bool inCharge=true,gone=true,bounded=true,smooth=true,shownWhole=true;
     for(int i=0;i<kCircleCount;++i) {
@@ -275,6 +368,8 @@ int main() {
     GatherChecks();
     WaveChecks();
     BurstChecks();
+    LookChecks();
+    DamageChecks();
     CircleChecks();
     std::printf(failures ? "\n%d FAILED\n" : "\nall passed\n",failures);
     return failures ? 1 : 0;
