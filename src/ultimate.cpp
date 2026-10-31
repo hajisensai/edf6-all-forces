@@ -27,7 +27,6 @@
 #include "memory.h"
 #include "plugin_net.h"
 #include "support_protocol.h"
-#include "support_soldier.h"   // ReadNativeObjectId
 #include "support_warning.h"   // WarnUltimate
 #include "ultimate_net.h"
 #include "ultimate_net_protocol.h"
@@ -552,7 +551,7 @@ bool Message(const Show& s,ultimate_net::Kind kind,ultimate_net::Msg& m) noexcep
     m.seed=s.seed;m.damage=s.damage;
     std::memcpy(m.at,s.at,12);std::memcpy(m.plane,s.plane,sizeof(m.plane));
     bool ok=false;
-    __try { ok=s.live && ReadNativeObjectId(s.by,m.caller); } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}
+    __try { ok=s.live && PlayerRequesterOf(s.by,m.caller); } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}   // its mission slot
     return ok;
 }
 // This machine's show `s` to every peer that has the channel (or to `peer` alone).

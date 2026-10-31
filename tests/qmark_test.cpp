@@ -22,8 +22,10 @@ PlayerJetReadout jetHud{};bool jetHudOn=false;
 PlayerHeliReadout heli{};bool heliOn=false;
 // This machine's mark (npcai.cpp's).
 bool ownEnemy=false;float ownAt[3]={5,0,300};
-// Native IDs: the player's, the enemy's (the same on every machine).
-const unsigned char kPlayerId[32]={0x11,0x22,0,0,0,0,0,0,0,0,0,0,5,0,0,0,7,0,0,0,0,0,0,0,9,9};
+// The player's requester ID (player_requester.h: its mission slot, the same on every machine) and its native NetId (this
+// machine's alone: a stock mission numbers the players' per machine, never sent); the enemy's native ID.
+const unsigned char kPlayerId[32]={0x41,0x46,0x50,0x52,2};
+const unsigned char kPlayerNetId[32]={0x11,0x22,0,0,0,0,0,0,0,0,0,0,5,0,0,0,7,0,0,0,0,0,0,0,9,9};
 const unsigned char kEnemyId[32]={0x33,0x44,0,0,0,0,0,0,0,0,0,0,5,0,0,0,8,0,0,0,0,0,0,0,1,2};
 const unsigned char kTeamId[32]={0x55,0x66,0,0,0,0,0,0,0,0,0,0,5,0,0,0,9,0,0,0,0,0,0,0,3,4};
 // The resolver: whether the teammate's player and the enemy are in this world, the player's slot and PUID.
@@ -48,9 +50,13 @@ bool CameraRay(float*,float*) noexcept { return false; }
 bool PlayerJetHud(PlayerJetReadout* out) noexcept { if(jetHudOn)*out=jetHud;return jetHudOn; }
 bool PlayerHeliHud(PlayerHeliReadout* out) noexcept { if(heliOn)*out=heli;return heliOn; }
 bool ReadNativeObjectId(const unsigned char* object,unsigned char* out) noexcept {
-    if(object==humanMem){std::memcpy(out,kPlayerId,32);return true;}
+    if(object==humanMem){std::memcpy(out,kPlayerNetId,32);return true;}
     if(object==enemyMem){std::memcpy(out,kEnemyId,32);return true;}
     return false;
+}
+bool PlayerRequesterOf(const void* object,unsigned char out[32]) noexcept {
+    std::memset(out,0,32);if(object!=humanMem)return false;
+    std::memcpy(out,kPlayerId,32);return true;
 }
 bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char target[32],MarkIdentities* out) noexcept {
     ++resolves;*out=MarkIdentities{};
@@ -168,8 +174,9 @@ void WireChecks() {
           !std::memcmp(d.marker,kPlayerId,32) && !std::memcmp(d.target,kEnemyId,32) && d.enemyAt[2]==3e3f && d.pointAt[2]==-8.0f &&
           d.pointLeftMs==4321 && d.caps==kCapabilities,"round trip");
     Check(b[0]=='Q' && b[1]=='M' && b[2]=='R' && b[3]=='K',"magic QMRK on the wire");
-    unsigned char c[kWireSize];std::memcpy(c,b,sizeof(c));c[4]=2;
+    unsigned char c[kWireSize];std::memcpy(c,b,sizeof(c));c[4]=3;
     Check(Owned(c,sizeof(c)) && !Decode(c,sizeof(c),d),"a newer version: ours, not taken");
+    c[4]=1;Check(Owned(c,sizeof(c)) && !Decode(c,sizeof(c),d),"an older version (the marker its NetId): ours, not taken");
     std::memcpy(c,b,sizeof(c));c[8]|=0x80;
     Check(Decode(c,sizeof(c),d) && d.caps==kCapabilities && d.enemy,"an unknown capability bit: masked off, the rest taken");
     std::memcpy(c,b,sizeof(c));c[8]=static_cast<unsigned char>(kCapPoint);
@@ -248,7 +255,7 @@ void ShareChecks() {
     qmark_net::State d;
     Check(sends==2 && sentTo[0]==1 && sentTo[1]==2,"online: this machine's marks to every peer");
     Check(qmark_net::Decode(sent,sizeof(sent),d) && !std::memcmp(d.marker,kPlayerId,32) && d.enemy && !std::memcmp(d.target,kEnemyId,32) &&
-          d.point && d.pointAt[2]==20.0f && d.pointLeftMs>0,"the state sent: the marker, the enemy by its native ID, the point and its time");
+          d.point && d.pointAt[2]==20.0f && d.pointLeftMs>0,"the state sent: the marker (its mission slot, not its NetId), the enemy by its native ID, the point and its time");
     sends=0;UpdateQMarkNetwork(true,2,&Send,T+10);Check(sends==0,"not again within the gap");
     UpdateQMarkNetwork(true,2,&Send,T+qmark_net::kEnemyKeepMs);Check(sends==2,"the enemy's position again on its keepalive");
     // A teammate's.
@@ -331,7 +338,7 @@ void ShareChecks() {
     // What is not ours.
     unsigned char other[qmark_net::kWireSize]{};other[0]='S';
     Check(!ReceiveQMarkNetwork(1,senderPuid,other,sizeof(other),T+800),"another magic: left to the support / command parsers");
-    TeamBytes(b,9,true,false);b[4]=2;
+    TeamBytes(b,9,true,false);b[4]=3;
     std::memset(played,0,sizeof(played));
     Check(ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+810),"a newer version: ours, dropped");
     Frame();Check(played[audio::kClipMarkTeam]==0,"...no cue for it");

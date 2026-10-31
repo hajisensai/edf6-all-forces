@@ -71,7 +71,7 @@ bool Send(void* user,std::uint32_t peer,const void* bytes,std::size_t size){
     if(n.id==r.failFrom && to==r.failTo && m.kind==r.failKind)return false;
     if(n.id==r.legacy && m.kind==Kind::Hello)m.capability=0;
     Packet p=r.PacketOf(n.id,to,m);
-    if(n.id==r.oldVersion)p.bytes[4]=3;
+    if(n.id==r.oldVersion)p.bytes[4]=4;
     r.history.push_back(p);r.queue.push_back(p);return true;
 }
 bool Authenticate(void* user,const char* puid,const NativeId& player){
@@ -100,7 +100,7 @@ Message Unpack(const Packet& p){Message m;Check(Decode(p.bytes.data(),p.bytes.si
 void Codec(){
     Message m;m.kind=Kind::Request;m.epoch=123;m.request=7;m.spec.requesterPlayer=Id(10);m.spec.target=Id(100);
     std::vector<std::uint8_t> bytes(EncodedSize(m));Check(Encode(m,bytes.data(),bytes.size()),"request codec accepts canonical native identities");
-    Check(bytes[0]=='E' && bytes[1]=='C' && bytes[2]=='T' && bytes[3]=='L' && bytes[4]==4,"explicit ECTL/version4 byte prefix");
+    Check(bytes[0]=='E' && bytes[1]=='C' && bytes[2]=='T' && bytes[3]=='L' && bytes[4]==5,"explicit ECTL/version5 byte prefix");
     Message back;Check(Decode(bytes.data(),bytes.size(),back) && back.spec.target==m.spec.target,"semantic fields roundtrip without native struct layout");
     Room r;
     for(std::size_t n=0;n<bytes.size();++n){Check(!Decode(bytes.data(),n,back),"all truncated datagrams rejected");Check(r.nodes[0]->protocol.Receive(1,r.nodes[1]->puid.c_str(),bytes.data(),n,r.now)==(n>=4),"owned malformed/truncated magic is consumed, foreign prefix is not");}

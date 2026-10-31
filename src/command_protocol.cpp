@@ -15,12 +15,10 @@ bool Same(const Request& a,const Request& b) noexcept {
         !std::memcmp(a.requester,b.requester,32) && !std::memcmp(a.focus,b.focus,32) && !std::memcmp(a.units,b.units,sizeof(a.units)) &&
         a.formationTotal==b.formationTotal && !std::memcmp(a.formationSlots,b.formationSlots,sizeof(a.formationSlots));
 }
-// The last order a version carries (6: HOLD; 7: the formation order).
-mapcmd::Order LastOrder(std::uint32_t version) noexcept { return version>=7 ? mapcmd::kLastOrder : mapcmd::Order::hold; }
 bool Valid(const Message& m) noexcept {
     if(!Compatible(m.version) || !m.epoch || m.kind<Kind::hello || m.kind>Kind::ways || m.rpc>=Rpc::count)return false;
-    if(m.kind==Kind::ways) {   // version 7: one unit's queue, its points finite and bounded
-        if(m.version<7 || m.rpc!=Rpc::none || !m.sequence || m.request.count!=1 || !CanonicalId(m.request.units[0]) ||
+    if(m.kind==Kind::ways) {   // one unit's queue, its points finite and bounded
+        if(m.rpc!=Rpc::none || !m.sequence || m.request.count!=1 || !CanonicalId(m.request.units[0]) ||
            m.request.flags || m.request.command.param || m.ways.n>kWaysMost)return false;
         // A queue: its current order a point order at a finite point; a clearing: neither.
         if(m.ways.n ? !mapcmd::PointOrder(static_cast<mapcmd::Order>(m.ways.order)) || m.ways.order>static_cast<std::uint32_t>(mapcmd::kLastOrder) :
@@ -31,7 +29,7 @@ bool Valid(const Message& m) noexcept {
             if(i<m.ways.n ? (!std::isfinite(f) || std::fabs(f)>1.0e6f) : f!=0.0f)return false;
         return true;
     }
-    // A hello / capability: its formationTotal the sender's highest version (0 from a version-6 build), nothing else.
+    // A hello / capability: its formationTotal the sender's highest version, nothing else.
     if(m.kind==Kind::hello || m.kind==Kind::capability)return m.sequence==0 && m.request.count==0 && !m.request.flags &&
         !m.request.command.param && m.request.formationTotal<=0xFFFFu &&
         (m.rpc==Rpc::none || (m.kind==Kind::capability && m.rpc==Rpc::unsupported));
@@ -51,13 +49,9 @@ std::uint32_t U32(const unsigned char*& p) noexcept {std::uint32_t v=0;for(unsig
 bool CanonicalId(const unsigned char* id,bool allowEmpty) noexcept {
     if(!id)return false;for(unsigned i=20;i<24;++i)if(id[i])return false;return allowEmpty || !Empty(id);
 }
-std::uint32_t RequestVersion(const Request& r) noexcept {
-    return r.flags || r.command.param || r.command.order>mapcmd::Order::hold ? 7u : kMinVersion;
-}
 bool ValidRequest(const Request& r,std::uint32_t version) noexcept {
-    if(!Compatible(version) || !r.count || r.count>kCommandNetUnits || r.command.order>LastOrder(version) ||
+    if(!Compatible(version) || !r.count || r.count>kCommandNetUnits || r.command.order>mapcmd::kLastOrder ||
        !CanonicalId(r.requester))return false;
-    if(RequestVersion(r)>version)return false;   // a flag or a parameter a version-6 peer would not read
     if(r.flags&~kQueued)return false;
     if((r.flags&kQueued) && !mapcmd::PointOrder(r.command.order))return false;   // only a point goes after the others
     if(r.command.order==mapcmd::Order::formation ? !mapcmd::FormationParamValid(r.command.param) : r.command.param!=0)return false;
@@ -107,7 +101,7 @@ bool Decode(const void* bytes,std::size_t size,Message& out) noexcept {
     Message m;m.version=U32(p);if(!Compatible(m.version))return false;
     m.kind=static_cast<Kind>(U32(p));m.request.flags=U32(p);
     m.epoch=U32(p);m.epoch|=static_cast<std::uint64_t>(U32(p))<<32;m.sequence=U32(p);m.request.count=U32(p);
-    const auto order=U32(p);if(order>static_cast<std::uint32_t>(LastOrder(m.version)))return false;
+    const auto order=U32(p);if(order>static_cast<std::uint32_t>(mapcmd::kLastOrder))return false;
     m.request.command.order=static_cast<mapcmd::Order>(order);m.rpc=static_cast<Rpc>(U32(p));
     for(float& f:m.request.command.at){const auto bits=U32(p);std::memcpy(&f,&bits,4);}m.request.command.param=U32(p);
     std::memcpy(m.request.requester,p,32);p+=32;std::memcpy(m.request.focus,p,32);p+=32;
@@ -143,7 +137,7 @@ Session::WaysEntry* Session::WaysSlot(const unsigned char* unit,bool make) noexc
     return free;
 }
 void Session::SendWays(std::uint32_t peer,const WaysEntry& e) noexcept {
-    if(!peer || peer>peers_ || !peer_[peer].capable || peer_[peer].version<7)return;   // a version-6 peer has no such message
+    if(!peer || peer>peers_ || !peer_[peer].capable)return;
     Message m;m.version=peer_[peer].version;m.kind=Kind::ways;m.epoch=epoch_;m.sequence=e.revision;
     m.request.count=1;std::memcpy(m.request.units[0],e.unit,32);m.ways=e.ways;
     Send(peer,m);
@@ -204,7 +198,7 @@ void Session::Update(bool ready,bool host,std::uint64_t epoch,std::uint32_t host
     if(epoch_!=epoch) {Reset();epoch_=epoch;lastHello_=now>1000 ? now-1000 : 0;}
     ready_=true;host_=host;hostPeer_=hostPeer;peers_=peers;
     if(!host_ && !hostCapable_ && now-lastHello_>=1000) {
-        // At the lowest version, the highest this build speaks in it (a version-6 host reads it and answers in 6).
+        // At the lowest version, the highest this build speaks in it.
         Message hello;hello.version=kMinVersion;hello.epoch=epoch_;hello.request.formationTotal=maxVersion_;
         Send(hostPeer_,hello);lastHello_=now;
     }
@@ -240,7 +234,7 @@ void Session::Receive(std::uint32_t peer,const char* puid,const Message& message
     if(!identity.puid[0])std::memcpy(identity.puid,puid,std::strlen(puid)+1);
     if(host_) {
         if(message.kind==Kind::hello) {
-            // The lower of the peer's highest (a version-6 build says none: its hello's own version) and this build's.
+            // The lower of the peer's highest (none said: its hello's own version) and this build's.
             const std::uint32_t said=message.request.formationTotal ? message.request.formationTotal : message.version;
             const std::uint32_t theirs=said<kMinVersion ? kMinVersion : said;
             peer_[peer].capable=true;peer_[peer].version=theirs<maxVersion_ ? theirs : maxVersion_;

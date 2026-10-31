@@ -134,7 +134,7 @@ struct Gun {
     ULONGLONG nextShot=0;
     std::uint64_t rng=0x9E3779B97F4A7C15ull;
     std::uint16_t serial=0;    // the host's for it (online: the gun's name on every machine; 0 offline)
-    unsigned char ownerId[32]{};   // floating: its owner's native ID (online)
+    unsigned char ownerId[32]{};   // floating: its owner's ID (online; player_requester.h: its mission slot)
     unsigned char fromId[32]{};    // the host's: the colonist it came from and its place in its list (a joining peer is told)
     std::uint8_t fromIndex=0;
     bool claiming=false;       // put down, the game's drop of it not claimed yet (claimAt: the gun's place then)
@@ -504,7 +504,7 @@ void Fly(Gun& g,const unsigned char* soldier,int ring,int ringCount,ULONGLONG ms
     g.nextShot=ms+static_cast<ULONGLONG>((g.burstLeft>0 ? g.gapFrames : g.coolFrames)*1000/60);
 }
 
-// It floats round `owner` (`ownerId` its native ID online) from `ms`, for `leftMs` (0: the mission).
+// It floats round `owner` (`ownerId` its player requester ID online) from `ms`, for `leftMs` (0: the mission).
 void Float(Gun& g,const unsigned char* owner,const unsigned char* ownerId,ULONGLONG ms,ULONGLONG leftMs) noexcept {
     g.state=State::floating;g.owner=ObjRef::Of(owner);g.since=ms;
     if(ownerId)std::memcpy(g.ownerId,ownerId,32);
@@ -542,7 +542,7 @@ void Step(ULONGLONG ms,float dt) noexcept {
     unsigned char* me=PlayerHuman();
     const bool host=OnlineHostOnly();
     unsigned char myId[32]{};
-    const bool haveId=me && ReadNativeObjectId(me,myId);
+    const bool haveId=me && PlayerRequesterOf(me,myId);   // its mission slot (player_requester.h), the same on every machine
     for(auto& g:guns) {
         if(g.state==State::free)continue;
         if(g.state==State::ground) {

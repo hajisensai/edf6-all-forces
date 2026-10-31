@@ -18,7 +18,9 @@ constexpr std::uint32_t kMagic=0x4c544345u,kCapability=5;
 // of +Z). An input of version 3 means the other way round on two axes, so a version-3 peer must not take part: its
 // hello does not decode here (nor ours there), it is never capable, and the host refuses every control in a room
 // with it (Session: every peer capable) instead of moving the enemy mirrored on one machine.
-constexpr std::uint8_t kVersion=4;
+// Version 5 (2026-10-31): the requesting player (LeaseSpec::requesterPlayer) is its requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine); a version-4 peer
+// is left out the same way.
+constexpr std::uint8_t kVersion=5;
 constexpr std::size_t kMaxPeers=32,kMaxLeases=16,kMaxInputBytes=512,kChunkBytes=512,kWirePrefixBytes=192,kWireBytes=kWirePrefixBytes+kMaxInputBytes,kMaxPoseBytes=512,kMaxActions=1024,kActionWindow=128;
 using ActionIndex=std::uint16_t;
 static_assert(kMaxActions<=static_cast<std::size_t>((std::numeric_limits<ActionIndex>::max)())+1,"all shared action pool indices must fit without truncation");

@@ -12,12 +12,12 @@ namespace crew::command_net {
 // is on its way to, mapcmd.cpp MapCommandAuthority) and the formation order (mapcmd::Order::formation, its parameter in
 // Command::param: the map's T and formation menu). Both in words a version-6 message keeps zero (the one after `kind`,
 // the one after the point): the layout and the size are 6's.
-// Negotiated, not assumed: every hello goes out as version kMinVersion (which a version-6 build reads) with the
-// sender's highest version in the hello's formationTotal (never read in a hello by version 6); the host answers each
-// peer at the lower of the two and the client speaks that version from then on. A version-6 host therefore gives a
-// version-7 client everything version 6 has, and a queued or formation order to it is refused before it is sent, with
-// the reason (SubmitMapCommand) -- never sent as an immediate order instead.
-constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=7,kMinVersion=6,kMaxPeers=1024;
+// Version 8 (2026-10-31): the requester is the player's requester ID (player_requester.h: its mission slot, the same on
+// every machine; a stock mission numbers the players' NetIds per machine), no longer its NetId. A build before it is not
+// spoken to at all (kMinVersion 8: its messages do not decode, ours do not there; no compatibility with older builds).
+// Negotiated, not assumed: every hello goes out as version kMinVersion with the sender's highest version in the hello's
+// formationTotal; the host answers each peer at the lower of the two and the client speaks that version from then on.
+constexpr std::uint32_t kMagic=0x444D434Eu,kVersion=8,kMinVersion=8,kMaxPeers=1024;
 constexpr bool Compatible(std::uint32_t version) noexcept { return version>=kMinVersion && version<=kVersion; }
 constexpr std::uint32_t kQueued=1u;   // Request::flags: after the points the unit is on its way to (Shift)
 constexpr std::size_t kWireSize=828;
@@ -50,10 +50,8 @@ struct Message {
     Ways ways{};   // Kind::ways only (its count in request.formationTotal on the wire)
 };
 bool CanonicalId(const unsigned char* id,bool allowEmpty=false) noexcept;
-// `version`: the one it is to travel at (a version-6 peer takes no flag, no parameter, no order past HOLD).
+// `version`: the one it is to travel at (a Compatible one).
 bool ValidRequest(const Request&,std::uint32_t version=kVersion) noexcept;
-// The lowest version that carries `r` (7 for a queued or formation order, else 6).
-std::uint32_t RequestVersion(const Request& r) noexcept;
 bool Encode(const Message&,void*,std::size_t) noexcept;
 bool Decode(const void*,std::size_t,Message&) noexcept;
 bool Owned(const void*,std::size_t) noexcept;

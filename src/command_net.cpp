@@ -118,17 +118,11 @@ std::uint32_t SubmitMapCommand(const ObjRef& requester,const ObjRef* units,unsig
     if(!commands.Ready()) {Note(note,noteSize,L"房主尚未启用联机 NPC 指挥，请确认版本并等待本关同步");return 0;}
     if(!units || !count || count>kCommandNetUnits) {Note(note,noteSize,L"请选择 1～16 个 NPC 小队，超出数量不会截断执行");return 0;}
     command_net::Request request;request.count=count;request.command=command;request.flags=queued ? command_net::kQueued : 0u;
-    // A host of version 6 reads neither the queue's flag nor the formation order: refused here, with why, never sent as
-    // an immediate order or a guard instead (command_protocol.h Version 7).
-    if(command_net::RequestVersion(request)>commands.HostVersion()) {
-        Note(note,noteSize,command.order==mapcmd::Order::formation ? L"房主的插件版本较旧，不支持联机阵形指令，请房主更新后再试" :
-                                                                     L"房主的插件版本较旧，不支持 Shift 排队路点（未发送，单位保持原命令）");
-        return 0;
-    }
     if(formationSlots && formationTotal) {
         request.formationTotal=formationTotal;std::memcpy(request.formationSlots,formationSlots,count*sizeof(std::uint32_t));
     } else if(formationSlots || formationTotal) {Note(note,noteSize,L"守点阵形选择已失效，请重新选择");return 0;}
-    if(!Id(requester,request.requester)) {Note(note,noteSize,L"当前玩家缺少有效的本关联机身份");return 0;}
+    // The requester by its mission slot (player_requester.h): a stock mission's player NetIds differ between machines.
+    if(!PlayerRequesterOf(requester,request.requester)) {Note(note,noteSize,L"当前玩家缺少有效的本关联机身份");return 0;}
     for(unsigned i=0;i<count;++i)if(!Id(units[i],request.units[i])) {
         Note(note,noteSize,L"所选单位已失效或没有联机身份，请重新选择");return 0;
     }

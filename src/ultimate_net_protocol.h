@@ -13,6 +13,7 @@
 // peer that announced the bit, another version dropped by the registry.
 //   magic, version, kind (byte 8), origin @12, serial @16, frame @20, seed @24 (two words, low first), damage @32,
 //   at[3] @36, plane[3] @48, caller[32] @60; zero to kWire.
+// Version 2 (2026-10-31): the caller is its requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
 #pragma once
 #include "ultimate_plan.h"
 #include "wire.h"
@@ -21,7 +22,7 @@
 
 namespace crew::ultimate_net {
 constexpr std::uint32_t kMagic=0x53544C55u;   // "ULTS"
-constexpr std::uint32_t kVersion=1;
+constexpr std::uint32_t kVersion=2;
 constexpr std::size_t kWire=96;
 constexpr std::uint64_t kKeepMs=1000;          // a playing show's keep goes out this often
 constexpr float kMostDamage=1.0e9f;            // a weapon's damage past this is not a weapon's
@@ -36,7 +37,7 @@ struct Msg {
     float damage=0.0f;               // the weapon's (dealt on the caller's machine only)
     float at[3]{};                   // the centre, already on the ground
     float plane[ultimate::kGroundCircles]{};   // the ground circles' heights (ultimate.cpp CirclePlane), the caller's
-    unsigned char caller[32]{};      // the calling player's native ID (support_soldier.h ReadNativeObjectId)
+    unsigned char caller[32]{};      // the calling player's requester ID (command_identity.h PlayerRequesterOf)
 };
 
 namespace detail {

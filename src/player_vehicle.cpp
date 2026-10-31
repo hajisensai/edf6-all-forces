@@ -104,8 +104,9 @@ void ConfigureHook(unsigned char* box,const airdrop::SharedRef* requester,const 
         const unsigned char* who=requester ? static_cast<const unsigned char*>(requester->object) : nullptr;
         if(twin<0 || !box || !who)return;
         Pending p;
-        if(!ReadNativeObjectId(who,p.requester) || wire::ZeroId(p.requester)) {
-            if(logs++<32)Log("PLAYERVEH a %ls request by %p whose requester has no native ID: the stock twin",kPlayerVehicles[twin].twin,who);
+        // The requester by its mission slot (player_requester.h), the same on every machine; its NetId is not.
+        if(!PlayerRequesterOf(who,p.requester) || wire::ZeroId(p.requester)) {
+            if(logs++<32)Log("PLAYERVEH a %ls request by %p that is no live player: the stock twin",kPlayerVehicles[twin].twin,who);
             return;
         }
         p.box=box;p.path=ConfiguredPath(box);p.body=kPlayerVehicles[twin].body;
@@ -156,7 +157,7 @@ void Joined(std::uint32_t peer) noexcept {
     SendHave(peer);
     unsigned char id[wire::kIdBytes];
     bool ok=false;
-    __try { const unsigned char* me=PlayerHuman();ok=me && ReadNativeObjectId(me,id) && !wire::ZeroId(id); } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}
+    __try { const unsigned char* me=PlayerHuman();ok=me && PlayerRequesterOf(me,id) && !wire::ZeroId(id); } __except(EXCEPTION_EXECUTE_HANDLER){ok=false;}
     if(!ok)return;
     playerveh::Msg syncs[kPlayerVehicleCount];
     const int n=engine.Syncs(id,origin,syncs,kPlayerVehicleCount);

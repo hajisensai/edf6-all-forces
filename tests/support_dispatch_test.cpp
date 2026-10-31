@@ -135,6 +135,11 @@ bool ReadNativeObjectId(const unsigned char* object,unsigned char* out) noexcept
     if(!object || !out)return false;std::memset(out,0,32);out[0]=0x55;
     if(object==submarineParent.obj)out[0]=0x66;out[12]=5;return true;
 }
+// A player's requester ID (player_requester.h), the one the resolver below finds the driver by.
+bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept {
+    std::memset(out,0,32);if(!who.obj)return false;
+    out[0]=0x55;out[12]=5;return true;
+}
 bool ResolveMarkIdentities(const unsigned char* marker,const unsigned char* target,MarkIdentities* out) noexcept {
     if(!out)return false;*out={};
     if(target && target[0]==0x66)out->target=submarineParent;

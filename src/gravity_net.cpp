@@ -187,7 +187,7 @@ bool Hold(const Target& t,const unsigned char* by,const float* hit,const float* 
     if(!out.holding) {
         gravity_net::Grab g{};
         g.kind=gravity_net::GrabKind::hold;
-        if(!ReadNativeObjectId(by,g.grabber))return true;   // no network identity: nobody else can find whose it is
+        if(!PlayerRequesterOf(by,g.grabber))return true;   // no live player: nobody else can find whose it is
         if(t.obj.obj && !ReadNativeObjectId(static_cast<const unsigned char*>(t.obj.obj),g.target))std::memset(g.target,0,32);
         float at[3];
         if(hit)std::memcpy(g.at,hit,12);
@@ -226,7 +226,7 @@ int Radial(const float* centre,float radius,float speed,const unsigned char* by,
        std::fabs(speed)>gravity_net::kMostRadialSpeed)return moved;
     gravity_net::Grab g{};
     g.kind=gravity_net::GrabKind::radial;
-    if(!ReadNativeObjectId(by,g.grabber))return moved;
+    if(!PlayerRequesterOf(by,g.grabber))return moved;
     std::memcpy(g.at,centre,12);
     g.goal[0]=radius;g.goal[1]=speed;
     g.origin=out.origin;g.grab=out.serial;
