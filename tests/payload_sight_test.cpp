@@ -48,11 +48,12 @@ const wchar_t* WeaponFile(const unsigned char* w,std::size_t* n) noexcept {
 void ClearWeaponLock(unsigned char*) noexcept {}
 int WeaponLock(const unsigned char*,float*,float*) noexcept { return 0; }
 const void* WeaponLockObject(const unsigned char*) noexcept { return nullptr; }   // no auto turrets on these fixtures
+const void* WeaponLockingObject(const unsigned char*) noexcept { return nullptr; }
 bool VisitEnemies(const unsigned char*,EnemyVisitor,void*) noexcept { return false; }
 bool FriendInLine(const float*,const float*,const void*) noexcept { return false; }
 bool GunnerAirTarget(const void*) noexcept { return false; }
 bool ReadRound(const unsigned char*,RoundModel* out) noexcept { *out={};return false; }
-namespace audio { void LockTone(int,float) noexcept {} }
+namespace audio { void LockTone(int,float,const void*,const void*) noexcept {} }
 }
 namespace edf { bool MeanMuzzle(const unsigned char*,std::uint64_t,float*,float*) noexcept { return false; } }
 namespace {

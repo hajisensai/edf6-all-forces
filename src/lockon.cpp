@@ -201,6 +201,13 @@ const void* WeaponLockObject(const unsigned char* w) noexcept {
     return got;
 }
 
+const void* WeaponLockingObject(const unsigned char* w) noexcept {
+    if(!w || !Readable(w+kLockList,0x48))return nullptr;
+    const auto entry=At<const unsigned char*>(w,kLocking);
+    if(entry && Live(At<const unsigned char*>(w,kLockingCtrl)) && Readable(entry,kEntryObject+8))return At<const void*>(entry,kEntryObject);
+    return nullptr;
+}
+
 void ClearWeaponLock(unsigned char* w) noexcept {
     if(clearOk && w)reinterpret_cast<EntryFn>(image+kClearLock)(w);
 }

@@ -215,6 +215,8 @@ struct Config {
     bool warnAudio=true;            // the cockpit's warnings heard (warn.cpp): PULL UP, stall horn, launch warble, callouts
     bool warnVoice=true;            // ...the callouts spoken by the Windows voice (off, or no voice: tones and chimes)
     float warnVolume=1.0f;          // ...the cockpit's tones and callouts (the lock tones too), times the game's own
+    int lockToneBeeps=3;            // ...the lock tone: this many beeps while locking, then silent (0: sounds as long as the lock, as it did; lock_cue.h)
+    int lockToneLockedMs=450;       // ...and the locked tone this long, then silent (a lock that holds stays silent)
     bool vehicleRam=true;           // a driven ground vehicle's parts (hull, feet, fists) hit what they drive into (vehicleram.cpp)
     float vehicleRamDamage=20.0f;   // ...their kinetic energy's damage (the jets' formula) times this (0: none; 20: a ground vehicle is 5-10x slower than a jet, so 1 would leave the ram unnoticeable)
     // The gravity operations (gravity.cpp) and their users: the gravity gun (gravitygun.cpp, the Air Raider's EDF6VC_CALL_GRAVITY_GUN)

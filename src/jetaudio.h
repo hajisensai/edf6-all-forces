@@ -17,7 +17,7 @@ void Set(int slot,const Mix& mix) noexcept;
 void Close(int slot) noexcept;
 // The cockpit's lock tone this frame (the player's picked store, playerjet.cpp), at Cfg().warnVolume: 2 locked, a steady high tone; 1
 // locking, beeps quickening with `progress` (0..1); 0 none. Not called for kToneStaleMs, it goes quiet.
-void LockTone(int state,float progress) noexcept;
+void LockTone(int state,float progress,const void* weapon,const void* target) noexcept;
 // The cockpit's warnings this frame (warn.cpp WarnTick), heard at Cfg().warnVolume:
 //  - `threat`: 2 a missile homing on it, fast high beeps; 1 an enemy's missile lock on it, slower low beeps; 0 none.
 //    `launch`: a missile just launched at it, a two-tone warble over the beeps;

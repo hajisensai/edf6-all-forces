@@ -332,6 +332,8 @@ void Validate(Config& n) noexcept {
     else if(n.viewDistance!=0.0f)Fix("ViewDistance",n.viewDistance,1000.0f,1.0e6f);
     Fix("JetSoundVolume",n.jetSoundVolume,0.0f,4.0f);
     Fix("WarnVolume",n.warnVolume,0.0f,4.0f);
+    n.lockToneBeeps=static_cast<int>(FixInt("LockToneBeeps",n.lockToneBeeps,0,100));
+    n.lockToneLockedMs=static_cast<int>(FixInt("LockToneLockedMs",n.lockToneLockedMs,0,60000));
     Fix("VehicleEngineVolume",n.vehicleEngineVolume,0.0f,4.0f);
     Fix("VehicleTurretVolume",n.vehicleTurretVolume,0.0f,4.0f);
     Fix("VehicleReloadVolume",n.vehicleReloadVolume,0.0f,4.0f);
@@ -703,6 +705,8 @@ void LoadConfig() noexcept {
     n.warnAudio=ReadBool(L"WarnAudio",n.warnAudio);
     n.warnVoice=ReadBool(L"WarnVoice",n.warnVoice);
     n.warnVolume=ReadFloat(L"WarnVolume",n.warnVolume);
+    n.lockToneBeeps=ReadInt(L"LockToneBeeps",static_cast<DWORD>(n.lockToneBeeps));
+    n.lockToneLockedMs=ReadInt(L"LockToneLockedMs",static_cast<DWORD>(n.lockToneLockedMs));
     n.vehicleSound=ReadBool(L"VehicleSound",n.vehicleSound);
     n.vehicleEngineVolume=ReadFloat(L"VehicleEngineVolume",n.vehicleEngineVolume);
     n.vehicleTurretVolume=ReadFloat(L"VehicleTurretVolume",n.vehicleTurretVolume);
@@ -996,6 +1000,7 @@ void LoadConfig() noexcept {
     Log("CONFIG playerJet hud gunSight=%d flight=%d threats=%d lockByView=%d turretAimHud=%d; warnings audio=%d voice=%d volume=%.2f",
         n.playerJetGunSight,n.playerJetFlightHud,n.playerJetThreatHud,n.playerJetLockByView,n.turretAimHud,n.warnAudio,n.warnVoice,
         n.warnVolume);
+    Log("CONFIG lockTone beeps=%d lockedMs=%d",n.lockToneBeeps,n.lockToneLockedMs);
     Log("CONFIG playerJet gearKey=0x%X gearPad=0x%X (XInput bits, held %.1f s)",n.playerJetGearKey,n.playerJetGearPad,kGearPadHoldSec);
     Log("CONFIG vehicleSound=%d engine=%.2f turret=%.2f reload=%.2f gun=%.2f mg=%.2f missile=%.2f",n.vehicleSound,n.vehicleEngineVolume,
         n.vehicleTurretVolume,n.vehicleReloadVolume,n.vehicleGunVolume,n.vehicleMgVolume,n.vehicleMissileVolume);
