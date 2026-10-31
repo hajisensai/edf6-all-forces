@@ -67,7 +67,7 @@ RTTI 扫描全部 150 个 GameObjectBase 派生类（`vtable-8` 的 COL 基类�
 3. **窗口**：每个特殊目标记录开合（无敌标志、传送舰伤害窗口、锚的屏蔽），统计开着的时长和两次打开的间隔（滑动平均）。开着：剩余时间可读（传送舰倒计时）就要求「飞行时间 < 剩余」，读不到就要求「已开时长 + 飞行时间 < 平时开着时长 × 0.85」；关着但按节律 2.5 s 内要开（或刚过期不到一个周期）→ **wait**：保留为目标、瞄准、不扣扳机（**预瞄**）；否则 skip。
 4. **接到 AI**：选目标（步兵 `PickTarget`、标记、炮手、直升机、战机、地面机器人）跳过 skip；扣扳机（步兵、`Veto` 含原版 AI 自己的目标、炮手座位、驾驶位挂载）要求 fire；步兵把视线对准预测给出的弱点瞄准点。普通敌人不做射线（只看无敌标志），每对射手-目标的计划缓存 150 ms。
 5. **兜底**：原来的「同一射手连续 4 发命中不掉血 → 停火 6 s」保留，覆盖不调用的那些类和预测没算到的情况。
-6. **日志**：特殊目标每 3 s 一行 `WASTEDFIRE plan <射手> -> <目标> (ship/anchor/generator/never/fortress part): window open/shut left … ms, … rays N met N on it N (body …), accepted …, flight … ms: fire/wait/skip`——实机看这一行就知道射线层对不对、刚体 id 游戏认不认。
+6. **日志**：同一射手对同一类特殊目标每 3 s 一行（全局再限每秒最多 4 行，`src/wasted_fire.h` `planlog`）`WASTEDFIRE plan <射手> -> <目标> (ship/anchor/generator/never/fortress part): window open/shut left … ms, … rays N met N on it N (body …), accepted …, flight … ms: fire/wait/skip (+N plan(s) since)`，末尾是这一行代表的、上一行以来没记的计划数。（原来按目标每 3 s 一行：移动要塞上百个部件各算一个目标，目标观察表只有 64 格、来回挤掉，新格立刻记一行，2026-10-31 约 10 MB/s 把 32 MB 日志几秒轮转一次。）——实机看这一行就知道射线层对不对、刚体 id 游戏认不认。
 
 ### 每类的测试
 
