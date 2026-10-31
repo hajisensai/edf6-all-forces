@@ -33,6 +33,7 @@
 #include "enemy_control_timeship.h"
 #include "online_authority.h"
 #include "support_soldier.h"
+#include "command_identity.h"   // PlayerRequesterOf
 #include "edf41classes.h"
 #include "memory.h"
 #include "map.h"
@@ -297,8 +298,9 @@ bool CandidateClear(Candidate& candidate) noexcept {
     if(!Drop(candidate.owner) || !Drop(candidate.target))return false;
     candidate=Candidate{};return true;
 }
+// The owner (kind 1, a player) by its mission slot (player_requester.h), the same on every machine; the target by its NetId.
 void MakeId(const ObjRef& object,unsigned char (&id)[32],std::uint64_t serial,unsigned kind) noexcept {
-    if(ReadNativeObjectId(static_cast<const unsigned char*>(object.obj),id))return;
+    if(kind==1 ? PlayerRequesterOf(object,id) : ReadNativeObjectId(static_cast<const unsigned char*>(object.obj),id))return;
     // Offline identities stay inside this local candidate table. Network entry
     // points resolve real NativeNetId32 and never accept these local tokens.
     std::memset(id,0,32);std::memcpy(id,"ECLOCAL",7);
@@ -342,7 +344,7 @@ Reason CanPrepare(const ObjRef& requester,const ObjRef& target,Catalogue* catalo
             if(!ready || !controlled_pvp::Probe(target,hooks))return Reason::nativeMismatch;
         }
         unsigned char sourceId[32]{},targetId[32]{};
-        if(!ReadNativeObjectId(static_cast<const unsigned char*>(requester.obj),sourceId) ||
+        if(!PlayerRequesterOf(requester,sourceId) ||
             !ReadNativeObjectId(static_cast<const unsigned char*>(target.obj),targetId))return Reason::noIdentity;
         if(catalogue->adapter) {
             if(!catalogue->adapter->NetworkPoseReady || !catalogue->adapter->NetworkPoseReady(target.obj))return Reason::networkUnavailable;

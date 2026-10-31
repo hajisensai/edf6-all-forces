@@ -18,7 +18,7 @@ struct Packet {unsigned from,to;Message message;};
 struct Room {
     std::vector<std::unique_ptr<Node>> nodes;std::deque<Packet> queue;std::vector<Packet> sent;
     std::uint64_t now=10000,epoch=77;unsigned drop=99;Kind dropKind=Kind::result;
-    explicit Room(unsigned count=3,bool capable=true,unsigned oldNode=99);
+    explicit Room(unsigned count=3,bool capable=true);
     unsigned Peer(unsigned here,unsigned global)const{return global<here ? global+1 : global;}
     unsigned Global(unsigned here,unsigned peer)const{return peer<=here ? peer-1 : peer;}
     const char* Name(unsigned n)const{return n==0 ? "host" : n==1 ? "client-one" : "client-two";}
@@ -37,10 +37,9 @@ void Execute(void* ptr,const char* sender,const Request& r,Message::Result* out)
     auto& n=*static_cast<Node*>(ptr);++n.executed;n.sender=sender;n.lastFlags=r.flags;n.lastParam=r.command.param;n.lastOrder=r.command.order;
     for(unsigned i=0;i<r.count;++i)out[i]={static_cast<unsigned>(i==1 ? NpcCommandReason::notOwner : NpcCommandReason::none),i==1 ? 0u : 4u};
 }
-Room::Room(unsigned count,bool capable,unsigned oldNode) {
+Room::Room(unsigned count,bool capable) {
     for(unsigned i=0;i<count;++i){
         auto n=std::make_unique<Node>();n->room=this;n->index=i;n->session->Configure({n.get(),&Send,(i==0 && !capable) ? nullptr : &Execute});
-        if(i==oldNode)n->session->LimitVersion(kMinVersion);   // a version-6 build
         nodes.push_back(std::move(n));
     }
     Step();
@@ -85,8 +84,8 @@ void Codec() {
     Check(!Encode(m,bytes,sizeof(bytes)),"HOLD carries no formation slots");
     Check(static_cast<int>(mapcmd::Order::hold)==13 && static_cast<int>(mapcmd::Order::formation)==14 &&
           mapcmd::kLastOrder==mapcmd::Order::formation,"HOLD is appended (13), the formation order after it (14)");
-    Check(kVersion==7 && kMinVersion==6 && Compatible(6) && Compatible(7) && !Compatible(5) && !Compatible(8),
-          "the wire is version 7 (the queue's flag, the formation order), version 6 still spoken");
+    Check(kVersion==8 && kMinVersion==8 && Compatible(8) && !Compatible(7) && !Compatible(6) && !Compatible(9),
+          "the wire is version 8 (the requester its mission slot); no older version spoken");
     for(auto order:{mapcmd::Order::move,mapcmd::Order::attackMove}) {
         m.request=Make(2,order);m.request.formationTotal=3;m.request.formationSlots[0]=0;m.request.formationSlots[1]=2;
         Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.request.command.order==order &&
@@ -108,14 +107,14 @@ void Codec() {
         Check(!Decode(edit,sizeof(edit),out),"an order past the last one is not decoded");
     }
 }
-// Version 7: the Shift queue's flag and the formation order, in the two words version 6 keeps zero; version 6 still
-// encodes and decodes (a v6 peer's packets), and neither carries what it cannot.
-void Version7() {
+// The Shift queue's flag and the formation order, in the word after `kind` and the one after the point. A build before
+// version 8 (its requester a NetId, which a stock mission numbers per machine) is neither read nor written to.
+void Version8() {
     Message m;m.kind=Kind::request;m.epoch=7;m.sequence=4;m.request=Make(2,mapcmd::Order::move);m.request.flags=kQueued;
     m.request.formationTotal=2;m.request.formationSlots[0]=0;m.request.formationSlots[1]=1;
     unsigned char bytes[kWireSize];Message copy;
-    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.version==7 && copy.request.flags==kQueued,
-          "a queued move round trips at version 7");
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.version==kVersion && copy.request.flags==kQueued,
+          "a queued move round trips");
     {std::uint32_t flags;std::memcpy(&flags,bytes+12,4);Check(flags==kQueued,"the queue's flag is the word after kind");}
     m.request.flags=kQueued|2u;Check(!Encode(m,bytes,sizeof(bytes)),"an unknown flag refused");
     m.request=Make(1,mapcmd::Order::follow);m.request.flags=kQueued;Check(!Encode(m,bytes,sizeof(bytes)),"only a point order is queued");
@@ -127,28 +126,19 @@ void Version7() {
     m.request=Make(1,mapcmd::Order::guard);m.request.command.param=3;Check(!Encode(m,bytes,sizeof(bytes)),"a parameter on another order refused");
     m.request=Make(1,mapcmd::Order::formation);m.request.command.param=mapcmd::FormationParam(2,-1);m.request.formationTotal=1;
     Check(!Encode(m,bytes,sizeof(bytes)),"no formation slots on the formation order");
-    // Version 6: the same layout, the two words zero; a queued flag, a parameter or the formation order cannot go at it.
-    m=Message{};m.version=6;m.kind=Kind::request;m.epoch=7;m.sequence=5;m.request=Make(1,mapcmd::Order::hold);
-    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy) && copy.version==6 && !copy.request.flags,
-          "a version-6 HOLD round trips (a version-6 peer's request is read)");
-    m.request=Make(1,mapcmd::Order::move);m.request.flags=kQueued;Check(!Encode(m,bytes,sizeof(bytes)),"no queued flag at version 6");
-    m.request=Make(1,mapcmd::Order::formation);m.request.command.param=mapcmd::FormationParam(2,-1);
-    Check(!Encode(m,bytes,sizeof(bytes)),"no formation order at version 6");
-    m.request=Make(1,mapcmd::Order::move);Check(Encode(m,bytes,sizeof(bytes)),"a plain move at version 6");
-    {const std::uint32_t queued=kQueued;unsigned char edit[kWireSize];std::memcpy(edit,bytes,sizeof(edit));std::memcpy(edit+12,&queued,4);
-     Check(!Decode(edit,sizeof(edit),copy),"a version-6 packet with the queue's word set is not read as queued");}
-    {const std::uint32_t order=static_cast<std::uint32_t>(mapcmd::Order::formation);unsigned char edit[kWireSize];
-     std::memcpy(edit,bytes,sizeof(edit));std::memcpy(edit+32,&order,4);
-     Check(!Decode(edit,sizeof(edit),copy),"no order past HOLD decodes at version 6");}
-    Check(RequestVersion(Make(1,mapcmd::Order::move))==6 && RequestVersion(m.request)==6,"a plain order needs version 6");
-    Request q=Make(1,mapcmd::Order::move);q.flags=kQueued;Check(RequestVersion(q)==7 && !ValidRequest(q,6) && ValidRequest(q,7),
-        "a queued one needs version 7");
+    m=Message{};m.kind=Kind::request;m.epoch=7;m.sequence=5;m.request=Make(1,mapcmd::Order::hold);
+    Check(Encode(m,bytes,sizeof(bytes)) && Decode(bytes,sizeof(bytes),copy),"a HOLD round trips");
+    for(std::uint32_t old:{6u,7u}) {
+        unsigned char edit[kWireSize];std::memcpy(edit,bytes,sizeof(edit));std::memcpy(edit+4,&old,4);
+        Check(Owned(edit,sizeof(edit)) && !Decode(edit,sizeof(edit),copy),"an older build's request is consumed, never read");
+    }
+    m.version=7;Check(!Encode(m,bytes,sizeof(bytes)),"nothing goes out at an older version");
+    Check(ValidRequest(Make(1,mapcmd::Order::move)) && !ValidRequest(Make(1,mapcmd::Order::move),7),"a request travels at version 8 alone");
 }
-// The negotiation (B1): both sides of every pair of versions agree the lower one; a version-6 host is never sent a
-// queued or formation order (refused before it goes, the map says why), a version-6 client keeps every order it has.
+// The negotiation: every hello at kMinVersion with the sender's highest in it; an older build is never answered.
 void Negotiation() {
-    {   // both version 7: queued and formation orders reach the executor with their flag and parameter
-        Room r;Check(r.nodes[1]->session->HostVersion()==7,"version 7 both sides: 7");
+    {   // queued and formation orders reach the executor with their flag and parameter
+        Room r;Check(r.nodes[1]->session->HostVersion()==kVersion,"both sides: version 8");
         Request q=Make(1,mapcmd::Order::attackMove);q.flags=kQueued;
         Check(r.nodes[1]->session->Submit(q,r.Name(1),r.now)!=0,"a queued attack-move submitted");r.Pump();
         Check(r.nodes[0]->executed==1 && r.nodes[0]->lastFlags==kQueued && r.nodes[0]->lastOrder==mapcmd::Order::attackMove,
@@ -156,38 +146,21 @@ void Negotiation() {
         r.Step();Request f=Make(1,mapcmd::Order::formation);f.command.param=mapcmd::FormationParam(-2,3);
         Check(r.nodes[1]->session->Submit(f,r.Name(1),r.now)!=0,"a formation order submitted");r.Pump();
         Check(r.nodes[0]->executed==2 && r.nodes[0]->lastParam==f.command.param,"the host's executor gets the formation parameter");
-        for(const auto& p:r.sent)if(p.message.kind==Kind::hello)Check(p.message.version==6 && p.message.request.formationTotal==7,
-            "a hello goes out at version 6, the sender's highest (7) in it");
+        for(const auto& p:r.sent)if(p.message.kind==Kind::hello)Check(p.message.version==kMinVersion && p.message.request.formationTotal==kVersion,
+            "a hello goes out at the lowest version, the sender's highest in it");
     }
-    {   // a version-6 host: the version-7 client speaks 6 and refuses what 6 cannot carry, before sending it
-        Room r(2,true,0);
-        Check(r.nodes[1]->session->Ready() && r.nodes[1]->session->HostVersion()==6,"a version-6 host: the client is ready, at 6");
-        Request q=Make(1,mapcmd::Order::move);q.flags=kQueued;
-        const auto before=r.sent.size();
-        Check(!r.nodes[1]->session->Submit(q,r.Name(1),r.now) && r.sent.size()==before,"a queued move to a version-6 host: not sent");
-        Request f=Make(1,mapcmd::Order::formation);f.command.param=mapcmd::FormationParam(1,-1);
-        Check(!r.nodes[1]->session->Submit(f,r.Name(1),r.now),"a formation order to a version-6 host: not sent");
-        Check(r.nodes[1]->session->Submit(Make(1,mapcmd::Order::move),r.Name(1),r.now)!=0,"a plain move to a version-6 host: sent");
-        r.Pump();
-        Check(r.nodes[0]->executed==1 && !r.nodes[0]->lastFlags,"the version-6 host executes the plain move");
-        for(const auto& p:r.sent)Check(p.message.version==6,"every packet of the pair at version 6");
-    }
-    {   // a version-6 client of a version-7 host: answered at 6, its orders executed
-        Room r(3,true,2);
-        Check(r.nodes[2]->session->Ready() && r.nodes[2]->session->HostVersion()==6 && r.nodes[1]->session->HostVersion()==7,
-              "the host answers each client at its own version");
-        Check(r.nodes[2]->session->Submit(Make(1,mapcmd::Order::hold),r.Name(2),r.now)!=0,"the version-6 client's HOLD");r.Pump();
-        Check(r.nodes[0]->executed==1,"executed");
-        for(const auto& p:r.sent)if(p.to==2 || p.from==2)Check(p.message.version==6,"everything to and from it at version 6");
-        // A version-7 packet claiming to come from it is not executed (above what it agreed).
-        Message forged;forged.kind=Kind::request;forged.epoch=r.epoch;forged.sequence=9;forged.request=Make(1,mapcmd::Order::move);
-        forged.request.flags=kQueued;
-        r.nodes[0]->session->Receive(2,r.Name(2),forged,r.now);r.Pump();
-        Check(r.nodes[0]->executed==1,"a version-7 request above a peer's agreed version is not executed");
+    {   // an older build (version 7 and before: its requester a NetId): no capability for its hello, its requests not run
+        Room r(2);const auto before=r.sent.size();
+        Message hello;hello.version=7;hello.epoch=r.epoch;hello.request.formationTotal=7;
+        r.nodes[0]->session->Receive(1,r.Name(1),hello,r.now);r.Pump();
+        Check(r.sent.size()==before,"an older build's hello: not answered");
+        Message forged;forged.version=7;forged.kind=Kind::request;forged.epoch=r.epoch;forged.sequence=9;forged.request=Make(1,mapcmd::Order::move);
+        r.nodes[0]->session->Receive(1,r.Name(1),forged,r.now);r.Pump();
+        Check(r.nodes[0]->executed==0,"an older build's request is not executed");
     }
 }
-// Kind::ways (v7): the host's Shift queues for the clients' maps -- sent to a version-7 peer when they change, never to
-// a version-6 one, all of them again to a peer saying hello, cleared when gone; newest revision wins.
+// Kind::ways: the host's Shift queues for the clients' maps -- sent to every capable peer when they change, all of them
+// again to a peer saying hello, cleared when gone; newest revision wins.
 void WaysMessages() {
     Message m;m.kind=Kind::ways;m.epoch=7;m.sequence=3;m.request.count=1;m.request.units[0][0]=9;m.ways.n=2;
     m.ways.order=static_cast<std::uint32_t>(mapcmd::Order::move);m.ways.current[0]=7;m.ways.current[2]=-2;
@@ -200,21 +173,21 @@ void WaysMessages() {
     m.ways.order=static_cast<std::uint32_t>(mapcmd::Order::move);
     {Message clear=m;clear.ways=command_net::Ways{};Check(Encode(clear,bytes,sizeof(bytes)),"a clearing: no order, no point");
      clear.ways.current[0]=1;Check(!Encode(clear,bytes,sizeof(bytes)),"a clearing carries no current point");}
-    m.version=6;Check(!Encode(m,bytes,sizeof(bytes)),"no ways message at version 6");m.version=7;
+    m.version=7;Check(!Encode(m,bytes,sizeof(bytes)),"no ways message at an older version");m.version=kVersion;
     m.ways.n=9;Check(!Encode(m,bytes,sizeof(bytes)),"at most eight points");m.ways.n=1;
     Check(!Encode(m,bytes,sizeof(bytes)),"a point past the count must be zero");m.ways.n=2;
     m.ways.at[0][1]=std::numeric_limits<float>::quiet_NaN();Check(!Encode(m,bytes,sizeof(bytes)),"no NaN point");m.ways.at[0][1]=0;
     m.sequence=0;Check(!Encode(m,bytes,sizeof(bytes)),"a revision is required");
 
-    Room r(3,true,2);   // node 2 is a version-6 build
+    Room r(3);
     const unsigned char unit[32]={5};const float pts[2][3]={{10,0,1},{20,0,2}};
     const mapcmd::Command now{mapcmd::Order::attackMove,{3,0,4}},moved{mapcmd::Order::move,{3,0,4}};
     const auto waysTo=[&](unsigned to){unsigned n=0;for(const auto& p:r.sent)if(p.to==to && p.message.kind==Kind::ways)++n;return n;};
     r.nodes[0]->session->PublishWays(unit,now,pts,2);r.Pump();
     command_net::Ways got;
-    Check(r.nodes[1]->session->WaysOf(unit,&got) && got.n==2 && got.at[1][0]==20,"a version-7 client gets the host's queue");
+    Check(r.nodes[1]->session->WaysOf(unit,&got) && got.n==2 && got.at[1][0]==20,"a client gets the host's queue");
     Check(got.order==static_cast<std::uint32_t>(mapcmd::Order::attackMove) && got.current[2]==4,"...and the unit's current order and point");
-    Check(!waysTo(2),"a version-6 client is never sent one");
+    Check(waysTo(2)==1 && r.nodes[2]->session->WaysOf(unit,&got),"so does every other client");
     const auto sent=r.sent.size();r.nodes[0]->session->PublishWays(unit,now,pts,2);r.Pump();
     Check(r.sent.size()==sent,"unchanged: not sent again");
     r.nodes[0]->session->PublishWays(unit,moved,pts,2);r.Pump();
@@ -224,7 +197,7 @@ void WaysMessages() {
      Check(r.sent.size()==before,"a queue whose current order is no point order: not published");}
     // A peer saying hello again (a reconnect, a new member) is sent every queue out now.
     const auto before=waysTo(1);
-    Message hello;hello.version=6;hello.epoch=r.epoch;hello.request.formationTotal=7;
+    Message hello;hello.version=kMinVersion;hello.epoch=r.epoch;hello.request.formationTotal=kVersion;
     r.nodes[0]->session->Receive(1,r.Name(1),hello,r.now);r.Pump();
     Check(waysTo(1)==before+1,"hello: the queues out sent to it again");
     unsigned char out[4][32];Check(r.nodes[0]->session->PublishedWays(out,4)==1,"the host lists what is out");
@@ -297,4 +270,4 @@ void Protocol() {
     Check(rebound.nodes[0]->executed==1 && rebound.sent.size()==packets,"peer index cannot inherit another PUID's capability or result cache");
 }
 }
-int main(){Codec();Version7();Negotiation();WaysMessages();WaysReconnect();Protocol();std::printf("command protocol: %d checks passed\n",checks);}
+int main(){Codec();Version8();Negotiation();WaysMessages();WaysReconnect();Protocol();std::printf("command protocol: %d checks passed\n",checks);}

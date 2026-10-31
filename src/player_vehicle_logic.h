@@ -105,8 +105,10 @@ inline bool ParseValue(const char* value,Variant* out,int* count) noexcept {
 }
 
 // --- The mission's messages (plugin_net.h channel PVEH, support_protocol.h kExtPlayerVehicle) ---
+// The requester is the player's requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
+// Version 2 (2026-10-31): that ID; version 1 sent the NetId, which a guest did not find for the host's player.
 inline constexpr std::uint32_t kMagic=0x48455650u;   // "PVEH"
-inline constexpr std::uint32_t kVersion=1;
+inline constexpr std::uint32_t kVersion=2;
 inline constexpr std::size_t kHead=16;                // magic, version, kind @8, origin @12
 inline constexpr std::size_t kDecideSize=kHead+8+4+4+wire::kIdBytes;   // body @16, seq @20, bits @24, requester @32
 inline constexpr std::size_t kSyncSize=kHead+8+wire::kIdBytes;          // body @16, next seq @20, requester @24

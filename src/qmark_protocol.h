@@ -9,7 +9,8 @@
 // ignored. A peer without this plugin version (no QMRK) drops the bytes: its support parser rejects the magic.
 // The enemy goes by its native network ID (support_soldier.h ReadNativeObjectId, the one the map commands' focus uses:
 // the same object on every machine); an all-zero ID: one without it, shown at the position sent. The marker is the
-// sending player's own native ID (resolved and checked against the authenticated sender on the receiving machine).
+// sending player's own requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine),
+// resolved and checked against the authenticated sender on the receiving machine. Version 2 (2026-10-31): that ID.
 #pragma once
 #include <array>
 #include <cstddef>
@@ -17,7 +18,7 @@
 
 namespace crew::qmark_net {
 constexpr std::uint32_t kMagic=0x4B524D51u;   // "QMRK"
-constexpr std::uint32_t kVersion=1;
+constexpr std::uint32_t kVersion=2;
 // kCapLetGo: `letGo` counts the marks its player let go (the key again on the same enemy), so the receiver tells a let-go
 // (its cue) from a mark gone with its enemy (silent).
 constexpr std::uint32_t kCapEnemy=1u,kCapPoint=2u,kCapLetGo=4u,kCapabilities=kCapEnemy|kCapPoint|kCapLetGo;

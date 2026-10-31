@@ -12,8 +12,11 @@ namespace crew {
 //   4 (2026-10-27): the support pt shared by a team, kept by the host (support_points_net.h: the SPTS channel).
 //   5 (2026-10-30): the X-Morph infantry kind (SupportWeapon 14; an older build rejects the composed loadout), the
 //      support channel's re-handshake keeping its transactions (support_protocol.cpp), the gunner seats' STUR channel.
+//   6 (2026-10-31): every channel names a player by its mission slot (player_requester.h), not its NetId (a stock
+//      mission numbers those per machine; the support wire keeps v2 for the version notice, its plans' requester changed
+//      with PR #300): map commands v8, PVEH v2, BRGS v2, ULTS v2, QMRK v2, GRVT/FGUN v3, enemy control v5.
 // EDF6Coop reads both values from All Forces (EDF6AF_RoomPrefix / EDF6AF_RoomProfile) rather than keeping its own.
-constexpr std::int64_t kAllForcesRoomProtocol=5;
+constexpr std::int64_t kAllForcesRoomProtocol=6;
 constexpr std::int64_t kAllForcesRoomPrefix=0x41460000+(kAllForcesRoomProtocol<<8);
 constexpr std::int64_t kAllForcesRoomInvalid=-1;
 constexpr bool AllForcesWireType(std::int64_t value) noexcept {

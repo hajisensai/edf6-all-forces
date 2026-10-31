@@ -63,7 +63,8 @@ void Wire() {
     Msg back;
     Check(size==kHead+4+18 && Decode(bytes,size,back) && back.count==2 && Same(back.have[1],m.have[1]),"have round trip");
     Check(!Decode(bytes,size-1,back),"a have of the wrong size refused");
-    bytes[4]=2;Check(!Decode(bytes,size,back),"another version refused");
+    bytes[4]=1;Check(!Decode(bytes,size,back),"an older version (the requester its NetId) refused");
+    bytes[4]=3;Check(!Decode(bytes,size,back),"a newer version refused");
     Msg d;d.kind=Kind::decide;d.origin=9;d.seq=3;d.variant=m.have[0];d.requester[0]=1;d.requester[31]=2;
     size=Encode(d,bytes,sizeof(bytes));
     Check(size==kDecideSize && Decode(bytes,size,back) && back.seq==3 && Same(back.variant,d.variant) && SameId(back.requester,d.requester),

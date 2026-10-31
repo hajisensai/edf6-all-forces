@@ -72,7 +72,8 @@ void WireChecks() {
     Encode(m,b,sizeof(b));
     unsigned char c[kWire];
     std::memcpy(c,b,kWire);c[0]='X';Check(!Decode(c,kWire,out) && !Owned(c,kWire),"another magic: not this channel's");
-    std::memcpy(c,b,kWire);PutU(c,4,2);Check(!Decode(c,kWire,out),"another version: dropped");
+    std::memcpy(c,b,kWire);PutU(c,4,1);Check(!Decode(c,kWire,out),"an older version (the caller its NetId): dropped");
+    std::memcpy(c,b,kWire);PutU(c,4,3);Check(!Decode(c,kWire,out),"another version: dropped");
     Check(!Decode(b,kWire-4,out),"another size: dropped");
     std::memcpy(c,b,kWire);c[8]=0;Check(!Decode(c,kWire,out),"kind 0: dropped");
     std::memcpy(c,b,kWire);PutF(c,36,std::nanf(""));Check(!Decode(c,kWire,out),"a centre not finite: dropped");
