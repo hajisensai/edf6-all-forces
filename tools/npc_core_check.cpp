@@ -222,8 +222,12 @@ Sea SeaAt(float,float,float*) noexcept { return Sea::land; }
 int MapCommandGuardAt(const float*) noexcept { ++pointOrders;return 1; }
 // The custom Q's side (qmark.cpp): the ray the camera's centre here; the point marks and the cues counted.
 bool QMarkRay(const unsigned char*,float* eye,float* dir) noexcept { return CameraRay(eye,dir); }
-int pointMarks=0,cueOwn=0,cueOff=0,qmarkFrames=0;
-void QMarkSetPoint(const float*) noexcept { ++pointMarks; }
+int pointMarks=0,cueOwn=0,cueOff=0,qmarkFrames=0,pointClears=0;bool pointShown=false;
+void QMarkSetPoint(const float*) noexcept { ++pointMarks;pointShown=true; }
+bool QMarkClearPoint(float* at) noexcept {
+    ++pointClears;at[0]=at[1]=0.0f;at[2]=30.0f;
+    const bool was=pointShown;pointShown=false;return was;
+}
 void QMarkPlay(QMarkCue c) noexcept { cueOwn+=c==QMarkCue::own;cueOff+=c==QMarkCue::off; }
 void QMarkFrame() noexcept { ++qmarkFrames; }
 // EDF6AutoTurret's turret seat (turretaim.cpp AutoTurretSeat): the player at one, its auto-aim, keyboard, lock and the
@@ -907,27 +911,57 @@ int main() {
         NpcMarkFrame(human,false);
         Expect(!NpcMarked(),"closing the map with Q held does not create a second press");
         markinput::down=false;NpcMarkFrame(human,false);
+        Expect(!NpcMarked(),"...nor its release a tap");
         mapHeld=true;markinput::down=true;NpcMarkFrame(human,false);
         Expect(!NpcMarked(),"TV or closing-map input hold blocks on-foot marking");
         markinput::down=false;NpcMarkFrame(human,false);mapHeld=false;
+        Expect(!NpcMarked(),"...released under it: no tap");
         cueOwn=cueOff=pointMarks=qmarkFrames=0;
+        // A tap acts on its release (the key held is the clear's: qmark_ray.h StepMarkKey).
         markinput::down=true;NpcMarkFrame(human,false);
-        Expect(NpcMarked(),"a fresh player-frame press marks without any NPC Think");
-        Expect(cueOwn==1 && cueOff==0 && qmarkFrames==1,"marking asks for the own cue; the Q mark's frame runs from the player's");
-        markinput::down=false;NpcMarkFrame(human,false);
-        markinput::down=true;NpcMarkFrame(human,false);
+        Expect(!NpcMarked() && cueOwn==0,"the press itself: nothing yet (a hold would clear)");
+        now+=100;markinput::down=false;NpcMarkFrame(human,false);
+        Expect(NpcMarked(),"a fresh player-frame tap marks on its release without any NPC Think");
+        Expect(cueOwn==1 && cueOff==0 && qmarkFrames==2,"marking asks for the own cue; the Q mark's frame runs from the player's");
+        markinput::down=true;NpcMarkFrame(human,false);markinput::down=false;NpcMarkFrame(human,false);
         Expect(!NpcMarked() && cueOff==1,"the same enemy again: let go, the off cue");
-        markinput::down=false;NpcMarkFrame(human,false);
         Put<void*>(human,kHumanVehicleCtrl,foeCtrl);   // riding (the stock spot it replaces was riding too)
-        markinput::down=true;NpcMarkFrame(human,false);
+        markinput::down=true;NpcMarkFrame(human,false);markinput::down=false;NpcMarkFrame(human,false);
         Expect(NpcMarked() && cueOwn==2,"riding: Q marks as on foot");
         Put<void*>(human,kHumanVehicleCtrl,nullptr);
-        markinput::down=false;NpcMarkFrame(human,false);markEnemy=nullptr;
-        markinput::down=true;NpcMarkFrame(human,false);
+        markEnemy=nullptr;
+        markinput::down=true;NpcMarkFrame(human,false);markinput::down=false;NpcMarkFrame(human,false);
         Expect(pointOrders==1 && NpcMarked(),"a ground miss orders selected units without clearing the existing mark");
         Expect(pointMarks==1 && cueOwn==3,"a ground miss marks the point (shared, shown) with the own cue");
-        markinput::down=false;NpcMarkFrame(human,false);config.enabled=false;
+        // Held kMarkClearMs (the user, 2026-10-31: "长按q应该能取消标记"): the enemy mark and the point cleared while
+        // still held, the off cue (the teammates' let-go), the ring where it was; the release nothing; the orders stay.
+        markEnemy=other;
         markinput::down=true;NpcMarkFrame(human,false);
+        now+=qmark::kMarkClearMs-1;NpcMarkFrame(human,false);
+        Expect(NpcMarked() && cueOff==1,"held just short of the clear: the mark stays");
+        now+=1;NpcMarkFrame(human,false);
+        Expect(!NpcMarked() && !pointShown && cueOff==2 && cueOwn==3,"held kMarkClearMs: the enemy mark and the point cleared, one off cue");
+        {
+            NpcPing p{};
+            Expect(NpcPingReadout(&p) && p.given==kPingCleared,"...the cleared ring for the HUD");
+        }
+        now+=500;NpcMarkFrame(human,false);markinput::down=false;NpcMarkFrame(human,false);
+        Expect(!NpcMarked() && cueOwn==3 && cueOff==2 && pointMarks==1 && pointOrders==1,
+               "the release after the clear: no tap (nothing marked, no point, no order)");
+        // Nothing marked: held does nothing (no cue).
+        markinput::down=true;NpcMarkFrame(human,false);now+=qmark::kMarkClearMs;NpcMarkFrame(human,false);
+        markinput::down=false;NpcMarkFrame(human,false);
+        Expect(!NpcMarked() && cueOff==2 && cueOwn==3,"held with nothing marked: nothing, no cue");
+        // Let go on the way to the clear: a tap (on the same enemy as ever).
+        markinput::down=true;NpcMarkFrame(human,false);now+=qmark::kMarkClearMs-50;NpcMarkFrame(human,false);
+        markinput::down=false;NpcMarkFrame(human,false);
+        Expect(NpcMarked() && cueOwn==4,"released before the clear: a tap marks");
+        // The map opened mid-press: neither a clear nor a tap.
+        markinput::down=true;NpcMarkFrame(human,false);NpcMarkFrame(human,true);now+=qmark::kMarkClearMs;
+        NpcMarkFrame(human,false);markinput::down=false;NpcMarkFrame(human,false);
+        Expect(NpcMarked() && cueOff==2,"the map opened mid-press: dropped (the mark kept, no let-go)");
+        config.enabled=false;
+        markinput::down=true;NpcMarkFrame(human,false);markinput::down=false;NpcMarkFrame(human,false);
         Expect(pointOrders==1 && !NpcMarked(),"global disable prevents ground orders and hides the mark");
         ResetNpcAi();Expect(At<long>(foeCtrl,0xC)==1,"player-frame mark releases its identity on reset");
     }

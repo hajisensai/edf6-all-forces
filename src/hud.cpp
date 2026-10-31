@@ -5474,19 +5474,21 @@ void StrikeBanner(Text* text,float width,float height,float s,Line* lines,int* a
 }
 // The mark key with no enemy near the aim (npcai.cpp SendToPoint): what came of it under the point for a moment (the
 // selected units sent there, how many; none selected; online); the point's own ring is the Q mark's (QMarkHud). An
-// enemy near the aim but not on it: a ring there and the word to aim at it.
+// enemy near the aim but not on it: a ring there and the word to aim at it. The key held (kPingCleared): the same ring
+// where this machine's mark was, and the word that it is cleared.
 void NpcPingHud(void* drawer,void* ctx,Text* text,const float* vp,float width,float height,float s,Line* lines,int* at) noexcept {
     NpcPing p{};
     float x,y,depth;
     if(!NpcPingReadout(&p) || !Project(vp,p.at,width,height,&x,&y,&depth))return;
     const float* tint=p.given>0 ? kMapOrder : kAmber;
-    if(p.given==kPingNearEnemy) {
+    if(p.given==kPingNearEnemy || p.given==kPingCleared) {
         Arc(drawer,ctx,x,y,14.0f*s,0.0f,kTurn,2.0f*s,20,tint);
         Seg(drawer,ctx,x,y-6.0f*s,x,y+6.0f*s,2.0f*s,tint);Seg(drawer,ctx,x-6.0f*s,y,x+6.0f*s,y,2.0f*s,tint);
     }
     if(p.given>=0)Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,Tr(Tx::npcPingSent),p.given);
     else Label(text,lines,at,x,y+26.0f*s,1,kLineScale*0.7f,tint,L"%ls",
-               Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy : Tx::npcPingNoUnit));
+               Tr(p.given==-2 ? Tx::cmdOfflineOnly : p.given==kPingNearEnemy ? Tx::npcPingNearEnemy :
+                  p.given==kPingCleared ? Tx::npcPingCleared : Tx::npcPingNoUnit));
 }
 
 // The catalog's categories in the HUD's words (debug_spawn.h Category, in its order): the debug spawn tool's menu and the

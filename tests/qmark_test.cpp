@@ -7,7 +7,9 @@
 //    the sender's keepalive / change / gap, the receiver's order, restart and silence, a point's time;
 //  - sharing: this machine's marks sent to every peer, a teammate's shown (found here by its native ID, its slot only for
 //    the authenticated sender), an old peer's bytes (no QMRK) left to the support parser;
-//  - the cues: marking asks for the own cue, a teammate's new mark for the team cue, at QMarkVolume; 0: silent.
+//  - the cues: marking asks for the own cue, a teammate's new mark for the team cue, at QMarkVolume; 0: silent;
+//  - the key held (qmark_ray.h StepMarkKey; the user, 2026-10-31: "长按q应该能取消标记"): a tap on its release, held
+//    kMarkClearMs a clear, the map opened mid-press nothing; the clear shared at once (no enemy, no point, a let-go).
 #include "../src/qmark.cpp"
 #include <cstdio>
 
@@ -144,6 +146,52 @@ void RayChecks() {
           "the Dreadnought's bridge holding the key (strafe): the mark yields (§3.3 B)");
     Check(qmark::SeatMarkPress(false,true)==qmark::SeatPress::markLock,"at an aircraft's stick: the press waits for its lock (§3.3 C)");
     Check(qmark::SeatMarkPress(false,false)==qmark::SeatPress::normal,"anywhere else: the press as ever");
+    {
+        using qmark::MarkPress;
+        const unsigned long long t0=1000;
+        qmark::MarkKey k{};
+        auto Step=[&](bool down,unsigned long long at,bool start=true,bool keep=true) {
+            return qmark::StepMarkKey(k,down,start,keep,at);
+        };
+        // A tap: nothing on the press, the tap on the release.
+        Check(Step(true,t0)==MarkPress::none && Step(true,t0+100)==MarkPress::none,"a press: nothing yet");
+        Check(Step(false,t0+150)==MarkPress::tap,"released before kMarkClearMs: a tap, on the release");
+        Check(Step(false,t0+200)==MarkPress::none,"...once");
+        // Held: the clear at kMarkClearMs, once, and the release nothing.
+        k=qmark::MarkKey{};
+        Step(true,t0);
+        Check(Step(true,t0+qmark::kMarkClearMs-1)==MarkPress::none,"held just short of kMarkClearMs: nothing yet");
+        Check(Step(true,t0+qmark::kMarkClearMs)==MarkPress::hold,"held kMarkClearMs: the clear, while still held");
+        Check(Step(true,t0+qmark::kMarkClearMs+500)==MarkPress::none,"...once however long it is held");
+        Check(Step(false,t0+qmark::kMarkClearMs+600)==MarkPress::none,"the release after a hold: no tap");
+        // Released on the way (a long tap): still a tap, never a clear.
+        k=qmark::MarkKey{};
+        Step(true,t0);Step(true,t0+300);
+        Check(Step(false,t0+qmark::kMarkClearMs-50)==MarkPress::tap,"let go on the way to the clear: a tap");
+        Check(Step(false,t0+2000)==MarkPress::none,"...and no clear after it");
+        // A press that may not start (the bridge's strafe, the map): nothing, held or tapped.
+        k=qmark::MarkKey{};
+        Step(true,t0,false);
+        Check(Step(true,t0+qmark::kMarkClearMs,false)==MarkPress::none && Step(false,t0+700,false)==MarkPress::none,
+              "a press that may not start (the bridge's strafe): neither a tap nor a clear");
+        // The map opened mid-press: dropped, neither on the hold nor on the release.
+        k=qmark::MarkKey{};
+        Step(true,t0);Step(true,t0+200);
+        Check(Step(true,t0+300,true,false)==MarkPress::none,"the map opened mid-press: dropped");
+        Check(Step(true,t0+qmark::kMarkClearMs,true,true)==MarkPress::none && Step(false,t0+900)==MarkPress::none,
+              "...the map shut again before the release: still nothing (a press begun in the map is not a press)");
+        k=qmark::MarkKey{};
+        Step(true,t0);
+        Check(Step(false,t0+100,true,false)==MarkPress::none,"released with the map open: no tap");
+        // A press already down when the mark could start (a press made in the map, held as it closed): not a press.
+        k=qmark::MarkKey{};
+        Step(true,t0,true,false);
+        Check(Step(true,t0+qmark::kMarkClearMs)==MarkPress::none && Step(false,t0+700)==MarkPress::none,
+              "held from the map: neither a tap nor a clear");
+        // The next press after any of these: as ever.
+        Step(true,t0+800);
+        Check(Step(false,t0+850)==MarkPress::tap,"the next press: a tap again");
+    }
     {
         int was=0,now=0;
         Check(qmark::JetMarkDue(&was,&now,false,false)==&now,"the new lock after the cycle: marked");
@@ -321,6 +369,31 @@ void ShareChecks() {
     const std::uint32_t before=d.letGo;
     sends=0;QMarkPlay(QMarkCue::off);Frame();UpdateQMarkNetwork(true,2,&Send,T+760);
     Check(sends==2 && qmark_net::Decode(sent,sizeof(sent),d) && d.letGo==before+1,"this machine's let-go counted and sent at once");
+    // The key held (npcai.cpp ClearOwnMarks): the enemy and the point both cleared, one let-go; the teammate's machine
+    // (an Inbox, as qmark.cpp's) sees both gone and its off cue, no new mark.
+    {
+        const float at[3]={10,0,20};
+        ownEnemy=true;QMarkSetPoint(at);Frame();
+        sends=0;UpdateQMarkNetwork(true,2,&Send,T+820);
+        qmark_net::State marked;
+        Check(sends==2 && qmark_net::Decode(sent,sizeof(sent),marked) && marked.enemy && marked.point,"an enemy and a point marked: sent");
+        qmark_net::Inbox peer;qmark_net::Change ch=qmark_net::Change::none;
+        Check(peer.Receive(1,marked,T+820,&ch) && ch==qmark_net::Change::marked,"...the teammate has them");
+        float was[3]{};
+        ownEnemy=false;
+        Check(QMarkClearPoint(was) && was[0]==10.0f && was[2]==20.0f,"the point cleared: where it was");
+        Check(!QMarkClearPoint(was),"...once");
+        QMarkPlay(QMarkCue::off);Frame();
+        QMarkView v2[kQMarkViews];int own=0;const int n2=Views(v2);
+        for(int i=0;i<n2;++i)own+=v2[i].own;
+        Check(own==0,"cleared: neither of this machine's marks shown");
+        sends=0;UpdateQMarkNetwork(true,2,&Send,T+830);
+        qmark_net::State cleared;
+        Check(sends==2 && qmark_net::Decode(sent,sizeof(sent),cleared) && !cleared.enemy && !cleared.point &&
+              cleared.letGo==marked.letGo+1,"the clear sent at once: no enemy, no point, the let-go counted");
+        Check(peer.Receive(1,cleared,T+830,&ch) && ch==qmark_net::Change::letGo && !peer.Enemy(1,T+830) && !peer.Point(1,T+830),
+              "the teammate: both gone, a let-go (its off cue)");
+    }
     // The name not readable: P<n> (no name).
     nameReadable=false;ResetQMarkNetwork();UpdateQMarkNetwork(true,2,&Send,T+770);
     Check(TeamBytes(b,1,true,false) && ReceiveQMarkNetwork(1,senderPuid,b,sizeof(b),T+780),"heard again");

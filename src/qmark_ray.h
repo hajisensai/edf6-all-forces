@@ -58,6 +58,24 @@ inline SeatPress SeatMarkPress(bool bridgeClaims,bool atStick) noexcept {
 // is there; at the wait's end the lock it kept (one target in the cone: the cycle came back to it); nothing while there
 // is no lock or it is already the mark (`marked`).
 constexpr unsigned kJetMarkWaitMs=2500;
+
+// The mark key held (the user, 2026-10-31: "长按q应该能取消标记"), as EDF6AutoTurret's lock key (designate.cpp,
+// LockClearMs 600): a tap acts on its release; held kMarkClearMs it clears this machine's player's marks at that moment
+// and its release does nothing. `start`: a press may begin now (the map shut and not holding the keys, the mark on, the
+// seat not one that keeps the key: a Dreadnought's bridge); `keep`: a press held may go on (the map opened or the mark
+// turned off mid-press: it is dropped, neither a tap nor a hold). `now` in ms.
+constexpr unsigned kMarkClearMs=600;
+enum class MarkPress { none, tap, hold };
+struct MarkKey { bool down,armed; unsigned long long at; };
+inline MarkPress StepMarkKey(MarkKey& k,bool down,bool start,bool keep,unsigned long long now) noexcept {
+    MarkPress r=MarkPress::none;
+    if(down && !k.down){k.armed=start;k.at=now;}
+    else if(down && k.armed && !keep)k.armed=false;
+    else if(down && k.armed && now-k.at>=kMarkClearMs){k.armed=false;r=MarkPress::hold;}
+    else if(!down && k.down && k.armed){k.armed=false;r=keep ? MarkPress::tap : MarkPress::none;}
+    k.down=down;
+    return r;
+}
 inline const void* JetMarkDue(const void* from,const void* locked,bool expired,bool marked) noexcept {
     if(!locked || marked)return nullptr;
     return locked!=from || expired ? locked : nullptr;
