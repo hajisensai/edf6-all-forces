@@ -125,3 +125,13 @@ kClasses 的 502 项改为 `{0x17DA028, 0x612D20, slot 4}`：在 stock slot 4 �
   - 对玩家呼叫的 NPC 司机、AutoCrew 的 dummy、任务脚本的载具都生效。
 - 地址与指令由 `tests/npc_vehicle_ai_native_audit.py` 钉住，签名不符时整项关闭（日志 `VEHTARGET off`）。
 - 未实机验证。
+
+## AI 动作的激活门：+0x4A0（2026-10-31，用户反馈「多辆载具只有一个 NPC 干活」）
+
+- 所有载具 AI 动作在转向 / 瞄准 / 开火前读载具自己的 `+0x4A0`：CarBase `0x661440` 的 `0x6616C0`（为 0 跳到 `0x661788`，整段跳过）、
+  机甲 `0x63C1C0` 的 `0x63C381`、普罗透斯 `0x648F70` 的 `0x649067`、巴尔加待机 `0x6049B0` 的 `0x604A1A`。（确认）
+- `+0x4A0` 只由 GameObjectBase 的激活 `0x548D50` 置 1（已激活 / `+0x380` 第 21 位时直接返回；置位后调第 26 槽，尾调 `0x54D180`）：
+  CreateFriend / CreateEnemy 的 `active`（`0x1D8AAB`）、视距 `+0x470 > 0` 内看到目标（`0x54C26A`）、部分受击（`0x5483E3`）。（确认）
+- 真实士兵走上去开的载具创建时不激活、`+0x470 = 0`：插件替它跑 AI 遍时 AI 动作照跑、原版也选了目标，但从不转向开火。
+  实测三辆 NPC 驾驶的 403 坦克只有原本就被激活的一辆打主炮（详见 `docs/feedback-2026-10-31-idle-vehicle-npc.md`）。（确认）
+- 修法：`src/npcai.cpp` `ActivateDrivenVehicle`，在 NPC 驾驶员第一次 AI 遍前调一次 `0x548D50`。
