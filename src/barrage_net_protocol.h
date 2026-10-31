@@ -8,6 +8,8 @@
 // A barrage lasts seconds: a peer that joins during one, or loses its message, does not see it (no keep).
 // Wire: fixed size, little-endian (wire.h), plugin_net.h channel BRGS, support_protocol.h kExtBarrage:
 //   magic, version, kind (byte 8), origin @12, serial @16, damage @20, at[3] @24, heading[3] @36, caller[32] @48; zero to kWire.
+// Version 2 (2026-10-31): the caller is its requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine);
+// version 1 sent the NetId, and a guest dropped the host's barrages.
 #pragma once
 #include "barrage_plan.h"
 #include "wire.h"
@@ -16,7 +18,7 @@
 
 namespace crew::barrage_net {
 constexpr std::uint32_t kMagic=0x53475242u;   // "BRGS"
-constexpr std::uint32_t kVersion=1;
+constexpr std::uint32_t kVersion=2;
 constexpr std::size_t kWire=80;
 constexpr float kMostDamage=1.0e9f;
 
@@ -27,7 +29,7 @@ struct Msg {
     float damage=0.0f;               // a round's (dealt on the caller's machine only)
     float at[3]{};                   // the point called, as the caller's machine planned from it
     float heading[3]{};              // ...and the heading
-    unsigned char caller[32]{};      // the calling player's native ID (support_soldier.h ReadNativeObjectId)
+    unsigned char caller[32]{};      // the calling player's requester ID (command_identity.h PlayerRequesterOf)
 };
 
 namespace detail {

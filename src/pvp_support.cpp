@@ -4,6 +4,7 @@
 #include "pvp.h"
 #include "pvp_native.h"
 #include "command_identity.h"
+#include "player_requester.h"
 #include "coop_extension_api.h"
 #include "support_net.h"
 #include "support_soldier.h"
@@ -16,37 +17,25 @@ bool EmptyRequester(const unsigned char (&requester)[32]) noexcept {
     for(unsigned char byte:requester)if(byte)return false;
     return true;
 }
-bool CanonicalRequester(const unsigned char (&requester)[32]) noexcept {
-    if(EmptyRequester(requester))return false;
-    for(unsigned i=20;i<24;++i)if(requester[i])return false;
-    return true;
-}
-bool SameRequester(const CommandIdentities& command,const MarkIdentities& mark) noexcept {
-    return command.requester && mark.player && mark.slot>=0 && mark.puid &&
-        command.requester.obj==mark.player.obj && command.requester.ctrl==mark.player.ctrl &&
-        command.requesterPuid==mark.puid;
-}
-// Both native helpers return borrowed identities for immediate game-thread use.
-// The strict command resolver rejects ambiguous IDs and registry changes; the
-// mark resolver additionally supplies the mission slot of that exact player.
-// Coop resolves that slot to a real transport PUID, then the sealed-world gate
-// proves it is also the player's native EOS identity in the current world.
+// The requester is the player's mission slot (player_requester.h), never its NetId: a stock mission numbers the players'
+// NetIds per machine, so a guest found no host player by the host's and refused every plan the host asked for (2026-10-31).
+// The mark resolver finds the one live player of that slot here (borrowed, immediate game-thread use); Coop resolves the
+// slot to a real transport PUID, then the sealed-world gate proves it is also that player's native EOS identity.
 bool ResolveOwner(const unsigned char (&requester)[32],const ObjRef* expected,EDF6CoopPeer* out) noexcept {
     if(!out)return false;
     *out={};
-    if(!CanonicalRequester(requester))return false;
-    CommandIdentities command{};
+    int slot=-1;
+    if(!PlayerRequesterSlot(requester,&slot))return false;
     MarkIdentities mark{};
-    if(!ResolveCommandIdentities(requester,nullptr,0,nullptr,&command) ||
-       !ResolveMarkIdentities(requester,nullptr,&mark) || !SameRequester(command,mark))return false;
-    if(expected && (command.requester.obj!=expected->obj || command.requester.ctrl!=expected->ctrl))return false;
+    if(!ResolveMarkIdentities(requester,nullptr,&mark) || !mark.player || mark.slot!=slot || !mark.puid)return false;
+    if(expected && (mark.player.obj!=expected->obj || mark.player.ctrl!=expected->ctrl))return false;
     const HMODULE coop=GetModuleHandleW(L"EDF6Coop.dll");
     const auto resolve=coop ? reinterpret_cast<EDF6CoopResolveMissionPlayerPuidFn>(
         GetProcAddress(coop,"EDF6Coop_ResolveMissionPlayerPuid")) : nullptr;
     if(!resolve)return false;
     EDF6CoopPeer owner{};
     __try {
-        if(!resolve(mark.slot,&owner) || !pvp_protocol::ValidPuid(owner.id) ||
+        if(!resolve(slot,&owner) || !pvp_protocol::ValidPuid(owner.id) ||
            !SenderIsPlayer(mark.puid,owner.id))return false;
     } __except(EXCEPTION_EXECUTE_HANDLER){return false;}
     *out=owner;return true;
@@ -92,7 +81,7 @@ bool PvpMakeInheritedSupportPlan(const ObjRef& parent,support_net::Plan* plan) n
             plan->team=0;return true;
         }
         unsigned char requester[32]{};EDF6CoopPeer owner{};
-        if(!ReadNativeObjectId(static_cast<const unsigned char*>(ownerPlayer.obj),requester) ||
+        if(!PlayerRequesterOf(ownerPlayer,requester) ||
            !ResolveOwner(requester,&ownerPlayer,&owner) || (known && std::strcmp(cached,owner.id)))return false;
         const int team=PvpSupportTeam(owner.id);
         if(team<0)return false;
@@ -110,7 +99,7 @@ bool PvpInheritSupport(const ObjRef& parent,const ObjRef* children,unsigned coun
             if(LiveParent(parent) && ((IsSoldierClass(parent.obj) && IsAnyPlayer(static_cast<const unsigned char*>(parent.obj))) ||
                PvpNativeSupportDriver(parent,&ownerPlayer))) {
                 unsigned char requester[32]{};EDF6CoopPeer owner{};
-                if(ReadNativeObjectId(static_cast<const unsigned char*>(ownerPlayer.obj),requester) && ResolveOwner(requester,&ownerPlayer,&owner)) {
+                if(PlayerRequesterOf(ownerPlayer,requester) && ResolveOwner(requester,&ownerPlayer,&owner)) {
                     std::memcpy(puid,owner.id,sizeof(puid));owned=true;
                 }
             }

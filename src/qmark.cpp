@@ -127,11 +127,11 @@ void Publish(ULONGLONG now) noexcept {
     ReleaseSRWLockExclusive(&viewLock);
 }
 
-// This machine's state to send: its player's ID, its enemy mark (by ID, else its position alone) and its point.
+// This machine's state to send: its player's ID (player_requester.h: its mission slot), its enemy mark (by ID, else its position alone) and its point.
 bool OwnState(qmark_net::State* s,ULONGLONG now) noexcept {
     *s=qmark_net::State{};
     const unsigned char* human=PlayerHuman();
-    if(!human || !ReadNativeObjectId(human,s->marker))return false;   // no player in a world here: nothing to say
+    if(!human || !PlayerRequesterOf(human,s->marker))return false;   // no player in a world here: nothing to say
     const void* enemy=nullptr;
     if(NpcMarkOwn(&enemy,s->enemyAt)) {
         s->enemy=true;

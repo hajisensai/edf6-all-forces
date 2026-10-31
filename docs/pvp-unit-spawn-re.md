@@ -175,7 +175,7 @@ rec+0x30 += 1           // 每线程的创建计数
 1. **预载（每台机器）**：任务开始时用 `0x7A3780(preloadMgr [0x20B29A8], sgo, 2, -1)` 预载候选 SGO，或者按需预载并让 PREPARE 等它完成（`LoadedHere` 的模式）。EDF4.1 移植敌体要求每台机器都装了同一份 Mods 文件。
 2. **房主 Plan**：每个出生单位一项。
    - `unit.matrix` 由房主算好（出生点矩阵）。
-   - `unit.netId` 由房主派生：`memset(id,0,32); 0x776790(id, 房主本机玩家的 NetId 条目, ordinal)`，即现有的 `DeriveSupportSoldierNetId(PlayerHuman(), ordinal)`。房主玩家由脚本 / `0x22AB90` 注册，每台机器上 ID 相同，所以派生出的 ID 在全员一致。
+   - `unit.netId` 由房主派生：`memset(id,0,32); 0x776790(id, 房主本机玩家的 NetId 条目, ordinal)`，即现有的 `DeriveSupportSoldierNetId(PlayerHuman(), ordinal)`。派生只在房主做、随计划表下发，所以全员用的是同一个 ID。注意：玩家自己的 NetId 在各机器上**不保证相同**——原版（AS）任务按脚本线程的注册计数编号（`1D94C0`），BVM 任务见 PR #299。所以计划表里的请求者不用 NetId，而用任务玩家序号（`src/player_requester.h`，2026-10-31）。
    - `plan.team` 填 PvP 阵营。计划表锁定后下发，**客人不自己派生**，只做校验。
 3. **ordinal 的取值**：现有 `support_protocol.h:217` 从 `0x40000000` 单调递增，满 `0x80000000` 就失败关闭；`support_protocol.cpp:54` 只接受类型 5 且 ordinal 在 `[0x40000000, 0x80000000)` 之间。游戏自己的类型 5 计数从 0 起（【推断】不会到 2^30），所以不撞。
    - 如果要「由共享数据确定性推出」，建议在同一区间里划出子段，例如 `0x70000000 | (matchEpoch & 0xFFF) << 12 | memberIndex`，同时把 support_net 的上限压到 `0x70000000`，两者就不重叠。

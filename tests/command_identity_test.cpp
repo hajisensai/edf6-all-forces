@@ -18,14 +18,19 @@ using namespace crew;
 using namespace crew::command_identity;
 int checks=0,walks=0,mutation=0;
 unsigned char actors[19][0x1EE0]{},ctrls[19][16]{},netctrls[19][16]{},entries[19][0x28]{};
-unsigned char user[0x50]{},userctrl[16]{},mgr[0x50]{},teams[team_native::kTeamCapacity*0x38]{},status[0x15000]{};
+unsigned char user[0x50]{},userctrl[16]{},user2[0x50]{},userctrl2[16]{},mgr[0x50]{},teams[team_native::kTeamCapacity*0x38]{},status[0x15000]{};
 unsigned char ids[19][32]{},heads[7][0x30]{},nodes[19][0x30]{};
+unsigned char requester0[32]{};   // actors[0]'s requester: mission slot 0 (player_requester.h)
 unsigned sceneCount=19;
 void Check(bool ok,const char* why){++checks;if(!ok){std::fprintf(stderr,"FAIL %s\n",why);std::exit(1);}}
-void __fastcall Walk(void*,Visitor* v) {
+// Each object through the visitor's own slot 1, as the native walker calls it (Visit, or the mark resolver's VisitMark).
+void VisitThrough(void* v,const unsigned char* object) {
+    reinterpret_cast<void(__fastcall*)(void*,const unsigned char*)>(const_cast<void*>((*static_cast<const void* const* const*>(v))[1]))(v,object);
+}
+void __fastcall Walk(void*,void* v) {
     ++walks;
-    for(unsigned i=0;i<sceneCount;++i)Visit(v,actors[i]);
-    Visit(v,actors[0]); // same object in more than one team is not an ambiguous scene match
+    for(unsigned i=0;i<sceneCount;++i)VisitThrough(v,actors[i]);
+    VisitThrough(v,actors[0]); // same object in more than one team is not an ambiguous scene match
     if(mutation==1)Put<void*>(image,kTeamManager,nullptr);
     if(mutation==2)Put<void*>(image,kGameStatus,nullptr);
     if(mutation==3)Put<unsigned>(status,0x14FF8,2);
@@ -44,7 +49,8 @@ void Reset() {
     std::memset(actors,0,sizeof actors);std::memset(ctrls,0,sizeof ctrls);
     std::memset(netctrls,0,sizeof netctrls);std::memset(entries,0,sizeof entries);
     std::memset(user,0,sizeof user);std::memset(userctrl,0,sizeof userctrl);
-    std::memset(ids,0,sizeof ids);
+    std::memset(user2,0,sizeof user2);std::memset(userctrl2,0,sizeof userctrl2);
+    std::memset(ids,0,sizeof ids);MakePlayerRequester(0,requester0);
     Put<void*>(image,kTeamManager,mgr);Put<void*>(image,kGameStatus,status);
     Put<void*>(mgr,0x38,teams);Put<std::uint64_t>(mgr,0x48,7);Put<unsigned>(status,0x14FF8,1);
     for(unsigned i=0;i<19;++i) {
@@ -61,11 +67,51 @@ void Reset() {
 }
 CommandIdentities out{};
 bool Resolve(unsigned count=16,const unsigned char* focus=ids[17]) {
-    return ResolveCommandIdentities(ids[0],ids+1,count,focus,&out);
+    return ResolveCommandIdentities(requester0,ids+1,count,focus,&out);
 }
 void Rejected(const char* why) {
     out.requester={actors[0],ctrls[0]};out.count=9;out.requesterPuid=user;
     Check(!Resolve() && !out.requester && !out.count && !out.requesterPuid,why);
+}
+// A second player (actors[1]) in mission slot `slot`, its own User.
+void SecondPlayer(int slot) {
+    actors[1][edf::kHumanPlayer]=1;Put<void*>(actors[1],0x1ED0,user2);Put<void*>(actors[1],0x1ED8,userctrl2);
+    Put<LONG>(userctrl2,8,1);Put<void*>(user2,0x18,user2);Put<int>(user2,0x48,slot);Put<unsigned>(status,0x14FF8,2);
+}
+// A support plan's requester is the player's mission slot (player_requester.h): it finds that player on any machine,
+// whatever NetId the player has there (a stock mission's are the script thread's count on each machine, 2026-10-31).
+void PlayerRequesters() {
+    unsigned char requester[32]{},again[32]{};int slot=-1;
+    Check(MakePlayerRequester(1,requester) && PlayerRequesterSlot(requester,&slot) && slot==1,"slot requester round trip");
+    Check(!requester[20] && !requester[21] && !requester[22] && !requester[23] && Canonical(requester),"slot requester keeps the canonical shape");
+    Check(!PlayerRequesterSlot(ids[0],nullptr),"a native NetId is not a slot requester");
+    Check(!MakePlayerRequester(-1,again) && !MakePlayerRequester(kPlayerRequesterSlots,again),"slot outside EDF6Coop's slots rejected");
+    std::memcpy(again,requester,32);again[8]=1;Check(!PlayerRequesterSlot(again,nullptr),"slot requester with other bytes rejected");
+    std::memcpy(again,requester,32);again[4]=0;again[5]=4;Check(!PlayerRequesterSlot(again,nullptr),"slot 1024 rejected");
+    MarkIdentities m{};
+    MakePlayerRequester(0,requester);
+    Check(ResolveMarkIdentities(requester,nullptr,&m) && m.player.obj==actors[0] && m.slot==0 && m.puid==user,"slot 0 finds its player");
+    Check(!ResolveMarkIdentities(ids[0],nullptr,&m) && !m.player,"a NetId marker names no player");
+    Check(ResolveMarkIdentities(ids[0],ids[2],&m) && !m.player && m.target.obj==actors[2],"a NetId marker: the target still found");
+    SecondPlayer(1);
+    // The host's player: another NetId on this machine than on the host's (here the same as the local player's).
+    std::memcpy(entries[1]+8,entries[0]+8,32);
+    MakePlayerRequester(1,requester);
+    Check(ResolveMarkIdentities(requester,nullptr,&m) && m.player.obj==actors[1] && m.slot==1 && m.puid==user2,
+          "slot 1 finds its player whatever its NetId");
+    MakePlayerRequester(0,requester);
+    Check(ResolveMarkIdentities(requester,nullptr,&m) && m.player.obj==actors[0] && m.puid==user,"slot 0 is not taken by the other");
+    Put<int>(user2,0x48,0);
+    Check(ResolveMarkIdentities(requester,nullptr,&m) && !m.player && m.slot==-1 && !m.puid,"two players of one slot: none");
+    Put<int>(user2,0x48,2);MakePlayerRequester(2,requester);
+    Check(ResolveMarkIdentities(requester,nullptr,&m) && !m.player,"slot outside the mission's players: none");
+    Put<int>(user2,0x48,1);actors[1][kDead]=1;MakePlayerRequester(1,requester);
+    Check(ResolveMarkIdentities(requester,nullptr,&m) && !m.player,"dead player: none");
+    actors[1][kDead]=0;
+    Check(PlayerRequesterOf(ObjRef{actors[1],ctrls[1]},again) && !std::memcmp(again,requester,32),"a live player's requester is its slot");
+    Check(!PlayerRequesterOf(ObjRef{actors[1],ctrls[2]},again) && !again[0],"a stale reference has no requester");
+    Check(!PlayerRequesterOf(ObjRef{actors[2],ctrls[2]},again) && !again[0],"a soldier that is no player has no requester");
+    Reset();
 }
 void Native(const char* path) {
     auto mod=LoadLibraryExA(path,nullptr,DONT_RESOLVE_DLL_REFERENCES);
@@ -113,14 +159,23 @@ int main(int argc,char** argv) {
     unsigned char got[32]{};Check(ReadNativeObjectId(actors[1],got) && !std::memcmp(got,ids[1],32),"production ID reader zeros dirty native padding");
     Check(Resolve(0,nullptr) && !out.count && !out.focus,"requester-only commands allowed");
     Check(!Resolve(17),"capacity rejected");
-    Check(!ResolveCommandIdentities(ids[0],nullptr,1,nullptr,&out),"missing units rejected");
-    Check(!ResolveCommandIdentities(ids[0],ids+1,1,nullptr,nullptr),"missing output rejected");
+    Check(!ResolveCommandIdentities(requester0,nullptr,1,nullptr,&out),"missing units rejected");
+    Check(!ResolveCommandIdentities(requester0,ids+1,1,nullptr,nullptr),"missing output rejected");
     ids[1][20]=1;Rejected("noncanonical padding rejected");Reset();
-    std::memset(ids[0],0,32);Rejected("zero requester rejected");Reset();
+    std::memset(requester0,0,32);Rejected("zero requester rejected");Reset();
+    // The requester is its mission slot alone (player_requester.h): its NetId names no player on another machine.
+    std::memcpy(requester0,ids[0],32);Rejected("a NetId requester rejected");Reset();
+    MakePlayerRequester(1,requester0);Rejected("a slot no player holds rejected");Reset();
+    std::memcpy(entries[0]+8,ids[18],32);Check(Resolve() && out.requester.obj==actors[0],"the requester found whatever its NetId here");Reset();
+    SecondPlayer(1);MakePlayerRequester(1,requester0);
+    Check(ResolveCommandIdentities(requester0,ids+2,15,ids[17],&out) && out.requester.obj==actors[1] && out.requesterPuid==user2 &&
+          out.units[0].obj==actors[2],"the other player's slot finds it");Reset();
+    SecondPlayer(0);Rejected("two players of the requester's slot rejected");Reset();
+    std::memcpy(ids[1],requester0,32);Rejected("requester's ID repeated as unit rejected");Reset();
     std::memset(ids[1],0,32);Rejected("zero unit rejected");Reset();
     std::memset(ids[17],0,32);Rejected("zero supplied focus rejected");Reset();
     std::memcpy(ids[2],ids[1],32);Rejected("duplicate units rejected");Reset();
-    std::memcpy(ids[1],ids[0],32);Rejected("requester repeated as unit rejected");Reset();
+    std::memcpy(ids[1],ids[0],32);Rejected("the requester repeated as a unit by its NetId rejected");Reset();
     std::memcpy(ids[17],ids[1],32);Rejected("focus repeated as unit rejected");Reset();
     std::memcpy(entries[18]+8,entries[1]+8,32);Rejected("two scene objects with same ID rejected");Reset();
     sceneCount=17;Rejected("missing focus rejected");Reset();
@@ -128,7 +183,7 @@ int main(int argc,char** argv) {
         actors[i][kDead]=1;Rejected("dead requested actor rejected");Reset();
         actors[i][0x18]=4;Rejected("deleted requested actor rejected");Reset();
         Put<LONG>(ctrls[i],8,0);Rejected("expired object rejected");Reset();
-        Put<LONG>(netctrls[i],0,0);Rejected("expired native identity rejected");Reset();
+        if(i){Put<LONG>(netctrls[i],0,0);Rejected("expired native identity rejected");Reset();}   // the requester's goes unread
     }
     actors[0][edf::kHumanPlayer]=0;Rejected("NPC with User fields cannot impersonate player");Reset();
     Put<unsigned>(actors[0],0,0);Rejected("non-soldier player rejected");Reset();
@@ -148,7 +203,8 @@ int main(int argc,char** argv) {
     Put<std::uint32_t>(image,team_walk::kWalkBound+3,0x18C);Rejected("walk bound not whole rows rejected");
     Put<std::uint32_t>(image,team_walk::kWalkBound+3,0x188);Reset();
     image[team_walk::kWalkBound]^=1;Rejected("unrecognized walk bound rejected");image[team_walk::kWalkBound]^=1;Reset();
-    image[kEnumAllTeams]^=1;Rejected("unsupported native walker rejected");
+    image[kEnumAllTeams]^=1;Rejected("unsupported native walker rejected");image[kEnumAllTeams]^=1;Reset();
+    PlayerRequesters();
     VirtualFree(image,0,MEM_RELEASE);image=nullptr;
     if(argc>1 && argv[1][0])Native(argv[1]);
     else std::puts("SKIP optional native walker: no EDF.dll supplied; production resolver checks still ran");

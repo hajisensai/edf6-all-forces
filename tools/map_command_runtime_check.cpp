@@ -92,7 +92,7 @@ std::uint32_t SubmitMapCommand(const ObjRef&,const ObjRef* ids,unsigned count,co
 }
 bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {*out=networkReply;return out->request!=0;}
 bool MapCommandNetworkReady() noexcept {return true;}
-std::uint32_t MapCommandNetworkVersion() noexcept {return 7;}
+std::uint32_t MapCommandNetworkVersion() noexcept {return 8;}
 // Kind::ways (command_net.cpp): what the host shares, what the client's host published for a unit.
 unsigned waysSyncs=0,waysShared=0;MapCommandWays waysLast{};
 void SyncMapCommandWays(const MapCommandWays* list,unsigned count) noexcept {

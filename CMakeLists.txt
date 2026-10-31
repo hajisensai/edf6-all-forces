@@ -866,6 +866,8 @@ add_test(NAME gltf_glb COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/test
 add_test(NAME input_source_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/input_source_guard_test.py")
 # The stock crosshair hidden while its player controls an enemy (tests/enemy_control_crosshair_guard.py).
 add_test(NAME enemy_control_crosshair_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/enemy_control_crosshair_guard.py")
+# Every channel names a player by its mission slot, never its NetId (tests/player_identity_guard.py).
+add_test(NAME player_identity_guard COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/player_identity_guard.py")
 add_test(NAME support_config_ini COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/support_config_ini_test.py")
 # The menu prints Chinese: UTF-8 like the workflow's other Python steps, not the runner's cp1252 console.
 set_tests_properties(support_config_ini PROPERTIES ENVIRONMENT PYTHONIOENCODING=utf-8)
@@ -1785,6 +1787,13 @@ add_test(NAME edf5_online_native COMMAND edf5_online_native_test "${EDF6_NATIVE_
 add_test(NAME edf5_online_foreign_build COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}" foreign)
 add_test(NAME edf5_online_rollback COMMAND edf5_online_native_test "${EDF6_NATIVE_DLL}" rollback)
 set_tests_properties(edf5_online_native edf5_online_foreign_build edf5_online_rollback PROPERTIES SKIP_RETURN_CODE 77)
+add_executable(edf5_online_netid_test EXCLUDE_FROM_ALL tests/edf5_online_netid_test.cpp)
+target_include_directories(edf5_online_netid_test PRIVATE src common)
+target_link_libraries(edf5_online_netid_test PRIVATE edf6common)
+target_compile_options(edf5_online_netid_test PRIVATE /W4 /WX /utf-8 /permissive-)
+add_dependencies(offline_checks edf5_online_netid_test)
+add_test(NAME edf5_online_netid COMMAND edf5_online_netid_test "${EDF6_NATIVE_DLL}")
+set_tests_properties(edf5_online_netid PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(fp_ride_lifecycle_test EXCLUDE_FROM_ALL tests/fp_ride_lifecycle_test.cpp)
 target_sources(fp_ride_lifecycle_test PRIVATE src/fp_skin_gpu.cpp common/weapon.cpp)
 target_include_directories(fp_ride_lifecycle_test PRIVATE src common)

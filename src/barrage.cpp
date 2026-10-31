@@ -200,8 +200,8 @@ void __fastcall UpdateHook(void* b,void* a2,void* a3,void* a4) noexcept {
 // ---- online (barrage_net_protocol.h) ----
 std::uint32_t origin=0,serial=0;   // this machine's barrages: its run, the last one's number in it
 barrage_net::Heard heard;          // the peers' barrages played here
-// This machine's player's barrage told to every peer that has the channel (the caller has no native ID: nobody else can
-// find it, nothing sent).
+// This machine's player's barrage told to every peer that has the channel, its caller by its mission slot
+// (player_requester.h; a caller that is no live player: nobody else can find it, nothing sent).
 void Tell(int kind,const unsigned char* caller,const float* at,const float* heading,float damage) noexcept {
     if(!plugin_net::Ready())return;
     if(!origin)origin=plugin_net::NewOrigin();
@@ -209,10 +209,10 @@ void Tell(int kind,const unsigned char* caller,const float* at,const float* head
     m.kind=kind;m.origin=origin;m.serial=++serial;m.damage=damage;
     std::memcpy(m.at,at,12);std::memcpy(m.heading,heading,12);
     bool id=false;
-    __try { id=ReadNativeObjectId(caller,m.caller); } __except(EXCEPTION_EXECUTE_HANDLER){id=false;}
+    __try { id=PlayerRequesterOf(caller,m.caller); } __except(EXCEPTION_EXECUTE_HANDLER){id=false;}
     unsigned char bytes[barrage_net::kWire];
     if(!id || !barrage_net::Encode(m,bytes,sizeof(bytes))) {
-        Log("BARRAGE NET %s: not told to the peers (%s)",barrage::kKindNames[kind],id ? "it does not encode" : "the caller has no native ID");
+        Log("BARRAGE NET %s: not told to the peers (%s)",barrage::kKindNames[kind],id ? "it does not encode" : "the caller is no live player");
         return;
     }
     const std::uint32_t sent=plugin_net::Broadcast(support_net::kExtBarrage,bytes,sizeof(bytes));

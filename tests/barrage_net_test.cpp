@@ -28,7 +28,8 @@ int main() {
     Check(Owned(b,sizeof(b)),"the channel's");
     for(std::size_t i=crew::barrage_net::detail::kUsed;i<kWire;++i)Check(b[i]==0,"zero past what is used");
     Check(!Decode(b,sizeof(b)-1,d),"the wrong size");
-    {unsigned char c[kWire];std::memcpy(c,b,kWire);c[4]=2;Check(!Decode(c,kWire,d),"another version");}
+    {unsigned char c[kWire];std::memcpy(c,b,kWire);c[4]=1;Check(!Decode(c,kWire,d),"an older version (the caller its NetId)");
+     c[4]=3;Check(!Decode(c,kWire,d),"another version");}
     {unsigned char c[kWire];std::memcpy(c,b,kWire);c[8]=static_cast<unsigned char>(crew::barrage::kKinds);Check(!Decode(c,kWire,d),"an unknown kind");}
     {unsigned char c[kWire];std::memcpy(c,b,kWire);c[0]^=1;Check(!Decode(c,kWire,d) && !Owned(c,kWire),"not BRGS");}
     {Msg x=m;x.heading[0]=0;x.heading[2]=0;Check(!Encode(x,b,sizeof(b)),"no heading: no barrage");}

@@ -1,4 +1,5 @@
 #include "command_identity.h"
+#include "player_requester.h"
 #include "memory.h"
 #include "team_walk.h"
 #include "support_soldier.h"
@@ -16,6 +17,7 @@ struct Visitor {
     unsigned count=0,expected=0;
     bool failed=false;
     void* puid=nullptr;
+    int requesterSlot=-1;   // ids[0] is a player requester (player_requester.h): its player found by that slot, never by an ID
 };
 bool Canonical(const unsigned char* id) noexcept {
     if(!id || !Readable(id,32))return false;
@@ -43,14 +45,18 @@ void __fastcall Ignore(void*) noexcept {}
 void __fastcall Visit(Visitor* v,const unsigned char* object) noexcept {
     if(v->failed || !object)return;
     __try {
+        ObjRef ref{};void* puid=nullptr;int slot=-1;
+        if(Live(object,&ref) && Requester(object,v->expected,&puid,&slot) && slot==v->requesterSlot) {
+            // The same object met again in another team is no second player; two of one slot fail.
+            if(v->refs[0] && (v->refs[0].obj!=ref.obj || v->refs[0].ctrl!=ref.ctrl)){v->failed=true;return;}
+            v->refs[0]=ref;v->puid=puid;
+        }
         unsigned char id[32]{};
         if(!ReadNativeObjectId(object,id))return;
-        for(unsigned i=0;i<v->count;++i) {
+        for(unsigned i=1;i<v->count;++i) {
             if(std::memcmp(id,v->ids[i],32))continue;
-            ObjRef ref{};
             if(!Live(object,&ref) || (v->refs[i] &&
                 (v->refs[i].obj!=ref.obj || v->refs[i].ctrl!=ref.ctrl))) {v->failed=true;return;}
-            if(i==0 && !Requester(object,v->expected,&v->puid)){v->failed=true;return;}
             v->refs[i]=ref;return;
         }
     } __except(EXCEPTION_EXECUTE_HANDLER){v->failed=true;}
@@ -60,11 +66,14 @@ const void* const kVisitorVtable[]={reinterpret_cast<const void*>(&Ignore),reint
 // yet registered here); a match not live is left empty.
 struct MarkVisitor {
     const void* const* vtable;
-    const unsigned char* marker;
     const unsigned char* target;
     unsigned expected=0;
     MarkIdentities out{};
     bool deadTarget=false;   // the target may be dead (not deleted)
+    // The marker, a player requester (player_requester.h): the live player of that mission slot, found by its User, never
+    // by an ID; two of them is none.
+    int markerSlot=-1;
+    bool markerTwice=false;
 };
 // Not deleted, its own weak reference live (dead or alive).
 bool Present(const unsigned char* object,ObjRef* ref) noexcept {
@@ -76,12 +85,18 @@ bool Present(const unsigned char* object,ObjRef* ref) noexcept {
 void __fastcall VisitMark(MarkVisitor* v,const unsigned char* object) noexcept {
     if(!object)return;
     __try {
-        unsigned char id[32]{};
-        if(!ReadNativeObjectId(object,id))return;
         ObjRef ref{};
-        if(v->marker && !std::memcmp(id,v->marker,32) && Live(object,&ref) && Requester(object,v->expected,&v->out.puid,&v->out.slot))
-            v->out.player=ref;
-        else if(v->target && !std::memcmp(id,v->target,32) && (v->deadTarget ? Present(object,&ref) : Live(object,&ref)))v->out.target=ref;
+        if(v->markerSlot>=0) {
+            void* puid=nullptr;int slot=-1;
+            if(Live(object,&ref) && Requester(object,v->expected,&puid,&slot) && slot==v->markerSlot) {
+                // The same object met again in another team is no second player.
+                if(v->out.player && (v->out.player.obj!=ref.obj || v->out.player.ctrl!=ref.ctrl))v->markerTwice=true;
+                v->out.player=ref;v->out.puid=puid;v->out.slot=slot;
+            }
+        }
+        unsigned char id[32]{};
+        if(!v->target || !ReadNativeObjectId(object,id))return;
+        if(!std::memcmp(id,v->target,32) && (v->deadTarget ? Present(object,&ref) : Live(object,&ref)))v->out.target=ref;
     } __except(EXCEPTION_EXECUTE_HANDLER){}
 }
 const void* const kMarkVisitorVtable[]={reinterpret_cast<const void*>(&Ignore),reinterpret_cast<const void*>(&VisitMark)};
@@ -91,14 +106,16 @@ bool Add(Visitor* v,const unsigned char* id) noexcept {
     std::memcpy(v->ids[v->count++],id,32);return true;
 }
 bool StillLive(const Visitor& v) noexcept {
-    for(unsigned i=0;i<v.count;++i) {
+    for(unsigned i=1;i<v.count;++i) {
         const auto object=static_cast<const unsigned char*>(v.refs[i].obj);
         ObjRef ref{};unsigned char id[32]{};
-        if(!Live(object,&ref) || ref.ctrl!=v.refs[i].ctrl ||
+        if(!Live(object,&ref) || ref.ctrl!=v.refs[i].ctrl || ref.obj==v.refs[0].obj ||
             !ReadNativeObjectId(object,id) || std::memcmp(id,v.ids[i],32))return false;
     }
-    void* puid=nullptr;
-    return Requester(static_cast<const unsigned char*>(v.refs[0].obj),v.expected,&puid) && puid==v.puid;
+    const auto asker=static_cast<const unsigned char*>(v.refs[0].obj);
+    ObjRef ref{};void* puid=nullptr;int slot=-1;
+    return Live(asker,&ref) && ref.ctrl==v.refs[0].ctrl && Requester(asker,v.expected,&puid,&slot) &&
+        puid==v.puid && slot==v.requesterSlot;
 }
 }
 bool ResolveCommandIdentities(const unsigned char requester[32],const unsigned char units[][32],
@@ -109,7 +126,7 @@ bool ResolveCommandIdentities(const unsigned char requester[32],const unsigned c
         *out=CommandIdentities{};
         if(count>kMaxCommandIdentities || (count && !units))return false;
         Visitor visitor{kVisitorVtable};
-        if(!Add(&visitor,requester))return false;
+        if(!PlayerRequesterSlot(requester,&visitor.requesterSlot) || !Add(&visitor,requester))return false;
         for(unsigned i=0;i<count;++i)if(!Add(&visitor,units[i]))return false;
         if(focus && !Add(&visitor,focus))return false;
         if(!Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)))return false;
@@ -134,9 +151,11 @@ bool ResolveMarks(const unsigned char marker[32],const unsigned char target[32],
     if(!out)return false;
     *out=MarkIdentities{};
     __try {
-        MarkVisitor visitor{kMarkVisitorVtable,Canonical(marker) ? marker : nullptr,Canonical(target) ? target : nullptr};
+        MarkVisitor visitor{kMarkVisitorVtable,Canonical(target) ? target : nullptr};
         visitor.deadTarget=deadTarget;
-        if(!visitor.marker && !visitor.target)return false;
+        // A player goes by its mission slot alone: a NetId (a stock mission numbers them per machine) names none.
+        if(!Canonical(marker) || !PlayerRequesterSlot(marker,&visitor.markerSlot))visitor.markerSlot=-1;
+        if(visitor.markerSlot<0 && !visitor.target)return false;
         if(!Matches(kEnumAllTeams,kEnumSignature,sizeof(kEnumSignature)))return false;
         void* mgr=At<void*>(image,kTeamManager);
         const auto status=At<const unsigned char*>(image,kGameStatus);
@@ -144,6 +163,7 @@ bool ResolveMarks(const unsigned char marker[32],const unsigned char target[32],
         visitor.expected=At<unsigned>(status,0x14FF8);
         if(!visitor.expected || visitor.expected>kMaxPlayers || !team_walk::WalkRows(mgr))return false;
         reinterpret_cast<WalkFn>(image+kEnumAllTeams)(mgr,&visitor);
+        if(visitor.markerTwice){visitor.out.player={};visitor.out.puid=nullptr;visitor.out.slot=-1;}
         *out=visitor.out;
         return true;
     } __except(EXCEPTION_EXECUTE_HANDLER){*out=MarkIdentities{};return false;}
@@ -154,5 +174,25 @@ bool ResolveMarkIdentities(const unsigned char marker[32],const unsigned char ta
 }
 bool ResolveGrabIdentities(const unsigned char grabber[32],const unsigned char target[32],MarkIdentities* out) noexcept {
     return ResolveMarks(grabber,target,true,out);
+}
+bool PlayerRequesterOf(const ObjRef& who,unsigned char out[32]) noexcept {
+    using namespace command_identity;
+    if(!out)return false;
+    std::memset(out,0,32);
+    __try {
+        const auto status=At<const unsigned char*>(image,kGameStatus);
+        if(!Readable(status,0x14FFC))return false;
+        const unsigned expected=At<unsigned>(status,0x14FF8);
+        const auto object=static_cast<const unsigned char*>(who.obj);
+        ObjRef ref{};void* puid=nullptr;int slot=-1;
+        if(!expected || expected>kMaxPlayers || !Live(object,&ref) || ref.ctrl!=who.ctrl ||
+           !Requester(object,expected,&puid,&slot))return false;
+        return MakePlayerRequester(slot,out);
+    } __except(EXCEPTION_EXECUTE_HANDLER){std::memset(out,0,32);return false;}
+}
+bool PlayerRequesterOf(const void* object,unsigned char out[32]) noexcept {
+    if(out)std::memset(out,0,32);
+    __try { return object && out && Readable(object,kSelfCtrl+8) && PlayerRequesterOf(ObjRef::Of(object),out); }
+    __except(EXCEPTION_EXECUTE_HANDLER){if(out)std::memset(out,0,32);return false;}
 }
 }

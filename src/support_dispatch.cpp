@@ -1567,7 +1567,7 @@ bool AuthenticatedCarrierDriver(std::uint32_t peer,const char* authenticatedPuid
     ObjRef requester{},driver{};unsigned char requesterId[32]{};MarkIdentities identity{};
     if(!SupportAuthenticatedRequester(peer,&requester) || !PvpNativeSupportDriver(source.target,&driver) ||
        requester.obj!=driver.obj || requester.ctrl!=driver.ctrl ||
-       !ReadNativeObjectId(static_cast<const unsigned char*>(requester.obj),requesterId) ||
+       !PlayerRequesterOf(requester,requesterId) ||
        !ResolveMarkIdentities(requesterId,nullptr,&identity) || identity.player.obj!=requester.obj ||
        identity.player.ctrl!=requester.ctrl || !SupportCommandRequesterMatches(identity.puid,authenticatedPuid))return false;
     *parent=source.target;return true;

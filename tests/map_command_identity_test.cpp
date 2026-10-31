@@ -67,7 +67,7 @@ std::uint32_t SubmitMapCommand(const ObjRef&,const ObjRef* ids,unsigned count,co
 }
 bool ReadMapCommandNetworkResult(CommandNetworkResult* out) noexcept {*out=networkReply;return out->request!=0;}
 bool MapCommandNetworkReady() noexcept {return true;}
-std::uint32_t MapCommandNetworkVersion() noexcept {return 7;}
+std::uint32_t MapCommandNetworkVersion() noexcept {return 8;}
 void SyncMapCommandWays(const MapCommandWays*,unsigned) noexcept {}
 unsigned ReadMapCommandWays(const ObjRef&,Command*,float (*)[3],unsigned) noexcept {return 0;}
 

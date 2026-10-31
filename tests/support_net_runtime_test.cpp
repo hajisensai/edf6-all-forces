@@ -149,13 +149,18 @@ bool ReadNativeObjectId(const unsigned char* object,unsigned char* id) noexcept 
     }
     return false;
 }
+// A player requester (player_requester.h) names its mission slot: the actor of that index here, unless the fixture hides it.
 bool ResolveMarkIdentities(const unsigned char* marker,const unsigned char*,MarkIdentities* out) noexcept {
-    if(!marker || !out || marker[0]<0x40 || marker[0]>=0x40+fixture::actors)return false;
-    const unsigned i=marker[0]-0x40;
+    int slot=-1;
+    if(marker && PlayerRequesterSlot(marker,&slot)) {
+        if(!out || fixture::nativeIdMissing || slot>=static_cast<int>(fixture::actors))return false;
+    } else if(!marker || !out || marker[0]<0x40 || marker[0]>=0x40+fixture::actors)return false;
+    const unsigned i=slot>=0 ? static_cast<unsigned>(slot) : marker[0]-0x40u;
     *out={};out->player={fixture::actorPuids[i],reinterpret_cast<const void*>(static_cast<std::uintptr_t>(i+100))};
     out->slot=static_cast<int>(i);out->puid=const_cast<char*>(fixture::identityMismatch ? "wrong-member" : fixture::actorPuids[i]);
     return true;
 }
+bool PlayerRequesterOf(const ObjRef&,unsigned char out[32]) noexcept {std::memset(out,0,32);return false;}
 // The native spawn functions are isolated below the bridge. Their production descriptor/plan contract still runs,
 // so this fixture verifies the real bridge routes only the reserved catalog through all range callbacks.
 support_net::PlanResult PlanRangeEnemy(std::uint32_t catalog,const float* at,std::uint64_t descriptor,support_net::Plan* out) noexcept {
@@ -254,7 +259,9 @@ bool Validate(const Plan& p) noexcept { return p.count==1 && (p.units[0].resourc
     (p.catalogId==kPreparedDroneCatalog && (p.units[0].resourceId==crew::kSupportSubDroneResource || crew::IsCarrierDroneResource(p.units[0].resourceId)))); }
 bool Spawn(std::uint64_t,const Plan& plan,bool remote) noexcept {
     Check(!remote,"host native spawn callback authority");++spawnCount;
-    lastSupportTeam=plan.team;lastSupportOwner=plan.requester[0];return true;
+    // A player requester's slot as 0x40+slot (the actor's NativeNetId stand-in), a prepared child's owner byte as it came.
+    int slot=-1;
+    lastSupportTeam=plan.team;lastSupportOwner=crew::PlayerRequesterSlot(plan.requester,&slot) ? 0x40+slot : plan.requester[0];return true;
 }
 void Destroy(std::uint64_t) noexcept { ++destroyCount; }
 bool Derive(std::uint32_t ordinal,unsigned char* bytes) noexcept { std::memset(bytes,0,32);bytes[12]=5;std::memcpy(bytes+4,&ordinal,4);return true; }
@@ -326,7 +333,7 @@ int main() {
     pvpTeam=1;identityMismatch=true;
     Check(crew::PlanForRequester(0,1,at,0,&probed)==PlanResult::refused,"native requester PUID must match authenticated local sender and sealed world");
     identityMismatch=false;nativeIdMissing=true;
-    Check(crew::PlanForRequester(0,1,at,0,&probed)==PlanResult::refused,"missing canonical native player ID never drops back to stock-team PVP support");
+    Check(crew::PlanForRequester(0,1,at,0,&probed)==PlanResult::refused,"a requester whose mission slot finds no player never drops back to stock-team PVP support");
     nativeIdMissing=false;pvpTeam=0;
     const unsigned before=destroyCount;
     ready=false;Step();Check(destroyCount==before && crew::SupportTransactionActive(1),"not-ready snapshot preserves delivered actors and activation");

@@ -13,7 +13,9 @@
 // own rule: a round whose attacker is another machine's hurts nothing here; EDF6Coop docs/net-re/damage.md).
 // Wire: fixed sizes, little-endian (wire.h), plugin_net.h channels GRVT (kExtGravity) and FGUN (kExtFloatGun): sent only
 // to a peer that announced the bit, another version dropped by the registry. Version 2 (2026-10-20): the grab's flight
-// and radial kinds, the float guns taken from the game's own drop. Objects go by their native network ID
+// and radial kinds, the float guns taken from the game's own drop. Version 3 (2026-10-31): a player (a grab's grabber, a
+// gun's asker and owner) goes by its requester ID (player_requester.h: its mission slot, the same on every machine; a stock mission numbers the players' NetIds per machine).
+// Other objects go by their native network ID
 // (support_soldier.h ReadNativeObjectId), all zero for one without it (a debris piece, a body of an unregistered object):
 // found by the grab's ray and position instead, and, thrown, steered on every copy by its grabber's flight states (the
 // game replicates no pose of these: docs/gravity-re.md §11).
@@ -24,7 +26,7 @@
 namespace crew::gravity_net {
 constexpr std::uint32_t kGrabMagic=0x54565247u;   // "GRVT"
 constexpr std::uint32_t kGunMagic=0x4E554746u;    // "FGUN"
-constexpr std::uint32_t kVersion=2;
+constexpr std::uint32_t kVersion=3;
 constexpr std::size_t kGrabWire=160,kGunWire=96;
 constexpr std::uint32_t kMaxPeers=1024;
 constexpr std::uint64_t kHoldGapMs=50;     // a hold's state goes out this often while it lasts
