@@ -126,7 +126,7 @@ std::vector<Bind> Binds() {
         kJet,kJet|kHeli,kJet,kJet,kJet,kDrill,kProteus,kProteus,kProteus,
         kDread,kDread,kDread,kDread,kDread,kDread,
         kSazabi,kSazabi,kSazabi,kSazabi,kSazabi,kSazabi,kSazabi,
-        kGround,kGround,kGround,kGround,kGround};
+        kGround,kGround,kGround,kGround,kGround,kGround,kGround};
     for(int i=0;i<kb::kSlotCount;++i)b.push_back({Narrow(kb::kSlots[i].ini),kb::CodeOfVk(kb::kSlots[i].defaultVk),ctx[i],kb::kSlots[i].page});
     return b;
 }

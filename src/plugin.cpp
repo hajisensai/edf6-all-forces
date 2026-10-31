@@ -261,6 +261,8 @@ void Validate(Config& n) noexcept {
     n.vehicleFire6Button=static_cast<int>(FixInt("VehicleFire6Button",n.vehicleFire6Button,0,0xFFFF));
     n.vehicleAutoTurretKey=static_cast<int>(FixInt("VehicleAutoTurretKey",n.vehicleAutoTurretKey,0,254));
     n.vehicleAutoTurretButton=static_cast<int>(FixInt("VehicleAutoTurretButton",n.vehicleAutoTurretButton,0,0xFFFF));
+    n.vehicleCruiseUpKey=static_cast<int>(FixInt("VehicleCruiseUpKey",n.vehicleCruiseUpKey,0,254));
+    n.vehicleCruiseDownKey=static_cast<int>(FixInt("VehicleCruiseDownKey",n.vehicleCruiseDownKey,0,254));
     n.playerJetTargetKey=static_cast<int>(FixInt("PlayerJetTargetKey",n.playerJetTargetKey,0,254));
     n.playerJetFlareKey=static_cast<int>(FixInt("PlayerJetFlareKey",n.playerJetFlareKey,0,254));
     n.playerJetHailKey=static_cast<int>(FixInt("PlayerJetHailKey",n.playerJetHailKey,0,254));
@@ -596,6 +598,8 @@ void LoadConfig() noexcept {
     n.autoTurrets=ReadBool(L"AutoTurrets",n.autoTurrets);
     n.vehicleAutoTurretKey=ReadInt(L"VehicleAutoTurretKey",static_cast<DWORD>(n.vehicleAutoTurretKey));
     n.vehicleAutoTurretButton=ReadInt(L"VehicleAutoTurretButton",static_cast<DWORD>(n.vehicleAutoTurretButton));
+    n.vehicleCruiseUpKey=ReadInt(L"VehicleCruiseUpKey",static_cast<DWORD>(n.vehicleCruiseUpKey));
+    n.vehicleCruiseDownKey=ReadInt(L"VehicleCruiseDownKey",static_cast<DWORD>(n.vehicleCruiseDownKey));
     n.playerJetTargetKey=ReadInt(L"PlayerJetTargetKey",static_cast<DWORD>(n.playerJetTargetKey));
     n.playerJetFlareKey=ReadInt(L"PlayerJetFlareKey",static_cast<DWORD>(n.playerJetFlareKey));
     n.playerJetAll=ReadBool(L"PlayerJetAll",n.playerJetAll);
@@ -1014,7 +1018,7 @@ void LoadConfig() noexcept {
         n.npcGuardRadius,n.npcFreeRange,n.npcRecruitCooldownSec,n.vanillaRecruit,n.npcFreeSquadCover);
     Log("CONFIG scriptNpcRecruit=%d settle=%.1fs",n.scriptNpcRecruit,n.scriptNpcSettleSec);
     Log("CONFIG tankReturnToPost=%d hold=%.1f reverseMax=%.0f",n.tankReturnToPost,n.tankPostHold,n.tankReverseMax);
-    Log("CONFIG vehicleGears=%d",n.vehicleGears);
+    Log("CONFIG vehicleGears=%d up=0x%X down=0x%X",n.vehicleGears,n.vehicleCruiseUpKey,n.vehicleCruiseDownKey);
     Log("CONFIG ground pilot=%d follow=%.0f range=%.0f leash=%.0f fire=%d",n.groundPilot,n.groundFollow,
         n.groundRange,n.groundLeash,n.groundFire);
     Log("CONFIG drill=%d maxRpm=%.0f spinUp=%.1fs spinDown=%.1fs damage=%.0f/s break=%.0f/s overheat=%.0fs cool=%.0fs resume=%.0f%% "

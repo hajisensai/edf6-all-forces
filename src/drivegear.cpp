@@ -1,8 +1,10 @@
 // The stock ground vehicles' War Thunder cruise gears (drive_gear.h; ini VehicleGears). The player's own driver seat on
-// the keyboard only (seat+0x2B0 0; a pad's stick is left as it is): the keys' stick the human wrote this frame
-// (docs/heli-input-re.md §4: HumanBase slot 4, W -> seat+0x2C4 negative) shifts the gear, and for the stock input that
-// follows (crew.cpp InputHook) the stick is the gear's; after it the seat holds the keys' own again, so the next frame
-// shifts on the keys and never on what the gear wrote. Which vehicles: those with CarBase's engine and a class of its
+// the keyboard only (seat+0x2B0 0; a pad's stick is left as it is): the gears are two keys of their own (ini
+// VehicleCruiseUpKey / VehicleCruiseDownKey, like War Thunder's); the keys' stick the human wrote this frame
+// (docs/heli-input-re.md §4: HumanBase slot 4, W -> seat+0x2C4 negative) is W / S in hand: it cancels the cruise (N) and
+// goes to the stock input untouched. Otherwise, in a gear, for the stock input that follows (crew.cpp InputHook) the
+// stick is the gear's; after it the seat holds the keys' own again, so the next frame reads the keys and never what
+// the gear wrote. Which vehicles: those with CarBase's engine and a class of its
 // tracks / wheels / two wheels (vehsound.cpp's BodyOfVehicle, the same names), not the plugin's bodies, not an
 // emplacement (it never drives), not the mechs (their W / S walk). Each one's gears are shares of its own top: the
 // native drive's top gear speed as its setup left it (docs/vehicle-top-speed-re.md); a vehicle whose gear table cannot
@@ -36,6 +38,7 @@ struct Drive {
     drivegear::State gear;
     float pos[3]{},speed=0.0f,top=0.0f;
     ULONGLONG ms=0,frame=~0ULL;
+    bool active=false;   // this frame the gear's stick is written (drivegear::Input)
 } drive{};
 ObjRef untabled;   // the last vehicle logged for an unreadable gear table (one line per vehicle, not per frame)
 
@@ -70,6 +73,8 @@ bool KeysAllowed() noexcept {
     DWORD pid=0;GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
     return pid==GetCurrentProcessId();
 }
+
+bool VkDown(int vk) noexcept { return vk>0 && (edf::AsyncKey(vk)&0x8000)!=0; }
 
 // The player's driver seat of `v` on the keyboard, or null.
 unsigned char* DriverSeat(unsigned char* v) noexcept {
@@ -120,13 +125,18 @@ DriveGearInput::DriveGearInput(unsigned char* v) noexcept {
             const ULONGLONG was=drive.ms;
             Measure(drive,v,ms);
             const float dt=was && ms>was ? static_cast<float>(ms-was)*0.001f : 0.0f;
-            const int key=!KeysAllowed() || !std::isfinite(keys) ? 0 : keys<-kPressed ? 1 : keys>kPressed ? -1 : 0;
+            // The gears are two keys of their own; W / S (the keys' stick) override them (drive_gear.h Input).
+            const bool allowed=KeysAllowed();
+            const bool manual=allowed && std::isfinite(keys) && std::fabs(keys)>kPressed;
+            const bool up=allowed && VkDown(Cfg().vehicleCruiseUpKey),down=allowed && VkDown(Cfg().vehicleCruiseDownKey);
+            const int key=up==down ? 0 : up ? 1 : -1;
             const int before=drive.gear.gear;
-            drivegear::Shift(drive.gear,key,dt);
+            drive.active=drivegear::Input(drive.gear,key,manual,dt);
             if(drive.gear.gear!=before)Log("GEAR v=%p %ls -> %ls at %.0f km/h (its top %.0f km/h)",v,drivegear::Name(before),
                                            drivegear::Name(drive.gear.gear),drive.speed*3.6f,top*3.6f);
             drive.frame=GameFrame();
         }
+        if(!drive.active)return;   // N, or W / S in hand: the keys go to the stock input as they are
         saved_=keys;seat_=seat;vehicle_=v;ctrl_=At<const void*>(v,kSelfCtrl);
         Put<float>(seat,kSeatLY,drivegear::Drive(drive.gear,drive.speed,drive.top));
     } __except(EXCEPTION_EXECUTE_HANDLER){seat_=nullptr;drive=Drive{};}

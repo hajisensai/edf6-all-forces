@@ -57,7 +57,9 @@ LB 0x100、RB 0x200、A/B/X/Y 0x1000/2000/4000/8000。
 
 ### 1.3 地面车（PR #254 合入后）
 
-- **W/S**：原版油门 / 刹车，改成点按换挡。挡位 R/N/1~4，按住每 0.4 s 再换一挡（`VehicleGears=1`）。
+- **挡位**：2026-10-31 起挡位是两个单独的键（`VehicleCruiseUpKey` 默认左 Shift、`VehicleCruiseDownKey` 默认左 Ctrl，
+  「插件：地面载具」页第 9、10 行），W/S 恢复原版油门 / 刹车且优先级高于挡位：一按 W/S 取消定速回 N、键盘原值直通
+  （`docs/feedback-2026-10-31-gears-lock-tone.md`）。挡位 R/N/1~4，按住每 0.4 s 再换一挡（`VehicleGears=1`）。
   实现是改写 `seat+0x2C4`，只作用于玩家键盘驾驶的座位 0。
 - 原版「驾驶 / 坦克」页的手刹、喇叭、主副炮照旧，由玩家在原版里设置。
 - 钻头战车：R / Y 发射钻头（`DrillLaunchKey/Button`）。
