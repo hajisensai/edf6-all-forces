@@ -12,6 +12,9 @@ bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && 
 
 unsigned char* image=nullptr;
 // Offline (online_authority.h): no session, every heli run here, the copies' owner unchanged.
+// firstperson.cpp: the rounds the shot entry told the first person (after the stock shot, never for a refused one).
+int shotCalls=0;int firstPersonShots=0;const unsigned char* firstPersonShotWeapon=nullptr;int shotCallsAtFirstPersonShot=-1;
+void FirstPersonShot(const unsigned char* weapon) noexcept { ++firstPersonShots;firstPersonShotWeapon=weapon;shotCallsAtFirstPersonShot=shotCalls; }
 bool InSession() noexcept { return false; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
 bool WastedFire(const void*,const void*) noexcept { return false; }   // wastedfire.cpp: no fire wasted here
@@ -90,7 +93,7 @@ const unsigned char* recordedContact=nullptr;
 void* recordedBody=nullptr;
 int checks=0,calls=0;
 alignas(16) unsigned char medicWeapon[0xC00]{};
-int shotCalls=0,shotCounter=7;
+int shotCounter=7;
 bool shotReplay=false;
 unsigned char shotPermission=0;
 
@@ -120,17 +123,23 @@ void __fastcall StockMedicShot(unsigned char* weapon,unsigned muzzle,void* overr
 }
 
 void CheckMedicPermission() {
-    Check(!InstallMedicPermission() && !medicShotNext,"unknown shot signature leaves hook off");
+    Check(!InstallShotEntry() && !medicShotNext,"unknown shot signature leaves hook off");
     std::memcpy(image+kMedicShot,kMedicShotSig,sizeof(kMedicShotSig));
-    Check(InstallMedicPermission() && InstallMedicPermission(),"matching shot installs once");
+    // The first person installs the entry on its own check, before or without the heli profile (medicOn false).
+    Check(!medicOn && InstallShotEntry() && InstallMedicPermission(),"matching shot installs once, without the heli profile");
     auto* trampoline=reinterpret_cast<unsigned char*>(medicShotNext);
     Check(std::memcmp(trampoline,kMedicShotSig,sizeof(kMedicShotSig))==0,"trampoline copies complete 15-byte prologue");
     Check(At<const void*>(trampoline,sizeof(kMedicShotSig)+6)==image+kMedicShot+sizeof(kMedicShotSig),"trampoline resumes at instruction boundary");
     medicShotNext=&StockMedicShot;
     Put<const void*>(medicWeapon,0x120,inputVehicle);Put<const void*>(inputVehicle,0,image+kVt410);
     Put<float>(medicWeapon,kWeaponDamage,-150.0f);
-    // Invoke the installed entry, including the fifth (stack) replay argument.
     inputConfig.enabled=false;inputConfig.medicGunnerAim=false;
+    medicWeapon[kWeaponFriendlyDamage]=0;
+    reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,nullptr,&shotCounter,false);
+    Check(shotCalls==1 && shotPermission==0 && firstPersonShots==1,
+          "without the heli profile the entry still tells the first person, its medic work off");
+    shotCalls=0;firstPersonShots=0;medicOn=true;
+    // Invoke the installed entry, including the fifth (stack) replay argument.
     for(bool replay:{false,true}) {
         medicWeapon[kWeaponFriendlyDamage]=0; // RideAi or subsequent mission script cleared it.
         reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,replay ? inputSeat : nullptr,&shotCounter,replay);
@@ -138,12 +147,15 @@ void CheckMedicPermission() {
         Check(shotPermission==1,"permission restored before local or replay parameter consumption");
     }
     Check(shotCalls==2,"native shot called exactly once per invocation");
+    Check(firstPersonShots==2 && firstPersonShotWeapon==medicWeapon && shotCallsAtFirstPersonShot==2,
+          "the first person is told of each round after the stock shot");
     const int before=shotCalls;
     for(const wchar_t* file:{L"EDF6VC_COAX_MG.SGO",L"edf6vc_coax_mg.sgo"})for(bool replay:{false,true}) {
         shotFile=file;shotFileLength=std::wcslen(file);Put<int>(medicWeapon,0xBD4,0);
         reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,replay ? inputSeat : nullptr,&shotCounter,replay);
         Check(shotCalls==before && At<int>(medicWeapon,0xBD4)==0,"retired local/replay shot cannot reach native recoil marker");
     }
+    Check(firstPersonShots==2,"a refused round tells the first person nothing");
     Check(obsoleteWarnings==1,"old data prompts one installer-regeneration diagnostic");
     for(const wchar_t* file:{L"V_403TANK_MACHINEGUN.SGO",L"EDF6VC_COAX_MG.SGO.NEW",L"OTHER_COAX_MG.SGO"}) {
         shotFile=file;shotFileLength=std::wcslen(file);
@@ -169,7 +181,7 @@ void CheckMedicPermission() {
     Check(medicWeapon[kWeaponFriendlyDamage]==0,"missing owner is unchanged");
     RestoreMedicPermission(nullptr);
     inputConfig.enabled=true;inputConfig.medicGunnerAim=true;
-    VirtualFree(trampoline,0,MEM_RELEASE);medicShotNext=nullptr;
+    VirtualFree(trampoline,0,MEM_RELEASE);medicShotNext=nullptr;medicOn=false;
 }
 // Production HeliFrame with one of the plugin's jets whose seats are all empty: a launched drone (JetFliesItself) is
 // flown (JetFrame), as an NPC-piloted jet is; a crewed one with no pilot is not (it waits for its real crew).

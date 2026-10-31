@@ -174,6 +174,111 @@ void Anchored() {
     Expect(Near(cosine,1.0f,1e-5f),"...pointing along the camera's forward",cosine);
 }
 
+bool NearM(const M4& a,const M4& b,float eps=1e-4f) {
+    for(int i=0;i<16;++i)if(!Near(a.m[i],b.m[i],eps))return false;
+    return true;
+}
+
+// ShotAnchor (fp_view.h): no shot is AnchoredTransform on the root itself; a shot shows the firing animation's departure
+// from the rest before it (that departure kept through T, the view's turn followed), and the hold eases back.
+void ShotKick() {
+    const float origin[3]={4,1.5f,-9},grip[3]={-.25f,-.2f,.4f},eye[3]={0,.1f,.05f};
+    const float s=.5f;
+    const M4 aim=Frame(.2f,.7f,origin);
+    // The weapon root at rest in the aim frame: tilted a little, off to the side, scaled by its hand matrix.
+    const M4 rest=Frame(-.15f,.1f,grip);
+    const M4 restScaled=Mul(Scale(1.3f),rest);
+    M4 anchor;
+    {   // Idle: the anchor is the root itself, and T is bit for bit AnchoredTransform's.
+        ShotHold h;
+        const M4 w=Mul(restScaled,aim);
+        bool same=true;
+        for(int k=0;k<5;++k) {
+            const bool moved=ShotAnchor(h,w,aim,false,false,&anchor);
+            M4 t0,t1;
+            const M4 cam=CameraAt(aim,eye);
+            same=same && !moved && std::memcmp(anchor.m,w.m,64)==0 && AnchoredTransform(anchor,cam,grip,s,&t0) &&
+                 AnchoredTransform(w,cam,grip,s,&t1) && std::memcmp(t0.m,t1.m,64)==0;
+        }
+        Expect(same,"no shot: the anchor is the root as drawn, T unchanged");
+    }
+    {   // A shot: the kick (back 6 cm, up 9 degrees about the grip) is kept through T while the view turns.
+        ShotHold h;
+        ShotAnchor(h,Mul(restScaled,aim),aim,false,false,&anchor);           // the step before the shot: R0
+        const float kickAt[3]={0,.01f,-.06f};
+        const M4 dev=Frame(-.16f,0,kickAt);   // a turn up about the root's own origin, 1 cm up and 6 cm back
+        bool kept=true,grips=true;
+        for(int k=0;k<6;++k) {
+            const M4 turned=Frame(.2f+.02f*k,.7f-.05f*k,origin);   // the player looks round while firing
+            const M4 w=Mul(Mul(dev,rest),turned);                    // the animation's departure from rest
+            const bool moved=ShotAnchor(h,w,turned,k==0,false,&anchor);
+            const M4 cam=CameraAt(turned,eye);
+            M4 t;
+            AnchoredTransform(anchor,cam,grip,s,&t);
+            // Drawn root = dev . Tr(grip) . S . C (orthonormal): the kick, at the grip, in the camera's frame.
+            M4 wo;Orthonormal(w,&wo);
+            const M4 drawn=Mul(wo,t);
+            const M4 want=Mul(Mul(Mul(dev,Translate(grip[0],grip[1],grip[2])),Scale(s)),cam);
+            kept=kept && moved && NearM(drawn,want,2e-4f);
+            // A hand fixed on the weapon (its bone rigid with the root) is drawn rigid with the drawn root.
+            const M4 handLocal=Translate(.02f,-.08f,.15f);
+            const M4 hand=Mul(handLocal,w);
+            M4 inv;InverseAffine(Mul(w,t),&inv);
+            grips=grips && NearM(Mul(Mul(hand,t),inv),handLocal,2e-4f);
+        }
+        Expect(kept,"a shot: the native kick is shown relative to the rest before it, following the aim");
+        Expect(grips,"a shot: the hand moves with the weapon (one T)");
+    }
+    {   // The after-shot phase: the hold stays past its window while the weapon is still firing, never past kShotHoldMost.
+        const M4 w=Mul(Mul(Translate(0,.02f,-.08f),restScaled),aim);
+        ShotHold h;
+        ShotAnchor(h,Mul(restScaled,aim),aim,false,false,&anchor);
+        ShotAnchor(h,w,aim,true,true,&anchor);
+        int held=1;
+        for(int k=0;k<kShotHoldFrames+6;++k)if(ShotAnchor(h,w,aim,false,true,&anchor) && h.holding)++held;
+        const bool past=h.holding && held==kShotHoldFrames+7;
+        ShotAnchor(h,w,aim,false,false,&anchor);
+        const bool ends=!h.holding && h.blend==kShotBlendFrames-1;
+        ShotHold g;
+        ShotAnchor(g,Mul(restScaled,aim),aim,false,false,&anchor);
+        ShotAnchor(g,w,aim,true,true,&anchor);
+        int most=1;
+        while(ShotAnchor(g,w,aim,false,true,&anchor) && g.holding && most<1000)++most;
+        Expect(past && ends,"the hold stays while the weapon is in its after-shot phase, then eases back when it ends");
+        Expect(most==kShotHoldMost,"a phase that never ends holds kShotHoldMost steps at most",static_cast<float>(most),
+               static_cast<float>(kShotHoldMost));
+    }
+    {   // The hand-back: after the hold the anchor eases to the root and is then the root exactly.
+        ShotHold h;
+        ShotAnchor(h,Mul(restScaled,aim),aim,false,false,&anchor);
+        M4 dev=Translate(0,.02f,-.08f);
+        const M4 w=Mul(Mul(dev,restScaled),aim);
+        ShotAnchor(h,w,aim,true,false,&anchor);
+        int held=1;
+        while(ShotAnchor(h,w,aim,false,false,&anchor) && h.holding)++held;
+        float lastGap=1e9f,most=0.0f;
+        bool eases=true;
+        M4 prev=anchor;
+        int steps=0;
+        for(;;) {
+            const float gap=std::sqrt((anchor.m[12]-w.m[12])*(anchor.m[12]-w.m[12])+(anchor.m[13]-w.m[13])*(anchor.m[13]-w.m[13])+
+                                      (anchor.m[14]-w.m[14])*(anchor.m[14]-w.m[14]));
+            eases=eases && gap<lastGap+1e-6f;lastGap=gap;
+            const bool moved=ShotAnchor(h,w,aim,false,false,&anchor);
+            const float step=std::sqrt((anchor.m[12]-prev.m[12])*(anchor.m[12]-prev.m[12])+(anchor.m[13]-prev.m[13])*(anchor.m[13]-prev.m[13])+
+                                       (anchor.m[14]-prev.m[14])*(anchor.m[14]-prev.m[14]));
+            most=std::fmax(most,step);prev=anchor;
+            if(!moved)break;
+            if(++steps>100){eases=false;break;}
+        }
+        Expect(held==kShotHoldFrames,"the hold lasts kShotHoldFrames after the latest shot",static_cast<float>(held),
+               static_cast<float>(kShotHoldFrames));
+        Expect(eases && steps==kShotBlendFrames-1 && std::memcmp(anchor.m,w.m,64)==0,"then eases back and is the root exactly",
+               static_cast<float>(steps),lastGap);
+        Expect(most<0.083f*1.3f/static_cast<float>(kShotBlendFrames+1)*1.6f,"easing back in small steps",most);
+    }
+}
+
 void Arms() {
     const float elbow[3]={-0.1f,-0.1f,0.3f},toward[3]={-0.2f,-0.3f,-0.1f};
     float shoulder[3],se[3],st[3];
@@ -762,6 +867,7 @@ int main() {
     Collapse_();
     Eye();
     Anchored();
+    ShotKick();
     Arms();
     Held();
     Motion();

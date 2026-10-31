@@ -21,7 +21,14 @@
 //    the effect factory there (0x697FD0) is redirected so that, for the player's weapons in first person, the pointer
 //    becomes an owned matrix after native construction: the shot's immutable muzzle-to-weapon offset through the
 //    current weapon pose and T. Both primary and Umbra deleting destructors retire its borrowed matrix; a camera
-//    reset freezes it until then. The round itself was made before that call from the real muzzle.
+//    reset freezes it until then. The round itself was made before that call from the real muzzle. Its size and
+//    brightness are its constructor's reading of the weapon's MuzzleFlash_CustomParameter (fp_flash.h): for a flash this
+//    view takes over, those elements are scaled for that one construction and put back (FirstPersonFlashScale, relative
+//    to the gun as drawn, and FirstPersonFlashBright); every other flash, the third person's and other players', is native.
+//  - The shot's kick (fp_view.h ShotAnchor): every weapon class fires through 0x696FD0, whose head hook is heli.cpp's
+//    (shared with the medic work, installed here by InstallShotEntry on its own prologue check, not the heli profile);
+//    it tells FirstPersonShot after each round. Around a shot each hand's anchor is the weapon root's
+//    rest before it, so the stock firing animation of the arms (which carries the weapon root) shows in first person.
 //  - The aim line (H call, M meaning): a soldier's weapon with a trajectory line (the grenade launchers' red arc) builds
 //    it with 0x6899F0(line, &start, &velocity, &gravity) from its muzzle (the call at 0x6888D9); the call is redirected and,
 //    for a line that starts at the player in first person, its start is moved through T (the viewmodel's muzzle); the
@@ -61,6 +68,8 @@
 #include "fp_view.h"
 #include "vehicle_look.h"
 #include "fp_motion.h"
+#include "fp_flash.h"
+#include "log_once.h"
 #include "fp_skin_gpu.h"
 #include "thermal.h"
 #include "enemy_control.h"
@@ -258,6 +267,12 @@ struct State {
     int reloadLeft;
     fpmotion::State motion;
     struct ShotEvent { const unsigned char* weapon; int count; float recoil; } shotEvent[2];
+    // The kick (fp_view.h ShotAnchor): each hand's hold, the weapon it is for, the rounds FirstPersonShot told since the
+    // last camera step, and the weapon's own shot count then (a second witness: +0xBD0 rises with each local round).
+    fpview::ShotHold shotHold[2];
+    const unsigned char* shotWeapon[2];
+    int shotsTold[2];
+    std::int32_t shotCount[2];
     int sampledShots,notifiedShots;
     M4 moved[2];                // the motion as a matrix about each hand's grip (fp_view.h MotionMatrix)
     bool viewOk[2];             // each hand's T this frame (kRight, kLeft), built by the camera step
@@ -943,10 +958,6 @@ void Flashes() noexcept {
 Flash* Relocate(unsigned char* w) noexcept {
     const int hand=Current().on ? HandOfModel(w+kWeaponModel) : -1;
     if(hand<0 || !Current().viewOk[hand])return nullptr;
-    auto& event=Current().shotEvent[hand];
-    if(event.weapon!=w)event=State::ShotEvent{w,0,0};
-    if(event.count<3)++event.count;
-    event.recoil=RecoilOf(w);
     const auto src=At<const float*>(w,kFlashMatrix);
     if(!src)return nullptr;
     M4 root,inverse;
@@ -964,6 +975,19 @@ Flash* Relocate(unsigned char* w) noexcept {
     std::memcpy(f.m,fpview::Mul(shot,Current().view[hand]).m,64);
     Put<const float*>(w,kFlashMatrix,f.m);
     return &f;
+}
+
+// A round of `weapon` (heli.cpp's hook on 0x696FD0, every weapon class's one shot entry, after the round): for this
+// machine's first person, the hand that weapon is in takes a shot for its kick (Kicks) and its recoil (Hand), whether or
+// not the weapon has a muzzle flash.
+void Shot(const unsigned char* weapon) noexcept {
+    const int hand=Current().on && !Current().overridden ? HandOfModel(weapon+kWeaponModel) : -1;
+    if(hand<0)return;
+    auto& event=Current().shotEvent[hand];
+    if(event.weapon!=weapon)event=State::ShotEvent{weapon,0,0};
+    if(event.count<3)++event.count;
+    event.recoil=RecoilOf(weapon);
+    if(Current().shotsTold[hand]<1000)++Current().shotsTold[hand];
 }
 
 // The start of a line `start` (x, y, z, w) moved through T into `out` when it is the player's in first person.
@@ -1051,10 +1075,75 @@ bool HookFlashLifetime(void* effect) noexcept {
     }
     return false;   // an unknown/custom effect retains its native matrix and ownership
 }
+// The flash classes by their factory (the class object 0x1194280 gets: vtable Factory@<class>, slot 2 makes one) and
+// the layout of what each constructor reads from MuzzleFlash_CustomParameter (fp_flash.h; docs/fp-render-re.md §5.2).
+// No layout: its sizes are not known to be read that way (EfsMuzzleFlash plays an effect file; the rail gun's and the
+// pile bunker's lists are colours and timings, not verified), so it stays native.
+struct FlashFactory { unsigned vtable; const char* name; const fpflash::Layout* layout; };
+constexpr FlashFactory kFlashFactories[]={
+    {0x17A63F8,"MuzzleFlash01",&fpflash::kBeams},
+    {0x17A64F8,"MuzzleFlash02",&fpflash::kBeams},
+    {0x17A61E8,"LaserMuzzleFlash02",&fpflash::kBeams},
+    {0x17A60D0,"LaserMuzzleFlash01",&fpflash::kSprite},
+    {0x17A6308,"LaserMuzzleFlash03",&fpflash::kSprite},
+    {0x17A6000,"EfsMuzzleFlash",nullptr},
+    {0x17A65F8,"MuzzleFlashRailGun",nullptr},
+    {0x17A6808,"PileBunkerMuzzleFlash01",nullptr},
+    {0x17A6900,"TestMuzzleFlash",nullptr},
+    {0x17A66F8,"MuzzleSmoke01",nullptr},   // the rocket launchers' smoke (live 2026-10-31: Goliath D1), not a flash
+};
+constexpr std::size_t kFlashCustom=0x40;   // the parameter block's MuzzleFlash_CustomParameter handle (weapon+0x4C8)
+SeenOnce<32> flashLayoutLogged;
+
+// Whether a state of this machine takes the flash `param` is about to be made for over (FlashCreateHook relocates it):
+// the player's weapon in hand, first person on, that hand's T built.
+bool TakesFlash(void* param) noexcept {
+    State* before=selected;
+    bool take=false;
+    const auto weapon=static_cast<unsigned char*>(param)-kFlashParam;
+    for(auto& state:states)if(state.on && !state.overridden) {
+        selected=&state;
+        const int hand=HandOfModel(weapon+kWeaponModel);
+        if(hand>=0){take=Current().viewOk[hand];break;}
+    }
+    selected=before;
+    return take;
+}
+
+// The native create with the first person's size and brightness in its parameters for that one call (fp_flash.h); the
+// document is put back before anything else runs.
+void* CreateFlash(void* factory,void* a,void* cls,void* param,bool scaled) {
+    fpflash::Edit edit{};
+    if(scaled) {
+        const auto vt=At<const unsigned char*>(cls,0);
+        const FlashFactory* known=nullptr;
+        for(const auto& f:kFlashFactories)if(vt==image+f.vtable)known=&f;
+        const auto key=static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(vt));
+        const auto readable=[](const void* p,std::size_t n,bool w){return Readable(p,n,w);};
+        if(known && known->layout) {
+            // The flash draws its geometry through its world matrix, which Relocate makes shot·T: it already shrinks
+            // with the gun (fp-render-re.md §5.2), so the size is FirstPersonFlashScale alone.
+            const double size=Cfg().fpFlashScale;
+            if(!fpflash::Scale(static_cast<const unsigned char*>(param)+kFlashCustom,*known->layout,size,Cfg().fpFlashBright,&edit,readable) &&
+               flashLayoutLogged.Check(key)==SeenOnce<32>::Verdict::fresh)
+                Log("FP flash %s: its MuzzleFlash_CustomParameter is not the %s layout, native size and brightness",known->name,known->layout->name);
+        } else if(flashLayoutLogged.Check(key)==SeenOnce<32>::Verdict::fresh) {
+            Log("FP flash %s (factory +0x%llX): no size/brightness layout known, native",known ? known->name : "of an unknown class",
+                static_cast<unsigned long long>(vt ? vt-image : 0));
+        }
+    }
+    void* effect=nullptr;
+    __try { effect=reinterpret_cast<CreateFn>(image+kEffectCreate)(factory,a,cls,param); }
+    __finally { fpflash::Restore(edit); }
+    return effect;
+}
+
 void* __fastcall FlashCreateHook(void* factory,void* a,void* cls,void* param) {
     // Keep native creation/shot world transforms intact. Only after a supported effect and its destructor exist
     // does it borrow one of our matrices; a rejected custom class or a full pool remains entirely native.
-    void* const effect=reinterpret_cast<CreateFn>(image+kEffectCreate)(factory,a,cls,param);
+    bool scaled=false;
+    __try { scaled=TakesFlash(param); } __except(EXCEPTION_EXECUTE_HANDLER){scaled=false;}
+    void* const effect=CreateFlash(factory,a,cls,param,scaled);
     if(!effect)return effect;
     State* before=selected;
     __try {
@@ -1274,8 +1363,10 @@ void Fit(int hand,bool dual,float* grip) noexcept {
 }
 
 // Each hand's T from the poses as they are now (above: its own weapon's anchor, else the other hand's T, else the aim
-// frame), with the hold the camera step chose (Current().grip, .hold, .moved, .nativeRest).
-void BuildViews(const unsigned char* h,const unsigned char* cam,const M4* anchor,const bool* anchored) noexcept {
+// frame), with the hold the camera step chose (Current().grip, .hold, .moved, .nativeRest). A firearm's T anchors on
+// `frame` (its root, or around a shot the rest before it: ShotAnchor); everything placed through T reads `anchor`, the
+// root as drawn, so the kick shows.
+void BuildViews(const unsigned char* h,const unsigned char* cam,const M4* anchor,const M4* frame,const bool* anchored) noexcept {
     const Config& c=Cfg();
     const M4 view=MatrixAt(cam+kCamMatrix);
     for(int hand=kRight;hand<=kLeft;++hand) {
@@ -1284,7 +1375,7 @@ void BuildViews(const unsigned char* h,const unsigned char* cam,const M4* anchor
         const bool native=Current().nativeWeapon[hand]!=nullptr && Current().nativeWeapon[hand]==weapon;
         Current().viewOk[hand]=anchored[hand] && (native
             ? fpview::NativeGripTransform(anchor[hand],MatrixAt(h+kAim),view,Current().grip[hand],c.fpScale,&Current().view[hand],Current().moved[hand],Current().nativeRest[hand])
-            : fpview::AnchoredTransform(anchor[hand],view,Current().grip[hand],c.fpScale,&Current().view[hand],Current().moved[hand]));
+            : fpview::AnchoredTransform(frame[hand],view,Current().grip[hand],c.fpScale,&Current().view[hand],Current().moved[hand]));
         Current().axisOk[hand]=Current().viewOk[hand];
         if(Current().axisOk[hand])fpview::Point(Current().view[hand],anchor[hand].m+12,Current().axis[hand]);
     }
@@ -1346,6 +1437,48 @@ void Placements(const M4* anchor,const bool* anchored,const M4& camera) noexcept
     }
 }
 
+// No kick carries over a ride: the rest R0 before boarding, rounds told and the count seen are dropped both ways.
+void ForgetKicks() noexcept {
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        Current().shotHold[hand]=fpview::ShotHold{};Current().shotWeapon[hand]=nullptr;
+        Current().shotsTold[hand]=0;Current().shotCount[hand]=0;
+    }
+}
+
+// Each hand's firearm anchor this step (fp_view.h ShotAnchor): its root, or around a shot the rest before it. A shot is
+// what FirstPersonShot told (0x696FD0, every round) or the weapon's own count rising; the hold runs its window and on
+// through the weapon's after-shot phase (+0xBD4 2), a reload does not cut it (fp_view.h); a melee weapon or shield (NativeGrip) keeps its own placement.
+void Kicks(const unsigned char* h,const M4* anchor,const bool* anchored,M4* frame) noexcept {
+    const M4 aim=MatrixAt(h+kAim);
+    for(int hand=kRight;hand<=kLeft;++hand) {
+        bool flip=false;
+        const unsigned char* w=HandWeapon(hand,&flip);
+        auto& s=Current().shotHold[hand];
+        const std::int32_t count=w ? At<std::int32_t>(w,kShotCount) : 0;
+        if(w!=Current().shotWeapon[hand]) {
+            s=fpview::ShotHold{};Current().shotWeapon[hand]=w;Current().shotsTold[hand]=0;Current().shotCount[hand]=count;
+        }
+        const std::int32_t counted=count-Current().shotCount[hand];
+        const bool shot=Current().shotsTold[hand]>0 || (counted>0 && counted<10);
+        Current().shotsTold[hand]=0;Current().shotCount[hand]=count;
+        if(!w || !anchored[hand] || NativeGrip(w)){s=fpview::ShotHold{};continue;}
+        const bool was=s.holding;
+        const std::int32_t state=At<std::int32_t>(w,kFireState);
+        const bool moved=fpview::ShotAnchor(s,anchor[hand],aim,shot,state==2,&frame[hand]);
+        if(!Cfg().debug || !(moved || was))continue;
+        // Debug=1 (the kick's probe): the root's departure from its rest R0 in the aim frame, each step of the hold.
+        const M4& l=s.last;const M4& r=s.rest;
+        const float d[3]={l.m[12]-r.m[12],l.m[13]-r.m[13],l.m[14]-r.m[14]};
+        float trace=0.0f;
+        for(int i=0;i<3;++i)trace+=l.m[i*4]*r.m[i*4]+l.m[i*4+1]*r.m[i*4+1]+l.m[i*4+2]*r.m[i*4+2];
+        const float turn=std::acos(fpview::Clamp(0.5f*(trace-1.0f),-1.0f,1.0f))*57.29578f;
+        const float up=std::atan2(l.m[9],l.m[10])-std::atan2(r.m[9],r.m[10]);
+        Log("FP kick %s %p: %s %d, root from rest (%.3f,%.3f,%.3f) m (aim frame: right, up, ahead), turned %.2f deg (bore up %.2f), shot %d, fire state %d",
+            hand==kRight ? "right" : "left",static_cast<const void*>(w),s.holding ? "hold" : "ease",s.holding ? s.frames : s.blend,
+            d[0],d[1],d[2],turn,up*57.29578f,shot,state);
+    }
+}
+
 // The camera step: which weapons, the hold (grip, fitted; the motion's springs a step), each hand's T.
 void Views(const unsigned char* h,const unsigned char* cam) noexcept {
     const Config& c=Cfg();
@@ -1375,7 +1508,9 @@ void Views(const unsigned char* h,const unsigned char* cam) noexcept {
         }
         if(!native)Current().nativeWeapon[hand]=nullptr;
     }
-    BuildViews(h,cam,anchor,anchored);
+    M4 frame[2]={anchor[kRight],anchor[kLeft]};
+    Kicks(h,anchor,anchored,frame);
+    BuildViews(h,cam,anchor,frame,anchored);
     Placements(anchor,anchored,MatrixAt(cam+kCamMatrix));
     if(c.debug){Current().probeCamThread=GetCurrentThreadId();++Current().probeCamSteps;}
     Probe(anchored,anchor,MatrixAt(cam+kCamMatrix));
@@ -1409,6 +1544,7 @@ bool Ride(unsigned char* cam,unsigned char* h) noexcept {
         Current().instrumentsReady=false;
         Current().have=false;Current().reloadLeft=0;Current().motion=fpmotion::State{};
         for(auto& event:Current().shotEvent)event=State::ShotEvent{};
+        ForgetKicks();
         Log("FP in a vehicle: %s %p seat %d, eye at its cockpit (%.2f %.2f %.2f)",ride.name ? ride.name : "?",
             static_cast<void*>(ride.vehicle),ride.seat,eye[0],eye[1],eye[2]);
     }
@@ -1466,7 +1602,7 @@ void Camera(unsigned char* cam) noexcept {
         if(!Ride(cam,h))Leave();
         return;
     }
-    if(Current().riding){Current().riding=false;Current().fresh=true;Log("FP on foot again");}
+    if(Current().riding){Current().riding=false;Current().fresh=true;ForgetKicks();Log("FP on foot again");}
     const unsigned char* head=BoneNamed(h+kBodyInst,L"head");
     const M4 body=MatrixAt(h+kBodyFrame);
     float headAt[3];
@@ -2334,6 +2470,13 @@ void FirstPersonCameraOverride(const void* camera,bool overridden) noexcept {
 }
 
 void ResetFirstPerson() noexcept { session.fetch_add(1,std::memory_order_release); }
+void FirstPersonShot(const unsigned char* weapon) noexcept {
+    if(!camOk || !weapon)return;
+    State* before=selected;
+    __try { for(auto& state:states)if(state.on){selected=&state;Shot(weapon);} }
+    __except(EXCEPTION_EXECUTE_HANDLER){}
+    selected=before;
+}
 
 int LocalPlayers(unsigned char** out,int most) noexcept {
     int n=0;
@@ -2456,13 +2599,15 @@ bool InstallFirstPerson() noexcept {
         RedirectCall(image+kLaserCastCall,image+kLaserCast,reinterpret_cast<void*>(&LaserCastHook),changed) &&
         edf::ChainVtableSlot(reinterpret_cast<void**>(image+kLaserRayVtable)+kLaserRaySlot,reinterpret_cast<void*>(&LaserRayHook),&nextLaserRay);
     const bool flashOk=RedirectCall(image+kFlashCall,image+kEffectCreate,reinterpret_cast<void*>(&FlashCreateHook),changed);
+    // The kick's rounds (FirstPersonShot): the shot entry's hook, by its own check, whatever the heli profile.
+    const bool shotOk=InstallShotEntry();
     placeOk=Matches(kUmbraPlace,kUmbraPlaceCode,sizeof(kUmbraPlaceCode));
     const bool lineOk=RedirectCall(image+kAimLineCall,image+kAimLineBuild,reinterpret_cast<void*>(&AimLineHook),changed);
     placeOk=placeOk && RedirectCall(image+kRenderCall,image+kRender,reinterpret_cast<void*>(&RenderHook),changed);
     const bool passOk=placeOk && RedirectCall(image+kPassEndCall,image+kPassEnd,reinterpret_cast<void*>(&PassEndHook),changed);
     toggled=Cfg().firstPersonStart;
     Log("FP installed: camera=%d draw=%d flash=%d aim line=%d culling=%d pass=%d start=%d",camOk,drawOk,flashOk,lineOk,placeOk,passOk,toggled.load());
-    Log("FP skin=%d laser=%d laser ray=%d",skinOk,laserOk,rayOk);
+    Log("FP skin=%d laser=%d laser ray=%d shot entry=%d",skinOk,laserOk,rayOk,shotOk);
     return drawOk;
 }
 }  // namespace crew

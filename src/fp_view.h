@@ -10,6 +10,7 @@
 //    weapon's root (its grip, the hand's mount) made orthonormal: the weapon sits at `grip` in the camera's frame,
 //    pointing straight ahead, whatever the third-person pose holds it at; the arms follow it, the hands' own animation
 //    (a reload's) on it kept.
+//  - Around a shot that anchor is the root's rest before the shot (ShotAnchor): the firing animation is shown.
 //  - Melee weapons and shields instead use NativeGripTransform: position the grip, preserving the authored rotation
 //    relative to the aim frame. Cancelling W's rotation every frame cancels their animated swing too.
 //  - The collapse: a matrix that sends a rigid instrument glyph's vertices to one point (rows 0..2 zero). The
@@ -205,6 +206,69 @@ inline bool AnchoredTransform(const M4& weapon,const M4& camera,const float* gri
     if(!Finite(t))return false;
     *out=t;
     return true;
+}
+
+// --- A shot's kick on the viewmodel (docs/fp-render-re.md §5.1) ---
+// The firearm anchor above puts the weapon root at the grip every frame. The third person's firing motion is the arms'
+// animation, which 0x68FD00 copies onto the weapon root each frame (§4.1), so that anchor cancelled it whole (the user,
+// 2026-10-31: the rifle's muzzle never rose, the rocket launcher did not move). Around a shot the anchor is instead the
+// root as it rested just before it: its place in the aim frame (R0), carried by the aim as the view turns. The
+// animation's departure from R0 is then shown, arms and weapon through the same T (the hand stays on the grip). The
+// hold lasts kShotHoldFrames after the latest shot and, past that, while the weapon is still in its after-shot phase
+// (`firing`: the fire state +0xBD4 2, which 0x6934F0 keeps after the shot's own 1 until it goes 0 or a reload's 3),
+// at most kShotHoldMost steps; then it eases back to the per-frame anchor over kShotBlendFrames. Live 2026-10-31
+// (Debug probe, the root from R0): the M1 Raven 5-7 cm back and 1-2 deg, its phase over 3 steps after the round, the
+// motion settling in ~12 (the window governs); the NC101 hand cannon 0.2 m back and 10 deg up, its phase ~31 steps;
+// Goliath D1 0.5 m back and 70 deg up, a reload's 3 from the 20th step. A reload does not cut the hold short (the
+// firing animation still runs when it starts); after the hold the reload is anchored per frame again. A weapon switch
+// drops it (firstperson.cpp).
+struct ShotHold {
+    M4 last{},rest{};    // the root in the aim frame: the last camera step's, and R0 the hold shows the shot from
+    bool lastOk=false;
+    bool holding=false;
+    int frames=0;        // camera steps of the hold left after the latest shot (then held on while `firing`)
+    int held=0;          // camera steps since the latest shot
+    int blend=0;         // camera steps of the hand-back left
+};
+// kShotHoldMost bounds a phase that never ends (a weapon held in state 2 without rounds): ~1.5 s at 60 steps a second.
+constexpr int kShotHoldFrames=24,kShotHoldMost=90,kShotBlendFrames=8;
+
+// `a`'s rows blended toward `b`'s by t (0: a, 1: b), made orthonormal again (the two are near: a kick's departure).
+inline M4 BlendFrames(const M4& a,const M4& b,float t) noexcept {
+    M4 r=a;
+    for(int i=0;i<16;++i)r.m[i]=a.m[i]+(b.m[i]-a.m[i])*t;
+    M4 o;
+    return Orthonormal(r,&o) ? o : a;
+}
+
+// One camera step of hand `s`: `weapon` its root as it will be drawn, `aim` the soldier's aim frame, `shot` a round of
+// that weapon left since the last step (0x696FD0, every weapon class's one shot entry), `firing` the weapon still in
+// its after-shot phase. `anchor` is what AnchoredTransform anchors on: `weapon` itself whenever no shot is being shown.
+// True while the anchor is not `weapon` (holding or easing back). A degenerate frame drops the hold.
+inline bool ShotAnchor(ShotHold& s,const M4& weapon,const M4& aim,bool shot,bool firing,M4* anchor) noexcept {
+    *anchor=weapon;
+    M4 a,w,inv,local;
+    if(!Orthonormal(aim,&a) || !Orthonormal(weapon,&w) || !InverseAffine(a,&inv)){s=ShotHold{};return false;}
+    local=Mul(w,inv);
+    if(shot) {
+        // A shot from rest takes R0 from the step before (this step's pose may already be the kick's first frame); one
+        // during the hold or its easing back keeps the R0 it has.
+        if(!s.holding && s.blend==0)s.rest=s.lastOk ? s.last : local;
+        s.holding=true;s.frames=kShotHoldFrames;s.held=0;s.blend=0;
+    } else if(s.holding) {
+        if(s.frames>0)--s.frames;
+        if((s.frames==0 && !firing) || ++s.held>=kShotHoldMost){s.holding=false;s.frames=0;s.held=0;s.blend=kShotBlendFrames;}
+    }
+    bool moved=false;
+    if(s.holding){*anchor=Mul(s.rest,a);moved=true;}
+    else if(s.blend>0) {
+        const float t=static_cast<float>(s.blend)/static_cast<float>(kShotBlendFrames+1);
+        *anchor=Mul(BlendFrames(local,s.rest,t),a);
+        --s.blend;moved=true;
+    }
+    s.last=local;s.lastOk=true;
+    if(moved && !Finite(*anchor)){*anchor=weapon;s=ShotHold{};return false;}
+    return moved;
 }
 
 // A melee weapon / shield has an authored holding angle and animated swing, not a gun bore to straighten. Anchor

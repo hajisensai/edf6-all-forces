@@ -63,6 +63,7 @@ bool EnemyControlCamera(const unsigned char* human,const float*,const float*,flo
     std::memcpy(eye,targetEye,12);std::memcpy(look,targetLook,12);return true;
 }
 bool SazabiFirstPersonFrame(const void*,unsigned,float*) noexcept { return false; }
+bool InstallShotEntry() noexcept { return false; }   // heli.cpp: no shot entry hooked here
 bool observeCamera=false;
 int lookOrbit=-1;   // the last VehicleLookCamera call's `orbit`: 1 round the vehicle (third person), 0 the head in place
 bool VehicleLookCamera(const unsigned char*,float* matrix,bool orbit) noexcept {
@@ -185,15 +186,15 @@ int main() {
     Current().viewOk[0]=true;Current().view[0]=fpview::Identity();
     float flashMatrix[16]{};flashMatrix[0]=flashMatrix[5]=flashMatrix[10]=flashMatrix[15]=1;
     Put<float>(weapon,kFireRecoil,.075f);Current().shots[0]=0;
-    for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);}
+    for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);Shot(weapon);}   // the round's flash, then the entry's hook
     int reload=0;
     fpmotion::Cue firing{};Hand(weapon,0,0,0,firing,&reload);
-    check(firing.shots==2 && firing.recoil>=.3f,"actual shot events drive recoil even when the sampled counter does not advance");
+    check(firing.shots==2 && firing.recoil>=.3f,"actual shot events (the shot entry, each round once with its flash) drive recoil even when the sampled counter does not advance");
     firing=fpmotion::Cue{};Hand(weapon,0,0,0,firing,&reload);
     check(firing.shots==0,"shot events are consumed once");
-    for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);}
+    for(int i=0;i<2;++i){Put<const float*>(weapon,kFlashMatrix,flashMatrix);Relocate(weapon);Shot(weapon);}   // the round's flash, then the entry's hook
     firing=fpmotion::Cue{};Hand(weapon,0,2,0,firing,&reload);
-    check(firing.shots==2,"counter and flash observations of the same shots are not double counted");
+    check(firing.shots==2,"the counter and the shot entry's rounds of the same shots are not double counted");
     check(reload==0,"no reload while the weapon fires");
     // The reload is the game's own frames left (+0xE68) while the state is 3 (the animation) or 4 (its _finish).
     const auto reloadIn=[&](int state,int left) {
@@ -334,7 +335,11 @@ int main() {
     Put<void*>(weapon,kSelfCtrl,weaponOwnerCtrl);
     reset();
     Current().shotEvent[0]=State::ShotEvent{weapon,2,.5f};Current().motion.recoilZ.at=-.07f;Current().have=true;Current().reloadLeft=30;
+    Current().shotHold[0].holding=true;Current().shotHold[0].frames=12;Current().shotHold[0].lastOk=true;
+    Current().shotWeapon[0]=weapon;Current().shotsTold[0]=2;Current().shotCount[0]=7;
     check(Ride(cam,human),"a fitted vehicle accepts the ride");
+    check(!Current().shotHold[0].holding && !Current().shotHold[0].lastOk && !Current().shotWeapon[0] && !Current().shotsTold[0] &&
+          !Current().shotCount[0],"boarding drops the kick's hold, its rest R0 and the rounds told: none comes back on foot");
     check(Current().shotEvent[0].count==0 && Current().motion.recoilZ.at==0 && !Current().have && !Current().reloadLeft,
           "boarding retires pending on-foot shots, recoil and reload state");
     check(At<void*>(model,kBatch)==&batch,"boarding returns the surviving weapon's original batch");

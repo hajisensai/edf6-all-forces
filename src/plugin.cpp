@@ -386,6 +386,8 @@ void Validate(Config& n) noexcept {
     Fix("FirstPersonViewHeightEase",n.fpViewHeightEase,0.02f,1.0f);
     Fix("FirstPersonCenter",n.fpCenter,0.0f,0.5f);
     Fix("FirstPersonSway",n.fpSway,0.0f,1.0f);
+    Fix("FirstPersonFlashScale",n.fpFlashScale,0.05f,1.0f);
+    Fix("FirstPersonFlashBright",n.fpFlashBright,0.0f,1.0f);
     Fix("FirstPersonGripX",n.fpGripX,-1.0f,1.0f);
     Fix("FirstPersonGripY",n.fpGripY,-1.0f,1.0f);
     Fix("FirstPersonGripZ",n.fpGripZ,-1.0f,2.0f);
@@ -821,6 +823,8 @@ void LoadConfig() noexcept {
     n.fpViewHeightEase=ReadFloat(L"FirstPersonViewHeightEase",n.fpViewHeightEase);
     n.fpCenter=ReadFloat(L"FirstPersonCenter",n.fpCenter);
     n.fpSway=ReadFloat(L"FirstPersonSway",n.fpSway);
+    n.fpFlashScale=ReadFloat(L"FirstPersonFlashScale",n.fpFlashScale);
+    n.fpFlashBright=ReadFloat(L"FirstPersonFlashBright",n.fpFlashBright);
     n.fpGripX=ReadFloat(L"FirstPersonGripX",n.fpGripX);
     n.fpGripY=ReadFloat(L"FirstPersonGripY",n.fpGripY);
     n.fpGripZ=ReadFloat(L"FirstPersonGripZ",n.fpGripZ);
@@ -1044,6 +1048,7 @@ void LoadConfig() noexcept {
     Log("CONFIG firstPerson=%d key=0x%X start=%d eye up %.2f ahead %.2f ease %.2f grip (%.2f,%.2f,%.2f) hold (%.2f,%.2f,%.2f) scale %.2f near %.3f aimSnap=%d motion=%d",
         n.firstPerson,n.firstPersonKey,n.firstPersonStart,n.fpEyeUp,n.fpEyeAhead,n.fpViewHeightEase,n.fpGripX,n.fpGripY,n.fpGripZ,n.fpHoldX,n.fpHoldY,n.fpHoldZ,
         n.fpScale,n.fpNear,n.fpAimSnap,n.fpMotion);
+    Log("CONFIG firstPerson muzzle flash scale %.2f (of the gun as drawn) bright %.2f",n.fpFlashScale,n.fpFlashBright);
     Log("CONFIG nixTorsoTwist=%d",n.nixTorsoTwist);
     Log("CONFIG map=%d key=0x%X button=0x%X viewDistance=%.0f marchPace=%d",n.map,n.mapKey,n.mapButton,n.mapViewDistance,n.mapMarchPace);
     Log("CONFIG vehicle secondary switch key=0x%X button=0x%X (the primary's rounds: PlayerJetSwitchKey / LB)",

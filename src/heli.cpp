@@ -57,6 +57,7 @@
 #include "helipad.h"
 #include "log_once.h"
 #include "profile_sigs.h"
+#include "firstperson.h"
 #include <cmath>
 #include <cstdarg>
 
@@ -775,11 +776,13 @@ void RestoreMedicPermission(unsigned char* weapon) noexcept {
         weapon[kWeaponFriendlyDamage]=1;
 }
 
+bool medicOn=false;   // CheckHeliProfile: the hook's medic and retired-loadout work (the first person needs only the entry)
+
 void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overrideParam,int* counter,bool replay) {
     // RideAi 0x6330C9 and later script setup 0x632DA0 clear +8B6 even on healing guns. Both the blast filter
     // and HP handler need its GDI bit 0x20. The common local/replay shot entry repairs it before parameter copying.
     // Weapon semantics are independent of AI/aim settings and network ownership; positive guns stay untouched.
-    __try {
+    if(medicOn)__try {
         // Old requests can survive a DLL-only upgrade. Reject the retired plugin
         // weapon before either local or replay fire sets native recoil +BD4.
         if(RetiredLoadout(weapon)){ReportRetiredLoadout();return;}
@@ -787,8 +790,13 @@ void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overri
     }
     __except(EXCEPTION_EXECUTE_HANDLER) {}
     medicShotNext(weapon,muzzle,overrideParam,counter,replay);
+    // The one shot entry of every weapon class: the first person's kick and recoil take each round here (the muzzle
+    // flash it used to wait for is missing on many weapons). It reads only this machine's first-person state.
+    FirstPersonShot(weapon);
 }
 
+// The hook on the shot entry, shared: its own prologue check only, so the first person (InstallShotEntry) installs it
+// whether or not the heli profile holds; the medic work runs only after CheckHeliProfile (medicOn).
 bool InstallMedicPermission() noexcept {
     if(medicShotNext)return true;
     if(!Matches(kMedicShot,kMedicShotSig,sizeof(kMedicShotSig)))return false;
@@ -3888,10 +3896,12 @@ bool FriendInLine(const float* from,const float* to,const void* self) noexcept {
     return PlayerInLine(from,to) || JetInLine(from,to,self);
 }
 
+bool InstallShotEntry() noexcept { return InstallMedicPermission(); }
+
 bool CheckHeliProfile() noexcept {
     __try {
         for(const auto& s:kHeliSignatures)if(!Matches(s.rva,s.bytes,s.size)){Log("HELI profile mismatch at %#zx",s.rva);return false;}
-        profileOk=true;
+        profileOk=true;medicOn=true;
         Log("HELI medic healing permission=%d (410 local/replayed shots heal friends)",InstallMedicPermission());
         Log("HELI player attitude=%d (mouse pitch separated from forward speed)",InstallPlayerAttitude());
         // Called helis that left are deleted (HeliReap) with the game's Delete, as jet.cpp deletes its jets.

@@ -52,6 +52,7 @@ bool AiGunner(const unsigned char*,const unsigned char*) noexcept {
     if(!gunnerFixture)MissingDependency();++gunnerQueries;return false;
 }
 bool IsSazabi(const void*) noexcept { return false; }
+void FirstPersonShot(const unsigned char*) noexcept { MissingDependency(); }   // firstperson.cpp: no medic shot here
 bool IsDreadnought(const void*) noexcept { return false; }
 namespace jet { int LockersOf(const void*,float (*)[3],int) noexcept { MissingDependency();return 0; } }
 int MissilesHomingAt(const float*,float,float (*)[3],int) noexcept { MissingDependency();return 0; }
