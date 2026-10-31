@@ -64,4 +64,37 @@ inline bool Wasted(const Book& b,const void* shooter,const void* target,std::uin
 }
 
 }  // namespace wastedfire
+
+// How often the plan for a special target is logged (wastedfire.cpp, WASTEDFIRE plan). One line a shooter and target kind
+// every kEveryMs, saying how many plans it stands for, and at most kPerSecond lines a second in all: a moving fortress has
+// a hundred parts, each its own target, and a line a target (the watch table thrashing, each new entry logging at once)
+// wrote ~10 MB a second on 2026-10-31 and rotated every other line out of the log within seconds.
+namespace planlog {
+constexpr std::uint64_t kEveryMs=3000;   // a shooter's plans on one kind of target: one line this often
+constexpr int kPerSecond=4;              // all lines together, in any game second (more shooters than kKeys still bounded)
+constexpr int kKeys=64;                  // shooter-kind pairs remembered (the least recently seen one goes)
+
+struct Key { const void* shooter; int kind; std::uint64_t loggedAt,seenAt; int quiet; bool logged; };
+struct Gate { Key key[kKeys]; std::uint64_t secondAt; int inSecond; };
+
+// A plan by `shooter` on a target of `kind` at `ms`: whether it gets a line; then *quiet is how many of its plans since
+// the last one did not.
+inline bool Pass(Gate& g,const void* shooter,int kind,std::uint64_t ms,int* quiet) noexcept {
+    Key* k=nullptr;
+    Key* oldest=&g.key[0];
+    for(Key& x:g.key) {
+        if(x.shooter==shooter && x.kind==kind){k=&x;break;}
+        if(x.seenAt<oldest->seenAt)oldest=&x;
+    }
+    if(!k){k=oldest;*k=Key{shooter,kind,0,0,0,false};}
+    k->seenAt=ms;
+    if(k->logged && ms-k->loggedAt<kEveryMs){++k->quiet;return false;}
+    if(ms-g.secondAt>=1000){g.secondAt=ms;g.inSecond=0;}
+    if(g.inSecond>=kPerSecond){++k->quiet;return false;}
+    ++g.inSecond;
+    *quiet=k->quiet;
+    k->quiet=0;k->loggedAt=ms;k->logged=true;
+    return true;
+}
+}  // namespace planlog
 }  // namespace crew

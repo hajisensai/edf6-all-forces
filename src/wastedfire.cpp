@@ -154,8 +154,7 @@ bool Accepts(unsigned char* o,Kind k,const float* at,std::uint32_t body) noexcep
 }
 
 // --- The watch: each target's window and motion, each shooter-target pair's last plan ---
-struct Watched { const void* target; std::uint64_t at,loggedAt; float pos[3],vel[3]; hitpredict::Window w; };
-constexpr std::uint64_t kLogMs=3000;
+struct Watched { const void* target; std::uint64_t at; float pos[3],vel[3]; hitpredict::Window w; };
 constexpr int kWatched=64;
 Watched watched[kWatched]{};
 Watched& Watch(const void* target) noexcept {
@@ -164,7 +163,7 @@ Watched& Watch(const void* target) noexcept {
         if(x.target==target)return x;
         if(x.at<oldest->at)oldest=&x;
     }
-    *oldest=Watched{target,0,0,{},{},{}};
+    *oldest=Watched{target,0,{},{},{}};
     return *oldest;
 }
 struct Plan { const void* shooter; const void* target; std::uint64_t at; hitpredict::Verdict verdict; float aim[3]; bool aimSet;
@@ -176,6 +175,7 @@ Plan plans[kPlans]{};
 bool rayMeetsObjects=false;
 
 wastedfire::Book book{};
+planlog::Gate planLog{};   // the WASTEDFIRE plan lines (a shooter and target kind every 3 s, 4 a second in all)
 SRWLOCK lock=SRWLOCK_INIT;
 
 // The target's lock points (its own registry entries), at most `max`; its root when it has none.
@@ -235,15 +235,16 @@ Plan Assess(const void* shooter,const void* target,const float* from,float speed
     }
     p.aimSet=accepted;
     p.verdict=hitpredict::Decide(&w.w,ms,flightMs,accepted,now.leftMs);
-    // One line a target every kLogMs: what the ray met and what the game's override said (the evidence a player's log
-    // gives of the prediction: the layer-11 ray meeting these bodies, their ids the override takes).
-    if(k!=Kind::none && k!=Kind::yes && ms-w.loggedAt>=kLogMs) {
-        w.loggedAt=ms;
+    // One line a shooter and target kind every planlog::kEveryMs (src/wasted_fire.h): what the ray met and what the game's
+    // override said (the evidence a player's log gives of the prediction: the layer-11 ray meeting these bodies, their ids
+    // the override takes), and how many plans since it stands for.
+    int quiet=0;
+    if(k!=Kind::none && k!=Kind::yes && planlog::Pass(planLog,shooter,static_cast<int>(k),ms,&quiet)) {
         static const char* const kNames[]={"none","yes","never","ship","anchor","generator","fortress part"};
         Log("WASTEDFIRE plan %p -> %p (%s): window %s left %.0f ms, %d point(s), rays %d met %d on it %d (body %u), "
-            "accepted %d, flight %.0f ms: %s",shooter,target,kNames[static_cast<int>(k)],now.open ? "open" : "shut",
+            "accepted %d, flight %.0f ms: %s (+%d plan(s) since)",shooter,target,kNames[static_cast<int>(k)],now.open ? "open" : "shut",
             static_cast<double>(now.leftMs),pts.n,rays,met,onTarget,lastBody,accepted,static_cast<double>(flightMs),
-            p.verdict==hitpredict::Verdict::fire ? "fire" : p.verdict==hitpredict::Verdict::wait ? "wait" : "skip");
+            p.verdict==hitpredict::Verdict::fire ? "fire" : p.verdict==hitpredict::Verdict::wait ? "wait" : "skip",quiet);
     }
     return p;
 }
@@ -321,6 +322,7 @@ void ResetWastedFire() noexcept {
     ReleaseSRWLockExclusive(&lock);
     for(auto& w:watched)w=Watched{};
     for(auto& p:plans)p=Plan{};
+    planLog=planlog::Gate{};
     rayMeetsObjects=false;
 }
 }  // namespace crew
