@@ -253,7 +253,7 @@ void PlayerLane(World& w) noexcept {
 // object deleted (removed without dying: a script's despawn); jet.cpp Alive's test. The squads told to focus fire all
 // take it while it is in the enemy list; every other soldier takes it first when it is within its longest reach plus how
 // far its order lets it move (npc::MarkInReach). This machine's alone (§2.3).
-struct MarkState { ObjRef obj; float at[3]; bool held; };
+struct MarkState { ObjRef obj; float at[3]; qmark::MarkKey key; const void* pressFrom; };
 MarkState mark{};
 const void* followedLock=nullptr;   // the turret lock the mark last followed (FollowTurretLock)
 // A mark key press at an aircraft's stick waiting for its lock (JetMarkFrame).
@@ -3441,34 +3441,65 @@ bool NpcMarkOwn(const void** object,float* at) noexcept {
     return true;
 }
 
+// The mark key held kMarkClearMs (qmark_ray.h StepMarkKey; the user, 2026-10-31: "长按q应该能取消标记"): this machine's
+// player's marks cleared, the enemy one and the point alike, and an aircraft's press waiting for its lock dropped. The
+// teammates' marks stay theirs; the units sent to a point keep their order. The teammates see it through the state the
+// mark already shares (qmark_protocol.h: no enemy, no point, the let-go counted: their off cue). A ring and 「已取消标记」
+// where the mark was; nothing marked: nothing done.
+void ClearOwnMarks() noexcept {
+    jetMark=JetMark{};
+    float at[3],pointAt[3];
+    bool had=static_cast<bool>(mark.obj);
+    if(had){std::memcpy(at,mark.at,12);npcmark::Assign(mark.obj,{});}
+    if(QMarkClearPoint(pointAt) && !had){had=true;std::memcpy(at,pointAt,12);}
+    if(!had){Log("NPCAI mark: held, nothing marked to clear");return;}
+    Ping(at,kPingCleared);QMarkPlay(QMarkCue::off);
+    Log("NPCAI mark: held: this machine's marks cleared");
+}
+
 void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept {
     const Config& c=Cfg();
     DWORD pid=0;
     GetWindowThreadProcessId(edf::ForegroundWindow(),&pid);
     const bool down=c.npcMarkKey>0 && pid==GetCurrentProcessId() && (edf::AsyncKey(c.npcMarkKey)&0x8000)!=0;
     // Held is followed while the map holds the keys too: a press made in the map (mapcmd.cpp) and still down when it
-    // closes is not a second press on foot.
+    // closes is not a press on foot; the map opened mid-press drops it.
     // On foot and riding alike (the stock spot it replaces was both). At a turret of EDF6AutoTurret's the pick is its
     // lock rule's, auto-aim on or off (TurretMark); with its auto-aim on and the keyboard, the same key is its lock
     // (qmark_ray.h KeyIsTurretLock) and the mark follows the lock.
     edf::aimlink::TurretLockV1 turret{};
     const bool atTurret=AutoTurretSeat(&turret);
     const bool turretKey=atTurret && qmark::KeyIsTurretLock(c.npcMarkKey,turret.autoAim && turret.keys,turret.lockKey);
-    if(down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()) {
-        const void* locked=nullptr;float lockAt[3]{};
-        const bool atStick=!atTurret && PlayerJetMarkTarget(human,&locked,lockAt);
-        const bool bridge=!atTurret && DreadnoughtBridgeClaims(human,c.npcMarkKey);
-        switch(qmark::SeatMarkPress(bridge,atStick)) {
-        case qmark::SeatPress::none: break;   // the bridge's strafe
-        case qmark::SeatPress::markLock:   // the target key the same: wait for the lock its cycle brings, else mark the lock now
-            jetMark=JetMark{true,c.playerJetTargetKey==c.npcMarkKey ? locked : nullptr,GetTickCount64()+qmark::kJetMarkWaitMs};break;
+    const bool keep=!mapOpen && !MapHoldsKeys() && npcmark::MarkOn();
+    const auto atStick=[&](const void** locked) noexcept {
+        float lockAt[3];
+        return !atTurret && PlayerJetMarkTarget(human,locked,lockAt);
+    };
+    bool start=false;
+    if(down && !mark.key.down && keep) {
+        // The bridge's strafe holds the key: no press at all. At an aircraft's stick the target key, the same, cycles
+        // the lock on its press: the lock it cycles away from is this one.
+        start=!(!atTurret && DreadnoughtBridgeClaims(human,c.npcMarkKey));
+        const void* locked=nullptr;
+        mark.pressFrom=atStick(&locked) && c.playerJetTargetKey==c.npcMarkKey ? locked : nullptr;
+    }
+    switch(qmark::StepMarkKey(mark.key,down,start,keep,GameMs())) {   // the game clock: a pause mid-press is not held
+    case qmark::MarkPress::none: break;
+    case qmark::MarkPress::hold: ClearOwnMarks();break;
+    case qmark::MarkPress::tap: {   // on the release (the press held kMarkClearMs is the hold's)
+        const void* locked=nullptr;
+        switch(qmark::SeatMarkPress(false,atStick(&locked))) {
+        case qmark::SeatPress::none: break;
+        case qmark::SeatPress::markLock:   // wait for the lock its cycle brings, else mark the lock now
+            jetMark=JetMark{true,mark.pressFrom,GetTickCount64()+qmark::kJetMarkWaitMs};break;
         case qmark::SeatPress::normal:
             if(atTurret)TurretMark(human,turret,turretKey);
             else ToggleMark(human,At<std::int32_t>(human,kTeam));
             break;
         }
+        break;
     }
-    mark.held=down;
+    }
     if(jetMark.pending)JetMarkFrame(human);
     if(turretKey && npcmark::MarkOn())FollowTurretLock(turret.target);
     else followedLock=nullptr;

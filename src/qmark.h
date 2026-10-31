@@ -17,6 +17,8 @@ bool QMarkOn() noexcept;
 bool QMarkRay(const unsigned char* human,float* eye,float* dir) noexcept;
 // This machine's point mark (no enemy aimed at): set at `at` for QMarkPointSec.
 void QMarkSetPoint(const float* at) noexcept;
+// ...cleared (the mark key held: npcai.cpp ClearOwnMarks). True when one was shown, `at` where.
+bool QMarkClearPoint(float* at) noexcept;
 // A cue to play on the next frame: this machine's player marked, a teammate marked, this machine's player let a mark go
 // (counted: the teammates hear it too), a teammate let one go. A mark gone with its enemy (dead, removed) has none.
 enum class QMarkCue : int { own, team, off, teamOff };

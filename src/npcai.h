@@ -88,8 +88,9 @@ void NpcMarkFrame(unsigned char* human,bool mapOpen) noexcept;
 bool NpcMarkEnemy(const void* object,const float* at,bool toggle) noexcept;
 // The mark key on foot with no enemy near the screen's centre: the point the selected units were sent to and how many took
 // it (MapCommandGuardAt's result: -1 none selected, -2 online; kPingNearEnemy: an enemy near the centre but outside the
-// mark's cone, nothing sent), `wall` when (GetTickCount64).
-constexpr int kPingNearEnemy=-3;
+// mark's cone, nothing sent; kPingCleared: the key held, this machine's marks cleared, `at` where one was), `wall` when
+// (GetTickCount64).
+constexpr int kPingNearEnemy=-3,kPingCleared=-4;
 struct NpcPing { bool on; float at[3]; int given; ULONGLONG wall; };
 // The last point for the HUD (draw thread): false when there is none shown now.
 bool NpcPingReadout(NpcPing* out) noexcept;

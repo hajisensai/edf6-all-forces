@@ -170,6 +170,13 @@ void QMarkSetPoint(const float* at) noexcept {
     ownPoint=OwnPoint{true,{at[0],at[1],at[2]},GetTickCount64()+static_cast<ULONGLONG>(Cfg().qmarkPointSec*1000.0f)};
 }
 
+bool QMarkClearPoint(float* at) noexcept {
+    const bool on=ownPoint.on && GetTickCount64()<ownPoint.until;
+    if(on)std::memcpy(at,ownPoint.at,12);
+    ownPoint=OwnPoint{};
+    return on;
+}
+
 void QMarkPlay(QMarkCue cue) noexcept {
     cues|=1u<<static_cast<int>(cue);
     if(cue==QMarkCue::off)++letGoes;   // this machine's player let a mark go: the teammates hear it (kCapLetGo)

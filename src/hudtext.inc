@@ -503,6 +503,8 @@ HUDTEXT(qmarkPlayer,L"P%d %.0f m",L"玩家%d %.0f m",L"玩家%d %.0f m",L"プレ
 HUDTEXT(qmarkAlly,L"ALLY %.0f m",L"队友 %.0f m",L"隊友 %.0f m",L"味方 %.0f m")
 // The mark key on foot with no enemy near the centre (npcai.cpp SendToPoint): the units selected on the map sent there.
 HUDTEXT(npcPingSent,L"MOVE HERE: %d UNIT(S)",L"前往此处：%d 个单位",L"前往此處：%d 個單位",L"ここへ移動：%d ユニット")
+// The mark key held (npcai.cpp ClearOwnMarks): where this machine's mark was.
+HUDTEXT(npcPingCleared,L"MARK CLEARED (HELD)",L"已取消标记（长按）",L"已取消標記（長按）",L"マーク解除（長押し）")
 HUDTEXT(npcPingNearEnemy,L"AIM AT THE ENEMY TO MARK IT",L"对准敌人才能标记",L"對準敵人才能標記",L"敵に合わせるとマーク")
 HUDTEXT(npcPingNoUnit,L"NO ENEMY HERE (SELECT UNITS ON THE MAP TO SEND THEM)",L"这里没有敌人（在地图上选择单位后可派往此处）",
         L"這裡沒有敵人（在地圖上選擇單位後可派往此處）",L"ここに敵はいない（マップでユニットを選ぶとここへ送れる）")

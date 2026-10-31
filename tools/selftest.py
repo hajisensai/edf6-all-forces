@@ -6144,7 +6144,7 @@ def map_wired() -> None:
     # NPC marking moved from a soldier's KeyHeld/MarkTick into the local player's frame. Track the held key while
     # hidden, but dispatch neither behind the map nor while its close/TV input hold is active.
     mark_frame = src('src/npcai.cpp').split('void NpcMarkFrame(unsigned char* human,bool mapOpen)', 1)[1].split('\n}\n', 1)[0]
-    assert '!mapOpen && !MapHoldsKeys()' in mark_frame and 'mark.held=down;' in mark_frame
+    assert '!mapOpen && !MapHoldsKeys()' in mark_frame and 'qmark::StepMarkKey(mark.key,down,start,keep,' in mark_frame
     assert 'NpcMarkFrame(human,open && game.open);' in code
     close = code.split('void Close(const char* why)', 1)[1].split('\n}', 1)[0]
     assert 'SuspendMapCommands();' in close, 'closing invalidates the hover/view without waiting for the stale timer'
@@ -6569,7 +6569,9 @@ def npc_ai_wired() -> None:
     # 取代原版 Q」): read on foot and riding alike, with or without the custom NPC AI (npcmark::MarkOn: the plugin on and the
     # key set; the NPCs' priority on it stays the AI's, npcmark::Enabled), drawn by the HUD; the focus order needs it.
     tick = code.split('void NpcMarkFrame(unsigned char* human,bool mapOpen)', 1)[1].split('\n}\n', 1)[0]
-    assert 'down && !mark.held && !mapOpen && !MapHoldsKeys() && npcmark::MarkOn()' in tick   # a turret seat's press: TurretMark (turret_aim_wired)
+    assert 'const bool keep=!mapOpen && !MapHoldsKeys() && npcmark::MarkOn();' in tick   # a turret seat's press: TurretMark (turret_aim_wired)
+    # A tap on its release, held kMarkClearMs the clear (qmark_ray.h StepMarkKey; the user, 2026-10-31: "长按q应该能取消标记").
+    assert 'case qmark::MarkPress::hold: ClearOwnMarks();' in tick and 'case qmark::MarkPress::tap:' in tick
     assert 'HumanOnFoot' not in tick and 'customNpcAi' not in tick, 'the custom Q marks riding too, without the NPC AI'
     assert 'KeepMark();' in tick and 'QMarkFrame();' in tick
     # A teammate's point mark is named (slot and name tag) as its enemy mark is: its marker is looked up for either.
