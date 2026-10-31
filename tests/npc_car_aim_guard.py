@@ -44,11 +44,11 @@ def main() -> int:
     with open(os.path.join(root, 'src', 'npcai.cpp'), encoding='utf-8') as f:
         src = code_only(f.read())
 
-    drive = body(src, 'void DriveVehicleAi(')
-    ready = drive.find('if(kind==AiPass::car && !CarAimReady(v,vt))return;')
+    drive = body(src, 'DriveStep DriveVehicleAiStep(')
+    ready = drive.find('if(kind==AiPass::car && !CarAimReady(v,vt))return DriveStep::carNotBuilt;')
     pass_call = drive.find('reinterpret_cast<AiPassFn>(vt[kSlotAiPass])(v,dt);')
     if ready < 0 or pass_call < 0 or ready > pass_call:
-        failures.append('DriveVehicleAi must return on !CarAimReady before it runs the CarBase pass')
+        failures.append('DriveVehicleAiStep must return on !CarAimReady before it runs the CarBase pass')
 
     aim = body(src, 'bool CarAimReady(')
     key = aim.find('CarAimKey(v,key)')
