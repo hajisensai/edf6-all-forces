@@ -9,6 +9,9 @@
 namespace crew {
 void ResetFirstPerson() noexcept;   // publish a new mission; camera/render thread retires old pointers
 bool InstallFirstPerson() noexcept;   // at load, before InstallMap (the map's camera step chains outside this one)
+// Game thread, after each round of any weapon (heli.cpp's hook on the shot entry 0x696FD0: local and replayed rounds of
+// every weapon class): the local first person's kick and recoil for the hand holding it (others: nothing).
+void FirstPersonShot(const unsigned char* weapon) noexcept;
 // Outer camera owner (map/TV) finished its step: suspend this viewport's viewmodel while it owns the view.
 void FirstPersonCameraOverride(const void* camera,bool overridden) noexcept;
 bool FirstPersonOn() noexcept;        // game thread: the local player's camera is in first person this frame

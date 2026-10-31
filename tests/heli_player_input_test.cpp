@@ -12,6 +12,9 @@ bool NpcDriver(const unsigned char* v) noexcept { return v && SeatCount(v)>0 && 
 
 unsigned char* image=nullptr;
 // Offline (online_authority.h): no session, every heli run here, the copies' owner unchanged.
+// firstperson.cpp: the rounds the shot entry told the first person (after the stock shot, never for a refused one).
+int shotCalls=0;int firstPersonShots=0;const unsigned char* firstPersonShotWeapon=nullptr;int shotCallsAtFirstPersonShot=-1;
+void FirstPersonShot(const unsigned char* weapon) noexcept { ++firstPersonShots;firstPersonShotWeapon=weapon;shotCallsAtFirstPersonShot=shotCalls; }
 bool InSession() noexcept { return false; }
 bool OnlineRunsHere(const void*) noexcept { return true; }
 bool WastedFire(const void*,const void*) noexcept { return false; }   // wastedfire.cpp: no fire wasted here
@@ -90,7 +93,7 @@ const unsigned char* recordedContact=nullptr;
 void* recordedBody=nullptr;
 int checks=0,calls=0;
 alignas(16) unsigned char medicWeapon[0xC00]{};
-int shotCalls=0,shotCounter=7;
+int shotCounter=7;
 bool shotReplay=false;
 unsigned char shotPermission=0;
 
@@ -138,12 +141,15 @@ void CheckMedicPermission() {
         Check(shotPermission==1,"permission restored before local or replay parameter consumption");
     }
     Check(shotCalls==2,"native shot called exactly once per invocation");
+    Check(firstPersonShots==2 && firstPersonShotWeapon==medicWeapon && shotCallsAtFirstPersonShot==2,
+          "the first person is told of each round after the stock shot");
     const int before=shotCalls;
     for(const wchar_t* file:{L"EDF6VC_COAX_MG.SGO",L"edf6vc_coax_mg.sgo"})for(bool replay:{false,true}) {
         shotFile=file;shotFileLength=std::wcslen(file);Put<int>(medicWeapon,0xBD4,0);
         reinterpret_cast<MedicShotFn>(image+kMedicShot)(medicWeapon,3,replay ? inputSeat : nullptr,&shotCounter,replay);
         Check(shotCalls==before && At<int>(medicWeapon,0xBD4)==0,"retired local/replay shot cannot reach native recoil marker");
     }
+    Check(firstPersonShots==2,"a refused round tells the first person nothing");
     Check(obsoleteWarnings==1,"old data prompts one installer-regeneration diagnostic");
     for(const wchar_t* file:{L"V_403TANK_MACHINEGUN.SGO",L"EDF6VC_COAX_MG.SGO.NEW",L"OTHER_COAX_MG.SGO"}) {
         shotFile=file;shotFileLength=std::wcslen(file);

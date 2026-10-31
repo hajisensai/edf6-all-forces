@@ -57,6 +57,7 @@
 #include "helipad.h"
 #include "log_once.h"
 #include "profile_sigs.h"
+#include "firstperson.h"
 #include <cmath>
 #include <cstdarg>
 
@@ -787,6 +788,9 @@ void __fastcall MedicShotHook(unsigned char* weapon,unsigned muzzle,void* overri
     }
     __except(EXCEPTION_EXECUTE_HANDLER) {}
     medicShotNext(weapon,muzzle,overrideParam,counter,replay);
+    // The one shot entry of every weapon class: the first person's kick and recoil take each round here (the muzzle
+    // flash it used to wait for is missing on many weapons). It reads only this machine's first-person state.
+    FirstPersonShot(weapon);
 }
 
 bool InstallMedicPermission() noexcept {

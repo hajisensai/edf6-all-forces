@@ -307,6 +307,8 @@ struct Config {
     float fpNear=0.03f;             // ...the camera's near clip, m (0: the stock 0.1)
     float fpCenter=0.07f;          // ...move each grip toward the centre, m; added separately so existing ini defaults upgrade
     float fpSway=0.20f;            // ...look-induced weapon sway, 0 none..1 full; recoil/bob unchanged
+    float fpFlashScale=0.35f;      // ...the muzzle flash's size against the gun as drawn (1: the third person's proportion)
+    float fpFlashBright=0.4f;      // ...and its brightness (1: the stock colour)
     bool fpAimSnap=true;            // ...the aim follows the mouse at once (this machine's look smoothing off)
     bool fpArmIk=true;              // ...the arms posed for the first person: shoulders beside and below the eye
     float fpHoldArc=60.0f;          // ...a free hand on the other hand's weapon slides round it this far from below, deg
