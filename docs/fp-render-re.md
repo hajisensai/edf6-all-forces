@@ -201,6 +201,43 @@ hook 0x6BF9F0(model, ctx, pass, view):
   要本地视觉副本：钩 `0x690660`，调用期间把定位点 `+0` 换成一个假记录（`+0xB0` 放视图模型里的抛壳点世界矩阵），返回后还原（M；
   尺寸是真实尺寸，缩小后的枪旁边会显大，L）。
 
+### 5.1 开火入口与第一人称后摇（2026-10-31，H；`tests/fp_render_native_audit.py` 钉住）
+
+- `0x696FD0`（一发弹）恰有 5 个调用点：`0x690D54`（`0x690CC0` 本机开火）、`0x6904F7` / `0x690603`（`0x690420` 按计数补发）、
+  `0x692A24`（`0x692540` 网络重建）、`0x694894`（`0x6947E0`）。
+- 各武器类的开火槽都汇到 `0x690CC0`：`Weapon_BasicShoot`（vtable `0x17E36E0` slot 16 → `0x69AA10`，`0x69AA27`）、`HeavyShoot`（`0x69E050` → `0x69E073` 跳 `0x69AA10`）、
+  `ChargeShoot`（`0x69C260`）、`Gatling`（`0x69D320`）、`HomingShoot`（`0x69E7C0`）、`PileBanker`（`0x6A6F80`）、`Shield`（`0x6AAB20`）、
+  `ImpactHammer`（slot 15 `0x69FD80`）、`Throw`（slot 23 `0x6B0300`）、`Sub`（`0x6AD610` → `0x6ADA04`）；`Swing`、`VehicleShoot` 也到达。
+  不到达的：`LaserMarker`、`LaserMarkerCallFire`、`RadioContact`、`Drone_Area`、`Drone_LaserMarker`、`Drone_Switch`、`Accessory`、`VehicleRailGun`、`VehicleMaser`
+  （标记 / 呼叫 / 无人机 / 车载类，不是枪械开火，第一人称无后摇需求；未逐个确认它们是否另有开火动作，L）。
+- `0x696FD0` 函数头已被 `heli.cpp` 的 `MedicShotHook` 钩住，`0x690D54` 被 `pvp_controlled_npc.cpp` 逐字节核对，所以第一人称在该钩子里每发调用
+  `FirstPersonShot`（原生开火之后；被拒的弹不通知）。`+0xBD0` 计数差仍作第二来源；`+0xBD4 = 1` 只在开火那一帧（`0x6982A5`），3/4 且 `+0xE68 > 0` 为换弹。
+- 后摇被抵消的原因（M，由 §4.1 推出，未实机）：`0x68FD00` 每帧把挂接骨抄到武器根，第三人称射击动作是手臂骨动画，逐帧按武器根锚定
+  （`AnchoredTransform`）就把它整个抵消。`fpview::ShotAnchor` 在开火后 24 个镜头步内用「开火前一步的武器根相对瞄准系 R0 × 当前瞄准」作锚点，
+  原生动作作为相对 R0 的偏差显示，之后 8 步平滑交回；`placeWeapon` / `placeBody` 用真实武器根，手仍握枪。
+
+### 5.2 火光的尺寸、亮度与绘制（2026-10-31，H）
+
+- 参数块 `weapon+0x488`：`+0x30` = weapon（`0x4B8`），`+0x38` = 矩阵指针（`0x4C0`），`+0x40` = `0x4C8` 处的变体文档句柄 `{doc*, u32 节点号}`，
+  `+0x10` 标签 u16 = 2（`0x68DBE5` / `0x68DBFB`），即 SGO `MuzzleFlash_CustomParameter`。`+0x4C0` 只有两个写入点：`0x697FB4`（开火入口）、`0x6B124C`（车载武器）。
+- 内存里的 DSGO 文档（`0x52DE0` / `0x52E50` / `0x52F50`）：覆盖表 `[doc+8]`、个数 `doc+0x18`，覆盖槽 `[doc+0x28]`（40 字节），文件 `[doc+0x50]`；
+  节点 = 文件 + i32`[文件+0xC]` + 序号·16，类型在 `+8`（0 double、3 容器），double 在 `+0`；容器块 = 节点 + i32`[节点]`，个数 `+0xC`，子序号在块 + `[块+8]`。
+- 工厂：类对象 vtable 为 `Factory@X`，slot 2 生成。`MuzzleFlash01` `0x17A63F8` → ctor `0x2BEC90`；`MuzzleFlash02` `0x17A64F8` → `0x2BFE60`；
+  `LaserMuzzleFlash02` `0x17A61E8` → `0x2BBE90`；`LaserMuzzleFlash01` `0x17A60D0` → `0x2BB300`；`LaserMuzzleFlash03` `0x17A6308` → `0x2BD9B0`；
+  `EfsMuzzleFlash` `0x17A6000` → `0x2BA6D0`；`MuzzleFlashRailGun` `0x17A65F8` → `0x2C0F90`；`PileBunkerMuzzleFlash01` `0x17A6808` → `0x2C2640`；
+  `TestMuzzleFlash` `0x17A6900` → `0x2C3710`。另有 `MuzzleSmoke01`（vtable `0x17A6778`，ctor `0x2C1BB0`，火箭筒用）不在 `kFlashFactories`，不挪也不改。
+- 布局（构造函数按元素序号读，见 audit 的立即数）：`MuzzleFlash01/02`、`LaserMuzzleFlash02` 为「光束」：[1] 光束长、[2] 宽、[5] 辐条长、[6] 辐条宽、[8] 颜色 vec4；
+  `LaserMuzzleFlash01/03` 为「精灵」：[1] 尺寸、[2] 颜色。Root.cpk 里用这 5 类的 420 把原版武器都符合（`V_FUEL01` 的 MF02 列表为空，不生成）。
+  其余 4 类布局未核实，第一人称保持原版并记一行日志。
+- 绘制（更正此前「火光尺寸不看矩阵」的说法）：Umbra slot 1 两遍。
+  - 第 1 遍 `0x112C860(…, 位置行 flash+0x90, 5.0, 颜色, 0.2, 2.0)`（MF02 `0x2C0C44`、MF01 `0x2BFB14`、Laser01 `0x2BBBA1`、Laser03 `0x2BE7F4`、Laser02 `0x2BD284`）：
+    只用位置和颜色，半径：MF02 / Laser01 / Laser03 为常数 5.0；MF01（`flash+0x220`）/ Laser02（`flash+0x200`）默认 5.0，可由元素 [9] 改
+    （`0x2BF3DF` / `0x2BC629` 写默认，`0x2BF47E` / `0x2BC6E8` 读文档）。推测是动态光（L）。矩阵缩放不影响它，插件也不改 [9]，只有颜色（即 `FirstPersonFlashBright`）变。
+  - 第 2 遍几何：光束类 `0x11548F0(…, r8 = flash+0x60 世界矩阵, 顶点 …)`，经 `0xFDDD0` 转置后写进常量缓冲做世界变换；精灵类 `0x3027B0(…, r8 = flash+0x60)` 同样。
+    `flash+0x60` 每次更新抄自 `*(flash+0x120)`（MF02 `0x2C0D5E`、Laser01 `0x2BBBDE`），第一人称下即 `Relocate` 写的 shot·T，含视图模型缩放 s。
+  → 火光几何已随画面里的枪缩小，所以第一人称只按 `FirstPersonFlashScale` 缩尺寸元素（不再乘 `FirstPersonScale`），颜色 rgb 乘 `FirstPersonFlashBright`
+  （第 1 遍的光也随之变暗）。改动在原生构造前写文档、构造后逐字节还原（`fp_flash.h`）；节点被覆盖、类型不符、列表太短都不写。
+
 ---
 
 ## 6. 视图模型的变换和「只画手臂」
